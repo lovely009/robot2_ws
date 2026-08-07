@@ -415,3 +415,69 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 - 腕部内部位置/速度模式的固定增益。
 
 这些都已经集中成易改参数。下一步拿到机械尺寸、RP 具体型号和腕部 25/30 mm 具体型号后，可以把“协议级仿真”继续升级成“参数接近真机的数字样机”。
+
+## 14. C++ 真机硬件层（upper_body_canfd_hardware）
+
+V4 新增 C++ 包 `upper_body_canfd_hardware`：把现有 Python 协议层（RP MIT 广播、25/30 mm 腕部 MIT、SocketCAN）移植为纯 C++，并实现
+`hardware_interface::SystemInterface` 插件 `upper_body_canfd_hardware/CanFdMotorSystem`，使真机走标准 ros2_control 生命周期
+（on_init → on_configure → on_activate → read/write → deactivate），URDF 与 `forward_command_controller` 配置不变。
+Humble 的 ros2_control 只支持 C++ 硬件插件，这也是本包用 C++ 实现的原因。
+
+### 14.1 仿真/真机切换
+
+`urdf/upper_body.urdf.xacro` 新增 `use_real_hardware` 开关：
+
+- `use_real_hardware:=false`（默认）：`gz_ros2_control/GazeboSimSystem`，走 Gazebo 仿真；
+- `use_real_hardware:=true`：左右臂各一个 `CanFdMotorSystem` 实例，分别绑定一条 CAN-FD 总线。
+
+每个关节在硬件块里带参数：`motor_type`（rp|wrist）、`can_node_id`、`direction`、`zero_offset`、`kp`、`kd`、`effort_scale`，
+默认 kp/kd 与键盘工具一致（RP 36/2.0、腕部 0.008/1.0）。
+
+### 14.2 无 Gazebo 全链路验证（vcan + 假从站）
+
+```bash
+cd ~/robot_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch upper_body_canfd_gazebo hardware_sim.launch.py
+```
+
+该 launch 会启动 vcan 假从站（`fake_slaves.py`，模拟 RP 广播应答 + 腕部 MIT 应答/周期状态）、`robot_state_publisher`、
+ros2_control（真插件跑在 vcan0/vcan1 上）以及 `joint_state_broadcaster` + `effort_controller`。验证：
+
+```bash
+ros2 control list_hardware_interfaces   # 14 个 effort 接口应为 available + claimed
+ros2 topic echo /joint_states --once    # 假从站反馈经过插件解码进入状态接口
+ros2 topic pub -1 /effort_controller/commands std_msgs/msg/Float64MultiArray \
+  "{data: [0,0,0,0,0,0,0,0.05,0,0,0,0,0,0]}"
+```
+
+### 14.3 真机 bring-up
+
+```bash
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 1000000 dbitrate 5000000 fd on restart-ms 100
+sudo ip link set can0 up
+sudo ip link set can1 down
+sudo ip link set can1 type can bitrate 1000000 dbitrate 5000000 fd on restart-ms 100
+sudo ip link set can1 up
+
+ros2 launch upper_body_canfd_gazebo real_hardware.launch.py \
+  left_interface:=can0 right_interface:=can1 allow_hardware:=true
+```
+
+插件默认拒绝 `can*` 接口，`allow_hardware:=true` 是刻意为之的显式许可。真机首测顺序：先 enable 后零指令确认反馈静止，
+再给单个关节（建议左腕 roll，2530 节点 N=3）极小 effort 验证方向与 `effort_scale`，通过后再扩展到 RP 单关节、单臂 7 关节。
+`canfd_keyboard`/`canfd_actions` 仍保留直连总线模式，作为调试与动作库通道，与 ros2_control 插件并行，二者不要同时驱动同一批电机。
+
+### 14.4 测试
+
+协议编解码（已知字节序列 + round-trip）和插件全链路（vcan 回环 + 进程内假从站）用 gtest：
+
+```bash
+colcon build --symlink-install --packages-select upper_body_canfd_hardware
+colcon test --packages-select upper_body_canfd_hardware
+colcon test-result --verbose
+```
+
+新包详细文档见 `~/robot_ws/src/upper_body_canfd_hardware/README.md`。

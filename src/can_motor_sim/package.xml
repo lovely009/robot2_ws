@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>can_motor_sim</name>
+  <version>0.0.0</version>
+  <description>CAN FD motor simulator (Protocol A/B) and interactive debug master
+    for vcan-based motor drive debugging with ros2_socketcan</description>
+  <maintainer email="love009@example.com">love009</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ros2_socketcan</exec_depend>
+  <exec_depend>ros2_socketcan_msgs</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

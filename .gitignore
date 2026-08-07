@@ -1,0 +1,9 @@
+# Generated colcon workspace artifacts.
+/build/
+/install/
+/log/
+
+# Python caches and Windows download metadata.
+**/__pycache__/
+**/*.pyc
+**/*:Zone.Identifier

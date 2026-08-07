@@ -1,0 +1,28 @@
+# Copyright 2026 can_motor_sim contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Smoke tests for the can_motor_sim package."""
+
+
+def test_modules_import():
+    import can_motor_sim.motor_master  # noqa: F401
+    import can_motor_sim.motor_slave   # noqa: F401
+
+
+def test_console_scripts_defined():
+    from importlib.metadata import entry_points
+
+    names = {ep.name for ep in entry_points(group='console_scripts')}
+    assert 'motor_master' in names
+    assert 'motor_slave' in names

@@ -1,5 +1,9 @@
 # upper_body_canfd_hardware
 
+> 迁移状态：该包是旧的一体式实现，暂时保留作回退/对照。新的活动路径是
+> `motor_canfd_drive` + `motor_hardware_interface`；`hardware.launch.py` 已切换到新插件。
+> 新功能和协议修订应进入 `motor_canfd_drive`，不要继续复制到本包。
+
 C++ 实现的真机 ros2_control 硬件层，只负责“ROS 关节模型 ↔ 两条私有电机协议”的转换，
 控制器不需要接触 SocketCAN，因此可以不加修改地在仿真与真机之间复用。
 

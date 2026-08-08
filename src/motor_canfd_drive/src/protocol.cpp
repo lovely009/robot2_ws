@@ -7,6 +7,7 @@ namespace {
 
 template <typename T>
 void write_le(uint8_t *destination, T value, const std::size_t width) {
+  // 25/30 mm 协议使用小端序：低有效字节先放到低地址。
   const auto raw = static_cast<uint64_t>(value);
   for (std::size_t index = 0; index < width; ++index) {
     destination[index] = static_cast<uint8_t>(raw >> (8U * index));
@@ -22,6 +23,7 @@ uint32_t read_le(const uint8_t *data, const std::size_t width) {
 }
 
 uint16_t wrist_velocity_to_code(const double velocity_rad_s) {
+  // rad/s -> rpm -> 0.1 rpm 协议码，并以 0x8000 表示有符号零点偏置。
   const auto rpm10 = static_cast<int32_t>(
       std::llround(velocity_rad_s * 60.0 / (2.0 * kPi) * 10.0));
   return static_cast<uint16_t>(
@@ -35,6 +37,7 @@ double wrist_code_to_velocity(const uint16_t code) {
 }
 
 uint32_t wrist_position_to_code(const double position_rad) {
+  // 一圈 2,097,152 tick。协议用 0x80000000 作为多圈有符号位置的零点偏置。
   const auto ticks = static_cast<int64_t>(std::llround(
       position_rad / (2.0 * kPi) * kWristTicksPerRevolution));
   return static_cast<uint32_t>(
@@ -64,6 +67,7 @@ uint32_t float_to_uint(double value, const double low, const double high,
   if (!(high > low) || bits == 0U || bits > 31U) {
     throw std::invalid_argument("invalid float_to_uint range or bit width");
   }
+  // RP MIT 字段是定点量：先按协议范围限幅，再线性映射到指定 bit 宽度。
   value = std::clamp(value, low, high);
   const auto maximum = (uint32_t{1} << bits) - 1U;
   return static_cast<uint32_t>((value - low) * maximum / (high - low));
@@ -79,6 +83,8 @@ double uint_to_float(const uint32_t value, const double low, const double high,
 }
 
 std::array<uint8_t, 8> pack_rp_slot(const JointCommand &command) {
+  // RP MIT 8 Byte 槽布局：P(16) + V(12) + Kp(12) + Kd(12) + Tau(12)。
+  // 12 bit 字段跨字节拼接，因此这里不要改成普通 memcpy。
   const auto position = float_to_uint(command.position, -10.0, 10.0, 16);
   const auto velocity = float_to_uint(command.velocity, -60.0, 60.0, 12);
   const auto kp = float_to_uint(command.kp, 0.0, 500.0, 12);
@@ -157,6 +163,7 @@ JointState unpack_rp_state(const uint8_t *data, const std::size_t size) {
 }
 
 std::array<uint8_t, 12> pack_wrist_command(const JointCommand &command) {
+  // 25/30 mm MIT 下行按手册依次写入：位置4B、速度2B、Kp2B、Kd2B、前馈电流2B。
   std::array<uint8_t, 12> output{};
   const auto position = wrist_position_to_code(command.position);
   const auto velocity = wrist_velocity_to_code(command.velocity);

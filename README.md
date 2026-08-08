@@ -1,6 +1,6 @@
 # robot_ws
 
-ROS 2 Humble 工作空间：半身双臂机器人的 CAN-FD 电机仿真与真机硬件层。
+ROS 2 Humble Robot工作空间。
 
 ## 包一览
 

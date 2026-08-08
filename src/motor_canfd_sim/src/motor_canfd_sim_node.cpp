@@ -1,27 +1,51 @@
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "motor_canfd_drive/config_loader.hpp"
+#include "motor_canfd_drive/motor_canfd_driver.hpp"
+#include "motor_canfd_drive/motor_protocol.hpp"
 #include "motor_canfd_drive/protocol.hpp"
 #include "motor_canfd_drive/socketcan.hpp"
-#include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/joint_state.hpp"
-#include "std_msgs/msg/float64_multi_array.hpp"
 
 namespace motor_canfd_sim {
 
+namespace drive = motor_canfd_drive;
 namespace protocol = motor_canfd_drive::protocol;
 using Clock = std::chrono::steady_clock;
+
+namespace {
+
+double clamp_symmetric(const double value, const double limit) {
+  return std::clamp(value, -limit, limit);
+}
+
+double motor_parameter_as_double(const drive::MotorConfig &motor,
+                                 const std::string &key) {
+  const auto it = motor.parameters.find(key);
+  if (it == motor.parameters.end()) {
+    throw std::runtime_error("motor '" + motor.name + "' is missing parameter '" + key + "'");
+  }
+  std::size_t parsed = 0U;
+  const double value = std::stod(it->second, &parsed);
+  if (parsed != it->second.size() || !std::isfinite(value)) {
+    throw std::runtime_error("motor '" + motor.name + "' parameter '" + key + "' is invalid");
+  }
+  return value;
+}
+
+} // namespace
 
 struct JointSample {
   double position{0.0};
@@ -29,85 +53,63 @@ struct JointSample {
   double effort{0.0};
 };
 
-struct RpDriveState {
+struct SimMotorState {
   bool enabled{false};
   protocol::JointCommand command{};
   Clock::time_point last_command{};
-};
-
-struct WristDriveState {
-  bool enabled{false};
   protocol::WristMode mode{protocol::WristMode::Mit};
   double zero_offset{0.0};
-  protocol::JointCommand command{};
-  Clock::time_point last_command{};
   double current_a{0.0};
-  uint8_t motor_type{0x01};
 };
 
-double clamp_symmetric(const double value, const double limit) {
-  return std::clamp(value, -limit, limit);
-}
+struct SimBus {
+  drive::BusConfig config;
+  std::unique_ptr<drive::SocketCan> socket;
+  std::vector<std::size_t> motor_indices;
+};
 
 class MotorCanFdSimNode final : public rclcpp::Node {
 public:
   MotorCanFdSimNode() : Node("motor_canfd_sim") {
-    const auto left_interface = declare_parameter<std::string>("left_interface", "vcan0");
-    const auto right_interface = declare_parameter<std::string>("right_interface", "vcan1");
-    const auto allow_hardware = declare_parameter<bool>("allow_hardware_interfaces", false);
+    const auto config_file = declare_parameter<std::string>("motor_config_file", "");
+    const auto allow_hardware =
+        declare_parameter<bool>("allow_hardware_interfaces", false);
     const auto control_rate_hz = declare_parameter<double>("control_rate_hz", 500.0);
     const auto status_rate_hz = declare_parameter<double>("status_rate_hz", 50.0);
     command_timeout_s_ = declare_parameter<double>("command_timeout_s", 0.15);
     rp_torque_limit_nm_ = declare_parameter<double>("rp_torque_limit_nm", 60.0);
-    wrist_torque_constant_ =
-        declare_parameter<double>("wrist_torque_constant_nm_per_amp", 0.35);
-    wrist_current_limit_a_ = declare_parameter<double>("wrist_current_limit_a", 11.0);
-    wrist_torque_limit_nm_ = declare_parameter<double>("wrist_torque_limit_nm", 5.0);
-    wrist_position_gain_ =
-        declare_parameter<double>("wrist_position_mode_gain_a_per_rad", 5.0);
-    wrist_position_damping_ =
-        declare_parameter<double>("wrist_position_mode_damping_a_per_rad_s", 0.08);
-    wrist_velocity_gain_ =
-        declare_parameter<double>("wrist_velocity_mode_gain_a_per_rad_s", 0.45);
+    motor_2530_current_limit_a_ =
+        declare_parameter<double>("motor_2530_current_limit_a", 11.0);
+    motor_2530_torque_limit_nm_ =
+        declare_parameter<double>("motor_2530_torque_limit_nm", 5.0);
+    motor_2530_position_gain_ =
+        declare_parameter<double>("motor_2530_position_mode_gain_a_per_rad", 5.0);
+    motor_2530_position_damping_ =
+        declare_parameter<double>("motor_2530_position_mode_damping_a_per_rad_s", 0.08);
+    motor_2530_velocity_gain_ =
+        declare_parameter<double>("motor_2530_velocity_mode_gain_a_per_rad_s", 0.45);
 
-    const auto rp_ids_raw = declare_parameter<std::vector<int64_t>>(
-        "rp_ids", std::vector<int64_t>{1, 2, 3, 4});
-    const auto wrist_nodes_raw = declare_parameter<std::vector<int64_t>>(
-        "wrist_nodes", std::vector<int64_t>{1, 2, 3});
-    const auto joint_names_raw = declare_parameter<std::vector<std::string>>(
-        "joint_names",
-        {"left_shoulder_yaw_joint", "left_shoulder_roll_joint",
-         "left_shoulder_pitch_joint", "left_elbow_pitch_joint",
-         "left_wrist_yaw_joint", "left_wrist_pitch_joint", "left_wrist_roll_joint",
-         "right_shoulder_yaw_joint", "right_shoulder_roll_joint",
-         "right_shoulder_pitch_joint", "right_elbow_pitch_joint",
-         "right_wrist_yaw_joint", "right_wrist_pitch_joint", "right_wrist_roll_joint"});
+    validate_scalar_parameters(control_rate_hz, status_rate_hz);
+    driver_config_ = drive::load_driver_config_yaml(config_file);
+    apply_bus_parameter_overrides();
 
-    validate_parameters(control_rate_hz, status_rate_hz, rp_ids_raw,
-                        wrist_nodes_raw, joint_names_raw);
-    for (std::size_t index = 0; index < rp_ids_.size(); ++index) {
-      rp_ids_[index] = static_cast<unsigned>(rp_ids_raw[index]);
-    }
-    for (std::size_t index = 0; index < wrist_nodes_.size(); ++index) {
-      wrist_nodes_[index] = static_cast<unsigned>(wrist_nodes_raw[index]);
-    }
-    std::copy(joint_names_raw.begin(), joint_names_raw.end(), joint_names_.begin());
+    // Reuse the production driver's validation (registered types, ID ranges,
+    // duplicate mappings, protocol-specific required parameters) without opening CAN.
+    const drive::MotorCanfdDriver config_validator(driver_config_);
+    static_cast<void>(config_validator);
+    build_runtime(allow_hardware);
 
-    const std::array<std::string, 2> interfaces{{left_interface, right_interface}};
-    for (const auto &interface_name : interfaces) {
-      if (!allow_hardware && interface_name.rfind("vcan", 0U) != 0U) {
-        throw std::runtime_error(
-            "refusing to run a motor emulator on '" + interface_name +
-            "'; set allow_hardware_interfaces:=true only for intentional HIL");
+    samples_.resize(driver_config_.motors.size());
+    motor_states_.resize(driver_config_.motors.size());
+    for (std::size_t index = 0; index < driver_config_.motors.size(); ++index) {
+      const auto &motor = driver_config_.motors[index];
+      if (motor.type != drive::kRpMotorType && motor.type != drive::kMotor2530Type) {
+        throw std::runtime_error("C++ simulator has no plant model for motor type '" +
+                                 motor.type + "'");
       }
-    }
-    buses_[0] = std::make_unique<motor_canfd_drive::SocketCan>(interfaces[0]);
-    buses_[1] = std::make_unique<motor_canfd_drive::SocketCan>(interfaces[1]);
-
-    for (std::size_t arm = 0; arm < 2U; ++arm) {
-      wrist_[arm][0].motor_type = 0x01;
-      wrist_[arm][1].motor_type = 0x01;
-      wrist_[arm][2].motor_type = 0x02;
+      if (!joint_to_motor_.emplace(motor.joint_name, index).second) {
+        throw std::runtime_error("duplicate simulated joint '" + motor.joint_name + "'");
+      }
     }
 
     effort_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
@@ -124,61 +126,67 @@ public:
         std::bind(&MotorCanFdSimNode::status_tick, this));
 
     RCLCPP_INFO(get_logger(),
-                "C++ CAN-FD motor simulator ready: left=%s right=%s; RP 4 + wrist 3 per arm",
-                left_interface.c_str(), right_interface.c_str());
+                "generic C++ CAN-FD simulator ready: %zu buses, %zu motors",
+                buses_.size(), driver_config_.motors.size());
   }
 
 private:
-  void validate_parameters(const double control_rate_hz, const double status_rate_hz,
-                           const std::vector<int64_t> &rp_ids,
-                           const std::vector<int64_t> &wrist_nodes,
-                           const std::vector<std::string> &joint_names) {
-    if (control_rate_hz <= 0.0 || status_rate_hz <= 0.0 || command_timeout_s_ <= 0.0) {
-      throw std::invalid_argument("rates and command_timeout_s must be positive");
-    }
-    if (rp_torque_limit_nm_ <= 0.0 || wrist_torque_constant_ <= 0.0 ||
-        wrist_current_limit_a_ <= 0.0 || wrist_torque_limit_nm_ <= 0.0) {
-      throw std::invalid_argument("simulation current/torque limits must be positive");
-    }
-    if (rp_ids.size() != 4U || wrist_nodes.size() != 3U || joint_names.size() != 14U) {
-      throw std::invalid_argument("rp_ids=4, wrist_nodes=3 and joint_names=14 are required");
-    }
-
-    std::array<int64_t, 4> sorted_rp{};
-    std::copy(rp_ids.begin(), rp_ids.end(), sorted_rp.begin());
-    std::sort(sorted_rp.begin(), sorted_rp.end());
-    if (sorted_rp.front() < 1 || sorted_rp.back() > 8 ||
-        std::adjacent_find(sorted_rp.begin(), sorted_rp.end()) != sorted_rp.end()) {
-      throw std::invalid_argument("RP IDs must be unique values in [1, 8]");
-    }
-
-    std::array<int64_t, 3> sorted_wrist{};
-    std::copy(wrist_nodes.begin(), wrist_nodes.end(), sorted_wrist.begin());
-    std::sort(sorted_wrist.begin(), sorted_wrist.end());
-    if (sorted_wrist.front() < 1 || sorted_wrist.back() > 60 ||
-        std::adjacent_find(sorted_wrist.begin(), sorted_wrist.end()) != sorted_wrist.end()) {
-      throw std::invalid_argument("wrist nodes must be unique values in [1, 60]");
+  void validate_scalar_parameters(const double control_rate_hz,
+                                  const double status_rate_hz) const {
+    if (control_rate_hz <= 0.0 || status_rate_hz <= 0.0 || command_timeout_s_ <= 0.0 ||
+        rp_torque_limit_nm_ <= 0.0 || motor_2530_current_limit_a_ <= 0.0 ||
+        motor_2530_torque_limit_nm_ <= 0.0) {
+      throw std::invalid_argument("simulation rates, timeout and limits must be positive");
     }
   }
 
-  std::size_t find_joint(const std::string &name) const {
-    const auto it = std::find(joint_names_.begin(), joint_names_.end(), name);
-    return it == joint_names_.end()
-               ? joint_names_.size()
-               : static_cast<std::size_t>(std::distance(joint_names_.begin(), it));
+  void apply_bus_parameter_overrides() {
+    for (auto &bus : driver_config_.buses) {
+      const auto parameter_name = "bus_override." + bus.name;
+      const auto interface_name =
+          declare_parameter<std::string>(parameter_name, bus.interface_name);
+      if (interface_name.empty()) {
+        throw std::invalid_argument("parameter '" + parameter_name + "' cannot be empty");
+      }
+      bus.interface_name = interface_name;
+    }
+  }
+
+  void build_runtime(const bool allow_hardware) {
+    std::unordered_map<std::string, std::size_t> bus_index;
+    buses_.reserve(driver_config_.buses.size());
+    for (const auto &config : driver_config_.buses) {
+      if (!allow_hardware && config.interface_name.rfind("vcan", 0U) != 0U) {
+        throw std::runtime_error(
+            "refusing to run a motor emulator on '" + config.interface_name +
+            "'; set allow_hardware_interfaces:=true only for intentional HIL");
+      }
+      SimBus bus;
+      bus.config = config;
+      bus.socket = std::make_unique<drive::SocketCan>(config.interface_name);
+      bus_index.emplace(config.name, buses_.size());
+      buses_.push_back(std::move(bus));
+    }
+    motor_to_bus_.resize(driver_config_.motors.size());
+    for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
+      const auto bus = bus_index.at(driver_config_.motors[motor].bus);
+      motor_to_bus_[motor] = bus;
+      buses_[bus].motor_indices.push_back(motor);
+    }
   }
 
   void on_joint_states(const sensor_msgs::msg::JointState::SharedPtr message) {
     for (std::size_t message_index = 0; message_index < message->name.size(); ++message_index) {
-      const auto index = find_joint(message->name[message_index]);
-      if (index >= samples_.size()) {
+      const auto it = joint_to_motor_.find(message->name[message_index]);
+      if (it == joint_to_motor_.end()) {
         continue;
       }
+      auto &sample = samples_[it->second];
       if (message_index < message->position.size()) {
-        samples_[index].position = message->position[message_index];
+        sample.position = message->position[message_index];
       }
       if (message_index < message->velocity.size()) {
-        samples_[index].velocity = message->velocity[message_index];
+        sample.velocity = message->velocity[message_index];
       }
     }
   }
@@ -193,6 +201,8 @@ private:
       return;
     }
 
+    // The current upper-body effort controller uses the same joint order as the
+    // motor map in motor_canfd.yaml. If the robot model changes, update both maps.
     std_msgs::msg::Float64MultiArray output;
     output.data.reserve(samples_.size());
     for (const auto &sample : samples_) {
@@ -202,156 +212,175 @@ private:
   }
 
   void drain_can(const Clock::time_point now) {
-    for (std::size_t arm = 0; arm < buses_.size(); ++arm) {
-      motor_canfd_drive::CanFrame frame;
-      while (buses_[arm]->receive(frame)) {
-        handle_frame(arm, frame, now);
+    for (std::size_t bus = 0; bus < buses_.size(); ++bus) {
+      drive::CanFrame frame;
+      while (buses_[bus].socket->receive(frame)) {
+        handle_frame(bus, frame, now);
       }
     }
   }
 
-  void handle_frame(const std::size_t arm, const motor_canfd_drive::CanFrame &frame,
+  void handle_frame(const std::size_t bus, const drive::CanFrame &frame,
                     const Clock::time_point now) {
     if (frame.is_extended) {
       return;
     }
     if (frame.id == protocol::kRpEnableId && frame.size >= 1U) {
       const bool enabled = frame.data[0] != 0U;
-      for (auto &drive : rp_[arm]) {
-        drive.enabled = enabled;
+      for (const auto motor : buses_[bus].motor_indices) {
+        if (driver_config_.motors[motor].type == drive::kRpMotorType) {
+          motor_states_[motor].enabled = enabled;
+        }
       }
       return;
     }
     if (frame.id == protocol::kRpCommandId && frame.size == 64U) {
-      for (std::size_t index = 0; index < rp_[arm].size(); ++index) {
-        const auto offset = static_cast<std::size_t>(rp_ids_[index] - 1U) * 8U;
-        rp_[arm][index].command =
+      bool has_rp = false;
+      for (const auto motor : buses_[bus].motor_indices) {
+        const auto &config = driver_config_.motors[motor];
+        if (config.type != drive::kRpMotorType) {
+          continue;
+        }
+        has_rp = true;
+        const auto offset = static_cast<std::size_t>(config.id - 1U) * 8U;
+        motor_states_[motor].command =
             protocol::unpack_rp_slot(frame.data.data() + offset, 8U);
-        rp_[arm][index].last_command = now;
+        motor_states_[motor].last_command = now;
       }
-      send_rp_feedback(arm);
+      if (has_rp) {
+        send_rp_feedback(bus);
+      }
       return;
     }
 
-    for (std::size_t index = 0; index < wrist_nodes_.size(); ++index) {
-      const auto node = wrist_nodes_[index];
-      if (frame.id == protocol::wrist_control_id(node) && frame.size == 8U) {
-        handle_wrist_control(arm, index,
-                             protocol::unpack_wrist_control(frame.data.data(), frame.size));
+    for (const auto motor : buses_[bus].motor_indices) {
+      const auto &config = driver_config_.motors[motor];
+      if (config.type != drive::kMotor2530Type) {
+        continue;
+      }
+      if (frame.id == protocol::wrist_control_id(config.id) && frame.size == 8U) {
+        handle_motor_2530_control(
+            motor, protocol::unpack_wrist_control(frame.data.data(), frame.size));
         return;
       }
-      if (frame.id == protocol::wrist_command_id(node) && frame.size == 12U) {
-        auto &drive = wrist_[arm][index];
-        drive.command = protocol::unpack_wrist_command(frame.data.data(), frame.size);
-        drive.last_command = now;
-        send_wrist_reply(arm, index);
+      if (frame.id == protocol::wrist_command_id(config.id) && frame.size == 12U) {
+        auto &state = motor_states_[motor];
+        state.command = protocol::unpack_wrist_command(frame.data.data(), frame.size);
+        state.last_command = now;
+        send_motor_2530_reply(motor);
         return;
       }
     }
   }
 
-  void handle_wrist_control(const std::size_t arm, const std::size_t wrist_index,
-                            const protocol::WristControl &control) {
-    auto &drive = wrist_[arm][wrist_index];
+  void handle_motor_2530_control(const std::size_t motor,
+                                 const protocol::WristControl &control) {
+    auto &state = motor_states_[motor];
     if (!control.run) {
-      drive.mode = control.mode;
+      state.mode = control.mode;
       if (control.set_zero) {
-        drive.zero_offset = samples_[arm * 7U + 4U + wrist_index].position;
+        state.zero_offset = samples_[motor].position;
       }
     }
-    drive.enabled = control.run;
+    state.enabled = control.run;
     if (!control.run) {
-      drive.current_a = 0.0;
+      state.current_a = 0.0;
     }
   }
 
   void calculate_efforts(const Clock::time_point now) {
-    for (std::size_t arm = 0; arm < 2U; ++arm) {
-      for (std::size_t index = 0; index < 4U; ++index) {
-        auto &sample = samples_[arm * 7U + index];
-        const auto &drive = rp_[arm][index];
+    for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
+      const auto &config = driver_config_.motors[motor];
+      auto &state = motor_states_[motor];
+      auto &sample = samples_[motor];
+      const bool fresh = state.enabled &&
+                         std::chrono::duration<double>(now - state.last_command).count() <=
+                             command_timeout_s_;
+      if (config.type == drive::kRpMotorType) {
         double torque = 0.0;
-        if (drive.enabled &&
-            std::chrono::duration<double>(now - drive.last_command).count() <=
-                command_timeout_s_) {
-          torque = drive.command.kp * (drive.command.position - sample.position) +
-                   drive.command.kd * (drive.command.velocity - sample.velocity) +
-                   drive.command.feedforward;
-          torque = clamp_symmetric(torque, rp_torque_limit_nm_);
+        if (fresh) {
+          torque = state.command.kp * (state.command.position - sample.position) +
+                   state.command.kd * (state.command.velocity - sample.velocity) +
+                   state.command.feedforward;
         }
-        sample.effort = torque;
+        sample.effort = clamp_symmetric(torque, rp_torque_limit_nm_);
+        continue;
       }
 
-      for (std::size_t index = 0; index < 3U; ++index) {
-        auto &sample = samples_[arm * 7U + 4U + index];
-        auto &drive = wrist_[arm][index];
-        double current = 0.0;
-        if (drive.enabled &&
-            std::chrono::duration<double>(now - drive.last_command).count() <=
-                command_timeout_s_) {
-          const auto relative_position = sample.position - drive.zero_offset;
-          if (drive.mode == protocol::WristMode::Mit) {
-            current = protocol::wrist_kp_to_current_gain(drive.command.kp) *
-                          (drive.command.position - relative_position) +
-                      protocol::wrist_kd_to_current_gain(drive.command.kd) *
-                          (drive.command.velocity - sample.velocity) +
-                      drive.command.feedforward;
-          } else if (drive.mode == protocol::WristMode::Position) {
-            current = wrist_position_gain_ *
-                          (drive.command.position - relative_position) -
-                      wrist_position_damping_ * sample.velocity;
-          } else if (drive.mode == protocol::WristMode::Velocity) {
-            current = wrist_velocity_gain_ *
-                      (drive.command.velocity - sample.velocity);
-          }
+      double current = 0.0;
+      if (fresh) {
+        const auto relative_position = sample.position - state.zero_offset;
+        if (state.mode == protocol::WristMode::Mit) {
+          current = protocol::wrist_kp_to_current_gain(state.command.kp) *
+                        (state.command.position - relative_position) +
+                    protocol::wrist_kd_to_current_gain(state.command.kd) *
+                        (state.command.velocity - sample.velocity) +
+                    state.command.feedforward;
+        } else if (state.mode == protocol::WristMode::Position) {
+          current = motor_2530_position_gain_ *
+                        (state.command.position - relative_position) -
+                    motor_2530_position_damping_ * sample.velocity;
+        } else if (state.mode == protocol::WristMode::Velocity) {
+          current = motor_2530_velocity_gain_ *
+                    (state.command.velocity - sample.velocity);
         }
-        drive.current_a = clamp_symmetric(current, wrist_current_limit_a_);
-        sample.effort = clamp_symmetric(
-            drive.current_a * wrist_torque_constant_, wrist_torque_limit_nm_);
+      }
+      state.current_a = clamp_symmetric(current, motor_2530_current_limit_a_);
+      const auto torque_constant =
+          motor_parameter_as_double(config, "torque_constant_nm_per_amp");
+      sample.effort = clamp_symmetric(state.current_a * torque_constant,
+                                      motor_2530_torque_limit_nm_);
+    }
+  }
+
+  void send_rp_feedback(const std::size_t bus) {
+    for (const auto motor : buses_[bus].motor_indices) {
+      const auto &config = driver_config_.motors[motor];
+      if (config.type != drive::kRpMotorType) {
+        continue;
+      }
+      const auto payload = protocol::pack_rp_state(
+          {samples_[motor].position, samples_[motor].velocity, samples_[motor].effort});
+      if (!buses_[bus].socket->send(config.id, payload.data(), payload.size(), true)) {
+        RCLCPP_WARN(get_logger(), "failed to send RP simulated feedback for %s",
+                    config.name.c_str());
       }
     }
   }
 
-  void send_rp_feedback(const std::size_t arm) {
-    for (std::size_t index = 0; index < rp_ids_.size(); ++index) {
-      const auto payload = protocol::pack_rp_state(samples_[arm * 7U + index]);
-      if (!buses_[arm]->send(rp_ids_[index], payload.data(), payload.size(), true)) {
-        RCLCPP_WARN(get_logger(), "failed to send RP simulated feedback");
-      }
-    }
-  }
-
-  void send_wrist_reply(const std::size_t arm, const std::size_t wrist_index) {
-    const auto node = wrist_nodes_[wrist_index];
-    const auto sample_index = arm * 7U + 4U + wrist_index;
-    protocol::JointState wire_state{samples_[sample_index].position -
-                                        wrist_[arm][wrist_index].zero_offset,
-                                    samples_[sample_index].velocity,
-                                    wrist_[arm][wrist_index].current_a};
-    const auto payload = protocol::pack_wrist_reply(node, wire_state);
-    if (!buses_[arm]->send(protocol::wrist_reply_id(node), payload.data(), payload.size(),
-                           true)) {
-      RCLCPP_WARN(get_logger(), "failed to send wrist simulated reply");
+  void send_motor_2530_reply(const std::size_t motor) {
+    const auto &config = driver_config_.motors[motor];
+    const auto &state = motor_states_[motor];
+    const protocol::JointState wire_state{
+        samples_[motor].position - state.zero_offset, samples_[motor].velocity,
+        state.current_a};
+    const auto payload = protocol::pack_wrist_reply(config.id, wire_state);
+    auto &socket = *buses_[motor_to_bus_[motor]].socket;
+    if (!socket.send(protocol::wrist_reply_id(config.id), payload.data(), payload.size(), true)) {
+      RCLCPP_WARN(get_logger(), "failed to send 25/30 mm simulated reply for %s",
+                  config.name.c_str());
     }
   }
 
   void status_tick() {
     try {
-      for (std::size_t arm = 0; arm < 2U; ++arm) {
-        for (std::size_t index = 0; index < wrist_nodes_.size(); ++index) {
-          const auto node = wrist_nodes_[index];
-          const auto sample_index = arm * 7U + 4U + index;
-          const auto &drive = wrist_[arm][index];
-          protocol::JointState wire_state{samples_[sample_index].position - drive.zero_offset,
-                                          samples_[sample_index].velocity,
-                                          drive.current_a};
-          const auto payload = protocol::pack_wrist_status(
-              node, wire_state, 12.0, 0U, drive.enabled ? 4U : 3U, 0U,
-              drive.mode, drive.motor_type);
-          if (!buses_[arm]->send(protocol::wrist_status_id(node), payload.data(),
-                                 payload.size(), true)) {
-            RCLCPP_WARN(get_logger(), "failed to send wrist simulated status");
-          }
+      for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
+        const auto &config = driver_config_.motors[motor];
+        if (config.type != drive::kMotor2530Type) {
+          continue;
+        }
+        const auto &state = motor_states_[motor];
+        const protocol::JointState wire_state{
+            samples_[motor].position - state.zero_offset, samples_[motor].velocity,
+            state.current_a};
+        const auto payload = protocol::pack_wrist_status(
+            config.id, wire_state, 12.0, 0U, state.enabled ? 4U : 3U, 0U,
+            state.mode, 0x01U);
+        auto &socket = *buses_[motor_to_bus_[motor]].socket;
+        if (!socket.send(protocol::wrist_status_id(config.id), payload.data(), payload.size(),
+                         true)) {
+          RCLCPP_WARN(get_logger(), "failed to send 25/30 mm simulated status for %s",
+                      config.name.c_str());
         }
       }
     } catch (const std::exception &exception) {
@@ -359,22 +388,20 @@ private:
     }
   }
 
-  std::array<std::unique_ptr<motor_canfd_drive::SocketCan>, 2> buses_;
-  std::array<std::array<RpDriveState, 4>, 2> rp_{};
-  std::array<std::array<WristDriveState, 3>, 2> wrist_{};
-  std::array<JointSample, 14> samples_{};
-  std::array<unsigned, 4> rp_ids_{{1U, 2U, 3U, 4U}};
-  std::array<unsigned, 3> wrist_nodes_{{1U, 2U, 3U}};
-  std::array<std::string, 14> joint_names_{};
+  drive::DriverConfig driver_config_;
+  std::vector<SimBus> buses_;
+  std::vector<std::size_t> motor_to_bus_;
+  std::unordered_map<std::string, std::size_t> joint_to_motor_;
+  std::vector<SimMotorState> motor_states_;
+  std::vector<JointSample> samples_;
 
   double command_timeout_s_{0.15};
   double rp_torque_limit_nm_{60.0};
-  double wrist_torque_constant_{0.35};
-  double wrist_current_limit_a_{11.0};
-  double wrist_torque_limit_nm_{5.0};
-  double wrist_position_gain_{5.0};
-  double wrist_position_damping_{0.08};
-  double wrist_velocity_gain_{0.45};
+  double motor_2530_current_limit_a_{11.0};
+  double motor_2530_torque_limit_nm_{5.0};
+  double motor_2530_position_gain_{5.0};
+  double motor_2530_position_damping_{0.08};
+  double motor_2530_velocity_gain_{0.45};
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr effort_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscription_;

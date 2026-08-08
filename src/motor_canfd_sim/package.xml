@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>motor_canfd_sim</name>
-  <version>0.1.0</version>
-  <description>C++ CAN-FD motor-side simulator and Gazebo bridge using motor_canfd_drive codecs.</description>
+  <version>0.2.0</version>
+  <description>C++ CAN-FD motor-side simulator and Gazebo bridge using the generic motor mapping.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,6 +11,7 @@
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>yaml_cpp_vendor</depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

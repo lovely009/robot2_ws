@@ -122,7 +122,7 @@ ign gazebo --versions
 
 ## 5. 编译
 
-本包已并入 `~/robot_ws` 工作空间，源码位于 `~/robot_ws/src/upper_body_canfd_gazebo`，与 `can_motor_sim` 一起编译：
+本包已并入 `~/robot_ws` 工作空间，源码位于 `~/robot_ws/src/upper_body_canfd_gazebo`，统一由工作空间构建：
 
 ```bash
 cd ~/robot_ws
@@ -407,10 +407,11 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 - `scripts/setup_vcan.sh`：建立 vcan0/vcan1；
 - `test/test_protocols.py`、`test/test_motion_library.py`、`test/test_action_player_packets.py`：协议字节序列、动作库限位/插值、动作到 CAN 帧映射测试（pytest）。
 
-新的真机链路已拆分为两个包：`motor_canfd_drive` 统一维护 SocketCAN 与两类电机协议，
-`motor_hardware_interface` 只实现 `ros2_control` 适配并从 YAML 读取映射/增益/超时。
-原 `upper_body_canfd_hardware` 暂时保留作迁移参考，不再作为 `hardware.launch.py` 的活动后端。
-协议手册的 PDF 原件仍放在仓库根目录。
+真机链路已经拆分为两个活动包：`motor_canfd_drive` 统一维护 SocketCAN 与电机协议策略，
+`motor_hardware_interface` 只实现 `ros2_control` 适配并从 YAML 读取总线/电机/关节映射、增益与超时。
+旧 `upper_body_canfd_hardware` 已删除，`hardware.launch.py` 只使用新的 `motor_hardware_interface`。
+旧的独立 `can_motor_sim` 调试包也已删除；本包自己的 Python `canfd_gazebo_bridge.py` 仍完整保留，
+因此原 Gazebo/Python 仿真路径不受影响。协议手册的 PDF 原件仍放在仓库根目录。
 
 ## 13. 当前哪些参数是“仿真假设”
 

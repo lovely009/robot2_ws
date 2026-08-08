@@ -11,10 +11,14 @@ namespace motor_canfd_drive::protocol {
 
 constexpr double kPi = 3.14159265358979323846;
 
+// RP 协议固定使用 CAN ID 0x00 做使能、0x80 做 64 Byte 广播命令。
+// 一帧 8 个槽位是 RP 线协议限制，不代表机器人只能有 8 个关节。
 constexpr uint32_t kRpEnableId = 0x00U;
 constexpr uint32_t kRpCommandId = 0x80U;
 constexpr std::size_t kRpBroadcastSlots = 8U;
 
+// 25/30 mm 协议中的原始码值比例。所有单位换算集中在 protocol.cpp，
+// 上层统一使用 rad、rad/s、A 或 Nm，避免协议单位渗透到 ROS 控制逻辑。
 constexpr int32_t kWristTicksPerRevolution = 2'097'152;
 constexpr int32_t kWristPositionTickLimit = 0x7cffffff;
 constexpr int32_t kWristVelocityCodeLimit = 30'000;
@@ -73,6 +77,7 @@ inline uint32_t wrist_status_id(const unsigned node) {
 uint32_t float_to_uint(double value, double low, double high, unsigned bits);
 double uint_to_float(uint32_t value, double low, double high, unsigned bits);
 
+// RP：8 Byte MIT 槽位 <-> 统一 JointCommand；12 Byte 状态 <-> JointState。
 std::array<uint8_t, 8> pack_rp_slot(const JointCommand &command);
 JointCommand unpack_rp_slot(const uint8_t *data, std::size_t size);
 
@@ -82,6 +87,8 @@ std::array<uint8_t, 12> pack_rp_state(
     double coil_temperature_c = 33.0);
 JointState unpack_rp_state(const uint8_t *data, std::size_t size);
 
+// 25/30 mm：命令、控制帧和反馈帧的字节编解码。
+// 注意：腕部反馈中的 effort 字段在这一层暂存“电流 A”，转换 Nm 由对应协议策略完成。
 std::array<uint8_t, 12> pack_wrist_command(const JointCommand &command);
 JointCommand unpack_wrist_command(const uint8_t *data, std::size_t size);
 

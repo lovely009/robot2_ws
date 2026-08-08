@@ -1,7 +1,0 @@
-<library path="upper_body_canfd_hardware">
-  <class name="upper_body_canfd_hardware/CanFdSystem"
-         type="upper_body_canfd_hardware::CanFdSystem"
-         base_class_type="hardware_interface::SystemInterface">
-    <description>Dual SocketCAN CAN-FD position hardware for RP and 25/30 mm joints.</description>
-  </class>
-</library>

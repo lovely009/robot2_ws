@@ -19,12 +19,15 @@ SocketCan::SocketCan(const std::string &interface_name) {
     throw std::invalid_argument("invalid SocketCAN interface name");
   }
 
+  // 非阻塞 socket 让控制循环可以“读完当前已有反馈后立即返回”，不会因为某台电机
+  // 暂时没发帧而卡住整个 ros2_control read() 周期。
   fd_ = ::socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK, CAN_RAW);
   if (fd_ < 0) {
     throw std::runtime_error("cannot create SocketCAN socket: " +
                              std::string(std::strerror(errno)));
   }
 
+  // Linux CAN_RAW socket 默认只收 classic CAN；显式开启 CAN-FD 才能处理 12/20/64 Byte 帧。
   const int enable_fd = 1;
   if (::setsockopt(fd_, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &enable_fd,
                    sizeof(enable_fd)) < 0) {
@@ -92,6 +95,7 @@ bool SocketCan::send(const uint32_t id, const uint8_t *data,
     return false;
   }
 
+  // 超过 classic CAN 的 8 Byte 必须走 CAN-FD；调用方也可 force_fd 强制 8 Byte FD 帧。
   const bool use_fd = force_fd || size > CAN_MAX_DLEN;
   if (use_fd) {
     canfd_frame frame{};
@@ -114,6 +118,7 @@ bool SocketCan::receive(CanFrame &output) const {
     throw std::runtime_error("receive on closed SocketCAN socket");
   }
 
+  // 用 CANFD_MTU 大缓冲区同时接收 classic CAN 与 CAN-FD，再根据 read() 返回长度判型。
   canfd_frame raw{};
   const auto count = ::read(fd_, &raw, CANFD_MTU);
   if (count < 0) {

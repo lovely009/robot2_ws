@@ -7,6 +7,7 @@
 
 namespace motor_canfd_drive {
 
+// 对 Linux classic CAN / CAN-FD 帧做统一封装；协议层无需直接依赖 linux/can.h。
 struct CanFrame {
   uint32_t id{0U};
   std::array<uint8_t, 64> data{};
@@ -16,6 +17,8 @@ struct CanFrame {
   bool is_extended{false};
 };
 
+// SocketCan 只负责 Linux SocketCAN 收发，不理解“电机”“关节”或任何私有协议。
+// 构造函数打开并绑定接口；对象析构时自动关闭文件描述符（RAII）。
 class SocketCan final {
 public:
   explicit SocketCan(const std::string &interface_name);

@@ -6,9 +6,12 @@ ROS 2 Humble 工作空间：半身双臂机器人的 CAN-FD 电机仿真与真�
 
 | 包 | 语言 | 作用 |
 |---|---|---|
-| `upper_body_canfd_gazebo` | Python | 14-DOF 半身双臂 Gazebo Fortress 仿真：URDF、世界、CAN-FD/vcan 双向桥、键盘遥控、动作播放器，以及真机 ros2_control 的 launch 与控制器配置 |
-| `can_motor_sim` | Python | CAN-FD 电机假从站（RP 广播应答 + 25/30 mm 腕部 MIT 应答）与交互式调试 master |
-| `upper_body_canfd_hardware` | C++ | 真机 ros2_control 硬件层：`CanFdSystem` SystemInterface 插件，单实例管理左右两条 CAN-FD 总线，导出 14 路 position 命令接口 |
+| `upper_body_canfd_gazebo` | Python | 原有 14-DOF Gazebo Fortress 仿真、Python CAN-FD bridge、动作与模型；继续保留 |
+| `can_motor_sim` | Python | 原有 CAN-FD 假从站与交互式调试 master；继续保留 |
+| `motor_canfd_drive` | C++ | 无 ROS 运行时依赖的底层驱动：SocketCAN、RP/25-30 协议、单臂总线管理 |
+| `motor_hardware_interface` | C++ | 标准 `ros2_control::SystemInterface` 适配层；参数/映射集中到 YAML |
+| `motor_canfd_sim` | C++ | 新的 CAN-FD/Gazebo 电机仿真 bridge，可跑 driver→vcan→sim 全链路 |
+| `upper_body_canfd_hardware` | C++ | 旧版一体式硬件层，暂时保留作迁移参考；新的真机入口不再依赖它 |
 
 ## 分支策略
 
@@ -32,6 +35,18 @@ colcon test && colcon test-result --verbose
 ros2 launch upper_body_canfd_gazebo sim.launch.py
 ```
 
+新 C++ bridge（保留同一 Gazebo 模型）：
+
+```bash
+ros2 launch motor_canfd_sim gazebo_cpp_sim.launch.py
+```
+
+新 C++ driver + vcan + C++ motor sim + Gazebo 全回环：
+
+```bash
+ros2 launch motor_canfd_sim driver_loopback.launch.py
+```
+
 真机 bring-up（position 控制器 + CAN-FD 硬件插件）：
 
 ```bash
@@ -44,5 +59,8 @@ ros2 launch upper_body_canfd_gazebo hardware.launch.py \
 ## 文档
 
 - 仿真、协议与动作库：[`upper_body_canfd_gazebo/README.md`](src/upper_body_canfd_gazebo/README.md)
-- 真机硬件层架构与参数：[`upper_body_canfd_hardware/README.md`](src/upper_body_canfd_hardware/README.md)
-- 电机假从站与调试 master：[`can_motor_sim/README.md`](src/can_motor_sim/README.md)
+- C++ 底层 CAN-FD 驱动：[`motor_canfd_drive/README.md`](src/motor_canfd_drive/README.md)
+- `ros2_control` 硬件接口：[`motor_hardware_interface/README.md`](src/motor_hardware_interface/README.md)
+- 新 C++ 仿真：[`motor_canfd_sim/README.md`](src/motor_canfd_sim/README.md)
+- 旧 Python 电机假从站：[`can_motor_sim/README.md`](src/can_motor_sim/README.md)
+- 旧一体式硬件层（迁移参考）：[`upper_body_canfd_hardware/README.md`](src/upper_body_canfd_hardware/README.md)

@@ -44,6 +44,8 @@ class RpMotorProtocol final : public MotorProtocol {
 public:
   void validate(const std::vector<MotorConfig> &motors,
                 const MotorIndexList &indices) const override {
+    // RP 的 1..8 限制来自一条 64 Byte 广播帧只有 8 个 MIT 槽位。
+    // 这个限制只作用于“同一 CAN 总线上的 RP 协议组”，不是整机电机数限制。
     if (indices.empty() || indices.size() > protocol::kRpBroadcastSlots) {
       throw std::invalid_argument("RP protocol supports 1..8 configured motors per CAN bus");
     }
@@ -70,6 +72,8 @@ public:
                       const MotorIndexList &indices,
                       const std::vector<protocol::JointCommand> &commands) const override {
     std::array<uint8_t, 64> payload{};
+    // RP 命令固定发送完整 8 槽广播。未配置的槽位填中性命令，已配置电机则按
+    // motor.id - 1 放进自己的协议槽位，因此 YAML 顺序不会改变 RP ID 映射。
     const auto neutral = protocol::pack_rp_slot({});
     for (std::size_t slot = 0; slot < protocol::kRpBroadcastSlots; ++slot) {
       std::copy(neutral.begin(), neutral.end(), payload.begin() + slot * 8U);
@@ -162,6 +166,8 @@ public:
       if ((frame.id == protocol::wrist_reply_id(motor.id) && frame.size == 12U) ||
           (frame.id == protocol::wrist_status_id(motor.id) && frame.size == 20U)) {
         state = protocol::unpack_wrist_feedback(frame.data.data(), frame.size);
+        // 25/30 mm 反馈协议给的是电流 A，而统一 JointState::effort 对上层表示 Nm。
+        // 因此在电机类型策略内使用各型号的 Kt 完成 tau = I * Kt。
         state.effort *= required_positive_parameter(
             motor, "torque_constant_nm_per_amp");
         motor_index = index;
@@ -202,6 +208,7 @@ MotorProtocolRegistry::create(const std::string &type) const {
 
 MotorProtocolRegistry MotorProtocolRegistry::with_builtin_protocols() {
   MotorProtocolRegistry registry;
+  // 内置类型只在这里注册。以后增加新电机协议时，不需要修改 MotorCanfdDriver。
   registry.register_factory(kRpMotorType,
                             [] { return std::make_unique<RpMotorProtocol>(); });
   registry.register_factory(kMotor2530Type,

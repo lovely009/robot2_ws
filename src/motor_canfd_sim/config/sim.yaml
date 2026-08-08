@@ -1,16 +1,18 @@
 motor_canfd_sim:
   ros__parameters:
-    # motor_config_file is supplied by launch so the simulator and hardware
-    # interface consume the exact same bus/motor/joint mapping.
+    # motor_config_file 由 launch 注入，使模拟器和真机 hardware interface
+    # 使用完全相同的 bus / motor / joint 拓扑，避免维护两份映射。
     motor_config_file: ""
     bus_override.left_arm: vcan0
     bus_override.right_arm: vcan1
+    # 默认禁止模拟器连接真实 can*，因为本节点会主动扮演电机并发送反馈帧。
     allow_hardware_interfaces: false
 
     control_rate_hz: 500.0
     status_rate_hz: 50.0
     command_timeout_s: 0.15
 
+    # 下列值属于仿真侧限幅/简化模型参数，不应直接当作真机额定参数使用。
     rp_torque_limit_nm: 60.0
     motor_2530_current_limit_a: 11.0
     motor_2530_torque_limit_nm: 5.0

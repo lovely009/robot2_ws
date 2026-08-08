@@ -5,49 +5,48 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include <yaml-cpp/yaml.h>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "motor_canfd_drive/config_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace motor_hardware_interface {
 namespace {
 
-template <std::size_t N>
-std::array<unsigned, N> parse_unsigned_array(const YAML::Node &node,
-                                             const char *name) {
-  if (!node || !node.IsSequence() || node.size() != N) {
-    throw std::runtime_error(std::string(name) + " must contain exactly " +
-                             std::to_string(N) + " entries");
-  }
-  std::array<unsigned, N> values{};
-  for (std::size_t index = 0; index < N; ++index) {
-    values[index] = node[index].as<unsigned>();
-  }
-  return values;
-}
-
-template <std::size_t N>
-std::array<std::string, N> parse_string_array(const YAML::Node &node,
-                                              const char *name) {
-  if (!node || !node.IsSequence() || node.size() != N) {
-    throw std::runtime_error(std::string(name) + " must contain exactly " +
-                             std::to_string(N) + " entries");
-  }
-  std::array<std::string, N> values{};
-  for (std::size_t index = 0; index < N; ++index) {
-    values[index] = node[index].as<std::string>();
-  }
-  return values;
-}
-
 bool has_state_interface(const hardware_interface::ComponentInfo &joint,
                          const std::string &name) {
   return std::any_of(joint.state_interfaces.begin(), joint.state_interfaces.end(),
                      [&](const auto &interface) { return interface.name == name; });
+}
+
+std::pair<double, double> parse_command_config(const YAML::Node &type_node,
+                                               const YAML::Node &motor_node,
+                                               const std::string &motor_name) {
+  const auto type_command = type_node ? type_node["command"] : YAML::Node{};
+  const auto motor_command = motor_node["command"];
+  const auto resolve = [&](const char *key) -> double {
+    if (motor_command && motor_command[key]) {
+      return motor_command[key].as<double>();
+    }
+    if (type_command && type_command[key]) {
+      return type_command[key].as<double>();
+    }
+    throw std::runtime_error("motor '" + motor_name +
+                             "' requires command." + key +
+                             " either per motor or in motor_types defaults");
+  };
+  const double kp = resolve("kp");
+  const double kd = resolve("kd");
+  if (!std::isfinite(kp) || !std::isfinite(kd) || kp < 0.0 || kd < 0.0) {
+    throw std::runtime_error("motor '" + motor_name +
+                             "' command kp/kd must be finite and non-negative");
+  }
+  return {kp, kd};
 }
 
 } // namespace
@@ -57,43 +56,31 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
     if (path.empty()) {
       throw std::runtime_error("hardware parameter 'config_file' is required");
     }
-    const auto root = YAML::LoadFile(path);
-    const auto hardware = root["motor_hardware"];
-    if (!hardware || !hardware.IsMap()) {
-      throw std::runtime_error("YAML root 'motor_hardware' is required");
-    }
+    config_.driver = motor_canfd_drive::load_driver_config_yaml(path);
 
+    const auto document = YAML::LoadFile(path);
+    const auto hardware = document["motor_hardware"];
     const auto timing = hardware["timing"];
+    if (!timing || !timing.IsMap()) {
+      throw std::runtime_error("motor_hardware.timing is required");
+    }
     config_.feedback_timeout_s = timing["feedback_timeout_s"].as<double>();
     config_.initial_feedback_wait_s = timing["initial_feedback_wait_s"].as<double>();
-
-    const auto gains = hardware["gains"];
-    config_.rp_kp = gains["rp"]["kp"].as<double>();
-    config_.rp_kd = gains["rp"]["kd"].as<double>();
-    config_.wrist_kp = gains["wrist"]["kp"].as<double>();
-    config_.wrist_kd = gains["wrist"]["kd"].as<double>();
-    const auto wrist_torque_constant =
-        gains["wrist"]["torque_constant_nm_per_amp"].as<double>();
-
-    const std::array<std::string, 2> sides{{"left", "right"}};
-    for (std::size_t arm = 0; arm < sides.size(); ++arm) {
-      const auto arm_node = hardware["arms"][sides[arm]];
-      config_.arms[arm].interface_name = arm_node["interface"].as<std::string>();
-      config_.arms[arm].rp_ids =
-          parse_unsigned_array<4>(arm_node["rp_ids"], "rp_ids");
-      config_.arms[arm].wrist_nodes =
-          parse_unsigned_array<3>(arm_node["wrist_nodes"], "wrist_nodes");
-      config_.arms[arm].wrist_torque_constant_nm_per_amp = wrist_torque_constant;
-      config_.joint_names[arm] =
-          parse_string_array<7>(arm_node["joint_names"], "joint_names");
+    if (!std::isfinite(config_.feedback_timeout_s) ||
+        !std::isfinite(config_.initial_feedback_wait_s) ||
+        config_.feedback_timeout_s <= 0.0 || config_.initial_feedback_wait_s <= 0.0) {
+      throw std::runtime_error("feedback timeouts must be finite positive values");
     }
 
-    if (config_.rp_kp < 0.0 || config_.rp_kd < 0.0 ||
-        config_.wrist_kp < 0.0 || config_.wrist_kd < 0.0 ||
-        config_.feedback_timeout_s <= 0.0 ||
-        config_.initial_feedback_wait_s <= 0.0 ||
-        wrist_torque_constant <= 0.0) {
-      throw std::runtime_error("gains, timeouts and torque constant must be valid positive values");
+    const auto types = hardware["motor_types"];
+    const auto motors = hardware["motors"];
+    config_.motor_commands.clear();
+    config_.motor_commands.reserve(config_.driver.motors.size());
+    for (const auto &motor : config_.driver.motors) {
+      const auto motor_node = motors[motor.name];
+      const auto type_node = types ? types[motor.type] : YAML::Node{};
+      const auto gains = parse_command_config(type_node, motor_node, motor.name);
+      config_.motor_commands.push_back({gains.first, gains.second});
     }
     return true;
   } catch (const std::exception &exception) {
@@ -102,34 +89,76 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
   }
 }
 
-bool CanFdSystem::validate_hardware_info(std::string &error) const {
-  if (info_.joints.size() != 14U) {
-    error = "exactly 14 joints are required by the configured dual-arm hardware";
+bool CanFdSystem::apply_bus_overrides(std::string &error) {
+  constexpr const char *prefix = "bus_override.";
+  const std::string prefix_string(prefix);
+  for (const auto &parameter : info_.hardware_parameters) {
+    if (parameter.first.rfind(prefix_string, 0U) != 0U) {
+      continue;
+    }
+    const auto bus_name = parameter.first.substr(prefix_string.size());
+    const auto bus_it = std::find_if(
+        config_.driver.buses.begin(), config_.driver.buses.end(),
+        [&](const auto &bus) { return bus.name == bus_name; });
+    if (bus_it == config_.driver.buses.end()) {
+      error = "hardware parameter '" + parameter.first +
+              "' refers to unknown configured bus '" + bus_name + "'";
+      return false;
+    }
+    if (parameter.second.empty()) {
+      error = "hardware parameter '" + parameter.first + "' cannot be empty";
+      return false;
+    }
+    bus_it->interface_name = parameter.second;
+  }
+  return true;
+}
+
+bool CanFdSystem::build_joint_mapping(std::string &error) {
+  const auto &motors = config_.driver.motors;
+  if (info_.joints.size() != motors.size()) {
+    error = "ros2_control exposes " + std::to_string(info_.joints.size()) +
+            " joints but YAML maps " + std::to_string(motors.size()) + " motors";
     return false;
   }
-  for (std::size_t arm = 0; arm < 2U; ++arm) {
-    for (std::size_t local = 0; local < 7U; ++local) {
-      const auto index = arm * 7U + local;
-      const auto &joint = info_.joints[index];
-      if (joint.name != config_.joint_names[arm][local]) {
-        error = "joint index " + std::to_string(index) + " must be '" +
-                config_.joint_names[arm][local] + "', got '" + joint.name + "'";
-        return false;
-      }
-      if (joint.command_interfaces.size() != 1U ||
-          joint.command_interfaces.front().name != hardware_interface::HW_IF_POSITION) {
-        error = "joint '" + joint.name + "' must expose one position command interface";
-        return false;
-      }
-      if (joint.state_interfaces.size() != 3U ||
-          !has_state_interface(joint, hardware_interface::HW_IF_POSITION) ||
-          !has_state_interface(joint, hardware_interface::HW_IF_VELOCITY) ||
-          !has_state_interface(joint, hardware_interface::HW_IF_EFFORT)) {
-        error = "joint '" + joint.name +
-                "' must expose position, velocity and effort state interfaces";
-        return false;
-      }
+
+  std::unordered_map<std::string, std::size_t> joint_index;
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
+    const auto &joint = info_.joints[index];
+    if (!joint_index.emplace(joint.name, index).second) {
+      error = "duplicate ros2_control joint '" + joint.name + "'";
+      return false;
     }
+    if (joint.command_interfaces.size() != 1U ||
+        joint.command_interfaces.front().name != hardware_interface::HW_IF_POSITION) {
+      error = "joint '" + joint.name + "' must expose one position command interface";
+      return false;
+    }
+    if (joint.state_interfaces.size() != 3U ||
+        !has_state_interface(joint, hardware_interface::HW_IF_POSITION) ||
+        !has_state_interface(joint, hardware_interface::HW_IF_VELOCITY) ||
+        !has_state_interface(joint, hardware_interface::HW_IF_EFFORT)) {
+      error = "joint '" + joint.name +
+              "' must expose position, velocity and effort state interfaces";
+      return false;
+    }
+  }
+
+  motor_to_joint_.assign(motors.size(), 0U);
+  std::vector<bool> mapped(info_.joints.size(), false);
+  for (std::size_t motor = 0; motor < motors.size(); ++motor) {
+    const auto it = joint_index.find(motors[motor].joint_name);
+    if (it == joint_index.end()) {
+      error = "motor '" + motors[motor].name + "' maps unknown ros2_control joint '" +
+              motors[motor].joint_name + "'";
+      return false;
+    }
+    motor_to_joint_[motor] = it->second;
+    mapped[it->second] = true;
+  }
+  if (!std::all_of(mapped.begin(), mapped.end(), [](const bool value) { return value; })) {
+    error = "every ros2_control joint must have exactly one motor mapping";
+    return false;
   }
   return true;
 }
@@ -145,47 +174,36 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
                                       ? std::string{}
                                       : config_it->second;
   std::string error;
-  if (!load_config(config_path, error)) {
+  if (!load_config(config_path, error) || !apply_bus_overrides(error) ||
+      !build_joint_mapping(error)) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "invalid motor config '%s': %s", config_path.c_str(), error.c_str());
-    return hardware_interface::CallbackReturn::ERROR;
-  }
-
-  const auto override_interface = [&](const char *parameter, const std::size_t arm) {
-    const auto it = info_.hardware_parameters.find(parameter);
-    if (it != info_.hardware_parameters.end() && !it->second.empty()) {
-      config_.arms[arm].interface_name = it->second;
-    }
-  };
-  override_interface("left_interface", 0U);
-  override_interface("right_interface", 1U);
-
-  if (!validate_hardware_info(error)) {
-    RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"), "%s", error.c_str());
+                 "invalid motor hardware configuration: %s", error.c_str());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
   try {
-    drivers_[0] = std::make_unique<motor_canfd_drive::ArmDriver>(config_.arms[0]);
-    drivers_[1] = std::make_unique<motor_canfd_drive::ArmDriver>(config_.arms[1]);
+    driver_ = std::make_unique<motor_canfd_drive::MotorCanfdDriver>(config_.driver);
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
                  "invalid CAN-FD driver configuration: %s", exception.what());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  position_.assign(14U, std::numeric_limits<double>::quiet_NaN());
-  velocity_.assign(14U, 0.0);
-  effort_.assign(14U, 0.0);
-  command_.assign(14U, 0.0);
+  const auto joint_count = info_.joints.size();
+  position_.assign(joint_count, std::numeric_limits<double>::quiet_NaN());
+  velocity_.assign(joint_count, 0.0);
+  effort_.assign(joint_count, 0.0);
+  command_.assign(joint_count, 0.0);
+  last_feedback_.assign(joint_count, std::chrono::steady_clock::time_point{});
+  motor_states_.assign(config_.driver.motors.size(), {});
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 std::vector<hardware_interface::StateInterface>
 CanFdSystem::export_state_interfaces() {
   std::vector<hardware_interface::StateInterface> interfaces;
-  interfaces.reserve(42U);
-  for (std::size_t index = 0; index < 14U; ++index) {
+  interfaces.reserve(info_.joints.size() * 3U);
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
     interfaces.emplace_back(info_.joints[index].name,
                             hardware_interface::HW_IF_POSITION, &position_[index]);
     interfaces.emplace_back(info_.joints[index].name,
@@ -199,74 +217,63 @@ CanFdSystem::export_state_interfaces() {
 std::vector<hardware_interface::CommandInterface>
 CanFdSystem::export_command_interfaces() {
   std::vector<hardware_interface::CommandInterface> interfaces;
-  interfaces.reserve(14U);
-  for (std::size_t index = 0; index < 14U; ++index) {
+  interfaces.reserve(info_.joints.size());
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
     interfaces.emplace_back(info_.joints[index].name,
                             hardware_interface::HW_IF_POSITION, &command_[index]);
   }
   return interfaces;
 }
 
-void CanFdSystem::close_buses() noexcept {
-  for (auto &driver : drivers_) {
-    if (driver) {
-      driver->close();
-    }
+void CanFdSystem::close_driver() noexcept {
+  if (driver_) {
+    driver_->close();
   }
 }
 
 hardware_interface::CallbackReturn
 CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
   try {
-    for (auto &driver : drivers_) {
-      driver->open();
-      if (!driver->set_enabled(false)) {
-        throw std::runtime_error("failed to send initial disable command");
-      }
+    driver_->open();
+    if (!driver_->set_enabled(false)) {
+      throw std::runtime_error("failed to send initial disable command");
     }
 
-    // Query feedback with zero gains while all motors are disabled. This preserves
-    // the existing safety rule: never invent q=0 and then enable against an unknown pose.
-    std::array<bool, 14> observed{};
+    // Discover the actual joint pose with zero gains before enabling motors.
+    std::vector<bool> observed(info_.joints.size(), false);
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration<double>(config_.initial_feedback_wait_s);
     while (std::chrono::steady_clock::now() < deadline) {
-      // Repeat the harmless zero-gain query during the startup window. Besides
-      // tolerating normal bus/node startup skew, this keeps the activation path
-      // deterministic with the vcan simulator without increasing real-hardware gains.
       if (!send_position_commands(true)) {
         throw std::runtime_error("failed to send zero-gain feedback query");
       }
       receive_feedback(&observed);
-      if (std::all_of(observed.begin(), observed.end(), [](const bool seen) { return seen; })) {
+      if (std::all_of(observed.begin(), observed.end(),
+                      [](const bool seen) { return seen; })) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    for (std::size_t index = 0; index < observed.size(); ++index) {
-      if (!observed[index] || !std::isfinite(position_[index])) {
+    for (std::size_t joint = 0; joint < observed.size(); ++joint) {
+      if (!observed[joint] || !std::isfinite(position_[joint])) {
         throw std::runtime_error("no initial feedback from joint '" +
-                                 info_.joints[index].name + "'");
+                                 info_.joints[joint].name + "'");
       }
-      command_[index] = position_[index];
+      command_[joint] = position_[joint];
     }
 
-    for (auto &driver : drivers_) {
-      if (!driver->set_enabled(true)) {
-        throw std::runtime_error("failed to enable one or more motors");
-      }
+    if (!driver_->set_enabled(true)) {
+      throw std::runtime_error("failed to enable one or more motors");
     }
     active_ = true;
     return hardware_interface::CallbackReturn::SUCCESS;
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
                  "activation failed: %s", exception.what());
-    for (auto &driver : drivers_) {
-      if (driver && driver->is_open()) {
-        static_cast<void>(driver->set_enabled(false));
-      }
+    if (driver_ && driver_->is_open()) {
+      static_cast<void>(driver_->set_enabled(false));
     }
-    close_buses();
+    close_driver();
     active_ = false;
     return hardware_interface::CallbackReturn::ERROR;
   }
@@ -275,53 +282,42 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
 hardware_interface::CallbackReturn
 CanFdSystem::on_deactivate(const rclcpp_lifecycle::State &) {
   active_ = false;
-  for (auto &driver : drivers_) {
-    if (driver && driver->is_open()) {
-      static_cast<void>(driver->set_enabled(false));
-    }
+  if (driver_ && driver_->is_open()) {
+    static_cast<void>(driver_->set_enabled(false));
   }
-  close_buses();
+  close_driver();
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 bool CanFdSystem::send_position_commands(const bool zero_gains) {
-  bool ok = true;
-  for (std::size_t arm = 0; arm < 2U; ++arm) {
-    motor_canfd_drive::ArmDriver::CommandArray commands{};
-    for (std::size_t joint = 0; joint < 7U; ++joint) {
-      commands[joint].position = command_[arm * 7U + joint];
-      if (!zero_gains) {
-        if (joint < 4U) {
-          commands[joint].kp = config_.rp_kp;
-          commands[joint].kd = config_.rp_kd;
-        } else {
-          commands[joint].kp = config_.wrist_kp;
-          commands[joint].kd = config_.wrist_kd;
-        }
-      }
+  std::vector<motor_canfd_drive::protocol::JointCommand> commands(
+      config_.driver.motors.size());
+  for (std::size_t motor = 0; motor < commands.size(); ++motor) {
+    const auto joint = motor_to_joint_[motor];
+    commands[motor].position = command_[joint];
+    if (!zero_gains) {
+      commands[motor].kp = config_.motor_commands[motor].kp;
+      commands[motor].kd = config_.motor_commands[motor].kd;
     }
-    ok &= drivers_[arm]->write_commands(commands);
   }
-  return ok;
+  return driver_->write_commands(commands);
 }
 
-void CanFdSystem::receive_feedback(std::array<bool, 14> *observed) {
+void CanFdSystem::receive_feedback(std::vector<bool> *observed) {
+  std::vector<bool> updated;
+  driver_->read_feedback(motor_states_, updated);
   const auto now = std::chrono::steady_clock::now();
-  for (std::size_t arm = 0; arm < 2U; ++arm) {
-    motor_canfd_drive::ArmDriver::UpdatedArray updated{};
-    drivers_[arm]->read_feedback(arm_states_[arm], updated);
-    for (std::size_t joint = 0; joint < 7U; ++joint) {
-      if (!updated[joint]) {
-        continue;
-      }
-      const auto index = arm * 7U + joint;
-      position_[index] = arm_states_[arm][joint].position;
-      velocity_[index] = arm_states_[arm][joint].velocity;
-      effort_[index] = arm_states_[arm][joint].effort;
-      last_feedback_[index] = now;
-      if (observed != nullptr) {
-        (*observed)[index] = true;
-      }
+  for (std::size_t motor = 0; motor < updated.size(); ++motor) {
+    if (!updated[motor]) {
+      continue;
+    }
+    const auto joint = motor_to_joint_[motor];
+    position_[joint] = motor_states_[motor].position;
+    velocity_[joint] = motor_states_[motor].velocity;
+    effort_[joint] = motor_states_[motor].effort;
+    last_feedback_[joint] = now;
+    if (observed != nullptr) {
+      observed->at(joint) = true;
     }
   }
 }
@@ -339,11 +335,11 @@ hardware_interface::return_type CanFdSystem::read(const rclcpp::Time &,
     return hardware_interface::return_type::ERROR;
   }
   const auto now = std::chrono::steady_clock::now();
-  for (std::size_t index = 0; index < last_feedback_.size(); ++index) {
-    if (std::chrono::duration<double>(now - last_feedback_[index]).count() >
+  for (std::size_t joint = 0; joint < last_feedback_.size(); ++joint) {
+    if (std::chrono::duration<double>(now - last_feedback_[joint]).count() >
         config_.feedback_timeout_s) {
       RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                   "feedback timeout: %s", info_.joints[index].name.c_str());
+                   "feedback timeout: %s", info_.joints[joint].name.c_str());
       return hardware_interface::return_type::ERROR;
     }
   }

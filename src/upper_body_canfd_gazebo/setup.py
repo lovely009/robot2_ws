@@ -9,7 +9,7 @@ package_name = "upper_body_canfd_gazebo"
 
 setup(
     name=package_name,
-    version="0.2.0",
+    version="0.3.0",
     packages=find_packages(exclude=["test", "tests"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),

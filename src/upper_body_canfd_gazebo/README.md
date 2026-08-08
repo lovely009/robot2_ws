@@ -415,3 +415,20 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 - 腕部内部位置/速度模式的固定增益。
 
 这些都已经集中成易改参数。下一步拿到机械尺寸、RP 具体型号和腕部 25/30 mm 具体型号后，可以把“协议级仿真”继续升级成“参数接近真机的数字样机”。
+
+## 真实硬件 ros2_control 后端
+
+新增的 `upper_body_canfd_hardware` 是标准 `hardware_interface::SystemInterface` 插件。
+仿真仍由 `gz_ros2_control` 提供相同的关节状态抽象；真机启动时 Xacro 切换为 CAN-FD
+硬件插件，上层控制器不再依赖协议帧或 SocketCAN。真机入口为：
+
+```bash
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch upper_body_canfd_gazebo hardware.launch.py \
+  left_interface:=can0 right_interface:=can1
+```
+
+真机控制器接受 14 路 position 指令，并导出 position/velocity/effort 状态。硬件插件在
+activate/deactivate 中统一使能和安全失能，持续检查每个关节反馈超时。禁止同时运行
+`canfd_actions`、`canfd_demo` 或 `canfd_keyboard` 等直接占用 CAN 总线的旧工具。

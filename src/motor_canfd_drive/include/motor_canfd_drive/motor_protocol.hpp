@@ -15,8 +15,8 @@ namespace motor_canfd_drive {
 
 using MotorIndexList = std::vector<std::size_t>;
 
-// A protocol strategy owns the wire rules for one motor family on one CAN bus.
-// The generic driver knows neither frame IDs nor packet layouts.
+// MotorProtocol 是“协议策略”抽象：每一种电机家族只负责自己的线协议规则。
+// 通用 MotorCanfdDriver 不需要知道 CAN ID、字节布局或该协议一次能带多少台电机。
 class MotorProtocol {
 public:
   virtual ~MotorProtocol() = default;
@@ -31,8 +31,8 @@ public:
                       const MotorIndexList &indices,
                       const std::vector<protocol::JointCommand> &commands) const = 0;
 
-  // Return true only when this protocol recognizes the frame and produces a
-  // state for one configured motor. motor_index is the global DriverConfig index.
+  // 只有当该协议识别出 frame，并成功解码出某台已配置电机的反馈时才返回 true。
+  // motor_index 返回这台电机在 DriverConfig::motors 中的全局下标，供上层统一写状态。
   virtual bool decode_feedback(const std::vector<MotorConfig> &motors,
                                const MotorIndexList &indices,
                                const CanFrame &frame,
@@ -48,8 +48,8 @@ public:
   bool contains(const std::string &type) const noexcept;
   std::unique_ptr<MotorProtocol> create(const std::string &type) const;
 
-  // Built-ins are registered here instead of being hard-coded in the generic
-  // driver. A future motor family adds a strategy + one registration entry.
+  // 内置协议在 registry 中注册，而不是硬编码到 MotorCanfdDriver 的收发循环里。
+  // 未来增加电机家族时，实现协议策略并增加一项工厂注册即可。
   static MotorProtocolRegistry with_builtin_protocols();
 
 private:

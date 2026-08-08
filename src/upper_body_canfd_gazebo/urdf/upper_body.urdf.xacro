@@ -4,6 +4,7 @@
   <xacro:arg name="hardware_backend" default="gazebo"/>
   <xacro:arg name="left_interface" default="can0"/>
   <xacro:arg name="right_interface" default="can1"/>
+  <xacro:arg name="motor_config_file" default=""/>
 
   <!-- Coordinate convention: +X forward, +Y left, +Z up. -->
   <material name="torso_gray"><color rgba="0.23 0.27 0.32 1"/></material>
@@ -269,13 +270,10 @@
   <xacro:if value="${'$(arg hardware_backend)' == 'canfd'}">
     <ros2_control name="UpperBodyCanFdSystem" type="system">
       <hardware>
-        <plugin>upper_body_canfd_hardware/CanFdSystem</plugin>
+        <plugin>motor_hardware_interface/CanFdSystem</plugin>
         <param name="left_interface">$(arg left_interface)</param>
         <param name="right_interface">$(arg right_interface)</param>
-        <param name="rp_kp">30.0</param><param name="rp_kd">1.0</param>
-        <param name="wrist_kp">0.008</param><param name="wrist_kd">1.0</param>
-        <param name="wrist_torque_constant_nm_per_amp">0.35</param>
-        <param name="feedback_timeout_s">0.1</param>
+        <param name="config_file">$(arg motor_config_file)</param>
       </hardware>
       <xacro:canfd_control_joint joint="left_shoulder_yaw_joint"/><xacro:canfd_control_joint joint="left_shoulder_roll_joint"/>
       <xacro:canfd_control_joint joint="left_shoulder_pitch_joint"/><xacro:canfd_control_joint joint="left_elbow_pitch_joint"/>

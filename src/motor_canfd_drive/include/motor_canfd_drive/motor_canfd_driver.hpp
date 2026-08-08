@@ -12,8 +12,8 @@
 
 namespace motor_canfd_drive {
 
-// Generic, ROS-independent CAN-FD driver.  Motor count, bus count, IDs and
-// motor families all come from DriverConfig; no robot topology is compiled in.
+// 与 ROS 无关的通用 CAN-FD 驱动。
+// 电机数量、总线数量、ID、电机类型全部来自 DriverConfig，编译代码中不包含机器人拓扑。
 class MotorCanfdDriver final {
 public:
   explicit MotorCanfdDriver(DriverConfig config);
@@ -36,18 +36,22 @@ public:
   std::size_t motor_count() const noexcept { return config_.motors.size(); }
 
 private:
+  // 同一条总线、同一种 type 的电机组成一个协议组。
+  // 例如 can0 上的 4 台 RP 是一组，can0 上的 3 台 motor_2530 是另一组。
   struct ProtocolGroup {
     std::string type;
     MotorIndexList motor_indices;
     std::unique_ptr<MotorProtocol> protocol;
   };
 
+  // 每个逻辑总线运行时只打开一个 SocketCAN socket，再挂接若干协议组。
   struct BusRuntime {
     BusConfig config;
     std::vector<ProtocolGroup> groups;
     std::unique_ptr<SocketCan> socket;
   };
 
+  // 在真正打开 CAN 前一次性验证配置并建立运行时分组，尽早暴露重复 ID/未知类型等错误。
   void validate_and_build(MotorProtocolRegistry registry);
   static bool send_frame(const SocketCan &socket, const CanFrame &frame);
 

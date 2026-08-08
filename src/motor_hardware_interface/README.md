@@ -1,42 +1,60 @@
 # motor_hardware_interface
 
-ROS 2 Humble `ros2_control` 适配层。该包只承担 ROS 关节接口/lifecycle 与
-`motor_canfd_drive::ArmDriver` 之间的转换，不再拥有私有协议或 SocketCAN 实现。
+ROS 2 Humble `ros2_control` adapter for `motor_canfd_drive`.
+
+The plugin is a C++ `hardware_interface::SystemInterface`; Python ROS 2 nodes are
+still fully compatible through normal controller Topic / Action / Service APIs.
+No pybind11 or Python wrapper is used for the low-level driver.
+
+## Boundary
 
 ```text
-controller_manager
-       │ SystemInterface
-       ▼
+controller_manager / ros2_control
+              |
+              v
 motor_hardware_interface
-       │ C++ API
-       ▼
-motor_canfd_drive
-       │ SocketCAN / CAN-FD
-       ▼
-can0 + can1
+  - lifecycle
+  - ROS joint interfaces
+  - YAML command/timing parameters
+  - joint-name <-> motor-index mapping
+              |
+              v
+motor_canfd_drive::MotorCanfdDriver
+  - bus/type grouping
+  - protocol encode/decode
+  - SocketCAN
 ```
 
-## Python 边界
+There is no fixed arm count or fixed joint count. The plugin validates that every
+joint declared in its `<ros2_control>` block has exactly one YAML motor mapping,
+then maps by **joint name**, not by array position.
 
-Humble 的硬件组件由 `controller_manager` 通过 `pluginlib` 加载 C++
-`hardware_interface::SystemInterface` 动态库，因此本包没有 Python hardware plugin，也不为
-`motor_canfd_drive` 提供 pybind11。Python 节点仍可正常通过 ROS 2 controller 的
-Topic / Action / Service 控制机器人；Python launch 文件也可以正常启动这个 C++ 插件。
+## Configuration
 
-## 参数
+`config/motor_canfd.yaml` contains:
 
-电机映射和调参集中在 `config/motor_canfd.yaml`：
+- `buses`: arbitrary logical bus names and SocketCAN interfaces;
+- `motor_types`: shared command gains and driver parameters per type;
+- `motors`: arbitrary motor entries with `joint`, `bus`, `type` and `id`;
+- `timing`: feedback/activation timeouts.
 
-- 左/右 SocketCAN 接口；
-- RP ID 与腕部节点；
-- 14 个关节名及顺序；
-- RP / 腕部 Kp、Kd；
-- 腕部 Nm/A 标定参数；
-- 初始反馈等待与运行反馈超时。
+Example:
 
-`ros2_control` 的硬件插件参数仍通过 URDF `<ros2_control><hardware><param>` 进入
-`HardwareInfo`；这里只传入 YAML 的 `config_file` 路径以及可选的左右接口覆盖值。控制器自身的
-参数继续使用标准 ROS 2 controller YAML。
+```yaml
+motor_hardware:
+  buses:
+    left_arm: {interface: can0}
+  motor_types:
+    rp:
+      command: {kp: 30.0, kd: 1.0}
+  motors:
+    shoulder_yaw:
+      joint: left_shoulder_yaw_joint
+      bus: left_arm
+      type: rp
+      id: 1
+```
 
-激活时会先显式失能，随后用零增益指令获取 14 路真实当前位置；只有全部收到反馈后才以当前
-姿态为初始目标并使能。不会假定机械零位。
+Per-motor `command` and `parameters` maps override the defaults for that motor
+type. Robot-specific launch files may override any bus using a hardware
+parameter named `bus_override.<logical_bus_name>`.

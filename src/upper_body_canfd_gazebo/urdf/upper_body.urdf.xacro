@@ -271,8 +271,8 @@
     <ros2_control name="UpperBodyCanFdSystem" type="system">
       <hardware>
         <plugin>motor_hardware_interface/CanFdSystem</plugin>
-        <param name="left_interface">$(arg left_interface)</param>
-        <param name="right_interface">$(arg right_interface)</param>
+        <param name="bus_override.left_arm">$(arg left_interface)</param>
+        <param name="bus_override.right_arm">$(arg right_interface)</param>
         <param name="config_file">$(arg motor_config_file)</param>
       </hardware>
       <xacro:canfd_control_joint joint="left_shoulder_yaw_joint"/><xacro:canfd_control_joint joint="left_shoulder_roll_joint"/>

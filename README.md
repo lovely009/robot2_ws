@@ -7,11 +7,11 @@ ROS 2 Humble 工作空间：半身双臂机器人的 CAN-FD 电机仿真与真�
 | 包 | 语言 | 作用 |
 |---|---|---|
 | `upper_body_canfd_gazebo` | Python | 原有 14-DOF Gazebo Fortress 仿真、Python CAN-FD bridge、动作与模型；继续保留 |
-| `can_motor_sim` | Python | 原有 CAN-FD 假从站与交互式调试 master；继续保留 |
 | `motor_canfd_drive` | C++ | 无 ROS 运行时依赖的通用底层驱动：动态总线/电机映射、协议策略注册、SocketCAN |
 | `motor_hardware_interface` | C++ | 标准 `ros2_control::SystemInterface` 适配层；参数/映射集中到 YAML |
 | `motor_canfd_sim` | C++ | 新的 CAN-FD/Gazebo 电机仿真 bridge，可跑 driver→vcan→sim 全链路 |
-| `upper_body_canfd_hardware` | C++ | 旧版一体式硬件层，暂时保留作迁移参考；新的真机入口不再依赖它 |
+
+`can_motor_sim` 与 `upper_body_canfd_hardware` 已在通用 C++ 驱动链路接管后移除。原 Python Gazebo/CAN bridge 仍保留在 `upper_body_canfd_gazebo`，两份协议原始 PDF 仍保存在仓库根目录。
 
 ## 分支策略
 
@@ -62,5 +62,3 @@ ros2 launch upper_body_canfd_gazebo hardware.launch.py \
 - C++ 底层 CAN-FD 驱动：[`motor_canfd_drive/README.md`](src/motor_canfd_drive/README.md)
 - `ros2_control` 硬件接口：[`motor_hardware_interface/README.md`](src/motor_hardware_interface/README.md)
 - 新 C++ 仿真：[`motor_canfd_sim/README.md`](src/motor_canfd_sim/README.md)
-- 旧 Python 电机假从站：[`can_motor_sim/README.md`](src/can_motor_sim/README.md)
-- 旧一体式硬件层（迁移参考）：[`upper_body_canfd_hardware/README.md`](src/upper_body_canfd_hardware/README.md)

@@ -1,4 +1,4 @@
-"""Generic C++ driver -> vcan -> C++ motor simulator -> Gazebo loopback."""
+"""通用 C++ 驱动 -> vcan -> C++ 电机模拟器 -> Gazebo 全回环启动文件。"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
@@ -16,10 +16,12 @@ def generate_launch_description() -> LaunchDescription:
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
 
+    # 真机硬件接口和电机模拟器共用这一份 YAML，确保 bus/motor/joint 映射一致。
     motor_config = PathJoinSubstitution(
         [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
     )
 
+    # Gazebo 只负责机器人动力学；start_bridge=false 避免同时启动旧 Python CAN 桥。
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
@@ -35,6 +37,7 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
+    # C++ 模拟器扮演“电机侧”。这里把逻辑总线重定向到 vcan0/vcan1。
     cpp_bridge = Node(
         package="motor_canfd_sim",
         executable="motor_canfd_sim_node",
@@ -71,6 +74,8 @@ def generate_launch_description() -> LaunchDescription:
     controller_config = PathJoinSubstitution(
         [FindPackageShare("motor_canfd_sim"), "config", "loopback_controllers.yaml"]
     )
+    # 新驱动的 controller_manager 放在 /driver 命名空间，避免与 Gazebo 自己的
+    # /controller_manager 重名。二者通过 CAN-FD/vcan 和关节状态形成完整回环。
     driver_manager = Node(
         package="controller_manager",
         executable="ros2_control_node",
@@ -101,6 +106,8 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
+    # 启动顺序：Gazebo/C++ 模拟器 -> 真机驱动 manager -> state broadcaster
+    # -> position controller。后一级等前一级就绪，可减少 controller 启动竞态。
     return LaunchDescription(
         [
             DeclareLaunchArgument("left_interface", default_value="vcan0"),

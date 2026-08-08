@@ -8,7 +8,7 @@ ROS 2 Humble 工作空间：半身双臂机器人的 CAN-FD 电机仿真与真�
 |---|---|---|
 | `upper_body_canfd_gazebo` | Python | 原有 14-DOF Gazebo Fortress 仿真、Python CAN-FD bridge、动作与模型；继续保留 |
 | `can_motor_sim` | Python | 原有 CAN-FD 假从站与交互式调试 master；继续保留 |
-| `motor_canfd_drive` | C++ | 无 ROS 运行时依赖的底层驱动：SocketCAN、RP/25-30 协议、单臂总线管理 |
+| `motor_canfd_drive` | C++ | 无 ROS 运行时依赖的通用底层驱动：动态总线/电机映射、协议策略注册、SocketCAN |
 | `motor_hardware_interface` | C++ | 标准 `ros2_control::SystemInterface` 适配层；参数/映射集中到 YAML |
 | `motor_canfd_sim` | C++ | 新的 CAN-FD/Gazebo 电机仿真 bridge，可跑 driver→vcan→sim 全链路 |
 | `upper_body_canfd_hardware` | C++ | 旧版一体式硬件层，暂时保留作迁移参考；新的真机入口不再依赖它 |

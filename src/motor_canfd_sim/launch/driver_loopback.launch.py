@@ -1,11 +1,7 @@
-"""Full C++ driver -> vcan -> C++ motor simulator -> Gazebo loopback."""
+"""Generic C++ driver -> vcan -> C++ motor simulator -> Gazebo loopback."""
 
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    RegisterEventHandler,
-)
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
@@ -19,6 +15,10 @@ def generate_launch_description() -> LaunchDescription:
     right_interface = LaunchConfiguration("right_interface")
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
+
+    motor_config = PathJoinSubstitution(
+        [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+    )
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -42,13 +42,14 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         parameters=[
             PathJoinSubstitution([FindPackageShare("motor_canfd_sim"), "config", "sim.yaml"]),
-            {"left_interface": left_interface, "right_interface": right_interface},
+            {
+                "motor_config_file": motor_config,
+                "bus_override.left_arm": left_interface,
+                "bus_override.right_arm": right_interface,
+            },
         ],
     )
 
-    motor_config = PathJoinSubstitution(
-        [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
-    )
     robot_description = ParameterValue(
         Command(
             [
@@ -107,23 +108,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("render_engine", default_value=""),
             gazebo,
-            # Start the driver process only after the C++ motor emulator process exists.
-            # The hardware plugin itself repeatedly sends zero-gain discovery queries during
-            # activation, so small process-start skew does not lose the one-shot query.
+            RegisterEventHandler(OnProcessStart(target_action=cpp_bridge, on_start=[driver_manager])),
             RegisterEventHandler(
-                OnProcessStart(target_action=cpp_bridge, on_start=[driver_manager])
+                OnProcessStart(target_action=driver_manager, on_start=[joint_state_broadcaster])
             ),
             RegisterEventHandler(
-                OnProcessStart(
-                    target_action=driver_manager,
-                    on_start=[joint_state_broadcaster],
-                )
-            ),
-            RegisterEventHandler(
-                OnProcessExit(
-                    target_action=joint_state_broadcaster,
-                    on_exit=[position_controller],
-                )
+                OnProcessExit(target_action=joint_state_broadcaster, on_exit=[position_controller])
             ),
             cpp_bridge,
         ]

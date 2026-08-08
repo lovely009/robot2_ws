@@ -11,7 +11,6 @@
 #include <yaml-cpp/yaml.h>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
-#include "motor_canfd_drive/config_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -22,6 +21,81 @@ bool has_state_interface(const hardware_interface::ComponentInfo &joint,
                          const std::string &name) {
   return std::any_of(joint.state_interfaces.begin(), joint.state_interfaces.end(),
                      [&](const auto &interface) { return interface.name == name; });
+}
+
+motor_canfd_drive::MotorParameterMap
+parse_driver_parameters(const YAML::Node &node, const std::string &context) {
+  motor_canfd_drive::MotorParameterMap parameters;
+  if (!node) {
+    return parameters;
+  }
+  if (!node.IsMap()) {
+    throw std::runtime_error(context + " parameters must be a YAML map");
+  }
+  for (const auto &entry : node) {
+    if (!entry.first.IsScalar() || !entry.second.IsScalar()) {
+      throw std::runtime_error(context +
+                               " parameters must contain scalar key/value pairs");
+    }
+    parameters[entry.first.Scalar()] = entry.second.Scalar();
+  }
+  return parameters;
+}
+
+void merge_parameters(motor_canfd_drive::MotorParameterMap &target,
+                      const motor_canfd_drive::MotorParameterMap &overrides) {
+  for (const auto &entry : overrides) {
+    target[entry.first] = entry.second;
+  }
+}
+
+motor_canfd_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) {
+  motor_canfd_drive::DriverConfig config;
+  const auto buses = hardware["buses"];
+  if (!buses || !buses.IsMap() || buses.size() == 0U) {
+    throw std::runtime_error("motor_hardware.buses must be a non-empty map");
+  }
+  for (const auto &entry : buses) {
+    config.buses.push_back({entry.first.as<std::string>(),
+                            entry.second["interface"].as<std::string>()});
+  }
+
+  std::unordered_map<std::string, motor_canfd_drive::MotorParameterMap>
+      type_parameters;
+  const auto motor_types = hardware["motor_types"];
+  if (motor_types) {
+    if (!motor_types.IsMap()) {
+      throw std::runtime_error("motor_hardware.motor_types must be a map");
+    }
+    for (const auto &entry : motor_types) {
+      const auto type = entry.first.as<std::string>();
+      type_parameters[type] = parse_driver_parameters(
+          entry.second["parameters"], "motor type '" + type + "'");
+    }
+  }
+
+  const auto motors = hardware["motors"];
+  if (!motors || !motors.IsMap() || motors.size() == 0U) {
+    throw std::runtime_error("motor_hardware.motors must be a non-empty map");
+  }
+  for (const auto &entry : motors) {
+    motor_canfd_drive::MotorConfig motor;
+    motor.name = entry.first.as<std::string>();
+    const auto node = entry.second;
+    motor.joint_name = node["joint"].as<std::string>();
+    motor.bus = node["bus"].as<std::string>();
+    motor.type = node["type"].as<std::string>();
+    motor.id = node["id"].as<unsigned>();
+    const auto defaults = type_parameters.find(motor.type);
+    if (defaults != type_parameters.end()) {
+      motor.parameters = defaults->second;
+    }
+    merge_parameters(motor.parameters, parse_driver_parameters(
+                                           node["parameters"],
+                                           "motor '" + motor.name + "'"));
+    config.motors.push_back(std::move(motor));
+  }
+  return config;
 }
 
 std::pair<double, double> parse_command_config(const YAML::Node &type_node,
@@ -56,10 +130,12 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
     if (path.empty()) {
       throw std::runtime_error("hardware parameter 'config_file' is required");
     }
-    config_.driver = motor_canfd_drive::load_driver_config_yaml(path);
-
     const auto document = YAML::LoadFile(path);
     const auto hardware = document["motor_hardware"];
+    if (!hardware || !hardware.IsMap()) {
+      throw std::runtime_error("YAML root 'motor_hardware' is required");
+    }
+    config_.driver = parse_driver_config(hardware);
     const auto timing = hardware["timing"];
     if (!timing || !timing.IsMap()) {
       throw std::runtime_error("motor_hardware.timing is required");

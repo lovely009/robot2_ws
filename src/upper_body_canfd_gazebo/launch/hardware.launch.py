@@ -11,11 +11,15 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description() -> LaunchDescription:
     share = FindPackageShare("upper_body_canfd_gazebo")
+    default_motor_config = PathJoinSubstitution(
+        [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+    )
     description = ParameterValue(Command([
         FindExecutable(name="xacro"), " ",
         PathJoinSubstitution([share, "urdf", "upper_body.urdf.xacro"]),
         " hardware_backend:=canfd left_interface:=", LaunchConfiguration("left_interface"),
         " right_interface:=", LaunchConfiguration("right_interface"),
+        " motor_config_file:=", LaunchConfiguration("motor_config_file"),
     ]), value_type=str)
     config = PathJoinSubstitution([share, "config", "hardware_controllers.yaml"])
     manager = Node(package="controller_manager", executable="ros2_control_node", output="screen",
@@ -29,6 +33,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument("left_interface", default_value="can0"),
         DeclareLaunchArgument("right_interface", default_value="can1"),
+        DeclareLaunchArgument("motor_config_file", default_value=default_motor_config),
         manager, state_publisher,
         RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[position])), jsb,
     ])

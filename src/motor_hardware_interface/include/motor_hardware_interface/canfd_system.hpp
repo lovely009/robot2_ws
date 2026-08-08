@@ -13,6 +13,8 @@
 
 namespace motor_hardware_interface {
 
+// ROS 2 ros2_control 适配层：把 controller_manager 的 joint 接口翻译成
+// MotorCanfdDriver 的通用命令/状态。这个类知道 ROS joint，但不处理私有协议字节。
 class CanFdSystem final : public hardware_interface::SystemInterface {
 public:
   RCLCPP_SHARED_PTR_DEFINITIONS(CanFdSystem)
@@ -33,11 +35,13 @@ public:
                                         const rclcpp::Duration &period) override;
 
 private:
+  // Kp/Kd 属于每台电机的控制配置；YAML 可先给 type 默认值，再按 motor 覆盖。
   struct MotorCommandConfig {
     double kp{0.0};
     double kd{0.0};
   };
 
+  // RuntimeConfig 是 ROS/YAML 世界与纯 C++ DriverConfig 之间的边界。
   struct RuntimeConfig {
     motor_canfd_drive::DriverConfig driver;
     std::vector<MotorCommandConfig> motor_commands;
@@ -54,6 +58,8 @@ private:
 
   RuntimeConfig config_;
   std::unique_ptr<motor_canfd_drive::MotorCanfdDriver> driver_;
+  // motor_to_joint_[m] = ros2_control joint 下标。映射按 joint_name 建立，
+  // 不依赖“第几个电机就是第几个关节”的固定数组顺序。
   std::vector<std::size_t> motor_to_joint_;
   std::vector<motor_canfd_drive::protocol::JointState> motor_states_;
   std::vector<double> position_;

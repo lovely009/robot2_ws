@@ -25,6 +25,8 @@ bool has_state_interface(const hardware_interface::ComponentInfo &joint,
 
 motor_canfd_drive::MotorParameterMap
 parse_driver_parameters(const YAML::Node &node, const std::string &context) {
+  // 底层 DriverConfig 不依赖 yaml-cpp，所以在 ROS 适配层把协议私有参数统一转换成
+  // string->string。具体协议策略再按需要解释数值和单位。
   motor_canfd_drive::MotorParameterMap parameters;
   if (!node) {
     return parameters;
@@ -44,12 +46,14 @@ parse_driver_parameters(const YAML::Node &node, const std::string &context) {
 
 void merge_parameters(motor_canfd_drive::MotorParameterMap &target,
                       const motor_canfd_drive::MotorParameterMap &overrides) {
+  // 后写入的单电机参数覆盖 motor_types 默认值，使同型号电机可以只配置差异项。
   for (const auto &entry : overrides) {
     target[entry.first] = entry.second;
   }
 }
 
 motor_canfd_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) {
+  // YAML 只在本 ROS 侧解析；函数输出纯 C++ DriverConfig 后，底层驱动不再接触 YAML。
   motor_canfd_drive::DriverConfig config;
   const auto buses = hardware["buses"];
   if (!buses || !buses.IsMap() || buses.size() == 0U) {
@@ -104,6 +108,7 @@ std::pair<double, double> parse_command_config(const YAML::Node &type_node,
   const auto type_command = type_node ? type_node["command"] : YAML::Node{};
   const auto motor_command = motor_node["command"];
   const auto resolve = [&](const char *key) -> double {
+    // 优先级：单电机 command > motor_types 公共默认值。
     if (motor_command && motor_command[key]) {
       return motor_command[key].as<double>();
     }
@@ -166,6 +171,8 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
 }
 
 bool CanFdSystem::apply_bus_overrides(std::string &error) {
+  // launch 可把 YAML 中的逻辑总线临时改映射到其他 SocketCAN 接口。
+  // 例如真机配置 left_arm:can0，回环仿真时覆盖成 left_arm:vcan0。
   constexpr const char *prefix = "bus_override.";
   const std::string prefix_string(prefix);
   for (const auto &parameter : info_.hardware_parameters) {
@@ -198,6 +205,8 @@ bool CanFdSystem::build_joint_mapping(std::string &error) {
     return false;
   }
 
+  // 先检查 ros2_control 暴露的接口形状，再按 joint.name 建表。
+  // 之后所有 motor->joint 关联都靠名字查找，不依赖 YAML 与 URDF 的排列顺序。
   std::unordered_map<std::string, std::size_t> joint_index;
   for (std::size_t index = 0; index < info_.joints.size(); ++index) {
     const auto &joint = info_.joints[index];
@@ -220,6 +229,7 @@ bool CanFdSystem::build_joint_mapping(std::string &error) {
     }
   }
 
+  // motor_to_joint_ 是运行期唯一需要的快速映射；每个 joint 必须且只能被映射一次。
   motor_to_joint_.assign(motors.size(), 0U);
   std::vector<bool> mapped(info_.joints.size(), false);
   for (std::size_t motor = 0; motor < motors.size(); ++motor) {
@@ -258,6 +268,8 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
   }
 
   try {
+    // 构造 MotorCanfdDriver 时会继续做协议级验证，例如 RP ID 范围、
+    // 25/30 mm 节点范围以及必需的 torque_constant 参数。
     driver_ = std::make_unique<motor_canfd_drive::MotorCanfdDriver>(config_.driver);
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
@@ -315,7 +327,9 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
       throw std::runtime_error("failed to send initial disable command");
     }
 
-    // Discover the actual joint pose with zero gains before enabling motors.
+    // 激活安全原则：绝不假设上电时机器人位于“零位”。
+    // 先保持失能并发送零增益命令，只利用反馈读取真实当前位置；全部关节可见后，
+    // 再把当前姿态复制为初始 position target，避免一使能就突然追赶错误目标。
     std::vector<bool> observed(info_.joints.size(), false);
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration<double>(config_.initial_feedback_wait_s);
@@ -368,6 +382,8 @@ CanFdSystem::on_deactivate(const rclcpp_lifecycle::State &) {
 bool CanFdSystem::send_position_commands(const bool zero_gains) {
   std::vector<motor_canfd_drive::protocol::JointCommand> commands(
       config_.driver.motors.size());
+  // ros2_control 以 joint 顺序保存 command_，底层 driver 以 motor 顺序收命令；
+  // 这里通过 motor_to_joint_ 做显式转换，因此两边顺序可以不同。
   for (std::size_t motor = 0; motor < commands.size(); ++motor) {
     const auto joint = motor_to_joint_[motor];
     commands[motor].position = command_[joint];
@@ -382,6 +398,8 @@ bool CanFdSystem::send_position_commands(const bool zero_gains) {
 void CanFdSystem::receive_feedback(std::vector<bool> *observed) {
   std::vector<bool> updated;
   driver_->read_feedback(motor_states_, updated);
+  // updated 只标记本轮真正收到新 CAN 反馈的电机；只有这些 joint 才刷新时间戳，
+  // 这样 read() 的反馈超时能识别“某一台电机掉线”，而不是被其他电机的帧掩盖。
   const auto now = std::chrono::steady_clock::now();
   for (std::size_t motor = 0; motor < updated.size(); ++motor) {
     if (!updated[motor]) {
@@ -410,6 +428,7 @@ hardware_interface::return_type CanFdSystem::read(const rclcpp::Time &,
                  "CAN feedback read failed: %s", exception.what());
     return hardware_interface::return_type::ERROR;
   }
+  // 使用 steady_clock 做超时判断，避免系统时间校准/跳变造成误报。
   const auto now = std::chrono::steady_clock::now();
   for (std::size_t joint = 0; joint < last_feedback_.size(); ++joint) {
     if (std::chrono::duration<double>(now - last_feedback_[joint]).count() >

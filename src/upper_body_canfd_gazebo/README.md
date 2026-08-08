@@ -391,9 +391,11 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 
 ## 12. 工程文件
 
-- `urdf/upper_body.urdf.xacro`：半身双臂几何、质量惯量、关节限位、Gazebo ros2_control；
+- `urdf/upper_body.urdf.xacro`：半身双臂几何、质量惯量、关节限位，以及 Gazebo 仿真 / 真机 CAN-FD 两套 ros2_control（`hardware_backend:=gazebo|canfd` 切换）；
 - `worlds/upper_body_world.sdf`：1 ms 物理步长的 Gazebo 世界；
 - `config/controllers.yaml`：14 路 effort 控制器；
+- `config/hardware_controllers.yaml`：真机 14 路 position 控制器（`hardware.launch.py` 使用）；
+- `launch/hardware.launch.py`：真机 ros2_control bring-up（CAN-FD 硬件插件 + 控制器）；
 - `upper_body_canfd_gazebo/protocol_rp.py`：RP 64 Byte MIT 广播和状态帧；
 - `upper_body_canfd_gazebo/protocol_2530.py`：腕部 25/30 mm 协议；
 - `upper_body_canfd_gazebo/socketcan.py`：不依赖 python-can 的 Linux SocketCAN/CAN-FD 层；
@@ -404,6 +406,10 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 - `upper_body_canfd_gazebo/canfd_keyboard_commander.py`：交互式键盘/手动指令遥控器；
 - `scripts/setup_vcan.sh`：建立 vcan0/vcan1；
 - `test/test_protocols.py`、`test/test_motion_library.py`、`test/test_action_player_packets.py`：协议字节序列、动作库限位/插值、动作到 CAN 帧映射测试（pytest）。
+
+真机硬件层 `upper_body_canfd_hardware` 的文件见其包内 `README.md`：`src/canfd_system.cpp`（插件实现）、
+`include/.../protocol.hpp`（RP/腕部协议纯 C++ 头）、`hardware_plugins.xml`（pluginlib 注册）、
+`test/test_protocol.cpp`（协议级 gtest）。协议手册的 PDF 原件放在仓库根目录。
 
 ## 13. 当前哪些参数是“仿真假设”
 
@@ -416,11 +422,12 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 
 这些都已经集中成易改参数。下一步拿到机械尺寸、RP 具体型号和腕部 25/30 mm 具体型号后，可以把“协议级仿真”继续升级成“参数接近真机的数字样机”。
 
-## 真实硬件 ros2_control 后端
+## 14. 真实硬件 ros2_control 后端
 
 新增的 `upper_body_canfd_hardware` 是标准 `hardware_interface::SystemInterface` 插件。
-仿真仍由 `gz_ros2_control` 提供相同的关节状态抽象；真机启动时 Xacro 切换为 CAN-FD
-硬件插件，上层控制器不再依赖协议帧或 SocketCAN。真机入口为：
+仿真仍由 `gz_ros2_control` 提供相同的关节状态抽象；真机启动时 Xacro 通过
+`hardware_backend:=canfd` 切换为 CAN-FD 硬件插件（默认 `gazebo`，`sim.launch.py` 无需改动）。
+上层控制器不再依赖协议帧或 SocketCAN。真机入口为：
 
 ```bash
 colcon build --symlink-install
@@ -429,6 +436,12 @@ ros2 launch upper_body_canfd_gazebo hardware.launch.py \
   left_interface:=can0 right_interface:=can1
 ```
 
-真机控制器接受 14 路 position 指令，并导出 position/velocity/effort 状态。硬件插件在
-activate/deactivate 中统一使能和安全失能，持续检查每个关节反馈超时。禁止同时运行
-`canfd_actions`、`canfd_demo` 或 `canfd_keyboard` 等直接占用 CAN 总线的旧工具。
+真机控制器接受 14 路 position 指令（`hardware_controllers.yaml`），并导出
+position/velocity/effort 状态。硬件插件在 activate 时先读取 14 个关节当前反馈、以当前姿态
+为初始目标再统一使能（不发明零位），deactivate 时统一安全失能，运行期间持续检查每个关节
+反馈超时。禁止同时运行 `canfd_actions`、`canfd_demo` 或 `canfd_keyboard` 等直接占用 CAN
+总线的旧工具。
+
+> 注意：当前分支的真机硬件层只有协议级单元测试，还没有 vcan 全链路验证路径。正式上电前
+> 建议先补一个基于 `can_motor_sim` 假从站的 vcan 回环测试，再按“先零指令确认反馈、再小力矩
+> 微动验证方向”的顺序在机构卸载状态下冒烟。

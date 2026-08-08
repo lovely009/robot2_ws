@@ -407,9 +407,10 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 - `scripts/setup_vcan.sh`：建立 vcan0/vcan1；
 - `test/test_protocols.py`、`test/test_motion_library.py`、`test/test_action_player_packets.py`：协议字节序列、动作库限位/插值、动作到 CAN 帧映射测试（pytest）。
 
-真机硬件层 `upper_body_canfd_hardware` 的文件见其包内 `README.md`：`src/canfd_system.cpp`（插件实现）、
-`include/.../protocol.hpp`（RP/腕部协议纯 C++ 头）、`hardware_plugins.xml`（pluginlib 注册）、
-`test/test_protocol.cpp`（协议级 gtest）。协议手册的 PDF 原件放在仓库根目录。
+新的真机链路已拆分为两个包：`motor_canfd_drive` 统一维护 SocketCAN 与两类电机协议，
+`motor_hardware_interface` 只实现 `ros2_control` 适配并从 YAML 读取映射/增益/超时。
+原 `upper_body_canfd_hardware` 暂时保留作迁移参考，不再作为 `hardware.launch.py` 的活动后端。
+协议手册的 PDF 原件仍放在仓库根目录。
 
 ## 13. 当前哪些参数是“仿真假设”
 
@@ -424,8 +425,9 @@ ros2 run upper_body_canfd_gazebo canfd_demo \
 
 ## 14. 真实硬件 ros2_control 后端
 
-新增的 `upper_body_canfd_hardware` 是标准 `hardware_interface::SystemInterface` 插件。
-仿真仍由 `gz_ros2_control` 提供相同的关节状态抽象；真机启动时 Xacro 通过
+新的 `motor_hardware_interface` 是标准 C++ `hardware_interface::SystemInterface` 插件，
+底层 CAN-FD 通信委托给不依赖 ROS 的 `motor_canfd_drive`。仿真仍由 `gz_ros2_control`
+提供相同的关节状态抽象；真机启动时 Xacro 通过
 `hardware_backend:=canfd` 切换为 CAN-FD 硬件插件（默认 `gazebo`，`sim.launch.py` 无需改动）。
 上层控制器不再依赖协议帧或 SocketCAN。真机入口为：
 
@@ -442,6 +444,26 @@ position/velocity/effort 状态。硬件插件在 activate 时先读取 14 个�
 反馈超时。禁止同时运行 `canfd_actions`、`canfd_demo` 或 `canfd_keyboard` 等直接占用 CAN
 总线的旧工具。
 
-> 注意：当前分支的真机硬件层只有协议级单元测试，还没有 vcan 全链路验证路径。正式上电前
-> 建议先补一个基于 `can_motor_sim` 假从站的 vcan 回环测试，再按“先零指令确认反馈、再小力矩
-> 微动验证方向”的顺序在机构卸载状态下冒烟。
+> 新增 `motor_canfd_sim/launch/driver_loopback.launch.py` 用于 driver → vcan → C++ motor sim →
+> Gazebo 的全回环路径。当前提交环境没有 ROS 2 Humble / Gazebo Fortress 运行时，因此这里完成的是
+> 协议/源码静态验证；合并前仍应在目标 Ubuntu 22.04 环境跑 `colcon test` 和该全回环 launch。
+> 真机上电仍必须按“先零增益确认反馈、再小力矩微动验证方向”的顺序进行。
+
+
+## 15. 新 C++ CAN-FD 仿真路径
+
+原 Python `canfd_gazebo_bridge.py` 保持不变。需要使用新 C++ bridge 时运行：
+
+```bash
+ros2 launch motor_canfd_sim gazebo_cpp_sim.launch.py
+```
+
+需要同时验证新的 `motor_hardware_interface` 时运行：
+
+```bash
+ros2 launch motor_canfd_sim driver_loopback.launch.py
+```
+
+后者把新 driver controller manager 放在 `/driver` 命名空间，避免与 Gazebo 自己的
+`/controller_manager` 冲突；位置命令入口为 `/driver/position_controller/commands`。
+旧 Python bridge 与新 driver 仍可通过同一 vcan 线协议通信，不需要 pybind11 或 Python wrapper。

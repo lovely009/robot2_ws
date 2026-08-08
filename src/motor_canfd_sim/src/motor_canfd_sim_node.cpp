@@ -30,6 +30,7 @@ namespace {
 
 drive::MotorParameterMap parse_driver_parameters(const YAML::Node &node,
                                                  const std::string &context) {
+  // 与真机 hardware interface 使用同一套参数合并规则，保证仿真/真机解释配置一致。
   drive::MotorParameterMap parameters;
   if (!node) {
     return parameters;
@@ -55,6 +56,7 @@ void merge_parameters(drive::MotorParameterMap &target,
 }
 
 drive::DriverConfig load_driver_config_yaml(const std::string &path) {
+  // 模拟器是 ROS 侧工具，可以读取 YAML；纯底层 motor_canfd_drive 仍只接收 DriverConfig。
   if (path.empty()) {
     throw std::invalid_argument("motor_config_file is required");
   }
@@ -177,8 +179,8 @@ public:
     driver_config_ = load_driver_config_yaml(config_file);
     apply_bus_parameter_overrides();
 
-    // Reuse the production driver's validation (registered types, ID ranges,
-    // duplicate mappings, protocol-specific required parameters) without opening CAN.
+    // 复用真机 MotorCanfdDriver 的配置校验（协议注册、ID 范围、重复映射、必需参数）。
+    // 这里只构造对象而不 open()，因此不会因为“检查配置”就占用任何 CAN 接口。
     const drive::MotorCanfdDriver config_validator(driver_config_);
     static_cast<void>(config_validator);
     build_runtime(allow_hardware);
@@ -225,6 +227,8 @@ private:
   }
 
   void apply_bus_parameter_overrides() {
+    // 同一份 YAML 真机可以写 can0/can1；仿真 launch 再通过 bus_override.*
+    // 动态改为 vcan0/vcan1，不复制电机拓扑配置。
     for (auto &bus : driver_config_.buses) {
       const auto parameter_name = "bus_override." + bus.name;
       const auto interface_name =
@@ -240,6 +244,8 @@ private:
     std::unordered_map<std::string, std::size_t> bus_index;
     buses_.reserve(driver_config_.buses.size());
     for (const auto &config : driver_config_.buses) {
+      // 安全保护：模拟器会主动“冒充电机”回复 CAN 帧，默认绝不允许接真实 can*。
+      // 只有明确的 HIL 测试才应显式打开 allow_hardware_interfaces。
       if (!allow_hardware && config.interface_name.rfind("vcan", 0U) != 0U) {
         throw std::runtime_error(
             "refusing to run a motor emulator on '" + config.interface_name +
@@ -260,6 +266,7 @@ private:
   }
 
   void on_joint_states(const sensor_msgs::msg::JointState::SharedPtr message) {
+    // /joint_states 的排列顺序并不保证与 YAML motors 一致，所以按 joint_name 查找。
     for (std::size_t message_index = 0; message_index < message->name.size(); ++message_index) {
       const auto it = joint_to_motor_.find(message->name[message_index]);
       if (it == joint_to_motor_.end()) {
@@ -285,8 +292,8 @@ private:
       return;
     }
 
-    // The current upper-body effort controller uses the same joint order as the
-    // motor map in motor_canfd.yaml. If the robot model changes, update both maps.
+    // 当前半身机器人 effort_controller 的数组顺序与 motor_canfd.yaml 的 motors 顺序一致。
+    // 如果以后修改 Gazebo controller joint 列表，必须同步检查这里的输出顺序。
     std_msgs::msg::Float64MultiArray output;
     output.data.reserve(samples_.size());
     for (const auto &sample : samples_) {
@@ -296,6 +303,7 @@ private:
   }
 
   void drain_can(const Clock::time_point now) {
+    // 每个 SocketCAN 都是非阻塞的：每个控制周期把当前积压帧排空后立即进入动力学计算。
     for (std::size_t bus = 0; bus < buses_.size(); ++bus) {
       drive::CanFrame frame;
       while (buses_[bus].socket->receive(frame)) {
@@ -326,6 +334,8 @@ private:
           continue;
         }
         has_rp = true;
+        // RP 的物理协议规定 ID 1..8 对应广播帧的槽 0..7。
+        // 用 config.id 计算偏移，不依赖 YAML 中电机出现的先后顺序。
         const auto offset = static_cast<std::size_t>(config.id - 1U) * 8U;
         motor_states_[motor].command =
             protocol::unpack_rp_slot(frame.data.data() + offset, 8U);
@@ -363,6 +373,7 @@ private:
     if (!control.run) {
       state.mode = control.mode;
       if (control.set_zero) {
+        // “置零”只改变该模拟电机的内部坐标偏置，不瞬移 Gazebo 关节。
         state.zero_offset = samples_[motor].position;
       }
     }
@@ -381,6 +392,9 @@ private:
                          std::chrono::duration<double>(now - state.last_command).count() <=
                              command_timeout_s_;
       if (config.type == drive::kRpMotorType) {
+        // RP 按 MIT 公式计算输出扭矩：
+        // tau = Kp*(q_des-q) + Kd*(dq_des-dq) + tau_ff。
+        // 超时或失能时 fresh=false，扭矩自动回到 0。
         double torque = 0.0;
         if (fresh) {
           torque = state.command.kp * (state.command.position - sample.position) +
@@ -391,6 +405,7 @@ private:
         continue;
       }
 
+      // 25/30 mm 协议控制量以电流为核心：先根据模式得到 A，再通过 Kt 转成 Nm。
       double current = 0.0;
       if (fresh) {
         const auto relative_position = sample.position - state.zero_offset;
@@ -412,6 +427,7 @@ private:
       state.current_a = clamp_symmetric(current, motor_2530_current_limit_a_);
       const auto torque_constant =
           motor_parameter_as_double(config, "torque_constant_nm_per_amp");
+      // 电机输出轴扭矩 tau = I * Kt；最后再做仿真扭矩上限保护。
       sample.effort = clamp_symmetric(state.current_a * torque_constant,
                                       motor_2530_torque_limit_nm_);
     }
@@ -435,6 +451,8 @@ private:
   void send_motor_2530_reply(const std::size_t motor) {
     const auto &config = driver_config_.motors[motor];
     const auto &state = motor_states_[motor];
+    // 腕部反馈协议的第三个量是“电流 A”。这里沿用 JointState 容器传给 pack 函数，
+    // 真机 driver 收到后会在 Motor2530Protocol 中再用 Kt 换算为统一的 Nm effort。
     const protocol::JointState wire_state{
         samples_[motor].position - state.zero_offset, samples_[motor].velocity,
         state.current_a};

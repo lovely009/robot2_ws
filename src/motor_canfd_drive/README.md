@@ -38,10 +38,10 @@ limits without changing the generic driver.
 The generic send/receive loops, bus management and ROS 2 hardware adapter do not
 need a new `if (type == ...)` branch.
 
-## YAML ownership
+## Configuration boundary
 
-`load_driver_config_yaml()` reads only `buses`, `motors`, and type/per-motor
-driver parameters. ROS-specific timing and command gains are intentionally not
-interpreted here. `yaml-cpp` is the only configuration dependency; the library
-has no `rclcpp`, `hardware_interface`, `pluginlib`, Topic, Action or Service
-dependency.
+This package does not parse ROS parameters or YAML. Callers construct a plain
+`DriverConfig` and pass it to `MotorCanfdDriver`. In this workspace,
+`motor_hardware_interface` converts the ROS-side YAML into that C++ structure.
+The low-level library therefore has no `yaml-cpp`, `rclcpp`,
+`hardware_interface`, `pluginlib`, Topic, Action or Service dependency.

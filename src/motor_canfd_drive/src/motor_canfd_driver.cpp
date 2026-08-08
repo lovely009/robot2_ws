@@ -27,6 +27,8 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
     throw std::invalid_argument("at least one motor must be configured");
   }
 
+  // 第一步：建立“逻辑总线名 -> 运行时下标”。同一个 SocketCAN 接口不能被两个
+  // 逻辑总线重复占用，否则接收帧归属会变得不确定。
   std::unordered_map<std::string, std::size_t> bus_index;
   std::unordered_set<std::string> interfaces;
   buses_.reserve(config_.buses.size());
@@ -46,6 +48,8 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
     buses_.push_back(std::move(runtime));
   }
 
+  // 第二步：逐台验证电机，并按 (bus, type) 分组。
+  // 这里完全不关心某条机械臂有几个关节，也不假设某种电机位于数组的固定区间。
   std::unordered_set<std::string> motor_names;
   std::unordered_set<std::string> joint_names;
   std::vector<std::map<std::string, MotorIndexList>> grouped(buses_.size());
@@ -75,6 +79,8 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
     grouped[bus_it->second][motor.type].push_back(index);
   }
 
+  // 第三步：为每个协议组创建策略对象，并把协议特有的 ID/数量/参数校验
+  // 交还给对应 MotorProtocol。通用 driver 因此无需写 type 判断分支。
   for (std::size_t bus = 0; bus < buses_.size(); ++bus) {
     for (auto &entry : grouped[bus]) {
       ProtocolGroup group;
@@ -89,6 +95,8 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
 
 void MotorCanfdDriver::open() {
   try {
+    // 每条逻辑总线只打开一个 SocketCAN socket。任何一条总线打开失败时，
+    // catch 会统一 close，避免留下“部分总线已打开”的半初始化状态。
     for (auto &bus : buses_) {
       if (!bus.socket) {
         bus.socket = std::make_unique<SocketCan>(bus.config.interface_name);
@@ -122,6 +130,8 @@ bool MotorCanfdDriver::set_enabled(const bool enabled) {
     return false;
   }
   bool ok = true;
+  // 使能帧由协议策略生成：RP 可能是一条广播帧，25/30 mm 则可能每台一帧。
+  // 通用层只负责把策略返回的帧发送到正确的总线。
   for (const auto &bus : buses_) {
     for (const auto &group : bus.groups) {
       const auto frames = group.protocol->make_enable_frames(
@@ -140,6 +150,8 @@ bool MotorCanfdDriver::write_commands(
     return false;
   }
   bool ok = true;
+  // commands 的下标始终对应 DriverConfig::motors 的全局下标；协议策略通过
+  // motor_indices 只取本组电机，再自行决定广播还是逐节点组帧。
   for (const auto &bus : buses_) {
     for (const auto &group : bus.groups) {
       const auto frames = group.protocol->make_command_frames(
@@ -163,6 +175,8 @@ std::size_t MotorCanfdDriver::read_feedback(
   }
 
   std::size_t count = 0U;
+  // SocketCAN 使用非阻塞读取：把当前已经到达的帧一次排空。
+  // 每帧按同一总线上的协议组依次尝试解码；首个识别成功的策略负责该帧。
   for (const auto &bus : buses_) {
     CanFrame frame;
     while (bus.socket->receive(frame)) {

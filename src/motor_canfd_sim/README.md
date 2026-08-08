@@ -3,7 +3,9 @@
 C++ motor-side CAN-FD simulator for the built-in `rp` and `motor_2530` families.
 It reads the same YAML schema as `motor_hardware_interface`, then reuses
 `motor_canfd_drive::DriverConfig` validation, SocketCAN transport and wire
-codecs. The original Python Gazebo/CAN simulation remains untouched.
+codecs. The standalone legacy `can_motor_sim` package has been removed; the
+Python Gazebo/CAN bridge in `upper_body_canfd_gazebo` remains available for the
+original simulation path.
 
 The simulator has no compiled-in `2 arms x 7 joints` topology. It builds buses
 and motor state vectors from the same `motor_canfd.yaml` used by the physical

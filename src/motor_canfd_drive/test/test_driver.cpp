@@ -13,6 +13,8 @@ namespace drive = motor_canfd_drive;
 namespace {
 
 drive::DriverConfig make_large_config() {
+  // 回归用例故意配置 13 台电机（8 RP + 5 个 25/30 mm），防止未来代码再次
+  // 把“当前机械臂 7 关节”误写成 MotorCanfdDriver 的固定容量。
   drive::DriverConfig config;
   config.buses.push_back({"main_bus", "vcan0"});
   for (unsigned id = 1U; id <= 8U; ++id) {
@@ -66,6 +68,8 @@ TEST(MotorCanfdDriver, RejectsDuplicateJointMapping) {
 }
 
 TEST(MotorCanfdDriver, CustomMotorTypeCanBeRegisteredWithoutChangingCoreDriver) {
+  // 用一个完全虚构的 future_type 证明：扩展新电机家族只需注册协议策略，
+  // 不需要给 MotorCanfdDriver 增加新的 type 分支。
   drive::DriverConfig config;
   config.buses.push_back({"aux", "vcan9"});
   config.motors.push_back({"future_motor", "future_joint", "aux", "future_type",

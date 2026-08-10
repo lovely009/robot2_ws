@@ -57,7 +57,7 @@ source install/setup.bash
 ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
-无图形环境可添加 `gui:=false`；渲染兼容问题可通过 `render_engine:=ogre` 覆盖。
+无图形环境可添加 `gui:=false`；默认渲染引擎为 OGRE1，若需切回 OGRE2 可传 `render_engine:=ogre2`。
 
 ## 参考动作
 

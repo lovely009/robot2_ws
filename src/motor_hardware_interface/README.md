@@ -1,67 +1,83 @@
 # motor_hardware_interface
 
-`motor_hardware_interface` 是 ROS 2 Humble `ros2_control` 到 `motor_canfd_drive` 的 C++ 适配层。
+将 `motor_canfd_drive` 接入 ROS 2 Humble `ros2_control` 的 C++ 适配包。
 
-插件实现标准 `hardware_interface::SystemInterface`。Python ROS 2 节点仍然可以通过 controller 的 Topic / Action / Service 正常控制机器人，不需要为底层驱动额外制作 `pybind11` 或 Python wrapper。
+## 职责
 
-## 分层边界
+- 实现 `hardware_interface::SystemInterface` lifecycle；
+- 导出 joint position command，以及 position、velocity、effort state interface；
+- 解析并校验 `motor_canfd.yaml`；
+- 按 joint 名称建立 ROS 关节与电机索引映射；
+- 管理首次反馈、运行期反馈超时和安全失能；
+- 将配置转换为纯 C++ `motor_canfd_drive::DriverConfig`。
 
-```text
-controller_manager / ros2_control
-              |
-              v
-motor_hardware_interface
-  - lifecycle 生命周期
-  - ROS joint 状态/命令接口
-  - YAML 参数与超时
-  - joint_name <-> motor_index 映射
-              |
-              v
-motor_canfd_drive::MotorCanfdDriver
-  - 按 bus/type 动态分组
-  - 协议编解码
-  - SocketCAN
-```
+本包不实现线协议或 SocketCAN 帧编解码，也不限定机械臂数量和每臂关节数。
 
-这里没有固定“几条机械臂”或“每条机械臂几个关节”。插件会检查 `<ros2_control>` 中声明的每个 joint 是否恰好映射到一个 YAML 电机，并且按 **joint 名称** 建立映射，而不是依赖数组下标或“前 4 个是 RP、后 3 个是腕部”之类的固定顺序。
+## 配置
 
-## 配置文件
-
-`config/motor_canfd.yaml` 的主要结构：
-
-- `buses`：任意数量的逻辑总线名和 SocketCAN 接口；
-- `motor_types`：某一电机类型共享的默认控制增益与驱动参数；
-- `motors`：任意数量的电机项，每项指定 `joint`、`bus`、`type`、`id`；
-- `timing`：首次反馈等待时间和运行时反馈超时。
-
-示例：
+默认配置为 `config/motor_canfd.yaml`，结构如下：
 
 ```yaml
 motor_hardware:
+  timing:
+    feedback_timeout_s: 0.10
+    initial_feedback_wait_s: 0.10
   buses:
     left_arm: {interface: can0}
   motor_types:
     rp:
       command: {kp: 30.0, kd: 1.0}
   motors:
-    shoulder_yaw:
+    left_shoulder_yaw:
       joint: left_shoulder_yaw_joint
       bus: left_arm
       type: rp
       id: 1
 ```
 
-同一种电机可以在 `motor_types` 下设置公共默认值，再在某个具体 motor 的 `command` 或 `parameters` 中覆盖。覆盖顺序是“类型默认值 → 单电机值”，因此只有特殊关节需要重复写参数。
+| 节点 | 含义 |
+|---|---|
+| `timing` | 首次反馈等待和运行期反馈超时 |
+| `buses` | 逻辑总线到 SocketCAN 接口的映射 |
+| `motor_types` | 同类型电机的命令和协议参数默认值 |
+| `motors` | motor、joint、bus、type 与 ID 的拓扑映射 |
 
-机器人自己的 launch 还可以通过 `bus_override.<逻辑总线名>` 覆盖 SocketCAN 接口。例如 YAML 真机写 `can0`，仿真启动时可以映射成 `vcan0`，无需维护第二份电机拓扑。
+单电机参数覆盖同类型默认值。Launch 可用 `bus_override.<逻辑总线名>` 覆盖接口，仿真因此能够复用真机拓扑而映射到 vcan。
 
-`config/motor_canfd.yaml` 是电机拓扑的单一配置源。解析入口是公开 API
-`motor_hardware_interface::load_driver_config(path)`（`motor_config.hpp`），
-它产出纯 C++ `DriverConfig` 后交给 `motor_canfd_drive`；`motor_canfd_sim`
-通过同一 API 复用解析，不再自带 YAML 解析副本。
+公开解析接口为：
 
-## 激活安全逻辑
+```cpp
+motor_canfd_drive::DriverConfig load_driver_config(const std::string & path);
+```
 
-硬件插件激活时不会假定机器人当前位于零位。它会先保持失能，用零增益命令读取每个关节的真实反馈；只有所有关节都收到有效位置后，才把“当前姿态”作为初始 position target 并统一使能。
+`motor_canfd_sim` 也调用该接口，避免重复实现 YAML 解析。
 
-运行期间 `read()` 会持续检查每个 joint 的反馈时间戳；超过 `feedback_timeout_s` 会向 `controller_manager` 返回错误。停用插件时先发送失能，再关闭 SocketCAN。
+## Lifecycle 与安全行为
+
+激活流程：
+
+1. 打开配置中的 SocketCAN 接口。
+2. 保持电机失能，以零增益命令等待全部关节的有效反馈。
+3. 将实测位置设为初始 position target。
+4. 全部关节就绪后统一使能。
+
+运行时 `read()` 检查每个 joint 的反馈时间戳；超过 `feedback_timeout_s` 时向
+`controller_manager` 返回错误。停用流程先发送失能命令，再关闭总线。
+
+> 安全逻辑不能替代硬件急停、机械限位和真机标定。
+
+## 插件
+
+插件描述文件为 `hardware_plugins.xml`。机器人 Xacro 通过 `motor_config_file` 和
+`bus_override.*` 参数加载插件；上层应用只使用标准 ros2_control controller 接口。
+
+## 构建与测试
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-up-to motor_hardware_interface
+colcon test --packages-select motor_hardware_interface
+colcon test-result --verbose
+```
+
+`test/test_motor_config.cpp` 使用 `test/fixtures/` 中的配置覆盖正常解析和错误配置校验。

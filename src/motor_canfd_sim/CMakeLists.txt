@@ -17,4 +17,9 @@ ament_target_dependencies(motor_canfd_sim_node rclcpp sensor_msgs std_msgs)
 install(TARGETS motor_canfd_sim_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_gazebo_cpp_sim_launch test/test_gazebo_cpp_sim_launch.py)
+endif()
+
 ament_package()

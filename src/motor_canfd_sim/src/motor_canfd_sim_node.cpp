@@ -13,12 +13,11 @@
 #include <utility>
 #include <vector>
 
-#include <yaml-cpp/yaml.h>
-
 #include "motor_canfd_drive/motor_canfd_driver.hpp"
 #include "motor_canfd_drive/motor_protocol.hpp"
 #include "motor_canfd_drive/protocol.hpp"
 #include "motor_canfd_drive/socketcan.hpp"
+#include "motor_hardware_interface/motor_config.hpp"
 
 namespace motor_canfd_sim {
 
@@ -27,91 +26,6 @@ namespace protocol = motor_canfd_drive::protocol;
 using Clock = std::chrono::steady_clock;
 
 namespace {
-
-drive::MotorParameterMap parse_driver_parameters(const YAML::Node &node,
-                                                 const std::string &context) {
-  // 与真机 hardware interface 使用同一套参数合并规则，保证仿真/真机解释配置一致。
-  drive::MotorParameterMap parameters;
-  if (!node) {
-    return parameters;
-  }
-  if (!node.IsMap()) {
-    throw std::runtime_error(context + " parameters must be a YAML map");
-  }
-  for (const auto &entry : node) {
-    if (!entry.first.IsScalar() || !entry.second.IsScalar()) {
-      throw std::runtime_error(context +
-                               " parameters must contain scalar key/value pairs");
-    }
-    parameters[entry.first.Scalar()] = entry.second.Scalar();
-  }
-  return parameters;
-}
-
-void merge_parameters(drive::MotorParameterMap &target,
-                      const drive::MotorParameterMap &overrides) {
-  for (const auto &entry : overrides) {
-    target[entry.first] = entry.second;
-  }
-}
-
-drive::DriverConfig load_driver_config_yaml(const std::string &path) {
-  // 模拟器是 ROS 侧工具，可以读取 YAML；纯底层 motor_canfd_drive 仍只接收 DriverConfig。
-  if (path.empty()) {
-    throw std::invalid_argument("motor_config_file is required");
-  }
-  const auto document = YAML::LoadFile(path);
-  const auto root = document["motor_hardware"];
-  if (!root || !root.IsMap()) {
-    throw std::runtime_error("YAML root 'motor_hardware' is required");
-  }
-
-  drive::DriverConfig config;
-  const auto buses = root["buses"];
-  if (!buses || !buses.IsMap() || buses.size() == 0U) {
-    throw std::runtime_error("motor_hardware.buses must be a non-empty map");
-  }
-  for (const auto &entry : buses) {
-    config.buses.push_back({entry.first.as<std::string>(),
-                            entry.second["interface"].as<std::string>()});
-  }
-
-  std::unordered_map<std::string, drive::MotorParameterMap> type_parameters;
-  const auto motor_types = root["motor_types"];
-  if (motor_types) {
-    if (!motor_types.IsMap()) {
-      throw std::runtime_error("motor_hardware.motor_types must be a map");
-    }
-    for (const auto &entry : motor_types) {
-      const auto type = entry.first.as<std::string>();
-      type_parameters[type] = parse_driver_parameters(
-          entry.second["parameters"], "motor type '" + type + "'");
-    }
-  }
-
-  const auto motors = root["motors"];
-  if (!motors || !motors.IsMap() || motors.size() == 0U) {
-    throw std::runtime_error("motor_hardware.motors must be a non-empty map");
-  }
-  for (const auto &entry : motors) {
-    drive::MotorConfig motor;
-    motor.name = entry.first.as<std::string>();
-    const auto node = entry.second;
-    motor.joint_name = node["joint"].as<std::string>();
-    motor.bus = node["bus"].as<std::string>();
-    motor.type = node["type"].as<std::string>();
-    motor.id = node["id"].as<unsigned>();
-    const auto defaults = type_parameters.find(motor.type);
-    if (defaults != type_parameters.end()) {
-      motor.parameters = defaults->second;
-    }
-    merge_parameters(motor.parameters, parse_driver_parameters(
-                                           node["parameters"],
-                                           "motor '" + motor.name + "'"));
-    config.motors.push_back(std::move(motor));
-  }
-  return config;
-}
 
 double clamp_symmetric(const double value, const double limit) {
   return std::clamp(value, -limit, limit);
@@ -176,7 +90,8 @@ public:
         declare_parameter<double>("motor_2530_velocity_mode_gain_a_per_rad_s", 0.45);
 
     validate_scalar_parameters(control_rate_hz, status_rate_hz);
-    driver_config_ = load_driver_config_yaml(config_file);
+    // 设备清单由调用方决定：本节点只接收配置路径，解析复用硬件接口的公开 API。
+    driver_config_ = motor_hardware_interface::load_driver_config(config_file);
     apply_bus_parameter_overrides();
 
     // 复用真机 MotorCanfdDriver 的配置校验（协议注册、ID 范围、重复映射、必需参数）。

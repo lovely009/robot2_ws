@@ -1,67 +1,82 @@
 # motor_canfd_sim
 
-`motor_canfd_sim` 是电机侧 C++ CAN-FD 模拟器，目前内置 `rp` 和 `motor_2530` 两种电机模型。它通过 `motor_hardware_interface` 的公开解析 API 复用同一份 `motor_canfd.yaml`（挂多少、挂哪些电机由上层决定），并复用 `motor_canfd_drive::DriverConfig` 的配置校验、SocketCAN 传输和协议编解码。
+C++ CAN-FD 电机侧模拟器。它通过 vcan 接收真实驱动命令、驱动 Gazebo effort controller，并将 Gazebo joint state 编码为电机反馈帧。
 
-本包是仓库唯一的电机仿真后端。Python Gazebo/CAN 桥和直接向 vcan 发送动作命令的路径已经移除，避免仿真绕过真实驱动架构或维护两套电机模型。
+## 定位
 
-## 为什么它也是动态配置
-
-模拟器内部没有写死“2 条机械臂 × 每臂 7 关节”。总线、电机数量以及 joint 映射都来自真机同一份 `motor_canfd.yaml`。这样新增关节或调整 ID 后，真机驱动和电机侧模拟器不会维护两份容易漂移的拓扑。
-
-仿真时通过 ROS 参数 `bus_override.<逻辑总线名>` 把 YAML 中的物理 CAN 接口安全地重定向到 vcan，例如：
-
-```yaml
-motor_canfd_sim:
-  ros__parameters:
-    bus_override.left_arm: vcan0
-    bus_override.right_arm: vcan1
-```
-
-默认情况下，模拟器拒绝打开名称不是 `vcan` 开头的接口。原因是这个进程会“扮演真实电机”并主动发送反馈帧；如果误连到真实 `can0/can1`，可能与真实电机同时发送相同协议的状态帧。
-
-只有明确进行 HIL（Hardware-in-the-Loop，硬件在环）测试时，才允许显式设置 `allow_hardware_interfaces:=true`。
-
-## 全回环数据流
+本包是仓库唯一支持的电机仿真后端，当前实现 `rp` 和 `motor_2530` 两类虚拟电机。
 
 ```text
-ros2_control position controller
-          -> motor_hardware_interface
-          -> MotorCanfdDriver
-          -> vcan
-          -> motor_canfd_sim（模拟电机）
-          -> Gazebo effort controller
-          -> /joint_states
-          -> 模拟反馈 CAN-FD 帧
-          -> MotorCanfdDriver
+MotorCanfdDriver -> vcan -> motor_canfd_sim
+                                  |
+                     effort command / joint state
+                                  |
+                               Gazebo
 ```
 
-启动完整回环：
+模拟器不预设“两臂 × 7 关节”。调用方必须提供电机拓扑文件；模拟器通过
+`motor_hardware_interface::load_driver_config()` 与真机复用同一份配置。
+
+## 安全限制
+
+模拟器会主动发送电机反馈帧，默认只允许打开名称以 `vcan` 开头的接口，防止与真实电机产生重复 CAN ID。
+
+仅在明确执行 HIL 测试时，才可设置：
+
+```text
+allow_hardware_interfaces:=true
+```
+
+启用该参数前必须完成总线隔离、CAN ID 冲突检查和急停验证。
+
+## 启动
+
+完整 Gazebo 回环由顶层集成包启动：
 
 ```bash
 ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
-也可以只用 C++ 模拟器替换旧 Gazebo/CAN 桥接器：
+只启动 Gazebo 模型和电机模拟器，不启动驱动侧 controller：
 
 ```bash
 ros2 launch upper_body_canfd_gazebo model_sim.launch.py
+```
 
-只启动模拟器（虚拟 CAN 电机设备），必须显式指定电机拓扑配置路径：
+只启动虚拟 CAN 电机设备：
 
 ```bash
 ros2 launch motor_canfd_sim motor_canfd_sim.launch.py \
-  motor_config_file:=$(ros2 pkg prefix motor_hardware_interface --share)/config/motor_canfd.yaml
-```
+  motor_config_file:=$(ros2 pkg prefix motor_hardware_interface --share)/config/motor_canfd.yaml \
+  left_interface:=vcan0 right_interface:=vcan1
 ```
 
-该入口会直接读取真机驱动使用的
-`motor_hardware_interface/config/motor_canfd.yaml`，因此电机 ID、关节和逻辑总线映射与真机保持一致；启动文件不会修改这份 YAML，而是通过
-`bus_override.left_arm` 和 `bus_override_right_arm` 将其中的物理总线分别映射到
-`left_interface`/`right_interface`。两个 launch 参数默认是 `vcan0`/`vcan1`，也可以在启动命令中显式覆盖。
+`motor_config_file` 在独立 launch 中是必填参数。`left_interface` 和
+`right_interface` 默认分别为 `vcan0`、`vcan1`。
 
-动作和其他上层应用应向 `/driver/position_controller/commands` 发布 ROS 2 position command，不应直接占用 vcan。仓库提供的参考动作入口为：
+## 参数
+
+运行参数默认值位于 `config/sim.yaml`。主要参数包括：
+
+- `motor_config_file`：电机拓扑配置路径；
+- `bus_override.<bus>`：逻辑总线到 vcan 的覆盖；
+- `allow_hardware_interfaces`：是否允许非 vcan 接口；
+- `control_rate_hz`、`status_rate_hz`、`command_timeout_s`：循环频率与命令超时；
+- `rp_torque_limit_nm`、`motor_2530_*`：仿真模型限幅与简化模型参数。
+
+上层控制命令必须发送到 ros2_control position controller，不应由应用直接占用 vcan。
+
+## 已知约束
+
+Gazebo effort controller 的数组顺序必须与 `motor_canfd.yaml` 的 motor 顺序一致。修改机器人 joint 列表、controller 配置或电机拓扑时，应同步检查三者并运行 launch 静态测试。
+
+## 构建与测试
 
 ```bash
-ros2 run upper_body_canfd_gazebo ros_actions
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-up-to motor_canfd_sim
+colcon test --packages-select motor_canfd_sim
+colcon test-result --verbose
 ```
-当前半身机器人 Gazebo effort controller 的输出数组顺序仍与 `motor_canfd.yaml` 中的 motor 顺序一致；如果以后修改 Gazebo 机器人本身的 controller joint 列表，必须同步检查这两个顺序。这个限制属于当前 Gazebo 控制器接口，不是 `MotorCanfdDriver` 的关节数量限制。
+
+`test/test_motor_canfd_sim_launch.py` 对独立 launch 的参数和安全默认值进行静态检查，不启动 Gazebo 或硬件。

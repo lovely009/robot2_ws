@@ -1,0 +1,13 @@
+<library path="upper_body_canfd_hardware">
+  <class
+    name="upper_body_canfd_hardware/CanFdMotorSystem"
+    type="upper_body_canfd_hardware::CanFdMotorSystem"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ros2_control system hardware for upper-body CAN-FD motors (YiYou RP MIT
+      broadcast joints + 25/30 mm wrist drives). One instance owns one CAN-FD
+      bus and maps joint effort commands to MIT frames and motor feedback to
+      position/velocity/effort state interfaces.
+    </description>
+  </class>
+</library>

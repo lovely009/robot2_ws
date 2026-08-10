@@ -9,13 +9,15 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
 
-add_library(${PROJECT_NAME} SHARED src/canfd_system.cpp)
+add_library(${PROJECT_NAME} SHARED
+  src/canfd_system.cpp
+  src/motor_config.cpp)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_link_libraries(${PROJECT_NAME} motor_canfd_drive yaml-cpp)
+target_link_libraries(${PROJECT_NAME} motor_canfd_drive::motor_canfd_drive yaml-cpp)
 ament_target_dependencies(${PROJECT_NAME}
   hardware_interface pluginlib rclcpp rclcpp_lifecycle)
 
@@ -32,4 +34,13 @@ install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(hardware_interface motor_canfd_drive pluginlib rclcpp rclcpp_lifecycle)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_motor_config test/test_motor_config.cpp)
+  target_compile_definitions(test_motor_config PRIVATE
+    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
+  target_link_libraries(test_motor_config ${PROJECT_NAME})
+endif()
+
 ament_package()

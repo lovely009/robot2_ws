@@ -19,7 +19,7 @@ ROS 2 position command
   -> motor_canfd_drive
 ```
 
-`launch/sim.launch.py` 只负责 Gazebo 世界、机器人模型、`joint_state_broadcaster`、`effort_controller` 和 `/clock`，由 `motor_canfd_sim/launch/driver_loopback.launch.py` 作为基础 launch 引入。
+`launch/gazebo.launch.py` 只负责 Gazebo 世界、机器人模型、`joint_state_broadcaster`、`effort_controller` 和 `/clock`；`launch/model_sim.launch.py` 在其上叠加电机模拟器；`launch/driver_loopback.launch.py` 再叠加 `/driver` ros2_control，构成完整回环。
 
 ## 机器人结构
 
@@ -74,7 +74,7 @@ bash scripts/setup_vcan.sh
 cd ~/robot_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 launch motor_canfd_sim driver_loopback.launch.py
+ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
 仿真包含两个 controller manager：Gazebo 的 `/controller_manager` 接收 effort；驱动侧 `/driver/controller_manager` 加载真实 `motor_hardware_interface` 并接收 position command。
@@ -127,12 +127,14 @@ colcon test-result --verbose
 ## 主要文件
 
 ```text
-launch/sim.launch.py                 Gazebo 基础仿真
+launch/gazebo.launch.py              Gazebo 基础仿真（模型+世界+effort）
+launch/model_sim.launch.py           Gazebo + C++ 电机模拟器（无驱动控制器）
+launch/driver_loopback.launch.py     完整回环（+ /driver ros2_control）
 launch/hardware.launch.py            真机 ros2_control bring-up
 urdf/upper_body.urdf.xacro           14-DoF 模型与硬件后端选择
 worlds/upper_body_world.sdf          Gazebo Fortress 世界
 config/controllers.yaml              Gazebo effort controller
-config/hardware_controllers.yaml     真机 position controller
+config/driver_controllers.yaml       真机与 /driver 回环共用的 position controller
 upper_body_canfd_gazebo/motion_library.py
 upper_body_canfd_gazebo/ros_action_player.py
 scripts/setup_vcan.sh

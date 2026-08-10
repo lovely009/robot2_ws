@@ -1,6 +1,6 @@
 # motor_canfd_sim
 
-`motor_canfd_sim` 是电机侧 C++ CAN-FD 模拟器，目前内置 `rp` 和 `motor_2530` 两种电机模型。它读取与 `motor_hardware_interface` 相同的 YAML 结构，并复用 `motor_canfd_drive::DriverConfig` 的配置校验、SocketCAN 传输和协议编解码。
+`motor_canfd_sim` 是电机侧 C++ CAN-FD 模拟器，目前内置 `rp` 和 `motor_2530` 两种电机模型。它通过 `motor_hardware_interface` 的公开解析 API 复用同一份 `motor_canfd.yaml`（挂多少、挂哪些电机由上层决定），并复用 `motor_canfd_drive::DriverConfig` 的配置校验、SocketCAN 传输和协议编解码。
 
 本包是仓库唯一的电机仿真后端。Python Gazebo/CAN 桥和直接向 vcan 发送动作命令的路径已经移除，避免仿真绕过真实驱动架构或维护两套电机模型。
 
@@ -38,13 +38,20 @@ ros2_control position controller
 启动完整回环：
 
 ```bash
-ros2 launch motor_canfd_sim driver_loopback.launch.py
+ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
 也可以只用 C++ 模拟器替换旧 Gazebo/CAN 桥接器：
 
 ```bash
-ros2 launch motor_canfd_sim gazebo_cpp_sim.launch.py
+ros2 launch upper_body_canfd_gazebo model_sim.launch.py
+
+只启动模拟器（虚拟 CAN 电机设备），必须显式指定电机拓扑配置路径：
+
+```bash
+ros2 launch motor_canfd_sim motor_canfd_sim.launch.py \
+  motor_config_file:=$(ros2 pkg prefix motor_hardware_interface --share)/config/motor_canfd.yaml
+```
 ```
 
 该入口会直接读取真机驱动使用的

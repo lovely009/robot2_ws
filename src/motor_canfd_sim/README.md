@@ -41,4 +41,15 @@ ros2_control position controller
 ros2 launch motor_canfd_sim driver_loopback.launch.py
 ```
 
+也可以只用 C++ 模拟器替换旧 Gazebo/CAN 桥接器：
+
+```bash
+ros2 launch motor_canfd_sim gazebo_cpp_sim.launch.py
+```
+
+该入口会直接读取真机驱动使用的
+`motor_hardware_interface/config/motor_canfd.yaml`，因此电机 ID、关节和逻辑总线映射与真机保持一致；启动文件不会修改这份 YAML，而是通过
+`bus_override.left_arm` 和 `bus_override.right_arm` 将其中的物理总线分别映射到
+`left_interface`/`right_interface`。两个 launch 参数默认是 `vcan0`/`vcan1`，也可以在启动命令中显式覆盖。
+
 当前半身机器人 Gazebo effort controller 的输出数组顺序仍与 `motor_canfd.yaml` 中的 motor 顺序一致；如果以后修改 Gazebo 机器人本身的 controller joint 列表，必须同步检查这两个顺序。这个限制属于当前 Gazebo 控制器接口，不是 `MotorCanfdDriver` 的关节数量限制。

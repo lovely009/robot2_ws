@@ -14,6 +14,11 @@ def generate_launch_description() -> LaunchDescription:
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
 
+    # 与真机驱动共用电机拓扑，只在启动时把物理 CAN 总线重定向到 vcan。
+    motor_config = PathJoinSubstitution(
+        [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+    )
+
     old_model_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
@@ -36,7 +41,11 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         parameters=[
             PathJoinSubstitution([FindPackageShare("motor_canfd_sim"), "config", "sim.yaml"]),
-            {"left_interface": left_interface, "right_interface": right_interface},
+            {
+                "motor_config_file": motor_config,
+                "bus_override.left_arm": left_interface,
+                "bus_override.right_arm": right_interface,
+            },
         ],
     )
 

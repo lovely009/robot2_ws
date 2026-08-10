@@ -14,7 +14,7 @@ MotorCanfdDriver -> vcan -> motor_canfd_sim
                                Gazebo
 ```
 
-模拟器不预设“两臂 × 7 关节”。调用方必须提供电机拓扑文件；模拟器通过
+模拟器不预设电机拓扑。调用方必须提供电机拓扑文件；模拟器通过
 `motor_hardware_interface::load_driver_config()` 与真机复用同一份配置。
 
 ## 安全限制

@@ -114,7 +114,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("left_interface", default_value="vcan0"),
             DeclareLaunchArgument("right_interface", default_value="vcan1"),
             DeclareLaunchArgument("gui", default_value="true"),
-            DeclareLaunchArgument("render_engine", default_value=""),
+            DeclareLaunchArgument("render_engine", default_value="ogre"),
             DeclareLaunchArgument(
                 "motor_config_file",
                 default_value=PathJoinSubstitution(

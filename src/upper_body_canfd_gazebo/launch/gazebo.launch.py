@@ -47,8 +47,8 @@ def generate_launch_description() -> LaunchDescription:
             "gz_args": [
                 # Server-only mode when gui:=false (e.g. headless containers).
                 PythonExpression(["'-s ' if '", LaunchConfiguration("gui"), "'.lower() == 'false' else ''"]),
-                # Optional render engine override, e.g. render_engine:=ogre for
-                # environments where the OGRE2 backend fails (WSLg + Mesa d3d12).
+                # OGRE1 为默认渲染引擎，规避 OGRE2 在 WSLg + Mesa d3d12
+                # 等环境下的渲染崩溃；需要时可显式覆盖为 ogre2。
                 PythonExpression(
                     [
                         "'--render-engine ' + '",
@@ -108,8 +108,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument(
                 "render_engine",
-                default_value="",
-                description="Gazebo rendering engine (e.g. ogre, ogre2); empty keeps the default",
+                default_value="ogre",
+                description="Gazebo rendering engine (ogre, ogre2)",
             ),
             gazebo,
             robot_state_publisher,

@@ -1,8 +1,7 @@
-"""Launch Gazebo Fortress, spawn the upper body and start the CAN-FD emulator."""
+"""启动 Gazebo Fortress、机器人模型和 Gazebo 侧 effort controller。"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
-from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
@@ -22,10 +21,6 @@ def generate_launch_description() -> LaunchDescription:
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", "upper_body.urdf.xacro"])
     controller_file = PathJoinSubstitution([pkg_share, "config", "controllers.yaml"])
     world_file = PathJoinSubstitution([pkg_share, "worlds", "upper_body_world.sdf"])
-
-    left_interface = LaunchConfiguration("left_interface")
-    right_interface = LaunchConfiguration("right_interface")
-    start_bridge = LaunchConfiguration("start_bridge")
 
     robot_description = ParameterValue(
         Command(
@@ -101,29 +96,11 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
     )
 
-    can_bridge = Node(
-        package="upper_body_canfd_gazebo",
-        executable="canfd_gazebo_bridge",
-        name="canfd_gazebo_bridge",
-        output="screen",
-        condition=IfCondition(start_bridge),
-        parameters=[
-            {
-                "left_interface": left_interface,
-                "right_interface": right_interface,
-                "use_sim_time": True,
-            }
-        ],
-    )
-
     # Humble/Fortress startup is event-driven instead of relying on fixed delays:
-    # create model -> joint state broadcaster -> effort controller -> CAN bridge.
+    # create model -> joint state broadcaster -> effort controller.
     # The controller spawners wait for /controller_manager when necessary.
     return LaunchDescription(
         [
-            DeclareLaunchArgument("left_interface", default_value="vcan0"),
-            DeclareLaunchArgument("right_interface", default_value="vcan1"),
-            DeclareLaunchArgument("start_bridge", default_value="true"),
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument(
                 "render_engine",
@@ -143,12 +120,6 @@ def generate_launch_description() -> LaunchDescription:
                 OnProcessExit(
                     target_action=joint_state_spawner,
                     on_exit=[effort_spawner],
-                )
-            ),
-            RegisterEventHandler(
-                OnProcessExit(
-                    target_action=effort_spawner,
-                    on_exit=[can_bridge],
                 )
             ),
             # Event handlers are registered before create starts, so even a fast

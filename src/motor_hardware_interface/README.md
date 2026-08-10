@@ -55,6 +55,11 @@ motor_hardware:
 
 机器人自己的 launch 还可以通过 `bus_override.<逻辑总线名>` 覆盖 SocketCAN 接口。例如 YAML 真机写 `can0`，仿真启动时可以映射成 `vcan0`，无需维护第二份电机拓扑。
 
+`config/motor_canfd.yaml` 是电机拓扑的单一配置源。解析入口是公开 API
+`motor_hardware_interface::load_driver_config(path)`（`motor_config.hpp`），
+它产出纯 C++ `DriverConfig` 后交给 `motor_canfd_drive`；`motor_canfd_sim`
+通过同一 API 复用解析，不再自带 YAML 解析副本。
+
 ## 激活安全逻辑
 
 硬件插件激活时不会假定机器人当前位于零位。它会先保持失能，用零增益命令读取每个关节的真实反馈；只有所有关节都收到有效位置后，才把“当前姿态”作为初始 position target 并统一使能。

@@ -1,0 +1,56 @@
+# 真机与 /driver 回环共用同一套 position 控制器配置，区别只有命名空间：
+# - 真机：ros2_control_node 在根命名空间运行 → 匹配 controller_manager 键；
+# - 回环：ros2_control_node 在 /driver 命名空间运行 → 匹配 /driver/* 键。
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+/driver/controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+position_controller:
+  ros__parameters:
+    joints:
+      - left_shoulder_yaw_joint
+      - left_shoulder_roll_joint
+      - left_shoulder_pitch_joint
+      - left_elbow_pitch_joint
+      - left_wrist_yaw_joint
+      - left_wrist_pitch_joint
+      - left_wrist_roll_joint
+      - right_shoulder_yaw_joint
+      - right_shoulder_roll_joint
+      - right_shoulder_pitch_joint
+      - right_elbow_pitch_joint
+      - right_wrist_yaw_joint
+      - right_wrist_pitch_joint
+      - right_wrist_roll_joint
+    interface_name: position
+
+/driver/position_controller:
+  ros__parameters:
+    joints:
+      - left_shoulder_yaw_joint
+      - left_shoulder_roll_joint
+      - left_shoulder_pitch_joint
+      - left_elbow_pitch_joint
+      - left_wrist_yaw_joint
+      - left_wrist_pitch_joint
+      - left_wrist_roll_joint
+      - right_shoulder_yaw_joint
+      - right_shoulder_roll_joint
+      - right_shoulder_pitch_joint
+      - right_elbow_pitch_joint
+      - right_wrist_yaw_joint
+      - right_wrist_pitch_joint
+      - right_wrist_roll_joint
+    interface_name: position

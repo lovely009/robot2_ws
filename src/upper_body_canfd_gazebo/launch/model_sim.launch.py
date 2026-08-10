@@ -1,4 +1,7 @@
-"""Run the existing Fortress model with the new C++ CAN-FD motor bridge."""
+"""Gazebo 模型 + C++ 电机模拟器，不含 ros2_control 驱动控制器。
+
+供模型侧开发/测试使用；完整回环请用 driver_loopback.launch.py。
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -13,36 +16,32 @@ def generate_launch_description() -> LaunchDescription:
     right_interface = LaunchConfiguration("right_interface")
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
+    motor_config_file = LaunchConfiguration("motor_config_file")
 
-    # 与真机驱动共用电机拓扑，只在启动时把物理 CAN 总线重定向到 vcan。
-    motor_config = PathJoinSubstitution(
-        [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
-    )
-
-    old_model_launch = IncludeLaunchDescription(
+    gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
-                [FindPackageShare("upper_body_canfd_gazebo"), "launch", "sim.launch.py"]
+                [FindPackageShare("upper_body_canfd_gazebo"), "launch", "gazebo.launch.py"]
             )
         ),
         launch_arguments={
-            "left_interface": left_interface,
-            "right_interface": right_interface,
-            "start_bridge": "false",
             "gui": gui,
             "render_engine": render_engine,
         }.items(),
     )
 
-    cpp_bridge = Node(
+    # 模拟器只接收配置路径；挂哪些电机由本包（上层集成）决定。
+    simulator = Node(
         package="motor_canfd_sim",
         executable="motor_canfd_sim_node",
         name="motor_canfd_sim",
         output="screen",
         parameters=[
-            PathJoinSubstitution([FindPackageShare("motor_canfd_sim"), "config", "sim.yaml"]),
+            PathJoinSubstitution(
+                [FindPackageShare("motor_canfd_sim"), "config", "sim.yaml"]
+            ),
             {
-                "motor_config_file": motor_config,
+                "motor_config_file": motor_config_file,
                 "bus_override.left_arm": left_interface,
                 "bus_override.right_arm": right_interface,
             },
@@ -55,7 +54,14 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("right_interface", default_value="vcan1"),
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("render_engine", default_value=""),
-            old_model_launch,
-            cpp_bridge,
+            DeclareLaunchArgument(
+                "motor_config_file",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+                ),
+                description="电机拓扑配置路径；默认使用与真机相同的 motor_canfd.yaml",
+            ),
+            gazebo,
+            simulator,
         ]
     )

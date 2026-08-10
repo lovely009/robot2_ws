@@ -12,7 +12,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 
 JOINT_NAMES = (
@@ -45,6 +45,12 @@ class Pose:
 
     left: ArmVector
     right: ArmVector
+
+
+def pose_to_command(pose: Pose) -> List[float]:
+    """按 position controller 的 joint 顺序展开左右臂目标。"""
+
+    return [*pose.left, *pose.right]
 
 
 @dataclass(frozen=True)

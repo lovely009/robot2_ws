@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>motor_canfd_sim</name>
+  <version>0.2.0</version>
+  <description>C++ CAN-FD motor-side simulator and Gazebo bridge using the generic motor mapping.</description>
+  <maintainer email="robot@example.com">Robot Developer</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>motor_canfd_drive</depend>
+  <depend>motor_hardware_interface</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_index_python</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

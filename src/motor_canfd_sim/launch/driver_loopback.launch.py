@@ -21,7 +21,7 @@ def generate_launch_description() -> LaunchDescription:
         [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
     )
 
-    # Gazebo 只负责机器人动力学；start_bridge=false 避免同时启动旧 Python CAN 桥。
+    # Gazebo 只负责机器人动力学；电机侧始终由 motor_canfd_sim 提供。
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
@@ -29,9 +29,6 @@ def generate_launch_description() -> LaunchDescription:
             )
         ),
         launch_arguments={
-            "left_interface": left_interface,
-            "right_interface": right_interface,
-            "start_bridge": "false",
             "gui": gui,
             "render_engine": render_engine,
         }.items(),

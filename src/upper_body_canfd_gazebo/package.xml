@@ -2,7 +2,7 @@
 <package format="3">
   <name>upper_body_canfd_gazebo</name>
   <version>0.3.0</version>
-  <description>14-DOF ROS 2 Humble + Gazebo Fortress upper-body model with per-arm SocketCAN/CAN-FD motor emulation.</description>
+  <description>14-DOF ROS 2 Humble + Gazebo Fortress model and ROS controller action tools.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 

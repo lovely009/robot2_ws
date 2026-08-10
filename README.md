@@ -6,12 +6,12 @@ ROS 2 Humble 工作空间：半身双臂机器人的 CAN-FD 电机仿真与真�
 
 | 包 | 语言 | 作用 |
 |---|---|---|
-| `upper_body_canfd_gazebo` | Python | 原有 14-DOF Gazebo Fortress 仿真、Python CAN-FD 桥接器、动作与模型；继续保留 |
+| `upper_body_canfd_gazebo` | Python | 14-DOF Gazebo Fortress 模型、基础仿真 launch 与 ROS 动作播放器 |
 | `motor_canfd_drive` | C++ | 无 ROS 运行时依赖的通用底层驱动：动态总线/电机映射、协议策略注册、SocketCAN |
 | `motor_hardware_interface` | C++ | 标准 `ros2_control::SystemInterface` 适配层；参数/映射集中到 YAML |
 | `motor_canfd_sim` | C++ | 新的 CAN-FD/Gazebo 电机仿真桥接器，可跑 driver→vcan→sim 全链路 |
 
-`can_motor_sim` 与 `upper_body_canfd_hardware` 已在通用 C++ 驱动链路接管后移除。原 Python Gazebo/CAN bridge 仍保留在 `upper_body_canfd_gazebo`，两份协议原始 PDF 仍保存在仓库根目录。
+`motor_canfd_sim` 是唯一电机仿真后端。仿真命令从 ROS 2 position controller 进入，依次经过真实的 `motor_hardware_interface`、`motor_canfd_drive`、vcan 和 C++ 电机模拟器；仓库不再保留绕过驱动直接发送 CAN-FD 的 Python 仿真路径。
 
 ## 分支策略
 
@@ -29,22 +29,16 @@ source install/setup.bash
 colcon test && colcon test-result --verbose
 ```
 
-仿真（Gazebo + 双 vcan，xacro 默认 `hardware_backend:=gazebo`）：
-
-```bash
-ros2 launch upper_body_canfd_gazebo sim.launch.py
-```
-
-新 C++ 桥接器（保留同一 Gazebo 模型）：
-
-```bash
-ros2 launch motor_canfd_sim gazebo_cpp_sim.launch.py
-```
-
-新 C++ driver + vcan + C++ motor sim + Gazebo 全回环：
+仿真（ROS controller + C++ driver + 双 vcan + C++ motor sim + Gazebo 全回环）：
 
 ```bash
 ros2 launch motor_canfd_sim driver_loopback.launch.py
+```
+
+另开终端通过 ROS controller 播放参考动作：
+
+```bash
+ros2 run upper_body_canfd_gazebo ros_actions
 ```
 
 真机 bring-up（position 控制器 + CAN-FD 硬件插件）：

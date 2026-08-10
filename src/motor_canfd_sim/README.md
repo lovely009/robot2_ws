@@ -2,7 +2,7 @@
 
 `motor_canfd_sim` 是电机侧 C++ CAN-FD 模拟器，目前内置 `rp` 和 `motor_2530` 两种电机模型。它读取与 `motor_hardware_interface` 相同的 YAML 结构，并复用 `motor_canfd_drive::DriverConfig` 的配置校验、SocketCAN 传输和协议编解码。
 
-旧的独立 `can_motor_sim` 包已经删除；`upper_body_canfd_gazebo` 中原有 Python Gazebo/CAN 桥接器继续保留，因此原仿真路径不受影响。
+本包是仓库唯一的电机仿真后端。Python Gazebo/CAN 桥和直接向 vcan 发送动作命令的路径已经移除，避免仿真绕过真实驱动架构或维护两套电机模型。
 
 ## 为什么它也是动态配置
 
@@ -39,6 +39,12 @@ ros2_control position controller
 
 ```bash
 ros2 launch motor_canfd_sim driver_loopback.launch.py
+```
+
+动作和其他上层应用应向 `/driver/position_controller/commands` 发布 ROS 2 position command，不应直接占用 vcan。仓库提供的参考动作入口为：
+
+```bash
+ros2 run upper_body_canfd_gazebo ros_actions
 ```
 
 当前半身机器人 Gazebo effort controller 的输出数组顺序仍与 `motor_canfd.yaml` 中的 motor 顺序一致；如果以后修改 Gazebo 机器人本身的 controller joint 列表，必须同步检查这两个顺序。这个限制属于当前 Gazebo 控制器接口，不是 `MotorCanfdDriver` 的关节数量限制。

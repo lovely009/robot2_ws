@@ -1,4 +1,8 @@
-"""启动 Gazebo Fortress、机器人模型和 Gazebo 侧 effort controller。"""
+"""启动 Gazebo Fortress、机器人模型和 Gazebo 侧 effort controller。
+
+本文件是模型侧基础 launch，不启动电机模拟器；由 model_sim.launch.py
+（+ 模拟器）与 driver_loopback.launch.py（+ 驱动控制器）嵌套引入。
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler

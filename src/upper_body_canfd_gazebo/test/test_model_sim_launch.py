@@ -1,4 +1,4 @@
-"""静态检查 Gazebo C++ 模拟器入口，不启动 Gazebo 或任何进程。"""
+"""静态检查 model_sim 入口（Gazebo 模型 + C++ 模拟器），不启动 Gazebo 或任何进程。"""
 
 import importlib.util
 from pathlib import Path
@@ -11,8 +11,8 @@ from launch_ros.utilities import evaluate_parameters
 
 
 def _load_launch_description():
-    launch_file = Path(__file__).parents[1] / "launch" / "gazebo_cpp_sim.launch.py"
-    spec = importlib.util.spec_from_file_location("gazebo_cpp_sim_launch", launch_file)
+    launch_file = Path(__file__).parents[1] / "launch" / "model_sim.launch.py"
+    spec = importlib.util.spec_from_file_location("model_sim_launch", launch_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.generate_launch_description()

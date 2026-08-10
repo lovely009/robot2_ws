@@ -21,7 +21,7 @@ def generate_launch_description() -> LaunchDescription:
         " right_interface:=", LaunchConfiguration("right_interface"),
         " motor_config_file:=", LaunchConfiguration("motor_config_file"),
     ]), value_type=str)
-    config = PathJoinSubstitution([share, "config", "hardware_controllers.yaml"])
+    config = PathJoinSubstitution([share, "config", "driver_controllers.yaml"])
     manager = Node(package="controller_manager", executable="ros2_control_node", output="screen",
                    parameters=[{"robot_description": description}, config])
     state_publisher = Node(package="robot_state_publisher", executable="robot_state_publisher",

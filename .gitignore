@@ -2,7 +2,7 @@
 /build/
 /install/
 /log/
-
+/.vscode/
 # Python caches and Windows download metadata.
 **/__pycache__/
 **/*.pyc

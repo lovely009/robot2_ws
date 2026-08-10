@@ -2,7 +2,7 @@
 
 `motor_canfd_drive` 是一个不依赖 ROS 运行时的 C++ CAN-FD 电机底层驱动库。它负责 SocketCAN 收发、线协议编解码、电机协议策略以及通用的“总线—电机”映射。
 
-这个包刻意不知道“机械臂”是什么，也不知道机器人有多少个关节，更不知道 ROS 2 控制器如何组织。这样做的目的，是让同一套底层驱动既能被 `ros2_control` 使用，也能被独立 C++ 调试程序或测试程序直接使用。
+这个包这样做的目的，是让同一套底层驱动既能被 `ros2_control` 使用，也能被独立 C++ 调试程序或测试程序直接使用。
 
 ## 运行结构
 
@@ -22,9 +22,9 @@ MotorCanfdDriver
      SocketCAN
 ```
 
-`MotorCanfdDriver` 使用动态容器管理总线和电机，所以数量完全由 `DriverConfig` 决定，不存在“机械臂固定 7 个关节”的限制。
+`MotorCanfdDriver` 使用动态容器管理总线和电机，所以数量完全由 `DriverConfig` 决定
 
-RP 协议本身的一条广播命令最多包含 8 个槽位，这是 **RP 协议的物理限制**，只由 RP 协议策略负责检查；它不是整个驱动、机械臂或机器人的关节数量限制。其他电机协议可以拥有完全不同的 ID、帧格式和数量限制，而不需要修改通用驱动循环。
+RP 协议本身的一条广播命令最多包含 8 个槽位，这是 **RP 协议的物理限制**，只由 RP 协议策略负责检查；其他电机协议可以拥有完全不同的 ID、帧格式和数量限制，而不需要修改通用驱动循环。
 
 ## 各层职责
 
@@ -35,7 +35,7 @@ RP 协议本身的一条广播命令最多包含 8 个槽位，这是 **RP 协�
 | `protocol.cpp` | 把物理量与协议字节相互转换 | 总线拓扑、ROS 2 |
 | `SocketCan` | Linux SocketCAN/CAN-FD 帧收发 | 电机类型、关节含义 |
 
-## 新增一种电机类型
+## 如何新增一种电机类型
 
 1. 为新线协议实现一个 `MotorProtocol`；
 2. 在 `MotorProtocolRegistry` 中注册一个工厂，或者由调用方传入已经注册好的 registry；
@@ -51,4 +51,4 @@ RP 协议本身的一条广播命令最多包含 8 个槽位，这是 **RP 协�
 
 当前工作空间由 `motor_hardware_interface` 在 ROS 侧读取 `motor_canfd.yaml`，转换为 `DriverConfig` 后交给底层库。因此 `motor_canfd_drive` 不依赖 `yaml-cpp`、`rclcpp`、`hardware_interface`、`pluginlib`、Topic、Action 或 Service。
 
-这个边界很重要：以后即使更换 ROS 2 上层、编写独立电机测试工具，底层 CAN-FD 驱动仍可直接复用。
+以后更换 ROS 2 上层、编写独立电机测试工具，底层 CAN-FD 驱动可直接复用。

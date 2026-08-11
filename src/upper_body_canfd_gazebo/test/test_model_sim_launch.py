@@ -37,7 +37,7 @@ def test_motor_configuration_and_bus_overrides_are_injected():
     parameters = evaluate_parameters(context, simulator._Node__parameters)
     injected = next(parameter for parameter in parameters if isinstance(parameter, dict))
 
-    expected_config = Path(get_package_share_directory("motor_hardware_interface")) / (
+    expected_config = Path(get_package_share_directory("motor_canfd_sim")) / (
         "config/motor_canfd.yaml"
     )
     assert Path(injected["motor_config_file"]).resolve() == expected_config.resolve()

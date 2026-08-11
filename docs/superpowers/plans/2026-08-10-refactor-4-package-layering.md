@@ -1,3 +1,10 @@
+# 历史实现计划（已被后续决策取代）
+
+> 本文是 2026-08-10 四包分层重构的**历史计划**，仅供追溯。其中"真机与仿真共享
+> 同一份 motor_canfd.yaml"等表述已被 [ADR 0002](../adr/0002-sim-topology-config-decoupled-from-hardware.md)、
+> [ADR 0003](../adr/0003-hardware-bringup-entry-in-motor-hardware-interface.md) 与
+> [ADR 0004](../adr/0004-fail-fast-on-activation-and-loopback-loss.md) 取代，请勿按本文执行。
+
 # 四包分层重构 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

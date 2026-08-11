@@ -6,7 +6,7 @@ ROS 2 Humble 工作空间：14 自由度上半身双臂机器人的 CAN-FD 电�
 
 - `src/<package>` — 4 个 ament 包，采用标准布局：`src/`（实现）、`include/<package>/`（C++ 头文件）、`config/`（YAML 配置）、`launch/`、`test/`，按需含 `urdf/`、`worlds/`。
 - `build/`、`install/`、`log/` — colcon 生成物，不提交到 Git。
-- 根目录 PDF — 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议硬件手册。
+- 协议 PDF — 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议硬件手册，位于 `src/motor_canfd_sim/`。
 - 各包内 `README.md` 是权威文档，先读它。
 
 ## 构建、测试与开发命令 (Build, Test, and Development Commands)

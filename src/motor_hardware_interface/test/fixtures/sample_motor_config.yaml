@@ -29,6 +29,9 @@ motor_hardware:
       bus: test_bus
       type: motor_2530
       id: 2
+      command:
+        kp: 0.9
+        kd: 0.5
       parameters:
         torque_constant_nm_per_amp: 0.55
         extra: per_motor

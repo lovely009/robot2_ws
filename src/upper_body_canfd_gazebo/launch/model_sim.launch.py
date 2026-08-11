@@ -9,6 +9,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from motor_canfd_sim.helpers import default_config_share_substitution
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -56,9 +57,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("render_engine", default_value="ogre"),
             DeclareLaunchArgument(
                 "motor_config_file",
-                default_value=PathJoinSubstitution(
-                    [FindPackageShare("motor_canfd_sim"), "config", "motor_canfd.yaml"]
-                ),
+                default_value=default_config_share_substitution(),
                 description="电机拓扑配置路径；默认使用仿真侧 motor_canfd_sim/config/motor_canfd.yaml",
             ),
             gazebo,

@@ -11,6 +11,8 @@ const std::string kSampleConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/sample_motor_config.yaml";
 const std::string kBadConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/bad_motor_config.yaml";
+const std::string kMissingTimingConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/missing_timing_motor_config.yaml";
 
 TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   const auto config = motor_hardware_interface::load_driver_config(kSampleConfig);
@@ -41,6 +43,44 @@ TEST(LoadDriverConfig, EmptyPathThrows) {
 
 TEST(LoadDriverConfig, MissingRootThrows) {
   EXPECT_THROW(motor_hardware_interface::load_driver_config(kBadConfig),
+               std::runtime_error);
+}
+
+TEST(LoadSystemConfig, ParsesTimingAndCommandGains) {
+  const auto config = motor_hardware_interface::load_system_config(kSampleConfig);
+  EXPECT_EQ(config.feedback_timeout_s, 0.10);
+  EXPECT_EQ(config.initial_feedback_wait_s, 0.10);
+
+  ASSERT_EQ(config.motor_commands.size(), 2U);
+  // 未配置单电机 command 时回落到 motor_types 默认值。
+  EXPECT_EQ(config.motor_commands[0].kp, 30.0);
+  EXPECT_EQ(config.motor_commands[0].kd, 1.0);
+  // 单电机 command 覆盖 motor_types 默认值。
+  EXPECT_EQ(config.motor_commands[1].kp, 0.9);
+  EXPECT_EQ(config.motor_commands[1].kd, 0.5);
+}
+
+TEST(LoadSystemConfig, DriverPartMatchesLoadDriverConfig) {
+  const auto system = motor_hardware_interface::load_system_config(kSampleConfig);
+  const auto driver = motor_hardware_interface::load_driver_config(kSampleConfig);
+  EXPECT_EQ(system.driver.buses.size(), driver.buses.size());
+  EXPECT_EQ(system.driver.motors.size(), driver.motors.size());
+  EXPECT_EQ(system.driver.motors[0].name, driver.motors[0].name);
+  EXPECT_EQ(system.driver.motors[1].parameters, driver.motors[1].parameters);
+}
+
+TEST(LoadSystemConfig, MissingTimingThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_system_config(kMissingTimingConfig),
+               std::runtime_error);
+}
+
+TEST(LoadSystemConfig, EmptyPathThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_system_config(""),
+               std::runtime_error);
+}
+
+TEST(LoadSystemConfig, MissingRootThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_system_config(kBadConfig),
                std::runtime_error);
 }
 

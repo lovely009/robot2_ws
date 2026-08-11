@@ -9,15 +9,14 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from motor_canfd_sim.helpers import default_config_share_substitution
 
 
 def generate_launch_description() -> LaunchDescription:
     motor_config_file = LaunchConfiguration("motor_config_file")
     left_interface = LaunchConfiguration("left_interface")
     right_interface = LaunchConfiguration("right_interface")
-    default_motor_config = PathJoinSubstitution(
-        [FindPackageShare("motor_canfd_sim"), "config", "motor_canfd.yaml"]
-    )
+    default_motor_config = default_config_share_substitution()
 
     simulator = Node(
         package="motor_canfd_sim",

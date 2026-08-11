@@ -15,6 +15,11 @@ from launch.actions import (
 )
 from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch_ros.actions import Node
+from motor_canfd_sim.helpers import (
+    event_handler_actions,
+    event_handler_matcher,
+    node_arguments_contain,
+)
 
 
 def _load_launch_description():
@@ -25,24 +30,12 @@ def _load_launch_description():
     return module.generate_launch_description()
 
 
-def _matcher(handler):
-    return handler._OnActionEventBase__action_matcher
-
-
-def _on_event_actions(handler):
-    return handler._OnActionEventBase__actions_on_event
-
-
-def _args_contain(node, token):
-    return any(token in str(argument) for argument in node._Node__arguments)
-
-
 def _collect_nodes(description):
     # 驱动侧节点只出现在事件处理器的 on_event 动作列表里，不在 entities 顶层。
     nodes = []
     for action in description.entities:
         if isinstance(action, RegisterEventHandler):
-            actions = _on_event_actions(action.event_handler)
+            actions = event_handler_actions(action.event_handler)
             if isinstance(actions, list):
                 nodes.extend(item for item in actions if isinstance(item, Node))
     return nodes
@@ -61,13 +54,13 @@ def test_startup_and_shutdown_event_chain():
         node for node in nodes
         if node.node_package == "controller_manager"
         and node.node_executable == "spawner"
-        and _args_contain(node, "joint_state_broadcaster")
+        and node_arguments_contain(node, "joint_state_broadcaster")
     )
     position = next(
         node for node in nodes
         if node.node_package == "controller_manager"
         and node.node_executable == "spawner"
-        and _args_contain(node, "position_controller")
+        and node_arguments_contain(node, "position_controller")
     )
 
     handlers = [
@@ -80,21 +73,24 @@ def test_startup_and_shutdown_event_chain():
 
     # 模拟器启动（谓词匹配）→ 驱动侧 controller_manager。
     assert any(
-        callable(_matcher(h)) and driver_manager in _on_event_actions(h)
+        callable(event_handler_matcher(h)) and driver_manager in event_handler_actions(h)
         for h in starts
     ), "缺少『模拟器启动后拉起驱动侧 manager』的事件处理"
     # 驱动侧 manager 就绪 → joint_state_broadcaster。
     assert any(
-        _matcher(h) is driver_manager and jsb in _on_event_actions(h) for h in starts
+        event_handler_matcher(h) is driver_manager
+        and jsb in event_handler_actions(h)
+        for h in starts
     ), "缺少『manager 就绪后拉起 joint_state_broadcaster』的事件处理"
     # joint_state_broadcaster 退出 → position_controller。
     assert any(
-        _matcher(h) is jsb and position in _on_event_actions(h) for h in exits
+        event_handler_matcher(h) is jsb and position in event_handler_actions(h)
+        for h in exits
     ), "缺少『joint_state_broadcaster 退出后拉起 position_controller』的事件处理"
     # 模拟器退出（谓词匹配）→ 终止整个回环。
     assert any(
-        callable(_matcher(h))
-        and any(isinstance(action, Shutdown) for action in _on_event_actions(h))
+        callable(event_handler_matcher(h))
+        and any(isinstance(action, Shutdown) for action in event_handler_actions(h))
         for h in exits
     ), "缺少『模拟器退出时终止回环』的事件处理"
 

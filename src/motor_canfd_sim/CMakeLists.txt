@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(motor_canfd_sim)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(motor_canfd_drive REQUIRED)
 find_package(motor_hardware_interface REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -33,4 +34,5 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_motor_canfd_sim_launch test/test_motor_canfd_sim_launch.py)
 endif()
 
+ament_python_install_package(motor_canfd_sim)
 ament_package()

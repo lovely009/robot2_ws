@@ -9,6 +9,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     RegisterEventHandler,
+    Shutdown,
 )
 from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -73,7 +74,7 @@ def generate_launch_description() -> LaunchDescription:
     )
     # 真机与回环共用同一份控制器配置，区别只有 controller_manager 命名空间。
     controller_config = PathJoinSubstitution(
-        [FindPackageShare("upper_body_canfd_gazebo"), "config", "driver_controllers.yaml"]
+        [FindPackageShare("motor_hardware_interface"), "config", "driver_controllers.yaml"]
     )
     # /driver 命名空间避免与 Gazebo 自己的 /controller_manager 重名；
     # 二者通过 CAN-FD/vcan 和关节状态形成完整回环。
@@ -118,9 +119,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "motor_config_file",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+                    [FindPackageShare("motor_canfd_sim"), "config", "motor_canfd.yaml"]
                 ),
-                description="电机拓扑配置路径；默认与真机一致",
+                description="电机拓扑配置路径；默认使用仿真侧 motor_canfd_sim/config/motor_canfd.yaml",
             ),
             RegisterEventHandler(
                 OnProcessStart(target_action=_is_simulator, on_start=[driver_manager])
@@ -130,6 +131,19 @@ def generate_launch_description() -> LaunchDescription:
             ),
             RegisterEventHandler(
                 OnProcessExit(target_action=joint_state_broadcaster, on_exit=[position_controller])
+            ),
+            # 模拟器退出即终止回环：模拟器不在 = 回环无意义。启动期失败（如 vcan
+            # 未创建导致模拟器启动即退出）应 fail-fast，而不是让 spawner 永久重试。
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=_is_simulator,
+                    on_exit=[
+                        Shutdown(
+                            reason="motor_canfd_sim 退出，完整回环终止；"
+                            "请确认 vcan 已创建（bash src/upper_body_canfd_gazebo/scripts/setup_vcan.sh）"
+                        )
+                    ],
+                )
             ),
             model_sim,
         ]

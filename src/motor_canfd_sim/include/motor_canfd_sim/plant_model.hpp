@@ -105,6 +105,13 @@ public:
       return clamp_symmetric(torque, rp_torque_limit_nm_);
     }
 
+    // 未知电机类型必须立即暴露，而不是静默按 25/30 mm 计算（人形/新家族扩展
+    // 时漏加分支会算错扭矩且无报错）。
+    if (config.type != motor_canfd_drive::kMotor2530Type) {
+      throw std::invalid_argument("C++ simulator plant has no model for motor type '" +
+                                  config.type + "'");
+    }
+
     // 25/30 mm 协议以电流为核心：先按模式得到 A，再通过 Kt 转成 Nm。
     double current = 0.0;
     if (fresh) {

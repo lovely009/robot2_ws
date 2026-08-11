@@ -19,6 +19,9 @@ MotorCanfdDriver -> vcan -> motor_canfd_sim
 `motor_hardware_interface::load_driver_config()`，与真机配置
 （`motor_hardware_interface/config/motor_canfd.yaml`）解耦。
 
+帧级处理按电机家族封装为 `SimMotorHandler`（与驱动侧 `MotorProtocol` 一一对应），
+节点只做路由与 ROS 编排；新增家族时在模拟器侧注册 handler，不在节点内增加类型分支。
+
 ## 安全限制
 
 模拟器会主动发送电机反馈帧，默认只允许打开名称以 `vcan` 开头的接口，防止与真实电机产生重复 CAN ID。

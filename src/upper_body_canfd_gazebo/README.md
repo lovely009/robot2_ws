@@ -36,7 +36,9 @@
 | `driver_loopback.launch.py` | 完整仿真回环：驱动侧 controller + 模拟器 + Gazebo |
 
 真机 bring-up 入口已下沉到 `motor_hardware_interface`（launch、控制器配置与 CAN-FD
-ros2_control 硬件片段），本包只负责模型描述与仿真集成。
+ros2_control 硬件片段），本包只负责模型描述与仿真集成。`driver_loopback` 与真机
+共用同一份 `driver_controllers.yaml`，仅 controller_manager 命名空间不同
+（回环运行在 `/driver` 下，避免与 Gazebo 侧 `/controller_manager` 重名）。
 
 ## 运行示例
 

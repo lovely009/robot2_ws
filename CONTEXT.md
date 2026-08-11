@@ -23,6 +23,8 @@
 | SocketCAN 接口 | Linux 网络接口，例如 `can0` 或 `vcan0` |
 | 总线覆盖 | `bus_override.<逻辑总线名>`；启动时替换逻辑总线对应的接口（HIL 时把 vcan 重定向到真实 can 接口） |
 | 协议策略 | 实现某一电机家族帧格式、ID 规则和控制语义的 `MotorProtocol` |
+| position joints 单一来源 | `driver_controllers.yaml` 不手抄 joints；launch 用 `motor_joints_from_config()` 从电机拓扑配置生成并注入 position controller，避免关节顺序多处副本 |
+| 接口参数 | `interface_<逻辑总线名>`：launch 按配置 `buses` 段生成的参数（例如 `interface_left_arm`），经 `bus_override.*` 传给硬件 xacro |
 
 ## 控制链路术语
 
@@ -32,6 +34,8 @@
 - **真机 bring-up**：由 `motor_hardware_interface` 提供的真机启动入口（launch 与控制器配置），不依赖仿真栈；模型描述由模型包提供。
 - **fail-fast 停机**：激活阶段最多重试 3 次（每次 1 s 窗口），仍失败或运行期反馈超时时驱动侧立即终止（安全语义），人工诊断后重跑；回环在模拟器退出时随之中止。
 - **HIL**：Hardware-in-the-Loop。允许模拟器访问物理 CAN 接口的专项测试模式，不是常规仿真配置。
+- **家族仿真处理器**：`SimMotorHandler`，电机侧模拟器中与驱动侧 `MotorProtocol` 一一对应的家族策略；新增电机家族时在模拟器侧注册 handler，节点本身无家族分支。
+- **动作库限位**：`motion_library.JOINT_LIMITS`，与 URDF joint limit 一致的双写副本；调整限位时需同步两处（当前无跨源测试，由人工维护）。
 
 ## 命名原则
 

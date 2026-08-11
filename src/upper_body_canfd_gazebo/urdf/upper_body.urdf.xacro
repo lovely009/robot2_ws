@@ -1,14 +1,11 @@
 <?xml version="1.0"?>
 <robot name="upper_body_canfd_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find motor_hardware_interface)/urdf/canfd_hardware.xacro"/>
   <xacro:arg name="controllers_file" default=""/>
   <xacro:arg name="hardware_backend" default="gazebo"/>
-  <xacro:arg name="left_interface" default="can0"/>
-  <xacro:arg name="right_interface" default="can1"/>
-  <xacro:arg name="motor_config_file" default=""/>
-  <xacro:arg name="use_real_hardware" default="false"/>
   <xacro:arg name="left_interface" default="vcan0"/>
   <xacro:arg name="right_interface" default="vcan1"/>
-  <xacro:arg name="allow_hardware" default="false"/>
+  <xacro:arg name="motor_config_file" default=""/>
 
   <!-- Coordinate convention: +X forward, +Y left, +Z up. -->
   <material name="torso_gray"><color rgba="0.23 0.27 0.32 1"/></material>
@@ -234,104 +231,6 @@
     </joint>
   </xacro:macro>
 
-  <xacro:macro name="canfd_control_joint" params="joint">
-    <joint name="${joint}">
-      <command_interface name="position"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
-  </xacro:macro>
-  <!-- Same interfaces as the sim block, plus per-joint CAN-FD motor metadata
-       consumed by upper_body_canfd_hardware/CanFdMotorSystem. -->
-  <xacro:macro name="real_control_joint"
-               params="joint effort motor_type node direction:=1 kp kd effort_scale:=1.0">
-    <joint name="${joint}">
-      <command_interface name="effort">
-        <param name="min">-${effort}</param>
-        <param name="max">${effort}</param>
-      </command_interface>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-      <param name="motor_type">${motor_type}</param>
-      <param name="can_node_id">${node}</param>
-      <param name="direction">${direction}</param>
-      <param name="zero_offset">0.0</param>
-      <param name="kp">${kp}</param>
-      <param name="kd">${kd}</param>
-      <param name="effort_scale">${effort_scale}</param>
-    </joint>
-  </xacro:macro>
-
-  <xacro:if value="$(arg use_real_hardware)">
-    <ros2_control name="LeftCanFdSystem" type="system">
-      <hardware>
-        <plugin>upper_body_canfd_hardware/CanFdMotorSystem</plugin>
-        <param name="interface">$(arg left_interface)</param>
-        <param name="allow_hardware_interfaces">$(arg allow_hardware)</param>
-      </hardware>
-      <xacro:real_control_joint joint="left_shoulder_yaw_joint" effort="60"
-                                motor_type="rp" node="1" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="left_shoulder_roll_joint" effort="60"
-                                motor_type="rp" node="2" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="left_shoulder_pitch_joint" effort="60"
-                                motor_type="rp" node="3" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="left_elbow_pitch_joint" effort="60"
-                                motor_type="rp" node="4" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="left_wrist_yaw_joint" effort="5"
-                                motor_type="wrist" node="1" kp="0.008" kd="1.0"/>
-      <xacro:real_control_joint joint="left_wrist_pitch_joint" effort="5"
-                                motor_type="wrist" node="2" kp="0.008" kd="1.0"/>
-      <xacro:real_control_joint joint="left_wrist_roll_joint" effort="5"
-                                motor_type="wrist" node="3" kp="0.008" kd="1.0"/>
-    </ros2_control>
-
-    <ros2_control name="RightCanFdSystem" type="system">
-      <hardware>
-        <plugin>upper_body_canfd_hardware/CanFdMotorSystem</plugin>
-        <param name="interface">$(arg right_interface)</param>
-        <param name="allow_hardware_interfaces">$(arg allow_hardware)</param>
-      </hardware>
-      <xacro:real_control_joint joint="right_shoulder_yaw_joint" effort="60"
-                                motor_type="rp" node="1" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="right_shoulder_roll_joint" effort="60"
-                                motor_type="rp" node="2" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="right_shoulder_pitch_joint" effort="60"
-                                motor_type="rp" node="3" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="right_elbow_pitch_joint" effort="60"
-                                motor_type="rp" node="4" kp="36.0" kd="2.0"/>
-      <xacro:real_control_joint joint="right_wrist_yaw_joint" effort="5"
-                                motor_type="wrist" node="1" kp="0.008" kd="1.0"/>
-      <xacro:real_control_joint joint="right_wrist_pitch_joint" effort="5"
-                                motor_type="wrist" node="2" kp="0.008" kd="1.0"/>
-      <xacro:real_control_joint joint="right_wrist_roll_joint" effort="5"
-                                motor_type="wrist" node="3" kp="0.008" kd="1.0"/>
-    </ros2_control>
-  </xacro:if>
-
-  <xacro:unless value="$(arg use_real_hardware)">
-    <ros2_control name="GazeboSimSystem" type="system">
-      <hardware>
-        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-      </hardware>
-      <xacro:sim_control_joint joint="left_shoulder_yaw_joint" effort="60"/>
-      <xacro:sim_control_joint joint="left_shoulder_roll_joint" effort="60"/>
-      <xacro:sim_control_joint joint="left_shoulder_pitch_joint" effort="60"/>
-      <xacro:sim_control_joint joint="left_elbow_pitch_joint" effort="60"/>
-      <xacro:sim_control_joint joint="left_wrist_yaw_joint" effort="5"/>
-      <xacro:sim_control_joint joint="left_wrist_pitch_joint" effort="5"/>
-      <xacro:sim_control_joint joint="left_wrist_roll_joint" effort="5"/>
-      <xacro:sim_control_joint joint="right_shoulder_yaw_joint" effort="60"/>
-      <xacro:sim_control_joint joint="right_shoulder_roll_joint" effort="60"/>
-      <xacro:sim_control_joint joint="right_shoulder_pitch_joint" effort="60"/>
-      <xacro:sim_control_joint joint="right_elbow_pitch_joint" effort="60"/>
-      <xacro:sim_control_joint joint="right_wrist_yaw_joint" effort="5"/>
-      <xacro:sim_control_joint joint="right_wrist_pitch_joint" effort="5"/>
-      <xacro:sim_control_joint joint="right_wrist_roll_joint" effort="5"/>
-    </ros2_control>
-  </xacro:unless>
-
   <xacro:if value="${'$(arg hardware_backend)' == 'gazebo'}">
     <ros2_control name="GazeboSimSystem" type="system">
       <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
@@ -362,12 +261,9 @@
 
   <xacro:if value="${'$(arg hardware_backend)' == 'canfd'}">
     <ros2_control name="UpperBodyCanFdSystem" type="system">
-      <hardware>
-        <plugin>motor_hardware_interface/CanFdSystem</plugin>
-        <param name="bus_override.left_arm">$(arg left_interface)</param>
-        <param name="bus_override.right_arm">$(arg right_interface)</param>
-        <param name="config_file">$(arg motor_config_file)</param>
-      </hardware>
+      <xacro:canfd_hardware left_interface="$(arg left_interface)"
+                            right_interface="$(arg right_interface)"
+                            motor_config_file="$(arg motor_config_file)"/>
       <xacro:canfd_control_joint joint="left_shoulder_yaw_joint"/><xacro:canfd_control_joint joint="left_shoulder_roll_joint"/>
       <xacro:canfd_control_joint joint="left_shoulder_pitch_joint"/><xacro:canfd_control_joint joint="left_elbow_pitch_joint"/>
       <xacro:canfd_control_joint joint="left_wrist_yaw_joint"/><xacro:canfd_control_joint joint="left_wrist_pitch_joint"/><xacro:canfd_control_joint joint="left_wrist_roll_joint"/>

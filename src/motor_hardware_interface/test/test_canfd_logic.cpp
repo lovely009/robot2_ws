@@ -212,5 +212,53 @@ TEST(TakeObservedPositions, RejectsSizeMismatch) {
   EXPECT_NE(error.find("different sizes"), std::string::npos);
 }
 
+// ---- all_feedback_received ----
+
+TEST(AllFeedbackReceived, TrueWhenEveryJointObserved) {
+  const std::vector<bool> observed{true, true, true};
+  EXPECT_TRUE(all_feedback_received(observed));
+}
+
+TEST(AllFeedbackReceived, FalseWhenAnyJointMissing) {
+  const std::vector<bool> observed{true, false, true};
+  EXPECT_FALSE(all_feedback_received(observed));
+}
+
+TEST(AllFeedbackReceived, EmptyObservationIsComplete) {
+  const std::vector<bool> observed{};
+  EXPECT_TRUE(all_feedback_received(observed));
+}
+
+// ---- missing_joint_names ----
+
+TEST(MissingJointNames, ReturnsNamesOfUnobservedJoints) {
+  const std::vector<std::string> joint_names{"a", "b", "c"};
+  const std::vector<bool> observed{true, false, true};
+  const auto missing = missing_joint_names(joint_names, observed);
+  ASSERT_EQ(missing.size(), 1U);
+  EXPECT_EQ(missing[0], "b");
+}
+
+TEST(MissingJointNames, ReturnsAllWhenNoneObserved) {
+  const std::vector<std::string> joint_names{"a", "b"};
+  const std::vector<bool> observed{false, false};
+  EXPECT_EQ(missing_joint_names(joint_names, observed),
+            (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(MissingJointNames, EmptyListsProduceEmptyResult) {
+  const std::vector<std::string> joint_names{};
+  const std::vector<bool> observed{};
+  EXPECT_TRUE(missing_joint_names(joint_names, observed).empty());
+}
+
+TEST(MissingJointNames, SizeMismatchUsesShorterList) {
+  const std::vector<std::string> joint_names{"a", "b", "c"};
+  const std::vector<bool> observed{true, false};
+  const auto missing = missing_joint_names(joint_names, observed);
+  ASSERT_EQ(missing.size(), 1U);
+  EXPECT_EQ(missing[0], "b");
+}
+
 } // namespace
 } // namespace motor_hardware_interface

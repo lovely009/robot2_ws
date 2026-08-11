@@ -72,6 +72,23 @@ bool should_continue_waiting(const std::vector<bool> &observed,
   return !all_observed && now < deadline;
 }
 
+bool all_feedback_received(const std::vector<bool> &observed) {
+  return std::all_of(observed.begin(), observed.end(), [](const bool seen) { return seen; });
+}
+
+std::vector<std::string> missing_joint_names(
+    const std::vector<std::string> &joint_names, const std::vector<bool> &observed) {
+  std::vector<std::string> missing;
+  const auto count = std::min(joint_names.size(), observed.size());
+  missing.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    if (!observed[index]) {
+      missing.push_back(joint_names[index]);
+    }
+  }
+  return missing;
+}
+
 bool take_observed_positions_as_initial_targets(
     const std::vector<std::string> &joint_names,
     const std::vector<bool> &observed, const std::vector<double> &positions,

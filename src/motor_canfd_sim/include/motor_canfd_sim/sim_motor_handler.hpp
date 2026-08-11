@@ -15,12 +15,11 @@
 #include "motor_canfd_drive/protocol.hpp"
 #include "motor_canfd_drive/socketcan.hpp"
 #include "motor_canfd_sim/plant_model.hpp"
+#include "motor_canfd_sim/sim_frame_decode.hpp"
 
 namespace motor_canfd_sim {
 
 namespace drive = motor_canfd_drive;
-namespace protocol = motor_canfd_drive::protocol;
-using Clock = std::chrono::steady_clock;
 
 // 一条模拟总线：配置、SocketCAN 通道与挂在这条总线上的电机下标。
 struct SimBus {

@@ -1,6 +1,6 @@
 # motor_canfd_drive
 
-C++17 CAN-FD 电机驱动库，提供 SocketCAN 传输、协议编解码、协议策略注册和动态电机映射。与ROS解耦
+C++17 CAN-FD 电机驱动库，提供 SocketCAN 传输、协议编解码、协议策略注册和动态电机映射。
 
 ## 职责边界
 

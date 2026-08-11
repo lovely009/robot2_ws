@@ -3,6 +3,8 @@
 /install/
 /log/
 /.vscode/
+# Brooks-lint 运行历史记录。
+/.brooks-lint-history.json
 # Python caches and Windows download metadata.
 **/__pycache__/
 **/*.pyc

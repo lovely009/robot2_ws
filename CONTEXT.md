@@ -30,7 +30,7 @@
 - **Gazebo 侧 controller**：`/controller_manager` 下的 effort controller，驱动仿真关节。
 - **完整回环**：position command 经硬件接口、底层驱动、vcan、电机侧模拟器和 Gazebo 后，再以 CAN-FD 反馈返回底层驱动。
 - **真机 bring-up**：由 `motor_hardware_interface` 提供的真机启动入口（launch 与控制器配置），不依赖仿真栈；模型描述由模型包提供。
-- **fail-fast 停机**：激活失败或反馈超时时驱动侧立即终止（安全语义），人工诊断后重跑；回环在模拟器退出时随之中止。
+- **fail-fast 停机**：激活阶段最多重试 3 次（每次 1 s 窗口），仍失败或运行期反馈超时时驱动侧立即终止（安全语义），人工诊断后重跑；回环在模拟器退出时随之中止。
 - **HIL**：Hardware-in-the-Loop。允许模拟器访问物理 CAN 接口的专项测试模式，不是常规仿真配置。
 
 ## 命名原则

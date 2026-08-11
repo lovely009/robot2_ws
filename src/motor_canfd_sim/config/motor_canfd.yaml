@@ -10,7 +10,8 @@
 motor_hardware:
   timing:
     feedback_timeout_s: 0.10
-    initial_feedback_wait_s: 0.10
+    # 激活窗口：每次尝试在窗口内轮询全部关节反馈，最多重试 3 次。
+    initial_feedback_wait_s: 1.0
 
   # 逻辑总线名可以自由定义；仿真默认挂到 vcan，接口仍可由
   # bus_override.<逻辑总线名> 在启动时覆盖。

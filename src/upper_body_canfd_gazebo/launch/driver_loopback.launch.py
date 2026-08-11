@@ -22,7 +22,18 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
-from motor_canfd_sim.helpers import default_config_share_substitution
+from motor_canfd_sim.helpers import default_config_share_substitution, expected_default_config_path
+from motor_hardware_interface.helpers import (
+    motor_joints_from_config,
+    write_position_joints_params_file,
+)
+
+# 驱动侧 position controller 的 joints 由仿真拓扑配置生成（单一来源），
+# 与模拟器/Gazebo 关节顺序一致。
+POSITION_JOINTS = motor_joints_from_config(expected_default_config_path())
+# launch_ros 会把参数 dict 里的列表序列化成 !!python/tuple，rcl 解析后为空；
+# 因此把 joints 写进标准嵌套格式的临时参数文件，随 manager 一起加载。
+POSITION_JOINTS_PARAM_FILE = write_position_joints_params_file(POSITION_JOINTS)
 
 
 def _is_simulator(action):
@@ -84,7 +95,11 @@ def generate_launch_description() -> LaunchDescription:
         executable="ros2_control_node",
         namespace="driver",
         output="screen",
-        parameters=[{"robot_description": robot_description}, controller_config],
+        parameters=[
+            {"robot_description": robot_description},
+            controller_config,
+            POSITION_JOINTS_PARAM_FILE,
+        ],
     )
     joint_state_broadcaster = Node(
         package="controller_manager",

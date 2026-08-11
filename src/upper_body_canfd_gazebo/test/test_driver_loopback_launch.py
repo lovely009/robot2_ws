@@ -16,17 +16,24 @@ from launch.actions import (
 from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch_ros.actions import Node
 from motor_canfd_sim.helpers import (
+    expected_default_config_path,
     event_handler_actions,
     event_handler_matcher,
     node_arguments_contain,
 )
+from motor_hardware_interface.helpers import motor_joints_from_config
 
 
-def _load_launch_description():
+def _load_launch_module():
     launch_file = Path(__file__).parents[1] / "launch" / "driver_loopback.launch.py"
     spec = importlib.util.spec_from_file_location("driver_loopback_launch", launch_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _load_launch_description():
+    module = _load_launch_module()
     return module.generate_launch_description()
 
 
@@ -93,6 +100,14 @@ def test_startup_and_shutdown_event_chain():
         and any(isinstance(action, Shutdown) for action in event_handler_actions(h))
         for h in exits
     ), "缺少『模拟器退出时终止回环』的事件处理"
+
+    # 驱动侧 position controller 的 joints 由仿真拓扑配置生成（单一来源），
+    # 与模拟器关节顺序一致。
+    expected_joints = motor_joints_from_config(expected_default_config_path())
+    assert _load_launch_module().POSITION_JOINTS == expected_joints, (
+        f"launch 注入的 joints 必须由配置生成："
+        f"{_load_launch_module().POSITION_JOINTS} != {expected_joints}"
+    )
 
 
 def test_event_handlers_are_registered_before_model_sim():

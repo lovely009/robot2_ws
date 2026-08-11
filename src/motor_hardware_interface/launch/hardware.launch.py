@@ -10,6 +10,9 @@ model_xacro 是必填参数：指向能渲染 CAN-FD 后端 ros2_control 块的�
 真机部署只需底层驱动 + 本适配包 + 模型描述，不需要模拟器或 Gazebo。
 """
 
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
@@ -22,6 +25,21 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+from motor_hardware_interface.helpers import (
+    motor_joints_from_config,
+    write_position_joints_params_file,
+)
+
+# 驱动侧 position controller 的 joints 由权威真机拓扑配置生成（单一来源），
+# 不在此处手抄。若调用方覆盖 motor_config_file，需保证拓扑顺序与默认一致。
+POSITION_JOINTS = motor_joints_from_config(
+    Path(get_package_share_directory("motor_hardware_interface"))
+    / "config"
+    / "motor_canfd.yaml"
+)
+# launch_ros 会把参数 dict 里的列表序列化成 !!python/tuple，rcl 解析后为空；
+# 因此把 joints 写进标准嵌套格式的临时参数文件，随 manager 一起加载。
+POSITION_JOINTS_PARAM_FILE = write_position_joints_params_file(POSITION_JOINTS)
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -42,7 +60,11 @@ def generate_launch_description() -> LaunchDescription:
     controller_config = PathJoinSubstitution([share, "config", "driver_controllers.yaml"])
 
     manager = Node(package="controller_manager", executable="ros2_control_node", output="screen",
-                   parameters=[{"robot_description": description}, controller_config])
+                   parameters=[
+                       {"robot_description": description},
+                       controller_config,
+                       POSITION_JOINTS_PARAM_FILE,
+                   ])
     state_publisher = Node(package="robot_state_publisher", executable="robot_state_publisher",
                            output="screen", parameters=[{"robot_description": description}])
     jsb = Node(package="controller_manager", executable="spawner", output="screen",

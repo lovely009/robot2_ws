@@ -102,7 +102,7 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 - `src/`：4 个 ROS 2 包。
 - `docs/adr/`：已接受的架构决策。
 - `docs/research/`：调研记录，不作为运行规范。
-- 根目录 PDF：电机与关节 CAN-FD 协议手册。
+- 协议 PDF：[25–30 mm 驱动与 RP 系列关节 CAN-FD 协议手册](src/motor_canfd_sim/25-30mm驱控一体使用说明手册_20260204.pdf)（位于 `src/motor_canfd_sim/`）。
 - `build/`、`install/`、`log/`：colcon 生成目录，不提交 Git。
 
 ## 文档入口

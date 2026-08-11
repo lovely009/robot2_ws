@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from motor_hardware_interface.helpers import motor_joints_from_config
+from motor_hardware_interface.helpers import motor_joints_from_config, read_buses
 from upper_body_canfd_gazebo.motion_library import JOINT_NAMES
 
 
@@ -100,6 +100,19 @@ def test_config_generated_joints_match_sim_motor_order() -> None:
     assert motor_joints_from_config(HARDWARE_CONFIG) == sim_joints, (
         "motor_joints_from_config(真机配置) 必须与仿真电机拓扑顺序一致（同一台机器人）"
     )
+
+
+def test_config_buses_feed_launch_interface_arguments() -> None:
+    """launch 从配置 buses 段生成 interface_<总线名> 参数（总线数量任意）。"""
+
+    assert read_buses(SIM_CONFIG) == [
+        ("left_arm", "vcan0"),
+        ("right_arm", "vcan1"),
+    ]
+    assert read_buses(HARDWARE_CONFIG) == [
+        ("left_arm", "can0"),
+        ("right_arm", "can1"),
+    ]
 
 
 def test_motion_library_joint_names_match_sim_arm_order() -> None:

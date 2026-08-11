@@ -3,8 +3,8 @@
   <xacro:include filename="$(find motor_hardware_interface)/urdf/canfd_hardware.xacro"/>
   <xacro:arg name="controllers_file" default=""/>
   <xacro:arg name="hardware_backend" default="gazebo"/>
-  <xacro:arg name="left_interface" default="vcan0"/>
-  <xacro:arg name="right_interface" default="vcan1"/>
+  <!-- CAN-FD 后端的总线覆盖列表："逻辑总线:接口,逻辑总线:接口"（数量任意）。 -->
+  <xacro:arg name="bus_overrides" default="left_arm:vcan0,right_arm:vcan1"/>
   <xacro:arg name="motor_config_file" default=""/>
 
   <!-- Coordinate convention: +X forward, +Y left, +Z up. -->
@@ -261,8 +261,7 @@
 
   <xacro:if value="${'$(arg hardware_backend)' == 'canfd'}">
     <ros2_control name="UpperBodyCanFdSystem" type="system">
-      <xacro:canfd_hardware left_interface="$(arg left_interface)"
-                            right_interface="$(arg right_interface)"
+      <xacro:canfd_hardware bus_overrides="$(arg bus_overrides)"
                             motor_config_file="$(arg motor_config_file)"/>
       <xacro:canfd_control_joint joint="left_shoulder_yaw_joint"/><xacro:canfd_control_joint joint="left_shoulder_roll_joint"/>
       <xacro:canfd_control_joint joint="left_shoulder_pitch_joint"/><xacro:canfd_control_joint joint="left_elbow_pitch_joint"/>

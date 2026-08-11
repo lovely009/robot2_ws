@@ -24,7 +24,9 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from motor_canfd_sim.helpers import default_config_share_substitution, expected_default_config_path
 from motor_hardware_interface.helpers import (
+    bus_overrides_pieces,
     motor_joints_from_config,
+    read_buses,
     write_position_joints_params_file,
 )
 
@@ -34,6 +36,8 @@ POSITION_JOINTS = motor_joints_from_config(expected_default_config_path())
 # launch_ros 会把参数 dict 里的列表序列化成 !!python/tuple，rcl 解析后为空；
 # 因此把 joints 写进标准嵌套格式的临时参数文件，随 manager 一起加载。
 POSITION_JOINTS_PARAM_FILE = write_position_joints_params_file(POSITION_JOINTS)
+# 总线清单来自仿真拓扑配置：每条总线一个 interface_<总线名> 参数。
+SIM_BUSES = read_buses(expected_default_config_path())
 
 
 def _is_simulator(action):
@@ -45,11 +49,13 @@ def _is_simulator(action):
 
 
 def generate_launch_description() -> LaunchDescription:
-    left_interface = LaunchConfiguration("left_interface")
-    right_interface = LaunchConfiguration("right_interface")
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
     motor_config_file = LaunchConfiguration("motor_config_file")
+    interface_arguments = {
+        f"interface_{name}": LaunchConfiguration(f"interface_{name}")
+        for name, _ in SIM_BUSES
+    }
 
     model_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -58,8 +64,7 @@ def generate_launch_description() -> LaunchDescription:
             )
         ),
         launch_arguments={
-            "left_interface": left_interface,
-            "right_interface": right_interface,
+            **interface_arguments,
             "gui": gui,
             "render_engine": render_engine,
             "motor_config_file": motor_config_file,
@@ -74,10 +79,8 @@ def generate_launch_description() -> LaunchDescription:
                 PathJoinSubstitution(
                     [FindPackageShare("upper_body_canfd_gazebo"), "urdf", "upper_body.urdf.xacro"]
                 ),
-                " hardware_backend:=canfd left_interface:=",
-                left_interface,
-                " right_interface:=",
-                right_interface,
+                " hardware_backend:=canfd bus_overrides:=",
+                *bus_overrides_pieces(SIM_BUSES),
                 " motor_config_file:=",
                 motor_config_file,
             ]
@@ -128,8 +131,10 @@ def generate_launch_description() -> LaunchDescription:
     # OnProcessStart(_is_simulator)），否则会漏掉模拟器启动事件。
     return LaunchDescription(
         [
-            DeclareLaunchArgument("left_interface", default_value="vcan0"),
-            DeclareLaunchArgument("right_interface", default_value="vcan1"),
+            *[
+                DeclareLaunchArgument(f"interface_{name}", default_value=interface)
+                for name, interface in SIM_BUSES
+            ],
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("render_engine", default_value="ogre"),
             DeclareLaunchArgument(

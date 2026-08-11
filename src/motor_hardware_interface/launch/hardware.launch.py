@@ -4,8 +4,8 @@
 joint_state_broadcaster 与 position_controller，直接驱动两条 SocketCAN/CAN-FD 总线。
 
 model_xacro 是必填参数：指向能渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro，
-要求该 xacro 暴露 hardware_backend/left_interface/right_interface/motor_config_file
-参数（本仓库的 upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro 即满足）。
+要求该 xacro 暴露 hardware_backend/bus_overrides/motor_config_file 参数
+（本仓库的 upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro 即满足）。
 
 真机部署只需底层驱动 + 本适配包 + 模型描述，不需要模拟器或 Gazebo。
 """
@@ -26,7 +26,9 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from motor_hardware_interface.helpers import (
+    bus_overrides_pieces,
     motor_joints_from_config,
+    read_buses,
     write_position_joints_params_file,
 )
 
@@ -40,21 +42,26 @@ POSITION_JOINTS = motor_joints_from_config(
 # launch_ros 会把参数 dict 里的列表序列化成 !!python/tuple，rcl 解析后为空；
 # 因此把 joints 写进标准嵌套格式的临时参数文件，随 manager 一起加载。
 POSITION_JOINTS_PARAM_FILE = write_position_joints_params_file(POSITION_JOINTS)
+# 总线清单来自权威真机配置：launch 为每条总线声明 interface_<总线名> 参数，
+# 并通过 bus_overrides 传给 xacro，总线数量任意。
+HARDWARE_BUSES = read_buses(
+    Path(get_package_share_directory("motor_hardware_interface"))
+    / "config"
+    / "motor_canfd.yaml"
+)
 
 
 def generate_launch_description() -> LaunchDescription:
     share = FindPackageShare("motor_hardware_interface")
     model_xacro = LaunchConfiguration("model_xacro")
-    left_interface = LaunchConfiguration("left_interface")
-    right_interface = LaunchConfiguration("right_interface")
     motor_config_file = LaunchConfiguration("motor_config_file")
     default_motor_config = PathJoinSubstitution([share, "config", "motor_canfd.yaml"])
 
     description = ParameterValue(Command([
         FindExecutable(name="xacro"), " ",
         model_xacro,
-        " hardware_backend:=canfd left_interface:=", left_interface,
-        " right_interface:=", right_interface,
+        " hardware_backend:=canfd bus_overrides:=",
+        *bus_overrides_pieces(HARDWARE_BUSES),
         " motor_config_file:=", motor_config_file,
     ]), value_type=str)
     controller_config = PathJoinSubstitution([share, "config", "driver_controllers.yaml"])
@@ -78,8 +85,10 @@ def generate_launch_description() -> LaunchDescription:
             default_value="",
             description="必填：渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro 路径",
         ),
-        DeclareLaunchArgument("left_interface", default_value="can0"),
-        DeclareLaunchArgument("right_interface", default_value="can1"),
+        *[
+            DeclareLaunchArgument(f"interface_{name}", default_value=interface)
+            for name, interface in HARDWARE_BUSES
+        ],
         DeclareLaunchArgument(
             "motor_config_file",
             default_value=default_motor_config,

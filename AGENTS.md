@@ -25,7 +25,7 @@ ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
 - `ros2 run upper_body_canfd_gazebo ros_actions` — 通过 position controller 播放参考动作。
-- `ros2 launch motor_hardware_interface hardware.launch.py model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro left_interface:=can0 right_interface:=can1` — 真机 bring-up（入口由适配层提供，模型描述来自模型包）。
+- `ros2 launch motor_hardware_interface hardware.launch.py model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro interface_left_arm:=can0 interface_right_arm:=can1` — 真机 bring-up（入口由适配层提供，模型描述来自模型包；总线接口参数由配置的 buses 段生成，名为 `interface_<总线名>`）。
 
 ## 代码风格与命名 (Coding Style & Naming Conventions)
 

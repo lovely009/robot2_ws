@@ -33,6 +33,14 @@ bool should_continue_waiting(const std::vector<bool> &observed,
                              const std::chrono::steady_clock::time_point &now,
                              const std::chrono::steady_clock::time_point &deadline);
 
+// 是否所有关节都已观察到反馈（空列表视为已收齐）。
+bool all_feedback_received(const std::vector<bool> &observed);
+
+// 返回尚未观察到反馈的关节名。joint_names 与 observed 长度应一致；
+// 不一致时按较短的列表取，避免越界。
+std::vector<std::string> missing_joint_names(
+    const std::vector<std::string> &joint_names, const std::vector<bool> &observed);
+
 // 把已观察到且位置有限的关节反馈复制为初始位置目标（避免一使能就追错误目标）。
 // 任一关节未观察到或位置非有限时返回 false，error 中给出首个问题关节名。
 bool take_observed_positions_as_initial_targets(

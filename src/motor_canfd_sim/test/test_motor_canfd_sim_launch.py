@@ -29,8 +29,8 @@ def test_defaults_to_sim_side_motor_config_and_vcan_buses():
     for declaration in declarations.values():
         declaration.execute(context)
 
-    assert context.launch_configurations["left_interface"] == "vcan0"
-    assert context.launch_configurations["right_interface"] == "vcan1"
+    assert context.launch_configurations["interface_left_arm"] == "vcan0"
+    assert context.launch_configurations["interface_right_arm"] == "vcan1"
 
     simulator = next(action for action in description.entities if isinstance(action, Node))
     parameters = evaluate_node_parameters(context, simulator)

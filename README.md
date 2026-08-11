@@ -83,7 +83,7 @@ ros2 run upper_body_canfd_gazebo ros_actions --action 1
 ```bash
 ros2 launch motor_hardware_interface hardware.launch.py \
   model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro \
-  left_interface:=can0 right_interface:=can1
+  interface_left_arm:=can0 interface_right_arm:=can1
 ```
 
 真机 bring-up 入口由 `motor_hardware_interface` 提供（不依赖仿真栈），模型描述来自模型包；

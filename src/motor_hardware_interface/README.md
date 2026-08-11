@@ -61,11 +61,11 @@ motor_canfd_drive::DriverConfig load_driver_config(const std::string & path);
 ```bash
 ros2 launch motor_hardware_interface hardware.launch.py \
   model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro \
-  left_interface:=can0 right_interface:=can1
+  interface_left_arm:=can0 interface_right_arm:=can1
 ```
 
 `model_xacro` 是必填参数：指向能渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro
-（要求暴露 `hardware_backend`/`left_interface`/`right_interface`/`motor_config_file`
+（要求暴露 `hardware_backend`/`bus_overrides`/`motor_config_file`
 参数）。真机部署只需底层驱动 + 本包 + 模型描述；启动前须完成 CAN-FD 总线配置并逐关节
 验证零位、方向、限位、增益与急停。
 

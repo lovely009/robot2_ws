@@ -3,11 +3,10 @@
 import importlib.util
 from pathlib import Path
 
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
-from launch_ros.utilities import evaluate_parameters
+from motor_canfd_sim.helpers import evaluate_node_parameters, expected_default_config_path
 
 
 def _load_launch_description():
@@ -34,13 +33,11 @@ def test_defaults_to_sim_side_motor_config_and_vcan_buses():
     assert context.launch_configurations["right_interface"] == "vcan1"
 
     simulator = next(action for action in description.entities if isinstance(action, Node))
-    parameters = evaluate_parameters(context, simulator._Node__parameters)
+    parameters = evaluate_node_parameters(context, simulator)
     injected = next(parameter for parameter in parameters if isinstance(parameter, dict))
 
     # 独立 launch 默认使用本包的仿真侧拓扑配置，而不是真机配置。
-    expected_config = Path(get_package_share_directory("motor_canfd_sim")) / (
-        "config/motor_canfd.yaml"
-    )
+    expected_config = expected_default_config_path()
     assert Path(injected["motor_config_file"]).resolve() == expected_config.resolve()
     assert injected["bus_override.left_arm"] == "vcan0"
     assert injected["bus_override.right_arm"] == "vcan1"

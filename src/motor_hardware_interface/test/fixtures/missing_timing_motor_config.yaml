@@ -1,0 +1,15 @@
+motor_hardware:
+  buses:
+    test_bus:
+      interface: vcan0
+  motor_types:
+    rp:
+      command:
+        kp: 30.0
+        kd: 1.0
+  motors:
+    shoulder_yaw:
+      joint: shoulder_yaw_joint
+      bus: test_bus
+      type: rp
+      id: 1

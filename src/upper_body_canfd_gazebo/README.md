@@ -73,7 +73,7 @@ ros2 run upper_body_canfd_gazebo ros_actions --speed-scale 0.5
 ```bash
 ros2 launch motor_hardware_interface hardware.launch.py \
   model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro \
-  left_interface:=can0 right_interface:=can1
+  interface_left_arm:=can0 interface_right_arm:=can1
 ```
 
 启动前需要完成 CAN-FD 总线配置，并逐关节检查零位、方向、限位、增益与急停。

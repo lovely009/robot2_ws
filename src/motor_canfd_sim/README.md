@@ -50,11 +50,12 @@ ros2 launch upper_body_canfd_gazebo model_sim.launch.py
 ```bash
 ros2 launch motor_canfd_sim motor_canfd_sim.launch.py \
   motor_config_file:=$(ros2 pkg prefix motor_hardware_interface --share)/config/motor_canfd.yaml \
-  left_interface:=vcan0 right_interface:=vcan1
+  interface_left_arm:=vcan0 interface_right_arm:=vcan1
 ```
 
 `motor_config_file` 默认指向本包 `config/motor_canfd.yaml`，调用方需要不同
-拓扑时覆盖。`left_interface` 和 `right_interface` 默认分别为 `vcan0`、`vcan1`。
+拓扑时覆盖。总线接口参数由配置的 buses 段生成（`interface_<总线名>`），
+默认分别为 `vcan0`、`vcan1`。
 
 ## 参数
 

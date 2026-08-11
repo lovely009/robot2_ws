@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from motor_hardware_interface.helpers import motor_joints_from_config
 from upper_body_canfd_gazebo.motion_library import JOINT_NAMES
 
 
@@ -78,19 +79,27 @@ def test_urdf_canfd_joint_order_matches_sim_motor_order() -> None:
     )
 
 
-def test_driver_position_controller_order_matches_sim_motor_order() -> None:
-    """真机与 /driver 回环共用 driver_controllers.yaml：两个命名空间的 position
-    列表都必须与仿真电机拓扑顺序一致，否则命令会发到错误关节。"""
-
+def test_driver_controllers_yaml_has_no_handcopied_joints() -> None:
+    """driver_controllers.yaml 不再手抄 joints 列表：由 launch 从配置生成（单一来源）。"""
     document = yaml.safe_load(DRIVER_CONTROLLERS_CONFIG.read_text())
+    for namespace in ("position_controller", "/driver/position_controller"):
+        parameters = document[namespace]["ros__parameters"]
+        assert "joints" not in parameters, (
+            f"{namespace} 的 joints 必须由 launch 从 motor_canfd.yaml 生成，"
+            "不应在 driver_controllers.yaml 中维护"
+        )
+
+
+def test_config_generated_joints_match_sim_motor_order() -> None:
+    """配置生成的 joints 列表必须等于仿真电机拓扑顺序（真机/仿真两侧一致）。"""
     _, sim_motors = _load_motors(SIM_CONFIG)
     sim_joints = [motor["joint"] for motor in sim_motors.values()]
-    for namespace in ("position_controller", "/driver/position_controller"):
-        joints: List[str] = document[namespace]["ros__parameters"]["joints"]
-        assert joints == sim_joints, (
-            "driver position controller 关节顺序必须与仿真电机拓扑顺序一致：\n"
-            f"{namespace}: {joints}\nsim config:  {sim_joints}"
-        )
+    assert motor_joints_from_config(SIM_CONFIG) == sim_joints, (
+        "motor_joints_from_config(仿真配置) 必须等于仿真电机拓扑顺序"
+    )
+    assert motor_joints_from_config(HARDWARE_CONFIG) == sim_joints, (
+        "motor_joints_from_config(真机配置) 必须与仿真电机拓扑顺序一致（同一台机器人）"
+    )
 
 
 def test_motion_library_joint_names_match_sim_arm_order() -> None:

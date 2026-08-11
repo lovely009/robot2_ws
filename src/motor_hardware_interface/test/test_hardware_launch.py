@@ -8,13 +8,19 @@ from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch.utilities import perform_substitutions
 from launch_ros.actions import Node
+from motor_hardware_interface.helpers import motor_joints_from_config
 
 
-def _load_launch_description():
+def _load_launch_module():
     launch_file = Path(__file__).parents[1] / "launch" / "hardware.launch.py"
     spec = importlib.util.spec_from_file_location("hardware_launch", launch_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _load_launch_description():
+    module = _load_launch_module()
     return module.generate_launch_description()
 
 
@@ -47,3 +53,14 @@ def test_bringup_launch_requires_model_description_and_uses_hardware_config():
     packages = {node.node_package for node in nodes}
     assert "controller_manager" in packages
     assert "robot_state_publisher" in packages
+
+    # joints 列表由权威真机配置生成并注入，不在 driver_controllers.yaml 手抄。
+    expected_joints = motor_joints_from_config(
+        Path(get_package_share_directory("motor_hardware_interface"))
+        / "config"
+        / "motor_canfd.yaml"
+    )
+    assert _load_launch_module().POSITION_JOINTS == expected_joints, (
+        f"launch 注入的 joints 必须由配置生成："
+        f"{_load_launch_module().POSITION_JOINTS} != {expected_joints}"
+    )

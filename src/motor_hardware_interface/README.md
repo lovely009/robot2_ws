@@ -11,7 +11,9 @@
 - 管理首次反馈、运行期反馈超时和安全失能；
 - 将配置转换为纯 C++ `motor_canfd_drive::DriverConfig`。
 - 提供真机 bring-up 入口：`launch/hardware.launch.py`、`config/driver_controllers.yaml`
-  与通用的 CAN-FD ros2_control 硬件 xacro 片段，真机部署不依赖仿真栈。
+  与通用的 CAN-FD ros2_control 硬件 xacro 片段，真机部署不依赖仿真栈；
+  position controller 的 joints 由 launch 从电机拓扑配置生成并注入（单一来源），
+  不在 `driver_controllers.yaml` 手抄。
 
 本包不实现线协议或 SocketCAN 帧编解码，也不限定机械臂数量和每臂关节数。
 
@@ -74,7 +76,8 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 激活流程：
 
 1. 打开配置中的 SocketCAN 接口。
-2. 保持电机失能，以零增益命令等待全部关节的有效反馈。
+2. 保持电机失能，以零增益命令在 `initial_feedback_wait_s`（默认 1 s）窗口内轮询
+   全部关节反馈；未收齐则重试，最多 3 次，每次失败用中文日志列出缺失反馈的关节清单。
 3. 将实测位置设为初始 position target。
 4. 全部关节就绪后统一使能。
 

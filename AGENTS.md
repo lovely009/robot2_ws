@@ -8,6 +8,7 @@ ROS 2 Humble 工作空间：14 自由度上半身双臂机器人的 CAN-FD 电�
 - `build/`、`install/`、`log/` — colcon 生成物，不提交到 Git。
 - 协议 PDF — 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议硬件手册，位于 `src/motor_canfd_sim/`。
 - 各包内 `README.md` 是权威文档，先读它。
+- launch 与静态测试共用辅助函数：`motor_hardware_interface/motor_hardware_interface/helpers.py`（buses 读取、joints 生成、参数文件写入）与 `motor_canfd_sim/motor_canfd_sim/helpers.py`（默认配置路径、launch 私有 API 封装）。
 
 ## 构建、测试与开发命令 (Build, Test, and Development Commands)
 
@@ -40,7 +41,7 @@ ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 - C++：GoogleTest（`ament_cmake_gtest`），测试文件位于 `src/<package>/test/test_*.cpp`。
 - Python：pytest（`ament_pytest`），测试文件位于 `src/<package>/test/test_*.py`，函数命名 `test_<behavior>()`。
 - launch 文件静态检查：`motor_canfd_sim` 用 `ament_add_pytest_test`，`upper_body_canfd_gazebo` 用 pytest 自动发现；测试不得启动 Gazebo 或硬件。
-- 统一运行：`colcon test && colcon test-result --verbose`。
+- 统一运行：`colcon test && colcon test-result --verbose`；当前基线 94 项用例全绿。
 
 ## 提交与 PR 规范 (Commit & Pull Request Guidelines)
 

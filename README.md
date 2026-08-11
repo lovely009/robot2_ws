@@ -1,35 +1,90 @@
 # robot_ws
 
-ROS 2 Humble 工作空间，面向 14 自由度上半身双臂 CAN-FD 控制。当前仓库包含 4 个 ament 包，提供 Gazebo Fortress 仿真与双 SocketCAN 真机控制链路。
+14 自由度上半身双臂机器人的 ROS 2 Humble 工作空间，覆盖 CAN-FD 电机控制的**仿真回环**与**真机控制**全链路。
 
-## 架构概览
+[![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/humble/)
+[![Gazebo](https://img.shields.io/badge/Gazebo-Fortress-6F6F6F)](https://gazebosim.org/)
+[![C++](https://img.shields.io/badge/C%2B%2B-17-blue)](https://isocpp.org/)
+[![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+![License](https://img.shields.io/badge/License-Apache--2.0-green)
 
-```text
-ROS 2 position controller
-  -> motor_hardware_interface
-  -> motor_canfd_drive
-  -> can / vcan
-  -> motor_canfd_sim
-  -> Gazebo effort controller（仅仿真）
+## Table of Contents
+
+- [特性](#特性)
+- [架构](#架构)
+- [快速开始](#快速开始)
+- [项目结构](#项目结构)
+- [配置原则](#配置原则)
+- [测试](#测试)
+- [开发流程](#开发流程)
+- [文档](#文档)
+- [License](#license)
+
+## 特性
+
+- **完整仿真回环**：ROS 2 position controller → `motor_canfd_drive` → vcan → `motor_canfd_sim` → Gazebo，反馈再经 CAN-FD 帧回到驱动侧，全链路实测可用。
+- **真机与仿真解耦**：真机 bring-up 入口由 `motor_hardware_interface` 自足提供，不依赖仿真栈；仿真拓扑配置来源于仿真模型，与真机配置各自演进（ADR 0002）。
+- **配置驱动拓扑**：电机数量、类型、总线与 joint 映射全部由 YAML 声明，底层驱动不写死关节数量或左右臂拓扑。
+- **协议策略扩展**：新增电机家族时，驱动侧注册 `MotorProtocol`、模拟器侧注册 `SimMotorHandler`，收发主循环无家族分支。
+- **安全语义**：激活阶段有界重试（3 × 1 s 窗口）后 fail-fast；运行期反馈超时立即终止；模拟器默认拒绝打开真实 CAN 接口（`allow_hardware_interfaces:=false`）。
+- **拓扑一致性测试**：URDF、effort controller、position controller、两侧电机拓扑与动作库的关节顺序互为单一来源，并有静态测试兜底。
+
+## 架构
+
+### 分层与依赖
+
+四个 ament 包构成单向依赖链，无环、无向上依赖：
+
+```mermaid
+graph LR
+    subgraph Integration["模型集成包 upper_body_canfd_gazebo (Python)"]
+        UBG["launch 编排 / URDF / worlds<br/>ros_actions 动作播放"]
+    end
+    subgraph Simulation["仿真后端 motor_canfd_sim (C++)"]
+        SIM["motor_canfd_sim_node<br/>SimMotorHandler · MotorPlantModel"]
+    end
+    subgraph Adapter["ROS 适配层 motor_hardware_interface (C++)"]
+        HWI["CanFdSystem<br/>load_driver_config() · 真机 bring-up"]
+    end
+    subgraph Driver["底层驱动 motor_canfd_drive (C++17, 无 ROS)"]
+        DRV["MotorCanfdDriver<br/>MotorProtocol · SocketCan"]
+    end
+    BUS["can0/can1 或 vcan0/vcan1<br/>逻辑总线 left_arm / right_arm"]
+    GZ["Gazebo Fortress<br/>effort controller"]
+
+    UBG -->|exec_depend / include launch| SIM
+    UBG -->|exec_depend / xacro include| HWI
+    SIM -->|复用解析 API| HWI
+    SIM -->|MotorCanfdDriver / SocketCan| DRV
+    HWI -->|SystemInterface 插件| DRV
+    DRV <-->|CAN-FD 帧| BUS
+    SIM <-->|CAN-FD 帧| BUS
+    SIM <-->|effort 命令 / joint state| GZ
+
+    classDef clean fill:#51cf66,stroke:#2b8a3e,color:#fff
+    class UBG,SIM,HWI,DRV,BUS,GZ clean
 ```
 
-| 包 | 语言 | 职责 |
-|---|---|---|
-| [motor_canfd_drive](src/motor_canfd_drive/README.md) | C++ | 与 ROS 解耦的 SocketCAN/CAN-FD 驱动、协议编解码与协议策略 |
-| [motor_hardware_interface](src/motor_hardware_interface/README.md) | C++ | ros2_control 适配层、YAML 解析与 joint 映射 |
-| [motor_canfd_sim](src/motor_canfd_sim/README.md) | C++ | 唯一支持的仿真后端，通过 vcan 模拟电机命令与反馈 |
-| [upper_body_canfd_gazebo](src/upper_body_canfd_gazebo/README.md) | Python | 机器人模型、Gazebo 集成、launch 编排与参考动作播放器 |
+| 层 | 包 | 语言 | 职责 |
+|---|---|---|---|
+| 应用集成 | [upper_body_canfd_gazebo](src/upper_body_canfd_gazebo/README.md) | Python | 机器人模型（URDF/xacro）、Gazebo 世界、launch 编排、参考动作播放 |
+| 仿真后端 | [motor_canfd_sim](src/motor_canfd_sim/README.md) | C++ | 电机侧模拟器：在 vcan 上扮演电机，驱动 Gazebo effort controller 并编码反馈帧 |
+| ROS 适配 | [motor_hardware_interface](src/motor_hardware_interface/README.md) | C++ | `ros2_control` SystemInterface 插件、YAML 解析、安全时序、真机 bring-up 入口 |
+| 底层驱动 | [motor_canfd_drive](src/motor_canfd_drive/README.md) | C++17 | 与 ROS 解耦的 SocketCAN/CAN-FD 传输与协议策略（`rp` / `motor_2530`） |
 
-`motor_canfd_sim` 是当前唯一支持的仿真后端；仿真使用 [src/motor_canfd_sim/config/motor_canfd.yaml](src/motor_canfd_sim/config/motor_canfd.yaml)（拓扑来自仿真模型），真机使用 [src/motor_hardware_interface/config/motor_canfd.yaml](src/motor_hardware_interface/config/motor_canfd.yaml)，两侧只共用解析 API，不共用配置文件。
+### 数据流
 
-架构决策记录见 [docs/adr/0001-motor-canfd-layering-and-config-single-source.md](docs/adr/0001-motor-canfd-layering-and-config-single-source.md) 与 [docs/adr/0002-sim-topology-config-decoupled-from-hardware.md](docs/adr/0002-sim-topology-config-decoupled-from-hardware.md)。
+**仿真回环**：`position_controller`（`/driver` 命名空间）→ `CanFdSystem` → `MotorCanfdDriver` 编码命令帧 → vcan → `motor_canfd_sim` 解码并更新 plant model → Gazebo effort controller；Gazebo joint state 经模拟器编码为反馈帧返回驱动侧，驱动侧 `read()` 更新 joint states。
 
-## 环境要求
+**真机**：同一套「适配层 → 底层驱动」链路，总线为真实 `can0/can1`；模型描述由模型包提供，无 Gazebo/模拟器依赖。
+
+## 快速开始
+
+### 环境要求
 
 - Ubuntu 22.04
-- ROS 2 Humble
-- Gazebo Fortress（`ros_gz`）
-- 支持 CAN-FD 的 Linux SocketCAN；仿真需要 `vcan`
+- ROS 2 Humble、Gazebo Fortress（`ros_gz`）
+- Linux SocketCAN（仿真需要 `vcan` 内核模块）
 
 安装依赖：
 
@@ -38,7 +93,7 @@ source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-## 构建与测试
+### 构建与测试
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -48,32 +103,22 @@ colcon test
 colcon test-result --verbose
 ```
 
-## 运行方式
-
 ### 全链路仿真
 
-在当前机器上，已验证如下命令可启动仿真主流程：
-
 ```bash
+# 1. 创建 vcan0 / vcan1
 bash src/upper_body_canfd_gazebo/scripts/setup_vcan.sh
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+
+# 2. 启动完整回环（Gazebo + 模拟器 + 驱动侧 controller）
 ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py gui:=false
 ```
 
-实际启动日志显示：
-- Gazebo、`motor_canfd_sim`、`robot_state_publisher` 和基础桥接节点都能启动；
-- 驱动侧 `ros2_control_node` 成功加载 `UpperBodyCanFdSystem`，`/driver/controller_manager` 与 `position_controller` 正常就绪；
-- 完整回环可用：向 `/driver/position_controller/commands` 发布位置指令后，`/joint_states`（Gazebo）与 `/driver/joint_states`（CAN 反馈）同步跟随。
-
-若只是验证模型与模拟器本身，可继续使用 `model_sim.launch.py` 或 `gazebo.launch.py`。
-
-另开一个终端播放参考动作：
+另开终端播放参考动作：
 
 ```bash
 source install/setup.bash
 ros2 run upper_body_canfd_gazebo ros_actions --list
-ros2 run upper_body_canfd_gazebo ros_actions --action 1
+ros2 run upper_body_canfd_gazebo ros_actions --action 8 --speed-scale 0.5
 ```
 
 ### 真机 bring-up
@@ -86,28 +131,59 @@ ros2 launch motor_hardware_interface hardware.launch.py \
   interface_left_arm:=can0 interface_right_arm:=can1
 ```
 
-真机 bring-up 入口由 `motor_hardware_interface` 提供（不依赖仿真栈），模型描述来自模型包；
-真机部署只需底层驱动 + 适配层 + 模型描述。首次接入时应逐关节确认零位、方向、限位、增益、
-反馈超时和硬件急停。当前仿真参数不能直接替代真机标定。
+首次接入时须逐关节确认零位、方向、限位、增益、反馈超时与硬件急停；仿真参数不能直接替代真机标定。
+
+## 项目结构
+
+```text
+.
+├── README.md / AGENTS.md / CONTEXT.md   # 工程说明、Agent 指南、领域术语
+├── docs/
+│   ├── adr/                             # 架构决策记录（ADR 0001–0004）
+│   └── health-dashboard-report.md       # 代码健康度报告（只读快照）
+└── src/
+    ├── motor_canfd_drive/               # 纯 C++17 底层驱动库
+    ├── motor_hardware_interface/        # ros2_control 适配 + 真机入口
+    ├── motor_canfd_sim/                 # 电机侧模拟器（唯一仿真后端）
+    └── upper_body_canfd_gazebo/         # 模型 / launch / 动作库
+```
 
 ## 配置原则
 
-- [src/motor_hardware_interface/config/motor_canfd.yaml](src/motor_hardware_interface/config/motor_canfd.yaml) 是真机侧总线、电机类型与 joint 映射的单一配置源；仿真侧拓扑在 [src/motor_canfd_sim/config/motor_canfd.yaml](src/motor_canfd_sim/config/motor_canfd.yaml)，来源于仿真模型，不与真机配置耦合。
-- 仿真默认使用 `vcan0/vcan1`，真机默认使用 `can0/can1`；`bus_override.<逻辑总线名>` 可在启动时覆盖接口。
-- 新增已有类型的电机只修改 YAML；新增电机家族时实现新的协议策略。
-- 底层驱动不得写死关节数量、左右臂拓扑或 ROS 2 接口。
+- **两份拓扑配置解耦**：[真机配置](src/motor_hardware_interface/config/motor_canfd.yaml) 与[仿真配置](src/motor_canfd_sim/config/motor_canfd.yaml) 各自演进，仅共享 `load_driver_config()` 解析 API（ADR 0002）；同一台机器人的拓扑一致性由静态测试兜底。
+- **joints 单一来源**：`driver_controllers.yaml` 不手抄 joints；launch 通过 `motor_joints_from_config()` 从电机拓扑配置生成并注入 position controller。
+- **总线数量任意**：launch 按配置 `buses` 段生成 `interface_<逻辑总线名>` 参数（如 `interface_left_arm`），`bus_override.*` 在启动时把逻辑总线映射到任意 SocketCAN 接口（HIL 时把 vcan 重定向到真实 can 接口）。
+- **新增已有类型电机**：只改 YAML 的 `motors` 段。
+- **新增电机家族**：驱动侧实现并注册 `MotorProtocol`，模拟器侧实现并注册 `SimMotorHandler`，两侧配置声明类型与实例；不得在通用收发循环中增加类型分支。
+- **安全边界**：模拟器默认只允许 `vcan*` 接口；真机安全依赖激活重试、反馈超时与人工标定流程，不能替代硬件急停与机械限位。
 
-## 仓库内容
+## 测试
 
-- `src/`：4 个 ROS 2 包。
-- `docs/adr/`：已接受的架构决策。
-- `docs/research/`：调研记录，不作为运行规范。
-- 协议 PDF：[25–30 mm 驱动与 RP 系列关节 CAN-FD 协议手册](src/motor_canfd_sim/25-30mm驱控一体使用说明手册_20260204.pdf)（位于 `src/motor_canfd_sim/`）。
-- `build/`、`install/`、`log/`：colcon 生成目录，不提交 Git。
+当前 94 项用例（GoogleTest + pytest）全部通过，测试不启动 Gazebo 或真实硬件。
 
-## 文档入口
+| 包 | 测试目标 | 覆盖内容 |
+|---|---|---|
+| `motor_canfd_drive` | `test_protocol` / `test_driver` | 协议字段编解码、配置校验、协议注册与扩展 |
+| `motor_hardware_interface` | `test_motor_config` / `test_canfd_logic` / `test_hardware_launch` | YAML 解析与校验、激活/超时纯逻辑、真机 launch 静态检查 |
+| `motor_canfd_sim` | `test_plant_model` / `test_sim_frame_decode` / `test_motor_canfd_sim_launch` | plant 模型、帧解析纯函数、launch 参数与安全默认值 |
+| `upper_body_canfd_gazebo` | `test_config_topology` 等 5 个 pytest | 拓扑一致性、launch 时序契约、动作库与动作播放器 |
 
-- 仿真与 launch 说明：[src/upper_body_canfd_gazebo/README.md](src/upper_body_canfd_gazebo/README.md)
-- 底层驱动说明：[src/motor_canfd_drive/README.md](src/motor_canfd_drive/README.md)
-- ROS 适配层说明：[src/motor_hardware_interface/README.md](src/motor_hardware_interface/README.md)
-- 电机侧模拟器说明：[src/motor_canfd_sim/README.md](src/motor_canfd_sim/README.md)
+## 开发流程
+
+- **分支模型**：`main` 仅用于发布；功能经 PR 合入 `develop`。
+- **提交规范**：conventional 前缀（`feat:` / `fix:` / `refactor:` / `docs:` / `test:`），正文写清原因。
+- **PR 要求**：说明改动内容与验证方式（如 `colcon test` 结果），必要时附 launch/行为截图。
+- **架构决策**：影响依赖方向、配置边界或安全语义的取舍写入 `docs/adr/`，随功能一起评审。
+
+## 文档
+
+- 领域术语与命名：[CONTEXT.md](CONTEXT.md)
+- Agent 开发指南：[AGENTS.md](AGENTS.md)
+- 各包说明：见上表包名链接
+- 架构决策：[docs/adr/](docs/adr/)
+- 代码健康度报告：[docs/health-dashboard-report.md](docs/health-dashboard-report.md)
+- 协议手册：`src/motor_canfd_sim/` 下的 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议 PDF
+
+## License
+
+Apache-2.0（各包 `package.xml` 声明）。

@@ -1,6 +1,7 @@
 # 四包分层与配置单一来源（motor_canfd）
 
-**Status**: accepted
+**Status**: accepted；其中“真机与仿真共享同一份 motor_canfd.yaml”部分已被
+[ADR 0002](./0002-sim-topology-config-decoupled-from-hardware.md) 取代。
 
 14 自由度上半身双臂 CAN-FD 工程按职责分三层、按包分四层单向依赖：`motor_canfd_drive ← motor_hardware_interface ← motor_canfd_sim ← upper_body_canfd_gazebo`。真机与仿真共享同一份 `motor_canfd.yaml`（电机拓扑单一配置源），由 `motor_hardware_interface` 持有并公开解析 API；`motor_canfd_drive` 是不解析 YAML、不依赖 ROS 的纯 C++ 协议库，只接收 `DriverConfig`。
 

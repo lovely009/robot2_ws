@@ -30,7 +30,7 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
-    # 模拟器只接收配置路径；挂哪些电机由本包（上层集成）决定。
+    # 模拟器只接收配置路径；默认使用 motor_canfd_sim 自带的仿真拓扑配置。
     simulator = Node(
         package="motor_canfd_sim",
         executable="motor_canfd_sim_node",
@@ -57,9 +57,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "motor_config_file",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("motor_hardware_interface"), "config", "motor_canfd.yaml"]
+                    [FindPackageShare("motor_canfd_sim"), "config", "motor_canfd.yaml"]
                 ),
-                description="电机拓扑配置路径；默认使用与真机相同的 motor_canfd.yaml",
+                description="电机拓扑配置路径；默认使用仿真侧 motor_canfd_sim/config/motor_canfd.yaml",
             ),
             gazebo,
             simulator,

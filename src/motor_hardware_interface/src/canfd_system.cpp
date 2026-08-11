@@ -57,7 +57,8 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
     if (path.empty()) {
       throw std::runtime_error("hardware parameter 'config_file' is required");
     }
-    // 拓扑（buses/motors/参数）由共享解析 API 产出，真机与模拟器共用一份 schema。
+    // 拓扑（buses/motors/参数）由同一解析 API 产出；真机与仿真各持一份配置文件，
+    // 仅结构（schema）一致。
     config_.driver = load_driver_config(path);
     // 以下 ROS 侧专属段（反馈超时、命令增益）仍在本适配层解析。
     const auto document = YAML::LoadFile(path);

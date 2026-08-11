@@ -11,6 +11,7 @@ find_package(std_msgs REQUIRED)
 
 add_executable(motor_canfd_sim_node
   src/motor_canfd_sim_node.cpp
+  src/sim_frame_decode.cpp
   src/sim_motor_handler.cpp)
 target_compile_features(motor_canfd_sim_node PUBLIC cxx_std_17)
 target_compile_options(motor_canfd_sim_node PRIVATE -Wall -Wextra -Wpedantic)
@@ -31,6 +32,11 @@ if(BUILD_TESTING)
   target_compile_options(test_plant_model PRIVATE -Wall -Wextra -Wpedantic)
   target_include_directories(test_plant_model PRIVATE include)
   target_link_libraries(test_plant_model motor_canfd_drive::motor_canfd_drive)
+  ament_add_gtest(test_sim_frame_decode test/test_sim_frame_decode.cpp src/sim_frame_decode.cpp)
+  target_compile_features(test_sim_frame_decode PUBLIC cxx_std_17)
+  target_compile_options(test_sim_frame_decode PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(test_sim_frame_decode PRIVATE include)
+  target_link_libraries(test_sim_frame_decode motor_canfd_drive::motor_canfd_drive)
   ament_add_pytest_test(test_motor_canfd_sim_launch test/test_motor_canfd_sim_launch.py)
 endif()
 

@@ -3,13 +3,10 @@
 #include "motor_hardware_interface/motor_config.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <thread>
 #include <utility>
-
-#include <yaml-cpp/yaml.h>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -24,32 +21,6 @@ bool has_state_interface(const hardware_interface::ComponentInfo &joint,
                      [&](const auto &interface) { return interface.name == name; });
 }
 
-std::pair<double, double> parse_command_config(const YAML::Node &type_node,
-                                               const YAML::Node &motor_node,
-                                               const std::string &motor_name) {
-  const auto type_command = type_node ? type_node["command"] : YAML::Node{};
-  const auto motor_command = motor_node["command"];
-  const auto resolve = [&](const char *key) -> double {
-    // 优先级：单电机 command > motor_types 公共默认值。
-    if (motor_command && motor_command[key]) {
-      return motor_command[key].as<double>();
-    }
-    if (type_command && type_command[key]) {
-      return type_command[key].as<double>();
-    }
-    throw std::runtime_error("motor '" + motor_name +
-                             "' requires command." + key +
-                             " either per motor or in motor_types defaults");
-  };
-  const double kp = resolve("kp");
-  const double kd = resolve("kd");
-  if (!std::isfinite(kp) || !std::isfinite(kd) || kp < 0.0 || kd < 0.0) {
-    throw std::runtime_error("motor '" + motor_name +
-                             "' command kp/kd must be finite and non-negative");
-  }
-  return {kp, kd};
-}
-
 } // namespace
 
 bool CanFdSystem::load_config(const std::string &path, std::string &error) {
@@ -57,37 +28,9 @@ bool CanFdSystem::load_config(const std::string &path, std::string &error) {
     if (path.empty()) {
       throw std::runtime_error("hardware parameter 'config_file' is required");
     }
-    // 拓扑（buses/motors/参数）由同一解析 API 产出；真机与仿真各持一份配置文件，
-    // 仅结构（schema）一致。
-    config_.driver = load_driver_config(path);
-    // 以下 ROS 侧专属段（反馈超时、命令增益）仍在本适配层解析。
-    const auto document = YAML::LoadFile(path);
-    const auto hardware = document["motor_hardware"];
-    if (!hardware || !hardware.IsMap()) {
-      throw std::runtime_error("YAML root 'motor_hardware' is required");
-    }
-    const auto timing = hardware["timing"];
-    if (!timing || !timing.IsMap()) {
-      throw std::runtime_error("motor_hardware.timing is required");
-    }
-    config_.feedback_timeout_s = timing["feedback_timeout_s"].as<double>();
-    config_.initial_feedback_wait_s = timing["initial_feedback_wait_s"].as<double>();
-    if (!std::isfinite(config_.feedback_timeout_s) ||
-        !std::isfinite(config_.initial_feedback_wait_s) ||
-        config_.feedback_timeout_s <= 0.0 || config_.initial_feedback_wait_s <= 0.0) {
-      throw std::runtime_error("feedback timeouts must be finite positive values");
-    }
-
-    const auto types = hardware["motor_types"];
-    const auto motors = hardware["motors"];
-    config_.motor_commands.clear();
-    config_.motor_commands.reserve(config_.driver.motors.size());
-    for (const auto &motor : config_.driver.motors) {
-      const auto motor_node = motors[motor.name];
-      const auto type_node = types ? types[motor.type] : YAML::Node{};
-      const auto gains = parse_command_config(type_node, motor_node, motor.name);
-      config_.motor_commands.push_back({gains.first, gains.second});
-    }
+    // 拓扑、时序与命令增益由同一解析 API 一次完成；真机与仿真各持一份配置，
+    // 仅结构（schema）一致。适配层不再二次解析 YAML。
+    config_ = load_system_config(path);
     return true;
   } catch (const std::exception &exception) {
     error = exception.what();

@@ -8,6 +8,7 @@
 #include "hardware_interface/system_interface.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "motor_canfd_drive/motor_canfd_driver.hpp"
+#include "motor_hardware_interface/motor_config.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 
@@ -35,20 +36,6 @@ public:
                                         const rclcpp::Duration &period) override;
 
 private:
-  // Kp/Kd 属于每台电机的控制配置；YAML 可先给 type 默认值，再按 motor 覆盖。
-  struct MotorCommandConfig {
-    double kp{0.0};
-    double kd{0.0};
-  };
-
-  // RuntimeConfig 是 ROS/YAML 世界与纯 C++ DriverConfig 之间的边界。
-  struct RuntimeConfig {
-    motor_canfd_drive::DriverConfig driver;
-    std::vector<MotorCommandConfig> motor_commands;
-    double feedback_timeout_s{0.1};
-    double initial_feedback_wait_s{0.1};
-  };
-
   bool load_config(const std::string &path, std::string &error);
   bool apply_bus_overrides(std::string &error);
   bool build_joint_mapping(std::string &error);
@@ -56,7 +43,7 @@ private:
   void receive_feedback(std::vector<bool> *observed = nullptr);
   void close_driver() noexcept;
 
-  RuntimeConfig config_;
+  MotorSystemConfig config_;
   std::unique_ptr<motor_canfd_drive::MotorCanfdDriver> driver_;
   // motor_to_joint_[m] = ros2_control joint 下标。映射按 joint_name 建立，
   // 不依赖“第几个电机就是第几个关节”的固定数组顺序。

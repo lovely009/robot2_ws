@@ -38,8 +38,8 @@ def test_bringup_launch_requires_model_description_and_uses_hardware_config():
 
     # 模型描述必须由调用方显式提供，本 launch 不默认指向任何仿真包。
     assert context.launch_configurations["model_xacro"] == ""
-    assert context.launch_configurations["left_interface"] == "can0"
-    assert context.launch_configurations["right_interface"] == "can1"
+    assert context.launch_configurations["interface_left_arm"] == "can0"
+    assert context.launch_configurations["interface_right_arm"] == "can1"
 
     expected_config = Path(get_package_share_directory("motor_hardware_interface")) / (
         "config/motor_canfd.yaml"

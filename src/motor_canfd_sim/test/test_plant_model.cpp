@@ -222,4 +222,13 @@ TEST(PlantModel, InvalidTorqueConstantThrows) {
                std::invalid_argument);
 }
 
+TEST(PlantModel, UnknownTypeThrowsInsteadOfFallingBackToWrist) {
+  auto plant = make_plant();
+  auto state = fresh_state(JointCommand{0.5, 0.0, 30.0, 1.0, 0.0});
+  JointSample sample;
+  EXPECT_THROW(plant.compute_effort(make_motor("future", "future_type"), state,
+                                    sample, Clock::now()),
+               std::invalid_argument);
+}
+
 } // namespace

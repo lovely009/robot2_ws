@@ -6,9 +6,10 @@
 
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import yaml
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 
 def motor_joints_from_config(config_path) -> List[str]:
@@ -21,6 +22,29 @@ def motor_joints_from_config(config_path) -> List[str]:
     document = yaml.safe_load(Path(config_path).read_text())
     motors = document["motor_hardware"]["motors"]
     return [motor["joint"] for motor in motors.values()]
+
+
+def read_buses(config_path) -> List[Tuple[str, str]]:
+    """按 motor_canfd.yaml 的 buses 段返回 [(逻辑总线名, 默认接口), ...]。"""
+
+    document = yaml.safe_load(Path(config_path).read_text())
+    buses = document["motor_hardware"]["buses"]
+    return [(name, node["interface"]) for name, node in buses.items()]
+
+
+def bus_overrides_pieces(buses: List[Tuple[str, str]]):
+    """构造 xacro 的 bus_overrides 替换片段："name:接口,..."。
+
+    每个接口取自 launch 参数 interface_<总线名>，总线数量任意。
+    """
+
+    pieces = []
+    for index, (name, _) in enumerate(buses):
+        if index:
+            pieces.append(TextSubstitution(text=","))
+        pieces.append(TextSubstitution(text=f"{name}:"))
+        pieces.append(LaunchConfiguration(f"interface_{name}"))
+    return pieces
 
 
 def write_position_joints_params_file(joints: List[str]) -> str:

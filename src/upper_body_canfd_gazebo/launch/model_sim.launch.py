@@ -9,15 +9,24 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from motor_canfd_sim.helpers import default_config_share_substitution
+from motor_canfd_sim.helpers import (
+    default_config_share_substitution,
+    expected_default_config_path,
+)
+from motor_hardware_interface.helpers import read_buses
+
+# 总线清单来自仿真拓扑配置：每条总线一个 interface_<总线名> 参数。
+SIM_BUSES = read_buses(expected_default_config_path())
 
 
 def generate_launch_description() -> LaunchDescription:
-    left_interface = LaunchConfiguration("left_interface")
-    right_interface = LaunchConfiguration("right_interface")
     gui = LaunchConfiguration("gui")
     render_engine = LaunchConfiguration("render_engine")
     motor_config_file = LaunchConfiguration("motor_config_file")
+    bus_overrides = {
+        f"bus_override.{name}": LaunchConfiguration(f"interface_{name}")
+        for name, _ in SIM_BUSES
+    }
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -43,16 +52,17 @@ def generate_launch_description() -> LaunchDescription:
             ),
             {
                 "motor_config_file": motor_config_file,
-                "bus_override.left_arm": left_interface,
-                "bus_override.right_arm": right_interface,
+                **bus_overrides,
             },
         ],
     )
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("left_interface", default_value="vcan0"),
-            DeclareLaunchArgument("right_interface", default_value="vcan1"),
+            *[
+                DeclareLaunchArgument(f"interface_{name}", default_value=interface)
+                for name, interface in SIM_BUSES
+            ],
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("render_engine", default_value="ogre"),
             DeclareLaunchArgument(

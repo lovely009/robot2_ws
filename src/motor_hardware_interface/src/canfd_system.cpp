@@ -21,6 +21,17 @@ bool has_state_interface(const hardware_interface::ComponentInfo &joint,
                      [&](const auto &interface) { return interface.name == name; });
 }
 
+std::string join_joint_names(const std::vector<std::string> &names) {
+  std::string joined;
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (index != 0U) {
+      joined += "、";
+    }
+    joined += names[index];
+  }
+  return joined;
+}
+
 } // namespace
 
 bool CanFdSystem::load_config(const std::string &path, std::string &error) {
@@ -121,7 +132,7 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
   if (!load_config(config_path, error) || !apply_bus_overrides(error) ||
       !build_joint_mapping(error)) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "invalid motor hardware configuration: %s", error.c_str());
+                 "电机硬件配置无效：%s", error.c_str());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -131,7 +142,7 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
     driver_ = std::make_unique<motor_canfd_drive::MotorCanfdDriver>(config_.driver);
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "invalid CAN-FD driver configuration: %s", exception.what());
+                 "CAN-FD 驱动配置无效：%s", exception.what());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -182,33 +193,55 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
   try {
     driver_->open();
     if (!driver_->set_enabled(false)) {
-      throw std::runtime_error("failed to send initial disable command");
+      throw std::runtime_error("发送初始失能指令失败");
     }
 
     // 激活安全原则：绝不假设上电时机器人位于“零位”。
-    // 先保持失能并发送零增益命令，只利用反馈读取真实当前位置；全部关节可见后，
-    // 再把当前姿态复制为初始 position target，避免一使能就突然追赶错误目标。
-    std::vector<bool> observed(info_.joints.size(), false);
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                              std::chrono::duration<double>(config_.initial_feedback_wait_s));
-    // 轮询继续条件与"已观察位置作为初始目标"都是纯逻辑，见 canfd_logic。
-    while (should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
-      if (!send_position_commands(true)) {
-        throw std::runtime_error("failed to send zero-gain feedback query");
-      }
-      receive_feedback(&observed);
-      if (!should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+    // 每次尝试保持失能并发送零增益命令，只利用反馈读取真实当前位置；全部关节
+    // 可见后再复制为初始 position target，避免一使能就突然追错目标。
+    // 连续 kMaxActivationAttempts 次窗口内未收齐反馈才判定失败（fail-fast）。
+    constexpr std::size_t kMaxActivationAttempts = 3U;
+    const auto attempt_window =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(config_.initial_feedback_wait_s));
 
     std::vector<std::string> joint_names;
     joint_names.reserve(info_.joints.size());
     for (const auto &joint : info_.joints) {
       joint_names.push_back(joint.name);
     }
+
+    std::vector<bool> observed;
+    bool activated = false;
+    for (std::size_t attempt = 1U; attempt <= kMaxActivationAttempts; ++attempt) {
+      observed.assign(info_.joints.size(), false);
+      const auto deadline = std::chrono::steady_clock::now() + attempt_window;
+      // 轮询继续条件与"已观察位置作为初始目标"都是纯逻辑，见 canfd_logic。
+      while (should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
+        if (!send_position_commands(true)) {
+          throw std::runtime_error("发送零增益反馈查询失败");
+        }
+        receive_feedback(&observed);
+        if (!should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+      if (all_feedback_received(observed)) {
+        activated = true;
+        break;
+      }
+      RCLCPP_WARN(rclcpp::get_logger("motor_hardware_interface"),
+                  "第 %zu/%zu 次激活尝试未收齐全部关节反馈，缺失：%s",
+                  attempt, kMaxActivationAttempts,
+                  join_joint_names(missing_joint_names(joint_names, observed)).c_str());
+    }
+    if (!activated) {
+      throw std::runtime_error("连续 " + std::to_string(kMaxActivationAttempts) +
+                               " 次激活尝试失败，未收到反馈的关节：" +
+                               join_joint_names(missing_joint_names(joint_names, observed)));
+    }
+
     std::string activation_error;
     if (!take_observed_positions_as_initial_targets(
             joint_names, observed, position_, command_, activation_error)) {
@@ -216,13 +249,13 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
     }
 
     if (!driver_->set_enabled(true)) {
-      throw std::runtime_error("failed to enable one or more motors");
+      throw std::runtime_error("使能电机失败");
     }
     active_ = true;
     return hardware_interface::CallbackReturn::SUCCESS;
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "activation failed: %s", exception.what());
+                 "激活失败：%s", exception.what());
     if (driver_ && driver_->is_open()) {
       static_cast<void>(driver_->set_enabled(false));
     }
@@ -288,7 +321,7 @@ hardware_interface::return_type CanFdSystem::read(const rclcpp::Time &,
     receive_feedback();
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "CAN feedback read failed: %s", exception.what());
+                 "CAN 反馈读取失败：%s", exception.what());
     return hardware_interface::return_type::ERROR;
   }
   // 使用 steady_clock 做超时判断，避免系统时间校准/跳变造成误报。
@@ -297,7 +330,7 @@ hardware_interface::return_type CanFdSystem::read(const rclcpp::Time &,
       first_stale_feedback(last_feedback_, now, config_.feedback_timeout_s);
   if (stale != last_feedback_.size()) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                 "feedback timeout: %s", info_.joints[stale].name.c_str());
+                 "反馈超时：%s", info_.joints[stale].name.c_str());
     return hardware_interface::return_type::ERROR;
   }
   return hardware_interface::return_type::OK;

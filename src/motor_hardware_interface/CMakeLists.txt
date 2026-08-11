@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(motor_hardware_interface)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(motor_canfd_drive REQUIRED)
 find_package(pluginlib REQUIRED)
@@ -48,4 +49,5 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
 endif()
 
+ament_python_install_package(motor_hardware_interface)
 ament_package()

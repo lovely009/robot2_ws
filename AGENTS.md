@@ -6,7 +6,7 @@ ROS 2 Humble 工作空间：14 自由度上半身双臂机器人的 CAN-FD 电�
 
 - `src/<package>` — 4 个 ament 包，采用标准布局：`src/`（实现）、`include/<package>/`（C++ 头文件）、`config/`（YAML 配置）、`launch/`、`test/`，按需含 `urdf/`、`worlds/`。
 - `build/`、`install/`、`log/` — colcon 生成物，不提交到 Git。
-- 根目录 PDF — 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议硬件手册。
+- 协议 PDF — 25–30 mm 驱动与 RP 系列关节 CAN-FD 协议硬件手册，位于 `src/motor_canfd_sim/`。
 - 各包内 `README.md` 是权威文档，先读它。
 
 ## 构建、测试与开发命令 (Build, Test, and Development Commands)
@@ -25,7 +25,7 @@ ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ```
 
 - `ros2 run upper_body_canfd_gazebo ros_actions` — 通过 position controller 播放参考动作。
-- `ros2 launch upper_body_canfd_gazebo hardware.launch.py left_interface:=can0 right_interface:=can1` — 真机 bring-up。
+- `ros2 launch motor_hardware_interface hardware.launch.py model_xacro:=src/upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro left_interface:=can0 right_interface:=can1` — 真机 bring-up（入口由适配层提供，模型描述来自模型包）。
 
 ## 代码风格与命名 (Coding Style & Naming Conventions)
 

@@ -18,49 +18,13 @@
 #include "motor_canfd_drive/protocol.hpp"
 #include "motor_canfd_drive/socketcan.hpp"
 #include "motor_hardware_interface/motor_config.hpp"
+#include "motor_canfd_sim/plant_model.hpp"
 
 namespace motor_canfd_sim {
 
 namespace drive = motor_canfd_drive;
 namespace protocol = motor_canfd_drive::protocol;
 using Clock = std::chrono::steady_clock;
-
-namespace {
-
-double clamp_symmetric(const double value, const double limit) {
-  return std::clamp(value, -limit, limit);
-}
-
-double motor_parameter_as_double(const drive::MotorConfig &motor,
-                                 const std::string &key) {
-  const auto it = motor.parameters.find(key);
-  if (it == motor.parameters.end()) {
-    throw std::runtime_error("motor '" + motor.name + "' is missing parameter '" + key + "'");
-  }
-  std::size_t parsed = 0U;
-  const double value = std::stod(it->second, &parsed);
-  if (parsed != it->second.size() || !std::isfinite(value)) {
-    throw std::runtime_error("motor '" + motor.name + "' parameter '" + key + "' is invalid");
-  }
-  return value;
-}
-
-} // namespace
-
-struct JointSample {
-  double position{0.0};
-  double velocity{0.0};
-  double effort{0.0};
-};
-
-struct SimMotorState {
-  bool enabled{false};
-  protocol::JointCommand command{};
-  Clock::time_point last_command{};
-  protocol::WristMode mode{protocol::WristMode::Mit};
-  double zero_offset{0.0};
-  double current_a{0.0};
-};
 
 struct SimBus {
   drive::BusConfig config;
@@ -90,6 +54,10 @@ public:
         declare_parameter<double>("motor_2530_velocity_mode_gain_a_per_rad_s", 0.45);
 
     validate_scalar_parameters(control_rate_hz, status_rate_hz);
+    plant_ = std::make_unique<MotorPlantModel>(
+        command_timeout_s_, rp_torque_limit_nm_, motor_2530_current_limit_a_,
+        motor_2530_torque_limit_nm_, motor_2530_position_gain_,
+        motor_2530_position_damping_, motor_2530_velocity_gain_);
     // 设备清单由调用方决定：本节点只接收配置路径，解析复用硬件接口的公开 API。
     driver_config_ = motor_hardware_interface::load_driver_config(config_file);
     apply_bus_parameter_overrides();
@@ -201,7 +169,10 @@ private:
     const auto now = Clock::now();
     try {
       drain_can(now);
-      calculate_efforts(now);
+      for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
+        samples_[motor].effort = plant_->compute_effort(
+            driver_config_.motors[motor], motor_states_[motor], samples_[motor], now);
+      }
     } catch (const std::exception &exception) {
       RCLCPP_ERROR(get_logger(), "CAN-FD simulation tick failed: %s", exception.what());
       return;
@@ -268,8 +239,10 @@ private:
         continue;
       }
       if (frame.id == protocol::wrist_control_id(config.id) && frame.size == 8U) {
-        handle_motor_2530_control(
-            motor, protocol::unpack_wrist_control(frame.data.data(), frame.size));
+        plant_->handle_motor_2530_control(
+            motor_states_[motor],
+            protocol::unpack_wrist_control(frame.data.data(), frame.size),
+            samples_[motor]);
         return;
       }
       if (frame.id == protocol::wrist_command_id(config.id) && frame.size == 12U) {
@@ -279,72 +252,6 @@ private:
         send_motor_2530_reply(motor);
         return;
       }
-    }
-  }
-
-  void handle_motor_2530_control(const std::size_t motor,
-                                 const protocol::WristControl &control) {
-    auto &state = motor_states_[motor];
-    if (!control.run) {
-      state.mode = control.mode;
-      if (control.set_zero) {
-        // “置零”只改变该模拟电机的内部坐标偏置，不瞬移 Gazebo 关节。
-        state.zero_offset = samples_[motor].position;
-      }
-    }
-    state.enabled = control.run;
-    if (!control.run) {
-      state.current_a = 0.0;
-    }
-  }
-
-  void calculate_efforts(const Clock::time_point now) {
-    for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
-      const auto &config = driver_config_.motors[motor];
-      auto &state = motor_states_[motor];
-      auto &sample = samples_[motor];
-      const bool fresh = state.enabled &&
-                         std::chrono::duration<double>(now - state.last_command).count() <=
-                             command_timeout_s_;
-      if (config.type == drive::kRpMotorType) {
-        // RP 按 MIT 公式计算输出扭矩：
-        // tau = Kp*(q_des-q) + Kd*(dq_des-dq) + tau_ff。
-        // 超时或失能时 fresh=false，扭矩自动回到 0。
-        double torque = 0.0;
-        if (fresh) {
-          torque = state.command.kp * (state.command.position - sample.position) +
-                   state.command.kd * (state.command.velocity - sample.velocity) +
-                   state.command.feedforward;
-        }
-        sample.effort = clamp_symmetric(torque, rp_torque_limit_nm_);
-        continue;
-      }
-
-      // 25/30 mm 协议控制量以电流为核心：先根据模式得到 A，再通过 Kt 转成 Nm。
-      double current = 0.0;
-      if (fresh) {
-        const auto relative_position = sample.position - state.zero_offset;
-        if (state.mode == protocol::WristMode::Mit) {
-          current = protocol::wrist_kp_to_current_gain(state.command.kp) *
-                        (state.command.position - relative_position) +
-                    protocol::wrist_kd_to_current_gain(state.command.kd) *
-                        (state.command.velocity - sample.velocity) +
-                    state.command.feedforward;
-        } else if (state.mode == protocol::WristMode::Position) {
-          current = motor_2530_position_gain_ *
-                        (state.command.position - relative_position) -
-                    motor_2530_position_damping_ * sample.velocity;
-        } else if (state.mode == protocol::WristMode::Velocity) {
-          current = motor_2530_velocity_gain_ *
-                    (state.command.velocity - sample.velocity);
-        }
-      }
-      state.current_a = clamp_symmetric(current, motor_2530_current_limit_a_);
-      const auto torque_constant =
-          motor_parameter_as_double(config, "torque_constant_nm_per_amp");
-      // 电机输出轴扭矩 tau = I * Kt；最后再做仿真扭矩上限保护。
-      sample.effort = clamp_symmetric(state.current_a * torque_constant,
-                                      motor_2530_torque_limit_nm_);
     }
   }
 
@@ -411,6 +318,7 @@ private:
   std::unordered_map<std::string, std::size_t> joint_to_motor_;
   std::vector<SimMotorState> motor_states_;
   std::vector<JointSample> samples_;
+  std::unique_ptr<MotorPlantModel> plant_;
 
   double command_timeout_s_{0.15};
   double rp_torque_limit_nm_{60.0};

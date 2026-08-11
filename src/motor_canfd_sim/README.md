@@ -14,8 +14,10 @@ MotorCanfdDriver -> vcan -> motor_canfd_sim
                                Gazebo
 ```
 
-模拟器不预设电机拓扑。调用方必须提供电机拓扑文件；模拟器通过
-`motor_hardware_interface::load_driver_config()` 与真机复用同一份配置。
+模拟器默认使用本包 `config/motor_canfd.yaml`（仿真侧拓扑，来源于仿真模型），
+上层 launch 需要不同拓扑时用 `motor_config_file` 覆盖；配置解析统一复用
+`motor_hardware_interface::load_driver_config()`，与真机配置
+（`motor_hardware_interface/config/motor_canfd.yaml`）解耦。
 
 ## 安全限制
 
@@ -51,8 +53,8 @@ ros2 launch motor_canfd_sim motor_canfd_sim.launch.py \
   left_interface:=vcan0 right_interface:=vcan1
 ```
 
-`motor_config_file` 在独立 launch 中是必填参数。`left_interface` 和
-`right_interface` 默认分别为 `vcan0`、`vcan1`。
+`motor_config_file` 默认指向本包 `config/motor_canfd.yaml`，调用方需要不同
+拓扑时覆盖。`left_interface` 和 `right_interface` 默认分别为 `vcan0`、`vcan1`。
 
 ## 参数
 
@@ -68,7 +70,10 @@ ros2 launch motor_canfd_sim motor_canfd_sim.launch.py \
 
 ## 已知约束
 
-Gazebo effort controller 的数组顺序必须与 `motor_canfd.yaml` 的 motor 顺序一致。修改机器人 joint 列表、controller 配置或电机拓扑时，应同步检查三者并运行 launch 静态测试。
+Gazebo effort controller 的数组顺序必须与仿真侧 `config/motor_canfd.yaml` 的
+motor 顺序一致。修改仿真模型 joint 列表、controller 配置或仿真拓扑时，应
+同步检查三者；该约束由 `upper_body_canfd_gazebo` 的 `test_config_topology.py`
+静态测试兜底。
 
 ## 构建与测试
 
@@ -79,4 +84,6 @@ colcon test --packages-select motor_canfd_sim
 colcon test-result --verbose
 ```
 
-`test/test_motor_canfd_sim_launch.py` 对独立 launch 的参数和安全默认值进行静态检查，不启动 Gazebo 或硬件。
+`test/test_plant_model.cpp` 覆盖 RP MIT 公式、腕部三模式、限幅与扭矩常数换算；
+`test/test_motor_canfd_sim_launch.py` 对独立 launch 的参数和安全默认值进行静态检查。
+两者都不启动 Gazebo 或硬件。

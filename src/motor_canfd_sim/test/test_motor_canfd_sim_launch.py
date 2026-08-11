@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
@@ -17,7 +18,7 @@ def _load_launch_description():
     return module.generate_launch_description()
 
 
-def test_requires_explicit_motor_config_file():
+def test_defaults_to_sim_side_motor_config_and_vcan_buses():
     description = _load_launch_description()
     context = LaunchContext()
 
@@ -29,14 +30,17 @@ def test_requires_explicit_motor_config_file():
     for declaration in declarations.values():
         declaration.execute(context)
 
-    # 独立 launch 不预设机器人拓扑：motor_config_file 默认必须为空。
-    assert context.launch_configurations["motor_config_file"] == ""
     assert context.launch_configurations["left_interface"] == "vcan0"
     assert context.launch_configurations["right_interface"] == "vcan1"
 
     simulator = next(action for action in description.entities if isinstance(action, Node))
     parameters = evaluate_parameters(context, simulator._Node__parameters)
     injected = next(parameter for parameter in parameters if isinstance(parameter, dict))
-    assert injected["motor_config_file"] == ""
+
+    # 独立 launch 默认使用本包的仿真侧拓扑配置，而不是真机配置。
+    expected_config = Path(get_package_share_directory("motor_canfd_sim")) / (
+        "config/motor_canfd.yaml"
+    )
+    assert Path(injected["motor_config_file"]).resolve() == expected_config.resolve()
     assert injected["bus_override.left_arm"] == "vcan0"
     assert injected["bus_override.right_arm"] == "vcan1"

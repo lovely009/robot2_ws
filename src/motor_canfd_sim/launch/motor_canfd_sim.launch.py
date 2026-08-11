@@ -1,7 +1,7 @@
 """只启动 C++ 电机模拟器（虚拟 CAN 电机设备），不启动 Gazebo 与驱动控制器。
 
-挂多少、挂哪些电机由调用方决定：必须显式传入 motor_config_file
-（例如 upper_body_canfd_gazebo 的 launch 传入共享 motor_canfd.yaml）。
+默认使用本包 config/motor_canfd.yaml（仿真侧拓扑，来源于仿真模型）；
+上层 launch 需要不同拓扑时用 motor_config_file 覆盖。
 """
 
 from launch import LaunchDescription
@@ -15,6 +15,9 @@ def generate_launch_description() -> LaunchDescription:
     motor_config_file = LaunchConfiguration("motor_config_file")
     left_interface = LaunchConfiguration("left_interface")
     right_interface = LaunchConfiguration("right_interface")
+    default_motor_config = PathJoinSubstitution(
+        [FindPackageShare("motor_canfd_sim"), "config", "motor_canfd.yaml"]
+    )
 
     simulator = Node(
         package="motor_canfd_sim",
@@ -37,8 +40,8 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "motor_config_file",
-                default_value="",
-                description="电机拓扑配置路径；模拟器不预设机器人拓扑，必须由调用方指定",
+                default_value=default_motor_config,
+                description="电机拓扑配置路径；默认使用本包的仿真侧拓扑配置",
             ),
             DeclareLaunchArgument("left_interface", default_value="vcan0"),
             DeclareLaunchArgument("right_interface", default_value="vcan1"),

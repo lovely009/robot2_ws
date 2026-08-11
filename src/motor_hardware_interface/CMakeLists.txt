@@ -29,7 +29,7 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
+install(DIRECTORY config launch urdf DESTINATION share/${PROJECT_NAME})
 install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
@@ -37,10 +37,12 @@ ament_export_dependencies(hardware_interface motor_canfd_drive pluginlib rclcpp 
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   ament_add_gtest(test_motor_config test/test_motor_config.cpp)
   target_compile_definitions(test_motor_config PRIVATE
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
   target_link_libraries(test_motor_config ${PROJECT_NAME})
+  ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
 endif()
 
 ament_package()

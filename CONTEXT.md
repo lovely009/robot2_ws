@@ -16,10 +16,12 @@
 
 | 推荐术语 | 含义 |
 |---|---|
-| 电机拓扑配置 | `motor_canfd.yaml`；总线、电机类型和 motor-to-joint 映射的单一配置源 |
+| 电机拓扑配置 | 总线、电机类型和 motor-to-joint 映射；真机侧为 `motor_hardware_interface/config/motor_canfd.yaml`（单一配置源），仿真侧为 `motor_canfd_sim/config/motor_canfd.yaml`（来源于仿真模型，两侧解耦） |
+| 真机参数 | `motor_hardware_interface/config/motor_canfd.yaml` 中经标定的数值（如反馈换算扭矩常数、安全时序），只服务驱动侧/真机 |
+| 仿真参数 | `motor_canfd_sim/config` 中描述模拟电机与物理行为的假设数值（扭矩常数、限幅、模式增益），只影响仿真，不得直接作为真机标定值 |
 | 逻辑总线 | 与接口名解耦的总线标识，例如 `left_arm` |
 | SocketCAN 接口 | Linux 网络接口，例如 `can0` 或 `vcan0` |
-| 总线覆盖 | `bus_override.<逻辑总线名>`；启动时替换逻辑总线对应的接口 |
+| 总线覆盖 | `bus_override.<逻辑总线名>`；启动时替换逻辑总线对应的接口（HIL 时把 vcan 重定向到真实 can 接口） |
 | 协议策略 | 实现某一电机家族帧格式、ID 规则和控制语义的 `MotorProtocol` |
 
 ## 控制链路术语
@@ -27,6 +29,8 @@
 - **驱动侧 controller**：`/driver/controller_manager` 下的 position controller，输出电机目标。
 - **Gazebo 侧 controller**：`/controller_manager` 下的 effort controller，驱动仿真关节。
 - **完整回环**：position command 经硬件接口、底层驱动、vcan、电机侧模拟器和 Gazebo 后，再以 CAN-FD 反馈返回底层驱动。
+- **真机 bring-up**：由 `motor_hardware_interface` 提供的真机启动入口（launch 与控制器配置），不依赖仿真栈；模型描述由模型包提供。
+- **fail-fast 停机**：激活失败或反馈超时时驱动侧立即终止（安全语义），人工诊断后重跑；回环在模拟器退出时随之中止。
 - **HIL**：Hardware-in-the-Loop。允许模拟器访问物理 CAN 接口的专项测试模式，不是常规仿真配置。
 
 ## 命名原则

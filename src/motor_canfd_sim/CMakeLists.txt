@@ -8,7 +8,9 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-add_executable(motor_canfd_sim_node src/motor_canfd_sim_node.cpp)
+add_executable(motor_canfd_sim_node
+  src/motor_canfd_sim_node.cpp
+  src/sim_motor_handler.cpp)
 target_compile_features(motor_canfd_sim_node PUBLIC cxx_std_17)
 target_compile_options(motor_canfd_sim_node PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motor_canfd_sim_node PRIVATE include)

@@ -15,22 +15,12 @@
 
 #include "motor_canfd_drive/motor_canfd_driver.hpp"
 #include "motor_canfd_drive/motor_protocol.hpp"
-#include "motor_canfd_drive/protocol.hpp"
 #include "motor_canfd_drive/socketcan.hpp"
 #include "motor_hardware_interface/motor_config.hpp"
 #include "motor_canfd_sim/plant_model.hpp"
+#include "motor_canfd_sim/sim_motor_handler.hpp"
 
 namespace motor_canfd_sim {
-
-namespace drive = motor_canfd_drive;
-namespace protocol = motor_canfd_drive::protocol;
-using Clock = std::chrono::steady_clock;
-
-struct SimBus {
-  drive::BusConfig config;
-  std::unique_ptr<drive::SocketCan> socket;
-  std::vector<std::size_t> motor_indices;
-};
 
 class MotorCanFdSimNode final : public rclcpp::Node {
 public:
@@ -70,14 +60,18 @@ public:
 
     samples_.resize(driver_config_.motors.size());
     motor_states_.resize(driver_config_.motors.size());
+    const auto handler_registry = SimMotorHandlerRegistry::with_builtin_handlers();
     for (std::size_t index = 0; index < driver_config_.motors.size(); ++index) {
       const auto &motor = driver_config_.motors[index];
-      if (motor.type != drive::kRpMotorType && motor.type != drive::kMotor2530Type) {
-        throw std::runtime_error("C++ simulator has no plant model for motor type '" +
+      if (!handler_registry.contains(motor.type)) {
+        throw std::runtime_error("C++ simulator has no motor handler for type '" +
                                  motor.type + "'");
       }
       if (!joint_to_motor_.emplace(motor.joint_name, index).second) {
         throw std::runtime_error("duplicate simulated joint '" + motor.joint_name + "'");
+      }
+      if (handlers_.count(motor.type) == 0U) {
+        handlers_.emplace(motor.type, handler_registry.create(motor.type));
       }
     }
 
@@ -203,112 +197,20 @@ private:
     if (frame.is_extended) {
       return;
     }
-    if (frame.id == protocol::kRpEnableId && frame.size >= 1U) {
-      const bool enabled = frame.data[0] != 0U;
-      for (const auto motor : buses_[bus].motor_indices) {
-        if (driver_config_.motors[motor].type == drive::kRpMotorType) {
-          motor_states_[motor].enabled = enabled;
-        }
-      }
-      return;
-    }
-    if (frame.id == protocol::kRpCommandId && frame.size == 64U) {
-      bool has_rp = false;
-      for (const auto motor : buses_[bus].motor_indices) {
-        const auto &config = driver_config_.motors[motor];
-        if (config.type != drive::kRpMotorType) {
-          continue;
-        }
-        has_rp = true;
-        // RP 的物理协议规定 ID 1..8 对应广播帧的槽 0..7。
-        // 用 config.id 计算偏移，不依赖 YAML 中电机出现的先后顺序。
-        const auto offset = static_cast<std::size_t>(config.id - 1U) * 8U;
-        motor_states_[motor].command =
-            protocol::unpack_rp_slot(frame.data.data() + offset, 8U);
-        motor_states_[motor].last_command = now;
-      }
-      if (has_rp) {
-        send_rp_feedback(bus);
-      }
-      return;
-    }
-
-    for (const auto motor : buses_[bus].motor_indices) {
-      const auto &config = driver_config_.motors[motor];
-      if (config.type != drive::kMotor2530Type) {
-        continue;
-      }
-      if (frame.id == protocol::wrist_control_id(config.id) && frame.size == 8U) {
-        plant_->handle_motor_2530_control(
-            motor_states_[motor],
-            protocol::unpack_wrist_control(frame.data.data(), frame.size),
-            samples_[motor]);
+    const SimHandlerContext context{driver_config_, buses_, motor_to_bus_,
+                                    motor_states_, samples_, *plant_, get_logger()};
+    for (const auto &entry : handlers_) {
+      if (entry.second->handle_frame(context, bus, frame, now)) {
         return;
       }
-      if (frame.id == protocol::wrist_command_id(config.id) && frame.size == 12U) {
-        auto &state = motor_states_[motor];
-        state.command = protocol::unpack_wrist_command(frame.data.data(), frame.size);
-        state.last_command = now;
-        send_motor_2530_reply(motor);
-        return;
-      }
-    }
-  }
-
-  void send_rp_feedback(const std::size_t bus) {
-    for (const auto motor : buses_[bus].motor_indices) {
-      const auto &config = driver_config_.motors[motor];
-      if (config.type != drive::kRpMotorType) {
-        continue;
-      }
-      const auto payload = protocol::pack_rp_state(
-          {samples_[motor].position, samples_[motor].velocity, samples_[motor].effort});
-      if (!buses_[bus].socket->send(config.id, payload.data(), payload.size(), true)) {
-        RCLCPP_WARN(get_logger(), "failed to send RP simulated feedback for %s",
-                    config.name.c_str());
-      }
-    }
-  }
-
-  void send_motor_2530_reply(const std::size_t motor) {
-    const auto &config = driver_config_.motors[motor];
-    const auto &state = motor_states_[motor];
-    // 腕部反馈协议的第三个量是“电流 A”。这里沿用 JointState 容器传给 pack 函数，
-    // 真机 driver 收到后会在 Motor2530Protocol 中再用 Kt 换算为统一的 Nm effort。
-    const protocol::JointState wire_state{
-        samples_[motor].position - state.zero_offset, samples_[motor].velocity,
-        state.current_a};
-    const auto payload = protocol::pack_wrist_reply(config.id, wire_state);
-    auto &socket = *buses_[motor_to_bus_[motor]].socket;
-    if (!socket.send(protocol::wrist_reply_id(config.id), payload.data(), payload.size(), true)) {
-      RCLCPP_WARN(get_logger(), "failed to send 25/30 mm simulated reply for %s",
-                  config.name.c_str());
     }
   }
 
   void status_tick() {
-    try {
-      for (std::size_t motor = 0; motor < driver_config_.motors.size(); ++motor) {
-        const auto &config = driver_config_.motors[motor];
-        if (config.type != drive::kMotor2530Type) {
-          continue;
-        }
-        const auto &state = motor_states_[motor];
-        const protocol::JointState wire_state{
-            samples_[motor].position - state.zero_offset, samples_[motor].velocity,
-            state.current_a};
-        const auto payload = protocol::pack_wrist_status(
-            config.id, wire_state, 12.0, 0U, state.enabled ? 4U : 3U, 0U,
-            state.mode, 0x01U);
-        auto &socket = *buses_[motor_to_bus_[motor]].socket;
-        if (!socket.send(protocol::wrist_status_id(config.id), payload.data(), payload.size(),
-                         true)) {
-          RCLCPP_WARN(get_logger(), "failed to send 25/30 mm simulated status for %s",
-                      config.name.c_str());
-        }
-      }
-    } catch (const std::exception &exception) {
-      RCLCPP_ERROR(get_logger(), "status publisher failed: %s", exception.what());
+    const SimHandlerContext context{driver_config_, buses_, motor_to_bus_,
+                                    motor_states_, samples_, *plant_, get_logger()};
+    for (const auto &entry : handlers_) {
+      entry.second->status_tick(context);
     }
   }
 
@@ -316,6 +218,7 @@ private:
   std::vector<SimBus> buses_;
   std::vector<std::size_t> motor_to_bus_;
   std::unordered_map<std::string, std::size_t> joint_to_motor_;
+  std::unordered_map<std::string, std::unique_ptr<SimMotorHandler>> handlers_;
   std::vector<SimMotorState> motor_states_;
   std::vector<JointSample> samples_;
   std::unique_ptr<MotorPlantModel> plant_;

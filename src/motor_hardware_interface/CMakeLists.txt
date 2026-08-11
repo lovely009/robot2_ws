@@ -11,6 +11,7 @@ find_package(yaml_cpp_vendor REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/canfd_system.cpp
+  src/canfd_logic.cpp
   src/motor_config.cpp)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
@@ -42,6 +43,8 @@ if(BUILD_TESTING)
   target_compile_definitions(test_motor_config PRIVATE
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
   target_link_libraries(test_motor_config ${PROJECT_NAME})
+  ament_add_gtest(test_canfd_logic test/test_canfd_logic.cpp)
+  target_link_libraries(test_canfd_logic ${PROJECT_NAME})
   ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
 endif()
 

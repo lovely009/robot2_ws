@@ -1,4 +1,5 @@
 #include "motor_hardware_interface/canfd_system.hpp"
+#include "motor_hardware_interface/canfd_logic.hpp"
 #include "motor_hardware_interface/motor_config.hpp"
 
 #include <algorithm>
@@ -6,7 +7,6 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 
 #include <yaml-cpp/yaml.h>
@@ -132,13 +132,10 @@ bool CanFdSystem::build_joint_mapping(std::string &error) {
 
   // 先检查 ros2_control 暴露的接口形状，再按 joint.name 建表。
   // 之后所有 motor->joint 关联都靠名字查找，不依赖 YAML 与 URDF 的排列顺序。
-  std::unordered_map<std::string, std::size_t> joint_index;
-  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
-    const auto &joint = info_.joints[index];
-    if (!joint_index.emplace(joint.name, index).second) {
-      error = "duplicate ros2_control joint '" + joint.name + "'";
-      return false;
-    }
+  std::vector<std::string> joint_names;
+  joint_names.reserve(info_.joints.size());
+  for (const auto &joint : info_.joints) {
+    joint_names.push_back(joint.name);
     if (joint.command_interfaces.size() != 1U ||
         joint.command_interfaces.front().name != hardware_interface::HW_IF_POSITION) {
       error = "joint '" + joint.name + "' must expose one position command interface";
@@ -154,24 +151,17 @@ bool CanFdSystem::build_joint_mapping(std::string &error) {
     }
   }
 
-  // motor_to_joint_ 是运行期唯一需要的快速映射；每个 joint 必须且只能被映射一次。
-  motor_to_joint_.assign(motors.size(), 0U);
-  std::vector<bool> mapped(info_.joints.size(), false);
-  for (std::size_t motor = 0; motor < motors.size(); ++motor) {
-    const auto it = joint_index.find(motors[motor].joint_name);
-    if (it == joint_index.end()) {
-      error = "motor '" + motors[motor].name + "' maps unknown ros2_control joint '" +
-              motors[motor].joint_name + "'";
-      return false;
-    }
-    motor_to_joint_[motor] = it->second;
-    mapped[it->second] = true;
+  // 名称映射与 1:1 覆盖校验是纯逻辑，在 canfd_logic 中实现并可单元测试。
+  std::vector<std::string> motor_names;
+  std::vector<std::string> motor_joint_names;
+  motor_names.reserve(motors.size());
+  motor_joint_names.reserve(motors.size());
+  for (const auto &motor : motors) {
+    motor_names.push_back(motor.name);
+    motor_joint_names.push_back(motor.joint_name);
   }
-  if (!std::all_of(mapped.begin(), mapped.end(), [](const bool value) { return value; })) {
-    error = "every ros2_control joint must have exactly one motor mapping";
-    return false;
-  }
-  return true;
+  return map_motors_to_joints(joint_names, motor_names, motor_joint_names,
+                              motor_to_joint_, error);
 }
 
 hardware_interface::CallbackReturn
@@ -257,24 +247,29 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
     // 再把当前姿态复制为初始 position target，避免一使能就突然追赶错误目标。
     std::vector<bool> observed(info_.joints.size(), false);
     const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::duration<double>(config_.initial_feedback_wait_s);
-    while (std::chrono::steady_clock::now() < deadline) {
+                          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                              std::chrono::duration<double>(config_.initial_feedback_wait_s));
+    // 轮询继续条件与"已观察位置作为初始目标"都是纯逻辑，见 canfd_logic。
+    while (should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
       if (!send_position_commands(true)) {
         throw std::runtime_error("failed to send zero-gain feedback query");
       }
       receive_feedback(&observed);
-      if (std::all_of(observed.begin(), observed.end(),
-                      [](const bool seen) { return seen; })) {
+      if (!should_continue_waiting(observed, std::chrono::steady_clock::now(), deadline)) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    for (std::size_t joint = 0; joint < observed.size(); ++joint) {
-      if (!observed[joint] || !std::isfinite(position_[joint])) {
-        throw std::runtime_error("no initial feedback from joint '" +
-                                 info_.joints[joint].name + "'");
-      }
-      command_[joint] = position_[joint];
+
+    std::vector<std::string> joint_names;
+    joint_names.reserve(info_.joints.size());
+    for (const auto &joint : info_.joints) {
+      joint_names.push_back(joint.name);
+    }
+    std::string activation_error;
+    if (!take_observed_positions_as_initial_targets(
+            joint_names, observed, position_, command_, activation_error)) {
+      throw std::runtime_error(activation_error);
     }
 
     if (!driver_->set_enabled(true)) {
@@ -355,13 +350,12 @@ hardware_interface::return_type CanFdSystem::read(const rclcpp::Time &,
   }
   // 使用 steady_clock 做超时判断，避免系统时间校准/跳变造成误报。
   const auto now = std::chrono::steady_clock::now();
-  for (std::size_t joint = 0; joint < last_feedback_.size(); ++joint) {
-    if (std::chrono::duration<double>(now - last_feedback_[joint]).count() >
-        config_.feedback_timeout_s) {
-      RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
-                   "feedback timeout: %s", info_.joints[joint].name.c_str());
-      return hardware_interface::return_type::ERROR;
-    }
+  const auto stale =
+      first_stale_feedback(last_feedback_, now, config_.feedback_timeout_s);
+  if (stale != last_feedback_.size()) {
+    RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
+                 "feedback timeout: %s", info_.joints[stale].name.c_str());
+    return hardware_interface::return_type::ERROR;
   }
   return hardware_interface::return_type::OK;
 }

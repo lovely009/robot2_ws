@@ -7,39 +7,42 @@
 
 namespace motor_canfd_sim {
 
+namespace {
+
+// 把帧解析结果应用到运行状态：使能/命令/控制帧各自更新对应电机。
+void apply_updates(const SimHandlerContext &ctx, const SimFrameResult &result,
+                   const Clock::time_point now) {
+  for (const auto &update : result.updates) {
+    auto &state = ctx.motor_states[update.motor];
+    if (update.set_enabled) {
+      state.enabled = update.enabled;
+    }
+    if (update.set_command) {
+      state.command = update.command;
+      state.last_command = now;
+    }
+    if (update.set_control) {
+      ctx.plant.handle_motor_2530_control(state, update.control,
+                                          ctx.samples[update.motor]);
+    }
+  }
+}
+
+} // namespace
+
 bool RpSimMotorHandler::handle_frame(const SimHandlerContext &ctx, const std::size_t bus,
                                      const drive::CanFrame &frame,
                                      const Clock::time_point now) {
-  if (frame.id == protocol::kRpEnableId && frame.size >= 1U) {
-    const bool enabled = frame.data[0] != 0U;
-    for (const auto motor : ctx.buses[bus].motor_indices) {
-      if (ctx.driver_config.motors[motor].type == drive::kRpMotorType) {
-        ctx.motor_states[motor].enabled = enabled;
-      }
-    }
-    return true;
+  const auto result =
+      decode_rp_frame(ctx.driver_config, ctx.buses[bus].motor_indices, frame);
+  if (!result.consumed) {
+    return false;
   }
-  if (frame.id == protocol::kRpCommandId && frame.size == 64U) {
-    bool has_rp = false;
-    for (const auto motor : ctx.buses[bus].motor_indices) {
-      const auto &config = ctx.driver_config.motors[motor];
-      if (config.type != drive::kRpMotorType) {
-        continue;
-      }
-      has_rp = true;
-      // RP 的物理协议规定 ID 1..8 对应广播帧的槽 0..7。
-      // 用 config.id 计算偏移，不依赖 YAML 中电机出现的先后顺序。
-      const auto offset = static_cast<std::size_t>(config.id - 1U) * 8U;
-      ctx.motor_states[motor].command =
-          protocol::unpack_rp_slot(frame.data.data() + offset, 8U);
-      ctx.motor_states[motor].last_command = now;
-    }
-    if (has_rp) {
-      send_feedback(ctx, bus);
-    }
-    return true;
+  apply_updates(ctx, result, now);
+  if (result.needs_feedback) {
+    send_feedback(ctx, bus);
   }
-  return false;
+  return true;
 }
 
 void RpSimMotorHandler::status_tick(const SimHandlerContext &) {}
@@ -65,27 +68,16 @@ bool Motor2530SimMotorHandler::handle_frame(const SimHandlerContext &ctx,
                                             const std::size_t bus,
                                             const drive::CanFrame &frame,
                                             const Clock::time_point now) {
-  for (const auto motor : ctx.buses[bus].motor_indices) {
-    const auto &config = ctx.driver_config.motors[motor];
-    if (config.type != drive::kMotor2530Type) {
-      continue;
-    }
-    if (frame.id == protocol::wrist_control_id(config.id) && frame.size == 8U) {
-      ctx.plant.handle_motor_2530_control(
-          ctx.motor_states[motor],
-          protocol::unpack_wrist_control(frame.data.data(), frame.size),
-          ctx.samples[motor]);
-      return true;
-    }
-    if (frame.id == protocol::wrist_command_id(config.id) && frame.size == 12U) {
-      auto &state = ctx.motor_states[motor];
-      state.command = protocol::unpack_wrist_command(frame.data.data(), frame.size);
-      state.last_command = now;
-      send_reply(ctx, motor);
-      return true;
-    }
+  const auto result = decode_motor_2530_frame(
+      ctx.driver_config, ctx.buses[bus].motor_indices, frame);
+  if (!result.consumed) {
+    return false;
   }
-  return false;
+  apply_updates(ctx, result, now);
+  if (result.needs_feedback) {
+    send_reply(ctx, result.updates.front().motor);
+  }
+  return true;
 }
 
 void Motor2530SimMotorHandler::status_tick(const SimHandlerContext &ctx) {

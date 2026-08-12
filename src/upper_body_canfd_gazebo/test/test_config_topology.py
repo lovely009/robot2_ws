@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from motor_hardware_interface.helpers import motor_joints_from_config, read_buses
-from upper_body_canfd_gazebo.motion_library import JOINT_NAMES
+from upper_body_canfd_gazebo.motion_library import JOINT_LIMITS, JOINT_NAMES
 
 
 def _config_path(package: str, name: str) -> Path:
@@ -129,4 +129,41 @@ def test_motion_library_joint_names_match_sim_arm_order() -> None:
     assert sim_joints[7:] == expected_right, (
         f"仿真配置右臂关节必须等于 right_ + JOINT_NAMES + _joint：\n"
         f"sim config:    {sim_joints[7:]}\nexpected right: {expected_right}"
+    )
+
+
+def _urdf_joint_limits(xacro_path: Path) -> List[Tuple[float, float]]:
+    """按通用关节顺序提取 URDF xacro 的 joint limit（左右臂共用同一 arm 宏）。"""
+
+    text = xacro_path.read_text()
+    limits: List[Tuple[float, float]] = []
+    for name in JOINT_NAMES:
+        pattern = re.compile(
+            r'<joint name="\$\{side\}_' + name + r'_joint" type="revolute">'
+            r"(.*?)</joint>",
+            re.S,
+        )
+        joint = pattern.search(text)
+        assert joint is not None, f"URDF xacro 中找不到关节 {name}"
+        limit = re.search(
+            r'<limit lower="([^"]+)" upper="([^"]+)"', joint.group(1)
+        )
+        assert limit is not None, f"URDF xacro 关节 {name} 缺少 limit"
+        limits.append((float(limit.group(1)), float(limit.group(2))))
+    return limits
+
+
+def test_motion_library_joint_limits_match_urdf() -> None:
+    """动作库限位必须与 URDF joint limit 逐对一致（跨源断言，防止双写漂移）。"""
+
+    xacro_path = (
+        Path(get_package_share_directory("upper_body_canfd_gazebo"))
+        / "urdf"
+        / "upper_body.urdf.xacro"
+    )
+    urdf_limits = _urdf_joint_limits(xacro_path)
+    library_limits = [tuple(limit) for limit in JOINT_LIMITS]
+    assert urdf_limits == library_limits, (
+        "动作库 JOINT_LIMITS 必须与 URDF joint limit 逐对一致：\n"
+        f"urdf:   {urdf_limits}\nlibrary: {library_limits}"
     )

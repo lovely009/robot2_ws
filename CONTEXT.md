@@ -35,7 +35,7 @@
 - **fail-fast 停机**：激活阶段最多重试 3 次（每次 1 s 窗口），仍失败或运行期反馈超时时驱动侧立即终止（安全语义），人工诊断后重跑；回环在模拟器退出时随之中止。
 - **HIL**：Hardware-in-the-Loop。允许模拟器访问物理 CAN 接口的专项测试模式，不是常规仿真配置。
 - **家族仿真处理器**：`SimMotorHandler`，电机侧模拟器中与驱动侧 `MotorProtocol` 一一对应的家族策略；新增电机家族时在模拟器侧注册 handler，节点本身无家族分支。
-- **动作库限位**：`motion_library.JOINT_LIMITS`，与 URDF joint limit 一致的双写副本；调整限位时需同步两处（当前无跨源测试，由人工维护）。
+- **动作库限位**：`motion_library.JOINT_LIMITS`，与 URDF joint limit 一致的双写副本；调整限位时需同步两处，由 `test_config_topology.py` 的跨源断言逐对校验。
 
 ## 命名原则
 

@@ -27,18 +27,15 @@ def motor_joints_from_config(config_path) -> List[str]:
 def read_buses(config_path) -> List[Tuple[str, str]]:
     """按 motor_canfd.yaml 的 buses 段返回 [(逻辑总线名, 默认接口), ...]。
 
-    SocketCAN 总线取 ``interface``；serial_slcan 串口总线取 ``tty``
-    （供 launch 的 interface_<总线名> 参数作为默认值）。
+    每一条逻辑总线取 ``interface``（供 launch 的 interface_<总线名> 参数
+    作为默认值）。
     """
 
     document = yaml.safe_load(Path(config_path).read_text())
     buses = document["motor_hardware"]["buses"]
     result = []
     for name, node in buses.items():
-        if node.get("transport") == "serial_slcan":
-            result.append((name, node.get("tty", node.get("interface", ""))))
-        else:
-            result.append((name, node["interface"]))
+        result.append((name, node["interface"]))
     return result
 
 

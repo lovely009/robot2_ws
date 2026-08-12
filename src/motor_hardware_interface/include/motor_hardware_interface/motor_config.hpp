@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "motor_canfd_drive/motor_canfd_driver.hpp"
+#include "motor_drive/motor_driver.hpp"
 
 namespace motor_hardware_interface {
 
@@ -15,7 +15,7 @@ struct MotorSystemConfig {
     double kd{0.0};
   };
 
-  motor_canfd_drive::DriverConfig driver;
+  motor_drive::DriverConfig driver;
   std::vector<CommandGains> motor_commands;
   double feedback_timeout_s{0.1};
   double initial_feedback_wait_s{0.1};
@@ -26,6 +26,6 @@ struct MotorSystemConfig {
 MotorSystemConfig load_system_config(const std::string &path);
 
 // 薄封装：只返回底层驱动需要的 DriverConfig 部分，内部复用同一次解析。
-motor_canfd_drive::DriverConfig load_driver_config(const std::string &path);
+motor_drive::DriverConfig load_driver_config(const std::string &path);
 
 } // namespace motor_hardware_interface

@@ -3,9 +3,8 @@
 启动 ros2_control（motor_hardware_interface/CanFdSystem）、robot_state_publisher、
 joint_state_broadcaster 与 position_controller，直接驱动两条 SocketCAN/CAN-FD 总线。
 
-model_xacro 是必填参数：指向能渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro，
-要求该 xacro 暴露 hardware_backend/bus_overrides/motor_config_file 参数
-（本仓库的 upper_body_canfd_gazebo/urdf/upper_body.urdf.xacro 即满足）。
+model_xacro 默认指向本包 urdf/upper_body.urdf.xacro：该模型只渲染 CAN-FD 后端
+ros2_control 块，暴露 bus_overrides/motor_config_file 参数。
 
 真机部署只需底层驱动 + 本适配包 + 模型描述，不需要模拟器或 Gazebo。
 """
@@ -53,6 +52,7 @@ HARDWARE_BUSES = read_buses(
 
 def generate_launch_description() -> LaunchDescription:
     share = FindPackageShare("motor_hardware_interface")
+    default_model_xacro = PathJoinSubstitution([share, "urdf", "upper_body.urdf.xacro"])
     model_xacro = LaunchConfiguration("model_xacro")
     motor_config_file = LaunchConfiguration("motor_config_file")
     default_motor_config = PathJoinSubstitution([share, "config", "motor_canfd.yaml"])
@@ -60,7 +60,7 @@ def generate_launch_description() -> LaunchDescription:
     description = ParameterValue(Command([
         FindExecutable(name="xacro"), " ",
         model_xacro,
-        " hardware_backend:=canfd bus_overrides:=",
+        " bus_overrides:=",
         *bus_overrides_pieces(HARDWARE_BUSES),
         " motor_config_file:=", motor_config_file,
     ]), value_type=str)
@@ -82,8 +82,8 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_xacro",
-            default_value="",
-            description="必填：渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro 路径",
+            default_value=default_model_xacro,
+            description="渲染 CAN-FD 后端 ros2_control 块的机器人模型 xacro 路径",
         ),
         *[
             DeclareLaunchArgument(f"interface_{name}", default_value=interface)

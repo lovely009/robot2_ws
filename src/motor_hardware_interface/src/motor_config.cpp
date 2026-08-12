@@ -11,11 +11,11 @@
 namespace motor_hardware_interface {
 namespace {
 
-motor_canfd_drive::MotorParameterMap
+motor_drive::MotorParameterMap
 parse_driver_parameters(const YAML::Node &node, const std::string &context) {
   // 底层 DriverConfig 不依赖 yaml-cpp，所以在这里把协议私有参数统一转换成
   // string->string。具体协议策略再按需要解释数值和单位。
-  motor_canfd_drive::MotorParameterMap parameters;
+  motor_drive::MotorParameterMap parameters;
   if (!node) {
     return parameters;
   }
@@ -32,49 +32,35 @@ parse_driver_parameters(const YAML::Node &node, const std::string &context) {
   return parameters;
 }
 
-void merge_parameters(motor_canfd_drive::MotorParameterMap &target,
-                      const motor_canfd_drive::MotorParameterMap &overrides) {
+void merge_parameters(motor_drive::MotorParameterMap &target,
+                      const motor_drive::MotorParameterMap &overrides) {
   // 后写入的单电机参数覆盖 motor_types 默认值，使同型号电机可以只配置差异项。
   for (const auto &entry : overrides) {
     target[entry.first] = entry.second;
   }
 }
 
-motor_canfd_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) {
+motor_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) {
   // 输出纯 C++ DriverConfig 后，底层驱动不再接触 YAML。
-  motor_canfd_drive::DriverConfig config;
+  motor_drive::DriverConfig config;
   const auto buses = hardware["buses"];
   if (!buses || !buses.IsMap() || buses.size() == 0U) {
     throw std::runtime_error("motor_hardware.buses must be a non-empty map");
   }
   for (const auto &entry : buses) {
-    motor_canfd_drive::BusConfig bus;
+    motor_drive::BusConfig bus;
     bus.name = entry.first.as<std::string>();
     const auto node = entry.second;
-    if (node["transport"]) {
-      bus.transport = node["transport"].as<std::string>();
-    }
     if (node["interface"]) {
       bus.interface_name = node["interface"].as<std::string>();
     }
-    if (node["tty"]) {
-      bus.tty = node["tty"].as<std::string>();
-    }
-    if (bus.transport == "serial_slcan") {
-      if (bus.tty.empty()) {
-        throw std::runtime_error("bus '" + bus.name +
-                                 "' with transport serial_slcan requires 'tty'");
-      }
-    } else {
-      if (bus.interface_name.empty()) {
-        throw std::runtime_error("bus '" + bus.name +
-                                 "' requires 'interface'");
-      }
+    if (bus.interface_name.empty()) {
+      throw std::runtime_error("bus '" + bus.name + "' requires 'interface'");
     }
     config.buses.push_back(std::move(bus));
   }
 
-  std::unordered_map<std::string, motor_canfd_drive::MotorParameterMap>
+  std::unordered_map<std::string, motor_drive::MotorParameterMap>
       type_parameters;
   const auto motor_types = hardware["motor_types"];
   if (motor_types) {
@@ -93,7 +79,7 @@ motor_canfd_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) 
     throw std::runtime_error("motor_hardware.motors must be a non-empty map");
   }
   for (const auto &entry : motors) {
-    motor_canfd_drive::MotorConfig motor;
+    motor_drive::MotorConfig motor;
     motor.name = entry.first.as<std::string>();
     const auto node = entry.second;
     motor.joint_name = node["joint"].as<std::string>();
@@ -189,7 +175,7 @@ MotorSystemConfig load_system_config(const std::string &path) {
   return config;
 }
 
-motor_canfd_drive::DriverConfig load_driver_config(const std::string &path) {
+motor_drive::DriverConfig load_driver_config(const std::string &path) {
   return load_system_config(path).driver;
 }
 

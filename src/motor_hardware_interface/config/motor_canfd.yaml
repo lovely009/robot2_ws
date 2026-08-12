@@ -13,7 +13,7 @@ motor_hardware:
       interface: can1
 
   # 默认参数按 motor.type 选择。某个具体电机可用自己的 command/parameters 覆盖默认值。
-  # 新增电机家族时在 motor_canfd_drive 中增加协议策略，而不是修改通用驱动循环。
+  # 新增电机家族时在 motor_drive 中增加协议策略，而不是修改通用驱动循环。
   motor_types:
     rp:
       command:

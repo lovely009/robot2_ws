@@ -2,6 +2,6 @@
   <class name="motor_hardware_interface/CanFdSystem"
          type="motor_hardware_interface::CanFdSystem"
          base_class_type="hardware_interface::SystemInterface">
-    <description>ros2_control SystemInterface backed by the reusable motor_canfd_drive C++ library.</description>
+    <description>ros2_control SystemInterface backed by the reusable motor_drive C++ library.</description>
   </class>
 </library>

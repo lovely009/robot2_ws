@@ -36,8 +36,14 @@ def test_bringup_launch_requires_model_description_and_uses_hardware_config():
     for declaration in declarations.values():
         declaration.execute(context)
 
-    # 模型描述必须由调用方显式提供，本 launch 不默认指向任何仿真包。
-    assert context.launch_configurations["model_xacro"] == ""
+    # 模型描述默认指向本包的 CAN-FD 真机模型 xacro，不依赖仿真包。
+    expected_xacro = Path(get_package_share_directory("motor_hardware_interface")) / (
+        "urdf/upper_body.urdf.xacro"
+    )
+    model_xacro = context.launch_configurations["model_xacro"]
+    if not isinstance(model_xacro, str):
+        model_xacro = perform_substitutions(context, [model_xacro])
+    assert Path(model_xacro).resolve() == expected_xacro.resolve()
     assert context.launch_configurations["interface_left_arm"] == "can0"
     assert context.launch_configurations["interface_right_arm"] == "can1"
 

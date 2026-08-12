@@ -7,7 +7,7 @@
 
 #include "hardware_interface/system_interface.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
-#include "motor_canfd_drive/motor_canfd_driver.hpp"
+#include "motor_drive/motor_driver.hpp"
 #include "motor_hardware_interface/motor_config.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp_lifecycle/state.hpp"
@@ -15,7 +15,7 @@
 namespace motor_hardware_interface {
 
 // ROS 2 ros2_control 适配层：把 controller_manager 的 joint 接口翻译成
-// MotorCanfdDriver 的通用命令/状态。这个类知道 ROS joint，但不处理私有协议字节。
+// MotorDriver 的通用命令/状态。这个类知道 ROS joint，但不处理私有协议字节。
 class CanFdSystem final : public hardware_interface::SystemInterface {
 public:
   RCLCPP_SHARED_PTR_DEFINITIONS(CanFdSystem)
@@ -44,11 +44,11 @@ private:
   void close_driver() noexcept;
 
   MotorSystemConfig config_;
-  std::unique_ptr<motor_canfd_drive::MotorCanfdDriver> driver_;
+  std::unique_ptr<motor_drive::MotorDriver> driver_;
   // motor_to_joint_[m] = ros2_control joint 下标。映射按 joint_name 建立，
   // 不依赖“第几个电机就是第几个关节”的固定数组顺序。
   std::vector<std::size_t> motor_to_joint_;
-  std::vector<motor_canfd_drive::protocol::JointState> motor_states_;
+  std::vector<motor_drive::protocol::JointState> motor_states_;
   std::vector<double> position_;
   std::vector<double> velocity_;
   std::vector<double> effort_;

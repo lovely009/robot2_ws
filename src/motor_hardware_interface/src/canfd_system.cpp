@@ -71,12 +71,8 @@ bool CanFdSystem::apply_bus_overrides(std::string &error) {
       error = "hardware parameter '" + parameter.first + "' cannot be empty";
       return false;
     }
-    // SocketCAN 总线覆盖接口名；串口总线覆盖 tty 路径。
-    if (bus_it->transport == "serial_slcan") {
-      bus_it->tty = parameter.second;
-    } else {
-      bus_it->interface_name = parameter.second;
-    }
+    // 总线覆盖只改 SocketCAN 接口名（例如 HIL 时把 vcan 指向真实 can 接口）。
+    bus_it->interface_name = parameter.second;
   }
   return true;
 }
@@ -142,9 +138,9 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
   }
 
   try {
-    // 构造 MotorCanfdDriver 时会继续做协议级验证，例如 RP ID 范围、
+    // 构造 MotorDriver 时会继续做协议级验证，例如 RP ID 范围、
     // 25/30 mm 节点范围以及必需的 torque_constant 参数。
-    driver_ = std::make_unique<motor_canfd_drive::MotorCanfdDriver>(config_.driver);
+    driver_ = std::make_unique<motor_drive::MotorDriver>(config_.driver);
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("motor_hardware_interface"),
                  "CAN-FD 驱动配置无效：%s", exception.what());
@@ -281,7 +277,7 @@ CanFdSystem::on_deactivate(const rclcpp_lifecycle::State &) {
 }
 
 bool CanFdSystem::send_position_commands(const bool zero_gains) {
-  std::vector<motor_canfd_drive::protocol::JointCommand> commands(
+  std::vector<motor_drive::protocol::JointCommand> commands(
       config_.driver.motors.size());
   // ros2_control 以 joint 顺序保存 command_，底层 driver 以 motor 顺序收命令；
   // 这里通过 motor_to_joint_ 做显式转换，因此两边顺序可以不同。

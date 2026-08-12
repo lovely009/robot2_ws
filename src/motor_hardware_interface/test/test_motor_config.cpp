@@ -13,6 +13,10 @@ const std::string kBadConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/bad_motor_config.yaml";
 const std::string kMissingTimingConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/missing_timing_motor_config.yaml";
+const std::string kSerialBusConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/serial_bus_motor_config.yaml";
+const std::string kSerialBusMissingTty =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/serial_bus_missing_tty.yaml";
 
 TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   const auto config = motor_hardware_interface::load_driver_config(kSampleConfig);
@@ -43,6 +47,20 @@ TEST(LoadDriverConfig, EmptyPathThrows) {
 
 TEST(LoadDriverConfig, MissingRootThrows) {
   EXPECT_THROW(motor_hardware_interface::load_driver_config(kBadConfig),
+               std::runtime_error);
+}
+
+TEST(LoadDriverConfig, ParsesSerialSlcanBus) {
+  const auto config = motor_hardware_interface::load_driver_config(kSerialBusConfig);
+  ASSERT_EQ(config.buses.size(), 1U);
+  EXPECT_EQ(config.buses[0].name, "bench");
+  EXPECT_EQ(config.buses[0].transport, "serial_slcan");
+  EXPECT_EQ(config.buses[0].tty, "/dev/ttyACM0");
+  EXPECT_TRUE(config.buses[0].interface_name.empty());
+}
+
+TEST(LoadDriverConfig, SerialSlcanBusRequiresTty) {
+  EXPECT_THROW(motor_hardware_interface::load_driver_config(kSerialBusMissingTty),
                std::runtime_error);
 }
 

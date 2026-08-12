@@ -48,8 +48,30 @@ motor_canfd_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) 
     throw std::runtime_error("motor_hardware.buses must be a non-empty map");
   }
   for (const auto &entry : buses) {
-    config.buses.push_back({entry.first.as<std::string>(),
-                            entry.second["interface"].as<std::string>()});
+    motor_canfd_drive::BusConfig bus;
+    bus.name = entry.first.as<std::string>();
+    const auto node = entry.second;
+    if (node["transport"]) {
+      bus.transport = node["transport"].as<std::string>();
+    }
+    if (node["interface"]) {
+      bus.interface_name = node["interface"].as<std::string>();
+    }
+    if (node["tty"]) {
+      bus.tty = node["tty"].as<std::string>();
+    }
+    if (bus.transport == "serial_slcan") {
+      if (bus.tty.empty()) {
+        throw std::runtime_error("bus '" + bus.name +
+                                 "' with transport serial_slcan requires 'tty'");
+      }
+    } else {
+      if (bus.interface_name.empty()) {
+        throw std::runtime_error("bus '" + bus.name +
+                                 "' requires 'interface'");
+      }
+    }
+    config.buses.push_back(std::move(bus));
   }
 
   std::unordered_map<std::string, motor_canfd_drive::MotorParameterMap>

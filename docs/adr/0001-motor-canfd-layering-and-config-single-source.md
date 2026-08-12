@@ -2,7 +2,7 @@
 
 **Status**: accepted；其中“真机与仿真共享同一份 motor_canfd.yaml”部分已被
 [ADR 0002](./0002-sim-topology-config-decoupled-from-hardware.md) 取代；
-“四包单向依赖链”仅适用于 `develop` 仿真分支，`dev-real` 真机分支只保留
+“四包单向依赖链”仅适用于 `dev-sim`（原 develop）仿真分支，`dev-real` 真机分支只保留
 `motor_drive` 与 `motor_hardware_interface` 两包，见
 [ADR 0005](./0005-dev-real-branch-and-motor-drive-rename.md)。
 

@@ -1,6 +1,6 @@
 # Brooks-Lint Health Dashboard
 
-> 快照说明：本报告生成于 2026-08-11，针对 `develop` 分支（四包 + 串口基线）。
+> 快照说明：本报告生成于 2026-08-11，针对 `dev-sim`（原 develop）分支（四包 + 串口基线）。
 > `dev-real` 真机分支只保留 `motor_drive` 与 `motor_hardware_interface` 两包，
 > 正文中的仿真包与串口结论不适用于该分支。
 

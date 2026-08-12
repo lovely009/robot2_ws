@@ -2,7 +2,7 @@
 
 14 自由度上半身双臂机器人的 ROS 2 Humble 工作空间，本分支面向**真机部署**：
 仅包含 `motor_drive`（底层驱动）与 `motor_hardware_interface`（ros2_control 适配层）
-两个 ament 包，不依赖仿真栈。仿真回环与 CANable2 串口台架能力保留在旧 `develop`
+两个 ament 包，不依赖仿真栈。仿真回环与 CANable2 串口台架能力保留在 `dev-sim`
 分支，两条线各自演进。
 
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/humble/)
@@ -150,7 +150,7 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 
 ## 开发流程
 
-- **分支模型**：`main` 仅用于发布；`dev-real` 是真机转移长期开发线；`develop`
+- **分支模型**：`main` 仅用于发布；`dev-real` 是真机转移长期开发线；`dev-sim`
   保留仿真回环与串口台架能力。
 - **提交规范**：conventional 前缀（`feat:` / `fix:` / `refactor:` / `docs:` /
   `test:`），正文写清原因。

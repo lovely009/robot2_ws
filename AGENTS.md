@@ -3,7 +3,7 @@
 ROS 2 Humble 工作空间（`dev-real` 分支）：14 自由度上半身双臂机器人的 CAN-FD 真机控制。
 `motor_drive` 是与 ROS 无关的 SocketCAN/CAN-FD 驱动（内置 RP 与 25/30 mm 协议），
 `motor_hardware_interface` 是 `ros2_control` 适配层与真机 bring-up 入口。仿真回环与
-CANable2 串口台架能力保留在旧 `develop` 分支，本分支不维护它们。
+CANable2 串口台架能力保留在 `dev-sim` 分支，本分支不维护它们。
 
 ## 项目结构 (Project Structure & Module Organization)
 
@@ -56,7 +56,7 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 
 - 历史中英混用；优先简洁的 conventional 前缀（`feat:`、`fix:`、`docs:`）或祈使句摘要，
   正文写清原因。
-- 功能经 PR 合入 `dev-real`；`main` 仅用于发布；`develop` 保留仿真与串口能力，本分支
+- 功能经 PR 合入 `dev-real`；`main` 仅用于发布；`dev-sim` 保留仿真与串口能力，本分支
   不反向合入。
 - PR 说明改动内容与验证方式（如 `colcon test` 结果），必要时附 launch/行为截图。
 

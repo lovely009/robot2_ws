@@ -1,6 +1,6 @@
 # dev-real 真机分支：motor_drive 更名与两包精简
 
-**Status**: accepted（`dev-real` 分支专用决策；`develop` 分支不受影响）
+**Status**: accepted（`dev-real` 分支专用决策；`dev-sim`（原 develop）分支不受影响）
 
 ## Context
 
@@ -11,7 +11,7 @@ ros2_control 适配层，并让包名反映“驱动不再只处理 CAN-FD 一�
 
 ## Decision
 
-- 从 `develop` 派生 `dev-real` 分支，旧 `develop` 保留仿真回环、CANable2 串口台架
+- 从 `develop`（后更名 `dev-sim`）派生 `dev-real` 分支，旧分支保留仿真回环、CANable2 串口台架
   能力与四包结构，两条线各自演进。
 - `dev-real` 只保留 `motor_drive` 与 `motor_hardware_interface` 两个 ament 包：
   `motor_canfd_sim`、`upper_body_canfd_gazebo` 从本分支移除。
@@ -27,12 +27,12 @@ ros2_control 适配层，并让包名反映“驱动不再只处理 CAN-FD 一�
 
 ## Considered Options
 
-- **在 develop 上直接更名并删除仿真包**：会破坏 develop 的仿真回环与串口验证能力，
+- **在 dev-sim（原 develop）上直接更名并删除仿真包**：会破坏其仿真回环与串口验证能力，
   且未提交的串口工作无归属，故否决。
 - **保留旧包名只改目录**：与“驱动支持两套协议”的职责不符，旧名字持续误导读者，
   故否决。
 - **保留串口传输代码但不在真机配置中使用**：本分支目标是干净的真机链路，串口
-  CANable2 只是台架工具，保留死代码违背精简意图；能力在 develop 有据可查，故移除。
+  CANable2 只是台架工具，保留死代码违背精简意图；能力在 dev-sim 有据可查，故移除。
 - **模型保留在独立包**：两包结构下无承载包，且真机 bring-up 自足是既有 ADR 0003
   的方向，模型随适配层内置最简。
 
@@ -40,7 +40,7 @@ ros2_control 适配层，并让包名反映“驱动不再只处理 CAN-FD 一�
 
 - `dev-real` 的真机部署链路：`motor_drive` + `motor_hardware_interface` + 内置模型，
   一条 launch 命令启动，无 Gazebo/模拟器依赖。
-- `develop` 继续维护仿真回环与串口验证；`motor_canfd_drive` 旧名只在 `develop`
+- `dev-sim` 继续维护仿真回环与串口验证；`motor_canfd_drive` 旧名只在 `dev-sim`
   分支存在，本分支文档不得引用。
 - 新增电机家族仍走协议策略注册；`motor_drive` 的 `BusConfig` 只剩
   `name` + `interface_name`，配置/解析/launch 全部回到纯 SocketCAN 语义。

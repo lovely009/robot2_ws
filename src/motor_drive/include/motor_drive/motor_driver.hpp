@@ -18,6 +18,8 @@ class MotorDriver final {
 public:
   explicit MotorDriver(DriverConfig config);
   MotorDriver(DriverConfig config, MotorProtocolRegistry registry);
+  MotorDriver(DriverConfig config, MotorProtocolRegistry protocols,
+              CanTransportRegistry transports);
   ~MotorDriver() = default;
 
   MotorDriver(const MotorDriver &) = delete;
@@ -56,6 +58,7 @@ private:
   static bool send_frame(const CanTransport &transport, const CanFrame &frame);
 
   DriverConfig config_;
+  CanTransportRegistry transports_;
   std::vector<BusRuntime> buses_;
 };
 

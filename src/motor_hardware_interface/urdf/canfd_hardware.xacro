@@ -33,4 +33,14 @@
       <state_interface name="effort"/>
     </joint>
   </xacro:macro>
+
+  <!-- 递归展开 "关节名,关节名,..." 列表，逐个生成 ros2_control joint 接口。
+       清单由 launch 从权威电机拓扑配置生成并注入（control_joints 参数），
+       本片段不写死任何关节数量。 -->
+  <xacro:macro name="emit_control_joints" params="joints">
+    <xacro:if value="${len(joints) > 0}">
+      <xacro:canfd_control_joint joint="${joints[0]}"/>
+      <xacro:emit_control_joints joints="${joints[1:]}" />
+    </xacro:if>
+  </xacro:macro>
 </robot>

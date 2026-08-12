@@ -51,11 +51,27 @@ motor_drive::DriverConfig parse_driver_config(const YAML::Node &hardware) {
     motor_drive::BusConfig bus;
     bus.name = entry.first.as<std::string>();
     const auto node = entry.second;
+    if (node["transport"]) {
+      bus.transport = node["transport"].as<std::string>();
+    }
     if (node["interface"]) {
       bus.interface_name = node["interface"].as<std::string>();
     }
-    if (bus.interface_name.empty()) {
-      throw std::runtime_error("bus '" + bus.name + "' requires 'interface'");
+    if (node["tty"]) {
+      bus.tty = node["tty"].as<std::string>();
+    }
+    // 传输类型缺省 socketcan（struct 默认值）；显式空串非法。
+    if (bus.transport.empty()) {
+      throw std::runtime_error("bus '" + bus.name +
+                               "' has an empty 'transport'");
+    }
+    if (bus.transport == "socketcan" && bus.interface_name.empty()) {
+      throw std::runtime_error("bus '" + bus.name +
+                               "' with transport socketcan requires 'interface'");
+    }
+    if (bus.transport == "serial_slcan" && bus.tty.empty()) {
+      throw std::runtime_error("bus '" + bus.name +
+                               "' with transport serial_slcan requires 'tty'");
     }
     config.buses.push_back(std::move(bus));
   }

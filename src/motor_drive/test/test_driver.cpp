@@ -53,6 +53,15 @@ public:
   }
 };
 
+class DummyTransport final : public drive::CanTransport {
+public:
+  bool send(uint32_t, const uint8_t *, std::size_t, bool, bool,
+            bool) const override {
+    return true;
+  }
+  bool receive(drive::CanFrame &) const override { return false; }
+};
+
 } // namespace
 
 TEST(MotorDriver, MotorCountIsConfigurationDrivenNotSeven) {
@@ -80,4 +89,63 @@ TEST(MotorDriver, CustomMotorTypeCanBeRegisteredWithoutChangingCoreDriver) {
                             [] { return std::make_unique<DummyProtocol>(); });
   EXPECT_NO_THROW(drive::MotorDriver driver(std::move(config),
                                             std::move(registry)));
+}
+
+TEST(CanTransportRegistry, BuiltinTransportsAreRegistered) {
+  const auto registry = drive::CanTransportRegistry::with_builtin_transports();
+  EXPECT_TRUE(registry.contains(drive::kSocketCanTransport));
+  EXPECT_TRUE(registry.contains(drive::kSerialSlcanTransport));
+  EXPECT_FALSE(registry.contains("unknown_transport"));
+}
+
+TEST(CanTransportRegistry, UnknownTransportThrowsOnCreate) {
+  const auto registry = drive::CanTransportRegistry::with_builtin_transports();
+  drive::BusConfig bus;
+  bus.name = "bad";
+  bus.transport = "not_a_transport";
+  EXPECT_THROW(static_cast<void>(registry.create(bus)), std::invalid_argument);
+}
+
+TEST(MotorDriver, OpensTransportFromBusConfig) {
+  // 传输类型由 BusConfig.transport 决定：注册 "fake" 后 open() 应调用对应工厂，
+  // 而不是在驱动里写死 SocketCan。
+  drive::DriverConfig config;
+  config.buses.push_back({"bench", "", "fake", "/dev/null"});
+  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
+                           drive::kRpMotorType, 1U, {}});
+
+  auto transports = drive::CanTransportRegistry::with_builtin_transports();
+  bool factory_called = false;
+  transports.register_factory(
+      "fake", [&factory_called](const drive::BusConfig &) {
+        factory_called = true;
+        return std::make_unique<DummyTransport>();
+      });
+
+  drive::MotorDriver driver(std::move(config),
+                            drive::MotorProtocolRegistry::with_builtin_protocols(),
+                            std::move(transports));
+  driver.open();
+  EXPECT_TRUE(driver.is_open());
+  EXPECT_TRUE(factory_called);
+  driver.close();
+  EXPECT_FALSE(driver.is_open());
+}
+
+TEST(MotorDriver, RejectsUnregisteredTransport) {
+  drive::DriverConfig config;
+  config.buses.push_back({"bench", "", "not_a_transport", ""});
+  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
+                           drive::kRpMotorType, 1U, {}});
+  EXPECT_THROW(drive::MotorDriver driver(std::move(config)),
+               std::invalid_argument);
+}
+
+TEST(MotorDriver, SerialSlcanBusRequiresTty) {
+  drive::DriverConfig config;
+  config.buses.push_back({"bench", "", drive::kSerialSlcanTransport, ""});
+  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
+                           drive::kRpMotorType, 1U, {}});
+  EXPECT_THROW(drive::MotorDriver driver(std::move(config)),
+               std::invalid_argument);
 }

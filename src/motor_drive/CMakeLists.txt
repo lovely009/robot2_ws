@@ -7,6 +7,8 @@ add_library(${PROJECT_NAME} SHARED
   src/motor_driver.cpp
   src/motor_protocol.cpp
   src/protocol.cpp
+  src/serial_slcan_transport.cpp
+  src/slcan.cpp
   src/socketcan.cpp)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
@@ -28,6 +30,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_motor_protocol ${PROJECT_NAME})
   ament_add_gtest(test_driver test/test_driver.cpp)
   target_link_libraries(test_driver ${PROJECT_NAME})
+  ament_add_gtest(test_slcan test/test_slcan.cpp)
+  target_link_libraries(test_slcan ${PROJECT_NAME})
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)

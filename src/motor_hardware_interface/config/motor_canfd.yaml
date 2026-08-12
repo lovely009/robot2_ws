@@ -5,12 +5,18 @@ motor_hardware:
     initial_feedback_wait_s: 1.0
 
   # 逻辑总线名可以自由定义；新增/删除总线只改这里，不需要修改 C++。
-  # SocketCAN 的物理位率由 Linux `ip link` 配置，本文件只负责接口映射。
+  # 传输类型由 transport 字段决定：
+  #   socketcan    -> interface（Linux SocketCAN 接口，如 can0，位率由 ip link 配置）
+  #   serial_slcan -> tty（CANable2 串口设备，如 /dev/ttyACM0；驱动内固定
+  #                   C->S8(仲裁 1M)->Y5(数据 5M)->O 配置总线）
+  # transport 缺省为 socketcan；bus_override 只覆盖设备路径，传输类型切换须改这里。
   buses:
     left_arm:
-      interface: can0
+      transport: serial_slcan
+      tty: /dev/ttyACM0
     right_arm:
-      interface: can1
+      transport: serial_slcan
+      tty: /dev/ttyACM1
 
   # 默认参数按 motor.type 选择。某个具体电机可用自己的 command/parameters 覆盖默认值。
   # 新增电机家族时在 motor_drive 中增加协议策略，而不是修改通用驱动循环。
@@ -31,6 +37,7 @@ motor_hardware:
 
   # 这里是唯一与具体机器人拓扑相关的电机映射。
   # motors 数量不限，也可以混合任意已注册的电机类型与逻辑总线。
+  # 当前 14 台仅为示例：电机数量/类型/ID/总线完全由本文件决定，增删改零代码改动。
   motors:
     left_shoulder_yaw:
       joint: left_shoulder_yaw_joint

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "motor_drive/socketcan.hpp"
+#include "motor_drive/serial_slcan_transport.hpp"
 
 namespace motor_drive {
 
@@ -17,8 +18,13 @@ MotorDriver::MotorDriver(DriverConfig config)
                   MotorProtocolRegistry::with_builtin_protocols()) {}
 
 MotorDriver::MotorDriver(DriverConfig config, MotorProtocolRegistry registry)
-    : config_(std::move(config)) {
-  validate_and_build(std::move(registry));
+    : MotorDriver(std::move(config), std::move(registry),
+                  CanTransportRegistry::with_builtin_transports()) {}
+
+MotorDriver::MotorDriver(DriverConfig config, MotorProtocolRegistry protocols,
+                         CanTransportRegistry transports)
+    : config_(std::move(config)), transports_(std::move(transports)) {
+  validate_and_build(std::move(protocols));
 }
 
 void MotorDriver::validate_and_build(MotorProtocolRegistry registry) {
@@ -33,6 +39,7 @@ void MotorDriver::validate_and_build(MotorProtocolRegistry registry) {
   // 两个逻辑总线重复占用，否则接收帧归属会变得不确定。
   std::unordered_map<std::string, std::size_t> bus_index;
   std::unordered_set<std::string> interface_names;
+  std::unordered_set<std::string> tty_paths;
   buses_.reserve(config_.buses.size());
   for (const auto &bus : config_.buses) {
     if (bus.name.empty()) {
@@ -41,14 +48,33 @@ void MotorDriver::validate_and_build(MotorProtocolRegistry registry) {
     if (!bus_index.emplace(bus.name, buses_.size()).second) {
       throw std::invalid_argument("duplicate CAN bus name '" + bus.name + "'");
     }
-    if (bus.interface_name.empty()) {
-      throw std::invalid_argument(
-          "SocketCAN bus '" + bus.name + "' requires an interface name");
+    if (bus.transport.empty()) {
+      throw std::invalid_argument("CAN bus '" + bus.name +
+                                  "' has an empty transport type");
     }
-    if (!interface_names.insert(bus.interface_name).second) {
-      throw std::invalid_argument(
-          "SocketCAN interface '" + bus.interface_name +
-          "' is assigned to more than one logical bus");
+    if (!transports_.contains(bus.transport)) {
+      throw std::invalid_argument("bus '" + bus.name + "' uses unregistered transport '" +
+                                  bus.transport + "'");
+    }
+    if (bus.transport == kSocketCanTransport) {
+      if (bus.interface_name.empty()) {
+        throw std::invalid_argument("socketcan bus '" + bus.name +
+                                    "' requires an interface name");
+      }
+      if (!interface_names.insert(bus.interface_name).second) {
+        throw std::invalid_argument(
+            "SocketCAN interface '" + bus.interface_name +
+            "' is assigned to more than one logical bus");
+      }
+    } else if (bus.transport == kSerialSlcanTransport) {
+      if (bus.tty.empty()) {
+        throw std::invalid_argument("serial_slcan bus '" + bus.name +
+                                    "' requires a tty path");
+      }
+      if (!tty_paths.insert(bus.tty).second) {
+        throw std::invalid_argument("tty '" + bus.tty +
+                                    "' is assigned to more than one logical bus");
+      }
     }
     BusRuntime runtime;
     runtime.config = bus;
@@ -102,17 +128,63 @@ void MotorDriver::validate_and_build(MotorProtocolRegistry registry) {
 
 void MotorDriver::open() {
   try {
-    // 每条逻辑总线打开一个 SocketCAN 传输。任何一条总线打开失败时，
-    // catch 会统一 close，避免留下“部分总线已打开”的半初始化状态。
+    // 每条逻辑总线按配置的 transport 类型创建传输（socketcan / serial_slcan）。
+    // 任何一条总线打开失败时，catch 会统一 close，避免留下“部分总线已打开”
+    // 的半初始化状态。
     for (auto &bus : buses_) {
       if (!bus.transport) {
-        bus.transport = std::make_unique<SocketCan>(bus.config.interface_name);
+        bus.transport = transports_.create(bus.config);
       }
     }
   } catch (...) {
     close();
     throw;
   }
+}
+
+void CanTransportRegistry::register_factory(std::string transport,
+                                            Factory factory) {
+  if (transport.empty() || !factory) {
+    throw std::invalid_argument("transport type and factory must be valid");
+  }
+  if (!factories_.emplace(std::move(transport), std::move(factory)).second) {
+    throw std::invalid_argument("transport type is already registered");
+  }
+}
+
+bool CanTransportRegistry::contains(const std::string &transport) const noexcept {
+  return factories_.find(transport) != factories_.end();
+}
+
+std::unique_ptr<CanTransport>
+CanTransportRegistry::create(const BusConfig &bus) const {
+  const auto it = factories_.find(bus.transport);
+  if (it == factories_.end()) {
+    throw std::invalid_argument("unknown CAN transport type '" + bus.transport +
+                                "'");
+  }
+  auto transport = it->second(bus);
+  if (!transport) {
+    throw std::runtime_error("transport factory returned null for type '" +
+                             bus.transport + "'");
+  }
+  return transport;
+}
+
+CanTransportRegistry CanTransportRegistry::with_builtin_transports() {
+  CanTransportRegistry registry;
+  // 内置传输只在这里注册。以后增加新传输后端时，不需要修改 MotorDriver。
+  registry.register_factory(kSocketCanTransport,
+                            [](const BusConfig &bus) {
+                              return std::make_unique<SocketCan>(
+                                  bus.interface_name);
+                            });
+  registry.register_factory(kSerialSlcanTransport,
+                            [](const BusConfig &bus) {
+                              return std::make_unique<SerialSlcanTransport>(
+                                  bus.tty);
+                            });
+  return registry;
 }
 
 void MotorDriver::close() noexcept {

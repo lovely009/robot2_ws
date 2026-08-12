@@ -71,8 +71,14 @@ bool CanFdSystem::apply_bus_overrides(std::string &error) {
       error = "hardware parameter '" + parameter.first + "' cannot be empty";
       return false;
     }
-    // 总线覆盖只改 SocketCAN 接口名（例如 HIL 时把 vcan 指向真实 can 接口）。
-    bus_it->interface_name = parameter.second;
+    // 总线覆盖只改设备路径：SocketCAN 总线覆盖接口名（HIL 时把 vcan 指向
+    // 真实 can 接口）；serial_slcan 串口总线覆盖 tty 路径。传输类型本身
+    // 由 YAML transport 字段决定，不能在这里切换。
+    if (bus_it->transport == "serial_slcan") {
+      bus_it->tty = parameter.second;
+    } else {
+      bus_it->interface_name = parameter.second;
+    }
   }
   return true;
 }

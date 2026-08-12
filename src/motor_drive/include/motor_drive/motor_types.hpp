@@ -10,10 +10,14 @@ namespace motor_drive {
 // 也不出现 left_arm/right_arm 等机器人结构概念。这样底层驱动可以脱离 ROS 2 独立复用。
 using MotorParameterMap = std::unordered_map<std::string, std::string>;
 
-// 一个逻辑总线对应一个 Linux SocketCAN 接口（如 can0 / vcan0）。
+// 一个逻辑总线对应一个 CAN 传输后端：
+//   transport = "socketcan"    -> interface_name（Linux SocketCAN 接口，如 can0）
+//   transport = "serial_slcan" -> tty（CANable2 串口设备，如 /dev/ttyACM0）
 struct BusConfig {
   std::string name;
   std::string interface_name;
+  std::string transport{"socketcan"};
+  std::string tty;
 };
 
 // 一台电机只描述“它是谁、挂在哪、用什么协议”。

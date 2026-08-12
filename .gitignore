@@ -8,4 +8,5 @@
 # Python caches and Windows download metadata.
 **/__pycache__/
 **/*.pyc
+**/.pytest_cache/
 **/*:Zone.Identifier

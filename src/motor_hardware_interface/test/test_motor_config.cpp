@@ -13,11 +13,20 @@ const std::string kBadConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/bad_motor_config.yaml";
 const std::string kMissingTimingConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/missing_timing_motor_config.yaml";
+const std::string kMixedTransportConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/mixed_transport_motor_config.yaml";
+const std::string kMissingTtyConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/missing_tty_motor_config.yaml";
+const std::string kEmptyTransportConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/empty_transport_motor_config.yaml";
 TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   const auto config = motor_hardware_interface::load_driver_config(kSampleConfig);
   ASSERT_EQ(config.buses.size(), 1U);
   EXPECT_EQ(config.buses[0].name, "test_bus");
   EXPECT_EQ(config.buses[0].interface_name, "vcan0");
+  // transport 缺省为 socketcan，向后兼容不带 transport 字段的配置。
+  EXPECT_EQ(config.buses[0].transport, "socketcan");
+  EXPECT_TRUE(config.buses[0].tty.empty());
 
   ASSERT_EQ(config.motors.size(), 2U);
   EXPECT_EQ(config.motors[0].name, "shoulder_yaw");
@@ -80,6 +89,29 @@ TEST(LoadSystemConfig, EmptyPathThrows) {
 
 TEST(LoadSystemConfig, MissingRootThrows) {
   EXPECT_THROW(motor_hardware_interface::load_system_config(kBadConfig),
+               std::runtime_error);
+}
+
+TEST(LoadDriverConfig, ParsesMixedTransportBuses) {
+  const auto config =
+      motor_hardware_interface::load_driver_config(kMixedTransportConfig);
+  ASSERT_EQ(config.buses.size(), 2U);
+  EXPECT_EQ(config.buses[0].name, "socket_bus");
+  EXPECT_EQ(config.buses[0].transport, "socketcan");
+  EXPECT_EQ(config.buses[0].interface_name, "vcan0");
+  EXPECT_EQ(config.buses[1].name, "serial_bus");
+  EXPECT_EQ(config.buses[1].transport, "serial_slcan");
+  EXPECT_EQ(config.buses[1].tty, "/dev/ttyACM0");
+  EXPECT_TRUE(config.buses[1].interface_name.empty());
+}
+
+TEST(LoadDriverConfig, SerialSlcanBusRequiresTty) {
+  EXPECT_THROW(motor_hardware_interface::load_driver_config(kMissingTtyConfig),
+               std::runtime_error);
+}
+
+TEST(LoadDriverConfig, EmptyTransportThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_driver_config(kEmptyTransportConfig),
                std::runtime_error);
 }
 

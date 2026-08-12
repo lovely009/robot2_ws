@@ -47,6 +47,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_canfd_logic test/test_canfd_logic.cpp)
   target_link_libraries(test_canfd_logic ${PROJECT_NAME})
   ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
+  ament_add_pytest_test(test_xacro_consistency test/test_xacro_consistency.py)
 endif()
 
 ament_python_install_package(motor_hardware_interface)

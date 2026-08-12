@@ -1,6 +1,9 @@
 # ROS 2 硬件驱动分层与参数文件规范调研
 
 调研日期：2026-08-10
+适用分支：本调研记录于 `develop` 四包结构期间；`dev-real` 分支只保留
+`motor_drive` 与 `motor_hardware_interface` 两包，正文中关于仿真包的结论仅适用于
+`develop`。
 调研问题（来自 grilling 设计树）：在这一层级中，底层硬件驱动包需不需要依赖 ROS？硬件参数文件应该怎么放？
 
 ## TL;DR

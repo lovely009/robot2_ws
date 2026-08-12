@@ -121,7 +121,7 @@ MIT Mini Cheetah 论文（Katz / Di Carlo / Kim, ICRA 2019）在关节层使用�
 
 - 扩展反馈解析：RP/2530 状态帧的温度、电压、故障位、电机状态/模式解析（R1/R3 范围）。
 - 故障处理：Level1 告警上报、Level2 触发 fail-fast 停机（沿用 ADR 0004 语义）。
-- 零位校准工具与模式切换/参数配置命令（作为 `motor_canfd_drive` 协议策略的扩展接口）。
+- 零位校准工具与模式切换/参数配置命令（作为 `motor_drive` 协议策略的扩展接口）。
 - 前馈力矩接口：从上层接收重力/动力学补偿量，填入 `JointCommand.feedforward`。
 
 ### 阶段 4：整机验证

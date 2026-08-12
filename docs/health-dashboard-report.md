@@ -1,5 +1,9 @@
 # Brooks-Lint Health Dashboard
 
+> 快照说明：本报告生成于 2026-08-11，针对 `develop` 分支（四包 + 串口基线）。
+> `dev-real` 真机分支只保留 `motor_drive` 与 `motor_hardware_interface` 两包，
+> 正文中的仿真包与串口结论不适用于该分支。
+
 **Mode:** Health Dashboard
 **Scope:** 整个仓库（4 个 ament 包，ROS 2 Humble 工作空间）；PR 维度 = develop 相对 main 的分支差异（48 个文件，+1861/−381）
 **Composite Score:** 100/100

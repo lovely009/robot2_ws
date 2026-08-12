@@ -25,3 +25,7 @@
 - `upper_body_canfd_gazebo` 回归纯仿真模型/launch 集成，仍负责模型描述。
 - CAN-FD ros2_control 硬件片段（`urdf/canfd_hardware.xacro`）与拓扑无关，其他机器人
   模型可直接 include。
+
+> 更新（dev-real 分支）：模型描述已随分支精简移入本包 `urdf/upper_body.urdf.xacro`，
+> `model_xacro` 提供包内默认值，不再强制由调用方从模型包传入，见
+> [ADR 0005](./0005-dev-real-branch-and-motor-drive-rename.md)。

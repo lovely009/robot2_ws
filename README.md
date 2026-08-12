@@ -1,5 +1,8 @@
 # robot_ws
 
+> 本分支 `dev-sim` 为**仿真线**：四包结构（底层驱动 / ROS 适配层 / 电机侧模拟器 /
+> Gazebo 模型集成）+ CANable2 串口台架能力；真机部署线为 `dev-real` 分支。
+
 14 自由度上半身双臂机器人的 ROS 2 Humble 工作空间，覆盖 CAN-FD 电机控制的**仿真回环**与**真机控制**全链路。
 
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/humble/)
@@ -170,7 +173,8 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 
 ## 开发流程
 
-- **分支模型**：`main` 仅用于发布；功能经 PR 合入 `develop`。
+- **分支模型**：`main` 仅用于发布；功能经 PR 合入 `dev-sim`（仿真线，含串口台架）；
+  真机线为 `dev-real`。
 - **提交规范**：conventional 前缀（`feat:` / `fix:` / `refactor:` / `docs:` / `test:`），正文写清原因。
 - **PR 要求**：说明改动内容与验证方式（如 `colcon test` 结果），必要时附 launch/行为截图。
 - **架构决策**：影响依赖方向、配置边界或安全语义的取舍写入 `docs/adr/`，随功能一起评审。

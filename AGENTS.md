@@ -46,7 +46,8 @@ ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 ## 提交与 PR 规范 (Commit & Pull Request Guidelines)
 
 - 历史中英混用；优先简洁的 conventional 前缀（`feat:`、`fix:`、`docs:`）或祈使句摘要，正文写清原因。
-- 功能经 PR 合入 `develop`，并关联 issue/PR 编号；`main` 仅用于发布。
+- 功能经 PR 合入 `dev-sim`（仿真线），并关联 issue/PR 编号；`main` 仅用于发布；
+  真机线为 `dev-real`。
 - PR 说明改动内容与验证方式（如 `colcon test` 结果），必要时附 launch/行为截图。
 
 ## Agent 专用说明 (Agent-Specific Instructions)

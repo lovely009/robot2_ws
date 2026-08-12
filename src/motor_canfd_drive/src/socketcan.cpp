@@ -80,7 +80,8 @@ void SocketCan::close_socket() noexcept {
 
 bool SocketCan::send(const uint32_t id, const uint8_t *data,
                      const std::size_t size, const bool force_fd,
-                     const bool bitrate_switch, const bool is_extended) const {
+                     const bool bitrate_switch,
+                     const bool is_extended) const {
   if (fd_ < 0 || data == nullptr || size > CANFD_MAX_DLEN) {
     return false;
   }

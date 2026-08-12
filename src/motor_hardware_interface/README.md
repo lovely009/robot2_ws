@@ -28,6 +28,8 @@ motor_hardware:
     initial_feedback_wait_s: 0.10
   buses:
     left_arm: {interface: can0}
+    # CANable2 串口总线（可选）：
+    # bench: {transport: serial_slcan, tty: /dev/ttyACM0}
   motor_types:
     rp:
       command: {kp: 30.0, kd: 1.0}
@@ -42,13 +44,25 @@ motor_hardware:
 | 节点 | 含义 |
 |---|---|
 | `timing` | 首次反馈等待和运行期反馈超时 |
-| `buses` | 逻辑总线到 SocketCAN 接口的映射 |
+| `buses` | 逻辑总线到传输后端的映射（`interface` 或 `transport+tty`） |
 | `motor_types` | 同类型电机的命令和协议参数默认值 |
 | `motors` | motor、joint、bus、type 与 ID 的拓扑映射 |
 
-单电机参数覆盖同类型默认值。Launch 可用 `bus_override.<逻辑总线名>` 覆盖接口
-（真机场景把逻辑总线指向 `can0/can1`）。仿真侧不再复用本配置：仿真拓扑位于
-`motor_canfd_sim/config/motor_canfd.yaml`，本文件只服务驱动侧/真机。
+单电机参数覆盖同类型默认值。Launch 可用 `bus_override.<逻辑总线名>` 覆盖传输端点
+（SocketCAN 总线覆盖接口名，`serial_slcan` 总线覆盖 tty 路径）。
+仿真侧不再复用本配置：仿真拓扑位于 `motor_canfd_sim/config/motor_canfd.yaml`，
+本文件只服务驱动侧/真机。
+
+### 串口总线示例（CANable2）
+
+```yaml
+buses:
+  bench: {transport: serial_slcan, tty: /dev/ttyACM0}
+```
+
+驱动通过 `/dev/ttyACM0` 的 slcan-FD 方言直接收发，无需 `can0` 接口；运行需
+tty 写权限（dialout 组或 sudo）。Launch 的 `interface_bench:=/dev/ttyACM0`
+参数同样可覆盖该 tty 路径。
 
 公开解析接口为：
 

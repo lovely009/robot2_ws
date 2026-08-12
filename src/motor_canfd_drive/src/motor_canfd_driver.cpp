@@ -2,10 +2,14 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+#include "motor_canfd_drive/serial_slcan_transport.hpp"
+#include "motor_canfd_drive/socketcan.hpp"
 
 namespace motor_canfd_drive {
 
@@ -27,21 +31,38 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
     throw std::invalid_argument("at least one motor must be configured");
   }
 
-  // 第一步：建立“逻辑总线名 -> 运行时下标”。同一个 SocketCAN 接口不能被两个
-  // 逻辑总线重复占用，否则接收帧归属会变得不确定。
+  // 第一步：建立“逻辑总线名 -> 运行时下标”。同一个传输端点（SocketCAN 接口
+  // 或串口设备）不能被两个逻辑总线重复占用，否则接收帧归属会变得不确定。
   std::unordered_map<std::string, std::size_t> bus_index;
   std::unordered_set<std::string> interfaces;
   buses_.reserve(config_.buses.size());
   for (const auto &bus : config_.buses) {
-    if (bus.name.empty() || bus.interface_name.empty()) {
-      throw std::invalid_argument("CAN bus name and interface cannot be empty");
+    if (bus.name.empty()) {
+      throw std::invalid_argument("CAN bus name cannot be empty");
     }
     if (!bus_index.emplace(bus.name, buses_.size()).second) {
       throw std::invalid_argument("duplicate CAN bus name '" + bus.name + "'");
     }
-    if (!interfaces.insert(bus.interface_name).second) {
-      throw std::invalid_argument("SocketCAN interface '" + bus.interface_name +
-                                  "' is assigned to more than one logical bus");
+    if (bus.transport == "serial_slcan") {
+      if (bus.tty.empty()) {
+        throw std::invalid_argument(
+            "serial_slcan bus '" + bus.name + "' requires a tty path");
+      }
+      if (!interfaces.insert(bus.tty).second) {
+        throw std::invalid_argument(
+            "serial device '" + bus.tty +
+            "' is assigned to more than one logical bus");
+      }
+    } else {
+      if (bus.interface_name.empty()) {
+        throw std::invalid_argument(
+            "SocketCAN bus '" + bus.name + "' requires an interface name");
+      }
+      if (!interfaces.insert(bus.interface_name).second) {
+        throw std::invalid_argument(
+            "SocketCAN interface '" + bus.interface_name +
+            "' is assigned to more than one logical bus");
+      }
     }
     BusRuntime runtime;
     runtime.config = bus;
@@ -95,11 +116,26 @@ void MotorCanfdDriver::validate_and_build(MotorProtocolRegistry registry) {
 
 void MotorCanfdDriver::open() {
   try {
-    // 每条逻辑总线只打开一个 SocketCAN socket。任何一条总线打开失败时，
+    // 每条逻辑总线按 transport 类型打开一个 CAN 传输。任何一条总线打开失败时，
     // catch 会统一 close，避免留下“部分总线已打开”的半初始化状态。
     for (auto &bus : buses_) {
-      if (!bus.socket) {
-        bus.socket = std::make_unique<SocketCan>(bus.config.interface_name);
+      if (!bus.transport) {
+        if (bus.config.transport == "serial_slcan") {
+          if (bus.config.tty.empty()) {
+            throw std::invalid_argument("bus '" + bus.config.name +
+                                        "' uses serial_slcan but has no tty");
+          }
+          bus.transport =
+              std::make_unique<SerialSlcanTransport>(bus.config.tty);
+        } else if (bus.config.transport.empty() ||
+                   bus.config.transport == "socketcan") {
+          bus.transport =
+              std::make_unique<SocketCan>(bus.config.interface_name);
+        } else {
+          throw std::invalid_argument("unknown CAN transport '" +
+                                      bus.config.transport + "' for bus '" +
+                                      bus.config.name + "'");
+        }
       }
     }
   } catch (...) {
@@ -110,19 +146,22 @@ void MotorCanfdDriver::open() {
 
 void MotorCanfdDriver::close() noexcept {
   for (auto &bus : buses_) {
-    bus.socket.reset();
+    bus.transport.reset();
   }
 }
 
 bool MotorCanfdDriver::is_open() const noexcept {
   return !buses_.empty() &&
          std::all_of(buses_.begin(), buses_.end(),
-                     [](const auto &bus) { return static_cast<bool>(bus.socket); });
+                     [](const auto &bus) {
+                       return static_cast<bool>(bus.transport);
+                     });
 }
 
-bool MotorCanfdDriver::send_frame(const SocketCan &socket, const CanFrame &frame) {
-  return socket.send(frame.id, frame.data.data(), frame.size, frame.is_fd,
-                     frame.bitrate_switch, frame.is_extended);
+bool MotorCanfdDriver::send_frame(const CanTransport &transport,
+                                  const CanFrame &frame) {
+  return transport.send(frame.id, frame.data.data(), frame.size, frame.is_fd,
+                        frame.bitrate_switch, frame.is_extended);
 }
 
 bool MotorCanfdDriver::set_enabled(const bool enabled) {
@@ -137,7 +176,7 @@ bool MotorCanfdDriver::set_enabled(const bool enabled) {
       const auto frames = group.protocol->make_enable_frames(
           config_.motors, group.motor_indices, enabled);
       for (const auto &frame : frames) {
-        ok &= send_frame(*bus.socket, frame);
+        ok &= send_frame(*bus.transport, frame);
       }
     }
   }
@@ -157,7 +196,7 @@ bool MotorCanfdDriver::write_commands(
       const auto frames = group.protocol->make_command_frames(
           config_.motors, group.motor_indices, commands);
       for (const auto &frame : frames) {
-        ok &= send_frame(*bus.socket, frame);
+        ok &= send_frame(*bus.transport, frame);
       }
     }
   }
@@ -179,7 +218,7 @@ std::size_t MotorCanfdDriver::read_feedback(
   // 每帧按同一总线上的协议组依次尝试解码；首个识别成功的策略负责该帧。
   for (const auto &bus : buses_) {
     CanFrame frame;
-    while (bus.socket->receive(frame)) {
+    while (bus.transport->receive(frame)) {
       for (const auto &group : bus.groups) {
         std::size_t motor_index = 0U;
         protocol::JointState state;

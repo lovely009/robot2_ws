@@ -1,12 +1,13 @@
 # motor_canfd_drive
 
-C++17 CAN-FD 电机驱动库，提供 SocketCAN 传输、协议编解码、协议策略注册和动态电机映射。
+C++17 CAN-FD 电机驱动库，提供可插拔的 CAN 传输（SocketCAN / CANable2 串口）、
+协议编解码、协议策略注册和动态电机映射。
 
 ## 职责边界
 
 负责：
 
-- 管理 `DriverConfig` 中声明的任意数量总线和电机；
+  - 管理 `DriverConfig` 中声明的任意数量总线和电机（每条总线可独立选择传输后端）；
 - 按 `(bus, type)` 分组并调用对应`MotorProtocol`；
 - 发送使能、失能和控制命令，接收并解析反馈；
 - 提供 RP 与 `motor_2530` 协议实现。
@@ -21,14 +22,14 @@ C++17 CAN-FD 电机驱动库，提供 SocketCAN 传输、协议编解码、协�
 
 ```text
 DriverConfig
-  buses[]  -> 逻辑总线名 + SocketCAN 接口
+  buses[]  -> 逻辑总线名 + 传输后端（socketcan / serial_slcan）
   motors[] -> motor + joint + bus + type + id + parameters
        |
        v
 MotorCanfdDriver
   -> 按 (bus, type) 分组
   -> MotorProtocol
-  -> SocketCan
+  -> CanTransport（SocketCan / SerialSlcanTransport）
 ```
 
 | 组件 | 职责 |
@@ -36,9 +37,28 @@ MotorCanfdDriver
 | `MotorCanfdDriver` | 配置校验、总线生命周期、电机分组和统一收发 |
 | `MotorProtocol` | 电机家族的使能、控制、反馈和 ID 规则 |
 | `protocol.*` | 物理量与线协议字段转换 |
-| `SocketCan` | Linux CAN-FD socket 的打开、发送、接收和关闭 |
+| `CanTransport` | 传输抽象：`send()` / `receive()`，驱动不感知底层实现 |
+| `SocketCan` | Linux CAN-FD socket 传输（`can0`/`vcan0` 等） |
+| `SerialSlcanTransport` | CANable2 串口传输（`/dev/ttyACM0`，slcan-FD 方言） |
+| `slcan.*` | slcan 帧编解码（纯函数，可独立单测） |
 
 RP 单条广播命令最多容纳 8 个槽位，这是 RP 线协议限制，仅由 RP 策略校验，不限制其他协议或整机电机数量。
+
+## 传输层
+
+`BusConfig.transport` 选择总线后端：
+
+```cpp
+// SocketCAN（默认）
+BusConfig{"left_arm", "can0", "socketcan", ""};
+
+// CANable2 串口（slcan 固件，1M 仲裁 / 5M 数据段）
+BusConfig{"bench", "", "serial_slcan", "/dev/ttyACM0"};
+```
+
+`SerialSlcanTransport` 构造时自动下发 `C → S8 → Y5 → O` 配置总线；
+`send()`/`receive()` 与 SocketCAN 语义一致（非阻塞、按帧编解码）。
+串口传输只需 tty 写权限（dialout 或 root），不需要 SocketCAN 接口或 NET_ADMIN。
 
 ## 公共接口
 
@@ -47,6 +67,9 @@ RP 单条广播命令最多容纳 8 个槽位，这是 RP 线协议限制，仅�
 - `motor_types.hpp`：驱动配置、命令与反馈数据类型；
 - `motor_protocol.hpp`：协议策略接口与 registry；
 - `motor_canfd_driver.hpp`：通用驱动入口；
+- `can_transport.hpp`：CAN 帧结构与传输抽象；
+- `serial_slcan_transport.hpp`：CANable2 串口传输；
+- `slcan.hpp`：slcan 帧编解码；
 - `protocol.hpp`：协议字段编解码；
 - `socketcan.hpp`：SocketCAN 封装。
 

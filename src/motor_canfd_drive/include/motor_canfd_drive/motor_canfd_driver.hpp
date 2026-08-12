@@ -5,10 +5,10 @@
 #include <string>
 #include <vector>
 
+#include "motor_canfd_drive/can_transport.hpp"
 #include "motor_canfd_drive/motor_protocol.hpp"
 #include "motor_canfd_drive/motor_types.hpp"
 #include "motor_canfd_drive/protocol.hpp"
-#include "motor_canfd_drive/socketcan.hpp"
 
 namespace motor_canfd_drive {
 
@@ -44,16 +44,16 @@ private:
     std::unique_ptr<MotorProtocol> protocol;
   };
 
-  // 每个逻辑总线运行时只打开一个 SocketCAN socket，再挂接若干协议组。
+  // 每个逻辑总线运行时只打开一个 CAN 传输，再挂接若干协议组。
   struct BusRuntime {
     BusConfig config;
     std::vector<ProtocolGroup> groups;
-    std::unique_ptr<SocketCan> socket;
+    std::unique_ptr<CanTransport> transport;
   };
 
   // 在真正打开 CAN 前一次性验证配置并建立运行时分组，尽早暴露重复 ID/未知类型等错误。
   void validate_and_build(MotorProtocolRegistry registry);
-  static bool send_frame(const SocketCan &socket, const CanFrame &frame);
+  static bool send_frame(const CanTransport &transport, const CanFrame &frame);
 
   DriverConfig config_;
   std::vector<BusRuntime> buses_;

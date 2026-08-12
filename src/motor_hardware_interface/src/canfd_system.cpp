@@ -71,7 +71,12 @@ bool CanFdSystem::apply_bus_overrides(std::string &error) {
       error = "hardware parameter '" + parameter.first + "' cannot be empty";
       return false;
     }
-    bus_it->interface_name = parameter.second;
+    // SocketCAN 总线覆盖接口名；串口总线覆盖 tty 路径。
+    if (bus_it->transport == "serial_slcan") {
+      bus_it->tty = parameter.second;
+    } else {
+      bus_it->interface_name = parameter.second;
+    }
   }
   return true;
 }

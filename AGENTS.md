@@ -41,7 +41,7 @@ ros2 launch upper_body_canfd_gazebo driver_loopback.launch.py
 - C++：GoogleTest（`ament_cmake_gtest`），测试文件位于 `src/<package>/test/test_*.cpp`。
 - Python：pytest（`ament_pytest`），测试文件位于 `src/<package>/test/test_*.py`，函数命名 `test_<behavior>()`。
 - launch 文件静态检查：`motor_canfd_sim` 用 `ament_add_pytest_test`，`upper_body_canfd_gazebo` 用 pytest 自动发现；测试不得启动 Gazebo 或硬件。
-- 统一运行：`colcon test && colcon test-result --verbose`；当前基线 94 项用例全绿。
+- 统一运行：`colcon test && colcon test-result --verbose`；当前基线 104 项用例全绿。
 
 ## 提交与 PR 规范 (Commit & Pull Request Guidelines)
 

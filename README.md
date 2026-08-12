@@ -159,11 +159,11 @@ ros2 launch motor_hardware_interface hardware.launch.py \
 
 ## 测试
 
-当前 94 项用例（GoogleTest + pytest）全部通过，测试不启动 Gazebo 或真实硬件。
+当前 104 项用例（GoogleTest + pytest）全部通过，测试不启动 Gazebo 或真实硬件。
 
 | 包 | 测试目标 | 覆盖内容 |
 |---|---|---|
-| `motor_canfd_drive` | `test_protocol` / `test_driver` | 协议字段编解码、配置校验、协议注册与扩展 |
+| `motor_canfd_drive` | `test_protocol` / `test_motor_protocol` / `test_driver` | 协议字段编解码、策略级帧生成/解码、配置校验、协议注册与扩展 |
 | `motor_hardware_interface` | `test_motor_config` / `test_canfd_logic` / `test_hardware_launch` | YAML 解析与校验、激活/超时纯逻辑、真机 launch 静态检查 |
 | `motor_canfd_sim` | `test_plant_model` / `test_sim_frame_decode` / `test_motor_canfd_sim_launch` | plant 模型、帧解析纯函数、launch 参数与安全默认值 |
 | `upper_body_canfd_gazebo` | `test_config_topology` 等 5 个 pytest | 拓扑一致性、launch 时序契约、动作库与动作播放器 |

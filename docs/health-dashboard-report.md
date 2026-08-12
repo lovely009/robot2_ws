@@ -3,7 +3,7 @@
 **Mode:** Health Dashboard
 **Scope:** 整个仓库（4 个 ament 包，ROS 2 Humble 工作空间）；PR 维度 = develop 相对 main 的分支差异（48 个文件，+1861/−381）
 **Composite Score:** 100/100
-**Trend:** 98 → 100 (+2)（第三次运行；上一轮 Warning 与 Suggestion 已全部在 develop 落地）
+**Trend:** 98 → 100 (+2)（第三次运行；补充测试提交后两条 Suggestion 已落地，仍保持 100）
 **生成日期:** 2026-08-11
 
 ## 给执行 AI 的说明
@@ -16,10 +16,10 @@
 |-----------|-------|------------|
 | Code Quality (PR) | 100/100 | Clean：近四批改动均带测试与 ADR，无 R1/R2 新发现 |
 | Architecture | 100/100 | Clean：单向四层、无环、家族扩展 seam 完整 |
-| Tech Debt | 99/100 | 动作库限位与 URDF 双写，无跨源测试 |
-| Test Quality | 99/100 | 94 项全绿；内置协议帧生成仍以字段级测试间接覆盖 |
+| Tech Debt | 100/100 | Clean：动作库限位已加跨源断言 |
+| Test Quality | 100/100 | Clean：104 项全绿；内置协议帧生成已补直接单测 |
 
-Composite = 100×0.25 + 100×0.30 + 99×0.25 + 99×0.20 = 99.55 → **100/100**。
+Composite = 100×0.25 + 100×0.30 + 100×0.25 + 100×0.20 = **100/100**。
 
 ## Module Dependency Graph
 
@@ -45,34 +45,17 @@ graph TD
 
 ## Top Findings
 
-### 🟢 Suggestion — Knowledge Duplication（R3）: 动作库限位与 URDF 双写，无跨源测试
+本轮无未解决问题。上一版报告的两条 Suggestion 已在后续提交落地：
 
-**Symptom:** `upper_body_canfd_gazebo/upper_body_canfd_gazebo/motion_library.py` 的
-`JOINT_LIMITS` 与 `urdf/upper_body.urdf.xacro` 的七个关节限位逐对相同（-1.57…2.80 rad），
-注释声明“与 URDF 保持一致”，但 `test_motion_library.py` 只用 `validate_pose` 做自校验，
-`test_config_topology.py` 只比对关节名，没有跨源断言限位相等。
-
-**Source:** Fowler — Refactoring: Duplicate Code; Hunt & Thomas — The Pragmatic Programmer: DRY（重复的是决策）
-
-**Consequence:** 调整 URDF 限位（如放开肩关节行程）后，动作库仍在旧限位处提前拦截，姿态越限或动作不可达要到运行时才暴露。
-
-**Remedy:** 在 `test_config_topology.py` 增加跨源断言：从 URDF xacro 提取各 `canfd_control_joint` 对应的 limit，与 `motion_library.JOINT_LIMITS` 逐对相等。
-
-### 🟢 Suggestion — Coverage Illusion（T5）: 内置协议策略帧生成缺少直接单测
-
-**Symptom:** `test_protocol.cpp` 覆盖字段级编解码与一次“模拟器回包 → 驱动解码”回环，但
-`RpProtocol` / `Motor2530Protocol` 的 `make_enable_frames()` / `make_command_frames()` 没有
-“给定 motors + indices + commands → 断言帧 ID / 槽位布局 / 载荷”的直接用例；
-`test_driver.cpp` 的 `DummyProtocol` 只验证注册机制与配置校验。
-
-**Source:** Feathers — Working Effectively with Legacy Code: 未覆盖路径; Osherove — The Art of Unit Testing: 边界路径完整性
-
-**Consequence:** 使能广播槽位、命令帧 ID 或字节布局回归时，单元层无法发现，只能靠手动回环或真机暴露。
-
-**Remedy:** 为两种内置协议补 gtest：构造 `motors + indices + commands` 后调用帧生成接口，按协议手册例值断言帧数、CAN ID、槽位布局，并做反馈解码回环。
+- **R3 动作库限位双写** → `test_config_topology.py::test_motion_library_joint_limits_match_urdf`
+  从 URDF xacro 提取各关节 limit，与 `motion_library.JOINT_LIMITS` 逐对断言。
+- **T5 协议帧生成缺直接单测** → 新增 `motor_canfd_drive/test/test_motor_protocol.cpp`（8 个 gtest）：
+  RP 使能/命令广播、2530 使能/命令帧按协议手册例值断言帧 ID、长度、FD 标志与载荷（含槽位布局），
+  并覆盖反馈解码、ID→电机下标映射、扭矩常数换算（A→Nm）与各类负例。
 
 ## Recommendation
 
-98 → 100 的跃升来自近四批重构全部落地：joints 单一来源、YAML 一次解析、模拟器家族策略化
-（`SimMotorHandler`）与拓扑一致性测试。剩余两条均为低严重度，建议先补协议帧生成单测
-（涉及安全使能路径、风险最高），再补动作库限位跨源断言；均可在 1 个 PR 内完成。
+当前全维度 100/100，无待办项。98 → 100 的跃升来自 joints 单一来源、YAML 一次解析、
+模拟器家族策略化（`SimMotorHandler`）、拓扑一致性测试，以及本次补充的策略级帧生成单测与
+动作库限位跨源断言。后续主要风险点是新电机家族扩展（协议 + 模拟器 handler + 两侧配置），
+建议沿用“策略注册 + 拓扑一致性测试”模式，并保持 104 项测试基线全绿。

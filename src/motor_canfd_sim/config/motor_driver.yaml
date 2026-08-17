@@ -1,0 +1,122 @@
+# 仿真侧电机拓扑配置（唯一入口，经 motor_specs_file 引用 motor.yaml 型号库）。
+#
+# 本文件描述电机侧模拟器在 vcan 上扮演哪些电机，拓扑必须与仿真模型一致：
+# 关节清单与顺序对齐 upper_body_canfd_gazebo 的 URDF 和 Gazebo effort
+# controller（controllers.yaml）关节顺序，模拟器按此顺序把 Gazebo joint state
+# 编码为反馈帧。
+#
+# 真机拓扑在 motor_hardware_interface/config/motor_driver.yaml，两侧各自演进；
+# 新增/删除关节或电机时，需要同步修改仿真模型（URDF/controller）与本文件。
+#
+# 结构（与真机拓扑一致）：
+#   motor_specs_file —— 型号库文件（相对本文件目录），见 config/motor.yaml。
+#   timing           —— 反馈超时与激活窗口时序。
+#   buses            —— 逻辑总线定义；仿真默认挂 vcan，接口仍可由
+#                        bus_override.<逻辑总线名> 在启动时覆盖。
+#   motors           —— 电机实例：type 引用 motor.yaml 型号；command.kp/kd 为
+#                        动态控制增益；单电机可覆盖 parameters。
+motor_hardware:
+  motor_specs_file: motor.yaml
+
+  timing:
+    feedback_timeout_s: 0.10
+    # 激活窗口：每次尝试在窗口内轮询全部关节反馈，最多重试 3 次。
+    initial_feedback_wait_s: 1.0
+
+  # 逻辑总线名可以自由定义；仿真默认挂到 vcan，接口仍可由
+  # bus_override.<逻辑总线名> 在启动时覆盖。
+  buses:
+    left_arm:
+      interface: vcan0
+    right_arm:
+      interface: vcan1
+
+  # 仿真模型拓扑：左臂 7 自由度 + 右臂 7 自由度，顺序与 Gazebo effort
+  # controller 的 joints 列表一致（左肩到左腕，再右肩到右腕）。
+  # type 引用 motor.yaml 型号（rp-50h / vaxor_2550），与真机拓扑一致。
+  motors:
+    left_shoulder_yaw:
+      joint: left_shoulder_yaw_joint
+      bus: left_arm
+      type: rp-50h
+      id: 1
+      command: {kp: 30.0, kd: 1.0}
+    left_shoulder_roll:
+      joint: left_shoulder_roll_joint
+      bus: left_arm
+      type: rp-50h
+      id: 2
+      command: {kp: 30.0, kd: 1.0}
+    left_shoulder_pitch:
+      joint: left_shoulder_pitch_joint
+      bus: left_arm
+      type: rp-50h
+      id: 3
+      command: {kp: 30.0, kd: 1.0}
+    left_elbow_pitch:
+      joint: left_elbow_pitch_joint
+      bus: left_arm
+      type: rp-50h
+      id: 4
+      command: {kp: 30.0, kd: 1.0}
+    left_wrist_yaw:
+      joint: left_wrist_yaw_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 1
+      command: {kp: 0.008, kd: 1.0}
+    left_wrist_pitch:
+      joint: left_wrist_pitch_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 2
+      command: {kp: 0.008, kd: 1.0}
+    left_wrist_roll:
+      joint: left_wrist_roll_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 3
+      command: {kp: 0.008, kd: 1.0}
+
+    right_shoulder_yaw:
+      joint: right_shoulder_yaw_joint
+      bus: right_arm
+      type: rp-50h
+      id: 1
+      command: {kp: 30.0, kd: 1.0}
+    right_shoulder_roll:
+      joint: right_shoulder_roll_joint
+      bus: right_arm
+      type: rp-50h
+      id: 2
+      command: {kp: 30.0, kd: 1.0}
+    right_shoulder_pitch:
+      joint: right_shoulder_pitch_joint
+      bus: right_arm
+      type: rp-50h
+      id: 3
+      command: {kp: 30.0, kd: 1.0}
+    right_elbow_pitch:
+      joint: right_elbow_pitch_joint
+      bus: right_arm
+      type: rp-50h
+      id: 4
+      command: {kp: 30.0, kd: 1.0}
+    right_wrist_yaw:
+      joint: right_wrist_yaw_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 1
+      command: {kp: 0.008, kd: 1.0}
+    right_wrist_pitch:
+      joint: right_wrist_pitch_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 2
+      command: {kp: 0.008, kd: 1.0}
+    right_wrist_roll:
+      joint: right_wrist_roll_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 3
+      command: {kp: 0.008, kd: 1.0}

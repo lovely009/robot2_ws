@@ -3,6 +3,10 @@
 /install/
 /log/
 /.vscode/
+# micro-ROS Agent 独立工作区的构建产物。
+micro_ros_agent/build/
+micro_ros_agent/install/
+micro_ros_agent/log/
 # 测试 fixture 目录误跑 colcon 产生的构建产物。
 src/motor_hardware_interface/test/fixtures/build/
 src/motor_hardware_interface/test/fixtures/install/

@@ -1,4 +1,4 @@
-# 领域术语与边界（dev-real）
+# 领域术语与边界（dev）
 
 运行方式以 README 为准，架构取舍以 docs/adr/ 为准。
 
@@ -8,12 +8,14 @@
 |---|---|
 | 底层驱动 | `motor_drive`：传输、线协议、通用电机映射（无 ROS） |
 | ROS 适配层 | `motor_hardware_interface`：ros2_control lifecycle、joint 映射、YAML 解析、真机 bring-up |
+| 仿真层 | `motor_canfd_sim`（电机侧模拟器）+ `upper_body_canfd_gazebo`（模型 / launch / 动作库） |
 
 ## 配置术语
 
 | 术语 | 含义 |
 |---|---|
-| 电机拓扑配置 | `motor_hardware_interface/config/motor_canfd.yaml`（**唯一拓扑源**：数量/类型/ID/关节名/总线/传输） |
+| 电机拓扑配置 | `config/motor_driver.yaml`（**唯一拓扑源**：数量/类型/ID/关节名/总线/传输；真机在 `motor_hardware_interface`，仿真在 `motor_canfd_sim`） |
+| 型号库 | `config/motor.yaml`（物理规格 / 控制默认值，与拓扑无关、可跨机器人复用） |
 | 逻辑总线 | 与设备路径解耦的总线标识，如 `left_arm` |
 | 传输类型 | `BusConfig.transport`：`socketcan`（内核接口）或 `serial_slcan`（CANable2 串口），缺省 `socketcan` |
 | 设备路径 | 可覆盖目标：socketcan 为接口名（`can0`），serial_slcan 为 tty（`/dev/ttyACM0`） |
@@ -27,6 +29,8 @@
 
 - 驱动侧 controller：`/driver/controller_manager` 下的 position controller。
 - 真机 bring-up：`motor_hardware_interface` 提供，默认 serial_slcan 双总线。
+- 仿真链路：`MotorDriver -> vcan -> motor_canfd_sim -> Gazebo effort controller`；
+  `upper_body_canfd_gazebo` 提供 `gazebo` / `model_sim` / `driver_loopback` 三个 launch。
 - fail-fast 停机：激活重试 3 次（每次 1 s 窗口）或运行期反馈超时即终止，人工诊断后重跑。
 
 ## 命名

@@ -4,21 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 这是什么
 
-ROS 2 Humble 工作空间（`dev-real` 真机线），只有两个 ament 包：
+ROS 2 Humble 工作空间（`dev` 开发分支），四个 ament 包：
 
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
+- `motor_canfd_sim` —— C++ 电机侧模拟器（vcan ↔ Gazebo）
+- `upper_body_canfd_gazebo` —— Gazebo 模型 / launch / 动作库
 
-分支约定：`dev-real` 真机线、`dev-sim` 仿真线、`main` 仅发布。本仓库只维护 `dev-real`，不依赖仿真栈。
+分支约定：`dev` 开发（本分支，真机 + 仿真 4 包）、`dev-real` 真机线、
+`dev-sim` 仿真线、`main` 仅发布。
 
-权威文档（修改代码前先读）：各包 `README.md`（`src/motor_drive/README.md`、`src/motor_hardware_interface/README.md`）、术语与命名 `CONTEXT.md`、架构决策 `docs/adr/`。`AGENTS.md` 也面向 agent，但其 config 文件名与协议名仍是上一版（`motor_canfd.yaml`、`motor_2530`），以代码与 README 为准——当前实际是 `motor.yaml` + `motor_driver.yaml`、协议 `rp`/`vaxor`。
+权威文档（修改代码前先读）：各包 `README.md`（`ros2_ws/src/<pkg>/README.md`）、
+术语与命名 `CONTEXT.md`、架构决策 `docs/adr/`。配置为 `motor.yaml`（型号库）+
+`motor_driver.yaml`（拓扑），协议 `rp`/`vaxor`。
 
 ## 构建与测试
 
 ```bash
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install && source install/setup.bash
-colcon test && colcon test-result --verbose      # 全量测试（含 81 项基线）
+colcon test && colcon test-result --verbose      # 全量测试
 ```
 
 按包构建：
@@ -40,7 +45,7 @@ colcon test --packages-select motor_drive --ctest-args -R test_protocol
 colcon test --packages-select motor_hardware_interface --pytest-args "-k <表达式>"
 ```
 
-测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）。测试不得启动 Gazebo 或真实硬件。
+测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）；`motor_canfd_sim` 有 `test_plant_model`/`test_sim_frame_decode`（gtest）；`upper_body_canfd_gazebo` 有 launch/拓扑/动作库 pytest。测试不得启动 Gazebo 或真实硬件。
 
 真机 bring-up（默认 serial_slcan 双总线 `/dev/ttyACM0`、`/dev/ttyACM1`）：
 
@@ -49,9 +54,15 @@ ros2 launch motor_hardware_interface hardware.launch.py
 ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0  # 覆盖设备路径
 ```
 
+仿真 bring-up（vcan）：
+
+```bash
+ros2 launch upper_body_canfd_gazebo gazebo.launch.py   # 或 model_sim / driver_loopback
+```
+
 ## 架构总览
 
-两层单向依赖，职责边界清晰：
+四包单向依赖，职责边界清晰：
 
 ```
 motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2 适配）
@@ -59,6 +70,10 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
   MotorProtocol / MotorProtocolRegistry       motor_config.cpp（YAML 解析，唯一 YAML 边界）
   MotorDriver（分组/校验/统一收发）           canfd_logic.cpp（纯逻辑，可单测）
   protocol.cpp（物理量 <-> 线协议字段）       launch + xacro（真机 bring-up）
+
+motor_canfd_sim（仿真电机侧）                upper_body_canfd_gazebo（集成）
+  SimMotorHandler（按家族模拟反馈帧）          urdf / launch / 动作库
+  plant_model（effort -> joint state）        gazebo / model_sim / driver_loopback
 ```
 
 核心是「三自适应」闭环，全部由配置驱动、编译代码不含机器人拓扑：
@@ -84,6 +99,7 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
 - `urdf/canfd_hardware.xacro`：与拓扑无关的 ros2_control 硬件片段（`canfd_hardware`/`emit_bus_overrides`/`emit_control_joints` 宏），不写死任何关节。
 - `urdf/upper_body.urdf.xacro`：物理模型（几何/惯性）**人工维护**；其 ros2_control 关节清单由 launch 注入，不手抄。两者一致性由 `test_xacro_consistency.py` 兜底。
 - `motor_hardware_interface/helpers.py`：launch 与测试共用（读取 buses/joints、生成参数文件）。
+- 仿真 launch：`upper_body_canfd_gazebo` 的 `gazebo.launch.py`（整机）← `model_sim.launch.py` ← `driver_loopback.launch.py`，默认挂 `motor_canfd_sim/config/motor_driver.yaml`。
 
 ## 关键约定与坑
 
@@ -93,4 +109,4 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
 - **安全 fail-fast**：激活时零增益轮询反馈（窗口内最多重试 3 次）→ 实测位置作初始目标 → 统一使能；运行期反馈超时返回错误，`controller_manager` 立即终止。软件兜底不能替代硬件急停、机械限位与真机标定。
 - **serial_slcan 权限**：需 tty 写权限（dialout/sudo）；`socketcan` 启动前 `ip link` 配置仲裁 1M/数据 5M。
 - **代码规范**：C++17、`-Wall -Wextra -Wpedantic`、2 空格缩进、snake_case（文件/函数/变量）、PascalCase（类）、`k` 前缀常量；中文注释写意图（数据流/单位/安全边界），协议名与 ROS 2 API 保留英文。
-- **提交**：conventional 前缀（`feat:`/`fix:`/`refactor:`/`docs:`/`test:`），功能经 PR 合入 `dev-real`，不反向合入 `dev-sim`。
+- **提交**：conventional 前缀（`feat:`/`fix:`/`refactor:`/`docs:`/`test:`），功能经 PR 合入 `dev`；真机/仿真线分别同步 `dev-real` / `dev-sim`。

@@ -102,7 +102,7 @@ def test_bringup_launch_defaults_to_tty_buses():
     default_config = (
         Path(get_package_share_directory("motor_hardware_interface"))
         / "config"
-        / "motor_canfd.yaml"
+        / "motor_driver.yaml"
     )
     expected_joints = motor_joints_from_config(default_config)
 

@@ -38,7 +38,7 @@ def _default_config_path() -> Path:
     return (
         Path(get_package_share_directory("motor_hardware_interface"))
         / "config"
-        / "motor_canfd.yaml"
+        / "motor_driver.yaml"
     )
 
 
@@ -48,7 +48,7 @@ def generate_launch_description() -> LaunchDescription:
         [share, "urdf", "upper_body.urdf.xacro"]
     )
     default_motor_config = PathJoinSubstitution(
-        [share, "config", "motor_canfd.yaml"]
+        [share, "config", "motor_driver.yaml"]
     )
 
     # interface_<总线名> 参数按默认配置声明（默认值即默认设备路径）。
@@ -69,7 +69,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "motor_config_file",
             default_value=default_motor_config,
-            description="真机电机拓扑配置；默认 motor_hardware_interface/config/motor_canfd.yaml",
+            description="真机电机拓扑配置；默认 motor_hardware_interface/config/motor_driver.yaml",
         ),
         OpaqueFunction(function=launch_control_stack),
     ])

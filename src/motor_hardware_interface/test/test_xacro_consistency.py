@@ -13,7 +13,7 @@ from motor_hardware_interface.helpers import motor_joints_from_config
 
 HERE = Path(__file__).parent
 MODEL_XACRO = HERE.parent / "urdf" / "upper_body.urdf.xacro"
-DEFAULT_CONFIG = HERE.parent / "config" / "motor_canfd.yaml"
+DEFAULT_CONFIG = HERE.parent / "config" / "motor_driver.yaml"
 OVERRIDE_CONFIG = HERE / "fixtures" / "override_motor_config.yaml"
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通过 CANable2 的串口 slcan-FD 方言直接验证 25/30 mm（motor_2530）电机。
+"""通过 CANable2 的串口 slcan-FD 方言直接验证 25/30 mm（vaxor）电机。
 
 不依赖 SocketCAN、不刷固件：把 /dev/ttyACM0 当作 CAN 通道，
 按固件命令集（C/S8/Y5/O + t/b 帧）收发控制与反馈帧。

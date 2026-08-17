@@ -3,6 +3,10 @@
 /install/
 /log/
 /.vscode/
+# 测试 fixture 目录误跑 colcon 产生的构建产物。
+src/motor_hardware_interface/test/fixtures/build/
+src/motor_hardware_interface/test/fixtures/install/
+src/motor_hardware_interface/test/fixtures/log/
 # Brooks-lint 运行历史记录。
 /.brooks-lint-history.json
 # Python caches and Windows download metadata.

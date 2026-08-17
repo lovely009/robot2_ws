@@ -7,8 +7,9 @@
 
 namespace motor_hardware_interface {
 
-// 适配层从同一份 motor_canfd.yaml 一次性解析出的完整运行配置：
-// 底层 DriverConfig 之外，还有 ROS 侧专属的反馈时序与每电机命令增益。
+// 适配层从拓扑文件（motor_driver.yaml，唯一入口）连同其引用的型号库
+// （motor.yaml）一次性解析出的完整运行配置：底层 DriverConfig 之外，
+// 还有 ROS 侧专属的反馈时序与每电机命令增益。
 struct MotorSystemConfig {
   struct CommandGains {
     double kp{0.0};

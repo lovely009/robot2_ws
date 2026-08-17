@@ -19,6 +19,10 @@ const std::string kMissingTtyConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/missing_tty_motor_config.yaml";
 const std::string kEmptyTransportConfig =
     std::string(TEST_SOURCE_DIR) + "/fixtures/empty_transport_motor_config.yaml";
+const std::string kNoSpecsConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/no_specs_motor_config.yaml";
+const std::string kMissingSpecsConfig =
+    std::string(TEST_SOURCE_DIR) + "/fixtures/missing_specs_motor_config.yaml";
 TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   const auto config = motor_hardware_interface::load_driver_config(kSampleConfig);
   ASSERT_EQ(config.buses.size(), 1U);
@@ -32,6 +36,7 @@ TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   EXPECT_EQ(config.motors[0].name, "shoulder_yaw");
   EXPECT_EQ(config.motors[0].joint_name, "shoulder_yaw_joint");
   EXPECT_EQ(config.motors[0].bus, "test_bus");
+  // 拓扑里 type 是型号名 rp-50h，解析后经 motor_types.<型号>.protocol 映射为协议类型 rp。
   EXPECT_EQ(config.motors[0].type, "rp");
   EXPECT_EQ(config.motors[0].id, 1U);
   EXPECT_EQ(config.motors[0].parameters.at("torque_constant_nm_per_amp"), "0.35");
@@ -89,6 +94,16 @@ TEST(LoadSystemConfig, EmptyPathThrows) {
 
 TEST(LoadSystemConfig, MissingRootThrows) {
   EXPECT_THROW(motor_hardware_interface::load_system_config(kBadConfig),
+               std::runtime_error);
+}
+
+TEST(LoadSystemConfig, MissingSpecsFileReferenceThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_system_config(kNoSpecsConfig),
+               std::runtime_error);
+}
+
+TEST(LoadSystemConfig, UnreadableSpecsFileThrows) {
+  EXPECT_THROW(motor_hardware_interface::load_system_config(kMissingSpecsConfig),
                std::runtime_error);
 }
 

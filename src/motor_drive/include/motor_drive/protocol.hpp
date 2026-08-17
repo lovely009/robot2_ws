@@ -17,8 +17,10 @@ constexpr uint32_t kRpEnableId = 0x00U;
 constexpr uint32_t kRpCommandId = 0x80U;
 constexpr std::size_t kRpBroadcastSlots = 8U;
 
-// 25/30 mm 协议中的原始码值比例。所有单位换算集中在 protocol.cpp，
-// 上层统一使用 rad、rad/s、A 或 Nm，避免协议单位渗透到 ROS 控制逻辑。
+// 25/30 mm 协议码值比例，依据《25-30mm 驱控一体使用说明手册》V20260204
+// §3.1（MIT 发送）/ §3.2（回复）/ §3.3（状态）的码值定义。
+// 所有单位换算集中在 protocol.cpp，上层统一使用 rad、rad/s、A 或 Nm，
+// 避免协议单位渗透到 ROS 控制逻辑。
 constexpr int32_t kWristTicksPerRevolution = 2'097'152;
 constexpr int32_t kWristPositionTickLimit = 0x7cffffff;
 constexpr int32_t kWristVelocityCodeLimit = 30'000;
@@ -87,8 +89,8 @@ std::array<uint8_t, 12> pack_rp_state(
     double coil_temperature_c = 33.0);
 JointState unpack_rp_state(const uint8_t *data, std::size_t size);
 
-// 25/30 mm：命令、控制帧和反馈帧的字节编解码。
-// 注意：腕部反馈中的 effort 字段在这一层暂存“电流 A”，转换 Nm 由对应协议策略完成。
+// 25/30 mm：命令、控制帧和反馈帧的字节编解码（帧格式见规格书 §3.1~§3.4）。
+// 注意：腕部反馈中的 effort 字段在这一层暂存”电流 A”，转换 Nm 由对应协议策略完成。
 std::array<uint8_t, 12> pack_wrist_command(const JointCommand &command);
 JointCommand unpack_wrist_command(const uint8_t *data, std::size_t size);
 

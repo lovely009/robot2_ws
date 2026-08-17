@@ -6,7 +6,7 @@
              default="left_arm:/dev/ttyACM0,right_arm:/dev/ttyACM1"/>
   <xacro:arg name="motor_config_file" default=""/>
   <!-- ros2_control 关节清单：由 launch 从电机拓扑配置生成并注入（逗号分隔）。
-       默认值保持与默认 motor_canfd.yaml 一致，保证无参数渲染可用。 -->
+       默认值保持与默认 motor_driver.yaml 一致，保证无参数渲染可用。 -->
   <xacro:arg name="control_joints"
              default="left_shoulder_yaw_joint,left_shoulder_roll_joint,left_shoulder_pitch_joint,left_elbow_pitch_joint,left_wrist_yaw_joint,left_wrist_pitch_joint,left_wrist_roll_joint,right_shoulder_yaw_joint,right_shoulder_roll_joint,right_shoulder_pitch_joint,right_elbow_pitch_joint,right_wrist_yaw_joint,right_wrist_pitch_joint,right_wrist_roll_joint"/>
   <xacro:property name="control_joints_value" value="$(arg control_joints)"/>

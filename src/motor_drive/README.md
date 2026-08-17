@@ -2,7 +2,7 @@
 
 C++17 电机驱动库（`dev-real` 真机线，无 ROS 依赖）：双传输后端
 （`socketcan` / `serial_slcan`）、协议策略注册、动态电机映射。
-内置 RP 与 `motor_2530` 两套协议。
+内置 RP 与 `vaxor` 两套协议。
 
 ## 职责
 
@@ -40,8 +40,8 @@ termios，无额外依赖。RP 单总线最多 8 台（广播槽位限制，仅 
 
 ## 扩展
 
-- **新增协议**：实现 `MotorProtocol` → 注册 `MotorProtocolRegistry` → YAML
-  `motor_types`/`motors` 声明 → 补测试。
+- **新增协议**：实现 `MotorProtocol` → 注册 `MotorProtocolRegistry` →
+  `motor.yaml`（型号参数库）声明型号与参数 → 补测试。
 - **新增传输**：实现 `CanTransport` → 注册 `CanTransportRegistry`
   （`std::unique_ptr<CanTransport>(const BusConfig&)`）→ YAML `transport` 声明
   → 补测试。
@@ -52,7 +52,9 @@ termios，无额外依赖。RP 单总线最多 8 台（广播槽位限制，仅 
 
 - `scripts/verify_2530_serial.py`：CANable2 串口验证 25/30 mm 电机（需 pyserial，
   源码树脚本不安装）。
-- `docs/`：25–30 mm 与 RP 系列三份协议 PDF。
+- `docs/`：RP 系列与 16–30 mm 系列电机资料
+  （[`rp-series.md`](docs/rp-series.md)、
+  [`motor-2530-series.md`](docs/motor-2530-series.md)）及五份协议/规格 PDF。
 
 ## 测试
 

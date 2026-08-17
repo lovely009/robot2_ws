@@ -13,7 +13,7 @@ from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 
 def motor_joints_from_config(config_path) -> List[str]:
-    """按 motor_canfd.yaml 的 motors 声明顺序返回关节名列表。
+    """按 motor_driver.yaml 的 motors 声明顺序返回关节名列表。
 
     PyYAML 的 dict 保持插入顺序，因此返回顺序即配置中的电机顺序，
     与模拟器/Gazebo 的关节顺序约定一致。
@@ -25,7 +25,7 @@ def motor_joints_from_config(config_path) -> List[str]:
 
 
 def read_buses(config_path) -> List[Tuple[str, str]]:
-    """按 motor_canfd.yaml 的 buses 段返回 [(逻辑总线名, 默认设备路径), ...]。
+    """按 motor_driver.yaml 的 buses 段返回 [(逻辑总线名, 默认设备路径), ...]。
 
     socketcan 总线取 ``interface``；serial_slcan 串口总线取 ``tty``
     （供 launch 的 interface_<总线名> 参数作为默认值，bus_overrides 按

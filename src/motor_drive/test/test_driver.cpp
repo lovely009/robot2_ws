@@ -25,7 +25,7 @@ drive::DriverConfig make_large_config() {
   for (unsigned id = 1U; id <= 5U; ++id) {
     config.motors.push_back(
         {"small_" + std::to_string(id), "joint_small_" + std::to_string(id),
-         "main_bus", drive::kMotor2530Type, id,
+         "main_bus", drive::kVaxorType, id,
          {{"torque_constant_nm_per_amp", "0.35"}}});
   }
   return config;

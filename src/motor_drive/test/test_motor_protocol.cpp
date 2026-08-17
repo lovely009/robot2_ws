@@ -129,13 +129,13 @@ TEST(RpProtocolStrategy, ValidateRejectsEmptyGroupAndBadIds) {
   EXPECT_THROW(protocol->validate(motors, {0U, 1U}), std::invalid_argument);
 }
 
-TEST(Motor2530ProtocolStrategy, EnableFramesArePerNodeWithControlPayload) {
+TEST(VaxorProtocolStrategy, EnableFramesArePerNodeWithControlPayload) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("w1", "j1", drive::kMotor2530Type, 1U,
+      make_motor("w1", "j1", drive::kVaxorType, 1U,
                  {{"torque_constant_nm_per_amp", "0.35"}}),
-      make_motor("w2", "j2", drive::kMotor2530Type, 2U,
+      make_motor("w2", "j2", drive::kVaxorType, 2U,
                  {{"torque_constant_nm_per_amp", "0.35"}})};
-  const auto frames = builtin_protocol(drive::kMotor2530Type)
+  const auto frames = builtin_protocol(drive::kVaxorType)
                           ->make_enable_frames(motors, {0U, 1U}, true);
   ASSERT_EQ(frames.size(), 2U);
   expect_frame(frames[0], protocol::wrist_control_id(1U),
@@ -144,9 +144,9 @@ TEST(Motor2530ProtocolStrategy, EnableFramesArePerNodeWithControlPayload) {
                {1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U}, false);
 }
 
-TEST(Motor2530ProtocolStrategy, CommandFramesMatchManualExample) {
+TEST(VaxorProtocolStrategy, CommandFramesMatchManualExample) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("w1", "j1", drive::kMotor2530Type, 1U,
+      make_motor("w1", "j1", drive::kVaxorType, 1U,
                  {{"torque_constant_nm_per_amp", "0.35"}})};
   protocol::JointCommand command;
   command.position =
@@ -154,7 +154,7 @@ TEST(Motor2530ProtocolStrategy, CommandFramesMatchManualExample) {
   command.kp = 0.008;
   command.kd = 1.0;
 
-  const auto frames = builtin_protocol(drive::kMotor2530Type)
+  const auto frames = builtin_protocol(drive::kVaxorType)
                           ->make_command_frames(motors, {0U}, {command});
   ASSERT_EQ(frames.size(), 1U);
   // 与 test_protocol.cpp 的 CommandMatchesManualExample 同一手册例值。
@@ -163,11 +163,11 @@ TEST(Motor2530ProtocolStrategy, CommandFramesMatchManualExample) {
   expect_frame(frames[0], protocol::wrist_command_id(1U), expected, true);
 }
 
-TEST(Motor2530ProtocolStrategy, DecodesReplyAndStatusWithTorqueConstantScaling) {
+TEST(VaxorProtocolStrategy, DecodesReplyAndStatusWithTorqueConstantScaling) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("w1", "j1", drive::kMotor2530Type, 1U,
+      make_motor("w1", "j1", drive::kVaxorType, 1U,
                  {{"torque_constant_nm_per_amp", "0.35"}})};
-  const auto protocol = builtin_protocol(drive::kMotor2530Type);
+  const auto protocol = builtin_protocol(drive::kVaxorType);
 
   protocol::JointState current_a;
   current_a.position = 0.5;
@@ -202,17 +202,71 @@ TEST(Motor2530ProtocolStrategy, DecodesReplyAndStatusWithTorqueConstantScaling) 
   EXPECT_FALSE(protocol->decode_feedback(motors, {0U}, frame, motor_index, state));
 }
 
-TEST(Motor2530ProtocolStrategy, ValidateRequiresTorqueConstantAndUniqueNodes) {
-  const auto protocol = builtin_protocol(drive::kMotor2530Type);
+TEST(VaxorProtocolStrategy, ValidateRequiresTorqueConstantAndUniqueNodes) {
+  const auto protocol = builtin_protocol(drive::kVaxorType);
   std::vector<drive::MotorConfig> motors{
-      make_motor("w1", "j1", drive::kMotor2530Type, 1U)};
+      make_motor("w1", "j1", drive::kVaxorType, 1U)};
   EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
 
   motors[0].parameters["torque_constant_nm_per_amp"] = "0.35";
-  motors.push_back(make_motor("w2", "j2", drive::kMotor2530Type, 1U,
+  motors.push_back(make_motor("w2", "j2", drive::kVaxorType, 1U,
                               {{"torque_constant_nm_per_amp", "0.35"}}));
   EXPECT_THROW(protocol->validate(motors, {0U, 1U}), std::invalid_argument);
 
   motors[1].id = 61U;
   EXPECT_THROW(protocol->validate(motors, {0U, 1U}), std::out_of_range);
+}
+
+TEST(VaxorProtocolStrategy, GearRatioAndEfficiencyScaleFeedback) {
+  // gear_ratio=50、gear_efficiency=0.65：命令位置/速度 ×50（关节→电机），
+  // 反馈位置/速度 ÷50、effort = 电流 × Kt × 减速比 × 效率（关节侧 Nm）。
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("w1", "j1", drive::kVaxorType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.35"},
+                  {"gear_ratio", "50"},
+                  {"gear_efficiency", "0.65"}})};
+  const auto protocol = builtin_protocol(drive::kVaxorType);
+
+  // 命令：关节位置 0.5 rad、速度 -0.25 rad/s → 电机侧码值放大 50 倍。
+  protocol::JointCommand command;
+  command.position = 0.5;
+  command.velocity = -0.25;
+  const auto frames = protocol->make_command_frames(motors, {0U}, {command});
+  ASSERT_EQ(frames.size(), 1U);
+  const auto motor_cmd =
+      protocol::unpack_wrist_command(frames[0].data.data(), frames[0].size);
+  EXPECT_NEAR(motor_cmd.position, 0.5 * 50.0,
+              2.0 * protocol::kPi / protocol::kWristTicksPerRevolution);
+  EXPECT_NEAR(motor_cmd.velocity, -0.25 * 50.0,
+              2.0 * protocol::kPi / 600.0);
+
+  // 反馈：电机侧位置 0.5、速度 -0.25、电流 1.5 A → 关节侧位置/速度 ÷50、
+  // effort = 电流 × Kt × 减速比 × 效率（关节侧 Nm）。
+  protocol::JointState motor_side;
+  motor_side.position = 0.5;
+  motor_side.velocity = -0.25;
+  motor_side.effort = 1.5;
+  const auto reply = protocol::pack_wrist_reply(1U, motor_side);
+  drive::CanFrame frame;
+  frame.id = protocol::wrist_reply_id(1U);
+  frame.size = reply.size();
+  std::copy(reply.begin(), reply.end(), frame.data.begin());
+  std::size_t motor_index = 99U;
+  protocol::JointState state;
+  EXPECT_TRUE(protocol->decode_feedback(motors, {0U}, frame, motor_index, state));
+  EXPECT_EQ(motor_index, 0U);
+  EXPECT_NEAR(state.position, 0.5 / 50.0,
+              2.0 * protocol::kPi / protocol::kWristTicksPerRevolution);
+  EXPECT_NEAR(state.velocity, -0.25 / 50.0, 2.0 * protocol::kPi / 600.0);
+  EXPECT_NEAR(state.effort, 1.5 * 0.35 * 50.0 * 0.65,
+              protocol::kWristCurrentScaleA * 0.35 * 50.0 * 0.65);
+}
+
+TEST(VaxorProtocolStrategy, ValidateRejectsBadMotorTypeCode) {
+  const auto protocol = builtin_protocol(drive::kVaxorType);
+  std::vector<drive::MotorConfig> motors{
+      make_motor("w1", "j1", drive::kVaxorType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.35"},
+                  {"motor_type_code", "0x05"}})};
+  EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
 }

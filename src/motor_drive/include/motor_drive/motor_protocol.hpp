@@ -57,6 +57,6 @@ private:
 };
 
 inline constexpr const char *kRpMotorType = "rp";
-inline constexpr const char *kMotor2530Type = "motor_2530";
+inline constexpr const char *kVaxorType = "vaxor";
 
 } // namespace motor_drive

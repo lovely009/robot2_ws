@@ -39,7 +39,7 @@ public:
 
 private:
   // 同一条总线、同一种 type 的电机组成一个协议组。
-  // 例如 can0 上的 4 台 RP 是一组，can0 上的 3 台 motor_2530 是另一组。
+  // 例如 can0 上的 4 台 RP 是一组，can0 上的 3 台 vaxor 是另一组。
   struct ProtocolGroup {
     std::string type;
     MotorIndexList motor_indices;

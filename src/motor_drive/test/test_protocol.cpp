@@ -41,6 +41,19 @@ TEST(WristProtocol, CommandMatchesManualExample) {
   EXPECT_EQ(bytes, expected);
 }
 
+TEST(WristProtocol, CurrentCommandMatchesManualExample) {
+  // 规格书 §3.2 电流模式示例：位置码值 65537、速度 0、Kp/Kd 0、电流码值 100。
+  protocol::JointCommand command;
+  command.position =
+      65537.0 / protocol::kWristTicksPerRevolution * 2.0 * protocol::kPi;
+  command.feedforward = 100.0 * protocol::kWristCurrentScaleA;
+  const auto bytes = protocol::pack_wrist_command(command);
+  const std::array<uint8_t, 12> expected{
+      {0x01, 0x00, 0x01, 0x80, 0x00, 0x80, 0x00, 0x00,
+       0x00, 0x00, 0x64, 0x80}};
+  EXPECT_EQ(bytes, expected);
+}
+
 TEST(WristProtocol, FeedbackKnownZero) {
   const std::array<uint8_t, 12> bytes{
       {0x05, 0x05, 0x00, 0x00, 0x00, 0x80, 0x00, 0x80,

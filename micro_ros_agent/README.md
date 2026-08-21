@@ -1,8 +1,9 @@
 # micro_ros_agent
 
 micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。作为 ROS 2 侧的
-桥接节点，与 MCU 固件（`../micro_ros_firmware/`，待建）通过 **serial（UART）** 传输通信，
-后期与 `../ros2_ws` 电机栈同域（domain 0）互通。
+桥接节点，与 MCU 固件（`../micro_ros_firmware/`，见其 README：STM32H723VGT6 + serial
+传输 + CAN1 桥固件）通过 **serial（UART）** 传输通信，后期与 `../ros2_ws`
+电机栈同域（domain 0）互通。
 
 ## 源码来源（humble 分支，快照提交）
 
@@ -10,10 +11,12 @@ micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。�
 |---|---|---|
 | `micro_ros_msgs` | https://github.com/micro-ROS/micro_ros_msgs.git | `humble` |
 | `micro-ROS-Agent` | https://github.com/micro-ROS/micro-ROS-Agent.git | `humble` |
+| `can_bridge_msgs` | 本地自定义（CANFrame + MotorCommand） | 与固件 `extra_packages/` 同一定义 |
 
 > 说明：官方仓库已由 `micro_ros_agent` 更名为 `micro-ROS-Agent`；官方 apt 仓库
 > **没有** `ros-humble-micro-ros-agent`，故采用源码构建。第三方 `.git` 已移除，
-> 以普通目录快照提交（不含构建产物）。
+> 以普通目录快照提交（不含构建产物）。`can_bridge_msgs` 为本地新增包，定义
+> CAN 帧桥接与电机命令消息，供主机侧 `ros2 topic echo/pub` 使用。
 
 ## 构建（免 sudo）
 
@@ -23,7 +26,7 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-- 依赖自动排序：`micro_ros_msgs` → `micro-ROS-Agent`。
+- 依赖自动排序：`micro_ros_msgs` → `can_bridge_msgs` → `micro-ROS-Agent`。
 - Agent 的 superbuild 构建时会从 GitHub 拉取 Micro-XRCE-DDS-Agent（走代理），
   并使用系统 Fast DDS / Fast CDR（Humble 自带 `ros-humble-fastrtps`）。
 - 若报缺测试/lint 依赖，可加 `--cmake-args -DBUILD_TESTING=OFF` 跳过，无需 sudo。

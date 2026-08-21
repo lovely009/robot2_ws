@@ -1,0 +1,58 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m7",
+    "extra_flags": "-DSTM32H7 -DSTM32H7xx -DSTM32H723xx -DARDUINO_GENERIC_H723VGTX",
+    "f_cpu": "550000000L",
+    "hwids": [
+      [
+        "0x0483",
+        "0x5740"
+      ]
+    ],
+    "mcu": "stm32h723vgt6",
+    "product_line": "STM32H723xx",
+    "variant": "STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)",
+    "arduino": {
+      "variant_h": "variant_generic.h"
+    }
+  },
+  "connectivity": [
+    "can",
+    "ethernet"
+  ],
+  "debug": {
+    "default_tools": [
+      "stlink"
+    ],
+    "jlink_device": "STM32H723VG",
+    "onboard_tools": [
+      "stlink"
+    ],
+    "openocd_target": "stm32h7x",
+    "svd_path": "STM32H723.svd"
+  },
+  "frameworks": [
+    "arduino",
+    "cmsis",
+    "stm32cube",
+    "mbed",
+    "libopencm3",
+    "zephyr"
+  ],
+  "name": "STM32H723VGT6",
+  "upload": {
+    "maximum_ram_size": 327680,
+    "maximum_size": 1048576,
+    "protocol": "stlink",
+    "protocols": [
+      "blackmagic",
+      "cmsis-dap",
+      "jlink",
+      "stlink",
+      "mbed"
+    ]
+  },
+  "url": "https://www.st.com/en/microcontrollers-microprocessors/stm32h723vg.html",
+  "vendor": "ST"
+}

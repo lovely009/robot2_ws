@@ -1,9 +1,19 @@
 # Repository Guidelines
 
-ROS 2 Humble 工作空间（`dev` 开发分支）：真机 `motor_drive`（无 ROS 底层驱动，
-双传输 `socketcan`/`serial_slcan`，协议 `rp`/`vaxor`）+ `motor_hardware_interface`
-（ros2_control 适配 + 真机入口）+ 仿真 `motor_canfd_sim` + `upper_body_canfd_gazebo`。
-**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
+`robot_ws` 是**三区域工作空间**（`dev` 开发分支），各区域独立构建。权威文档优先：
+各区域/各包 `README.md`；本文件给 Agent 即用指南；架构取舍见 `docs/adr/`。
+
+| 区域 | 内容 | 权威文档 |
+|---|---|---|
+| `ros2_ws/` | ROS 2 Humble 电机栈：真机 `motor_drive` + `motor_hardware_interface`，仿真 `motor_canfd_sim` + `upper_body_canfd_gazebo` | 本文件 + `CONTEXT.md` + 各包 `README.md` |
+| `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，serial over USB CDC） | `micro_ros_firmware/README.md` + `micro_ros_firmware/AGENTS.md` |
+| `micro_ros_agent/` | micro-ROS Agent 独立 colcon 工作区（serial ↔ 固件，与电机栈同域互通） | `micro_ros_agent/README.md` |
+
+## ros2_ws（ROS 2 电机栈）
+
+真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `rp`/`vaxor`）
++ `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_canfd_sim` +
+`upper_body_canfd_gazebo`。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
 `motor_hardware_interface/config/motor_driver.yaml` 决定，增删改不修改 C++、launch
 或 controller 配置。
 
@@ -49,9 +59,52 @@ ros2 launch upper_body_canfd_gazebo gazebo.launch.py     # 仿真（vcan）
 
 ## Agent 注意事项
 
+- 优先找现成方案，不自己造轮子：动手前先查已有 skill/工具/库/依赖（如 `find-skills`、
+  各区域 `README.md`、已装依赖），确认没有现成再实现；能用成熟库就别手写核心逻辑。
 - 不写死电机数量/类型/总线：拓扑只来自 YAML；扩展协议走 `MotorProtocolRegistry`、
   扩展传输走 `CanTransportRegistry`，不改通用收发循环。
 - `bus_override` 只覆盖设备路径，传输类型切换须改 YAML。
 - URDF 物理模型（几何/惯性）人工维护；ros2_control 关节清单由 launch 自动生成，
   不手写 `canfd_control_joint`。
 - 软件安全逻辑不能替代硬件急停、机械限位与真机标定。
+
+## micro_ros_firmware（STM32 固件）
+
+STM32H723VGT6 micro-ROS **空工程**（PlatformIO + STM32duino + FreeRTOS），serial over
+USB CDC（PA11=USB_DM / PA12=USB_DP）进 ROS 2（humble），参考
+husarion/micro_ros_stm32_template 的任务编排。当前为**空白脚手架**：仅节点初始化 +
+FreeRTOS 任务编排，无业务逻辑。
+**详细决策与踩坑见 `micro_ros_firmware/README.md` 与 `micro_ros_firmware/AGENTS.md`**，
+这里只列即用要点：
+
+```bash
+cd micro_ros_firmware
+~/.platformio/penv/bin/pio run            # 构建（pio 不在 PATH；首次需外网拉 micro-ROS 源码）
+~/.platformio/penv/bin/pio run -t upload  # ST-Link 烧录
+~/.platformio/penv/bin/pio device monitor # 串口监视 115200
+```
+
+- 非 ROS 2 工程，**不要用 colcon**；改构建宏等不触发 SrcWrapper 重编译，
+  须 `pio run -t clean` 全量重建。
+- H723 无独立 `USB_OTG_FS`：USB 靠 `-DPIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE`；
+  HAL 模块使能走命令行 `-D` 宏，SrcWrapper 编译不含项目 `include/`。
+- FreeRTOS：调度器接管 SysTick；micro-ROS 建链/收发在独立 `micro_ros` 任务，
+  业务占位在 `app` 任务；`loop()` 被 idle hook 调用只能非阻塞。
+- 节点名 `micro_ros_node`（`src/ros_bridge.cpp` 顶部常量，改一处即可）。
+- 状态灯是 **WS2812 彩灯**（SPI6 MOSI=PA7），`digitalWrite` 无效，用 `ws2812_set_rgb()`。
+- 烧录/串口权限：stlink 与 USB CDC（0483:5740）udev 规则；
+  `libusb_open ... LIBUSB_ERROR_ACCESS` 即缺 stlink 规则。
+
+## micro_ros_agent（micro-ROS Agent）
+
+独立 colcon 工作区（ROS 2 humble），把固件（serial USB CDC `/dev/ttyACM0`）桥进 ROS 2 域：
+`micro_ros_msgs` + `can_bridge_msgs` + `micro-ROS-Agent` 快照，构建/联调详见
+`micro_ros_agent/README.md`。要点：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install                # 缺测试依赖可加 --cmake-args -DBUILD_TESTING=OFF
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
+```
+
+无客户端时 agent 节点不出现在 `ros2 node list`，属正常（节点在客户端建立会话后才注册）。

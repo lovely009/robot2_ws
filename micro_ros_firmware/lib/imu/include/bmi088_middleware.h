@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "bmi088_transport_status.h"
+
 #define BMI088_USE_SPI
 
 // 硬件抽象层（由本工程以例程为准实现）：SPI2 + 硬件 CS + FreeRTOS 安全延时

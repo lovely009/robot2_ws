@@ -30,7 +30,9 @@ bool imu_try_init(void) {
   // BMI088_delay_ms 内部使用 vTaskDelay，因此本函数只能在调度器启动后调用。
   // 每次调用只尝试一次，重试节奏由 sensor_task 管理。
   g_ready = false;
-  if (BMI088_init() != BMI088_NO_ERROR) {
+  BMI088_transport_error_clear();
+  const uint8_t init_status = BMI088_init();
+  if (init_status != BMI088_NO_ERROR || BMI088_transport_error_latched()) {
     return false;
   }
 
@@ -39,12 +41,16 @@ bool imu_try_init(void) {
   return true;
 }
 
-void imu_update(void) {
+bool imu_update(void) {
   if (!g_ready) {
-    return;
+    return false;
   }
 
+  BMI088_transport_error_clear();
   BMI088_read(g_gyro, g_accel, &g_temp);
+  if (BMI088_transport_error_latched()) {
+    return false;
+  }
 
   // 姿态解算（IMU 模式：陀螺 + 加速度，无磁力计）
   MahonyAHRSupdateIMU(g_quat, g_gyro[0], g_gyro[1], g_gyro[2], g_accel[0],
@@ -56,6 +62,7 @@ void imu_update(void) {
   g_angle[1] = asinf(-2.0f * (g_quat[1] * g_quat[3] - g_quat[0] * g_quat[2]));
   g_angle[2] = atan2f(2.0f * (g_quat[0] * g_quat[1] + g_quat[2] * g_quat[3]),
                       2.0f * (g_quat[0] * g_quat[0] + g_quat[3] * g_quat[3]) - 1.0f);
+  return true;
 }
 
 void imu_get_data(imu_data_t *out) {

@@ -107,13 +107,18 @@ static void sensor_task_fn(void *arg) {
 
   while (1) {
     if (xSemaphoreTake(g_imu_sem, portMAX_DELAY) == pdTRUE && imu_ready()) {
-      imu_update();
+      if (!imu_update()) {
+        g_imu_healthy = false;
+        heater_set_duty(0U);
+        continue;
+      }
       // 写非活动缓冲不影响 ROS 读取；只在切换索引/序号时关闭中断。
       imu_data_t *next = imu_snapshot_begin_write(&g_imu_snapshot);
       imu_get_data(next);
       taskENTER_CRITICAL();
       imu_snapshot_publish(&g_imu_snapshot);
       taskEXIT_CRITICAL();
+      g_imu_healthy = true;
       temp_pid_run(next->temp);
     }
   }
@@ -128,9 +133,7 @@ bool sensor_task_start(void) {
   if (g_imu_sem == nullptr) {
     return false;
   }
-  // 官方 TempCtrl 用 vSemaphoreCreateBinary 创建，初始即为可用状态；
-  // 现代 xSemaphoreCreateBinary 初始为空，补一次 Give 保持同样首拍行为。
-  xSemaphoreGive(g_imu_sem);
+  // xSemaphoreCreateBinary 初始为空；首个 imu_update 必须由 ACC_INT DRDY 唤醒。
   imu_snapshot_init(&g_imu_snapshot);
   g_imu_init_error_count = 0U;
   g_imu_healthy = false;

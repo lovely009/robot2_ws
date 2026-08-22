@@ -46,7 +46,13 @@ static void test_consumer_gets_complete_published_buffer() {
   assert(sequence == 1U);
   assert_sample_equals(copied, sample_a);
 
-  *imu_snapshot_begin_write(&snapshot) = sample_b;
+  imu_data_t *inactive = imu_snapshot_begin_write(&snapshot);
+  inactive->gyro[0] = sample_b.gyro[0];
+  assert(imu_snapshot_copy(&snapshot, &copied, &sequence));
+  assert(sequence == 1U);
+  assert_sample_equals(copied, sample_a);
+
+  *inactive = sample_b;
   imu_snapshot_publish(&snapshot);
   assert(imu_snapshot_copy(&snapshot, &copied, &sequence));
   assert(sequence == 2U);

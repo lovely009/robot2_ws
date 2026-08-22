@@ -57,3 +57,12 @@ target_include_directories(test_imu_snapshot PRIVATE
   ../../lib/imu/include)
 
 add_test(NAME imu_snapshot COMMAND test_imu_snapshot)
+
+add_executable(test_bmi088_transport_status
+  test_bmi088_transport_status.cpp
+  ../../lib/imu/src/bmi088_transport_status.c)
+
+target_include_directories(test_bmi088_transport_status PRIVATE
+  ../../lib/imu/include)
+
+add_test(NAME bmi088_transport_status COMMAND test_bmi088_transport_status)

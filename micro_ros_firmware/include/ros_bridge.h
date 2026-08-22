@@ -1,4 +1,4 @@
-// micro-ROS 桥接层接口（空工程骨架）
+// micro-ROS 桥接层接口（IMU/温度发布）
 //
 // 职责：node/executor 生命周期管理。main.cpp 只负责 FreeRTOS 任务编排与
 // 串口初始化，本模块封装全部 ROS 实体。

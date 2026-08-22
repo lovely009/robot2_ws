@@ -70,10 +70,12 @@ ros2 launch upper_body_canfd_gazebo gazebo.launch.py     # 仿真（vcan）
 
 ## micro_ros_firmware（STM32 固件）
 
-STM32H723VGT6 micro-ROS **空工程**（PlatformIO + STM32duino + FreeRTOS），serial over
-USB CDC（PA11=USB_DM / PA12=USB_DP）进 ROS 2（humble），参考
-husarion/micro_ros_stm32_template 的任务编排。当前为**空白脚手架**：仅节点初始化 +
-FreeRTOS 任务编排，无业务逻辑。
+STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS），serial over
+USB CDC（PA11=USB_DM / PA12=USB_DP）进 ROS 2（humble）。业务为 **BMI088 IMU**
+（`micro_ros/imu/data`、`micro_ros/imu/temp`）+ **三路 FDCAN**（FDCAN1/2/3，
+例程测试帧默认关闭、RX 回调收帧）+ **电机协议编解码**（RP/25-30mm，来自
+`ros2_ws/src/motor_drive`；`micro_ros/motor_command` 驱动两个默认测试电机，
+消息为 `sensor_msgs/JointState`；完整拓扑后续由参数服务下发）。
 **详细决策与踩坑见 `micro_ros_firmware/README.md` 与 `micro_ros_firmware/AGENTS.md`**，
 这里只列即用要点：
 
@@ -89,8 +91,10 @@ cd micro_ros_firmware
 - H723 无独立 `USB_OTG_FS`：USB 靠 `-DPIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE`；
   HAL 模块使能走命令行 `-D` 宏，SrcWrapper 编译不含项目 `include/`。
 - FreeRTOS：调度器接管 SysTick；micro-ROS 建链/收发在独立 `micro_ros` 任务，
-  业务占位在 `app` 任务；`loop()` 被 idle hook 调用只能非阻塞。
+  IMU 与 FDCAN 各有独立业务任务；`loop()` 被 idle hook 调用只能非阻塞。
 - 节点名 `micro_ros_node`（`src/ros_bridge.cpp` 顶部常量，改一处即可）。
+- FDCAN 需 `-DHAL_FDCAN_MODULE_ENABLED`，内核时钟为 PLL2Q=80MHz；
+  改 HAL 构建宏后必须 `pio run -t clean` 全量重建。
 - 状态灯是 **WS2812 彩灯**（SPI6 MOSI=PA7），`digitalWrite` 无效，用 `ws2812_set_rgb()`。
 - 烧录/串口权限：stlink 与 USB CDC（0483:5740）udev 规则；
   `libusb_open ... LIBUSB_ERROR_ACCESS` 即缺 stlink 规则。

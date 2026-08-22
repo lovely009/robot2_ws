@@ -17,10 +17,10 @@ typedef struct {
   float angle[3];  // 欧拉角 yaw/pitch/roll（rad）
 } imu_data_t;
 
-// 初始化 BMI088 + 姿态 + 加热（内部自旋等待传感器就绪）
+// 初始化 BMI088（内部自旋等待传感器就绪，必须在 FreeRTOS 任务内调用）
 void imu_init(void);
 
-// 读一次传感器并更新姿态/温度（须在 FreeRTOS 任务中按固定周期调用）
+// 读一次传感器并更新姿态；须在 sensor_task 的 EXTI 信号量唤醒后调用
 void imu_update(void);
 
 // 拷贝当前数据（供发布层读取）

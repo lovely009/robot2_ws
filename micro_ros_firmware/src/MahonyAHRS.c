@@ -1,6 +1,6 @@
 // Madgwick 的实现版 Mahony AHRS（官方 CtrBoard-H7_ALL 例程移植）。
-// sampleFreq 由默认 1000Hz 改为 200Hz，与本工程 app_task 的 5ms 采样节奏对齐，
-// 避免姿态积分因 dt 与采样频率不匹配而漂移。
+// sampleFreq 与 BMI088 加速度计 ODR=200Hz 对齐：ACC_INT(PE10) 每周期触发
+// sensor_task 信号量，一次信号量对应一次采样，姿态积分 dt=1/200s。
 
 #include "MahonyAHRS.h"
 #include <math.h>

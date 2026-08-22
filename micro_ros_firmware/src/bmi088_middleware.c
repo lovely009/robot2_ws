@@ -1,15 +1,20 @@
-// BMI088 通信层（以官方 CtrBoard-H7_IMU 例程为准移植）。
+// BMI088 通信层（以官方 CtrBoard-H7_IMU_TempCtrl 例程为准移植）。
 //
-// 例程挂在 HAL SPI2（PB13=SCK, PC1=MOSI, PC2=MISO）,硬件 CS=PC0(ACC)/PC3(GYRO)。
-// 本工程为 STM32duino + FreeRTOS，故：
-//   - 采用与 ws2812.c 一致的直接 HAL 寄存器写法初始化 SPI2；
-//   - SysTick 已被 FreeRTOS 接管，us 忙等改用 delayMicroseconds，ms 用 vTaskDelay。
+// 例程挂在 HAL SPI2（PB13=SCK, PC1=MOSI, PC2=MISO）+ DMA1_Stream0/1，
+// 硬件 CS=PC0(ACC)/PC3(GYRO)，POWER_5V=PC15，EXTI=PE10/PE12。
+// 本工程为 STM32duino + FreeRTOS，因此：
+//   - GPIO 上电/片选由本层初始化，SPI2 引脚与 DMA 由 dma.c 的 HAL_SPI_MspInit 配置；
+//   - EXTI 使用 Arduino attachInterrupt()（sensor_task.cpp 内）；
+//   - SysTick 已被 FreeRTOS 接管，us 忙等用 delayMicroseconds，ms 用 vTaskDelay。
 
 #include "bmi088_middleware.h"
+#include "dma.h"
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 #include "stm32h7xx_hal.h"
 
+#define POWER_5V_PORT GPIOC
+#define POWER_5V_PIN GPIO_PIN_15
 #define ACC_CS_PORT GPIOC
 #define ACC_CS_PIN GPIO_PIN_0
 #define GYRO_CS_PORT GPIOC
@@ -18,35 +23,38 @@
 static SPI_HandleTypeDef hspi_bmi088;
 
 void BMI088_GPIO_init(void) {
-  // 仅硬件片选（PC0=ACC_CS, PC3=GYRO_CS），默认拉到高电平（未选通）
+  // PC15=POWER_5V：传感器供电使能（官方默认置高）
   __HAL_RCC_GPIOC_CLK_ENABLE();
   GPIO_InitTypeDef gpio = {0};
-  gpio.Pin = ACC_CS_PIN | GYRO_CS_PIN;
+  gpio.Pin = POWER_5V_PIN;
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
   gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(POWER_5V_PORT, &gpio);
+
+  // PC0=ACC_CS, PC3=GYRO_CS：硬件片选，默认拉到高电平（未选通）
+  gpio.Pin = ACC_CS_PIN | GYRO_CS_PIN;
   gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOC, &gpio);
-  HAL_GPIO_WritePin(GPIOC, ACC_CS_PIN | GYRO_CS_PIN, GPIO_PIN_SET);
+  HAL_GPIO_Init(ACC_CS_PORT, &gpio);
+  HAL_GPIO_WritePin(GPIOC, POWER_5V_PIN | ACC_CS_PIN | GYRO_CS_PIN,
+                    GPIO_PIN_SET);
+
+  // PA0：官方例程固定输出的保留引脚，置低
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  GPIO_InitTypeDef pa0 = {0};
+  pa0.Pin = GPIO_PIN_0;
+  pa0.Mode = GPIO_MODE_OUTPUT_PP;
+  pa0.Pull = GPIO_NOPULL;
+  pa0.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOA, &pa0);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
 }
 
 void BMI088_com_init(void) {
-  // SPI2 引脚：PB13=SCK, PC1=MOSI, PC2=MISO（AF5），与例程一致
-  __HAL_RCC_SPI2_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
+  // 官方顺序：MX_DMA_Init 先于 MX_SPI2_Init；
+  // SPI2 引脚/DMA 流在 HAL_SPI_MspInit（src/dma.c）内完成。
+  MX_DMA_Init();
 
-  GPIO_InitTypeDef gpio = {0};
-  gpio.Pin = GPIO_PIN_13;
-  gpio.Mode = GPIO_MODE_AF_PP;
-  gpio.Pull = GPIO_NOPULL;
-  gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  gpio.Alternate = GPIO_AF5_SPI2;
-  HAL_GPIO_Init(GPIOB, &gpio);
-
-  gpio.Pin = GPIO_PIN_1 | GPIO_PIN_2;
-  HAL_GPIO_Init(GPIOC, &gpio);  // PC1=MOSI, PC2=MISO，其余字段与 SCK 一致
-
-  // 关键字段与例程一致：主模式、CPOL/CPHA=11、MSB、软 NSS、预分频 32
   hspi_bmi088.Instance = SPI2;
   hspi_bmi088.Init.Mode = SPI_MODE_MASTER;
   hspi_bmi088.Init.Direction = SPI_DIRECTION_2LINES;
@@ -95,4 +103,9 @@ uint8_t BMI088_read_write_byte(uint8_t reg) {
   uint8_t tx = reg, rx = 0;
   HAL_SPI_TransmitReceive(&hspi_bmi088, &tx, &rx, 1, 0xFFFF);
   return rx;
+}
+
+// 官方使能了 SPI2 中断；阻塞路径不产生事件，保留转发入口以防后续 DMA 化。
+void SPI2_IRQHandler(void) {
+  HAL_SPI_IRQHandler(&hspi_bmi088);
 }

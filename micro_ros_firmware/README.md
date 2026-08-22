@@ -1,91 +1,131 @@
 # micro_ros_firmware
 
-STM32H723VGT6 上的 **micro-ROS 空工程**（PlatformIO + STM32duino + FreeRTOS），
+STM32H723VGT6 上的 **micro-ROS 固件**（PlatformIO + STM32duino + FreeRTOS），
 通过 **serial over USB CDC**（PA11=USB_DM / PA12=USB_DP）与主机侧
 `../micro_ros_agent/` 通信，桥接进 ROS 2 Humble 域。
 
-工程参考 [husarion/micro_ros_stm32_template](https://github.com/husarion/micro_ros_stm32_template)
-的任务编排方式：**FreeRTOS 调度 + micro-ROS 独立任务建链/收发**。当前为
-**空白脚手架**，仅包含节点初始化的最小骨架，无业务逻辑；后续业务
-（CAN/电机/IMU 等）在 `src/ros_bridge.cpp` 与 `src/main.cpp` 的占位任务里增量扩展。
+当前业务为 **BMI088 IMU** 与 **三路 FDCAN**，底层功能移植自官方
+`/home/ly/文档/dm-mc02-master/例程/CtrBoard-H7_IMU_TempCtrl`：
+SPI2 + DMA1 配置、POWER_5V/CS/EXTI、TIM3 加热与温度 PID 均保留；
+Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例程内容。
+三路 FDCAN（FDCAN1/2/3）移植自
+`/home/ly/文档/dm-mc02-master/例程/CtrBoard-H7_FDCAN`：FD + BRS、标称
+1Mbps / 数据 5Mbps、接收中断回调与周期测试帧发送均保留；micro-ROS 桥接
+目前只覆盖 IMU，CANFD 尚未发布话题。
+电机协议编解码（RP + 25/30mm）已从 `ros2_ws/src/motor_drive` 移植为
+`src/motor_protocol.c`（同一文件内按 RP / vaxor 两部分分区），字节布局与
+原实现一致。固件暂不维护完整拓扑：`control_task` 内置两个默认测试电机
+（RP + vaxor），订阅 `micro_ros/motor_command`（`sensor_msgs/msg/JointState`）
+直接下发；完整拓扑后续通过参数服务下发，不在此扩展。
 
 ## 关键决策
 
 | 决策 | 取值 | 理由 |
 |---|---|---|
-| 框架 | `framework = arduino`（STM32duino） | `micro_ros_platformio` 官方只支持 Arduino 框架；`stm32cube` 无官方集成，需自写传输，故弃用 |
-| 实时内核 | `STM32FreeRTOS`（stm32duino） | 与 Arduino 核心共存，调度器接管 SysTick，micro-ROS 在独立任务中运行；与模板一致 |
-| ROS 2 发行版 | `board_microros_distro = humble` | 与 `micro_ros_agent` 源码（humble）对齐 |
-| 传输 | `board_microros_transport = serial`（物理层 USB CDC） | micro-ROS 侧保持 serial 传输；STM32duino 启用 USB CDC 后 generic `Serial` 即映射为 `SerialUSB`，agent 以 `/dev/ttyACM0` 对接 |
+| 框架 | `framework = arduino`（STM32duino） | `micro_ros_platformio` 官方只支持 Arduino 框架 |
+| 实时内核 | `STM32FreeRTOS`（stm32duino） | 调度器接管 SysTick，micro-ROS 与 IMU 独立任务 |
+| ROS 2 发行版 | `board_microros_distro = humble` | 与 `micro_ros_agent` 源码对齐 |
+| 传输 | `board_microros_transport = serial`（物理层 USB CDC） | micro-ROS 侧保持 serial，agent 以 `/dev/ttyACM0` 对接 |
 | USB 引脚 | **PA11=USB_DM / PA12=USB_DP** | H723 的 USB OTG HS 内嵌 PHY（FS 模式）固定引脚 |
-| USB 构建宏 | `PIO_FRAMEWORK_ARDUINO_ENABLE_CDC` + `PIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE` | 前者触发 USBDevice 库（`USBD_USE_CDC`+`USBCON`）；后者因 **H723 只有 `USB_OTG_HS`（无独立 `USB_OTG_FS`）**，须以 FS 模式 + 内嵌 PHY 使用（`USE_USB_HS`+`USE_USB_HS_IN_FS`） |
-| FreeRTOS 与 SysTick | `osSystickHandler()` 弱符号覆盖 | STM32duino 的 `SysTick_Handler()` 调用弱 `osSystickHandler()`，FreeRTOS 覆写之，`millis()`/`micros()` 与调度共存 |
-| 状态 LED | **PA7（WS2812 彩灯，SPI6 MOSI 驱动）** | 板载指示灯为 1 颗 WS2812 RGB 灯珠，数据线接 SPI6 MOSI（PA7，AF8） |
-| 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 的变体（旧式变体名已废弃） |
+| USB 构建宏 | `PIO_FRAMEWORK_ARDUINO_ENABLE_CDC` + `PIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE` | H723 无独立 `USB_OTG_FS`，须以 FS 模式 + 内嵌 PHY 使用 |
+| IMU 通信 | **SPI2**（PB13=SCK / PC1=MOSI / PC2=MISO，7.5MHz） | 官方 TempCtrl 同源 |
+| IMU DMA | **DMA1_Stream0(RX) / Stream1(TX)** 保留配置并链接 | 官方生成代码同构；收发仍走阻塞 HAL，与官方行为一致 |
+| IMU 采样触发 | **ACC_INT=PE10 EXTI + FreeRTOS 二值信号量，ODR=200Hz** | 官方 TempCtrl 由加速度计 DRDY 唤醒；本工程从 800Hz 降至 200Hz |
+| 加热 PWM | **TIM3_CH4=PB1**（500Hz），使用 Arduino `HardwareTimer` | 官方 PSC=24-1 / ARR=10000-1 语义 |
+| 状态 LED | **PA7（WS2812，SPI6 MOSI 驱动）** | 板载 1 颗 RGB 灯珠 |
+| CANFD 通信 | **FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13**，FD + BRS，RX/TX 元素 64B | 官方同源；64B 为承载 RP 广播与 vaxor 命令/反馈 |
+| CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
+| CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
+| CAN1 调试桥 | `-DENABLE_CAN1_DEBUG_BRIDGE=1`（默认开启） | 通过 `micro_ros/can1/send`、`micro_ros/can1/receive` 调试 FDCAN1；关掉则不在 ROS 侧建实体 |
+| JointState 桥 | `-DENABLE_MOTOR_COMMAND_BRIDGE=1`（默认开启） | 订阅 `micro_ros/motor_command`（`sensor_msgs/msg/JointState`）驱动默认测试电机（RP + vaxor） |
+| 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
-> **为何改板卡 JSON**：STM32duino 变体源码被 `ARDUINO_GENERIC_H723VGTX` 宏保护，
-> 自定义板卡默认不定义该宏，会导致 `digitalPin`/`SystemClock_Config` 链接失败。
-> `boards/stm32h723vgt6.json` 已在 `extra_flags` 中加入该宏，并显式指定
-> `arduino.variant_h = variant_generic.h`，另加 `build.hwids` 提供 USB VID/PID。
+## 时钟
 
-> **为何覆盖 `SystemClock_Config`**：已安装的 STM32duino 4.21200.0 中 H723V 变体的
-> `generic_clock.c` 未使能 HSI48、未选择 USB 时钟源，USB CDC 无法工作。
-> `src/system_clock.cpp` 以强定义覆盖 WEAK 符号，采用官方 CtrBoard-H7 例程时钟树：
-> 主时钟 HSE 24MHz → PLL1 → 480MHz SYSCLK（HCLK 240MHz / APB 120MHz）；使能 HSI48
-> 并选为 USB 时钟（`RCC_USBCLKSOURCE_HSI48`）；SPI6 内核时钟 = HSE（WS2812）。
+`src/system_clock.cpp` 强定义覆盖 WEAK `SystemClock_Config`：
+
+- HSE 24MHz → PLL1 → **480MHz SYSCLK**（HCLK 240MHz / APB 120MHz）
+- **HSI48** 作为 USB 时钟源
+- **SPI6 = HSE 24MHz**（WS2812 编码）
+- **SPI123 = PLL1Q = 240MHz**（BMI088 SPI2，预分频 32 -> 7.5MHz）
+- **FDCAN = PLL2Q = 80MHz**（HSE 24MHz / 2 × 40，Q=6；标称 1Mbps / 数据 5Mbps）
 
 ## 任务编排
 
-`src/main.cpp` 在 `setup()` 里完成板级初始化并创建 FreeRTOS 任务，末尾
-`vTaskStartScheduler()`：
+`setup()` 只做板级初始化和创建 `start_task`，随后 `vTaskStartScheduler()`。
+IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay`，
+调度器启动前调用会非法。
 
 | 任务 | 优先级 | 栈 | 职责 |
 |---|---|---|---|
-| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发（连接状态机），断连自动重建 |
-| `app` | 1 | 2048 | 业务占位，后续在此增量扩展 |
-
-`loop()` 会被 STM32FreeRTOS 的 `vApplicationIdleHook` 调用，故必须保持非阻塞。
+| `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`control` 后自删除 |
+| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，断连自动重建；状态灯红/绿闪/蓝 |
+| `sensor` | 4 | 1024 | 500ms 延时 → 加热 PWM → BMI088 初始化 → EXTI 信号量 → 读取/Mahony/PID；后续传感器扩展点 |
+| `control` | 3 | 1024 | 500ms 延时 → FDCAN1/2/3 初始化；JointState 编码下发；官方 0x520 测试帧默认关闭（宏开启） |
 
 ## 目录结构
 
 ```
 micro_ros_firmware/
-├── platformio.ini             # 构建配置（arduino/humble/serial+USB CDC，lib_deps 拉取 micro_ros_platformio + STM32FreeRTOS）
+├── platformio.ini             # arduino/humble/serial+USB CDC；FDCAN HAL 构建宏
 ├── boards/
 │   └── stm32h723vgt6.json     # 自定义板卡定义（变体/宏/USB VID-PID/烧录协议）
 ├── include/
-│   ├── ros_bridge.h           # micro-ROS 节点生命周期接口
-│   └── ws2812.h               # 板载 WS2812 彩灯驱动接口
+│   ├── ros_bridge.h           # micro-ROS 生命周期与 IMU/温度发布
+│   ├── ws2812.h               # 板载 WS2812 彩灯驱动接口
+│   ├── sensor_task.h          # 传感器任务接口（sensor_task_start）
+│   ├── control_task.h         # 控制任务接口（control_task_start）
+│   ├── imu.h                  # IMU 聚合模块接口（BMI088 + Mahony 数据）
+│   ├── bmi088_driver.h        # BMI088 传感器驱动（例程移植）
+│   ├── bmi088_middleware.h    # BMI088 通信层（SPI2 + 硬件 CS）
+│   ├── MahonyAHRS.h           # Mahony 姿态解算
+│   ├── fdcan.h                # FDCAN 句柄与初始化接口（例程移植）
+│   ├── can_bsp.h              # FDCAN 板级收发接口（例程移植）
+│   ├── motor_protocol.h       # 电机协议编解码接口（RP/25-30mm，ros2_ws 移植）
+│   └── dma.h                  # DMA1 初始化接口（SPI2 RX/TX）
 └── src/
-    ├── main.cpp               # 空工程入口：板级初始化 + FreeRTOS 任务编排
-    ├── ros_bridge.cpp         # micro-ROS node/executor 生命周期（空白脚手架）
-    ├── ws2812.c               # WS2812 驱动（SPI6 MOSI=PA7，HAL 编码）
-    └── system_clock.cpp       # 覆盖 SystemClock_Config：HSE 主时钟 + HSI48/USB + SPI6/HSE
+    ├── main.cpp               # 入口：板级初始化 + start_task 编排
+    ├── ros_bridge.cpp         # node/publisher/executor + IMU 话题
+    ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
+    ├── control_task.cpp       # 控制任务：初始化三路 FDCAN + 周期测试帧
+    ├── imu.c                  # BMI088 读取 + Mahony 姿态（SI 换算）
+    ├── bmi088_driver.c        # BMI088 传感器驱动（例程移植）
+    ├── bmi088_middleware.c    # POWER_5V/CS/SPI2 通信层
+    ├── MahonyAHRS.c           # Mahony 姿态解算（sampleFreq=200Hz）
+    ├── fdcan.c                # FDCAN 外设初始化 + MspInit/DeInit + IRQ 转发
+    ├── can_bsp.c              # FDCAN 过滤/启动/收发/中断回调
+    ├── motor_protocol.c       # 电机协议编解码（RP/25-30mm，ros2_ws protocol.cpp 移植）
+    ├── dma.c                  # DMA1 配置 + HAL_SPI_MspInit + DMA IRQ 转发
+    ├── ws2812.c               # WS2812 驱动（SPI6 MOSI=PA7）
+    └── system_clock.cpp       # 覆盖 SystemClock_Config
 ```
 
-构建产物 `.pio/`、`libmicroros/` 已加入 `.gitignore`。
+## 硬件接线
 
-## 前置条件
-
-- PlatformIO Core ≥ 6.1.0（本机：`~/.platformio/penv/bin/pio`，v6.1.19）
-- `git`、`cmake`、`python3-pip`（micro_ros_platformio 首次构建会下载并编译
-  micro-ROS 库，需要外网访问 GitHub）
-- ST-Link 调试器（烧录用 `stlink` 协议）
+| 信号 | MCU 引脚 |
+|---|---|
+| USB_DM / USB_DP | PA11 / PA12（直接 USB 线） |
+| 状态灯 | PA7（WS2812，SPI6 MOSI） |
+| SPI2_SCK / MOSI / MISO | PB13 / PC1 / PC2 |
+| ACC_CS / GYRO_CS | PC0 / PC3 |
+| POWER_5V | PC15（置高使能 IMU 供电） |
+| ACC_INT / GYRO_INT | PE10 / PE12（上升沿 EXTI） |
+| 加热 PWM | PB1（TIM3_CH4） |
+| FDCAN1_RX / TX | PD0 / PD1 |
+| FDCAN2_RX / TX | PB5 / PB6 |
+| FDCAN3_RX / TX | PD12 / PD13 |
+| 保留输出 | PA0（官方例程固定置低） |
 
 ## 构建与烧录
 
 ```bash
 cd micro_ros_firmware
-~/.platformio/penv/bin/pio run            # 首次下载 STM32duino + STM32FreeRTOS + 构建 libmicroros
+~/.platformio/penv/bin/pio run            # 编译
 ~/.platformio/penv/bin/pio run -t upload  # ST-Link 烧录
 ~/.platformio/penv/bin/pio device monitor # 串口监视（115200，USB CDC 下波特率无效）
 ```
 
-> 若想用 `pio` 命令而非全路径，可 `source ~/.platformio/penv/bin/activate`。
-
 ## 与 micro_ros_agent 联调
-
-主机侧启动 agent（serial 传输，USB CDC 设备 `/dev/ttyACM0`）：
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -93,30 +133,37 @@ source ../micro_ros_agent/install/setup.bash
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ```
 
-> 若 USB 设备号不是 `/dev/ttyACM0`，用 `ls /dev/ttyACM*` 确认；也可
-> `udevadm info -q property -n /dev/ttyACM0` 查看 VID/PID（应为 0483:5740）。
+建链后发布：
 
-建链后应能观测到节点 `micro_ros_node`（空工程无话题，业务扩展后在此加话题）。
+- `micro_ros/imu/data`：`sensor_msgs/msg/Imu`（四元数、SI 角速度/线加速度）
+- `micro_ros/imu/temp`：`std_msgs/msg/Float32`（BMI088 芯片温度）
+- `micro_ros/motor_command`：订阅 `sensor_msgs/msg/JointState`；`name`/`position`/
+  `velocity`/`effort` 对应默认测试电机；vaxor 模式由字段决定：只发 `position`
+  =位置模式、只发 `velocity`=速度模式、只发 `effort`=MIT 前馈，切换模式自动
+  先停机再启动；kp/kd 用电机默认值，命令到达自动使能
+- `micro_ros/JointState`：发布 `sensor_msgs/msg/JointState`（默认测试电机反馈）
 
-## 硬件接线
+宏 `ENABLE_CAN1_DEBUG_BRIDGE=1` 开启时，额外提供 FDCAN1 调试桥
+（`can_bridge_msgs/msg/CANFrame`，与 `micro_ros_agent` 同一定义）：
 
-USB CDC 传输（PA11=USB_DM / PA12=USB_DP），无需 USB-TTL 转换器，直接接主机 USB：
-
-| 信号 | MCU 引脚 |
-|---|---|
-| USB_DM | PA11 |
-| USB_DP | PA12 |
-| GND | 与主机共地（USB 线已含） |
-| 状态灯 | PA7（WS2812 彩灯，SPI6 MOSI 驱动，无需限流电阻） |
-
-> 换回 UART：在 `platformio.ini` 去掉两个 USB CDC 宏，并把 `src/main.cpp` 顶部
-> `kMicrorosSerial` 改回具体 `HardwareSerial`（如 `Serial1`=USART1 PA9/PA10、
-> `Serial2`=USART2 PA2/PA3、`Serial3`=USART3 PB10/PB11），经 USB-TTL 接主机。
+- `micro_ros/can1/send`：订阅；收到一帧即经 FDCAN1 发出（ROS → CAN）
+- `micro_ros/can1/receive`：发布；FDCAN1 中断收到的帧定时上报（CAN → ROS）
 
 ## 已知问题与后续
 
-- `variant_generic.h` 是 STM32duino 通用引脚映射，不含机器人专用外设；
-  若需自定义 GPIO/外设，可在 `include/` 增加自有变体头并在板卡 JSON 切换 `variant_h`。
-- micro-ROS 无 agent 时节点不注册、固件在 `kWaitAgent` 轮询，属正常。
-- USB CDC 依赖主机枚举：未接主机 USB 时固件停留在 `kWaitAgent`，接上并启动 agent 后自动建链。
+- IMU 任务在调度器启动后无条件运行；BMI088 未上电/未接线时会阻塞重试
+  初始化，`imu_init()` 返回前不发布有效数据。
+- DMA 仅保留官方配置与中断转发，BMI088 收发仍走阻塞
+  `HAL_SPI_TransmitReceive`；若后续改为 DMA 传输，需在半完成回调中
+  给 IMU 任务补一次醒信号。
+- 无 agent 时节点不注册、固件在 `kWaitAgent` 轮询，属正常。
 - `loop()` 被 STM32FreeRTOS 的 idle hook 调用，只能放非阻塞代码。
+- 官方 `0x520` 测试帧循环保留在 `ENABLE_CANFD_DEMO_LOOP=1` 下，默认关闭；
+  开启后总线无对端 ACK 时 TX FIFO 会积压（`fdcanx_send_data` 返回失败）。
+- `control_task` 已接 JointState；默认仅 `left_shoulder_yaw_joint`（RP）与
+  `left_wrist_yaw_joint`（vaxor，节点 ID=2，当前 CAN1 实际接入）两台测试
+  电机（`sensor_msgs/JointState`），完整拓扑待参数服务。
+- `motor_protocol.c` 是协议编解码库（RP/25-30mm），目前只移植未接线；
+  接入时由 `control_task` 调用 pack/unpack 生成/解析 CAN 帧。
+- CAN1 调试桥 RX/TX 元素已扩到 64 字节，可承载 RP 64B 广播与 vaxor 12/20B
+  帧；`CANFrame.id` 为 `uint16`，29 位扩展 ID 仅能表示低 16 位。

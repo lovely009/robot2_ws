@@ -7,6 +7,9 @@
 //   - 主时钟：HSE 24MHz（板载晶振）→ PLL1 → 480 MHz SYSCLK（比 HSI 精确稳定）
 //   - 使能 HSI48（48 MHz RC）作为 USB 内核时钟源（RCC_USBCLKSOURCE_HSI48）
 //   - SPI6 内核时钟 = HSE 24MHz（WS2812 彩灯，官方例程同源）
+//   - SPI2 内核时钟 = PLL1Q = 240MHz（BMI088，官方 IMU 例程同源，预分频 32 → 7.5MHz）
+//   - FDCAN 内核时钟 = PLL2Q = 80MHz（官方 FDCAN 例程用 PLL1Q=80MHz；
+//     本工程 PLL1Q 已用于 SPI2，故改由 PLL2Q 独立供给，位时序不变）
 //
 // 链接说明：SystemClock_Config 在 stm32_def.h 中以 C 链接声明，故此处用
 // extern "C" 定义；调用链 main() → init() → hw_config_init() → SystemClock_Config()。
@@ -33,7 +36,7 @@ extern "C" void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLM = 2;
   RCC_OscInitStruct.PLL.PLLN = 40;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;  // 480/2 = 240MHz，SPI2 内核时钟（官方 IMU 例程同源）
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -58,12 +61,22 @@ extern "C" void SystemClock_Config(void)
   }
 
   // 外设时钟：USB 用 HSI48（48 MHz）、SPI6 用 HSE（24 MHz，WS2812）、
-  // SPI2 用 PLL（BMI088，官方 IMU 例程同源）
+  // SPI2 用 PLL（BMI088，官方 IMU 例程同源）、FDCAN 用 PLL2（80 MHz）
   PeriphClkInitStruct.PeriphClockSelection =
-      RCC_PERIPHCLK_USB | RCC_PERIPHCLK_SPI6 | RCC_PERIPHCLK_SPI123;
+      RCC_PERIPHCLK_USB | RCC_PERIPHCLK_SPI6 | RCC_PERIPHCLK_SPI123 |
+      RCC_PERIPHCLK_FDCAN;
   PeriphClkInitStruct.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
   PeriphClkInitStruct.Spi6ClockSelection = RCC_SPI6CLKSOURCE_HSE;
   PeriphClkInitStruct.Spi123ClockSelection = RCC_SPI123CLKSOURCE_PLL;
+  PeriphClkInitStruct.FdcanClockSelection = RCC_FDCANCLKSOURCE_PLL2;
+  PeriphClkInitStruct.PLL2.PLL2M = 2;
+  PeriphClkInitStruct.PLL2.PLL2N = 40;
+  PeriphClkInitStruct.PLL2.PLL2P = 2;
+  PeriphClkInitStruct.PLL2.PLL2Q = 6;
+  PeriphClkInitStruct.PLL2.PLL2R = 2;
+  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
+  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
+  PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
     Error_Handler();
   }

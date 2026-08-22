@@ -111,6 +111,51 @@ static void test_invalid_names_are_counted() {
   assert(ctx.invalid_command_count == 3U);
 }
 
+static void test_partial_joint_update_preserves_other_joint_timestamp() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motors[] = {
+      {"joint_1", MOTOR_CONTROL_RP, 1, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {"joint_2", MOTOR_CONTROL_RP, 2, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+  };
+  const motor_control_command_t commands[] = {
+      {"joint_1", MOTOR_PROTOCOL_WRIST_MODE_MIT, 0.1, 0.0, 0.0},
+      {"joint_2", MOTOR_PROTOCOL_WRIST_MODE_MIT, 0.2, 0.0, 0.0},
+  };
+
+  motor_control_init(&ctx, motors, 2);
+  assert(motor_control_accept_command(&ctx, &commands[0], 10U));
+  assert(motor_control_accept_command(&ctx, &commands[1], 20U));
+  assert(motor_control_accept_command(&ctx, &commands[0], 30U));
+  assert(ctx.runtime[0].last_command_ms == 30U);
+  assert(ctx.runtime[1].last_command_ms == 20U);
+}
+
+static void test_invalid_joint_does_not_block_valid_joint_in_same_batch() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motors[] = {
+      {"joint_1", MOTOR_CONTROL_RP, 1, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {"joint_2", MOTOR_CONTROL_RP, 2, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+  };
+  const motor_control_command_t commands[] = {
+      {"joint_1", MOTOR_PROTOCOL_WRIST_MODE_MIT, NAN, 0.0, 0.0},
+      {"joint_2", MOTOR_PROTOCOL_WRIST_MODE_MIT, 0.2, 0.0, 0.0},
+  };
+
+  motor_control_init(&ctx, motors, 2);
+  for (const motor_control_command_t &command : commands) {
+    (void)motor_control_accept_command(&ctx, &command, 40U);
+  }
+  assert(!ctx.runtime[0].command_valid);
+  assert(ctx.runtime[1].command_valid);
+  assert(ctx.runtime[1].last_command_ms == 40U);
+  assert(ctx.invalid_command_count == 1U);
+  assert(ctx.valid_command_count == 1U);
+}
+
 static void test_agent_disconnect_requires_authorization_and_new_command() {
   motor_control_context_t ctx{};
   const motor_control_motor_config_t motor = {
@@ -601,6 +646,8 @@ int main() {
   test_invalid_command_does_not_refresh_freshness();
   test_infinity_is_rejected();
   test_invalid_names_are_counted();
+  test_partial_joint_update_preserves_other_joint_timestamp();
+  test_invalid_joint_does_not_block_valid_joint_in_same_batch();
   test_agent_disconnect_requires_authorization_and_new_command();
   test_rp_commands_are_aggregated_per_bus_and_faults_are_per_slot();
   test_rp_hard_timeout_only_neutralizes_its_slot();

@@ -1,35 +1,37 @@
 // 电机域 ROS 桥接实现。
 //
-// 职责：订阅 /joint_commands（sensor_msgs/JointState）展开为
-// control_motor_command() 下发；周期消费 FDCAN1 反馈，经 control_task
-// 解码后发布 micro_ros/JointState。协议编解码与电机表在 control_task，
-// 本模块不接触 can_bsp 内部缓冲。
+// ROS 回调只校验/转换消息并写 control task mailbox；20 ms 定时器只复制
+// control task 维护的最新关节快照。协议、总线与正常发送路径均不在本模块。
 
 #include "motor_bridge.h"
 
 #include <Arduino.h>
+#include <math.h>
 #include <string.h>
 
 #include <rcl/rcl.h>
-#include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rclc/rclc.h>
 #include <sensor_msgs/msg/joint_state.h>
+#include <std_msgs/msg/bool.h>
 
-#include "can_bsp.h"
 #include "control_task.h"
 
 #if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
 
-static const char *kJointCommandsTopic = "/joint_commands";    // 单点控制命令
-static const char *kJointFeedbackTopic = "micro_ros/JointState";  // 关节反馈
+static const char *kJointCommandsTopic = "/joint_commands";
+static const char *kJointFeedbackTopic = "micro_ros/JointState";
+static const char *kMotorEnableTopic = "micro_ros/motor_enable";
 static const size_t kJointCommandMaxMotors = 2;  // 当前默认两台测试电机
 
 static rcl_subscription_t g_joint_state_sub;
+static rcl_subscription_t g_motor_enable_sub;
 static rcl_publisher_t g_joint_feedback_pub;
 static sensor_msgs__msg__JointState g_joint_state_msg;
 static sensor_msgs__msg__JointState g_joint_feedback_msg;
+static std_msgs__msg__Bool g_motor_enable_msg;
 
-// micro-ROS 不会为 NULL 序列/字符串分配空间：全部静态预分配
+// micro-ROS 不会为 NULL 序列/字符串分配空间：全部静态预分配。
 static rosidl_runtime_c__String g_joint_name_strs[kJointCommandMaxMotors];
 static char g_joint_name_buf[kJointCommandMaxMotors][32];
 static double g_joint_position_buf[kJointCommandMaxMotors];
@@ -41,122 +43,91 @@ static double g_joint_fb_position_buf[kJointCommandMaxMotors];
 static double g_joint_fb_velocity_buf[kJointCommandMaxMotors];
 static double g_joint_fb_effort_buf[kJointCommandMaxMotors];
 
-// 调试计数（GDB 可读）
-volatile uint32_t g_joint_feedback_decode_count = 0;
-volatile uint32_t g_joint_feedback_decode_ok = 0;
+// 调试计数（GDB 可读）。
 volatile uint32_t g_joint_feedback_pub_count = 0;
 volatile int32_t g_joint_feedback_pub_rc = 0;
 
-static uint32_t g_last_rx_seq = 0;
 static bool g_ready = false;
-static bool g_sub_added = false;
+static bool g_joint_sub_up = false;
+static bool g_enable_sub_up = false;
+static bool g_publisher_up = false;
+static bool g_joint_sub_added = false;
+static bool g_enable_sub_added = false;
 
-// ROS 侧 JointState -> 默认测试电机（RP/vaxor）协议帧
 static void joint_state_sub_cb(const void *msg) {
   const sensor_msgs__msg__JointState *state =
       (const sensor_msgs__msg__JointState *)msg;
+  if (state == nullptr || state->name.data == nullptr) {
+    return;
+  }
+
   size_t count = state->name.size;
+  if (count > state->name.capacity) {
+    count = state->name.capacity;
+  }
   if (count > kJointCommandMaxMotors) {
     count = kJointCommandMaxMotors;
   }
-  for (size_t i = 0; i < count; ++i) {
-    control_motor_command_t out = {};
-    const rosidl_runtime_c__String *name = &state->name.data[i];
-    size_t len = name->size;
-    if (len > sizeof(out.joint_name) - 1U) {
-      len = sizeof(out.joint_name) - 1U;
+  uint32_t received_ms = millis();
+  for (size_t index = 0; index < count; ++index) {
+    motor_control_command_t command = {};
+    const rosidl_runtime_c__String *name = &state->name.data[index];
+    if (name->data == nullptr || name->size == 0U ||
+        name->size >= name->capacity ||
+        name->size >= sizeof(command.joint_name)) {
+      continue;
     }
-    memcpy(out.joint_name, name->data, len);
-    out.joint_name[len] = '\0';
-    // vaxor 模式严格校验：恰好只有 position 或恰好只有 velocity 才切模式；
-    // 两者同发、仅 effort 或均未发一律保持 MIT。
-    const bool has_position = state->position.size > i;
-    const bool has_velocity = state->velocity.size > i;
-    out.mode = CONTROL_MOTOR_MODE_MIT;
+    memcpy(command.joint_name, name->data, name->size);
+    command.joint_name[name->size] = '\0';
+
+    // 恰好只有 position 或 velocity 时选择对应 vaxor 模式；其余保持 MIT。
+    const bool has_position =
+        state->position.data != nullptr && state->position.size > index &&
+        state->position.capacity > index;
+    const bool has_velocity =
+        state->velocity.data != nullptr && state->velocity.size > index &&
+        state->velocity.capacity > index;
+    const bool has_effort =
+        state->effort.data != nullptr && state->effort.size > index &&
+        state->effort.capacity > index;
+    command.mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
     if (has_position && !has_velocity) {
-      out.mode = CONTROL_MOTOR_MODE_POSITION;
+      command.mode = MOTOR_PROTOCOL_WRIST_MODE_POSITION;
     } else if (has_velocity && !has_position) {
-      out.mode = CONTROL_MOTOR_MODE_VELOCITY;
+      command.mode = MOTOR_PROTOCOL_WRIST_MODE_VELOCITY;
     }
     if (has_position) {
-      out.position = state->position.data[i];
+      command.position = state->position.data[index];
     }
     if (has_velocity) {
-      out.velocity = state->velocity.data[i];
+      command.velocity = state->velocity.data[index];
     }
-    if (state->effort.size > i) {
-      out.effort = state->effort.data[i];
+    if (has_effort) {
+      command.effort = state->effort.data[index];
     }
-    control_motor_command(&out);
+    if (!isfinite(command.position) || !isfinite(command.velocity) ||
+        !isfinite(command.effort)) {
+      continue;
+    }
+    (void)control_task_submit_command(&command, received_ms);
   }
 }
 
-// 找到已登记关节或登记新关节；满 2 台后返回 -1
-static int find_or_add_feedback_joint(const char *joint_name) {
-  for (size_t i = 0; i < kJointCommandMaxMotors; ++i) {
-    if (g_joint_fb_name_strs[i].size > 0U &&
-        strcmp(g_joint_fb_name_strs[i].data, joint_name) == 0) {
-      return (int)i;
-    }
+static void motor_enable_sub_cb(const void *msg) {
+  const std_msgs__msg__Bool *enabled = (const std_msgs__msg__Bool *)msg;
+  if (enabled != nullptr) {
+    control_task_set_authorization(enabled->data);
   }
-  for (size_t i = 0; i < kJointCommandMaxMotors; ++i) {
-    if (g_joint_fb_name_strs[i].size == 0U) {
-      size_t len = strlen(joint_name);
-      if (len >= g_joint_fb_name_strs[i].capacity) {
-        len = g_joint_fb_name_strs[i].capacity - 1U;
-      }
-      memcpy(g_joint_fb_name_strs[i].data, joint_name, len);
-      g_joint_fb_name_strs[i].data[len] = '\0';
-      g_joint_fb_name_strs[i].size = len;
-      g_joint_feedback_msg.name.size = i + 1U;
-      g_joint_feedback_msg.position.size = i + 1U;
-      g_joint_feedback_msg.velocity.size = i + 1U;
-      g_joint_feedback_msg.effort.size = i + 1U;
-      return (int)i;
-    }
-  }
-  return -1;
-}
-
-// 尝试把 FDCAN1 新帧解析为默认电机反馈并发布 micro_ros/JointState
-static void publish_joint_feedback(uint32_t id, const uint8_t *data,
-                                   size_t size) {
-  g_joint_feedback_decode_count++;
-  control_joint_state_t state = {};
-  if (!control_decode_feedback(id, data, size, &state)) {
-    return;
-  }
-  g_joint_feedback_decode_ok++;
-  int index = find_or_add_feedback_joint(state.joint_name);
-  if (index < 0) {
-    return;
-  }
-  g_joint_fb_position_buf[index] = state.position;
-  g_joint_fb_velocity_buf[index] = state.velocity;
-  g_joint_fb_effort_buf[index] = state.effort;
-
-  uint32_t ms = millis();
-  g_joint_feedback_msg.header.stamp.sec = (int32_t)(ms / 1000u);
-  g_joint_feedback_msg.header.stamp.nanosec =
-      (uint32_t)((ms % 1000u) * 1000000u);
-  g_joint_feedback_msg.header.frame_id.data = (char *)"joints";
-  g_joint_feedback_msg.header.frame_id.size = 6;
-  g_joint_feedback_msg.header.frame_id.capacity = 7;
-  rcl_ret_t rc = rcl_publish(&g_joint_feedback_pub, &g_joint_feedback_msg,
-                             nullptr);
-  g_joint_feedback_pub_count++;
-  g_joint_feedback_pub_rc = (int32_t)rc;
-  (void)rc;
 }
 
 static void setup_command_msg_buffers() {
   g_joint_state_msg.name.data = g_joint_name_strs;
   g_joint_state_msg.name.size = 0;
   g_joint_state_msg.name.capacity = kJointCommandMaxMotors;
-  for (size_t i = 0; i < kJointCommandMaxMotors; ++i) {
-    g_joint_name_strs[i].data = g_joint_name_buf[i];
-    g_joint_name_strs[i].size = 0;
-    g_joint_name_strs[i].capacity = sizeof(g_joint_name_buf[i]);
+  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
+    g_joint_name_strs[index].data = g_joint_name_buf[index];
+    g_joint_name_strs[index].size = 0;
+    g_joint_name_strs[index].capacity = sizeof(g_joint_name_buf[index]);
   }
   g_joint_state_msg.position.data = g_joint_position_buf;
   g_joint_state_msg.position.size = 0;
@@ -173,10 +144,10 @@ static void setup_feedback_msg_buffers() {
   g_joint_feedback_msg.name.data = g_joint_fb_name_strs;
   g_joint_feedback_msg.name.size = 0;
   g_joint_feedback_msg.name.capacity = kJointCommandMaxMotors;
-  for (size_t i = 0; i < kJointCommandMaxMotors; ++i) {
-    g_joint_fb_name_strs[i].data = g_joint_fb_name_buf[i];
-    g_joint_fb_name_strs[i].size = 0;
-    g_joint_fb_name_strs[i].capacity = sizeof(g_joint_fb_name_buf[i]);
+  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
+    g_joint_fb_name_strs[index].data = g_joint_fb_name_buf[index];
+    g_joint_fb_name_strs[index].size = 0;
+    g_joint_fb_name_strs[index].capacity = sizeof(g_joint_fb_name_buf[index]);
   }
   g_joint_feedback_msg.position.data = g_joint_fb_position_buf;
   g_joint_feedback_msg.position.size = 0;
@@ -187,6 +158,9 @@ static void setup_feedback_msg_buffers() {
   g_joint_feedback_msg.effort.data = g_joint_fb_effort_buf;
   g_joint_feedback_msg.effort.size = 0;
   g_joint_feedback_msg.effort.capacity = kJointCommandMaxMotors;
+  g_joint_feedback_msg.header.frame_id.data = (char *)"joints";
+  g_joint_feedback_msg.header.frame_id.size = 6;
+  g_joint_feedback_msg.header.frame_id.capacity = 7;
 }
 
 bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
@@ -196,56 +170,118 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
           kJointCommandsTopic) != RCL_RET_OK) {
     return false;
   }
+  g_joint_sub_up = true;
+
+  if (rclc_subscription_init_default(
+          &g_motor_enable_sub, node,
+          ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+          kMotorEnableTopic) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_enable_sub_up = true;
+
   if (rclc_publisher_init_default(
           &g_joint_feedback_pub, node,
           ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, JointState),
           kJointFeedbackTopic) != RCL_RET_OK) {
-    rcl_ret_t rc = rcl_subscription_fini(&g_joint_state_sub, node);
-    (void)rc;
+    motor_bridge_destroy(node, executor);
     return false;
   }
+  g_publisher_up = true;
   setup_command_msg_buffers();
   setup_feedback_msg_buffers();
+  g_motor_enable_msg.data = false;
 
   if (rclc_executor_add_subscription(executor, &g_joint_state_sub,
                                      &g_joint_state_msg, joint_state_sub_cb,
                                      ON_NEW_DATA) != RCL_RET_OK) {
-    rcl_ret_t rc = rcl_publisher_fini(&g_joint_feedback_pub, node);
-    rc = rcl_subscription_fini(&g_joint_state_sub, node);
-    (void)rc;
+    motor_bridge_destroy(node, executor);
     return false;
   }
-  g_sub_added = true;
+  g_joint_sub_added = true;
+  if (rclc_executor_add_subscription(executor, &g_motor_enable_sub,
+                                     &g_motor_enable_msg, motor_enable_sub_cb,
+                                     ON_NEW_DATA) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_enable_sub_added = true;
   g_ready = true;
   return true;
 }
 
 void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
-  if (!g_ready && !g_sub_added) {
-    return;
-  }
   g_ready = false;
-  if (g_sub_added) {
-    rcl_ret_t rc = rclc_executor_remove_subscription(executor, &g_joint_state_sub);
+  if (g_enable_sub_added) {
+    rcl_ret_t rc =
+        rclc_executor_remove_subscription(executor, &g_motor_enable_sub);
     (void)rc;
-    g_sub_added = false;
+    g_enable_sub_added = false;
   }
-  rcl_ret_t rc = rcl_publisher_fini(&g_joint_feedback_pub, node);
-  rc = rcl_subscription_fini(&g_joint_state_sub, node);
-  (void)rc;
+  if (g_joint_sub_added) {
+    rcl_ret_t rc =
+        rclc_executor_remove_subscription(executor, &g_joint_state_sub);
+    (void)rc;
+    g_joint_sub_added = false;
+  }
+  if (g_publisher_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_joint_feedback_pub, node);
+    (void)rc;
+    g_publisher_up = false;
+  }
+  if (g_enable_sub_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_motor_enable_sub, node);
+    (void)rc;
+    g_enable_sub_up = false;
+  }
+  if (g_joint_sub_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_joint_state_sub, node);
+    (void)rc;
+    g_joint_sub_up = false;
+  }
 }
 
 void motor_bridge_poll(void) {
   if (!g_ready) {
     return;
   }
-  can_rx_frame_t frame = {0};
-  uint32_t seq = can1_rx_snapshot(&frame);
-  if (seq == g_last_rx_seq) {
+
+  size_t output_count = 0;
+  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
+    control_joint_state_t state = {};
+    if (!control_task_get_joint_state(index, &state)) {
+      continue;
+    }
+    rosidl_runtime_c__String *name = &g_joint_fb_name_strs[output_count];
+    size_t name_size = strlen(state.joint_name);
+    if (name_size >= name->capacity) {
+      continue;
+    }
+    memcpy(name->data, state.joint_name, name_size + 1U);
+    name->size = name_size;
+    g_joint_fb_position_buf[output_count] = state.position;
+    g_joint_fb_velocity_buf[output_count] = state.velocity;
+    g_joint_fb_effort_buf[output_count] = state.effort;
+    ++output_count;
+  }
+  if (output_count == 0U) {
     return;
   }
-  g_last_rx_seq = seq;
-  publish_joint_feedback(frame.id, frame.data, frame.dlc);
+
+  g_joint_feedback_msg.name.size = output_count;
+  g_joint_feedback_msg.position.size = output_count;
+  g_joint_feedback_msg.velocity.size = output_count;
+  g_joint_feedback_msg.effort.size = output_count;
+  uint32_t ms = millis();
+  g_joint_feedback_msg.header.stamp.sec = (int32_t)(ms / 1000U);
+  g_joint_feedback_msg.header.stamp.nanosec =
+      (uint32_t)((ms % 1000U) * 1000000U);
+  rcl_ret_t rc =
+      rcl_publish(&g_joint_feedback_pub, &g_joint_feedback_msg, nullptr);
+  ++g_joint_feedback_pub_count;
+  g_joint_feedback_pub_rc = (int32_t)rc;
+  (void)rc;
 }
 
 #else

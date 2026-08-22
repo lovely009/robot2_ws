@@ -131,9 +131,10 @@ bool control_motor_command(const control_motor_command_t *command) {
     }
     motor->enabled = true;
   } else if (!motor->enabled || motor->mode != command->mode) {
-    // vaxor：模式切换先停机（run=0），再按新模式启动
-    if (motor->enabled) {
-      send_vaxor_control(motor, false, motor->mode);
+    // vaxor：切模式严格按协议时序：先“停机+切模式”（run=0），再“运行”（run=1）。
+    // 上电默认 MIT，首次切速度/位置也必须走这一步，不能只发运行帧。
+    if (!send_vaxor_control(motor, false, command->mode)) {
+      return false;
     }
     if (!send_vaxor_control(motor, true, command->mode)) {
       return false;

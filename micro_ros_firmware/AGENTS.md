@@ -32,8 +32,9 @@ cd micro_ros_firmware
   `ENABLE_MOTOR_COMMAND_BRIDGE` 控制（默认开启）；固件只内置
   `left_shoulder_yaw_joint`（RP）与 `left_wrist_yaw_joint`（vaxor，节点
   ID=2，当前 CAN1 实际接入）两个默认测试电机，完整拓扑待参数服务。
-- vaxor 模式由 JointState 字段自动选择：只发 `position`=位置模式、只发
-  `velocity`=速度模式、只发 `effort`=MIT 前馈；模式切换先发停机帧再启动。
+- vaxor 模式由 JointState 字段严格选择：恰好只发 `position`=位置、恰好只发
+  `velocity`=速度，其余（含仅 `effort`、两者同发）保持 MIT；模式切换必须
+  先“停机+切模式”再运行。
 - 反馈话题 `micro_ros/JointState`（`sensor_msgs/msg/JointState`）发布默认
   测试电机解析后的位置/速度/力矩。
 - 状态灯：上电/未连接=红，连接成功=绿 1Hz 闪，断连=蓝（`main.cpp` 状态机）。

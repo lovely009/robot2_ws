@@ -68,17 +68,21 @@ static void joint_state_sub_cb(const void *msg) {
     }
     memcpy(out.joint_name, name->data, len);
     out.joint_name[len] = '\0';
-    // vaxor 模式由字段决定：position -> 位置，velocity -> 速度，effort -> MIT
+    // vaxor 模式严格校验：恰好只有 position 或恰好只有 velocity 才切模式；
+    // 两者同发、仅 effort 或均未发一律保持 MIT。
+    const bool has_position = state->position.size > i;
+    const bool has_velocity = state->velocity.size > i;
     out.mode = CONTROL_MOTOR_MODE_MIT;
-    if (state->position.size > i) {
-      out.position = state->position.data[i];
+    if (has_position && !has_velocity) {
       out.mode = CONTROL_MOTOR_MODE_POSITION;
+    } else if (has_velocity && !has_position) {
+      out.mode = CONTROL_MOTOR_MODE_VELOCITY;
     }
-    if (state->velocity.size > i) {
+    if (has_position) {
+      out.position = state->position.data[i];
+    }
+    if (has_velocity) {
       out.velocity = state->velocity.data[i];
-      if (state->position.size <= i) {
-        out.mode = CONTROL_MOTOR_MODE_VELOCITY;
-      }
     }
     if (state->effort.size > i) {
       out.effort = state->effort.data[i];

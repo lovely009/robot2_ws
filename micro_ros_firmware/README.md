@@ -152,9 +152,10 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `micro_ros/imu/data`：`sensor_msgs/msg/Imu`（四元数、SI 角速度/线加速度）
 - `micro_ros/imu/temp`：`std_msgs/msg/Float32`（BMI088 芯片温度）
 - `/joint_commands`：订阅 `sensor_msgs/msg/JointState`；`name`/`position`/
-  `velocity`/`effort` 对应默认测试电机；vaxor 模式由字段决定：只发 `position`
-  =位置模式、只发 `velocity`=速度模式、只发 `effort`=MIT 前馈，切换模式自动
-  先停机再启动；kp/kd 用电机默认值，命令到达自动使能
+  `velocity`/`effort` 对应默认测试电机；vaxor 模式严格校验：恰好只发
+  `position`=位置模式、恰好只发 `velocity`=速度模式，其余情况（含仅
+  `effort`、两者同发）保持 MIT；切换模式先“停机+切模式”再运行；
+  kp/kd 用电机默认值，命令到达自动使能
 - `micro_ros/JointState`：发布 `sensor_msgs/msg/JointState`（默认测试电机反馈）
 
 宏 `ENABLE_CAN1_DEBUG_BRIDGE=1` 开启时，额外提供 FDCAN1 调试桥

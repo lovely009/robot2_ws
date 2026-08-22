@@ -1,11 +1,26 @@
 
-This directory is intended for PlatformIO Test Runner and project tests.
+# 固件测试
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+## Host 协议回归测试
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+在 `micro_ros_firmware` 目录执行：
+
+```bash
+cmake -S test/host -B .host-build
+cmake --build .host-build
+ctest --test-dir .host-build --output-on-failure
+```
+
+该入口直接在主机上编译 `lib/motor_protocol`，用于固定 RP 与 vaxor 的字节协议行为。
+它不模拟 HAL、FreeRTOS 或 rclc；这些依赖仍由 PlatformIO 的目标板构建和联调覆盖。
+
+清理 host 构建产物：
+
+```bash
+rm -rf .host-build/
+```
+
+`.host-build/` 是本地构建目录，不得提交。
+
+PlatformIO Test Runner 的用法参见
+<https://docs.platformio.org/en/latest/advanced/unit-testing/index.html>。

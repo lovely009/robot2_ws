@@ -13,6 +13,7 @@
 
 #include "imu.h"
 #include "imu_snapshot.h"
+#include "supervisor_task.h"
 
 // 任务参数：栈 1024 字（4KB），优先级高于 micro_ros 收发任务
 static const uint32_t kSensorTaskStack = 1024;
@@ -94,9 +95,11 @@ static void sensor_task_fn(void *arg) {
     g_imu_healthy = false;
     ++g_imu_init_error_count;
     heater_set_duty(0U);
+    supervisor_heartbeat(SUPERVISOR_TASK_SENSOR);
     vTaskDelay(pdMS_TO_TICKS(kImuInitRetryMs));
   }
   g_imu_healthy = true;
+  supervisor_heartbeat(SUPERVISOR_TASK_SENSOR);
 
   // 仅在首次成功后挂 EXTI，重试不会重复注册中断。
   if (!g_drdy_attached) {
@@ -110,6 +113,7 @@ static void sensor_task_fn(void *arg) {
       if (!imu_update()) {
         g_imu_healthy = false;
         heater_set_duty(0U);
+        supervisor_heartbeat(SUPERVISOR_TASK_SENSOR);
         continue;
       }
       // 写非活动缓冲不影响 ROS 读取；只在切换索引/序号时关闭中断。
@@ -120,6 +124,7 @@ static void sensor_task_fn(void *arg) {
       taskEXIT_CRITICAL();
       g_imu_healthy = true;
       temp_pid_run(next->temp);
+      supervisor_heartbeat(SUPERVISOR_TASK_SENSOR);
     }
   }
 }

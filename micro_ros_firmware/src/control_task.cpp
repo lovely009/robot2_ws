@@ -13,6 +13,7 @@
 #include "can_bsp.h"
 #include "control_mailbox.h"
 #include "motor_protocol.h"
+#include "supervisor_task.h"
 
 #if !defined(ENABLE_CANFD_DEMO_LOOP)
 #define ENABLE_CANFD_DEMO_LOOP 0
@@ -56,6 +57,7 @@ static uint32_t g_can_debug_sequences[CAN_RX_BUS_COUNT];
 // ROS/link 任务只覆盖请求；motor_control_context_t 始终由 control task 修改。
 static bool g_mailbox_initialized = false;
 static bool g_task_started = false;
+static volatile bool g_fdcan_ready = false;
 
 volatile uint32_t g_control_motor_cmd_count = 0;
 volatile uint32_t g_control_motor_found_count = 0;
@@ -294,6 +296,9 @@ static void control_task_fn(void *arg) {
   MX_FDCAN2_Init();
   MX_FDCAN3_Init();
   bsp_can_init();
+  taskENTER_CRITICAL();
+  g_fdcan_ready = true;
+  taskEXIT_CRITICAL();
 
   TickType_t last_wake = xTaskGetTickCount();
   for (;;) {
@@ -305,6 +310,8 @@ static void control_task_fn(void *arg) {
 #if ENABLE_CANFD_DEMO_LOOP
     run_canfd_demo_cycle();
 #endif
+    // 完成一次 10 ms 控制状态机周期后才计入进展。
+    supervisor_heartbeat(SUPERVISOR_TASK_CONTROL);
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(kControlPeriodMs));
   }
 }
@@ -320,6 +327,9 @@ bool control_task_start(void) {
   taskEXIT_CRITICAL();
 
   motor_control_init(&g_motor_control, kDefaultMotors, kDefaultMotorCount);
+  taskENTER_CRITICAL();
+  g_fdcan_ready = false;
+  taskEXIT_CRITICAL();
   if (xTaskCreate(control_task_fn, "control", kControlTaskStack, nullptr,
                   kControlTaskPrio, nullptr) == pdPASS) {
     return true;
@@ -329,4 +339,12 @@ bool control_task_start(void) {
   g_task_started = false;
   taskEXIT_CRITICAL();
   return false;
+}
+
+bool control_task_fdcan_ready(void) {
+  bool ready = false;
+  taskENTER_CRITICAL();
+  ready = g_fdcan_ready;
+  taskEXIT_CRITICAL();
+  return ready;
 }

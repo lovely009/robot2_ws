@@ -15,6 +15,7 @@
 #include <micro_ros_platformio.h>
 
 #include "ros_bridge.h"   // micro-ROS 节点生命周期
+#include "supervisor_task.h"  // 开发期任务健康监督
 #include "ws2812.h"       // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
 #include "sensor_task.h"   // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
 #include "control_task.h"  // 控制任务（当前三路 FDCAN 例程移植）
@@ -147,6 +148,8 @@ static void micro_ros_task(void *arg) {
         break;
     }
     update_link_led();
+    // 表示连接状态机已完成一次迭代；不等同于 agent 已连接。
+    supervisor_heartbeat(SUPERVISOR_TASK_MICRO_ROS);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -163,6 +166,9 @@ static void start_task(void *arg) {
     Error_Handler();
   }
   if (!control_task_start()) {
+    Error_Handler();
+  }
+  if (!supervisor_task_start()) {
     Error_Handler();
   }
   // 编排完成后删除开始任务自身

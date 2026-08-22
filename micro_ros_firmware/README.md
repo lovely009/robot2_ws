@@ -62,6 +62,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，断连自动重建；状态灯红/绿闪/蓝 |
 | `sensor` | 4 | 1024 | 500ms 延时 → 加热 PWM → BMI088 初始化 → EXTI 信号量 → 读取/Mahony/PID；后续传感器扩展点 |
 | `control` | 3 | 1024 | 500ms 延时 → FDCAN1/2/3 初始化；100Hz 统一消费命令/debug mailbox 并发送；官方 0x520 测试帧默认关闭（宏开启） |
+| `supervisor` | 1 | 512 | 每 100ms 观察 control/sensor/micro-ROS 状态机 heartbeat，聚合 GDB 可读诊断；开发期不复位、不喂 IWDG |
 
 ## 代码组织
 

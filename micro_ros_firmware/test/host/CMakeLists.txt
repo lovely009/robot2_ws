@@ -66,3 +66,12 @@ target_include_directories(test_bmi088_transport_status PRIVATE
   ../../lib/imu/include)
 
 add_test(NAME bmi088_transport_status COMMAND test_bmi088_transport_status)
+
+add_executable(test_supervisor_heartbeat
+  test_supervisor_heartbeat.cpp
+  ../../lib/supervisor/src/supervisor_heartbeat.c)
+
+target_include_directories(test_supervisor_heartbeat PRIVATE
+  ../../lib/supervisor/include)
+
+add_test(NAME supervisor_heartbeat COMMAND test_supervisor_heartbeat)

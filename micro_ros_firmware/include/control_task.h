@@ -19,6 +19,9 @@ extern "C" {
 // 创建控制任务（只能调用一次；重复调用返回 true 且不重复建任务）
 bool control_task_start(void);
 
+// 三路 FDCAN 已完成初始化时返回 true；启动延时内为 false，仅供软件诊断观察。
+bool control_task_fdcan_ready(void);
+
 // 按 joint_name 覆盖对应静态 mailbox；只复制命令，不触碰 FDCAN/HAL。
 // received_ms 由 ROS 接收时刻提供；找不到默认测试电机时返回 false。
 bool control_task_submit_command(const motor_control_command_t *command,

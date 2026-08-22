@@ -40,6 +40,34 @@ static const UBaseType_t kStartTaskPrio = 1;
 
 static const uint32_t kMicroRosTaskStack = 8192;  // micro-ROS + RMW 需要较大栈
 static const UBaseType_t kMicroRosTaskPrio = 2;
+// 当前 board linker script 的 _Min_Stack_Size=0x400；STM32FreeRTOS 默认
+// configMINIMAL_STACK_SIZE 语义为 0x400/8=128 words，timer task 为其两倍。
+static const uint32_t kIdleTaskStackWords = 128U;
+static const uint32_t kTimerTaskStackWords = 256U;
+
+// configSUPPORT_STATIC_ALLOCATION=1 后，FreeRTOS 要求应用提供 idle/timer
+// 内核任务的静态 TCB 与栈；业务任务仍沿用现有 xTaskCreate() 路径。
+extern "C" void vApplicationGetIdleTaskMemory(
+    StaticTask_t **idle_tcb, StackType_t **idle_stack,
+    uint32_t *idle_stack_size) {
+  static StaticTask_t tcb;
+  static StackType_t stack[kIdleTaskStackWords];
+  *idle_tcb = &tcb;
+  *idle_stack = stack;
+  *idle_stack_size = kIdleTaskStackWords;
+}
+
+#if configUSE_TIMERS == 1
+extern "C" void vApplicationGetTimerTaskMemory(
+    StaticTask_t **timer_tcb, StackType_t **timer_stack,
+    uint32_t *timer_stack_size) {
+  static StaticTask_t tcb;
+  static StackType_t stack[kTimerTaskStackWords];
+  *timer_tcb = &tcb;
+  *timer_stack = stack;
+  *timer_stack_size = kTimerTaskStackWords;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // 统一硬件初始化

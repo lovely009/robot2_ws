@@ -60,6 +60,22 @@ typedef struct {
 } motor_control_tx_action_t;
 
 typedef struct {
+  uint8_t bus_index;
+  uint32_t can_id;
+  uint8_t size;
+  bool is_fd;
+  bool is_extended;
+  uint8_t data[64];
+} motor_control_rx_frame_t;
+
+typedef struct {
+  char joint_name[MOTOR_CONTROL_JOINT_NAME_CAPACITY];
+  double position;
+  double velocity;
+  double effort;
+} motor_control_joint_state_t;
+
+typedef struct {
   motor_control_state_t state;
   motor_protocol_joint_command_t command;
   uint32_t last_command_ms;
@@ -77,11 +93,15 @@ typedef struct motor_control_context {
   char joint_names[MOTOR_CONTROL_MAX_MOTORS]
                   [MOTOR_CONTROL_JOINT_NAME_CAPACITY];
   motor_control_motor_runtime_t runtime[MOTOR_CONTROL_MAX_MOTORS];
+  motor_control_joint_state_t joint_states[MOTOR_CONTROL_MAX_MOTORS];
+  bool joint_state_valid[MOTOR_CONTROL_MAX_MOTORS];
   bool bus_fault[MOTOR_CONTROL_MAX_BUSES];
   bool rp_bus_disabled[MOTOR_CONTROL_MAX_BUSES];
   size_t motor_count;
   uint32_t valid_command_count;
   uint32_t invalid_command_count;
+  uint32_t valid_feedback_count;
+  uint32_t invalid_feedback_count;
   bool authorized;
   bool agent_connected;
   bool agent_ever_connected;
@@ -93,6 +113,11 @@ void motor_control_init(motor_control_context_t *ctx,
 bool motor_control_accept_command(motor_control_context_t *ctx,
                                   const motor_control_command_t *command,
                                   uint32_t now_ms);
+bool motor_control_accept_feedback(motor_control_context_t *ctx,
+                                   const motor_control_rx_frame_t *frame);
+bool motor_control_get_joint_state(const motor_control_context_t *ctx,
+                                   size_t index,
+                                   motor_control_joint_state_t *out);
 size_t motor_control_step(motor_control_context_t *ctx, uint32_t now_ms,
                           motor_control_tx_action_t *actions,
                           size_t action_capacity);

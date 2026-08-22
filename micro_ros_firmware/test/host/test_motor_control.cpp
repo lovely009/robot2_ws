@@ -595,6 +595,55 @@ static void test_fixed_capacities_are_enforced() {
   assert(vaxor_ctx.runtime[0].vaxor_enabled);
 }
 
+static void test_feedback_is_decoded_by_motor_control() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motors[] = {
+      {"shoulder", MOTOR_CONTROL_RP, 1, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {"wrist", MOTOR_CONTROL_VAXOR, 2, 0,
+       50.0, 0.65, 0.042, 0.008, 1.0},
+  };
+  motor_control_init(&ctx, motors, 2U);
+
+  const motor_protocol_joint_state_t rp_input{1.5, -2.0, 3.0};
+  motor_control_rx_frame_t rp_frame{};
+  rp_frame.bus_index = 0U;
+  rp_frame.can_id = 1U;
+  rp_frame.size = 12U;
+  motor_protocol_pack_rp_state(&rp_input, 25.0, 0U, 48.0, 25.0,
+                               rp_frame.data);
+  assert(motor_control_accept_feedback(&ctx, &rp_frame));
+
+  motor_control_joint_state_t state{};
+  assert(motor_control_get_joint_state(&ctx, 0U, &state));
+  assert(std::strcmp(state.joint_name, "shoulder") == 0);
+  assert(nearly_equal(state.position, rp_input.position, 0.001));
+  assert(nearly_equal(state.velocity, rp_input.velocity, 0.05));
+  assert(nearly_equal(state.effort, rp_input.effort, 0.05));
+
+  const motor_protocol_joint_state_t wrist_input{5.0, -10.0, 2.0};
+  motor_control_rx_frame_t wrist_frame{};
+  wrist_frame.bus_index = 0U;
+  wrist_frame.can_id = motor_protocol_wrist_reply_id(2U);
+  wrist_frame.size = 12U;
+  motor_protocol_pack_wrist_reply(2U, &wrist_input, wrist_frame.data);
+  assert(motor_control_accept_feedback(&ctx, &wrist_frame));
+  assert(motor_control_get_joint_state(&ctx, 1U, &state));
+  assert(std::strcmp(state.joint_name, "wrist") == 0);
+  assert(nearly_equal(state.position, wrist_input.position / 50.0, 0.0001));
+  assert(nearly_equal(state.velocity, wrist_input.velocity / 50.0, 0.001));
+  assert(nearly_equal(state.effort, wrist_input.effort * 0.042 * 50.0 * 0.65,
+                      0.01));
+
+  motor_control_rx_frame_t unmatched{};
+  unmatched.bus_index = 1U;
+  unmatched.can_id = 1U;
+  unmatched.size = 12U;
+  assert(!motor_control_accept_feedback(&ctx, &unmatched));
+  assert(ctx.valid_feedback_count == 2U);
+  assert(ctx.invalid_feedback_count == 1U);
+}
+
 int main() {
   test_timeout_boundaries();
   test_timeout_uses_wrapping_unsigned_elapsed_time();
@@ -613,5 +662,6 @@ int main() {
   test_invalid_config_names_are_skipped();
   test_config_name_is_deep_copied();
   test_fixed_capacities_are_enforced();
+  test_feedback_is_decoded_by_motor_control();
   return 0;
 }

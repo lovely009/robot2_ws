@@ -23,6 +23,9 @@ static const uint32_t kControlTaskStack = 1024;
 static const UBaseType_t kControlTaskPrio = 3;
 static const uint16_t kControlStartDelayMs = 500;
 static const uint16_t kControlPeriodMs = 10;
+// 每总线每周期最多处理 8 帧，总上限 24 帧；CAN1 积压留给后续周期，
+// 保证 RX burst 不会无界占用 10 ms TX 周期。
+static const size_t kCanRxDrainBudgetPerBus = 8U;
 
 // 临时默认测试电机：RP 占位 id=1；CAN1 当前实际接入 vaxor 节点 ID=2。
 // 数值保持与原 control_task 电机表一致，完整拓扑后续由参数服务替换。
@@ -47,9 +50,8 @@ static const size_t kCanHandleCount =
 
 static motor_control_context_t g_motor_control;
 static control_mailbox_t g_control_mailbox;
-static control_joint_state_t g_joint_states[kDefaultMotorCount];
-static bool g_joint_state_valid[kDefaultMotorCount];
-static uint32_t g_last_can1_rx_sequence = 0;
+static can_rx_frame_t g_can_debug_snapshots[CAN_RX_BUS_COUNT];
+static uint32_t g_can_debug_sequences[CAN_RX_BUS_COUNT];
 
 // ROS/link 任务只覆盖请求；motor_control_context_t 始终由 control task 修改。
 static bool g_mailbox_initialized = false;
@@ -61,6 +63,7 @@ volatile uint32_t g_control_debug_submit_count = 0;
 volatile uint32_t g_control_debug_overwrite_count = 0;
 volatile uint32_t g_control_debug_rejected_count = 0;
 volatile uint32_t g_control_debug_sent_count = 0;
+volatile uint32_t g_control_can_rx_backlog_count[CAN_RX_BUS_COUNT] = {0};
 static volatile uint32_t g_control_tx_ok_count = 0;
 static volatile uint32_t g_control_tx_error_count = 0;
 
@@ -119,12 +122,30 @@ bool control_task_get_joint_state(size_t index, control_joint_state_t *out) {
     return false;
   }
   taskENTER_CRITICAL();
-  bool valid = g_joint_state_valid[index];
+  motor_control_joint_state_t state = {};
+  bool valid = motor_control_get_joint_state(&g_motor_control, index, &state);
   if (valid) {
-    *out = g_joint_states[index];
+    memcpy(out->joint_name, state.joint_name, sizeof(out->joint_name));
+    out->position = state.position;
+    out->velocity = state.velocity;
+    out->effort = state.effort;
   }
   taskEXIT_CRITICAL();
   return valid;
+}
+
+uint32_t control_task_can_debug_snapshot(uint8_t bus_index,
+                                         can_rx_frame_t *out) {
+  if (bus_index >= CAN_RX_BUS_COUNT) {
+    return 0U;
+  }
+  taskENTER_CRITICAL();
+  uint32_t sequence = g_can_debug_sequences[bus_index];
+  if (out != nullptr) {
+    *out = g_can_debug_snapshots[bus_index];
+  }
+  taskEXIT_CRITICAL();
+  return sequence;
 }
 
 static void drain_control_requests() {
@@ -171,64 +192,39 @@ static void drain_command_mailboxes() {
   }
 }
 
-static bool decode_feedback(uint32_t id, const uint8_t *data, size_t size,
-                            size_t *motor_index,
-                            control_joint_state_t *out) {
-  if (data == nullptr || motor_index == nullptr || out == nullptr) {
-    return false;
-  }
-  for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    const motor_control_motor_config_t *motor = &kDefaultMotors[index];
-    motor_protocol_joint_state_t state = {};
-    bool matched = false;
-
-    if (motor->protocol == MOTOR_CONTROL_RP) {
-      if (id == motor->id && size == 12U) {
-        matched = motor_protocol_unpack_rp_state(data, size, &state);
-      }
-    } else if ((id == motor_protocol_wrist_reply_id(motor->id) &&
-                size == 12U) ||
-               (id == motor_protocol_wrist_status_id(motor->id) &&
-                size == 20U)) {
-      matched = motor_protocol_unpack_wrist_feedback(data, size, &state);
-      state.position /= motor->gear_ratio;
-      state.velocity /= motor->gear_ratio;
-      state.effort *= motor->torque_constant_nm_per_amp * motor->gear_ratio *
-                      motor->gear_efficiency;
-    }
-
-    if (matched) {
-      memset(out, 0, sizeof(*out));
-      size_t name_size = strlen(motor->joint_name) + 1U;
-      memcpy(out->joint_name, motor->joint_name, name_size);
-      out->position = state.position;
-      out->velocity = state.velocity;
-      out->effort = state.effort;
-      *motor_index = index;
-      return true;
-    }
-  }
-  return false;
+static void accept_can_feedback(const can_rx_frame_t *frame) {
+  motor_control_rx_frame_t feedback = {};
+  feedback.bus_index = frame->bus_index;
+  feedback.can_id = frame->id;
+  feedback.size = frame->dlc;
+  feedback.is_fd = frame->is_fd;
+  feedback.is_extended = frame->is_extended;
+  memcpy(feedback.data, frame->data, frame->dlc);
+  (void)motor_control_accept_feedback(&g_motor_control, &feedback);
 }
 
-// 当前 fdcan 层只提供 CAN1 最新快照；CAN RX queue 留给后续任务实现。
-static void drain_can_rx_snapshot() {
-  can_rx_frame_t frame = {};
-  uint32_t sequence = can1_rx_snapshot(&frame);
-  if (sequence == g_last_can1_rx_sequence) {
-    return;
-  }
-  g_last_can1_rx_sequence = sequence;
-
-  size_t motor_index = 0;
-  control_joint_state_t state = {};
-  if (!decode_feedback(frame.id, frame.data, frame.dlc, &motor_index, &state)) {
-    return;
-  }
+static void update_can_debug_snapshot(const can_rx_frame_t *frame) {
   taskENTER_CRITICAL();
-  g_joint_states[motor_index] = state;
-  g_joint_state_valid[motor_index] = true;
+  g_can_debug_snapshots[frame->bus_index] = *frame;
+  ++g_can_debug_sequences[frame->bus_index];
   taskEXIT_CRITICAL();
+}
+
+static void drain_can_rx_queues() {
+  for (uint8_t bus_index = 0U; bus_index < CAN_RX_BUS_COUNT; ++bus_index) {
+    size_t processed = 0U;
+    can_rx_frame_t frame = {};
+    while (processed < kCanRxDrainBudgetPerBus &&
+           can_rx_queue_pop(bus_index, &frame)) {
+      update_can_debug_snapshot(&frame);
+      accept_can_feedback(&frame);
+      ++processed;
+    }
+    if (processed == kCanRxDrainBudgetPerBus &&
+        can_rx_queue_pending(bus_index) > 0U) {
+      ++g_control_can_rx_backlog_count[bus_index];
+    }
+  }
 }
 
 static size_t apply_tx_actions(const motor_control_tx_action_t *actions,
@@ -303,7 +299,7 @@ static void control_task_fn(void *arg) {
   for (;;) {
     drain_control_requests();
     drain_command_mailboxes();
-    drain_can_rx_snapshot();
+    drain_can_rx_queues();
     run_motor_control_cycle(millis());
     run_debug_tx_cycle();
 #if ENABLE_CANFD_DEMO_LOOP

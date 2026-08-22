@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "can_rx_queue.h"
 #include "motor_control.h"
 
 #ifdef __cplusplus
@@ -44,6 +45,11 @@ typedef struct {
 // 按默认电机表索引复制最新反馈；尚未收到该关节反馈或索引越界时返回 false。
 bool control_task_get_joint_state(size_t index, control_joint_state_t *out);
 
+// control task 在消费主 RX 队列时复制的每总线最新原始帧；调试桥只读该采样，
+// 不与控制路径争抢主队列。返回自增序号，参数非法时返回 0。
+uint32_t control_task_can_debug_snapshot(uint8_t bus_index,
+                                         can_rx_frame_t *out);
+
 // 调试计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
 extern volatile uint32_t g_control_motor_cmd_count;
 extern volatile uint32_t g_control_motor_found_count;
@@ -51,6 +57,8 @@ extern volatile uint32_t g_control_debug_submit_count;
 extern volatile uint32_t g_control_debug_overwrite_count;
 extern volatile uint32_t g_control_debug_rejected_count;
 extern volatile uint32_t g_control_debug_sent_count;
+extern volatile uint32_t
+    g_control_can_rx_backlog_count[CAN_RX_BUS_COUNT];
 
 #ifdef __cplusplus
 }

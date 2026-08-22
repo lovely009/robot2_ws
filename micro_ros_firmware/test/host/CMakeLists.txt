@@ -40,3 +40,11 @@ target_include_directories(test_control_mailbox PRIVATE
   ../../lib/motor_protocol/include)
 
 add_test(NAME control_mailbox COMMAND test_control_mailbox)
+
+add_executable(test_can_rx_ring
+  test_can_rx_ring.cpp)
+
+target_include_directories(test_can_rx_ring PRIVATE
+  ../../lib/fdcan/include)
+
+add_test(NAME can_rx_ring COMMAND test_can_rx_ring)

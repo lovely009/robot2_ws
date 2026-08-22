@@ -2,7 +2,7 @@
 //
 // 职责：把 FDCAN1 接收帧发布到 micro_ros/can1/receive，并把
 // micro_ros/can1/send 的订阅帧覆盖到 control task debug mailbox。接收帧
-// 统一通过 can1_rx_snapshot() 获取，不直接访问 can_bsp 内部缓冲。
+// 统一读取 control task 复制的低优先级快照，不消费 FDCAN 主 RX 队列。
 
 #include "can_debug_bridge.h"
 
@@ -14,7 +14,6 @@
 #include <rclc/executor.h>
 #include <can_bridge_msgs/msg/can_frame.h>
 
-#include "can_bsp.h"
 #include "control_task.h"
 
 #if defined(ENABLE_CAN1_DEBUG_BRIDGE) && ENABLE_CAN1_DEBUG_BRIDGE
@@ -117,7 +116,7 @@ void can_debug_bridge_poll(void) {
     return;
   }
   can_rx_frame_t frame = {0};
-  uint32_t seq = can1_rx_snapshot(&frame);
+  uint32_t seq = control_task_can_debug_snapshot(0U, &frame);
   if (seq == g_last_rx_seq) {
     return;
   }

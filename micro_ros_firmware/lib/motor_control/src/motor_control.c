@@ -356,6 +356,70 @@ bool motor_control_accept_command(motor_control_context_t *ctx,
   return false;
 }
 
+bool motor_control_accept_feedback(motor_control_context_t *ctx,
+                                   const motor_control_rx_frame_t *frame) {
+  if (ctx == NULL || frame == NULL || frame->size > sizeof(frame->data)) {
+    if (ctx != NULL) {
+      ++ctx->invalid_feedback_count;
+    }
+    return false;
+  }
+
+  for (size_t index = 0; index < ctx->motor_count; ++index) {
+    const motor_control_motor_config_t *motor = &ctx->motors[index];
+    if (motor->bus_index != frame->bus_index) {
+      continue;
+    }
+
+    motor_protocol_joint_state_t decoded = {0};
+    bool matched = false;
+    if (motor->protocol == MOTOR_CONTROL_RP) {
+      matched = frame->can_id == motor->id && frame->size == 12U &&
+                motor_protocol_unpack_rp_state(frame->data, frame->size,
+                                               &decoded);
+    } else if ((frame->can_id == motor_protocol_wrist_reply_id(motor->id) &&
+                frame->size == 12U) ||
+               (frame->can_id == motor_protocol_wrist_status_id(motor->id) &&
+                frame->size == 20U)) {
+      matched = motor_protocol_unpack_wrist_feedback(
+          frame->data, frame->size, &decoded);
+      decoded.position /= motor->gear_ratio;
+      decoded.velocity /= motor->gear_ratio;
+      decoded.effort *= motor->torque_constant_nm_per_amp *
+                        motor->gear_ratio * motor->gear_efficiency;
+    }
+
+    if (!matched) {
+      continue;
+    }
+
+    motor_control_joint_state_t *state = &ctx->joint_states[index];
+    memset(state, 0, sizeof(*state));
+    memcpy(state->joint_name, motor->joint_name,
+           strlen(motor->joint_name) + 1U);
+    state->position = decoded.position;
+    state->velocity = decoded.velocity;
+    state->effort = decoded.effort;
+    ctx->joint_state_valid[index] = true;
+    ++ctx->valid_feedback_count;
+    return true;
+  }
+
+  ++ctx->invalid_feedback_count;
+  return false;
+}
+
+bool motor_control_get_joint_state(const motor_control_context_t *ctx,
+                                   size_t index,
+                                   motor_control_joint_state_t *out) {
+  if (ctx == NULL || out == NULL || index >= ctx->motor_count ||
+      !ctx->joint_state_valid[index]) {
+    return false;
+  }
+  *out = ctx->joint_states[index];
+  return true;
+}
+
 size_t motor_control_step(motor_control_context_t *ctx, uint32_t now_ms,
                           motor_control_tx_action_t *actions,
                           size_t action_capacity) {

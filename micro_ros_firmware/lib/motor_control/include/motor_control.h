@@ -16,6 +16,7 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_MOTORS 8U
 #define MOTOR_CONTROL_MAX_BUSES 8U
 #define MOTOR_CONTROL_MAX_TX_ACTIONS 16U
+#define MOTOR_CONTROL_JOINT_NAME_CAPACITY 32U
 
 typedef enum {
   MOTOR_CONTROL_RP,
@@ -42,7 +43,7 @@ typedef struct {
 } motor_control_motor_config_t;
 
 typedef struct {
-  char joint_name[32];
+  char joint_name[MOTOR_CONTROL_JOINT_NAME_CAPACITY];
   uint8_t mode;
   double position;
   double velocity;
@@ -67,14 +68,17 @@ typedef struct {
   uint8_t requested_mode;
   uint8_t active_mode;
   bool vaxor_enabled;
+  bool vaxor_stop_pending;
   bool reauthorization_required;
 } motor_control_motor_runtime_t;
 
 typedef struct motor_control_context {
   motor_control_motor_config_t motors[MOTOR_CONTROL_MAX_MOTORS];
+  char joint_names[MOTOR_CONTROL_MAX_MOTORS]
+                  [MOTOR_CONTROL_JOINT_NAME_CAPACITY];
   motor_control_motor_runtime_t runtime[MOTOR_CONTROL_MAX_MOTORS];
   bool bus_fault[MOTOR_CONTROL_MAX_BUSES];
-  bool bus_disable_pending[MOTOR_CONTROL_MAX_BUSES];
+  bool rp_bus_disabled[MOTOR_CONTROL_MAX_BUSES];
   size_t motor_count;
   uint32_t valid_command_count;
   uint32_t invalid_command_count;

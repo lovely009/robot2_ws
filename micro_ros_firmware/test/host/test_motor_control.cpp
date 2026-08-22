@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 
 static bool nearly_equal(double actual, double expected, double tolerance) {
   return std::fabs(actual - expected) <= tolerance;
@@ -376,7 +377,14 @@ static void test_bus_fault_and_manual_disable_are_bus_level() {
   assert(ctx.runtime[1].state == MOTOR_CONTROL_ACTIVE);
   assert(motor_control_accept_command(&ctx, &commands[0], 2));
   assert(motor_control_step(
-             &ctx, 2, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 2U);
+             &ctx, 2, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 3U);
+  assert(actions[0].bus_index == 0U);
+  assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+  assert(actions[0].data[0] == 1U);
+  assert(actions[1].bus_index == 0U);
+  assert(actions[1].can_id == MOTOR_PROTOCOL_RP_COMMAND_ID);
+  assert(actions[2].bus_index == 1U);
+  assert(actions[2].can_id == MOTOR_PROTOCOL_RP_COMMAND_ID);
 
   assert(motor_control_set_authorization(&ctx, false));
   count = motor_control_step(
@@ -400,6 +408,159 @@ static void test_vaxor_invalid_mode_is_rejected() {
   assert(!motor_control_accept_command(&ctx, &command, 0));
   assert(ctx.invalid_command_count == 1U);
   assert(!ctx.runtime[0].command_valid);
+}
+
+static void test_vaxor_disconnect_stop_survives_recovery_before_step() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motor = {
+      "wrist", MOTOR_CONTROL_VAXOR, 2, 0,
+      50.0, 0.65, 0.042, 0.008, 1.0};
+  const motor_control_command_t command = {
+      "wrist", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.1, 0.2, 0.3};
+  motor_control_tx_action_t actions[MOTOR_CONTROL_MAX_TX_ACTIONS]{};
+
+  motor_control_init(&ctx, &motor, 1);
+  motor_control_set_agent_connected(&ctx, true);
+  assert(motor_control_accept_command(&ctx, &command, 0));
+  assert(motor_control_step(
+             &ctx, 0, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 3U);
+  assert(ctx.runtime[0].vaxor_enabled);
+
+  motor_control_set_agent_connected(&ctx, false);
+  motor_control_set_agent_connected(&ctx, true);
+  assert(motor_control_set_authorization(&ctx, true));
+  assert(motor_control_accept_command(&ctx, &command, 1));
+
+  size_t count = motor_control_step(
+      &ctx, 1, actions, MOTOR_CONTROL_MAX_TX_ACTIONS);
+  assert(count == 3U);
+  assert_vaxor_control_action(
+      actions[0], 2, false, MOTOR_PROTOCOL_WRIST_MODE_MIT);
+  assert_vaxor_control_action(
+      actions[1], 2, true, MOTOR_PROTOCOL_WRIST_MODE_MIT);
+  (void)unpack_vaxor_command_action(actions[2], 2);
+}
+
+static void test_hard_stop_invalidates_command_across_full_millis_wrap() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motor = {
+      "wrist", MOTOR_CONTROL_VAXOR, 2, 0,
+      50.0, 0.65, 0.042, 0.008, 1.0};
+  const motor_control_command_t command = {
+      "wrist", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.1, 0.2, 0.3};
+  motor_control_tx_action_t actions[MOTOR_CONTROL_MAX_TX_ACTIONS]{};
+
+  motor_control_init(&ctx, &motor, 1);
+  assert(motor_control_accept_command(&ctx, &command, 100U));
+  assert(motor_control_step(
+             &ctx, 100U, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 3U);
+
+  assert(motor_control_step(
+             &ctx, 400U, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 1U);
+  assert(ctx.runtime[0].state == MOTOR_CONTROL_DISABLED);
+  assert(!ctx.runtime[0].command_valid);
+  assert_vaxor_control_action(
+      actions[0], 2, false, MOTOR_PROTOCOL_WRIST_MODE_MIT);
+
+  size_t count = motor_control_step(
+      &ctx, 100U, actions, MOTOR_CONTROL_MAX_TX_ACTIONS);
+  assert(count == 0U);
+  assert(ctx.runtime[0].state == MOTOR_CONTROL_DISABLED);
+}
+
+static void test_rp_disable_repeats_until_atomic_enable_and_command_recovery() {
+  motor_control_context_t ctx{};
+  const motor_control_motor_config_t motor = {
+      "joint", MOTOR_CONTROL_RP, 1, 0,
+      1.0, 1.0, 0.0, 30.0, 1.0};
+  const motor_control_command_t command = {
+      "joint", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.25, 0.0, 0.0};
+  motor_control_tx_action_t actions[MOTOR_CONTROL_MAX_TX_ACTIONS]{};
+
+  motor_control_init(&ctx, &motor, 1);
+  assert(motor_control_accept_command(&ctx, &command, 0));
+  assert(motor_control_step(
+             &ctx, 0, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 1U);
+
+  motor_control_set_bus_fault(&ctx, 0, true);
+  for (uint32_t now_ms : {1U, 2U}) {
+    assert(motor_control_step(
+               &ctx, now_ms, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 1U);
+    assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+    assert(actions[0].data[0] == 0U);
+  }
+
+  motor_control_set_bus_fault(&ctx, 0, false);
+  assert(motor_control_step(
+             &ctx, 3, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 1U);
+  assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+  assert(actions[0].data[0] == 0U);
+
+  assert(motor_control_set_authorization(&ctx, true));
+  assert(motor_control_step(
+             &ctx, 4, actions, MOTOR_CONTROL_MAX_TX_ACTIONS) == 1U);
+  assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+  assert(actions[0].data[0] == 0U);
+
+  assert(motor_control_accept_command(&ctx, &command, 5));
+  assert(motor_control_step(&ctx, 5, actions, 1) == 1U);
+  assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+  assert(actions[0].data[0] == 0U);
+
+  size_t count = motor_control_step(
+      &ctx, 5, actions, MOTOR_CONTROL_MAX_TX_ACTIONS);
+  assert(count == 2U);
+  assert(actions[0].can_id == MOTOR_PROTOCOL_RP_ENABLE_ID);
+  assert(actions[0].data[0] == 1U);
+  assert(actions[1].can_id == MOTOR_PROTOCOL_RP_COMMAND_ID);
+  motor_protocol_joint_command_t slot{};
+  assert(motor_protocol_unpack_rp_slot(actions[1].data, 8, &slot));
+  assert(nearly_equal(slot.position, 0.25, 0.001));
+}
+
+static void test_invalid_config_names_are_skipped() {
+  motor_control_context_t ctx{};
+  char unterminated_name[32];
+  std::memset(unterminated_name, 'x', sizeof(unterminated_name));
+  const motor_control_motor_config_t motors[] = {
+      {nullptr, MOTOR_CONTROL_RP, 1, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {"", MOTOR_CONTROL_RP, 2, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {unterminated_name, MOTOR_CONTROL_RP, 3, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+      {"valid", MOTOR_CONTROL_RP, 4, 0,
+       1.0, 1.0, 0.0, 30.0, 1.0},
+  };
+  const motor_control_command_t command = {
+      "valid", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.1, 0.0, 0.0};
+
+  motor_control_init(&ctx, motors, 4);
+  assert(ctx.motor_count == 1U);
+  assert(motor_control_accept_command(&ctx, &command, 0));
+}
+
+static void test_config_name_is_deep_copied() {
+  motor_control_context_t ctx{};
+  char caller_name[32] = "stable_joint";
+  const motor_control_motor_config_t motor = {
+      caller_name, MOTOR_CONTROL_RP, 1, 0,
+      1.0, 1.0, 0.0, 30.0, 1.0};
+  const motor_control_command_t original_command = {
+      "stable_joint", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.1, 0.0, 0.0};
+  const motor_control_command_t mutated_command = {
+      "mutated", MOTOR_PROTOCOL_WRIST_MODE_MIT,
+      0.2, 0.0, 0.0};
+
+  motor_control_init(&ctx, &motor, 1);
+  std::strcpy(caller_name, "mutated");
+  assert(motor_control_accept_command(&ctx, &original_command, 0));
+  assert(!motor_control_accept_command(&ctx, &mutated_command, 1));
 }
 
 static void test_fixed_capacities_are_enforced() {
@@ -446,6 +607,11 @@ int main() {
   test_vaxor_enable_mode_switch_and_gear_ratio_conversion();
   test_bus_fault_and_manual_disable_are_bus_level();
   test_vaxor_invalid_mode_is_rejected();
+  test_vaxor_disconnect_stop_survives_recovery_before_step();
+  test_hard_stop_invalidates_command_across_full_millis_wrap();
+  test_rp_disable_repeats_until_atomic_enable_and_command_recovery();
+  test_invalid_config_names_are_skipped();
+  test_config_name_is_deep_copied();
   test_fixed_capacities_are_enforced();
   return 0;
 }

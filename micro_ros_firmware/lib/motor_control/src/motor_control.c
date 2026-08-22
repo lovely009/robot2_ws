@@ -7,8 +7,19 @@ static uint32_t elapsed_ms(uint32_t now, uint32_t then) {
   return now - then;
 }
 
+static void latch_vaxor_stop(motor_control_context_t *ctx,
+                              size_t motor_index) {
+  motor_control_motor_runtime_t *runtime = &ctx->runtime[motor_index];
+  if (ctx->motors[motor_index].protocol == MOTOR_CONTROL_VAXOR &&
+      runtime->vaxor_enabled) {
+    runtime->vaxor_stop_pending = true;
+    runtime->vaxor_enabled = false;
+  }
+}
+
 static void latch_all_motors(motor_control_context_t *ctx) {
   for (size_t index = 0; index < ctx->motor_count; ++index) {
+    latch_vaxor_stop(ctx, index);
     motor_control_motor_runtime_t *runtime = &ctx->runtime[index];
     runtime->state = MOTOR_CONTROL_FAULT_LATCHED;
     runtime->command_valid = false;
@@ -24,7 +35,7 @@ static void mark_rp_bus_disable(motor_control_context_t *ctx,
   for (size_t index = 0; index < ctx->motor_count; ++index) {
     if (ctx->motors[index].protocol == MOTOR_CONTROL_RP &&
         ctx->motors[index].bus_index == bus_index) {
-      ctx->bus_disable_pending[bus_index] = true;
+      ctx->rp_bus_disabled[bus_index] = true;
       return;
     }
   }
@@ -36,33 +47,6 @@ static void mark_all_rp_buses_disabled(motor_control_context_t *ctx) {
       mark_rp_bus_disable(ctx, ctx->motors[index].bus_index);
     }
   }
-}
-
-static size_t append_pending_bus_disables(motor_control_context_t *ctx,
-                                          motor_control_tx_action_t *actions,
-                                          size_t action_capacity) {
-  size_t action_count = 0U;
-  if (actions == NULL) {
-    return 0U;
-  }
-  for (size_t bus = 0; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
-    if (!ctx->bus_disable_pending[bus]) {
-      continue;
-    }
-    if (action_count >= action_capacity) {
-      break;
-    }
-    motor_control_tx_action_t *action = &actions[action_count++];
-    memset(action, 0, sizeof(*action));
-    action->bus_index = (uint8_t)bus;
-    action->can_id = MOTOR_PROTOCOL_RP_ENABLE_ID;
-    action->size = 8U;
-    action->is_fd = false;
-    action->is_extended = false;
-    action->data[0] = 0U;
-    ctx->bus_disable_pending[bus] = false;
-  }
-  return action_count;
 }
 
 static void pack_rp_neutral(uint8_t out[8]) {
@@ -98,7 +82,55 @@ static bool is_first_rp_motor_on_bus(const motor_control_context_t *ctx,
   return true;
 }
 
-static size_t append_rp_actions(const motor_control_context_t *ctx,
+static void fill_rp_control_action(motor_control_tx_action_t *action,
+                                   uint8_t bus_index, bool enabled) {
+  memset(action, 0, sizeof(*action));
+  action->bus_index = bus_index;
+  action->can_id = MOTOR_PROTOCOL_RP_ENABLE_ID;
+  action->size = 8U;
+  action->is_fd = false;
+  action->is_extended = false;
+  action->data[0] = enabled ? 1U : 0U;
+}
+
+static void fill_rp_command_action(const motor_control_context_t *ctx,
+                                   uint8_t bus_index,
+                                   motor_control_tx_action_t *action) {
+  memset(action, 0, sizeof(*action));
+  action->bus_index = bus_index;
+  action->can_id = MOTOR_PROTOCOL_RP_COMMAND_ID;
+  action->size = 64U;
+  action->is_fd = true;
+  action->is_extended = false;
+  for (size_t slot = 0; slot < MOTOR_PROTOCOL_RP_BROADCAST_SLOTS; ++slot) {
+    pack_rp_neutral(action->data + slot * 8U);
+  }
+
+  for (size_t peer = 0; peer < ctx->motor_count; ++peer) {
+    const motor_control_motor_config_t *peer_motor = &ctx->motors[peer];
+    if (peer_motor->protocol != MOTOR_CONTROL_RP ||
+        peer_motor->bus_index != bus_index || peer_motor->id == 0U ||
+        peer_motor->id > MOTOR_PROTOCOL_RP_BROADCAST_SLOTS) {
+      continue;
+    }
+    pack_rp_runtime(peer_motor, &ctx->runtime[peer],
+                    action->data + (peer_motor->id - 1U) * 8U);
+  }
+}
+
+static bool rp_bus_has_active_command(const motor_control_context_t *ctx,
+                                      uint8_t bus_index) {
+  for (size_t index = 0; index < ctx->motor_count; ++index) {
+    if (ctx->motors[index].protocol == MOTOR_CONTROL_RP &&
+        ctx->motors[index].bus_index == bus_index &&
+        ctx->runtime[index].state == MOTOR_CONTROL_ACTIVE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static size_t append_rp_actions(motor_control_context_t *ctx,
                                 motor_control_tx_action_t *actions,
                                 size_t action_capacity) {
   size_t action_count = 0U;
@@ -112,35 +144,40 @@ static size_t append_rp_actions(const motor_control_context_t *ctx,
         !is_first_rp_motor_on_bus(ctx, index)) {
       continue;
     }
-    if (!ctx->authorized ||
-        (motor->bus_index < MOTOR_CONTROL_MAX_BUSES &&
-         ctx->bus_fault[motor->bus_index])) {
+    bool bus_fault_active =
+        motor->bus_index < MOTOR_CONTROL_MAX_BUSES &&
+        ctx->bus_fault[motor->bus_index];
+    bool bus_disabled = motor->bus_index < MOTOR_CONTROL_MAX_BUSES &&
+                        ctx->rp_bus_disabled[motor->bus_index];
+    if (!ctx->authorized || bus_fault_active) {
+      bus_disabled = true;
+      if (motor->bus_index < MOTOR_CONTROL_MAX_BUSES) {
+        ctx->rp_bus_disabled[motor->bus_index] = true;
+      }
+    }
+
+    if (bus_disabled) {
+      bool recovery_ready =
+          ctx->authorized && !bus_fault_active &&
+          rp_bus_has_active_command(ctx, motor->bus_index);
+      if (recovery_ready && action_capacity - action_count >= 2U) {
+        fill_rp_control_action(&actions[action_count++], motor->bus_index,
+                               true);
+        fill_rp_command_action(ctx, motor->bus_index,
+                               &actions[action_count++]);
+        if (motor->bus_index < MOTOR_CONTROL_MAX_BUSES) {
+          ctx->rp_bus_disabled[motor->bus_index] = false;
+        }
+      } else if (action_count < action_capacity) {
+        fill_rp_control_action(&actions[action_count++], motor->bus_index,
+                               false);
+      }
       continue;
     }
-    if (action_count >= action_capacity) {
-      break;
-    }
 
-    motor_control_tx_action_t *action = &actions[action_count++];
-    memset(action, 0, sizeof(*action));
-    action->bus_index = motor->bus_index;
-    action->can_id = MOTOR_PROTOCOL_RP_COMMAND_ID;
-    action->size = 64U;
-    action->is_fd = true;
-    action->is_extended = false;
-    for (size_t slot = 0; slot < MOTOR_PROTOCOL_RP_BROADCAST_SLOTS; ++slot) {
-      pack_rp_neutral(action->data + slot * 8U);
-    }
-
-    for (size_t peer = 0; peer < ctx->motor_count; ++peer) {
-      const motor_control_motor_config_t *peer_motor = &ctx->motors[peer];
-      if (peer_motor->protocol != MOTOR_CONTROL_RP ||
-          peer_motor->bus_index != motor->bus_index || peer_motor->id == 0U ||
-          peer_motor->id > MOTOR_PROTOCOL_RP_BROADCAST_SLOTS) {
-        continue;
-      }
-      pack_rp_runtime(peer_motor, &ctx->runtime[peer],
-                      action->data + (peer_motor->id - 1U) * 8U);
+    if (action_count < action_capacity) {
+      fill_rp_command_action(ctx, motor->bus_index,
+                             &actions[action_count++]);
     }
   }
   return action_count;
@@ -192,10 +229,12 @@ static size_t append_vaxor_actions(motor_control_context_t *ctx,
 
     if (runtime->state == MOTOR_CONTROL_DISABLED ||
         runtime->state == MOTOR_CONTROL_FAULT_LATCHED) {
-      if (runtime->vaxor_enabled && action_count < action_capacity) {
+      if ((runtime->vaxor_stop_pending || runtime->vaxor_enabled) &&
+          action_count < action_capacity) {
         fill_vaxor_control_action(&actions[action_count++], motor, false,
                                   runtime->active_mode);
         runtime->vaxor_enabled = false;
+        runtime->vaxor_stop_pending = false;
       }
       continue;
     }
@@ -205,14 +244,16 @@ static size_t append_vaxor_actions(motor_control_context_t *ctx,
                               : runtime->requested_mode;
     bool mode_transition =
         !runtime->vaxor_enabled || runtime->active_mode != target_mode;
-    size_t required_actions = mode_transition ? 3U : 1U;
+    bool stop_start_required = runtime->vaxor_stop_pending || mode_transition;
+    size_t required_actions = stop_start_required ? 3U : 1U;
     if (required_actions > action_capacity - action_count) {
       continue;
     }
 
-    if (mode_transition) {
+    if (stop_start_required) {
       fill_vaxor_control_action(&actions[action_count++], motor, false,
                                 target_mode);
+      runtime->vaxor_stop_pending = false;
       fill_vaxor_control_action(&actions[action_count++], motor, true,
                                 target_mode);
       runtime->vaxor_enabled = true;
@@ -243,15 +284,27 @@ void motor_control_init(motor_control_context_t *ctx,
   if (motors == NULL) {
     return;
   }
-  if (motor_count > MOTOR_CONTROL_MAX_MOTORS) {
-    motor_count = MOTOR_CONTROL_MAX_MOTORS;
-  }
-  ctx->motor_count = motor_count;
-  for (size_t index = 0; index < motor_count; ++index) {
-    ctx->motors[index] = motors[index];
+  for (size_t source = 0;
+       source < motor_count && ctx->motor_count < MOTOR_CONTROL_MAX_MOTORS;
+       ++source) {
+    const char *joint_name = motors[source].joint_name;
+    if (joint_name == NULL || joint_name[0] == '\0') {
+      continue;
+    }
+    const char *terminator =
+        memchr(joint_name, '\0', MOTOR_CONTROL_JOINT_NAME_CAPACITY);
+    if (terminator == NULL) {
+      continue;
+    }
+    size_t index = ctx->motor_count;
+    size_t name_size = (size_t)(terminator - joint_name) + 1U;
+    memcpy(ctx->joint_names[index], joint_name, name_size);
+    ctx->motors[index] = motors[source];
+    ctx->motors[index].joint_name = ctx->joint_names[index];
     ctx->runtime[index].state = MOTOR_CONTROL_DISABLED;
     ctx->runtime[index].active_mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
     ctx->runtime[index].requested_mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
+    ++ctx->motor_count;
   }
 }
 
@@ -323,6 +376,8 @@ size_t motor_control_step(motor_control_context_t *ctx, uint32_t now_ms,
     }
     uint32_t age = elapsed_ms(now_ms, runtime->last_command_ms);
     if (age >= 300U) {
+      runtime->command_valid = false;
+      latch_vaxor_stop(ctx, index);
       runtime->state = MOTOR_CONTROL_DISABLED;
     } else if (age >= 100U) {
       runtime->state = MOTOR_CONTROL_SOFT_STOP;
@@ -330,12 +385,7 @@ size_t motor_control_step(motor_control_context_t *ctx, uint32_t now_ms,
       runtime->state = MOTOR_CONTROL_ACTIVE;
     }
   }
-  size_t action_count =
-      append_pending_bus_disables(ctx, actions, action_capacity);
-  if (action_count < action_capacity && actions != NULL) {
-    action_count += append_rp_actions(
-        ctx, actions + action_count, action_capacity - action_count);
-  }
+  size_t action_count = append_rp_actions(ctx, actions, action_capacity);
   if (action_count >= action_capacity || actions == NULL) {
     return action_count;
   }
@@ -380,6 +430,7 @@ void motor_control_set_bus_fault(motor_control_context_t *ctx,
       continue;
     }
     motor_control_motor_runtime_t *runtime = &ctx->runtime[index];
+    latch_vaxor_stop(ctx, index);
     runtime->state = MOTOR_CONTROL_FAULT_LATCHED;
     runtime->command_valid = false;
     runtime->reauthorization_required = true;
@@ -394,6 +445,7 @@ void motor_control_set_motor_fault(motor_control_context_t *ctx,
   motor_control_motor_runtime_t *runtime = &ctx->runtime[motor_index];
   runtime->fault_active = active;
   if (active) {
+    latch_vaxor_stop(ctx, motor_index);
     runtime->state = MOTOR_CONTROL_FAULT_LATCHED;
     runtime->command_valid = false;
     runtime->reauthorization_required = true;

@@ -4,6 +4,8 @@
 /log/
 /.vscode/
 /.worktrees/
+# micro_ros_firmware 本地 CMake host 测试产物。
+/micro_ros_firmware/.host-build/
 # micro-ROS Agent 独立工作区的构建产物。
 micro_ros_agent/build/
 micro_ros_agent/install/

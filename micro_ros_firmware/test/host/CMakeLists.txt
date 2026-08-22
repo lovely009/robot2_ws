@@ -48,3 +48,12 @@ target_include_directories(test_can_rx_ring PRIVATE
   ../../lib/fdcan/include)
 
 add_test(NAME can_rx_ring COMMAND test_can_rx_ring)
+
+add_executable(test_imu_snapshot
+  test_imu_snapshot.cpp
+  ../../lib/imu/src/imu_snapshot.c)
+
+target_include_directories(test_imu_snapshot PRIVATE
+  ../../lib/imu/include)
+
+add_test(NAME imu_snapshot COMMAND test_imu_snapshot)

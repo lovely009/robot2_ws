@@ -15,16 +15,28 @@ static float g_quat[4];
 static float g_angle[3];
 static volatile bool g_ready = false;
 
-void imu_init(void) {
-  // 首轮调用会完成 POWER_5V/CS/SPI2/DMA 初始化；传感器未就绪时每 100ms 重试。
-  // BMI088_delay_ms 内部使用 vTaskDelay，因此本函数只能在调度器启动后调用。
-  while (BMI088_init() != BMI088_NO_ERROR) {
-    BMI088_delay_ms(100);
+static void reset_attitude_state(void) {
+  for (int i = 0; i < 3; ++i) {
+    g_gyro[i] = 0.0f;
+    g_accel[i] = 0.0f;
+    g_angle[i] = 0.0f;
   }
-
+  g_temp = 0.0f;
   g_quat[0] = 1.0f;
   g_quat[1] = g_quat[2] = g_quat[3] = 0.0f;
+}
+
+bool imu_try_init(void) {
+  // BMI088_delay_ms 内部使用 vTaskDelay，因此本函数只能在调度器启动后调用。
+  // 每次调用只尝试一次，重试节奏由 sensor_task 管理。
+  g_ready = false;
+  if (BMI088_init() != BMI088_NO_ERROR) {
+    return false;
+  }
+
+  reset_attitude_state();
   g_ready = true;
+  return true;
 }
 
 void imu_update(void) {

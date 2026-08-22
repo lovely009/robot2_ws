@@ -6,6 +6,9 @@
 #define SENSOR_TASK_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+#include "imu.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +19,13 @@ bool sensor_task_start(void);
 
 // 强制停止加热（官方 TempCtrl forceStop 语义；true 时 PID 输出置 0）
 void imu_set_force_stop(bool stop);
+
+// 原子复制最新的完整 IMU 快照；尚无有效样本时返回 false。
+bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence);
+
+// BMI088 初始化诊断：失败次数与当前健康状态。
+uint32_t sensor_task_get_imu_init_error_count(void);
+bool sensor_task_imu_healthy(void);
 
 #ifdef __cplusplus
 }

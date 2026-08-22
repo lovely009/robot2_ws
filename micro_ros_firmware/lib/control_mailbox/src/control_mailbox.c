@@ -158,7 +158,8 @@ bool control_mailbox_submit_debug_frame(
     control_mailbox_t *mailbox, const motor_control_tx_action_t *frame) {
   if (mailbox == NULL || frame == NULL ||
       frame->bus_index >= MOTOR_CONTROL_MAX_BUSES ||
-      !is_supported_frame_size(frame->size)) {
+      !is_supported_frame_size(frame->size) ||
+      (!frame->is_fd && frame->size > 8U)) {
     if (mailbox != NULL) {
       ++mailbox->invalid_debug_frame_count;
     }

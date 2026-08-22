@@ -110,7 +110,7 @@ static void test_disconnect_reconnect_edge_requires_reauthorization() {
   assert(control_mailbox_submit_command(&mailbox, &command, 12U));
 }
 
-static void test_debug_frame_overwrites_and_validates_dlc() {
+static void test_debug_frame_overwrites_and_validates_format_dlc() {
   control_mailbox_t mailbox{};
   control_mailbox_init(&mailbox, kMotors, 2);
   motor_control_tx_action_t frame{};
@@ -121,15 +121,32 @@ static void test_debug_frame_overwrites_and_validates_dlc() {
   assert(mailbox.invalid_debug_frame_count == 1U);
 
   frame.size = 8U;
+  frame.is_fd = false;
   frame.data[0] = 1U;
   assert(control_mailbox_submit_debug_frame(&mailbox, &frame));
+
+  frame.size = 12U;
   frame.data[0] = 2U;
-  assert(control_mailbox_submit_debug_frame(&mailbox, &frame));
-  assert(mailbox.debug_overwrite_count == 1U);
+  assert(!control_mailbox_submit_debug_frame(&mailbox, &frame));
+  assert(mailbox.invalid_debug_frame_count == 2U);
 
   motor_control_tx_action_t out{};
   uint32_t sequence = 0;
   assert(control_mailbox_take_debug_frame(&mailbox, &out, &sequence));
+  assert(!out.is_fd);
+  assert(out.size == 8U);
+  assert(out.data[0] == 1U);
+
+  frame.is_fd = true;
+  assert(control_mailbox_submit_debug_frame(&mailbox, &frame));
+  frame.size = 8U;
+  frame.data[0] = 2U;
+  assert(control_mailbox_submit_debug_frame(&mailbox, &frame));
+  assert(mailbox.debug_overwrite_count == 1U);
+
+  assert(control_mailbox_take_debug_frame(&mailbox, &out, &sequence));
+  assert(out.is_fd);
+  assert(out.size == 8U);
   assert(out.data[0] == 2U);
   assert(sequence > 0U);
   assert(!control_mailbox_take_debug_frame(&mailbox, &out, &sequence));
@@ -140,6 +157,6 @@ int main() {
   test_invalid_joint_does_not_block_later_valid_joint();
   test_disable_enable_edge_discards_old_command();
   test_disconnect_reconnect_edge_requires_reauthorization();
-  test_debug_frame_overwrites_and_validates_dlc();
+  test_debug_frame_overwrites_and_validates_format_dlc();
   return 0;
 }

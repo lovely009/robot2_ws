@@ -29,3 +29,14 @@ target_include_directories(test_motor_control PRIVATE
 target_link_libraries(test_motor_control PRIVATE m)
 
 add_test(NAME motor_control COMMAND test_motor_control)
+
+add_executable(test_control_mailbox
+  test_control_mailbox.cpp
+  ../../lib/control_mailbox/src/control_mailbox.c)
+
+target_include_directories(test_control_mailbox PRIVATE
+  ../../lib/control_mailbox/include
+  ../../lib/motor_control/include
+  ../../lib/motor_protocol/include)
+
+add_test(NAME control_mailbox COMMAND test_control_mailbox)

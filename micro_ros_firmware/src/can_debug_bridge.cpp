@@ -1,8 +1,8 @@
 // CAN1 调试桥接实现。
 //
 // 职责：把 FDCAN1 接收帧发布到 micro_ros/can1/receive，并把
-// micro_ros/can1/send 的订阅帧写入 FDCAN1 TX FIFO。接收帧统一通过
-// can1_rx_snapshot() 获取，不直接访问 can_bsp 内部缓冲。
+// micro_ros/can1/send 的订阅帧覆盖到 control task debug mailbox。接收帧
+// 统一通过 can1_rx_snapshot() 获取，不直接访问 can_bsp 内部缓冲。
 
 #include "can_debug_bridge.h"
 
@@ -15,6 +15,7 @@
 #include <can_bridge_msgs/msg/can_frame.h>
 
 #include "can_bsp.h"
+#include "control_task.h"
 
 #if defined(ENABLE_CAN1_DEBUG_BRIDGE) && ENABLE_CAN1_DEBUG_BRIDGE
 
@@ -47,12 +48,23 @@ static void fill_can1_rx_msg(const can_rx_frame_t *frame) {
   g_can1_rx_msg.is_fd = frame->is_fd;
 }
 
-// 收到 ROS 侧 CANFrame 后写入 FDCAN1 TX FIFO（micro-ROS 任务上下文，可阻塞）
+// ROS 回调只做有界复制并覆盖 debug mailbox；control task 每 10 ms 最多发送一帧。
 static void can1_tx_sub_cb(const void *msg) {
   const can_bridge_msgs__msg__CANFrame *frame =
       (const can_bridge_msgs__msg__CANFrame *)msg;
-  fdcanx_send_frame(&hfdcan1, frame->id, frame->data, frame->dlc,
-                    frame->is_extended, frame->is_fd);
+  if (frame == nullptr) {
+    return;
+  }
+  motor_control_tx_action_t action = {};
+  action.bus_index = 0U;
+  action.can_id = frame->id;
+  action.size = frame->dlc;
+  action.is_extended = frame->is_extended;
+  action.is_fd = frame->is_fd;
+  if (frame->dlc <= sizeof(action.data)) {
+    memcpy(action.data, frame->data, frame->dlc);
+  }
+  (void)control_task_submit_debug_frame(&action);
 }
 
 bool can_debug_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {

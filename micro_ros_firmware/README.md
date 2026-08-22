@@ -61,7 +61,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`control` 后自删除 |
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，断连自动重建；状态灯红/绿闪/蓝 |
 | `sensor` | 4 | 1024 | 500ms 延时 → 加热 PWM → BMI088 初始化 → EXTI 信号量 → 读取/Mahony/PID；后续传感器扩展点 |
-| `control` | 3 | 1024 | 500ms 延时 → FDCAN1/2/3 初始化；JointState 编码下发；官方 0x520 测试帧默认关闭（宏开启） |
+| `control` | 3 | 1024 | 500ms 延时 → FDCAN1/2/3 初始化；100Hz 统一消费命令/debug mailbox 并发送；官方 0x520 测试帧默认关闭（宏开启） |
 
 ## 代码组织
 
@@ -71,17 +71,19 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 |---|---|
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
 | `imu_bridge` | `micro_ros/imu/data` 与 `micro_ros/imu/temp` 的缓冲/填充/发布 |
-| `can_debug_bridge` | `micro_ros/can1/send` 订阅与 `micro_ros/can1/receive` 发布（宏控制） |
+| `can_debug_bridge` | `micro_ros/can1/send` 校验/入 mailbox 与 `micro_ros/can1/receive` 发布（宏控制） |
 | `motor_bridge` | `/joint_commands` 订阅展开 + `micro_ros/JointState` 反馈发布（宏控制） |
 | `control_task` | 电机表、RP/vaxor 协议收发与反馈解码，不接触 ROS |
 | `lib/fdcan` | FDCAN 初始化/收发/中断回调，通过 `can1_rx_snapshot()` 对外提供最新帧 |
 | `lib/imu` | BMI088 驱动/通信层/Mahony/SI 聚合（依赖 `lib/dma`） |
 | `lib/motor_protocol` | RP/vaxor 协议编解码（纯逻辑） |
+| `lib/control_mailbox` | 固定容量命令/debug overwrite mailbox 与连接/授权边沿锁存（纯逻辑） |
 | `lib/ws2812` | 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7） |
 | `lib/dma` | 板级 DMA 初始化（当前 SPI2 专用）与中断转发 |
 
-数据流：FDCAN1 中断写快照 → `ros_bridge` 定时器轮询各域桥 → 域桥经
-`can1_rx_snapshot()` 取帧并发布/解码；ROS 命令经域桥回调下发给 `control_task`。
+数据流：FDCAN1 中断写快照 → control task 解码最新电机状态 / `ros_bridge`
+定时器发布各域快照；ROS 电机命令与 CAN debug TX 只由域桥回调覆盖 mailbox，
+control task 是正常 FDCAN 发送的唯一任务上下文。
 
 ## 目录结构
 
@@ -90,6 +92,9 @@ micro_ros_firmware/
 ├── platformio.ini             # arduino/humble/serial+USB CDC；FDCAN HAL 构建宏
 ├── boards/
 │   └── stm32h723vgt6.json     # 自定义板卡定义（变体/宏/USB VID-PID/烧录协议）
+├── extra_packages/
+│   └── can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs
+│                               # micro-ROS 构建复用同仓库权威消息定义
 ├── include/                   # 应用层头文件（任务/ROS 桥）
 │   ├── ros_bridge.h           # micro-ROS 生命周期与域桥编排接口
 │   ├── imu_bridge.h           # IMU/温度域 ROS 桥接接口
@@ -101,6 +106,7 @@ micro_ros_firmware/
 │   ├── imu/                   # BMI088 驱动 + 通信层 + Mahony + SI 聚合（依赖 dma）
 │   ├── dma/                   # 板级 DMA：SPI2 配置 + HAL_SPI_MspInit/IRQ 转发
 │   ├── fdcan/                 # 三路 FDCAN 初始化/收发/中断回调/接收快照
+│   ├── control_mailbox/       # 固定容量 mailbox 与边沿锁存（host 可测）
 │   ├── motor_protocol/        # RP/vaxor 协议编解码（纯逻辑）
 │   └── ws2812/                # WS2812 彩灯驱动（SPI6 MOSI=PA7）
 └── src/
@@ -161,7 +167,9 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 宏 `ENABLE_CAN1_DEBUG_BRIDGE=1` 开启时，额外提供 FDCAN1 调试桥
 （`can_bridge_msgs/msg/CANFrame`，与 `micro_ros_agent` 同一定义）：
 
-- `micro_ros/can1/send`：订阅；收到一帧即经 FDCAN1 发出（ROS → CAN）
+- `micro_ros/can1/send`：订阅；合法 DLC 帧覆盖单槽 mailbox，control task 每
+  10ms 最多发送一帧（latest-wins）。连续覆盖、拒绝和成功发送可通过
+  `g_control_debug_{overwrite,rejected,sent}_count` 观察；断连丢弃未发送帧。
 - `micro_ros/can1/receive`：发布；FDCAN1 中断收到的帧定时上报（CAN → ROS）
 
 ## 已知问题与后续

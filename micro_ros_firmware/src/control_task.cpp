@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "can_bsp.h"
+#include "control_mailbox.h"
 #include "motor_protocol.h"
 
 #if !defined(ENABLE_CANFD_DEMO_LOOP)
@@ -44,105 +45,72 @@ static FDCAN_HandleTypeDef *const kCanHandles[] = {
 static const size_t kCanHandleCount =
     sizeof(kCanHandles) / sizeof(kCanHandles[0]);
 
-typedef struct {
-  motor_control_command_t command;
-  uint32_t received_ms;
-  uint32_t sequence;
-  bool pending;
-} command_mailbox_t;
-
 static motor_control_context_t g_motor_control;
-static command_mailbox_t g_command_mailboxes[kDefaultMotorCount];
+static control_mailbox_t g_control_mailbox;
 static control_joint_state_t g_joint_states[kDefaultMotorCount];
 static bool g_joint_state_valid[kDefaultMotorCount];
-static uint32_t g_command_sequence = 0;
 static uint32_t g_last_can1_rx_sequence = 0;
 
 // ROS/link 任务只覆盖请求；motor_control_context_t 始终由 control task 修改。
-static bool g_authorization_requested = true;
-static bool g_authorization_pending = false;
-static bool g_authorization_disable_pending = false;
-static bool g_agent_state_seen = false;
-static bool g_agent_connected_requested = false;
-static bool g_agent_state_pending = false;
-static bool g_agent_disconnect_pending = false;
+static bool g_mailbox_initialized = false;
 static bool g_task_started = false;
 
 volatile uint32_t g_control_motor_cmd_count = 0;
 volatile uint32_t g_control_motor_found_count = 0;
+volatile uint32_t g_control_debug_submit_count = 0;
+volatile uint32_t g_control_debug_overwrite_count = 0;
+volatile uint32_t g_control_debug_rejected_count = 0;
+volatile uint32_t g_control_debug_sent_count = 0;
 static volatile uint32_t g_control_tx_ok_count = 0;
 static volatile uint32_t g_control_tx_error_count = 0;
 
-static int find_motor_index(const char *joint_name) {
-  for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    if (strcmp(kDefaultMotors[index].joint_name, joint_name) == 0) {
-      return (int)index;
-    }
-  }
-  return -1;
-}
-
-static void clear_pending_commands_locked() {
-  for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    g_command_mailboxes[index].pending = false;
+static void ensure_mailbox_initialized_locked() {
+  if (!g_mailbox_initialized) {
+    control_mailbox_init(&g_control_mailbox, kDefaultMotors,
+                         kDefaultMotorCount);
+    g_mailbox_initialized = true;
   }
 }
 
 bool control_task_submit_command(const motor_control_command_t *command,
                                  uint32_t received_ms) {
-  ++g_control_motor_cmd_count;
-  if (command == nullptr || command->joint_name[0] == '\0' ||
-      memchr(command->joint_name, '\0', sizeof(command->joint_name)) ==
-          nullptr) {
-    return false;
-  }
-  int index = find_motor_index(command->joint_name);
-  if (index < 0) {
-    return false;
-  }
-
   taskENTER_CRITICAL();
-  // 禁用/断连期间不积压命令，保证重新授权后必须收到新命令。
-  bool accepting = g_authorization_requested &&
-                   (!g_agent_state_seen || g_agent_connected_requested);
-  if (accepting) {
-    command_mailbox_t *mailbox = &g_command_mailboxes[index];
-    mailbox->command = *command;
-    mailbox->received_ms = received_ms;
-    mailbox->sequence = ++g_command_sequence;
-    mailbox->pending = true;
+  ensure_mailbox_initialized_locked();
+  ++g_control_motor_cmd_count;
+  bool accepted = control_mailbox_submit_command(
+      &g_control_mailbox, command, received_ms);
+  if (accepted) {
     ++g_control_motor_found_count;
   }
   taskEXIT_CRITICAL();
-  return accepting;
+  return accepted;
+}
+
+bool control_task_submit_debug_frame(const motor_control_tx_action_t *frame) {
+  taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
+  bool accepted =
+      control_mailbox_submit_debug_frame(&g_control_mailbox, frame);
+  g_control_debug_submit_count = g_control_mailbox.debug_submit_count;
+  g_control_debug_overwrite_count = g_control_mailbox.debug_overwrite_count;
+  if (!accepted) {
+    ++g_control_debug_rejected_count;
+  }
+  taskEXIT_CRITICAL();
+  return accepted;
 }
 
 void control_task_set_authorization(bool authorized) {
   taskENTER_CRITICAL();
-  g_authorization_requested = authorized;
-  g_authorization_pending = true;
-  if (!authorized) {
-    g_authorization_disable_pending = true;
-    clear_pending_commands_locked();
-  }
+  ensure_mailbox_initialized_locked();
+  control_mailbox_request_authorization(&g_control_mailbox, authorized);
   taskEXIT_CRITICAL();
 }
 
 void control_task_set_agent_connected(bool connected) {
   taskENTER_CRITICAL();
-  bool disconnected_after_connection =
-      !connected && g_agent_state_seen && g_agent_connected_requested;
-  g_agent_state_seen = true;
-  g_agent_connected_requested = connected;
-  g_agent_state_pending = true;
-  if (!connected) {
-    g_agent_disconnect_pending = true;
-    clear_pending_commands_locked();
-    if (disconnected_after_connection) {
-      // 与 motor_control 断连语义对齐：重连后必须显式重新授权。
-      g_authorization_requested = false;
-    }
-  }
+  ensure_mailbox_initialized_locked();
+  control_mailbox_request_agent_connected(&g_control_mailbox, connected);
   taskEXIT_CRITICAL();
 }
 
@@ -160,50 +128,37 @@ bool control_task_get_joint_state(size_t index, control_joint_state_t *out) {
 }
 
 static void drain_control_requests() {
-  bool authorization_requested;
-  bool authorization_pending;
-  bool authorization_disable_pending;
-  bool agent_connected_requested;
-  bool agent_state_pending;
-  bool agent_disconnect_pending;
+  control_mailbox_events_t events = {};
 
   taskENTER_CRITICAL();
-  authorization_requested = g_authorization_requested;
-  authorization_pending = g_authorization_pending;
-  authorization_disable_pending = g_authorization_disable_pending;
-  agent_connected_requested = g_agent_connected_requested;
-  agent_state_pending = g_agent_state_pending;
-  agent_disconnect_pending = g_agent_disconnect_pending;
-  g_authorization_pending = false;
-  g_authorization_disable_pending = false;
-  g_agent_state_pending = false;
-  g_agent_disconnect_pending = false;
+  ensure_mailbox_initialized_locked();
+  (void)control_mailbox_take_events(&g_control_mailbox, &events);
   taskEXIT_CRITICAL();
 
   // 快速 false->true 转换也必须先执行失效动作，不能遗漏断连/禁用边沿。
-  if (agent_disconnect_pending) {
+  if (events.agent_disconnect_edge) {
     motor_control_set_agent_connected(&g_motor_control, false);
   }
-  if (agent_state_pending && agent_connected_requested) {
+  if (events.agent_state_pending && events.agent_connected_requested) {
     motor_control_set_agent_connected(&g_motor_control, true);
   }
-  if (authorization_disable_pending) {
+  if (events.authorization_disable_edge) {
     (void)motor_control_set_authorization(&g_motor_control, false);
   }
-  if (authorization_pending && authorization_requested) {
+  if (events.authorization_pending && events.authorization_requested) {
     (void)motor_control_set_authorization(&g_motor_control, true);
   }
 }
 
 static void drain_command_mailboxes() {
-  command_mailbox_t pending[kDefaultMotorCount] = {};
+  control_mailbox_command_slot_t pending[kDefaultMotorCount] = {};
 
   taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
   for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    if (g_command_mailboxes[index].pending) {
-      pending[index] = g_command_mailboxes[index];
-      g_command_mailboxes[index].pending = false;
-    }
+    pending[index].pending = control_mailbox_take_command(
+        &g_control_mailbox, index, &pending[index].command,
+        &pending[index].received_ms, &pending[index].sequence);
   }
   taskEXIT_CRITICAL();
 
@@ -276,8 +231,9 @@ static void drain_can_rx_snapshot() {
   taskEXIT_CRITICAL();
 }
 
-static void apply_tx_actions(const motor_control_tx_action_t *actions,
-                             size_t action_count) {
+static size_t apply_tx_actions(const motor_control_tx_action_t *actions,
+                               size_t action_count) {
+  size_t success_count = 0;
   for (size_t index = 0; index < action_count; ++index) {
     const motor_control_tx_action_t *action = &actions[index];
     if (action->bus_index >= kCanHandleCount || action->size > 64U) {
@@ -289,17 +245,31 @@ static void apply_tx_actions(const motor_control_tx_action_t *actions,
         action->size, action->is_extended, action->is_fd);
     if (rc == 0U) {
       ++g_control_tx_ok_count;
+      ++success_count;
     } else {
       ++g_control_tx_error_count;
     }
   }
+  return success_count;
 }
 
 static void run_motor_control_cycle(uint32_t now_ms) {
   motor_control_tx_action_t actions[MOTOR_CONTROL_MAX_TX_ACTIONS] = {};
   size_t action_count = motor_control_step(
       &g_motor_control, now_ms, actions, MOTOR_CONTROL_MAX_TX_ACTIONS);
-  apply_tx_actions(actions, action_count);
+  (void)apply_tx_actions(actions, action_count);
+}
+
+static void run_debug_tx_cycle() {
+  motor_control_tx_action_t frame = {};
+  taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
+  bool pending = control_mailbox_take_debug_frame(
+      &g_control_mailbox, &frame, nullptr);
+  taskEXIT_CRITICAL();
+  if (pending) {
+    g_control_debug_sent_count += apply_tx_actions(&frame, 1U);
+  }
 }
 
 #if ENABLE_CANFD_DEMO_LOOP
@@ -335,6 +305,7 @@ static void control_task_fn(void *arg) {
     drain_command_mailboxes();
     drain_can_rx_snapshot();
     run_motor_control_cycle(millis());
+    run_debug_tx_cycle();
 #if ENABLE_CANFD_DEMO_LOOP
     run_canfd_demo_cycle();
 #endif
@@ -344,6 +315,7 @@ static void control_task_fn(void *arg) {
 
 bool control_task_start(void) {
   taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
   if (g_task_started) {
     taskEXIT_CRITICAL();
     return true;

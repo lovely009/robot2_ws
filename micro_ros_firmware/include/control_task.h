@@ -23,6 +23,9 @@ bool control_task_start(void);
 bool control_task_submit_command(const motor_control_command_t *command,
                                  uint32_t received_ms);
 
+// 覆盖单槽 debug CAN mailbox；control task 每周期最多消费一帧。
+bool control_task_submit_debug_frame(const motor_control_tx_action_t *frame);
+
 // 请求控制内核改变人工授权；false 立即使旧命令失效，true 仅清除已消失的
 // 可恢复故障，不会重放旧命令。
 void control_task_set_authorization(bool authorized);
@@ -44,6 +47,10 @@ bool control_task_get_joint_state(size_t index, control_joint_state_t *out);
 // 调试计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
 extern volatile uint32_t g_control_motor_cmd_count;
 extern volatile uint32_t g_control_motor_found_count;
+extern volatile uint32_t g_control_debug_submit_count;
+extern volatile uint32_t g_control_debug_overwrite_count;
+extern volatile uint32_t g_control_debug_rejected_count;
+extern volatile uint32_t g_control_debug_sent_count;
 
 #ifdef __cplusplus
 }

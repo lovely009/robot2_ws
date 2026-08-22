@@ -1,16 +1,13 @@
-// micro-ROS 桥接层接口（IMU/温度发布）
+// micro-ROS 桥接层接口（agent 通信生命周期）。
 //
-// 职责：node/executor 生命周期管理。main.cpp 只负责 FreeRTOS 任务编排与
-// 串口初始化，本模块封装全部 ROS 实体。
-//
-// 注释规范：中文写意图，micro-ROS / ROS 2 API 保留英文。
+// 职责：node/executor/timer 生命周期与断连重建。main.cpp 只负责 FreeRTOS
+// 任务编排与串口初始化；各业务域的 ROS 实体在 imu_bridge、can_debug_bridge、
+// motor_bridge 中分别维护，本模块按固定顺序编排创建/销毁与定时轮询。
 
 #ifndef ROS_BRIDGE_H
 #define ROS_BRIDGE_H
 
-#include <stdint.h>
 #include <stdbool.h>
-#include "imu.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,13 +21,6 @@ void ros_bridge_destroy(void);
 
 // 周期处理：executor（心跳定时器）
 void ros_bridge_spin(void);
-
-// 发布 IMU 数据（sensor_msgs/Imu + std_msgs/Float32 温度）
-// agent 未连接或实体未建立时静默跳过。
-void ros_bridge_publish_imu(const imu_data_t *data);
-
-// 设置最新 IMU 样本源；定时器会周期读取并发布（在 app 任务更新后调用一次）
-void ros_bridge_set_imu_source(const imu_data_t *src);
 
 #ifdef __cplusplus
 }

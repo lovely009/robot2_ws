@@ -2,7 +2,7 @@
 //
 // 任务编排：
 //   - systemInit() 统一完成板级硬件初始化（时钟/USB/状态灯）；
-//   - start_task 创建 micro_ros 收发任务与 imu 业务任务；
+//   - start_task 创建 micro_ros / sensor / control 三个业务任务；
 //   - vTaskStartScheduler() 接管调度后永不返回，loop() 仅作 Arduino 占位。
 //
 // 状态灯语义：上电红灯；micro-ROS 连接成功后绿灯 1Hz 闪烁；断连后蓝灯。
@@ -123,7 +123,7 @@ static void micro_ros_task(void *arg) {
   }
 }
 
-// 编排任务：micro-ROS 与 IMU 任务相互独立，均在调度器启动后创建。
+// 编排任务：micro-ROS 收发、传感器与控制任务相互独立，均在调度器启动后创建。
 static void start_task(void *arg) {
   (void)arg;
 

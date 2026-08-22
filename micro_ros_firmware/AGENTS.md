@@ -24,11 +24,11 @@ cd micro_ros_firmware
 - `STM32FreeRTOS`：调度器接管 SysTick；micro-ROS 与 IMU 都是独立任务。
 - USB 引脚 **PA11=USB_DM / PA12=USB_DP**；状态 LED 是 **WS2812**（SPI6 MOSI=PA7）。
 - 节点名 `micro_ros_node`，话题 `micro_ros/imu/data`、`micro_ros/imu/temp`
-  （在 `ros_bridge.cpp` 顶部）。
+  （在 `src/imu_bridge.cpp` 顶部）。
 - CAN1 调试桥话题 `micro_ros/can1/send` / `micro_ros/can1/receive` 由
   `ENABLE_CAN1_DEBUG_BRIDGE` 宏控制（`platformio.ini` 默认开启，类型
   `can_bridge_msgs/msg/CANFrame`）。
-- JointState 话题 `micro_ros/motor_command`（`sensor_msgs/msg/JointState`）由
+- JointState 话题 `/joint_commands`（`sensor_msgs/msg/JointState`）由
   `ENABLE_MOTOR_COMMAND_BRIDGE` 控制（默认开启）；固件只内置
   `left_shoulder_yaw_joint`（RP）与 `left_wrist_yaw_joint`（vaxor，节点
   ID=2，当前 CAN1 实际接入）两个默认测试电机，完整拓扑待参数服务。
@@ -47,7 +47,7 @@ cd micro_ros_firmware
   ACC_INT，不要手写 `HAL_GPIO_EXTI_Callback`/`EXTI15_10_IRQHandler`。
 - **TIM3 用 HardwareTimer**：`sensor_task.cpp` 里 `HardwareTimer` 封装 PWM，
   不要再手写 `TIM_HandleTypeDef` 初始化。
-- **DMA 保留但未用于收发**：`src/dma.c` 配置 DMA1_Stream0/1 并链接 SPI2，
+- **DMA 保留但未用于收发**：`lib/dma/src/dma.c` 配置 DMA1_Stream0/1 并链接 SPI2，
   BMI088 仍走阻塞 `HAL_SPI_TransmitReceive`（与官方一致）；改 DMA 传输时
   必须给 IMU 任务补唤醒语义。
 - **USB CDC 宏**：H723 只有 `USB_OTG_HS`，必须保留两个
@@ -74,25 +74,32 @@ cd micro_ros_firmware
 - `platformio.ini`：构建配置（USB CDC 宏 + `HAL_FDCAN_MODULE_ENABLED`）
 - `boards/stm32h723vgt6.json`：变体/`variant_h`/`-DARDUINO_GENERIC_H723VGTX`/VID-PID
 - `src/main.cpp`：`systemInit` + `start_task`（创建 `micro_ros`/`sensor`/`control`）
-- `src/ros_bridge.cpp`：node/publisher/timer，发布 IMU 最新样本
+- `src/ros_bridge.cpp`：node/executor/timer 生命周期，编排各域桥
+- `src/imu_bridge.cpp`：IMU/温度发布（`micro_ros/imu/data`、`micro_ros/imu/temp`）
+- `src/can_debug_bridge.cpp`：CAN1 调试桥（`micro_ros/can1/send`/`receive`）
+- `src/motor_bridge.cpp`：电机命令/反馈桥（`/joint_commands`、`micro_ros/JointState`）
 - `src/sensor_task.cpp`：传感器任务（EXTI/信号量/温度 PID/加热 PWM）
 - `src/control_task.cpp`：控制任务（三路 FDCAN 初始化；官方测试帧默认关闭，
   由 `ENABLE_CANFD_DEMO_LOOP` 宏开启；JointState → 默认测试电机协议帧）
-- `src/imu.c`：BMI088 读取 + Mahony + SI 换算
-- `src/bmi088_*`：BMI088 驱动与 SPI2 通信层（官方例程移植）
-- `src/fdcan.c`：FDCAN 初始化 + MspInit/DeInit + IRQ 转发（官方例程移植）
-- `src/can_bsp.c`：FDCAN 过滤/启动/收发/中断回调（官方例程移植）
-- `src/motor_protocol.c`：电机协议编解码（RP/25-30mm，ros2_ws
+- `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
+- `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（依赖 `lib/dma`）
+- `lib/dma`：DMA1 配置 + `HAL_SPI_MspInit` + DMA IRQ 转发（当前 SPI2 专用）
+- `lib/fdcan`：FDCAN 初始化/过滤/收发/中断回调/接收快照（官方例程移植）
+- `lib/motor_protocol`：电机协议编解码（RP/25-30mm，ros2_ws
   `motor_drive/protocol.cpp` 移植；同一文件内分 RP/vaxor 两部分，
   `-fno-exceptions` 下异常改返回值）
-- `src/dma.c`：DMA1 配置 + `HAL_SPI_MspInit` + DMA IRQ 转发
-- `src/ws2812.c`：板载状态灯（SPI6 MOSI=PA7）
-- `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
+- `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
+
+`src/` 只放任务编排与 ROS 桥；硬件驱动/协议库在 `lib/`，PlatformIO 会自动
+发现并链接。`lib/imu` 依赖 `lib/dma`（见 `lib/imu/library.json`），新增跨库
+依赖时同步补 `library.json`。
 
 ## 代码规范
 
 - C++17 + C（STM32duino HAL）混合；2 空格缩进；snake_case（文件/函数/变量）、
   PascalCase（类）、`k` 前缀常量。
 - 中文注释写意图（数据流/单位/安全边界）；micro-ROS / ROS 2 API 保留英文。
-- 硬件映射集中：引脚/话题/节点名在 `main.cpp` 或 `ros_bridge.cpp`/
-  `sensor_task.cpp` 顶部常量，不散落。
+- 硬件映射集中：引脚/话题/节点名在 `main.cpp` 或各域桥/任务文件顶部常量，
+  不散落。
+- 业务域桥只通过 `can1_rx_snapshot()` 取 CAN1 帧，不直接访问 `can_bsp`
+  内部缓冲；新增 CAN 消费方时沿用“记序号、比变化”的轮询模式。

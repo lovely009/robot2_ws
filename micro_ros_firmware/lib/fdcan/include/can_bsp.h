@@ -1,5 +1,6 @@
 // FDCAN 板级收发接口（官方 CtrBoard-H7_FDCAN 例程 bsp_fdcan.c 移植）。
-// 发送支持标准 ID 的 FD 帧（BRS），接收经中断回调落到静态缓冲区。
+// 发送支持标准 ID 的 FD 帧（BRS），接收经中断回调落到模块内静态缓冲区；
+// 业务层通过 can1_rx_snapshot() 取最新帧，不直接触碰裸全局变量。
 
 #ifndef CAN_BSP_H
 #define CAN_BSP_H
@@ -11,13 +12,14 @@
 
 #define hcan_t FDCAN_HandleTypeDef
 
-// CAN1 最近一帧接收元数据（供 micro-ROS 调试桥轮询；数据仍在 rx_data1）
+// CAN1 最近一帧接收快照（中断写入，业务任务轮询读取）
 typedef struct {
   uint32_t id;
   uint8_t dlc;
   bool is_extended;
   bool is_fd;
-} can_rx_meta_t;
+  uint8_t data[64];
+} can_rx_frame_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,21 +42,12 @@ uint8_t fdcanx_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf);
 uint8_t fdcanx_receive_frame(hcan_t *hfdcan, uint32_t *rec_id, uint8_t *buf,
                              bool *is_extended, bool *is_fd);
 
-// 中断回调内读取，供业务轮询 rx_data1/2/3
-void fdcan1_rx_callback(void);
-void fdcan2_rx_callback(void);
-void fdcan3_rx_callback(void);
+// 取 CAN1 最新接收帧快照；返回自增序号，调用方记录上次序号以判断新帧。
+// 在中断内复制，可安全地从任务上下文调用。
+uint32_t can1_rx_snapshot(can_rx_frame_t *out);
 
-// CAN1 调试桥：回调自增计数器，micro-ROS 定时器按计数变化消费最新帧
+// 调试计数：CAN1 接收帧总数（GDB 可读）
 extern volatile uint32_t can1_rx_counter;
-extern can_rx_meta_t can1_rx_meta;
-
-extern uint8_t rx_data1[64];
-extern uint8_t rx_data2[64];
-extern uint8_t rx_data3[64];
-extern uint16_t rec_id1;
-extern uint16_t rec_id2;
-extern uint16_t rec_id3;
 
 #ifdef __cplusplus
 }

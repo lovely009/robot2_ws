@@ -134,29 +134,41 @@ uint8_t fdcanx_receive_frame(hcan_t *hfdcan, uint32_t *rec_id, uint8_t *buf,
   return (uint8_t)fdcan_dlc_to_bytes(rx.DataLength);
 }
 
-uint8_t rx_data1[64] = {0};
-uint8_t rx_data2[64] = {0};
-uint8_t rx_data3[64] = {0};
-uint16_t rec_id1 = 0;
-uint16_t rec_id2 = 0;
-uint16_t rec_id3 = 0;
-volatile uint32_t can1_rx_counter = 0;
-can_rx_meta_t can1_rx_meta = {0};
+// CAN2/3 暂未接入业务，保留最近一帧即可
+static uint8_t rx_data2[64] = {0};
+static uint8_t rx_data3[64] = {0};
+static uint16_t rec_id2 = 0;
+static uint16_t rec_id3 = 0;
 
-void fdcan1_rx_callback(void) {
-  // CAN1 调试桥：保留完整帧元数据，置位后由 micro-ROS 定时器消费
-  can1_rx_meta.dlc =
-      fdcanx_receive_frame(&hfdcan1, &can1_rx_meta.id, rx_data1,
-                           &can1_rx_meta.is_extended, &can1_rx_meta.is_fd);
+// CAN1 最近一帧快照：中断写入，can1_rx_snapshot() 在任务侧读取
+static can_rx_frame_t g_can1_frame = {0};
+volatile uint32_t can1_rx_counter = 0;
+
+static void fdcan1_rx_callback(void) {
+  g_can1_frame.dlc =
+      fdcanx_receive_frame(&hfdcan1, &g_can1_frame.id, g_can1_frame.data,
+                           &g_can1_frame.is_extended, &g_can1_frame.is_fd);
   can1_rx_counter++;
 }
 
-void fdcan2_rx_callback(void) {
+static void fdcan2_rx_callback(void) {
   fdcanx_receive(&hfdcan2, &rec_id2, rx_data2);
 }
 
-void fdcan3_rx_callback(void) {
+static void fdcan3_rx_callback(void) {
   fdcanx_receive(&hfdcan3, &rec_id3, rx_data3);
+}
+
+uint32_t can1_rx_snapshot(can_rx_frame_t *out) {
+  // 关中断保证 64B 数据与元数据/序号一致；调用方是任务上下文，开销可接受
+  uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  uint32_t seq = can1_rx_counter;
+  if (out != NULL) {
+    *out = g_can1_frame;
+  }
+  __set_PRIMASK(primask);
+  return seq;
 }
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs) {

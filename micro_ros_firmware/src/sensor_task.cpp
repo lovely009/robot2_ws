@@ -12,7 +12,7 @@
 #include <HardwareTimer.h>
 
 #include "imu.h"
-#include "ros_bridge.h"
+#include "imu_bridge.h"
 
 // 任务参数：栈 1024 字（4KB），优先级高于 micro_ros 收发任务
 static const uint32_t kSensorTaskStack = 1024;
@@ -93,7 +93,7 @@ static void sensor_task_fn(void *arg) {
   attachInterrupt(PE12, gyro_isr, RISING);
 
   // 供 micro-ROS 定时器读取最新样本；agent 未连接时静默跳过发布
-  ros_bridge_set_imu_source(&g_imu_shared);
+  imu_bridge_set_source(&g_imu_shared);
 
   while (1) {
     if (xSemaphoreTake(g_imu_sem, portMAX_DELAY) == pdTRUE && imu_ready()) {

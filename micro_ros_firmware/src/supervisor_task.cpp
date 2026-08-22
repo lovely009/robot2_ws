@@ -12,8 +12,8 @@ static const uint32_t kSupervisorTaskStack = 512U;
 static const UBaseType_t kSupervisorTaskPrio = 1U;
 static const uint32_t kSupervisorPeriodMs = 100U;
 
-// control 正常周期 10 ms；750 ms 仍能容忍启动延时和开发态的短暂调度抖动。
-static const uint32_t kControlHeartbeatTimeoutMs = 750U;
+// control 正常周期 10 ms；首个心跳前由 evaluator 保留启动期 grace，首拍后
+// 每个 100 ms supervisor 窗口均要求观察到状态机进展。
 // BMI088 正常 DRDY 为约 200 Hz；降级初始化每秒只会完成一次重试。
 static const uint32_t kSensorHealthyHeartbeatTimeoutMs = 300U;
 static const uint32_t kSensorDegradedHeartbeatTimeoutMs = 2500U;
@@ -50,7 +50,7 @@ static void supervisor_task_fn(void *arg) {
     const bool control_stalled = supervisor_heartbeat_evaluate(
         &g_heartbeat_states[SUPERVISOR_TASK_CONTROL],
         heartbeats[SUPERVISOR_TASK_CONTROL], now_ms,
-        kControlHeartbeatTimeoutMs);
+        SUPERVISOR_CONTROL_RUNTIME_TIMEOUT_MS);
     const bool sensor_stalled = supervisor_heartbeat_evaluate(
         &g_heartbeat_states[SUPERVISOR_TASK_SENSOR],
         heartbeats[SUPERVISOR_TASK_SENSOR], now_ms, sensor_timeout_ms);

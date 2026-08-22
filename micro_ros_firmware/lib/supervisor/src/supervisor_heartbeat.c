@@ -7,10 +7,16 @@ bool supervisor_heartbeat_evaluate(supervisor_heartbeat_state_t *state,
     return true;
   }
 
-  if (!state->initialized || state->last_heartbeat != heartbeat) {
+  if (!state->observed) {
+    if (heartbeat == 0U) {
+      return false;
+    }
+    state->observed = true;
+  }
+
+  if (state->last_heartbeat != heartbeat) {
     state->last_heartbeat = heartbeat;
     state->last_progress_ms = now_ms;
-    state->initialized = true;
     return false;
   }
 

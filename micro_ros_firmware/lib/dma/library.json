@@ -1,8 +1,0 @@
-{
-  "name": "dma",
-  "version": "0.1.0",
-  "description": "板级 DMA 初始化层：DMA1 + SPI2 MspInit/中断转发",
-  "keywords": ["stm32", "dma", "spi"],
-  "frameworks": ["arduino"],
-  "platforms": ["ststm32"]
-}

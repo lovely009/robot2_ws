@@ -1,0 +1,8 @@
+{
+  "name": "ws2812",
+  "version": "0.1.0",
+  "description": "板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）",
+  "keywords": ["stm32", "ws2812", "led"],
+  "frameworks": ["arduino"],
+  "platforms": ["ststm32"]
+}

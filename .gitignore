@@ -8,6 +8,8 @@
 micro_ros_agent/build/
 micro_ros_agent/install/
 micro_ros_agent/log/
+# 固件分支留在本地时的构建与编辑器产物。
+micro_ros_firmware/
 # 测试 fixture 目录误跑 colcon 产生的构建产物。
 src/motor_hardware_interface/test/fixtures/build/
 src/motor_hardware_interface/test/fixtures/install/

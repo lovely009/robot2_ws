@@ -16,6 +16,7 @@
 #include <std_msgs/msg/bool.h>
 
 #include "control_task.h"
+#include "time_utils.h"
 
 #if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
 
@@ -273,10 +274,8 @@ void motor_bridge_poll(void) {
   g_joint_feedback_msg.position.size = output_count;
   g_joint_feedback_msg.velocity.size = output_count;
   g_joint_feedback_msg.effort.size = output_count;
-  uint32_t ms = millis();
-  g_joint_feedback_msg.header.stamp.sec = (int32_t)(ms / 1000U);
-  g_joint_feedback_msg.header.stamp.nanosec =
-      (uint32_t)((ms % 1000U) * 1000000U);
+  // 时间戳：epoch 优先，未同步回退 millis
+  fill_header_stamp(&g_joint_feedback_msg.header.stamp);
   rcl_ret_t rc =
       rcl_publish(&g_joint_feedback_pub, &g_joint_feedback_msg, nullptr);
   ++g_joint_feedback_pub_count;

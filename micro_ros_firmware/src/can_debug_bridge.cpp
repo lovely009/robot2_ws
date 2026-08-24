@@ -15,6 +15,7 @@
 #include <can_bridge_msgs/msg/can_frame.h>
 
 #include "control_task.h"
+#include "time_utils.h"
 
 #if defined(ENABLE_CAN1_DEBUG_BRIDGE) && ENABLE_CAN1_DEBUG_BRIDGE
 
@@ -31,10 +32,8 @@ static bool g_ready = false;
 static bool g_sub_added = false;
 
 static void fill_can1_rx_msg(const can_rx_frame_t *frame) {
-  // 时间戳沿用 IMU 的 millis 方案；frame_id 标记来源总线
-  uint32_t ms = millis();
-  g_can1_rx_msg.header.stamp.sec = (int32_t)(ms / 1000u);
-  g_can1_rx_msg.header.stamp.nanosec = (uint32_t)((ms % 1000u) * 1000000u);
+  // 时间戳沿用 IMU 的 epoch 优先方案；frame_id 标记来源总线
+  fill_header_stamp(&g_can1_rx_msg.header.stamp);
   g_can1_rx_msg.header.frame_id.data = (char *)"can1";
   g_can1_rx_msg.header.frame_id.size = 4;
   g_can1_rx_msg.header.frame_id.capacity = 5;

@@ -15,6 +15,7 @@
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/time_sync.h>
 
 #include "can_debug_bridge.h"
 #include "control_task.h"
@@ -132,6 +133,9 @@ static bool create_entities() {
     destroy_entities();
     return false;
   }
+  // 会话已建立：发起一次 NTP 时间同步，使 rmw_uros_epoch_nanos() 与主机对齐。
+  // 失败不致命（各桥在未同步时回退 millis()），故忽略返回值。
+  rmw_uros_sync_session(1000);
   // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
   control_task_set_agent_connected(true);
   return true;

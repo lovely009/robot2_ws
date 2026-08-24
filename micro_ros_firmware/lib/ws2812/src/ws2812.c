@@ -57,10 +57,16 @@ void ws2812_set_rgb(uint8_t r, uint8_t g, uint8_t b) {
     txbuf[23 - i] = (((b >> i) & 0x01) ? 0x78 : 0x60);
   }
   uint8_t zero = 0x00;
+  // WS2812 是单线时序协议，位宽对中断/任务抢占敏感：发送期间关中断，
+  // 保证 24 位颜色 + 复位低电平连续输出，避免被高优先级任务/ISR 打断
+  // 导致灯珠锁存到错误数据（表现为突然全白/很亮闪一下）。
+  // 关中断时长 ≈ 124 字节 @ 6MHz ≈ 165us，对 100Hz 控制/FDCAN 影响可忽略。
+  __disable_irq();
   HAL_SPI_Transmit(&hspi6, &zero, 0, 0xFFFF);  // 空传输，确保 SPI 就绪
   while (hspi6.State != HAL_SPI_STATE_READY) {}
   HAL_SPI_Transmit(&hspi6, txbuf, 24, 0xFFFF);
   for (int i = 0; i < 100; i++) {
     HAL_SPI_Transmit(&hspi6, &zero, 1, 0xFFFF);  // 复位：>50us 低电平
   }
+  __enable_irq();
 }

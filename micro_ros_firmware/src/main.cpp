@@ -95,19 +95,30 @@ static bool g_ever_connected = false;  // 曾连上 agent：断连后保持蓝�
 
 // 灯态跟随状态机：红=未连接，绿=连接成功（1Hz 闪烁），蓝=断连等待重连
 static void update_link_led() {
+  uint8_t r = 0, g = 0, b = 0;
   switch (g_state) {
     case LinkState::kWaitAgent:
-      ws2812_set_rgb(g_ever_connected ? 0 : 1, 0, g_ever_connected ? 1 : 0);
+      r = g_ever_connected ? 0 : 1;
+      b = g_ever_connected ? 1 : 0;
       break;
     case LinkState::kConnect:
-      break;  // 短暂建链态，保持上一颜色
+      return;  // 短暂建链态，保持上一颜色
     case LinkState::kRun:
       // 500ms 亮 / 500ms 灭，即 1Hz 绿灯闪烁
-      ws2812_set_rgb(0, ((millis() / 500u) & 1u) ? 1 : 0, 0);
+      g = ((millis() / 500u) & 1u) ? 1 : 0;
       break;
     case LinkState::kLost:
-      ws2812_set_rgb(0, 0, 1);
+      b = 1;
       break;
+  }
+  // 只在颜色变化时刷帧：WS2812 单线时序对抢占敏感，减少发送次数可显著
+  // 降低被高优先级任务/ISR 打断导致误锁存（突然全白）的概率。
+  static uint8_t last_r = 0xFF, last_g = 0xFF, last_b = 0xFF;
+  if (r != last_r || g != last_g || b != last_b) {
+    last_r = r;
+    last_g = g;
+    last_b = b;
+    ws2812_set_rgb(r, g, b);
   }
 }
 

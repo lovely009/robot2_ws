@@ -14,6 +14,7 @@
 #include <std_msgs/msg/float32.h>
 
 #include "sensor_task.h"
+#include "time_utils.h"
 
 static const char *kImuTopic = "micro_ros/imu/data";
 static const char *kTempTopic = "micro_ros/imu/temp";
@@ -25,10 +26,8 @@ static std_msgs__msg__Float32 g_temp_msg;
 static bool g_ready = false;
 
 static void fill_imu_msg(const imu_data_t *data) {
-  // 时间戳（sensor_msgs 惯例，sec + nanosec）
-  uint32_t ms = millis();
-  g_imu_msg.header.stamp.sec = (int32_t)(ms / 1000u);
-  g_imu_msg.header.stamp.nanosec = (uint32_t)((ms % 1000u) * 1000000u);
+  // 时间戳（sensor_msgs 惯例，sec + nanosec）：epoch 优先，未同步回退 millis
+  fill_header_stamp(&g_imu_msg.header.stamp);
   g_imu_msg.header.frame_id.data = (char *)"imu_link";
   g_imu_msg.header.frame_id.size = 8;
   g_imu_msg.header.frame_id.capacity = 9;

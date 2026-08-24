@@ -4,6 +4,10 @@
 /log/
 /.vscode/
 /.worktrees/
+# ros2_ws 独立 colcon 工作区的构建产物。
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
 # micro_ros_firmware 本地 CMake host 测试产物。
 /micro_ros_firmware/.host-build/
 # micro-ROS Agent 独立工作区的构建产物。

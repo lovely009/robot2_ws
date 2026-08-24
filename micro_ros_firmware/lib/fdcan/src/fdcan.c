@@ -7,8 +7,17 @@
 // RX FIFO0 + TX FIFO，每路按 HAL 计算占 300 个 32 位字，偏移 0/300/600。
 // 中断转发沿用 HAL：FDCANx_IT0/IT1_IRQHandler -> HAL_FDCAN_IRQHandler。
 
+#include <STM32FreeRTOS.h>
+
 #include "fdcan.h"
 #include "stm32_def.h"  // Error_Handler 宏（_Error_Handler(file, line)）
+
+#define FDCAN_FREERTOS_IRQ_PRIORITY 5U
+
+_Static_assert(
+    FDCAN_FREERTOS_IRQ_PRIORITY >=
+        configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
+    "FDCAN IRQ priority must permit FreeRTOS FromISR APIs");
 
 FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
@@ -139,6 +148,8 @@ void MX_FDCAN3_Init(void) {
 
 void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
   GPIO_InitTypeDef gpio = {0};
+  configASSERT(FDCAN_FREERTOS_IRQ_PRIORITY >=
+               configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY);
   fdcan_periph_clk_config();
 
   if (fdcanHandle->Instance == FDCAN1) {
@@ -156,9 +167,9 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
     gpio.Alternate = GPIO_AF9_FDCAN1;
     HAL_GPIO_Init(GPIOD, &gpio);
 
-    HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
-    HAL_NVIC_SetPriority(FDCAN1_IT1_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN1_IT1_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
   } else if (fdcanHandle->Instance == FDCAN2) {
     HAL_RCC_FDCAN_CLK_ENABLED++;
@@ -175,9 +186,9 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
     gpio.Alternate = GPIO_AF9_FDCAN2;
     HAL_GPIO_Init(GPIOB, &gpio);
 
-    HAL_NVIC_SetPriority(FDCAN2_IT0_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN2_IT0_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN2_IT0_IRQn);
-    HAL_NVIC_SetPriority(FDCAN2_IT1_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN2_IT1_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN2_IT1_IRQn);
   } else if (fdcanHandle->Instance == FDCAN3) {
     HAL_RCC_FDCAN_CLK_ENABLED++;
@@ -194,9 +205,9 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
     gpio.Alternate = GPIO_AF5_FDCAN3;
     HAL_GPIO_Init(GPIOD, &gpio);
 
-    HAL_NVIC_SetPriority(FDCAN3_IT0_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN3_IT0_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN3_IT0_IRQn);
-    HAL_NVIC_SetPriority(FDCAN3_IT1_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(FDCAN3_IT1_IRQn, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
     HAL_NVIC_EnableIRQ(FDCAN3_IT1_IRQn);
   }
 }

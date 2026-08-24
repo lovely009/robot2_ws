@@ -15,24 +15,42 @@ static float g_quat[4];
 static float g_angle[3];
 static volatile bool g_ready = false;
 
-void imu_init(void) {
-  // 首轮调用会完成 POWER_5V/CS/SPI2/DMA 初始化；传感器未就绪时每 100ms 重试。
-  // BMI088_delay_ms 内部使用 vTaskDelay，因此本函数只能在调度器启动后调用。
-  while (BMI088_init() != BMI088_NO_ERROR) {
-    BMI088_delay_ms(100);
+static void reset_attitude_state(void) {
+  for (int i = 0; i < 3; ++i) {
+    g_gyro[i] = 0.0f;
+    g_accel[i] = 0.0f;
+    g_angle[i] = 0.0f;
   }
-
+  g_temp = 0.0f;
   g_quat[0] = 1.0f;
   g_quat[1] = g_quat[2] = g_quat[3] = 0.0f;
-  g_ready = true;
 }
 
-void imu_update(void) {
-  if (!g_ready) {
-    return;
+bool imu_try_init(void) {
+  // BMI088_delay_ms 内部使用 vTaskDelay，因此本函数只能在调度器启动后调用。
+  // 每次调用只尝试一次，重试节奏由 sensor_task 管理。
+  g_ready = false;
+  BMI088_transport_error_clear();
+  const uint8_t init_status = BMI088_init();
+  if (init_status != BMI088_NO_ERROR || BMI088_transport_error_latched()) {
+    return false;
   }
 
+  reset_attitude_state();
+  g_ready = true;
+  return true;
+}
+
+bool imu_update(void) {
+  if (!g_ready) {
+    return false;
+  }
+
+  BMI088_transport_error_clear();
   BMI088_read(g_gyro, g_accel, &g_temp);
+  if (BMI088_transport_error_latched()) {
+    return false;
+  }
 
   // 姿态解算（IMU 模式：陀螺 + 加速度，无磁力计）
   MahonyAHRSupdateIMU(g_quat, g_gyro[0], g_gyro[1], g_gyro[2], g_accel[0],
@@ -44,6 +62,7 @@ void imu_update(void) {
   g_angle[1] = asinf(-2.0f * (g_quat[1] * g_quat[3] - g_quat[0] * g_quat[2]));
   g_angle[2] = atan2f(2.0f * (g_quat[0] * g_quat[1] + g_quat[2] * g_quat[3]),
                       2.0f * (g_quat[0] * g_quat[0] + g_quat[3] * g_quat[3]) - 1.0f);
+  return true;
 }
 
 void imu_get_data(imu_data_t *out) {

@@ -1,7 +1,7 @@
 {
   "name": "fdcan",
   "version": "0.1.0",
-  "description": "CtrBoard H7 三路 FDCAN 板级组件：初始化、收发、中断回调与快照",
+  "description": "CtrBoard H7 三路 FDCAN 板级组件：初始化、收发、中断回调与静态 RX 队列",
   "keywords": ["stm32", "canfd", "fdcan"],
   "frameworks": ["arduino"],
   "platforms": ["ststm32"]

@@ -21,6 +21,7 @@
 #define GYRO_CS_PIN GPIO_PIN_3
 
 static SPI_HandleTypeDef hspi_bmi088;
+static const uint32_t kBmi088SpiTransferTimeoutMs = 2U;
 
 void BMI088_GPIO_init(void) {
   // PC15=POWER_5V：传感器供电使能（官方默认置高）
@@ -101,7 +102,14 @@ void BMI088_GYRO_NS_H(void) {
 
 uint8_t BMI088_read_write_byte(uint8_t reg) {
   uint8_t tx = reg, rx = 0;
-  HAL_SPI_TransmitReceive(&hspi_bmi088, &tx, &rx, 1, 0xFFFF);
+  if (BMI088_transport_error_latched()) {
+    return 0U;
+  }
+  if (HAL_SPI_TransmitReceive(&hspi_bmi088, &tx, &rx, 1,
+                              kBmi088SpiTransferTimeoutMs) != HAL_OK) {
+    BMI088_transport_error_latch();
+    return 0U;
+  }
   return rx;
 }
 

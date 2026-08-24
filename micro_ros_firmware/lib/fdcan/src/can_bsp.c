@@ -2,10 +2,44 @@
 // 官方只给 FDCAN1 配了接收过滤器；本工程对三路都配"全收"过滤器，
 // 使 fdcan2/3 的回调同样可用（发送/接收行为与例程保持一致）。
 
+#include <STM32FreeRTOS.h>
+
 #include "can_bsp.h"
 #include "stm32_def.h"  // Error_Handler 宏（_Error_Handler(file, line)）
 
 static FDCAN_HandleTypeDef *const kCanHandles[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
+static const UBaseType_t kRxQueueCapacities[CAN_RX_BUS_COUNT] = {
+    CAN1_RX_QUEUE_CAPACITY,
+    CAN_OTHER_RX_QUEUE_CAPACITY,
+    CAN_OTHER_RX_QUEUE_CAPACITY,
+};
+
+static StaticQueue_t g_rx_queue_controls[CAN_RX_BUS_COUNT];
+static uint8_t g_can1_rx_storage[CAN1_RX_QUEUE_CAPACITY *
+                                 sizeof(can_rx_frame_t)];
+static uint8_t g_can2_rx_storage[CAN_OTHER_RX_QUEUE_CAPACITY *
+                                 sizeof(can_rx_frame_t)];
+static uint8_t g_can3_rx_storage[CAN_OTHER_RX_QUEUE_CAPACITY *
+                                 sizeof(can_rx_frame_t)];
+static uint8_t *const kRxQueueStorage[CAN_RX_BUS_COUNT] = {
+    g_can1_rx_storage,
+    g_can2_rx_storage,
+    g_can3_rx_storage,
+};
+static QueueHandle_t g_rx_queues[CAN_RX_BUS_COUNT] = {NULL, NULL, NULL};
+static volatile can_rx_diagnostics_t g_rx_diagnostics[CAN_RX_BUS_COUNT] = {0};
+
+static void can_rx_queues_init(void) {
+  for (uint8_t bus_index = 0U; bus_index < CAN_RX_BUS_COUNT; ++bus_index) {
+    if (g_rx_queues[bus_index] != NULL) {
+      continue;
+    }
+    g_rx_queues[bus_index] = xQueueCreateStatic(
+        kRxQueueCapacities[bus_index], sizeof(can_rx_frame_t),
+        kRxQueueStorage[bus_index], &g_rx_queue_controls[bus_index]);
+    configASSERT(g_rx_queues[bus_index] != NULL);
+  }
+}
 
 // FD 帧仅允许 0-8/12/16/20/24/32/48/64 字节；DLC 代码即 HAL 宏值
 static uint32_t fdcan_bytes_to_dlc(uint32_t len) {
@@ -76,13 +110,17 @@ void can_filter_init(void) {
 }
 
 void bsp_can_init(void) {
+  can_rx_queues_init();
   can_filter_init();
   HAL_FDCAN_Start(&hfdcan1);
   HAL_FDCAN_Start(&hfdcan2);
   HAL_FDCAN_Start(&hfdcan3);
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+  const uint32_t rx_notifications =
+      FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL |
+      FDCAN_IT_RX_FIFO0_MESSAGE_LOST;
+  HAL_FDCAN_ActivateNotification(&hfdcan1, rx_notifications, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan2, rx_notifications, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan3, rx_notifications, 0);
 }
 
 uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, const uint8_t *data, uint32_t len) {
@@ -134,52 +172,116 @@ uint8_t fdcanx_receive_frame(hcan_t *hfdcan, uint32_t *rec_id, uint8_t *buf,
   return (uint8_t)fdcan_dlc_to_bytes(rx.DataLength);
 }
 
-// CAN2/3 暂未接入业务，保留最近一帧即可
-static uint8_t rx_data2[64] = {0};
-static uint8_t rx_data3[64] = {0};
-static uint16_t rec_id2 = 0;
-static uint16_t rec_id3 = 0;
-
-// CAN1 最近一帧快照：中断写入，can1_rx_snapshot() 在任务侧读取
-static can_rx_frame_t g_can1_frame = {0};
-volatile uint32_t can1_rx_counter = 0;
-
-static void fdcan1_rx_callback(void) {
-  g_can1_frame.dlc =
-      fdcanx_receive_frame(&hfdcan1, &g_can1_frame.id, g_can1_frame.data,
-                           &g_can1_frame.is_extended, &g_can1_frame.is_fd);
-  can1_rx_counter++;
-}
-
-static void fdcan2_rx_callback(void) {
-  fdcanx_receive(&hfdcan2, &rec_id2, rx_data2);
-}
-
-static void fdcan3_rx_callback(void) {
-  fdcanx_receive(&hfdcan3, &rec_id3, rx_data3);
-}
-
-uint32_t can1_rx_snapshot(can_rx_frame_t *out) {
-  // 关中断保证 64B 数据与元数据/序号一致；调用方是任务上下文，开销可接受
-  uint32_t primask = __get_PRIMASK();
-  __disable_irq();
-  uint32_t seq = can1_rx_counter;
-  if (out != NULL) {
-    *out = g_can1_frame;
+bool can_rx_queue_pop(uint8_t bus_index, can_rx_frame_t *out) {
+  if (bus_index >= CAN_RX_BUS_COUNT || out == NULL ||
+      g_rx_queues[bus_index] == NULL) {
+    return false;
   }
-  __set_PRIMASK(primask);
-  return seq;
+  return xQueueReceive(g_rx_queues[bus_index], out, 0U) == pdPASS;
+}
+
+uint32_t can_rx_queue_pending(uint8_t bus_index) {
+  if (bus_index >= CAN_RX_BUS_COUNT || g_rx_queues[bus_index] == NULL) {
+    return 0U;
+  }
+  return (uint32_t)uxQueueMessagesWaiting(g_rx_queues[bus_index]);
+}
+
+void can_rx_get_diagnostics(uint8_t bus_index, can_rx_diagnostics_t *out) {
+  if (out == NULL) {
+    return;
+  }
+  if (bus_index >= CAN_RX_BUS_COUNT) {
+    *out = (can_rx_diagnostics_t){0};
+    return;
+  }
+  taskENTER_CRITICAL();
+  out->rx_count = g_rx_diagnostics[bus_index].rx_count;
+  out->overflow_count = g_rx_diagnostics[bus_index].overflow_count;
+  out->hal_receive_error_count =
+      g_rx_diagnostics[bus_index].hal_receive_error_count;
+  taskEXIT_CRITICAL();
+}
+
+static int8_t can_bus_index(FDCAN_HandleTypeDef *hfdcan) {
+  for (uint8_t bus_index = 0U; bus_index < CAN_RX_BUS_COUNT; ++bus_index) {
+    if (hfdcan == kCanHandles[bus_index]) {
+      return (int8_t)bus_index;
+    }
+  }
+  return -1;
+}
+
+static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,
+                                     uint8_t bus_index,
+                                     can_rx_frame_t *frame) {
+  FDCAN_RxHeaderTypeDef rx = {0};
+  *frame = (can_rx_frame_t){0};
+  if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx, frame->data) !=
+      HAL_OK) {
+    return false;
+  }
+  frame->bus_index = bus_index;
+  frame->id = rx.Identifier;
+  frame->dlc = (uint8_t)fdcan_dlc_to_bytes(rx.DataLength);
+  frame->is_extended = (rx.IdType == FDCAN_EXTENDED_ID);
+  frame->is_fd = (rx.FDFormat == FDCAN_FD_CAN);
+  return true;
+}
+
+static void can_rx_queue_push_from_isr(uint8_t bus_index,
+                                       const can_rx_frame_t *frame,
+                                       BaseType_t *higher_priority_task_woken) {
+  QueueHandle_t queue = g_rx_queues[bus_index];
+  configASSERT(queue != NULL);
+  ++g_rx_diagnostics[bus_index].rx_count;
+  if (xQueueSendFromISR(queue, frame, higher_priority_task_woken) == pdPASS) {
+    return;
+  }
+
+  can_rx_frame_t discarded = {0};
+  BaseType_t receive_result =
+      xQueueReceiveFromISR(queue, &discarded, higher_priority_task_woken);
+  configASSERT(receive_result == pdPASS);
+  if (receive_result != pdPASS) {
+    return;
+  }
+  ++g_rx_diagnostics[bus_index].overflow_count;
+  BaseType_t send_result =
+      xQueueSendFromISR(queue, frame, higher_priority_task_woken);
+  configASSERT(send_result == pdPASS);
 }
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs) {
-  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0) {
+  int8_t bus_index = can_bus_index(hfdcan);
+  if (bus_index < 0) {
     return;
   }
-  if (hfdcan == &hfdcan1) {
-    fdcan1_rx_callback();
-  } else if (hfdcan == &hfdcan2) {
-    fdcan2_rx_callback();
-  } else if (hfdcan == &hfdcan3) {
-    fdcan3_rx_callback();
+
+  const uint32_t handled_notifications =
+      FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL |
+      FDCAN_IT_RX_FIFO0_MESSAGE_LOST;
+  if ((RxFifo0ITs & handled_notifications) == 0U) {
+    return;
   }
+
+  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0U) {
+    ++g_rx_diagnostics[(uint8_t)bus_index].hal_receive_error_count;
+  }
+
+  BaseType_t higher_priority_task_woken = pdFALSE;
+  // 硬件 FIFO 深度为 8；只处理进入回调时已挂起的帧，后到帧由下一次 IRQ
+  // 继续承接，避免持续满载时在单次 ISR 中无界循环。
+  uint32_t pending_frames =
+      HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0);
+  for (uint32_t index = 0U; index < pending_frames; ++index) {
+    can_rx_frame_t frame = {0};
+    if (!fdcan_receive_into_frame(hfdcan, (uint8_t)bus_index, &frame)) {
+      ++g_rx_diagnostics[(uint8_t)bus_index].hal_receive_error_count;
+      break;
+    }
+    can_rx_queue_push_from_isr((uint8_t)bus_index, &frame,
+                               &higher_priority_task_woken);
+  }
+  portYIELD_FROM_ISR(higher_priority_task_woken);
 }

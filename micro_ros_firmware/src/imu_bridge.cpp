@@ -13,6 +13,8 @@
 #include <sensor_msgs/msg/imu.h>
 #include <std_msgs/msg/float32.h>
 
+#include "sensor_task.h"
+
 static const char *kImuTopic = "micro_ros/imu/data";
 static const char *kTempTopic = "micro_ros/imu/temp";
 
@@ -20,7 +22,6 @@ static rcl_publisher_t g_imu_pub;
 static rcl_publisher_t g_temp_pub;
 static sensor_msgs__msg__Imu g_imu_msg;
 static std_msgs__msg__Float32 g_temp_msg;
-static const imu_data_t *g_imu_source = nullptr;  // sensor_task 写入的最新样本
 static bool g_ready = false;
 
 static void fill_imu_msg(const imu_data_t *data) {
@@ -82,15 +83,15 @@ void imu_bridge_destroy(rcl_node_t *node) {
   (void)rc;
 }
 
-void imu_bridge_set_source(const imu_data_t *src) {
-  g_imu_source = src;
-}
-
 void imu_bridge_poll(void) {
-  if (!g_ready || g_imu_source == nullptr) {
+  if (!g_ready) {
     return;
   }
-  fill_imu_msg(g_imu_source);
+  imu_data_t snapshot = {};
+  if (!sensor_task_get_imu_snapshot(&snapshot, nullptr)) {
+    return;
+  }
+  fill_imu_msg(&snapshot);
   rcl_ret_t rc = rcl_publish(&g_imu_pub, &g_imu_msg, nullptr);
   rc = rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
   (void)rc;

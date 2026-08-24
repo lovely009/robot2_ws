@@ -15,6 +15,7 @@
 #include <micro_ros_platformio.h>
 
 #include "ros_bridge.h"   // micro-ROS 节点生命周期
+#include "supervisor_task.h"  // 开发期任务健康监督
 #include "ws2812.h"       // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
 #include "sensor_task.h"   // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
 #include "control_task.h"  // 控制任务（当前三路 FDCAN 例程移植）
@@ -40,6 +41,34 @@ static const UBaseType_t kStartTaskPrio = 1;
 
 static const uint32_t kMicroRosTaskStack = 8192;  // micro-ROS + RMW 需要较大栈
 static const UBaseType_t kMicroRosTaskPrio = 2;
+// 当前 board linker script 的 _Min_Stack_Size=0x400；STM32FreeRTOS 默认
+// configMINIMAL_STACK_SIZE 语义为 0x400/8=128 words，timer task 为其两倍。
+static const uint32_t kIdleTaskStackWords = 128U;
+static const uint32_t kTimerTaskStackWords = 256U;
+
+// configSUPPORT_STATIC_ALLOCATION=1 后，FreeRTOS 要求应用提供 idle/timer
+// 内核任务的静态 TCB 与栈；业务任务仍沿用现有 xTaskCreate() 路径。
+extern "C" void vApplicationGetIdleTaskMemory(
+    StaticTask_t **idle_tcb, StackType_t **idle_stack,
+    uint32_t *idle_stack_size) {
+  static StaticTask_t tcb;
+  static StackType_t stack[kIdleTaskStackWords];
+  *idle_tcb = &tcb;
+  *idle_stack = stack;
+  *idle_stack_size = kIdleTaskStackWords;
+}
+
+#if configUSE_TIMERS == 1
+extern "C" void vApplicationGetTimerTaskMemory(
+    StaticTask_t **timer_tcb, StackType_t **timer_stack,
+    uint32_t *timer_stack_size) {
+  static StaticTask_t tcb;
+  static StackType_t stack[kTimerTaskStackWords];
+  *timer_tcb = &tcb;
+  *timer_stack = stack;
+  *timer_stack_size = kTimerTaskStackWords;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // 统一硬件初始化
@@ -119,6 +148,8 @@ static void micro_ros_task(void *arg) {
         break;
     }
     update_link_led();
+    // 表示连接状态机已完成一次迭代；不等同于 agent 已连接。
+    supervisor_heartbeat(SUPERVISOR_TASK_MICRO_ROS);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -135,6 +166,9 @@ static void start_task(void *arg) {
     Error_Handler();
   }
   if (!control_task_start()) {
+    Error_Handler();
+  }
+  if (!supervisor_task_start()) {
     Error_Handler();
   }
   // 编排完成后删除开始任务自身

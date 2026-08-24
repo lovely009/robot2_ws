@@ -17,6 +17,7 @@
 #include <rclc/executor.h>
 
 #include "can_debug_bridge.h"
+#include "control_task.h"
 #include "imu_bridge.h"
 #include "motor_bridge.h"
 
@@ -34,7 +35,7 @@ static const size_t kExecutorHandles = 1
     + 1
 #endif
 #if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
-    + 1
+    + 2
 #endif
     ;
 
@@ -54,6 +55,8 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
 }
 
 static void destroy_entities() {
+  // 先通知控制任务失联，使旧命令在 ROS 实体清理期间即失效。
+  control_task_set_agent_connected(false);
   imu_bridge_destroy(&g_node);
   can_debug_bridge_destroy(&g_node, &g_executor);
   motor_bridge_destroy(&g_node, &g_executor);
@@ -129,6 +132,8 @@ static bool create_entities() {
     destroy_entities();
     return false;
   }
+  // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
+  control_task_set_agent_connected(true);
   return true;
 }
 

@@ -1,11 +1,32 @@
-# Generated colcon workspace artifacts.
+# ROS 2 / colcon generated artifacts.
 /build/
 /install/
 /log/
+/.colcon/
+/compile_commands.json
+
+# Editor and operating-system metadata.
 /.vscode/
+/.idea/
+**/*.swp
+**/*.swo
+**/*~
+**/.DS_Store
+**/Thumbs.db
+
 # Brooks-lint 运行历史记录。
 /.brooks-lint-history.json
-# Python caches and Windows download metadata.
+
+# Python caches, test output, coverage and packaging metadata.
 **/__pycache__/
-**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.py[cod]
+**/*.egg-info/
+/.coverage
+/.coverage.*
+/htmlcov/
+
+# Windows download metadata.
 **/*:Zone.Identifier

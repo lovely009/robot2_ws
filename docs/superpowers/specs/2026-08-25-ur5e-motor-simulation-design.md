@@ -263,8 +263,12 @@ ROS 与外部控制通过不同 launch 互斥。除 launch 隔离外，motor nod
 - `usb_serial` 和 `serial_slcan` 两种 transport；
 - disabled 时的持续反馈与零 effort；
 - 六个已 enable 电机的独立 timeout；
-- 越限、错总线、duplicate-controller、断线零 effort 和 launch 退出；
+- 越限、duplicate-controller、断线零 effort 和 launch 退出；
 - diagnostics 内容和反馈计数。
+
+机械臂只有一个物理端口，收到的帧不携带“来自哪个逻辑总线”的额外字段，
+因此错总线无法通过单端口 PTY 构造。该故障由共享 `FrameRouter` 单元测试直接传入
+未配置 bus 或其他模型的 bus 标识进行验证；PTY 只验证它在单一 `arm` 端口上能观测的故障。
 
 ### 12.4 Gazebo 验收
 

@@ -1,0 +1,255 @@
+<?xml version="1.0"?>
+<robot name="humanoid" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="controllers_file" default=""/>
+  <xacro:arg name="mechanics_file" default="$(find humanoid_gazebo)/config/mechanics.yaml"/>
+  <xacro:arg name="motor_config_file" default="$(find humanoid_gazebo)/config/motors.yaml"/>
+
+  <xacro:property name="mechanics" value="${xacro.load_yaml('$(arg mechanics_file)')}"/>
+  <xacro:property name="motor_data" value="${xacro.load_yaml('$(arg motor_config_file)')['motor_simulation']}"/>
+  <xacro:property name="mass" value="${mechanics['mass']}"/>
+  <xacro:property name="geometry" value="${mechanics['geometry']}"/>
+  <xacro:property name="joint_dynamics" value="${mechanics['dynamics']}"/>
+  <xacro:property name="profiles" value="${motor_data['profiles']}"/>
+
+  <!-- REP-103: +X forward, +Y left, +Z up. -->
+  <material name="body_gray"><color rgba="0.30 0.34 0.39 1"/></material>
+  <material name="left_blue"><color rgba="0.10 0.42 0.80 1"/></material>
+  <material name="right_orange"><color rgba="0.92 0.38 0.08 1"/></material>
+  <material name="joint_dark"><color rgba="0.07 0.08 0.10 1"/></material>
+  <material name="support_yellow"><color rgba="0.85 0.65 0.08 1"/></material>
+
+  <xacro:macro name="box_link" params="name link_mass size_x size_y size_z center_x center_y center_z color">
+    <link name="${name}">
+      <visual>
+        <origin xyz="${center_x} ${center_y} ${center_z}" rpy="0 0 0"/>
+        <geometry><box size="${size_x} ${size_y} ${size_z}"/></geometry>
+        <material name="${color}"/>
+      </visual>
+      <collision>
+        <origin xyz="${center_x} ${center_y} ${center_z}" rpy="0 0 0"/>
+        <geometry><box size="${size_x} ${size_y} ${size_z}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="${center_x} ${center_y} ${center_z}" rpy="0 0 0"/>
+        <mass value="${link_mass}"/>
+        <inertia ixx="${link_mass * (size_y*size_y + size_z*size_z) / 12.0}" ixy="0" ixz="0"
+                 iyy="${link_mass * (size_x*size_x + size_z*size_z) / 12.0}" iyz="0"
+                 izz="${link_mass * (size_x*size_x + size_y*size_y) / 12.0}"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="sphere_link" params="name link_mass radius color">
+    <link name="${name}">
+      <visual><geometry><sphere radius="${radius}"/></geometry><material name="${color}"/></visual>
+      <collision><geometry><sphere radius="${radius}"/></geometry></collision>
+      <inertial>
+        <mass value="${link_mass}"/>
+        <inertia ixx="${0.4 * link_mass * radius * radius}" ixy="0" ixz="0"
+                 iyy="${0.4 * link_mass * radius * radius}" iyz="0"
+                 izz="${0.4 * link_mass * radius * radius}"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="cylinder_link" params="name link_mass radius length color">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 ${-length / 2.0}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+        <material name="${color}"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${-length / 2.0}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 ${-length / 2.0}" rpy="0 0 0"/>
+        <mass value="${link_mass}"/>
+        <inertia ixx="${link_mass * (3*radius*radius + length*length) / 12.0}" ixy="0" ixz="0"
+                 iyy="${link_mass * (3*radius*radius + length*length) / 12.0}" iyz="0"
+                 izz="${0.5 * link_mass * radius * radius}"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="actuated_joint" params="name parent child xyz axis profile">
+    <xacro:property name="limits" value="${profiles[profile]}"/>
+    <joint name="${name}" type="revolute">
+      <origin xyz="${xyz}" rpy="0 0 0"/>
+      <parent link="${parent}"/>
+      <child link="${child}"/>
+      <axis xyz="${axis}"/>
+      <limit lower="${limits['hard_lower_deg'] * pi / 180.0}"
+             upper="${limits['hard_upper_deg'] * pi / 180.0}"
+             effort="${limits['effort_nm']}"
+             velocity="${limits['velocity_rad_s']}"/>
+      <dynamics damping="${joint_dynamics['damping']}" friction="${joint_dynamics['friction']}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="arm" params="side sign color">
+    <xacro:sphere_link name="${side}_scapula_protraction_link" link_mass="${mass['arm_intermediate']}" radius="0.035" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_scapula_protraction_joint" parent="chest_link" child="${side}_scapula_protraction_link"
+                          xyz="0 ${sign * geometry['shoulder_half_width']} ${geometry['shoulder_offset_z']}" axis="0 0 ${sign}" profile="scapula_protraction"/>
+
+    <xacro:sphere_link name="${side}_scapula_elevation_link" link_mass="${mass['arm_intermediate']}" radius="0.035" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_scapula_elevation_joint" parent="${side}_scapula_protraction_link" child="${side}_scapula_elevation_link"
+                          xyz="0 0 0" axis="${sign} 0 0" profile="scapula_elevation"/>
+
+    <xacro:sphere_link name="${side}_shoulder_pitch_link" link_mass="${mass['arm_intermediate']}" radius="0.04" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_shoulder_pitch_joint" parent="${side}_scapula_elevation_link" child="${side}_shoulder_pitch_link"
+                          xyz="0 0 0" axis="0 1 0" profile="shoulder_pitch"/>
+
+    <xacro:sphere_link name="${side}_shoulder_roll_link" link_mass="${mass['arm_intermediate']}" radius="0.04" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_shoulder_roll_joint" parent="${side}_shoulder_pitch_link" child="${side}_shoulder_roll_link"
+                          xyz="0 0 0" axis="${sign} 0 0" profile="shoulder_roll"/>
+
+    <xacro:cylinder_link name="${side}_upper_arm_link" link_mass="${mass['upper_arm']}" radius="0.045" length="${geometry['upper_arm_length']}" color="${color}"/>
+    <xacro:actuated_joint name="${side}_shoulder_yaw_joint" parent="${side}_shoulder_roll_link" child="${side}_upper_arm_link"
+                          xyz="0 0 0" axis="0 0 ${sign}" profile="shoulder_yaw"/>
+
+    <xacro:sphere_link name="${side}_elbow_link" link_mass="${mass['elbow']}" radius="0.04" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_elbow_pitch_joint" parent="${side}_upper_arm_link" child="${side}_elbow_link"
+                          xyz="0 0 ${-geometry['upper_arm_length']}" axis="0 1 0" profile="elbow_pitch"/>
+
+    <xacro:cylinder_link name="${side}_forearm_link" link_mass="${mass['forearm']}" radius="0.038" length="${geometry['forearm_length']}" color="${color}"/>
+    <xacro:actuated_joint name="${side}_forearm_roll_joint" parent="${side}_elbow_link" child="${side}_forearm_link"
+                          xyz="0 0 0" axis="0 0 ${sign}" profile="forearm_roll"/>
+
+    <xacro:sphere_link name="${side}_wrist_link" link_mass="${mass['wrist']}" radius="0.034" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_wrist_flexion_joint" parent="${side}_forearm_link" child="${side}_wrist_link"
+                          xyz="0 0 ${-geometry['forearm_length']}" axis="0 1 0" profile="wrist_flexion"/>
+
+    <xacro:box_link name="${side}_hand_link" link_mass="${mass['hand']}" size_x="0.075" size_y="0.11" size_z="0.18"
+                    center_x="0" center_y="0" center_z="-0.09" color="${color}"/>
+    <xacro:actuated_joint name="${side}_wrist_deviation_joint" parent="${side}_wrist_link" child="${side}_hand_link"
+                          xyz="0 0 0" axis="${sign} 0 0" profile="wrist_deviation"/>
+  </xacro:macro>
+
+  <xacro:macro name="leg" params="side sign color rp_id_offset vaxor_id_offset">
+    <xacro:sphere_link name="${side}_hip_yaw_link" link_mass="${mass['hip_yaw']}" radius="0.05" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_hip_yaw_joint" parent="pelvis_link" child="${side}_hip_yaw_link"
+                          xyz="0 ${sign * geometry['hip_half_width']} 0" axis="0 0 ${sign}" profile="hip_yaw"/>
+
+    <xacro:sphere_link name="${side}_hip_roll_link" link_mass="${mass['hip_roll']}" radius="0.05" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_hip_roll_joint" parent="${side}_hip_yaw_link" child="${side}_hip_roll_link"
+                          xyz="0 0 0" axis="${sign} 0 0" profile="hip_roll"/>
+
+    <xacro:cylinder_link name="${side}_thigh_link" link_mass="${mass['thigh']}" radius="0.06" length="${geometry['thigh_length']}" color="${color}"/>
+    <xacro:actuated_joint name="${side}_hip_pitch_joint" parent="${side}_hip_roll_link" child="${side}_thigh_link"
+                          xyz="0 0 0" axis="0 1 0" profile="hip_pitch"/>
+
+    <xacro:cylinder_link name="${side}_shank_link" link_mass="${mass['shank']}" radius="0.052" length="${geometry['shank_length']}" color="${color}"/>
+    <xacro:actuated_joint name="${side}_knee_pitch_joint" parent="${side}_thigh_link" child="${side}_shank_link"
+                          xyz="0 0 ${-geometry['thigh_length']}" axis="0 1 0" profile="knee_pitch"/>
+
+    <xacro:sphere_link name="${side}_ankle_link" link_mass="${mass['ankle']}" radius="0.045" color="joint_dark"/>
+    <xacro:actuated_joint name="${side}_ankle_pitch_joint" parent="${side}_shank_link" child="${side}_ankle_link"
+                          xyz="0 0 ${-geometry['shank_length']}" axis="0 1 0" profile="ankle_pitch"/>
+
+    <xacro:box_link name="${side}_foot_link" link_mass="${mass['foot']}"
+                    size_x="${geometry['foot_size_x']}" size_y="${geometry['foot_size_y']}" size_z="${geometry['foot_size_z']}"
+                    center_x="${geometry['foot_center_x']}" center_y="0" center_z="${geometry['foot_center_z']}" color="${color}"/>
+    <xacro:actuated_joint name="${side}_ankle_roll_joint" parent="${side}_ankle_link" child="${side}_foot_link"
+                          xyz="0 0 0" axis="${sign} 0 0" profile="ankle_roll"/>
+  </xacro:macro>
+
+  <link name="world"/>
+  <link name="support_link">
+    <visual>
+      <origin xyz="-0.32 0 0.90" rpy="0 0 0"/>
+      <geometry><box size="0.08 0.50 1.80"/></geometry>
+      <material name="support_yellow"/>
+    </visual>
+  </link>
+  <joint name="world_to_support_joint" type="fixed">
+    <parent link="world"/><child link="support_link"/>
+  </joint>
+
+  <xacro:box_link name="pelvis_link" link_mass="${mass['pelvis']}" size_x="0.22" size_y="0.30" size_z="0.20"
+                  center_x="0" center_y="0" center_z="0.05" color="body_gray"/>
+  <joint name="support_to_pelvis_joint" type="fixed">
+    <origin xyz="0 0 ${geometry['hip_center_z']}" rpy="0 0 0"/>
+    <parent link="support_link"/><child link="pelvis_link"/>
+  </joint>
+
+  <xacro:box_link name="abdomen_link" link_mass="${mass['abdomen']}" size_x="0.20" size_y="0.25" size_z="0.20"
+                  center_x="0" center_y="0" center_z="0.08" color="body_gray"/>
+  <joint name="pelvis_to_abdomen_joint" type="fixed">
+    <origin xyz="0 0 ${geometry['abdomen_offset_z']}" rpy="0 0 0"/>
+    <parent link="pelvis_link"/><child link="abdomen_link"/>
+  </joint>
+
+  <xacro:box_link name="chest_link" link_mass="${mass['chest']}" size_x="0.24" size_y="0.46" size_z="0.30"
+                  center_x="0" center_y="0" center_z="0.15" color="body_gray"/>
+  <joint name="abdomen_to_chest_joint" type="fixed">
+    <origin xyz="0 0 ${geometry['chest_offset_z']}" rpy="0 0 0"/>
+    <parent link="abdomen_link"/><child link="chest_link"/>
+  </joint>
+
+  <xacro:sphere_link name="head_link" link_mass="${mass['head']}" radius="${geometry['head_radius']}" color="body_gray"/>
+  <joint name="chest_to_head_joint" type="fixed">
+    <origin xyz="0 0 ${geometry['head_offset_z']}" rpy="0 0 0"/>
+    <parent link="chest_link"/><child link="head_link"/>
+  </joint>
+
+  <xacro:arm side="left" sign="1" color="left_blue"/>
+  <xacro:arm side="right" sign="-1" color="right_orange"/>
+  <xacro:leg side="left" sign="1" color="left_blue" rp_id_offset="0" vaxor_id_offset="0"/>
+  <xacro:leg side="right" sign="-1" color="right_orange" rp_id_offset="4" vaxor_id_offset="2"/>
+
+  <xacro:macro name="control_joint" params="name profile">
+    <xacro:property name="limits" value="${profiles[profile]}"/>
+    <joint name="${name}">
+      <command_interface name="effort">
+        <param name="min">-${limits['effort_nm']}</param>
+        <param name="max">${limits['effort_nm']}</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="GazeboSimSystem" type="system">
+    <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
+    <xacro:control_joint name="left_scapula_protraction_joint" profile="scapula_protraction"/>
+    <xacro:control_joint name="left_scapula_elevation_joint" profile="scapula_elevation"/>
+    <xacro:control_joint name="left_shoulder_pitch_joint" profile="shoulder_pitch"/>
+    <xacro:control_joint name="left_shoulder_roll_joint" profile="shoulder_roll"/>
+    <xacro:control_joint name="left_shoulder_yaw_joint" profile="shoulder_yaw"/>
+    <xacro:control_joint name="left_elbow_pitch_joint" profile="elbow_pitch"/>
+    <xacro:control_joint name="left_forearm_roll_joint" profile="forearm_roll"/>
+    <xacro:control_joint name="left_wrist_flexion_joint" profile="wrist_flexion"/>
+    <xacro:control_joint name="left_wrist_deviation_joint" profile="wrist_deviation"/>
+    <xacro:control_joint name="right_scapula_protraction_joint" profile="scapula_protraction"/>
+    <xacro:control_joint name="right_scapula_elevation_joint" profile="scapula_elevation"/>
+    <xacro:control_joint name="right_shoulder_pitch_joint" profile="shoulder_pitch"/>
+    <xacro:control_joint name="right_shoulder_roll_joint" profile="shoulder_roll"/>
+    <xacro:control_joint name="right_shoulder_yaw_joint" profile="shoulder_yaw"/>
+    <xacro:control_joint name="right_elbow_pitch_joint" profile="elbow_pitch"/>
+    <xacro:control_joint name="right_forearm_roll_joint" profile="forearm_roll"/>
+    <xacro:control_joint name="right_wrist_flexion_joint" profile="wrist_flexion"/>
+    <xacro:control_joint name="right_wrist_deviation_joint" profile="wrist_deviation"/>
+    <xacro:control_joint name="left_hip_yaw_joint" profile="hip_yaw"/>
+    <xacro:control_joint name="left_hip_roll_joint" profile="hip_roll"/>
+    <xacro:control_joint name="left_hip_pitch_joint" profile="hip_pitch"/>
+    <xacro:control_joint name="left_knee_pitch_joint" profile="knee_pitch"/>
+    <xacro:control_joint name="left_ankle_pitch_joint" profile="ankle_pitch"/>
+    <xacro:control_joint name="left_ankle_roll_joint" profile="ankle_roll"/>
+    <xacro:control_joint name="right_hip_yaw_joint" profile="hip_yaw"/>
+    <xacro:control_joint name="right_hip_roll_joint" profile="hip_roll"/>
+    <xacro:control_joint name="right_hip_pitch_joint" profile="hip_pitch"/>
+    <xacro:control_joint name="right_knee_pitch_joint" profile="knee_pitch"/>
+    <xacro:control_joint name="right_ankle_pitch_joint" profile="ankle_pitch"/>
+    <xacro:control_joint name="right_ankle_roll_joint" profile="ankle_roll"/>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+      <hold_joints>true</hold_joints>
+    </plugin>
+  </gazebo>
+</robot>

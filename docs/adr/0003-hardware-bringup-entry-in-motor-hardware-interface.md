@@ -1,27 +1,9 @@
-# 真机 bring-up 入口归属 motor_hardware_interface
+# 历史：真实机器人启动入口归属
 
-**Status**: accepted
+**Status:** superseded（2026-08-25）
 
-真机启动入口（`hardware.launch.py`、`driver_controllers.yaml` 与 CAN-FD ros2_control
-硬件 xacro 片段）从 `upper_body_canfd_gazebo` 下沉到 `motor_hardware_interface`：真机
-部署只依赖底层驱动 + 适配层 + 模型描述，不再被模拟器/Gazebo 的安装依赖绑架。模型描述
-（URDF）仍由模型包提供，`hardware.launch.py` 以 `model_xacro` 为必填参数，避免适配层
-反向依赖模型包。
+本 ADR 曾讨论真实机器人启动入口应属于 ROS 硬件适配包还是模型包。当前仓库明确只做
+Gazebo 仿真，不提供真实机器人启动入口、硬件插件或控制器配置，因此原决策不再适用。
 
-## Considered Options
-
-- **保持现状（真机入口留在模型集成包）**：入口与模型放一起顺手，但安装真机链路必然
-  拖入 `motor_canfd_sim` 与整套 Gazebo 依赖。
-- **下沉到 motor_hardware_interface（已选）**：真机入口与 CAN-FD 适配职责同属一层，
-  控制器配置与电机拓扑配置同归 `hw/config`；代价是入口不自带模型描述，调用方必须
-  显式传 `model_xacro`。
-- **新建轻量 bringup 包**：职责最清晰，但多一个包与一层依赖链，当前规模不值得。
-
-## Consequences
-
-- 真机命令变为 `ros2 launch motor_hardware_interface hardware.launch.py model_xacro:=...`。
-- `driver_controllers.yaml` 成为 `hw/config` 的一部分，`driver_loopback` 与真机共用
-  同一份控制器配置。
-- `upper_body_canfd_gazebo` 回归纯仿真模型/launch 集成，仍负责模型描述。
-- CAN-FD ros2_control 硬件片段（`urdf/canfd_hardware.xacro`）与拓扑无关，其他机器人
-  模型可直接 include。
+外部 3588 或 MCU 在本工程中只是协议对端，通过 USB CDC/UART 或 USB-CANFD 向仿真节点
+发送命令；其软件、标定和安全机制不属于本仓库范围。

@@ -1,0 +1,20 @@
+motor_simulation:
+  timing:
+    control_hz: 100
+    rp_feedback_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+  buses: [left_arm, right_arm, legs]
+  profiles:
+    invalid:
+      hard_lower_deg: -10
+      hard_upper_deg: 10
+      command_lower_deg: -20
+      command_upper_deg: 5
+      velocity_rad_s: 1
+      effort_nm: 1
+      gear_ratio: 1
+      efficiency: 1
+      plant: {kp: 1, kd: 1}
+  motors:
+    - {joint: invalid_joint, bus: left_arm, protocol: rp, id: 1, profile: invalid}

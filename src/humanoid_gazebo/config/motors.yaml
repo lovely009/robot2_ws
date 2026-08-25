@@ -1,0 +1,167 @@
+# 所有执行器数据均为 Gazebo 仿真的名义值，不代表厂家规格或真机标定值。
+motor_simulation:
+  timing:
+    control_hz: 100
+    rp_feedback_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+  command_margin_deg: 5.0
+  buses: [left_arm, right_arm, legs]
+
+  profiles:
+    scapula_protraction:
+      hard_lower_deg: -25
+      hard_upper_deg: 25
+      velocity_rad_s: 2.0
+      effort_nm: 30.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    scapula_elevation:
+      hard_lower_deg: -15
+      hard_upper_deg: 30
+      velocity_rad_s: 2.0
+      effort_nm: 30.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    shoulder_pitch:
+      hard_lower_deg: -60
+      hard_upper_deg: 150
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    shoulder_roll:
+      hard_lower_deg: -30
+      hard_upper_deg: 150
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    shoulder_yaw:
+      hard_lower_deg: -90
+      hard_upper_deg: 90
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    elbow_pitch:
+      hard_lower_deg: 0
+      hard_upper_deg: 145
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    forearm_roll:
+      hard_lower_deg: -90
+      hard_upper_deg: 90
+      velocity_rad_s: 6.0
+      effort_nm: 4.0
+      gear_ratio: 36.0
+      efficiency: 0.80
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
+    wrist_flexion:
+      hard_lower_deg: -70
+      hard_upper_deg: 70
+      velocity_rad_s: 6.0
+      effort_nm: 4.0
+      gear_ratio: 36.0
+      efficiency: 0.80
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
+    wrist_deviation:
+      hard_lower_deg: -25
+      hard_upper_deg: 25
+      velocity_rad_s: 6.0
+      effort_nm: 4.0
+      gear_ratio: 36.0
+      efficiency: 0.80
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
+    hip_yaw:
+      hard_lower_deg: -45
+      hard_upper_deg: 45
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    hip_roll:
+      hard_lower_deg: -35
+      hard_upper_deg: 35
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    hip_pitch:
+      hard_lower_deg: -30
+      hard_upper_deg: 120
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    knee_pitch:
+      hard_lower_deg: 0
+      hard_upper_deg: 135
+      velocity_rad_s: 4.0
+      effort_nm: 60.0
+      gear_ratio: 1.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0}
+    ankle_pitch:
+      hard_lower_deg: -40
+      hard_upper_deg: 30
+      velocity_rad_s: 4.0
+      effort_nm: 10.0
+      gear_ratio: 80.0
+      efficiency: 0.80
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
+    ankle_roll:
+      hard_lower_deg: -25
+      hard_upper_deg: 25
+      velocity_rad_s: 4.0
+      effort_nm: 10.0
+      gear_ratio: 80.0
+      efficiency: 0.80
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
+
+  # 顺序是外部控制与 Gazebo controller 的稳定 30 轴 ABI。
+  motors:
+    - {joint: left_scapula_protraction_joint, bus: left_arm, protocol: rp, id: 1, profile: scapula_protraction}
+    - {joint: left_scapula_elevation_joint, bus: left_arm, protocol: rp, id: 2, profile: scapula_elevation}
+    - {joint: left_shoulder_pitch_joint, bus: left_arm, protocol: rp, id: 3, profile: shoulder_pitch}
+    - {joint: left_shoulder_roll_joint, bus: left_arm, protocol: rp, id: 4, profile: shoulder_roll}
+    - {joint: left_shoulder_yaw_joint, bus: left_arm, protocol: rp, id: 5, profile: shoulder_yaw}
+    - {joint: left_elbow_pitch_joint, bus: left_arm, protocol: rp, id: 6, profile: elbow_pitch}
+    - {joint: left_forearm_roll_joint, bus: left_arm, protocol: motor_2530, id: 1, profile: forearm_roll}
+    - {joint: left_wrist_flexion_joint, bus: left_arm, protocol: motor_2530, id: 2, profile: wrist_flexion}
+    - {joint: left_wrist_deviation_joint, bus: left_arm, protocol: motor_2530, id: 3, profile: wrist_deviation}
+
+    - {joint: right_scapula_protraction_joint, bus: right_arm, protocol: rp, id: 1, profile: scapula_protraction}
+    - {joint: right_scapula_elevation_joint, bus: right_arm, protocol: rp, id: 2, profile: scapula_elevation}
+    - {joint: right_shoulder_pitch_joint, bus: right_arm, protocol: rp, id: 3, profile: shoulder_pitch}
+    - {joint: right_shoulder_roll_joint, bus: right_arm, protocol: rp, id: 4, profile: shoulder_roll}
+    - {joint: right_shoulder_yaw_joint, bus: right_arm, protocol: rp, id: 5, profile: shoulder_yaw}
+    - {joint: right_elbow_pitch_joint, bus: right_arm, protocol: rp, id: 6, profile: elbow_pitch}
+    - {joint: right_forearm_roll_joint, bus: right_arm, protocol: motor_2530, id: 1, profile: forearm_roll}
+    - {joint: right_wrist_flexion_joint, bus: right_arm, protocol: motor_2530, id: 2, profile: wrist_flexion}
+    - {joint: right_wrist_deviation_joint, bus: right_arm, protocol: motor_2530, id: 3, profile: wrist_deviation}
+
+    - {joint: left_hip_yaw_joint, bus: legs, protocol: rp, id: 1, profile: hip_yaw}
+    - {joint: left_hip_roll_joint, bus: legs, protocol: rp, id: 2, profile: hip_roll}
+    - {joint: left_hip_pitch_joint, bus: legs, protocol: rp, id: 3, profile: hip_pitch}
+    - {joint: left_knee_pitch_joint, bus: legs, protocol: rp, id: 4, profile: knee_pitch}
+    - {joint: left_ankle_pitch_joint, bus: legs, protocol: motor_2530, id: 1, profile: ankle_pitch}
+    - {joint: left_ankle_roll_joint, bus: legs, protocol: motor_2530, id: 2, profile: ankle_roll}
+
+    - {joint: right_hip_yaw_joint, bus: legs, protocol: rp, id: 5, profile: hip_yaw}
+    - {joint: right_hip_roll_joint, bus: legs, protocol: rp, id: 6, profile: hip_roll}
+    - {joint: right_hip_pitch_joint, bus: legs, protocol: rp, id: 7, profile: hip_pitch}
+    - {joint: right_knee_pitch_joint, bus: legs, protocol: rp, id: 8, profile: knee_pitch}
+    - {joint: right_ankle_pitch_joint, bus: legs, protocol: motor_2530, id: 3, profile: ankle_pitch}
+    - {joint: right_ankle_roll_joint, bus: legs, protocol: motor_2530, id: 4, profile: ankle_roll}

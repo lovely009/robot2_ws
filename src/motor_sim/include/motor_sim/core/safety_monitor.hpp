@@ -37,9 +37,12 @@ public:
   using Clock = std::chrono::steady_clock;
   using TimePoint = Clock::time_point;
 
+  // latching_enabled=false 仅用于本机调试：所有故障只记录不锁存，
+  // 输出不清零；默认 true 保持完整安全语义。
   SafetyMonitor(std::size_t axis_count,
                 std::chrono::milliseconds command_timeout,
-                std::chrono::milliseconds duplicate_window);
+                std::chrono::milliseconds duplicate_window,
+                bool latching_enabled = true);
 
   void set_enabled(std::size_t motor_index, bool enabled, TimePoint now);
   void observe_valid_command(std::size_t motor_index, const std::string &bus,
@@ -64,6 +67,7 @@ private:
   std::size_t axis_count_;
   std::chrono::milliseconds command_timeout_;
   std::chrono::milliseconds duplicate_window_;
+  bool latching_enabled_;
   Fault fault_{Fault::None};
   std::vector<bool> enabled_;
   std::vector<std::optional<TimePoint>> last_valid_commands_;

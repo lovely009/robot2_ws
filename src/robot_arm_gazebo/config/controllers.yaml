@@ -1,4 +1,6 @@
-controller_manager:
+# 顶层键必须是节点全限定名：插件把 controller_manager 放在 /robot_arm 命名空间下，
+# 裸键匹配不上会导致整个参数文件被静默忽略。
+/robot_arm/controller_manager:
   ros__parameters:
     update_rate: 100
     joint_state_broadcaster:
@@ -6,7 +8,7 @@ controller_manager:
     effort_controller:
       type: forward_command_controller/ForwardCommandController
 
-effort_controller:
+/robot_arm/effort_controller:
   ros__parameters:
     joints:
       - shoulder_pan_joint

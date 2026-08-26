@@ -90,3 +90,34 @@ TEST(SafetyMonitor, LimitFaultIsFirstFaultAndCannotBeCleared) {
   safety.observe_disconnect("left_arm");
   EXPECT_EQ(safety.fault(), core::Fault::CommandLimit);
 }
+
+// 调试模式（latching_enabled=false）：检测逻辑保留，但任何故障都不锁存、
+// 不清零输出，方便单步调试时反复注入命令。
+TEST(SafetyMonitorDebugMode, TimeoutDoesNotLatchOrZeroEfforts) {
+  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
+  safety.set_enabled(0U, true, at_ms(0));
+  safety.observe_valid_command(0U, "arm", 1U, {0x01U}, at_ms(0));
+  const auto state = safety.tick(at_ms(151));
+  EXPECT_FALSE(state.latched);
+  EXPECT_EQ(state.fault, core::Fault::None);
+  // 快照不携带清零 efforts；状态里仍能看到超时标记用于诊断。
+  EXPECT_TRUE(state.efforts.empty());
+  EXPECT_TRUE(state.motor_status[0].timed_out);
+}
+
+TEST(SafetyMonitorDebugMode, DuplicateControllerDoesNotLatch) {
+  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
+  safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));
+  safety.observe_valid_command(0U, "legs", 3U, {0x02U}, at_us(1500));
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+  EXPECT_FALSE(safety.latched());
+}
+
+TEST(SafetyMonitorDebugMode, DisconnectAndExplicitLatchAreIgnored) {
+  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
+  safety.observe_disconnect("arm");
+  safety.observe_reconnect("arm");
+  safety.latch(core::Fault::WrongBus);
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+  EXPECT_FALSE(safety.latched());
+}

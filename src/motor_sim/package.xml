@@ -2,7 +2,7 @@
 <package format="3">
   <name>motor_sim</name>
   <version>0.1.0</version>
-  <description>Shared RP and Vaxor motor simulation components.</description>
+  <description>Shared RP, Vaxor and CERB motor simulation components.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 

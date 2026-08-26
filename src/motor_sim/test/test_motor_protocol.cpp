@@ -126,7 +126,11 @@ TEST(VaxorProtocol, EncodesReplyAndStatusAtMotorSide) {
   EXPECT_EQ(status.size, 20U);
   EXPECT_EQ(status.data[18],
             static_cast<uint8_t>(protocol::CommandMode::Velocity));
-  EXPECT_EQ(status.data[19], 0U);
+  // 手册 3.5：Data19 是电机类型枚举（0x01=30mm），与使能状态无关。
+  EXPECT_EQ(status.data[19], 0x01U);
+  // 手册 3.5：母线电压 = 码值 / 10 V，无 0x8000 偏移；120 -> 12.0 V。
+  EXPECT_EQ(status.data[10], 120U);
+  EXPECT_EQ(status.data[11], 0U);
 }
 
 TEST(MotorProtocols, RejectInvalidIdsAndIgnoreUnrelatedFrames) {

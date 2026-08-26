@@ -1,5 +1,6 @@
 #include "motor_sim/protocol/motor_protocol.hpp"
 
+#include "motor_sim/protocol/cerb_protocol.hpp"
 #include "motor_sim/protocol/rp_protocol.hpp"
 #include "motor_sim/protocol/vaxor_protocol.hpp"
 
@@ -71,6 +72,13 @@ CommandMode wire_mode(const uint8_t value) {
   return static_cast<CommandMode>(value);
 }
 
+// 手册 3.5：母线电压 = 原始码值 / 10 V，该字段无 0x8000 偏移；
+// 120 对应 12.0 V 仿名义供电。
+constexpr uint16_t kVaxorNominalBusVoltageCode = 120U;
+// 手册 3.5：电机类型 0x01=30mm、0x02=25mm、0x03=20mm、0x04=16mm；
+// 仿真统一上报 30mm 仿名义类型。
+constexpr uint8_t kVaxorSimulatedMotorType = 0x01U;
+
 }  // namespace
 
 std::unique_ptr<MotorProtocol> make_motor_protocol(const std::string_view name) {
@@ -79,6 +87,9 @@ std::unique_ptr<MotorProtocol> make_motor_protocol(const std::string_view name) 
   }
   if (name == "motor_2530") {
     return std::make_unique<VaxorProtocol>();
+  }
+  if (name == "cerb") {
+    return std::make_unique<CerbProtocol>();
   }
   throw std::invalid_argument("unsupported motor protocol");
 }
@@ -278,10 +289,11 @@ std::array<uint8_t, 20> pack_vaxor_status(
   std::array<uint8_t, 20> output{};
   const auto reply = pack_vaxor_reply(feedback);
   std::copy(reply.begin(), reply.begin() + 10U, output.begin());
-  write_le(output.data() + 10U, static_cast<uint16_t>(0x8000 + 120), 2U);
+  write_le(output.data() + 10U, kVaxorNominalBusVoltageCode, 2U);
+  // Data12~15 故障位保持 0（无故障），Data16=4 表示运行，Data17=0 空闲。
   output[16] = 4U;
   output[18] = static_cast<uint8_t>(feedback.mode);
-  output[19] = static_cast<uint8_t>(feedback.enabled);
+  output[19] = kVaxorSimulatedMotorType;
   return output;
 }
 

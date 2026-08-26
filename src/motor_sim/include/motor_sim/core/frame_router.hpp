@@ -21,6 +21,9 @@ enum class RouterStatus { Applied, Ignored, WrongBus, SafetyFault };
 struct RouterResult {
   RouterStatus status{RouterStatus::Ignored};
   std::vector<std::size_t> updated_motor_indices;
+  // 手册一问一答语义：本帧命中了哪些 Vaxor 电机的 MIT 命令，
+  // 节点层需立即回发 FeedbackKind::Reply 帧。
+  std::vector<std::size_t> reply_motor_indices;
 };
 
 class FrameRouter {
@@ -28,7 +31,9 @@ public:
   using Clock = std::chrono::steady_clock;
   using TimePoint = Clock::time_point;
 
-  explicit FrameRouter(SystemConfig config);
+  // fault_latching_enabled=false 仅用于本机调试，默认保持锁存安全语义。
+  explicit FrameRouter(SystemConfig config,
+                       bool fault_latching_enabled = true);
   RouterResult handle(const std::string &bus,
                       const protocol::CanFrame &frame, TimePoint now);
   std::vector<double> compute_efforts(const std::vector<JointSample> &states,

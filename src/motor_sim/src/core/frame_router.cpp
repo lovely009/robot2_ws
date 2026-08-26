@@ -17,17 +17,23 @@ bool is_control_frame(const protocol::CanFrame &frame,
   if (motor.protocol == "rp") {
     return frame.id == protocol::kRpEnableId && !frame.fd && frame.size == 8U;
   }
+  // CERB 的使能位随 MIT 命令帧携带，没有独立控制帧；
+  // 其余协议按 Vaxor 控制帧识别。
+  if (motor.protocol == "cerb") {
+    return false;
+  }
   return frame.id == protocol::vaxor_control_id(motor.id) && !frame.fd &&
          frame.size == 8U;
 }
 
 }  // namespace
 
-FrameRouter::FrameRouter(SystemConfig config)
+FrameRouter::FrameRouter(SystemConfig config,
+                         const bool fault_latching_enabled)
     : config_(std::move(config)),
       safety_(config_.motors.size(),
               std::chrono::milliseconds(config_.timing.command_timeout_ms),
-              std::chrono::milliseconds(2)),
+              std::chrono::milliseconds(2), fault_latching_enabled),
       commands_(config_.motors.size()),
       enabled_(config_.motors.size(), false),
       modes_(config_.motors.size(), protocol::CommandMode::Mit),
@@ -49,7 +55,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
                                  const protocol::CanFrame &frame,
                                  const TimePoint now) {
   if (safety_.latched()) {
-    return {RouterStatus::SafetyFault, {}};
+    return {RouterStatus::SafetyFault, {}, {}};
   }
   bool bus_exists = false;
   for (const auto &configured_bus : config_.buses) {
@@ -57,7 +63,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
   }
   if (!bus_exists) {
     safety_.latch(Fault::WrongBus);
-    return {RouterStatus::WrongBus, {}};
+    return {RouterStatus::WrongBus, {}, {}};
   }
 
   struct PendingCommand {
@@ -82,7 +88,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
          joint_command.position < motor.limits.command_lower_rad ||
          joint_command.position > motor.limits.command_upper_rad)) {
       safety_.latch(Fault::CommandLimit);
-      return {RouterStatus::SafetyFault, {}};
+      return {RouterStatus::SafetyFault, {}, {}};
     }
     pending.push_back({index, joint_command, control});
   }
@@ -90,12 +96,12 @@ RouterResult FrameRouter::handle(const std::string &bus,
   if (pending.empty()) {
     if (frame_belongs_to_other_bus(bus, frame)) {
       safety_.latch(Fault::WrongBus);
-      return {RouterStatus::WrongBus, {}};
+      return {RouterStatus::WrongBus, {}, {}};
     }
-    return {RouterStatus::Ignored, {}};
+    return {RouterStatus::Ignored, {}, {}};
   }
 
-  RouterResult result{RouterStatus::Applied, {}};
+  RouterResult result{RouterStatus::Applied, {}, {}};
   result.updated_motor_indices.reserve(pending.size());
   for (const auto &item : pending) {
     if (item.control) {
@@ -114,10 +120,22 @@ RouterResult FrameRouter::handle(const std::string &bus,
       safety_.observe_valid_command(item.index, bus, frame.id,
                                     payload_bytes(frame), now);
       if (safety_.latched()) {
-        return {RouterStatus::SafetyFault, {}};
+        return {RouterStatus::SafetyFault, {}, {}};
       }
       commands_[item.index] = item.command;
       commands_[item.index].enabled = enabled_[item.index];
+      // CERB 的使能位随 MIT 命令帧携带，这里同步锁存使能状态；
+      // Vaxor/RP 的使能只能来自独立控制帧。
+      if (config_.motors[item.index].protocol == "cerb") {
+        safety_.set_enabled(item.index, item.command.enabled, now);
+        enabled_[item.index] = item.command.enabled;
+      }
+      // Vaxor 的 MIT 命令帧要求逐帧应答（手册 3.4）；CERB 反馈报文同样由
+      // 命令帧触发；RP 反馈由节点分频发送。
+      if (config_.motors[item.index].protocol == "motor_2530" ||
+          config_.motors[item.index].protocol == "cerb") {
+        result.reply_motor_indices.push_back(item.index);
+      }
     }
     result.updated_motor_indices.push_back(item.index);
   }
@@ -152,6 +170,13 @@ protocol::MotorCommand FrameRouter::to_joint_command(
   auto command = wire_command;
   if (config_.motors[index].protocol == "rp") {
     command.use_nominal_gains = true;
+    return command;
+  }
+  // CERB MIT 的位置、速度、增益与前馈力矩都是减速器输出轴侧物理量，
+  // 与关节侧一致，直接透传，不做传动换算。
+  if (config_.motors[index].protocol == "cerb") {
+    command.mode = wire_command.mode;
+    command.use_nominal_gains = false;
     return command;
   }
   command.mode = modes_[index];
@@ -198,6 +223,19 @@ protocol::MotorFeedback FrameRouter::motor_feedback(
     feedback.position = state.position_rad;
     feedback.velocity = state.velocity_rad_s;
     feedback.effort = joint_effort_nm;
+    return feedback;
+  }
+  // CERB 反馈帧：位置为负载端（与关节侧一致，直接透传），
+  // 速度为电机端（rad/s，编码器内换算为 RPM），电流由关节力矩经传动与 Kt 还原。
+  if (motor.protocol == "cerb") {
+    feedback.position = state.position_rad;
+    feedback.velocity =
+        transmissions_[index].joint_to_motor_velocity(state.velocity_rad_s);
+    const double motor_torque =
+        transmissions_[index].joint_effort_to_motor_torque(joint_effort_nm);
+    feedback.effort = std::clamp(
+        motor_torque / motor.plant.torque_constant_nm_per_a,
+        -motor.plant.current_limit_a, motor.plant.current_limit_a);
     return feedback;
   }
   feedback.position =

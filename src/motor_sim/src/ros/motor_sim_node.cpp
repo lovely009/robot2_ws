@@ -1,7 +1,10 @@
 #include "motor_sim/ros/motor_sim_node.hpp"
+#include "motor_sim/transport/socket_can_transport.hpp"
+
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 
 #include <fcntl.h>
+#include <net/if.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -22,8 +25,11 @@ transport::TransportMode parse_transport_mode(const std::string &value) {
   if (value == "serial_slcan") {
     return transport::TransportMode::SerialSlcan;
   }
+  if (value == "socket_can") {
+    return transport::TransportMode::SocketCan;
+  }
   throw std::invalid_argument(
-      "transport_mode must be usb_serial or serial_slcan");
+      "transport_mode must be usb_serial, serial_slcan or socket_can");
 }
 
 std::string fault_message(const Fault fault) {
@@ -52,29 +58,47 @@ void validate_node_parameters(
   if (parameters.config_file.empty()) {
     throw std::invalid_argument("config_file cannot be empty");
   }
-  const std::set<int> supported_baud_rates{
-      115200, 460800, 921600, 1000000, 2000000, 3000000};
-  if (supported_baud_rates.find(parameters.baud_rate) ==
-      supported_baud_rates.end()) {
-    throw std::invalid_argument("unsupported baud_rate");
-  }
   if (parameters.transport_mode == transport::TransportMode::SerialSlcan &&
       !parameters.allow_external_canfd) {
     throw std::invalid_argument(
         "serial_slcan requires allow_external_canfd:=true");
   }
+  if (parameters.transport_mode != transport::TransportMode::SocketCan) {
+    const std::set<int> supported_baud_rates{
+        115200, 460800, 921600, 1000000, 2000000, 3000000};
+    if (supported_baud_rates.find(parameters.baud_rate) ==
+        supported_baud_rates.end()) {
+      throw std::invalid_argument("unsupported baud_rate");
+    }
+  }
   const std::set<std::string> expected(contract.buses.begin(),
                                        contract.buses.end());
   std::set<std::string> buses;
-  std::set<std::string> devices;
-  for (const auto &[bus, device] : parameters.ports) {
+  std::set<std::string> endpoints;
+  for (const auto &[bus, endpoint] : parameters.ports) {
     if (expected.find(bus) == expected.end() || !buses.insert(bus).second) {
       throw std::invalid_argument("ports must define each logical bus once");
     }
-    if (device.empty() || !std::filesystem::exists(device)) {
+    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
+      // SocketCAN 端口是接口名（如 vcan0），不是设备路径；必须已存在
+      // （ip link 可见）且各逻辑总线互不重复。
+      if (endpoint.empty() || endpoint.find('/') != std::string::npos) {
+        throw std::invalid_argument(
+            "socketcan port must be an interface name without '/'");
+      }
+      if (::if_nametoindex(endpoint.c_str()) == 0U) {
+        throw std::invalid_argument("socketcan interface must exist");
+      }
+      if (!endpoints.insert(endpoint).second) {
+        throw std::invalid_argument("socketcan interfaces must be unique");
+      }
+      continue;
+    }
+    if (endpoint.empty() || !std::filesystem::exists(endpoint)) {
       throw std::invalid_argument("serial port must exist");
     }
-    const int descriptor = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    const int descriptor =
+        ::open(endpoint.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (descriptor < 0 || ::isatty(descriptor) != 1) {
       if (descriptor >= 0) {
         ::close(descriptor);
@@ -82,8 +106,8 @@ void validate_node_parameters(
       throw std::invalid_argument("serial port must open as a tty");
     }
     ::close(descriptor);
-    const auto resolved = std::filesystem::canonical(device).string();
-    if (!devices.insert(resolved).second) {
+    const auto resolved = std::filesystem::canonical(endpoint).string();
+    if (!endpoints.insert(resolved).second) {
       throw std::invalid_argument("serial ports must be unique");
     }
   }
@@ -109,22 +133,37 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
       "config_file", defaults.config_file);
   parameters.allow_external_canfd =
       declare_parameter<bool>("allow_external_canfd", false);
+  // 调试开关：false 时故障只记录不锁存；默认 true 保持安全语义。
+  defaults.fault_latching_enabled =
+      declare_parameter<bool>("fault_latching_enabled",
+                              defaults.fault_latching_enabled);
   validate_node_parameters(parameters, contract);
 
   TransportMap transports;
   for (const auto &[bus, device] : parameters.ports) {
-    transports.emplace(bus, std::make_unique<transport::SerialTransport>(
-                                device, parameters.transport_mode,
-                                parameters.baud_rate));
+    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
+      transports.emplace(
+          bus, std::make_unique<transport::SocketCanTransport>(device));
+    } else {
+      transports.emplace(bus, std::make_unique<transport::SerialTransport>(
+                                  device, parameters.transport_mode,
+                                  parameters.baud_rate));
+    }
   }
   initialize(::motor_sim::core::load_system_config(parameters.config_file,
                                                     contract),
              std::move(transports), defaults);
   for (const auto &[bus, device] : parameters.ports) {
-    publish_diagnostic(
-        diagnostic_msgs::msg::DiagnosticStatus::OK,
-        "serial bus '" + bus + "' requested '" + device + "', resolved '" +
-            std::filesystem::canonical(device).string() + "'");
+    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
+      publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::OK,
+                         "socketcan bus '" + bus + "' bound to '" + device +
+                             "'");
+    } else {
+      publish_diagnostic(
+          diagnostic_msgs::msg::DiagnosticStatus::OK,
+          "serial bus '" + bus + "' requested '" + device + "', resolved '" +
+              std::filesystem::canonical(device).string() + "'");
+    }
   }
 }
 
@@ -136,7 +175,8 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options, SystemConfig conf
 
 void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
                               const NodeDefaults &defaults) {
-  router_ = std::make_unique<FrameRouter>(std::move(config));
+  router_ = std::make_unique<FrameRouter>(std::move(config),
+                                          defaults.fault_latching_enabled);
   transports_ = std::move(transports);
   if (transports_.size() != router_->config().buses.size()) {
     throw std::invalid_argument("transport count does not match configured buses");
@@ -174,7 +214,10 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
   transport_timer_ = create_wall_timer(std::chrono::milliseconds(1),
                                        [this] { transport_tick(); });
   publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::OK,
-                     "serial buses opened; motors await explicit enable");
+                     defaults.fault_latching_enabled
+                         ? "serial buses opened; motors await explicit enable"
+                         : "serial buses opened; motors await explicit enable; "
+                           "DEBUG: fault latching disabled");
 }
 
 void MotorSimNode::joint_state_callback(
@@ -207,8 +250,24 @@ void MotorSimNode::transport_tick() {
       }
       // 使用独立 I/O 线程记录的到达时间，ROS executor 延迟后成批消费
       // 也不会压缩帧间隔，避免 2 ms duplicate-controller 误报。
-      static_cast<void>(router_->handle(bus, received_frame.frame,
-                                        received_frame.received_at));
+      const auto router_result = router_->handle(bus, received_frame.frame,
+                                                 received_frame.received_at);
+      if (router_result.status == core::RouterStatus::Applied) {
+        // 手册 3.4 一问一答：Vaxor 每收到一帧 MIT 命令立即回一帧 Reply。
+        for (const auto index : router_result.reply_motor_indices) {
+          const auto feedback = router_->motor_feedback(
+              index, joint_states_[index], last_efforts_[index]);
+          const auto frame = protocol::make_motor_protocol(
+                                 router_->config().motors[index].protocol)
+                                 ->encode_feedback(feedback,
+                                                   protocol::FeedbackKind::
+                                                       Reply);
+          if (!endpoint->send(frame)) {
+            handle_disconnect(bus);
+            return;
+          }
+        }
+      }
     }
   }
 }
@@ -236,6 +295,11 @@ void MotorSimNode::send_feedback(const std::size_t tick) {
   for (std::size_t index = 0U; index < config.motors.size(); ++index) {
     const auto &motor = config.motors[index];
     const bool rp = motor.protocol == "rp";
+    // CERB 没有周期上报（手册未定义），反馈完全由命令帧触发，
+    // 在 transport_tick 的一问一答路径中回发。
+    if (motor.protocol == "cerb") {
+      continue;
+    }
     if ((rp && tick % rp_divisor != 0U) ||
         (!rp && tick % vaxor_divisor != 0U)) {
       continue;

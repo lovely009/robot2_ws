@@ -8,10 +8,12 @@ namespace motor_sim::core {
 SafetyMonitor::SafetyMonitor(
     const std::size_t axis_count,
     const std::chrono::milliseconds command_timeout,
-    const std::chrono::milliseconds duplicate_window)
+    const std::chrono::milliseconds duplicate_window,
+    const bool latching_enabled)
     : axis_count_(axis_count),
       command_timeout_(command_timeout),
       duplicate_window_(duplicate_window),
+      latching_enabled_(latching_enabled),
       enabled_(axis_count, false),
       last_valid_commands_(axis_count),
       last_motor_status_(axis_count) {
@@ -65,6 +67,11 @@ void SafetyMonitor::observe_reconnect(const std::string &) noexcept {
 }
 
 void SafetyMonitor::latch(const Fault fault) noexcept {
+  // 调试模式下所有故障路径（超时/越限/错总线/重复控制器/断线）都汇聚到
+  // 这里；禁用锁存时只保留检测逻辑，不置位故障、不清零输出。
+  if (!latching_enabled_) {
+    return;
+  }
   if (fault_ == Fault::None && fault != Fault::None) {
     fault_ = fault;
   }

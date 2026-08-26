@@ -11,8 +11,6 @@
 
 namespace motor_sim::transport {
 
-enum class TransportMode { UsbSerial, SerialSlcan };
-
 class SerialTransport final : public FrameTransport {
 public:
   SerialTransport(std::string device, TransportMode mode, int baud_rate);

@@ -4,6 +4,7 @@ import yaml
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+CONTROLLER_NAMESPACE = "/robot_arm"
 EXPECTED = [
     ("shoulder_pan_joint", "arm", "rp", 1),
     ("shoulder_lift_joint", "arm", "rp", 2),
@@ -23,9 +24,27 @@ def test_motor_and_controller_order_match() -> None:
     controllers = yaml.safe_load(
         (PACKAGE_ROOT / "config/controllers.yaml").read_text()
     )
-    assert controllers["effort_controller"]["ros__parameters"]["joints"] == [
-        row[0] for row in EXPECTED
-    ]
+    assert controllers[f"{CONTROLLER_NAMESPACE}/effort_controller"][
+        "ros__parameters"
+    ]["joints"] == [row[0] for row in EXPECTED]
+
+
+def test_controller_yaml_keys_match_namespaced_nodes() -> None:
+    """参数文件顶层键按节点全限定名匹配，裸键在 /robot_arm 命名空间下整文件失效。"""
+
+    controllers = yaml.safe_load(
+        (PACKAGE_ROOT / "config/controllers.yaml").read_text()
+    )
+    assert controllers[f"{CONTROLLER_NAMESPACE}/controller_manager"][
+        "ros__parameters"
+    ]["update_rate"] == 100
+    for name in ("joint_state_broadcaster", "effort_controller"):
+        assert (
+            controllers[f"{CONTROLLER_NAMESPACE}/controller_manager"][
+                "ros__parameters"
+            ][name]["type"]
+            != ""
+        )
 
 
 def test_six_axis_command_limits_stay_inside_hard_limits() -> None:

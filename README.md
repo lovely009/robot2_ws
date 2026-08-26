@@ -1,19 +1,26 @@
-# 30 轴人形机器人 Gazebo 仿真
+# UR5e 机械臂 Gazebo 电机仿真
 
-本仓库只包含一个 ROS 2 包：`humanoid_gazebo`。它在 Gazebo Fortress 中模拟一台
-170 cm、45 kg、躯体悬空固定的人形机器人，并通过三路 USB 串口接收外部控制器的
-电机协议帧。仓库不包含真机驱动、真机 bring-up 或本机 CAN 回环。
+本仓库包含两个 ROS 2 包，在 Gazebo Fortress 中模拟一台基座固定于 world 的
+UR5e 六轴机械臂，并通过 USB 串口接收外部控制器的 RP / Vaxor 电机协议帧。
+仓库不包含真机驱动、真机 bring-up 或本机 CAN 回环。
+
+## 包结构
+
+| 包 | 职责 |
+|---|---|
+| `motor_sim` | 与具体机器人无关的共享仿真库：RP/Vaxor/CERB 协议、串口与 SocketCAN 传输、传动换算、plant 模型、帧路由与锁存安全状态、ROS 连接节点 |
+| `robot_arm_gazebo` | UR5e 模型与 Gazebo 集成：URDF、world、controller 配置、`arm` 单总线拓扑契约和 `robot_arm_motor_sim_node` 运行入口 |
 
 ## 机器人与数据流
 
-- 双臂各 9 轴：肩胛前伸、肩胛上提、肩 pitch/roll/yaw、肘 pitch、前臂 roll、
-  腕 flexion/deviation。
-- 双腿各 6 轴：髋 yaw/roll/pitch、膝 pitch、踝 pitch/roll。
-- 共 30 轴、20 个 RP、10 个 Vaxor（`motor_2530`）。
-- 逻辑总线固定为 `left_arm`、`right_arm`、`legs`，每条总线绑定一个唯一的
-  `/dev/serial/by-id/...` 设备。
-- 外部帧经包内协议、串口、传动与电机模型转换为 Gazebo effort；关节状态再编码成
-  电机反馈帧返回外部控制器。
+- 六轴顺序以 `robot_arm_gazebo/config/motors.yaml` 为准：shoulder_pan、
+  shoulder_lift、elbow 为 RP（id 1–3），wrist_1、wrist_2、wrist_3 为
+  Vaxor（`motor_2530`，id 4–6）。
+- 逻辑总线只有 `arm` 一条，绑定一个唯一的 `/dev/serial/by-id/...` 设备。
+- 外部帧经 `motor_sim` 的协议、串口、传动与电机模型转换为 Gazebo effort；
+  关节状态再编码成电机反馈帧返回外部控制器。
+- `config/motors.yaml` 是电机仿真配置的唯一来源；所有电气、传动、增益和
+  限幅值均为仿名义值，不代表 UR、RP 或 Vaxor 真机规格。
 
 ## 环境与构建
 
@@ -28,60 +35,72 @@ colcon test
 colcon test-result --verbose
 ```
 
-`colcon list --names-only` 应只输出 `humanoid_gazebo`。
+`colcon list --names-only` 应只输出 `motor_sim` 和 `robot_arm_gazebo`。
 
 ## 启动
 
-只查看模型，不连接外部控制器：
+只查看模型并加载 effort 控制器，不连接外部控制器：
 
 ```bash
-ros2 launch humanoid_gazebo gazebo.launch.py
+ros2 launch robot_arm_gazebo gazebo.launch.py \
+  initial_positions:=0,-1.57,0,-1.57,0,0
 ```
 
-三路 USB CDC/UART 串口直连：
+连接外部控制器时单独运行电机仿真节点（无需 Gazebo）：
 
 ```bash
-ros2 launch humanoid_gazebo usb_sim.launch.py \
-  left_arm_port:=/dev/serial/by-id/usb-left-arm \
-  right_arm_port:=/dev/serial/by-id/usb-right-arm \
-  legs_port:=/dev/serial/by-id/usb-legs
+ros2 run robot_arm_gazebo robot_arm_motor_sim_node --ros-args \
+  -p transport_mode:=usb_serial \
+  -p arm_port:=/dev/serial/by-id/usb-arm
 ```
 
-三路 USB-CANFD 适配器：
+- `transport_mode` 只有 `usb_serial`、`serial_slcan` 和 `socket_can` 三种且互斥；
+  选择 `serial_slcan` 时必须显式设置 `allow_external_canfd:=true`；
+  `socket_can` 的端口是 SocketCAN 接口名（如 `vcan0`），不是设备路径。
+- 启动后电机默认不使能，必须先收到协议定义的使能命令。
+- 命令超时 150 ms、越限、错总线、2 ms 内重复控制器或传输断开都会锁存故障，
+  并把全部关节输出置零，不能靠后续普通命令自动恢复。
+- 调试时可显式设置 `fault_latching_enabled:=false` 关闭故障锁存（只记录
+  diagnostics 不停机、不清零输出）；默认 `true` 保持完整安全语义，仅建议
+  本机 vcan/PTY 联调时使用。
+- `scripts/robot_arm_actions` 动作播放器只用于模型验收，直接读取
+  `/joint_states` 并发布有界 PD effort，不代表外部电机链路。
+
+### 用 vcan 本机人工联调
+
+不需要 Gazebo 和真实串口，用 Linux 虚拟 CAN 接口即可手动测试协议链路：
 
 ```bash
-ros2 launch humanoid_gazebo canfd_sim.launch.py \
-  allow_external_canfd:=true \
-  left_arm_port:=/dev/serial/by-id/usb-canfd-left-arm \
-  right_arm_port:=/dev/serial/by-id/usb-canfd-right-arm \
-  legs_port:=/dev/serial/by-id/usb-canfd-legs
+# 一次性创建虚拟 CAN 口（需要 sudo）
+sudo modprobe vcan
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+
+# 终端 1：单独起电机仿真节点
+ros2 run robot_arm_gazebo robot_arm_motor_sim_node --ros-args \
+  -p transport_mode:=socket_can \
+  -p arm_port:=vcan0
+
+# 终端 2：观察反馈帧（wrist_1 回复 0x711，状态帧 0x712 每 20 ms 一帧）
+candump vcan0
 ```
 
-`canfd_sim.launch.py` 会向每个适配器发送 `C`、`S8`、`Y5`、`O` 初始化序列，
-对应仲裁段 1 Mbit/s、数据段 5 Mbit/s 和 BRS。只有显式设置
-`allow_external_canfd:=true` 才会启动。
-
-## Gazebo 动作验收
-
-动作工具直接控制 Gazebo，不经过串口节点，不能与外部控制仿真同时运行：
+以 wrist_1（N=4）为例，用 `can-utils` 注入命令：
 
 ```bash
-ros2 run humanoid_gazebo ros_actions --list
-ros2 run humanoid_gazebo ros_actions --action joint_scan
-ros2 run humanoid_gazebo ros_actions --action suspended_legs --speed-scale 0.5
+# 使能电机（控制帧 0x502+4N）
+cansend vcan0 512#0100000000000000
+
+# 持续下发 MIT 目标位置（手册 25/30mm 推荐参数 golden vector），
+# 否则使能后 150 ms 即触发超时锁存，需重启节点
+while true; do cansend vcan0 511##0010001800080200364000080; sleep 0.05; done
 ```
 
-动作包括逐轴扫描、肩肱节律、双臂组合、悬空双腿和左右镜像检查。肩肱节律在通用
-计算接口中默认关闭，只有对应验收动作显式启用。
+也可以伪造关节运动观察反馈位置变化：
 
-## 安全边界
+```bash
+ros2 topic pub -r 50 /joint_states sensor_msgs/msg/JointState \
+  "{name: [wrist_1_joint], position: [0.3], velocity: [0.0]}"
+```
 
-- 三路端口必须存在、使用稳定设备名且互不重复；任一路断开都会输出全零 effort 并
-  终止整个仿真。
-- 电机必须收到显式 enable 才响应；命令超时、越限、错总线或重复控制器都会锁存
-  故障并将全部 effort 置零。
-- `usb_serial` 只传输帧记录，不模拟仲裁、布线、终端电阻、误码或总线占用率。
-- YAML 中的电机、电气、传动与增益参数都是仿名义值，不是厂家保证值或真机标定值。
-
-物理接线和终端要求见 [USB 接线指南](src/humanoid_gazebo/docs/usb-wiring.md)，包内结构与
-参数说明见 [`humanoid_gazebo` README](src/humanoid_gazebo/README.md)。
+故障与状态可通过 `ros2 topic echo /diagnostics` 观察。

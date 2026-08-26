@@ -6,6 +6,10 @@
 
 namespace motor_sim::transport {
 
+// 一个进程只能选择一种传输模式；socket_can 走 Linux SocketCAN（如 vcan0），
+// 其余两种走串口承载的 ASCII 帧记录。
+enum class TransportMode { UsbSerial, SerialSlcan, SocketCan };
+
 enum class ReceiveResult { Frame, NoData, Disconnected };
 
 struct ReceivedFrame {

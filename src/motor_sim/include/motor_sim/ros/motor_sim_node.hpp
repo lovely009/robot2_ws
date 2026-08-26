@@ -45,6 +45,8 @@ struct NodeDefaults {
   std::string joint_states_topic{"joint_states"};
   std::string effort_topic{"effort_controller/commands"};
   std::string diagnostics_topic{"diagnostics"};
+  // 仅调试用：false 时故障只记录不锁存，输出不清零；默认 true。
+  bool fault_latching_enabled{true};
 };
 
 void validate_node_parameters(

@@ -12,7 +12,8 @@ find_package(yaml_cpp_vendor REQUIRED)
 add_library(motor_protocol
   src/protocol/motor_protocol.cpp
   src/protocol/rp_protocol.cpp
-  src/protocol/vaxor_protocol.cpp)
+  src/protocol/vaxor_protocol.cpp
+  src/protocol/cerb_protocol.cpp)
 target_compile_features(motor_protocol PUBLIC cxx_std_17)
 target_compile_options(motor_protocol PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motor_protocol PUBLIC
@@ -21,7 +22,8 @@ target_include_directories(motor_protocol PUBLIC
 
 add_library(motor_transport
   src/transport/frame_record.cpp
-  src/transport/serial_transport.cpp)
+  src/transport/serial_transport.cpp
+  src/transport/socket_can_transport.cpp)
 target_compile_features(motor_transport PUBLIC cxx_std_17)
 target_compile_options(motor_transport PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motor_transport PUBLIC
@@ -74,6 +76,11 @@ if(BUILD_TESTING)
   target_compile_options(test_motor_protocol PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_motor_protocol motor_protocol)
 
+  ament_add_gtest(test_cerb_protocol test/test_cerb_protocol.cpp)
+  target_compile_features(test_cerb_protocol PUBLIC cxx_std_17)
+  target_compile_options(test_cerb_protocol PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_cerb_protocol motor_protocol)
+
   ament_add_gtest(test_frame_record test/test_frame_record.cpp)
   target_compile_features(test_frame_record PUBLIC cxx_std_17)
   target_compile_options(test_frame_record PRIVATE -Wall -Wextra -Wpedantic)
@@ -83,6 +90,11 @@ if(BUILD_TESTING)
   target_compile_features(test_serial_transport PUBLIC cxx_std_17)
   target_compile_options(test_serial_transport PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_serial_transport motor_transport util)
+
+  ament_add_gtest(test_socket_can_transport test/test_socket_can_transport.cpp)
+  target_compile_features(test_socket_can_transport PUBLIC cxx_std_17)
+  target_compile_options(test_socket_can_transport PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_socket_can_transport motor_transport)
 
   ament_add_gtest(test_config test/test_config.cpp)
   target_compile_features(test_config PUBLIC cxx_std_17)

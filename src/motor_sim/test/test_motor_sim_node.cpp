@@ -39,7 +39,7 @@ core::TopologyContract arm_contract() {
   return {{"arm"}, {{"joint_a", "arm", "rp", 1U}}};
 }
 
-core::TopologyContract humanoid_contract() {
+core::TopologyContract three_bus_contract() {
   return {{"left_arm", "right_arm", "legs"}, {}};
 }
 
@@ -59,7 +59,7 @@ TEST(MotorSimNodeParameters, AcceptsSingleArmPty) {
                                                  arm_contract()));
 }
 
-TEST(MotorSimNodeParameters, AcceptsThreeHumanoidPtys) {
+TEST(MotorSimNodeParameters, AcceptsThreeBusPtys) {
   PseudoTerminal left;
   PseudoTerminal right;
   PseudoTerminal legs;
@@ -67,7 +67,7 @@ TEST(MotorSimNodeParameters, AcceptsThreeHumanoidPtys) {
   value.ports = {{"left_arm", left.slave_path()},
                  {"right_arm", right.slave_path()},
                  {"legs", legs.slave_path()}};
-  EXPECT_NO_THROW(ros::validate_node_parameters(value, humanoid_contract()));
+  EXPECT_NO_THROW(ros::validate_node_parameters(value, three_bus_contract()));
 }
 
 TEST(MotorSimNodeParameters, RejectsMissingBusAndDuplicateDevice) {
@@ -92,6 +92,35 @@ TEST(MotorSimNodeParameters, SerialSlcanRequiresExplicitOptIn) {
                std::invalid_argument);
   value.allow_external_canfd = true;
   EXPECT_NO_THROW(ros::validate_node_parameters(value, arm_contract()));
+}
+
+TEST(MotorSimNodeParameters, SocketCanAcceptsExistingInterfaceName) {
+  auto value = parameters("/dev/null");
+  value.transport_mode = transport::TransportMode::SocketCan;
+  // socket_can 不使用波特率，非法值也应被忽略。
+  value.baud_rate = 12345;
+  value.ports = {{"arm", "lo"}};
+  EXPECT_NO_THROW(ros::validate_node_parameters(value, arm_contract()));
+}
+
+TEST(MotorSimNodeParameters, SocketCanRejectsMissingOrPathLikeInterfaces) {
+  auto missing = parameters("");
+  missing.transport_mode = transport::TransportMode::SocketCan;
+  missing.ports = {{"arm", "no_such_vcan_interface"}};
+  EXPECT_THROW(ros::validate_node_parameters(missing, arm_contract()),
+               std::invalid_argument);
+
+  auto path_like = parameters("");
+  path_like.transport_mode = transport::TransportMode::SocketCan;
+  path_like.ports = {{"arm", "/dev/serial/by-id/usb-arm"}};
+  EXPECT_THROW(ros::validate_node_parameters(path_like, arm_contract()),
+               std::invalid_argument);
+
+  auto empty = parameters("");
+  empty.transport_mode = transport::TransportMode::SocketCan;
+  empty.ports = {{"arm", ""}};
+  EXPECT_THROW(ros::validate_node_parameters(empty, arm_contract()),
+               std::invalid_argument);
 }
 
 TEST(MotorSimNodeParameters, RejectsRegularFileAndUnsupportedBaud) {

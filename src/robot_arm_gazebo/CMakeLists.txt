@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(robot_arm_gazebo)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(motor_sim REQUIRED)
@@ -18,9 +19,12 @@ target_include_directories(robot_arm_motor_sim_node PRIVATE include)
 target_link_libraries(robot_arm_motor_sim_node motor_sim::motor_sim_node)
 ament_target_dependencies(robot_arm_motor_sim_node ament_index_cpp rclcpp)
 
+ament_python_install_package(${PROJECT_NAME})
+
 install(TARGETS robot_arm_motor_sim_node DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY config urdf vendor worlds DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config launch urdf vendor worlds DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
+install(PROGRAMS scripts/robot_arm_actions DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

@@ -1,6 +1,12 @@
 <?xml version="1.0"?>
 <robot name="ur5e" xmlns:xacro="http://wiki.ros.org/xacro">
   <xacro:arg name="controllers_file" default="$(find robot_arm_gazebo)/config/controllers.yaml"/>
+  <xacro:arg name="shoulder_pan_initial" default="0.0"/>
+  <xacro:arg name="shoulder_lift_initial" default="-1.57"/>
+  <xacro:arg name="elbow_initial" default="0.0"/>
+  <xacro:arg name="wrist_1_initial" default="-1.57"/>
+  <xacro:arg name="wrist_2_initial" default="0.0"/>
+  <xacro:arg name="wrist_3_initial" default="0.0"/>
   <xacro:include filename="$(find robot_arm_gazebo)/vendor/ur_description/urdf/ur_macro.xacro"/>
 
   <link name="world"/>
@@ -32,16 +38,17 @@
 
   <ros2_control name="GazeboSimSystem" type="system">
     <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
-    <xacro:effort_joint name="shoulder_pan_joint" limit="60" initial="0.0"/>
-    <xacro:effort_joint name="shoulder_lift_joint" limit="60" initial="-1.57"/>
-    <xacro:effort_joint name="elbow_joint" limit="60" initial="0.0"/>
-    <xacro:effort_joint name="wrist_1_joint" limit="10" initial="-1.57"/>
-    <xacro:effort_joint name="wrist_2_joint" limit="10" initial="0.0"/>
-    <xacro:effort_joint name="wrist_3_joint" limit="10" initial="0.0"/>
+    <xacro:effort_joint name="shoulder_pan_joint" limit="60" initial="$(arg shoulder_pan_initial)"/>
+    <xacro:effort_joint name="shoulder_lift_joint" limit="60" initial="$(arg shoulder_lift_initial)"/>
+    <xacro:effort_joint name="elbow_joint" limit="60" initial="$(arg elbow_initial)"/>
+    <xacro:effort_joint name="wrist_1_joint" limit="10" initial="$(arg wrist_1_initial)"/>
+    <xacro:effort_joint name="wrist_2_joint" limit="10" initial="$(arg wrist_2_initial)"/>
+    <xacro:effort_joint name="wrist_3_joint" limit="10" initial="$(arg wrist_3_initial)"/>
   </ros2_control>
 
   <gazebo>
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <ros><namespace>/robot_arm</namespace></ros>
       <parameters>$(arg controllers_file)</parameters>
       <hold_joints>true</hold_joints>
     </plugin>

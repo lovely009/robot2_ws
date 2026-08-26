@@ -33,7 +33,10 @@ def test_model_has_fixed_base_tool_and_six_effort_interfaces() -> None:
     control = robot.find("ros2_control")
     assert control is not None
     assert [joint.attrib["name"] for joint in control.findall("joint")] == DRIVEN
-    assert all(joint.find("command_interface").attrib["name"] == "effort" for joint in control.findall("joint"))
+    assert all(
+        joint.find("command_interface").attrib["name"] == "effort"
+        for joint in control.findall("joint")
+    )
 
 
 def test_model_inertias_are_positive_and_finite() -> None:

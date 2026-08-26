@@ -1,4 +1,5 @@
 #include "humanoid_gazebo/motor_sim/motor_sim_node.hpp"
+#include "humanoid_gazebo/topology.hpp"
 #include "motor_sim/protocol/motor_protocol.hpp"
 #include "motor_sim/transport/frame_record.hpp"
 #include "motor_sim/transport/serial_transport.hpp"
@@ -212,7 +213,8 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
                   legs.slave_path(), transport::TransportMode::UsbSerial,
                   3000000));
 
-  auto config = humanoid_sim::load_system_config(kMotorsYaml);
+  auto config = ::motor_sim::core::load_system_config(
+      kMotorsYaml, humanoid_gazebo::humanoid_topology_contract());
   const auto joint_names = [&config] {
     std::vector<std::string> names;
     names.reserve(config.motors.size());

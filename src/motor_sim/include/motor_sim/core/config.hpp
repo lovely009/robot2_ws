@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 struct TimingConfig {
   unsigned control_hz{100U};
@@ -56,6 +56,19 @@ struct SystemConfig {
   std::vector<MotorConfig> motors;
 };
 
-SystemConfig load_system_config(const std::string &path);
+struct RequiredMotorAddress {
+  std::string joint;
+  std::string bus;
+  std::string protocol;
+  unsigned id{0U};
+};
 
-}  // namespace humanoid_gazebo::motor_sim
+struct TopologyContract {
+  std::vector<std::string> buses;
+  std::vector<RequiredMotorAddress> motors;
+};
+
+SystemConfig load_system_config(const std::string &path,
+                                const TopologyContract &contract);
+
+}  // namespace motor_sim::core

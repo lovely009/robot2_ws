@@ -1,4 +1,5 @@
 #include "humanoid_gazebo/motor_sim/motor_sim_node.hpp"
+#include "humanoid_gazebo/topology.hpp"
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
@@ -10,6 +11,7 @@
 #include <utility>
 
 namespace humanoid_gazebo::motor_sim {
+using ::motor_sim::core::Fault;
 namespace {
 
 constexpr const char *kLeftArm = "left_arm";
@@ -110,7 +112,9 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options)
                                 device, parameters.transport_mode,
                                 parameters.baud_rate));
   }
-  initialize(load_system_config(parameters.config_file), std::move(transports));
+  initialize(::motor_sim::core::load_system_config(
+                 parameters.config_file, humanoid_topology_contract()),
+             std::move(transports));
 }
 
 MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,

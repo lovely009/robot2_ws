@@ -1,13 +1,13 @@
-#include "humanoid_gazebo/motor_sim/transmission.hpp"
+#include "motor_sim/core/transmission.hpp"
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
 
-namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace core = motor_sim::core;
 
 TEST(Transmission, RoundTripsMotorAndJointPositionAndVelocity) {
-  const humanoid_sim::Transmission transmission({36.0, 0.80, -1.0, 0.1});
+  const core::Transmission transmission({36.0, 0.80, -1.0, 0.1});
   const double motor_position =
       transmission.joint_to_motor_position(0.4);
   EXPECT_NEAR(motor_position, -10.8, 1e-12);
@@ -21,16 +21,16 @@ TEST(Transmission, RoundTripsMotorAndJointPositionAndVelocity) {
 }
 
 TEST(Transmission, ConvertsTorqueWithRatioEfficiencyAndDirection) {
-  const humanoid_sim::Transmission transmission({36.0, 0.80, -1.0, 0.0});
+  const core::Transmission transmission({36.0, 0.80, -1.0, 0.0});
   EXPECT_NEAR(transmission.motor_torque_to_joint_effort(0.1), -2.88, 1e-12);
   EXPECT_NEAR(transmission.joint_effort_to_motor_torque(-2.88), 0.1, 1e-12);
 }
 
 TEST(Transmission, RejectsInvalidMechanicalParameters) {
-  EXPECT_THROW(humanoid_sim::Transmission({0.0, 0.80, 1.0, 0.0}),
+  EXPECT_THROW(core::Transmission({0.0, 0.80, 1.0, 0.0}),
                std::invalid_argument);
-  EXPECT_THROW(humanoid_sim::Transmission({36.0, 1.20, 1.0, 0.0}),
+  EXPECT_THROW(core::Transmission({36.0, 1.20, 1.0, 0.0}),
                std::invalid_argument);
-  EXPECT_THROW(humanoid_sim::Transmission({36.0, 0.80, 0.0, 0.0}),
+  EXPECT_THROW(core::Transmission({36.0, 0.80, 0.0, 0.0}),
                std::invalid_argument);
 }

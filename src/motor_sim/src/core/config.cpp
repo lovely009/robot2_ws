@@ -1,10 +1,9 @@
-#include "humanoid_gazebo/motor_sim/config.hpp"
+#include "motor_sim/core/config.hpp"
 
 #include "motor_sim/protocol/motor_protocol.hpp"
 
 #include <yaml-cpp/yaml.h>
 
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -13,50 +12,10 @@
 #include <unordered_set>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 namespace protocol = ::motor_sim::protocol;
 namespace {
-
-struct RequiredMotorAddress {
-  const char *joint;
-  const char *bus;
-  const char *protocol;
-  unsigned id;
-};
-
-constexpr std::array<RequiredMotorAddress, 30> kRequiredMotorOrder{{
-    {"left_scapula_protraction_joint", "left_arm", "rp", 1U},
-    {"left_scapula_elevation_joint", "left_arm", "rp", 2U},
-    {"left_shoulder_pitch_joint", "left_arm", "rp", 3U},
-    {"left_shoulder_roll_joint", "left_arm", "rp", 4U},
-    {"left_shoulder_yaw_joint", "left_arm", "rp", 5U},
-    {"left_elbow_pitch_joint", "left_arm", "rp", 6U},
-    {"left_forearm_roll_joint", "left_arm", "motor_2530", 1U},
-    {"left_wrist_flexion_joint", "left_arm", "motor_2530", 2U},
-    {"left_wrist_deviation_joint", "left_arm", "motor_2530", 3U},
-    {"right_scapula_protraction_joint", "right_arm", "rp", 1U},
-    {"right_scapula_elevation_joint", "right_arm", "rp", 2U},
-    {"right_shoulder_pitch_joint", "right_arm", "rp", 3U},
-    {"right_shoulder_roll_joint", "right_arm", "rp", 4U},
-    {"right_shoulder_yaw_joint", "right_arm", "rp", 5U},
-    {"right_elbow_pitch_joint", "right_arm", "rp", 6U},
-    {"right_forearm_roll_joint", "right_arm", "motor_2530", 1U},
-    {"right_wrist_flexion_joint", "right_arm", "motor_2530", 2U},
-    {"right_wrist_deviation_joint", "right_arm", "motor_2530", 3U},
-    {"left_hip_yaw_joint", "legs", "rp", 1U},
-    {"left_hip_roll_joint", "legs", "rp", 2U},
-    {"left_hip_pitch_joint", "legs", "rp", 3U},
-    {"left_knee_pitch_joint", "legs", "rp", 4U},
-    {"left_ankle_pitch_joint", "legs", "motor_2530", 1U},
-    {"left_ankle_roll_joint", "legs", "motor_2530", 2U},
-    {"right_hip_yaw_joint", "legs", "rp", 5U},
-    {"right_hip_roll_joint", "legs", "rp", 6U},
-    {"right_hip_pitch_joint", "legs", "rp", 7U},
-    {"right_knee_pitch_joint", "legs", "rp", 8U},
-    {"right_ankle_pitch_joint", "legs", "motor_2530", 3U},
-    {"right_ankle_roll_joint", "legs", "motor_2530", 4U},
-}};
 
 struct MotorProfile {
   TransmissionConfig transmission;
@@ -170,7 +129,8 @@ MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
   return profile;
 }
 
-SystemConfig parse_config(const YAML::Node &root) {
+SystemConfig parse_config(const YAML::Node &root,
+                          const TopologyContract &contract) {
   const auto simulation = required_node(root, "motor_simulation", "root");
   if (!simulation.IsMap()) {
     throw std::runtime_error("motor_simulation must be a map");
@@ -187,8 +147,8 @@ SystemConfig parse_config(const YAML::Node &root) {
       positive_unsigned(timing, "command_timeout_ms", "timing");
 
   const auto buses = required_node(simulation, "buses", "motor_simulation");
-  if (!buses.IsSequence() || buses.size() != 3U) {
-    throw std::runtime_error("buses must contain exactly three names");
+  if (!buses.IsSequence()) {
+    throw std::runtime_error("buses must be a sequence");
   }
   std::unordered_set<std::string> bus_names;
   for (const auto &node : buses) {
@@ -198,10 +158,13 @@ SystemConfig parse_config(const YAML::Node &root) {
     }
     config.buses.push_back({name});
   }
-  if (config.buses[0].name != "left_arm" ||
-      config.buses[1].name != "right_arm" ||
-      config.buses[2].name != "legs") {
-    throw std::runtime_error("bus order must be left_arm, right_arm, legs");
+  std::vector<std::string> parsed_buses;
+  parsed_buses.reserve(config.buses.size());
+  for (const auto &bus : config.buses) {
+    parsed_buses.push_back(bus.name);
+  }
+  if (parsed_buses != contract.buses) {
+    throw std::runtime_error("buses violate the model topology contract");
   }
 
   const double margin = optional_finite_double(
@@ -221,8 +184,8 @@ SystemConfig parse_config(const YAML::Node &root) {
   }
 
   const auto motors = required_node(simulation, "motors", "motor_simulation");
-  if (!motors.IsSequence() || motors.size() != kRequiredMotorOrder.size()) {
-    throw std::runtime_error("motors must match the fixed 30-axis ABI");
+  if (!motors.IsSequence() || motors.size() != contract.motors.size()) {
+    throw std::runtime_error("motors violate the model topology contract");
   }
   std::unordered_set<std::string> joints;
   std::unordered_set<std::string> addresses;
@@ -265,10 +228,10 @@ SystemConfig parse_config(const YAML::Node &root) {
         !addresses.insert(address).second) {
       throw std::runtime_error(context + " duplicates a joint or bus address");
     }
-    const auto &required = kRequiredMotorOrder[index];
+    const auto &required = contract.motors[index];
     if (motor.joint != required.joint || motor.bus != required.bus ||
         motor.protocol != required.protocol || motor.id != required.id) {
-      throw std::runtime_error(context + " violates the fixed 30-axis ABI");
+      throw std::runtime_error(context + " violates the model topology contract");
     }
     config.motors.push_back(std::move(motor));
   }
@@ -277,16 +240,17 @@ SystemConfig parse_config(const YAML::Node &root) {
 
 }  // namespace
 
-SystemConfig load_system_config(const std::string &path) {
+SystemConfig load_system_config(const std::string &path,
+                                const TopologyContract &contract) {
   if (path.empty()) {
     throw std::runtime_error("motor configuration path cannot be empty");
   }
   try {
-    return parse_config(YAML::LoadFile(path));
+    return parse_config(YAML::LoadFile(path), contract);
   } catch (const YAML::Exception &error) {
     throw std::runtime_error("cannot load motor configuration '" + path +
                              "': " + error.what());
   }
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

@@ -1,4 +1,5 @@
-#include "humanoid_gazebo/motor_sim/config.hpp"
+#include "humanoid_gazebo/topology.hpp"
+#include "motor_sim/core/config.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace core = motor_sim::core;
 
 namespace {
 
@@ -18,7 +19,7 @@ const std::string kMotorsYaml =
 const std::string kBadLimitsYaml =
     std::string(TEST_SOURCE_DIR) + "/test/fixtures/bad_limits.yaml";
 
-std::size_t count_protocol(const humanoid_sim::SystemConfig &config,
+std::size_t count_protocol(const core::SystemConfig &config,
                            const std::string &protocol) {
   return static_cast<std::size_t>(std::count_if(
       config.motors.begin(), config.motors.end(),
@@ -28,7 +29,8 @@ std::size_t count_protocol(const humanoid_sim::SystemConfig &config,
 }  // namespace
 
 TEST(MotorConfig, LoadsExactThirtyAxisContract) {
-  const auto config = humanoid_sim::load_system_config(kMotorsYaml);
+  const auto config = core::load_system_config(
+      kMotorsYaml, humanoid_gazebo::humanoid_topology_contract());
   ASSERT_EQ(config.buses.size(), 3U);
   EXPECT_EQ(config.buses[0].name, "left_arm");
   EXPECT_EQ(config.buses[1].name, "right_arm");
@@ -46,7 +48,8 @@ TEST(MotorConfig, LoadsExactThirtyAxisContract) {
 }
 
 TEST(MotorConfig, LoadsTimingIdsLimitsAndNominalTransmission) {
-  const auto config = humanoid_sim::load_system_config(kMotorsYaml);
+  const auto config = core::load_system_config(
+      kMotorsYaml, humanoid_gazebo::humanoid_topology_contract());
   EXPECT_EQ(config.timing.control_hz, 100U);
   EXPECT_EQ(config.timing.rp_feedback_hz, 100U);
   EXPECT_EQ(config.timing.vaxor_feedback_hz, 50U);
@@ -70,12 +73,15 @@ TEST(MotorConfig, LoadsTimingIdsLimitsAndNominalTransmission) {
 }
 
 TEST(MotorConfig, RejectsCommandLimitOutsideHardLimit) {
-  EXPECT_THROW(humanoid_sim::load_system_config(kBadLimitsYaml),
+  EXPECT_THROW(core::load_system_config(
+                   kBadLimitsYaml, humanoid_gazebo::humanoid_topology_contract()),
                std::runtime_error);
 }
 
 TEST(MotorConfig, RejectsMissingFile) {
-  EXPECT_THROW(humanoid_sim::load_system_config("/does/not/exist.yaml"),
+  EXPECT_THROW(core::load_system_config(
+                   "/does/not/exist.yaml",
+                   humanoid_gazebo::humanoid_topology_contract()),
                std::runtime_error);
 }
 
@@ -105,6 +111,8 @@ TEST(MotorConfig, RejectsRuntimeConfigWithWrongThirtyAxisOrder) {
     ASSERT_TRUE(output.good());
     output << yaml;
   }
-  EXPECT_THROW(humanoid_sim::load_system_config(path), std::runtime_error);
+  EXPECT_THROW(core::load_system_config(
+                   path, humanoid_gazebo::humanoid_topology_contract()),
+               std::runtime_error);
   static_cast<void>(std::remove(path.c_str()));
 }

@@ -1,9 +1,9 @@
-#include "humanoid_gazebo/motor_sim/safety_monitor.hpp"
+#include "motor_sim/core/safety_monitor.hpp"
 
 #include <stdexcept>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 SafetyMonitor::SafetyMonitor(
     const std::size_t axis_count,
@@ -70,4 +70,4 @@ SafetySnapshot SafetyMonitor::snapshot() const {
   return state;
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

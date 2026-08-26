@@ -11,13 +11,17 @@
 #include <utility>
 #include <vector>
 
-#include "humanoid_gazebo/motor_sim/frame_router.hpp"
+#include "motor_sim/core/frame_router.hpp"
 #include "motor_sim/transport/frame_transport.hpp"
 #include "motor_sim/transport/serial_transport.hpp"
 
 namespace humanoid_gazebo::motor_sim {
 
 namespace transport = ::motor_sim::transport;
+namespace protocol = ::motor_sim::protocol;
+using ::motor_sim::core::FrameRouter;
+using ::motor_sim::core::JointSample;
+using ::motor_sim::core::SystemConfig;
 
 using PortMap = std::vector<std::pair<std::string, std::string>>;
 using TransportMap =

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "humanoid_gazebo/motor_sim/config.hpp"
+#include "motor_sim/core/config.hpp"
 #include "motor_sim/protocol/motor_protocol.hpp"
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 namespace protocol = ::motor_sim::protocol;
 
@@ -26,4 +26,4 @@ private:
   PlantConfig config_;
 };
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

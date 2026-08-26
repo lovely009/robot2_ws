@@ -1,11 +1,11 @@
-#include "humanoid_gazebo/motor_sim/frame_router.hpp"
+#include "motor_sim/core/frame_router.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 namespace {
 
 std::vector<uint8_t> payload_bytes(const protocol::CanFrame &frame) {
@@ -225,4 +225,4 @@ bool FrameRouter::frame_belongs_to_other_bus(
   return false;
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

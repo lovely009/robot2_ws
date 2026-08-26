@@ -6,13 +6,13 @@
 #include <string>
 #include <vector>
 
-#include "humanoid_gazebo/motor_sim/config.hpp"
-#include "humanoid_gazebo/motor_sim/plant_model.hpp"
-#include "humanoid_gazebo/motor_sim/safety_monitor.hpp"
-#include "humanoid_gazebo/motor_sim/transmission.hpp"
+#include "motor_sim/core/config.hpp"
+#include "motor_sim/core/plant_model.hpp"
+#include "motor_sim/core/safety_monitor.hpp"
+#include "motor_sim/core/transmission.hpp"
 #include "motor_sim/protocol/motor_protocol.hpp"
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 namespace protocol = ::motor_sim::protocol;
 
@@ -58,4 +58,4 @@ private:
   std::vector<JointSample> last_states_;
 };
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

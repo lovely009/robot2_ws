@@ -1,10 +1,10 @@
-#include "humanoid_gazebo/motor_sim/plant_model.hpp"
+#include "motor_sim/core/plant_model.hpp"
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
 
-namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace core = motor_sim::core;
 namespace protocol = ::motor_sim::protocol;
 
 namespace {
@@ -21,14 +21,14 @@ protocol::MotorCommand position_command(const double position) {
 }  // namespace
 
 TEST(PlantModel, SaturatesEffortAtJointLimit) {
-  humanoid_sim::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
+  core::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
   const auto output =
       plant.step(position_command(1.0), {0.0, 0.0}, 0.01);
   EXPECT_NEAR(output.effort_nm, 8.0, 1e-12);
 }
 
 TEST(PlantModel, UsesVelocityDampingAndFeedforward) {
-  humanoid_sim::MotorPlantModel plant({20.0, 2.0, 20.0, 0.0, 0.0});
+  core::MotorPlantModel plant({20.0, 2.0, 20.0, 0.0, 0.0});
   auto command = position_command(0.5);
   command.velocity = 0.2;
   command.feedforward = 1.0;
@@ -37,14 +37,14 @@ TEST(PlantModel, UsesVelocityDampingAndFeedforward) {
 }
 
 TEST(PlantModel, DisabledCommandProducesZeroEffort) {
-  humanoid_sim::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
+  core::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
   auto command = position_command(1.0);
   command.enabled = false;
   EXPECT_DOUBLE_EQ(plant.step(command, {0.0, 0.0}, 0.01).effort_nm, 0.0);
 }
 
 TEST(PlantModel, RejectsNonPositiveOrNonFiniteTimeStep) {
-  humanoid_sim::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
+  core::MotorPlantModel plant({30.0, 1.0, 8.0, 0.0, 0.0});
   EXPECT_THROW(plant.step(position_command(1.0), {0.0, 0.0}, 0.0),
                std::invalid_argument);
   EXPECT_THROW(plant.step(position_command(1.0), {0.0, 0.0}, -0.01),

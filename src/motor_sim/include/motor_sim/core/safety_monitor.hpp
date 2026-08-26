@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 enum class Fault {
   None,
@@ -60,4 +60,4 @@ private:
   std::unordered_map<std::string, RecentFrame> recent_frames_;
 };
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

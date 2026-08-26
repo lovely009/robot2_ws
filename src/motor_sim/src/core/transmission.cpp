@@ -1,10 +1,10 @@
-#include "humanoid_gazebo/motor_sim/transmission.hpp"
+#include "motor_sim/core/transmission.hpp"
 
 #include <cmath>
 #include <stdexcept>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 Transmission::Transmission(TransmissionConfig config)
     : config_(std::move(config)) {
@@ -58,4 +58,4 @@ void Transmission::set_zero_at_joint(const double joint_position_rad) {
   config_.zero_offset_rad = joint_position_rad;
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

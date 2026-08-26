@@ -1,8 +1,8 @@
 #pragma once
 
-#include "humanoid_gazebo/motor_sim/config.hpp"
+#include "motor_sim/core/config.hpp"
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 class Transmission {
 public:
@@ -20,4 +20,4 @@ private:
   TransmissionConfig config_;
 };
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

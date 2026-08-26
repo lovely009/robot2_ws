@@ -1,11 +1,11 @@
-#include "humanoid_gazebo/motor_sim/plant_model.hpp"
+#include "motor_sim/core/plant_model.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::core {
 
 MotorPlantModel::MotorPlantModel(PlantConfig config)
     : config_(std::move(config)) {
@@ -42,4 +42,4 @@ PlantOutput MotorPlantModel::step(const protocol::MotorCommand &command,
                      config_.effort_limit_nm)};
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::core

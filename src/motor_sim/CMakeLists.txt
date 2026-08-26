@@ -3,6 +3,7 @@ project(motor_sim)
 
 find_package(ament_cmake REQUIRED)
 find_package(Threads REQUIRED)
+find_package(yaml_cpp_vendor REQUIRED)
 
 add_library(motor_protocol
   src/protocol/motor_protocol.cpp
@@ -24,8 +25,21 @@ target_include_directories(motor_transport PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(motor_transport PUBLIC motor_protocol Threads::Threads)
 
+add_library(motor_sim_core
+  src/core/config.cpp
+  src/core/frame_router.cpp
+  src/core/transmission.cpp
+  src/core/plant_model.cpp
+  src/core/safety_monitor.cpp)
+target_compile_features(motor_sim_core PUBLIC cxx_std_17)
+target_compile_options(motor_sim_core PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(motor_sim_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(motor_sim_core PUBLIC motor_protocol yaml-cpp)
+
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS motor_protocol motor_transport
+install(TARGETS motor_protocol motor_transport motor_sim_core
   EXPORT export_motor_sim
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -54,6 +68,20 @@ if(BUILD_TESTING)
   target_compile_features(test_serial_transport PUBLIC cxx_std_17)
   target_compile_options(test_serial_transport PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_serial_transport motor_transport util)
+
+  ament_add_gtest(test_config test/test_config.cpp)
+  target_compile_features(test_config PUBLIC cxx_std_17)
+  target_compile_options(test_config PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_definitions(test_config PRIVATE
+    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(test_config motor_sim_core)
+
+  foreach(CORE_TEST transmission plant_model safety_monitor)
+    ament_add_gtest(test_${CORE_TEST} test/test_${CORE_TEST}.cpp)
+    target_compile_features(test_${CORE_TEST} PUBLIC cxx_std_17)
+    target_compile_options(test_${CORE_TEST} PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(test_${CORE_TEST} motor_sim_core)
+  endforeach()
 endif()
 
 ament_package()

@@ -15,7 +15,7 @@
 #include "motor_sim/transport/frame_transport.hpp"
 #include "motor_sim/transport/serial_transport.hpp"
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::ros {
 
 namespace transport = ::motor_sim::transport;
 namespace protocol = ::motor_sim::protocol;
@@ -23,7 +23,12 @@ using ::motor_sim::core::FrameRouter;
 using ::motor_sim::core::JointSample;
 using ::motor_sim::core::SystemConfig;
 
-using PortMap = std::vector<std::pair<std::string, std::string>>;
+struct BusPort {
+  std::string bus;
+  std::string device;
+};
+
+using PortMap = std::vector<BusPort>;
 using TransportMap =
     std::map<std::string, std::unique_ptr<transport::FrameTransport>>;
 
@@ -35,14 +40,24 @@ struct NodeParameters {
   bool allow_external_canfd{false};
 };
 
-void validate_node_parameters(const NodeParameters &parameters);
+struct NodeDefaults {
+  std::string config_file;
+  std::string joint_states_topic{"joint_states"};
+  std::string effort_topic{"effort_controller/commands"};
+  std::string diagnostics_topic{"diagnostics"};
+};
+
+void validate_node_parameters(
+    const NodeParameters &parameters,
+    const ::motor_sim::core::TopologyContract &contract);
 
 class MotorSimNode final : public rclcpp::Node {
 public:
-  MotorSimNode();
-  explicit MotorSimNode(const rclcpp::NodeOptions &options);
+  MotorSimNode(const rclcpp::NodeOptions &options,
+               ::motor_sim::core::TopologyContract contract,
+               NodeDefaults defaults);
   MotorSimNode(const rclcpp::NodeOptions &options, SystemConfig config,
-               TransportMap transports);
+               TransportMap transports, NodeDefaults defaults = {});
 
   bool shutdown_requested() const noexcept { return shutdown_requested_; }
   const std::vector<double> &last_efforts() const noexcept {
@@ -50,7 +65,8 @@ public:
   }
 
 private:
-  void initialize(SystemConfig config, TransportMap transports);
+  void initialize(SystemConfig config, TransportMap transports,
+                  const NodeDefaults &defaults);
   void joint_state_callback(const sensor_msgs::msg::JointState &message);
   void transport_tick();
   void control_tick();
@@ -76,4 +92,4 @@ private:
   bool shutdown_requested_{false};
 };
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::ros

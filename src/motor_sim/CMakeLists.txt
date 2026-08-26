@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.8)
 project(motor_sim)
 
 find_package(ament_cmake REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(Threads REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
 
@@ -38,8 +42,19 @@ target_include_directories(motor_sim_core PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(motor_sim_core PUBLIC motor_protocol yaml-cpp)
 
+add_library(motor_sim_node
+  src/ros/motor_sim_node.cpp)
+target_compile_features(motor_sim_node PUBLIC cxx_std_17)
+target_compile_options(motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(motor_sim_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(motor_sim_node motor_sim_core motor_transport)
+ament_target_dependencies(motor_sim_node
+  diagnostic_msgs rclcpp sensor_msgs std_msgs)
+
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS motor_protocol motor_transport motor_sim_core
+install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_node
   EXPORT export_motor_sim
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -82,6 +97,12 @@ if(BUILD_TESTING)
     target_compile_options(test_${CORE_TEST} PRIVATE -Wall -Wextra -Wpedantic)
     target_link_libraries(test_${CORE_TEST} motor_sim_core)
   endforeach()
+
+  ament_add_gtest(test_motor_sim_node test/test_motor_sim_node.cpp)
+  target_compile_features(test_motor_sim_node PUBLIC cxx_std_17)
+  target_compile_options(test_motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_motor_sim_node motor_sim_node util)
+  ament_target_dependencies(test_motor_sim_node rclcpp)
 endif()
 
 ament_package()

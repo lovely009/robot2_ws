@@ -1,4 +1,4 @@
-#include "humanoid_gazebo/motor_sim/motor_sim_node.hpp"
+#include "motor_sim/ros/motor_sim_node.hpp"
 #include "humanoid_gazebo/topology.hpp"
 #include "motor_sim/protocol/motor_protocol.hpp"
 #include "motor_sim/transport/frame_record.hpp"
@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace motor_ros = motor_sim::ros;
 namespace protocol = ::motor_sim::protocol;
 namespace transport = ::motor_sim::transport;
 using namespace std::chrono_literals;
@@ -199,7 +199,7 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
   PseudoTerminal left_arm;
   PseudoTerminal right_arm;
   PseudoTerminal legs;
-  humanoid_sim::TransportMap transports;
+  motor_ros::TransportMap transports;
   transports.emplace(
       "left_arm", std::make_unique<transport::SerialTransport>(
                       left_arm.slave_path(),
@@ -223,7 +223,7 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
     }
     return names;
   }();
-  auto simulator = std::make_shared<humanoid_sim::MotorSimNode>(
+  auto simulator = std::make_shared<motor_ros::MotorSimNode>(
       rclcpp::NodeOptions{}, std::move(config), std::move(transports));
   auto observer = std::make_shared<rclcpp::Node>("pty_integration_observer");
   auto joint_states = observer->create_publisher<sensor_msgs::msg::JointState>(

@@ -1,22 +1,19 @@
-#include "humanoid_gazebo/motor_sim/motor_sim_node.hpp"
-#include "humanoid_gazebo/topology.hpp"
-
-#include <ament_index_cpp/get_package_share_directory.hpp>
+#include "motor_sim/ros/motor_sim_node.hpp"
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <set>
 #include <stdexcept>
 #include <utility>
 
-namespace humanoid_gazebo::motor_sim {
+namespace motor_sim::ros {
 using ::motor_sim::core::Fault;
 namespace {
-
-constexpr const char *kLeftArm = "left_arm";
-constexpr const char *kRightArm = "right_arm";
-constexpr const char *kLegs = "legs";
 
 transport::TransportMode parse_transport_mode(const std::string &value) {
   if (value == "usb_serial") {
@@ -49,62 +46,70 @@ std::string fault_message(const Fault fault) {
 
 }  // namespace
 
-void validate_node_parameters(const NodeParameters &parameters) {
+void validate_node_parameters(
+    const NodeParameters &parameters,
+    const ::motor_sim::core::TopologyContract &contract) {
   if (parameters.config_file.empty()) {
     throw std::invalid_argument("config_file cannot be empty");
   }
-  if (parameters.baud_rate <= 0) {
-    throw std::invalid_argument("baud_rate must be positive");
+  const std::set<int> supported_baud_rates{
+      115200, 460800, 921600, 1000000, 2000000, 3000000};
+  if (supported_baud_rates.find(parameters.baud_rate) ==
+      supported_baud_rates.end()) {
+    throw std::invalid_argument("unsupported baud_rate");
   }
   if (parameters.transport_mode == transport::TransportMode::SerialSlcan &&
       !parameters.allow_external_canfd) {
     throw std::invalid_argument(
         "serial_slcan requires allow_external_canfd:=true");
   }
-  const std::set<std::string> expected{kLeftArm, kRightArm, kLegs};
+  const std::set<std::string> expected(contract.buses.begin(),
+                                       contract.buses.end());
   std::set<std::string> buses;
   std::set<std::string> devices;
   for (const auto &[bus, device] : parameters.ports) {
     if (expected.find(bus) == expected.end() || !buses.insert(bus).second) {
       throw std::invalid_argument("ports must define each logical bus once");
     }
-    constexpr const char *kStablePrefix = "/dev/serial/by-id/";
-    if (device.rfind(kStablePrefix, 0U) != 0U ||
-        device.size() <= std::char_traits<char>::length(kStablePrefix)) {
-      throw std::invalid_argument(
-          "serial ports must use nonempty /dev/serial/by-id paths");
+    if (device.empty() || !std::filesystem::exists(device)) {
+      throw std::invalid_argument("serial port must exist");
     }
-    if (!devices.insert(device).second) {
+    const int descriptor = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (descriptor < 0 || ::isatty(descriptor) != 1) {
+      if (descriptor >= 0) {
+        ::close(descriptor);
+      }
+      throw std::invalid_argument("serial port must open as a tty");
+    }
+    ::close(descriptor);
+    const auto resolved = std::filesystem::canonical(device).string();
+    if (!devices.insert(resolved).second) {
       throw std::invalid_argument("serial ports must be unique");
     }
   }
   if (buses != expected) {
-    throw std::invalid_argument(
-        "ports must contain left_arm, right_arm and legs");
+    throw std::invalid_argument("ports must match the topology contract");
   }
 }
 
-MotorSimNode::MotorSimNode() : MotorSimNode(rclcpp::NodeOptions{}) {}
-
-MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options)
-    : rclcpp::Node("humanoid_motor_sim", options) {
-  const auto share =
-      ament_index_cpp::get_package_share_directory("humanoid_gazebo");
+MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
+                           ::motor_sim::core::TopologyContract contract,
+                           NodeDefaults defaults)
+    : rclcpp::Node("motor_sim", options) {
   const auto mode_name =
       declare_parameter<std::string>("transport_mode", "usb_serial");
   NodeParameters parameters;
   parameters.transport_mode = parse_transport_mode(mode_name);
-  parameters.ports = {
-      {kLeftArm, declare_parameter<std::string>("left_arm_port", "")},
-      {kRightArm, declare_parameter<std::string>("right_arm_port", "")},
-      {kLegs, declare_parameter<std::string>("legs_port", "")},
-  };
+  for (const auto &bus : contract.buses) {
+    parameters.ports.push_back(
+        {bus, declare_parameter<std::string>(bus + "_port", "")});
+  }
   parameters.baud_rate = declare_parameter<int>("baud_rate", 3000000);
   parameters.config_file = declare_parameter<std::string>(
-      "config_file", share + "/config/motors.yaml");
+      "config_file", defaults.config_file);
   parameters.allow_external_canfd =
       declare_parameter<bool>("allow_external_canfd", false);
-  validate_node_parameters(parameters);
+  validate_node_parameters(parameters, contract);
 
   TransportMap transports;
   for (const auto &[bus, device] : parameters.ports) {
@@ -112,18 +117,25 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options)
                                 device, parameters.transport_mode,
                                 parameters.baud_rate));
   }
-  initialize(::motor_sim::core::load_system_config(
-                 parameters.config_file, humanoid_topology_contract()),
-             std::move(transports));
+  initialize(::motor_sim::core::load_system_config(parameters.config_file,
+                                                    contract),
+             std::move(transports), defaults);
+  for (const auto &[bus, device] : parameters.ports) {
+    publish_diagnostic(
+        diagnostic_msgs::msg::DiagnosticStatus::OK,
+        "serial bus '" + bus + "' requested '" + device + "', resolved '" +
+            std::filesystem::canonical(device).string() + "'");
+  }
 }
 
-MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
-                           SystemConfig config, TransportMap transports)
-    : rclcpp::Node("humanoid_motor_sim", options) {
-  initialize(std::move(config), std::move(transports));
+MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options, SystemConfig config,
+                           TransportMap transports, NodeDefaults defaults)
+    : rclcpp::Node("motor_sim", options) {
+  initialize(std::move(config), std::move(transports), defaults);
 }
 
-void MotorSimNode::initialize(SystemConfig config, TransportMap transports) {
+void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
+                              const NodeDefaults &defaults) {
   router_ = std::make_unique<FrameRouter>(std::move(config));
   transports_ = std::move(transports);
   if (transports_.size() != router_->config().buses.size()) {
@@ -145,12 +157,12 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports) {
   }
 
   effort_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
-      "/effort_controller/commands", 10);
+      defaults.effort_topic, 10);
   diagnostic_publisher_ =
       create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
-          "/humanoid_gazebo/diagnostics", 10);
+          defaults.diagnostics_topic, 10);
   joint_state_subscription_ = create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", 10,
+      defaults.joint_states_topic, 10,
       [this](const sensor_msgs::msg::JointState &message) {
         joint_state_callback(message);
       });
@@ -162,7 +174,7 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports) {
   transport_timer_ = create_wall_timer(std::chrono::milliseconds(1),
                                        [this] { transport_tick(); });
   publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::OK,
-                     "three serial buses opened; motors await explicit enable");
+                     "serial buses opened; motors await explicit enable");
 }
 
 void MotorSimNode::joint_state_callback(
@@ -253,7 +265,7 @@ void MotorSimNode::publish_diagnostic(const int level,
                                       const std::string &message) {
   diagnostic_msgs::msg::DiagnosticStatus status;
   status.level = static_cast<uint8_t>(level);
-  status.name = "humanoid_gazebo/motor_sim";
+  status.name = "motor_sim";
   status.hardware_id = "gazebo-serial-simulator";
   status.message = message;
   diagnostic_msgs::msg::DiagnosticArray array;
@@ -281,11 +293,11 @@ void MotorSimNode::handle_disconnect(const std::string &bus) {
   // Reliable publisher 的 ACK 证明零 effort 已进入订阅端中间件；再留一个短的
   // executor 窗口，让 controller 回调实际消费零值后才终止整个 launch。
   static_cast<void>(effort_publisher_->wait_for_all_acked(
-      std::chrono::milliseconds(50)));
-  shutdown_timer_ = create_wall_timer(std::chrono::milliseconds(20), [this] {
+      std::chrono::milliseconds(100)));
+  shutdown_timer_ = create_wall_timer(std::chrono::milliseconds(100), [this] {
     shutdown_timer_->cancel();
     rclcpp::shutdown();
   });
 }
 
-}  // namespace humanoid_gazebo::motor_sim
+}  // namespace motor_sim::ros

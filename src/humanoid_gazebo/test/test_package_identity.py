@@ -27,7 +27,11 @@ def test_colcon_discovers_shared_motor_and_humanoid_packages() -> None:
         text=True,
         capture_output=True,
     )
-    assert result.stdout.splitlines() == ["humanoid_gazebo", "motor_sim"]
+    assert result.stdout.splitlines() == [
+        "humanoid_gazebo",
+        "motor_sim",
+        "robot_arm_gazebo",
+    ]
 
 
 def test_source_tree_contains_only_approved_simulation_packages() -> None:
@@ -35,7 +39,11 @@ def test_source_tree_contains_only_approved_simulation_packages() -> None:
         package.parent.relative_to(ROOT).as_posix()
         for package in (ROOT / "src").glob("*/package.xml")
     )
-    assert package_roots == ["src/humanoid_gazebo", "src/motor_sim"]
+    assert package_roots == [
+        "src/humanoid_gazebo",
+        "src/motor_sim",
+        "src/robot_arm_gazebo",
+    ]
 
 
 def test_runtime_sources_and_user_docs_have_no_removed_architecture_names() -> None:

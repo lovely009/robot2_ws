@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<robot name="ur5e" xmlns:xacro="http://wiki.ros.org/xacro">
+  <xacro:arg name="controllers_file" default="$(find robot_arm_gazebo)/config/controllers.yaml"/>
+  <xacro:include filename="$(find robot_arm_gazebo)/vendor/ur_description/urdf/ur_macro.xacro"/>
+
+  <link name="world"/>
+  <xacro:ur_robot
+      name="ur5e"
+      tf_prefix=""
+      parent="world"
+      ur_type="ur5e"
+      joint_limits_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/joint_limits.yaml"
+      kinematics_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/default_kinematics.yaml"
+      physical_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/physical_parameters.yaml"
+      visual_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/visual_parameters.yaml"
+      generate_ros2_control_tag="false"
+      sim_ignition="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <xacro:macro name="effort_joint" params="name limit initial">
+    <joint name="${name}">
+      <command_interface name="effort">
+        <param name="min">-${limit}</param>
+        <param name="max">${limit}</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">${initial}</param></state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="GazeboSimSystem" type="system">
+    <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
+    <xacro:effort_joint name="shoulder_pan_joint" limit="60" initial="0.0"/>
+    <xacro:effort_joint name="shoulder_lift_joint" limit="60" initial="-1.57"/>
+    <xacro:effort_joint name="elbow_joint" limit="60" initial="0.0"/>
+    <xacro:effort_joint name="wrist_1_joint" limit="10" initial="-1.57"/>
+    <xacro:effort_joint name="wrist_2_joint" limit="10" initial="0.0"/>
+    <xacro:effort_joint name="wrist_3_joint" limit="10" initial="0.0"/>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+      <hold_joints>true</hold_joints>
+    </plugin>
+  </gazebo>
+</robot>

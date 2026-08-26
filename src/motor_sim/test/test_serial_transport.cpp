@@ -1,4 +1,4 @@
-#include "humanoid_gazebo/transport/serial_transport.hpp"
+#include "motor_sim/transport/serial_transport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -12,8 +12,8 @@
 #include <string>
 #include <thread>
 
-namespace protocol = humanoid_gazebo::protocol;
-namespace transport = humanoid_gazebo::transport;
+namespace protocol = motor_sim::protocol;
+namespace transport = motor_sim::transport;
 using namespace std::chrono_literals;
 
 namespace {

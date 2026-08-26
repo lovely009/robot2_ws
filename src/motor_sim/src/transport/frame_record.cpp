@@ -1,10 +1,10 @@
-#include "humanoid_gazebo/transport/frame_record.hpp"
+#include "motor_sim/transport/frame_record.hpp"
 
 #include <cstdio>
 #include <optional>
 #include <stdexcept>
 
-namespace humanoid_gazebo::transport {
+namespace motor_sim::transport {
 namespace {
 
 constexpr std::size_t kStandardIdWidth = 3U;
@@ -201,4 +201,4 @@ FrameRecordParser::push(const std::string_view bytes) {
   return frames;
 }
 
-}  // namespace humanoid_gazebo::transport
+}  // namespace motor_sim::transport

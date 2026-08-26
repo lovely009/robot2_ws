@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "humanoid_gazebo/motor_sim/frame_router.hpp"
-#include "humanoid_gazebo/transport/frame_transport.hpp"
-#include "humanoid_gazebo/transport/serial_transport.hpp"
+#include "motor_sim/transport/frame_transport.hpp"
+#include "motor_sim/transport/serial_transport.hpp"
 
 namespace humanoid_gazebo::motor_sim {
+
+namespace transport = ::motor_sim::transport;
 
 using PortMap = std::vector<std::pair<std::string, std::string>>;
 using TransportMap =

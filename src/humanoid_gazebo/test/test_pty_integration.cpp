@@ -1,7 +1,7 @@
 #include "humanoid_gazebo/motor_sim/motor_sim_node.hpp"
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
-#include "humanoid_gazebo/transport/frame_record.hpp"
-#include "humanoid_gazebo/transport/serial_transport.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
+#include "motor_sim/transport/frame_record.hpp"
+#include "motor_sim/transport/serial_transport.hpp"
 
 #include <gtest/gtest.h>
 #include <rclcpp/executors/single_threaded_executor.hpp>
@@ -24,9 +24,9 @@
 #include <utility>
 #include <vector>
 
-namespace motor_sim = humanoid_gazebo::motor_sim;
-namespace protocol = humanoid_gazebo::protocol;
-namespace transport = humanoid_gazebo::transport;
+namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace protocol = ::motor_sim::protocol;
+namespace transport = ::motor_sim::transport;
 using namespace std::chrono_literals;
 
 namespace {
@@ -198,7 +198,7 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
   PseudoTerminal left_arm;
   PseudoTerminal right_arm;
   PseudoTerminal legs;
-  motor_sim::TransportMap transports;
+  humanoid_sim::TransportMap transports;
   transports.emplace(
       "left_arm", std::make_unique<transport::SerialTransport>(
                       left_arm.slave_path(),
@@ -212,7 +212,7 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
                   legs.slave_path(), transport::TransportMode::UsbSerial,
                   3000000));
 
-  auto config = motor_sim::load_system_config(kMotorsYaml);
+  auto config = humanoid_sim::load_system_config(kMotorsYaml);
   const auto joint_names = [&config] {
     std::vector<std::string> names;
     names.reserve(config.motors.size());
@@ -221,7 +221,7 @@ TEST(PtyIntegration, ThreeBusRoundTripAndDisconnect) {
     }
     return names;
   }();
-  auto simulator = std::make_shared<motor_sim::MotorSimNode>(
+  auto simulator = std::make_shared<humanoid_sim::MotorSimNode>(
       rclcpp::NodeOptions{}, std::move(config), std::move(transports));
   auto observer = std::make_shared<rclcpp::Node>("pty_integration_observer");
   auto joint_states = observer->create_publisher<sensor_msgs::msg::JointState>(

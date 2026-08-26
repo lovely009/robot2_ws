@@ -1,9 +1,9 @@
-#include "humanoid_gazebo/protocol/rp_protocol.hpp"
+#include "motor_sim/protocol/rp_protocol.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 namespace {
 
 CanFrame make_frame(const uint32_t id, const uint8_t *data,
@@ -58,4 +58,4 @@ CanFrame RpProtocol::encode_feedback(const MotorFeedback &feedback,
   return make_frame(feedback.motor_id, payload.data(), payload.size(), true);
 }
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

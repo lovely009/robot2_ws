@@ -1,6 +1,6 @@
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
-#include "humanoid_gazebo/protocol/rp_protocol.hpp"
-#include "humanoid_gazebo/protocol/vaxor_protocol.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
+#include "motor_sim/protocol/rp_protocol.hpp"
+#include "motor_sim/protocol/vaxor_protocol.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace protocol = humanoid_gazebo::protocol;
+namespace protocol = motor_sim::protocol;
 
 namespace {
 

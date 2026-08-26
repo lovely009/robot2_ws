@@ -5,9 +5,9 @@
 #include <string_view>
 #include <vector>
 
-#include "humanoid_gazebo/protocol/can_frame.hpp"
+#include "motor_sim/protocol/can_frame.hpp"
 
-namespace humanoid_gazebo::transport {
+namespace motor_sim::transport {
 
 std::string encode_frame_record(const protocol::CanFrame &frame);
 
@@ -23,4 +23,4 @@ private:
   bool dropping_overlong_record_{false};
 };
 
-}  // namespace humanoid_gazebo::transport
+}  // namespace motor_sim::transport

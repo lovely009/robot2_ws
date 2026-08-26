@@ -6,10 +6,10 @@
 #include <string>
 #include <thread>
 
-#include "humanoid_gazebo/transport/frame_record.hpp"
-#include "humanoid_gazebo/transport/frame_transport.hpp"
+#include "motor_sim/transport/frame_record.hpp"
+#include "motor_sim/transport/frame_transport.hpp"
 
-namespace humanoid_gazebo::transport {
+namespace motor_sim::transport {
 
 enum class TransportMode { UsbSerial, SerialSlcan };
 
@@ -44,4 +44,4 @@ private:
   std::deque<ReceivedFrame> received_frames_;
 };
 
-}  // namespace humanoid_gazebo::transport
+}  // namespace motor_sim::transport

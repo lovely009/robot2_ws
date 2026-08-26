@@ -1,14 +1,14 @@
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
 
-#include "humanoid_gazebo/protocol/rp_protocol.hpp"
-#include "humanoid_gazebo/protocol/vaxor_protocol.hpp"
+#include "motor_sim/protocol/rp_protocol.hpp"
+#include "motor_sim/protocol/vaxor_protocol.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 namespace {
 
 template <typename T>
@@ -299,4 +299,4 @@ MotorFeedback unpack_vaxor_feedback(const uint8_t *data,
   return feedback;
 }
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

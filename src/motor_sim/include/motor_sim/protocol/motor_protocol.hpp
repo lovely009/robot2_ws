@@ -7,9 +7,9 @@
 #include <optional>
 #include <string_view>
 
-#include "humanoid_gazebo/protocol/can_frame.hpp"
+#include "motor_sim/protocol/can_frame.hpp"
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr uint32_t kRpEnableId = 0x00U;
@@ -93,4 +93,4 @@ std::array<uint8_t, 12> pack_vaxor_reply(const MotorFeedback &feedback);
 std::array<uint8_t, 20> pack_vaxor_status(const MotorFeedback &feedback);
 MotorFeedback unpack_vaxor_feedback(const uint8_t *data, std::size_t size);
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

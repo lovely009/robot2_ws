@@ -1,4 +1,4 @@
-#include "humanoid_gazebo/transport/serial_transport.hpp"
+#include "motor_sim/transport/serial_transport.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -11,7 +11,7 @@
 #include <chrono>
 #include <utility>
 
-namespace humanoid_gazebo::transport {
+namespace motor_sim::transport {
 namespace {
 
 speed_t baud_constant(const int baud_rate) {
@@ -229,4 +229,4 @@ void SerialTransport::mark_disconnected() noexcept {
   received_frames_.clear();
 }
 
-}  // namespace humanoid_gazebo::transport
+}  // namespace motor_sim::transport

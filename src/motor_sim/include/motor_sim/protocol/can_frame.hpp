@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 
 // 协议层自己的 CAN/CAN-FD 帧表示，不依赖 Linux 内核网络类型。
 struct CanFrame {
@@ -16,4 +16,4 @@ struct CanFrame {
   std::size_t size{0U};
 };
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

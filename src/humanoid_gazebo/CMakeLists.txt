@@ -5,31 +5,11 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(motor_sim REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(Threads REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
-
-add_library(humanoid_protocol
-  src/protocol/motor_protocol.cpp
-  src/protocol/rp_protocol.cpp
-  src/protocol/vaxor_protocol.cpp)
-target_compile_features(humanoid_protocol PUBLIC cxx_std_17)
-target_compile_options(humanoid_protocol PRIVATE -Wall -Wextra -Wpedantic)
-target_include_directories(humanoid_protocol PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-
-add_library(humanoid_transport
-  src/transport/frame_record.cpp
-  src/transport/serial_transport.cpp)
-target_compile_features(humanoid_transport PUBLIC cxx_std_17)
-target_compile_options(humanoid_transport PRIVATE -Wall -Wextra -Wpedantic)
-target_include_directories(humanoid_transport PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_link_libraries(humanoid_transport PUBLIC humanoid_protocol Threads::Threads)
 
 add_library(humanoid_motor_sim_core
   src/motor_sim/config.cpp
@@ -44,7 +24,7 @@ target_include_directories(humanoid_motor_sim_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(humanoid_motor_sim_core PUBLIC
-  humanoid_protocol yaml-cpp)
+  motor_sim::motor_protocol yaml-cpp)
 
 add_library(humanoid_motor_sim_node_lib
   src/motor_sim_node.cpp)
@@ -55,7 +35,7 @@ target_include_directories(humanoid_motor_sim_node_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(humanoid_motor_sim_node_lib
-  humanoid_motor_sim_core humanoid_transport)
+  humanoid_motor_sim_core motor_sim::motor_transport)
 ament_target_dependencies(humanoid_motor_sim_node_lib
   ament_index_cpp diagnostic_msgs rclcpp sensor_msgs std_msgs)
 
@@ -72,8 +52,7 @@ install(DIRECTORY config launch urdf worlds
   DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY docs/ DESTINATION share/${PROJECT_NAME}/docs)
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS humanoid_protocol humanoid_transport humanoid_motor_sim_core
-  humanoid_motor_sim_node_lib
+install(TARGETS humanoid_motor_sim_core humanoid_motor_sim_node_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
@@ -84,24 +63,6 @@ install(PROGRAMS scripts/ros_actions
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
-
-  ament_add_gtest(test_motor_protocol test/test_motor_protocol.cpp)
-  target_compile_features(test_motor_protocol PUBLIC cxx_std_17)
-  target_compile_options(test_motor_protocol PRIVATE -Wall -Wextra -Wpedantic)
-  target_include_directories(test_motor_protocol PRIVATE include)
-  target_link_libraries(test_motor_protocol humanoid_protocol)
-
-  ament_add_gtest(test_frame_record test/test_frame_record.cpp)
-  target_compile_features(test_frame_record PUBLIC cxx_std_17)
-  target_compile_options(test_frame_record PRIVATE -Wall -Wextra -Wpedantic)
-  target_include_directories(test_frame_record PRIVATE include)
-  target_link_libraries(test_frame_record humanoid_transport)
-
-  ament_add_gtest(test_serial_transport test/test_serial_transport.cpp)
-  target_compile_features(test_serial_transport PUBLIC cxx_std_17)
-  target_compile_options(test_serial_transport PRIVATE -Wall -Wextra -Wpedantic)
-  target_include_directories(test_serial_transport PRIVATE include)
-  target_link_libraries(test_serial_transport humanoid_transport util)
 
   ament_add_gtest(test_motor_config test/test_motor_config.cpp)
   target_compile_features(test_motor_config PUBLIC cxx_std_17)

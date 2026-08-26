@@ -19,7 +19,7 @@ def test_integration_package_has_final_identity() -> None:
     assert not legacy_directory.exists()
 
 
-def test_colcon_discovers_only_humanoid_gazebo() -> None:
+def test_colcon_discovers_shared_motor_and_humanoid_packages() -> None:
     result = subprocess.run(
         ["colcon", "list", "--names-only"],
         cwd=ROOT,
@@ -27,15 +27,15 @@ def test_colcon_discovers_only_humanoid_gazebo() -> None:
         text=True,
         capture_output=True,
     )
-    assert result.stdout.splitlines() == ["humanoid_gazebo"]
+    assert result.stdout.splitlines() == ["humanoid_gazebo", "motor_sim"]
 
 
-def test_source_tree_contains_only_the_simulation_package() -> None:
+def test_source_tree_contains_only_approved_simulation_packages() -> None:
     package_roots = sorted(
         package.parent.relative_to(ROOT).as_posix()
         for package in (ROOT / "src").glob("*/package.xml")
     )
-    assert package_roots == ["src/humanoid_gazebo"]
+    assert package_roots == ["src/humanoid_gazebo", "src/motor_sim"]
 
 
 def test_runtime_sources_and_user_docs_have_no_removed_architecture_names() -> None:

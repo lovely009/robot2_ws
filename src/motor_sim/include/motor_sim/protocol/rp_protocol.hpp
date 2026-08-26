@@ -1,10 +1,10 @@
 #pragma once
 
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 
-class VaxorProtocol final : public MotorProtocol {
+class RpProtocol final : public MotorProtocol {
 public:
   void validate_motor_id(unsigned motor_id) const override;
   std::optional<MotorCommand>
@@ -13,4 +13,4 @@ public:
                            FeedbackKind kind) const override;
 };
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

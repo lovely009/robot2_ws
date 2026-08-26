@@ -1,4 +1,4 @@
-#include "humanoid_gazebo/transport/frame_record.hpp"
+#include "motor_sim/transport/frame_record.hpp"
 
 #include <gtest/gtest.h>
 
@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include <string>
 
-namespace protocol = humanoid_gazebo::protocol;
-namespace transport = humanoid_gazebo::transport;
+namespace protocol = motor_sim::protocol;
+namespace transport = motor_sim::transport;
 
 namespace {
 

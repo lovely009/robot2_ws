@@ -1,9 +1,9 @@
-#include "humanoid_gazebo/protocol/vaxor_protocol.hpp"
+#include "motor_sim/protocol/vaxor_protocol.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-namespace humanoid_gazebo::protocol {
+namespace motor_sim::protocol {
 namespace {
 
 CanFrame make_frame(const uint32_t id, const uint8_t *data,
@@ -61,4 +61,4 @@ CanFrame VaxorProtocol::encode_feedback(const MotorFeedback &feedback,
                     payload.size(), true);
 }
 
-}  // namespace humanoid_gazebo::protocol
+}  // namespace motor_sim::protocol

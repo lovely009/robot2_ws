@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-namespace motor_sim = humanoid_gazebo::motor_sim;
-namespace protocol = humanoid_gazebo::protocol;
+namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace protocol = ::motor_sim::protocol;
 using namespace std::chrono_literals;
 
 namespace {
@@ -17,8 +17,8 @@ namespace {
 const std::string kMotorsYaml =
     std::string(TEST_SOURCE_DIR) + "/config/motors.yaml";
 
-motor_sim::FrameRouter::TimePoint at_ms(const int64_t milliseconds) {
-  return motor_sim::FrameRouter::TimePoint{} +
+humanoid_sim::FrameRouter::TimePoint at_ms(const int64_t milliseconds) {
+  return humanoid_sim::FrameRouter::TimePoint{} +
          std::chrono::milliseconds(milliseconds);
 }
 
@@ -89,79 +89,79 @@ protocol::CanFrame vaxor_control_frame(const unsigned node, const bool enabled,
 }  // namespace
 
 TEST(FrameRouter, RejectsKnownVaxorNodeOnWrongBus) {
-  motor_sim::FrameRouter router(motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter router(humanoid_sim::load_system_config(kMotorsYaml));
   const auto result =
       router.handle("left_arm", vaxor_command_frame(4U, 0.0), at_ms(0));
-  EXPECT_EQ(result.status, motor_sim::RouterStatus::WrongBus);
+  EXPECT_EQ(result.status, humanoid_sim::RouterStatus::WrongBus);
   EXPECT_TRUE(router.safety_state().latched);
 }
 
 TEST(FrameRouter, OutOfCommandRangeLatchesWholeRobot) {
-  motor_sim::FrameRouter router(motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter router(humanoid_sim::load_system_config(kMotorsYaml));
   ASSERT_EQ(router.handle("left_arm", rp_enable_frame(true), at_ms(0)).status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   const auto result =
       router.handle("left_arm", rp_command_frame(1.0), at_ms(10));
-  EXPECT_EQ(result.status, motor_sim::RouterStatus::SafetyFault);
-  EXPECT_EQ(router.safety_state().fault, motor_sim::Fault::CommandLimit);
+  EXPECT_EQ(result.status, humanoid_sim::RouterStatus::SafetyFault);
+  EXPECT_EQ(router.safety_state().fault, humanoid_sim::Fault::CommandLimit);
   const auto efforts = router.compute_efforts(
-      std::vector<motor_sim::JointSample>(30U), 0.01, at_ms(10));
+      std::vector<humanoid_sim::JointSample>(30U), 0.01, at_ms(10));
   EXPECT_EQ(efforts, std::vector<double>(30U, 0.0));
 }
 
 TEST(FrameRouter, ExplicitEnableAndValidCommandProduceIndependentEffort) {
-  motor_sim::FrameRouter router(motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter router(humanoid_sim::load_system_config(kMotorsYaml));
   EXPECT_EQ(router.handle("left_arm", rp_enable_frame(true), at_ms(0)).status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   EXPECT_EQ(router.handle("left_arm", rp_command_frame(0.1), at_ms(10)).status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   const auto efforts = router.compute_efforts(
-      std::vector<motor_sim::JointSample>(30U), 0.01, at_ms(10));
+      std::vector<humanoid_sim::JointSample>(30U), 0.01, at_ms(10));
   EXPECT_GT(efforts[0], 0.0);
   EXPECT_NEAR(efforts[1], 0.0, 0.05);
   EXPECT_DOUBLE_EQ(efforts[9], 0.0);
 }
 
 TEST(FrameRouter, CommandDoesNotAutoEnableMotor) {
-  motor_sim::FrameRouter router(motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter router(humanoid_sim::load_system_config(kMotorsYaml));
   EXPECT_EQ(router.handle("left_arm", rp_command_frame(0.1), at_ms(0)).status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   const auto efforts = router.compute_efforts(
-      std::vector<motor_sim::JointSample>(30U), 0.01, at_ms(0));
+      std::vector<humanoid_sim::JointSample>(30U), 0.01, at_ms(0));
   EXPECT_EQ(efforts, std::vector<double>(30U, 0.0));
 }
 
 TEST(FrameRouter, TimeoutAndDisconnectLatchZeroEffort) {
-  motor_sim::FrameRouter timeout_router(
-      motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter timeout_router(
+      humanoid_sim::load_system_config(kMotorsYaml));
   timeout_router.handle("left_arm", rp_enable_frame(true), at_ms(0));
   EXPECT_EQ(timeout_router.compute_efforts(
-                std::vector<motor_sim::JointSample>(30U), 0.01, at_ms(151)),
+                std::vector<humanoid_sim::JointSample>(30U), 0.01, at_ms(151)),
             std::vector<double>(30U, 0.0));
   EXPECT_EQ(timeout_router.safety_state().fault,
-            motor_sim::Fault::CommandTimeout);
+            humanoid_sim::Fault::CommandTimeout);
 
-  motor_sim::FrameRouter disconnect_router(
-      motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter disconnect_router(
+      humanoid_sim::load_system_config(kMotorsYaml));
   disconnect_router.observe_disconnect("legs");
   EXPECT_EQ(disconnect_router.safety_state().fault,
-            motor_sim::Fault::TransportDisconnected);
+            humanoid_sim::Fault::TransportDisconnected);
 }
 
 TEST(FrameRouter, VaxorModeGainCurrentLimitAndSetZeroAreApplied) {
-  motor_sim::FrameRouter router(motor_sim::load_system_config(kMotorsYaml));
+  humanoid_sim::FrameRouter router(humanoid_sim::load_system_config(kMotorsYaml));
   constexpr std::size_t kRightForearm = 15U;
   ASSERT_EQ(router.handle("right_arm",
                           vaxor_control_frame(
                               1U, true, false, protocol::CommandMode::Mit),
                           at_ms(0))
                 .status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   ASSERT_EQ(router.handle("right_arm", vaxor_command_frame(1U, 3.6, 0.008, 11.0),
                           at_ms(10))
                 .status,
-            motor_sim::RouterStatus::Applied);
-  std::vector<motor_sim::JointSample> states(30U);
+            humanoid_sim::RouterStatus::Applied);
+  std::vector<humanoid_sim::JointSample> states(30U);
   states[kRightForearm].position_rad = 0.0;
   const auto efforts = router.compute_efforts(states, 0.01, at_ms(10));
   EXPECT_GT(efforts[kRightForearm], 3.7);
@@ -174,7 +174,7 @@ TEST(FrameRouter, VaxorModeGainCurrentLimitAndSetZeroAreApplied) {
                               1U, true, true, protocol::CommandMode::Position),
                           at_ms(20))
                 .status,
-            motor_sim::RouterStatus::Applied);
+            humanoid_sim::RouterStatus::Applied);
   const auto feedback =
       router.motor_feedback(kRightForearm, states[kRightForearm], 0.0);
   EXPECT_NEAR(feedback.position, 0.0, 1e-12);

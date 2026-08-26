@@ -1,6 +1,6 @@
 #include "humanoid_gazebo/motor_sim/config.hpp"
 
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -14,6 +14,8 @@
 #include <utility>
 
 namespace humanoid_gazebo::motor_sim {
+
+namespace protocol = ::motor_sim::protocol;
 namespace {
 
 struct RequiredMotorAddress {

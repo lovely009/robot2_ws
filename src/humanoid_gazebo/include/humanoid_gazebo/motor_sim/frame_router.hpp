@@ -10,9 +10,11 @@
 #include "humanoid_gazebo/motor_sim/plant_model.hpp"
 #include "humanoid_gazebo/motor_sim/safety_monitor.hpp"
 #include "humanoid_gazebo/motor_sim/transmission.hpp"
-#include "humanoid_gazebo/protocol/motor_protocol.hpp"
+#include "motor_sim/protocol/motor_protocol.hpp"
 
 namespace humanoid_gazebo::motor_sim {
+
+namespace protocol = ::motor_sim::protocol;
 
 enum class RouterStatus { Applied, Ignored, WrongBus, SafetyFault };
 

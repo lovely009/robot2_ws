@@ -4,13 +4,13 @@
 
 #include <stdexcept>
 
-namespace motor_sim = humanoid_gazebo::motor_sim;
-namespace transport = humanoid_gazebo::transport;
+namespace humanoid_sim = humanoid_gazebo::motor_sim;
+namespace transport = ::motor_sim::transport;
 
 namespace {
 
-motor_sim::NodeParameters valid_parameters() {
-  motor_sim::NodeParameters parameters;
+humanoid_sim::NodeParameters valid_parameters() {
+  humanoid_sim::NodeParameters parameters;
   parameters.transport_mode = transport::TransportMode::UsbSerial;
   parameters.ports = {
       {"left_arm", "/dev/serial/by-id/usb-left"},
@@ -25,38 +25,38 @@ motor_sim::NodeParameters valid_parameters() {
 }  // namespace
 
 TEST(MotorSimNodeParameters, AcceptsThreeStableUniqueUsbPorts) {
-  EXPECT_NO_THROW(motor_sim::validate_node_parameters(valid_parameters()));
+  EXPECT_NO_THROW(humanoid_sim::validate_node_parameters(valid_parameters()));
 }
 
 TEST(MotorSimNodeParameters, RejectsUnstableOrDuplicatePorts) {
   auto unstable = valid_parameters();
   unstable.ports[0].second = "/dev/ttyACM0";
-  EXPECT_THROW(motor_sim::validate_node_parameters(unstable),
+  EXPECT_THROW(humanoid_sim::validate_node_parameters(unstable),
                std::invalid_argument);
 
   auto duplicate = valid_parameters();
   duplicate.ports[2].second = duplicate.ports[0].second;
-  EXPECT_THROW(motor_sim::validate_node_parameters(duplicate),
+  EXPECT_THROW(humanoid_sim::validate_node_parameters(duplicate),
                std::invalid_argument);
 }
 
 TEST(MotorSimNodeParameters, SerialSlcanRequiresExplicitOptIn) {
   auto parameters = valid_parameters();
   parameters.transport_mode = transport::TransportMode::SerialSlcan;
-  EXPECT_THROW(motor_sim::validate_node_parameters(parameters),
+  EXPECT_THROW(humanoid_sim::validate_node_parameters(parameters),
                std::invalid_argument);
   parameters.allow_external_canfd = true;
-  EXPECT_NO_THROW(motor_sim::validate_node_parameters(parameters));
+  EXPECT_NO_THROW(humanoid_sim::validate_node_parameters(parameters));
 }
 
 TEST(MotorSimNodeParameters, RejectsMissingBusAndConfig) {
   auto missing_bus = valid_parameters();
   missing_bus.ports.pop_back();
-  EXPECT_THROW(motor_sim::validate_node_parameters(missing_bus),
+  EXPECT_THROW(humanoid_sim::validate_node_parameters(missing_bus),
                std::invalid_argument);
 
   auto missing_config = valid_parameters();
   missing_config.config_file.clear();
-  EXPECT_THROW(motor_sim::validate_node_parameters(missing_config),
+  EXPECT_THROW(humanoid_sim::validate_node_parameters(missing_config),
                std::invalid_argument);
 }

@@ -2,9 +2,9 @@
 
 #include <chrono>
 
-#include "humanoid_gazebo/protocol/can_frame.hpp"
+#include "motor_sim/protocol/can_frame.hpp"
 
-namespace humanoid_gazebo::transport {
+namespace motor_sim::transport {
 
 enum class ReceiveResult { Frame, NoData, Disconnected };
 
@@ -22,4 +22,4 @@ public:
   virtual ReceiveResult receive(ReceivedFrame &frame) = 0;
 };
 
-}  // namespace humanoid_gazebo::transport
+}  // namespace motor_sim::transport

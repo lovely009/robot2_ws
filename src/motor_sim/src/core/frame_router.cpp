@@ -95,15 +95,11 @@ RouterResult FrameRouter::handle(const std::string &bus,
     return {RouterStatus::Ignored, {}};
   }
 
-  safety_.observe_valid_command(bus, frame.id, payload_bytes(frame), now);
-  if (safety_.latched()) {
-    return {RouterStatus::SafetyFault, {}};
-  }
-
   RouterResult result{RouterStatus::Applied, {}};
   result.updated_motor_indices.reserve(pending.size());
   for (const auto &item : pending) {
     if (item.control) {
+      safety_.set_enabled(item.index, item.command.enabled, now);
       enabled_[item.index] = item.command.enabled;
       modes_[item.index] = item.command.mode;
       commands_[item.index].enabled = item.command.enabled;
@@ -115,6 +111,11 @@ RouterResult FrameRouter::handle(const std::string &bus,
         commands_[item.index].position = last_states_[item.index].position_rad;
       }
     } else {
+      safety_.observe_valid_command(item.index, bus, frame.id,
+                                    payload_bytes(frame), now);
+      if (safety_.latched()) {
+        return {RouterStatus::SafetyFault, {}};
+      }
       commands_[item.index] = item.command;
       commands_[item.index].enabled = enabled_[item.index];
     }

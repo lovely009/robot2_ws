@@ -26,25 +26,52 @@ TimePoint at_us(const int64_t microseconds) {
 
 TEST(SafetyMonitor, TimeoutZerosEveryAxisAndLatches) {
   core::SafetyMonitor safety(30U, 150ms, 2ms);
-  safety.observe_valid_command("left_arm", 1U, {0x01U}, at_ms(0));
+  safety.set_enabled(0U, true, at_ms(0));
+  safety.observe_valid_command(0U, "left_arm", 1U, {0x01U}, at_ms(0));
   const auto state = safety.tick(at_ms(151));
   EXPECT_TRUE(state.latched);
   EXPECT_EQ(state.fault, core::Fault::CommandTimeout);
   EXPECT_EQ(state.efforts, std::vector<double>(30U, 0.0));
 }
 
+TEST(SafetyMonitor, DisabledMotorsMayRemainIdle) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms);
+  EXPECT_FALSE(safety.tick(TimePoint{} + 10s).latched);
+}
+
+TEST(SafetyMonitor, OneStaleEnabledMotorLatchesWholeRobot) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms);
+  const auto start = TimePoint{} + 1s;
+  safety.set_enabled(0U, true, start);
+  safety.set_enabled(1U, true, start);
+  safety.observe_valid_command(0U, "arm", 1U, {1U}, start + 100ms);
+  safety.observe_valid_command(1U, "arm", 2U, {2U}, start + 10ms);
+  const auto snapshot = safety.tick(start + 170ms);
+  EXPECT_TRUE(snapshot.latched);
+  EXPECT_EQ(snapshot.fault, core::Fault::CommandTimeout);
+  EXPECT_TRUE(snapshot.motor_status[1].timed_out);
+}
+
 TEST(SafetyMonitor, DifferentDuplicatePayloadWithinWindowLatches) {
   core::SafetyMonitor safety(30U, 150ms, 2ms);
-  safety.observe_valid_command("legs", 3U, {0x01U}, at_us(0));
-  safety.observe_valid_command("legs", 3U, {0x02U}, at_us(1500));
+  safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));
+  safety.observe_valid_command(0U, "legs", 3U, {0x02U}, at_us(1500));
   EXPECT_EQ(safety.fault(), core::Fault::DuplicateController);
   EXPECT_TRUE(safety.latched());
 }
 
 TEST(SafetyMonitor, IdenticalRetransmissionDoesNotLatch) {
   core::SafetyMonitor safety(30U, 150ms, 2ms);
-  safety.observe_valid_command("legs", 3U, {0x01U}, at_us(0));
-  safety.observe_valid_command("legs", 3U, {0x01U}, at_us(1500));
+  safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));
+  safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(1500));
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+  EXPECT_FALSE(safety.latched());
+}
+
+TEST(SafetyMonitor, DifferentPayloadOutsideConflictWindowDoesNotLatch) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms);
+  safety.observe_valid_command(0U, "arm", 1U, {0x01U}, at_us(0));
+  safety.observe_valid_command(0U, "arm", 1U, {0x02U}, at_us(3000));
   EXPECT_EQ(safety.fault(), core::Fault::None);
   EXPECT_FALSE(safety.latched());
 }

@@ -19,10 +19,17 @@ enum class Fault {
   WrongBus,
 };
 
+struct MotorSafetyStatus {
+  bool enabled{false};
+  bool timed_out{false};
+  std::optional<std::chrono::milliseconds> command_age;
+};
+
 struct SafetySnapshot {
   bool latched{false};
   Fault fault{Fault::None};
   std::vector<double> efforts;
+  std::vector<MotorSafetyStatus> motor_status;
 };
 
 class SafetyMonitor {
@@ -34,7 +41,9 @@ public:
                 std::chrono::milliseconds command_timeout,
                 std::chrono::milliseconds duplicate_window);
 
-  void observe_valid_command(const std::string &bus, uint32_t can_id,
+  void set_enabled(std::size_t motor_index, bool enabled, TimePoint now);
+  void observe_valid_command(std::size_t motor_index, const std::string &bus,
+                             uint32_t can_id,
                              const std::vector<uint8_t> &payload,
                              TimePoint now);
   void observe_disconnect(const std::string &bus);
@@ -56,7 +65,9 @@ private:
   std::chrono::milliseconds command_timeout_;
   std::chrono::milliseconds duplicate_window_;
   Fault fault_{Fault::None};
-  std::optional<TimePoint> last_valid_command_;
+  std::vector<bool> enabled_;
+  std::vector<std::optional<TimePoint>> last_valid_commands_;
+  std::vector<MotorSafetyStatus> last_motor_status_;
   std::unordered_map<std::string, RecentFrame> recent_frames_;
 };
 

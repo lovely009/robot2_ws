@@ -50,6 +50,14 @@ std::string fault_message(const Fault fault) {
   return "unknown fault";
 }
 
+diagnostic_msgs::msg::KeyValue diagnostic_value(const std::string &key,
+                                                const std::string &value) {
+  diagnostic_msgs::msg::KeyValue result;
+  result.key = key;
+  result.value = value;
+  return result;
+}
+
 }  // namespace
 
 void validate_node_parameters(
@@ -137,6 +145,12 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   defaults.fault_latching_enabled =
       declare_parameter<bool>("fault_latching_enabled",
                               defaults.fault_latching_enabled);
+  defaults.drive_state_topic = declare_parameter<std::string>(
+      "drive_state_topic", defaults.drive_state_topic);
+  defaults.control_gate_topic = declare_parameter<std::string>(
+      "control_gate_topic", defaults.control_gate_topic);
+  defaults.reset_fault_service = declare_parameter<std::string>(
+      "reset_fault_service", defaults.reset_fault_service);
   validate_node_parameters(parameters, contract);
 
   TransportMap transports;
@@ -198,6 +212,8 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
 
   effort_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
       defaults.effort_topic, 10);
+  drive_state_publisher_ = create_publisher<std_msgs::msg::String>(
+      defaults.drive_state_topic, 10);
   diagnostic_publisher_ =
       create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
           defaults.diagnostics_topic, 10);
@@ -205,6 +221,17 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
       defaults.joint_states_topic, 10,
       [this](const sensor_msgs::msg::JointState &message) {
         joint_state_callback(message);
+      });
+  control_gate_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      defaults.control_gate_topic, 10,
+      [this](const std_msgs::msg::Bool &message) {
+        control_gate_callback(message);
+      });
+  reset_fault_service_ = create_service<std_srvs::srv::Trigger>(
+      defaults.reset_fault_service,
+      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+        reset_fault_callback(request, std::move(response));
       });
   const auto period = std::chrono::duration<double>(
       1.0 / static_cast<double>(router_->config().timing.control_hz));
@@ -278,9 +305,13 @@ void MotorSimNode::control_tick() {
       joint_states_,
       1.0 / static_cast<double>(router_->config().timing.control_hz), now);
   publish_efforts(last_efforts_);
+  publish_drive_state();
   const auto safety = router_->safety_state();
   if (safety.latched) {
     publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::ERROR,
+                       fault_message(safety.fault));
+  } else if (safety.rearm_required) {
+    publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
                        fault_message(safety.fault));
   }
   send_feedback(control_tick_count_++);
@@ -325,6 +356,49 @@ void MotorSimNode::publish_efforts(const std::vector<double> &efforts) {
   effort_publisher_->publish(message);
 }
 
+void MotorSimNode::publish_drive_state() {
+  std_msgs::msg::String message;
+  message.data = std::string(core::drive_state_name(router_->drive_state()));
+  drive_state_publisher_->publish(message);
+}
+
+void MotorSimNode::control_gate_callback(const std_msgs::msg::Bool &message) {
+  control_gate_open_ = message.data;
+  router_->set_control_gate(message.data);
+  last_transition_reason_ = message.data ? "controller gate opened"
+                                         : "controller gate closed";
+}
+
+void MotorSimNode::reset_fault_callback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+  const auto result = router_->reset_fault();
+  response->success = result == core::ResetFaultResult::Cleared;
+  switch (result) {
+    case core::ResetFaultResult::Cleared:
+      response->message = "故障已清除；请重新使能并发送全轴新鲜命令";
+      reset_rejection_reason_.clear();
+      last_transition_reason_ = "fault reset";
+      break;
+    case core::ResetFaultResult::NotLatched:
+      response->message = "当前没有锁存故障";
+      break;
+    case core::ResetFaultResult::AxesStillEnabled:
+      response->message = "拒绝复位：必须先显式 disable 全部轴";
+      break;
+    case core::ResetFaultResult::TransportDisconnected:
+      response->message = "拒绝复位：传输已断开";
+      break;
+    case core::ResetFaultResult::ConditionActive:
+      response->message = "拒绝复位：故障条件仍然存在";
+      break;
+  }
+  if (!response->success) {
+    reset_rejection_reason_ = response->message;
+  }
+  publish_drive_state();
+}
+
 void MotorSimNode::publish_diagnostic(const int level,
                                       const std::string &message) {
   diagnostic_msgs::msg::DiagnosticStatus status;
@@ -332,6 +406,23 @@ void MotorSimNode::publish_diagnostic(const int level,
   status.name = "motor_sim";
   status.hardware_id = "gazebo-serial-simulator";
   status.message = message;
+  const auto safety = router_->safety_state();
+  status.values.resize(7U);
+  status.values[0] = diagnostic_value(
+      "drive_state", std::string(core::drive_state_name(router_->drive_state())));
+  status.values[1] = diagnostic_value(
+      "brake_engaged",
+      router_->drive_state() == core::DriveState::MotorControlActive ? "false"
+                                                                     : "true");
+  status.values[2] = diagnostic_value(
+      "control_gate", control_gate_open_ ? "true" : "false");
+  status.values[3] = diagnostic_value("fault", fault_message(safety.fault));
+  status.values[4] = diagnostic_value(
+      "fault_latched", safety.latched ? "true" : "false");
+  status.values[5] =
+      diagnostic_value("last_transition_reason", last_transition_reason_);
+  status.values[6] =
+      diagnostic_value("reset_rejection_reason", reset_rejection_reason_);
   diagnostic_msgs::msg::DiagnosticArray array;
   array.header.stamp = now();
   array.status.push_back(std::move(status));
@@ -346,6 +437,7 @@ void MotorSimNode::handle_disconnect(const std::string &bus) {
   router_->observe_disconnect(bus);
   last_efforts_.assign(router_->config().motors.size(), 0.0);
   publish_efforts(last_efforts_);
+  publish_drive_state();
   publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::ERROR,
                      "serial bus '" + bus + "' disconnected; shutting down");
   if (control_timer_) {

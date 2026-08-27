@@ -6,6 +6,7 @@ find_package(diagnostic_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(Threads REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
 
@@ -54,7 +55,7 @@ target_include_directories(motor_sim_node PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(motor_sim_node motor_sim_core motor_transport)
 ament_target_dependencies(motor_sim_node
-  diagnostic_msgs rclcpp sensor_msgs std_msgs)
+  diagnostic_msgs rclcpp sensor_msgs std_msgs std_srvs)
 
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_node
@@ -122,7 +123,7 @@ if(BUILD_TESTING)
   target_compile_features(test_motor_sim_node PUBLIC cxx_std_17)
   target_compile_options(test_motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_motor_sim_node motor_sim_node util)
-  ament_target_dependencies(test_motor_sim_node rclcpp)
+  ament_target_dependencies(test_motor_sim_node rclcpp std_msgs std_srvs)
 endif()
 
 ament_package()

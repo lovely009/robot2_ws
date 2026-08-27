@@ -34,6 +34,7 @@ FrameRouter::FrameRouter(SystemConfig config,
       safety_(config_.motors.size(),
               std::chrono::milliseconds(config_.timing.command_timeout_ms),
               std::chrono::milliseconds(2), fault_latching_enabled),
+      lifecycle_(config_.motors.size()),
       commands_(config_.motors.size()),
       enabled_(config_.motors.size(), false),
       modes_(config_.motors.size(), protocol::CommandMode::Mit),
@@ -54,15 +55,13 @@ FrameRouter::FrameRouter(SystemConfig config,
 RouterResult FrameRouter::handle(const std::string &bus,
                                  const protocol::CanFrame &frame,
                                  const TimePoint now) {
-  if (safety_.latched()) {
-    return {RouterStatus::SafetyFault, {}, {}};
-  }
   bool bus_exists = false;
   for (const auto &configured_bus : config_.buses) {
     bus_exists = bus_exists || configured_bus.name == bus;
   }
   if (!bus_exists) {
     safety_.latch(Fault::WrongBus);
+    lifecycle_.enter_fault(safety_.latched());
     return {RouterStatus::WrongBus, {}, {}};
   }
 
@@ -88,14 +87,19 @@ RouterResult FrameRouter::handle(const std::string &bus,
          joint_command.position < motor.limits.command_lower_rad ||
          joint_command.position > motor.limits.command_upper_rad)) {
       safety_.latch(Fault::CommandLimit);
+      lifecycle_.enter_fault(safety_.latched());
       return {RouterStatus::SafetyFault, {}, {}};
     }
     pending.push_back({index, joint_command, control});
   }
 
   if (pending.empty()) {
+    if (safety_.latched()) {
+      return {RouterStatus::SafetyFault, {}, {}};
+    }
     if (frame_belongs_to_other_bus(bus, frame)) {
       safety_.latch(Fault::WrongBus);
+      lifecycle_.enter_fault(safety_.latched());
       return {RouterStatus::WrongBus, {}, {}};
     }
     return {RouterStatus::Ignored, {}, {}};
@@ -104,8 +108,14 @@ RouterResult FrameRouter::handle(const std::string &bus,
   RouterResult result{RouterStatus::Applied, {}, {}};
   result.updated_motor_indices.reserve(pending.size());
   for (const auto &item : pending) {
+    // 锁存后仅接收显式 disable，用于满足 reset 的全轴停用前置条件；
+    // 普通 enable 和运动帧不能清除或绕过故障。
+    if (safety_.latched() && (!item.control || item.command.enabled)) {
+      return {RouterStatus::SafetyFault, {}, {}};
+    }
     if (item.control) {
       safety_.set_enabled(item.index, item.command.enabled, now);
+      lifecycle_.set_enabled(item.index, item.command.enabled);
       enabled_[item.index] = item.command.enabled;
       modes_[item.index] = item.command.mode;
       commands_[item.index].enabled = item.command.enabled;
@@ -119,7 +129,8 @@ RouterResult FrameRouter::handle(const std::string &bus,
     } else {
       safety_.observe_valid_command(item.index, bus, frame.id,
                                     payload_bytes(frame), now);
-      if (safety_.latched()) {
+      if (safety_.latched() || safety_.rearm_required()) {
+        lifecycle_.enter_fault(safety_.latched());
         return {RouterStatus::SafetyFault, {}, {}};
       }
       commands_[item.index] = item.command;
@@ -128,8 +139,10 @@ RouterResult FrameRouter::handle(const std::string &bus,
       // Vaxor/RP 的使能只能来自独立控制帧。
       if (config_.motors[item.index].protocol == "cerb") {
         safety_.set_enabled(item.index, item.command.enabled, now);
+        lifecycle_.set_enabled(item.index, item.command.enabled);
         enabled_[item.index] = item.command.enabled;
       }
+      lifecycle_.observe_fresh_command(item.index);
       // Vaxor 的 MIT 命令帧要求逐帧应答（手册 3.4）；CERB 反馈报文同样由
       // 命令帧触发；RP 反馈由节点分频发送。
       if (config_.motors[item.index].protocol == "motor_2530" ||
@@ -138,6 +151,9 @@ RouterResult FrameRouter::handle(const std::string &bus,
       }
     }
     result.updated_motor_indices.push_back(item.index);
+  }
+  if (safety_.ready_for_new_enable_cycle()) {
+    lifecycle_.reset_to_brake();
   }
   return result;
 }
@@ -149,7 +165,11 @@ FrameRouter::compute_efforts(const std::vector<JointSample> &states,
     throw std::invalid_argument("joint sample count does not match motor count");
   }
   last_states_ = states;
-  if (safety_.tick(now).latched) {
+  const auto safety = safety_.tick(now);
+  if (safety.latched || safety.rearm_required) {
+    lifecycle_.enter_fault(safety.latched);
+  }
+  if (lifecycle_.state() != DriveState::MotorControlActive) {
     return std::vector<double>(config_.motors.size(), 0.0);
   }
   std::vector<double> efforts(config_.motors.size(), 0.0);
@@ -162,6 +182,15 @@ FrameRouter::compute_efforts(const std::vector<JointSample> &states,
 
 void FrameRouter::observe_disconnect(const std::string &bus) {
   safety_.observe_disconnect(bus);
+  lifecycle_.enter_fault(safety_.latched());
+}
+
+ResetFaultResult FrameRouter::reset_fault() noexcept {
+  const auto result = safety_.reset_fault();
+  if (result == ResetFaultResult::Cleared) {
+    lifecycle_.reset_to_brake();
+  }
+  return result;
 }
 
 protocol::MotorCommand FrameRouter::to_joint_command(

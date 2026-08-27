@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "motor_sim/core/config.hpp"
+#include "motor_sim/core/drive_lifecycle.hpp"
 #include "motor_sim/core/plant_model.hpp"
 #include "motor_sim/core/safety_monitor.hpp"
 #include "motor_sim/core/transmission.hpp"
@@ -39,6 +40,11 @@ public:
   std::vector<double> compute_efforts(const std::vector<JointSample> &states,
                                       double dt_s, TimePoint now);
   void observe_disconnect(const std::string &bus);
+  void set_control_gate(bool open) noexcept {
+    lifecycle_.set_control_gate(open);
+  }
+  DriveState drive_state() const noexcept { return lifecycle_.state(); }
+  ResetFaultResult reset_fault() noexcept;
   protocol::MotorFeedback motor_feedback(std::size_t index,
                                          const JointSample &state,
                                          double joint_effort_nm) const;
@@ -54,6 +60,7 @@ private:
 
   SystemConfig config_;
   SafetyMonitor safety_;
+  DriveLifecycle lifecycle_;
   std::vector<std::unique_ptr<protocol::MotorProtocol>> protocols_;
   std::vector<Transmission> transmissions_;
   std::vector<MotorPlantModel> plants_;

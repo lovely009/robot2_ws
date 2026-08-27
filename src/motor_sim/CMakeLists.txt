@@ -111,6 +111,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_${CORE_TEST} motor_sim_core)
   endforeach()
 
+  ament_add_gtest(test_frame_router test/test_frame_router.cpp)
+  target_compile_features(test_frame_router PUBLIC cxx_std_17)
+  target_compile_options(test_frame_router PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_definitions(test_frame_router PRIVATE
+    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(test_frame_router motor_sim_core)
+
   ament_add_gtest(test_motor_sim_node test/test_motor_sim_node.cpp)
   target_compile_features(test_motor_sim_node PUBLIC cxx_std_17)
   target_compile_options(test_motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)

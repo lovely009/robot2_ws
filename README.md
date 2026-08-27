@@ -99,10 +99,14 @@ candump vcan0
 # 使能电机（控制帧 0x502+4N）
 cansend vcan0 512#0100000000000000
 
-# 持续下发 MIT 目标位置（手册 25/30mm 推荐参数 golden vector），
-# 否则使能后 150 ms 即触发超时锁存，需重启节点
-while true; do cansend vcan0 511##0010001800080200364000080; sleep 0.05; done
+# 持续下发 wrist_1 的 MIT 目标：关节侧 1.5 rad、速度 0；
+# payload 已按 motors.yaml 的 80:1 传动比编码，kp=0.5、kd=0.02。
+# 否则使能后 150 ms 即触发超时锁存，需重启节点。
+while true; do cansend vcan0 511##0AD276382008050C302000080; sleep 0.05; done
 ```
+
+上述固定 payload 只对应当前 `motors.yaml` 中 `wrist_1` 的 80:1 传动配置。修改传动比、
+方向或零点后，外部控制器必须重新执行关节侧与电机侧换算，不能继续复用该字节串。
 
 也可以伪造关节运动观察反馈位置变化：
 

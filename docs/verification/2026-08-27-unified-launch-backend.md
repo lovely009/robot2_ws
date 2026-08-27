@@ -114,3 +114,35 @@ launch 将 Gazebo 退出码记录为 `-2`，属于本次人工终止路径，不
 `/robot_arm/diagnostics` 当前在 motor node 初始化时发布连接状态；启动后才执行的
 `ros2 topic echo --once` 不会收到此前的非持久化消息。本次验收以 motor node 存活、
 controller 状态、topic 存在性和 100 Hz 数据流确认后端工作状态。
+
+## vcan0 端到端控制验收
+
+验收时间：2026-08-27 11:43–11:44 CST。重新启动统一 launch 并等待两个 controller
+进入 `active` 后，通过 `vcan0` 控制 Vaxor `wrist_1`（motor id 4）：
+
+```bash
+# 显式使能，控制帧 ID = 0x502 + 4*4 = 0x512
+cansend vcan0 512#0100000000000000
+
+# MIT 命令 ID = 0x501 + 4*4 = 0x511；持续周期小于 150 ms 超时
+while true; do
+  cansend vcan0 511##0AD276382008050C302000080
+  sleep 0.05
+done
+```
+
+MIT payload 表示电机侧目标位置 120 rad；按 `motors.yaml` 的 80:1 传动比换算为
+`wrist_1` 关节侧目标 1.5 rad，速度为 0，电机侧 `kp=0.5`、`kd=0.02`。
+
+实测证据：
+
+- 控制前 `wrist_1 = 2.0405502872 rad`；
+- 持续控制约 2 秒后 `wrist_1 = 1.5540688412 rad`，向 1.5 rad 目标收敛；
+- 同时 `/robot_arm/effort_controller/commands` 的 wrist_1 分量为
+  `-1.6562909462 Nm`，其余未使能轴输出为 0；
+- `candump vcan0,711:7FF` 连续收到 motor id 4 的 `0x711` Vaxor reply 帧；
+- 控制期间 motor node 和两个 controller 保持运行，未触发故障退出。
+
+这证明链路 `vcan0 命令帧 → Vaxor 解码 → 传动换算 → plant effort → Gazebo 关节 →
+Vaxor 反馈帧` 已形成端到端闭环。原 README 中未按当前 Vaxor 位置偏移和 80:1 传动配置
+编码的示例 payload 已同步更正。

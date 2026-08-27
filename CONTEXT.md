@@ -28,6 +28,8 @@
 Gazebo、UR5e、controller、时钟桥和电机协议节点。外部工程通过 launch 参数选择
 transport、设备、namespace 和 ROS topic，不单独启动 `robot_arm_motor_sim_node`。
 默认连接为 `usb_serial` 和 `/dev/ttyUSB0`；设备或接口不存在时整套 launch 失败退出。
+Gazebo 启动时保持暂停，依次配置 joint state、外部 effort 与闭环抱闸 controller；
+抱闸 controller 成功激活后才恢复物理仿真，消除控制接管前的重力下坠窗口。
 
 - `usb_serial`：外部设备和仿真主机通过 USB CDC/UART 交换帧记录。这里只模拟协议端点，
   不存在物理 CAN 总线行为。
@@ -45,10 +47,14 @@ transport、设备、namespace 和 ROS topic，不单独启动 `robot_arm_motor_
 - `Transmission`：Vaxor 的电机侧与关节侧位置、速度、力矩换算。
 - `MotorPlantModel`：把已启用且有效的电机命令变为仿真关节 effort。
 - 显式 enable：启动后默认不驱动，必须先收到协议定义的使能命令。
+- 驱动生命周期：`brake_engaged`、`awaiting_first_command`、`ready_for_control`、
+  `motor_control_active`、`fault_latched`。只有六轴全部使能且命令新鲜，才允许控制 gate。
+- 仿真抱闸：`brake_controller` 使用 effort 闭环保持姿态，与外部
+  `effort_controller` 通过 Controller Manager STRICT 原子互斥切换。
 - 锁存故障：命令越限、150 ms 超时、错总线、2 ms 内重复控制器或串口断开后，
   全部轴输出零 effort，不能靠后续普通命令自动恢复。
-- 调试开关：`fault_latching_enabled:=false` 时上述故障只记录 diagnostics，
-  不锁存、不清零输出；仅用于本机联调，默认关闭该行为（即默认锁存）。
+- 调试开关：`fault_latching_enabled:=false` 时故障仍清零并抱闸，但不锁存；全轴
+  disable 后可重新 enable。默认 `true` 保持锁存和显式复位/重启语义。
 - 动作验收工具：`scripts/robot_arm_actions` 直接读取 `/robot_arm/joint_states` 并向
   effort 控制器发布有界 PD effort；它不代表外部电机链路。
 

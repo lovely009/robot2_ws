@@ -66,11 +66,15 @@ ros2 launch robot_arm_gazebo gazebo.launch.py \
   选择 `serial_slcan` 时必须显式设置 `allow_external_canfd:=true`；
   `socket_can` 的端口是 SocketCAN 接口名（如 `vcan0`），不是设备路径。
 - 启动后电机默认不使能，必须先收到协议定义的使能命令。
+- Gazebo 先以暂停状态加载模型和三个 controller；`brake_controller` 成功接管六轴后
+  才恢复物理仿真，因此启动和未使能状态不会再因重力直接塌落。
 - 命令超时 150 ms、越限、错总线、2 ms 内重复控制器或传输断开都会锁存故障，
   并把全部关节输出置零，不能靠后续普通命令自动恢复。
-- 调试时可显式设置 `fault_latching_enabled:=false` 关闭故障锁存（只记录
-  diagnostics 不停机、不清零输出）；默认 `true` 保持完整安全语义，仅建议
-  本机 vcan/PTY 联调时使用。
+- 调试时可显式设置 `fault_latching_enabled:=false` 关闭故障锁存；故障仍会清零并
+  抱闸，但全轴 disable 后可以重新 enable，不必重启。默认 `true` 时必须显式复位或
+  按既有规则重启，仅建议在本机 vcan/PTY 联调时关闭。
+- `self_collision_enabled` 控制模型级自碰撞。当前 UR 碰撞网格在部分腕部姿态会产生
+  接触偏置；调控制器时可设为 `false` 隔离碰撞问题，验收防穿模时再设为 `true`。
 - `scripts/robot_arm_actions` 动作播放器只用于模型验收，直接读取
   `/robot_arm/joint_states` 并发布有界 PD effort，不代表外部电机链路。
 
@@ -101,9 +105,13 @@ cansend vcan0 512#0100000000000000
 
 # 持续下发 wrist_1 的 MIT 目标：关节侧 1.5 rad、速度 0；
 # payload 已按 motors.yaml 的 80:1 传动比编码，kp=0.5、kd=0.02。
-# 否则使能后 150 ms 即触发超时锁存，需重启节点。
+# 否则使能后 150 ms 即触发超时锁存。
 while true; do cansend vcan0 511##0AD276382008050C302000080; sleep 0.05; done
 ```
+
+该单轴示例只用于检查 Vaxor 帧收发，不会释放整机抱闸。完整后端要求六轴全部 enable，
+并在 150 ms 窗口内持续收到六轴新鲜命令；满足后才会将 `brake_controller` 原子切换为
+`effort_controller`。任一轴超时或故障都会先关 gate、清零，再切回抱闸。
 
 上述固定 payload 只对应当前 `motors.yaml` 中 `wrist_1` 的 80:1 传动配置。修改传动比、
 方向或零点后，外部控制器必须重新执行关节侧与电机侧换算，不能继续复用该字节串。

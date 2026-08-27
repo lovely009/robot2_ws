@@ -19,6 +19,14 @@ enum class Fault {
   WrongBus,
 };
 
+enum class ResetFaultResult {
+  Cleared,
+  NotLatched,
+  AxesStillEnabled,
+  TransportDisconnected,
+  ConditionActive,
+};
+
 struct MotorSafetyStatus {
   bool enabled{false};
   bool timed_out{false};
@@ -27,6 +35,7 @@ struct MotorSafetyStatus {
 
 struct SafetySnapshot {
   bool latched{false};
+  bool rearm_required{false};
   Fault fault{Fault::None};
   std::vector<double> efforts;
   std::vector<MotorSafetyStatus> motor_status;
@@ -53,9 +62,14 @@ public:
   void observe_reconnect(const std::string &bus) noexcept;
   void latch(Fault fault) noexcept;
   SafetySnapshot tick(TimePoint now);
+  ResetFaultResult reset_fault() noexcept;
 
   bool latched() const noexcept { return fault_ != Fault::None; }
-  Fault fault() const noexcept { return fault_; }
+  bool rearm_required() const noexcept { return rearm_required_; }
+  bool ready_for_new_enable_cycle() const noexcept;
+  Fault fault() const noexcept {
+    return latched() ? fault_ : detected_fault_;
+  }
   SafetySnapshot snapshot() const;
 
 private:
@@ -69,7 +83,12 @@ private:
   std::chrono::milliseconds duplicate_window_;
   bool latching_enabled_;
   Fault fault_{Fault::None};
+  Fault detected_fault_{Fault::None};
+  bool rearm_required_{false};
+  bool transport_connected_{true};
+  bool new_enable_cycle_ready_{false};
   std::vector<bool> enabled_;
+  std::vector<bool> disabled_since_fault_;
   std::vector<std::optional<TimePoint>> last_valid_commands_;
   std::vector<MotorSafetyStatus> last_motor_status_;
   std::unordered_map<std::string, RecentFrame> recent_frames_;

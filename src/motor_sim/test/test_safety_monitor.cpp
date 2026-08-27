@@ -91,33 +91,74 @@ TEST(SafetyMonitor, LimitFaultIsFirstFaultAndCannotBeCleared) {
   EXPECT_EQ(safety.fault(), core::Fault::CommandLimit);
 }
 
-// 调试模式（latching_enabled=false）：检测逻辑保留，但任何故障都不锁存、
-// 不清零输出，方便单步调试时反复注入命令。
-TEST(SafetyMonitorDebugMode, TimeoutDoesNotLatchOrZeroEfforts) {
-  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
+TEST(SafetyMonitorReset, RejectsResetUntilEveryAxisWasExplicitlyDisabled) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms);
+  safety.set_enabled(0U, true, at_ms(0));
+  safety.set_enabled(1U, true, at_ms(0));
+  safety.latch(core::Fault::CommandLimit);
+
+  EXPECT_EQ(safety.reset_fault(), core::ResetFaultResult::AxesStillEnabled);
+  safety.set_enabled(0U, false, at_ms(1));
+  safety.set_enabled(1U, false, at_ms(1));
+  EXPECT_EQ(safety.reset_fault(), core::ResetFaultResult::Cleared);
+  EXPECT_FALSE(safety.latched());
+  EXPECT_TRUE(safety.ready_for_new_enable_cycle());
+}
+
+TEST(SafetyMonitorReset, DisconnectFaultCannotBeReset) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms);
+  safety.observe_disconnect("arm");
+  safety.set_enabled(0U, false, at_ms(1));
+  safety.set_enabled(1U, false, at_ms(1));
+
+  EXPECT_EQ(safety.reset_fault(),
+            core::ResetFaultResult::TransportDisconnected);
+  EXPECT_TRUE(safety.latched());
+}
+
+TEST(SafetyMonitorReset, ClearedFaultDoesNotReuseOldCommandTimestamp) {
+  core::SafetyMonitor safety(1U, 150ms, 2ms);
   safety.set_enabled(0U, true, at_ms(0));
   safety.observe_valid_command(0U, "arm", 1U, {0x01U}, at_ms(0));
-  const auto state = safety.tick(at_ms(151));
-  EXPECT_FALSE(state.latched);
-  EXPECT_EQ(state.fault, core::Fault::None);
-  // 快照不携带清零 efforts；状态里仍能看到超时标记用于诊断。
-  EXPECT_TRUE(state.efforts.empty());
-  EXPECT_TRUE(state.motor_status[0].timed_out);
+  EXPECT_TRUE(safety.tick(at_ms(151)).latched);
+  safety.set_enabled(0U, false, at_ms(152));
+  ASSERT_EQ(safety.reset_fault(), core::ResetFaultResult::Cleared);
+
+  safety.set_enabled(0U, true, at_ms(200));
+  const auto state = safety.tick(at_ms(201));
+  EXPECT_FALSE(state.motor_status[0].command_age.has_value());
+  EXPECT_FALSE(state.motor_status[0].timed_out);
 }
 
-TEST(SafetyMonitorDebugMode, DuplicateControllerDoesNotLatch) {
-  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
-  safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));
-  safety.observe_valid_command(0U, "legs", 3U, {0x02U}, at_us(1500));
-  EXPECT_EQ(safety.fault(), core::Fault::None);
+TEST(SafetyMonitorDebugMode, TimeoutRequiresAllAxisDisableBeforeRearm) {
+  core::SafetyMonitor safety(2U, 150ms, 2ms, false);
+  safety.set_enabled(0U, true, at_ms(0));
+  safety.set_enabled(1U, true, at_ms(0));
+  safety.observe_valid_command(0U, "arm", 1U, {1U}, at_ms(0));
+  safety.observe_valid_command(1U, "arm", 2U, {2U}, at_ms(0));
+
+  const auto fault = safety.tick(at_ms(151));
   EXPECT_FALSE(safety.latched());
+  EXPECT_EQ(fault.fault, core::Fault::CommandTimeout);
+  EXPECT_TRUE(fault.rearm_required);
+  EXPECT_EQ(fault.efforts, std::vector<double>(2U, 0.0));
+
+  safety.set_enabled(0U, false, at_ms(152));
+  EXPECT_FALSE(safety.ready_for_new_enable_cycle());
+  safety.set_enabled(1U, false, at_ms(152));
+  EXPECT_TRUE(safety.ready_for_new_enable_cycle());
+  EXPECT_FALSE(safety.snapshot().rearm_required);
 }
 
-TEST(SafetyMonitorDebugMode, DisconnectAndExplicitLatchAreIgnored) {
-  core::SafetyMonitor safety(30U, 150ms, 2ms, false);
-  safety.observe_disconnect("arm");
-  safety.observe_reconnect("arm");
-  safety.latch(core::Fault::WrongBus);
-  EXPECT_EQ(safety.fault(), core::Fault::None);
+TEST(SafetyMonitorDebugMode, DuplicateControllerBrakesUntilExplicitDisable) {
+  core::SafetyMonitor safety(1U, 150ms, 2ms, false);
+  safety.set_enabled(0U, true, at_us(0));
+  safety.observe_valid_command(0U, "arm", 3U, {0x01U}, at_us(0));
+  safety.observe_valid_command(0U, "arm", 3U, {0x02U}, at_us(1500));
+
   EXPECT_FALSE(safety.latched());
+  EXPECT_EQ(safety.snapshot().fault, core::Fault::DuplicateController);
+  EXPECT_TRUE(safety.rearm_required());
+  safety.set_enabled(0U, false, at_us(1600));
+  EXPECT_TRUE(safety.ready_for_new_enable_cycle());
 }

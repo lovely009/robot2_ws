@@ -5,12 +5,14 @@ import math
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     GroupAction,
     IncludeLaunchDescription,
     LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
     Shutdown,
+    TimerAction,
 )
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -43,6 +45,7 @@ HARD_LIMITS = (
 LAUNCH_DEFAULTS = {
     "initial_positions": "0,-1.57,0,-1.57,0,0",
     "world_file": "",
+    "world_name": "ur5e_world",
     "gz_verbosity": "2",
     "transport_mode": "usb_serial",
     "arm_port": "/dev/ttyUSB0",
@@ -147,7 +150,7 @@ def _build_runtime(context):
         launch_arguments={
             "on_exit_shutdown": "true",
             "gz_args": [
-                "-r -v ",
+                "-v ",
                 LaunchConfiguration("gz_verbosity"),
                 " ",
                 LaunchConfiguration("world_file"),
@@ -183,6 +186,7 @@ def _build_runtime(context):
             controller_manager,
             "--controller-manager-timeout",
             "60",
+            "--inactive",
         ],
     )
     effort_spawner = Node(
@@ -191,6 +195,19 @@ def _build_runtime(context):
         output="screen",
         arguments=[
             "effort_controller",
+            "--controller-manager",
+            controller_manager,
+            "--controller-manager-timeout",
+            "60",
+            "--inactive",
+        ],
+    )
+    brake_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        output="screen",
+        arguments=[
+            "brake_controller",
             "--controller-manager",
             controller_manager,
             "--controller-manager-timeout",
@@ -246,6 +263,9 @@ def _build_runtime(context):
                 "controller_name": ParameterValue(
                     "effort_controller", value_type=str
                 ),
+                "brake_controller_name": ParameterValue(
+                    "brake_controller", value_type=str
+                ),
                 "controller_manager_name": controller_manager,
                 "controller_switch_timeout": ParameterValue(
                     LaunchConfiguration("controller_switch_timeout"),
@@ -255,6 +275,49 @@ def _build_runtime(context):
         ],
     )
     backend_nodes = GroupAction([motor_sim, brake_coordinator])
+    world_control_service = PythonExpression(
+        ["'/world/' + '", LaunchConfiguration("world_name"), "' + '/control'"]
+    )
+    unpause_world = ExecuteProcess(
+        cmd=[
+            FindExecutable(name="ign"),
+            "service",
+            "-s",
+            world_control_service,
+            "--reqtype",
+            "ignition.msgs.WorldControl",
+            "--reptype",
+            "ignition.msgs.Boolean",
+            "--timeout",
+            "2000",
+            "--req",
+            "pause: false",
+        ],
+        output="screen",
+    )
+    activate_joint_state = ExecuteProcess(
+        cmd=[
+            FindExecutable(name="ros2"),
+            "control",
+            "switch_controllers",
+            "--activate",
+            "joint_state_broadcaster",
+            "brake_controller",
+            "--strict",
+            "--activate-asap",
+            "--controller-manager",
+            controller_manager,
+        ],
+        output="screen",
+    )
+    initialize_active_controllers = GroupAction(
+        [
+            activate_joint_state,
+            # 先让 ROS 2 CLI 把切换请求送入 Controller Manager；物理恢复后的
+            # 第一个 update 即完成 brake_controller 接管，避免重力启动窗口。
+            TimerAction(period=1.0, actions=[unpause_world]),
+        ]
+    )
     return [
         gazebo,
         GroupAction([PushRosNamespace(robot_namespace), robot_state_publisher]),
@@ -277,7 +340,30 @@ def _build_runtime(context):
             OnProcessExit(
                 target_action=effort_spawner,
                 on_exit=_start_after_success(
-                    backend_nodes, "配置 inactive effort_controller"
+                    brake_spawner, "配置 inactive effort_controller"
+                ),
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=brake_spawner,
+                on_exit=_start_after_success(
+                    initialize_active_controllers,
+                    "配置 inactive brake_controller",
+                ),
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=unpause_world,
+                on_exit=_start_after_success(None, "恢复 Gazebo 物理仿真"),
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=activate_joint_state,
+                on_exit=_start_after_success(
+                    backend_nodes, "激活 joint_state_broadcaster"
                 ),
             )
         ),
@@ -314,6 +400,12 @@ def generate_launch_description() -> LaunchDescription:
                     [package_share, "worlds", "ur5e_world.sdf"]
                 ),
                 description="Gazebo world 文件路径。",
+            ),
+            # world 的 SDF 名称，用于启动编排阶段恢复暂停的物理仿真。
+            DeclareLaunchArgument(
+                "world_name",
+                default_value=LAUNCH_DEFAULTS["world_name"],
+                description="Gazebo world 名称，必须与 SDF 中的 world name 一致。",
             ),
             # Gazebo 日志详细度，数值越大输出越详细。
             DeclareLaunchArgument(

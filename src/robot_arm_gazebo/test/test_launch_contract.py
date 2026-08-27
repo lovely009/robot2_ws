@@ -4,7 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 from launch import LaunchContext
-from launch.actions import GroupAction, RegisterEventHandler, Shutdown
+from launch.actions import (
+    ExecuteProcess,
+    GroupAction,
+    RegisterEventHandler,
+    Shutdown,
+    TimerAction,
+)
 from launch.utilities import perform_substitutions
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -15,6 +21,7 @@ LAUNCH_FILE = PACKAGE_ROOT / "launch/gazebo.launch.py"
 EXPECTED_ARGUMENTS = {
     "initial_positions",
     "world_file",
+    "world_name",
     "gz_verbosity",
     "transport_mode",
     "arm_port",
@@ -98,13 +105,13 @@ def test_gazebo_launch_uses_robot_arm_namespace_and_fail_fast_chain() -> None:
     staged_handlers = [
         handler
         for handler in handlers
-        if target_action(handler).node_executable
+        if getattr(target_action(handler), "node_executable", None)
         not in {
             "robot_arm_motor_sim_node",
             "robot_arm_brake_coordinator_node",
         }
     ]
-    assert len(staged_handlers) == 3
+    assert len(staged_handlers) == 6
     assert all(
         any(isinstance(action, Shutdown) for action in actions_on_exit(handler, 1))
         for handler in staged_handlers
@@ -143,20 +150,73 @@ def test_transport_mode_rejects_unknown_value() -> None:
         module.validate_transport_mode("automatic")
 
 
-def test_effort_controller_is_inactive_before_both_backend_nodes_start() -> None:
+def test_paused_world_initializes_controllers_before_backend_nodes_start() -> None:
     module = load_launch_module()
     context, actions = build_runtime(module)
     handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
-    effort_handler = next(
+    spawner_handlers = [
         handler
         for handler in handlers
-        if "effort_controller"
-        in target_action(handler)._Node__arguments
+        if isinstance(target_action(handler), Node)
+        and target_action(handler).node_executable == "spawner"
+    ]
+    assert len(spawner_handlers) == 3
+    assert all(
+        "--inactive" in target_action(handler)._Node__arguments
+        for handler in spawner_handlers
     )
-    effort_spawner = target_action(effort_handler)
-    assert "--inactive" in effort_spawner._Node__arguments
 
-    started = actions_on_exit(effort_handler, returncode=0)
+    gazebo = next(
+        action
+        for action in actions
+        if action.__class__.__name__ == "IncludeLaunchDescription"
+    )
+    launch_arguments = dict(
+        gazebo._IncludeLaunchDescription__launch_arguments
+    )
+    gz_args = "".join(
+        part if isinstance(part, str) else part.perform(context)
+        for part in launch_arguments["gz_args"]
+    )
+    assert "-r" not in gz_args.split()
+
+    brake_handler = next(
+        handler
+        for handler in spawner_handlers
+        if "brake_controller" in target_action(handler)._Node__arguments
+    )
+    initialization = actions_on_exit(brake_handler, returncode=0)[0]
+    assert isinstance(initialization, GroupAction)
+    activate_joint_state = next(
+        action
+        for action in initialization._GroupAction__actions
+        if isinstance(action, ExecuteProcess)
+    )
+    delayed_unpause = next(
+        action
+        for action in initialization._GroupAction__actions
+        if isinstance(action, TimerAction)
+    )
+    assert delayed_unpause.period == 1.0
+    unpause = delayed_unpause.actions[0]
+    assert isinstance(unpause, ExecuteProcess)
+    # Humble 的 ros2controlcli 未把显式 timeout 转为 float，会在 Duration 中
+    # 重复字符串并崩溃；启动阶段使用其数值型默认值，运行期协调器仍使用 launch 参数。
+    activate_cmd = [
+        perform_substitutions(context, argument)
+        for argument in activate_joint_state.cmd
+    ]
+    assert "--switch-timeout" not in activate_cmd
+    assert "joint_state_broadcaster" in activate_cmd
+    assert "brake_controller" in activate_cmd
+
+    activation_handler = next(
+        handler
+        for handler in handlers
+        if target_action(handler) is activate_joint_state
+    )
+
+    started = actions_on_exit(activation_handler, returncode=0)
     assert len(started) == 1
     backend_group = started[0]
     assert isinstance(backend_group, GroupAction)
@@ -191,6 +251,7 @@ def test_effort_controller_is_inactive_before_both_backend_nodes_start() -> None
     assert coordinator_parameters["controller_manager_name"] == (
         "/robot_arm/controller_manager"
     )
+    assert coordinator_parameters["brake_controller_name"] == "brake_controller"
     assert coordinator_parameters["controller_switch_timeout"] == 2.0
 
     remappings = motor_node._Node__remappings
@@ -210,7 +271,8 @@ def test_motor_backend_exit_shuts_down_unified_launch() -> None:
     motor_handler = next(
         handler
         for handler in handlers
-        if target_action(handler).node_executable == "robot_arm_motor_sim_node"
+        if getattr(target_action(handler), "node_executable", None)
+        == "robot_arm_motor_sim_node"
     )
 
     exit_actions = actions_on_exit(motor_handler, returncode=1)
@@ -224,7 +286,7 @@ def test_brake_coordinator_exit_shuts_down_unified_launch() -> None:
     coordinator_handler = next(
         handler
         for handler in handlers
-        if target_action(handler).node_executable
+        if getattr(target_action(handler), "node_executable", None)
         == "robot_arm_brake_coordinator_node"
     )
 
@@ -257,12 +319,24 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
     )
     actions = module._build_runtime(context)
     handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
-    effort_handler = next(
+    brake_handler = next(
         handler
         for handler in handlers
-        if "effort_controller" in target_action(handler)._Node__arguments
+        if isinstance(target_action(handler), Node)
+        and "brake_controller" in target_action(handler)._Node__arguments
     )
-    backend_group = actions_on_exit(effort_handler, returncode=0)[0]
+    initialization = actions_on_exit(brake_handler, returncode=0)[0]
+    activate_joint_state = next(
+        action
+        for action in initialization._GroupAction__actions
+        if isinstance(action, ExecuteProcess)
+    )
+    activation_handler = next(
+        handler
+        for handler in handlers
+        if target_action(handler) is activate_joint_state
+    )
+    backend_group = actions_on_exit(activation_handler, returncode=0)[0]
     backend_nodes = [
         action
         for action in backend_group._GroupAction__actions
@@ -308,6 +382,7 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
         "control_gate_topic": "/plant/control_gate",
         "diagnostics_topic": "/plant/diagnostics",
         "controller_name": "effort_controller",
+        "brake_controller_name": "brake_controller",
         "controller_manager_name": "/test_arm/controller_manager",
         "controller_switch_timeout": 3.5,
     }
@@ -315,9 +390,9 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
     spawners = [
         target_action(handler)
         for handler in handlers
-        if target_action(handler).node_executable == "spawner"
+        if getattr(target_action(handler), "node_executable", None) == "spawner"
     ]
-    assert len(spawners) == 2
+    assert len(spawners) == 3
     for spawner in spawners:
         manager_index = spawner._Node__arguments.index("--controller-manager") + 1
         assert spawner._Node__arguments[manager_index].perform(context) == (

@@ -131,14 +131,15 @@ TEST(BrakeCoordinatorNode, UsesStrictSwitchAndPublishesOrderedGate) {
               std::shared_ptr<controller_manager_msgs::srv::SwitchController::
                                   Response> response) {
             strictness.push_back(request->strictness);
-            if (!request->activate_controllers.empty()) {
-              operations.push_back("activate:" +
-                                   request->activate_controllers.front());
+            std::string operation = "activate:";
+            for (const auto &name : request->activate_controllers) {
+              operation += name + ",";
             }
-            if (!request->deactivate_controllers.empty()) {
-              operations.push_back("deactivate:" +
-                                   request->deactivate_controllers.front());
+            operation += " deactivate:";
+            for (const auto &name : request->deactivate_controllers) {
+              operation += name + ",";
             }
+            operations.push_back(operation);
             response->ok = true;
           });
   auto drive_publisher =
@@ -157,6 +158,7 @@ TEST(BrakeCoordinatorNode, UsesStrictSwitchAndPublishesOrderedGate) {
        {"diagnostics_topic", "test_brake_diagnostics"},
        {"controller_manager_name", "/test_controller_manager"},
        {"controller_name", "effort_controller"},
+       {"brake_controller_name", "brake_controller"},
        {"controller_switch_timeout", 0.5}});
   auto coordinator = std::make_shared<arm::BrakeCoordinator>(options);
 
@@ -173,7 +175,8 @@ TEST(BrakeCoordinatorNode, UsesStrictSwitchAndPublishesOrderedGate) {
   ASSERT_TRUE(spin_until(executor, [&] {
     return !operations.empty() && !gates.empty() && gates.back();
   }));
-  EXPECT_EQ(operations.front(), "activate:effort_controller");
+  EXPECT_EQ(operations.front(),
+            "activate:effort_controller, deactivate:brake_controller,");
   ASSERT_FALSE(strictness.empty());
   EXPECT_EQ(strictness.front(),
             controller_manager_msgs::srv::SwitchController::Request::STRICT);
@@ -185,7 +188,8 @@ TEST(BrakeCoordinatorNode, UsesStrictSwitchAndPublishesOrderedGate) {
   }));
   drive_publisher->publish(state);
   ASSERT_TRUE(spin_until(executor, [&] { return operations.size() >= 2U; }));
-  EXPECT_EQ(operations.back(), "deactivate:effort_controller");
+  EXPECT_EQ(operations.back(),
+            "activate:brake_controller, deactivate:effort_controller,");
   EXPECT_FALSE(coordinator->shutdown_requested());
 
   static_cast<void>(gate_subscription);

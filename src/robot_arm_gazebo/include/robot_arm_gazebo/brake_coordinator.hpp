@@ -67,6 +67,7 @@ private:
 
   BrakeCoordinatorStateMachine state_machine_;
   std::string controller_name_;
+  std::string brake_controller_name_;
   std::string controller_manager_name_;
   double switch_timeout_s_{2.0};
   std::string current_drive_state_{"brake_engaged"};

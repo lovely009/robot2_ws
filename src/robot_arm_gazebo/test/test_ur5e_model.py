@@ -50,7 +50,8 @@ def test_model_has_fixed_base_tool_and_six_effort_interfaces() -> None:
     assert control is not None
     assert [joint.attrib["name"] for joint in control.findall("joint")] == DRIVEN
     assert all(
-        joint.find("command_interface").attrib["name"] == "effort"
+        [interface.attrib["name"] for interface in joint.findall("command_interface")]
+        == ["effort"]
         for joint in control.findall("joint")
     )
 

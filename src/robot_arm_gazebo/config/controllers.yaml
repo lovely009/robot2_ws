@@ -7,6 +7,8 @@
       type: joint_state_broadcaster/JointStateBroadcaster
     effort_controller:
       type: forward_command_controller/ForwardCommandController
+    brake_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
 
 /robot_arm/effort_controller:
   ros__parameters:
@@ -18,3 +20,27 @@
       - wrist_2_joint
       - wrist_3_joint
     interface_name: effort
+
+# brake_controller 使用 effort 闭环保持当前位置；抱闸协调器使用 STRICT 原子切换，
+# 保证它不与外部电机 effort_controller 同时控制关节。以下增益仅为仿真名义值。
+/robot_arm/brake_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+    command_interfaces:
+      - effort
+    state_interfaces:
+      - position
+      - velocity
+    gains:
+      shoulder_pan_joint: {p: 50.0, i: 0.0, d: 5.0}
+      shoulder_lift_joint: {p: 100.0, i: 10.0, d: 10.0, i_clamp: 60.0}
+      elbow_joint: {p: 80.0, i: 8.0, d: 8.0, i_clamp: 60.0}
+      wrist_1_joint: {p: 20.0, i: 2.0, d: 2.0, i_clamp: 10.0}
+      wrist_2_joint: {p: 20.0, i: 2.0, d: 2.0, i_clamp: 10.0}
+      wrist_3_joint: {p: 15.0, i: 1.5, d: 1.5, i_clamp: 10.0}

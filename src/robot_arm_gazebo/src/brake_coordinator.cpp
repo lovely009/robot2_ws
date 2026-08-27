@@ -129,11 +129,15 @@ BrakeCoordinator::BrakeCoordinator(const rclcpp::NodeOptions &options)
       declare_parameter<std::string>("diagnostics_topic", "diagnostics");
   controller_name_ =
       declare_parameter<std::string>("controller_name", "effort_controller");
+  brake_controller_name_ = declare_parameter<std::string>(
+      "brake_controller_name", "brake_controller");
   controller_manager_name_ = declare_parameter<std::string>(
       "controller_manager_name", "controller_manager");
   switch_timeout_s_ =
       declare_parameter<double>("controller_switch_timeout", 2.0);
-  if (controller_name_.empty() || controller_manager_name_.empty() ||
+  if (controller_name_.empty() || brake_controller_name_.empty() ||
+      controller_name_ == brake_controller_name_ ||
+      controller_manager_name_.empty() ||
       switch_timeout_s_ <= 0.0) {
     throw std::invalid_argument("invalid brake coordinator parameters");
   }
@@ -216,8 +220,10 @@ void BrakeCoordinator::request_switch(const SwitchOperation operation) {
   request->timeout = rclcpp::Duration::from_seconds(switch_timeout_s_);
   if (operation == SwitchOperation::Activate) {
     request->activate_controllers.push_back(controller_name_);
+    request->deactivate_controllers.push_back(brake_controller_name_);
   } else {
     request->deactivate_controllers.push_back(controller_name_);
+    request->activate_controllers.push_back(brake_controller_name_);
   }
 
   const auto timeout = std::chrono::duration_cast<std::chrono::nanoseconds>(

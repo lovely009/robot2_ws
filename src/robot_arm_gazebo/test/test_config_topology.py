@@ -4,7 +4,7 @@ import yaml
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-CONTROLLER_NAMESPACE = "/robot_arm"
+CONTROLLER_WILDCARD = "/**"
 EXPECTED = [
     ("shoulder_pan_joint", "arm", "rp", 1),
     ("shoulder_lift_joint", "arm", "rp", 2),
@@ -24,7 +24,7 @@ def test_motor_and_controller_order_match() -> None:
     controllers = yaml.safe_load(
         (PACKAGE_ROOT / "config/controllers.yaml").read_text()
     )
-    assert controllers[f"{CONTROLLER_NAMESPACE}/effort_controller"][
+    assert controllers[f"{CONTROLLER_WILDCARD}/effort_controller"][
         "ros__parameters"
     ]["joints"] == [row[0] for row in EXPECTED]
 
@@ -35,12 +35,12 @@ def test_controller_yaml_keys_match_namespaced_nodes() -> None:
     controllers = yaml.safe_load(
         (PACKAGE_ROOT / "config/controllers.yaml").read_text()
     )
-    assert controllers[f"{CONTROLLER_NAMESPACE}/controller_manager"][
+    assert controllers[f"{CONTROLLER_WILDCARD}/controller_manager"][
         "ros__parameters"
     ]["update_rate"] == 100
-    for name in ("joint_state_broadcaster", "effort_controller"):
+    for name in ("joint_state_broadcaster", "effort_controller", "brake_controller"):
         assert (
-            controllers[f"{CONTROLLER_NAMESPACE}/controller_manager"][
+            controllers[f"{CONTROLLER_WILDCARD}/controller_manager"][
                 "ros__parameters"
             ][name]["type"]
             != ""

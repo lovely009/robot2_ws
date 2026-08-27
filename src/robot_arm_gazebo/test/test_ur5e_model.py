@@ -63,6 +63,15 @@ def test_model_inertias_are_positive_and_finite() -> None:
     assert all(math.isfinite(value) and value > 0.0 for value in masses)
 
 
+def test_joint_damping_is_split_between_arm_and_wrist() -> None:
+    robot = expanded_robot(arm_joint_damping="12.0", wrist_joint_damping="1.5")
+    joints = {joint.attrib["name"]: joint for joint in robot.findall("joint")}
+    for name in DRIVEN[:3]:
+        assert joints[name].find("dynamics").attrib["damping"] == "12.0"
+    for name in DRIVEN[3:]:
+        assert joints[name].find("dynamics").attrib["damping"] == "1.5"
+
+
 def test_model_self_collision_is_enabled_by_default_and_can_be_overridden() -> None:
     robot = expanded_robot()
     assert len(robot.findall(".//collision")) == 7
@@ -72,3 +81,10 @@ def test_model_self_collision_is_enabled_by_default_and_can_be_overridden() -> N
 
     disabled = final_sdf(self_collision_enabled="false")
     assert disabled.findtext("model/self_collide") == "false"
+
+
+def test_gz_ros2_control_namespace_can_be_overridden() -> None:
+    robot = expanded_robot(robot_namespace="test_arm")
+    plugin = robot.find("gazebo/plugin[@name='gz_ros2_control::GazeboSimROS2ControlPlugin']")
+    assert plugin is not None
+    assert plugin.findtext("ros/namespace") == "/test_arm"

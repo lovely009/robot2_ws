@@ -12,7 +12,6 @@ from launch.actions import (
     OpaqueFunction,
     RegisterEventHandler,
     Shutdown,
-    TimerAction,
 )
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -44,15 +43,15 @@ HARD_LIMITS = (
 # 集中默认值便于长期调试；调用方仍可用 launch 参数逐项临时覆盖。
 LAUNCH_DEFAULTS = {
     "initial_positions": "0,-1.57,0,-1.57,0,0",
-    "world_file": "",
+    "world_file": "ur5e_world.sdf",
     "world_name": "ur5e_world",
     "gz_verbosity": "2",
-    "transport_mode": "usb_serial",
-    "arm_port": "/dev/ttyUSB0",
+    "transport_mode": "socket_can",
+    "arm_port": "vcan0",
     "baud_rate": "3000000",
-    "allow_external_canfd": "false",
-    "fault_latching_enabled": "true",
-    "motor_config_file": "",
+    "allow_external_canfd": "true",
+    "fault_latching_enabled": "false",
+    "motor_config_file": "motors.yaml",
     "robot_namespace": "robot_arm",
     "joint_states_topic": "joint_states",
     "effort_commands_topic": "effort_controller/commands",
@@ -61,6 +60,8 @@ LAUNCH_DEFAULTS = {
     "control_gate_topic": "control_gate",
     "reset_fault_service": "reset_fault",
     "controller_switch_timeout": "2.0",
+    "arm_joint_damping": "20.0",
+    "wrist_joint_damping": "2.0",
     "self_collision_enabled": "true",
 }
 
@@ -134,6 +135,12 @@ def _build_runtime(context):
                 model,
                 " controllers_file:=",
                 controllers,
+                " robot_namespace:=",
+                robot_namespace,
+                " arm_joint_damping:=",
+                LaunchConfiguration("arm_joint_damping"),
+                " wrist_joint_damping:=",
+                LaunchConfiguration("wrist_joint_damping"),
                 " self_collision_enabled:=",
                 LaunchConfiguration("self_collision_enabled"),
                 *xacro_initials,
@@ -278,45 +285,39 @@ def _build_runtime(context):
     world_control_service = PythonExpression(
         ["'/world/' + '", LaunchConfiguration("world_name"), "' + '/control'"]
     )
-    unpause_world = ExecuteProcess(
+    initialize_active_controllers = ExecuteProcess(
         cmd=[
-            FindExecutable(name="ign"),
-            "service",
-            "-s",
-            world_control_service,
-            "--reqtype",
-            "ignition.msgs.WorldControl",
-            "--reptype",
-            "ignition.msgs.Boolean",
-            "--timeout",
-            "2000",
-            "--req",
-            "pause: false",
+            FindExecutable(name="bash"),
+            "-c",
+            [
+                "set -e; ",
+                "(",
+                "while true; do ",
+                FindExecutable(name="ign"),
+                " service -s ",
+                world_control_service,
+                " --reqtype ignition.msgs.WorldControl",
+                " --reptype ignition.msgs.Boolean --timeout 2000",
+                " --req 'multi_step: 1' >/dev/null; sleep 0.05; done",
+                ") & step_pid=$!; ",
+                "trap 'kill $step_pid 2>/dev/null || true' EXIT; ",
+                FindExecutable(name="ros2"),
+                " control switch_controllers --activate ",
+                "joint_state_broadcaster brake_controller ",
+                "--strict --activate-asap --controller-manager ",
+                controller_manager,
+                "; ",
+                "kill $step_pid 2>/dev/null || true; wait $step_pid 2>/dev/null || true; ",
+                "trap - EXIT; ",
+                FindExecutable(name="ign"),
+                " service -s ",
+                world_control_service,
+                " --reqtype ignition.msgs.WorldControl",
+                " --reptype ignition.msgs.Boolean --timeout 2000",
+                " --req 'pause: false'",
+            ],
         ],
         output="screen",
-    )
-    activate_joint_state = ExecuteProcess(
-        cmd=[
-            FindExecutable(name="ros2"),
-            "control",
-            "switch_controllers",
-            "--activate",
-            "joint_state_broadcaster",
-            "brake_controller",
-            "--strict",
-            "--activate-asap",
-            "--controller-manager",
-            controller_manager,
-        ],
-        output="screen",
-    )
-    initialize_active_controllers = GroupAction(
-        [
-            activate_joint_state,
-            # 先让 ROS 2 CLI 把切换请求送入 Controller Manager；物理恢复后的
-            # 第一个 update 即完成 brake_controller 接管，避免重力启动窗口。
-            TimerAction(period=1.0, actions=[unpause_world]),
-        ]
     )
     return [
         gazebo,
@@ -355,15 +356,9 @@ def _build_runtime(context):
         ),
         RegisterEventHandler(
             OnProcessExit(
-                target_action=unpause_world,
-                on_exit=_start_after_success(None, "恢复 Gazebo 物理仿真"),
-            )
-        ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=activate_joint_state,
+                target_action=initialize_active_controllers,
                 on_exit=_start_after_success(
-                    backend_nodes, "激活 joint_state_broadcaster"
+                    backend_nodes, "激活初始抱闸并恢复 Gazebo 物理仿真"
                 ),
             )
         ),
@@ -504,6 +499,18 @@ def generate_launch_description() -> LaunchDescription:
                 "controller_switch_timeout",
                 default_value=LAUNCH_DEFAULTS["controller_switch_timeout"],
                 description="effort controller STRICT 切换超时，单位秒。",
+            ),
+            # 肩、肘三轴粘性阻尼，单位 N·m·s/rad；用于近似传动阻力并稳定仿真。
+            DeclareLaunchArgument(
+                "arm_joint_damping",
+                default_value=LAUNCH_DEFAULTS["arm_joint_damping"],
+                description="肩、肘三轴粘性阻尼，单位 N·m·s/rad。",
+            ),
+            # 腕部三轴粘性阻尼，单位 N·m·s/rad。
+            DeclareLaunchArgument(
+                "wrist_joint_damping",
+                default_value=LAUNCH_DEFAULTS["wrist_joint_damping"],
+                description="腕部三轴粘性阻尼，单位 N·m·s/rad。",
             ),
             # 模型级自碰撞开关；相邻 joint 连接 link 由 SDFormat 自动排除。
             DeclareLaunchArgument(

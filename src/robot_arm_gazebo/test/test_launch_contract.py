@@ -9,7 +9,6 @@ from launch.actions import (
     GroupAction,
     RegisterEventHandler,
     Shutdown,
-    TimerAction,
 )
 from launch.utilities import perform_substitutions
 from launch_ros.actions import Node
@@ -37,6 +36,8 @@ EXPECTED_ARGUMENTS = {
     "control_gate_topic",
     "reset_fault_service",
     "controller_switch_timeout",
+    "arm_joint_damping",
+    "wrist_joint_damping",
     "self_collision_enabled",
 }
 
@@ -111,7 +112,7 @@ def test_gazebo_launch_uses_robot_arm_namespace_and_fail_fast_chain() -> None:
             "robot_arm_brake_coordinator_node",
         }
     ]
-    assert len(staged_handlers) == 6
+    assert len(staged_handlers) == 5
     assert all(
         any(isinstance(action, Shutdown) for action in actions_on_exit(handler, 1))
         for handler in staged_handlers
@@ -186,34 +187,21 @@ def test_paused_world_initializes_controllers_before_backend_nodes_start() -> No
         if "brake_controller" in target_action(handler)._Node__arguments
     )
     initialization = actions_on_exit(brake_handler, returncode=0)[0]
-    assert isinstance(initialization, GroupAction)
-    activate_joint_state = next(
-        action
-        for action in initialization._GroupAction__actions
-        if isinstance(action, ExecuteProcess)
-    )
-    delayed_unpause = next(
-        action
-        for action in initialization._GroupAction__actions
-        if isinstance(action, TimerAction)
-    )
-    assert delayed_unpause.period == 1.0
-    unpause = delayed_unpause.actions[0]
-    assert isinstance(unpause, ExecuteProcess)
+    assert isinstance(initialization, ExecuteProcess)
     # Humble 的 ros2controlcli 未把显式 timeout 转为 float，会在 Duration 中
     # 重复字符串并崩溃；启动阶段使用其数值型默认值，运行期协调器仍使用 launch 参数。
-    activate_cmd = [
-        perform_substitutions(context, argument)
-        for argument in activate_joint_state.cmd
-    ]
-    assert "--switch-timeout" not in activate_cmd
-    assert "joint_state_broadcaster" in activate_cmd
-    assert "brake_controller" in activate_cmd
+    initialization_script = perform_substitutions(context, initialization.cmd[2])
+    assert "--switch-timeout" not in initialization_script
+    assert "joint_state_broadcaster brake_controller" in initialization_script
+    assert "multi_step: 1" in initialization_script
+    assert initialization_script.index("multi_step: 1") < initialization_script.index(
+        "pause: false"
+    )
 
     activation_handler = next(
         handler
         for handler in handlers
-        if target_action(handler) is activate_joint_state
+        if target_action(handler) is initialization
     )
 
     started = actions_on_exit(activation_handler, returncode=0)
@@ -326,15 +314,10 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
         and "brake_controller" in target_action(handler)._Node__arguments
     )
     initialization = actions_on_exit(brake_handler, returncode=0)[0]
-    activate_joint_state = next(
-        action
-        for action in initialization._GroupAction__actions
-        if isinstance(action, ExecuteProcess)
-    )
     activation_handler = next(
         handler
         for handler in handlers
-        if target_action(handler) is activate_joint_state
+        if target_action(handler) is initialization
     )
     backend_group = actions_on_exit(activation_handler, returncode=0)[0]
     backend_nodes = [

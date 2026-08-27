@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <robot name="ur5e" xmlns:xacro="http://wiki.ros.org/xacro">
   <xacro:arg name="controllers_file" default="$(find robot_arm_gazebo)/config/controllers.yaml"/>
+  <xacro:arg name="robot_namespace" default="robot_arm"/>
+  <xacro:arg name="arm_joint_damping" default="20.0"/>
+  <xacro:arg name="wrist_joint_damping" default="2.0"/>
   <xacro:arg name="shoulder_pan_initial" default="0.0"/>
   <xacro:arg name="shoulder_lift_initial" default="-1.57"/>
   <xacro:arg name="elbow_initial" default="0.0"/>
@@ -21,6 +24,8 @@
       physical_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/physical_parameters.yaml"
       visual_parameters_file="$(find robot_arm_gazebo)/vendor/ur_description/config/ur5e/visual_parameters.yaml"
       generate_ros2_control_tag="false"
+      arm_joint_damping="$(arg arm_joint_damping)"
+      wrist_joint_damping="$(arg wrist_joint_damping)"
       sim_ignition="true">
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:ur_robot>
@@ -51,7 +56,7 @@
     <!-- 模型级自碰撞由 SDFormat 处理；直接经 joint 相连的相邻 link 自动排除。 -->
     <self_collide>$(arg self_collision_enabled)</self_collide>
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-      <ros><namespace>/robot_arm</namespace></ros>
+      <ros><namespace>/$(arg robot_namespace)</namespace></ros>
       <parameters>$(arg controllers_file)</parameters>
       <hold_joints>true</hold_joints>
     </plugin>

@@ -111,7 +111,8 @@ while true; do cansend vcan0 511##0AD276382008050C302000080; sleep 0.05; done
 
 该单轴示例只用于检查 Vaxor 帧收发，不会释放整机抱闸。完整后端要求六轴全部 enable，
 并在 150 ms 窗口内持续收到六轴新鲜命令；满足后才会将 `brake_controller` 原子切换为
-`effort_controller`。任一轴超时或故障都会先关 gate、清零，再切回抱闸。
+`effort_controller`。任一轴超时或故障都会关闭 gate，并通过 STRICT 原子切换回
+抱闸 controller；电机后端在 gate 关闭时持续发布零 effort。
 
 上述固定 payload 只对应当前 `motors.yaml` 中 `wrist_1` 的 80:1 传动配置。修改传动比、
 方向或零点后，外部控制器必须重新执行关节侧与电机侧换算，不能继续复用该字节串。

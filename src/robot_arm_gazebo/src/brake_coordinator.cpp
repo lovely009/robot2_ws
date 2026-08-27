@@ -28,7 +28,7 @@ CoordinatorAction BrakeCoordinatorStateMachine::on_drive_state(
   received_drive_state_ = true;
 
   if (state == "ready_for_control") {
-    awaiting_zero_confirmation_ = false;
+    awaiting_brake_transition_ = false;
     brake_engaged_ = false;
     if (pending_switch_.has_value()) {
       return CoordinatorAction::None;
@@ -53,16 +53,16 @@ CoordinatorAction BrakeCoordinatorStateMachine::on_drive_state(
     if (pending_switch_ == SwitchOperation::Deactivate) {
       return CoordinatorAction::None;
     }
-    if (gate_open_ || !awaiting_zero_confirmation_) {
+    if (gate_open_ || !awaiting_brake_transition_) {
       gate_open_ = false;
       brake_engaged_ = false;
-      awaiting_zero_confirmation_ = true;
+      awaiting_brake_transition_ = true;
       return CoordinatorAction::PublishGateFalse;
     }
     if (pending_switch_.has_value()) {
       return CoordinatorAction::None;
     }
-    awaiting_zero_confirmation_ = false;
+    awaiting_brake_transition_ = false;
     if (controller_active_) {
       pending_switch_ = SwitchOperation::Deactivate;
       return CoordinatorAction::DeactivateController;
@@ -184,7 +184,7 @@ void BrakeCoordinator::handle_action(const CoordinatorAction action,
     case CoordinatorAction::PublishGateFalse:
       publish_gate(false);
       publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                         "gate 已关闭，等待零 effort 确认");
+                         "gate 已关闭，等待 STRICT 切换到抱闸 controller");
       return;
     case CoordinatorAction::PublishGateTrue:
       publish_gate(true);

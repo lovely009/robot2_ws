@@ -43,7 +43,7 @@ private:
   std::optional<SwitchOperation> pending_switch_;
   std::string drive_state_{"brake_engaged"};
   bool received_drive_state_{false};
-  bool awaiting_zero_confirmation_{false};
+  bool awaiting_brake_transition_{false};
   bool gate_open_{false};
   bool controller_active_{false};
   bool brake_engaged_{true};

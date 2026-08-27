@@ -1,5 +1,6 @@
 import math
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -15,13 +16,28 @@ DRIVEN = [
 ]
 
 
-def expanded_robot() -> ET.Element:
+def expanded_robot(**arguments: str) -> ET.Element:
+    xacro_arguments = [f"{name}:={value}" for name, value in arguments.items()]
     result = subprocess.run(
-        ["xacro", str(PACKAGE_ROOT / "urdf/ur5e.urdf.xacro")],
+        ["xacro", str(PACKAGE_ROOT / "urdf/ur5e.urdf.xacro"), *xacro_arguments],
         check=True,
         capture_output=True,
         text=True,
     )
+    return ET.fromstring(result.stdout)
+
+
+def final_sdf(**arguments: str) -> ET.Element:
+    robot = expanded_robot(**arguments)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".urdf") as urdf:
+        urdf.write(ET.tostring(robot, encoding="unicode"))
+        urdf.flush()
+        result = subprocess.run(
+            ["ign", "sdf", "-p", urdf.name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     return ET.fromstring(result.stdout)
 
 
@@ -44,3 +60,14 @@ def test_model_inertias_are_positive_and_finite() -> None:
     masses = [float(node.attrib["value"]) for node in robot.findall(".//inertial/mass")]
     assert masses
     assert all(math.isfinite(value) and value > 0.0 for value in masses)
+
+
+def test_model_self_collision_is_enabled_by_default_and_can_be_overridden() -> None:
+    robot = expanded_robot()
+    assert len(robot.findall(".//collision")) == 7
+
+    enabled = final_sdf()
+    assert enabled.findtext("model/self_collide") == "true"
+
+    disabled = final_sdf(self_collision_enabled="false")
+    assert disabled.findtext("model/self_collide") == "false"

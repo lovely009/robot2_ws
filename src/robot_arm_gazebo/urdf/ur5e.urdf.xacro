@@ -7,6 +7,7 @@
   <xacro:arg name="wrist_1_initial" default="-1.57"/>
   <xacro:arg name="wrist_2_initial" default="0.0"/>
   <xacro:arg name="wrist_3_initial" default="0.0"/>
+  <xacro:arg name="self_collision_enabled" default="true"/>
   <xacro:include filename="$(find robot_arm_gazebo)/vendor/ur_description/urdf/ur_macro.xacro"/>
 
   <link name="world"/>
@@ -47,6 +48,8 @@
   </ros2_control>
 
   <gazebo>
+    <!-- 模型级自碰撞由 SDFormat 处理；直接经 joint 相连的相邻 link 自动排除。 -->
+    <self_collide>$(arg self_collision_enabled)</self_collide>
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <ros><namespace>/robot_arm</namespace></ros>
       <parameters>$(arg controllers_file)</parameters>

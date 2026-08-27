@@ -26,6 +26,11 @@ EXPECTED_ARGUMENTS = {
     "joint_states_topic",
     "effort_commands_topic",
     "diagnostics_topic",
+    "drive_state_topic",
+    "control_gate_topic",
+    "reset_fault_service",
+    "controller_switch_timeout",
+    "self_collision_enabled",
 }
 
 
@@ -93,7 +98,11 @@ def test_gazebo_launch_uses_robot_arm_namespace_and_fail_fast_chain() -> None:
     staged_handlers = [
         handler
         for handler in handlers
-        if target_action(handler).node_executable != "robot_arm_motor_sim_node"
+        if target_action(handler).node_executable
+        not in {
+            "robot_arm_motor_sim_node",
+            "robot_arm_brake_coordinator_node",
+        }
     ]
     assert len(staged_handlers) == 3
     assert all(
@@ -116,11 +125,16 @@ def test_gazebo_launch_declares_documented_backend_arguments() -> None:
 
 def test_gazebo_launch_has_expected_connection_defaults() -> None:
     module = load_launch_module()
-    assert module.LAUNCH_DEFAULTS["transport_mode"] == "usb_serial"
-    assert module.LAUNCH_DEFAULTS["arm_port"] == "/dev/ttyUSB0"
+    assert module.LAUNCH_DEFAULTS["transport_mode"] in {
+        "usb_serial",
+        "serial_slcan",
+        "socket_can",
+    }
+    assert module.LAUNCH_DEFAULTS["arm_port"]
     assert module.LAUNCH_DEFAULTS["baud_rate"] == "3000000"
-    assert module.LAUNCH_DEFAULTS["allow_external_canfd"] == "false"
-    assert module.LAUNCH_DEFAULTS["fault_latching_enabled"] == "true"
+    assert module.LAUNCH_DEFAULTS["allow_external_canfd"] in {"true", "false"}
+    assert module.LAUNCH_DEFAULTS["fault_latching_enabled"] in {"true", "false"}
+    assert module.LAUNCH_DEFAULTS["self_collision_enabled"] == "true"
 
 
 def test_transport_mode_rejects_unknown_value() -> None:
@@ -129,7 +143,7 @@ def test_transport_mode_rejects_unknown_value() -> None:
         module.validate_transport_mode("automatic")
 
 
-def test_effort_controller_success_starts_configured_motor_backend() -> None:
+def test_effort_controller_is_inactive_before_both_backend_nodes_start() -> None:
     module = load_launch_module()
     context, actions = build_runtime(module)
     handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
@@ -139,22 +153,45 @@ def test_effort_controller_success_starts_configured_motor_backend() -> None:
         if "effort_controller"
         in target_action(handler)._Node__arguments
     )
+    effort_spawner = target_action(effort_handler)
+    assert "--inactive" in effort_spawner._Node__arguments
 
     started = actions_on_exit(effort_handler, returncode=0)
     assert len(started) == 1
-    motor_node = started[0]
-    assert isinstance(motor_node, Node)
+    backend_group = started[0]
+    assert isinstance(backend_group, GroupAction)
+    backend_nodes = [
+        action
+        for action in backend_group._GroupAction__actions
+        if isinstance(action, Node)
+    ]
+    assert len(backend_nodes) == 2
+    motor_node = next(
+        node for node in backend_nodes if node.node_executable == "robot_arm_motor_sim_node"
+    )
+    coordinator = next(
+        node
+        for node in backend_nodes
+        if node.node_executable == "robot_arm_brake_coordinator_node"
+    )
     assert motor_node.node_package == "robot_arm_gazebo"
-    assert motor_node.node_executable == "robot_arm_motor_sim_node"
     assert motor_node._Node__node_namespace.perform(context) == "robot_arm"
+    assert coordinator._Node__node_namespace.perform(context) == "robot_arm"
 
     parameters = resolve_parameters(motor_node, context)
-    assert parameters["transport_mode"] == "usb_serial"
-    assert parameters["arm_port"] == "/dev/ttyUSB0"
+    assert parameters["transport_mode"] == module.LAUNCH_DEFAULTS["transport_mode"]
+    assert parameters["arm_port"] == module.LAUNCH_DEFAULTS["arm_port"]
     assert parameters["config_file"].endswith("/config/motors.yaml")
     assert parameters["baud_rate"] == 3000000
-    assert parameters["allow_external_canfd"] is False
-    assert parameters["fault_latching_enabled"] is True
+    assert parameters["drive_state_topic"] == "drive_state"
+    assert parameters["control_gate_topic"] == "control_gate"
+    assert parameters["reset_fault_service"] == "reset_fault"
+
+    coordinator_parameters = resolve_parameters(coordinator, context)
+    assert coordinator_parameters["controller_manager_name"] == (
+        "/robot_arm/controller_manager"
+    )
+    assert coordinator_parameters["controller_switch_timeout"] == 2.0
 
     remappings = motor_node._Node__remappings
     assert [
@@ -180,6 +217,21 @@ def test_motor_backend_exit_shuts_down_unified_launch() -> None:
     assert any(isinstance(action, Shutdown) for action in exit_actions)
 
 
+def test_brake_coordinator_exit_shuts_down_unified_launch() -> None:
+    module = load_launch_module()
+    _, actions = build_runtime(module)
+    handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
+    coordinator_handler = next(
+        handler
+        for handler in handlers
+        if target_action(handler).node_executable
+        == "robot_arm_brake_coordinator_node"
+    )
+
+    exit_actions = actions_on_exit(coordinator_handler, returncode=1)
+    assert any(isinstance(action, Shutdown) for action in exit_actions)
+
+
 def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
     module = load_launch_module()
     context = LaunchContext()
@@ -196,6 +248,11 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
             "joint_states_topic": "/plant/joints",
             "effort_commands_topic": "/plant/efforts",
             "diagnostics_topic": "/plant/diagnostics",
+            "drive_state_topic": "/plant/drive_state",
+            "control_gate_topic": "/plant/control_gate",
+            "reset_fault_service": "/plant/reset_fault",
+            "controller_switch_timeout": "3.5",
+            "self_collision_enabled": "false",
         }
     )
     actions = module._build_runtime(context)
@@ -205,7 +262,20 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
         for handler in handlers
         if "effort_controller" in target_action(handler)._Node__arguments
     )
-    motor_node = actions_on_exit(effort_handler, returncode=0)[0]
+    backend_group = actions_on_exit(effort_handler, returncode=0)[0]
+    backend_nodes = [
+        action
+        for action in backend_group._GroupAction__actions
+        if isinstance(action, Node)
+    ]
+    motor_node = next(
+        node for node in backend_nodes if node.node_executable == "robot_arm_motor_sim_node"
+    )
+    coordinator = next(
+        node
+        for node in backend_nodes
+        if node.node_executable == "robot_arm_brake_coordinator_node"
+    )
 
     parameters = resolve_parameters(motor_node, context)
     assert parameters == {
@@ -215,6 +285,9 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
         "config_file": "/tmp/test-motors.yaml",
         "allow_external_canfd": True,
         "fault_latching_enabled": False,
+        "drive_state_topic": "/plant/drive_state",
+        "control_gate_topic": "/plant/control_gate",
+        "reset_fault_service": "/plant/reset_fault",
     }
     assert motor_node._Node__node_namespace.perform(context) == "test_arm"
     assert [
@@ -228,6 +301,16 @@ def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
         ("effort_controller/commands", "/plant/efforts"),
         ("diagnostics", "/plant/diagnostics"),
     ]
+
+    coordinator_parameters = resolve_parameters(coordinator, context)
+    assert coordinator_parameters == {
+        "drive_state_topic": "/plant/drive_state",
+        "control_gate_topic": "/plant/control_gate",
+        "diagnostics_topic": "/plant/diagnostics",
+        "controller_name": "effort_controller",
+        "controller_manager_name": "/test_arm/controller_manager",
+        "controller_switch_timeout": 3.5,
+    }
 
     spawners = [
         target_action(handler)

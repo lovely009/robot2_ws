@@ -54,6 +54,11 @@ LAUNCH_DEFAULTS = {
     "joint_states_topic": "joint_states",
     "effort_commands_topic": "effort_controller/commands",
     "diagnostics_topic": "diagnostics",
+    "drive_state_topic": "drive_state",
+    "control_gate_topic": "control_gate",
+    "reset_fault_service": "reset_fault",
+    "controller_switch_timeout": "2.0",
+    "self_collision_enabled": "true",
 }
 
 
@@ -126,6 +131,8 @@ def _build_runtime(context):
                 model,
                 " controllers_file:=",
                 controllers,
+                " self_collision_enabled:=",
+                LaunchConfiguration("self_collision_enabled"),
                 *xacro_initials,
             ]
         ),
@@ -188,6 +195,7 @@ def _build_runtime(context):
             controller_manager,
             "--controller-manager-timeout",
             "60",
+            "--inactive",
         ],
     )
     motor_sim = Node(
@@ -209,6 +217,11 @@ def _build_runtime(context):
                 "fault_latching_enabled": ParameterValue(
                     LaunchConfiguration("fault_latching_enabled"), value_type=bool
                 ),
+                "drive_state_topic": LaunchConfiguration("drive_state_topic"),
+                "control_gate_topic": LaunchConfiguration("control_gate_topic"),
+                "reset_fault_service": LaunchConfiguration(
+                    "reset_fault_service"
+                ),
             }
         ],
         remappings=[
@@ -220,6 +233,28 @@ def _build_runtime(context):
             ("diagnostics", LaunchConfiguration("diagnostics_topic")),
         ],
     )
+    brake_coordinator = Node(
+        package="robot_arm_gazebo",
+        executable="robot_arm_brake_coordinator_node",
+        namespace=robot_namespace,
+        output="screen",
+        parameters=[
+            {
+                "drive_state_topic": LaunchConfiguration("drive_state_topic"),
+                "control_gate_topic": LaunchConfiguration("control_gate_topic"),
+                "diagnostics_topic": LaunchConfiguration("diagnostics_topic"),
+                "controller_name": ParameterValue(
+                    "effort_controller", value_type=str
+                ),
+                "controller_manager_name": controller_manager,
+                "controller_switch_timeout": ParameterValue(
+                    LaunchConfiguration("controller_switch_timeout"),
+                    value_type=float,
+                ),
+            }
+        ],
+    )
+    backend_nodes = GroupAction([motor_sim, brake_coordinator])
     return [
         gazebo,
         GroupAction([PushRosNamespace(robot_namespace), robot_state_publisher]),
@@ -241,13 +276,21 @@ def _build_runtime(context):
         RegisterEventHandler(
             OnProcessExit(
                 target_action=effort_spawner,
-                on_exit=_start_after_success(motor_sim, "启动 effort_controller"),
+                on_exit=_start_after_success(
+                    backend_nodes, "配置 inactive effort_controller"
+                ),
             )
         ),
         RegisterEventHandler(
             OnProcessExit(
                 target_action=motor_sim,
                 on_exit=_shutdown_on_exit("电机仿真后端"),
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=brake_coordinator,
+                on_exit=_shutdown_on_exit("仿真抱闸协调器"),
             )
         ),
         spawn_robot,
@@ -306,11 +349,13 @@ def generate_launch_description() -> LaunchDescription:
                 default_value=LAUNCH_DEFAULTS["allow_external_canfd"],
                 description="允许外部 CAN-FD；serial_slcan 模式必须设为 true。",
             ),
-            # 故障锁存安全开关；false 仅供本机调试，不会锁存并清零输出。
+            # 故障锁存安全开关；false 仍会抱闸，但可通过全轴 disable 后重新使能恢复。
             DeclareLaunchArgument(
                 "fault_latching_enabled",
                 default_value=LAUNCH_DEFAULTS["fault_latching_enabled"],
-                description="启用故障锁存和整臂零输出；仅调试时设为 false。",
+                description=(
+                    "启用故障锁存；false 仍清零抱闸，但允许全轴 disable 后恢复。"
+                ),
             ),
             # 六轴协议、ID、限位、传动和 plant 参数的唯一配置源。
             DeclareLaunchArgument(
@@ -343,6 +388,36 @@ def generate_launch_description() -> LaunchDescription:
                 "diagnostics_topic",
                 default_value=LAUNCH_DEFAULTS["diagnostics_topic"],
                 description="namespace 内的 diagnostics topic。",
+            ),
+            # motor node 发布、抱闸协调器订阅的五态驱动生命周期 topic。
+            DeclareLaunchArgument(
+                "drive_state_topic",
+                default_value=LAUNCH_DEFAULTS["drive_state_topic"],
+                description="namespace 内的驱动生命周期状态 topic。",
+            ),
+            # 协调器确认 effort controller 已就绪后打开的控制 gate topic。
+            DeclareLaunchArgument(
+                "control_gate_topic",
+                default_value=LAUNCH_DEFAULTS["control_gate_topic"],
+                description="namespace 内的 controller 就绪确认 gate topic。",
+            ),
+            # 锁存故障的显式复位服务；复位前必须全轴 disable。
+            DeclareLaunchArgument(
+                "reset_fault_service",
+                default_value=LAUNCH_DEFAULTS["reset_fault_service"],
+                description="namespace 内的锁存故障显式复位服务。",
+            ),
+            # Controller Manager STRICT 切换确认超时，单位秒。
+            DeclareLaunchArgument(
+                "controller_switch_timeout",
+                default_value=LAUNCH_DEFAULTS["controller_switch_timeout"],
+                description="effort controller STRICT 切换超时，单位秒。",
+            ),
+            # 模型级自碰撞开关；相邻 joint 连接 link 由 SDFormat 自动排除。
+            DeclareLaunchArgument(
+                "self_collision_enabled",
+                default_value=LAUNCH_DEFAULTS["self_collision_enabled"],
+                description="启用模型级自碰撞；默认 true。",
             ),
             OpaqueFunction(function=_build_runtime),
         ]

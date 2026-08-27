@@ -39,19 +39,27 @@ colcon test-result --verbose
 
 ## 启动
 
-只查看模型并加载 effort 控制器，不连接外部控制器：
+`gazebo.launch.py` 是完整仿真后端的唯一启动入口。默认使用
+`usb_serial`、`/dev/ttyUSB0` 和 3,000,000 baud，一条命令同时启动 Gazebo、
+UR5e、控制器、时钟桥和电机协议仿真节点：
+
+```bash
+ros2 launch robot_arm_gazebo gazebo.launch.py
+```
+
+设备不存在、不可打开或参数不合法时，整套后端会快速失败并关闭，避免留下无法接入的
+Gazebo 场景。查看全部参数、默认值和中文用途说明：
+
+```bash
+ros2 launch robot_arm_gazebo gazebo.launch.py --show-args
+```
+
+所有参数都可在 launch 命令中临时覆盖。例如使用常见的 ACM 串口并修改初始姿态：
 
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py \
+  arm_port:=/dev/ttyACM0 \
   initial_positions:=0,-1.57,0,-1.57,0,0
-```
-
-连接外部控制器时单独运行电机仿真节点（无需 Gazebo）：
-
-```bash
-ros2 run robot_arm_gazebo robot_arm_motor_sim_node --ros-args \
-  -p transport_mode:=usb_serial \
-  -p arm_port:=/dev/serial/by-id/usb-arm
 ```
 
 - `transport_mode` 只有 `usb_serial`、`serial_slcan` 和 `socket_can` 三种且互斥；
@@ -64,7 +72,7 @@ ros2 run robot_arm_gazebo robot_arm_motor_sim_node --ros-args \
   diagnostics 不停机、不清零输出）；默认 `true` 保持完整安全语义，仅建议
   本机 vcan/PTY 联调时使用。
 - `scripts/robot_arm_actions` 动作播放器只用于模型验收，直接读取
-  `/joint_states` 并发布有界 PD effort，不代表外部电机链路。
+  `/robot_arm/joint_states` 并发布有界 PD effort，不代表外部电机链路。
 
 ### 用 vcan 本机人工联调
 
@@ -76,10 +84,10 @@ sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan
 sudo ip link set up vcan0
 
-# 终端 1：单独起电机仿真节点
-ros2 run robot_arm_gazebo robot_arm_motor_sim_node --ros-args \
-  -p transport_mode:=socket_can \
-  -p arm_port:=vcan0
+# 终端 1：启动完整仿真后端并切换到 vcan0
+ros2 launch robot_arm_gazebo gazebo.launch.py \
+  transport_mode:=socket_can \
+  arm_port:=vcan0
 
 # 终端 2：观察反馈帧（wrist_1 回复 0x711，状态帧 0x712 每 20 ms 一帧）
 candump vcan0
@@ -99,8 +107,27 @@ while true; do cansend vcan0 511##0010001800080200364000080; sleep 0.05; done
 也可以伪造关节运动观察反馈位置变化：
 
 ```bash
-ros2 topic pub -r 50 /joint_states sensor_msgs/msg/JointState \
+ros2 topic pub -r 50 /robot_arm/joint_states sensor_msgs/msg/JointState \
   "{name: [wrist_1_joint], position: [0.3], velocity: [0.0]}"
 ```
 
-故障与状态可通过 `ros2 topic echo /diagnostics` 观察。
+统一 launch 的默认接口位于 `/robot_arm` namespace，故障与状态可通过
+`ros2 topic echo /robot_arm/diagnostics` 观察。
+
+使用外部 SLCAN-FD 适配器时必须显式授权：
+
+```bash
+ros2 launch robot_arm_gazebo gazebo.launch.py \
+  transport_mode:=serial_slcan \
+  arm_port:=/dev/ttyUSB0 \
+  allow_external_canfd:=true
+```
+
+本机 PTY/vcan 调试时可临时关闭锁存；不要将该选项用于正式仿真验收：
+
+```bash
+ros2 launch robot_arm_gazebo gazebo.launch.py \
+  transport_mode:=socket_can \
+  arm_port:=vcan0 \
+  fault_latching_enabled:=false
+```

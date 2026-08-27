@@ -65,6 +65,7 @@ install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_node
   RUNTIME DESTINATION bin)
 ament_export_targets(export_motor_sim HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
+ament_export_dependencies(diagnostic_msgs rclcpp sensor_msgs std_msgs std_srvs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

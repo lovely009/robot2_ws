@@ -8,6 +8,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <depend>ament_index_cpp</depend>
+  <depend>controller_manager_msgs</depend>
   <depend>diagnostic_msgs</depend>
   <depend>motor_sim</depend>
   <depend>rclcpp</depend>

@@ -1,11 +1,32 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from launch import LaunchContext
+from launch.actions import GroupAction, RegisterEventHandler, Shutdown
+from launch.utilities import perform_substitutions
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 LAUNCH_FILE = PACKAGE_ROOT / "launch/gazebo.launch.py"
+EXPECTED_ARGUMENTS = {
+    "initial_positions",
+    "world_file",
+    "gz_verbosity",
+    "transport_mode",
+    "arm_port",
+    "baud_rate",
+    "allow_external_canfd",
+    "fault_latching_enabled",
+    "motor_config_file",
+    "robot_namespace",
+    "joint_states_topic",
+    "effort_commands_topic",
+    "diagnostics_topic",
+}
 
 
 def load_launch_module():
@@ -16,14 +37,209 @@ def load_launch_module():
     return module
 
 
+def build_runtime(module):
+    context = LaunchContext()
+    context.launch_configurations.update(module.LAUNCH_DEFAULTS)
+    context.launch_configurations["world_file"] = str(
+        PACKAGE_ROOT / "worlds/ur5e_world.sdf"
+    )
+    context.launch_configurations["motor_config_file"] = str(
+        PACKAGE_ROOT / "config/motors.yaml"
+    )
+    return context, module._build_runtime(context)
+
+
+def target_action(handler: RegisterEventHandler):
+    return handler.event_handler._OnActionEventBase__action_matcher
+
+
+def actions_on_exit(handler: RegisterEventHandler, returncode: int):
+    callback = handler.event_handler._OnActionEventBase__on_event
+    return callback(SimpleNamespace(returncode=returncode), None)
+
+
+def resolve_parameters(node: Node, context: LaunchContext) -> dict[str, object]:
+    resolved = {}
+    for name_parts, value in node._Node__parameters[0].items():
+        name = perform_substitutions(context, list(name_parts))
+        if isinstance(value, ParameterValue):
+            resolved[name] = value.evaluate(context)
+        else:
+            resolved[name] = perform_substitutions(context, list(value))
+    return resolved
+
+
 def test_gazebo_launch_uses_robot_arm_namespace_and_fail_fast_chain() -> None:
-    text = LAUNCH_FILE.read_text(encoding="utf-8")
-    assert 'PushRosNamespace("robot_arm")' in text
-    assert '"-name", "ur5e"' in text
-    assert '"/robot_arm/controller_manager"' in text
-    assert "joint_state_spawner" in text
-    assert "effort_spawner" in text
-    assert "Shutdown(" in text
+    module = load_launch_module()
+    context, actions = build_runtime(module)
+    spawn_robot = next(
+        action
+        for action in actions
+        if isinstance(action, Node) and action.node_executable == "create"
+    )
+    assert spawn_robot._Node__node_namespace.perform(context) == "robot_arm"
+    assert spawn_robot._Node__arguments == [
+        "-name",
+        "ur5e",
+        "-topic",
+        "robot_description",
+    ]
+
+    group = next(action for action in actions if isinstance(action, GroupAction))
+    pushed_namespace = group._GroupAction__actions[0]
+    assert perform_substitutions(context, pushed_namespace.namespace) == "robot_arm"
+
+    handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
+    staged_handlers = [
+        handler
+        for handler in handlers
+        if target_action(handler).node_executable != "robot_arm_motor_sim_node"
+    ]
+    assert len(staged_handlers) == 3
+    assert all(
+        any(isinstance(action, Shutdown) for action in actions_on_exit(handler, 1))
+        for handler in staged_handlers
+    )
+
+
+def test_gazebo_launch_declares_documented_backend_arguments() -> None:
+    module = load_launch_module()
+    launch_description = module.generate_launch_description()
+    declarations = {
+        entity.name: entity
+        for entity in launch_description.entities
+        if entity.__class__.__name__ == "DeclareLaunchArgument"
+    }
+    assert declarations.keys() == EXPECTED_ARGUMENTS
+    assert all(declaration.description for declaration in declarations.values())
+
+
+def test_gazebo_launch_has_expected_connection_defaults() -> None:
+    module = load_launch_module()
+    assert module.LAUNCH_DEFAULTS["transport_mode"] == "usb_serial"
+    assert module.LAUNCH_DEFAULTS["arm_port"] == "/dev/ttyUSB0"
+    assert module.LAUNCH_DEFAULTS["baud_rate"] == "3000000"
+    assert module.LAUNCH_DEFAULTS["allow_external_canfd"] == "false"
+    assert module.LAUNCH_DEFAULTS["fault_latching_enabled"] == "true"
+
+
+def test_transport_mode_rejects_unknown_value() -> None:
+    module = load_launch_module()
+    with pytest.raises(ValueError, match="transport_mode"):
+        module.validate_transport_mode("automatic")
+
+
+def test_effort_controller_success_starts_configured_motor_backend() -> None:
+    module = load_launch_module()
+    context, actions = build_runtime(module)
+    handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
+    effort_handler = next(
+        handler
+        for handler in handlers
+        if "effort_controller"
+        in target_action(handler)._Node__arguments
+    )
+
+    started = actions_on_exit(effort_handler, returncode=0)
+    assert len(started) == 1
+    motor_node = started[0]
+    assert isinstance(motor_node, Node)
+    assert motor_node.node_package == "robot_arm_gazebo"
+    assert motor_node.node_executable == "robot_arm_motor_sim_node"
+    assert motor_node._Node__node_namespace.perform(context) == "robot_arm"
+
+    parameters = resolve_parameters(motor_node, context)
+    assert parameters["transport_mode"] == "usb_serial"
+    assert parameters["arm_port"] == "/dev/ttyUSB0"
+    assert parameters["config_file"].endswith("/config/motors.yaml")
+    assert parameters["baud_rate"] == 3000000
+    assert parameters["allow_external_canfd"] is False
+    assert parameters["fault_latching_enabled"] is True
+
+    remappings = motor_node._Node__remappings
+    assert [
+        perform_substitutions(context, list(target)) for _, target in remappings
+    ] == [
+        "joint_states",
+        "effort_controller/commands",
+        "diagnostics",
+    ]
+
+
+def test_motor_backend_exit_shuts_down_unified_launch() -> None:
+    module = load_launch_module()
+    _, actions = build_runtime(module)
+    handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
+    motor_handler = next(
+        handler
+        for handler in handlers
+        if target_action(handler).node_executable == "robot_arm_motor_sim_node"
+    )
+
+    exit_actions = actions_on_exit(motor_handler, returncode=1)
+    assert any(isinstance(action, Shutdown) for action in exit_actions)
+
+
+def test_runtime_overrides_namespace_transport_and_topics_together() -> None:
+    module = load_launch_module()
+    context = LaunchContext()
+    context.launch_configurations.update(module.LAUNCH_DEFAULTS)
+    context.launch_configurations.update(
+        {
+            "robot_namespace": "test_arm",
+            "transport_mode": "socket_can",
+            "arm_port": "vcan0",
+            "baud_rate": "115200",
+            "allow_external_canfd": "true",
+            "fault_latching_enabled": "false",
+            "motor_config_file": "/tmp/test-motors.yaml",
+            "joint_states_topic": "/plant/joints",
+            "effort_commands_topic": "/plant/efforts",
+            "diagnostics_topic": "/plant/diagnostics",
+        }
+    )
+    actions = module._build_runtime(context)
+    handlers = [action for action in actions if isinstance(action, RegisterEventHandler)]
+    effort_handler = next(
+        handler
+        for handler in handlers
+        if "effort_controller" in target_action(handler)._Node__arguments
+    )
+    motor_node = actions_on_exit(effort_handler, returncode=0)[0]
+
+    parameters = resolve_parameters(motor_node, context)
+    assert parameters == {
+        "transport_mode": "socket_can",
+        "arm_port": "vcan0",
+        "baud_rate": 115200,
+        "config_file": "/tmp/test-motors.yaml",
+        "allow_external_canfd": True,
+        "fault_latching_enabled": False,
+    }
+    assert motor_node._Node__node_namespace.perform(context) == "test_arm"
+    assert [
+        (
+            perform_substitutions(context, list(source)),
+            perform_substitutions(context, list(target)),
+        )
+        for source, target in motor_node._Node__remappings
+    ] == [
+        ("joint_states", "/plant/joints"),
+        ("effort_controller/commands", "/plant/efforts"),
+        ("diagnostics", "/plant/diagnostics"),
+    ]
+
+    spawners = [
+        target_action(handler)
+        for handler in handlers
+        if target_action(handler).node_executable == "spawner"
+    ]
+    assert len(spawners) == 2
+    for spawner in spawners:
+        manager_index = spawner._Node__arguments.index("--controller-manager") + 1
+        assert spawner._Node__arguments[manager_index].perform(context) == (
+            "/test_arm/controller_manager"
+        )
 
 
 @pytest.mark.parametrize(

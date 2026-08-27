@@ -14,7 +14,13 @@ from launch.actions import (
 )
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    Command,
+    FindExecutable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+    PythonExpression,
+)
 from launch_ros.actions import Node, PushRosNamespace
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -33,11 +39,39 @@ HARD_LIMITS = (
     (-2.0 * math.pi, 2.0 * math.pi),
 )
 
+# 集中默认值便于长期调试；调用方仍可用 launch 参数逐项临时覆盖。
+LAUNCH_DEFAULTS = {
+    "initial_positions": "0,-1.57,0,-1.57,0,0",
+    "world_file": "",
+    "gz_verbosity": "2",
+    "transport_mode": "usb_serial",
+    "arm_port": "/dev/ttyUSB0",
+    "baud_rate": "3000000",
+    "allow_external_canfd": "false",
+    "fault_latching_enabled": "true",
+    "motor_config_file": "",
+    "robot_namespace": "robot_arm",
+    "joint_states_topic": "joint_states",
+    "effort_commands_topic": "effort_controller/commands",
+    "diagnostics_topic": "diagnostics",
+}
+
 
 def parse_initial_positions(raw: str, limits=HARD_LIMITS) -> list[float]:
     """保留 launch 模块的公开校验入口，便于静态契约测试。"""
 
     return parse_initial_positions_impl(raw, limits)
+
+
+def validate_transport_mode(value: str) -> str:
+    """在启动任何进程前拒绝未知传输模式。"""
+
+    supported = {"usb_serial", "serial_slcan", "socket_can"}
+    if value not in supported:
+        raise ValueError(
+            "transport_mode must be usb_serial, serial_slcan or socket_can"
+        )
+    return value
 
 
 def _start_after_success(next_action, stage: str):
@@ -50,15 +84,27 @@ def _start_after_success(next_action, stage: str):
     return _on_exit
 
 
+def _shutdown_on_exit(stage: str):
+    def _on_exit(event, _context):
+        reason = f"{stage} 已退出（退出码 {event.returncode}），停止 UR5e 仿真后端"
+        return [LogInfo(msg=reason), Shutdown(reason=reason)]
+
+    return _on_exit
+
+
 def _build_runtime(context):
     # OpaqueFunction 先完成严格解析；异常会在任何 Gazebo/ROS 进程创建前终止 launch。
     values = parse_initial_positions(
         LaunchConfiguration("initial_positions").perform(context)
     )
+    validate_transport_mode(LaunchConfiguration("transport_mode").perform(context))
     package_share = FindPackageShare("robot_arm_gazebo")
     model = PathJoinSubstitution([package_share, "urdf", "ur5e.urdf.xacro"])
     controllers = PathJoinSubstitution([package_share, "config", "controllers.yaml"])
-    world = PathJoinSubstitution([package_share, "worlds", "ur5e_world.sdf"])
+    robot_namespace = LaunchConfiguration("robot_namespace")
+    controller_manager = PythonExpression(
+        ["'/' + '", robot_namespace, "'.strip('/') + '/controller_manager'"]
+    )
     initial_names = (
         "shoulder_pan_initial",
         "shoulder_lift_initial",
@@ -93,7 +139,12 @@ def _build_runtime(context):
         ),
         launch_arguments={
             "on_exit_shutdown": "true",
-            "gz_args": ["-r -v 2 ", world],
+            "gz_args": [
+                "-r -v ",
+                LaunchConfiguration("gz_verbosity"),
+                " ",
+                LaunchConfiguration("world_file"),
+            ],
         }.items(),
     )
     robot_state_publisher = Node(
@@ -111,7 +162,7 @@ def _build_runtime(context):
     spawn_robot = Node(
         package="ros_gz_sim",
         executable="create",
-        namespace="robot_arm",
+        namespace=robot_namespace,
         output="screen",
         arguments=["-name", "ur5e", "-topic", "robot_description"],
     )
@@ -122,7 +173,7 @@ def _build_runtime(context):
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
-            "/robot_arm/controller_manager",
+            controller_manager,
             "--controller-manager-timeout",
             "60",
         ],
@@ -134,14 +185,44 @@ def _build_runtime(context):
         arguments=[
             "effort_controller",
             "--controller-manager",
-            "/robot_arm/controller_manager",
+            controller_manager,
             "--controller-manager-timeout",
             "60",
         ],
     )
+    motor_sim = Node(
+        package="robot_arm_gazebo",
+        executable="robot_arm_motor_sim_node",
+        namespace=robot_namespace,
+        output="screen",
+        parameters=[
+            {
+                "transport_mode": LaunchConfiguration("transport_mode"),
+                "arm_port": LaunchConfiguration("arm_port"),
+                "baud_rate": ParameterValue(
+                    LaunchConfiguration("baud_rate"), value_type=int
+                ),
+                "config_file": LaunchConfiguration("motor_config_file"),
+                "allow_external_canfd": ParameterValue(
+                    LaunchConfiguration("allow_external_canfd"), value_type=bool
+                ),
+                "fault_latching_enabled": ParameterValue(
+                    LaunchConfiguration("fault_latching_enabled"), value_type=bool
+                ),
+            }
+        ],
+        remappings=[
+            ("joint_states", LaunchConfiguration("joint_states_topic")),
+            (
+                "effort_controller/commands",
+                LaunchConfiguration("effort_commands_topic"),
+            ),
+            ("diagnostics", LaunchConfiguration("diagnostics_topic")),
+        ],
+    )
     return [
         gazebo,
-        GroupAction([PushRosNamespace("robot_arm"), robot_state_publisher]),
+        GroupAction([PushRosNamespace(robot_namespace), robot_state_publisher]),
         clock_bridge,
         RegisterEventHandler(
             OnProcessExit(
@@ -160,7 +241,13 @@ def _build_runtime(context):
         RegisterEventHandler(
             OnProcessExit(
                 target_action=effort_spawner,
-                on_exit=_start_after_success(None, "启动 effort_controller"),
+                on_exit=_start_after_success(motor_sim, "启动 effort_controller"),
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=motor_sim,
+                on_exit=_shutdown_on_exit("电机仿真后端"),
             )
         ),
         spawn_robot,
@@ -168,10 +255,94 @@ def _build_runtime(context):
 
 
 def generate_launch_description() -> LaunchDescription:
+    package_share = FindPackageShare("robot_arm_gazebo")
     return LaunchDescription(
         [
+            # 六轴仿真初始关节角，严格使用 6 个逗号分隔的有限弧度值。
             DeclareLaunchArgument(
-                "initial_positions", default_value="0,-1.57,0,-1.57,0,0"
+                "initial_positions",
+                default_value=LAUNCH_DEFAULTS["initial_positions"],
+                description="六轴初始关节角，格式为 6 个逗号分隔的弧度值。",
+            ),
+            # Gazebo world 文件；默认使用包内 UR5e 空场景，可传绝对路径覆盖。
+            DeclareLaunchArgument(
+                "world_file",
+                default_value=PathJoinSubstitution(
+                    [package_share, "worlds", "ur5e_world.sdf"]
+                ),
+                description="Gazebo world 文件路径。",
+            ),
+            # Gazebo 日志详细度，数值越大输出越详细。
+            DeclareLaunchArgument(
+                "gz_verbosity",
+                default_value=LAUNCH_DEFAULTS["gz_verbosity"],
+                description="Gazebo 日志详细度。",
+            ),
+            # 外部电机协议端点的传输方式；三种模式互斥。
+            DeclareLaunchArgument(
+                "transport_mode",
+                default_value=LAUNCH_DEFAULTS["transport_mode"],
+                description=(
+                    "电机协议传输方式：usb_serial、serial_slcan 或 socket_can。"
+                ),
+            ),
+            # arm 总线端点；串口模式填 tty 路径，SocketCAN 模式填接口名。
+            DeclareLaunchArgument(
+                "arm_port",
+                default_value=LAUNCH_DEFAULTS["arm_port"],
+                description=(
+                    "arm 总线端点：串口路径（如 /dev/ttyUSB0）或 SocketCAN 接口名。"
+                ),
+            ),
+            # 串口波特率；socket_can 模式不使用该值。
+            DeclareLaunchArgument(
+                "baud_rate",
+                default_value=LAUNCH_DEFAULTS["baud_rate"],
+                description="串口波特率；socket_can 模式忽略。",
+            ),
+            # 外部 CAN-FD 授权；serial_slcan 必须显式设为 true。
+            DeclareLaunchArgument(
+                "allow_external_canfd",
+                default_value=LAUNCH_DEFAULTS["allow_external_canfd"],
+                description="允许外部 CAN-FD；serial_slcan 模式必须设为 true。",
+            ),
+            # 故障锁存安全开关；false 仅供本机调试，不会锁存并清零输出。
+            DeclareLaunchArgument(
+                "fault_latching_enabled",
+                default_value=LAUNCH_DEFAULTS["fault_latching_enabled"],
+                description="启用故障锁存和整臂零输出；仅调试时设为 false。",
+            ),
+            # 六轴协议、ID、限位、传动和 plant 参数的唯一配置源。
+            DeclareLaunchArgument(
+                "motor_config_file",
+                default_value=PathJoinSubstitution(
+                    [package_share, "config", "motors.yaml"]
+                ),
+                description="电机仿真 YAML 配置文件路径。",
+            ),
+            # 所有机器人 ROS 资源的 namespace，不包含前导斜杠。
+            DeclareLaunchArgument(
+                "robot_namespace",
+                default_value=LAUNCH_DEFAULTS["robot_namespace"],
+                description="机器人 ROS namespace，默认 robot_arm。",
+            ),
+            # 电机节点订阅的关节状态 topic，可使用相对或绝对名称。
+            DeclareLaunchArgument(
+                "joint_states_topic",
+                default_value=LAUNCH_DEFAULTS["joint_states_topic"],
+                description="namespace 内的关节状态 topic，亦可传绝对名称。",
+            ),
+            # 电机节点发布的六轴 effort 命令 topic。
+            DeclareLaunchArgument(
+                "effort_commands_topic",
+                default_value=LAUNCH_DEFAULTS["effort_commands_topic"],
+                description="namespace 内的 effort controller 命令 topic。",
+            ),
+            # 电机节点发布连接和锁存状态的 diagnostics topic。
+            DeclareLaunchArgument(
+                "diagnostics_topic",
+                default_value=LAUNCH_DEFAULTS["diagnostics_topic"],
+                description="namespace 内的 diagnostics topic。",
             ),
             OpaqueFunction(function=_build_runtime),
         ]

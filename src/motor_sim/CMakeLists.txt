@@ -33,6 +33,7 @@ target_link_libraries(motor_transport PUBLIC motor_protocol Threads::Threads)
 
 add_library(motor_sim_core
   src/core/config.cpp
+  src/core/drive_lifecycle.cpp
   src/core/frame_router.cpp
   src/core/transmission.cpp
   src/core/plant_model.cpp
@@ -103,7 +104,7 @@ if(BUILD_TESTING)
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(test_config motor_sim_core)
 
-  foreach(CORE_TEST transmission plant_model safety_monitor)
+  foreach(CORE_TEST transmission plant_model safety_monitor drive_lifecycle)
     ament_add_gtest(test_${CORE_TEST} test/test_${CORE_TEST}.cpp)
     target_compile_features(test_${CORE_TEST} PUBLIC cxx_std_17)
     target_compile_options(test_${CORE_TEST} PRIVATE -Wall -Wextra -Wpedantic)

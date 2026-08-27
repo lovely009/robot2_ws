@@ -75,7 +75,42 @@ diagnostics_topic
 
 ## 硬件相关说明
 
-验收环境未提供 `/dev/ttyUSB0`，因此没有执行依赖真实设备的完整运行启动。这符合仓库的
-自动测试约束；设备存在性、tty 可打开性、SocketCAN 接口存在性及 SLCAN-FD 显式授权仍由
+验收环境未提供 `/dev/ttyUSB0`，因此没有执行依赖真实串口设备的启动。设备存在性、tty
+可打开性、SocketCAN 接口存在性及 SLCAN-FD 显式授权仍由
 `robot_arm_motor_sim_node` 在运行时执行权威校验，失败会触发统一 launch 关闭。
 
+## vcan0 真实运行验收
+
+验收时间：2026-08-27 11:33–11:35 CST。主机存在已启用的 `vcan0`，执行：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch robot_arm_gazebo gazebo.launch.py \
+  transport_mode:=socket_can \
+  arm_port:=vcan0
+```
+
+实际运行结果：
+
+- Gazebo Fortress、`robot_state_publisher`、`/clock` bridge 和 UR5e entity 启动成功；
+- `joint_state_broadcaster` 与 `effort_controller` 依次加载、配置并激活；
+- controller 成功后才启动 `/robot_arm/motor_sim`，进程保持运行；
+- `ros2 node list` 显示 7 个预期节点：controller manager、两个 controller、
+  `gz_ros2_control`、motor sim、state publisher 和 clock bridge；
+- `ros2 control list_controllers --controller-manager /robot_arm/controller_manager`
+  显示两个 controller 均为 `active`；
+- `/robot_arm/joint_states` 可读取完整六轴状态，实测发布频率约 100 Hz；
+- `/robot_arm/effort_controller/commands` 实测发布频率约 100 Hz；
+- `/robot_arm/diagnostics`、joint states、effort commands、robot description、TF 和 clock
+  等预期 topic 均存在；
+- 稳定运行约 90 秒未出现节点异常退出，Ctrl-C 后 motor node、bridge、state publisher、
+  controller manager 和 Gazebo 均完成有序关闭，未残留相关进程。
+
+Gazebo GUI 输出了 Fortress/QML 的 deprecated connection、binding loop 和组件序列化警告；
+这些警告未导致 controller、topic 或数据频率异常。Ctrl-C 通过 SIGINT 停止 Gazebo 时，
+launch 将 Gazebo 退出码记录为 `-2`，属于本次人工终止路径，不是运行期崩溃。
+
+`/robot_arm/diagnostics` 当前在 motor node 初始化时发布连接状态；启动后才执行的
+`ros2 topic echo --once` 不会收到此前的非持久化消息。本次验收以 motor node 存活、
+controller 状态、topic 存在性和 100 Hz 数据流确认后端工作状态。

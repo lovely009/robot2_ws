@@ -25,4 +25,4 @@ motor_simulation:
       plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
   motors:
     - {joint: joint_a, bus: arm, protocol: rp, id: 1, profile: rp_axis}
-    - {joint: joint_b, bus: arm, protocol: motor_2530, id: 4, profile: vaxor_axis}
+    - {joint: joint_b, bus: arm, protocol: vaxor, id: 4, profile: vaxor_axis}

@@ -219,7 +219,7 @@ SystemConfig parse_config(const YAML::Node &root,
     motor.plant = profile->second.plant;
     // Vaxor 与 CERB 的反馈电流都由关节力矩除以 Kt（含传动）换算，
     // 必须提供正的转矩常数与电流限幅。
-    if ((motor.protocol == "motor_2530" || motor.protocol == "cerb") &&
+    if ((motor.protocol == "vaxor" || motor.protocol == "cerb") &&
         (motor.plant.torque_constant_nm_per_a <= 0.0 ||
          motor.plant.current_limit_a <= 0.0)) {
       throw std::runtime_error(context + " Vaxor plant needs Kt and current limit");

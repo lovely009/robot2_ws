@@ -23,7 +23,7 @@ TEST(RobotArmMotorConfig, LoadsExactSixAxisContract) {
   EXPECT_EQ(config.buses.front().name, "arm");
   ASSERT_EQ(config.motors.size(), 6U);
   EXPECT_EQ(config.motors[2].id, 3U);
-  EXPECT_EQ(config.motors[3].protocol, "motor_2530");
+  EXPECT_EQ(config.motors[3].protocol, "vaxor");
   EXPECT_DOUBLE_EQ(config.motors[3].transmission.gear_ratio, 80.0);
 }
 
@@ -34,7 +34,7 @@ TEST(RobotArmMotorConfig, RejectsSwappedWristIdsAndSeventhMotorContracts) {
                std::runtime_error);
 
   auto seventh = robot_arm_gazebo::robot_arm_topology_contract();
-  seventh.motors.push_back({"extra_joint", "arm", "rp", 7U});
+  seventh.motors.push_back({"extra_joint", "arm", "cerb", 7U});
   EXPECT_THROW(core::load_system_config(kMotorsYaml, seventh),
                std::runtime_error);
 }

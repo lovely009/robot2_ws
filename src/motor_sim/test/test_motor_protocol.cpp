@@ -29,7 +29,7 @@ protocol::CanFrame frame_from_bytes(
 
 TEST(ProtocolFactory, CreatesOnlySupportedMotorFamilies) {
   EXPECT_NE(protocol::make_motor_protocol("rp"), nullptr);
-  EXPECT_NE(protocol::make_motor_protocol("motor_2530"), nullptr);
+  EXPECT_NE(protocol::make_motor_protocol("vaxor"), nullptr);
   EXPECT_THROW(protocol::make_motor_protocol("unknown"),
                std::invalid_argument);
 }

@@ -12,7 +12,7 @@ constexpr double kCerbPositionMaxRad = 12.5;
 constexpr double kCerbVelocityMaxRadS = 30.0;
 constexpr double kCerbKpMax = 500.0;
 constexpr double kCerbKdMax = 5.0;
-constexpr double kCerbTorqueMaxNm = 10.0;
+constexpr double kCerbTorqueMaxNm = 11.0;  // CE-RB-R48-101 峰值扭矩 11 Nm
 
 // 反馈帧负载端位置：±32768 对应 ±180°。
 constexpr double kCerbFeedbackCountsPerRad = 32768.0 / kPi;

@@ -6,12 +6,12 @@ import yaml
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 CONTROLLER_WILDCARD = "/**"
 EXPECTED = [
-    ("shoulder_pan_joint", "arm", "rp", 1),
-    ("shoulder_lift_joint", "arm", "rp", 2),
-    ("elbow_joint", "arm", "rp", 3),
-    ("wrist_1_joint", "arm", "motor_2530", 4),
-    ("wrist_2_joint", "arm", "motor_2530", 5),
-    ("wrist_3_joint", "arm", "motor_2530", 6),
+    ("shoulder_pan_joint", "arm", "cerb", 1),
+    ("shoulder_lift_joint", "arm", "cerb", 2),
+    ("elbow_joint", "arm", "cerb", 3),
+    ("wrist_1_joint", "arm", "vaxor", 4),
+    ("wrist_2_joint", "arm", "vaxor", 5),
+    ("wrist_3_joint", "arm", "vaxor", 6),
 ]
 
 

@@ -20,7 +20,7 @@ core::FrameRouter make_router(const bool fault_latching_enabled = true) {
   const core::TopologyContract contract{
       {"arm"},
       {{"joint_a", "arm", "rp", 1U},
-       {"joint_b", "arm", "motor_2530", 4U}}};
+       {"joint_b", "arm", "vaxor", 4U}}};
   const auto path =
       std::string(TEST_SOURCE_DIR) + "/test/fixtures/two_axis.yaml";
   return core::FrameRouter(core::load_system_config(path, contract),

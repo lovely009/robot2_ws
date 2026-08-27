@@ -19,7 +19,7 @@ TEST(SystemConfig, AcceptsContractOwnedByCaller) {
   const core::TopologyContract contract{
       {"arm"},
       {{"joint_a", "arm", "rp", 1U},
-       {"joint_b", "arm", "motor_2530", 4U}}};
+       {"joint_b", "arm", "vaxor", 4U}}};
   const auto config =
       core::load_system_config(fixture_path("two_axis.yaml"), contract);
   ASSERT_EQ(config.motors.size(), 2U);
@@ -28,7 +28,7 @@ TEST(SystemConfig, AcceptsContractOwnedByCaller) {
 
 TEST(SystemConfig, RejectsOrderDifferentFromContract) {
   const core::TopologyContract contract{
-      {"arm"}, {{"joint_b", "arm", "motor_2530", 4U}}};
+      {"arm"}, {{"joint_b", "arm", "vaxor", 4U}}};
   EXPECT_THROW(core::load_system_config(fixture_path("two_axis.yaml"), contract),
                std::runtime_error);
 }

@@ -85,7 +85,7 @@ std::unique_ptr<MotorProtocol> make_motor_protocol(const std::string_view name) 
   if (name == "rp") {
     return std::make_unique<RpProtocol>();
   }
-  if (name == "motor_2530") {
+  if (name == "vaxor") {
     return std::make_unique<VaxorProtocol>();
   }
   if (name == "cerb") {

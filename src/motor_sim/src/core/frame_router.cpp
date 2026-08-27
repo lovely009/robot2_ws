@@ -121,7 +121,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
       commands_[item.index].enabled = item.command.enabled;
       commands_[item.index].mode = item.command.mode;
       if (item.command.set_zero &&
-          config_.motors[item.index].protocol == "motor_2530") {
+          config_.motors[item.index].protocol == "vaxor") {
         transmissions_[item.index].set_zero_at_joint(
             last_states_[item.index].position_rad);
         commands_[item.index].position = last_states_[item.index].position_rad;
@@ -145,7 +145,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
       lifecycle_.observe_fresh_command(item.index);
       // Vaxor 的 MIT 命令帧要求逐帧应答（手册 3.4）；CERB 反馈报文同样由
       // 命令帧触发；RP 反馈由节点分频发送。
-      if (config_.motors[item.index].protocol == "motor_2530" ||
+      if (config_.motors[item.index].protocol == "vaxor" ||
           config_.motors[item.index].protocol == "cerb") {
         result.reply_motor_indices.push_back(item.index);
       }

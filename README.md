@@ -1,19 +1,18 @@
-# robot_ws（dev）
+# robot_ws（dev/robot_ws）
 
-机器人的 ROS 2 Humble 工作空间（开发分支 `dev`）。四个 ament 包，真机与仿真并存：
+机器人的 ROS 2 Humble 工作空间（开发分支 `dev/robot_ws`）。四个 ament 包，真机与仿真并存：
 
 | 包 | 定位 |
 |---|---|
 | `motor_drive` | 无 ROS 底层驱动库（传输 / 线协议 / 电机映射） |
 | `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up |
-| `motor_canfd_sim` | C++ 电机侧模拟器（vcan ↔ Gazebo） |
-| `upper_body_canfd_gazebo` | Gazebo 模型 / launch / 动作库 |
+| `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
+| `robot_arm_gazebo` | UR5e 模型与 Gazebo 集成（URDF / world / controller / launch） |
 
 ## 分支
 
-- `dev`：开发分支（本分支，真机 + 仿真 4 包）
-- `dev-real`：真机线（仅 `motor_drive` + `motor_hardware_interface` 两包）
-- `dev-sim`：仿真线
+- `dev/robot_ws`：开发分支（本分支，真机 + 仿真 4 包）
+- `dev-sim`：仿真线（纯 `motor_sim` + `robot_arm_gazebo`）
 - `main`：发布
 
 ## 构建与测试
@@ -40,7 +39,7 @@ ros2 launch motor_hardware_interface hardware.launch.py
 ## 仿真 bring-up
 
 ```bash
-ros2 launch upper_body_canfd_gazebo gazebo.launch.py   # 或 model_sim / driver_loopback
+ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
 
 仿真默认使用 `vcan0/vcan1`；模拟器仅允许打开 `vcan*` 接口，防止与真实电机重复 CAN ID。

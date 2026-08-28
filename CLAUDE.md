@@ -8,10 +8,10 @@ ROS 2 Humble 工作空间（`dev` 开发分支），四个 ament 包：
 
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
-- `motor_canfd_sim` —— C++ 电机侧模拟器（vcan ↔ Gazebo）
-- `upper_body_canfd_gazebo` —— Gazebo 模型 / launch / 动作库
+- `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
+- `robot_arm_gazebo` —— UR5e 模型与 Gazebo 集成（URDF / world / controller / launch）
 
-分支约定：`dev` 开发（本分支，真机 + 仿真 4 包）、`dev-real` 真机线、
+分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 4 包）、
 `dev-sim` 仿真线、`main` 仅发布。
 
 权威文档（修改代码前先读）：各包 `README.md`（`ros2_ws/src/<pkg>/README.md`）、
@@ -45,7 +45,7 @@ colcon test --packages-select motor_drive --ctest-args -R test_protocol
 colcon test --packages-select motor_hardware_interface --pytest-args "-k <表达式>"
 ```
 
-测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）；`motor_canfd_sim` 有 `test_plant_model`/`test_sim_frame_decode`（gtest）；`upper_body_canfd_gazebo` 有 launch/拓扑/动作库 pytest。测试不得启动 Gazebo 或真实硬件。
+测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）；`motor_sim` 有协议/传输/帧路由/plant 等 gtest；`robot_arm_gazebo` 有 launch/拓扑 pytest。测试不得启动 Gazebo 或真实硬件。
 
 真机 bring-up（默认 serial_slcan 双总线 `/dev/ttyACM0`、`/dev/ttyACM1`）：
 
@@ -57,7 +57,7 @@ ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0
 仿真 bring-up（vcan）：
 
 ```bash
-ros2 launch upper_body_canfd_gazebo gazebo.launch.py   # 或 model_sim / driver_loopback
+ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
 
 ## 架构总览
@@ -71,9 +71,9 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
   MotorDriver（分组/校验/统一收发）           canfd_logic.cpp（纯逻辑，可单测）
   protocol.cpp（物理量 <-> 线协议字段）       launch + xacro（真机 bring-up）
 
-motor_canfd_sim（仿真电机侧）                upper_body_canfd_gazebo（集成）
-  SimMotorHandler（按家族模拟反馈帧）          urdf / launch / 动作库
-  plant_model（effort -> joint state）        gazebo / model_sim / driver_loopback
+motor_sim（共享仿真库）                      robot_arm_gazebo（集成）
+  SimMotorHandler / plant_model / 帧路由        urdf / launch / Gazebo 集成
+  （协议 / 传输 / 传动 / 锁存安全）            gazebo.launch.py 统一后端入口
 ```
 
 核心是「三自适应」闭环，全部由配置驱动、编译代码不含机器人拓扑：
@@ -99,7 +99,7 @@ motor_canfd_sim（仿真电机侧）                upper_body_canfd_gazebo（�
 - `urdf/canfd_hardware.xacro`：与拓扑无关的 ros2_control 硬件片段（`canfd_hardware`/`emit_bus_overrides`/`emit_control_joints` 宏），不写死任何关节。
 - `urdf/upper_body.urdf.xacro`：物理模型（几何/惯性）**人工维护**；其 ros2_control 关节清单由 launch 注入，不手抄。两者一致性由 `test_xacro_consistency.py` 兜底。
 - `motor_hardware_interface/helpers.py`：launch 与测试共用（读取 buses/joints、生成参数文件）。
-- 仿真 launch：`upper_body_canfd_gazebo` 的 `gazebo.launch.py`（整机）← `model_sim.launch.py` ← `driver_loopback.launch.py`，默认挂 `motor_canfd_sim/config/motor_driver.yaml`。
+- 仿真 launch：`robot_arm_gazebo` 的 `gazebo.launch.py` 统一仿真后端入口，默认挂 `robot_arm_gazebo/config/motors.yaml`。
 
 ## 关键约定与坑
 

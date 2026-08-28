@@ -5,15 +5,15 @@
 
 | 区域 | 内容 | 权威文档 |
 |---|---|---|
-| `ros2_ws/` | ROS 2 Humble 电机栈：真机 `motor_drive` + `motor_hardware_interface`，仿真 `motor_canfd_sim` + `upper_body_canfd_gazebo` | 本文件 + `CONTEXT.md` + 各包 `README.md` |
+| `ros2_ws/` | ROS 2 Humble 电机栈：真机 `motor_drive` + `motor_hardware_interface`，仿真 `motor_sim` + `robot_arm_gazebo` | 本文件 + `CONTEXT.md` + 各包 `README.md` |
 | `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，serial over USB CDC） | `micro_ros_firmware/README.md` + `micro_ros_firmware/AGENTS.md` |
 | `micro_ros_agent/` | micro-ROS Agent 独立 colcon 工作区（serial ↔ 固件，与电机栈同域互通） | `micro_ros_agent/README.md` |
 
 ## ros2_ws（ROS 2 电机栈）
 
 真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `rp`/`vaxor`）
-+ `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_canfd_sim` +
-`upper_body_canfd_gazebo`。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
++ `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_sim` +
+`robot_arm_gazebo`。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
 `motor_hardware_interface/config/motor_driver.yaml` 决定，增删改不修改 C++、launch
 或 controller 配置。
 
@@ -32,7 +32,7 @@ source /opt/ros/humble/setup.bash
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose
 ros2 launch motor_hardware_interface hardware.launch.py  # 真机，默认 tty 双总线
-ros2 launch upper_body_canfd_gazebo gazebo.launch.py     # 仿真（vcan）
+ros2 launch robot_arm_gazebo gazebo.launch.py           # 仿真（vcan）
 ```
 
 - 覆盖设备路径：`interface_<逻辑总线名>:=<路径>`；传输类型切换改 YAML `transport`。

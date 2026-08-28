@@ -108,10 +108,22 @@ RouterResult FrameRouter::handle(const std::string &bus,
   RouterResult result{RouterStatus::Applied, {}, {}};
   result.updated_motor_indices.reserve(pending.size());
   for (const auto &item : pending) {
-    // 锁存后仅接收显式 disable，用于满足 reset 的全轴停用前置条件；
-    // 普通 enable 和运动帧不能清除或绕过故障。
-    if (safety_.latched() && (!item.control || item.command.enabled)) {
-      return {RouterStatus::SafetyFault, {}, {}};
+    // 锁存后只接受显式失能，用于满足 reset_fault 的全轴停用前置条件；
+    // 任何带使能位的帧（整臂使能、单轴恢复、运动命令）都不能清除或绕过故障。
+    // 各协议的失能构造不同：RP/Vaxor 走独立控制帧（item.control 且 enabled==false）；
+    // CERB 没有独立控制帧，失能随 MIT 命令帧的使能位携带（非控制帧但 enabled==false）。
+    // 不能简单以 enabled==false 放行，否则 RP 运动帧（非控制、enabled 恒假）会被误收。
+    const bool is_disable = !item.command.enabled &&
+                            (item.control ||
+                             config_.motors[item.index].protocol == "cerb");
+    if (safety_.latched()) {
+      if (!is_disable) {
+        return {RouterStatus::SafetyFault, {}, {}};
+      }
+      safety_.set_enabled(item.index, false, now);
+      lifecycle_.set_enabled(item.index, false);
+      enabled_[item.index] = false;
+      continue;
     }
     if (item.control) {
       safety_.set_enabled(item.index, item.command.enabled, now);
@@ -127,6 +139,14 @@ RouterResult FrameRouter::handle(const std::string &bus,
         commands_[item.index].position = last_states_[item.index].position_rad;
       }
     } else {
+      // CERB 的使能位随 MIT 命令帧携带；必须在 observe_valid_command 之前同步
+      // 使能状态，否则最新命令时间戳不会被记录（monitor 仅在已使能时记录），
+      // 后续超时锁存永不触发。Vaxor/RP 的使能只来自独立控制帧，此处不变。
+      if (config_.motors[item.index].protocol == "cerb") {
+        safety_.set_enabled(item.index, item.command.enabled, now);
+        lifecycle_.set_enabled(item.index, item.command.enabled);
+        enabled_[item.index] = item.command.enabled;
+      }
       safety_.observe_valid_command(item.index, bus, frame.id,
                                     payload_bytes(frame), now);
       if (safety_.latched() || safety_.rearm_required()) {
@@ -135,13 +155,6 @@ RouterResult FrameRouter::handle(const std::string &bus,
       }
       commands_[item.index] = item.command;
       commands_[item.index].enabled = enabled_[item.index];
-      // CERB 的使能位随 MIT 命令帧携带，这里同步锁存使能状态；
-      // Vaxor/RP 的使能只能来自独立控制帧。
-      if (config_.motors[item.index].protocol == "cerb") {
-        safety_.set_enabled(item.index, item.command.enabled, now);
-        lifecycle_.set_enabled(item.index, item.command.enabled);
-        enabled_[item.index] = item.command.enabled;
-      }
       lifecycle_.observe_fresh_command(item.index);
       // Vaxor 的 MIT 命令帧要求逐帧应答（手册 3.4）；CERB 反馈报文同样由
       // 命令帧触发；RP 反馈由节点分频发送。

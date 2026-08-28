@@ -92,8 +92,11 @@ CanFrame CerbProtocol::encode_feedback(const MotorFeedback &feedback,
   // 手册未定义周期状态帧，Reply 与 Status 统一编码为命令触发的反馈报文。
   static_cast<void>(kind);
 
+  // 反馈位置按命令侧解析量程（±kCerbPositionMaxRad）编码，保持与 MIT 命令帧
+  // 解码比例一致；肩关节硬限位 ±360° 仍可能超出 ±180°，故不能使用 ±π 截断。
   const auto position_counts = static_cast<int32_t>(std::llround(
-      std::clamp(feedback.position, -kPi, kPi) * kCerbFeedbackCountsPerRad));
+      std::clamp(feedback.position, -kCerbPositionMaxRad, kCerbPositionMaxRad) *
+      kCerbFeedbackCountsPerRad));
   const auto velocity_rpm = static_cast<int32_t>(
       std::llround(feedback.velocity * 60.0 / (2.0 * kPi)));
   const auto current_ma =

@@ -14,8 +14,8 @@ UR5e 六轴机械臂，并通过 USB 串口接收外部控制器的 RP / Vaxor �
 ## 机器人与数据流
 
 - 六轴顺序以 `robot_arm_gazebo/config/motors.yaml` 为准：shoulder_pan、
-  shoulder_lift、elbow 为 RP（id 1–3），wrist_1、wrist_2、wrist_3 为
-  Vaxor（`motor_2530`，id 4–6）。
+  shoulder_lift、elbow 为 CERB（id 1–3），wrist_1、wrist_2、wrist_3 为
+  Vaxor（`vaxor`，id 4–6）。
 - 逻辑总线只有 `arm` 一条，绑定一个唯一的 `/dev/serial/by-id/...` 设备。
 - 外部帧经 `motor_sim` 的协议、串口、传动与电机模型转换为 Gazebo effort；
   关节状态再编码成电机反馈帧返回外部控制器。
@@ -40,12 +40,15 @@ colcon test-result --verbose
 ## 启动
 
 `gazebo.launch.py` 是完整仿真后端的唯一启动入口。默认使用
-`usb_serial`、`/dev/ttyUSB0` 和 3,000,000 baud，一条命令同时启动 Gazebo、
-UR5e、控制器、时钟桥和电机协议仿真节点：
+`socket_can`、`vcan0` 和 `fault_latching_enabled:=false`，一条命令同时启动
+Gazebo、UR5e、控制器、时钟桥和电机协议仿真节点：
 
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
+
+默认连接 `socket_can/vcan0` 仅用于本机联调；正式仿真验收应使用 `usb_serial` 或
+`serial_slcan` 并保留 `fault_latching_enabled:=true`。
 
 设备不存在、不可打开或参数不合法时，整套后端会快速失败并关闭，避免留下无法接入的
 Gazebo 场景。查看全部参数、默认值和中文用途说明：

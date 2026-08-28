@@ -222,7 +222,8 @@ SystemConfig parse_config(const YAML::Node &root,
     if ((motor.protocol == "vaxor" || motor.protocol == "cerb") &&
         (motor.plant.torque_constant_nm_per_a <= 0.0 ||
          motor.plant.current_limit_a <= 0.0)) {
-      throw std::runtime_error(context + " Vaxor plant needs Kt and current limit");
+      throw std::runtime_error(context +
+                                 " Vaxor/CERB plant needs Kt and current limit");
     }
     const auto address = motor.bus + "\n" + motor.protocol + "\n" +
                          std::to_string(motor.id);

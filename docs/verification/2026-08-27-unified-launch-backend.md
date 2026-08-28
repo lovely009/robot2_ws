@@ -70,8 +70,10 @@ effort_commands_topic
 diagnostics_topic
 ```
 
-确认默认连接为 `transport_mode=usb_serial`、`arm_port=/dev/ttyUSB0`、
-`baud_rate=3000000`，故障锁存默认启用。
+确认默认连接为 `transport_mode=socket_can`、`arm_port=vcan0`、
+`allow_external_canfd=true`、`fault_latching_enabled=false`、`baud_rate=3000000`，
+仅用于本机联调；正式验收应使用 `usb_serial`/`serial_slcan` 并保留
+`fault_latching_enabled=true`。
 
 ## 硬件相关说明
 

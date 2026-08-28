@@ -8,9 +8,8 @@
 | 六轴 ABI | `robot_arm_gazebo/config/motors.yaml` 中 shoulder_pan、shoulder_lift、elbow、wrist_1、wrist_2、wrist_3 的稳定顺序 |
 | 逻辑总线 | `arm`；不是 Linux 设备名，当前仅一条 |
 | 稳定串口路径 | 仿真主机上的 `/dev/serial/by-id/...`，`arm` 总线独占一个 |
-| RP | `motor_sim` 内置的 RP 关节协议策略，本模型共 3 个实例（id 1–3） |
-| Vaxor | 配置名 `motor_2530` 的小型电机协议策略，本模型共 3 个实例（id 4–6） |
-| CERB | 配置名 `cerb` 的巨蟹关节模组协议策略（MIT 模式子集），按需在 YAML 中启用 |
+| CERB | 配置名 `cerb` 的巨蟹关节模组协议策略（MIT 模式子集），本模型共 3 个实例（id 1–3） |
+| Vaxor | 配置名 `vaxor` 的小型电机协议策略，本模型共 3 个实例（id 4–6） |
 | 电机侧状态 | 电机协议所见的位置、速度、电流或力矩；Vaxor 需经过传动换算 |
 | 关节侧状态 | Gazebo 的 position、velocity、effort，按六轴 ABI 排列 |
 | 帧记录 | 串口承载的 ASCII CAN/CAN-FD 记录，支持分片接收与逐记录容错 |
@@ -27,7 +26,8 @@
 `robot_arm_gazebo/launch/gazebo.launch.py` 是完整仿真后端的唯一启动入口；它统一编排
 Gazebo、UR5e、controller、时钟桥和电机协议节点。外部工程通过 launch 参数选择
 transport、设备、namespace 和 ROS topic，不单独启动 `robot_arm_motor_sim_node`。
-默认连接为 `usb_serial` 和 `/dev/ttyUSB0`；设备或接口不存在时整套 launch 失败退出。
+默认连接为 `socket_can` 和 `vcan0`，且 `fault_latching_enabled:=false`，仅用于本机联调；
+正式仿真验收应使用 `usb_serial` 或 `serial_slcan` 并保留 `fault_latching_enabled:=true`。
 Gazebo 启动时保持暂停，依次配置 joint state、外部 effort 与闭环抱闸 controller；
 抱闸 controller 成功激活后才恢复物理仿真，消除控制接管前的重力下坠窗口。
 

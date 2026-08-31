@@ -15,7 +15,7 @@
 | 术语 | 含义 |
 |---|---|
 | 电机拓扑配置 | `config/motor_driver.yaml`（**唯一拓扑源**：数量/类型/ID/关节名/总线/传输；真机在 `motor_hardware_interface`，仿真在 `robot_arm_gazebo`） |
-| 型号库 | `config/motor.yaml`（物理规格 / 控制默认值，与拓扑无关、可跨机器人复用） |
+| 型号库 | `config/motor.yaml`（协议运行参数 / 安全阈值，与拓扑无关、可跨机器人复用；完整规格见 `motor_drive/docs/`） |
 | 逻辑总线 | 与设备路径解耦的总线标识，如 `left_arm` |
 | 传输类型 | `BusConfig.transport`：`socketcan`（内核接口）或 `serial_slcan`（CANable2 串口），缺省 `socketcan` |
 | 设备路径 | 可覆盖目标：socketcan 为接口名（`can0`），serial_slcan 为 tty（`/dev/ttyACM0`） |

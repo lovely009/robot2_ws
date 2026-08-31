@@ -2,7 +2,7 @@
 
 micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。作为 ROS 2 侧的
 桥接节点，与 MCU 固件（`../micro_ros_firmware/`，见其 README：STM32H723VGT6 + serial
-传输 + CAN1 桥固件）通过 **serial（UART）** 传输通信，后期与 `../ros2_ws`
+传输 + CAN1 桥固件）通过 **serial（USB CDC）** 传输通信，后期与 `../ros2_ws`
 电机栈同域（domain 0）互通。
 
 ## 源码来源（humble 分支，快照提交）

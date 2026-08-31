@@ -46,20 +46,19 @@ ros2 launch robot_arm_gazebo gazebo.launch.py
 
 ## 配置（两份文件）
 
-- **`config/motor.yaml`（型号库）**：每型号**完整电机规格**（电磁：Kt/Kv/R/L；
-  传动：减速比/效率/背隙；能力与保护阈值：额定/峰值电流与扭矩、电压范围、
-  绕组温度；控制默认值 `command` kp/kd），与拓扑无关、可跨机器人复用。
-  标注「运行消费」的参数由协议策略读取（如 `torque_constant`、`gear_ratio`），
-  其余为机器可读的规格档案，供校验与未来保护/故障逻辑消费。
+- **`config/motor.yaml`（型号库）**：每型号**协议运行所需静态参数**（如
+  `torque_constant_nm_per_amp`、`gear_ratio`）与软件侧**安全阈值**（额定/峰值
+  扭矩等），与拓扑无关、可跨机器人复用。完整电机规格（电磁参数、背隙、
+  电流/电压/温度范围等）见 `ros2_ws/src/motor_drive/docs/` 规格书。
 - **`config/motor_driver.yaml`（拓扑，唯一入口）**：`motor_specs_file` 引用型号库 +
   `timing` + `buses` + `motors` 装配（每台电机 `type` 引用 motor.yaml 型号，
-  单电机可覆盖参数）。
+  单电机可覆盖参数；`command.kp/kd` 为每台电机的动态控制增益）。
 
 ## 核心契约
 
-- **双文件配置**：拓扑 `motor_driver.yaml`（电机数量/类型/ID/关节名/总线/传输）
-  与型号参数 `motor.yaml`（物理规格/控制默认值）分离；增删改电机零代码改动
-  （新增物理关节时同步 URDF，测试兜底）。
+- **双文件配置**：拓扑 `motor_driver.yaml`（电机数量/类型/ID/关节名/总线/传输/
+  动态增益）与型号参数 `motor.yaml`（协议运行参数/安全阈值）分离；增删改电机
+  零代码改动（新增物理关节时同步 URDF，测试兜底）。
 - **接口自适应**：`CanTransportRegistry` + YAML `transport` 字段，内置
   `socketcan` / `serial_slcan`。
 - **协议自适应**：`MotorProtocolRegistry` + YAML `type`，内置 `rp` / `vaxor`。
@@ -71,7 +70,7 @@ ros2 launch robot_arm_gazebo gazebo.launch.py
 | 场景 | 改动 |
 |---|---|
 | 增删电机 | 只改 `motor_driver.yaml` `motors`（新物理关节时同步 URDF） |
-| 修改电机物理参数 | 改 `motor.yaml` 型号段（Kt / gear_ratio / 型号） |
+| 修改电机物理参数 | 改 `motor.yaml` 型号段（torque_constant / gear_ratio 等） |
 | 新增电机类型 | 实现 `MotorProtocol` + 注册工厂 + `motor.yaml` 声明 |
 | 新增传输 | 实现 `CanTransport` + 注册工厂 + YAML `transport` |
 

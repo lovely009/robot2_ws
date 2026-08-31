@@ -21,8 +21,14 @@
 #define W25Q64_BLOCK_ERASE_TIMEOUT_MS 3000U
 #define W25Q64_CHIP_ERASE_TIMEOUT_MS 100000U
 
-static w25q64_status_t w25q64_hal_status(HAL_StatusTypeDef status) {
-  return status == HAL_TIMEOUT ? W25Q64_ERROR_TIMEOUT : W25Q64_ERROR_HAL;
+static w25q64_status_t w25q64_hal_status(const OSPI_HandleTypeDef *handle,
+                                          HAL_StatusTypeDef status) {
+  if (status == HAL_TIMEOUT ||
+      (handle != NULL &&
+       (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
+    return W25Q64_ERROR_TIMEOUT;
+  }
+  return W25Q64_ERROR_HAL;
 }
 
 static OSPI_HandleTypeDef *w25q64_handle(void) {
@@ -62,7 +68,7 @@ static w25q64_status_t w25q64_wait_ready(uint32_t timeout_ms) {
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
 
   OSPI_AutoPollingTypeDef polling = {0};
@@ -72,7 +78,7 @@ static w25q64_status_t w25q64_wait_ready(uint32_t timeout_ms) {
   polling.Interval = 0x10U;
   polling.AutomaticStop = HAL_OSPI_AUTOMATIC_STOP_ENABLE;
   hal_status = HAL_OSPI_AutoPolling(handle, &polling, timeout_ms);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(hal_status);
+  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }
 
 static w25q64_status_t w25q64_write_enable(void) {
@@ -86,7 +92,7 @@ static w25q64_status_t w25q64_write_enable(void) {
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
 
   w25q64_command_init(&command, W25Q64_CMD_READ_STATUS_REG1);
@@ -94,7 +100,7 @@ static w25q64_status_t w25q64_write_enable(void) {
   command.NbData = 1U;
   hal_status = HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
 
   OSPI_AutoPollingTypeDef polling = {0};
@@ -104,7 +110,7 @@ static w25q64_status_t w25q64_write_enable(void) {
   polling.Interval = 0x10U;
   polling.AutomaticStop = HAL_OSPI_AUTOMATIC_STOP_ENABLE;
   hal_status = HAL_OSPI_AutoPolling(handle, &polling, W25Q64_HAL_TIMEOUT_MS);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(hal_status);
+  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }
 
 static w25q64_status_t w25q64_erase(uint32_t address, uint32_t erase_size,
@@ -130,7 +136,7 @@ static w25q64_status_t w25q64_erase(uint32_t address, uint32_t erase_size,
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   return w25q64_wait_ready(timeout_ms);
 }
@@ -162,11 +168,11 @@ w25q64_status_t w25q64_reset(void) {
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   w25q64_command_init(&command, W25Q64_CMD_RESET_DEVICE);
   hal_status = HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(hal_status);
+  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }
 
 uint32_t w25q64_read_id(void) {
@@ -214,10 +220,10 @@ w25q64_status_t w25q64_read(uint32_t address, uint8_t *data, uint32_t size) {
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   hal_status = HAL_OSPI_Receive(handle, data, W25Q64_HAL_TIMEOUT_MS);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(hal_status);
+  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }
 
 w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
@@ -247,11 +253,11 @@ w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   hal_status = HAL_OSPI_Transmit(handle, (uint8_t *)data, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   return w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
 }
@@ -317,7 +323,7 @@ w25q64_status_t w25q64_chip_erase(void) {
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
   return w25q64_wait_ready(W25Q64_CHIP_ERASE_TIMEOUT_MS);
 }
@@ -336,15 +342,16 @@ w25q64_status_t w25q64_memory_mapped_mode(void) {
   w25q64_command_init(&command, W25Q64_CMD_FAST_READ_QUAD_IO);
   command.AddressMode = HAL_OSPI_ADDRESS_4_LINES;
   command.DataMode = HAL_OSPI_DATA_4_LINES;
+  command.NbData = 1U;
   command.DummyCycles = 6U;
   HAL_StatusTypeDef hal_status =
       HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    return w25q64_hal_status(hal_status);
+    return w25q64_hal_status(handle, hal_status);
   }
 
   OSPI_MemoryMappedTypeDef mapped = {0};
   mapped.TimeOutActivation = HAL_OSPI_TIMEOUT_COUNTER_DISABLE;
   hal_status = HAL_OSPI_MemoryMapped(handle, &mapped);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(hal_status);
+  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }

@@ -8,8 +8,14 @@ static bool g_initialized = false;
 
 #define OCTOSPI2_TIMEOUT_MS 1000U
 
-static w25q64_status_t ospi_status(HAL_StatusTypeDef status) {
-  return status == HAL_TIMEOUT ? W25Q64_ERROR_TIMEOUT : W25Q64_ERROR_HAL;
+static w25q64_status_t ospi_status(const OSPI_HandleTypeDef *handle,
+                                   HAL_StatusTypeDef status) {
+  if (status == HAL_TIMEOUT ||
+      (handle != NULL &&
+       (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
+    return W25Q64_ERROR_TIMEOUT;
+  }
+  return W25Q64_ERROR_HAL;
 }
 
 static w25q64_status_t octospi2_configure_clock(void) {
@@ -98,18 +104,21 @@ w25q64_status_t octospi2_init(void) {
 
   HAL_StatusTypeDef hal_status = HAL_OSPI_Init(&g_hospi2);
   if (hal_status != HAL_OK) {
+    w25q64_status_t status = ospi_status(&g_hospi2, hal_status);
     octospi2_deinit();
-    return ospi_status(hal_status);
+    return status;
   }
 
   OSPIM_CfgTypeDef manager = {0};
   manager.ClkPort = 1U;
   manager.NCSPort = 1U;
   manager.IOLowPort = HAL_OSPIM_IOPORT_1_LOW;
+  manager.Req2AckTime = 1U;
   hal_status = HAL_OSPIM_Config(&g_hospi2, &manager, OCTOSPI2_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
+    w25q64_status_t status = ospi_status(&g_hospi2, hal_status);
     octospi2_deinit();
-    return ospi_status(hal_status);
+    return status;
   }
 
   g_initialized = true;

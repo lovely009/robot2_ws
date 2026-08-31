@@ -36,6 +36,7 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 | CANFD 通信 | **FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13**，FD + BRS，RX/TX 元素 64B | ISR 写静态 RX 队列；容量 CAN1=32、CAN2/3=8，队满丢最旧帧 |
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
+| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `-DHAL_OSPI_MODULE_ENABLED` 与 `-DENABLE_W25Q64=1` 默认启用；启动只作无损探测 |
 | CAN1 调试桥 | `-DENABLE_CAN1_DEBUG_BRIDGE=1`（默认开启） | 通过 `micro_ros/can1/send`、`micro_ros/can1/receive` 调试 FDCAN1；关掉则不在 ROS 侧建实体 |
 | JointState 桥 | `-DENABLE_MOTOR_COMMAND_BRIDGE=1`（默认开启） | 订阅 `/joint_commands`（`sensor_msgs/msg/JointState`）驱动默认测试电机（RP + vaxor） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
@@ -120,6 +121,7 @@ micro_ros_firmware/
 │   ├── motor_control/         # 电机 timeout/故障/恢复状态机（host 可测）
 │   ├── control_mailbox/       # 固定容量 mailbox 与边沿锁存（host 可测）
 │   ├── motor_protocol/        # RP/vaxor 协议编解码（纯逻辑）
+│   ├── w25q64/                # OCTOSPI2 W25Q64 驱动（启动探测默认开启）
 │   └── ws2812/                # WS2812 彩灯驱动（SPI6 MOSI=PA7）
 └── src/
     ├── main.cpp               # 入口：板级初始化 + start_task 编排
@@ -147,6 +149,7 @@ micro_ros_firmware/
 | FDCAN1_RX / TX | PD0 / PD1 |
 | FDCAN2_RX / TX | PB5 / PB6 |
 | FDCAN3_RX / TX | PD12 / PD13 |
+| W25Q64 OCTOSPI2 Port 1 | PA1 / PA3 / PB0 / PB2 / PE11 / PD11 |
 | 保留输出 | PA0（官方例程固定置低） |
 
 ## 构建与烧录
@@ -165,6 +168,18 @@ cd micro_ros_firmware
 可离线重编固件对象；全新机器或删除 micro-ROS 构建环境后的 clean bootstrap
 仍需联网下载依赖/ROS 2 源，网络或 TLS 不可用时会失败。常规验证不运行
 `clean_microros`，除非确实需要重建该下载环境。
+
+### W25Q64 启动探测
+
+默认构建启用 `HAL_OSPI_MODULE_ENABLED` 和 `ENABLE_W25Q64=1`。`start_task` 在创建
+其它任务前仅执行 `w25q64_init()` 和一次 JEDEC ID 读取；前者包含 OSPI 初始化、
+Flash reset 和就绪轮询，后者应返回 `0xEF4017`。该路径不会擦除、写入或进入
+memory-mapped 模式，初始化/ID 失败同样继续启动所有任务。
+
+已启用时，GDB 可读取 `g_w25q64_init_status`（成功为 `W25Q64_OK`）和
+`g_w25q64_jedec_id`（预期 `0xEF4017`）。关闭时用 `-DENABLE_W25Q64=0`，入口不
+包含、不声明也不调用驱动。后续运行期读写必须由单一任务/模块所有，不能与启动
+探测或其它任务并发操作同一 OSPI 句柄。
 
 ## 与 micro_ros_agent 联调
 

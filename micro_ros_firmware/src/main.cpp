@@ -19,13 +19,22 @@
 #include "ws2812.h"       // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
 #include "sensor_task.h"   // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
 #include "control_task.h"  // 控制任务（当前三路 FDCAN 例程移植）
-#include "w25q64.h"        // 让 PlatformIO 发现并编译 W25Q64 库
+
+#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
+#include "w25q64.h"
+#endif
 
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 
 #if !defined(MICRO_ROS_TRANSPORT_ARDUINO_SERIAL)
 #error "本固件仅支持 serial 传输，请在 platformio.ini 设置 board_microros_transport = serial"
+#endif
+
+#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
+// 启动探测诊断仅供 GDB 读取。失败不阻止其余 FreeRTOS 任务启动。
+volatile int32_t g_w25q64_init_status = W25Q64_ERROR_STATE;
+volatile uint32_t g_w25q64_jedec_id = 0U;
 #endif
 
 // ---------------------------------------------------------------------------
@@ -169,6 +178,12 @@ static void micro_ros_task(void *arg) {
 // 编排任务：micro-ROS 收发、传感器与控制任务相互独立，均在调度器启动后创建。
 static void start_task(void *arg) {
   (void)arg;
+
+#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
+  // 仅初始化、复位和读取 JEDEC ID；不执行任何写入、擦除或 memory-mapped 操作。
+  g_w25q64_init_status = static_cast<int32_t>(w25q64_init());
+  g_w25q64_jedec_id = w25q64_read_id();
+#endif
 
   if (xTaskCreate(micro_ros_task, "micro_ros", kMicroRosTaskStack, nullptr,
                   kMicroRosTaskPrio, nullptr) != pdPASS) {

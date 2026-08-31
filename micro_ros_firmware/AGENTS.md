@@ -63,8 +63,13 @@ cd micro_ros_firmware
   SPI2 240MHz，PLLQ 改开会连带改变 SPI2 速率。
 - **FDCAN 时钟**：`PLL2Q=80MHz` 独立供 FDCAN；不要为 FDCAN 改 PLL1Q，
   否则会连带改变 SPI2 速率。
-- **HAL 模块**：DMA/SPI/TIM 由 STM32duino 默认使能；FDCAN 需要显式
-  `-DHAL_FDCAN_MODULE_ENABLED`（`platformio.ini` 已加）。
+- **HAL 模块**：DMA/SPI/TIM 由 STM32duino 默认使能；FDCAN 与 W25Q64 OSPI 分别
+  需要显式 `-DHAL_FDCAN_MODULE_ENABLED`、`-DHAL_OSPI_MODULE_ENABLED`
+  （`platformio.ini` 已加）。任一 HAL 构建宏变更后必须执行
+  `pio run -t clean` 全量重建。
+- **W25Q64 启动探测**：`ENABLE_W25Q64=1` 时，`start_task` 只做初始化、reset、
+  就绪轮询与 JEDEC ID 读取，GDB 可读 `g_w25q64_init_status`、
+  `g_w25q64_jedec_id`；失败不得阻止其他任务。禁止在上电路径自动擦写 Flash。
 - **调试桥限制**：`CANFrame.id` 是 `uint16`，29 位扩展 ID 不能完整回显；
   RX/TX 元素已扩到 64B，RP 广播与 vaxor 12/20B 帧可正常承载。
 - **FDCAN RX 归属**：ISR 只写静态队列（CAN1=32、CAN2/3=8，满时 drop-oldest），
@@ -74,7 +79,7 @@ cd micro_ros_firmware
   `priority >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY` 才能调用
   `xQueue*FromISR`；队列只在 `bsp_can_init()` single-init，不在重连时重建。
 - **改 HAL 构建宏后必须 `pio run -t clean` 全量重建**：SrcWrapper 的
-  `stm32yyxx_hal_fdcan.c.o` 不会因 build flag 变化自动重编。
+  `stm32yyxx_hal_fdcan.c.o`、`stm32yyxx_hal_ospi.c.o` 不会因 build flag 变化自动重编。
 - **FreeRTOS 下 `loop()` 只能非阻塞**：业务放 `sensor`/`control`/`micro_ros` 任务。
 - **任务栈/周期**：`start_task` P1/256 words；`sensor` P4/1024 words（DRDY）；
   `control` P3/1024 words（10ms/100Hz）；`micro_ros` P2/8192 words（20ms
@@ -97,7 +102,7 @@ cd micro_ros_firmware
 
 ## 结构（简）
 
-- `platformio.ini`：构建配置（USB CDC 宏 + `HAL_FDCAN_MODULE_ENABLED`）
+- `platformio.ini`：构建配置（USB CDC 宏 + FDCAN/OSPI HAL 宏）
 - `boards/stm32h723vgt6.json`：变体/`variant_h`/`-DARDUINO_GENERIC_H723VGTX`/VID-PID
 - `src/main.cpp`：`systemInit` + `start_task`（创建
   `micro_ros`/`sensor`/`control`/`supervisor`）
@@ -120,6 +125,8 @@ cd micro_ros_firmware
   `motor_drive/protocol.cpp` 移植；同一文件内分 RP/vaxor 两部分，
   `-fno-exceptions` 下异常改返回值）
 - `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
+- `lib/w25q64`：OCTOSPI2 W25Q64 驱动；运行期访问必须指定单一所有者，不能由多个
+  任务并发使用同一 OSPI 句柄
 
 `src/` 只放任务编排与 ROS 桥；硬件驱动/协议库在 `lib/`，PlatformIO 会自动
 发现并链接。`lib/imu` 依赖 `lib/dma`（见 `lib/imu/library.json`），新增跨库

@@ -19,6 +19,7 @@
 #include "ws2812.h"       // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
 #include "sensor_task.h"   // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
 #include "control_task.h"  // 控制任务（当前三路 FDCAN 例程移植）
+#include "w25q64.h"        // 让 PlatformIO 发现并编译 W25Q64 库
 
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>

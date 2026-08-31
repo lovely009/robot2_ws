@@ -75,3 +75,12 @@ target_include_directories(test_supervisor_heartbeat PRIVATE
   ../../lib/supervisor/include)
 
 add_test(NAME supervisor_heartbeat COMMAND test_supervisor_heartbeat)
+
+add_executable(test_w25q64_geometry
+  test_w25q64_geometry.cpp
+  ../../lib/w25q64/src/w25q64_geometry.c)
+
+target_include_directories(test_w25q64_geometry PRIVATE
+  ../../lib/w25q64/include)
+
+add_test(NAME w25q64_geometry COMMAND test_w25q64_geometry)

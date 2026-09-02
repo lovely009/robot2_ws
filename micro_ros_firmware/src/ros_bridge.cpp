@@ -15,6 +15,9 @@
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+#include <rclc_parameter/rclc_parameter.h>
+#endif
 #include <rmw_microros/time_sync.h>
 
 #include "can_debug_bridge.h"
@@ -29,14 +32,20 @@ static rcl_node_t g_node;
 static rclc_executor_t g_executor;
 static rcl_timer_t g_timer;
 static rcl_allocator_t g_allocator;
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+static rclc_parameter_server_t g_param_server;
+#endif
 
-// executor 最大句柄数：定时器 + 各宏开关下的订阅
+// executor 最大句柄数：定时器 + 各宏开关下的订阅/参数服务器
 static const size_t kExecutorHandles = 1
 #if defined(ENABLE_CAN1_DEBUG_BRIDGE) && ENABLE_CAN1_DEBUG_BRIDGE
     + 1
 #endif
 #if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
     + 2
+#endif
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+    + RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES
 #endif
     ;
 
@@ -45,6 +54,9 @@ static bool g_support_up = false;
 static bool g_node_up = false;
 static bool g_executor_up = false;
 static bool g_timer_up = false;
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+static bool g_param_server_up = false;
+#endif
 
 // 周期定时器：驱动各业务域轮询（IMU 发布、CAN1 调试帧、电机反馈）
 static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
@@ -53,6 +65,9 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   imu_bridge_poll();
   can_debug_bridge_poll();
   motor_bridge_poll();
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+  motor_bridge_apply_pending_config();
+#endif
 }
 
 static void destroy_entities() {
@@ -62,6 +77,13 @@ static void destroy_entities() {
   can_debug_bridge_destroy(&g_node, &g_executor);
   motor_bridge_destroy(&g_node, &g_executor);
 
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+  if (g_param_server_up) {
+    rcl_ret_t rc = rclc_parameter_server_fini(&g_param_server, &g_node);
+    (void)rc;
+    g_param_server_up = false;
+  }
+#endif
   if (g_timer_up) {
     rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);
     rc = rcl_timer_fini(&g_timer);
@@ -121,6 +143,25 @@ static bool create_entities() {
     destroy_entities();
     return false;
   }
+
+#if defined(ENABLE_PARAMETER_SERVER) && ENABLE_PARAMETER_SERVER
+  // 初始化参数服务器（允许未声明参数，支持动态电机拓扑）
+  rclc_parameter_options_t param_options;
+  param_options.notify_changed_over_dds = true;
+  param_options.max_params = 64;
+  param_options.allow_undeclared_parameters = true;
+  param_options.low_mem_mode = false;
+  if (rclc_parameter_server_init_with_option(&g_param_server, &g_node, &param_options) != RCL_RET_OK) {
+    destroy_entities();
+    return false;
+  }
+  g_param_server_up = true;
+
+  if (rclc_executor_add_parameter_server_with_context(&g_executor, &g_param_server, motor_bridge_param_callback, nullptr) != RCL_RET_OK) {
+    destroy_entities();
+    return false;
+  }
+#endif
 
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(20),
                               bridge_timer_cb) != RCL_RET_OK) {

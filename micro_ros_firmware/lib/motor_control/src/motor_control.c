@@ -551,3 +551,61 @@ bool motor_control_set_authorization(motor_control_context_t *ctx,
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// 运行时重建电机表
+// ---------------------------------------------------------------------------
+bool motor_control_reconfigure(motor_control_context_t *ctx,
+                               const motor_control_motor_config_t *motors,
+                               size_t motor_count) {
+  if (ctx == NULL || motors == NULL || motor_count == 0U ||
+      motor_count > MOTOR_CONTROL_MAX_MOTORS) {
+    return false;
+  }
+
+  // 前置检查：必须已停机（authorized=false）且所有电机已停止
+  if (ctx->authorized) {
+    return false;
+  }
+
+  // 1. 等待所有 VAXOR 电机完成停止
+  //    （由上层保证在调用前已等待足够时间，这里只做状态清理）
+
+  // 2. 清除所有故障和授权状态
+  memset(ctx->bus_fault, 0, sizeof(ctx->bus_fault));
+  memset(ctx->rp_bus_disabled, 0, sizeof(ctx->rp_bus_disabled));
+
+  // 3. 复制新电机表
+  ctx->motor_count = motor_count;
+  memcpy(ctx->motors, motors, motor_count * sizeof(motor_control_motor_config_t));
+
+  // 4. 重置所有运行时状态
+  memset(ctx->runtime, 0, motor_count * sizeof(motor_control_motor_runtime_t));
+  memset(ctx->joint_states, 0, motor_count * sizeof(motor_control_joint_state_t));
+  memset(ctx->joint_state_valid, 0, motor_count * sizeof(bool));
+
+  // 5. 复制关节名到内部缓冲区并重定向指针
+  for (size_t index = 0; index < motor_count; ++index) {
+    size_t name_len = strlen(motors[index].joint_name);
+    if (name_len >= MOTOR_CONTROL_JOINT_NAME_CAPACITY) {
+      name_len = MOTOR_CONTROL_JOINT_NAME_CAPACITY - 1U;
+    }
+    memcpy(ctx->joint_names[index], motors[index].joint_name, name_len);
+    ctx->joint_names[index][name_len] = '\0';
+    ctx->motors[index].joint_name = ctx->joint_names[index];  // 重定向到内部缓冲
+    ctx->runtime[index].state = MOTOR_CONTROL_DISABLED;
+  }
+
+  // 6. 重置统计计数
+  ctx->valid_command_count = 0U;
+  ctx->invalid_command_count = 0U;
+  ctx->valid_feedback_count = 0U;
+  ctx->invalid_feedback_count = 0U;
+
+  // 7. 重置授权状态
+  ctx->authorized = false;
+  ctx->agent_connected = false;
+  ctx->agent_ever_connected = false;
+
+  return true;
+}

@@ -26,6 +26,8 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 | 实时内核 | `STM32FreeRTOS`（stm32duino） | 调度器接管 SysTick，micro-ROS 与 IMU 独立任务 |
 | ROS 2 发行版 | `board_microros_distro = humble` | 与 `micro_ros_agent` 源码对齐 |
 | 传输 | `board_microros_transport = serial`（物理层 USB CDC） | micro-ROS 侧保持 serial，agent 以 `/dev/ttyACM0` 对接 |
+| 参数服务容量 | `microros.meta`：`RMW_UXRCE_MAX_SERVICES=5` | `rclc` 参数服务器固定创建 5 个 service，默认容量 1 会导致节点创建失败 |
+| 参数服务器 | `ENABLE_PARAMETER_SERVER=0`（默认关闭） | 现阶段继续使用固件内置电机表；后期参数拓扑方案成熟后再编译启用 |
 | USB 引脚 | **PA11=USB_DM / PA12=USB_DP** | H723 的 USB OTG HS 内嵌 PHY（FS 模式）固定引脚 |
 | USB 构建宏 | `PIO_FRAMEWORK_ARDUINO_ENABLE_CDC` + `PIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE` | H723 无独立 `USB_OTG_FS`，须以 FS 模式 + 内嵌 PHY 使用 |
 | IMU 通信 | **SPI2**（PB13=SCK / PC1=MOSI / PC2=MISO，7.5MHz） | 官方 TempCtrl 同源 |

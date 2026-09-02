@@ -130,6 +130,13 @@ void motor_control_set_motor_fault(motor_control_context_t *ctx,
 bool motor_control_set_authorization(motor_control_context_t *ctx,
                                      bool authorized);
 
+// 运行时重建电机表：先停机，再替换配置，最后重启。
+// 调用前必须确保所有电机已停止（authorized=false）。
+// 重建后会自动清除所有故障状态和命令历史。
+bool motor_control_reconfigure(motor_control_context_t *ctx,
+                               const motor_control_motor_config_t *motors,
+                               size_t motor_count);
+
 #ifdef __cplusplus
 }
 #endif

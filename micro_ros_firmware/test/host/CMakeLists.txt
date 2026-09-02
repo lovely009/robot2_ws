@@ -76,6 +76,14 @@ target_include_directories(test_supervisor_heartbeat PRIVATE
 
 add_test(NAME supervisor_heartbeat COMMAND test_supervisor_heartbeat)
 
+add_executable(test_microros_capacity
+  test_microros_capacity.cpp)
+
+target_include_directories(test_microros_capacity PRIVATE
+  ../../.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/include)
+
+add_test(NAME microros_capacity COMMAND test_microros_capacity)
+
 add_executable(test_w25q64_geometry
   test_w25q64_geometry.cpp
   ../../lib/w25q64/src/w25q64_geometry.c)

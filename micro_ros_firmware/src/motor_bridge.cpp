@@ -299,3 +299,237 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
 void motor_bridge_poll(void) {}
 
 #endif  // ENABLE_MOTOR_COMMAND_BRIDGE
+
+// ---------------------------------------------------------------------------
+// 参数回调：解析电机拓扑参数并触发电机表重建
+// ---------------------------------------------------------------------------
+#if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "motor_control.h"
+
+// 临时配置缓冲区（参数收集完成后一次性应用）
+static motor_control_motor_config_t g_pending_motors[MOTOR_CONTROL_MAX_MOTORS];
+static size_t g_pending_motor_count = 0;
+static bool g_config_pending = false;
+
+// 参数解析辅助函数
+static bool param_get_int(const Parameter *param, int64_t *value) {
+  if (param == NULL || value == NULL) return false;
+  if (param->value.type != RCLC_PARAMETER_INT) return false;
+  *value = param->value.integer_value;
+  return true;
+}
+
+static bool param_get_double(const Parameter *param, double *value) {
+  if (param == NULL || value == NULL) return false;
+  if (param->value.type != RCLC_PARAMETER_DOUBLE) return false;
+  *value = param->value.double_value;
+  return true;
+}
+
+static bool param_get_string(const Parameter *param, const char **value) {
+  if (param == NULL || value == NULL) return false;
+  if (param->value.type != RCLC_PARAMETER_NOT_SET &&
+      param->value.string_value.data != NULL) {
+    *value = param->value.string_value.data;
+    return true;
+  }
+  return false;
+}
+
+// 总线名到索引的映射（由参数 bus_mapping_{name} 动态设置）
+static uint8_t g_bus_name_to_index[8][16];  // 最多 8 条总线，每条总线名最长 15 字符
+static uint8_t g_bus_name_to_index_count = 0;
+
+static uint8_t find_bus_index(const char *bus_name) {
+  if (bus_name == NULL) return 0;
+  for (uint8_t i = 0; i < g_bus_name_to_index_count; ++i) {
+    if (strcmp((const char *)g_bus_name_to_index[i], bus_name) == 0) {
+      return i;
+    }
+  }
+  return 0;  // 默认返回总线 0
+}
+
+static void register_bus_mapping(const char *bus_name, uint8_t bus_index) {
+  if (bus_name == NULL || g_bus_name_to_index_count >= 8) return;
+  // 检查是否已存在
+  for (uint8_t i = 0; i < g_bus_name_to_index_count; ++i) {
+    if (strcmp((const char *)g_bus_name_to_index[i], bus_name) == 0) {
+      return;  // 已存在
+    }
+  }
+  // 注册新映射
+  size_t name_len = strlen(bus_name);
+  if (name_len >= 16) name_len = 15;
+  memcpy(g_bus_name_to_index[g_bus_name_to_index_count], bus_name, name_len);
+  g_bus_name_to_index[g_bus_name_to_index_count][name_len] = '\0';
+  g_bus_name_to_index_count++;
+}
+
+// 协议名到枚举的映射
+static motor_control_protocol_t parse_protocol(const char *protocol_str) {
+  if (protocol_str == NULL) return MOTOR_CONTROL_RP;
+  if (strcmp(protocol_str, "vaxor") == 0 || strcmp(protocol_str, "VAXOR") == 0) {
+    return MOTOR_CONTROL_VAXOR;
+  }
+  return MOTOR_CONTROL_RP;  // 默认 RP
+}
+
+bool motor_bridge_param_callback(const Parameter *old_param,
+                                 const Parameter *new_param,
+                                 void *context) {
+  (void)old_param;
+  (void)context;
+
+  if (new_param == NULL) return false;
+
+  // 处理 motor_count 参数
+  if (strcmp(new_param->name.data, "motor_count") == 0) {
+    int64_t count = 0;
+    if (param_get_int(new_param, &count) && count > 0 && count <= MOTOR_CONTROL_MAX_MOTORS) {
+      g_pending_motor_count = (size_t)count;
+      g_config_pending = true;
+      return true;
+    }
+    return false;
+  }
+
+  // 处理 bus_mapping_{name} 参数
+  if (strncmp(new_param->name.data, "bus_mapping_", 12) == 0) {
+    const char *bus_name = new_param->name.data + 12;
+    int64_t bus_index = 0;
+    if (param_get_int(new_param, &bus_index) && bus_index >= 0 && bus_index < 8) {
+      register_bus_mapping(bus_name, (uint8_t)bus_index);
+      return true;
+    }
+    return false;
+  }
+
+  // 处理电机参数 motor_{i}_{field}
+  if (strncmp(new_param->name.data, "motor_", 6) == 0) {
+    const char *rest = new_param->name.data + 6;
+
+    // 解析索引
+    char *end_ptr = NULL;
+    long index = strtol(rest, &end_ptr, 10);
+    if (end_ptr == rest || index < 0 || (size_t)index >= MOTOR_CONTROL_MAX_MOTORS) {
+      return false;
+    }
+
+    // 确保 pending 数组足够大
+    if ((size_t)index >= g_pending_motor_count) {
+      g_pending_motor_count = (size_t)index + 1;
+    }
+
+    motor_control_motor_config_t *motor = &g_pending_motors[index];
+    const char *field = end_ptr + 1;  // 跳过下划线
+
+    if (strcmp(field, "joint_name") == 0) {
+      const char *value = NULL;
+      if (param_get_string(new_param, &value)) {
+        size_t len = strlen(value);
+        if (len >= MOTOR_CONTROL_JOINT_NAME_CAPACITY) len = MOTOR_CONTROL_JOINT_NAME_CAPACITY - 1;
+        memcpy((void *)motor->joint_name, (const void *)value, len);
+        ((char *)motor->joint_name)[len] = '\0';
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "protocol") == 0) {
+      const char *value = NULL;
+      if (param_get_string(new_param, &value)) {
+        motor->protocol = parse_protocol(value);
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "id") == 0) {
+      int64_t value = 0;
+      if (param_get_int(new_param, &value) && value >= 1 && value <= 60) {
+        motor->id = (uint8_t)value;
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "bus") == 0) {
+      const char *value = NULL;
+      if (param_get_string(new_param, &value)) {
+        motor->bus_index = find_bus_index(value);
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "gear_ratio") == 0) {
+      double value = 0;
+      if (param_get_double(new_param, &value) && value > 0) {
+        motor->gear_ratio = value;
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "gear_efficiency") == 0) {
+      double value = 0;
+      if (param_get_double(new_param, &value) && value > 0 && value <= 1.0) {
+        motor->gear_efficiency = value;
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "torque_constant") == 0) {
+      double value = 0;
+      if (param_get_double(new_param, &value) && value >= 0) {
+        motor->torque_constant_nm_per_amp = value;
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "default_kp") == 0) {
+      double value = 0;
+      if (param_get_double(new_param, &value) && value >= 0) {
+        motor->default_kp = value;
+        g_config_pending = true;
+        return true;
+      }
+    } else if (strcmp(field, "default_kd") == 0) {
+      double value = 0;
+      if (param_get_double(new_param, &value) && value >= 0) {
+        motor->default_kd = value;
+        g_config_pending = true;
+        return true;
+      }
+    }
+  }
+
+  return false;  // 未知参数，拒绝
+}
+
+// 应用挂起的配置（由 ros_bridge_poll 调用）
+void motor_bridge_apply_pending_config(void) {
+  if (!g_config_pending || g_pending_motor_count == 0) return;
+
+  // 检查所有电机配置是否完整
+  for (size_t i = 0; i < g_pending_motor_count; ++i) {
+    motor_control_motor_config_t *motor = &g_pending_motors[i];
+    if (motor->joint_name[0] == '\0') return;  // 关节名为空，配置不完整
+    if (motor->id == 0) return;  // ID 无效
+  }
+
+  // 调用 control_task 重建电机表
+  if (control_task_reconfigure(g_pending_motors, g_pending_motor_count)) {
+    g_config_pending = false;
+    g_pending_motor_count = 0;
+  }
+}
+
+#else
+
+// 禁用电机桥接时的空实现
+bool motor_bridge_param_callback(const Parameter *old_param,
+                                 const Parameter *new_param,
+                                 void *context) {
+  (void)old_param;
+  (void)new_param;
+  (void)context;
+  return false;
+}
+
+void motor_bridge_apply_pending_config(void) {}
+
+#endif  // ENABLE_MOTOR_COMMAND_BRIDGE

@@ -348,3 +348,33 @@ bool control_task_fdcan_ready(void) {
   taskEXIT_CRITICAL();
   return ready;
 }
+
+// ---------------------------------------------------------------------------
+// 运行时重建电机表
+// ---------------------------------------------------------------------------
+bool control_task_reconfigure(const motor_control_motor_config_t *motors,
+                              size_t motor_count) {
+  if (motors == NULL || motor_count == 0U) {
+    return false;
+  }
+
+  // 1. 停止所有电机（取消授权）
+  control_task_set_authorization(false);
+
+  // 2. 等待足够时间让所有电机完成停止
+  //    VAXOR: 100ms soft stop + 300ms hard stop
+  //    RP: 无额外停止时间
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  // 3. 在临界区内重建电机表
+  taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
+  bool success = motor_control_reconfigure(&g_motor_control, motors, motor_count);
+  if (success) {
+    // 重置 mailbox 以匹配新电机表
+    control_mailbox_init(&g_control_mailbox, motors, motor_count);
+  }
+  taskEXIT_CRITICAL();
+
+  return success;
+}

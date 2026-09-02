@@ -99,6 +99,11 @@ cd micro_ros_firmware
   `extra_packages/can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs`。
   全新 clean bootstrap 仍有下载依赖/ROS 2 源的网络要求；常规验证不要运行
   `clean_microros`，使用缓存依赖执行 `pio run -t clean && pio run`。
+- **参数服务器需要 5 个 service 槽位**：必须保留 `microros.meta` 及
+  `board_microros_user_meta = microros.meta`；默认 libmicroros 仅配置 1 个，
+  会使节点实体创建失败。修改 meta 后才需要执行一次 `pio run -t clean_microros`。
+  当前 `ENABLE_PARAMETER_SERVER=0`，固件继续使用内置电机表；后期开启参数下发时
+  改为 `1`，无需再调整 service 容量。
 
 ## 结构（简）
 

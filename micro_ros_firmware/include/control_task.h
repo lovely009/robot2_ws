@@ -53,6 +53,12 @@ bool control_task_get_joint_state(size_t index, control_joint_state_t *out);
 uint32_t control_task_can_debug_snapshot(uint8_t bus_index,
                                          can_rx_frame_t *out);
 
+// 运行时重建电机表：接收新配置后停止所有电机，等待安全时间，然后重建。
+// 必须在 control task 已启动后调用；重建期间会临时禁用命令接收。
+// 返回 true 表示重建成功，false 表示参数无效或正在忙。
+bool control_task_reconfigure(const motor_control_motor_config_t *motors,
+                              size_t motor_count);
+
 // 调试计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
 extern volatile uint32_t g_control_motor_cmd_count;
 extern volatile uint32_t g_control_motor_found_count;

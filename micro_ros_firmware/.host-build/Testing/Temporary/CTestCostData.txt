@@ -1,0 +1,10 @@
+motor_protocol 6 0.000286294
+motor_control 6 0.00032626
+control_mailbox 6 0.000222494
+can_rx_ring 6 0.000210128
+imu_snapshot 6 0.000271251
+bmi088_transport_status 6 0.000244418
+supervisor_heartbeat 6 0.000198606
+microros_capacity 5 0.000372551
+w25q64_geometry 3 0.000370225
+---

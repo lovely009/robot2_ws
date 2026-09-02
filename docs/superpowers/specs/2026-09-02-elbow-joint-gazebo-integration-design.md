@@ -2,19 +2,23 @@
 
 ## 目标
 
-将 `ros2_ws/src/urdf` 中的四轴肘部关节模型接入现有 ROS 2 Humble + Gazebo
-Fortress 仿真栈，使其通过 `gz_ros2_control` 和现有 `motor_sim` 链路接受控制，
-同时保持当前 UR5e 仿真入口和行为不变。
+将 `ros2_ws/src/urdf` 中的四轴肘部关节模型完整迁入 `robot_arm_gazebo`，接入现有
+ROS 2 Humble + Gazebo Fortress 仿真栈，使其通过 `gz_ros2_control` 和现有
+`motor_sim` 链路接受控制，同时保持当前 UR5e 仿真入口和行为不变。迁移后删除独立
+的 `elbow_joint_description` 包，不保留两份模型资源。
 
 ## 范围
 
-- 保留 `elbow_joint_description/urdf/joint.urdf` 作为几何、质量、惯性、坐标和
-  机械关节限位的来源。
+- 将原始 `joint.urdf`、CSV、STL、导出日志及相关源资源迁入
+  `robot_arm_gazebo/vendor/elbow_joint_description/`；其中 `joint.urdf` 继续作为
+  几何、质量、惯性、坐标和机械关节限位的来源。
 - 为肘部模型新增仿真包装 Xacro、控制器配置、电机拓扑和独立 launch 入口。
 - 使用 Gazebo Fortress 6、`ros_gz_sim`、`gz_ros2_control` 和现有
   `robot_arm_gazebo` 电机仿真模块。
 - 不修改或替换现有 UR5e launch、UR5e 模型及其配置。
 - 不把仿真默认的 effort、velocity、阻尼或电机型号参数当作真机额定参数。
+- 删除 `ros2_ws/src/urdf` 下独立包的 CMake、package manifest、旧 Gazebo Classic
+  launch 和已迁移资源；所有运行时引用改为 `package://robot_arm_gazebo/...`。
 
 ## 方案选择
 
@@ -30,9 +34,10 @@ UR5e launch 的条件复杂度。
 
 ## 模块与接口
 
-### 描述模块
+### 模型资源
 
-`elbow_joint_description` 提供模型资源和仿真包装 Xacro。包装层负责：
+`robot_arm_gazebo/vendor/elbow_joint_description/` 保存来自 SolidWorks 导出的原始
+资源，`robot_arm_gazebo/urdf/elbow_joint.urdf.xacro` 提供仿真包装。包装层负责：
 
 - 通过 Xacro include 引入原始四轴机械描述，避免复制 link、joint 和 mesh 定义；
 - 将 `link0` 固定到仿真世界；
@@ -44,7 +49,12 @@ UR5e launch 的条件复杂度。
   `velocity=3.141592653589793 rad/s` 和 `damping=0.1 N·m·s/rad`。
 
 原始网格、惯性、关节原点、轴向和上下限不因仿真适配而改变。固定关节 `J1` 不进入
-控制关节清单。
+控制关节清单。所有 mesh URI 改为
+`package://robot_arm_gazebo/vendor/elbow_joint_description/meshes/<文件名>`。
+
+独立包现有的 `test/test_description.py` 中仍有价值的 XML、mesh 与关节语义检查迁入
+`robot_arm_gazebo/test/test_elbow_description.py`，而不是随旧包删除。旧包专属的
+`CMakeLists.txt`、`package.xml`、RViz/Classic Gazebo launch 和安装导出配置不迁移。
 
 ### 仿真集成模块
 
@@ -125,6 +135,7 @@ controller manager 就绪前保持 inactive，初始化完成后再恢复物理�
 - 电机总线存在、ID 唯一且为 1～4；
 - 新 launch 静态加载成功，现有 UR5e launch 测试不回归；
 - 目标包构建和 `colcon test` 通过。
+- 工作区不再包含 `elbow_joint_description` 包，且源码中不存在对该包名的运行时引用。
 
 集成验收使用 Gazebo Fortress：启动独立肘部 launch 后，模型和全部 STL 正常显示，
 `1J`～`4J` 出现在 controller manager 与 `/joint_states` 中，发送非零控制命令时至少

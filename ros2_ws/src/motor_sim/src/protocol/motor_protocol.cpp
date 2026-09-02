@@ -1,7 +1,6 @@
 #include "motor_sim/protocol/motor_protocol.hpp"
 
 #include "motor_sim/protocol/cerb_protocol.hpp"
-#include "motor_sim/protocol/rp_protocol.hpp"
 #include "motor_sim/protocol/vaxor_protocol.hpp"
 
 #include <algorithm>
@@ -82,9 +81,6 @@ constexpr uint8_t kVaxorSimulatedMotorType = 0x01U;
 }  // namespace
 
 std::unique_ptr<MotorProtocol> make_motor_protocol(const std::string_view name) {
-  if (name == "rp") {
-    return std::make_unique<RpProtocol>();
-  }
   if (name == "vaxor") {
     return std::make_unique<VaxorProtocol>();
   }

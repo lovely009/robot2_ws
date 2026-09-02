@@ -56,7 +56,6 @@ private:
   std::unordered_map<std::string, Factory> factories_;
 };
 
-inline constexpr const char *kRpMotorType = "rp";
 inline constexpr const char *kVaxorType = "vaxor";
 
 } // namespace motor_drive

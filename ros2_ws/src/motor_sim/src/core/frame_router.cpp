@@ -14,11 +14,7 @@ std::vector<uint8_t> payload_bytes(const protocol::CanFrame &frame) {
 
 bool is_control_frame(const protocol::CanFrame &frame,
                       const MotorConfig &motor) {
-  if (motor.protocol == "rp") {
-    return frame.id == protocol::kRpEnableId && !frame.fd && frame.size == 8U;
-  }
-  // CERB 的使能位随 MIT 命令帧携带，没有独立控制帧；
-  // 其余协议按 Vaxor 控制帧识别。
+  // RP 已弃用；Vaxor 的独立控制帧是当前唯一支持的控制帧。
   if (motor.protocol == "cerb") {
     return false;
   }
@@ -110,9 +106,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
   for (const auto &item : pending) {
     // 锁存后只接受显式失能，用于满足 reset_fault 的全轴停用前置条件；
     // 任何带使能位的帧（整臂使能、单轴恢复、运动命令）都不能清除或绕过故障。
-    // 各协议的失能构造不同：RP/Vaxor 走独立控制帧（item.control 且 enabled==false）；
-    // CERB 没有独立控制帧，失能随 MIT 命令帧的使能位携带（非控制帧但 enabled==false）。
-    // 不能简单以 enabled==false 放行，否则 RP 运动帧（非控制、enabled 恒假）会被误收。
+    // 现阶段仅 Vaxor 与 CERB 仍受支持：Vaxor 走独立控制帧，CERB 随 MIT 命令帧携带使能位。
     const bool is_disable = !item.command.enabled &&
                             (item.control ||
                              config_.motors[item.index].protocol == "cerb");
@@ -210,10 +204,7 @@ protocol::MotorCommand FrameRouter::to_joint_command(
     const std::size_t index,
     const protocol::MotorCommand &wire_command) const {
   auto command = wire_command;
-  if (config_.motors[index].protocol == "rp") {
-    command.use_nominal_gains = true;
-    return command;
-  }
+  // RP 已弃用，当前仅保留 Vaxor/CERB。
   // CERB MIT 的位置、速度、增益与前馈力矩都是减速器输出轴侧物理量，
   // 与关节侧一致，直接透传，不做传动换算。
   if (config_.motors[index].protocol == "cerb") {

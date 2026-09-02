@@ -1,6 +1,6 @@
 // 控制业务任务接口（官方 CtrBoard-H7_FDCAN 例程移植）。
-// 当前承载三路 FDCAN 初始化、100 Hz 电机控制周期与反馈快照；固件只内置
-// 两个默认测试电机（RP + vaxor），完整拓扑后续通过参数服务下发。
+// 当前承载三路 FDCAN 初始化、100 Hz 电机控制周期与反馈快照；固件固定内置
+// 两个默认测试 vaxor 电机，不维护运行时动态拓扑配置。
 
 #ifndef CONTROL_TASK_H
 #define CONTROL_TASK_H

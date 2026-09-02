@@ -29,9 +29,9 @@ cd micro_ros_firmware
   `ENABLE_CAN1_DEBUG_BRIDGE` 宏控制（`platformio.ini` 默认开启，类型
   `can_bridge_msgs/msg/CANFrame`）。
 - JointState 话题 `/joint_commands`（`sensor_msgs/msg/JointState`）由
-  `ENABLE_MOTOR_COMMAND_BRIDGE` 控制（默认开启）；固件只内置
+  `ENABLE_MOTOR_COMMAND_BRIDGE` 控制（默认开启）；固件固定内置
   `left_shoulder_yaw_joint`（RP）与 `left_wrist_yaw_joint`（vaxor，节点
-  ID=2，当前 CAN1 实际接入）两个默认测试电机，完整拓扑待参数服务。
+  ID=2，当前 CAN1 实际接入）两个默认测试电机，不支持动态拓扑配置。
 - `micro_ros/motor_enable` 是显式运动授权：`false` 清空 pending 命令并失能；
   断连重连后必须先发 `true`、再发新命令，禁止重放旧命令。
 - vaxor 模式由 JointState 字段严格选择：恰好只发 `position`=位置、恰好只发

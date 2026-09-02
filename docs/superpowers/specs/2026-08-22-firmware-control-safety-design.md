@@ -55,7 +55,7 @@ micro-ROS、BMI088 和三路 FDCAN。当前实现可以构建并完成基本联�
 
 ### 3.2 本轮不包含
 
-- 完整电机拓扑参数服务；
+- 完整电机拓扑动态配置；
 - 完整 diagnostics topic 或自定义诊断消息；
 - `dev`/`prod` 两套 PlatformIO 环境；
 - rclc executor 或 Agent 的完整 host 仿真；
@@ -348,7 +348,7 @@ micro-ROS 的 USB CDC 混入文本日志。
 - 新增 host-side 测试入口和测试文件；
 - 更新 `micro_ros_firmware/README.md` 和 `AGENTS.md`。
 
-不修改 `ros2_ws` 电机栈，不在本轮实现完整拓扑参数服务。
+不修改 `ros2_ws` 电机栈，不在本轮实现完整拓扑动态配置。
 
 ## 13. 实施顺序
 

@@ -5,7 +5,7 @@
 参考 `CtrBoard-H7_W25Q64` 例程，将 W25Q64JV 的 OCTOSPI2 Quad 驱动移入
 `micro_ros_firmware/lib/w25q64`，保持现有 BMI088、FDCAN、USB 和 WS2812 功能，
 并完成固件编译验证。此次只建立 Flash 底层驱动，不实现参数记录格式、磨损均衡或
-参数服务器持久化。
+持久化配置存储。
 
 ## 硬件映射
 

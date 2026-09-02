@@ -4,9 +4,9 @@
 #include <cstring>
 
 static const motor_control_motor_config_t kMotors[] = {
-    {"joint_1", MOTOR_CONTROL_RP, 1, 0,
-     1.0, 1.0, 0.0, 30.0, 1.0},
-    {"joint_2", MOTOR_CONTROL_VAXOR, 2, 0,
+    {"joint_1", MOTOR_CONTROL_VAXOR, 2, 0,
+     50.0, 0.65, 0.042, 0.008, 1.0},
+    {"joint_2", MOTOR_CONTROL_VAXOR, 3, 0,
      50.0, 0.65, 0.042, 0.008, 1.0},
 };
 

@@ -27,162 +27,6 @@ static void latch_all_motors(motor_control_context_t *ctx) {
   }
 }
 
-static void mark_rp_bus_disable(motor_control_context_t *ctx,
-                                uint8_t bus_index) {
-  if (bus_index >= MOTOR_CONTROL_MAX_BUSES) {
-    return;
-  }
-  for (size_t index = 0; index < ctx->motor_count; ++index) {
-    if (ctx->motors[index].protocol == MOTOR_CONTROL_RP &&
-        ctx->motors[index].bus_index == bus_index) {
-      ctx->rp_bus_disabled[bus_index] = true;
-      return;
-    }
-  }
-}
-
-static void mark_all_rp_buses_disabled(motor_control_context_t *ctx) {
-  for (size_t index = 0; index < ctx->motor_count; ++index) {
-    if (ctx->motors[index].protocol == MOTOR_CONTROL_RP) {
-      mark_rp_bus_disable(ctx, ctx->motors[index].bus_index);
-    }
-  }
-}
-
-static void pack_rp_neutral(uint8_t out[8]) {
-  const motor_protocol_joint_command_t neutral = {0.0, 0.0, 0.0, 0.0, 0.0};
-  motor_protocol_pack_rp_slot(&neutral, out);
-}
-
-static void pack_rp_runtime(const motor_control_motor_config_t *motor,
-                            const motor_control_motor_runtime_t *runtime,
-                            uint8_t out[8]) {
-  if (runtime->state == MOTOR_CONTROL_ACTIVE) {
-    motor_protocol_pack_rp_slot(&runtime->command, out);
-    return;
-  }
-  if (runtime->state == MOTOR_CONTROL_SOFT_STOP) {
-    const motor_protocol_joint_command_t damping = {
-        0.0, 0.0, 0.0, motor->default_kd, 0.0};
-    motor_protocol_pack_rp_slot(&damping, out);
-    return;
-  }
-  pack_rp_neutral(out);
-}
-
-static bool is_first_rp_motor_on_bus(const motor_control_context_t *ctx,
-                                     size_t motor_index) {
-  uint8_t bus_index = ctx->motors[motor_index].bus_index;
-  for (size_t index = 0; index < motor_index; ++index) {
-    if (ctx->motors[index].protocol == MOTOR_CONTROL_RP &&
-        ctx->motors[index].bus_index == bus_index) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static void fill_rp_control_action(motor_control_tx_action_t *action,
-                                   uint8_t bus_index, bool enabled) {
-  memset(action, 0, sizeof(*action));
-  action->bus_index = bus_index;
-  action->can_id = MOTOR_PROTOCOL_RP_ENABLE_ID;
-  action->size = 8U;
-  action->is_fd = false;
-  action->is_extended = false;
-  action->data[0] = enabled ? 1U : 0U;
-}
-
-static void fill_rp_command_action(const motor_control_context_t *ctx,
-                                   uint8_t bus_index,
-                                   motor_control_tx_action_t *action) {
-  memset(action, 0, sizeof(*action));
-  action->bus_index = bus_index;
-  action->can_id = MOTOR_PROTOCOL_RP_COMMAND_ID;
-  action->size = 64U;
-  action->is_fd = true;
-  action->is_extended = false;
-  for (size_t slot = 0; slot < MOTOR_PROTOCOL_RP_BROADCAST_SLOTS; ++slot) {
-    pack_rp_neutral(action->data + slot * 8U);
-  }
-
-  for (size_t peer = 0; peer < ctx->motor_count; ++peer) {
-    const motor_control_motor_config_t *peer_motor = &ctx->motors[peer];
-    if (peer_motor->protocol != MOTOR_CONTROL_RP ||
-        peer_motor->bus_index != bus_index || peer_motor->id == 0U ||
-        peer_motor->id > MOTOR_PROTOCOL_RP_BROADCAST_SLOTS) {
-      continue;
-    }
-    pack_rp_runtime(peer_motor, &ctx->runtime[peer],
-                    action->data + (peer_motor->id - 1U) * 8U);
-  }
-}
-
-static bool rp_bus_has_active_command(const motor_control_context_t *ctx,
-                                      uint8_t bus_index) {
-  for (size_t index = 0; index < ctx->motor_count; ++index) {
-    if (ctx->motors[index].protocol == MOTOR_CONTROL_RP &&
-        ctx->motors[index].bus_index == bus_index &&
-        ctx->runtime[index].state == MOTOR_CONTROL_ACTIVE) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static size_t append_rp_actions(motor_control_context_t *ctx,
-                                motor_control_tx_action_t *actions,
-                                size_t action_capacity) {
-  size_t action_count = 0U;
-  if (actions == NULL) {
-    return 0U;
-  }
-
-  for (size_t index = 0; index < ctx->motor_count; ++index) {
-    const motor_control_motor_config_t *motor = &ctx->motors[index];
-    if (motor->protocol != MOTOR_CONTROL_RP ||
-        !is_first_rp_motor_on_bus(ctx, index)) {
-      continue;
-    }
-    bool bus_fault_active =
-        motor->bus_index < MOTOR_CONTROL_MAX_BUSES &&
-        ctx->bus_fault[motor->bus_index];
-    bool bus_disabled = motor->bus_index < MOTOR_CONTROL_MAX_BUSES &&
-                        ctx->rp_bus_disabled[motor->bus_index];
-    if (!ctx->authorized || bus_fault_active) {
-      bus_disabled = true;
-      if (motor->bus_index < MOTOR_CONTROL_MAX_BUSES) {
-        ctx->rp_bus_disabled[motor->bus_index] = true;
-      }
-    }
-
-    if (bus_disabled) {
-      bool recovery_ready =
-          ctx->authorized && !bus_fault_active &&
-          rp_bus_has_active_command(ctx, motor->bus_index);
-      if (recovery_ready && action_capacity - action_count >= 2U) {
-        fill_rp_control_action(&actions[action_count++], motor->bus_index,
-                               true);
-        fill_rp_command_action(ctx, motor->bus_index,
-                               &actions[action_count++]);
-        if (motor->bus_index < MOTOR_CONTROL_MAX_BUSES) {
-          ctx->rp_bus_disabled[motor->bus_index] = false;
-        }
-      } else if (action_count < action_capacity) {
-        fill_rp_control_action(&actions[action_count++], motor->bus_index,
-                               false);
-      }
-      continue;
-    }
-
-    if (action_count < action_capacity) {
-      fill_rp_command_action(ctx, motor->bus_index,
-                             &actions[action_count++]);
-    }
-  }
-  return action_count;
-}
-
 static void fill_vaxor_control_action(motor_control_tx_action_t *action,
                                        const motor_control_motor_config_t *motor,
                                        bool run, uint8_t mode) {
@@ -373,16 +217,12 @@ bool motor_control_accept_feedback(motor_control_context_t *ctx,
 
     motor_protocol_joint_state_t decoded = {0};
     bool matched = false;
-    if (motor->protocol == MOTOR_CONTROL_RP) {
-      matched = frame->can_id == motor->id && frame->size == 12U &&
-                motor_protocol_unpack_rp_state(frame->data, frame->size,
-                                               &decoded);
-    } else if ((frame->can_id == motor_protocol_wrist_reply_id(motor->id) &&
-                frame->size == 12U) ||
-               (frame->can_id == motor_protocol_wrist_status_id(motor->id) &&
-                frame->size == 20U)) {
-      matched = motor_protocol_unpack_wrist_feedback(
-          frame->data, frame->size, &decoded);
+    if ((frame->can_id == motor_protocol_wrist_reply_id(motor->id) &&
+         frame->size == 12U) ||
+        (frame->can_id == motor_protocol_wrist_status_id(motor->id) &&
+         frame->size == 20U)) {
+      matched = motor_protocol_unpack_wrist_feedback(frame->data, frame->size,
+                                                    &decoded);
       decoded.position /= motor->gear_ratio;
       decoded.velocity /= motor->gear_ratio;
       decoded.effort *= motor->torque_constant_nm_per_amp *
@@ -449,12 +289,13 @@ size_t motor_control_step(motor_control_context_t *ctx, uint32_t now_ms,
       runtime->state = MOTOR_CONTROL_ACTIVE;
     }
   }
-  size_t action_count = append_rp_actions(ctx, actions, action_capacity);
-  if (action_count >= action_capacity || actions == NULL) {
-    return action_count;
+
+  size_t action_count = 0U;
+  if (actions == NULL) {
+    return 0U;
   }
-  action_count += append_vaxor_actions(
-      ctx, actions + action_count, action_capacity - action_count);
+
+  action_count += append_vaxor_actions(ctx, actions, action_capacity);
   return action_count;
 }
 
@@ -475,7 +316,6 @@ void motor_control_set_agent_connected(motor_control_context_t *ctx,
   if (disconnected_after_connection) {
     ctx->authorized = false;
     latch_all_motors(ctx);
-    mark_all_rp_buses_disabled(ctx);
   }
 }
 
@@ -488,7 +328,6 @@ void motor_control_set_bus_fault(motor_control_context_t *ctx,
   if (!active) {
     return;
   }
-  mark_rp_bus_disable(ctx, bus_index);
   for (size_t index = 0; index < ctx->motor_count; ++index) {
     if (ctx->motors[index].bus_index != bus_index) {
       continue;
@@ -524,7 +363,6 @@ bool motor_control_set_authorization(motor_control_context_t *ctx,
   if (!authorized) {
     ctx->authorized = false;
     latch_all_motors(ctx);
-    mark_all_rp_buses_disabled(ctx);
     return true;
   }
   if (ctx->agent_ever_connected && !ctx->agent_connected) {

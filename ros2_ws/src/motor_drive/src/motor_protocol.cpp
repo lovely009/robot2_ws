@@ -57,71 +57,6 @@ double optional_positive_parameter(const MotorConfig &motor,
   return value;
 }
 
-class RpMotorProtocol final : public MotorProtocol {
-public:
-  void validate(const std::vector<MotorConfig> &motors,
-                const MotorIndexList &indices) const override {
-    // RP 的 1..8 限制来自一条 64 Byte 广播帧只有 8 个 MIT 槽位。
-    // 这个限制只作用于“同一 CAN 总线上的 RP 协议组”，不是整机电机数限制。
-    if (indices.empty() || indices.size() > protocol::kRpBroadcastSlots) {
-      throw std::invalid_argument("RP protocol supports 1..8 configured motors per CAN bus");
-    }
-    std::unordered_set<unsigned> ids;
-    for (const auto index : indices) {
-      const auto &motor = motors.at(index);
-      const auto id = motor.id;
-      if (id < 1U || id > protocol::kRpBroadcastSlots || !ids.insert(id).second) {
-        throw std::invalid_argument(
-            "RP IDs on one CAN bus must be unique values in [1, 8]");
-      }
-    }
-  }
-
-  std::vector<CanFrame>
-  make_enable_frames(const std::vector<MotorConfig> &, const MotorIndexList &,
-                     const bool enabled) const override {
-    const std::array<uint8_t, 8> payload{
-        {static_cast<uint8_t>(enabled), 0U, 0U, 0U, 0U, 0U, 0U, 0U}};
-    return {make_frame(protocol::kRpEnableId, payload.data(), payload.size(), false)};
-  }
-
-  std::vector<CanFrame>
-  make_command_frames(const std::vector<MotorConfig> &motors,
-                      const MotorIndexList &indices,
-                      const std::vector<protocol::JointCommand> &commands) const override {
-    std::array<uint8_t, 64> payload{};
-    // RP 命令固定发送完整 8 槽广播。未配置的槽位填中性命令，已配置电机则按
-    // motor.id - 1 放进自己的协议槽位，因此 YAML 顺序不会改变 RP ID 映射。
-    const auto neutral = protocol::pack_rp_slot({});
-    for (std::size_t slot = 0; slot < protocol::kRpBroadcastSlots; ++slot) {
-      std::copy(neutral.begin(), neutral.end(), payload.begin() + slot * 8U);
-    }
-    for (const auto index : indices) {
-      const auto packed = protocol::pack_rp_slot(commands.at(index));
-      const auto slot = motors.at(index).id - 1U;
-      std::copy(packed.begin(), packed.end(), payload.begin() + slot * 8U);
-    }
-    return {make_frame(protocol::kRpCommandId, payload.data(), payload.size(), true)};
-  }
-
-  bool decode_feedback(const std::vector<MotorConfig> &motors,
-                       const MotorIndexList &indices, const CanFrame &frame,
-                       std::size_t &motor_index,
-                       protocol::JointState &state) const override {
-    if (frame.is_extended || frame.size != 12U) {
-      return false;
-    }
-    for (const auto index : indices) {
-      if (frame.id == motors.at(index).id) {
-        state = protocol::unpack_rp_state(frame.data.data(), frame.size);
-        motor_index = index;
-        return true;
-      }
-    }
-    return false;
-  }
-};
-
 class VaxorProtocol final : public MotorProtocol {
 public:
   void validate(const std::vector<MotorConfig> &motors,
@@ -251,8 +186,6 @@ MotorProtocolRegistry::create(const std::string &type) const {
 MotorProtocolRegistry MotorProtocolRegistry::with_builtin_protocols() {
   MotorProtocolRegistry registry;
   // 内置类型只在这里注册。以后增加新电机协议时，不需要修改 MotorDriver。
-  registry.register_factory(kRpMotorType,
-                            [] { return std::make_unique<RpMotorProtocol>(); });
   registry.register_factory(kVaxorType,
                             [] { return std::make_unique<VaxorProtocol>(); });
   return registry;

@@ -14,9 +14,9 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 `can_bridge_msgs/CANFrame` 接入 ROS 调试话题。
 电机协议编解码（RP + 25/30mm）已从 `ros2_ws/src/motor_drive` 移植为
 `lib/motor_protocol`（同一文件内按 RP / vaxor 两部分分区），字节布局与
-原实现一致。固件暂不维护完整拓扑：`control_task` 内置两个默认测试电机
-（RP + vaxor），订阅 `/joint_commands`（`sensor_msgs/msg/JointState`）
-直接下发；完整拓扑后续通过参数服务下发，不在此扩展。
+原实现一致。当前固件不维护动态拓扑配置，`control_task` 固定内置两个默认测试电机
+（RP + vaxor），订阅 `/joint_commands`（`sensor_msgs/msg/JointState`）直接下发；
+完整拓扑和参数化配置暂不在本工程中实现，保持为静态默认表。
 
 ## 关键决策
 
@@ -36,9 +36,9 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 | CANFD 通信 | **FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13**，FD + BRS，RX/TX 元素 64B | ISR 写静态 RX 队列；容量 CAN1=32、CAN2/3=8，队满丢最旧帧 |
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
-| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `-DHAL_OSPI_MODULE_ENABLED` 与 `-DENABLE_W25Q64=1` 默认启用；启动只作无损探测 |
-| CAN1 调试桥 | `-DENABLE_CAN1_DEBUG_BRIDGE=1`（默认开启） | 通过 `micro_ros/can1/send`、`micro_ros/can1/receive` 调试 FDCAN1；关掉则不在 ROS 侧建实体 |
-| JointState 桥 | `-DENABLE_MOTOR_COMMAND_BRIDGE=1`（默认开启） | 订阅 `/joint_commands`（`sensor_msgs/msg/JointState`）驱动默认测试电机（RP + vaxor） |
+| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `-DHAL_OSPI_MODULE_ENABLED` 仍保留；默认关闭 `-DENABLE_W25Q64=0`，仅在需要时再启用启动探测 |
+| CAN1 调试桥 | `-DENABLE_CAN1_DEBUG_BRIDGE=0`（默认关闭） | 通过 `micro_ros/can1/send`、`micro_ros/can1/receive` 调试 FDCAN1；开启时再在 ROS 侧建实体 |
+| JointState 桥 | `-DENABLE_MOTOR_COMMAND_BRIDGE=0`（默认关闭） | 默认不订阅 `/joint_commands`，只在需要时再启用默认测试电机桥接 |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
 ## 时钟
@@ -171,13 +171,14 @@ cd micro_ros_firmware
 
 ### W25Q64 启动探测
 
-默认构建启用 `HAL_OSPI_MODULE_ENABLED` 和 `ENABLE_W25Q64=1`。`start_task` 在创建
-其它任务前仅执行 `w25q64_init()` 和一次 JEDEC ID 读取；前者包含 OSPI 初始化、
-Flash reset 和就绪轮询，后者应返回 `0xEF4017`。该路径不会擦除、写入或进入
-memory-mapped 模式，初始化/ID 失败同样继续启动所有任务。
+默认构建仍保留 `HAL_OSPI_MODULE_ENABLED`，但关闭 `ENABLE_W25Q64=0` 以保持最简
+固件。需要时再用 `-DENABLE_W25Q64=1`；`start_task` 在创建其它任务前仅执行
+`w25q64_init()` 和一次 JEDEC ID 读取；前者包含 OSPI 初始化、Flash reset 和就绪
+轮询，后者应返回 `0xEF4017`。该路径不会擦除、写入或进入 memory-mapped 模式，
+初始化/ID 失败同样继续启动所有任务。
 
 已启用时，GDB 可读取 `g_w25q64_init_status`（成功为 `W25Q64_OK`）和
-`g_w25q64_jedec_id`（预期 `0xEF4017`）。关闭时用 `-DENABLE_W25Q64=0`，入口不
+`g_w25q64_jedec_id`（预期 `0xEF4017`）。关闭时使用 `-DENABLE_W25Q64=0`，入口不
 包含、不声明也不调用驱动。后续运行期读写必须由单一任务/模块所有，不能与启动
 探测或其它任务并发操作同一 OSPI 句柄。
 
@@ -203,6 +204,8 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   授权恢复不会重放旧命令，必须在 `true` 之后发送一条新的 `/joint_commands`
   命令，RP 总线才会原子执行 enable + 新广播帧，vaxor 才会重新 run
 - `micro_ros/JointState`：发布 `sensor_msgs/msg/JointState`（默认测试电机反馈）
+
+工程不提供 ROS 参数化热更新；拓扑和关节表固定在固件中，保持默认两电机测试配置。
 
 宏 `ENABLE_CAN1_DEBUG_BRIDGE=1` 开启时，额外提供 FDCAN1 调试桥
 （`can_bridge_msgs/msg/CANFrame`，与 `micro_ros_agent` 同一定义）：
@@ -292,7 +295,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   开启后总线无对端 ACK 时 TX FIFO 会积压（`fdcanx_send_data` 返回失败）。
 - `control_task` 已接 JointState；默认仅 `left_shoulder_yaw_joint`（RP）与
   `left_wrist_yaw_joint`（vaxor，节点 ID=2，当前 CAN1 实际接入）两台测试
-  电机（`sensor_msgs/JointState`），完整拓扑待参数服务。
+  电机（`sensor_msgs/JointState`），完整拓扑待后续配置扩展。
 - `lib/motor_protocol` 是协议编解码库（RP/25-30mm），由 `control_task`
   调用 pack/unpack 生成/解析 CAN 帧；当前 CAN1 已接入一台 vaxor。
 - CAN1 调试桥 RX/TX 元素已扩到 64 字节，可承载 RP 64B 广播与 vaxor 12/20B

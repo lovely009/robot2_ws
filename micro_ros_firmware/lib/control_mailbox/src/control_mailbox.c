@@ -13,6 +13,30 @@ static bool is_supported_frame_size(uint8_t size) {
          size == 24U || size == 32U || size == 48U || size == 64U;
 }
 
+static bool is_agent_connected_allowed(const control_mailbox_t *mailbox) {
+  return mailbox == NULL || !mailbox->agent_state_seen ||
+         mailbox->agent_connected_requested;
+}
+
+static void drop_live_mailbox_state(control_mailbox_t *mailbox) {
+  if (mailbox == NULL) {
+    return;
+  }
+  clear_commands(mailbox);
+  mailbox->debug_pending = false;
+}
+
+static bool is_valid_command(const motor_control_command_t *command) {
+  return command != NULL && command->joint_name[0] != '\0' &&
+         memchr(command->joint_name, '\0', sizeof(command->joint_name)) != NULL;
+}
+
+static bool is_valid_debug_frame(const motor_control_tx_action_t *frame) {
+  return frame != NULL && frame->bus_index < MOTOR_CONTROL_MAX_BUSES &&
+         is_supported_frame_size(frame->size) &&
+         (!frame->is_fd && frame->size <= 8U || frame->is_fd);
+}
+
 void control_mailbox_init(control_mailbox_t *mailbox,
                           const motor_control_motor_config_t *motors,
                           size_t motor_count) {
@@ -46,16 +70,13 @@ void control_mailbox_init(control_mailbox_t *mailbox,
 bool control_mailbox_submit_command(control_mailbox_t *mailbox,
                                     const motor_control_command_t *command,
                                     uint32_t received_ms) {
-  if (mailbox == NULL || command == NULL || command->joint_name[0] == '\0' ||
-      memchr(command->joint_name, '\0', sizeof(command->joint_name)) == NULL) {
+  if (mailbox == NULL || !is_valid_command(command)) {
     if (mailbox != NULL) {
       ++mailbox->invalid_command_count;
     }
     return false;
   }
-  if (!mailbox->authorization_requested ||
-      (mailbox->agent_state_seen &&
-       !mailbox->agent_connected_requested)) {
+  if (!mailbox->authorization_requested || !is_agent_connected_allowed(mailbox)) {
     return false;
   }
 
@@ -123,8 +144,7 @@ void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
   mailbox->agent_state_pending = true;
   if (!connected) {
     mailbox->agent_disconnect_edge = true;
-    clear_commands(mailbox);
-    mailbox->debug_pending = false;
+    drop_live_mailbox_state(mailbox);
     if (disconnected_after_connection) {
       mailbox->authorization_requested = false;
     }
@@ -156,16 +176,13 @@ bool control_mailbox_take_events(control_mailbox_t *mailbox,
 
 bool control_mailbox_submit_debug_frame(
     control_mailbox_t *mailbox, const motor_control_tx_action_t *frame) {
-  if (mailbox == NULL || frame == NULL ||
-      frame->bus_index >= MOTOR_CONTROL_MAX_BUSES ||
-      !is_supported_frame_size(frame->size) ||
-      (!frame->is_fd && frame->size > 8U)) {
+  if (mailbox == NULL || !is_valid_debug_frame(frame)) {
     if (mailbox != NULL) {
       ++mailbox->invalid_debug_frame_count;
     }
     return false;
   }
-  if (mailbox->agent_state_seen && !mailbox->agent_connected_requested) {
+  if (!is_agent_connected_allowed(mailbox)) {
     return false;
   }
   if (mailbox->debug_pending) {

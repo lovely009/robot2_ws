@@ -1,4 +1,4 @@
-// 固定容量电机控制内核：不依赖 HAL、RTOS、Arduino 或 ROS。
+// 固定容量电机控制内核：当前仅支持 vaxor 25/30mm 协议。
 
 #ifndef MOTOR_CONTROL_H
 #define MOTOR_CONTROL_H
@@ -19,7 +19,6 @@ extern "C" {
 #define MOTOR_CONTROL_JOINT_NAME_CAPACITY 32U
 
 typedef enum {
-  MOTOR_CONTROL_RP,
   MOTOR_CONTROL_VAXOR,
 } motor_control_protocol_t;
 
@@ -96,7 +95,6 @@ typedef struct motor_control_context {
   motor_control_joint_state_t joint_states[MOTOR_CONTROL_MAX_MOTORS];
   bool joint_state_valid[MOTOR_CONTROL_MAX_MOTORS];
   bool bus_fault[MOTOR_CONTROL_MAX_BUSES];
-  bool rp_bus_disabled[MOTOR_CONTROL_MAX_BUSES];
   size_t motor_count;
   uint32_t valid_command_count;
   uint32_t invalid_command_count;

@@ -1,45 +1,28 @@
-// 电机协议编解码（从 ros2_ws/src/motor_drive/src/protocol.cpp 移植）。
-// 文件内分两部分：RP 协议 / vaxor（25/30mm）协议；公共定点映射放最前。
-// 逐字节保留原实现，异常改为返回值。
+// 电机协议编解码（vaxor 25/30mm 唯一支持协议）。
+// RP 协议已弃用，固件库中不再保留 RP 编解码实现。
 
 #include "motor_protocol.h"
 
 #include <math.h>
 
-// ---------------------------------------------------------------------------
-// 公共：限幅与小端读写
-// ---------------------------------------------------------------------------
 static int64_t clamp_i64(int64_t value, int64_t low, int64_t high) {
-  if (value < low) {
-    return low;
-  }
-  if (value > high) {
-    return high;
-  }
+  if (value < low) return low;
+  if (value > high) return high;
   return value;
 }
 
 static int32_t clamp_i32(int32_t value, int32_t low, int32_t high) {
-  if (value < low) {
-    return low;
-  }
-  if (value > high) {
-    return high;
-  }
+  if (value < low) return low;
+  if (value > high) return high;
   return value;
 }
 
 static double clamp_double(double value, double low, double high) {
-  if (value < low) {
-    return low;
-  }
-  if (value > high) {
-    return high;
-  }
+  if (value < low) return low;
+  if (value > high) return high;
   return value;
 }
 
-// vaxor 协议使用小端序：低有效字节先放到低地址
 static void write_le(uint8_t *destination, uint64_t value, size_t width) {
   for (size_t index = 0; index < width; ++index) {
     destination[index] = (uint8_t)(value >> (8U * index));
@@ -54,9 +37,6 @@ static uint32_t read_le(const uint8_t *data, size_t width) {
   return value;
 }
 
-// ---------------------------------------------------------------------------
-// 公共：RP MIT 定点映射
-// ---------------------------------------------------------------------------
 uint32_t motor_protocol_float_to_uint(double value, double low, double high,
                                       unsigned bits) {
   if (!(high > low) || bits == 0U || bits > 31U) {
@@ -76,94 +56,7 @@ double motor_protocol_uint_to_float(uint32_t value, double low, double high,
   return value * (high - low) / maximum + low;
 }
 
-// ---------------------------------------------------------------------------
-// RP 协议：8 Byte MIT 槽位 / 12 Byte 状态
-// ---------------------------------------------------------------------------
-void motor_protocol_pack_rp_slot(const motor_protocol_joint_command_t *command,
-                                 uint8_t out[8]) {
-  // RP MIT 8 Byte 槽：P(16) + V(12) + Kp(12) + Kd(12) + Tau(12)，跨字节拼接
-  uint32_t position =
-      motor_protocol_float_to_uint(command->position, -10.0, 10.0, 16);
-  uint32_t velocity =
-      motor_protocol_float_to_uint(command->velocity, -60.0, 60.0, 12);
-  uint32_t kp = motor_protocol_float_to_uint(command->kp, 0.0, 500.0, 12);
-  uint32_t kd = motor_protocol_float_to_uint(command->kd, 0.0, 10.0, 12);
-  uint32_t torque =
-      motor_protocol_float_to_uint(command->feedforward, -60.0, 60.0, 12);
-  out[0] = (uint8_t)(position >> 8U);
-  out[1] = (uint8_t)position;
-  out[2] = (uint8_t)(velocity >> 4U);
-  out[3] = (uint8_t)((velocity << 4U) | (kp >> 8U));
-  out[4] = (uint8_t)kp;
-  out[5] = (uint8_t)(kd >> 4U);
-  out[6] = (uint8_t)((kd << 4U) | (torque >> 8U));
-  out[7] = (uint8_t)torque;
-}
-
-bool motor_protocol_unpack_rp_slot(const uint8_t *data, size_t size,
-                                   motor_protocol_joint_command_t *command) {
-  if (data == NULL || size != 8U || command == NULL) {
-    return false;
-  }
-  uint32_t position = ((uint32_t)data[0] << 8U) | data[1];
-  uint32_t velocity = ((uint32_t)data[2] << 4U) | (data[3] >> 4U);
-  uint32_t kp = ((uint32_t)(data[3] & 0x0fU) << 8U) | data[4];
-  uint32_t kd = ((uint32_t)data[5] << 4U) | (data[6] >> 4U);
-  uint32_t torque = ((uint32_t)(data[6] & 0x0fU) << 8U) | data[7];
-  command->position = motor_protocol_uint_to_float(position, -10.0, 10.0, 16);
-  command->velocity = motor_protocol_uint_to_float(velocity, -60.0, 60.0, 12);
-  command->kp = motor_protocol_uint_to_float(kp, 0.0, 500.0, 12);
-  command->kd = motor_protocol_uint_to_float(kd, 0.0, 10.0, 12);
-  command->feedforward = motor_protocol_uint_to_float(torque, -60.0, 60.0, 12);
-  return true;
-}
-
-void motor_protocol_pack_rp_state(const motor_protocol_joint_state_t *state,
-                                  double mos_temperature_c, uint16_t status,
-                                  double voltage_v, double coil_temperature_c,
-                                  uint8_t out[12]) {
-  uint32_t position =
-      motor_protocol_float_to_uint(state->position, -10.0, 10.0, 16);
-  uint32_t velocity =
-      motor_protocol_float_to_uint(state->velocity, -60.0, 60.0, 12);
-  uint32_t torque =
-      motor_protocol_float_to_uint(state->effort, -60.0, 60.0, 12);
-  uint8_t mos = (uint8_t)clamp_double(mos_temperature_c + 40.0, 0.0, 255.0);
-  uint8_t voltage = (uint8_t)clamp_double(voltage_v, 0.0, 255.0);
-  uint8_t coil = (uint8_t)clamp_double(coil_temperature_c + 40.0, 0.0, 255.0);
-  out[0] = (uint8_t)(position >> 8U);
-  out[1] = (uint8_t)position;
-  out[2] = (uint8_t)(velocity >> 4U);
-  out[3] = (uint8_t)((velocity << 4U) | (torque >> 8U));
-  out[4] = (uint8_t)torque;
-  out[5] = mos;
-  out[6] = (uint8_t)status;
-  out[7] = (uint8_t)(status >> 8U);
-  out[8] = voltage;
-  out[9] = coil;
-  out[10] = 0U;
-  out[11] = 0U;
-}
-
-bool motor_protocol_unpack_rp_state(const uint8_t *data, size_t size,
-                                    motor_protocol_joint_state_t *state) {
-  if (data == NULL || size != 12U || state == NULL) {
-    return false;
-  }
-  uint32_t position = ((uint32_t)data[0] << 8U) | data[1];
-  uint32_t velocity = ((uint32_t)data[2] << 4U) | (data[3] >> 4U);
-  uint32_t torque = ((uint32_t)(data[3] & 0x0fU) << 8U) | data[4];
-  state->position = motor_protocol_uint_to_float(position, -10.0, 10.0, 16);
-  state->velocity = motor_protocol_uint_to_float(velocity, -60.0, 60.0, 12);
-  state->effort = motor_protocol_uint_to_float(torque, -60.0, 60.0, 12);
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// vaxor（25/30mm）协议：命令 / 控制 / 反馈
-// ---------------------------------------------------------------------------
 static uint16_t wrist_velocity_to_code(double velocity_rad_s) {
-  // rad/s -> rpm -> 0.1 rpm 协议码，0x8000 为有符号零点偏置
   int32_t rpm10 =
       (int32_t)llround(velocity_rad_s * 60.0 / (2.0 * MOTOR_PROTOCOL_PI) * 10.0);
   rpm10 = clamp_i32(rpm10, -MOTOR_PROTOCOL_WRIST_VELOCITY_CODE_LIMIT,
@@ -177,7 +70,6 @@ static double wrist_code_to_velocity(uint16_t code) {
 }
 
 static uint32_t wrist_position_to_code(double position_rad) {
-  // 一圈 2,097,152 tick；0x80000000 为多圈有符号位置零点偏置
   int64_t ticks = llround(position_rad / (2.0 * MOTOR_PROTOCOL_PI) *
                           (double)MOTOR_PROTOCOL_WRIST_TICKS_PER_REV);
   ticks = clamp_i64(ticks, -MOTOR_PROTOCOL_WRIST_POSITION_TICK_LIMIT,
@@ -223,7 +115,6 @@ uint32_t motor_protocol_wrist_status_id(unsigned node) {
 
 void motor_protocol_pack_wrist_command(const motor_protocol_joint_command_t *command,
                                        uint8_t out[12]) {
-  // 25/30mm MIT 下行：位置 4B、速度 2B、Kp 2B、Kd 2B、前馈电流 2B（小端）
   uint32_t position = wrist_position_to_code(command->position);
   uint16_t velocity = wrist_velocity_to_code(command->velocity);
   uint16_t kp = (uint16_t)clamp_i64(

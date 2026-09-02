@@ -28,12 +28,13 @@ static const uint16_t kControlPeriodMs = 10;
 // 保证 RX burst 不会无界占用 10 ms TX 周期。
 static const size_t kCanRxDrainBudgetPerBus = 8U;
 
-// 临时默认测试电机：RP 占位 id=1；CAN1 当前实际接入 vaxor 节点 ID=2。
-// 数值保持与原 control_task 电机表一致，完整拓扑后续由参数服务替换。
+// 固定默认测试电机：当前 firmware 仅保留 vaxor 25/30mm 电机。
+// 拓扑固定为当前默认表，后续需扩展时应在更高层引入明确的配置入口，
+// 不能把动态拓扑配置混进当前固件控制任务。
 static const motor_control_motor_config_t kDefaultMotors[] = {
-    {"left_shoulder_yaw_joint", MOTOR_CONTROL_RP, 1, 0,
-     1.0, 1.0, 0.0, 30.0, 1.0},
     {"left_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 2, 0,
+     50.0, 0.65, 0.042, 0.008, 1.0},
+    {"right_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 3, 0,
      50.0, 0.65, 0.042, 0.008, 1.0},
 };
 static const size_t kDefaultMotorCount =

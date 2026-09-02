@@ -14,11 +14,11 @@
 #include <STM32FreeRTOS.h>
 #include <micro_ros_platformio.h>
 
-#include "ros_bridge.h"   // micro-ROS 节点生命周期
+#include "ros_bridge.h"       // micro-ROS 节点生命周期
 #include "supervisor_task.h"  // 开发期任务健康监督
-#include "ws2812.h"       // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
-#include "sensor_task.h"   // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
-#include "control_task.h"  // 控制任务（当前三路 FDCAN 例程移植）
+#include "ws2812.h"           // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
+#include "sensor_task.h"      // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
+#include "control_task.h"     // 控制任务（当前三路 FDCAN 例程移植）
 
 #if defined(ENABLE_W25Q64) && ENABLE_W25Q64
 #include "w25q64.h"
@@ -122,7 +122,7 @@ static void update_link_led() {
       break;
   }
   // 只在颜色变化时刷帧：WS2812 单线时序对抢占敏感，减少发送次数可显著
-  // 降低被高优先级任务/ISR 打断导致误锁存（突然全白）的概率。
+  // 降低被高优先级任务/ISR 打断导致误锁存的概率。
   static uint8_t last_r = 0xFF, last_g = 0xFF, last_b = 0xFF;
   if (r != last_r || g != last_g || b != last_b) {
     last_r = r;

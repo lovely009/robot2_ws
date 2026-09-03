@@ -162,8 +162,7 @@ bool control_mailbox_take_events(control_mailbox_t *mailbox,
   memset(events, 0, sizeof(*events));
   events->authorization_requested = mailbox->authorization_requested;
   events->authorization_pending = mailbox->authorization_pending;
-  events->authorization_disable_edge =
-      mailbox->authorization_disable_edge;
+  events->authorization_disable_edge = mailbox->authorization_disable_edge;
   events->agent_connected_requested = mailbox->agent_connected_requested;
   events->agent_state_pending = mailbox->agent_state_pending;
   events->agent_disconnect_edge = mailbox->agent_disconnect_edge;

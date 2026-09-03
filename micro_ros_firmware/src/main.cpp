@@ -1,63 +1,26 @@
-// micro-ROS 入口（STM32H723VGT6, serial over USB CDC + FreeRTOS + IMU）
-//
-// 任务编排：
-//   - systemInit() 统一完成板级硬件初始化（时钟/USB/状态灯）；
-//   - start_task 创建 micro_ros / sensor / control 三个业务任务；
-//   - vTaskStartScheduler() 接管调度后永不返回，loop() 仅作 Arduino 占位。
-//
-// 状态灯语义：上电红灯；micro-ROS 连接成功后绿灯 1Hz 闪烁；断连后蓝灯。
-//
-// 注释规范：中文写意图，micro-ROS / ROS 2 / FreeRTOS 等 API 保留英文。
+// micro-ROS 固件入口：初始化板级资源，创建业务任务并启动 FreeRTOS。
 
 #include <Arduino.h>
-#include <HardwareSerial.h>
 #include <STM32FreeRTOS.h>
 #include <micro_ros_platformio.h>
 
-#include "ros_bridge.h"       // micro-ROS 节点生命周期
-#include "supervisor_task.h"  // 开发期任务健康监督
-#include "ws2812.h"           // 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7）
-#include "sensor_task.h"      // 传感器任务（当前 BMI088 + Mahony + 温控 PID）
-#include "control_task.h"     // 控制任务（当前三路 FDCAN 例程移植）
+#include "control_task.h"
+#include "led_task.h"
+#include "micro_ros_task.h"
+#include "sensor_task.h"
+#include "ws2812.h"
 
-#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
-#include "w25q64.h"
-#endif
+static const uint32_t START_STK_SIZE = 256U;
+static const UBaseType_t START_TASK_PRIO = 1U;
+static TaskHandle_t StartTask_Handler = nullptr;
 
-#include <rcl/rcl.h>
-#include <rcl/error_handling.h>
-
-#if !defined(MICRO_ROS_TRANSPORT_ARDUINO_SERIAL)
-#error "本固件仅支持 serial 传输，请在 platformio.ini 设置 board_microros_transport = serial"
-#endif
-
-#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
-// 启动探测诊断仅供 GDB 读取。失败不阻止其余 FreeRTOS 任务启动。
-volatile int32_t g_w25q64_init_status = W25Q64_ERROR_STATE;
-volatile uint32_t g_w25q64_jedec_id = 0U;
-#endif
-
-// ---------------------------------------------------------------------------
-// 板级配置
-// ---------------------------------------------------------------------------
-// micro-ROS 串口：USB CDC（PA11=USB_DM, PA12=USB_DP）。
-// 启用 USB CDC 后 STM32duino 的 generic Serial 即映射为 SerialUSB（USBSerial，
-// 继承 Stream），故用 auto& 引用以同时兼容 UART 与 USB CDC 两种后端。
-static auto &kMicrorosSerial = Serial;
-static const uint32_t kSerialBaud = 115200;  // USB CDC 忽略波特率，仅占位
-
-static const uint32_t kStartTaskStack = 256;  // 开始任务
-static const UBaseType_t kStartTaskPrio = 1;
-
-static const uint32_t kMicroRosTaskStack = 8192;  // micro-ROS + RMW 需要较大栈
-static const UBaseType_t kMicroRosTaskPrio = 2;
-// 当前 board linker script 的 _Min_Stack_Size=0x400；STM32FreeRTOS 默认
-// configMINIMAL_STACK_SIZE 语义为 0x400/8=128 words，timer task 为其两倍。
+static auto &kMicroRosSerial = Serial;
+static const uint32_t kSerialBaud = 115200U;
 static const uint32_t kIdleTaskStackWords = 128U;
 static const uint32_t kTimerTaskStackWords = 256U;
 
-// configSUPPORT_STATIC_ALLOCATION=1 后，FreeRTOS 要求应用提供 idle/timer
-// 内核任务的静态 TCB 与栈；业务任务仍沿用现有 xTaskCreate() 路径。
+// FreeRTOS 配置为静态分配 idle task 内存；缓冲区必须具有静态生命周期，
+// 避免调度器运行后依赖堆分配。
 extern "C" void vApplicationGetIdleTaskMemory(
     StaticTask_t **idle_tcb, StackType_t **idle_stack,
     uint32_t *idle_stack_size) {
@@ -69,6 +32,7 @@ extern "C" void vApplicationGetIdleTaskMemory(
 }
 
 #if configUSE_TIMERS == 1
+// 软件定时器启用时，由应用提供 timer service task 的静态控制块和栈。
 extern "C" void vApplicationGetTimerTaskMemory(
     StaticTask_t **timer_tcb, StackType_t **timer_stack,
     uint32_t *timer_stack_size) {
@@ -80,113 +44,30 @@ extern "C" void vApplicationGetTimerTaskMemory(
 }
 #endif
 
-// ---------------------------------------------------------------------------
-// 统一硬件初始化
-// ---------------------------------------------------------------------------
-// 时钟（SystemClock_Config）、USB CDC、micro-ROS serial 传输、状态灯等板级
-// 初始化在此一次性完成；IMU 初始化延后到调度器启动后的 sensor_task 内执行。
-static void systemInit() {
-  // 状态灯：初始化 SPI6（PA7=MOSI）驱动 WS2812，初始红灯
+void initialize_system(void) {
+  // 状态灯必须在 led task 启动前完成底层初始化；运行期仅由 led task 写入。
   ws2812_init();
-  ws2812_set_rgb(1, 0, 0);  // 上电红灯
 
-  kMicrorosSerial.begin(kSerialBaud);  // serial 传输：初始化 USB CDC
-  set_microros_serial_transports(kMicrorosSerial);
+  // micro-ROS 使用 USB CDC 暴露的 Serial 作为串行传输。USB CDC 下波特率参数
+  // 不决定物理链路速率，但 begin() 仍用于启动串口设备。
+  kMicroRosSerial.begin(kSerialBaud);
+  set_microros_serial_transports(kMicroRosSerial);
 
-  delay(1000);  // 等 USB 枚举稳定后再启动任务
+  // 给 USB 枚举和主机侧串口就绪预留时间；此处调度器尚未启动，可使用 delay()。
+  delay(1000U);
 }
 
-// ---------------------------------------------------------------------------
-// micro-ROS 任务：连接状态机（等 agent → 建实体 → 收发 → 断连清理）
-// ---------------------------------------------------------------------------
-enum class LinkState { kWaitAgent, kConnect, kRun, kLost };
-static LinkState g_state = LinkState::kWaitAgent;
-static bool g_ever_connected = false;  // 曾连上 agent：断连后保持蓝灯而非回到红灯
+static void start_task(void *pv_parameters);
 
-// 灯态跟随状态机：红=未连接，绿=连接成功（1Hz 闪烁），蓝=断连等待重连
-static void update_link_led() {
-  uint8_t r = 0, g = 0, b = 0;
-  switch (g_state) {
-    case LinkState::kWaitAgent:
-      r = g_ever_connected ? 0 : 1;
-      b = g_ever_connected ? 1 : 0;
-      break;
-    case LinkState::kConnect:
-      return;  // 短暂建链态，保持上一颜色
-    case LinkState::kRun:
-      // 500ms 亮 / 500ms 灭，即 1Hz 绿灯闪烁
-      g = ((millis() / 500u) & 1u) ? 1 : 0;
-      break;
-    case LinkState::kLost:
-      b = 1;
-      break;
+static void start_task(void *pv_parameters) {
+  (void)pv_parameters;
+
+  // 先创建状态指示与通信任务，再启动传感器和控制任务。各 start 函数只负责
+  // 创建长期运行的业务任务；任一创建失败都进入统一故障处理，避免部分系统运行。
+  if (!led_task_start()) {
+    Error_Handler();
   }
-  // 只在颜色变化时刷帧：WS2812 单线时序对抢占敏感，减少发送次数可显著
-  // 降低被高优先级任务/ISR 打断导致误锁存的概率。
-  static uint8_t last_r = 0xFF, last_g = 0xFF, last_b = 0xFF;
-  if (r != last_r || g != last_g || b != last_b) {
-    last_r = r;
-    last_g = g;
-    last_b = b;
-    ws2812_set_rgb(r, g, b);
-  }
-}
-
-static void micro_ros_task(void *arg) {
-  (void)arg;
-  while (1) {
-    switch (g_state) {
-      case LinkState::kWaitAgent:
-        // 探测 agent（200ms 超时 × 3 次）；agent 未启动时在此轮询等待
-        if (RMW_RET_OK == rmw_uros_ping_agent(200, 3)) {
-          g_state = LinkState::kConnect;
-        }
-        break;
-
-      case LinkState::kConnect:
-        if (ros_bridge_create()) {
-          g_ever_connected = true;
-          g_state = LinkState::kRun;
-        } else {
-          ros_bridge_destroy();  // 失败则清理，回等待态稍后重试
-          g_state = LinkState::kWaitAgent;
-        }
-        break;
-
-      case LinkState::kRun:
-        // 心跳检测 + 服务会话：ping 探测 agent 存活，spin 驱动定时器发布 IMU。
-        if (RMW_RET_OK != rmw_uros_ping_agent(200, 3)) {
-          g_state = LinkState::kLost;  // 运行期 agent 丢失
-        } else {
-          ros_bridge_spin();
-        }
-        break;
-
-      case LinkState::kLost:
-      default:
-        ros_bridge_destroy();
-        g_state = LinkState::kWaitAgent;
-        break;
-    }
-    update_link_led();
-    // 表示连接状态机已完成一次迭代；不等同于 agent 已连接。
-    supervisor_heartbeat(SUPERVISOR_TASK_MICRO_ROS);
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
-}
-
-// 编排任务：micro-ROS 收发、传感器与控制任务相互独立，均在调度器启动后创建。
-static void start_task(void *arg) {
-  (void)arg;
-
-#if defined(ENABLE_W25Q64) && ENABLE_W25Q64
-  // 仅初始化、复位和读取 JEDEC ID；不执行任何写入、擦除或 memory-mapped 操作。
-  g_w25q64_init_status = static_cast<int32_t>(w25q64_init());
-  g_w25q64_jedec_id = w25q64_read_id();
-#endif
-
-  if (xTaskCreate(micro_ros_task, "micro_ros", kMicroRosTaskStack, nullptr,
-                  kMicroRosTaskPrio, nullptr) != pdPASS) {
+  if (!micro_ros_task_start()) {
     Error_Handler();
   }
   if (!sensor_task_start()) {
@@ -195,31 +76,28 @@ static void start_task(void *arg) {
   if (!control_task_start()) {
     Error_Handler();
   }
-  if (!supervisor_task_start()) {
-    Error_Handler();
-  }
-  // 编排完成后删除开始任务自身
-  vTaskDelete(nullptr);
+
+  // 子任务创建完成后释放一次性的启动任务资源。
+  vTaskDelete(StartTask_Handler);
 }
 
-// ---------------------------------------------------------------------------
-// Arduino 入口
-// ---------------------------------------------------------------------------
 void setup() {
-  systemInit();  // 统一硬件初始化
+  // setup() 只完成不依赖 FreeRTOS 调度器的板级初始化。BMI088 等内部使用
+  // vTaskDelay 的初始化必须留在对应业务任务中执行。
+  initialize_system();
 
-  if (xTaskCreate(start_task, "start_task", kStartTaskStack, nullptr,
-                  kStartTaskPrio, nullptr) != pdPASS) {
+  // 通过低优先级启动任务统一创建业务任务，确保其初始化发生在调度器启动后。
+  if (xTaskCreate(start_task, "start_task", START_STK_SIZE, nullptr,
+                  START_TASK_PRIO, &StartTask_Handler) != pdPASS) {
     Error_Handler();
   }
 
-  // 启动调度器：接管 SysTick 后永不返回
   vTaskStartScheduler();
 
-  // 理论上不可达；若 FreeRTOS 因配置错误返回此处，直接挂起
-  while (1) {}
+  // 正常情况下调度器不会返回；若返回则停留在此处，禁止继续执行未受调度的业务。
+  for (;;) {}
 }
 
-// Arduino 核心要求存在 loop()。STM32FreeRTOS 在 vApplicationIdleHook 里调用
-// loop()，故这里只能放非阻塞代码（不得阻塞/延时，详见 STM32FreeRTOS.c）。
+// STM32FreeRTOS 将 Arduino loop() 作为 idle hook 调用，因此必须保持非阻塞且
+// 不承载业务逻辑；所有周期性工作均由独立任务负责。
 void loop() {}

@@ -29,6 +29,9 @@ rosidl_generate_interfaces(
   ${PROJECT_NAME}
   "msg/CANFrame.msg"
   "msg/MotorCommand.msg"
+  "msg/MotorGains.msg"
+  "msg/MotorMode.msg"
+  "msg/MotorStatus.msg"
   DEPENDENCIES std_msgs
 )
 

@@ -2,7 +2,7 @@
 <package format="3">
   <name>motor_drive</name>
   <version>0.2.0</version>
-  <description>ROS-independent, configuration-driven C++ SocketCAN/CAN-FD motor driver with RP and 25/30 mm protocol strategies.</description>
+  <description>ROS-independent, configuration-driven C++ SocketCAN/CAN-FD motor driver with CREB and 25/30 mm protocol strategies.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 

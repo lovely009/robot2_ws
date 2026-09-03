@@ -109,7 +109,8 @@ public:
   std::vector<CanFrame>
   make_command_frames(const std::vector<MotorConfig> &motors,
                       const MotorIndexList &indices,
-                      const std::vector<protocol::JointCommand> &commands) const override {
+                      const std::vector<protocol::JointCommand> &commands,
+                      const bool) const override {
     std::vector<CanFrame> frames;
     frames.reserve(indices.size());
     for (const auto index : indices) {
@@ -155,6 +156,115 @@ public:
   }
 };
 
+protocol::CrebMitLimits creb_limits(const MotorConfig &motor) {
+  return {required_positive_parameter(motor, "mit_position_limit_rad"),
+          required_positive_parameter(motor, "mit_velocity_limit_rad_s"),
+          required_positive_parameter(motor, "mit_torque_limit_nm")};
+}
+
+void validate_creb_node(const unsigned node) {
+  if (node < 1U || node > 127U) {
+    throw std::out_of_range("CREB node must be in [1, 127]");
+  }
+}
+
+uint32_t creb_command_id(const unsigned node) {
+  validate_creb_node(node);
+  return 0x110U + node;
+}
+
+uint32_t creb_feedback_id(const unsigned node) {
+  validate_creb_node(node);
+  return 0x300U + node;
+}
+
+CanFrame make_creb_frame(const MotorConfig &motor,
+                         const protocol::JointCommand &command,
+                         const bool enabled) {
+  const auto mit = protocol::pack_creb_mit_command(command, creb_limits(motor));
+  // CAN FD 的 DLC=9 对应 12 个数据字节；协议只定义前 9 Byte，尾部补零。
+  std::array<uint8_t, 12> payload{};
+  // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
+  payload[0] = static_cast<uint8_t>((enabled ? 0xc0U : 0x00U) | 0x0cU);
+  std::copy(mit.begin(), mit.end(), payload.begin() + 1U);
+  return make_frame(creb_command_id(motor.id), payload.data(), payload.size(),
+                    true);
+}
+
+class CrebProtocol final : public MotorProtocol {
+public:
+  void validate(const std::vector<MotorConfig> &motors,
+                const MotorIndexList &indices) const override {
+    if (indices.empty()) {
+      throw std::invalid_argument("CREB protocol group cannot be empty");
+    }
+    std::unordered_set<unsigned> ids;
+    for (const auto index : indices) {
+      const auto &motor = motors.at(index);
+      validate_creb_node(motor.id);
+      if (!ids.insert(motor.id).second) {
+        throw std::invalid_argument(
+            "CREB motor IDs on one CAN bus must be unique values in [1, 127]");
+      }
+      static_cast<void>(required_positive_parameter(
+          motor, "torque_constant_nm_per_amp"));
+      static_cast<void>(required_positive_parameter(motor, "gear_ratio"));
+      static_cast<void>(creb_limits(motor));
+    }
+  }
+
+  std::vector<CanFrame>
+  make_enable_frames(const std::vector<MotorConfig> &motors,
+                     const MotorIndexList &indices,
+                     const bool enabled) const override {
+    std::vector<CanFrame> frames;
+    frames.reserve(indices.size());
+    for (const auto index : indices) {
+      frames.push_back(make_creb_frame(motors.at(index), {}, enabled));
+    }
+    return frames;
+  }
+
+  std::vector<CanFrame>
+  make_command_frames(const std::vector<MotorConfig> &motors,
+                      const MotorIndexList &indices,
+                      const std::vector<protocol::JointCommand> &commands,
+                      const bool enabled) const override {
+    std::vector<CanFrame> frames;
+    frames.reserve(indices.size());
+    for (const auto index : indices) {
+      frames.push_back(
+          make_creb_frame(motors.at(index), commands.at(index), enabled));
+    }
+    return frames;
+  }
+
+  bool decode_feedback(const std::vector<MotorConfig> &motors,
+                       const MotorIndexList &indices, const CanFrame &frame,
+                       std::size_t &motor_index,
+                       protocol::JointState &state) const override {
+    if (frame.is_extended || !frame.is_fd || !frame.bitrate_switch ||
+        frame.size != 12U || (frame.data[11] & 0x20U) != 0U) {
+      return false;
+    }
+    for (const auto index : indices) {
+      const auto &motor = motors.at(index);
+      if (frame.id != creb_feedback_id(motor.id)) {
+        continue;
+      }
+      state = protocol::unpack_creb_feedback(frame.data.data(), frame.size);
+      const double gear = required_positive_parameter(motor, "gear_ratio");
+      state.velocity /= gear;
+      state.effort *= required_positive_parameter(
+                          motor, "torque_constant_nm_per_amp") *
+                      gear;
+      motor_index = index;
+      return true;
+    }
+    return false;
+  }
+};
+
 } // namespace
 
 void MotorProtocolRegistry::register_factory(std::string type, Factory factory) {
@@ -188,6 +298,8 @@ MotorProtocolRegistry MotorProtocolRegistry::with_builtin_protocols() {
   // 内置类型只在这里注册。以后增加新电机协议时，不需要修改 MotorDriver。
   registry.register_factory(kVaxorType,
                             [] { return std::make_unique<VaxorProtocol>(); });
+  registry.register_factory(kCrebType,
+                            [] { return std::make_unique<CrebProtocol>(); });
   return registry;
 }
 

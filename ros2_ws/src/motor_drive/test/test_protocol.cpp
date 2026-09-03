@@ -2,6 +2,7 @@
 
 #include <array>
 #include <gtest/gtest.h>
+#include <limits>
 
 namespace protocol = motor_drive::protocol;
 
@@ -77,4 +78,53 @@ TEST(WristProtocol, ReplyGeneratedBySimulatorCanBeReadByDriver) {
               2.0 * protocol::kPi / 600.0);
   EXPECT_NEAR(decoded.effort, current_state.effort,
               protocol::kWristCurrentScaleA);
+}
+
+TEST(CrebProtocol, MitCommandUsesConfiguredRangesAndManualBitLayout) {
+  protocol::JointCommand command;
+  command.position = 12.5;
+  command.velocity = -30.0;
+  command.kp = 500.0;
+  command.kd = 5.0;
+  command.feedforward = -10.0;
+
+  const auto bytes = protocol::pack_creb_mit_command(
+      command, protocol::CrebMitLimits{12.5, 30.0, 10.0});
+  const std::array<uint8_t, 8> expected{
+      {0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0xf0, 0x00}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CrebProtocol, NeutralMitCommandMatchesManualQuantization) {
+  const auto bytes = protocol::pack_creb_mit_command(
+      {}, protocol::CrebMitLimits{12.5, 30.0, 10.0});
+  const std::array<uint8_t, 8> expected{
+      {0x7f, 0xff, 0x7f, 0xf0, 0x00, 0x00, 0x07, 0xff}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CrebProtocol, FeedbackDecodesBigEndianPhysicalValues) {
+  // 位置 1820 / 182 = 10 deg，速度 -60 rpm，Iq = 1500 mA。
+  const std::array<uint8_t, 12> bytes{
+      {0x07, 0x1c, 0xff, 0xc4, 0x05, 0xdc,
+       0x00, 0x00, 0x00, 0xf0, 0x06, 0xc0}};
+  const auto state = protocol::unpack_creb_feedback(bytes.data(), bytes.size());
+  EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
+  EXPECT_NEAR(state.velocity, -2.0 * protocol::kPi, 1e-12);
+  EXPECT_DOUBLE_EQ(state.effort, 1.5);
+}
+
+TEST(CrebProtocol, FeedbackRejectsWrongPayloadSize) {
+  const std::array<uint8_t, 11> bytes{};
+  EXPECT_THROW(
+      static_cast<void>(protocol::unpack_creb_feedback(bytes.data(), bytes.size())),
+      std::invalid_argument);
+}
+
+TEST(CrebProtocol, MitCommandRejectsNonFiniteInput) {
+  protocol::JointCommand command;
+  command.position = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(static_cast<void>(protocol::pack_creb_mit_command(
+                   command, protocol::CrebMitLimits{12.5, 30.0, 10.0})),
+               std::invalid_argument);
 }

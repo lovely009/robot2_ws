@@ -63,7 +63,7 @@ TEST(VaxorProtocolStrategy, CommandFramesMatchManualExample) {
   command.kd = 1.0;
 
   const auto frames = builtin_protocol(drive::kVaxorType)
-                          ->make_command_frames(motors, {0U}, {command});
+                          ->make_command_frames(motors, {0U}, {command}, true);
   ASSERT_EQ(frames.size(), 1U);
   // 与 test_protocol.cpp 的 CommandMatchesManualExample 同一手册例值。
   const std::vector<uint8_t> expected{0x01, 0x00, 0x01, 0x80, 0x00, 0x80,
@@ -139,7 +139,8 @@ TEST(VaxorProtocolStrategy, GearRatioAndEfficiencyScaleFeedback) {
   protocol::JointCommand command;
   command.position = 0.5;
   command.velocity = -0.25;
-  const auto frames = protocol->make_command_frames(motors, {0U}, {command});
+  const auto frames =
+      protocol->make_command_frames(motors, {0U}, {command}, true);
   ASSERT_EQ(frames.size(), 1U);
   const auto motor_cmd =
       protocol::unpack_wrist_command(frames[0].data.data(), frames[0].size);
@@ -177,4 +178,126 @@ TEST(VaxorProtocolStrategy, ValidateRejectsBadMotorTypeCode) {
                  {{"torque_constant_nm_per_amp", "0.35"},
                   {"motor_type_code", "0x05"}})};
   EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
+}
+
+TEST(CrebProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("r58", "j1", drive::kCrebType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.086"},
+                  {"gear_ratio", "101"},
+                  {"mit_position_limit_rad", "12.5"},
+                  {"mit_velocity_limit_rad_s", "30"},
+                  {"mit_torque_limit_nm", "10"}})};
+  protocol::JointCommand command;
+  command.position = 12.5;
+  command.velocity = -30.0;
+  command.kp = 500.0;
+  command.kd = 5.0;
+  command.feedforward = -10.0;
+
+  const auto protocol = builtin_protocol(drive::kCrebType);
+  const auto disabled_frames =
+      protocol->make_command_frames(motors, {0U}, {command}, false);
+  ASSERT_EQ(disabled_frames.size(), 1U);
+  EXPECT_EQ(disabled_frames[0].data[0], 0x0cU);
+
+  const auto frames =
+      protocol->make_command_frames(motors, {0U}, {command}, true);
+  ASSERT_EQ(frames.size(), 1U);
+  expect_frame(frames[0], 0x111U,
+               {0xcc, 0xff, 0xff, 0x00, 0x0f,
+                0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00}, true);
+}
+
+TEST(CrebProtocolStrategy, EnableAndDisableUseSafeNeutralMitFrames) {
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("r58", "j1", drive::kCrebType, 2U,
+                 {{"torque_constant_nm_per_amp", "0.086"},
+                  {"gear_ratio", "101"},
+                  {"mit_position_limit_rad", "12.5"},
+                  {"mit_velocity_limit_rad_s", "30"},
+                  {"mit_torque_limit_nm", "10"}})};
+  const auto protocol = builtin_protocol(drive::kCrebType);
+
+  const auto enabled = protocol->make_enable_frames(motors, {0U}, true);
+  ASSERT_EQ(enabled.size(), 1U);
+  expect_frame(enabled[0], 0x112U,
+               {0xcc, 0x7f, 0xff, 0x7f, 0xf0,
+                0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00}, true);
+
+  const auto disabled = protocol->make_enable_frames(motors, {0U}, false);
+  ASSERT_EQ(disabled.size(), 1U);
+  expect_frame(disabled[0], 0x112U,
+               {0x0c, 0x7f, 0xff, 0x7f, 0xf0,
+                0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00}, true);
+}
+
+TEST(CrebProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("r58", "j1", drive::kCrebType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.086"},
+                  {"gear_ratio", "101"},
+                  {"mit_position_limit_rad", "12.5"},
+                  {"mit_velocity_limit_rad_s", "30"},
+                  {"mit_torque_limit_nm", "10"}})};
+  drive::CanFrame frame;
+  frame.id = 0x301U;
+  frame.size = 12U;
+  frame.is_fd = true;
+  frame.bitrate_switch = true;
+  frame.data = {0x07, 0x1c, 0xff, 0xc4, 0x05, 0xdc,
+                0x00, 0x00, 0x00, 0xf0, 0x06, 0xc0};
+
+  std::size_t motor_index = 99U;
+  protocol::JointState state;
+  EXPECT_TRUE(builtin_protocol(drive::kCrebType)
+                  ->decode_feedback(motors, {0U}, frame, motor_index, state));
+  EXPECT_EQ(motor_index, 0U);
+  EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
+  EXPECT_NEAR(state.velocity, -2.0 * protocol::kPi / 101.0, 1e-12);
+  EXPECT_NEAR(state.effort, 1.5 * 0.086 * 101.0, 1e-12);
+
+  frame.bitrate_switch = false;
+  EXPECT_FALSE(builtin_protocol(drive::kCrebType)
+                   ->decode_feedback(motors, {0U}, frame, motor_index, state));
+  frame.bitrate_switch = true;
+  frame.data[11] = 0xe0;
+  EXPECT_FALSE(builtin_protocol(drive::kCrebType)
+                   ->decode_feedback(motors, {0U}, frame, motor_index, state));
+}
+
+TEST(CrebProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {
+  const auto protocol = builtin_protocol(drive::kCrebType);
+  std::vector<drive::MotorConfig> motors{
+      make_motor("r58", "j1", drive::kCrebType, 0U,
+                 {{"torque_constant_nm_per_amp", "0.086"},
+                  {"gear_ratio", "101"}})};
+  EXPECT_THROW(protocol->validate(motors, {0U}), std::out_of_range);
+
+  motors[0].id = 1U;
+  motors[0].parameters.erase("gear_ratio");
+  EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
+
+  motors[0].parameters["gear_ratio"] = "101";
+  EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
+}
+
+TEST(CrebProtocolStrategy, UsesPerMotorMitRangeOverrides) {
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("r48", "j1", drive::kCrebType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.077"},
+                  {"gear_ratio", "101"},
+                  {"mit_position_limit_rad", "25"},
+                  {"mit_velocity_limit_rad_s", "60"},
+                  {"mit_torque_limit_nm", "20"}})};
+  protocol::JointCommand command;
+  command.position = 12.5;
+  command.velocity = -30.0;
+  command.feedforward = -10.0;
+  const auto frames = builtin_protocol(drive::kCrebType)
+                          ->make_command_frames(motors, {0U}, {command}, false);
+  ASSERT_EQ(frames.size(), 1U);
+  expect_frame(frames[0], 0x111U,
+               {0x0c, 0xbf, 0xff, 0x3f, 0xf0,
+                0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x00}, true);
 }

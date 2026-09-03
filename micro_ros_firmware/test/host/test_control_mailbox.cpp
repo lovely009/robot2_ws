@@ -92,6 +92,10 @@ static void test_disconnect_reconnect_edge_requires_reauthorization() {
   debug.can_id = 0x123U;
   debug.size = 8U;
   assert(control_mailbox_submit_debug_frame(&mailbox, &debug));
+  const motor_control_mode_request_t mode{"joint_1", 2U};
+  const motor_control_gains_request_t gains{"joint_1", 0.02, 2.0};
+  assert(control_mailbox_submit_mode(&mailbox, &mode));
+  assert(control_mailbox_submit_gains(&mailbox, &gains));
 
   control_mailbox_request_agent_connected(&mailbox, false);
   control_mailbox_request_agent_connected(&mailbox, true);
@@ -104,6 +108,10 @@ static void test_disconnect_reconnect_edge_requires_reauthorization() {
   assert(!control_mailbox_take_command(
       &mailbox, 0, &out, nullptr, nullptr));
   assert(!control_mailbox_take_debug_frame(&mailbox, &debug, nullptr));
+  motor_control_mode_request_t mode_out{};
+  motor_control_gains_request_t gains_out{};
+  assert(!control_mailbox_take_mode(&mailbox, 0U, &mode_out));
+  assert(!control_mailbox_take_gains(&mailbox, 0U, &gains_out));
   assert(!control_mailbox_submit_command(&mailbox, &command, 11U));
 
   control_mailbox_request_authorization(&mailbox, true);
@@ -152,11 +160,75 @@ static void test_debug_frame_overwrites_and_validates_format_dlc() {
   assert(!control_mailbox_take_debug_frame(&mailbox, &out, &sequence));
 }
 
+static void test_mode_and_gains_requests_are_kept_per_joint() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox, kMotors, 2U);
+  const motor_control_mode_request_t mode_1{"joint_1", 2U};
+  const motor_control_mode_request_t mode_2{"joint_2", 1U};
+  const motor_control_gains_request_t gains_1{"joint_1", 0.02, 2.0};
+  const motor_control_gains_request_t gains_2{"joint_2", 0.03, 3.0};
+
+  assert(control_mailbox_submit_mode(&mailbox, &mode_1));
+  assert(control_mailbox_submit_mode(&mailbox, &mode_2));
+  assert(control_mailbox_submit_gains(&mailbox, &gains_1));
+  assert(control_mailbox_submit_gains(&mailbox, &gains_2));
+  assert(control_mailbox_has_configuration(&mailbox, 0U));
+  assert(control_mailbox_has_configuration(&mailbox, 1U));
+
+  motor_control_mode_request_t mode_out{};
+  motor_control_gains_request_t gains_out{};
+  assert(control_mailbox_take_mode(&mailbox, 1U, &mode_out));
+  assert(std::strcmp(mode_out.joint_name, "joint_2") == 0);
+  assert(mode_out.mode == 1U);
+  assert(control_mailbox_take_gains(&mailbox, 0U, &gains_out));
+  assert(std::strcmp(gains_out.joint_name, "joint_1") == 0);
+  assert(gains_out.kp == 0.02);
+  assert(gains_out.kd == 2.0);
+  assert(!control_mailbox_take_mode(&mailbox, 1U, &mode_out));
+  assert(!control_mailbox_take_gains(&mailbox, 0U, &gains_out));
+}
+
+static void test_configuration_discards_older_but_preserves_newer_command() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox, kMotors, 2U);
+  const motor_control_command_t command = make_command("joint_1", 1.0);
+  const motor_control_mode_request_t mode{"joint_1", 2U};
+  const motor_control_gains_request_t gains{"joint_1", 0.02, 2.0};
+  motor_control_command_t command_out{};
+
+  assert(control_mailbox_submit_command(&mailbox, &command, 1U));
+  assert(control_mailbox_submit_mode(&mailbox, &mode));
+  assert(!control_mailbox_take_command(
+      &mailbox, 0U, &command_out, nullptr, nullptr));
+
+  assert(control_mailbox_submit_gains(&mailbox, &gains));
+  assert(control_mailbox_submit_command(&mailbox, &command, 3U));
+  assert(control_mailbox_take_command(
+      &mailbox, 0U, &command_out, nullptr, nullptr));
+}
+
+static void test_invalid_mode_or_gains_does_not_disturb_command() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox, kMotors, 2U);
+  const motor_control_command_t command = make_command("joint_1", 1.0);
+  const motor_control_mode_request_t invalid_mode{"joint_1", 3U};
+  const motor_control_gains_request_t invalid_gains{"joint_1", -1.0, 2.0};
+  assert(control_mailbox_submit_command(&mailbox, &command, 1U));
+  assert(!control_mailbox_submit_mode(&mailbox, &invalid_mode));
+  assert(!control_mailbox_submit_gains(&mailbox, &invalid_gains));
+  motor_control_command_t command_out{};
+  assert(control_mailbox_take_command(
+      &mailbox, 0U, &command_out, nullptr, nullptr));
+}
+
 int main() {
   test_per_joint_overwrite_preserves_other_timestamp();
   test_invalid_joint_does_not_block_later_valid_joint();
   test_disable_enable_edge_discards_old_command();
   test_disconnect_reconnect_edge_requires_reauthorization();
   test_debug_frame_overwrites_and_validates_format_dlc();
+  test_mode_and_gains_requests_are_kept_per_joint();
+  test_configuration_discards_older_but_preserves_newer_command();
+  test_invalid_mode_or_gains_does_not_disturb_command();
   return 0;
 }

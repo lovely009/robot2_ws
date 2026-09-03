@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.o CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o -o test_supervisor_heartbeat 

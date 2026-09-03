@@ -22,6 +22,12 @@ uint32_t read_le(const uint8_t *data, const std::size_t width) {
   return value;
 }
 
+int16_t read_be_i16(const uint8_t *data) {
+  const auto raw = static_cast<uint16_t>(
+      (static_cast<uint16_t>(data[0]) << 8U) | data[1]);
+  return static_cast<int16_t>(raw);
+}
+
 uint16_t wrist_velocity_to_code(const double velocity_rad_s) {
   // rad/s -> rpm -> 0.1 rpm 协议码，并以 0x8000 表示有符号零点偏置。
   const auto rpm10 = static_cast<int32_t>(
@@ -258,6 +264,47 @@ JointState unpack_wrist_feedback(const uint8_t *data, const std::size_t size) {
   const auto current = static_cast<uint16_t>(read_le(data + 8U, 2U));
   return {wrist_code_to_position(position), wrist_code_to_velocity(velocity),
           wrist_code_to_current(current)};
+}
+
+std::array<uint8_t, 8>
+pack_creb_mit_command(const JointCommand &command,
+                      const CrebMitLimits &limits) {
+  if (!(limits.position_rad > 0.0) || !(limits.velocity_rad_s > 0.0) ||
+      !(limits.torque_nm > 0.0)) {
+    throw std::invalid_argument("CREB MIT limits must be positive");
+  }
+  if (!std::isfinite(command.position) || !std::isfinite(command.velocity) ||
+      !std::isfinite(command.kp) || !std::isfinite(command.kd) ||
+      !std::isfinite(command.feedforward)) {
+    throw std::invalid_argument("CREB MIT command values must be finite");
+  }
+  const auto position = float_to_uint(command.position, -limits.position_rad,
+                                      limits.position_rad, 16U);
+  const auto velocity = float_to_uint(command.velocity, -limits.velocity_rad_s,
+                                      limits.velocity_rad_s, 12U);
+  const auto kp = float_to_uint(command.kp, 0.0, 500.0, 12U);
+  const auto kd = float_to_uint(command.kd, 0.0, 5.0, 12U);
+  const auto torque = float_to_uint(command.feedforward, -limits.torque_nm,
+                                    limits.torque_nm, 12U);
+  return {static_cast<uint8_t>(position >> 8U),
+          static_cast<uint8_t>(position),
+          static_cast<uint8_t>(velocity >> 4U),
+          static_cast<uint8_t>((velocity << 4U) | (kp >> 8U)),
+          static_cast<uint8_t>(kp),
+          static_cast<uint8_t>(kd >> 4U),
+          static_cast<uint8_t>((kd << 4U) | (torque >> 8U)),
+          static_cast<uint8_t>(torque)};
+}
+
+JointState unpack_creb_feedback(const uint8_t *data, const std::size_t size) {
+  if (data == nullptr || size != 12U) {
+    throw std::invalid_argument("CREB feedback must be 12 bytes");
+  }
+  // 新版协议规定反馈为大端：位置码每 182 count 为 1°，速度为 rpm，Iq 为 mA。
+  const double position = read_be_i16(data) / 182.0 * kPi / 180.0;
+  const double velocity = read_be_i16(data + 2U) * 2.0 * kPi / 60.0;
+  const double current = read_be_i16(data + 4U) / 1000.0;
+  return {position, velocity, current};
 }
 
 double wrist_kp_to_current_gain(const double protocol_kp) {

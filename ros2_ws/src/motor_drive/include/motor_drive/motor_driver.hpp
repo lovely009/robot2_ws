@@ -39,11 +39,12 @@ public:
 
 private:
   // 同一条总线、同一种 type 的电机组成一个协议组。
-  // 例如 can0 上的 4 台 RP 是一组，can0 上的 3 台 vaxor 是另一组。
+  // 例如 can0 上的 4 台 CREB 是一组，can0 上的 3 台 vaxor 是另一组。
   struct ProtocolGroup {
     std::string type;
     MotorIndexList motor_indices;
     std::unique_ptr<MotorProtocol> protocol;
+    bool enabled{false};
   };
 
   // 每个逻辑总线运行时只打开一个 CAN 传输，再挂接若干协议组。

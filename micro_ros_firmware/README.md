@@ -12,11 +12,13 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 `/home/ly/文档/dm-mc02-master/例程/CtrBoard-H7_FDCAN`：FD + BRS、标称
 1Mbps / 数据 5Mbps、接收中断回调与周期测试帧发送均保留；FDCAN1 已通过
 `can_bridge_msgs/CANFrame` 接入 ROS 调试话题。
-电机协议编解码（RP + 25/30mm）已从 `ros2_ws/src/motor_drive` 移植为
-`lib/motor_protocol`（同一文件内按 RP / vaxor 两部分分区），字节布局与
-原实现一致。当前固件不维护动态拓扑配置，`control_task` 固定内置两个默认测试电机
-（RP + vaxor），订阅 `/joint_commands`（`sensor_msgs/msg/JointState`）直接下发；
-完整拓扑和参数化配置暂不在本工程中实现，保持为静态默认表。
+电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）已从
+`ros2_ws/src/motor_drive` 移植为 `lib/motor_protocol`，字节布局与主机实现一致；
+RP 已弃用。当前固件不维护动态拓扑配置，`control_task` 固定内置两台 vaxor
+与两台 CREB 默认测试电机，订阅 `/joint_commands`
+（`sensor_msgs/msg/JointState`）直接下发；CREB 以 100Hz CANopen SYNC
+（标准帧 `0x080`）触发 `0x300 + ID` 状态反馈。完整拓扑和参数化配置暂不在
+本工程中实现，保持为静态默认表。
 
 ## 关键决策
 
@@ -36,7 +38,7 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 | CANFD 通信 | **FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13**，FD + BRS，RX/TX 元素 64B | ISR 写静态 RX 队列；容量 CAN1=32、CAN2/3=8，队满丢最旧帧 |
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
-| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `-DHAL_OSPI_MODULE_ENABLED` 仍保留；默认关闭 `-DENABLE_W25Q64=0`，仅在需要时再启用启动探测 |
+| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `lib/w25q64` 保留，当前不执行启动探测 |
 | CAN1 调试桥 | `-DENABLE_CAN1_DEBUG_BRIDGE=0`（默认关闭） | 通过 `micro_ros/can1/send`、`micro_ros/can1/receive` 调试 FDCAN1；开启时再在 ROS 侧建实体 |
 | JointState 桥 | `-DENABLE_MOTOR_COMMAND_BRIDGE=0`（默认关闭） | 默认不订阅 `/joint_commands`，只在需要时再启用默认测试电机桥接 |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
@@ -59,17 +61,11 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 
 | 任务 | 优先级 | 栈 | 职责 |
 |---|---|---|---|
-| `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`control`/`supervisor` 后自删除 |
-| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，20ms bridge timer 发布各域最新快照；断连自动重建；状态灯红/绿闪/蓝 |
+| `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`control` 后自删除 |
+| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，20ms bridge timer 发布各域最新快照；断连自动重建 |
+| `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 4 | 1024 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 200Hz ACC DRDY 触发采样/Mahony/PID |
 | `control` | 3 | 1024 | 500ms 延时 → FDCAN1/2/3 初始化；100Hz 统一消费命令/debug mailbox 并发送；官方 0x520 测试帧默认关闭（宏开启） |
-| `supervisor` | 1 | 512 | 每 100ms 观察 control/sensor/micro-ROS 状态机 heartbeat，聚合 GDB 可读诊断；开发期不复位、不喂 IWDG |
-
-supervisor 在各任务第一次 heartbeat 前保留启动宽限；进入运行期后，control
-连续 100ms 无进展即告警，sensor 健康/降级阈值分别为 300ms/2500ms，micro-ROS
-阈值为 1500ms（容纳 `rmw_uros_ping_agent(200, 3)` 的合法阻塞）。这些阈值只更新
-`supervisor_diagnostics_t` 的 heartbeat、miss count 和 fault bitmask，当前开发阶段
-是 **observation-only**：没有硬件 IWDG 初始化、喂狗或复位动作。
 
 ## 代码组织
 
@@ -81,18 +77,18 @@ supervisor 在各任务第一次 heartbeat 前保留启动宽限；进入运行�
 | `imu_bridge` | `micro_ros/imu/data` 与 `micro_ros/imu/temp` 的缓冲/填充/发布 |
 | `can_debug_bridge` | `micro_ros/can1/send` 校验/入 mailbox 与 `micro_ros/can1/receive` 发布（宏控制） |
 | `motor_bridge` | `/joint_commands` 订阅展开 + `micro_ros/JointState` 反馈发布（宏控制） |
-| `control_task` | 电机表、RP/vaxor 协议收发与反馈解码，不接触 ROS |
-| `lib/fdcan` | FDCAN 初始化/收发/中断回调；ISR 写三路静态 RX 队列，主队列仅由 control task 消费 |
+| `control_task` | 固定 vaxor 电机表、协议收发与反馈解码，不接触 ROS |
+| `lib/fdcan` | FDCAN 初始化/收发/中断回调；ISR 写三路静态 RX 队列，主队列仅由 control task 消费；独立维护 RX 快照 |
 | `lib/imu` | BMI088 驱动/通信层/Mahony/SI 聚合（依赖 `lib/dma`） |
-| `lib/motor_protocol` | RP/vaxor 协议编解码（纯逻辑） |
-| `lib/motor_control` | 100/300ms timeout、协议状态机、RP slot 聚合及总线级 enable/disable（纯逻辑） |
+| `lib/motor_protocol` | vaxor/CREB 协议编解码（纯逻辑） |
+| `lib/motor_control` | 100/300ms timeout、vaxor 协议状态机及总线级 enable/disable（纯逻辑） |
 | `lib/control_mailbox` | 固定容量命令/debug overwrite mailbox 与连接/授权边沿锁存（纯逻辑） |
 | `lib/ws2812` | 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7） |
 | `lib/dma` | 板级 DMA 初始化（当前 SPI2 专用）与中断转发 |
 
-数据流：FDCAN1/2/3 ISR → 对应静态 RX 队列 → control task 有界消费并解码反馈；
-control task 同时复制每路最新帧到只读 debug snapshot，`can_debug_bridge` 只读取
-CAN1 的副本，不消费主队列。ROS 电机命令和 CAN debug TX 回调只覆盖静态
+数据流：FDCAN1/2/3 ISR → 对应静态 RX 队列 → control task 有界消费并解码反馈，
+CAN 数据层独立更新每路最新帧快照；`can_debug_bridge` 只读取 CAN1 的副本，
+不消费主队列。ROS 电机命令和 CAN debug TX 回调只覆盖静态
 mailbox；control task 以 100Hz 绝对周期统一取走并作为正常 FDCAN 发送的唯一
 任务上下文。IMU 则由 sensor task 写双缓冲 snapshot，20ms bridge timer 复制后发布，
 桥接层不持有 sensor task 的内部源指针。
@@ -112,6 +108,9 @@ micro_ros_firmware/
 │   ├── imu_bridge.h           # IMU/温度域 ROS 桥接接口
 │   ├── can_debug_bridge.h     # CAN1 调试域 ROS 桥接接口
 │   ├── motor_bridge.h         # 电机域 ROS 桥接接口
+│   ├── micro_ros_link_state.h # micro-ROS 链路状态类型
+│   ├── micro_ros_task.h       # micro-ROS 任务接口
+│   ├── led_task.h             # LED 任务接口 + host 可测的状态到颜色策略
 │   ├── sensor_task.h          # 传感器任务接口（sensor_task_start）
 │   └── control_task.h         # 控制任务接口（control_task_start）
 ├── lib/                       # 板级/协议库（PlatformIO 自动发现）
@@ -120,18 +119,19 @@ micro_ros_firmware/
 │   ├── fdcan/                 # 三路 FDCAN 初始化/收发/中断回调/静态 RX 队列
 │   ├── motor_control/         # 电机 timeout/故障/恢复状态机（host 可测）
 │   ├── control_mailbox/       # 固定容量 mailbox 与边沿锁存（host 可测）
-│   ├── motor_protocol/        # RP/vaxor 协议编解码（纯逻辑）
-│   ├── w25q64/                # OCTOSPI2 W25Q64 驱动（启动探测默认开启）
+│   ├── motor_protocol/        # vaxor/CREB 协议编解码（纯逻辑）
+│   ├── w25q64/                # OCTOSPI2 W25Q64 驱动（保留，未接入启动路径）
 │   └── ws2812/                # WS2812 彩灯驱动（SPI6 MOSI=PA7）
 └── src/
-    ├── main.cpp               # 入口：板级初始化 + start_task 编排
+    ├── main.cpp               # Arduino 入口与 start_task 编排
+    ├── micro_ros_task.cpp     # micro-ROS agent 状态机
+    ├── led_task.cpp           # WS2812 状态显示任务 + host 可测的颜色策略
     ├── ros_bridge.cpp         # node/executor/timer 生命周期 + 域桥编排
     ├── imu_bridge.cpp         # IMU/温度发布（micro_ros/imu/data、temp）
     ├── can_debug_bridge.cpp   # CAN1 调试桥（send/receive）
     ├── motor_bridge.cpp       # 电机命令/反馈桥（/joint_commands、JointState）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
     ├── control_task.cpp       # 控制任务：三路 FDCAN + 100Hz mailbox/状态机编排
-    ├── supervisor_task.cpp    # 100ms 开发期 heartbeat 观察任务
     └── system_clock.cpp       # 覆盖 SystemClock_Config
 ```
 
@@ -169,18 +169,11 @@ cd micro_ros_firmware
 仍需联网下载依赖/ROS 2 源，网络或 TLS 不可用时会失败。常规验证不运行
 `clean_microros`，除非确实需要重建该下载环境。
 
-### W25Q64 启动探测
+### W25Q64
 
-默认构建仍保留 `HAL_OSPI_MODULE_ENABLED`，但关闭 `ENABLE_W25Q64=0` 以保持最简
-固件。需要时再用 `-DENABLE_W25Q64=1`；`start_task` 在创建其它任务前仅执行
-`w25q64_init()` 和一次 JEDEC ID 读取；前者包含 OSPI 初始化、Flash reset 和就绪
-轮询，后者应返回 `0xEF4017`。该路径不会擦除、写入或进入 memory-mapped 模式，
-初始化/ID 失败同样继续启动所有任务。
-
-已启用时，GDB 可读取 `g_w25q64_init_status`（成功为 `W25Q64_OK`）和
-`g_w25q64_jedec_id`（预期 `0xEF4017`）。关闭时使用 `-DENABLE_W25Q64=0`，入口不
-包含、不声明也不调用驱动。后续运行期读写必须由单一任务/模块所有，不能与启动
-探测或其它任务并发操作同一 OSPI 句柄。
+`lib/w25q64` 驱动及其 geometry host test 保留，但当前固件不执行启动探测，
+也不定义 W25Q64 启动开关或暴露启动诊断变量。后续运行期读写必须由明确的
+专用任务/模块单独管理 OSPI 句柄。
 
 ## 与 micro_ros_agent 联调
 
@@ -195,17 +188,30 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `micro_ros/imu/data`：`sensor_msgs/msg/Imu`（四元数、SI 角速度/线加速度）
 - `micro_ros/imu/temp`：`std_msgs/msg/Float32`（BMI088 芯片温度）
 - `/joint_commands`：订阅 `sensor_msgs/msg/JointState`；`name`/`position`/
-  `velocity`/`effort` 对应默认测试电机；vaxor 模式严格校验：恰好只发
-  `position`=位置模式、恰好只发 `velocity`=速度模式，其余情况（含仅
-  `effort`、两者同发）保持 MIT；切换模式先“停机+切模式”再运行；
-  kp/kd 用电机默认值
+  `velocity`/`effort` 对应默认测试电机。该话题只更新控制目标，不推断模式，
+  `kp/kd` 使用该关节当前配置值
+- `micro_ros/motor_mode`：订阅 `can_bridge_msgs/msg/MotorMode`，字段为
+  `joint_name` 和 `mode`（0=MIT、1=速度、2=位置）。vaxor 支持三种模式；
+  CREB 固定 MIT，只接受 0。实际模式改变会先停机、清除旧目标，随后必须发布
+  一条新的 `/joint_commands` 才会恢复运动
+- `micro_ros/motor_gains`：订阅 `can_bridge_msgs/msg/MotorGains`，字段为
+  `joint_name`、`kp`、`kd`。值必须有限且非负，并满足协议范围（vaxor：
+  `kp<=0.65535`、`kd<=655.35`；CREB：`kp<=500`、`kd<=5`）。更新只影响随后
+  收到的控制指令，不刷新命令 freshness、也不会单独触发运动；值在 agent
+  断连后保留于 RAM，MCU 重启时恢复固件默认值
 - `micro_ros/motor_enable`：订阅 `std_msgs/msg/Bool`，`false` 立即撤销授权并
   清空待处理命令；`true` 仅在 agent 已连接且无 bus/motor fault 时重新授权。
   授权恢复不会重放旧命令，必须在 `true` 之后发送一条新的 `/joint_commands`
-  命令，RP 总线才会原子执行 enable + 新广播帧，vaxor 才会重新 run
+  命令，vaxor 才会重新 run，CREB 才会重新使能并开始 100ms 等待
 - `micro_ros/JointState`：发布 `sensor_msgs/msg/JointState`（默认测试电机反馈）
+- `micro_ros/motor_status`：发布 `can_bridge_msgs/msg/MotorStatus`；每条消息对应
+  一台电机，包含 20 字节 vaxor 状态帧中的关节名、电压、故障码、电机状态、
+  校准状态、控制模式和电机类型。12 字节普通反馈不生成状态消息；每个新状态
+  快照只发布一次，不以新时间戳重复发布旧数据
 
-工程不提供 ROS 参数化热更新；拓扑和关节表固定在固件中，保持默认两电机测试配置。
+工程不提供 ROS 参数化热更新；拓扑和关节表固定在固件中，保持默认四电机测试配置：
+FDCAN1 上 vaxor ID 1/2 与 CREB R58/R48 ID 1/2。CREB 的协议 CAN ID 区间不同，
+因此可与相同节点号的 vaxor 共存。
 
 宏 `ENABLE_CAN1_DEBUG_BRIDGE=1` 开启时，额外提供 FDCAN1 调试桥
 （`can_bridge_msgs/msg/CANFrame`，与 `micro_ros_agent` 同一定义）：
@@ -222,14 +228,14 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   callback 不直接调用 FDCAN HAL，debug TX 也服从 control task 唯一发送者约束。
 - 命令 age `<100ms` 时 active；`>=100ms` 进入 soft stop，以 MIT 零位置、零速度、
   零前馈和默认 `kd` 发送阻尼；`>=300ms` 使该命令失效。vaxor 随后发送 stop，
-  RP 则只把超时电机自身的 8B broadcast slot 置 neutral，其他新鲜 slot 可继续运行。
-- RP enable/disable 是总线级动作：bus fault、`motor_enable=false` 或 agent 断连会
-  使该 RP 总线反复发送 disable；单个 RP motor fault/timeout 只隔离自己的 slot，
-  不应误伤同总线其他 slot。清除故障后仍须重新授权并提供新命令，才会在同一
-  control 周期按 enable + broadcast 顺序恢复。
+  CREB 发送一次失能 MIT 帧；同总线其他新鲜电机继续运行。
+- CREB 首次收到新命令时先发送使能零命令，等待至少 100ms 后才发送运动目标；
+  人工失能、bus/motor fault 或 agent 断连会锁存一次失能帧。清除故障后仍须
+  重新授权并提供新命令，不重放旧目标。
 - agent 已连接后若断连，所有旧命令立即失效、授权撤销、未发送 debug 帧丢弃；
   重连本身不恢复运动。先发布 `micro_ros/motor_enable=true`，再发布新命令。
-- NaN/Inf、未知 joint、非法 vaxor mode 或非法 CAN DLC 被拒绝，不刷新命令 freshness。
+- NaN/Inf、负数/越界增益、未知 joint、非法模式或非法 CAN DLC 被拒绝，
+  不刷新命令 freshness。
 
 上述是软件失效响应，不是硬件安全认证。电机/机构当前**无抱闸**，通信失效或
 零力矩后仍可能因重力、惯性或外力运动；硬件急停、机械限位、供电隔离和真机
@@ -245,7 +251,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   `g_control_can_rx_backlog_count[3]`。GDB 还可通过
   `can_rx_get_diagnostics()` 查看每路 `rx_count`、`overflow_count`、
   `hal_receive_error_count`，并查看 `g_control_tx_{ok,error}_count` 与 debug
-  mailbox 计数。control task 复制的 latest debug snapshot 仅供 ROS 发布。
+  mailbox 计数。latest CAN snapshot 仅供上层只读发布。
 - FDCAN IT0/IT1 抢占优先级固定为 5，且必须数值不小于
   `configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`，否则不可调用 FreeRTOS
   `FromISR` API；修改 NVIC/FreeRTOS priority 配置时必须同时验证该约束。
@@ -255,8 +261,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   快速失败；失败时 heater PWM 立即置 0。初始化成功后，空的二值信号量保证
   第一份有效样本必须来自真实 ACC DRDY；sensor task 写双缓冲 snapshot，ROS
   只复制已发布缓冲。运行中 SPI 失败会标记 IMU unhealthy、关闭 heater，并在
-  后续 DRDY 再尝试采样；`g_imu_init_error_count` 和 supervisor fault bit 可供 GDB
-  观察。
+  后续 DRDY 再尝试采样；`g_imu_init_error_count` 可供 GDB 观察。
 
 ## `dev-real` 无负载真机验证清单（仅人工执行）
 
@@ -265,24 +270,26 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 也不得据此宣称已达到硬件安全：
 
 - [ ] MIT 小幅零附近命令连续运行，示波器/logic analyzer 验证 control TX 为
-  100Hz，并记录 control cycle WCET、周期 jitter 与 supervisor heartbeat。
+  100Hz，并记录 control cycle WCET 与周期 jitter。
 - [ ] 停止刷新单个命令，验证 100ms 边界进入默认 `kd` 阻尼、300ms 边界 hard
-  stop；RP 仅 neutral 对应 slot，vaxor 发 stop，其他有效 RP slot 不受影响。
+  stop；vaxor 发 stop、CREB 发失能 MIT 帧，其他有效电机不受影响。
 - [ ] Agent 断连/重连，验证断连即撤销授权、清旧命令/旧 debug TX；重连后必须
   依次发送 `motor_enable=true` 与新命令，期间不得自行恢复或重放。
-- [ ] 发布 `motor_enable=false/true`，验证 RP 总线级 disable，以及只有新鲜命令
-  到达后才执行 enable + broadcast；vaxor 同样不得复用旧命令。
+- [ ] 发布 `motor_enable=false/true`，验证 vaxor/CREB 都不复用旧命令；CREB
+  重新使能后必须等待至少 100ms 才发送运动目标。
 - [ ] 注入 NaN/Inf、未知 joint、非法 mode/DLC，验证拒绝计数增加且 freshness
   不更新。
-- [ ] CAN 无 ACK/拔除收发器，验证 TX error/backlog 可见，任务与 supervisor
-  仍可观察；硬件急停作为最终保护，不依赖软件停机。
+- [ ] CAN 无 ACK/拔除收发器，验证 TX error/backlog 可见；硬件急停作为
+  最终保护，不依赖软件停机。
 - [ ] 对 CAN1 注入超过 32 帧、CAN2/3 注入超过 8 帧的 RX burst，记录每路
   `rx/overflow/backlog`、control cycle WCET/jitter，确认 drop-oldest 与每周期
   每总线最多 8 帧的有界 drain；数据率必须覆盖预计极端负载。
-- [ ] 同一 RP 总线配置多个 slot，分别制造单 slot timeout/fault 与 bus fault，
-  验证前者仅 neutral 对应 slot、后者整总线 disable，恢复顺序无旧命令重放。
+- [ ] 同一总线混挂 vaxor/CREB，分别制造单电机 timeout/fault 与 bus fault，
+  验证故障隔离、协议对应的失能帧和恢复顺序均无旧命令重放。
+- [ ] 示波器或 candump 验证 CREB 所在总线每 10ms 仅一帧 `0x080` SYNC，且
+  R58/R48 分别以 `0x301/0x302` 返回状态；测量实际反馈频率与 control jitter。
 - [ ] 断开/恢复 BMI088、阻塞 SPI 或停止 DRDY，验证 2ms transport bound、每秒
-  初始化重试、heater off、双缓冲不撕裂及 healthy/degraded heartbeat 阈值。
+  初始化重试、heater off 与双缓冲不撕裂。
 
 ## 已知问题与后续
 
@@ -293,12 +300,12 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `loop()` 被 STM32FreeRTOS 的 idle hook 调用，只能放非阻塞代码。
 - 官方 `0x520` 测试帧循环保留在 `ENABLE_CANFD_DEMO_LOOP=1` 下，默认关闭；
   开启后总线无对端 ACK 时 TX FIFO 会积压（`fdcanx_send_data` 返回失败）。
-- `control_task` 已接 JointState；默认仅 `left_shoulder_yaw_joint`（RP）与
-  `left_wrist_yaw_joint`（vaxor，节点 ID=2，当前 CAN1 实际接入）两台测试
-  电机（`sensor_msgs/JointState`），完整拓扑待后续配置扩展。
-- `lib/motor_protocol` 是协议编解码库（RP/25-30mm），由 `control_task`
-  调用 pack/unpack 生成/解析 CAN 帧；当前 CAN1 已接入一台 vaxor。
-- CAN1 调试桥 RX/TX 元素已扩到 64 字节，可承载 RP 64B 广播与 vaxor 12/20B
+- `control_task` 已接 JointState；默认表包含两台 vaxor 与两台 CREB。CREB
+  使能后等待至少 100ms 才发送运动目标，100/300ms 命令超时分别进入阻尼/失能。
+- CREB R58/R48 当前 MIT 范围分别配置为位置 `±π rad`、速度 `±π rad/s`、
+  力矩 `±45/±11 Nm`，必须与真机参数设置页一致；control task 每 10ms 在
+  CREB 所在总线发送一次 `0x080` SYNC，触发周期状态反馈。
+- CAN1 调试桥 RX/TX 元素已扩到 64 字节，可承载 CREB/vaxor CAN FD
   帧；`CANFrame.id` 为 `uint16`，29 位扩展 ID 仅能表示低 16 位。
 - RX burst 下的实际 control WCET/jitter、队列容量余量及 100/300ms 动作边界尚需
   按上述清单在 `dev-real` 无负载测量；host/固件编译不能替代真机时序证据。

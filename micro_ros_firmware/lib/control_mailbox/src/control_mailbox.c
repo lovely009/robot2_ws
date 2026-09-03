@@ -1,10 +1,18 @@
 #include "control_mailbox.h"
 
+#include <math.h>
 #include <string.h>
 
 static void clear_commands(control_mailbox_t *mailbox) {
   for (size_t index = 0; index < mailbox->joint_count; ++index) {
     mailbox->command_slots[index].pending = false;
+  }
+}
+
+static void clear_configuration_requests(control_mailbox_t *mailbox) {
+  for (size_t index = 0; index < mailbox->joint_count; ++index) {
+    mailbox->mode_slots[index].pending = false;
+    mailbox->gains_slots[index].pending = false;
   }
 }
 
@@ -23,12 +31,18 @@ static void drop_live_mailbox_state(control_mailbox_t *mailbox) {
     return;
   }
   clear_commands(mailbox);
+  clear_configuration_requests(mailbox);
   mailbox->debug_pending = false;
 }
 
 static bool is_valid_command(const motor_control_command_t *command) {
   return command != NULL && command->joint_name[0] != '\0' &&
          memchr(command->joint_name, '\0', sizeof(command->joint_name)) != NULL;
+}
+
+static bool valid_joint_name(const char *joint_name) {
+  return joint_name != NULL && joint_name[0] != '\0' &&
+         memchr(joint_name, '\0', MOTOR_CONTROL_JOINT_NAME_CAPACITY) != NULL;
 }
 
 static bool is_valid_debug_frame(const motor_control_tx_action_t *frame) {
@@ -63,6 +77,7 @@ void control_mailbox_init(control_mailbox_t *mailbox,
     }
     size_t name_size = (size_t)(terminator - name) + 1U;
     memcpy(mailbox->joint_names[mailbox->joint_count], name, name_size);
+    mailbox->protocols[mailbox->joint_count] = motors[source].protocol;
     ++mailbox->joint_count;
   }
 }
@@ -116,6 +131,82 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox, size_t index,
   }
   mailbox->command_slots[index].pending = false;
   return true;
+}
+
+bool control_mailbox_submit_mode(
+    control_mailbox_t *mailbox, const motor_control_mode_request_t *request) {
+  if (mailbox == NULL || request == NULL ||
+      !valid_joint_name(request->joint_name)) {
+    return false;
+  }
+  for (size_t index = 0; index < mailbox->joint_count; ++index) {
+    if (strcmp(mailbox->joint_names[index], request->joint_name) == 0) {
+      if ((mailbox->protocols[index] == MOTOR_CONTROL_VAXOR &&
+           request->mode > MOTOR_PROTOCOL_WRIST_MODE_POSITION) ||
+          (mailbox->protocols[index] == MOTOR_CONTROL_CREB &&
+           request->mode != MOTOR_PROTOCOL_WRIST_MODE_MIT)) {
+        return false;
+      }
+      mailbox->command_slots[index].pending = false;
+      mailbox->mode_slots[index].request = *request;
+      mailbox->mode_slots[index].pending = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool control_mailbox_take_mode(control_mailbox_t *mailbox, size_t index,
+                               motor_control_mode_request_t *request) {
+  if (mailbox == NULL || request == NULL || index >= mailbox->joint_count ||
+      !mailbox->mode_slots[index].pending) {
+    return false;
+  }
+  *request = mailbox->mode_slots[index].request;
+  mailbox->mode_slots[index].pending = false;
+  return true;
+}
+
+bool control_mailbox_submit_gains(
+    control_mailbox_t *mailbox, const motor_control_gains_request_t *request) {
+  if (mailbox == NULL || request == NULL ||
+      !valid_joint_name(request->joint_name) || !isfinite(request->kp) ||
+      !isfinite(request->kd) || request->kp < 0.0 || request->kd < 0.0) {
+    return false;
+  }
+  for (size_t index = 0; index < mailbox->joint_count; ++index) {
+    if (strcmp(mailbox->joint_names[index], request->joint_name) == 0) {
+      if ((mailbox->protocols[index] == MOTOR_CONTROL_VAXOR &&
+           (request->kp > 0.65535 || request->kd > 655.35)) ||
+          (mailbox->protocols[index] == MOTOR_CONTROL_CREB &&
+           (request->kp > 500.0 || request->kd > 5.0))) {
+        return false;
+      }
+      mailbox->command_slots[index].pending = false;
+      mailbox->gains_slots[index].request = *request;
+      mailbox->gains_slots[index].pending = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool control_mailbox_take_gains(control_mailbox_t *mailbox, size_t index,
+                                motor_control_gains_request_t *request) {
+  if (mailbox == NULL || request == NULL || index >= mailbox->joint_count ||
+      !mailbox->gains_slots[index].pending) {
+    return false;
+  }
+  *request = mailbox->gains_slots[index].request;
+  mailbox->gains_slots[index].pending = false;
+  return true;
+}
+
+bool control_mailbox_has_configuration(const control_mailbox_t *mailbox,
+                                       size_t index) {
+  return mailbox != NULL && index < mailbox->joint_count &&
+         (mailbox->mode_slots[index].pending ||
+          mailbox->gains_slots[index].pending);
 }
 
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,

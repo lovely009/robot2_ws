@@ -69,7 +69,6 @@ all: CMakeFiles/test_control_mailbox.dir/all
 all: CMakeFiles/test_can_rx_ring.dir/all
 all: CMakeFiles/test_imu_snapshot.dir/all
 all: CMakeFiles/test_bmi088_transport_status.dir/all
-all: CMakeFiles/test_supervisor_heartbeat.dir/all
 all: CMakeFiles/test_w25q64_geometry.dir/all
 .PHONY : all
 
@@ -84,7 +83,6 @@ clean: CMakeFiles/test_control_mailbox.dir/clean
 clean: CMakeFiles/test_can_rx_ring.dir/clean
 clean: CMakeFiles/test_imu_snapshot.dir/clean
 clean: CMakeFiles/test_bmi088_transport_status.dir/clean
-clean: CMakeFiles/test_supervisor_heartbeat.dir/clean
 clean: CMakeFiles/test_w25q64_geometry.dir/clean
 .PHONY : clean
 
@@ -245,39 +243,13 @@ CMakeFiles/test_bmi088_transport_status.dir/clean:
 .PHONY : CMakeFiles/test_bmi088_transport_status.dir/clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/test_supervisor_heartbeat.dir
-
-# All Build rule for target.
-CMakeFiles/test_supervisor_heartbeat.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles --progress-num=19,20,21 "Built target test_supervisor_heartbeat"
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/test_supervisor_heartbeat.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_supervisor_heartbeat.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles 0
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/rule
-
-# Convenience name for target.
-test_supervisor_heartbeat: CMakeFiles/test_supervisor_heartbeat.dir/rule
-.PHONY : test_supervisor_heartbeat
-
-# clean rule for target.
-CMakeFiles/test_supervisor_heartbeat.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/clean
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/clean
-
-#=============================================================================
 # Target rules for target CMakeFiles/test_w25q64_geometry.dir
 
 # All Build rule for target.
 CMakeFiles/test_w25q64_geometry.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles --progress-num=22,23,24 "Built target test_w25q64_geometry"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles --progress-num=19,20,21 "Built target test_w25q64_geometry"
 .PHONY : CMakeFiles/test_w25q64_geometry.dir/all
 
 # Build rule for subdir invocation for target.

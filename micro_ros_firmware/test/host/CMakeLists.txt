@@ -49,6 +49,15 @@ target_include_directories(test_can_rx_ring PRIVATE
 
 add_test(NAME can_rx_ring COMMAND test_can_rx_ring)
 
+add_executable(test_can_snapshot
+  test_can_snapshot.cpp
+  ../../lib/fdcan/src/can_snapshot.c)
+
+target_include_directories(test_can_snapshot PRIVATE
+  ../../lib/fdcan/include)
+
+add_test(NAME can_snapshot COMMAND test_can_snapshot)
+
 add_executable(test_imu_snapshot
   test_imu_snapshot.cpp
   ../../lib/imu/src/imu_snapshot.c)
@@ -67,15 +76,6 @@ target_include_directories(test_bmi088_transport_status PRIVATE
 
 add_test(NAME bmi088_transport_status COMMAND test_bmi088_transport_status)
 
-add_executable(test_supervisor_heartbeat
-  test_supervisor_heartbeat.cpp
-  ../../lib/supervisor/src/supervisor_heartbeat.c)
-
-target_include_directories(test_supervisor_heartbeat PRIVATE
-  ../../lib/supervisor/include)
-
-add_test(NAME supervisor_heartbeat COMMAND test_supervisor_heartbeat)
-
 add_executable(test_w25q64_geometry
   test_w25q64_geometry.cpp
   ../../lib/w25q64/src/w25q64_geometry.c)
@@ -84,3 +84,16 @@ target_include_directories(test_w25q64_geometry PRIVATE
   ../../lib/w25q64/include)
 
 add_test(NAME w25q64_geometry COMMAND test_w25q64_geometry)
+
+add_executable(test_led_status
+  test_led_status.cpp
+  ../../src/led_task.cpp)
+
+target_include_directories(test_led_status PRIVATE
+  ../../include)
+
+# led_task.cpp 用 HOST_TEST 跳过 Arduino/FreeRTOS 段，host 只测颜色策略
+target_compile_definitions(test_led_status PRIVATE
+  HOST_TEST=1)
+
+add_test(NAME led_status COMMAND test_led_status)

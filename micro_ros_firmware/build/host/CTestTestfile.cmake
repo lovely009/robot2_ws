@@ -16,7 +16,5 @@ add_test(imu_snapshot "/home/ly/robot_ws/micro_ros_firmware/build/host/test_imu_
 set_tests_properties(imu_snapshot PROPERTIES  _BACKTRACE_TRIPLES "/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;59;add_test;/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;0;")
 add_test(bmi088_transport_status "/home/ly/robot_ws/micro_ros_firmware/build/host/test_bmi088_transport_status")
 set_tests_properties(bmi088_transport_status PROPERTIES  _BACKTRACE_TRIPLES "/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;68;add_test;/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;0;")
-add_test(supervisor_heartbeat "/home/ly/robot_ws/micro_ros_firmware/build/host/test_supervisor_heartbeat")
-set_tests_properties(supervisor_heartbeat PROPERTIES  _BACKTRACE_TRIPLES "/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;77;add_test;/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;0;")
 add_test(w25q64_geometry "/home/ly/robot_ws/micro_ros_firmware/build/host/test_w25q64_geometry")
-set_tests_properties(w25q64_geometry PROPERTIES  _BACKTRACE_TRIPLES "/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;86;add_test;/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;0;")
+set_tests_properties(w25q64_geometry PROPERTIES  _BACKTRACE_TRIPLES "/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;77;add_test;/home/ly/robot_ws/micro_ros_firmware/test/host/CMakeLists.txt;0;")

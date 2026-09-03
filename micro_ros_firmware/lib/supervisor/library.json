@@ -1,8 +1,0 @@
-{
-  "name": "supervisor_heartbeat",
-  "version": "1.0.0",
-  "build": {
-    "includeDir": "include",
-    "srcDir": "src"
-  }
-}

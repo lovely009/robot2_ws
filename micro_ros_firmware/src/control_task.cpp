@@ -2,7 +2,7 @@
 //
 // control task 是正常电机命令的唯一发送者：ROS 回调只覆盖静态 mailbox，
 // 本任务按 10 ms 绝对周期消费命令、推进 motor_control 并下发 FDCAN action。
-// 固件暂不维护完整拓扑，只保留当前两台默认测试电机。
+// 固件暂不维护完整拓扑，只保留当前四台默认测试电机。
 
 #include "control_task.h"
 
@@ -11,9 +11,9 @@
 #include <string.h>
 
 #include "can_bsp.h"
+#include "can_snapshot.h"
 #include "control_mailbox.h"
 #include "motor_protocol.h"
-#include "supervisor_task.h"
 
 #if !defined(ENABLE_CANFD_DEMO_LOOP)
 #define ENABLE_CANFD_DEMO_LOOP 0
@@ -28,14 +28,20 @@ static const uint16_t kControlPeriodMs = 10;
 // 保证 RX burst 不会无界占用 10 ms TX 周期。
 static const size_t kCanRxDrainBudgetPerBus = 8U;
 
-// 固定默认测试电机：当前 firmware 仅保留 vaxor 25/30mm 电机。
+// 固定默认测试电机：FDCAN1 同时挂载 vaxor 25/30mm 与 CREB R58/R48。
 // 拓扑固定为当前默认表，后续需扩展时应在更高层引入明确的配置入口，
 // 不能把动态拓扑配置混进当前固件控制任务。
 static const motor_control_motor_config_t kDefaultMotors[] = {
-    {"left_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 2, 0,
+    {"left_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 1, 0,
      50.0, 0.65, 0.042, 0.008, 1.0},
-    {"right_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 3, 0,
+    {"right_wrist_yaw_joint", MOTOR_CONTROL_VAXOR, 2, 0,
      50.0, 0.65, 0.042, 0.008, 1.0},
+    {"left_shoulder_yaw_joint", MOTOR_CONTROL_CREB, 1, 0,
+     101.0, 1.0, 0.086, 30.0, 1.0,
+     MOTOR_PROTOCOL_PI, MOTOR_PROTOCOL_PI, 45.0},
+    {"right_shoulder_yaw_joint", MOTOR_CONTROL_CREB, 2, 0,
+     101.0, 1.0, 0.077, 30.0, 1.0,
+     MOTOR_PROTOCOL_PI, MOTOR_PROTOCOL_PI, 11.0},
 };
 static const size_t kDefaultMotorCount =
     sizeof(kDefaultMotors) / sizeof(kDefaultMotors[0]);
@@ -52,9 +58,6 @@ static const size_t kCanHandleCount =
 
 static motor_control_context_t g_motor_control;
 static control_mailbox_t g_control_mailbox;
-static can_rx_frame_t g_can_debug_snapshots[CAN_RX_BUS_COUNT];
-static uint32_t g_can_debug_sequences[CAN_RX_BUS_COUNT];
-
 // ROS/link 任务只覆盖请求；motor_control_context_t 始终由 control task 修改。
 static bool g_mailbox_initialized = false;
 static bool g_task_started = false;
@@ -69,6 +72,16 @@ volatile uint32_t g_control_debug_sent_count = 0;
 volatile uint32_t g_control_can_rx_backlog_count[CAN_RX_BUS_COUNT] = {0};
 static volatile uint32_t g_control_tx_ok_count = 0;
 static volatile uint32_t g_control_tx_error_count = 0;
+
+uint32_t control_task_can_snapshot(uint8_t bus_index, can_rx_frame_t *out) {
+  if (bus_index >= CAN_RX_BUS_COUNT) {
+    return 0U;
+  }
+  taskENTER_CRITICAL();
+  uint32_t sequence = can_snapshot_read(bus_index, out);
+  taskEXIT_CRITICAL();
+  return sequence;
+}
 
 static void ensure_mailbox_initialized_locked() {
   if (!g_mailbox_initialized) {
@@ -88,6 +101,22 @@ bool control_task_submit_command(const motor_control_command_t *command,
   if (accepted) {
     ++g_control_motor_found_count;
   }
+  taskEXIT_CRITICAL();
+  return accepted;
+}
+
+bool control_task_submit_mode(const motor_control_mode_request_t *request) {
+  taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
+  bool accepted = control_mailbox_submit_mode(&g_control_mailbox, request);
+  taskEXIT_CRITICAL();
+  return accepted;
+}
+
+bool control_task_submit_gains(const motor_control_gains_request_t *request) {
+  taskENTER_CRITICAL();
+  ensure_mailbox_initialized_locked();
+  bool accepted = control_mailbox_submit_gains(&g_control_mailbox, request);
   taskEXIT_CRITICAL();
   return accepted;
 }
@@ -137,18 +166,25 @@ bool control_task_get_joint_state(size_t index, control_joint_state_t *out) {
   return valid;
 }
 
-uint32_t control_task_can_debug_snapshot(uint8_t bus_index,
-                                         can_rx_frame_t *out) {
-  if (bus_index >= CAN_RX_BUS_COUNT) {
-    return 0U;
+bool control_task_get_motor_status(size_t index, control_motor_status_t *out) {
+  if (index >= kDefaultMotorCount || out == nullptr) {
+    return false;
   }
   taskENTER_CRITICAL();
-  uint32_t sequence = g_can_debug_sequences[bus_index];
-  if (out != nullptr) {
-    *out = g_can_debug_snapshots[bus_index];
+  motor_control_motor_status_t status = {};
+  bool valid = motor_control_get_motor_status(&g_motor_control, index, &status);
+  if (valid) {
+    memcpy(out->joint_name, status.joint_name, sizeof(out->joint_name));
+    out->sequence = status.sequence;
+    out->voltage = static_cast<float>(status.voltage_v);
+    out->fault = status.fault;
+    out->motor_state = status.motor_state;
+    out->calibration_state = status.calibration_state;
+    out->mode = status.mode;
+    out->motor_type = status.motor_type;
   }
   taskEXIT_CRITICAL();
-  return sequence;
+  return valid;
 }
 
 static void drain_control_requests() {
@@ -174,23 +210,46 @@ static void drain_control_requests() {
   }
 }
 
-static void drain_command_mailboxes() {
-  control_mailbox_command_slot_t pending[kDefaultMotorCount] = {};
+static void drain_motor_mailboxes() {
+  control_mailbox_command_slot_t commands[kDefaultMotorCount] = {};
+  control_mailbox_mode_slot_t modes[kDefaultMotorCount] = {};
+  control_mailbox_gains_slot_t gains[kDefaultMotorCount] = {};
 
   taskENTER_CRITICAL();
   ensure_mailbox_initialized_locked();
   for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    pending[index].pending = control_mailbox_take_command(
-        &g_control_mailbox, index, &pending[index].command,
-        &pending[index].received_ms, &pending[index].sequence);
+    bool configuration_pending =
+        control_mailbox_has_configuration(&g_control_mailbox, index);
+    modes[index].pending = control_mailbox_take_mode(
+        &g_control_mailbox, index, &modes[index].request);
+    gains[index].pending = control_mailbox_take_gains(
+        &g_control_mailbox, index, &gains[index].request);
+    if (!configuration_pending) {
+      commands[index].pending = control_mailbox_take_command(
+          &g_control_mailbox, index, &commands[index].command,
+          &commands[index].received_ms, &commands[index].sequence);
+    }
   }
   taskEXIT_CRITICAL();
 
+  // 配置建立一个完整控制周期的屏障：先让 motor_control 发送停机/模式帧，
+  // 配置之后到达的新命令留到下一周期，不能在同一 step 内直接 run。
   for (size_t index = 0; index < kDefaultMotorCount; ++index) {
-    if (pending[index].pending) {
+    if (modes[index].pending) {
+      (void)motor_control_set_mode(&g_motor_control,
+                                   modes[index].request.joint_name,
+                                   modes[index].request.mode);
+    }
+    if (gains[index].pending) {
+      (void)motor_control_set_gains(&g_motor_control,
+                                    gains[index].request.joint_name,
+                                    gains[index].request.kp,
+                                    gains[index].request.kd);
+    }
+    if (commands[index].pending) {
       (void)motor_control_accept_command(&g_motor_control,
-                                         &pending[index].command,
-                                         pending[index].received_ms);
+                                         &commands[index].command,
+                                         commands[index].received_ms);
     }
   }
 }
@@ -206,10 +265,9 @@ static void accept_can_feedback(const can_rx_frame_t *frame) {
   (void)motor_control_accept_feedback(&g_motor_control, &feedback);
 }
 
-static void update_can_debug_snapshot(const can_rx_frame_t *frame) {
+static void update_can_snapshot(const can_rx_frame_t *frame) {
   taskENTER_CRITICAL();
-  g_can_debug_snapshots[frame->bus_index] = *frame;
-  ++g_can_debug_sequences[frame->bus_index];
+  can_snapshot_store(frame->bus_index, frame);
   taskEXIT_CRITICAL();
 }
 
@@ -219,7 +277,7 @@ static void drain_can_rx_queues() {
     can_rx_frame_t frame = {};
     while (processed < kCanRxDrainBudgetPerBus &&
            can_rx_queue_pop(bus_index, &frame)) {
-      update_can_debug_snapshot(&frame);
+      update_can_snapshot(&frame);
       accept_can_feedback(&frame);
       ++processed;
     }
@@ -304,15 +362,13 @@ static void control_task_fn(void *arg) {
   TickType_t last_wake = xTaskGetTickCount();
   for (;;) {
     drain_control_requests();
-    drain_command_mailboxes();
+    drain_motor_mailboxes();
     drain_can_rx_queues();
     run_motor_control_cycle(millis());
     run_debug_tx_cycle();
 #if ENABLE_CANFD_DEMO_LOOP
     run_canfd_demo_cycle();
 #endif
-    // 完成一次 10 ms 控制状态机周期后才计入进展。
-    supervisor_heartbeat(SUPERVISOR_TASK_CONTROL);
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(kControlPeriodMs));
   }
 }

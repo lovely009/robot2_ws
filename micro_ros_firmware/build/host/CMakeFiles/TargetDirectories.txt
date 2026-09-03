@@ -4,7 +4,6 @@
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test_can_rx_ring.dir
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test_imu_snapshot.dir
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test_bmi088_transport_status.dir
-/home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test_supervisor_heartbeat.dir
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test_w25q64_geometry.dir
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/test.dir
 /home/ly/robot_ws/micro_ros_firmware/build/host/CMakeFiles/edit_cache.dir

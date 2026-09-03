@@ -67,10 +67,11 @@ all: CMakeFiles/test_motor_protocol.dir/all
 all: CMakeFiles/test_motor_control.dir/all
 all: CMakeFiles/test_control_mailbox.dir/all
 all: CMakeFiles/test_can_rx_ring.dir/all
+all: CMakeFiles/test_can_snapshot.dir/all
 all: CMakeFiles/test_imu_snapshot.dir/all
 all: CMakeFiles/test_bmi088_transport_status.dir/all
-all: CMakeFiles/test_supervisor_heartbeat.dir/all
 all: CMakeFiles/test_w25q64_geometry.dir/all
+all: CMakeFiles/test_led_status.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -82,10 +83,11 @@ clean: CMakeFiles/test_motor_protocol.dir/clean
 clean: CMakeFiles/test_motor_control.dir/clean
 clean: CMakeFiles/test_control_mailbox.dir/clean
 clean: CMakeFiles/test_can_rx_ring.dir/clean
+clean: CMakeFiles/test_can_snapshot.dir/clean
 clean: CMakeFiles/test_imu_snapshot.dir/clean
 clean: CMakeFiles/test_bmi088_transport_status.dir/clean
-clean: CMakeFiles/test_supervisor_heartbeat.dir/clean
 clean: CMakeFiles/test_w25q64_geometry.dir/clean
+clean: CMakeFiles/test_led_status.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -95,7 +97,7 @@ clean: CMakeFiles/test_w25q64_geometry.dir/clean
 CMakeFiles/test_motor_protocol.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_protocol.dir/build.make CMakeFiles/test_motor_protocol.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_protocol.dir/build.make CMakeFiles/test_motor_protocol.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=16,17,18 "Built target test_motor_protocol"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=22,23,24 "Built target test_motor_protocol"
 .PHONY : CMakeFiles/test_motor_protocol.dir/all
 
 # Build rule for subdir invocation for target.
@@ -121,7 +123,7 @@ CMakeFiles/test_motor_protocol.dir/clean:
 CMakeFiles/test_motor_control.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_control.dir/build.make CMakeFiles/test_motor_control.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_control.dir/build.make CMakeFiles/test_motor_control.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=12,13,14,15 "Built target test_motor_control"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=18,19,20,21 "Built target test_motor_control"
 .PHONY : CMakeFiles/test_motor_control.dir/all
 
 # Build rule for subdir invocation for target.
@@ -147,7 +149,7 @@ CMakeFiles/test_motor_control.dir/clean:
 CMakeFiles/test_control_mailbox.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_control_mailbox.dir/build.make CMakeFiles/test_control_mailbox.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_control_mailbox.dir/build.make CMakeFiles/test_control_mailbox.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=6,7,8 "Built target test_control_mailbox"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=9,10,11 "Built target test_control_mailbox"
 .PHONY : CMakeFiles/test_control_mailbox.dir/all
 
 # Build rule for subdir invocation for target.
@@ -193,13 +195,39 @@ CMakeFiles/test_can_rx_ring.dir/clean:
 .PHONY : CMakeFiles/test_can_rx_ring.dir/clean
 
 #=============================================================================
+# Target rules for target CMakeFiles/test_can_snapshot.dir
+
+# All Build rule for target.
+CMakeFiles/test_can_snapshot.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=6,7,8 "Built target test_can_snapshot"
+.PHONY : CMakeFiles/test_can_snapshot.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_can_snapshot.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_can_snapshot.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 0
+.PHONY : CMakeFiles/test_can_snapshot.dir/rule
+
+# Convenience name for target.
+test_can_snapshot: CMakeFiles/test_can_snapshot.dir/rule
+.PHONY : test_can_snapshot
+
+# clean rule for target.
+CMakeFiles/test_can_snapshot.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/clean
+.PHONY : CMakeFiles/test_can_snapshot.dir/clean
+
+#=============================================================================
 # Target rules for target CMakeFiles/test_imu_snapshot.dir
 
 # All Build rule for target.
 CMakeFiles/test_imu_snapshot.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_imu_snapshot.dir/build.make CMakeFiles/test_imu_snapshot.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_imu_snapshot.dir/build.make CMakeFiles/test_imu_snapshot.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=9,10,11 "Built target test_imu_snapshot"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=12,13,14 "Built target test_imu_snapshot"
 .PHONY : CMakeFiles/test_imu_snapshot.dir/all
 
 # Build rule for subdir invocation for target.
@@ -245,39 +273,13 @@ CMakeFiles/test_bmi088_transport_status.dir/clean:
 .PHONY : CMakeFiles/test_bmi088_transport_status.dir/clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/test_supervisor_heartbeat.dir
-
-# All Build rule for target.
-CMakeFiles/test_supervisor_heartbeat.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=19,20,21 "Built target test_supervisor_heartbeat"
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/test_supervisor_heartbeat.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_supervisor_heartbeat.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 0
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/rule
-
-# Convenience name for target.
-test_supervisor_heartbeat: CMakeFiles/test_supervisor_heartbeat.dir/rule
-.PHONY : test_supervisor_heartbeat
-
-# clean rule for target.
-CMakeFiles/test_supervisor_heartbeat.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/clean
-.PHONY : CMakeFiles/test_supervisor_heartbeat.dir/clean
-
-#=============================================================================
 # Target rules for target CMakeFiles/test_w25q64_geometry.dir
 
 # All Build rule for target.
 CMakeFiles/test_w25q64_geometry.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=22,23,24 "Built target test_w25q64_geometry"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=25,26,27 "Built target test_w25q64_geometry"
 .PHONY : CMakeFiles/test_w25q64_geometry.dir/all
 
 # Build rule for subdir invocation for target.
@@ -295,6 +297,32 @@ test_w25q64_geometry: CMakeFiles/test_w25q64_geometry.dir/rule
 CMakeFiles/test_w25q64_geometry.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/clean
 .PHONY : CMakeFiles/test_w25q64_geometry.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/test_led_status.dir
+
+# All Build rule for target.
+CMakeFiles/test_led_status.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles --progress-num=15,16,17 "Built target test_led_status"
+.PHONY : CMakeFiles/test_led_status.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_led_status.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_led_status.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ly/robot_ws/micro_ros_firmware/test/host/build/CMakeFiles 0
+.PHONY : CMakeFiles/test_led_status.dir/rule
+
+# Convenience name for target.
+test_led_status: CMakeFiles/test_led_status.dir/rule
+.PHONY : test_led_status
+
+# clean rule for target.
+CMakeFiles/test_led_status.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/clean
+.PHONY : CMakeFiles/test_led_status.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

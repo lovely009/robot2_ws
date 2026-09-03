@@ -1,6 +1,6 @@
 // 控制业务任务接口（官方 CtrBoard-H7_FDCAN 例程移植）。
 // 当前承载三路 FDCAN 初始化、100 Hz 电机控制周期与反馈快照；固件固定内置
-// 两个默认测试 vaxor 电机，不维护运行时动态拓扑配置。
+// 两台 vaxor 与两台 CREB 测试电机，不维护运行时动态拓扑配置。
 
 #ifndef CONTROL_TASK_H
 #define CONTROL_TASK_H
@@ -27,6 +27,10 @@ bool control_task_fdcan_ready(void);
 bool control_task_submit_command(const motor_control_command_t *command,
                                  uint32_t received_ms);
 
+// 模式与增益使用独立 mailbox；配置更新不直接触发运动，且只影响后续命令。
+bool control_task_submit_mode(const motor_control_mode_request_t *request);
+bool control_task_submit_gains(const motor_control_gains_request_t *request);
+
 // 覆盖单槽 debug CAN mailbox；control task 每周期最多消费一帧。
 bool control_task_submit_debug_frame(const motor_control_tx_action_t *frame);
 
@@ -48,10 +52,24 @@ typedef struct {
 // 按默认电机表索引复制最新反馈；尚未收到该关节反馈或索引越界时返回 false。
 bool control_task_get_joint_state(size_t index, control_joint_state_t *out);
 
-// control task 在消费主 RX 队列时复制的每总线最新原始帧；调试桥只读该采样，
-// 不与控制路径争抢主队列。返回自增序号，参数非法时返回 0。
-uint32_t control_task_can_debug_snapshot(uint8_t bus_index,
-                                         can_rx_frame_t *out);
+// vaxor 20 字节状态帧中的诊断字段；12 字节普通反馈不会产生该快照。
+typedef struct {
+  char joint_name[32];
+  uint32_t sequence;
+  float voltage;
+  uint32_t fault;
+  uint8_t motor_state;
+  uint8_t calibration_state;
+  uint8_t mode;
+  uint8_t motor_type;
+} control_motor_status_t;
+
+// 按默认电机表索引复制最新状态；尚未收到 20 字节状态帧时返回 false。
+bool control_task_get_motor_status(size_t index, control_motor_status_t *out);
+
+// 返回每总线最新原始 RX 帧的副本；不与控制路径争抢主队列。
+// 返回自增序号，参数非法时返回 0。
+uint32_t control_task_can_snapshot(uint8_t bus_index, can_rx_frame_t *out);
 
 // 调试计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
 extern volatile uint32_t g_control_motor_cmd_count;

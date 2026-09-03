@@ -205,19 +205,6 @@ test_bmi088_transport_status/fast:
 .PHONY : test_bmi088_transport_status/fast
 
 #=============================================================================
-# Target rules for targets named test_supervisor_heartbeat
-
-# Build rule for target.
-test_supervisor_heartbeat: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_supervisor_heartbeat
-.PHONY : test_supervisor_heartbeat
-
-# fast build rule for target.
-test_supervisor_heartbeat/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/build
-.PHONY : test_supervisor_heartbeat/fast
-
-#=============================================================================
 # Target rules for targets named test_w25q64_geometry
 
 # Build rule for target.
@@ -352,30 +339,6 @@ home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_protocol.dir/build.make CMakeFiles/test_motor_protocol.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_control.dir/build.make CMakeFiles/test_motor_control.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s
-
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o
-
-# target to build an object file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i
-
-# target to preprocess a source file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s
-
-# target to generate assembly for a file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
 
 home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o: home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.o
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o
@@ -545,30 +508,6 @@ test_motor_protocol.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_protocol.dir/build.make CMakeFiles/test_motor_protocol.dir/test_motor_protocol.cpp.s
 .PHONY : test_motor_protocol.cpp.s
 
-test_supervisor_heartbeat.o: test_supervisor_heartbeat.cpp.o
-.PHONY : test_supervisor_heartbeat.o
-
-# target to build an object file
-test_supervisor_heartbeat.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.o
-.PHONY : test_supervisor_heartbeat.cpp.o
-
-test_supervisor_heartbeat.i: test_supervisor_heartbeat.cpp.i
-.PHONY : test_supervisor_heartbeat.i
-
-# target to preprocess a source file
-test_supervisor_heartbeat.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.i
-.PHONY : test_supervisor_heartbeat.cpp.i
-
-test_supervisor_heartbeat.s: test_supervisor_heartbeat.cpp.s
-.PHONY : test_supervisor_heartbeat.s
-
-# target to generate assembly for a file
-test_supervisor_heartbeat.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.s
-.PHONY : test_supervisor_heartbeat.cpp.s
-
 test_w25q64_geometry.o: test_w25q64_geometry.cpp.o
 .PHONY : test_w25q64_geometry.o
 
@@ -608,7 +547,6 @@ help:
 	@echo "... test_imu_snapshot"
 	@echo "... test_motor_control"
 	@echo "... test_motor_protocol"
-	@echo "... test_supervisor_heartbeat"
 	@echo "... test_w25q64_geometry"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.i"
@@ -625,9 +563,6 @@ help:
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.s"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.s"
@@ -649,9 +584,6 @@ help:
 	@echo "... test_motor_protocol.o"
 	@echo "... test_motor_protocol.i"
 	@echo "... test_motor_protocol.s"
-	@echo "... test_supervisor_heartbeat.o"
-	@echo "... test_supervisor_heartbeat.i"
-	@echo "... test_supervisor_heartbeat.s"
 	@echo "... test_w25q64_geometry.o"
 	@echo "... test_w25q64_geometry.i"
 	@echo "... test_w25q64_geometry.s"

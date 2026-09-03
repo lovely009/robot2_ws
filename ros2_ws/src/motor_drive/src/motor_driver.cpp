@@ -190,6 +190,9 @@ CanTransportRegistry CanTransportRegistry::with_builtin_transports() {
 void MotorDriver::close() noexcept {
   for (auto &bus : buses_) {
     bus.transport.reset();
+    for (auto &group : bus.groups) {
+      group.enabled = false;
+    }
   }
 }
 
@@ -212,15 +215,18 @@ bool MotorDriver::set_enabled(const bool enabled) {
     return false;
   }
   bool ok = true;
-  // 使能帧由协议策略生成：RP 可能是一条广播帧，25/30 mm 则可能每台一帧。
+  // 使能帧由协议策略生成；通用层不假设广播或逐节点等线协议细节。
   // 通用层只负责把策略返回的帧发送到正确的总线。
-  for (const auto &bus : buses_) {
-    for (const auto &group : bus.groups) {
+  for (auto &bus : buses_) {
+    for (auto &group : bus.groups) {
       const auto frames = group.protocol->make_enable_frames(
           config_.motors, group.motor_indices, enabled);
+      bool group_ok = true;
       for (const auto &frame : frames) {
-        ok &= send_frame(*bus.transport, frame);
+        group_ok &= send_frame(*bus.transport, frame);
       }
+      group.enabled = enabled && group_ok;
+      ok &= group_ok;
     }
   }
   return ok;
@@ -237,7 +243,7 @@ bool MotorDriver::write_commands(
   for (const auto &bus : buses_) {
     for (const auto &group : bus.groups) {
       const auto frames = group.protocol->make_command_frames(
-          config_.motors, group.motor_indices, commands);
+          config_.motors, group.motor_indices, commands, group.enabled);
       for (const auto &frame : frames) {
         ok &= send_frame(*bus.transport, frame);
       }

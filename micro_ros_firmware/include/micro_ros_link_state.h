@@ -1,0 +1,11 @@
+#ifndef MICRO_ROS_LINK_STATE_H
+#define MICRO_ROS_LINK_STATE_H
+
+typedef enum {
+  MICRO_ROS_LINK_WAIT_AGENT,
+  MICRO_ROS_LINK_CONNECT,
+  MICRO_ROS_LINK_RUN,
+  MICRO_ROS_LINK_LOST,
+} micro_ros_link_state_t;
+
+#endif

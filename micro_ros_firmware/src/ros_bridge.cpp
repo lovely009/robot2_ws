@@ -36,7 +36,7 @@ static const size_t kExecutorHandles = 1
     + 1
 #endif
 #if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
-    + 2
+    + 4
 #endif
     ;
 

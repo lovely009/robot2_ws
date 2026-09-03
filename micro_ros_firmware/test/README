@@ -12,11 +12,12 @@ cmake --build .host-build --clean-first
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口直接在主机上编译 `lib/motor_protocol`、`lib/motor_control` 与
+该入口直接在主机上编译 `src/led_task.cpp`（`HOST_TEST` 宏下只含纯颜色策略）、
+`lib/motor_protocol`、`lib/motor_control` 与
 `lib/control_mailbox`，并覆盖 FDCAN drop-oldest ring 模型、IMU double-buffer
-snapshot/transport error latch、supervisor heartbeat evaluator。当前 CTest 应发现
-7 个测试：`motor_protocol`、`motor_control`、`control_mailbox`、`can_rx_ring`、
-`imu_snapshot`、`bmi088_transport_status`、`supervisor_heartbeat`。它不模拟 HAL、
+ snapshot/transport error latch，以及链路状态到颜色的 LED 策略。当前 CTest 应发现 8 个测试：`led_status`、`motor_protocol`、
+`motor_control`、`control_mailbox`、`can_rx_ring`、`imu_snapshot`、
+`bmi088_transport_status`、`w25q64_geometry`。它不模拟 HAL、
 FreeRTOS 或 rclc；目标板编译只证明静态集成/链接，不代替真机时序和失效测试。
 
 ## 固件 clean 构建与静态检查
@@ -51,7 +52,8 @@ git -C .. diff --check
 
 README 的无负载真机清单只供人工在 `dev-real` 执行，要求硬件急停已验证可用，
 并记录 RX burst 下 WCET/jitter、100/300ms timeout、Agent 重连、`motor_enable`、
-RP 多 slot、CAN 无 ACK 与 BMI088 异常。自动验证不得烧录或驱动电机；当前无抱闸，
+vaxor/CREB 混挂、CREB 100Hz SYNC、CAN 无 ACK 与 BMI088 异常。自动验证不得
+烧录或驱动电机；当前无抱闸，
 host/固件 build 结果不能表述为硬件安全验证。
 
 清理 host 构建产物：

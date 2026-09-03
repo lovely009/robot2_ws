@@ -22,6 +22,16 @@ typedef struct {
 } control_mailbox_command_slot_t;
 
 typedef struct {
+  motor_control_mode_request_t request;
+  bool pending;
+} control_mailbox_mode_slot_t;
+
+typedef struct {
+  motor_control_gains_request_t request;
+  bool pending;
+} control_mailbox_gains_slot_t;
+
+typedef struct {
   bool authorization_requested;
   bool authorization_pending;
   bool authorization_disable_edge;
@@ -33,7 +43,10 @@ typedef struct {
 typedef struct {
   char joint_names[MOTOR_CONTROL_MAX_MOTORS]
                   [MOTOR_CONTROL_JOINT_NAME_CAPACITY];
+  motor_control_protocol_t protocols[MOTOR_CONTROL_MAX_MOTORS];
   control_mailbox_command_slot_t command_slots[MOTOR_CONTROL_MAX_MOTORS];
+  control_mailbox_mode_slot_t mode_slots[MOTOR_CONTROL_MAX_MOTORS];
+  control_mailbox_gains_slot_t gains_slots[MOTOR_CONTROL_MAX_MOTORS];
   motor_control_tx_action_t debug_frame;
   size_t joint_count;
   uint32_t next_sequence;
@@ -62,6 +75,16 @@ bool control_mailbox_submit_command(control_mailbox_t *mailbox,
 bool control_mailbox_take_command(control_mailbox_t *mailbox, size_t index,
                                   motor_control_command_t *command,
                                   uint32_t *received_ms, uint32_t *sequence);
+bool control_mailbox_submit_mode(
+    control_mailbox_t *mailbox, const motor_control_mode_request_t *request);
+bool control_mailbox_take_mode(control_mailbox_t *mailbox, size_t index,
+                               motor_control_mode_request_t *request);
+bool control_mailbox_submit_gains(
+    control_mailbox_t *mailbox, const motor_control_gains_request_t *request);
+bool control_mailbox_take_gains(control_mailbox_t *mailbox, size_t index,
+                                motor_control_gains_request_t *request);
+bool control_mailbox_has_configuration(const control_mailbox_t *mailbox,
+                                       size_t index);
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
                                            bool authorized);
 void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,

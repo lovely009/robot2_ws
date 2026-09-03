@@ -29,7 +29,8 @@ public:
   virtual std::vector<CanFrame>
   make_command_frames(const std::vector<MotorConfig> &motors,
                       const MotorIndexList &indices,
-                      const std::vector<protocol::JointCommand> &commands) const = 0;
+                      const std::vector<protocol::JointCommand> &commands,
+                      bool enabled) const = 0;
 
   // 只有当该协议识别出 frame，并成功解码出某台已配置电机的反馈时才返回 true。
   // motor_index 返回这台电机在 DriverConfig::motors 中的全局下标，供上层统一写状态。
@@ -57,5 +58,6 @@ private:
 };
 
 inline constexpr const char *kVaxorType = "vaxor";
+inline constexpr const char *kCrebType = "creb";
 
 } // namespace motor_drive

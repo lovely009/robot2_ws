@@ -258,6 +258,8 @@ CanFdSystem::on_activate(const rclcpp_lifecycle::State &) {
     if (!driver_->set_enabled(true)) {
       throw std::runtime_error("使能电机失败");
     }
+    // CREB 手册要求上伺服后至少等待 100 ms，才能向新的目标位置运动。
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     active_ = true;
     return hardware_interface::CallbackReturn::SUCCESS;
   } catch (const std::exception &exception) {

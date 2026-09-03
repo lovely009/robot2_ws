@@ -1,0 +1,10 @@
+motor_protocol 10 0.000180125
+motor_control 7 0.000264194
+control_mailbox 10 0.00013608
+can_rx_ring 10 0.000120451
+imu_snapshot 10 0.000126058
+bmi088_transport_status 10 9.82584e-05
+w25q64_geometry 10 9.53281e-05
+led_status 10 9.48617e-05
+can_snapshot 3 0.000538903
+---

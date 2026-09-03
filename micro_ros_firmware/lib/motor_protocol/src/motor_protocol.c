@@ -1,4 +1,4 @@
-// 电机协议编解码（vaxor 25/30mm 唯一支持协议）。
+// 电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）。
 // RP 协议已弃用，固件库中不再保留 RP 编解码实现。
 
 #include "motor_protocol.h"
@@ -37,6 +37,11 @@ static uint32_t read_le(const uint8_t *data, size_t width) {
   return value;
 }
 
+static int32_t read_be_i16(const uint8_t *data) {
+  uint16_t raw = ((uint16_t)data[0] << 8U) | data[1];
+  return raw <= INT16_MAX ? (int32_t)raw : (int32_t)raw - 65536;
+}
+
 uint32_t motor_protocol_float_to_uint(double value, double low, double high,
                                       unsigned bits) {
   if (!(high > low) || bits == 0U || bits > 31U) {
@@ -54,6 +59,13 @@ double motor_protocol_uint_to_float(uint32_t value, double low, double high,
   }
   uint32_t maximum = (UINT32_C(1) << bits) - 1U;
   return value * (high - low) / maximum + low;
+}
+
+static uint32_t creb_symmetric_float_to_uint(double value, double limit,
+                                               unsigned bits) {
+  double normalized = (clamp_double(value / limit, -1.0, 1.0) + 1.0) * 0.5;
+  uint32_t maximum = (UINT32_C(1) << bits) - 1U;
+  return (uint32_t)(normalized * maximum);
 }
 
 static uint16_t wrist_velocity_to_code(double velocity_rad_s) {
@@ -194,7 +206,7 @@ void motor_protocol_pack_wrist_status(unsigned node,
   write_le(out + 8U, wrist_current_to_code(state->effort), 2U);
   int32_t voltage_code =
       clamp_i32((int32_t)llround(voltage_v * 10.0), -32768, 32767);
-  write_le(out + 10U, (uint16_t)(voltage_code + 0x8000), 2U);
+  write_le(out + 10U, (uint16_t)(int16_t)voltage_code, 2U);
   write_le(out + 12U, fault, 4U);
   out[16] = motor_state;
   out[17] = calibration_state;
@@ -213,6 +225,95 @@ bool motor_protocol_unpack_wrist_feedback(const uint8_t *data, size_t size,
   state->position = wrist_code_to_position(position);
   state->velocity = wrist_code_to_velocity(velocity);
   state->effort = wrist_code_to_current(current);
+  return true;
+}
+
+bool motor_protocol_unpack_wrist_status(
+    const uint8_t *data, size_t size, motor_protocol_wrist_status_t *status) {
+  if (data == NULL || size != 20U || status == NULL) {
+    return false;
+  }
+  int16_t voltage_code = (int16_t)read_le(data + 10U, 2U);
+  status->voltage_v = voltage_code / 10.0;
+  status->fault = read_le(data + 12U, 4U);
+  status->motor_state = data[16];
+  status->calibration_state = data[17];
+  status->mode = data[18];
+  status->motor_type = data[19];
+  return true;
+}
+
+bool motor_protocol_creb_node_valid(unsigned node) {
+  return node >= 1U && node <= 127U;
+}
+
+bool motor_protocol_creb_command_id(unsigned node, uint32_t *id) {
+  if (!motor_protocol_creb_node_valid(node) || id == NULL) {
+    return false;
+  }
+  *id = 0x110U + node;
+  return true;
+}
+
+bool motor_protocol_creb_feedback_id(unsigned node, uint32_t *id) {
+  if (!motor_protocol_creb_node_valid(node) || id == NULL) {
+    return false;
+  }
+  *id = 0x300U + node;
+  return true;
+}
+
+bool motor_protocol_pack_creb_mit_frame(
+    const motor_protocol_joint_command_t *command,
+    const motor_protocol_creb_limits_t *limits, bool enabled,
+    uint8_t out[12]) {
+  if (command == NULL || limits == NULL || out == NULL ||
+      !isfinite(limits->position_rad) ||
+      !isfinite(limits->velocity_rad_s) || !isfinite(limits->torque_nm) ||
+      !(limits->position_rad > 0.0) || !(limits->velocity_rad_s > 0.0) ||
+      !(limits->torque_nm > 0.0) ||
+      !isfinite(2.0 * limits->position_rad) ||
+      !isfinite(2.0 * limits->velocity_rad_s) ||
+      !isfinite(2.0 * limits->torque_nm) || !isfinite(command->position) ||
+      !isfinite(command->velocity) || !isfinite(command->kp) ||
+      !isfinite(command->kd) || !isfinite(command->feedforward)) {
+    return false;
+  }
+
+  uint32_t position = creb_symmetric_float_to_uint(
+      command->position, limits->position_rad, 16U);
+  uint32_t velocity = creb_symmetric_float_to_uint(
+      command->velocity, limits->velocity_rad_s, 12U);
+  uint32_t kp = motor_protocol_float_to_uint(command->kp, 0.0, 500.0, 12U);
+  uint32_t kd = motor_protocol_float_to_uint(command->kd, 0.0, 5.0, 12U);
+  uint32_t torque = creb_symmetric_float_to_uint(
+      command->feedforward, limits->torque_nm, 12U);
+
+  // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
+  out[0] = (uint8_t)((enabled ? 0xc0U : 0x00U) | 0x0cU);
+  out[1] = (uint8_t)(position >> 8U);
+  out[2] = (uint8_t)position;
+  out[3] = (uint8_t)(velocity >> 4U);
+  out[4] = (uint8_t)((velocity << 4U) | (kp >> 8U));
+  out[5] = (uint8_t)kp;
+  out[6] = (uint8_t)(kd >> 4U);
+  out[7] = (uint8_t)((kd << 4U) | (torque >> 8U));
+  out[8] = (uint8_t)torque;
+  out[9] = 0U;
+  out[10] = 0U;
+  out[11] = 0U;
+  return true;
+}
+
+bool motor_protocol_unpack_creb_feedback(
+    const uint8_t *data, size_t size, motor_protocol_joint_state_t *state) {
+  if (data == NULL || size != 12U || state == NULL ||
+      (data[11] & 0x20U) != 0U) {
+    return false;
+  }
+  state->position = read_be_i16(data) / 182.0 * MOTOR_PROTOCOL_PI / 180.0;
+  state->velocity = read_be_i16(data + 2U) * 2.0 * MOTOR_PROTOCOL_PI / 60.0;
+  state->effort = read_be_i16(data + 4U) / 1000.0;
   return true;
 }
 

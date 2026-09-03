@@ -179,6 +179,19 @@ test_can_rx_ring/fast:
 .PHONY : test_can_rx_ring/fast
 
 #=============================================================================
+# Target rules for targets named test_can_snapshot
+
+# Build rule for target.
+test_can_snapshot: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_can_snapshot
+.PHONY : test_can_snapshot
+
+# fast build rule for target.
+test_can_snapshot/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/build
+.PHONY : test_can_snapshot/fast
+
+#=============================================================================
 # Target rules for targets named test_imu_snapshot
 
 # Build rule for target.
@@ -205,19 +218,6 @@ test_bmi088_transport_status/fast:
 .PHONY : test_bmi088_transport_status/fast
 
 #=============================================================================
-# Target rules for targets named test_supervisor_heartbeat
-
-# Build rule for target.
-test_supervisor_heartbeat: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_supervisor_heartbeat
-.PHONY : test_supervisor_heartbeat
-
-# fast build rule for target.
-test_supervisor_heartbeat/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/build
-.PHONY : test_supervisor_heartbeat/fast
-
-#=============================================================================
 # Target rules for targets named test_w25q64_geometry
 
 # Build rule for target.
@@ -229,6 +229,19 @@ test_w25q64_geometry: cmake_check_build_system
 test_w25q64_geometry/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/build
 .PHONY : test_w25q64_geometry/fast
+
+#=============================================================================
+# Target rules for targets named test_led_status
+
+# Build rule for target.
+test_led_status: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_led_status
+.PHONY : test_led_status
+
+# fast build rule for target.
+test_led_status/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/build
+.PHONY : test_led_status/fast
 
 home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.o: home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.c.o
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.o
@@ -253,6 +266,30 @@ home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.s: h
 home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_control_mailbox.dir/build.make CMakeFiles/test_control_mailbox.dir/home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.c.s
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.c.s
+
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.o: home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.o
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.o
+
+# target to build an object file
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.o
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.o
+
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.i: home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.i
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.i
+
+# target to preprocess a source file
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.i
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.i
+
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.s: home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.s
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.s
+
+# target to generate assembly for a file
+home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.s
+.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.s
 
 home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.o: home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.c.o
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.o
@@ -353,30 +390,6 @@ home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_control.dir/build.make CMakeFiles/test_motor_control.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.s
 
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o
-
-# target to build an object file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.o
-
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i
-
-# target to preprocess a source file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.i
-
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s: home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s
-
-# target to generate assembly for a file
-home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
-.PHONY : home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.c.s
-
 home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o: home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.o
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o
 
@@ -400,6 +413,30 @@ home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.s: home/ly/ro
 home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_w25q64_geometry.dir/build.make CMakeFiles/test_w25q64_geometry.dir/home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.s
 .PHONY : home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.s
+
+home/ly/robot_ws/micro_ros_firmware/src/led_task.o: home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.o
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.o
+
+# target to build an object file
+home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.o
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.o
+
+home/ly/robot_ws/micro_ros_firmware/src/led_task.i: home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.i
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.i
+
+# target to preprocess a source file
+home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.i
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.i
+
+home/ly/robot_ws/micro_ros_firmware/src/led_task.s: home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.s
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.s
+
+# target to generate assembly for a file
+home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.s
+.PHONY : home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.s
 
 test_bmi088_transport_status.o: test_bmi088_transport_status.cpp.o
 .PHONY : test_bmi088_transport_status.o
@@ -449,6 +486,30 @@ test_can_rx_ring.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_rx_ring.dir/build.make CMakeFiles/test_can_rx_ring.dir/test_can_rx_ring.cpp.s
 .PHONY : test_can_rx_ring.cpp.s
 
+test_can_snapshot.o: test_can_snapshot.cpp.o
+.PHONY : test_can_snapshot.o
+
+# target to build an object file
+test_can_snapshot.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/test_can_snapshot.cpp.o
+.PHONY : test_can_snapshot.cpp.o
+
+test_can_snapshot.i: test_can_snapshot.cpp.i
+.PHONY : test_can_snapshot.i
+
+# target to preprocess a source file
+test_can_snapshot.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/test_can_snapshot.cpp.i
+.PHONY : test_can_snapshot.cpp.i
+
+test_can_snapshot.s: test_can_snapshot.cpp.s
+.PHONY : test_can_snapshot.s
+
+# target to generate assembly for a file
+test_can_snapshot.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_can_snapshot.dir/build.make CMakeFiles/test_can_snapshot.dir/test_can_snapshot.cpp.s
+.PHONY : test_can_snapshot.cpp.s
+
 test_control_mailbox.o: test_control_mailbox.cpp.o
 .PHONY : test_control_mailbox.o
 
@@ -496,6 +557,30 @@ test_imu_snapshot.s: test_imu_snapshot.cpp.s
 test_imu_snapshot.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_imu_snapshot.dir/build.make CMakeFiles/test_imu_snapshot.dir/test_imu_snapshot.cpp.s
 .PHONY : test_imu_snapshot.cpp.s
+
+test_led_status.o: test_led_status.cpp.o
+.PHONY : test_led_status.o
+
+# target to build an object file
+test_led_status.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/test_led_status.cpp.o
+.PHONY : test_led_status.cpp.o
+
+test_led_status.i: test_led_status.cpp.i
+.PHONY : test_led_status.i
+
+# target to preprocess a source file
+test_led_status.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/test_led_status.cpp.i
+.PHONY : test_led_status.cpp.i
+
+test_led_status.s: test_led_status.cpp.s
+.PHONY : test_led_status.s
+
+# target to generate assembly for a file
+test_led_status.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_led_status.dir/build.make CMakeFiles/test_led_status.dir/test_led_status.cpp.s
+.PHONY : test_led_status.cpp.s
 
 test_motor_control.o: test_motor_control.cpp.o
 .PHONY : test_motor_control.o
@@ -545,30 +630,6 @@ test_motor_protocol.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_motor_protocol.dir/build.make CMakeFiles/test_motor_protocol.dir/test_motor_protocol.cpp.s
 .PHONY : test_motor_protocol.cpp.s
 
-test_supervisor_heartbeat.o: test_supervisor_heartbeat.cpp.o
-.PHONY : test_supervisor_heartbeat.o
-
-# target to build an object file
-test_supervisor_heartbeat.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.o
-.PHONY : test_supervisor_heartbeat.cpp.o
-
-test_supervisor_heartbeat.i: test_supervisor_heartbeat.cpp.i
-.PHONY : test_supervisor_heartbeat.i
-
-# target to preprocess a source file
-test_supervisor_heartbeat.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.i
-.PHONY : test_supervisor_heartbeat.cpp.i
-
-test_supervisor_heartbeat.s: test_supervisor_heartbeat.cpp.s
-.PHONY : test_supervisor_heartbeat.s
-
-# target to generate assembly for a file
-test_supervisor_heartbeat.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_supervisor_heartbeat.dir/build.make CMakeFiles/test_supervisor_heartbeat.dir/test_supervisor_heartbeat.cpp.s
-.PHONY : test_supervisor_heartbeat.cpp.s
-
 test_w25q64_geometry.o: test_w25q64_geometry.cpp.o
 .PHONY : test_w25q64_geometry.o
 
@@ -604,15 +665,19 @@ help:
 	@echo "... test"
 	@echo "... test_bmi088_transport_status"
 	@echo "... test_can_rx_ring"
+	@echo "... test_can_snapshot"
 	@echo "... test_control_mailbox"
 	@echo "... test_imu_snapshot"
+	@echo "... test_led_status"
 	@echo "... test_motor_control"
 	@echo "... test_motor_protocol"
-	@echo "... test_supervisor_heartbeat"
 	@echo "... test_w25q64_geometry"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/control_mailbox/src/control_mailbox.s"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.o"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.i"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.s"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.s"
@@ -625,33 +690,36 @@ help:
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.s"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.o"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.i"
-	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/supervisor/src/supervisor_heartbeat.s"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.o"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.i"
 	@echo "... home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.s"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/src/led_task.o"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/src/led_task.i"
+	@echo "... home/ly/robot_ws/micro_ros_firmware/src/led_task.s"
 	@echo "... test_bmi088_transport_status.o"
 	@echo "... test_bmi088_transport_status.i"
 	@echo "... test_bmi088_transport_status.s"
 	@echo "... test_can_rx_ring.o"
 	@echo "... test_can_rx_ring.i"
 	@echo "... test_can_rx_ring.s"
+	@echo "... test_can_snapshot.o"
+	@echo "... test_can_snapshot.i"
+	@echo "... test_can_snapshot.s"
 	@echo "... test_control_mailbox.o"
 	@echo "... test_control_mailbox.i"
 	@echo "... test_control_mailbox.s"
 	@echo "... test_imu_snapshot.o"
 	@echo "... test_imu_snapshot.i"
 	@echo "... test_imu_snapshot.s"
+	@echo "... test_led_status.o"
+	@echo "... test_led_status.i"
+	@echo "... test_led_status.s"
 	@echo "... test_motor_control.o"
 	@echo "... test_motor_control.i"
 	@echo "... test_motor_control.s"
 	@echo "... test_motor_protocol.o"
 	@echo "... test_motor_protocol.i"
 	@echo "... test_motor_protocol.s"
-	@echo "... test_supervisor_heartbeat.o"
-	@echo "... test_supervisor_heartbeat.i"
-	@echo "... test_supervisor_heartbeat.s"
 	@echo "... test_w25q64_geometry.o"
 	@echo "... test_w25q64_geometry.i"
 	@echo "... test_w25q64_geometry.s"

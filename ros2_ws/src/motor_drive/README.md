@@ -2,7 +2,7 @@
 
 C++17 电机驱动库（`dev-real` 真机线，无 ROS 依赖）：双传输后端
 （`socketcan` / `serial_slcan`）、协议策略注册、动态电机映射。
-内置 RP 与 `vaxor` 两套协议。
+内置 `vaxor` 与 `creb` 两套协议；RP 已弃用，仅保留历史编解码辅助代码。
 
 ## 职责
 
@@ -30,7 +30,8 @@ DriverConfig (buses[]/motors[]) -> MotorDriver
 
 `BusConfig`：`name` + `interface_name`（socketcan）+ `transport` + `tty`
 （serial_slcan）。`serial_slcan` 固定 `C->S8(仲裁 1M)->Y5(数据 5M)->O`，POSIX
-termios，无额外依赖。RP 单总线最多 8 台（广播槽位限制，仅 RP 策略校验）。
+termios，无额外依赖。CREB 使用标准 CAN FD 帧及 BRS，默认仲裁 1 Mbit/s、
+数据 5 Mbit/s。
 
 ## 公共接口
 
@@ -52,9 +53,9 @@ termios，无额外依赖。RP 单总线最多 8 台（广播槽位限制，仅 
 
 - `scripts/verify_2530_serial.py`：CANable2 串口验证 25/30 mm 电机（需 pyserial，
   源码树脚本不安装）。
-- `docs/`：RP 系列与 16–30 mm 系列电机资料
-  （[`rp-series.md`](docs/rp-series.md)、
-  [`motor-2530-series.md`](docs/motor-2530-series.md)）及五份协议/规格 PDF。
+- `docs/`：CREB 与 16–30 mm 系列协议摘要
+  （[`creb-series.md`](docs/creb-series.md)、
+  [`motor-2530-series.md`](docs/motor-2530-series.md)）；`rp-series.md` 仅作历史资料。
 
 ## 测试
 

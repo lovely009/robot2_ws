@@ -13,20 +13,14 @@ namespace drive = motor_drive;
 namespace {
 
 drive::DriverConfig make_large_config() {
-  // 回归用例故意配置 13 台电机（8 RP + 5 个 25/30 mm），防止未来代码再次
+  // 回归用例故意配置 13 台测试电机，防止未来代码再次
   // 把“当前机械臂 7 关节”误写成 MotorDriver 的固定容量。
   drive::DriverConfig config;
   config.buses.push_back({"main_bus", "vcan0"});
-  for (unsigned id = 1U; id <= 8U; ++id) {
-    config.motors.push_back({"rp_" + std::to_string(id),
-                             "joint_rp_" + std::to_string(id), "main_bus",
-                             drive::kRpMotorType, id, {}});
-  }
-  for (unsigned id = 1U; id <= 5U; ++id) {
-    config.motors.push_back(
-        {"small_" + std::to_string(id), "joint_small_" + std::to_string(id),
-         "main_bus", drive::kVaxorType, id,
-         {{"torque_constant_nm_per_amp", "0.35"}}});
+  for (unsigned id = 1U; id <= 13U; ++id) {
+    config.motors.push_back({"dummy_" + std::to_string(id),
+                             "joint_dummy_" + std::to_string(id), "main_bus",
+                             "dummy", id, {}});
   }
   return config;
 }
@@ -43,7 +37,8 @@ public:
   std::vector<drive::CanFrame>
   make_command_frames(const std::vector<drive::MotorConfig> &,
                       const drive::MotorIndexList &,
-                      const std::vector<drive::protocol::JointCommand> &) const override {
+                      const std::vector<drive::protocol::JointCommand> &,
+                      bool) const override {
     return {};
   }
   bool decode_feedback(const std::vector<drive::MotorConfig> &,
@@ -52,6 +47,13 @@ public:
     return false;
   }
 };
+
+drive::MotorProtocolRegistry registry_with_dummy_protocol() {
+  auto registry = drive::MotorProtocolRegistry::with_builtin_protocols();
+  registry.register_factory("dummy",
+                            [] { return std::make_unique<DummyProtocol>(); });
+  return registry;
+}
 
 class DummyTransport final : public drive::CanTransport {
 public:
@@ -65,14 +67,16 @@ public:
 } // namespace
 
 TEST(MotorDriver, MotorCountIsConfigurationDrivenNotSeven) {
-  const drive::MotorDriver driver(make_large_config());
+  const drive::MotorDriver driver(make_large_config(),
+                                  registry_with_dummy_protocol());
   EXPECT_EQ(driver.motor_count(), 13U);
 }
 
 TEST(MotorDriver, RejectsDuplicateJointMapping) {
   auto config = make_large_config();
   config.motors.back().joint_name = config.motors.front().joint_name;
-  EXPECT_THROW(drive::MotorDriver driver(std::move(config)),
+  EXPECT_THROW(drive::MotorDriver driver(std::move(config),
+                                         registry_with_dummy_protocol()),
                std::invalid_argument);
 }
 
@@ -111,8 +115,8 @@ TEST(MotorDriver, OpensTransportFromBusConfig) {
   // 而不是在驱动里写死 SocketCan。
   drive::DriverConfig config;
   config.buses.push_back({"bench", "", "fake", "/dev/null"});
-  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
-                           drive::kRpMotorType, 1U, {}});
+  config.motors.push_back(
+      {"dummy_1", "joint_dummy_1", "bench", "dummy", 1U, {}});
 
   auto transports = drive::CanTransportRegistry::with_builtin_transports();
   bool factory_called = false;
@@ -123,7 +127,7 @@ TEST(MotorDriver, OpensTransportFromBusConfig) {
       });
 
   drive::MotorDriver driver(std::move(config),
-                            drive::MotorProtocolRegistry::with_builtin_protocols(),
+                            registry_with_dummy_protocol(),
                             std::move(transports));
   driver.open();
   EXPECT_TRUE(driver.is_open());
@@ -135,17 +139,19 @@ TEST(MotorDriver, OpensTransportFromBusConfig) {
 TEST(MotorDriver, RejectsUnregisteredTransport) {
   drive::DriverConfig config;
   config.buses.push_back({"bench", "", "not_a_transport", ""});
-  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
-                           drive::kRpMotorType, 1U, {}});
-  EXPECT_THROW(drive::MotorDriver driver(std::move(config)),
+  config.motors.push_back(
+      {"dummy_1", "joint_dummy_1", "bench", "dummy", 1U, {}});
+  EXPECT_THROW(drive::MotorDriver driver(std::move(config),
+                                         registry_with_dummy_protocol()),
                std::invalid_argument);
 }
 
 TEST(MotorDriver, SerialSlcanBusRequiresTty) {
   drive::DriverConfig config;
   config.buses.push_back({"bench", "", drive::kSerialSlcanTransport, ""});
-  config.motors.push_back({"rp_1", "joint_rp_1", "bench",
-                           drive::kRpMotorType, 1U, {}});
-  EXPECT_THROW(drive::MotorDriver driver(std::move(config)),
+  config.motors.push_back(
+      {"dummy_1", "joint_dummy_1", "bench", "dummy", 1U, {}});
+  EXPECT_THROW(drive::MotorDriver driver(std::move(config),
+                                         registry_with_dummy_protocol()),
                std::invalid_argument);
 }

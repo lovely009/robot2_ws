@@ -1,5 +1,5 @@
-// 电机协议编解码（vaxor 25/30mm 唯一支持协议）。
-// 现阶段固件只保留 vaxor 协议，不再维护 RP 兼容层。
+// 电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）。
+// RP 已弃用，不再维护兼容层。
 
 #ifndef MOTOR_PROTOCOL_H
 #define MOTOR_PROTOCOL_H
@@ -44,6 +44,21 @@ typedef struct {
 } motor_protocol_joint_state_t;
 
 typedef struct {
+  double voltage_v;
+  uint32_t fault;
+  uint8_t motor_state;
+  uint8_t calibration_state;
+  uint8_t mode;
+  uint8_t motor_type;
+} motor_protocol_wrist_status_t;
+
+typedef struct {
+  double position_rad;
+  double velocity_rad_s;
+  double torque_nm;
+} motor_protocol_creb_limits_t;
+
+typedef struct {
   bool run;
   bool set_zero;
   uint8_t mode;
@@ -80,6 +95,24 @@ void motor_protocol_pack_wrist_status(unsigned node,
                                       uint8_t motor_type, uint8_t out[20]);
 bool motor_protocol_unpack_wrist_feedback(const uint8_t *data, size_t size,
                                           motor_protocol_joint_state_t *state);
+bool motor_protocol_unpack_wrist_status(
+    const uint8_t *data, size_t size, motor_protocol_wrist_status_t *status);
+
+// ---------------- CREB 自定义 PDO / MIT ----------------
+// 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
+bool motor_protocol_creb_node_valid(unsigned node);
+bool motor_protocol_creb_command_id(unsigned node, uint32_t *id);
+bool motor_protocol_creb_feedback_id(unsigned node, uint32_t *id);
+
+// 输出 CAN FD DLC=9 对应的 12 Byte 载荷：控制字 + 8 Byte MIT + 3 Byte 零填充。
+bool motor_protocol_pack_creb_mit_frame(
+    const motor_protocol_joint_command_t *command,
+    const motor_protocol_creb_limits_t *limits, bool enabled,
+    uint8_t out[12]);
+
+// 解码位置(rad)、电机端速度(rad/s)和 Iq(A)；故障状态反馈返回 false。
+bool motor_protocol_unpack_creb_feedback(
+    const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
 
 double motor_protocol_wrist_kp_to_current_gain(double protocol_kp);
 double motor_protocol_wrist_kd_to_current_gain(double protocol_kd);

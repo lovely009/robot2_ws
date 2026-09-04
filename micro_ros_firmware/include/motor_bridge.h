@@ -1,6 +1,6 @@
 // 电机域 ROS 桥接接口（agent 通信层下的电机模块）。
-// 受 ENABLE_MOTOR_COMMAND_BRIDGE 宏控制：订阅 /joint_commands 下发默认
-// 测试电机，并消费 FDCAN1 反馈发布 micro_ros/JointState 与 motor_status。
+// 常驻订阅 /joint_commands 下发默认测试电机，并消费 FDCAN1 反馈发布
+// micro_ros/JointState 与 motor_status。
 
 #ifndef MOTOR_BRIDGE_H
 #define MOTOR_BRIDGE_H

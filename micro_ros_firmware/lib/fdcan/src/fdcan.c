@@ -201,7 +201,7 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
     gpio.Pin = GPIO_PIN_12 | GPIO_PIN_13;
     gpio.Mode = GPIO_MODE_AF_PP;
     gpio.Pull = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     gpio.Alternate = GPIO_AF5_FDCAN3;
     HAL_GPIO_Init(GPIOD, &gpio);
 

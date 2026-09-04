@@ -19,6 +19,7 @@ CMakeFiles/test_control_mailbox.dir/home/ly/robot_ws/micro_ros_firmware/lib/cont
  /usr/include/x86_64-linux-gnu/bits/wchar.h \
  /usr/include/x86_64-linux-gnu/bits/stdint-intn.h \
  /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h \
+ /home/ly/robot_ws/micro_ros_firmware/test/host/../../lib/control_mailbox/include/control_command_mailbox.h \
  /home/ly/robot_ws/micro_ros_firmware/test/host/../../lib/motor_control/include/motor_control.h \
  /home/ly/robot_ws/micro_ros_firmware/test/host/../../lib/motor_protocol/include/motor_protocol.h \
  /usr/include/math.h /usr/include/x86_64-linux-gnu/bits/math-vector.h \

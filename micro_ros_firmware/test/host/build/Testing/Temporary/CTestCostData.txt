@@ -1,10 +1,10 @@
-motor_protocol 10 0.000180125
-motor_control 7 0.000264194
-control_mailbox 10 0.00013608
-can_rx_ring 10 0.000120451
-imu_snapshot 10 0.000126058
-bmi088_transport_status 10 9.82584e-05
-w25q64_geometry 10 9.53281e-05
-led_status 10 9.48617e-05
-can_snapshot 3 0.000538903
+motor_protocol 12 0.00012409
+motor_control 9 0.000127679
+control_mailbox 12 8.99811e-05
+can_rx_ring 12 9.09879e-05
+imu_snapshot 12 8.28016e-05
+bmi088_transport_status 12 8.02818e-05
+w25q64_geometry 12 8.25962e-05
+led_status 12 8.04471e-05
+can_snapshot 4 0.000255744
 ---

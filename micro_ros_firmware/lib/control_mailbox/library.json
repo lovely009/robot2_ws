@@ -4,8 +4,5 @@
   "build": {
     "includeDir": "include",
     "srcDir": "src"
-  },
-  "dependencies": {
-    "motor_control": "*"
   }
 }

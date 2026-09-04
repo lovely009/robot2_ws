@@ -21,8 +21,6 @@
 #include "control_task.h"
 #include "time_utils.h"
 
-#if defined(ENABLE_MOTOR_COMMAND_BRIDGE) && ENABLE_MOTOR_COMMAND_BRIDGE
-
 // 电机域话题分工：控制目标、运动授权、模式和增益分别输入，反馈与诊断分别输出。
 // 控制目标不携带模式或增益，避免普通控制消息隐式改变电机配置。
 static const char *kJointCommandsTopic = "/joint_commands";
@@ -483,21 +481,3 @@ void motor_bridge_poll(void) {
     }
   }
 }
-
-#else
-
-// 功能宏关闭时保留空实现，使 ros_bridge 无需散布条件编译分支。
-bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
-  (void)node;
-  (void)executor;
-  return true;
-}
-
-void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
-  (void)node;
-  (void)executor;
-}
-
-void motor_bridge_poll(void) {}
-
-#endif  // ENABLE_MOTOR_COMMAND_BRIDGE

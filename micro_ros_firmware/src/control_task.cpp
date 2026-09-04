@@ -11,7 +11,6 @@
 #include <string.h>
 
 #include "can_bsp.h"
-#include "can_snapshot.h"
 #include "control_mailbox.h"
 #include "motor_protocol.h"
 
@@ -65,23 +64,9 @@ static volatile bool g_fdcan_ready = false;
 
 volatile uint32_t g_control_motor_cmd_count = 0;
 volatile uint32_t g_control_motor_found_count = 0;
-volatile uint32_t g_control_debug_submit_count = 0;
-volatile uint32_t g_control_debug_overwrite_count = 0;
-volatile uint32_t g_control_debug_rejected_count = 0;
-volatile uint32_t g_control_debug_sent_count = 0;
 volatile uint32_t g_control_can_rx_backlog_count[CAN_RX_BUS_COUNT] = {0};
 static volatile uint32_t g_control_tx_ok_count = 0;
 static volatile uint32_t g_control_tx_error_count = 0;
-
-uint32_t control_task_can_snapshot(uint8_t bus_index, can_rx_frame_t *out) {
-  if (bus_index >= CAN_RX_BUS_COUNT) {
-    return 0U;
-  }
-  taskENTER_CRITICAL();
-  uint32_t sequence = can_snapshot_read(bus_index, out);
-  taskEXIT_CRITICAL();
-  return sequence;
-}
 
 static void ensure_mailbox_initialized_locked() {
   if (!g_mailbox_initialized) {
@@ -117,20 +102,6 @@ bool control_task_submit_gains(const motor_control_gains_request_t *request) {
   taskENTER_CRITICAL();
   ensure_mailbox_initialized_locked();
   bool accepted = control_mailbox_submit_gains(&g_control_mailbox, request);
-  taskEXIT_CRITICAL();
-  return accepted;
-}
-
-bool control_task_submit_debug_frame(const motor_control_tx_action_t *frame) {
-  taskENTER_CRITICAL();
-  ensure_mailbox_initialized_locked();
-  bool accepted =
-      control_mailbox_submit_debug_frame(&g_control_mailbox, frame);
-  g_control_debug_submit_count = g_control_mailbox.debug_submit_count;
-  g_control_debug_overwrite_count = g_control_mailbox.debug_overwrite_count;
-  if (!accepted) {
-    ++g_control_debug_rejected_count;
-  }
   taskEXIT_CRITICAL();
   return accepted;
 }
@@ -265,19 +236,12 @@ static void accept_can_feedback(const can_rx_frame_t *frame) {
   (void)motor_control_accept_feedback(&g_motor_control, &feedback);
 }
 
-static void update_can_snapshot(const can_rx_frame_t *frame) {
-  taskENTER_CRITICAL();
-  can_snapshot_store(frame->bus_index, frame);
-  taskEXIT_CRITICAL();
-}
-
 static void drain_can_rx_queues() {
   for (uint8_t bus_index = 0U; bus_index < CAN_RX_BUS_COUNT; ++bus_index) {
     size_t processed = 0U;
     can_rx_frame_t frame = {};
     while (processed < kCanRxDrainBudgetPerBus &&
            can_rx_queue_pop(bus_index, &frame)) {
-      update_can_snapshot(&frame);
       accept_can_feedback(&frame);
       ++processed;
     }
@@ -317,35 +281,6 @@ static void run_motor_control_cycle(uint32_t now_ms) {
   (void)apply_tx_actions(actions, action_count);
 }
 
-static void run_debug_tx_cycle() {
-  motor_control_tx_action_t frame = {};
-  taskENTER_CRITICAL();
-  ensure_mailbox_initialized_locked();
-  bool pending = control_mailbox_take_debug_frame(
-      &g_control_mailbox, &frame, nullptr);
-  taskEXIT_CRITICAL();
-  if (pending) {
-    g_control_debug_sent_count += apply_tx_actions(&frame, 1U);
-  }
-}
-
-#if ENABLE_CANFD_DEMO_LOOP
-static void run_canfd_demo_cycle() {
-  // 保留官方 0x520 调试模式：三路依次间隔 100 ms 发送。
-  static const uint16_t kControlTestId = 0x520;
-  static const uint8_t kControlTestData[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-  static uint8_t bus_index = 0;
-  static uint8_t period_count = 0;
-  if (period_count++ < 10U) {
-    return;
-  }
-  period_count = 0;
-  (void)fdcanx_send_data(kCanHandles[bus_index], kControlTestId,
-                         kControlTestData, sizeof(kControlTestData));
-  bus_index = (uint8_t)((bus_index + 1U) % kCanHandleCount);
-}
-#endif
-
 static void control_task_fn(void *arg) {
   (void)arg;
 
@@ -365,7 +300,6 @@ static void control_task_fn(void *arg) {
     drain_motor_mailboxes();
     drain_can_rx_queues();
     run_motor_control_cycle(millis());
-    run_debug_tx_cycle();
 #if ENABLE_CANFD_DEMO_LOOP
     run_canfd_demo_cycle();
 #endif

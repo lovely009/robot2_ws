@@ -1,35 +1,48 @@
-// 固定容量控制输入 mailbox：不依赖 HAL、RTOS、Arduino 或 ROS。
-// 调用方负责在并发访问时提供短 critical section。
+// 固定容量的跨任务控制输入交换层。
+// 不依赖 HAL、RTOS、Arduino、ROS 或任何电机协议；调用方负责提供短临界区。
 
 #ifndef CONTROL_MAILBOX_H
 #define CONTROL_MAILBOX_H
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
-#include "motor_control.h"
+#include "control_command_mailbox.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct {
-  motor_control_command_t command;
-  uint32_t received_ms;
-  uint32_t sequence;
-  bool pending;
-} control_mailbox_command_slot_t;
+#define CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY 16U
+
+// 低频设备配置的语义类型。具体型号/协议能力由运行时和协议适配器判断。
+typedef enum {
+  CONTROL_MAILBOX_CONFIG_SET_MODE = 1U,
+  CONTROL_MAILBOX_CONFIG_SET_GAINS = 2U,
+  CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS = 3U,
+} control_mailbox_config_kind_t;
 
 typedef struct {
-  motor_control_mode_request_t request;
-  bool pending;
-} control_mailbox_mode_slot_t;
+  float kp;
+  float kd;
+} control_mailbox_gains_t;
 
 typedef struct {
-  motor_control_gains_request_t request;
-  bool pending;
-} control_mailbox_gains_slot_t;
+  float min_position_rad;
+  float max_position_rad;
+} control_mailbox_position_limits_t;
+
+typedef struct {
+  uint32_t request_id;
+  uint32_t received_tick_ms;
+  uint16_t motor_id;
+  control_mailbox_config_kind_t kind;
+  union {
+    uint8_t mode;
+    control_mailbox_gains_t gains;
+    control_mailbox_position_limits_t position_limits;
+  } value;
+} control_mailbox_config_request_t;
 
 typedef struct {
   bool authorization_requested;
@@ -41,22 +54,13 @@ typedef struct {
 } control_mailbox_events_t;
 
 typedef struct {
-  char joint_names[MOTOR_CONTROL_MAX_MOTORS]
-                  [MOTOR_CONTROL_JOINT_NAME_CAPACITY];
-  motor_control_protocol_t protocols[MOTOR_CONTROL_MAX_MOTORS];
-  control_mailbox_command_slot_t command_slots[MOTOR_CONTROL_MAX_MOTORS];
-  control_mailbox_mode_slot_t mode_slots[MOTOR_CONTROL_MAX_MOTORS];
-  control_mailbox_gains_slot_t gains_slots[MOTOR_CONTROL_MAX_MOTORS];
-  motor_control_tx_action_t debug_frame;
-  size_t joint_count;
-  uint32_t next_sequence;
-  uint32_t command_overwrite_count;
-  uint32_t invalid_command_count;
-  uint32_t debug_submit_count;
-  uint32_t debug_overwrite_count;
-  uint32_t invalid_debug_frame_count;
-  uint32_t debug_sequence;
-  bool debug_pending;
+  control_command_mailbox_t command;
+  control_mailbox_config_request_t
+      config_queue[CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY];
+  uint8_t config_head;
+  uint8_t config_count;
+  uint32_t config_rejected_count;
+
   bool authorization_requested;
   bool authorization_pending;
   bool authorization_disable_edge;
@@ -66,36 +70,32 @@ typedef struct {
   bool agent_disconnect_edge;
 } control_mailbox_t;
 
-void control_mailbox_init(control_mailbox_t *mailbox,
-                          const motor_control_motor_config_t *motors,
-                          size_t motor_count);
-bool control_mailbox_submit_command(control_mailbox_t *mailbox,
-                                    const motor_control_command_t *command,
-                                    uint32_t received_ms);
-bool control_mailbox_take_command(control_mailbox_t *mailbox, size_t index,
-                                  motor_control_command_t *command,
-                                  uint32_t *received_ms, uint32_t *sequence);
-bool control_mailbox_submit_mode(
-    control_mailbox_t *mailbox, const motor_control_mode_request_t *request);
-bool control_mailbox_take_mode(control_mailbox_t *mailbox, size_t index,
-                               motor_control_mode_request_t *request);
-bool control_mailbox_submit_gains(
-    control_mailbox_t *mailbox, const motor_control_gains_request_t *request);
-bool control_mailbox_take_gains(control_mailbox_t *mailbox, size_t index,
-                                motor_control_gains_request_t *request);
-bool control_mailbox_has_configuration(const control_mailbox_t *mailbox,
-                                       size_t index);
+void control_mailbox_init(control_mailbox_t *mailbox);
+
+// 高频输入：完整快照 latest-wins。未授权或 Agent 已断开时拒绝新命令。
+bool control_mailbox_submit_command(
+    control_mailbox_t *mailbox,
+    const control_command_snapshot_t *snapshot);
+bool control_mailbox_take_command(control_mailbox_t *mailbox,
+                                  control_command_snapshot_t *snapshot);
+void control_mailbox_clear_command(control_mailbox_t *mailbox);
+
+// 低频输入：有界 FIFO，不覆盖、不丢弃已经入队的旧配置请求。
+bool control_mailbox_submit_config(
+    control_mailbox_t *mailbox,
+    const control_mailbox_config_request_t *request);
+bool control_mailbox_take_config(
+    control_mailbox_t *mailbox,
+    control_mailbox_config_request_t *request);
+void control_mailbox_clear_config(control_mailbox_t *mailbox);
+
+// 连接/授权是状态请求；take_events 返回状态电平和一次性边沿。
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
                                            bool authorized);
 void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
-                                              bool connected);
+                                             bool connected);
 bool control_mailbox_take_events(control_mailbox_t *mailbox,
                                  control_mailbox_events_t *events);
-bool control_mailbox_submit_debug_frame(
-    control_mailbox_t *mailbox, const motor_control_tx_action_t *frame);
-bool control_mailbox_take_debug_frame(control_mailbox_t *mailbox,
-                                      motor_control_tx_action_t *frame,
-                                      uint32_t *sequence);
 
 #ifdef __cplusplus
 }

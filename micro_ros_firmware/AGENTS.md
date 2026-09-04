@@ -25,11 +25,7 @@ cd micro_ros_firmware
 - USB 引脚 **PA11=USB_DM / PA12=USB_DP**；状态 LED 是 **WS2812**（SPI6 MOSI=PA7）。
 - 节点名 `micro_ros_node`，话题 `micro_ros/imu/data`、`micro_ros/imu/temp`
   （在 `src/imu_bridge.cpp` 顶部）。
-- CAN1 调试桥话题 `micro_ros/can1/send` / `micro_ros/can1/receive` 由
-  `ENABLE_CAN1_DEBUG_BRIDGE` 宏控制（`platformio.ini` 默认开启，类型
-  `can_bridge_msgs/msg/CANFrame`）。
-- JointState 话题 `/joint_commands`（`sensor_msgs/msg/JointState`）由
-  `ENABLE_MOTOR_COMMAND_BRIDGE` 控制（默认开启）；固件在 FDCAN1 固定内置
+- JointState 话题 `/joint_commands`（`sensor_msgs/msg/JointState`）常驻编译；固件在 FDCAN1 固定内置
   vaxor ID 1/2 与 CREB R58/R48 ID 1/2 四个默认测试电机，不支持动态拓扑配置。
   CREB 的 CAN ID 区间与 vaxor 不同，相同节点号可在同一总线共存。
 - `micro_ros/motor_enable` 是显式运动授权：`false` 清空 pending 命令并失能；
@@ -76,11 +72,9 @@ cd micro_ros_firmware
   （`platformio.ini` 已加）。任一 HAL 构建宏变更后必须执行
   `pio run -t clean` 全量重建。
 - **W25Q64**：保留 `lib/w25q64` 及 geometry host test，但不执行启动探测，禁止在上电路径自动擦写 Flash。
-- **调试桥限制**：`CANFrame.id` 是 `uint16`，29 位扩展 ID 不能完整回显；
-  RX/TX 元素已扩到 64B，vaxor 12/20B 与 CREB 12B 帧可正常承载。
 - **FDCAN RX 归属**：ISR 只写静态队列（CAN1=32、CAN2/3=8，满时 drop-oldest），
-  control task 是唯一消费者，每周期每总线最多 drain 8 帧；CAN 数据层独立维护
-  latest snapshot 给上层读取，不得让 bridge 或第二任务直接消费主队列。
+  control task 是唯一消费者，每周期每总线最多 drain 8 帧；ROS 桥只能读取已解码的
+  电机反馈/状态，不得让 bridge 或第二任务直接消费主队列。
 - **FDCAN IRQ**：优先级固定为 5，必须满足
   `priority >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY` 才能调用
   `xQueue*FromISR`；队列只在 `bsp_can_init()` single-init，不在重连时重建。
@@ -90,8 +84,8 @@ cd micro_ros_firmware
 - **任务栈/周期**：`start_task` P1/256 words；`sensor` P4/1024 words（DRDY）；
   `control` P3/1024 words（10ms/100Hz）；`micro_ros` P2/8192 words（20ms
   bridge timer）。调栈/周期后同步改 README。
-- **控制发送唯一性**：ROS callback 只写 per-joint/latest-wins 或 debug 单槽
-  latest-wins mailbox；control task 是电机和 debug TX 的唯一正常发送者。
+- **控制发送唯一性**：ROS callback 只写完整 ID 快照 latest-wins mailbox；control task
+  是唯一正常 FDCAN 发送者。
   100ms soft stop 使用 MIT 默认 `kd` 阻尼，300ms hard stop；vaxor/CREB
   各自发送 stop/disable，其他新鲜电机继续运行。
 - **类型坑**：本平台 `int32_t` 是 `long`，模板推导（如 `std::clamp`）须显式
@@ -112,17 +106,16 @@ cd micro_ros_firmware
 - `src/led_task.cpp`：WS2812 状态显示任务 + host 可测的状态到颜色映射
 - `src/ros_bridge.cpp`：node/executor/timer 生命周期，编排各域桥
 - `src/imu_bridge.cpp`：IMU/温度发布（`micro_ros/imu/data`、`micro_ros/imu/temp`）
-- `src/can_debug_bridge.cpp`：CAN1 调试桥（`micro_ros/can1/send`/`receive`）
 - `src/motor_bridge.cpp`：电机命令、模式、增益与反馈/状态 ROS 桥
 - `src/sensor_task.cpp`：传感器任务（EXTI/信号量/温度 PID/加热 PWM）
 - `src/control_task.cpp`：控制任务（三路 FDCAN 初始化；官方测试帧默认关闭，
   由 `ENABLE_CANFD_DEMO_LOOP` 宏开启；JointState → 默认测试电机协议帧）
 - `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
 - `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（依赖 `lib/dma`）
-- `lib/dma`：DMA1 配置 + `HAL_SPI_MspInit` + DMA IRQ 转发（当前 SPI2 专用）
+- `lib/dma`：DMA1 配置 + `HAL_SPI_MspInit` + DMA IRQ 转发（当前 SPI2，预留其他外设复用）
 - `lib/fdcan`：FDCAN 初始化/过滤/收发/中断回调/三路静态 RX 队列（官方例程移植）
 - `lib/motor_control`：100/300ms timeout、故障/恢复及 vaxor/CREB action 状态机
-- `lib/control_mailbox`：per-joint/debug latest-wins mailbox 与授权/连接边沿
+- `lib/control_mailbox`：ID 完整命令快照、低频配置 FIFO 与授权/连接边沿
 - `lib/motor_protocol`：vaxor/CREB 电机协议编解码（从 ros2_ws
   `motor_drive/protocol.cpp` 移植，`-fno-exceptions` 下异常改返回值）
 - `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
@@ -130,8 +123,7 @@ cd micro_ros_firmware
   任务并发使用同一 OSPI 句柄
 
 `src/` 只放任务编排与 ROS 桥；硬件驱动/协议库在 `lib/`，PlatformIO 会自动
-发现并链接。`lib/imu` 依赖 `lib/dma`（见 `lib/imu/library.json`），新增跨库
-依赖时同步补 `library.json`。
+发现并链接。新增跨库依赖时同步补对应的 `library.json`。
 
 ## 代码规范
 
@@ -141,8 +133,8 @@ cd micro_ros_firmware
 - 硬件映射集中：引脚/话题/节点名在 `main.cpp` 或各域桥/任务文件顶部常量，
   不散落。
 - FDCAN ISR → 静态队列 → control task sole consumer 是固定所有权边界；业务域桥
-  只能通过 `control_task_can_snapshot()` 复制 latest CAN snapshot，不得
-  直接访问 `can_bsp` 内部队列或 HAL 发送接口。
+  只能通过 `control_task_get_joint_state()` / `control_task_get_motor_status()` 读取
+  已解码副本，不得直接访问 `can_bsp` 内部队列或 HAL 发送接口。
 - `dev-real` 交接只能做无负载真机验证且硬件急停必须可用；必须实测 RX burst 下
   control WCET/jitter、100Hz 周期、100/300ms 边界和 overflow/backlog。当前机构
   无抱闸，软件 stop 不能替代硬件急停、机械限位或供电隔离。

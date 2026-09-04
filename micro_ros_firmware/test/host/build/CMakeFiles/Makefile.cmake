@@ -47,7 +47,6 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/test_motor_control.dir/DependInfo.cmake"
   "CMakeFiles/test_control_mailbox.dir/DependInfo.cmake"
   "CMakeFiles/test_can_rx_ring.dir/DependInfo.cmake"
-  "CMakeFiles/test_can_snapshot.dir/DependInfo.cmake"
   "CMakeFiles/test_imu_snapshot.dir/DependInfo.cmake"
   "CMakeFiles/test_bmi088_transport_status.dir/DependInfo.cmake"
   "CMakeFiles/test_w25q64_geometry.dir/DependInfo.cmake"

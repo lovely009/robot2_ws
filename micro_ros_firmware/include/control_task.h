@@ -1,5 +1,5 @@
 // 控制业务任务接口（官方 CtrBoard-H7_FDCAN 例程移植）。
-// 当前承载三路 FDCAN 初始化、100 Hz 电机控制周期与反馈快照；固件固定内置
+// 当前承载三路 FDCAN 初始化、100 Hz 电机控制周期与反馈/状态；固件固定内置
 // 两台 vaxor 与两台 CREB 测试电机，不维护运行时动态拓扑配置。
 
 #ifndef CONTROL_TASK_H
@@ -30,9 +30,6 @@ bool control_task_submit_command(const motor_control_command_t *command,
 // 模式与增益使用独立 mailbox；配置更新不直接触发运动，且只影响后续命令。
 bool control_task_submit_mode(const motor_control_mode_request_t *request);
 bool control_task_submit_gains(const motor_control_gains_request_t *request);
-
-// 覆盖单槽 debug CAN mailbox；control task 每周期最多消费一帧。
-bool control_task_submit_debug_frame(const motor_control_tx_action_t *frame);
 
 // 请求控制内核改变人工授权；false 立即使旧命令失效，true 仅清除已消失的
 // 可恢复故障，不会重放旧命令。
@@ -67,17 +64,9 @@ typedef struct {
 // 按默认电机表索引复制最新状态；尚未收到 20 字节状态帧时返回 false。
 bool control_task_get_motor_status(size_t index, control_motor_status_t *out);
 
-// 返回每总线最新原始 RX 帧的副本；不与控制路径争抢主队列。
-// 返回自增序号，参数非法时返回 0。
-uint32_t control_task_can_snapshot(uint8_t bus_index, can_rx_frame_t *out);
-
-// 调试计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
+// 诊断计数：回调收到 JointState 次数 / 匹配到默认电机次数（GDB 可读）
 extern volatile uint32_t g_control_motor_cmd_count;
 extern volatile uint32_t g_control_motor_found_count;
-extern volatile uint32_t g_control_debug_submit_count;
-extern volatile uint32_t g_control_debug_overwrite_count;
-extern volatile uint32_t g_control_debug_rejected_count;
-extern volatile uint32_t g_control_debug_sent_count;
 extern volatile uint32_t
     g_control_can_rx_backlog_count[CAN_RX_BUS_COUNT];
 

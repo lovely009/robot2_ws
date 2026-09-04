@@ -76,7 +76,7 @@ static void start_task(void *pv_parameters) {
   if (!control_task_start()) {
     Error_Handler();
   }
-
+  
   // 子任务创建完成后释放一次性的启动任务资源。
   vTaskDelete(StartTask_Handler);
 }

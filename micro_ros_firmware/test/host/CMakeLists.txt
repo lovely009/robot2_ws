@@ -32,12 +32,11 @@ add_test(NAME motor_control COMMAND test_motor_control)
 
 add_executable(test_control_mailbox
   test_control_mailbox.cpp
+  ../../lib/control_mailbox/src/control_command_mailbox.c
   ../../lib/control_mailbox/src/control_mailbox.c)
 
 target_include_directories(test_control_mailbox PRIVATE
-  ../../lib/control_mailbox/include
-  ../../lib/motor_control/include
-  ../../lib/motor_protocol/include)
+  ../../lib/control_mailbox/include)
 
 add_test(NAME control_mailbox COMMAND test_control_mailbox)
 
@@ -48,15 +47,6 @@ target_include_directories(test_can_rx_ring PRIVATE
   ../../lib/fdcan/include)
 
 add_test(NAME can_rx_ring COMMAND test_can_rx_ring)
-
-add_executable(test_can_snapshot
-  test_can_snapshot.cpp
-  ../../lib/fdcan/src/can_snapshot.c)
-
-target_include_directories(test_can_snapshot PRIVATE
-  ../../lib/fdcan/include)
-
-add_test(NAME can_snapshot COMMAND test_can_snapshot)
 
 add_executable(test_imu_snapshot
   test_imu_snapshot.cpp

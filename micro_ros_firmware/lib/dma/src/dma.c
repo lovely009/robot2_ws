@@ -1,32 +1,57 @@
-// DMA1 配置（官方 CtrBoard-H7_IMU_TempCtrl 例程移植）。
-// 官方由 MX_DMA_Init 开启 DMA1 时钟/中断，并在 HAL_SPI_MspInit 中配置
-// SPI2_RX = DMA1_Stream0、SPI2_TX = DMA1_Stream1 并链接到 hspi2。
-// 本工程 SPI2 句柄由 bmi088_middleware.c 提供，收发仍走官方阻塞调用，
-// DMA 仅保留配置与中断转发路径。
+// DMA 共享资源门卫实现（职责与资源占用表见 dma.h）。
+//
+// DMA 流占用表（编译期固定；新占用必须在此登记并更新本表）：
+//   DMA1_Stream0 → SPI2_RX（BMI088 加速度计/陀螺仪，lib/imu）
+//   DMA1_Stream1 → SPI2_TX（BMI088 加速度计/陀螺仪，lib/imu）
+//   其余流空闲。SPI6（WS2812 候选，ARD §30.2）未分配。
+//
+// 优先级合规：DMA 流中断优先级必须 ≥（数值上不高于触发优先级门槛）
+// configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY——当前不调用 FromISR API，
+// 但未来 DMA 回调一旦使用 RTOS 服务，此断言阻止静默违规（同 lib/fdcan 的
+// FDCAN_FREERTOS_IRQ_PRIORITY 断言做法）。
 
 #include "dma.h"
 #include "stm32_def.h"
+#include <STM32FreeRTOS.h> // configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY（断言用）
+
+// DMA 中断优先级沿用官方 TempCtrl：6/0（低于 syscall 门槛 5，数值更大）。
+#define DMA_STREAM_IRQ_PRIORITY 6U
 
 static DMA_HandleTypeDef hdma_spi2_rx;
 static DMA_HandleTypeDef hdma_spi2_tx;
 
+static void spi2_msp_init(SPI_HandleTypeDef *hspi);
+
 void MX_DMA_Init(void) {
-  // DMA 中断优先级沿用官方 TempCtrl：6/0
+  // 与 FreeRTOS FromISR 的兼容性在编译期钉死（禁止项：静默违反 RTOS 约定）。
+  _Static_assert(DMA_STREAM_IRQ_PRIORITY >=
+                     configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
+                 "DMA IRQ priority must not preempt the FreeRTOS syscall threshold");
+
   __HAL_RCC_DMA1_CLK_ENABLE();
 
-  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, DMA_STREAM_IRQ_PRIORITY, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
-  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, DMA_STREAM_IRQ_PRIORITY, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
 }
 
+// SPI MspInit 分发器：HAL 的该回调全局唯一。当前仅 SPI2（BMI088）；
+// 新 SPI 外设在此新增分支并同步更新 dma.c 顶部的流占用表。
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
-  if (hspi->Instance != SPI2) {
+  if (hspi == NULL) {
     return;
   }
+  // Instance 为外设寄存器结构指针，不能用 switch（非整型）。
+  if (hspi->Instance == SPI2) {
+    spi2_msp_init(hspi);
+  }
+  // 未登记的 SPI：不初始化（外设自负责报错）。
+}
 
+static void spi2_msp_init(SPI_HandleTypeDef *hspi) {
   // SPI2 时钟源与官方一致：PLL（在 SPI2 首次初始化时兜底配置）
-  RCC_PeriphCLKInitTypeDef periph_clk = {};
+  RCC_PeriphCLKInitTypeDef periph_clk = {0};
   periph_clk.PeriphClockSelection = RCC_PERIPHCLK_SPI2;
   periph_clk.Spi123ClockSelection = RCC_SPI123CLKSOURCE_PLL;
   if (HAL_RCCEx_PeriphCLKConfig(&periph_clk) != HAL_OK) {
@@ -82,7 +107,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
   __HAL_LINKDMA(hspi, hdmatx, hdma_spi2_tx);
 
   // 保留官方中断使能；阻塞收发路径不会触发 SPI 事件
-  HAL_NVIC_SetPriority(SPI2_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(SPI2_IRQn, DMA_STREAM_IRQ_PRIORITY, 0);
   HAL_NVIC_EnableIRQ(SPI2_IRQn);
 }
 

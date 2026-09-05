@@ -12,6 +12,8 @@ static bool config_request_is_valid(
   switch (request->kind) {
     case CONTROL_MAILBOX_CONFIG_SET_MODE:
       return true;
+    case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
+      return true; // bool 无可校验域
     case CONTROL_MAILBOX_CONFIG_SET_GAINS:
       return isfinite(request->value.gains.kp) &&
              isfinite(request->value.gains.kd) &&
@@ -63,8 +65,13 @@ void control_mailbox_init(control_mailbox_t *mailbox) {
 bool control_mailbox_submit_command(
     control_mailbox_t *mailbox,
     const control_command_snapshot_t *snapshot) {
-  if (mailbox == NULL || !mailbox->authorization_requested ||
-      !agent_is_connected_or_unknown(mailbox)) {
+  if (mailbox == NULL) {
+    return false;
+  }
+  // 授权/会话门拒绝计数可见（快照本身非法由 publish 侧 invalid_snapshot_count
+  // 计数——两处互不重复：门拒绝发生在数据校验之前）。
+  if (!mailbox->authorization_requested || !agent_is_connected_or_unknown(mailbox)) {
+    ++mailbox->command_rejected_count;
     return false;
   }
   return control_command_mailbox_publish(&mailbox->command, snapshot);
@@ -87,12 +94,20 @@ void control_mailbox_clear_command(control_mailbox_t *mailbox) {
 bool control_mailbox_submit_config(
     control_mailbox_t *mailbox,
     const control_mailbox_config_request_t *request) {
-  if (mailbox == NULL || !config_request_is_valid(request) ||
-      !agent_is_connected_or_unknown(mailbox) ||
-      mailbox->config_count >= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY) {
-    if (mailbox != NULL) {
-      ++mailbox->config_rejected_count;
-    }
+  if (mailbox == NULL) {
+    return false;
+  }
+  // 拒绝类别可区分：非法请求 / 会话门 / FIFO 满（诊断语义见头文件）。
+  if (!config_request_is_valid(request)) {
+    ++mailbox->config_invalid_count;
+    return false;
+  }
+  if (!agent_is_connected_or_unknown(mailbox)) {
+    ++mailbox->config_session_count;
+    return false;
+  }
+  if (mailbox->config_count >= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY) {
+    ++mailbox->config_overflow_count;
     return false;
   }
 

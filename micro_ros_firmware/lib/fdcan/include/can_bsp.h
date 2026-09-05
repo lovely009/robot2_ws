@@ -1,6 +1,11 @@
-// FDCAN 板级收发接口（官方 CtrBoard-H7_FDCAN 例程 bsp_fdcan.c 移植）。
-// 发送支持标准 ID 的 FD 帧（BRS），接收经中断回调落到三路静态队列；
-// control task 是主队列的唯一消费者。
+// FDCAN 板级收发接口（ARD-0007 §21/§22/§28：三路硬件 init/过滤器/IRQ/
+// RX ring/TX 调度/低层统计归 lib/fdcan；不做协议解码、ROS、策略）。
+//
+// 数据路径：ISR 只从硬件 FIFO 取帧、盖 MCU 单调时戳、写入该总线 can_rx_ring
+// （SPSC 无锁，不解码）；motor_rt_task 每服务节拍经 can_rx_ring_pop 批量弹出，
+// TX 经每总线 can_tx_scheduler（P0/P1/P2）pump 后由 can_bsp_submit_tx 提交硬件。
+//
+// 本层不做：协议解码、ROS、策略裁决、第二个 RX 消费者（ARD §28.1）。
 
 #ifndef CAN_BSP_H
 #define CAN_BSP_H
@@ -8,7 +13,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "can_rx_queue.h"
+#include "can_rx_ring.h"
+#include "can_tx_scheduler.h"
 #include "fdcan.h"
 
 #define hcan_t FDCAN_HandleTypeDef
@@ -17,25 +23,32 @@
 extern "C" {
 #endif
 
+// 初始化 RX ring/TX 调度器、过滤器、启动三路硬件并激活中断
+// （RXFIFO0 新帧/满/丢失 + 错误状态）。
 void bsp_can_init(void);
 void can_filter_init(void);
 
-// 返回 0=成功，1=失败（DLC 不支持或 TX FIFO 满）
-uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, const uint8_t *data, uint32_t len);
+// 总线 RX ring 访问（任务侧批量弹出；ISR 在内部写入）。
+can_rx_ring_t *can_bsp_rx_ring(uint8_t bus_index);
 
-// 通用发送：支持标准/扩展 ID、经典/FD 帧；fdcanx_send_data 为其 FD 标准帧特例
-uint8_t fdcanx_send_frame(hcan_t *hfdcan, uint32_t id, const uint8_t *data,
-                          uint32_t len, bool is_extended, bool is_fd);
+// 总线 TX 调度器访问（上层路由 P0/P1/P2 帧后 pump）。
+can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index);
 
-// 从 RX FIFO0 取一帧；返回数据长度，无帧返回 0
-uint8_t fdcanx_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf);
+// 提交一帧到该总线硬件 TX FIFO（pump 结果逐帧调用）。
+// 失败（DLC 不支持/FIFO 满）自动计入该总线调度器的 tx_hw_reject_count。
+bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame);
 
-// 通用接收：额外返回扩展/ FD 标志；fdcanx_receive 为兼容封装
-uint8_t fdcanx_receive_frame(hcan_t *hfdcan, uint32_t *rec_id, uint8_t *buf,
-                             bool *is_extended, bool *is_fd);
+// 硬件级错误/丢帧计数（HAL 读取失败、硬件 FIFO 丢失、错误状态事件），
+// 供诊断副本汇聚（ARD §32.1）。
+uint32_t can_bsp_bus_stat(uint8_t bus_index, uint8_t stat_index);
+
+#define CAN_BSP_STAT_HAL_READ_ERROR 0U
+#define CAN_BSP_STAT_HW_FIFO_LOST 1U
+#define CAN_BSP_STAT_ERROR_STATUS 2U
+#define CAN_BSP_STAT_COUNT 3U
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // CAN_BSP_H
+#endif // CAN_BSP_H

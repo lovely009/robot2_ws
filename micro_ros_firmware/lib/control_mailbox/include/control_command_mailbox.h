@@ -1,5 +1,13 @@
 // 与电机协议和运行时策略无关的完整命令快照 mailbox。
-// 调用方负责在并发访问时提供短 critical section。
+//
+// 并发契约：本层无内部锁。publish/take/clear 的每一次调用都必须位于
+// 调用方提供的临界区内（写侧与读侧互斥即可）；违反契约（如无锁双写者）
+// 不属于受支持用法。
+//
+// 语义：双缓冲 latest-wins——publish 写后台缓冲并翻转，未取走时再次
+// publish 只覆盖"后台"并计入 overwrite_count（已发布的快照不会被撕碎）；
+// take 取走已发布快照并清除 pending；clear 只撤销"未取走"的输入，
+// 诊断计数（overwrite/invalid）保留为生命周期统计。
 
 #ifndef CONTROL_COMMAND_MAILBOX_H
 #define CONTROL_COMMAND_MAILBOX_H

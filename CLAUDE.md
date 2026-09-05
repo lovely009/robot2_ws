@@ -10,6 +10,7 @@ ROS 2 Humble 工作空间（`dev` 开发分支），四个 ament 包：
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
 - `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
 - `robot_arm_gazebo` —— UR5e 模型与 Gazebo 集成（URDF / world / controller / launch）
+- `micro_ros_firmware` —— STM32 控制板 micro-ROS 固件（PlatformIO，**非 ament 包**，见下节）
 
 分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 4 包）、
 `dev-sim` 仿真线、`main` 仅发布。
@@ -59,6 +60,21 @@ ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
+
+## micro_ros_firmware（STM32 固件，PlatformIO，非 ament 包）
+
+STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经 `../micro_ros_agent/`（独立仓库）对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；权威文档是该目录 `AGENTS.md`（其顶部横幅指向进行中的重构 HANDOFF）。
+
+```bash
+# 均在 micro_ros_firmware/ 内执行
+~/.platformio/penv/bin/pio run                 # 编译（pio 不在 PATH）；-t upload 烧录
+cmake -S test/host -B .host-build && cmake --build .host-build --clean-first -j2
+ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + cassert 断言（无 gtest）
+```
+
+- 改 `platformio.ini` 编译宏后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编）；勿跑 `-t clean_microros`（联网重下环境）。
+- 消息唯一来源是 `micro_ros_agent/src/can_bridge_msgs`，`extra_packages/can_bridge_msgs` 只是指向它的符号链接——改消息去 agent 仓库，勿在固件侧另建。
+- motor runtime 重构（`docs/ARD-0007-*.md` + `docs/HANDOFF-motor-runtime-refactor.md`）中间态**刻意不兼容**：Phase B 前固件编译失败于 `control_task.cpp` 属预期，验证以 host 测试为准。
 
 ## 架构总览
 

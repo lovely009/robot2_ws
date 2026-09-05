@@ -17,9 +17,9 @@
 #include <rclc/executor.h>
 #include <rmw_microros/time_sync.h>
 
-#include "control_task.h"
 #include "imu_bridge.h"
 #include "motor_bridge.h"
+#include "motor_rt_task.h"
 
 static const char *kNodeName = "micro_ros_node";
 
@@ -29,8 +29,10 @@ static rclc_executor_t g_executor;
 static rcl_timer_t g_timer;
 static rcl_allocator_t g_allocator;
 
-// executor 最大句柄数：定时器 + 电机桥订阅。
-static const size_t kExecutorHandles = 5;
+// executor 最大句柄数：定时器 + 各业务桥订阅数（桥自报，避免魔法数截断）。
+static size_t executor_handle_count() {
+  return 1U + motor_bridge_executor_handle_count();
+}
 
 // 按初始化阶段跟踪，保证失败/断连时只清理已成功创建的实体
 static bool g_support_up = false;
@@ -47,8 +49,8 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
 }
 
 static void destroy_entities() {
-  // 先通知控制任务失联，使旧命令在 ROS 实体清理期间即失效。
-  control_task_set_agent_connected(false);
+  // 先通知实时任务失联，使旧命令在 ROS 实体清理期间即失效。
+  motor_rt_set_agent_connected(false);
   imu_bridge_destroy(&g_node);
   motor_bridge_destroy(&g_node, &g_executor);
 
@@ -92,7 +94,7 @@ static bool create_entities() {
   }
   g_node_up = true;
 
-  if (rclc_executor_init(&g_executor, &g_support.context, kExecutorHandles,
+  if (rclc_executor_init(&g_executor, &g_support.context, executor_handle_count(),
                          &g_allocator) != RCL_RET_OK) {
     destroy_entities();
     return false;
@@ -123,7 +125,7 @@ static bool create_entities() {
   // 失败不致命（各桥在未同步时回退 millis()），故忽略返回值。
   rmw_uros_sync_session(1000);
   // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
-  control_task_set_agent_connected(true);
+  motor_rt_set_agent_connected(true);
   return true;
 }
 

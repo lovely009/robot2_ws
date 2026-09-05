@@ -4,9 +4,9 @@
 #include <STM32FreeRTOS.h>
 #include <micro_ros_platformio.h>
 
-#include "control_task.h"
 #include "led_task.h"
 #include "micro_ros_task.h"
+#include "motor_rt_task.h"
 #include "sensor_task.h"
 #include "ws2812.h"
 
@@ -19,8 +19,7 @@ static const uint32_t kSerialBaud = 115200U;
 static const uint32_t kIdleTaskStackWords = 128U;
 static const uint32_t kTimerTaskStackWords = 256U;
 
-// FreeRTOS 配置为静态分配 idle task 内存；缓冲区必须具有静态生命周期，
-// 避免调度器运行后依赖堆分配。
+// FreeRTOS 配置为静态分配 idle task 内存；缓冲区必须具有静态生命周期，避免调度器运行后依赖堆分配。
 extern "C" void vApplicationGetIdleTaskMemory(
     StaticTask_t **idle_tcb, StackType_t **idle_stack,
     uint32_t *idle_stack_size) {
@@ -48,8 +47,7 @@ void initialize_system(void) {
   // 状态灯必须在 led task 启动前完成底层初始化；运行期仅由 led task 写入。
   ws2812_init();
 
-  // micro-ROS 使用 USB CDC 暴露的 Serial 作为串行传输。USB CDC 下波特率参数
-  // 不决定物理链路速率，但 begin() 仍用于启动串口设备。
+  // micro-ROS 使用 USB CDC 暴露的 Serial 作为串行传输。USB CDC 下波特率参数不决定物理链路速率，但 begin() 仍用于启动串口设备。
   kMicroRosSerial.begin(kSerialBaud);
   set_microros_serial_transports(kMicroRosSerial);
 
@@ -62,8 +60,7 @@ static void start_task(void *pv_parameters);
 static void start_task(void *pv_parameters) {
   (void)pv_parameters;
 
-  // 先创建状态指示与通信任务，再启动传感器和控制任务。各 start 函数只负责
-  // 创建长期运行的业务任务；任一创建失败都进入统一故障处理，避免部分系统运行。
+  // 先创建状态指示与通信任务，再启动传感器和控制任务。各 start 函数只负责创建长期运行的业务任务；任一创建失败都进入统一故障处理，避免部分系统运行。
   if (!led_task_start()) {
     Error_Handler();
   }
@@ -73,7 +70,7 @@ static void start_task(void *pv_parameters) {
   if (!sensor_task_start()) {
     Error_Handler();
   }
-  if (!control_task_start()) {
+  if (!motor_rt_task_start()) {
     Error_Handler();
   }
   
@@ -82,8 +79,7 @@ static void start_task(void *pv_parameters) {
 }
 
 void setup() {
-  // setup() 只完成不依赖 FreeRTOS 调度器的板级初始化。BMI088 等内部使用
-  // vTaskDelay 的初始化必须留在对应业务任务中执行。
+  // setup() 只完成不依赖 FreeRTOS 调度器的板级初始化。BMI088 等内部使用vTaskDelay 的初始化必须留在对应业务任务中执行。
   initialize_system();
 
   // 通过低优先级启动任务统一创建业务任务，确保其初始化发生在调度器启动后。
@@ -98,6 +94,5 @@ void setup() {
   for (;;) {}
 }
 
-// STM32FreeRTOS 将 Arduino loop() 作为 idle hook 调用，因此必须保持非阻塞且
-// 不承载业务逻辑；所有周期性工作均由独立任务负责。
+// STM32FreeRTOS 将 Arduino loop() 作为 idle hook 调用，因此必须保持非阻塞且不承载业务逻辑；所有周期性工作均由独立任务负责。
 void loop() {}

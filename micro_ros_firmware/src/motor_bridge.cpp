@@ -1,483 +1,529 @@
-// 电机域 ROS 桥接实现。
+// 电机域 ROS 桥实现（Phase C：ID 化消息面，ARD-0007 §15-20 冻结集）。
 //
-// ROS 回调只校验/转换消息并写 control task mailbox；20 ms 定时器只复制
-// control task 维护的最新关节快照。协议、总线与正常发送路径均不在本模块。
+// 订阅（4 句柄）：
+//   /motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
+//   micro_ros/motor_policy（Enable/Kp/Kd/软限幅）→ mailbox 配置
+//   micro_ros/motor_config（模式/设备侧限位事务）→ mailbox 配置
+//   micro_ros/motor_enable（全局授权电平）
+// 发布（5）：
+//   micro_ros/motion_states（100Hz 目标，只读副本）
+//   micro_ros/motor_status_array（低频诊断）
+//   micro_ros/motor_topology（1s 全量拓扑）
+//   micro_ros/motor_events（事件转发）
+//   micro_ros/motor_config_result（事务结果，request_id 关联）
+//
+// 本桥不做：joint_name 语义、协议/CAN 字节、直接 RX 访问（ARD §28.1）。
+// QoS（TBD-ROS-05 默认表）：命令/状态流 best-effort depth1（latest-wins、
+// 无历史积压，ARD §34）；策略/配置/结果/事件/拓扑 reliable 小深度。
 
 #include "motor_bridge.h"
 
 #include <Arduino.h>
-#include <math.h>
-#include <string.h>
 
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
-#include <rclc/rclc.h>
-#include <can_bridge_msgs/msg/motor_gains.h>
-#include <can_bridge_msgs/msg/motor_mode.h>
-#include <can_bridge_msgs/msg/motor_status.h>
-#include <sensor_msgs/msg/joint_state.h>
 #include <std_msgs/msg/bool.h>
 
-#include "control_task.h"
-#include "time_utils.h"
+#include <can_bridge_msgs/msg/motor_command_array.h>
+#include <can_bridge_msgs/msg/motor_config.h>
+#include <can_bridge_msgs/msg/motor_config_result.h>
+#include <can_bridge_msgs/msg/motor_event.h>
+#include <can_bridge_msgs/msg/motor_motion_state_array.h>
+#include <can_bridge_msgs/msg/motor_policy.h>
+#include <can_bridge_msgs/msg/motor_status_array.h>
+#include <can_bridge_msgs/msg/motor_topology.h>
+#include <rmw_microros/time_sync.h>
 
-// 电机域话题分工：控制目标、运动授权、模式和增益分别输入，反馈与诊断分别输出。
-// 控制目标不携带模式或增益，避免普通控制消息隐式改变电机配置。
-static const char *kJointCommandsTopic = "/joint_commands";
-static const char *kJointFeedbackTopic = "micro_ros/JointState";
-static const char *kMotorStatusTopic = "micro_ros/motor_status";
-static const char *kMotorEnableTopic = "micro_ros/motor_enable";
-static const char *kMotorModeTopic = "micro_ros/motor_mode";
-static const char *kMotorGainsTopic = "micro_ros/motor_gains";
-static const size_t kJointCommandMaxMotors = 4;  // 当前默认四台测试电机
+#include "motor_rt_task.h"
 
-// rcl 实体和对应消息必须具有静态生命周期，不能使用回调栈上的临时对象。
-static rcl_subscription_t g_joint_state_sub;
-static rcl_subscription_t g_motor_enable_sub;
-static rcl_subscription_t g_motor_mode_sub;
-static rcl_subscription_t g_motor_gains_sub;
-static rcl_publisher_t g_joint_feedback_pub;
-static rcl_publisher_t g_motor_status_pub;
-static sensor_msgs__msg__JointState g_joint_state_msg;
-static sensor_msgs__msg__JointState g_joint_feedback_msg;
-static std_msgs__msg__Bool g_motor_enable_msg;
-static can_bridge_msgs__msg__MotorMode g_motor_mode_msg;
-static can_bridge_msgs__msg__MotorGains g_motor_gains_msg;
-static can_bridge_msgs__msg__MotorStatus g_motor_status_msg;
+// 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
+// 禁止反序列化路径上的动态分配）。
+static can_bridge_msgs__msg__MotorMotionStateTarget
+    g_motion_states_buf[64];
+static can_bridge_msgs__msg__MotorStatusTarget g_status_buf[64];
+static can_bridge_msgs__msg__MotorTopologyEntry g_topology_buf[64];
+static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[64];
 
-// micro-ROS 不会为 NULL 序列/字符串分配空间：全部静态预分配。
-static rosidl_runtime_c__String g_joint_name_strs[kJointCommandMaxMotors];
-static char g_joint_name_buf[kJointCommandMaxMotors][32];
-static double g_joint_position_buf[kJointCommandMaxMotors];
-static double g_joint_velocity_buf[kJointCommandMaxMotors];
-static double g_joint_effort_buf[kJointCommandMaxMotors];
-static rosidl_runtime_c__String g_joint_fb_name_strs[kJointCommandMaxMotors];
-static char g_joint_fb_name_buf[kJointCommandMaxMotors][32];
-static double g_joint_fb_position_buf[kJointCommandMaxMotors];
-static double g_joint_fb_velocity_buf[kJointCommandMaxMotors];
-static double g_joint_fb_effort_buf[kJointCommandMaxMotors];
-static char g_motor_status_name_buf[32];
-static char g_motor_mode_name_buf[32];
-static char g_motor_gains_name_buf[32];
-static uint32_t g_motor_status_published_sequence[kJointCommandMaxMotors];
+// ---- 话题名 ----
+static const char *kCommandTopic = "/motor_command_array";
+static const char *kPolicyTopic = "micro_ros/motor_policy";
+static const char *kConfigTopic = "micro_ros/motor_config";
+static const char *kEnableTopic = "micro_ros/motor_enable";
+static const char *kMotionStatesTopic = "micro_ros/motion_states";
+static const char *kStatusTopic = "micro_ros/motor_status_array";
+static const char *kTopologyTopic = "micro_ros/motor_topology";
+static const char *kEventsTopic = "micro_ros/motor_events";
+static const char *kConfigResultTopic = "micro_ros/motor_config_result";
 
-// 调试计数（GDB 可读）。
-volatile uint32_t g_joint_feedback_pub_count = 0;
-volatile int32_t g_joint_feedback_pub_rc = 0;
-volatile uint32_t g_motor_status_pub_count = 0;
-volatile int32_t g_motor_status_pub_rc = 0;
+// ---- 订阅（4）----
+static rcl_subscription_t g_command_sub;
+static can_bridge_msgs__msg__MotorCommandArray g_command_msg;
+static bool g_command_up = false;
+static bool g_command_added = false;
 
-// 分阶段记录创建结果：建链中途失败或 agent 断连时，只销毁已经成功初始化、
-// 已经加入 executor 的实体，避免对未初始化的 rcl 对象调用 fini/remove。
-static bool g_ready = false;
-static bool g_joint_sub_up = false;
-static bool g_enable_sub_up = false;
-static bool g_mode_sub_up = false;
-static bool g_gains_sub_up = false;
-static bool g_joint_publisher_up = false;
-static bool g_status_publisher_up = false;
-static bool g_joint_sub_added = false;
-static bool g_enable_sub_added = false;
-static bool g_mode_sub_added = false;
-static bool g_gains_sub_added = false;
+static rcl_subscription_t g_policy_sub;
+static can_bridge_msgs__msg__MotorPolicy g_policy_msg;
+static bool g_policy_up = false;
+static bool g_policy_added = false;
 
-static bool copy_request_joint_name(const rosidl_runtime_c__String *source,
-                                    char *destination,
-                                    size_t destination_capacity) {
-  // ROS 字符串必须同时满足 size/capacity 约束；内部请求固定使用 C 字符串。
-  if (source == nullptr || source->data == nullptr || source->size == 0U ||
-      source->size >= source->capacity ||
-      source->size >= destination_capacity) {
-    return false;
-  }
-  memcpy(destination, source->data, source->size);
-  destination[source->size] = '\0';
-  return true;
+static rcl_subscription_t g_config_sub;
+static can_bridge_msgs__msg__MotorConfig g_config_msg;
+static bool g_config_up = false;
+static bool g_config_added = false;
+
+static rcl_subscription_t g_enable_sub;
+static std_msgs__msg__Bool g_enable_msg;
+static bool g_enable_up = false;
+static bool g_enable_added = false;
+
+// ---- 发布（5）----
+static rcl_publisher_t g_motion_states_pub;
+static can_bridge_msgs__msg__MotorMotionStateArray g_motion_states_msg;
+static bool g_motion_states_up = false;
+
+static rcl_publisher_t g_status_pub;
+static can_bridge_msgs__msg__MotorStatusArray g_status_msg;
+static bool g_status_up = false;
+
+static rcl_publisher_t g_topology_pub;
+static can_bridge_msgs__msg__MotorTopology g_topology_msg;
+static bool g_topology_up = false;
+
+static rcl_publisher_t g_events_pub;
+static can_bridge_msgs__msg__MotorEvent g_event_msg;
+static bool g_events_up = false;
+
+static rcl_publisher_t g_config_result_pub;
+static can_bridge_msgs__msg__MotorConfigResult g_config_result_msg;
+static bool g_config_result_up = false;
+
+static uint32_t g_policy_request_id = 1U; // Policy 无 request_id，桥代生成
+
+size_t motor_bridge_executor_handle_count(void) {
+  return 4U; // command/policy/config/enable 订阅
 }
 
-static void joint_state_sub_cb(const void *msg) {
-  const sensor_msgs__msg__JointState *state =
-      (const sensor_msgs__msg__JointState *)msg;
-  if (state == nullptr || state->name.data == nullptr) {
+// QoS 助手（TBD-ROS-05 默认表）。
+static rmw_qos_profile_t qos_stream() {
+  // 高频流：best-effort + depth 1（latest-wins，无历史积压，ARD §34）。
+  rmw_qos_profile_t qos = rmw_qos_profile_default;
+  qos.reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
+  qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
+  qos.depth = 1;
+  return qos;
+}
+
+static rmw_qos_profile_t qos_reliable(size_t depth) {
+  rmw_qos_profile_t qos = rmw_qos_profile_default;
+  qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
+  qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
+  qos.depth = depth;
+  return qos;
+}
+
+// ---------------------------------------------------------------------------
+// 回调：消息校验 → mailbox 写入
+// ---------------------------------------------------------------------------
+
+static void command_array_cb(const void *msgin) {
+  if (msgin == nullptr) {
     return;
   }
-
-  // name 决定命令数量；异常 size 先收紧到实际 capacity 和固件固定容量。
-  size_t count = state->name.size;
-  if (count > state->name.capacity) {
-    count = state->name.capacity;
+  const auto *msg = (const can_bridge_msgs__msg__MotorCommandArray *)msgin;
+  if (msg->count > msg->targets.size) {
+    return; // 有界数组外的声明：拒绝
   }
-  if (count > kJointCommandMaxMotors) {
-    count = kJointCommandMaxMotors;
+  control_command_snapshot_t snapshot = {0};
+  snapshot.sequence = msg->sequence;
+  snapshot.received_tick_ms = millis(); // 本地接收 tick（ARD §12.2）
+  const uint8_t count =
+      msg->count < CONTROL_COMMAND_MAILBOX_MAX_TARGETS
+          ? msg->count
+          : CONTROL_COMMAND_MAILBOX_MAX_TARGETS;
+  for (uint8_t i = 0; i < count; ++i) {
+    snapshot.targets[i].motor_id = msg->targets.data[i].motor_id;
+    snapshot.targets[i].position = msg->targets.data[i].position;
+    snapshot.targets[i].velocity = msg->targets.data[i].velocity;
+    snapshot.targets[i].effort = msg->targets.data[i].effort;
   }
-  uint32_t received_ms = millis();
-  for (size_t index = 0; index < count; ++index) {
-    motor_control_command_t command = {};
-    const rosidl_runtime_c__String *name = &state->name.data[index];
-    if (name->data == nullptr || name->size == 0U ||
-        name->size >= name->capacity ||
-        name->size >= sizeof(command.joint_name)) {
-      continue;
-    }
-    memcpy(command.joint_name, name->data, name->size);
-    command.joint_name[name->size] = '\0';
-
-    // JointState 的三个数值数组允许省略；缺失字段保持零值。每个已提供字段都要
-    // 同时检查 data、size 和 capacity，防止畸形序列导致越界读取。
-    const bool has_position =
-        state->position.data != nullptr && state->position.size > index &&
-        state->position.capacity > index;
-    const bool has_velocity =
-        state->velocity.data != nullptr && state->velocity.size > index &&
-        state->velocity.capacity > index;
-    const bool has_effort =
-        state->effort.data != nullptr && state->effort.size > index &&
-        state->effort.capacity > index;
-    if (has_position) {
-      command.position = state->position.data[index];
-    }
-    if (has_velocity) {
-      command.velocity = state->velocity.data[index];
-    }
-    if (has_effort) {
-      command.effort = state->effort.data[index];
-    }
-    if (!isfinite(command.position) || !isfinite(command.velocity) ||
-        !isfinite(command.effort)) {
-      continue;
-    }
-    // 回调只写 latest-wins mailbox；FDCAN 发送由 control task 独占完成。
-    (void)control_task_submit_command(&command, received_ms);
-  }
+  snapshot.target_count = count;
+  (void)motor_rt_submit_command(&snapshot); // 非法快照由 mailbox 拒绝并计数
 }
 
-static void motor_enable_sub_cb(const void *msg) {
-  const std_msgs__msg__Bool *enabled = (const std_msgs__msg__Bool *)msg;
-  if (enabled != nullptr) {
-    control_task_set_authorization(enabled->data);
-  }
-}
-
-static void motor_mode_sub_cb(const void *msg) {
-  const can_bridge_msgs__msg__MotorMode *mode =
-      (const can_bridge_msgs__msg__MotorMode *)msg;
-  motor_control_mode_request_t request = {};
-  if (mode == nullptr ||
-      !copy_request_joint_name(&mode->joint_name, request.joint_name,
-                               sizeof(request.joint_name))) {
+static void policy_cb(const void *msgin) {
+  if (msgin == nullptr) {
     return;
   }
-  // 协议支持范围由 control mailbox 再按关节类型校验；模式配置会建立一个
-  // 控制周期屏障，切换完成前不会消费新的运动目标。
-  request.mode = mode->mode;
-  (void)control_task_submit_mode(&request);
+  const auto *msg = (const can_bridge_msgs__msg__MotorPolicy *)msgin;
+
+  control_mailbox_config_request_t request = {0};
+  request.request_id = g_policy_request_id++;
+  request.received_tick_ms = millis();
+  request.motor_id = msg->motor_id;
+
+  // Enable 先于增益/限位（先表达运动许可变化）。
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
+  request.value.enable = msg->enable;
+  (void)motor_rt_submit_config(&request);
+
+  if (msg->set_gains) {
+    request.kind = CONTROL_MAILBOX_CONFIG_SET_GAINS;
+    request.value.gains.kp = msg->kp;
+    request.value.gains.kd = msg->kd;
+    (void)motor_rt_submit_config(&request);
+  }
+  if (msg->set_limits) {
+    request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
+    request.value.position_limits.min_position_rad = msg->min_position_rad;
+    request.value.position_limits.max_position_rad = msg->max_position_rad;
+    (void)motor_rt_submit_config(&request);
+  }
 }
 
-static void motor_gains_sub_cb(const void *msg) {
-  const can_bridge_msgs__msg__MotorGains *gains =
-      (const can_bridge_msgs__msg__MotorGains *)msg;
-  motor_control_gains_request_t request = {};
-  if (gains == nullptr || !isfinite(gains->kp) || !isfinite(gains->kd) ||
-      !copy_request_joint_name(&gains->joint_name, request.joint_name,
-                               sizeof(request.joint_name))) {
+static void config_cb(const void *msgin) {
+  if (msgin == nullptr) {
     return;
   }
-  // 此处先拒绝 NaN/Inf；非负和协议上限由 control mailbox 统一校验。
-  // 新增益只会被随后接收的控制命令复制，不会自行刷新命令或触发运动。
-  request.kp = gains->kp;
-  request.kd = gains->kd;
-  (void)control_task_submit_gains(&request);
-}
-
-static void setup_command_msg_buffers() {
-  // 订阅消息的序列存储由应用提供；executor 反序列化时只写这些固定缓冲区。
-  g_joint_state_msg.name.data = g_joint_name_strs;
-  g_joint_state_msg.name.size = 0;
-  g_joint_state_msg.name.capacity = kJointCommandMaxMotors;
-  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
-    g_joint_name_strs[index].data = g_joint_name_buf[index];
-    g_joint_name_strs[index].size = 0;
-    g_joint_name_strs[index].capacity = sizeof(g_joint_name_buf[index]);
+  const auto *msg = (const can_bridge_msgs__msg__MotorConfig *)msgin;
+  if (msg->request_id == 0U) {
+    return; // request_id 契约：非 0
   }
-  g_joint_state_msg.position.data = g_joint_position_buf;
-  g_joint_state_msg.position.size = 0;
-  g_joint_state_msg.position.capacity = kJointCommandMaxMotors;
-  g_joint_state_msg.velocity.data = g_joint_velocity_buf;
-  g_joint_state_msg.velocity.size = 0;
-  g_joint_state_msg.velocity.capacity = kJointCommandMaxMotors;
-  g_joint_state_msg.effort.data = g_joint_effort_buf;
-  g_joint_state_msg.effort.size = 0;
-  g_joint_state_msg.effort.capacity = kJointCommandMaxMotors;
-}
-
-static void setup_feedback_msg_buffers() {
-  // 发布消息复用同一组固定缓冲区，每次 poll 仅调整有效元素的 size。
-  g_joint_feedback_msg.name.data = g_joint_fb_name_strs;
-  g_joint_feedback_msg.name.size = 0;
-  g_joint_feedback_msg.name.capacity = kJointCommandMaxMotors;
-  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
-    g_joint_fb_name_strs[index].data = g_joint_fb_name_buf[index];
-    g_joint_fb_name_strs[index].size = 0;
-    g_joint_fb_name_strs[index].capacity = sizeof(g_joint_fb_name_buf[index]);
+  control_mailbox_config_request_t request = {0};
+  request.request_id = msg->request_id;
+  request.received_tick_ms = millis();
+  request.motor_id = msg->motor_id;
+  if (msg->kind == can_bridge_msgs__msg__MotorConfig__KIND_SET_MODE) {
+    request.kind = CONTROL_MAILBOX_CONFIG_SET_MODE;
+    request.value.mode = msg->mode;
+  } else if (msg->kind ==
+             can_bridge_msgs__msg__MotorConfig__KIND_SET_LIMITS) {
+    request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
+    request.value.position_limits.min_position_rad = msg->min_position_rad;
+    request.value.position_limits.max_position_rad = msg->max_position_rad;
+  } else {
+    return; // 未知 kind
   }
-  g_joint_feedback_msg.position.data = g_joint_fb_position_buf;
-  g_joint_feedback_msg.position.size = 0;
-  g_joint_feedback_msg.position.capacity = kJointCommandMaxMotors;
-  g_joint_feedback_msg.velocity.data = g_joint_fb_velocity_buf;
-  g_joint_feedback_msg.velocity.size = 0;
-  g_joint_feedback_msg.velocity.capacity = kJointCommandMaxMotors;
-  g_joint_feedback_msg.effort.data = g_joint_fb_effort_buf;
-  g_joint_feedback_msg.effort.size = 0;
-  g_joint_feedback_msg.effort.capacity = kJointCommandMaxMotors;
-  g_joint_feedback_msg.header.frame_id.data = (char *)"joints";
-  g_joint_feedback_msg.header.frame_id.size = 6;
-  g_joint_feedback_msg.header.frame_id.capacity = 7;
+  (void)motor_rt_submit_config(&request);
 }
 
-static void setup_status_msg_buffers() {
-  // sequence 用于区分新状态快照，重连后清零以重新发布当前有效状态。
-  memset(g_motor_status_published_sequence, 0,
-         sizeof(g_motor_status_published_sequence));
-  g_motor_status_msg.joint_name.data = g_motor_status_name_buf;
-  g_motor_status_msg.joint_name.size = 0U;
-  g_motor_status_msg.joint_name.capacity = sizeof(g_motor_status_name_buf);
-  g_motor_status_msg.header.frame_id.data = (char *)"joints";
-  g_motor_status_msg.header.frame_id.size = 6U;
-  g_motor_status_msg.header.frame_id.capacity = 7U;
+static void enable_cb(const void *msgin) {
+  if (msgin == nullptr) {
+    return;
+  }
+  const auto *msg = (const std_msgs__msg__Bool *)msgin;
+  motor_rt_request_authorization(msg->data);
 }
 
-static void setup_configuration_msg_buffers() {
-  // 两个配置话题每次只承载一个关节名，各使用独立缓冲区避免互相覆盖。
-  g_motor_mode_msg.joint_name.data = g_motor_mode_name_buf;
-  g_motor_mode_msg.joint_name.size = 0U;
-  g_motor_mode_msg.joint_name.capacity = sizeof(g_motor_mode_name_buf);
-  g_motor_gains_msg.joint_name.data = g_motor_gains_name_buf;
-  g_motor_gains_msg.joint_name.size = 0U;
-  g_motor_gains_msg.joint_name.capacity = sizeof(g_motor_gains_name_buf);
+// ---------------------------------------------------------------------------
+// 发布填充
+// ---------------------------------------------------------------------------
+
+static void publish_motion_states() {
+  motor_control_motion_state_t states[64];
+  const size_t count =
+      motor_rt_copy_motion_states(states, sizeof(states) / sizeof(states[0]));
+  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  g_motion_states_msg.states.size = out_count;
+  for (uint8_t i = 0; i < out_count; ++i) {
+    auto &out = g_motion_states_msg.states.data[i];
+    out.motor_id = states[i].motor_id;
+    out.position = states[i].position_rad;
+    out.velocity = states[i].velocity_rad_s;
+    out.effort = states[i].effort_nm;
+    out.state_age_ms = states[i].state_age_ms;
+  }
+  g_motion_states_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  const rcl_ret_t publish_rc = rcl_publish(&g_motion_states_pub, &g_motion_states_msg, nullptr);
+  (void)publish_rc;
 }
+
+static void publish_statuses() {
+  motor_control_status_t statuses[64];
+  const size_t count =
+      motor_rt_copy_statuses(statuses, sizeof(statuses) / sizeof(statuses[0]));
+  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  g_status_msg.statuses.size = out_count;
+  for (uint8_t i = 0; i < out_count; ++i) {
+    auto &out = g_status_msg.statuses.data[i];
+    out.motor_id = statuses[i].motor_id;
+    out.temperature = statuses[i].temperature_c;
+    out.current = statuses[i].current_a;
+    out.voltage = statuses[i].voltage_v;
+    out.drive_mode = statuses[i].drive_mode;
+    out.unified_fault_code = statuses[i].unified_fault_code;
+    out.vendor_fault_code = statuses[i].vendor_fault_code;
+    out.protection_flags = statuses[i].protection_flags;
+    out.limit_flags = statuses[i].limit_flags;
+    out.online = statuses[i].online;
+    out.lifecycle = statuses[i].lifecycle;
+    out.state_age_ms = statuses[i].state_age_ms;
+  }
+  g_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  const rcl_ret_t publish_rc = rcl_publish(&g_status_pub, &g_status_msg, nullptr);
+  (void)publish_rc;
+}
+
+static uint32_t g_topology_tick = 0U; // 1s 节流的相位
+
+static void publish_topology(uint32_t now_ms) {
+  if ((uint32_t)(now_ms - g_topology_tick) < 1000U) {
+    return;
+  }
+  g_topology_tick = now_ms;
+  motor_rt_topology_entry_t entries[64];
+  const size_t count =
+      motor_rt_copy_topology(entries, sizeof(entries) / sizeof(entries[0]));
+  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  g_topology_msg.entries.size = out_count;
+  for (uint8_t i = 0; i < out_count; ++i) {
+    auto &out = g_topology_msg.entries.data[i];
+    out.motor_id = entries[i].motor_id;
+    out.bus_index = entries[i].bus_index;
+    out.protocol = entries[i].protocol;
+    memcpy(out.model_name.data, entries[i].model_name, 32);
+    out.model_name.size = strlen(entries[i].model_name);
+    out.capability_flags = entries[i].capability_flags;
+    out.online = entries[i].online;
+    out.conflict = entries[i].conflict;
+    out.lifecycle = entries[i].lifecycle;
+  }
+  g_topology_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  const rcl_ret_t publish_rc = rcl_publish(&g_topology_pub, &g_topology_msg, nullptr);
+  (void)publish_rc;
+}
+
+static void publish_events_and_results() {
+  motor_control_event_t events[16];
+  size_t n;
+  while ((n = motor_rt_drain_events(events, 16)) > 0) {
+    for (size_t i = 0; i < n; ++i) {
+      if (events[i].type == MOTOR_CONTROL_EVENT_CONFIG_RESULT) {
+        g_config_result_msg.request_id = events[i].request_id;
+        g_config_result_msg.motor_id = events[i].motor_id;
+        g_config_result_msg.result =
+            (uint8_t)(events[i].reason & 0xFFU);
+        const rcl_ret_t publish_rc = rcl_publish(&g_config_result_pub, &g_config_result_msg, nullptr);
+  (void)publish_rc;
+      }
+      g_event_msg.tick_ms = events[i].tick_ms;
+      g_event_msg.event_type = (uint8_t)events[i].type;
+      g_event_msg.motor_id = events[i].motor_id;
+      g_event_msg.bus_index = events[i].bus_index;
+      g_event_msg.reason = events[i].reason;
+      g_event_msg.request_id = events[i].request_id;
+      const rcl_ret_t publish_rc = rcl_publish(&g_events_pub, &g_event_msg, nullptr);
+  (void)publish_rc;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 生命周期
+// ---------------------------------------------------------------------------
+
+size_t motor_bridge_executor_handle_count(void); // 见头文件
 
 bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
-  // 先初始化所有 subscription/publisher，再绑定静态消息并加入 executor。
-  // 任一步失败都走统一 destroy，保证下次 agent 重连可以重新创建。
-  if (rclc_subscription_init_default(
-          &g_joint_state_sub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, JointState),
-          kJointCommandsTopic) != RCL_RET_OK) {
+  if (node == nullptr || executor == nullptr) {
     return false;
   }
-  g_joint_sub_up = true;
 
-  if (rclc_subscription_init_default(
-          &g_motor_enable_sub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
-          kMotorEnableTopic) != RCL_RET_OK) {
-    motor_bridge_destroy(node, executor);
-    return false;
-  }
-  g_enable_sub_up = true;
+  g_command_msg.targets.capacity = 64;
+  g_command_msg.targets.data = g_command_targets_buf;
+  g_motion_states_msg.states.capacity = 64;
+  g_motion_states_msg.states.data = g_motion_states_buf;
+  g_status_msg.statuses.capacity = 64;
+  g_status_msg.statuses.data = g_status_buf;
+  g_topology_msg.entries.capacity = 64;
+  g_topology_msg.entries.data = g_topology_buf;
 
-  if (rclc_subscription_init_default(
-          &g_motor_mode_sub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, MotorMode),
-          kMotorModeTopic) != RCL_RET_OK) {
+  // ---- 订阅 ----
+  rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_stream();
+  if (rcl_subscription_init(&g_command_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(
+                                can_bridge_msgs, msg, MotorCommandArray),
+                            kCommandTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_mode_sub_up = true;
+  g_command_up = true;
 
-  if (rclc_subscription_init_default(
-          &g_motor_gains_sub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, MotorGains),
-          kMotorGainsTopic) != RCL_RET_OK) {
+  sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_reliable(4);
+  if (rcl_subscription_init(&g_policy_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                        MotorPolicy),
+                            kPolicyTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_gains_sub_up = true;
+  g_policy_up = true;
 
-  if (rclc_publisher_init_default(
-          &g_joint_feedback_pub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, JointState),
-          kJointFeedbackTopic) != RCL_RET_OK) {
+  sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_reliable(4);
+  if (rcl_subscription_init(&g_config_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                        MotorConfig),
+                            kConfigTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_joint_publisher_up = true;
+  g_config_up = true;
 
-  if (rclc_publisher_init_default(
-          &g_motor_status_pub, node,
-          ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, MotorStatus),
-          kMotorStatusTopic) != RCL_RET_OK) {
+  sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_reliable(1);
+  if (rcl_subscription_init(&g_enable_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+                            kEnableTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_status_publisher_up = true;
-  setup_command_msg_buffers();
-  setup_feedback_msg_buffers();
-  setup_status_msg_buffers();
-  setup_configuration_msg_buffers();
-  g_motor_enable_msg.data = false;
+  g_enable_up = true;
 
-  if (rclc_executor_add_subscription(executor, &g_joint_state_sub,
-                                     &g_joint_state_msg, joint_state_sub_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+  // ---- 发布 ----
+  rcl_publisher_options_t pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_stream();
+  if (rcl_publisher_init(&g_motion_states_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(
+                             can_bridge_msgs, msg, MotorMotionStateArray),
+                         kMotionStatesTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_joint_sub_added = true;
-  if (rclc_executor_add_subscription(executor, &g_motor_enable_sub,
-                                     &g_motor_enable_msg, motor_enable_sub_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+  g_motion_states_up = true;
+
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_stream();
+  if (rcl_publisher_init(&g_status_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorStatusArray),
+                         kStatusTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_enable_sub_added = true;
-  if (rclc_executor_add_subscription(executor, &g_motor_mode_sub,
-                                     &g_motor_mode_msg, motor_mode_sub_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+  g_status_up = true;
+
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_reliable(1);
+  if (rcl_publisher_init(&g_topology_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorTopology),
+                         kTopologyTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_mode_sub_added = true;
-  if (rclc_executor_add_subscription(executor, &g_motor_gains_sub,
-                                     &g_motor_gains_msg, motor_gains_sub_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+  g_topology_up = true;
+
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_reliable(8);
+  if (rcl_publisher_init(&g_events_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorEvent),
+                         kEventsTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_gains_sub_added = true;
-  // 只有所有实体和 executor handle 均就绪后，定时发布路径才允许运行。
-  g_ready = true;
+  g_events_up = true;
+
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_reliable(4);
+  if (rcl_publisher_init(&g_config_result_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorConfigResult),
+                         kConfigResultTopic, &pub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_config_result_up = true;
+
+  // ---- executor ----
+  if (rclc_executor_add_subscription(executor, &g_command_sub, &g_command_msg,
+                                     command_array_cb,
+                                     ON_NEW_DATA) != RCL_RET_OK ||
+      rclc_executor_add_subscription(executor, &g_policy_sub, &g_policy_msg,
+                                     policy_cb, ON_NEW_DATA) != RCL_RET_OK ||
+      rclc_executor_add_subscription(executor, &g_config_sub, &g_config_msg,
+                                     config_cb, ON_NEW_DATA) != RCL_RET_OK ||
+      rclc_executor_add_subscription(executor, &g_enable_sub, &g_enable_msg,
+                                     enable_cb, ON_NEW_DATA) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_command_added = g_policy_added = g_config_added = g_enable_added = true;
   return true;
 }
 
 void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
-  // 先阻止 poll 使用实体，再按“executor handle → rcl 实体”的顺序释放。
-  g_ready = false;
-  if (g_gains_sub_added) {
-    rcl_ret_t rc =
-        rclc_executor_remove_subscription(executor, &g_motor_gains_sub);
-    (void)rc;
-    g_gains_sub_added = false;
+  if (executor != nullptr) {
+    if (g_command_added) {
+      rclc_executor_remove_subscription(executor, &g_command_sub);
+      g_command_added = false;
+    }
+    if (g_policy_added) {
+      rclc_executor_remove_subscription(executor, &g_policy_sub);
+      g_policy_added = false;
+    }
+    if (g_config_added) {
+      rclc_executor_remove_subscription(executor, &g_config_sub);
+      g_config_added = false;
+    }
+    if (g_enable_added) {
+      rclc_executor_remove_subscription(executor, &g_enable_sub);
+      g_enable_added = false;
+    }
   }
-  if (g_mode_sub_added) {
-    rcl_ret_t rc =
-        rclc_executor_remove_subscription(executor, &g_motor_mode_sub);
+  if (g_command_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_command_sub, node);
     (void)rc;
-    g_mode_sub_added = false;
+    g_command_up = false;
   }
-  if (g_enable_sub_added) {
-    rcl_ret_t rc =
-        rclc_executor_remove_subscription(executor, &g_motor_enable_sub);
+  if (g_policy_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_policy_sub, node);
     (void)rc;
-    g_enable_sub_added = false;
+    g_policy_up = false;
   }
-  if (g_joint_sub_added) {
-    rcl_ret_t rc =
-        rclc_executor_remove_subscription(executor, &g_joint_state_sub);
+  if (g_config_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_config_sub, node);
     (void)rc;
-    g_joint_sub_added = false;
+    g_config_up = false;
   }
-  if (g_status_publisher_up) {
-    rcl_ret_t rc = rcl_publisher_fini(&g_motor_status_pub, node);
+  if (g_enable_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_enable_sub, node);
     (void)rc;
-    g_status_publisher_up = false;
+    g_enable_up = false;
   }
-  if (g_joint_publisher_up) {
-    rcl_ret_t rc = rcl_publisher_fini(&g_joint_feedback_pub, node);
+  if (g_motion_states_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_motion_states_pub, node);
     (void)rc;
-    g_joint_publisher_up = false;
+    g_motion_states_up = false;
   }
-  if (g_enable_sub_up) {
-    rcl_ret_t rc = rcl_subscription_fini(&g_motor_enable_sub, node);
+  if (g_status_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_status_pub, node);
     (void)rc;
-    g_enable_sub_up = false;
+    g_status_up = false;
   }
-  if (g_gains_sub_up) {
-    rcl_ret_t rc = rcl_subscription_fini(&g_motor_gains_sub, node);
+  if (g_topology_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_topology_pub, node);
     (void)rc;
-    g_gains_sub_up = false;
+    g_topology_up = false;
   }
-  if (g_mode_sub_up) {
-    rcl_ret_t rc = rcl_subscription_fini(&g_motor_mode_sub, node);
+  if (g_events_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_events_pub, node);
     (void)rc;
-    g_mode_sub_up = false;
+    g_events_up = false;
   }
-  if (g_joint_sub_up) {
-    rcl_ret_t rc = rcl_subscription_fini(&g_joint_state_sub, node);
+  if (g_config_result_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_config_result_pub, node);
     (void)rc;
-    g_joint_sub_up = false;
+    g_config_result_up = false;
   }
 }
 
 void motor_bridge_poll(void) {
-  if (!g_ready) {
-    return;
-  }
-
-  // 将 control task 中已经收到反馈的关节压紧写入 JointState；尚无反馈的关节
-  // 不占序列元素，确保 name/position/velocity/effort 始终等长。
-  size_t output_count = 0;
-  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
-    control_joint_state_t state = {};
-    if (!control_task_get_joint_state(index, &state)) {
-      continue;
-    }
-    rosidl_runtime_c__String *name = &g_joint_fb_name_strs[output_count];
-    size_t name_size = strlen(state.joint_name);
-    if (name_size >= name->capacity) {
-      continue;
-    }
-    memcpy(name->data, state.joint_name, name_size + 1U);
-    name->size = name_size;
-    g_joint_fb_position_buf[output_count] = state.position;
-    g_joint_fb_velocity_buf[output_count] = state.velocity;
-    g_joint_fb_effort_buf[output_count] = state.effort;
-    ++output_count;
-  }
-  // 没有有效关节反馈时仅跳过本次 JointState 发布，不发布空消息。
-  rcl_ret_t rc = RCL_RET_OK;
-  if (output_count > 0U) {
-    g_joint_feedback_msg.name.size = output_count;
-    g_joint_feedback_msg.position.size = output_count;
-    g_joint_feedback_msg.velocity.size = output_count;
-    g_joint_feedback_msg.effort.size = output_count;
-    // 时间戳：epoch 优先，未同步回退 millis
-    fill_header_stamp(&g_joint_feedback_msg.header.stamp);
-    rc = rcl_publish(&g_joint_feedback_pub, &g_joint_feedback_msg, nullptr);
-    ++g_joint_feedback_pub_count;
-    g_joint_feedback_pub_rc = (int32_t)rc;
-  }
-
-  // MotorStatus 与 JointState 独立处理，不依赖 JointState 是否有效；每台已收到
-  // 20 字节状态帧的电机发布一条消息。
-  for (size_t index = 0; index < kJointCommandMaxMotors; ++index) {
-    control_motor_status_t status = {};
-    if (!control_task_get_motor_status(index, &status)) {
-      continue;
-    }
-    // 只发布尚未成功发送过的新快照；失败时不推进序号，下次 poll 自动重试。
-    if (status.sequence == g_motor_status_published_sequence[index]) {
-      continue;
-    }
-    size_t name_size = strlen(status.joint_name);
-    if (name_size >= g_motor_status_msg.joint_name.capacity) {
-      continue;
-    }
-    memcpy(g_motor_status_msg.joint_name.data, status.joint_name,
-           name_size + 1U);
-    g_motor_status_msg.joint_name.size = name_size;
-    g_motor_status_msg.voltage = status.voltage;
-    g_motor_status_msg.fault = status.fault;
-    g_motor_status_msg.motor_state = status.motor_state;
-    g_motor_status_msg.calibration_state = status.calibration_state;
-    g_motor_status_msg.mode = status.mode;
-    g_motor_status_msg.motor_type = status.motor_type;
-    fill_header_stamp(&g_motor_status_msg.header.stamp);
-    rc = rcl_publish(&g_motor_status_pub, &g_motor_status_msg, nullptr);
-    ++g_motor_status_pub_count;
-    g_motor_status_pub_rc = (int32_t)rc;
-    if (rc == RCL_RET_OK) {
-      g_motor_status_published_sequence[index] = status.sequence;
-    }
-  }
+  const uint32_t now_ms = millis();
+  publish_motion_states();
+  publish_statuses();
+  publish_topology(now_ms);
+  publish_events_and_results();
 }

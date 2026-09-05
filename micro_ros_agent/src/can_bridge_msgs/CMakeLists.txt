@@ -27,6 +27,20 @@ endif()
 
 rosidl_generate_interfaces(
   ${PROJECT_NAME}
+  # ---- ID 化有界消息（ARD-0007 §15-20，Phase C 冻结）----
+  "msg/MotorCommandTarget.msg"
+  "msg/MotorCommandArray.msg"
+  "msg/MotorMotionStateTarget.msg"
+  "msg/MotorMotionStateArray.msg"
+  "msg/MotorStatusTarget.msg"
+  "msg/MotorStatusArray.msg"
+  "msg/MotorTopologyEntry.msg"
+  "msg/MotorTopology.msg"
+  "msg/MotorEvent.msg"
+  "msg/MotorPolicy.msg"
+  "msg/MotorConfig.msg"
+  "msg/MotorConfigResult.msg"
+  # ---- 旧接口（DEPRECATED：固件已停用；上层迁移完成后删除）----
   "msg/CANFrame.msg"
   "msg/MotorCommand.msg"
   "msg/MotorGains.msg"

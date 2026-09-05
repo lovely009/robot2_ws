@@ -1,3 +1,5 @@
+# DEPRECATED（Phase C）：joint_name/raw-CAN 依赖面，固件已停用；上层迁移完成后删除。
+
 # 单电机命令（每电机一条，joint_name 区分 RP/vaxor）
 # 单位与 ros2_ws 一致：rad、rad/s、A/Nm；enable 变化时固件同步使能/失能
 string joint_name   # 关节名，与 ros2_ws YAML 对齐（如 left_shoulder_yaw_joint）

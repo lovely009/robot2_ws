@@ -1,3 +1,5 @@
+# DEPRECATED（Phase C）：joint_name/raw-CAN 依赖面，固件已停用；上层迁移完成后删除。
+
 # 单条 CAN/CAN-FD 帧（桥接 micro_ros_firmware 的 FDCAN1 总线）
 # header.stamp 由固件在时间同步后写入（rmw_uros_epoch_nanos）
 std_msgs/Header header

@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_can_rx_ring.dir/test_can_rx_ring.cpp.o -o test_can_rx_ring 

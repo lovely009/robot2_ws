@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_bmi088_transport_status.dir/test_bmi088_transport_status.cpp.o CMakeFiles/test_bmi088_transport_status.dir/home/ly/robot_ws/micro_ros_firmware/lib/imu/src/bmi088_transport_status.c.o -o test_bmi088_transport_status 

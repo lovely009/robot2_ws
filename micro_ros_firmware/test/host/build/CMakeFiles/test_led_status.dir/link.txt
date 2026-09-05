@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_led_status.dir/test_led_status.cpp.o CMakeFiles/test_led_status.dir/home/ly/robot_ws/micro_ros_firmware/src/led_task.cpp.o -o test_led_status 

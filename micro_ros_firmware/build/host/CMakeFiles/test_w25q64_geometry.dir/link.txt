@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_w25q64_geometry.dir/test_w25q64_geometry.cpp.o CMakeFiles/test_w25q64_geometry.dir/home/ly/robot_ws/micro_ros_firmware/lib/w25q64/src/w25q64_geometry.c.o -o test_w25q64_geometry 

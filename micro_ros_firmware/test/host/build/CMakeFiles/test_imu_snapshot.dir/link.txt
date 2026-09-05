@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_imu_snapshot.dir/test_imu_snapshot.cpp.o CMakeFiles/test_imu_snapshot.dir/home/ly/robot_ws/micro_ros_firmware/lib/imu/src/imu_snapshot.c.o -o test_imu_snapshot 

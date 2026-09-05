@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_motor_protocol.dir/test_motor_protocol.cpp.o CMakeFiles/test_motor_protocol.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.o -o test_motor_protocol  -lm 

@@ -4,3 +4,8 @@ libmicroros/
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# 构建产物（PlatformIO / CMake 生成，禁止入库）
+build/
+.host-build/
+test/host/build/

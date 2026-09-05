@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_motor_control.dir/test_motor_control.cpp.o CMakeFiles/test_motor_control.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_control/src/motor_control.c.o CMakeFiles/test_motor_control.dir/home/ly/robot_ws/micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c.o -o test_motor_control  -lm 

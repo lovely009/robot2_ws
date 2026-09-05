@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_can_snapshot.dir/test_can_snapshot.cpp.o CMakeFiles/test_can_snapshot.dir/home/ly/robot_ws/micro_ros_firmware/lib/fdcan/src/can_snapshot.c.o -o test_can_snapshot 

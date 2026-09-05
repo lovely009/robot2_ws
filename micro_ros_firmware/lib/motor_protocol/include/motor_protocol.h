@@ -114,9 +114,6 @@ bool motor_protocol_pack_creb_mit_frame(
 bool motor_protocol_unpack_creb_feedback(
     const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
 
-double motor_protocol_wrist_kp_to_current_gain(double protocol_kp);
-double motor_protocol_wrist_kd_to_current_gain(double protocol_kd);
-
 #ifdef __cplusplus
 }
 #endif

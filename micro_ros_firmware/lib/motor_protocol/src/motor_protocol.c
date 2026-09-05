@@ -316,11 +316,3 @@ bool motor_protocol_unpack_creb_feedback(
   state->effort = read_be_i16(data + 4U) / 1000.0;
   return true;
 }
-
-double motor_protocol_wrist_kp_to_current_gain(double protocol_kp) {
-  return protocol_kp / 0.001115;
-}
-
-double motor_protocol_wrist_kd_to_current_gain(double protocol_kd) {
-  return protocol_kd / 85.636;
-}

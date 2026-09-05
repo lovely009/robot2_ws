@@ -108,7 +108,8 @@ static void test_config_is_neutral_bounded_fifo() {
       make_mode_request(99U, 99U, 1U);
   assert(!control_mailbox_submit_config(&mailbox, &full_request));
   assert(mailbox.config_count == CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY);
-  assert(mailbox.config_rejected_count == 1U);
+  assert(mailbox.config_overflow_count == 1U); // 满：消费慢于生产
+  assert(mailbox.config_invalid_count == 0U);
 
   for (uint32_t index = 0U;
        index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
@@ -148,7 +149,8 @@ static void test_config_validation_covers_semantic_shape_only() {
   invalid = make_mode_request(3U, 1U, 0U);
   invalid.kind = static_cast<control_mailbox_config_kind_t>(99U);
   assert(!control_mailbox_submit_config(&mailbox, &invalid));
-  assert(mailbox.config_rejected_count == 4U);
+  assert(mailbox.config_invalid_count == 4U); // 非法请求单独可辨
+  assert(mailbox.config_overflow_count == 0U);
 }
 
 static void test_authorization_and_agent_edges_are_idempotent() {
@@ -206,11 +208,125 @@ static void test_authorization_and_agent_edges_are_idempotent() {
   assert(!control_mailbox_take_events(&mailbox, &events));
 }
 
+// 新增：授权/会话门拒绝的命令提交必须计数（拒绝必可见）。
+static void test_command_gate_rejections_are_counted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  const control_command_snapshot_t command =
+      make_snapshot(1U, 10U, 1U, 0.1F);
+
+  // 引导豁免：Agent 未上报前，授权默认允许 → 可提交。
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 0U);
+
+  control_mailbox_request_authorization(&mailbox, false);
+  control_mailbox_events_t events{};
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 1U); // 授权门拒绝可见
+
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 2U); // 未恢复授权，仍被拒
+
+  control_mailbox_request_authorization(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 2U); // 放行不计数
+
+  // 会话断开后命令门拒绝（授权由断链撤销）。
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 3U);
+}
+
+// 新增：会话边沿矩阵（首连/断链/重连/重复状态）与 take_events 返回值语义。
+static void test_session_edge_matrix() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  // 引导态：无边沿（返回 false），但仍带货电平。
+  control_mailbox_events_t events{};
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  assert(events.authorization_requested); // 引导豁免电平
+  assert(!events.agent_connected_requested);
+
+  // 首次连接：state_pending 边沿，无断链边沿。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(events.agent_connected_requested);
+  assert(!events.agent_disconnect_edge);
+
+  // 重复同状态：无新边沿。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+
+  // 从未连接就断（不可能走到，防御路径）：仅状态电平，无断链边沿。
+  // ——此处 agent 已连接，走"连接后断开"主路径。
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_disconnect_edge);
+  assert(events.agent_state_pending);
+  assert(!events.agent_connected_requested);
+  // 断链撤销授权：电平随边沿一起可见。
+  assert(events.authorization_disable_edge);
+  assert(!events.authorization_requested);
+
+  // 会话门：断链期（重连前）config 提交被拒且计入会话计数。
+  const control_mailbox_config_request_t config =
+      make_mode_request(7U, 1U, 0U);
+  assert(!control_mailbox_submit_config(&mailbox, &config));
+  assert(mailbox.config_session_count == 1U);
+  assert(mailbox.config_invalid_count == 0U);
+  assert(mailbox.config_overflow_count == 0U);
+
+  // 重连：会话恢复不恢复运动授权（ARD §33）——仅 state_pending；
+  // 配置不属于运动授权，Agent 在线即可重新排队。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(!events.authorization_pending); // 无授权恢复边沿
+  assert(!events.authorization_requested);
+  assert(control_mailbox_submit_config(&mailbox, &config));
+  assert(mailbox.config_session_count == 1U);
+
+  // 引导豁免前只见状态：新 mailbox 上"从未连接就断开"（防御路径）。
+  control_mailbox_t fresh{};
+  control_mailbox_init(&fresh);
+  control_mailbox_request_agent_connected(&fresh, false);
+  assert(control_mailbox_take_events(&fresh, &events));
+  assert(events.agent_state_pending);
+  assert(!events.agent_disconnect_edge);      // 从未连接 → 无断链边沿
+  assert(events.authorization_requested);     // 引导豁免未被撤销
+}
+
+// SET_ENABLE：逐电机 Enable 经 config FIFO 传递（ARD §19）。
+static void test_config_set_enable_queues() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_config_request_t request{};
+  request.request_id = 21U;
+  request.motor_id = 5U;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
+  request.value.enable = true;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+  control_mailbox_config_request_t out{};
+  assert(control_mailbox_take_config(&mailbox, &out));
+  assert(out.kind == CONTROL_MAILBOX_CONFIG_SET_ENABLE);
+  assert(out.value.enable == true);
+}
+
 int main() {
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
   test_config_is_neutral_bounded_fifo();
   test_config_validation_covers_semantic_shape_only();
   test_authorization_and_agent_edges_are_idempotent();
+  test_command_gate_rejections_are_counted();
+  test_session_edge_matrix();
+  test_config_set_enable_queues();
   return 0;
 }

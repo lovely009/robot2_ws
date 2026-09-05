@@ -17,10 +17,30 @@ target_link_libraries(test_motor_protocol PRIVATE m)
 
 add_test(NAME motor_protocol COMMAND test_motor_protocol)
 
+add_executable(test_motor_protocol_adapter
+  test_motor_protocol_adapter.cpp
+  ../../lib/motor_protocol/src/motor_protocol.c
+  ../../lib/motor_protocol/src/vaxor_adapter.c
+  ../../lib/motor_protocol/src/creb_adapter.c
+  ../../lib/motor_control/src/motor_control_profile.c)
+
+target_include_directories(test_motor_protocol_adapter PRIVATE
+  ../../lib/motor_protocol/include
+  ../../lib/motor_control/include)
+
+target_link_libraries(test_motor_protocol_adapter PRIVATE m)
+
+add_test(NAME motor_protocol_adapter COMMAND test_motor_protocol_adapter)
+
 add_executable(test_motor_control
   test_motor_control.cpp
   ../../lib/motor_control/src/motor_control.c
-  ../../lib/motor_protocol/src/motor_protocol.c)
+  ../../lib/motor_control/src/motor_control_discovery.c
+  ../../lib/motor_control/src/motor_control_config.c
+  ../../lib/motor_control/src/motor_control_profile.c
+  ../../lib/motor_protocol/src/motor_protocol.c
+  ../../lib/motor_protocol/src/vaxor_adapter.c
+  ../../lib/motor_protocol/src/creb_adapter.c)
 
 target_include_directories(test_motor_control PRIVATE
   ../../lib/motor_control/include
@@ -41,12 +61,22 @@ target_include_directories(test_control_mailbox PRIVATE
 add_test(NAME control_mailbox COMMAND test_control_mailbox)
 
 add_executable(test_can_rx_ring
-  test_can_rx_ring.cpp)
+  test_can_rx_ring.cpp
+  ../../lib/fdcan/src/can_rx_ring.c)
 
 target_include_directories(test_can_rx_ring PRIVATE
   ../../lib/fdcan/include)
 
 add_test(NAME can_rx_ring COMMAND test_can_rx_ring)
+
+add_executable(test_can_tx_scheduler
+  test_can_tx_scheduler.cpp
+  ../../lib/fdcan/src/can_tx_scheduler.c)
+
+target_include_directories(test_can_tx_scheduler PRIVATE
+  ../../lib/fdcan/include)
+
+add_test(NAME can_tx_scheduler COMMAND test_can_tx_scheduler)
 
 add_executable(test_imu_snapshot
   test_imu_snapshot.cpp

@@ -14,8 +14,8 @@
 /**/arm_position_controller:
   ros__parameters:
     joints:
-      - Joint_Link1
-      - Joint_Link2
-      - Joint_Link3
-      - Joint_Link4
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4
     interface_name: position

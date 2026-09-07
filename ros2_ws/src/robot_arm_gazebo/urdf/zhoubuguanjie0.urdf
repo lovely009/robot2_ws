@@ -85,7 +85,7 @@
     </collision>
   </link>
   <joint
-    name="Joint_Link1"
+    name="joint_link1"
     type="revolute">
     <origin
       xyz="0 0 -0.0525"
@@ -143,7 +143,7 @@
     </collision>
   </link>
   <joint
-    name="Joint_Link2"
+    name="joint_link2"
     type="revolute">
     <origin
       xyz="0.0981 0 -0.0245"
@@ -201,7 +201,7 @@
     </collision>
   </link>
   <joint
-    name="Joint_Link3"
+    name="joint_link3"
     type="revolute">
     <origin
       xyz="-0.00062082 -0.027543 -0.193"
@@ -259,7 +259,7 @@
     </collision>
   </link>
   <joint
-    name="Joint_Link4"
+    name="joint_link4"
     type="revolute">
     <origin
       xyz="0 -0.0911 0.0245"

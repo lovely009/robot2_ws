@@ -5,11 +5,15 @@
     std_msgs/msg/Float64MultiArray "{data: [0.5, -0.3, 1.0, 0.2]}"
 """
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     RegisterEventHandler,
+    SetEnvironmentVariable,
 )
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -31,6 +35,15 @@ def generate_launch_description():
         [pkg_share, "config", "controllers.yaml"]
     )
     world_file = LaunchConfiguration("world_file")
+
+    # Ignition 用 model:// 解析 mesh（URDF 的 package:// 被转换），须把
+    # install/robot_arm_gazebo/share 加入资源搜索路径（其下有 robot_arm_gazebo/meshes）
+    pkg_install_share = os.path.dirname(get_package_share_directory("robot_arm_gazebo"))
+    resource_path = os.environ.get("IGN_GAZEBO_RESOURCE_PATH", "")
+    ign_resource_path = (
+        f"{pkg_install_share}{os.pathsep}{resource_path}" if resource_path
+        else pkg_install_share
+    )
 
     robot_description = ParameterValue(
         Command(
@@ -101,6 +114,7 @@ def generate_launch_description():
                 default_value="empty.sdf",
                 description="Ignition 世界文件（gz sim 可解析的路径）",
             ),
+            SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", ign_resource_path),
             gazebo,
             robot_state_publisher,
             clock_bridge,

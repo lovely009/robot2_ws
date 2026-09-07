@@ -9,28 +9,28 @@
     <hardware>
       <plugin>gz_ros2_control/GazeboSimSystem</plugin>
     </hardware>
-    <joint name="Joint_Link1">
+    <joint name="joint_link1">
       <command_interface name="position"/>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
       </state_interface>
       <state_interface name="velocity"/>
     </joint>
-    <joint name="Joint_Link2">
+    <joint name="joint_link2">
       <command_interface name="position"/>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
       </state_interface>
       <state_interface name="velocity"/>
     </joint>
-    <joint name="Joint_Link3">
+    <joint name="joint_link3">
       <command_interface name="position"/>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
       </state_interface>
       <state_interface name="velocity"/>
     </joint>
-    <joint name="Joint_Link4">
+    <joint name="joint_link4">
       <command_interface name="position"/>
       <state_interface name="position">
         <param name="initial_value">0.0</param>

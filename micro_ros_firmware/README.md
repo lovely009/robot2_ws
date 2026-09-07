@@ -62,7 +62,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | 任务 | 优先级 | 栈 | 职责 |
 |---|---|---|---|
 | `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`motor_rt` 后自删除 |
-| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，20ms bridge timer 发布各域最新快照；断连自动重建 |
+| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）发布各域最新快照；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
 | `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 10ms 控制边界消费完整快照与配置 FIFO |
@@ -90,7 +90,8 @@ adapter 解码进内核 → 内核按完整快照/会话/心跳裁决生命周�
 按 P0/P1/P2 路由进每总线 TX 调度器 → 由任务层统一提交 HAL。
 ROS 桥只通过 mailbox（写侧）与内核只读副本/事件队列（读侧）交互；
 原始 CAN 帧不进入 ROS 域。IMU 则由 sensor task 写双缓冲 snapshot，
-20ms bridge timer 复制后发布，桥接层不持有 sensor task 的内部源指针。
+10ms bridge timer（100Hz）复制后发布——IMU 快照发布随之由 50Hz 升至
+100Hz（2026-09-08 审查修复轮），桥接层不持有 sensor task 的内部源指针。
 
 ## 目录结构
 
@@ -200,7 +201,8 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 
 发布（上行，均为 ID 化，缺失浮点 = NaN）：
 
-- `micro_ros/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz）。
+- `micro_ros/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
+  由 10ms bridge timer 驱动）。
 - `micro_ros/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
   保护位/事务状态）。
 - `micro_ros/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑

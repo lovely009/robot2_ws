@@ -110,6 +110,10 @@ cd micro_ros_firmware
   其他新鲜电机继续运行。
 - **类型坑**：本平台 `int32_t` 是 `long`，模板推导（如 `std::clamp`）须显式
   指定类型参数。
+- **`_write` 链接兜底**：固件代码不使用 Print/printf，框架弱 `_write`
+  （Print.cpp.o）不会被链接器提取；libmicroros 的 rcutils/rosidl stdio 路径
+  强引用它 → `src/syscalls.cpp` 提供强定义空汇。新增 stdio 用户须重审该文件，
+  禁止把动态日志接上 USB CDC。
 - **git pull 分支偏离**：残留 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/build/`
   会让 download_dev_environment 的 `git pull` 失败 -> 删除该 build/ 目录后重跑。
 - **GitHub 直连超时**：micro-ROS 依赖重下（regen）在国内网络下易超时；本机已把
@@ -121,6 +125,12 @@ cd micro_ros_firmware
   `extra_packages/can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs`。
   全新 clean bootstrap 仍有下载依赖/ROS 2 源的网络要求；常规验证不要运行
   `clean_microros`，使用缓存依赖执行 `pio run -t clean && pio run`。
+- **改 .msg 后必须手动清 libmicroros**：micro_ros_platformio 的 extra_packages
+  copytree 是 `dirs_exist_ok` 合并（`build/mcu/src/`），已删除的旧消息会残留、
+  新消息头不会主动再生——否则出现 `motor_bind.h: No such file`（或反向的旧头
+  残留）。改/删消息后删
+  `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/{libmicroros,build/mcu}`
+  再 `pio run`（colcon 重编约 1 分钟，走缓存仓库不联网）。
 
 ## 结构（简）
 

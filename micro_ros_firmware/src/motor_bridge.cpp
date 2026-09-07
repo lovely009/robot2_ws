@@ -107,6 +107,16 @@ static bool g_config_result_up = false;
 
 static uint32_t g_policy_request_id = 1U; // Policy 无 request_id，桥代生成
 
+// Policy 请求 id 发放：0 为契约保留值（config_cb 与内核 submit_config 均拒
+// 0），回绕时跳过。
+static uint32_t next_policy_request_id(void) {
+  const uint32_t id = g_policy_request_id++;
+  if (g_policy_request_id == 0U) {
+    g_policy_request_id = 1U;
+  }
+  return id;
+}
+
 size_t motor_bridge_executor_handle_count(void) {
   return 5U; // command/policy/config/bind/enable 订阅
 }
@@ -165,25 +175,29 @@ static void policy_cb(const void *msgin) {
   const auto *msg = (const can_bridge_msgs__msg__MotorPolicy *)msgin;
 
   control_mailbox_config_request_t request = {0};
-  request.request_id = g_policy_request_id++;
   request.received_tick_ms = millis();
   request.motor_id = msg->motor_id;
 
-  // Enable 先于增益/限位（先表达运动许可变化）。
+  // Enable 先于增益/限位（先表达运动许可变化）。三路请求各自独立
+  // request_id（审查 M3）：同一结构体复用曾让最多 3 条请求同 id，上层
+  // 无法按 id 关联各自的 CONFIG_RESULT 回告。
   request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
   request.value.enable = msg->enable;
+  request.request_id = next_policy_request_id();
   (void)motor_rt_submit_config(&request);
 
   if (msg->set_gains) {
     request.kind = CONTROL_MAILBOX_CONFIG_SET_GAINS;
     request.value.gains.kp = msg->kp;
     request.value.gains.kd = msg->kd;
+    request.request_id = next_policy_request_id();
     (void)motor_rt_submit_config(&request);
   }
   if (msg->set_limits) {
     request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
     request.value.position_limits.min_position_rad = msg->min_position_rad;
     request.value.position_limits.max_position_rad = msg->max_position_rad;
+    request.request_id = next_policy_request_id();
     (void)motor_rt_submit_config(&request);
   }
 }

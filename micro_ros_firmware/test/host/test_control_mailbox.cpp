@@ -1,6 +1,24 @@
 #include "control_mailbox.h"
+#include "motor_protocol_adapter.h"
 
 #include <cassert>
+
+// 配置 kind 枚举契约（审查 M5）：mailbox 与内核协议层枚举逐值相等
+// （1/2/3/4）——固件侧 motor_rt_task.cpp 同款 static_assert，host 侧双链
+// 锁死，任一侧改动枚举值即编译失败。
+static_assert(CONTROL_MAILBOX_CONFIG_SET_MODE == MOTOR_PROTOCOL_CONFIG_SET_MODE,
+              "mailbox/protocol config kind 契约不一致：SET_MODE");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_GAINS == MOTOR_PROTOCOL_CONFIG_SET_GAINS,
+    "mailbox/protocol config kind 契约不一致：SET_GAINS");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS ==
+        MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS,
+    "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_ENABLE == MOTOR_PROTOCOL_CONFIG_SET_ENABLE,
+    "mailbox/protocol config kind 契约不一致：SET_ENABLE");
+
 #include <cmath>
 #include <cstring>
 #include <limits>

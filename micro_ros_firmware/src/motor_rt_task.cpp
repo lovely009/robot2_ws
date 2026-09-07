@@ -334,11 +334,28 @@ static void convert_snapshot(const control_command_snapshot_t *in,
   }
 }
 
+// 配置 kind 枚举契约（审查 M5）：mailbox 与内核协议层枚举类型独立、数值
+// 必须逐值相等（1/2/3/4）——convert_config 的裸 cast 依赖此前提，编译期
+// 锁死，任一侧改动枚举值即编译失败。
+static_assert(CONTROL_MAILBOX_CONFIG_SET_MODE == MOTOR_PROTOCOL_CONFIG_SET_MODE,
+              "mailbox/protocol config kind 契约不一致：SET_MODE");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_GAINS == MOTOR_PROTOCOL_CONFIG_SET_GAINS,
+    "mailbox/protocol config kind 契约不一致：SET_GAINS");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS ==
+        MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS,
+    "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
+static_assert(
+    CONTROL_MAILBOX_CONFIG_SET_ENABLE == MOTOR_PROTOCOL_CONFIG_SET_ENABLE,
+    "mailbox/protocol config kind 契约不一致：SET_ENABLE");
+
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
-  // kind 数值契约一致（1/2/3/4），两侧枚举类型独立故显式转换。
+  // kind 数值契约一致（1/2/3/4，上方 static_assert 编译期锁），两侧枚举
+  // 类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
     case CONTROL_MAILBOX_CONFIG_SET_MODE:

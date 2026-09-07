@@ -50,6 +50,17 @@ target_link_libraries(test_motor_control PRIVATE m)
 
 add_test(NAME motor_control COMMAND test_motor_control)
 
+add_executable(test_motor_event_relay
+  test_motor_event_relay.cpp
+  ../../lib/motor_event_relay/src/motor_event_relay.c)
+
+target_include_directories(test_motor_event_relay PRIVATE
+  ../../lib/motor_event_relay/include
+  ../../lib/motor_control/include
+  ../../lib/motor_protocol/include)
+
+add_test(NAME motor_event_relay COMMAND test_motor_event_relay)
+
 add_executable(test_control_mailbox
   test_control_mailbox.cpp
   ../../lib/control_mailbox/src/control_command_mailbox.c

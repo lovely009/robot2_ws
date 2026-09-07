@@ -13,6 +13,7 @@
 
 #include "can_bsp.h"
 #include "fdcan.h"
+#include "motor_event_relay.h"
 #include "motor_protocol_adapter.h"
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
@@ -117,47 +118,41 @@ bool motor_rt_task_started(void) { return g_task_started; }
 bool motor_rt_task_fdcan_ready(void) { return g_fdcan_ready; }
 
 // ---------------------------------------------------------------------------
-// 内核事件转发队列（任务 1ms 搬运；桥在轮询里取走）与拓扑副本
+// 内核事件中继（任务 1ms 搬运；桥在轮询里取走）与拓扑副本
 // ---------------------------------------------------------------------------
 
-static motor_control_event_t g_event_queue[MOTOR_RT_EVENT_QUEUE_CAPACITY];
-static size_t g_event_head;
-static size_t g_event_count;
-static uint32_t g_event_dropped;
+// SPSC 中继环（lib/motor_event_relay）：本任务生产、ROS 桥任务消费。
+static motor_event_relay_t g_event_relay;
 
 static void forward_kernel_events(void) {
+  // 内核事件环是本任务私有上下文，排空无需临界区；共享中继环的每条投递包
+  // 短临界区，与桥侧 drain 互斥（审查 H3：原实现生产侧裸写，与持锁的消费侧
+  // 不构成互斥；满队 memmove 又隐含 head==0 假设破坏环形序——两处一并由
+  // 中继模块修复）。
   motor_control_event_t drained[8];
   size_t n;
   while ((n = motor_control_drain_events(&g_motor_control, drained, 8)) > 0) {
     for (size_t i = 0; i < n; ++i) {
-      if (g_event_count >= MOTOR_RT_EVENT_QUEUE_CAPACITY) {
-        // 满丢最旧（保最新事件），丢弃计数可见。
-        memmove(&g_event_queue[0], &g_event_queue[1],
-                (MOTOR_RT_EVENT_QUEUE_CAPACITY - 1U) * sizeof(g_event_queue[0]));
-        g_event_count = MOTOR_RT_EVENT_QUEUE_CAPACITY - 1U;
-        g_event_dropped++;
-      }
-      g_event_queue[(g_event_head + g_event_count) %
-                    MOTOR_RT_EVENT_QUEUE_CAPACITY] = drained[i];
-      g_event_count++;
+      taskENTER_CRITICAL();
+      motor_event_relay_push(&g_event_relay, &drained[i]);
+      taskEXIT_CRITICAL();
     }
   }
 }
 
-uint32_t motor_rt_event_dropped(void) { return g_event_dropped; }
+uint32_t motor_rt_event_dropped(void) {
+  taskENTER_CRITICAL();
+  const uint32_t dropped = motor_event_relay_dropped_count(&g_event_relay);
+  taskEXIT_CRITICAL();
+  return dropped;
+}
 
 size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
   taskENTER_CRITICAL();
-  const size_t count =
-      g_event_count < capacity ? g_event_count : capacity;
-  for (size_t i = 0; i < count; ++i) {
-    out[i] = g_event_queue[(g_event_head + i) % MOTOR_RT_EVENT_QUEUE_CAPACITY];
-  }
-  g_event_head = (g_event_head + count) % MOTOR_RT_EVENT_QUEUE_CAPACITY;
-  g_event_count -= count;
+  const size_t count = motor_event_relay_drain(&g_event_relay, out, capacity);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -512,6 +507,7 @@ bool motor_rt_task_start(void) {
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
+  motor_event_relay_init(&g_event_relay);
   watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
 
   if (xTaskCreate(motor_rt_task_fn, "motor_rt", kMotorRtTaskStack, nullptr,

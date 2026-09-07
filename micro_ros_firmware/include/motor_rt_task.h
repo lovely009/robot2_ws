@@ -67,9 +67,9 @@ typedef struct {
 } motor_rt_topology_entry_t;
 size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity);
 
-// 内核事件转发队列：任务每服务节拍把内核事件环搬入本队列（满则丢最旧并
-// 计数），桥在轮询里取走。类型复用内核事件（无 ROS 依赖）。
-#define MOTOR_RT_EVENT_QUEUE_CAPACITY 64U
+// 内核事件转发：任务每服务节拍把内核事件环搬入 SPSC 中继环
+// （lib/motor_event_relay，容量 64，满则丢最旧并计数），桥在轮询里取走。
+// 类型复用内核事件（无 ROS 依赖）。
 uint32_t motor_rt_event_dropped(void);
 size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity);
 

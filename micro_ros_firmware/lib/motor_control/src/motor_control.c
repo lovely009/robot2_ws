@@ -168,6 +168,16 @@ bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
       return motor_control_bind_profile(ctx, motor_id, i, now_ms);
     }
   }
+  // 未知名（含空名）：拒绝并回 PROFILE_REJECTED（MotorBind 契约要求结果
+  // 回告，审查 M4）。reason 复用 PROFILE_UNAVAILABLE（=3，与既有绑定拒绝
+  // 同款）；设备已在表时附其 bus_index，未发现设备 bus_index=0。
+  motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
+  if (entry != NULL) {
+    entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
+  }
+  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
+                           motor_id, entry != NULL ? entry->bus_index : 0U,
+                           MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
   return false;
 }
 
@@ -285,6 +295,11 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
   }
   motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
   if (entry == NULL) {
+    // 设备未发现：无表项（bus_index=0），但 MotorBind 契约要求结果回告
+    // （审查 M4）——静默 false 会让上层请求永远等不到 PROFILE_* 事件。
+    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
+                             motor_id, 0U,
+                             MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
     return false;
   }
   // 门禁：只允许未定型的发现/识别/就绪态换绑；运行中（ACTIVE/SAFE_STOP）与

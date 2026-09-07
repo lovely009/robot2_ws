@@ -87,7 +87,10 @@ typedef struct {
   uint32_t tick_ms;
   uint16_t motor_id;
   uint8_t bus_index;
-  uint16_t reason;    // 结果码/失败码（motor_control_fault_code_t 或 config result）
+  uint16_t reason;    // 结果码/失败码（motor_control_fault_code_t 或 config
+                      // result；PROFILE_REJECTED 事件复用
+                      // MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE=3 表示型号
+                      // 不可得——未知名/设备未发现/门禁拒绝，审查 M4）
   uint32_t request_id; // 仅 CONFIG_RESULT 携带
 } motor_control_event_t;
 
@@ -298,8 +301,9 @@ bool motor_control_requeue_p0(motor_control_context_t *ctx,
 
 // 按型号名绑定（TBD-PROFILE-01 过渡绑定通道的内核入口）：遍历编译期型号
 // 目录精确匹配，命中走 bind_profile 的全部门禁与事件（PROFILE_BOUND /
-// PROFILE_REJECTED / READY）。未知名或设备未发现返回 false（后者无 bus
-// 上下文可附事件）；已 ACTIVE/SAFE_STOP 等运行中/异常态电机拒绝改绑。
+// PROFILE_REJECTED / READY）。未知名（含空名）或设备未发现拒绝并回
+// PROFILE_REJECTED（未发现时 bus_index=0）；已 ACTIVE/SAFE_STOP 等运行中/
+// 异常态电机拒绝改绑。
 bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
                                         uint16_t motor_id,
                                         const char *model_name, uint32_t now_ms);

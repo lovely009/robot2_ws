@@ -543,7 +543,7 @@ static void test_bind_profile_by_name() {
   motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
   motor_control_on_raw_frame(&ctx, &f); // 仅发现，未绑定
 
-  // 未知名 / 空名 / 未发现设备：拒绝（后两者无事件可附）。
+  // 未知名 / 空名 / 未发现设备：拒绝并回 PROFILE_REJECTED（审查 M4）。
   assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
   assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 110));
   assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 110));
@@ -570,6 +570,47 @@ static void test_bind_profile_by_name() {
     assert(bound);
     assert(ready);
   }
+}
+
+// M4：绑定拒绝必须回 PROFILE_REJECTED 事件（MotorBind.msg 契约：结果经
+// PROFILE_BOUND/PROFILE_REJECTED 回告）——未知名与设备未发现曾静默 false。
+static void test_bind_rejection_emits_profile_rejected() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_control_on_raw_frame(&ctx, &f); // 设备 5 已发现（bus 0）
+  motor_control_event_t clear_buf[64];
+  (void)motor_control_drain_events(&ctx, clear_buf, 64); // 清空引导 DISCOVERED 事件
+
+  // (a) 已发现 + 未知名 → 事件 reason=3（PROFILE_UNAVAILABLE），bus=表项总线。
+  assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
+  motor_control_event_t ev = {};
+  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
+  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
+  assert(ev.motor_id == 5);
+  assert(ev.bus_index == 0);
+  assert(ev.reason == MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE);
+
+  // (b) 空名防御路径 → 同样回告。
+  assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 120));
+  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
+  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
+
+  // (c) 未发现 id=99 + 已知名 → 事件 bus=0。
+  assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 130));
+  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
+  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
+  assert(ev.motor_id == 99);
+  assert(ev.bus_index == 0);
+  assert(ev.reason == MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE);
+
+  // (d) 正常绑定不受影响 → PROFILE_BOUND。
+  size_t idx;
+  assert(find_profile("vaxor_2550", &idx));
+  assert(motor_control_bind_profile(&ctx, 5, idx, 140));
+  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
+  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_BOUND);
+  assert(ev.motor_id == 5);
 }
 
 // 快照含未注册 motor_id → 整体拒绝（ARD §15.5：不存在/冲突设备必须拒绝）。
@@ -1764,6 +1805,73 @@ static void test_fault_recovery_no_motion_without_explicit_enable() {
   assert(!entry_of(&ctx, 7)->policy_enable);
 }
 
+// M2：撤权/离线中止进行中配置事务时必须回 CONFIG_UNCONFIRMED 终态——
+// 七码无「中止」码（msgs 冻结），UNCONFIRMED（写入效果无法确认）语义最诚实；
+// 否则上层请求悬挂到自身超时（审查 M2）。
+static void test_revoke_aborts_tx_with_unconfirmed() {
+  motor_control_context_t ctx;
+  const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
+  motor_control_init(&ctx, adapters, 1);
+  uint8_t payload[4] = {};
+  motor_protocol_raw_frame_t f = raw_frame(0, 0x602, 4, payload, 100); // node 2
+  motor_control_on_raw_frame(&ctx, &f);
+  assert(ctx.entry_count == 1);
+  assert(motor_control_bind_profile_ptr(&ctx, 2, &g_mock_profile, 110));
+  motor_control_set_agent_connected(&ctx, true, 112);
+  assert(motor_control_set_authorization(&ctx, true, 114));
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  motor_protocol_config_request_t mode_req = {};
+  mode_req.request_id = 7U;
+  mode_req.motor_id = 2;
+  mode_req.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
+  mode_req.mode = 1U;
+  assert(motor_control_submit_config(&ctx, &mode_req, 116));
+  assert(entry_of(&ctx, 2)->tx_active);
+  motor_control_service(&ctx, 118); // 发出阶段帧，进入等待
+  assert(entry_of(&ctx, 2)->tx_awaiting);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 撤权 → 事务中止 → UNCONFIRMED 终态回告（带原 request_id）。
+  assert(motor_control_set_authorization(&ctx, false, 150));
+  assert(!entry_of(&ctx, 2)->tx_active);
+  assert(has_result_event(&ctx, 7U, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED));
+}
+
+static void test_offline_aborts_tx_with_unconfirmed() {
+  motor_control_context_t ctx;
+  const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
+  motor_control_init(&ctx, adapters, 1);
+  uint8_t payload[4] = {};
+  motor_protocol_raw_frame_t f = raw_frame(0, 0x602, 4, payload, 100); // node 2
+  motor_control_on_raw_frame(&ctx, &f);
+  assert(ctx.entry_count == 1);
+  assert(motor_control_bind_profile_ptr(&ctx, 2, &g_mock_profile, 110));
+  motor_control_set_agent_connected(&ctx, true, 112);
+  assert(motor_control_set_authorization(&ctx, true, 114));
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  motor_protocol_config_request_t mode_req = {};
+  mode_req.request_id = 7U;
+  mode_req.motor_id = 2;
+  mode_req.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
+  mode_req.mode = 1U;
+  assert(motor_control_submit_config(&ctx, &mode_req, 116));
+  assert(entry_of(&ctx, 2)->tx_active);
+  motor_control_service(&ctx, 118); // 发出阶段帧，进入等待
+  assert(entry_of(&ctx, 2)->tx_awaiting);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 停心跳：服务节拍直接跳过事务 50ms 超时（否则 TIMEOUT 先收敛），离线检查
+  // 先于 config_step 执行 → 事务被离线中止（而非 TIMEOUT）。
+  motor_control_service(&ctx, 1200);
+  assert(entry_of(&ctx, 2)->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE);
+  assert(!entry_of(&ctx, 2)->tx_active);
+  assert(has_result_event(&ctx, 7U, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED));
+}
+
 // 软停帧编码失败（M2）：与失能路径同语义——挂起 p0_pending 由 service
 // 重试；重试仍失败则计数并放弃（不静默丢安全帧）。
 static bool mock_encode_soft_stop_fail(const motor_protocol_model_profile_t *p,
@@ -1990,6 +2098,7 @@ static void run_all_tests() {
   test_enter_active_requires_auth_profile_snapshot();
   test_p0_requeue_after_downstream_failure();
   test_bind_profile_by_name();
+  test_bind_rejection_emits_profile_rejected();
   test_snapshot_with_unknown_motor_rejected();
   test_snapshot_absence_soft_stops_motor();
   test_30ms_stale_snapshot_soft_stops();
@@ -2026,6 +2135,8 @@ static void run_all_tests() {
   test_policy_enable_disables_and_arms();
   test_fault_recovery_requires_reauth();
   test_fault_recovery_no_motion_without_explicit_enable();
+  test_revoke_aborts_tx_with_unconfirmed();
+  test_offline_aborts_tx_with_unconfirmed();
   test_soft_stop_encode_failure_pends_retry();
   test_tx_slot_maps_entry_index();
   test_p0_tx_slot_on_soft_stop_and_disable();

@@ -1,4 +1,4 @@
-// WS2812 彩灯驱动（SPI6 编码，官方 CtrBoard-H7_WS2812 例程同源方案）
+// WS2812 彩灯驱动（SPI6 + BDMA 编码，官方 CtrBoard-H7_WS2812 例程同源方案）
 //
 // 原理：
 //   - SPI6 内核时钟 = HSE 24MHz（SystemClock_Config 已设 RCC_SPI6CLKSOURCE_HSE），
@@ -7,14 +7,38 @@
 //     1→0x78（4 高 4 低 ≈ 667ns 高），位周期 1.33us（WS2812 容差内）
 //   - 24 位 GRB 颜色 = 24 字节；帧尾 100 字节 0x00 低电平复位（>50us）
 //
+// DMA（2026-09-07，替代旧「阻塞发送 + 关中断 ~165us + 101 次 HAL 调用」实现）：
+//   - H723 上 SPI6 的 DMA 请求只接 DMAMUX2/BDMA（DMA1/2 无此请求线）；
+//     BDMA 仅能访问 DTCM/SRAM4 → 帧缓冲置于 RAM_D3 的 .bdma_noinit 段
+//     （项目级链接脚本 ldscript/stm32h723vgt6.ld；NOLOAD 段由本文件清零）。
+//   - 控制器级资源（BDMA/DMAMUX2 时钟、Channel0 NVIC）归 lib/dma 的
+//     MX_DMA_Init，由 main 板级初始化在 ws2812_init 之前调用（前置契约）。
+//   - 发送 = 单次 HAL_SPI_Transmit_DMA；完成经 BDMA_Channel0 IRQ（本文件
+//     自持 handler，HAL 在其中等 SPI 移位排空并置 READY）。不关中断——
+//     DMA 流不被任务/ISR 抢占打断，灯序与高优先级活动互不影响。
+//   - 忙（上一帧未完）时 submit 返回 false，调用方下个周期重试。
+//   - cache/MPU（dma.h 政策声明位）：本工程未启用 cache（H723 无 D-cache），
+//     DMA 缓冲无需维护。
+//
 // 注：此前用 SPI1 @2.125MHz + 3 位编码（0→0x80 高 470ns）卡在 WS2812 阈值
 // （~0.5us）边缘，0 位被误判为 1 → 全白。官方 6MHz + 8 位编码 0 位仅 333ns，安全。
 
 #include "ws2812.h"
-#include "stm32_def.h"      // Error_Handler 宏
-#include "stm32h7xx_hal.h"  // HAL SPI6 / GPIO
+#include "stm32_def.h"      // Error_Handler
+#include "stm32h7xx_hal.h"  // HAL SPI6 / BDMA / GPIO
+#include <string.h>
+
+#define WS2812_FRAME_COLOR_BYTES 24U  // GRB 24 位 × 8 SPI 位
+#define WS2812_FRAME_RESET_BYTES 100U // 帧尾低电平复位 >50us
+#define WS2812_FRAME_BYTES \
+  (WS2812_FRAME_COLOR_BYTES + WS2812_FRAME_RESET_BYTES)
+
+// BDMA 仅能访问 DTCM/SRAM4：帧缓冲必须落在 RAM_D3（.bdma_noinit，见链接脚本）
+static uint8_t g_ws2812_frame[WS2812_FRAME_BYTES]
+    __attribute__((section(".bdma_noinit"), aligned(4)));
 
 static SPI_HandleTypeDef hspi6;
+static DMA_HandleTypeDef hdma_spi6_tx;
 
 void ws2812_init(void) {
   // SPI6 内核时钟源已在 SystemClock_Config 设为 HSE（24MHz）
@@ -30,6 +54,22 @@ void ws2812_init(void) {
   gpio.Alternate = GPIO_AF8_SPI6;
   HAL_GPIO_Init(GPIOA, &gpio);
 
+  // SPI6_TX DMA：BDMA1 Channel0（DMAMUX2 请求 12）。控制器级资源（时钟/NVIC）
+  // 已由 lib/dma 的 MX_DMA_Init 使能——前置契约见文件头。
+  hdma_spi6_tx.Instance = BDMA_Channel0;
+  hdma_spi6_tx.Init.Request = BDMA_REQUEST_SPI6_TX;
+  hdma_spi6_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+  hdma_spi6_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+  hdma_spi6_tx.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_spi6_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_spi6_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_spi6_tx.Init.Mode = DMA_NORMAL;
+  hdma_spi6_tx.Init.Priority = DMA_PRIORITY_LOW;
+  if (HAL_DMA_Init(&hdma_spi6_tx) != HAL_OK) {
+    Error_Handler();
+  }
+  __HAL_LINKDMA(&hspi6, hdmatx, hdma_spi6_tx);
+
   // HAL 把 SPI 的 CFG1/CFG2 寄存器一次性写入，故需显式配置关键字段；
   // 其余字段（CRC/TIMode/NSSPolarity 等）默认 0，结构体清零后省略。
   hspi6.Instance = SPI6;
@@ -39,34 +79,35 @@ void ws2812_init(void) {
   hspi6.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi6.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi6.Init.NSS = SPI_NSS_SOFT;
-  hspi6.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;  // 24MHz/4 = 6MHz
+  hspi6.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4; // 24MHz/4 = 6MHz
   hspi6.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi6.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
   hspi6.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
   if (HAL_SPI_Init(&hspi6) != HAL_OK) {
     Error_Handler();
   }
+
+  // .bdma_noinit 为 NOLOAD 段，startup 不清零：帧尾复位字节必须恒 0x00
+  memset(g_ws2812_frame, 0, sizeof(g_ws2812_frame));
 }
 
-void ws2812_set_rgb(uint8_t r, uint8_t g, uint8_t b) {
-  // WS2812 数据顺序为 GRB（绿红蓝）；0→0x60, 1→0x78（8 SPI 位/WS2812 位）
-  uint8_t txbuf[24];
+bool ws2812_submit_rgb(uint8_t r, uint8_t g, uint8_t b) {
+  if (hspi6.State != HAL_SPI_STATE_READY) {
+    return false; // 上一帧 DMA 未完：调用方下个周期重试
+  }
+  // WS2812 数据顺序为 GRB；0→0x60, 1→0x78（8 SPI 位/WS2812 位）。
+  // 帧尾 100 字节复位在 init 时清零后不再改动。
   for (int i = 0; i < 8; i++) {
-    txbuf[7 - i] = (((g >> i) & 0x01) ? 0x78 : 0x60);
-    txbuf[15 - i] = (((r >> i) & 0x01) ? 0x78 : 0x60);
-    txbuf[23 - i] = (((b >> i) & 0x01) ? 0x78 : 0x60);
+    g_ws2812_frame[7 - i] = (((g >> i) & 0x01) ? 0x78 : 0x60);
+    g_ws2812_frame[15 - i] = (((r >> i) & 0x01) ? 0x78 : 0x60);
+    g_ws2812_frame[23 - i] = (((b >> i) & 0x01) ? 0x78 : 0x60);
   }
-  uint8_t zero = 0x00;
-  // WS2812 是单线时序协议，位宽对中断/任务抢占敏感：发送期间关中断，
-  // 保证 24 位颜色 + 复位低电平连续输出，避免被高优先级任务/ISR 打断
-  // 导致灯珠锁存到错误数据（表现为突然全白/很亮闪一下）。
-  // 关中断时长 ≈ 124 字节 @ 6MHz ≈ 165us，对 100Hz 控制/FDCAN 影响可忽略。
-  __disable_irq();
-  HAL_SPI_Transmit(&hspi6, &zero, 0, 0xFFFF);  // 空传输，确保 SPI 就绪
-  while (hspi6.State != HAL_SPI_STATE_READY) {}
-  HAL_SPI_Transmit(&hspi6, txbuf, 24, 0xFFFF);
-  for (int i = 0; i < 100; i++) {
-    HAL_SPI_Transmit(&hspi6, &zero, 1, 0xFFFF);  // 复位：>50us 低电平
-  }
-  __enable_irq();
+  return HAL_SPI_Transmit_DMA(&hspi6, g_ws2812_frame,
+                              WS2812_FRAME_BYTES) == HAL_OK;
+}
+
+// BDMA 发送完成中断：HAL 在此等待 SPI 移位排空、置 READY。handler 归
+// 设备库自持（与 lib/imu / lib/fdcan 的回调同构）。
+void BDMA_Channel0_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_spi6_tx);
 }

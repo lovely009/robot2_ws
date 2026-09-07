@@ -2,7 +2,7 @@
 // P2 管理流量。每总线一个实例（三路硬件独立调度）。
 //
 // 语义：
-//  - P0（停机/失能/急停/安全帧）：最高优先级，pump 时先于一切出队；
+//  - P0（停机/失能/使能/急停/安全帧）：最高优先级，pump 时先于一切出队；
 //    上层（运行时内核）已按电机去重，本层为有界 FIFO，满则丢新并计数；
 //    P2 队列积压绝不影响 P0 出队（§22.1 MUST）。
 //  - P1（100Hz MIT）：每个电机槽位 latest-wins——新目标覆盖未发送旧目标
@@ -74,10 +74,15 @@ typedef struct {
 
 void can_tx_scheduler_init(can_tx_scheduler_t *sched);
 
-// P0：入队（满 = 丢新帧 + dropped_count，返回 false；上层不应依赖返回值
-// 做重试——P0 重试在内核 p0_pending 层完成）。
+// P0：入队（满 = 丢新帧 + dropped_count，返回 false；任务层将失败回告内核
+// motor_control_requeue_p0 重入队，审查 4a——安全帧不允许静默丢弃）。
 bool can_tx_scheduler_submit_p0(can_tx_scheduler_t *sched,
                                 const can_tx_frame_t *frame);
+
+// 硬件拒收的安全帧回插 P0 队首（下一 pump 先于一切出队；队满返回 false，
+// 正常调用时序下不发生——刚 pop 出一帧）。审查 4a。
+bool can_tx_scheduler_requeue_p0_front(can_tx_scheduler_t *sched,
+                                       const can_tx_frame_t *frame);
 
 // P1：写入电机槽位（latest-wins）。槽脏且未发送时再写 → replaced_count++。
 bool can_tx_scheduler_submit_p1(can_tx_scheduler_t *sched, uint16_t slot,
@@ -89,9 +94,10 @@ bool can_tx_scheduler_submit_p2(can_tx_scheduler_t *sched,
 
 // 出队本轮待发送帧：先排空 P0，再发全部脏 P1 槽，最后 P2 受配额约束。
 // 返回实际出队帧数；容量不足时余量保留（P0 绝不因容量被跳过——容量不足
-// 时优先保证 P0/P1，P2 留在队列）。
+// 时优先保证 P0/P1，P2 留在队列）。p0_count 非空时写入 out 前缀中的 P0 帧
+// 数（供调用方在硬件拒收时识别安全帧并回插，审查 4a）。
 uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
-                               uint32_t capacity);
+                               uint32_t capacity, uint32_t *p0_count);
 
 // 硬件提交结果记账（调用方在 HAL_FDCAN_AddMessageToTxFifoQ 失败时调用）。
 void can_tx_scheduler_note_hw_reject(can_tx_scheduler_t *sched);

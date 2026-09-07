@@ -69,7 +69,7 @@ bool can_tx_scheduler_submit_p2(can_tx_scheduler_t *sched,
 }
 
 uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
-                               uint32_t capacity) {
+                               uint32_t capacity, uint32_t *p0_count) {
   if (sched == NULL || out == NULL) {
     return 0U;
   }
@@ -81,6 +81,9 @@ uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
                   &sched->p0.count, &out[count])) {
     sched->p0_sent++;
     count++;
+  }
+  if (p0_count != NULL) {
+    *p0_count = count; // out 前缀中的 P0 帧数（硬件拒收回插用，审查 4a）
   }
 
   // 2) P1：发全部脏槽位一次（容量不足的脏槽保留到下轮）。
@@ -103,6 +106,18 @@ uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
     count++;
   }
   return count;
+}
+
+bool can_tx_scheduler_requeue_p0_front(can_tx_scheduler_t *sched,
+                                       const can_tx_frame_t *frame) {
+  if (sched == NULL || frame == NULL || sched->p0.count >= CAN_TX_P0_CAPACITY) {
+    return false;
+  }
+  sched->p0.head = (uint8_t)((sched->p0.head + CAN_TX_P0_CAPACITY - 1U) %
+                             CAN_TX_P0_CAPACITY);
+  sched->p0.queue[sched->p0.head] = *frame;
+  sched->p0.count++;
+  return true;
 }
 
 void can_tx_scheduler_note_hw_reject(can_tx_scheduler_t *sched) {

@@ -73,9 +73,12 @@ cd micro_ros_firmware
   ACC_INT，不要手写 `HAL_GPIO_EXTI_Callback`/`EXTI15_10_IRQHandler`。
 - **TIM3 用 HardwareTimer**：`sensor_task.cpp` 里 `HardwareTimer` 封装 PWM，
   不要再手写 `TIM_HandleTypeDef` 初始化。
-- **DMA 保留但未用于收发**：`lib/dma/src/dma.c` 配置 DMA1_Stream0/1 并链接 SPI2，
-  BMI088 仍走阻塞 `HAL_SPI_TransmitReceive`（与官方一致）；改 DMA 传输时
-  必须给 IMU 任务补唤醒语义。
+- **DMA 分工（2026-09-07 低耦合口径）**：`lib/dma` 只管控制器级资源（DMA1 +
+  BDMA/DMAMUX2 时钟、NVIC、占用登记），由 `main` 板级初始化统一使能（先于
+  一切设备传输）。设备配置归各设备库自持：`lib/imu` 阻塞收发**不用 DMA**
+  （8 字节寄存器读无收益，句柄/链接已移除），`lib/ws2812` 用 BDMA_Ch0 发送
+  （帧缓冲必须在 `.bdma_noinit`——BDMA 仅能访问 DTCM/SRAM4，链接脚本见
+  `ldscript/stm32h723vgt6.ld`）。
 - **USB CDC 宏**：H723 只有 `USB_OTG_HS`，必须保留两个
   `PIO_FRAMEWORK_ARDUINO_*` 构建宏；删掉则 USB 不枚举。
 - **时钟覆盖**：`src/system_clock.cpp` 强定义覆盖 WEAK 符号；PLL1Q=2 提供
@@ -96,7 +99,8 @@ cd micro_ros_firmware
 - **改 HAL 构建宏后必须 `pio run -t clean` 全量重建**：SrcWrapper 的
   `stm32yyxx_hal_fdcan.c.o`、`stm32yyxx_hal_ospi.c.o` 不会因 build flag 变化自动重编。
 - **FreeRTOS 下 `loop()` 只能非阻塞**：业务放 `sensor`/`control`/`micro_ros` 任务。
-- **任务栈/周期**：`start_task` P1/256 words；`sensor` P4/1024 words（DRDY）；
+- **任务栈/周期**：`start_task` P1/256 words；`sensor` P2/512 words（DRDY；
+  IMU 非关键路径，不得抢占 motor_rt）；
   `motor_rt` P3/1024 words（1ms 服务 + 10ms 控制边界）；`micro_ros` P2/8192 words
   （bridge timer）。调栈/周期后同步改 README。
 - **控制发送唯一性**：ROS callback 只写完整 ID 快照 latest-wins mailbox；`motor_rt_task`
@@ -133,8 +137,10 @@ cd micro_ros_firmware
 - `src/motor_rt_task.cpp`：唯一电机实时任务（1ms 服务 + 10ms 控制边界；RX drain、
   内核服务、SYNC 心跳、TX 路由、事件搬运、mailbox 消费）
 - `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
-- `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（依赖 `lib/dma`）
-- `lib/dma`：DMA1 配置 + `HAL_SPI_MspInit` + DMA IRQ 转发（当前 SPI2，预留其他外设复用）
+- `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（自持 SPI2 的 `HAL_SPI_MspInit`，
+  不用 DMA，不依赖其他 lib）
+- `lib/dma`：DMA1 控制器级资源门卫（时钟、流 NVIC、占用登记、优先级合规断言）；
+  设备配置归各设备库，跨设备接线在任务层
 - `lib/fdcan`：FDCAN 初始化/过滤/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度/
   硬件级统计（官方例程移植收敛）
 - `lib/motor_control`：ID 驱动运行时内核——注册表/型号目录/九态生命周期/安全级联/

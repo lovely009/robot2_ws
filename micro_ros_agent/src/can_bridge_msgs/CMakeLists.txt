@@ -40,12 +40,7 @@ rosidl_generate_interfaces(
   "msg/MotorPolicy.msg"
   "msg/MotorConfig.msg"
   "msg/MotorConfigResult.msg"
-  # ---- 旧接口（DEPRECATED：固件已停用；上层迁移完成后删除）----
-  "msg/CANFrame.msg"
-  "msg/MotorCommand.msg"
-  "msg/MotorGains.msg"
-  "msg/MotorMode.msg"
-  "msg/MotorStatus.msg"
+  "msg/MotorBind.msg"
   DEPENDENCIES std_msgs
 )
 

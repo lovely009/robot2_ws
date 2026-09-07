@@ -29,6 +29,7 @@ static const uint32_t kRxPopBatch = 8U;            // 单次批量弹出（栈�
 static const uint32_t kTxCollectBudget = 16U;      // 每 1ms 最多取走内核待发帧数
 static const uint32_t kTxPumpBudgetPerBus = 8U;    // 每 1ms 每总线最多提交帧数
 static const uint32_t kConfigDrainPerBoundary = 4U; // 每 10ms 边界最多转发配置数
+static const uint32_t kBindDrainPerBoundary = 4U;   // 每 10ms 边界最多转发绑定数
 static const uint32_t kDiscoverySyncPeriodMs = 10U; // SYNC 心跳周期（维持设备
                                                     // 20ms 状态上报，总线检测）
 
@@ -58,6 +59,14 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
 bool motor_rt_submit_config(const control_mailbox_config_request_t *request) {
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
+  taskEXIT_CRITICAL();
+  return ok;
+}
+
+bool motor_rt_submit_bind(uint16_t motor_id, const char *model_name) {
+  taskENTER_CRITICAL();
+  const bool ok =
+      control_mailbox_submit_bind(&g_control_mailbox, motor_id, model_name);
   taskEXIT_CRITICAL();
   return ok;
 }
@@ -268,7 +277,11 @@ static void route_kernel_tx(void) {
     memcpy(frame.data, batch[i].data, bytes);
     switch (batch[i].tx_class) {
       case MOTOR_PROTOCOL_TX_CLASS_P0:
-        (void)can_tx_scheduler_submit_p0(sched, &frame);
+        // 调度器 FIFO 满 → 回告内核重入队（p0_pending 逐拍补发，审查 4a），
+        // 安全帧不允许在搬运链路中静默丢弃。
+        if (!can_tx_scheduler_submit_p0(sched, &frame)) {
+          (void)motor_control_requeue_p0(&g_motor_control, &batch[i]);
+        }
         break;
       case MOTOR_PROTOCOL_TX_CLASS_P1:
         (void)can_tx_scheduler_submit_p1(sched, batch[i].tx_slot, &frame);
@@ -290,9 +303,19 @@ static void pump_tx_schedulers(void) {
     if (sched == nullptr) {
       continue;
     }
-    const uint32_t n = can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus);
+    uint32_t p0_count = 0U;
+    const uint32_t n =
+        can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus, &p0_count);
     for (uint32_t i = 0; i < n; ++i) {
-      (void)can_bsp_submit_tx(bus, &pump[i]); // 失败已由调度器记账
+      if (!can_bsp_submit_tx(bus, &pump[i])) {
+        // 硬件 FIFO 满（如总线失联期 AutoRetransmission 滞留）拒绝安全帧：
+        // 回插 P0 队首，下一拍先于一切重试（审查 4a——离线电机的失能帧
+        // 必须在总线恢复后落地）。P1 由下一周期最新目标天然取代，P2 为
+        // 管理流量，二者维持计数可见、不重试。
+        if (i < p0_count) {
+          (void)can_tx_scheduler_requeue_p0_front(sched, &pump[i]);
+        }
+      }
     }
   }
 }
@@ -320,7 +343,7 @@ static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
-  // kind 数值契约一致（1/2/3），两侧枚举类型独立故显式转换。
+  // kind 数值契约一致（1/2/3/4），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
     case CONTROL_MAILBOX_CONFIG_SET_MODE:
@@ -336,6 +359,9 @@ static void convert_config(const control_mailbox_config_request_t *in,
       out->position_limits.max_position_rad =
           in->value.position_limits.max_position_rad;
       break;
+    case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
+      out->enable = in->value.enable;
+      break;
     default:
       break;
   }
@@ -344,8 +370,12 @@ static void convert_config(const control_mailbox_config_request_t *in,
 static void control_boundary(void) {
   static bool session_synced = false;
 
+  // mailbox 并发契约：读侧 take_* 与写侧 submit_* 必须互斥（库无内部锁）。
   control_mailbox_events_t events = {0};
-  const bool has_edges = control_mailbox_take_events(&g_control_mailbox, &events);
+  bool has_edges = false;
+  taskENTER_CRITICAL();
+  has_edges = control_mailbox_take_events(&g_control_mailbox, &events);
+  taskEXIT_CRITICAL();
   const uint32_t now_ms = millis();
   // 启动首边界先同步一次电平（mailbox 引导豁免的授权电平必须镜像到内核）。
   if (has_edges || !session_synced) {
@@ -361,9 +391,16 @@ static void control_boundary(void) {
   }
 
   // 完整命令快照（mailbox 无新快照时本边界不产生运动帧）。
-  control_command_snapshot_t snapshot_in = {0};
-  if (control_mailbox_take_command(&g_control_mailbox, &snapshot_in)) {
-    motor_control_command_snapshot_t snapshot = {0};
+  // 两个快照各约 1KB，改静态避免压栈（本函数仅 motor_rt 任务单上下文
+  // 进入）：take 成功时整体覆盖、convert 只写 target_count 条、内核只读
+  // target_count 条，静态尾部残留不可达。
+  static control_command_snapshot_t snapshot_in;
+  static motor_control_command_snapshot_t snapshot;
+  bool got_snapshot = false;
+  taskENTER_CRITICAL();
+  got_snapshot = control_mailbox_take_command(&g_control_mailbox, &snapshot_in);
+  taskEXIT_CRITICAL();
+  if (got_snapshot) {
     convert_snapshot(&snapshot_in, &snapshot);
     (void)motor_control_apply_command_snapshot(&g_motor_control, &snapshot,
                                                now_ms);
@@ -372,14 +409,62 @@ static void control_boundary(void) {
   // 配置 FIFO 有界转发（每边界至多 kConfigDrainPerBoundary 条，不阻塞节拍）。
   for (uint32_t i = 0; i < kConfigDrainPerBoundary; ++i) {
     control_mailbox_config_request_t request_in = {0};
-    if (!control_mailbox_take_config(&g_control_mailbox, &request_in)) {
+    bool got_config = false;
+    taskENTER_CRITICAL();
+    got_config = control_mailbox_take_config(&g_control_mailbox, &request_in);
+    taskEXIT_CRITICAL();
+    if (!got_config) {
       break;
     }
     motor_protocol_config_request_t request = {0};
     convert_config(&request_in, &request);
     (void)motor_control_submit_config(&g_motor_control, &request, now_ms);
   }
+
+  // 身份绑定 FIFO 有界转发（TBD-PROFILE-01 过渡通道；断链不清，重连后
+  // 绑定仍有效；结果经内核 PROFILE_BOUND/PROFILE_REJECTED 事件回告）。
+  for (uint32_t i = 0; i < kBindDrainPerBoundary; ++i) {
+    control_mailbox_bind_request_t bind_in = {0};
+    bool got_bind = false;
+    taskENTER_CRITICAL();
+    got_bind = control_mailbox_take_bind(&g_control_mailbox, &bind_in);
+    taskEXIT_CRITICAL();
+    if (!got_bind) {
+      break;
+    }
+    (void)motor_control_bind_profile_by_name(&g_motor_control, bind_in.motor_id,
+                                             bind_in.model_name, now_ms);
+  }
 }
+
+// IWDG 活性监督（审查 4b）：仅由 motor_rt 任务喂——安全任务挂死（死锁/
+// 踩内存/栈溢出钩子）→ 超时复位回 WAIT_AGENT/授权清零的可观测初始态；
+// micro_ros 任务挂死时本任务仍存活、安全动作（快照级联失能）仍可执行，
+// 不纳入喂狗面。调试器断点期间冻结计数，避免误复位。
+#ifdef HAL_IWDG_MODULE_ENABLED
+#include "stm32h7xx_hal.h"
+
+static IWDG_HandleTypeDef g_iwdg;
+
+static void watchdog_start(void) {
+  __HAL_RCC_LSI_ENABLE();
+  while (!__HAL_RCC_GET_FLAG(RCC_FLAG_LSIRDY)) {
+  }
+  g_iwdg.Instance = IWDG1; // H7 实例名为 IWDG1
+  g_iwdg.Init.Prescaler = IWDG_PRESCALER_32; // LSI 32kHz / 32 = 1kHz
+  g_iwdg.Init.Reload = 500U;                 // ~500ms 超时
+  g_iwdg.Init.Window = IWDG_WINDOW_DISABLE;
+  (void)HAL_IWDG_Init(&g_iwdg);
+#ifdef __HAL_DBGMCU_FREEZE_IWDG
+  __HAL_DBGMCU_FREEZE_IWDG();
+#endif
+}
+
+static void watchdog_feed(void) { (void)HAL_IWDG_Refresh(&g_iwdg); }
+#else
+static void watchdog_start(void) {}
+static void watchdog_feed(void) {}
+#endif
 
 static void motor_rt_task_fn(void *pv_parameters) {
   (void)pv_parameters;
@@ -396,6 +481,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
   uint32_t last_control_ms = millis();
 
   for (;;) {
+    watchdog_feed(); // 活性监督：本循环停摆 ≥ 超时即复位
     vTaskDelayUntil(&last_wake, kServicePeriodTicks);
     const uint32_t now_ms = millis();
 
@@ -426,6 +512,7 @@ bool motor_rt_task_start(void) {
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
+  watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
 
   if (xTaskCreate(motor_rt_task_fn, "motor_rt", kMotorRtTaskStack, nullptr,
                   kMotorRtTaskPrio, &g_task_handle) != pdPASS) {

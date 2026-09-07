@@ -13,7 +13,7 @@ Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例�
 1Mbps / 数据 5Mbps、接收中断回调与周期测试帧发送均保留。
 电机协议（vaxor 25/30mm + CREB CAN FD/MIT）已收敛为 `lib/motor_protocol`
 adapter 接缝：厂家字节布局、CAN-ID 推导与 FD 属性只存在于该库，内核只见 SI
-关节侧物理量；RP 已弃用。电机运行时为 **ID 驱动、发现式**（ARD-0007）：固件
+关节侧物理量。电机运行时为 **ID 驱动、发现式**（ARD-0007）：固件
 不内置任何电机表或 `joint_name`，设备经反馈帧自主发现（vaxor 20ms 状态心跳 /
 CREB SYNC 上报心跳），型号由上层经 Profile 绑定确认；命令是最多 64 目标的
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
@@ -64,7 +64,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `start_task` | 1 | 256 | 创建 `micro_ros`/`sensor`/`motor_rt` 后自删除 |
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，20ms bridge timer 发布各域最新快照；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
-| `sensor` | 4 | 1024 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 200Hz ACC DRDY 触发采样/Mahony/PID |
+| `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
 | `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 10ms 控制边界消费完整快照与配置 FIFO |
 
 ## 代码组织

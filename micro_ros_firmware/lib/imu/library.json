@@ -2,12 +2,16 @@
   "name": "imu",
   "version": "0.1.0",
   "description": "CtrBoard H7 BMI088 IMU 组件：驱动、通信层、Mahony 与 SI 聚合",
-  "keywords": ["stm32", "imu", "bmi088", "mahony"],
-  "frameworks": ["arduino"],
-  "platforms": ["ststm32"],
-  "dependencies": [
-    {
-      "name": "dma"
-    }
+  "keywords": [
+    "stm32",
+    "imu",
+    "bmi088",
+    "mahony"
+  ],
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "ststm32"
   ]
 }

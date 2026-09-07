@@ -43,8 +43,10 @@ static void led_task_fn(void *parameters) {
         ((millis() / 500U) & 1U) != 0U, previous);
     if (selected.r != previous.r || selected.g != previous.g ||
         selected.b != previous.b) {
-      ws2812_set_rgb(selected.r, selected.g, selected.b);
-      previous = selected;
+      // 非阻塞提交：忙（上一帧 DMA 未完）时保留 previous，下个 50ms 周期重试
+      if (ws2812_submit_rgb(selected.r, selected.g, selected.b)) {
+        previous = selected;
+      }
     }
     vTaskDelayUntil(&last_wake, kLedTaskPeriod);
   }

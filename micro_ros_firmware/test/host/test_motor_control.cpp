@@ -59,8 +59,8 @@ static motor_protocol_raw_frame_t vaxor_reply(uint16_t node, double motor_pos,
                                               uint32_t tick) {
   motor_protocol_joint_state_t wire = {motor_pos, motor_vel, current_a};
   uint8_t data[12];
-  motor_protocol_pack_wrist_reply(node, &wire, data);
-  return raw_frame(0, motor_protocol_wrist_reply_id(node), 12, data, tick);
+  motor_protocol_pack_vaxor_reply(node, &wire, data);
+  return raw_frame(0, motor_protocol_vaxor_reply_id(node), 12, data, tick);
 }
 
 // vaxor 20B 状态帧（fault 非零触发 fault_active）。
@@ -68,8 +68,8 @@ static motor_protocol_raw_frame_t vaxor_status(uint16_t node, uint32_t fault,
                                                uint32_t tick) {
   motor_protocol_joint_state_t wire = {0.0, 0.0, 0.0};
   uint8_t data[20];
-  motor_protocol_pack_wrist_status(node, &wire, 48.0, fault, 1, 0, 0, 1, data);
-  return raw_frame(0, motor_protocol_wrist_status_id(node), 20, data, tick);
+  motor_protocol_pack_vaxor_status(node, &wire, 48.0, fault, 1, 0, 0, 1, data);
+  return raw_frame(0, motor_protocol_vaxor_status_id(node), 20, data, tick);
 }
 
 // CREB 反馈帧：pos 1820 counts = 10°，vel 120 rpm（电机侧），Iq 2000 mA = 2 A。
@@ -461,15 +461,115 @@ static void test_enter_active_requires_auth_profile_snapshot() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
 
-  // 授权 + 新快照 → ACTIVE，发出使能帧与 MIT 帧（vaxor 无整定门）。
+  // 授权 + 新快照 → ACTIVE：使能帧走 P0（先于 MIT 上总线，审查 C2 修复），
+  // MIT 帧走 P1；vaxor 无整定门，两帧同拍生成。一次排空统计两类计数。
   assert(motor_control_set_authorization(&ctx, true, 160));
   motor_control_command_snapshot_t s2 = make_snapshot(2, 165);
   snapshot_add(&s2, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s2, 170));
   motor_control_service(&ctx, 180);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) >= 2);
+  {
+    motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+    size_t p0_count = 0, p1_count = 0, n;
+    while ((n = motor_control_collect_tx(&ctx, frames,
+                                         MOTOR_CONTROL_MAX_TX_PENDING)) > 0) {
+      for (size_t i = 0; i < n; ++i) {
+        if (frames[i].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0) {
+          p0_count++;
+        } else if (frames[i].tx_class == MOTOR_PROTOCOL_TX_CLASS_P1) {
+          p1_count++;
+        }
+      }
+    }
+    assert(p0_count == 1); // 使能帧（P0）
+    assert(p1_count == 1); // MIT 帧（P1）
+  }
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_ACTIVE, 5));
+}
+
+// 审查 4a：下游（调度器 FIFO 满 / 硬件拒收）回告的 P0 帧必须重入队。
+static void test_p0_requeue_after_downstream_failure() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+
+  // 正常路径：内核生成的 P0 帧（tx_slot = 表项索引）原样回传 → 重入队。
+  motor_protocol_tx_frame_t frame = {0};
+  frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+  frame.tx_slot = (uint16_t)(entry_of(&ctx, 5) - &ctx.entries[0]);
+  frame.can_id = 0x123U;
+  frame.size = 2U;
+  assert(motor_control_requeue_p0(&ctx, &frame));
+  motor_protocol_tx_frame_t out[MOTOR_CONTROL_MAX_TX_PENDING];
+  size_t n = motor_control_collect_tx(&ctx, out, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1);
+  assert(out[0].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
+  assert(out[0].tx_slot == frame.tx_slot);
+
+  // 队列满：填满非 P0 后回告 → 驱逐最旧非 P0 腾位（P0 抢占语义）。
+  size_t profile_index;
+  assert(find_profile("vaxor_2550", &profile_index));
+  assert(motor_control_bind_profile(&ctx, 5, profile_index, 110));
+  motor_control_set_agent_connected(&ctx, true, 120);
+  motor_control_set_authorization(&ctx, true, 130);
+  for (uint32_t tick = 150; tick < 150 + MOTOR_CONTROL_MAX_TX_PENDING; ++tick) {
+    // 每拍刷新快照（防 30ms 陈旧级联）与反馈心跳（防 100ms 离线），MIT 逐拍
+    // 入队直至填满待发队列。
+    motor_control_command_snapshot_t fill = make_snapshot(tick, tick);
+    snapshot_add(&fill, 5, 0.1f, 0.0f, 0.0f);
+    assert(motor_control_apply_command_snapshot(&ctx, &fill, tick));
+    motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, tick);
+    motor_control_on_raw_frame(&ctx, &keepalive);
+    motor_control_service(&ctx, tick);
+  }
+  const uint32_t dropped_before = ctx.tx_dropped_count;
+  assert(motor_control_requeue_p0(&ctx, &frame));
+  assert(ctx.tx_dropped_count == dropped_before + 1U); // 驱逐一个非 P0
+  n = motor_control_collect_tx(&ctx, out, MOTOR_CONTROL_MAX_TX_PENDING);
+  bool found_p0 = false;
+  for (size_t i = 0; i < n; ++i) {
+    if (out[i].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0) {
+      found_p0 = true;
+    }
+  }
+  assert(found_p0);
+}
+
+// 审查第 5 步：MotorBind 过渡绑定通道的内核落地（按名绑定）。
+static void test_bind_profile_by_name() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_control_on_raw_frame(&ctx, &f); // 仅发现，未绑定
+
+  // 未知名 / 空名 / 未发现设备：拒绝（后两者无事件可附）。
+  assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
+  assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 110));
+  assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 110));
+
+  // 命中：绑定 + PROFILE_BOUND + 识别收敛 READY_DISABLED（events_contain
+  // 是排空式断言，两个事件须在单次排空中同时确认）。
+  assert(motor_control_bind_profile_by_name(&ctx, 5, "vaxor_2550", 120));
+  assert(entry_of(&ctx, 5)->profile != NULL);
+  assert(entry_of(&ctx, 5)->lifecycle ==
+         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  {
+    bool bound = false, ready = false;
+    motor_control_event_t drained[64];
+    size_t n;
+    while ((n = motor_control_drain_events(&ctx, drained, 64)) > 0) {
+      for (size_t i = 0; i < n; ++i) {
+        if (drained[i].motor_id != 5) {
+          continue;
+        }
+        bound = bound || drained[i].type == MOTOR_CONTROL_EVENT_PROFILE_BOUND;
+        ready = ready || drained[i].type == MOTOR_CONTROL_EVENT_READY;
+      }
+    }
+    assert(bound);
+    assert(ready);
+  }
 }
 
 // 快照含未注册 motor_id → 整体拒绝（ARD §15.5：不存在/冲突设备必须拒绝）。
@@ -539,7 +639,8 @@ static void test_30ms_stale_snapshot_soft_stops() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   motor_control_service(&ctx, 151);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 1);
+  // P0 两帧：进入 ACTIVE 时的使能帧（审查 C2 起走 P0）+ 本次软停帧。
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 2);
 
   // 新鲜快照回来 → 恢复（级联去重标志复位）。
   motor_control_command_snapshot_t s2 = make_snapshot(2, 160);
@@ -869,9 +970,9 @@ static void test_gains_clamped_to_profile() {
   bool found_mit = false;
   for (size_t i = 0; i < n; ++i) {
     if (frames[i].size == 12U &&
-        frames[i].can_id == motor_protocol_wrist_command_id(5)) {
+        frames[i].can_id == motor_protocol_vaxor_command_id(5)) {
       motor_protocol_joint_command_t wire = {};
-      assert(motor_protocol_unpack_wrist_command(frames[i].data, 12, &wire));
+      assert(motor_protocol_unpack_vaxor_command(frames[i].data, 12, &wire));
       assert(fabs(wire.kp - 0.65535) < 1e-6); // 必须钳到上限（非静默丢增益）
       assert(wire.kd <= 655.35 + 0.02);
       found_mit = true;
@@ -914,9 +1015,9 @@ static void test_vaxor_software_limits_clamp_before_pack() {
   bool found = false;
   for (size_t i = 0; i < n; ++i) {
     if (frames[i].size == 12U &&
-        frames[i].can_id == motor_protocol_wrist_command_id(5)) {
+        frames[i].can_id == motor_protocol_vaxor_command_id(5)) {
       motor_protocol_joint_command_t wire = {};
-      assert(motor_protocol_unpack_wrist_command(frames[i].data, 12, &wire));
+      assert(motor_protocol_unpack_vaxor_command(frames[i].data, 12, &wire));
       assert(fabs(wire.position - 25.0) < 0.01);
       found = true;
     }
@@ -953,7 +1054,7 @@ static void test_vaxor_mode_transaction_gates_motion() {
   mode.request_id = 7U;
   mode.motor_id = 5;
   mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
-  mode.mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
+  mode.mode = MOTOR_PROTOCOL_MODE_MIT;
   assert(motor_control_submit_config(&ctx, &mode, 150));
 
   // 边界 1：事务进行中 → 只有 P2 control(run=0) 阶段帧，无 MIT。
@@ -963,7 +1064,7 @@ static void test_vaxor_mode_transaction_gates_motion() {
   motor_control_service(&ctx, 160); // 阶段 0 发出并推进
   size_t n1 = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
   assert(n1 == 1);
-  assert(frames[0].can_id == motor_protocol_wrist_control_id(5));
+  assert(frames[0].can_id == motor_protocol_vaxor_control_id(5));
   assert(frames[0].size == 8U);
   assert(frames[0].tx_class == MOTOR_PROTOCOL_TX_CLASS_P2);
   assert(frames[0].data[0] == 0U); // run=false
@@ -989,9 +1090,9 @@ static void test_vaxor_mode_transaction_gates_motion() {
   motor_control_service(&ctx, 180);
   size_t n3 = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
   assert(n3 >= 2);
-  assert(frames[0].can_id == motor_protocol_wrist_control_id(5));
+  assert(frames[0].can_id == motor_protocol_vaxor_control_id(5));
   assert(frames[0].data[0] == 1U); // 重使能：run=true
-  assert(frames[1].can_id == motor_protocol_wrist_command_id(5));
+  assert(frames[1].can_id == motor_protocol_vaxor_command_id(5));
   assert(frames[1].size == 12U); // MIT 恢复
 }
 
@@ -1042,7 +1143,7 @@ static void test_creb_set_mode_mit_immediate_ok() {
   mode.request_id = 3U;
   mode.motor_id = 7;
   mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
-  mode.mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
+  mode.mode = MOTOR_PROTOCOL_MODE_MIT;
   assert(motor_control_submit_config(&ctx, &mode, 110));
   motor_control_service(&ctx, 120);
   motor_control_service(&ctx, 130);
@@ -1669,11 +1770,11 @@ static void test_tx_slot_maps_entry_index() {
   bool saw_mit_5 = false;
   bool saw_mit_6 = false;
   for (size_t i = 0; i < n; ++i) {
-    if (frames[i].can_id == motor_protocol_wrist_command_id(6)) {
+    if (frames[i].can_id == motor_protocol_vaxor_command_id(6)) {
       assert(frames[i].tx_slot == 1);
       saw_mit_6 = true;
     }
-    if (frames[i].can_id == motor_protocol_wrist_command_id(5)) {
+    if (frames[i].can_id == motor_protocol_vaxor_command_id(5)) {
       assert(frames[i].tx_slot == 0);
       saw_mit_5 = true;
     }
@@ -1689,6 +1790,8 @@ static void run_all_tests() {
   test_duplicate_motor_id_across_buses_conflicts();
   test_identity_conflict_same_bus_different_protocol();
   test_enter_active_requires_auth_profile_snapshot();
+  test_p0_requeue_after_downstream_failure();
+  test_bind_profile_by_name();
   test_snapshot_with_unknown_motor_rejected();
   test_snapshot_absence_soft_stops_motor();
   test_30ms_stale_snapshot_soft_stops();

@@ -186,7 +186,8 @@ typedef struct {
   // P0 帧重试：推送失败（缓冲满且无可驱逐的 P1/P2）时置位，service 逐节拍重发；
   // 新使能/MIT 帧成功后作废（新命令取代过期的安全帧）。
   bool p0_pending;
-  uint8_t p0_kind; // 0=无，1=软停，2=失能
+  uint8_t p0_kind; // 0=无，1=软停，2=失能，3=使能（见 motor_control_internal.h）
+  uint8_t last_p0_kind; // 最近生成的 P0 帧类别：下游重入队失败转挂起的依据
 
   motor_protocol_measured_state_t measured;
   bool has_measured;
@@ -215,6 +216,9 @@ typedef struct {
   const motor_protocol_adapter_t *const *adapters;
   size_t adapter_count;
 
+  // 表项索引被 TX 桥引用为 P1 latest-wins 槽位（tx_slot，见
+  // motor_protocol_adapter.h）：只增不减是其稳定性前提——禁止实现表项
+  // 压缩/回收，否则必须同步重定义槽位映射。
   motor_control_entry_t entries[MOTOR_CONTROL_MAX_MOTORS];
   size_t entry_count;
 
@@ -284,6 +288,21 @@ bool motor_control_bind_profile(motor_control_context_t *ctx, uint16_t motor_id,
 bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor_id,
                                     const motor_protocol_model_profile_t *profile,
                                     uint32_t now_ms);
+
+// P0 安全帧下游回告重入队（审查 4a）：调度器 P0 FIFO 满或硬件拒收时，任务层
+// 把内核生成的帧原样回传（tx_slot = 表项索引）。重入队复用 P0 驱逐语义；
+// 待发队列全 P0 的病态下转 p0_pending 挂起（按 last_p0_kind 重新编码，
+// service 逐节拍补发）——安全帧不允许在任何一段搬运中静默消失。
+bool motor_control_requeue_p0(motor_control_context_t *ctx,
+                              const motor_protocol_tx_frame_t *frame);
+
+// 按型号名绑定（TBD-PROFILE-01 过渡绑定通道的内核入口）：遍历编译期型号
+// 目录精确匹配，命中走 bind_profile 的全部门禁与事件（PROFILE_BOUND /
+// PROFILE_REJECTED / READY）。未知名或设备未发现返回 false（后者无 bus
+// 上下文可附事件）；已 ACTIVE/SAFE_STOP 等运行中/异常态电机拒绝改绑。
+bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
+                                        uint16_t motor_id,
+                                        const char *model_name, uint32_t now_ms);
 
 // 低频配置入口（mailbox config FIFO 逐条转发）。SET_GAINS/SET_POSITION_LIMITS
 // 在 Vaxor 上是本地 Policy；SET_MODE 与 CREB 限位走 request_id 事务。

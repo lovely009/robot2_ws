@@ -24,15 +24,15 @@ static void test_p1_send_once() {
   can_tx_scheduler_init(&sched);
   can_tx_frame_t out[8];
 
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 0);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 0);
 
   can_tx_frame_t f = make_frame(0x515, 1);
   assert(can_tx_scheduler_submit_p1(&sched, 5, &f));
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 1);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 1);
   assert(out[0].can_id == 0x515 && out[0].data[0] == 1);
   assert(sched.p1_sent == 1);
   // 已发送的槽不再重发（无历史积压，禁止项 5）。
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 0);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 0);
 }
 
 // P1 latest-wins：脏槽被覆盖 → replaced 计数，只发最新。
@@ -46,7 +46,7 @@ static void test_p1_latest_wins() {
   assert(sched.p1.replaced_count == 1);
 
   can_tx_frame_t out[8];
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 1);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 1);
   assert(out[0].data[0] == 0xBB); // 只发最新
 }
 
@@ -62,7 +62,7 @@ static void test_priority_order() {
   assert(can_tx_scheduler_submit_p0(&sched, &p0)); // 最后入队但最先出队
 
   can_tx_frame_t out[8];
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 3);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 3);
   assert(out[0].data[0] == 0x00);
   assert(out[1].data[0] == 0x11);
   assert(out[2].data[0] == 0x22);
@@ -78,9 +78,9 @@ static void test_p2_quota() {
     assert(can_tx_scheduler_submit_p2(&sched, &f));
   }
   can_tx_frame_t out[8];
-  assert(can_tx_scheduler_pump(&sched, out, 8) == CAN_TX_P2_PUMP_QUOTA);
-  assert(can_tx_scheduler_pump(&sched, out, 8) == CAN_TX_P2_PUMP_QUOTA);
-  assert(can_tx_scheduler_pump(&sched, out, 8) == 5 - 2 * CAN_TX_P2_PUMP_QUOTA);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == CAN_TX_P2_PUMP_QUOTA);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == CAN_TX_P2_PUMP_QUOTA);
+  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 5 - 2 * CAN_TX_P2_PUMP_QUOTA);
 }
 
 // P0/P2 有界：满则丢新并计数（ARD §22.3；P0 上层已去重）。
@@ -120,11 +120,14 @@ static void test_pump_small_capacity_keeps_priority() {
   assert(can_tx_scheduler_submit_p0(&sched, &p0b));
 
   can_tx_frame_t out[2];
-  assert(can_tx_scheduler_pump(&sched, out, 2) == 2);
+  uint32_t p0_count = 0U;
+  assert(can_tx_scheduler_pump(&sched, out, 2, &p0_count) == 2);
+  assert(p0_count == 2); // P0 前缀计数（审查 4a：硬件拒收回插识别用）
   assert(out[0].data[0] == 0xA0 && out[1].data[0] == 0xA1); // P0 先出
-  assert(can_tx_scheduler_pump(&sched, out, 2) == 2);
+  assert(can_tx_scheduler_pump(&sched, out, 2, &p0_count) == 2);
+  assert(p0_count == 0); // 本轮无 P0
   assert(out[0].data[0] == 0x11 && out[1].data[0] == 0x12); // P1 次之
-  assert(can_tx_scheduler_pump(&sched, out, 2) == 1);       // P2 最后（配额 2 但仅剩 1）
+  assert(can_tx_scheduler_pump(&sched, out, 2, nullptr) == 1); // P2 最后（配额 2 但仅剩 1）
   assert(out[0].data[0] == 0x22);
 }
 
@@ -139,9 +142,9 @@ static void test_multi_bus_independence() {
   assert(can_tx_scheduler_submit_p1(&bus1, 0, &f1));
 
   can_tx_frame_t out[4];
-  assert(can_tx_scheduler_pump(&bus0, out, 4) == 1);
+  assert(can_tx_scheduler_pump(&bus0, out, 4, nullptr) == 1);
   assert(out[0].data[0] == 0xB0);
-  assert(can_tx_scheduler_pump(&bus1, out, 4) == 1);
+  assert(can_tx_scheduler_pump(&bus1, out, 4, nullptr) == 1);
   assert(out[0].data[0] == 0xB1);
 }
 

@@ -7,45 +7,45 @@
 
 namespace {
 
-constexpr double kWristPositionTolerance = 0.00001;
-constexpr double kWristVelocityTolerance = 0.011;
-constexpr double kWristKpTolerance = 0.00001;
-constexpr double kWristKdTolerance = 0.01;
-constexpr double kWristCurrentTolerance = 0.003;
+constexpr double kVaxorPositionTolerance = 0.00001;
+constexpr double kVaxorVelocityTolerance = 0.011;
+constexpr double kVaxorKpTolerance = 0.00001;
+constexpr double kVaxorKdTolerance = 0.01;
+constexpr double kVaxorCurrentTolerance = 0.003;
 
-void test_wrist_12_byte_command_round_trip() {
+void test_vaxor_12_byte_command_round_trip() {
   const motor_protocol_joint_command_t input{1.5, -2.0, 0.12345, 0.67, -1.1};
   uint8_t bytes[12]{};
-  motor_protocol_pack_wrist_command(&input, bytes);
+  motor_protocol_pack_vaxor_command(&input, bytes);
 
   motor_protocol_joint_command_t output{};
-  assert(motor_protocol_unpack_wrist_command(bytes, sizeof(bytes), &output));
-  assert(std::abs(output.position - input.position) < kWristPositionTolerance);
-  assert(std::abs(output.velocity - input.velocity) < kWristVelocityTolerance);
-  assert(std::abs(output.kp - input.kp) < kWristKpTolerance);
-  assert(std::abs(output.kd - input.kd) < kWristKdTolerance);
-  assert(std::abs(output.feedforward - input.feedforward) < kWristCurrentTolerance);
+  assert(motor_protocol_unpack_vaxor_command(bytes, sizeof(bytes), &output));
+  assert(std::abs(output.position - input.position) < kVaxorPositionTolerance);
+  assert(std::abs(output.velocity - input.velocity) < kVaxorVelocityTolerance);
+  assert(std::abs(output.kp - input.kp) < kVaxorKpTolerance);
+  assert(std::abs(output.kd - input.kd) < kVaxorKdTolerance);
+  assert(std::abs(output.feedforward - input.feedforward) < kVaxorCurrentTolerance);
 }
 
-void test_wrist_status_and_feedback_round_trip() {
+void test_vaxor_status_and_feedback_round_trip() {
   const motor_protocol_joint_state_t input{5.0, -10.0, 2.0};
   uint8_t reply[12]{};
-  motor_protocol_pack_wrist_reply(2U, &input, reply);
+  motor_protocol_pack_vaxor_reply(2U, &input, reply);
 
   motor_protocol_joint_state_t output{};
-  assert(motor_protocol_unpack_wrist_feedback(reply, sizeof(reply), &output));
-  assert(std::abs(output.position - input.position) < kWristPositionTolerance);
-  assert(std::abs(output.velocity - input.velocity) < kWristVelocityTolerance);
-  assert(std::abs(output.effort - input.effort) < kWristCurrentTolerance);
+  assert(motor_protocol_unpack_vaxor_feedback(reply, sizeof(reply), &output));
+  assert(std::abs(output.position - input.position) < kVaxorPositionTolerance);
+  assert(std::abs(output.velocity - input.velocity) < kVaxorVelocityTolerance);
+  assert(std::abs(output.effort - input.effort) < kVaxorCurrentTolerance);
 }
 
-void test_wrist_status_decodes_all_status_fields() {
+void test_vaxor_status_decodes_all_status_fields() {
   const uint8_t bytes[20]{0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
                           0xe6U, 0x01U, 0x78U, 0x56U, 0x34U, 0x12U,
                           4U, 5U, 2U, 7U};
 
-  motor_protocol_wrist_status_t status{};
-  assert(motor_protocol_unpack_wrist_status(bytes, sizeof(bytes), &status));
+  motor_protocol_vaxor_status_t status{};
+  assert(motor_protocol_unpack_vaxor_status(bytes, sizeof(bytes), &status));
   assert(std::abs(status.voltage_v - 48.6) < 0.051);
   assert(status.fault == 0x12345678U);
   assert(status.motor_state == 4U);
@@ -54,31 +54,31 @@ void test_wrist_status_decodes_all_status_fields() {
   assert(status.motor_type == 7U);
 }
 
-void test_wrist_status_encodes_voltage_as_unbiased_signed_tenths() {
+void test_vaxor_status_encodes_voltage_as_unbiased_signed_tenths() {
   const motor_protocol_joint_state_t input{};
   uint8_t bytes[20]{};
-  motor_protocol_pack_wrist_status(2U, &input, 48.6, 0U,
+  motor_protocol_pack_vaxor_status(2U, &input, 48.6, 0U,
                                    0U, 0U, 0U, 0U, bytes);
   assert(bytes[10] == 0xe6U);
   assert(bytes[11] == 0x01U);
 }
 
-void test_wrist_status_rejects_short_feedback() {
+void test_vaxor_status_rejects_short_feedback() {
   uint8_t bytes[12]{};
-  motor_protocol_wrist_status_t status{};
-  assert(!motor_protocol_unpack_wrist_status(bytes, sizeof(bytes), &status));
+  motor_protocol_vaxor_status_t status{};
+  assert(!motor_protocol_unpack_vaxor_status(bytes, sizeof(bytes), &status));
 }
 
 void test_unpack_rejects_invalid_lengths() {
   uint8_t bytes[20]{};
   motor_protocol_joint_command_t command{};
   motor_protocol_joint_state_t state{};
-  motor_protocol_wrist_control_t control{};
+  motor_protocol_vaxor_control_t control{};
 
-  assert(!motor_protocol_unpack_wrist_command(bytes, 11U, &command));
-  assert(!motor_protocol_unpack_wrist_control(bytes, 7U, &control));
-  assert(!motor_protocol_unpack_wrist_feedback(bytes, 11U, &state));
-  assert(!motor_protocol_unpack_wrist_feedback(bytes, 13U, &state));
+  assert(!motor_protocol_unpack_vaxor_command(bytes, 11U, &command));
+  assert(!motor_protocol_unpack_vaxor_control(bytes, 7U, &control));
+  assert(!motor_protocol_unpack_vaxor_feedback(bytes, 11U, &state));
+  assert(!motor_protocol_unpack_vaxor_feedback(bytes, 13U, &state));
 }
 
 void test_creb_mit_frame_matches_new_protocol_layout() {
@@ -169,11 +169,11 @@ void test_creb_node_ids_cover_declared_range() {
 }  // namespace
 
 int main() {
-  test_wrist_12_byte_command_round_trip();
-  test_wrist_status_and_feedback_round_trip();
-  test_wrist_status_decodes_all_status_fields();
-  test_wrist_status_encodes_voltage_as_unbiased_signed_tenths();
-  test_wrist_status_rejects_short_feedback();
+  test_vaxor_12_byte_command_round_trip();
+  test_vaxor_status_and_feedback_round_trip();
+  test_vaxor_status_decodes_all_status_fields();
+  test_vaxor_status_encodes_voltage_as_unbiased_signed_tenths();
+  test_vaxor_status_rejects_short_feedback();
   test_unpack_rejects_invalid_lengths();
   test_creb_mit_frame_matches_new_protocol_layout();
   test_creb_disabled_neutral_frame_is_safe();

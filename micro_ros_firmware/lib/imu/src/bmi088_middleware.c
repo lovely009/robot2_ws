@@ -3,12 +3,12 @@
 // 例程挂在 HAL SPI2（PB13=SCK, PC1=MOSI, PC2=MISO）+ DMA1_Stream0/1，
 // 硬件 CS=PC0(ACC)/PC3(GYRO)，POWER_5V=PC15，EXTI=PE10/PE12。
 // 本工程为 STM32duino + FreeRTOS，因此：
-//   - GPIO 上电/片选由本层初始化，SPI2 引脚与 DMA 由 dma.c 的 HAL_SPI_MspInit 配置；
+//   - GPIO 上电/片选由本层初始化，SPI2 引脚与 DMA 由本库 imu_spi2_transport.c
+//     的 HAL_SPI_MspInit 配置；
 //   - EXTI 使用 Arduino attachInterrupt()（sensor_task.cpp 内）；
 //   - SysTick 已被 FreeRTOS 接管，us 忙等用 delayMicroseconds，ms 用 vTaskDelay。
 
 #include "bmi088_middleware.h"
-#include "dma.h"
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 #include "stm32h7xx_hal.h"
@@ -52,10 +52,9 @@ void BMI088_GPIO_init(void) {
 }
 
 void BMI088_com_init(void) {
-  // 官方顺序：MX_DMA_Init 先于 MX_SPI2_Init；
-  // SPI2 引脚/DMA 流在 HAL_SPI_MspInit（src/dma.c）内完成。
-  MX_DMA_Init();
-
+  // 前置契约：任务层（sensor_task_start）已先经 lib/dma 完成 DMA1 时钟与
+  // 流 NVIC（官方时序：DMA 先于 SPI2）。SPI2 引脚/DMA 流链接在本库
+  // imu_spi2_transport.c 的 HAL_SPI_MspInit 内完成。
   hspi_bmi088.Instance = SPI2;
   hspi_bmi088.Init.Mode = SPI_MODE_MASTER;
   hspi_bmi088.Init.Direction = SPI_DIRECTION_2LINES;

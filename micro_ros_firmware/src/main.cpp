@@ -4,11 +4,18 @@
 #include <STM32FreeRTOS.h>
 #include <micro_ros_platformio.h>
 
+#include "dma.h"
 #include "led_task.h"
 #include "micro_ros_task.h"
 #include "motor_rt_task.h"
 #include "sensor_task.h"
 #include "ws2812.h"
+
+// 防回归：栈溢出检测必须经项目级 STM32FreeRTOSConfig.h 生效；若该文件被
+// 删除或未被 __has_include 命中，此处直接编译失败而非静默降级。
+#if configCHECK_FOR_STACK_OVERFLOW != 2
+#error "configCHECK_FOR_STACK_OVERFLOW must be 2 (see include/STM32FreeRTOSConfig.h)"
+#endif
 
 static const uint32_t START_STK_SIZE = 256U;
 static const UBaseType_t START_TASK_PRIO = 1U;
@@ -43,7 +50,25 @@ extern "C" void vApplicationGetTimerTaskMemory(
 }
 #endif
 
+// 栈溢出 fail-safe（configCHECK_FOR_STACK_OVERFLOW=2，STM32FreeRTOSConfig.h）：
+// 栈已不可信，只记录任务名指针供 GDB 观察后关中断停机；不得调用任何依赖
+// 栈深度或内核服务的函数（Serial/WS2812 均不可用）。
+static const char *volatile g_stack_overflow_task = nullptr;
+
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t pxTask,
+                                              char *pcTaskName) {
+  (void)pxTask;
+  g_stack_overflow_task = pcTaskName;
+  taskDISABLE_INTERRUPTS();
+  for (;;) {
+  }
+}
 void initialize_system(void) {
+  // 板级 DMA/BDMA 控制器资源（时钟+NVIC，lib/dma）先于一切设备传输初始化；
+  // 设备配置归各设备库自持（lib/ws2812 SPI6+BDMA、lib/imu SPI2），
+  // 「DMA 先于设备初始化」的官方时序由本函数保证。
+  MX_DMA_Init();
+
   // 状态灯必须在 led task 启动前完成底层初始化；运行期仅由 led task 写入。
   ws2812_init();
 

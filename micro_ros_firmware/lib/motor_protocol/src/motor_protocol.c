@@ -1,5 +1,4 @@
 // 电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）。
-// RP 协议已弃用，固件库中不再保留 RP 编解码实现。
 
 #include "motor_protocol.h"
 
@@ -68,72 +67,72 @@ static uint32_t creb_symmetric_float_to_uint(double value, double limit,
   return (uint32_t)(normalized * maximum);
 }
 
-static uint16_t wrist_velocity_to_code(double velocity_rad_s) {
+static uint16_t vaxor_velocity_to_code(double velocity_rad_s) {
   int32_t rpm10 =
       (int32_t)llround(velocity_rad_s * 60.0 / (2.0 * MOTOR_PROTOCOL_PI) * 10.0);
-  rpm10 = clamp_i32(rpm10, -MOTOR_PROTOCOL_WRIST_VELOCITY_CODE_LIMIT,
-                    MOTOR_PROTOCOL_WRIST_VELOCITY_CODE_LIMIT);
+  rpm10 = clamp_i32(rpm10, -MOTOR_PROTOCOL_VAXOR_VELOCITY_CODE_LIMIT,
+                    MOTOR_PROTOCOL_VAXOR_VELOCITY_CODE_LIMIT);
   return (uint16_t)(rpm10 + 0x8000);
 }
 
-static double wrist_code_to_velocity(uint16_t code) {
+static double vaxor_code_to_velocity(uint16_t code) {
   int32_t raw = (int32_t)code - 0x8000;
   return raw / 10.0 * 2.0 * MOTOR_PROTOCOL_PI / 60.0;
 }
 
-static uint32_t wrist_position_to_code(double position_rad) {
+static uint32_t vaxor_position_to_code(double position_rad) {
   int64_t ticks = llround(position_rad / (2.0 * MOTOR_PROTOCOL_PI) *
-                          (double)MOTOR_PROTOCOL_WRIST_TICKS_PER_REV);
-  ticks = clamp_i64(ticks, -MOTOR_PROTOCOL_WRIST_POSITION_TICK_LIMIT,
-                    MOTOR_PROTOCOL_WRIST_POSITION_TICK_LIMIT);
+                          (double)MOTOR_PROTOCOL_VAXOR_TICKS_PER_REV);
+  ticks = clamp_i64(ticks, -MOTOR_PROTOCOL_VAXOR_POSITION_TICK_LIMIT,
+                    MOTOR_PROTOCOL_VAXOR_POSITION_TICK_LIMIT);
   return (uint32_t)(ticks + INT64_C(0x80000000));
 }
 
-static double wrist_code_to_position(uint32_t code) {
+static double vaxor_code_to_position(uint32_t code) {
   return ((int64_t)code - INT64_C(0x80000000)) /
-         (double)MOTOR_PROTOCOL_WRIST_TICKS_PER_REV * 2.0 * MOTOR_PROTOCOL_PI;
+         (double)MOTOR_PROTOCOL_VAXOR_TICKS_PER_REV * 2.0 * MOTOR_PROTOCOL_PI;
 }
 
-static uint16_t wrist_current_to_code(double current_a) {
+static uint16_t vaxor_current_to_code(double current_a) {
   int32_t raw =
-      (int32_t)llround(current_a / MOTOR_PROTOCOL_WRIST_CURRENT_SCALE_A);
+      (int32_t)llround(current_a / MOTOR_PROTOCOL_VAXOR_CURRENT_SCALE_A);
   raw = clamp_i32(raw, -32768, 32767);
   return (uint16_t)(raw + 0x8000);
 }
 
-static double wrist_code_to_current(uint16_t code) {
-  return ((int32_t)code - 0x8000) * MOTOR_PROTOCOL_WRIST_CURRENT_SCALE_A;
+static double vaxor_code_to_current(uint16_t code) {
+  return ((int32_t)code - 0x8000) * MOTOR_PROTOCOL_VAXOR_CURRENT_SCALE_A;
 }
 
-bool motor_protocol_wrist_node_valid(unsigned node) {
+bool motor_protocol_vaxor_node_valid(unsigned node) {
   return node >= 1U && node <= 60U;
 }
 
-uint32_t motor_protocol_wrist_command_id(unsigned node) {
+uint32_t motor_protocol_vaxor_command_id(unsigned node) {
   return 0x501U + 4U * node;
 }
 
-uint32_t motor_protocol_wrist_control_id(unsigned node) {
+uint32_t motor_protocol_vaxor_control_id(unsigned node) {
   return 0x502U + 4U * node;
 }
 
-uint32_t motor_protocol_wrist_reply_id(unsigned node) {
+uint32_t motor_protocol_vaxor_reply_id(unsigned node) {
   return 0x701U + 4U * node;
 }
 
-uint32_t motor_protocol_wrist_status_id(unsigned node) {
+uint32_t motor_protocol_vaxor_status_id(unsigned node) {
   return 0x702U + 4U * node;
 }
 
-void motor_protocol_pack_wrist_command(const motor_protocol_joint_command_t *command,
+void motor_protocol_pack_vaxor_command(const motor_protocol_joint_command_t *command,
                                        uint8_t out[12]) {
-  uint32_t position = wrist_position_to_code(command->position);
-  uint16_t velocity = wrist_velocity_to_code(command->velocity);
+  uint32_t position = vaxor_position_to_code(command->position);
+  uint16_t velocity = vaxor_velocity_to_code(command->velocity);
   uint16_t kp = (uint16_t)clamp_i64(
-      llround(command->kp / MOTOR_PROTOCOL_WRIST_KP_SCALE), 0, 0xffff);
+      llround(command->kp / MOTOR_PROTOCOL_VAXOR_KP_SCALE), 0, 0xffff);
   uint16_t kd = (uint16_t)clamp_i64(
-      llround(command->kd / MOTOR_PROTOCOL_WRIST_KD_SCALE), 0, 0xffff);
-  uint16_t current = wrist_current_to_code(command->feedforward);
+      llround(command->kd / MOTOR_PROTOCOL_VAXOR_KD_SCALE), 0, 0xffff);
+  uint16_t current = vaxor_current_to_code(command->feedforward);
   write_le(out, position, 4U);
   write_le(out + 4U, velocity, 2U);
   write_le(out + 6U, kp, 2U);
@@ -141,7 +140,7 @@ void motor_protocol_pack_wrist_command(const motor_protocol_joint_command_t *com
   write_le(out + 10U, current, 2U);
 }
 
-bool motor_protocol_unpack_wrist_command(const uint8_t *data, size_t size,
+bool motor_protocol_unpack_vaxor_command(const uint8_t *data, size_t size,
                                          motor_protocol_joint_command_t *command) {
   if (data == NULL || size != 12U || command == NULL) {
     return false;
@@ -151,15 +150,15 @@ bool motor_protocol_unpack_wrist_command(const uint8_t *data, size_t size,
   uint16_t kp = (uint16_t)read_le(data + 6U, 2U);
   uint16_t kd = (uint16_t)read_le(data + 8U, 2U);
   uint16_t current = (uint16_t)read_le(data + 10U, 2U);
-  command->position = wrist_code_to_position(position);
-  command->velocity = wrist_code_to_velocity(velocity);
-  command->kp = kp * MOTOR_PROTOCOL_WRIST_KP_SCALE;
-  command->kd = kd * MOTOR_PROTOCOL_WRIST_KD_SCALE;
-  command->feedforward = wrist_code_to_current(current);
+  command->position = vaxor_code_to_position(position);
+  command->velocity = vaxor_code_to_velocity(velocity);
+  command->kp = kp * MOTOR_PROTOCOL_VAXOR_KP_SCALE;
+  command->kd = kd * MOTOR_PROTOCOL_VAXOR_KD_SCALE;
+  command->feedforward = vaxor_code_to_current(current);
   return true;
 }
 
-void motor_protocol_pack_wrist_control(const motor_protocol_wrist_control_t *control,
+void motor_protocol_pack_vaxor_control(const motor_protocol_vaxor_control_t *control,
                                        uint8_t out[8]) {
   out[0] = control->run ? 1U : 0U;
   out[1] = control->set_zero ? 1U : 0U;
@@ -171,12 +170,12 @@ void motor_protocol_pack_wrist_control(const motor_protocol_wrist_control_t *con
   out[7] = 0U;
 }
 
-bool motor_protocol_unpack_wrist_control(const uint8_t *data, size_t size,
-                                         motor_protocol_wrist_control_t *control) {
+bool motor_protocol_unpack_vaxor_control(const uint8_t *data, size_t size,
+                                         motor_protocol_vaxor_control_t *control) {
   if (data == NULL || size != 8U || control == NULL) {
     return false;
   }
-  if (data[2] > (uint8_t)MOTOR_PROTOCOL_WRIST_MODE_POSITION) {
+  if (data[2] > (uint8_t)MOTOR_PROTOCOL_MODE_POSITION) {
     return false;
   }
   control->run = data[0] != 0U;
@@ -185,25 +184,25 @@ bool motor_protocol_unpack_wrist_control(const uint8_t *data, size_t size,
   return true;
 }
 
-void motor_protocol_pack_wrist_reply(unsigned node,
+void motor_protocol_pack_vaxor_reply(unsigned node,
                                      const motor_protocol_joint_state_t *state,
                                      uint8_t out[12]) {
-  write_le(out, motor_protocol_wrist_command_id(node), 2U);
-  write_le(out + 2U, wrist_position_to_code(state->position), 4U);
-  write_le(out + 6U, wrist_velocity_to_code(state->velocity), 2U);
-  write_le(out + 8U, wrist_current_to_code(state->effort), 2U);
+  write_le(out, motor_protocol_vaxor_command_id(node), 2U);
+  write_le(out + 2U, vaxor_position_to_code(state->position), 4U);
+  write_le(out + 6U, vaxor_velocity_to_code(state->velocity), 2U);
+  write_le(out + 8U, vaxor_current_to_code(state->effort), 2U);
 }
 
-void motor_protocol_pack_wrist_status(unsigned node,
+void motor_protocol_pack_vaxor_status(unsigned node,
                                       const motor_protocol_joint_state_t *state,
                                       double voltage_v, uint32_t fault,
                                       uint8_t motor_state,
                                       uint8_t calibration_state, uint8_t mode,
                                       uint8_t motor_type, uint8_t out[20]) {
-  write_le(out, motor_protocol_wrist_command_id(node), 2U);
-  write_le(out + 2U, wrist_position_to_code(state->position), 4U);
-  write_le(out + 6U, wrist_velocity_to_code(state->velocity), 2U);
-  write_le(out + 8U, wrist_current_to_code(state->effort), 2U);
+  write_le(out, motor_protocol_vaxor_command_id(node), 2U);
+  write_le(out + 2U, vaxor_position_to_code(state->position), 4U);
+  write_le(out + 6U, vaxor_velocity_to_code(state->velocity), 2U);
+  write_le(out + 8U, vaxor_current_to_code(state->effort), 2U);
   int32_t voltage_code =
       clamp_i32((int32_t)llround(voltage_v * 10.0), -32768, 32767);
   write_le(out + 10U, (uint16_t)(int16_t)voltage_code, 2U);
@@ -214,7 +213,7 @@ void motor_protocol_pack_wrist_status(unsigned node,
   out[19] = motor_type;
 }
 
-bool motor_protocol_unpack_wrist_feedback(const uint8_t *data, size_t size,
+bool motor_protocol_unpack_vaxor_feedback(const uint8_t *data, size_t size,
                                           motor_protocol_joint_state_t *state) {
   if (data == NULL || (size != 12U && size != 20U) || state == NULL) {
     return false;
@@ -222,14 +221,14 @@ bool motor_protocol_unpack_wrist_feedback(const uint8_t *data, size_t size,
   uint32_t position = read_le(data + 2U, 4U);
   uint16_t velocity = (uint16_t)read_le(data + 6U, 2U);
   uint16_t current = (uint16_t)read_le(data + 8U, 2U);
-  state->position = wrist_code_to_position(position);
-  state->velocity = wrist_code_to_velocity(velocity);
-  state->effort = wrist_code_to_current(current);
+  state->position = vaxor_code_to_position(position);
+  state->velocity = vaxor_code_to_velocity(velocity);
+  state->effort = vaxor_code_to_current(current);
   return true;
 }
 
-bool motor_protocol_unpack_wrist_status(
-    const uint8_t *data, size_t size, motor_protocol_wrist_status_t *status) {
+bool motor_protocol_unpack_vaxor_status(
+    const uint8_t *data, size_t size, motor_protocol_vaxor_status_t *status) {
   if (data == NULL || size != 20U || status == NULL) {
     return false;
   }

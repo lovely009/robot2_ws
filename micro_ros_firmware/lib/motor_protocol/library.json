@@ -1,8 +1,8 @@
 {
   "name": "motor_protocol",
   "version": "0.1.0",
-  "description": "RP / vaxor 电机协议编解码（ros2_ws motor_drive 移植）",
-  "keywords": ["motor", "rp", "vaxor", "can"],
+  "description": "vaxor / CREB 电机协议编解码（ros2_ws motor_drive 移植）",
+  "keywords": ["motor", "vaxor", "creb", "can"],
   "frameworks": ["arduino"],
   "platforms": ["ststm32"]
 }

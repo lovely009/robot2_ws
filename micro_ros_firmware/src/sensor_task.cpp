@@ -15,8 +15,11 @@
 #include "imu_snapshot.h"
 
 // 任务参数：栈 1024 字（4KB），优先级高于 micro_ros 收发任务
-static const uint32_t kSensorTaskStack = 1024;
-static const UBaseType_t kSensorTaskPrio = 4;
+// IMU 为非关键路径（姿态/温度仅上 ROS）：优先级降到 motor_rt 之下，消除对
+// 1ms 控制节拍的抢占；栈减半，台架 TBD-RT-01 复测，溢出由 stack overflow
+// hook（main.cpp）兜底。功能不变：DRDY 采样/Mahony/PID/加热/发布原样。
+static const uint32_t kSensorTaskStack = 512;
+static const UBaseType_t kSensorTaskPrio = 2;
 static const uint16_t kSensorStartDelayMs = 500;
 static const uint16_t kImuInitRetryMs = 1000;
 
@@ -138,6 +141,8 @@ bool sensor_task_start(void) {
   g_imu_init_error_count = 0U;
   g_imu_healthy = false;
 
+  // DMA1 时钟/流 NVIC 已由 main 板级初始化（initialize_system）先行使能
+  // （官方时序：DMA 先于 SPI2）；SPI2 设备配置归 lib/imu 自持。
   return xTaskCreate(sensor_task_fn, "sensor", kSensorTaskStack, nullptr,
                      kSensorTaskPrio, nullptr) == pdPASS;
 }

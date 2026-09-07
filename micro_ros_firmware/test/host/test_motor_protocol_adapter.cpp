@@ -57,18 +57,18 @@ static void test_vaxor_match_rx_frame() {
   uint16_t node = 0;
   uint8_t data[MOTOR_PROTOCOL_MAX_FRAME_BYTES] = {};
   motor_protocol_raw_frame_t reply =
-      make_frame(0, motor_protocol_wrist_reply_id(2), 12, data, 100);
+      make_frame(0, motor_protocol_vaxor_reply_id(2), 12, data, 100);
   assert(motor_protocol_vaxor_adapter.match_rx_frame(&reply, &node));
   assert(node == 2);
 
   motor_protocol_raw_frame_t status =
-      make_frame(0, motor_protocol_wrist_status_id(7), 20, data, 100);
+      make_frame(0, motor_protocol_vaxor_status_id(7), 20, data, 100);
   assert(motor_protocol_vaxor_adapter.match_rx_frame(&status, &node));
   assert(node == 7);
 
   // 命令/控制段是固件 TX 方向，不属于 RX 归属。
   motor_protocol_raw_frame_t cmd =
-      make_frame(0, motor_protocol_wrist_command_id(2), 12, data, 100);
+      make_frame(0, motor_protocol_vaxor_command_id(2), 12, data, 100);
   assert(!motor_protocol_vaxor_adapter.match_rx_frame(&cmd, &node));
 
   motor_protocol_raw_frame_t alien = make_frame(0, 0x123, 8, data, 100);
@@ -90,10 +90,10 @@ static void test_vaxor_decode_reply_converts_si() {
   const double kCurrentA = 0.5;  // Iq (A)
   motor_protocol_joint_state_t wire = {kMotorPos, kMotorVel, kCurrentA};
   uint8_t data[12];
-  motor_protocol_pack_wrist_reply(2, &wire, data);
+  motor_protocol_pack_vaxor_reply(2, &wire, data);
 
   motor_protocol_raw_frame_t frame =
-      make_frame(0, motor_protocol_wrist_reply_id(2), 12, data, 500);
+      make_frame(0, motor_protocol_vaxor_reply_id(2), 12, data, 500);
   motor_protocol_measured_state_t measured = {};
   assert(motor_protocol_vaxor_adapter.decode_frame(profile, 2, &frame, &measured));
 
@@ -116,10 +116,10 @@ static void test_vaxor_decode_status_frame() {
 
   motor_protocol_joint_state_t wire = {0.0, 0.0, 0.25};
   uint8_t data[20];
-  motor_protocol_pack_wrist_status(3, &wire, 48.6, 0x12345678, 4, 5, 2, 7, data);
+  motor_protocol_pack_vaxor_status(3, &wire, 48.6, 0x12345678, 4, 5, 2, 7, data);
 
   motor_protocol_raw_frame_t frame =
-      make_frame(1, motor_protocol_wrist_status_id(3), 20, data, 600);
+      make_frame(1, motor_protocol_vaxor_status_id(3), 20, data, 600);
   motor_protocol_measured_state_t measured = {};
   assert(motor_protocol_vaxor_adapter.decode_frame(profile, 3, &frame, &measured));
 
@@ -141,9 +141,9 @@ static void test_vaxor_decode_status_frame() {
 static void test_vaxor_decode_without_profile_yields_nan_motion() {
   motor_protocol_joint_state_t wire = {1.0, 1.0, 0.1};
   uint8_t data[12];
-  motor_protocol_pack_wrist_reply(4, &wire, data);
+  motor_protocol_pack_vaxor_reply(4, &wire, data);
   motor_protocol_raw_frame_t frame =
-      make_frame(0, motor_protocol_wrist_reply_id(4), 12, data, 100);
+      make_frame(0, motor_protocol_vaxor_reply_id(4), 12, data, 100);
   motor_protocol_measured_state_t measured = {};
   assert(motor_protocol_vaxor_adapter.decode_frame(nullptr, 4, &frame, &measured));
   assert(nan_equal(measured.position_rad, NAN));
@@ -171,14 +171,14 @@ static void test_vaxor_encode_mit_command() {
   assert(motor_protocol_vaxor_adapter.encode_mit_command(profile, 2, 1, &intent, &out));
   assert(out.bus_index == 1);
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P1);
-  assert(out.can_id == motor_protocol_wrist_command_id(2));
+  assert(out.can_id == motor_protocol_vaxor_command_id(2));
   assert(out.is_fd);
   assert(!out.is_extended);
   assert(out.size == 12);
 
   // 用协议解码器反向验证线协议内容（线协议字段为电机侧/电流 A）。
   motor_protocol_joint_command_t wire = {};
-  assert(motor_protocol_unpack_wrist_command(out.data, out.size, &wire));
+  assert(motor_protocol_unpack_vaxor_command(out.data, out.size, &wire));
   assert(fabs(wire.position - 0.5 * 50.0) < 1e-3);          // 电机轴 rad
   assert(fabs(wire.velocity - 1.0 * 50.0) < 0.02);          // 电机轴 rad/s
   assert(fabs(wire.feedforward - 1.0) < 0.005);             // 1.365 N·m → 1 A
@@ -192,15 +192,15 @@ static void test_vaxor_encode_enable() {
   assert(find_profile("vaxor_2550", &profile));
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_vaxor_adapter.encode_enable(profile, 5, 2, &out));
-  assert(out.can_id == motor_protocol_wrist_control_id(5));
+  assert(out.can_id == motor_protocol_vaxor_control_id(5));
   assert(out.size == 8);
   assert(!out.is_fd);
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P1);
-  motor_protocol_wrist_control_t control = {};
-  assert(motor_protocol_unpack_wrist_control(out.data, out.size, &control));
+  motor_protocol_vaxor_control_t control = {};
+  assert(motor_protocol_unpack_vaxor_control(out.data, out.size, &control));
   assert(control.run);
   assert(!control.set_zero);
-  assert(control.mode == MOTOR_PROTOCOL_WRIST_MODE_MIT);
+  assert(control.mode == MOTOR_PROTOCOL_MODE_MIT);
 }
 
 // 软停帧：MIT 阻尼 {0,0,0,default_kd,0} 且保持使能（TBD-SAFETY-01 占位语义），
@@ -211,10 +211,10 @@ static void test_vaxor_encode_soft_stop() {
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_vaxor_adapter.encode_soft_stop(profile, 1, 0, &out));
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
-  assert(out.can_id == motor_protocol_wrist_command_id(1));
+  assert(out.can_id == motor_protocol_vaxor_command_id(1));
   assert(out.size == 12);
   motor_protocol_joint_command_t wire = {};
-  assert(motor_protocol_unpack_wrist_command(out.data, out.size, &wire));
+  assert(motor_protocol_unpack_vaxor_command(out.data, out.size, &wire));
   assert(wire.position == 0.0);
   assert(wire.velocity == 0.0);
   assert(wire.kp == 0.0);
@@ -229,10 +229,10 @@ static void test_vaxor_encode_disable() {
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_vaxor_adapter.encode_disable(profile, 1, 0, &out));
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
-  assert(out.can_id == motor_protocol_wrist_control_id(1));
+  assert(out.can_id == motor_protocol_vaxor_control_id(1));
   assert(out.size == 8);
-  motor_protocol_wrist_control_t control = {};
-  assert(motor_protocol_unpack_wrist_control(out.data, out.size, &control));
+  motor_protocol_vaxor_control_t control = {};
+  assert(motor_protocol_unpack_vaxor_control(out.data, out.size, &control));
   assert(!control.run);
 }
 
@@ -251,7 +251,7 @@ static void test_vaxor_config_mode_transaction_stages() {
   motor_protocol_config_request_t request = {};
   request.request_id = 42U;
   request.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
-  request.mode = MOTOR_PROTOCOL_WRIST_MODE_MIT;
+  request.mode = MOTOR_PROTOCOL_MODE_MIT;
 
   assert(motor_protocol_vaxor_adapter.config_stage_count(profile, &request) == 2);
 
@@ -261,16 +261,16 @@ static void test_vaxor_config_mode_transaction_stages() {
 
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_vaxor_adapter.config_encode_stage(0, profile, 2, 0, &request, &out));
-  assert(out.can_id == motor_protocol_wrist_control_id(2));
-  motor_protocol_wrist_control_t control = {};
-  assert(motor_protocol_unpack_wrist_control(out.data, out.size, &control));
+  assert(out.can_id == motor_protocol_vaxor_control_id(2));
+  motor_protocol_vaxor_control_t control = {};
+  assert(motor_protocol_unpack_vaxor_control(out.data, out.size, &control));
   assert(!control.run);
-  assert(control.mode == MOTOR_PROTOCOL_WRIST_MODE_MIT);
+  assert(control.mode == MOTOR_PROTOCOL_MODE_MIT);
 
   assert(motor_protocol_vaxor_adapter.config_encode_stage(1, profile, 2, 0, &request, &out));
-  assert(motor_protocol_unpack_wrist_control(out.data, out.size, &control));
+  assert(motor_protocol_unpack_vaxor_control(out.data, out.size, &control));
   assert(control.run);
-  assert(control.mode == MOTOR_PROTOCOL_WRIST_MODE_MIT);
+  assert(control.mode == MOTOR_PROTOCOL_MODE_MIT);
 
   motor_protocol_config_request_t gains = {};
   gains.kind = MOTOR_PROTOCOL_CONFIG_SET_GAINS;
@@ -406,7 +406,7 @@ static void test_creb_config_unsupported_paths() {
 
   motor_protocol_config_request_t mode = {};
   mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
-  mode.mode = MOTOR_PROTOCOL_WRIST_MODE_VELOCITY;
+  mode.mode = MOTOR_PROTOCOL_MODE_VELOCITY;
   assert(motor_protocol_creb_adapter.config_stage_count(profile, &mode) == 0);
 
   motor_protocol_config_request_t limits = {};

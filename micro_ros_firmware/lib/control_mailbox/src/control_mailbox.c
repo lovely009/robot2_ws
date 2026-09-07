@@ -33,6 +33,10 @@ static uint8_t config_queue_index(uint8_t head, uint8_t offset) {
   return (uint8_t)((head + offset) % CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY);
 }
 
+static uint8_t bind_queue_index(uint8_t head, uint8_t offset) {
+  return (uint8_t)((head + offset) % CONTROL_MAILBOX_BIND_QUEUE_CAPACITY);
+}
+
 static void clear_live_inputs(control_mailbox_t *mailbox) {
   control_mailbox_clear_command(mailbox);
   control_mailbox_clear_config(mailbox);
@@ -97,13 +101,15 @@ bool control_mailbox_submit_config(
   if (mailbox == NULL) {
     return false;
   }
-  // 拒绝类别可区分：非法请求 / 会话门 / FIFO 满（诊断语义见头文件）。
-  if (!config_request_is_valid(request)) {
-    ++mailbox->config_invalid_count;
-    return false;
-  }
+  // 拒绝类别可区分：会话门 / 非法请求 / FIFO 满（诊断语义见头文件）。
+  // 与 submit_command 同序：门先于数据校验——断链期的非法载荷统一
+  // 归因到会话门，两条提交路径的诊断口径一致。
   if (!agent_is_connected_or_unknown(mailbox)) {
     ++mailbox->config_session_count;
+    return false;
+  }
+  if (!config_request_is_valid(request)) {
+    ++mailbox->config_invalid_count;
     return false;
   }
   if (mailbox->config_count >= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY) {
@@ -136,6 +142,40 @@ void control_mailbox_clear_config(control_mailbox_t *mailbox) {
     mailbox->config_head = 0U;
     mailbox->config_count = 0U;
   }
+}
+
+// 身份绑定：非法输入（motor_id==0 / 名字空或超长）拒绝；FIFO 满即拒——
+// 低频请求，上层重发即可（绑定幂等），不设诊断计数。断链不清本队列。
+bool control_mailbox_submit_bind(control_mailbox_t *mailbox, uint16_t motor_id,
+                                 const char *model_name) {
+  if (mailbox == NULL || model_name == NULL || motor_id == 0U) {
+    return false;
+  }
+  const size_t name_len = strlen(model_name);
+  if (name_len == 0U ||
+      name_len >= CONTROL_MAILBOX_BIND_NAME_CAPACITY) {
+    return false;
+  }
+  if (mailbox->bind_count >= CONTROL_MAILBOX_BIND_QUEUE_CAPACITY) {
+    return false;
+  }
+  control_mailbox_bind_request_t *slot = &mailbox->bind_queue[bind_queue_index(
+      mailbox->bind_head, mailbox->bind_count)];
+  slot->motor_id = motor_id;
+  memcpy(slot->model_name, model_name, name_len + 1U);
+  ++mailbox->bind_count;
+  return true;
+}
+
+bool control_mailbox_take_bind(control_mailbox_t *mailbox,
+                               control_mailbox_bind_request_t *request) {
+  if (mailbox == NULL || request == NULL || mailbox->bind_count == 0U) {
+    return false;
+  }
+  *request = mailbox->bind_queue[mailbox->bind_head];
+  mailbox->bind_head = bind_queue_index(mailbox->bind_head, 1U);
+  --mailbox->bind_count;
+  return true;
 }
 
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,

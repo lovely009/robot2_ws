@@ -13,7 +13,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 | `motor_protocol` | Vaxor/CREB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
 | `motor_control` | 动态注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS、HAL、厂家字节布局 |
 | `control_mailbox` | 高频完整命令、低频配置请求、授权/连接事件的跨任务交换 | 协议校验、限位裁决、CAN 发送 |
-| `imu` | BMI088、SPI2 通信、融合和 snapshot；依赖 `dma` | 电机控制、ROS 发布 |
+| `imu` | BMI088、SPI2 阻塞通信、融合和 snapshot（不用 DMA） | 电机控制、ROS 发布 |
 | `w25q64` | OCTOSPI2 W25Q64 原始读写与 geometry | 参数策略、日志调度、控制闭环 |
 | `ws2812` | SPI6/PA7 的 LED 物理发送 | 系统状态判定、电机安全 |
 
@@ -27,22 +27,27 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 当前只收录已确认参数的 CREB R48/R58 和 Vaxor 25/30mm 型号。
 
 `control_mailbox` 内部使用相互独立的 command/config/event 存储和 API。当前实现为：
-高频命令使用完整 ID 快照的双缓冲 latest-wins；低频模式、增益和位置限位使用
-固定容量 FIFO；连接和授权使用状态电平加一次性边沿。库不保存 joint 名、协议类型
-或电机型号，也不做厂家协议能力裁决。
+高频命令使用完整 ID 快照的双缓冲 latest-wins；低频模式、增益、位置限位和逐电机
+enable 使用固定容量 FIFO；连接和授权使用状态电平加一次性边沿。库不保存 joint 名、
+协议类型或电机型号，也不做厂家协议能力裁决。
 
-`dma` 是共享的板级资源库。当前提供 BMI088/SPI2 的配置，但 DMA 通道、IRQ 和
-缓存所有权必须能扩展给 WS2812 或其他外设；设备驱动不得互相调用 DMA 私有状态。
+`dma` 是共享的板级资源门卫，只管控制器级资源（DMA1 + BDMA/DMAMUX2 时钟、
+通道 NVIC、占用登记、优先级合规断言），由 `main` 板级初始化统一使能。设备
+SPI/DMA 配置归各设备库——`lib/imu` 自持 SPI2 的 `HAL_SPI_MspInit` 与 DMA
+句柄/handler，`lib/ws2812` 自持 BDMA_Ch0 与 handler（帧缓冲在
+`.bdma_noinit`/RAM_D3——BDMA 仅能访问 DTCM/SRAM4），均与 `lib/fdcan` 自持
+`HAL_FDCAN_MspInit` 同构。设备库之间禁止互相 include 或调用。
 
 ## 依赖方向
 
 ```text
-src/motor_ros_bridge -> control_mailbox
-src/motor_rt_task    -> control_mailbox + fdcan + motor_control
-motor_control        -> motor_protocol
-src/sensor_task      -> imu
-src/storage_task     -> w25q64
-src/led_task         -> ws2812
+src/ros_bridge     -> motor_bridge + imu_bridge（ROS 实体编排）
+src/motor_bridge   -> motor_rt_task（经包装函数写 control_mailbox）
+src/motor_rt_task  -> control_mailbox + fdcan + motor_control
+motor_control      -> motor_protocol（接口接缝，文档明载）
+src/sensor_task    -> imu
+src/led_task       -> ws2812
+lib/w25q64         -> 休眠：当前无消费者（无 storage 任务），待接线
 ```
 
 库不能反向依赖 `src/`、ROS 或其他任务。实时路径不使用动态内存、阻塞等待或
@@ -61,7 +66,7 @@ src/led_task         -> ws2812
 
 - `control_mailbox_submit_command()` / `take_command()`：最多 64 个唯一
   `uint16 motor_id`，位置/速度/力矩为 `float32`，携带 sequence 和 MCU 接收 tick；
-- `control_mailbox_submit_config()` / `take_config()`：固定容量 8 的低频语义请求队列，
+- `control_mailbox_submit_config()` / `take_config()`：固定容量 16 的低频语义请求队列，
   不覆盖已入队请求；
 - `control_mailbox_request_authorization()`、`request_agent_connected()` 和
   `take_events()`：只传递连接/授权状态及边沿；

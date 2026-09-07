@@ -107,6 +107,29 @@ static bool tick_elapsed(uint32_t now, uint32_t then, uint32_t threshold) {
   return (uint32_t)(now - then) >= threshold;
 }
 
+// 下游（调度器 P0 FIFO 满 / 硬件拒收）回告重入队（审查 4a）：帧由本内核
+// 生成（tx_slot = 表项索引），任务层原样回传即可定位表项。
+bool motor_control_requeue_p0(motor_control_context_t *ctx,
+                              const motor_protocol_tx_frame_t *frame) {
+  if (ctx == NULL || frame == NULL ||
+      frame->tx_class != MOTOR_PROTOCOL_TX_CLASS_P0 ||
+      frame->tx_slot >= ctx->entry_count) {
+    return false;
+  }
+  motor_control_entry_t *entry = &ctx->entries[frame->tx_slot];
+  if (!entry->used) {
+    return false;
+  }
+  if (motor_control_push_tx_p0(ctx, entry, frame)) {
+    return true; // 重入队成功（含驱逐腾位路径）
+  }
+  // 病态：待发队列全为 P0。转挂起重试，service_p0_retries 按 last_p0_kind
+  // 重新编码补发——不静默丢安全帧。
+  entry->p0_pending = true;
+  entry->p0_kind = entry->last_p0_kind;
+  return false;
+}
+
 // 统一 P0 失能帧生成 + 推送（撤权/离线/故障/冲突共用）。
 static bool send_disable_p0(motor_control_context_t *ctx,
                             motor_control_entry_t *entry) {
@@ -119,11 +142,31 @@ static bool send_disable_p0(motor_control_context_t *ctx,
     return false;
   }
   frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+  entry->last_p0_kind = MOTOR_CONTROL_P0_DISABLE;
   if (motor_control_push_tx_p0(ctx, entry, &frame)) {
     return true;
   }
   entry->p0_pending = true;
   entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;
+  return false;
+}
+
+// 按型号名绑定（审查第 5 步）：型号目录遍历 + 精确匹配，命中复用
+// bind_profile 的门禁与事件；这是 MotorBind 订阅通道的内核落地。
+bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
+                                        uint16_t motor_id,
+                                        const char *model_name, uint32_t now_ms) {
+  if (ctx == NULL || model_name == NULL) {
+    return false;
+  }
+  const size_t count = motor_control_profile_count();
+  for (size_t i = 0; i < count; ++i) {
+    const motor_protocol_model_profile_t *profile = motor_control_profile_at(i);
+    if (profile != NULL && profile->model_name != NULL &&
+        strcmp(profile->model_name, model_name) == 0) {
+      return motor_control_bind_profile(ctx, motor_id, i, now_ms);
+    }
+  }
   return false;
 }
 
@@ -445,8 +488,13 @@ bool motor_control_apply_command_snapshot(
         entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
         continue;
       }
-      frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
-      frame.tx_slot = (uint16_t)i; // P1 latest-wins 槽 = 表项索引（任务层路由用）
+      // 使能帧走 P0：与失能/软停同为「必须送达」的控制事件，且 P0 每拍先于
+      // 一切 P1 出队，保证使能先于同拍生成的 MIT 帧上总线。此前与 MIT 同挂
+      // P1 latest-wins 槽（同 tx_slot），无整定门协议（vaxor）两帧同拍生成
+      // 被覆盖——使能帧永不上线（2026-09-07 全固件审查 C2 修复）。
+      frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+      entry->last_p0_kind = MOTOR_CONTROL_P0_ENABLE;
+      frame.tx_slot = (uint16_t)i; // 表项索引：P0 回告重入队按此定位（审查 4a）
       if (!motor_control_push_tx(ctx, &frame)) {
         continue;
       }
@@ -514,6 +562,7 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
       if (entry->adapter->encode_soft_stop(entry->profile, entry->node,
                                            entry->bus_index, &frame)) {
         frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+        entry->last_p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
         if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
           entry->p0_pending = true;
           entry->p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
@@ -573,6 +622,11 @@ static void service_p0_retries(motor_control_context_t *ctx) {
                entry->adapter != NULL && entry->adapter->encode_disable != NULL) {
       encoded = entry->adapter->encode_disable(entry->profile, entry->node,
                                                entry->bus_index, &frame);
+    } else if (entry->p0_kind == MOTOR_CONTROL_P0_ENABLE &&
+               entry->adapter != NULL && entry->profile != NULL &&
+               entry->adapter->encode_enable != NULL) {
+      encoded = entry->adapter->encode_enable(entry->profile, entry->node,
+                                              entry->bus_index, &frame);
     } else {
       encoded = false;
     }

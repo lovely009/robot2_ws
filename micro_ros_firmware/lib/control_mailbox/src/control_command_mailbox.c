@@ -4,6 +4,11 @@
 #include <stddef.h>
 #include <string.h>
 
+// publish 的缓冲翻转写入 published 的补集，按双缓冲硬编码；
+// 变更容量须同步修改翻转逻辑，勿单独调整宏。
+_Static_assert(CONTROL_COMMAND_MAILBOX_BUFFER_COUNT == 2U,
+               "publish buffer flip assumes exactly 2 buffers");
+
 static bool snapshot_is_valid(const control_command_snapshot_t *snapshot) {
   if (snapshot == NULL ||
       snapshot->target_count > CONTROL_COMMAND_MAILBOX_MAX_TARGETS) {

@@ -260,7 +260,7 @@ typedef struct motor_protocol_adapter {
 extern const motor_protocol_adapter_t motor_protocol_vaxor_adapter;
 extern const motor_protocol_adapter_t motor_protocol_creb_adapter;
 
-// 节点号合法性（wrist ID 算术函数不校验范围，入口统一在此把关）。
+// 节点号合法性（vaxor ID 算术函数不校验范围，入口统一在此把关）。
 static inline bool motor_protocol_adapter_valid_node(
     const motor_protocol_adapter_t *adapter, uint16_t node) {
   return adapter != NULL && node >= adapter->node_id_min &&

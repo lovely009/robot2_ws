@@ -1,8 +1,11 @@
 // 固定容量的跨任务控制输入交换层。
 // 不依赖 HAL、RTOS、Arduino、ROS 或任何电机协议。
 //
-// 并发契约：本层无内部锁。submit/take/clear/request_* /take_events 的
-// 每一次调用都必须位于调用方提供的临界区内（写侧与读侧互斥即可）；
+// 并发契约：本层无内部锁、无原子字段。submit/take/clear/request_*/
+// take_events 的每一次调用都必须位于调用方提供的临界区内，且写侧与
+// 读侧必须共用同一互斥域（单核下 FreeRTOS taskENTER_CRITICAL 或等效
+// 关中断即满足；"两侧各自加锁"不构成互斥，会产生数据竞争）。仅支持
+// 任务上下文调用（ISR 内 taskENTER_CRITICAL 非法，本层不做检测）；
 // 违反契约（如无锁双写者）不属于受支持用法。
 
 #ifndef CONTROL_MAILBOX_H
@@ -18,6 +21,8 @@ extern "C" {
 #endif
 
 #define CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY 16U
+#define CONTROL_MAILBOX_BIND_QUEUE_CAPACITY 4U
+#define CONTROL_MAILBOX_BIND_NAME_CAPACITY 32U
 
 // 低频设备配置的语义类型。具体型号/协议能力由运行时和协议适配器判断。
 typedef enum {
@@ -50,6 +55,13 @@ typedef struct {
   } value;
 } control_mailbox_config_request_t;
 
+// 身份绑定请求（TBD-PROFILE-01 过渡态）：型号名与固件型号目录同名锚点，
+// 31 字符 + NUL 与内核 model_name[32] 精确对应。
+typedef struct {
+  uint16_t motor_id;
+  char model_name[32];
+} control_mailbox_bind_request_t;
+
 typedef struct {
   bool authorization_requested;
   bool authorization_pending;
@@ -65,6 +77,13 @@ typedef struct {
       config_queue[CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY];
   uint8_t config_head;
   uint8_t config_count;
+
+  // 身份绑定 FIFO：低频、不覆盖；断链不清（绑定是身份事实，重连无需重发），
+  // 仅 init 归零。结果经 motor_events 的 PROFILE_BOUND/PROFILE_REJECTED 回告。
+  control_mailbox_bind_request_t
+      bind_queue[CONTROL_MAILBOX_BIND_QUEUE_CAPACITY];
+  uint8_t bind_head;
+  uint8_t bind_count;
 
   // 拒绝诊断（拒绝必可见，且类别可区分；为生命周期累计，clear 不清零）。
   uint32_t config_invalid_count;   // 请求非法（request_id==0/字段非法/未知 kind）
@@ -96,7 +115,9 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox,
 void control_mailbox_clear_command(control_mailbox_t *mailbox);
 
 // 低频输入：有界 FIFO，不覆盖、不丢弃已经入队的旧配置请求。
-// 配置不属于运动授权：可在禁能/未授权状态下排队（会话门仍生效）。
+// 配置不属于运动授权：可在禁能/未授权状态下排队（会话门仍生效，
+// 且会话门先于数据校验——与 submit_command 同序，断链期拒绝统一
+// 计入 config_session_count）。
 bool control_mailbox_submit_config(
     control_mailbox_t *mailbox,
     const control_mailbox_config_request_t *request);
@@ -104,6 +125,13 @@ bool control_mailbox_take_config(
     control_mailbox_t *mailbox,
     control_mailbox_config_request_t *request);
 void control_mailbox_clear_config(control_mailbox_t *mailbox);
+
+// 身份绑定输入（TBD-PROFILE-01 过渡通道）：有界 FIFO，满即拒（低频请求，
+// 上层重发即可，无诊断计数）；非法输入（motor_id==0 / 名字空或超长）拒绝。
+bool control_mailbox_submit_bind(control_mailbox_t *mailbox, uint16_t motor_id,
+                                 const char *model_name);
+bool control_mailbox_take_bind(control_mailbox_t *mailbox,
+                               control_mailbox_bind_request_t *request);
 
 // 连接/授权是状态请求：同状态重复调用幂等（不产生新边沿）；
 // 断链（曾连接后断开）清命令+配置并撤销授权；会话恢复不恢复授权

@@ -84,19 +84,19 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
   out->velocity_rad_s = NAN;
   out->effort_nm = NAN;
 
-  motor_protocol_joint_state_t wire = {0.0, 0.0, 0.0};
-  if (frame->can_id == motor_protocol_wrist_reply_id(node) &&
+  motor_protocol_joint_state_t wire = {0};
+  if (frame->can_id == motor_protocol_vaxor_reply_id(node) &&
       frame->dlc == 12U) {
     // 回显帧恒 12B（实时反馈，100Hz 跟随命令）；20B 状态帧只在 status-id。
-    if (!motor_protocol_unpack_wrist_feedback(frame->data, frame->dlc, &wire)) {
+    if (!motor_protocol_unpack_vaxor_feedback(frame->data, frame->dlc, &wire)) {
       return false;
     }
     out->has_motion_state = true;
     vaxor_fill_si(profile, &wire, out);
     if (frame->dlc == 20U) {
       // 20B 状态帧：附加电压/故障/身份字段（身份供 Profile 绑定诊断参考）。
-      motor_protocol_wrist_status_t status = {0};
-      if (!motor_protocol_unpack_wrist_status(frame->data, frame->dlc, &status)) {
+      motor_protocol_vaxor_status_t status = {0};
+      if (!motor_protocol_unpack_vaxor_status(frame->data, frame->dlc, &status)) {
         return false;
       }
       out->is_status_frame = true;
@@ -110,14 +110,14 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
     }
     return true;
   }
-  if (frame->can_id == motor_protocol_wrist_status_id(node) &&
+  if (frame->can_id == motor_protocol_vaxor_status_id(node) &&
       frame->dlc == 20U) {
-    motor_protocol_wrist_status_t status = {0};
-    if (!motor_protocol_unpack_wrist_status(frame->data, frame->dlc, &status)) {
+    motor_protocol_vaxor_status_t status = {0};
+    if (!motor_protocol_unpack_vaxor_status(frame->data, frame->dlc, &status)) {
       return false;
     }
     // 状态帧前 10 字节与 reply 同布局，运动量同样有效。
-    if (!motor_protocol_unpack_wrist_feedback(frame->data, frame->dlc, &wire)) {
+    if (!motor_protocol_unpack_vaxor_feedback(frame->data, frame->dlc, &wire)) {
       return false;
     }
     out->has_motion_state = true;
@@ -162,12 +162,12 @@ static bool vaxor_encode_mit_command(const motor_protocol_model_profile_t *profi
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
-  out->can_id = motor_protocol_wrist_command_id(node);
+  out->can_id = motor_protocol_vaxor_command_id(node);
   out->size = 12U;
   out->is_fd = true;
   out->is_extended = false;
   out->is_brs = true;
-  motor_protocol_pack_wrist_command(&wire, out->data);
+  motor_protocol_pack_vaxor_command(&wire, out->data);
   return true;
 }
 
@@ -177,17 +177,17 @@ static bool vaxor_encode_control(uint16_t node, uint8_t bus_index, bool run,
   if (out == NULL) {
     return false;
   }
-  const motor_protocol_wrist_control_t control = {run, false,
-                                                  MOTOR_PROTOCOL_WRIST_MODE_MIT};
+  const motor_protocol_vaxor_control_t control = {run, false,
+                                                  MOTOR_PROTOCOL_MODE_MIT};
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = tx_class;
-  out->can_id = motor_protocol_wrist_control_id(node);
+  out->can_id = motor_protocol_vaxor_control_id(node);
   out->size = 8U;
   out->is_fd = false;
   out->is_extended = false;
   out->is_brs = false;
-  motor_protocol_pack_wrist_control(&control, out->data);
+  motor_protocol_pack_vaxor_control(&control, out->data);
   return true;
 }
 
@@ -268,7 +268,7 @@ static bool vaxor_config_encode_stage(
     uint8_t bus_index, const motor_protocol_config_request_t *request,
     motor_protocol_tx_frame_t *out) {
   if (request == NULL || out == NULL || request->kind != MOTOR_PROTOCOL_CONFIG_SET_MODE ||
-      stage >= 2U || request->mode > (uint8_t)MOTOR_PROTOCOL_WRIST_MODE_POSITION) {
+      stage >= 2U || request->mode > (uint8_t)MOTOR_PROTOCOL_MODE_POSITION) {
     return false;
   }
   (void)profile;

@@ -1,12 +1,13 @@
 // Madgwick 的实现版 Mahony AHRS（官方 CtrBoard-H7_ALL 例程移植）。
-// sampleFreq 与 BMI088 加速度计 ODR=200Hz 对齐：ACC_INT(PE10) 每周期触发
-// sensor_task 信号量，一次信号量对应一次采样，姿态积分 dt=1/200s。
+// sampleFreq 与 BMI088 加速度计 ODR=100Hz 对齐：ACC_INT(PE10) 每周期触发
+// sensor_task 信号量，一次信号量对应一次采样，姿态积分 dt=1/100s。
+// 注意：改 ODR 必须同步改这里的 sampleFreq，否则姿态积分尺度错误。
 
 #include "MahonyAHRS.h"
 #include <math.h>
 #include <stdint.h>
 
-#define sampleFreq 200.0f
+#define sampleFreq 100.0f
 #define twoKpDef (2.0f * 0.5f)
 #define twoKiDef (2.0f * 0.0f)
 

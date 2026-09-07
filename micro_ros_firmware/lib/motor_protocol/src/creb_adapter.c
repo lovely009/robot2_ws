@@ -191,7 +191,7 @@ creb_config_stage_count(const motor_protocol_model_profile_t *profile,
   if (request->kind != MOTOR_PROTOCOL_CONFIG_SET_MODE) {
     return 0U; // 限位写等管理对象未决（TBD-CONFIG-01）→ UNSUPPORTED
   }
-  if (request->mode == (uint8_t)MOTOR_PROTOCOL_WRIST_MODE_MIT) {
+  if (request->mode == (uint8_t)MOTOR_PROTOCOL_MODE_MIT) {
     return 1U; // 设备恒 MIT：单个空阶段，事务立即以 OK 收尾
   }
   return 0U; // 非 MIT 模式不受支持（ARD §25：CREB 默认且固定 MIT）

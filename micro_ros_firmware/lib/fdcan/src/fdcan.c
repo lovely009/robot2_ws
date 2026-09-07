@@ -3,7 +3,7 @@
 // 官方生成代码：三路 FDCAN（FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13），
 // FD + BRS、标称 1Mbps / 数据 5Mbps。时钟源在官方例程为 PLL1Q=80MHz，
 // 本工程为不动 BMI088 的 PLL1Q=240MHz(SPI2)，改用 PLL2Q=80MHz 供 FDCAN。
-// 消息 RAM：RX/TX 元素扩到 64B（RP 广播 64B、vaxor 反馈 12/20B），只保留
+// 消息 RAM：RX/TX 元素扩到 64B（CAN-FD 满载帧；vaxor 反馈 12/20B），只保留
 // RX FIFO0 + TX FIFO，每路按 HAL 计算占 300 个 32 位字，偏移 0/300/600。
 // 中断转发沿用 HAL：FDCANx_IT0/IT1_IRQHandler -> HAL_FDCAN_IRQHandler。
 
@@ -57,7 +57,7 @@ void MX_FDCAN1_Init(void) {
   hfdcan1.Init.NominalTimeSeg2 = 16;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 2;
-  hfdcan1.Init.DataTimeSeg1 = 13;
+  hfdcan1.Init.DataTimeSeg1 = 12; // 16tq@80MHz = 5Mbps，与 FDCAN2/3 一致（审查 C3）
   hfdcan1.Init.DataTimeSeg2 = 3;
   hfdcan1.Init.MessageRAMOffset = 0;
   hfdcan1.Init.StdFiltersNbr = 4;

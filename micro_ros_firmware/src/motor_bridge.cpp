@@ -24,6 +24,7 @@
 #include <rclc/executor.h>
 #include <std_msgs/msg/bool.h>
 
+#include <can_bridge_msgs/msg/motor_bind.h>
 #include <can_bridge_msgs/msg/motor_command_array.h>
 #include <can_bridge_msgs/msg/motor_config.h>
 #include <can_bridge_msgs/msg/motor_config_result.h>
@@ -32,6 +33,7 @@
 #include <can_bridge_msgs/msg/motor_policy.h>
 #include <can_bridge_msgs/msg/motor_status_array.h>
 #include <can_bridge_msgs/msg/motor_topology.h>
+#include <rosidl_runtime_c/string_functions.h>
 #include <rmw_microros/time_sync.h>
 
 #include "motor_rt_task.h"
@@ -48,6 +50,7 @@ static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[64];
 static const char *kCommandTopic = "/motor_command_array";
 static const char *kPolicyTopic = "micro_ros/motor_policy";
 static const char *kConfigTopic = "micro_ros/motor_config";
+static const char *kBindTopic = "micro_ros/motor_bind";
 static const char *kEnableTopic = "micro_ros/motor_enable";
 static const char *kMotionStatesTopic = "micro_ros/motion_states";
 static const char *kStatusTopic = "micro_ros/motor_status_array";
@@ -70,6 +73,11 @@ static rcl_subscription_t g_config_sub;
 static can_bridge_msgs__msg__MotorConfig g_config_msg;
 static bool g_config_up = false;
 static bool g_config_added = false;
+
+static rcl_subscription_t g_bind_sub;
+static can_bridge_msgs__msg__MotorBind g_bind_msg;
+static bool g_bind_up = false;
+static bool g_bind_added = false;
 
 static rcl_subscription_t g_enable_sub;
 static std_msgs__msg__Bool g_enable_msg;
@@ -100,7 +108,7 @@ static bool g_config_result_up = false;
 static uint32_t g_policy_request_id = 1U; // Policy 无 request_id，桥代生成
 
 size_t motor_bridge_executor_handle_count(void) {
-  return 4U; // command/policy/config/enable 订阅
+  return 5U; // command/policy/config/bind/enable 订阅
 }
 
 // QoS 助手（TBD-ROS-05 默认表）。
@@ -206,6 +214,24 @@ static void config_cb(const void *msgin) {
   (void)motor_rt_submit_config(&request);
 }
 
+// 绑定回调（TBD-PROFILE-01 过渡通道）：校验后入 mailbox bind FIFO；
+// 结果经 motor_events 的 PROFILE_BOUND/PROFILE_REJECTED 事件回告。
+static void bind_cb(const void *msgin) {
+  if (msgin == nullptr) {
+    return;
+  }
+  const auto *msg = (const can_bridge_msgs__msg__MotorBind *)msgin;
+  if (msg->motor_id == 0U || msg->model_name.size == 0U ||
+      msg->model_name.size >= CONTROL_MAILBOX_BIND_NAME_CAPACITY ||
+      msg->model_name.data == nullptr) {
+    return; // 非法载荷静默丢弃（事件层无法回告无 bus 上下文的绑定）
+  }
+  char name[CONTROL_MAILBOX_BIND_NAME_CAPACITY];
+  memcpy(name, msg->model_name.data, msg->model_name.size);
+  name[msg->model_name.size] = '\0';
+  (void)motor_rt_submit_bind(msg->motor_id, name);
+}
+
 static void enable_cb(const void *msgin) {
   if (msgin == nullptr) {
     return;
@@ -280,8 +306,9 @@ static void publish_topology(uint32_t now_ms) {
     out.motor_id = entries[i].motor_id;
     out.bus_index = entries[i].bus_index;
     out.protocol = entries[i].protocol;
-    memcpy(out.model_name.data, entries[i].model_name, 32);
-    out.model_name.size = strlen(entries[i].model_name);
+    (void)rosidl_runtime_c__String__assignn(&out.model_name,
+                                            entries[i].model_name,
+                                            strlen(entries[i].model_name));
     out.capability_flags = entries[i].capability_flags;
     out.online = entries[i].online;
     out.conflict = entries[i].conflict;
@@ -337,6 +364,18 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_topology_msg.entries.capacity = 64;
   g_topology_msg.entries.data = g_topology_buf;
 
+  // model_name 是全桥唯一 String 成员：静态缓冲零值时 data==NULL，首个设备
+  // 注册后的拓扑发布即向 NULL memcpy（BusFault）。static 守卫一次性初始化，
+  // 不随会话重连反复分配；容量由 String__assignn 首拍按需增长，稳态零分配。
+  static bool s_topology_strings_ready = false;
+  if (!s_topology_strings_ready) {
+    for (size_t i = 0; i < sizeof(g_topology_buf) / sizeof(g_topology_buf[0]);
+         ++i) {
+      (void)rosidl_runtime_c__String__init(&g_topology_buf[i].model_name);
+    }
+    s_topology_strings_ready = true;
+  }
+
   // ---- 订阅 ----
   rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
   sub_opts.qos = qos_stream();
@@ -370,6 +409,23 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
   g_config_up = true;
+
+  sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_reliable(4);
+  if (rcl_subscription_init(&g_bind_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                        MotorBind),
+                            kBindTopic, &sub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_bind_up = true;
+  // 有界字符串（<=31+NUL）反序列化要求预置容量：直接挂静态缓冲，零堆分配
+  //（与序列缓冲同一静态存储口径，见文件头注释）。
+  static char s_bind_name_buf[CONTROL_MAILBOX_BIND_NAME_CAPACITY];
+  g_bind_msg.model_name.data = s_bind_name_buf;
+  g_bind_msg.model_name.size = 0U;
+  g_bind_msg.model_name.capacity = sizeof(s_bind_name_buf);
 
   sub_opts = rcl_subscription_get_default_options();
   sub_opts.qos = qos_reliable(1);
@@ -445,12 +501,15 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
                                      policy_cb, ON_NEW_DATA) != RCL_RET_OK ||
       rclc_executor_add_subscription(executor, &g_config_sub, &g_config_msg,
                                      config_cb, ON_NEW_DATA) != RCL_RET_OK ||
+      rclc_executor_add_subscription(executor, &g_bind_sub, &g_bind_msg,
+                                     bind_cb, ON_NEW_DATA) != RCL_RET_OK ||
       rclc_executor_add_subscription(executor, &g_enable_sub, &g_enable_msg,
                                      enable_cb, ON_NEW_DATA) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
-  g_command_added = g_policy_added = g_config_added = g_enable_added = true;
+  g_command_added = g_policy_added = g_config_added = g_bind_added =
+      g_enable_added = true;
   return true;
 }
 
@@ -467,6 +526,10 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
     if (g_config_added) {
       rclc_executor_remove_subscription(executor, &g_config_sub);
       g_config_added = false;
+    }
+    if (g_bind_added) {
+      rclc_executor_remove_subscription(executor, &g_bind_sub);
+      g_bind_added = false;
     }
     if (g_enable_added) {
       rclc_executor_remove_subscription(executor, &g_enable_sub);
@@ -487,6 +550,11 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
     rcl_ret_t rc = rcl_subscription_fini(&g_config_sub, node);
     (void)rc;
     g_config_up = false;
+  }
+  if (g_bind_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_bind_sub, node);
+    (void)rc;
+    g_bind_up = false;
   }
   if (g_enable_up) {
     rcl_ret_t rc = rcl_subscription_fini(&g_enable_sub, node);

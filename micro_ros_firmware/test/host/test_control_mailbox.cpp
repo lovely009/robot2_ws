@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 static control_command_snapshot_t make_snapshot(uint32_t sequence,
@@ -319,6 +320,60 @@ static void test_config_set_enable_queues() {
   assert(out.value.enable == true);
 }
 
+// 配置提交与命令路径同序：会话门先于数据校验——断链期的非法载荷
+// 归因到 config_session_count，与 config_invalid_count 互斥不重复。
+static void test_config_gate_precedes_validation() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_request_agent_connected(&mailbox, true);
+  control_mailbox_events_t events{};
+  assert(control_mailbox_take_events(&mailbox, &events));
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+
+  control_mailbox_config_request_t invalid = make_mode_request(0U, 1U, 0U);
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+  assert(mailbox.config_session_count == 1U); // 会话门优先归因
+  assert(mailbox.config_invalid_count == 0U); // 不重复计数
+  assert(mailbox.config_overflow_count == 0U);
+}
+
+// 身份绑定 FIFO：非法输入拒绝、往返、满拒、断链不清（绑定是身份事实）。
+static void test_bind_fifo_persists_across_disconnect() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  assert(!control_mailbox_submit_bind(&mailbox, 0U, "vaxor_2550")); // id==0
+  assert(!control_mailbox_submit_bind(&mailbox, 5U, ""));           // 空名
+  char long_name[CONTROL_MAILBOX_BIND_NAME_CAPACITY + 1U] = {0};
+  memset(long_name, 'a', sizeof(long_name) - 1U);
+  assert(!control_mailbox_submit_bind(&mailbox, 5U, long_name)); // 超长
+
+  for (uint16_t id = 1U; id <= CONTROL_MAILBOX_BIND_QUEUE_CAPACITY; ++id) {
+    assert(control_mailbox_submit_bind(&mailbox, id, "vaxor_2550"));
+  }
+  assert(!control_mailbox_submit_bind(&mailbox, 9U, "vaxor_2550")); // 满拒
+
+  // 断链清命令与配置，但绑定保留（重连无需重发）。
+  control_mailbox_request_agent_connected(&mailbox, false);
+  control_mailbox_events_t events{};
+  (void)control_mailbox_take_events(&mailbox, &events);
+  control_command_snapshot_t command_out{};
+  assert(!control_mailbox_take_command(&mailbox, &command_out));
+  control_mailbox_config_request_t config_out{};
+  assert(!control_mailbox_take_config(&mailbox, &config_out));
+
+  for (uint16_t id = 1U; id <= CONTROL_MAILBOX_BIND_QUEUE_CAPACITY; ++id) {
+    control_mailbox_bind_request_t bind_out{};
+    assert(control_mailbox_take_bind(&mailbox, &bind_out));
+    assert(bind_out.motor_id == id);
+    assert(strcmp(bind_out.model_name, "vaxor_2550") == 0);
+  }
+  control_mailbox_bind_request_t bind_out{};
+  assert(!control_mailbox_take_bind(&mailbox, &bind_out));
+}
+
 int main() {
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
@@ -328,5 +383,7 @@ int main() {
   test_command_gate_rejections_are_counted();
   test_session_edge_matrix();
   test_config_set_enable_queues();
+  test_config_gate_precedes_validation();
+  test_bind_fifo_persists_across_disconnect();
   return 0;
 }

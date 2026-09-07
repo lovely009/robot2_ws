@@ -14,6 +14,7 @@ extern "C" {
 #define MOTOR_CONTROL_P0_NONE 0U
 #define MOTOR_CONTROL_P0_SOFT_STOP 1U
 #define MOTOR_CONTROL_P0_DISABLE 2U
+#define MOTOR_CONTROL_P0_ENABLE 3U // 使能帧亦为 P0（审查 C2/4a）
 
 // 追加事件（环满丢最旧并计数——保最新状态，ARD §18 精神；tick 为 MCU 单调时基）。
 void motor_control_push_event(motor_control_context_t *ctx, uint32_t now_ms,

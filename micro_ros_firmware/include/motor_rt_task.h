@@ -39,6 +39,9 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
 
 // 提交一条低频配置请求（有界 FIFO，不覆盖已入队请求；mailbox 请求类型）。
 bool motor_rt_submit_config(const control_mailbox_config_request_t *request);
+// 身份绑定请求（TBD-PROFILE-01 过渡通道）：入 mailbox bind FIFO，控制边界
+// 转发内核按名绑定；结果经 motor_events 的 PROFILE_* 事件回告。
+bool motor_rt_submit_bind(uint16_t motor_id, const char *model_name);
 
 // 授权/会话状态请求（电平；内核经任务边界沿同步）。
 void motor_rt_request_authorization(bool authorized);

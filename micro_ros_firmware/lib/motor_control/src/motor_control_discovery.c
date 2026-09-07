@@ -39,6 +39,10 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   entry->enable_pending = false;
   entry->has_target = false;
   entry->motion_authorized = false;
+  // policy_enable 一并冻结（审查 M1）：全局 set_authorization(true) 会重立
+  // motion_authorized，若 policy_enable 残留 true，锁存清除后仅重发全局授权
+  // + 新快照即自动复运动——违反 ARD §36「失败不自动恢复运动授权」。
+  entry->policy_enable = false;
   entry->tx_active = false; // 冲突与撤权/离线的终结策略一致：事务不再有意义
   entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
   entry->unified_fault_code = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
@@ -154,7 +158,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
   }
 
   // 厂家故障：置位 → FAULT 禁运动 + P0 失能；清除 → 回 READY_DISABLED
-  // （重新使能链路，目标已清）。恢复规则细节待 TBD 关闭，此处为最小语义。
+  // （重新使能链路，目标已清；policy_enable 已随锁存冻结，恢复必须显式
+  // SET_ENABLE(true)，ARD §36）。恢复规则细节待 TBD 关闭，此处为最小语义。
   if (measured.fault_active) {
     entry->vendor_fault_code =
         measured.vendor_fault_code != 0U ? measured.vendor_fault_code : 1U;
@@ -181,6 +186,9 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       entry->enable_pending = false;
       entry->has_target = false;
       entry->motion_authorized = false;
+      // policy_enable 一并冻结（审查 M1，ARD §36）：故障清除后不得仅凭全局
+      // 再授权 + 新快照自动复运动，必须显式 SET_ENABLE(true)。
+      entry->policy_enable = false;
       entry->tx_active = false;
       entry->last_failure_reason = MOTOR_CONTROL_FAULT_VENDOR;
       motor_control_push_event(ctx, frame->rx_tick_ms, MOTOR_CONTROL_EVENT_FAULT,

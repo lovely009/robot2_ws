@@ -1706,6 +1706,64 @@ static void test_fault_recovery_requires_reauth() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
+// M1：故障/冲突锁存必须冻结 policy_enable。全局 set_authorization(true) 会
+// 重立全部表项 motion_authorized，若 policy_enable 残留 true，故障清除后仅
+// 重发全局授权 + 新快照即自动复运动——违反 ARD §36「失败不自动恢复」。
+// 修复后：撤权→再授权 + 新快照 ⇒ 0 运动帧；显式 SET_ENABLE(true) 才恢复。
+static void test_fault_recovery_no_motion_without_explicit_enable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 7, "vaxor_2530", 100);
+  motor_control_command_snapshot_t s = make_snapshot(1, 110);
+  snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 115));
+  motor_control_service(&ctx, 120);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 故障锁存 → 厂商故障位清零 → READY_DISABLED。
+  motor_protocol_raw_frame_t faulted = vaxor_status(7, 0x12345678, 150);
+  motor_control_on_raw_frame(&ctx, &faulted);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_FAULT);
+  motor_protocol_raw_frame_t cleared = vaxor_status(7, 0, 160);
+  motor_control_on_raw_frame(&ctx, &cleared);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 撤权 → 再授权（全局重立 motion_authorized）+ 新快照：修复前 policy_enable
+  // 残留 true → 运动自动恢复（缺陷路径）；修复后必须 0 帧。
+  assert(motor_control_set_authorization(&ctx, false, 170));
+  assert(motor_control_set_authorization(&ctx, true, 175));
+  motor_control_command_snapshot_t s2 = make_snapshot(2, 180);
+  snapshot_add(&s2, 7, 0.2f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 185));
+  motor_control_service(&ctx, 190);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 0); // 无使能帧、无 MIT 帧：policy_enable 冻结生效
+
+  // 显式 SET_ENABLE(true) → 快照恢复运动。
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 21U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  assert(motor_control_submit_config(&ctx, &enable, 200));
+  motor_control_command_snapshot_t s3 = make_snapshot(3, 210);
+  snapshot_add(&s3, 7, 0.3f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s3, 215));
+  motor_control_service(&ctx, 220);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 冲突锁存同样冻结 policy_enable：同 node 换协议（vaxor→creb）即冲突。
+  motor_protocol_raw_frame_t cross = creb_feedback(7, 230);
+  motor_control_on_raw_frame(&ctx, &cross);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(!entry_of(&ctx, 7)->policy_enable);
+}
+
 // 软停帧编码失败（M2）：与失能路径同语义——挂起 p0_pending 由 service
 // 重试；重试仍失败则计数并放弃（不静默丢安全帧）。
 static bool mock_encode_soft_stop_fail(const motor_protocol_model_profile_t *p,
@@ -1967,6 +2025,7 @@ static void run_all_tests() {
   test_set_mode_gating_on_unidentified();
   test_policy_enable_disables_and_arms();
   test_fault_recovery_requires_reauth();
+  test_fault_recovery_no_motion_without_explicit_enable();
   test_soft_stop_encode_failure_pends_retry();
   test_tx_slot_maps_entry_index();
   test_p0_tx_slot_on_soft_stop_and_disable();

@@ -351,6 +351,47 @@ static void test_creb_encode_mit_command() {
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
+// 速度单位契约钉死（审查 H2）：命令侧关节 rad/s 直通 π 上限 12 位对称量化
+// （不乘 gear），反馈侧电机侧 rpm ÷gear。两侧口径若混淆——命令误乘 gear=101
+// 会满码饱和失真——由「非饱和」断言当场抓获。
+static void test_creb_velocity_unit_contract() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("creb_r58_101", &profile));
+
+  motor_protocol_tx_frame_t out = {};
+  motor_protocol_control_intent_t intent = {};
+  intent.kp = 0.0f;
+  intent.kd = 0.0f;
+
+  // ±2.0 rad/s 落在量化区间内部：非饱和即自证命令侧未乘 gear（×101 会双双
+  // 饱和到满码/零码），正负码关于中点对称（12 位对称量化）。
+  intent.velocity_rad_s = 2.0f;
+  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  const uint32_t code_pos = ((uint32_t)out.data[3] << 4) | (out.data[4] >> 4);
+  intent.velocity_rad_s = -2.0f;
+  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  const uint32_t code_neg = ((uint32_t)out.data[3] << 4) | (out.data[4] >> 4);
+  assert(code_pos > 0U && code_pos < 4095U);
+  assert(code_neg > 0U && code_neg < 4095U);
+  assert(code_pos + code_neg == 4095U || code_pos + code_neg == 4094U);
+
+  // 上限语义：超出 Profile π 即饱和（钉死「上限=π」而非任何 ×gear 放大限）。
+  intent.velocity_rad_s = 10.0f;
+  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(((uint32_t)out.data[3] << 4) | (out.data[4] >> 4) == 0xFFFU);
+  intent.velocity_rad_s = -10.0f;
+  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(((uint32_t)out.data[3] << 4) | (out.data[4] >> 4) == 0x000U);
+
+  // 反馈分向复断言：1200 rpm（电机侧）→ ÷101 → 关节侧 rad/s。
+  motor_protocol_raw_frame_t frame =
+      creb_feedback(3, 1820, 1200, 2000, 0x00, 705);
+  motor_protocol_measured_state_t measured = {};
+  assert(motor_protocol_creb_adapter.decode_frame(profile, 3, &frame, &measured));
+  assert(fabs(measured.velocity_rad_s - (1200.0 * 2.0 * M_PI / 60.0) / 101.0) <
+         1e-4);
+}
+
 // 使能/失能帧：中性目标 + 控制字使能位（0xcc 使能 / 0x0c 失能）。
 static void test_creb_enable_disable_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
@@ -478,6 +519,7 @@ int main() {
   test_vaxor_config_mode_transaction_stages();
   test_creb_decode_feedback_converts_si();
   test_creb_encode_mit_command();
+  test_creb_velocity_unit_contract();
   test_creb_enable_disable_frames();
   test_creb_encode_soft_stop();
   test_creb_encode_discovery_sync();

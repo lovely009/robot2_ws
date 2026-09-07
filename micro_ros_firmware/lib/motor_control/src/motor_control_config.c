@@ -26,8 +26,9 @@
 // 事务收尾与步进
 // ---------------------------------------------------------------------------
 
-static void finish_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
-                      uint16_t result, uint32_t now_ms) {
+void motor_control_finish_tx(motor_control_context_t *ctx,
+                             motor_control_entry_t *entry, uint16_t result,
+                             uint32_t now_ms) {
   entry->tx_active = false;
   entry->tx_awaiting = false;
   // 模式事务驱动过厂家使能序列（vaxor stop/start）：无论成败，使能序列
@@ -41,6 +42,8 @@ static void finish_tx(motor_control_context_t *ctx, motor_control_entry_t *entry
                            entry->motor_id, entry->bus_index, result,
                            entry->tx_request_id);
 }
+// 注：本函数亦被撤权/离线/冲突/故障四条中止路径复用（UNCONFIRMED，审查
+// M2）——事务在哪些路径上都必须收敛到终态，上层请求不得悬挂。
 
 // 事务成功收尾：无确认手段的协议不得谎报 OK（ARD §20.5 / 禁止项 9）。
 static void finish_tx_success(motor_control_context_t *ctx,
@@ -49,7 +52,7 @@ static void finish_tx_success(motor_control_context_t *ctx,
       entry->adapter != NULL && entry->adapter->config_verify_required
           ? (uint16_t)MOTOR_PROTOCOL_CONFIG_UNCONFIRMED
           : (uint16_t)MOTOR_PROTOCOL_CONFIG_OK;
-  finish_tx(ctx, entry, result, now_ms);
+  motor_control_finish_tx(ctx, entry, result, now_ms);
 }
 
 // 超时/重试判定先行，随后至多推进一个阶段（跨节拍步进，ARD §20.6）。
@@ -69,7 +72,7 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     entry->tx_retries++;
     if (entry->tx_retries > 2U) {
-      finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_TIMEOUT, now_ms);
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_TIMEOUT, now_ms);
       continue;
     }
     entry->tx_awaiting = false; // 下方发送循环重发本阶段
@@ -83,13 +86,13 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     const motor_protocol_adapter_t *adapter = entry->adapter;
     if (adapter == NULL) {
-      finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_DEVICE_ERROR, now_ms);
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_DEVICE_ERROR, now_ms);
       continue;
     }
     motor_protocol_config_stage_info_t info = {0};
     if (adapter->config_stage_info == NULL ||
         !adapter->config_stage_info(entry->tx_stage, &entry->tx_request, &info)) {
-      finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_DEVICE_ERROR, now_ms);
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_DEVICE_ERROR, now_ms);
       continue;
     }
     motor_protocol_tx_frame_t frame = {0};
@@ -150,13 +153,14 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
       entry->tx_awaiting = false; // 读回不一致 → 重发本阶段（≤2 次）
       if (entry->tx_retries > 2U) {
         // 读回核验不一致：不得返回 OK（禁止项 9）→ UNCONFIRMED。
-        finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                  frame->rx_tick_ms);
+        motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                                frame->rx_tick_ms);
       }
       return true;
     case MOTOR_PROTOCOL_STAGE_FAIL:
     default:
-      finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED, frame->rx_tick_ms);
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                              frame->rx_tick_ms);
       return true;
   }
 }

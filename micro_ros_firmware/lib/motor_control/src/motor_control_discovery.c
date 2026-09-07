@@ -43,7 +43,12 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   // motion_authorized，若 policy_enable 残留 true，锁存清除后仅重发全局授权
   // + 新快照即自动复运动——违反 ARD §36「失败不自动恢复运动授权」。
   entry->policy_enable = false;
-  entry->tx_active = false; // 冲突与撤权/离线的终结策略一致：事务不再有意义
+  // 中止进行中的配置事务：回 UNCONFIRMED 终态（审查 M2），与撤权/离线的
+  // 终结策略一致——事务不再有意义但必须收敛。
+  if (entry->tx_active) {
+    motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                            now_ms);
+  }
   entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
   entry->unified_fault_code = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
@@ -189,7 +194,11 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       // policy_enable 一并冻结（审查 M1，ARD §36）：故障清除后不得仅凭全局
       // 再授权 + 新快照自动复运动，必须显式 SET_ENABLE(true)。
       entry->policy_enable = false;
-      entry->tx_active = false;
+      // 中止进行中的配置事务：回 UNCONFIRMED 终态（审查 M2）。
+      if (entry->tx_active) {
+        motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                                frame->rx_tick_ms);
+      }
       entry->last_failure_reason = MOTOR_CONTROL_FAULT_VENDOR;
       motor_control_push_event(ctx, frame->rx_tick_ms, MOTOR_CONTROL_EVENT_FAULT,
                                entry->motor_id, entry->bus_index,

@@ -207,7 +207,11 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     entry->enable_pending = false;
     entry->has_target = false;
     entry->motion_authorized = false;
-    entry->tx_active = false; // 断链清配置事务（mailbox 同步清 config FIFO）
+    // 中止进行中的配置事务：回 UNCONFIRMED 终态（上层请求不悬挂，审查 M2）。
+    if (entry->tx_active) {
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                              now_ms);
+    }
     if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
@@ -693,7 +697,11 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     entry->enable_pending = false;
     entry->motion_authorized = false; // 逐电机授权冻结（§36）
     entry->policy_enable = false;     // 冻结为 false：恢复需显式重发 Enable
-    entry->tx_active = false;
+    // 中止进行中的配置事务：回 UNCONFIRMED 终态（上层请求不悬挂，审查 M2）。
+    if (entry->tx_active) {
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+                              now_ms);
+    }
     entry->unified_fault_code = MOTOR_CONTROL_FAULT_OFFLINE;
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_OFFLINE;
     ctx->require_new_snapshot = true; // 重连后旧授权/目标不复用（ARD §10.4）

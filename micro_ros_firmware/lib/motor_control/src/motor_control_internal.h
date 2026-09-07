@@ -58,6 +58,13 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
                                    const motor_protocol_raw_frame_t *frame);
 void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms);
 
+// 配置事务统一收尾（CONFIG_RESULT 终态回告，清理 tx_active/tx_awaiting）。
+// 除正常事务路径外，亦被撤权/离线/冲突/故障四条中止路径复用（UNCONFIRMED，
+// 审查 M2）——事务中止必须回终态，上层请求不得悬挂到自身超时。
+void motor_control_finish_tx(motor_control_context_t *ctx,
+                             motor_control_entry_t *entry, uint16_t result,
+                             uint32_t now_ms);
+
 #ifdef __cplusplus
 }
 #endif

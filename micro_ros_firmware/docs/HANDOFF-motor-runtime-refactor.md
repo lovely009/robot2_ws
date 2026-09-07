@@ -42,6 +42,37 @@
 `../micro_ros_agent/`（消息包所在真实源目录），再动 `ros2_ws/` 上层**。
 ② §7 台架验证（T1–T12）后 ADR 转 Accepted。
 
+### 2026-09-08 审查修复轮（1 blocker + 4 high + 5 medium，全部完成）
+
+27-agent 对抗审查（固件 + agent 两包）产出 49 findings，其中 10 项高置信缺陷
+经用户批准的 12 步计划修复完毕，每步独立 commit、双向验证（host 套件 +
+`pio run`）：
+
+| 级别 | 缺陷 | 修复 | commit |
+|---|---|---|---|
+| blocker B1 | ISR RX 帧时戳用 FreeRTOS tick，与内核 `millis()` 恒定偏移 ~1s → 上电即全员误判离线 | `can_bsp.c isr_now_ms()` 统一 `HAL_GetTick()` | 9912026 |
+| high H1 | 6 处 P0 组帧点零初始化 `tx_slot=0` → 回告重入队错挂表项 0 | 全部组帧点补 `motor_control_entry_index()` 表项索引 | 88f83ad |
+| high H2 | CREB 速度单位注释自相矛盾（×gear 与直通两说） | 文件头/encode 注释统一口径（命令=关节侧直通 / 反馈=电机侧 rpm÷gear）+ 契约钉死测试 | f9b99dd |
+| high H3 | 事件队列满队 memmove 丢错元素 + 生产侧裸写不互斥 | 抽纯 C SPSC 模块 `motor_event_relay`（满丢最旧 head 前移）+ 双侧临界区 | c0509d5 |
+| high H4 | `motor_rt_task.cpp` 零 host 测试（`test/host` 只从 `src/` 编译 `led_task.cpp`） | 未单独立项：H3 的纯 C 抽取使事件环逻辑可 host 测试（新增 `test_motor_event_relay` 目标） | c0509d5 |
+| medium M1 | 故障/冲突锁存清 `motion_authorized` 但残留 `policy_enable` → 全局再授权+新快照即自动复运动 | 两处锁存补 `policy_enable = false`（ARD §36） | 3d76d2e |
+| medium M2 | 撤权/离线/冲突/故障中止事务直接清 `tx_active` → 上层请求悬挂 | 四路径改 `finish_tx(CONFIG_UNCONFIRMED)` 终态收敛（消息契约冻结，ARD 七码无「中止」码，UNCONFIRMED 语义诚实） | 0ccceda |
+| medium M3 | MotorPolicy 三路请求复用同一 `request_id` → CONFIG_RESULT 无法关联 | `next_policy_request_id()` 独立自增，回绕跳过保留值 0 | 01d4a88 |
+| medium M4 | bind 未知名/设备未发现静默 `false` → MotorBind 结果回告缺失 | 两路径补 PROFILE_REJECTED 事件（reason=3，未发现 bus_index=0） | 9b63255 |
+| medium M5 | mailbox/内核配置枚举裸 cast 无编译期校验 | 固件 + host 双链 static_assert 逐值锁死（1/2/3/4） | 7307729 |
+
+配套与注记：
+
+- host 套件 10→11 目标（新增 `test_motor_event_relay`），11/11 全绿；每步均
+  `pio run` SUCCESS。
+- 步骤 0：既有 build fix 一并提交（c200df6，`_write` 空汇兜底 libmicroros
+  stdio 链接 + AGENTS 记录 stdio/消息缓存坑位）。
+- **bridge timer 20ms→10ms（100Hz，用户拍板）**：motion_states/IMU 快照发布
+  频率翻倍（5baf33d），USB CDC 上行流量 ~2×——带宽压力（消息缓存 guardrail、
+  executor 负载）留待 §7 台架 T1–T12 实测，必要时回退或分频 IMU。
+- 已知遗留（超出本轮范围）：`motor_rt_task.cpp` 的 bind by_name 转发仍为
+  `(void)` 尽力而为——失败可见性已由 M4 事件补齐，重试策略留待上层迁移时统一。
+
 
 ## 1. 先做什么
 

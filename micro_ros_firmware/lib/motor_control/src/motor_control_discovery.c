@@ -28,6 +28,7 @@ static void latch_config_conflict(motor_control_context_t *ctx,
     if (entry->adapter->encode_disable(entry->profile, entry->node,
                                        entry->bus_index, &frame)) {
       frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+      frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
       if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
         entry->p0_pending = true;
         entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;
@@ -168,6 +169,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
             entry->adapter->encode_disable(entry->profile, entry->node,
                                            entry->bus_index, &frame)) {
           frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+          frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
           if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
             entry->p0_pending = true;
             entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;

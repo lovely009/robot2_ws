@@ -142,6 +142,7 @@ static bool send_disable_p0(motor_control_context_t *ctx,
     return false;
   }
   frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+  frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
   entry->last_p0_kind = MOTOR_CONTROL_P0_DISABLE;
   if (motor_control_push_tx_p0(ctx, entry, &frame)) {
     return true;
@@ -562,6 +563,7 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
       if (entry->adapter->encode_soft_stop(entry->profile, entry->node,
                                            entry->bus_index, &frame)) {
         frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+        frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
         entry->last_p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
         if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
           entry->p0_pending = true;
@@ -637,6 +639,7 @@ static void service_p0_retries(motor_control_context_t *ctx) {
       continue;
     }
     frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+    frame.tx_slot = (uint16_t)i; // 循环变量即表项索引
     if (motor_control_push_tx(ctx, &frame)) {
       entry->p0_pending = false;
       entry->p0_kind = MOTOR_CONTROL_P0_NONE;

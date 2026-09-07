@@ -216,9 +216,9 @@ typedef struct {
   const motor_protocol_adapter_t *const *adapters;
   size_t adapter_count;
 
-  // 表项索引被 TX 桥引用为 P1 latest-wins 槽位（tx_slot，见
-  // motor_protocol_adapter.h）：只增不减是其稳定性前提——禁止实现表项
-  // 压缩/回收，否则必须同步重定义槽位映射。
+  // 表项索引被 TX 桥引用为 P1 latest-wins 槽位，并被 P0 回告重入队用于定位
+  // 表项（tx_slot，见 motor_protocol_adapter.h）：只增不减是其稳定性前提——
+  // 禁止实现表项压缩/回收，否则必须同步重定义槽位映射。
   motor_control_entry_t entries[MOTOR_CONTROL_MAX_MOTORS];
   size_t entry_count;
 

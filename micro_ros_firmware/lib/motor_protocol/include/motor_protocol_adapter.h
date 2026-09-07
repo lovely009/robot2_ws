@@ -70,8 +70,9 @@ typedef enum {
 typedef struct {
   uint8_t bus_index;
   motor_protocol_tx_class_t tx_class;
-  // P1 latest-wins 槽索引（= 内核注册表表项索引，只增不减故稳定；同总线
-  // 两电机必有不同索引）。P0/P2 为 FIFO，忽略此字段。
+  // 内核注册表表项索引（只增不减故稳定；同总线两电机必有不同索引）：
+  // P1 = latest-wins 槽位；P0 = 下游（调度器 FIFO 满）回告重入队按此定位
+  // 表项（审查 4a/H1）——组帧点必须填写；P2 = FIFO，忽略此字段。
   uint16_t tx_slot;
   uint32_t can_id;
   bool is_extended;

@@ -1782,6 +1782,146 @@ static void test_tx_slot_maps_entry_index() {
   assert(saw_mit_5 && saw_mit_6);
 }
 
+// H1：内核生成的软停/失能 P0 帧必须携带表项索引（tx_slot）——下游调度器
+// FIFO 满回告 motor_control_requeue_p0 按 tx_slot 定位表项，tx_slot 恒 0 会
+// 把 p0_pending 错挂表项 0。断言主体用表项索引 ≥1 的电机（motor 6 = entry 1）。
+static void test_p0_tx_slot_on_soft_stop_and_disable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2530", 100);
+  bring_vaxor_to_ready(&ctx, 6, "vaxor_2530", 100);
+  motor_control_command_snapshot_t s = make_snapshot(1, 110);
+  snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
+  snapshot_add(&s, 6, 0.2f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 115));
+  motor_control_service(&ctx, 120);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 空快照 → 双双软停：P0 软停帧 tx_slot 各归其位（vaxor 软停复用命令 CAN-ID）。
+  motor_control_command_snapshot_t empty = make_snapshot(2, 130);
+  assert(motor_control_apply_command_snapshot(&ctx, &empty, 135));
+  motor_control_service(&ctx, 140);
+  size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  bool saw_soft_5 = false;
+  bool saw_soft_6 = false;
+  for (size_t i = 0; i < n; ++i) {
+    if (frames[i].tx_class != MOTOR_PROTOCOL_TX_CLASS_P0) {
+      continue;
+    }
+    if (frames[i].can_id == motor_protocol_vaxor_command_id(6)) {
+      assert(frames[i].tx_slot == 1);
+      saw_soft_6 = true;
+    }
+    if (frames[i].can_id == motor_protocol_vaxor_command_id(5)) {
+      assert(frames[i].tx_slot == 0);
+      saw_soft_5 = true;
+    }
+  }
+  assert(saw_soft_5 && saw_soft_6);
+
+  // 撤权 → 双双失能：P0 失能帧 tx_slot 各归其位（回告重入队按此定位表项）。
+  // vaxor 失能帧走 encode_control → control CAN-ID（0x502+4n），与软停的
+  // 命令 CAN-ID（0x501+4n）不同——两侧都要按各自 ID 断言 tx_slot。
+  assert(motor_control_set_authorization(&ctx, false, 150));
+  n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  bool saw_dis_5 = false;
+  bool saw_dis_6 = false;
+  for (size_t i = 0; i < n; ++i) {
+    if (frames[i].tx_class != MOTOR_PROTOCOL_TX_CLASS_P0) {
+      continue;
+    }
+    if (frames[i].can_id == motor_protocol_vaxor_control_id(6)) {
+      assert(frames[i].tx_slot == 1);
+      saw_dis_6 = true;
+    }
+    if (frames[i].can_id == motor_protocol_vaxor_control_id(5)) {
+      assert(frames[i].tx_slot == 0);
+      saw_dis_5 = true;
+    }
+  }
+  assert(saw_dis_5 && saw_dis_6);
+}
+
+// H1（重编码路径）：软停编码首拍失败挂起 → service 重编码补发，重编码帧同样
+// 必须携带正确 tx_slot（service_p0_retries 曾恒 0）。两台 mock 电机（node 2/3
+// = 表项 0/1），断言主体是表项 1。
+static bool g_soft_stop_fail_countdown = false;
+
+static bool mock_encode_soft_stop_fail_once(const motor_protocol_model_profile_t *p,
+                                            uint16_t node, uint8_t bus,
+                                            motor_protocol_tx_frame_t *out) {
+  if (g_soft_stop_fail_countdown) {
+    g_soft_stop_fail_countdown = false;
+    (void)p; (void)node; (void)bus; (void)out;
+    return false;
+  }
+  memset(out, 0, sizeof(*out));
+  out->bus_index = bus;
+  out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P1; // 内核会覆写为 P0
+  out->can_id = 0x620U + node;
+  out->size = 1U;
+  return true;
+}
+
+static void test_p0_tx_slot_on_retry_reencode() {
+  motor_control_context_t ctx;
+  motor_protocol_adapter_t adapter = g_mock_adapter;
+  adapter.encode_soft_stop = mock_encode_soft_stop_fail_once;
+  motor_protocol_model_profile_t profile = g_mock_profile;
+  profile.protocol = &adapter;
+  const motor_protocol_adapter_t *adapters[1] = {&adapter};
+  motor_control_init(&ctx, adapters, 1);
+
+  // 两台 mock 电机：node 2 → 表项 0，node 3 → 表项 1（断言主体）。
+  for (uint16_t node = 2; node <= 3; ++node) {
+    motor_protocol_raw_frame_t f = {};
+    f.bus_index = 0;
+    f.can_id = 0x600U + node;
+    f.dlc = 4U;
+    f.rx_tick_ms = 100;
+    f.data[0] = 1U;
+    motor_control_on_raw_frame(&ctx, &f);
+    assert(motor_control_bind_profile_ptr(&ctx, node, &profile, 100));
+  }
+  motor_control_set_agent_connected(&ctx, true, 100);
+  assert(motor_control_set_authorization(&ctx, true, 100));
+  motor_control_command_snapshot_t s = make_snapshot(1, 110);
+  snapshot_add(&s, 2, 0.1f, 0.0f, 0.0f);
+  snapshot_add(&s, 3, 0.2f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 115));
+  motor_control_service(&ctx, 120);
+  assert(entry_of(&ctx, 2)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  assert(entry_of(&ctx, 3)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 首拍失败：空快照软停，node 2 编码失败挂起，node 3 编码成功出帧。
+  g_soft_stop_fail_countdown = true;
+  motor_control_command_snapshot_t empty = make_snapshot(2, 130);
+  assert(motor_control_apply_command_snapshot(&ctx, &empty, 135));
+  assert(entry_of(&ctx, 2)->p0_pending);
+  motor_control_service(&ctx, 140); // 重编码 node 2 的挂起软停帧
+  size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  bool saw_reencode_2 = false;
+  bool saw_first_3 = false;
+  for (size_t i = 0; i < n; ++i) {
+    if (frames[i].tx_class != MOTOR_PROTOCOL_TX_CLASS_P0) {
+      continue;
+    }
+    if (frames[i].can_id == 0x620U + 3U) {
+      assert(frames[i].tx_slot == 1); // 首拍成功帧：表项 1（pre-fix 恒 0）
+      saw_first_3 = true;
+    }
+    if (frames[i].can_id == 0x620U + 2U) {
+      assert(frames[i].tx_slot == 0); // 重编码补发帧：表项 0
+      saw_reencode_2 = true;
+    }
+  }
+  assert(saw_first_3 && saw_reencode_2);
+  assert(!entry_of(&ctx, 2)->p0_pending);
+}
+
 
 static void run_all_tests() {
   test_init_starts_unauthorized_and_empty();
@@ -1829,6 +1969,8 @@ static void run_all_tests() {
   test_fault_recovery_requires_reauth();
   test_soft_stop_encode_failure_pends_retry();
   test_tx_slot_maps_entry_index();
+  test_p0_tx_slot_on_soft_stop_and_disable();
+  test_p0_tx_slot_on_retry_reencode();
   test_creb_offline_by_heartbeat_loss();
 }
 

@@ -10,6 +10,14 @@
 extern "C" {
 #endif
 
+// 表项索引（tx_slot 的取值来源）：依赖"表项只增不减"不变量（见
+// motor_control.h entries 注释）。P1 latest-wins 槽位与 P0 回告重入队
+// 均按此索引定位表项。
+static inline size_t motor_control_entry_index(
+    const motor_control_context_t *ctx, const motor_control_entry_t *entry) {
+  return (size_t)(entry - ctx->entries);
+}
+
 // P0 帧重试挂起类别（motor_control_entry_t::p0_kind）。
 #define MOTOR_CONTROL_P0_NONE 0U
 #define MOTOR_CONTROL_P0_SOFT_STOP 1U

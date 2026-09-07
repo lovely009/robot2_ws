@@ -7,8 +7,9 @@
 // 回收旧槽位；与 ARD §51.1 伪代码一致。旧 FreeRTOS 队列的 drop-oldest
 // 行为随队列一同移除）。
 //
-// 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms）与 is_brs 属性
-// （ARD §21.2）；bus_index 由 ISR 填写。
+// 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms，与内核 millis() 同一
+// HAL 计数器——见 can_bsp.c isr_now_ms）与 is_brs 属性（ARD §21.2）；
+// bus_index 由 ISR 填写。
 
 #ifndef CAN_RX_RING_H
 #define CAN_RX_RING_H
@@ -32,7 +33,8 @@ typedef struct {
   bool is_fd;
   bool is_brs;
   uint8_t dlc;
-  uint32_t rx_tick_ms; // ISR 盖章：MCU 单调时基毫秒
+  uint32_t rx_tick_ms; // ISR 盖章：HAL/millis 同一单调时基毫秒（勿用 FreeRTOS
+                       // tick——其起点为调度器启动，与 millis 存在启动期恒定偏移）
   uint8_t data[CAN_RX_FRAME_BYTES];
 } can_rx_frame_t;
 

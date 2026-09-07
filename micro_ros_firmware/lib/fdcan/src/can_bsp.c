@@ -7,10 +7,8 @@
 // 旧 FreeRTOS 队列 RX 与 poll 收发 API（fdcanx_receive*/send_data）已删除，
 // CAN 调试桥不得复活为第二个 RX 消费者（§28.1）。
 
-#include <STM32FreeRTOS.h>
-
 #include "can_bsp.h"
-#include "stm32_def.h" // Error_Handler 宏（_Error_Handler(file, line)）
+#include "stm32_def.h" // Error_Handler 宏（_Error_Handler(file, line)）+ HAL_GetTick
 
 #include <string.h>
 
@@ -172,9 +170,12 @@ static int8_t can_bus_index(FDCAN_HandleTypeDef *hfdcan) {
   return -1;
 }
 
-// 单调时基毫秒（ISR 上下文安全）：FreeRTOS tick 经 portTICK_PERIOD_MS 折算。
+// 单调时基毫秒（ISR 上下文安全）：HAL_GetTick 读 32 位对齐 volatile uwTick，
+// 单加载无读改写，Cortex-M7 上原子。必须与内核 millis()（= HAL_GetTick）同基——
+// 内核用帧时戳与 now_ms 做帧龄比较（离线判定/状态新鲜度），两侧若不同基
+// （如 FreeRTOS tick，起点为调度器启动）会引入启动期恒定偏移导致误判。
 static uint32_t isr_now_ms(void) {
-  return (uint32_t)xTaskGetTickCountFromISR() * (uint32_t)portTICK_PERIOD_MS;
+  return HAL_GetTick();
 }
 
 static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,

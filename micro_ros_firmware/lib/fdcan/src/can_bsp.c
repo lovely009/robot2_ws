@@ -4,8 +4,7 @@
 //    不解码、不建运行时状态；
 //  - TX：每总线 can_tx_scheduler，pump 结果经 can_bsp_submit_tx 进硬件 FIFO；
 //  - 统计：ring/调度器自带计数 + 本层硬件级错误计数（ARD §32.1）。
-// 旧 FreeRTOS 队列 RX 与 poll 收发 API（fdcanx_receive*/send_data）已删除，
-// CAN 调试桥不得复活为第二个 RX 消费者（§28.1）。
+//  - 所有权：motor_rt_task 是 RX ring 唯一消费者，调试桥不得形成第二条 RX 路径。
 
 #include "can_bsp.h"
 #include "stm32_def.h" // Error_Handler 宏（_Error_Handler(file, line)）+ HAL_GetTick

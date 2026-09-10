@@ -2,8 +2,8 @@
 
 micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。作为 ROS 2 侧的
 桥接节点，与 MCU 固件（`../micro_ros_firmware/`，见其 README：STM32H723VGT6 + serial
-传输 + CAN1 桥固件）通过 **serial（USB CDC）** 传输通信，后期与 `../ros2_ws`
-电机栈同域（domain 0）互通。
+传输 + BMI088/三路 FDCAN 电机运行时）通过 **serial（USB CDC）** 传输通信，并与
+`../ros2_ws` 电机栈同域（domain 0）互通。
 
 ## 源码来源（humble 分支，快照提交）
 
@@ -11,7 +11,7 @@ micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。�
 |---|---|---|
 | `micro_ros_msgs` | https://github.com/micro-ROS/micro_ros_msgs.git | `humble` |
 | `micro-ROS-Agent` | https://github.com/micro-ROS/micro-ROS-Agent.git | `humble` |
-| `can_bridge_msgs` | 本地自定义（CANFrame + MotorCommand） | 与固件 `extra_packages/` 同一定义 |
+| `can_bridge_msgs` | 本地自定义（13 个 ID 化有界消息） | 固件 `extra_packages/` 以符号链接复用 |
 
 > 说明：官方仓库已由 `micro_ros_agent` 更名为 `micro-ROS-Agent`；官方 apt 仓库
 > **没有** `ros-humble-micro-ros-agent`，故采用源码构建。第三方 `.git` 已移除，

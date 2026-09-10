@@ -6,7 +6,7 @@ STM32H723VGT6 上的 **micro-ROS 固件**（PlatformIO + STM32duino + FreeRTOS�
 
 当前业务为 **BMI088 IMU** 与 **三路 FDCAN**，底层功能移植自官方
 `/home/ly/文档/dm-mc02-master/例程/CtrBoard-H7_IMU_TempCtrl`：
-SPI2 + DMA1 配置、POWER_5V/CS/EXTI、TIM3 加热与温度 PID 均保留；
+SPI2 阻塞传输、POWER_5V/CS/EXTI、TIM3 加热与温度 PID 均保留；
 Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例程内容。
 三路 FDCAN（FDCAN1/2/3）移植自
 `/home/ly/文档/dm-mc02-master/例程/CtrBoard-H7_FDCAN`：FD + BRS、标称
@@ -32,7 +32,7 @@ OFFLINE = 心跳丢失 100ms。上层迁移与台架验证进度见
 | USB 引脚 | **PA11=USB_DM / PA12=USB_DP** | H723 的 USB OTG HS 内嵌 PHY（FS 模式）固定引脚 |
 | USB 构建宏 | `PIO_FRAMEWORK_ARDUINO_ENABLE_CDC` + `PIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE` | H723 无独立 `USB_OTG_FS`，须以 FS 模式 + 内嵌 PHY 使用 |
 | IMU 通信 | **SPI2**（PB13=SCK / PC1=MOSI / PC2=MISO，7.5MHz） | 官方 TempCtrl 同源 |
-| IMU DMA | **DMA1_Stream0(RX) / Stream1(TX)** 保留配置并链接 | 官方生成代码同构；收发仍走有界阻塞 HAL，每字节最多 2ms |
+| IMU 传输 | **SPI2 阻塞收发，不使用 DMA** | 单次寄存器访问仅 8 Byte；每字节 HAL timeout 2ms，失败锁存至当前操作结束 |
 | IMU 采样触发 | **ACC_INT=PE10 EXTI + FreeRTOS 二值信号量，ODR=200Hz** | 官方 TempCtrl 由加速度计 DRDY 唤醒；本工程从 800Hz 降至 200Hz |
 | 加热 PWM | **TIM3_CH4=PB1**（500Hz），使用 Arduino `HardwareTimer` | 官方 PSC=24-1 / ARR=10000-1 语义 |
 | 状态 LED | **PA7（WS2812，SPI6 MOSI 驱动）** | 板载 1 颗 RGB 灯珠 |
@@ -78,11 +78,11 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `motor_bridge` | ID 化命令/Policy/Config 订阅 + motion/status/topology/events/config_result 发布 |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 10ms 控制边界，内核唯一调用者 |
 | `lib/fdcan` | FDCAN 初始化/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度/硬件统计 |
-| `lib/imu` | BMI088 驱动/通信层、SPI2 DMA、Mahony/SI 聚合（单一 IMU 域） |
+| `lib/imu` | BMI088 驱动/通信层、SPI2 阻塞传输、Mahony/SI 聚合（单一 IMU 域） |
 | `lib/motor_protocol` | adapter 接缝 + vaxor/CREB 编解码（厂家字节唯一归属地） |
 | `lib/motor_control` | ID 驱动运行时内核：注册表/型号目录/九态生命周期/安全级联/配置事务 |
 | `lib/control_mailbox` | ID 完整命令快照、低频配置 FIFO 与连接/授权边沿（纯逻辑） |
-| `lib/dma` | 共享 DMA1、SPI2 MSP 配置与 DMA IRQ 转发（当前由 IMU 使用） |
+| `lib/dma` | DMA1/BDMA 控制器级资源（时钟、NVIC、占用登记）；设备配置由各设备库自持 |
 | `lib/ws2812` | 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7） |
 
 数据流：FDCAN1/2/3 ISR → 每总线 SPSC ring → `motor_rt_task` 有界 drain 并经
@@ -113,12 +113,12 @@ micro_ros_firmware/
 │   ├── sensor_task.h          # 传感器任务接口（sensor_task_start）
 │   └── motor_rt_task.h        # 电机实时任务接口（motor_rt_task_start）
 ├── lib/                       # 板级/协议库（PlatformIO 自动发现）
-│   ├── imu/                   # BMI088 驱动 + SPI2 DMA + 通信层 + Mahony + SI 聚合
+│   ├── imu/                   # BMI088 驱动 + SPI2 阻塞传输 + Mahony + SI 聚合
 │   ├── fdcan/                 # 三路 FDCAN/中断回调/SPSC RX ring/P0-P1-P2 TX 调度
 │   ├── motor_control/         # ID 驱动运行时内核（host 可测）
 │   ├── control_mailbox/       # 固定容量 mailbox 与边沿锁存（host 可测）
 │   ├── motor_protocol/        # adapter 接缝 + vaxor/CREB 编解码（纯逻辑）
-│   ├── dma/                   # 共享 DMA1：SPI2 配置 + HAL_SPI_MspInit/IRQ 转发
+│   ├── dma/                   # DMA1/BDMA 控制器级资源（设备配置由各库自持）
 │   ├── w25q64/                # OCTOSPI2 W25Q64 驱动（保留，未接入启动路径）
 │   └── ws2812/                # WS2812 彩灯驱动（SPI6 MOSI=PA7）
 └── src/
@@ -289,16 +289,15 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 
 ## 已知问题与后续
 
-- DMA 仅保留官方配置与中断转发，BMI088 收发仍走阻塞
-  `HAL_SPI_TransmitReceive`；若后续改为 DMA 传输，需在半完成回调中
-  给 IMU 任务补一次醒信号。
+- BMI088 收发固定走阻塞 `HAL_SPI_TransmitReceive`，当前不占用 DMA stream；
+  若后续切换 DMA，设备句柄/回调仍归 `lib/imu`，控制器资源须向 `lib/dma` 登记。
 - 无 agent 时节点不注册、固件在 `kWaitAgent` 轮询，属正常。
 - `loop()` 被 STM32FreeRTOS 的 idle hook 调用，只能放非阻塞代码。
 - 官方 `0x520` 测试帧循环保留在 `ENABLE_CANFD_DEMO_LOOP=1` 下，默认关闭；
   开启后总线无对端 ACK 时 TX FIFO 会积压（`fdcanx_send_data` 返回失败）。
-- 电机运行时已完成 ID 驱动化（ARD-0007，进度见 HANDOFF §0）；上层
-  `motor_hardware_interface` 迁移暂缓（`ros2_ws/` 先不动），5 个旧
-  joint_name 消息标废弃保留至迁移完成后删除。
+- 电机运行时已完成 ID 驱动化（ARD-0007，进度见 HANDOFF §0）；13 个
+  `can_bridge_msgs` 消息由 `../micro_ros_agent/src/can_bridge_msgs` 唯一维护，
+  固件侧只通过 `extra_packages/can_bridge_msgs` 符号链接复用。
 - CREB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、
   力矩 `±11/±45 Nm`，必须与真机参数设置页一致；`motor_rt_task` 每 10ms 发送
   `0x080` SYNC 维持设备 20ms 状态心跳（总线检测）。

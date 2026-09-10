@@ -12,6 +12,7 @@
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 #include "stm32h7xx_hal.h"
+#include "imu_spi2_transport.h"  // imu_spi2_board_init：弱符号陷阱下的显式板级初始化
 
 #define POWER_5V_PORT GPIOC
 #define POWER_5V_PIN GPIO_PIN_15
@@ -54,7 +55,10 @@ void BMI088_GPIO_init(void) {
 void BMI088_com_init(void) {
   // 前置契约：任务层（sensor_task_start）已先经 lib/dma 完成 DMA1 时钟与
   // 流 NVIC（官方时序：DMA 先于 SPI2）。SPI2 引脚/DMA 流链接在本库
-  // imu_spi2_transport.c 的 HAL_SPI_MspInit 内完成。
+  // imu_spi2_transport.c 完成并须显式触发——HAL_SPI_MspInit 曾因弱符号
+  // 陷阱不被链接（SrcWrapper __weak 空体先满足引用，archive 成员不提取，
+  // SPI2EN 永不置位），回调仅作兜底（2026-09-08）。
+  imu_spi2_board_init();
   hspi_bmi088.Instance = SPI2;
   hspi_bmi088.Init.Mode = SPI_MODE_MASTER;
   hspi_bmi088.Init.Direction = SPI_DIRECTION_2LINES;

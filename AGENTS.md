@@ -13,7 +13,8 @@
 
 真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `rp`/`vaxor`）
 + `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_sim` +
-`robot_arm_gazebo`。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
+`robot_arm_gazebo`；`can_bridge_msgs` 提供固件/ROS 2 共用消息，`web_host` 提供
+rosbridge Web 上位机。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
 `motor_hardware_interface/config/motor_driver.yaml` 决定，增删改不修改 C++、launch
 或 controller 配置。
 

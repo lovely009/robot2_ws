@@ -13,9 +13,12 @@
 //     （项目级链接脚本 ldscript/stm32h723vgt6.ld；NOLOAD 段由本文件清零）。
 //   - 控制器级资源（BDMA/DMAMUX2 时钟、Channel0 NVIC）归 lib/dma 的
 //     MX_DMA_Init，由 main 板级初始化在 ws2812_init 之前调用（前置契约）。
-//   - 发送 = 单次 HAL_SPI_Transmit_DMA；完成经 BDMA_Channel0 IRQ（本文件
-//     自持 handler，HAL 在其中等 SPI 移位排空并置 READY）。不关中断——
-//     DMA 流不被任务/ISR 抢占打断，灯序与高优先级活动互不影响。
+//   - 发送 = 单次 HAL_SPI_Transmit_DMA；完成链两级，handler 均由本文件
+//     自持（与 lib/imu / lib/fdcan 同构）：BDMA_Channel0 IRQ 里 HAL 收完
+//     缓冲并使能 SPI EOT 中断，SPI6 EOT IRQ 里 HAL 清标志、置 READY。
+//     SPI6 侧缺失则 State 永久 BUSY_TX——首帧后 LED 冻结红灯（2026-09-08
+//     修复）。不关中断——DMA 流不被任务/ISR 抢占打断，灯序与高优先级
+//     活动互不影响。
 //   - 忙（上一帧未完）时 submit 返回 false，调用方下个周期重试。
 //   - cache/MPU（dma.h 政策声明位）：本工程未启用 cache（H723 无 D-cache），
 //     DMA 缓冲无需维护。
@@ -87,6 +90,11 @@ void ws2812_init(void) {
     Error_Handler();
   }
 
+  // 两级完成链第二级：SPI6 EOT 中断（handler 见文件尾）。优先级与 BDMA
+  // 同为 6，≥ FreeRTOS 可调用域边界（configLIBRARY_MAX_SYSCALL=5）。
+  HAL_NVIC_SetPriority(SPI6_IRQn, 6, 0);
+  HAL_NVIC_EnableIRQ(SPI6_IRQn);
+
   // .bdma_noinit 为 NOLOAD 段，startup 不清零：帧尾复位字节必须恒 0x00
   memset(g_ws2812_frame, 0, sizeof(g_ws2812_frame));
 }
@@ -106,8 +114,14 @@ bool ws2812_submit_rgb(uint8_t r, uint8_t g, uint8_t b) {
                               WS2812_FRAME_BYTES) == HAL_OK;
 }
 
-// BDMA 发送完成中断：HAL 在此等待 SPI 移位排空、置 READY。handler 归
-// 设备库自持（与 lib/imu / lib/fdcan 的回调同构）。
+// 发送完成中断两级链（handler 均归设备库自持，与 lib/imu / lib/fdcan
+// 的回调同构）：BDMA TC = HAL 收完缓冲、使能 EOT 中断；SPI6 EOT = HAL
+// 清 EOT/TXTF 标志、置 READY。缺任一级则链断（SPI6 侧缺失曾是 LED
+// 冻结红灯的根因——EOT 挂起无人清，submit 永远撞 BUSY_TX）。
 void BDMA_Channel0_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_spi6_tx);
+}
+
+void SPI6_IRQHandler(void) {
+  HAL_SPI_IRQHandler(&hspi6);
 }

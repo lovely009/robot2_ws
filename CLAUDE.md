@@ -4,15 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 这是什么
 
-ROS 2 Humble 工作空间（`dev` 开发分支），四个 ament 包：
+ROS 2 Humble 工作空间（`dev` 开发分支），`ros2_ws/` 下六个 ament 包：
 
+- `can_bridge_msgs` —— 固件与 ROS 2 共用的 ID 化有界消息定义
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
 - `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
 - `robot_arm_gazebo` —— UR5e 模型与 Gazebo 集成（URDF / world / controller / launch）
-- `micro_ros_firmware` —— STM32 控制板 micro-ROS 固件（PlatformIO，**非 ament 包**，见下节）
+- `web_host` —— rosbridge Web 上位机（姿态、IMU、电机状态与命令快照）
 
-分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 4 包）、
+另有两个独立工程区域：`micro_ros_firmware`（PlatformIO，非 ament 包）与
+`micro_ros_agent`（独立 colcon 工作区）。
+
+分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 6 包）、
 `dev-sim` 仿真线、`main` 仅发布。
 
 权威文档（修改代码前先读）：各包 `README.md`（`ros2_ws/src/<pkg>/README.md`）、
@@ -78,7 +82,7 @@ ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + casse
 
 ## 架构总览
 
-四包单向依赖，职责边界清晰：
+核心四个电机包单向依赖，职责边界清晰：
 
 ```
 motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2 适配）

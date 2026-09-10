@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot2 · Web 上位机</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <h1>Robot2 Web 上位机</h1>
+    </div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">未连接</span>
+      <input id="rosUrl" type="text" spellcheck="false" placeholder="ws://localhost:9090">
+      <button id="btnConnect">连接</button>
+      <button id="btnDisconnect" class="secondary">断开</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- IMU 姿态 -->
+    <section class="card" id="cardImu">
+      <h2>IMU 姿态 <span class="hz" id="imuHz">0 Hz</span></h2>
+      <div class="imu-layout">
+        <div class="attitude">
+          <div class="attitude-viewport">
+            <div class="attitude-ball" id="attBall">
+              <div class="att-sky"></div>
+              <div class="att-ground"></div>
+              <div class="att-horizon"></div>
+              <div class="att-marks"></div>
+            </div>
+            <div class="attitude-fixed"></div>
+          </div>
+          <div class="att-label">人工地平仪</div>
+        </div>
+        <div class="imu-numbers">
+          <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>
+          <div class="num-row"><span>Pitch</span><b id="valPitch">--</b></div>
+          <div class="num-row"><span>Yaw</span><b id="valYaw">--</b></div>
+          <div class="num-row"><span>温度</span><b id="valTemp">--</b></div>
+          <div class="num-row"><span>更新</span><b id="imuAge">--</b></div>
+        </div>
+      </div>
+      <canvas id="imuChart" height="120"></canvas>
+      <div class="legend">
+        <span class="lg lg-roll">Roll</span>
+        <span class="lg lg-pitch">Pitch</span>
+        <span class="lg lg-yaw">Yaw</span>
+      </div>
+    </section>
+
+    <!-- 系统状态 -->
+    <section class="card card-narrow" id="cardSys">
+      <h2>系统状态</h2>
+      <div class="num-row"><span>心跳计数</span><b id="hbCount">--</b></div>
+      <div class="num-row"><span>心跳年龄</span><b id="hbAge">--</b></div>
+      <div class="num-row"><span>IMU 温度</span><b id="tempAge">--</b></div>
+      <div class="status-note" id="sysNote">连接 rosbridge 后开始监控。</div>
+    </section>
+
+    <!-- 电机拓扑/状态表 -->
+    <section class="card card-wide" id="cardMotors">
+      <h2>电机状态 <span class="hz" id="motorHz"></span></h2>
+      <table class="motors">
+        <thead>
+          <tr>
+            <th>ID</th><th>在线</th><th>生命周期</th><th>温度°C</th><th>电流A</th>
+            <th>电压V</th><th>速度 rad/s</th><th>位置 rad</th><th>故障</th><th>测量年龄</th>
+          </tr>
+        </thead>
+        <tbody id="motorRows">
+          <tr class="empty"><td colspan="10">暂无数据（等待 /motor_status 与 /motor_motion_states）</td></tr>
+        </tbody>
+      </table>
+      <h2 class="sub">事件日志 <span class="muted">/motor_events</span></h2>
+      <ul class="events" id="eventLog"></ul>
+    </section>
+
+    <!-- 电机控制 -->
+    <section class="card card-wide" id="cardCtrl">
+      <h2>电机命令 <span class="muted">/motor_command · MotorCommandArray 快照</span></h2>
+      <p class="muted warn">
+        注意：快照语义 —— 快照中未出现的电机将被软停；任一字段为 NaN/Inf 整包拒收。
+      </p>
+      <table class="cmd">
+        <thead>
+          <tr><th>motor_id</th><th>position (rad)</th><th>velocity (rad/s)</th><th>effort (N·m)</th></tr>
+        </thead>
+        <tbody id="cmdRows"></tbody>
+      </table>
+      <div class="cmd-actions">
+        <button id="btnAddRow">+ 添加电机</button>
+        <button id="btnSendCmd" class="primary">发送快照</button>
+        <span id="cmdResult"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot muted">
+    rosbridge: ws ·9090 &nbsp;|&nbsp; 页面: http ·8080 &nbsp;|&nbsp; 仅限内网使用，rosbridge 未设鉴权
+  </footer>
+
+  <script src="roslib.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

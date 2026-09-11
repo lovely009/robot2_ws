@@ -35,31 +35,37 @@ motor_hardware:
   # 这里是唯一与具体机器人拓扑相关的电机映射。
   # motors 数量不限，也可以混合任意已注册的电机类型与逻辑总线。
   # 当前 14 台仅为示例：电机数量/类型/ID/总线完全由本文件决定，增删改零代码改动。
+  # CREB 的三个 mit_*_limit 必须与电机参数设置页一致（见 creb-series.md），
+  # 此处为示例值。
   motors:
     left_shoulder_yaw:
       joint: left_shoulder_yaw_joint
       bus: left_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 1
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     left_shoulder_roll:
       joint: left_shoulder_roll_joint
       bus: left_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 2
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     left_shoulder_pitch:
       joint: left_shoulder_pitch_joint
       bus: left_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 3
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     left_elbow_pitch:
       joint: left_elbow_pitch_joint
       bus: left_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 4
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     left_wrist_yaw:
       joint: left_wrist_yaw_joint
       bus: left_arm
@@ -82,27 +88,31 @@ motor_hardware:
     right_shoulder_yaw:
       joint: right_shoulder_yaw_joint
       bus: right_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 1
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     right_shoulder_roll:
       joint: right_shoulder_roll_joint
       bus: right_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 2
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     right_shoulder_pitch:
       joint: right_shoulder_pitch_joint
       bus: right_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 3
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     right_elbow_pitch:
       joint: right_elbow_pitch_joint
       bus: right_arm
-      type: rp-50h
+      type: creb_r58_101
       id: 4
       command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
     right_wrist_yaw:
       joint: right_wrist_yaw_joint
       bus: right_arm

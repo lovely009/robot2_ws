@@ -14,12 +14,12 @@ motor_hardware:
     left_shoulder_yaw:
       joint: left_shoulder_yaw_joint
       bus: left_arm
-      type: rp-50h
+      type: vaxor_2530
       id: 1
     left_shoulder_roll:
       joint: left_shoulder_roll_joint
       bus: left_arm
-      type: rp-50h
+      type: vaxor_2530
       id: 2
     left_wrist_yaw:
       joint: left_wrist_yaw_joint

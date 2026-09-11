@@ -218,7 +218,6 @@ cref = Kp × (pdes − p) + Kd × (vdes − v) + cff
   position/velocity ×N（关节→电机，kp/kd/前馈电流为电机侧量不变）；反馈
   position/velocity ÷N、effort ×N×效率（电机→关节，
   `effort = 电流 × Kt × N × 效率`，效率由 `gear_efficiency` 参数提供）。
-  RP 反馈为关节侧（实际关节扭矩），无需 `gear_ratio` 换算，见 rp-series.md。
 - **型号字段（`motor_type_code`，可选）**：规格书状态帧 Data19，`0x01`=30mm、
   `0x02`=25mm、`0x03`=20mm、`0x04`=16mm；当前仅配置声明与合法范围校验。
 - 位置码值范围 −2097151999 ~ 2097151999，超出电机可能不停止。

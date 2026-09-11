@@ -139,8 +139,6 @@ SystemConfig parse_config(const YAML::Node &root,
   const auto timing = required_node(simulation, "timing", "motor_simulation");
   config.timing.control_hz =
       positive_unsigned(timing, "control_hz", "timing");
-  config.timing.rp_feedback_hz =
-      positive_unsigned(timing, "rp_feedback_hz", "timing");
   config.timing.vaxor_feedback_hz =
       positive_unsigned(timing, "vaxor_feedback_hz", "timing");
   config.timing.command_timeout_ms =

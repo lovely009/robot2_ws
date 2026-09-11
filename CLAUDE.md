@@ -21,12 +21,13 @@ ROS 2 Humble 工作空间（`dev` 开发分支），`ros2_ws/` 下六个 ament �
 
 权威文档（修改代码前先读）：各包 `README.md`（`ros2_ws/src/<pkg>/README.md`）、
 术语与命名 `CONTEXT.md`、架构决策 `docs/adr/`。配置为 `motor.yaml`（型号库）+
-`motor_driver.yaml`（拓扑），协议 `rp`/`vaxor`。
+`motor_driver.yaml`（拓扑），协议 `vaxor`/`creb`。
 
 ## 构建与测试
 
 ```bash
 source /opt/ros/humble/setup.bash
+cd ros2_ws
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose      # 全量测试
 ```
@@ -67,7 +68,7 @@ ros2 launch robot_arm_gazebo gazebo.launch.py
 
 ## micro_ros_firmware（STM32 固件，PlatformIO，非 ament 包）
 
-STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经 `../micro_ros_agent/`（独立仓库）对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；权威文档是该目录 `AGENTS.md`（其顶部横幅指向进行中的重构 HANDOFF）。
+STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经同仓库 `micro_ros_agent/` 对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；权威文档是该目录 `AGENTS.md`，运行时设计与后续台架项见 `docs/ARD-0007-*.md` 和 `docs/HANDOFF-motor-runtime-refactor.md`。
 
 ```bash
 # 均在 micro_ros_firmware/ 内执行
@@ -78,7 +79,7 @@ ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + casse
 
 - 改 `platformio.ini` 编译宏后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编）；勿跑 `-t clean_microros`（联网重下环境）。
 - 消息唯一来源是 `micro_ros_agent/src/can_bridge_msgs`，`extra_packages/can_bridge_msgs` 只是指向它的符号链接——改消息去 agent 仓库，勿在固件侧另建。
-- motor runtime 重构（`docs/ARD-0007-*.md` + `docs/HANDOFF-motor-runtime-refactor.md`）中间态**刻意不兼容**：Phase B 前固件编译失败于 `control_task.cpp` 属预期，验证以 host 测试为准。
+- motor runtime 已完成固件侧 ID 驱动化；当前固件应同时通过 host 测试与 `pio run`。剩余上层迁移和真机台架项见 `docs/HANDOFF-motor-runtime-refactor.md`。
 
 ## 架构总览
 
@@ -99,7 +100,7 @@ motor_sim（共享仿真库）                      robot_arm_gazebo（集成）
 核心是「三自适应」闭环，全部由配置驱动、编译代码不含机器人拓扑：
 
 1. **传输自适应** —— `BusConfig.transport` 决定后端：`socketcan`（内核接口，需 `interface`）或 `serial_slcan`（CANable2 串口，需 `tty`，驱动内固定 S8/Y5 位率）。新增后端实现 `CanTransport` 并注册到 `CanTransportRegistry`。
-2. **协议自适应** —— `MotorProtocol` 策略 + `MotorProtocolRegistry` 按 type 字符串工厂注册。内置 `rp`（RP 系列行星关节，反馈关节侧位置/扭矩）与 `vaxor`（25/30 mm 腕部电机，反馈电流 A）。新增电机家族实现 `MotorProtocol` 并注册，不改 `MotorDriver` 收发循环。
+2. **协议自适应** —— `MotorProtocol` 策略 + `MotorProtocolRegistry` 按 type 字符串工厂注册。内置 `vaxor`（25/30 mm 腕部电机，反馈电流 A）与 `creb`（CREB Lite CAN FD 关节模组，反馈输出轴位置/电机端速度/Iq）。新增电机家族实现 `MotorProtocol` 并注册，不改 `MotorDriver` 收发循环。
 3. **数量自适应** —— `DriverConfig` 用 `vector` 描述 buses/motors，无固定 7/14 关节假设。
 
 数据流：YAML → `load_system_config()`（yaml-cpp 解析，字符串参数 map）→ 纯 C++ `DriverConfig` → `MotorDriver`（按 `(bus, type)` 分组，每组一个 `MotorProtocol`）→ `CanTransport` 收发帧。`MotorDriver` 不接触 YAML，协议/传输都不感知 ROS。

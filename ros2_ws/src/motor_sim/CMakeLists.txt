@@ -12,7 +12,6 @@ find_package(yaml_cpp_vendor REQUIRED)
 
 add_library(motor_protocol
   src/protocol/motor_protocol.cpp
-  src/protocol/rp_protocol.cpp
   src/protocol/vaxor_protocol.cpp
   src/protocol/cerb_protocol.cpp)
 target_compile_features(motor_protocol PUBLIC cxx_std_17)

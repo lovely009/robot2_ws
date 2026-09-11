@@ -7,5 +7,5 @@ motor_hardware:
     shoulder_yaw:
       joint: shoulder_yaw_joint
       bus: test_bus
-      type: rp-50h
+      type: vaxor_2530
       id: 1

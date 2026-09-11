@@ -6,29 +6,6 @@
 
 namespace protocol = motor_drive::protocol;
 
-TEST(RpProtocol, NeutralSlotMatchesManual) {
-  const auto bytes = protocol::pack_rp_slot({});
-  const std::array<uint8_t, 8> expected{
-      {0x7f, 0xff, 0x7f, 0xf0, 0x00, 0x00, 0x07, 0xff}};
-  EXPECT_EQ(bytes, expected);
-}
-
-TEST(RpProtocol, SlotRoundTripKeepsPhysicalValuesWithinQuantization) {
-  protocol::JointCommand command;
-  command.position = 1.25;
-  command.velocity = -2.0;
-  command.kp = 30.0;
-  command.kd = 1.0;
-  command.feedforward = 2.5;
-  const auto bytes = protocol::pack_rp_slot(command);
-  const auto decoded = protocol::unpack_rp_slot(bytes.data(), bytes.size());
-  EXPECT_NEAR(decoded.position, command.position, 20.0 / 65535.0);
-  EXPECT_NEAR(decoded.velocity, command.velocity, 120.0 / 4095.0);
-  EXPECT_NEAR(decoded.kp, command.kp, 500.0 / 4095.0);
-  EXPECT_NEAR(decoded.kd, command.kd, 10.0 / 4095.0);
-  EXPECT_NEAR(decoded.feedforward, command.feedforward, 120.0 / 4095.0);
-}
-
 TEST(WristProtocol, CommandMatchesManualExample) {
   protocol::JointCommand command;
   command.position =

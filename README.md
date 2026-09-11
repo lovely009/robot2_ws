@@ -21,6 +21,7 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
+cd ros2_ws
 colcon build --symlink-install
 source install/setup.bash
 colcon test && colcon test-result --verbose
@@ -63,7 +64,7 @@ ros2 launch robot_arm_gazebo gazebo.launch.py
   零代码改动（新增物理关节时同步 URDF，测试兜底）。
 - **接口自适应**：`CanTransportRegistry` + YAML `transport` 字段，内置
   `socketcan` / `serial_slcan`。
-- **协议自适应**：`MotorProtocolRegistry` + YAML `type`，内置 `rp` / `vaxor`。
+- **协议自适应**：`MotorProtocolRegistry` + YAML `type`，内置 `vaxor` / `creb`。
 - **清单自动生成**：controller joints 与 URDF ros2_control 关节清单由 launch 按
   实际配置生成，不手抄；`motor_config_file:=` 覆盖后以实际配置为准。
 

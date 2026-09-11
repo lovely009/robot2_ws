@@ -2,7 +2,7 @@
 
 C++17 电机驱动库（`dev-real` 真机线，无 ROS 依赖）：双传输后端
 （`socketcan` / `serial_slcan`）、协议策略注册、动态电机映射。
-内置 `vaxor` 与 `creb` 两套协议；RP 已弃用，仅保留历史编解码辅助代码。
+内置 `vaxor` 与 `creb` 两套协议。
 
 ## 职责
 
@@ -55,7 +55,7 @@ termios，无额外依赖。CREB 使用标准 CAN FD 帧及 BRS，默认仲裁 1
   源码树脚本不安装）。
 - `docs/`：CREB 与 16–30 mm 系列协议摘要
   （[`creb-series.md`](docs/creb-series.md)、
-  [`motor-2530-series.md`](docs/motor-2530-series.md)）；`rp-series.md` 仅作历史资料。
+  [`motor-2530-series.md`](docs/motor-2530-series.md)）。
 
 ## 测试
 

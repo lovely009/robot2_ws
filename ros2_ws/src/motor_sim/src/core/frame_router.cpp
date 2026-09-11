@@ -14,7 +14,7 @@ std::vector<uint8_t> payload_bytes(const protocol::CanFrame &frame) {
 
 bool is_control_frame(const protocol::CanFrame &frame,
                       const MotorConfig &motor) {
-  // RP 已弃用；Vaxor 的独立控制帧是当前唯一支持的控制帧。
+  // Vaxor 的独立控制帧是当前唯一支持的控制帧；CERB 使能随 MIT 命令帧携带。
   if (motor.protocol == "cerb") {
     return false;
   }
@@ -135,7 +135,7 @@ RouterResult FrameRouter::handle(const std::string &bus,
     } else {
       // CERB 的使能位随 MIT 命令帧携带；必须在 observe_valid_command 之前同步
       // 使能状态，否则最新命令时间戳不会被记录（monitor 仅在已使能时记录），
-      // 后续超时锁存永不触发。Vaxor/RP 的使能只来自独立控制帧，此处不变。
+      // 后续超时锁存永不触发。Vaxor 的使能只来自独立控制帧，此处不变。
       if (config_.motors[item.index].protocol == "cerb") {
         safety_.set_enabled(item.index, item.command.enabled, now);
         lifecycle_.set_enabled(item.index, item.command.enabled);
@@ -151,11 +151,8 @@ RouterResult FrameRouter::handle(const std::string &bus,
       commands_[item.index].enabled = enabled_[item.index];
       lifecycle_.observe_fresh_command(item.index);
       // Vaxor 的 MIT 命令帧要求逐帧应答（手册 3.4）；CERB 反馈报文同样由
-      // 命令帧触发；RP 反馈由节点分频发送。
-      if (config_.motors[item.index].protocol == "vaxor" ||
-          config_.motors[item.index].protocol == "cerb") {
-        result.reply_motor_indices.push_back(item.index);
-      }
+      // 命令帧触发。
+      result.reply_motor_indices.push_back(item.index);
     }
     result.updated_motor_indices.push_back(item.index);
   }
@@ -204,7 +201,7 @@ protocol::MotorCommand FrameRouter::to_joint_command(
     const std::size_t index,
     const protocol::MotorCommand &wire_command) const {
   auto command = wire_command;
-  // RP 已弃用，当前仅保留 Vaxor/CERB。
+  // 当前仅保留 Vaxor/CERB。
   // CERB MIT 的位置、速度、增益与前馈力矩都是减速器输出轴侧物理量，
   // 与关节侧一致，直接透传，不做传动换算。
   if (config_.motors[index].protocol == "cerb") {
@@ -252,12 +249,6 @@ protocol::MotorFeedback FrameRouter::motor_feedback(
   feedback.motor_id = motor.id;
   feedback.enabled = enabled_[index];
   feedback.mode = modes_[index];
-  if (motor.protocol == "rp") {
-    feedback.position = state.position_rad;
-    feedback.velocity = state.velocity_rad_s;
-    feedback.effort = joint_effort_nm;
-    return feedback;
-  }
   // CERB 反馈帧：位置为负载端（与关节侧一致，直接透传），
   // 速度为电机端（rad/s，编码器内换算为 RPM），电流由关节力矩经传动与 Kt 还原。
   if (motor.protocol == "cerb") {

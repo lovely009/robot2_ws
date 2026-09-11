@@ -103,7 +103,7 @@ motor_drive::DriverConfig parse_driver_config(const YAML::Node &hardware,
     const auto node = entry.second;
     motor.joint_name = node["joint"].as<std::string>();
     motor.bus = node["bus"].as<std::string>();
-    const auto model_type = node["type"].as<std::string>();  // 型号名，如 rp-50h
+    const auto model_type = node["type"].as<std::string>();  // 型号名，如 creb_r58_101
     motor.id = node["id"].as<unsigned>();
 
     // 型号 -> 协议类型：motor_types.<model>.protocol 声明所属协议；缺省时型号名

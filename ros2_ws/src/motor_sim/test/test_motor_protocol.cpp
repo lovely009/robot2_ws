@@ -1,5 +1,4 @@
 #include "motor_sim/protocol/motor_protocol.hpp"
-#include "motor_sim/protocol/rp_protocol.hpp"
 #include "motor_sim/protocol/vaxor_protocol.hpp"
 
 #include <gtest/gtest.h>
@@ -28,7 +27,6 @@ protocol::CanFrame frame_from_bytes(
 }  // namespace
 
 TEST(ProtocolFactory, CreatesOnlySupportedMotorFamilies) {
-  EXPECT_THROW(protocol::make_motor_protocol("rp"), std::invalid_argument);
   EXPECT_NE(protocol::make_motor_protocol("vaxor"), nullptr);
   EXPECT_THROW(protocol::make_motor_protocol("unknown"),
                std::invalid_argument);

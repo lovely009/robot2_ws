@@ -1,7 +1,6 @@
 motor_simulation:
   timing:
     control_hz: 100
-    rp_feedback_hz: 100
     vaxor_feedback_hz: 50
     command_timeout_ms: 150
   buses: [arm]

@@ -14,7 +14,6 @@
 | 模块 | 职责 |
 |---|---|
 | `MotorProtocol` | 协议策略基类，定义帧格式与编解码接口 |
-| `RpProtocol` | RP 系列行星关节协议（反馈关节侧位置/扭矩） |
 | `VaxorProtocol` | VAXOR 25/30mm 腕部电机协议（反馈电流 A） |
 | `CerbProtocol` | CERB 协议（扩展支持） |
 

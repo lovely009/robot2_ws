@@ -319,29 +319,23 @@ void MotorSimNode::control_tick() {
 
 void MotorSimNode::send_feedback(const std::size_t tick) {
   const auto &config = router_->config();
-  const auto rp_divisor =
-      std::max(1U, config.timing.control_hz / config.timing.rp_feedback_hz);
   const auto vaxor_divisor = std::max(
       1U, config.timing.control_hz / config.timing.vaxor_feedback_hz);
   for (std::size_t index = 0U; index < config.motors.size(); ++index) {
     const auto &motor = config.motors[index];
-    const bool rp = motor.protocol == "rp";
     // CERB 没有周期上报（手册未定义），反馈完全由命令帧触发，
     // 在 transport_tick 的一问一答路径中回发。
     if (motor.protocol == "cerb") {
       continue;
     }
-    if ((rp && tick % rp_divisor != 0U) ||
-        (!rp && tick % vaxor_divisor != 0U)) {
+    if (tick % vaxor_divisor != 0U) {
       continue;
     }
     const auto feedback =
         router_->motor_feedback(index, joint_states_[index], last_efforts_[index]);
-    const auto kind = rp ? protocol::FeedbackKind::Reply
-                         : protocol::FeedbackKind::Status;
     const auto frame =
-        protocol::make_motor_protocol(motor.protocol)->encode_feedback(feedback,
-                                                                       kind);
+        protocol::make_motor_protocol(motor.protocol)->encode_feedback(
+            feedback, protocol::FeedbackKind::Status);
     const auto endpoint = transports_.find(motor.bus);
     if (endpoint == transports_.end() || !endpoint->second->send(frame)) {
       handle_disconnect(motor.bus);

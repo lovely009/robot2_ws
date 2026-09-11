@@ -18,7 +18,7 @@ std::string fixture_path(const std::string &name) {
 TEST(SystemConfig, AcceptsContractOwnedByCaller) {
   const core::TopologyContract contract{
       {"arm"},
-      {{"joint_a", "arm", "rp", 1U},
+      {{"joint_a", "arm", "vaxor", 1U},
        {"joint_b", "arm", "vaxor", 4U}}};
   const auto config =
       core::load_system_config(fixture_path("two_axis.yaml"), contract);

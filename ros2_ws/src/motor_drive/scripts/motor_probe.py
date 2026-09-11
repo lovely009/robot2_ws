@@ -1,8 +1,7 @@
-"""电机调试共享模块：slcan 帧收发与 RP / vaxor（25/30mm）编解码。
+"""电机调试共享模块：slcan 帧收发与 vaxor（25/30mm）编解码。
 
 纯函数，无 curses、无硬件依赖，可直接单测。vaxor 部分从
-verify_2530_serial.py 迁入并保持数值一致；RP 部分照 motor_drive/protocol.cpp
-复制（接受与 C++ 的漂移）。
+verify_2530_serial.py 迁入并保持数值一致。
 """
 
 from __future__ import annotations
@@ -172,75 +171,3 @@ def decode_vaxor_feedback(frame_id: int, data: bytes, node: int):
             "motor_type": data[19],
         }
     return None
-
-
-# ---------------------------------------------------------------------------
-# RP 编解码（照 motor_drive/protocol.cpp）
-# ---------------------------------------------------------------------------
-
-RP_ENABLE_ID = 0x00
-RP_COMMAND_ID = 0x80
-RP_BROADCAST_SLOTS = 8
-
-_RP_POS_RANGE = (-10.0, 10.0, 16)
-_RP_VEL_RANGE = (-60.0, 60.0, 12)
-_RP_KP_RANGE = (0.0, 500.0, 12)
-_RP_KD_RANGE = (0.0, 10.0, 12)
-_RP_TORQUE_RANGE = (-60.0, 60.0, 12)
-
-_RP_ZERO_COMMAND = {"position": 0.0, "velocity": 0.0, "kp": 0.0, "kd": 0.0,
-                    "feedforward": 0.0}
-
-
-def _float_to_uint(value: float, low: float, high: float, bits: int) -> int:
-    # 与 protocol.cpp::float_to_uint 一致：先限幅，再线性映射并截断（非四舍五入）。
-    value = max(low, min(high, value))
-    maximum = (1 << bits) - 1
-    return int((value - low) * maximum / (high - low))
-
-
-def _uint_to_float(value: int, low: float, high: float, bits: int) -> float:
-    maximum = (1 << bits) - 1
-    return value * (high - low) / maximum + low
-
-
-def pack_rp_slot(command: dict) -> bytes:
-    """RP MIT 8 Byte 槽：P(16)+V(12)+Kp(12)+Kd(12)+Tau(12)。"""
-    position = _float_to_uint(command.get("position", 0.0), *_RP_POS_RANGE)
-    velocity = _float_to_uint(command.get("velocity", 0.0), *_RP_VEL_RANGE)
-    kp = _float_to_uint(command.get("kp", 0.0), *_RP_KP_RANGE)
-    kd = _float_to_uint(command.get("kd", 0.0), *_RP_KD_RANGE)
-    torque = _float_to_uint(command.get("feedforward", 0.0), *_RP_TORQUE_RANGE)
-    return bytes([
-        position >> 8, position & 0xFF,
-        velocity >> 4, ((velocity & 0x0F) << 4) | (kp >> 8), kp & 0xFF,
-        kd >> 4, ((kd & 0x0F) << 4) | (torque >> 8), torque & 0xFF,
-    ])
-
-
-def pack_rp_command(slot_commands: dict) -> bytes:
-    """RP 8 槽 64 字节广播：slot_commands 键为电机 id（1-8），未配置槽填中性槽。"""
-    payload = bytearray(RP_BROADCAST_SLOTS * 8)
-    for slot in range(RP_BROADCAST_SLOTS):
-        command = slot_commands.get(slot + 1, _RP_ZERO_COMMAND)
-        payload[slot * 8:(slot + 1) * 8] = pack_rp_slot(command)
-    return bytes(payload)
-
-
-def pack_rp_enable(enabled: bool) -> bytes:
-    return bytes([int(enabled), 0, 0, 0, 0, 0, 0, 0])
-
-
-def unpack_rp_state(data: bytes) -> dict:
-    """RP 12 字节状态帧 -> 位姿/速度/扭矩 + MOS 温度/status/电压/线圈温度。"""
-    if len(data) < 12:
-        raise ValueError("RP state must be 12 bytes")
-    return {
-        "position": _uint_to_float((data[0] << 8) | data[1], *_RP_POS_RANGE),
-        "velocity": _uint_to_float((data[2] << 4) | (data[3] >> 4), *_RP_VEL_RANGE),
-        "effort": _uint_to_float(((data[3] & 0x0F) << 8) | data[4], *_RP_TORQUE_RANGE),
-        "mos_temperature_c": data[5] - 40.0,
-        "status": (data[6] << 8) | data[7],
-        "voltage_v": data[8],
-        "coil_temperature_c": data[9] - 40.0,
-    }

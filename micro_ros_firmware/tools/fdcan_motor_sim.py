@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""FDCAN1 台架电机模拟器（9 节点：CREB 1-6 + VAXOR 7-9）。
+
+主机经 CANable2（SLCAN 串口，默认 /dev/ttyACM1）在控制板 FDCAN1 上模拟电机，
+用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。总线上无真机。
+仲裁段 1M（S8）、数据段 5M（本台 CANable2 固件 16e7497-dirty 用 Y7）。
+
+线协议字节布局严格对齐固件：
+  micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c
+  micro_ros_firmware/lib/motor_protocol/src/{creb,vaxor}_adapter.c
+
+上行（本脚本 → 固件）：
+  CREB  feedback  0x300+id        FD/BRS 12B 大端：deg(182count/°) / rpm / mA，
+                                    data[11] bit5=0（故障位）；由 0x080 SYNC 触发
+  VAXOR status    0x702+4*id      FD/BRS 20B 小端（见 motor_protocol_pack_vaxor_status）
+  VAXOR reply     0x701+4*id      FD/BRS 12B，收到 0x501+4*id MIT 命令后逐帧应答
+
+下行（固件 → 本脚本，仅记录/驱动趋近）：
+  CREB  SYNC 0x080（经典 0B，10ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
+
+用法：
+  python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 S8/Y5/O 开通道
+  python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
+开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾并发 C 关通道。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import select
+import signal
+import struct
+import termios
+import time
+import tty
+
+PI = 3.141592653589793
+
+# ---- SLCAN -------------------------------------------------------------
+
+FD_LEN_CODE = {0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
+               7: "7", 8: "8", 12: "9", 16: "A", 20: "B", 24: "C",
+               32: "D", 48: "E", 64: "F"}
+_CODE_LEN = {v: k for k, v in FD_LEN_CODE.items()}
+
+
+def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
+    """标准 11bit ID 的 SLCAN 行（CANable2 方言），以 \\r 结尾。"""
+    if can_id > 0x7FF:
+        raise ValueError("standard ID out of range")
+    cmd = "t" if not is_fd else ("b" if brs else "d")
+    return f"{cmd}{can_id:03X}{FD_LEN_CODE[len(payload)]}".encode() \
+        + payload.hex().upper().encode() + b"\r"
+
+
+def parse_slcan(line: str):
+    """解析固件上报帧 -> (id, data, is_fd)；非数据帧返回 None。"""
+    line = line.strip()
+    if len(line) < 5:
+        return None
+    cmd, rest = line[0], line[1:]
+    if cmd in "tT":
+        is_fd, id_len = False, 3 if cmd == "t" else 8
+    elif cmd in "dDbB":
+        is_fd, id_len = True, 3 if cmd in "db" else 8
+    else:
+        return None  # a/w/f/错误状态等忽略
+    try:
+        can_id = int(rest[:id_len], 16)
+        n = _CODE_LEN[rest[id_len]]
+        data = bytes.fromhex(rest[id_len + 1:id_len + 1 + 2 * n])
+    except (ValueError, KeyError):
+        return None
+    if len(data) != n:
+        return None
+    return can_id, data, is_fd
+
+
+# ---- 线协议码值（与固件 codec 同常量） -----------------------------------
+
+VAXOR_TICKS_PER_REV = 2_097_152
+VAXOR_POS_LIMIT = 0x7CFFFFFF
+VAXOR_VEL_LIMIT = 30_000
+VAXOR_CUR_SCALE = 11.0 / 4096.0
+
+
+def vaxor_pos_code(motor_rad: float) -> bytes:
+    ticks = round(motor_rad / (2 * PI) * VAXOR_TICKS_PER_REV)
+    ticks = max(-VAXOR_POS_LIMIT, min(VAXOR_POS_LIMIT, ticks))
+    return int(ticks + 0x80000000).to_bytes(4, "little", signed=False)
+
+
+def vaxor_vel_code(motor_rad_s: float) -> bytes:
+    rpm10 = round(motor_rad_s * 60.0 / (2 * PI) * 10.0)
+    rpm10 = max(-VAXOR_VEL_LIMIT, min(VAXOR_VEL_LIMIT, rpm10))
+    return int(rpm10 + 0x8000).to_bytes(2, "little")
+
+
+def vaxor_cur_code(current_a: float) -> bytes:
+    raw = max(-32768, min(32767, round(current_a / VAXOR_CUR_SCALE)))
+    return int(raw + 0x8000).to_bytes(2, "little")
+
+
+def vaxor_decode_pos(code4: bytes) -> float:
+    return (int.from_bytes(code4, "little", signed=False) - 0x80000000) \
+        / VAXOR_TICKS_PER_REV * 2 * PI
+
+
+def creb_symmetric(code: int, limit: float, bits: int) -> float:
+    return (code / float((1 << bits) - 1)) * 2.0 * limit - limit
+
+
+def creb_decode_command(data: bytes):
+    """固件下行 CREB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。"""
+    enabled = (data[0] & 0x80) != 0
+    pos = creb_symmetric((data[1] << 8) | data[2], PI, 16)
+    vel = creb_symmetric(((data[3] & 0xF0) << 4) | data[4], PI, 12)
+    kp_raw = ((data[4] & 0x0F) << 8) | data[5]
+    kd_raw = (data[6] << 4) | ((data[7] & 0xF0) >> 4)
+    tau = creb_symmetric(((data[7] & 0x0F) << 8) | data[8], 45.0, 12)
+    return {"enabled": enabled, "pos_rad": pos, "vel_rad_s": vel,
+            "kp": kp_raw * 500.0 / 4095.0, "kd": kd_raw * 5.0 / 4095.0,
+            "tau_nm": tau}
+
+
+# ---- 节点模型 -----------------------------------------------------------
+
+class MotorModel:
+    def __init__(self, motor_id: int, kind: str):
+        self.id = motor_id
+        self.kind = kind  # "creb" | "vaxor"
+        self.tx_count = 0
+        self.rx_count = 0
+        self.enabled = False
+        self.last_cmd = None
+        if kind == "creb":
+            # 关节侧：初值每台 10° 递增、101rpm(=0.1047rad/s 关节)、1A
+            self.pos_deg = float(10 * motor_id)
+            self.tgt_deg = self.pos_deg
+            self.rpm = 101.0
+            self.iq_ma = 1000.0
+        else:
+            # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad，gear=50
+            self.pos_motor_rad = 0.1 * (motor_id - 6) * 50.0
+            self.tgt_motor_rad = self.pos_motor_rad
+            self.vel_motor_rad_s = 2.5
+            self.current_a = 0.5
+
+    def approach(self, dt_s: float):
+        # 极简一阶趋近，仅用于演示「命令影响反馈」，不模拟真实动力学。
+        rate = 2.0 * dt_s
+        if self.kind == "creb":
+            self.pos_deg += (self.tgt_deg - self.pos_deg) * min(1.0, rate)
+        else:
+            self.pos_motor_rad += (self.tgt_motor_rad - self.pos_motor_rad) \
+                * min(1.0, rate)
+
+    def creb_frame(self) -> bytes:
+        data = struct.pack(">hhh", round(self.pos_deg * 182.0),
+                           round(self.rpm), round(self.iq_ma))
+        return data + b"\x00" * 6  # data[11] bit5=0（无故障）
+
+    def vaxor_status_frame(self) -> bytes:
+        cmd_id = 0x501 + 4 * self.id
+        out = cmd_id.to_bytes(2, "little")
+        out += vaxor_pos_code(self.pos_motor_rad)
+        out += vaxor_vel_code(self.vel_motor_rad_s)
+        out += vaxor_cur_code(self.current_a)
+        out += struct.pack("<h", 150)          # 15.0 V
+        out += (0).to_bytes(4, "little")       # fault=0
+        out += bytes([4, 0, 0, 0x02])          # motor_state/calib/mode(MIT)/25mm
+        return out
+
+    def vaxor_reply_frame(self) -> bytes:
+        cmd_id = 0x501 + 4 * self.id
+        return cmd_id.to_bytes(2, "little") + \
+            vaxor_pos_code(self.pos_motor_rad) + \
+            vaxor_vel_code(self.vel_motor_rad_s) + \
+            vaxor_cur_code(self.current_a)
+
+
+# ---- 主循环 -------------------------------------------------------------
+
+class SlcanSim:
+    def __init__(self, tty: str, creb_ids, vaxor_ids, period_ms: int,
+                 log_path: str | None, use_brs: bool = True,
+                 fb_period_ms: int = 20, stagger_ms: float = 2.2):
+        self.tty_path = tty
+        self.use_brs = use_brs
+        self.fb_period = fb_period_ms / 1000.0
+        self.stagger = stagger_ms / 1000.0
+        self.period = period_ms / 1000.0
+        self.models = {i: MotorModel(i, "creb") for i in creb_ids}
+        self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
+        self.rx_buf = b""
+        self.sync_seen = False
+        self.sync_count = 0
+        self.next_send = {}
+        self.last_creb_emit = 0.0
+        self.stop = False
+        self.log_f = open(log_path, "w") if log_path else None
+        self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+
+    def configure(self):
+        tty.setraw(self.fd, when=termios.TCSANOW)
+        attrs = termios.tcgetattr(self.fd)
+        attrs[2] |= termios.CLOCAL | termios.CREAD
+        termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
+        termios.tcflush(self.fd, termios.TCIOFLUSH)
+        # 与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）。
+        # 注意：本机 CANable2 固件 16e7497-dirty 的数据率索引 Y7 才是稳定 5Mbps
+        # （Y5 在该固件上是临界近邻速率，BRS 帧偶发成帧但丢帧致 OFFLINE）。
+        for cmd in (b"C\r", b"S8\r", b"Y7\r", b"O\r"):
+            os.write(self.fd, cmd)
+            time.sleep(0.15)
+        termios.tcflush(self.fd, termios.TCIOFLUSH)
+
+    def send(self, can_id: int, payload: bytes, is_fd: bool = True,
+             brs: bool = True, model: "MotorModel | None" = None,
+             tag: str = ""):
+        os.write(self.fd, slcan_line(can_id, payload, is_fd, brs))
+        if model:
+            model.tx_count += 1
+        if self.log_f:
+            self.log_f.write(json.dumps({
+                "t": round(time.monotonic(), 4), "dir": "tx", "tag": tag,
+                "id": can_id, "data": payload.hex()}) + "\n")
+
+    def log_rx(self, can_id: int, data: bytes, tag: str):
+        m = self._model_for_downlink(can_id)
+        if m:
+            m.rx_count += 1
+        if self.log_f:
+            self.log_f.write(json.dumps({
+                "t": round(time.monotonic(), 4), "dir": "rx", "tag": tag,
+                "id": can_id, "data": data.hex()}) + "\n")
+
+    def _model_for_downlink(self, can_id: int):
+        # CREB MIT 0x110+id(1..127)；VAXOR 命令 0x501+4n / 控制 0x502+4n
+        node = can_id - 0x110
+        if 1 <= node <= 127 and node in self.models \
+                and self.models[node].kind == "creb":
+            return self.models[node]
+        for base, kind in ((0x501, "vaxor"), (0x502, "vaxor")):
+            delta = can_id - base
+            if delta >= 4 and delta % 4 == 0 and (delta // 4) in self.models \
+                    and self.models[delta // 4].kind == kind:
+                return self.models[delta // 4]
+        return None
+
+    def handle_downlink(self, can_id: int, data: bytes, is_fd: bool):
+        if can_id == 0x080:  # CREB SYNC（经典 0B），链路存活探针与调度基准
+            now = time.monotonic()
+            if not self.sync_seen:
+                self.sync_seen = True
+                print("[sim] 收到首个 SYNC，链路已通，开始 SYNC 对齐错峰上报")
+            self.sync_count += 1
+            # 真实设备在 SYNC 后窗口上报：每 2 个 SYNC（20ms）为一周期，9 帧从
+            # SYNC 时刻起按 stagger 错峰排在 0..16ms，避免与 SYNC 自由仲裁碰撞。
+            if self.sync_count % 2 == 1:
+                for slot, mid in enumerate(sorted(self.models)):
+                    self.next_send[mid] = now + slot * self.stagger
+            return
+        m = self._model_for_downlink(can_id)
+        if m is None:
+            return
+        if m.kind == "creb" and can_id == 0x110 + m.id and len(data) >= 9:
+            cmd = creb_decode_command(data)
+            m.enabled = cmd["enabled"]
+            m.last_cmd = cmd
+            if cmd["enabled"]:
+                m.tgt_deg = cmd["pos_rad"] * 180.0 / PI
+            self.log_rx(can_id, data, "creb_mit")
+        elif m.kind == "vaxor" and can_id == 0x502 + 4 * m.id:
+            m.enabled = bool(data[0])
+            m.last_cmd = {"run": bool(data[0]), "set_zero": bool(data[1]),
+                          "mode": data[2]}
+            self.log_rx(can_id, data, "vaxor_ctrl")
+        elif m.kind == "vaxor" and can_id == 0x501 + 4 * m.id:
+            tgt = vaxor_decode_pos(data[2:6])
+            m.tgt_motor_rad = tgt
+            m.last_cmd = {"tgt_motor_rad": tgt}
+            self.log_rx(can_id, data, "vaxor_mit")
+            # 手册：MIT 命令逐帧应答。
+            self.send(0x701 + 4 * m.id, m.vaxor_reply_frame(), True,
+                      self.use_brs, m, "vaxor_reply")
+
+    def emit_one(self, mid: int):
+        m = self.models[mid]
+        # --no-brs：FD 帧数据段也走仲裁 1M（规避台架 5M 信号完整性问题，仍为 FD 帧）。
+        if m.kind == "creb":
+            self.send(0x300 + mid, m.creb_frame(), True, self.use_brs, m,
+                      "creb_fb")
+        else:
+            self.send(0x702 + 4 * mid, m.vaxor_status_frame(), True,
+                      self.use_brs, m, "vaxor_status")
+
+    def emit_creb(self):
+        for mid, m in self.models.items():
+            if m.kind == "creb":
+                self.send(0x300 + mid, m.creb_frame(), True, True, m,
+                          "creb_fb")
+        self.last_creb_emit = time.monotonic()
+
+    def emit_vaxor(self):
+        for mid, m in self.models.items():
+            if m.kind == "vaxor":
+                self.send(0x702 + 4 * mid, m.vaxor_status_frame(), True, True,
+                          m, "vaxor_status")
+
+    def read_available(self):
+        try:
+            chunk = os.read(self.fd, 4096)
+        except OSError:
+            return
+        if not chunk:
+            return
+        self.rx_buf += chunk
+        while b"\r" in self.rx_buf:
+            line, self.rx_buf = self.rx_buf.split(b"\r", 1)
+            parsed = parse_slcan(line.decode(errors="replace"))
+            if parsed:
+                self.handle_downlink(*parsed)
+
+    def report(self):
+        print("\n=== 模拟器节点状态 ===")
+        for mid in sorted(self.models):
+            m = self.models[mid]
+            if m.kind == "creb":
+                extra = f"pos={m.pos_deg:.1f}deg tgt={m.tgt_deg:.1f}"
+            else:
+                extra = f"pos={m.pos_motor_rad:.2f}rad_m tgt={m.tgt_motor_rad:.2f}"
+            print(f"  {m.kind:5s} id={mid:d} tx={m.tx_count:5d} "
+                  f"rx={m.rx_count:4d} en={int(m.enabled)} {extra} "
+                  f"last={m.last_cmd}")
+        print(f"  SYNC(0x080) seen: {self.sync_seen}")
+        if self.log_f:
+            self.log_f.flush()
+
+    def run(self):
+        creb_ids = sorted(i for i, m in self.models.items() if m.kind == "creb")
+        vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
+        print(f"[sim] {self.tty_path} S8/Y7/O opened; CREB {creb_ids} "
+              f"VAXOR {vaxor_ids}")
+        print("[sim] 通道已开、静默监听中（仅做 ACK 节点）。请复位控制板；"
+              "收到首个 0x080 SYNC 后开始错峰上报。Ctrl-C 结束。")
+        gate_start = time.monotonic()
+        last_step = gate_start
+        warned = False
+        while not self.stop:
+            now = time.monotonic()
+            r, _, _ = select.select([self.fd], [], [], 0.002)
+            if r:
+                self.read_available()
+            if not self.sync_seen:
+                # 门控：板子上线前绝不发帧（否则无人 ACK 会把 CANable 自己打进
+                # bus-off，板子启动后也无人 ACK 其 SYNC，双双死锁）。
+                if not warned and now - gate_start > 3.0:
+                    print("[sim] 警告：3s 未收到 SYNC，请确认板子已复位且接线正确")
+                    warned = True
+                continue
+            dt = now - last_step
+            for m in self.models.values():
+                m.approach(dt)
+            last_step = now
+            # 错峰：每节点 50Hz（周期 20ms），相位在首个 SYNC 时按 2.2ms 错开。
+            for mid in sorted(self.models):
+                if now >= self.next_send.get(mid, now):
+                    self.emit_one(mid)
+                    self.next_send[mid] = now + 1.0  # 等下 SYNC 窗口重排
+        self.report()
+        try:
+            os.write(self.fd, b"C\r")  # 收尾关通道
+        except OSError:
+            pass
+        if self.log_f:
+            self.log_f.close()
+        os.close(self.fd)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tty", default="/dev/ttyACM1")
+    ap.add_argument("--creb", default="1,2,3,4,5,6")
+    ap.add_argument("--vaxor", default="7,8,9")
+    ap.add_argument("--period-ms", type=int, default=10)
+    ap.add_argument("--no-brs", action="store_true",
+                    help="FD 帧不切 5M 数据段（全程 1M），规避台架 5M 信号问题")
+    ap.add_argument("--fb-period-ms", type=int, default=20,
+                    help="每电机反馈周期（默认 20ms=50Hz；台架信号差时调大到 50）")
+    ap.add_argument("--stagger-ms", type=float, default=2.2,
+                    help="多节点反馈相位错开间隔")
+    ap.add_argument("--log", default=None)
+    args = ap.parse_args()
+    creb_ids = [int(x) for x in args.creb.split(",") if x]
+    vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
+    sim = SlcanSim(args.tty, creb_ids, vaxor_ids, args.period_ms, args.log,
+                   use_brs=not args.no_brs, fb_period_ms=args.fb_period_ms,
+                   stagger_ms=args.stagger_ms)
+
+    def _sig(_a, _b):
+        sim.stop = True
+    signal.signal(signal.SIGTERM, _sig)
+    signal.signal(signal.SIGINT, _sig)
+
+    sim.configure()
+    sim.run()
+
+
+if __name__ == "__main__":
+    main()

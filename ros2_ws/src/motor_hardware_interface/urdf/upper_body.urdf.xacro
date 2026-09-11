@@ -61,7 +61,7 @@
   </xacro:macro>
 
   <xacro:macro name="arm" params="side sign arm_color">
-    <!-- RP motor 1: shoulder yaw. -->
+    <!-- Shoulder yaw motor. -->
     <xacro:joint_ball_link name="${side}_shoulder_yaw_link" color="joint_dark"/>
     <joint name="${side}_shoulder_yaw_joint" type="revolute">
       <origin xyz="0 ${sign * 0.265} 0.72" rpy="0 0 0"/>
@@ -72,7 +72,7 @@
       <dynamics damping="0.06" friction="0.02"/>
     </joint>
 
-    <!-- RP motor 2: shoulder roll. -->
+    <!-- Shoulder roll motor. -->
     <xacro:joint_ball_link name="${side}_shoulder_roll_link" color="joint_dark"/>
     <joint name="${side}_shoulder_roll_joint" type="revolute">
       <parent link="${side}_shoulder_yaw_link"/>
@@ -82,7 +82,7 @@
       <dynamics damping="0.06" friction="0.02"/>
     </joint>
 
-    <!-- RP motor 3: shoulder pitch; the upper arm hangs along -Z at q=0. -->
+    <!-- Shoulder pitch motor; the upper arm hangs along -Z at q=0. -->
     <link name="${side}_upper_arm_link">
       <visual>
         <origin xyz="0 0 -0.15"/>
@@ -103,7 +103,7 @@
       <dynamics damping="0.08" friction="0.025"/>
     </joint>
 
-    <!-- RP motor 4: elbow pitch. -->
+    <!-- Elbow pitch motor. -->
     <link name="${side}_forearm_link">
       <visual>
         <origin xyz="0 0 -0.135"/>

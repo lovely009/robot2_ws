@@ -12,9 +12,6 @@
 namespace motor_sim::protocol {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr uint32_t kRpEnableId = 0x00U;
-constexpr uint32_t kRpCommandId = 0x80U;
-constexpr std::size_t kRpBroadcastSlots = 8U;
 constexpr int32_t kVaxorTicksPerRevolution = 2'097'152;
 constexpr int32_t kVaxorPositionTickLimit = 0x7cffffff;
 constexpr int32_t kVaxorVelocityCodeLimit = 30'000;
@@ -42,7 +39,7 @@ struct MotorCommand {
   double velocity{0.0};
   double kp{0.0};
   double kd{0.0};
-  // RP 中单位为 Nm，Vaxor 中单位为 A；传动/plant 层按电机类型解释。
+  // CERB 中单位为 Nm，Vaxor 中单位为 A；传动/plant 层按电机类型解释。
   double feedforward{0.0};
   // 仿真内部标志：协议未携带增益时使用 motors.yaml 的名义 plant 增益。
   bool use_nominal_gains{false};
@@ -52,7 +49,7 @@ struct MotorFeedback {
   unsigned motor_id{0U};
   double position{0.0};
   double velocity{0.0};
-  // RP 中单位为 Nm，Vaxor 中单位为 A。
+  // CERB 中单位为 Nm，Vaxor 中单位为 A。
   double effort{0.0};
   bool enabled{false};
   CommandMode mode{CommandMode::Mit};
@@ -72,11 +69,6 @@ std::unique_ptr<MotorProtocol> make_motor_protocol(std::string_view name);
 
 uint32_t float_to_uint(double value, double low, double high, unsigned bits);
 double uint_to_float(uint32_t value, double low, double high, unsigned bits);
-
-std::array<uint8_t, 8> pack_rp_slot(const MotorCommand &command);
-MotorCommand unpack_rp_slot(const uint8_t *data, std::size_t size);
-std::array<uint8_t, 12> pack_rp_state(const MotorFeedback &feedback);
-MotorFeedback unpack_rp_state(const uint8_t *data, std::size_t size);
 
 void validate_vaxor_node(unsigned node);
 uint32_t vaxor_command_id(unsigned node);

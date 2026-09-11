@@ -14,12 +14,12 @@ motor_hardware:
     shoulder_yaw:
       joint: shoulder_yaw_joint
       bus: socket_bus
-      type: rp-50h
+      type: vaxor_2530
       id: 1
       command: {kp: 30.0, kd: 1.0}
     wrist_pitch:
       joint: wrist_pitch_joint
       bus: serial_bus
-      type: rp-50h
+      type: vaxor_2530
       id: 2
       command: {kp: 30.0, kd: 1.0}

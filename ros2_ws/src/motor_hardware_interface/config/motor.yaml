@@ -3,7 +3,7 @@
 # parameters 分两类：
 #   - 运行消费：协议策略读取并参与换算（扭矩常数/减速比/效率）。
 #   - 安全阈值：软件侧在 MIT 反馈帧里能实际监控到的量，供保护逻辑消费
-#     （扭矩/电流/电压超限）。反馈帧里没有的量（如 vaxor 无温度、RP 无电流）
+#     （扭矩/电流/电压超限）。反馈帧里没有的量（如 vaxor/creb 无温度）
 #     不在此列——写了软件侧也监控不到。
 # 其余规格声明（尺寸、重量、外观、轴承等）见 src/motor_drive/docs/ 下规格书。
 #
@@ -17,42 +17,9 @@
 #   - 本文件（motor.yaml）       —— 型号库：静态参数 + 安全阈值
 #   - motor_driver.yaml（拓扑）  —— 拓扑与动态参数：buses / motors / timing / command
 #
-# 来源：src/motor_drive/docs/rp-series.md、motor-2530-series.md 及对应规格书。
+# 来源：src/motor_drive/docs/creb-series.md、motor-2530-series.md 及对应规格书。
 
 motor_types:
-  # ── 意优 RP 系列行星关节（反馈为关节侧位置/扭矩 + 温度 + 电压，无电流）──
-  # 扭矩为关节侧 Nm，直接与阈值比较；电压 48±10% V、最大耐压 90 V 为全型号共用。
-  rp-40c:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 2.0      # 额定扭矩（关节侧）
-      peak_torque_nm: 6.0       # 峰值扭矩（扭矩超限保护）
-  rp-50l:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 5.0
-      peak_torque_nm: 15.0
-  rp-50h:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 10.0
-      peak_torque_nm: 30.0
-  rp-70l:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 12.0
-      peak_torque_nm: 36.0
-  rp-70h:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 17.0
-      peak_torque_nm: 60.0
-  rp-90l:
-    protocol: rp
-    parameters:
-      rated_torque_nm: 35.0
-      peak_torque_nm: 120.0
-
   # ── VAXOR 25mm 微型关节模组（反馈为电流 A + 电压 + fault，无温度）──
   # 同一 vaxor 协议下的两个减速比档位；扭矩阈值为关节侧（装减速器后）。
   vaxor_2550:

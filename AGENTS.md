@@ -5,13 +5,13 @@
 
 | 区域 | 内容 | 权威文档 |
 |---|---|---|
-| `ros2_ws/` | ROS 2 Humble 电机栈：真机 `motor_drive` + `motor_hardware_interface`，仿真 `motor_sim` + `robot_arm_gazebo` | 本文件 + `CONTEXT.md` + 各包 `README.md` |
+| `ros2_ws/` | ROS 2 Humble 六包工作区：消息、真机、仿真与 Web 上位机 | 本文件 + `CONTEXT.md` + 各包 `README.md` |
 | `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，serial over USB CDC） | `micro_ros_firmware/README.md` + `micro_ros_firmware/AGENTS.md` |
 | `micro_ros_agent/` | micro-ROS Agent 独立 colcon 工作区（serial ↔ 固件，与电机栈同域互通） | `micro_ros_agent/README.md` |
 
 ## ros2_ws（ROS 2 电机栈）
 
-真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `rp`/`vaxor`）
+真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `vaxor`/`creb`）
 + `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_sim` +
 `robot_arm_gazebo`；`can_bridge_msgs` 提供固件/ROS 2 共用消息，`web_host` 提供
 rosbridge Web 上位机。**电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
@@ -30,6 +30,7 @@ rosbridge Web 上位机。**电机拓扑唯一来源是 YAML**：数量/类型/I
 
 ```bash
 source /opt/ros/humble/setup.bash
+cd ros2_ws
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose
 ros2 launch motor_hardware_interface hardware.launch.py  # 真机，默认 tty 双总线
@@ -71,34 +72,27 @@ ros2 launch robot_arm_gazebo gazebo.launch.py           # 仿真（vcan）
 
 ## micro_ros_firmware（STM32 固件）
 
-STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS），serial over
-USB CDC（PA11=USB_DM / PA12=USB_DP）进 ROS 2（humble）。业务为 **BMI088 IMU**
-（`micro_ros/imu/data`、`micro_ros/imu/temp`）+ **三路 FDCAN**（FDCAN1/2/3，
-例程测试帧默认关闭、RX 回调收帧）+ **电机协议编解码**（RP/25-30mm，来自
-`ros2_ws/src/motor_drive`；`micro_ros/motor_command` 驱动两个默认测试电机，
-消息为 `sensor_msgs/JointState`；完整拓扑后续由参数服务下发）。
-**详细决策与踩坑见 `micro_ros_firmware/README.md` 与 `micro_ros_firmware/AGENTS.md`**，
-这里只列即用要点：
+STM32H723VGT6 固件使用 PlatformIO + STM32duino + FreeRTOS，经 USB CDC 对接
+micro-ROS Agent。BMI088 使用阻塞 SPI2；三路 FDCAN 由单一 `motor_rt_task` 管理。
+电机运行时按 `motor_id` 发现和控制，不保存安装表或 `joint_name`；命令是最多
+64 个目标的完整快照。详细约束见 `micro_ros_firmware/README.md`、
+`micro_ros_firmware/AGENTS.md` 和运行时 HANDOFF。
 
 ```bash
 cd micro_ros_firmware
-~/.platformio/penv/bin/pio run            # 构建（pio 不在 PATH；首次需外网拉 micro-ROS 源码）
-~/.platformio/penv/bin/pio run -t upload  # ST-Link 烧录
-~/.platformio/penv/bin/pio device monitor # 串口监视 115200
+~/.platformio/penv/bin/pio run
+cmake -S test/host -B .host-build && cmake --build .host-build --clean-first -j2
+ctest --test-dir .host-build --output-on-failure
 ```
 
-- 非 ROS 2 工程，**不要用 colcon**；改构建宏等不触发 SrcWrapper 重编译，
-  须 `pio run -t clean` 全量重建。
-- H723 无独立 `USB_OTG_FS`：USB 靠 `-DPIO_FRAMEWORK_ARDUINO_USB_HIGHSPEED_FULLMODE`；
-  HAL 模块使能走命令行 `-D` 宏，SrcWrapper 编译不含项目 `include/`。
-- FreeRTOS：调度器接管 SysTick；micro-ROS 建链/收发在独立 `micro_ros` 任务，
-  IMU 与 FDCAN 各有独立业务任务；`loop()` 被 idle hook 调用只能非阻塞。
-- 节点名 `micro_ros_node`（`src/ros_bridge.cpp` 顶部常量，改一处即可）。
-- FDCAN 需 `-DHAL_FDCAN_MODULE_ENABLED`，内核时钟为 PLL2Q=80MHz；
-  改 HAL 构建宏后必须 `pio run -t clean` 全量重建。
-- 状态灯是 **WS2812 彩灯**（SPI6 MOSI=PA7），`digitalWrite` 无效，用 `ws2812_set_rgb()`。
-- 烧录/串口权限：stlink 与 USB CDC（0483:5740）udev 规则；
-  `libusb_open ... LIBUSB_ERROR_ACCESS` 即缺 stlink 规则。
+- 固件不是 ament 包，不能用 colcon；修改 `platformio.ini` 编译宏后先执行
+  `pio run -t clean`，不要在常规验证中运行 `clean_microros`。
+- `motor_rt_task` 是 RX ring 唯一消费者、运行时唯一写者和正常 CAN TX 所有者；
+  ROS 桥只使用 mailbox、只读状态副本和事件中继。
+- FDCAN 内核时钟为 PLL2Q=80MHz；仲裁段 1Mbps、数据段 5Mbps。
+- BMI088 当前不占用 DMA；WS2812 使用 SPI6 + BDMA Channel0，两个设备库各自
+  持有句柄和中断入口。
+- 自动测试不得烧录或驱动电机；软件停机不能替代硬件急停、机械限位与供电隔离。
 
 ## micro_ros_agent（micro-ROS Agent）
 
@@ -108,6 +102,7 @@ cd micro_ros_firmware
 
 ```bash
 source /opt/ros/humble/setup.bash
+cd micro_ros_agent
 colcon build --symlink-install                # 缺测试依赖可加 --cmake-args -DBUILD_TESTING=OFF
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ```

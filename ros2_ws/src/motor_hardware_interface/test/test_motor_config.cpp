@@ -36,8 +36,8 @@ TEST(LoadDriverConfig, ParsesTopologyFromYaml) {
   EXPECT_EQ(config.motors[0].name, "shoulder_yaw");
   EXPECT_EQ(config.motors[0].joint_name, "shoulder_yaw_joint");
   EXPECT_EQ(config.motors[0].bus, "test_bus");
-  // 拓扑里 type 是型号名 rp-50h，解析后经 motor_types.<型号>.protocol 映射为协议类型 rp。
-  EXPECT_EQ(config.motors[0].type, "rp");
+  // 拓扑里 type 是型号名 vaxor_2530，解析后经 motor_types.<型号>.protocol 映射为协议类型 vaxor。
+  EXPECT_EQ(config.motors[0].type, "vaxor");
   EXPECT_EQ(config.motors[0].id, 1U);
   EXPECT_EQ(config.motors[0].parameters.at("torque_constant_nm_per_amp"), "0.35");
 }

@@ -144,7 +144,7 @@ CanFdSystem::on_init(const hardware_interface::HardwareInfo &info) {
   }
 
   try {
-    // 构造 MotorDriver 时会继续做协议级验证，例如 RP ID 范围、
+    // 构造 MotorDriver 时会继续做协议级验证，例如各协议 ID 范围、
     // 25/30 mm 节点范围以及必需的 torque_constant 参数。
     driver_ = std::make_unique<motor_drive::MotorDriver>(config_.driver);
   } catch (const std::exception &exception) {

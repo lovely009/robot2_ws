@@ -58,7 +58,7 @@ private:
 };
 
 core::TopologyContract arm_contract() {
-  return {{"arm"}, {{"joint_a", "arm", "rp", 1U}}};
+  return {{"arm"}, {{"joint_a", "arm", "vaxor", 1U}}};
 }
 
 core::TopologyContract three_bus_contract() {
@@ -76,14 +76,13 @@ ros::NodeParameters parameters(const std::string &device) {
 core::SystemConfig one_axis_config() {
   core::SystemConfig config;
   config.timing.control_hz = 100U;
-  config.timing.rp_feedback_hz = 100U;
   config.timing.vaxor_feedback_hz = 50U;
   config.timing.command_timeout_ms = 150U;
   config.buses.push_back({"arm"});
   core::MotorConfig motor;
   motor.joint = "joint_a";
   motor.bus = "arm";
-  motor.protocol = "rp";
+  motor.protocol = "vaxor";
   motor.id = 1U;
   motor.limits.command_lower_rad = -1.0;
   motor.limits.command_upper_rad = 1.0;

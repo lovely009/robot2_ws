@@ -7,7 +7,6 @@ namespace motor_sim::core {
 
 struct TimingConfig {
   unsigned control_hz{100U};
-  unsigned rp_feedback_hz{100U};
   unsigned vaxor_feedback_hz{50U};
   unsigned command_timeout_ms{150U};
 };

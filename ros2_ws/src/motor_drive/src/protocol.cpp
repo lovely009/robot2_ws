@@ -73,7 +73,7 @@ uint32_t float_to_uint(double value, const double low, const double high,
   if (!(high > low) || bits == 0U || bits > 31U) {
     throw std::invalid_argument("invalid float_to_uint range or bit width");
   }
-  // RP MIT 字段是定点量：先按协议范围限幅，再线性映射到指定 bit 宽度。
+  // MIT 字段是定点量：先按协议范围限幅，再线性映射到指定 bit 宽度。
   value = std::clamp(value, low, high);
   const auto maximum = (uint32_t{1} << bits) - 1U;
   return static_cast<uint32_t>((value - low) * maximum / (high - low));
@@ -86,86 +86,6 @@ double uint_to_float(const uint32_t value, const double low, const double high,
   }
   const auto maximum = (uint32_t{1} << bits) - 1U;
   return value * (high - low) / maximum + low;
-}
-
-std::array<uint8_t, 8> pack_rp_slot(const JointCommand &command) {
-  // RP MIT 8 Byte 槽布局：P(16) + V(12) + Kp(12) + Kd(12) + Tau(12)。
-  // 12 bit 字段跨字节拼接，因此这里不要改成普通 memcpy。
-  const auto position = float_to_uint(command.position, -10.0, 10.0, 16);
-  const auto velocity = float_to_uint(command.velocity, -60.0, 60.0, 12);
-  const auto kp = float_to_uint(command.kp, 0.0, 500.0, 12);
-  const auto kd = float_to_uint(command.kd, 0.0, 10.0, 12);
-  const auto torque = float_to_uint(command.feedforward, -60.0, 60.0, 12);
-  return {static_cast<uint8_t>(position >> 8U),
-          static_cast<uint8_t>(position),
-          static_cast<uint8_t>(velocity >> 4U),
-          static_cast<uint8_t>((velocity << 4U) | (kp >> 8U)),
-          static_cast<uint8_t>(kp),
-          static_cast<uint8_t>(kd >> 4U),
-          static_cast<uint8_t>((kd << 4U) | (torque >> 8U)),
-          static_cast<uint8_t>(torque)};
-}
-
-JointCommand unpack_rp_slot(const uint8_t *data, const std::size_t size) {
-  if (data == nullptr || size != 8U) {
-    throw std::invalid_argument("RP MIT slot must be 8 bytes");
-  }
-  const uint32_t position =
-      (static_cast<uint32_t>(data[0]) << 8U) | data[1];
-  const uint32_t velocity =
-      (static_cast<uint32_t>(data[2]) << 4U) | (data[3] >> 4U);
-  const uint32_t kp =
-      (static_cast<uint32_t>(data[3] & 0x0fU) << 8U) | data[4];
-  const uint32_t kd =
-      (static_cast<uint32_t>(data[5]) << 4U) | (data[6] >> 4U);
-  const uint32_t torque =
-      (static_cast<uint32_t>(data[6] & 0x0fU) << 8U) | data[7];
-  return {uint_to_float(position, -10.0, 10.0, 16),
-          uint_to_float(velocity, -60.0, 60.0, 12),
-          uint_to_float(kp, 0.0, 500.0, 12),
-          uint_to_float(kd, 0.0, 10.0, 12),
-          uint_to_float(torque, -60.0, 60.0, 12)};
-}
-
-std::array<uint8_t, 12>
-pack_rp_state(const JointState &state, const double mos_temperature_c,
-              const uint16_t status, const double voltage_v,
-              const double coil_temperature_c) {
-  const auto position = float_to_uint(state.position, -10.0, 10.0, 16);
-  const auto velocity = float_to_uint(state.velocity, -60.0, 60.0, 12);
-  const auto torque = float_to_uint(state.effort, -60.0, 60.0, 12);
-  const auto mos = static_cast<uint8_t>(
-      std::clamp(mos_temperature_c + 40.0, 0.0, 255.0));
-  const auto voltage = static_cast<uint8_t>(std::clamp(voltage_v, 0.0, 255.0));
-  const auto coil = static_cast<uint8_t>(
-      std::clamp(coil_temperature_c + 40.0, 0.0, 255.0));
-  return {static_cast<uint8_t>(position >> 8U),
-          static_cast<uint8_t>(position),
-          static_cast<uint8_t>(velocity >> 4U),
-          static_cast<uint8_t>((velocity << 4U) | (torque >> 8U)),
-          static_cast<uint8_t>(torque),
-          mos,
-          static_cast<uint8_t>(status),
-          static_cast<uint8_t>(status >> 8U),
-          voltage,
-          coil,
-          0U,
-          0U};
-}
-
-JointState unpack_rp_state(const uint8_t *data, const std::size_t size) {
-  if (data == nullptr || size != 12U) {
-    throw std::invalid_argument("RP state must be 12 bytes");
-  }
-  const uint32_t position =
-      (static_cast<uint32_t>(data[0]) << 8U) | data[1];
-  const uint32_t velocity =
-      (static_cast<uint32_t>(data[2]) << 4U) | (data[3] >> 4U);
-  const uint32_t torque =
-      (static_cast<uint32_t>(data[3] & 0x0fU) << 8U) | data[4];
-  return {uint_to_float(position, -10.0, 10.0, 16),
-          uint_to_float(velocity, -60.0, 60.0, 12),
-          uint_to_float(torque, -60.0, 60.0, 12)};
 }
 
 std::array<uint8_t, 12> pack_wrist_command(const JointCommand &command) {

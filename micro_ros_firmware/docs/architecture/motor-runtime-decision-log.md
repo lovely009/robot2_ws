@@ -1,12 +1,14 @@
 # micro-ROS 电机运行时架构开发基线
 
-> 对应 ADR：[ADR 0007：micro-ROS 采用发现驱动的聚合式电机运行时](adr/0007-micro-ros-discovery-driven-motor-runtime.md)。
+> 对应 ADR：[ADR 0007：micro-ROS 采用发现驱动的聚合式电机运行时](../adr/0007-micro-ros-discovery-driven-motor-runtime.md)。
 > 本文是 `micro_ros_firmware` 重构的开发基线；旧台账中的逐条讨论已归并，不要求开发者逐条回看。
-> 最后更新：2026-09-04。
+> 原始基线日期：2026-09-04。
+>
+> **当前适用性（2026-09-11）**：架构边界仍有效；`motor_rt_task`、ID 快照、Profile 绑定、消息、结果事件、P0/P1/P2 与 RX ring 已落地。第 10 节实施顺序和第 11 节开放项保留为历史基线；当前未闭环项统一见[运行时验证计划](../plans/active/motor-runtime-validation.md)。
 
 ## 1. 目标和原则
 
-系统由 STM32H723 上的 micro-ROS 固件控制约 40 台 Vaxor/CREB 外置电机，使用
+系统由 STM32H723 上的 micro-ROS 固件控制约 40 台 Vaxor/CERB 外置电机，使用
 FDCAN1、FDCAN2、FDCAN3，三路均为 CAN-FD 仲裁段 1 Mbps、数据段 5 Mbps。电机 ID
 在系统内唯一；电机可动态上线、离线和热插拔。
 
@@ -39,7 +41,7 @@ ROS 2 controller
               ┌──────────┼──────────┐
               │          │          │
         registry     safety       protocol adapters
-              │          │       Vaxor / CREB
+              │          │       Vaxor / CERB
               └──────────┴──────────┘
                          │
                  FDCAN1 / FDCAN2 / FDCAN3
@@ -55,8 +57,8 @@ micro-ROS 状态消息。拓扑变化和配置结果走低频消息，不塞进 
 ### 3.1 启动、发现和热插拔
 
 1. 初始化三路 FDCAN、静态缓冲、协议注册表和运行时注册表。
-2. 启动 `motor_rt_task` 后进入发现窗口；Vaxor 用自身 20 ms 状态识别型号，CREB
-   用反馈/管理读取识别身份。CREB 的 `0x080 SYNC` 只用于发现、重连和热插拔探测。
+2. 启动 `motor_rt_task` 后进入发现窗口；Vaxor 用自身 20 ms 状态识别型号，CERB
+   用反馈/管理读取识别身份。CERB 的 `0x080 SYNC` 只用于发现、重连和热插拔探测。
 3. 身份确定后选择固件 `MotorModelProfile`，读取或确认设备能力；失败则保持禁能并
    发布原因。
 4. 发布一次全量 `MotorTopology`。设备再次上线、离线、身份变化或能力冲突时更新
@@ -125,8 +127,8 @@ Profile 是编译期型号目录，不是每台电机的安装表。至少包含
 
 | 型号 | 主要参数 | 运行方式 |
 |---|---|---|
-| CREB R48-101 | `101:1`、30 RPM、额定/峰值 `5/11 Nm`、48 V、21 bit 编码器 | CAN，支持驱动器侧限位配置 |
-| CREB R58-101 | `101:1`、30 RPM、额定/峰值 `20/45 Nm`、48 V、21 bit 编码器 | CAN，支持驱动器侧限位配置 |
+| CERB R48-101 | `101:1`、30 RPM、额定/峰值 `5/11 Nm`、48 V、21 bit 编码器 | CAN，支持驱动器侧限位配置 |
+| CERB R58-101 | `101:1`、30 RPM、额定/峰值 `20/45 Nm`、48 V、21 bit 编码器 | CAN，支持驱动器侧限位配置 |
 | Vaxor 25 mm 系列 | 12~18 V、绝对编码器；规格书明确给出 30/50 速比参数 | CAN-FD，上电默认 MIT，无硬件限位 |
 
 Vaxor 系列名中的 80 速比当前没有完整参数，不能用 30/50 档外推；补齐规格前不
@@ -134,7 +136,7 @@ Vaxor 系列名中的 80 速比当前没有完整参数，不能用 30/50 档外
 
 ### 5.2 适配器边界
 
-| 能力 | Vaxor | CREB |
+| 能力 | Vaxor | CERB |
 |---|---|---|
 | 身份 | 从每 20 ms 自主状态识别型号 | 通过反馈/管理读取识别 |
 | 默认控制 | 标准 MIT 单电机帧：`0x501 + 4*N`，12 字节 | MIT 单电机帧：`0x110 \| Dev_ID`，9 字节 |
@@ -172,7 +174,7 @@ interfaces；`sensor_msgs/msg/JointState` 只用于上层状态发布，不作�
 | 接口 | 内容 | 规则 |
 |---|---|---|
 | `MotorPolicy` | Enable、MIT `Kp/Kd`、前馈、软件限幅、安全授权 | 运行时策略，不进入 100 Hz 命令 |
-| `MotorConfig` | 模式切换、CREB 限位及其他设备配置 | 请求/结果事务，不刷新运动 freshness |
+| `MotorConfig` | 模式切换、CERB 限位及其他设备配置 | 请求/结果事务，不刷新运动 freshness |
 
 `MotorConfig` 的最小规则：
 
@@ -221,8 +223,8 @@ FDCAN ISR 只完成取硬件 FIFO、加时间戳、写环和计数；满时丢�
 | P2 | SYNC、身份/能力读取、配置事务 | 有界管理队列，不能挤占 P0/P1 |
 
 默认 MIT 不使用聚合 CAN 帧：同一总线有多少台活动电机，就生成多少条单电机 MIT
-帧；CREB 超过 8 台也不因此切换到 `0x200`。`0x200` 只在明确的非 MIT 模式下由
-CREB 适配器启用，并按每组最多 8 台拆分。
+帧；CERB 超过 8 台也不因此切换到 `0x200`。`0x200` 只在明确的非 MIT 模式下由
+CERB 适配器启用，并按每组最多 8 台拆分。
 
 CAN-FD 侧的正常性由三件事保证：协议适配器独立组帧、P1 只保留最新目标、1 ms
 调度器持续泵送硬件 FIFO。最终仍需在最大电机数和最坏反馈流量下实测总线负载、RX
@@ -230,11 +232,16 @@ CAN-FD 侧的正常性由三件事保证：协议适配器独立组帧、P1 只�
 
 ## 8. 代码模块和所有权
 
+> 实现落位注（2026-09-11）：表中 `src/motor_ros_bridge` 落位为 `src/ros_bridge`
+> （编排）+ `src/motor_bridge`（电机域桥）+ `src/micro_ros_task`（Agent 状态机）；
+> `src/storage_task` 未创建（W25Q64 待接线）。目录实况以固件 README「代码组织」
+> 为准，责任边界不变。
+
 | 模块 | 责任 | 不负责 |
 |---|---|---|
 | `lib/fdcan` | 三路初始化、过滤器、IRQ、RX ring、TX 调度、HAL FIFO 和底层统计 | 协议解码、ROS、策略判断 |
 | `lib/dma` | 共享 DMA 控制器、通道配置和 IRQ 资源管理 | IMU/LED 采样策略和设备业务 |
-| `lib/motor_protocol` | Vaxor/CREB 发现、编解码、停止、SYNC、配置事务 | 注册表和 ROS 消息 |
+| `lib/motor_protocol` | Vaxor/CERB 发现、编解码、停止、SYNC、配置事务 | 注册表和 ROS 消息 |
 | `lib/motor_control` | 注册表、型号 Profile、生命周期、安全、命令 freshness、状态快照 | ROS API、硬件 HAL 细节 |
 | `lib/control_mailbox` | 最新完整运动命令、Policy/Config 请求和连接事件的固定容量交换 | 策略、协议校验、设备等待、CAN 发送 |
 | `src/motor_rt_task` | 1 ms 服务、10 ms 控制边界、调用 runtime | 阻塞等待、动态分配 |
@@ -259,17 +266,19 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 
 1. 固化消息包、枚举、Profile 数据结构和静态容量常量。
 2. 重构 `lib/fdcan`：三路 RX 环、ISR 所有权、TX 调度器和统计。
-3. 在 `motor_control` 内建立 runtime seam，并接入 `motor_protocol` 的 Vaxor/CREB 解析与 MIT 组帧。
+3. 在 `motor_control` 内建立 runtime seam，并接入 `motor_protocol` 的 Vaxor/CERB 解析与 MIT 组帧。
 4. 接入 1 ms/10 ms `motor_rt_task`，删除旧固定四电机路径和 CAN 调试桥。
 5. 接入 micro-ROS mailbox、状态/拓扑发布和低频配置事务。
 6. 先做主机单元测试，再做单总线、双总线、三总线和约 40 台电机的台架测试。
 
 开发阶段只允许一个模块拥有正常电机 TX；旧路径迁移完成前不得与新运行时并行发送。
 
-## 11. 当前仍需在实现阶段落地的项目
+## 11. 原始实现阶段开放项（历史）
+
+> 下列条目保留 2026-09-04 基线原文；消息、QoS、公共状态位、过滤器和事务框架此后已落地。当前开放项见[运行时验证计划](../plans/active/motor-runtime-validation.md)。
 
 - 自定义消息包的 `.msg` 文件名、字段顺序和 QoS。
-- Vaxor/CREB 管理事务的具体对象、帧过滤器和各阶段超时值。
+- Vaxor/CERB 管理事务的具体对象、帧过滤器和各阶段超时值。
 - 三路总线在最坏反馈流量下的 TX 配额、RX 深度和实测负载。
 - `protection_flags`、`limit_flags` 和低频结果码的公共头文件/消息常量。
 

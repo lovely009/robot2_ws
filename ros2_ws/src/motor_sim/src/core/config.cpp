@@ -129,8 +129,11 @@ MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
   return profile;
 }
 
-SystemConfig parse_config(const YAML::Node &root,
-                          const TopologyContract &contract) {
+// 解析 YAML 中 motors 段的通用逻辑。
+// 当 contract 不为 nullptr 时，逐项对比 buses/motors 顺序与地址；
+// 为 nullptr 时，仅做内部一致性校验（bus 已声明、joint 唯一、地址唯一、ID 合法）。
+SystemConfig parse_config_common(const YAML::Node &root,
+                                 const TopologyContract *contract) {
   const auto simulation = required_node(root, "motor_simulation", "root");
   if (!simulation.IsMap()) {
     throw std::runtime_error("motor_simulation must be a map");
@@ -156,13 +159,15 @@ SystemConfig parse_config(const YAML::Node &root,
     }
     config.buses.push_back({name});
   }
-  std::vector<std::string> parsed_buses;
-  parsed_buses.reserve(config.buses.size());
-  for (const auto &bus : config.buses) {
-    parsed_buses.push_back(bus.name);
-  }
-  if (parsed_buses != contract.buses) {
-    throw std::runtime_error("buses violate the model topology contract");
+  if (contract != nullptr) {
+    std::vector<std::string> parsed_buses;
+    parsed_buses.reserve(config.buses.size());
+    for (const auto &bus : config.buses) {
+      parsed_buses.push_back(bus.name);
+    }
+    if (parsed_buses != contract->buses) {
+      throw std::runtime_error("buses violate the model topology contract");
+    }
   }
 
   const double margin = optional_finite_double(
@@ -182,7 +187,10 @@ SystemConfig parse_config(const YAML::Node &root,
   }
 
   const auto motors = required_node(simulation, "motors", "motor_simulation");
-  if (!motors.IsSequence() || motors.size() != contract.motors.size()) {
+  if (!motors.IsSequence()) {
+    throw std::runtime_error("motors must be a sequence");
+  }
+  if (contract != nullptr && motors.size() != contract->motors.size()) {
     throw std::runtime_error("motors violate the model topology contract");
   }
   std::unordered_set<std::string> joints;
@@ -229,14 +237,25 @@ SystemConfig parse_config(const YAML::Node &root,
         !addresses.insert(address).second) {
       throw std::runtime_error(context + " duplicates a joint or bus address");
     }
-    const auto &required = contract.motors[index];
-    if (motor.joint != required.joint || motor.bus != required.bus ||
-        motor.protocol != required.protocol || motor.id != required.id) {
-      throw std::runtime_error(context + " violates the model topology contract");
+    if (contract != nullptr) {
+      const auto &required = contract->motors[index];
+      if (motor.joint != required.joint || motor.bus != required.bus ||
+          motor.protocol != required.protocol || motor.id != required.id) {
+        throw std::runtime_error(
+            context + " violates the model topology contract");
+      }
     }
     config.motors.push_back(std::move(motor));
   }
+  if (config.motors.empty()) {
+    throw std::runtime_error("motors must be nonempty");
+  }
   return config;
+}
+
+SystemConfig parse_config(const YAML::Node &root,
+                          const TopologyContract &contract) {
+  return parse_config_common(root, &contract);
 }
 
 }  // namespace
@@ -248,6 +267,18 @@ SystemConfig load_system_config(const std::string &path,
   }
   try {
     return parse_config(YAML::LoadFile(path), contract);
+  } catch (const YAML::Exception &error) {
+    throw std::runtime_error("cannot load motor configuration '" + path +
+                             "': " + error.what());
+  }
+}
+
+SystemConfig load_system_config(const std::string &path) {
+  if (path.empty()) {
+    throw std::runtime_error("motor configuration path cannot be empty");
+  }
+  try {
+    return parse_config_common(YAML::LoadFile(path), nullptr);
   } catch (const YAML::Exception &error) {
     throw std::runtime_error("cannot load motor configuration '" + path +
                              "': " + error.what());

@@ -4,10 +4,11 @@
 //   /motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
 //   micro_ros/motor_policy（Enable/Kp/Kd/软限幅）→ mailbox 配置
 //   micro_ros/motor_config（模式/设备侧限位事务）→ mailbox 配置
+//   micro_ros/motor_bind（身份绑定，TBD-PROFILE-01 过渡通道）→ mailbox 绑定 FIFO
 //   micro_ros/motor_enable（全局授权电平）
 // 发布（5）：
-//   micro_ros/motion_states（100Hz 目标，只读副本）
-//   micro_ros/motor_status_array（低频诊断）
+//   micro_ros/motion_states（100Hz 运动状态，只读副本）
+//   micro_ros/motor_status_array（100Hz 诊断）
 //   micro_ros/motor_topology（1s 全量拓扑）
 //   micro_ros/motor_events（事件转发）
 //   micro_ros/motor_config_result（事务结果，request_id 关联）
@@ -277,6 +278,14 @@ static void publish_motion_states() {
 }
 
 static void publish_statuses() {
+  // 状态是电平视图：故障/生命周期变化的即时通知由 motor_events（reliable）
+  // 承担，本话题按 .msg 契约保持低频（20Hz：10ms tick ×5）；100Hz 里
+  // 绝大部分只是 state_age 自增的重复内容，运动量新鲜度以 motion_states 为准。
+  static uint8_t s_phase = 0U;
+  if (++s_phase < 5U) {
+    return;
+  }
+  s_phase = 0U;
   motor_control_status_t statuses[64];
   const size_t count =
       motor_rt_copy_statuses(statuses, sizeof(statuses) / sizeof(statuses[0]));

@@ -1,9 +1,13 @@
 // motor_control ID 化运行时 host test（ARD-0007 §43.1 覆盖清单）。
 //
 // 覆盖：注册/发现、九态生命周期迁移、30/100ms 快照安全级联、断链立即停机、
-// 受控缺席软停、重复/冲突 motor_id、Profile 绑定与拒绝、OFFLINE/重连、
-// 配置事务（BUSY/UNSUPPORTED/超时/重试/结果码）、软件限位钳制、使能整定门、
-// 容量 64、事件环、TX 收集。全部黑盒：只走公共 API，不触碰 ctx 内部字段
+// 受控缺席软停、重复/冲突 motor_id（冲突锁存穿越离线/重连）、Profile 绑定
+// 与拒绝、OFFLINE/重连、逐电机 Enable 冻结与复立、厂家故障锁存且恢复需
+// 显式重使能、配置事务（BUSY/UNSUPPORTED/超时/重试/结果码，撤权与离线
+// 中止回 UNCONFIRMED）、增益与软件限位钳制、使能整定门、P0 重入队/满队
+// 抢占、tx_slot 表项路由、过期挂起 P0 帧随使能作废、快照校验（NaN/重复
+// ID/序号回绕）、容量 64、状态副本按 motor_id 升序输出、
+// 事件环与 TX 收集/丢弃计数。全部黑盒：只走公共 API，不触碰 ctx 内部字段
 // （生命周期断言经公共头的 entries 数组只读完成）。
 //
 // 时基说明：所有 tick 为 MCU 单调时基毫秒（uint32 回绕安全）。
@@ -24,7 +28,7 @@ static const motor_protocol_adapter_t *g_adapters[2];
 
 static void bind_real_adapters() {
   g_adapters[0] = &motor_protocol_vaxor_adapter;
-  g_adapters[1] = &motor_protocol_creb_adapter;
+  g_adapters[1] = &motor_protocol_cerb_adapter;
 }
 
 static bool find_profile(const char *name, size_t *out_index) {
@@ -72,8 +76,8 @@ static motor_protocol_raw_frame_t vaxor_status(uint16_t node, uint32_t fault,
   return raw_frame(0, motor_protocol_vaxor_status_id(node), 20, data, tick);
 }
 
-// CREB 反馈帧：pos 1820 counts = 10°，vel 120 rpm（电机侧），Iq 2000 mA = 2 A。
-static motor_protocol_raw_frame_t creb_feedback(uint16_t node, uint32_t tick) {
+// CERB 反馈帧：pos 1820 counts = 10°，vel 120 rpm（电机侧），Iq 2000 mA = 2 A。
+static motor_protocol_raw_frame_t cerb_feedback(uint16_t node, uint32_t tick) {
   uint8_t data[12] = {};
   data[0] = 0x07; data[1] = 0x1c;
   data[2] = 0x00; data[3] = 0x78;
@@ -81,9 +85,9 @@ static motor_protocol_raw_frame_t creb_feedback(uint16_t node, uint32_t tick) {
   return raw_frame(0, 0x300U + node, 12, data, tick);
 }
 
-// CREB 故障帧：data[11] bit5 置位（厂家故障位，decode 判 fault_active）。
-static motor_protocol_raw_frame_t creb_fault(uint16_t node, uint32_t tick) {
-  motor_protocol_raw_frame_t f = creb_feedback(node, tick);
+// CERB 故障帧：data[11] bit5 置位（厂家故障位，decode 判 fault_active）。
+static motor_protocol_raw_frame_t cerb_fault(uint16_t node, uint32_t tick) {
+  motor_protocol_raw_frame_t f = cerb_feedback(node, tick);
   f.data[11] |= 0x20U;
   return f;
 }
@@ -185,9 +189,9 @@ static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id
   assert(motor_control_set_authorization(ctx, true, tick));
 }
 
-static void bring_creb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
+static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
                                 const char *profile_name, uint32_t tick) {
-  motor_protocol_raw_frame_t f = creb_feedback(motor_id, tick);
+  motor_protocol_raw_frame_t f = cerb_feedback(motor_id, tick);
   motor_control_on_raw_frame(ctx, &f);
   size_t idx;
   assert(find_profile(profile_name, &idx));
@@ -346,7 +350,9 @@ static const motor_protocol_model_profile_t g_mock_profile = {
 
 // ---------------------------------------------------------------------------
 // 用例
-// ---------------------------------------------------------------------------// 初始化：空注册表、未授权（安全默认——引导期授权电平由任务层转发）。
+// ---------------------------------------------------------------------------
+
+// 初始化：空注册表、未授权（安全默认——引导期授权电平由任务层转发）。
 static void test_init_starts_unauthorized_and_empty() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -395,19 +401,19 @@ static void test_frame_creates_discovered_then_bind_readies() {
 static void test_registry_capacity_64_rejects_overflow() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  // vaxor 节点 1..32（motor_id 1..32）+ CREB 节点 33..64（motor_id 33..64）。
+  // vaxor 节点 1..32（motor_id 1..32）+ CERB 节点 33..64（motor_id 33..64）。
   for (uint16_t node = 1; node <= 32; ++node) {
     motor_protocol_raw_frame_t f = vaxor_reply(node, 0.0, 0.0, 0.0, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
   for (uint16_t node = 33; node <= 64; ++node) {
-    motor_protocol_raw_frame_t f = creb_feedback(node, node * 10);
+    motor_protocol_raw_frame_t f = cerb_feedback(node, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
   assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
 
-  // 第 65 台：CREB 节点 65（合法范围 1..127，motor_id 65 未占用）→ 满表拒绝。
-  motor_protocol_raw_frame_t extra = creb_feedback(65, 1000);
+  // 第 65 台：CERB 节点 65（合法范围 1..127，motor_id 65 未占用）→ 满表拒绝。
+  motor_protocol_raw_frame_t extra = cerb_feedback(65, 1000);
   motor_control_on_raw_frame(&ctx, &extra);
   assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_REGISTRY_FULL, 0));
@@ -418,9 +424,9 @@ static void test_registry_capacity_64_rejects_overflow() {
 static void test_duplicate_motor_id_across_buses_conflicts() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  motor_protocol_raw_frame_t f1 = creb_feedback(7, 100); // bus 0
+  motor_protocol_raw_frame_t f1 = cerb_feedback(7, 100); // bus 0
   motor_control_on_raw_frame(&ctx, &f1);
-  motor_protocol_raw_frame_t f2 = creb_feedback(7, 110);
+  motor_protocol_raw_frame_t f2 = cerb_feedback(7, 110);
   f2.bus_index = 1; // 同节点不同总线
   motor_control_on_raw_frame(&ctx, &f2);
 
@@ -433,8 +439,8 @@ static void test_duplicate_motor_id_across_buses_conflicts() {
 static void test_identity_conflict_same_bus_different_protocol() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  motor_protocol_raw_frame_t creb = creb_feedback(7, 100); // motor_id 7（CREB）
-  motor_control_on_raw_frame(&ctx, &creb);
+  motor_protocol_raw_frame_t cerb = cerb_feedback(7, 100); // motor_id 7（CERB）
+  motor_control_on_raw_frame(&ctx, &cerb);
   // vaxor reply id 0x701+4*7 也解析出 node 7 —— 身份冲突。
   motor_protocol_raw_frame_t vaxor = vaxor_reply(7, 0.0, 0.0, 0.0, 110);
   motor_control_on_raw_frame(&ctx, &vaxor);
@@ -885,17 +891,17 @@ static void test_vaxor_offline_and_reconnect() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// CREB OFFLINE（2026-09-05 协议核实）：0x080 SYNC 维持设备 20ms 状态上报，
+// CERB OFFLINE（2026-09-05 协议核实）：0x080 SYNC 维持设备 20ms 状态上报，
 // 上报帧即心跳（承担总线检测）——心跳在线时无命令也活着；心跳丢失
 // ≥100ms（5×20ms，adapter 阈值）即 OFFLINE，与是否在发命令无关。
-static void test_creb_offline_by_heartbeat_loss() {
+static void test_cerb_offline_by_heartbeat_loss() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_creb_to_ready(&ctx, 7, "creb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
 
   // 心跳在线（20ms 间隔的上报帧）→ 无命令也保持 READY，不误判离线。
   for (uint32_t t = 140; t <= 220; t += 20) {
-    motor_protocol_raw_frame_t fb = creb_feedback(7, t);
+    motor_protocol_raw_frame_t fb = cerb_feedback(7, t);
     motor_control_on_raw_frame(&ctx, &fb);
     motor_control_service(&ctx, t);
   }
@@ -908,12 +914,12 @@ static void test_creb_offline_by_heartbeat_loss() {
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_OFFLINE, 7));
 }
 
-// CREB 使能整定门：使能帧后 100ms 内不发运动目标（厂商指引，adapter 常量）。
+// CERB 使能整定门：使能帧后 100ms 内不发运动目标（厂商指引，adapter 常量）。
 // 整定期间持续喂新快照，避免 30ms 级联抢先触发。
-static void test_creb_enable_settle_gate() {
+static void test_cerb_enable_settle_gate() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_creb_to_ready(&ctx, 7, "creb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 120);
   snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 130));
@@ -923,15 +929,15 @@ static void test_creb_enable_settle_gate() {
   motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
   assert(n == 1);
-  assert(frames[0].can_id == 0x110U + 7U); // CREB 使能帧
+  assert(frames[0].can_id == 0x110U + 7U); // CERB 使能帧
   assert(frames[0].data[0] == 0xccU);      // 使能位
 
   // 整定期内的后续快照也不得产生 MIT 帧。
-  // （各步喂 20ms 间隔心跳帧：CREB SYNC 上报帧承担总线检测，静默 100ms 即离线。）
+  // （各步喂 20ms 间隔心跳帧：CERB SYNC 上报帧承担总线检测，静默 100ms 即离线。）
   motor_control_command_snapshot_t s2 = make_snapshot(2, 150);
   snapshot_add(&s2, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s2, 160));
-  motor_protocol_raw_frame_t hb1 = creb_feedback(7, 158);
+  motor_protocol_raw_frame_t hb1 = cerb_feedback(7, 158);
   motor_control_on_raw_frame(&ctx, &hb1);
   motor_control_service(&ctx, 170);
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
@@ -939,7 +945,7 @@ static void test_creb_enable_settle_gate() {
   motor_control_command_snapshot_t s3 = make_snapshot(3, 180);
   snapshot_add(&s3, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s3, 185));
-  motor_protocol_raw_frame_t hb2 = creb_feedback(7, 188);
+  motor_protocol_raw_frame_t hb2 = cerb_feedback(7, 188);
   motor_control_on_raw_frame(&ctx, &hb2);
   motor_control_service(&ctx, 190); // 整定 60ms，仍在窗内
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
@@ -947,7 +953,7 @@ static void test_creb_enable_settle_gate() {
   motor_control_command_snapshot_t s4 = make_snapshot(4, 220);
   snapshot_add(&s4, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s4, 225));
-  motor_protocol_raw_frame_t hb3 = creb_feedback(7, 228);
+  motor_protocol_raw_frame_t hb3 = cerb_feedback(7, 228);
   motor_control_on_raw_frame(&ctx, &hb3);
   motor_control_service(&ctx, 235); // 整定 105ms ≥ 100ms → 到期
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
@@ -956,7 +962,7 @@ static void test_creb_enable_settle_gate() {
   motor_control_command_snapshot_t s5 = make_snapshot(5, 245);
   snapshot_add(&s5, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s5, 250));
-  motor_protocol_raw_frame_t hb4 = creb_feedback(7, 252);
+  motor_protocol_raw_frame_t hb4 = cerb_feedback(7, 252);
   motor_control_on_raw_frame(&ctx, &hb4);
   motor_control_service(&ctx, 260);
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
@@ -1137,11 +1143,11 @@ static void test_vaxor_mode_transaction_gates_motion() {
   assert(frames[1].size == 12U); // MIT 恢复
 }
 
-// CREB 限位写：厂家对象未决（TBD-CONFIG-01）→ UNSUPPORTED，不影响运动授权。
-static void test_creb_limits_unsupported() {
+// CERB 限位写：厂家对象未决（TBD-CONFIG-01）→ UNSUPPORTED，不影响运动授权。
+static void test_cerb_limits_unsupported() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_creb_to_ready(&ctx, 7, "creb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 120);
   snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 130));
@@ -1152,7 +1158,7 @@ static void test_creb_limits_unsupported() {
     snapshot_add(&settle, 7, 0.1f, 0.0f, 0.0f);
     assert(motor_control_apply_command_snapshot(&ctx, &settle, t));
     if ((t - 145) % 20 == 0) { // SYNC 上报心跳（20ms 间隔）
-      motor_protocol_raw_frame_t hb = creb_feedback(7, t);
+      motor_protocol_raw_frame_t hb = cerb_feedback(7, t);
       motor_control_on_raw_frame(&ctx, &hb);
     }
     motor_control_service(&ctx, t);
@@ -1175,11 +1181,11 @@ static void test_creb_limits_unsupported() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE); // 授权不变
 }
 
-// CREB SET_MODE MIT：设备恒 MIT → 单个空阶段事务 → 立即 OK。
-static void test_creb_set_mode_mit_immediate_ok() {
+// CERB SET_MODE MIT：设备恒 MIT → 单个空阶段事务 → 立即 OK。
+static void test_cerb_set_mode_mit_immediate_ok() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_creb_to_ready(&ctx, 7, "creb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
   motor_protocol_config_request_t mode = {};
   mode.request_id = 3U;
   mode.motor_id = 7;
@@ -1279,8 +1285,8 @@ static void test_mock_transaction_advance_retry_busy_timeout() {
   assert(has_result_event(&ctx, 8U, MOTOR_PROTOCOL_CONFIG_TIMEOUT));
 }
 
-// 发现探测：CREB 发 0x080 SYNC（P2）；仅 vaxor 注册表 → 拒绝。
-static void test_probe_discovery_creb_only() {
+// 发现探测：CERB 发 0x080 SYNC（P2）；仅 vaxor 注册表 → 拒绝。
+static void test_probe_discovery_cerb_only() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   assert(motor_control_probe_discovery(&ctx, 1));
@@ -1352,9 +1358,9 @@ static void test_motion_state_age_and_nan() {
   assert(states[0].state_age_ms == 50);
   assert(fabs(states[0].position_rad - 1.0 / 50.0) < 1e-4);
 
-  // 无反馈电机 → 位置可解（CREB 关节侧直通，无需 Profile），速度/扭矩
+  // 无反馈电机 → 位置可解（CERB 关节侧直通，无需 Profile），速度/扭矩
   // 依赖 Profile（未绑定 → NaN），仍在发现态。
-  motor_protocol_raw_frame_t cf = creb_feedback(9, 410);
+  motor_protocol_raw_frame_t cf = cerb_feedback(9, 410);
   motor_control_on_raw_frame(&ctx, &cf);
   motor_control_service(&ctx, 460);
   motor_control_motion_state_t states2[8];
@@ -1407,9 +1413,9 @@ static void test_bind_profile_rejection() {
 
   // 越界索引与协议不匹配都要拒绝。
   assert(!motor_control_bind_profile(&ctx, 5, motor_control_profile_count(), 110));
-  size_t creb_idx;
-  assert(find_profile("creb_r58_101", &creb_idx));
-  assert(!motor_control_bind_profile(&ctx, 5, creb_idx, 115));
+  size_t cerb_idx;
+  assert(find_profile("cerb_r58_101", &cerb_idx));
+  assert(!motor_control_bind_profile(&ctx, 5, cerb_idx, 115));
   assert(entry_of(&ctx, 5)->profile == nullptr);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 5));
   // 正确绑定仍可继续。
@@ -1427,7 +1433,7 @@ static void test_bind_profile_rejection() {
 static void test_settle_window_absence_soft_stops() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_creb_to_ready(&ctx, 7, "creb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 120);
   snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 130)); // 使能帧，整定中
@@ -1453,9 +1459,9 @@ static void test_settle_window_absence_soft_stops() {
   assert(found_damping);
 
   // 心跳保活（SYNC 上报帧承担总线检测，静默 100ms 即离线）。
-  motor_protocol_raw_frame_t hb1 = creb_feedback(7, 200);
+  motor_protocol_raw_frame_t hb1 = cerb_feedback(7, 200);
   motor_control_on_raw_frame(&ctx, &hb1);
-  motor_protocol_raw_frame_t hb2 = creb_feedback(7, 290);
+  motor_protocol_raw_frame_t hb2 = cerb_feedback(7, 290);
   motor_control_on_raw_frame(&ctx, &hb2);
 
   // 电机重新出现在新鲜快照 → 恢复 ACTIVE（整定到期由 service 清除后下发）。
@@ -1558,8 +1564,8 @@ static void test_conflict_survives_offline_reconnect() {
   motor_control_init(&ctx, g_adapters, 2);
   motor_protocol_raw_frame_t vaxor_first = vaxor_reply(7, 0.0, 0.0, 0.0, 100);
   motor_control_on_raw_frame(&ctx, &vaxor_first);
-  motor_protocol_raw_frame_t creb_conflict = creb_feedback(7, 110);
-  motor_control_on_raw_frame(&ctx, &creb_conflict); // 同 node 不同协议 → 冲突
+  motor_protocol_raw_frame_t cerb_conflict = cerb_feedback(7, 110);
+  motor_control_on_raw_frame(&ctx, &cerb_conflict); // 同 node 不同协议 → 冲突
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 
   // 长静默：冲突态不降级 OFFLINE（§9.3 —— 离线不得成为解除冲突的通道）。
@@ -1798,8 +1804,8 @@ static void test_fault_recovery_no_motion_without_explicit_enable() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
 
-  // 冲突锁存同样冻结 policy_enable：同 node 换协议（vaxor→creb）即冲突。
-  motor_protocol_raw_frame_t cross = creb_feedback(7, 230);
+  // 冲突锁存同样冻结 policy_enable：同 node 换协议（vaxor→cerb）即冲突。
+  motor_protocol_raw_frame_t cross = cerb_feedback(7, 230);
   motor_control_on_raw_frame(&ctx, &cross);
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
   assert(!entry_of(&ctx, 7)->policy_enable);
@@ -1911,7 +1917,7 @@ static void test_soft_stop_encode_failure_pends_retry() {
   assert(motor_control_apply_command_snapshot(&ctx, &empty, 135));
   const motor_control_entry_t *entry = entry_of(&ctx, 3);
   assert(entry->p0_pending);
-  assert(entry->p0_kind == 1U); // 公共头注释：0=无，1=软停，2=失能
+  assert(entry->p0_kind == 1U); // 公共头注释：0=无，1=软停，2=失能，3=使能
   assert(entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
   // service 重试：编码仍失败 → 放弃并计数（可见，不静默）。
   motor_control_service(&ctx, 140);
@@ -2088,6 +2094,116 @@ static void test_p0_tx_slot_on_retry_reencode() {
   assert(!entry_of(&ctx, 2)->p0_pending);
 }
 
+// 过期 P0 挂起帧必须在使能帧成功出队时作废：撤权期间队列满留下的挂起
+// 失能重试帧，不得在重新使能后被 service 补发（否则刚使能的电机被旧
+// 失能帧再次打回）。CERB 有 100ms 使能整定窗——使能与首帧 MIT 之间隔
+// 多个 service 节拍，正是旧失能帧复发的窗口；无整定门协议使能与 MIT 同
+// 边界出队，由 MIT 成功路径作废，不经过本窗口。填队列用回告重入队假帧；
+// 溢出那次转挂起的类别随后会被撤权路径以 DISABLE 覆盖，不影响断言。
+static void test_stale_pending_disable_cleared_by_enable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+
+  // 使能 → 整定窗 → ACTIVE（与 test_cerb_enable_settle_gate 同节奏）。
+  motor_control_command_snapshot_t s = make_snapshot(1, 120);
+  snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 130));
+  motor_control_service(&ctx, 140);
+  motor_control_command_snapshot_t s2 = make_snapshot(2, 150);
+  snapshot_add(&s2, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 160));
+  motor_protocol_raw_frame_t hb1 = cerb_feedback(7, 158);
+  motor_control_on_raw_frame(&ctx, &hb1);
+  motor_control_service(&ctx, 170);
+  motor_control_command_snapshot_t s3 = make_snapshot(3, 180);
+  snapshot_add(&s3, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s3, 185));
+  motor_protocol_raw_frame_t hb2 = cerb_feedback(7, 188);
+  motor_control_on_raw_frame(&ctx, &hb2);
+  motor_control_service(&ctx, 190);
+  motor_control_command_snapshot_t s4 = make_snapshot(4, 220);
+  snapshot_add(&s4, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s4, 225));
+  motor_protocol_raw_frame_t hb3 = cerb_feedback(7, 228);
+  motor_control_on_raw_frame(&ctx, &hb3);
+  motor_control_service(&ctx, 235); // 整定 105ms ≥ 100ms → 到期
+  motor_control_command_snapshot_t s5 = make_snapshot(5, 245);
+  snapshot_add(&s5, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s5, 250));
+  motor_protocol_raw_frame_t hb4 = cerb_feedback(7, 252);
+  motor_control_on_raw_frame(&ctx, &hb4);
+  motor_control_service(&ctx, 260);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // P0 待发队列填满（回告重入队假帧；容量 MAX_TX_PENDING → MAX+1 次
+  // 调用才溢出，最后一次失败返回 false）。
+  bool last_requeue = true;
+  for (uint32_t k = 0; k <= MOTOR_CONTROL_MAX_TX_PENDING; ++k) {
+    motor_protocol_tx_frame_t fill = {};
+    fill.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+    fill.tx_slot = 0; // motor 7 = 表项 0
+    fill.can_id = 0x700U;
+    fill.size = 1U;
+    last_requeue = motor_control_requeue_p0(&ctx, &fill);
+  }
+  assert(!last_requeue);
+
+  // 撤权：失能帧推送失败（队列全 P0 无可驱逐）→ 转挂起重试。
+  assert(motor_control_set_authorization(&ctx, false, 270));
+  assert(entry_of(&ctx, 7)->p0_pending);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+
+  // 重新授权 + 新完整快照 → 使能帧出队（整定窗开启）→ 过期挂起必须
+  // 同时作废；否则 service 在整定窗内把旧失能帧补发出门。
+  motor_protocol_raw_frame_t hb5 = cerb_feedback(7, 278);
+  motor_control_on_raw_frame(&ctx, &hb5);
+  assert(motor_control_set_authorization(&ctx, true, 280));
+  motor_control_command_snapshot_t s6 = make_snapshot(6, 285);
+  snapshot_add(&s6, 7, 0.15f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s6, 290));
+  assert(!entry_of(&ctx, 7)->p0_pending); // 修复点：使能成功即作废
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING); // 取走使能帧
+  motor_control_service(&ctx, 300);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 0);
+  assert(!entry_of(&ctx, 7)->p0_pending);
+}
+
+// 状态副本按 motor_id 升序输出（注册表顺序 = 发现序，会随上线顺序漂移）。
+// 注册顺序故意乱序（5、3、7），断言 motion/status 副本均升序；capacity
+// 截断保留最小 id 前缀；缺席电机（未发现）不产生条目。
+static void test_state_copies_sorted_by_motor_id() {
+  motor_control_context_t ctx;
+  const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
+  motor_control_init(&ctx, adapters, 1);
+  motor_protocol_model_profile_t profile = g_mock_profile;
+  const uint16_t nodes[3] = {5U, 3U, 7U};
+  for (size_t k = 0; k < 3; ++k) {
+    motor_protocol_raw_frame_t f = {};
+    f.bus_index = 0;
+    f.can_id = 0x600U + nodes[k];
+    f.dlc = 4U;
+    f.rx_tick_ms = 100;
+    f.data[0] = 1U;
+    motor_control_on_raw_frame(&ctx, &f);
+    assert(motor_control_bind_profile_ptr(&ctx, nodes[k], &profile, 100));
+  }
+  motor_control_motion_state_t states[8];
+  size_t n = motor_control_copy_motion_states(&ctx, states, 8, 120);
+  assert(n == 3);
+  assert(states[0].motor_id == 3U && states[1].motor_id == 5U &&
+         states[2].motor_id == 7U);
+  motor_control_status_t statuses[8];
+  size_t m = motor_control_copy_statuses(&ctx, statuses, 8, 120);
+  assert(m == 3);
+  assert(statuses[0].motor_id == 3U && statuses[1].motor_id == 5U &&
+         statuses[2].motor_id == 7U);
+  n = motor_control_copy_motion_states(&ctx, states, 2, 120);
+  assert(n == 2 && states[0].motor_id == 3U && states[1].motor_id == 5U);
+}
+
 
 static void run_all_tests() {
   test_init_starts_unauthorized_and_empty();
@@ -2107,17 +2223,17 @@ static void run_all_tests() {
   test_recovery_requires_fresh_snapshot_not_old_targets();
   test_snapshot_validation();
   test_vaxor_offline_and_reconnect();
-  test_creb_offline_by_heartbeat_loss();
-  test_creb_enable_settle_gate();
+  test_cerb_offline_by_heartbeat_loss();
+  test_cerb_enable_settle_gate();
   test_vaxor_no_settle();
   test_gains_clamped_to_profile();
   test_vaxor_software_limits_clamp_before_pack();
   test_vaxor_mode_transaction_gates_motion();
-  test_creb_limits_unsupported();
-  test_creb_set_mode_mit_immediate_ok();
+  test_cerb_limits_unsupported();
+  test_cerb_set_mode_mit_immediate_ok();
   test_vendor_fault_latches_and_recovers();
   test_mock_transaction_advance_retry_busy_timeout();
-  test_probe_discovery_creb_only();
+  test_probe_discovery_cerb_only();
   test_event_ring_drains_and_counts_drops();
   test_collect_tx_capacity_and_remainder();
   test_motion_state_age_and_nan();
@@ -2141,7 +2257,8 @@ static void run_all_tests() {
   test_tx_slot_maps_entry_index();
   test_p0_tx_slot_on_soft_stop_and_disable();
   test_p0_tx_slot_on_retry_reencode();
-  test_creb_offline_by_heartbeat_loss();
+  test_stale_pending_disable_cleared_by_enable();
+  test_state_copies_sorted_by_motor_id();
 }
 
 int main() {

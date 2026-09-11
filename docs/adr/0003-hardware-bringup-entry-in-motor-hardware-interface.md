@@ -1,5 +1,7 @@
 # 真机 bring-up 入口归属 motor_hardware_interface
 
+> **当前适用性（2026-09-11）：有效，入口细节已演进。** 真机 bring-up 仍由 `motor_hardware_interface` 持有；当前包已内置上半身模型 xacro 和默认路径，正文“`model_xacro` 必填”是原始决策阶段的约束。
+
 **Status**: accepted
 
 真机启动入口（`hardware.launch.py`、`driver_controllers.yaml` 与 CAN-FD ros2_control

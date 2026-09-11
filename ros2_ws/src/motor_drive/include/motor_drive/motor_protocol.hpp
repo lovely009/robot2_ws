@@ -58,6 +58,6 @@ private:
 };
 
 inline constexpr const char *kVaxorType = "vaxor";
-inline constexpr const char *kCrebType = "creb";
+inline constexpr const char *kCerbType = "cerb";
 
 } // namespace motor_drive

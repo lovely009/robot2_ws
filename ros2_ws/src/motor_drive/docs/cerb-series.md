@@ -1,7 +1,7 @@
-# CREB Lite CAN FD / MIT 协议摘要
+# CERB Lite CAN FD / MIT 协议摘要
 
-本文记录 `motor_drive` 实际使用的协议子集。来源为《CREB 关节模组使用协议
-简易说明书》V1.0（适用固件 1.16.07 以上）、《CREB 电机上手流程（三）—
+本文记录 `motor_drive` 实际使用的协议子集。来源为《CERB 关节模组使用协议
+简易说明书》V1.0（适用固件 1.16.07 以上）、《CERB 电机上手流程（三）—
 MIT 模式说明》及 R48/R58 产品图纸。电机参数设置页中的 MIT 范围必须与
 软件配置一致。
 
@@ -32,7 +32,7 @@ bit 4:1 为模式（MIT=`0x06`）。Byte 1–8 依次打包
 | CE-RB-R58-101-Lite-CO-I | 101:1 | 0.086 Nm/A | 20/45 Nm | 3.5/10.8 A |
 | CE-RB-R48-101-Lite-CO-I | 101:1 | 0.077 Nm/A | 5/11 Nm | 1.3/3.2 A |
 
-对应型号库名称为 `creb_r58_101` 与 `creb_r48_101`。每台电机必须在拓扑中用
+对应型号库名称为 `cerb_r58_101` 与 `cerb_r48_101`。每台电机必须在拓扑中用
 `mit_position_limit_rad`、`mit_velocity_limit_rad_s`、
 `mit_torque_limit_nm` 明确配置参数页中的量化范围；三者必须为正数。旧资料的
 示例值不能自动成为具体生产型号的配置。

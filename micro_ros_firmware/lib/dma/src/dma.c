@@ -4,9 +4,9 @@
 //                    缓冲位于 .bdma_noinit/RAM_D3）
 //   其余空闲。
 //
-// 优先级合规：DMA 流中断优先级必须 ≥（数值上不高于触发优先级门槛）
-// configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY——当前不调用 FromISR API，
-// 但未来 DMA 回调一旦使用 RTOS 服务，此断言阻止静默违规（同 lib/fdcan 的
+// 优先级合规：DMA 流中断优先级必须 ≥ configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY
+// （数值更大=紧迫度更低，不得抢占 FreeRTOS 内核临界区）——当前不调用 FromISR
+// API，但未来 DMA 回调一旦使用 RTOS 服务，此断言阻止静默违规（同 lib/fdcan 的
 // FDCAN_FREERTOS_IRQ_PRIORITY 断言做法）。
 
 #include "dma.h"

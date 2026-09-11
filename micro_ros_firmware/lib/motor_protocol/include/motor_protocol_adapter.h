@@ -38,7 +38,7 @@ extern "C" {
 #define MOTOR_PROTOCOL_CAP_MODE_MIT (1UL << 0)
 #define MOTOR_PROTOCOL_CAP_MODE_VELOCITY (1UL << 1)
 #define MOTOR_PROTOCOL_CAP_MODE_POSITION (1UL << 2)
-#define MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE (1UL << 3)  // CREB 驱动器侧限位
+#define MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE (1UL << 3)  // CERB 驱动器侧限位
 #define MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE (1UL << 4)     // Vaxor 仅软件限位
 #define MOTOR_PROTOCOL_CAP_AUTONOMOUS_FEEDBACK (1UL << 5) // vaxor ~20ms 自主上报
 
@@ -99,7 +99,7 @@ typedef struct {
   float supply_voltage_v;          // 标称供电电压
   float default_kp;                // 默认 MIT 增益（使能/软停阻尼用）
   float default_kd;
-  float mit_position_limit_rad;    // MIT 量化范围（CREB 逐帧量化用）
+  float mit_position_limit_rad;    // MIT 量化范围（CERB 逐帧量化用）
   float mit_velocity_limit_rad_s;
   float mit_torque_limit_nm;
   float kp_max;                    // 增益线协议上限（Policy 钳制用）
@@ -125,7 +125,7 @@ typedef struct {
   float position_rad;    // 关节侧（已按 Profile 换算；未绑定为 NaN）
   float velocity_rad_s;  // 关节侧
   float effort_nm;       // 关节侧（Iq×Kt×减速比×效率）
-  float current_a;       // 电机电流（vaxor/CREB 反馈均有）
+  float current_a;       // 电机电流（vaxor/CERB 反馈均有）
   float voltage_v;       // 仅 vaxor 20B 状态帧
   float temperature_c;   // 当前两协议均无来源，恒 NaN
   uint8_t drive_mode;    // 厂家模式字节（原样透传）
@@ -135,7 +135,7 @@ typedef struct {
   uint8_t motor_type;    // vaxor 型号线索（绑定 Profile 的诊断参考）
   bool has_motion_state; // 本帧含位置/速度/电流运动量（12B 反馈）
   bool is_status_frame;  // vaxor 20B 状态帧
-  bool fault_active;     // 厂家故障位有效（如 CREB data[11]&0x20）
+  bool fault_active;     // 厂家故障位有效（如 CERB data[11]&0x20）
 } motor_protocol_measured_state_t;
 
 // ---------------------------------------------------------------------------
@@ -196,12 +196,12 @@ typedef enum {
 // ---------------------------------------------------------------------------
 typedef struct motor_protocol_adapter {
   const char *protocol_name;
-  uint16_t node_id_min; // 厂家节点号合法范围（vaxor 1..60，CREB 1..127）
+  uint16_t node_id_min; // 厂家节点号合法范围（vaxor 1..60，CERB 1..127）
   uint16_t node_id_max;
   uint32_t offline_timeout_ms; // OFFLINE 判定阈值占位（TBD-SAFETY-03）
-  uint32_t enable_settle_ms;   // 使能后到可发运动目标的整定时间（CREB 100ms）
+  uint32_t enable_settle_ms;   // 使能后到可发运动目标的整定时间（CERB 100ms）
   bool autonomous_feedback;    // true：存在与命令无关的 20ms 状态心跳（vaxor
-                               // 20B 状态帧 / CREB SYNC 上报帧，均承担总线检测）
+                               // 20B 状态帧 / CERB SYNC 上报帧，均承担总线检测）
                                // ——OFFLINE 按心跳龄判定；false：反馈仅在命令
                                // 期出现——只在"正在发命令却持续无反馈"时判离线
   // true：配置事务的写阶段无厂家确认手段（无读回对象），事务成功只能收敛
@@ -224,7 +224,7 @@ typedef struct motor_protocol_adapter {
                              const motor_protocol_control_intent_t *intent,
                              motor_protocol_tx_frame_t *out);
 
-  // 使能帧（中性目标 + 使能位）。vaxor=control(run=1,mode)，CREB=中性 MIT。
+  // 使能帧（中性目标 + 使能位）。vaxor=control(run=1,mode)，CERB=中性 MIT。
   bool (*encode_enable)(const motor_protocol_model_profile_t *profile, uint16_t node,
                         uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
@@ -237,7 +237,7 @@ typedef struct motor_protocol_adapter {
   bool (*encode_disable)(const motor_protocol_model_profile_t *profile, uint16_t node,
                          uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
-  // 发现/重连/热插拔探测帧（CREB 0x080 SYNC；vaxor 无 → 返回 false）。
+  // 发现/重连/热插拔探测帧（CERB 0x080 SYNC；vaxor 无 → 返回 false）。
   // 禁止作为常规 100Hz 控制触发（ARD §23.4、禁止项 14）。
   bool (*encode_discovery_sync)(uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
@@ -259,7 +259,7 @@ typedef struct motor_protocol_adapter {
 
 // 内置 adapter（新增协议家族 = 新增一个实例，内核零改动）。
 extern const motor_protocol_adapter_t motor_protocol_vaxor_adapter;
-extern const motor_protocol_adapter_t motor_protocol_creb_adapter;
+extern const motor_protocol_adapter_t motor_protocol_cerb_adapter;
 
 // 节点号合法性（vaxor ID 算术函数不校验范围，入口统一在此把关）。
 static inline bool motor_protocol_adapter_valid_node(

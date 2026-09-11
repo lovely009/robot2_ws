@@ -58,7 +58,7 @@ size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity);
 typedef struct {
   uint16_t motor_id;
   uint8_t bus_index;
-  uint8_t protocol; // 0=VAXOR 1=CREB
+  uint8_t protocol; // 0=VAXOR 1=CERB
   char model_name[32];
   uint32_t capability_flags;
   bool online;

@@ -1,5 +1,7 @@
 # ADR 0006：dev-real「三自适应」闭环与默认 tty
 
+> **当前适用性（2026-09-11）：有效。** transport、protocol 和数量继续配置驱动；默认 tty 只是一套生产配置基线，部署时须按实际设备映射校准。
+
 **Status**: accepted（`dev-real` 专用；取代 ADR 0005 中"移除串口"的结论）
 
 ## Context

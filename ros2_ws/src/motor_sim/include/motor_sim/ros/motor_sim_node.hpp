@@ -55,15 +55,29 @@ struct NodeDefaults {
   bool fault_latching_enabled{true};
 };
 
+// 按外部拓扑契约校验参数：buses 顺序、数量与每台电机地址必须与契约一致。
 void validate_node_parameters(
     const NodeParameters &parameters,
     const ::motor_sim::core::TopologyContract &contract);
 
+// 仅按一组预期 bus 名校验参数：用于独立入口，总线集合来自配置文件而非外部契约。
+void validate_node_parameters(
+    const NodeParameters &parameters,
+    const std::vector<std::string> &expected_buses);
+
 class MotorSimNode final : public rclcpp::Node {
 public:
+  // 机器人集成层入口：按外部拓扑契约校验 YAML 与端口映射，保证与 URDF/关节清单一致。
   MotorSimNode(const rclcpp::NodeOptions &options,
                ::motor_sim::core::TopologyContract contract,
                NodeDefaults defaults);
+
+  // 通用独立入口：不依赖外部拓扑契约，buses/motors 完全由 config_file 决定。
+  // bus→endpoint 映射通过 `<bus_name>_port` 参数显式传入；不提供任何机器人默认值。
+  explicit MotorSimNode(const rclcpp::NodeOptions &options,
+                        NodeDefaults defaults = {});
+
+  // 测试/集成入口：直接注入已构造的 config 与 transports。
   MotorSimNode(const rclcpp::NodeOptions &options, SystemConfig config,
                TransportMap transports, NodeDefaults defaults = {});
 

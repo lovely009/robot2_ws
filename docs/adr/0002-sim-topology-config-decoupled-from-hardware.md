@@ -1,5 +1,7 @@
 # 仿真拓扑配置与真机解耦（motor_canfd_sim 自持 motor_canfd.yaml）
 
+> **当前适用性（2026-09-11）：原则仍有效，实现已演进。** 当前通用模拟能力位于 `motor_sim`，机器人专属模型与联动配置归 `robot_arm_gazebo`；两者均须可独立运行。正文中的旧包名和 UR5e 拓扑只表示当时实现。
+
 **Status**: accepted
 
 仿真不再复用 `motor_hardware_interface/config/motor_canfd.yaml`：`motor_canfd_sim` 自带
@@ -45,6 +47,5 @@ ADR 0001 中“真机与仿真共享同一份 motor_canfd.yaml”的部分。
 接真机前必须替换为标定/实测值的仿真假设：
 
 - `motor_2530.torque_constant_nm_per_amp`（当前 0.35 Nm/A）
-- RP 扭矩上限 `rp_torque_limit_nm`（当前 60 Nm）
 - 腕部位置/速度模式增益（`motor_2530_position_*` / `motor_2530_velocity_mode_*`）
 - URDF 各连杆质量与惯量

@@ -257,7 +257,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
                                  MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
         return true;
       }
-      // 设备侧限位（CREB）：必须走 request_id 事务 + 读回核验（ARD §26.2）。
+      // 设备侧限位（CERB）：必须走 request_id 事务 + 读回核验（ARD §26.2）。
       if (entry->tx_active) {
         ctx->config_rejected_count++;
         motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,

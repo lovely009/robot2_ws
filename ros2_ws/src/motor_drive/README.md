@@ -2,7 +2,7 @@
 
 C++17 电机驱动库（`dev-real` 真机线，无 ROS 依赖）：双传输后端
 （`socketcan` / `serial_slcan`）、协议策略注册、动态电机映射。
-内置 `vaxor` 与 `creb` 两套协议。
+内置 `vaxor` 与 `cerb` 两套协议。
 
 ## 职责
 
@@ -30,7 +30,7 @@ DriverConfig (buses[]/motors[]) -> MotorDriver
 
 `BusConfig`：`name` + `interface_name`（socketcan）+ `transport` + `tty`
 （serial_slcan）。`serial_slcan` 固定 `C->S8(仲裁 1M)->Y5(数据 5M)->O`，POSIX
-termios，无额外依赖。CREB 使用标准 CAN FD 帧及 BRS，默认仲裁 1 Mbit/s、
+termios，无额外依赖。CERB 使用标准 CAN FD 帧及 BRS，默认仲裁 1 Mbit/s、
 数据 5 Mbit/s。
 
 ## 公共接口
@@ -53,8 +53,8 @@ termios，无额外依赖。CREB 使用标准 CAN FD 帧及 BRS，默认仲裁 1
 
 - `scripts/verify_2530_serial.py`：CANable2 串口验证 25/30 mm 电机（需 pyserial，
   源码树脚本不安装）。
-- `docs/`：CREB 与 16–30 mm 系列协议摘要
-  （[`creb-series.md`](docs/creb-series.md)、
+- `docs/`：CERB 与 16–30 mm 系列协议摘要
+  （[`cerb-series.md`](docs/cerb-series.md)、
   [`motor-2530-series.md`](docs/motor-2530-series.md)）。
 
 ## 测试

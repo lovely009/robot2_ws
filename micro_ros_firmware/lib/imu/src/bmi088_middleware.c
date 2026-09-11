@@ -56,7 +56,7 @@ void BMI088_com_init(void) {
   hspi_bmi088.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi_bmi088.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi_bmi088.Init.NSS = SPI_NSS_SOFT;
-  hspi_bmi088.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+  hspi_bmi088.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // PLL1Q 240MHz/32 = 7.5MHz SCK
   hspi_bmi088.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi_bmi088.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi_bmi088.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -96,6 +96,7 @@ void BMI088_GYRO_NS_H(void) {
 uint8_t BMI088_read_write_byte(uint8_t reg) {
   uint8_t tx = reg, rx = 0;
   if (BMI088_transport_error_latched()) {
+    // 已锁存：短路本次操作剩余字节，避免每字节重跑 2ms HAL 超时。
     return 0U;
   }
   if (HAL_SPI_TransmitReceive(&hspi_bmi088, &tx, &rx, 1,

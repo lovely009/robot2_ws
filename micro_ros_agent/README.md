@@ -16,7 +16,8 @@ micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。�
 > 说明：官方仓库已由 `micro_ros_agent` 更名为 `micro-ROS-Agent`；官方 apt 仓库
 > **没有** `ros-humble-micro-ros-agent`，故采用源码构建。第三方 `.git` 已移除，
 > 以普通目录快照提交（不含构建产物）。`can_bridge_msgs` 为本地新增包，定义
-> CAN 帧桥接与电机命令消息，供主机侧 `ros2 topic echo/pub` 使用。
+> ID 化有界电机消息（命令快照、运动/诊断状态、拓扑、事件与配置事务），
+> 供主机侧与上层电机栈使用。
 
 ## 构建（免 sudo）
 
@@ -49,7 +50,8 @@ ros2 run micro_ros_agent micro_ros_agent --help
 - 两套工作区独立构建；运行时同时 source 两个 `install/setup.bash`（先 `/opt/ros`，
   再 `ros2_ws` 与 `micro_ros_agent`，顺序无强依赖）。
 - 默认 DDS 域（domain 0）下，micro-ROS 客户端发布的 topic 与 `ros2_ws` 节点直接互通，
-  无需额外桥接；如需映射进 ros2_control/电机栈，再设计桥接节点。
+  无需额外桥接；上层 joint↔motor_id 映射的迁移进度见固件 HANDOFF
+  （`../micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`）。
 
 ## 冒烟验证（无固件）
 
@@ -63,4 +65,5 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/pts/N -v
 ```
 
 > 无客户端时 Agent 节点不会出现在 `ros2 node list`（节点在客户端建立会话后才注册），
-> 属正常现象；端到端收发验证留待固件阶段。
+> 属正常现象；与固件的端到端联调见固件 README「与 micro_ros_agent 联调」与
+> [FDCAN1 台架指南](../docs/guides/fdcan1-bench-guide.md)。

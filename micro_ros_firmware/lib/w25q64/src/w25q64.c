@@ -277,6 +277,7 @@ w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
   uint32_t current_address = address;
   const uint8_t *current_data = data;
   uint32_t remaining = size;
+  // 页编程不可跨页（跨页地址回卷到页首）：逐页拆分写入。
   while (remaining != 0U) {
     uint32_t page_remaining =
         W25Q64_PAGE_SIZE - (current_address % W25Q64_PAGE_SIZE);

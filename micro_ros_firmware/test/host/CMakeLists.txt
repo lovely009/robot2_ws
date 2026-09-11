@@ -21,7 +21,7 @@ add_executable(test_motor_protocol_adapter
   test_motor_protocol_adapter.cpp
   ../../lib/motor_protocol/src/motor_protocol.c
   ../../lib/motor_protocol/src/vaxor_adapter.c
-  ../../lib/motor_protocol/src/creb_adapter.c
+  ../../lib/motor_protocol/src/cerb_adapter.c
   ../../lib/motor_control/src/motor_control_profile.c)
 
 target_include_directories(test_motor_protocol_adapter PRIVATE
@@ -40,7 +40,7 @@ add_executable(test_motor_control
   ../../lib/motor_control/src/motor_control_profile.c
   ../../lib/motor_protocol/src/motor_protocol.c
   ../../lib/motor_protocol/src/vaxor_adapter.c
-  ../../lib/motor_protocol/src/creb_adapter.c)
+  ../../lib/motor_protocol/src/cerb_adapter.c)
 
 target_include_directories(test_motor_control PRIVATE
   ../../lib/motor_control/include
@@ -129,3 +129,9 @@ target_compile_definitions(test_led_status PRIVATE
   HOST_TEST=1)
 
 add_test(NAME led_status COMMAND test_led_status)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_test(
+  NAME fdcan_motor_sim
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fdcan_motor_sim.py)

@@ -1,5 +1,7 @@
 # 四包分层与配置单一来源（motor_canfd）
 
+> **当前适用性（2026-09-11）：历史、部分被取代。** 本文保留旧四包与分支语境；当前 `dev/robot_ws` 是六包工作区。纯驱动/ROS 适配/电机模拟/机器人集成的职责分层仍适用，配置共享结论由 ADR 0002 修正。现行入口见[ADR 索引](README.md)。
+
 **Status**: accepted；其中“真机与仿真共享同一份 motor_canfd.yaml”部分已被
 [ADR 0002](./0002-sim-topology-config-decoupled-from-hardware.md) 取代；
 “四包单向依赖链”仅适用于 `dev-sim`（原 develop）仿真分支，`dev-real` 真机分支只保留

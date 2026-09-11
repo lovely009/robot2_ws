@@ -236,7 +236,7 @@ static void test_vaxor_encode_disable() {
   assert(!control.run);
 }
 
-// vaxor 无 SYNC：发现探测必须拒绝（0x080 只属于 CREB 发现路径）。
+// vaxor 无 SYNC：发现探测必须拒绝（0x080 只属于 CERB 发现路径）。
 static void test_vaxor_no_discovery_sync() {
   motor_protocol_tx_frame_t out = {};
   assert(!motor_protocol_vaxor_adapter.encode_discovery_sync(0, &out));
@@ -278,10 +278,10 @@ static void test_vaxor_config_mode_transaction_stages() {
 }
 
 // ---------------------------------------------------------------------------
-// CREB adapter
+// CERB adapter
 // ---------------------------------------------------------------------------
 
-static motor_protocol_raw_frame_t creb_feedback(uint16_t node, int16_t pos_deg_counts,
+static motor_protocol_raw_frame_t cerb_feedback(uint16_t node, int16_t pos_deg_counts,
                                                 int16_t vel_rpm, int16_t effort_ma,
                                                 uint8_t tail_byte, uint32_t tick) {
   uint8_t data[12] = {};
@@ -297,13 +297,13 @@ static motor_protocol_raw_frame_t creb_feedback(uint16_t node, int16_t pos_deg_c
 
 // 解码：位置为关节侧原样（deg→rad）；速度为电机侧 rpm→rad/s 后 /减速比；
 // 扭矩 = Iq(A)×Kt×减速比。故障位（data[11]&0x20）标注 fault_active 且不丢帧。
-static void test_creb_decode_feedback_converts_si() {
+static void test_cerb_decode_feedback_converts_si() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r58_101", &profile));
+  assert(find_profile("cerb_r58_101", &profile));
 
-  motor_protocol_raw_frame_t frame = creb_feedback(3, 1820, 120, 2000, 0x00, 700);
+  motor_protocol_raw_frame_t frame = cerb_feedback(3, 1820, 120, 2000, 0x00, 700);
   motor_protocol_measured_state_t measured = {};
-  assert(motor_protocol_creb_adapter.decode_frame(profile, 3, &frame, &measured));
+  assert(motor_protocol_cerb_adapter.decode_frame(profile, 3, &frame, &measured));
 
   assert(measured.has_motion_state);
   assert(!measured.fault_active);
@@ -313,17 +313,17 @@ static void test_creb_decode_feedback_converts_si() {
   assert(fabs(measured.current_a - 2.0) < 1e-6);
 
   // 故障位帧：fault_active 置位，运动量缺失（NaN），帧本身有效。
-  motor_protocol_raw_frame_t faulted = creb_feedback(3, 1820, 120, 2000, 0x20, 701);
+  motor_protocol_raw_frame_t faulted = cerb_feedback(3, 1820, 120, 2000, 0x20, 701);
   motor_protocol_measured_state_t fault_state = {};
-  assert(motor_protocol_creb_adapter.decode_frame(profile, 3, &faulted, &fault_state));
+  assert(motor_protocol_cerb_adapter.decode_frame(profile, 3, &faulted, &fault_state));
   assert(fault_state.fault_active);
   assert(nan_equal(fault_state.position_rad, NAN));
 }
 
-// 编码 MIT：关节侧 SI 直通（CREB 线协议即关节侧），使能位进控制字。
-static void test_creb_encode_mit_command() {
+// 编码 MIT：关节侧 SI 直通（CERB 线协议即关节侧），使能位进控制字。
+static void test_cerb_encode_mit_command() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r58_101", &profile));
+  assert(find_profile("cerb_r58_101", &profile));
 
   motor_protocol_control_intent_t intent = {};
   intent.position_rad = 1.0f;
@@ -334,7 +334,7 @@ static void test_creb_encode_mit_command() {
   intent.enable = true;
 
   motor_protocol_tx_frame_t out = {};
-  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   assert(out.bus_index == 2);
   assert(out.can_id == 0x110U + 9U);
   assert(out.is_fd);
@@ -343,20 +343,20 @@ static void test_creb_encode_mit_command() {
   assert(out.data[0] == 0xccU); // 使能位 + MIT 模式
   // 与 codec 直连打包逐字节一致（passthrough 语义）。
   motor_protocol_joint_command_t wire = {1.0, -2.0, 30.0, 1.0, 5.0};
-  motor_protocol_creb_limits_t limits = {profile->mit_position_limit_rad,
+  motor_protocol_cerb_limits_t limits = {profile->mit_position_limit_rad,
                                          profile->mit_velocity_limit_rad_s,
                                          profile->mit_torque_limit_nm};
   uint8_t expected[12];
-  motor_protocol_pack_creb_mit_frame(&wire, &limits, true, expected);
+  motor_protocol_pack_cerb_mit_frame(&wire, &limits, true, expected);
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
 // 速度单位契约：命令侧关节 rad/s 直通 π 上限 12 位对称量化
 // （不乘 gear），反馈侧电机侧 rpm ÷gear。两侧口径若混淆——命令误乘 gear=101
 // 会满码饱和失真——由「非饱和」断言当场抓获。
-static void test_creb_velocity_unit_contract() {
+static void test_cerb_velocity_unit_contract() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r58_101", &profile));
+  assert(find_profile("cerb_r58_101", &profile));
 
   motor_protocol_tx_frame_t out = {};
   motor_protocol_control_intent_t intent = {};
@@ -366,10 +366,10 @@ static void test_creb_velocity_unit_contract() {
   // ±2.0 rad/s 落在量化区间内部：非饱和即自证命令侧未乘 gear（×101 会双双
   // 饱和到满码/零码），正负码关于中点对称（12 位对称量化）。
   intent.velocity_rad_s = 2.0f;
-  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   const uint32_t code_pos = ((uint32_t)out.data[3] << 4) | (out.data[4] >> 4);
   intent.velocity_rad_s = -2.0f;
-  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   const uint32_t code_neg = ((uint32_t)out.data[3] << 4) | (out.data[4] >> 4);
   assert(code_pos > 0U && code_pos < 4095U);
   assert(code_neg > 0U && code_neg < 4095U);
@@ -377,61 +377,61 @@ static void test_creb_velocity_unit_contract() {
 
   // 上限语义：超出 Profile π 即饱和（钉死「上限=π」而非任何 ×gear 放大限）。
   intent.velocity_rad_s = 10.0f;
-  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   assert(((uint32_t)out.data[3] << 4) | (out.data[4] >> 4) == 0xFFFU);
   intent.velocity_rad_s = -10.0f;
-  assert(motor_protocol_creb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   assert(((uint32_t)out.data[3] << 4) | (out.data[4] >> 4) == 0x000U);
 
   // 反馈分向复断言：1200 rpm（电机侧）→ ÷101 → 关节侧 rad/s。
   motor_protocol_raw_frame_t frame =
-      creb_feedback(3, 1820, 1200, 2000, 0x00, 705);
+      cerb_feedback(3, 1820, 1200, 2000, 0x00, 705);
   motor_protocol_measured_state_t measured = {};
-  assert(motor_protocol_creb_adapter.decode_frame(profile, 3, &frame, &measured));
+  assert(motor_protocol_cerb_adapter.decode_frame(profile, 3, &frame, &measured));
   assert(fabs(measured.velocity_rad_s - (1200.0 * 2.0 * M_PI / 60.0) / 101.0) <
          1e-4);
 }
 
 // 使能/失能帧：中性目标 + 控制字使能位（0xcc 使能 / 0x0c 失能）。
-static void test_creb_enable_disable_frames() {
+static void test_cerb_enable_disable_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r48_101", &profile));
+  assert(find_profile("cerb_r48_101", &profile));
 
   motor_protocol_tx_frame_t enable = {};
-  assert(motor_protocol_creb_adapter.encode_enable(profile, 1, 0, &enable));
+  assert(motor_protocol_cerb_adapter.encode_enable(profile, 1, 0, &enable));
   assert(enable.can_id == 0x111U);
   assert(enable.size == 12);
   assert(enable.data[0] == 0xccU);
 
   motor_protocol_tx_frame_t disable = {};
-  assert(motor_protocol_creb_adapter.encode_disable(profile, 1, 0, &disable));
+  assert(motor_protocol_cerb_adapter.encode_disable(profile, 1, 0, &disable));
   assert(disable.tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
   assert(disable.data[0] == 0x0cU);
 }
 
 // 软停帧：阻尼 kd=Profile 默认，保持使能，P0。
-static void test_creb_encode_soft_stop() {
+static void test_cerb_encode_soft_stop() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r48_101", &profile));
+  assert(find_profile("cerb_r48_101", &profile));
   motor_protocol_tx_frame_t out = {};
-  assert(motor_protocol_creb_adapter.encode_soft_stop(profile, 2, 1, &out));
+  assert(motor_protocol_cerb_adapter.encode_soft_stop(profile, 2, 1, &out));
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
   assert(out.data[0] == 0xccU); // 保持使能
   // kd=1.0 量化到 12bit/[0,5] → 819 = 0x333，位于 kd 字段（byte6 高 4 位 + byte7 低 4 位前段）。
   // 与 codec 直连一致性校验：
   motor_protocol_joint_command_t wire = {0.0, 0.0, 0.0, profile->default_kd, 0.0};
-  motor_protocol_creb_limits_t limits = {profile->mit_position_limit_rad,
+  motor_protocol_cerb_limits_t limits = {profile->mit_position_limit_rad,
                                          profile->mit_velocity_limit_rad_s,
                                          profile->mit_torque_limit_nm};
   uint8_t expected[12];
-  motor_protocol_pack_creb_mit_frame(&wire, &limits, true, expected);
+  motor_protocol_pack_cerb_mit_frame(&wire, &limits, true, expected);
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
 // 发现帧：0x080、零长度、经典帧、P2。
-static void test_creb_encode_discovery_sync() {
+static void test_cerb_encode_discovery_sync() {
   motor_protocol_tx_frame_t out = {};
-  assert(motor_protocol_creb_adapter.encode_discovery_sync(2, &out));
+  assert(motor_protocol_cerb_adapter.encode_discovery_sync(2, &out));
   assert(out.can_id == 0x080U);
   assert(out.size == 0);
   assert(!out.is_fd);
@@ -441,25 +441,25 @@ static void test_creb_encode_discovery_sync() {
 
 // 配置事务：非 MIT 模式与限位写均不受支持（0 阶段 → 内核回 UNSUPPORTED；
 // 限位厂家对象属 TBD-CONFIG-01，不猜）。
-static void test_creb_config_unsupported_paths() {
+static void test_cerb_config_unsupported_paths() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("creb_r58_101", &profile));
+  assert(find_profile("cerb_r58_101", &profile));
 
   motor_protocol_config_request_t mode = {};
   mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
   mode.mode = MOTOR_PROTOCOL_MODE_VELOCITY;
-  assert(motor_protocol_creb_adapter.config_stage_count(profile, &mode) == 0);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &mode) == 0);
 
   motor_protocol_config_request_t limits = {};
   limits.kind = MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS;
   limits.position_limits.min_position_rad = -1.0f;
   limits.position_limits.max_position_rad = 1.0f;
-  assert(motor_protocol_creb_adapter.config_stage_count(profile, &limits) == 0);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &limits) == 0);
 }
 
 // 节点范围与 ID 段不重叠（同一 CAN ID 不得同时归属两个协议）。
 static void test_adapter_id_ranges_disjoint() {
-  // vaxor reply 最低 0x701+4 = 0x705；CREB feedback 最高 0x300+127 = 0x37f。
+  // vaxor reply 最低 0x701+4 = 0x705；CERB feedback 最高 0x300+127 = 0x37f。
   assert(0x300U + 127U < 0x701U + 4U);
   // vaxor command 最低 0x501+4 = 0x505 > 0x37f。
   assert(0x37fU < 0x505U);
@@ -485,15 +485,15 @@ static void test_profile_catalog_baselines() {
   assert(p->gear_ratio == 30.0f);
   assert(p->gear_efficiency == 0.70f);
 
-  assert(find_profile("creb_r58_101", &p));
-  assert(p->protocol == &motor_protocol_creb_adapter);
+  assert(find_profile("cerb_r58_101", &p));
+  assert(p->protocol == &motor_protocol_cerb_adapter);
   assert(p->gear_ratio == 101.0f);
   assert(fabs(p->torque_constant_nm_per_amp - 0.086) < 1e-6);
   assert(p->rated_torque_nm == 20.0f);
   assert(p->peak_torque_nm == 45.0f);
   assert((p->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U);
 
-  assert(find_profile("creb_r48_101", &p));
+  assert(find_profile("cerb_r48_101", &p));
   assert(fabs(p->torque_constant_nm_per_amp - 0.077) < 1e-6);
   assert(p->rated_torque_nm == 5.0f);
   assert(p->peak_torque_nm == 11.0f);
@@ -517,13 +517,13 @@ int main() {
   test_vaxor_encode_disable();
   test_vaxor_no_discovery_sync();
   test_vaxor_config_mode_transaction_stages();
-  test_creb_decode_feedback_converts_si();
-  test_creb_encode_mit_command();
-  test_creb_velocity_unit_contract();
-  test_creb_enable_disable_frames();
-  test_creb_encode_soft_stop();
-  test_creb_encode_discovery_sync();
-  test_creb_config_unsupported_paths();
+  test_cerb_decode_feedback_converts_si();
+  test_cerb_encode_mit_command();
+  test_cerb_velocity_unit_contract();
+  test_cerb_enable_disable_frames();
+  test_cerb_encode_soft_stop();
+  test_cerb_encode_discovery_sync();
+  test_cerb_config_unsupported_paths();
   test_adapter_id_ranges_disjoint();
   test_profile_catalog_baselines();
   printf("test_motor_protocol_adapter: all passed\n");

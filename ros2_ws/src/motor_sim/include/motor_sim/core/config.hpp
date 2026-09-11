@@ -67,7 +67,14 @@ struct TopologyContract {
   std::vector<RequiredMotorAddress> motors;
 };
 
+// 从 YAML 加载配置，并按 caller 提供的拓扑契约逐项校验 buses/motors 的顺序与地址。
+// 机器人集成层使用此重载，保证 YAML 与 URDF/关节清单完全一致。
 SystemConfig load_system_config(const std::string &path,
                                 const TopologyContract &contract);
+
+// 从 YAML 直接加载配置，不依赖外部拓扑契约。buses/motors 顺序完全由 YAML 决定。
+// 通用独立入口使用此重载；调用方显式传入 config_file 与 bus→endpoint 映射，
+// 电机数量、协议与 ID 以配置文件为准，不做任何伪造的默认拓扑。
+SystemConfig load_system_config(const std::string &path);
 
 }  // namespace motor_sim::core

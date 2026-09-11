@@ -1,17 +1,21 @@
 # FDCAN1 九电机台架：第一轮运行记录与阻塞项（2026-09-11）
 
-目标文档：[2026-09-11-fdcan1-bench-9motors-goal.md](2026-09-11-fdcan1-bench-9motors-goal.md)
-工具：[`micro_ros_firmware/tools/fdcan_motor_sim.py`](../micro_ros_firmware/tools/fdcan_motor_sim.py)
-（CANable2 ttyACM1 SLCAN 模拟 CREB 1-6 + VAXOR 7-9；micro-ROS agent 在 ttyACM0）
+> [!IMPORTANT]
+> 本文保留第一轮原始现象和当时判断，供实验追溯；其中“当前 CANable2 应使用 Y7、故障位于物理层”的结论已被第二轮复测修正。
+> 当前设备是上游 `b158aa7` 对应固件，只接受 `Y2`/`Y5`；`Y7` 会被静默拒绝并保留默认 2 Mbps，而控制板数据相位为 5 Mbps。改用 `Y5` 并修复模拟器末节点 deadline 覆盖后，30 秒九节点 CAN FD+BRS 复测全绿。权威后续结论见 [第二轮复测结论](2026-09-11-fdcan1-bench-run2-findings.md)。
+
+目标文档：[九电机活动计划](2026-09-11-fdcan1-bench-9motors-goal.md)
+工具：[`micro_ros_agent/tools/fdcan_motor_sim.py`](../../micro_ros_agent/tools/fdcan_motor_sim.py)
+（CANable2 ttyACM1 SLCAN 模拟 CERB 1-6 + VAXOR 7-9；micro-ROS agent 在 ttyACM0）
 
 ## 已验证通过
 
 - ST-Link SWD、OpenOCD `reset run`、agent serial、SLCAN 通道与双层观测（slcan 抓包 + ROS 话题）全部可用。
 - **经典帧 1Mbps 完全稳定**：板子 0x080 SYNC（10ms/0B）被动监听 6s 持续不丢、不 bus-off。
-- **单电机 FD 帧长期稳定**：只发 creb id1 反馈（50Hz）时，无论 FD 无 BRS（全程 1M）
+- **单电机 FD 帧长期稳定**：只发 cerb id1 反馈（50Hz）时，无论 FD 无 BRS（全程 1M）
   还是 FD+BRS（5M 数据段），topology 持续 `online=true`、12s 以上不掉线；
-  固件正确解出并注册（`protocol=CREB, bus_index=0`）。
-- **九台全部被正确发现**：topology 出现 motor_id 1..9，1-6 `protocol=1(CREB)`、
+  固件正确解出并注册（`protocol=CERB, bus_index=0`）。
+- **九台全部被正确发现**：topology 出现 motor_id 1..9，1-6 `protocol=1(CERB)`、
   7-9 `protocol=0(VAXOR)`，`conflict=false`；events 出 9×DISCOVERED(0)。
   证明固件 motor_id/协议族归属/注册表/拓扑话题全链路正确，无 ID 冲突。
 
@@ -25,7 +29,7 @@ REC≈52–61、PSR LEC=bit/stuff error、BO=EP=EW=1）。对照实验：
 | 纯监听（0 发送） | 无 | SYNC 100Hz ≥6s 稳定 |
 | 单电机 12B 反馈 50Hz，无 BRS(1M) | 低 | ≥543 SYNC 稳定 |
 | 单电机 12B 反馈 50Hz，BRS(5M, Y7) | 低 | online 稳定 ≥12s |
-| 6×CREB 12B 错峰 | 中 | ~8s 后 bus-off |
+| 6×CERB 12B 错峰 | 中 | ~8s 后 bus-off |
 | 9 节点 450fps / 180fps / SYNC 对齐 | 中高 | 秒级 bus-off |
 | 9 节点 `--no-brs`（全程 1M） | 中 | 仍 bus-off |
 

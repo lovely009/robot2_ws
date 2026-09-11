@@ -115,7 +115,7 @@ typedef struct {
 } motor_control_command_snapshot_t;
 
 // 输出：运动状态（100 Hz 发布用，ARD §16；缺失浮点 = NaN，state_age_ms
-// 为 MCU 单调时基下最近有效运动测量距今毫秒数）。
+// 为 MCU 单调时基下最近有效运动测量距今毫秒数，从无测量 = 0xFFFFFFFF）。
 typedef struct {
   uint16_t motor_id;
   uint8_t bus_index;
@@ -141,7 +141,7 @@ typedef struct {
   uint32_t vendor_fault_code;
   uint32_t protection_flags;
   uint32_t limit_flags;
-  uint32_t state_age_ms;
+  uint32_t state_age_ms; // 从无测量 = 0xFFFFFFFF
   uint8_t transaction_state; // 0=空闲，1=配置事务进行中
   uint16_t last_failure_reason;
 } motor_control_status_t;
@@ -161,7 +161,8 @@ typedef struct {
 
   uint32_t last_rx_tick_ms;       // 任意本机帧（OFFLINE 判定）
   uint32_t last_motion_rx_tick_ms; // 最近有效运动反馈（state_age）
-  uint32_t last_commanded_tick_ms; // 最近 MIT/使能帧（CREB OFFLINE 判定）
+  uint32_t last_commanded_tick_ms; // 最近 MIT/使能/配置帧（非自主心跳协议的
+                                   // OFFLINE 判定输入）
 
   bool has_target;
   float target_position_rad;
@@ -169,8 +170,9 @@ typedef struct {
   float target_effort_nm;
 
   // Policy（低频，不进入 100 Hz 命令——ARD §19.4）。
-  bool policy_enable;   // 逐电机 Enable（MotorPolicy；OFFLINE 冻结为 false，
-                        // 恢复需上层显式重发 SET_ENABLE(true)——ARD §36）
+  bool policy_enable;   // 逐电机 Enable（MotorPolicy；OFFLINE/厂家故障/冲突
+                        // 冻结为 false，恢复需上层显式重发 SET_ENABLE(true)
+                        // ——ARD §36）
   bool has_kp_kd;
   float kp;
   float kd;
@@ -187,7 +189,7 @@ typedef struct {
   bool motion_authorized;
 
   // P0 帧重试：推送失败（缓冲满且无可驱逐的 P1/P2）时置位，service 逐节拍重发；
-  // 新使能/MIT 帧成功后作废（新命令取代过期的安全帧）。
+  // 新 MIT 帧成功后作废（新命令取代过期的安全帧）。
   bool p0_pending;
   uint8_t p0_kind; // 0=无，1=软停，2=失能，3=使能（见 motor_control_internal.h）
   uint8_t last_p0_kind; // 最近生成的 P0 帧类别：下游重入队失败转挂起的依据
@@ -309,7 +311,7 @@ bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
                                         const char *model_name, uint32_t now_ms);
 
 // 低频配置入口（mailbox config FIFO 逐条转发）。SET_GAINS/SET_POSITION_LIMITS
-// 在 Vaxor 上是本地 Policy；SET_MODE 与 CREB 限位走 request_id 事务。
+// 在 Vaxor 上是本地 Policy；SET_MODE 与 CERB 限位走 request_id 事务。
 // 结果统一经 CONFIG_RESULT 事件异步给出；本函数返回值仅表示"已受理/校验拒绝"。
 bool motor_control_submit_config(motor_control_context_t *ctx,
                                  const motor_protocol_config_request_t *request,
@@ -335,7 +337,7 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
                                           const motor_control_command_snapshot_t *snapshot,
                                           uint32_t now_ms);
 
-// 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CREB）的总线发
+// 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；
 // 发现窗口复用同一路径）。禁止作为 100Hz 控制触发（ARD §23.4）。
 bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_index);

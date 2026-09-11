@@ -1,3 +1,7 @@
+// imu_snapshot host 单测（cassert 风格）：双缓冲快照的发布/拷贝契约——
+// 首次发布前 copy 失败；写 inactive 缓冲不干扰读者（仍读到旧完整样本）；
+// publish 后序号递增，读者原子切换到新样本。
+
 #include "imu_snapshot.h"
 
 #include <cassert>

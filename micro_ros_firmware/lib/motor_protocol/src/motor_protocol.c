@@ -1,4 +1,4 @@
-// 电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）。
+// 电机协议编解码（vaxor 25/30mm + CERB CAN FD/MIT）。
 
 #include "motor_protocol.h"
 
@@ -60,7 +60,7 @@ double motor_protocol_uint_to_float(uint32_t value, double low, double high,
   return value * (high - low) / maximum + low;
 }
 
-static uint32_t creb_symmetric_float_to_uint(double value, double limit,
+static uint32_t cerb_symmetric_float_to_uint(double value, double limit,
                                                unsigned bits) {
   double normalized = (clamp_double(value / limit, -1.0, 1.0) + 1.0) * 0.5;
   uint32_t maximum = (UINT32_C(1) << bits) - 1U;
@@ -242,29 +242,29 @@ bool motor_protocol_unpack_vaxor_status(
   return true;
 }
 
-bool motor_protocol_creb_node_valid(unsigned node) {
+bool motor_protocol_cerb_node_valid(unsigned node) {
   return node >= 1U && node <= 127U;
 }
 
-bool motor_protocol_creb_command_id(unsigned node, uint32_t *id) {
-  if (!motor_protocol_creb_node_valid(node) || id == NULL) {
+bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id) {
+  if (!motor_protocol_cerb_node_valid(node) || id == NULL) {
     return false;
   }
   *id = 0x110U + node;
   return true;
 }
 
-bool motor_protocol_creb_feedback_id(unsigned node, uint32_t *id) {
-  if (!motor_protocol_creb_node_valid(node) || id == NULL) {
+bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id) {
+  if (!motor_protocol_cerb_node_valid(node) || id == NULL) {
     return false;
   }
   *id = 0x300U + node;
   return true;
 }
 
-bool motor_protocol_pack_creb_mit_frame(
+bool motor_protocol_pack_cerb_mit_frame(
     const motor_protocol_joint_command_t *command,
-    const motor_protocol_creb_limits_t *limits, bool enabled,
+    const motor_protocol_cerb_limits_t *limits, bool enabled,
     uint8_t out[12]) {
   if (command == NULL || limits == NULL || out == NULL ||
       !isfinite(limits->position_rad) ||
@@ -279,13 +279,13 @@ bool motor_protocol_pack_creb_mit_frame(
     return false;
   }
 
-  uint32_t position = creb_symmetric_float_to_uint(
+  uint32_t position = cerb_symmetric_float_to_uint(
       command->position, limits->position_rad, 16U);
-  uint32_t velocity = creb_symmetric_float_to_uint(
+  uint32_t velocity = cerb_symmetric_float_to_uint(
       command->velocity, limits->velocity_rad_s, 12U);
   uint32_t kp = motor_protocol_float_to_uint(command->kp, 0.0, 500.0, 12U);
   uint32_t kd = motor_protocol_float_to_uint(command->kd, 0.0, 5.0, 12U);
-  uint32_t torque = creb_symmetric_float_to_uint(
+  uint32_t torque = cerb_symmetric_float_to_uint(
       command->feedforward, limits->torque_nm, 12U);
 
   // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
@@ -304,7 +304,7 @@ bool motor_protocol_pack_creb_mit_frame(
   return true;
 }
 
-bool motor_protocol_unpack_creb_feedback(
+bool motor_protocol_unpack_cerb_feedback(
     const uint8_t *data, size_t size, motor_protocol_joint_state_t *state) {
   if (data == NULL || size != 12U || state == NULL ||
       (data[11] & 0x20U) != 0U) {

@@ -3,7 +3,7 @@ uint16 motor_id
 uint8 bus_index           # 0..2（FDCAN1/2/3）
 # 协议族（与 firmware adapter 注册顺序对齐）
 uint8 PROTOCOL_VAXOR=0
-uint8 PROTOCOL_CREB=1
+uint8 PROTOCOL_CERB=1
 uint8 protocol
 string<=31 model_name     # 型号目录名（未绑定 = 空串）
 uint32 capability_flags   # MOTOR_PROTOCOL_CAP_*（唯一定义点在协议 adapter 头）

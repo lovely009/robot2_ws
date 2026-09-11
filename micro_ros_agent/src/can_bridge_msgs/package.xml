@@ -3,7 +3,7 @@
 <package format="3">
   <name>can_bridge_msgs</name>
   <version>0.3.0</version>
-  <description>自定义消息定义：CAN 帧、电机命令、模式、增益与状态，供 micro_ros_firmware 与主机侧共用</description>
+  <description>自定义消息定义：ID 化有界电机命令、策略、配置、状态、拓扑与事件，供 micro_ros_firmware 与主机侧共用</description>
   <maintainer email="dev@robot.local">robot dev</maintainer>
   <license>Apache License 2.0</license>
 

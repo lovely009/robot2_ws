@@ -38,8 +38,8 @@ struct JointState {
   double effort{0.0};
 };
 
-// CREB MIT 量化范围必须由配置明确给出，并与电机参数设置页保持一致。
-struct CrebMitLimits {
+// CERB MIT 量化范围必须由配置明确给出，并与电机参数设置页保持一致。
+struct CerbMitLimits {
   double position_rad;
   double velocity_rad_s;
   double torque_nm;
@@ -98,13 +98,13 @@ std::array<uint8_t, 20> pack_wrist_status(
     uint8_t motor_type = 0x01);
 JointState unpack_wrist_feedback(const uint8_t *data, std::size_t size);
 
-// CREB 自定义 PDO：MIT 数据区为 8 Byte，外层策略再添加 1 Byte 控制字。
+// CERB 自定义 PDO：MIT 数据区为 8 Byte，外层策略再添加 1 Byte 控制字。
 std::array<uint8_t, 8>
-pack_creb_mit_command(const JointCommand &command,
-                      const CrebMitLimits &limits);
+pack_cerb_mit_command(const JointCommand &command,
+                      const CerbMitLimits &limits);
 
-// CREB 反馈在线协议中的 effort 是 Iq（A），由协议策略换算成输出端 Nm。
-JointState unpack_creb_feedback(const uint8_t *data, std::size_t size);
+// CERB 反馈在线协议中的 effort 是 Iq（A），由协议策略换算成输出端 Nm。
+JointState unpack_cerb_feedback(const uint8_t *data, std::size_t size);
 
 double wrist_kp_to_current_gain(double protocol_kp);
 double wrist_kd_to_current_gain(double protocol_kd);

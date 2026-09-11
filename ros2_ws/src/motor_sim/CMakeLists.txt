@@ -45,23 +45,36 @@ target_include_directories(motor_sim_core PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(motor_sim_core PUBLIC motor_protocol yaml-cpp)
 
-add_library(motor_sim_node
+# ROS 层节点库：MotorSimNode 供独立可执行与机器人集成层链接。
+# 独立可执行目标名为 motor_sim_node（ros2 run motor_sim motor_sim_node），
+# 与本库目标名刻意区分，避免 CMake 目标重名。
+add_library(motor_sim_ros
   src/ros/motor_sim_node.cpp)
-target_compile_features(motor_sim_node PUBLIC cxx_std_17)
-target_compile_options(motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
-target_include_directories(motor_sim_node PUBLIC
+target_compile_features(motor_sim_ros PUBLIC cxx_std_17)
+target_compile_options(motor_sim_ros PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(motor_sim_ros PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_link_libraries(motor_sim_node motor_sim_core motor_transport)
-ament_target_dependencies(motor_sim_node
+target_link_libraries(motor_sim_ros motor_sim_core motor_transport)
+ament_target_dependencies(motor_sim_ros
   diagnostic_msgs rclcpp sensor_msgs std_msgs std_srvs)
 
+# 通用独立可执行入口：不依赖机器人拓扑契约，buses/motors 完全由 YAML 决定。
+add_executable(motor_sim_node
+  src/ros/motor_sim_node_main.cpp)
+target_compile_features(motor_sim_node PUBLIC cxx_std_17)
+target_compile_options(motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(motor_sim_node motor_sim_ros)
+
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_node
+install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_ros
   EXPORT export_motor_sim
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
+install(TARGETS motor_sim_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 ament_export_targets(export_motor_sim HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 ament_export_dependencies(diagnostic_msgs rclcpp sensor_msgs std_msgs std_srvs)
@@ -122,7 +135,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_motor_sim_node test/test_motor_sim_node.cpp)
   target_compile_features(test_motor_sim_node PUBLIC cxx_std_17)
   target_compile_options(test_motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
-  target_link_libraries(test_motor_sim_node motor_sim_node util)
+  target_link_libraries(test_motor_sim_node motor_sim_ros util)
   ament_target_dependencies(test_motor_sim_node rclcpp std_msgs std_srvs)
 endif()
 

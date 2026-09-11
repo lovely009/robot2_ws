@@ -89,7 +89,7 @@ w25q64_status_t octospi2_init(void) {
   g_hospi2.Init.FifoThreshold = 8U;
   g_hospi2.Init.DualQuad = HAL_OSPI_DUALQUAD_DISABLE;
   g_hospi2.Init.MemoryType = HAL_OSPI_MEMTYPE_MICRON;
-  g_hospi2.Init.DeviceSize = 23U;
+  g_hospi2.Init.DeviceSize = 23U; // 2^23 = 8 MiB，对应 W25Q64_FLASH_SIZE
   g_hospi2.Init.ChipSelectHighTime = 1U;
   g_hospi2.Init.FreeRunningClock = HAL_OSPI_FREERUNCLK_DISABLE;
   g_hospi2.Init.ClockMode = HAL_OSPI_CLOCK_MODE_3;

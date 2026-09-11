@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""FDCAN1 台架电机模拟器（9 节点：CREB 1-6 + VAXOR 7-9）。
+"""FDCAN1 台架电机模拟器（9 节点：CERB 1-6 + VAXOR 7-9）。
 
 主机经 CANable2（SLCAN 串口，默认 /dev/ttyACM1）在控制板 FDCAN1 上模拟电机，
 用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。总线上无真机。
-仲裁段 1M（S8）、数据段 5M（本台 CANable2 固件 16e7497-dirty 用 Y7）。
+仲裁段 1M（S8）、数据段 5M（上游 CANable2 固件 b158aa7 用 Y5）。
+自定义固件若使用其他 Y 索引，可通过 --data-bitrate-index 显式覆盖。
 
 线协议字节布局严格对齐固件：
   micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c
-  micro_ros_firmware/lib/motor_protocol/src/{creb,vaxor}_adapter.c
+  micro_ros_firmware/lib/motor_protocol/src/{cerb,vaxor}_adapter.c
 
 上行（本脚本 → 固件）：
-  CREB  feedback  0x300+id        FD/BRS 12B 大端：deg(182count/°) / rpm / mA，
+  CERB  feedback  0x300+id        FD/BRS 12B 大端：deg(182count/°) / rpm / mA，
                                     data[11] bit5=0（故障位）；由 0x080 SYNC 触发
   VAXOR status    0x702+4*id      FD/BRS 20B 小端（见 motor_protocol_pack_vaxor_status）
   VAXOR reply     0x701+4*id      FD/BRS 12B，收到 0x501+4*id MIT 命令后逐帧应答
 
 下行（固件 → 本脚本，仅记录/驱动趋近）：
-  CREB  SYNC 0x080（经典 0B，10ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  CERB  SYNC 0x080（经典 0B，10ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
 用法：
   python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 S8/Y5/O 开通道
   python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
+  python3 fdcan_motor_sim.py --data-bitrate-index 7  # 仅用于对应的自定义固件
+节点清单与节奏可调：--cerb/--vaxor（默认 1-6 / 7-9）、--period-ms（板端 SYNC
+周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰）、--no-brs（数据段不切 5M）。
 开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾并发 C 关通道。
 """
 
@@ -39,6 +43,7 @@ import time
 import tty
 
 PI = 3.141592653589793
+DEFAULT_DATA_BITRATE_INDEX = 5
 
 # ---- SLCAN -------------------------------------------------------------
 
@@ -46,6 +51,22 @@ FD_LEN_CODE = {0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
                7: "7", 8: "8", 12: "9", 16: "A", 20: "B", 24: "C",
                32: "D", 48: "E", 64: "F"}
 _CODE_LEN = {v: k for k, v in FD_LEN_CODE.items()}
+
+
+def slcan_config_commands(
+        data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX) -> tuple[bytes, ...]:
+    """构造关闭、1M 仲裁位率、数据位率和开通道命令。"""
+    if not 0 <= data_bitrate_index <= 9:
+        raise ValueError("SLCAN data bitrate index must be one decimal digit")
+    return (b"C\r", b"S8\r", f"Y{data_bitrate_index}\r".encode(), b"O\r")
+
+
+def schedule_feedback_window(pending: dict[int, list[float]], motor_ids,
+                             window_start: float, stagger: float) -> None:
+    """登记本轮反馈 deadline，保留尚未消费的上一轮 deadline。"""
+    for slot, motor_id in enumerate(motor_ids):
+        pending.setdefault(motor_id, []).append(
+            window_start + slot * stagger)
 
 
 def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
@@ -110,18 +131,18 @@ def vaxor_decode_pos(code4: bytes) -> float:
         / VAXOR_TICKS_PER_REV * 2 * PI
 
 
-def creb_symmetric(code: int, limit: float, bits: int) -> float:
+def cerb_symmetric(code: int, limit: float, bits: int) -> float:
     return (code / float((1 << bits) - 1)) * 2.0 * limit - limit
 
 
-def creb_decode_command(data: bytes):
-    """固件下行 CREB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。"""
+def cerb_decode_command(data: bytes):
+    """固件下行 CERB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。"""
     enabled = (data[0] & 0x80) != 0
-    pos = creb_symmetric((data[1] << 8) | data[2], PI, 16)
-    vel = creb_symmetric(((data[3] & 0xF0) << 4) | data[4], PI, 12)
+    pos = cerb_symmetric((data[1] << 8) | data[2], PI, 16)
+    vel = cerb_symmetric(((data[3] & 0xF0) << 4) | data[4], PI, 12)
     kp_raw = ((data[4] & 0x0F) << 8) | data[5]
     kd_raw = (data[6] << 4) | ((data[7] & 0xF0) >> 4)
-    tau = creb_symmetric(((data[7] & 0x0F) << 8) | data[8], 45.0, 12)
+    tau = cerb_symmetric(((data[7] & 0x0F) << 8) | data[8], 45.0, 12)
     return {"enabled": enabled, "pos_rad": pos, "vel_rad_s": vel,
             "kp": kp_raw * 500.0 / 4095.0, "kd": kd_raw * 5.0 / 4095.0,
             "tau_nm": tau}
@@ -132,12 +153,12 @@ def creb_decode_command(data: bytes):
 class MotorModel:
     def __init__(self, motor_id: int, kind: str):
         self.id = motor_id
-        self.kind = kind  # "creb" | "vaxor"
+        self.kind = kind  # "cerb" | "vaxor"
         self.tx_count = 0
         self.rx_count = 0
         self.enabled = False
         self.last_cmd = None
-        if kind == "creb":
+        if kind == "cerb":
             # 关节侧：初值每台 10° 递增、101rpm(=0.1047rad/s 关节)、1A
             self.pos_deg = float(10 * motor_id)
             self.tgt_deg = self.pos_deg
@@ -153,13 +174,13 @@ class MotorModel:
     def approach(self, dt_s: float):
         # 极简一阶趋近，仅用于演示「命令影响反馈」，不模拟真实动力学。
         rate = 2.0 * dt_s
-        if self.kind == "creb":
+        if self.kind == "cerb":
             self.pos_deg += (self.tgt_deg - self.pos_deg) * min(1.0, rate)
         else:
             self.pos_motor_rad += (self.tgt_motor_rad - self.pos_motor_rad) \
                 * min(1.0, rate)
 
-    def creb_frame(self) -> bytes:
+    def cerb_frame(self) -> bytes:
         data = struct.pack(">hhh", round(self.pos_deg * 182.0),
                            round(self.rpm), round(self.iq_ma))
         return data + b"\x00" * 6  # data[11] bit5=0（无故障）
@@ -186,21 +207,24 @@ class MotorModel:
 # ---- 主循环 -------------------------------------------------------------
 
 class SlcanSim:
-    def __init__(self, tty: str, creb_ids, vaxor_ids, period_ms: int,
+    def __init__(self, tty: str, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
+                 data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX,
                  fb_period_ms: int = 20, stagger_ms: float = 2.2):
         self.tty_path = tty
         self.use_brs = use_brs
-        self.fb_period = fb_period_ms / 1000.0
+        self.data_bitrate_index = data_bitrate_index
+        if period_ms <= 0 or fb_period_ms <= 0:
+            raise ValueError("SYNC and feedback periods must be positive")
+        self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
         self.stagger = stagger_ms / 1000.0
-        self.period = period_ms / 1000.0
-        self.models = {i: MotorModel(i, "creb") for i in creb_ids}
+        self.models = {i: MotorModel(i, "cerb") for i in cerb_ids}
         self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
         self.rx_buf = b""
         self.sync_seen = False
         self.sync_count = 0
         self.next_send = {}
-        self.last_creb_emit = 0.0
+        self.last_cerb_emit = 0.0
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
         self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
@@ -211,10 +235,9 @@ class SlcanSim:
         attrs[2] |= termios.CLOCAL | termios.CREAD
         termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
-        # 与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）。
-        # 注意：本机 CANable2 固件 16e7497-dirty 的数据率索引 Y7 才是稳定 5Mbps
-        # （Y5 在该固件上是临界近邻速率，BRS 帧偶发成帧但丢帧致 OFFLINE）。
-        for cmd in (b"C\r", b"S8\r", b"Y7\r", b"O\r"):
+        # 默认与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）；
+        # 非上游 CANable2 固件可用 CLI 覆盖其 Y 索引。
+        for cmd in slcan_config_commands(self.data_bitrate_index):
             os.write(self.fd, cmd)
             time.sleep(0.15)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
@@ -240,10 +263,10 @@ class SlcanSim:
                 "id": can_id, "data": data.hex()}) + "\n")
 
     def _model_for_downlink(self, can_id: int):
-        # CREB MIT 0x110+id(1..127)；VAXOR 命令 0x501+4n / 控制 0x502+4n
+        # CERB MIT 0x110+id(1..127)；VAXOR 命令 0x501+4n / 控制 0x502+4n
         node = can_id - 0x110
         if 1 <= node <= 127 and node in self.models \
-                and self.models[node].kind == "creb":
+                and self.models[node].kind == "cerb":
             return self.models[node]
         for base, kind in ((0x501, "vaxor"), (0x502, "vaxor")):
             delta = can_id - base
@@ -253,28 +276,28 @@ class SlcanSim:
         return None
 
     def handle_downlink(self, can_id: int, data: bytes, is_fd: bool):
-        if can_id == 0x080:  # CREB SYNC（经典 0B），链路存活探针与调度基准
+        if can_id == 0x080:  # CERB SYNC（经典 0B），链路存活探针与调度基准
             now = time.monotonic()
             if not self.sync_seen:
                 self.sync_seen = True
                 print("[sim] 收到首个 SYNC，链路已通，开始 SYNC 对齐错峰上报")
             self.sync_count += 1
-            # 真实设备在 SYNC 后窗口上报：每 2 个 SYNC（20ms）为一周期，9 帧从
-            # SYNC 时刻起按 stagger 错峰排在 0..16ms，避免与 SYNC 自由仲裁碰撞。
-            if self.sync_count % 2 == 1:
-                for slot, mid in enumerate(sorted(self.models)):
-                    self.next_send[mid] = now + slot * self.stagger
+            # 真实设备在 SYNC 后窗口上报：按反馈周期折算 SYNC 间隔，9 帧从
+            # 窗口起点按 stagger 错峰，跨窗口的末槽 deadline 进入队列而不覆盖。
+            if (self.sync_count - 1) % self.feedback_sync_interval == 0:
+                schedule_feedback_window(
+                    self.next_send, sorted(self.models), now, self.stagger)
             return
         m = self._model_for_downlink(can_id)
         if m is None:
             return
-        if m.kind == "creb" and can_id == 0x110 + m.id and len(data) >= 9:
-            cmd = creb_decode_command(data)
+        if m.kind == "cerb" and can_id == 0x110 + m.id and len(data) >= 9:
+            cmd = cerb_decode_command(data)
             m.enabled = cmd["enabled"]
             m.last_cmd = cmd
             if cmd["enabled"]:
                 m.tgt_deg = cmd["pos_rad"] * 180.0 / PI
-            self.log_rx(can_id, data, "creb_mit")
+            self.log_rx(can_id, data, "cerb_mit")
         elif m.kind == "vaxor" and can_id == 0x502 + 4 * m.id:
             m.enabled = bool(data[0])
             m.last_cmd = {"run": bool(data[0]), "set_zero": bool(data[1]),
@@ -291,20 +314,20 @@ class SlcanSim:
 
     def emit_one(self, mid: int):
         m = self.models[mid]
-        # --no-brs：FD 帧数据段也走仲裁 1M（规避台架 5M 信号完整性问题，仍为 FD 帧）。
-        if m.kind == "creb":
-            self.send(0x300 + mid, m.creb_frame(), True, self.use_brs, m,
-                      "creb_fb")
+        # --no-brs：FD 帧数据段也走仲裁 1M，用于隔离 BRS 数据相位问题。
+        if m.kind == "cerb":
+            self.send(0x300 + mid, m.cerb_frame(), True, self.use_brs, m,
+                      "cerb_fb")
         else:
             self.send(0x702 + 4 * mid, m.vaxor_status_frame(), True,
                       self.use_brs, m, "vaxor_status")
 
-    def emit_creb(self):
+    def emit_cerb(self):
         for mid, m in self.models.items():
-            if m.kind == "creb":
-                self.send(0x300 + mid, m.creb_frame(), True, True, m,
-                          "creb_fb")
-        self.last_creb_emit = time.monotonic()
+            if m.kind == "cerb":
+                self.send(0x300 + mid, m.cerb_frame(), True, True, m,
+                          "cerb_fb")
+        self.last_cerb_emit = time.monotonic()
 
     def emit_vaxor(self):
         for mid, m in self.models.items():
@@ -330,7 +353,7 @@ class SlcanSim:
         print("\n=== 模拟器节点状态 ===")
         for mid in sorted(self.models):
             m = self.models[mid]
-            if m.kind == "creb":
+            if m.kind == "cerb":
                 extra = f"pos={m.pos_deg:.1f}deg tgt={m.tgt_deg:.1f}"
             else:
                 extra = f"pos={m.pos_motor_rad:.2f}rad_m tgt={m.tgt_motor_rad:.2f}"
@@ -342,9 +365,10 @@ class SlcanSim:
             self.log_f.flush()
 
     def run(self):
-        creb_ids = sorted(i for i, m in self.models.items() if m.kind == "creb")
+        cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
-        print(f"[sim] {self.tty_path} S8/Y7/O opened; CREB {creb_ids} "
+        print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/O opened; "
+              f"CERB {cerb_ids} "
               f"VAXOR {vaxor_ids}")
         print("[sim] 通道已开、静默监听中（仅做 ACK 节点）。请复位控制板；"
               "收到首个 0x080 SYNC 后开始错峰上报。Ctrl-C 结束。")
@@ -367,11 +391,14 @@ class SlcanSim:
             for m in self.models.values():
                 m.approach(dt)
             last_step = now
-            # 错峰：每节点 50Hz（周期 20ms），相位在首个 SYNC 时按 2.2ms 错开。
+            # 错峰：频率由 --fb-period-ms 决定，默认每节点 50Hz。
             for mid in sorted(self.models):
-                if now >= self.next_send.get(mid, now):
+                deadlines = self.next_send.get(mid)
+                if deadlines and now >= deadlines[0]:
                     self.emit_one(mid)
-                    self.next_send[mid] = now + 1.0  # 等下 SYNC 窗口重排
+                    deadlines.pop(0)
+                    if not deadlines:
+                        del self.next_send[mid]
         self.report()
         try:
             os.write(self.fd, b"C\r")  # 收尾关通道
@@ -385,21 +412,27 @@ class SlcanSim:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tty", default="/dev/ttyACM1")
-    ap.add_argument("--creb", default="1,2,3,4,5,6")
+    ap.add_argument("--cerb", default="1,2,3,4,5,6")
     ap.add_argument("--vaxor", default="7,8,9")
-    ap.add_argument("--period-ms", type=int, default=10)
+    ap.add_argument("--period-ms", type=int, default=10,
+                    help="板端 SYNC 周期，用于换算反馈窗口（默认 10ms）")
+    ap.add_argument("--data-bitrate-index", type=int, choices=range(10),
+                    default=DEFAULT_DATA_BITRATE_INDEX,
+                    help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）")
     ap.add_argument("--no-brs", action="store_true",
-                    help="FD 帧不切 5M 数据段（全程 1M），规避台架 5M 信号问题")
+                    help="FD 帧不切 5M 数据段（全程 1M），用于 BRS 数据相位对照")
     ap.add_argument("--fb-period-ms", type=int, default=20,
-                    help="每电机反馈周期（默认 20ms=50Hz；台架信号差时调大到 50）")
+                    help="每电机反馈周期（默认 20ms=50Hz；降低反馈负载时可调到 50）")
     ap.add_argument("--stagger-ms", type=float, default=2.2,
                     help="多节点反馈相位错开间隔")
     ap.add_argument("--log", default=None)
     args = ap.parse_args()
-    creb_ids = [int(x) for x in args.creb.split(",") if x]
+    cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
-    sim = SlcanSim(args.tty, creb_ids, vaxor_ids, args.period_ms, args.log,
-                   use_brs=not args.no_brs, fb_period_ms=args.fb_period_ms,
+    sim = SlcanSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
+                   use_brs=not args.no_brs,
+                   data_bitrate_index=args.data_bitrate_index,
+                   fb_period_ms=args.fb_period_ms,
                    stagger_ms=args.stagger_ms)
 
     def _sig(_a, _b):

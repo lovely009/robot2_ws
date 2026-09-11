@@ -187,16 +187,16 @@ JointState unpack_wrist_feedback(const uint8_t *data, const std::size_t size) {
 }
 
 std::array<uint8_t, 8>
-pack_creb_mit_command(const JointCommand &command,
-                      const CrebMitLimits &limits) {
+pack_cerb_mit_command(const JointCommand &command,
+                      const CerbMitLimits &limits) {
   if (!(limits.position_rad > 0.0) || !(limits.velocity_rad_s > 0.0) ||
       !(limits.torque_nm > 0.0)) {
-    throw std::invalid_argument("CREB MIT limits must be positive");
+    throw std::invalid_argument("CERB MIT limits must be positive");
   }
   if (!std::isfinite(command.position) || !std::isfinite(command.velocity) ||
       !std::isfinite(command.kp) || !std::isfinite(command.kd) ||
       !std::isfinite(command.feedforward)) {
-    throw std::invalid_argument("CREB MIT command values must be finite");
+    throw std::invalid_argument("CERB MIT command values must be finite");
   }
   const auto position = float_to_uint(command.position, -limits.position_rad,
                                       limits.position_rad, 16U);
@@ -216,9 +216,9 @@ pack_creb_mit_command(const JointCommand &command,
           static_cast<uint8_t>(torque)};
 }
 
-JointState unpack_creb_feedback(const uint8_t *data, const std::size_t size) {
+JointState unpack_cerb_feedback(const uint8_t *data, const std::size_t size) {
   if (data == nullptr || size != 12U) {
-    throw std::invalid_argument("CREB feedback must be 12 bytes");
+    throw std::invalid_argument("CERB feedback must be 12 bytes");
   }
   // 新版协议规定反馈为大端：位置码每 182 count 为 1°，速度为 rpm，Iq 为 mA。
   const double position = read_be_i16(data) / 182.0 * kPi / 180.0;

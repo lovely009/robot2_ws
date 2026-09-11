@@ -10,5 +10,5 @@ bool set_gains
 float32 kp
 float32 kd
 bool set_limits
-float32 min_position_rad  # rad（仅 Vaxor 本地软限位；CREB 走 MotorConfig 事务）
+float32 min_position_rad  # rad（仅 Vaxor 本地软限位；CERB 走 MotorConfig 事务）
 float32 max_position_rad  # rad

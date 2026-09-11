@@ -14,7 +14,7 @@
 #include "imu.h"
 #include "imu_snapshot.h"
 
-// 任务参数：栈 1024 字（4KB），优先级高于 micro_ros 收发任务
+// 任务参数：栈 512 字（2KB），优先级 2（与 micro_ros 收发任务相同，低于 motor_rt）
 // IMU 为非关键路径（姿态/温度仅上 ROS）：优先级降到 motor_rt 之下，消除对
 // 1ms 控制节拍的抢占；栈减半，台架 TBD-RT-01 复测，溢出由 stack overflow
 // hook（main.cpp）兜底。功能不变：DRDY 采样/Mahony/PID/加热/发布原样。

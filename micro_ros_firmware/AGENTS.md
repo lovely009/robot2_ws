@@ -6,11 +6,11 @@ USB CDC 进 ROS 2 humble）。当前业务为 **BMI088 IMU** + **三路 FDCAN**�
 **权威文档：`README.md`**，改动前先读；本文件只列 Agent 即用要点。
 
 > **电机运行时与后续验收：**
-> [`docs/HANDOFF-motor-runtime-refactor.md`](docs/HANDOFF-motor-runtime-refactor.md)。
+> [`docs/handoffs/HANDOFF-motor-runtime-refactor.md`](docs/handoffs/HANDOFF-motor-runtime-refactor.md)。
 > 固件侧 ID 驱动运行时已经完成；剩余工作是上层 `motor_hardware_interface`
 > 的 joint↔motor_id 映射与真机台架验证。上层迁移启动时先更新同仓库
 > `../micro_ros_agent/` 的权威消息包，再修改 `ros2_ws/`。
-> 运行时设计以 HANDOFF、`docs/ARD-0007-micro-ros-motor-runtime.md` 和
+> 运行时设计以 HANDOFF、`docs/architecture/ARD-0007-micro-ros-motor-runtime.md` 和
 > ADR 0007 为准；不得恢复旧四电机表或 `JointState` 命令路径。
 
 ## 构建与烧录（本机）
@@ -39,7 +39,7 @@ cd micro_ros_firmware
   `micro_ros/motion_states`（`MotorMotionStateArray`，缺失量 NaN）、
   `micro_ros/motor_status_array`、`micro_ros/motor_topology`（1s 节流）、
   `micro_ros/motor_events`、`micro_ros/motor_config_result`。无 `joint_name`、
-  无固定电机表；电机经反馈帧自主发现（vaxor 自主上报 / CREB SYNC 上报），
+  无固定电机表；电机经反馈帧自主发现（vaxor 自主上报 / CERB SYNC 上报），
   型号由上层经 Profile 绑定接口确认（型号目录无 Vaxor-80）。
 - `micro_ros/motor_enable` 是显式全局运动授权：`false` 清空 pending 命令并协议级
   失能；断连重连后必须先发 `true`、再发新完整快照，禁止重放旧命令。
@@ -48,14 +48,14 @@ cd micro_ros_firmware
 - `micro_ros/motor_policy` 还携带 `SET_GAINS`（按 `motor_id` 钳到 Profile 上限，
   只影响后续命令、不刷新命令时效）与 `SET_POSITION_LIMITS`（Vaxor 软件限位，
   打包前钳制）。`micro_ros/motor_config`（`MotorConfig`，带 `request_id`）承载
-  SET_MODE 事务（vaxor stop/start 两阶段、结果收敛 UNCONFIRMED；CREB 恒 MIT）
-  与 CREB 限位（厂家管理对象未决，当前一律 UNSUPPORTED），结果经
+  SET_MODE 事务（vaxor stop/start 两阶段、结果收敛 UNCONFIRMED；CERB 恒 MIT）
+  与 CERB 限位（厂家管理对象未决，当前一律 UNSUPPORTED），结果经
   `micro_ros/motor_config_result` 异步返回。
 - 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（100Hz）、20B 状态帧
-  =20ms 自主心跳；CREB 反馈帧=命令实时状态（100Hz）、`0x080` SYNC 上报帧=20ms
+  =20ms 自主心跳；CERB 反馈帧=命令实时状态（100Hz）、`0x080` SYNC 上报帧=20ms
   状态心跳（承担总线检测）。OFFLINE=心跳丢失 100ms。`motor_rt_task` 每 10ms 发
-  一次 SYNC 维持 CREB 上报，禁止把 SYNC 当控制触发。
-- CREB 仅使用 MIT：R48/R58 的 P/V/T Max 为 `π rad`、`π rad/s`、
+  一次 SYNC 维持 CERB 上报，禁止把 SYNC 当控制触发。
+- CERB 仅使用 MIT：R48/R58 的 P/V/T Max 为 `π rad`、`π rad/s`、
   `11/45 Nm`；使能后等待至少 100ms（adapter `enable_settle_ms`）才发送目标。
 - 状态灯由 `led_task` 独占：上电/未连接=红，连接成功=绿 1Hz 闪，断连=蓝；每 50ms 轮询。
 - FDCAN1/2/3 = PD0/PD1、PB5/PB6、PD12/PD13（FD + BRS，标称 1M/数据 5M）。
@@ -129,7 +129,11 @@ cd micro_ros_firmware
   新消息头不会主动再生——否则出现 `motor_bind.h: No such file`（或反向的旧头
   残留）。改/删消息后删
   `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/{libmicroros,build/mcu}`
-  再 `pio run`（colcon 重编约 1 分钟，走缓存仓库不联网）。
+  再 `pio run`。2026-09-11 实测两条路径的坑：不删缓存的增量重建（含
+  `../micro_ros_agent/tools/refresh_microros_messages.py`）可能因 copytree 合并陈旧状态报
+  `Error running link command: No such file or directory`；删 `build/mcu`
+  则触发依赖经 ghfast.top 镜像**重新克隆（需网络）**，代理断流/TLS 握手
+  失败时清除半成品重试即可。
 
 ## 结构（简）
 
@@ -154,11 +158,11 @@ cd micro_ros_firmware
   硬件级统计（官方例程移植收敛）
 - `lib/motor_control`：ID 驱动运行时内核——注册表/型号目录/九态生命周期/安全级联/
   配置事务/状态事件副本（纯 C，host 可测）
-- `lib/motor_protocol`：adapter 接缝（`motor_protocol_adapter.h`）+ vaxor/CREB
-  adapter 与纯 codec（厂家字节/CAN-ID 推导/FD 属性唯一归属地）
-- `lib/control_mailbox`：ID 完整命令快照、低频配置 FIFO 与授权/连接边沿
-- `lib/motor_protocol`：vaxor/CREB 电机协议编解码（从 ros2_ws
+- `lib/motor_protocol`：adapter 接缝（`motor_protocol_adapter.h`）+ vaxor/CERB
+  adapter 与纯 codec（厂家字节/CAN-ID 推导/FD 属性唯一归属地；自 ros2_ws
   `motor_drive/protocol.cpp` 移植，`-fno-exceptions` 下异常改返回值）
+- `lib/control_mailbox`：ID 完整命令快照、低频配置 FIFO 与授权/连接边沿
+- `lib/motor_event_relay`：内核事件中继环（满丢最旧保最新并计数，host 可测）
 - `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
 - `lib/w25q64`：OCTOSPI2 W25Q64 驱动；运行期访问必须指定单一所有者，不能由多个
   任务并发使用同一 OSPI 句柄

@@ -92,6 +92,12 @@ void imu_bridge_poll(void) {
   }
   fill_imu_msg(&snapshot);
   rcl_ret_t rc = rcl_publish(&g_imu_pub, &g_imu_msg, nullptr);
-  rc = rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
   (void)rc;
+  // 温度是慢变量（BMI088 温度档 ~1.25Hz 更新），2Hz 发布已覆盖全部
+  // 传感器更新；imu/data 才是 100Hz 的观测流。
+  static uint8_t s_temp_phase = 0U;
+  if (++s_temp_phase >= 50U) { // 10ms tick ×50 = 2Hz
+    s_temp_phase = 0U;
+    (void)rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
+  }
 }

@@ -26,7 +26,7 @@
   并计 `overwrite_count`，已发布快照不会被撕碎，`take` 拿到的永远是完整副本。
 - `take_command`：取走当前已发布快照并清 pending；无新快照返回 false，不改写输出。
 - `sequence` 单调性、新鲜度（30ms/100ms staleness）、缺席电机软停等裁决**不在本库**
-  ——mailbox 刻意不校验 sequence/tick，由 motor_control 内核负责（HANDOFF §3.2）。
+  ——mailbox 刻意不校验 sequence/tick，由 motor_control 内核负责（HANDOFF「快照安全规则」）。
 
 ### 低频配置（有界 FIFO，不覆盖）
 

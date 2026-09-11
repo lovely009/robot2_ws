@@ -42,7 +42,7 @@ static volatile bool g_fdcan_ready = false;
 // 协议 adapter 注册表（构造注入内核；新增协议 = 加一项，内核零改动）。
 static const motor_protocol_adapter_t *const kAdapters[2] = {
     &motor_protocol_vaxor_adapter,
-    &motor_protocol_creb_adapter,
+    &motor_protocol_cerb_adapter,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,12 +159,29 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
     return 0U;
   }
   taskENTER_CRITICAL();
+  // 发布顺序确定化：按 motor_id 升序（同内核 copy_motion_states 注释）。
+  bool taken[MOTOR_CONTROL_MAX_MOTORS] = {};
   size_t count = 0U;
-  for (size_t i = 0; i < g_motor_control.entry_count && count < capacity; ++i) {
-    const motor_control_entry_t *entry = &g_motor_control.entries[i];
-    if (!entry->used) {
-      continue;
+  for (;;) {
+    if (count >= capacity) {
+      break;
     }
+    int best = -1;
+    for (size_t i = 0; i < g_motor_control.entry_count; ++i) {
+      const motor_control_entry_t *candidate = &g_motor_control.entries[i];
+      if (!candidate->used || taken[i]) {
+        continue;
+      }
+      if (best < 0 ||
+          candidate->motor_id < g_motor_control.entries[best].motor_id) {
+        best = (int)i;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+    taken[best] = true;
+    const motor_control_entry_t *entry = &g_motor_control.entries[best];
     motor_rt_topology_entry_t *topo = &out[count++];
     topo->motor_id = entry->motor_id;
     topo->bus_index = entry->bus_index;
@@ -230,7 +247,7 @@ static void drain_rx_rings(void) {
   }
 }
 
-// 1ms 服务之二（前置）：SYNC 心跳——对 SYNC 能力协议（CREB）的总线周期发
+// 1ms 服务之二（前置）：SYNC 心跳——对 SYNC 能力协议（CERB）的总线周期发
 // 0x080，维持设备 20ms 状态上报（上报帧即总线检测心跳，2026-09-05 协议核实）。
 // 发现/热插拔窗口复用同一路径；vaxor 无 SYNC（adapter 返回 false，零开销）。
 // 禁止升级为控制触发（ARD §23.4）。

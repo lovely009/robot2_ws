@@ -8,7 +8,8 @@
 //
 // 安全实现要点：
 //  - P0 帧（软停/失能）推送失败不静默丢弃：先驱逐最旧非 P0 帧腾位（§22.1
-//    抢占），仍失败挂 p0_pending 由 service 逐节拍重发，新使能/MIT 成功后作废；
+//    抢占），仍失败挂 p0_pending 由 service 逐节拍重发；新 MIT 或使能帧
+//    成功出队后作废——过期软停/失能重试帧不得晚于新安全意图出门；
 //  - 受控集合 = ACTIVE ∪ READY_DISABLED(已使能)（§13.1 DERIVED：使能整定窗内
 //    的电机已在受控集合，缺席/30ms 级联同样必须停它）；
 //  - apply 前置 staleness 门（§51.3）：age>30ms 不下发目标、age>100ms 撤权，
@@ -518,6 +519,13 @@ bool motor_control_apply_command_snapshot(
       }
       entry->motion_enabled = true;
       entry->last_commanded_tick_ms = now_ms;
+      // 使能帧已出队：此前挂起的软停/失能重试帧是过期意图，不得在其后
+      // 出门（否则重新使能的电机被旧失能帧再次打回，CERB 会输掉整个
+      // 整定窗）。挂起中的使能帧（重入队转挂起）保持，由 service 补发。
+      if (entry->p0_pending && entry->p0_kind != MOTOR_CONTROL_P0_ENABLE) {
+        entry->p0_pending = false;
+        entry->p0_kind = MOTOR_CONTROL_P0_NONE;
+      }
       if (entry->adapter->enable_settle_ms > 0U) {
         entry->enable_pending = true;
         entry->enable_started_tick_ms = now_ms;
@@ -567,7 +575,7 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
     return;
   }
   // 受控集合（ARD §13.1 DERIVED）：ACTIVE，或已使能但尚在使能序列中的
-  // READY_DISABLED（CREB 使能整定窗内的电机同样必须被软停覆盖）。
+  // READY_DISABLED（CERB 使能整定窗内的电机同样必须被软停覆盖）。
   const bool in_controlled_set =
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
       (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
@@ -682,7 +690,7 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
       continue;
     }
     // OFFLINE 判定（2026-09-05 协议核实）：两协议均有与命令无关的 20ms 状态
-    // 心跳（vaxor 20B 状态帧 / CREB 0x080 SYNC 上报帧），承担总线检测——
+    // 心跳（vaxor 20B 状态帧 / CERB 0x080 SYNC 上报帧），承担总线检测——
     // 心跳龄超阈值即离线。非自主心跳协议仅在"正在发命令却持续无反馈"时判定
     // （非受控期沉默是常态）。
     bool offline = false;
@@ -817,12 +825,30 @@ size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
   if (ctx == NULL || out == NULL) {
     return 0U;
   }
+  // 发布顺序确定化：按 motor_id 升序逐个选最小未输出条目。注册表顺序 =
+  // 发现序，会随上线顺序漂移；上层处理与人工对读都需要稳定顺序。
+  // n ≤ 64 的 O(n²) 选择只在 10ms 桥接轮询路径执行；缺席电机（未发现/
+  // 已移除）自然不产生条目，不占位。
+  bool taken[MOTOR_CONTROL_MAX_MOTORS] = {false};
   size_t count = 0U;
-  for (size_t i = 0; i < ctx->entry_count && count < capacity; ++i) {
-    const motor_control_entry_t *entry = &ctx->entries[i];
-    if (!entry->used) {
-      continue;
+  for (;;) {
+    if (count >= capacity) {
+      break;
     }
+    int best = -1;
+    for (size_t i = 0; i < ctx->entry_count; ++i) {
+      if (!ctx->entries[i].used || taken[i]) {
+        continue;
+      }
+      if (best < 0 || ctx->entries[i].motor_id < ctx->entries[best].motor_id) {
+        best = (int)i;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+    taken[best] = true;
+    const motor_control_entry_t *entry = &ctx->entries[best];
     motor_control_motion_state_t *state = &out[count++];
     state->motor_id = entry->motor_id;
     state->bus_index = entry->bus_index;
@@ -845,12 +871,27 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
   if (ctx == NULL || out == NULL) {
     return 0U;
   }
+  // 发布顺序确定化：按 motor_id 升序（同 copy_motion_states 注释）。
+  bool taken[MOTOR_CONTROL_MAX_MOTORS] = {false};
   size_t count = 0U;
-  for (size_t i = 0; i < ctx->entry_count && count < capacity; ++i) {
-    const motor_control_entry_t *entry = &ctx->entries[i];
-    if (!entry->used) {
-      continue;
+  for (;;) {
+    if (count >= capacity) {
+      break;
     }
+    int best = -1;
+    for (size_t i = 0; i < ctx->entry_count; ++i) {
+      if (!ctx->entries[i].used || taken[i]) {
+        continue;
+      }
+      if (best < 0 || ctx->entries[i].motor_id < ctx->entries[best].motor_id) {
+        best = (int)i;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+    taken[best] = true;
+    const motor_control_entry_t *entry = &ctx->entries[best];
     motor_control_status_t *status = &out[count++];
     status->motor_id = entry->motor_id;
     status->bus_index = entry->bus_index;

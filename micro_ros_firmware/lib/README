@@ -10,7 +10,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 |---|---|---|
 | `fdcan` | FDCAN1/2/3 的 HAL、IRQ、RX ring、TX 调度和统计 | 电机协议、拓扑、控制策略 |
 | `dma` | DMA 控制器、通道配置和 IRQ 资源管理 | IMU/LED 采样策略和设备业务 |
-| `motor_protocol` | Vaxor/CREB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
+| `motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
 | `motor_control` | 动态注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS、HAL、厂家字节布局 |
 | `control_mailbox` | 高频完整命令、低频配置请求、授权/连接事件的跨任务交换 | 协议校验、限位裁决、CAN 发送 |
 | `imu` | BMI088、SPI2 阻塞通信、融合和 snapshot（不用 DMA） | 电机控制、ROS 发布 |
@@ -24,7 +24,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 
 `motor_control` 内部区分 `motor_registry`、`motor_profile`、`motor_lifecycle`、
 `motor_safety` 和 `motor_snapshot`。Profile 是固件内置的型号目录，不是安装台账；
-当前只收录已确认参数的 CREB R48/R58 和 Vaxor 25/30mm 型号。
+当前只收录已确认参数的 CERB R48/R58 和 Vaxor 25/30mm 型号。
 
 `control_mailbox` 内部使用相互独立的 command/config/event 存储和 API。当前实现为：
 高频命令使用完整 ID 快照的双缓冲 latest-wins；低频模式、增益、位置限位和逐电机

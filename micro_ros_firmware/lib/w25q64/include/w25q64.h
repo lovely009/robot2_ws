@@ -1,3 +1,6 @@
+// W25Q64（OCTOSPI2）原始读写驱动：保留驱动与 geometry host test，当前固件
+// 不执行启动探测——上电路径禁止自动初始化/擦写 Flash，接入时须指定单一所有者。
+
 #ifndef W25Q64_H_
 #define W25Q64_H_
 

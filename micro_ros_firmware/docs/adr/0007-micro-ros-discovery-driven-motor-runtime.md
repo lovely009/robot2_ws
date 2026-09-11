@@ -1,18 +1,29 @@
 # ADR 0007：micro-ROS 采用发现驱动的聚合式电机运行时
 
-**Status**: proposed（架构基线，待代码和台架验证后转 accepted）
+**Status**: proposed（核心运行时已实现；待最大规模与实时台架证据后转 accepted）
 **Scope**: `micro_ros_firmware`，STM32H723，FDCAN1/2/3，约 40 台外置电机
+
+> **实现状态（2026-09-11）**
+>
+> | 已实现并有自动测试 | 仍需验证或确认 |
+> |---|---|
+> | 动态发现、全局唯一 `motor_id`、Profile 显式绑定 | 三总线约 40 台最大规模与 USB CDC 余量 |
+> | 完整命令快照、30/100 ms 安全时基、授权门禁 | 厂家级软停与 CERB 管理对象 |
+> | 单一 `motor_rt_task`、每总线 SPSC RX ring、P0/P1/P2 | RX/P2/TX 最坏预算、WCET/jitter、P0/P1 延迟 |
+> | 消息、QoS 基线、结果事件、公共状态位 | BUS_OFF 恢复与 Profile 自动一致性机制 |
+>
+> 详细现状见 [ARD-0007](../architecture/ARD-0007-micro-ros-motor-runtime.md)；开放项由[运行时验证计划](../plans/active/motor-runtime-validation.md)维护。
 
 ## Context
 
 现有固件以固定测试电机、按关节名路由和分散的 CAN 收发逻辑为中心，不能自然支持
-跨三路总线的 Vaxor/CREB 混合设备、动态拓扑和热插拔。ROS 回调、协议字节、实时
+跨三路总线的 Vaxor/CERB 混合设备、动态拓扑和热插拔。ROS 回调、协议字节、实时
 控制和 CAN 缓冲彼此耦合，也无法稳定保证 100 Hz 控制。
 
 系统约束如下：
 
 - 三路 FDCAN 使用 CAN-FD，仲裁段 1 Mbps、数据段 5 Mbps。
-- 电机 ID 全局唯一；Vaxor 自主每 20 ms 上报状态，CREB 可通过协议读取/反馈。
+- 电机 ID 全局唯一；Vaxor 自主每 20 ms 上报状态，CERB 可通过协议读取/反馈。
 - 两类电机默认 MIT 模式；上层使用 ROS 2 标准控制接口。
 - 控制和反馈目标为 100 Hz；固件需要保留本地安全时基。
 
@@ -44,7 +55,7 @@
   `sensor_msgs/msg/JointState`。状态物理单位为 `rad`、`rad/s`、`N·m`，缺失浮点值为
   `NaN`，逻辑 ID 为 `uint16`。
 - `MotorPolicy` 负责 Enable、MIT 参数、软件限幅和安全授权；`MotorConfig` 负责模式
-  切换、CREB 限位和设备配置。两者不进入 100 Hz 命令，也不刷新命令 freshness。
+  切换、CERB 限位和设备配置。两者不进入 100 Hz 命令，也不刷新命令 freshness。
 - `MotorConfig` 使用 `request_id` 请求/结果事务。同一电机同时只允许一个未完成事务，
   新请求返回 `BUSY`。MCU 校验、协议执行并完成设备读回后才返回 `OK`；可重试步骤最多
   自动重试 2 次，最终无法确认返回 `TIMEOUT` 或 `UNCONFIRMED`。
@@ -59,13 +70,13 @@
 - TX 使用三类优先级：P0 安全帧，P1 周期控制，P2 发现/身份/配置。P1 为每台电机
   一个 latest-wins 槽，不能积压旧目标；P2 不能挤占 P0/P1。
 - ROS 消息永远不直接映射为 CAN 帧。协议适配器按电机生成厂家帧，默认 MIT 下 Vaxor
-  和 CREB 都使用单电机帧；CREB `0x200` 多控只在明确的非 MIT 模式下使用，`0x080`
+  和 CERB 都使用单电机帧；CERB `0x200` 多控只在明确的非 MIT 模式下使用，`0x080`
   SYNC 只用于发现和热插拔探测。
 
 ### 5. 协议适配器
 
 `motor_rt_task` 只依赖统一的身份、能力、状态、控制意图和原始 CAN 帧接口。
-Vaxor/CREB 适配器分别封装发现、编解码、MIT 控制、反馈、停止、SYNC 和管理事务。
+Vaxor/CERB 适配器分别封装发现、编解码、MIT 控制、反馈、停止、SYNC 和管理事务。
 新增协议只增加适配器，不修改实时循环、消息边界或 FDCAN 调度器。
 
 ### 6. 内存和其他外设
@@ -97,4 +108,5 @@ Vaxor/CREB 适配器分别封装发现、编解码、MIT 控制、反馈、停�
 
 ## 参考
 
-- [micro-ROS 电机运行时架构开发基线](../motor-runtime-decision-log.md)
+- [micro-ROS 电机运行时架构开发基线](../architecture/motor-runtime-decision-log.md)
+- [电机运行时架构验证计划](../plans/active/motor-runtime-validation.md)

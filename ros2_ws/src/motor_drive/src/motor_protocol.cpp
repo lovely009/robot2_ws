@@ -156,60 +156,60 @@ public:
   }
 };
 
-protocol::CrebMitLimits creb_limits(const MotorConfig &motor) {
+protocol::CerbMitLimits cerb_limits(const MotorConfig &motor) {
   return {required_positive_parameter(motor, "mit_position_limit_rad"),
           required_positive_parameter(motor, "mit_velocity_limit_rad_s"),
           required_positive_parameter(motor, "mit_torque_limit_nm")};
 }
 
-void validate_creb_node(const unsigned node) {
+void validate_cerb_node(const unsigned node) {
   if (node < 1U || node > 127U) {
-    throw std::out_of_range("CREB node must be in [1, 127]");
+    throw std::out_of_range("CERB node must be in [1, 127]");
   }
 }
 
-uint32_t creb_command_id(const unsigned node) {
-  validate_creb_node(node);
+uint32_t cerb_command_id(const unsigned node) {
+  validate_cerb_node(node);
   return 0x110U + node;
 }
 
-uint32_t creb_feedback_id(const unsigned node) {
-  validate_creb_node(node);
+uint32_t cerb_feedback_id(const unsigned node) {
+  validate_cerb_node(node);
   return 0x300U + node;
 }
 
-CanFrame make_creb_frame(const MotorConfig &motor,
+CanFrame make_cerb_frame(const MotorConfig &motor,
                          const protocol::JointCommand &command,
                          const bool enabled) {
-  const auto mit = protocol::pack_creb_mit_command(command, creb_limits(motor));
+  const auto mit = protocol::pack_cerb_mit_command(command, cerb_limits(motor));
   // CAN FD 的 DLC=9 对应 12 个数据字节；协议只定义前 9 Byte，尾部补零。
   std::array<uint8_t, 12> payload{};
   // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
   payload[0] = static_cast<uint8_t>((enabled ? 0xc0U : 0x00U) | 0x0cU);
   std::copy(mit.begin(), mit.end(), payload.begin() + 1U);
-  return make_frame(creb_command_id(motor.id), payload.data(), payload.size(),
+  return make_frame(cerb_command_id(motor.id), payload.data(), payload.size(),
                     true);
 }
 
-class CrebProtocol final : public MotorProtocol {
+class CerbProtocol final : public MotorProtocol {
 public:
   void validate(const std::vector<MotorConfig> &motors,
                 const MotorIndexList &indices) const override {
     if (indices.empty()) {
-      throw std::invalid_argument("CREB protocol group cannot be empty");
+      throw std::invalid_argument("CERB protocol group cannot be empty");
     }
     std::unordered_set<unsigned> ids;
     for (const auto index : indices) {
       const auto &motor = motors.at(index);
-      validate_creb_node(motor.id);
+      validate_cerb_node(motor.id);
       if (!ids.insert(motor.id).second) {
         throw std::invalid_argument(
-            "CREB motor IDs on one CAN bus must be unique values in [1, 127]");
+            "CERB motor IDs on one CAN bus must be unique values in [1, 127]");
       }
       static_cast<void>(required_positive_parameter(
           motor, "torque_constant_nm_per_amp"));
       static_cast<void>(required_positive_parameter(motor, "gear_ratio"));
-      static_cast<void>(creb_limits(motor));
+      static_cast<void>(cerb_limits(motor));
     }
   }
 
@@ -220,7 +220,7 @@ public:
     std::vector<CanFrame> frames;
     frames.reserve(indices.size());
     for (const auto index : indices) {
-      frames.push_back(make_creb_frame(motors.at(index), {}, enabled));
+      frames.push_back(make_cerb_frame(motors.at(index), {}, enabled));
     }
     return frames;
   }
@@ -234,7 +234,7 @@ public:
     frames.reserve(indices.size());
     for (const auto index : indices) {
       frames.push_back(
-          make_creb_frame(motors.at(index), commands.at(index), enabled));
+          make_cerb_frame(motors.at(index), commands.at(index), enabled));
     }
     return frames;
   }
@@ -249,10 +249,10 @@ public:
     }
     for (const auto index : indices) {
       const auto &motor = motors.at(index);
-      if (frame.id != creb_feedback_id(motor.id)) {
+      if (frame.id != cerb_feedback_id(motor.id)) {
         continue;
       }
-      state = protocol::unpack_creb_feedback(frame.data.data(), frame.size);
+      state = protocol::unpack_cerb_feedback(frame.data.data(), frame.size);
       const double gear = required_positive_parameter(motor, "gear_ratio");
       state.velocity /= gear;
       state.effort *= required_positive_parameter(
@@ -298,8 +298,8 @@ MotorProtocolRegistry MotorProtocolRegistry::with_builtin_protocols() {
   // 内置类型只在这里注册。以后增加新电机协议时，不需要修改 MotorDriver。
   registry.register_factory(kVaxorType,
                             [] { return std::make_unique<VaxorProtocol>(); });
-  registry.register_factory(kCrebType,
-                            [] { return std::make_unique<CrebProtocol>(); });
+  registry.register_factory(kCerbType,
+                            [] { return std::make_unique<CerbProtocol>(); });
   return registry;
 }
 

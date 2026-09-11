@@ -1,4 +1,4 @@
-// 电机协议编解码（vaxor 25/30mm + CREB CAN FD/MIT）。
+// 电机协议编解码（vaxor 25/30mm + CERB CAN FD/MIT）。
 
 #ifndef MOTOR_PROTOCOL_H
 #define MOTOR_PROTOCOL_H
@@ -55,7 +55,7 @@ typedef struct {
   double position_rad;
   double velocity_rad_s;
   double torque_nm;
-} motor_protocol_creb_limits_t;
+} motor_protocol_cerb_limits_t;
 
 typedef struct {
   bool run;
@@ -97,20 +97,20 @@ bool motor_protocol_unpack_vaxor_feedback(const uint8_t *data, size_t size,
 bool motor_protocol_unpack_vaxor_status(
     const uint8_t *data, size_t size, motor_protocol_vaxor_status_t *status);
 
-// ---------------- CREB 自定义 PDO / MIT ----------------
+// ---------------- CERB 自定义 PDO / MIT ----------------
 // 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
-bool motor_protocol_creb_node_valid(unsigned node);
-bool motor_protocol_creb_command_id(unsigned node, uint32_t *id);
-bool motor_protocol_creb_feedback_id(unsigned node, uint32_t *id);
+bool motor_protocol_cerb_node_valid(unsigned node);
+bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id);
+bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
 
 // 输出 CAN FD DLC=9 对应的 12 Byte 载荷：控制字 + 8 Byte MIT + 3 Byte 零填充。
-bool motor_protocol_pack_creb_mit_frame(
+bool motor_protocol_pack_cerb_mit_frame(
     const motor_protocol_joint_command_t *command,
-    const motor_protocol_creb_limits_t *limits, bool enabled,
+    const motor_protocol_cerb_limits_t *limits, bool enabled,
     uint8_t out[12]);
 
 // 解码位置(rad)、电机端速度(rad/s)和 Iq(A)；故障状态反馈返回 false。
-bool motor_protocol_unpack_creb_feedback(
+bool motor_protocol_unpack_cerb_feedback(
     const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
 
 #ifdef __cplusplus

@@ -1,5 +1,7 @@
 # 激活失败与回环终止采用 fail-fast 语义
 
+> **当前适用性（2026-09-11）：有效。** 真机激活/反馈超时和仿真关键进程退出继续采用 fail-fast；正文中的 `driver_loopback` 是历史入口名，不表示当前四轴 Gazebo 已与 `motor_sim` 完成联动。
+
 **Status**: accepted
 
 驱动侧硬件激活失败或运行期反馈超时会让 `controller_manager` 进程立即终止（Humble

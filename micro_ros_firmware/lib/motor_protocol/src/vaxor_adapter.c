@@ -93,21 +93,6 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
     }
     out->has_motion_state = true;
     vaxor_fill_si(profile, &wire, out);
-    if (frame->dlc == 20U) {
-      // 20B 状态帧：附加电压/故障/身份字段（身份供 Profile 绑定诊断参考）。
-      motor_protocol_vaxor_status_t status = {0};
-      if (!motor_protocol_unpack_vaxor_status(frame->data, frame->dlc, &status)) {
-        return false;
-      }
-      out->is_status_frame = true;
-      out->voltage_v = (float)status.voltage_v;
-      out->vendor_fault_code = status.fault;
-      out->vendor_state = status.motor_state;
-      out->calibration_state = status.calibration_state;
-      out->drive_mode = status.mode;
-      out->motor_type = status.motor_type;
-      out->fault_active = status.fault != 0U;
-    }
     return true;
   }
   if (frame->can_id == motor_protocol_vaxor_status_id(node) &&

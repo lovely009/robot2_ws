@@ -1,5 +1,7 @@
 # dev-real 真机分支：motor_drive 更名与两包精简
 
+> **当前适用性（2026-09-11）：历史分支决策、部分被 ADR 0006 取代。** `motor_drive` 更名保留；当前 `dev/robot_ws` 已重新包含六包，串口能力也已恢复，不能按本文删除仿真包或 SLCAN 实现。
+
 **Status**: accepted（`dev-real` 分支专用决策；`dev-sim`（原 develop）分支不受影响）
 
 ## Context
@@ -23,7 +25,7 @@ ros2_control 适配层，并让包名反映“驱动不再只处理 CAN-FD 一�
   SocketCAN 传输（`CanTransport` 抽象保留，供未来扩展其他后端）。
 - 机器人模型 `upper_body.urdf.xacro` 移入 `motor_hardware_interface/urdf/` 并去掉
   Gazebo 分支；`hardware.launch.py` 的 `model_xacro` 默认指向包内模型。
-- 三份协议手册（25–30 mm 与 RP 系列）移入 `motor_drive/docs/`。
+- 协议手册移入 `motor_drive/docs/`。
 
 ## Considered Options
 

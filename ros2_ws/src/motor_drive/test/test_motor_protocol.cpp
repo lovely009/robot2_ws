@@ -180,9 +180,9 @@ TEST(VaxorProtocolStrategy, ValidateRejectsBadMotorTypeCode) {
   EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
 }
 
-TEST(CrebProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
+TEST(CerbProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("r58", "j1", drive::kCrebType, 1U,
+      make_motor("r58", "j1", drive::kCerbType, 1U,
                  {{"torque_constant_nm_per_amp", "0.086"},
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
@@ -195,7 +195,7 @@ TEST(CrebProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
   command.kd = 5.0;
   command.feedforward = -10.0;
 
-  const auto protocol = builtin_protocol(drive::kCrebType);
+  const auto protocol = builtin_protocol(drive::kCerbType);
   const auto disabled_frames =
       protocol->make_command_frames(motors, {0U}, {command}, false);
   ASSERT_EQ(disabled_frames.size(), 1U);
@@ -209,15 +209,15 @@ TEST(CrebProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
                 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00}, true);
 }
 
-TEST(CrebProtocolStrategy, EnableAndDisableUseSafeNeutralMitFrames) {
+TEST(CerbProtocolStrategy, EnableAndDisableUseSafeNeutralMitFrames) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("r58", "j1", drive::kCrebType, 2U,
+      make_motor("r58", "j1", drive::kCerbType, 2U,
                  {{"torque_constant_nm_per_amp", "0.086"},
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
                   {"mit_velocity_limit_rad_s", "30"},
                   {"mit_torque_limit_nm", "10"}})};
-  const auto protocol = builtin_protocol(drive::kCrebType);
+  const auto protocol = builtin_protocol(drive::kCerbType);
 
   const auto enabled = protocol->make_enable_frames(motors, {0U}, true);
   ASSERT_EQ(enabled.size(), 1U);
@@ -232,9 +232,9 @@ TEST(CrebProtocolStrategy, EnableAndDisableUseSafeNeutralMitFrames) {
                 0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00}, true);
 }
 
-TEST(CrebProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
+TEST(CerbProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("r58", "j1", drive::kCrebType, 1U,
+      make_motor("r58", "j1", drive::kCerbType, 1U,
                  {{"torque_constant_nm_per_amp", "0.086"},
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
@@ -250,7 +250,7 @@ TEST(CrebProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
 
   std::size_t motor_index = 99U;
   protocol::JointState state;
-  EXPECT_TRUE(builtin_protocol(drive::kCrebType)
+  EXPECT_TRUE(builtin_protocol(drive::kCerbType)
                   ->decode_feedback(motors, {0U}, frame, motor_index, state));
   EXPECT_EQ(motor_index, 0U);
   EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
@@ -258,18 +258,18 @@ TEST(CrebProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
   EXPECT_NEAR(state.effort, 1.5 * 0.086 * 101.0, 1e-12);
 
   frame.bitrate_switch = false;
-  EXPECT_FALSE(builtin_protocol(drive::kCrebType)
+  EXPECT_FALSE(builtin_protocol(drive::kCerbType)
                    ->decode_feedback(motors, {0U}, frame, motor_index, state));
   frame.bitrate_switch = true;
   frame.data[11] = 0xe0;
-  EXPECT_FALSE(builtin_protocol(drive::kCrebType)
+  EXPECT_FALSE(builtin_protocol(drive::kCerbType)
                    ->decode_feedback(motors, {0U}, frame, motor_index, state));
 }
 
-TEST(CrebProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {
-  const auto protocol = builtin_protocol(drive::kCrebType);
+TEST(CerbProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {
+  const auto protocol = builtin_protocol(drive::kCerbType);
   std::vector<drive::MotorConfig> motors{
-      make_motor("r58", "j1", drive::kCrebType, 0U,
+      make_motor("r58", "j1", drive::kCerbType, 0U,
                  {{"torque_constant_nm_per_amp", "0.086"},
                   {"gear_ratio", "101"}})};
   EXPECT_THROW(protocol->validate(motors, {0U}), std::out_of_range);
@@ -282,9 +282,9 @@ TEST(CrebProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {
   EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
 }
 
-TEST(CrebProtocolStrategy, UsesPerMotorMitRangeOverrides) {
+TEST(CerbProtocolStrategy, UsesPerMotorMitRangeOverrides) {
   const std::vector<drive::MotorConfig> motors{
-      make_motor("r48", "j1", drive::kCrebType, 1U,
+      make_motor("r48", "j1", drive::kCerbType, 1U,
                  {{"torque_constant_nm_per_amp", "0.077"},
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "25"},
@@ -294,7 +294,7 @@ TEST(CrebProtocolStrategy, UsesPerMotorMitRangeOverrides) {
   command.position = 12.5;
   command.velocity = -30.0;
   command.feedforward = -10.0;
-  const auto frames = builtin_protocol(drive::kCrebType)
+  const auto frames = builtin_protocol(drive::kCerbType)
                           ->make_command_frames(motors, {0U}, {command}, false);
   ASSERT_EQ(frames.size(), 1U);
   expect_frame(frames[0], 0x111U,

@@ -24,7 +24,8 @@ extern "C" {
 #endif
 
 // 初始化 RX ring/TX 调度器、过滤器、启动三路硬件并激活中断
-// （RXFIFO0 新帧/满/丢失 + 错误状态）。
+// （RXFIFO0 新帧/满/丢失 + 错误状态）。single-init 约定：仅在上电初始化路径
+// 调用一次，无重入保护，不在重连时重建。
 void bsp_can_init(void);
 void can_filter_init(void);
 

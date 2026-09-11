@@ -23,8 +23,8 @@
 
 ```yaml
 motor_types:
-  creb_r58_101:
-    protocol: creb                     # 巨蟹 CREB Lite 关节模组
+  cerb_r58_101:
+    protocol: cerb                     # 巨蟹 CERB Lite 关节模组
     parameters:
       torque_constant_nm_per_amp: 0.086 # Iq A -> 电机轴 Nm
       gear_ratio: 101                   # 电机↔关节换算
@@ -47,12 +47,12 @@ motor_hardware:
     right_arm: {transport: serial_slcan, tty: /dev/ttyACM1}
   motors:
     left_shoulder_yaw: {joint: left_shoulder_yaw_joint, bus: left_arm,
-                        type: creb_r58_101, id: 1,
+                        type: cerb_r58_101, id: 1,
                         command: {kp: 30.0, kd: 1.0}}
 ```
 
-- `type` 填型号名（如 `creb_r58_101`、`vaxor_2550`），解析层经 `protocol` 字段映射为
-  协议类型（`creb`/`vaxor`）交给底层驱动；参数默认值按型号名合并。
+- `type` 填型号名（如 `cerb_r58_101`、`vaxor_2550`），解析层经 `protocol` 字段映射为
+  协议类型（`cerb`/`vaxor`）交给底层驱动；参数默认值按型号名合并。
 - `command.kp/kd` 是每台电机的动态调参增益，在拓扑里显式配置。
 - `transport` 缺省 `socketcan`；`socketcan` 要求 `interface`（位率由 `ip link`
   配置），`serial_slcan` 要求 `tty`（驱动内固定 S8/Y5）。`motors` 数量不限，

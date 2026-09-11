@@ -57,9 +57,9 @@ static const motor_protocol_model_profile_t kProfiles[] = {
                             MOTOR_PROTOCOL_CAP_AUTONOMOUS_FEEDBACK,
     },
     {
-        // CREB R48-101（motor.yaml: creb_r48_101；ARD §8.3 基线）
-        .model_name = "creb_r48_101",
-        .protocol = &motor_protocol_creb_adapter,
+        // CERB R48-101（motor.yaml: cerb_r48_101；ARD §8.3 基线）
+        .model_name = "cerb_r48_101",
+        .protocol = &motor_protocol_cerb_adapter,
         .gear_ratio = 101.0f,
         .gear_efficiency = 1.0f,
         .torque_constant_nm_per_amp = 0.077f,
@@ -78,9 +78,9 @@ static const motor_protocol_model_profile_t kProfiles[] = {
                             MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE,
     },
     {
-        // CREB R58-101（motor.yaml: creb_r58_101；ARD §8.3 基线）
-        .model_name = "creb_r58_101",
-        .protocol = &motor_protocol_creb_adapter,
+        // CERB R58-101（motor.yaml: cerb_r58_101；ARD §8.3 基线）
+        .model_name = "cerb_r58_101",
+        .protocol = &motor_protocol_cerb_adapter,
         .gear_ratio = 101.0f,
         .gear_efficiency = 1.0f,
         .torque_constant_nm_per_amp = 0.086f,

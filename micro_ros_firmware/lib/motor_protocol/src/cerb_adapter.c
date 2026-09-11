@@ -1,4 +1,4 @@
-// CREB CAN-FD/MIT 协议 adapter（ARD-0007 §24 能力清单的 CREB 实现）。
+// CERB CAN-FD/MIT 协议 adapter（ARD-0007 §24 能力清单的 CERB 实现）。
 //
 // 单位约定（命令与反馈分向）：
 //  - 命令（encode）：关节侧 rad/s 直通 MIT 12 位对称量化，上限 = Profile
@@ -23,19 +23,19 @@
 #include <math.h>
 #include <string.h>
 
-#define CREB_FEEDBACK_ID_BASE 0x300U
-#define CREB_COMMAND_ID_BASE 0x110U
-#define CREB_SYNC_ID 0x080U
+#define CERB_FEEDBACK_ID_BASE 0x300U
+#define CERB_COMMAND_ID_BASE 0x110U
+#define CERB_SYNC_ID 0x080U
 
-static bool creb_match_rx_frame(const motor_protocol_raw_frame_t *frame,
+static bool cerb_match_rx_frame(const motor_protocol_raw_frame_t *frame,
                                 uint16_t *out_node) {
   if (frame == NULL || out_node == NULL || frame->is_extended) {
     return false;
   }
-  if (frame->dlc != 12U || frame->can_id < CREB_FEEDBACK_ID_BASE + 1U) {
+  if (frame->dlc != 12U || frame->can_id < CERB_FEEDBACK_ID_BASE + 1U) {
     return false;
   }
-  const uint32_t offset = frame->can_id - CREB_FEEDBACK_ID_BASE;
+  const uint32_t offset = frame->can_id - CERB_FEEDBACK_ID_BASE;
   if (offset > 127U) {
     return false;
   }
@@ -43,15 +43,15 @@ static bool creb_match_rx_frame(const motor_protocol_raw_frame_t *frame,
   return true;
 }
 
-static bool creb_decode_frame(const motor_protocol_model_profile_t *profile,
+static bool cerb_decode_frame(const motor_protocol_model_profile_t *profile,
                               uint16_t node,
                               const motor_protocol_raw_frame_t *frame,
                               motor_protocol_measured_state_t *out) {
-  if (profile != NULL && profile->protocol != &motor_protocol_creb_adapter) {
+  if (profile != NULL && profile->protocol != &motor_protocol_cerb_adapter) {
     return false;
   }
   if (frame == NULL || out == NULL || frame->is_extended ||
-      frame->can_id != CREB_FEEDBACK_ID_BASE + node || frame->dlc != 12U) {
+      frame->can_id != CERB_FEEDBACK_ID_BASE + node || frame->dlc != 12U) {
     return false;
   }
   memset(out, 0, sizeof(*out));
@@ -69,7 +69,7 @@ static bool creb_decode_frame(const motor_protocol_model_profile_t *profile,
   }
 
   motor_protocol_joint_state_t wire = {0.0, 0.0, 0.0};
-  if (!motor_protocol_unpack_creb_feedback(frame->data, frame->dlc, &wire)) {
+  if (!motor_protocol_unpack_cerb_feedback(frame->data, frame->dlc, &wire)) {
     return false;
   }
   out->has_motion_state = true;
@@ -87,11 +87,11 @@ static bool creb_decode_frame(const motor_protocol_model_profile_t *profile,
   return true;
 }
 
-static bool creb_encode_mit_command(const motor_protocol_model_profile_t *profile,
+static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profile,
                                     uint16_t node, uint8_t bus_index,
                                     const motor_protocol_control_intent_t *intent,
                                     motor_protocol_tx_frame_t *out) {
-  if (profile == NULL || profile->protocol != &motor_protocol_creb_adapter ||
+  if (profile == NULL || profile->protocol != &motor_protocol_cerb_adapter ||
       intent == NULL || out == NULL) {
     return false;
   }
@@ -104,14 +104,14 @@ static bool creb_encode_mit_command(const motor_protocol_model_profile_t *profil
   }
   // 命令线协议即关节侧（速度含内）：位置/速度/扭矩直通 MIT 量化，上限来自
   // Profile。命令速度不乘减速比（直通 π 上限量化），与反馈侧 rpm ÷gear
-  // 分向相反——两侧行为由 test_creb_velocity_unit_contract 固定。
+  // 分向相反——两侧行为由 test_cerb_velocity_unit_contract 固定。
   motor_protocol_joint_command_t wire = {0};
   wire.position = intent->position_rad;
   wire.velocity = intent->velocity_rad_s;
   wire.kp = intent->kp;
   wire.kd = intent->kd;
   wire.feedforward = intent->effort_nm;
-  const motor_protocol_creb_limits_t limits = {
+  const motor_protocol_cerb_limits_t limits = {
       profile->mit_position_limit_rad,
       profile->mit_velocity_limit_rad_s,
       profile->mit_torque_limit_nm,
@@ -119,58 +119,58 @@ static bool creb_encode_mit_command(const motor_protocol_model_profile_t *profil
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
-  out->can_id = CREB_COMMAND_ID_BASE + node;
+  out->can_id = CERB_COMMAND_ID_BASE + node;
   out->size = 12U;
   out->is_fd = true;
   out->is_extended = false;
   out->is_brs = true;
-  motor_protocol_pack_creb_mit_frame(&wire, &limits, intent->enable, out->data);
+  motor_protocol_pack_cerb_mit_frame(&wire, &limits, intent->enable, out->data);
   return true;
 }
 
 // 中性目标帧（使能/失能共用形状，控制字区分）。
-static bool creb_encode_neutral(const motor_protocol_model_profile_t *profile,
+static bool cerb_encode_neutral(const motor_protocol_model_profile_t *profile,
                                 uint16_t node, uint8_t bus_index, bool enable,
                                 float kd, motor_protocol_tx_class_t tx_class,
                                 motor_protocol_tx_frame_t *out) {
   motor_protocol_control_intent_t neutral = {0};
   neutral.kd = kd;
   neutral.enable = enable;
-  if (!creb_encode_mit_command(profile, node, bus_index, &neutral, out)) {
+  if (!cerb_encode_mit_command(profile, node, bus_index, &neutral, out)) {
     return false;
   }
   out->tx_class = tx_class;
   return true;
 }
 
-static bool creb_encode_enable(const motor_protocol_model_profile_t *profile,
+static bool cerb_encode_enable(const motor_protocol_model_profile_t *profile,
                                uint16_t node, uint8_t bus_index,
                                motor_protocol_tx_frame_t *out) {
   // 使能 = 中性目标 + 使能位（0xcc）；运动目标待整定窗结束后下发。
-  return creb_encode_neutral(profile, node, bus_index, true, 0.0f,
+  return cerb_encode_neutral(profile, node, bus_index, true, 0.0f,
                              MOTOR_PROTOCOL_TX_CLASS_P1, out);
 }
 
 // TBD-SAFETY-01：软停暂取阻尼帧（零目标 + 默认 kd，保持使能）。
-static bool creb_encode_soft_stop(const motor_protocol_model_profile_t *profile,
+static bool cerb_encode_soft_stop(const motor_protocol_model_profile_t *profile,
                                   uint16_t node, uint8_t bus_index,
                                   motor_protocol_tx_frame_t *out) {
   if (profile == NULL) {
     return false;
   }
-  return creb_encode_neutral(profile, node, bus_index, true, profile->default_kd,
+  return cerb_encode_neutral(profile, node, bus_index, true, profile->default_kd,
                              MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
-static bool creb_encode_disable(const motor_protocol_model_profile_t *profile,
+static bool cerb_encode_disable(const motor_protocol_model_profile_t *profile,
                                 uint16_t node, uint8_t bus_index,
                                 motor_protocol_tx_frame_t *out) {
   // 失能 = 中性目标 + 控制字使能位清零（0x0c）。
-  return creb_encode_neutral(profile, node, bus_index, false, 0.0f,
+  return cerb_encode_neutral(profile, node, bus_index, false, 0.0f,
                              MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
-static bool creb_encode_discovery_sync(uint8_t bus_index,
+static bool cerb_encode_discovery_sync(uint8_t bus_index,
                                        motor_protocol_tx_frame_t *out) {
   if (out == NULL) {
     return false;
@@ -178,7 +178,7 @@ static bool creb_encode_discovery_sync(uint8_t bus_index,
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P2;
-  out->can_id = CREB_SYNC_ID;
+  out->can_id = CERB_SYNC_ID;
   out->size = 0U;
   out->is_fd = false;
   out->is_extended = false;
@@ -187,7 +187,7 @@ static bool creb_encode_discovery_sync(uint8_t bus_index,
 }
 
 static uint8_t
-creb_config_stage_count(const motor_protocol_model_profile_t *profile,
+cerb_config_stage_count(const motor_protocol_model_profile_t *profile,
                         const motor_protocol_config_request_t *request) {
   if (request == NULL) {
     return 0U;
@@ -199,10 +199,10 @@ creb_config_stage_count(const motor_protocol_model_profile_t *profile,
   if (request->mode == (uint8_t)MOTOR_PROTOCOL_MODE_MIT) {
     return 1U; // 设备恒 MIT：单个空阶段，事务立即以 OK 收尾
   }
-  return 0U; // 非 MIT 模式不受支持（ARD §25：CREB 默认且固定 MIT）
+  return 0U; // 非 MIT 模式不受支持（ARD §25：CERB 默认且固定 MIT）
 }
 
-static bool creb_config_stage_info(uint8_t stage,
+static bool cerb_config_stage_info(uint8_t stage,
                                    const motor_protocol_config_request_t *request,
                                    motor_protocol_config_stage_info_t *out) {
   if (request == NULL || out == NULL || request->kind != MOTOR_PROTOCOL_CONFIG_SET_MODE ||
@@ -214,7 +214,7 @@ static bool creb_config_stage_info(uint8_t stage,
   return true;
 }
 
-static bool creb_config_encode_stage(
+static bool cerb_config_encode_stage(
     uint8_t stage, const motor_protocol_model_profile_t *profile, uint16_t node,
     uint8_t bus_index, const motor_protocol_config_request_t *request,
     motor_protocol_tx_frame_t *out) {
@@ -229,7 +229,7 @@ static bool creb_config_encode_stage(
   return true;
 }
 
-static motor_protocol_stage_outcome_t creb_config_on_response(
+static motor_protocol_stage_outcome_t cerb_config_on_response(
     uint8_t stage, const motor_protocol_config_request_t *request,
     const motor_protocol_raw_frame_t *response) {
   (void)stage;
@@ -238,23 +238,23 @@ static motor_protocol_stage_outcome_t creb_config_on_response(
   return MOTOR_PROTOCOL_STAGE_ADVANCE; // 无响应阶段，不可达
 }
 
-const motor_protocol_adapter_t motor_protocol_creb_adapter = {
-    .protocol_name = "creb",
+const motor_protocol_adapter_t motor_protocol_cerb_adapter = {
+    .protocol_name = "cerb",
     .node_id_min = 1U,
     .node_id_max = 127U,
     .offline_timeout_ms = 100U, // 5×20ms SYNC 上报心跳（总线检测）
     .enable_settle_ms = 100U,   // 使能后 ≥100ms 才发运动目标（既有经验行为）
     .autonomous_feedback = true, // SYNC 上报帧 = 20ms 状态心跳（承担总线检测）
     .config_verify_required = false, // MIT 空阶段事务无设备写入，可报 OK
-    .match_rx_frame = creb_match_rx_frame,
-    .decode_frame = creb_decode_frame,
-    .encode_mit_command = creb_encode_mit_command,
-    .encode_enable = creb_encode_enable,
-    .encode_soft_stop = creb_encode_soft_stop,
-    .encode_disable = creb_encode_disable,
-    .encode_discovery_sync = creb_encode_discovery_sync,
-    .config_stage_count = creb_config_stage_count,
-    .config_stage_info = creb_config_stage_info,
-    .config_encode_stage = creb_config_encode_stage,
-    .config_on_response = creb_config_on_response,
+    .match_rx_frame = cerb_match_rx_frame,
+    .decode_frame = cerb_decode_frame,
+    .encode_mit_command = cerb_encode_mit_command,
+    .encode_enable = cerb_encode_enable,
+    .encode_soft_stop = cerb_encode_soft_stop,
+    .encode_disable = cerb_encode_disable,
+    .encode_discovery_sync = cerb_encode_discovery_sync,
+    .config_stage_count = cerb_config_stage_count,
+    .config_stage_info = cerb_config_stage_info,
+    .config_encode_stage = cerb_config_encode_stage,
+    .config_on_response = cerb_config_on_response,
 };

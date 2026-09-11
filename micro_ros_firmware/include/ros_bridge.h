@@ -19,7 +19,7 @@ bool ros_bridge_create(void);
 // 销毁 ROS 实体，agent 断连后调用（可重入，实体整体重建）
 void ros_bridge_destroy(void);
 
-// 周期处理：executor（心跳定时器）
+// 周期处理：spin executor（服务 10ms 周期定时器，驱动各域轮询发布）
 void ros_bridge_spin(void);
 
 #ifdef __cplusplus

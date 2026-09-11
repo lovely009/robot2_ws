@@ -1,5 +1,5 @@
 // FDCAN 句柄与初始化接口（官方 CtrBoard-H7_FDCAN 例程移植）。
-// 三路 FDCAN 的时钟/引脚/中断在 src/fdcan.c 的 MspInit 内完成。
+// 三路 FDCAN 的时钟/引脚/中断在本库 src/fdcan.c 的 HAL_FDCAN_MspInit 内完成。
 
 #ifndef FDCAN_H
 #define FDCAN_H

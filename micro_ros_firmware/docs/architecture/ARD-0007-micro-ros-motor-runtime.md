@@ -5,10 +5,25 @@
 > **目标 MCU**：STM32H723  
 > **电机总线**：FDCAN1 / FDCAN2 / FDCAN3  
 > **目标设备规模**：约 40 台，架构容量至少 64 台  
-> **主要电机族**：Vaxor / CREB  
+> **主要电机族**：Vaxor / CERB  
 > **文档状态**：Proposed / Development Baseline  
 > **日期**：2026-09-04  
-> **上位决策**：ADR 0007《micro-ROS 采用发现驱动的聚合式电机运行时》
+> **上位决策**：[ADR 0007](../adr/0007-micro-ros-discovery-driven-motor-runtime.md)《micro-ROS 采用发现驱动的聚合式电机运行时》
+>
+> **2026-09-11 实现状态**
+>
+> | 范围 | 状态 | 当前证据或开放边界 |
+> |---|---|---|
+> | 运行时模型与所有权 | 已实现 | 动态 registry、全局唯一 `motor_id`、单一 `motor_rt_task`、每总线 SPSC RX ring |
+> | 命令与安全 | 已实现 | 完整快照、整包校验、30 ms 软停、100 ms 失能、逐电机授权门禁 |
+> | 调度与协议 seam | 已实现 | P0/P1/P2、P1 latest-wins、CERB/Vaxor adapter、FD/BRS/DLC/软件路由 |
+> | ROS 边界 | 已实现基线 | 聚合消息、Profile 绑定、配置结果与事件；host CTest 12/12 |
+> | FDCAN1 九节点上行 | 已验证 | CAN FD+BRS 30 秒零错误、1–9 全 online；见[第二轮报告](../../../docs/reports/2026-09-11-fdcan1-bench-run2-findings.md) |
+> | 架构 accepted 证据 | 未闭环 | 厂家软停/管理对象、BUS_OFF 恢复、预算、WCET/jitter、Profile 一致性、三总线约 40 台 |
+>
+> **导航**：[目标与范围](#4-系统目标) · [数据模型](#8-运行时数据模型) · [生命周期](#9-生命周期状态机) · [任务与时序](#11-实时任务与时序) · [ROS 边界](#14-ros-2--micro-ros-边界) · [FDCAN](#21-fdcan-接收架构) · [所有权](#28-模块划分与所有权) · [验证](#43-单元测试要求) · [当前状态](#55-当前状态)
+>
+> 当前开放项以[运行时验证计划](../plans/active/motor-runtime-validation.md)为准；本文原始 55 章规范正文保留，不以实施状态说明改写当时设计基线。
 
 ---
 
@@ -18,7 +33,7 @@
 
 - 固件模块划分；
 - ROS 2 / micro-ROS 消息设计；
-- Vaxor / CREB 协议适配；
+- Vaxor / CERB 协议适配；
 - FDCAN 收发与调度实现；
 - 安全状态机实现；
 - 单元测试、集成测试和约 40 台电机台架验收；
@@ -82,9 +97,9 @@
 |---|---|---|
 | REV-01 | “状态目标 100 Hz”与 Vaxor 20 ms 自主上报 | 100 Hz 状态发布不等于 100 Hz 新测量。必须携带 `state_age_ms`，不能把重复发布的最近状态解释为新采样。 |
 | REV-02 | `MotorPolicy` 的“前馈”与 `MotorCommandArray.effort` | 语义可能重叠。`effort` 已承担 100 Hz 力矩/前馈目标；Policy 中若仍保留前馈，必须定义为低频偏置/限制类参数，否则应删除。**TBD**。 |
-| REV-03 | 30 ms “软停”的具体协议动作 | 架构已要求软停，但 Vaxor/CREB 各自如何实现尚未固化。必须由适配器给出可测试定义。**TBD**。 |
+| REV-03 | 30 ms “软停”的具体协议动作 | 架构已要求软停，但 Vaxor/CERB 各自如何实现尚未固化。必须由适配器给出可测试定义。**TBD**。 |
 | REV-04 | OFFLINE 判定阈值 | 生命周期包含 `OFFLINE`，但不同协议的离线超时未定义。**TBD**。 |
-| REV-05 | CREB “CAN”与系统“三路 CAN-FD” | 总线硬件运行在 CAN-FD 环境，但 CREB 各类帧实际 `is_fd/is_brs/dlc` 必须由协议适配器明确，不能根据总线类型猜测。**TBD**。 |
+| REV-05 | CERB “CAN”与系统“三路 CAN-FD” | 总线硬件运行在 CAN-FD 环境，但 CERB 各类帧实际 `is_fd/is_brs/dlc` 必须由协议适配器明确，不能根据总线类型猜测。**TBD**。 |
 | REV-06 | QoS、消息包名、字段最终顺序 | 明确属于实现规格，必须在接入 micro-ROS 前固化。**TBD**。 |
 | REV-07 | 每 1 ms 的最大 RX 处理量、P2 配额、TX pump 配额 | 原设计要求“有界工作”，但预算未量化。必须通过计算和台架测试确定。**TBD**。 |
 | REV-08 | 全局唯一 `motor_id` 的冲突处理 | **DERIVED**：同 ID 出现在不同总线/身份不一致时必须进入冲突状态并禁止运动，不能“后到覆盖先到”。 |
@@ -100,11 +115,11 @@
 系统 MUST：
 
 1. 在 STM32H723 上同时管理 FDCAN1、FDCAN2、FDCAN3。
-2. 支持约 40 台 Vaxor/CREB 混合电机。
+2. 支持约 40 台 Vaxor/CERB 混合电机。
 3. 支持设备动态上线、离线和热插拔。
 4. 根据设备身份选择 `MotorModelProfile`，而不是依赖固定安装表。
 5. 为 ROS 2 上层提供统一的电机控制、运动状态、诊断状态、拓扑和配置接口。
-6. 默认以 MIT 模式控制 Vaxor 与 CREB。
+6. 默认以 MIT 模式控制 Vaxor 与 CERB。
 7. 在正常控制路径实现 100 Hz 命令边界。
 8. 在 ROS/Agent 异常时由 MCU 独立执行安全降级。
 9. 保证历史运动命令不会因队列积压而在未来被发送。
@@ -130,7 +145,7 @@
 
 - motor runtime；
 - FDCAN 软件接收环和发送调度器；
-- Vaxor/CREB 协议适配器边界；
+- Vaxor/CERB 协议适配器边界；
 - runtime registry；
 - 生命周期与安全状态；
 - command/config mailbox；
@@ -188,7 +203,7 @@
 |       |                                                       |
 |  +----+-------------+--------------+----------------------+   |
 |  | registry         | safety       | protocol adapters    |   |
-|  |                  |              | Vaxor / CREB         |   |
+|  |                  |              | Vaxor / CERB         |   |
 |  +----+-------------+--------------+----------------------+   |
 |       |                                                       |
 |       v                                                       |
@@ -336,8 +351,8 @@ Profile MUST 是“型号目录”，而不是“设备实例表”。
 
 | 型号 | 已确认参数 | 架构行为 |
 |---|---|---|
-| CREB R48-101 | 101:1；30 RPM；额定/峰值 5/11 N·m；48 V；21 bit 编码器 | 支持驱动器侧限位配置 |
-| CREB R58-101 | 101:1；30 RPM；额定/峰值 20/45 N·m；48 V；21 bit 编码器 | 支持驱动器侧限位配置 |
+| CERB R48-101 | 101:1；30 RPM；额定/峰值 5/11 N·m；48 V；21 bit 编码器 | 支持驱动器侧限位配置 |
+| CERB R58-101 | 101:1；30 RPM；额定/峰值 20/45 N·m；48 V；21 bit 编码器 | 支持驱动器侧限位配置 |
 | Vaxor 25 mm 系列 | 12~18 V；绝对编码器；30/50 速比参数已确认 | CAN-FD；上电默认 MIT；无硬件限位 |
 
 Vaxor 80 速比的完整参数未确认前 MUST NOT 进入可运动的 Profile。
@@ -444,9 +459,9 @@ READY_DISABLED
 - 其自主上报不应在 ISR 中解码。
 - MIT 命令响应是否用于补充状态更新由协议适配器负责。
 
-### 10.3 CREB 发现
+### 10.3 CERB 发现
 
-- CREB 使用反馈/管理读取识别身份。
+- CERB 使用反馈/管理读取识别身份。
 - `0x080 SYNC` MUST 仅用于发现、重连和热插拔探测，不作为 100 Hz 默认 MIT 控制聚合机制。
 
 ### 10.4 热插拔
@@ -603,7 +618,7 @@ MUST NOT 自动复用：
 
 “软停”厂家级动作尚未由输入材料定义。
 
-实现前 MUST 为 Vaxor/CREB 分别明确：
+实现前 MUST 为 Vaxor/CERB 分别明确：
 
 - 是保持当前位置、速度归零、力矩归零还是专用 stop；
 - `Kp/Kd` 如何处理；
@@ -856,7 +871,7 @@ B. Policy 仅保存低频静态 bias/scale/limit，最终输出由 runtime 合�
 ### 20.2 用途
 
 - 模式切换；
-- CREB 限位；
+- CERB 限位；
 - 其他设备配置。
 
 ### 20.3 基本事务规则
@@ -948,7 +963,7 @@ ISR MUST 只执行：
 
 ISR MUST NOT：
 
-- 解码 Vaxor/CREB；
+- 解码 Vaxor/CERB；
 - 修改复杂 runtime 状态机；
 - 调用 ROS/micro-ROS；
 - 发正常控制帧；
@@ -1035,7 +1050,7 @@ Length: 12 bytes
 
 具体 N 与 `motor_id` 的映射、FD/BRS 位及字节定义由 Vaxor 适配器/协议文件固化。
 
-### 23.2 CREB
+### 23.2 CERB
 
 已确认默认 MIT 单电机帧：
 
@@ -1044,18 +1059,18 @@ CAN ID: 0x110 | Dev_ID
 Length: 9 bytes
 ```
 
-具体 FD/BRS 位及字节定义由 CREB 适配器/协议文件固化。
+具体 FD/BRS 位及字节定义由 CERB 适配器/协议文件固化。
 
-### 23.3 CREB 多控
+### 23.3 CERB 多控
 
 `0x200`：
 
 - MUST NOT 因“总线上电机超过 8 台”而自动启用；
 - 仅在明确的非 MIT 模式下启用；
-- 由 CREB 适配器负责；
+- 由 CERB 适配器负责；
 - 每组最多 8 台。
 
-### 23.4 CREB SYNC
+### 23.4 CERB SYNC
 
 `0x080 SYNC`：
 
@@ -1118,9 +1133,9 @@ map_vendor_fault
 
 ---
 
-## 25. Vaxor/CREB 能力边界
+## 25. Vaxor/CERB 能力边界
 
-| 能力 | Vaxor | CREB |
+| 能力 | Vaxor | CERB |
 |---|---|---|
 | 发现/身份 | 20 ms 自主状态 | 反馈/管理读取 |
 | 默认控制 | MIT 单电机 | MIT 单电机 |
@@ -1144,9 +1159,9 @@ map_vendor_fault
 - MUST 在协议打包前检查；
 - 不得依赖 ROS 回调实时执行安全裁决。
 
-### 26.2 CREB
+### 26.2 CERB
 
-CREB 驱动器侧限位配置：
+CERB 驱动器侧限位配置：
 
 - 通过 `MotorConfig` 事务；
 - 写入后必须读回确认；
@@ -1200,7 +1215,7 @@ CAN 发送。
 |---|---|---|
 | `lib/fdcan` | 初始化、过滤器、IRQ、RX ring、TX 调度、HAL FIFO 和底层统计 | 协议解码、ROS、策略 |
 | `lib/dma` | 共享 DMA 控制器、通道配置和 IRQ 资源管理 | IMU/LED 采样策略和设备业务 |
-| `lib/motor_protocol` | Vaxor/CREB 发现、编解码、MIT、停止、SYNC、配置事务 | 注册表所有权、ROS 消息 |
+| `lib/motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置事务 | 注册表所有权、ROS 消息 |
 | `lib/motor_control` | 注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS API、厂家 HAL 字节 |
 | `lib/control_mailbox` | 高频命令、低频 Policy/Config 和连接事件的固定容量交换 | 策略、协议校验、设备等待、CAN 发送 |
 | `src/motor_rt_task` | 1 ms 服务、10 ms 控制、统一调度 | 阻塞等待、动态分配 |
@@ -1404,12 +1419,12 @@ QoS 选择必须符合“最新运动命令优先、不得积压历史命令”�
 
 ## 36. 离线判定
 
-Vaxor/CREB 的 OFFLINE 阈值当前未定义，为 **TBD-SAFETY-03**。
+Vaxor/CERB 的 OFFLINE 阈值当前未定义，为 **TBD-SAFETY-03**。
 
 阈值设计必须考虑：
 
 - Vaxor 20 ms 自主状态周期；
-- CREB 反馈机制；
+- CERB 反馈机制；
 - CAN 总线拥塞；
 - 临时丢帧；
 - 100 Hz 控制；
@@ -1538,7 +1553,7 @@ MCU 不应因为 joint 名称变化而需要重新编译。
 - 双总线；
 - 三总线；
 - 约 40 台设备；
-- Vaxor/CREB 混合；
+- Vaxor/CERB 混合；
 - 最大可预期状态反馈；
 - P2 同时存在发现/配置；
 - 命令 100 Hz。
@@ -1616,7 +1631,7 @@ MCU 不应因为 joint 名称变化而需要重新编译。
 
 ### 43.4 protocol
 
-Vaxor/CREB 各自覆盖：
+Vaxor/CERB 各自覆盖：
 
 - identity；
 - state decode；
@@ -1637,7 +1652,7 @@ Vaxor/CREB 各自覆盖：
 | T1 | 无电机/模拟帧 | runtime、消息、调度、静态内存 |
 | T2 | 单协议单电机 | 发现、MIT、状态、安全停 |
 | T3 | 单总线多电机 | P1 latest-wins、RX/TX 压力 |
-| T4 | 单总线 Vaxor+CREB | 协议共存 |
+| T4 | 单总线 Vaxor+CERB | 协议共存 |
 | T5 | 双总线 | 并行服务、公平性 |
 | T6 | 三总线 | 调度和 CPU 峰值 |
 | T7 | 约 40 台 | 最大规模稳定性 |
@@ -1724,7 +1739,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 ### Phase 3：协议层
 
 1. Vaxor identity/state/MIT；
-2. CREB identity/state/MIT；
+2. CERB identity/state/MIT；
 3. stop/disable；
 4. discovery/SYNC；
 5. config transaction；
@@ -1774,9 +1789,9 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 
 | ID | 项目 | 阻塞阶段 |
 |---|---|---|
-| TBD-SAFETY-01 | Vaxor/CREB 30 ms 软停厂家级语义 | 安全验收 |
+| TBD-SAFETY-01 | Vaxor/CERB 30 ms 软停厂家级语义 | 安全验收 |
 | TBD-SAFETY-02 | RX overflow 触发安全降级的阈值/策略 | 台架验收 |
-| TBD-SAFETY-03 | Vaxor/CREB OFFLINE 判定阈值 | 热插拔/安全 |
+| TBD-SAFETY-03 | Vaxor/CERB OFFLINE 判定阈值 | 热插拔/安全 |
 | TBD-ROS-01 | 命令 NaN/Inf 校验规则 | 消息冻结 |
 | TBD-ROS-02 | Topology/Event 最终 `.msg` 和字段 | micro-ROS 接入 |
 | TBD-ROS-03 | Policy“前馈”与 Command `effort` 语义 | 消息冻结 |
@@ -1785,7 +1800,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 | TBD-STATUS-01 | protection/limit 公共位定义 | 状态接口 |
 | TBD-CAN-01 | P2 队列深度、每周期 RX/P2/TX 配额 | 实时集成 |
 | TBD-CAN-02 | FDCAN 过滤器 | 总线集成 |
-| TBD-CAN-03 | CREB/Vaxor 各帧 FD/BRS/具体 DLC 属性确认 | 协议集成 |
+| TBD-CAN-03 | CERB/Vaxor 各帧 FD/BRS/具体 DLC 属性确认 | 协议集成 |
 | TBD-RT-01 | WCET、P0/P1 延迟、jitter 预算 | 台架验收 |
 | TBD-PROFILE-01 | 固件/上层 Profile 一致性检测方式 | 系统集成 |
 | TBD-CONFIG-01 | 厂家管理对象、阶段超时值 | 配置事务 |
@@ -1799,7 +1814,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 
 1. 在 MCU 固定表中写死 40 台电机与关节名。
 2. ROS callback 直接调用 HAL 发送运动 CAN。
-3. ISR 中解码 Vaxor/CREB。
+3. ISR 中解码 Vaxor/CERB。
 4. 每个 motor task 各自拥有一个 FDCAN TX 路径。
 5. 用 FIFO 堆积 100 Hz 运动命令。
 6. 在 1 ms task 内等待配置响应。
@@ -1809,7 +1824,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 10. 为了调试保留可直接注入正常运动 CAN 的 bridge。
 11. 在实时路径 `malloc`。
 12. W25Q64 写日志阻塞 `motor_rt_task`。
-13. 因 CREB 数量 > 8 自动切换 `0x200` 多控。
+13. 因 CERB 数量 > 8 自动切换 `0x200` 多控。
 14. 用 `0x080 SYNC` 替代默认 MIT 控制。
 15. Vaxor 80 速比参数未确认就套用 30/50 Profile。
 16. 同 ID 冲突时“最后发现者覆盖前者”。
@@ -1870,7 +1885,7 @@ micro_ros_firmware/
 │   ├── motor_protocol/
 │       ├── motor_protocol.*
 │       ├── vaxor_adapter.*
-│       └── creb_adapter.*
+│       └── cerb_adapter.*
 │   ├── imu/
 │   ├── w25q64/
 │   └── ws2812/
@@ -2014,7 +2029,7 @@ void motor_runtime_apply_latest_command_snapshot(void)
 - 用队列积压历史运动命令；
 - 将 joint 语义下沉 MCU；
 - 在实时路径允许动态分配；
-- CREB/Vaxor 默认控制不再以单电机 MIT 为主；
+- CERB/Vaxor 默认控制不再以单电机 MIT 为主；
 - 将厂家协议细节上移到 ROS 接口。
 
 以下通常只需实现规格变更：
@@ -2037,7 +2052,7 @@ void motor_runtime_apply_latest_command_snapshot(void)
 
 > 在 STM32H723 上建立一个发现驱动、静态有界、单一实时所有权的电机运行时。  
 > 上层只表达统一的 joint/motor 控制语义；MCU 负责身份、生命周期、安全和调度；  
-> Vaxor/CREB 适配器独占厂家协议字节；三路 FDCAN 独立缓冲和调度；  
+> Vaxor/CERB 适配器独占厂家协议字节；三路 FDCAN 独立缓冲和调度；  
 > 100 Hz 命令以完整快照进入，P1 只保留最新目标；  
 > 30 ms 无新命令软停，100 ms 或 Agent 断开协议级停机/失能；  
 > 配置走低频、可验证、非阻塞事务；实时路径禁止动态分配；  
@@ -2046,6 +2061,8 @@ void motor_runtime_apply_latest_command_snapshot(void)
 ---
 
 ## 55. 当前状态
+
+> **2026-09-11 状态修正**：本节以下 12 项是 2026-09-04 原始 TBD 清单，保留用于追溯。其后已经闭环 OFFLINE 判定、Policy 前馈语义、消息/QoS 基线、配置结果接口、CAN FD/BRS/过滤器细节和公共状态位。部分闭环的是管理事务框架；仍开放厂家级软停/管理对象、RX/P2/TX 最坏预算、WCET/jitter/P0/P1 延迟、Profile 自动一致性和最大规模三总线证据。当前可执行清单见[运行时验证计划](../plans/active/motor-runtime-validation.md)。
 
 本 ARD 可作为重构开发基线，但在以下关键 TBD 闭环前仍保持 **Proposed**：
 

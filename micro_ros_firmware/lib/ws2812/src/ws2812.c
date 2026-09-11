@@ -1,30 +1,8 @@
-// WS2812 彩灯驱动（SPI6 + BDMA 编码，官方 CtrBoard-H7_WS2812 例程同源方案）
-//
-// 原理：
-//   - SPI6 内核时钟 = HSE 24MHz（SystemClock_Config 已设 RCC_SPI6CLKSOURCE_HSE），
-//     预分频 /4 → SPI 时钟 6MHz
-//   - 每 8 个 SPI 位编码 1 个 WS2812 位：0→0x60（2 高 6 低 ≈ 333ns 高），
-//     1→0x78（4 高 4 低 ≈ 667ns 高），位周期 1.33us（WS2812 容差内）
-//   - 24 位 GRB 颜色 = 24 字节；帧尾 100 字节 0x00 低电平复位（>50us）
-//
-// DMA（2026-09-07，替代旧「阻塞发送 + 关中断 ~165us + 101 次 HAL 调用」实现）：
-//   - H723 上 SPI6 的 DMA 请求只接 DMAMUX2/BDMA（DMA1/2 无此请求线）；
-//     BDMA 仅能访问 DTCM/SRAM4 → 帧缓冲置于 RAM_D3 的 .bdma_noinit 段
-//     （项目级链接脚本 ldscript/stm32h723vgt6.ld；NOLOAD 段由本文件清零）。
-//   - 控制器级资源（BDMA/DMAMUX2 时钟、Channel0 NVIC）归 lib/dma 的
-//     MX_DMA_Init，由 main 板级初始化在 ws2812_init 之前调用（前置契约）。
-//   - 发送 = 单次 HAL_SPI_Transmit_DMA；完成链两级，handler 均由本文件
-//     自持（与 lib/imu / lib/fdcan 同构）：BDMA_Channel0 IRQ 里 HAL 收完
-//     缓冲并使能 SPI EOT 中断，SPI6 EOT IRQ 里 HAL 清标志、置 READY。
-//     SPI6 侧缺失则 State 永久 BUSY_TX——首帧后 LED 冻结红灯（2026-09-08
-//     修复）。不关中断——DMA 流不被任务/ISR 抢占打断，灯序与高优先级
-//     活动互不影响。
-//   - 忙（上一帧未完）时 submit 返回 false，调用方下个周期重试。
-//   - cache/MPU（dma.h 政策声明位）：本工程未启用 cache（H723 无 D-cache），
-//     DMA 缓冲无需维护。
-//
-// 注：此前用 SPI1 @2.125MHz + 3 位编码（0→0x80 高 470ns）卡在 WS2812 阈值
-// （~0.5us）边缘，0 位被误判为 1 → 全白。官方 6MHz + 8 位编码 0 位仅 333ns，安全。
+// WS2812 彩灯驱动：SPI6 @ 6MHz，以 8 个 SPI 位编码 1 个 WS2812 位。
+// 24 字节 GRB 数据后追加 100 字节低电平复位。SPI6_TX 使用 BDMA Channel0；
+// 帧缓冲必须位于 BDMA 可访问的 .bdma_noinit/RAM_D3，且由本文件显式清零。
+// MX_DMA_Init 须先初始化控制器时钟和 NVIC。发送使用单次 DMA，忙时由调用方
+// 下周期重试；BDMA 完成后仍需 SPI6 EOT 中断将 HAL 状态恢复为 READY。
 
 #include "ws2812.h"
 #include "stm32_def.h"      // Error_Handler
@@ -114,10 +92,7 @@ bool ws2812_submit_rgb(uint8_t r, uint8_t g, uint8_t b) {
                               WS2812_FRAME_BYTES) == HAL_OK;
 }
 
-// 发送完成中断两级链（handler 均归设备库自持，与 lib/imu / lib/fdcan
-// 的回调同构）：BDMA TC = HAL 收完缓冲、使能 EOT 中断；SPI6 EOT = HAL
-// 清 EOT/TXTF 标志、置 READY。缺任一级则链断（SPI6 侧缺失曾是 LED
-// 冻结红灯的根因——EOT 挂起无人清，submit 永远撞 BUSY_TX）。
+// BDMA TC 完成缓冲搬运；SPI6 EOT 清发送标志并将 HAL 状态置回 READY。
 void BDMA_Channel0_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_spi6_tx);
 }

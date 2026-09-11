@@ -1,4 +1,4 @@
-// motor_control v2 内核 host test（Phase A，ARD-0007 §43.1 覆盖清单）。
+// motor_control ID 化运行时 host test（ARD-0007 §43.1 覆盖清单）。
 //
 // 覆盖：注册/发现、九态生命周期迁移、30/100ms 快照安全级联、断链立即停机、
 // 受控缺席软停、重复/冲突 motor_id、Profile 绑定与拒绝、OFFLINE/重连、
@@ -461,7 +461,7 @@ static void test_enter_active_requires_auth_profile_snapshot() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
 
-  // 授权 + 新快照 → ACTIVE：使能帧走 P0（先于 MIT 上总线，审查 C2 修复），
+  // 授权 + 新快照 → ACTIVE：使能帧走 P0，先于 MIT 帧上总线，
   // MIT 帧走 P1；vaxor 无整定门，两帧同拍生成。一次排空统计两类计数。
   assert(motor_control_set_authorization(&ctx, true, 160));
   motor_control_command_snapshot_t s2 = make_snapshot(2, 165);
@@ -488,7 +488,7 @@ static void test_enter_active_requires_auth_profile_snapshot() {
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_ACTIVE, 5));
 }
 
-// 审查 4a：下游（调度器 FIFO 满 / 硬件拒收）回告的 P0 帧必须重入队。
+// 下游因调度器 FIFO 满或硬件拒收而回告的 P0 帧必须重入队。
 static void test_p0_requeue_after_downstream_failure() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -536,14 +536,14 @@ static void test_p0_requeue_after_downstream_failure() {
   assert(found_p0);
 }
 
-// 审查第 5 步：MotorBind 过渡绑定通道的内核落地（按名绑定）。
+// MotorBind 过渡绑定通道的内核行为（按名绑定）。
 static void test_bind_profile_by_name() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
   motor_control_on_raw_frame(&ctx, &f); // 仅发现，未绑定
 
-  // 未知名 / 空名 / 未发现设备：拒绝并回 PROFILE_REJECTED（审查 M4）。
+  // 未知名、空名或未发现设备：拒绝并回 PROFILE_REJECTED。
   assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
   assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 110));
   assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 110));
@@ -572,7 +572,7 @@ static void test_bind_profile_by_name() {
   }
 }
 
-// M4：绑定拒绝必须回 PROFILE_REJECTED 事件（MotorBind.msg 契约：结果经
+// 绑定拒绝必须回 PROFILE_REJECTED 事件（MotorBind.msg 契约：结果经
 // PROFILE_BOUND/PROFILE_REJECTED 回告）——未知名与设备未发现曾静默 false。
 static void test_bind_rejection_emits_profile_rejected() {
   motor_control_context_t ctx;
@@ -680,7 +680,7 @@ static void test_30ms_stale_snapshot_soft_stops() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   motor_control_service(&ctx, 151);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  // P0 两帧：进入 ACTIVE 时的使能帧（审查 C2 起走 P0）+ 本次软停帧。
+  // P0 两帧：进入 ACTIVE 时的使能帧 + 本次软停帧。
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 2);
 
   // 新鲜快照回来 → 恢复（级联去重标志复位）。
@@ -1420,10 +1420,10 @@ static void test_bind_profile_rejection() {
 }
 
 // ---------------------------------------------------------------------------
-// 对抗性审查修复项的回归覆盖
+// 安全边界回归覆盖
 // ---------------------------------------------------------------------------
 
-// 修复项 1：使能整定窗内的电机属于受控集合——快照缺席即软停（不再永久使能）。
+// 使能整定窗内的电机属于受控集合：快照缺席即软停。
 static void test_settle_window_absence_soft_stops() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -1470,7 +1470,7 @@ static void test_settle_window_absence_soft_stops() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 修复项 2：缓冲满时 P0 失能帧驱逐非 P0 帧入队（抢占，ARD §22.1），不静默丢失。
+// 缓冲满时 P0 失能帧驱逐非 P0 帧入队（ARD §22.1），不得静默丢失。
 static void test_p0_preempts_full_buffer() {
   motor_control_context_t ctx;
   const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
@@ -1514,7 +1514,7 @@ static void test_p0_preempts_full_buffer() {
   assert(!entry_of(&ctx, 3)->p0_pending); // 未挂起重试（已成功入队）
 }
 
-// 修复项 3：过期快照门（ARD §51.3）——>30ms 软停、>100ms 撤权，且不记录、
+// 过期快照门（ARD §51.3）：>30ms 软停、>100ms 撤权，且不记录、
 // 不复位级联标志。
 static void test_stale_snapshot_gates() {
   motor_control_context_t ctx;
@@ -1552,7 +1552,7 @@ static void test_stale_snapshot_gates() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 修复项 4：CONFIG_CONFLICT 锁存——穿越 OFFLINE/重连不自动解除（§9.3）。
+// CONFIG_CONFLICT 锁存穿越 OFFLINE/重连，不自动解除（§9.3）。
 static void test_conflict_survives_offline_reconnect() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -1574,7 +1574,7 @@ static void test_conflict_survives_offline_reconnect() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
-// 修复项 5：DISCOVERED→IDENTIFYING 中间态可观测（ARD §43.1 第 1 条）。
+// DISCOVERED→IDENTIFYING 中间态可观测（ARD §43.1 第 1 条）。
 static void test_identifying_state_observed() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -1586,7 +1586,7 @@ static void test_identifying_state_observed() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING);
 }
 
-// 修复项 6：事件携带 MCU 单调时戳（ARD §18.2）。
+// 事件携带 MCU 单调时戳（ARD §18.2）。
 static void test_event_carries_tick() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -1606,7 +1606,7 @@ static void test_event_carries_tick() {
   assert(tick_ok);
 }
 
-// 修复项 7：P1 溢出丢弃计数可见（P0 路径由 test_p0_preempts_full_buffer 覆盖）。
+// P1 溢出丢弃计数可见（P0 路径由 test_p0_preempts_full_buffer 覆盖）。
 static void test_tx_drop_counted() {
   motor_control_context_t ctx;
   const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
@@ -1630,7 +1630,7 @@ static void test_tx_drop_counted() {
   assert(ctx.tx_dropped_count > 0); // 满即丢且计数（P1 路径）
 }
 
-// 修复项 8：SET_MODE 门禁——未识别（无 Profile）电机不得受理（INVALID）。
+// SET_MODE 门禁：未识别（无 Profile）电机不得受理（INVALID）。
 static void test_set_mode_gating_on_unidentified() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -1645,7 +1645,7 @@ static void test_set_mode_gating_on_unidentified() {
   assert(has_result_event(&ctx, 11U, MOTOR_PROTOCOL_CONFIG_INVALID));
 }
 
-// 修复项 9：逐电机 Enable（MotorPolicy）——false 立即失能并冻结，
+// 逐电机 Enable（MotorPolicy）：false 立即失能并冻结，
 // true 重立授权（仍需新快照）；OFFLINE 冻结后必须显式重发 Enable。
 static void test_policy_enable_disables_and_arms() {
   motor_control_context_t ctx;
@@ -1697,7 +1697,7 @@ static void test_policy_enable_disables_and_arms() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 厂家故障恢复语义（H1）：FAULT 清除回 READY_DISABLED 后，逐电机
+// 厂家故障恢复语义：FAULT 清除回 READY_DISABLED 后，逐电机
 // motion_authorized 已在故障锁存时清除——快照重现**不得**自动恢复运动；
 // 必须显式 SET_ENABLE(true) 复立授权位（"失败不自动恢复运动授权"）。
 static void test_fault_recovery_requires_reauth() {
@@ -1747,7 +1747,7 @@ static void test_fault_recovery_requires_reauth() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// M1：故障/冲突锁存必须冻结 policy_enable。全局 set_authorization(true) 会
+// 故障/冲突锁存必须冻结 policy_enable。全局 set_authorization(true) 会
 // 重立全部表项 motion_authorized，若 policy_enable 残留 true，故障清除后仅
 // 重发全局授权 + 新快照即自动复运动——违反 ARD §36「失败不自动恢复」。
 // 修复后：撤权→再授权 + 新快照 ⇒ 0 运动帧；显式 SET_ENABLE(true) 才恢复。
@@ -1805,9 +1805,9 @@ static void test_fault_recovery_no_motion_without_explicit_enable() {
   assert(!entry_of(&ctx, 7)->policy_enable);
 }
 
-// M2：撤权/离线中止进行中配置事务时必须回 CONFIG_UNCONFIRMED 终态——
+// 撤权/离线中止进行中配置事务时必须回 CONFIG_UNCONFIRMED 终态：
 // 七码无「中止」码（msgs 冻结），UNCONFIRMED（写入效果无法确认）语义最诚实；
-// 否则上层请求悬挂到自身超时（审查 M2）。
+// 否则上层请求会悬挂到自身超时。
 static void test_revoke_aborts_tx_with_unconfirmed() {
   motor_control_context_t ctx;
   const motor_protocol_adapter_t *adapters[1] = {&g_mock_adapter};
@@ -1872,7 +1872,7 @@ static void test_offline_aborts_tx_with_unconfirmed() {
   assert(has_result_event(&ctx, 7U, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED));
 }
 
-// 软停帧编码失败（M2）：与失能路径同语义——挂起 p0_pending 由 service
+// 软停帧编码失败与失能路径同语义：挂起 p0_pending 由 service
 // 重试；重试仍失败则计数并放弃（不静默丢安全帧）。
 static bool mock_encode_soft_stop_fail(const motor_protocol_model_profile_t *p,
                                        uint16_t node, uint8_t bus,
@@ -1919,7 +1919,7 @@ static void test_soft_stop_encode_failure_pends_retry() {
   assert(entry_of(&ctx, 3)->protocol_error_count >= 1);
 }
 
-// P1 槽位（B1 前置）：MIT/使能帧携带表项索引槽（tx_slot），供任务层把帧路由到
+// P1 槽位：MIT/使能帧携带表项索引槽（tx_slot），供任务层把帧路由到
 // per-bus 调度器的 latest-wins 槽。两台电机（先 5 后 6）→ 槽 0/1。
 static void test_tx_slot_maps_entry_index() {
   motor_control_context_t ctx;
@@ -1948,7 +1948,7 @@ static void test_tx_slot_maps_entry_index() {
   assert(saw_mit_5 && saw_mit_6);
 }
 
-// H1：内核生成的软停/失能 P0 帧必须携带表项索引（tx_slot）——下游调度器
+// 内核生成的软停/失能 P0 帧必须携带表项索引（tx_slot），供下游调度器
 // FIFO 满回告 motor_control_requeue_p0 按 tx_slot 定位表项，tx_slot 恒 0 会
 // 把 p0_pending 错挂表项 0。断言主体用表项索引 ≥1 的电机（motor 6 = entry 1）。
 static void test_p0_tx_slot_on_soft_stop_and_disable() {
@@ -2009,7 +2009,7 @@ static void test_p0_tx_slot_on_soft_stop_and_disable() {
   assert(saw_dis_5 && saw_dis_6);
 }
 
-// H1（重编码路径）：软停编码首拍失败挂起 → service 重编码补发，重编码帧同样
+// 重编码路径：软停编码首拍失败挂起 → service 重编码补发，重编码帧同样
 // 必须携带正确 tx_slot（service_p0_retries 曾恒 0）。两台 mock 电机（node 2/3
 // = 表项 0/1），断言主体是表项 1。
 static bool g_soft_stop_fail_countdown = false;

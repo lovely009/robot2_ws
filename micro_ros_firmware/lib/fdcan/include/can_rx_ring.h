@@ -3,9 +3,8 @@
 //
 // 并发约定：push 只在 ISR 上下文调用（只推进 head）；pop/pending 只在任务
 // 上下文调用（只推进 tail）。head/tail 均 32 位自然对齐，Cortex-M7 上
-// 单加载/存储原子。环满丢弃**新帧**并计数（不移动 tail——ISR 侧无法安全
-// 回收旧槽位；与 ARD §51.1 伪代码一致。旧 FreeRTOS 队列的 drop-oldest
-// 行为随队列一同移除）。
+// 单加载/存储原子。环满丢弃**新帧**并计数，不移动 tail，因为 ISR 侧不能
+// 回收仍可能由消费者读取的槽位（ARD §51.1）。
 //
 // 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms，与内核 millis() 同一
 // HAL 计数器——见 can_bsp.c isr_now_ms）与 is_brs 属性（ARD §21.2）；

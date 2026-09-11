@@ -57,7 +57,7 @@ void MX_FDCAN1_Init(void) {
   hfdcan1.Init.NominalTimeSeg2 = 16;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 2;
-  hfdcan1.Init.DataTimeSeg1 = 12; // 16tq@80MHz = 5Mbps，与 FDCAN2/3 一致（审查 C3）
+  hfdcan1.Init.DataTimeSeg1 = 12; // 16tq@80MHz = 5Mbps，与 FDCAN2/3 一致
   hfdcan1.Init.DataTimeSeg2 = 3;
   hfdcan1.Init.MessageRAMOffset = 0;
   hfdcan1.Init.StdFiltersNbr = 4;

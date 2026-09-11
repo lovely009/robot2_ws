@@ -1,6 +1,6 @@
-// 电机域 ROS 桥实现（Phase C：ID 化消息面，ARD-0007 §15-20 冻结集）。
+// 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15-20）。
 //
-// 订阅（4 句柄）：
+// 订阅（5 句柄）：
 //   /motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
 //   micro_ros/motor_policy（Enable/Kp/Kd/软限幅）→ mailbox 配置
 //   micro_ros/motor_config（模式/设备侧限位事务）→ mailbox 配置
@@ -58,7 +58,7 @@ static const char *kTopologyTopic = "micro_ros/motor_topology";
 static const char *kEventsTopic = "micro_ros/motor_events";
 static const char *kConfigResultTopic = "micro_ros/motor_config_result";
 
-// ---- 订阅（4）----
+// ---- 订阅（5）----
 static rcl_subscription_t g_command_sub;
 static can_bridge_msgs__msg__MotorCommandArray g_command_msg;
 static bool g_command_up = false;
@@ -178,9 +178,8 @@ static void policy_cb(const void *msgin) {
   request.received_tick_ms = millis();
   request.motor_id = msg->motor_id;
 
-  // Enable 先于增益/限位（先表达运动许可变化）。三路请求各自独立
-  // request_id（审查 M3）：同一结构体复用曾让最多 3 条请求同 id，上层
-  // 无法按 id 关联各自的 CONFIG_RESULT 回告。
+  // Enable 先于增益/限位，以先表达运动许可变化；每条请求使用独立
+  // request_id，使各自的 CONFIG_RESULT 可关联。
   request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
   request.value.enable = msg->enable;
   request.request_id = next_policy_request_id();

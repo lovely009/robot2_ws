@@ -33,10 +33,9 @@ enable 使用固定容量 FIFO；连接和授权使用状态电平加一次性�
 
 `dma` 是共享的板级资源门卫，只管控制器级资源（DMA1 + BDMA/DMAMUX2 时钟、
 通道 NVIC、占用登记、优先级合规断言），由 `main` 板级初始化统一使能。设备
-SPI/DMA 配置归各设备库——`lib/imu` 自持 SPI2 的 `HAL_SPI_MspInit` 与 DMA
-句柄/handler，`lib/ws2812` 自持 BDMA_Ch0 与 handler（帧缓冲在
-`.bdma_noinit`/RAM_D3——BDMA 仅能访问 DTCM/SRAM4），均与 `lib/fdcan` 自持
-`HAL_FDCAN_MspInit` 同构。设备库之间禁止互相 include 或调用。
+配置归各设备库：`lib/imu` 自持阻塞 SPI2 且当前不用 DMA；`lib/ws2812` 自持
+BDMA_Ch0 句柄与 handler，帧缓冲位于 `.bdma_noinit`/RAM_D3。设备库之间禁止
+互相 include 或调用。
 
 ## 依赖方向
 
@@ -60,7 +59,7 @@ lib/w25q64         -> 休眠：当前无消费者（无 storage 任务），待�
 - `can_transport` → `fdcan` 内部源文件；
 - `motor_profile` → `motor_control` 内部源文件；
 - `command_mailbox`、`config_mailbox` → `control_mailbox` 内部 API；
-- `dma` 保持独立；当前由 `imu` 使用，后续可供 WS2812 或其他外设复用。
+- `dma` 保持独立；当前管理 WS2812 的 BDMA 控制器资源，并为后续设备统一登记资源。
 
 ### `control_mailbox` 当前接口
 

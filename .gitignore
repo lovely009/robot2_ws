@@ -52,3 +52,6 @@
 **/Thumbs.db
 **/desktop.ini
 **/*:Zone.Identifier
+
+# 厂商例程快照（533MB，仅本地参考，勿入库）
+micro_ros_firmware/docs/dm-mc02例程/

@@ -1,6 +1,6 @@
 // CREB CAN-FD/MIT 协议 adapter（ARD-0007 §24 能力清单的 CREB 实现）。
 //
-// 单位约定（分向声明，与 codec 及既有经验行为一致——审查 H2 统一口径）：
+// 单位约定（命令与反馈分向）：
 //  - 命令（encode）：关节侧 rad/s 直通 MIT 12 位对称量化，上限 = Profile
 //    mit_velocity_limit_rad_s（π）。命令侧不乘减速比——若按 ×gear 换算到
 //    电机侧，正常关节速度（×101）将远超 π 满码饱和失真。
@@ -103,9 +103,8 @@ static bool creb_encode_mit_command(const motor_protocol_model_profile_t *profil
     return false;
   }
   // 命令线协议即关节侧（速度含内）：位置/速度/扭矩直通 MIT 量化，上限来自
-  // Profile。速度分向口径（审查 H2）：命令侧不乘减速比（直通 π 上限量化），
-  // 与反馈侧 rpm ÷gear 分向相反——两侧行为由 test_creb_velocity_unit_contract
-  // 钉死。
+  // Profile。命令速度不乘减速比（直通 π 上限量化），与反馈侧 rpm ÷gear
+  // 分向相反——两侧行为由 test_creb_velocity_unit_contract 固定。
   motor_protocol_joint_command_t wire = {0};
   wire.position = intent->position_rad;
   wire.velocity = intent->velocity_rad_s;

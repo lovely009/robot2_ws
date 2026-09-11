@@ -1,9 +1,8 @@
 # motor_event_relay
 
-内核事件中继环（审查 H3 抽取）：`motor_rt_task`（生产侧，1ms 服务节拍）把
-`motor_control` 内核事件环的条目搬入本环，ROS 桥任务（消费侧，轮询）经
-`motor_rt_drain_events` 取走上报。纯 C、静态内存、无动态分配；只依赖
-`lib/motor_control` 的事件类型 `motor_control_event_t`（无 ROS/HAL/RTOS 依赖）。
+内核事件中继环：`motor_rt_task`（生产侧，1ms 服务节拍）把 `motor_control`
+内核事件搬入本环，ROS 桥任务（消费侧，轮询）经 `motor_rt_drain_events` 取走
+上报。纯 C、静态内存、无动态分配；只依赖 `motor_control_event_t`。
 
 ## API
 
@@ -26,11 +25,10 @@
 消费侧 `motor_rt_drain_events` / `motor_rt_event_dropped`（micro_ros 桥任务，
 逐调用临界区）。
 
-## 设计约束：环形序永不破坏
+## 溢出策略
 
-旧实现满队时 memmove 平移数组，隐含 head==0 假设——head≠0 时丢错元素且
-破坏 FIFO 序（审查 H3）。本模块满队只做「覆盖 head 槽 + head 前移」，任何
-head 状态下序都保持严格 FIFO；禁止重新引入数组平移。
+满队时覆盖 `head` 槽并前移 `head`，因此始终丢最旧、保最新且维持 FIFO；
+每次丢弃累计到 `dropped_count`。
 
 ## 构建与测试
 

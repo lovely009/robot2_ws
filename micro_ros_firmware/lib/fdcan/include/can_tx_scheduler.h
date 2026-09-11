@@ -9,7 +9,7 @@
 //    （slot 为电机在总线上的槽索引，0..CAN_TX_P1_SLOTS-1），无 FIFO 历史
 //    （禁止项 5）。pump 只发送"脏"槽位一次。
 //  - P2（发现/配置/管理）：有界 FIFO + 每次 pump 配额上限，绝不让 P2
-//    挤占 P0/P1（TBD-CAN-01：配额值为可审查占位常量）。
+//    挤占 P0/P1（TBD-CAN-01：配额值为具名占位常量）。
 //
 // pump() 返回本轮应提交到硬件 FIFO 的帧（调用方按序 HAL_FDCAN_AddMessage）。
 // 纯 C、无 HAL/FreeRTOS 依赖，可宿主测试；硬件忙/拒绝的反馈由调用方
@@ -75,12 +75,12 @@ typedef struct {
 void can_tx_scheduler_init(can_tx_scheduler_t *sched);
 
 // P0：入队（满 = 丢新帧 + dropped_count，返回 false；任务层将失败回告内核
-// motor_control_requeue_p0 重入队，审查 4a——安全帧不允许静默丢弃）。
+// motor_control_requeue_p0 重入队，确保安全帧不静默丢弃）。
 bool can_tx_scheduler_submit_p0(can_tx_scheduler_t *sched,
                                 const can_tx_frame_t *frame);
 
 // 硬件拒收的安全帧回插 P0 队首（下一 pump 先于一切出队；队满返回 false，
-// 正常调用时序下不发生——刚 pop 出一帧）。审查 4a。
+// 正常调用时序下不会发生，因为刚从 P0 弹出一帧）。
 bool can_tx_scheduler_requeue_p0_front(can_tx_scheduler_t *sched,
                                        const can_tx_frame_t *frame);
 
@@ -95,7 +95,7 @@ bool can_tx_scheduler_submit_p2(can_tx_scheduler_t *sched,
 // 出队本轮待发送帧：先排空 P0，再发全部脏 P1 槽，最后 P2 受配额约束。
 // 返回实际出队帧数；容量不足时余量保留（P0 绝不因容量被跳过——容量不足
 // 时优先保证 P0/P1，P2 留在队列）。p0_count 非空时写入 out 前缀中的 P0 帧
-// 数（供调用方在硬件拒收时识别安全帧并回插，审查 4a）。
+// 数，供调用方在硬件拒收时识别安全帧并回插。
 uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
                                uint32_t capacity, uint32_t *p0_count);
 

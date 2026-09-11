@@ -1,9 +1,7 @@
-// DMA 共享资源门卫实现（职责、占用表与新口径见 dma.h）。
-//
 // DMA/BDMA 占用表（编译期固定；新占用在此登记并更新本表）：
-//   DMA1_Stream0/1 → 空闲（lib/imu 阻塞收发不用 DMA，2026-09-07 移除链接）
-//   BDMA1_Ch0      → SPI6_TX（WS2812，lib/ws2812 自持句柄/链接/handler；
-//                    BDMA 仅能访问 DTCM/SRAM4，缓冲在 .bdma_noinit/RAM_D3）
+//   DMA1_Stream0/1 → 空闲（BMI088 使用阻塞 SPI2）
+//   BDMA1_Ch0      → SPI6_TX（WS2812；句柄与 handler 归 lib/ws2812，
+//                    缓冲位于 .bdma_noinit/RAM_D3）
 //   其余空闲。
 //
 // 优先级合规：DMA 流中断优先级必须 ≥（数值上不高于触发优先级门槛）

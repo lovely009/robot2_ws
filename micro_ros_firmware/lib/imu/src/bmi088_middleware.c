@@ -1,18 +1,12 @@
-// BMI088 通信层（以官方 CtrBoard-H7_IMU_TempCtrl 例程为准移植）。
-//
-// 例程挂在 HAL SPI2（PB13=SCK, PC1=MOSI, PC2=MISO）+ DMA1_Stream0/1，
-// 硬件 CS=PC0(ACC)/PC3(GYRO)，POWER_5V=PC15，EXTI=PE10/PE12。
-// 本工程为 STM32duino + FreeRTOS，因此：
-//   - GPIO 上电/片选由本层初始化，SPI2 引脚与 DMA 由本库 imu_spi2_transport.c
-//     的 HAL_SPI_MspInit 配置；
-//   - EXTI 使用 Arduino attachInterrupt()（sensor_task.cpp 内）；
-//   - SysTick 已被 FreeRTOS 接管，us 忙等用 delayMicroseconds，ms 用 vTaskDelay。
+// BMI088 通信层：SPI2 阻塞收发，板级资源由 imu_spi2_transport.c 初始化。
+// GPIO 上电/片选由本层管理，EXTI 由 sensor_task.cpp 管理；毫秒延时使用
+// FreeRTOS，微秒延时使用 delayMicroseconds。
 
 #include "bmi088_middleware.h"
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 #include "stm32h7xx_hal.h"
-#include "imu_spi2_transport.h"  // imu_spi2_board_init：弱符号陷阱下的显式板级初始化
+#include "imu_spi2_transport.h"
 
 #define POWER_5V_PORT GPIOC
 #define POWER_5V_PIN GPIO_PIN_15
@@ -53,11 +47,7 @@ void BMI088_GPIO_init(void) {
 }
 
 void BMI088_com_init(void) {
-  // 前置契约：任务层（sensor_task_start）已先经 lib/dma 完成 DMA1 时钟与
-  // 流 NVIC（官方时序：DMA 先于 SPI2）。SPI2 引脚/DMA 流链接在本库
-  // imu_spi2_transport.c 完成并须显式触发——HAL_SPI_MspInit 曾因弱符号
-  // 陷阱不被链接（SrcWrapper __weak 空体先满足引用，archive 成员不提取，
-  // SPI2EN 永不置位），回调仅作兜底（2026-09-08）。
+  // 显式初始化 SPI2 板级资源；HAL_SPI_MspInit 仅作兜底。
   imu_spi2_board_init();
   hspi_bmi088.Instance = SPI2;
   hspi_bmi088.Init.Mode = SPI_MODE_MASTER;
@@ -116,7 +106,7 @@ uint8_t BMI088_read_write_byte(uint8_t reg) {
   return rx;
 }
 
-// 官方使能了 SPI2 中断；阻塞路径不产生事件，保留转发入口以防后续 DMA 化。
+// 阻塞收发不产生 SPI 事件；保留入口供后续中断模式使用。
 void SPI2_IRQHandler(void) {
   HAL_SPI_IRQHandler(&hspi_bmi088);
 }

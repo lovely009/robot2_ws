@@ -1,6 +1,5 @@
-// motor_event_relay host 单测（cassert 风格）：FIFO 序 + 部分取走、满丢最旧
-// 保最新、head≠0 病态区跨回绕（审查 H3 旧实现 memmove 平移在 head≠0 时破坏
-// 环形序——本套件钉死「任何 head 状态下序严格 FIFO」契约）。
+// motor_event_relay host 单测（cassert 风格）：FIFO 序、部分取走、满队丢最旧
+// 保最新，以及 head 非零时的跨回绕；固定所有 head 状态下的严格 FIFO 契约。
 
 #include <cassert>
 #include <cstdint>

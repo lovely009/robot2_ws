@@ -1,5 +1,5 @@
 // motor_control 发现与注册：原始帧 → adapter 归属 → 注册表条目 → 解码 →
-// 生命周期/冲突/故障处理（ARD-0007 §9/§10/§21/§36；HANDOFF 阶段 A-1）。
+// 生命周期/冲突/故障处理（ARD-0007 §9/§10/§21/§36）。
 //
 // 键与冲突：注册表以全局唯一 uint16 motor_id 为键（当前派生：= 厂家 node 号，
 // 部署保证全局唯一；同号再现即冲突兜底）。同 motor_id 跨总线/跨协议身份不符
@@ -39,12 +39,11 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   entry->enable_pending = false;
   entry->has_target = false;
   entry->motion_authorized = false;
-  // policy_enable 一并冻结（审查 M1）：全局 set_authorization(true) 会重立
+  // policy_enable 一并冻结：即使全局授权与新快照随后到达，也必须等待
   // motion_authorized，若 policy_enable 残留 true，锁存清除后仅重发全局授权
   // + 新快照即自动复运动——违反 ARD §36「失败不自动恢复运动授权」。
   entry->policy_enable = false;
-  // 中止进行中的配置事务：回 UNCONFIRMED 终态（审查 M2），与撤权/离线的
-  // 终结策略一致——事务不再有意义但必须收敛。
+  // 中止配置事务并回 UNCONFIRMED 终态，确保请求收敛。
   if (entry->tx_active) {
     motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
                             now_ms);
@@ -191,10 +190,10 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       entry->enable_pending = false;
       entry->has_target = false;
       entry->motion_authorized = false;
-      // policy_enable 一并冻结（审查 M1，ARD §36）：故障清除后不得仅凭全局
+      // policy_enable 一并冻结（ARD §36）：故障清除后不得仅凭全局
       // 再授权 + 新快照自动复运动，必须显式 SET_ENABLE(true)。
       entry->policy_enable = false;
-      // 中止进行中的配置事务：回 UNCONFIRMED 终态（审查 M2）。
+      // 中止配置事务并回 UNCONFIRMED 终态。
       if (entry->tx_active) {
         motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
                                 frame->rx_tick_ms);

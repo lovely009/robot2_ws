@@ -16,8 +16,7 @@ void motor_event_relay_push(motor_event_relay_t *relay,
     return;
   }
   if (relay->count == MOTOR_EVENT_RELAY_CAPACITY) {
-    // 满丢最旧：覆盖 head 槽后前移——环形序保持 FIFO，绝不平移数组
-    // （旧实现 memmove 假设 head==0，head≠0 时丢错元素并破坏环形序）。
+    // 满队时覆盖最旧的 head 槽，再前移 head，保持严格 FIFO。
     relay->slots[relay->head] = *event;
     relay->head = (relay->head + 1U) % MOTOR_EVENT_RELAY_CAPACITY;
     relay->dropped_count++;

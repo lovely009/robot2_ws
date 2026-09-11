@@ -1,4 +1,4 @@
-// can_tx_scheduler host test（Phase B / ARD-0007 §22）。
+// can_tx_scheduler host test（ARD-0007 §22）。
 // 验证：P0 > P1 > P2 出队顺序、P1 latest-wins、P0 去重由上层负责（本层有界
 // FIFO 满丢新并计数）、P2 每次 pump 配额、容量受限时的优先级保持、
 // 多总线实例独立、硬件拒绝记账。
@@ -122,7 +122,7 @@ static void test_pump_small_capacity_keeps_priority() {
   can_tx_frame_t out[2];
   uint32_t p0_count = 0U;
   assert(can_tx_scheduler_pump(&sched, out, 2, &p0_count) == 2);
-  assert(p0_count == 2); // P0 前缀计数（审查 4a：硬件拒收回插识别用）
+  assert(p0_count == 2); // P0 前缀计数供硬件拒收回插识别
   assert(out[0].data[0] == 0xA0 && out[1].data[0] == 0xA1); // P0 先出
   assert(can_tx_scheduler_pump(&sched, out, 2, &p0_count) == 2);
   assert(p0_count == 0); // 本轮无 P0

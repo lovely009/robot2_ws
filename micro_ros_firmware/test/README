@@ -1,68 +1,69 @@
-
 # 固件测试
 
 ## Host 回归测试
 
-在 `micro_ros_firmware` 目录使用全新的 `.host-build/` 执行：
+在 `micro_ros_firmware` 目录使用全新的 `.host-build/`：
 
 ```bash
 cmake -E remove_directory .host-build
 cmake -S test/host -B .host-build
-cmake --build .host-build --clean-first
+cmake --build .host-build --clean-first -j2
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口直接在主机上编译 `src/led_task.cpp`（`HOST_TEST` 宏下只含纯颜色策略）、
-`lib/motor_protocol`、`lib/motor_control` 与
-`lib/control_mailbox`，并覆盖 FDCAN drop-oldest ring 模型、IMU double-buffer
- snapshot/transport error latch，以及链路状态到颜色的 LED 策略。当前 CTest 应发现 8 个测试：`led_status`、`motor_protocol`、
-`motor_control`、`control_mailbox`、`can_rx_ring`、`imu_snapshot`、
-`bmi088_transport_status`、`w25q64_geometry`。它不模拟 HAL、
-FreeRTOS 或 rclc；目标板编译只证明静态集成/链接，不代替真机时序和失效测试。
+该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 11 个目标：
 
-## 固件 clean 构建与静态检查
+- `motor_protocol`
+- `motor_protocol_adapter`
+- `motor_control`
+- `motor_event_relay`
+- `control_mailbox`
+- `can_rx_ring`
+- `can_tx_scheduler`
+- `imu_snapshot`
+- `bmi088_transport_status`
+- `w25q64_geometry`
+- `led_status`
 
-已缓存依赖时清理固件对象并重新链接；不要为了本检查运行 `clean_microros`：
+host 测试不模拟 HAL、FreeRTOS 或 rclc；目标板编译也只证明静态集成和链接，
+二者均不能替代真机时序与失效测试。
+
+## 固件 clean 构建
+
+已缓存依赖时，清理固件对象并重新链接：
 
 ```bash
 ~/.platformio/penv/bin/pio run -t clean
 ~/.platformio/penv/bin/pio run
 ```
 
-记录 PlatformIO 最终 RAM/Flash 百分比与字节数，并检查相对基线没有新增 warning。
-`extra_packages/can_bridge_msgs` 必须仍是指向
-`../../micro_ros_agent/src/can_bridge_msgs` 的同仓库符号链接。全新机器或 micro-ROS
-构建环境被删除后的 clean bootstrap 需要网络下载依赖/ROS 2 源，网络/TLS 失败
-不能用 host 测试掩盖。
+修改 `platformio.ini` 编译宏后必须 clean，避免 HAL SrcWrapper 沿用旧对象。记录最终
+RAM/Flash 用量，并检查相对基线没有新增 warning。常规验证不得运行
+`clean_microros`；全新机器或删除 micro-ROS 构建环境后，bootstrap 需要联网下载
+依赖和 ROS 2 源。
 
-从 `micro_ros_firmware` 执行结构检查：
+## 结构检查
+
+从 `micro_ros_firmware` 执行：
 
 ```bash
 test "$(readlink extra_packages/can_bridge_msgs)" = "../../micro_ros_agent/src/can_bridge_msgs"
 ! rg -n "fdcanx_send|HAL_FDCAN" src/*_bridge.cpp
-rg -n "vTaskDelayUntil" src/control_task.cpp
-rg -n "xQueueCreateStatic|xQueueSendFromISR" lib/fdcan/src/can_bsp.c
+rg -n "vTaskDelayUntil" src/motor_rt_task.cpp
+! rg -n "xQueueCreateStatic|xQueueSendFromISR" lib/fdcan/src/can_bsp.c
 git -C .. diff --check
 ```
 
-第一条确认消息定义来自同仓库权威包；第二条必须零命中，保证 ROS bridge 没有
-绕过 control task 直接发送；其余检查 100Hz absolute-delay 与 ISR 静态队列结构。
+这些检查分别确认：消息定义复用同仓库权威包；ROS bridge 不绕过
+`motor_rt_task` 直接发送；实时任务使用绝对周期延时；FDCAN ISR 不恢复
+FreeRTOS 队列；Git diff 没有空白错误。
 
-## `dev-real` 交接边界
+## 真机边界
 
-README 的无负载真机清单只供人工在 `dev-real` 执行，要求硬件急停已验证可用，
-并记录 RX burst 下 WCET/jitter、100/300ms timeout、Agent 重连、`motor_enable`、
-vaxor/CREB 混挂、CREB 100Hz SYNC、CAN 无 ACK 与 BMI088 异常。自动验证不得
-烧录或驱动电机；当前无抱闸，
-host/固件 build 结果不能表述为硬件安全验证。
+无负载真机清单只供人工在 `dev-real` 执行，且必须先确认硬件急停与供电隔离可用。
+重点记录 RX burst 下的 WCET/jitter、30/100ms 快照超时、Agent 重连、授权恢复、
+vaxor/CREB 混挂、CREB SYNC、CAN 无 ACK 与 BMI088 异常。自动验证不得烧录或
+驱动电机；当前机构无抱闸，host 测试和固件 build 不能表述为硬件安全验证。
 
-清理 host 构建产物：
-
-```bash
-rm -rf .host-build/
-```
-
-`.host-build/` 是本地构建目录，不得提交。
-
-PlatformIO Test Runner 的用法参见
+`.host-build/` 是本地构建目录，不得提交。PlatformIO Test Runner 用法见
 <https://docs.platformio.org/en/latest/advanced/unit-testing/index.html>。

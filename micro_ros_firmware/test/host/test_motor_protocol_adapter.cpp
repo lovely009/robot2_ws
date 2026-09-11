@@ -1,7 +1,7 @@
-// motor_protocol adapter 层 host test（Phase A）。
+// motor_protocol adapter 层 host test。
 // 验证点：帧归属/节点范围、解码 SI 换算（Profile 驱动）、编码帧 ID/长度/类别、
 // 使能/软停/失能/发现帧、配置事务阶段表、型号目录数值。
-// 约定：只走公共 API，不触碰内部状态（白盒断言已在 Phase A 移除）。
+// 只走公共 API，不触碰内部状态。
 
 #include <cassert>
 #include <cmath>
@@ -351,7 +351,7 @@ static void test_creb_encode_mit_command() {
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
-// 速度单位契约钉死（审查 H2）：命令侧关节 rad/s 直通 π 上限 12 位对称量化
+// 速度单位契约：命令侧关节 rad/s 直通 π 上限 12 位对称量化
 // （不乘 gear），反馈侧电机侧 rpm ÷gear。两侧口径若混淆——命令误乘 gear=101
 // 会满码饱和失真——由「非饱和」断言当场抓获。
 static void test_creb_velocity_unit_contract() {

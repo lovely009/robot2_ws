@@ -5,14 +5,13 @@ USB CDC 进 ROS 2 humble）。当前业务为 **BMI088 IMU** + **三路 FDCAN**�
 `CtrBoard-H7_IMU_TempCtrl` / `CtrBoard-H7_FDCAN` 底层功能移植 + Mahony/ROS 发布增强。
 **权威文档：`README.md`**，改动前先读；本文件只列 Agent 即用要点。
 
-> **电机运行时重构进度必读：**
+> **电机运行时与后续验收：**
 > [`docs/HANDOFF-motor-runtime-refactor.md`](docs/HANDOFF-motor-runtime-refactor.md)。
-> 阶段 A/B/C（固件侧）已于 2026-09-05 完成并通过 host 套件 + `pio run` 验证，
-> 进度与协议核实结论见该交接 §0；剩余为上层 `motor_hardware_interface` 迁移
-> （暂缓：`ros2_ws/` 先不动，启动时先更新 `../micro_ros_agent/`）与台架验证。
-> 电机运行时目标设计以该交接、`docs/ARD-0007-micro-ros-motor-runtime.md` 和
-> ADR 0007 为准。下文已同步为 ID 驱动新口径；旧"四台默认测试电机"/`JointState`
-> 命令路径已删除，不得恢复。
+> 固件侧 ID 驱动运行时已经完成；剩余工作是上层 `motor_hardware_interface`
+> 的 joint↔motor_id 映射与真机台架验证。上层迁移启动时先更新同仓库
+> `../micro_ros_agent/` 的权威消息包，再修改 `ros2_ws/`。
+> 运行时设计以 HANDOFF、`docs/ARD-0007-micro-ros-motor-runtime.md` 和
+> ADR 0007 为准；不得恢复旧四电机表或 `JointState` 命令路径。
 
 ## 构建与烧录（本机）
 

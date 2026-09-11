@@ -1,12 +1,12 @@
 // motor_control v2 内核主体：初始化、会话/授权、10ms 控制边界、1ms 服务、
-// TX 收集与状态/事件副本（ARD-0007 §8/§9/§11/§13；HANDOFF 阶段 A）。
+// TX 收集与状态/事件副本（ARD-0007 §8/§9/§11/§13）。
 //
 // 所有权与边界：
-//  - 本模块不依赖 ROS / HAL / FreeRTOS / control_mailbox（HANDOFF 阶段 A-3）；
+//  - 本模块不依赖 ROS / HAL / FreeRTOS / control_mailbox；
 //  - 厂家字节只经 motor_protocol 的 adapter 接口（ARD §24）；
 //  - 一切时序判定用 MCU 单调时基毫秒（ARD §12），禁止 ROS 时间。
 //
-// 安全实现要点（对抗性审查后修订）：
+// 安全实现要点：
 //  - P0 帧（软停/失能）推送失败不静默丢弃：先驱逐最旧非 P0 帧腾位（§22.1
 //    抢占），仍失败挂 p0_pending 由 service 逐节拍重发，新使能/MIT 成功后作废；
 //  - 受控集合 = ACTIVE ∪ READY_DISABLED(已使能)（§13.1 DERIVED：使能整定窗内
@@ -107,7 +107,7 @@ static bool tick_elapsed(uint32_t now, uint32_t then, uint32_t threshold) {
   return (uint32_t)(now - then) >= threshold;
 }
 
-// 下游（调度器 P0 FIFO 满 / 硬件拒收）回告重入队（审查 4a）：帧由本内核
+// 下游（调度器 P0 FIFO 满 / 硬件拒收）回告重入队：帧由本内核
 // 生成（tx_slot = 表项索引），任务层原样回传即可定位表项。
 bool motor_control_requeue_p0(motor_control_context_t *ctx,
                               const motor_protocol_tx_frame_t *frame) {
@@ -152,7 +152,7 @@ static bool send_disable_p0(motor_control_context_t *ctx,
   return false;
 }
 
-// 按型号名绑定（审查第 5 步）：型号目录遍历 + 精确匹配，命中复用
+// 按型号名绑定：型号目录遍历 + 精确匹配，命中复用
 // bind_profile 的门禁与事件；这是 MotorBind 订阅通道的内核落地。
 bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
                                         uint16_t motor_id,
@@ -168,9 +168,9 @@ bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
       return motor_control_bind_profile(ctx, motor_id, i, now_ms);
     }
   }
-  // 未知名（含空名）：拒绝并回 PROFILE_REJECTED（MotorBind 契约要求结果
-  // 回告，审查 M4）。reason 复用 PROFILE_UNAVAILABLE（=3，与既有绑定拒绝
-  // 同款）；设备已在表时附其 bus_index，未发现设备 bus_index=0。
+  // 未知名（含空名）：拒绝并回 PROFILE_REJECTED。reason 复用
+  // PROFILE_UNAVAILABLE（=3，与既有绑定拒绝同款）；设备已在表时附其
+  // bus_index，未发现设备 bus_index=0。
   motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
   if (entry != NULL) {
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
@@ -217,7 +217,7 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     entry->enable_pending = false;
     entry->has_target = false;
     entry->motion_authorized = false;
-    // 中止进行中的配置事务：回 UNCONFIRMED 终态（上层请求不悬挂，审查 M2）。
+    // 中止进行中的配置事务：回 UNCONFIRMED 终态，避免上层请求悬挂。
     if (entry->tx_active) {
       motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
                               now_ms);
@@ -295,8 +295,8 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
   }
   motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
   if (entry == NULL) {
-    // 设备未发现：无表项（bus_index=0），但 MotorBind 契约要求结果回告
-    // （审查 M4）——静默 false 会让上层请求永远等不到 PROFILE_* 事件。
+    // 设备未发现：无表项（bus_index=0），仍回告 PROFILE_REJECTED，避免
+    // 上层请求悬挂。
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
                              motor_id, 0U,
                              MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
@@ -508,13 +508,11 @@ bool motor_control_apply_command_snapshot(
         entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
         continue;
       }
-      // 使能帧走 P0：与失能/软停同为「必须送达」的控制事件，且 P0 每拍先于
-      // 一切 P1 出队，保证使能先于同拍生成的 MIT 帧上总线。此前与 MIT 同挂
-      // P1 latest-wins 槽（同 tx_slot），无整定门协议（vaxor）两帧同拍生成
-      // 被覆盖——使能帧永不上线（2026-09-07 全固件审查 C2 修复）。
+      // 使能帧使用 P0，并先于同拍 P1 MIT 帧出队，避免两帧共享
+      // latest-wins 槽时使能帧被覆盖。
       frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
       entry->last_p0_kind = MOTOR_CONTROL_P0_ENABLE;
-      frame.tx_slot = (uint16_t)i; // 表项索引：P0 回告重入队按此定位（审查 4a）
+      frame.tx_slot = (uint16_t)i; // 表项索引：P0 回告重入队按此定位
       if (!motor_control_push_tx(ctx, &frame)) {
         continue;
       }
@@ -712,7 +710,7 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     entry->enable_pending = false;
     entry->motion_authorized = false; // 逐电机授权冻结（§36）
     entry->policy_enable = false;     // 冻结为 false：恢复需显式重发 Enable
-    // 中止进行中的配置事务：回 UNCONFIRMED 终态（上层请求不悬挂，审查 M2）。
+    // 中止进行中的配置事务：回 UNCONFIRMED 终态，避免上层请求悬挂。
     if (entry->tx_active) {
       motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
                               now_ms);

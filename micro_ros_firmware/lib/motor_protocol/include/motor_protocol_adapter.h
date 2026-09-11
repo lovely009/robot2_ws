@@ -59,7 +59,7 @@ typedef struct {
   uint8_t data[MOTOR_PROTOCOL_MAX_FRAME_BYTES];
 } motor_protocol_raw_frame_t;
 
-// 待发送帧输出（固定容量）。tx_class 供 Phase B 的每总线 TX 调度器
+// 待发送帧输出（固定容量）。tx_class 供每总线 TX 调度器
 // 分配 P0/P1/P2 队列（ARD-0007 §22）。
 typedef enum {
   MOTOR_PROTOCOL_TX_CLASS_P0 = 0U, // 安全帧：软停/停机/失能（可抢占）
@@ -72,7 +72,7 @@ typedef struct {
   motor_protocol_tx_class_t tx_class;
   // 内核注册表表项索引（只增不减故稳定；同总线两电机必有不同索引）：
   // P1 = latest-wins 槽位；P0 = 下游（调度器 FIFO 满）回告重入队按此定位
-  // 表项（审查 4a/H1）——组帧点必须填写；P2 = FIFO，忽略此字段。
+  // 表项；组帧点必须填写。P2 使用 FIFO，忽略此字段。
   uint16_t tx_slot;
   uint32_t can_id;
   bool is_extended;

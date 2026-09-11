@@ -1,7 +1,7 @@
 #ifndef MOTOR_CONTROL_H
 #define MOTOR_CONTROL_H
 
-// ID 驱动的电机运行时内核（ARD-0007 §8/§9/§13/§20；HANDOFF 阶段 A）。
+// ID 驱动的电机运行时内核（ARD-0007 §8/§9/§13/§20）。
 //
 // 定位：纯 C 运行时内核——注册表、型号 Profile 目录、生命周期、安全、
 // freshness、状态/事件快照。不依赖 ROS、HAL、FreeRTOS、control_mailbox，
@@ -9,7 +9,7 @@
 // 厂家字节只经 motor_protocol 的 adapter 接口（构造时注入 adapter 列表，
 // 新增协议不改内核——ARD §24.3）。
 //
-// 所有权：motor_rt_task（Phase B）是唯一调用者。1ms 服务节拍调
+// 所有权：motor_rt_task 是唯一调用者。1ms 服务节拍调
 // on_raw_frame()/service()；10ms 控制边界调 apply_command_snapshot()；
 // TX 调度器（lib/fdcan）消费 collect_tx() 输出的 P0/P1/P2 帧。
 //
@@ -36,7 +36,7 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_TX_PENDING 96U
 #define MOTOR_CONTROL_MAX_EVENTS 32U
 
-// 命令快照安全阈值（ARD-0007 §13.2；HANDOFF 阶段 A-6）。
+// 命令快照安全阈值（ARD-0007 §13.2）。
 #define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
 #define MOTOR_CONTROL_SNAPSHOT_DISABLE_MS 100U
 
@@ -90,7 +90,7 @@ typedef struct {
   uint16_t reason;    // 结果码/失败码（motor_control_fault_code_t 或 config
                       // result；PROFILE_REJECTED 事件复用
                       // MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE=3 表示型号
-                      // 不可得——未知名/设备未发现/门禁拒绝，审查 M4）
+                      // 不可得——未知名/设备未发现/门禁拒绝）
   uint32_t request_id; // 仅 CONFIG_RESULT 携带
 } motor_control_event_t;
 
@@ -182,8 +182,8 @@ typedef struct {
   bool motion_enabled;    // 已发使能帧且未被失能
   bool enable_pending;    // 整定窗口内，暂不发运动目标
   uint32_t enable_started_tick_ms;
-  // 逐电机运动授权（ARD §36/§10.4：OFFLINE 即冻结，重连后由"完成重新发现流程
-  // 后被新完整快照显式纳入"复立；正式的逐电机 Enable 等 Phase C 的 MotorPolicy）。
+  // 逐电机运动授权（ARD §36/§10.4）：故障、离线、撤权或 SET_ENABLE(false)
+  // 会清除此位，恢复必须显式 SET_ENABLE(true)，不得由新快照自动复立。
   bool motion_authorized;
 
   // P0 帧重试：推送失败（缓冲满且无可驱逐的 P1/P2）时置位，service 逐节拍重发；
@@ -275,8 +275,8 @@ void motor_control_init(motor_control_context_t *ctx,
 void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connected,
                                        uint32_t now_ms);
 
-// 授权门（≡ Enable，mailbox 冻结契约为全局授权；逐电机 Enable 等 Phase C
-// 的 MotorPolicy）。撤销授权执行与断链相同的安全路径；
+// 授权门：全局授权与逐电机 MotorPolicy Enable 共同控制运动。撤销授权执行
+// 与断链相同的安全路径；
 // 恢复授权后必须等新的完整快照才可能回 ACTIVE（require_new_snapshot）。
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
                                      uint32_t now_ms);
@@ -292,7 +292,7 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
                                     const motor_protocol_model_profile_t *profile,
                                     uint32_t now_ms);
 
-// P0 安全帧下游回告重入队（审查 4a）：调度器 P0 FIFO 满或硬件拒收时，任务层
+// P0 安全帧下游回告重入队：调度器 P0 FIFO 满或硬件拒收时，任务层
 // 把内核生成的帧原样回传（tx_slot = 表项索引）。重入队复用 P0 驱逐语义；
 // 待发队列全 P0 的病态下转 p0_pending 挂起（按 last_p0_kind 重新编码，
 // service 逐节拍补发）——安全帧不允许在任何一段搬运中静默消失。
@@ -344,7 +344,7 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 // 输出（固定容量副本；只读消费）
 // ---------------------------------------------------------------------------
 
-// 取走待发送帧（最多 capacity 帧，余量保留待下次）。Phase B 的每总线
+// 取走待发送帧（最多 capacity 帧，余量保留待下次）。每总线
 // TX 调度器按 tx_class 分配 P0/P1/P2 队列。
 size_t motor_control_collect_tx(motor_control_context_t *ctx,
                                 motor_protocol_tx_frame_t *out, size_t capacity);

@@ -110,8 +110,8 @@ static bool create_entities() {
     return false;
   }
 
-  // 10ms 周期（100Hz）：motion_states 与 IMU 快照按各域最新值发布
-  // （2026-09-08 审查修复轮用户拍板 20ms→10ms；USB CDC 带宽压力留待台架验证）。
+  // 10ms 周期（100Hz）：发布各域的最新 motion_states 与 IMU 快照；
+  // USB CDC 带宽余量仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
                               bridge_timer_cb) != RCL_RET_OK) {
     destroy_entities();

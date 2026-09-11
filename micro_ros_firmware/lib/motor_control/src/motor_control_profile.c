@@ -1,8 +1,7 @@
 // motor_control 型号目录（ARD-0007 §8.2/§8.3 编译期"型号目录"）。
 // 行值来源（仓库权威，不得凭空猜测）：
 //  - ros2_ws/src/motor_hardware_interface/config/motor.yaml（Kt/减速比/效率/
-//    额定与峰值扭矩/额定电流）
-//  - 旧默认测试表（control_task.cpp，默认 MIT 增益）
+//    额定与峰值扭矩/额定电流、默认 MIT 增益）
 //  - ARD §8.3 已确认型号基线（电压/编码器/限位能力）
 //
 // Vaxor 80 速比无完整规格，刻意不在目录中（ARD §8.3、禁止项 15）。

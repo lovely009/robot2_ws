@@ -83,7 +83,7 @@ uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
     count++;
   }
   if (p0_count != NULL) {
-    *p0_count = count; // out 前缀中的 P0 帧数（硬件拒收回插用，审查 4a）
+    *p0_count = count; // out 前缀中的 P0 帧数，供硬件拒收时回插
   }
 
   // 2) P1：发全部脏槽位一次（容量不足的脏槽保留到下轮）。

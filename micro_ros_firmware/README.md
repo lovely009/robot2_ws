@@ -90,8 +90,7 @@ adapter 解码进内核 → 内核按完整快照/会话/心跳裁决生命周�
 按 P0/P1/P2 路由进每总线 TX 调度器 → 由任务层统一提交 HAL。
 ROS 桥只通过 mailbox（写侧）与内核只读副本/事件队列（读侧）交互；
 原始 CAN 帧不进入 ROS 域。IMU 则由 sensor task 写双缓冲 snapshot，
-10ms bridge timer（100Hz）复制后发布——IMU 快照发布随之由 50Hz 升至
-100Hz（2026-09-08 审查修复轮），桥接层不持有 sensor task 的内部源指针。
+10ms bridge timer（100Hz）复制后发布；桥接层不持有 sensor task 的内部源指针。
 
 ## 目录结构
 

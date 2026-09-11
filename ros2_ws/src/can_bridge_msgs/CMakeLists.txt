@@ -27,7 +27,7 @@ endif()
 
 rosidl_generate_interfaces(
   ${PROJECT_NAME}
-  # ---- ID 化有界消息（ARD-0007 §15-20，Phase C 冻结）----
+  # ID 化有界电机消息（ARD-0007 §15-20）
   "msg/MotorCommandTarget.msg"
   "msg/MotorCommandArray.msg"
   "msg/MotorMotionStateTarget.msg"

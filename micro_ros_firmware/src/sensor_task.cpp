@@ -141,8 +141,8 @@ bool sensor_task_start(void) {
   g_imu_init_error_count = 0U;
   g_imu_healthy = false;
 
-  // DMA1 时钟/流 NVIC 已由 main 板级初始化（initialize_system）先行使能
-  // （官方时序：DMA 先于 SPI2）；SPI2 设备配置归 lib/imu 自持。
+  // 共享 DMA 控制器资源已由 main 初始化；BMI088 的阻塞 SPI2 配置归
+  // lib/imu 自持，当前不占用 DMA。
   return xTaskCreate(sensor_task_fn, "sensor", kSensorTaskStack, nullptr,
                      kSensorTaskPrio, nullptr) == pdPASS;
 }

@@ -1,23 +1,7 @@
-// SPI2/BMI088 传输自持层（低耦合高内聚：设备传输配置归设备库）。
-//
-// 内容：SPI2 板级资源（引脚/时钟源/SPI2_IRQn）与 HAL_SPI_MspInit 兜底。
-// 收发为阻塞 HAL_SPI_TransmitReceive（8 字节寄存器读，DMA 无收益——
-// 2026-09-07 决策，DMA 句柄/链接/流 IRQHandler 已移除；lib/dma 占用表中
-// DMA1_Stream0/1 已释放。若未来启用 DMA：句柄归本文件，控制器资源归
-// lib/dma 登记）。
-//
-// 弱符号陷阱（2026-09-08）：本文件曾仅以 HAL_SPI_MspInit 强符号对外。
-// SrcWrapper 的 stm32yyxx_hal_spi.c.o 以直接对象文件先于 libimu.a 成员
-// 参与链接，其 __weak 空体（0x2 字节）先满足符号引用，链接器不再回绑
-// archive 强定义——成员整体不提取，SPI2EN 永不置位，BMI088 首笔传输
-// 超时锁存（实机定位：APB1LENR bit14=0、SPI2 寄存器读全 0）。修复：
-// 板级配置导出为 imu_spi2_board_init()（见 include/imu_spi2_transport.h），
-// 由 bmi088_middleware.c 在 HAL_SPI_Init 前显式调用；HAL_SPI_MspInit
-// 保留为兜底（.o 被引用后随成员入链，强符号生效）。
-//
-// 前置契约（任务层保证）：main 板级初始化已先调 lib/dma 的 MX_DMA_Init
-// （官方时序「DMA 先于 SPI2」对纯阻塞路径不再是硬依赖，保留惯例）。
-// 本文件不 include 任何其他 lib 头。
+// BMI088 的 SPI2 板级资源层：配置时钟源、引脚与 NVIC。
+// 当前收发使用阻塞 HAL_SPI_TransmitReceive，不占用 DMA；若后续改用 DMA，
+// 设备句柄和回调仍归本库，控制器资源向 lib/dma 登记。
+// 设备层必须显式调用 imu_spi2_board_init；HAL_SPI_MspInit 仅作幂等兜底。
 
 #include "imu_spi2_transport.h"
 #include "stm32h7xx_hal.h"
@@ -70,8 +54,7 @@ void imu_spi2_board_init(void) {
   HAL_NVIC_EnableIRQ(SPI2_IRQn);
 }
 
-// HAL 回调兜底：正常路径已由 imu_spi2_board_init 显式完成（见文件头
-// 弱符号陷阱说明）。幂等保护下重复执行收敛为空操作。
+// HAL 回调兜底：正常路径已显式初始化，幂等保护使重复调用为空操作。
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
   if (hspi == NULL) {
     return;

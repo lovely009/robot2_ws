@@ -1,5 +1,4 @@
-// 电机实时任务实现（ARD-0007 §11 双节拍 / §51.2-51.3 伪代码的任务层落地；
-// HANDOFF 阶段 B：control_task 整体替换为 motor_rt_task，无兼容转发）。
+// 电机实时任务实现（ARD-0007 §11 双节拍 / §51.2-51.3）。
 //
 // 有界性（ARD §11.2）：本任务不等待 ROS/Agent/设备响应/W25Q64，不动态分配；
 // RX/TX/配置每周期配额为具名常量（TBD-CAN-01 占位值，台架数据后收敛）。
@@ -24,7 +23,7 @@ static const uint32_t kStartDelayMs = 500U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
 static const uint32_t kControlPeriodMs = 10U;
 
-// 每周期配额（TBD-CAN-01 占位；均为具名常量，可审查、可调）。
+// 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
 static const uint32_t kRxDrainBudgetPerBus = 16U;  // 每 1ms 每总线最多解码帧数
 static const uint32_t kRxPopBatch = 8U;            // 单次批量弹出（栈上界）
 static const uint32_t kTxCollectBudget = 16U;      // 每 1ms 最多取走内核待发帧数
@@ -125,10 +124,8 @@ bool motor_rt_task_fdcan_ready(void) { return g_fdcan_ready; }
 static motor_event_relay_t g_event_relay;
 
 static void forward_kernel_events(void) {
-  // 内核事件环是本任务私有上下文，排空无需临界区；共享中继环的每条投递包
-  // 短临界区，与桥侧 drain 互斥（审查 H3：原实现生产侧裸写，与持锁的消费侧
-  // 不构成互斥；满队 memmove 又隐含 head==0 假设破坏环形序——两处一并由
-  // 中继模块修复）。
+  // 内核事件环由本任务独占；共享中继环的每次 push 与桥侧 drain 使用同一
+  // 临界区，确保生产与消费互斥。
   motor_control_event_t drained[8];
   size_t n;
   while ((n = motor_control_drain_events(&g_motor_control, drained, 8)) > 0) {
@@ -272,7 +269,7 @@ static void route_kernel_tx(void) {
     memcpy(frame.data, batch[i].data, bytes);
     switch (batch[i].tx_class) {
       case MOTOR_PROTOCOL_TX_CLASS_P0:
-        // 调度器 FIFO 满 → 回告内核重入队（p0_pending 逐拍补发，审查 4a），
+        // 调度器 FIFO 满时回告内核重入队，由 p0_pending 逐拍补发；
         // 安全帧不允许在搬运链路中静默丢弃。
         if (!can_tx_scheduler_submit_p0(sched, &frame)) {
           (void)motor_control_requeue_p0(&g_motor_control, &batch[i]);
@@ -303,10 +300,9 @@ static void pump_tx_schedulers(void) {
         can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus, &p0_count);
     for (uint32_t i = 0; i < n; ++i) {
       if (!can_bsp_submit_tx(bus, &pump[i])) {
-        // 硬件 FIFO 满（如总线失联期 AutoRetransmission 滞留）拒绝安全帧：
-        // 回插 P0 队首，下一拍先于一切重试（审查 4a——离线电机的失能帧
-        // 必须在总线恢复后落地）。P1 由下一周期最新目标天然取代，P2 为
-        // 管理流量，二者维持计数可见、不重试。
+        // 回插 P0 队首，下一拍先于其他帧重试，确保离线电机的失能帧
+        // 在总线恢复后落地。P1 由下一周期最新目标取代，P2 为管理流量；
+        // 二者只保留拒收计数，不重试。
         if (i < p0_count) {
           (void)can_tx_scheduler_requeue_p0_front(sched, &pump[i]);
         }
@@ -334,9 +330,8 @@ static void convert_snapshot(const control_command_snapshot_t *in,
   }
 }
 
-// 配置 kind 枚举契约（审查 M5）：mailbox 与内核协议层枚举类型独立、数值
-// 必须逐值相等（1/2/3/4）——convert_config 的裸 cast 依赖此前提，编译期
-// 锁死，任一侧改动枚举值即编译失败。
+// mailbox 与内核协议层的配置 kind 枚举类型独立，但数值必须逐值相等；
+// convert_config 的显式转换依赖此前提，以下断言防止单侧修改。
 static_assert(CONTROL_MAILBOX_CONFIG_SET_MODE == MOTOR_PROTOCOL_CONFIG_SET_MODE,
               "mailbox/protocol config kind 契约不一致：SET_MODE");
 static_assert(
@@ -449,10 +444,9 @@ static void control_boundary(void) {
   }
 }
 
-// IWDG 活性监督（审查 4b）：仅由 motor_rt 任务喂——安全任务挂死（死锁/
-// 踩内存/栈溢出钩子）→ 超时复位回 WAIT_AGENT/授权清零的可观测初始态；
-// micro_ros 任务挂死时本任务仍存活、安全动作（快照级联失能）仍可执行，
-// 不纳入喂狗面。调试器断点期间冻结计数，避免误复位。
+// IWDG 仅由 motor_rt 任务喂：安全任务停摆会超时复位至 WAIT_AGENT 和授权
+// 清零的初始态；micro_ros 任务停摆时，motor_rt 仍能执行快照超时失能。
+// 调试器断点期间冻结计数，避免误复位。
 #ifdef HAL_IWDG_MODULE_ENABLED
 #include "stm32h7xx_hal.h"
 

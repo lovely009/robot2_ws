@@ -1,4 +1,4 @@
-// can_rx_ring host test（Phase B / ARD-0007 §21）。
+// can_rx_ring host test（ARD-0007 §21）。
 // 验证：SPSC 环的 FIFO 顺序、字段保真、容量 64、满时丢新帧并计数、
 // head/tail 回绕、部分弹出后的 pending 语义。
 

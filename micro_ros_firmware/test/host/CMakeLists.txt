@@ -68,7 +68,7 @@ add_executable(test_control_mailbox
 
 target_include_directories(test_control_mailbox PRIVATE
   ../../lib/control_mailbox/include
-  ../../lib/motor_protocol/include) # config kind 契约 static_assert（M5）
+  ../../lib/motor_protocol/include) # config kind 枚举契约 static_assert
 
 add_test(NAME control_mailbox COMMAND test_control_mailbox)
 

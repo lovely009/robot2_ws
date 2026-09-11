@@ -1,5 +1,5 @@
 // motor_control 低频配置：Policy 本地项（增益/软件限位）与 request_id 事务
-// （ARD-0007 §19/§20/§26；HANDOFF 阶段 A-7）。
+// （ARD-0007 §19/§20/§26）。
 //
 // 事务规则（ARD §20）：每电机至多一个未决事务，新请求立即 BUSY（不排队、
 // 不覆盖）；分阶段、跨 1ms 服务节拍推进（每节拍至多一个阶段迁移），绝不
@@ -42,8 +42,8 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
                            entry->motor_id, entry->bus_index, result,
                            entry->tx_request_id);
 }
-// 注：本函数亦被撤权/离线/冲突/故障四条中止路径复用（UNCONFIRMED，审查
-// M2）——事务在哪些路径上都必须收敛到终态，上层请求不得悬挂。
+// 本函数也被撤权、离线、冲突和故障路径复用；这些路径均须回
+// UNCONFIRMED 终态，避免上层请求悬挂。
 
 // 事务成功收尾：无确认手段的协议不得谎报 OK（ARD §20.5 / 禁止项 9）。
 static void finish_tx_success(motor_control_context_t *ctx,

@@ -112,7 +112,7 @@ static void test_vaxor_decode_reply_converts_si() {
 // 解码 20B 状态帧：运动量 + 身份/诊断字段（fault/motor_type 透传）。
 static void test_vaxor_decode_status_frame() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("vaxor_2530", &profile));
+  assert(find_profile("vaxor_2550", &profile));
 
   motor_protocol_joint_state_t wire = {0.0, 0.0, 0.25};
   uint8_t data[20];
@@ -133,8 +133,8 @@ static void test_vaxor_decode_status_frame() {
   assert(measured.motor_type == 7);
   // 故障字非零 → fault_active（内核负责降级，adapter 只标注）。
   assert(measured.fault_active);
-  // 30 速比：扭矩 = 0.25 × 0.042 × 30 × 0.70
-  assert(fabs(measured.effort_nm - 0.25 * 0.042 * 30.0 * 0.70) < 5e-3);
+  // 50 速比：扭矩 = 0.25 × 0.042 × 50 × 0.65
+  assert(fabs(measured.effort_nm - 0.25 * 0.042 * 50.0 * 0.65) < 5e-3);
 }
 
 // 未绑定 Profile 时运动量为 NaN，但状态/身份字段照常（发现/识别依赖）。
@@ -469,8 +469,9 @@ static void test_adapter_id_ranges_disjoint() {
 // 型号目录（数值来源 = ROS 型号库，TBD-PROFILE-01 锚点）
 // ---------------------------------------------------------------------------
 
-static void test_profile_catalog_baselines() {
-  assert(motor_control_profile_count() == 4U);
+static void test_profile_catalog_only_exposes_supported_models() {
+  // 生产支持集只有三种；误加回退役型号会重新开放 MotorBind，必须由测试拦住。
+  assert(motor_control_profile_count() == 3U);
 
   const motor_protocol_model_profile_t *p = nullptr;
   assert(find_profile("vaxor_2550", &p));
@@ -480,10 +481,6 @@ static void test_profile_catalog_baselines() {
   assert(fabs(p->torque_constant_nm_per_amp - 0.042) < 1e-6);
   assert((p->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U);
   assert((p->capability_flags & MOTOR_PROTOCOL_CAP_AUTONOMOUS_FEEDBACK) != 0U);
-
-  assert(find_profile("vaxor_2530", &p));
-  assert(p->gear_ratio == 30.0f);
-  assert(p->gear_efficiency == 0.70f);
 
   assert(find_profile("cerb_r58_101", &p));
   assert(p->protocol == &motor_protocol_cerb_adapter);
@@ -525,7 +522,7 @@ int main() {
   test_cerb_encode_discovery_sync();
   test_cerb_config_unsupported_paths();
   test_adapter_id_ranges_disjoint();
-  test_profile_catalog_baselines();
+  test_profile_catalog_only_exposes_supported_models();
   printf("test_motor_protocol_adapter: all passed\n");
   return 0;
 }

@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'static_server = web_host.static_server:main',
+            'rosbridge_shim = web_host.rosbridge_shim:main',
         ],
     },
 )

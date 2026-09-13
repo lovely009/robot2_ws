@@ -33,14 +33,13 @@ cd micro_ros_firmware
 - USB 引脚 **PA11=USB_DM / PA12=USB_DP**；状态 LED 是 **WS2812**（SPI6 MOSI=PA7）。
 - 节点名 `micro_ros_node`，话题 `micro_ros/imu/data`、`micro_ros/imu/temp`
   （在 `src/imu_bridge.cpp` 顶部）。
-- 电机接口为 ID 化完整快照（ARD-0007）：下行 `/motor_command_array`
-  （`can_bridge_msgs/MotorCommandArray`，最多 64 个 `motor_id + pos/vel/effort`，
-  best-effort）+ `micro_ros/motor_enable`（全局授权）；上行
-  `micro_ros/motion_states`（`MotorMotionStateArray`，缺失量 NaN）、
-  `micro_ros/motor_status_array`、`micro_ros/motor_topology`（1s 节流）、
-  `micro_ros/motor_events`、`micro_ros/motor_config_result`。无 `joint_name`、
-  无固定电机表；电机经反馈帧自主发现（vaxor 自主上报 / CERB SYNC 上报），
-  型号由上层经 Profile 绑定接口确认（型号目录无 Vaxor-80）。
+- 电机接口为 ID 化完整快照（ARD-0007），共 5 个订阅 + 5 个发布：下行
+  `/motor_command_array`、`micro_ros/motor_policy`、`micro_ros/motor_config`、
+  `micro_ros/motor_bind`、`micro_ros/motor_enable`；上行 `micro_ros/motion_states`、
+  `micro_ros/motor_status_array`、`micro_ros/motor_topology`、
+  `micro_ros/motor_events`、`micro_ros/motor_config_result`。无 `joint_name`、无固定
+  电机表；设备经反馈帧自主发现（vaxor 自主上报 / CERB SYNC 上报），型号由上层
+  经 Profile 绑定接口确认（型号目录无 Vaxor-80）。
 - `micro_ros/motor_enable` 是显式全局运动授权：`false` 清空 pending 命令并协议级
   失能；断连重连后必须先发 `true`、再发新完整快照，禁止重放旧命令。
   `micro_ros/motor_policy`（`MotorPolicy`）携带逐电机 `SET_ENABLE`：OFFLINE/故障
@@ -51,6 +50,9 @@ cd micro_ros_firmware
   SET_MODE 事务（vaxor stop/start 两阶段、结果收敛 UNCONFIRMED；CERB 恒 MIT）
   与 CERB 限位（厂家管理对象未决，当前一律 UNSUPPORTED），结果经
   `micro_ros/motor_config_result` 异步返回。
+- `micro_ros/motor_bind`（`MotorBind`）把已发现的 `motor_id` 绑定到编译期型号目录
+  的 `model_name`；绑定幂等且断链保留，结果经 `motor_events` 的 PROFILE_BOUND /
+  PROFILE_REJECTED 事件回告。
 - 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（100Hz）、20B 状态帧
   =20ms 自主心跳；CERB 反馈帧=命令实时状态（100Hz）、`0x080` SYNC 上报帧=20ms
   状态心跳（承担总线检测）。OFFLINE=心跳丢失 100ms。`motor_rt_task` 每 10ms 发
@@ -95,8 +97,10 @@ cd micro_ros_firmware
 - **FDCAN IRQ**：优先级固定为 5，必须满足
   `priority >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`；ring/调度器只在
   `bsp_can_init()` single-init，不在重连时重建。
-- **改 HAL 构建宏后必须 `pio run -t clean` 全量重建**：SrcWrapper 的
-  `stm32yyxx_hal_fdcan.c.o`、`stm32yyxx_hal_ospi.c.o` 不会因 build flag 变化自动重编。
+- **改 HAL 构建宏或链接脚本后必须 `pio run -t clean` 全量重建**：SrcWrapper 的
+  `stm32yyxx_hal_fdcan.c.o`、`stm32yyxx_hal_ospi.c.o` 不会因 build flag 变化自动重编；
+  PlatformIO 的依赖检查也不监听 `ldscript/*.ld`，增量构建会静默跳过重新链接
+  （readelf 看到的仍是旧 ELF，易误判链接修复"已生效"）。
 - **FreeRTOS 下 `loop()` 只能非阻塞**：业务放 `sensor`/`control`/`micro_ros` 任务。
 - **任务栈/周期**：`start_task` P1/256 words；`sensor` P2/512 words（DRDY；
   IMU 非关键路径，不得抢占 motor_rt）；

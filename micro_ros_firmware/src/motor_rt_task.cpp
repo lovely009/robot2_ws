@@ -19,7 +19,6 @@
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
-static const uint32_t kStartDelayMs = 500U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
 static const uint32_t kControlPeriodMs = 10U;
 
@@ -349,17 +348,20 @@ static void convert_snapshot(const control_command_snapshot_t *in,
 
 // mailbox 与内核协议层的配置 kind 枚举类型独立，但数值必须逐值相等；
 // convert_config 的显式转换依赖此前提，以下断言防止单侧修改。
-static_assert(CONTROL_MAILBOX_CONFIG_SET_MODE == MOTOR_PROTOCOL_CONFIG_SET_MODE,
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
               "mailbox/protocol config kind 契约不一致：SET_MODE");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_GAINS == MOTOR_PROTOCOL_CONFIG_SET_GAINS,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_GAINS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_GAINS),
     "mailbox/protocol config kind 契约不一致：SET_GAINS");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS ==
-        MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS),
     "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_ENABLE == MOTOR_PROTOCOL_CONFIG_SET_ENABLE,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
     "mailbox/protocol config kind 契约不一致：SET_ENABLE");
 
 static void convert_config(const control_mailbox_config_request_t *in,

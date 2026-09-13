@@ -98,6 +98,7 @@ void imu_bridge_poll(void) {
   static uint8_t s_temp_phase = 0U;
   if (++s_temp_phase >= 50U) { // 10ms tick ×50 = 2Hz
     s_temp_phase = 0U;
-    (void)rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
+    rc = rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
+    (void)rc;
   }
 }

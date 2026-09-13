@@ -6,17 +6,20 @@
 // 配置 kind 枚举契约：mailbox 与内核协议层枚举逐值相等
 // （1/2/3/4）——固件侧 motor_rt_task.cpp 同款 static_assert，host 侧双链
 // 锁死，任一侧改动枚举值即编译失败。
-static_assert(CONTROL_MAILBOX_CONFIG_SET_MODE == MOTOR_PROTOCOL_CONFIG_SET_MODE,
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
               "mailbox/protocol config kind 契约不一致：SET_MODE");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_GAINS == MOTOR_PROTOCOL_CONFIG_SET_GAINS,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_GAINS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_GAINS),
     "mailbox/protocol config kind 契约不一致：SET_GAINS");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS ==
-        MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS),
     "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
 static_assert(
-    CONTROL_MAILBOX_CONFIG_SET_ENABLE == MOTOR_PROTOCOL_CONFIG_SET_ENABLE,
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
     "mailbox/protocol config kind 契约不一致：SET_ENABLE");
 
 #include <cmath>

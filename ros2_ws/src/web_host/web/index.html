@@ -12,6 +12,11 @@
       <span class="logo"></span>
       <h1>Robot2 Web 上位机</h1>
     </div>
+    <div class="chips">
+      <span class="chip" id="chipOnline">在线 -/-</span>
+      <span class="chip" id="chipFault">故障 0</span>
+      <span class="chip" id="chipHz">运动流 -- Hz</span>
+    </div>
     <div class="conn">
       <span class="dot" id="connDot"></span>
       <span id="connText">未连接</span>
@@ -21,88 +26,106 @@
     </div>
   </header>
 
-  <main class="grid">
-    <!-- IMU 姿态 -->
-    <section class="card" id="cardImu">
-      <h2>IMU 姿态 <span class="hz" id="imuHz">0 Hz</span></h2>
-      <div class="imu-layout">
-        <div class="attitude">
-          <div class="attitude-viewport">
-            <div class="attitude-ball" id="attBall">
-              <div class="att-sky"></div>
-              <div class="att-ground"></div>
-              <div class="att-horizon"></div>
-              <div class="att-marks"></div>
-            </div>
-            <div class="attitude-fixed"></div>
-          </div>
-          <div class="att-label">人工地平仪</div>
-        </div>
-        <div class="imu-numbers">
+  <main class="layout">
+    <!-- 左：监控 -->
+    <div class="col-monitor">
+      <section class="card">
+        <h2>IMU <span class="hz" id="imuHz">-- Hz</span></h2>
+        <div class="imu-row">
           <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>
           <div class="num-row"><span>Pitch</span><b id="valPitch">--</b></div>
           <div class="num-row"><span>Yaw</span><b id="valYaw">--</b></div>
           <div class="num-row"><span>温度</span><b id="valTemp">--</b></div>
           <div class="num-row"><span>更新</span><b id="imuAge">--</b></div>
         </div>
-      </div>
-      <canvas id="imuChart" height="120"></canvas>
-      <div class="legend">
-        <span class="lg lg-roll">Roll</span>
-        <span class="lg lg-pitch">Pitch</span>
-        <span class="lg lg-yaw">Yaw</span>
-      </div>
-    </section>
+      </section>
 
-    <!-- 系统状态 -->
-    <section class="card card-narrow" id="cardSys">
-      <h2>系统状态</h2>
-      <div class="num-row"><span>心跳计数</span><b id="hbCount">--</b></div>
-      <div class="num-row"><span>心跳年龄</span><b id="hbAge">--</b></div>
-      <div class="num-row"><span>IMU 温度</span><b id="tempAge">--</b></div>
-      <div class="status-note" id="sysNote">连接 rosbridge 后开始监控。</div>
-    </section>
+      <section class="card">
+        <h2>电机状态</h2>
+        <div class="table-wrap">
+          <table class="motors">
+            <thead>
+              <tr>
+                <th>ID</th><th>协议</th><th>型号</th><th>在线</th><th>生命周期</th>
+                <th>位置 rad</th><th>速度 rad/s</th><th>力矩 N·m</th><th>电流 A</th>
+                <th>故障</th><th>age</th>
+              </tr>
+            </thead>
+            <tbody id="motorRows">
+              <tr class="empty"><td colspan="11">暂无数据（等待 motor_topology）</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-    <!-- 电机拓扑/状态表 -->
-    <section class="card card-wide" id="cardMotors">
-      <h2>电机状态 <span class="hz" id="motorHz"></span></h2>
-      <table class="motors">
-        <thead>
-          <tr>
-            <th>ID</th><th>在线</th><th>生命周期</th><th>温度°C</th><th>电流A</th>
-            <th>电压V</th><th>速度 rad/s</th><th>位置 rad</th><th>故障</th><th>测量年龄</th>
-          </tr>
-        </thead>
-        <tbody id="motorRows">
-          <tr class="empty"><td colspan="10">暂无数据（等待 /motor_status 与 /motor_motion_states）</td></tr>
-        </tbody>
-      </table>
-      <h2 class="sub">事件日志 <span class="muted">/motor_events</span></h2>
-      <ul class="events" id="eventLog"></ul>
-    </section>
+      <section class="card">
+        <h2>事件日志 <span class="muted">/micro_ros/motor_events</span></h2>
+        <ul class="events" id="eventLog"></ul>
+      </section>
+    </div>
 
-    <!-- 电机控制 -->
-    <section class="card card-wide" id="cardCtrl">
-      <h2>电机命令 <span class="muted">/motor_command · MotorCommandArray 快照</span></h2>
-      <p class="muted warn">
-        注意：快照语义 —— 快照中未出现的电机将被软停；任一字段为 NaN/Inf 整包拒收。
-      </p>
-      <table class="cmd">
-        <thead>
-          <tr><th>motor_id</th><th>position (rad)</th><th>velocity (rad/s)</th><th>effort (N·m)</th></tr>
-        </thead>
-        <tbody id="cmdRows"></tbody>
-      </table>
-      <div class="cmd-actions">
-        <button id="btnAddRow">+ 添加电机</button>
-        <button id="btnSendCmd" class="primary">发送快照</button>
-        <span id="cmdResult"></span>
-      </div>
-    </section>
+    <!-- 右：控制下发 -->
+    <div class="col-control">
+      <section class="card">
+        <h2>型号绑定</h2>
+        <div class="ctrl-row">
+          <input id="bindId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+          <select id="bindModel">
+            <option value="cerb_r58_101">cerb_r58_101</option>
+            <option value="cerb_r48_101">cerb_r48_101</option>
+            <option value="vaxor_2550">vaxor_2550</option>
+          </select>
+          <button id="btnBind">绑定</button>
+        </div>
+        <p class="muted tiny">结果见事件日志 PROFILE_BOUND / PROFILE_REJECTED。运行中电机不可改绑。</p>
+      </section>
+
+      <section class="card">
+        <h2>授权与使能</h2>
+        <div class="ctrl-block">
+          <div class="label">全局授权 <span class="muted tiny">/micro_ros/motor_enable</span></div>
+          <div class="ctrl-row">
+            <button id="btnGlobalEnable" class="primary">全局授权</button>
+            <button id="btnGlobalDisable" class="danger">全局撤权</button>
+          </div>
+        </div>
+        <div class="ctrl-block">
+          <div class="label">逐电机使能 <span class="muted tiny">/micro_ros/motor_policy</span></div>
+          <div class="ctrl-row">
+            <input id="polId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+            <button id="btnPolEnable">使能</button>
+            <button id="btnPolDisable" class="secondary">失能</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>命令快照 <span class="muted tiny">/motor_command_array</span></h2>
+        <p class="warn tiny">
+          完整快照语义：快照中缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
+        </p>
+        <table class="cmd">
+          <thead>
+            <tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr>
+          </thead>
+          <tbody id="cmdRows"></tbody>
+        </table>
+        <div class="ctrl-row wrap">
+          <button id="btnAddRow">+ 添加</button>
+          <button id="btnFillOnline" class="secondary">填入 1–9</button>
+          <button id="btnClearRows" class="secondary">清空</button>
+        </div>
+        <div class="ctrl-row wrap">
+          <button id="btnSendOnce" class="primary">单发一次</button>
+          <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
+        </div>
+        <div id="cmdResult" class="result tiny"></div>
+      </section>
+    </div>
   </main>
 
-  <footer class="foot muted">
-    rosbridge: ws ·9090 &nbsp;|&nbsp; 页面: http ·8080 &nbsp;|&nbsp; 仅限内网使用，rosbridge 未设鉴权
+  <footer class="foot muted tiny">
+    rosbridge ws·9090 ｜ 页面 http·8080 ｜ 仅限内网，rosbridge 无鉴权
   </footer>
 
   <script src="roslib.min.js"></script>

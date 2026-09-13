@@ -40,7 +40,7 @@ OFFLINE = 心跳丢失 100ms。上层迁移与台架验证进度见
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
 | W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `lib/w25q64` 保留，当前不执行启动探测 |
-| 电机接口 | ID 化完整快照（`MotorCommandArray` 等 9 话题） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
+| 电机接口 | ID 化完整快照（5 个订阅 + 5 个发布，共 10 个话题） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
 ## 时钟
@@ -186,7 +186,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 建链后可见电机话题（消息均属 `can_bridge_msgs`，源在
 `../micro_ros_agent/src/can_bridge_msgs`）：
 
-订阅（下行，最多 64 目标的完整 ID 快照）：
+订阅（下行，5 个话题；命令为最多 64 目标的完整 ID 快照）：
 
 - `/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
@@ -200,8 +200,11 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `micro_ros/motor_config`（`MotorConfig`，带 `request_id`）：SET_MODE 事务
   （vaxor stop/start 两阶段、无厂家确认对象 → 结果 UNCONFIRMED；CERB 恒 MIT）
   与 CERB 限位（管理对象未决，一律 UNSUPPORTED）。
+- `micro_ros/motor_bind`（`MotorBind`，reliable）：把已发现的 `motor_id` 绑定到
+  编译期型号目录中的 `model_name`；绑定幂等且断链保留，结果经 `motor_events` 的
+  PROFILE_BOUND / PROFILE_REJECTED 事件回告。
 
-发布（上行，均为 ID 化，缺失浮点 = NaN）：
+发布（上行，5 个话题；均为 ID 化，缺失浮点 = NaN）：
 
 - `micro_ros/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
   由 10ms bridge timer 驱动）。

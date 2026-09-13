@@ -8,7 +8,8 @@ led_color_t led_status_select(micro_ros_link_state_t state,
     case MICRO_ROS_LINK_CONNECT:
       return previous;
     case MICRO_ROS_LINK_RUN:
-      return led_color_t{0U, blink_on ? 1U : 0U, 0U};
+      return led_color_t{
+          0U, static_cast<uint8_t>(blink_on ? 1U : 0U), 0U};
     case MICRO_ROS_LINK_LOST:
       return led_color_t{0U, 0U, 1U};
     case MICRO_ROS_LINK_WAIT_AGENT:

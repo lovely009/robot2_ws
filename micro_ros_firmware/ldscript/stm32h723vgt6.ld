@@ -13,8 +13,9 @@
  * 注意：
  * - 板级定义会开启 D-cache，因此 DMA/BDMA 缓冲区需要相应地
  *   做缓存维护，或放入 MPU 非缓存区域。
- * - MPU 非缓存区域在 src/board_memory.cpp 中按本文件的 SRAM1+2 / SRAM4
- *   划分设置；改动下方 ORIGIN/LENGTH 必须同步改该文件的基址与大小。
+ * - MPU 非缓存区域在 src/system_clock.cpp 的 ConfigureMpuNonCacheRegions()
+ *   中按本文件的 RAM_D2（SRAM1+2）/ RAM_D3（SRAM4）划分设置；
+ *   改动下方 ORIGIN/LENGTH 必须同步改该函数的基址与大小。
  * - ITCM 代码放置需要启动侧的拷贝逻辑；本脚本不会静默把代码放进 ITCM。
  */
 
@@ -79,26 +80,26 @@ SECTIONS
     . = ALIGN(4);
   } > FLASH
 
-  .ARM.extab :
+  .ARM.extab (READONLY) :
   {
     *(.ARM.extab* .gnu.linkonce.armextab.*)
   } > FLASH
 
-  .ARM :
+  .ARM (READONLY) :
   {
     __exidx_start = .;
     *(.ARM.exidx*)
     __exidx_end = .;
   } > FLASH
 
-  .preinit_array :
+  .preinit_array (READONLY) :
   {
     PROVIDE_HIDDEN(__preinit_array_start = .);
     KEEP(*(.preinit_array*))
     PROVIDE_HIDDEN(__preinit_array_end = .);
   } > FLASH
 
-  .init_array :
+  .init_array (READONLY) :
   {
     PROVIDE_HIDDEN(__init_array_start = .);
     KEEP(*(SORT(.init_array.*)))
@@ -106,7 +107,7 @@ SECTIONS
     PROVIDE_HIDDEN(__init_array_end = .);
   } > FLASH
 
-  .fini_array :
+  .fini_array (READONLY) :
   {
     PROVIDE_HIDDEN(__fini_array_start = .);
     KEEP(*(SORT(.fini_array.*)))

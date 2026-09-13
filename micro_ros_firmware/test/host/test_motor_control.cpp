@@ -1760,7 +1760,7 @@ static void test_fault_recovery_requires_reauth() {
 static void test_fault_recovery_no_motion_without_explicit_enable() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_vaxor_to_ready(&ctx, 7, "vaxor_2530", 100);
+  bring_vaxor_to_ready(&ctx, 7, "vaxor_2550", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 110);
   snapshot_add(&s, 7, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 115));
@@ -1930,8 +1930,8 @@ static void test_soft_stop_encode_failure_pends_retry() {
 static void test_tx_slot_maps_entry_index() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_vaxor_to_ready(&ctx, 5, "vaxor_2530", 100);
-  bring_vaxor_to_ready(&ctx, 6, "vaxor_2530", 100);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+  bring_vaxor_to_ready(&ctx, 6, "vaxor_2550", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 110);
   snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
   snapshot_add(&s, 6, 0.2f, 0.0f, 0.0f);
@@ -1960,8 +1960,8 @@ static void test_tx_slot_maps_entry_index() {
 static void test_p0_tx_slot_on_soft_stop_and_disable() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_vaxor_to_ready(&ctx, 5, "vaxor_2530", 100);
-  bring_vaxor_to_ready(&ctx, 6, "vaxor_2530", 100);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+  bring_vaxor_to_ready(&ctx, 6, "vaxor_2550", 100);
   motor_control_command_snapshot_t s = make_snapshot(1, 110);
   snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
   snapshot_add(&s, 6, 0.2f, 0.0f, 0.0f);

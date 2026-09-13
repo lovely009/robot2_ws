@@ -13,28 +13,6 @@
 
 static const motor_protocol_model_profile_t kProfiles[] = {
     {
-        // Vaxor 25mm 30 速比档（motor.yaml: vaxor_2530）
-        .model_name = "vaxor_2530",
-        .protocol = &motor_protocol_vaxor_adapter,
-        .gear_ratio = 30.0f,
-        .gear_efficiency = 0.70f,
-        .torque_constant_nm_per_amp = 0.042f,
-        .rated_torque_nm = 0.0f,  // 未确认，不参与钳制
-        .peak_torque_nm = 0.0f,
-        .rated_speed_rad_s = 0.0f,
-        .supply_voltage_v = 15.0f, // 12~18V 标称中值（ARD §8.3）
-        .default_kp = 0.008f,
-        .default_kd = 1.0f,
-        .mit_position_limit_rad = 0.0f, // vaxor 量化范围在 codec 内部钳制
-        .mit_velocity_limit_rad_s = 0.0f,
-        .mit_torque_limit_nm = 0.0f,
-        .kp_max = 0.65535f, // 线协议量化上限（KP_SCALE 0.00001 × 0xffff）
-        .kd_max = 655.35f,  // KD_SCALE 0.01 × 0xffff
-        .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |
-                            MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE |
-                            MOTOR_PROTOCOL_CAP_AUTONOMOUS_FEEDBACK,
-    },
-    {
         // Vaxor 25mm 50 速比档（motor.yaml: vaxor_2550）
         .model_name = "vaxor_2550",
         .protocol = &motor_protocol_vaxor_adapter,

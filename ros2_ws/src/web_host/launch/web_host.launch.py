@@ -20,9 +20,11 @@ def generate_launch_description():
         DeclareLaunchArgument('web_port', default_value='8080',
                               description='HTTP port of the static web UI.'),
 
+        # 经 web_host 的垫片启动 rosbridge：兼容有界字符串 string<31>
+        # （MotorTopology/MotorBind），见 web_host/rosbridge_shim.py。
         Node(
-            package='rosbridge_server',
-            executable='rosbridge_websocket',
+            package='web_host',
+            executable='rosbridge_shim',
             name='rosbridge_websocket',
             output='screen',
             parameters=[{

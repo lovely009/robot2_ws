@@ -66,6 +66,18 @@ ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0
 ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
 
+与机器人无关的独立仿真节点（不启 Gazebo；拓扑完全由 `motor_config_file` 决定，
+无任何默认值，bus→端口映射必须显式传入）：
+
+```bash
+ros2 launch motor_sim motor_sim.launch.py \
+  motor_config_file:=/path/to/motors.yaml transport_mode:=socket_can arm_port:=vcan0
+```
+
+注意传输名两套：motor_drive YAML 用 `socketcan`/`serial_slcan`，motor_sim 节点参数用
+`socket_can`/`usb_serial`/`serial_slcan`；`serial_slcan` 模式必须显式
+`allow_external_canfd:=true`。
+
 ## micro_ros_firmware（STM32 固件，PlatformIO，非 ament 包）
 
 STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经同仓库 `micro_ros_agent/` 对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；权威文档是该目录 `AGENTS.md`，运行时设计与后续台架项见 `micro_ros_firmware/docs/architecture/ARD-0007-micro-ros-motor-runtime.md` 和 `micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`（台架报告与指南在 `docs/reports/`、`docs/guides/`）。
@@ -74,12 +86,24 @@ STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路
 # 均在 micro_ros_firmware/ 内执行
 ~/.platformio/penv/bin/pio run                 # 编译（pio 不在 PATH）；-t upload 烧录
 cmake -S test/host -B .host-build && cmake --build .host-build --clean-first -j2
-ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + cassert 断言（无 gtest）
+ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + cassert 断言（无 gtest，另含一个 python 线协议测试）
 ```
 
-- 改 `platformio.ini` 编译宏后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编）；勿跑 `-t clean_microros`（联网重下环境）。
-- 消息唯一来源是 `micro_ros_agent/src/can_bridge_msgs`，`extra_packages/can_bridge_msgs` 只是指向它的符号链接——改消息去 agent 仓库，勿在固件侧另建。
+- 改 `platformio.ini` 编译宏或 `ldscript/*.ld` 后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编；增量构建不监听链接脚本改动、会静默跳过重新链接）；勿跑 `-t clean_microros`（联网重下环境）。
 - motor runtime 已完成固件侧 ID 驱动化；当前固件应同时通过 host 测试与 `pio run`。剩余上层迁移和真机台架项见 `micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`。
+
+## micro_ros_agent（独立 colcon 工作区，勿在 ros2_ws 内构建）
+
+固件 USB CDC 与 ROS 2 之间的 micro-ROS 桥；也放主机侧台架工具。构建在该目录内独立进行：
+
+```bash
+cd micro_ros_agent && colcon build --symlink-install
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0   # ttyACM0=板子 CDC
+```
+
+- 消息定义唯一来源是 `micro_ros_agent/src/can_bridge_msgs`；固件 `extra_packages/can_bridge_msgs` 是指向它的符号链接。
+- 改消息后普通 `pio run` 不会重生成类型（PlatformIO 只检查 `libmicroros.a` 是否存在）：用 `micro_ros_agent/tools/refresh_microros_messages.py` 增量刷新，勿跑 `-t clean_microros`。
+- `micro_ros_agent/tools/fdcan_motor_sim.py`：FDCAN1 九节点（CERB 1–6 + VAXOR 7–9）主机模拟器，经 `/dev/ttyACM1` CANable2 SLCAN 跑全通路台架；流程与启动顺序（CANable 必须先成为 ACK 节点再复位控制板，否则总线 bus-off 不自动恢复）见 `docs/guides/fdcan1-bench-guide.md`。
 
 ## 架构总览
 

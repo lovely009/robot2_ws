@@ -1,0 +1,94 @@
+# web_host
+
+rosbridge Web 上位机：一个 launch 同时起两个节点——
+
+| 节点 | 可执行 | 作用 |
+|---|---|---|
+| `rosbridge_websocket` | `rosbridge_shim` | 官方 rosbridge 的**启动垫片**，先给 `rosbridge_library` 补上有界字符串原语（`string<31>` / `string<=31`，见 `web_host/rosbridge_shim.py` 模块注释），再 runpy 运行官方入口；解决 `can_bridge_msgs` 的 `MotorTopology` / `MotorBind` 等含 `string<=31` 字段时 rosbridge 2.0.7 序列化报 `inst is not a ROS Message, but a str` 的问题 |
+| `web_static_server` | `static_server` | 纯标准库 `ThreadingHTTPServer` 托管 `web/`（`index.html` / `app.js` / `style.css` / `roslib.min.js`），无 Node 等构建依赖 |
+
+前端打开页面后按 `location.hostname:9090` 自动拼 WebSocket 地址（见 `web/app.js`），
+所以从别的机器访问时，浏览器地址栏用主机 IP，rosbridge 也会连到同一个 IP。
+
+页面分四个 Tab（纯前端，无 Node 构建依赖，`web/` 下 `index.html` / `app.js` /
+`style.css` / `roslib.min.js`）：
+
+| Tab | 功能 |
+|---|---|
+| 监控 | IMU 数值 + 3D 姿态/人工地平仪、电机状态表、事件日志（可导出 JSON/CSV）、命令历史 |
+| 控制 | 型号绑定、全局授权/逐电机使能、**逐电机增益 SET_GAINS**、**位置限位 SET_POSITION_LIMITS**、**模式切换 SET_MODE**（结果异步回 CONFIG_RESULT）、命令快照单发/100Hz 连发 |
+| 曲线 | 位置/速度/力矩/电流实时折线（canvas，多电机可选、时间窗可调） |
+| 示教 | 点位序列（记录当前命令 / 单步 / 循环播放 / 导入导出 JSON） |
+
+> 增益/限位经 `motor_policy` 下发，固件契约总是附带一次 `SET_ENABLE`，页面统一
+> 置 `enable:true`（仅重立授权许可，不打断运行中电机）；SET_MODE 走
+> `motor_config` 事务，`request_id` 由页面生成并与 `motor_config_result` 关联回显。
+
+## 构建
+
+ament_python 包，在 `ros2_ws/` 内构建：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ros2_ws
+colcon build --symlink-install --packages-select web_host
+source install/setup.bash
+```
+
+> 注意：即使使用 `--symlink-install`，`setup.py` 里 `console_scripts`
+> 新增/改名后（例如 `rosbridge_shim` 刚加入时）**必须重跑一次 colcon build**，
+> 入口脚本在 build 时生成到 `install/web_host/lib/web_host/`，symlink 不会自动补上，
+> 否则 launch 报 `executable 'rosbridge_shim' not found`。
+
+## 启动
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/ly/robot_ws/ros2_ws/install/setup.bash
+ros2 launch web_host web_host.launch.py
+```
+
+默认端口（launch 参数可覆盖）：
+
+- WebSocket：`0.0.0.0:9090` —— `rosbridge_port:=<端口>`
+- 静态页面：`0.0.0.0:8080` —— `web_port:=<端口>`
+
+```bash
+ros2 launch web_host web_host.launch.py rosbridge_port:=9091 web_port:=8081
+```
+
+启动成功的标志（两条都要看到）：
+
+```
+[rosbridge_websocket]: Rosbridge WebSocket server started on port 9090
+[web_static_server]: Serving .../install/web_host/share/web_host/web at http://0.0.0.0:8080
+```
+
+浏览器打开 **http://<主机IP>:8080**（本机即 http://localhost:8080）。
+
+停止：前台 launch 直接 `Ctrl+C`，两个节点一起退出。
+
+## 与 micro-ROS agent 的关系
+
+web_host 只负责 ROS 2 ⇄ 浏览器；固件（STM32 控制板）的话题要另起
+`micro_ros_agent`（独立工作区，见 `../../micro_ros_agent/README.md`）才能在
+domain 0 看到。两者无启动顺序要求，页面上话题无数据时先确认 agent 已连上板子：
+
+```bash
+# 另一个终端；ttyACM0=控制板 USB CDC（VID 0483）
+source /opt/ros/humble/setup.bash
+source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
+```
+
+agent 会话建立后，`ros2 topic list` 应能看到 `/micro_ros/motor_topology`、
+`/micro_ros/motor_status_array`、`/micro_ros/imu/data` 等固件话题，
+页面左侧监控区即有数据。需要 `/dev/ttyACM*` 写权限（用户在 `dialout` 组）。
+
+## 验证
+
+```bash
+ss -ltn | grep -E ':(9090|8080)'          # 两端口在监听
+ros2 topic list                            # 能看到 /micro_ros/* 说明 agent 也正常
+curl -sI http://localhost:8080 | head -1  # 期望 HTTP/1.0 200 OK
+```

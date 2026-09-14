@@ -26,102 +26,260 @@
     </div>
   </header>
 
-  <main class="layout">
-    <!-- 左：监控 -->
-    <div class="col-monitor">
-      <section class="card">
-        <h2>IMU <span class="hz" id="imuHz">-- Hz</span></h2>
-        <div class="imu-row">
-          <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>
-          <div class="num-row"><span>Pitch</span><b id="valPitch">--</b></div>
-          <div class="num-row"><span>Yaw</span><b id="valYaw">--</b></div>
-          <div class="num-row"><span>温度</span><b id="valTemp">--</b></div>
-          <div class="num-row"><span>更新</span><b id="imuAge">--</b></div>
+  <nav class="tabs">
+    <button class="tab on" data-page="monitor">监控</button>
+    <button class="tab" data-page="control">控制</button>
+    <button class="tab" data-page="chart">曲线</button>
+    <button class="tab" data-page="teach">示教</button>
+  </nav>
+
+  <main>
+    <!-- ============ 监控页 ============ -->
+    <section class="page on" id="page-monitor">
+      <div class="layout">
+        <div class="col-monitor">
+          <section class="card">
+            <h2>IMU <span class="hz" id="imuHz">-- Hz</span></h2>
+            <div class="imu-wrap">
+              <div class="imu-row">
+                <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>
+                <div class="num-row"><span>Pitch</span><b id="valPitch">--</b></div>
+                <div class="num-row"><span>Yaw</span><b id="valYaw">--</b></div>
+                <div class="num-row"><span>温度</span><b id="valTemp">--</b></div>
+                <div class="num-row"><span>更新</span><b id="imuAge">--</b></div>
+              </div>
+              <canvas id="imu3d" width="200" height="200" class="imu3d" title="3D 姿态（飞行器侧倾/俯仰/航向）"></canvas>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>电机状态</h2>
+            <div class="table-wrap">
+              <table class="motors">
+                <thead>
+                  <tr>
+                    <th>ID</th><th>协议</th><th>型号</th><th>在线</th><th>生命周期</th>
+                    <th>位置 rad</th><th>速度 rad/s</th><th>力矩 N·m</th><th>电流 A</th>
+                    <th>故障</th><th>age</th>
+                  </tr>
+                </thead>
+                <tbody id="motorRows">
+                  <tr class="empty"><td colspan="11">暂无数据（等待 motor_topology）</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>事件日志 <span class="muted">/micro_ros/motor_events</span>
+              <span class="spacer"></span>
+              <button id="btnExportEvents" class="tiny-btn">导出 JSON</button>
+              <button id="btnExportEventsCsv" class="tiny-btn">导出 CSV</button>
+              <button id="btnClearEvents" class="tiny-btn secondary">清空</button>
+            </h2>
+            <ul class="events" id="eventLog"></ul>
+          </section>
         </div>
-      </section>
 
-      <section class="card">
-        <h2>电机状态</h2>
-        <div class="table-wrap">
-          <table class="motors">
-            <thead>
-              <tr>
-                <th>ID</th><th>协议</th><th>型号</th><th>在线</th><th>生命周期</th>
-                <th>位置 rad</th><th>速度 rad/s</th><th>力矩 N·m</th><th>电流 A</th>
-                <th>故障</th><th>age</th>
-              </tr>
-            </thead>
-            <tbody id="motorRows">
-              <tr class="empty"><td colspan="11">暂无数据（等待 motor_topology）</td></tr>
-            </tbody>
-          </table>
+        <div class="col-control">
+          <section class="card">
+            <h2>IMU 姿态指示</h2>
+            <div class="num-row"><span>Roll</span><b id="valRollBig">--</b></div>
+            <div class="num-row"><span>Pitch</span><b id="valPitchBig">--</b></div>
+            <div class="num-row"><span>Yaw</span><b id="valYawBig">--</b></div>
+            <div class="num-row"><span>四元数</span><b id="valQuat" class="muted">--</b></div>
+            <canvas id="attitudeHorizon" width="260" height="150" class="horizon" title="人工地平仪"></canvas>
+          </section>
+
+          <section class="card">
+            <h2>命令历史 <span class="muted">已发快照</span>
+              <span class="spacer"></span>
+              <button id="btnExportHist" class="tiny-btn">导出 JSON</button>
+              <button id="btnClearHist" class="tiny-btn secondary">清空</button>
+            </h2>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>时间</th><th>seq</th><th>电机</th><th>状态</th></tr></thead>
+                <tbody id="histRows"><tr class="empty"><td colspan="4">暂无记录</td></tr></tbody>
+              </table>
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section class="card">
-        <h2>事件日志 <span class="muted">/micro_ros/motor_events</span></h2>
-        <ul class="events" id="eventLog"></ul>
-      </section>
-    </div>
+    <!-- ============ 控制页 ============ -->
+    <section class="page" id="page-control">
+      <div class="layout">
+        <div class="col-monitor">
+          <section class="card">
+            <h2>型号绑定</h2>
+            <div class="ctrl-row">
+              <input id="bindId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+              <select id="bindModel">
+                <option value="cerb_r58_101">cerb_r58_101</option>
+                <option value="cerb_r48_101">cerb_r48_101</option>
+                <option value="vaxor_2550">vaxor_2550</option>
+              </select>
+              <button id="btnBind">绑定</button>
+            </div>
+            <p class="muted tiny">结果见事件日志 PROFILE_BOUND / PROFILE_REJECTED。运行中电机不可改绑。</p>
+          </section>
 
-    <!-- 右：控制下发 -->
-    <div class="col-control">
-      <section class="card">
-        <h2>型号绑定</h2>
-        <div class="ctrl-row">
-          <input id="bindId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
-          <select id="bindModel">
-            <option value="cerb_r58_101">cerb_r58_101</option>
-            <option value="cerb_r48_101">cerb_r48_101</option>
-            <option value="vaxor_2550">vaxor_2550</option>
-          </select>
-          <button id="btnBind">绑定</button>
+          <section class="card">
+            <h2>授权与使能</h2>
+            <div class="ctrl-block">
+              <div class="label">全局授权 <span class="muted tiny">/micro_ros/motor_enable</span></div>
+              <div class="ctrl-row">
+                <button id="btnGlobalEnable" class="primary">全局授权</button>
+                <button id="btnGlobalDisable" class="danger">全局撤权</button>
+              </div>
+            </div>
+            <div class="ctrl-block">
+              <div class="label">逐电机使能 <span class="muted tiny">/micro_ros/motor_policy</span></div>
+              <div class="ctrl-row">
+                <input id="polId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+                <button id="btnPolEnable">使能</button>
+                <button id="btnPolDisable" class="secondary">失能</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>逐电机增益 <span class="muted tiny">/micro_ros/motor_policy · SET_GAINS</span></h2>
+            <p class="muted tiny">kp/kd 按 Profile 上限钳制；只影响后续命令，不刷新命令时效。需先逐电机使能。</p>
+            <div class="ctrl-row">
+              <input id="gainId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+              <input id="gainKp" type="number" step="0.01" value="0" title="kp">
+              <input id="gainKd" type="number" step="0.01" value="0" title="kd">
+              <button id="btnGainApply" class="primary">应用增益</button>
+            </div>
+            <div id="gainResult" class="result tiny"></div>
+          </section>
+
+          <section class="card">
+            <h2>位置限位 <span class="muted tiny">SET_POSITION_LIMITS</span></h2>
+            <p class="muted tiny">Vaxor 本地软限位（打包前钳制）；CERB 限位走下方 MotorConfig 事务。</p>
+            <div class="ctrl-row">
+              <input id="limId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+              <input id="limMin" type="number" step="0.01" value="-3.14" title="min rad">
+              <input id="limMax" type="number" step="0.01" value="3.14" title="max rad">
+              <button id="btnLimApply" class="primary">应用限位</button>
+            </div>
+            <div id="limResult" class="result tiny"></div>
+          </section>
+
+          <section class="card">
+            <h2>模式切换 <span class="muted tiny">/micro_ros/motor_config · KIND_SET_MODE</span></h2>
+            <p class="muted tiny">vaxor 两阶段事务；CERB 仅支持 MIT（0）。结果异步回 CONFIG_RESULT。</p>
+            <div class="ctrl-row">
+              <input id="modeId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
+              <select id="modeSel">
+                <option value="0">MIT (0)</option>
+                <option value="1">Velocity (1)</option>
+                <option value="2">Position (2)</option>
+              </select>
+              <button id="btnModeSend" class="primary">发送</button>
+            </div>
+            <div id="modeResult" class="result tiny"></div>
+          </section>
         </div>
-        <p class="muted tiny">结果见事件日志 PROFILE_BOUND / PROFILE_REJECTED。运行中电机不可改绑。</p>
-      </section>
 
-      <section class="card">
-        <h2>授权与使能</h2>
-        <div class="ctrl-block">
-          <div class="label">全局授权 <span class="muted tiny">/micro_ros/motor_enable</span></div>
-          <div class="ctrl-row">
-            <button id="btnGlobalEnable" class="primary">全局授权</button>
-            <button id="btnGlobalDisable" class="danger">全局撤权</button>
+        <div class="col-control">
+          <section class="card">
+            <h2>命令快照 <span class="muted tiny">/motor_command_array</span></h2>
+            <p class="warn tiny">
+              完整快照语义：快照中缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
+            </p>
+            <table class="cmd">
+              <thead>
+                <tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr>
+              </thead>
+              <tbody id="cmdRows"></tbody>
+            </table>
+            <div class="ctrl-row wrap">
+              <button id="btnAddRow">+ 添加</button>
+              <button id="btnFillOnline" class="secondary">填入 1–9</button>
+              <button id="btnClearRows" class="secondary">清空</button>
+            </div>
+            <div class="ctrl-row wrap">
+              <button id="btnSendOnce" class="primary">单发一次</button>
+              <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
+            </div>
+            <div id="cmdResult" class="result tiny"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 曲线页 ============ -->
+    <section class="page" id="page-chart">
+      <div class="layout single">
+        <section class="card">
+          <h2>实时曲线 <span class="muted">/micro_ros/motion_states · /micro_ros/motor_status_array</span>
+            <span class="spacer"></span>
+            <button id="btnChartPause" class="tiny-btn">暂停</button>
+            <button id="btnChartClear" class="tiny-btn secondary">清空</button>
+          </h2>
+          <div class="ctrl-row wrap">
+            <label class="check">通道
+              <select id="chartCh">
+                <option value="position">位置 rad</option>
+                <option value="velocity">速度 rad/s</option>
+                <option value="effort">力矩 N·m</option>
+                <option value="current">电流 A</option>
+              </select>
+            </label>
+            <label class="check">电机
+              <select id="chartMotor"><option value="0">全部</option></select>
+            </label>
+            <label class="check">窗口
+              <select id="chartWindow">
+                <option value="5000">5 s</option>
+                <option value="10000" selected>10 s</option>
+                <option value="30000">30 s</option>
+              </select>
+            </label>
+            <span class="muted tiny" id="chartHint">--</span>
           </div>
-        </div>
-        <div class="ctrl-block">
-          <div class="label">逐电机使能 <span class="muted tiny">/micro_ros/motor_policy</span></div>
-          <div class="ctrl-row">
-            <input id="polId" type="number" min="1" max="65535" step="1" value="1" title="motor_id">
-            <button id="btnPolEnable">使能</button>
-            <button id="btnPolDisable" class="secondary">失能</button>
-          </div>
-        </div>
-      </section>
+          <canvas id="chart" width="980" height="380" class="chart"></canvas>
+        </section>
+      </div>
+    </section>
 
-      <section class="card">
-        <h2>命令快照 <span class="muted tiny">/motor_command_array</span></h2>
-        <p class="warn tiny">
-          完整快照语义：快照中缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
-        </p>
-        <table class="cmd">
-          <thead>
-            <tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr>
-          </thead>
-          <tbody id="cmdRows"></tbody>
-        </table>
-        <div class="ctrl-row wrap">
-          <button id="btnAddRow">+ 添加</button>
-          <button id="btnFillOnline" class="secondary">填入 1–9</button>
-          <button id="btnClearRows" class="secondary">清空</button>
-        </div>
-        <div class="ctrl-row wrap">
-          <button id="btnSendOnce" class="primary">单发一次</button>
-          <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
-        </div>
-        <div id="cmdResult" class="result tiny"></div>
-      </section>
-    </div>
+    <!-- ============ 示教页 ============ -->
+    <section class="page" id="page-teach">
+      <div class="layout single">
+        <section class="card">
+          <h2>点位序列 <span class="muted">逐点下发命令快照，支持单步 / 循环播放</span>
+            <span class="spacer"></span>
+            <button id="btnTeachRecord" class="tiny-btn primary">记录当前命令</button>
+            <button id="btnTeachAdd" class="tiny-btn">+ 空点位</button>
+            <button id="btnTeachExport" class="tiny-btn">导出 JSON</button>
+            <button id="btnTeachImport" class="tiny-btn">导入 JSON</button>
+          </h2>
+          <p class="muted tiny">
+            每行：等待 ms（停留）后下发该行快照；电机目标列用「ID:pos,vel,eff」文本表示（0 目标 = 该行不含此电机）。
+            播放前需全局授权 + 逐电机使能；单发与 100Hz 连发互斥。
+          </p>
+          <div class="ctrl-row wrap">
+            <button id="btnTeachPlay" class="primary">播放</button>
+            <button id="btnTeachPause" class="secondary">暂停</button>
+            <button id="btnTeachStep" class="secondary">单步</button>
+            <label class="check"><input type="checkbox" id="chkTeachLoop"> 循环</label>
+            <span class="muted tiny" id="teachStatus">空闲</span>
+          </div>
+          <div class="table-wrap">
+            <table class="teach">
+              <thead>
+                <tr><th>#</th><th>等待 ms</th><th>电机目标（ID:pos,vel,eff）</th><th></th></tr>
+              </thead>
+              <tbody id="teachRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
   </main>
 
   <footer class="foot muted tiny">

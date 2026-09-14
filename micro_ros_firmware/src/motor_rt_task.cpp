@@ -538,7 +538,7 @@ bool motor_rt_task_start(void) {
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
   motor_event_relay_init(&g_event_relay);
-  watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
+  // watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
 
   if (xTaskCreate(motor_rt_task_fn, "motor_rt", kMotorRtTaskStack, nullptr,
                   kMotorRtTaskPrio, &g_task_handle) != pdPASS) {

@@ -16,6 +16,8 @@ const TOPICS = {
   policy: {name: '/micro_ros/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicy'},
   enable: {name: '/micro_ros/motor_enable', type: 'std_msgs/msg/Bool'},
   command: {name: '/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
+  config: {name: '/micro_ros/motor_config', type: 'can_bridge_msgs/msg/MotorConfig'},
+  configResult: {name: '/micro_ros/motor_config_result', type: 'can_bridge_msgs/msg/MotorConfigResult'},
 };
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -26,7 +28,11 @@ const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
   'REGISTRY_FULL'];
 const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
+const CONFIG_RESULT_NAMES = ['OK', 'BUSY', 'INVALID', 'UNSUPPORTED',
+  'DEVICE_ERROR', 'TIMEOUT', 'UNCONFIRMED'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
+const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
+  '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
 
 // ---------- 工具 ----------
 const $ = (id) => document.getElementById(id);
@@ -52,11 +58,22 @@ const state = {
   connected: false,
   motors: new Map(),
   events: [],
-  imu: {count: 0, last: 0, roll: 0, pitch: 0, yaw: 0},
+  imu: {count: 0, last: 0, roll: 0, pitch: 0, yaw: 0, q: null},
   temp: undefined,
   tempLast: 0,
   motionCount: 0,
 };
+
+// 曲线缓冲：motor_id -> {t:[], position:[], velocity:[], effort:[], current:[]}
+const chartBuf = new Map();
+const chart = {running: true, windowMs: 10000};
+
+// 命令历史：{t, seq, targets:[...]}
+const history = [];
+
+// 待回显的配置事务：request_id -> {kind:'mode'|'limits', motor_id, t}
+const pendingConfigs = new Map();
+let configSeq = 1;
 
 // ---------- rosbridge ----------
 let ros = null;
@@ -138,18 +155,24 @@ function subscribeAll() {
 
   sub('motion', (m) => {
     state.motionCount++;
+    const t = Date.now();
     for (const s of (m.states || [])) {
       const row = state.motors.get(s.motor_id) || {};
       row.motion = s;
       state.motors.set(s.motor_id, row);
+      chartPush(s.motor_id, 'position', s.position, t);
+      chartPush(s.motor_id, 'velocity', s.velocity, t);
+      chartPush(s.motor_id, 'effort', s.effort, t);
     }
   });
 
   sub('status', (m) => {
+    const t = Date.now();
     for (const s of (m.statuses || [])) {
       const row = state.motors.get(s.motor_id) || {};
       row.status = s;
       state.motors.set(s.motor_id, row);
+      chartPush(s.motor_id, 'current', s.current, t);
     }
   });
 
@@ -160,8 +183,9 @@ function subscribeAll() {
         ? EVENT_NAMES[m.event_type] : 'EVENT_' + m.event_type,
       id: m.motor_id,
       reason: m.reason,
+      request_id: m.request_id || 0,
     });
-    if (state.events.length > 50) state.events.pop();
+    if (state.events.length > 2000) state.events.pop();
     renderEvents();
   });
 
@@ -171,11 +195,38 @@ function subscribeAll() {
     state.imu.roll = e.roll;
     state.imu.pitch = e.pitch;
     state.imu.yaw = e.yaw;
+    state.imu.q = q;
     state.imu.count++;
     state.imu.last = Date.now();
   });
 
   sub('temp', (m) => { state.temp = m.data; state.tempLast = Date.now(); });
+
+  sub('configResult', (m) => {
+    const p = pendingConfigs.get(m.request_id);
+    const name = CONFIG_RESULT_NAMES[m.result] !== undefined
+      ? CONFIG_RESULT_NAMES[m.result] : 'R' + m.result;
+    let el = null;
+    if (p) {
+      el = p.kind === 'mode' ? $('modeResult') : (p.kind === 'limits' ? $('limResult') : null);
+      pendingConfigs.delete(m.request_id);
+    }
+    const text = `motor ${m.motor_id} req#${m.request_id} → ${name}`;
+    if (el) setResult(el, m.result === 0, text);
+    // 无 pending 记录（页面刷新过）也进命令历史旁的事件日志。
+    if (!p) renderEvents();
+  });
+}
+
+// 曲线数据入缓冲；每通道独立时间轴（缺失 NaN 保留，绘制时跳过）。
+function chartPush(id, ch, val, t) {
+  let b = chartBuf.get(id);
+  if (!b) {
+    b = {t: [], position: [], velocity: [], effort: [], current: []};
+    chartBuf.set(id, b);
+  }
+  b[ch].push(Number.isFinite(val) ? val : NaN);
+  b.t.push(t);
 }
 
 // ---------- 渲染 ----------
@@ -231,21 +282,32 @@ function renderMotors() {
 }
 
 function renderEvents() {
-  $('eventLog').innerHTML = state.events.map((e) =>
+  $('eventLog').innerHTML = state.events.slice(0, 50).map((e) =>
     `<li><span class="muted">${new Date(e.t).toLocaleTimeString()}</span> `
-    + `<b>${e.name}</b> · id=${e.id}${e.reason ? ' · reason=' + e.reason : ''}</li>`
+    + `<b>${e.name}</b> · id=${e.id}${e.reason ? ' · reason=' + e.reason : ''}`
+    + (e.request_id ? ` · req#${e.request_id}` : '') + '</li>'
   ).join('') || '<li class="muted">暂无事件</li>';
 }
 
 function renderImu() {
-  $('valRoll').textContent = fmt(rad2deg(state.imu.roll), 1) + ' °';
-  $('valPitch').textContent = fmt(rad2deg(state.imu.pitch), 1) + ' °';
-  $('valYaw').textContent = fmt(rad2deg(state.imu.yaw), 1) + ' °';
+  const d = (v) => fmt(rad2deg(v), 1) + ' °';
+  const r = d(state.imu.roll), p = d(state.imu.pitch), y = d(state.imu.yaw);
+  $('valRoll').textContent = r;
+  $('valPitch').textContent = p;
+  $('valYaw').textContent = y;
+  $('valRollBig').textContent = r;
+  $('valPitchBig').textContent = p;
+  $('valYawBig').textContent = y;
+  $('valQuat').textContent = state.imu.q
+    ? `${fmt(state.imu.q.x, 3)} ${fmt(state.imu.q.y, 3)} ${fmt(state.imu.q.z, 3)} ${fmt(state.imu.q.w, 3)}`
+    : '--';
   $('valTemp').textContent = state.temp !== undefined ? fmt(state.temp, 1) + ' °C' : '--';
   const ageMs = Date.now() - state.imu.last;
   $('imuAge').textContent = state.imu.last
     ? (ageMs < 3000 ? ageMs + ' ms' : '超时')
     : '--';
+  drawImu3d();
+  drawHorizon();
 }
 
 // ---------- 控制：绑定 / 授权 / 使能 ----------
@@ -270,6 +332,69 @@ function doPolicy(enable) {
     set_gains: false, kp: 0.0, kd: 0.0,
     set_limits: false, min_position_rad: 0.0, max_position_rad: 0.0,
   });
+}
+
+// 通用结果区写入。
+function setResult(el, ok, text) {
+  el.className = 'result tiny ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+// SET_GAINS：固件 policy 契约总是附带一次 SET_ENABLE，故 enable 置 true
+// （仅重立授权许可，不打断运行中电机），避免误失能。
+function applyGains() {
+  const id = parseInt($('gainId').value, 10);
+  const kp = parseFloat($('gainKp').value);
+  const kd = parseFloat($('gainKd').value);
+  const el = $('gainResult');
+  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
+  if (![kp, kd].every(Number.isFinite)) { setResult(el, false, 'kp/kd 必须为有限数'); return; }
+  const ok = pub('policy', {
+    motor_id: id, enable: true,
+    set_gains: true, kp, kd,
+    set_limits: false, min_position_rad: 0.0, max_position_rad: 0.0,
+  });
+  setResult(el, ok, ok ? `已发 SET_GAINS id=${id} kp=${kp} kd=${kd}` : '未连接 rosbridge');
+}
+
+// SET_POSITION_LIMITS：同上附带 enable 许可；结果经 events 回告。
+function applyLimits() {
+  const id = parseInt($('limId').value, 10);
+  const min = parseFloat($('limMin').value);
+  const max = parseFloat($('limMax').value);
+  const el = $('limResult');
+  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
+  if (![min, max].every(Number.isFinite)) { setResult(el, false, 'min/max 必须为有限数'); return; }
+  if (min >= max) { setResult(el, false, 'min 必须小于 max'); return; }
+  const ok = pub('policy', {
+    motor_id: id, enable: true,
+    set_gains: false, kp: 0.0, kd: 0.0,
+    set_limits: true, min_position_rad: min, max_position_rad: max,
+  });
+  setResult(el, ok, ok ? `已发 SET_LIMITS id=${id} [${min}, ${max}]` : '未连接 rosbridge');
+}
+
+// SET_MODE 事务：request_id 关联回显；CERB 仅 MIT（0）。
+function sendMode() {
+  const id = parseInt($('modeId').value, 10);
+  const mode = parseInt($('modeSel').value, 10);
+  const el = $('modeResult');
+  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
+  if (mode < 0 || mode > 2) { setResult(el, false, 'mode 非法'); return; }
+  const request_id = configSeq++;
+  pendingConfigs.set(request_id, {kind: 'mode', motor_id: id, t: Date.now()});
+  const ok = pub('config', {
+    request_id, motor_id: id,
+    kind: 1, // KIND_SET_MODE
+    mode,
+    min_position_rad: 0.0, max_position_rad: 0.0,
+  });
+  if (!ok) {
+    pendingConfigs.delete(request_id);
+    setResult(el, false, '未连接 rosbridge');
+    return;
+  }
+  setResult(el, true, `已发 req#${request_id} id=${id} mode=${mode}，等待 CONFIG_RESULT…`);
 }
 
 // ---------- 控制：命令快照 ----------
@@ -319,6 +444,15 @@ function sendSnapshot() {
   if (!state.connected) { setCmdResult(false, '未连接 rosbridge'); return false; }
   const {targets, error} = readCmdTargets();
   if (error) { setCmdResult(false, error); return false; }
+  const res = sendTargets(targets);
+  setCmdResult(res.ok, `已发 ${res.msg}`);
+  return res.ok;
+}
+
+// 发送完整快照（命令表与示教共用）；记录历史。
+function sendTargets(targets) {
+  if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
+  if (!targets.length) return {ok: false, msg: '快照为空'};
   seq = (seq + 1) >>> 0;
   pub('command', {
     // uint64：rosbridge 2.x 入站要求 JSON number（float64 会丢失末几位
@@ -328,8 +462,51 @@ function sendSnapshot() {
     count: targets.length,
     targets,
   });
-  setCmdResult(true, `已发 seq=${seq}，${targets.length} 台`);
-  return true;
+  history.unshift({
+    t: Date.now(),
+    seq,
+    targets: targets.map((x) => ({...x})),
+  });
+  if (history.length > 500) history.pop();
+  renderHistory();
+  return {ok: true, msg: `seq=${seq}，${targets.length} 台`};
+}
+
+function renderHistory() {
+  const tbody = $('histRows');
+  tbody.innerHTML = history.slice(0, 20).map((h) =>
+    `<tr>
+      <td class="num">${new Date(h.t).toLocaleTimeString()}</td>
+      <td class="num">${h.seq}</td>
+      <td>${h.targets.map((x) => `${x.motor_id}:${fmt(x.position,1)},${fmt(x.velocity,1)},${fmt(x.effort,1)}`).join(' ')}</td>
+      <td><span class="pill on">已发</span></td>
+    </tr>`
+  ).join('') || '<tr class="empty"><td colspan="4">暂无记录</td></tr>';
+}
+
+// ---------- 导出工具 ----------
+function download(name, text, mime) {
+  const blob = new Blob([text], {type: mime || 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+function exportEvents(csv) {
+  const rows = state.events.map((e) => csv
+    ? [new Date(e.t).toISOString(), e.name, e.id, e.reason ?? '', e.request_id ?? ''].join(',')
+    : JSON.stringify(e));
+  download(
+    'events-' + Date.now() + (csv ? '.csv' : '.json'),
+    rows.join('\n'),
+    csv ? 'text/csv' : 'application/json');
+}
+
+function exportHistory() {
+  download('cmd-history-' + Date.now() + '.json',
+    JSON.stringify(history.slice().reverse(), null, 2));
 }
 
 function startStream() {
@@ -343,9 +520,388 @@ function stopStream() {
   if (chk) chk.checked = false;
 }
 
+// ---------- 曲线图 ----------
+function chartTrim() {
+  const cutoff = Date.now() - 60000; // 物理裁剪窗口上限 60s
+  for (const b of chartBuf.values()) {
+    while (b.t.length && b.t[0] < cutoff) {
+      b.t.shift();
+      b.position.shift(); b.velocity.shift(); b.effort.shift(); b.current.shift();
+    }
+  }
+}
+
+function fillChartMotorSelect() {
+  const sel = $('chartMotor');
+  const cur = sel.value;
+  const ids = [...state.motors.keys()].sort((a, b) => a - b);
+  sel.innerHTML = '<option value="0">全部</option>'
+    + ids.map((id) => `<option value="${id}">电机 ${id}</option>`).join('');
+  if (cur && ids.includes(parseInt(cur, 10))) sel.value = cur;
+}
+
+function drawChart() {
+  const canvas = $('chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const padL = 52, padR = 10, padT = 12, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const now = Date.now();
+  const start = now - chart.windowMs;
+  const ch = $('chartCh').value;
+  const selId = parseInt($('chartMotor').value, 10) || 0;
+
+  ctx.fillStyle = '#0a0f1e';
+  ctx.fillRect(0, 0, W, H);
+  // 网格
+  ctx.strokeStyle = '#1c2540';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + plotH * i / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+  }
+  for (let i = 0; i <= 6; i++) {
+    const x = padL + plotW * i / 6;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+  }
+
+  // 收集序列
+  const series = [];
+  for (const [id, b] of chartBuf) {
+    if (selId && id !== selId) continue;
+    if (!b[ch] || !b.t.length) continue;
+    series.push({id, b});
+  }
+  let min = Infinity, max = -Infinity;
+  for (const {b} of series) {
+    for (let i = 0; i < b.t.length; i++) {
+      if (b.t[i] < start) continue;
+      const v = b[ch][i];
+      if (Number.isFinite(v)) { if (v < min) min = v; if (v > max) max = v; }
+    }
+  }
+  ctx.fillStyle = '#7e8bab';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'left';
+  if (!series.length || !Number.isFinite(min)) {
+    ctx.fillText('暂无数据（等待运动/状态流）', padL + 8, padT + 18);
+    $('chartHint').textContent = '等待数据…';
+    return;
+  }
+  if (min === max) { min -= 1; max += 1; }
+  const span = max - min;
+  min -= span * 0.08; max += span * 0.08;
+  // y 轴标签
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const v = max - (max - min) * i / 4;
+    ctx.fillText(fmt(v, 2), padL - 6, padT + plotH * i / 4 + 4);
+  }
+  // 时间标签
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 2; i++) {
+    const t = start + chart.windowMs * i / 2;
+    const x = padL + plotW * i / 2;
+    ctx.fillText('-' + Math.round((now - t) / 1000) + 's', x, H - 6);
+  }
+  const px = (t) => padL + (t - start) / chart.windowMs * plotW;
+  const py = (v) => padT + (max - v) / (max - min) * plotH;
+  let idx = 0;
+  for (const {id, b} of series) {
+    const color = CHART_COLORS[idx++ % CHART_COLORS.length];
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < b.t.length; i++) {
+      if (b.t[i] < start) continue;
+      const v = b[ch][i];
+      if (!Number.isFinite(v)) { pen = false; continue; }
+      const x = px(b.t[i]), y = py(v);
+      if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+    }
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText('#' + id, padL + 8, padT + 12 + 14 * idx);
+  }
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#7e8bab';
+  ctx.font = '11px sans-serif';
+  const legY = padT + 12 + 14 * idx;
+  ctx.fillText($('chartCh').selectedOptions[0].text
+    + ' · ' + (chart.windowMs / 1000) + 's 窗口' + (chart.running ? '' : '（已暂停）'),
+    padL, idx ? legY + 2 : padT + 18);
+  $('chartHint').textContent = series.length
+    ? `绘制 ${series.length} 条 · 范围 [${fmt(min, 2)}, ${fmt(max, 2)}]`
+    : '无数据';
+}
+
+// ---------- IMU 3D 姿态 ----------
+function drawImu3d() {
+  const canvas = $('imu3d');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  ctx.fillStyle = '#0a0f1e';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  if (!state.imu.q) {
+    ctx.fillStyle = '#7e8bab';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('等待 IMU…', cx, cy);
+    return;
+  }
+  const {x, y, z, w} = state.imu.q;
+  // body→world 旋转矩阵（四元数）
+  const R = [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+    [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+  ];
+  const r = 42;
+  const verts = [];
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    verts.push([sx * r, sy * r, sz * r]);
+  }
+  const proj = (v) => {
+    const xw = R[0][0] * v[0] + R[0][1] * v[1] + R[0][2] * v[2];
+    const yw = R[1][0] * v[0] + R[1][1] * v[1] + R[1][2] * v[2];
+    const zw = R[2][0] * v[0] + R[2][1] * v[1] + R[2][2] * v[2];
+    return [cx + xw, cy - yw, zw];
+  };
+  const p = verts.map(proj);
+  const edges = [[0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6],
+    [3, 7], [4, 5], [4, 6], [5, 7], [6, 7]];
+  const sorted = edges
+    .map(([a, b]) => ({a, b, z: (p[a][2] + p[b][2]) / 2}))
+    .sort((m, n) => m.z - n.z);
+  ctx.strokeStyle = '#4da3ff';
+  ctx.lineWidth = 1.5;
+  for (const {a, b} of sorted) {
+    ctx.beginPath(); ctx.moveTo(p[a][0], p[a][1]); ctx.lineTo(p[b][0], p[b][1]); ctx.stroke();
+  }
+  ctx.fillStyle = '#dce4f5';
+  for (const pt of p) { ctx.beginPath(); ctx.arc(pt[0], pt[1], 1.6, 0, Math.PI * 2); ctx.fill(); }
+  // 三轴：X 前(红) Y 上(绿) Z 右(蓝)
+  const axes = [[[1, 0, 0], [255, 107, 107]], [[0, 1, 0], [107, 255, 122]],
+    [[0, 0, 1], [107, 168, 255]]];
+  const o = proj([0, 0, 0]);
+  for (const [v, col] of axes) {
+    const q = proj([v[0] * r * 1.25, v[1] * r * 1.25, v[2] * r * 1.25]);
+    ctx.strokeStyle = `rgb(${col.join(',')})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+  }
+}
+
+// 人工地平仪：按 roll 旋转、pitch 平移地平线。
+function drawHorizon() {
+  const canvas = $('attitudeHorizon');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  ctx.fillStyle = '#0a0f1e';
+  ctx.fillRect(0, 0, W, H);
+  if (!state.imu.q) {
+    ctx.fillStyle = '#7e8bab';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('等待 IMU…', cx, cy);
+    return;
+  }
+  const roll = state.imu.roll, pitch = state.imu.pitch;
+  const pitchPx = pitch / Math.PI * H * 0.9;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#12223f');
+  grad.addColorStop(1, '#22303f');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(roll);
+  // 地平线
+  ctx.strokeStyle = '#f5b94a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-W, -pitchPx);
+  ctx.lineTo(W, -pitchPx);
+  ctx.stroke();
+  // 俯仰刻度线（±30°）
+  ctx.strokeStyle = '#7e8bab';
+  ctx.lineWidth = 1;
+  for (let deg = -30; deg <= 30; deg += 10) {
+    if (deg === 0) continue;
+    const yy = -deg / 45 * H * 0.35 - pitchPx;
+    ctx.beginPath(); ctx.moveTo(-46, yy); ctx.lineTo(46, yy); ctx.stroke();
+  }
+  ctx.restore();
+  // 机身符号
+  ctx.strokeStyle = '#ff6b6b';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(cx - 32, cy); ctx.lineTo(cx + 32, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - 16); ctx.lineTo(cx, cy + 16); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 16); ctx.lineTo(cx - 5, cy - 8);
+  ctx.moveTo(cx, cy - 16); ctx.lineTo(cx + 5, cy - 8);
+  ctx.stroke();
+  ctx.fillStyle = '#37d67a';
+  ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+}
+
+// ---------- 示教（点位序列） ----------
+const teach = {playing: false, timer: null, idx: 0};
+
+function setTeach(cls, text) {
+  const el = $('teachStatus');
+  el.className = 'muted tiny ' + (cls === 'err' ? 'warn' : '');
+  el.textContent = text;
+}
+
+function teachAddRow(wait = 1000, targetsText = '') {
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    `<td class="num">${$('teachRows').querySelectorAll('tr').length + 1}</td>`
+    + `<td><input type="number" class="t-wait" value="${wait}" min="0" step="100"></td>`
+    + `<td><input type="text" class="t-targets" placeholder="1:0,0,0 2:0,0,0" value="${targetsText}"></td>`
+    + `<td><button class="t-del secondary">删</button></td>`;
+  tr.querySelector('.t-del').onclick = () => { tr.remove(); teachRenumber(); };
+  $('teachRows').appendChild(tr);
+}
+
+function teachRenumber() {
+  [...$('teachRows').querySelectorAll('tr')].forEach((tr, i) => {
+    tr.querySelector('td.num').textContent = i + 1;
+  });
+}
+
+function teachReadRows() {
+  const rows = [];
+  for (const tr of $('teachRows').querySelectorAll('tr')) {
+    const wait = parseInt(tr.querySelector('.t-wait').value, 10);
+    const text = tr.querySelector('.t-targets').value.trim();
+    const targets = [];
+    if (text) {
+      for (const token of text.split(/[\s;]+/)) {
+        const m = /^(\d+):([-\d.]+),([-\d.]+),([-\d.]+)$/.exec(token);
+        if (!m) return {error: `目标格式非法：${token}（应为 ID:pos,vel,eff）`};
+        targets.push({motor_id: +m[1], position: +m[2], velocity: +m[3], effort: +m[4]});
+      }
+    }
+    rows.push({wait: Number.isFinite(wait) && wait >= 0 ? wait : 0, targets});
+  }
+  return {rows};
+}
+
+function teachStopTimer() {
+  if (teach.timer) { clearTimeout(teach.timer); teach.timer = null; }
+}
+
+function teachStepGo() {
+  if (!teach.playing) return;
+  const row = teach.rows[teach.idx];
+  let res = {ok: true, msg: '空点位（不下发）'};
+  if (row.targets.length) res = sendTargets(row.targets);
+  setTeach(res.ok ? 'ok' : 'err',
+    (res.ok ? '✓' : '✗') + ` 点位 ${teach.idx + 1}/${teach.rows.length}: ${res.msg}`);
+  let next = teach.idx + 1;
+  if (next >= teach.rows.length) {
+    if ($('chkTeachLoop').checked) { next = 0; }
+    else {
+      teach.playing = false;
+      setTeach('ok', '播放完成');
+      return;
+    }
+  }
+  teach.idx = next;
+  teach.timer = setTimeout(teachStepGo, row.wait);
+}
+
+function teachPlay() {
+  const {rows, error} = teachReadRows();
+  if (error) { setTeach('err', error); return; }
+  if (!rows.length) { setTeach('err', '没有点位'); return; }
+  teachStopTimer();
+  teach.rows = rows;
+  if (teach.idx >= rows.length) teach.idx = 0;
+  teach.playing = true;
+  teachStepGo();
+}
+
+function teachPause() {
+  teach.playing = false;
+  teachStopTimer();
+  setTeach('ok', `已暂停（停在点位 ${Math.min(teach.idx + 1, teach.rows ? teach.rows.length : 1)}）`);
+}
+
+function teachStep() {
+  teachPause();
+  const {rows, error} = teachReadRows();
+  if (error) { setTeach('err', error); return; }
+  if (!rows.length) { setTeach('err', '没有点位'); return; }
+  teach.rows = rows;
+  if (teach.idx >= rows.length) teach.idx = 0;
+  const row = rows[teach.idx];
+  let res = {ok: true, msg: '空点位（不下发）'};
+  if (row.targets.length) res = sendTargets(row.targets);
+  setTeach(res.ok ? 'ok' : 'err', `单步 ${teach.idx + 1}/${rows.length}: ${res.msg}`);
+  teach.idx++;
+  if (teach.idx >= rows.length) teach.idx = 0;
+}
+
+function teachRecordCmd() {
+  const {targets, error} = readCmdTargets();
+  if (error) { setTeach('err', error); return; }
+  if (!targets.length) { setTeach('err', '命令表为空'); return; }
+  const text = targets
+    .map((x) => `${x.motor_id}:${x.position},${x.velocity},${x.effort}`).join(' ');
+  teachAddRow(1000, text);
+  setTeach('ok', '已记录当前命令为点位');
+}
+
+function teachExport() {
+  const {rows, error} = teachReadRows();
+  if (error) { setTeach('err', error); return; }
+  download('teach-' + Date.now() + '.json', JSON.stringify(rows, null, 2));
+}
+
+function teachImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json';
+  input.onchange = () => {
+    const f = input.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = JSON.parse(reader.result);
+        if (!Array.isArray(rows)) throw new Error('不是数组');
+        $('teachRows').innerHTML = '';
+        for (const r of rows) {
+          const text = (r.targets || [])
+            .map((x) => `${x.motor_id}:${x.position},${x.velocity},${x.effort}`).join(' ');
+          teachAddRow(r.wait || 1000, text);
+        }
+        setTeach('ok', `导入 ${rows.length} 个点位`);
+      } catch (e) {
+        setTeach('err', '导入失败：' + e.message);
+      }
+    };
+    reader.readAsText(f);
+  };
+  input.click();
+}
+
 // ---------- 定时刷新 ----------
 setInterval(renderMotors, 200);
 setInterval(renderImu, 200);
+setInterval(chartTrim, 1000);
+setInterval(drawChart, 200);
+setInterval(fillChartMotorSelect, 1000);
 
 let lastMotionCount = 0;
 setInterval(() => {
@@ -361,6 +917,14 @@ setInterval(() => {
   $('imuHz').textContent = state.connected ? hz + ' Hz' : '-- Hz';
 }, 1000);
 
+// ---------- Tab 切换 ----------
+function switchTab(page) {
+  document.querySelectorAll('.tab').forEach((b) =>
+    b.classList.toggle('on', b.dataset.page === page));
+  document.querySelectorAll('.page').forEach((p) =>
+    p.classList.toggle('on', p.id === 'page-' + page));
+}
+
 // ---------- 初始化 ----------
 function init() {
   $('rosUrl').value = (location.protocol === 'https:' ? 'wss://' : 'ws://')
@@ -369,11 +933,19 @@ function init() {
   $('btnDisconnect').onclick = disconnect;
   $('rosUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
 
+  document.querySelectorAll('.tab').forEach((b) => {
+    b.onclick = () => switchTab(b.dataset.page);
+  });
+
   $('btnBind').onclick = doBind;
   $('btnGlobalEnable').onclick = () => doGlobal(true);
   $('btnGlobalDisable').onclick = () => doGlobal(false);
   $('btnPolEnable').onclick = () => doPolicy(true);
   $('btnPolDisable').onclick = () => doPolicy(false);
+
+  $('btnGainApply').onclick = applyGains;
+  $('btnLimApply').onclick = applyLimits;
+  $('btnModeSend').onclick = sendMode;
 
   $('btnAddRow').onclick = () => addCmdRow();
   $('btnFillOnline').onclick = () => {
@@ -384,7 +956,37 @@ function init() {
   $('btnSendOnce').onclick = () => { stopStream(); sendSnapshot(); };
   $('chkStream').onchange = (e) => e.target.checked ? startStream() : stopStream();
 
+  // 曲线
+  $('chartCh').onchange = drawChart;
+  $('chartMotor').onchange = drawChart;
+  $('chartWindow').onchange = () => {
+    chart.windowMs = parseInt($('chartWindow').value, 10);
+    drawChart();
+  };
+  $('btnChartPause').onclick = () => {
+    chart.running = !chart.running;
+    $('btnChartPause').textContent = chart.running ? '暂停' : '继续';
+  };
+  $('btnChartClear').onclick = () => chartBuf.clear();
+
+  // 事件日志 / 历史导出
+  $('btnExportEvents').onclick = () => exportEvents(false);
+  $('btnExportEventsCsv').onclick = () => exportEvents(true);
+  $('btnClearEvents').onclick = () => { state.events = []; renderEvents(); };
+  $('btnExportHist').onclick = exportHistory;
+  $('btnClearHist').onclick = () => { history.length = 0; renderHistory(); };
+
+  // 示教
+  $('btnTeachPlay').onclick = teachPlay;
+  $('btnTeachPause').onclick = teachPause;
+  $('btnTeachStep').onclick = teachStep;
+  $('btnTeachRecord').onclick = teachRecordCmd;
+  $('btnTeachAdd').onclick = () => teachAddRow();
+  $('btnTeachExport').onclick = teachExport;
+  $('btnTeachImport').onclick = teachImport;
+
   addCmdRow(1, 0, 0, 0);
+  teachAddRow(1000, '1:0,0,0');
 }
 
 init();

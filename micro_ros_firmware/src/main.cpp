@@ -92,9 +92,9 @@ static void start_task(void *pv_parameters) {
   if (!micro_ros_task_start()) {
     Error_Handler();
   }
-  if (!sensor_task_start()) {
-    Error_Handler();
-  }
+  // if (!sensor_task_start()) {
+  //   Error_Handler();
+  // }
   if (!motor_rt_task_start()) {
     Error_Handler();
   }

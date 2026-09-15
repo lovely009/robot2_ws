@@ -200,6 +200,14 @@ void motor_control_init(motor_control_context_t *ctx,
   ctx->require_new_snapshot = false;
 }
 
+void motor_control_set_model_resolver(motor_control_context_t *ctx,
+                                      motor_control_model_resolver_t resolver) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->model_resolver = resolver;
+}
+
 // 撤销运动授权的统一安全路径（ARD §13.2/§13.3/§33）。
 void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) {
   if (ctx == NULL) {
@@ -264,10 +272,15 @@ bool motor_control_set_authorization(motor_control_context_t *ctx, bool authoriz
       return false; // 断链期间不得授权
     }
     ctx->authorized = true;
-    // 全局 Enable：重立全部表项的运动授权（逐电机策略位不受影响；
-    // 离线冻结的 policy_enable 仍需 MotorPolicy 显式重发——ARD §36）。
+    // 全局授权重立非冻结态表项的逐电机授权位（断链/超时撤权的恢复路径）。
+    // FAULT/OFFLINE/CONFIG_CONFLICT 冻结态不自动复立——这些路径的恢复只能
+    // 复位控制板（逐电机 policy_enable 亦保持冻结，ARD §36 安全语义）。
     for (size_t i = 0; i < ctx->entry_count; ++i) {
-      if (ctx->entries[i].used) {
+      if (ctx->entries[i].used &&
+          ctx->entries[i].lifecycle != MOTOR_CONTROL_LIFECYCLE_FAULT &&
+          ctx->entries[i].lifecycle != MOTOR_CONTROL_LIFECYCLE_OFFLINE &&
+          ctx->entries[i].lifecycle !=
+              MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
         ctx->entries[i].motion_authorized = true;
       }
     }
@@ -387,12 +400,8 @@ bool motor_control_apply_command_snapshot(
       }
     }
   }
-  // 序号必须严格单调（回绕安全，ARD §11.3 步骤 2）。
-  if (!rejected && ctx->have_snapshot &&
-      (int32_t)(snapshot->sequence - ctx->last_snapshot_sequence) <= 0) {
-    rejected = true;
-    reject_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
-  }
+  // 序号门已按 2026-09-15 台架决策移除：重放/乱序防护由新鲜度门
+  // （30/100ms 级联）承担；last_snapshot_sequence 仅作诊断保留。
   if (rejected) {
     ctx->snapshot_rejected_count++;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_SNAPSHOT_REJECTED,

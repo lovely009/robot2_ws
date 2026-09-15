@@ -186,25 +186,20 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 建链后可见电机话题（消息均属 `can_bridge_msgs`，源在
 `../micro_ros_agent/src/can_bridge_msgs`）：
 
-订阅（下行，5 个话题；命令为最多 64 目标的完整 ID 快照）：
+订阅（下行，1 个话题；命令为最多 64 目标的完整 ID 快照）：
 
 - `/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
-- `micro_ros/motor_enable`（`std_msgs/Bool`）：全局运动授权。`false` 清空 pending
-  命令并协议级失能；断连重连后必须先发 `true`、再发新快照，禁止重放旧命令。
-- `micro_ros/motor_policy`（`MotorPolicy`）：逐电机策略——`SET_ENABLE`（逐电机
-  Enable：离线/故障恢复后运动不自动恢复，必须显式重发）、`SET_GAINS`（`kp/kd`
-  按 `motor_id` 钳到 Profile 上限，只影响后续命令）、`SET_POSITION_LIMITS`
-  （Vaxor 软件限位 rad，打包前钳制）。
-- `micro_ros/motor_config`（`MotorConfig`，带 `request_id`）：SET_MODE 事务
-  （vaxor stop/start 两阶段、无厂家确认对象 → 结果 UNCONFIRMED；CERB 恒 MIT）
-  与 CERB 限位（管理对象未决，一律 UNSUPPORTED）。
-- `micro_ros/motor_bind`（`MotorBind`，reliable）：把已发现的 `motor_id` 绑定到
-  编译期型号目录中的 `model_name`；绑定幂等且断链保留，结果经 `motor_events` 的
-  PROFILE_BOUND / PROFILE_REJECTED 事件回告。
 
-发布（上行，5 个话题；均为 ID 化，缺失浮点 = NaN）：
+下行配置通道（`motor_enable`/`motor_policy`/`motor_config`/`motor_bind` 与
+`motor_config_result`）已删除（2026-09-15）：型号绑定来自编译期静态表
+`src/motor_static_topology.c`——内核 resolver 在发现建档/重连时自动按名绑定
+（表外电机不绑定、不可控）；授权/增益/限位取内核安全默认（建档 `policy_enable`
+默认 true、全局授权 mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、
+CERB 限位在驱动器侧配置）。
+
+发布（上行，4 个话题；均为 ID 化，缺失浮点 = NaN）：
 
 - `micro_ros/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
   由 10ms bridge timer 驱动）。
@@ -212,9 +207,8 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   保护位/事务状态）。
 - `micro_ros/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
   （`motor_id`/总线/协议/型号/能力/冲突标志）。
-- `micro_ros/motor_events`（`MotorEvent`）：生命周期/安全/配置结果事件流。
-- `micro_ros/motor_config_result`（`MotorConfigResult`）：按 `request_id`
-  异步返回七种结果码。
+- `micro_ros/motor_events`（`MotorEvent`）：生命周期/安全事件流（含静态绑定的
+  PROFILE_BOUND / PROFILE_REJECTED）。
 
 `motor_id ↔ joint_name` 的映射、方向与零位是**上层职责**（上层迁移进行中，
 见 HANDOFF「剩余工作」）；固件不做 name-to-ID 适配。
@@ -227,9 +221,10 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   `kd` 阻尼软停；`>100ms` → 协议级失能并清授权；Agent 断链立即失能清授权，
   不等 100ms。恢复必须 新授权 + 新完整快照，不复用旧目标。
 - 快照内缺席的受控电机立即软停；`motor_id` 重复/未知/NaN 的快照整体拒绝。
-- 全局授权（`motor_enable`）与逐电机 Enable（`motor_policy` SET_ENABLE）双重
-  门禁：OFFLINE（心跳丢失 100ms）、厂家故障、撤权或 SET_ENABLE(false) 清除的
-  逐电机授权**不会自动恢复**，须显式重发该电机的 Enable。
+- 授权由会话状态派生（motor_enable 话题已删）：Agent 在线即全局授权；断连立即
+  撤权、30/100ms 快照超时软停/失能后，**重新发送新鲜完整快照即自动恢复**
+  （任务层每控制边界按会话电平重立全局授权）。FAULT/OFFLINE/CONFIG_CONFLICT
+  冻结态的逐电机授权不被全局重立复活——这三类恢复只能复位控制板。
 - CERB 使能后等待至少 100ms（adapter 整定门）才发送运动目标；SET_MODE 事务
   结束后强制重走使能序列。厂家故障置位 → FAULT 禁运动 + P0 失能；清除 →
   READY_DISABLED 等待显式重授权。
@@ -271,12 +266,11 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   100Hz，并记录 motor_rt cycle WCET 与周期 jitter。
 - [ ] 停止刷新快照，验证 30ms 边界进入默认 `kd` 阻尼软停、100ms 边界协议级
   失能并清授权；单电机从快照缺席，验证仅该电机软停、其他电机不受影响。
-- [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后必须
-  依次发送 `motor_enable=true`、逐电机 SET_ENABLE 与新完整快照，期间不得
-  自行恢复或重放。
-- [ ] 发布 `motor_enable=false/true` 与逐电机 SET_ENABLE(false/true)，验证
-  vaxor/CERB 都不复用旧命令；CERB 重新使能后必须等待至少 100ms 才发送
-  运动目标；SET_MODE 事务结束后验证使能序列重走。
+- [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后静态拓扑
+  resolver 自动重绑定收敛 READY_DISABLED，恢复运动必须复位控制板
+  （编译期授权语义）+ 新完整快照，期间不得自行恢复或重放。
+- [ ] 验证 OFFLINE/厂家故障冻结的逐电机授权不会因重连自动复立（须复位）；
+  CERB 重新使能后必须等待至少 100ms 才发送运动目标。
 - [ ] 注入 NaN/Inf、未知/重复 motor_id、非法 mode，验证快照整体拒绝、拒绝
   计数增加且 freshness 不更新。
 - [ ] CAN 无 ACK/拔除收发器，验证 hw_reject/backlog 计数可见；硬件急停作为

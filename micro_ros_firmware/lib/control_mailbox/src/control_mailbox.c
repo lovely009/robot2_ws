@@ -222,6 +222,11 @@ void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
       revoke_authorization(mailbox);
       mailbox->agent_disconnect_edge = true;
     }
+  } else if (!mailbox->authorization_requested) {
+    // 会话恢复即重立授权电平（motor_enable 话题已删，授权由会话状态派生）。
+    // 内核侧仍按生命周期冻结 FAULT/OFFLINE/CONFLICT 表项，安全语义不放宽。
+    mailbox->authorization_requested = true;
+    mailbox->authorization_pending = true;
   }
 }
 

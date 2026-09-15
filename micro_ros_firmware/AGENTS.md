@@ -33,26 +33,23 @@ cd micro_ros_firmware
 - USB 引脚 **PA11=USB_DM / PA12=USB_DP**；状态 LED 是 **WS2812**（SPI6 MOSI=PA7）。
 - 节点名 `micro_ros_node`，话题 `micro_ros/imu/data`、`micro_ros/imu/temp`
   （在 `src/imu_bridge.cpp` 顶部）。
-- 电机接口为 ID 化完整快照（ARD-0007），共 5 个订阅 + 5 个发布：下行
-  `/motor_command_array`、`micro_ros/motor_policy`、`micro_ros/motor_config`、
-  `micro_ros/motor_bind`、`micro_ros/motor_enable`；上行 `micro_ros/motion_states`、
+- 电机接口为 ID 化完整快照（ARD-0007；下行已精简，2026-09-15）：下行仅
+  `/motor_command_array`（100Hz 完整快照）；上行 `micro_ros/motion_states`、
   `micro_ros/motor_status_array`、`micro_ros/motor_topology`、
-  `micro_ros/motor_events`、`micro_ros/motor_config_result`。无 `joint_name`、无固定
-  电机表；设备经反馈帧自主发现（vaxor 自主上报 / CERB SYNC 上报），型号由上层
-  经 Profile 绑定接口确认（型号目录无 Vaxor-80）。
-- `micro_ros/motor_enable` 是显式全局运动授权：`false` 清空 pending 命令并协议级
-  失能；断连重连后必须先发 `true`、再发新完整快照，禁止重放旧命令。
-  `micro_ros/motor_policy`（`MotorPolicy`）携带逐电机 `SET_ENABLE`：OFFLINE/故障
-  清除后运动不会自动恢复，必须显式重发该电机的 Enable。
-- `micro_ros/motor_policy` 还携带 `SET_GAINS`（按 `motor_id` 钳到 Profile 上限，
-  只影响后续命令、不刷新命令时效）与 `SET_POSITION_LIMITS`（Vaxor 软件限位，
-  打包前钳制）。`micro_ros/motor_config`（`MotorConfig`，带 `request_id`）承载
-  SET_MODE 事务（vaxor stop/start 两阶段、结果收敛 UNCONFIRMED；CERB 恒 MIT）
-  与 CERB 限位（厂家管理对象未决，当前一律 UNSUPPORTED），结果经
-  `micro_ros/motor_config_result` 异步返回。
-- `micro_ros/motor_bind`（`MotorBind`）把已发现的 `motor_id` 绑定到编译期型号目录
-  的 `model_name`；绑定幂等且断链保留，结果经 `motor_events` 的 PROFILE_BOUND /
-  PROFILE_REJECTED 事件回告。
+  `micro_ros/motor_events`。无 `joint_name`；设备经反馈帧自主发现（vaxor 自主
+  上报 / CERB SYNC 上报）。
+- 下行配置通道（`motor_policy`/`motor_config`/`motor_bind`/`motor_enable` 与
+  `motor_config_result`）已删除：型号绑定来自编译期静态表
+  `src/motor_static_topology.c`——内核经 `motor_control_set_model_resolver` 在
+  发现建档/重连时按名自动绑定（表外电机不绑定、不可控，绑定失败不逐帧重试）；
+  授权/增益/限位取内核安全默认（建档 `policy_enable` 默认 true、全局授权
+  mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、CERB 限位在
+  驱动器侧）。host 测试默认 resolver=NULL，走显式 bind API
+  （`test_static_model_resolver_auto_bind`）。内核 bind/submit_config API 与
+  mailbox config/bind FIFO 保留（测试覆盖、无 ROS 生产者）。
+- `.msg` 文件（MotorBind/MotorConfig/MotorPolicy/MotorConfigResult）暂保留于
+  can_bridge_msgs（ros2_ws 侧 motor_sim/web_host 仍引用），固件已停用——
+  删除须同步改 ros2_ws 并刷新 micro-ROS 类型（勿用 clean_microros）。
 - 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（100Hz）、20B 状态帧
   =20ms 自主心跳；CERB 反馈帧=命令实时状态（100Hz）、`0x080` SYNC 上报帧=20ms
   状态心跳（承担总线检测）。OFFLINE=心跳丢失 100ms。`motor_rt_task` 每 10ms 发

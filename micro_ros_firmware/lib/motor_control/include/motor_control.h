@@ -149,6 +149,13 @@ typedef struct {
 // ---------------------------------------------------------------------------
 // 运行时上下文（静态分配；字段仅供内核实现读写，调用方走函数接口）。
 // ---------------------------------------------------------------------------
+
+// 编译期拓扑注入：发现建档/重连时经此解析型号名并自动绑定（下行
+// MotorBind/Policy/Config/Enable 话题通道已删除，拓扑改为固件静态表）。
+// NULL = 禁用（host 测试默认，走显式 bind API）；返回 NULL = 表外电机，
+// 保持未绑定不可控（安全侧）。
+typedef const char *(*motor_control_model_resolver_t)(uint16_t motor_id);
+
 typedef struct {
   bool used;
   uint16_t motor_id; // 全局唯一（当前派生：= 厂家 node 号；冲突即 CONFIG_CONFLICT）
@@ -221,6 +228,9 @@ typedef struct {
   const motor_protocol_adapter_t *const *adapters;
   size_t adapter_count;
 
+  // 静态拓扑解析器（motor_control_set_model_resolver 注入；NULL=禁用）。
+  motor_control_model_resolver_t model_resolver;
+
   // 表项索引被 TX 桥引用为 P1 latest-wins 槽位，并被 P0 回告重入队用于定位
   // 表项（tx_slot，见 motor_protocol_adapter.h）：只增不减是其稳定性前提——
   // 禁止实现表项压缩/回收，否则必须同步重定义槽位映射。
@@ -271,6 +281,11 @@ typedef struct {
 void motor_control_init(motor_control_context_t *ctx,
                         const motor_protocol_adapter_t *const *adapters,
                         size_t adapter_count);
+
+// 静态拓扑注入（发现建档/重连时自动按名绑定；NULL 关闭）。须在首个原始帧
+// 到达前设置；运行期可换表（只影响后续新建/重连表项）。
+void motor_control_set_model_resolver(motor_control_context_t *ctx,
+                                      motor_control_model_resolver_t resolver);
 
 // 会话边沿。断链（曾连接后断开）立即对全部可控电机发协议级停机/失能（P0）、
 // 清运动授权与目标，不等待 100ms（ARD §13.2/§33）。
@@ -331,7 +346,7 @@ void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
 // 10ms 控制边界（ARD §11.3）：校验并消费一份完整快照；
-// 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法/回退序号）。
+// 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法载荷）。
 // ---------------------------------------------------------------------------
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
                                           const motor_control_command_snapshot_t *snapshot,

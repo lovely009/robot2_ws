@@ -230,7 +230,11 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   }
 }
 
-// 错误状态事件（EW/EP/BUS_OFF）：仅计数，恢复策略待台架 T12 数据。
+// 错误状态事件（EW/EP/BUS_OFF）：计数 + bus-off 自恢复。
+// M_CAN 无 bxCAN 式 ABOM 位：进 bus-off 时硬件自动置 CCCR.INIT 停机，恢复只有
+// 软件清 INIT 一条路——清零后内核等 11 个连续隐性位再同步总线，收发自动恢复，
+// 之后上层收发循环继续提交帧。总线仍故障会再次进 bus-off 并再次触发回调，
+// 恢复动作幂等（台架 T12 故障恢复路径）。
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
                                    uint32_t ErrorStatusITs) {
   int8_t bus_index = can_bus_index(hfdcan);
@@ -239,5 +243,8 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
   }
   if (ErrorStatusITs != 0U) {
     g_bus_stats[(uint8_t)bus_index][CAN_BSP_STAT_ERROR_STATUS]++;
+  }
+  if ((ErrorStatusITs & FDCAN_IT_BUS_OFF) != 0U) {
+    CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
   }
 }

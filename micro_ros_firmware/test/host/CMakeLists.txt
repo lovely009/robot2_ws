@@ -99,6 +99,19 @@ target_include_directories(test_imu_snapshot PRIVATE
 
 add_test(NAME imu_snapshot COMMAND test_imu_snapshot)
 
+add_executable(test_imu_units
+  test_imu_units.cpp
+  ../../lib/imu/src/imu.c
+  ../../lib/imu/src/MahonyAHRS.c
+  ../../lib/imu/src/bmi088_transport_status.c)
+
+target_include_directories(test_imu_units PRIVATE
+  ../../lib/imu/include)
+
+target_link_libraries(test_imu_units PRIVATE m)
+
+add_test(NAME imu_units COMMAND test_imu_units)
+
 add_executable(test_bmi088_transport_status
   test_bmi088_transport_status.cpp
   ../../lib/imu/src/bmi088_transport_status.c)
@@ -107,6 +120,14 @@ target_include_directories(test_bmi088_transport_status PRIVATE
   ../../lib/imu/include)
 
 add_test(NAME bmi088_transport_status COMMAND test_bmi088_transport_status)
+
+add_executable(test_bmi088_register_config
+  test_bmi088_register_config.cpp)
+
+target_include_directories(test_bmi088_register_config PRIVATE
+  ../../lib/imu/include)
+
+add_test(NAME bmi088_register_config COMMAND test_bmi088_register_config)
 
 add_executable(test_w25q64_geometry
   test_w25q64_geometry.cpp
@@ -129,6 +150,23 @@ target_compile_definitions(test_led_status PRIVATE
   HOST_TEST=1)
 
 add_test(NAME led_status COMMAND test_led_status)
+
+add_executable(test_static_topology
+  test_static_topology.cpp
+  ../../src/motor_static_topology.c
+  ../../lib/motor_control/src/motor_control_profile.c
+  ../../lib/motor_protocol/src/motor_protocol.c
+  ../../lib/motor_protocol/src/vaxor_adapter.c
+  ../../lib/motor_protocol/src/cerb_adapter.c)
+
+target_include_directories(test_static_topology PRIVATE
+  ../../src
+  ../../lib/motor_control/include
+  ../../lib/motor_protocol/include)
+
+target_link_libraries(test_static_topology PRIVATE m)
+
+add_test(NAME static_topology COMMAND test_static_topology)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

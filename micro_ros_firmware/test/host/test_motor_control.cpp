@@ -542,6 +542,69 @@ static void test_p0_requeue_after_downstream_failure() {
   assert(found_p0);
 }
 
+// 编译期拓扑 resolver（下行 MotorBind 话题删除后的绑定来源）：建档/重连
+// 自动按名绑定；表外电机与 NULL resolver 保持未绑定（安全侧）。
+static const char *bench_resolver(uint16_t motor_id) {
+  return motor_id == 5 ? "vaxor_2550" : NULL;
+}
+
+static void test_static_model_resolver_auto_bind() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_control_set_model_resolver(&ctx, bench_resolver);
+
+  // 建档即绑定：PROFILE_BOUND + READY，收敛 READY_DISABLED（events_contain
+  // 是排空式断言，两个事件须在单次排空中同时确认）。
+  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_control_on_raw_frame(&ctx, &f);
+  assert(entry_of(&ctx, 5) != NULL);
+  assert(entry_of(&ctx, 5)->profile != NULL);
+  assert(entry_of(&ctx, 5)->lifecycle ==
+         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  {
+    bool bound = false, ready = false;
+    motor_control_event_t drained[64];
+    size_t n;
+    while ((n = motor_control_drain_events(&ctx, drained, 64)) > 0) {
+      for (size_t i = 0; i < n; ++i) {
+        if (drained[i].motor_id != 5) {
+          continue;
+        }
+        bound = bound || drained[i].type == MOTOR_CONTROL_EVENT_PROFILE_BOUND;
+        ready = ready || drained[i].type == MOTOR_CONTROL_EVENT_READY;
+      }
+    }
+    assert(bound);
+    assert(ready);
+  }
+
+  // 表外电机：不绑定，profile==NULL（不可控）。
+  motor_protocol_raw_frame_t f9 = vaxor_reply(9, 0.0, 0.0, 0.0, 110);
+  motor_control_on_raw_frame(&ctx, &f9);
+  assert(entry_of(&ctx, 9) != NULL);
+  assert(entry_of(&ctx, 9)->profile == NULL);
+
+  // 离线 → 重连：resolver 在重连路径再次按名绑定收敛 READY_DISABLED。
+  motor_control_service(&ctx, 300); // 100ms 无帧 → OFFLINE（vaxor 判龄）
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE);
+  motor_protocol_raw_frame_t f2 = vaxor_reply(5, 0.0, 0.0, 0.0, 400);
+  motor_control_on_raw_frame(&ctx, &f2);
+  assert(entry_of(&ctx, 5)->lifecycle ==
+         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_BOUND, 5));
+
+  // NULL resolver（host 默认）：恢复显式绑定语义，不自动绑定。
+  motor_control_context_t ctx2;
+  motor_control_init(&ctx2, g_adapters, 2);
+  motor_control_set_model_resolver(&ctx2, NULL);
+  motor_protocol_raw_frame_t f5 = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_control_on_raw_frame(&ctx2, &f5);
+  assert(entry_of(&ctx2, 5)->profile == NULL);
+  // 新建表项首帧停在 DISCOVERED（识别推进在次帧）；关键是无 profile、未绑定。
+  assert(entry_of(&ctx2, 5)->lifecycle ==
+         MOTOR_CONTROL_LIFECYCLE_DISCOVERED);
+}
+
 // MotorBind 过渡绑定通道的内核行为（按名绑定）。
 static void test_bind_profile_by_name() {
   motor_control_context_t ctx;
@@ -799,8 +862,9 @@ static void test_recovery_requires_fresh_snapshot_not_old_targets() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 快照校验：非法快照整体拒绝（NaN/重复 ID），序号必须单调（回绕安全）
-// （ARD §11.3/§15.5）。
+// 快照校验：非法快照整体拒绝（NaN/重复 ID）。序号门已于 2026-09-15 移除
+//（新鲜度门 30/100ms 级联承担重放/乱序防护），任意序号——包括回退/重复/
+// uint32 回绕——均接受。
 static void test_snapshot_validation() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -810,15 +874,14 @@ static void test_snapshot_validation() {
   snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 130));
 
-  // 回退/重复序号拒绝。
+  // 回退/重复序号：序号门已移除，一律接受（仍受新鲜度门约束）。
   motor_control_command_snapshot_t replay = make_snapshot(1, 140);
   snapshot_add(&replay, 5, 0.2f, 0.0f, 0.0f);
-  assert(!motor_control_apply_command_snapshot(&ctx, &replay, 150));
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_SNAPSHOT_REJECTED, 0));
+  assert(motor_control_apply_command_snapshot(&ctx, &replay, 150));
 
   motor_control_command_snapshot_t backward = make_snapshot(0, 150);
   snapshot_add(&backward, 5, 0.2f, 0.0f, 0.0f);
-  assert(!motor_control_apply_command_snapshot(&ctx, &backward, 155));
+  assert(motor_control_apply_command_snapshot(&ctx, &backward, 155));
 
   // NaN 拒绝。
   motor_control_command_snapshot_t nan_s = make_snapshot(2, 160);
@@ -831,7 +894,7 @@ static void test_snapshot_validation() {
   snapshot_add(&dup, 5, 0.1f, 0.0f, 0.0f);
   assert(!motor_control_apply_command_snapshot(&ctx, &dup, 190));
 
-  // 序号回绕（独立上下文）：首帧任意序号接受；0xFFFFFFFF → 0 仍是前进。
+  // uint32 回绕与跳变：任意序号接受（独立上下文）。
   motor_control_context_t ctx2;
   motor_control_init(&ctx2, g_adapters, 2);
   bring_vaxor_to_ready(&ctx2, 5, "vaxor_2550", 100);
@@ -844,9 +907,9 @@ static void test_snapshot_validation() {
   motor_control_command_snapshot_t after_wrap = make_snapshot(1, 240);
   snapshot_add(&after_wrap, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx2, &after_wrap, 250));
-  motor_control_command_snapshot_t stale_after_wrap = make_snapshot(0, 260);
-  snapshot_add(&stale_after_wrap, 5, 0.1f, 0.0f, 0.0f);
-  assert(!motor_control_apply_command_snapshot(&ctx2, &stale_after_wrap, 270));
+  motor_control_command_snapshot_t back_low = make_snapshot(0, 260);
+  snapshot_add(&back_low, 5, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx2, &back_low, 270));
 }
 
 // OFFLINE（Vaxor：自主上报缺失即判龄）与重连（ARD §36/§43.1 第 12 条）。
@@ -1706,6 +1769,28 @@ static void test_policy_enable_disables_and_arms() {
 // 厂家故障恢复语义：FAULT 清除回 READY_DISABLED 后，逐电机
 // motion_authorized 已在故障锁存时清除——快照重现**不得**自动恢复运动；
 // 必须显式 SET_ENABLE(true) 复立授权位（"失败不自动恢复运动授权"）。
+// 全局重授权只重立非冻结态（会话派生授权的安全边界）：FAULT/OFFLINE/
+// CONFIG_CONFLICT 表项的逐电机授权位不被复活，恢复只能复位控制板。
+static void test_global_reauth_skips_frozen_lifecycles() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+  motor_protocol_raw_frame_t faulted = vaxor_status(5, 0x12345678, 125);
+  motor_control_on_raw_frame(&ctx, &faulted);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_FAULT);
+  (void)motor_control_set_authorization(&ctx, true, 130);
+  assert(!entry_of(&ctx, 5)->motion_authorized); // FAULT 不复活
+  assert(ctx.authorized);
+
+  // 故障清除 → READY_DISABLED：全局位可重立，但 policy_enable 冻结仍挡命令。
+  motor_protocol_raw_frame_t cleared = vaxor_status(5, 0, 135);
+  motor_control_on_raw_frame(&ctx, &cleared);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  (void)motor_control_set_authorization(&ctx, true, 140);
+  assert(entry_of(&ctx, 5)->motion_authorized);
+  assert(!entry_of(&ctx, 5)->policy_enable); // 仍须复位才能运动
+}
+
 static void test_fault_recovery_requires_reauth() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -2215,6 +2300,7 @@ static void run_all_tests() {
   test_p0_requeue_after_downstream_failure();
   test_bind_profile_by_name();
   test_bind_rejection_emits_profile_rejected();
+  test_static_model_resolver_auto_bind();
   test_snapshot_with_unknown_motor_rejected();
   test_snapshot_absence_soft_stops_motor();
   test_30ms_stale_snapshot_soft_stops();
@@ -2250,6 +2336,7 @@ static void run_all_tests() {
   test_set_mode_gating_on_unidentified();
   test_policy_enable_disables_and_arms();
   test_fault_recovery_requires_reauth();
+  test_global_reauth_skips_frozen_lifecycles();
   test_fault_recovery_no_motion_without_explicit_enable();
   test_revoke_aborts_tx_with_unconfirmed();
   test_offline_aborts_tx_with_unconfirmed();

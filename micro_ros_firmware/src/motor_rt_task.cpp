@@ -14,23 +14,25 @@
 #include "fdcan.h"
 #include "motor_event_relay.h"
 #include "motor_protocol_adapter.h"
+#include "motor_static_topology.h"
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-static const uint32_t kControlPeriodMs = 10U;
+static const uint32_t kControlPeriodMs = 20U;
 
 // 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
-static const uint32_t kRxDrainBudgetPerBus = 16U;  // 每 1ms 每总线最多解码帧数
-static const uint32_t kRxPopBatch = 8U;            // 单次批量弹出（栈上界）
-static const uint32_t kTxCollectBudget = 16U;      // 每 1ms 最多取走内核待发帧数
-static const uint32_t kTxPumpBudgetPerBus = 8U;    // 每 1ms 每总线最多提交帧数
+static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
+static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈上界）
+static const uint32_t kTxCollectBudget = 16U;       // 每 1ms 最多取走内核待发帧数
+static const uint32_t kTxPumpBudgetPerBus = 8U;     // 每 1ms 每总线最多提交帧数
 static const uint32_t kConfigDrainPerBoundary = 4U; // 每 10ms 边界最多转发配置数
 static const uint32_t kBindDrainPerBoundary = 4U;   // 每 10ms 边界最多转发绑定数
-static const uint32_t kDiscoverySyncPeriodMs = 10U; // SYNC 心跳周期（维持设备
-                                                    // 20ms 状态上报，总线检测）
+static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
+                                                    // 20ms 状态上报，与 VAXOR
+                                                    // 20ms 自推统一 50Hz）
 
 static motor_control_context_t g_motor_control;
 static control_mailbox_t g_control_mailbox;
@@ -53,27 +55,6 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   const bool ok = control_mailbox_submit_command(&g_control_mailbox, snapshot);
   taskEXIT_CRITICAL();
   return ok;
-}
-
-bool motor_rt_submit_config(const control_mailbox_config_request_t *request) {
-  taskENTER_CRITICAL();
-  const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
-  taskEXIT_CRITICAL();
-  return ok;
-}
-
-bool motor_rt_submit_bind(uint16_t motor_id, const char *model_name) {
-  taskENTER_CRITICAL();
-  const bool ok =
-      control_mailbox_submit_bind(&g_control_mailbox, motor_id, model_name);
-  taskEXIT_CRITICAL();
-  return ok;
-}
-
-void motor_rt_request_authorization(bool authorized) {
-  taskENTER_CRITICAL();
-  control_mailbox_request_authorization(&g_control_mailbox, authorized);
-  taskEXIT_CRITICAL();
 }
 
 void motor_rt_set_agent_connected(bool connected) {
@@ -395,6 +376,10 @@ static void convert_config(const control_mailbox_config_request_t *in,
 
 static void control_boundary(void) {
   static bool session_synced = false;
+  // 授权从会话状态派生（motor_enable 话题已删）：Agent 状态未知（引导期）
+  // 或在线 = 授权；断连 = 撤权。每边界同步电平，使 100ms 超时撤权后重新
+  // 到来的新鲜快照能即时恢复运动（无需任何显式重授权命令）。
+  static bool session_connected = true;
 
   // mailbox 并发契约：读侧 take_* 与写侧 submit_* 必须互斥（库无内部锁）。
   control_mailbox_events_t events = {0};
@@ -408,12 +393,17 @@ static void control_boundary(void) {
     if (events.agent_state_pending || !session_synced) {
       motor_control_set_agent_connected(&g_motor_control,
                                         events.agent_connected_requested, now_ms);
+      session_connected = events.agent_connected_requested;
     }
     if (events.authorization_pending || !session_synced) {
       motor_control_set_authorization(&g_motor_control,
                                       events.authorization_requested, now_ms);
     }
     session_synced = true;
+  }
+  // 会话在线：每边界维持授权电平（幂等；冻结态表项由内核侧跳过）。
+  if (session_connected) {
+    motor_control_set_authorization(&g_motor_control, true, now_ms);
   }
 
   // 完整命令快照（mailbox 无新快照时本边界不产生运动帧）。
@@ -537,6 +527,10 @@ bool motor_rt_task_start(void) {
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
+  // 编译期拓扑注入：下行 bind/policy/config/enable 话题已删，型号绑定改由
+  // 静态表在发现建档/重连时自动完成（src/motor_static_topology.c）。
+  motor_control_set_model_resolver(&g_motor_control,
+                                   motor_static_topology_model_for);
   motor_event_relay_init(&g_event_relay);
   // watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
 

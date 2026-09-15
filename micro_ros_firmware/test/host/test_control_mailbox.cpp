@@ -247,21 +247,30 @@ static void test_command_gate_rejections_are_counted() {
   assert(!control_mailbox_submit_command(&mailbox, &command));
   assert(mailbox.command_rejected_count == 1U); // 授权门拒绝可见
 
+  // 新语义（motor_enable 话题已删）：会话在线即授权——首连自动重立授权。
   control_mailbox_request_agent_connected(&mailbox, true);
   assert(control_mailbox_take_events(&mailbox, &events));
-  assert(!control_mailbox_submit_command(&mailbox, &command));
-  assert(mailbox.command_rejected_count == 2U); // 未恢复授权，仍被拒
-
-  control_mailbox_request_authorization(&mailbox, true);
-  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(events.authorization_pending); // 撤权后首连重立授权边沿
   assert(control_mailbox_submit_command(&mailbox, &command));
-  assert(mailbox.command_rejected_count == 2U); // 放行不计数
+  assert(mailbox.command_rejected_count == 1U); // 放行不计数
+
+  // 显式置 true 已无变化（幂等）。
+  control_mailbox_request_authorization(&mailbox, true);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  assert(control_mailbox_submit_command(&mailbox, &command));
 
   // 会话断开后命令门拒绝（授权由断链撤销）。
   control_mailbox_request_agent_connected(&mailbox, false);
   assert(control_mailbox_take_events(&mailbox, &events));
   assert(!control_mailbox_submit_command(&mailbox, &command));
-  assert(mailbox.command_rejected_count == 3U);
+  assert(mailbox.command_rejected_count == 2U);
+
+  // 重连自动重立授权，命令重新放行。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 2U);
 }
 
 // 新增：会话边沿矩阵（首连/断链/重连/重复状态）与 take_events 返回值语义。
@@ -305,13 +314,13 @@ static void test_session_edge_matrix() {
   assert(mailbox.config_invalid_count == 0U);
   assert(mailbox.config_overflow_count == 0U);
 
-  // 重连：会话恢复不恢复运动授权（ARD §33）——仅 state_pending；
-  // 配置不属于运动授权，Agent 在线即可重新排队。
+  // 重连：授权随会话恢复自动重立（motor_enable 已删，授权=会话在线派生）；
+  // state_pending + authorization_pending 同时可见，配置重新可排队。
   control_mailbox_request_agent_connected(&mailbox, true);
   assert(control_mailbox_take_events(&mailbox, &events));
   assert(events.agent_state_pending);
-  assert(!events.authorization_pending); // 无授权恢复边沿
-  assert(!events.authorization_requested);
+  assert(events.authorization_pending); // 重连重立授权边沿
+  assert(events.authorization_requested);
   assert(control_mailbox_submit_config(&mailbox, &config));
   assert(mailbox.config_session_count == 1U);
 

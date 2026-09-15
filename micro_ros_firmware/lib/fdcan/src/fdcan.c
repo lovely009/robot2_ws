@@ -19,6 +19,16 @@ _Static_assert(
         configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
     "FDCAN IRQ priority must permit FreeRTOS FromISR APIs");
 
+// 台架自答模式（platformio.ini 的 FDCAN_SELF_ACK_BENCH，默认关）：HAL 的
+// EXTERNAL_LOOPBACK = TEST.LBCK + MON，控制器自答自己的帧——空总线（无
+// ACK 节点）也能把 SYNC/命令发上总线供第三方观察，错误计数不再累积。
+// MON 代价：本节点对总线上其他节点只收不应——真实电机/完整台架必须关闭。
+#ifdef FDCAN_SELF_ACK_BENCH
+#define FDCAN_INIT_MODE FDCAN_MODE_EXTERNAL_LOOPBACK
+#else
+#define FDCAN_INIT_MODE FDCAN_MODE_NORMAL
+#endif
+
 FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
 FDCAN_HandleTypeDef hfdcan3;
@@ -47,7 +57,7 @@ static void fdcan_periph_clk_config(void) {
 void MX_FDCAN1_Init(void) {
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
-  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.Mode = FDCAN_INIT_MODE;
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = ENABLE;
@@ -81,7 +91,7 @@ void MX_FDCAN1_Init(void) {
 void MX_FDCAN2_Init(void) {
   hfdcan2.Instance = FDCAN2;
   hfdcan2.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
-  hfdcan2.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan2.Init.Mode = FDCAN_INIT_MODE;
   hfdcan2.Init.AutoRetransmission = ENABLE;
   hfdcan2.Init.TransmitPause = DISABLE;
   hfdcan2.Init.ProtocolException = ENABLE;
@@ -115,7 +125,7 @@ void MX_FDCAN2_Init(void) {
 void MX_FDCAN3_Init(void) {
   hfdcan3.Instance = FDCAN3;
   hfdcan3.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
-  hfdcan3.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan3.Init.Mode = FDCAN_INIT_MODE;
   hfdcan3.Init.AutoRetransmission = ENABLE;
   hfdcan3.Init.TransmitPause = DISABLE;
   hfdcan3.Init.ProtocolException = ENABLE;

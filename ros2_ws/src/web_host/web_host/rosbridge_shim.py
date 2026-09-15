@@ -1,12 +1,11 @@
 """rosbridge 启动垫片：兼容有界字符串（``string<=31``）。
 
-背景：can_bridge_msgs 的 ``MotorTopologyEntry.model_name`` 与
-``MotorBind.model_name`` 使用有界字符串。Humble 的 rclpy 把字段类型报告为
-``string<31>``（``ros2 interface show`` 记法为 ``string<=31``），而
-rosbridge_library 2.0.7 的原语类型表只含 ``string``，导致：
+背景：can_bridge_msgs 的 ``MotorTopologyEntry.model_name`` 使用有界字符串。
+Humble 的 rclpy 把字段类型报告为 ``string<31>``（``ros2 interface show`` 记法为
+``string<=31``），而 rosbridge_library 2.0.7 的原语类型表只含 ``string``，导致：
 
 - 出站：序列化 MotorTopology 时抛 ``inst is not a ROS Message, but a str``；
-- 入站：网页 publish MotorBind 时同样在原语判断处失败。
+- 入站：网页 publish 含该字段的消息时同样在原语判断处失败。
 
 本垫片在运行官方 rosbridge 入口脚本前把两种记法补进原语表，行为与
 ``string`` 完全一致（长度约束在固件侧仍由 32B 静态缓冲保证，网页发送值

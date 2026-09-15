@@ -21,7 +21,7 @@ def generate_launch_description():
                               description='HTTP port of the static web UI.'),
 
         # 经 web_host 的垫片启动 rosbridge：兼容有界字符串 string<31>
-        # （MotorTopology/MotorBind），见 web_host/rosbridge_shim.py。
+        # （MotorTopology.model_name），见 web_host/rosbridge_shim.py。
         Node(
             package='web_host',
             executable='rosbridge_shim',

@@ -414,8 +414,8 @@ def main():
     ap.add_argument("--tty", default="/dev/ttyACM1")
     ap.add_argument("--cerb", default="1,2,3,4,5,6")
     ap.add_argument("--vaxor", default="7,8,9")
-    ap.add_argument("--period-ms", type=int, default=10,
-                    help="板端 SYNC 周期，用于换算反馈窗口（默认 10ms）")
+    ap.add_argument("--period-ms", type=int, default=20,
+                    help="板端 SYNC 周期，用于换算反馈窗口（默认 20ms）")
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10),
                     default=DEFAULT_DATA_BITRATE_INDEX,
                     help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）")

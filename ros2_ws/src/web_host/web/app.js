@@ -1,5 +1,5 @@
 // Robot2 Web 上位机：监控（topology/motion/status/events/imu）+ 控制下发
-// （bind / 全局 enable / 逐电机 policy / command 快照）。
+// （command 快照；下行配置话题已随固件裁剪移除，型号绑定/授权为固件编译期）。
 // 话题与 can_bridge_msgs 对齐固件；QoS 由 rosbridge 2.x 按发布方自动协商。
 (() => {
 'use strict';
@@ -12,12 +12,7 @@ const TOPICS = {
   events: {name: '/micro_ros/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
   imu: {name: '/micro_ros/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/micro_ros/imu/temp', type: 'std_msgs/msg/Float32'},
-  bind: {name: '/micro_ros/motor_bind', type: 'can_bridge_msgs/msg/MotorBind'},
-  policy: {name: '/micro_ros/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicy'},
-  enable: {name: '/micro_ros/motor_enable', type: 'std_msgs/msg/Bool'},
   command: {name: '/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  config: {name: '/micro_ros/motor_config', type: 'can_bridge_msgs/msg/MotorConfig'},
-  configResult: {name: '/micro_ros/motor_config_result', type: 'can_bridge_msgs/msg/MotorConfigResult'},
 };
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -28,8 +23,6 @@ const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
   'REGISTRY_FULL'];
 const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
-const CONFIG_RESULT_NAMES = ['OK', 'BUSY', 'INVALID', 'UNSUPPORTED',
-  'DEVICE_ERROR', 'TIMEOUT', 'UNCONFIRMED'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
@@ -70,10 +63,6 @@ const chart = {running: true, windowMs: 10000};
 
 // 命令历史：{t, seq, targets:[...]}
 const history = [];
-
-// 待回显的配置事务：request_id -> {kind:'mode'|'limits', motor_id, t}
-const pendingConfigs = new Map();
-let configSeq = 1;
 
 // ---------- rosbridge ----------
 let ros = null;
@@ -201,21 +190,6 @@ function subscribeAll() {
   });
 
   sub('temp', (m) => { state.temp = m.data; state.tempLast = Date.now(); });
-
-  sub('configResult', (m) => {
-    const p = pendingConfigs.get(m.request_id);
-    const name = CONFIG_RESULT_NAMES[m.result] !== undefined
-      ? CONFIG_RESULT_NAMES[m.result] : 'R' + m.result;
-    let el = null;
-    if (p) {
-      el = p.kind === 'mode' ? $('modeResult') : (p.kind === 'limits' ? $('limResult') : null);
-      pendingConfigs.delete(m.request_id);
-    }
-    const text = `motor ${m.motor_id} req#${m.request_id} → ${name}`;
-    if (el) setResult(el, m.result === 0, text);
-    // 无 pending 记录（页面刷新过）也进命令历史旁的事件日志。
-    if (!p) renderEvents();
-  });
 }
 
 // 曲线数据入缓冲；每通道独立时间轴（缺失 NaN 保留，绘制时跳过）。
@@ -310,94 +284,8 @@ function renderImu() {
   drawHorizon();
 }
 
-// ---------- 控制：绑定 / 授权 / 使能 ----------
-function doBind() {
-  const id = parseInt($('bindId').value, 10);
-  const model = $('bindModel').value;
-  if (!Number.isInteger(id) || id < 1 || id > 65535) { alert('motor_id 非法'); return; }
-  pub('bind', {motor_id: id, model_name: model});
-}
-
-function doGlobal(enable) {
-  pub('enable', {data: enable});
-}
-
-function doPolicy(enable) {
-  const id = parseInt($('polId').value, 10);
-  if (!Number.isInteger(id) || id < 1 || id > 65535) { alert('motor_id 非法'); return; }
-  // 只翻 enable 位，set_gains/set_limits 不置位，其余字段保持原值。
-  pub('policy', {
-    motor_id: id,
-    enable,
-    set_gains: false, kp: 0.0, kd: 0.0,
-    set_limits: false, min_position_rad: 0.0, max_position_rad: 0.0,
-  });
-}
-
-// 通用结果区写入。
-function setResult(el, ok, text) {
-  el.className = 'result tiny ' + (ok ? 'ok' : 'err');
-  el.textContent = text;
-}
-
-// SET_GAINS：固件 policy 契约总是附带一次 SET_ENABLE，故 enable 置 true
-// （仅重立授权许可，不打断运行中电机），避免误失能。
-function applyGains() {
-  const id = parseInt($('gainId').value, 10);
-  const kp = parseFloat($('gainKp').value);
-  const kd = parseFloat($('gainKd').value);
-  const el = $('gainResult');
-  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
-  if (![kp, kd].every(Number.isFinite)) { setResult(el, false, 'kp/kd 必须为有限数'); return; }
-  const ok = pub('policy', {
-    motor_id: id, enable: true,
-    set_gains: true, kp, kd,
-    set_limits: false, min_position_rad: 0.0, max_position_rad: 0.0,
-  });
-  setResult(el, ok, ok ? `已发 SET_GAINS id=${id} kp=${kp} kd=${kd}` : '未连接 rosbridge');
-}
-
-// SET_POSITION_LIMITS：同上附带 enable 许可；结果经 events 回告。
-function applyLimits() {
-  const id = parseInt($('limId').value, 10);
-  const min = parseFloat($('limMin').value);
-  const max = parseFloat($('limMax').value);
-  const el = $('limResult');
-  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
-  if (![min, max].every(Number.isFinite)) { setResult(el, false, 'min/max 必须为有限数'); return; }
-  if (min >= max) { setResult(el, false, 'min 必须小于 max'); return; }
-  const ok = pub('policy', {
-    motor_id: id, enable: true,
-    set_gains: false, kp: 0.0, kd: 0.0,
-    set_limits: true, min_position_rad: min, max_position_rad: max,
-  });
-  setResult(el, ok, ok ? `已发 SET_LIMITS id=${id} [${min}, ${max}]` : '未连接 rosbridge');
-}
-
-// SET_MODE 事务：request_id 关联回显；CERB 仅 MIT（0）。
-function sendMode() {
-  const id = parseInt($('modeId').value, 10);
-  const mode = parseInt($('modeSel').value, 10);
-  const el = $('modeResult');
-  if (!Number.isInteger(id) || id < 1 || id > 65535) { setResult(el, false, 'motor_id 非法'); return; }
-  if (mode < 0 || mode > 2) { setResult(el, false, 'mode 非法'); return; }
-  const request_id = configSeq++;
-  pendingConfigs.set(request_id, {kind: 'mode', motor_id: id, t: Date.now()});
-  const ok = pub('config', {
-    request_id, motor_id: id,
-    kind: 1, // KIND_SET_MODE
-    mode,
-    min_position_rad: 0.0, max_position_rad: 0.0,
-  });
-  if (!ok) {
-    pendingConfigs.delete(request_id);
-    setResult(el, false, '未连接 rosbridge');
-    return;
-  }
-  setResult(el, true, `已发 req#${request_id} id=${id} mode=${mode}，等待 CONFIG_RESULT…`);
-}
-
 // ---------- 控制：命令快照 ----------
+// sequence 仅作日志关联（固件序号门已移除，2026-09-15）。
 let seq = 0;
 let streamTimer = null;
 
@@ -937,20 +825,17 @@ function init() {
     b.onclick = () => switchTab(b.dataset.page);
   });
 
-  $('btnBind').onclick = doBind;
-  $('btnGlobalEnable').onclick = () => doGlobal(true);
-  $('btnGlobalDisable').onclick = () => doGlobal(false);
-  $('btnPolEnable').onclick = () => doPolicy(true);
-  $('btnPolDisable').onclick = () => doPolicy(false);
-
-  $('btnGainApply').onclick = applyGains;
-  $('btnLimApply').onclick = applyLimits;
-  $('btnModeSend').onclick = sendMode;
-
   $('btnAddRow').onclick = () => addCmdRow();
   $('btnFillOnline').onclick = () => {
+    // 只填拓扑中在线的电机，目标取当前实测位置（保持原位语义）；
+    // 未收到运动状态时位置填 0 并给出提示色由用户核对后再发。
+    const online = [];
+    for (const [id, row] of state.motors) {
+      if (row.topo && row.topo.online) online.push([id, row.motion ? row.motion.position : 0]);
+    }
+    if (online.length === 0) { alert('拓扑中暂无在线电机'); return; }
     $('cmdRows').innerHTML = '';
-    for (let id = 1; id <= 9; id++) addCmdRow(id, 0, 0, 0);
+    for (const [id, pos] of online.sort((a, b) => a[0] - b[0])) addCmdRow(id, pos, 0, 0);
   };
   $('btnClearRows').onclick = () => { stopStream(); $('cmdRows').innerHTML = ''; };
   $('btnSendOnce').onclick = () => { stopStream(); sendSnapshot(); };

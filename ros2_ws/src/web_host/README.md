@@ -4,7 +4,7 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 
 | 节点 | 可执行 | 作用 |
 |---|---|---|
-| `rosbridge_websocket` | `rosbridge_shim` | 官方 rosbridge 的**启动垫片**，先给 `rosbridge_library` 补上有界字符串原语（`string<31>` / `string<=31`，见 `web_host/rosbridge_shim.py` 模块注释），再 runpy 运行官方入口；解决 `can_bridge_msgs` 的 `MotorTopology` / `MotorBind` 等含 `string<=31` 字段时 rosbridge 2.0.7 序列化报 `inst is not a ROS Message, but a str` 的问题 |
+| `rosbridge_websocket` | `rosbridge_shim` | 官方 rosbridge 的**启动垫片**，先给 `rosbridge_library` 补上有界字符串原语（`string<31>` / `string<=31`，见 `web_host/rosbridge_shim.py` 模块注释），再 runpy 运行官方入口；解决 `can_bridge_msgs` 的 `MotorTopology` 等含 `string<=31` 字段时 rosbridge 2.0.7 序列化报 `inst is not a ROS Message, but a str` 的问题 |
 | `web_static_server` | `static_server` | 纯标准库 `ThreadingHTTPServer` 托管 `web/`（`index.html` / `app.js` / `style.css` / `roslib.min.js`），无 Node 等构建依赖 |
 
 前端打开页面后按 `location.hostname:9090` 自动拼 WebSocket 地址（见 `web/app.js`），
@@ -16,13 +16,9 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 | Tab | 功能 |
 |---|---|
 | 监控 | IMU 数值 + 3D 姿态/人工地平仪、电机状态表、事件日志（可导出 JSON/CSV）、命令历史 |
-| 控制 | 型号绑定、全局授权/逐电机使能、**逐电机增益 SET_GAINS**、**位置限位 SET_POSITION_LIMITS**、**模式切换 SET_MODE**（结果异步回 CONFIG_RESULT）、命令快照单发/100Hz 连发 |
+| 控制 | 命令快照单发/100Hz 连发（下行配置话题已随固件裁剪移除——型号绑定/授权/增益/限位均为固件编译期静态配置，见 `micro_ros_firmware/src/motor_static_topology.c`） |
 | 曲线 | 位置/速度/力矩/电流实时折线（canvas，多电机可选、时间窗可调） |
 | 示教 | 点位序列（记录当前命令 / 单步 / 循环播放 / 导入导出 JSON） |
-
-> 增益/限位经 `motor_policy` 下发，固件契约总是附带一次 `SET_ENABLE`，页面统一
-> 置 `enable:true`（仅重立授权许可，不打断运行中电机）；SET_MODE 走
-> `motor_config` 事务，`request_id` 由页面生成并与 `motor_config_result` 关联回显。
 
 ## 构建
 

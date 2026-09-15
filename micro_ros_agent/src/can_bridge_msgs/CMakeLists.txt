@@ -37,10 +37,6 @@ rosidl_generate_interfaces(
   "msg/MotorTopologyEntry.msg"
   "msg/MotorTopology.msg"
   "msg/MotorEvent.msg"
-  "msg/MotorPolicy.msg"
-  "msg/MotorConfig.msg"
-  "msg/MotorConfigResult.msg"
-  "msg/MotorBind.msg"
   DEPENDENCIES std_msgs
 )
 

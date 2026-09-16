@@ -43,11 +43,7 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   // motion_authorized，若 policy_enable 残留 true，锁存清除后仅重发全局授权
   // + 新快照即自动复运动——违反 ARD §36「失败不自动恢复运动授权」。
   entry->policy_enable = false;
-  // 中止配置事务并回 UNCONFIRMED 终态，确保请求收敛。
-  if (entry->tx_active) {
-    motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                            now_ms);
-  }
+  motor_control_abort_tx(ctx, entry, now_ms);
   entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
   entry->unified_fault_code = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
@@ -85,9 +81,23 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
   }
 
   // 注册表定位/建档（motor_id 全局键；满表拒绝并出事件，不静默截断）。
+  const bool presence = adapter->is_discovery_frame == NULL ||
+                        adapter->is_discovery_frame(frame);
   motor_control_entry_t *entry = motor_control_find_entry(ctx, node);
   const bool created = entry == NULL;
-  bool needs_static_bind = created;
+  if (!presence) {
+    if (created) {
+      // 可归属但不是"设备存在"证据（CERB SDO 应答）：没有表项就无处裁决，
+      // 且不得凭一次杂散事务应答凭空造出一台电机。
+      ctx->unknown_frame_count++;
+      return;
+    }
+    // 已知设备的事务应答：只刷新链路新鲜度并服务事务裁决，不推进生命周期、
+    // 不解码——它不是周期状态帧，走解码只会把协议错误计数刷成噪声。
+    entry->last_rx_tick_ms = frame->rx_tick_ms;
+    (void)motor_control_config_on_frame(ctx, entry, frame);
+    return;
+  }
   if (created) {
     if (ctx->entry_count >= MOTOR_CONTROL_MAX_MOTORS) {
       motor_control_push_event(ctx, frame->rx_tick_ms,
@@ -132,7 +142,12 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->unified_fault_code = MOTOR_CONTROL_FAULT_NONE;
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_NONE;
     ctx->require_new_snapshot = true;
-    needs_static_bind = true; // 重连后重新收敛绑定（profile 保留，幂等）
+    // 重连后重新识别：身份是设备事实，可能在换机/改接线后已变；旧 profile
+    // 与旧读数一并作废（identity_read_done 复位 → service 复检时重发）。
+    entry->identity_read_done = false;
+    entry->identity_size = 0U;
+    entry->identity_read_overflow = false;
+    entry->profile = NULL;
     motor_control_push_event(ctx, frame->rx_tick_ms,
                              MOTOR_CONTROL_EVENT_RECONNECTED, entry->motor_id,
                              entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
@@ -144,17 +159,9 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_IDENTIFYING;
   }
 
-  // 编译期拓扑注入（下行 bind/policy/config/enable 话题已删）：建档与重连
-  // 各尝试一次按名自动绑定，复用 bind 门禁与 PROFILE_*/READY 事件语义；
-  // 表外电机（resolver 返回 NULL）保持未绑定不可控。绑定失败不逐帧重试——
-  // 静态表是编译期事实，重试只会刷屏事件环（保持 IDENTIFYING，不可控安全侧）。
-  if (needs_static_bind && ctx->model_resolver != NULL) {
-    const char *model = ctx->model_resolver(node);
-    if (model != NULL) {
-      (void)motor_control_bind_profile_by_name(ctx, node, model,
-                                               frame->rx_tick_ms);
-    }
-  }
+  // 型号绑定（唯一来源：设备自报身份）不在本路径发起：识别由
+  // motor_control_config_step 按不变量复检（在线 + 可绑定态 + 本轮未定论），
+  // 覆盖建档、重连、以及被离线/撤权中止后的重发。
 
   // 配置事务响应裁决（先于运动解码——读回帧同时携带反馈时两者都生效）。
   (void)motor_control_config_on_frame(ctx, entry, frame);
@@ -207,11 +214,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       // policy_enable 一并冻结（ARD §36）：故障清除后不得仅凭全局
       // 再授权 + 新快照自动复运动，必须显式 SET_ENABLE(true)。
       entry->policy_enable = false;
-      // 中止配置事务并回 UNCONFIRMED 终态。
-      if (entry->tx_active) {
-        motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                                frame->rx_tick_ms);
-      }
+      motor_control_abort_tx(ctx, entry, frame->rx_tick_ms);
       entry->last_failure_reason = MOTOR_CONTROL_FAULT_VENDOR;
       motor_control_push_event(ctx, frame->rx_tick_ms, MOTOR_CONTROL_EVENT_FAULT,
                                entry->motor_id, entry->bus_index,

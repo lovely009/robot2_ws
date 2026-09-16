@@ -17,8 +17,14 @@
   VAXOR status    0x702+4*id      FD/BRS 20B 小端（见 motor_protocol_pack_vaxor_status）
   VAXOR reply     0x701+4*id      FD/BRS 12B，收到 0x501+4*id MIT 命令后逐帧应答
 
+上行（本脚本 → 固件，身份识别应答）：
+  CERB  SDO 应答 0x580+id        FD/BRS 8B；0x1008 分段上传（41 → 000 t nnn c）
+        ——固件发现建档后读 0x1008 自报身份串并按串绑定型号，本脚本按
+        --cerb-r58 分配 R58LITE_V2 / R48LITE_V2
+
 下行（固件 → 本脚本，仅记录/驱动趋近）：
   CERB  SYNC 0x080（经典 0B，10ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  CERB  SDO 请求 0x600+id（FD 8B；40 08 10 00 上传发起 → 60/70 取分段）
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
 用法：
@@ -164,6 +170,10 @@ class MotorModel:
             self.tgt_deg = self.pos_deg
             self.rpm = 101.0
             self.iq_ma = 1000.0
+            # 设备自报身份（SDO 0x1008 回串），由 --cerb-r58 分配；固件据此
+            # 自动绑定型号，模拟器必须实现同一对象否则台架全是不绑定电机。
+            self.identity = b"R48LITE_V2"
+            self.sdo_offset = 0
         else:
             # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad，gear=50
             self.pos_motor_rad = 0.1 * (motor_id - 6) * 50.0
@@ -210,7 +220,8 @@ class SlcanSim:
     def __init__(self, tty: str, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX,
-                 fb_period_ms: int = 20, stagger_ms: float = 2.2):
+                 fb_period_ms: int = 20, stagger_ms: float = 2.2,
+                 r58_ids=()):
         self.tty_path = tty
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
@@ -220,6 +231,9 @@ class SlcanSim:
         self.stagger = stagger_ms / 1000.0
         self.models = {i: MotorModel(i, "cerb") for i in cerb_ids}
         self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
+        for mid in r58_ids:
+            if mid in self.models and self.models[mid].kind == "cerb":
+                self.models[mid].identity = b"R58LITE_V2"
         self.rx_buf = b""
         self.sync_seen = False
         self.sync_count = 0
@@ -275,6 +289,40 @@ class SlcanSim:
                 return self.models[delta // 4]
         return None
 
+    def handle_sdo(self, node: int, data: bytes) -> None:
+        """CERB 身份读取应答（SDO 0x1008 分段上传），与固件 cerb_adapter 对向。
+
+        厂家属具书 §4.3：上传发起 40 08 10 00 → 应答 41 08 10 00 + 总字节数；
+        随后 60/70 交替取段 → 应答 000 t nnn c + 7 字节数据。
+        """
+        m = self.models.get(node)
+        if m is None or m.kind != "cerb":
+            return
+        m.rx_count += 1
+        command = data[0]
+        index = data[1] | (data[2] << 8)
+        if command == 0x40:
+            if index != 0x1008:
+                self.send(0x580 + node,
+                          bytes([0x80, data[1], data[2], data[3], 0, 0, 0, 0]),
+                          True, self.use_brs, m, "sdo_abort")
+                return
+            m.sdo_offset = 0
+            size = len(m.identity)
+            self.send(0x580 + node,
+                      bytes([0x41, 0x08, 0x10, 0x00, size & 0xFF,
+                             (size >> 8) & 0xFF, 0, 0]),
+                      True, self.use_brs, m, "sdo_initiate")
+            return
+        if (command & 0xE0) == 0x60:  # 分段上传请求（bit4 = 切换位）
+            chunk = m.identity[m.sdo_offset:m.sdo_offset + 7]
+            m.sdo_offset += len(chunk)
+            last = m.sdo_offset >= len(m.identity)
+            unused = (7 - len(chunk)) if last else 0
+            head = ((command >> 4) & 1) << 4 | (unused << 1) | (1 if last else 0)
+            self.send(0x580 + node, bytes([head]) + chunk.ljust(7, b"\x00"),
+                      True, self.use_brs, m, "sdo_segment")
+
     def handle_downlink(self, can_id: int, data: bytes, is_fd: bool):
         if can_id == 0x080:  # CERB SYNC（经典 0B），链路存活探针与调度基准
             now = time.monotonic()
@@ -287,6 +335,9 @@ class SlcanSim:
             if (self.sync_count - 1) % self.feedback_sync_interval == 0:
                 schedule_feedback_window(
                     self.next_send, sorted(self.models), now, self.stagger)
+            return
+        if 0x601 <= can_id <= 0x67F and len(data) >= 8:  # SDO 请求 0x600+node
+            self.handle_sdo(can_id - 0x600, data)
             return
         m = self._model_for_downlink(can_id)
         if m is None:
@@ -414,6 +465,9 @@ def main():
     ap.add_argument("--tty", default="/dev/ttyACM1")
     ap.add_argument("--cerb", default="1,2,3,4,5,6")
     ap.add_argument("--vaxor", default="7,8,9")
+    ap.add_argument("--cerb-r58", default="1",
+                    help="自报 R58LITE_V2 身份的 CERB 节点（其余 CERB 节点"
+                         "自报 R48LITE_V2；固件按身份串自动绑定型号）")
     ap.add_argument("--period-ms", type=int, default=20,
                     help="板端 SYNC 周期，用于换算反馈窗口（默认 20ms）")
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10),
@@ -429,11 +483,13 @@ def main():
     args = ap.parse_args()
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
+    r58_ids = [int(x) for x in args.cerb_r58.split(",") if x]
     sim = SlcanSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
                    use_brs=not args.no_brs,
                    data_bitrate_index=args.data_bitrate_index,
                    fb_period_ms=args.fb_period_ms,
-                   stagger_ms=args.stagger_ms)
+                   stagger_ms=args.stagger_ms,
+                   r58_ids=r58_ids)
 
     def _sig(_a, _b):
         sim.stop = True

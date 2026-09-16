@@ -153,35 +153,6 @@ static bool send_disable_p0(motor_control_context_t *ctx,
   return false;
 }
 
-// 按型号名绑定：型号目录遍历 + 精确匹配，命中复用
-// bind_profile 的门禁与事件；这是 MotorBind 订阅通道的内核落地。
-bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
-                                        uint16_t motor_id,
-                                        const char *model_name, uint32_t now_ms) {
-  if (ctx == NULL || model_name == NULL) {
-    return false;
-  }
-  const size_t count = motor_control_profile_count();
-  for (size_t i = 0; i < count; ++i) {
-    const motor_protocol_model_profile_t *profile = motor_control_profile_at(i);
-    if (profile != NULL && profile->model_name != NULL &&
-        strcmp(profile->model_name, model_name) == 0) {
-      return motor_control_bind_profile(ctx, motor_id, i, now_ms);
-    }
-  }
-  // 未知名（含空名）：拒绝并回 PROFILE_REJECTED。reason 复用
-  // PROFILE_UNAVAILABLE（=3，与既有绑定拒绝同款）；设备已在表时附其
-  // bus_index，未发现设备 bus_index=0。
-  motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
-  if (entry != NULL) {
-    entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
-  }
-  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                           motor_id, entry != NULL ? entry->bus_index : 0U,
-                           MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // 生命周期管理
 // ---------------------------------------------------------------------------
@@ -198,14 +169,6 @@ void motor_control_init(motor_control_context_t *ctx,
   // 安全默认：未授权、无快照。任务层启动时把 mailbox 的授权电平转发进来。
   ctx->authorized = false;
   ctx->require_new_snapshot = false;
-}
-
-void motor_control_set_model_resolver(motor_control_context_t *ctx,
-                                      motor_control_model_resolver_t resolver) {
-  if (ctx == NULL) {
-    return;
-  }
-  ctx->model_resolver = resolver;
 }
 
 // 撤销运动授权的统一安全路径（ARD §13.2/§13.3/§33）。
@@ -226,11 +189,8 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     entry->enable_pending = false;
     entry->has_target = false;
     entry->motion_authorized = false;
-    // 中止进行中的配置事务：回 UNCONFIRMED 终态，避免上层请求悬挂。
-    if (entry->tx_active) {
-      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                              now_ms);
-    }
+    // 中止进行中的事务（配置请求回 UNCONFIRMED；身份读取待重连重发）。
+    motor_control_abort_tx(ctx, entry, now_ms);
     if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
@@ -727,11 +687,8 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     entry->enable_pending = false;
     entry->motion_authorized = false; // 逐电机授权冻结（§36）
     entry->policy_enable = false;     // 冻结为 false：恢复需显式重发 Enable
-    // 中止进行中的配置事务：回 UNCONFIRMED 终态，避免上层请求悬挂。
-    if (entry->tx_active) {
-      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                              now_ms);
-    }
+    // 中止进行中的事务（配置请求回 UNCONFIRMED；身份读取待重连重发）。
+    motor_control_abort_tx(ctx, entry, now_ms);
     entry->unified_fault_code = MOTOR_CONTROL_FAULT_OFFLINE;
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_OFFLINE;
     ctx->require_new_snapshot = true; // 重连后旧授权/目标不复用（ARD §10.4）

@@ -177,25 +177,98 @@ static const motor_control_entry_t *entry_of(motor_control_context_t *ctx,
   return nullptr;
 }
 
-// 完整使能链路（vaxor 路径）：反馈 → 绑定 → 连接 → 授权。
+// ---- 设备身份读取（CERB SDO 0x1008）测试侧驱动器 --------------------------
+//
+// 与固件 adapter 对向实现同一线协议：上传发起应答（0x41 + 索引/子索引 +
+// 总字节数）与分段应答（byte0 = 000 t nnn c，数据在 byte1..7）。
+
+static motor_protocol_raw_frame_t sdo_initiate_response(uint16_t node,
+                                                        size_t total,
+                                                        uint32_t tick) {
+  uint8_t data[8] = {0x41, 0x08, 0x10, 0x00, 0, 0, 0, 0};
+  data[4] = (uint8_t)(total & 0xFFU);
+  data[5] = (uint8_t)((total >> 8) & 0xFFU);
+  return raw_frame(0, 0x580U + node, 8, data, tick);
+}
+
+static motor_protocol_raw_frame_t sdo_segment_response(
+    uint16_t node, uint8_t toggle, const uint8_t *payload, size_t payload_len,
+    bool last, uint32_t tick) {
+  uint8_t data[8] = {0};
+  const size_t unused = last ? 7U - payload_len : 0U;
+  data[0] = (uint8_t)(((toggle & 1U) << 4) | ((unused & 0x07U) << 1) |
+                      (last ? 1U : 0U));
+  memcpy(&data[1], payload, payload_len);
+  return raw_frame(0, 0x580U + node, 8, data, tick);
+}
+
+// 加速传输应答（单帧回全量，n = 未用字节数）。CANopen 加速传输上限 4 字节，
+// 故只用于短串用例。
+static motor_protocol_raw_frame_t sdo_expedited_response(uint16_t node,
+                                                         const char *text,
+                                                         uint32_t tick) {
+  const size_t len = strlen(text);
+  assert(len <= 4U);
+  uint8_t data[8] = {0};
+  data[0] = (uint8_t)(0x43U | ((uint8_t)(4U - len) << 2));
+  data[1] = 0x08;
+  data[2] = 0x10;
+  data[3] = 0x00;
+  memcpy(&data[4], text, len);
+  return raw_frame(0, 0x580U + node, 8, data, tick);
+}
+
+// 走完一次完整身份读取事务（事务每节拍至多推进一步，故逐段喂 service）。
+static void feed_identity(motor_control_context_t *ctx, uint16_t node,
+                          const char *identity, uint32_t tick) {
+  const size_t len = strlen(identity);
+  motor_control_service(ctx, tick); // 阶段 0：上传发起
+  motor_protocol_raw_frame_t ack = sdo_initiate_response(node, len, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  size_t offset = 0U;
+  uint8_t toggle = 0U;
+  while (offset < len) {
+    motor_control_service(ctx, tick + 2U + 2U * (uint32_t)toggle);
+    const size_t chunk = (len - offset) > 7U ? 7U : (len - offset);
+    const bool last = (offset + chunk) >= len;
+    motor_protocol_raw_frame_t seg =
+        sdo_segment_response(node, toggle, (const uint8_t *)identity + offset,
+                             chunk, last, tick + 3U + 2U * (uint32_t)toggle);
+    motor_control_on_raw_frame(ctx, &seg);
+    offset += chunk;
+    toggle = (uint8_t)((toggle + 1U) & 1U);
+  }
+}
+
+// 完整使能链路（vaxor 路径）：反馈 → 自动绑定（协议内唯一型号）→ 连接 → 授权。
 static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
                                  const char *profile_name, uint32_t tick) {
   motor_protocol_raw_frame_t f = vaxor_reply(motor_id, 0.0, 0.0, 0.0, tick);
   motor_control_on_raw_frame(ctx, &f);
+  motor_control_service(ctx, tick + 1U); // 识别在服务节拍上发起
   size_t idx;
   assert(find_profile(profile_name, &idx));
-  assert(motor_control_bind_profile(ctx, motor_id, idx, tick));
+  // vaxor 无身份读对象：内核按"协议内唯一型号"兜底绑定，无需上层干预。
+  assert(entry_of(ctx, motor_id)->profile == motor_control_profile_at(idx));
   motor_control_set_agent_connected(ctx, true, tick);
   assert(motor_control_set_authorization(ctx, true, tick));
 }
 
+// 完整使能链路（CERB 路径）：反馈 → 读设备自报身份 → 命中目录即绑定 →
+// 连接 → 授权。
 static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
                                 const char *profile_name, uint32_t tick) {
   motor_protocol_raw_frame_t f = cerb_feedback(motor_id, tick);
-  motor_control_on_raw_frame(ctx, &f);
+  motor_control_on_raw_frame(ctx, &f); // 建档即发起身份读取
   size_t idx;
   assert(find_profile(profile_name, &idx));
-  assert(motor_control_bind_profile(ctx, motor_id, idx, tick));
+  const motor_protocol_model_profile_t *profile = motor_control_profile_at(idx);
+  assert(profile->identity_string != NULL);
+  feed_identity(ctx, motor_id, profile->identity_string, tick + 1U);
+  assert(entry_of(ctx, motor_id)->profile == profile);
+  // 事务期的 P2 请求帧清掉，避免污染后续 TX 断言。
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
   motor_control_set_agent_connected(ctx, true, tick);
   assert(motor_control_set_authorization(ctx, true, tick));
 }
@@ -299,9 +372,11 @@ static bool mock_stage_encode(uint8_t stage, const motor_protocol_model_profile_
 
 static motor_protocol_stage_outcome_t mock_on_response(
     uint8_t stage, const motor_protocol_config_request_t *request,
-    const motor_protocol_raw_frame_t *response) {
+    const motor_protocol_raw_frame_t *response,
+    motor_protocol_read_buffer_t *read_out) {
   (void)stage;
   (void)request;
+  (void)read_out;
   // 依响应内容裁决（非盲目）：data[0]==1 → ADVANCE，否则 RETRY。
   return response != nullptr && response->data[0] == 1U
              ? MOTOR_PROTOCOL_STAGE_ADVANCE
@@ -317,6 +392,7 @@ static const motor_protocol_adapter_t g_mock_adapter = {
     true,  // autonomous_feedback
     false, // config_verify_required
     mock_match,
+    nullptr, // is_discovery_frame（mock 无事务应答帧，match 到的都是存在证据）
     mock_decode,
     mock_encode_mit,
     mock_encode_enable,
@@ -331,6 +407,7 @@ static const motor_protocol_adapter_t g_mock_adapter = {
 // mock 协议的测试 Profile（经指针版绑定 API 注入，不进生产型号目录）。
 static const motor_protocol_model_profile_t g_mock_profile = {
     "mock_model",
+    nullptr, // identity_string（mock 型号不在目录内，靠显式绑定注入）
     &g_mock_adapter,
     1.0f,
     1.0f,
@@ -363,18 +440,25 @@ static void test_init_starts_unauthorized_and_empty() {
   assert(motor_control_collect_tx(&ctx, frames, 4) == 0);
 }
 
-// 生命周期：帧 → DISCOVERED → 绑定 → READY_DISABLED（ARD §43.1 第 1 条）。
+// 生命周期：帧 → DISCOVERED → 识别 → READY_DISABLED（ARD §43.1 第 1 条）。
+// vaxor 无身份读对象，识别即"协议内唯一型号"兜底，首帧一步到位；
+// 需要等设备回串的协议（CERB）中间停在 DISCOVERED/IDENTIFYING，见
+// test_identity_read_binds_and_unknown_stays_unbound 与
+// test_identifying_state_observed。
 static void test_frame_creates_discovered_then_bind_readies() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
   motor_control_on_raw_frame(&ctx, &f);
   assert(ctx.entry_count == 1);
+  // 帧到达只建档：识别是服务节拍上的动作（不占 RX 路径）。
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_DISCOVERED);
+  assert(entry_of(&ctx, 5)->profile == NULL);
 
+  motor_control_service(&ctx, 101);
   size_t vaxor_2550;
   assert(find_profile("vaxor_2550", &vaxor_2550));
-  assert(motor_control_bind_profile(&ctx, 5, vaxor_2550, 110));
+  assert(entry_of(&ctx, 5)->profile == motor_control_profile_at(vaxor_2550));
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   // drain 是消费性的：一次取出全部事件再断言多个类型。
   motor_control_event_t seen[64];
@@ -542,24 +626,20 @@ static void test_p0_requeue_after_downstream_failure() {
   assert(found_p0);
 }
 
-// 编译期拓扑 resolver（下行 MotorBind 话题删除后的绑定来源）：建档/重连
-// 自动按名绑定；表外电机与 NULL resolver 保持未绑定（安全侧）。
-static const char *bench_resolver(uint16_t motor_id) {
-  return motor_id == 5 ? "vaxor_2550" : NULL;
-}
-
-static void test_static_model_resolver_auto_bind() {
+// 身份读取 → 自动绑定全链路：建档即读设备自报型号，命中目录绑定并收敛
+// READY_DISABLED，事件可见；未命中目录（认不出的设备）保持不可控。
+static void test_identity_read_binds_and_unknown_stays_unbound() {
+  // (a) 命中：R48 自报串 → cerb_r48_101。
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  motor_control_set_model_resolver(&ctx, bench_resolver);
-
-  // 建档即绑定：PROFILE_BOUND + READY，收敛 READY_DISABLED（events_contain
-  // 是排空式断言，两个事件须在单次排空中同时确认）。
-  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_protocol_raw_frame_t f = cerb_feedback(7, 100);
   motor_control_on_raw_frame(&ctx, &f);
-  assert(entry_of(&ctx, 5) != NULL);
-  assert(entry_of(&ctx, 5)->profile != NULL);
-  assert(entry_of(&ctx, 5)->lifecycle ==
+  assert(entry_of(&ctx, 7)->profile == NULL); // 首帧只建档，身份未回
+  feed_identity(&ctx, 7, "R48LITE_V2", 101);
+  size_t idx;
+  assert(find_profile("cerb_r48_101", &idx));
+  assert(entry_of(&ctx, 7)->profile == motor_control_profile_at(idx));
+  assert(entry_of(&ctx, 7)->lifecycle ==
          MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   {
     bool bound = false, ready = false;
@@ -567,7 +647,7 @@ static void test_static_model_resolver_auto_bind() {
     size_t n;
     while ((n = motor_control_drain_events(&ctx, drained, 64)) > 0) {
       for (size_t i = 0; i < n; ++i) {
-        if (drained[i].motor_id != 5) {
+        if (drained[i].motor_id != 7) {
           continue;
         }
         bound = bound || drained[i].type == MOTOR_CONTROL_EVENT_PROFILE_BOUND;
@@ -578,108 +658,213 @@ static void test_static_model_resolver_auto_bind() {
     assert(ready);
   }
 
-  // 表外电机：不绑定，profile==NULL（不可控）。
-  motor_protocol_raw_frame_t f9 = vaxor_reply(9, 0.0, 0.0, 0.0, 110);
-  motor_control_on_raw_frame(&ctx, &f9);
-  assert(entry_of(&ctx, 9) != NULL);
-  assert(entry_of(&ctx, 9)->profile == NULL);
-
-  // 离线 → 重连：resolver 在重连路径再次按名绑定收敛 READY_DISABLED。
-  motor_control_service(&ctx, 300); // 100ms 无帧 → OFFLINE（vaxor 判龄）
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE);
-  motor_protocol_raw_frame_t f2 = vaxor_reply(5, 0.0, 0.0, 0.0, 400);
-  motor_control_on_raw_frame(&ctx, &f2);
-  assert(entry_of(&ctx, 5)->lifecycle ==
-         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_BOUND, 5));
-
-  // NULL resolver（host 默认）：恢复显式绑定语义，不自动绑定。
+  // (b) 未命中：目录外自报串 → PROFILE_REJECTED + 保持不可控（不猜型号）。
   motor_control_context_t ctx2;
   motor_control_init(&ctx2, g_adapters, 2);
-  motor_control_set_model_resolver(&ctx2, NULL);
-  motor_protocol_raw_frame_t f5 = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
-  motor_control_on_raw_frame(&ctx2, &f5);
-  assert(entry_of(&ctx2, 5)->profile == NULL);
-  // 新建表项首帧停在 DISCOVERED（识别推进在次帧）；关键是无 profile、未绑定。
-  assert(entry_of(&ctx2, 5)->lifecycle ==
-         MOTOR_CONTROL_LIFECYCLE_DISCOVERED);
-}
-
-// MotorBind 过渡绑定通道的内核行为（按名绑定）。
-static void test_bind_profile_by_name() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
-  motor_control_on_raw_frame(&ctx, &f); // 仅发现，未绑定
-
-  // 未知名、空名或未发现设备：拒绝并回 PROFILE_REJECTED。
-  assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
-  assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 110));
-  assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 110));
-
-  // 命中：绑定 + PROFILE_BOUND + 识别收敛 READY_DISABLED（events_contain
-  // 是排空式断言，两个事件须在单次排空中同时确认）。
-  assert(motor_control_bind_profile_by_name(&ctx, 5, "vaxor_2550", 120));
-  assert(entry_of(&ctx, 5)->profile != NULL);
-  assert(entry_of(&ctx, 5)->lifecycle ==
-         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  {
-    bool bound = false, ready = false;
-    motor_control_event_t drained[64];
-    size_t n;
-    while ((n = motor_control_drain_events(&ctx, drained, 64)) > 0) {
-      for (size_t i = 0; i < n; ++i) {
-        if (drained[i].motor_id != 5) {
-          continue;
-        }
-        bound = bound || drained[i].type == MOTOR_CONTROL_EVENT_PROFILE_BOUND;
-        ready = ready || drained[i].type == MOTOR_CONTROL_EVENT_READY;
-      }
-    }
-    assert(bound);
-    assert(ready);
-  }
-}
-
-// 绑定拒绝必须回 PROFILE_REJECTED 事件（MotorBind.msg 契约：结果经
-// PROFILE_BOUND/PROFILE_REJECTED 回告）——未知名与设备未发现曾静默 false。
-static void test_bind_rejection_emits_profile_rejected() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
-  motor_control_on_raw_frame(&ctx, &f); // 设备 5 已发现（bus 0）
+  motor_protocol_raw_frame_t f2 = cerb_feedback(8, 100);
+  motor_control_on_raw_frame(&ctx2, &f2);
   motor_control_event_t clear_buf[64];
-  (void)motor_control_drain_events(&ctx, clear_buf, 64); // 清空引导 DISCOVERED 事件
-
-  // (a) 已发现 + 未知名 → 事件 reason=3（PROFILE_UNAVAILABLE），bus=表项总线。
-  assert(!motor_control_bind_profile_by_name(&ctx, 5, "vaxor_80", 110));
+  (void)motor_control_drain_events(&ctx2, clear_buf, 64);
+  feed_identity(&ctx2, 8, "R99LITE_V9", 101);
+  assert(entry_of(&ctx2, 8)->profile == NULL);
   motor_control_event_t ev = {};
-  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
+  assert(motor_control_drain_events(&ctx2, &ev, 1) == 1);
   assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
-  assert(ev.motor_id == 5);
+  assert(ev.motor_id == 8);
   assert(ev.bus_index == 0);
   assert(ev.reason == MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE);
+}
 
-  // (b) 空名防御路径 → 同样回告。
-  assert(!motor_control_bind_profile_by_name(&ctx, 5, "", 120));
-  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
-  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
+// 身份串比较规则：尾随 NUL/空白剪掉后整串精确匹配，不做前缀/模糊匹配。
+static void test_identity_string_match_is_exact() {
+  const motor_protocol_adapter_t *cerb = &motor_protocol_cerb_adapter;
+  const uint8_t exact[] = {'R', '4', '8', 'L', 'I', 'T', 'E', '_', 'V', '2'};
+  assert(motor_control_profile_by_identity(cerb, exact, sizeof(exact)) != NULL);
+  // 尾随填充（SDO 按对象声明长度回传常见形态）不影响判定。
+  const uint8_t padded[] = {'R', '4', '8', 'L', 'I', 'T', 'E', '_',
+                            'V', '2', 0, 0, 32};
+  assert(motor_control_profile_by_identity(cerb, padded, sizeof(padded)) != NULL);
+  // 前缀、大小写与多一字符都不许命中。
+  const uint8_t prefix[] = {'R', '4', '8'};
+  assert(motor_control_profile_by_identity(cerb, prefix, sizeof(prefix)) == NULL);
+  const uint8_t lower[] = {'r', '4', '8', 'l', 'i', 't', 'e', '_',
+                           'v', '2'};
+  assert(motor_control_profile_by_identity(cerb, lower, sizeof(lower)) == NULL);
+  const uint8_t longer[] = {'R', '4', '8', 'L', 'I', 'T', 'E', '_',
+                            'V', '2', 'X'};
+  assert(motor_control_profile_by_identity(cerb, longer, sizeof(longer)) == NULL);
+  // 协议不符不得命中（同一身份串拿去 vaxor 上查）。
+  assert(motor_control_profile_by_identity(&motor_protocol_vaxor_adapter, exact,
+                                           sizeof(exact)) == NULL);
+  assert(motor_control_profile_by_identity(cerb, NULL, 0U) == NULL);
+  // 协议内唯一型号兜底：vaxor 只有一型 → 命中；cerb 有两型 → NULL（不猜）。
+  assert(motor_control_profile_sole(&motor_protocol_vaxor_adapter) != NULL);
+  assert(motor_control_profile_sole(&motor_protocol_cerb_adapter) == NULL);
+}
 
-  // (c) 未发现 id=99 + 已知名 → 事件 bus=0。
-  assert(!motor_control_bind_profile_by_name(&ctx, 99, "vaxor_2550", 130));
-  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
-  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED);
-  assert(ev.motor_id == 99);
-  assert(ev.bus_index == 0);
-  assert(ev.reason == MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE);
+// 身份读取失败的终态：不绑定、不逐帧重试（只发一次事务）；超时同理。
+static void test_identity_read_failure_stays_unbound_without_retry() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = cerb_feedback(9, 100);
+  motor_control_on_raw_frame(&ctx, &f);
+  // 设备从容不应答（SDO 不实现/被滤掉）：每阶段 20ms 超时 ×≤2 次重试。
+  // 期间维持 20ms 心跳，隔离"事务超时"与"心跳丢失判离线"两条路径。
+  for (uint32_t t = 110U; t <= 260U; t += 10U) {
+    if (t % 40U == 0U) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
+      motor_control_on_raw_frame(&ctx, &hb);
+    }
+    motor_control_service(&ctx, t);
+  }
+  assert(entry_of(&ctx, 9)->online);
+  assert(entry_of(&ctx, 9)->profile == NULL);
+  // 读毕后不再发起新事务：排空待发队列后再看不再产生 SDO 请求帧。
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (uint32_t t = 270U; t <= 330U; t += 10U) {
+    motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
+    motor_control_on_raw_frame(&ctx, &hb);
+    motor_control_service(&ctx, t);
+  }
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (size_t i = 0; i < n; ++i) {
+    assert(frames[i].can_id < 0x600U || frames[i].can_id > 0x67FU); // 无 SDO 请求
+  }
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 9));
+}
 
-  // (d) 正常绑定不受影响 → PROFILE_BOUND。
+// 重连重新识别：profile 不沿用旧读数，重新读身份后才回到可绑定态。
+static void test_reconnect_reidentifies_device() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 4, "cerb_r58_101", 100);
+  assert(entry_of(&ctx, 4)->profile != NULL);
+
+  motor_control_service(&ctx, 400); // 心跳龄超 100ms → OFFLINE
+  assert(entry_of(&ctx, 4)->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE);
+
+  motor_protocol_raw_frame_t back = cerb_feedback(4, 500);
+  motor_control_on_raw_frame(&ctx, &back);
+  // 重连即作废旧身份：未读回前不可控（换成别的型号的话不得沿用旧换算比）。
+  assert(entry_of(&ctx, 4)->profile == NULL);
+  feed_identity(&ctx, 4, "R48LITE_V2", 501);
   size_t idx;
-  assert(find_profile("vaxor_2550", &idx));
-  assert(motor_control_bind_profile(&ctx, 5, idx, 140));
-  assert(motor_control_drain_events(&ctx, &ev, 1) == 1);
-  assert(ev.type == MOTOR_CONTROL_EVENT_PROFILE_BOUND);
-  assert(ev.motor_id == 5);
+  assert(find_profile("cerb_r48_101", &idx));
+  assert(entry_of(&ctx, 4)->profile == motor_control_profile_at(idx));
+  assert(entry_of(&ctx, 4)->lifecycle ==
+         MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+}
+
+// 事务中止（撤权路径）不算"识别失败"：身份读取重连后仍会重新发起。
+static void test_identity_read_abort_is_not_a_verdict() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_control_set_agent_connected(&ctx, true, 50);
+  assert(motor_control_set_authorization(&ctx, true, 60));
+
+  motor_protocol_raw_frame_t f = cerb_feedback(6, 100);
+  motor_control_on_raw_frame(&ctx, &f); // 身份事务已发起，未应答
+  // 断链撤权 → 中止事务（不判成败、不回 PROFILE_REJECTED）。
+  motor_control_set_agent_connected(&ctx, false, 110);
+  motor_control_event_t ev = {};
+  size_t n = 0;
+  bool rejected = false;
+  while (motor_control_drain_events(&ctx, &ev, 1) == 1) {
+    rejected = rejected || ev.type == MOTOR_CONTROL_EVENT_PROFILE_REJECTED;
+    if (++n > 64U) {
+      break;
+    }
+  }
+  assert(!rejected);
+
+  // 重连后重新识别仍然成功（若中止被误判为"识别失败"，这里就永远绑不上）。
+  motor_protocol_raw_frame_t back = cerb_feedback(6, 200);
+  motor_control_on_raw_frame(&ctx, &back);
+  feed_identity(&ctx, 6, "R58LITE_V2", 201);
+  size_t idx;
+  assert(find_profile("cerb_r58_101", &idx));
+  assert(entry_of(&ctx, 6)->profile == motor_control_profile_at(idx));
+}
+
+// SDO 应答可归属但不得凭空建档（只有 12B 状态上报是"设备存在"证据）；
+// 已知设备的迟到/杂散应答只服务裁决，不得计入解码错误。
+static void test_sdo_response_alone_creates_no_entry() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t ack = sdo_initiate_response(3, 10, 100);
+  motor_control_on_raw_frame(&ctx, &ack);
+  assert(ctx.entry_count == 0U);
+  assert(ctx.unknown_frame_count == 1U);
+
+  // 已知设备（已绑定、无未决事务）收到杂散 SDO 应答：静默丢弃。
+  motor_protocol_raw_frame_t f = cerb_feedback(3, 200);
+  motor_control_on_raw_frame(&ctx, &f);
+  motor_control_service(&ctx, 201);
+  feed_identity(&ctx, 3, "R48LITE_V2", 202);
+  assert(entry_of(&ctx, 3)->profile != NULL);
+  const uint32_t errors_before = ctx.decode_error_count;
+  motor_protocol_raw_frame_t stray = sdo_initiate_response(3, 10, 400);
+  motor_control_on_raw_frame(&ctx, &stray);
+  assert(ctx.decode_error_count == errors_before);
+  assert(entry_of(&ctx, 3)->profile != NULL);
+}
+
+// 事务等待期内到达的同节点周期上报必须被忽略（不是应答）：不推进阶段、
+// 不计重试，且照常走解码供运动状态使用。
+static void test_identity_read_ignores_heartbeat_frames() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = cerb_feedback(5, 100);
+  motor_control_on_raw_frame(&ctx, &f);
+  motor_control_service(&ctx, 101); // 阶段 0：上传发起，进入等待
+
+  motor_protocol_raw_frame_t hb = cerb_feedback(5, 102);
+  motor_control_on_raw_frame(&ctx, &hb); // 同节点周期上报
+  assert(ctx.decode_error_count == 0U);  // 仍是正常反馈帧，不是协议错误
+  assert(entry_of(&ctx, 5)->has_measured);
+  // 心跳不得把事务推走：真实应答到达后仍从阶段 0 继续。
+  motor_protocol_raw_frame_t ack = sdo_initiate_response(5, 10, 103);
+  motor_control_on_raw_frame(&ctx, &ack);
+  motor_control_service(&ctx, 104);
+  motor_protocol_raw_frame_t seg =
+      sdo_segment_response(5, 0, (const uint8_t *)"R58LITE_V2", 7, false, 105);
+  motor_control_on_raw_frame(&ctx, &seg);
+  motor_control_service(&ctx, 106);
+  // 续段 = 身份串第 7..9 字节（"R58LITE" + "_V2"）。
+  motor_protocol_raw_frame_t last =
+      sdo_segment_response(5, 1, (const uint8_t *)"_V2", 3, true, 107);
+  motor_control_on_raw_frame(&ctx, &last);
+  size_t idx;
+  assert(find_profile("cerb_r58_101", &idx));
+  assert(entry_of(&ctx, 5)->profile == motor_control_profile_at(idx));
+}
+
+// 加速传输（≤4B 单帧回全量）走通且目录无此串 → 不绑定；
+// 应答回带的索引不符 → 读到的内容不可信，直接判读失败。
+static void test_identity_read_expedited_and_wrong_index() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = cerb_feedback(2, 100);
+  motor_control_on_raw_frame(&ctx, &f);
+  motor_control_service(&ctx, 101);
+  motor_protocol_raw_frame_t ack = sdo_expedited_response(2, "R48V", 102);
+  motor_control_on_raw_frame(&ctx, &ack);
+  assert(entry_of(&ctx, 2)->profile == NULL);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 2));
+
+  // 索引不符（设备回了别的对象 0x1000，与它 0x1008 的诉求无关）：不猜。
+  motor_control_context_t ctx2;
+  motor_control_init(&ctx2, g_adapters, 2);
+  motor_protocol_raw_frame_t f2 = cerb_feedback(3, 100);
+  motor_control_on_raw_frame(&ctx2, &f2);
+  motor_control_service(&ctx2, 101);
+  uint8_t wrong[8] = {0x41, 0x00, 0x10, 0x00, 10, 0, 0, 0}; // 索引 0x1000
+  motor_protocol_raw_frame_t wf = raw_frame(0, 0x580U + 3, 8, wrong, 102);
+  motor_control_on_raw_frame(&ctx2, &wf);
+  assert(entry_of(&ctx2, 3)->profile == NULL);
+  assert(events_contain(&ctx2, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 3));
 }
 
 // 快照含未注册 motor_id → 整体拒绝（ARD §15.5：不存在/冲突设备必须拒绝）。
@@ -841,7 +1026,7 @@ static void test_recovery_requires_fresh_snapshot_not_old_targets() {
   motor_protocol_raw_frame_t f2 = vaxor_reply(5, 0.0, 0.0, 0.0, 705);
   motor_control_on_raw_frame(&ctx, &f2);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING); // 重连帧非首帧：发现→识别即时推进
-  motor_control_service(&ctx, 706); // 识别流推进（Profile 保留 → READY）
+  motor_control_service(&ctx, 706); // 重新识别 → 绑定 → READY_DISABLED
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   // 循环期 100ms 级联已再次清权：按恢复语义重新授权（ARD §13.3）。
   assert(motor_control_set_authorization(&ctx, true, 708));
@@ -934,7 +1119,10 @@ static void test_vaxor_offline_and_reconnect() {
   motor_protocol_raw_frame_t f2 = vaxor_reply(5, 0.0, 0.0, 0.0, 300);
   motor_control_on_raw_frame(&ctx, &f2);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING); // 重连帧非首帧：发现→识别即时推进
-  motor_control_service(&ctx, 302); // 识别流推进（Profile 保留 → READY）
+  // 旧 profile 已在重连时作废（身份是设备事实，可能换机）；本拍重新识别
+  // （vaxor 走"协议内唯一型号"兜底）→ 绑定 → READY_DISABLED。
+  assert(entry_of(&ctx, 5)->profile == NULL);
+  motor_control_service(&ctx, 302);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_RECONNECTED, 5));
   assert(motor_control_set_authorization(&ctx, true, 305)); // 重新授权
@@ -1643,6 +1831,8 @@ static void test_conflict_survives_offline_reconnect() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
+// 识别只在服务节拍上发生：帧路径只推进 DISCOVERED → IDENTIFYING，不绑定
+// （识别要发事务帧，属于服务路径的职责，RX 路径不做总线输出）。
 // DISCOVERED→IDENTIFYING 中间态可观测（ARD §43.1 第 1 条）。
 static void test_identifying_state_observed() {
   motor_control_context_t ctx;
@@ -2298,9 +2488,14 @@ static void run_all_tests() {
   test_identity_conflict_same_bus_different_protocol();
   test_enter_active_requires_auth_profile_snapshot();
   test_p0_requeue_after_downstream_failure();
-  test_bind_profile_by_name();
-  test_bind_rejection_emits_profile_rejected();
-  test_static_model_resolver_auto_bind();
+  test_identity_read_binds_and_unknown_stays_unbound();
+  test_identity_string_match_is_exact();
+  test_identity_read_failure_stays_unbound_without_retry();
+  test_reconnect_reidentifies_device();
+  test_identity_read_abort_is_not_a_verdict();
+  test_sdo_response_alone_creates_no_entry();
+  test_identity_read_ignores_heartbeat_frames();
+  test_identity_read_expedited_and_wrong_index();
   test_snapshot_with_unknown_motor_rejected();
   test_snapshot_absence_soft_stops_motor();
   test_30ms_stale_snapshot_soft_stops();

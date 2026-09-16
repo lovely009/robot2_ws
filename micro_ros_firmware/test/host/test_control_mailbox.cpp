@@ -369,41 +369,6 @@ static void test_config_gate_precedes_validation() {
   assert(mailbox.config_overflow_count == 0U);
 }
 
-// 身份绑定 FIFO：非法输入拒绝、往返、满拒、断链不清（绑定是身份事实）。
-static void test_bind_fifo_persists_across_disconnect() {
-  control_mailbox_t mailbox{};
-  control_mailbox_init(&mailbox);
-
-  assert(!control_mailbox_submit_bind(&mailbox, 0U, "vaxor_2550")); // id==0
-  assert(!control_mailbox_submit_bind(&mailbox, 5U, ""));           // 空名
-  char long_name[CONTROL_MAILBOX_BIND_NAME_CAPACITY + 1U] = {0};
-  memset(long_name, 'a', sizeof(long_name) - 1U);
-  assert(!control_mailbox_submit_bind(&mailbox, 5U, long_name)); // 超长
-
-  for (uint16_t id = 1U; id <= CONTROL_MAILBOX_BIND_QUEUE_CAPACITY; ++id) {
-    assert(control_mailbox_submit_bind(&mailbox, id, "vaxor_2550"));
-  }
-  assert(!control_mailbox_submit_bind(&mailbox, 9U, "vaxor_2550")); // 满拒
-
-  // 断链清命令与配置，但绑定保留（重连无需重发）。
-  control_mailbox_request_agent_connected(&mailbox, false);
-  control_mailbox_events_t events{};
-  (void)control_mailbox_take_events(&mailbox, &events);
-  control_command_snapshot_t command_out{};
-  assert(!control_mailbox_take_command(&mailbox, &command_out));
-  control_mailbox_config_request_t config_out{};
-  assert(!control_mailbox_take_config(&mailbox, &config_out));
-
-  for (uint16_t id = 1U; id <= CONTROL_MAILBOX_BIND_QUEUE_CAPACITY; ++id) {
-    control_mailbox_bind_request_t bind_out{};
-    assert(control_mailbox_take_bind(&mailbox, &bind_out));
-    assert(bind_out.motor_id == id);
-    assert(strcmp(bind_out.model_name, "vaxor_2550") == 0);
-  }
-  control_mailbox_bind_request_t bind_out{};
-  assert(!control_mailbox_take_bind(&mailbox, &bind_out));
-}
-
 int main() {
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
@@ -414,6 +379,5 @@ int main() {
   test_session_edge_matrix();
   test_config_set_enable_queues();
   test_config_gate_precedes_validation();
-  test_bind_fifo_persists_across_disconnect();
   return 0;
 }

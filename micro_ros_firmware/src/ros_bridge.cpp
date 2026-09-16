@@ -1,7 +1,7 @@
 // micro-ROS 桥接层（agent 通信生命周期）。
 //
 // 职责：node + executor + 周期定时器生命周期管理，agent 断连后整体重建。
-// 业务域实体由 imu_bridge / motor_bridge 各自维护，
+// 业务域实体由 imu_bridge / motor_bridge / param_bridge 各自维护，
 // 本模块只负责创建/销毁顺序与定时轮询分发。
 //
 // 注释规范：中文写意图，micro-ROS / ROS 2 API 保留英文。
@@ -20,6 +20,7 @@
 #include "imu_bridge.h"
 #include "motor_bridge.h"
 #include "motor_rt_task.h"
+#include "param_bridge.h"
 
 static const char *kNodeName = "micro_ros_node";
 
@@ -29,9 +30,12 @@ static rclc_executor_t g_executor;
 static rcl_timer_t g_timer;
 static rcl_allocator_t g_allocator;
 
-// executor 最大句柄数：定时器 + 各业务桥订阅数（桥自报，避免魔法数截断）。
+// executor 最大句柄数：定时器 + 各业务桥订阅数 + 参数服务器（桥自报，
+// 避免魔法数截断）。参数服务器的 5 个 service handle 少算一个就会在
+// rclc_executor_add_parameter_server 上失败。
 static size_t executor_handle_count() {
-  return 1U + motor_bridge_executor_handle_count();
+  return 1U + motor_bridge_executor_handle_count() +
+         PARAM_BRIDGE_EXECUTOR_HANDLES;
 }
 
 // 按初始化阶段跟踪，保证失败/断连时只清理已成功创建的实体
@@ -53,6 +57,9 @@ static void destroy_entities() {
   motor_rt_set_agent_connected(false);
   imu_bridge_destroy(&g_node);
   motor_bridge_destroy(&g_node, &g_executor);
+  // 参数服务器只 fini 自己的实体；留在 executor 里的 service handle 由下方
+  // rclc_executor_fini 一并回收（rclc 没有 remove_parameter_server）。
+  param_bridge_destroy(&g_node);
 
   if (g_timer_up) {
     rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);
@@ -106,6 +113,10 @@ static bool create_entities() {
     return false;
   }
   if (!motor_bridge_create(&g_node, &g_executor)) {
+    destroy_entities();
+    return false;
+  }
+  if (!param_bridge_create(&g_node, &g_executor)) {
     destroy_entities();
     return false;
   }

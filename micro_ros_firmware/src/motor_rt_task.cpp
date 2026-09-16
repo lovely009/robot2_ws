@@ -14,7 +14,6 @@
 #include "fdcan.h"
 #include "motor_event_relay.h"
 #include "motor_protocol_adapter.h"
-#include "motor_static_topology.h"
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
@@ -29,7 +28,6 @@ static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈�
 static const uint32_t kTxCollectBudget = 16U;       // 每 1ms 最多取走内核待发帧数
 static const uint32_t kTxPumpBudgetPerBus = 8U;     // 每 1ms 每总线最多提交帧数
 static const uint32_t kConfigDrainPerBoundary = 4U; // 每 10ms 边界最多转发配置数
-static const uint32_t kBindDrainPerBoundary = 4U;   // 每 10ms 边界最多转发绑定数
 static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
                                                     // 20ms 状态上报，与 VAXOR
                                                     // 20ms 自推统一 50Hz）
@@ -437,20 +435,6 @@ static void control_boundary(void) {
     (void)motor_control_submit_config(&g_motor_control, &request, now_ms);
   }
 
-  // 身份绑定 FIFO 有界转发（TBD-PROFILE-01 过渡通道；断链不清，重连后
-  // 绑定仍有效；结果经内核 PROFILE_BOUND/PROFILE_REJECTED 事件回告）。
-  for (uint32_t i = 0; i < kBindDrainPerBoundary; ++i) {
-    control_mailbox_bind_request_t bind_in = {0};
-    bool got_bind = false;
-    taskENTER_CRITICAL();
-    got_bind = control_mailbox_take_bind(&g_control_mailbox, &bind_in);
-    taskEXIT_CRITICAL();
-    if (!got_bind) {
-      break;
-    }
-    (void)motor_control_bind_profile_by_name(&g_motor_control, bind_in.motor_id,
-                                             bind_in.model_name, now_ms);
-  }
 }
 
 // IWDG 仅由 motor_rt 任务喂：安全任务停摆会超时复位至 WAIT_AGENT 和授权
@@ -527,10 +511,9 @@ bool motor_rt_task_start(void) {
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
-  // 编译期拓扑注入：下行 bind/policy/config/enable 话题已删，型号绑定改由
-  // 静态表在发现建档/重连时自动完成（src/motor_static_topology.c）。
-  motor_control_set_model_resolver(&g_motor_control,
-                                   motor_static_topology_model_for);
+  // 型号绑定不需要注入：内核在发现建档/重连时向设备读自报身份并查型号
+  // 目录（协议 adapter 的 READ_IDENTITY 事务），无身份读对象的协议回退到
+  // "协议内唯一型号"。表外设备保持未绑定不可控。
   motor_event_relay_init(&g_event_relay);
   // watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
 

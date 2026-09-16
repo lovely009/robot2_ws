@@ -39,14 +39,18 @@ cd micro_ros_firmware
   `micro_ros/motor_events`。无 `joint_name`；设备经反馈帧自主发现（vaxor 自主
   上报 / CERB SYNC 上报）。
 - 下行配置通道（`motor_policy`/`motor_config`/`motor_bind`/`motor_enable` 与
-  `motor_config_result`）已删除：型号绑定来自编译期静态表
-  `src/motor_static_topology.c`——内核经 `motor_control_set_model_resolver` 在
-  发现建档/重连时按名自动绑定（表外电机不绑定、不可控，绑定失败不逐帧重试）；
+  `motor_config_result`）已删除：**型号绑定由内核读设备自报身份自动完成**
+  （2026-09-16 起）——发现建档/重连后，1ms 服务节拍按不变量复检
+  （在线 + 处于可绑定生命周期 + 本轮未定论 + 无事务在飞）发起
+  `MOTOR_PROTOCOL_CONFIG_READ_IDENTITY` 事务：CERB 走 CANopen SDO 分段上传
+  读 0x1008（厂家名称，实测回串 `R48LITE_V2` / `R58LITE_V2`），回串剪掉
+  尾随 NUL/空白后与型号目录 `identity_string` 整串精确匹配；无身份读对象的
+  协议（vaxor）回退到"协议内唯一型号"。未命中目录 → `PROFILE_REJECTED` +
+  保持未绑定不可控（不猜型号）；本轮定论后不再重试，重连会重新识别。
   授权/增益/限位取内核安全默认（建档 `policy_enable` 默认 true、全局授权
   mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、CERB 限位在
-  驱动器侧）。host 测试默认 resolver=NULL，走显式 bind API
-  （`test_static_model_resolver_auto_bind`）。内核 bind/submit_config API 与
-  mailbox config/bind FIFO 保留（测试覆盖、无 ROS 生产者）。
+  驱动器侧）。内核 `bind_profile`/`submit_config` API 保留（测试覆盖与目录内
+  定向绑定）；mailbox bind FIFO 已随静态表一并删除。
 - `.msg` 文件（MotorBind/MotorConfig/MotorPolicy/MotorConfigResult）暂保留于
   can_bridge_msgs（ros2_ws 侧 motor_sim/web_host 仍引用），固件已停用——
   删除须同步改 ros2_ws 并刷新 micro-ROS 类型（勿用 clean_microros）。

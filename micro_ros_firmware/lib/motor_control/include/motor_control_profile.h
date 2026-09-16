@@ -23,6 +23,17 @@ extern "C" {
 size_t motor_control_profile_count(void);
 const motor_protocol_model_profile_t *motor_control_profile_at(size_t index);
 
+// 按设备自报身份串查型号：协议与身份串双匹配，剪掉回串的尾随 NUL/空白后
+// 整串精确比较（无前缀/模糊匹配）。未命中返回 NULL（不绑定，不可控）。
+const motor_protocol_model_profile_t *motor_control_profile_by_identity(
+    const motor_protocol_adapter_t *protocol, const uint8_t *identity,
+    size_t length);
+
+// 协议内唯一型号：目录内该协议只有一行才返回，多行返回 NULL（无从判定不猜）。
+// 供无身份读对象的协议兜底绑定（如 vaxor）。
+const motor_protocol_model_profile_t *motor_control_profile_sole(
+    const motor_protocol_adapter_t *protocol);
+
 #ifdef __cplusplus
 }
 #endif

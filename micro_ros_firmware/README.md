@@ -193,11 +193,12 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   缺席的受控电机立即软停，禁止沿用旧目标。
 
 下行配置通道（`motor_enable`/`motor_policy`/`motor_config`/`motor_bind` 与
-`motor_config_result`）已删除（2026-09-15）：型号绑定来自编译期静态表
-`src/motor_static_topology.c`——内核 resolver 在发现建档/重连时自动按名绑定
-（表外电机不绑定、不可控）；授权/增益/限位取内核安全默认（建档 `policy_enable`
-默认 true、全局授权 mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、
-CERB 限位在驱动器侧配置）。
+`motor_config_result`）已删除：型号绑定由内核读设备自报身份自动完成
+（2026-09-16 起，静态拓扑表已删）——发现建档/重连后经事务读 CERB SDO 0x1008
+（厂家名称）并与型号目录整串精确匹配；vaxor 无身份读对象，回退到"协议内唯一
+型号"。未命中目录的设备保持未绑定不可控。授权/增益/限位取内核安全默认（建档
+`policy_enable` 默认 true、全局授权 mailbox 引导豁免、增益回退 profile
+`default_kp/default_kd`、CERB 限位在驱动器侧配置）。
 
 发布（上行，4 个话题；均为 ID 化，缺失浮点 = NaN）：
 
@@ -207,8 +208,8 @@ CERB 限位在驱动器侧配置）。
   保护位/事务状态）。
 - `micro_ros/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
   （`motor_id`/总线/协议/型号/能力/冲突标志）。
-- `micro_ros/motor_events`（`MotorEvent`）：生命周期/安全事件流（含静态绑定的
-  PROFILE_BOUND / PROFILE_REJECTED）。
+- `micro_ros/motor_events`（`MotorEvent`）：生命周期/安全事件流（含身份识别
+  的 PROFILE_BOUND / PROFILE_REJECTED）。
 
 `motor_id ↔ joint_name` 的映射、方向与零位是**上层职责**（上层迁移进行中，
 见 HANDOFF「剩余工作」）；固件不做 name-to-ID 适配。
@@ -266,9 +267,13 @@ CERB 限位在驱动器侧配置）。
   100Hz，并记录 motor_rt cycle WCET 与周期 jitter。
 - [ ] 停止刷新快照，验证 30ms 边界进入默认 `kd` 阻尼软停、100ms 边界协议级
   失能并清授权；单电机从快照缺席，验证仅该电机软停、其他电机不受影响。
-- [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后静态拓扑
-  resolver 自动重绑定收敛 READY_DISABLED，恢复运动必须复位控制板
-  （编译期授权语义）+ 新完整快照，期间不得自行恢复或重放。
+- [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后内核重新读
+  设备自报身份（CERB SDO 0x1008）并重绑定收敛 READY_DISABLED，恢复运动必须
+  复位控制板（编译期授权语义）+ 新完整快照，期间不得自行恢复或重放。
+- [ ] 身份识别台架核对：`ros2 topic echo micro_ros/motor_topology` 中各 CERB
+  节点的 `model_name` 应与铭牌一致（R48/R58 不得互相误判）；拔掉某台设备后
+  该行消失，重新上电后被重新识别；目录外型号应停留在未绑定并出
+  PROFILE_REJECTED 事件。
 - [ ] 验证 OFFLINE/厂家故障冻结的逐电机授权不会因重连自动复立（须复位）；
   CERB 重新使能后必须等待至少 100ms 才发送运动目标。
 - [ ] 注入 NaN/Inf、未知/重复 motor_id、非法 mode，验证快照整体拒绝、拒绝

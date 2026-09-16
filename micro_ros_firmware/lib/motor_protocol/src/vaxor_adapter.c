@@ -233,7 +233,9 @@ vaxor_config_stage_count(const motor_protocol_model_profile_t *profile,
   if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
     return 2U;
   }
-  return 0U; // 增益是本地 Policy；限位仅软件（不走设备事务）
+  return 0U; // 增益是本地 Policy；限位仅软件（不走设备事务）；
+             // READ_IDENTITY 无读对象（设备无自报型号串）→ 内核回退到
+             // "协议内唯一型号"兜底绑定。
 }
 
 static bool vaxor_config_stage_info(uint8_t stage,
@@ -267,10 +269,12 @@ static bool vaxor_config_encode_stage(
 
 static motor_protocol_stage_outcome_t vaxor_config_on_response(
     uint8_t stage, const motor_protocol_config_request_t *request,
-    const motor_protocol_raw_frame_t *response) {
+    const motor_protocol_raw_frame_t *response,
+    motor_protocol_read_buffer_t *read_out) {
   (void)stage;
   (void)request;
   (void)response;
+  (void)read_out;
   return MOTOR_PROTOCOL_STAGE_ADVANCE; // 无响应阶段，不可达
 }
 
@@ -283,6 +287,8 @@ const motor_protocol_adapter_t motor_protocol_vaxor_adapter = {
     .autonomous_feedback = true,
     .config_verify_required = true, // 模式切换无厂家确认对象（TBD-CONFIG-01）
     .match_rx_frame = vaxor_match_rx_frame,
+    // 无 SDO/事务应答对象：match 命中的 12B 回显帧与 20B 状态帧都是存在证据。
+    .is_discovery_frame = NULL,
     .decode_frame = vaxor_decode_frame,
     .encode_mit_command = vaxor_encode_mit_command,
     .encode_enable = vaxor_encode_enable,

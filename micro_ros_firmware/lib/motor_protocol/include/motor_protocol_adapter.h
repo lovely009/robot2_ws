@@ -89,6 +89,11 @@ typedef struct {
 // ---------------------------------------------------------------------------
 typedef struct {
   const char *model_name; // 与 ROS 型号库同名（TBD-PROFILE-01 一致性核对的锚点）
+  // 设备自报身份串（协议的身份读取对象回串，实测 CERB SDO 0x1008：
+  // "R48LITE_V2" / "R58LITE_V2"）——型号绑定的唯一自动来源。
+  // NULL = 该型号无可读身份（协议无身份读对象），绑定只能靠"协议内唯一型号"
+  // 兜底（见 motor_control_profile_sole）。
+  const char *identity_string;
   const struct motor_protocol_adapter *protocol; // 所属协议 adapter
   float gear_ratio;                // 电机轴↔关节轴减速比
   float gear_efficiency;           // 关节侧扭矩效率
@@ -146,7 +151,10 @@ typedef enum {
   MOTOR_PROTOCOL_CONFIG_SET_MODE = 1U,
   MOTOR_PROTOCOL_CONFIG_SET_GAINS = 2U,
   MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS = 3U,
-  MOTOR_PROTOCOL_CONFIG_SET_ENABLE = 4U // 逐电机 Enable（ARD §19 MotorPolicy）
+  MOTOR_PROTOCOL_CONFIG_SET_ENABLE = 4U, // 逐电机 Enable（ARD §19 MotorPolicy）
+  // 内核内部事务（不属 mailbox 契约，1..4 的数值对应关系不受影响）：
+  // 读设备自报身份串，结果不回 CONFIG_RESULT，用于型号自动绑定。
+  MOTOR_PROTOCOL_CONFIG_READ_IDENTITY = 5U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -182,12 +190,26 @@ typedef struct {
 } motor_protocol_config_stage_info_t;
 
 // 响应裁决：ADVANCE=进入下一阶段；RETRY=重发本阶段；FAIL=读回不一致等失败
-// （内核映射为 UNCONFIRMED——读回类失败不得返回 OK，ARD §20.4/禁止项 9）。
+// （内核映射为 UNCONFIRMED——读回类失败不得返回 OK，ARD §20.4/禁止项 9）；
+// COMPLETE=本阶段即整个事务的终态（设备提前给出末段，后续阶段不再发送）；
+// IGNORE=本帧不是本阶段的应答（如同一节点的周期上报与事务应答共用归属），
+// 保持等待与重试计数不变，帧交由其他路径继续处理。
 typedef enum {
   MOTOR_PROTOCOL_STAGE_ADVANCE = 0U,
   MOTOR_PROTOCOL_STAGE_RETRY = 1U,
-  MOTOR_PROTOCOL_STAGE_FAIL = 2U
+  MOTOR_PROTOCOL_STAGE_FAIL = 2U,
+  MOTOR_PROTOCOL_STAGE_COMPLETE = 3U,
+  MOTOR_PROTOCOL_STAGE_IGNORE = 4U
 } motor_protocol_stage_outcome_t;
+
+// 读取类事务的载荷回填缓冲（调用方提供固定容量存储；adapter 只追加）。
+// 溢出置 overflow 而不截断静默——内核据其判读取失败（不得用残缺身份绑定）。
+typedef struct {
+  uint8_t *data;
+  size_t capacity;
+  size_t size;
+  bool overflow;
+} motor_protocol_read_buffer_t;
 
 // ---------------------------------------------------------------------------
 // adapter 接口（C 函数表）。所有 encode/decode 均为纯函数：不持静态状态，
@@ -210,7 +232,14 @@ typedef struct motor_protocol_adapter {
   bool config_verify_required;
 
   // 帧归属：该帧是否属于本协议；是则给出厂家节点号。两协议 ID 段不重叠。
+  // 含协议内一切可归属帧——含事务响应帧（如 CERB 的 SDO 应答 0x580+node），
+  // 它们要能命中已知表项完成裁决。
   bool (*match_rx_frame)(const motor_protocol_raw_frame_t *frame, uint16_t *out_node);
+
+  // "设备存在"证据帧判定（发现建档/重连的唯一依据）：match_rx_frame 命中的
+  // 帧里，只有周期上报/反馈类帧能证明设备在线上。事务响应帧可归属到已知
+  // 设备，但不得凭它凭空建档。NULL = 本协议 match 到的帧皆是存在证据。
+  bool (*is_discovery_frame)(const motor_protocol_raw_frame_t *frame);
 
   // 解码 + SI 换算。profile 为 NULL（未绑定）时运动量为 NaN，
   // 身份/状态字段照常填充。失败（长度/魔数不符）返回 false。
@@ -242,6 +271,8 @@ typedef struct motor_protocol_adapter {
   bool (*encode_discovery_sync)(uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 配置事务：阶段数（0 = 该请求不被本协议支持 → 内核回 UNSUPPORTED）。
+  // READ_IDENTITY 上返回 0 = 本协议无身份读对象（内核回退到"协议内唯一型号"
+  // 兜底绑定，不再发帧）。
   uint8_t (*config_stage_count)(const motor_protocol_model_profile_t *profile,
                                 const motor_protocol_config_request_t *request);
   bool (*config_stage_info)(uint8_t stage,
@@ -252,9 +283,14 @@ typedef struct motor_protocol_adapter {
                               uint8_t bus_index,
                               const motor_protocol_config_request_t *request,
                               motor_protocol_tx_frame_t *out);
+  // read_out 仅读取类事务（READ_IDENTITY）使用：adapter 追加设备回传载荷，
+  // 其余事务传 NULL 并忽略。调用方保证缓冲在事务全程有效。
+  // 契约：只在返回 ADVANCE/COMPLETE 的路径上追加；判 RETRY/FAIL/IGNORE
+  // 之前不得写入缓冲——重试会重发同一阶段，内核不替 adapter 回退载荷。
   motor_protocol_stage_outcome_t (*config_on_response)(
       uint8_t stage, const motor_protocol_config_request_t *request,
-      const motor_protocol_raw_frame_t *response);
+      const motor_protocol_raw_frame_t *response,
+      motor_protocol_read_buffer_t *read_out);
 } motor_protocol_adapter_t;
 
 // 内置 adapter（新增协议家族 = 新增一个实例，内核零改动）。

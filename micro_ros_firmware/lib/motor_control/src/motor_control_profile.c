@@ -10,11 +10,13 @@
 #include "motor_control_profile.h"
 
 #include <stddef.h>
+#include <string.h>
 
 static const motor_protocol_model_profile_t kProfiles[] = {
     {
         // Vaxor 25mm 50 速比档（motor.yaml: vaxor_2550）
         .model_name = "vaxor_2550",
+        .identity_string = NULL, // vaxor 无身份读对象 → 协议内唯一型号兜底
         .protocol = &motor_protocol_vaxor_adapter,
         .gear_ratio = 50.0f,
         .gear_efficiency = 0.65f,
@@ -37,6 +39,8 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     {
         // CERB R48-101（motor.yaml: cerb_r48_101；ARD §8.3 基线）
         .model_name = "cerb_r48_101",
+        // 设备 SDO 0x1008 回串（台架实测，与 R58 可区分）
+        .identity_string = "R48LITE_V2",
         .protocol = &motor_protocol_cerb_adapter,
         .gear_ratio = 101.0f,
         .gear_efficiency = 1.0f,
@@ -58,6 +62,8 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     {
         // CERB R58-101（motor.yaml: cerb_r58_101；ARD §8.3 基线）
         .model_name = "cerb_r58_101",
+        // 设备 SDO 0x1008 回串（台架实测）
+        .identity_string = "R58LITE_V2",
         .protocol = &motor_protocol_cerb_adapter,
         .gear_ratio = 101.0f,
         .gear_efficiency = 1.0f,
@@ -87,4 +93,61 @@ const motor_protocol_model_profile_t *motor_control_profile_at(size_t index) {
     return NULL;
   }
   return &kProfiles[index];
+}
+
+// 身份串比较：设备回串含尾随 NUL/空白填充（SDO 按对象声明长度回传），
+// 一律剪掉后整串精确比较——不做前缀/大小写/模糊匹配，识别错了会把整机
+// 换算比（减速比/Kt）配错，比不绑定危险得多。
+static bool identity_matches(const char *identity_string, const uint8_t *identity,
+                             size_t length) {
+  if (identity_string == NULL || identity == NULL) {
+    return false;
+  }
+  size_t end = length;
+  while (end > 0U && (identity[end - 1U] == '\0' || identity[end - 1U] == ' ' ||
+                      identity[end - 1U] == '\t' || identity[end - 1U] == '\r' ||
+                      identity[end - 1U] == '\n')) {
+    --end;
+  }
+  const size_t expected = strlen(identity_string);
+  if (end != expected) {
+    return false;
+  }
+  return memcmp(identity, identity_string, expected) == 0;
+}
+
+const motor_protocol_model_profile_t *motor_control_profile_by_identity(
+    const motor_protocol_adapter_t *protocol, const uint8_t *identity,
+    size_t length) {
+  if (protocol == NULL || identity == NULL || length == 0U) {
+    return NULL;
+  }
+  for (size_t i = 0; i < motor_control_profile_count(); ++i) {
+    const motor_protocol_model_profile_t *profile = &kProfiles[i];
+    if (profile->protocol != protocol) {
+      continue; // 协议不符不得绑定（与 bind 门禁一致）
+    }
+    if (identity_matches(profile->identity_string, identity, length)) {
+      return profile;
+    }
+  }
+  return NULL;
+}
+
+const motor_protocol_model_profile_t *motor_control_profile_sole(
+    const motor_protocol_adapter_t *protocol) {
+  if (protocol == NULL) {
+    return NULL;
+  }
+  const motor_protocol_model_profile_t *sole = NULL;
+  for (size_t i = 0; i < motor_control_profile_count(); ++i) {
+    if (kProfiles[i].protocol != protocol) {
+      continue;
+    }
+    if (sole != NULL) {
+      return NULL; // 目录内该协议多于一型 → 无从判定，不猜
+    }
+    sole = &kProfiles[i];
+  }
+  return sole;
 }

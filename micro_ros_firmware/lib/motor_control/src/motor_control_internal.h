@@ -58,12 +58,24 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
                                    const motor_protocol_raw_frame_t *frame);
 void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms);
 
+// 身份读取发起（config_step 的不变量复检调用，每拍至多一台）：走事务机器
+// 读设备自报型号串，读毕由内核按串精确匹配型号目录并绑定；协议无身份读
+// 对象时直接用"协议内唯一型号"兜底。已在读（tx_active）或本轮已定论
+// （identity_read_done）的表项直接返回。
+void motor_control_start_identity_read(motor_control_context_t *ctx,
+                                       motor_control_entry_t *entry,
+                                       uint32_t now_ms);
+
 // 配置事务统一收尾（CONFIG_RESULT 终态回告，清理 tx_active/tx_awaiting）。
-// 除正常事务路径外，亦被撤权/离线/冲突/故障四条中止路径复用；事务中止
-// 必须回 UNCONFIRMED 终态，避免上层请求悬挂到自身超时。
+// 只在事务自己走出裁决（响应、超时、阶段推进完毕）时调用。
 void motor_control_finish_tx(motor_control_context_t *ctx,
                              motor_control_entry_t *entry, uint16_t result,
                              uint32_t now_ms);
+
+// 事务中止（离线/冲突/厂家故障/撤权路径共用）：配置事务回 UNCONFIRMED 终态
+// 避免上层请求悬挂；身份读取不判成败也不回事件，待表项回到可绑定态重发。
+void motor_control_abort_tx(motor_control_context_t *ctx,
+                            motor_control_entry_t *entry, uint32_t now_ms);
 
 #ifdef __cplusplus
 }

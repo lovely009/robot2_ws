@@ -151,23 +151,6 @@ target_compile_definitions(test_led_status PRIVATE
 
 add_test(NAME led_status COMMAND test_led_status)
 
-add_executable(test_static_topology
-  test_static_topology.cpp
-  ../../src/motor_static_topology.c
-  ../../lib/motor_control/src/motor_control_profile.c
-  ../../lib/motor_protocol/src/motor_protocol.c
-  ../../lib/motor_protocol/src/vaxor_adapter.c
-  ../../lib/motor_protocol/src/cerb_adapter.c)
-
-target_include_directories(test_static_topology PRIVATE
-  ../../src
-  ../../lib/motor_control/include
-  ../../lib/motor_protocol/include)
-
-target_link_libraries(test_static_topology PRIVATE m)
-
-add_test(NAME static_topology COMMAND test_static_topology)
-
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

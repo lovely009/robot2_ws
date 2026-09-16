@@ -150,11 +150,9 @@ typedef struct {
 // 运行时上下文（静态分配；字段仅供内核实现读写，调用方走函数接口）。
 // ---------------------------------------------------------------------------
 
-// 编译期拓扑注入：发现建档/重连时经此解析型号名并自动绑定（下行
-// MotorBind/Policy/Config/Enable 话题通道已删除，拓扑改为固件静态表）。
-// NULL = 禁用（host 测试默认，走显式 bind API）；返回 NULL = 表外电机，
-// 保持未绑定不可控（安全侧）。
-typedef const char *(*motor_control_model_resolver_t)(uint16_t motor_id);
+// 身份读取缓冲容量：设备自报型号串实测 10 字符，留一倍余量；超出即判读取
+// 失败（identity_read_overflow），绝不用残缺串去绑型号。
+#define MOTOR_CONTROL_IDENTITY_CAPACITY 24U
 
 typedef struct {
   bool used;
@@ -163,6 +161,14 @@ typedef struct {
   uint16_t node;
   const motor_protocol_adapter_t *adapter;
   const motor_protocol_model_profile_t *profile; // NULL = 未绑定（不可控）
+  // 身份读取（型号绑定的唯一识别来源）：建档/重连各发起一次，读毕置
+  // identity_read_done（成败皆置，不逐帧重试——识别失败是设备事实，
+  // 重试只会刷事件环）。protocol 无身份读对象时内核直接走"协议内唯一型号"
+  // 兜底，同样置 done。
+  uint8_t identity[MOTOR_CONTROL_IDENTITY_CAPACITY];
+  size_t identity_size;
+  bool identity_read_overflow; // 回串超出容量 → 读取失败（不用残缺串绑定）
+  bool identity_read_done;
   motor_control_lifecycle_t lifecycle;
   bool online;
 
@@ -228,9 +234,6 @@ typedef struct {
   const motor_protocol_adapter_t *const *adapters;
   size_t adapter_count;
 
-  // 静态拓扑解析器（motor_control_set_model_resolver 注入；NULL=禁用）。
-  motor_control_model_resolver_t model_resolver;
-
   // 表项索引被 TX 桥引用为 P1 latest-wins 槽位，并被 P0 回告重入队用于定位
   // 表项（tx_slot，见 motor_protocol_adapter.h）：只增不减是其稳定性前提——
   // 禁止实现表项压缩/回收，否则必须同步重定义槽位映射。
@@ -282,10 +285,8 @@ void motor_control_init(motor_control_context_t *ctx,
                         const motor_protocol_adapter_t *const *adapters,
                         size_t adapter_count);
 
-// 静态拓扑注入（发现建档/重连时自动按名绑定；NULL 关闭）。须在首个原始帧
-// 到达前设置；运行期可换表（只影响后续新建/重连表项）。
-void motor_control_set_model_resolver(motor_control_context_t *ctx,
-                                      motor_control_model_resolver_t resolver);
+// 静态拓扑注入已删除：型号绑定改为建档/重连时读设备自报身份（协议 adapter
+// 的 READ_IDENTITY 事务），无身份读对象的协议回退到"协议内唯一型号"。
 
 // 会话边沿。断链（曾连接后断开）立即对全部可控电机发协议级停机/失能（P0）、
 // 清运动授权与目标，不等待 100ms（ARD §13.2/§33）。
@@ -298,8 +299,10 @@ void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connec
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
                                      uint32_t now_ms);
 
-// Profile 绑定（TBD-PROFILE-01 过渡：识别源关闭前由上层显式绑定型号；
-// 型号目录不含 Vaxor-80 → 绑定被拒并出事件，该电机永不出运动帧）。
+// Profile 绑定（型号目录索引版）。生产路径只有一条：建档/重连读设备自报
+// 身份后由内核内部绑定（见 motor_control_start_identity_read）；本入口保留
+// 给测试与目录内定向绑定。型号不在目录 → 拒绝并出 PROFILE_REJECTED 事件，
+// 该电机永不出运动帧。
 bool motor_control_bind_profile(motor_control_context_t *ctx, uint16_t motor_id,
                                 size_t profile_index, uint32_t now_ms);
 
@@ -315,15 +318,6 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
 // service 逐节拍补发）——安全帧不允许在任何一段搬运中静默消失。
 bool motor_control_requeue_p0(motor_control_context_t *ctx,
                               const motor_protocol_tx_frame_t *frame);
-
-// 按型号名绑定（TBD-PROFILE-01 过渡绑定通道的内核入口）：遍历编译期型号
-// 目录精确匹配，命中走 bind_profile 的全部门禁与事件（PROFILE_BOUND /
-// PROFILE_REJECTED / READY）。未知名（含空名）或设备未发现拒绝并回
-// PROFILE_REJECTED（未发现时 bus_index=0）；已 ACTIVE/SAFE_STOP 等运行中/
-// 异常态电机拒绝改绑。
-bool motor_control_bind_profile_by_name(motor_control_context_t *ctx,
-                                        uint16_t motor_id,
-                                        const char *model_name, uint32_t now_ms);
 
 // 低频配置入口（mailbox config FIFO 逐条转发）。SET_GAINS/SET_POSITION_LIMITS
 // 在 Vaxor 上是本地 Policy；SET_MODE 与 CERB 限位走 request_id 事务。

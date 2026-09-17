@@ -104,7 +104,6 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0   # ttyACM0=�
 - 消息定义唯一来源是 `micro_ros_agent/src/can_bridge_msgs`；固件 `extra_packages/can_bridge_msgs` 是指向它的符号链接。
 - 改消息后普通 `pio run` 不会重生成类型（PlatformIO 只检查 `libmicroros.a` 是否存在）：用 `micro_ros_agent/tools/refresh_microros_messages.py` 增量刷新，勿跑 `-t clean_microros`。
 - `micro_ros_agent/tools/fdcan_motor_sim.py`：FDCAN1 九节点（CERB 1–6 + VAXOR 7–9）主机模拟器，经 `/dev/ttyACM1` CANable2 SLCAN 跑全通路台架；流程与启动顺序（CANable 必须先成为 ACK 节点再复位控制板，否则总线 bus-off 不自动恢复）见 `docs/guides/fdcan1-bench-guide.md`。**烧录前先停模拟器**——MCU 挂起期间模拟器仍在发帧而无人 ACK，会把 CANable 打进错误态。
-- `micro_ros_agent/src/motor_param_bridge`：ROS 参数 → 固件下行配置的桥。参数 `motor_<id>.model/kp/kd/pos_min/pos_max` 翻译成 `micro_ros/motor_bind`（身份绑定）与 `micro_ros/motor_policy`（MIT 增益/软限位），进固件 mailbox 配置/绑定 FIFO。门禁在固件内核：换绑仅限未定型态，运行中回 `PROFILE_REJECTED`；结果经 `micro_ros/motor_events` 回告。
 
 ## 架构总览
 

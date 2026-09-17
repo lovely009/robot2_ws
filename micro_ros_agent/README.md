@@ -11,16 +11,13 @@ micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。�
 |---|---|---|
 | `micro_ros_msgs` | https://github.com/micro-ROS/micro_ros_msgs.git | `humble` |
 | `micro-ROS-Agent` | https://github.com/micro-ROS/micro-ROS-Agent.git | `humble` |
-| `can_bridge_msgs` | 本地自定义（11 个 ID 化有界消息） | 固件 `extra_packages/` 以符号链接复用 |
-| `motor_param_bridge` | 本地自定义（ROS 参数 → 固件下行配置话题） | 主机侧节点，不参与固件构建 |
+| `can_bridge_msgs` | 本地自定义（13 个 ID 化有界消息） | 固件 `extra_packages/` 以符号链接复用 |
 
 > 说明：官方仓库已由 `micro_ros_agent` 更名为 `micro-ROS-Agent`；官方 apt 仓库
 > **没有** `ros-humble-micro-ros-agent`，故采用源码构建。第三方 `.git` 已移除，
 > 以普通目录快照提交（不含构建产物）。`can_bridge_msgs` 为本地新增包，定义
-> ID 化有界电机消息（命令快照、运动/诊断状态、拓扑、事件、身份绑定与运行时
-> 策略），供主机侧与上层电机栈使用。`motor_param_bridge` 把 ROS 参数
-> `motor_<id>.model/kp/kd/pos_min/pos_max` 翻译成 `micro_ros/motor_bind` 与
-> `micro_ros/motor_policy` 两条下行话题，写进固件现成的 mailbox 配置/绑定 FIFO。
+> ID 化有界电机消息（命令快照、运动/诊断状态、拓扑、事件与配置事务），
+> 供主机侧与上层电机栈使用。
 
 ## 构建（免 sudo）
 

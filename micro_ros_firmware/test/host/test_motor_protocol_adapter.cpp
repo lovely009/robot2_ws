@@ -765,6 +765,65 @@ static void test_cerb_sdo_velocity_torque_frames() {
   assert(mode_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_NONE);
 }
 
+
+// 描述符表边界：所有 kind 的越界阶段统一拒绝；保存阶段不裁决任何应答。
+static void test_cerb_descriptor_table_bounds() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r58_101", &profile));
+
+  motor_protocol_config_request_t kinds[] = {
+      {}, {}, {}, {}, {},
+  };
+  kinds[0].kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  kinds[1].kind = MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS;
+  kinds[2].kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  kinds[3].kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
+  kinds[4].kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  const uint8_t counts[] = {1U, 6U, 3U, 3U, 4U};
+
+  motor_protocol_tx_frame_t frame = {};
+  motor_protocol_config_stage_info_t info = {};
+  motor_protocol_raw_frame_t resp = {};
+  resp.can_id = 0x581U;
+  resp.dlc = 8U;
+  for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+    const uint8_t beyond = counts[i];
+    assert(!motor_protocol_cerb_adapter.config_encode_stage(
+        beyond, profile, 1U, 0U, &kinds[i], &frame));
+    assert(!motor_protocol_cerb_adapter.config_stage_info(
+        beyond, profile, &kinds[i], &info));
+    assert(motor_protocol_cerb_adapter.config_on_response(
+               beyond, profile, &kinds[i], &resp, nullptr) ==
+           MOTOR_PROTOCOL_STAGE_FAIL);
+  }
+
+  // SET_MODE 空阶段的杂散帧：非 8B RETRY、8B FAIL（旧边界口径）。
+  motor_protocol_config_request_t mode = {};
+  mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
+  mode.mode = (uint8_t)MOTOR_PROTOCOL_MODE_MIT;
+  motor_protocol_raw_frame_t mode_resp = {};
+  mode_resp.dlc = 7U;
+  assert(motor_protocol_cerb_adapter.config_on_response(
+             0U, profile, &mode, &mode_resp, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_RETRY);
+  mode_resp.dlc = 8U;
+  mode_resp.data[0] = 0x80U;
+  assert(motor_protocol_cerb_adapter.config_on_response(
+             0U, profile, &mode, &mode_resp, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_FAIL);
+
+  // 保存阶段（速度 stage 2）的杂散应答：IGNORE，不得触发 FLASH 重写/推进。
+  motor_protocol_config_request_t vel = {};
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.motor_id = 1U;
+  vel.max_velocity_rad_s = 1.0f;
+  const uint8_t save_ack[8] = {0x60, 0x39, 0x25, 0x00, 0x01, 0x00, 0x00, 0x00};
+  memcpy(resp.data, save_ack, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(
+             2U, profile, &vel, &resp, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_IGNORE);
+}
+
 // 设零点：单阶段写 0x2531=1（字典表「设置电机输出端零位」），等 SDO 写应答即
 // 完成——命令式对象，不读回（读回值语义未定义）。失能态门禁在内核侧。
 static void test_cerb_set_zero_frames() {
@@ -772,6 +831,7 @@ static void test_cerb_set_zero_frames() {
   assert(find_profile("cerb_r58_101", &profile));
   motor_protocol_config_request_t req = {};
   req.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  req.motor_id = 3U; // 与应答帧 0x580+3 同节点（内核按 can_id 预过滤归属）
   assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 1U);
 
   motor_protocol_tx_frame_t frame = {};
@@ -918,6 +978,7 @@ int main() {
   test_cerb_sdo_velocity_torque_frames();
   test_cerb_sdo_response_judging();
   test_cerb_identity_read_transaction();
+  test_cerb_descriptor_table_bounds();
   test_cerb_refresh_params_transaction();
   test_adapter_id_ranges_disjoint();
   test_profile_catalog_only_exposes_supported_models();

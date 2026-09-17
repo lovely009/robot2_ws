@@ -361,6 +361,183 @@ static bool cerb_sdo_request(uint16_t node, uint8_t bus_index,
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// 配置事务阶段描述符表
+//
+// 除分段上传的 READ_IDENTITY 与 SET_MODE 空阶段外，所有事务的阶段知识
+// （对象/子索引/读写/保存码/原值槽位）只存在于下表；stage_count/info/encode/
+// on_response 四个接口都是这张表的解释器，新增一种事务 = 加一行表，不再
+// 散改 8 个 switch。
+// ---------------------------------------------------------------------------
+
+enum {
+  CERB_STAGE_SDO_WRITE, // 快速写 0x23，等写应答 0x60
+  CERB_STAGE_SDO_READ,  // 快速上传 0x40，等 0x43 回读并与写值比对
+  CERB_STAGE_SAVE,      // 写 0x2539 保存码，无应答，发完即推进
+};
+
+// 写阶段的取值来源（读/保存阶段为 NONE）。
+enum {
+  CERB_VALUE_NONE,
+  CERB_VALUE_ZERO,       // 0x2531=1 常量
+  CERB_VALUE_POS_LOWER,  // rad → cnt（位置下限）
+  CERB_VALUE_POS_UPPER,
+  CERB_VALUE_SPEED,      // 关节侧 rad/s → 电机端 RPM
+  CERB_VALUE_CURRENT,    // 关节侧 N·m → 峰值电流 mA
+};
+
+typedef struct {
+  uint8_t action;      // CERB_STAGE_*
+  uint8_t value_kind;  // CERB_VALUE_*
+  uint8_t param_slot;  // MOTOR_PROTOCOL_PARAM_SLOT_*（读回落袋/写登记槽位）
+  uint16_t index;      // SDO 主索引
+  uint8_t sub;         // SDO 子索引
+  uint8_t save_code;   // CERB_STAGE_SAVE 的 0x2539 保存码（1/2/4）
+} cerb_stage_desc_t;
+
+#define CERB_DESC_WRITE(idx_, sub_, slot_, value_)                            \
+  { CERB_STAGE_SDO_WRITE, value_, slot_, idx_, sub_, 0U }
+#define CERB_DESC_READ(idx_, sub_, slot_, value_)                            \
+  { CERB_STAGE_SDO_READ, value_, slot_, idx_, sub_, 0U }
+#define CERB_DESC_SAVE(code_)                                                 \
+  { CERB_STAGE_SAVE, CERB_VALUE_NONE, MOTOR_PROTOCOL_PARAM_SLOT_NONE,        \
+    CERB_OBJ_SAVE_FLASH, CERB_SUB_DEFAULT, code_ }
+
+static const cerb_stage_desc_t kStagesSetZero[1] = {
+  CERB_DESC_WRITE(CERB_OBJ_SET_ZERO, CERB_SUB_DEFAULT,
+                  MOTOR_PROTOCOL_PARAM_SLOT_NONE, CERB_VALUE_ZERO),
+};
+
+// 下限写+读回、上限写+读回，最后两条保存（负限位码 4、正限位码 2）。
+static const cerb_stage_desc_t kStagesPositionLimits[6] = {
+  CERB_DESC_WRITE(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
+                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+  CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
+                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+  CERB_DESC_WRITE(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
+                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+  CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
+                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_LOWER),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_UPPER),
+};
+
+static const cerb_stage_desc_t kStagesVelocityLimit[3] = {
+  CERB_DESC_WRITE(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
+                  MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+  CERB_DESC_READ(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
+};
+
+static const cerb_stage_desc_t kStagesTorqueLimit[3] = {
+  CERB_DESC_WRITE(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
+                  MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+  CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
+};
+
+// REFRESH_PARAMS：4 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
+// 不再依赖阶段号硬编码）。
+static const cerb_stage_desc_t kStagesRefresh[4] = {
+  CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
+                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+  CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
+                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+  CERB_DESC_READ(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+  CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+};
+
+// 事务 kind → 阶段表。READ_IDENTITY（分段上传）与 SET_MODE（空阶段）不在
+// 表内，由三个接口特殊处理；返回 NULL 表示该 kind 不走设备事务。
+static const cerb_stage_desc_t *cerb_stage_table(
+    const motor_protocol_config_request_t *request, uint8_t *count) {
+  switch (request->kind) {
+    case MOTOR_PROTOCOL_CONFIG_SET_ZERO:
+      *count = (uint8_t)(sizeof(kStagesSetZero) / sizeof(kStagesSetZero[0]));
+      return kStagesSetZero;
+    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
+      *count = (uint8_t)(sizeof(kStagesPositionLimits) /
+                         sizeof(kStagesPositionLimits[0]));
+      return kStagesPositionLimits;
+    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
+      *count = (uint8_t)(sizeof(kStagesVelocityLimit) /
+                         sizeof(kStagesVelocityLimit[0]));
+      return kStagesVelocityLimit;
+    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
+      *count = (uint8_t)(sizeof(kStagesTorqueLimit) /
+                         sizeof(kStagesTorqueLimit[0]));
+      return kStagesTorqueLimit;
+    case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS:
+      *count = (uint8_t)(sizeof(kStagesRefresh) / sizeof(kStagesRefresh[0]));
+      return kStagesRefresh;
+    default:
+      *count = 0U;
+      return NULL;
+  }
+}
+
+static const cerb_stage_desc_t *cerb_stage_at(
+    const motor_protocol_config_request_t *request, uint8_t stage) {
+  uint8_t count = 0U;
+  const cerb_stage_desc_t *table = cerb_stage_table(request, &count);
+  if (table == NULL || stage >= count) {
+    return NULL;
+  }
+  return &table[stage];
+}
+
+// 写阶段的设备端原始值（cnt/RPM/mA/命令常量），按取值来源分发换算。
+static uint32_t cerb_stage_write_value(
+    uint8_t value_kind, const motor_protocol_model_profile_t *profile,
+    const motor_protocol_config_request_t *request) {
+  switch (value_kind) {
+    case CERB_VALUE_ZERO:
+      return CERB_SET_ZERO_CODE;
+    case CERB_VALUE_POS_LOWER:
+      return (uint32_t)cerb_rad_to_limit_cnt(
+          request->position_limits.min_position_rad);
+    case CERB_VALUE_POS_UPPER:
+      return (uint32_t)cerb_rad_to_limit_cnt(
+          request->position_limits.max_position_rad);
+    case CERB_VALUE_SPEED:
+      return cerb_joint_rad_s_to_motor_rpm(profile,
+                                            request->max_velocity_rad_s);
+    case CERB_VALUE_CURRENT:
+      return cerb_joint_nm_to_motor_ma(profile, request->max_torque_nm);
+    default:
+      return 0U;
+  }
+}
+
+// REFRESH 回读原值 → 关节侧 SI（按槽位选换算，不再按阶段号 switch）。
+static bool cerb_refresh_raw_to_si(uint8_t slot, uint32_t raw,
+                                   const motor_protocol_model_profile_t *profile,
+                                   float *out) {
+  switch (slot) {
+    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
+    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
+      // INTEGER32 cnt（负载端，与关节同轴）。
+      *out = (float)motor_protocol_cerb_limit_cnt_to_rad((int32_t)raw);
+      return true;
+    case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
+      *out = (float)motor_protocol_cerb_motor_rpm_to_joint_rad_s(
+          (double)profile->gear_ratio, raw);
+      return true;
+    case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
+      // 0x2538 是电气电流上限：与写入侧同一套限值系数，保证"读到的 A"
+      // 与"写回去的 A"是同一个数（换算系数换了也不会来回漂）。
+      *out = (float)motor_protocol_limit_ma_to_joint_nm(
+          (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
+      return true;
+    default:
+      return false;
+  }
+}
+
 static uint8_t
 cerb_config_stage_count(const motor_protocol_model_profile_t *profile,
                         const motor_protocol_config_request_t *request) {
@@ -371,167 +548,14 @@ cerb_config_stage_count(const motor_protocol_model_profile_t *profile,
     // 1 次上传发起 + 最多 4 个分段；设备提前给末段时 COMPLETE 提前收尾。
     return (uint8_t)(1U + CERB_IDENTITY_MAX_SEGMENTS);
   }
-  if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    // 4 个加速 SDO upload：位置下限/上限、最大转速、峰值电流。
-    return 4U;
+  if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
+    // 非 MIT 模式不受支持（ARD §25：CERB 默认且固定 MIT）。
+    return request->mode == (uint8_t)MOTOR_PROTOCOL_MODE_MIT ? 1U : 0U;
   }
+  uint8_t count = 0U;
+  (void)cerb_stage_table(request, &count);
   (void)profile;
-  switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_MODE:
-      // 非 MIT 模式不受支持（ARD §25：CERB 默认且固定 MIT）。
-      return request->mode == (uint8_t)MOTOR_PROTOCOL_MODE_MIT ? 1U : 0U;
-    case MOTOR_PROTOCOL_CONFIG_SET_ZERO:
-      // 单阶段：写 0x2531=1，等 SDO 写应答即完成（命令式对象无读回语义）。
-      return 1U;
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      // 下限写+读回、上限写+读回，最后两条保存（负限位码 4、正限位码 2）。
-      return 6U;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      // 写+读回，最后写 FLASH 落盘。
-      return 3U;
-    default:
-      // 增益/使能是纯内核本地项，不经设备事务。
-      return 0U;
-  }
-}
-
-// 阶段 → (对象索引, 子索引, 是否写, 目标原始值)。
-// 阶段布局：位置限位 0=写下限 1=读下限 2=写上限 3=读上限；
-// 速度/力矩 0=写 1=读回。返回 false = 阶段越界或该 kind 不走设备事务。
-static bool cerb_sdo_stage_plan(
-    uint8_t stage, const motor_protocol_model_profile_t *profile,
-    const motor_protocol_config_request_t *request, uint16_t *out_index,
-    uint8_t *out_sub, bool *out_is_write, uint32_t *out_value) {
-  if (request == NULL || out_index == NULL || out_sub == NULL ||
-      out_is_write == NULL || out_value == NULL) {
-    return false;
-  }
-  const bool even = (stage % 2U) == 0U;
-  switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_ZERO:
-      if (stage >= 1U) {
-        return false;
-      }
-      *out_index = CERB_OBJ_SET_ZERO;
-      *out_sub = CERB_SUB_DEFAULT;
-      *out_is_write = true;
-      *out_value = CERB_SET_ZERO_CODE;
-      return true;
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      if (stage >= 4U) {
-        return false;
-      }
-      *out_index = CERB_OBJ_POS_LIMIT;
-      *out_sub = (stage < 2U) ? CERB_SUB_POS_LOWER : CERB_SUB_POS_UPPER;
-      *out_is_write = even;
-      *out_value = (uint32_t)cerb_rad_to_limit_cnt(
-          (stage < 2U) ? request->position_limits.min_position_rad
-                       : request->position_limits.max_position_rad);
-      return true;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      if (stage >= 2U) {
-        return false;
-      }
-      *out_index = CERB_OBJ_MAX_SPEED;
-      *out_sub = CERB_SUB_DEFAULT;
-      *out_is_write = even;
-      *out_value = cerb_joint_rad_s_to_motor_rpm(profile,
-                                                 request->max_velocity_rad_s);
-      return true;
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      if (stage >= 2U) {
-        return false;
-      }
-      *out_index = CERB_OBJ_MAX_CURRENT;
-      *out_sub = CERB_SUB_DEFAULT;
-      *out_is_write = even;
-      *out_value = cerb_joint_nm_to_motor_ma(profile, request->max_torque_nm);
-      return true;
-    default:
-      return false;
-  }
-}
-
-// REFRESH_PARAMS 只读阶段 → (对象, 子索引, 参数槽位)。槽位与阶段顺序同源：
-// 内核按槽位落袋设备端原值，不依赖阶段号硬编码。
-static bool cerb_refresh_stage_plan(uint8_t stage, uint16_t *out_index,
-                                    uint8_t *out_sub, uint8_t *out_slot) {
-  switch (stage) {
-    case 0U:
-      *out_index = CERB_OBJ_POS_LIMIT;
-      *out_sub = CERB_SUB_POS_LOWER;
-      *out_slot = MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN;
-      return true;
-    case 1U:
-      *out_index = CERB_OBJ_POS_LIMIT;
-      *out_sub = CERB_SUB_POS_UPPER;
-      *out_slot = MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX;
-      return true;
-    case 2U:
-      *out_index = CERB_OBJ_MAX_SPEED;
-      *out_sub = CERB_SUB_DEFAULT;
-      *out_slot = MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX;
-      return true;
-    case 3U:
-      *out_index = CERB_OBJ_MAX_CURRENT;
-      *out_sub = CERB_SUB_DEFAULT;
-      *out_slot = MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX;
-      return true;
-    default:
-      return false;
-  }
-}
-
-// 写事务阶段 → 参数槽位（读回核验阶段与其写阶段同槽位）。
-static uint8_t cerb_write_stage_slot(const motor_protocol_config_request_t *request,
-                                     uint8_t stage) {
-  switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      return (stage < 2U) ? MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN
-                          : MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      return MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX;
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      return MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX;
-    default:
-      return MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-  }
-}
-
-// 保存阶段（写 FLASH）在阶段序列的最后一位。它**无应答**：发完即推进，不等
-// ack 也不重试——驱动器写 FLASH 期间可能阻塞自己的控制循环，等 ack 只会把它
-// 和整条总线拖住。落盘成功与否由"下次上电的设备参数比对"检出（不一致 →
-// 未初始化），这比一次不可靠的 ack 判据更硬。
-// 保存阶段（写 0x2539）在阶段序列末尾：位置限位两条（先负限位码 4、后正限位码
-// 2），速度/电流一条（码 1）。只对**写事务**成立——按"末位阶段"泛化会把
-// REFRESH_PARAMS 的最后一个读阶段（0x2538）也当成保存阶段，白丢一条读。
-static bool cerb_save_stage_code(const motor_protocol_config_request_t *request,
-                                 uint8_t stage, uint32_t *out_code) {
-  if (request == NULL || out_code == NULL) {
-    return false;
-  }
-  switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      if (stage == 4U) {
-        *out_code = CERB_SAVE_CODE_POS_LOWER;
-        return true;
-      }
-      if (stage == 5U) {
-        *out_code = CERB_SAVE_CODE_POS_UPPER;
-        return true;
-      }
-      return false;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      if (stage == 2U) {
-        *out_code = CERB_SAVE_CODE_PARAMS;
-        return true;
-      }
-      return false;
-    default:
-      return false;
-  }
+  return count;
 }
 
 static bool cerb_config_stage_info(uint8_t stage,
@@ -549,20 +573,6 @@ static bool cerb_config_stage_info(uint8_t stage,
     out->timeout_ms = CERB_SDO_TIMEOUT_MS;
     return true;
   }
-  if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    uint16_t index = 0U;
-    uint8_t sub = 0U;
-    uint8_t slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-    if (!cerb_refresh_stage_plan(stage, &index, &sub, &slot)) {
-      return false;
-    }
-    out->waits_response = true; // 4 个 upload，每阶段等应答
-    out->timeout_ms = CERB_SDO_TIMEOUT_MS;
-    out->param_raw_valid = true;
-    out->param_slot = slot;
-    out->param_raw = 0U; // 读阶段：原值由设备应答带回（读缓冲载荷）
-    return true;
-  }
   if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
     if (stage >= 1U) {
       return false;
@@ -571,43 +581,34 @@ static bool cerb_config_stage_info(uint8_t stage,
     out->timeout_ms = 0U;
     return true;
   }
-  if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
-    // 设零位是命令式对象：等写应答，但写入的 1 不是"设备参数"，不进记录/比对。
-    if (stage >= 1U) {
-      return false;
-    }
-    out->waits_response = true;
-    out->timeout_ms = CERB_SDO_TIMEOUT_MS;
-    out->param_raw_valid = false;
-    out->param_slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-    out->param_raw = 0U;
-    return true;
+  const cerb_stage_desc_t *desc = cerb_stage_at(request, stage);
+  if (desc == NULL) {
+    return false;
   }
-  uint32_t save_code = 0U;
-  if (cerb_save_stage_code(request, stage, &save_code)) {
-    out->waits_response = false; // 无应答：见 cerb_save_stage_code 的说明
+  out->timeout_ms = CERB_SDO_TIMEOUT_MS;
+  if (desc->action == CERB_STAGE_SAVE) {
+    out->waits_response = false; // 无应答：见 CERB_DESC_SAVE 的保存语义
     out->timeout_ms = 0U;
     out->param_raw_valid = false; // 保存码不是设备参数，不进比对/记录
     out->param_slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
     out->param_raw = 0U;
     return true;
   }
-  // profile 参与换算：本阶段写入设备端的管理对象量（cnt/RPM/mA）要带出去，
-  // 供内核写固件记录——记录必须与设备实际存的原值同口径（比对依据）。
-  uint16_t index = 0U;
-  uint8_t sub = 0U;
-  bool is_write = false;
-  uint32_t value = 0U;
-  if (!cerb_sdo_stage_plan(stage, profile, request, &index, &sub, &is_write,
-                           &value)) {
-    return false;
+  if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
+    out->waits_response = true; // 4 个 upload，每阶段等应答
+    out->param_raw_valid = true;
+    out->param_slot = desc->param_slot;
+    out->param_raw = 0U; // 原值由设备应答带回（读缓冲载荷）
+    return true;
   }
+  // 写事务的 SDO 阶段。
   out->waits_response = true; // 每个 SDO 阶段都等应答（写等 ack、读等回读）
-  out->timeout_ms = CERB_SDO_TIMEOUT_MS;
-  out->param_raw_valid = is_write;
-  out->param_slot = is_write ? cerb_write_stage_slot(request, stage)
-                             : MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-  out->param_raw = value;
+  // set_zero 虽走 SDO 写，但写的是命令码不是设备参数，不进记录/比对。
+  out->param_raw_valid = desc->action == CERB_STAGE_SDO_WRITE &&
+                         desc->param_slot != MOTOR_PROTOCOL_PARAM_SLOT_NONE;
+  out->param_slot = out->param_raw_valid ? desc->param_slot
+                                         : MOTOR_PROTOCOL_PARAM_SLOT_NONE;
+  out->param_raw = cerb_stage_write_value(desc->value_kind, profile, request);
   return true;
 }
 
@@ -617,18 +618,6 @@ static bool cerb_config_encode_stage(
     motor_protocol_tx_frame_t *out) {
   if (request == NULL || out == NULL) {
     return false;
-  }
-  uint32_t save_code = 0U;
-  if (cerb_save_stage_code(request, stage, &save_code)) {
-    uint8_t payload[8] = {CERB_SDO_CCS_WRITE4,
-                          (uint8_t)(CERB_OBJ_SAVE_FLASH & 0xFFU),
-                          (uint8_t)(CERB_OBJ_SAVE_FLASH >> 8U),
-                          CERB_SUB_DEFAULT,
-                          (uint8_t)(save_code & 0xFFU),
-                          (uint8_t)((save_code >> 8U) & 0xFFU),
-                          (uint8_t)((save_code >> 16U) & 0xFFU),
-                          (uint8_t)((save_code >> 24U) & 0xFFU)};
-    return cerb_sdo_request(node, bus_index, payload, out);
   }
   if (request->kind == MOTOR_PROTOCOL_CONFIG_READ_IDENTITY) {
     if (stage >= (uint8_t)(1U + CERB_IDENTITY_MAX_SEGMENTS)) {
@@ -649,20 +638,6 @@ static bool cerb_config_encode_stage(
     }
     return cerb_sdo_request(node, bus_index, payload, out);
   }
-  if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    uint16_t index = 0U;
-    uint8_t sub = 0U;
-    uint8_t slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-    if (!cerb_refresh_stage_plan(stage, &index, &sub, &slot)) {
-      return false;
-    }
-    uint8_t payload[8] = {0};
-    payload[0] = CERB_SDO_CCS_UPLOAD_INITIATE; // 0x40 上传请求
-    payload[1] = (uint8_t)(index & 0xFFU);
-    payload[2] = (uint8_t)(index >> 8U);
-    payload[3] = sub;
-    return cerb_sdo_request(node, bus_index, payload, out);
-  }
   if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
     if (stage >= 1U) {
       return false;
@@ -670,22 +645,33 @@ static bool cerb_config_encode_stage(
     memset(out, 0, sizeof(*out)); // size 0 = 空阶段（无帧），仅推进状态机
     return true;
   }
-  uint16_t index = 0U;
-  uint8_t sub = 0U;
-  bool is_write = false;
-  uint32_t value = 0U;
-  if (!cerb_sdo_stage_plan(stage, profile, request, &index, &sub, &is_write,
-                           &value)) {
+  const cerb_stage_desc_t *desc = cerb_stage_at(request, stage);
+  if (desc == NULL) {
     return false;
   }
-  // 与身份读取共用同一请求构造：厂家默认「CANFD 加速 标准帧」（说明书
-  // §3.1：1M 仲裁段 / 5M 数据段），SDO 一律不走经典帧。
   uint8_t payload[8] = {0};
-  payload[0] = is_write ? CERB_SDO_CCS_WRITE4 : CERB_SDO_CCS_UPLOAD_INITIATE;
-  payload[1] = (uint8_t)(index & 0xFFU);
-  payload[2] = (uint8_t)(index >> 8U);
-  payload[3] = sub;
-  if (is_write) {
+  if (desc->action == CERB_STAGE_SAVE) {
+    // 保存阶段无应答：发完即推进。驱动器写 FLASH 期间可能阻塞自身控制
+    // 循环，等 ack 只会把它和整条总线拖住；落盘成功与否由下次上电的
+    // 设备参数比对检出（不一致 → 未初始化），比一次不可靠 ack 更硬。
+    payload[0] = CERB_SDO_CCS_WRITE4;
+    payload[1] = (uint8_t)(CERB_OBJ_SAVE_FLASH & 0xFFU);
+    payload[2] = (uint8_t)(CERB_OBJ_SAVE_FLASH >> 8U);
+    payload[3] = CERB_SUB_DEFAULT;
+    payload[4] = desc->save_code;
+    return cerb_sdo_request(node, bus_index, payload, out);
+  }
+  // 写/读 SDO：厂家默认「CANFD 加速 标准帧」（说明书 §3.1：1M 仲裁 /
+  // 5M 数据），SDO 一律不走经典帧。
+  payload[0] = desc->action == CERB_STAGE_SDO_WRITE
+                   ? CERB_SDO_CCS_WRITE4
+                   : CERB_SDO_CCS_UPLOAD_INITIATE;
+  payload[1] = (uint8_t)(desc->index & 0xFFU);
+  payload[2] = (uint8_t)(desc->index >> 8U);
+  payload[3] = desc->sub;
+  if (desc->action == CERB_STAGE_SDO_WRITE) {
+    const uint32_t value =
+        cerb_stage_write_value(desc->value_kind, profile, request);
     payload[4] = (uint8_t)(value & 0xFFU);
     payload[5] = (uint8_t)((value >> 8U) & 0xFFU);
     payload[6] = (uint8_t)((value >> 16U) & 0xFFU);
@@ -748,22 +734,33 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
                      (size_t)CERB_SDO_SEGMENT_BYTES - unused);
     return last ? MOTOR_PROTOCOL_STAGE_COMPLETE : MOTOR_PROTOCOL_STAGE_ADVANCE;
   }
-  // 设备参数回读（REFRESH_PARAMS）：4 个加速 upload 应答，每阶段追加一个
+
+  // SET_MODE 是空阶段（waits_response=false，内核不会投递应答）；保持旧版
+  // 对杂散帧的边界口径：非 8B RETRY、8B FAIL（其事务无设备阶段计划）。
+  if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
+    return response->dlc == 8U ? MOTOR_PROTOCOL_STAGE_FAIL
+                               : MOTOR_PROTOCOL_STAGE_RETRY;
+  }
+
+  const cerb_stage_desc_t *desc = cerb_stage_at(request, stage);
+  if (desc == NULL) {
+    return MOTOR_PROTOCOL_STAGE_FAIL;
+  }
+  const uint32_t sdo_response_id =
+      MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->motor_id;
+  // 保存阶段无应答（发完即推进，内核不置 awaiting）：杂散帧不可能合法属于
+  // 本阶段，显式 IGNORE，避免直调边界把它当 RETRY 触发 FLASH 重写。
+  if (desc->action == CERB_STAGE_SAVE) {
+    return MOTOR_PROTOCOL_STAGE_IGNORE;
+  }
+
+  // 设备参数回读（REFRESH_PARAMS）：4 个加速 upload，每阶段追加一个
   // motor_protocol_param_stage_t（设备端原值 + 关节侧换算值）进读缓冲。
-  // 原值带出去是刻意的：内核与固件记录比对、页面显示设备真值都只认原值，
-  // SI 仅是换算投影（系数配错时两端一起错，比不出问题）。
   if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    if (response->can_id != MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->motor_id ||
-        response->dlc < 8U) {
+    if (response->can_id != sdo_response_id || response->dlc < 8U) {
       return MOTOR_PROTOCOL_STAGE_IGNORE;
     }
     if ((response->data[0] & 0xE0U) == CERB_SDO_CMD_ABORT) {
-      return MOTOR_PROTOCOL_STAGE_FAIL;
-    }
-    uint16_t want_index = 0U;
-    uint8_t want_sub = 0U;
-    uint8_t want_slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
-    if (!cerb_refresh_stage_plan(stage, &want_index, &want_sub, &want_slot)) {
       return MOTOR_PROTOCOL_STAGE_FAIL;
     }
     if (response->data[0] != CERB_SDO_SCS_UPLOAD_4BYTE) {
@@ -771,7 +768,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     }
     const uint16_t got_index =
         (uint16_t)(response->data[1] | ((uint16_t)response->data[2] << 8U));
-    if (got_index != want_index || response->data[3] != want_sub) {
+    if (got_index != desc->index || response->data[3] != desc->sub) {
       return MOTOR_PROTOCOL_STAGE_RETRY; // 非本阶段对象
     }
     if (profile == NULL) {
@@ -779,53 +776,31 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     }
     float value = 0.0f;
     const uint32_t raw = cerb_read_le32(&response->data[4]);
-    switch (stage) {
-      case 0U:
-      case 1U: {
-        // INTEGER32 cnt（负载端，与关节同轴）。
-        const int32_t cnt = (int32_t)raw;
-        value = (float)motor_protocol_cerb_limit_cnt_to_rad(cnt);
-        break;
-      }
-      case 2U:
-        value = (float)motor_protocol_cerb_motor_rpm_to_joint_rad_s(
-            (double)profile->gear_ratio, raw);
-        break;
-      case 3U:
-        // 0x2538 是电气电流上限：与写入侧用同一套限值系数，保证"读到的 A"
-        // 与"写回去的 A"是同一个数（换算系数换了也不会来回漂）。
-        value = (float)motor_protocol_limit_ma_to_joint_nm(
-            (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
-        break;
-      default:
-        return MOTOR_PROTOCOL_STAGE_FAIL;
+    if (!cerb_refresh_raw_to_si(desc->param_slot, raw, profile, &value)) {
+      return MOTOR_PROTOCOL_STAGE_FAIL;
     }
     const motor_protocol_param_stage_t payload = {.raw = raw,
                                                   .value_si = value};
     cerb_read_append(read_out, (const uint8_t *)&payload, sizeof(payload));
     return MOTOR_PROTOCOL_STAGE_ADVANCE;
   }
-  // 设备侧管理对象：写应答 / 读回核验（0x607D、0x6080、0x2538）。
+
+  // 写事务的 SDO 阶段（保存阶段无应答，不会进本函数）。
+  // 长度检查（can_id 归属已由内核/match_rx_frame 预过滤；与旧实现一致，
+  // 直调测试不设 can_id）。sdo_response_id 在 refresh 分支使用。
+  (void)sdo_response_id;
   if (response->dlc != 8U) {
     return MOTOR_PROTOCOL_STAGE_RETRY;
   }
   if (response->data[0] == CERB_SDO_CMD_ABORT) {
     return MOTOR_PROTOCOL_STAGE_FAIL; // 设备明确拒绝（含字典越界/不支持）
   }
-  uint16_t index = 0U;
-  uint8_t sub = 0U;
-  bool is_write = false;
-  uint32_t expected = 0U;
-  if (!cerb_sdo_stage_plan(stage, profile, request, &index, &sub, &is_write,
-                           &expected)) {
-    return MOTOR_PROTOCOL_STAGE_FAIL;
-  }
   const uint16_t got_index = (uint16_t)((uint16_t)response->data[1] |
                                         ((uint16_t)response->data[2] << 8U));
-  if (got_index != index || response->data[3] != sub) {
-    return MOTOR_PROTOCOL_STAGE_RETRY; // 非本阶段应答（可能是上一阶段的迟到帧）
+  if (got_index != desc->index || response->data[3] != desc->sub) {
+    return MOTOR_PROTOCOL_STAGE_RETRY; // 非本阶段应答（上一阶段迟到帧）
   }
-  if (is_write) {
+  if (desc->action == CERB_STAGE_SDO_WRITE) {
     return response->data[0] == CERB_SDO_SCS_WRITE_ACK
                ? MOTOR_PROTOCOL_STAGE_ADVANCE
                : MOTOR_PROTOCOL_STAGE_RETRY;
@@ -833,7 +808,9 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
   if (response->data[0] != CERB_SDO_SCS_UPLOAD_4BYTE) {
     return MOTOR_PROTOCOL_STAGE_RETRY;
   }
-  // 读回必须与写入值一致；不一致重发本阶段（≤2 次后内核收敛为 UNCONFIRMED）。
+  // 读回必须与写入值一致；不一致重发本阶段（≤2 次后内核收敛 UNCONFIRMED）。
+  const uint32_t expected =
+      cerb_stage_write_value(desc->value_kind, profile, request);
   return cerb_read_le32(&response->data[4]) == expected
              ? MOTOR_PROTOCOL_STAGE_ADVANCE
              : MOTOR_PROTOCOL_STAGE_RETRY;

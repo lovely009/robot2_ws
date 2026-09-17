@@ -248,8 +248,10 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
   motor_control_dev_init_t dev_state = MOTOR_CONTROL_DEV_INIT_NA;
   if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
     entry->dev_read_attempts++; // 每次回读收尾都计入（成功也算一次尝试）
-    // 回读成功的判据：4 个阶段各追加一个 motor_protocol_param_stage_t，无溢出。
-    if (result == MOTOR_PROTOCOL_CONFIG_OK && entry->refresh_count == 4U) {
+    // 回读成功的判据：4 个槽位的原值位图全部到齐（每 ADVANCE 落袋一个槽，
+    // 重复/缺失槽位图凑不齐 0x0F）。
+    if (result == MOTOR_PROTOCOL_CONFIG_OK &&
+        entry->refresh_slots == MOTOR_CONTROL_DEV_RAW_ALL) {
       // 全部阶段到齐才提交：设备端原值位图一次性换成本次读到的槽位。
       entry->dev_raw_present = entry->refresh_slots;
       update_shadow_from_read(entry);
@@ -686,6 +688,18 @@ static bool reject_invalid(motor_control_context_t *ctx,
   return false;
 }
 
+// 事务进行中的统一拒绝（一问一答：同一电机新请求直接 BUSY，不排队）。
+static bool reject_busy(motor_control_context_t *ctx,
+                        motor_control_entry_t *entry,
+                        const motor_protocol_config_request_t *request,
+                        uint32_t now_ms) {
+  ctx->config_rejected_count++;
+  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+                           entry->motor_id, entry->bus_index,
+                           MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
+  return false;
+}
+
 bool motor_control_submit_config(motor_control_context_t *ctx,
                                  const motor_protocol_config_request_t *request,
                                  uint32_t now_ms) {
@@ -757,11 +771,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_invalid(ctx, entry, request, now_ms);
       }
       if (entry->tx_active) {
-        ctx->config_rejected_count++;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
-        return false;
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, &bounded, now_ms); // 落事务的是钳制后的请求
     }
@@ -826,11 +836,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_invalid(ctx, entry, request, now_ms);
       }
       if (entry->tx_active) {
-        ctx->config_rejected_count++;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
-        return false;
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, &clamped, now_ms);
     }
@@ -845,11 +851,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_invalid(ctx, entry, request, now_ms);
       }
       if (entry->tx_active) {
-        ctx->config_rejected_count++;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
-        return false;
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, request, now_ms);
     }
@@ -895,13 +897,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_invalid(ctx, entry, request, now_ms);
       }
       if (entry->tx_active) {
-        ctx->config_rejected_count++;
-        motor_control_push_event(ctx, now_ms,
-                                 MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_BUSY,
-                                 request->request_id);
-        return false;
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, request, now_ms);
     }
@@ -921,11 +917,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_invalid(ctx, entry, request, now_ms);
       }
       if (entry->tx_active) {
-        ctx->config_rejected_count++;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
-        return false;
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, request, now_ms);
     }

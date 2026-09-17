@@ -1,50 +1,56 @@
-# 电机运行时架构验证计划
+# 电机运行时验证计划（开放项唯一清单）
 
-> **状态：活动。** 核心运行时已实现并通过 host 回归；以下条目是 ADR 0007 保持 Proposed 的真实开放项。已实现功能不再继续标作笼统 TBD。
+> **状态：活动，2026-09-18 重构后更新。** 本文件是 ADR 0007 保持 Proposed 期间
+> 唯一的开放项清单；原交接文档已归档（[HANDOFF](../archive/HANDOFF-motor-runtime-refactor.md)）。
+>
+> 现状基线（架构不在此重复）：host CTest 17 个用例全绿（16 个 C++ cassert +
+> 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（1 订 4 发 + rclc
+> 参数服务器）、构建与台架顺序以 [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
+> [ADR 0007](../../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 2026-09-18 勘误和
+> [决策日志](../architecture/motor-runtime-decision-log.md)为准。
+> 标「host 已覆盖」表示逻辑有自动测试、仅缺真机证据；其余 `[ ]` 均需台架或设计动作。
 
-## 已由代码与自动测试闭环
+## 1. 实时性与总线容量
 
-- [x] `MotorCommandArray` 对 NaN/Inf、未知 ID、重复 ID 整快照拒绝，拒绝时不刷新 freshness；
-- [x] `MotorTopology`、`MotorEvent`、`MotorConfigResult` 消息及发布路径；
-- [x] `effort` 是 100 Hz 命令中的唯一动态前馈量；
-- [x] QoS 具备当前实现基线；
-- [x] protection/limit 公共位定义；
-- [x] 两协议 100 ms OFFLINE 判定；
-- [x] FDCAN adapter 明确 FD/BRS/DLC，硬件过滤器采用接收标准 ID 后由软件路由；
-- [x] 按 `model_name` 显式 Profile 绑定；
-- [x] P0/P1/P2 静态队列、P1 latest-wins、每总线 RX ring 和单一 TX 所有权。
+- [ ] **TBD-RT-01**：实测 `motor_rt_task` WCET、1 ms 周期 jitter、P0/P1 最坏发送延迟。
+- [ ] **TBD-CAN-01**：最坏反馈流量下 RX ring / P2 配额 / TX 队列容量，记录 overflow、backlog、队列峰值、总线负载。
+- [ ] 三总线约 40 台 Vaxor/CERB 混合持续压测；测量 USB CDC 状态上行带宽余量。
+- [ ] 故障注入下 P0 不静默丢失：CAN 无 ACK、RX burst、下游硬件拒收（重入队/抢占逻辑 host 已覆盖）。
+- [ ] 长时间热插拔、离线/恢复循环稳定性。
 
-## 仍需设计确认或实测
+## 2. 安全语义真机确认
 
-### 协议与安全
+- [ ] **TBD-SAFETY-01**：以厂家文档和无负载台架确认两协议 30 ms 软停实际动作。缺席软停、30 ms/100 ms 时基与单电机隔离语义 host 已覆盖。
+- [ ] **TBD-SAFETY-02**：确定 RX ring overflow 触发安全降级的阈值与恢复条件。
+- [ ] Agent 断连立即失能清授权；重连须重新全局授权 + 逐电机 `SET_ENABLE(true)` + 新快照才恢复（派生逻辑 host 已覆盖，真机顺序待验）。
+- [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode（整快照拒绝且不刷新 freshness，host 已覆盖）；厂家故障锁存、心跳丢失 100 ms OFFLINE 与恢复路径。
+- [ ] CERB 每总线 20 ms 单帧 SYNC、约 20 ms 状态上报、100 ms OFFLINE 边界实测（协议编解码 host 已覆盖）。
+- [x] **BUS_OFF 自清恢复**：HAL 错误状态回调清 `CCCR.INIT` 已实现，**2026-09-18 真机自恢复已实测通过**；持续物理故障下的反复 bus-off 计数随 TBD-CAN-01 故障注入观察。
+- [ ] BMI088 断线 / 阻塞 SPI / 停 DRDY：传输超时、降级重试、heater off、双缓冲不撕裂。
 
-- [ ] **TBD-SAFETY-01**：以厂家文档和无负载台架确认 CERB/VAXOR 30 ms 软停动作；
-- [ ] **TBD-SAFETY-02**：确定 RX ring overflow 触发安全降级的阈值和恢复条件；
-- [x] ~~**TBD-ZERO-01**：零位是否掉电持久~~ **已实测结案（2026-09-17）**：设零 →
-  驱动器断电重上电 → **零位保持**。结论：0x2531 写入即由驱动器自行落盘，设零事务
-  无需额外保存码（保持单阶段）。
-- [ ] **TBD-PROFILE-02**：规格书自身三套口径互不一致（自报 Kt 0.086/0.077；
-  额定/峰值两点隐含关节侧 N·m/A 4.167~5.714 与 3.438~3.846，隐含效率 0.48~0.66；
-  反电动势常数折算 Kt≈0.0506/0.0449，与自报值差 1.70×）。**限值口径已不依赖它**
-  （改用规格书峰值对，见决策日志 §6.6），但**反馈扭矩估计仍依赖 Kt 链**：若真实
-  关节侧 N·m/A 只有名义值的一半，上层看到的力矩会比实际大一倍。判别实验：静止
-  重力载荷下同时读字典表的 `0x6077`（力矩传感器，0.01 N·m）与 `0x6078`（实际电流，
-  mA）算 `Kt_eff = τ_sensor/(Iq×gear)`——**驱动器自带力矩传感器，不必外接**；或
-  MIT 给已知前馈扭矩做最小二乘拟合。**台架未做**。
-- [x] ~~**TBD-CONFIG-01**：确认厂家管理对象，特别是 CERB 设备侧限位~~ **已确认并实现**（2026-09-16）：对象见《CANopen-V0.9 字典表》（位置限位 0x607D:01/:02 cnt、最大转速 0x6080 电机端 RPM、峰值电流 0x2538 电机端 mA，均 ≤4 字节→快速 SDO）。**台架实测待做**。
-- [ ] 设计并验证 FDCAN BUS_OFF 恢复策略，避免自动恢复掩盖持续物理故障；
-- [ ] 建立上层型号库与固件 Profile 的版本/内容一致性机制。
+## 3. 参数链与 Profile
 
-### 容量与实时性
+- [ ] **TBD-CONFIG-01（台架实测部分）**：逐台确认上电回读四对象值；故意改一台设备参数 → 判未初始化（CONFIG_CONFLICT，`last_error=40`，拒绝使能）→ 写回恢复闭环；回读失败报 41 不拦。boot 比对/写回/恢复事务 host 已覆盖（决策日志 §6.3）。
+- [ ] REFRESH_PARAMS 按总线一问一答、四个 SDO upload 回读与 `system.save` W25Q64 双 sector 持久化真机验证（事务状态机 host 已覆盖，§6.5）。
+- [ ] **TBD-PROFILE-02**：CERB 规格书 Kt 三套口径互不一致，反馈扭矩估计仍依赖 Kt 链（真实值若仅名义一半，上层力矩偏大 1 倍）。判别实验：静止重力载荷同时读字典 `0x6077`（力矩传感器，0.01 N·m）与 `0x6078`（实际电流，mA）算 `Kt_eff = τ/(Iq×gear)`——驱动器自带传感器，不必外接；或 MIT 已知前馈扭矩最小二乘拟合。
+- [ ] Vaxor 80 速比型号无完整规格，型号目录刻意不收；规格到位并补 Profile 前不得开放控制。
+- [ ] 建立上层型号库（motor.yaml）与固件内置 Profile 的版本/内容一致性机制。
 
-- [ ] **TBD-CAN-01**：在最坏反馈流量下验证 RX、P2、TX 配额与队列容量；
-- [ ] **TBD-RT-01**：测量 `motor_rt_task` WCET、1 ms jitter、P0/P1 最坏发送延迟；
-- [ ] 三路总线约 40 台混合电机的持续压力测试；
-- [ ] 测量最大规模下 USB CDC 带宽和状态上行余量；
-- [ ] 长时间热插拔、离线/恢复与冲突注入。
+## 4. 上层迁移（ROS 2 侧，未动工）
+
+- [ ] `motor_hardware_interface` 迁移：维护 `joint_name ↔ motor_id`、方向、零位与关节语义；发 `MotorCommandArray`、收 `MotorMotionStateArray`，参数经 rclc 参数服务器对接。
+- [ ] 消息定义改动先改权威包 `micro_ros_agent/src/can_bridge_msgs` 再同步 ROS 工作区；固件不得恢复 name-to-ID 兼容层。
+- [ ] 规模约束：rclc low-mem 参数槽 128 ≈ 17 台，40 台方案落地前须先评估参数面容量。
+
+## 近期已结案（不再追踪）
+
+- [x] 参数读写全链路、SDO 0x1008 读身份自动绑定（bind FIFO 已退役）、设零掉电持久化（2026-09-17 真机结案，§6.7）、DEV_INIT 不一致槽位位图事件、storage 任务接线、1 订 4 发消息面。
+- [x] CERB 管理对象确认与快速 SDO 实现（2026-09-16，TBD-CONFIG-01 对象部分）；台架实测部分仍开放，见第 3 节。
+- [x] MotorConfigResult 消息已删除，配置结果走 `motor_events` 内核事件与参数错误码（ADR 勘误），本条遗迹销账。
 
 ## 验收记录要求
 
-每次台架记录必须包含固件提交、编译宏、时钟、总线位率、节点拓扑、运行时长、错误计数、队列峰值、WCET/jitter 和明确判据。硬件测试不得以软件停机替代急停、机械限位和供电隔离。
-
-全部架构级条目闭环后，再更新 [ADR 0007](../../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 状态；单次九电机 FDCAN1 通过不能代替三总线最大规模验收。
+每次台架必须记录：固件 commit、编译宏、时钟与总线位率、节点拓扑（总线/ID/型号）、
+运行时长、错误计数（ring drop / 事件丢弃 / last_error）、队列峰值、WCET/jitter 和明确通过判据。
+硬件测试不得以软件停机替代急停、机械限位与供电隔离。全部架构级条目闭环后再将
+ADR 0007 转 accepted；单次九电机 FDCAN1 通过不代表三总线 40 台最大规模验收。

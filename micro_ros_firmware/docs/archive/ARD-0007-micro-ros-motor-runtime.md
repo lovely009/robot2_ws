@@ -1,5 +1,7 @@
 # ARD-0007：micro-ROS 发现驱动的聚合式电机运行时——架构需求与设计文档
 
+> **已归档（2026-09-18）**：本文件是发现式 ID 运行时的冻结设计基线。现行设计以 `docs/adr/0007-...md`（含勘误块）与 `docs/architecture/motor-runtime-decision-log.md` 为准；本文的 10ms 控制边界、MotorPolicy/MotorConfig 话题、config_result 发布等已被后续实现取代，正文保留作历史追溯，不再维护。
+
 > **ARD**：Architecture Requirements & Design Document（架构需求与设计文档）  
 > **系统**：`micro_ros_firmware`  
 > **目标 MCU**：STM32H723  

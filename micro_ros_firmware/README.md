@@ -19,8 +19,8 @@ CERB SYNC 上报心跳），型号由内核读设备 SDO 0x1008 自报身份、�
 自动绑定；命令是最多 64 目标的
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
 "命令实时回显（50Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
-OFFLINE = 心跳丢失 100ms。上层迁移与台架验证进度见
-`docs/handoffs/HANDOFF-motor-runtime-refactor.md`。
+OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
+`docs/plans/active/motor-runtime-validation.md`（唯一清单）。
 
 ## 关键决策
 
@@ -79,11 +79,15 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `imu_bridge` | `micro_ros/imu/data` 与 `micro_ros/imu/temp` 的缓冲/填充/发布 |
 | `motor_bridge` | ID 化命令订阅 + motion/status/topology/events 发布 |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 20ms 控制边界，内核唯一调用者 |
+| `session_sync` | 会话边沿/电平→内核授权的纯派生（20ms 边界调用，host 可测） |
+| `storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
+| `heater` | TIM3 加热 PWM 所有权 + 纯 PID（host 可测） |
 | `lib/fdcan` | FDCAN 初始化/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度 |
 | `lib/imu` | BMI088 驱动/通信层、SPI2 阻塞传输、Mahony/SI 聚合（单一 IMU 域） |
 | `lib/motor_protocol` | adapter 接缝 + vaxor/CERB 编解码（厂家字节唯一归属地） |
 | `lib/motor_control` | ID 驱动运行时内核：注册表/型号目录/九态生命周期/安全级联/配置事务 |
 | `lib/control_mailbox` | ID 完整命令快照、低频配置 FIFO 与连接/授权边沿（纯逻辑） |
+| `lib/board` | 板级共享常量（ISR syscall 阈值），板级库经它免依赖 FreeRTOS |
 | `lib/dma` | DMA1/BDMA 控制器级资源（时钟、NVIC、占用登记）；设备配置由各设备库自持 |
 | `lib/w25q64` | OCTOSPI2 W25Q64 驱动；唯一所有者为 `storage_task`（见「W25Q64」节） |
 | `lib/ws2812` | 板载 WS2812 彩灯驱动（SPI6 MOSI=PA7） |
@@ -316,8 +320,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读四个管理对象，与 W25 里的固件�
   最多阻塞 2ms，首次 HAL 失败后锁存 transport error，当前初始化/采样余下访问
   快速失败；失败时 heater PWM 立即置 0。初始化成功后，空的二值信号量保证
   第一份有效样本必须来自真实 ACC DRDY；sensor task 写双缓冲 snapshot，ROS
-  只复制已发布缓冲。运行中 SPI 失败会标记 IMU unhealthy、关闭 heater，并在
-  后续 DRDY 再尝试采样；`g_imu_init_error_count` 可供 GDB 观察。
+  只复制已发布缓冲。运行中 SPI 失败会关闭 heater 并在后续 DRDY 再尝试采样。
 
 ## `dev-real` 无负载真机验证清单（仅人工执行）
 

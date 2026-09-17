@@ -1,26 +1,29 @@
 # micro_ros_firmware 文档
 
-固件**开发资料**按文件夹归类；厂商参考资料平铺在本目录根部。台架活动计划、
-交接与实验报告在根工程 [docs/reports](../../docs/reports/README.md)，台架操作
+固件**开发资料**按文件夹归类；厂商参考资料平铺在本目录根部。台架活动计划与
+实验报告在根工程 [docs/reports](../../docs/reports/README.md)，台架操作
 指南在 [docs/guides](../../docs/guides/README.md)。
 
 ## 目录职责
 
-- `adr/`：固件架构决策，不存操作步骤；
-- `architecture/`：架构需求、设计与开发基线；
-- `handoffs/`：当前实现边界、风险和下一步；
-- `plans/active/`：未完成架构验收项；
-- 根部平铺文件：厂商板卡与电机协议原件，不改内文。
+- `adr/`：固件架构决策（含勘误），不存操作步骤；
+- `architecture/`：架构开发基线（decision-log 承载设计理由）；
+- `plans/active/`：未完成真机验收项（唯一开放清单）；
+- `archive/`：冻结的完整规范与历史交接，保留追溯、不再维护；
+- 根部平铺文件：厂商板卡与电机协议原件，不改内文；
+- `dm-mc02例程/`：厂商例程整树（仅本地参考，已 gitignore，勿入库）。
 
 ## 开发文档
 
 | 文档 | 内容 | 状态 |
 |---|---|---|
-| [ARD-0007](architecture/ARD-0007-micro-ros-motor-runtime.md) | 架构需求与设计（55 章规范 + 实现状态矩阵） | Proposed / 开发基线 |
-| [ADR 0007](adr/0007-micro-ros-discovery-driven-motor-runtime.md) | 发现驱动的聚合式电机运行时决策 | Proposed |
-| [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 架构开发基线（2026-09-04 收敛） | 基线，部分历史 |
-| [HANDOFF-motor-runtime-refactor](handoffs/HANDOFF-motor-runtime-refactor.md) | 当前实现边界、剩余上层迁移与台架验收 | 当前 |
-| [motor-runtime-validation](plans/active/motor-runtime-validation.md) | ADR 0007 转 accepted 前的架构级开放验收 | 活动 |
+| [README](../../README.md) | 工程事实：硬件/时钟/任务/模块/安全语义 | 权威 |
+| [AGENTS.md](../../AGENTS.md) | AI/人工操作手册：构建、台架顺序、坑 | 权威 |
+| [ADR 0007](adr/0007-micro-ros-discovery-driven-motor-runtime.md) | 发现驱动聚合式运行时决策（顶部含 2026-09-18 勘误） | Proposed + 勘误 |
+| [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 设计理由（参数链/一问一答/设零等） | 基线，含历史 |
+| [motor-runtime-validation](plans/active/motor-runtime-validation.md) | 开放台架项唯一清单与验收记录要求 | 活动 |
+| [ARD-0007 归档](archive/ARD-0007-micro-ros-motor-runtime.md) | 冻结的 55 章完整规范（10ms/旧话题等已被取代） | 历史 |
+| [HANDOFF 归档](archive/HANDOFF-motor-runtime-refactor.md) | 2026-09 重构交接快照（开放项已并入 validation plan） | 历史 |
 
 ## 厂商参考资料（原件不改内文）
 

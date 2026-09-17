@@ -17,7 +17,7 @@
 
 ## 启动顺序
 
-顺序不可颠倒：CANable2 必须先成为 ACK 节点，控制板才复位；否则 FDCAN1 可能因无人 ACK 进入 BUS_OFF，而当前固件不会自动恢复。
+顺序不可颠倒：CANable2 必须先成为 ACK 节点，控制板才复位；否则 FDCAN1 会因无人 ACK 进入 BUS_OFF。固件自清 INIT 恢复（2026-09-18 已实测），但仍须 ACK 节点在先才能重新同步。
 
 1. 启动 micro-ROS Agent：
 
@@ -77,4 +77,4 @@ Ctrl-C 停止模拟器时脚本发送 `C` 关闭 CANable 通道并输出每节�
 
 30 秒九节点基线：`ECR=0`、1–9 全 online、反馈计数 `1546/1545×8`，详见[第二轮报告](../reports/2026-09-11-fdcan1-bench-run2-findings.md)。
 
-以下不属于只读指南：发布 `MotorBind`、`motor_enable`、`motor_command_array`，以及发送任何电机运动目标。继续前必须按[活动计划](../reports/2026-09-11-fdcan1-bench-9motors-goal.md)逐项记录环境和证据。
+以下不属于只读指南：发布 `motor_command_array` 或发送任何电机运动目标（`MotorBind`/`motor_enable` 话题已删除）。继续前必须按[活动计划](../reports/2026-09-11-fdcan1-bench-9motors-goal.md)逐项记录环境和证据。

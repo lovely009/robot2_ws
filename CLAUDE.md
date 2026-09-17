@@ -80,7 +80,7 @@ ros2 launch motor_sim motor_sim.launch.py \
 
 ## micro_ros_firmware（STM32 固件，PlatformIO，非 ament 包）
 
-STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经同仓库 `micro_ros_agent/` 对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；权威文档是该目录 `AGENTS.md`，运行时设计与后续台架项见 `micro_ros_firmware/docs/architecture/ARD-0007-micro-ros-motor-runtime.md` 和 `micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`（台架报告与指南在 `docs/reports/`、`docs/guides/`）。
+STM32H723VGT6 控制板固件：micro-ROS（serial/USB CDC）+ FreeRTOS + 三路 FDCAN，经同仓库 `micro_ros_agent/` 对接 ROS 2。构建体系是 **PlatformIO，不能用 colcon**；**权威操作文档是该目录 `AGENTS.md`**（构建/台架顺序/坑），工程事实以 `micro_ros_firmware/README.md` 为准；设计决策见 `micro_ros_firmware/docs/adr/0007-...`（含勘误），冻结的 ARD-0007 完整规范已归档 `micro_ros_firmware/docs/archive/`，开放台架项唯一清单是 `micro_ros_firmware/docs/plans/active/motor-runtime-validation.md`。
 
 ```bash
 # 均在 micro_ros_firmware/ 内执行
@@ -90,7 +90,7 @@ ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + casse
 ```
 
 - 改 `platformio.ini` 编译宏或 `ldscript/*.ld` 后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编；增量构建不监听链接脚本改动、会静默跳过重新链接）；勿跑 `-t clean_microros`（联网重下环境）。
-- motor runtime 已完成固件侧 ID 驱动化；当前固件应同时通过 host 测试与 `pio run`。剩余上层迁移和真机台架项见 `micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`。
+- 当前固件应同时通过 host 测试（17 项 CTest）与 `pio run`；剩余上层迁移与真机台架项见 validation plan。
 
 ## micro_ros_agent（独立 colcon 工作区，勿在 ros2_ws 内构建）
 

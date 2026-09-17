@@ -369,8 +369,9 @@ CAN-FD 侧的正常性由三件事保证：协议适配器独立组帧、P1 只�
 
 > 实现落位注（2026-09-11）：表中 `src/motor_ros_bridge` 落位为 `src/ros_bridge`
 > （编排）+ `src/motor_bridge`（电机域桥）+ `src/micro_ros_task`（Agent 状态机）；
-> `src/storage_task` 未创建（W25Q64 待接线）。目录实况以固件 README「代码组织」
-> 为准，责任边界不变。
+> ~~`src/storage_task` 未创建（W25Q64 待接线）~~ **[2026-09-18 更新]**
+> storage_task 已实现并独占 W25Q64 参数持久化（非低频日志，见 README「W25Q64」）。
+> 下文 §8 的 MotorPolicy/MotorConfig 话题层已由 rclc 参数服务器取代，保留作设计理由追溯。
 
 | 模块 | 责任 | 不负责 |
 |---|---|---|

@@ -1,7 +1,11 @@
 # 电机运行时交接
 
+> **已归档（2026-09-18）**：开放项已全部并入
+> [运行时验证计划](../plans/active/motor-runtime-validation.md)（唯一开放清单）；
+> 以下为重构完成时的实现边界快照，保留作历史，不再维护。
+
 > 固件侧 ID 驱动运行时已经完成。本文只记录当前实现边界、剩余上层迁移与
-> 台架验收项；设计依据以 [ARD-0007](../architecture/ARD-0007-micro-ros-motor-runtime.md)、
+> 台架验收项；设计依据以 [ARD-0007](ARD-0007-micro-ros-motor-runtime.md)、
 > [ADR 0007](../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 和
 > [架构开发基线](../architecture/motor-runtime-decision-log.md) 为准。开放架构验收统一维护在
 > [运行时验证计划](../plans/active/motor-runtime-validation.md)。

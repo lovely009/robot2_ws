@@ -12,7 +12,18 @@
 > | 单一 `motor_rt_task`、每总线 SPSC RX ring、P0/P1/P2 | RX/P2/TX 最坏预算、WCET/jitter、P0/P1 延迟 |
 > | 消息、QoS 基线、结果事件、公共状态位 | BUS_OFF 恢复与 Profile 自动一致性机制 |
 >
-> 详细现状见 [ARD-0007](../architecture/ARD-0007-micro-ros-motor-runtime.md)；开放项由[运行时验证计划](../plans/active/motor-runtime-validation.md)维护。
+> 详细现状见 [ARD-0007](../archive/ARD-0007-micro-ros-motor-runtime.md)；开放项由[运行时验证计划](../plans/active/motor-runtime-validation.md)维护。
+
+## 2026-09-18 勘误（实现现状优先）
+
+- **控制边界**：实际为 1 ms 服务（RX drain / 内核 service / SYNC / TX）+ 20 ms 控制边界，非本文的 10 ms。
+- **消息面**：1 个订阅 `/motor_command_array` + 4 个发布（`motion_states`、`motor_status_array`、`motor_topology`、`motor_events`）；MotorBind/MotorPolicy/MotorConfig 话题与独立 `motor_config_result` 话题均不存在。配置走 rclc 参数服务器（`m<id>.*` / `system.*`），结果经内核事件 `motor_events` 与参数错误码给出。
+- **型号绑定**：内核经 READ_IDENTITY 事务读设备 SDO 0x1008 自报身份、查内置型号目录自动完成，非上层 Profile 通道。
+- **参数持久化**：storage 任务独占 W25Q64 双 sector blob（v2 = 32 B 头 + 64×48 B 记录）；设备写事务去抖 500 ms 自动落盘，另支持 `system.save` 手动保存。上电对四对象回读比对，不一致报 40、失败报 41。
+- **授权**：会话电平每控制边界纯派生（`src/session_sync.c`）；未知或在线即授权，断连立即 P0 撤权；冻结态恢复需 `SET_ENABLE(true)` 后收到新快照。
+- **BUS_OFF 恢复**：HAL 回调清 `CCCR.INIT` 自清恢复，非仅计数。
+- **W25Q64**：已接线使用，非休眠占位。
+- **ARD 正文归档**：完整 ARD-0007 正文已移至 [`docs/archive/ARD-0007-micro-ros-motor-runtime.md`](../archive/ARD-0007-micro-ros-motor-runtime.md)，现行设计以本勘误与 `docs/architecture/motor-runtime-decision-log.md` 为准。
 
 ## Context
 

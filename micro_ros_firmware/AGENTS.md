@@ -1,285 +1,120 @@
-# micro_ros_firmware —— Agent 指南
+# micro_ros_firmware —— Agent 操作手册
 
-STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，serial over
-USB CDC 进 ROS 2 humble）。当前业务为 **BMI088 IMU** + **三路 FDCAN**：官方
-`CtrBoard-H7_IMU_TempCtrl` / `CtrBoard-H7_FDCAN` 底层功能移植 + Mahony/ROS 发布增强。
-**权威文档：`README.md`**，改动前先读；本文件只列 Agent 即用要点。
+STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，USB CDC）。
+本文件只放即用命令、硬约束与踩坑；架构细节看权威文档，勿在此复制：
+`README.md`（硬件/时钟/任务/话题/安全级联/真机清单）、`lib/README`（库分层）、
+`docs/adr/0007-micro-ros-discovery-driven-motor-runtime.md`、
+`docs/architecture/motor-runtime-decision-log.md`、
+`docs/plans/active/motor-runtime-validation.md`（开放台架项 TBD-*）、
+`docs/archive/`（冻结 ARD 规范与历史交接）。
 
-> **电机运行时与后续验收：**
-> [`docs/handoffs/HANDOFF-motor-runtime-refactor.md`](docs/handoffs/HANDOFF-motor-runtime-refactor.md)。
-> 固件侧 ID 驱动运行时已经完成；剩余工作是上层 `motor_hardware_interface`
-> 的 joint↔motor_id 映射与真机台架验证。上层迁移启动时先更新同仓库
-> `../micro_ros_agent/` 的权威消息包，再修改 `ros2_ws/`。
-> 运行时设计以 HANDOFF、`docs/architecture/ARD-0007-micro-ros-motor-runtime.md` 和
-> ADR 0007 为准；不得恢复旧四电机表或 `JointState` 命令路径。
+## 构建与烧录 / host 测试
 
-## 构建与烧录（本机）
-
-`pio` 不在 PATH，用全路径：
+`pio` 不在 PATH；固件用 PlatformIO（不能用 colcon），命令均在本目录执行：
 
 ```bash
-cd micro_ros_firmware
 ~/.platformio/penv/bin/pio run            # 编译
-~/.platformio/penv/bin/pio run -t upload  # ST-Link 烧录
-~/.platformio/penv/bin/pio device monitor # 串口监视 115200（USB CDC 下波特率无效）
+~/.platformio/penv/bin/pio run -t upload  # ST-Link swd 烧录（已免 sudo）
+~/.platformio/penv/bin/pio run -t clean   # 全量清理（不是 clean_microros）
+
+cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
+  ctest --test-dir .host-build --output-on-failure
 ```
 
-## 关键决策（改动前确认，勿破坏）
+- host 共 17 个测试（16 个 C++ ctest + 1 个 python 线协议），直接编译固件真实 .c、
+  无桩无复制；白盒用例 `-I` 内核 src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
+- **必须 `-t clean` 全量重建**：改 `platformio.ini` 构建宏（USB CDC 两宏、
+  HAL_FDCAN/IWDG、HSE_VALUE、-Os、FDCAN_SELF_ACK_BENCH）或 `ldscript/*.ld`。
+  SrcWrapper HAL 对象不随 flag 重编、增量链接不监听 .ld，不 clean 静默用旧 ELF；
+  改 -Os 后还要重测 motor_rt WCET/jitter。
+- 勿跑 `-t clean_microros`（联网重下依赖）；libmicroros/ 被删后重建需 GitHub
+  可达，本机 .pio 内 repositories.py 的 ghfast 镜像补丁未入库，重下前先确认还在。
 
-- `framework = arduino`：`micro_ros_platformio` 官方只支持 Arduino 框架。
-- `board_microros_distro = humble`、`board_microros_transport = serial`
-  （物理层 USB CDC，agent 以 `/dev/ttyACM0` 对接）。
-- `STM32FreeRTOS`：调度器接管 SysTick；micro-ROS 与 IMU 都是独立任务。
-- USB 引脚 **PA11=USB_DM / PA12=USB_DP**；状态 LED 是 **WS2812**（SPI6 MOSI=PA7）。
-- 节点名 `micro_ros_node`，话题 `micro_ros/imu/data`、`micro_ros/imu/temp`
-  （在 `src/imu_bridge.cpp` 顶部）。
-- 电机接口为 ID 化完整快照（ARD-0007；下行已精简，2026-09-15）：下行仅
-  `/motor_command_array`（100Hz 完整快照）；上行 `micro_ros/motion_states`、
-  `micro_ros/motor_status_array`、`micro_ros/motor_topology`、
-  `micro_ros/motor_events`。无 `joint_name`；设备经反馈帧自主发现（vaxor 自主
-  上报 / CERB SYNC 上报）。
-- 下行配置通道（`motor_policy`/`motor_config`/`motor_bind`/`motor_enable` 与
-  `motor_config_result`）已删除：**型号绑定由内核读设备自报身份自动完成**
-  （2026-09-16 起）——发现建档/重连后，1ms 服务节拍按不变量复检
-  （在线 + 处于可绑定生命周期 + 本轮未定论 + 无事务在飞）发起
-  `MOTOR_PROTOCOL_CONFIG_READ_IDENTITY` 事务：CERB 走 CANopen SDO 分段上传
-  读 0x1008（厂家名称，实测回串 `R48LITE_V2` / `R58LITE_V2`），回串剪掉
-  尾随 NUL/空白后与型号目录 `identity_string` 整串精确匹配；无身份读对象的
-  协议（vaxor）回退到"协议内唯一型号"。未命中目录 → `PROFILE_REJECTED` +
-  保持未绑定不可控（不猜型号）；本轮定论后不再重试，重连会重新识别。
-  授权/增益/限位取内核安全默认（建档 `policy_enable` 默认 true、全局授权
-  mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、CERB 限位在
-  驱动器侧）。内核 `bind_profile`/`submit_config` API 保留（测试覆盖与目录内
-  定向绑定）；mailbox bind FIFO 已随静态表一并删除，config FIFO 保留（暂无
-  ROS 生产者，无身份绑定入口——型号一律由内核读设备自报身份决定）。
-- `.msg` 现状（2026-09-16 核实）：唯一源 `micro_ros_agent/src/can_bridge_msgs`
-  只有 command / motion / status / topology / event 五类；MotorBind、
-  MotorConfig、MotorPolicy、MotorConfigResult 均不存在（ros2_ws 侧也无生产者）。
-  下行通道若要回归，须同步改 ros2_ws 并用
-  `tools/refresh_microros_messages.py` 增量刷新（勿用 clean_microros）。
-- 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（50Hz，跟随控制
-  边界）、20B 状态帧=20ms 自主心跳；CERB 反馈帧=命令实时状态（50Hz，跟随控制
-  边界）、`0x080` SYNC 上报帧=20ms 状态心跳（承担总线检测）。OFFLINE=心跳丢失
-  100ms。`motor_rt_task` 每 20ms 发
-  一次 SYNC 维持 CERB 上报，禁止把 SYNC 当控制触发。
-- CERB 仅使用 MIT：R48/R58 的 P/V/T Max 为 `π rad`、`π rad/s`、
-  `11/45 Nm`；使能后等待至少 100ms（adapter `enable_settle_ms`）才发送目标。
-- 状态灯由 `led_task` 独占：上电/未连接=红，连接成功=绿 1Hz 闪，断连=蓝；每 50ms 轮询。
-- FDCAN1/2/3 = PD0/PD1、PB5/PB6、PD12/PD13（FD + BRS，标称 1M/数据 5M）。
+## 台架关键顺序
 
-## 高频踩坑（务必先看）
+- **CANable 先成为 ACK 节点，再复位/烧录控制板**：SLCAN 顺序
+  `C`→`S8`→`Y5`→`O`（间隔 ≥150ms；Y5=数据 5M，Y7 被静默拒绝），sim 自动做。
+  顺序反了 FDCAN1 无人 ACK 进 bus-off（固件自清 INIT 已实测可恢复，但重同步仍需
+  ACK 在先）；已 bus-off：停旧进程→重开通道→再复位板子，只重启 agent 没用。
+- **烧录前先停模拟器**：MCU 挂起期间总线无人 ACK，模拟器继续发帧会把 CANable
+  打进错误态。
+- 控制板 CDC 与 CANable 的 `ttyACM` 编号会交换，一律按 `/dev/serial/by-id/` 区分。
+- FDCAN2/3 悬空导致的 bus-off 属预期，不算 FDCAN1 台架失败。
+- 模拟器在 `../micro_ros_agent/tools/fdcan_motor_sim.py`（CERB 1–6 + VAXOR 7–9，
+  默认 /dev/ttyACM1）；完整流程见仓库根 `docs/guides/fdcan1-bench-guide.md`。
 
-- **IMU 初始化只能在任务里做**：调用 `imu_try_init()`，每次只尝试一次；失败后
-  sensor task 每 1s 降级重试。`BMI088_delay_ms` 用 `vTaskDelay`，调度器未启动
-  时调用会非法；不要在 `setup()`/`systemInit()` 初始化 IMU。
-- **IMU SPI 失败必须有界**：每字节 HAL timeout 为 2ms，首个失败锁存至当前
-  初始化/采样结束；失败时 heater 置 0。首个有效样本必须由真实 ACC DRDY 唤醒，
-  sensor/ROS 之间只传递双缓冲 snapshot 副本，不暴露内部源指针。
-- **EXTI 用框架 API**：`sensor_task.cpp` 通过 `attachInterrupt(PE10, ...)` 挂
-  ACC_INT，不要手写 `HAL_GPIO_EXTI_Callback`/`EXTI15_10_IRQHandler`。
-- **TIM3 用 HardwareTimer**：`sensor_task.cpp` 里 `HardwareTimer` 封装 PWM，
-  不要再手写 `TIM_HandleTypeDef` 初始化。
-- **DMA 分工（2026-09-07 低耦合口径）**：`lib/dma` 只管控制器级资源（DMA1 +
-  BDMA/DMAMUX2 时钟、NVIC、占用登记），由 `main` 板级初始化统一使能（先于
-  一切设备传输）。设备配置归各设备库自持：`lib/imu` 阻塞收发**不用 DMA**
-  （8 字节寄存器读无收益，句柄/链接已移除），`lib/ws2812` 用 BDMA_Ch0 发送
-  （帧缓冲必须在 `.bdma_noinit`——BDMA 仅能访问 DTCM/SRAM4，链接脚本见
-  `ldscript/stm32h723vgt6.ld`）。
-- **USB CDC 宏**：H723 只有 `USB_OTG_HS`，必须保留两个
-  `PIO_FRAMEWORK_ARDUINO_*` 构建宏；删掉则 USB 不枚举。
-- **时钟覆盖**：`src/system_clock.cpp` 强定义覆盖 WEAK 符号；PLL1Q=2 提供
-  SPI2 240MHz，PLLQ 改开会连带改变 SPI2 速率。
-- **FDCAN 时钟**：`PLL2Q=80MHz` 独立供 FDCAN；不要为 FDCAN 改 PLL1Q，
-  否则会连带改变 SPI2 速率。
-- **HAL 模块**：DMA/SPI/TIM 由 STM32duino 默认使能；FDCAN 与 W25Q64 OSPI 分别
-  需要显式 `-DHAL_FDCAN_MODULE_ENABLED`、`-DHAL_OSPI_MODULE_ENABLED`
-  （`platformio.ini` 已加）。任一 HAL 构建宏变更后必须执行
-  `pio run -t clean` 全量重建。
-- **W25Q64**：由 `storage_task` 独占（P1/1024 words）：boot 同步 `w25q64_init()`
-  并读双 sector A/B（0x0/0x1000，选 CRC 有效且 seq 新者）；无芯片/ID 不符静默降级
-  为无持久化，不阻断启动。运行期保存两个触发源：`system.save` 脉冲与设备写事务
-  成功后内核置 `record_dirty` 由 `motor_rt` 去抖 500ms 自动落盘。erase（阻塞可达
-  ~1s）只能在 storage 任务内执行，IWDG 由 motor_rt 独立喂；擦写后读回校验，失败
-  不翻转活动 sector。Flash 缓冲必须 4 字节对齐
-  （-Os 下结构体访问会生成 STRD，非对齐直接 HardFault）。
-- **FDCAN RX 归属**：ISR 只盖时戳并把原始帧写入每总线 SPSC ring（容量 64，
-  满时丢新帧并计数，不解码），`motor_rt_task` 是唯一消费者，每 1ms 每总线最多
-  drain 16 帧；ROS 桥只能读取内核状态副本，不得让 bridge 或第二任务直接消费 ring。
-- **FDCAN IRQ**：优先级固定为 5，必须满足
-  `priority >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`；ring/调度器只在
-  `bsp_can_init()` single-init，不在重连时重建。
-- **改 HAL 构建宏或链接脚本后必须 `pio run -t clean` 全量重建**：SrcWrapper 的
-  `stm32yyxx_hal_fdcan.c.o`、`stm32yyxx_hal_ospi.c.o` 不会因 build flag 变化自动重编；
-  PlatformIO 的依赖检查也不监听 `ldscript/*.ld`，增量构建会静默跳过重新链接
-  （readelf 看到的仍是旧 ELF，易误判链接修复"已生效"）。
-- **FreeRTOS 下 `loop()` 只能非阻塞**：业务放 `sensor`/`control`/`micro_ros` 任务。
-- **任务栈/周期**：`start_task` P1/256 words；`sensor` P2/512 words（DRDY；
-  IMU 非关键路径，不得抢占 motor_rt）；
-  `motor_rt` P3/1024 words（1ms 服务 + 20ms 控制边界）；`micro_ros` P2/8192 words
-  （bridge timer）；`storage` P1/1024 words（OSPI/HAL AutoPolling 深栈）。
-  调栈/周期后同步改 README。
-- **参数服务器契约**（`param_bridge`）：每电机 7 个动态参数 `m<id>.{enable,kp,kd,
-  pos_min,pos_max,vel_limit,torque_limit}`（发现后注册、离线不注销，容量 17 台）+
-  8 个 `system.*`（save 脉冲、refresh + **refresh_seq** 回读、**set_zero + set_zero_seq**
-  设零点、last_error(_motor)、heap_free；容量仍 17 台）。
-  **单位是工程单位**（2026-09-17）：位置 **度**、速度 **度/秒**、力矩 **安培**
-  （设备里的对象本来就是 cnt / RPM / mA）；rad、rad/s、N·m 只在内核与 W25 记录里，
-  换算只在 `param_bridge` 边界做一次（`lib/param_store/param_units.h`，host 可测）。
-  力矩用 A 而非 N·m：设备侧权威对象是 `0x2538`（电机最大电流），折成 N·m 要过
-  Kt×减速比×效率，而该系数正存在未决争议（决策日志 §6.4 的 TBD-PROFILE-02）。
-  rclc 跑 low-mem 模式（DTCM newlib 堆约 0.3KB/槽）：`ros2 param get/set` 单参数可用，
-  批量 get 与 `ros2 param dump` 返回空。set=「已受理」，设备类写最终成败经
-  CONFIG_RESULT 事件（失败自动回弹 rcl 值）；`system.refresh=<id>` 发 4 个 SDO
-  upload 刷 CERB 设备影子；enable 不落盘。
-- **设备参数以驱动板为准（2026-09-17）**：上电/重连绑定完成后，内核自动对
-  设备侧限位型号（CERB）发一次 `REFRESH_PARAMS` 回读（`0x607D:01/:02`、
-  `0x6080`、`0x2538`），与 W25 记录**逐槽位比设备端原值**（cnt/RPM/mA——
-  比关节侧 SI 会在换算系数配错时两边一起错，等于没比）：
-  - 一致（或本机对该台无记录）= 初始化通过；
-  - **初始化未完成一律不可使能**：`PENDING`（回读未收尾）/`MISMATCH`
-    （与记录不一致）/`UNVERIFIED`（回读失败）三种结论下，`SET_ENABLE` 一律
-    被拒（`INVALID`）、也不出运动帧。内核进 `CONFIG_CONFLICT`，
-    `param_bridge` 报 `last_error=40`（不一致）/ `41`（未核对）；从参数页写回
-    该台参数（写事务同时更新设备与记录）或重连后重读即可恢复；
-  - **运行中回读发现不一致 → 软停**（P0 MIT 阻尼帧、保留使能），不硬失能；
-    静止态（READY_DISABLED 等）没有要停的东西，直接锁存结论；
-  - 自动回读失败先**退避重试**（最多 `MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS`=3 次、
-    间隔 `MOTOR_CONTROL_DEV_READ_RETRY_MS`=500ms；SDO upload 是纯只读、对设备
-    无副作用），用尽才定论 `UNVERIFIED`，避免一次总线抖动把该台卡在不可使能。
-    重试期间该台仍是 PENDING（同样不可使能）。
-  - 记录里没写过的槽位不参与比对；VAXOR 无设备对象，恒不参与（`dev_init=NA`）。
-  W25 blob 因此升到 **v2**（32B 头 + 64×48B 记录，多出 4 个 `device_raw`）；
-  v1 blob 由 `param_store_blob_migrate_v1()` 就地升级，不丢已存参数。
-  取消 `boot_record_offered`/记录捕获/`stored_apply_mask` 的相互守卫时注意：
-  "先声明无记录、后拿到记录"的路径极易把记录或待套用位静默丢掉（空 Flash 的
-  板子会因此整机不可使能），三者必须各自独立。
-  设备侧写成功后内核置 `record_dirty`，`motor_rt` 去抖 500ms 自动落盘——
-  「写就是设备和驱动板一起写」，记录不落盘则断电后下次上电必然判不一致。
-- **设零点**（2026-09-17）：`system.set_zero = <电机 id>` → 内核事务写 **0x2531 = 1**
-  （字典表「设置电机输出端零位」）。**单阶段、只等 SDO 写应答、不读回**——0x2531 是
-  命令式对象，读回值语义未定义。门禁与设备侧限位同源：`device_limit_write_allowed`
-  （ACTIVE/SAFE_STOP 一律 INVALID 拒绝，不隐式失能；厂家手册注「设置时电机需要在
-  失能状态」）。零点不是本机记录的参数，**不更新设备影子/记录**。⚠️ 零点一变，设备里
-  0x607D 的限位也随之换物理位置，操作者须重认限位与机械行程。**持久化已实测**
-  （2026-09-17 台架：设零后驱动器断电重上电，零位保持）→ 0x2531 写入即由驱动器自行
-  落盘，**不需要追加 0x2539 保存码**，勿自作主张补发。
-- **外部写入不得超过固定硬件参数表**（`motor_control_profile.c` 的编译期型号
-  目录，数值取自规格书 `docs/CE-RB-R{58,48}-101-*-参数规格.pdf`）：扭矩/电流取
-  `min(请求, 峰值扭矩 45/11 N·m, 峰值电流 10.8/3.2 A × 限值系数)`、速度 ≤ 额定
-  （π rad/s）、位置 ≤ MIT 量化范围（±π）。**限值对象 0x2538 的换算系数是规格书
-  峰值对**（45/10.8、11/3.2 N·m/A），不是反馈链的 Kt×减速比×效率——写峰值扭矩
-  必须正好写出峰值电流；反馈估计仍走 Kt 链（两者是不同量）。补规格书新列时同步
-  更新型号目录与 host 用例 `test_device_write_clamped_to_hardware_table`。
-- **设备侧写事务以"写 FLASH"收尾**（2026-09-17）：0x607D/0x6080/0x2538 写 + 读回
-  核验之后，adapter 追加末阶段写 **0x2539**（《CANopen-V0.9字典表》「Flash保存参数
-  代码」：**1=电机参数、2=正限位、4=负限位**；速度/电流事务发 1，位置限位发 4 与 2
-  两条）。驱动器里的限值**不落盘就掉电回出厂值**，本机上电比对随即判"不一致 →
-  未初始化"。该阶段**无应答也不重试**（写 flash 期间驱动器控制循环会被阻塞，等 ack
-  只会把总线和它一起拖住）；是否真落盘由下次上电的设备参数比对检出。
-  另：字典给 0x607D:01/:02 量程 **-32767~32768 cnt**，`-π` 折算的 -32768 越界，
-  `cerb_rad_to_limit_cnt` 末尾按字典钳制。改动这两个常量前先查字典表。
-- **新增 config kind 要改五处**（漏一处就静默失效）：① `motor_protocol_adapter.h`
-  的 `motor_protocol_config_kind_t`；② `control_mailbox.h` 的
-  `control_mailbox_config_kind_t`；③ `motor_rt_task.cpp` 的 kind 契约 static_assert
-  + `convert_config` 分派；④ **`control_mailbox.c` 的 `config_request_is_valid`
-  白名单**（默认 false——漏加会让请求在 mailbox 就被拒，内核收不到、总线一条帧都
-  没有，上位机只看到"没反应"）；⑤ 内核 `motor_control_submit_config` 的分支与
-  门禁。2026-09-17 的 SET_ZERO 就栽在第 ④ 处，已补 host 用例
-  `test_set_zero_request_is_accepted` 兜底。
-- **配置事务总线级一问一答**（2026-09-17 台架实测后加）：同一总线上任一时刻
-  只允许一个"已发未答"的 SDO 阶段（`motor_control_config.c` 的
-  `bus_stage_in_flight`）。厂家 SDO 是严格请求-应答：并发发问会让设备应答排队，
-  迟到的应答与本阶段索引不符被判 RETRY，重发又把设备压得更死——现象就是
-  "回读一直超时"（实测 log：同一台两条请求间 940ms 的超时-重发循环）。
-  配合 CERB 阶段超时 20→30ms。**改动收发节奏时别把这层串行去掉**。
-- **控制发送唯一性**：ROS callback 只写完整 ID 快照 latest-wins mailbox；`motor_rt_task`
-  是唯一正常 FDCAN 发送者（内核 → TX 调度器 → 硬件，P0/P1/P2 分级）。
-  快照缺席/30ms 无快照 = MIT 默认 `kd` 阻尼软停；100ms 无快照、Agent 断链或
-  撤权 = 协议级失能并清授权（须新授权 + 新完整快照才可能回 ACTIVE）；
-  其他新鲜电机继续运行。
-- **类型坑**：本平台 `int32_t` 是 `long`，模板推导（如 `std::clamp`）须显式
-  指定类型参数。
-- **`_write` 链接兜底**：固件代码不使用 Print/printf，框架弱 `_write`
-  （Print.cpp.o）不会被链接器提取；libmicroros 的 rcutils/rosidl stdio 路径
-  强引用它 → `src/syscalls.cpp` 提供强定义空汇。新增 stdio 用户须重审该文件，
-  禁止把动态日志接上 USB CDC。
-- **git pull 分支偏离**：残留 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/build/`
-  会让 download_dev_environment 的 `git pull` 失败 -> 删除该 build/ 目录后重跑。
-- **GitHub 直连超时**：micro-ROS 依赖重下（regen）在国内网络下易超时；本机已把
-  `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/microros_utils/repositories.py`
-  的 github.com 前缀替换为 `https://ghfast.top/https://github.com` 镜像（补丁仅在本机
-  .pio 内，未入库）。重下 libmicroros 前先确认该补丁仍在；只删 `libmicroros/` 时
-  无需联网（缓存命中）。
-- **自定义消息只用同仓库符号链接**：
-  `extra_packages/can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs`。
-  全新 clean bootstrap 仍有下载依赖/ROS 2 源的网络要求；常规验证不要运行
-  `clean_microros`，使用缓存依赖执行 `pio run -t clean && pio run`。
-- **改 .msg 后必须手动清 libmicroros**：micro_ros_platformio 的 extra_packages
-  copytree 是 `dirs_exist_ok` 合并（`build/mcu/src/`），已删除的旧消息会残留、
-  新消息头不会主动再生——否则出现 `motor_bind.h: No such file`（或反向的旧头
-  残留）。改/删消息后删
-  `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/{libmicroros,build/mcu}`
-  再 `pio run`。2026-09-11 实测两条路径的坑：不删缓存的增量重建（含
-  `../micro_ros_agent/tools/refresh_microros_messages.py`）可能因 copytree 合并陈旧状态报
-  `Error running link command: No such file or directory`；删 `build/mcu`
-  则触发依赖经 ghfast.top 镜像**重新克隆（需网络）**，代理断流/TLS 握手
-  失败时清除半成品重试即可。
+## micro-ROS 坑
 
-## 结构（简）
+- **meta 5 service 上限**：rclc 参数服务器固定建 5 个 service（get/get_types/set/
+  list/describe），要求 `RMW_UXRCE_MAX_SERVICES >= 5`（`microros_user.meta`）。
+  这是 libmicroros.a 库编译期事实，-D 改不了；builder 见 .a 即 early return，改 meta
+  须删 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/` 再 `pio run`
+  （需联网），否则节点 WAIT_AGENT 无限重连且编译期零提示。
+  `tools/check_microros_config.py`（pre: 脚本）构建前校验旧缓存并 Exit(1)。
+- **改消息后**跑 `../micro_ros_agent/tools/refresh_microros_messages.py`
+  增量刷新（复用缓存、不联网），勿 clean_microros。消息唯一来源是
+  `../micro_ros_agent/src/can_bridge_msgs`，固件侧只经 extra_packages 符号链接复用。
+- **配置事务总线级一问一答**：同一总线任一时刻至多一个已发未答的 SDO 阶段
+  （`motor_control_config.c` 的 `bus_stage_in_flight`）；并发发问必表现为
+  「回读一直超时」，CERB 阶段超时 30ms——改收发节奏时别删这层串行。
+  `kind=7 READ_IDENTITY` 内核专用（建档/重连自动发，不经 mailbox；mailbox 契约
+  为 1..6、8、9）。新增 config kind 须同步五处否则静默失效：①adapter 枚举
+  ②mailbox 枚举 ③motor_rt_task.cpp 的 static_assert+convert_config
+  ④control_mailbox.c 白名单（默认 false，漏加则总线零帧）⑤内核 submit_config 门禁。
 
-- `platformio.ini`：构建配置（USB CDC 宏 + FDCAN/OSPI HAL 宏）
-- `boards/stm32h723vgt6.json`：变体/`variant_h`/`-DARDUINO_GENERIC_H723VGTX`/VID-PID
-- `src/main.cpp`：Arduino 入口与 `start_task`（创建 `led`/`micro_ros`/`sensor`/`storage`/`motor_rt`）
-- `src/micro_ros_task.cpp`：micro-ROS agent 连接状态机
-- `src/led_task.cpp`：WS2812 状态显示任务 + host 可测的状态到颜色映射
-- `src/ros_bridge.cpp`：node/executor/timer 生命周期，编排各域桥
-- `src/imu_bridge.cpp`：IMU/温度发布（`micro_ros/imu/data`、`micro_ros/imu/temp`）
-- `src/motor_bridge.cpp`：唯一订阅 `/motor_command_array`（ID 化完整快照）；
-  发布 `micro_ros/motion_states`、`motor_status_array`、`motor_topology`、
-  `motor_events` 四路
-- `src/sensor_task.cpp`：传感器任务（EXTI/信号量/温度 PID/加热 PWM）
-- `src/param_bridge.cpp`：ROS 2 参数服务器桥（`rclc_parameter` low-mem）：
-  动态注册/100ms 影子同步/修改回调经 config FIFO 下发/on_config_result 钩子收敛
-  outstanding（失败回弹）/save、refresh 脉冲。名字与值域逻辑在 `lib/param_store`
-  （host 可测），本文件不直接发 FDCAN。
-- `src/storage_task.cpp`：W25Q64 唯一所有者（boot 加载双 sector blob、save 拍
-  参数视图快照→CRC→擦非活动槽→写→读回校验）。
-- `src/motor_rt_task.cpp`：唯一电机实时任务（1ms 服务 + 20ms 控制边界；RX drain、
-  内核服务、SYNC 心跳、TX 路由、事件搬运、mailbox 消费、boot 存储参数套用、参数
-  视图副本）
-- `lib/param_store`：纯 C 参数名模型（m<id>.field 生成/解析/校验）与 W25 blob
-  布局（32B 头 + 64×48B 记录，v1 记录为 32B；+ CRC32，双 sector A/B）
-- `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
-- `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（自持 SPI2 的 `HAL_SPI_MspInit`，
-  不用 DMA，不依赖其他 lib）
-- `lib/dma`：DMA1 控制器级资源门卫（时钟、流 NVIC、占用登记、优先级合规断言）；
-  设备配置归各设备库，跨设备接线在任务层
-- `lib/fdcan`：FDCAN 初始化/过滤/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度/
-  硬件级统计（官方例程移植收敛）
-- `lib/motor_control`：ID 驱动运行时内核——注册表/型号目录/九态生命周期/安全级联/
-  配置事务/状态事件副本（纯 C，host 可测）
-- `lib/motor_protocol`：adapter 接缝（`motor_protocol_adapter.h`）+ vaxor/CERB
-  adapter 与纯 codec（厂家字节/CAN-ID 推导/FD 属性唯一归属地；自 ros2_ws
-  `motor_drive/protocol.cpp` 移植，`-fno-exceptions` 下异常改返回值）
-- `lib/control_mailbox`：ID 完整命令快照、低频配置 FIFO 与授权/连接边沿
-- `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
-- `lib/w25q64`：OCTOSPI2 W25Q64 驱动；运行期访问必须指定单一所有者，不能由多个
-  任务并发使用同一 OSPI 句柄
+## W25 / 存储
 
-`src/` 只放任务编排与 ROS 桥；硬件驱动/协议库在 `lib/`，PlatformIO 会自动
-发现并链接。新增跨库依赖时同步补对应的 `library.json`。
+- storage 任务（P1/1024 words）是 W25Q64 **唯一所有者**：boot 同步 init 并读双
+  sector A/B（0x0/0x1000），选 CRC 有效且 seq 新者；无芯片/ID 不符静默降级，
+  不阻断启动。
+- blob v2 = 32B 头 + 64×48B 记录（3104B）；v1（32B 记录）加载时自动就地迁移。
+  save 总擦非活动 sector 并读回 memcmp，失败不翻转活动 sector（旧槽仍可启动）。
+- 两个落盘触发：`system.save` 脉冲；设备写事务成功 → 内核 record_dirty → motor_rt
+  去抖 **500ms** 自动落盘（写必须设备+驱动板一起写，不落盘下次上电必判不一致）。
+- Flash 缓冲必须 ≥4 字节对齐（代码统一 `alignas(8)`）：-Os 下结构体访问生成
+  STRD，非对齐直接 HardFault。
+- 擦写阻塞可达 ~1s，**只在 storage 任务**；IWDG（~500ms）由 motor_rt 每拍独立
+  喂狗，调试断点冻结计数。
+
+## 关键路径 / 文件速查
+
+- `src/main.cpp` —— setup 板级初始化 + start_task 编排五任务；`loop()` 必须空。
+- `src/motor_rt_task.cpp` —— 唯一电机实时任务：1ms 服务（RX drain / 内核 service /
+  SYNC / TX 路由 pump / IWDG 喂狗）+ 20ms 控制边界（会话边沿、快照 apply、配置 FIFO、
+  boot 参数、落盘去抖）；内核唯一调用者、唯一正常 FDCAN 发送者。
+- `src/session_sync.c` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
+- `lib/motor_control/` —— ID 驱动内核（注册表/型号目录/生命周期/安全级联/配置
+  事务）；公共 API 只在 `include/`，内部布局 `src/motor_control_internal.h`
+  不向 app 导出。
+- `lib/motor_protocol/` —— adapter 接缝 `motor_protocol_adapter.h` + vaxor/cerb
+  adapter 与 codec；厂家字节/CAN-ID/FD 属性唯一归属地；事务由静态阶段描述符表驱动。
+- `lib/control_mailbox/` —— 命令快照 latest-wins 双缓冲 + 配置 FIFO（16）+
+  会话/授权电平边沿；纯 C、静态内存、不自建锁。
+- `src/storage_task.cpp` + `src/storage_projection.c/.h` —— Flash 唯一所有者；
+  参数视图 ↔ blob 的纯 C 投影（host 可测）。
+- `src/heater.cpp` —— 加热温度 PID 纯函数（HOST_TEST 可测），设备侧归 sensor_task。
+- `lib/board/include/board_irq.h` —— ISR syscall 阈值常量（5），板级库唯一门槛事实。
+- `src/system_clock.cpp` —— 外设时钟单点（SYSCLK 480M / PLL1Q=SPI2 240M /
+  PLL2Q=FDCAN 80M / HSI48=USB）；勿为 FDCAN 动 PLL1Q（连带改 SPI2 速率）。
+- 其余：`lib/fdcan`（ISR→SPSC ring 64→P0/P1/P2 TX 调度）、`lib/imu`、`lib/dma`、
+  `lib/w25q64`、`lib/ws2812`、`lib/param_store`；分层与依赖方向见 `lib/README`。
 
 ## 代码规范
 
-- C++17 + C（STM32duino HAL）混合；2 空格缩进；snake_case（文件/函数/变量）、
-  PascalCase（类）、`k` 前缀常量。
-- 中文注释写意图（数据流/单位/安全边界）；micro-ROS / ROS 2 API 保留英文。
-- 硬件映射集中：引脚/话题/节点名在 `main.cpp` 或各域桥/任务文件顶部常量，
-  不散落。
-- FDCAN ISR → SPSC ring → `motor_rt_task` 唯一消费者是固定所有权边界；业务域桥
-  只能通过 `motor_rt_copy_motion_states()` / `motor_rt_copy_statuses()` /
-  `motor_rt_copy_topology()` / `motor_rt_drain_events()` 读取只读副本，
-  不得直接访问 `can_bsp` 内部 ring/调度器或 HAL 发送接口。
-- `dev-real` 交接只能做无负载真机验证且硬件急停必须可用；必须实测 RX burst 下
-  motor_rt WCET/jitter、50Hz 周期、30/100ms 快照级联边界和 overflow/backlog。
-  当前机构无抱闸，软件 stop 不能替代硬件急停、机械限位或供电隔离。
+- C17/C++17；`-Wall -Wextra -Wpedantic`；2 空格缩进；snake_case（文件/函数/变量）、
+  PascalCase（类型）、`k` 前缀常量。
+- 中文注释写意图（数据流/单位/安全边界）；协议名（vaxor/cerb/CANopen/MIT/SDO）
+  与 ROS 2 API 保留英文。
+- `src/` 只放任务编排与 ROS 桥，驱动/协议进 `lib/`；库不得反向依赖 `src/`、ROS
+  或其他任务，设备库之间不互相调用（见 `lib/README`）。
+- **板级库（lib/fdcan、lib/dma、lib/board）不得 include FreeRTOS**；ISR 优先级
+  合规只用 `BOARD_ISR_SYSCALL_THRESHOLD`（board_irq.h），main.cpp 有编译期反向断言。
+- 固定所有权：FDCAN ISR → SPSC ring → motor_rt 唯一消费者；ROS 桥只写 mailbox、
+  经 `motor_rt_copy_*()`/`drain_events()` 读副本，禁止第二任务碰 ring/HAL 发送。
+- 新增电机协议：实现 adapter + 静态阶段描述符，注册进 motor_rt_task.cpp 的
+  `kAdapters`（构造注入），**不改内核收发循环**；型号数值进
+  `motor_control_profile.c` 编译期目录，改动同步 host 用例。
+- 本平台 `int32_t` 是 `long`，模板（如 std::clamp）须显式指定类型参数。
+- 固件不用 printf：`src/syscalls.cpp` 已给强符号空 `_write`，禁止动态日志接 USB CDC。
+- 真机只允许 `dev-real` 无负载验证且硬件急停可用；软件 stop 不替代急停/机械限位
+  （当前无抱闸）。验证项与 WCET/overflow 待实测条目见 validation plan。

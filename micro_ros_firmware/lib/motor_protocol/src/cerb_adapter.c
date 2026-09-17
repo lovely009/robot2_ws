@@ -261,7 +261,10 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
   out->is_fd = true;
   out->is_extended = false;
   out->is_brs = true;
-  motor_protocol_pack_cerb_mit_frame(&wire, &limits, intent->enable, out->data);
+  if (!motor_protocol_pack_cerb_mit_frame(&wire, &limits, intent->enable,
+                                          out->data)) {
+    return false;
+  }
   return true;
 }
 

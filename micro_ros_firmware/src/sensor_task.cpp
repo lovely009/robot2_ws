@@ -33,8 +33,6 @@ static const float kMaxOut = 500.0f;   // CCR 上限（≤ ARR=10000，即 5%）
 
 static SemaphoreHandle_t g_imu_sem = nullptr;
 static imu_snapshot_t g_imu_snapshot = {};
-static volatile uint32_t g_imu_init_error_count = 0U;
-static volatile bool g_imu_healthy = false;
 static bool g_drdy_attached = false;
 
 static HardwareTimer &heater_timer() {
@@ -87,12 +85,9 @@ static void sensor_task_fn(void *arg) {
 
   // 初始化失败不阻塞电机域：每秒单次重试并让出调度机会。
   while (!imu_try_init()) {
-    g_imu_healthy = false;
-    ++g_imu_init_error_count;
     heater_set_duty(0U);
     vTaskDelay(pdMS_TO_TICKS(kImuInitRetryMs));
   }
-  g_imu_healthy = true;
 
   // 仅在首次成功后挂 EXTI，重试不会重复注册中断。
   if (!g_drdy_attached) {
@@ -103,7 +98,6 @@ static void sensor_task_fn(void *arg) {
   while (1) {
     if (xSemaphoreTake(g_imu_sem, portMAX_DELAY) == pdTRUE && imu_ready()) {
       if (!imu_update()) {
-        g_imu_healthy = false;
         heater_set_duty(0U);
         continue;
       }
@@ -113,7 +107,6 @@ static void sensor_task_fn(void *arg) {
       taskENTER_CRITICAL();
       imu_snapshot_publish(&g_imu_snapshot);
       taskEXIT_CRITICAL();
-      g_imu_healthy = true;
       temp_pid_run(next->temp);
     }
   }
@@ -130,8 +123,6 @@ bool sensor_task_start(void) {
   }
   // xSemaphoreCreateBinary 初始为空；首个 imu_update 必须由 ACC_INT DRDY 唤醒。
   imu_snapshot_init(&g_imu_snapshot);
-  g_imu_init_error_count = 0U;
-  g_imu_healthy = false;
 
   // 共享 DMA 控制器资源已由 main 初始化；BMI088 的阻塞 SPI2 配置归
   // lib/imu 自持，当前不占用 DMA。
@@ -147,18 +138,3 @@ bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence) {
   return copied;
 }
 
-uint32_t sensor_task_get_imu_init_error_count(void) {
-  uint32_t count = 0U;
-  taskENTER_CRITICAL();
-  count = g_imu_init_error_count;
-  taskEXIT_CRITICAL();
-  return count;
-}
-
-bool sensor_task_imu_healthy(void) {
-  bool healthy = false;
-  taskENTER_CRITICAL();
-  healthy = g_imu_healthy;
-  taskEXIT_CRITICAL();
-  return healthy;
-}

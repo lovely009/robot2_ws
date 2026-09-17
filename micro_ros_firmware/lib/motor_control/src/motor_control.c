@@ -327,7 +327,6 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
   // →READY_DISABLED；绑定即识别来源，Vaxor-80 不在目录 → 永远无法到这）。
   if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_DISCOVERED ||
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING) {
-    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_IDENTIFYING;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_READY, motor_id,
                              entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);

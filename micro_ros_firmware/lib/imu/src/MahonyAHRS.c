@@ -11,8 +11,8 @@
 #define twoKpDef (2.0f * 0.5f)
 #define twoKiDef (2.0f * 0.0f)
 
-volatile float twoKp = twoKpDef;
-volatile float twoKi = twoKiDef;
+static volatile float twoKp = twoKpDef;
+static volatile float twoKi = twoKiDef;
 volatile float integralFBx = 0.0f, integralFBy = 0.0f, integralFBz = 0.0f;
 
 static float invSqrt(float x);

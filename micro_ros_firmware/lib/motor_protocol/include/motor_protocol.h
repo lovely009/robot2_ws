@@ -66,7 +66,7 @@ typedef struct {
 uint32_t motor_protocol_float_to_uint(double value, double low, double high,
                                       unsigned bits);
 
-// 节点 ID：base + stride*node（node 合法范围 1..60）。基址即 node 0 槽位，
+// 节点 ID：base + stride*node（node 合法范围 1..60）。基址对应 node 0，
 // 因 node 0 非法而不冲突。
 //
 // 以下常量是 vaxor CAN-ID 推导的唯一来源：本文件的 *_id() 与 adapter 的
@@ -83,6 +83,10 @@ uint32_t motor_protocol_vaxor_control_id(unsigned node);
 uint32_t motor_protocol_vaxor_reply_id(unsigned node);
 uint32_t motor_protocol_vaxor_status_id(unsigned node);
 
+// —— 对端仿真/host 测试专用分区 ——
+// 以下 4 个函数站在「设备侧」视角（构造设备来帧、解码固件下发帧），
+// 生产固件不调用，仅供 host 测试伪造九节点对端；总线对端另有 Python 仿真
+// （micro_ros_agent/tools/fdcan_motor_sim.py）独立实现，改动需双侧对齐。
 void motor_protocol_pack_vaxor_command(const motor_protocol_joint_command_t *command,
                                        uint8_t out[12]);
 bool motor_protocol_unpack_vaxor_command(const uint8_t *data, size_t size,

@@ -3231,7 +3231,8 @@ static void test_device_param_write_syncs_record_and_recovers() {
   assert(e->record_raw[3] == kR58PeakMa);
   assert((e->record_raw_present & 0x08U) != 0U);
   assert(e->dev_raw[3] == kR58PeakMa);
-  assert(fabs(e->record_max_torque_nm - 45.0) < 0.1);
+  // SI 限值随写核验同步进设备影子（record_* 镜像字段已删，原值仍在 record_raw）。
+  assert(fabs(e->dev_max_torque_nm - 45.0) < 0.1);
   assert(motor_control_take_record_dirty(&ctx));
 
   // 记录与设备重新一致 → 解除未初始化，回到可运动态。

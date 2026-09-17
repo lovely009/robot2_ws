@@ -9,9 +9,6 @@
 #define W25Q64_CMD_READ_JEDEC_ID 0x9FU
 #define W25Q64_CMD_WRITE_ENABLE 0x06U
 #define W25Q64_CMD_SECTOR_ERASE 0x20U
-#define W25Q64_CMD_BLOCK_ERASE_32K 0x52U
-#define W25Q64_CMD_BLOCK_ERASE_64K 0xD8U
-#define W25Q64_CMD_CHIP_ERASE 0xC7U
 #define W25Q64_CMD_QUAD_INPUT_PAGE_PROGRAM 0x32U
 #define W25Q64_CMD_FAST_READ_QUAD_IO 0xEBU
 #define W25Q64_CMD_READ_STATUS_REG1 0x05U
@@ -20,8 +17,6 @@
 #define W25Q64_STATUS_WEL 0x02U
 #define W25Q64_HAL_TIMEOUT_MS 1000U
 #define W25Q64_SECTOR_ERASE_TIMEOUT_MS 1000U
-#define W25Q64_BLOCK_ERASE_TIMEOUT_MS 3000U
-#define W25Q64_CHIP_ERASE_TIMEOUT_MS 100000U
 
 static w25q64_status_t w25q64_hal_status(const OSPI_HandleTypeDef *handle,
                                           HAL_StatusTypeDef status) {
@@ -299,62 +294,4 @@ w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
 w25q64_status_t w25q64_erase_sector(uint32_t address) {
   return w25q64_erase(address, W25Q64_SECTOR_SIZE, W25Q64_CMD_SECTOR_ERASE,
                        W25Q64_SECTOR_ERASE_TIMEOUT_MS);
-}
-
-w25q64_status_t w25q64_erase_block_32k(uint32_t address) {
-  return w25q64_erase(address, 32768U, W25Q64_CMD_BLOCK_ERASE_32K,
-                       W25Q64_BLOCK_ERASE_TIMEOUT_MS);
-}
-
-w25q64_status_t w25q64_erase_block_64k(uint32_t address) {
-  return w25q64_erase(address, 65536U, W25Q64_CMD_BLOCK_ERASE_64K,
-                       W25Q64_BLOCK_ERASE_TIMEOUT_MS);
-}
-
-w25q64_status_t w25q64_chip_erase(void) {
-  OSPI_HandleTypeDef *handle = w25q64_handle();
-  if (handle == NULL) {
-    return W25Q64_ERROR_STATE;
-  }
-  w25q64_status_t status = w25q64_write_enable();
-  if (status != W25Q64_OK) {
-    return status;
-  }
-
-  OSPI_RegularCmdTypeDef command;
-  w25q64_command_init(&command, W25Q64_CMD_CHIP_ERASE);
-  HAL_StatusTypeDef hal_status =
-      HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
-  if (hal_status != HAL_OK) {
-    return w25q64_hal_status(handle, hal_status);
-  }
-  return w25q64_wait_ready(W25Q64_CHIP_ERASE_TIMEOUT_MS);
-}
-
-w25q64_status_t w25q64_memory_mapped_mode(void) {
-  OSPI_HandleTypeDef *handle = w25q64_handle();
-  if (handle == NULL) {
-    return W25Q64_ERROR_STATE;
-  }
-  w25q64_status_t status = w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
-  if (status != W25Q64_OK) {
-    return status;
-  }
-
-  OSPI_RegularCmdTypeDef command;
-  w25q64_command_init(&command, W25Q64_CMD_FAST_READ_QUAD_IO);
-  command.AddressMode = HAL_OSPI_ADDRESS_4_LINES;
-  command.DataMode = HAL_OSPI_DATA_4_LINES;
-  command.NbData = 1U;
-  command.DummyCycles = 6U;
-  HAL_StatusTypeDef hal_status =
-      HAL_OSPI_Command(handle, &command, W25Q64_HAL_TIMEOUT_MS);
-  if (hal_status != HAL_OK) {
-    return w25q64_hal_status(handle, hal_status);
-  }
-
-  OSPI_MemoryMappedTypeDef mapped = {0};
-  mapped.TimeOutActivation = HAL_OSPI_TIMEOUT_COUNTER_DISABLE;
-  hal_status = HAL_OSPI_MemoryMapped(handle, &mapped);
-  return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }

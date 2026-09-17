@@ -16,7 +16,6 @@ static FDCAN_HandleTypeDef *const kCanHandles[CAN_RX_BUS_COUNT] = {
 
 static can_rx_ring_t g_rx_rings[CAN_RX_BUS_COUNT];
 static can_tx_scheduler_t g_tx_schedulers[CAN_TX_BUS_COUNT];
-static volatile uint32_t g_bus_stats[CAN_RX_BUS_COUNT][CAN_BSP_STAT_COUNT];
 
 can_rx_ring_t *can_bsp_rx_ring(uint8_t bus_index) {
   if (bus_index >= CAN_RX_BUS_COUNT) {
@@ -30,13 +29,6 @@ can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index) {
     return NULL;
   }
   return &g_tx_schedulers[bus_index];
-}
-
-uint32_t can_bsp_bus_stat(uint8_t bus_index, uint8_t stat_index) {
-  if (bus_index >= CAN_RX_BUS_COUNT || stat_index >= CAN_BSP_STAT_COUNT) {
-    return 0U;
-  }
-  return g_bus_stats[bus_index][stat_index];
 }
 
 // FD 帧仅允许 0-8/12/16/20/24/32/48/64 字节；DLC 代码即 HAL 宏值
@@ -112,7 +104,6 @@ void bsp_can_init(void) {
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
     can_tx_scheduler_init(&g_tx_schedulers[bus]);
   }
-  memset((void *)g_bus_stats, 0, sizeof(g_bus_stats));
   can_filter_init();
   HAL_FDCAN_Start(&hfdcan1);
   HAL_FDCAN_Start(&hfdcan2);
@@ -210,10 +201,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     return;
   }
 
-  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0U) {
-    g_bus_stats[bus][CAN_BSP_STAT_HW_FIFO_LOST]++;
-  }
-
   // 硬件 FIFO 深度为 8；只处理进入回调时已挂起的帧，后到帧由下一次 IRQ
   // 继续承接，避免持续满载时在单次 ISR 中无界循环。
   const uint32_t rx_tick_ms = isr_now_ms();
@@ -222,7 +209,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   for (uint32_t index = 0U; index < pending_frames; ++index) {
     can_rx_frame_t frame = {0};
     if (!fdcan_receive_into_frame(hfdcan, bus, rx_tick_ms, &frame)) {
-      g_bus_stats[bus][CAN_BSP_STAT_HAL_READ_ERROR]++;
       break;
     }
     // SPSC 入环：满则丢新帧并计数（can_rx_ring 内部完成，ARD §21.3）。
@@ -230,7 +216,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   }
 }
 
-// 错误状态事件（EW/EP/BUS_OFF）：计数 + bus-off 自恢复。
+// 错误状态事件（EW/EP/BUS_OFF）：bus-off 自恢复。
 // M_CAN 无 bxCAN 式 ABOM 位：进 bus-off 时硬件自动置 CCCR.INIT 停机，恢复只有
 // 软件清 INIT 一条路——清零后内核等 11 个连续隐性位再同步总线，收发自动恢复，
 // 之后上层收发循环继续提交帧。总线仍故障会再次进 bus-off 并再次触发回调，
@@ -240,9 +226,6 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
   int8_t bus_index = can_bus_index(hfdcan);
   if (bus_index < 0) {
     return;
-  }
-  if (ErrorStatusITs != 0U) {
-    g_bus_stats[(uint8_t)bus_index][CAN_BSP_STAT_ERROR_STATUS]++;
   }
   if ((ErrorStatusITs & FDCAN_IT_BUS_OFF) != 0U) {
     CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);

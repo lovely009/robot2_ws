@@ -280,13 +280,6 @@ typedef struct {
   uint8_t refresh_slots;
   // 固件记录（Flash 投影）：上电比对的基准，也是电机未上线时页面的回落值。
   bool record_valid;
-  bool record_has_position;
-  bool record_has_velocity;
-  bool record_has_torque;
-  float record_min_rad;
-  float record_max_rad;
-  float record_max_velocity_rad_s;
-  float record_max_torque_nm;
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   uint8_t record_raw_present;
   bool boot_record_offered; // 本会话已把 Flash 记录（或"无记录"）告知本表项

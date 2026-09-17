@@ -177,23 +177,16 @@ static void update_record_after_write(motor_control_context_t *ctx,
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
   switch (entry->tx_kind) {
     case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      entry->record_has_position = true;
-      entry->record_min_rad = entry->tx_request.position_limits.min_position_rad;
-      entry->record_max_rad = entry->tx_request.position_limits.max_position_rad;
       entry->record_raw_present |= (uint8_t)(pos_min_bit | pos_max_bit);
       entry->dev_raw_present |= (uint8_t)(pos_min_bit | pos_max_bit);
       break;
     case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      entry->record_has_velocity = true;
-      entry->record_max_velocity_rad_s = entry->tx_request.max_velocity_rad_s;
       entry->record_raw_present |=
           (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
       entry->dev_raw_present |=
           (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
       break;
     case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      entry->record_has_torque = true;
-      entry->record_max_torque_nm = entry->tx_request.max_torque_nm;
       entry->record_raw_present |=
           (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
       entry->dev_raw_present |=

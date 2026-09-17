@@ -8,7 +8,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 
 | 库 | 只负责 | 不负责 |
 |---|---|---|
-| `fdcan` | FDCAN1/2/3 的 HAL、IRQ、RX ring、TX 调度和统计 | 电机协议、拓扑、控制策略 |
+| `fdcan` | FDCAN1/2/3 的 HAL、IRQ、RX ring、TX 调度 | 电机协议、拓扑、控制策略 |
 | `dma` | DMA 控制器、通道配置和 IRQ 资源管理 | IMU/LED 采样策略和设备业务 |
 | `motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
 | `motor_control` | 动态注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS、HAL、厂家字节布局 |
@@ -19,8 +19,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 
 ### 模块内部边界
 
-`fdcan` 内部至少区分 `can_frame`、`can_rx_ring`、`can_tx_scheduler` 和
-`can_stats`；`fdcan.h` 的 HAL 句柄不得泄漏到协议层。
+`fdcan` 内部至少区分 `can_frame`、`can_rx_ring`、`can_tx_scheduler`；`fdcan.h` 的 HAL 句柄不得泄漏到协议层。
 
 `motor_control` 内部区分 `motor_registry`、`motor_profile`、`motor_lifecycle`、
 `motor_safety` 和 `motor_snapshot`。Profile 是固件内置的型号目录，不是安装台账；

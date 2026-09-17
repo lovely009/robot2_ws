@@ -32,10 +32,6 @@ w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
 w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
                                uint32_t size);
 w25q64_status_t w25q64_erase_sector(uint32_t address);
-w25q64_status_t w25q64_erase_block_32k(uint32_t address);
-w25q64_status_t w25q64_erase_block_64k(uint32_t address);
-w25q64_status_t w25q64_chip_erase(void);
-w25q64_status_t w25q64_memory_mapped_mode(void);
 
 #ifdef __cplusplus
 }

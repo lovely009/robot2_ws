@@ -39,14 +39,6 @@ can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index);
 // 失败（DLC 不支持/FIFO 满）自动计入该总线调度器的 tx_hw_reject_count。
 bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame);
 
-// 硬件级错误/丢帧计数（HAL 读取失败、硬件 FIFO 丢失、错误状态事件），
-// 供诊断副本汇聚（ARD §32.1）。
-uint32_t can_bsp_bus_stat(uint8_t bus_index, uint8_t stat_index);
-
-#define CAN_BSP_STAT_HAL_READ_ERROR 0U
-#define CAN_BSP_STAT_HW_FIFO_LOST 1U
-#define CAN_BSP_STAT_ERROR_STATUS 2U
-#define CAN_BSP_STAT_COUNT 3U
 
 #ifdef __cplusplus
 }

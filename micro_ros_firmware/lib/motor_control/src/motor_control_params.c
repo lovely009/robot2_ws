@@ -153,13 +153,6 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
   }
   if (rec != NULL && !entry->record_valid) {
     entry->record_valid = true;
-    entry->record_has_position = rec->has_position_limits;
-    entry->record_has_velocity = rec->has_velocity_limit;
-    entry->record_has_torque = rec->has_torque_limit;
-    entry->record_min_rad = rec->pos_min_rad;
-    entry->record_max_rad = rec->pos_max_rad;
-    entry->record_max_velocity_rad_s = rec->velocity_limit_rad_s;
-    entry->record_max_torque_nm = rec->torque_limit_nm;
     memcpy(entry->record_raw, rec->device_raw, sizeof(entry->record_raw));
     entry->record_raw_present = rec->device_raw_present;
   }

@@ -34,6 +34,14 @@ target_include_directories(fw_motor_control PUBLIC
   ../../lib/motor_control/include)
 target_link_libraries(fw_motor_control PUBLIC fw_adapters)
 
+# 会话同步纯逻辑（src 下；host 可直编）
+add_library(fw_session_sync OBJECT
+  ../../src/session_sync.c)
+target_include_directories(fw_session_sync PUBLIC
+  ../../src ../../include ../../lib/control_mailbox/include
+  ../../lib/motor_control/include ../../lib/motor_protocol/include)
+target_link_libraries(fw_session_sync PUBLIC fw_mailbox fw_motor_control)
+
 add_library(fw_mailbox OBJECT
   ../../lib/control_mailbox/src/control_command_mailbox.c
   ../../lib/control_mailbox/src/control_mailbox.c)
@@ -170,6 +178,12 @@ fw_host_test(test_heater_pid
   SOURCES test_heater_pid.cpp ../../src/heater.cpp
   INCLUDES ../../include
   DEFINES HOST_TEST=1)
+
+# 白盒：直读内核 ctx 字段（-I 内核 src）
+fw_host_test(test_session_sync
+  SOURCES test_session_sync.cpp
+  OBLIBS fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../src ../../lib/motor_control/src)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

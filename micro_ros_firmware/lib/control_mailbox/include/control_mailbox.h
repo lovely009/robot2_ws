@@ -130,6 +130,10 @@ void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
                                              bool connected);
 // 返回值 = 自上次调用以来是否出现未读边沿；返回 false 时仍带货当前电平
 // ——任务层启动时应先调用一次以同步初始电平。
+// 会话电平（授权派生依据）：从未上报过连接状态（引导期，状态未知）或
+// 明确在线 = true；曾连接后断开 = false。
+bool control_mailbox_session_authorized(const control_mailbox_t *mailbox);
+
 bool control_mailbox_take_events(control_mailbox_t *mailbox,
                                  control_mailbox_events_t *events);
 

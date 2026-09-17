@@ -47,9 +47,13 @@ static void clear_live_inputs(control_mailbox_t *mailbox) {
   control_mailbox_clear_config(mailbox);
 }
 
+bool control_mailbox_session_authorized(const control_mailbox_t *mailbox) {
+  return mailbox != NULL && (!mailbox->agent_state_seen ||
+                             mailbox->agent_connected_requested);
+}
+
 static bool agent_is_connected_or_unknown(const control_mailbox_t *mailbox) {
-  return mailbox == NULL || !mailbox->agent_state_seen ||
-         mailbox->agent_connected_requested;
+  return control_mailbox_session_authorized(mailbox);
 }
 
 static void revoke_authorization(control_mailbox_t *mailbox) {

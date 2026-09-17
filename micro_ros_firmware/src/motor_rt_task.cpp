@@ -14,6 +14,7 @@
 #include "storage_task.h"
 #include "fdcan.h"
 #include "motor_protocol_adapter.h"
+#include "session_sync.h"
 
 // 跨库容量契约：64 这一物理容量在各库独立定义，单侧改小会静默截断，
 // 编译期锁齐。RX ring 的 64 是环深语义（非设备数），刻意不纳入。
@@ -400,36 +401,17 @@ static void convert_config(const control_mailbox_config_request_t *in,
 }
 
 static void control_boundary(void) {
-  static bool session_synced = false;
-  // 授权从会话状态派生（motor_enable 话题已删）：Agent 状态未知（引导期）
-  // 或在线 = 授权；断连 = 撤权。每边界同步电平，使 100ms 超时撤权后重新
-  // 到来的新鲜快照能即时恢复运动（无需任何显式重授权命令）。
-  static bool session_connected = true;
-
-  // mailbox 并发契约：读侧 take_* 与写侧 submit_* 必须互斥（库无内部锁）。
+  // 会话/授权同步（纯逻辑在 session_sync）：临界区内一次取走边沿并读
+  // 会话电平（未知=引导豁免），内核状态变更在临界区外执行。
   control_mailbox_events_t events = {0};
-  bool has_edges = false;
+  bool session_authorized = false;
   taskENTER_CRITICAL();
-  has_edges = control_mailbox_take_events(&g_control_mailbox, &events);
+  (void)control_mailbox_take_events(&g_control_mailbox, &events);
+  session_authorized =
+      control_mailbox_session_authorized(&g_control_mailbox);
   taskEXIT_CRITICAL();
   const uint32_t now_ms = millis();
-  // 启动首边界先同步一次电平（mailbox 引导豁免的授权电平必须镜像到内核）。
-  if (has_edges || !session_synced) {
-    if (events.agent_state_pending || !session_synced) {
-      motor_control_set_agent_connected(g_motor_control,
-                                        events.agent_connected_requested, now_ms);
-      session_connected = events.agent_connected_requested;
-    }
-    if (events.authorization_pending || !session_synced) {
-      motor_control_set_authorization(g_motor_control,
-                                      events.authorization_requested, now_ms);
-    }
-    session_synced = true;
-  }
-  // 会话在线：每边界维持授权电平（幂等；冻结态表项由内核侧跳过）。
-  if (session_connected) {
-    motor_control_set_authorization(g_motor_control, true, now_ms);
-  }
+  session_sync_apply(g_motor_control, &events, session_authorized, now_ms);
 
   // 完整命令快照（mailbox 无新快照时本边界不产生运动帧）。
   // 两个快照各约 1KB，改静态避免压栈（本函数仅 motor_rt 任务单上下文

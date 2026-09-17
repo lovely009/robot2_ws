@@ -163,6 +163,12 @@ fw_host_test(test_storage_projection
   OBLIBS fw_storage_projection fw_param_store
   INCLUDES ../../lib/motor_protocol/include)
 
+# heater.cpp 用 HOST_TEST 跳过 Arduino/HardwareTimer 段，host 只测纯 PID
+fw_host_test(test_heater_pid
+  SOURCES test_heater_pid.cpp ../../src/heater.cpp
+  INCLUDES ../../include
+  DEFINES HOST_TEST=1)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

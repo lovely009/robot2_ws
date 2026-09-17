@@ -1,17 +1,17 @@
 // 传感器业务任务（官方 CtrBoard-H7_IMU_TempCtrl 任务编排移植）。
 //
-// 官方流程：osDelay(500) → 启动 TIM3 PWM → BMI088_init() →
-// 等 ACC_INT(PE10) 二值信号量 → BMI088_read → 温度 PID → CCR4。
-// 本工程使用 Arduino attachInterrupt()/HardwareTimer，并保留 micro-ROS 发布；
+// 官方流程：osDelay(500) → heater_init() 启 TIM3 PWM → BMI088_init() →
+// 等 ACC_INT(PE10) 二值信号量 → BMI088_read → heater PID → CCR4。
+// 本工程使用 Arduino attachInterrupt()，加热 PWM 在 heater 模块，保留 micro-ROS 发布；
 // 任务命名为 sensor，后续其他传感器也在此任务编排。
 
 #include "sensor_task.h"
 
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
-#include <HardwareTimer.h>
 
 #include "imu.h"
+#include "heater.h"
 #include "imu_snapshot.h"
 
 // 任务参数：栈 512 字（2KB），优先级 2（与 micro_ros 收发任务相同，低于 motor_rt）
@@ -23,57 +23,15 @@ static const UBaseType_t kSensorTaskPrio = 2;
 static const uint16_t kSensorStartDelayMs = 500;
 static const uint16_t kImuInitRetryMs = 1000;
 
-// 温度 PID（官方 imu_temp_ctrl.c 原值）。输出单位为 TIM3 CCR 计数：
-// ARR=10000 → PWM 500Hz，占空比 = duty/(ARR+1)，故 kMaxOut 必须 ≤ ARR。
-static const float kDesTemp = 40.0f;   // 目标温度 °C
-static const float kPidKp = 100.0f;    // 每 °C 误差的 CCR 增量
-static const float kPidKi = 50.0f;
-static const float kPidKd = 10.0f;
-static const float kMaxOut = 500.0f;   // CCR 上限（≤ ARR=10000，即 5%）
-
 static SemaphoreHandle_t g_imu_sem = nullptr;
 static imu_snapshot_t g_imu_snapshot = {};
 static bool g_drdy_attached = false;
-
-static HardwareTimer &heater_timer() {
-  static HardwareTimer tim3(TIM3);
-  return tim3;
-}
-
-static void heater_init() {
-  // 官方 TIM3：PSC=24-1、ARR=10000-1，APB1=120MHz → PWM 500Hz，初始占空比 0
-  heater_timer().setPWM(4, PB1_ALT1, 500, 0);
-}
-
-static void heater_set_duty(uint16_t duty) {
-  heater_timer().setCaptureCompare(4, duty);
-}
+static heater_pid_state_t g_heater_pid = {};
 
 static void accel_isr() {
   BaseType_t higher_priority_task_woken = pdFALSE;
   xSemaphoreGiveFromISR(g_imu_sem, &higher_priority_task_woken);
   portYIELD_FROM_ISR(higher_priority_task_woken);
-}
-
-static void temp_pid_run(float temp) {
-  static float err = 0.0f;
-  static float err_l = 0.0f;
-  static float err_ll = 0.0f;
-
-  float out = kPidKp * (kDesTemp - temp) +
-              kPidKi * ((kDesTemp - temp) + err_l + err_ll) +
-              kPidKd * ((kDesTemp - temp) - err_l);
-  err_ll = err_l;
-  err_l = err;
-  err = kDesTemp - temp;
-
-  if (out > kMaxOut) {
-    out = kMaxOut;
-  }
-  if (out < 0.0f) {
-    out = 0.0f;
-  }
-  heater_set_duty(static_cast<uint16_t>(out));
 }
 
 static void sensor_task_fn(void *arg) {
@@ -107,7 +65,8 @@ static void sensor_task_fn(void *arg) {
       taskENTER_CRITICAL();
       imu_snapshot_publish(&g_imu_snapshot);
       taskEXIT_CRITICAL();
-      temp_pid_run(next->temp);
+      const float ccr = heater_pid_update(&g_heater_pid, next->temp);
+      heater_set_duty(static_cast<uint16_t>(ccr));
     }
   }
 }

@@ -4,8 +4,8 @@
 #include <cassert>
 
 // 配置 kind 枚举契约：mailbox 与内核协议层枚举逐值相等
-// （1/2/3/4）——固件侧 motor_rt_task.cpp 同款 static_assert，host 侧双链
-// 锁死，任一侧改动枚举值即编译失败。
+// （1..6、8、9，7 为内核专用不经 mailbox）——固件侧 motor_rt_task.cpp
+// 同款 static_assert，host 侧双链锁死，任一侧改动枚举值即编译失败。
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
                   static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
               "mailbox/protocol config kind 契约不一致：SET_MODE");

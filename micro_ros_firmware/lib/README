@@ -46,8 +46,9 @@ src/motor_rt_task  -> control_mailbox + fdcan + motor_control
 motor_control      -> motor_protocol（接口接缝，文档明载）
 src/sensor_task    -> imu
 src/led_task       -> ws2812
-lib/w25q64         -> 休眠：无消费者（无 storage 任务）；已由 platformio.ini
-                      的 lib_ignore 排除出固件构建，源码待接线时启用
+src/storage_task   -> w25q64 + param_store（Flash 唯一所有者，见 storage_task.h）
+lib/w25q64         -> octospi 控制器层 + W25 命令层/geometry（仅 storage_task 使用）
+lib/param_store    -> blob 布局/CRC/v1 迁移 + 参数名/单位纯逻辑（无硬件依赖）
 ```
 
 库不能反向依赖 `src/`、ROS 或其他任务。实时路径不使用动态内存、阻塞等待或

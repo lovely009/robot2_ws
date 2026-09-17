@@ -8,12 +8,10 @@
 //   micro_ros/motor_topology（1s 全量拓扑）
 //   micro_ros/motor_events（事件转发）
 //
-// 下行配置通道（motor_policy / motor_config / motor_bind / motor_enable）
-// 与 motor_config_result 已删除：型号绑定由内核在发现建档/重连时向设备读
-// 自报身份（协议 adapter 的 READ_IDENTITY 事务）并查型号目录完成，无上层
-// 绑定通道；授权/增益/限位取内核安全默认（建档 policy_enable 默认 true、
-// 全局授权 mailbox 引导豁免、增益回退 profile default_kp/kd、CERB 限位
-// 在驱动器侧配置）。
+// 下行无配置通道：型号绑定由内核在发现建档/重连时经 READ_IDENTITY 事务读
+// 设备自报身份并查型号目录完成；授权/增益/限位取内核安全默认（建档
+// policy_enable 默认 true、全局授权 mailbox 引导豁免、增益回退
+// profile default_kp/kd、CERB 限位在驱动器侧配置）。
 //
 // 本桥不做：joint_name 语义、协议/CAN 字节、直接 RX 访问（ARD §28.1）。
 // QoS（TBD-ROS-05 默认表）：命令/状态流 best-effort depth1（latest-wins、

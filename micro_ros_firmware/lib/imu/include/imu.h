@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-// 对外发布的 IMU 数据（SI 单位，符合 ROS2 sensor_msgs/Imu 约定）
+// 对外发布的 IMU 数据（SI 单位，符合 ROS 2 sensor_msgs/Imu 约定）
 typedef struct {
   float gyro[3];   // 角速度 rad/s
   float accel[3];  // 线加速度 m/s^2

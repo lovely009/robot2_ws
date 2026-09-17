@@ -23,12 +23,13 @@ static const UBaseType_t kSensorTaskPrio = 2;
 static const uint16_t kSensorStartDelayMs = 500;
 static const uint16_t kImuInitRetryMs = 1000;
 
-// 温度 PID（官方 imu_temp_ctrl.c 原值）
-static const float kDesTemp = 40.0f;
-static const float kPidKp = 100.0f;
+// 温度 PID（官方 imu_temp_ctrl.c 原值）。输出单位为 TIM3 CCR 计数：
+// ARR=10000 → PWM 500Hz，占空比 = duty/(ARR+1)，故 kMaxOut 必须 ≤ ARR。
+static const float kDesTemp = 40.0f;   // 目标温度 °C
+static const float kPidKp = 100.0f;    // 每 °C 误差的 CCR 增量
 static const float kPidKi = 50.0f;
 static const float kPidKd = 10.0f;
-static const float kMaxOut = 500.0f;
+static const float kMaxOut = 500.0f;   // CCR 上限（≤ ARR=10000，即 5%）
 
 static SemaphoreHandle_t g_imu_sem = nullptr;
 static imu_snapshot_t g_imu_snapshot = {};

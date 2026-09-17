@@ -6,8 +6,8 @@
 // v2 相对 v1（32B 记录）增加设备端原值：设备参数以设备内为准，固件记录是
 // 上电比对的基准，比对必须比原值——关节侧 SI 会与换算系数一起错，比对恒
 // 通过。v1 blob 仍可读：param_store_blob_migrate_v1() 就地升级。
-#ifndef PARAM_STORE_BLOB_H_
-#define PARAM_STORE_BLOB_H_
+#ifndef PARAM_STORE_BLOB_H
+#define PARAM_STORE_BLOB_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -97,4 +97,4 @@ param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_siz
 }
 #endif
 
-#endif // PARAM_STORE_BLOB_H_
+#endif // PARAM_STORE_BLOB_H

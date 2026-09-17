@@ -10,8 +10,8 @@
 // 力矩列用 A 而不是 N·m 的理由：设备侧的权威对象是 0x2538（电机最大电流，
 // mA），把手里的电流值乘 Kt×减速比×效率折成 N·m 只会引入一次系数争议
 // （见 docs/architecture/motor-runtime-decision-log.md §6.4）。
-#ifndef PARAM_UNITS_H_
-#define PARAM_UNITS_H_
+#ifndef PARAM_UNITS_H
+#define PARAM_UNITS_H
 
 #include <math.h>
 
@@ -43,4 +43,4 @@ static inline float param_units_amp_to_nm(float amp, float nm_per_amp) {
   return amp * nm_per_amp;
 }
 
-#endif // PARAM_UNITS_H_
+#endif // PARAM_UNITS_H

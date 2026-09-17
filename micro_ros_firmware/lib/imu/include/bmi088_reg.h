@@ -1,3 +1,6 @@
+// BMI088 寄存器定义，移植自厂商官方例程。
+// 保持原样：寄存器名/位名（含 BMI088_ACCEL_CONGIF_ERROR 等厂商拼写）
+// 与手册一一对应，改名会破坏可追溯性，勿"修正"。
 #ifndef BMI088_REG_H
 #define BMI088_REG_H
 

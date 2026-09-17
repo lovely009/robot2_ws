@@ -1,5 +1,7 @@
-#ifndef OCTOSPI_H_
-#define OCTOSPI_H_
+// OCTOSPI2 控制器层：句柄/初始化/间接读写，只服务 storage 任务经 w25q64
+// 命令层使用；地址单位字节。
+#ifndef OCTOSPI_H
+#define OCTOSPI_H
 
 #include "stm32h7xx_hal.h"
 
@@ -17,4 +19,4 @@ OSPI_HandleTypeDef *octospi2_handle(void);
 }
 #endif
 
-#endif  // OCTOSPI_H_
+#endif  // OCTOSPI_H

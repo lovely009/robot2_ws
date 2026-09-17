@@ -1,3 +1,4 @@
+// micro-ROS 连接管理任务实现：四态机见 micro_ros_task.h。
 #include "micro_ros_task.h"
 
 #include <Arduino.h>

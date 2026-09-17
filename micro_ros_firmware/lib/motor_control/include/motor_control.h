@@ -34,9 +34,7 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_BUSES 3U
 #define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS 64U
 #define MOTOR_CONTROL_MAX_TX_PENDING 96U
-// 事件环深度 = ROS 桥一次轮询间隔内可积压的事件数。原为 32，配合上游
-// 64 深的 motor_event_relay 使用；中继退役后直接提到 64，缓冲深度不变，
-// 同时少一个环、少一次 1ms 搬运与两处冗余的丢弃计数。
+// 事件环深度 = ROS 桥一个轮询间隔内可积压的事件数（64）。
 #define MOTOR_CONTROL_MAX_EVENTS 64U
 
 // 命令快照安全阈值（ARD-0007 §13.2）。

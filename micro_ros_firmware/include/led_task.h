@@ -1,3 +1,5 @@
+// WS2812 状态灯任务：按 micro-ROS 连接状态选颜色（策略函数 host 可测，
+// 见 led_status_select；物理发送在 lib/ws2812）。
 #ifndef LED_TASK_H
 #define LED_TASK_H
 

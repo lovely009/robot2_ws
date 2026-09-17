@@ -97,8 +97,10 @@ cd micro_ros_firmware
   `pio run -t clean` 全量重建。
 - **W25Q64**：由 `storage_task` 独占（P1/1024 words）：boot 同步 `w25q64_init()`
   并读双 sector A/B（0x0/0x1000，选 CRC 有效且 seq 新者）；无芯片/ID 不符静默降级
-  为无持久化，不阻断启动。运行期只响应 `system.save` 脉冲：erase（阻塞可达 ~1s）
-  只能在 storage 任务内执行，IWDG 由 motor_rt 独立喂。Flash 缓冲必须 4 字节对齐
+  为无持久化，不阻断启动。运行期保存两个触发源：`system.save` 脉冲与设备写事务
+  成功后内核置 `record_dirty` 由 `motor_rt` 去抖 500ms 自动落盘。erase（阻塞可达
+  ~1s）只能在 storage 任务内执行，IWDG 由 motor_rt 独立喂；擦写后读回校验，失败
+  不翻转活动 sector。Flash 缓冲必须 4 字节对齐
   （-Os 下结构体访问会生成 STRD，非对齐直接 HardFault）。
 - **FDCAN RX 归属**：ISR 只盖时戳并把原始帧写入每总线 SPSC ring（容量 64，
   满时丢新帧并计数，不解码），`motor_rt_task` 是唯一消费者，每 1ms 每总线最多
@@ -227,7 +229,7 @@ cd micro_ros_firmware
 
 - `platformio.ini`：构建配置（USB CDC 宏 + FDCAN/OSPI HAL 宏）
 - `boards/stm32h723vgt6.json`：变体/`variant_h`/`-DARDUINO_GENERIC_H723VGTX`/VID-PID
-- `src/main.cpp`：Arduino 入口与 `start_task`（创建 `led`/`micro_ros`/`sensor`/`motor_rt`）
+- `src/main.cpp`：Arduino 入口与 `start_task`（创建 `led`/`micro_ros`/`sensor`/`storage`/`motor_rt`）
 - `src/micro_ros_task.cpp`：micro-ROS agent 连接状态机
 - `src/led_task.cpp`：WS2812 状态显示任务 + host 可测的状态到颜色映射
 - `src/ros_bridge.cpp`：node/executor/timer 生命周期，编排各域桥
@@ -246,7 +248,7 @@ cd micro_ros_firmware
   内核服务、SYNC 心跳、TX 路由、事件搬运、mailbox 消费、boot 存储参数套用、参数
   视图副本）
 - `lib/param_store`：纯 C 参数名模型（m<id>.field 生成/解析/校验）与 W25 blob
-  布局（32B 头 + 64×32B 记录 + CRC32，双 sector A/B）
+  布局（32B 头 + 64×48B 记录，v1 记录为 32B；+ CRC32，双 sector A/B）
 - `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
 - `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（自持 SPI2 的 `HAL_SPI_MspInit`，
   不用 DMA，不依赖其他 lib）

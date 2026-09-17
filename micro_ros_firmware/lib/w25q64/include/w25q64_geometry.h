@@ -1,5 +1,7 @@
-#ifndef W25Q64_GEOMETRY_H_
-#define W25Q64_GEOMETRY_H_
+// W25Q64 几何常量（纯值，host 可测）：全部以字节为单位。
+// Flash 8MB；页编程 256B；4KB 扇区是最小擦除单位（storage A/B 各占一扇区）。
+#ifndef W25Q64_GEOMETRY_H
+#define W25Q64_GEOMETRY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,4 +22,4 @@ bool w25q64_erase_address_valid(uint32_t address, uint32_t erase_size);
 }
 #endif
 
-#endif  // W25Q64_GEOMETRY_H_
+#endif  // W25Q64_GEOMETRY_H

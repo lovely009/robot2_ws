@@ -1,8 +1,8 @@
-// W25Q64（OCTOSPI2）原始读写驱动：保留驱动与 geometry host test，当前固件
-// 不执行启动探测——上电路径禁止自动初始化/擦写 Flash，接入时须指定单一所有者。
+// W25Q64（OCTOSPI2）原始读写驱动 + geometry 纯逻辑（host 可测）。
+// 唯一所有者是 storage 任务：上电即初始化，其余任务严禁直接访问本驱动。
 
-#ifndef W25Q64_H_
-#define W25Q64_H_
+#ifndef W25Q64_H
+#define W25Q64_H
 
 #include <stdint.h>
 
@@ -41,4 +41,4 @@ w25q64_status_t w25q64_memory_mapped_mode(void);
 }
 #endif
 
-#endif  // W25Q64_H_
+#endif  // W25Q64_H

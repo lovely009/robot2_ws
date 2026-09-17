@@ -1,7 +1,8 @@
 // W25Q64 参数存储任务实现（协议见 storage_task.h）。
 //
-// 双 sector A/B（各放一个 2080B blob，地址 0x0/0x1000）：save 总写非活动槽，
-// boot 选 CRC 有效且 seq 最大者——erase/write 中掉电至少保留一个好槽。
+// 双 sector A/B（各放一个 blob：v2 为 3104B = 32B 头 + 64×48B 记录，
+// 地址 0x0/0x1000；v1 旧格式记录为 32B）：save 总写非活动 sector，
+// boot 选 CRC 有效且 seq 最大者——erase/write 中掉电至少保留一个好 sector。
 //
 // 并发：g_boot_records 只在 start 的加载阶段写（任务创建前）；save 路径用
 // motor_rt 临界区拍参数快照后离开临界区再擦写；结果单字由 micro_ros 任务
@@ -43,11 +44,11 @@ alignas(8) static uint8_t g_write_buf[PARAM_STORE_BLOB_SIZE];
 alignas(8) static uint8_t g_verify_buf[PARAM_STORE_BLOB_SIZE];
 static volatile storage_save_status_t g_result = STORAGE_SAVE_IDLE;
 
-static uint32_t sector_address(uint8_t slot) {
-  return slot == 0U ? kSectorA : kSectorB;
+static uint32_t sector_address(uint8_t sector) {
+  return sector == 0U ? kSectorA : kSectorB;
 }
 
-// 设备端原值槽位 ↔ 参数字段/设备槽位常量的跨库顺序断言（storage 同时可见
+// 设备参数对象原值 ↔ 字段/参数对象常量的跨库顺序断言（storage 同时可见
 // 两个库的头，放在这里做唯一一处交叉校验；顺序错了会把 mA 当位置限写进记录）。
 static_assert(PARAM_DEVICE_SLOT_POS_MIN == MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
 static_assert(PARAM_DEVICE_SLOT_POS_MAX == MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
@@ -59,7 +60,7 @@ static_assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
 
 // 把内核参数视图投影成 blob 字段（enable 不持久化）。
 // 两类型号口径不同：
-//  - CERB（设备侧限位）：只收录**设备核验过**的槽位（dev_raw_present 有位），
+//  - CERB（设备侧限位）：只收录**设备核验过**的参数对象（dev_raw_present 有位），
 //    并同时存设备端原值——记录是上电比对基准，比对必须比原值；型号标定
 //    占位/未读过设备的值不得混进记录，否则下次上电会拿占位值判不一致。
 //  - VAXOR（本地软限位）：没有设备对象，有限值即用户设定值，照旧收录。
@@ -183,12 +184,11 @@ static void project_blob_to_boot(const param_store_blob_t *blob) {
   }
 }
 
-// 读取一个 sector 的 blob；有效返回指针（指向 static 读缓冲外的调用方缓冲）。
-// 读取一个 sector 并落到 v2 布局：优先按 v2 校验；不是 v2 时再尝试把
-// v1（升级前写入的 32B 记录格式）就地迁移——升级不该静默丢掉用户的 kp/kd
-// 与限值记录。
-static bool read_slot(uint8_t slot, uint8_t *buf) {
-  if (w25q64_read(sector_address(slot), buf, PARAM_STORE_BLOB_SIZE) !=
+// 读取一个 sector 到调用方缓冲并落到 v2 布局：优先按 v2 校验；不是 v2 时再
+// 尝试把 v1（升级前写入的 32B 记录格式）就地迁移——升级不该静默丢掉用户的
+// kp/kd 与限值记录。
+static bool read_sector(uint8_t sector, uint8_t *buf) {
+  if (w25q64_read(sector_address(sector), buf, PARAM_STORE_BLOB_SIZE) !=
       W25Q64_OK) {
     return false;
   }
@@ -197,7 +197,7 @@ static bool read_slot(uint8_t slot, uint8_t *buf) {
     return true;
   }
   alignas(8) static uint8_t legacy_buf[PARAM_STORE_LEGACY_BLOB_SIZE];
-  if (w25q64_read(sector_address(slot), legacy_buf, sizeof(legacy_buf)) !=
+  if (w25q64_read(sector_address(sector), legacy_buf, sizeof(legacy_buf)) !=
       W25Q64_OK) {
     return false;
   }
@@ -208,8 +208,8 @@ static bool read_slot(uint8_t slot, uint8_t *buf) {
 static void load_boot_params() {
   alignas(8) static uint8_t slot_a[PARAM_STORE_BLOB_SIZE];
   alignas(8) static uint8_t slot_b[PARAM_STORE_BLOB_SIZE];
-  const bool ok_a = read_slot(0, slot_a);
-  const bool ok_b = read_slot(1, slot_b);
+  const bool ok_a = read_sector(0, slot_a);
+  const bool ok_b = read_sector(1, slot_b);
   const param_store_blob_t *blob_a =
       reinterpret_cast<const param_store_blob_t *>(slot_a);
   const param_store_blob_t *blob_b =
@@ -237,7 +237,7 @@ static void load_boot_params() {
   }
 }
 
-// 拍快照 → 打包 → 擦写非活动槽 → 读回 CRC 核验 → 翻转活动槽。
+// 拍快照 → 打包 → 擦写非活动 sector → 读回 CRC 核验 → 翻转活动 sector。
 static void perform_save() {
   if (!g_flash_ok) {
     g_result = STORAGE_SAVE_FAIL;

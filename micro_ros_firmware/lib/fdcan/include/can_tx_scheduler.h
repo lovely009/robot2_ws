@@ -69,7 +69,7 @@ typedef struct {
   uint32_t p0_sent;
   uint32_t p1_sent;
   uint32_t p2_sent;
-  uint32_t tx_hw_reject_count; // 调用方经 note_result 记账的硬件拒绝
+  uint32_t tx_hw_reject_count; // 调用方经 note_hw_reject 记账的硬件拒绝
 } can_tx_scheduler_t;
 
 void can_tx_scheduler_init(can_tx_scheduler_t *sched);

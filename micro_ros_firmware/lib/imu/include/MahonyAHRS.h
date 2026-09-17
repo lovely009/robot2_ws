@@ -1,5 +1,5 @@
-#ifndef MahonyAHRS_h
-#define MahonyAHRS_h
+#ifndef MAHONY_AHRS_H
+#define MAHONY_AHRS_H
 
 extern volatile float twoKp;
 extern volatile float twoKi;

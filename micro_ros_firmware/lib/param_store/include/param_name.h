@@ -1,8 +1,8 @@
 // ROS 参数名模型（纯 C，无 rcl 依赖，host 可直测）：
 // 电机参数名 m<id>.<field> 的唯一生成/解析处，以及值域校验。
 // param_bridge 的 rcl 缝合层只做名字 <-> 内核动作的转换，逻辑全部在此。
-#ifndef PARAM_NAME_H_
-#define PARAM_NAME_H_
+#ifndef PARAM_NAME_H
+#define PARAM_NAME_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -64,4 +64,4 @@ bool param_position_limits_ok(float min_rad, float max_rad);
 }
 #endif
 
-#endif // PARAM_NAME_H_
+#endif // PARAM_NAME_H

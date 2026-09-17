@@ -23,7 +23,8 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 // 销毁电机话题（可重入；未创建时为空操作）
 void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor);
 
-// 周期轮询（由 ros_bridge 定时器调用，发布 ID 化状态副本）
+// 周期轮询（由 ros_bridge 定时器调用）：先把内核配置结果事件转发给
+// param_bridge（顺序契约见 ros_bridge.h），再发布 ID 化状态副本。
 void motor_bridge_poll(void);
 
 #ifdef __cplusplus

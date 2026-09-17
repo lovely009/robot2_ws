@@ -3,7 +3,7 @@
 // 参数契约：
 //   每电机 7 个（电机发现后动态注册，离线不注销；容量见 kMaxMotors）：
 //     m<id>.enable(bool) m<id>.kp/.kd(double) m<id>.pos_min/.pos_max(rad)
-//     m<id>.vel_limit(rad/s) m<id>.torque_limit(Nm)
+//     m<id>.vel_limit(rad/s) m<id>.torque_limit(A，峰值电流工程单位)
 //   系统参数（建服时注册）：
 //     system.save(bool，false→true 脉冲：保存全部参数到 W25)
 //     system.refresh(int，写 motor_id：触发 CERB 设备参数 SDO 回读)
@@ -11,7 +11,8 @@
 //     system.heap_free（只读，台架观测 newlib 堆余量）
 //
 // 语义（ARD §19/§20）：set 同步返回仅表示「已受理」；设备类写最终成败经
-// CONFIG_RESULT 事件异步给出，失败自动回滚影子。回调运行在 micro-ROS
+// 内核配置结果事件异步给出（本桥接收后转 motor_events/参数码），失败自动
+// 回滚影子。回调运行在 micro-ROS
 // 任务上下文，不得直接发 FDCAN/擦 Flash——一律经 mailbox 或 storage 通知。
 //
 // rclc 硬约束：仅 BOOL/INT/DOUBLE；回调内禁 add/delete/set（get 不禁）；

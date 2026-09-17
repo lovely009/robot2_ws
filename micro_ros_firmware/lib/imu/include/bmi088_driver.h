@@ -1,3 +1,6 @@
+// BMI088 厂商驱动（移植自官方例程，经 middleware 挂 SPI2）。
+// 标识符保持厂商原样（如 read_muli_reg、temperate 等拼写勿改），
+// 单位以数据手册为准；中文适配注释加在 middleware 层。
 #ifndef BMI088_DRIVER_H
 #define BMI088_DRIVER_H
 

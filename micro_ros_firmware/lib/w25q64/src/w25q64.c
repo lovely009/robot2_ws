@@ -1,3 +1,5 @@
+// W25Q64 命令层：JEDEC 识别、读、页编、扇区擦与编程后读回校验，经 octospi
+// 控制器层下发。唯一调用者是 storage 任务；地址/长度单位均为字节。
 #include "w25q64.h"
 
 #include "octospi.h"

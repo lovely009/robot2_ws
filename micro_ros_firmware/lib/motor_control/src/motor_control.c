@@ -256,8 +256,9 @@ bool motor_control_set_authorization(motor_control_context_t *ctx, bool authoriz
     }
     ctx->authorized = true;
     // 全局授权重立非冻结态表项的逐电机授权位（断链/超时撤权的恢复路径）。
-    // FAULT/OFFLINE/CONFIG_CONFLICT 冻结态不自动复立——这些路径的恢复只能
-    // 复位控制板（逐电机 policy_enable 亦保持冻结，ARD §36 安全语义）。
+    // FAULT/OFFLINE/CONFIG_CONFLICT 冻结态不自动复立——逐电机恢复只能显式
+    // SET_ENABLE(true) + 新鲜完整快照；其中跨总线身份冲突锁存无运行期解除
+    // 路径，只能整机重启（ARD §36 安全语义）。
     for (size_t i = 0; i < ctx->entry_count; ++i) {
       if (ctx->entries[i].used &&
           ctx->entries[i].lifecycle != MOTOR_CONTROL_LIFECYCLE_FAULT &&

@@ -117,7 +117,7 @@ size_t motor_control_copy_param_views(motor_control_context_t *ctx,
   return n;
 }
 
-// ponytail: O(电机数×存储记录数) 线性查找；64 台 × 50Hz 边界仅 4k 比较，
+// 复杂度上限：O(电机数×存储记录数) 线性查找；64 台 × 50Hz 边界仅 4k 比较，
 // 真到三总线 40 台规模仍可忽略；若记录查找变热点再改为 motor_id 索引表。
 static const motor_control_stored_params_t *find_stored(
     const motor_control_stored_params_t *records, size_t count,

@@ -225,7 +225,7 @@ static void drain_rx_rings(void) {
   }
 }
 
-// 1ms 服务之二（前置）：SYNC 心跳——对 SYNC 能力协议（CERB）的总线周期发
+// 1ms 服务之一（前置）：SYNC 心跳——对 SYNC 能力协议（CERB）的总线周期发
 // 0x080，维持设备 20ms 状态上报（上报帧即总线检测心跳，2026-09-05 协议核实）。
 // 发现/热插拔窗口复用同一路径；vaxor 无 SYNC（adapter 返回 false，零开销）。
 // 禁止升级为控制触发（ARD §23.4）。
@@ -362,8 +362,8 @@ static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
-  // kind 数值契约一致（1..6，上方 static_assert 编译期锁），两侧枚举
-  // 类型独立故显式转换。
+  // kind 数值契约一致（1..6、8、9；7 是内核专用 READ_IDENTITY 不经
+  // mailbox，上方 static_assert 编译期锁），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
     case CONTROL_MAILBOX_CONFIG_SET_MODE:

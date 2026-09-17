@@ -555,6 +555,9 @@ bool motor_rt_task_start(void) {
   if (g_task_started) {
     return true;
   }
+  // 注入参数快照提供者：storage 任务 save 时回调（打破 storage→motor_rt
+  // 任务头反向依赖；临界区仍在 motor_rt_copy_param_views 内部）。
+  storage_task_set_param_snapshot(motor_rt_copy_param_views);
   // mailbox 与内核先于任务初始化；内核 adapter 列表构造注入。
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,

@@ -17,6 +17,12 @@
 extern "C" {
 #endif
 
+// 参数快照提供者（由 motor_rt 注册）：在本任务上下文、内核临界区内拍视图。
+// 未注册时 save 直接回 STORAGE_SAVE_FAIL（等价无 Flash 降级）。
+typedef size_t (*storage_param_snapshot_fn_t)(
+    motor_control_param_view_t *out, size_t capacity);
+void storage_task_set_param_snapshot(storage_param_snapshot_fn_t fn);
+
 typedef enum {
   STORAGE_SAVE_IDLE = 0,
   STORAGE_SAVE_OK = 1,

@@ -15,7 +15,7 @@
 #include <math.h>
 #include <string.h>
 
-#include "motor_rt_task.h"
+#include "storage_projection.h"
 #include "param_store_blob.h"
 #include "w25q64.h"
 
@@ -29,6 +29,11 @@ static const uint32_t kSectorB = W25Q64_SECTOR_SIZE;
 static TaskHandle_t g_task = nullptr;
 static bool g_started = false;
 static bool g_flash_ok = false;
+static storage_param_snapshot_fn_t g_snapshot_fn = nullptr;
+
+void storage_task_set_param_snapshot(storage_param_snapshot_fn_t fn) {
+  g_snapshot_fn = fn;
+}
 static uint8_t g_active_sector = 0; // 0=A 1=B（无有效 blob 默认 A）
 static uint32_t g_seq = 0U;
 
@@ -46,144 +51,6 @@ static volatile storage_save_status_t g_result = STORAGE_SAVE_IDLE;
 
 static uint32_t sector_address(uint8_t sector) {
   return sector == 0U ? kSectorA : kSectorB;
-}
-
-// 设备参数对象原值 ↔ 字段/参数对象常量的跨库顺序断言（storage 同时可见
-// 两个库的头，放在这里做唯一一处交叉校验；顺序错了会把 mA 当位置限写进记录）。
-static_assert(PARAM_DEVICE_SLOT_POS_MIN == MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
-static_assert(PARAM_DEVICE_SLOT_POS_MAX == MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
-static_assert(PARAM_DEVICE_SLOT_VEL_LIMIT ==
-              MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
-static_assert(PARAM_DEVICE_SLOT_TORQUE_LIMIT ==
-              MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
-static_assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
-static_assert(PARAM_STORE_RECORD_COUNT == MOTOR_CONTROL_MAX_MOTORS,
-              "blob 记录数必须与注册表容量一致");
-
-// 把内核参数视图投影成 blob 字段（enable 不持久化）。
-// 两类型号口径不同：
-//  - CERB（设备侧限位）：只收录**设备核验过**的参数对象（dev_raw_present 有位），
-//    并同时存设备端原值——记录是上电比对基准，比对必须比原值；型号标定
-//    占位/未读过设备的值不得混进记录，否则下次上电会拿占位值判不一致。
-//  - VAXOR（本地软限位）：没有设备对象，有限值即用户设定值，照旧收录。
-static void project_views_to_blob(param_store_blob_t *blob,
-                                  const motor_control_param_view_t *views,
-                                  size_t count) {
-  for (size_t i = 0; i < count; ++i) {
-    const motor_control_param_view_t *v = &views[i];
-    if (v->motor_id == 0U) {
-      continue;
-    }
-    if (isfinite(v->kp)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_KP, v->kp);
-    }
-    if (isfinite(v->kd)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_KD, v->kd);
-    }
-    if (v->device_side_limits) {
-      // 设备端原值优先；本次上电还没回读过设备时退回记录原值（保住比对基准）。
-      const bool have_device = v->dev_raw_present != 0U;
-      const uint8_t raw_present =
-          have_device ? v->dev_raw_present : v->record_raw_present;
-      const uint32_t *raw_values = have_device ? v->dev_raw : v->record_raw;
-      const uint8_t pos_min_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_POS_MIN);
-      const uint8_t pos_max_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_POS_MAX);
-      const uint8_t vel_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_VEL_LIMIT);
-      const uint8_t torque_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT);
-      // 位置限位成对落盘：只有两端都经设备核验才收录。
-      if ((raw_present & (uint8_t)(pos_min_bit | pos_max_bit)) ==
-              (uint8_t)(pos_min_bit | pos_max_bit) &&
-          isfinite(v->pos_min_rad) && isfinite(v->pos_max_rad)) {
-        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MIN,
-                             v->pos_min_rad);
-        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MAX,
-                             v->pos_max_rad);
-        param_store_blob_set_device_raw(blob, v->motor_id,
-                                        PARAM_DEVICE_SLOT_POS_MIN,
-                                        raw_values[PARAM_DEVICE_SLOT_POS_MIN]);
-        param_store_blob_set_device_raw(blob, v->motor_id,
-                                        PARAM_DEVICE_SLOT_POS_MAX,
-                                        raw_values[PARAM_DEVICE_SLOT_POS_MAX]);
-      }
-      if ((raw_present & vel_bit) != 0U &&
-          isfinite(v->velocity_limit_rad_s)) {
-        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_VEL_LIMIT,
-                             v->velocity_limit_rad_s);
-        param_store_blob_set_device_raw(blob, v->motor_id,
-                                        PARAM_DEVICE_SLOT_VEL_LIMIT,
-                                        raw_values[PARAM_DEVICE_SLOT_VEL_LIMIT]);
-      }
-      if ((raw_present & torque_bit) != 0U && isfinite(v->torque_limit_nm)) {
-        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_TORQUE_LIMIT,
-                             v->torque_limit_nm);
-        param_store_blob_set_device_raw(
-            blob, v->motor_id, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
-            raw_values[PARAM_DEVICE_SLOT_TORQUE_LIMIT]);
-      }
-      continue; // 设备侧型号的限值到此为止（不落软限位分支）
-    }
-    if (isfinite(v->pos_min_rad)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MIN,
-                           v->pos_min_rad);
-    }
-    if (isfinite(v->pos_max_rad)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MAX,
-                           v->pos_max_rad);
-    }
-    if (isfinite(v->velocity_limit_rad_s)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_VEL_LIMIT,
-                           v->velocity_limit_rad_s);
-    }
-    if (isfinite(v->torque_limit_nm)) {
-      param_store_blob_set(blob, v->motor_id, PARAM_FIELD_TORQUE_LIMIT,
-                           v->torque_limit_nm);
-    }
-  }
-}
-
-// blob → boot 记录（每电机一条；字段存在性来自 present 位图）。
-static void project_blob_to_boot(const param_store_blob_t *blob) {
-  g_boot_count = 0U;
-  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-    const param_store_record_t *rec = &blob->records[i];
-    if ((rec->present == 0U && rec->device_raw_present == 0U) ||
-        g_boot_count >= PARAM_STORE_RECORD_COUNT) {
-      continue;
-    }
-    motor_control_stored_params_t *out = &g_boot_records[g_boot_count++];
-    memset(out, 0, sizeof(*out));
-    out->motor_id = rec->motor_id;
-    float value = 0.0f;
-    if (param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_KP, &value) &&
-        param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_KD, &value)) {
-      out->has_kp_kd = true;
-      out->kp = rec->kp;
-      out->kd = rec->kd;
-    }
-    if (param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_POS_MIN,
-                             &value) &&
-        param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_POS_MAX,
-                             &value)) {
-      out->has_position_limits = true;
-      out->pos_min_rad = rec->pos_min;
-      out->pos_max_rad = rec->pos_max;
-    }
-    if (param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_VEL_LIMIT,
-                             &value)) {
-      out->has_velocity_limit = true;
-      out->velocity_limit_rad_s = rec->vel_limit;
-    }
-    if (param_store_blob_get(blob, rec->motor_id, PARAM_FIELD_TORQUE_LIMIT,
-                             &value)) {
-      out->has_torque_limit = true;
-      out->torque_limit_nm = rec->torque_limit;
-    }
-    // 设备端原值：上电比对的唯一依据（SI 值只用于显示与换算）。
-    out->device_raw_present = rec->device_raw_present;
-    for (size_t slot = 0; slot < PARAM_DEVICE_SLOT_COUNT; ++slot) {
-      out->device_raw[slot] = rec->device_raw[slot];
-    }
-  }
 }
 
 // 读取一个 sector 到调用方缓冲并落到 v2 布局：优先按 v2 校验；不是 v2 时再
@@ -235,19 +102,21 @@ static void load_boot_params() {
   }
   if (chosen != nullptr) {
     g_seq = chosen->seq;
-    project_blob_to_boot(chosen);
+    g_boot_count = storage_projection_blob_to_boot(
+        chosen, g_boot_records, PARAM_STORE_RECORD_COUNT);
   }
 }
 
 // 拍快照 → 打包 → 擦写非活动 sector → 读回 CRC 核验 → 翻转活动 sector。
 static void perform_save() {
-  if (!g_flash_ok) {
+  if (!g_flash_ok || g_snapshot_fn == nullptr) {
     g_result = STORAGE_SAVE_FAIL;
     return;
   }
   motor_control_param_view_t views[MOTOR_CONTROL_MAX_MOTORS];
-  const size_t n =
-      motor_rt_copy_param_views(views, MOTOR_CONTROL_MAX_MOTORS);
+  // 经注入的提供者拍快照（实现在 motor_rt：进内核临界区，仍在本任务
+  // 上下文执行——与旧的直接互调逐字同构）。
+  const size_t n = g_snapshot_fn(views, MOTOR_CONTROL_MAX_MOTORS);
 
   param_store_blob_t *blob =
       param_store_blob_reset(g_write_buf, sizeof(g_write_buf));
@@ -255,7 +124,7 @@ static void perform_save() {
     g_result = STORAGE_SAVE_FAIL;
     return;
   }
-  project_views_to_blob(blob, views, n);
+  storage_projection_views_to_blob(blob, views, n);
   g_seq++;
   param_store_blob_finalize(blob, g_seq);
 

@@ -66,6 +66,14 @@ target_link_libraries(fw_imu_core PUBLIC fw_bmi088_status)
 add_library(fw_param_store OBJECT
   ../../lib/param_store/src/param_store_blob.c
   ../../lib/param_store/src/param_name.c)
+
+# storage 投影纯 C（src 下少有的 host 可编文件；无 Arduino/RTOS 依赖）
+add_library(fw_storage_projection OBJECT
+  ../../src/storage_projection.c)
+target_include_directories(fw_storage_projection PUBLIC
+  ../../src ../../include ../../lib/param_store/include
+  ../../lib/motor_control/include ../../lib/motor_protocol/include)
+target_link_libraries(fw_storage_projection PUBLIC fw_param_store)
 target_include_directories(fw_param_store PUBLIC
   ../../lib/param_store/include)
 
@@ -149,6 +157,11 @@ fw_host_test(test_led_status
   SOURCES test_led_status.cpp ../../src/led_task.cpp
   INCLUDES ../../include
   DEFINES HOST_TEST=1)
+
+fw_host_test(test_storage_projection
+  SOURCES test_storage_projection.cpp
+  OBLIBS fw_storage_projection fw_param_store
+  INCLUDES ../../lib/motor_protocol/include)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

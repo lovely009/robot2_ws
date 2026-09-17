@@ -57,6 +57,19 @@ static void fdcan_periph_clk_config(void) {
 // 三路 FDCAN 的位时序、元素尺寸与滤波配额完全一致，仅 Instance 与消息 RAM
 // 偏移不同（每路 300 个 32 位字：RX FIFO0 + TX FIFO，64B 元素）。
 // 集中在此，避免三份拷贝各自漂移——历史上 DataTimeSeg1 是靠注释维持一致的。
+//
+// 位时序（FDCAN 时钟 = PLL2Q 80MHz，system_clock 单点配置）：
+//   仲裁：N=1, SJW=16, Seg1=63, Seg2=16 → 80 tq/bit → 1.0 Mbps
+//   数据：N=1, SJW=2,  Seg1=12, Seg2=3  → 16 tq/bit → 5.0 Mbps
+// 数值是台架实测基线，无示波器/总线分析仪不得改动。
+#define FDCAN_ARB_BITRATE_PRESCALER 1U
+#define FDCAN_ARB_SJW_TQ             16U
+#define FDCAN_ARB_SEG1_TQ            63U
+#define FDCAN_ARB_SEG2_TQ            16U
+#define FDCAN_DATA_BITRATE_PRESCALER 1U
+#define FDCAN_DATA_SJW_TQ            2U
+#define FDCAN_DATA_SEG1_TQ           12U
+#define FDCAN_DATA_SEG2_TQ           3U
 static void fdcan_apply_init(FDCAN_HandleTypeDef *handle,
                             FDCAN_GlobalTypeDef *instance,
                             uint32_t message_ram_offset) {
@@ -66,14 +79,14 @@ static void fdcan_apply_init(FDCAN_HandleTypeDef *handle,
   handle->Init.AutoRetransmission = ENABLE;
   handle->Init.TransmitPause = DISABLE;
   handle->Init.ProtocolException = ENABLE;
-  handle->Init.NominalPrescaler = 1;
-  handle->Init.NominalSyncJumpWidth = 16;
-  handle->Init.NominalTimeSeg1 = 63;
-  handle->Init.NominalTimeSeg2 = 16;
-  handle->Init.DataPrescaler = 1;
-  handle->Init.DataSyncJumpWidth = 2;
-  handle->Init.DataTimeSeg1 = 12; // 16tq@80MHz = 5Mbps（仲裁 1Mbps 见上）
-  handle->Init.DataTimeSeg2 = 3;
+  handle->Init.NominalPrescaler = FDCAN_ARB_BITRATE_PRESCALER;
+  handle->Init.NominalSyncJumpWidth = FDCAN_ARB_SJW_TQ;
+  handle->Init.NominalTimeSeg1 = FDCAN_ARB_SEG1_TQ;
+  handle->Init.NominalTimeSeg2 = FDCAN_ARB_SEG2_TQ;
+  handle->Init.DataPrescaler = FDCAN_DATA_BITRATE_PRESCALER;
+  handle->Init.DataSyncJumpWidth = FDCAN_DATA_SJW_TQ;
+  handle->Init.DataTimeSeg1 = FDCAN_DATA_SEG1_TQ;
+  handle->Init.DataTimeSeg2 = FDCAN_DATA_SEG2_TQ;
   handle->Init.MessageRAMOffset = message_ram_offset;
   handle->Init.StdFiltersNbr = 4;
   handle->Init.ExtFiltersNbr = 4;

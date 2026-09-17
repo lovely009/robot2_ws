@@ -24,13 +24,14 @@ static rcl_publisher_t g_temp_pub;
 static sensor_msgs__msg__Imu g_imu_msg;
 static std_msgs__msg__Float32 g_temp_msg;
 static bool g_ready = false;
+static constexpr char kImuFrameId[] = "imu_link";
 
 static void fill_imu_msg(const imu_data_t *data) {
   // 时间戳（sensor_msgs 惯例，sec + nanosec）：epoch 优先，未同步回退 millis
   fill_header_stamp(&g_imu_msg.header.stamp);
-  g_imu_msg.header.frame_id.data = (char *)"imu_link";
-  g_imu_msg.header.frame_id.size = 8;
-  g_imu_msg.header.frame_id.capacity = 9;
+  g_imu_msg.header.frame_id.data = (char *)kImuFrameId;
+  g_imu_msg.header.frame_id.size = sizeof(kImuFrameId) - 1U;
+  g_imu_msg.header.frame_id.capacity = sizeof(kImuFrameId);
 
   // 四元数（w,x,y,z → x,y,z,w）
   g_imu_msg.orientation.x = data->quat[1];

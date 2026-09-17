@@ -37,10 +37,10 @@
 // 写后必读回核验（ARD §20.4 / 禁止项 9）。设备身份对象 0x1008 超 4 字节，
 // 走分段上传（见下 READ_IDENTITY 段）。
 // ---------------------------------------------------------------------------
-#define CERB_SDO_CMD_WRITE4 0x23U
-#define CERB_SDO_CMD_READ4 0x40U
-#define CERB_SDO_CMD_WRITE4_ACK 0x60U
-#define CERB_SDO_CMD_READ4_ACK 0x43U
+#define CERB_SDO_CCS_WRITE4 0x23U
+#define CERB_SDO_CCS_UPLOAD_INITIATE 0x40U
+#define CERB_SDO_SCS_WRITE_ACK 0x60U
+#define CERB_SDO_SCS_UPLOAD_4BYTE 0x43U
 #define CERB_SDO_CMD_ABORT 0x80U
 
 // 管理对象（主索引/子索引）与标度：
@@ -128,10 +128,7 @@ static uint32_t cerb_joint_nm_to_motor_ma(
 // CANopen SDO（厂家《CREB关节模组使用协议简易说明书》§4）：请求 0x600+node、
 // 应答 0x580+node，均为 DLC 8 的 CANFD 加速标准帧（§3.1：1M 仲裁/5M 数据）。
 // 身份读取对象 = 0x1008（厂家名称，分段上传），回串即型号身份。
-#define CERB_SDO_REQUEST_ID_BASE 0x600U
-#define CERB_SDO_RESPONSE_ID_BASE 0x580U
-#define CERB_SDO_CMD_UPLOAD_INITIATE 0x40U // 上传发起（读请求）
-#define CERB_SDO_CMD_UPLOAD_SEGMENT 0x60U  // 分段上传请求（bit4 = 切换位）
+#define CERB_SDO_CCS_UPLOAD_SEGMENT 0x60U  // 分段上传请求（bit4 = 切换位）
 #define CERB_SDO_SCS_UPLOAD 0x40U       // 应答高 3 位 = 010（上传发起应答）
 #define CERB_SDO_IDENTITY_INDEX 0x1008U // 厂家名称（设备身份串）
 #define CERB_SDO_IDENTITY_SUBINDEX 0x00U
@@ -355,7 +352,7 @@ static bool cerb_sdo_request(uint16_t node, uint8_t bus_index,
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P2; // 管理流量，非控制路径
-  out->can_id = CERB_SDO_REQUEST_ID_BASE + node;
+  out->can_id = MOTOR_PROTOCOL_CERB_SDO_REQUEST_ID_BASE + node;
   out->size = 8U;
   out->is_fd = true;
   out->is_extended = false;
@@ -623,7 +620,7 @@ static bool cerb_config_encode_stage(
   }
   uint32_t save_code = 0U;
   if (cerb_save_stage_code(request, stage, &save_code)) {
-    uint8_t payload[8] = {CERB_SDO_CMD_WRITE4,
+    uint8_t payload[8] = {CERB_SDO_CCS_WRITE4,
                           (uint8_t)(CERB_OBJ_SAVE_FLASH & 0xFFU),
                           (uint8_t)(CERB_OBJ_SAVE_FLASH >> 8U),
                           CERB_SUB_DEFAULT,
@@ -640,14 +637,14 @@ static bool cerb_config_encode_stage(
     uint8_t payload[8] = {0};
     if (stage == 0U) {
       // 上传发起：40 08 10 00（索引 0x1008 小端，子索引 0）
-      payload[0] = CERB_SDO_CMD_UPLOAD_INITIATE;
+      payload[0] = CERB_SDO_CCS_UPLOAD_INITIATE;
       payload[1] = (uint8_t)(CERB_SDO_IDENTITY_INDEX & 0xFFU);
       payload[2] = (uint8_t)(CERB_SDO_IDENTITY_INDEX >> 8);
       payload[3] = CERB_SDO_IDENTITY_SUBINDEX;
     } else {
       // 分段上传请求：60/70 交替（bit4 = 切换位，从 0 起）。
       payload[0] =
-          (uint8_t)(CERB_SDO_CMD_UPLOAD_SEGMENT |
+          (uint8_t)(CERB_SDO_CCS_UPLOAD_SEGMENT |
                     (uint8_t)(((stage - 1U) & 1U) << 4));
     }
     return cerb_sdo_request(node, bus_index, payload, out);
@@ -660,7 +657,7 @@ static bool cerb_config_encode_stage(
       return false;
     }
     uint8_t payload[8] = {0};
-    payload[0] = CERB_SDO_CMD_READ4; // 0x40 上传请求
+    payload[0] = CERB_SDO_CCS_UPLOAD_INITIATE; // 0x40 上传请求
     payload[1] = (uint8_t)(index & 0xFFU);
     payload[2] = (uint8_t)(index >> 8U);
     payload[3] = sub;
@@ -684,7 +681,7 @@ static bool cerb_config_encode_stage(
   // 与身份读取共用同一请求构造：厂家默认「CANFD 加速 标准帧」（说明书
   // §3.1：1M 仲裁段 / 5M 数据段），SDO 一律不走经典帧。
   uint8_t payload[8] = {0};
-  payload[0] = is_write ? CERB_SDO_CMD_WRITE4 : CERB_SDO_CMD_READ4;
+  payload[0] = is_write ? CERB_SDO_CCS_WRITE4 : CERB_SDO_CCS_UPLOAD_INITIATE;
   payload[1] = (uint8_t)(index & 0xFFU);
   payload[2] = (uint8_t)(index >> 8U);
   payload[3] = sub;
@@ -709,7 +706,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     // 归属过滤：同一节点的 12B 周期上报与 8B SDO 应答都会经归属匹配进来，
     // 只有 0x580+node 的 8B 帧才是本事务的应答。request->motor_id 在 adapter
     // 侧即解析后的厂家 node（内核键 = node，见 motor_protocol_adapter.h）。
-    if (response->can_id != CERB_SDO_RESPONSE_ID_BASE + request->motor_id ||
+    if (response->can_id != MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->motor_id ||
         response->dlc < 8U) {
       return MOTOR_PROTOCOL_STAGE_IGNORE;
     }
@@ -756,7 +753,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
   // 原值带出去是刻意的：内核与固件记录比对、页面显示设备真值都只认原值，
   // SI 仅是换算投影（系数配错时两端一起错，比不出问题）。
   if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    if (response->can_id != CERB_SDO_RESPONSE_ID_BASE + request->motor_id ||
+    if (response->can_id != MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->motor_id ||
         response->dlc < 8U) {
       return MOTOR_PROTOCOL_STAGE_IGNORE;
     }
@@ -769,7 +766,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     if (!cerb_refresh_stage_plan(stage, &want_index, &want_sub, &want_slot)) {
       return MOTOR_PROTOCOL_STAGE_FAIL;
     }
-    if (response->data[0] != CERB_SDO_CMD_READ4_ACK) {
+    if (response->data[0] != CERB_SDO_SCS_UPLOAD_4BYTE) {
       return MOTOR_PROTOCOL_STAGE_RETRY; // 非上传应答（迟到的写应答等）
     }
     const uint16_t got_index =
@@ -829,11 +826,11 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     return MOTOR_PROTOCOL_STAGE_RETRY; // 非本阶段应答（可能是上一阶段的迟到帧）
   }
   if (is_write) {
-    return response->data[0] == CERB_SDO_CMD_WRITE4_ACK
+    return response->data[0] == CERB_SDO_SCS_WRITE_ACK
                ? MOTOR_PROTOCOL_STAGE_ADVANCE
                : MOTOR_PROTOCOL_STAGE_RETRY;
   }
-  if (response->data[0] != CERB_SDO_CMD_READ4_ACK) {
+  if (response->data[0] != CERB_SDO_SCS_UPLOAD_4BYTE) {
     return MOTOR_PROTOCOL_STAGE_RETRY;
   }
   // 读回必须与写入值一致；不一致重发本阶段（≤2 次后内核收敛为 UNCONFIRMED）。

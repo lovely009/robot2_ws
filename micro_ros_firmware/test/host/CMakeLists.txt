@@ -137,7 +137,8 @@ fw_host_test(test_bmi088_register_config
 
 fw_host_test(test_param_store
   SOURCES test_param_store.cpp
-  OBLIBS fw_param_store)
+  OBLIBS fw_param_store
+  INCLUDES ../../lib/motor_protocol/include) # param_units.h 引用 MOTOR_PROTOCOL_PI
 
 fw_host_test(test_w25q64_geometry
   SOURCES test_w25q64_geometry.cpp

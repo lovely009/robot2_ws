@@ -15,6 +15,15 @@
 #include "fdcan.h"
 #include "motor_protocol_adapter.h"
 
+// 跨库容量契约：64 这一物理容量在各库独立定义，单侧改小会静默截断，
+// 编译期锁齐。RX ring 的 64 是环深语义（非设备数），刻意不纳入。
+static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
+              "命令快照容量必须与注册表容量一致");
+static_assert(MOTOR_CONTROL_MAX_MOTORS == CAN_TX_P1_SLOTS,
+              "P1 调度槽数必须与注册表容量一致");
+static_assert(MOTOR_CONTROL_MAX_MOTORS == MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS,
+              "内核快照目标容量必须与注册表容量一致");
+
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
 static const uint32_t kMotorRtTaskStack = 1024U;

@@ -15,9 +15,9 @@
 
 #include <math.h>
 
-// π 不依赖 M_PI（-std=c11 下未必定义）。
-#define PARAM_UNITS_PI 3.14159265358979323846
-#define PARAM_UNITS_RAD_TO_DEG (180.0 / PARAM_UNITS_PI)
+#include "motor_protocol.h" // MOTOR_PROTOCOL_PI 全工程唯一 π
+
+#define PARAM_UNITS_RAD_TO_DEG (180.0 / MOTOR_PROTOCOL_PI)
 
 // 角度：rad ↔ deg。
 static inline float param_units_rad_to_deg(float rad) {

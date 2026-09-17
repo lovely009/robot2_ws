@@ -24,7 +24,7 @@ static const UBaseType_t kStorageTaskPrio = 1U; // 与 led 同级最低；Flash 
 static const configSTACK_DEPTH_TYPE kStorageTaskStack = 1024U; // 4KB（HAL OSPI AutoPolling 深栈）
 
 static const uint32_t kSectorA = 0x000000U;
-static const uint32_t kSectorB = 0x001000U;
+static const uint32_t kSectorB = W25Q64_SECTOR_SIZE;
 
 static TaskHandle_t g_task = nullptr;
 static bool g_started = false;
@@ -57,6 +57,8 @@ static_assert(PARAM_DEVICE_SLOT_VEL_LIMIT ==
 static_assert(PARAM_DEVICE_SLOT_TORQUE_LIMIT ==
               MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
 static_assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
+static_assert(PARAM_STORE_RECORD_COUNT == MOTOR_CONTROL_MAX_MOTORS,
+              "blob 记录数必须与注册表容量一致");
 
 // 把内核参数视图投影成 blob 字段（enable 不持久化）。
 // 两类型号口径不同：

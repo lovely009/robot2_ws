@@ -37,11 +37,14 @@
 
 // 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
 // 禁止反序列化路径上的动态分配）。
+// 各 ROS 数组容量对齐内核注册表（跨库一致性由 motor_rt_task.cpp
+// 顶部 static_assert 锁定；勿在本文件写裸 64）。
+static constexpr size_t kRosArrayCapacity = MOTOR_CONTROL_MAX_MOTORS;
 static can_bridge_msgs__msg__MotorMotionStateTarget
-    g_motion_states_buf[64];
-static can_bridge_msgs__msg__MotorStatusTarget g_status_buf[64];
-static can_bridge_msgs__msg__MotorTopologyEntry g_topology_buf[64];
-static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[64];
+    g_motion_states_buf[kRosArrayCapacity];
+static can_bridge_msgs__msg__MotorStatusTarget g_status_buf[kRosArrayCapacity];
+static can_bridge_msgs__msg__MotorTopologyEntry g_topology_buf[kRosArrayCapacity];
+static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[kRosArrayCapacity];
 
 // ---- 话题名 ----
 static const char *kCommandTopic = "/motor_command_array";
@@ -129,10 +132,10 @@ static void command_array_cb(const void *msgin) {
 // ---------------------------------------------------------------------------
 
 static void publish_motion_states() {
-  motor_control_motion_state_t states[64];
+  motor_control_motion_state_t states[kRosArrayCapacity];
   const size_t count =
       motor_rt_copy_motion_states(states, sizeof(states) / sizeof(states[0]));
-  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  const uint8_t out_count = (uint8_t)(count < kRosArrayCapacity ? count : kRosArrayCapacity);
   g_motion_states_msg.states.size = out_count;
   for (uint8_t i = 0; i < out_count; ++i) {
     auto &out = g_motion_states_msg.states.data[i];
@@ -156,10 +159,10 @@ static void publish_statuses() {
     return;
   }
   s_phase = 0U;
-  motor_control_status_t statuses[64];
+  motor_control_status_t statuses[kRosArrayCapacity];
   const size_t count =
       motor_rt_copy_statuses(statuses, sizeof(statuses) / sizeof(statuses[0]));
-  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  const uint8_t out_count = (uint8_t)(count < kRosArrayCapacity ? count : kRosArrayCapacity);
   g_status_msg.statuses.size = out_count;
   for (uint8_t i = 0; i < out_count; ++i) {
     auto &out = g_status_msg.statuses.data[i];
@@ -188,10 +191,10 @@ static void publish_topology(uint32_t now_ms) {
     return;
   }
   g_topology_tick = now_ms;
-  motor_rt_topology_entry_t entries[64];
+  motor_rt_topology_entry_t entries[kRosArrayCapacity];
   const size_t count =
       motor_rt_copy_topology(entries, sizeof(entries) / sizeof(entries[0]));
-  const uint8_t out_count = (uint8_t)(count < 64U ? count : 64U);
+  const uint8_t out_count = (uint8_t)(count < kRosArrayCapacity ? count : kRosArrayCapacity);
   g_topology_msg.entries.size = out_count;
   for (uint8_t i = 0; i < out_count; ++i) {
     auto &out = g_topology_msg.entries.data[i];
@@ -239,13 +242,13 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
 
-  g_command_msg.targets.capacity = 64;
+  g_command_msg.targets.capacity = kRosArrayCapacity;
   g_command_msg.targets.data = g_command_targets_buf;
-  g_motion_states_msg.states.capacity = 64;
+  g_motion_states_msg.states.capacity = kRosArrayCapacity;
   g_motion_states_msg.states.data = g_motion_states_buf;
-  g_status_msg.statuses.capacity = 64;
+  g_status_msg.statuses.capacity = kRosArrayCapacity;
   g_status_msg.statuses.data = g_status_buf;
-  g_topology_msg.entries.capacity = 64;
+  g_topology_msg.entries.capacity = kRosArrayCapacity;
   g_topology_msg.entries.data = g_topology_buf;
 
   // model_name 是全桥唯一 String 成员：静态缓冲零值时 data==NULL，首个设备

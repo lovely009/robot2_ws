@@ -22,18 +22,9 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
     return;
   }
-  if (entry->motion_enabled && entry->adapter != NULL &&
-      entry->adapter->encode_disable != NULL) {
-    motor_protocol_tx_frame_t frame = {0};
-    if (entry->adapter->encode_disable(entry->profile, entry->node,
-                                       entry->bus_index, &frame)) {
-      frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
-      frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
-      if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
-        entry->p0_pending = true;
-        entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;
-      }
-    }
+  if (entry->motion_enabled) {
+    // 失能帧生成/推送与失败挂起统一在 motor_control_send_p0 内。
+    (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
   }
   entry->motion_enabled = false;
   entry->enable_pending = false;
@@ -163,8 +154,13 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
   // motor_control_config_step 按不变量复检（在线 + 可绑定态 + 本轮未定论），
   // 覆盖建档、重连、以及被离线/撤权中止后的重发。
 
-  // 配置事务响应裁决（先于运动解码——读回帧同时携带反馈时两者都生效）。
-  (void)motor_control_config_on_frame(ctx, entry, frame);
+  // 配置事务响应裁决（先于运动解码）。返回 true = 帧已被事务消费：SDO 应答
+  // （0x580|node）既非运动反馈、也不满足厂家反馈帧型，继续送解码只会把它
+  // 计成协议错误并置 DECODE_ERROR 故障位——故消费后直接返回。
+  // vaxor 无响应阶段（waits_response 恒 false），此分支对它不可达。
+  if (motor_control_config_on_frame(ctx, entry, frame)) {
+    return;
+  }
 
   // 解码 + SI 换算（Profile 未绑定时运动量为 NaN，状态/身份字段照常）。
   motor_protocol_measured_state_t measured = {0};
@@ -194,17 +190,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP ||
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED) {
       if (entry->motion_enabled) {
-        motor_protocol_tx_frame_t frame = {0};
-        if (entry->adapter->encode_disable != NULL &&
-            entry->adapter->encode_disable(entry->profile, entry->node,
-                                           entry->bus_index, &frame)) {
-          frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
-          frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
-          if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
-            entry->p0_pending = true;
-            entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;
-          }
-        }
+        (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
       }
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_FAULT;
       entry->motion_enabled = false;

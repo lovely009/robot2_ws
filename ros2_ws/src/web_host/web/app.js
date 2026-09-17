@@ -98,6 +98,7 @@ function connect() {
   ros.on('connection', () => {
     setConn(true);
     subscribeAll();
+    loadParams(); // 参数是默认页签：连上后自动读取，避免打开看到空表
   });
   ros.on('error', () => setConn(false, '连接错误'));
   ros.on('close', () => {
@@ -806,6 +807,167 @@ setInterval(() => {
 }, 1000);
 
 // ---------- Tab 切换 ----------
+
+// ---------- 参数页（rcl_interfaces 参数服务直连）----------
+// 固件 rclc_parameter 为 low-mem 模式：每次 get/set 只能一个参数，
+// 不支持 ros2 param dump 式批量 get；逐参数调用。
+const PARAM_NODE = '/micro_ros_node';
+// 注意：ROS 参数服务名是蛇形小写（类型名才是驼峰）：
+//   list_parameters/get_parameters/set_parameters（含 describe_parameters 等）。
+function paramServiceName(typeName) {
+  return typeName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+const PARAM_NUM_FIELDS = ['kp', 'kd', 'pos_min', 'pos_max', 'vel_limit', 'torque_limit'];
+// 参数服务调用结果：id -> {enable, kp, ...}（字符串原值，NaN 为空）
+const paramCache = new Map();
+
+function paramService(service, request) {
+  return new Promise((resolve, reject) => {
+    const client = new ROSLIB.Service({
+      ros, name: `${PARAM_NODE}/${paramServiceName(service)}`,
+      serviceType: `rcl_interfaces/srv/${service}`,
+    });
+    client.callService(new ROSLIB.ServiceRequest(request), resolve,
+      (e) => reject(new Error(String(e))));
+  });
+}
+
+async function paramGet(name) {
+  const res = await paramService('GetParameters', {names: [name]});
+  const v = res.values[0];
+  if (!v || v.type === 0) return null; // NOT_SET
+  if (v.type === 1) return v.bool_value;
+  if (v.type === 2) return v.integer_value;
+  return v.double_value; // type 3
+}
+
+function paramSetValue(name, type, key, value) {
+  const pv = {type};
+  if (type === 1) pv.bool_value = !!value;
+  else if (type === 2) pv.integer_value = value;
+  else pv.double_value = value; // 3 = DOUBLE
+  return paramService('SetParameters', {parameters: [{name, value: pv}]});
+}
+
+function setParamResult(ok, text) {
+  const el = $('paramResult');
+  el.className = 'result tiny ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+function renderParamRows() {
+  const tbody = $('paramRows');
+  const ids = [...paramCache.keys()].sort((a, b) => a - b);
+  if (ids.length === 0) {
+    tbody.innerHTML = '<tr class="empty"><td colspan="10">参数集为空（等待电机发现）</td></tr>';
+    return;
+  }
+  tbody.innerHTML = ids.map((id) => {
+    const v = paramCache.get(id);
+    const model = (state.motors.get(id) || {}).topo?.model_name || '';
+    const cell = (f) =>
+      `<input data-id="${id}" data-field="${f}" class="pnum" value="${v[f] ?? ''}">`;
+    return `<tr>
+      <td class="num">${id}</td>
+      <td>${model || '<span class="muted">--</span>'}</td>
+      <td><input type="checkbox" data-id="${id}" data-field="enable" ${v.enable ? 'checked' : ''}></td>
+      <td>${cell('kp')}</td><td>${cell('kd')}</td>
+      <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
+      <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
+      <td><button class="tiny-btn" data-refresh="${id}">回读</button></td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('input').forEach((inp) => {
+    inp.addEventListener('input', () => { inp.dataset.dirty = '1'; });
+    inp.addEventListener('change', () => { inp.dataset.dirty = '1'; });
+  });
+  tbody.querySelectorAll('[data-refresh]').forEach((btn) => {
+    btn.onclick = () => refreshDeviceParams(parseInt(btn.dataset.refresh, 10));
+  });
+}
+
+async function loadParams() {
+  if (!state.connected) return;
+  setParamResult(true, '读取中…');
+  try {
+    const res = await paramService('ListParameters', {prefixes: [], depth: 1});
+    const names = res.result.names.filter((n) => /^m\d+\./.test(n));
+    paramCache.clear();
+    for (const name of names) {
+      const [, idStr, field] = name.match(/^m(\d+)\.(.+)$/);
+      const id = parseInt(idStr, 10);
+      if (!PARAM_NUM_FIELDS.includes(field) && field !== 'enable') continue;
+      if (!paramCache.has(id)) paramCache.set(id, {});
+      paramCache.get(id)[field] = await paramGet(name);
+    }
+    renderParamRows();
+    setParamResult(true, `已读取 ${paramCache.size} 台电机的参数`);
+  } catch (e) {
+    setParamResult(false, '读取失败：' + e.message);
+  }
+}
+
+async function applyParams() {
+  if (!state.connected) return;
+  const dirty = [...$('paramRows').querySelectorAll('input[data-dirty]')];
+  if (dirty.length === 0) { setParamResult(true, '没有修改'); return; }
+  setParamResult(true, `下发 ${dirty.length} 项中…`);
+  let fail = 0;
+  for (const inp of dirty) {
+    const id = parseInt(inp.dataset.id, 10);
+    const field = inp.dataset.field;
+    const name = `m${id}.${field}`;
+    try {
+      let type, value;
+      if (field === 'enable') { type = 1; value = inp.checked; }
+      else {
+        if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
+        value = parseFloat(inp.value);
+        if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
+        type = 3;
+      }
+      const r = await paramSetValue(name, type, field, value);
+      if (!r.results[0].successful) {
+        fail++;
+        setParamResult(false, `${name} 被拒：${r.results[0].reason || '见 last_error'}`);
+      }
+      delete inp.dataset.dirty;
+    } catch (e) {
+      fail++;
+      setParamResult(false, `${name} 失败：${e.message}`);
+    }
+  }
+  // 读固件侧最近错误码（设备类写最终成败是异步的）。
+  setTimeout(async () => {
+    try {
+      const [code, motor] = await Promise.all(
+        ['system.last_error', 'system.last_error_motor'].map(paramGet));
+      if (code) setParamResult(false, `完成，last_error=${code} motor=${motor}`);
+      else if (!fail) setParamResult(true, '下发已受理（设备限值最终成败见 CONFIG_RESULT 事件）');
+    } catch (e) { /* 忽略错误码读取 */ }
+  }, 400);
+}
+
+async function saveParamsToFlash() {
+  if (!state.connected) return;
+  try {
+    await paramSetValue('system.save', 1, 'save', true);
+    setParamResult(true, '保存请求已提交（Flash 写入约 0.5s）');
+  } catch (e) {
+    setParamResult(false, '保存失败：' + e.message);
+  }
+}
+
+async function refreshDeviceParams(id) {
+  if (!state.connected) return;
+  try {
+    await paramSetValue('system.refresh', 2, 'refresh', id);
+    setParamResult(true, `电机 ${id} 设备参数回读已请求`);
+  } catch (e) {
+    setParamResult(false, '回读请求失败：' + e.message);
+  }
+}
+
 function switchTab(page) {
   document.querySelectorAll('.tab').forEach((b) =>
     b.classList.toggle('on', b.dataset.page === page));
@@ -869,6 +1031,10 @@ function init() {
   $('btnTeachAdd').onclick = () => teachAddRow();
   $('btnTeachExport').onclick = teachExport;
   $('btnTeachImport').onclick = teachImport;
+
+  $('btnParamLoad').onclick = loadParams;
+  $('btnParamApply').onclick = applyParams;
+  $('btnParamSave').onclick = saveParamsToFlash;
 
   addCmdRow(1, 0, 0, 0);
   teachAddRow(1000, '1:0,0,0');

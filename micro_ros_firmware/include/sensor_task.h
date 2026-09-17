@@ -17,9 +17,6 @@ extern "C" {
 // 创建传感器任务（只能调用一次；重复调用返回 true 且不重复建任务）
 bool sensor_task_start(void);
 
-// 强制停止加热（官方 TempCtrl forceStop 语义；true 时 PID 输出置 0）
-void imu_set_force_stop(bool stop);
-
 // 原子复制最新的完整 IMU 快照；尚无有效样本时返回 false。
 bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence);
 

@@ -50,13 +50,17 @@ cd micro_ros_firmware
   授权/增益/限位取内核安全默认（建档 `policy_enable` 默认 true、全局授权
   mailbox 引导豁免、增益回退 profile `default_kp/default_kd`、CERB 限位在
   驱动器侧）。内核 `bind_profile`/`submit_config` API 保留（测试覆盖与目录内
-  定向绑定）；mailbox bind FIFO 已随静态表一并删除。
-- `.msg` 文件（MotorBind/MotorConfig/MotorPolicy/MotorConfigResult）暂保留于
-  can_bridge_msgs（ros2_ws 侧 motor_sim/web_host 仍引用），固件已停用——
-  删除须同步改 ros2_ws 并刷新 micro-ROS 类型（勿用 clean_microros）。
-- 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（100Hz）、20B 状态帧
-  =20ms 自主心跳；CERB 反馈帧=命令实时状态（100Hz）、`0x080` SYNC 上报帧=20ms
-  状态心跳（承担总线检测）。OFFLINE=心跳丢失 100ms。`motor_rt_task` 每 10ms 发
+  定向绑定）；mailbox bind FIFO 已随静态表一并删除，config FIFO 保留（暂无
+  ROS 生产者，无身份绑定入口——型号一律由内核读设备自报身份决定）。
+- `.msg` 现状（2026-09-16 核实）：唯一源 `micro_ros_agent/src/can_bridge_msgs`
+  只有 command / motion / status / topology / event 五类；MotorBind、
+  MotorConfig、MotorPolicy、MotorConfigResult 均不存在（ros2_ws 侧也无生产者）。
+  下行通道若要回归，须同步改 ros2_ws 并用
+  `tools/refresh_microros_messages.py` 增量刷新（勿用 clean_microros）。
+- 反馈模型（2026-09-05 核实）：vaxor 12B 回显帧=命令实时反馈（50Hz，跟随控制
+  边界）、20B 状态帧=20ms 自主心跳；CERB 反馈帧=命令实时状态（50Hz，跟随控制
+  边界）、`0x080` SYNC 上报帧=20ms 状态心跳（承担总线检测）。OFFLINE=心跳丢失
+  100ms。`motor_rt_task` 每 20ms 发
   一次 SYNC 维持 CERB 上报，禁止把 SYNC 当控制触发。
 - CERB 仅使用 MIT：R48/R58 的 P/V/T Max 为 `π rad`、`π rad/s`、
   `11/45 Nm`；使能后等待至少 100ms（adapter `enable_settle_ms`）才发送目标。
@@ -91,7 +95,11 @@ cd micro_ros_firmware
   需要显式 `-DHAL_FDCAN_MODULE_ENABLED`、`-DHAL_OSPI_MODULE_ENABLED`
   （`platformio.ini` 已加）。任一 HAL 构建宏变更后必须执行
   `pio run -t clean` 全量重建。
-- **W25Q64**：保留 `lib/w25q64` 及 geometry host test，但不执行启动探测，禁止在上电路径自动擦写 Flash。
+- **W25Q64**：由 `storage_task` 独占（P1/1024 words）：boot 同步 `w25q64_init()`
+  并读双 sector A/B（0x0/0x1000，选 CRC 有效且 seq 新者）；无芯片/ID 不符静默降级
+  为无持久化，不阻断启动。运行期只响应 `system.save` 脉冲：erase（阻塞可达 ~1s）
+  只能在 storage 任务内执行，IWDG 由 motor_rt 独立喂。Flash 缓冲必须 4 字节对齐
+  （-Os 下结构体访问会生成 STRD，非对齐直接 HardFault）。
 - **FDCAN RX 归属**：ISR 只盖时戳并把原始帧写入每总线 SPSC ring（容量 64，
   满时丢新帧并计数，不解码），`motor_rt_task` 是唯一消费者，每 1ms 每总线最多
   drain 16 帧；ROS 桥只能读取内核状态副本，不得让 bridge 或第二任务直接消费 ring。
@@ -105,8 +113,16 @@ cd micro_ros_firmware
 - **FreeRTOS 下 `loop()` 只能非阻塞**：业务放 `sensor`/`control`/`micro_ros` 任务。
 - **任务栈/周期**：`start_task` P1/256 words；`sensor` P2/512 words（DRDY；
   IMU 非关键路径，不得抢占 motor_rt）；
-  `motor_rt` P3/1024 words（1ms 服务 + 10ms 控制边界）；`micro_ros` P2/8192 words
-  （bridge timer）。调栈/周期后同步改 README。
+  `motor_rt` P3/1024 words（1ms 服务 + 20ms 控制边界）；`micro_ros` P2/8192 words
+  （bridge timer）；`storage` P1/1024 words（OSPI/HAL AutoPolling 深栈）。
+  调栈/周期后同步改 README。
+- **参数服务器契约**（`param_bridge`）：每电机 7 个动态参数 `m<id>.{enable,kp,kd,
+  pos_min,pos_max,vel_limit,torque_limit}`（发现后注册、离线不注销，容量 17 台）+
+  5 个 `system.*`（save/refresh 脉冲、last_error(_motor)、heap_free）。rclc 跑
+  low-mem 模式（DTCM newlib 堆约 0.3KB/槽）：`ros2 param get/set` 单参数可用，
+  批量 get 与 `ros2 param dump` 返回空。set=「已受理」，设备类写最终成败经
+  CONFIG_RESULT 事件（失败自动回弹 rcl 值）；`system.refresh=<id>` 发 4 个 SDO
+  upload 刷 CERB 设备影子；enable 不落盘。
 - **控制发送唯一性**：ROS callback 只写完整 ID 快照 latest-wins mailbox；`motor_rt_task`
   是唯一正常 FDCAN 发送者（内核 → TX 调度器 → 硬件，P0/P1/P2 分级）。
   快照缺席/30ms 无快照 = MIT 默认 `kd` 阻尼软停；100ms 无快照、Agent 断链或
@@ -149,11 +165,21 @@ cd micro_ros_firmware
 - `src/led_task.cpp`：WS2812 状态显示任务 + host 可测的状态到颜色映射
 - `src/ros_bridge.cpp`：node/executor/timer 生命周期，编排各域桥
 - `src/imu_bridge.cpp`：IMU/温度发布（`micro_ros/imu/data`、`micro_ros/imu/temp`）
-- `src/motor_bridge.cpp`：电机 ID 化命令/Policy/Config 订阅与 motion/status/
-  topology/events/config_result 发布
+- `src/motor_bridge.cpp`：唯一订阅 `/motor_command_array`（ID 化完整快照）；
+  发布 `micro_ros/motion_states`、`motor_status_array`、`motor_topology`、
+  `motor_events` 四路
 - `src/sensor_task.cpp`：传感器任务（EXTI/信号量/温度 PID/加热 PWM）
-- `src/motor_rt_task.cpp`：唯一电机实时任务（1ms 服务 + 10ms 控制边界；RX drain、
-  内核服务、SYNC 心跳、TX 路由、事件搬运、mailbox 消费）
+- `src/param_bridge.cpp`：ROS 2 参数服务器桥（`rclc_parameter` low-mem）：
+  动态注册/100ms 影子同步/修改回调经 config FIFO 下发/on_config_result 钩子收敛
+  outstanding（失败回弹）/save、refresh 脉冲。名字与值域逻辑在 `lib/param_store`
+  （host 可测），本文件不直接发 FDCAN。
+- `src/storage_task.cpp`：W25Q64 唯一所有者（boot 加载双 sector blob、save 拍
+  参数视图快照→CRC→擦非活动槽→写→读回校验）。
+- `src/motor_rt_task.cpp`：唯一电机实时任务（1ms 服务 + 20ms 控制边界；RX drain、
+  内核服务、SYNC 心跳、TX 路由、事件搬运、mailbox 消费、boot 存储参数套用、参数
+  视图副本）
+- `lib/param_store`：纯 C 参数名模型（m<id>.field 生成/解析/校验）与 W25 blob
+  布局（32B 头 + 64×32B 记录 + CRC32，双 sector A/B）
 - `src/system_clock.cpp`：覆盖 `SystemClock_Config`（HSE/HSI48/SPI2/SPI6 时钟树）
 - `lib/imu`：BMI088 驱动/通信层/Mahony/SI 聚合（自持 SPI2 的 `HAL_SPI_MspInit`，
   不用 DMA，不依赖其他 lib）
@@ -167,7 +193,6 @@ cd micro_ros_firmware
   adapter 与纯 codec（厂家字节/CAN-ID 推导/FD 属性唯一归属地；自 ros2_ws
   `motor_drive/protocol.cpp` 移植，`-fno-exceptions` 下异常改返回值）
 - `lib/control_mailbox`：ID 完整命令快照、低频配置 FIFO 与授权/连接边沿
-- `lib/motor_event_relay`：内核事件中继环（满丢最旧保最新并计数，host 可测）
 - `lib/ws2812`：板载状态灯（SPI6 MOSI=PA7）
 - `lib/w25q64`：OCTOSPI2 W25Q64 驱动；运行期访问必须指定单一所有者，不能由多个
   任务并发使用同一 OSPI 句柄
@@ -187,5 +212,5 @@ cd micro_ros_firmware
   `motor_rt_copy_topology()` / `motor_rt_drain_events()` 读取只读副本，
   不得直接访问 `can_bsp` 内部 ring/调度器或 HAL 发送接口。
 - `dev-real` 交接只能做无负载真机验证且硬件急停必须可用；必须实测 RX burst 下
-  motor_rt WCET/jitter、100Hz 周期、30/100ms 快照级联边界和 overflow/backlog。
+  motor_rt WCET/jitter、50Hz 周期、30/100ms 快照级联边界和 overflow/backlog。
   当前机构无抱闸，软件 stop 不能替代硬件急停、机械限位或供电隔离。

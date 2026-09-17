@@ -1,25 +1,22 @@
-// ROS 2 参数服务器桥（rclc_parameter）——骨架。
+// ROS 2 参数服务器桥（rclc_parameter）：固件运行时参数的唯一 ROS 入口。
 //
-// 现状（骨架期）：只有生命周期与 executor 接线——服务器对象、5 个 service
-// （get/get_types/set/list/describe）与容量预留，**参数契约尚未落地**（参数
-// 集合为空）。主机侧验证：`ros2 service list` 能看到该节点的 5 个 parameters
-// service，`ros2 param list` 返回空。参数集合的设计与逐条落地是下一步。
+// 参数契约：
+//   每电机 7 个（电机发现后动态注册，离线不注销；容量见 kMaxMotors）：
+//     m<id>.enable(bool) m<id>.kp/.kd(double) m<id>.pos_min/.pos_max(rad)
+//     m<id>.vel_limit(rad/s) m<id>.torque_limit(Nm)
+//   系统参数（建服时注册）：
+//     system.save(bool，false→true 脉冲：保存全部参数到 W25)
+//     system.refresh(int，写 motor_id：触发 CERB 设备参数 SDO 回读)
+//     system.last_error / .last_error_motor（只读错误码，见 .cpp 码表）
+//     system.heap_free（只读，台架观测 newlib 堆余量）
 //
-// 生命周期由 ros_bridge 编排（agent 断连时整体重建，与 imu/motor 桥同款）。
+// 语义（ARD §19/§20）：set 同步返回仅表示「已受理」；设备类写最终成败经
+// CONFIG_RESULT 事件异步给出，失败自动回滚影子。回调运行在 micro-ROS
+// 任务上下文，不得直接发 FDCAN/擦 Flash——一律经 mailbox 或 storage 通知。
 //
-// 库级前提（不满足会静默失败）：rclc 参数服务器固定要建 5 个 service，要求
-// libmicroros.a 以 RMW_UXRCE_MAX_SERVICES>=5 构建（见仓库根的
-// microros_user.meta 与 tools/check_microros_config.py）。配置不符时 init 会在
-// 第二个 service 上失败 → 本模块返回 false → ros_bridge 整体回滚 → 节点在
-// WAIT_AGENT 无限重连；编译期不会有任何提示。
-//
-// rclc_parameter 的三个硬约束（落参数契约时必须遵守）：
-//   1) 只有 BOOL/INT/DOUBLE，没有 string —— 字符串语义（型号名等）只能编码
-//      成整数索引；
-//   2) 修改回调只能返回 true/false，SetParametersResult.reason 由 rclc 填空串，
-//      用户写不进去 —— "为什么被拒"要另开只读参数给原因码；
-//   3) rclc_add_parameter 在用户回调内被禁用 —— 动态参数只能在 executor spin
-//      之外（bridge timer 轮询）补齐。
+// rclc 硬约束：仅 BOOL/INT/DOUBLE；回调内禁 add/delete/set（get 不禁）；
+// 内部写回（同步/回滚/脉冲复位）必须经 g_internal_write 守卫。
+// low_mem_mode=true：兼容 ros2 param get/set/list，不兼容批量 get/dump。
 
 #ifndef PARAM_BRIDGE_H
 #define PARAM_BRIDGE_H
@@ -30,27 +27,29 @@
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
 
+#include "motor_control.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// 参数服务器占用的 executor handle 数。必须与 rclc 的
-// RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES 一致：少了 rclc_executor_add_
-// parameter_server 直接失败（编译期锁在 param_bridge.cpp）。
 #define PARAM_BRIDGE_EXECUTOR_HANDLES 5U
 
-// 参数集合容量（编译期固定，rclc 不动态扩容）。骨架期无参数，留出余量；
-// 参数契约落地后按实际条目数收敛。
-#define PARAM_BRIDGE_MAX_PARAMS 32U
+// 128 槽 = 5 系统参数 + 17 电机 × 7。ponytail: rclc 参数集在 DTCM newlib
+// 堆（low-mem 约 0.3KB/槽），远期三总线 ~40 台时需改自定义 srv 参数接口。
+#define PARAM_BRIDGE_MAX_PARAMS 128U
 
-// 创建参数服务器并接入 executor（node/executor 由 ros_bridge 提供）。
-// 失败返回 false，调用方按既有失败路径整体回滚。
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
-
-// 销毁参数服务器（只 fini 自己的实体；executor/node 由 ros_bridge 收尾）。
 void param_bridge_destroy(rcl_node_t *node);
-
 bool param_bridge_created(void);
+
+// 10ms 桥定时器调用（排在 motor_bridge_poll 之后）：动态注册、影子同步、
+// 脉冲动作（save/refresh）、错误码回写。
+void param_bridge_poll(void);
+
+// motor_bridge publish_events 的逐条事件钩子（同任务顺序调用）：
+// 消费 CONFIG_RESULT 做 outstanding 收敛/回滚。
+void param_bridge_on_config_result(const motor_control_event_t *event);
 
 #ifdef __cplusplus
 }

@@ -37,6 +37,9 @@ rosidl_generate_interfaces(
   "msg/MotorTopologyEntry.msg"
   "msg/MotorTopology.msg"
   "msg/MotorEvent.msg"
+  # 低频下行配置（上层 → MCU）：身份绑定与运行时策略
+  "msg/MotorBind.msg"
+  "msg/MotorPolicy.msg"
   DEPENDENCIES std_msgs
 )
 

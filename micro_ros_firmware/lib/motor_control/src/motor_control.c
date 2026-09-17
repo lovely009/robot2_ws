@@ -1,4 +1,4 @@
-// motor_control v2 内核主体：初始化、会话/授权、10ms 控制边界、1ms 服务、
+// motor_control v2 内核主体：初始化、会话/授权、20ms 控制边界、1ms 服务、
 // TX 收集与状态/事件副本（ARD-0007 §8/§9/§11/§13）。
 //
 // 所有权与边界：
@@ -86,7 +86,11 @@ bool motor_control_push_tx_p0(motor_control_context_t *ctx,
     }
   }
   // 全是 P0（病态）：不丢任何安全帧——挂起重试，service 逐节拍补发。
+  // 重试类别取 last_p0_kind（调用方推送前必须已设置），故各调用方不再
+  // 各自复制「失败则置 p0_pending/p0_kind」的尾巴。
   ctx->p0_retry_count++;
+  entry->p0_pending = true;
+  entry->p0_kind = entry->last_p0_kind;
   return false;
 }
 
@@ -121,36 +125,49 @@ bool motor_control_requeue_p0(motor_control_context_t *ctx,
   if (!entry->used) {
     return false;
   }
-  if (motor_control_push_tx_p0(ctx, entry, frame)) {
-    return true; // 重入队成功（含驱逐腾位路径）
-  }
-  // 病态：待发队列全为 P0。转挂起重试，service_p0_retries 按 last_p0_kind
-  // 重新编码补发——不静默丢安全帧。
-  entry->p0_pending = true;
-  entry->p0_kind = entry->last_p0_kind;
-  return false;
+  // 成功即重入队（含驱逐腾位路径）；失败（待发队列全为 P0 的病态）已由
+  // push_tx_p0 转挂起重试，service_p0_retries 按 last_p0_kind 重新编码
+  // 补发——不静默丢安全帧。
+  return motor_control_push_tx_p0(ctx, entry, frame);
 }
 
-// 统一 P0 失能帧生成 + 推送（撤权/离线/故障/冲突共用）。
-static bool send_disable_p0(motor_control_context_t *ctx,
-                            motor_control_entry_t *entry) {
-  if (entry->adapter == NULL || entry->adapter->encode_disable == NULL) {
+// 统一 P0 安全帧生成 + 推送（失能/软停共用）。撤权、离线、故障、冲突、
+// 软停五条路径全部经此，不再各自复制编码与「失败挂起」逻辑。
+//
+// kind 会被记入 last_p0_kind：下游（TX 调度器/硬件）拒收触发 requeue_p0 时
+// 据此重新编码补发，故每次推送前必须设置。此前三处外部调用漏设该字段，
+// 会把一帧失能被按残留类别（可能已是 ENABLE）补发。
+//
+// 编码失败与队列满都不静默丢安全帧：挂 p0_pending 交 service 逐节拍重试
+// 并计入 protocol_error_count（与 service_p0_retries 同一语义）。
+bool motor_control_send_p0(motor_control_context_t *ctx,
+                           motor_control_entry_t *entry, uint8_t kind) {
+  if (ctx == NULL || entry == NULL || entry->adapter == NULL) {
     return false;
   }
   motor_protocol_tx_frame_t frame = {0};
-  if (!entry->adapter->encode_disable(entry->profile, entry->node,
-                                      entry->bus_index, &frame)) {
+  bool encoded = false;
+  if (kind == MOTOR_CONTROL_P0_DISABLE) {
+    encoded = entry->adapter->encode_disable != NULL &&
+              entry->adapter->encode_disable(entry->profile, entry->node,
+                                             entry->bus_index, &frame);
+  } else if (kind == MOTOR_CONTROL_P0_SOFT_STOP) {
+    // 软停编码需要 Profile 的力矩/限位量，缺失即视为编码失败。
+    encoded = entry->profile != NULL &&
+              entry->adapter->encode_soft_stop != NULL &&
+              entry->adapter->encode_soft_stop(entry->profile, entry->node,
+                                               entry->bus_index, &frame);
+  }
+  if (!encoded) {
+    entry->p0_pending = true;
+    entry->p0_kind = kind;
+    entry->protocol_error_count++;
     return false;
   }
   frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
   frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
-  entry->last_p0_kind = MOTOR_CONTROL_P0_DISABLE;
-  if (motor_control_push_tx_p0(ctx, entry, &frame)) {
-    return true;
-  }
-  entry->p0_pending = true;
-  entry->p0_kind = MOTOR_CONTROL_P0_DISABLE;
-  return false;
+  entry->last_p0_kind = kind;
+  return motor_control_push_tx_p0(ctx, entry, &frame);
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +200,7 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     }
     if (entry->motion_enabled) {
       // 推送失败不静默：p0_pending 挂起，service 逐节拍重发失能帧。
-      (void)send_disable_p0(ctx, entry);
+      (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
     }
     entry->motion_enabled = false;
     entry->enable_pending = false;
@@ -296,6 +313,7 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
     return false;
   }
   entry->profile = profile;
+  motor_control_set_default_device_shadow(entry);
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_BOUND, motor_id,
                            entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
   // 身份确认完成 → 识别态收敛到 READY_DISABLED（ARD §9：DISCOVERED→IDENTIFYING
@@ -311,7 +329,7 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
 }
 
 // ---------------------------------------------------------------------------
-// 10ms 控制边界（ARD §11.3 / §51.3）
+// 20ms 控制边界（ARD §11.3 / §51.3）
 // ---------------------------------------------------------------------------
 
 static bool snapshot_contains(const motor_control_command_snapshot_t *snapshot,
@@ -436,9 +454,11 @@ bool motor_control_apply_command_snapshot(
     // Policy 软件限位（Vaxor，打包前钳制——ARD §26.1）；限位标志逐快照重算，
     // 不粘滞（目标回到限内即清除）。
     float target_pos = target->position_rad;
+    float target_vel = target->velocity_rad_s;
     float target_effort = target->effort_nm;
     const motor_protocol_model_profile_t *profile = entry->profile;
     entry->limit_flags &= ~(MOTOR_PROTOCOL_LIMIT_POS_MIN | MOTOR_PROTOCOL_LIMIT_POS_MAX |
+                            MOTOR_PROTOCOL_LIMIT_VEL |
                             MOTOR_PROTOCOL_LIMIT_EFFORT);
     if (entry->has_soft_limits &&
         (profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
@@ -448,6 +468,17 @@ bool motor_control_apply_command_snapshot(
       } else if (target_pos > entry->soft_max_rad) {
         target_pos = entry->soft_max_rad;
         entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_POS_MAX;
+      }
+    }
+    // 软件速度限值（仅 CAP_LIMIT_SOFTWARE 型号；双向对称）。
+    if (entry->has_soft_vel_limit &&
+        (profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
+      if (target_vel > entry->soft_max_velocity_rad_s) {
+        target_vel = entry->soft_max_velocity_rad_s;
+        entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_VEL;
+      } else if (target_vel < -entry->soft_max_velocity_rad_s) {
+        target_vel = -entry->soft_max_velocity_rad_s;
+        entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_VEL;
       }
     }
     // Profile 峰值钳制（已确认型号才有峰值；0 = 未确认不钳）。
@@ -460,10 +491,21 @@ bool motor_control_apply_command_snapshot(
         entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_EFFORT;
       }
     }
+    // 软件力矩限值（在峰值钳制之后，只可能更严——设置时已钳到型号峰值）。
+    if (entry->has_soft_torque_limit &&
+        (profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
+      if (target_effort > entry->soft_max_torque_nm) {
+        target_effort = entry->soft_max_torque_nm;
+        entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_EFFORT;
+      } else if (target_effort < -entry->soft_max_torque_nm) {
+        target_effort = -entry->soft_max_torque_nm;
+        entry->limit_flags |= MOTOR_PROTOCOL_LIMIT_EFFORT;
+      }
+    }
 
     entry->has_target = true;
     entry->target_position_rad = target_pos;
-    entry->target_velocity_rad_s = target->velocity_rad_s;
+    entry->target_velocity_rad_s = target_vel;
     entry->target_effort_nm = target_effort;
     // motion_authorized 不因快照出现而自动复立：撤销后只能由
     // set_authorization(true) 或 SET_ENABLE(true) 显式重立（ARD §36）。
@@ -550,27 +592,9 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
       (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
        entry->motion_enabled);
   if (in_controlled_set) {
-    // 仅在进入软停的迁移沿发帧（去重，防 100Hz P0 刷屏）。
-    if (entry->adapter != NULL && entry->profile != NULL &&
-        entry->adapter->encode_soft_stop != NULL) {
-      motor_protocol_tx_frame_t frame = {0};
-      if (entry->adapter->encode_soft_stop(entry->profile, entry->node,
-                                           entry->bus_index, &frame)) {
-        frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
-        frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
-        entry->last_p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
-        if (!motor_control_push_tx_p0(ctx, entry, &frame)) {
-          entry->p0_pending = true;
-          entry->p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
-        }
-      } else {
-        // 编码失败（Profile 缺失等病态）：同样挂起重试——安全帧不静默消失；
-        // 重试仍失败时由 service 计数并放弃（与失能路径同语义）。
-        entry->p0_pending = true;
-        entry->p0_kind = MOTOR_CONTROL_P0_SOFT_STOP;
-        entry->protocol_error_count++;
-      }
-    }
+    // 仅在进入软停的迁移沿发帧（去重，防 50Hz P0 刷屏）。
+    // 编码失败/队列满都挂起重试（安全帧不静默消失），计数在 helper 内。
+    (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_SOFT_STOP);
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_SAFE_STOP;
     entry->has_target = false;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_SOFT_STOP,
@@ -678,7 +702,7 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     }
     // 撤销该电机的运动帧输出：正在发命令的设备必须先收到失能帧（§36）。
     if (entry->motion_enabled) {
-      (void)send_disable_p0(ctx, entry);
+      (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
     }
     entry->online = false;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_OFFLINE;
@@ -785,6 +809,37 @@ size_t motor_control_collect_tx(motor_control_context_t *ctx,
   return count;
 }
 
+// 顺序确定化辅助：取下一个「未输出且 motor_id 最小」的表项，并在 taken 中
+// 标记（taken 按表项索引、容量 MOTOR_CONTROL_MAX_MOTORS，由调用方清零）；
+// 无可取时返回 NULL。
+//
+// 为什么需要：注册表顺序 = 发现序，会随上线顺序漂移，而状态/拓扑发布顺序
+// 必须稳定（上层处理、人工对读都依赖）。n <= 64 的 O(n^2) 只出现在 10ms
+// 桥接轮询路径，不在 1ms 实时环内。
+//
+// motion states / statuses / topology 三处共用本函数；勿再各自展开选择
+// 循环——早期副本散落三处，其一还跨越模块边界直读 ctx->entries。
+const motor_control_entry_t *motor_control_entry_take_sorted(
+    const motor_control_context_t *ctx, bool *taken) {
+  if (ctx == NULL || taken == NULL) {
+    return NULL;
+  }
+  int best = -1;
+  for (size_t i = 0; i < ctx->entry_count; ++i) {
+    if (!ctx->entries[i].used || taken[i]) {
+      continue;
+    }
+    if (best < 0 || ctx->entries[i].motor_id < ctx->entries[best].motor_id) {
+      best = (int)i;
+    }
+  }
+  if (best < 0) {
+    return NULL;
+  }
+  taken[best] = true;
+  return &ctx->entries[best];
+}
+
 size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
                                         motor_control_motion_state_t *out,
                                         size_t capacity, uint32_t now_ms) {
@@ -801,20 +856,11 @@ size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
     if (count >= capacity) {
       break;
     }
-    int best = -1;
-    for (size_t i = 0; i < ctx->entry_count; ++i) {
-      if (!ctx->entries[i].used || taken[i]) {
-        continue;
-      }
-      if (best < 0 || ctx->entries[i].motor_id < ctx->entries[best].motor_id) {
-        best = (int)i;
-      }
-    }
-    if (best < 0) {
+    const motor_control_entry_t *entry =
+        motor_control_entry_take_sorted(ctx, taken);
+    if (entry == NULL) {
       break;
     }
-    taken[best] = true;
-    const motor_control_entry_t *entry = &ctx->entries[best];
     motor_control_motion_state_t *state = &out[count++];
     state->motor_id = entry->motor_id;
     state->bus_index = entry->bus_index;
@@ -844,20 +890,11 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
     if (count >= capacity) {
       break;
     }
-    int best = -1;
-    for (size_t i = 0; i < ctx->entry_count; ++i) {
-      if (!ctx->entries[i].used || taken[i]) {
-        continue;
-      }
-      if (best < 0 || ctx->entries[i].motor_id < ctx->entries[best].motor_id) {
-        best = (int)i;
-      }
-    }
-    if (best < 0) {
+    const motor_control_entry_t *entry =
+        motor_control_entry_take_sorted(ctx, taken);
+    if (entry == NULL) {
       break;
     }
-    taken[best] = true;
-    const motor_control_entry_t *entry = &ctx->entries[best];
     motor_control_status_t *status = &out[count++];
     status->motor_id = entry->motor_id;
     status->bus_index = entry->bus_index;

@@ -1,21 +1,12 @@
-// BMI088 的 SPI2 板级资源层：配置时钟源、引脚与 NVIC。
-// 当前收发使用阻塞 HAL_SPI_TransmitReceive，不占用 DMA；若后续改用 DMA，
-// 设备句柄和回调仍归本库，控制器资源向 lib/dma 登记。
+// BMI088 的 SPI2 板级资源层：配置时钟源与引脚。
+// 当前收发使用阻塞 HAL_SPI_TransmitReceive，不占用 DMA 也不使能 SPI2_IRQn；
+// 若后续改用 DMA，设备句柄和回调仍归本库，控制器资源向 lib/dma 登记。
 // 设备层必须显式调用 imu_spi2_board_init；HAL_SPI_MspInit 仅作幂等兜底。
 
 #include "imu_spi2_transport.h"
 #include "stm32h7xx_hal.h"
 #include "stm32_def.h"      // Error_Handler
-#include <STM32FreeRTOS.h>  // configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY（断言用）
 #include <stdbool.h>
-
-// SPI2 中断优先级：与 lib/dma 的控制器级政策一致
-// （6/0，低于 syscall 门槛 5，数值更大）。
-#define IMU_SPI2_IRQ_PRIORITY 6U
-
-_Static_assert(IMU_SPI2_IRQ_PRIORITY >=
-                   configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
-               "SPI2 IRQ priority must not preempt the FreeRTOS syscall threshold");
 
 static bool g_spi2_board_done = false;
 
@@ -48,10 +39,7 @@ void imu_spi2_board_init(void) {
 
   gpio.Pin = GPIO_PIN_13;
   HAL_GPIO_Init(GPIOB, &gpio);
-
-  // 保留官方中断使能；阻塞收发路径不会触发 SPI 事件
-  HAL_NVIC_SetPriority(SPI2_IRQn, IMU_SPI2_IRQ_PRIORITY, 0);
-  HAL_NVIC_EnableIRQ(SPI2_IRQn);
+  // 不使能 SPI2_IRQn：本库用阻塞收发，不产生 SPI 事件。
 }
 
 // HAL 回调兜底：正常路径已显式初始化，幂等保护使重复调用为空操作。

@@ -35,6 +35,7 @@
 #include <rmw_microros/time_sync.h>
 
 #include "motor_rt_task.h"
+#include "param_bridge.h"
 
 // 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
 // 禁止反序列化路径上的动态分配）。
@@ -217,6 +218,8 @@ static void publish_events() {
   size_t n;
   while ((n = motor_rt_drain_events(events, 16)) > 0) {
     for (size_t i = 0; i < n; ++i) {
+      // 参数桥先收敛 outstanding（同任务顺序调用，无线程问题），再发布。
+      param_bridge_on_config_result(&events[i]);
       g_event_msg.tick_ms = events[i].tick_ms;
       g_event_msg.event_type = (uint8_t)events[i].type;
       g_event_msg.motor_id = events[i].motor_id;

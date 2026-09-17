@@ -63,7 +63,7 @@ typedef struct {
 // 分配 P0/P1/P2 队列（ARD-0007 §22）。
 typedef enum {
   MOTOR_PROTOCOL_TX_CLASS_P0 = 0U, // 安全帧：软停/停机/失能（可抢占）
-  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 100 Hz MIT 控制（latest-wins 槽）
+  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 50 Hz MIT 控制（latest-wins 槽）
   MOTOR_PROTOCOL_TX_CLASS_P2 = 2U  // 发现/配置管理（有界配额）
 } motor_protocol_tx_class_t;
 
@@ -152,9 +152,18 @@ typedef enum {
   MOTOR_PROTOCOL_CONFIG_SET_GAINS = 2U,
   MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS = 3U,
   MOTOR_PROTOCOL_CONFIG_SET_ENABLE = 4U, // 逐电机 Enable（ARD §19 MotorPolicy）
-  // 内核内部事务（不属 mailbox 契约，1..4 的数值对应关系不受影响）：
+  // 设备侧管理对象（仅 CERB；走 CANopen 快速 SDO，写后读回核验）：
+  //   0x6080 电机最大转速（电机端 RPM）
+  MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT = 5U,
+  //   0x2538 电机峰值电流（电机端 mA）
+  MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT = 6U,
+  // 内核内部事务（不属 mailbox 契约，1..6 的数值对应关系不受影响）：
   // 读设备自报身份串，结果不回 CONFIG_RESULT，用于型号自动绑定。
-  MOTOR_PROTOCOL_CONFIG_READ_IDENTITY = 5U
+  MOTOR_PROTOCOL_CONFIG_READ_IDENTITY = 7U,
+  // 设备参数回读（属 mailbox 契约，与 control_mailbox 侧同值 8 锁死）：
+  // 顺序 upload 0x607D:01/02、0x6080、0x2538，回值换算成关节侧 SI 后
+  // 以 4 个 float 追加进读缓冲，内核据此刷新设备参数影子。仅 CERB。
+  MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS = 8U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -181,6 +190,8 @@ typedef struct {
   float kp;     // SET_GAINS
   float kd;
   motor_protocol_position_limits_t position_limits; // SET_POSITION_LIMITS（rad）
+  float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）
+  float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
 } motor_protocol_config_request_t;
 
 // 配置事务阶段（ARD-0007 §20.4：分阶段、跨 1ms 节拍步进、每阶段可重试 ≤2 次）。
@@ -247,7 +258,7 @@ typedef struct motor_protocol_adapter {
                        const motor_protocol_raw_frame_t *frame,
                        motor_protocol_measured_state_t *out);
 
-  // 100 Hz MIT 控制帧（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
+  // 50 Hz MIT 控制帧（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
   bool (*encode_mit_command)(const motor_protocol_model_profile_t *profile, uint16_t node,
                              uint8_t bus_index,
                              const motor_protocol_control_intent_t *intent,
@@ -267,7 +278,7 @@ typedef struct motor_protocol_adapter {
                          uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 发现/重连/热插拔探测帧（CERB 0x080 SYNC；vaxor 无 → 返回 false）。
-  // 禁止作为常规 100Hz 控制触发（ARD §23.4、禁止项 14）。
+  // 禁止作为常规 50Hz 控制触发（ARD §23.4、禁止项 14）。
   bool (*encode_discovery_sync)(uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 配置事务：阶段数（0 = 该请求不被本协议支持 → 内核回 UNSUPPORTED）。
@@ -283,12 +294,15 @@ typedef struct motor_protocol_adapter {
                               uint8_t bus_index,
                               const motor_protocol_config_request_t *request,
                               motor_protocol_tx_frame_t *out);
+  // profile 传入的原因：设备侧管理对象的读回核验要做单位换算
+  // （0x6080 电机端 RPM、0x2538 电机端 mA），换算系数在 profile 里。
   // read_out 仅读取类事务（READ_IDENTITY）使用：adapter 追加设备回传载荷，
   // 其余事务传 NULL 并忽略。调用方保证缓冲在事务全程有效。
   // 契约：只在返回 ADVANCE/COMPLETE 的路径上追加；判 RETRY/FAIL/IGNORE
   // 之前不得写入缓冲——重试会重发同一阶段，内核不替 adapter 回退载荷。
   motor_protocol_stage_outcome_t (*config_on_response)(
-      uint8_t stage, const motor_protocol_config_request_t *request,
+      uint8_t stage, const motor_protocol_model_profile_t *profile,
+      const motor_protocol_config_request_t *request,
       const motor_protocol_raw_frame_t *response,
       motor_protocol_read_buffer_t *read_out);
 } motor_protocol_adapter_t;

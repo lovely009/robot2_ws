@@ -46,7 +46,8 @@ src/motor_rt_task  -> control_mailbox + fdcan + motor_control
 motor_control      -> motor_protocol（接口接缝，文档明载）
 src/sensor_task    -> imu
 src/led_task       -> ws2812
-lib/w25q64         -> 休眠：当前无消费者（无 storage 任务），待接线
+lib/w25q64         -> 休眠：无消费者（无 storage 任务）；已由 platformio.ini
+                      的 lib_ignore 排除出固件构建，源码待接线时启用
 ```
 
 库不能反向依赖 `src/`、ROS 或其他任务。实时路径不使用动态内存、阻塞等待或

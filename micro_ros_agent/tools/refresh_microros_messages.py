@@ -52,6 +52,17 @@ def main() -> None:
     require(platformio_root / "build" / "mcu" / "src", "micro-ROS MCU 源码缓存")
     require(platformio_root / "platformio_toolchain.cmake", "PlatformIO CMake toolchain")
 
+    # 本脚本独立运行时不经 pio 进程，PATH 里没有 PlatformIO 注入的 ARM 工具链；
+    # toolchain 文件用裸名调用 arm-none-eabi-gcc-ar，缺路径会在静态库归档阶段
+    # 报 “Error running link command: No such file or directory”。显式补上。
+    toolchain_bin = (
+        Path.home() / ".platformio" / "packages" / "toolchain-gccarmnoneeabi" / "bin"
+    )
+    if toolchain_bin.is_dir() and str(toolchain_bin) not in os.environ.get("PATH", "").split(
+        os.pathsep
+    ):
+        os.environ["PATH"] = str(toolchain_bin) + os.pathsep + os.environ.get("PATH", "")
+
     resolved_package = package_link.resolve(strict=True)
     expected_package = (firmware_root.parent / "micro_ros_agent" / "src" / "can_bridge_msgs").resolve()
     if resolved_package != expected_package:

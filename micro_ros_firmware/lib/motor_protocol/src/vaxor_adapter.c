@@ -10,7 +10,7 @@
 //    Iq = τ ÷ (Kt × 减速比 × 效率)（命令方向，修正旧路径 N·m/A 混用）。
 //
 // 反馈模型（2026-09-05 与厂家行为核实，两部分）：
-//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，100Hz 跟随命令；
+//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，跟随控制边界 50Hz；
 //  - 20B 状态帧 @ status-id（0x702+4n）：20ms 周期自主上报，承担总线检测
 //    （心跳），并携带电压/故障/身份字段。
 //
@@ -25,26 +25,24 @@
 #include <math.h>
 #include <string.h>
 
-// 反馈段 ID 基址（= node 0 槽位；node 合法范围 1..60，见 motor_protocol.h）。
-#define VAXOR_REPLY_ID_BASE 0x701U
-#define VAXOR_STATUS_ID_BASE 0x702U
-
 static bool vaxor_match_rx_frame(const motor_protocol_raw_frame_t *frame,
                                  uint16_t *out_node) {
   if (frame == NULL || out_node == NULL || frame->is_extended) {
     return false;
   }
-  // 反馈段：reply = 0x701 + 4n（12B）、status = 0x702 + 4n（20B），n ∈ 1..60
-  // （基址 0x701/0x702 对应 node 0 的槽位，node 0 非法，由 node ≥ 1 排除）。
-  uint32_t id = frame->can_id;
-  if (frame->dlc == 12U && id > VAXOR_REPLY_ID_BASE &&
-      (id - VAXOR_REPLY_ID_BASE) % 4U == 0U) {
-    *out_node = (uint16_t)((id - VAXOR_REPLY_ID_BASE) / 4U);
+  // 反馈段：reply = 基址 + stride*n（12B）、status = 基址 + stride*n（20B），
+  // n ∈ 1..60。基址即 node 0 槽位，node 0 非法故用 > 基址排除。
+  // 基址与 stride 取自 motor_protocol.h 的唯一来源，勿在此重定义。
+  const uint32_t id = frame->can_id;
+  const uint32_t stride = MOTOR_PROTOCOL_VAXOR_NODE_STRIDE;
+  if (frame->dlc == 12U && id > MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE &&
+      (id - MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE) % stride == 0U) {
+    *out_node = (uint16_t)((id - MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE) / stride);
     return true;
   }
-  if (frame->dlc == 20U && id > VAXOR_STATUS_ID_BASE &&
-      (id - VAXOR_STATUS_ID_BASE) % 4U == 0U) {
-    *out_node = (uint16_t)((id - VAXOR_STATUS_ID_BASE) / 4U);
+  if (frame->dlc == 20U && id > MOTOR_PROTOCOL_VAXOR_STATUS_ID_BASE &&
+      (id - MOTOR_PROTOCOL_VAXOR_STATUS_ID_BASE) % stride == 0U) {
+    *out_node = (uint16_t)((id - MOTOR_PROTOCOL_VAXOR_STATUS_ID_BASE) / stride);
     return true;
   }
   return false;
@@ -87,7 +85,7 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
   motor_protocol_joint_state_t wire = {0};
   if (frame->can_id == motor_protocol_vaxor_reply_id(node) &&
       frame->dlc == 12U) {
-    // 回显帧恒 12B（实时反馈，100Hz 跟随命令）；20B 状态帧只在 status-id。
+    // 回显帧恒 12B（实时反馈，跟随控制边界 50Hz）；20B 状态帧只在 status-id。
     if (!motor_protocol_unpack_vaxor_feedback(frame->data, frame->dlc, &wire)) {
       return false;
     }
@@ -268,10 +266,12 @@ static bool vaxor_config_encode_stage(
 }
 
 static motor_protocol_stage_outcome_t vaxor_config_on_response(
-    uint8_t stage, const motor_protocol_config_request_t *request,
+    uint8_t stage, const motor_protocol_model_profile_t *profile,
+    const motor_protocol_config_request_t *request,
     const motor_protocol_raw_frame_t *response,
     motor_protocol_read_buffer_t *read_out) {
   (void)stage;
+  (void)profile;
   (void)request;
   (void)response;
   (void)read_out;

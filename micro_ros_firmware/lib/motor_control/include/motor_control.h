@@ -10,7 +10,7 @@
 // 新增协议不改内核——ARD §24.3）。
 //
 // 所有权：motor_rt_task 是唯一调用者。1ms 服务节拍调
-// on_raw_frame()/service()；10ms 控制边界调 apply_command_snapshot()；
+// on_raw_frame()/service()；20ms 控制边界调 apply_command_snapshot()；
 // TX 调度器（lib/fdcan）消费 collect_tx() 输出的 P0/P1/P2 帧。
 //
 // 时基：一切 freshness/超时判定使用 MCU 单调时基毫秒（调用方传入 now_ms
@@ -34,7 +34,10 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_BUSES 3U
 #define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS 64U
 #define MOTOR_CONTROL_MAX_TX_PENDING 96U
-#define MOTOR_CONTROL_MAX_EVENTS 32U
+// 事件环深度 = ROS 桥一次轮询间隔内可积压的事件数。原为 32，配合上游
+// 64 深的 motor_event_relay 使用；中继退役后直接提到 64，缓冲深度不变，
+// 同时少一个环、少一次 1ms 搬运与两处冗余的丢弃计数。
+#define MOTOR_CONTROL_MAX_EVENTS 64U
 
 // 命令快照安全阈值（ARD-0007 §13.2）。
 #define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
@@ -192,6 +195,13 @@ typedef struct {
   bool has_soft_limits; // 仅 Vaxor（软件限位，打包前钳制——ARD §26.1）
   float soft_min_rad;
   float soft_max_rad;
+  // 软件速度/力矩限值：同样仅对 CAP_LIMIT_SOFTWARE 型号本地生效（VAXOR 无
+  // 厂家管理对象）。钳制发生在打包前，只影响目标、不触发驱动器保护，故与
+  // 增益一样无生命周期门禁（设备侧写才有门禁，见 motor_control_config.c）。
+  bool has_soft_vel_limit;
+  float soft_max_velocity_rad_s; // 双向对称限值（±）
+  bool has_soft_torque_limit;
+  float soft_max_torque_nm;      // 双向对称限值（±）
 
   // 使能时序（vendor 整定门：adapter->enable_settle_ms）。
   bool motion_enabled;    // 已发使能帧且未被失能
@@ -217,6 +227,21 @@ typedef struct {
   uint32_t limit_flags;
   uint32_t protocol_error_count;
   uint16_t last_failure_reason;
+
+  // 设备侧参数影子（CERB）：写事务核验值/REFRESH 回读值；绑定后首次取
+  // Profile 默认值。Vaxor 不用（其限值是本地 soft_* 字段）。
+  bool dev_limits_valid;
+  float dev_min_rad;
+  float dev_max_rad;
+  float dev_max_velocity_rad_s;
+  float dev_max_torque_nm;
+  // REFRESH_PARAMS 事务回读暂存：adapter 按阶段追加 4 个关节侧 float。
+  float refresh_values[4];
+  uint8_t refresh_count;
+  // boot 存储参数套用状态：bit7=已见过存储记录（只初始化一次），
+  // bit0=待套增益、bit1=待套限值；Profile 未就绪时低位保留由 20ms 边界
+  // 重试，套尽后只留 bit7（之后的 refresh/设备写影子不被重复 apply 覆盖）。
+  uint8_t stored_apply_mask;
 
   // 配置事务（每电机至多一个未决；新请求 BUSY——ARD §20.3）。
   bool tx_active;
@@ -339,7 +364,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
 void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
-// 10ms 控制边界（ARD §11.3）：校验并消费一份完整快照；
+// 20ms 控制边界（ARD §11.3）：校验并消费一份完整快照；
 // 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法载荷）。
 // ---------------------------------------------------------------------------
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
@@ -348,7 +373,7 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
 
 // 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；
-// 发现窗口复用同一路径）。禁止作为 100Hz 控制触发（ARD §23.4）。
+// 发现窗口复用同一路径）。禁止作为 50Hz 控制触发（ARD §23.4）。
 bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_index);
 
 // ---------------------------------------------------------------------------
@@ -360,6 +385,11 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 size_t motor_control_collect_tx(motor_control_context_t *ctx,
                                 motor_protocol_tx_frame_t *out, size_t capacity);
 
+// 顺序确定化辅助（状态/拓扑副本共用，见 .c 内详细注释）：取下一个
+// 「未输出且 motor_id 最小」的表项并在 taken 中标记；无可取返回 NULL。
+const motor_control_entry_t *motor_control_entry_take_sorted(
+    const motor_control_context_t *ctx, bool *taken);
+
 size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
                                         motor_control_motion_state_t *out,
                                         size_t capacity, uint32_t now_ms);
@@ -368,6 +398,56 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
                                    uint32_t now_ms);
 size_t motor_control_drain_events(motor_control_context_t *ctx,
                                   motor_control_event_t *out, size_t capacity);
+
+// ---------------------------------------------------------------------------
+// 参数视图与存储参数套用（param_bridge / 存储任务共用）
+// ---------------------------------------------------------------------------
+
+// 单电机参数视图：值未设置（未绑定/未配置）用 NaN 表示；enable 是策略位。
+// device_side_limits：true=CERB 设备对象影子；false=Vaxor 本地软限位字段。
+typedef struct {
+  uint16_t motor_id;
+  bool online;
+  bool bound;                  // Profile 已绑定（值可换算/校验）
+  bool device_side_limits;
+  bool enable;                 // policy_enable
+  float kp;
+  float kd;
+  float pos_min_rad;
+  float pos_max_rad;
+  float velocity_limit_rad_s;
+  float torque_limit_nm;
+  bool limits_valid;           // 四个限值全部有效（非 NaN）
+} motor_control_param_view_t;
+
+// 只读参数视图副本（固定容量，按注册表顺序）；未发现电机不在结果中。
+size_t motor_control_copy_param_views(motor_control_context_t *ctx,
+                                      motor_control_param_view_t *out,
+                                      size_t capacity);
+
+// boot 持久化参数（W25 blob 投影）；未保存字段对应 has_* 为 false。
+// 不含 enable（策略位不持久化）。调用方（motor_rt 20ms 边界）每边界传入，
+// 内核按表项 stored_apply_mask 在 Profile 绑定后分批套用。
+typedef struct {
+  uint16_t motor_id;
+  bool has_kp_kd;
+  bool has_position_limits;
+  bool has_velocity_limit;
+  bool has_torque_limit;
+  float kp;
+  float kd;
+  float pos_min_rad;
+  float pos_max_rad;
+  float velocity_limit_rad_s;
+  float torque_limit_nm;
+} motor_control_stored_params_t;
+
+// 套用 boot 存储参数（幂等：套尽的电机 mask 清零；Profile 未绑定的电机
+// 保留 mask 等后续边界）。CERB 设备值只填影子，不发任何 SDO 写。
+void motor_control_apply_stored_params(
+    motor_control_context_t *ctx,
+    const motor_control_stored_params_t *records, size_t count,
+    uint32_t now_ms);
 
 #ifdef __cplusplus
 }

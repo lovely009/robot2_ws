@@ -33,6 +33,16 @@ def generate_launch_description():
             }],
         ),
 
+        # rosapi：提供 /rosapi/get_param(s)/set_param 等参数服务，
+        # 让浏览器端能读写 motor_param_bridge 的 ROS 参数（网页参数面板）。
+        # 无鉴权，仅限内网（与 rosbridge 同）。
+        Node(
+            package='rosapi',
+            executable='rosapi_node',
+            name='rosapi',
+            output='screen',
+        ),
+
         Node(
             package='web_host',
             executable='static_server',

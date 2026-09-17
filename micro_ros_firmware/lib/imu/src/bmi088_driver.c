@@ -15,6 +15,9 @@ float BMI088_GYRO_SEN = BMI088_GYRO_2000_SEN;
     BMI088_write_single_reg((reg), (data));      \
     BMI088_ACCEL_NS_H();                         \
   }
+// 注意：加速度计单寄存器读比陀螺多一个 dummy 字节（地址后先写 0x55 再读），
+// 这是 BMI088 数据手册对 ACC SPI 读的硬性要求，不能改用下面的
+// BMI088_read_single_reg（只有地址 + 数据两次传输，仅适用于 GYRO）。
 #define BMI088_accel_read_single_reg(reg, data) \
   {                                             \
     BMI088_ACCEL_NS_L();                        \
@@ -23,6 +26,7 @@ float BMI088_GYRO_SEN = BMI088_GYRO_2000_SEN;
     (data) = BMI088_read_write_byte(0x55);      \
     BMI088_ACCEL_NS_H();                        \
   }
+// 同上：ACC 多寄存器读同样需要在地址后补一个 dummy 字节。
 #define BMI088_accel_read_muli_reg(reg, data, len) \
   {                                                \
     BMI088_ACCEL_NS_L();                           \

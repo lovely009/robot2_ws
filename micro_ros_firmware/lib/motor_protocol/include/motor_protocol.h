@@ -65,11 +65,19 @@ typedef struct {
 
 uint32_t motor_protocol_float_to_uint(double value, double low, double high,
                                       unsigned bits);
-double motor_protocol_uint_to_float(uint32_t value, double low, double high,
-                                    unsigned bits);
 
-// 节点 ID：0x501/0x502/0x701/0x702 + 4*node（node 合法范围 1..60）
-bool motor_protocol_vaxor_node_valid(unsigned node);
+// 节点 ID：base + stride*node（node 合法范围 1..60）。基址即 node 0 槽位，
+// 因 node 0 非法而不冲突。
+//
+// 以下常量是 vaxor CAN-ID 推导的唯一来源：本文件的 *_id() 与 adapter 的
+// 接收匹配均须引用，勿在别处重新定义字面量（历史上 vaxor_adapter.c 曾
+// 自带一份 0x701/0x702 副本并与取模算术重复实现）。
+#define MOTOR_PROTOCOL_VAXOR_COMMAND_ID_BASE 0x501U
+#define MOTOR_PROTOCOL_VAXOR_CONTROL_ID_BASE 0x502U
+#define MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE 0x701U
+#define MOTOR_PROTOCOL_VAXOR_STATUS_ID_BASE 0x702U
+#define MOTOR_PROTOCOL_VAXOR_NODE_STRIDE 4U
+
 uint32_t motor_protocol_vaxor_command_id(unsigned node);
 uint32_t motor_protocol_vaxor_control_id(unsigned node);
 uint32_t motor_protocol_vaxor_reply_id(unsigned node);
@@ -99,9 +107,33 @@ bool motor_protocol_unpack_vaxor_status(
 
 // ---------------- CERB 自定义 PDO / MIT ----------------
 // 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
+// 与 vaxor 同理：以下常量是 CERB CAN-ID 推导的唯一来源（历史上
+// cerb_adapter.c 曾自带一份 0x300/0x110 副本并内联重算命令 ID）。
+#define MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE 0x110U
+#define MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE 0x300U
+#define MOTOR_PROTOCOL_CERB_SYNC_ID 0x080U
+// CANopen SDO（《CANopen-V0.9 字典表》§SDO 协议内容详解）：
+//   请求 0x600|node，响应 0x580|node，DLC 恒 8，CANFD 加速标准帧
+//   （说明书 §3.1：1M 仲裁段 / 5M 数据段）。
+//   管理对象均 ≤4 字节，走快速（expedited）SDO；设备身份对象 0x1008 超
+//   4 字节，走分段（segmented）上传。
+#define MOTOR_PROTOCOL_CERB_SDO_REQUEST_ID_BASE 0x600U
+#define MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE 0x580U
+
 bool motor_protocol_cerb_node_valid(unsigned node);
 bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id);
 bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
+
+// SDO 管理对象反向换算（设备影子回读，REFRESH_PARAMS 事务用）：
+// 0x607D cnt（负载端，65536 cnt/360°）→ 关节侧 rad；
+// 0x6080 电机端 RPM → 关节侧 rad/s（÷gear）；0x2538 电机端 mA → 关节侧 N·m。
+double motor_protocol_cerb_limit_cnt_to_rad(int32_t cnt);
+double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
+                                                    uint32_t rpm);
+double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
+                                                double gear_ratio,
+                                                double gear_efficiency,
+                                                uint32_t milliamp);
 
 // 输出 CAN FD DLC=9 对应的 12 Byte 载荷：控制字 + 8 Byte MIT + 3 Byte 零填充。
 bool motor_protocol_pack_cerb_mit_frame(

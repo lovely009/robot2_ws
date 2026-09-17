@@ -174,6 +174,14 @@ class MotorModel:
             # 自动绑定型号，模拟器必须实现同一对象否则台架全是不绑定电机。
             self.identity = b"R48LITE_V2"
             self.sdo_offset = 0
+            # 厂家管理对象（CANopen 字典）：位置限幅 cnt（±180°）、
+            # 最大转速 RPM、峰值电流 mA。固件写后读回/REFRESH 上传的对端。
+            self.sdo_params = {
+                (0x607D, 1): -32768,
+                (0x607D, 2): 32768,
+                (0x6080, 0): 600,
+                (0x2538, 0): 1000,
+            }
         else:
             # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad，gear=50
             self.pos_motor_rad = 0.1 * (motor_id - 6) * 50.0
@@ -301,7 +309,29 @@ class SlcanSim:
         m.rx_count += 1
         command = data[0]
         index = data[1] | (data[2] << 8)
+        sub = data[3]
+        key = (index, sub)
+        if command == 0x23:
+            # 4 字节快速写：存储并回写成功 ack（0x60），无有对象则 abort。
+            if key in m.sdo_params:
+                m.sdo_params[key] = int.from_bytes(data[4:8], "little",
+                                                   signed=True)
+                self.send(0x580 + node,
+                          bytes([0x60, data[1], data[2], data[3], 0, 0, 0, 0]),
+                          True, self.use_brs, m, "sdo_write_ack")
+            else:
+                self.send(0x580 + node,
+                          bytes([0x80, data[1], data[2], data[3], 0, 0, 0, 0]),
+                          True, self.use_brs, m, "sdo_abort")
+            return
         if command == 0x40:
+            if key in m.sdo_params:
+                # 快速上传（0x43）+ 当前值（小端有符号 32 位）。
+                raw = int(m.sdo_params[key]).to_bytes(4, "little", signed=True)
+                self.send(0x580 + node,
+                          bytes([0x43, data[1], data[2], data[3]]) + raw,
+                          True, self.use_brs, m, "sdo_read")
+                return
             if index != 0x1008:
                 self.send(0x580 + node,
                           bytes([0x80, data[1], data[2], data[3], 0, 0, 0, 0]),

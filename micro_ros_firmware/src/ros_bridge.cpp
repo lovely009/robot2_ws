@@ -50,9 +50,14 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   (void)last_call_time;
   imu_bridge_poll();
   motor_bridge_poll();
+  // 排在 motor 之后：同一拍 CONFIG_RESULT 钩子先于参数注册/同步处理。
+  param_bridge_poll();
 }
 
-static void destroy_entities() {
+// ---------------------------------------------------------------------------
+// 对外接口（micro_ros_task 调用；可重入：断连后整体重建）
+// ---------------------------------------------------------------------------
+void ros_bridge_destroy() {
   // 先通知实时任务失联，使旧命令在 ROS 实体清理期间即失效。
   motor_rt_set_agent_connected(false);
   imu_bridge_destroy(&g_node);
@@ -84,9 +89,9 @@ static void destroy_entities() {
   }
 }
 
-static bool create_entities() {
+bool ros_bridge_create() {
   // 先清残留，保证可重入（agent 断连后整体重建）
-  destroy_entities();
+  ros_bridge_destroy();
 
   // rclc_support/executor 保存 allocator 指针而非拷贝，必须使用静态存储
   g_allocator = rcl_get_default_allocator();
@@ -96,28 +101,28 @@ static bool create_entities() {
   g_support_up = true;
 
   if (rclc_node_init_default(&g_node, kNodeName, "", &g_support) != RCL_RET_OK) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   g_node_up = true;
 
   if (rclc_executor_init(&g_executor, &g_support.context, executor_handle_count(),
                          &g_allocator) != RCL_RET_OK) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   g_executor_up = true;
 
   if (!imu_bridge_create(&g_node)) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   if (!motor_bridge_create(&g_node, &g_executor)) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   if (!param_bridge_create(&g_node, &g_executor)) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
 
@@ -125,13 +130,13 @@ static bool create_entities() {
   // USB CDC 带宽余量仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
                               bridge_timer_cb) != RCL_RET_OK) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   g_timer_up = true;
 
   if (rclc_executor_add_timer(&g_executor, &g_timer) != RCL_RET_OK) {
-    destroy_entities();
+    ros_bridge_destroy();
     return false;
   }
   // 会话已建立：发起一次 NTP 时间同步，使 rmw_uros_epoch_nanos() 与主机对齐。
@@ -140,17 +145,6 @@ static bool create_entities() {
   // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
   motor_rt_set_agent_connected(true);
   return true;
-}
-
-// ---------------------------------------------------------------------------
-// 对外接口
-// ---------------------------------------------------------------------------
-bool ros_bridge_create() {
-  return create_entities();
-}
-
-void ros_bridge_destroy() {
-  destroy_entities();
 }
 
 void ros_bridge_spin() {

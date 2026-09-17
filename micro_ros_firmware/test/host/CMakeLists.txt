@@ -38,6 +38,7 @@ add_executable(test_motor_control
   ../../lib/motor_control/src/motor_control_discovery.c
   ../../lib/motor_control/src/motor_control_config.c
   ../../lib/motor_control/src/motor_control_profile.c
+  ../../lib/motor_control/src/motor_control_params.c
   ../../lib/motor_protocol/src/motor_protocol.c
   ../../lib/motor_protocol/src/vaxor_adapter.c
   ../../lib/motor_protocol/src/cerb_adapter.c)
@@ -49,17 +50,6 @@ target_include_directories(test_motor_control PRIVATE
 target_link_libraries(test_motor_control PRIVATE m)
 
 add_test(NAME motor_control COMMAND test_motor_control)
-
-add_executable(test_motor_event_relay
-  test_motor_event_relay.cpp
-  ../../lib/motor_event_relay/src/motor_event_relay.c)
-
-target_include_directories(test_motor_event_relay PRIVATE
-  ../../lib/motor_event_relay/include
-  ../../lib/motor_control/include
-  ../../lib/motor_protocol/include)
-
-add_test(NAME motor_event_relay COMMAND test_motor_event_relay)
 
 add_executable(test_control_mailbox
   test_control_mailbox.cpp
@@ -128,6 +118,16 @@ target_include_directories(test_bmi088_register_config PRIVATE
   ../../lib/imu/include)
 
 add_test(NAME bmi088_register_config COMMAND test_bmi088_register_config)
+
+add_executable(test_param_store
+  test_param_store.cpp
+  ../../lib/param_store/src/param_store_blob.c
+  ../../lib/param_store/src/param_name.c)
+
+target_include_directories(test_param_store PRIVATE
+  ../../lib/param_store/include)
+
+add_test(NAME param_store COMMAND test_param_store)
 
 add_executable(test_w25q64_geometry
   test_w25q64_geometry.cpp

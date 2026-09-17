@@ -34,10 +34,17 @@ bool motor_control_push_tx(motor_control_context_t *ctx,
                            const motor_protocol_tx_frame_t *frame);
 
 // P0 安全帧推送：满时驱逐最旧的非 P0 帧腾位（对齐 ARD §22.1 抢占语义）；
-// 仍失败则在该表项挂 p0_pending，由 service 逐节拍重发（不静默丢安全帧）。
+// 仍失败则按 entry->last_p0_kind 挂 p0_pending，由 service 逐节拍重发
+// （不静默丢安全帧）。调用方推送前必须已设置 last_p0_kind。
 bool motor_control_push_tx_p0(motor_control_context_t *ctx,
                               motor_control_entry_t *entry,
                               const motor_protocol_tx_frame_t *frame);
+
+// 统一 P0 安全帧生成 + 推送（kind 取 MOTOR_CONTROL_P0_DISABLE /
+// MOTOR_CONTROL_P0_SOFT_STOP）。编码失败与队列满都不静默丢：挂起重试
+// 并计数。撤权/离线/故障/冲突/软停五条路径共用，勿再各自复制编码逻辑。
+bool motor_control_send_p0(motor_control_context_t *ctx,
+                           motor_control_entry_t *entry, uint8_t kind);
 
 // 全局键查找（线性扫描：40 台规模 + 64 容量下足够，确定性优于哈希）。
 motor_control_entry_t *motor_control_find_entry(motor_control_context_t *ctx,
@@ -51,6 +58,9 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms);
 // 单电机软停（P0 阻尼帧 + SAFE_STOP）。仅对 ACTIVE 态发帧（去重）。
 void motor_control_soft_stop_entry(motor_control_context_t *ctx,
                                    motor_control_entry_t *entry, uint32_t now_ms);
+
+// 绑定后首次设备影子填 Profile 默认（CERB；motor_control_params.c）。
+void motor_control_set_default_device_shadow(motor_control_entry_t *entry);
 
 // 配置事务：响应帧裁决（on_raw_frame 调用）与跨节拍步进（service 调用）。
 bool motor_control_config_on_frame(motor_control_context_t *ctx,

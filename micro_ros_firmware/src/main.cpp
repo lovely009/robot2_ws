@@ -9,6 +9,7 @@
 #include "micro_ros_task.h"
 #include "motor_rt_task.h"
 #include "sensor_task.h"
+#include "storage_task.h"
 #include "ws2812.h"
 
 // 防回归：栈溢出检测必须经项目级 STM32FreeRTOSConfig.h 生效；若该文件被
@@ -93,6 +94,11 @@ static void start_task(void *pv_parameters) {
     Error_Handler();
   }
   if (!sensor_task_start()) {
+    Error_Handler();
+  }
+  // 存储任务先于 motor_rt：同步加载 W25 blob（无芯片则降级），motor_rt
+  // 启动时快照 boot 参数。Flash 擦除只在 storage(P1) 任务内发生。
+  if (!storage_task_start()) {
     Error_Handler();
   }
   if (!motor_rt_task_start()) {

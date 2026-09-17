@@ -21,6 +21,18 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
     "mailbox/protocol config kind 契约不一致：SET_ENABLE");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT),
+    "mailbox/protocol config kind 契约不一致：SET_VELOCITY_LIMIT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT),
+    "mailbox/protocol config kind 契约不一致：SET_TORQUE_LIMIT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
+    "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
 
 #include <cmath>
 #include <cstring>
@@ -168,10 +180,37 @@ static void test_config_validation_covers_semantic_shape_only() {
   invalid.value.position_limits = {1.0F, 1.0F};
   assert(!control_mailbox_submit_config(&mailbox, &invalid));
 
+  // 速度/力矩限值：NaN、非正一律拒（设备侧管理对象，仅 CERB）
   invalid = make_mode_request(3U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  invalid.value.max_velocity_rad_s = std::numeric_limits<float>::quiet_NaN();
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(4U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  invalid.value.max_velocity_rad_s = 0.0F;
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(5U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
+  invalid.value.max_torque_nm = -1.0F;
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(6U, 1U, 0U);
   invalid.kind = static_cast<control_mailbox_config_kind_t>(99U);
   assert(!control_mailbox_submit_config(&mailbox, &invalid));
-  assert(mailbox.config_invalid_count == 4U); // 非法请求单独可辨
+  assert(mailbox.config_invalid_count == 7U); // 非法请求单独可辨
+
+  // 合法限值入队（正数、有限）
+  control_mailbox_config_request_t good = make_mode_request(7U, 1U, 0U);
+  good.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  good.value.max_velocity_rad_s = 3.0F;
+  assert(control_mailbox_submit_config(&mailbox, &good));
+  good = make_mode_request(8U, 1U, 0U);
+  good.kind = CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
+  good.value.max_torque_nm = 20.0F;
+  assert(control_mailbox_submit_config(&mailbox, &good));
+  assert(mailbox.config_invalid_count == 7U); // 合法请求不计入非法计数
   assert(mailbox.config_overflow_count == 0U);
 }
 
@@ -369,7 +408,28 @@ static void test_config_gate_precedes_validation() {
   assert(mailbox.config_overflow_count == 0U);
 }
 
+
+// REFRESH_PARAMS：无载荷请求，只凭 request_id/motor_id 即可入队。
+static void test_refresh_params_request_is_accepted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_request_agent_connected(&mailbox, true);
+
+  control_mailbox_config_request_t request{};
+  request.request_id = 1U;
+  request.received_tick_ms = 10U;
+  request.motor_id = 3U;
+  request.kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+
+  control_mailbox_config_request_t taken{};
+  assert(control_mailbox_take_config(&mailbox, &taken));
+  assert(taken.kind == CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS);
+  assert(taken.motor_id == 3U);
+}
+
 int main() {
+  test_refresh_params_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
   test_config_is_neutral_bounded_fifo();

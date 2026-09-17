@@ -11,8 +11,8 @@
 #include <cstring>
 
 #include "can_bsp.h"
+#include "storage_task.h"
 #include "fdcan.h"
-#include "motor_event_relay.h"
 #include "motor_protocol_adapter.h"
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
@@ -27,16 +27,20 @@ static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多�
 static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈上界）
 static const uint32_t kTxCollectBudget = 16U;       // 每 1ms 最多取走内核待发帧数
 static const uint32_t kTxPumpBudgetPerBus = 8U;     // 每 1ms 每总线最多提交帧数
-static const uint32_t kConfigDrainPerBoundary = 4U; // 每 10ms 边界最多转发配置数
+static const uint32_t kConfigDrainPerBoundary = 4U; // 每 20ms 边界最多转发配置数
 static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
                                                     // 20ms 状态上报，与 VAXOR
                                                     // 20ms 自推统一 50Hz）
 
 static motor_control_context_t g_motor_control;
 static control_mailbox_t g_control_mailbox;
+
+// boot 存储参数（start 时从 storage 任务快照；20ms 边界套用到内核）。
+static motor_control_stored_params_t
+    g_stored_params[MOTOR_CONTROL_MAX_MOTORS];
+static size_t g_stored_count = 0U;
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
-static volatile bool g_fdcan_ready = false;
 
 // 协议 adapter 注册表（构造注入内核；新增协议 = 加一项，内核零改动）。
 static const motor_protocol_adapter_t *const kAdapters[2] = {
@@ -51,6 +55,18 @@ static const motor_protocol_adapter_t *const kAdapters[2] = {
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_command(&g_control_mailbox, snapshot);
+  taskEXIT_CRITICAL();
+  return ok;
+}
+
+// 低频配置入口（当前无 ROS 生产者）。与命令同款短
+// 临界区：mailbox 无内部锁，读写两侧必须共用同一互斥域。
+// 校验与门禁全在 mailbox/内核：request_id==0、字段非法 → config_invalid_count；
+// 断链期 → config_session_count；FIFO 满 → config_overflow_count。
+bool motor_rt_submit_config(
+    const control_mailbox_config_request_t *request) {
+  taskENTER_CRITICAL();
+  const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
   taskEXIT_CRITICAL();
   return ok;
 }
@@ -90,44 +106,34 @@ size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity) {
   return count;
 }
 
-bool motor_rt_task_started(void) { return g_task_started; }
-
-bool motor_rt_task_fdcan_ready(void) { return g_fdcan_ready; }
-
-// ---------------------------------------------------------------------------
-// 内核事件中继（任务 1ms 搬运；桥在轮询里取走）与拓扑副本
-// ---------------------------------------------------------------------------
-
-// SPSC 中继环（lib/motor_event_relay）：本任务生产、ROS 桥任务消费。
-static motor_event_relay_t g_event_relay;
-
-static void forward_kernel_events(void) {
-  // 内核事件环由本任务独占；共享中继环的每次 push 与桥侧 drain 使用同一
-  // 临界区，确保生产与消费互斥。
-  motor_control_event_t drained[8];
-  size_t n;
-  while ((n = motor_control_drain_events(&g_motor_control, drained, 8)) > 0) {
-    for (size_t i = 0; i < n; ++i) {
-      taskENTER_CRITICAL();
-      motor_event_relay_push(&g_event_relay, &drained[i]);
-      taskEXIT_CRITICAL();
-    }
+size_t motor_rt_copy_param_views(motor_control_param_view_t *out,
+                                 size_t capacity) {
+  if (out == nullptr || capacity == 0U) {
+    return 0U;
   }
+  taskENTER_CRITICAL();
+  const size_t count =
+      motor_control_copy_param_views(&g_motor_control, out, capacity);
+  taskEXIT_CRITICAL();
+  return count;
 }
 
-uint32_t motor_rt_event_dropped(void) {
-  taskENTER_CRITICAL();
-  const uint32_t dropped = motor_event_relay_dropped_count(&g_event_relay);
-  taskEXIT_CRITICAL();
-  return dropped;
-}
+// ---------------------------------------------------------------------------
+// 内核事件环与拓扑副本
+// ---------------------------------------------------------------------------
+//
+// 内核事件环（motor_control 内，深度 MOTOR_CONTROL_MAX_EVENTS）即为桥的
+// 消费源：本任务生产、ROS 桥在轮询里取走。此处不再经中间环搬运——两侧
+// 本就共用同一临界区，二次解耦没有带来并发隔离，反而多一层搬运与一份
+// 需要单独维护的丢弃计数。丢弃计数保留在内核（ctx.event_dropped_count）。
 
 size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
   taskENTER_CRITICAL();
-  const size_t count = motor_event_relay_drain(&g_event_relay, out, capacity);
+  const size_t count =
+      motor_control_drain_events(&g_motor_control, out, capacity);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -137,29 +143,19 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
     return 0U;
   }
   taskENTER_CRITICAL();
-  // 发布顺序确定化：按 motor_id 升序（同内核 copy_motion_states 注释）。
+  // 发布顺序确定化：按 motor_id 升序，选择逻辑统一走内核的选择器
+  // （不再跨模块直读 g_motor_control.entries）。
   bool taken[MOTOR_CONTROL_MAX_MOTORS] = {};
   size_t count = 0U;
   for (;;) {
     if (count >= capacity) {
       break;
     }
-    int best = -1;
-    for (size_t i = 0; i < g_motor_control.entry_count; ++i) {
-      const motor_control_entry_t *candidate = &g_motor_control.entries[i];
-      if (!candidate->used || taken[i]) {
-        continue;
-      }
-      if (best < 0 ||
-          candidate->motor_id < g_motor_control.entries[best].motor_id) {
-        best = (int)i;
-      }
-    }
-    if (best < 0) {
+    const motor_control_entry_t *entry =
+        motor_control_entry_take_sorted(&g_motor_control, taken);
+    if (entry == nullptr) {
       break;
     }
-    taken[best] = true;
-    const motor_control_entry_t *entry = &g_motor_control.entries[best];
     motor_rt_topology_entry_t *topo = &out[count++];
     topo->motor_id = entry->motor_id;
     topo->bus_index = entry->bus_index;
@@ -306,7 +302,7 @@ static void pump_tx_schedulers(void) {
   }
 }
 
-// 10ms 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 20ms 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
@@ -342,12 +338,24 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
     "mailbox/protocol config kind 契约不一致：SET_ENABLE");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT),
+    "mailbox/protocol config kind 契约不一致：SET_VELOCITY_LIMIT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT),
+    "mailbox/protocol config kind 契约不一致：SET_TORQUE_LIMIT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
+    "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
 
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
-  // kind 数值契约一致（1/2/3/4，上方 static_assert 编译期锁），两侧枚举
+  // kind 数值契约一致（1..6，上方 static_assert 编译期锁），两侧枚举
   // 类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
@@ -367,6 +375,14 @@ static void convert_config(const control_mailbox_config_request_t *in,
     case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
       out->enable = in->value.enable;
       break;
+    case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
+      out->max_velocity_rad_s = in->value.max_velocity_rad_s;
+      break;
+    case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
+      out->max_torque_nm = in->value.max_torque_nm;
+      break;
+    case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
+      break; // 无载荷：只凭 motor_id 发起 4 个 SDO upload
     default:
       break;
   }
@@ -435,6 +451,11 @@ static void control_boundary(void) {
     (void)motor_control_submit_config(&g_motor_control, &request, now_ms);
   }
 
+  // boot 存储参数：Profile 未绑定的电机保留待套用位，后续边界自动重试。
+  if (g_stored_count > 0U) {
+    motor_control_apply_stored_params(&g_motor_control, g_stored_params,
+                                      g_stored_count, now_ms);
+  }
 }
 
 // IWDG 仅由 motor_rt 任务喂：安全任务停摆会超时复位至 WAIT_AGENT 和授权
@@ -474,7 +495,6 @@ static void motor_rt_task_fn(void *pv_parameters) {
   MX_FDCAN2_Init();
   MX_FDCAN3_Init();
   bsp_can_init();
-  g_fdcan_ready = true;
 
   TickType_t last_wake = xTaskGetTickCount();
   uint32_t last_control_ms = millis();
@@ -490,9 +510,8 @@ static void motor_rt_task_fn(void *pv_parameters) {
     motor_control_service(&g_motor_control, now_ms);
     sustain_discovery_sync(now_ms);
     route_kernel_tx();
-    forward_kernel_events();
 
-    // 10ms 控制边界（漂移自校正：按 millis 差触发）。
+    // 20ms 控制边界（漂移自校正：按 millis 差触发；50 Hz）。
     if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
       last_control_ms = now_ms;
       control_boundary();
@@ -511,11 +530,23 @@ bool motor_rt_task_start(void) {
   control_mailbox_init(&g_control_mailbox);
   motor_control_init(&g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
+  // boot 存储参数快照（storage 任务先于本任务启动；无有效 blob 时 count=0）。
+  // 保存进静态副本：W25 的新值下次启动才生效，运行期不再引用 storage 任务。
+  size_t stored_count = 0U;
+  const motor_control_stored_params_t *stored =
+      storage_boot_params(&stored_count);
+  if (stored_count > MOTOR_CONTROL_MAX_MOTORS) {
+    stored_count = MOTOR_CONTROL_MAX_MOTORS;
+  }
+  memcpy(g_stored_params, stored,
+         stored_count * sizeof(motor_control_stored_params_t));
+  g_stored_count = stored_count;
   // 型号绑定不需要注入：内核在发现建档/重连时向设备读自报身份并查型号
   // 目录（协议 adapter 的 READ_IDENTITY 事务），无身份读对象的协议回退到
   // "协议内唯一型号"。表外设备保持未绑定不可控。
-  motor_event_relay_init(&g_event_relay);
-  // watchdog_start(); // IWDG 就绪后再拉起实时任务，首拍即开始喂狗
+  // IWDG 先于任务创建就绪：首拍即开始喂狗，任务创建后 500ms 内必有第一次
+  // 喂狗。复位后果是回到 WAIT_AGENT + 授权清零的初始态（安全侧）。
+  watchdog_start();
 
   if (xTaskCreate(motor_rt_task_fn, "motor_rt", kMotorRtTaskStack, nullptr,
                   kMotorRtTaskPrio, &g_task_handle) != pdPASS) {

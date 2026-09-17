@@ -28,6 +28,13 @@ typedef enum {
   CONTROL_MAILBOX_CONFIG_SET_GAINS = 2U,
   CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS = 3U,
   CONTROL_MAILBOX_CONFIG_SET_ENABLE = 4U, // 逐电机 Enable（ARD §19 MotorPolicy）
+  // 设备侧管理对象（仅 CERB，走 CANopen 快速 SDO）：关节侧 SI 量，内核钳制到
+  // 型号额定后再由 adapter 换算成电机端原始量（0x6080 RPM / 0x2538 mA）。
+  CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT = 5U,
+  CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT = 6U,
+  // 设备参数回读（无载荷，只用 motor_id；CERB 走 4 个加速 SDO upload，
+  // Vaxor 内核直接回 UNSUPPORTED）。
+  CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS = 8U
 } control_mailbox_config_kind_t;
 
 typedef struct {
@@ -50,6 +57,8 @@ typedef struct {
     bool enable;
     control_mailbox_gains_t gains;
     control_mailbox_position_limits_t position_limits;
+    float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）
+    float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
   } value;
 } control_mailbox_config_request_t;
 

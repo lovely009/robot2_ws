@@ -106,8 +106,3 @@ uint8_t BMI088_read_write_byte(uint8_t reg) {
   }
   return rx;
 }
-
-// 阻塞收发不产生 SPI 事件；保留入口供后续中断模式使用。
-void SPI2_IRQHandler(void) {
-  HAL_SPI_IRQHandler(&hspi_bmi088);
-}

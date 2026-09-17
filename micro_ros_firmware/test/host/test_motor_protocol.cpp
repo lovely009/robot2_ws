@@ -166,6 +166,33 @@ void test_cerb_node_ids_cover_declared_range() {
   assert(id == 0x301U);
 }
 
+
+void test_cerb_sdo_limit_scales_invert_forward_encodings() {
+  // 0x607D 位置限位：65536 cnt/360°（负载端，与关节同轴）。
+  assert(motor_protocol_cerb_limit_cnt_to_rad(32768) == MOTOR_PROTOCOL_PI);
+  assert(motor_protocol_cerb_limit_cnt_to_rad(-32768) == -MOTOR_PROTOCOL_PI);
+  assert(motor_protocol_cerb_limit_cnt_to_rad(0) == 0.0);
+  // 90° = 16384 cnt
+  assert(std::abs(motor_protocol_cerb_limit_cnt_to_rad(16384) -
+                  MOTOR_PROTOCOL_PI / 2.0) < 1e-9);
+
+  // 0x6080 电机端 RPM → 关节侧 rad/s（÷gear；正向换算的逆函数）。
+  // 600 RPM @ gear=101：电机侧 20π rad/s，关节侧 20π/101。
+  const double gear = 101.0;
+  assert(std::abs(motor_protocol_cerb_motor_rpm_to_joint_rad_s(gear, 600U) -
+                  2.0 * MOTOR_PROTOCOL_PI * 10.0 / gear) < 1e-12);
+  assert(motor_protocol_cerb_motor_rpm_to_joint_rad_s(gear, 0U) == 0.0);
+
+  // 0x2538 电机端 mA → 关节侧 N·m：τ = Iq × Kt × gear × eff。
+  // 1000 mA, Kt=0.077, gear=101, eff=1.0 → 7.777 N·m。
+  assert(std::abs(motor_protocol_cerb_motor_ma_to_joint_nm(
+                      0.077, gear, 1.0, 1000U) -
+                  0.077 * gear) < 1e-12);
+  assert(std::abs(motor_protocol_cerb_motor_ma_to_joint_nm(
+                      0.077, gear, 0.8, 2500U) -
+                  2.5 * 0.077 * gear * 0.8) < 1e-12);
+}
+
 }  // namespace
 
 int main() {
@@ -181,5 +208,6 @@ int main() {
   test_cerb_rejects_invalid_or_faulted_data();
   test_cerb_large_finite_limit_quantizes_without_overflow();
   test_cerb_node_ids_cover_declared_range();
+  test_cerb_sdo_limit_scales_invert_forward_encodings();
   return 0;
 }

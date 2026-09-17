@@ -11,12 +11,11 @@ cmake --build .host-build --clean-first -j2
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 12 个目标：
+该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 14 个目标：
 
 - `motor_protocol`
 - `motor_protocol_adapter`
 - `motor_control`
-- `motor_event_relay`
 - `control_mailbox`
 - `can_rx_ring`
 - `can_tx_scheduler`

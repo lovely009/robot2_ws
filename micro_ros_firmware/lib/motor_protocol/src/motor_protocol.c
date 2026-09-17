@@ -51,15 +51,6 @@ uint32_t motor_protocol_float_to_uint(double value, double low, double high,
   return (uint32_t)((value - low) * maximum / (high - low));
 }
 
-double motor_protocol_uint_to_float(uint32_t value, double low, double high,
-                                    unsigned bits) {
-  if (!(high > low) || bits == 0U || bits > 31U) {
-    return 0.0;
-  }
-  uint32_t maximum = (UINT32_C(1) << bits) - 1U;
-  return value * (high - low) / maximum + low;
-}
-
 static uint32_t cerb_symmetric_float_to_uint(double value, double limit,
                                                unsigned bits) {
   double normalized = (clamp_double(value / limit, -1.0, 1.0) + 1.0) * 0.5;
@@ -104,24 +95,24 @@ static double vaxor_code_to_current(uint16_t code) {
   return ((int32_t)code - 0x8000) * MOTOR_PROTOCOL_VAXOR_CURRENT_SCALE_A;
 }
 
-bool motor_protocol_vaxor_node_valid(unsigned node) {
-  return node >= 1U && node <= 60U;
-}
-
 uint32_t motor_protocol_vaxor_command_id(unsigned node) {
-  return 0x501U + 4U * node;
+  return MOTOR_PROTOCOL_VAXOR_COMMAND_ID_BASE +
+         MOTOR_PROTOCOL_VAXOR_NODE_STRIDE * node;
 }
 
 uint32_t motor_protocol_vaxor_control_id(unsigned node) {
-  return 0x502U + 4U * node;
+  return MOTOR_PROTOCOL_VAXOR_CONTROL_ID_BASE +
+         MOTOR_PROTOCOL_VAXOR_NODE_STRIDE * node;
 }
 
 uint32_t motor_protocol_vaxor_reply_id(unsigned node) {
-  return 0x701U + 4U * node;
+  return MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE +
+         MOTOR_PROTOCOL_VAXOR_NODE_STRIDE * node;
 }
 
 uint32_t motor_protocol_vaxor_status_id(unsigned node) {
-  return 0x702U + 4U * node;
+  return MOTOR_PROTOCOL_VAXOR_STATUS_ID_BASE +
+         MOTOR_PROTOCOL_VAXOR_NODE_STRIDE * node;
 }
 
 void motor_protocol_pack_vaxor_command(const motor_protocol_joint_command_t *command,
@@ -250,7 +241,7 @@ bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id) {
   if (!motor_protocol_cerb_node_valid(node) || id == NULL) {
     return false;
   }
-  *id = 0x110U + node;
+  *id = MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE + node;
   return true;
 }
 
@@ -258,8 +249,33 @@ bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id) {
   if (!motor_protocol_cerb_node_valid(node) || id == NULL) {
     return false;
   }
-  *id = 0x300U + node;
+  *id = MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE + node;
   return true;
+}
+
+// 0x607D：cnt → rad。正向换算见 cerb_adapter 的 cerb_rad_to_limit_cnt，
+// 两侧共用 65536/360 标度（本函数是其逆函数）。
+double motor_protocol_cerb_limit_cnt_to_rad(int32_t cnt) {
+  const double degrees = (double)cnt * 360.0 / 65536.0;
+  return degrees * MOTOR_PROTOCOL_PI / 180.0;
+}
+
+// 0x6080：电机端 RPM → 关节侧 rad/s。
+double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
+                                                    uint32_t rpm) {
+  if (!(gear_ratio > 0.0)) {
+    return NAN;
+  }
+  return (double)rpm * (2.0 * MOTOR_PROTOCOL_PI / 60.0) / gear_ratio;
+}
+
+// 0x2538：电机端 mA → 关节侧 N·m（τ = Iq × Kt × gear × efficiency）。
+double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
+                                                double gear_ratio,
+                                                double gear_efficiency,
+                                                uint32_t milliamp) {
+  return ((double)milliamp / 1000.0) * torque_constant * gear_ratio *
+         gear_efficiency;
 }
 
 bool motor_protocol_pack_cerb_mit_frame(

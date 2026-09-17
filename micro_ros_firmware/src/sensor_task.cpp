@@ -31,7 +31,6 @@ static const float kPidKd = 10.0f;
 static const float kMaxOut = 500.0f;
 
 static SemaphoreHandle_t g_imu_sem = nullptr;
-static volatile bool g_force_stop = false;
 static imu_snapshot_t g_imu_snapshot = {};
 static volatile uint32_t g_imu_init_error_count = 0U;
 static volatile bool g_imu_healthy = false;
@@ -57,10 +56,6 @@ static void accel_isr() {
   portYIELD_FROM_ISR(higher_priority_task_woken);
 }
 
-static void gyro_isr() {
-  // 官方仅配置 GYRO_INT(PE12)，回调留空
-}
-
 static void temp_pid_run(float temp) {
   static float err = 0.0f;
   static float err_l = 0.0f;
@@ -77,9 +72,6 @@ static void temp_pid_run(float temp) {
     out = kMaxOut;
   }
   if (out < 0.0f) {
-    out = 0.0f;
-  }
-  if (g_force_stop) {
     out = 0.0f;
   }
   heater_set_duty(static_cast<uint16_t>(out));
@@ -104,7 +96,6 @@ static void sensor_task_fn(void *arg) {
   // 仅在首次成功后挂 EXTI，重试不会重复注册中断。
   if (!g_drdy_attached) {
     attachInterrupt(PE10, accel_isr, RISING);
-    attachInterrupt(PE12, gyro_isr, RISING);
     g_drdy_attached = true;
   }
 
@@ -145,10 +136,6 @@ bool sensor_task_start(void) {
   // lib/imu 自持，当前不占用 DMA。
   return xTaskCreate(sensor_task_fn, "sensor", kSensorTaskStack, nullptr,
                      kSensorTaskPrio, nullptr) == pdPASS;
-}
-
-void imu_set_force_stop(bool stop) {
-  g_force_stop = stop;
 }
 
 bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence) {

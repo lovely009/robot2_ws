@@ -11,6 +11,8 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosbridge_library</exec_depend>
+  <!-- 参数服务（/rosapi/get_param 等），网页参数面板依赖 -->
+  <exec_depend>rosapi</exec_depend>
   <exec_depend>can_bridge_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>

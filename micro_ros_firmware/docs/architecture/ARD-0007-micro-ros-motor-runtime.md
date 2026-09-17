@@ -83,7 +83,7 @@
 - 发现驱动、运行时注册；
 - MCU 不维护固定“关节安装表”；
 - 三路 FDCAN 由一个实时业务所有者统一调度；
-- 1 ms 服务节拍 + 10 ms 控制边界；
+- 1 ms 服务节拍 + 20 ms 控制边界；
 - ROS 聚合语义与厂家 CAN 协议彻底隔离；
 - P0/P1/P2 分级调度，P1 latest-wins；
 - Enable/安全策略与 100 Hz 运动命令分离；
@@ -120,7 +120,7 @@
 4. 根据设备身份选择 `MotorModelProfile`，而不是依赖固定安装表。
 5. 为 ROS 2 上层提供统一的电机控制、运动状态、诊断状态、拓扑和配置接口。
 6. 默认以 MIT 模式控制 Vaxor 与 CERB。
-7. 在正常控制路径实现 100 Hz 命令边界。
+7. 在正常控制路径实现 50 Hz 命令边界。
 8. 在 ROS/Agent 异常时由 MCU 独立执行安全降级。
 9. 保证历史运动命令不会因队列积压而在未来被发送。
 10. 在最大负载下仍保持可测量、可界定、可验证的实时行为。
@@ -199,7 +199,7 @@
 |  command/config mailbox                                       |
 |       |                                                       |
 |       v                                                       |
-|  motor_rt_task (1 ms service, 10 ms control boundary)         |
+|  motor_rt_task (1 ms service, 20 ms control boundary)         |
 |       |                                                       |
 |  +----+-------------+--------------+----------------------+   |
 |  | registry         | safety       | protocol adapters    |   |
@@ -262,7 +262,7 @@ ROS 消息 MUST NOT 直接映射为 CAN 帧。
 
 ### AR-007 有界实时路径
 
-ISR、1 ms 服务、10 ms 控制边界的 CPU 工作量和内存使用 MUST 有上限。
+ISR、1 ms 服务、20 ms 控制边界的 CPU 工作量和内存使用 MUST 有上限。
 
 ### AR-008 安全本地化
 
@@ -462,7 +462,7 @@ READY_DISABLED
 ### 10.3 CERB 发现
 
 - CERB 使用反馈/管理读取识别身份。
-- `0x080 SYNC` MUST 仅用于发现、重连和热插拔探测，不作为 100 Hz 默认 MIT 控制聚合机制。
+- `0x080 SYNC` MUST 仅用于发现、重连和热插拔探测，不作为 50 Hz 默认 MIT 控制聚合机制。
 
 ### 10.4 热插拔
 
@@ -489,7 +489,11 @@ READY_DISABLED
 其两个时间尺度：
 
 - **1 ms**：服务节拍；
-- **10 ms**：运动控制边界，即 100 Hz。
+- **20 ms**：运动控制边界，即 50 Hz。
+
+> 2026-09-15 变更：运动控制边界由 10 ms 调整为 20 ms，SYNC 心跳同周期，
+> 以对齐 VAXOR 的 20 ms 自主状态上报（两者统一到 50 Hz）。上层命令发布
+> 仍为 100 Hz（见 §11.4）。
 
 ### 11.2 1 ms 服务节拍
 
@@ -500,7 +504,7 @@ READY_DISABLED
 3. 调用适配器解码；
 4. 更新在线时间、状态、诊断；
 5. 推进发现/配置事务状态机；
-6. 处理 10 ms 控制边界到期事件；
+6. 处理 20 ms 控制边界到期事件；
 7. 按 P0/P1/P2 调度三路 TX；
 8. 更新实时统计。
 
@@ -517,9 +521,9 @@ MUST NOT 在 1 ms 路径中：
 
 每周期具体最大 RX 帧数、P2 步数、TX pump 数量为 **TBD**，但 MUST 在实现中以常量或可审查配置体现。
 
-### 11.3 10 ms 控制边界
+### 11.3 20 ms 控制边界
 
-每 10 ms MUST：
+每 20 ms MUST：
 
 1. 读取/复制最新完整 `MotorCommandArray` 快照；
 2. 校验 `sequence`；
@@ -534,10 +538,12 @@ MUST NOT 在 1 ms 路径中：
 11. 对合格 `ACTIVE` 电机生成厂家 MIT P1 帧；
 12. 将 P1 目标写入 latest-wins 槽。
 
-### 11.4 100 Hz 的准确语义
+### 11.4 50 Hz 控制边界与 100 Hz 发布的准确语义
 
-- 100 Hz 是**控制快照处理频率**。
-- `MotorMotionStateArray` 可目标 100 Hz 发布。
+- **50 Hz（20 ms）是控制快照处理频率**：固件在每个控制边界取最新完整快照。
+- 上层以 100 Hz 发布 `MotorCommandArray`；固件按其控制边界消费最新值，
+  未被消费的快照不构成丢失（latest-wins）。
+- `MotorMotionStateArray` 可目标 100 Hz 发布（ROS 桥定时器 100 Hz）。
 - 100 Hz 状态发布 MUST NOT 被解释为每个电机都有 100 Hz 新 CAN 测量。
 - 若某电机最近状态未更新，发布端可继续输出最近有效值，但 MUST 正确更新 `state_age_ms`。
 - 上层控制器可基于 `state_age_ms` 判断测量新鲜度。
@@ -701,7 +707,7 @@ MUST NOT 包含：
 
 ### 15.5 校验
 
-bridge 或 10 ms 边界 MUST 拒绝/安全处理：
+bridge 或 20 ms 边界 MUST 拒绝/安全处理：
 
 - `count > 64`；
 - 重复 `motor_id`；
@@ -919,7 +925,7 @@ MUST NOT：
 - busy-wait；
 - sleep 等待；
 - 阻塞 P0/P1；
-- 因配置读取耗时而延迟 10 ms 控制边界。
+- 因配置读取耗时而延迟 20 ms 控制边界。
 
 配置结果消息的最终名称与字段为 **TBD-ROS-04**。
 
@@ -1007,7 +1013,7 @@ ISR MUST NOT：
 
 内容：
 
-- 默认 100 Hz MIT 单电机控制。
+- 默认 50 Hz MIT 单电机控制。
 
 每台电机 MUST 只有一个 latest-wins 槽：
 
@@ -1218,7 +1224,7 @@ CAN 发送。
 | `lib/motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置事务 | 注册表所有权、ROS 消息 |
 | `lib/motor_control` | 注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS API、厂家 HAL 字节 |
 | `lib/control_mailbox` | 高频命令、低频 Policy/Config 和连接事件的固定容量交换 | 策略、协议校验、设备等待、CAN 发送 |
-| `src/motor_rt_task` | 1 ms 服务、10 ms 控制、统一调度 | 阻塞等待、动态分配 |
+| `src/motor_rt_task` | 1 ms 服务、20 ms 控制、统一调度 | 阻塞等待、动态分配 |
 | `src/motor_ros_bridge` | ROS 消息校验、写 mailbox、发布状态副本 | 访问主 RX ring、直接发正常 CAN |
 | `src/storage_task` | W25Q64 低频日志 | 实时控制、配置裁决 |
 | `src/led_task` | WS2812 状态显示 | 电机安全与 FDCAN 业务 |
@@ -1309,7 +1315,7 @@ MUST NOT 保存为运行时权威源的内容：
 - `motor_id → joint_name`；
 - 当前运动授权。
 
-任何 flash 写入 MUST NOT 阻塞 1 ms/10 ms 电机路径。
+任何 flash 写入 MUST NOT 阻塞 1 ms/20 ms 电机路径。
 
 ---
 
@@ -1352,7 +1358,7 @@ MUST NOT 保存为运行时权威源的内容：
 
 - `motor_rt_task` 周期；
 - 最大执行时间；
-- 10 ms 边界延迟；
+- 20 ms 边界延迟；
 - P0 最大排队延迟；
 - P1 目标替换计数；
 - RX backlog high-water mark。
@@ -1427,7 +1433,7 @@ Vaxor/CERB 的 OFFLINE 阈值当前未定义，为 **TBD-SAFETY-03**。
 - CERB 反馈机制；
 - CAN 总线拥塞；
 - 临时丢帧；
-- 100 Hz 控制；
+- 50 Hz 控制；
 - 热插拔恢复。
 
 达到 OFFLINE 后 MUST：
@@ -1534,11 +1540,11 @@ MCU 不应因为 joint 名称变化而需要重新编译。
 实现必须建立以下预算并实测：
 
 - 1 ms 周期最大执行时间；
-- 10 ms 控制边界最大执行时间；
+- 20 ms 控制边界最大执行时间；
 - 每周期最大 RX 解码数；
 - 每周期最大 P2 推进数；
 - P0 从生成到提交硬件 FIFO 的最大延迟；
-- P1 从 10 ms 边界到提交硬件 FIFO 的最大延迟；
+- P1 从 20 ms 边界到提交硬件 FIFO 的最大延迟；
 - 三路同时高负载时的最坏抖动。
 
 具体验收数值为 **TBD-RT-01**，但原则上 MUST 留出可证明的调度余量，不能以“平均不超时”作为通过标准。
@@ -1708,7 +1714,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 ### 45.5 实时
 
 - [ ] 1 ms 任务 WCET 已测。
-- [ ] 10 ms 控制 jitter 已测。
+- [ ] 20 ms 控制 jitter 已测。
 - [ ] 无等待 W25Q64/Agent/设备响应。
 - [ ] 约 40 台规模压力测试通过。
 
@@ -1751,7 +1757,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 2. lifecycle；
 3. safety；
 4. 1 ms service；
-5. 10 ms boundary；
+5. 20 ms boundary；
 6. latest-wins；
 7. session safety。
 
@@ -1851,7 +1857,7 @@ ADR 从 `proposed` 转为 `accepted` 前，至少要求：
 - [ ] 是否需要新协议 adapter？
 - [ ] 是否增加新的 fault/flag 位？
 - [ ] 是否有对应单测？
-- [ ] 是否影响 1 ms/10 ms WCET？
+- [ ] 是否影响 1 ms/20 ms WCET？
 
 若答案涉及架构边界变化，应新建 ADR，而不是只在代码中修改。
 
@@ -1934,7 +1940,7 @@ void motor_rt_task_1ms(void)
 
     motor_runtime_step_transactions_with_budget();
 
-    if (control_boundary_10ms_due()) {
+    if (control_boundary_20ms_due()) {
         motor_runtime_apply_latest_command_snapshot();
     }
 
@@ -1948,7 +1954,7 @@ void motor_rt_task_1ms(void)
 }
 ```
 
-### 51.3 10 ms 控制
+### 51.3 20 ms 控制
 
 ```c
 void motor_runtime_apply_latest_command_snapshot(void)
@@ -2002,7 +2008,7 @@ void motor_runtime_apply_latest_command_snapshot(void)
 | 需求 | 设计位置 | 验证 |
 |---|---|---|
 | 动态拓扑 | registry + adapters + topology | 热插拔测试 |
-| 100 Hz 控制 | 10 ms boundary | jitter/周期测试 |
+| 50 Hz 控制 | 20 ms boundary | jitter/周期测试 |
 | 1 ms 服务 | motor_rt_task | WCET |
 | 30 ms 软停 | safety | 断命令测试 |
 | 100 ms 失能 | safety + P0 | 断命令/Agent 测试 |
@@ -2024,7 +2030,7 @@ void motor_runtime_apply_latest_command_snapshot(void)
 - 改变正常 CAN TX 单一所有权；
 - 使用每电机独立实时任务；
 - ROS 消息直接变成厂家 CAN；
-- 改变 1 ms/10 ms 双时基架构；
+- 改变 1 ms/20 ms 双时基架构；
 - 改变 30/100 ms 安全总原则；
 - 用队列积压历史运动命令；
 - 将 joint 语义下沉 MCU；

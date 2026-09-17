@@ -18,10 +18,10 @@
 - `motor_control` 运行时状态的唯一写者；
 - 正常 CAN TX 的唯一所有者；
 - 每 1ms 执行 RX drain、内核服务、SYNC、TX 路由与 pump；
-- 每 10ms 处理会话/授权、完整命令快照、配置 FIFO 与绑定 FIFO。
+- 每 20ms 处理会话/授权、完整命令快照、配置 FIFO 与绑定 FIFO。
 
-ROS 桥只通过 mailbox、只读状态副本和事件中继交互，不接触厂家协议字节或
-原始 CAN RX。host CTest 当前包含 12 个目标；固件目标代码改动合入前还必须执行
+ROS 桥只通过 mailbox、只读状态副本和内核事件环交互，不接触厂家协议字节或
+原始 CAN RX。host CTest 当前包含 14 个目标；固件目标代码改动合入前还必须执行
 PlatformIO build。
 
 ## 协议与运行时事实
@@ -31,13 +31,13 @@ PlatformIO build。
 - vaxor：12B reply 帧（`0x701 + 4n`）回显控制状态；20B status 帧
   （`0x702 + 4n`）约每 20ms 自主上报并承担在线检测。
 - CERB：`0x300 + node` 反馈帧回显控制状态；`0x080` SYNC 维持约 20ms
-  状态上报。SYNC 每 10ms 发送，只用于发现、重连和心跳，不作为 100Hz 控制触发。
+  状态上报。SYNC 每 20ms 发送，只用于发现、重连和心跳，不作为 50Hz 控制触发。
 - 两种协议的 OFFLINE 阈值均为心跳丢失 100ms。
 
 每总线 TX 调度分为：
 
 - P0：安全、使能、软停、失能；不得静默丢弃，队列满或硬件拒收时回告内核重试；
-- P1：100Hz MIT，按运行时槽位 latest-wins；
+- P1：50Hz MIT，按运行时槽位 latest-wins；
 - P2：发现、配置和管理，有界配额，不得挤占 P0/P1。
 
 逐电机 `motion_authorized` 是真实门禁。离线、故障、冲突、全局撤权或
@@ -63,7 +63,7 @@ PlatformIO build。
 - WS2812 使用 SPI6 + BDMA Channel0；DMA 缓冲位于 `.bdma_noinit/RAM_D3`。
   BDMA 完成缓冲搬运后，仍需 SPI6 EOT IRQ 将 HAL 状态恢复为 READY。
 - W25Q64 当前不执行启动探测；后续运行期访问须有独立低优先级所有者，不得阻塞
-  1ms/10ms 电机路径。
+  1ms/20ms 电机路径。
 
 ## 剩余工作
 
@@ -76,7 +76,17 @@ PlatformIO build。
 
 ### 未闭环项
 
-- CERB 设备侧限位管理对象尚未确认，目前请求返回 `UNSUPPORTED`；
+- ~~CERB 设备侧限位管理对象尚未确认~~ **已实现**（2026-09-16）：对象取自
+  《CANopen-V0.9 字典表》——位置限位 `0x607D:01/:02`（cnt，65536 cnt/360°）、
+  最大转速 `0x6080`（电机端 RPM）、峰值电流 `0x2538`（电机端 mA），全部
+  ≤4 字节故只用快速 SDO（SDO 走 CANFD 加速标准帧）；内核/adapter 层已实现
+  编码 + 写后读回核验，且设备侧写仅限未运动状态。**下行 ROS 入口已落地**
+  （2026-09-17，台架九节点实测通过）：`src/param_bridge.cpp` 参数服务器
+  ——每电机 `m<id>.{enable,kp,kd,pos_min,pos_max,vel_limit,torque_limit}`
+  + `system.{save,refresh,last_error,last_error_motor,heap_free}`，
+  经 config FIFO 接现有内核事务；另增 REFRESH_PARAMS（kind=8）四个 SDO
+  upload 回读设备影子，W25Q64 双 sector 显式持久化（`storage_task`）。
+  已知天花板：rclc low-mem 参数槽 128 ≈ 17 台。
 - Vaxor 80 速比型号缺少完整 Profile，不得凭猜测开放控制；
 - FDCAN BUS_OFF 当前可观测但恢复策略须依据台架数据确定；
 - 最大规模三总线、约 40 台设备时的 USB CDC 带宽、RX 容量和实时余量尚待实测；
@@ -110,7 +120,7 @@ git -C .. diff --check
 4. 注入未知/重复 ID、NaN/Inf、非法 mode、厂家故障、心跳丢失和跨总线 ID 冲突，
    检查拒绝、锁存、P0 失能和结果事件。
 5. 制造 CAN 无 ACK、RX burst 和 BUS_OFF，记录调度器及 ring 计数，验证 P0 不静默丢失。
-6. 验证 CERB 每总线 10ms 单帧 SYNC、约 20ms 状态上报和 100ms OFFLINE 边界。
+6. 验证 CERB 每总线 20ms 单帧 SYNC、约 20ms 状态上报和 100ms OFFLINE 边界。
 7. 断开 BMI088、阻塞 SPI 或停止 DRDY，验证传输超时、降级重试、heater off 与
    双缓冲不撕裂。
 

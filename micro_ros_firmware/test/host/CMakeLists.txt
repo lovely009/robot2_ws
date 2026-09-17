@@ -6,150 +6,148 @@ enable_testing()
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(test_motor_protocol
-  test_motor_protocol.cpp
+# 原则：测试直接编译固件真实 .c，无桩无复制。固件源码按库组织成 OBJECT
+# 库单点维护源文件列表，新增内核 .c 只改本文件一处；include 目录随库
+# PUBLIC 传播，测试目标只声明依赖哪个库。
+add_library(fw_motor_protocol OBJECT
   ../../lib/motor_protocol/src/motor_protocol.c)
-
-target_include_directories(test_motor_protocol PRIVATE
+target_include_directories(fw_motor_protocol PUBLIC
   ../../lib/motor_protocol/include)
 
-target_link_libraries(test_motor_protocol PRIVATE m)
-
-add_test(NAME motor_protocol COMMAND test_motor_protocol)
-
-add_executable(test_motor_protocol_adapter
-  test_motor_protocol_adapter.cpp
-  ../../lib/motor_protocol/src/motor_protocol.c
+# 协议适配器 + 型号目录（profile 被适配器与内核两侧共用，归此库单点编译）
+add_library(fw_adapters OBJECT
   ../../lib/motor_protocol/src/vaxor_adapter.c
   ../../lib/motor_protocol/src/cerb_adapter.c
   ../../lib/motor_control/src/motor_control_profile.c)
-
-target_include_directories(test_motor_protocol_adapter PRIVATE
+target_include_directories(fw_adapters PUBLIC
   ../../lib/motor_protocol/include
   ../../lib/motor_control/include)
+target_link_libraries(fw_adapters PUBLIC fw_motor_protocol)
 
-target_link_libraries(test_motor_protocol_adapter PRIVATE m)
-
-add_test(NAME motor_protocol_adapter COMMAND test_motor_protocol_adapter)
-
-add_executable(test_motor_control
-  test_motor_control.cpp
+# 电机运行时内核（白盒测试另需 -I 内核 src，见 test_motor_control）
+add_library(fw_motor_control OBJECT
   ../../lib/motor_control/src/motor_control.c
   ../../lib/motor_control/src/motor_control_discovery.c
   ../../lib/motor_control/src/motor_control_config.c
-  ../../lib/motor_control/src/motor_control_profile.c
-  ../../lib/motor_control/src/motor_control_params.c
-  ../../lib/motor_protocol/src/motor_protocol.c
-  ../../lib/motor_protocol/src/vaxor_adapter.c
-  ../../lib/motor_protocol/src/cerb_adapter.c)
+  ../../lib/motor_control/src/motor_control_params.c)
+target_include_directories(fw_motor_control PUBLIC
+  ../../lib/motor_control/include)
+target_link_libraries(fw_motor_control PUBLIC fw_adapters)
 
-target_include_directories(test_motor_control PRIVATE
-  ../../lib/motor_control/include
-  ../../lib/motor_protocol/include)
-
-target_link_libraries(test_motor_control PRIVATE m)
-
-add_test(NAME motor_control COMMAND test_motor_control)
-
-add_executable(test_control_mailbox
-  test_control_mailbox.cpp
+add_library(fw_mailbox OBJECT
   ../../lib/control_mailbox/src/control_command_mailbox.c
   ../../lib/control_mailbox/src/control_mailbox.c)
+target_include_directories(fw_mailbox PUBLIC
+  ../../lib/control_mailbox/include)
 
-target_include_directories(test_control_mailbox PRIVATE
-  ../../lib/control_mailbox/include
-  ../../lib/motor_protocol/include) # config kind 枚举契约 static_assert
-
-add_test(NAME control_mailbox COMMAND test_control_mailbox)
-
-add_executable(test_can_rx_ring
-  test_can_rx_ring.cpp
+add_library(fw_can_rx_ring OBJECT
   ../../lib/fdcan/src/can_rx_ring.c)
+target_include_directories(fw_can_rx_ring PUBLIC ../../lib/fdcan/include)
 
-target_include_directories(test_can_rx_ring PRIVATE
-  ../../lib/fdcan/include)
-
-add_test(NAME can_rx_ring COMMAND test_can_rx_ring)
-
-add_executable(test_can_tx_scheduler
-  test_can_tx_scheduler.cpp
+add_library(fw_can_tx_scheduler OBJECT
   ../../lib/fdcan/src/can_tx_scheduler.c)
+target_include_directories(fw_can_tx_scheduler PUBLIC ../../lib/fdcan/include)
 
-target_include_directories(test_can_tx_scheduler PRIVATE
-  ../../lib/fdcan/include)
-
-add_test(NAME can_tx_scheduler COMMAND test_can_tx_scheduler)
-
-add_executable(test_imu_snapshot
-  test_imu_snapshot.cpp
+add_library(fw_imu_snapshot OBJECT
   ../../lib/imu/src/imu_snapshot.c)
+target_include_directories(fw_imu_snapshot PUBLIC ../../lib/imu/include)
 
-target_include_directories(test_imu_snapshot PRIVATE
-  ../../lib/imu/include)
+add_library(fw_bmi088_status OBJECT
+  ../../lib/imu/src/bmi088_transport_status.c)
+target_include_directories(fw_bmi088_status PUBLIC ../../lib/imu/include)
 
-add_test(NAME imu_snapshot COMMAND test_imu_snapshot)
-
-add_executable(test_imu_units
-  test_imu_units.cpp
+# imu.c 与 MahonyAHRS 未调用的传输函数靠链接器裁剪，另带 status 提供真实符号
+add_library(fw_imu_core OBJECT
   ../../lib/imu/src/imu.c
-  ../../lib/imu/src/MahonyAHRS.c
-  ../../lib/imu/src/bmi088_transport_status.c)
+  ../../lib/imu/src/MahonyAHRS.c)
+target_include_directories(fw_imu_core PUBLIC ../../lib/imu/include)
+target_link_libraries(fw_imu_core PUBLIC fw_bmi088_status)
 
-target_include_directories(test_imu_units PRIVATE
-  ../../lib/imu/include)
-
-target_link_libraries(test_imu_units PRIVATE m)
-
-add_test(NAME imu_units COMMAND test_imu_units)
-
-add_executable(test_bmi088_transport_status
-  test_bmi088_transport_status.cpp
-  ../../lib/imu/src/bmi088_transport_status.c)
-
-target_include_directories(test_bmi088_transport_status PRIVATE
-  ../../lib/imu/include)
-
-add_test(NAME bmi088_transport_status COMMAND test_bmi088_transport_status)
-
-add_executable(test_bmi088_register_config
-  test_bmi088_register_config.cpp)
-
-target_include_directories(test_bmi088_register_config PRIVATE
-  ../../lib/imu/include)
-
-add_test(NAME bmi088_register_config COMMAND test_bmi088_register_config)
-
-add_executable(test_param_store
-  test_param_store.cpp
+add_library(fw_param_store OBJECT
   ../../lib/param_store/src/param_store_blob.c
   ../../lib/param_store/src/param_name.c)
-
-target_include_directories(test_param_store PRIVATE
+target_include_directories(fw_param_store PUBLIC
   ../../lib/param_store/include)
 
-add_test(NAME param_store COMMAND test_param_store)
-
-add_executable(test_w25q64_geometry
-  test_w25q64_geometry.cpp
+add_library(fw_w25_geometry OBJECT
   ../../lib/w25q64/src/w25q64_geometry.c)
+target_include_directories(fw_w25_geometry PUBLIC ../../lib/w25q64/include)
 
-target_include_directories(test_w25q64_geometry PRIVATE
-  ../../lib/w25q64/include)
+# 声明一个 host 测试目标：SOURCES 测试自身源文件，OBLIBS 依赖的固件 OBJECT
+# 库，INCLUDES 额外包含目录，DEFINES 编译宏（如 led 的 HOST_TEST）。
+# 注意 CMake 3.16 不传递 OBJECT 库的目标文件（只传播 include），
+# OBLIBS 必须列出链接所需的全部库（含间接依赖）。
+function(fw_host_test name)
+  cmake_parse_arguments(ARG "" "" "SOURCES;OBLIBS;INCLUDES;DEFINES" ${ARGN})
+  add_executable(${name} ${ARG_SOURCES})
+  if(ARG_OBLIBS)
+    target_link_libraries(${name} PRIVATE ${ARG_OBLIBS})
+  endif()
+  if(ARG_INCLUDES)
+    target_include_directories(${name} PRIVATE ${ARG_INCLUDES})
+  endif()
+  if(ARG_DEFINES)
+    target_compile_definitions(${name} PRIVATE ${ARG_DEFINES})
+  endif()
+  target_link_libraries(${name} PRIVATE m)
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
 
-add_test(NAME w25q64_geometry COMMAND test_w25q64_geometry)
+fw_host_test(test_motor_protocol
+  SOURCES test_motor_protocol.cpp
+  OBLIBS fw_motor_protocol)
 
-add_executable(test_led_status
-  test_led_status.cpp
-  ../../src/led_task.cpp)
+fw_host_test(test_motor_protocol_adapter
+  SOURCES test_motor_protocol_adapter.cpp
+  OBLIBS fw_adapters fw_motor_protocol)
 
-target_include_directories(test_led_status PRIVATE
-  ../../include)
+fw_host_test(test_motor_control
+  SOURCES test_motor_control.cpp
+  OBLIBS fw_motor_control fw_adapters fw_motor_protocol)
+
+# config kind 枚举契约 static_assert 需要协议枚举定义
+fw_host_test(test_control_mailbox
+  SOURCES test_control_mailbox.cpp
+  OBLIBS fw_mailbox
+  INCLUDES ../../lib/motor_protocol/include)
+
+fw_host_test(test_can_rx_ring
+  SOURCES test_can_rx_ring.cpp
+  OBLIBS fw_can_rx_ring)
+
+fw_host_test(test_can_tx_scheduler
+  SOURCES test_can_tx_scheduler.cpp
+  OBLIBS fw_can_tx_scheduler)
+
+fw_host_test(test_imu_snapshot
+  SOURCES test_imu_snapshot.cpp
+  OBLIBS fw_imu_snapshot)
+
+fw_host_test(test_imu_units
+  SOURCES test_imu_units.cpp
+  OBLIBS fw_imu_core fw_bmi088_status)
+
+fw_host_test(test_bmi088_transport_status
+  SOURCES test_bmi088_transport_status.cpp
+  OBLIBS fw_bmi088_status)
+
+fw_host_test(test_bmi088_register_config
+  SOURCES test_bmi088_register_config.cpp
+  INCLUDES ../../lib/imu/include)
+
+fw_host_test(test_param_store
+  SOURCES test_param_store.cpp
+  OBLIBS fw_param_store)
+
+fw_host_test(test_w25q64_geometry
+  SOURCES test_w25q64_geometry.cpp
+  OBLIBS fw_w25_geometry)
 
 # led_task.cpp 用 HOST_TEST 跳过 Arduino/FreeRTOS 段，host 只测颜色策略
-target_compile_definitions(test_led_status PRIVATE
-  HOST_TEST=1)
-
-add_test(NAME led_status COMMAND test_led_status)
+fw_host_test(test_led_status
+  SOURCES test_led_status.cpp ../../src/led_task.cpp
+  INCLUDES ../../include
+  DEFINES HOST_TEST=1)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

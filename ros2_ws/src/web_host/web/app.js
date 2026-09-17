@@ -23,6 +23,9 @@ const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
   'REGISTRY_FULL'];
 const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
+// 设备参数槽位名（DEV_INIT 事件 request_id 携带的不一致位图，1u<<slot）
+const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流'];
+const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致', '回读不成功'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
@@ -50,6 +53,9 @@ const rad2deg = (r) => r * 180 / Math.PI;
 const state = {
   connected: false,
   motors: new Map(),
+  lastError: 0,       // system.last_error 快照（总览条与失败文案翻译用）
+  lastErrorMotor: -1,
+  devInit: new Map(), // motor_id -> {state, mask}：DEV_INIT 事件带来的核对结论
   events: [],
   imu: {count: 0, last: 0, roll: 0, pitch: 0, yaw: 0, q: null},
   temp: undefined,
@@ -176,6 +182,14 @@ function subscribeAll() {
       request_id: m.request_id || 0,
     });
     if (state.events.length > 2000) state.events.pop();
+    // DEV_INIT(type 15)：记下核对结论与"哪几项对不上"（request_id = 槽位位图）。
+    if (m.event_type === 15) {
+      state.devInit.set(m.motor_id, {
+        state: m.reason,
+        mask: m.request_id || 0,
+      });
+      renderParamSummary();
+    }
     renderEvents();
   });
 
@@ -213,6 +227,8 @@ function lifecyclePill(lc) {
 }
 
 function renderMotors() {
+  // 参数页总览条依赖电机状态流（在线/生命周期），随之刷新；表未加载时是空操作。
+  if (paramCache.size > 0) renderParamSummary();
   const tbody = $('motorRows');
   const rows = [...state.motors.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -230,7 +246,7 @@ function renderMotors() {
         <td>${model ? model : '<span class="muted">未绑定</span>'}</td>
         <td>${online === undefined ? '--'
           : `<span class="pill ${online ? 'on' : 'off'}">${online ? '是' : '否'}</span>`}</td>
-        <td>${lifecyclePill(lc)}</td>
+        <td title="${devDetailTitle(id)}">${lifecyclePill(lc)}</td>
         <td class="num">${fmt(mo.position, 3)}</td>
         <td class="num">${fmt(mo.velocity, 3)}</td>
         <td class="num">${fmt(mo.effort, 3)}</td>
@@ -329,12 +345,31 @@ function setCmdResult(ok, text) {
   el.textContent = text;
 }
 
+// 目标里含"未初始化（不可使能）"或离线的电机时点名提示：这些台不会动，而且
+// **不会有任何报错回显**（固件只是不给它们发运动帧）——不提示的话，操作者会以为
+// 是别的原因（命令没发出去 / 参数不对）。
+function noteBlockedTargets(targets) {
+  const blocked = [];
+  for (const t of targets) {
+    const row = state.motors.get(t.motor_id) || {};
+    const online = row.status?.online ?? row.topo?.online;
+    const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
+    if (online === false) blocked.push(`${t.motor_id}(离线)`);
+    else if (lc === 7) blocked.push(`${t.motor_id}(未初始化)`);
+    else if (lc === undefined) blocked.push(`${t.motor_id}(未上报状态)`);
+  }
+  return blocked;
+}
+
 function sendSnapshot() {
   if (!state.connected) { setCmdResult(false, '未连接 rosbridge'); return false; }
   const {targets, error} = readCmdTargets();
   if (error) { setCmdResult(false, error); return false; }
   const res = sendTargets(targets);
-  setCmdResult(res.ok, `已发 ${res.msg}`);
+  // 连发时只在启动那一拍提示一次，避免 100Hz 刷 DOM。
+  const blocked = streamTimer ? [] : noteBlockedTargets(targets);
+  setCmdResult(res.ok, `已发 ${res.msg}` +
+    (blocked.length ? ` ｜ ⚠ ${blocked.join('、')} 不会动（未初始化或离线）` : ''));
   return res.ok;
 }
 
@@ -876,8 +911,23 @@ function renderParamRows() {
       : (!online ? '<span class="pill off">记录</span>'
                  : (lcVerified ? '<span class="pill mid">驱动板</span>'
                                : '<span class="pill off">未核对</span>'));
-    const cell = (f) =>
-      `<input data-id="${id}" data-field="${f}" class="pnum" value="${v[f] ?? ''}">`;
+    // 设备端原值提示：页面已知"工程单位 → 设备原值"的换算（设备对象就是 cnt / mA），
+    // 直接写在输入框 title 里，省去对着 CAN 日志换算。速度的电机端 RPM 还要按减速比
+    // 折算，页面拿不到该系数，故不给。
+    const isCerb = row.topo?.protocol === 1;
+    const raw = (f, value) => {
+      if (!isCerb || !Number.isFinite(value)) return '';
+      if (f === 'pos_min' || f === 'pos_max') {
+        return `设备端 ${Math.round(value * 65536 / 360)} cnt`;
+      }
+      if (f === 'torque_limit') return `设备端 ${Math.round(value * 1000)} mA`;
+      return '';
+    };
+    const cell = (f) => {
+      const hint = raw(f, Number(v[f]));
+      return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(v[f])}"` +
+        (hint ? ` title="${hint}"` : '') + `>`;
+    };
     return `<tr>
       <td class="num">${id}</td>
       <td>${model || '<span class="muted">--</span>'}</td>
@@ -901,11 +951,111 @@ function renderParamRows() {
   tbody.querySelectorAll('[data-zero]').forEach((btn) => {
     btn.onclick = () => setMotorZero(parseInt(btn.dataset.zero, 10));
   });
+  renderParamSummary();
 }
 
-async function loadParams() {
+// 状态列悬停提示：DEV_INIT 事件带来的"哪几项与固件记录不一致"。
+function devDetailTitle(id) {
+  const info = state.devInit.get(id);
+  if (!info || info.state !== 3 || !info.mask) return '';
+  const slots = DEV_SLOT_NAMES.filter((_, i) => (info.mask & (1 << i)) !== 0);
+  return `设备参数与固件记录不一致：${slots.join('、')}（写回对应项即可恢复）`;
+}
+
+// 参数值显示：内核把这些量存成 float32，拓宽成 double 后会出现
+// 0.20000000298023224 这类尾巴——显示时收敛到有效位，别让人误以为是精度问题。
+// 只影响显示；未编辑的字段不会下发（applyParams 只发 dirty 字段）。
+function fmtParam(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const s = Math.abs(n) >= 1e6 || (n !== 0 && Math.abs(n) < 1e-4)
+    ? n.toExponential(6)
+    : String(Number(n.toPrecision(7)));
+  return s;
+}
+
+// 设备参数核对总览：把"上电核对"的结论放到最显眼处。判据是内核把未完成核对的台
+// 置 CONFIG_CONFLICT(7)，具体是"与记录不一致(40)"还是"回读不成功(41)"看
+// system.last_error；其余在线台按已核对显示（来源=驱动板）。
+function renderParamSummary() {
+  const el = $('paramSummary');
+  if (!el) return;
+  const ids = [...paramCache.keys()].sort((a, b) => a - b);
+  if (ids.length === 0) {
+    el.className = 'summary tiny';
+    el.textContent = '设备参数核对：暂无电机';
+    return;
+  }
+  const offline = [], blocked = [], ok = [];
+  for (const id of ids) {
+    const row = state.motors.get(id) || {};
+    const online = row.status?.online ?? row.topo?.online;
+    const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
+    if (online === false) offline.push(id);
+    else if (lc === 7) blocked.push(id);
+    else ok.push(id);
+  }
+  const parts = [`<b>设备参数核对：共 ${ids.length} 台</b>`,
+    `<span class="pill mid">已核对 ${ok.length}</span>`];
+  if (blocked.length) {
+    const code = Number(state.lastError || 0);
+    const why = (code === 40) ? '与固件记录不一致'
+      : (code === 41 ? '回读不成功' : '未完成');
+    // 逐台指出"哪几项对不上"：位图来自 DEV_INIT 事件（收到前只显示结论）。
+    const per = blocked.map((id) => {
+      const info = state.devInit.get(id);
+      const mask = info ? info.mask : 0;
+      if (!mask) return `${id}`;
+      const slots = DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
+      return `${id}(${slots.join('、')})`;
+    });
+    parts.push(`<span class="pill off">未初始化 ${blocked.length}</span>` +
+      `<span class="muted">（${per.join(' ')}：${why}——写回对应项、或点该行「回读」后按驱动板值对齐）</span>`);
+  }
+  if (offline.length) {
+    parts.push(`<span class="pill off">离线 ${offline.length}</span>` +
+      `<span class="muted">（${offline.join('/')}：显示固件记录回落值）</span>`);
+  }
+  el.className = 'summary tiny';
+  el.innerHTML = parts.join(' ');
+}
+
+// last_error 快照：总览条与失败文案用它把错误码翻译成人话。
+async function refreshLastError() {
+  try {
+    const [code, motor] = await Promise.all(
+      ['system.last_error', 'system.last_error_motor'].map(paramGet));
+    state.lastError = Number(code) || 0;
+    state.lastErrorMotor = Number(motor);
+  } catch (e) { /* 读不到就保留旧值 */ }
+  return state.lastError;
+}
+
+// 读取 = 读驱动板 + 读参数。参数以驱动板为准，所以先把在线台逐台回读一遍
+// （拿到设备真值并触发核对结论），再取参数表——这样"读取"得到的永远是设备真值，
+// 而且核对结论会随 DEV_INIT 事件带到页面上（指出哪几项不一致）。
+async function loadParams({skipDeviceRead = false} = {}) {
   if (!state.connected) return;
   setParamResult(true, '读取中…');
+  if (!skipDeviceRead) {
+    const online = [...state.motors.entries()]
+      .filter(([, r]) => (r.status?.online ?? r.topo?.online) === true)
+      .map(([id]) => id)
+      .sort((a, b) => a - b);
+    if (online.length) {
+      let done = 0, bad = 0;
+      for (const id of online) {
+        setParamResult(true, `读取中… 回读驱动板 ${id}（${done + 1}/${online.length}）`);
+        const r = await requestDeviceRead(id, 3000);
+        done++;
+        if (!r.ok) bad++;
+      }
+      if (bad) {
+        setParamResult(false, `已回读 ${done} 台，其中 ${bad} 台未通过核对（见下表「状态」与错误码）`);
+      }
+    }
+  }
   try {
     const res = await paramService('ListParameters', {prefixes: [], depth: 1});
     const names = res.result.names.filter((n) => /^m\d+\./.test(n));
@@ -917,6 +1067,7 @@ async function loadParams() {
       if (!paramCache.has(id)) paramCache.set(id, {});
       paramCache.get(id)[field] = await paramGet(name);
     }
+    await refreshLastError();
     renderParamRows();
     setParamResult(true, `已读取 ${paramCache.size} 台电机的参数`);
   } catch (e) {
@@ -978,8 +1129,10 @@ async function saveParamsToFlash() {
 // 设备参数回读：固件侧是异步 SDO 事务（严格一问一答，4 个对象逐条读，最坏
 // 含超时重试要几秒）。完成判据用只读的 system.refresh_seq（单调递增）——只看
 // last_error(_motor) 分不清"这一轮"和"上一轮留下的"，会把没读当成成功。
-async function refreshDeviceParams(id) {
-  if (!state.connected) return;
+// 请求一次设备参数回读并等它收尾。返回 {ok, code}：
+//  code=0 一致；40/41 见内核；-1 固件未受理；-2 服务调用失败；-3 超时未收尾。
+async function requestDeviceRead(id, timeoutMs) {
+  const budget = timeoutMs || 9000;
   let seqBefore = 0;
   try {
     seqBefore = Number(await paramGet('system.refresh_seq')) || 0;
@@ -987,55 +1140,58 @@ async function refreshDeviceParams(id) {
   try {
     const r = await paramSetValue('system.refresh', 2, 'refresh', id);
     if (r.results && r.results[0] && !r.results[0].successful) {
-      setParamResult(false, `固件未受理 system.refresh（${r.results[0].reason || '见 last_error'}）`);
-      return;
+      return {ok: false, code: -1, reason: r.results[0].reason};
     }
   } catch (e) {
-    setParamResult(false, '回读请求失败：' + e.message);
-    return;
+    return {ok: false, code: -2, reason: e.message};
   }
-  setParamResult(true, `电机 ${id} 设备参数回读已请求，等待驱动板应答…`);
-
-  for (let i = 0; i < 60; i++) {
+  const rounds = Math.max(1, Math.ceil(budget / 150));
+  for (let i = 0; i < rounds; i++) {
     await new Promise((r) => setTimeout(r, 150));
     let seq;
     try {
       seq = Number(await paramGet('system.refresh_seq'));
     } catch (e) {
-      continue; // 单次 get 失败（low-mem 模式串行）：继续轮询
+      continue;
     }
-    if (seq === seqBefore) continue; // 事务还没收尾
-
-    let code = 0, motor = -1;
-    try {
-      [code, motor] = await Promise.all(
-        ['system.last_error', 'system.last_error_motor'].map(paramGet));
-    } catch (e) { /* 结论码读不到：仍按"已收尾"报，数值已刷新 */ }
-    const c = Number(code);
-    if (Number(motor) !== id) {
-      setParamResult(true, `电机 ${id} 回读已结束（固件最近错误码 ${c} 属于电机 ${motor}）`);
-    } else if (c === 0) {
-      setParamResult(true, `电机 ${id} 设备参数已从驱动板读回（驱动板真值）`);
-    } else if (c === 40) {
-      setParamResult(false, `电机 ${id} 参数不一致：固件记录与驱动板不符 → 该台未初始化，` +
-        '在该行写回参数即可恢复');
-    } else if (c === 41) {
-      setParamResult(false, `电机 ${id} 回读不成功（last_error=41）：驱动板未应答。` +
-        '该台初始化未完成，不可使能——重连或再点一次「回读」');
-    } else {
-      setParamResult(false, `电机 ${id} 回读失败：last_error=${c}`);
-    }
-    await loadParams();
-    return;
+    if (seq === seqBefore) continue; // 未收尾
+    await refreshLastError();
+    return {ok: state.lastError === 0, code: state.lastError};
   }
-  let code = 0, motor = -1;
-  try {
-    [code, motor] = await Promise.all(
-      ['system.last_error', 'system.last_error_motor'].map(paramGet));
-  } catch (e) { /* 读不到就算了 */ }
-  setParamResult(false, `电机 ${id} 回读仍未收尾（已等 9 秒）：固件最近错误码 ` +
-    `${Number(code)}（电机 ${Number(motor)}）` +
-    (Number(code) === 11 ? '——11 是「提交失败」，请求在 mailbox 被拒' : ''));
+  return {ok: false, code: -3, timeout: true};
+}
+
+async function refreshDeviceParams(id) {
+  if (!state.connected) return;
+  setParamResult(true, `电机 ${id} 设备参数回读已请求，等待驱动板应答…`);
+
+  const r = await requestDeviceRead(id);
+  if (r.code === -1) {
+    setParamResult(false, `固件未受理 system.refresh（${r.reason || '见 last_error'}）`);
+  } else if (r.code === -2) {
+    setParamResult(false, '回读请求失败：' + r.reason);
+  } else if (r.code === -3) {
+    setParamResult(false, `电机 ${id} 回读仍未收尾（超时）：固件最近错误码 ` +
+      `${state.lastError}（电机 ${state.lastErrorMotor}）` +
+      (state.lastError === 11 ? '——11 是「提交失败」，请求在 mailbox 被拒' : ''));
+  } else if (Number(state.lastErrorMotor) !== id) {
+    setParamResult(true, `电机 ${id} 回读已结束（固件最近错误码 ${state.lastError} 属于电机 ${state.lastErrorMotor}）`);
+  } else if (r.code === 0) {
+    setParamResult(true, `电机 ${id} 设备参数已从驱动板读回（驱动板真值）`);
+  } else if (r.code === 40) {
+    const info = state.devInit.get(id);
+    const slots = info && info.mask
+      ? '（不一致项：' + DEV_SLOT_NAMES.filter((_, i) => (info.mask & (1 << i)) !== 0).join('、') + '）'
+      : '';
+    setParamResult(false, `电机 ${id} 参数不一致${slots}：固件记录与驱动板不符 → 该台未初始化，` +
+      '写回对应项即可恢复');
+  } else if (r.code === 41) {
+    setParamResult(false, `电机 ${id} 回读不成功（last_error=41）：驱动板未应答。` +
+      '该台初始化未完成，不可使能——重连或再点一次「回读」');
+  } else {
+    setParamResult(false, `电机 ${id} 回读失败：last_error=${r.code}`);
+  }
+  await loadParams({skipDeviceRead: true});
 }
 
 // 设零点（设备对象 0x2531 写 1，字典表「设置电机输出端零位」）：
@@ -1089,7 +1245,8 @@ async function setMotorZero(id) {
       setParamResult(false, `电机 ${id} 设零点失败：last_error=${c}` +
         (c === 2 ? '（参数被拒——该台在运行中？厂家要求失能状态设置）' : ''));
     } else {
-      setParamResult(true, `电机 ${id} 已设零点：当前姿态即零点`);
+      setParamResult(true, `电机 ${id} 已设零点：当前姿态即零点` +
+        '——设备内限位随零点移动，请重新确认限位与机械行程');
     }
     await loadParams();
     return;

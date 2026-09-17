@@ -74,24 +74,30 @@ static void finish_identity_read(motor_control_context_t *ctx,
 //  - 记录里没有的槽位不参与比对（刚烧录、Flash 还空的电机不该整体卡住）。
 // ---------------------------------------------------------------------------
 
-// 记录与设备回读是否一致（逐槽位比对设备端原值）。
-static bool dev_params_match_record(const motor_control_entry_t *entry) {
+// 记录与设备回读逐槽位比对（设备端原值）。返回值 = 不一致槽位位图
+// （1u << MOTOR_PROTOCOL_PARAM_SLOT_*；0 = 一致）。位图随 DEV_INIT 事件带出去，
+// 让上位机能直接说"是哪一项对不上"——否则操作者按页面写回一个槽位、别的槽位
+// 仍不一致，结论还是未初始化，看起来就像"设置不生效"。
+static uint8_t dev_params_mismatch_mask(const motor_control_entry_t *entry) {
+  uint8_t mask = 0U;
   if (!entry->record_valid) {
-    return true; // 本机无记录：没有比对基准
+    return 0U; // 本机无记录：没有比对基准
   }
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
     const uint8_t bit = (uint8_t)(1U << slot);
     if ((entry->record_raw_present & bit) == 0U) {
       continue; // 记录里没写过这项：不构成不一致
     }
-    if ((entry->dev_raw_present & bit) == 0U) {
-      return false; // 记录有、设备没读到 → 无从确认一致
-    }
-    if (entry->dev_raw[slot] != entry->record_raw[slot]) {
-      return false;
+    if ((entry->dev_raw_present & bit) == 0U ||
+        entry->dev_raw[slot] != entry->record_raw[slot]) {
+      mask |= bit; // 记录有、设备没读到 → 也算对不上（无从确认一致）
     }
   }
-  return true;
+  return mask;
+}
+
+static bool dev_params_match_record(const motor_control_entry_t *entry) {
+  return dev_params_mismatch_mask(entry) == 0U;
 }
 
 // 定论落地：写 dev_init，并按结论放行/冻结该台。调用点必须在 tx_active
@@ -100,6 +106,11 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
                                   motor_control_entry_t *entry,
                                   motor_control_dev_init_t state,
                                   uint32_t now_ms) {
+  // 不一致时把"哪几项对不上"随事件带出去（1u<<slot；0 = 无此项信息）。
+  const uint32_t detail =
+      (state == MOTOR_CONTROL_DEV_INIT_MISMATCH)
+          ? (uint32_t)dev_params_mismatch_mask(entry)
+          : 0U;
   const bool ready = (state == MOTOR_CONTROL_DEV_INIT_NA ||
                       state == MOTOR_CONTROL_DEV_INIT_OK);
   const bool was_dev_block =
@@ -141,7 +152,7 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
                            entry->motor_id, entry->bus_index, (uint16_t)state,
-                           0U);
+                           detail);
 }
 
 // 回读成功：影子取设备真值（设备为准），四个槽位的 SI 值同步落袋。

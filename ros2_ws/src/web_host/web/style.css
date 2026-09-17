@@ -94,6 +94,18 @@ body {
 
 /* ---------- 通用文本 ---------- */
 .muted { color: var(--muted); }
+/* 参数页顶部：设备参数核对总览（已核对/未初始化/离线一眼可见） */
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card2);
+}
 .tiny { font-size: 11px; }
 .hz { color: var(--ok); font-size: 11px; font-weight: 400; }
 .warn { color: var(--warn); }

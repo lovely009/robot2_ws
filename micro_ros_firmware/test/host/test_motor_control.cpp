@@ -132,6 +132,26 @@ static size_t count_tx_class(motor_control_context_t *ctx,
   return total;
 }
 
+// 取指定电机的 DEV_INIT 事件（state + 不一致槽位位图）。drain 是消费性的，
+// 同一条用例里要在别的 events_contain 之前调用。
+static bool take_dev_init_event(motor_control_context_t *ctx, uint16_t motor_id,
+                               uint16_t *out_state, uint32_t *out_detail) {
+  motor_control_event_t events[64];
+  bool found = false;
+  size_t n;
+  while ((n = motor_control_drain_events(ctx, events, 64)) > 0) {
+    for (size_t i = 0; i < n; ++i) {
+      if (events[i].type == MOTOR_CONTROL_EVENT_DEV_INIT &&
+          events[i].motor_id == motor_id) {
+        if (out_state != nullptr) *out_state = events[i].reason;
+        if (out_detail != nullptr) *out_detail = events[i].request_id;
+        found = true;
+      }
+    }
+  }
+  return found;
+}
+
 // 事件断言：循环 drain 至空，扫描全部事件（drain 是消费性的，不能只取一次）。
 static bool events_contain(motor_control_context_t *ctx,
                            motor_control_event_type_t type, uint16_t motor_id) {
@@ -3154,8 +3174,14 @@ static void test_device_param_mismatch_blocks_motion() {
   assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
   assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM);
   assert(!e->policy_enable);
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
-  // 影子 = 设备真值（13300 mA → 115.5 N·m），不是记录值。
+  // 事件必须点名"是哪一项对不上"：记录里只有峰值电流(槽 3)与设备不同 →
+  // 位图 = 1<<3。操作者据此知道该写哪一项，而不是盲写一通还看不到结果。
+  uint16_t state = 0U;
+  uint32_t detail = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &detail));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(detail == (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX));
+  // 影子 = 设备真值（设备为准），不是记录值。
   assert(fabs(e->dev_max_torque_nm - 13.3 * kR58LimitNmPerAmp) < 0.1);
 
   // 使能被拒（显式回告，不静默吞掉）。

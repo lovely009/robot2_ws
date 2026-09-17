@@ -16,9 +16,24 @@ robot_arm_gazebo/
 │   └── gazebo.launch.py        # Ignition 仿真 + 控制器
 ├── meshes/                     # SolidWorks 导出 STL
 └── urdf/
-    ├── zhoubuguanjie0.urdf         # 原始 SolidWorks 导出（mesh 路径已改指本包）
-    └── zhoubuguanjie0.urdf.xacro   # 仿真薄壳：注入 ros2_control 与 gz 插件
+    ├── zhoubuguanjie0.urdf             # 原始 SolidWorks 导出（mesh 路径已改指本包）
+    ├── zhoubuguanjie0.standalone.urdf  # 单文件纯模型（无 xacro、无插件），可直接加载
+    └── zhoubuguanjie0.urdf.xacro       # 仿真薄壳：注入 ros2_control 与 gz 插件
 ```
+
+## 单文件 URDF（`zhoubuguanjie0.standalone.urdf`）
+
+把 xacro 薄壳展开、剥掉 `<ros2_control>` 与 `<gazebo>` 插件块后的纯模型，单个文件即可
+加载（RViz、第三方工具、拖到别处都行），不需要 xacro 处理：
+
+```bash
+ros2 run robot_state_publisher robot_state_publisher \
+  --ros-args -p robot_description:="$(cat install/robot_arm_gazebo/share/robot_arm_gazebo/urdf/zhoubuguanjie0.standalone.urdf)"
+```
+
+mesh 仍走 `package://robot_arm_gazebo/meshes/`，因此加载前须 source 本工作空间；
+若要脱离 ROS 使用，把 `package://robot_arm_gazebo/meshes/` 批量替换为
+`file:///绝对路径/robot_arm_gazebo/meshes/` 即可。
 
 ## 构建与使用
 

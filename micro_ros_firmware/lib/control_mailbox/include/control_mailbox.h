@@ -34,7 +34,9 @@ typedef enum {
   CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT = 6U,
   // 设备参数回读（无载荷，只用 motor_id；CERB 走 4 个加速 SDO upload，
   // Vaxor 内核直接回 UNSUPPORTED）。
-  CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS = 8U
+  CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS = 8U,
+  // 设零点（无载荷，只用 motor_id；CERB 写 0x2531=1，仅失能态受理）。
+  CONTROL_MAILBOX_CONFIG_SET_ZERO = 9U
 } control_mailbox_config_kind_t;
 
 typedef struct {

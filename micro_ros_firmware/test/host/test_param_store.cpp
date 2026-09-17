@@ -8,6 +8,7 @@
 
 #include "param_name.h"
 #include "param_store_blob.h"
+#include "param_units.h"
 
 namespace {
 
@@ -130,6 +131,122 @@ void test_blob_record_capacity() {
   assert(!param_store_blob_set(blob, 1, PARAM_FIELD_ENABLE, true ? 1.0f : 0.0f));
 }
 
+// 设备端原值（v2 新增）：与 SI 字段同记录、位图独立、互不干扰。
+void test_blob_device_raw_roundtrip() {
+  static uint8_t storage[PARAM_STORE_BLOB_SIZE];
+  param_store_blob_t *blob = param_store_blob_reset(storage, sizeof(storage));
+  // 先写原值、后写字段：必须落在同一条记录（空槽判定看两位图）。
+  assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
+                                         13300U));
+  assert(param_store_blob_set(blob, 7, PARAM_FIELD_TORQUE_LIMIT, 115.5f));
+  assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT,
+                                         3030U));
+  uint32_t raw = 0U;
+  float v = 0.0f;
+  assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
+                                         &raw) && raw == 13300U);
+  assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT,
+                                         &raw) && raw == 3030U);
+  assert(!param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_POS_MIN,
+                                          &raw));
+  assert(param_store_blob_device_raw_present(blob, 7) ==
+         (uint8_t)((1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT) |
+                   (1U << PARAM_DEVICE_SLOT_VEL_LIMIT)));
+  assert(param_store_blob_get(blob, 7, PARAM_FIELD_TORQUE_LIMIT, &v) &&
+         std::fabs(v - 115.5f) < 1e-4f);
+  // 只占原值位的记录也必须能被查到（present 无位）。
+  assert(param_store_blob_device_raw_present(blob, 7) != 0U);
+  // 未记录原值的电机：位图为 0。
+  assert(param_store_blob_set(blob, 9, PARAM_FIELD_KP, 30.0f));
+  assert(param_store_blob_device_raw_present(blob, 9) == 0U);
+  // 槽位越界拒绝。
+  assert(!param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, 1U));
+}
+
+// v1 → v2 迁移：升级不丢既有的增益/限值记录；设备端原值位图为 0（不出来源
+// 不明的原值，首次上电按"无可比基准"处理）。
+void test_blob_migrate_v1() {
+  static uint8_t legacy[PARAM_STORE_LEGACY_BLOB_SIZE];
+  std::memset(legacy, 0, sizeof(legacy));
+  auto *hdr = reinterpret_cast<uint32_t *>(legacy);
+  hdr[0] = PARAM_STORE_MAGIC;                    // magic
+  hdr[1] = PARAM_STORE_VERSION_LEGACY | (PARAM_STORE_HEADER_SIZE << 16); // ver/size
+  hdr[2] = 5U;                                   // seq
+  hdr[3] = PARAM_STORE_RECORD_COUNT;             // record_count
+  // 记录 0：motor 3，kp/kd/位置限位。
+  const size_t rec0 = PARAM_STORE_HEADER_SIZE;
+  auto *p32 = reinterpret_cast<uint32_t *>(legacy + rec0);
+  p32[0] = (1U << PARAM_FIELD_KP) | (1U << PARAM_FIELD_KD) |
+           (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX);
+  auto *p16 = reinterpret_cast<uint16_t *>(legacy + rec0);
+  p16[2] = 3U; // motor_id
+  auto *pf = reinterpret_cast<float *>(legacy + rec0);
+  pf[2] = 12.5f; // kp
+  pf[3] = 1.0f;  // kd
+  pf[4] = -3.14f;
+  pf[5] = 3.14f;
+  // v1 CRC：头（crc 字段清零）+ 全部 32B 记录。
+  auto crc32 = [](uint32_t crc, const uint8_t *d, size_t len) {
+    crc = ~crc;
+    for (size_t i = 0; i < len; ++i) {
+      crc ^= d[i];
+      for (int b = 0; b < 8; ++b) {
+        crc = (crc >> 1) ^ (0xEDB88320U & (uint32_t)(-(int32_t)(crc & 1U)));
+      }
+    }
+    return ~crc;
+  };
+  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
+  std::memcpy(header_copy, legacy, PARAM_STORE_HEADER_SIZE);
+  std::memset(header_copy + 16, 0, sizeof(uint32_t));
+  uint32_t crc = crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
+  crc = crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
+              PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
+  hdr[4] = crc; // crc32 字段（偏移 16）
+
+  static uint8_t out[PARAM_STORE_BLOB_SIZE];
+  param_store_blob_t *blob = param_store_blob_migrate_v1(
+      legacy, sizeof(legacy), out, sizeof(out));
+  assert(blob != nullptr);
+  assert(blob->version == PARAM_STORE_VERSION && blob->seq == 5U);
+  assert(param_store_blob_validate(blob));
+  float v = 0.0f;
+  assert(param_store_blob_get(blob, 3, PARAM_FIELD_KP, &v) && v == 12.5f);
+  assert(param_store_blob_get(blob, 3, PARAM_FIELD_KD, &v) && v == 1.0f);
+  assert(param_store_blob_get(blob, 3, PARAM_FIELD_POS_MIN, &v) && v == -3.14f);
+  assert(param_store_blob_get(blob, 3, PARAM_FIELD_POS_MAX, &v) && v == 3.14f);
+  assert(!param_store_blob_get(blob, 3, PARAM_FIELD_VEL_LIMIT, &v));
+  assert(param_store_blob_device_raw_present(blob, 3) == 0U);
+
+  // CRC 损坏 → 拒绝迁移（当作无有效 blob）。
+  hdr[4] ^= 0xFFU;
+  assert(param_store_blob_migrate_v1(legacy, sizeof(legacy), out, sizeof(out)) ==
+         nullptr);
+}
+
+// 参数服务器对外工程单位 ↔ 内核 SI（param_units.h）。
+void test_param_units() {
+  // 角度往返：±180° ↔ ±π，180 的整数度必须精确（页面显示的就是这些值）。
+  assert(std::fabs(param_units_rad_to_deg(3.141592653589793f) - 180.0f) < 1e-3f);
+  assert(std::fabs(param_units_rad_to_deg(-0.5235987756f) + 30.0f) < 1e-4f);
+  assert(std::fabs(param_units_deg_to_rad(180.0f) - 3.14159265f) < 1e-5f);
+  assert(std::fabs(param_units_deg_to_rad(-90.0f) + 1.5707963f) < 1e-6f);
+  // 速度同系数（deg/s ↔ rad/s）。
+  assert(std::fabs(param_units_rad_to_deg(1.0f) - 57.29578f) < 1e-3f);
+  // 力矩：系数由固件按型号给出（这里是规格书峰值对 45 N·m ÷ 10.8 A）；
+  // 设备里 13.3 A → 55.4 N·m → 回读仍是 13.3 A（往返一致，与系数取值无关）。
+  const float r58 = 45.0f / 10.8f;
+  assert(std::fabs(param_units_nm_to_amp(13.3f * r58, r58) - 13.3f) < 1e-3f);
+  assert(std::fabs(param_units_amp_to_nm(13.3f, r58) - 55.4167f) < 0.05f);
+  assert(std::fabs(param_units_amp_to_nm(param_units_nm_to_amp(45.0f, r58), r58) - 45.0f) < 1e-3f);
+  // 系数缺失/非法：不换算（返回 NaN），调用方保持 SI 语义或拒绝下发。
+  assert(std::isnan(param_units_nm_to_amp(45.0f, 0.0f)));
+  assert(std::isnan(param_units_nm_to_amp(45.0f, NAN)));
+  assert(std::isnan(param_units_amp_to_nm(5.0f, -1.0f)));
+  assert(std::isnan(param_units_nm_to_amp(NAN, r58)));
+  assert(std::isnan(param_units_amp_to_nm(NAN, r58)));
+}
+
 } // namespace
 
 int main() {
@@ -138,6 +255,9 @@ int main() {
   test_blob_roundtrip_and_crc();
   test_blob_rejects_bad_layout();
   test_blob_record_capacity();
+  test_blob_device_raw_roundtrip();
+  test_param_units();
+  test_blob_migrate_v1();
   printf("test_param_store: all passed\n");
   return 0;
 }

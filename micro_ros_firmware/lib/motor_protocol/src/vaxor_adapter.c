@@ -237,14 +237,21 @@ vaxor_config_stage_count(const motor_protocol_model_profile_t *profile,
 }
 
 static bool vaxor_config_stage_info(uint8_t stage,
+                                    const motor_protocol_model_profile_t *profile,
                                     const motor_protocol_config_request_t *request,
                                     motor_protocol_config_stage_info_t *out) {
+  (void)profile;
   if (request == NULL || out == NULL || request->kind != MOTOR_PROTOCOL_CONFIG_SET_MODE ||
       stage >= 2U) {
     return false;
   }
   out->waits_response = false;
   out->timeout_ms = 0U;
+  // Vaxor 限位是内核本地软限位（CAP_LIMIT_SOFTWARE），没有设备端参数对象：
+  // 阶段不带设备端原值，不参与上电比对。
+  out->param_raw_valid = false;
+  out->param_slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
+  out->param_raw = 0U;
   return true;
 }
 

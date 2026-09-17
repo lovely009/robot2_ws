@@ -270,6 +270,22 @@ double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
 }
 
 // 0x2538：电机端 mA → 关节侧 N·m（τ = Iq × Kt × gear × efficiency）。
+double motor_protocol_limit_ma_to_joint_nm(double joint_nm_per_amp,
+                                           uint32_t milliamp) {
+  if (!(joint_nm_per_amp > 0.0)) {
+    return 0.0;
+  }
+  return ((double)milliamp / 1000.0) * joint_nm_per_amp;
+}
+
+uint32_t motor_protocol_limit_joint_nm_to_ma(double joint_nm_per_amp,
+                                             double joint_nm) {
+  if (!(joint_nm_per_amp > 0.0) || !(joint_nm > 0.0)) {
+    return 0U;
+  }
+  return (uint32_t)llround(joint_nm / joint_nm_per_amp * 1000.0);
+}
+
 double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
                                                 double gear_ratio,
                                                 double gear_efficiency,

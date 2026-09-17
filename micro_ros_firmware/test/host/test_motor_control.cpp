@@ -265,11 +265,160 @@ static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id
   assert(entry_of(ctx, motor_id)->profile == motor_control_profile_at(idx));
   motor_control_set_agent_connected(ctx, true, tick);
   assert(motor_control_set_authorization(ctx, true, tick));
+  assert(entry_of(ctx, motor_id)->dev_init == MOTOR_CONTROL_DEV_INIT_NA);
 }
 
 // 完整使能链路（CERB 路径）：反馈 → 读设备自报身份 → 命中目录即绑定 →
 // 连接 → 授权。
-static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
+// ---------------------------------------------------------------------------
+// 设备参数（CERB 0x607D:01/:02、0x6080、0x2538）：上电回读 → 与固件记录比对。
+// ---------------------------------------------------------------------------
+
+// 设备四个管理对象的顺序（与 adapter 的 REFRESH 阶段同序）。
+static const uint16_t kDevIndex[4] = {0x607DU, 0x607DU, 0x6080U, 0x2538U};
+static const uint8_t kDevSub[4] = {1U, 2U, 0U, 0U};
+
+static motor_protocol_raw_frame_t sdo_read_ack(uint16_t node, uint8_t stage,
+                                               uint32_t value, uint32_t tick) {
+  uint8_t payload[8] = {0x43U,
+                        (uint8_t)(kDevIndex[stage] & 0xFFU),
+                        (uint8_t)(kDevIndex[stage] >> 8U),
+                        kDevSub[stage],
+                        (uint8_t)(value & 0xFFU),
+                        (uint8_t)((value >> 8U) & 0xFFU),
+                        (uint8_t)((value >> 16U) & 0xFFU),
+                        (uint8_t)((value >> 24U) & 0xFFU)};
+  motor_protocol_raw_frame_t f = raw_frame(0, 0x580U + node, 8, payload, tick);
+  f.is_fd = false;
+  return f;
+}
+
+static motor_protocol_raw_frame_t sdo_write_ack(uint16_t node, uint16_t index,
+                                                uint8_t sub, uint32_t tick) {
+  uint8_t payload[8] = {0x60U, (uint8_t)(index & 0xFFU),
+                        (uint8_t)(index >> 8U), sub, 0U, 0U, 0U, 0U};
+  motor_protocol_raw_frame_t f = raw_frame(0, 0x580U + node, 8, payload, tick);
+  f.is_fd = false;
+  return f;
+}
+
+// 走完一次 REFRESH_PARAMS：逐阶段 service 出请求 → 喂对应应答。
+// 返回结束时的时间戳。keepalive 为真时每阶段夹带周期心跳 + 新命令快照，
+// 让"运行中回读"的用例在该事务期间保持 ACTIVE（否则 30ms 快照缺席级联会
+// 先把电机软停，掩盖被测路径）。
+// out_saw_p0：本事务期间是否观测到该节点的 P0 帧（软停等安全帧）。喂帧过程
+// 会清空待发队列，事后 flush 看不到已被取走的帧，故在 drain 时顺手记录。
+static uint32_t feed_device_params(motor_control_context_t *ctx, uint16_t node,
+                                   const uint32_t raw[4], uint32_t tick,
+                                   bool keepalive, bool *out_saw_p0 = nullptr) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  uint32_t t = tick;
+  for (uint8_t stage = 0U; stage < 4U; ++stage) {
+    if (keepalive) {
+      motor_control_command_snapshot_t snap = make_snapshot(1000U + stage, t);
+      snapshot_add(&snap, node, 0.1f, 0.0f, 0.0f);
+      (void)motor_control_apply_command_snapshot(ctx, &snap, t);
+    }
+    motor_control_service(ctx, t);
+    const size_t drained =
+        motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    for (size_t k = 0U; out_saw_p0 != nullptr && k < drained; ++k) {
+      if (drain[k].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0 &&
+          drain[k].can_id == 0x110U + node) {
+        *out_saw_p0 = true;
+      }
+    }
+    if (keepalive) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(node, t);
+      motor_control_on_raw_frame(ctx, &hb);
+    }
+    motor_protocol_raw_frame_t ack =
+        sdo_read_ack(node, stage, raw[stage], t + 1U);
+    motor_control_on_raw_frame(ctx, &ack);
+    t += 4U;
+  }
+  // 收尾那一拍也要看：末阶段应答在 on_raw_frame 里收尾，软停帧正是在此后的
+  // 服务拍被取走——只看循环内的 drain 会漏掉它。
+  motor_control_service(ctx, t);
+  const size_t tail =
+      motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (size_t k = 0U; out_saw_p0 != nullptr && k < tail; ++k) {
+    if (drain[k].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0 &&
+        drain[k].can_id == 0x110U + node) {
+      *out_saw_p0 = true;
+    }
+  }
+  return t;
+}
+
+// 只喂周期心跳、不回应答：让在飞的设备参数回读按阶段超时失败。
+// 心跳是必须的——静默 100ms 会先把该台判离线，测的就不是超时路径了。
+static uint32_t run_heartbeat_only(motor_control_context_t *ctx, uint16_t node,
+                                   uint32_t t, uint32_t until_ms) {
+  while ((int32_t)(until_ms - t) > 0) {
+    motor_control_service(ctx, t);
+    motor_protocol_raw_frame_t hb = cerb_feedback(node, t);
+    motor_control_on_raw_frame(ctx, &hb);
+    t += 20U;
+  }
+  return t;
+}
+
+// 走完一次 SET_TORQUE_LIMIT（写 + 读回核验）。
+static uint32_t feed_torque_write(motor_control_context_t *ctx, uint16_t node,
+                                  uint32_t ma, uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(ctx, tick);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t ack =
+      sdo_write_ack(node, 0x2538U, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t rd = sdo_read_ack(node, 3U, ma, tick + 3U);
+  motor_control_on_raw_frame(ctx, &rd);
+  motor_control_service(ctx, tick + 4U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  return tick + 4U;
+}
+
+// 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
+static motor_control_stored_params_t make_device_record(uint16_t motor_id,
+                                                        const uint32_t raw[4],
+                                                        uint8_t raw_present) {
+  motor_control_stored_params_t rec = {};
+  rec.motor_id = motor_id;
+  rec.has_position_limits = (raw_present & 0x03U) == 0x03U;
+  rec.has_velocity_limit = (raw_present & 0x04U) != 0U;
+  rec.has_torque_limit = (raw_present & 0x08U) != 0U;
+  rec.device_raw_present = raw_present;
+  for (size_t i = 0; i < 4U; ++i) {
+    rec.device_raw[i] = raw[i];
+  }
+  return rec;
+}
+
+// 限值对象的换算系数 = 规格书峰值对：45 N·m ÷ 10.8 A（R58）、11 ÷ 3.2（R48）。
+// 故"峰值扭矩 ⇔ 峰值电流"精确成立：写峰值扭矩 45 N·m 落在 10800 mA。
+#define kR58PeakMa 10800U
+// 下限 -32768 cnt（int32 补码）＝ -180°，上限 +32768 cnt ＝ +180°；
+// 3030 RPM 电机端 ＝ π rad/s 关节侧；10800 mA ＝ 45 N·m（规格书峰值）。
+static const uint32_t kR58Raw[4] = {0xFFFF8000U, 32768U, 3030U, kR58PeakMa};
+// 关节侧 N·m/A（限值口径）。
+#define kR58LimitNmPerAmp (45.0f / 10.8f)
+
+// 设备参数初始化收尾（新流程的一部分）：把"本机无记录"告知内核，驱动自动
+// 回读，再喂四个 SDO 应答。不做这一步该台停在 PENDING，按新口径不可使能。
+static void complete_device_param_init(motor_control_context_t *ctx, uint16_t node,
+                                       uint32_t tick) {
+  motor_control_stored_params_t none = {};
+  motor_control_apply_stored_params(ctx, &none, 0U, tick);
+  (void)feed_device_params(ctx, node, kR58Raw, tick + 1U, false);
+}
+
+// 绑定完成 + 会话就绪，但**不做**设备参数回读：需要观察 PENDING /
+// MISMATCH / UNVERIFIED 或自己驱动回读的用例用这个。
+static void bring_cerb_to_bound(motor_control_context_t *ctx, uint16_t motor_id,
                                 const char *profile_name, uint32_t tick) {
   motor_protocol_raw_frame_t f = cerb_feedback(motor_id, tick);
   motor_control_on_raw_frame(ctx, &f); // 建档即发起身份读取
@@ -284,6 +433,15 @@ static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
   (void)flush_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
   motor_control_set_agent_connected(ctx, true, tick);
   assert(motor_control_set_authorization(ctx, true, tick));
+}
+
+// 上电收敛完整态：绑定 + 设备参数回读比对走完（本机无记录 → OK）。
+// 上电流程要求"初始化完成才可运动"，常规用例（关心使能/运动）用这个。
+static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
+                                const char *profile_name, uint32_t tick) {
+  bring_cerb_to_bound(ctx, motor_id, profile_name, tick);
+  complete_device_param_init(ctx, motor_id, tick + 1U);
+  assert(entry_of(ctx, motor_id)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
 }
 
 // ---------------------------------------------------------------------------
@@ -364,9 +522,12 @@ static uint8_t mock_stage_count(const motor_protocol_model_profile_t *profile,
   return request->kind == MOTOR_PROTOCOL_CONFIG_SET_MODE ? 1U : 0U;
 }
 
-static bool mock_stage_info(uint8_t stage, const motor_protocol_config_request_t *request,
+static bool mock_stage_info(uint8_t stage,
+                            const motor_protocol_model_profile_t *profile,
+                            const motor_protocol_config_request_t *request,
                             motor_protocol_config_stage_info_t *out) {
   (void)stage;
+  (void)profile;
   (void)request;
   out->waits_response = true;
   out->timeout_ms = 50U;
@@ -1414,8 +1575,9 @@ static void test_cerb_limits_sdo_transaction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
-  // CERB 位置限位改走 CANopen 快速 SDO：四阶段（写下限/读下限/写上限/读上限）
-  // 全通才 OK；读回不一致不得返回 OK（ARD §20.4 / 禁止项 9）。
+  // CERB 位置限位改走 CANopen 快速 SDO：六阶段（写下限/读下限/写上限/读上限/
+  // **写 FLASH 0x2539 两次：4=负限位、2=正限位**）全通才 OK；读回不一致不得
+  // 返回 OK（ARD §20.4 / 禁止项 9）。
   // ±1.0 rad → cnt = ±10430（0x28BE），字典标度 65536 cnt/360°。
   motor_protocol_config_request_t limits = {};
   limits.request_id = 9U;
@@ -1470,11 +1632,27 @@ static void test_cerb_limits_sdo_transaction() {
   motor_control_service(&ctx, t);
   r = sdo_response(0x60U, kPosUpperSdoSub, 0U, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
-  // 阶段 3：读回上限（值一致）→ 事务收尾
+  // 阶段 3：读回上限（值一致）
   t += 10;
   motor_control_service(&ctx, t);
   r = sdo_response(0x43U, kPosUpperSdoSub, kUpperCnt, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
+  // 阶段 4/5：写 FLASH（0x2539，无应答）——字典表：4=负限位、2=正限位。
+  // 不按对应码保存，驱动器掉电就回出厂值，下次上电比对必然判"不一致"。
+  const uint32_t kSaveCodes[2] = {4U, 2U};
+  for (size_t s = 0; s < 2U; ++s) {
+    t += 10;
+    motor_control_service(&ctx, t);
+    const size_t n = motor_control_collect_tx(&ctx, frames, 16);
+    bool found = false;
+    for (size_t i = 0; i < n; ++i) {
+      if (frames[i].can_id == 0x607U && frames[i].data[0] == 0x23U &&
+          frames[i].data[1] == 0x39U && frames[i].data[4] == (uint8_t)kSaveCodes[s]) {
+        found = true;
+      }
+    }
+    assert(found);
+  }
   assert(has_result_event(&ctx, 9U, MOTOR_PROTOCOL_CONFIG_OK));
   assert(!entry_of(&ctx, 7)->tx_active);
 
@@ -1507,6 +1685,15 @@ static void test_cerb_limits_sdo_transaction() {
   assert(!motor_control_submit_config(&ctx, &late, 290));
   assert(has_result_event(&ctx, 10U, MOTOR_PROTOCOL_CONFIG_INVALID));
   assert(!entry_of(&ctx, 7)->tx_active); // 拒绝即不启动事务
+
+  // 设零点同口径：厂家要求失能状态设置，运动中一律拒绝（不隐式失能）。
+  motor_protocol_config_request_t zero = {};
+  zero.request_id = 11U;
+  zero.motor_id = 7;
+  zero.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  assert(!motor_control_submit_config(&ctx, &zero, 295));
+  assert(has_result_event(&ctx, 11U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  assert(!entry_of(&ctx, 7)->tx_active);
 
 }
 
@@ -2633,7 +2820,7 @@ static void run_all_tests() {
 static void test_cerb_refresh_params_transaction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   while (motor_control_collect_tx(&ctx, nullptr, 0) > 0) {}
 
   // 绑定后默认影子：±π、额定 π rad/s、峰值 45 N·m。
@@ -2681,7 +2868,7 @@ static void test_cerb_refresh_params_transaction() {
   r = sdo_read(0U, 0x6080U, 600U, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
   t += 10;
-  // 阶段 3：读 0x2538 = 1000 mA → 0.086×101 = 8.686 N·m
+  // 阶段 3：读 0x2538 = 1000 mA → 1 A × (45/10.8) = 4.1667 N·m（限值系数）
   motor_control_service(&ctx, t);
   r = sdo_read(0U, 0x2538U, 1000U, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
@@ -2692,7 +2879,7 @@ static void test_cerb_refresh_params_transaction() {
   assert(fabs(v->pos_min_rad - MOTOR_PROTOCOL_PI / 2.0) < 1e-4);
   assert(fabs(v->pos_max_rad - MOTOR_PROTOCOL_PI) < 1e-4);
   assert(fabs(v->velocity_limit_rad_s - 2.0 * MOTOR_PROTOCOL_PI * 10.0 / 101.0) < 1e-4);
-  assert(fabs(v->torque_limit_nm - 0.086 * 101.0) < 1e-4);
+  assert(fabs(v->torque_limit_nm - 45.0 / 10.8) < 1e-4);
 }
 
 // Vaxor 无设备参数可读：REFRESH 立即回 UNSUPPORTED，不发任何帧。
@@ -2747,6 +2934,9 @@ static void test_cerb_device_write_updates_shadow() {
                    (uint8_t)((rpm >> 16) & 0xFFU), 0};
   motor_protocol_raw_frame_t rrf = raw_frame(0, 0x587U, 8, rd, t + 1);
   motor_control_on_raw_frame(&ctx, &rrf);
+  t += 10;
+  motor_control_service(&ctx, t); // 末阶段：写 FLASH（0x2539，无应答）后收尾
+  (void)motor_control_collect_tx(&ctx, sent, 8U);
   assert(has_result_event(&ctx, 43U, MOTOR_PROTOCOL_CONFIG_OK));
   const motor_control_param_view_t *v = view_of(&ctx, 7);
   assert(fabs(v->velocity_limit_rad_s -
@@ -2772,11 +2962,12 @@ static void test_refresh_rejected_before_bind() {
 // boot 存储参数套用：CERB 只填设备影子不发 SDO；Vaxor 落本地软限位；
 // 未绑定电机保留待套用位，绑定后的下一次 apply 生效。
 static void test_stored_params_apply_after_bind() {
-  // CERB：记录 + 影子，不发帧；增益钳到 Profile 上限。
+  // CERB：记录填影子（尚未回读设备 → 来源 RECORD），不发 SDO 帧；
+  // 增益钳到 Profile 上限。
   {
     motor_control_context_t ctx;
     motor_control_init(&ctx, g_adapters, 2);
-    bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+    bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
     while (motor_control_collect_tx(&ctx, nullptr, 0) > 0) {}
 
     motor_control_stored_params_t rec = {};
@@ -2851,7 +3042,9 @@ static void test_stored_params_apply_after_bind() {
 static void test_stored_apply_does_not_override_refreshed_shadow() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  // 用 bound 版（不做设备参数回读）：本用例先验证"记录是未回读时的回落值"，
+  // 再验证"回读之后记录不得覆盖设备影子"。
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   while (motor_control_collect_tx(&ctx, nullptr, 0) > 0) {}
 
   motor_control_stored_params_t rec = {};
@@ -2861,8 +3054,10 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
   rec.has_torque_limit = true;
   rec.torque_limit_nm = 20.0f;
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  // 尚未回读设备：影子取记录（来源 = RECORD），页面显示的就是记录值。
   assert(fabs(view_of(&ctx, 7)->velocity_limit_rad_s - 1.5) < 1e-4);
   assert(fabs(view_of(&ctx, 7)->torque_limit_nm - 20.0) < 1e-4);
+  assert(view_of(&ctx, 7)->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_RECORD);
 
   // 设备回读事务更新影子（模拟内核 refresh 成功路径：直接走一遍完整事务）。
   motor_protocol_config_request_t req = {};
@@ -2893,16 +3088,570 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
   motor_control_on_raw_frame(&ctx, &f4);
   assert(has_result_event(&ctx, 51U, MOTOR_PROTOCOL_CONFIG_OK));
 
-  // 再多次套用 boot blob：设备影子必须保持回读值。
+  // 回读之后：来源转为设备，记录不得再覆盖影子（设备为准）。
+  assert(view_of(&ctx, 7)->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
   motor_control_apply_stored_params(&ctx, &rec, 1, t + 20);
   motor_control_apply_stored_params(&ctx, &rec, 1, t + 40);
   const motor_control_param_view_t *v = view_of(&ctx, 7);
   assert(fabs(v->velocity_limit_rad_s - 2.0 * MOTOR_PROTOCOL_PI * 10.0 / 101.0) < 1e-4);
-  assert(fabs(v->torque_limit_nm - 8.686) < 1e-3);
+  assert(fabs(v->torque_limit_nm - 45.0 / 10.8) < 1e-3);
+}
+
+
+// 上电比对：记录已落袋后自动回读，一致 → OK（可运动）。
+static void test_device_param_boot_verify_ok() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+  assert(entry_of(&ctx, 7)->boot_record_offered);
+
+  // 自动回读：service 即发出第一个 SDO 读请求（0x600+node，P2）。
+  motor_control_service(&ctx, 120);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U);
+  assert(frames[0].can_id == 0x600U + 7U);
+  assert(frames[0].tx_class == MOTOR_PROTOCOL_TX_CLASS_P2);
+  assert(frames[0].data[0] == 0x40U && frames[0].data[1] == 0x7DU); // 读 0x607D
+
+  uint32_t t = feed_device_params(&ctx, 7, kR58Raw, 121, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(entry_of(&ctx, 7)->dev_raw_present == 0x0FU);
+  assert(entry_of(&ctx, 7)->dev_raw[3] == kR58PeakMa);
+  assert(entry_of(&ctx, 7)->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
+
+  const motor_control_param_view_t *v = view_of(&ctx, 7);
+  assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(v->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
+  assert(v->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
+  assert(v->dev_raw[3] == kR58PeakMa);
+  assert(fabs(v->torque_limit_nm - 45.0) < 0.1);
+
+  // 自动回读每会话只发一次：再 service 不再产生 SDO 请求。
+  motor_control_service(&ctx, t + 10U);
+  assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0U);
+}
+
+// 上电比对：设备里的峰值电流与记录不一致（台架实测 13300 mA vs 记录 10800 mA）
+// → 未初始化：冻结授权、拒绝使能、不出运动帧；影子仍取设备真值。
+static void test_device_param_mismatch_blocks_motion() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  const uint32_t device_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  (void)feed_device_params(&ctx, 7, device_raw, 120, false);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(e->dev_raw[3] == 13300U);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM);
+  assert(!e->policy_enable);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
+  // 影子 = 设备真值（13300 mA → 115.5 N·m），不是记录值。
+  assert(fabs(e->dev_max_torque_nm - 13.3 * kR58LimitNmPerAmp) < 0.1);
+
+  // 使能被拒（显式回告，不静默吞掉）。
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 71U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  motor_control_service(&ctx, 140);
+  assert(!motor_control_submit_config(&ctx, &enable, 141));
+  assert(has_result_event(&ctx, 71U, MOTOR_PROTOCOL_CONFIG_INVALID));
+
+  // 快照也不得产生任何 MIT（P1）帧。
+  motor_control_command_snapshot_t snap = make_snapshot(1U, 150);
+  snapshot_add(&snap, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &snap, 152));
+  motor_control_service(&ctx, 154);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+}
+
+// 写事务 = 设备 + 固件记录一起写：写核验通过后记录同步、脏位置起、比对重判。
+static void test_device_param_write_syncs_record_and_recovers() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  const uint32_t bad_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  (void)feed_device_params(&ctx, 7, bad_raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(!motor_control_take_record_dirty(&ctx));
+
+  // 用户从参数页写回 45 N·m（峰值钳制上限）→ 规格书峰值电流 10800 mA。
+  motor_protocol_config_request_t trq = {};
+  trq.request_id = 81U;
+  trq.motor_id = 7;
+  trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
+  trq.max_torque_nm = 100.0f; // 超峰值 → 内核钳到 45 N·m
+  motor_control_service(&ctx, 140);
+  assert(motor_control_submit_config(&ctx, &trq, 141));
+  (void)feed_torque_write(&ctx, 7, kR58PeakMa, 142);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(has_result_event(&ctx, 81U, MOTOR_PROTOCOL_CONFIG_OK));
+  // 记录与设备同步（原值口径），并请求落盘。
+  assert(e->record_raw[3] == kR58PeakMa);
+  assert((e->record_raw_present & 0x08U) != 0U);
+  assert(e->dev_raw[3] == kR58PeakMa);
+  assert(fabs(e->record_max_torque_nm - 45.0) < 0.1);
+  assert(motor_control_take_record_dirty(&ctx));
+
+  // 记录与设备重新一致 → 解除未初始化，回到可运动态。
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_NONE);
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 82U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  assert(motor_control_submit_config(&ctx, &enable, 160));
+  assert(has_result_event(&ctx, 82U, MOTOR_PROTOCOL_CONFIG_OK));
+}
+
+// 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
+// 结论出事件 + 错误码 41。恢复：重连重读或手动回读。
+static void test_device_param_unverified_blocks_motion() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 只喂心跳、不回应答：单次尝试 = 4 阶段 ×(20ms 超时 ×3)，尝试之间退避
+  // 500ms；用尽 MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 次才定论。
+  uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 3000U);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_read_attempts >= MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
+  assert(e->dev_read_done);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(!e->policy_enable);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
+
+  // 初始化未完成：使能被拒，快照也不出 MIT。
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 91U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  assert(!motor_control_submit_config(&ctx, &enable, t));
+  assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  motor_control_command_snapshot_t snap = make_snapshot(1U, t + 2U);
+  snapshot_add(&snap, 7, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &snap, t + 4U));
+  motor_control_service(&ctx, t + 6U);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+}
+
+// 首次回读失败 → 退避重试、期间仍 PENDING；重试成功即 OK，不退化 UNVERIFIED。
+static void test_device_param_read_retry_recovers() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 第一次尝试：设备不应答（只喂心跳）→ 未定论，排下次重试。
+  uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 500U);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_read_attempts == 1U);
+  assert(!e->dev_read_done);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING); // 仍不可使能
+  assert(!motor_control_dev_params_allow_motion(e));
+
+  // 退避窗内继续喂心跳保持在线（静默 100ms 会被判离线，测的就不是重试路径），
+  // 到点后设备正常应答 → 第二次尝试成功。
+  const uint32_t retry_at = e->dev_read_retry_tick_ms;
+  t = run_heartbeat_only(&ctx, 7, t, retry_at - 5U);
+  (void)feed_device_params(&ctx, 7, kR58Raw, retry_at, false);
+  assert(e->dev_read_attempts == 2U);
+  assert(e->dev_read_done);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(motor_control_dev_params_allow_motion(e));
+}
+
+// 上电回读未收尾（PENDING）：同样不可使能——"初始化完成前不可使能"。
+// 回读收尾后立即可使能（不等重连、不需人工干预）。
+static void test_device_param_pending_blocks_enable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 95U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  motor_control_service(&ctx, 112);
+  assert(!motor_control_submit_config(&ctx, &enable, 113));
+  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_INVALID));
+
+  // 设备参数回读收尾 → OK → 使能被受理。
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(motor_control_submit_config(&ctx, &enable, 140));
+  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_OK));
+}
+
+// 运行中（ACTIVE）手动回读发现不一致：走**软停**（阻尼帧、保留使能），
+// 不硬失能；随后锁存未初始化结论。
+static void test_device_param_runtime_mismatch_soft_stops() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+
+  // 跑到 ACTIVE：使能 + 整定窗 100ms 内持续喂快照与心跳。
+  motor_protocol_config_request_t enable = {};
+  enable.request_id = 96U;
+  enable.motor_id = 7;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  assert(motor_control_submit_config(&ctx, &enable, 150));
+  for (uint32_t i = 0U; i < 8U; ++i) {
+    const uint32_t base = 152U + i * 20U;
+    motor_control_command_snapshot_t snap = make_snapshot(1U + i, base);
+    snapshot_add(&snap, 7, 0.1f, 0.0f, 0.0f);
+    assert(motor_control_apply_command_snapshot(&ctx, &snap, base + 2U));
+    motor_protocol_raw_frame_t hb = cerb_feedback(7, base + 3U);
+    motor_control_on_raw_frame(&ctx, &hb);
+    motor_control_service(&ctx, base + 4U);
+  }
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1); // 清空 P1 待发
+
+  // 手动回读，设备里的峰值电流与记录不符 → 软停而不是硬失能。
+  motor_protocol_config_request_t refresh = {};
+  refresh.request_id = 97U;
+  refresh.motor_id = 7;
+  refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  assert(motor_control_submit_config(&ctx, &refresh, 320));
+  const uint32_t bad_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  bool saw_p0 = false;
+  (void)feed_device_params(&ctx, 7, bad_raw, 321, true, &saw_p0);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_SOFT_STOP, 7));
+  assert(!e->policy_enable && !e->motion_authorized);
+  // 软停帧（P0、MIT 阻尼）已发出——不是失能帧。
+  assert(saw_p0);
+}
+
+// 记录里没写过的槽位不参与比对：只比记录声明过的字段。
+static void test_device_param_partial_record_compare() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  // 记录只含峰值电流一项；设备的位置/转速与记录里的值无关。
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x08U);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  const uint32_t device_raw[4] = {1024U, 2048U, 100U, kR58PeakMa};
+  (void)feed_device_params(&ctx, 7, device_raw, 120, false);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(e->dev_raw_present == 0x0FU);
+  assert(e->record_raw_present == 0x08U);
+
+  // 记录里声明的峰值电流对不上 → 未初始化（其余槽位不参与）。
+  motor_control_context_t ctx2;
+  motor_control_init(&ctx2, g_adapters, 2);
+  bring_cerb_to_bound(&ctx2, 9, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec2 = make_device_record(9, kR58Raw, 0x08U);
+  motor_control_apply_stored_params(&ctx2, &rec2, 1, 110);
+  const uint32_t bad_raw[4] = {1024U, 2048U, 100U, 13300U};
+  (void)feed_device_params(&ctx2, 9, bad_raw, 120, false);
+  assert(entry_of(&ctx2, 9)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+}
+
+// 视图同时暴露固件记录（比对基准）：本次上电未成功回读设备时，存储投影靠它
+// 保住基准，不能因为"读不到设备"就把记录抹掉。
+static void test_device_param_view_exposes_record() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  const motor_control_param_view_t *v = view_of(&ctx, 7);
+  assert(v->dev_raw_present == 0U);        // 还没回读设备
+  assert(v->record_raw_present == 0x0FU);  // 记录基准在视图里可见
+  assert(v->record_raw[3] == kR58PeakMa);
+  assert(v->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_RECORD);
+  assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+
+  // 回读成功后：设备端原值就位，记录仍保留（比对依据）。
+  const uint32_t device_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  (void)feed_device_params(&ctx, 7, device_raw, 120, false);
+  v = view_of(&ctx, 7);
+  assert(v->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
+  assert(v->dev_raw[3] == 13300U);
+  assert(v->record_raw_present == 0x0FU);
+  assert(v->record_raw[3] == kR58PeakMa);
+  assert(v->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
+  assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+}
+
+// 多台 CERB 并行上电回读：每台必须各发 4 个 SDO 读请求，对象顺序固定为
+// 0x607D:01（位置下限）→ 0x607D:02（位置上限）→ 0x6080（最大转速）→
+// 0x2538（峰值电流）。多台并行时同一拍各台各推进一个阶段，总线上是
+// "逐台交错"而非"逐台跑完再下一台"——按台过滤日志时每台恰好 4 条读请求。
+static void test_device_param_four_reads_per_motor() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  const uint16_t ids[4] = {1U, 2U, 3U, 4U};
+  for (size_t i = 0; i < 4U; ++i) {
+    bring_cerb_to_bound(&ctx, ids[i], "cerb_r58_101", 100U);
+  }
+  motor_control_stored_params_t rec[4];
+  for (size_t i = 0; i < 4U; ++i) {
+    rec[i] = make_device_record(ids[i], kR58Raw, 0x0FU);
+  }
+  motor_control_apply_stored_params(&ctx, rec, 4U, 110U);
+
+  // 逐拍推进：每拍喂心跳保活 → service → 取帧（**同总线每拍至多一条 SDO
+  // 请求**，一问一答）→ 立刻喂该请求的应答。
+  uint8_t got_count[4] = {0};
+  uint8_t got_index[4][4] = {{0}};
+  uint32_t t = 120U;
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  for (uint8_t round = 0U; round < 40U; ++round) {
+    for (size_t i = 0; i < 4U; ++i) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(ids[i], t);
+      motor_control_on_raw_frame(&ctx, &hb);
+    }
+    motor_control_service(&ctx, t);
+    const size_t n = motor_control_collect_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+    size_t requests = 0U;
+    for (size_t k = 0; k < n; ++k) {
+      if (frames[k].data[0] != 0x40U) {
+        continue; // 只看上传（读）请求
+      }
+      requests++;
+      const uint16_t node = (uint16_t)(frames[k].can_id - 0x600U);
+      assert(node >= 1U && node <= 4U);
+      const uint16_t index =
+          (uint16_t)(frames[k].data[1] | ((uint16_t)frames[k].data[2] << 8U));
+      const uint8_t sub = frames[k].data[3];
+      const size_t slot = (index == 0x607DU) ? (sub == 1U ? 0U : 1U)
+                                             : (index == 0x6080U ? 2U : 3U);
+      assert(slot == got_count[node - 1U]); // 每台阶段顺序固定
+      got_index[node - 1U][got_count[node - 1U]] = (uint8_t)index;
+      got_count[node - 1U]++;
+      motor_protocol_raw_frame_t ack =
+          sdo_read_ack(node, (uint8_t)slot, kR58Raw[slot], t + 1U);
+      motor_control_on_raw_frame(&ctx, &ack);
+    }
+    // 一问一答：同一总线上不允许出现两条同时在飞的 SDO 请求。
+    assert(requests <= 1U);
+    t += 2U;
+  }
+  for (size_t i = 0; i < 4U; ++i) {
+    assert(got_count[i] == 4U); // 每台恰好 4 条读
+    assert(entry_of(&ctx, ids[i])->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+    assert(entry_of(&ctx, ids[i])->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
+  }
+}
+
+// 重连：本轮设备参数结论作废重读，但 Flash 记录（比对基准）必须保留——
+// 记录只在 boot 首次落袋时捕获，重连时清掉就再也补不回来，之后的不一致
+// 会被当成"本机无记录"静默放过。
+static void test_device_param_reconnect_keeps_record() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+
+  // 心跳丢失 ≥100ms → OFFLINE；再收到反馈 → 重连（走重识别）。
+  uint32_t t = 400U; // 末帧约在 136ms，留足 100ms 心跳龄
+  motor_control_service(&ctx, t);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE);
+  motor_protocol_raw_frame_t hb = cerb_feedback(7, t + 1U);
+  motor_control_on_raw_frame(&ctx, &hb);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING); // 结论作废，待重读
+  assert(!e->dev_read_done);
+  assert(e->record_valid);                    // 记录保留
+  assert(e->record_raw_present == 0x0FU);
+  assert(e->record_raw[3] == kR58PeakMa);
+  assert(e->dev_raw_present == 0U);           // 旧影子作废
+}
+
+// 外部写入不得超过**固定硬件参数表**（规格书）：请求超限时钳到型号表峰值，
+// 且落到设备上的原值正好等于规格书的峰值电流 / 额定转速 / 位置量化范围。
+// 覆盖三列：扭矩(=电流)、速度、位置。
+static void test_device_write_clamped_to_hardware_table() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+
+  // ① 扭矩请求 100 N·m（远超峰值 45）→ 钳到峰值，落到设备 = 峰值电流 10800 mA。
+  motor_protocol_config_request_t trq = {};
+  trq.request_id = 201U;
+  trq.motor_id = 7;
+  trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
+  trq.max_torque_nm = 100.0f;
+  assert(motor_control_submit_config(&ctx, &trq, 200));
+  motor_control_service(&ctx, 201);
+  const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U && frames[0].can_id == 0x600U + 7U);
+  assert(frames[0].data[0] == 0x23U && frames[0].data[1] == 0x38U); // 写 0x2538
+  const uint32_t ma = (uint32_t)frames[0].data[4] |
+                      ((uint32_t)frames[0].data[5] << 8U) |
+                      ((uint32_t)frames[0].data[6] << 16U) |
+                      ((uint32_t)frames[0].data[7] << 24U);
+  assert(ma == kR58PeakMa); // 10800 mA = 规格书峰值电流
+  (void)feed_torque_write(&ctx, 7, kR58PeakMa, 202);
+  assert(fabs(entry_of(&ctx, 7)->dev_max_torque_nm - 45.0f) < 0.01f);
+  assert(entry_of(&ctx, 7)->record_raw[3] == kR58PeakMa);
+
+  // ② 速度请求 10 rad/s（远超额定 π）→ 钳到额定，落到设备 = 3030 RPM。
+  motor_protocol_config_request_t vel = {};
+  vel.request_id = 202U;
+  vel.motor_id = 7;
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.max_velocity_rad_s = 10.0f;
+  assert(motor_control_submit_config(&ctx, &vel, 300));
+  motor_control_service(&ctx, 301);
+  size_t m = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(m == 1U && frames[0].data[0] == 0x23U && frames[0].data[1] == 0x80U); // 写 0x6080
+  const uint32_t rpm = (uint32_t)frames[0].data[4] |
+                       ((uint32_t)frames[0].data[5] << 8U) |
+                       ((uint32_t)frames[0].data[6] << 16U) |
+                       ((uint32_t)frames[0].data[7] << 24U);
+  assert(rpm == 3030U); // 额定 30 RPM 输出 → 电机端 3030 RPM
+  motor_control_service(&ctx, 302);
+  motor_protocol_raw_frame_t ack = sdo_write_ack(7, 0x6080U, 0U, 303U);
+  motor_control_on_raw_frame(&ctx, &ack);
+  motor_control_service(&ctx, 304);
+  (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING); // 取走本阶段读回请求
+  motor_protocol_raw_frame_t rd = sdo_read_ack(7, 2U, 3030U, 305U);
+  motor_control_on_raw_frame(&ctx, &rd);
+  assert(fabs(entry_of(&ctx, 7)->dev_max_velocity_rad_s - MOTOR_PROTOCOL_PI) < 1e-3f);
+  // 末阶段：写 FLASH（0x2539，码 1）落盘。无应答，服务一拍即发出并收尾——
+  // 不落盘的话驱动器一断电就回出厂值，下次上电比对必然判"不一致"。
+  motor_control_service(&ctx, 306);
+  m = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(m == 1U && frames[0].can_id == 0x600U + 7U);
+  assert(frames[0].data[0] == 0x23U && frames[0].data[1] == 0x39U &&
+         frames[0].data[2] == 0x25U && frames[0].data[4] == 0x01U);
+  assert(!entry_of(&ctx, 7)->tx_active);
+
+  // ③ 位置请求 ±300°（超 ±180° 量化范围）→ 钳到 ±π，落到设备 = ±32768 cnt。
+  motor_protocol_config_request_t pos = {};
+  pos.request_id = 203U;
+  pos.motor_id = 7;
+  pos.kind = MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS;
+  pos.position_limits.min_position_rad = -300.0f * (float)MOTOR_PROTOCOL_PI / 180.0f;
+  pos.position_limits.max_position_rad = 300.0f * (float)MOTOR_PROTOCOL_PI / 180.0f;
+  assert(motor_control_submit_config(&ctx, &pos, 400));
+  motor_control_service(&ctx, 401);
+  m = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(m == 1U && frames[0].data[0] == 0x23U && frames[0].data[3] == 0x01U);
+  const int32_t lo_cnt = (int32_t)((uint32_t)frames[0].data[4] |
+                                   ((uint32_t)frames[0].data[5] << 8U) |
+                                   ((uint32_t)frames[0].data[6] << 16U) |
+                                   ((uint32_t)frames[0].data[7] << 24U));
+  // 钳到 ±π，再按字典范围钳 cnt：下限是 -32767（字典下限），不是 -32768。
+  assert(lo_cnt == -32767);
+}
+
+// 设零点（字典 0x2531 写 1）：失能态受理，单阶段写 + 应答即 OK；不更新记录，
+// 也不进设备参数比对（零点不是本机记录的参数）。
+static void test_cerb_set_zero_transaction() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  const uint32_t raw_before = entry_of(&ctx, 7)->dev_raw[3];
+  const bool record_valid_before = entry_of(&ctx, 7)->record_valid;
+
+  motor_protocol_config_request_t z = {};
+  z.request_id = 301U;
+  z.motor_id = 7;
+  z.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  assert(motor_control_submit_config(&ctx, &z, 110));
+  motor_control_service(&ctx, 111);
+  const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U && frames[0].can_id == 0x600U + 7U);
+  assert(frames[0].data[0] == 0x23U && frames[0].data[1] == 0x31U &&
+         frames[0].data[2] == 0x25U && frames[0].data[4] == 0x01U);
+
+  // SDO 写应答（0x60，索引 0x2531）→ 事务 OK。
+  motor_protocol_raw_frame_t ack = sdo_write_ack(7, 0x2531U, 0U, 112U);
+  motor_control_on_raw_frame(&ctx, &ack);
+  assert(has_result_event(&ctx, 301U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(!entry_of(&ctx, 7)->tx_active);
+  // 记录与设备端原值不受影响（零点不是本机记录的参数）。
+  assert(entry_of(&ctx, 7)->dev_raw[3] == raw_before);
+  assert(entry_of(&ctx, 7)->record_valid == record_valid_before);
+
+  // 未绑定/无表项：拒绝。
+  motor_protocol_config_request_t unknown = z;
+  unknown.request_id = 302U;
+  unknown.motor_id = 99U;
+  assert(!motor_control_submit_config(&ctx, &unknown, 120));
+}
+
+// 非设备侧型号（VAXOR）与未回读：不参与比对，恒 NA。
+static void test_device_param_na_for_software_limit_models() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+  motor_control_stored_params_t rec = {};
+  rec.motor_id = 5;
+  rec.has_kp_kd = true;
+  rec.kp = 1.0f;
+  rec.kd = 0.5f;
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  motor_control_service(&ctx, 120);
+  assert(entry_of(&ctx, 5)->dev_init == MOTOR_CONTROL_DEV_INIT_NA);
+  assert(entry_of(&ctx, 5)->dev_read_done == false); // 从不发起设备回读
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0U);
 }
 
 int main() {
   bind_real_adapters();
+  test_device_param_boot_verify_ok();
+  test_device_param_mismatch_blocks_motion();
+  test_device_param_write_syncs_record_and_recovers();
+  test_device_param_read_retry_recovers();
+  test_device_param_unverified_blocks_motion();
+  test_device_param_pending_blocks_enable();
+  test_device_param_runtime_mismatch_soft_stops();
+  test_device_param_partial_record_compare();
+  test_device_param_view_exposes_record();
+  test_device_write_clamped_to_hardware_table();
+  test_cerb_set_zero_transaction();
+  test_device_param_four_reads_per_motor();
+  test_device_param_reconnect_keeps_record();
+  test_device_param_na_for_software_limit_models();
   test_stored_apply_does_not_override_refreshed_shadow();
   test_stored_params_apply_after_bind();
   test_cerb_refresh_params_transaction();

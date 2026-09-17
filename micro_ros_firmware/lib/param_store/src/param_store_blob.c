@@ -2,7 +2,8 @@
 
 #include <string.h>
 
-_Static_assert(sizeof(param_store_record_t) == 32U, "record 必须 32B");
+_Static_assert(sizeof(param_store_record_t) == PARAM_STORE_RECORD_SIZE,
+               "record 必须 48B");
 _Static_assert(sizeof(param_store_blob_t) == PARAM_STORE_BLOB_SIZE,
                "blob 布局尺寸漂移");
 
@@ -52,10 +53,16 @@ bool param_store_blob_validate(const param_store_blob_t *blob) {
   return blob->crc32 == blob_crc(blob);
 }
 
+// 已占用记录 = 有字段位或有设备端原值位；空槽两者皆空（motor_id 可能有
+// 残留，判定不看它——否则"先写原值后写字段"会占出两条记录）。
+static bool record_occupied(const param_store_record_t *rec) {
+  return rec->present != 0U || rec->device_raw_present != 0U;
+}
+
 static param_store_record_t *find_record(param_store_blob_t *blob,
                                          uint16_t motor_id) {
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-    if (blob->records[i].present != 0U &&
+    if (record_occupied(&blob->records[i]) &&
         blob->records[i].motor_id == motor_id) {
       return &blob->records[i];
     }
@@ -74,7 +81,8 @@ bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
   param_store_record_t *rec = find_record(blob, motor_id);
   if (rec == NULL) {
     for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-      if (blob->records[i].present == 0U) {
+      // 空槽 = present 无位且没被 device_raw 单独占用（可能先写原值后写字段）。
+      if (!record_occupied(&blob->records[i])) {
         rec = &blob->records[i];
         rec->motor_id = motor_id;
         break;
@@ -105,7 +113,7 @@ bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
   }
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
     const param_store_record_t *rec = &blob->records[i];
-    if (rec->present == 0U || rec->motor_id != motor_id) {
+    if (!record_occupied(rec) || rec->motor_id != motor_id) {
       continue;
     }
     if ((rec->present & ((uint32_t)1U << (unsigned)field)) == 0U) {
@@ -131,4 +139,138 @@ void param_store_blob_finalize(param_store_blob_t *blob, uint32_t seq) {
   blob->seq = seq;
   blob->crc32 = 0U;
   blob->crc32 = blob_crc(blob);
+}
+
+bool param_store_blob_set_device_raw(param_store_blob_t *blob, uint16_t motor_id,
+                                     param_device_slot_t slot, uint32_t raw) {
+  if (blob == NULL || motor_id == 0U || slot >= PARAM_DEVICE_SLOT_COUNT) {
+    return false;
+  }
+  param_store_record_t *rec = find_record(blob, motor_id);
+  if (rec == NULL) {
+    for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+      if (!record_occupied(&blob->records[i])) {
+        rec = &blob->records[i];
+        rec->motor_id = motor_id;
+        break;
+      }
+    }
+    if (rec == NULL) {
+      return false;
+    }
+  }
+  rec->device_raw[(unsigned)slot] = raw;
+  rec->device_raw_present |= (uint8_t)(1U << (unsigned)slot);
+  return true;
+}
+
+bool param_store_blob_get_device_raw(const param_store_blob_t *blob,
+                                     uint16_t motor_id, param_device_slot_t slot,
+                                     uint32_t *raw) {
+  if (blob == NULL || raw == NULL || slot >= PARAM_DEVICE_SLOT_COUNT) {
+    return false;
+  }
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    const param_store_record_t *rec = &blob->records[i];
+    if (!record_occupied(rec) || rec->motor_id != motor_id) {
+      continue;
+    }
+    if ((rec->device_raw_present & (uint8_t)(1U << (unsigned)slot)) == 0U) {
+      return false;
+    }
+    *raw = rec->device_raw[(unsigned)slot];
+    return true;
+  }
+  return false;
+}
+
+uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
+                                            uint16_t motor_id) {
+  if (blob == NULL) {
+    return 0U;
+  }
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    const param_store_record_t *rec = &blob->records[i];
+    if (record_occupied(rec) && rec->motor_id == motor_id) {
+      return rec->device_raw_present;
+    }
+  }
+  return 0U;
+}
+
+// v1 记录（32B，无设备端原值）：仅供读取迁移，不参与写入。
+typedef struct {
+  uint32_t present;
+  uint16_t motor_id;
+  uint16_t reserved;
+  float kp;
+  float kd;
+  float pos_min;
+  float pos_max;
+  float vel_limit;
+  float torque_limit;
+} param_store_record_v1_t;
+
+typedef struct {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t header_size;
+  uint32_t seq;
+  uint32_t record_count;
+  uint32_t crc32;
+  uint32_t reserved[3];
+  param_store_record_v1_t records[PARAM_STORE_RECORD_COUNT];
+} param_store_blob_v1_t;
+
+_Static_assert(sizeof(param_store_record_v1_t) == PARAM_STORE_LEGACY_RECORD_SIZE,
+               "v1 record 必须 32B");
+_Static_assert(sizeof(param_store_blob_v1_t) == PARAM_STORE_LEGACY_BLOB_SIZE,
+               "v1 blob 尺寸漂移");
+
+static uint32_t blob_v1_crc(const param_store_blob_v1_t *blob) {
+  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
+  memcpy(header_copy, blob, PARAM_STORE_HEADER_SIZE);
+  memset(header_copy + 16, 0, sizeof(uint32_t));
+  uint32_t crc = crc32_update(0U, header_copy, PARAM_STORE_HEADER_SIZE);
+  return crc32_update(crc, (const uint8_t *)blob->records,
+                      sizeof(blob->records));
+}
+
+param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_size,
+                                                void *out, size_t out_size) {
+  if (legacy_src == NULL || out == NULL ||
+      src_size < PARAM_STORE_LEGACY_BLOB_SIZE ||
+      out_size < PARAM_STORE_BLOB_SIZE) {
+    return NULL;
+  }
+  const param_store_blob_v1_t *src = (const param_store_blob_v1_t *)legacy_src;
+  if (src->magic != PARAM_STORE_MAGIC ||
+      src->version != PARAM_STORE_VERSION_LEGACY ||
+      src->header_size != PARAM_STORE_HEADER_SIZE ||
+      src->record_count != PARAM_STORE_RECORD_COUNT ||
+      src->crc32 != blob_v1_crc(src)) {
+    return NULL;
+  }
+  param_store_blob_t *dst = param_store_blob_reset(out, out_size);
+  if (dst == NULL) {
+    return NULL;
+  }
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    const param_store_record_v1_t *from = &src->records[i];
+    if (from->present == 0U) {
+      continue;
+    }
+    param_store_record_t *to = &dst->records[i];
+    to->present = from->present;
+    to->motor_id = from->motor_id;
+    to->device_raw_present = 0U; // v1 没有设备端原值：升级后不做比对
+    to->kp = from->kp;
+    to->kd = from->kd;
+    to->pos_min = from->pos_min;
+    to->pos_max = from->pos_max;
+    to->vel_limit = from->vel_limit;
+    to->torque_limit = from->torque_limit;
+  }
+  param_store_blob_finalize(dst, src->seq); // seq 沿用，活动槽选择不受影响
+  return dst;
 }

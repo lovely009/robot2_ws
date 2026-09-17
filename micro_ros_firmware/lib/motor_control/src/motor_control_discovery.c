@@ -139,6 +139,18 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->identity_size = 0U;
     entry->identity_read_overflow = false;
     entry->profile = NULL;
+    // 设备参数**结论**一并作废：重新上线要重新回读设备并比对（换机/厂家工具
+    // 都可能改过设备里的值）。旧影子的换算值属于旧型号，不许留用。
+    // 注意只清"本轮会话结论"，**不清 Flash 记录**（record_*）：记录是电机侧
+    // 的持久事实，且只在 boot 首次落袋时捕获一次——在这里清掉就再也补不回来，
+    // 之后的重连都会变成"无记录可比"，不一致会被静默放过。
+    entry->dev_limits_valid = false;
+    entry->limits_source = MOTOR_CONTROL_LIMITS_SOURCE_NONE;
+    entry->dev_raw_present = 0U;
+    entry->dev_read_done = false;
+    entry->dev_read_attempts = 0U;
+    entry->dev_read_retry_tick_ms = 0U;
+    entry->dev_init = MOTOR_CONTROL_DEV_INIT_PENDING;
     motor_control_push_event(ctx, frame->rx_tick_ms,
                              MOTOR_CONTROL_EVENT_RECONNECTED, entry->motor_id,
                              entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);

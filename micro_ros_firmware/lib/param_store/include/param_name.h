@@ -26,6 +26,18 @@ typedef enum {
   PARAM_FIELD_COUNT
 } param_field_t;
 
+// 设备端原值槽位（位置下限/位置上限/最大转速/峰值电流）。顺序必须与
+// motor_protocol_adapter.h 的 MOTOR_PROTOCOL_PARAM_SLOT_* 一致——两端跨库
+// 同序由 host 测试（test_param_store / test_motor_control）与 storage_task
+// 里的 _Static_assert 共同保证。
+typedef enum {
+  PARAM_DEVICE_SLOT_POS_MIN = 0,
+  PARAM_DEVICE_SLOT_POS_MAX = 1,
+  PARAM_DEVICE_SLOT_VEL_LIMIT = 2,
+  PARAM_DEVICE_SLOT_TORQUE_LIMIT = 3,
+  PARAM_DEVICE_SLOT_COUNT = 4
+} param_device_slot_t;
+
 typedef enum {
   PARAM_NAME_UNKNOWN = -1,
   PARAM_NAME_MOTOR = 0,

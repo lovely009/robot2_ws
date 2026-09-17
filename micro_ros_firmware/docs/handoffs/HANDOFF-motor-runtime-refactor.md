@@ -87,6 +87,13 @@ PlatformIO build。
   经 config FIFO 接现有内核事务；另增 REFRESH_PARAMS（kind=8）四个 SDO
   upload 回读设备影子，W25Q64 双 sector 显式持久化（`storage_task`）。
   已知天花板：rclc low-mem 参数槽 128 ≈ 17 台。
+- **设备参数上电比对已落地**（2026-09-17，见
+  `docs/architecture/motor-runtime-decision-log.md` §6.3）：上电/重连自动回读
+  设备四对象并与 W25 记录比**设备端原值**，不一致即"未初始化"（`CONFIG_CONFLICT`
+  + 拒绝使能 + `last_error=40`），回读失败报 41 但不拦；设备侧写成功同时更新
+  设备与记录并自动落盘（去抖 500ms）；W25 blob 升 v2（含 4 个 `device_raw`）并
+  支持 v1 迁移。**台架实测待做**：真机逐台确认回读值、故意改一台设备的参数
+  验证"判为未初始化 → 写回恢复"闭环。
 - Vaxor 80 速比型号缺少完整 Profile，不得凭猜测开放控制；
 - FDCAN BUS_OFF 当前可观测但恢复策略须依据台架数据确定；
 - 最大规模三总线、约 40 台设备时的 USB CDC 带宽、RX 容量和实时余量尚待实测；

@@ -118,11 +118,78 @@ cd micro_ros_firmware
   调栈/周期后同步改 README。
 - **参数服务器契约**（`param_bridge`）：每电机 7 个动态参数 `m<id>.{enable,kp,kd,
   pos_min,pos_max,vel_limit,torque_limit}`（发现后注册、离线不注销，容量 17 台）+
-  5 个 `system.*`（save/refresh 脉冲、last_error(_motor)、heap_free）。rclc 跑
-  low-mem 模式（DTCM newlib 堆约 0.3KB/槽）：`ros2 param get/set` 单参数可用，
+  8 个 `system.*`（save 脉冲、refresh + **refresh_seq** 回读、**set_zero + set_zero_seq**
+  设零点、last_error(_motor)、heap_free；容量仍 17 台）。
+  **单位是工程单位**（2026-09-17）：位置 **度**、速度 **度/秒**、力矩 **安培**
+  （设备里的对象本来就是 cnt / RPM / mA）；rad、rad/s、N·m 只在内核与 W25 记录里，
+  换算只在 `param_bridge` 边界做一次（`lib/param_store/param_units.h`，host 可测）。
+  力矩用 A 而非 N·m：设备侧权威对象是 `0x2538`（电机最大电流），折成 N·m 要过
+  Kt×减速比×效率，而该系数正存在未决争议（决策日志 §6.4 的 TBD-PROFILE-02）。
+  rclc 跑 low-mem 模式（DTCM newlib 堆约 0.3KB/槽）：`ros2 param get/set` 单参数可用，
   批量 get 与 `ros2 param dump` 返回空。set=「已受理」，设备类写最终成败经
   CONFIG_RESULT 事件（失败自动回弹 rcl 值）；`system.refresh=<id>` 发 4 个 SDO
   upload 刷 CERB 设备影子；enable 不落盘。
+- **设备参数以驱动板为准（2026-09-17）**：上电/重连绑定完成后，内核自动对
+  设备侧限位型号（CERB）发一次 `REFRESH_PARAMS` 回读（`0x607D:01/:02`、
+  `0x6080`、`0x2538`），与 W25 记录**逐槽位比设备端原值**（cnt/RPM/mA——
+  比关节侧 SI 会在换算系数配错时两边一起错，等于没比）：
+  - 一致（或本机对该台无记录）= 初始化通过；
+  - **初始化未完成一律不可使能**：`PENDING`（回读未收尾）/`MISMATCH`
+    （与记录不一致）/`UNVERIFIED`（回读失败）三种结论下，`SET_ENABLE` 一律
+    被拒（`INVALID`）、也不出运动帧。内核进 `CONFIG_CONFLICT`，
+    `param_bridge` 报 `last_error=40`（不一致）/ `41`（未核对）；从参数页写回
+    该台参数（写事务同时更新设备与记录）或重连后重读即可恢复；
+  - **运行中回读发现不一致 → 软停**（P0 MIT 阻尼帧、保留使能），不硬失能；
+    静止态（READY_DISABLED 等）没有要停的东西，直接锁存结论；
+  - 自动回读失败先**退避重试**（最多 `MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS`=3 次、
+    间隔 `MOTOR_CONTROL_DEV_READ_RETRY_MS`=500ms；SDO upload 是纯只读、对设备
+    无副作用），用尽才定论 `UNVERIFIED`，避免一次总线抖动把该台卡在不可使能。
+    重试期间该台仍是 PENDING（同样不可使能）。
+  - 记录里没写过的槽位不参与比对；VAXOR 无设备对象，恒不参与（`dev_init=NA`）。
+  W25 blob 因此升到 **v2**（32B 头 + 64×48B 记录，多出 4 个 `device_raw`）；
+  v1 blob 由 `param_store_blob_migrate_v1()` 就地升级，不丢已存参数。
+  取消 `boot_record_offered`/记录捕获/`stored_apply_mask` 的相互守卫时注意：
+  "先声明无记录、后拿到记录"的路径极易把记录或待套用位静默丢掉（空 Flash 的
+  板子会因此整机不可使能），三者必须各自独立。
+  设备侧写成功后内核置 `record_dirty`，`motor_rt` 去抖 500ms 自动落盘——
+  「写就是设备和驱动板一起写」，记录不落盘则断电后下次上电必然判不一致。
+- **设零点**（2026-09-17）：`system.set_zero = <电机 id>` → 内核事务写 **0x2531 = 1**
+  （字典表「设置电机输出端零位」）。**单阶段、只等 SDO 写应答、不读回**——0x2531 是
+  命令式对象，读回值语义未定义。门禁与设备侧限位同源：`device_limit_write_allowed`
+  （ACTIVE/SAFE_STOP 一律 INVALID 拒绝，不隐式失能；厂家手册注「设置时电机需要在
+  失能状态」）。零点不是本机记录的参数，**不更新设备影子/记录**。⚠️ 零点一变，设备里
+  0x607D 的限位也随之换物理位置，操作者须重认限位与机械行程。**是否掉电持久未定**：
+  字典 0x2539 只列了 1/2/4 三个保存码，没有"零位"项 → 需台架实测（设零 → 驱动器断电
+  重上电 → 看同一姿态的反馈位置是否不变）；若会丢，向厂家确认零位对应的保存码。
+- **外部写入不得超过固定硬件参数表**（`motor_control_profile.c` 的编译期型号
+  目录，数值取自规格书 `docs/CE-RB-R{58,48}-101-*-参数规格.pdf`）：扭矩/电流取
+  `min(请求, 峰值扭矩 45/11 N·m, 峰值电流 10.8/3.2 A × 限值系数)`、速度 ≤ 额定
+  （π rad/s）、位置 ≤ MIT 量化范围（±π）。**限值对象 0x2538 的换算系数是规格书
+  峰值对**（45/10.8、11/3.2 N·m/A），不是反馈链的 Kt×减速比×效率——写峰值扭矩
+  必须正好写出峰值电流；反馈估计仍走 Kt 链（两者是不同量）。补规格书新列时同步
+  更新型号目录与 host 用例 `test_device_write_clamped_to_hardware_table`。
+- **设备侧写事务以"写 FLASH"收尾**（2026-09-17）：0x607D/0x6080/0x2538 写 + 读回
+  核验之后，adapter 追加末阶段写 **0x2539**（《CANopen-V0.9字典表》「Flash保存参数
+  代码」：**1=电机参数、2=正限位、4=负限位**；速度/电流事务发 1，位置限位发 4 与 2
+  两条）。驱动器里的限值**不落盘就掉电回出厂值**，本机上电比对随即判"不一致 →
+  未初始化"。该阶段**无应答也不重试**（写 flash 期间驱动器控制循环会被阻塞，等 ack
+  只会把总线和它一起拖住）；是否真落盘由下次上电的设备参数比对检出。
+  另：字典给 0x607D:01/:02 量程 **-32767~32768 cnt**，`-π` 折算的 -32768 越界，
+  `cerb_rad_to_limit_cnt` 末尾按字典钳制。改动这两个常量前先查字典表。
+- **新增 config kind 要改五处**（漏一处就静默失效）：① `motor_protocol_adapter.h`
+  的 `motor_protocol_config_kind_t`；② `control_mailbox.h` 的
+  `control_mailbox_config_kind_t`；③ `motor_rt_task.cpp` 的 kind 契约 static_assert
+  + `convert_config` 分派；④ **`control_mailbox.c` 的 `config_request_is_valid`
+  白名单**（默认 false——漏加会让请求在 mailbox 就被拒，内核收不到、总线一条帧都
+  没有，上位机只看到"没反应"）；⑤ 内核 `motor_control_submit_config` 的分支与
+  门禁。2026-09-17 的 SET_ZERO 就栽在第 ④ 处，已补 host 用例
+  `test_set_zero_request_is_accepted` 兜底。
+- **配置事务总线级一问一答**（2026-09-17 台架实测后加）：同一总线上任一时刻
+  只允许一个"已发未答"的 SDO 阶段（`motor_control_config.c` 的
+  `bus_stage_in_flight`）。厂家 SDO 是严格请求-应答：并发发问会让设备应答排队，
+  迟到的应答与本阶段索引不符被判 RETRY，重发又把设备压得更死——现象就是
+  "回读一直超时"（实测 log：同一台两条请求间 940ms 的超时-重发循环）。
+  配合 CERB 阶段超时 20→30ms。**改动收发节奏时别把这层串行去掉**。
 - **控制发送唯一性**：ROS callback 只写完整 ID 快照 latest-wins mailbox；`motor_rt_task`
   是唯一正常 FDCAN 发送者（内核 → TX 调度器 → 硬件，P0/P1/P2 分级）。
   快照缺席/30ms 无快照 = MIT 默认 `kd` 阻尼软停；100ms 无快照、Agent 断链或

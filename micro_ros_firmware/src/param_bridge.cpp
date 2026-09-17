@@ -24,24 +24,37 @@
 
 #include "motor_rt_task.h"
 #include "param_name.h"
+#include "param_units.h"
 #include "storage_task.h"
 
 // 错误码（system.last_error）：0=无；1..6 对齐 CONFIG 结果七码（reason 1..6）；
 // 10=本地校验拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知电机；
-// 20=save 失败；30=refresh 失败。
+// 20=save 失败；30=refresh 失败；40=设备参数与固件记录不一致（未初始化，该台
+// 不可运动）；41=设备参数回读不成功（未核对，同样不可运动）。
+// 40/41 由内核结论驱动（dev_init），与请求回告无关：设备真值说了算。
 #define ERR_NONE 0
 #define ERR_LOCAL_VALIDATION 10
 #define ERR_SUBMIT_FAILED 11
 #define ERR_UNKNOWN_MOTOR 12
 #define ERR_SAVE_FAIL 20
 #define ERR_REFRESH_FAIL 30
+#define ERR_DEV_INIT_MISMATCH 40
+#define ERR_DEV_INIT_UNVERIFIED 41
 
 static const char *const kSystemSave = "system.save";
 static const char *const kSystemRefresh = "system.refresh";
 static const char *const kSystemLastError = "system.last_error";
 static const char *const kSystemLastErrorMotor = "system.last_error_motor";
 static const char *const kSystemHeapFree = "system.heap_free";
-#define kSystemParamCount 5U
+// 回读完成序号（只读、单调递增）：上位机"点回读 → 等结果"的**唯一可靠判据**。
+// 只看 last_error(_motor) 不行——上一轮成功留下的 (0, id) 与本轮无法区分，
+// 页面会把"还没读"当成功。每次 param 桥发起的回读收尾（无论成败）都 +1。
+static const char *const kSystemRefreshSeq = "system.refresh_seq";
+// 设零点（写 = 电机 id，触发）：CERB 写 0x2531=1，仅失能态受理（已使能一律被
+// 内核拒绝）。set_zero_seq 是只读完成序号，判据同 refresh_seq。
+static const char *const kSystemSetZero = "system.set_zero";
+static const char *const kSystemSetZeroSeq = "system.set_zero_seq";
+#define kSystemParamCount 8U
 
 static const uint32_t kSyncPeriodMs = 100U;  // 影子同步周期
 static const uint32_t kRegisterPerPoll = 2U; // 每拍最多注册电机数
@@ -66,6 +79,8 @@ struct MotorSlot {
   uint32_t outstanding[PARAM_FIELD_COUNT];
   double old_value[PARAM_FIELD_COUNT]; // 受理时旧值（回滚用，enable 存 0/1）
   double staged_pos[2]; // 位置双限：先到的一侧（索引 = field-POS_MIN）
+  float torque_per_amp; // 关节侧 N·m/A（参数力矩列 A ↔ 内核 N·m 的换算系数）
+  uint8_t reported_dev_init; // 已上报的设备参数结论（变化才报，避免刷码）
 };
 
 static MotorSlot g_motors[MOTOR_CONTROL_MAX_MOTORS];
@@ -80,6 +95,11 @@ static bool g_refresh_pending = false;
 static uint16_t g_refresh_motor = 0;
 static uint32_t g_refresh_id = 0;
 static uint32_t g_next_request_id = 1U; // 跨会话不复位（防重连后旧事件串台）
+static int64_t g_refresh_seq = 0;       // 回读完成序号（只增；重连不复位，页面自比对）
+static bool g_set_zero_pending = false;
+static uint16_t g_set_zero_motor = 0;
+static uint32_t g_set_zero_id = 0;
+static int64_t g_set_zero_seq = 0;      // 设零点完成序号（同 refresh_seq 口径）
 static uint32_t g_last_sync_ms = 0;
 static uint32_t g_last_heap_ms = 0;
 static bool g_force_resync = false;
@@ -171,10 +191,16 @@ static bool submit_single_limit(MotorSlot *slot, param_field_t field,
   request.received_tick_ms = millis();
   request.motor_id = slot->motor_id;
   request.kind = field_config_kind(field);
+  // 参数服务器对外是工程单位：速度 deg/s、力矩 A（见 param_units.h）。
   if (field == PARAM_FIELD_VEL_LIMIT) {
-    request.value.max_velocity_rad_s = (float)value;
+    request.value.max_velocity_rad_s = param_units_deg_to_rad((float)value);
   } else {
-    request.value.max_torque_nm = (float)value;
+    request.value.max_torque_nm = param_units_amp_to_nm((float)value,
+                                                        slot->torque_per_amp);
+    if (!isfinite(request.value.max_torque_nm)) {
+      report_error(ERR_LOCAL_VALIDATION, slot->motor_id); // 系数未知：不拿瞎猜的换算下发
+      return false;
+    }
   }
   if (!motor_rt_submit_config(&request)) {
     report_error(ERR_SUBMIT_FAILED, slot->motor_id);
@@ -270,8 +296,9 @@ static bool submit_position_limits(MotorSlot *slot, param_field_t changed,
   request.received_tick_ms = millis();
   request.motor_id = slot->motor_id;
   request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
-  request.value.position_limits.min_position_rad = (float)lo;
-  request.value.position_limits.max_position_rad = (float)hi;
+  // 成对校验在工程单位（deg）里做，只在提交边界折成内核 SI。
+  request.value.position_limits.min_position_rad = param_units_deg_to_rad((float)lo);
+  request.value.position_limits.max_position_rad = param_units_deg_to_rad((float)hi);
   if (!motor_rt_submit_config(&request)) {
     report_error(ERR_SUBMIT_FAILED, slot->motor_id);
     return false;
@@ -315,6 +342,21 @@ static bool param_on_modification(const Parameter *old_param,
     }
     g_refresh_pending = true;
     g_refresh_motor = motor_id;
+    return true;
+  }
+  if (strcmp(name, kSystemSetZero) == 0) {
+    if (new_param->value.type != RCLC_PARAMETER_INT ||
+        new_param->value.integer_value < 0) {
+      return false;
+    }
+    const uint16_t motor_id = (uint16_t)new_param->value.integer_value;
+    MotorSlot *slot = find_slot(motor_id);
+    if (slot == nullptr || !slot->bound) {
+      report_error(ERR_UNKNOWN_MOTOR, motor_id);
+      return false;
+    }
+    g_set_zero_pending = true;
+    g_set_zero_motor = motor_id;
     return true;
   }
 
@@ -374,6 +416,9 @@ static bool param_on_modification(const Parameter *old_param,
 static void register_system_params() {
   (void)rclc_add_parameter(&g_server, kSystemSave, RCLC_PARAMETER_BOOL);
   (void)rclc_add_parameter(&g_server, kSystemRefresh, RCLC_PARAMETER_INT);
+  (void)rclc_add_parameter(&g_server, kSystemRefreshSeq, RCLC_PARAMETER_INT);
+  (void)rclc_add_parameter(&g_server, kSystemSetZero, RCLC_PARAMETER_INT);
+  (void)rclc_add_parameter(&g_server, kSystemSetZeroSeq, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemLastError, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemLastErrorMotor,
                            RCLC_PARAMETER_INT);
@@ -384,10 +429,15 @@ static void register_system_params() {
   (void)rclc_parameter_set_int(&g_server, kSystemLastError, 0);
   (void)rclc_parameter_set_int(&g_server, kSystemLastErrorMotor, 0xFFFF);
   (void)rclc_parameter_set_int(&g_server, kSystemHeapFree, 0);
+  (void)rclc_parameter_set_int(&g_server, kSystemRefreshSeq, g_refresh_seq);
+  (void)rclc_parameter_set_int(&g_server, kSystemSetZero, -1);
+  (void)rclc_parameter_set_int(&g_server, kSystemSetZeroSeq, g_set_zero_seq);
   g_internal_write = false;
   (void)rclc_set_parameter_read_only(&g_server, kSystemLastError, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemLastErrorMotor, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemHeapFree, true);
+  (void)rclc_set_parameter_read_only(&g_server, kSystemRefreshSeq, true);
+  (void)rclc_set_parameter_read_only(&g_server, kSystemSetZeroSeq, true);
 }
 
 static double view_field(const motor_control_param_view_t *v,
@@ -399,14 +449,15 @@ static double view_field(const motor_control_param_view_t *v,
       return v->kp;
     case PARAM_FIELD_KD:
       return v->kd;
+    // 对外工程单位：deg / deg/s / A（见 param_units.h，换算只在这一层做一次）。
     case PARAM_FIELD_POS_MIN:
-      return v->pos_min_rad;
+      return param_units_rad_to_deg(v->pos_min_rad);
     case PARAM_FIELD_POS_MAX:
-      return v->pos_max_rad;
+      return param_units_rad_to_deg(v->pos_max_rad);
     case PARAM_FIELD_VEL_LIMIT:
-      return v->velocity_limit_rad_s;
+      return param_units_rad_to_deg(v->velocity_limit_rad_s);
     case PARAM_FIELD_TORQUE_LIMIT:
-      return v->torque_limit_nm;
+      return param_units_nm_to_amp(v->torque_limit_nm, v->torque_per_amp);
     default:
       return NAN;
   }
@@ -449,6 +500,7 @@ static void register_motor_params(const motor_control_param_view_t *v) {
   slot->used = true;
   slot->motor_id = v->motor_id;
   slot->bound = v->bound;
+  slot->torque_per_amp = v->torque_per_amp;
 
   param_name_buf_t name;
   (void)param_name_build_motor(name, sizeof(name), v->motor_id,
@@ -484,6 +536,7 @@ static bool doubles_differ(double a, double b) {
 static void sync_slot_from_view(MotorSlot *slot,
                                 const motor_control_param_view_t *v) {
   slot->bound = v->bound;
+  slot->torque_per_amp = v->torque_per_amp; // 绑定型号变化时换算系数随之更新
   param_name_buf_t name;
   if (slot->outstanding[PARAM_FIELD_ENABLE] == 0U) {
     bool current = false;
@@ -507,6 +560,21 @@ static void sync_slot_from_view(MotorSlot *slot,
       set_double_internal(name, target);
     }
   }
+}
+
+static void do_set_zero_pulse() {
+  g_set_zero_pending = false;
+  set_int_internal(kSystemSetZero, -1);
+  control_mailbox_config_request_t request = {};
+  request.request_id = next_request_id();
+  request.received_tick_ms = millis();
+  request.motor_id = g_set_zero_motor;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
+  if (!motor_rt_submit_config(&request)) {
+    report_error(ERR_SUBMIT_FAILED, g_set_zero_motor);
+    return;
+  }
+  g_set_zero_id = request.request_id;
 }
 
 static void do_refresh_pulse() {
@@ -549,6 +617,9 @@ void param_bridge_poll(void) {
   if (g_refresh_pending) {
     do_refresh_pulse();
   }
+  if (g_set_zero_pending) {
+    do_set_zero_pulse();
+  }
   if (g_save_pending) {
     g_save_pending = false;
     storage_task_request_save();
@@ -556,6 +627,26 @@ void param_bridge_poll(void) {
   }
   if (storage_take_result() == STORAGE_SAVE_FAIL) {
     report_error(ERR_SAVE_FAIL, 0xFFFF);
+  }
+
+  // 设备参数结论（未初始化）：按"变化才报"推 system.last_error(_motor)。
+  // 结论由内核上电回读比对产生，不随任何请求回告走。
+  for (size_t i = 0; i < g_view_count; ++i) {
+    MotorSlot *slot = find_slot(g_views[i].motor_id);
+    if (slot == nullptr || slot->reported_dev_init == g_views[i].dev_init) {
+      continue;
+    }
+    slot->reported_dev_init = g_views[i].dev_init;
+    if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH) {
+      report_error(ERR_DEV_INIT_MISMATCH, g_views[i].motor_id);
+    } else if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED) {
+      report_error(ERR_DEV_INIT_UNVERIFIED, g_views[i].motor_id);
+    } else if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_OK ||
+               g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_NA) {
+      // 结论转好也上报（last_error=0 + motor_id）：上位机据此确认"这次回读
+      // 成功"，否则一个陈旧的 40 会永远挂在那里，分不清新旧。
+      report_error(ERR_NONE, g_views[i].motor_id);
+    }
   }
 
   // 周期影子同步。
@@ -588,11 +679,24 @@ void param_bridge_on_config_result(const motor_control_event_t *event) {
   }
   const bool ok = event->reason == MOTOR_PROTOCOL_CONFIG_OK;
 
+  if (id == g_set_zero_id) {
+    g_set_zero_id = 0;
+    if (!ok) {
+      report_error((int64_t)event->reason, event->motor_id);
+    }
+    g_set_zero_seq++;
+    set_int_internal(kSystemSetZeroSeq, g_set_zero_seq);
+    return;
+  }
   if (id == g_refresh_id) {
     g_refresh_id = 0;
     if (!ok) {
       report_error(ERR_REFRESH_FAIL, event->motor_id);
     }
+    // 收尾序号：上位机据此确认"这次回读已经结束"，再去读结论码
+    // （0=一致 / 40=与记录不一致 / 41=回读不成功 / 其余=事务失败码）。
+    g_refresh_seq++;
+    set_int_internal(kSystemRefreshSeq, g_refresh_seq);
     g_force_resync = true; // 成功：下一拍吸收新设备影子
     return;
   }

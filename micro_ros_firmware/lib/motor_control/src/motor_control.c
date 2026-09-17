@@ -108,8 +108,14 @@ motor_control_entry_t *motor_control_find_entry(motor_control_context_t *ctx,
 }
 
 // uint32 毫秒回绕安全比较：now 是否已超过 then 至少 threshold。
+// 时间差判定：**带符号**比较，不是无符号。
+// 帧的时戳由 ISR 盖，服务用任务里早先采样的 now——drain 期间跨过 1ms 边界
+// 时会出现"帧戳 = now + 1"。无符号减法把这种"戳在未来"算成 0xFFFFFFFF，
+// 于是 OFFLINE（差值 ≥ 100ms 阈值）立刻成立：该电机无端被判离线、清逐电机
+// 授权、事务被判 UNCONFIRMED。带符号差值把它算成 -1ms = 刚到的新鲜帧，
+// 语义正确；回绕安全性不变（只要两侧间隔 < 2^31 ms ≈ 24 天）。
 static bool tick_elapsed(uint32_t now, uint32_t then, uint32_t threshold) {
-  return (uint32_t)(now - then) >= threshold;
+  return (int32_t)(now - then) >= (int32_t)threshold;
 }
 
 // 下游（调度器 P0 FIFO 满 / 硬件拒收）回告重入队：帧由本内核
@@ -446,6 +452,12 @@ bool motor_control_apply_command_snapshot(
     }
     if (entry->profile == NULL) {
       continue; // 未绑定型号：不可控
+    }
+    if (!motor_control_dev_params_allow_motion(entry)) {
+      // 设备参数与固件记录不一致（未初始化）：参数以设备为准，该台不出运动帧。
+      // 结论由 apply_dev_init_result 落地（正常路径下该台已在 CONFIG_CONFLICT
+      // 态），这里是兜底门。
+      continue;
     }
     if (entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_MODE) {
       continue; // 模式事务独占该电机的使能序列（分阶段、不阻塞）
@@ -916,6 +928,14 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
     status->last_failure_reason = entry->last_failure_reason;
   }
   return count;
+}
+
+bool motor_control_take_record_dirty(motor_control_context_t *ctx) {
+  if (ctx == NULL || !ctx->record_dirty) {
+    return false;
+  }
+  ctx->record_dirty = false;
+  return true;
 }
 
 size_t motor_control_drain_events(motor_control_context_t *ctx,

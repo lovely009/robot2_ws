@@ -130,6 +130,15 @@ bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
 double motor_protocol_cerb_limit_cnt_to_rad(int32_t cnt);
 double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
                                                     uint32_t rpm);
+// 限值对象专用换算（0x2538 电流上限 ↔ 关节侧扭矩），系数 = 关节侧 N·m/A，
+// 由 motor_protocol_profile_limit_nm_per_amp() 给出（规格书峰值对优先）。
+// 与反馈换算分开：反馈是"电流 → 实测扭矩估计"（走 Kt 链），限值是"规格书
+// 峰值对的两端映射"，规格书自身额定/峰值两点隐含效率不同，不能共用一个常数。
+double motor_protocol_limit_ma_to_joint_nm(double joint_nm_per_amp,
+                                           uint32_t milliamp);
+uint32_t motor_protocol_limit_joint_nm_to_ma(double joint_nm_per_amp,
+                                             double joint_nm);
+
 double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
                                                 double gear_ratio,
                                                 double gear_efficiency,

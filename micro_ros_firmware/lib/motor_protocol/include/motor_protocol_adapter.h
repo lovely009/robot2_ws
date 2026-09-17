@@ -100,6 +100,11 @@ typedef struct {
   float torque_constant_nm_per_amp; // 电机轴 Kt：反馈 Iq(A) → 电机轴 Nm
   float rated_torque_nm;           // 关节侧额定扭矩（0 = 未确认）
   float peak_torque_nm;            // 关节侧峰值扭矩（0 = 未确认，不参与钳制）
+  // 电机端电流限值（规格书原始值，0 = 未确认）。设备侧管理对象 0x2538
+  // （「电机最大电流参数」，mA）是**电气上限**：外部写入不得把设备里的电流
+  // 推到峰值电流之上，故钳制必须同时看这一列，而不只是扭矩列。
+  float rated_current_amp;
+  float peak_current_amp;
   float rated_speed_rad_s;         // 关节侧额定转速（0 = 未确认）
   float supply_voltage_v;          // 标称供电电压
   float default_kp;                // 默认 MIT 增益（使能/软停阻尼用）
@@ -160,9 +165,15 @@ typedef enum {
   // 内核内部事务（不属 mailbox 契约，1..6 的数值对应关系不受影响）：
   // 读设备自报身份串，结果不回 CONFIG_RESULT，用于型号自动绑定。
   MOTOR_PROTOCOL_CONFIG_READ_IDENTITY = 7U,
+  // 设零点（属 mailbox 契约，与 control_mailbox 侧同值 9 锁死）：CERB 写
+  // 0x2531（字典「设置电机输出端零位」，写 1；手册注明「设置时电机需要在失能
+  // 状态」）。单阶段：只等 SDO 写应答（0x60），不做读回——0x2531 是命令式对象，
+  // 读回值语义未定义。不跟 0x2539 保存码：字典未给出"零位"对应的保存码。
+  MOTOR_PROTOCOL_CONFIG_SET_ZERO = 9U,
   // 设备参数回读（属 mailbox 契约，与 control_mailbox 侧同值 8 锁死）：
-  // 顺序 upload 0x607D:01/02、0x6080、0x2538，回值换算成关节侧 SI 后
-  // 以 4 个 float 追加进读缓冲，内核据此刷新设备参数影子。仅 CERB。
+  // 顺序 upload 0x607D:01/02、0x6080、0x2538，每阶段追加一个
+  // motor_protocol_param_stage_t（设备端原值 + 关节侧换算值）进读缓冲，
+  // 内核据此刷新设备参数影子并与固件记录比对。仅 CERB。
   MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS = 8U
 } motor_protocol_config_kind_t;
 
@@ -194,10 +205,36 @@ typedef struct {
   float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
 } motor_protocol_config_request_t;
 
+// 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；与
+// PARAM_FIELD_POS_MIN/POS_MAX/VEL_LIMIT/TORQUE_LIMIT 四字段一一对应）。
+#define MOTOR_PROTOCOL_PARAM_SLOT_NONE 0xFFU
+#define MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN 0U
+#define MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX 1U
+#define MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX 2U
+#define MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX 3U
+#define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 4U
+
+// REFRESH_PARAMS 每阶段回填载荷（读缓冲按阶段顺序追加，每阶段一个）。
+// raw = 设备端原值（cnt / 电机端 RPM / 电机端 mA），value_si = 关节侧换算值
+// （rad / rad/s / N·m）。原值是与固件记录比对的依据，SI 值供影子与页面。
+typedef struct {
+  uint32_t raw;
+  float value_si;
+} motor_protocol_param_stage_t;
+
 // 配置事务阶段（ARD-0007 §20.4：分阶段、跨 1ms 节拍步进、每阶段可重试 ≤2 次）。
+//
+// param_* 字段：本阶段与之对应的**设备端参数槽位**与原值（CERB 的
+// 0x607D:01/:02、0x6080、0x2538）。内核据此在事务成功后写固件记录、并把
+// 回读原值与记录比对——比对必须以设备端原值为准：关节侧 SI 值两端都过同一
+// 套 Kt×减速比换算，系数配错时两边一起错、比对恒通过（见内核 dev_init）。
+// 不涉及设备参数的阶段（身份读、Vaxor 本地策略）必须保持 param_raw_valid=false。
 typedef struct {
   bool waits_response; // 本阶段是否等待设备响应帧
   uint32_t timeout_ms; // 等待超时（无响应阶段忽略）
+  bool param_raw_valid; // 本阶段是否携带设备端参数（原值/槽位有意义）
+  uint8_t param_slot;   // MOTOR_PROTOCOL_PARAM_SLOT_*
+  uint32_t param_raw;   // 写=写入值；读=请求对象（回值由读缓冲带回）
 } motor_protocol_config_stage_info_t;
 
 // 响应裁决：ADVANCE=进入下一阶段；RETRY=重发本阶段；FAIL=读回不一致等失败
@@ -287,6 +324,7 @@ typedef struct motor_protocol_adapter {
   uint8_t (*config_stage_count)(const motor_protocol_model_profile_t *profile,
                                 const motor_protocol_config_request_t *request);
   bool (*config_stage_info)(uint8_t stage,
+                            const motor_protocol_model_profile_t *profile,
                             const motor_protocol_config_request_t *request,
                             motor_protocol_config_stage_info_t *out);
   bool (*config_encode_stage)(uint8_t stage,
@@ -310,6 +348,25 @@ typedef struct motor_protocol_adapter {
 // 内置 adapter（新增协议家族 = 新增一个实例，内核零改动）。
 extern const motor_protocol_adapter_t motor_protocol_vaxor_adapter;
 extern const motor_protocol_adapter_t motor_protocol_cerb_adapter;
+
+// 限值对象（0x2538 电流上限）的关节侧换算系数 N·m/A。
+// 优先用规格书的**峰值对**：峰值扭矩 ↔ 峰值电流两端都写在规格书上，用它换算
+// 可保证"写到峰值扭矩"正好等于"写到峰值电流"，即钳制口径与规格书同源；
+// 缺任一字段时退回 Kt×减速比×效率（反馈链口径）。
+// 注意：反馈（Iq → 实测扭矩估计）仍走 Kt×减速比×效率，两者是不同量——前者是
+// 限值映射、后者是物理估计；规格书自身的额定/峰值两点隐含的效率并不相同
+// （R58 额定 0.66、峰值 0.48），单一常数无法同时命中，故各取所需。
+static inline float motor_protocol_profile_limit_nm_per_amp(
+    const motor_protocol_model_profile_t *profile) {
+  if (profile == NULL) {
+    return 0.0f;
+  }
+  if (profile->peak_torque_nm > 0.0f && profile->peak_current_amp > 0.0f) {
+    return profile->peak_torque_nm / profile->peak_current_amp;
+  }
+  return profile->torque_constant_nm_per_amp * profile->gear_ratio *
+         profile->gear_efficiency;
+}
 
 // 节点号合法性（vaxor ID 算术函数不校验范围，入口统一在此把关）。
 static inline bool motor_protocol_adapter_valid_node(

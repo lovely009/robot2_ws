@@ -41,6 +41,10 @@ static motor_control_stored_params_t
 static size_t g_stored_count = 0U;
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
+// 设备侧写成功 → 记录待落盘（去抖：连改多项只落一次，Flash 擦写 ~1s）。
+static bool g_save_pending = false;
+static uint32_t g_save_deadline_ms = 0U;
+static const uint32_t kRecordSaveDebounceMs = 500U;
 
 // 协议 adapter 注册表（构造注入内核；新增协议 = 加一项，内核零改动）。
 static const motor_protocol_adapter_t *const kAdapters[2] = {
@@ -350,6 +354,9 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
     "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ZERO) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ZERO),
+              "mailbox/protocol config kind 契约不一致：SET_ZERO");
 
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
@@ -383,6 +390,8 @@ static void convert_config(const control_mailbox_config_request_t *in,
       break;
     case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
       break; // 无载荷：只凭 motor_id 发起 4 个 SDO upload
+    case CONTROL_MAILBOX_CONFIG_SET_ZERO:
+      break; // 无载荷：只凭 motor_id 写 0x2531（设零位，仅失能态）
     default:
       break;
   }
@@ -452,9 +461,20 @@ static void control_boundary(void) {
   }
 
   // boot 存储参数：Profile 未绑定的电机保留待套用位，后续边界自动重试。
-  if (g_stored_count > 0U) {
-    motor_control_apply_stored_params(&g_motor_control, g_stored_params,
-                                      g_stored_count, now_ms);
+  // 无记录（count=0）时也必须调用：内核据此把"记录已就位（哪怕是没有记录）"
+  // 告知每个表项，上电设备参数回读才会发起（见 motor_control_config_step 0b）。
+  motor_control_apply_stored_params(&g_motor_control, g_stored_params,
+                                    g_stored_count, now_ms);
+
+  // 设备侧写成功 = 设备与固件记录已同步，记录必须落盘才算"一起写"（否则
+  // 断电后上电比对必然不一致）。去抖 500ms：页面连续改多项只落一次。
+  if (motor_control_take_record_dirty(&g_motor_control)) {
+    g_save_pending = true;
+    g_save_deadline_ms = now_ms + kRecordSaveDebounceMs;
+  }
+  if (g_save_pending && (int32_t)(now_ms - g_save_deadline_ms) >= 0) {
+    g_save_pending = false;
+    storage_task_request_save();
   }
 }
 

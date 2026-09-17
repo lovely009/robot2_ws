@@ -47,7 +47,22 @@ static uint32_t sector_address(uint8_t slot) {
   return slot == 0U ? kSectorA : kSectorB;
 }
 
-// 把内核参数视图投影成 blob 字段（只收录有限值；enable 不持久化）。
+// 设备端原值槽位 ↔ 参数字段/设备槽位常量的跨库顺序断言（storage 同时可见
+// 两个库的头，放在这里做唯一一处交叉校验；顺序错了会把 mA 当位置限写进记录）。
+static_assert(PARAM_DEVICE_SLOT_POS_MIN == MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
+static_assert(PARAM_DEVICE_SLOT_POS_MAX == MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
+static_assert(PARAM_DEVICE_SLOT_VEL_LIMIT ==
+              MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
+static_assert(PARAM_DEVICE_SLOT_TORQUE_LIMIT ==
+              MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
+static_assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
+
+// 把内核参数视图投影成 blob 字段（enable 不持久化）。
+// 两类型号口径不同：
+//  - CERB（设备侧限位）：只收录**设备核验过**的槽位（dev_raw_present 有位），
+//    并同时存设备端原值——记录是上电比对基准，比对必须比原值；型号标定
+//    占位/未读过设备的值不得混进记录，否则下次上电会拿占位值判不一致。
+//  - VAXOR（本地软限位）：没有设备对象，有限值即用户设定值，照旧收录。
 static void project_views_to_blob(param_store_blob_t *blob,
                                   const motor_control_param_view_t *views,
                                   size_t count) {
@@ -61,6 +76,48 @@ static void project_views_to_blob(param_store_blob_t *blob,
     }
     if (isfinite(v->kd)) {
       param_store_blob_set(blob, v->motor_id, PARAM_FIELD_KD, v->kd);
+    }
+    if (v->device_side_limits) {
+      // 设备端原值优先；本次上电还没回读过设备时退回记录原值（保住比对基准）。
+      const bool have_device = v->dev_raw_present != 0U;
+      const uint8_t raw_present =
+          have_device ? v->dev_raw_present : v->record_raw_present;
+      const uint32_t *raw_values = have_device ? v->dev_raw : v->record_raw;
+      const uint8_t pos_min_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_POS_MIN);
+      const uint8_t pos_max_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_POS_MAX);
+      const uint8_t vel_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_VEL_LIMIT);
+      const uint8_t torque_bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT);
+      // 位置限位成对落盘：只有两端都经设备核验才收录。
+      if ((raw_present & (uint8_t)(pos_min_bit | pos_max_bit)) ==
+              (uint8_t)(pos_min_bit | pos_max_bit) &&
+          isfinite(v->pos_min_rad) && isfinite(v->pos_max_rad)) {
+        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MIN,
+                             v->pos_min_rad);
+        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MAX,
+                             v->pos_max_rad);
+        param_store_blob_set_device_raw(blob, v->motor_id,
+                                        PARAM_DEVICE_SLOT_POS_MIN,
+                                        raw_values[PARAM_DEVICE_SLOT_POS_MIN]);
+        param_store_blob_set_device_raw(blob, v->motor_id,
+                                        PARAM_DEVICE_SLOT_POS_MAX,
+                                        raw_values[PARAM_DEVICE_SLOT_POS_MAX]);
+      }
+      if ((raw_present & vel_bit) != 0U &&
+          isfinite(v->velocity_limit_rad_s)) {
+        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_VEL_LIMIT,
+                             v->velocity_limit_rad_s);
+        param_store_blob_set_device_raw(blob, v->motor_id,
+                                        PARAM_DEVICE_SLOT_VEL_LIMIT,
+                                        raw_values[PARAM_DEVICE_SLOT_VEL_LIMIT]);
+      }
+      if ((raw_present & torque_bit) != 0U && isfinite(v->torque_limit_nm)) {
+        param_store_blob_set(blob, v->motor_id, PARAM_FIELD_TORQUE_LIMIT,
+                             v->torque_limit_nm);
+        param_store_blob_set_device_raw(
+            blob, v->motor_id, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
+            raw_values[PARAM_DEVICE_SLOT_TORQUE_LIMIT]);
+      }
+      continue; // 设备侧型号的限值到此为止（不落软限位分支）
     }
     if (isfinite(v->pos_min_rad)) {
       param_store_blob_set(blob, v->motor_id, PARAM_FIELD_POS_MIN,
@@ -86,7 +143,8 @@ static void project_blob_to_boot(const param_store_blob_t *blob) {
   g_boot_count = 0U;
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
     const param_store_record_t *rec = &blob->records[i];
-    if (rec->present == 0U || g_boot_count >= PARAM_STORE_RECORD_COUNT) {
+    if ((rec->present == 0U && rec->device_raw_present == 0U) ||
+        g_boot_count >= PARAM_STORE_RECORD_COUNT) {
       continue;
     }
     motor_control_stored_params_t *out = &g_boot_records[g_boot_count++];
@@ -117,17 +175,34 @@ static void project_blob_to_boot(const param_store_blob_t *blob) {
       out->has_torque_limit = true;
       out->torque_limit_nm = rec->torque_limit;
     }
+    // 设备端原值：上电比对的唯一依据（SI 值只用于显示与换算）。
+    out->device_raw_present = rec->device_raw_present;
+    for (size_t slot = 0; slot < PARAM_DEVICE_SLOT_COUNT; ++slot) {
+      out->device_raw[slot] = rec->device_raw[slot];
+    }
   }
 }
 
 // 读取一个 sector 的 blob；有效返回指针（指向 static 读缓冲外的调用方缓冲）。
+// 读取一个 sector 并落到 v2 布局：优先按 v2 校验；不是 v2 时再尝试把
+// v1（升级前写入的 32B 记录格式）就地迁移——升级不该静默丢掉用户的 kp/kd
+// 与限值记录。
 static bool read_slot(uint8_t slot, uint8_t *buf) {
   if (w25q64_read(sector_address(slot), buf, PARAM_STORE_BLOB_SIZE) !=
       W25Q64_OK) {
     return false;
   }
-  return param_store_blob_validate(
-      reinterpret_cast<const param_store_blob_t *>(buf));
+  if (param_store_blob_validate(
+          reinterpret_cast<const param_store_blob_t *>(buf))) {
+    return true;
+  }
+  alignas(8) static uint8_t legacy_buf[PARAM_STORE_LEGACY_BLOB_SIZE];
+  if (w25q64_read(sector_address(slot), legacy_buf, sizeof(legacy_buf)) !=
+      W25Q64_OK) {
+    return false;
+  }
+  return param_store_blob_migrate_v1(legacy_buf, sizeof(legacy_buf), buf,
+                                     PARAM_STORE_BLOB_SIZE) != nullptr;
 }
 
 static void load_boot_params() {

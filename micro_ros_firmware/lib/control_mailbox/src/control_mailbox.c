@@ -31,6 +31,7 @@ static bool config_request_is_valid(
       return isfinite(request->value.max_torque_nm) &&
              request->value.max_torque_nm > 0.0F;
     case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
+    case CONTROL_MAILBOX_CONFIG_SET_ZERO:
       return true; // 无载荷，只凭 request_id/motor_id
     default:
       return false;

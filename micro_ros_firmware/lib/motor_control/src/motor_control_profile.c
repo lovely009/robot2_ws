@@ -47,6 +47,9 @@ static const motor_protocol_model_profile_t kProfiles[] = {
         .torque_constant_nm_per_amp = 0.077f,
         .rated_torque_nm = 5.0f,
         .peak_torque_nm = 11.0f,
+        // docs/CE-RB-R48-101-Lite-CO-I-参数规格.pdf：额定 1.3 A / 峰值 3.2 A
+        .rated_current_amp = 1.3f,
+        .peak_current_amp = 3.2f,
         .rated_speed_rad_s = 3.14159265f, // 30 RPM 关节侧
         .supply_voltage_v = 48.0f,
         .default_kp = 30.0f,
@@ -70,6 +73,9 @@ static const motor_protocol_model_profile_t kProfiles[] = {
         .torque_constant_nm_per_amp = 0.086f,
         .rated_torque_nm = 20.0f,
         .peak_torque_nm = 45.0f,
+        // docs/CE-RB-R58-101-Lite-CO-I-参数规格.pdf：额定 3.5 A / 峰值 10.8 A
+        .rated_current_amp = 3.5f,
+        .peak_current_amp = 10.8f,
         .rated_speed_rad_s = 3.14159265f,
         .supply_voltage_v = 48.0f,
         .default_kp = 30.0f,

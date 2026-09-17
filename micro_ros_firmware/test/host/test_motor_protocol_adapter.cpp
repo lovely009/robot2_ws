@@ -256,7 +256,7 @@ static void test_vaxor_config_mode_transaction_stages() {
   assert(motor_protocol_vaxor_adapter.config_stage_count(profile, &request) == 2);
 
   motor_protocol_config_stage_info_t info = {};
-  assert(motor_protocol_vaxor_adapter.config_stage_info(0, &request, &info));
+  assert(motor_protocol_vaxor_adapter.config_stage_info(0, profile, &request, &info));
   assert(!info.waits_response);
 
   motor_protocol_tx_frame_t out = {};
@@ -455,8 +455,9 @@ static void test_cerb_config_unsupported_paths() {
   assert(motor_protocol_cerb_adapter.config_stage_count(profile, &gains) == 0);
 }
 
-// 位置限位：4 阶段（写下限/读下限/写上限/读上限），字节序与
+// 位置限位：5 阶段（写下限/读下限/写上限/读上限/**写 FLASH**），字节序与
 // 《CANopen-V0.9 字典表》示例一致（0x607D:01 下限、:02 上限，单位 cnt）。
+// 末阶段 0x2539 是厂家手册的「写入 FLASH」：不落盘则驱动器掉电回出厂值。
 static void test_cerb_sdo_position_limit_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
   assert(find_profile("cerb_r58_101", &profile));
@@ -466,16 +467,20 @@ static void test_cerb_sdo_position_limit_frames() {
   req.position_limits.min_position_rad = -(float)MOTOR_PROTOCOL_PI / 2.0f; // 90°
   req.position_limits.max_position_rad = (float)MOTOR_PROTOCOL_PI / 2.0f;
 
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 4U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 6U);
 
   // 90° → cnt = 90 × 65536/360 = 16384 = 0x4000。
   const uint8_t kWriteLower[8] = {0x23, 0x7D, 0x60, 0x01, 0x00, 0xC0, 0xFF, 0xFF};
   const uint8_t kReadLower[8] = {0x40, 0x7D, 0x60, 0x01, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kWriteUpper[8] = {0x23, 0x7D, 0x60, 0x02, 0x00, 0x40, 0x00, 0x00};
   const uint8_t kReadUpper[8] = {0x40, 0x7D, 0x60, 0x02, 0x00, 0x00, 0x00, 0x00};
-  const uint8_t *expect[4] = {kWriteLower, kReadLower, kWriteUpper, kReadUpper};
+  // 末两条是保存：负限位码 4、正限位码 2（字典表 0x2539 说明）。
+  const uint8_t kSaveLower[8] = {0x23, 0x39, 0x25, 0x00, 0x04, 0x00, 0x00, 0x00};
+  const uint8_t kSaveUpper[8] = {0x23, 0x39, 0x25, 0x00, 0x02, 0x00, 0x00, 0x00};
+  const uint8_t *expect[6] = {kWriteLower, kReadLower, kWriteUpper, kReadUpper,
+                              kSaveLower, kSaveUpper};
 
-  for (uint8_t stage = 0U; stage < 4U; ++stage) {
+  for (uint8_t stage = 0U; stage < 6U; ++stage) {
     motor_protocol_tx_frame_t frame = {};
     assert(motor_protocol_cerb_adapter.config_encode_stage(
         stage, profile, 1U, 0U, &req, &frame));
@@ -486,13 +491,20 @@ static void test_cerb_sdo_position_limit_frames() {
       assert(frame.data[i] == expect[stage][i]);
     }
     motor_protocol_config_stage_info_t info = {};
-    assert(motor_protocol_cerb_adapter.config_stage_info(stage, &req, &info));
-    assert(info.waits_response); // 每阶段都等应答
-    assert(info.timeout_ms > 0U);
+    assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
+    if (stage < 4U) {
+      assert(info.waits_response); // 读回核验阶段等应答
+      assert(info.timeout_ms > 0U);
+    } else {
+      // 写 FLASH：无应答、不等超时（驱动器写 flash 期间会阻塞自己的控制循环，
+      // 等 ack 只会把它和总线一起拖住；落盘结果由下次上电的设备比对检出）。
+      assert(!info.waits_response);
+      assert(!info.param_raw_valid); // 保存码不是设备参数，不进记录/比对
+    }
   }
-  // 越界阶段无效。
+  // 越界阶段无效（6 阶段：0..5）。
   motor_protocol_tx_frame_t frame = {};
-  assert(!motor_protocol_cerb_adapter.config_encode_stage(4U, profile, 1U, 0U, &req, &frame));
+  assert(!motor_protocol_cerb_adapter.config_encode_stage(6U, profile, 1U, 0U, &req, &frame));
 }
 
 // 身份读取事务（READ_IDENTITY）与设备侧管理对象共用同一裁决入口
@@ -576,7 +588,7 @@ static void test_cerb_refresh_params_transaction() {
     assert(frame.can_id == 0x600U + 4U);
     assert(memcmp(frame.data, expect[stage], 8U) == 0);
     motor_protocol_config_stage_info_t info = {};
-    assert(motor_protocol_cerb_adapter.config_stage_info(stage, &req, &info));
+    assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
     assert(info.waits_response && info.timeout_ms > 0U);
   }
   motor_protocol_tx_frame_t frame = {};
@@ -634,12 +646,33 @@ static void test_cerb_refresh_params_transaction() {
         motor_protocol_cerb_adapter.config_on_response(stage, profile, &req, &r, &read);
     assert(outcome == MOTOR_PROTOCOL_STAGE_ADVANCE);
   }
-  assert(read.size == 16U && !read.overflow);
-  const float *values = reinterpret_cast<const float *>(storage);
-  assert(fabs(values[0] - MOTOR_PROTOCOL_PI / 2.0) < 1e-5);
-  assert(fabs(values[1] + MOTOR_PROTOCOL_PI / 2.0) < 1e-5);
-  assert(fabs(values[2] - 2.0 * MOTOR_PROTOCOL_PI * 10.0 / 101.0) < 1e-5);
-  assert(fabs(values[3] - 0.086 * 101.0) < 1e-5);
+  // 每阶段一个 motor_protocol_param_stage_t：设备端原值 + 关节侧换算值。
+  assert(read.size == 4U * sizeof(motor_protocol_param_stage_t) && !read.overflow);
+  const motor_protocol_param_stage_t *values =
+      reinterpret_cast<const motor_protocol_param_stage_t *>(storage);
+  assert(values[0].raw == 16384U);   // +90° 的 cnt（原值原样带出）
+  assert(values[1].raw == 0xFFFFC000U); // -16384 的补码
+  assert(values[2].raw == 600U);     // 电机端 RPM
+  assert(values[3].raw == 1000U);    // 电机端 mA
+  assert(fabs(values[0].value_si - MOTOR_PROTOCOL_PI / 2.0) < 1e-5);
+  assert(fabs(values[1].value_si + MOTOR_PROTOCOL_PI / 2.0) < 1e-5);
+  assert(fabs(values[2].value_si - 2.0 * MOTOR_PROTOCOL_PI * 10.0 / 101.0) < 1e-5);
+  // 限值对象用规格书峰值对（45 N·m ÷ 10.8 A），不是反馈的 Kt×gear 链。
+  assert(fabs(values[3].value_si - 45.0 / 10.8) < 1e-5);
+
+  // 阶段 → 设备端参数槽位（内核按槽位落袋，不硬编码阶段号）。
+  {
+    const uint8_t expect_slots[4] = {
+        MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX,
+        MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX};
+    for (uint8_t stage = 0U; stage < 4U; ++stage) {
+      motor_protocol_config_stage_info_t info = {};
+      assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
+      assert(info.param_raw_valid);
+      assert(info.param_slot == expect_slots[stage]);
+      assert(info.param_raw == 0U); // 读阶段：原值由应答带回
+    }
+  }
 
   // Vaxor：无设备参数回读能力（0 阶段 → UNSUPPORTED）。
   const motor_protocol_model_profile_t *vp = nullptr;
@@ -656,7 +689,7 @@ static void test_cerb_sdo_velocity_torque_frames() {
   motor_protocol_config_request_t vel = {};
   vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
   vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &vel) == 2U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &vel) == 3U);
   motor_protocol_tx_frame_t f = {};
   assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 1U, 0U, &vel, &f));
   assert(f.data[0] == 0x23U && f.data[1] == 0x80U && f.data[2] == 0x60U && f.data[3] == 0x00U);
@@ -666,16 +699,110 @@ static void test_cerb_sdo_velocity_torque_frames() {
   assert(motor_protocol_cerb_adapter.config_encode_stage(1U, profile, 1U, 0U, &vel, &f));
   assert(f.data[0] == 0x40U); // 读回请求
 
-  // 关节侧 30 N·m → Iq = 30/(0.086×101×1.0) = 3.4539 A → 3454 mA。
+  // 关节侧 30 N·m → 电流 = 30/(45/10.8) = 7.2 A → 7200 mA（限值系数 = 峰值对）。
   motor_protocol_config_request_t trq = {};
   trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   trq.max_torque_nm = 30.0f;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &trq) == 2U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &trq) == 3U);
   assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 1U, 0U, &trq, &f));
   assert(f.data[0] == 0x23U && f.data[1] == 0x38U && f.data[2] == 0x25U && f.data[3] == 0x00U);
   const uint32_t ma = (uint32_t)f.data[4] | ((uint32_t)f.data[5] << 8U) |
                       ((uint32_t)f.data[6] << 16U) | ((uint32_t)f.data[7] << 24U);
-  assert(ma == 3454U);
+  assert(ma == 7200U);
+
+  // 写阶段必须把写入的设备端原值带出（内核据此写固件记录）：与帧内字节同值。
+  motor_protocol_config_stage_info_t write_info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &trq, &write_info));
+  assert(write_info.param_raw_valid);
+  assert(write_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
+  assert(write_info.param_raw == ma);
+  // 读回核验阶段与写阶段同槽位（内核写记录时只看写阶段）。
+  assert(motor_protocol_cerb_adapter.config_stage_info(1U, profile, &trq, &write_info));
+  assert(!write_info.param_raw_valid);
+  assert(write_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_NONE);
+
+  motor_protocol_config_stage_info_t vel_info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &vel, &vel_info));
+  assert(vel_info.param_raw_valid);
+  assert(vel_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
+  assert(vel_info.param_raw == 3030U);
+
+  motor_protocol_config_request_t pos = {};
+  pos.kind = MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS;
+  pos.position_limits.min_position_rad = -(float)MOTOR_PROTOCOL_PI / 2.0f;
+  pos.position_limits.max_position_rad = (float)MOTOR_PROTOCOL_PI / 2.0f;
+  motor_protocol_config_stage_info_t pos_info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &pos, &pos_info));
+  assert(pos_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
+  assert(motor_protocol_cerb_adapter.config_stage_info(2U, profile, &pos, &pos_info));
+  assert(pos_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
+
+  // 末阶段（写 FLASH）不携带设备参数：它是保存码，不是设备参数。
+  motor_protocol_config_stage_info_t save_info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(2U, profile, &trq, &save_info));
+  assert(!save_info.waits_response && !save_info.param_raw_valid);
+  motor_protocol_tx_frame_t save_frame = {};
+  assert(motor_protocol_cerb_adapter.config_encode_stage(2U, profile, 1U, 0U, &trq,
+                                                        &save_frame));
+  assert(save_frame.data[0] == 0x23U && save_frame.data[1] == 0x39U &&
+         save_frame.data[2] == 0x25U && save_frame.data[4] == 0x01U);
+
+  // 身份读取不携带设备参数（不得混入记录）。
+  motor_protocol_config_request_t ident = {};
+  ident.kind = MOTOR_PROTOCOL_CONFIG_READ_IDENTITY;
+  motor_protocol_config_stage_info_t ident_info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &ident, &ident_info));
+  assert(!ident_info.param_raw_valid);
+
+  // Vaxor 的 SET_MODE 阶段同理不带设备参数。
+  const motor_protocol_model_profile_t *vp = nullptr;
+  assert(find_profile("vaxor_2550", &vp));
+  motor_protocol_config_request_t mode = {};
+  mode.kind = MOTOR_PROTOCOL_CONFIG_SET_MODE;
+  motor_protocol_config_stage_info_t mode_info = {};
+  assert(motor_protocol_vaxor_adapter.config_stage_info(0U, vp, &mode, &mode_info));
+  assert(!mode_info.param_raw_valid);
+  assert(mode_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_NONE);
+}
+
+// 设零点：单阶段写 0x2531=1（字典表「设置电机输出端零位」），等 SDO 写应答即
+// 完成——命令式对象，不读回（读回值语义未定义）。失能态门禁在内核侧。
+static void test_cerb_set_zero_frames() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r58_101", &profile));
+  motor_protocol_config_request_t req = {};
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 1U);
+
+  motor_protocol_tx_frame_t frame = {};
+  assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 3U, 0U, &req,
+                                                        &frame));
+  const uint8_t kExpect[8] = {0x23, 0x31, 0x25, 0x00, 0x01, 0x00, 0x00, 0x00};
+  assert(frame.can_id == 0x600U + 3U && frame.size == 8U && frame.is_fd);
+  assert(memcmp(frame.data, kExpect, 8U) == 0);
+
+  motor_protocol_config_stage_info_t info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &req, &info));
+  assert(info.waits_response && info.timeout_ms > 0U);
+  assert(!info.param_raw_valid); // 不是设备参数：不进记录/比对
+  assert(!motor_protocol_cerb_adapter.config_encode_stage(1U, profile, 3U, 0U, &req,
+                                                         &frame));
+
+  motor_protocol_raw_frame_t r = {};
+  r.can_id = 0x580U + 3U;
+  r.dlc = 8U;
+  const uint8_t kAck[8] = {0x60, 0x31, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
+  memcpy(r.data, kAck, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_ADVANCE);
+  const uint8_t kAbort[8] = {0x80, 0x31, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
+  memcpy(r.data, kAbort, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_FAIL);
+  const uint8_t kWrong[8] = {0x60, 0x38, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
+  memcpy(r.data, kWrong, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r, nullptr) ==
+         MOTOR_PROTOCOL_STAGE_RETRY);
 }
 
 // 响应裁决：写等 ack、读回必须一致；设备 abort → FAIL；索引不符 → RETRY。
@@ -787,6 +914,7 @@ int main() {
   test_cerb_encode_discovery_sync();
   test_cerb_config_unsupported_paths();
   test_cerb_sdo_position_limit_frames();
+  test_cerb_set_zero_frames();
   test_cerb_sdo_velocity_torque_frames();
   test_cerb_sdo_response_judging();
   test_cerb_identity_read_transaction();

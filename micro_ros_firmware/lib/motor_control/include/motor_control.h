@@ -43,6 +43,10 @@ extern "C" {
 #define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
 #define MOTOR_CONTROL_SNAPSHOT_DISABLE_MS 100U
 
+// 设备参数上电回读的尝试上限与退避（读是只读事务，重试无副作用）。
+#define MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 3U
+#define MOTOR_CONTROL_DEV_READ_RETRY_MS 500U
+
 // 生命周期（ARD-0007 §9.1：九态，只有 ACTIVE 允许运动帧）。
 typedef enum {
   MOTOR_CONTROL_LIFECYCLE_ABSENT = 0U,
@@ -63,8 +67,30 @@ typedef enum {
   MOTOR_CONTROL_FAULT_VENDOR = 2U,
   MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE = 3U,
   MOTOR_CONTROL_FAULT_CONFIG_CONFLICT = 4U,
-  MOTOR_CONTROL_FAULT_OFFLINE = 5U
+  MOTOR_CONTROL_FAULT_OFFLINE = 5U,
+  // 设备参数未初始化（上电回读失败或与固件记录不一致）。仅设备侧限位
+  // 型号（CERB）会产生：参数以设备为准，未核对不得运动。
+  MOTOR_CONTROL_FAULT_DEV_PARAM = 6U
 } motor_control_fault_code_t;
+
+// 设备参数初始化状态（上电/重连后回读设备 → 与固件记录比对）。
+// 参数以设备内为准、固件记录只作比对基准：不一致即"未初始化"，该台不可控。
+typedef enum {
+  MOTOR_CONTROL_DEV_INIT_NA = 0U,        // 非设备侧型号（VAXOR）：无从比对
+  MOTOR_CONTROL_DEV_INIT_PENDING = 1U,   // 尚未回读设备（上电/重连后）
+  MOTOR_CONTROL_DEV_INIT_OK = 2U,        // 与记录一致（或本机无记录可比）
+  MOTOR_CONTROL_DEV_INIT_MISMATCH = 3U,  // 与记录不一致 → 未初始化
+  MOTOR_CONTROL_DEV_INIT_UNVERIFIED = 4U // 回读失败（超时/中止）→ 未核对
+} motor_control_dev_init_t;
+
+// 限值来源（参数视图用）：设备回读 > Flash 记录 > 型号标定。
+// 页面据此标注"设备真值"还是"离线回落值"，不把两种来源混成同一串数字。
+typedef enum {
+  MOTOR_CONTROL_LIMITS_SOURCE_NONE = 0U,    // 无有效值
+  MOTOR_CONTROL_LIMITS_SOURCE_PROFILE = 1U, // 型号标定默认
+  MOTOR_CONTROL_LIMITS_SOURCE_RECORD = 2U,  // Flash 记录（电机未上线时回落）
+  MOTOR_CONTROL_LIMITS_SOURCE_DEVICE = 3U   // 设备回读（权威）
+} motor_control_limits_source_t;
 
 // 事件（ARD-0007 §10.4/§18.2：拓扑变化必须可见；固定容量环形缓冲，挤掉即计数）。
 typedef enum {
@@ -82,7 +108,10 @@ typedef enum {
   MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST = 11U,
   MOTOR_CONTROL_EVENT_SNAPSHOT_REJECTED = 12U,
   MOTOR_CONTROL_EVENT_CONFIG_RESULT = 13U,
-  MOTOR_CONTROL_EVENT_REGISTRY_FULL = 14U
+  MOTOR_CONTROL_EVENT_REGISTRY_FULL = 14U,
+  // 设备参数初始化定论（reason = motor_control_dev_init_t）。不一致/未核对
+  // 是运维可见事实：出事件以便上层定位是哪一台、什么结论。
+  MOTOR_CONTROL_EVENT_DEV_INIT = 15U
 } motor_control_event_type_t;
 
 typedef struct {
@@ -228,16 +257,50 @@ typedef struct {
   uint32_t protocol_error_count;
   uint16_t last_failure_reason;
 
-  // 设备侧参数影子（CERB）：写事务核验值/REFRESH 回读值；绑定后首次取
-  // Profile 默认值。Vaxor 不用（其限值是本地 soft_* 字段）。
+  // 设备侧参数影子（CERB）：当前生效的四个限值 + 来源。写事务核验值、
+  // REFRESH 回读值、Flash 记录、型号标定都往这里落，limits_source 标明是
+  // 哪一种——页面必须能分辨"设备真值"与"离线回落记录"。Vaxor 不用（其限值
+  // 是本地 soft_* 字段，来源恒为 NONE/PROFILE）。
   bool dev_limits_valid;
+  uint8_t limits_source; // motor_control_limits_source_t
   float dev_min_rad;
   float dev_max_rad;
   float dev_max_velocity_rad_s;
   float dev_max_torque_nm;
-  // REFRESH_PARAMS 事务回读暂存：adapter 按阶段追加 4 个关节侧 float。
-  float refresh_values[4];
+  // 设备端原值（cnt/cnt/RPM/mA，按 MOTOR_PROTOCOL_PARAM_SLOT_* 索引）：
+  // 与固件记录比对的唯一口径，也让页面显示设备里真正存的东西（换算值会
+  // 把系数错误一起吞掉，见 motor_protocol_adapter.h 的 param_* 契约）。
+  uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  float dev_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // 同槽位的关节侧换算值
+  uint8_t dev_raw_present; // 位图 = 1u << slot
+  // REFRESH_PARAMS 事务回读暂存：adapter 按阶段追加一个
+  // motor_protocol_param_stage_t（原值 + 关节侧换算值）。
+  motor_protocol_param_stage_t refresh_stages[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   uint8_t refresh_count;
+  // 本次回读已落袋的槽位位图。成功收尾才提交到 dev_raw_present——半途失败
+  // （超时/中止）不得让位图声称某些槽位有新值，否则比对会拿半份数据下结论。
+  uint8_t refresh_slots;
+  // 固件记录（Flash 投影）：上电比对的基准，也是电机未上线时页面的回落值。
+  bool record_valid;
+  bool record_has_position;
+  bool record_has_velocity;
+  bool record_has_torque;
+  float record_min_rad;
+  float record_max_rad;
+  float record_max_velocity_rad_s;
+  float record_max_torque_nm;
+  uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  uint8_t record_raw_present;
+  bool boot_record_offered; // 本会话已把 Flash 记录（或"无记录"）告知本表项
+  // 上电比对结论。PENDING/MISMATCH/UNVERIFIED 三态都不可控（见
+  // motor_control_dev_params_ready）。
+  motor_control_dev_init_t dev_init;
+  bool dev_read_done; // 本会话已对设备参数定论（成功后不再自动重读）
+  // 自动回读的尝试计数与退避时刻：SDO 读是纯只读、对设备无副作用，读不到
+  // 多半是总线抖动/设备忙，多给几次机会再判"未核对"，避免一次抖动就把该台
+  // 卡在不可使能（结论口径不变：没核对通过就不放行）。
+  uint8_t dev_read_attempts;
+  uint32_t dev_read_retry_tick_ms;
   // boot 存储参数套用状态：bit7=已见过存储记录（只初始化一次），
   // bit0=待套增益、bit1=待套限值；Profile 未就绪时低位保留由 20ms 边界
   // 重试，套尽后只留 bit7（之后的 refresh/设备写影子不被重复 apply 覆盖）。
@@ -252,6 +315,9 @@ typedef struct {
   uint8_t tx_stage;
   uint8_t tx_retries;
   uint32_t tx_deadline_tick_ms;
+  // 本事务各阶段实际编码出的设备端原值（写阶段发出时登记）。写事务成功
+  // 收尾时用它同步固件记录——记录必须与设备里真正存的原值同口径。
+  uint32_t tx_write_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
 } motor_control_entry_t;
 
 typedef struct {
@@ -297,7 +363,26 @@ typedef struct {
   uint32_t snapshot_accepted_count;
   uint32_t snapshot_rejected_count;
   uint32_t config_rejected_count;
+
+  // "设备与固件记录一起写"的落盘信号：设备侧写事务成功（设备 + 记录已同步）
+  // 后置位。任务层取走并落 Flash——记录不落盘就断电，下次上电比对必然不一致。
+  bool record_dirty;
 } motor_control_context_t;
+
+// 取走并清除记录脏位（true = 自上次取走后有设备侧写成功，需要落盘）。
+bool motor_control_take_record_dirty(motor_control_context_t *ctx);
+
+// 设备参数初始化是否放行运动（"初始化完成前不可使能"）。只有两种结论放行：
+//  - NA：非设备侧型号（VAXOR 无设备对象，无从比对）；
+//  - OK：回读值与固件记录一致，或本机对该台无记录。
+// PENDING（上电回读未收尾）/ MISMATCH（与记录不一致）/ UNVERIFIED（回读失败）
+// 一律放行不了：设备参数以驱动板为准，没核对完成就没有"用哪份值"的答案。
+// 恢复路径：变量写回（写事务同时更新设备与记录，随即重判）或重连重读。
+static inline bool motor_control_dev_params_allow_motion(
+    const motor_control_entry_t *entry) {
+  return entry != NULL && (entry->dev_init == MOTOR_CONTROL_DEV_INIT_NA ||
+                           entry->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+}
 
 // ---------------------------------------------------------------------------
 // 生命周期管理
@@ -418,7 +503,26 @@ typedef struct {
   float velocity_limit_rad_s;
   float torque_limit_nm;
   bool limits_valid;           // 四个限值全部有效（非 NaN）
+  uint8_t limits_source;       // motor_control_limits_source_t
+  uint8_t dev_init;            // motor_control_dev_init_t
+  // 设备端原值有效性位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）：有位的槽位
+  // 其 dev_raw 就是设备里真正存的值（回读或写后核验得来），持久化据此逐槽
+  // 收录——不要求四个槽位齐全，刚写过一项也应当落盘。
+  // 关节侧 N·m/A（Kt × 减速比 × 效率）：参数服务器的力矩列按 A 呈现时要它
+  // 换算，未绑定/系数未知为 NaN。设备侧型号与反馈换算用的是同一个系数。
+  float torque_per_amp;
+  uint8_t dev_raw_present;
+  uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // cnt/cnt/RPM/mA
+  // 固件记录里的设备端原值（上电比对基准）。设备端原值缺失时（本次上电还没
+  // 成功回读过设备）存储投影用它保底——否则一次"读不到设备"后再点保存，
+  // 会把比对基准整体抹掉，下次上电就再也发现不了不一致。
+  uint8_t record_raw_present;
+  uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
 } motor_control_param_view_t;
+
+// 四个设备端原值是否齐全（页面/工具判"设备真值可完整显示"）。
+#define MOTOR_CONTROL_DEV_RAW_ALL \
+  ((uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_COUNT) - 1U))
 
 // 只读参数视图副本（固定容量，按注册表顺序）；未发现电机不在结果中。
 size_t motor_control_copy_param_views(motor_control_context_t *ctx,
@@ -440,6 +544,10 @@ typedef struct {
   float pos_max_rad;
   float velocity_limit_rad_s;
   float torque_limit_nm;
+  // 写入设备时实际落在设备里的原值（与上列 SI 值同一次事务产生）：
+  // 上电比对比的是这一组，设备端原值不随换算系数漂移。
+  uint32_t device_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  uint8_t device_raw_present; // 位图 = 1u << slot
 } motor_control_stored_params_t;
 
 // 套用 boot 存储参数（幂等：套尽的电机 mask 清零；Profile 未绑定的电机

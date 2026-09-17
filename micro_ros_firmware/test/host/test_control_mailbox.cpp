@@ -428,8 +428,31 @@ static void test_refresh_params_request_is_accepted() {
   assert(taken.motor_id == 3U);
 }
 
+// SET_ZERO：同为无载荷请求。**注意**：mailbox 的 config_request_is_valid 是
+// 白名单（default: false），新增 kind 必须同时加进去——漏加会让请求在 mailbox
+// 就被拒（last_error=11），内核完全收不到、总线上一条帧都没有。
+static void test_set_zero_request_is_accepted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_request_agent_connected(&mailbox, true);
+
+  control_mailbox_config_request_t request{};
+  request.request_id = 7U;
+  request.received_tick_ms = 20U;
+  request.motor_id = 5U;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+  assert(mailbox.config_invalid_count == 0U);
+
+  control_mailbox_config_request_t taken{};
+  assert(control_mailbox_take_config(&mailbox, &taken));
+  assert(taken.kind == CONTROL_MAILBOX_CONFIG_SET_ZERO);
+  assert(taken.motor_id == 5U);
+}
+
 int main() {
   test_refresh_params_request_is_accepted();
+  test_set_zero_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
   test_config_is_neutral_bounded_fifo();

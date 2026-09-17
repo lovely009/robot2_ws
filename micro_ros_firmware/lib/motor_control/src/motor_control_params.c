@@ -13,13 +13,17 @@
 #include <math.h>
 #include <string.h>
 
-// 绑定后首次设备影子：取 Profile 标定（±mit 位置限、额定转速、峰值扭矩）。
+// 绑定后首次设备影子：取 Profile 标定（±mit 位置限、额定转速、峰值扭矩）作
+// 占位，来源标 PROFILE——设备真值要等上电回读（dev_init=PENDING 期间该台
+// 不可运动，见 motor_control_dev_params_ready）。
 void motor_control_set_default_device_shadow(motor_control_entry_t *entry) {
   if (entry == NULL || entry->profile == NULL || entry->dev_limits_valid) {
     return;
   }
   const motor_protocol_model_profile_t *p = entry->profile;
   if ((p->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+    entry->limits_source = MOTOR_CONTROL_LIMITS_SOURCE_NONE;
+    entry->dev_init = MOTOR_CONTROL_DEV_INIT_NA; // 无设备对象可比对
     return;
   }
   entry->dev_min_rad = -p->mit_position_limit_rad;
@@ -28,6 +32,8 @@ void motor_control_set_default_device_shadow(motor_control_entry_t *entry) {
       p->rated_speed_rad_s > 0.0f ? p->rated_speed_rad_s : NAN;
   entry->dev_max_torque_nm = p->peak_torque_nm > 0.0f ? p->peak_torque_nm : NAN;
   entry->dev_limits_valid = true;
+  entry->limits_source = MOTOR_CONTROL_LIMITS_SOURCE_PROFILE;
+  entry->dev_init = MOTOR_CONTROL_DEV_INIT_PENDING;
 }
 
 static void fill_view(const motor_control_entry_t *entry,
@@ -73,6 +79,26 @@ static void fill_view(const motor_control_entry_t *entry,
   view->limits_valid =
       isfinite(view->pos_min_rad) && isfinite(view->pos_max_rad) &&
       isfinite(view->velocity_limit_rad_s) && isfinite(view->torque_limit_nm);
+  view->limits_source =
+      device_side ? entry->limits_source : MOTOR_CONTROL_LIMITS_SOURCE_NONE;
+  view->dev_init = (uint8_t)entry->dev_init;
+  // 设备端原值只在"来源=设备回读"时有效：其余来源（型号标定/Flash 记录）
+  // 没有设备原值可给，页面据此区分"设备真值"与"离线回落值"。
+  // 力矩列（A）用的是**限值系数**（规格书峰值对），与写事务的钳制同源；
+  // 反馈侧的扭矩估计仍走 Kt×减速比×效率（见 motor_protocol.h 的说明）。
+  view->torque_per_amp = entry->profile != NULL
+                             ? motor_protocol_profile_limit_nm_per_amp(
+                                   entry->profile)
+                             : NAN;
+  view->dev_raw_present = device_side ? entry->dev_raw_present : 0U;
+  view->record_raw_present = device_side ? entry->record_raw_present : 0U;
+  for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
+    const uint8_t bit = (uint8_t)(1U << slot);
+    view->dev_raw[slot] =
+        (view->dev_raw_present & bit) != 0U ? entry->dev_raw[slot] : 0U;
+    view->record_raw[slot] =
+        (view->record_raw_present & bit) != 0U ? entry->record_raw[slot] : 0U;
+  }
 }
 
 size_t motor_control_copy_param_views(motor_control_context_t *ctx,
@@ -114,6 +140,36 @@ static const motor_control_stored_params_t *find_stored(
 static void apply_stored_to_entry(motor_control_entry_t *entry,
                                   const motor_control_stored_params_t *rec) {
   const motor_protocol_model_profile_t *p = entry->profile;
+
+  // 两件事分开做，别互相挡：
+  //  - boot_record_offered：只表示"本次调用已把记录（哪怕是"没有记录"）告知
+  //    本表项"，设备参数回读据此才发起（config_step 0b）；
+  //  - 记录内容捕获：只在真拿到记录时落袋一次（首次非 NULL 胜出）。若把它塞
+  //    进 offered 的守卫里，先"声明无记录"再拿到记录的路径会把记录永久丢掉，
+  //    比对基准随之消失——不一致就再也发现不了。
+  // 记录内容不需要 Profile，也不受 mask 影响：它是上电比对基准与离线回落值。
+  if (!entry->boot_record_offered) {
+    entry->boot_record_offered = true;
+  }
+  if (rec != NULL && !entry->record_valid) {
+    entry->record_valid = true;
+    entry->record_has_position = rec->has_position_limits;
+    entry->record_has_velocity = rec->has_velocity_limit;
+    entry->record_has_torque = rec->has_torque_limit;
+    entry->record_min_rad = rec->pos_min_rad;
+    entry->record_max_rad = rec->pos_max_rad;
+    entry->record_max_velocity_rad_s = rec->velocity_limit_rad_s;
+    entry->record_max_torque_nm = rec->torque_limit_nm;
+    memcpy(entry->record_raw, rec->device_raw, sizeof(entry->record_raw));
+    entry->record_raw_present = rec->device_raw_present;
+  }
+
+  // rec == NULL（本机对该台还没拿到记录）：只完成"已告知"这一次性动作，
+  // 不碰 mask——把 SEEN 打在这里会让后到的真记录被当成"已套尽"，记录被静默
+  // 丢弃（与上面 capture 同一类坑）。
+  if (rec == NULL) {
+    return;
+  }
 
   // 首次见到该记录：按字段存在性建立待套用位（只一次）。
   if ((entry->stored_apply_mask & STORED_MASK_SEEN) == 0U) {
@@ -158,16 +214,20 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
       }
     } else if ((p->capability_flags &
                 MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U) {
-      // CERB：只填设备影子，不发 SDO（设备真实值以 refresh 回读为准）。
-      if (rec->has_position_limits) {
-        entry->dev_min_rad = rec->pos_min_rad;
-        entry->dev_max_rad = rec->pos_max_rad;
-      }
-      if (rec->has_velocity_limit) {
-        entry->dev_max_velocity_rad_s = rec->velocity_limit_rad_s;
-      }
-      if (rec->has_torque_limit) {
-        entry->dev_max_torque_nm = rec->torque_limit_nm;
+      // CERB：记录只作显示回落，绝不发 SDO 写；设备真值以回读为准。
+      // 已经回读过设备的（source=DEVICE）不再被记录覆盖——设备为准。
+      if (entry->limits_source != MOTOR_CONTROL_LIMITS_SOURCE_DEVICE) {
+        if (rec->has_position_limits) {
+          entry->dev_min_rad = rec->pos_min_rad;
+          entry->dev_max_rad = rec->pos_max_rad;
+        }
+        if (rec->has_velocity_limit) {
+          entry->dev_max_velocity_rad_s = rec->velocity_limit_rad_s;
+        }
+        if (rec->has_torque_limit) {
+          entry->dev_max_torque_nm = rec->torque_limit_nm;
+        }
+        entry->limits_source = MOTOR_CONTROL_LIMITS_SOURCE_RECORD;
       }
       entry->dev_limits_valid = true;
     }
@@ -180,7 +240,11 @@ void motor_control_apply_stored_params(
     const motor_control_stored_params_t *records, size_t count,
     uint32_t now_ms) {
   (void)now_ms; // 当前套用不产生事件，暂不需要时基
-  if (ctx == NULL || records == NULL || count == 0U) {
+  // 注意 count == 0（Flash 全空）**不是**提前返回的理由：本次调用仍要向每个
+  // 表项声明"记录已就位（哪怕是没有记录）"，上电设备参数回读才有发起时机
+  // （见 motor_control_config_step 0b）。这里提前返回会让空 Flash 的板子
+  // 永远停在 PENDING → 按"初始化完成才可运动"的口径整机不可使能。
+  if (ctx == NULL || records == NULL) {
     return;
   }
   for (size_t i = 0; i < ctx->entry_count; ++i) {
@@ -188,11 +252,11 @@ void motor_control_apply_stored_params(
     if (!entry->used) {
       continue;
     }
-    // 无记录且无待套用位：跳过；有待套用位（记录只会在 boot 数组里持续传入）。
+    // 无记录也要调用：本次调用同时承担"向表项声明记录已就位（含没有记录）"，
+    // 上电设备参数回读据此才有发起时机（见 motor_control_config_step 0b）。
+    // 有记录时按 mask 套用增益/限值；套尽后本函数是常数开销。
     const motor_control_stored_params_t *rec =
         find_stored(records, count, entry->motor_id);
-    if (rec != NULL) {
-      apply_stored_to_entry(entry, rec);
-    }
+    apply_stored_to_entry(entry, rec);
   }
 }

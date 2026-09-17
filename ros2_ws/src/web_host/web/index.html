@@ -123,22 +123,33 @@
             <button id="btnParamSave" class="tiny-btn">保存到 W25</button>
           </h2>
           <p class="warn tiny">
+            <b>设零</b>：把该台当前姿态设为设备零点（写 0x2531=1）。厂家要求
+            <b>失能状态</b>下设置——运行中会被固件拒绝，不会隐式失能；零点改变后设备内的
+            位置限位随之移动，请重新确认限位与机械行程。
+            <b>单位</b>：位置 <b>度</b>、速度 <b>度/秒</b>、力矩 <b>安培</b>（设备里的对象就是
+            cnt / RPM / mA，rad 与 N·m 只在固件内核里用；换算由固件在参数边界做一次）。
             参数在固件内核生效：<b>kp/kd/enable</b> 本地立即生效；<b>pos/vel/torque 限值</b>
             VAXOR 为 MCU 本地软钳制，CERB 走 CANopen SDO 写后读回核验（要求电机未运动，
             运行中写入会被拒绝并回弹）。set 仅表示「已受理」，最终成败看事件日志的
-            <code>CONFIG_RESULT</code>（失败自动回弹旧值）。「回读」对 CERB 发 SDO upload
-            刷新设备真实值。「保存到 W25」显式落盘，掉电恢复（enable 不持久化）。
+            <code>CONFIG_RESULT</code>（失败自动回弹旧值）。「回读」对 CERB 逐条发 SDO upload
+            （设备是严格一问一答，4 个对象读完约 1 秒）刷新设备真实值。「保存到 W25」显式落盘，掉电恢复（enable 不持久化）。
+            <b>参数以驱动板内为准</b>：「来源」列标出这行数字取自驱动板（在线）还是固件记录
+            （离线回落）；上电时固件会逐台回读并与 Flash 记录比对，<b>初始化未完成（未回读完 /
+            与记录不一致 / 回读失败）的那台不可使能</b>（状态列显示 CONFIG_CONFLICT），
+            从本页写回参数即可恢复一致。运行中回读发现不一致会走软停（阻尼停机），不硬失能。
           </p>
           <div class="table-wrap">
             <table class="params">
               <thead>
                 <tr>
-                  <th>ID</th><th>型号</th><th>enable</th><th>kp</th><th>kd</th>
-                  <th>pos_min</th><th>pos_max</th><th>vel_max</th><th>torque_max</th><th></th>
+                  <th>ID</th><th>型号</th><th>状态</th><th>来源</th><th>enable</th>
+                  <th>kp</th><th>kd</th>
+                  <th>pos_min<small>(°)</small></th><th>pos_max<small>(°)</small></th>
+                  <th>vel_max<small>(°/s)</small></th><th>torque_max<small>(A)</small></th><th></th>
                 </tr>
               </thead>
               <tbody id="paramRows">
-                <tr class="empty"><td colspan="10">连接后点「读取」载入当前参数</td></tr>
+                <tr class="empty"><td colspan="12">连接后点「读取」载入当前参数</td></tr>
               </tbody>
             </table>
           </div>

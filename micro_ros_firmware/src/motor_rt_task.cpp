@@ -41,7 +41,9 @@ static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维�
                                                     // 20ms 状态上报，与 VAXOR
                                                     // 20ms 自推统一 50Hz）
 
-static motor_control_context_t g_motor_control;
+// 不透明内核单例（布局在 motor_control 库内私有；本任务只持指针）。
+static motor_control_context_t *const g_motor_control =
+    motor_control_instance();
 static control_mailbox_t g_control_mailbox;
 
 // boot 存储参数（start 时从 storage 任务快照；20ms 边界套用到内核）。
@@ -102,7 +104,7 @@ size_t motor_rt_copy_motion_states(motor_control_motion_state_t *out,
   const uint32_t now_ms = millis();
   taskENTER_CRITICAL();
   const size_t count =
-      motor_control_copy_motion_states(&g_motor_control, out, capacity, now_ms);
+      motor_control_copy_motion_states(g_motor_control, out, capacity, now_ms);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -114,7 +116,7 @@ size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity) {
   const uint32_t now_ms = millis();
   taskENTER_CRITICAL();
   const size_t count =
-      motor_control_copy_statuses(&g_motor_control, out, capacity, now_ms);
+      motor_control_copy_statuses(g_motor_control, out, capacity, now_ms);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -126,7 +128,7 @@ size_t motor_rt_copy_param_views(motor_control_param_view_t *out,
   }
   taskENTER_CRITICAL();
   const size_t count =
-      motor_control_copy_param_views(&g_motor_control, out, capacity);
+      motor_control_copy_param_views(g_motor_control, out, capacity);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -146,7 +148,7 @@ size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
   }
   taskENTER_CRITICAL();
   const size_t count =
-      motor_control_drain_events(&g_motor_control, out, capacity);
+      motor_control_drain_events(g_motor_control, out, capacity);
   taskEXIT_CRITICAL();
   return count;
 }
@@ -156,44 +158,35 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
     return 0U;
   }
   taskENTER_CRITICAL();
-  // 发布顺序确定化：按 motor_id 升序，选择逻辑统一走内核的选择器
-  // （不再跨模块直读 g_motor_control.entries）。
-  bool taken[MOTOR_CONTROL_MAX_MOTORS] = {};
-  size_t count = 0U;
-  for (;;) {
-    if (count >= capacity) {
-      break;
-    }
-    const motor_control_entry_t *entry =
-        motor_control_entry_take_sorted(&g_motor_control, taken);
-    if (entry == nullptr) {
-      break;
-    }
-    motor_rt_topology_entry_t *topo = &out[count++];
-    topo->motor_id = entry->motor_id;
-    topo->bus_index = entry->bus_index;
+  // 内核按 motor_id 升序产出拓扑，这里只做协议编号映射与字符串落地。
+  motor_control_topology_entry_t topo_in[MOTOR_CONTROL_MAX_MOTORS];
+  const size_t kernel_count =
+      motor_control_copy_topology(g_motor_control, topo_in, capacity);
+  for (size_t i = 0; i < kernel_count; ++i) {
+    const motor_control_topology_entry_t *in = &topo_in[i];
+    motor_rt_topology_entry_t *topo = &out[i];
+    topo->motor_id = in->motor_id;
+    topo->bus_index = in->bus_index;
     topo->protocol = 0xFFU; // 未登记协议（防御；当前两协议均可命中）
     for (size_t k = 0; k < sizeof(kAdapters) / sizeof(kAdapters[0]); ++k) {
-      if (kAdapters[k] == entry->adapter) {
+      if (kAdapters[k] == in->protocol) {
         topo->protocol = (uint8_t)k; // 注册顺序 = MotorTopologyEntry 协议枚举
         break;
       }
     }
     topo->model_name[0] = '\0';
-    if (entry->profile != nullptr && entry->profile->model_name != nullptr) {
-      strncpy(topo->model_name, entry->profile->model_name,
+    if (in->model_name != nullptr) {
+      strncpy(topo->model_name, in->model_name,
               sizeof(topo->model_name) - 1U);
       topo->model_name[sizeof(topo->model_name) - 1U] = '\0';
     }
-    topo->capability_flags =
-        entry->profile != nullptr ? entry->profile->capability_flags : 0U;
-    topo->online = entry->online;
-    topo->conflict =
-        entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
-    topo->lifecycle = (uint8_t)entry->lifecycle;
+    topo->capability_flags = in->capability_flags;
+    topo->online = in->online;
+    topo->conflict = in->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
+    topo->lifecycle = (uint8_t)in->lifecycle;
   }
   taskEXIT_CRITICAL();
-  return count;
+  return kernel_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +220,7 @@ static void drain_rx_rings(void) {
         frame.dlc = batch[i].dlc;
         frame.rx_tick_ms = batch[i].rx_tick_ms;
         memcpy(frame.data, batch[i].data, MOTOR_PROTOCOL_MAX_FRAME_BYTES);
-        motor_control_on_raw_frame(&g_motor_control, &frame);
+        motor_control_on_raw_frame(g_motor_control, &frame);
       }
       drained += popped;
     }
@@ -245,7 +238,7 @@ static void sustain_discovery_sync(uint32_t now_ms) {
   }
   last_sync_ms = now_ms;
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
-    (void)motor_control_probe_discovery(&g_motor_control, bus);
+    (void)motor_control_probe_discovery(g_motor_control, bus);
   }
 }
 
@@ -255,7 +248,7 @@ static void sustain_discovery_sync(uint32_t now_ms) {
 static void route_kernel_tx(void) {
   static motor_protocol_tx_frame_t batch[kTxCollectBudget]; // 静态：固定容量
   const size_t count =
-      motor_control_collect_tx(&g_motor_control, batch, kTxCollectBudget);
+      motor_control_collect_tx(g_motor_control, batch, kTxCollectBudget);
   for (size_t i = 0; i < count; ++i) {
     can_tx_scheduler_t *sched = can_bsp_tx_scheduler(batch[i].bus_index);
     if (sched == nullptr) {
@@ -276,7 +269,7 @@ static void route_kernel_tx(void) {
         // 调度器 FIFO 满时回告内核重入队，由 p0_pending 逐拍补发；
         // 安全帧不允许在搬运链路中静默丢弃。
         if (!can_tx_scheduler_submit_p0(sched, &frame)) {
-          (void)motor_control_requeue_p0(&g_motor_control, &batch[i]);
+          (void)motor_control_requeue_p0(g_motor_control, &batch[i]);
         }
         break;
       case MOTOR_PROTOCOL_TX_CLASS_P1:
@@ -423,19 +416,19 @@ static void control_boundary(void) {
   // 启动首边界先同步一次电平（mailbox 引导豁免的授权电平必须镜像到内核）。
   if (has_edges || !session_synced) {
     if (events.agent_state_pending || !session_synced) {
-      motor_control_set_agent_connected(&g_motor_control,
+      motor_control_set_agent_connected(g_motor_control,
                                         events.agent_connected_requested, now_ms);
       session_connected = events.agent_connected_requested;
     }
     if (events.authorization_pending || !session_synced) {
-      motor_control_set_authorization(&g_motor_control,
+      motor_control_set_authorization(g_motor_control,
                                       events.authorization_requested, now_ms);
     }
     session_synced = true;
   }
   // 会话在线：每边界维持授权电平（幂等；冻结态表项由内核侧跳过）。
   if (session_connected) {
-    motor_control_set_authorization(&g_motor_control, true, now_ms);
+    motor_control_set_authorization(g_motor_control, true, now_ms);
   }
 
   // 完整命令快照（mailbox 无新快照时本边界不产生运动帧）。
@@ -450,7 +443,7 @@ static void control_boundary(void) {
   taskEXIT_CRITICAL();
   if (got_snapshot) {
     convert_snapshot(&snapshot_in, &snapshot);
-    (void)motor_control_apply_command_snapshot(&g_motor_control, &snapshot,
+    (void)motor_control_apply_command_snapshot(g_motor_control, &snapshot,
                                                now_ms);
   }
 
@@ -466,18 +459,18 @@ static void control_boundary(void) {
     }
     motor_protocol_config_request_t request = {0};
     convert_config(&request_in, &request);
-    (void)motor_control_submit_config(&g_motor_control, &request, now_ms);
+    (void)motor_control_submit_config(g_motor_control, &request, now_ms);
   }
 
   // boot 存储参数：Profile 未绑定的电机保留待套用位，后续边界自动重试。
   // 无记录（count=0）时也必须调用：内核据此把"记录已就位（哪怕是没有记录）"
   // 告知每个表项，上电设备参数回读才会发起（见 motor_control_config_step 0b）。
-  motor_control_apply_stored_params(&g_motor_control, g_stored_params,
+  motor_control_apply_stored_params(g_motor_control, g_stored_params,
                                     g_stored_count, now_ms);
 
   // 设备侧写成功 = 设备与固件记录已同步，记录必须落盘才算"一起写"（否则
   // 断电后上电比对必然不一致）。去抖 500ms：页面连续改多项只落一次。
-  if (motor_control_take_record_dirty(&g_motor_control)) {
+  if (motor_control_take_record_dirty(g_motor_control)) {
     g_save_pending = true;
     g_save_deadline_ms = now_ms + kRecordSaveDebounceMs;
   }
@@ -536,7 +529,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
     // 1ms 服务：RX 有界解码 → 运行时服务（离线/新鲜度/事务步进）→
     // SYNC 心跳 → 内核待发帧路由进调度器 → 事件搬运。
     drain_rx_rings();
-    motor_control_service(&g_motor_control, now_ms);
+    motor_control_service(g_motor_control, now_ms);
     sustain_discovery_sync(now_ms);
     route_kernel_tx();
 
@@ -560,7 +553,7 @@ bool motor_rt_task_start(void) {
   storage_task_set_param_snapshot(motor_rt_copy_param_views);
   // mailbox 与内核先于任务初始化；内核 adapter 列表构造注入。
   control_mailbox_init(&g_control_mailbox);
-  motor_control_init(&g_motor_control, kAdapters,
+  motor_control_init(g_motor_control, kAdapters,
                      sizeof(kAdapters) / sizeof(kAdapters[0]));
   // boot 存储参数快照（storage 任务先于本任务启动；无有效 blob 时 count=0）。
   // 保存进静态副本：W25 的新值下次启动才生效，运行期不再引用 storage 任务。

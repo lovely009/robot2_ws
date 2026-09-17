@@ -180,6 +180,13 @@ bool motor_control_send_p0(motor_control_context_t *ctx,
 // 生命周期管理
 // ---------------------------------------------------------------------------
 
+// 生产单例（库内静态分配；app 经 motor_control_instance() 只拿到不透明指针）。
+static motor_control_context_t g_motor_control_instance;
+
+motor_control_context_t *motor_control_instance(void) {
+  return &g_motor_control_instance;
+}
+
 void motor_control_init(motor_control_context_t *ctx,
                         const motor_protocol_adapter_t *const *adapters,
                         size_t adapter_count) {
@@ -936,6 +943,37 @@ bool motor_control_take_record_dirty(motor_control_context_t *ctx) {
   }
   ctx->record_dirty = false;
   return true;
+}
+
+size_t motor_control_copy_topology(motor_control_context_t *ctx,
+                                   motor_control_topology_entry_t *out,
+                                   size_t capacity) {
+  if (ctx == NULL || out == NULL) {
+    return 0U;
+  }
+  // 发布顺序确定化：按 motor_id 升序（同 copy_motion_states 注释）。
+  bool taken[MOTOR_CONTROL_MAX_MOTORS] = {false};
+  size_t count = 0U;
+  for (;;) {
+    if (count >= capacity) {
+      break;
+    }
+    const motor_control_entry_t *entry =
+        motor_control_entry_take_sorted(ctx, taken);
+    if (entry == NULL) {
+      break;
+    }
+    motor_control_topology_entry_t *t = &out[count++];
+    t->motor_id = entry->motor_id;
+    t->bus_index = entry->bus_index;
+    t->protocol = entry->adapter;
+    t->model_name = entry->profile != NULL ? entry->profile->model_name : NULL;
+    t->capability_flags =
+        entry->profile != NULL ? entry->profile->capability_flags : 0U;
+    t->online = entry->online;
+    t->lifecycle = entry->lifecycle;
+  }
+  return count;
 }
 
 size_t motor_control_drain_events(motor_control_context_t *ctx,

@@ -17,7 +17,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "motor_control.h"
+#include "motor_control_internal.h"
 #include "motor_control_profile.h"
 
 // ---------------------------------------------------------------------------
@@ -3663,6 +3663,30 @@ static void test_device_param_na_for_software_limit_models() {
   assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0U);
 }
 
+
+// copy_topology：按 motor_id 升序、含型号名/能力位/在线/生命周期；容量上界生效。
+static void test_copy_topology() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 9, "vaxor_2550", 300);
+  bring_cerb_to_bound(&ctx, 2, "cerb_r48_101", 100);
+  bring_vaxor_to_ready(&ctx, 7, "vaxor_2550", 300);
+
+  motor_control_topology_entry_t out[4] = {};
+  assert(motor_control_copy_topology(&ctx, out, 4) == 3U);
+  assert(out[0].motor_id == 2U && out[1].motor_id == 7U && out[2].motor_id == 9U);
+  // 字段
+  assert(out[0].protocol == &motor_protocol_cerb_adapter);
+  assert(strcmp(out[0].model_name, "cerb_r48_101") == 0);
+  assert((out[0].capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U);
+  assert(out[1].protocol == &motor_protocol_vaxor_adapter);
+  assert(out[1].model_name != nullptr);
+  // 容量上界
+  assert(motor_control_copy_topology(&ctx, out, 2) == 2U);
+  // NULL 防护
+  assert(motor_control_copy_topology(&ctx, nullptr, 4) == 0U);
+}
+
 int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
@@ -3685,6 +3709,7 @@ int main() {
   test_vaxor_refresh_params_unsupported();
   test_cerb_device_write_updates_shadow();
   test_refresh_rejected_before_bind();
+  test_copy_topology();
   run_all_tests();
   printf("test_motor_control: all passed\n");
   return 0;

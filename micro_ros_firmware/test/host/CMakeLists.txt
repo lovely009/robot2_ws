@@ -111,7 +111,9 @@ fw_host_test(test_motor_protocol_adapter
 
 fw_host_test(test_motor_control
   SOURCES test_motor_control.cpp
-  OBLIBS fw_motor_control fw_adapters fw_motor_protocol)
+  OBLIBS fw_motor_control fw_adapters fw_motor_protocol
+  # 白盒：直读 ctx->entries 等内部布局（internal.h 不向 app 导出）
+  INCLUDES ../../lib/motor_control/src)
 
 # config kind 枚举契约 static_assert 需要协议枚举定义
 fw_host_test(test_control_mailbox

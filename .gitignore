@@ -43,6 +43,7 @@
 /.superpowers/
 /.worktrees/
 /.brooks-lint-history.json
+/aqtinstall.log
 *.swp
 *.swo
 *~

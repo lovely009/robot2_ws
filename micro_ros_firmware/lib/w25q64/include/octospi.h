@@ -5,13 +5,20 @@
 
 #include "stm32h7xx_hal.h"
 
-#include "w25q64.h"
+// 控制器层状态（数值与 w25q64_status_t 对齐，w25q64.c 静态断言锁死；
+// 不下沉 ARGUMENT/ID 等芯片层概念）。
+typedef enum {
+  OCTOSPI_OK = 0,
+  OCTOSPI_ERROR_HAL = -2,
+  OCTOSPI_ERROR_TIMEOUT = -3,
+  OCTOSPI_ERROR_STATE = -5,
+} octospi_status_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-w25q64_status_t octospi2_init(void);
+octospi_status_t octospi2_init(void);
 void octospi2_deinit(void);
 OSPI_HandleTypeDef *octospi2_handle(void);
 

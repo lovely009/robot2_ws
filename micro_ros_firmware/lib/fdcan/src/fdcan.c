@@ -7,17 +7,10 @@
 // RX FIFO0 + TX FIFO，每路按 HAL 计算占 300 个 32 位字，偏移 0/300/600。
 // 中断转发沿用 HAL：FDCANx_IT0/IT1_IRQHandler -> HAL_FDCAN_IRQHandler。
 
-#include <STM32FreeRTOS.h>
+#include "board_irq.h"
 
 #include "fdcan.h"
 #include "stm32_def.h"  // Error_Handler 宏（_Error_Handler(file, line)）
-
-#define FDCAN_FREERTOS_IRQ_PRIORITY 5U
-
-_Static_assert(
-    FDCAN_FREERTOS_IRQ_PRIORITY >=
-        configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
-    "FDCAN IRQ priority must permit FreeRTOS FromISR APIs");
 
 // 台架自答模式（platformio.ini 的 FDCAN_SELF_ACK_BENCH，默认关）：HAL 的
 // EXTERNAL_LOOPBACK = TEST.LBCK + MON，控制器自答自己的帧——空总线（无
@@ -35,24 +28,6 @@ FDCAN_HandleTypeDef hfdcan3;
 
 // 三路共用一个 FDCAN 内核时钟，计数器保证只开关一次
 static uint32_t HAL_RCC_FDCAN_CLK_ENABLED = 0;
-
-static void fdcan_periph_clk_config(void) {
-  // PLL2：HSE 24MHz / 2 * 40 = 480MHz VCO，Q=6 -> 80MHz FDCAN 内核时钟
-  RCC_PeriphCLKInitTypeDef periph_clk = {0};
-  periph_clk.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
-  periph_clk.FdcanClockSelection = RCC_FDCANCLKSOURCE_PLL2;
-  periph_clk.PLL2.PLL2M = 2;
-  periph_clk.PLL2.PLL2N = 40;
-  periph_clk.PLL2.PLL2P = 2;
-  periph_clk.PLL2.PLL2Q = 6;
-  periph_clk.PLL2.PLL2R = 2;
-  periph_clk.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
-  periph_clk.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
-  periph_clk.PLL2.PLL2FRACN = 0;
-  if (HAL_RCCEx_PeriphCLKConfig(&periph_clk) != HAL_OK) {
-    Error_Handler();
-  }
-}
 
 // 三路 FDCAN 的位时序、元素尺寸与滤波配额完全一致，仅 Instance 与消息 RAM
 // 偏移不同（每路 300 个 32 位字：RX FIFO0 + TX FIFO，64B 元素）。
@@ -144,10 +119,6 @@ static const fdcan_board_pin_t kFdcanPins[] = {
 
 void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
   GPIO_InitTypeDef gpio = {0};
-  configASSERT(FDCAN_FREERTOS_IRQ_PRIORITY >=
-               configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY);
-  fdcan_periph_clk_config();
-
   for (size_t i = 0; i < sizeof(kFdcanPins) / sizeof(kFdcanPins[0]); ++i) {
     const fdcan_board_pin_t *row = &kFdcanPins[i];
     if (fdcanHandle->Instance != row->instance) {
@@ -170,9 +141,9 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef *fdcanHandle) {
     gpio.Alternate = row->alternate;
     HAL_GPIO_Init(row->port, &gpio);
 
-    HAL_NVIC_SetPriority(row->it0, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
+    HAL_NVIC_SetPriority(row->it0, BOARD_ISR_SYSCALL_THRESHOLD, 0);
     HAL_NVIC_EnableIRQ(row->it0);
-    HAL_NVIC_SetPriority(row->it1, FDCAN_FREERTOS_IRQ_PRIORITY, 0);
+    HAL_NVIC_SetPriority(row->it1, BOARD_ISR_SYSCALL_THRESHOLD, 0);
     HAL_NVIC_EnableIRQ(row->it1);
     return;
   }

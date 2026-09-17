@@ -11,12 +11,16 @@
 #include "sensor_task.h"
 #include "storage_task.h"
 #include "ws2812.h"
+#include "board_irq.h"
 
 // 防回归：栈溢出检测必须经项目级 STM32FreeRTOSConfig.h 生效；若该文件被
 // 删除或未被 __has_include 命中，此处直接编译失败而非静默降级。
 #if configCHECK_FOR_STACK_OVERFLOW != 2
 #error "configCHECK_FOR_STACK_OVERFLOW must be 2 (see include/STM32FreeRTOSConfig.h)"
 #endif
+static_assert(BOARD_ISR_SYSCALL_THRESHOLD ==
+                  configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
+              "board_irq.h 阈值必须与 FreeRTOS syscall 门槛一致");
 
 static const uint32_t START_STK_SIZE = 256U;
 static const UBaseType_t START_TASK_PRIO = 1U;

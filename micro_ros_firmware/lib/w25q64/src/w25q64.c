@@ -1,8 +1,15 @@
 // W25Q64 命令层：JEDEC 识别、读、页编、扇区擦与编程后读回校验，经 octospi
 // 控制器层下发。唯一调用者是 storage 任务；地址/长度单位均为字节。
 #include "w25q64.h"
-
 #include "octospi.h"
+
+// octospi 层状态枚举与本层数值对齐：跨层返回值依赖等值，编译期锁死。
+_Static_assert((int)W25Q64_ERROR_HAL == (int)OCTOSPI_ERROR_HAL,
+               "W25Q64/octospi 错误码 HAL 必须等值");
+_Static_assert((int)W25Q64_ERROR_TIMEOUT == (int)OCTOSPI_ERROR_TIMEOUT,
+               "W25Q64/octospi 错误码 TIMEOUT 必须等值");
+_Static_assert((int)W25Q64_ERROR_STATE == (int)OCTOSPI_ERROR_STATE,
+               "W25Q64/octospi 错误码 STATE 必须等值");
 
 #define W25Q64_CMD_ENABLE_RESET 0x66U
 #define W25Q64_CMD_RESET_DEVICE 0x99U

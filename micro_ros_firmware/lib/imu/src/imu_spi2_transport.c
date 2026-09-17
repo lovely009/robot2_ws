@@ -16,14 +16,7 @@ void imu_spi2_board_init(void) {
   }
   g_spi2_board_done = true;
 
-  // SPI2 时钟源与官方一致：PLL
-  RCC_PeriphCLKInitTypeDef periph_clk = {0};
-  periph_clk.PeriphClockSelection = RCC_PERIPHCLK_SPI2;
-  periph_clk.Spi123ClockSelection = RCC_SPI123CLKSOURCE_PLL;
-  if (HAL_RCCEx_PeriphCLKConfig(&periph_clk) != HAL_OK) {
-    Error_Handler();
-  }
-
+  // SPI123 时钟源（PLL1Q 240MHz）由 system_clock.cpp 单点选择，此处只开时钟门。
   __HAL_RCC_SPI2_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();

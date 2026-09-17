@@ -8,24 +8,24 @@ static bool g_initialized = false;
 
 #define OCTOSPI2_TIMEOUT_MS 1000U
 
-static w25q64_status_t ospi_status(const OSPI_HandleTypeDef *handle,
+static octospi_status_t ospi_status(const OSPI_HandleTypeDef *handle,
                                    HAL_StatusTypeDef status) {
   if (status == HAL_TIMEOUT ||
       (handle != NULL &&
        (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
-    return W25Q64_ERROR_TIMEOUT;
+    return OCTOSPI_ERROR_TIMEOUT;
   }
-  return W25Q64_ERROR_HAL;
+  return OCTOSPI_ERROR_HAL;
 }
 
-static w25q64_status_t octospi2_configure_clock(void) {
+static octospi_status_t octospi2_configure_clock(void) {
   RCC_PeriphCLKInitTypeDef periph_clock = {0};
   periph_clock.PeriphClockSelection = RCC_PERIPHCLK_OSPI;
   periph_clock.OspiClockSelection = RCC_OSPICLKSOURCE_D1HCLK;
   if (HAL_RCCEx_PeriphCLKConfig(&periph_clock) != HAL_OK) {
-    return W25Q64_ERROR_HAL;
+    return OCTOSPI_ERROR_HAL;
   }
-  return W25Q64_OK;
+  return OCTOSPI_OK;
 }
 
 static void octospi2_gpio_init(void) {
@@ -66,13 +66,13 @@ static void octospi2_gpio_deinit(void) {
   HAL_GPIO_DeInit(GPIOD, GPIO_PIN_11);
 }
 
-w25q64_status_t octospi2_init(void) {
+octospi_status_t octospi2_init(void) {
   if (g_initialized) {
-    return W25Q64_OK;
+    return OCTOSPI_OK;
   }
 
-  w25q64_status_t status = octospi2_configure_clock();
-  if (status != W25Q64_OK) {
+  octospi_status_t status = octospi2_configure_clock();
+  if (status != OCTOSPI_OK) {
     return status;
   }
 
@@ -104,7 +104,7 @@ w25q64_status_t octospi2_init(void) {
 
   HAL_StatusTypeDef hal_status = HAL_OSPI_Init(&g_hospi2);
   if (hal_status != HAL_OK) {
-    w25q64_status_t status = ospi_status(&g_hospi2, hal_status);
+    octospi_status_t status = ospi_status(&g_hospi2, hal_status);
     octospi2_deinit();
     return status;
   }
@@ -116,13 +116,13 @@ w25q64_status_t octospi2_init(void) {
   manager.Req2AckTime = 1U;
   hal_status = HAL_OSPIM_Config(&g_hospi2, &manager, OCTOSPI2_TIMEOUT_MS);
   if (hal_status != HAL_OK) {
-    w25q64_status_t status = ospi_status(&g_hospi2, hal_status);
+    octospi_status_t status = ospi_status(&g_hospi2, hal_status);
     octospi2_deinit();
     return status;
   }
 
   g_initialized = true;
-  return W25Q64_OK;
+  return OCTOSPI_OK;
 }
 
 void octospi2_deinit(void) {

@@ -462,12 +462,12 @@ typedef struct {
   uint8_t dev_init;            // motor_control_dev_init_t
   // 设备端原值有效性位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）：有位的槽位
   // 其 dev_raw 就是设备里真正存的值（回读或写后核验得来），持久化据此逐槽
-  // 收录——不要求四个槽位齐全，刚写过一项也应当落盘。
+  // 收录——不要求六个槽位齐全，刚写过一项也应当落盘。
   // 关节侧 N·m/A（Kt × 减速比 × 效率）：参数服务器的力矩列按 A 呈现时要它
   // 换算，未绑定/系数未知为 NaN。设备侧型号与反馈换算用的是同一个系数。
   float torque_per_amp;
   uint8_t dev_raw_present;
-  uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // cnt/cnt/RPM/mA
+  uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // cnt/cnt/RPM/mA/保护开关/方向
   // 固件记录里的设备端原值（上电比对基准）。设备端原值缺失时（本次上电还没
   // 成功回读过设备）存储投影用它保底——否则一次"读不到设备"后再点保存，
   // 会把比对基准整体抹掉，下次上电就再也发现不了不一致。
@@ -475,7 +475,7 @@ typedef struct {
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
 } motor_control_param_view_t;
 
-// 四个设备端原值是否齐全（页面/工具判"设备真值可完整显示"）。
+// 六个设备端原值是否齐全（页面/工具判"设备真值可完整显示"）。
 #define MOTOR_CONTROL_DEV_RAW_ALL \
   ((uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_COUNT) - 1U))
 

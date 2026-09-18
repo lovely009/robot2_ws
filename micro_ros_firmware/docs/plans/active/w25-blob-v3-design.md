@@ -274,6 +274,35 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 `0x6064`，应在容差内为 0（手册零位标定 5 步流程的第 3 步本就要求），
 用于确认"设零真的生效了"——现在固件是单阶段只等写应答，写被拒也会报成功。
 
+### 8.2 实际语义：**变更检测**，不是"保护必须在位"
+
+比对基准是**上次成功落盘时设备里的值**，不是"保护=0"这个常量。因此这套机制
+答的是"这两项自上次落盘以来变过没有"，**不是**"现在保护是不是开着"。两条必须
+写明的后果（现均**已知并接受**，见下文加固方向）：
+
+1. **先关保护、再触发任何一次保存 ⇒ 记录被重新基线化成"关"。** 保存投影
+   （`storage_projection_views_to_blob`，`src/storage_projection.c:40-43`）在回读
+   成功时**优先取设备值**：设备当前 `device_raw[4] = 1`（保护关）就被当成新基准
+   落盘。下次上电设备与记录一致 → 该台正常使能，而按本文档自己的话，这个关节
+   **没有任何限位在执行**。触发保存**不需要写参数**：`device_limit_write_allowed()`
+   只查 `lifecycle != ACTIVE && != SAFE_STOP`（`motor_control_config.c:672-675`），
+   `CONFIG_CONFLICT` 的台仍受理限位写事务；写成功即 `record_dirty`
+   （`motor_control_config.c:198`）→ `motor_rt_task.cpp:584` 去抖 ~500 ms 落盘。
+   即：这段比对是变更检测，不是"限位在位"的验证。
+2. **刚由 v2 迁移上来的记录不参与比对，直到第一次保存。**
+   `param_store_blob_migrate_v2`（`lib/param_store/src/param_store_blob.c:345`）只搬
+   `device_raw[0..3]` 并 `device_raw_present & 0x0F`，bit4/bit5 为 0——比对循环
+   （`dev_params_mismatch_mask`，`motor_control_config.c:80-96`）见到"记录没写过"
+   就 `continue`。所以每块刚升级的板子都处在"这两槽没比"的状态里，直到它第一次
+   保存。（台架实测正是如此：`reason 3` 且 bit4/bit5 未置位。）
+
+**这是交给 owner 的边界，不是本次修的东西**——语义要不要收紧是 owner 的决定。
+可选加固方向（**仅列出，未实现**，留给 owner 拍板）：
+- 「`0x2650:01 == 1` 恒判 MISMATCH」：把"保护必须在位"变成硬前置；代价是外部
+  工具一次误操作就把该台永久锁死（参数面改不了，见 §8.1）。
+- 「拒绝把 `SAFETY = 1` 当基线落盘」：保留变更检测语义，只阻断"关保护后再保存
+  即洗白"这条路径。
+
 ## 9. 测试
 
 `test/host/test_param_store.cpp`（host，纯 C 可直测）：

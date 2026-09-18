@@ -99,7 +99,7 @@ typedef struct {
   float dev_max_rad;
   float dev_max_velocity_rad_s;
   float dev_max_torque_nm;
-  // 设备端原值（cnt/cnt/RPM/mA，按 MOTOR_PROTOCOL_PARAM_SLOT_* 索引）：
+  // 设备端原值（cnt/cnt/RPM/mA/保护开关/方向，按 MOTOR_PROTOCOL_PARAM_SLOT_* 索引）：
   // 与固件记录比对的唯一口径，也让页面显示设备里真正存的东西（换算值会
   // 把系数错误一起吞掉，见 motor_protocol_adapter.h 的 param_* 契约）。
   uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];

@@ -26,8 +26,16 @@ const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
   'REGISTRY_FULL', 'DEV_INIT', 'TRAJECTORY_REJECTED'];
 const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
-// 设备参数槽位名（DEV_INIT 事件 request_id 携带的不一致位图，1u<<slot）
-const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流'];
+// 设备参数槽位名（DEV_INIT 事件 request_id 携带的槽位位图，1u<<slot）。
+// ⚠️ 这是与固件位图的**隐式契约**：槽位顺序必须逐位对齐 firmware 的
+// device_raw 槽索引（MOTOR_PROTOCOL_PARAM_SLOT_*），权威定义在
+// micro_ros_agent/src/can_bridge_msgs/msg/MotorEvent.msg 的 EVENT_DEV_INIT
+// 注释块。固件新增槽位时，这里与那条注释必须同步改——只改一边会静默错位。
+const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流',
+  '保护开关(0x2650:01)', '方向(0x2541)'];
+// 参数面能改的槽位（0..3）；槽 4/5（保护开关/方向）不在参数面，写参数改不了。
+const DEV_SLOT_PARAM_MASK = 0x0F;
+const DEV_SLOT_EXTERNAL_MASK = 0x30;
 const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致', '回读不成功'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
@@ -1060,12 +1068,41 @@ function renderParamRows() {
   renderParamSummary();
 }
 
-// 状态列悬停提示：DEV_INIT 事件带来的"哪几项与固件记录不一致"。
+// 位图 → 槽位名列表（槽位顺序即 DEV_SLOT_NAMES 顺序）。
+function devSlotNames(mask) {
+  return DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
+}
+
+// 恢复口径（MISMATCH 用）：槽 0..3 在参数面，写回对应项即可；槽 4/5
+// （0x2650:01 保护开关 / 0x2541 方向）**不在参数面**，重跑参数写事务改不了它们
+// ——只能拿 cangaroo 或厂商上位机把设备对象改回期望值，再重连重读。
+function devRecoveryText(mask) {
+  const external = (mask & DEV_SLOT_EXTERNAL_MASK) !== 0;
+  const param = (mask & DEV_SLOT_PARAM_MASK) !== 0;
+  if (external && param) {
+    return '写回对应参数项即可，但保护开关/方向不在参数面——' +
+      '须用 cangaroo 或厂商工具改回设备对象后重连重读';
+  }
+  if (external) {
+    return '保护开关/方向不在参数面，写参数改不了——' +
+      '须用 cangaroo 或厂商工具改回设备对象后重连重读';
+  }
+  return '写回对应项即可恢复';
+}
+
+// 状态列悬停提示：DEV_INIT 事件带来的槽位位图。state=3(MISMATCH) 位图是"对不上"
+// 的槽位，state=4(UNVERIFIED) 位图是"没读到"的槽位（见 MotorEvent.msg）。
 function devDetailTitle(id) {
   const info = state.devInit.get(id);
-  if (!info || info.state !== 3 || !info.mask) return '';
-  const slots = DEV_SLOT_NAMES.filter((_, i) => (info.mask & (1 << i)) !== 0);
-  return `设备参数与固件记录不一致：${slots.join('、')}（写回对应项即可恢复）`;
+  if (!info || !info.mask) return '';
+  const slots = devSlotNames(info.mask).join('、');
+  if (info.state === 3) {
+    return `设备参数与固件记录不一致：${slots}（${devRecoveryText(info.mask)}）`;
+  }
+  if (info.state === 4) {
+    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「回读」重试）`;
+  }
+  return '';
 }
 
 // 参数值显示：内核把这些量存成 float32，拓宽成 double 后会出现
@@ -1108,16 +1145,21 @@ function renderParamSummary() {
     const code = Number(state.lastError || 0);
     const why = (code === 40) ? '与固件记录不一致'
       : (code === 41 ? '回读不成功' : '未完成');
-    // 逐台指出"哪几项对不上"：位图来自 DEV_INIT 事件（收到前只显示结论）。
+    // 逐台指出"哪几项"：位图来自 DEV_INIT 事件（收到前只显示结论）。code 40 的
+    // 位图是"对不上"的槽位、41 是"没读到"的槽位——两者都只是槽位名，靠 why 区分。
+    let blockedMask = 0;
     const per = blocked.map((id) => {
       const info = state.devInit.get(id);
       const mask = info ? info.mask : 0;
+      blockedMask |= mask;
       if (!mask) return `${id}`;
-      const slots = DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
-      return `${id}(${slots.join('、')})`;
+      return `${id}(${devSlotNames(mask).join('、')})`;
     });
+    const suffix = (code === 41)
+      ? '括号内是未收到的对象——重连或再点该行「回读」重试'
+      : devRecoveryText(blockedMask);
     parts.push(`<span class="pill off">未初始化 ${blocked.length}</span>` +
-      `<span class="muted">（${per.join(' ')}：${why}——写回对应项、或点该行「回读」后按驱动板值对齐）</span>`);
+      `<span class="muted">（${per.join(' ')}：${why}——${suffix}）</span>`);
   }
   if (offline.length) {
     parts.push(`<span class="pill off">离线 ${offline.length}</span>` +
@@ -1283,12 +1325,17 @@ async function refreshDeviceParams(id) {
   } else if (r.code === 40) {
     const info = state.devInit.get(id);
     const slots = info && info.mask
-      ? '（不一致项：' + DEV_SLOT_NAMES.filter((_, i) => (info.mask & (1 << i)) !== 0).join('、') + '）'
+      ? '（不一致项：' + devSlotNames(info.mask).join('、') + '）'
       : '';
+    const recovery = info && info.mask ? devRecoveryText(info.mask) : '写回对应项即可恢复';
     setParamResult(false, `电机 ${id} 参数不一致${slots}：固件记录与驱动板不符 → 该台未初始化，` +
-      '写回对应项即可恢复');
+      recovery);
   } else if (r.code === 41) {
-    setParamResult(false, `电机 ${id} 回读不成功（last_error=41）：驱动板未应答。` +
+    const info = state.devInit.get(id);
+    const missing = info && info.mask
+      ? '（未收到的对象：' + devSlotNames(info.mask).join('、') + '）'
+      : '';
+    setParamResult(false, `电机 ${id} 回读不成功（last_error=41）${missing}：驱动板未应答。` +
       '该台初始化未完成，不可使能——重连或再点一次「回读」');
   } else {
     setParamResult(false, `电机 ${id} 回读失败：last_error=${r.code}`);

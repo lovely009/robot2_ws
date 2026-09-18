@@ -1,7 +1,14 @@
 // 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15；下行已精简）。
 //
-// 订阅（1 句柄）：
+// 订阅（3 句柄）：
 //   /motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
+//   /motor_trajectory（多点轨迹，段级低频）→ 校验 → mailbox 轨迹通道
+//   /motor_policy（逐电机 enable/kp/kd，低频）→ 校验 → mailbox 策略通道
+//
+// 两条下行命令源的仲裁在内核：轨迹声明集合内的电机由轨迹独占，快照对它
+// 既不下发也不软停；集合外的电机仍由快照负责（缺失即软停，ARD §13.1）。
+// 策略与二者正交：它是控制律参数与武装位，不是运动目标（ARD §15.4 禁止
+// Kp/Kd/Enable 进入 100Hz 快照，故单独成一条）。
 // 发布（4）：
 //   micro_ros/motion_states（100Hz 运动状态，只读副本）
 //   micro_ros/motor_status_array（20Hz 诊断）
@@ -21,14 +28,20 @@
 
 #include <Arduino.h>
 
+#include <string.h>
+
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
 
 #include <can_bridge_msgs/msg/motor_command_array.h>
 #include <can_bridge_msgs/msg/motor_event.h>
+#include <can_bridge_msgs/msg/motor_diagnostics.h>
 #include <can_bridge_msgs/msg/motor_motion_state_array.h>
+#include <can_bridge_msgs/msg/motor_policy_array.h>
 #include <can_bridge_msgs/msg/motor_status_array.h>
 #include <can_bridge_msgs/msg/motor_topology.h>
+#include <can_bridge_msgs/msg/motor_trajectory.h>
+#include <can_bridge_msgs/msg/motor_trajectory_state.h>
 #include <rosidl_runtime_c/string_functions.h>
 #include <rmw_microros/time_sync.h>
 
@@ -45,19 +58,46 @@ static can_bridge_msgs__msg__MotorMotionStateTarget
 static can_bridge_msgs__msg__MotorStatusTarget g_status_buf[kRosArrayCapacity];
 static can_bridge_msgs__msg__MotorTopologyEntry g_topology_buf[kRosArrayCapacity];
 static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[kRosArrayCapacity];
+// 轨迹两层有界序列各自预分配（点数容量独立于电机数，见 .msg 契约）。
+static constexpr size_t kRosTrajectoryPointCapacity =
+    MOTOR_CONTROL_MAX_TRAJECTORY_POINTS;
+static can_bridge_msgs__msg__MotorTrajectoryPoint
+    g_trajectory_points_buf[kRosTrajectoryPointCapacity];
+static uint16_t g_trajectory_target_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
+static can_bridge_msgs__msg__MotorPolicyTarget g_policy_targets_buf[kRosArrayCapacity];
 
 // ---- 话题名 ----
 static const char *kCommandTopic = "/motor_command_array";
+static const char *kTrajectoryTopic = "/motor_trajectory";
+static const char *kPolicyTopic = "/motor_policy";
 static const char *kMotionStatesTopic = "micro_ros/motion_states";
 static const char *kStatusTopic = "micro_ros/motor_status_array";
 static const char *kTopologyTopic = "micro_ros/motor_topology";
 static const char *kEventsTopic = "micro_ros/motor_events";
+static const char *kDiagnosticsTopic = "micro_ros/diagnostics";
+static const char *kTrajectoryStateTopic = "micro_ros/trajectory_state";
 
-// ---- 订阅（1）----
+// 消息面契约版本：随字段**语义**变更递增（字段只增不改序，故不是每次加字段
+// 都动）。上层据此检测漂移，而不是静默按旧布局解析。
+// 2 = 上行按「拓扑=身份 / 状态=状态与电气 / 运动=运动学」三分去重：
+//     lifecycle 只留 status、state_age_ms 只留 motion、topology 加版本号。
+static constexpr uint16_t kMotorMsgSchemaVersion = 2U;
+
+// ---- 订阅（2）----
 static rcl_subscription_t g_command_sub;
 static can_bridge_msgs__msg__MotorCommandArray g_command_msg;
 static bool g_command_up = false;
 static bool g_command_added = false;
+
+static rcl_subscription_t g_trajectory_sub;
+static can_bridge_msgs__msg__MotorTrajectory g_trajectory_msg;
+static bool g_trajectory_up = false;
+static bool g_trajectory_added = false;
+
+static rcl_subscription_t g_policy_sub;
+static can_bridge_msgs__msg__MotorPolicyArray g_policy_msg;
+static bool g_policy_up = false;
+static bool g_policy_added = false;
 
 // ---- 发布（4）----
 static rcl_publisher_t g_motion_states_pub;
@@ -76,8 +116,21 @@ static rcl_publisher_t g_events_pub;
 static can_bridge_msgs__msg__MotorEvent g_event_msg;
 static bool g_events_up = false;
 
+static rcl_publisher_t g_diagnostics_pub;
+static can_bridge_msgs__msg__MotorDiagnostics g_diagnostics_msg;
+static uint32_t g_diagnostics_ring_buf[MOTOR_CONTROL_MAX_BUSES];
+static bool g_diagnostics_up = false;
+
+static rcl_publisher_t g_trajectory_state_pub;
+static can_bridge_msgs__msg__MotorTrajectoryState g_trajectory_state_msg;
+static uint16_t g_trajectory_state_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
+static bool g_trajectory_state_up = false;
+
 size_t motor_bridge_executor_handle_count(void) {
-  return 1U; // command 订阅（下行配置通道已删；型号绑定在内核内自动完成）
+  // command + trajectory + policy 三个订阅（下行配置话题已删；型号绑定在
+  // 内核内自动完成）。加订阅必须同步本计数，否则 executor 句柄不足会静默
+  // 丢回调。
+  return 3U;
 }
 
 // QoS 助手（TBD-ROS-05 默认表）。
@@ -127,6 +180,66 @@ static void command_array_cb(const void *msgin) {
   (void)motor_rt_submit_command(&snapshot); // 非法快照由 mailbox 拒绝并计数
 }
 
+static void trajectory_cb(const void *msgin) {
+  if (msgin == nullptr) {
+    return;
+  }
+  const auto *msg = (const can_bridge_msgs__msg__MotorTrajectory *)msgin;
+  // 声明计数必须在有界数组之内：超界一律拒绝，不做静默截断（截断会把
+  // 一条轨迹悄悄变成另一条）。
+  if (msg->count > msg->points.size ||
+      msg->target_count > msg->target_ids.size ||
+      msg->count > CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS ||
+      msg->target_count > CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS) {
+    return;
+  }
+  // 5KB 级别，静态而非栈上（回调在 micro_ros 任务栈上跑）。
+  static control_trajectory_t trajectory;
+  memset(&trajectory, 0, sizeof(trajectory));
+  trajectory.sequence = msg->sequence;
+  trajectory.trajectory_id = msg->trajectory_id;
+  trajectory.received_tick_ms = millis(); // 本地接收 tick（ARD §12.2）
+  trajectory.point_count = msg->count;
+  trajectory.target_count = msg->target_count;
+  for (uint16_t i = 0; i < msg->target_count; ++i) {
+    trajectory.target_ids[i] = msg->target_ids.data[i];
+  }
+  for (uint16_t i = 0; i < msg->count; ++i) {
+    trajectory.points[i].time_from_start_ms =
+        msg->points.data[i].time_from_start_ms;
+    trajectory.points[i].motor_id = msg->points.data[i].motor_id;
+    trajectory.points[i].position = msg->points.data[i].position;
+    trajectory.points[i].velocity = msg->points.data[i].velocity;
+    trajectory.points[i].effort = msg->points.data[i].effort;
+  }
+  (void)motor_rt_submit_trajectory(&trajectory); // 非法轨迹由 mailbox 拒绝并计数
+}
+
+static void policy_cb(const void *msgin) {
+  if (msgin == nullptr) {
+    return;
+  }
+  const auto *msg = (const can_bridge_msgs__msg__MotorPolicyArray *)msgin;
+  // 声明计数必须在有界数组之内：超界一律拒绝，不做静默截断。
+  if (msg->count > msg->targets.size ||
+      msg->count > CONTROL_POLICY_MAILBOX_MAX_TARGETS) {
+    return;
+  }
+  // 约 0.8KB，静态而非栈上（回调在 micro_ros 任务栈上跑）。
+  static control_policy_snapshot_t snapshot;
+  snapshot.received_tick_ms = millis(); // 本地接收 tick
+  snapshot.request_id = msg->request_id;
+  snapshot.policy_generation = msg->policy_generation;
+  snapshot.target_count = msg->count;
+  for (uint8_t i = 0; i < msg->count; ++i) {
+    snapshot.targets[i].motor_id = msg->targets.data[i].motor_id;
+    snapshot.targets[i].enabled = msg->targets.data[i].enabled;
+    snapshot.targets[i].kp = msg->targets.data[i].kp;
+    snapshot.targets[i].kd = msg->targets.data[i].kd;
+  }
+  (void)motor_rt_submit_policy(&snapshot); // 非法策略由 mailbox 整条拒绝并计数
+}
+
 // ---------------------------------------------------------------------------
 // 发布填充
 // ---------------------------------------------------------------------------
@@ -144,6 +257,7 @@ static void publish_motion_states() {
     out.velocity = states[i].velocity_rad_s;
     out.effort = states[i].effort_nm;
     out.state_age_ms = states[i].state_age_ms;
+    out.target_source = states[i].target_source;
   }
   g_motion_states_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_motion_states_pub, &g_motion_states_msg, nullptr);
@@ -177,7 +291,6 @@ static void publish_statuses() {
     out.limit_flags = statuses[i].limit_flags;
     out.online = statuses[i].online;
     out.lifecycle = statuses[i].lifecycle;
-    out.state_age_ms = statuses[i].state_age_ms;
   }
   g_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_status_pub, &g_status_msg, nullptr);
@@ -207,10 +320,70 @@ static void publish_topology(uint32_t now_ms) {
     out.capability_flags = entries[i].capability_flags;
     out.online = entries[i].online;
     out.conflict = entries[i].conflict;
-    out.lifecycle = entries[i].lifecycle;
   }
+  g_topology_msg.schema_version = kMotorMsgSchemaVersion;
   g_topology_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_topology_pub, &g_topology_msg, nullptr);
+  (void)publish_rc;
+}
+
+// 诊断：1Hz。这些计数器此前全在芯片里，除 heap_free 一个都不对外——实时性与
+// 总线容量的问题因此只能靠 JTAG 定位。全部是单调递增的生命周期累计。
+static void publish_diagnostics(uint32_t now_ms) {
+  static uint32_t s_phase = 0U;
+  if ((uint32_t)(now_ms - s_phase) < 1000U) {
+    return;
+  }
+  s_phase = now_ms;
+  motor_rt_diagnostics_t d = {};
+  motor_rt_copy_diagnostics(&d);
+  g_diagnostics_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  g_diagnostics_msg.rx_frame_count = d.kernel.rx_frame_count;
+  g_diagnostics_msg.unknown_frame_count = d.kernel.unknown_frame_count;
+  g_diagnostics_msg.decode_error_count = d.kernel.decode_error_count;
+  g_diagnostics_msg.snapshot_accepted = d.kernel.snapshot_accepted;
+  g_diagnostics_msg.snapshot_rejected = d.kernel.snapshot_rejected;
+  g_diagnostics_msg.config_rejected = d.kernel.config_rejected;
+  g_diagnostics_msg.event_dropped = d.kernel.event_dropped;
+  g_diagnostics_msg.tx_dropped = d.kernel.tx_dropped;
+  g_diagnostics_msg.p0_retry = d.kernel.p0_retry;
+  g_diagnostics_msg.trajectory_accepted = d.kernel.trajectory_accepted;
+  g_diagnostics_msg.trajectory_rejected = d.kernel.trajectory_rejected;
+  g_diagnostics_msg.policy_accepted = d.kernel.policy_accepted;
+  g_diagnostics_msg.policy_rejected = d.kernel.policy_rejected;
+  g_diagnostics_msg.ring_drop.size = MOTOR_CONTROL_MAX_BUSES;
+  for (uint32_t i = 0U; i < MOTOR_CONTROL_MAX_BUSES; ++i) {
+    g_diagnostics_msg.ring_drop.data[i] = d.ring_drop[i];
+  }
+  g_diagnostics_msg.heap_free = d.heap_free;
+  const rcl_ret_t publish_rc =
+      rcl_publish(&g_diagnostics_pub, &g_diagnostics_msg, nullptr);
+  (void)publish_rc;
+}
+
+// 轨迹执行状态：10Hz。补上「我发的轨迹受理了吗、跑到哪了」——轨迹是 best-effort
+// 下发的，没有它就只能靠猜。被拒的细节另见事件流的 TRAJECTORY_REJECTED。
+static void publish_trajectory_state(uint32_t now_ms) {
+  static uint32_t s_phase = 0U;
+  if ((uint32_t)(now_ms - s_phase) < 100U) {
+    return;
+  }
+  s_phase = now_ms;
+  motor_control_trajectory_state_t st = {};
+  motor_rt_copy_trajectory_state(&st);
+  g_trajectory_state_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  g_trajectory_state_msg.trajectory_id = st.trajectory_id;
+  g_trajectory_state_msg.active = st.active;
+  g_trajectory_state_msg.completed = st.completed;
+  g_trajectory_state_msg.elapsed_ms = st.elapsed_ms;
+  g_trajectory_state_msg.total_ms = st.total_ms;
+  g_trajectory_state_msg.target_count = st.target_count;
+  g_trajectory_state_msg.target_ids.size = st.target_count;
+  for (uint16_t i = 0U; i < st.target_count; ++i) {
+    g_trajectory_state_msg.target_ids.data[i] = st.target_ids[i];
+  }
+  const rcl_ret_t publish_rc =
+      rcl_publish(&g_trajectory_state_pub, &g_trajectory_state_msg, nullptr);
   (void)publish_rc;
 }
 
@@ -227,6 +400,7 @@ static void publish_events() {
       g_event_msg.bus_index = events[i].bus_index;
       g_event_msg.reason = events[i].reason;
       g_event_msg.request_id = events[i].request_id;
+      g_event_msg.event_seq = events[i].seq;
       const rcl_ret_t publish_rc = rcl_publish(&g_events_pub, &g_event_msg, nullptr);
       (void)publish_rc;
     }
@@ -244,6 +418,17 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 
   g_command_msg.targets.capacity = kRosArrayCapacity;
   g_command_msg.targets.data = g_command_targets_buf;
+  g_trajectory_msg.points.capacity = kRosTrajectoryPointCapacity;
+  g_trajectory_msg.points.data = g_trajectory_points_buf;
+  g_trajectory_msg.target_ids.capacity = MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS;
+  g_trajectory_msg.target_ids.data = g_trajectory_target_ids_buf;
+  g_policy_msg.targets.capacity = kRosArrayCapacity;
+  g_policy_msg.targets.data = g_policy_targets_buf;
+  g_diagnostics_msg.ring_drop.capacity = MOTOR_CONTROL_MAX_BUSES;
+  g_diagnostics_msg.ring_drop.data = g_diagnostics_ring_buf;
+  g_trajectory_state_msg.target_ids.capacity =
+      MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS;
+  g_trajectory_state_msg.target_ids.data = g_trajectory_state_ids_buf;
   g_motion_states_msg.states.capacity = kRosArrayCapacity;
   g_motion_states_msg.states.data = g_motion_states_buf;
   g_status_msg.statuses.capacity = kRosArrayCapacity;
@@ -274,6 +459,29 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
   g_command_up = true;
+
+  sub_opts = rcl_subscription_get_default_options();
+  sub_opts.qos = qos_stream();
+  if (rcl_subscription_init(&g_trajectory_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                        MotorTrajectory),
+                            kTrajectoryTopic, &sub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_trajectory_up = true;
+
+  sub_opts = rcl_subscription_get_default_options();
+  // 策略是低频状态声明，允许重发；用 reliable 小深度避免"没生效"被静默。
+  sub_opts.qos = qos_reliable(1);
+  if (rcl_subscription_init(&g_policy_sub, node,
+                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                        MotorPolicyArray),
+                            kPolicyTopic, &sub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_policy_up = true;
 
   // ---- 发布 ----
   rcl_publisher_options_t pub_opts = rcl_publisher_get_default_options();
@@ -320,6 +528,28 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   }
   g_events_up = true;
 
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_stream();
+  if (rcl_publisher_init(&g_diagnostics_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorDiagnostics),
+                         kDiagnosticsTopic, &pub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_diagnostics_up = true;
+
+  pub_opts = rcl_publisher_get_default_options();
+  pub_opts.qos = qos_stream();
+  if (rcl_publisher_init(&g_trajectory_state_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+                                                     MotorTrajectoryState),
+                         kTrajectoryStateTopic, &pub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_trajectory_state_up = true;
+
   // ---- executor ----
   if (rclc_executor_add_subscription(executor, &g_command_sub, &g_command_msg,
                                      command_array_cb,
@@ -328,6 +558,20 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
   g_command_added = true;
+  if (rclc_executor_add_subscription(executor, &g_trajectory_sub,
+                                     &g_trajectory_msg, trajectory_cb,
+                                     ON_NEW_DATA) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_trajectory_added = true;
+  if (rclc_executor_add_subscription(executor, &g_policy_sub, &g_policy_msg,
+                                     policy_cb,
+                                     ON_NEW_DATA) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_policy_added = true;
   return true;
 }
 
@@ -336,10 +580,28 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
     rclc_executor_remove_subscription(executor, &g_command_sub);
     g_command_added = false;
   }
+  if (executor != nullptr && g_trajectory_added) {
+    rclc_executor_remove_subscription(executor, &g_trajectory_sub);
+    g_trajectory_added = false;
+  }
   if (g_command_up) {
     rcl_ret_t rc = rcl_subscription_fini(&g_command_sub, node);
     (void)rc;
     g_command_up = false;
+  }
+  if (executor != nullptr && g_policy_added) {
+    rclc_executor_remove_subscription(executor, &g_policy_sub);
+    g_policy_added = false;
+  }
+  if (g_trajectory_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_trajectory_sub, node);
+    (void)rc;
+    g_trajectory_up = false;
+  }
+  if (g_policy_up) {
+    rcl_ret_t rc = rcl_subscription_fini(&g_policy_sub, node);
+    (void)rc;
+    g_policy_up = false;
   }
   if (g_motion_states_up) {
     rcl_ret_t rc = rcl_publisher_fini(&g_motion_states_pub, node);
@@ -361,6 +623,16 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
     (void)rc;
     g_events_up = false;
   }
+  if (g_diagnostics_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_diagnostics_pub, node);
+    (void)rc;
+    g_diagnostics_up = false;
+  }
+  if (g_trajectory_state_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_trajectory_state_pub, node);
+    (void)rc;
+    g_trajectory_state_up = false;
+  }
 }
 
 void motor_bridge_poll(void) {
@@ -369,4 +641,6 @@ void motor_bridge_poll(void) {
   publish_statuses();
   publish_topology(now_ms);
   publish_events();
+  publish_diagnostics(now_ms);
+  publish_trajectory_state(now_ms);
 }

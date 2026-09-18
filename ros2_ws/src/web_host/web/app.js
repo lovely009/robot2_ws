@@ -1,5 +1,6 @@
 // Robot2 Web 上位机：监控（topology/motion/status/events/imu）+ 控制下发
-// （command 快照；下行配置话题已随固件裁剪移除，型号绑定/授权为固件编译期）。
+// （command 快照 / trajectory 多点轨迹；下行配置话题已随固件裁剪移除，
+// 型号绑定/授权为固件编译期）。
 // 话题与 can_bridge_msgs 对齐固件；QoS 由 rosbridge 2.x 按发布方自动协商。
 (() => {
 'use strict';
@@ -13,6 +14,8 @@ const TOPICS = {
   imu: {name: '/micro_ros/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/micro_ros/imu/temp', type: 'std_msgs/msg/Float32'},
   command: {name: '/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
+  trajectory: {name: '/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  policy: {name: '/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
 };
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -21,7 +24,7 @@ const PROTOCOL = ['VAXOR', 'CERB'];
 const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'ACTIVE', 'SOFT_STOP', 'DISABLE', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
-  'REGISTRY_FULL'];
+  'REGISTRY_FULL', 'DEV_INIT', 'TRAJECTORY_REJECTED'];
 const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
 // 设备参数槽位名（DEV_INIT 事件 request_id 携带的不一致位图，1u<<slot）
 const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流'];
@@ -396,6 +399,32 @@ function sendTargets(targets) {
   return {ok: true, msg: `seq=${seq}，${targets.length} 台`};
 }
 
+// 发布一条多点轨迹：固件在自己的 20ms 控制边界按 time_from_start_ms 段内
+// 线性插值执行，速度取段斜率。轨迹声明集合内的电机由轨迹**独占**——同一时刻
+// 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
+// "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
+// 并软停这些电机。
+function sendTrajectory(points, targetIds) {
+  if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
+  const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
+  seq = (seq + 1) >>> 0;
+  pub('trajectory', {
+    sync_time_ns: Date.now() * 1e6, // 仅用于跨系统日志对齐
+    sequence: seq,
+    count: points.length,
+    target_count: ids.length,
+    target_ids: ids,
+    points,
+  });
+  const total = points.length ? points[points.length - 1].time_from_start_ms : 0;
+  return {ok: true, msg: `轨迹 seq=${seq}：${points.length} 个路点 / ${ids.length} 台` +
+    (points.length ? `，总时长 ${total} ms` : '')};
+}
+
+function cancelTrajectory() {
+  return sendTrajectory([], []);
+}
+
 function renderHistory() {
   const tbody = $('histRows');
   tbody.innerHTML = history.slice(0, 20).map((h) =>
@@ -744,30 +773,66 @@ function teachStepGo() {
   teach.timer = setTimeout(teachStepGo, row.wait);
 }
 
+// 示教行 → 轨迹路点：每行的 wait 是"从上一行到本行"的时长，累加成
+// time_from_start_ms。同一行的多台电机共用同一时刻（固件允许不同电机共用
+// 时间戳），行内重复 ID 取后者。
+function teachRowsToTrajectory(rows) {
+  const points = [];
+  const ids = new Set();
+  let t = 0;
+  for (const row of rows) {
+    for (const x of row.targets) {
+      const point = {time_from_start_ms: t, motor_id: x.motor_id,
+        position: x.position, velocity: x.velocity, effort: x.effort};
+      const dup = points.findIndex(
+        (p) => p.time_from_start_ms === t && p.motor_id === x.motor_id);
+      if (dup >= 0) points[dup] = point; else points.push(point);
+      ids.add(x.motor_id);
+    }
+    t += row.wait;
+  }
+  return {points, ids: [...ids]};
+}
+
+// 播放改为把整条时间线交给 MCU 执行（不再由浏览器逐点 setTimeout）：
+// 定时抖动不再影响运动质量，松手/切页也不会中断。
 function teachPlay() {
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   if (!rows.length) { setTeach('err', '没有点位'); return; }
+  const {points, ids} = teachRowsToTrajectory(rows);
+  if (!points.length) { setTeach('err', '所有点位都是空的'); return; }
+  stopStream(); // 轨迹独占这些电机：先停 100Hz 连发，避免两条命令源分叉
   teachStopTimer();
-  teach.rows = rows;
-  if (teach.idx >= rows.length) teach.idx = 0;
   teach.playing = true;
-  teachStepGo();
+  teach.rows = rows;
+  const res = sendTrajectory(points, ids);
+  setTeach(res.ok ? 'ok' : 'err',
+    (res.ok ? '✓ 已托管给 MCU：' : '✗ ') + res.msg);
 }
 
+// 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消
+// （固件保持末点，机构无抱闸，软停会掉臂），所以"停"必须显式点。
 function teachPause() {
+  const wasPlaying = teach.playing;
   teach.playing = false;
   teachStopTimer();
-  setTeach('ok', `已暂停（停在点位 ${Math.min(teach.idx + 1, teach.rows ? teach.rows.length : 1)}）`);
+  if (!wasPlaying) { setTeach('ok', '未在播放'); return; }
+  const res = cancelTrajectory();
+  setTeach(res.ok ? 'ok' : 'err',
+    res.ok ? '✓ 已取消轨迹（这些电机软停并交回快照通道）' : `✗ ${res.msg}`);
 }
 
 function teachStep() {
-  teachPause();
+  teach.playing = false;
+  teachStopTimer();
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   if (!rows.length) { setTeach('err', '没有点位'); return; }
   teach.rows = rows;
   if (teach.idx >= rows.length) teach.idx = 0;
+  // 单步走快照通道：必须先取消轨迹，否则这些电机归轨迹管，快照会被挡下。
+  cancelTrajectory();
   const row = rows[teach.idx];
   let res = {ok: true, msg: '空点位（不下发）'};
   if (row.targets.length) res = sendTargets(row.targets);
@@ -843,6 +908,43 @@ setInterval(() => {
 
 // ---------- Tab 切换 ----------
 
+// ---------- 逐电机策略（/motor_policy）----------
+// enable 与 MIT 增益**不在参数树里**：它们是动态量（ARD §19.4 禁止进 100Hz
+// 快照）。固件侧是稀疏语义——只影响下发的那些电机，其余保持原状。
+// 代数必须严格前进才受理「从未武装到武装」，挡的是「周期重发同一条策略」在
+// 故障后自动复权；每次真正改变意图时自然 +1 即可。
+let policyGeneration = 0;
+
+function setPolResult(ok, text) {
+  const el = $('polResult');
+  el.className = 'result tiny' + (ok ? '' : ' warn');
+  el.textContent = text;
+}
+
+function sendPolicyFromForm() {
+  if (!state.connected) { setPolResult(false, '未连接 rosbridge'); return; }
+  const id = parseInt($('polId').value, 10);
+  const kp = parseFloat($('polKp').value);
+  const kd = parseFloat($('polKd').value);
+  if (!Number.isInteger(id) || id < 1) { setPolResult(false, 'ID 非法'); return; }
+  if (!Number.isFinite(kp) || !Number.isFinite(kd) || kp < 0 || kd < 0) {
+    setPolResult(false, 'kp/kd 必须是非负有限值');
+    return;
+  }
+  policyGeneration = (policyGeneration + 1) >>> 0;
+  seq = (seq + 1) >>> 0;
+  pub('policy', {
+    sync_time_ns: Date.now() * 1e6,
+    request_id: seq,
+    policy_generation: policyGeneration,
+    count: 1,
+    targets: [{motor_id: id, enabled: $('polEnable').checked, kp, kd}],
+  });
+  setPolResult(true, `已发 seq=${seq} gen=${policyGeneration}：电机 ${id} ` +
+    ($('polEnable').checked ? '武装' : '失能') +
+    '。受理/拒绝是异步的，看事件表的 CONFIG_RESULT');
+}
+
 // ---------- 参数页（rcl_interfaces 参数服务直连）----------
 // 固件 rclc_parameter 为 low-mem 模式：每次 get/set 只能一个参数，
 // 不支持 ros2 param dump 式批量 get；逐参数调用。
@@ -852,7 +954,9 @@ const PARAM_NODE = '/micro_ros_node';
 function paramServiceName(typeName) {
   return typeName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
-const PARAM_NUM_FIELDS = ['kp', 'kd', 'pos_min', 'pos_max', 'vel_limit', 'torque_limit'];
+// 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /motor_policy
+// 话题（固件起把这三项从参数面退役）。
+const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit'];
 // 参数服务调用结果：id -> {enable, kp, ...}（字符串原值，NaN 为空）
 const paramCache = new Map();
 
@@ -933,12 +1037,11 @@ function renderParamRows() {
       <td>${model || '<span class="muted">--</span>'}</td>
       <td>${lifecyclePill(lc)}</td>
       <td>${src}</td>
-      <td><input type="checkbox" data-id="${id}" data-field="enable" ${v.enable ? 'checked' : ''}></td>
-      <td>${cell('kp')}</td><td>${cell('kd')}</td>
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td><button class="tiny-btn" data-refresh="${id}">回读</button>
-        <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button></td>
+        <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
+        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
     </tr>`;
   }).join('');
   tbody.querySelectorAll('input').forEach((inp) => {
@@ -950,6 +1053,9 @@ function renderParamRows() {
   });
   tbody.querySelectorAll('[data-zero]').forEach((btn) => {
     btn.onclick = () => setMotorZero(parseInt(btn.dataset.zero, 10));
+  });
+  tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
+    btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
   });
   renderParamSummary();
 }
@@ -1063,7 +1169,7 @@ async function loadParams({skipDeviceRead = false} = {}) {
     for (const name of names) {
       const [, idStr, field] = name.match(/^m(\d+)\.(.+)$/);
       const id = parseInt(idStr, 10);
-      if (!PARAM_NUM_FIELDS.includes(field) && field !== 'enable') continue;
+      if (!PARAM_NUM_FIELDS.includes(field)) continue;
       if (!paramCache.has(id)) paramCache.set(id, {});
       paramCache.get(id)[field] = await paramGet(name);
     }
@@ -1086,14 +1192,10 @@ async function applyParams() {
     const field = inp.dataset.field;
     const name = `m${id}.${field}`;
     try {
-      let type, value;
-      if (field === 'enable') { type = 1; value = inp.checked; }
-      else {
-        if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
-        value = parseFloat(inp.value);
-        if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
-        type = 3;
-      }
+      if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
+      const value = parseFloat(inp.value);
+      if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
+      const type = 3; // double
       const r = await paramSetValue(name, type, field, value);
       if (!r.results[0].successful) {
         fail++;
@@ -1264,6 +1366,63 @@ async function setMotorZero(id) {
     (Number(code) === 0 ? '——错误码为 0 说明固件可能根本没有该参数（版本旧？）' : ''));
 }
 
+// 故障清除（固件参数 `system.clear_fault` = <电机 id>，脉冲；完成序号
+// `system.clear_fault_seq`）。内核按**成因**区分：
+//   · 身份冲突锁存（同 motor_id 跨总线/协议身份不符）刻意不可解除 → 拒绝；
+//   · 设备参数未初始化（last_error=40/41）→ 走一次回读重比对，真不一致仍锁；
+//   · 厂家故障 → 发厂家清错帧（CERB 的 MIT 控制字 bit5；Vaxor 无清错位 → 拒绝）。
+// 仅非运动态受理；清完仍须显式勾 enable + 新的完整快照/轨迹才可能回运动
+// （ARD §36「失败不自动恢复运动授权」）。
+async function clearMotorFault(id) {
+  if (!state.connected) return;
+  const ok = window.confirm(
+    `清除电机 ${id} 的故障锁存？\n\n` +
+    '· 仅在该台非运动态受理（运动中会被固件拒绝）\n' +
+    '· 身份冲突锁存（跨总线/协议身份不符）无法清除，会被固件拒绝\n' +
+    '· 设备参数未初始化会触发一次回读重比对\n' +
+    '· 清完仍须显式使能 + 新的完整快照/轨迹才可能回运动');
+  if (!ok) return;
+
+  let seqBefore = 0;
+  try { seqBefore = Number(await paramGet('system.clear_fault_seq')) || 0; } catch (e) { /* 靠超时兜底 */ }
+  try {
+    const r = await paramSetValue('system.clear_fault', 2, 'clear_fault', id);
+    if (r.results && r.results[0] && !r.results[0].successful) {
+      setParamResult(false, `固件未受理 system.clear_fault（${r.results[0].reason || '见 last_error'}）：` +
+        '该台可能在运动中，或固件不是含「故障清除」的版本');
+      return;
+    }
+  } catch (e) {
+    setParamResult(false, '故障清除请求失败：' + e.message + '（固件是否已刷入含「故障清除」的版本？）');
+    return;
+  }
+  setParamResult(true, `电机 ${id} 故障清除已请求…`);
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    let seq;
+    try { seq = Number(await paramGet('system.clear_fault_seq')); } catch (e) { continue; }
+    if (seq === seqBefore) continue; // 事务未收尾
+
+    let code = 0, motor = -1;
+    try {
+      [code, motor] = await Promise.all(
+        ['system.last_error', 'system.last_error_motor'].map(paramGet));
+    } catch (e) { /* 读不到结论码：按成功兜底 */ }
+    const c = Number(code);
+    if (Number(motor) === id && c !== 0) {
+      setParamResult(false, `电机 ${id} 故障清除未成功：last_error=${c}` +
+        '（身份冲突锁存不可解除、该台在运动中、或该协议无清错手段，都会被拒）');
+    } else {
+      setParamResult(true, `电机 ${id} 故障清除已受理：厂家故障需设备状态帧回报 ` +
+        'fault_active=false 才收敛到 READY_DISABLED，届时再显式使能');
+    }
+    await loadParams();
+    return;
+  }
+  setParamResult(false, `电机 ${id} 故障清除未收尾（已等 6 秒）：` +
+    '看 system.last_error 与 motor_events 定位是哪一层拒的');
+}
+
 function switchTab(page) {
   document.querySelectorAll('.tab').forEach((b) =>
     b.classList.toggle('on', b.dataset.page === page));
@@ -1329,6 +1488,7 @@ function init() {
   $('btnTeachImport').onclick = teachImport;
 
   $('btnParamLoad').onclick = loadParams;
+  $('btnPolSend').onclick = sendPolicyFromForm;
   $('btnParamApply').onclick = applyParams;
   $('btnParamSave').onclick = saveParamsToFlash;
 

@@ -44,6 +44,8 @@ target_link_libraries(fw_session_sync PUBLIC fw_mailbox fw_motor_control)
 
 add_library(fw_mailbox OBJECT
   ../../lib/control_mailbox/src/control_command_mailbox.c
+  ../../lib/control_mailbox/src/control_trajectory_mailbox.c
+  ../../lib/control_mailbox/src/control_policy_mailbox.c
   ../../lib/control_mailbox/src/control_mailbox.c)
 target_include_directories(fw_mailbox PUBLIC
   ../../lib/control_mailbox/include)
@@ -128,6 +130,14 @@ fw_host_test(test_control_mailbox
   SOURCES test_control_mailbox.cpp
   OBLIBS fw_mailbox
   INCLUDES ../../lib/motor_protocol/include)
+
+fw_host_test(test_trajectory_mailbox
+  SOURCES test_trajectory_mailbox.cpp
+  OBLIBS fw_mailbox)
+
+fw_host_test(test_policy_mailbox
+  SOURCES test_policy_mailbox.cpp
+  OBLIBS fw_mailbox)
 
 fw_host_test(test_can_rx_ring
   SOURCES test_can_rx_ring.cpp

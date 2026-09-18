@@ -66,6 +66,12 @@ typedef struct {
   // 会清除此位，恢复必须显式 SET_ENABLE(true)，不得由新快照自动复立。
   bool motion_authorized;
 
+  // 最近一次受理的 SET_POLICY 代数。「未武装 → 武装」要求代数严格前进，
+  // 用于挡住「周期重发同一条策略」在故障后把电机自动重新武装。
+  // 不需要在故障/离线/冲突/设备参数路径上单独锁存：那几条路径都会把
+  // policy_enable 清成 false，本规则靠「当前未武装」自然生效。
+  uint32_t policy_generation;
+
   // P0 帧重试：推送失败（缓冲满且无可驱逐的 P1/P2）时置位，service 逐节拍重发；
   // 新 MIT 帧成功后作废（新命令取代过期的安全帧）。
   bool p0_pending;
@@ -164,6 +170,18 @@ struct motor_control_context {
   bool snapshot_soft_stop_active; // 30ms 级联已触发（去重）
   bool snapshot_disable_done;     // 100ms 级联已触发（去重）
 
+  // 多点轨迹（ARD §13 的时序补充通道；与快照通道并存）。归属不落字段：
+  // 「某电机是否被轨迹拥有」由 (trajectory_active, target_ids, motor_id)
+  // 纯派生——故障/离线/冲突/设备参数未核对各自把表项带离可动生命周期，
+  // 自动脱离轨迹，无需在那些路径里额外清理归属。
+  motor_control_trajectory_t trajectory;
+  bool trajectory_active;
+  uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基
+  uint32_t trajectory_accepted_count;
+  uint32_t trajectory_rejected_count;
+  uint32_t policy_accepted_count;
+  uint32_t policy_rejected_count;
+
   // 待发送帧缓冲（collect_tx 消费；满则丢弃并计数）。
   motor_protocol_tx_frame_t tx_pending[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t tx_count;
@@ -174,6 +192,8 @@ struct motor_control_context {
   motor_control_event_t events[MOTOR_CONTROL_MAX_EVENTS];
   size_t event_count;
   uint32_t event_dropped_count;
+  // 事件序号分配器：每 push 一条 +1（回绕安全，消费者只比相邻差值）。
+  uint32_t event_seq;
 
   // 诊断计数（ARD §32）。
   uint32_t rx_frame_count;
@@ -252,6 +272,14 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
 
 // 绑定后首次设备影子填 Profile 默认（CERB；motor_control_params.c）。
 void motor_control_set_default_device_shadow(motor_control_entry_t *entry);
+
+// 策略落地（motor_control_config.c）：SET_POLICY config kind 与批量入口
+// motor_control_apply_policy 共用，避免两条路径的门禁与钳制漂移。
+// 返回值 = 是否受理；被拒时会自行出 CONFIG_RESULT 事件。
+bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
+                                      motor_control_entry_t *entry,
+                                      const motor_protocol_config_request_t *request,
+                                      uint32_t now_ms);
 
 // 配置事务：响应帧裁决（on_raw_frame 调用）与跨节拍步进（service 调用）。
 bool motor_control_config_on_frame(motor_control_context_t *ctx,

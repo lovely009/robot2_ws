@@ -26,4 +26,3 @@ uint8 LIFECYCLE_FAULT=6
 uint8 LIFECYCLE_CONFIG_CONFLICT=7
 uint8 LIFECYCLE_OFFLINE=8
 uint8 lifecycle
-uint32 state_age_ms        # 0xFFFFFFFF = 从未收到运动测量

@@ -113,7 +113,12 @@ static void perform_save() {
     g_result = STORAGE_SAVE_FAIL;
     return;
   }
-  motor_control_param_view_t views[MOTOR_CONTROL_MAX_MOTORS];
+  // **静态而非栈上**：64 × 80 B = 5,120 B，而本任务栈只有 4 KB
+  // （kStorageTaskStack = 1024 words）。放在栈上必然溢出 → FreeRTOS
+  // 栈溢出 fail-safe（main.cpp 的 hook：关中断死循环）→ IWDG 无人喂 →
+  // ~500ms 后复位。台架现象就是「一落盘就重启」。
+  // 本任务独占该缓冲（perform_save 只由 storage_task_fn 调用）。
+  static motor_control_param_view_t views[MOTOR_CONTROL_MAX_MOTORS];
   // 经注入的提供者拍快照（实现在 motor_rt：进内核临界区，仍在本任务
   // 上下文执行——与旧的直接互调逐字同构）。
   const size_t n = g_snapshot_fn(views, MOTOR_CONTROL_MAX_MOTORS);

@@ -89,9 +89,18 @@ def main() -> None:
     # 有意不调用 download_dev_environment()/download_mcu_environment()：这两个步骤
     # 可能访问网络。这里只覆盖本仓库维护的 extra package 并增量重建现有工作区。
     builder.download_extra_packages()
+    # 第三个参数是 board_microros_user_meta：官方流程（extra_script.py）用
+    # builder.run(meta, toolchain, microros_user_meta) 把它附加到 colcon 的
+    # --metas 列表后面，覆盖包内 metas/colcon.meta 的默认值。漏掉它的后果是
+    # 库被按**默认**配置重建——本固件要求 RMW_UXRCE_MAX_SERVICES=5（rclc 参数
+    # 服务器要 5 个 service），默认是 1，重建后 pio run 会被
+    # tools/check_microros_config.py 拦下（且只有到运行期才会暴露）。
+    user_meta = firmware_root / "microros_user.meta"
+    require(user_meta, "microros_user.meta 库级配置覆盖")
     builder.build_mcu_environment(
         str(platformio_root / "metas" / "colcon.meta"),
         str(platformio_root / "platformio_toolchain.cmake"),
+        str(user_meta),
     )
     builder.package_mcu_library()
 

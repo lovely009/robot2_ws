@@ -32,7 +32,13 @@ static bool config_request_is_valid(
              request->value.max_torque_nm > 0.0F;
     case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
     case CONTROL_MAILBOX_CONFIG_SET_ZERO:
+    case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
       return true; // 无载荷，只凭 request_id/motor_id
+    case CONTROL_MAILBOX_CONFIG_SET_POLICY:
+      return isfinite(request->value.policy.kp) &&
+             isfinite(request->value.policy.kd) &&
+             request->value.policy.kp >= 0.0F &&
+             request->value.policy.kd >= 0.0F;
     default:
       return false;
   }
@@ -44,6 +50,9 @@ static uint8_t config_queue_index(uint8_t head, uint8_t offset) {
 
 static void clear_live_inputs(control_mailbox_t *mailbox) {
   control_mailbox_clear_command(mailbox);
+  // 轨迹与会话同寿命：断链后不得留一条「未来还要动」的时间线。
+  control_mailbox_clear_trajectory(mailbox);
+  control_mailbox_clear_policy(mailbox);
   control_mailbox_clear_config(mailbox);
 }
 
@@ -63,6 +72,8 @@ static void revoke_authorization(control_mailbox_t *mailbox) {
     mailbox->authorization_disable_edge = true;
   }
   control_mailbox_clear_command(mailbox);
+  control_mailbox_clear_trajectory(mailbox);
+  control_mailbox_clear_policy(mailbox);
 }
 
 void control_mailbox_init(control_mailbox_t *mailbox) {
@@ -71,6 +82,8 @@ void control_mailbox_init(control_mailbox_t *mailbox) {
   }
   memset(mailbox, 0, sizeof(*mailbox));
   control_command_mailbox_init(&mailbox->command);
+  control_trajectory_mailbox_init(&mailbox->trajectory);
+  control_policy_mailbox_init(&mailbox->policy);
   // 在首次收到 Agent 状态前允许启动阶段写入；真正的安全裁决仍在 runtime。
   mailbox->authorization_requested = true;
 }
@@ -101,6 +114,63 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox,
 void control_mailbox_clear_command(control_mailbox_t *mailbox) {
   if (mailbox != NULL) {
     control_command_mailbox_clear(&mailbox->command);
+  }
+}
+
+bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
+                                       const control_trajectory_t *trajectory) {
+  if (mailbox == NULL) {
+    return false;
+  }
+  // 与 submit_command 逐条同门同序：授权/会话门先于数据校验，两条提交
+  // 路径的诊断口径一致（门拒绝与载荷非法不重复计数）。
+  if (!mailbox->authorization_requested ||
+      !agent_is_connected_or_unknown(mailbox)) {
+    ++mailbox->trajectory_rejected_count;
+    return false;
+  }
+  return control_trajectory_mailbox_publish(&mailbox->trajectory, trajectory);
+}
+
+bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
+                                     control_trajectory_t *trajectory) {
+  if (mailbox == NULL) {
+    return false;
+  }
+  return control_trajectory_mailbox_take(&mailbox->trajectory, trajectory);
+}
+
+void control_mailbox_clear_trajectory(control_mailbox_t *mailbox) {
+  if (mailbox != NULL) {
+    control_trajectory_mailbox_clear(&mailbox->trajectory);
+  }
+}
+
+bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
+                                   const control_policy_snapshot_t *snapshot) {
+  if (mailbox == NULL) {
+    return false;
+  }
+  // 与 submit_command 同门同序：授权/会话门先于数据校验。
+  if (!mailbox->authorization_requested ||
+      !agent_is_connected_or_unknown(mailbox)) {
+    ++mailbox->policy_rejected_count;
+    return false;
+  }
+  return control_policy_mailbox_publish(&mailbox->policy, snapshot);
+}
+
+bool control_mailbox_take_policy(control_mailbox_t *mailbox,
+                                 control_policy_snapshot_t *snapshot) {
+  if (mailbox == NULL) {
+    return false;
+  }
+  return control_policy_mailbox_take(&mailbox->policy, snapshot);
+}
+
+void control_mailbox_clear_policy(control_mailbox_t *mailbox) {
+  if (mailbox != NULL) {
+    control_policy_mailbox_clear(&mailbox->policy);
   }
 }
 
@@ -169,6 +239,7 @@ void control_mailbox_request_authorization(control_mailbox_t *mailbox,
   if (!authorized) {
     mailbox->authorization_disable_edge = true;
     control_mailbox_clear_command(mailbox);
+    control_mailbox_clear_trajectory(mailbox);
   }
 }
 

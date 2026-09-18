@@ -33,9 +33,22 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_MOTORS 64U
 #define MOTOR_CONTROL_MAX_BUSES 3U
 #define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS 64U
-#define MOTOR_CONTROL_MAX_TX_PENDING 96U
-// 事件环深度 = ROS 桥一个轮询间隔内可积压的事件数（64）。
-#define MOTOR_CONTROL_MAX_EVENTS 64U
+#define MOTOR_CONTROL_MAX_TX_PENDING 160U
+// 事件环深度：按「最坏一次并发发现」定，不是按一个桥轮询间隔定。
+// 48 台同时上电时，DISCOVERED 会在一个 10 ms 桥轮询里挤进最多 48 条
+// （每台首帧即出事件）；而 PROFILE_BOUND/READY 走身份读取事务，被
+// config_step 限速在 1 台/ms，是摊开的。原值 64 对并发发现没有余量。
+#define MOTOR_CONTROL_MAX_EVENTS 128U
+// 轨迹通道容量：点数决定一条轨迹能带多少个 (时间, 电机) 样本，电机数
+// 对齐注册表。内存代价 = 3 份拷贝（ROS 接收体 + mailbox 双缓冲 + 内核
+// 锁存）× 20 B/点；改小这两个常量是唯一的省 RAM 手段（见 README）。
+#define MOTOR_CONTROL_MAX_TRAJECTORY_POINTS 256U
+#define MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS 64U
+
+// 命令源标识（target_source）：最近一次实际生效的命令来自哪条通道。
+#define MOTOR_CONTROL_TARGET_SOURCE_NONE 0U
+#define MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT 1U
+#define MOTOR_CONTROL_TARGET_SOURCE_TRAJECTORY 2U
 
 // 命令快照安全阈值（ARD-0007 §13.2）。
 #define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
@@ -68,7 +81,11 @@ typedef enum {
   MOTOR_CONTROL_FAULT_OFFLINE = 5U,
   // 设备参数未初始化（上电回读失败或与固件记录不一致）。仅设备侧限位
   // 型号（CERB）会产生：参数以设备为准，未核对不得运动。
-  MOTOR_CONTROL_FAULT_DEV_PARAM = 6U
+  MOTOR_CONTROL_FAULT_DEV_PARAM = 6U,
+  // 策略代数未前进（SET_POLICY：「未武装 → 武装」需要新意图）。只写入
+  // last_failure_reason 供本机诊断，不进 unified_fault_code——它不是设备
+  // 故障，而是本机拒绝了一条重复的授权请求。
+  MOTOR_CONTROL_FAULT_STALE_GENERATION = 7U
 } motor_control_fault_code_t;
 
 // 设备参数初始化状态（上电/重连后回读设备 → 与固件记录比对）。
@@ -109,7 +126,11 @@ typedef enum {
   MOTOR_CONTROL_EVENT_REGISTRY_FULL = 14U,
   // 设备参数初始化定论（reason = motor_control_dev_init_t）。不一致/未核对
   // 是运维可见事实：出事件以便上层定位是哪一台、什么结论。
-  MOTOR_CONTROL_EVENT_DEV_INIT = 15U
+  MOTOR_CONTROL_EVENT_DEV_INIT = 15U,
+// 轨迹被整条拒绝（结构与 mailbox 同规则，另加注册表存在性）：reason =
+// motor_control_fault_code_t。轨迹合法但被拒属于异常路径（mailbox 已先
+// 校验过一遍），出事件便于定位是哪一侧放行的非法载荷。
+MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED = 16U
 } motor_control_event_type_t;
 
 typedef struct {
@@ -122,6 +143,7 @@ typedef struct {
                       // MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE=3 表示型号
                       // 不可得——未知名/设备未发现/门禁拒绝）
   uint32_t request_id; // 仅 CONFIG_RESULT 携带
+  uint32_t seq;        // 内核分配，单调递增（消费者据此判丢帧）
 } motor_control_event_t;
 
 // ---------------------------------------------------------------------------
@@ -144,6 +166,50 @@ typedef struct {
   motor_control_snapshot_target_t targets[MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS];
 } motor_control_command_snapshot_t;
 
+// 输入：多点轨迹（mailbox control_trajectory_t 的同形镜像）。
+// 语义：轨迹声明集合内的电机由轨迹独占（快照对其既不下发也不软停）；
+// 集合外的电机仍由完整快照负责。起点 = 内核受理时刻的本地单调时基，
+// 消息里的 sync_time_ns 不参与任何裁决（ARD §12）。
+// ---------------------------------------------------------------------------
+typedef struct {
+  uint32_t time_from_start_ms; // 相对轨迹起点；同一电机内严格递增
+  uint16_t motor_id;
+  float position_rad;
+  float velocity_rad_s; // 诊断用；执行速度由段斜率导出
+  float effort_nm;
+} motor_control_trajectory_point_t;
+
+typedef struct {
+  uint32_t sequence;
+  uint32_t received_tick_ms;
+  uint32_t trajectory_id;
+  uint16_t point_count;
+  uint16_t target_count;
+  uint16_t target_ids[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
+  motor_control_trajectory_point_t points[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
+} motor_control_trajectory_t;
+
+// ---------------------------------------------------------------------------
+// 输入：逐电机策略快照（mailbox control_policy_snapshot_t 的同形镜像）。
+// **稀疏语义**：只影响 targets 里列出的电机，未列出的保持原状——这不是
+// 命令快照的「缺席即软停」。整条校验，非法即整条拒绝、绝不部分采纳。
+// ---------------------------------------------------------------------------
+typedef struct {
+  uint16_t motor_id;
+  bool enabled;
+  float kp;
+  float kd;
+} motor_control_policy_target_t;
+
+typedef struct {
+  uint32_t received_tick_ms;
+  uint32_t request_id;
+  uint32_t policy_generation;
+  uint8_t target_count;
+  motor_control_policy_target_t targets[MOTOR_CONTROL_MAX_MOTORS];
+} motor_control_policy_snapshot_t;
+
+// ---------------------------------------------------------------------------
 // 输出：运动状态（100 Hz 发布用，ARD §16；缺失浮点 = NaN，state_age_ms
 // 为 MCU 单调时基下最近有效运动测量距今毫秒数，从无测量 = 0xFFFFFFFF）。
 typedef struct {
@@ -155,6 +221,8 @@ typedef struct {
   float velocity_rad_s;
   float effort_nm;
   uint32_t state_age_ms;
+  // 最近生效的命令源（与 MotorMotionStateTarget 的同名常量对齐）。
+  uint8_t target_source;
 } motor_control_motion_state_t;
 
 // 输出：诊断状态（ARD §17；统一故障码 + 厂家故障字 + 公共位标志）。
@@ -171,7 +239,6 @@ typedef struct {
   uint32_t vendor_fault_code;
   uint32_t protection_flags;
   uint32_t limit_flags;
-  uint32_t state_age_ms; // 从无测量 = 0xFFFFFFFF
   uint8_t transaction_state; // 0=空闲，1=配置事务进行中
   uint16_t last_failure_reason;
 } motor_control_status_t;
@@ -265,6 +332,71 @@ void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
                                           const motor_control_command_snapshot_t *snapshot,
                                           uint32_t now_ms);
+
+// 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
+// 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
+// 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
+// 20ms 控制边界完成。
+bool motor_control_apply_trajectory(motor_control_context_t *ctx,
+                                    const motor_control_trajectory_t *trajectory,
+                                    uint32_t now_ms);
+
+// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内线性插值并下发。
+// 无活动轨迹时 O(1) 返回（未用轨迹 = 对既有行为零影响）。
+// 时间超出末点 → 钳末点保持，绝不外推。
+void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
+
+// 「与路点无关的拒绝」占位（计数越界 / 归属重复 / 未注册 / 有归属无路点）。
+#define MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE 0xFFFFU
+
+// 轨迹执行状态（低频发布用）。时间基准与轨迹路点同源（MCU 本地单调时基）。
+typedef struct {
+  uint32_t trajectory_id;
+  bool active;
+  bool completed;   // 时间线走完（归属仍保留：电机在末点保持）
+  uint32_t elapsed_ms;
+  uint32_t total_ms;
+  uint16_t target_count;
+  uint16_t target_ids[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
+} motor_control_trajectory_state_t;
+
+void motor_control_copy_trajectory_state(
+    const motor_control_context_t *ctx,
+    motor_control_trajectory_state_t *out, uint32_t now_ms);
+
+// ---------------------------------------------------------------------------
+// 诊断快照（ARD §32）：固件级计数器一次性可读。这些量此前只存在于运行上下文
+// 里、一个都不对外，实时性与总线容量的问题因此只能靠 JTAG 定位。
+// 只含**内核自己持有**的量；每总线 RX ring 溢出与堆余量由任务层补齐
+// （见 motor_rt_task.h 的 motor_rt_diagnostics_t）。
+// ---------------------------------------------------------------------------
+typedef struct {
+  uint32_t rx_frame_count;
+  uint32_t unknown_frame_count;
+  uint32_t decode_error_count;
+  uint32_t snapshot_accepted;
+  uint32_t snapshot_rejected;
+  uint32_t config_rejected;
+  uint32_t event_dropped;
+  uint32_t tx_dropped;
+  uint32_t p0_retry;
+  uint32_t trajectory_accepted;
+  uint32_t trajectory_rejected;
+  uint32_t policy_accepted;
+  uint32_t policy_rejected;
+} motor_control_diagnostics_t;
+
+void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
+                                    motor_control_diagnostics_t *out);
+
+// 受理并落地一条策略快照（20ms 控制边界调用）。逐台走与 SET_POLICY 相同的
+// 落地逻辑（含防复权代数门）；**单台被拒不影响其余**，拒绝经 CONFIG_RESULT
+// 事件可见。注意：逐台成功也会各出一条事件，故策略是**低频**接口——高频
+// 发布会把事件环灌满（丢弃计数见 diagnostics 话题）。
+// 返回 false = 整条非法（计数越界/非有限或负增益/重复 motor_id）。
+bool motor_control_apply_policy(
+    motor_control_context_t *ctx,
+    const motor_control_policy_snapshot_t *snapshot, uint32_t now_ms);
 
 // 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；

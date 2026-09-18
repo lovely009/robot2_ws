@@ -54,12 +54,23 @@ static const char *const kSystemRefreshSeq = "system.refresh_seq";
 // 内核拒绝）。set_zero_seq 是只读完成序号，判据同 refresh_seq。
 static const char *const kSystemSetZero = "system.set_zero";
 static const char *const kSystemSetZeroSeq = "system.set_zero_seq";
-#define kSystemParamCount 8U
+// 故障清除（写 = 电机 id，触发）：内核按**成因**区分——身份冲突锁存刻意
+// 不可解除（拒绝）；设备参数未初始化（DEV_PARAM）走一次回读重比对；厂家
+// 故障发厂家清错帧。clear_fault_seq 是只读完成序号，判据同 set_zero_seq。
+static const char *const kSystemClearFault = "system.clear_fault";
+static const char *const kSystemClearFaultSeq = "system.clear_fault_seq";
+#define kSystemParamCount 10U
 
 static const uint32_t kSyncPeriodMs = 100U;  // 影子同步周期
 static const uint32_t kRegisterPerPoll = 2U; // 每拍最多注册电机数
+// ROS 参数面上每电机只暴露 4 项（限位/限速/限流）。enable/kp/kd 是动态量，
+// 已移到 /motor_policy 话题（ARD §19.4 本就禁止它们进命令快照），不再占
+// 参数面预算。注意 param_field_t 仍是 7 项且**不要改**——它是 Flash blob 的
+// present 位图契约与记录布局；退役的字段只是不再被注册，布局不变、无需迁移。
+#define PARAM_MOTOR_FIELD_COUNT 4U
+
 static const uint32_t kMaxMotors =
-    (PARAM_BRIDGE_MAX_PARAMS - kSystemParamCount) / PARAM_FIELD_COUNT;
+    (PARAM_BRIDGE_MAX_PARAMS - kSystemParamCount) / PARAM_MOTOR_FIELD_COUNT;
 
 // param 请求的 request_id 标签位：与内核身份读取伪 id（bit31）错开。
 #define PARAM_REQUEST_TAG 0x40000000U
@@ -100,6 +111,10 @@ static bool g_set_zero_pending = false;
 static uint16_t g_set_zero_motor = 0;
 static uint32_t g_set_zero_id = 0;
 static int64_t g_set_zero_seq = 0;      // 设零点完成序号（同 refresh_seq 口径）
+static bool g_clear_fault_pending = false;
+static uint16_t g_clear_fault_motor = 0;
+static uint32_t g_clear_fault_id = 0;
+static int64_t g_clear_fault_seq = 0;   // 故障清除完成序号（同口径）
 static uint32_t g_last_sync_ms = 0;
 static uint32_t g_last_heap_ms = 0;
 static bool g_force_resync = false;
@@ -156,9 +171,6 @@ static control_mailbox_config_kind_t field_config_kind(param_field_t field) {
   switch (field) {
     case PARAM_FIELD_ENABLE:
       return CONTROL_MAILBOX_CONFIG_SET_ENABLE;
-    case PARAM_FIELD_KP:
-    case PARAM_FIELD_KD:
-      return CONTROL_MAILBOX_CONFIG_SET_GAINS;
     case PARAM_FIELD_POS_MIN:
     case PARAM_FIELD_POS_MAX:
       return CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
@@ -359,6 +371,21 @@ static bool param_on_modification(const Parameter *old_param,
     g_set_zero_motor = motor_id;
     return true;
   }
+  if (strcmp(name, kSystemClearFault) == 0) {
+    if (new_param->value.type != RCLC_PARAMETER_INT ||
+        new_param->value.integer_value < 0) {
+      return false;
+    }
+    const uint16_t motor_id = (uint16_t)new_param->value.integer_value;
+    MotorSlot *slot = find_slot(motor_id);
+    if (slot == nullptr || !slot->bound) {
+      report_error(ERR_UNKNOWN_MOTOR, motor_id);
+      return false;
+    }
+    g_clear_fault_pending = true;
+    g_clear_fault_motor = motor_id;
+    return true;
+  }
 
   uint16_t motor_id = 0;
   param_field_t field = PARAM_FIELD_KP;
@@ -371,24 +398,13 @@ static bool param_on_modification(const Parameter *old_param,
     return false;
   }
 
-  if (field == PARAM_FIELD_ENABLE) {
-    if (new_param->value.type != RCLC_PARAMETER_BOOL) {
-      return false;
-    }
-    control_mailbox_config_request_t request = {};
-    request.request_id = next_request_id();
-    request.received_tick_ms = millis();
-    request.motor_id = motor_id;
-    request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
-    request.value.enable = new_param->value.bool_value;
-    if (!motor_rt_submit_config(&request)) {
-      report_error(ERR_SUBMIT_FAILED, motor_id);
-      return false;
-    }
-    slot->old_value[PARAM_FIELD_ENABLE] =
-        old_param->value.bool_value ? 1.0 : 0.0;
-    slot->outstanding[PARAM_FIELD_ENABLE] = request.request_id;
-    return true;
+  if (field == PARAM_FIELD_ENABLE || field == PARAM_FIELD_KP ||
+      field == PARAM_FIELD_KD) {
+    // 这三项是动态量，已移到 /motor_policy 话题（不占参数槽位预算）。
+    // 名字仍会被 param_name_parse 解析出来，但从不注册，正常路径收不到；
+    // 这里显式拒绝，免得将来有人把注册加回去，却发现写入被静默吞掉。
+    report_error(ERR_LOCAL_VALIDATION, motor_id);
+    return false;
   }
 
   if (new_param->value.type != RCLC_PARAMETER_DOUBLE) {
@@ -419,6 +435,8 @@ static void register_system_params() {
   (void)rclc_add_parameter(&g_server, kSystemRefreshSeq, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemSetZero, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemSetZeroSeq, RCLC_PARAMETER_INT);
+  (void)rclc_add_parameter(&g_server, kSystemClearFault, RCLC_PARAMETER_INT);
+  (void)rclc_add_parameter(&g_server, kSystemClearFaultSeq, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemLastError, RCLC_PARAMETER_INT);
   (void)rclc_add_parameter(&g_server, kSystemLastErrorMotor,
                            RCLC_PARAMETER_INT);
@@ -432,12 +450,16 @@ static void register_system_params() {
   (void)rclc_parameter_set_int(&g_server, kSystemRefreshSeq, g_refresh_seq);
   (void)rclc_parameter_set_int(&g_server, kSystemSetZero, -1);
   (void)rclc_parameter_set_int(&g_server, kSystemSetZeroSeq, g_set_zero_seq);
+  (void)rclc_parameter_set_int(&g_server, kSystemClearFault, -1);
+  (void)rclc_parameter_set_int(&g_server, kSystemClearFaultSeq,
+                               g_clear_fault_seq);
   g_internal_write = false;
   (void)rclc_set_parameter_read_only(&g_server, kSystemLastError, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemLastErrorMotor, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemHeapFree, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemRefreshSeq, true);
   (void)rclc_set_parameter_read_only(&g_server, kSystemSetZeroSeq, true);
+  (void)rclc_set_parameter_read_only(&g_server, kSystemClearFaultSeq, true);
 }
 
 static double view_field(const motor_control_param_view_t *v,
@@ -502,21 +524,16 @@ static void register_motor_params(const motor_control_param_view_t *v) {
   slot->bound = v->bound;
   slot->torque_per_amp = v->torque_per_amp;
 
+  // 只注册静态量（限位/限速/限流）；enable/kp/kd 走 /motor_policy 话题。
   param_name_buf_t name;
-  (void)param_name_build_motor(name, sizeof(name), v->motor_id,
-                               PARAM_FIELD_ENABLE);
-  (void)rclc_add_parameter(&g_server, name, RCLC_PARAMETER_BOOL);
-  for (int f = PARAM_FIELD_KP; f < PARAM_FIELD_COUNT; ++f) {
+  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
     (void)param_name_build_motor(name, sizeof(name), v->motor_id,
                                  (param_field_t)f);
     (void)rclc_add_parameter(&g_server, name, RCLC_PARAMETER_DOUBLE);
   }
   // 初值（内部写，不触发业务动作）。NaN 原值透传给 double 参数。
   g_internal_write = true;
-  (void)param_name_build_motor(name, sizeof(name), v->motor_id,
-                               PARAM_FIELD_ENABLE);
-  (void)rclc_parameter_set_bool(&g_server, name, v->enable);
-  for (int f = PARAM_FIELD_KP; f < PARAM_FIELD_COUNT; ++f) {
+  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
     (void)param_name_build_motor(name, sizeof(name), v->motor_id,
                                  (param_field_t)f);
     (void)rclc_parameter_set_double(&g_server, name,
@@ -538,16 +555,7 @@ static void sync_slot_from_view(MotorSlot *slot,
   slot->bound = v->bound;
   slot->torque_per_amp = v->torque_per_amp; // 绑定型号变化时换算系数随之更新
   param_name_buf_t name;
-  if (slot->outstanding[PARAM_FIELD_ENABLE] == 0U) {
-    bool current = false;
-    (void)param_name_build_motor(name, sizeof(name), slot->motor_id,
-                                 PARAM_FIELD_ENABLE);
-    (void)rclc_parameter_get_bool(&g_server, name, &current);
-    if (current != v->enable) {
-      set_bool_internal(name, v->enable);
-    }
-  }
-  for (int f = PARAM_FIELD_KP; f < PARAM_FIELD_COUNT; ++f) {
+  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
     if (slot->outstanding[f] != 0U) {
       continue;
     }
@@ -575,6 +583,21 @@ static void do_set_zero_pulse() {
     return;
   }
   g_set_zero_id = request.request_id;
+}
+
+static void do_clear_fault_pulse() {
+  g_clear_fault_pending = false;
+  set_int_internal(kSystemClearFault, -1);
+  control_mailbox_config_request_t request = {};
+  request.request_id = next_request_id();
+  request.received_tick_ms = millis();
+  request.motor_id = g_clear_fault_motor;
+  request.kind = CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
+  if (!motor_rt_submit_config(&request)) {
+    report_error(ERR_SUBMIT_FAILED, g_clear_fault_motor);
+    return;
+  }
+  g_clear_fault_id = request.request_id;
 }
 
 static void do_refresh_pulse() {
@@ -619,6 +642,9 @@ void param_bridge_poll(void) {
   }
   if (g_set_zero_pending) {
     do_set_zero_pulse();
+  }
+  if (g_clear_fault_pending) {
+    do_clear_fault_pulse();
   }
   if (g_save_pending) {
     g_save_pending = false;
@@ -686,6 +712,15 @@ void param_bridge_on_config_result(const motor_control_event_t *event) {
     }
     g_set_zero_seq++;
     set_int_internal(kSystemSetZeroSeq, g_set_zero_seq);
+    return;
+  }
+  if (id == g_clear_fault_id) {
+    g_clear_fault_id = 0;
+    if (!ok) {
+      report_error((int64_t)event->reason, event->motor_id);
+    }
+    g_clear_fault_seq++;
+    set_int_internal(kSystemClearFaultSeq, g_clear_fault_seq);
     return;
   }
   if (id == g_refresh_id) {

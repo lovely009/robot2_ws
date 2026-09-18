@@ -9,5 +9,5 @@ string<=31 model_name     # 型号目录名（未绑定 = 空串）
 uint32 capability_flags   # MOTOR_PROTOCOL_CAP_*（唯一定义点在协议 adapter 头）
 bool online
 bool conflict             # CONFIG_CONFLICT 锁存
-# 生命周期九态枚举同 MotorStatusTarget
-uint8 lifecycle
+# 生命周期九态不放这里：它变化快，属「状态」不属「身份」，
+# 唯一权威是 MotorStatusTarget.lifecycle（20Hz）。

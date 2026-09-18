@@ -127,14 +127,19 @@
             <b>设零</b>：把该台当前姿态设为设备零点（写 0x2531=1）。厂家要求
             <b>失能状态</b>下设置——运行中会被固件拒绝，不会隐式失能；零点改变后设备内的
             位置限位随之移动，请重新确认限位与机械行程。
+            <br>
+            <b>清错</b>：清除该台的故障锁存（`system.clear_fault`）。仅<b>非运动态</b>受理；
+            跨总线/协议身份冲突的锁存刻意不可解除（会被拒绝）；设备参数未初始化会触发一次
+            回读重比对。清完仍须<b>显式使能</b>并重发完整快照/轨迹才可能回运动。
             <b>单位</b>：位置 <b>度</b>、速度 <b>度/秒</b>、力矩 <b>安培</b>（设备里的对象就是
             cnt / RPM / mA，rad 与 N·m 只在固件内核里用；换算由固件在参数边界做一次）。
             参数在固件内核生效：<b>kp/kd/enable</b> 本地立即生效；<b>pos/vel/torque 限值</b>
             VAXOR 为 MCU 本地软钳制，CERB 走 CANopen SDO 写后读回核验（要求电机未运动，
             运行中写入会被拒绝并回弹）。set 仅表示「已受理」，最终成败看事件日志的
             <code>CONFIG_RESULT</code>（失败自动回弹旧值）。「回读」对 CERB 逐条发 SDO upload
-            （设备是严格一问一答，4 个对象读完约 1 秒）刷新设备真实值。「保存到 W25」显式落盘（<b>现在只对 kp/kd 有意义</b>：设备侧限值/限位写成功即自动
-            落盘，总线上能看到 <code>23 39 25 00</code> 保存帧；enable 不持久化）。
+            （设备是严格一问一答，4 个对象读完约 1 秒）刷新设备真实值。「保存到 W25」显式落盘；
+            设备侧限值/限位写成功即自动落盘，总线上能看到 <code>23 39 25 00</code> 保存帧。
+            <b>本页只有静态量</b>：enable/kp/kd 是动态量，走下方「逐电机策略」那条话题，不在参数树里。
             <b>错误码</b>：<code>11</code>=提交失败（mailbox 被拒）、<code>20</code>=保存失败、
             <code>30</code>=回读失败、<code>40</code>=设备与固件记录不一致（该台未初始化）、
             <code>41</code>=回读不成功；<code>1..6</code> 为事务结果码（1=BUSY 2=INVALID
@@ -144,18 +149,34 @@
             与记录不一致 / 回读失败）的那台不可使能</b>（状态列显示 CONFIG_CONFLICT），
             从本页写回参数即可恢复一致。运行中回读发现不一致会走软停（阻尼停机），不硬失能。
           </p>
+          <section class="card">
+            <h2>逐电机策略 <span class="muted tiny">/motor_policy</span></h2>
+            <p class="warn tiny">
+              enable 与 MIT 增益走这条话题（<b>不在参数树里</b>）。<b>稀疏语义</b>：只影响下发的那些电机，
+              其余保持原状——与命令快照的「缺席即软停」不同。<b>代数</b>必须严格前进才受理「从未武装到武装」，
+              挡的是「周期重发同一条策略」在故障后把电机自动重新武装（固件会拒绝并回 CONFIG_RESULT 事件）。
+              故障清除后仍须重新武装 + 新的完整快照/轨迹才可能回运动。
+            </p>
+            <p>
+              <label>ID <input id="polId" type="number" min="1" value="1" style="width:5em"></label>
+              <label><input id="polEnable" type="checkbox"> 启用</label>
+              <label>kp <input id="polKp" type="number" step="0.1" value="0" style="width:7em"></label>
+              <label>kd <input id="polKd" type="number" step="0.1" value="0" style="width:7em"></label>
+              <button id="btnPolSend">下发</button>
+            </p>
+            <div id="polResult" class="result tiny"></div>
+          </section>
           <div class="table-wrap">
             <table class="params">
               <thead>
                 <tr>
-                  <th>ID</th><th>型号</th><th>状态</th><th>来源</th><th>enable</th>
-                  <th>kp</th><th>kd</th>
+                  <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
                   <th>pos_min<small>(°)</small></th><th>pos_max<small>(°)</small></th>
                   <th>vel_max<small>(°/s)</small></th><th>torque_max<small>(A)</small></th><th></th>
                 </tr>
               </thead>
               <tbody id="paramRows">
-                <tr class="empty"><td colspan="12">连接后点「读取」载入当前参数</td></tr>
+                <tr class="empty"><td colspan="9">连接后点「读取」载入当前参数</td></tr>
               </tbody>
             </table>
           </div>

@@ -374,7 +374,13 @@ enum {
   CERB_STAGE_SDO_WRITE, // 快速写 0x23，等写应答 0x60
   CERB_STAGE_SDO_READ,  // 快速上传 0x40，等 0x43 回读并与写值比对
   CERB_STAGE_SAVE,      // 写 0x2539 保存码，无应答，发完即推进
+  CERB_STAGE_MIT_CLEAR, // MIT 控制字置 bit5 清错，无应答，发完即推进
 };
+
+// MIT 下行控制字 bit5 = 清错（ros2_ws/src/motor_drive/docs/cerb-series.md）。
+// 固件的常规 MIT 组帧只置 bit7(使能)/bit6(抱闸释放)/bit4:1(模式)，从不置
+// 这一位——它是唯一的主动清错手段。
+#define CERB_MIT_CTRL_CLEAR_FAULT 0x20U
 
 // 写阶段的取值来源（读/保存阶段为 NONE）。
 enum {
@@ -440,6 +446,13 @@ static const cerb_stage_desc_t kStagesTorqueLimit[3] = {
 
 // REFRESH_PARAMS：4 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
 // 不再依赖阶段号硬编码）。
+// CLEAR_FAULT：单阶段清错帧，无应答。是否真清掉由设备后续状态帧的
+// fault_active 判定（既有 FAULT → READY_DISABLED 路径），不引入新确认机制。
+static const cerb_stage_desc_t kStagesClearFault[1] = {
+  { CERB_STAGE_MIT_CLEAR, CERB_VALUE_NONE, MOTOR_PROTOCOL_PARAM_SLOT_NONE, 0U,
+    0U, 0U },
+};
+
 static const cerb_stage_desc_t kStagesRefresh[4] = {
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
@@ -474,6 +487,10 @@ static const cerb_stage_desc_t *cerb_stage_table(
     case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS:
       *count = (uint8_t)(sizeof(kStagesRefresh) / sizeof(kStagesRefresh[0]));
       return kStagesRefresh;
+    case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT:
+      *count = (uint8_t)(sizeof(kStagesClearFault) /
+                         sizeof(kStagesClearFault[0]));
+      return kStagesClearFault;
     default:
       *count = 0U;
       return NULL;
@@ -585,6 +602,14 @@ static bool cerb_config_stage_info(uint8_t stage,
   if (desc == NULL) {
     return false;
   }
+  if (desc->action == CERB_STAGE_MIT_CLEAR) {
+    out->waits_response = false; // 设备不对清错帧应答
+    out->timeout_ms = 0U;
+    out->param_raw_valid = false;
+    out->param_slot = MOTOR_PROTOCOL_PARAM_SLOT_NONE;
+    out->param_raw = 0U;
+    return true;
+  }
   out->timeout_ms = CERB_SDO_TIMEOUT_MS;
   if (desc->action == CERB_STAGE_SAVE) {
     out->waits_response = false; // 无应答：见 CERB_DESC_SAVE 的保存语义
@@ -648,6 +673,19 @@ static bool cerb_config_encode_stage(
   const cerb_stage_desc_t *desc = cerb_stage_at(request, stage);
   if (desc == NULL) {
     return false;
+  }
+  if (desc->action == CERB_STAGE_MIT_CLEAR) {
+    // 中性目标 + **不请求使能**（bit7=0）：故障态设备上「重新使能」的意图
+    // 无意义，而且会把「清错」变成隐式的重新使能。清完仍要显式
+    // SET_ENABLE(true) + 新快照才可能回运动（ARD §36）。
+    motor_protocol_control_intent_t neutral = {0};
+    neutral.kd = profile != NULL ? profile->default_kd : 0.0f;
+    neutral.enable = false;
+    if (!cerb_encode_mit_command(profile, node, bus_index, &neutral, out)) {
+      return false;
+    }
+    out->data[0] |= CERB_MIT_CTRL_CLEAR_FAULT;
+    return true;
   }
   uint8_t payload[8] = {0};
   if (desc->action == CERB_STAGE_SAVE) {

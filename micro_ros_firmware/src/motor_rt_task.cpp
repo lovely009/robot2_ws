@@ -24,6 +24,14 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CAN_TX_P1_SLOTS,
               "P1 调度槽数必须与注册表容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS,
               "内核快照目标容量必须与注册表容量一致");
+static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_POINTS ==
+                  CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS,
+              "轨迹点数容量必须与 mailbox 容量一致");
+static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS ==
+                  CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS,
+              "轨迹电机容量必须与 mailbox 容量一致");
+static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
+              "策略容量必须与注册表容量一致");
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
@@ -71,6 +79,21 @@ static const motor_protocol_adapter_t *const kAdapters[2] = {
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_command(&g_control_mailbox, snapshot);
+  taskEXIT_CRITICAL();
+  return ok;
+}
+
+bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory) {
+  taskENTER_CRITICAL();
+  const bool ok =
+      control_mailbox_submit_trajectory(&g_control_mailbox, trajectory);
+  taskEXIT_CRITICAL();
+  return ok;
+}
+
+bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
+  taskENTER_CRITICAL();
+  const bool ok = control_mailbox_submit_policy(&g_control_mailbox, snapshot);
   taskEXIT_CRITICAL();
   return ok;
 }
@@ -152,6 +175,33 @@ size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
       motor_control_drain_events(g_motor_control, out, capacity);
   taskEXIT_CRITICAL();
   return count;
+}
+
+void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out) {
+  if (out == nullptr) {
+    return;
+  }
+  const uint32_t now_ms = millis();
+  taskENTER_CRITICAL();
+  motor_control_copy_trajectory_state(g_motor_control, out, now_ms);
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
+  if (out == nullptr) {
+    return;
+  }
+  taskENTER_CRITICAL();
+  motor_control_copy_diagnostics(g_motor_control, &out->kernel);
+  taskEXIT_CRITICAL();
+  // ring 溢出在 lib/fdcan 侧，堆余量只有本任务能问（内核不感知堆）。
+  static_assert(MOTOR_CONTROL_MAX_BUSES == CAN_RX_BUS_COUNT,
+                "总线数契约：内核与 fdcan 必须一致");
+  for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
+    can_rx_ring_t *ring = can_bsp_rx_ring(bus);
+    out->ring_drop[bus] = ring != nullptr ? ring->overflow_count : 0U;
+  }
+  out->heap_free = (uint32_t)xPortGetFreeHeapSize();
 }
 
 size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
@@ -328,6 +378,42 @@ static void convert_snapshot(const control_command_snapshot_t *in,
   }
 }
 
+static void convert_policy(const control_policy_snapshot_t *in,
+                           motor_control_policy_snapshot_t *out) {
+  out->received_tick_ms = in->received_tick_ms;
+  out->request_id = in->request_id;
+  out->policy_generation = in->policy_generation;
+  out->target_count = in->target_count;
+  for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_MOTORS;
+       ++i) {
+    out->targets[i].motor_id = in->targets[i].motor_id;
+    out->targets[i].enabled = in->targets[i].enabled;
+    out->targets[i].kp = in->targets[i].kp;
+    out->targets[i].kd = in->targets[i].kd;
+  }
+}
+
+static void convert_trajectory(const control_trajectory_t *in,
+                               motor_control_trajectory_t *out) {
+  out->sequence = in->sequence;
+  out->received_tick_ms = in->received_tick_ms;
+  out->trajectory_id = in->trajectory_id;
+  out->point_count = in->point_count;
+  out->target_count = in->target_count;
+  for (uint16_t i = 0;
+       i < in->target_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS; ++i) {
+    out->target_ids[i] = in->target_ids[i];
+  }
+  for (uint16_t i = 0;
+       i < in->point_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_POINTS; ++i) {
+    out->points[i].time_from_start_ms = in->points[i].time_from_start_ms;
+    out->points[i].motor_id = in->points[i].motor_id;
+    out->points[i].position_rad = in->points[i].position;
+    out->points[i].velocity_rad_s = in->points[i].velocity;
+    out->points[i].effort_nm = in->points[i].effort;
+  }
+}
+
 // mailbox 与内核协议层的配置 kind 枚举类型独立，但数值必须逐值相等；
 // convert_config 的显式转换依赖此前提，以下断言防止单侧修改。
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
@@ -360,6 +446,12 @@ static_assert(
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ZERO) ==
                   static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ZERO),
               "mailbox/protocol config kind 契约不一致：SET_ZERO");
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_CLEAR_FAULT) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT),
+              "mailbox/protocol config kind 契约不一致：CLEAR_FAULT");
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POLICY) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POLICY),
+              "mailbox/protocol config kind 契约不一致：SET_POLICY");
 
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
@@ -395,6 +487,14 @@ static void convert_config(const control_mailbox_config_request_t *in,
       break; // 无载荷：只凭 motor_id 发起 4 个 SDO upload
     case CONTROL_MAILBOX_CONFIG_SET_ZERO:
       break; // 无载荷：只凭 motor_id 写 0x2531（设零位，仅失能态）
+    case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
+      break; // 无载荷：只凭 motor_id 发厂家清错帧
+    case CONTROL_MAILBOX_CONFIG_SET_POLICY:
+      out->enable = in->value.policy.enable;
+      out->kp = in->value.policy.kp;
+      out->kd = in->value.policy.kd;
+      out->policy_generation = in->value.policy.generation;
+      break;
     default:
       break;
   }
@@ -427,6 +527,35 @@ static void control_boundary(void) {
     convert_snapshot(&snapshot_in, &snapshot);
     (void)motor_control_apply_command_snapshot(g_motor_control, &snapshot,
                                                now_ms);
+  }
+
+  // 多点轨迹：先受理（校验在 mailbox 与内核各做一次），再按时间线插值
+  // 下发。两份轨迹各约 5KB，改静态避免压栈（与快照同因）。无新轨迹时
+  // take 失败；step 在无活动轨迹时 O(1) 返回。
+  static control_trajectory_t trajectory_in;
+  static motor_control_trajectory_t trajectory;
+  bool got_trajectory = false;
+  taskENTER_CRITICAL();
+  got_trajectory =
+      control_mailbox_take_trajectory(&g_control_mailbox, &trajectory_in);
+  taskEXIT_CRITICAL();
+  if (got_trajectory) {
+    convert_trajectory(&trajectory_in, &trajectory);
+    (void)motor_control_apply_trajectory(g_motor_control, &trajectory, now_ms);
+  }
+  motor_control_trajectory_step(g_motor_control, now_ms);
+
+  // 逐电机策略：批量、latest-wins。稀疏语义——只影响列出的电机，未列出的
+  // 保持原状。约 0.8KB，静态避免压栈。
+  static control_policy_snapshot_t policy_in;
+  static motor_control_policy_snapshot_t policy;
+  bool got_policy = false;
+  taskENTER_CRITICAL();
+  got_policy = control_mailbox_take_policy(&g_control_mailbox, &policy_in);
+  taskEXIT_CRITICAL();
+  if (got_policy) {
+    convert_policy(&policy_in, &policy);
+    (void)motor_control_apply_policy(g_motor_control, &policy, now_ms);
   }
 
   // 配置 FIFO 有界转发（每边界至多 kConfigDrainPerBoundary 条，不阻塞节拍）。

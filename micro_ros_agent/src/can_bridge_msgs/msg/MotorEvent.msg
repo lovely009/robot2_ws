@@ -25,9 +25,18 @@ uint8 EVENT_SNAPSHOT_REJECTED=12
 uint8 EVENT_CONFIG_RESULT=13
 uint8 EVENT_REGISTRY_FULL=14
 uint8 EVENT_DEV_INIT=15
+# 轨迹被整条拒绝。与其它事件不同，本事件的字段含义重载：
+#   request_id = 被拒的 trajectory_id（并发多条时才分得清是谁）
+#   reason     = 首个非法路点下标；0xFFFF = 与路点无关（计数越界/
+#                声明集合重复/未注册电机/声明了归属却无路点）
+#   motor_id   = 0（一条轨迹可含多台，逐台归属无意义）
+uint8 EVENT_TRAJECTORY_REJECTED=16
 uint32 tick_ms
 uint8 event_type
 uint16 motor_id
 uint8 bus_index
 uint16 reason
 uint32 request_id
+# 单调递增（内核分配，跨事件连续）。消费者据此判丢帧：相邻两条之间跳号即
+# 说明事件环满过；累计丢弃数见 MotorDiagnostics.event_dropped。
+uint32 event_seq

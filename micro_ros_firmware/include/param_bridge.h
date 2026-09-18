@@ -38,7 +38,12 @@ extern "C" {
 
 // 128 槽 = 5 系统参数 + 17 电机 × 7。ponytail: rclc 参数集在 DTCM newlib
 // 堆（low-mem 约 0.3KB/槽），远期三总线 ~40 台时需改自定义 srv 参数接口。
-#define PARAM_BRIDGE_MAX_PARAMS 128U
+// 槽位预算：每电机 4 项（限位/限速/限流）+ system.* 10 项。
+// **2026-09-18 台架实测修正**：原设 208（覆盖 48 台）在真机上把堆吃到只剩
+// 1,776 B——每槽约 269 B，208 槽比 128 槽多吃约 21.5 KB，而 DTCM 堆池的实际
+// 余量远小于静态估算。降到 176：覆盖 (176-10)/4 = 41 台（实际部署约 40），
+// 释放约 8.6 KB。再往上调之前必须先在台架上量 heap_free 的稳态最低位。
+#define PARAM_BRIDGE_MAX_PARAMS 176U
 
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_destroy(rcl_node_t *node);

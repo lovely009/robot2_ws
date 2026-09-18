@@ -174,7 +174,17 @@ typedef enum {
   // 顺序 upload 0x607D:01/02、0x6080、0x2538，每阶段追加一个
   // motor_protocol_param_stage_t（设备端原值 + 关节侧换算值）进读缓冲，
   // 内核据此刷新设备参数影子并与固件记录比对。仅 CERB。
-  MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS = 8U
+  MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS = 8U,
+  // 故障清除（属 mailbox 契约，与 control_mailbox 侧同值 10 锁死）：主动
+  // 下发厂家清错手段。CERB 是 MIT 控制字 bit5（清错位），单阶段、不等应答
+  // ——是否真清掉由设备后续状态帧的 fault_active 判定（既有
+  // FAULT → READY_DISABLED 路径，无新确认机制）。协议无清错手段时
+  // config_stage_count 返回 0，内核统一回 UNSUPPORTED（不猜厂家字节）。
+  MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT = 10U,
+  // 逐电机策略（属 mailbox 契约，与 control_mailbox 侧同值 11 锁死）：enable +
+  // MIT 增益，**一次原子更新**。走本地的 Policy 路径，不产生任何设备事务。
+  // 拆成 SET_GAINS + SET_ENABLE 两次调用会留下「用旧 Kd 使能」的窗口。
+  MOTOR_PROTOCOL_CONFIG_SET_POLICY = 11U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -203,6 +213,9 @@ typedef struct {
   motor_protocol_position_limits_t position_limits; // SET_POSITION_LIMITS（rad）
   float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）
   float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
+  // SET_POLICY：代数必须严格前进才受理「从未武装到武装」的迁移（防周期重发
+  // 自动复权）。其余 kind 忽略本字段。
+  uint32_t policy_generation;
 } motor_protocol_config_request_t;
 
 // 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；与

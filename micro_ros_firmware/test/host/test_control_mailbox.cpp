@@ -33,6 +33,14 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
     "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ZERO) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ZERO),
+    "mailbox/protocol config kind 契约不一致：SET_ZERO");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_CLEAR_FAULT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT),
+    "mailbox/protocol config kind 契约不一致：CLEAR_FAULT");
 
 #include <cmath>
 #include <cstring>

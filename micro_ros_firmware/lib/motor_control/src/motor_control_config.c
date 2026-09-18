@@ -700,6 +700,72 @@ static bool reject_busy(motor_control_context_t *ctx,
   return false;
 }
 
+// 策略落地：enable + MIT 增益，一次原子落地。SET_POLICY config kind 与批量
+// 入口 motor_control_apply_policy 共用，避免两条路径的门禁与钳制漂移。
+//
+// 为什么必须原子：增益要先于使能到位，否则存在一个用旧 Kd 使能的窗口；拆成
+// SET_GAINS + SET_ENABLE 两次调用会留下它，也会让「两笔只成一半」变成可观测
+// 状态。
+//
+// 代数门（防「周期重发自动复权」）：「未武装 → 武装」是一次新意图，
+// policy_generation 必须严格前进（初值 0，故首次武装至少要 1）。冻结态
+// （FAULT/OFFLINE/CONFIG_CONFLICT/DEV_PARAM）与显式失能都会清掉
+// policy_enable，所以本规则**不需要在那几条路径上额外锁存任何东西**。
+// 它挡不住「每次都递增代数的周期发布者」：那与人工逐次授权在行为上不可
+// 区分。ARD §36 的「显式」在机制层面到此为止，再往上靠上层自律。
+bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
+                                      motor_control_entry_t *entry,
+                                      const motor_protocol_config_request_t *request,
+                                      uint32_t now_ms) {
+      if (entry->profile == NULL) {
+    return reject_invalid(ctx, entry, request, now_ms);
+  }
+  if (!isfinite(request->kp) || !isfinite(request->kd) ||
+      request->kp < 0.0f || request->kd < 0.0f) {
+    return reject_invalid(ctx, entry, request, now_ms);
+  }
+  if (request->enable && !entry->policy_enable &&
+      request->policy_generation <= entry->policy_generation) {
+    entry->last_failure_reason = MOTOR_CONTROL_FAULT_STALE_GENERATION;
+    return reject_invalid(ctx, entry, request, now_ms);
+  }
+  if (request->enable && !motor_control_dev_params_allow_motion(entry)) {
+    entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
+    return reject_invalid(ctx, entry, request, now_ms);
+  }
+  // 增益先在本地落定（钳到型号上限），再动使能位——顺序即语义。
+  entry->kp =
+      request->kp > entry->profile->kp_max ? entry->profile->kp_max : request->kp;
+  entry->kd =
+      request->kd > entry->profile->kd_max ? entry->profile->kd_max : request->kd;
+  entry->has_kp_kd = true;
+  entry->policy_generation = request->policy_generation;
+  if (request->enable) {
+    entry->policy_enable = true;
+    entry->motion_authorized = true;
+  } else {
+    entry->policy_enable = false;
+    entry->motion_authorized = false;
+    entry->has_target = false;
+    if (entry->motion_enabled) {
+      (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
+      entry->motion_enabled = false;
+    }
+    entry->enable_pending = false;
+    if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
+        entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
+      entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
+      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
+                               entry->motor_id, entry->bus_index,
+                               MOTOR_CONTROL_FAULT_NONE, 0U);
+    }
+  }
+  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+                           entry->motor_id, entry->bus_index,
+                           MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+  return true;
+    }
+
 bool motor_control_submit_config(motor_control_context_t *ctx,
                                  const motor_protocol_config_request_t *request,
                                  uint32_t now_ms) {
@@ -855,6 +921,37 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
       }
       return start_tx(ctx, entry, request, now_ms);
     }
+    case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT: {
+      // 故障清除：只清「可清的」。三类故障的判据是**成因**（unified_fault_code）
+      // 而不是生命周期——DEV_PARAM 与身份冲突都会把表项带进 CONFIG_CONFLICT，
+      // 按生命周期判会把两者混为一谈。
+      //  - 身份冲突锁存（latch_config_conflict）：ARD §9.3 刻意不可解除，复位
+      //    只能整机重启 → 拒绝。
+      //  - 设备参数未初始化（DEV_PARAM）：改走一次 REFRESH_PARAMS 事务，重跑
+      //    回读与比对。真不一致仍然由 apply_dev_init_result 判 MISMATCH 保持
+      //    CONFIG_CONFLICT——清除只负责「允许重走授权链」，不伪造一致。
+      //  - 厂家故障：发起设备侧清错事务（协议无手段则 UNSUPPORTED）。设备清掉
+      //    后下一帧状态帧走既有 FAULT → READY_DISABLED 路径收敛。
+      // 清错帧是控制类帧（MIT 控制字），运动中的电机不得收到——与设备侧限位
+      // 写同口径：安全边界不在运动中变动。
+      if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_CONFIG_CONFLICT) {
+        return reject_invalid(ctx, entry, request, now_ms); // 身份冲突不可解除
+      }
+      if (entry->tx_active) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
+      if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM) {
+        motor_protocol_config_request_t refresh = *request;
+        refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+        return start_tx(ctx, entry, &refresh, now_ms);
+      }
+      return start_tx(ctx, entry, request, now_ms);
+    }
+    case MOTOR_PROTOCOL_CONFIG_SET_POLICY:
+      return motor_control_apply_policy_entry(ctx, entry, request, now_ms);
     case MOTOR_PROTOCOL_CONFIG_SET_ENABLE: {
       // 逐电机 Enable（ARD §19）：本地策略位，非事务。
       // true = 重立运动授权（仍需新快照才能运动）；false = 立即退出运动：

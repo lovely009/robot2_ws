@@ -15,6 +15,8 @@
 #include <stdint.h>
 
 #include "control_command_mailbox.h"
+#include "control_policy_mailbox.h"
+#include "control_trajectory_mailbox.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +38,15 @@ typedef enum {
   // Vaxor 内核直接回 UNSUPPORTED）。
   CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS = 8U,
   // 设零点（无载荷，只用 motor_id；CERB 写 0x2531=1，仅失能态受理）。
-  CONTROL_MAILBOX_CONFIG_SET_ZERO = 9U
+  CONTROL_MAILBOX_CONFIG_SET_ZERO = 9U,
+  // 故障清除（无载荷，只用 motor_id）：清可清的故障。CERB 发 MIT 控制字
+  // bit5；Vaxor 无清错手段 → 内核回 UNSUPPORTED。身份冲突锁存刻意不可
+  // 解除（ARD §9.3），内核拒绝。
+  CONTROL_MAILBOX_CONFIG_CLEAR_FAULT = 10U,
+  // 逐电机策略（无设备事务，本地立即生效）：enable + 增益原子更新，另带
+  // 防复权代数。**单台入口**——ROS 面走的是批量通道
+  // （control_policy_mailbox.h），批量落地逐台复用同一套逻辑。
+  CONTROL_MAILBOX_CONFIG_SET_POLICY = 11U
 } control_mailbox_config_kind_t;
 
 typedef struct {
@@ -48,6 +58,16 @@ typedef struct {
   float min_position_rad;
   float max_position_rad;
 } control_mailbox_position_limits_t;
+
+// SET_POLICY 载荷：三项一起送，内核一次落地。
+// generation 必须严格前进才受理「未武装 → 武装」的迁移；内核据此挡住
+// 「周期重发同一条策略」在故障后把电机自动重新武装起来。
+typedef struct {
+  uint32_t generation;
+  bool enable;
+  float kp;
+  float kd;
+} control_mailbox_policy_t;
 
 typedef struct {
   uint32_t request_id;
@@ -61,6 +81,7 @@ typedef struct {
     control_mailbox_position_limits_t position_limits;
     float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）
     float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
+    control_mailbox_policy_t policy; // SET_POLICY
   } value;
 } control_mailbox_config_request_t;
 
@@ -75,6 +96,8 @@ typedef struct {
 
 typedef struct {
   control_command_mailbox_t command;
+  control_trajectory_mailbox_t trajectory;
+  control_policy_mailbox_t policy;
   control_mailbox_config_request_t
       config_queue[CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY];
   uint8_t config_head;
@@ -86,6 +109,10 @@ typedef struct {
   uint32_t config_session_count;   // Agent 未连接期的配置提交
   uint32_t command_rejected_count; // 被授权/会话门拒绝的命令提交
                                    //（快照本身非法走 command.invalid_snapshot_count）
+  uint32_t trajectory_rejected_count; // 被授权/会话门拒绝的轨迹提交
+                                      //（轨迹本身非法走 trajectory.invalid_trajectory_count）
+  uint32_t policy_rejected_count; // 被授权/会话门拒绝的策略提交
+                                  //（策略本身非法走 policy.invalid_policy_count）
 
   bool authorization_requested;     // 授权电平（init 默认 true = 引导豁免）
   bool authorization_pending;       // 电平变化边沿（一次性，take_events 读后清）
@@ -108,6 +135,23 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox,
                                   control_command_snapshot_t *snapshot);
 // 只撤销"未取走"的输入；诊断计数保留为生命周期统计。
 void control_mailbox_clear_command(control_mailbox_t *mailbox);
+
+// 轨迹输入：多点时间线 latest-wins。与 submit_command 同门同序（授权 +
+// 会话门先于数据校验）；空轨迹 = 取消，是合法载荷。
+bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
+                                       const control_trajectory_t *trajectory);
+bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
+                                     control_trajectory_t *trajectory);
+void control_mailbox_clear_trajectory(control_mailbox_t *mailbox);
+
+// 策略输入：批量、latest-wins。与 submit_command 同门同序（授权 + 会话门
+// 先于数据校验）。**不走 config FIFO**——那条队列深 16，装不下一条最多 64
+// 台的策略消息（详见 control_policy_mailbox.h）。
+bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
+                                   const control_policy_snapshot_t *snapshot);
+bool control_mailbox_take_policy(control_mailbox_t *mailbox,
+                                 control_policy_snapshot_t *snapshot);
+void control_mailbox_clear_policy(control_mailbox_t *mailbox);
 
 // 低频输入：有界 FIFO，不覆盖、不丢弃已经入队的旧配置请求。
 // 配置不属于运动授权：可在禁能/未授权状态下排队（会话门仍生效，

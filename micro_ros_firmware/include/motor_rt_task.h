@@ -5,7 +5,8 @@
 //    motor_control_on_raw_frame → motor_control_service（OFFLINE/新鲜度级联/
 //    配置事务步进）→ 每总线 can_tx_scheduler pump → can_bsp_submit_tx。
 //  - 20ms 控制边界：mailbox 会话/授权边沿同步到内核 → 完整命令快照 →
-//    apply_command_snapshot → 配置 FIFO 逐条（每边界有界）→ submit_config。
+//    apply_command_snapshot → 多点轨迹受理与轨迹步进（段内线性插值）→
+//    配置 FIFO 逐条（每边界有界）→ submit_config。
 //
 // 线程边界：mailbox 是本任务与 ROS 桥之间的唯一通道。外部只允许通过本头
 // 文件的写入口（临界区内转发 mailbox）与只读状态副本交互；内核上下文仅由
@@ -34,6 +35,14 @@ bool motor_rt_task_start(void);
 
 // 提交一份完整命令快照（latest-wins；非法快照由 mailbox 拒绝并计数）。
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
+
+// 提交一条多点轨迹（latest-wins；非法轨迹由 mailbox 拒绝并计数；
+// 空轨迹 = 取消）。轨迹在 20ms 控制边界生效，与快照按电机归属仲裁。
+bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory);
+
+// 提交一条批量策略（latest-wins；非法由 mailbox 整条拒绝并计数）。
+// 不走 config FIFO——那条队列深 16，装不下最多 64 台的策略消息。
+bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot);
 
 // 低频配置提交（暂无 ROS 生产者；契约见 control_mailbox 配置 FIFO）。
 bool motor_rt_submit_config(const control_mailbox_config_request_t *request);
@@ -69,6 +78,18 @@ size_t motor_rt_copy_param_views(motor_control_param_view_t *out,
 // 本任务生产、ROS 桥在轮询里消费，两侧共用临界区。满则环内丢最旧并计数
 // （ctx.event_dropped_count）。类型复用内核事件（无 ROS 依赖）。
 size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity);
+
+// 诊断快照：内核计数器 + 任务层补齐的每总线 RX ring 溢出与堆余量。
+// 堆余量由本任务采集（内核不感知堆），ring 溢出由 lib/fdcan 持有。
+typedef struct {
+  motor_control_diagnostics_t kernel;
+  uint32_t ring_drop[MOTOR_CONTROL_MAX_BUSES];
+  uint32_t heap_free;
+} motor_rt_diagnostics_t;
+void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);
+
+// 轨迹执行状态副本（内核类型直接暴露：无协议指针，无需镜像）。
+void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out);
 
 #ifdef __cplusplus
 }

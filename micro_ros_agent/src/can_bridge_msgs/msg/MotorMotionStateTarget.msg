@@ -6,3 +6,9 @@ float32 position      # rad，关节侧（缺失=NaN）
 float32 velocity      # rad/s，关节侧（缺失=NaN）
 float32 effort        # N·m，关节侧（缺失=NaN）
 uint32 state_age_ms   # 0xFFFFFFFF = 从未收到运动测量
+# 最近生效的命令源。轨迹在播期间是所属电机的唯一权威——快照对它们既不下发
+# 也不软停，这个字段就是让上层看见「我的快照为什么被忽略」。
+uint8 TARGET_SOURCE_NONE=0
+uint8 TARGET_SOURCE_SNAPSHOT=1
+uint8 TARGET_SOURCE_TRAJECTORY=2
+uint8 target_source

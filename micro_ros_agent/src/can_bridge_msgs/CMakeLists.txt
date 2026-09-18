@@ -37,6 +37,15 @@ rosidl_generate_interfaces(
   "msg/MotorTopologyEntry.msg"
   "msg/MotorTopology.msg"
   "msg/MotorEvent.msg"
+  # 下行多点轨迹（MotorCommandArray 的时序补充通道，非替代）
+  "msg/MotorTrajectoryPoint.msg"
+  "msg/MotorTrajectory.msg"
+  # 下行逐电机策略（动态量 enable/kp/kd；稀疏语义，非完整快照）
+  "msg/MotorPolicyTarget.msg"
+  "msg/MotorPolicyArray.msg"
+  # 上行：轨迹执行状态与固件级诊断
+  "msg/MotorTrajectoryState.msg"
+  "msg/MotorDiagnostics.msg"
   DEPENDENCIES std_msgs
 )
 

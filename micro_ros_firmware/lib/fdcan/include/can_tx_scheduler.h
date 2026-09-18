@@ -28,7 +28,9 @@ extern "C" {
 
 #define CAN_TX_BUS_COUNT 3U
 #define CAN_TX_P1_SLOTS 64U        // 每电机一个 latest-wins 槽（对齐注册表容量）
-#define CAN_TX_P0_CAPACITY 16U     // P0 FIFO（上层已去重，容量可小）
+#define CAN_TX_P0_CAPACITY 32U     // P0 FIFO（上层已去重）。按「最坏一次全表
+                                   // 撤权」定：48 台分摊到 3 条总线是 16 台/
+                                   // 总线，原值 16 正好等于该数、毫无余量。
 #define CAN_TX_P2_CAPACITY 16U     // P2 FIFO（ARD §22.3 有界）
 #define CAN_TX_P2_PUMP_QUOTA 2U    // 每次 pump 最多出队 P2 帧数（TBD-CAN-01 占位）
 #define CAN_TX_FRAME_BYTES 64U

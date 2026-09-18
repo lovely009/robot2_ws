@@ -64,17 +64,30 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 ## W25 / 存储
 
-- storage 任务（P1/1024 words）是 W25Q64 **唯一所有者**：boot 同步 init 并读双
-  sector A/B（0x0/0x1000），选 CRC 有效且 seq 新者；无芯片/ID 不符静默降级，
-  不阻断启动。
-- blob v2 = 32B 头 + 64×48B 记录（3104B）；v1（32B 记录）加载时自动就地迁移。
-  save 总擦非活动 sector 并读回 memcmp，失败不翻转活动 sector（旧槽仍可启动）。
+- storage 任务（P1/1024 words）是 W25Q64 **唯一所有者**：boot 同步 init 并**顺序
+  整读两个槽**——槽 A `0x0000–0x1FFF`、槽 B `0x2000–0x3FFF`（每槽 2 个 4KB 扇区），
+  每块整读后过 `param_store_blob_validate()`（CRC 覆盖头+记录）再选 `seq` 新者；
+  **刻意不做「只读 32B 头选胜者」的捷径**（未经校验的 seq 会选错槽）。无芯片/ID
+  不符静默降级，不阻断启动。
+- blob v3 = 32B 头 + 64×120B 记录（7712B）；save 擦**非活动槽的 2 个扇区**、
+  写 7712B、按 256B 页读回 memcmp，任一失败不翻转活动槽（旧槽仍可启动）。
+- **升级/回滚**：v2（48B 记录）与 v1（32B 记录）加载时各自就地迁移到 v3
+  （`migrate_v2` / `migrate_v1`，两条 fan-in 路径，**不是** v1→v2→v3 链）。旧布局
+  槽 B 基址是 `0x1000`，新布局下它落在槽 A 擦除范围内——boot 只在**两个新槽都
+  无效**时兜底读一次 `0x1000`。**已知缺口（不修）**：旧槽 A 有效、旧槽 B 更新时
+  会按旧槽 A 启动，即**静默回退一代**。
+  **回滚到旧固件会丢参数**：新固件存过一次后两槽都是 v3，旧固件判两槽皆无效、
+  从零开始。
+- boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
+  `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
+  与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。
 - 两个落盘触发：`system.save` 脉冲；设备写事务成功 → 内核 record_dirty → motor_rt
   去抖 **500ms** 自动落盘（写必须设备+驱动板一起写，不落盘下次上电必判不一致）。
 - Flash 缓冲必须 ≥4 字节对齐（代码统一 `alignas(8)`）：-Os 下结构体访问生成
   STRD，非对齐直接 HardFault。
-- 擦写阻塞可达 ~1s，**只在 storage 任务**；IWDG（~500ms）由 motor_rt 每拍独立
-  喂狗，调试断点冻结计数。
+- 擦写阻塞：v2 单扇区实测 ~1s（**旧值**）；v3 双扇区阻塞值**待台架实测**
+  （见 validation plan）。**只在 storage 任务**；IWDG（~500ms）由 motor_rt 每拍
+  独立喂狗，调试断点冻结计数。
 
 ## 关键路径 / 文件速查
 

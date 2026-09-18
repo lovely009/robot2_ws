@@ -44,6 +44,7 @@ import os
 import select
 import signal
 import struct
+import sys
 import termios
 import time
 import tty
@@ -255,6 +256,15 @@ class SlcanSim:
         for mid in dir_ccw_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
                 self.models[mid].sdo_params[(0x2541, 0x00)] = 1
+        # 请求的 id 若没匹配到任何 CERB 节点，两个开关都静默无效——操作员会拿到
+        # 一次"匹配"的运行并误判固件的不一致门没触发（安全属性假阴性）。显式报出。
+        for flag, ids in (("--safety-off", safety_off_ids),
+                          ("--dir-ccw", dir_ccw_ids)):
+            missed = [i for i in ids if i not in self.models
+                      or self.models[i].kind != "cerb"]
+            if missed:
+                print(f"[sim] 警告：{flag} 的 id {missed} 未匹配任何 CERB 节点，"
+                      f"不会产生不一致场景", file=sys.stderr)
         self.rx_buf = b""
         self.sync_seen = False
         self.sync_count = 0

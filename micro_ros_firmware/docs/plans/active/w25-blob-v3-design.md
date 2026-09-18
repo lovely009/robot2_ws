@@ -166,15 +166,18 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 
 ### 5.5 静态占用（含槽位扩展的连带代价）
 
-`storage_task` 自身（`src/storage_task.cpp`）：
+`storage_task` 自身（`src/storage_task.cpp`）**实测 `.bss` = 23168 B**。初稿的表格
+只数了 blob 缓冲、漏了新增的 `v2_buf` 与 `views[64]`，故它的 15168 B 偏低：
 
-| | 现在 | v3 |
+| | 初稿 | 实测 |
 |---|---|---|
 | boot 缓冲 | 2×3104 | 共用 scratch |
 | write / verify | 3104 + 3104 | 7712 + 256 |
 | `legacy_buf` | 2080 | 2080 |
 | `g_boot_records` | 5120 | 5120 |
-| 小计 | **19616 B**（19.16 KiB） | **15168 B**（14.81 KiB） |
+| `v2_buf`（v2 迁移用） | 漏记 | 3104 |
+| `views[64]`（perform_save） | 漏记 | 计入 `.bss` 实测 |
+| 小计 | ~~15168 B~~ | **23168 B（实测 `.bss`）** |
 
 **但 `MOTOR_PROTOCOL_PARAM_SLOT_COUNT` 4→6 会让所有按槽位数量的数组同时变大**，
 每电机表项 +48 B：
@@ -188,26 +191,30 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 | `tx_write_raw[COUNT]` | `:145` | +8 B | +512 B |
 | `dev_raw[COUNT]` + `record_raw[COUNT]` | `motor_control.h:470,475` | +16 B | +2048 B |
 | `device_raw[COUNT]` | `motor_control.h:504` | +8 B | +512 B |
-| **合计** | | | **+5632 B** |
+| **合计** | | | **+6144 B（实测）** |
 
 （后两行各存在两份 64 元数组：`param_bridge` 的 `g_views[64]` 与
-`storage_task` `perform_save()` 的 `views[64]`；`g_boot_records[64]` 一份。）
+`storage_task` `perform_save()` 的 `views[64]`；`g_boot_records[64]` 一份。
+上表逐行是**设计估算**，**实测连带代价以 +6144 B 为准**。）
 
-**净结果：−4448 + 5632 = +1184 B（约 +0.36% RAM_D1）。**
+**净结果（实测）：+4800 B RAM / +360 B Flash**（RAM_D1 从 220,308 B 到
+225,108 B，即 68.7%）。
 
-⚠️ 早期草案写的"扩容反而省 RAM（−4448 B）"**只算了 storage 缓冲，漏了槽位扩展的连带代价，
-是错的**。真实代价是**约 +1.2 KB**。
+⚠️ 早期草案写的"扩容反而省 RAM（−4448 B）"**只算了 storage 缓冲、漏了槽位扩展
+的连带代价**；其后草案的"+1184 B"也只补了一部分、仍**偏低**——**两个数都错**，
+以实测 +4800 B RAM / +360 B Flash 为准。
 
 仍选方案 A / D3 的理由**不是省 RAM**，而是：D3 让两个新事实**零改动**复用现有的
 落袋 / 位图 / 比对 / 事件位图通路，省掉的是一整套并行比对逻辑与它的测试面。
-1.2 KB 换这个划算。若 RAM 后续吃紧，退路是不扩 `PARAM_SLOT_COUNT`、
-给两个新事实各加一个专用字段（约 +2048 B），代价是失去 D3 的复用。
+几 KB RAM 换这个**复用**划算（注意：它**不是** RAM 节省）。若 RAM 后续吃紧，
+退路是不扩 `PARAM_SLOT_COUNT`、给两个新事实各加一个专用字段（约 +2048 B），
+代价是失去 D3 的复用。
 
 ### 5.6 已知代价
 
 1. save 从擦 1 个扇区变擦 2 个，阻塞时间约翻倍。README 里"擦写阻塞可达 ~1s"要改为
    台架实测值，列入 validation plan。
-2. 静态 RAM 净增约 +1184 B（见 §5.5）。
+2. 静态 **实测 +4800 B RAM / +360 B Flash**（见 §5.5）。
 
 ## 6. 迁移链
 
@@ -218,9 +225,11 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
   `device_raw_present` / 6 个 float / `device_raw[0..3]`；
   `device_raw[4..7]` 清零（未核验，与 v1→v2 时 `device_raw_present = 0` 同口径）；
   `model_name` 清零、`identity_hash = 0`、`mit_*` 三标度写 0 → `finalize(seq 沿用)`。
-- 保留现有 `param_store_blob_migrate_v1`（`param_store_blob.c:239`），形成
-  **v1 → v2 → v3** 链。`read_slot` 依次尝试：v3 `validate` → v2 迁移（结果再 `validate`）
-  → v1 迁移（结果再 `validate`）。
+- 保留现有 `param_store_blob_migrate_v1`（`param_store_blob.c:239`）。**两条路径是
+  fan-in，不是 v1 → v2 → v3 链**：`migrate_v1` 自 Task 1 起就直接写 v3 blob（它写
+  `param_store_blob_t`，`param_store_blob_reset()` 打 `version = 3`），新增的
+  `migrate_v2` 也直接写 v3。`read_slot` 依次尝试：v3 `validate` → v2 迁移（结果再
+  `validate`）→ v1 迁移（结果再 `validate`）。
 
 **不可逆性（须写入 AGENTS.md）**：新固件 save 过一次后两个槽都是 v3，
 旧固件会判两槽皆无效并从头开始——**回滚会丢参数**。v1→v2 当时同性质，属既有先例。
@@ -273,7 +282,7 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 - `record_occupied` 语义、`present` 位图、`device_raw[8]` 越界拒绝；
 - CRC 覆盖新增字段、`reserved` 尾置零；
 - **v2 → v3 迁移**：含"v2 只有 4 槽设备原值 → 迁移后 [4..5] 为未核验"；
-- **v1 → v2 → v3 链式迁移**。
+- **v1 → v3 迁移**（v1 直接升 v3，非链式 v1→v2→v3）。
 
 `test/host/test_motor_control.cpp`：
 

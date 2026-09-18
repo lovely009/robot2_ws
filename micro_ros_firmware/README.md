@@ -40,7 +40,7 @@ OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 | CANFD 通信 | **FDCAN1=PD0/PD1、FDCAN2=PB5/PB6、FDCAN3=PD12/PD13**，FD + BRS，RX/TX 元素 64B | ISR 只盖时戳写每总线 SPSC RX ring（容量 64，满丢新帧并计数），不解码 |
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
-| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `storage_task` 独占：双 sector A/B 参数持久化（见「W25Q64」节） |
+| W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `storage_task` 独占：双槽（每槽 2 扇区）A/B 参数持久化（见「W25Q64」节） |
 | 电机接口 | ID 化有界消息（3 个订阅 + 6 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
@@ -66,7 +66,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）按域节拍发布：运动/IMU 数据 100Hz、状态 20Hz、拓扑 1Hz、温度 2Hz；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
-| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 读双 sector blob；设备写事务去抖 500ms 自动落盘 + `system.save` 脉冲，见「W25Q64」节） |
+| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；设备写事务去抖 500ms 自动落盘 + `system.save` 脉冲，见「W25Q64」节） |
 | `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 20ms 控制边界消费完整快照与配置 FIFO |
 
 ## 代码组织
@@ -138,7 +138,7 @@ micro_ros_firmware/
     ├── motor_bridge.cpp       # 电机 ID 化话题桥（订阅/发布，见"联调"节）
     ├── param_bridge.cpp       # ROS 2 参数服务器桥（静态量 + 运维动作）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
-    ├── storage_task.cpp       # W25Q64 唯一所有者：boot 加载双 sector blob + save 落盘
+    ├── storage_task.cpp       # W25Q64 唯一所有者：boot 加载双槽 blob（每槽 2 扇区）+ save 落盘
     ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 20ms 控制边界
     └── system_clock.cpp       # 覆盖 SystemClock_Config
 ```
@@ -180,13 +180,26 @@ cd micro_ros_firmware
 ### W25Q64
 
 `storage_task`（P1/栈 1024 words）是 W25Q64 的唯一所有者。boot 同步
-`w25q64_init()` 并读双 sector A/B（地址 0x0/0x1000），选 CRC 有效且 seq
-最新者；无芯片/ID 不符静默降级为无持久化，不阻断启动。blob v2 =
-32B 头 + 64×48B 记录（3104B）；v1 旧布局记录 32B，加载时自动就地迁移。
+`w25q64_init()` 并**顺序整读两个槽**（槽 A `0x0000–0x1FFF`、槽 B `0x2000–0x3FFF`，
+每槽 2 个 4 KB 扇区）：每块整读后过 `param_store_blob_validate()`（CRC 覆盖
+头+记录），选 CRC 有效且 `seq` 最新者；胜者是先读的槽时重读一次再校验。
+**刻意不做「只读 32B 头选胜者」的捷径**——那会拿未经校验的 `seq` 做裁决，
+头损坏时可能选错槽。无芯片/ID 不符静默降级为无持久化，不阻断启动。
+blob v3 = 32B 头 + 64×120B 记录（7712B）；v2（48B 记录）与 v1（32B 记录）
+加载时各自就地迁移到 v3（两条 fan-in 路径，**不是** v1→v2→v3 链）。
 保存有两个触发源：设备写事务成功后去抖 500ms 自动落盘、`system.save`
-手动脉冲。save 总擦写非活动 sector，擦/写后读回 memcmp 校验，失败不翻转
-活动 sector（旧槽仍可启动）。擦写阻塞可达 ~1s，只在 storage 任务内执行，
-IWDG 由 motor_rt 独立喂。
+手动脉冲。save 擦写非活动槽的**两个**扇区、写 7712B，按 256B 页读回 memcmp
+校验，任一失败不翻转活动槽（旧槽仍可启动）。
+
+**升级迁移（一次性，含已知缺口）**：旧布局槽 B 基址是 `0x1000`，新布局下它
+落进槽 A 的擦除范围；boot **只在两个新槽都无效**时兜底读一次 `0x1000`，把旧
+板子的参数迁过来。**缺口（刻意不修）**：若旧槽 A 有效、而旧槽 B 持有更新的
+一代，新版会按旧槽 A 启动，即**静默回退一代**。反向亦然——新固件 save 过一次
+后两槽都是 v3，旧固件会判两槽皆无效并从零开始，**回滚到旧固件会丢参数**。
+
+**擦写阻塞**：v2 单扇区实测 **~1s**（**旧值**）；v3 save 改擦 **2** 个扇区，
+阻塞时间约翻倍，**双扇区实测值待台架**（见 validation plan）。擦写只在
+storage 任务内执行，IWDG 由 motor_rt 独立喂。
 
 ## 与 micro_ros_agent 联调
 
@@ -230,8 +243,8 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   POINTS`），更长的时间线由上层分段链式下发（段边界速度不连续，MIT 的 Kd 平滑）。
   静态占用约 31 KB（ROS 接收体 + mailbox 双缓冲 + 转换中间 + 内核锁存，20 B/点），
   改小上面两个常量是唯一的省 RAM 手段。**RAM 口径**：`.data`+`.bss` 全部落在
-  320 KiB 的 RAM_D1 上，实测占用 **63.0%**（206,324 B / 327,680 B）。PlatformIO
-  报的 35.7% 分母是整芯片 577,536 B，会把紧张度藏起来——判断余量要用 RAM_D1
+  320 KiB 的 RAM_D1 上，实测占用 **68.7%**（225,108 B / 327,680 B）。PlatformIO
+  报的 39.0% 分母是整芯片 577,536 B，会把紧张度藏起来——判断余量要用 RAM_D1
   口径。参数槽另占 DTCM 堆（见「参数」一节）。
 
 ### 故障清除（`system.clear_fault`）
@@ -329,7 +342,20 @@ CERB 发一次 `REFRESH_PARAMS` 回读四个管理对象，与 W25 里的固件�
 - 自动回读失败会退避重试（≤3 次、间隔 500ms；读是只读事务，重试无副作用），
   用尽才判 `41`，避免一次总线抖动就让该台使能不了；
 - 设备侧写成功后记录同步落盘（去抖 500ms）：写就是设备和驱动板一起写。
-- W25 blob 升 v2（多 4 个设备端原值），v1 就地迁移，不丢已存参数。
+- W25 blob 升 v3（记录 120 B：多 4 个设备端原值 + 保护开关/方向 + 型号身份），
+  v1/v2 各自就地迁移，不丢已存参数。
+
+**设备侧保护开关与方向纳入上电比对（2026-09-19）**：CERB 的 `0x2650:01`
+（看门狗+限位保护开关，0 = 保护开）与 `0x2541`（方向，0 = CW）也并入
+`REFRESH_PARAMS` 回读，与记录逐槽位比对。CERB 的关节限位**完全靠设备侧
+`0x607D` 强制执行**（`CAP_LIMIT_DEVICE_SIDE`，固件没有软限位兜底），所以
+`0x2650:01 = 1` 等于该关节**没有任何限位在执行**。任一不一致 → 该台进
+`CONFIG_CONFLICT`、拒绝 `SET_ENABLE`、不出运动帧（同"初始化未完成不可使能"
+口径；`EVENT_DEV_INIT` 的 reason 位图新增 bit4=保护开关、bit5=方向）。
+⚠️ **恢复路径缺口**：`0x2650`/`0x2541` **不在参数面**，所以"重跑参数写事务"
+这条既有恢复路径**改不了它们**——参数面没有任何入口能修。恢复只能靠：设备侧
+对象被（外部）改回期望值后重连重读（重连只是重读、不修值），或用 cangaroo /
+厂商上位机直接改设备对象。这是运维前置条件，别当成一键可修复。
 
 发布（上行，6 个话题；均为 ID 化，缺失浮点 = NaN）：
 

@@ -222,9 +222,11 @@ void test_blob_device_raw_safety_slots() {
   assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT, 3030U));
   assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_SAFETY, &raw) && raw == 1U);
   assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT, &raw) && raw == 3030U);
-  // 越界（COUNT 与 8 之间的空槽、以及 >= 8）都拒绝。
+  // 越界（COUNT 与 8 之间的空槽、以及 >= 8）都拒绝。用枚举基（COUNT / COUNT+1）
+  // 而非裸字面量：裸字面量转枚举是越界值，C++ 下属 UB。
   assert(!param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, 1U));
-  assert(!param_store_blob_set_device_raw(blob, 7, (param_device_slot_t)78, 1U));
+  assert(!param_store_blob_set_device_raw(
+      blob, 7, (param_device_slot_t)(PARAM_DEVICE_SLOT_COUNT + 1), 1U));
   assert(!param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, &raw));
   // device_raw_present 是 u8：满位图 0x3F 不溢出。
   assert(param_store_blob_device_raw_present(blob, 7) <= 0x3FU);

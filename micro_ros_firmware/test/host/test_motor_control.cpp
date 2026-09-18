@@ -406,19 +406,25 @@ static uint32_t feed_torque_write(motor_control_context_t *ctx, uint16_t node,
 }
 
 // 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
+// include_safety_slots：true（默认）= 把 v3 的只读安全槽（4=保护开关 / 5=方向）
+// 一并置位——"设备端回读过后落盘"的记录形状。false = 按 raw_present 原样，模拟
+// **v2 迁移上来的记录**（`param_store_blob_migrate_v2` 只搬低 4 位，槽 4/5 为
+// "未核验"），用来验证"记录没写过的槽位不参与比对"这条安全规则。
 static motor_control_stored_params_t make_device_record(
     uint16_t motor_id, const uint32_t raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT],
-    uint8_t raw_present) {
+    uint8_t raw_present, bool include_safety_slots = true) {
   motor_control_stored_params_t rec = {};
   rec.motor_id = motor_id;
   rec.has_position_limits = (raw_present & 0x03U) == 0x03U;
   rec.has_velocity_limit = (raw_present & 0x04U) != 0U;
   rec.has_torque_limit = (raw_present & 0x08U) != 0U;
-  // v3：安全开关(0x2650:01)/方向(0x2541)两槽总是随记录落袋（出厂默认
-  // 0=保护开 / 0=CW），上电比对据此也能发现设备侧保护被外部工具关掉。
+  // v3：安全开关(0x2650:01)/方向(0x2541)两槽随记录落袋（出厂默认 0=保护开 /
+  // 0=CW），上电比对据此也能发现设备侧保护被外部工具关掉。
   rec.device_raw_present =
-      (uint8_t)(raw_present | (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
-                (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+      include_safety_slots
+          ? (uint8_t)(raw_present | (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                      (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION))
+          : raw_present;
   for (size_t i = 0; i < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++i) {
     rec.device_raw[i] = raw[i];
   }
@@ -3321,6 +3327,40 @@ static void test_dev_init_flags_safety_mismatch() {
   assert(saved == 0U);
 }
 
+// v2 迁移形状的记录（只搬低 4 位，槽 4/5 位为 0）：记录里没写过的槽位不参与比对
+// ——设备即使报 slot4=1（保护被外部工具关掉），也不得判 CONFIG_CONFLICT。
+// 这是负载路径（dev_params_mismatch_mask 的 `record_raw_present` 跳过分支）：若
+// 有人把规则改成"设备有位 ⇒ 不一致"，每台刚升级的 CERB 都会被误判冲突且没有
+// 外部工具不可恢复，而 CI 仍全绿——所以在这里钉死。
+static void test_device_param_migrated_record_skips_safety_slots() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  // include_safety_slots=false：记录只有四个限值槽，槽 4/5 未核验。
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU, false);
+  assert(rec.device_raw_present == 0x0FU);
+  assert((rec.device_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 设备回读：第 4 槽（保护开关）报 1 = 保护被关——记录没这项，不构成不一致。
+  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved;
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK); // 不是 CONFIG_CONFLICT
+  assert((e->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
+  // 设备端回读容有 slot4（设备确实读了），记录端没有——这是本用例的形状。
+  assert((e->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
+  // DEV_INIT 事件：state=OK、位图不含 bit4（既非冲突、也非缺失）。
+  uint16_t state = 0U;
+  uint32_t detail = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &detail));
+  assert(state == MOTOR_CONTROL_DEV_INIT_OK);
+  assert((detail & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
+}
+
 // 回归（P8）：限值写事务只写它自己那几个槽位，不得把只读安全槽（4=保护开关 /
 // 5=方向）清零。清零后记录落盘成 0，下次上电与设备(1)比对必然不一致 → 假
 // CONFIG_CONFLICT，该台在无外部工具的情况下永久不可使能。
@@ -4407,6 +4447,7 @@ int main() {
   test_device_param_boot_verify_ok();
   test_device_param_mismatch_blocks_motion();
   test_dev_init_flags_safety_mismatch();
+  test_device_param_migrated_record_skips_safety_slots();
   test_device_param_write_syncs_record_and_recovers();
   test_limit_write_preserves_readonly_safety_slots();
   test_device_param_read_retry_recovers();

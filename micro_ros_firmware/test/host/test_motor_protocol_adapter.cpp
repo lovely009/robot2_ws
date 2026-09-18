@@ -998,13 +998,14 @@ static void test_cerb_refresh_covers_safety_slots() {
     assert(memcmp(frame.data, expect[i], 8U) == 0);
   }
 
-  // 原值透传：应答 raw=1 → value_si=1.0（不做任何换算）；raw=0 → 0.0。
+  // 原值透传：应答 raw=1 → value_si=1.0（不做任何换算）。两槽都喂 1——若用
+  // {1,0}，方向槽会落在 0，`*out = 0.0f` 这种写死实现也能蒙混通过。
   // 走真实的 on_response 路径（不是内部换算助手）。
   uint8_t storage[16] = {0};
   motor_protocol_raw_frame_t r = {};
   r.can_id = 0x580U + 1U;
   r.dlc = 8U;
-  const uint32_t kRaws[2] = {1U, 0U};
+  const uint32_t kRaws[2] = {1U, 1U};
   for (uint8_t i = 0U; i < 2U; ++i) {
     const uint8_t stage = (uint8_t)(4U + i);
     motor_protocol_read_buffer_t read = {storage, sizeof(storage), 0U, false};

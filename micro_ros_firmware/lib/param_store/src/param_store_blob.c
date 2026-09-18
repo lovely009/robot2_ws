@@ -274,3 +274,86 @@ param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_siz
   param_store_blob_finalize(dst, src->seq); // seq 沿用，活动槽选择不受影响
   return dst;
 }
+
+// v2 记录（48B，device_raw 4 槽、无型号身份/MIT 标度）：仅供读取迁移，不参与写入。
+typedef struct {
+  uint32_t present;
+  uint16_t motor_id;
+  uint8_t device_raw_present;
+  uint8_t reserved0;
+  float kp;
+  float kd;
+  float pos_min;
+  float pos_max;
+  float vel_limit;
+  float torque_limit;
+  uint32_t device_raw[4];
+} param_store_record_v2_t;
+
+typedef struct {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t header_size;
+  uint32_t seq;
+  uint32_t record_count;
+  uint32_t crc32;
+  uint32_t reserved[3];
+  param_store_record_v2_t records[PARAM_STORE_RECORD_COUNT];
+} param_store_blob_v2_t;
+
+_Static_assert(sizeof(param_store_record_v2_t) == PARAM_STORE_RECORD_SIZE_V2,
+               "v2 record 必须 48B");
+_Static_assert(sizeof(param_store_blob_v2_t) == PARAM_STORE_BLOB_SIZE_V2,
+               "v2 blob 尺寸漂移");
+
+static uint32_t blob_v2_crc(const param_store_blob_v2_t *blob) {
+  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
+  memcpy(header_copy, blob, PARAM_STORE_HEADER_SIZE);
+  memset(header_copy + 16, 0, sizeof(uint32_t));
+  uint32_t crc = crc32_update(0U, header_copy, PARAM_STORE_HEADER_SIZE);
+  return crc32_update(crc, (const uint8_t *)blob->records,
+                      sizeof(blob->records));
+}
+
+param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
+                                                void *out, size_t out_size) {
+  if (v2_src == NULL || out == NULL || src_size < PARAM_STORE_BLOB_SIZE_V2 ||
+      out_size < PARAM_STORE_BLOB_SIZE) {
+    return NULL;
+  }
+  const param_store_blob_v2_t *src = (const param_store_blob_v2_t *)v2_src;
+  if (src->magic != PARAM_STORE_MAGIC ||
+      src->version != PARAM_STORE_VERSION_V2 ||
+      src->header_size != PARAM_STORE_HEADER_SIZE ||
+      src->record_count != PARAM_STORE_RECORD_COUNT ||
+      src->crc32 != blob_v2_crc(src)) {
+    return NULL; // 头或 CRC 不合格：不动 out，调用方按"无有效 blob"处理
+  }
+  param_store_blob_t *dst = param_store_blob_reset(out, out_size);
+  if (dst == NULL) {
+    return NULL;
+  }
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    const param_store_record_v2_t *from = &src->records[i];
+    if (from->present == 0U && from->device_raw_present == 0U) {
+      continue; // 空槽（与 record_occupied 同判定）
+    }
+    param_store_record_t *to = &dst->records[i];
+    to->present = from->present;
+    to->motor_id = from->motor_id;
+    to->device_raw_present = from->device_raw_present;
+    to->kp = from->kp;
+    to->kd = from->kd;
+    to->pos_min = from->pos_min;
+    to->pos_max = from->pos_max;
+    to->vel_limit = from->vel_limit;
+    to->torque_limit = from->torque_limit;
+    for (uint32_t s = 0; s < 4U; ++s) {
+      to->device_raw[s] = from->device_raw[s];
+    }
+    // device_raw[4..7]、model_name、identity_hash、mit_*、profile_version、
+    // reserved 均为 0（reset 已清零）——语义是"未知/未核验"。
+  }
+  param_store_blob_finalize(dst, src->seq); // seq 沿用，活动槽选择不受影响
+  return dst;
+}

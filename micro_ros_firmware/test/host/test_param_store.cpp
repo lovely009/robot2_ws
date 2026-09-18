@@ -13,6 +13,18 @@
 
 namespace {
 
+// CRC32/IEEE 802.3，与固件 blob CRC 同式（测试手搓旧版 blob 时算校验用）。
+static uint32_t test_crc32(uint32_t crc, const uint8_t *data, size_t len) {
+  crc = ~crc;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (int b = 0; b < 8; ++b) {
+      crc = (crc >> 1) ^ (0xEDB88320U & (uint32_t)(-(int32_t)(crc & 1U)));
+    }
+  }
+  return ~crc;
+}
+
 void test_param_name_build_parse_roundtrip() {
   char buf[PARAM_NAME_MAX_LEN];
   for (uint16_t id = 1U; id <= 127U; ++id) {
@@ -241,22 +253,12 @@ void test_blob_migrate_v1() {
   pf[4] = -3.14f;
   pf[5] = 3.14f;
   // v1 CRC：头（crc 字段清零）+ 全部 32B 记录。
-  auto crc32 = [](uint32_t crc, const uint8_t *d, size_t len) {
-    crc = ~crc;
-    for (size_t i = 0; i < len; ++i) {
-      crc ^= d[i];
-      for (int b = 0; b < 8; ++b) {
-        crc = (crc >> 1) ^ (0xEDB88320U & (uint32_t)(-(int32_t)(crc & 1U)));
-      }
-    }
-    return ~crc;
-  };
   uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
   std::memcpy(header_copy, legacy, PARAM_STORE_HEADER_SIZE);
   std::memset(header_copy + 16, 0, sizeof(uint32_t));
-  uint32_t crc = crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
-  crc = crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
-              PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
+  uint32_t crc = test_crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
+  crc = test_crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
+                   PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
   hdr[4] = crc; // crc32 字段（偏移 16）
 
   static uint8_t out[PARAM_STORE_BLOB_SIZE];
@@ -277,6 +279,148 @@ void test_blob_migrate_v1() {
   hdr[4] ^= 0xFFU;
   assert(param_store_blob_migrate_v1(legacy, sizeof(legacy), out, sizeof(out)) ==
          nullptr);
+}
+
+// 手搓一个合法 v2 blob（48B 记录）供迁移测试。
+static void build_v2_blob(uint8_t *buf) {
+  std::memset(buf, 0, PARAM_STORE_BLOB_SIZE_V2);
+  auto *hdr = reinterpret_cast<uint32_t *>(buf);
+  hdr[0] = PARAM_STORE_MAGIC;
+  hdr[1] = PARAM_STORE_VERSION_V2 | (PARAM_STORE_HEADER_SIZE << 16);
+  hdr[2] = 9U; // seq
+  hdr[3] = PARAM_STORE_RECORD_COUNT;
+  const size_t rec = PARAM_STORE_HEADER_SIZE;
+  auto *p32 = reinterpret_cast<uint32_t *>(buf + rec);
+  p32[0] = (1U << PARAM_FIELD_KP) | (1U << PARAM_FIELD_KD) |
+           (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX) |
+           (1U << PARAM_FIELD_VEL_LIMIT) | (1U << PARAM_FIELD_TORQUE_LIMIT);
+  auto *p16 = reinterpret_cast<uint16_t *>(buf + rec);
+  p16[2] = 5U; // motor_id
+  buf[rec + 6] = (uint8_t)((1U << PARAM_DEVICE_SLOT_POS_MIN) |
+                           (1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT));
+  auto *pf = reinterpret_cast<float *>(buf + rec);
+  pf[2] = 30.0f;  // kp
+  pf[3] = 1.0f;   // kd
+  pf[4] = -3.14f; // pos_min
+  pf[5] = 3.14f;  // pos_max
+  pf[6] = 3.0f;   // vel_limit
+  pf[7] = 45.0f;  // torque_limit
+  // v2 里 device_raw 在偏移 32，共 4 槽。
+  auto *praw = reinterpret_cast<uint32_t *>(buf + rec + 32);
+  praw[PARAM_DEVICE_SLOT_POS_MIN] = (uint32_t)(int32_t)-32767;
+  praw[PARAM_DEVICE_SLOT_TORQUE_LIMIT] = 10800U;
+  // v2 CRC：头（crc 字段清零）+ 64×48B 记录。
+  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
+  std::memcpy(header_copy, buf, PARAM_STORE_HEADER_SIZE);
+  std::memset(header_copy + 16, 0, sizeof(uint32_t));
+  uint32_t crc = test_crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
+  crc = test_crc32(crc, buf + PARAM_STORE_HEADER_SIZE,
+                   PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+  hdr[4] = crc;
+}
+
+// v2（48B 记录、device_raw 4 槽）→ v3：用户数据一字不丢，新槽与型号身份一律
+// "未知/未核验"；v2 头或 CRC 不合格则拒绝迁移。
+void test_blob_migrate_v2() {
+  static uint8_t v2[PARAM_STORE_BLOB_SIZE_V2];
+  build_v2_blob(v2);
+  static uint8_t out[PARAM_STORE_BLOB_SIZE];
+  param_store_blob_t *blob =
+      param_store_blob_migrate_v2(v2, sizeof(v2), out, sizeof(out));
+  assert(blob != nullptr);
+  assert(blob->version == PARAM_STORE_VERSION && blob->seq == 9U);
+  assert(param_store_blob_validate(blob));
+  // 用户数据一字不丢。
+  float v = 0.0f;
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_KP, &v) && v == 30.0f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_TORQUE_LIMIT, &v) && v == 45.0f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_VEL_LIMIT, &v) && v == 3.0f);
+  // 四个旧设备槽原值保留，新两个槽是"未核验"。
+  uint32_t raw = 0U;
+  assert(param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_POS_MIN, &raw));
+  assert(raw == (uint32_t)(int32_t)-32767);
+  assert(param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_TORQUE_LIMIT, &raw));
+  assert(raw == 10800U);
+  assert(!param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_SAFETY, &raw));
+  assert(!param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_DIRECTION, &raw));
+  // v3 新字段：型号身份与 MIT 标度一律为"未知"。
+  assert(blob->records[0].model_name[0] == '\0');
+  assert(blob->records[0].identity_hash == 0U);
+  assert(blob->records[0].mit_torque_limit_nm == 0.0f);
+  assert(blob->records[0].profile_version == 0U);
+  // reserved 尾必须全零（后续项靠"全零 = 未使用"识别）。
+  for (size_t i = 0; i < sizeof(blob->records[0].reserved); ++i) {
+    assert(blob->records[0].reserved[i] == 0U);
+  }
+  // CRC 损坏 → 拒绝迁移。
+  auto *hdr = reinterpret_cast<uint32_t *>(v2);
+  hdr[4] ^= 0xFFU;
+  assert(param_store_blob_migrate_v2(v2, sizeof(v2), out, sizeof(out)) == nullptr);
+}
+
+// v1 直上 v3 与 v2 上 v3 两条升级路径必须收敛到同一个 v3 状态：内容相同的
+// 两种旧 blob 升级后逐字节一致（v2 只是历史上的中转布局，v1 记录直译为 v3
+// 记录，中间不再落一份 48B 布局）。v1 没有来源的设备端原值：位图恒为 0。
+void test_blob_migrate_chain_v1_to_v3() {
+  const size_t rec = PARAM_STORE_HEADER_SIZE;
+  const uint32_t seq = 3U;
+
+  // v1 源：motor 4，仅 kp = 7.5。
+  static uint8_t legacy[PARAM_STORE_LEGACY_BLOB_SIZE];
+  std::memset(legacy, 0, sizeof(legacy));
+  auto *h1 = reinterpret_cast<uint32_t *>(legacy);
+  h1[0] = PARAM_STORE_MAGIC;
+  h1[1] = PARAM_STORE_VERSION_LEGACY | (PARAM_STORE_HEADER_SIZE << 16);
+  h1[2] = seq;
+  h1[3] = PARAM_STORE_RECORD_COUNT;
+  reinterpret_cast<uint32_t *>(legacy + rec)[0] = (1U << PARAM_FIELD_KP);
+  reinterpret_cast<uint16_t *>(legacy + rec)[2] = 4U; // motor_id
+  reinterpret_cast<float *>(legacy + rec)[2] = 7.5f;  // kp
+  uint8_t hc[PARAM_STORE_HEADER_SIZE];
+  std::memcpy(hc, legacy, PARAM_STORE_HEADER_SIZE);
+  std::memset(hc + 16, 0, sizeof(uint32_t));
+  uint32_t crc = test_crc32(0U, hc, PARAM_STORE_HEADER_SIZE);
+  h1[4] = test_crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
+                     PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
+
+  static uint8_t via_v1[PARAM_STORE_BLOB_SIZE];
+  assert(param_store_blob_migrate_v1(legacy, sizeof(legacy), via_v1,
+                                     sizeof(via_v1)) != nullptr);
+  const auto *b1 = reinterpret_cast<const param_store_blob_t *>(via_v1);
+  assert(param_store_blob_validate(b1) && b1->seq == seq);
+  float v = 0.0f;
+  assert(param_store_blob_get(b1, 4, PARAM_FIELD_KP, &v) && v == 7.5f);
+  assert(param_store_blob_device_raw_present(b1, 4) == 0U);
+
+  // v2 源：同内容（无设备端原值），只差记录布局是 48B。
+  static uint8_t v2[PARAM_STORE_BLOB_SIZE_V2];
+  std::memset(v2, 0, sizeof(v2));
+  auto *h2 = reinterpret_cast<uint32_t *>(v2);
+  h2[0] = PARAM_STORE_MAGIC;
+  h2[1] = PARAM_STORE_VERSION_V2 | (PARAM_STORE_HEADER_SIZE << 16);
+  h2[2] = seq;
+  h2[3] = PARAM_STORE_RECORD_COUNT;
+  reinterpret_cast<uint32_t *>(v2 + rec)[0] = (1U << PARAM_FIELD_KP);
+  reinterpret_cast<uint16_t *>(v2 + rec)[2] = 4U; // motor_id
+  reinterpret_cast<float *>(v2 + rec)[2] = 7.5f;  // kp
+  std::memcpy(hc, v2, PARAM_STORE_HEADER_SIZE);
+  std::memset(hc + 16, 0, sizeof(uint32_t));
+  crc = test_crc32(0U, hc, PARAM_STORE_HEADER_SIZE);
+  h2[4] = test_crc32(crc, v2 + PARAM_STORE_HEADER_SIZE,
+                     PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+
+  static uint8_t via_v2[PARAM_STORE_BLOB_SIZE];
+  assert(param_store_blob_migrate_v2(v2, sizeof(v2), via_v2, sizeof(via_v2)) !=
+         nullptr);
+  const auto *b2 = reinterpret_cast<const param_store_blob_t *>(via_v2);
+  assert(param_store_blob_validate(b2) && b2->seq == seq);
+  assert(param_store_blob_get(b2, 4, PARAM_FIELD_KP, &v) && v == 7.5f);
+  assert(param_store_blob_device_raw_present(b2, 4) == 0U);
+  // 两条路径收敛：型号身份/MIT 标度等 v3 新字段同为"未知"，逐字节一致。
+  assert(std::memcmp(via_v1, via_v2, PARAM_STORE_BLOB_SIZE) == 0);
+  // 已是 v3 的 blob 不会再被 v2 迁移吃一次（重复迁移必须被拒绝）。
+  assert(param_store_blob_migrate_v2(via_v1, sizeof(via_v1), via_v2,
+                                     sizeof(via_v2)) == nullptr);
 }
 
 // 参数服务器对外工程单位 ↔ 内核 SI（param_units.h）。
@@ -315,6 +459,8 @@ int main() {
   test_blob_device_raw_safety_slots();
   test_param_units();
   test_blob_migrate_v1();
+  test_blob_migrate_v2();
+  test_blob_migrate_chain_v1_to_v3();
   printf("test_param_store: all passed\n");
   return 0;
 }

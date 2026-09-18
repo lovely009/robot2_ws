@@ -113,6 +113,13 @@ uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
 param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_size,
                                                 void *out, size_t out_size);
 
+// v2（48B 记录、device_raw 4 槽）→ v3。校验 v2 头与 CRC，逐字段搬运；
+// device_raw[4..7] 清零（新增的安全/方向槽为"未核验"，与 v1→v2 时
+// device_raw_present = 0 同口径）；型号身份与 MIT 标度一律写 0 = 未知。
+// 成功返回 out，失败返回 NULL（调用方按"无有效 blob"处理）。
+param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
+                                                void *out, size_t out_size);
+
 #ifdef __cplusplus
 }
 #endif

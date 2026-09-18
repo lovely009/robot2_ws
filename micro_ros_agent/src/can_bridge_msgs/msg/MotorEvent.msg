@@ -7,9 +7,14 @@
 #   reason = 0=NA 1=PENDING 2=OK 3=MISMATCH（未初始化，该台不可运动）
 #   4=UNVERIFIED（回读失败，不拦运动但结论可见））
 # reason：事件相关的原因/结果码（故障码或配置结果码）；request_id 仅
-# CONFIG_RESULT 携带；EVENT_DEV_INIT 的 request_id 携带"设备参数不一致槽位位图"
+# CONFIG_RESULT 携带；EVENT_DEV_INIT 的 request_id 携带槽位位图
 #   （1u<<slot：1=位置下限 2=位置上限 4=最大转速 8=峰值电流
 #     16=保护开关(0x2650:01) 32=方向(0x2541)；0=无此项信息）。
+#   位图两态语义不同：
+#     reason==3 (MISMATCH)：位图 = **对不上**的槽位（记录有、设备读到的值不同）；
+#     reason==4 (UNVERIFIED)：位图 = **没读到**的槽位（回读未到齐，非值不符）。
+#   槽位号与 firmware 的 device_raw 槽索引一一对应；新增槽位必须同时改这里与
+#   web_host 的 DEV_SLOT_NAMES（web/app.js）。
 uint8 EVENT_DISCOVERED=0
 uint8 EVENT_PROFILE_BOUND=1
 uint8 EVENT_PROFILE_REJECTED=2

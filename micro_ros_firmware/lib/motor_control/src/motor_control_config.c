@@ -66,7 +66,7 @@ static void finish_identity_read(motor_control_context_t *ctx,
 // 设备参数初始化（上电/重连回读设备 → 与固件记录比对）
 //
 // 口径（2026-09-17 定）：**参数以设备内为准，固件记录只作比对基准**。
-//  - 绑定完成后自动回读一次设备四对象（0x607D:01/02、0x6080、0x2538）；
+//  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:01、0x2541）；
 //  - 回读值与记录逐槽位比对，比的是**设备端原值**：关节侧 SI 两端都过同一套
 //    Kt×减速比换算，系数配错时两边一起错、比对恒通过，等于没比；
 //  - 不一致或回读失败 → 该台"未初始化"：冻结授权、不出运动帧，直到参数被
@@ -106,11 +106,18 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
                                   motor_control_entry_t *entry,
                                   motor_control_dev_init_t state,
                                   uint32_t now_ms) {
-  // 不一致时把"哪几项对不上"随事件带出去（1u<<slot；0 = 无此项信息）。
+  // 位图随事件带出去（1u<<slot；0 = 无此项信息），但两态语义不同：
+  //  - MISMATCH：**对不上**的槽位（记录有、设备读到的值不同）；
+  //  - UNVERIFIED：**没读到**的槽位（refresh_slots 是本次已落袋的槽位，
+  //    取补集即缺失项）。0x2650:01 的读子索引是本分支唯一未经真机验证的对象
+  //    （TBD-CONFIG-02），设备 abort 时若不给位图，操作者分不清是它没答还是
+  //    总线抖动——位图让事件直接点名"哪个对象没到"。
   const uint32_t detail =
       (state == MOTOR_CONTROL_DEV_INIT_MISMATCH)
           ? (uint32_t)dev_params_mismatch_mask(entry)
-          : 0U;
+          : (state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED)
+                ? (uint32_t)(MOTOR_CONTROL_DEV_RAW_ALL & ~entry->refresh_slots)
+                : 0U;
   const bool ready = (state == MOTOR_CONTROL_DEV_INIT_NA ||
                       state == MOTOR_CONTROL_DEV_INIT_OK);
   const bool was_dev_block =
@@ -155,7 +162,7 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
                            detail);
 }
 
-// 回读成功：影子取设备真值（设备为准），四个槽位的 SI 值同步落袋。
+// 回读成功：影子取设备真值（设备为准），六个槽位的 SI 值同步落袋。
 static void update_shadow_from_read(motor_control_entry_t *entry) {
   entry->dev_min_rad = entry->dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
   entry->dev_max_rad = entry->dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];

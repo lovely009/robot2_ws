@@ -218,14 +218,18 @@ typedef struct {
   uint32_t policy_generation;
 } motor_protocol_config_request_t;
 
-// 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；与
-// PARAM_FIELD_POS_MIN/POS_MAX/VEL_LIMIT/TORQUE_LIMIT 四字段一一对应）。
+// 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；前四槽与
+// PARAM_FIELD_POS_MIN/POS_MAX/VEL_LIMIT/TORQUE_LIMIT 四字段一一对应，
+// 后两槽是 v3 的设备侧安全事实，无对应 SI 字段）。
 #define MOTOR_PROTOCOL_PARAM_SLOT_NONE 0xFFU
 #define MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN 0U
 #define MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX 1U
 #define MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX 2U
 #define MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX 3U
-#define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 4U
+// v3：设备侧安全事实（无 SI 换算，原值透传）。
+#define MOTOR_PROTOCOL_PARAM_SLOT_SAFETY 4U    // 0x2650:01
+#define MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION 5U // 0x2541
+#define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 6U
 
 // REFRESH_PARAMS 每阶段回填载荷（读缓冲按阶段顺序追加，每阶段一个）。
 // raw = 设备端原值（cnt / 电机端 RPM / 电机端 mA），value_si = 关节侧换算值

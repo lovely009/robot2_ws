@@ -248,8 +248,8 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
   motor_control_dev_init_t dev_state = MOTOR_CONTROL_DEV_INIT_NA;
   if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
     entry->dev_read_attempts++; // 每次回读收尾都计入（成功也算一次尝试）
-    // 回读成功的判据：4 个槽位的原值位图全部到齐（每 ADVANCE 落袋一个槽，
-    // 重复/缺失槽位图凑不齐 0x0F）。
+    // 回读成功的判据：全部槽位的原值位图到齐（每 ADVANCE 落袋一个槽，
+    // 重复/缺失槽位图凑不齐 MOTOR_CONTROL_DEV_RAW_ALL）。
     if (result == MOTOR_PROTOCOL_CONFIG_OK &&
         entry->refresh_slots == MOTOR_CONTROL_DEV_RAW_ALL) {
       // 全部阶段到齐才提交：设备端原值位图一次性换成本次读到的槽位。

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 
+#include "motor_protocol_adapter.h" // MOTOR_PROTOCOL_PARAM_SLOT_*（跨库同序校验）
 #include "param_name.h"
 #include "param_store_blob.h"
 #include "param_units.h"
@@ -183,6 +184,40 @@ void test_blob_device_raw_roundtrip() {
   assert(!param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, 1U));
 }
 
+// v3 新增两个设备槽位（0x2650:01 安全开关 / 0x2541 方向）：可独立于四个限值槽
+// 落袋，位图互不干扰，越界拒绝。
+void test_blob_device_raw_safety_slots() {
+  static uint8_t storage[PARAM_STORE_BLOB_SIZE];
+  param_store_blob_t *blob = param_store_blob_reset(storage, sizeof(storage));
+  assert(PARAM_DEVICE_SLOT_COUNT == 6U);
+  assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
+  assert(PARAM_DEVICE_SLOT_SAFETY == MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+  assert(PARAM_DEVICE_SLOT_DIRECTION == MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+  // 只写安全槽（不写限值）：记录必须存在且只有该位。
+  assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_SAFETY, 1U));
+  assert(param_store_blob_device_raw_present(blob, 7) ==
+         (uint8_t)(1U << PARAM_DEVICE_SLOT_SAFETY));
+  // 再加方向槽，两位并存。
+  assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_DIRECTION, 0U));
+  assert(param_store_blob_device_raw_present(blob, 7) ==
+         (uint8_t)((1U << PARAM_DEVICE_SLOT_SAFETY) |
+                   (1U << PARAM_DEVICE_SLOT_DIRECTION)));
+  // 值 0 也是有效记录（方向 CW = 0），不能与"未核验"混淆。
+  uint32_t raw = 123U;
+  assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_DIRECTION, &raw));
+  assert(raw == 0U);
+  // 与四个限值槽共存、互不覆盖。
+  assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT, 3030U));
+  assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_SAFETY, &raw) && raw == 1U);
+  assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT, &raw) && raw == 3030U);
+  // 越界（COUNT 与 8 之间的空槽、以及 >= 8）都拒绝。
+  assert(!param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, 1U));
+  assert(!param_store_blob_set_device_raw(blob, 7, (param_device_slot_t)78, 1U));
+  assert(!param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, &raw));
+  // device_raw_present 是 u8：满位图 0x3F 不溢出。
+  assert(param_store_blob_device_raw_present(blob, 7) <= 0x3FU);
+}
+
 // v1 → v2 迁移：升级不丢既有的增益/限值记录；设备端原值位图为 0（不出来源
 // 不明的原值，首次上电按"无可比基准"处理）。
 void test_blob_migrate_v1() {
@@ -277,6 +312,7 @@ int main() {
   test_blob_rejects_bad_layout();
   test_blob_record_capacity();
   test_blob_device_raw_roundtrip();
+  test_blob_device_raw_safety_slots();
   test_param_units();
   test_blob_migrate_v1();
   printf("test_param_store: all passed\n");

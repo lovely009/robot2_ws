@@ -176,11 +176,17 @@ class MotorModel:
             self.sdo_offset = 0
             # 厂家管理对象（CANopen 字典）：位置限幅 cnt（±180°）、
             # 最大转速 RPM、峰值电流 mA。固件写后读回/REFRESH 上传的对端。
+            # 0x2650:01 保护开关：0 = 看门狗 + 限位保护开（出厂默认），1 = 关。
+            # 0x2541 方向：0 = CW，1 = CCW。
+            # 0x6064 负载端位置当前值：设零后应为 0（设零生效核验用；固件暂未读）。
             self.sdo_params = {
                 (0x607D, 1): -32768,
                 (0x607D, 2): 32768,
                 (0x6080, 0): 600,
                 (0x2538, 0): 1000,
+                (0x2650, 0x01): 0,
+                (0x2541, 0x00): 0,
+                (0x6064, 0x00): 0,
             }
         else:
             # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad，gear=50
@@ -229,7 +235,7 @@ class SlcanSim:
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX,
                  fb_period_ms: int = 20, stagger_ms: float = 2.2,
-                 r58_ids=()):
+                 r58_ids=(), safety_off_ids=(), dir_ccw_ids=()):
         self.tty_path = tty
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
@@ -242,6 +248,13 @@ class SlcanSim:
         for mid in r58_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
                 self.models[mid].identity = b"R58LITE_V2"
+        # 故意制造与固件记录不一致的场景：保护关 / 方向 CCW。
+        for mid in safety_off_ids:
+            if mid in self.models and self.models[mid].kind == "cerb":
+                self.models[mid].sdo_params[(0x2650, 0x01)] = 1
+        for mid in dir_ccw_ids:
+            if mid in self.models and self.models[mid].kind == "cerb":
+                self.models[mid].sdo_params[(0x2541, 0x00)] = 1
         self.rx_buf = b""
         self.sync_seen = False
         self.sync_count = 0
@@ -498,6 +511,11 @@ def main():
     ap.add_argument("--cerb-r58", default="1",
                     help="自报 R58LITE_V2 身份的 CERB 节点（其余 CERB 节点"
                          "自报 R48LITE_V2；固件按身份串自动绑定型号）")
+    ap.add_argument("--safety-off", type=int, nargs="*", default=[],
+                    help="把这些 CERB 节点的 0x2650:01 置 1（关闭看门狗+限位保护），"
+                         "用于制造与固件记录不一致的场景")
+    ap.add_argument("--dir-ccw", type=int, nargs="*", default=[],
+                    help="把这些 CERB 节点的 0x2541 置 1（CCW），用于制造方向不一致")
     ap.add_argument("--period-ms", type=int, default=20,
                     help="板端 SYNC 周期，用于换算反馈窗口（默认 20ms）")
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10),
@@ -519,7 +537,9 @@ def main():
                    data_bitrate_index=args.data_bitrate_index,
                    fb_period_ms=args.fb_period_ms,
                    stagger_ms=args.stagger_ms,
-                   r58_ids=r58_ids)
+                   r58_ids=r58_ids,
+                   safety_off_ids=args.safety_off,
+                   dir_ccw_ids=args.dir_ccw)
 
     def _sig(_a, _b):
         sim.stop = True

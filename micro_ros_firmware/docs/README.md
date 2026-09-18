@@ -23,6 +23,7 @@
 | [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 设计理由（参数链/一问一答/设零等） | 基线，含历史 |
 | [motor-runtime-validation](plans/active/motor-runtime-validation.md) | 开放台架项唯一清单与验收记录要求 | 活动 |
 | [w25-blob-v3-design](plans/active/w25-blob-v3-design.md) | W25 参数 blob v3 布局（每槽 2 扇区、设备侧事实、迁移链、零点代被否的理由） | 设计已定，待实现 |
+| [w25-blob-v3-plan](plans/active/w25-blob-v3-plan.md) | 上者的实现计划：8 个任务，host 可测部分在前、台架部分在后 | 待执行 |
 | [ARD-0007 归档](archive/ARD-0007-micro-ros-motor-runtime.md) | 冻结的 55 章完整规范（10ms/旧话题等已被取代） | 历史 |
 | [HANDOFF 归档](archive/HANDOFF-motor-runtime-refactor.md) | 2026-09 重构交接快照（开放项已并入 validation plan） | 历史 |
 

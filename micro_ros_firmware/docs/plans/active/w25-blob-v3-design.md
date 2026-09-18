@@ -164,7 +164,9 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 - `load_boot_params()` 入口 `configASSERT(g_task == nullptr);`
 - scratch 变量处注明「仅 start 阶段（任务创建前）与 save 路径复用，二者无时间重叠」
 
-### 5.5 静态占用
+### 5.5 静态占用（含槽位扩展的连带代价）
+
+`storage_task` 自身（`src/storage_task.cpp`）：
 
 | | 现在 | v3 |
 |---|---|---|
@@ -172,14 +174,40 @@ boot 的「胜者 blob」缓冲与 `g_write_buf` **共用一块 7712 B scratch**
 | write / verify | 3104 + 3104 | 7712 + 256 |
 | `legacy_buf` | 2080 | 2080 |
 | `g_boot_records` | 5120 | 5120 |
-| **合计** | **19616 B**（19.16 KiB） | **15168 B**（14.81 KiB） |
+| 小计 | **19616 B**（19.16 KiB） | **15168 B**（14.81 KiB） |
 
-**净减 4448 B（4.34 KiB）**——扩容反而省 RAM，因为消掉了一份整 blob 缓冲。
+**但 `MOTOR_PROTOCOL_PARAM_SLOT_COUNT` 4→6 会让所有按槽位数量的数组同时变大**，
+每电机表项 +48 B：
+
+| 数组 | 位置 | 每项增量 | ×64 表项 |
+|---|---|---|---|
+| `dev_raw[COUNT]` | `motor_control_internal.h:105` | +8 B | +512 B |
+| `dev_si[COUNT]` | `:106` | +8 B | +512 B |
+| `refresh_stages[COUNT]` | `:110` | +16 B | +1024 B |
+| `record_raw[COUNT]` | `:117` | +8 B | +512 B |
+| `tx_write_raw[COUNT]` | `:145` | +8 B | +512 B |
+| `dev_raw[COUNT]` + `record_raw[COUNT]` | `motor_control.h:470,475` | +16 B | +2048 B |
+| `device_raw[COUNT]` | `motor_control.h:504` | +8 B | +512 B |
+| **合计** | | | **+5632 B** |
+
+（后两行各存在两份 64 元数组：`param_bridge` 的 `g_views[64]` 与
+`storage_task` `perform_save()` 的 `views[64]`；`g_boot_records[64]` 一份。）
+
+**净结果：−4448 + 5632 = +1184 B（约 +0.36% RAM_D1）。**
+
+⚠️ 早期草案写的"扩容反而省 RAM（−4448 B）"**只算了 storage 缓冲，漏了槽位扩展的连带代价，
+是错的**。真实代价是**约 +1.2 KB**。
+
+仍选方案 A / D3 的理由**不是省 RAM**，而是：D3 让两个新事实**零改动**复用现有的
+落袋 / 位图 / 比对 / 事件位图通路，省掉的是一整套并行比对逻辑与它的测试面。
+1.2 KB 换这个划算。若 RAM 后续吃紧，退路是不扩 `PARAM_SLOT_COUNT`、
+给两个新事实各加一个专用字段（约 +2048 B），代价是失去 D3 的复用。
 
 ### 5.6 已知代价
 
-save 从擦 1 个扇区变擦 2 个，阻塞时间约翻倍。README 里"擦写阻塞可达 ~1s"要改为台架实测值，
-列入 validation plan。
+1. save 从擦 1 个扇区变擦 2 个，阻塞时间约翻倍。README 里"擦写阻塞可达 ~1s"要改为
+   台架实测值，列入 validation plan。
+2. 静态 RAM 净增约 +1184 B（见 §5.5）。
 
 ## 6. 迁移链
 

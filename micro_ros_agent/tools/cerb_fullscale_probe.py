@@ -154,6 +154,20 @@ def _line(label: str, raw, ok: bool, scale: float = 1.0, unit: str = ""):
         print(f"  {label:22s}: raw={raw:>12d}  ≈ {raw * scale:.4f} {unit}")
 
 
+def _self_check():
+    """钉住 MIT 组帧与固件 `motor_protocol_pack_cerb_mit_frame` 的手工对齐。
+
+    这份 bit 布局是照抄固件写的，固件一改、这里静默漂移，探针就会发错帧还看不出
+    来。用一组非平凡码值当已知向量：任一位字段错位都会让断言炸。
+    """
+    got = cerb_mit_frame(True, pos_raw=0x1234, vel_raw=0xABC, kp_raw=0x567,
+                         kd_raw=0x89A, tau_raw=0xDEF)
+    want = bytes([0xCC, 0x12, 0x34, 0xAB, 0xC5, 0x67, 0x89, 0xAD, 0xEF, 0, 0, 0])
+    assert got == want, (got.hex(), want.hex())
+    # 失能只清 bit7：控制字 0x0C，其余字节与使能态一致。
+    assert cerb_mit_frame(False, pos_raw=0x1234)[0] == 0x0C
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="CERB MIT 满量程反推探针（只发 MIT 帧 + SDO 读，不烧板子/不改设备）")
@@ -167,6 +181,8 @@ def main():
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10), default=5,
                     help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）")
     args = ap.parse_args()
+
+    _self_check()  # 组帧布局先自检，别拿错帧去对真机
 
     print(f"[probe] 目标：CERB node {args.node} @ {args.dev}")
     print("[probe] ⚠️ 将发使能 + 满量程 MIT 帧，电机会真的出力——"
@@ -203,10 +219,15 @@ def main():
             pos, ok = probe.sdo_read(OBJ_POSITION_ACTUAL)
             _line("0x6064 位置实际值", pos, ok)
 
-        probe.hold_mit(cerb_mit_frame(False), 60)  # 收尾失能，别留在满量程出力
-        print("[probe] 已发失能帧收尾。把反算的物理满量程与 0x6080 / 0x2538 "
+        print("[probe] 满量程序列结束。把反算的物理满量程与 0x6080 / 0x2538 "
               "对照即见分晓。")
     finally:
+        # 无论中途异常都先发失能帧：设备侧保护若被外部工具关掉就没有 >500ms
+        # 自锁兜底，异常退出时电机会停在满量程出力。
+        try:
+            probe.hold_mit(cerb_mit_frame(False), 60)
+        except OSError:
+            pass
         probe.close()
 
 

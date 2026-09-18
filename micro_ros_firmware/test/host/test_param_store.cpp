@@ -355,6 +355,33 @@ void test_blob_migrate_v2() {
   for (size_t i = 0; i < sizeof(blob->records[0].reserved); ++i) {
     assert(blob->records[0].reserved[i] == 0U);
   }
+  // 畸形但 CRC 合法：device_raw_present 位 4/5 被置位（v2 合法写路径 slot >= 4
+  // 即拒，故真机不可能出现；这里模拟没人背书的 Flash 内容）。迁移只认低 4 位，
+  // 不得让来料谎报"安全/方向槽已核验、值为 0"。
+  static uint8_t bad[PARAM_STORE_BLOB_SIZE_V2];
+  build_v2_blob(bad);
+  bad[PARAM_STORE_HEADER_SIZE + 6] |=
+      (uint8_t)((1U << PARAM_DEVICE_SLOT_SAFETY) |
+                (1U << PARAM_DEVICE_SLOT_DIRECTION));
+  uint8_t bhdr[PARAM_STORE_HEADER_SIZE];
+  std::memcpy(bhdr, bad, PARAM_STORE_HEADER_SIZE);
+  std::memset(bhdr + 16, 0, sizeof(uint32_t));
+  uint32_t bcrc = test_crc32(0U, bhdr, PARAM_STORE_HEADER_SIZE);
+  reinterpret_cast<uint32_t *>(bad)[4] =
+      test_crc32(bcrc, bad + PARAM_STORE_HEADER_SIZE,
+                 PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+  blob = param_store_blob_migrate_v2(bad, sizeof(bad), out, sizeof(out));
+  assert(blob != nullptr && param_store_blob_validate(blob));
+  raw = 123U; // 读失败必须不写回
+  assert(!param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_SAFETY, &raw));
+  assert(!param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_DIRECTION, &raw));
+  assert(raw == 123U);
+  assert(blob->records[0].device_raw[PARAM_DEVICE_SLOT_SAFETY] == 0U);
+  assert(blob->records[0].device_raw[PARAM_DEVICE_SLOT_DIRECTION] == 0U);
+  // 低 4 位不受掩码影响：原有的两个槽仍照常可读。
+  assert(param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_POS_MIN, &raw));
+  assert(raw == (uint32_t)(int32_t)-32767);
+
   // CRC 损坏 → 拒绝迁移。
   auto *hdr = reinterpret_cast<uint32_t *>(v2);
   hdr[4] ^= 0xFFU;

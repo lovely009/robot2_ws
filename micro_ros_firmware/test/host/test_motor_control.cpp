@@ -3282,6 +3282,98 @@ static void test_device_param_write_syncs_record_and_recovers() {
   assert(has_result_event(&ctx, 82U, MOTOR_PROTOCOL_CONFIG_OK));
 }
 
+// v3：安全开关（槽 4 = 0x2650:01）纳入上电比对——记录说"保护开(0)"、设备第 4
+// 阶段回读说"保护已被关(1)" → MISMATCH，且位图须点名 bit4（否则上位机只能盲写）。
+static void test_dev_init_flags_safety_mismatch() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  // 记录：安全槽 = 0（保护开）——即 kR58Raw[4] 的出厂默认值。
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  assert(rec.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 设备回读：第 4 阶段（安全开关）返回 1 = 保护被关。临时改值后立即还原，
+  // 免得污染后续共用 kR58Raw 的夹具。
+  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved;
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  // 位图须指出是 bit4（安全开关），不是别的槽位。
+  uint16_t state = 0U;
+  uint32_t detail = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &detail));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(detail == (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY));
+  const motor_control_param_view_t *v = view_of(&ctx, 7);
+  assert(v != nullptr);
+  assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert((v->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
+  assert(v->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  // 不一致 → 不可使能（与既有 MISMATCH 用例同口径）。
+  assert(!e->policy_enable);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+
+  // 一致场景（记录与设备都是 0）走既有 bring_cerb_to_ready → OK 已被覆盖。
+  assert(saved == 0U);
+}
+
+// 回归（P8）：限值写事务只写它自己那几个槽位，不得把只读安全槽（4=保护开关 /
+// 5=方向）清零。清零后记录落盘成 0，下次上电与设备(1)比对必然不一致 → 假
+// CONFIG_CONFLICT，该台在无外部工具的情况下永久不可使能。
+// 基线必须**非零**：基线为 0 时清零是空操作，这条路径根本测不出来。
+static void test_limit_write_preserves_readonly_safety_slots() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  // 设备侧保护被外部工具关掉(1)、方向 CCW(1)：记录与设备同为非零基线。
+  const uint32_t saved_safety = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+  const uint32_t saved_dir = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = 1U;
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(!motor_control_take_record_dirty(&ctx));
+
+  // 写峰值扭矩（写 + 读回核验）：本次事务只写了槽 3。
+  motor_protocol_config_request_t trq = {};
+  trq.request_id = 91U;
+  trq.motor_id = 7;
+  trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
+  trq.max_torque_nm = 100.0f; // 超峰值 → 钳到 45 N·m = 10800 mA
+  motor_control_service(&ctx, 140);
+  assert(motor_control_submit_config(&ctx, &trq, 141));
+  (void)feed_torque_write(&ctx, 7, kR58PeakMa, 142);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_OK));
+  // 只读槽必须原值保留——设备与记录两端都不许被写事务抹掉。
+  assert(e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  assert(e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] == 1U);
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] == 1U);
+  // 写后重判仍一致（记录被抹成 0 前，这里会走成假不一致）。
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  // 端到端复现"下次上电"：记录(现已被污染) 与设备(仍为 1) 比对必须一致。
+  assert((e->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] ==
+         e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY]);
+
+  // 视图也必须看到原值（上位机/页面读的就是这份）。
+  const motor_control_param_view_t *v = view_of(&ctx, 7);
+  assert(v != nullptr);
+  assert(v->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  assert(v->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved_safety;
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = saved_dir;
+}
+
 // 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
 // 结论出事件 + 错误码 41。恢复：重连重读或手动回读。
 static void test_device_param_unverified_blocks_motion() {
@@ -4314,7 +4406,9 @@ int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
   test_device_param_mismatch_blocks_motion();
+  test_dev_init_flags_safety_mismatch();
   test_device_param_write_syncs_record_and_recovers();
+  test_limit_write_preserves_readonly_safety_slots();
   test_device_param_read_retry_recovers();
   test_device_param_unverified_blocks_motion();
   test_device_param_pending_blocks_enable();

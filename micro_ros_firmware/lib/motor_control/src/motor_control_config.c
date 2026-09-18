@@ -175,32 +175,30 @@ static void update_record_after_write(motor_control_context_t *ctx,
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
   const uint8_t pos_max_bit =
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
+  // 本次事务实际写到的槽位（只写这些：安全/方向是只读 REFRESH 槽，
+  // tx_write_raw 里恒为 0，按 record_raw_present 全量刷会把它们抹成 0）。
+  uint8_t written_mask = 0U;
   switch (entry->tx_kind) {
     case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      entry->record_raw_present |= (uint8_t)(pos_min_bit | pos_max_bit);
-      entry->dev_raw_present |= (uint8_t)(pos_min_bit | pos_max_bit);
+      written_mask = (uint8_t)(pos_min_bit | pos_max_bit);
       break;
     case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      entry->record_raw_present |=
-          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
-      entry->dev_raw_present |=
-          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
+      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
       break;
     case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      entry->record_raw_present |=
-          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
-      entry->dev_raw_present |=
-          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
+      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
       break;
     default:
       return;
   }
+  entry->record_raw_present |= written_mask;
+  entry->dev_raw_present |= written_mask;
   // 设备已核验写入 → 记录同步落盘（任务层响应）。不落盘就断电 = 下次上电
   // 比对必然不一致 = 该台未初始化，属于自找的停机。
   ctx->record_dirty = true;
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
     const uint8_t bit = (uint8_t)(1U << slot);
-    if ((entry->record_raw_present & bit) == 0U) {
+    if ((written_mask & bit) == 0U) {
       continue;
     }
     // 刚写并读回核验过：设备与记录同值。

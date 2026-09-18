@@ -8,7 +8,8 @@
 #   4=UNVERIFIED（回读失败，不拦运动但结论可见））
 # reason：事件相关的原因/结果码（故障码或配置结果码）；request_id 仅
 # CONFIG_RESULT 携带；EVENT_DEV_INIT 的 request_id 携带"设备参数不一致槽位位图"
-# （1u<<slot：1=位置下限 2=位置上限 4=最大转速 8=峰值电流；0=无此项信息）。
+#   （1u<<slot：1=位置下限 2=位置上限 4=最大转速 8=峰值电流
+#     16=保护开关(0x2650:01) 32=方向(0x2541)；0=无此项信息）。
 uint8 EVENT_DISCOVERED=0
 uint8 EVENT_PROFILE_BOUND=1
 uint8 EVENT_PROFILE_REJECTED=2

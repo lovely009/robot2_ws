@@ -32,7 +32,9 @@ static const configSTACK_DEPTH_TYPE kStorageTaskStack = 1024U; // 4KB（HAL OSPI
 // 双槽 A/B，每槽 2 个 4KB 扇区（W25Q64 最小擦除单位），各放一个 blob：
 // v3 为 7712B = 32B 头 + 64×120B 记录。save 总写非活动槽，boot 选 CRC 有效且
 // seq 最大者——erase/write 中掉电至少保留一个好槽（擦 A 的扇区不碰 B）。
-static const uint32_t kSlotBase[2] = {0x000000U, 0x00002000U};
+// constexpr 而非 const：下面的槽不重叠断言要在编译期索引 kSlotBase[1]，
+// const 数组不是常量表达式、索引不了。
+static constexpr uint32_t kSlotBase[2] = {0x000000U, 0x00002000U};
 static const uint32_t kSlotSectors = 2U;
 
 // 一个 blob 必须装得进一个槽。超了的话 perform_save 的整写会越过槽尽头写进
@@ -40,6 +42,13 @@ static const uint32_t kSlotSectors = 2U;
 // 槽里的有效 blob。7712 对 8192 还剩 480B（记录尺寸涨到 127B 以上就越界）。
 static_assert(PARAM_STORE_BLOB_SIZE <= kSlotSectors * W25Q64_SECTOR_SIZE,
               "blob 超出槽容量（2 个 4KB 扇区），整写会破坏下一个槽");
+
+// 槽区不重叠：槽 B 的基址必须在槽 A 的擦除范围之外。上面那条只保证 blob 装得进
+// 一个槽，不保证两槽首尾相接——kSlotBase 一旦手滑改小（如把 B 写成 0x1000），
+// 擦 A 会连带擦掉 B，双槽冗余静默失效。范围由 W25Q64_SECTOR_SIZE 与 kSlotSectors
+// 派生，改布局时这条会先炸。
+static_assert(kSlotBase[1] >= kSlotSectors * W25Q64_SECTOR_SIZE,
+              "槽 B 与槽 A 的擦除范围重叠，双槽冗余失效");
 
 // 升级前旧布局的槽 B 基址（旧 kSectorB = W25Q64_SECTOR_SIZE = 0x1000）。
 // 新布局下 0x1000 落在槽 A 的擦除范围内，read_slot() 永远读不到它，

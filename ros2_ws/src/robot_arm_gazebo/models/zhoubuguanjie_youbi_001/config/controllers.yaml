@@ -1,4 +1,4 @@
-# gz_ros2_control 插件读取的 controller_manager 参数。
+# zhoubuguanjie_youbi_001 的 gz_ros2_control 参数。
 # 顶层键用通配 /**/：无论是否加命名空间都能匹配，避免参数文件被静默忽略。
 /**/controller_manager:
   ros__parameters:
@@ -11,6 +11,8 @@
     arm_position_controller:
       type: forward_command_controller/ForwardCommandController
 
+# joints 顺序即 Float64MultiArray 命令顺序，必须与 urdf/*.urdf.xacro 的
+# <ros2_control> 关节块一致（由 test_model_consistency.py 兜底）。
 /**/arm_position_controller:
   ros__parameters:
     joints:

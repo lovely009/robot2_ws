@@ -1,7 +1,9 @@
-"""启动 Ignition Gazebo 仿真：空世界 + 生成 zhoubuguanjie0 + gz_ros2_control 控制器。
+"""启动 Ignition Gazebo 仿真：空世界 + 生成模型 + gz_ros2_control 控制器。
 
+模型由 `model:=` 选择（`models/<模型名>/`），默认 `zhoubuguanjie_youbi_001`。
 控制方式（启动完成后）：
-  ros2 topic pub --once /arm_position_controller/commands \
+
+  ros2 topic pub --once /arm_position_controller/commands \\
     std_msgs/msg/Float64MultiArray "{data: [0.5, -0.3, 1.0, 0.2]}"
 """
 
@@ -30,14 +32,16 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     pkg_share = FindPackageShare("robot_arm_gazebo")
-    xacro_file = PathJoinSubstitution([pkg_share, "urdf", "zhoubuguanjie0.urdf.xacro"])
-    controllers_file = PathJoinSubstitution(
-        [pkg_share, "config", "controllers.yaml"]
+    model = LaunchConfiguration("model")
+    xacro_file = PathJoinSubstitution(
+        [pkg_share, "models", model, "urdf", [model, ".urdf.xacro"]]
     )
+    controllers_file = LaunchConfiguration("controllers_file")
     world_file = LaunchConfiguration("world_file")
 
-    # Ignition 用 model:// 解析 mesh（URDF 的 package:// 被转换），须把
-    # install/robot_arm_gazebo/share 加入资源搜索路径（其下有 robot_arm_gazebo/meshes）
+    # Ignition 用 model:// 解析 mesh（URDF 的 package:// 会被转换），须把
+    # install/robot_arm_gazebo/share 加入资源搜索路径（其下有 robot_arm_gazebo/models）。
+    # 模型挪进 models/ 后仍是同一个前缀，这条逻辑与模型无关。
     pkg_install_share = os.path.dirname(get_package_share_directory("robot_arm_gazebo"))
     resource_path = os.environ.get("IGN_GAZEBO_RESOURCE_PATH", "")
     ign_resource_path = (
@@ -53,6 +57,8 @@ def generate_launch_description():
                 xacro_file,
                 " controllers_file:=",
                 controllers_file,
+                " fixed_base:=",
+                LaunchConfiguration("fixed_base"),
             ]
         ),
         value_type=str,
@@ -82,15 +88,16 @@ def generate_launch_description():
         output="screen",
         arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
     )
-    # z=0.1 抬高生成点，避免 base_link 下探的连杆穿地
+    # spawn_z 默认 0.0：本模型的 base_link 几何底面就在 z=0，配合 xacro 的 fixed_base
+    # 正好坐落在地面上。换模型要重新核这个值。
     spawn_robot = Node(
         package="ros_gz_sim",
         executable="create",
         output="screen",
         arguments=[
-            "-name", "zhoubuguanjie0",
+            "-name", model,
             "-topic", "robot_description",
-            "-z", "0.1",
+            "-z", LaunchConfiguration("spawn_z"),
         ],
     )
     # 依赖链：模型生成 -> joint_state_broadcaster -> arm_position_controller
@@ -110,9 +117,31 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument(
+                "model",
+                default_value="zhoubuguanjie_youbi_001",
+                description="models/ 下的模型目录名",
+            ),
+            DeclareLaunchArgument(
                 "world_file",
                 default_value="empty.sdf",
                 description="Ignition 世界文件（gz sim 可解析的路径）",
+            ),
+            DeclareLaunchArgument(
+                "spawn_z",
+                default_value="0.0",
+                description="模型生成高度（m）",
+            ),
+            DeclareLaunchArgument(
+                "fixed_base",
+                default_value="true",
+                description="把基座焊到世界原点（false = 自由浮动基座）",
+            ),
+            DeclareLaunchArgument(
+                "controllers_file",
+                default_value=PathJoinSubstitution(
+                    [pkg_share, "models", model, "config", "controllers.yaml"]
+                ),
+                description="controller_manager 参数文件",
             ),
             SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", ign_resource_path),
             gazebo,

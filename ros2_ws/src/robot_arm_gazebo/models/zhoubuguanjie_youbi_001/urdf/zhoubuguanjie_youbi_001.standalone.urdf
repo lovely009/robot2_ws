@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- zhoubuguanjie_youbi_001（右臂：base_link + 4 个 revolute 关节）纯模型 URDF，可直接加载。
+     由 urdf/zhoubuguanjie_youbi_001.urdf.xacro 渲染后剥掉 <ros2_control> 与 <gazebo> 块得到
+     （渲染时 fixed_base:=false，因此不含 world 固定连杆——那是 Gazebo 侧的仿真脚手架）。
+     网格走 package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/，加载前须 source 本工作空间；
+     要脱离 ROS 使用，改用 ../../dist/zhoubuguanjie_youbi_001_urdf/ 那份相对路径版本。
+     ⚠ 关节限位/力矩/速度是占位值，接真机前必须按实际机械限位与执行器参数替换。 -->
+<robot name="zhoubuguanjie_youbi_001">
+  <link name="base_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00629970843764133 1.38777878078145E-17 0.325106190979423" />
+      <mass value="2.22448219489018" />
+      <inertia ixx="0.0749372273844986" ixy="-1.38777878078145E-17" ixz="-0.00344585483935504" iyy="0.0758630248185487" iyz="1.51247539928116E-18" izz="0.00214410459700138" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/base_link.STL" />
+      </geometry>
+      <material name="base_link_material">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Joint_link1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="2.50643442047073E-05 0.054054985534666 0.0158564352187658" />
+      <mass value="0.0762504652335834" />
+      <inertia ixx="5.31898800116342E-05" ixy="2.05814228806544E-08" ixz="1.60387049891424E-09" iyy="2.76525913404109E-05" iyz="-6.23218154851001E-06" izz="6.72452721965134E-05" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link1.STL" />
+      </geometry>
+      <material name="Joint_link1_material">
+        <color rgba="0.525490196078431 0.525490196078431 0.525490196078431 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link1" type="revolute">
+    <origin rpy="-1.5707963267949 0 1.5707963267949" xyz="0.15949999999999 0 0.571" />
+    <parent link="base_link" />
+    <child link="Joint_link1" />
+    <axis xyz="0 0 -1" />
+    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  </joint>
+  <link name="Joint_link2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-7.82491764322777E-06 -0.000784518186316654 -0.100341274664932" />
+      <mass value="0.367805897681557" />
+      <inertia ixx="0.000466921336949519" ixy="6.69905753929883E-09" ixz="6.23363468732402E-09" iyy="0.000488265285338672" iyz="-7.16408070377422E-08" izz="9.90104954670308E-05" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link2.STL" />
+      </geometry>
+      <material name="Joint_link2_material">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link2" type="revolute">
+    <origin rpy="1.5707963267949 0 0" xyz="0 0.1038999999523 0.024500000000005" />
+    <parent link="Joint_link1" />
+    <child link="Joint_link2" />
+    <axis xyz="0 0 1" />
+    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  </joint>
+  <link name="Joint_link3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-1.784212152579E-05 -0.0469363599236421 0.00907328673873262" />
+      <mass value="0.132267825932645" />
+      <inertia ixx="9.44431509025685E-05" ixy="4.40438369399382E-08" ixz="-4.48507308056477E-09" iyy="4.3847994524083E-05" iyz="1.29999168983204E-05" izz="0.000115386940763818" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link3.STL" />
+      </geometry>
+      <material name="Joint_link3_material">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link3" type="revolute">
+    <origin rpy="1.5707963267949 0 3.14159265358979" xyz="0 -0.0275499999523 -0.1872" />
+    <parent link="Joint_link2" />
+    <child link="Joint_link3" />
+    <axis xyz="0 0 -1" />
+    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  </joint>
+  <link name="Joint_link4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-9.66273375877912E-06 -7.793472574845E-05 -0.037647306785287" />
+      <mass value="0.155504476024836" />
+      <inertia ixx="0.000142371849517456" ixy="-1.27232826263566E-08" ixz="3.26803722788738E-08" iyy="0.000142330685156374" iyz="-3.59873351374845E-08" izz="2.55115641524042E-05" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link4.STL" />
+      </geometry>
+      <material name="Joint_link4_material">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link4" type="revolute">
+    <origin rpy="1.5707963267949 0 3.14159265358979" xyz="0 -0.099599999952301 0.0245000000000002" />
+    <parent link="Joint_link3" />
+    <child link="Joint_link4" />
+    <axis xyz="0 0 -1" />
+    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  </joint>
+</robot>

@@ -48,6 +48,9 @@
 *.swo
 *~
 
+# robot_arm_gazebo 的可重生成发布件压缩包（目录内容已入库，见包 README）
+/ros2_ws/src/robot_arm_gazebo/dist/*.zip
+
 # 操作系统元数据
 **/.DS_Store
 **/Thumbs.db

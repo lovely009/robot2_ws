@@ -21,7 +21,8 @@ rosbridge Web 上位机。**电机拓扑唯一来源是 YAML**：数量/类型/I
 ## 结构与入口
 
 - `ros2_ws/src/<package>` 标准 ament 布局（`src/`/`include/`/`config/`/`launch/`/`test/`，
-  按需 `urdf/`、`scripts/`）；各包 `README.md` 是权威文档，修改前先读。
+  按需 `urdf/`、`scripts/`；模型库包按 `models/<模型名>/` 组织）；各包 `README.md` 是
+  权威文档，修改前先读。
 - launch 与测试共用 `motor_hardware_interface/motor_hardware_interface/helpers.py`
   （buses 读取、joints 生成、参数文件写入）。
 - 协议 PDF 在 `ros2_ws/src/motor_drive/docs/`。
@@ -34,7 +35,7 @@ cd ros2_ws
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose
 ros2 launch motor_hardware_interface hardware.launch.py  # 真机，默认 tty 双总线
-ros2 launch robot_arm_gazebo gazebo.launch.py           # 仿真（vcan）
+ros2 launch robot_arm_gazebo gazebo.launch.py           # 仿真（Ignition，model:= 选模型）
 ```
 
 - 覆盖设备路径：`interface_<逻辑总线名>:=<路径>`；传输类型切换改 YAML `transport`。

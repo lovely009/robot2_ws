@@ -8,13 +8,13 @@
 |---|---|
 | 底层驱动 | `motor_drive`：传输、线协议、通用电机映射（无 ROS） |
 | ROS 适配层 | `motor_hardware_interface`：ros2_control lifecycle、joint 映射、YAML 解析、真机 bring-up |
-| 仿真层 | `motor_sim`（共享仿真库：协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）+ `robot_arm_gazebo`（UR5e 模型 / launch / Gazebo 集成） |
+| 仿真层 | `motor_sim`（共享仿真库：协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）+ `robot_arm_gazebo`（机械臂模型库 `models/<模型名>` / launch / Gazebo 集成） |
 
 ## 配置术语
 
 | 术语 | 含义 |
 |---|---|
-| 电机拓扑配置 | `config/motor_driver.yaml`（**唯一拓扑源**：数量/类型/ID/关节名/总线/传输；真机在 `motor_hardware_interface`，仿真在 `robot_arm_gazebo`） |
+| 电机拓扑配置 | `config/motor_driver.yaml`（**唯一拓扑源**：数量/类型/ID/关节名/总线/传输；当前只有真机侧持有） |
 | 型号库 | `config/motor.yaml`（协议运行参数 / 安全阈值，与拓扑无关、可跨机器人复用；完整规格见 `motor_drive/docs/`） |
 | 逻辑总线 | 与设备路径解耦的总线标识，如 `left_arm` |
 | 传输类型 | `BusConfig.transport`：`socketcan`（内核接口）或 `serial_slcan`（CANable2 串口），缺省 `socketcan` |
@@ -29,8 +29,9 @@
 
 - 驱动侧 controller：`/driver/controller_manager` 下的 position controller。
 - 真机 bring-up：`motor_hardware_interface` 提供，默认 serial_slcan 双总线。
-- 仿真链路：`MotorDriver -> vcan -> motor_sim -> Gazebo effort controller`；
-  `robot_arm_gazebo` 提供 `gazebo.launch.py` 统一仿真后端入口。
+- 仿真链路：`MotorDriver -> vcan -> motor_sim -> Gazebo effort controller`（`motor_sim` 独立回路）；
+  `robot_arm_gazebo` 的 `gazebo.launch.py` 用 `gz_ros2_control` 位置控制器直接驱动模型，
+  不经 vcan 也不经 `motor_drive`（两个仿真回路尚未联动）。
 - fail-fast 停机：激活重试 3 次（每次 1 s 窗口）或运行期反馈超时即终止，人工诊断后重跑。
 
 ## 命名

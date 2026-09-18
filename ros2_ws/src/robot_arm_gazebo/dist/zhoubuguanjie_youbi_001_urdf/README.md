@@ -27,13 +27,16 @@ zhoubuguanjie_youbi_001_urdf/
 
 | 关节名 | 父 link | 子 link | 轴 | 限位 (rad) |
 | --- | --- | --- | --- | --- |
-| `Joint_link1` | `base_link` | `Joint_link1` | (0,0,-1) | -1.5708 ~ 1.5708 |
-| `Joint_link2` | `Joint_link1` | `Joint_link2` | (0,0,1) | -1.5708 ~ 1.5708 |
-| `Joint_link3` | `Joint_link2` | `Joint_link3` | (0,0,-1) | -1.5708 ~ 1.5708 |
-| `Joint_link4` | `Joint_link3` | `Joint_link4` | (0,0,-1) | -1.5708 ~ 1.5708 |
+| `joint_link1` | `base_link` | `Joint_link1` | (0,0,-1) | -1.5708 ~ 1.5708 |
+| `joint_link2` | `Joint_link1` | `Joint_link2` | (0,0,1) | -1.5708 ~ 1.5708 |
+| `joint_link3` | `Joint_link2` | `Joint_link3` | (0,0,-1) | -1.5708 ~ 1.5708 |
+| `joint_link4` | `Joint_link3` | `Joint_link4` | (0,0,-1) | -1.5708 ~ 1.5708 |
 
-关节与子 link 同名（`Joint_linkN`），顺序即从基座往外的串联顺序。
-单位：长度 m、角度 rad、质量 kg、惯量 kg·m²。
+连杆名是 CAD 原名 `Joint_linkN`（关节模组的名字），关节名统一为小写 `joint_linkN`，
+两者一一对应。顺序即从基座往外的串联顺序。单位：长度 m、角度 rad、质量 kg、惯量 kg·m²。
+
+本文件是 `robot_arm_gazebo` 仓库内 `models/zhoubuguanjie_youbi_001/` 的对外发布形态
+（网格改为相对路径，去掉 ROS 依赖）；仓库里那份另带 `ros2_control` 与 Gazebo 集成。
 
 ## ⚠️ 参数来源与必须修改的地方
 

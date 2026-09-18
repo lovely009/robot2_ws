@@ -1,39 +1,36 @@
 # robot_arm_gazebo
 
-肘部关节机械臂（`zhoubuguanjie0`）的 Ignition Gazebo 仿真集成包。模型由 SolidWorks
-URDF 导出器生成（4 个 revolute 关节 + base_link，STL 网格），已移植为 ROS 2
-Humble ament 包，仿真后端为 Ignition（`ros_gz_sim` + `gz_ros2_control`）。
+机械臂 URDF 模型库与 Ignition Gazebo 仿真集成。每个模型是一个**自包含目录**
+（`models/<模型名>/`：几何 + 网格 + 控制器参数 + 自己的 README），共享的
+`config/`、`launch/`、`test/` 不含任何模型专有名字——加一个模型只需拷一个目录进来。
+
+仿真后端是 Ignition（`ros_gz_sim` + `gz_ros2_control`）。
+
+## 模型
+
+| 模型 | 说明 | 自由度 |
+| --- | --- | --- |
+| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，固定基座 + 4 个 revolute 关节） | 4 |
+
+模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 
 ## 目录结构
 
 ```
 robot_arm_gazebo/
 ├── config/
-│   ├── controllers.yaml        # controller_manager / 关节状态广播 / 位置控制器
-│   └── display.rviz            # RViz 预览配置
+│   └── display.rviz                        # 跨模型共享的 RViz 预览配置
 ├── launch/
-│   ├── display.launch.py       # RViz 模型预览（无 Gazebo）
-│   └── gazebo.launch.py        # Ignition 仿真 + 控制器
-├── meshes/                     # SolidWorks 导出 STL
-└── urdf/
-    ├── zhoubuguanjie0.urdf             # 原始 SolidWorks 导出（mesh 路径已改指本包）
-    ├── zhoubuguanjie0.standalone.urdf  # 单文件纯模型（无 xacro、无插件），可直接加载
-    └── zhoubuguanjie0.urdf.xacro       # 仿真薄壳：注入 ros2_control 与 gz 插件
+│   ├── display.launch.py                   # RViz 预览（无 Gazebo、无控制器）
+│   └── gazebo.launch.py                    # Ignition 仿真 + 位置控制器
+├── models/
+│   └── <模型名>/                            # 自包含：urdf / meshes / config / cad / README
+├── dist/
+│   └── <模型名>_urdf/                       # ROS 无关的对外发布件（相对路径网格），不安装
+└── test/
+    ├── test_model_consistency.py           # 模型目录三件套一致性
+    └── test_launch_models.py               # launch 的模型选择链路
 ```
-
-## 单文件 URDF（`zhoubuguanjie0.standalone.urdf`）
-
-把 xacro 薄壳展开、剥掉 `<ros2_control>` 与 `<gazebo>` 插件块后的纯模型，单个文件即可
-加载（RViz、第三方工具、拖到别处都行），不需要 xacro 处理：
-
-```bash
-ros2 run robot_state_publisher robot_state_publisher \
-  --ros-args -p robot_description:="$(cat install/robot_arm_gazebo/share/robot_arm_gazebo/urdf/zhoubuguanjie0.standalone.urdf)"
-```
-
-mesh 仍走 `package://robot_arm_gazebo/meshes/`，因此加载前须 source 本工作空间；
-若要脱离 ROS 使用，把 `package://robot_arm_gazebo/meshes/` 批量替换为
-`file:///绝对路径/robot_arm_gazebo/meshes/` 即可。
 
 ## 构建与使用
 
@@ -50,6 +47,27 @@ ros2 launch robot_arm_gazebo gazebo.launch.py
 ros2 launch robot_arm_gazebo gazebo.launch.py world_file:=/path/to/world.sdf
 ```
 
+RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还需要 `ros_gz_sim` +
+`gz_ros2_control`。它们都写在 `package.xml` 的 `exec_depend` 里，但 **rosdep 不会自动装**；
+缺包时 launch 在启动任何进程之前就抛 `package ... not found`（例如本机缺
+`ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
+
+两个 launch 都接受 `model:=<模型名>` 选择 `models/` 下的模型，默认
+`zhoubuguanjie_youbi_001`：
+
+```bash
+ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
+```
+
+`gazebo.launch.py` 的其余参数：
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `world_file` | `empty.sdf` | Ignition 世界文件 |
+| `spawn_z` | `0.0` | 模型生成高度（m），按模型几何实测值定 |
+| `fixed_base` | `true` | 把基座焊到世界原点；`false` = 自由浮动基座 |
+| `controllers_file` | `models/<模型>/config/controllers.yaml` | controller_manager 参数 |
+
 ## 控制机械臂
 
 `gazebo.launch.py` 启动后自动激活 `joint_state_broadcaster` 与
@@ -62,13 +80,50 @@ ros2 topic pub --once /arm_position_controller/commands \
 ros2 topic echo /joint_states
 ```
 
-关节顺序：`Joint_Link1`（0~1.57 rad）、`Joint_Link2`（±1.57）、
-`Joint_Link3`（-0.09~2.09）、`Joint_Link4`（±1.57）。
+命令向量顺序 = 该模型 `config/controllers.yaml` 里 `joints` 的顺序 =
+URDF 关节串联顺序（三者由 `test_model_consistency.py` 锁死）。当前模型顺序为
+`joint_link1` → `joint_link4`。
 
-## 移植说明
+## 加一个新模型
 
-- mesh 路径已从 `package://zhoubuguanjie0/` 改写为 `package://robot_arm_gazebo/`。
-- SolidWorks 导出的关节限位 `effort="0" velocity="0"` 已补为
-  `effort="10.0" Nm` / `velocity="1.0" rad/s`（名义占位值，按真实执行器参数调整）。
-- ros2_control 硬件接口为 `gz_ros2_control/GazeboSimSystem`（position 命令 +
-  position/velocity 状态），控制器参数见 `config/controllers.yaml`。
+1. 在 `models/` 下建 `<新模型名>/`，含 `urdf/`（`<名>.urdf`、`<名>.standalone.urdf`、
+   `<名>.urdf.xacro`）、`meshes/`、`config/controllers.yaml`、`cad/`、`README.md`；
+2. 网格路径写成 `package://robot_arm_gazebo/models/<新模型名>/meshes/...`；
+3. 薄壳 xacro 用相对文件名 include 同目录的 URDF（`<xacro:include filename="<名>.urdf"/>`），
+   不要用 `$(dirname)`——它只在 `ros2 launch` 的文件上下文里可用，本包 launch 是以子进程
+   方式调 `xacro` 的；
+4. 跑 `colcon test --packages-select robot_arm_gazebo`，测试会以新目录为参数自动覆盖它。
+
+已知限制：
+
+- **一次只生成一个模型**：控制器名（`joint_state_broadcaster` /
+  `arm_position_controller`）是全局的，同一仿真里生成两个模型会撞名。
+- `config/display.rviz` 的 Fixed Frame 写死 `base_link`，根连杆不叫 `base_link` 的模型
+  需要自行覆盖 `rviz_config`。
+- 模型是**仿真/可视化资产**：几何与惯性来自 CAD 未做真机标定，关节限位/力矩/速度是
+  占位值，接真机前必须替换。真机链路（`motor_drive` + `motor_hardware_interface` +
+  `motor_driver.yaml` 拓扑）与本包没有代码依赖。
+
+## 单文件纯模型
+
+每个模型的 `urdf/<名>.standalone.urdf` 是把薄壳展开、剥掉 `<ros2_control>` 与
+`<gazebo>` 插件块后的纯模型，单个文件即可加载（RViz、第三方工具、拖到别处都行），
+不需要 xacro 处理：
+
+```bash
+ros2 run robot_state_publisher robot_state_publisher --ros-args \
+  -p robot_description:="$(cat install/robot_arm_gazebo/share/robot_arm_gazebo/models/<模型名>/urdf/<模型名>.standalone.urdf)"
+```
+
+网格仍走 `package://robot_arm_gazebo/models/<模型名>/meshes/`，因此加载前须 source
+本工作空间；要脱离 ROS 使用，用 `dist/<模型名>_urdf/` 那份（网格是相对路径）。
+
+## 对外发布件（`dist/`）
+
+`dist/<模型名>_urdf/` 是不依赖 ROS 的单文件模型 + 网格，可以直接打包发给别人：
+
+```bash
+cd dist/zhoubuguanjie_youbi_001_urdf && zip -r ../zhoubuguanjie_youbi_001_urdf.zip .
+```
+
+zip 不入库（内容在目录里都有，随时可重打）；`dist/` 也不随包安装。

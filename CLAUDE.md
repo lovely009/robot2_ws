@@ -10,7 +10,7 @@ ROS 2 Humble 工作空间（`dev` 开发分支），`ros2_ws/` 下六个 ament �
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
 - `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
-- `robot_arm_gazebo` —— UR5e 模型与 Gazebo 集成（URDF / world / controller / launch）
+- `robot_arm_gazebo` —— 机械臂 URDF 模型库（`models/<模型名>/`）与 Ignition Gazebo 仿真集成
 - `web_host` —— rosbridge Web 上位机（姿态、IMU、电机状态与命令快照）
 
 另有两个独立工程区域：`micro_ros_firmware`（PlatformIO，非 ament 包）与
@@ -51,7 +51,7 @@ colcon test --packages-select motor_drive --ctest-args -R test_protocol
 colcon test --packages-select motor_hardware_interface --pytest-args "-k <表达式>"
 ```
 
-测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）；`motor_sim` 有协议/传输/帧路由/plant 等 gtest；`robot_arm_gazebo` 有 launch/拓扑 pytest。测试不得启动 Gazebo 或真实硬件。
+测试目标：`motor_drive` 有 `test_protocol`/`test_motor_protocol`/`test_driver`/`test_slcan`；`motor_hardware_interface` 有 `test_motor_config`/`test_canfd_logic`（gtest）+ `test_hardware_launch`/`test_xacro_consistency`（pytest）；`motor_sim` 有协议/传输/帧路由/plant 等 gtest；`robot_arm_gazebo` 有 `test_model_consistency`/`test_launch_models`（模型目录自洽与 launch 契约，pytest）。测试不得启动 Gazebo 或真实硬件。
 
 真机 bring-up（默认 serial_slcan 双总线 `/dev/ttyACM0`、`/dev/ttyACM1`）：
 
@@ -60,10 +60,11 @@ ros2 launch motor_hardware_interface hardware.launch.py
 ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0  # 覆盖设备路径
 ```
 
-仿真 bring-up（vcan）：
+仿真 bring-up（Ignition + `gz_ros2_control`；`model:=` 选 `models/` 下的模型）：
 
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py
+ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
 ```
 
 与机器人无关的独立仿真节点（不启 Gazebo；拓扑完全由 `motor_config_file` 决定，
@@ -116,9 +117,9 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
   MotorDriver（分组/校验/统一收发）           canfd_logic.cpp（纯逻辑，可单测）
   protocol.cpp（物理量 <-> 线协议字段）       launch + xacro（真机 bring-up）
 
-motor_sim（共享仿真库）                      robot_arm_gazebo（集成）
-  SimMotorHandler / plant_model / 帧路由        urdf / launch / Gazebo 集成
-  （协议 / 传输 / 传动 / 锁存安全）            gazebo.launch.py 统一后端入口
+motor_sim（共享仿真库）                      robot_arm_gazebo（模型库 + 仿真集成）
+  SimMotorHandler / plant_model / 帧路由        models/<模型名> / launch / Gazebo 集成
+  （协议 / 传输 / 传动 / 锁存安全）            gazebo.launch.py（gz_ros2_control 位置控制）
 ```
 
 核心是「三自适应」闭环，全部由配置驱动、编译代码不含机器人拓扑：
@@ -144,7 +145,8 @@ motor_sim（共享仿真库）                      robot_arm_gazebo（集成）
 - `urdf/canfd_hardware.xacro`：与拓扑无关的 ros2_control 硬件片段（`canfd_hardware`/`emit_bus_overrides`/`emit_control_joints` 宏），不写死任何关节。
 - `urdf/upper_body.urdf.xacro`：物理模型（几何/惯性）**人工维护**；其 ros2_control 关节清单由 launch 注入，不手抄。两者一致性由 `test_xacro_consistency.py` 兜底。
 - `motor_hardware_interface/helpers.py`：launch 与测试共用（读取 buses/joints、生成参数文件）。
-- 仿真 launch：`robot_arm_gazebo` 的 `gazebo.launch.py` 统一仿真后端入口，默认挂 `robot_arm_gazebo/config/motors.yaml`。
+- 仿真 launch：`robot_arm_gazebo` 的 `gazebo.launch.py` 用 `model:=<模型名>` 选 `models/` 下的模型
+  （默认 `zhoubuguanjie_youbi_001`），控制器参数挂该模型自己的 `config/controllers.yaml`。
 
 ## 关键约定与坑
 

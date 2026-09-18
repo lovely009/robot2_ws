@@ -8,7 +8,7 @@
 | `motor_drive` | 无 ROS 底层驱动库（传输 / 线协议 / 电机映射） |
 | `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up |
 | `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
-| `robot_arm_gazebo` | UR5e 模型与 Gazebo 集成（URDF / world / controller / launch） |
+| `robot_arm_gazebo` | 机械臂 URDF 模型库（`models/<模型名>`）与 Ignition Gazebo 集成 |
 | `web_host` | rosbridge Web 上位机（姿态、IMU、电机状态与命令快照） |
 
 ## 分支
@@ -45,7 +45,8 @@ ros2 launch motor_hardware_interface hardware.launch.py
 ros2 launch robot_arm_gazebo gazebo.launch.py
 ```
 
-仿真默认使用 `vcan0/vcan1`；模拟器仅允许打开 `vcan*` 接口，防止与真实电机重复 CAN ID。
+`gazebo.launch.py` 走 Ignition + `gz_ros2_control` 位置控制器，不经过 `motor_sim` 的 vcan 回路
+（`motor_sim` 的接口选择由 `transport_mode` 与显式的 bus→端口参数决定，无默认值）。
 
 ## 配置（两份文件）
 

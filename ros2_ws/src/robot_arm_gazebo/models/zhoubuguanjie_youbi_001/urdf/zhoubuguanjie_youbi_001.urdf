@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- zhoubuguanjie_youbi_001（base_link + 4 个 revolute 关节）纯模型 URDF，可直接加载。
-     几何/惯性参数由 SolidWorks 模型导出，未做真机标定；
-     关节限位/力矩/速度是占位值，接真机前必须按实际机械限位与执行器参数修改；
-     网格走同目录 meshes/ 相对路径，整个文件夹可任意搬移。 -->
+<!-- zhoubuguanjie_youbi_001（右臂：base_link + 4 个 revolute 关节）。
+     原始文件由 SolidWorks SW2URDF 导出器生成（Commit Version: 1.6.0-4-g7f85cfe
+     Build Version: 1.6.7995.38578），移植进 robot_arm_gazebo 时做了三处改写：
+       1. mesh 路径 package://zhoubuguanjie_youbi_001/ -> package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/；
+       2. 关节名 Joint_linkN -> joint_linkN（连杆名保持 CAD 原名 Joint_linkN，两者不再同名）；
+       3. 导出的 limit 全为 0（会锁死关节），填入占位值。
+     ⚠ 几何/惯性来自 CAD 未做真机标定；limit 是占位值，接真机前必须按实际机械限位与
+     执行器参数替换。原始导出件与导出日志见 ../cad/。 -->
 <robot
   name="zhoubuguanjie_youbi_001">
   <link
@@ -27,7 +31,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/base_link.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/base_link.STL" />
       </geometry>
       <material
         name="base_link_material">
@@ -41,7 +45,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/base_link.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/base_link.STL" />
       </geometry>
     </collision>
   </link>
@@ -67,7 +71,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link1.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link1.STL" />
       </geometry>
       <material
         name="Joint_link1_material">
@@ -81,12 +85,12 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link1.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link1.STL" />
       </geometry>
     </collision>
   </link>
   <joint
-    name="Joint_link1"
+    name="joint_link1"
     type="revolute">
     <origin
       xyz="0.15949999999999 0 0.571"
@@ -125,7 +129,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link2.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link2.STL" />
       </geometry>
       <material
         name="Joint_link2_material">
@@ -139,12 +143,12 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link2.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link2.STL" />
       </geometry>
     </collision>
   </link>
   <joint
-    name="Joint_link2"
+    name="joint_link2"
     type="revolute">
     <origin
       xyz="0 0.1038999999523 0.024500000000005"
@@ -183,7 +187,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link3.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link3.STL" />
       </geometry>
       <material
         name="Joint_link3_material">
@@ -197,12 +201,12 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link3.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link3.STL" />
       </geometry>
     </collision>
   </link>
   <joint
-    name="Joint_link3"
+    name="joint_link3"
     type="revolute">
     <origin
       xyz="0 -0.0275499999523 -0.1872"
@@ -241,7 +245,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link4.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link4.STL" />
       </geometry>
       <material
         name="Joint_link4_material">
@@ -255,12 +259,12 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Joint_link4.STL" />
+          filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link4.STL" />
       </geometry>
     </collision>
   </link>
   <joint
-    name="Joint_link4"
+    name="joint_link4"
     type="revolute">
     <origin
       xyz="0 -0.099599999952301 0.0245000000000002"

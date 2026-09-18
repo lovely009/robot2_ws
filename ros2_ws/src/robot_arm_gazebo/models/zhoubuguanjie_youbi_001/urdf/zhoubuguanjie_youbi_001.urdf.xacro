@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!-- zhoubuguanjie_youbi_001 的仿真薄壳：引入 SolidWorks 导出的原始 URDF，注入 ros2_control
+     与 gz_ros2_control 插件。display.launch.py 直接加载 urdf（无需控制器），
+     gazebo.launch.py 加载本文件。
+
+     参数：
+       controllers_file  控制器参数文件（gazebo.launch.py 按模型目录传入）
+       fixed_base        true（默认）= 把 base_link 焊到世界原点：真机上这条臂是固定在
+                         台面上的，焊死后基座不再依赖地面接触摩擦来保持不动，行为可复现。
+                         实测 false（自由浮动基座）在现有命令范围内也没有明显漂移，但那时
+                         基座姿态由接触求解决定，不适合当基准。
+
+     模型目录是自包含的：include 用相对文件名（xacro 按被包含文件所在目录解析，见
+     xacro/__init__.py:abs_filename_spec），整个目录拷进 models/ 即可新增一个模型，
+     不需要改这个文件之外的任何东西。注意不能用 $(dirname)：它只在 ros2 launch 提供的
+     文件上下文里可用，直接调 `xacro <file>`（本包的 launch 就是这种子进程方式）会报
+     "no file/directory information available"。 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="zhoubuguanjie_youbi_001">
+  <xacro:arg name="controllers_file"
+             default="$(find robot_arm_gazebo)/models/zhoubuguanjie_youbi_001/config/controllers.yaml"/>
+  <xacro:arg name="fixed_base" default="true"/>
+
+  <xacro:include filename="zhoubuguanjie_youbi_001.urdf"/>
+
+  <xacro:if value="$(arg fixed_base)">
+    <link name="world"/>
+    <joint name="world_to_base_link" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="world"/>
+      <child link="base_link"/>
+    </joint>
+  </xacro:if>
+
+  <!-- 关节接口声明（position 命令 + position/velocity 状态）。宏名不带模型前缀，
+       拷去新模型时不用改；关节清单必须与 config/controllers.yaml 的顺序一致。 -->
+  <xacro:macro name="sim_control_joint" params="name">
+    <joint name="${name}">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="zhoubuguanjie_youbi_001_system" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <xacro:sim_control_joint name="joint_link1"/>
+    <xacro:sim_control_joint name="joint_link2"/>
+    <xacro:sim_control_joint name="joint_link3"/>
+    <xacro:sim_control_joint name="joint_link4"/>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+    </plugin>
+  </gazebo>
+</robot>

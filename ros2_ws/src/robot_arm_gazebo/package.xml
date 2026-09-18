@@ -3,12 +3,13 @@
 <package format="3">
   <name>robot_arm_gazebo</name>
   <version>1.0.0</version>
-  <description>肘部关节机械臂（zhoubuguanjie0，SolidWorks 导出）的 Ignition Gazebo 仿真集成。</description>
+  <description>机械臂 URDF 模型库（models/&lt;模型名&gt;）与 Ignition Gazebo 仿真集成。</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
   <exec_depend>gz_ros2_control</exec_depend>
@@ -21,6 +22,10 @@
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>xacro</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

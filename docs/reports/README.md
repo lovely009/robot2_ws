@@ -7,3 +7,4 @@
 - [2026-09-11 FDCAN1 九电机台架交接](2026-09-11-fdcan1-bench.md) — 历史快照；MotorBind 路线已废弃、BUS_OFF 自清恢复已实现，当前结论以本目录 2026-09-18 重构回归报告为准。
 - [2026-09-11 第一轮 FDCAN1 台架记录](2026-09-11-fdcan1-bench-run1-findings.md) — 历史记录；Y7/物理层判断已被第二轮修正。
 - [2026-09-11 第二轮复测结论](2026-09-11-fdcan1-bench-run2-findings.md) — 当前 CANable2 `b158aa7` 使用 Y5；九节点 CAN FD+BRS 30 秒 GREEN。
+- [2026-09-18 固件高内聚重构九节点回归](2026-09-18-firmware-refactor-regression.md) — 重构行为保持回归（断连撤权/配置事务 golden/持久化/BUS_OFF），真机专项仍开放。

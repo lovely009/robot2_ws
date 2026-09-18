@@ -22,8 +22,8 @@
 
 - [ ] **TBD-SAFETY-01**：以厂家文档和无负载台架确认两协议 30 ms 软停实际动作。缺席软停、30 ms/100 ms 时基与单电机隔离语义 host 已覆盖。
 - [ ] **TBD-SAFETY-02**：确定 RX ring overflow 触发安全降级的阈值与恢复条件。
-- [ ] Agent 断连立即失能清授权；重连须重新全局授权 + 逐电机 `SET_ENABLE(true)` + 新快照才恢复（派生逻辑 host 已覆盖，真机顺序待验）。
-- [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode（整快照拒绝且不刷新 freshness，host 已覆盖）；厂家故障锁存、心跳丢失 100 ms OFFLINE 与恢复路径。
+- [x] Agent 断连立即失能清授权：2026-09-18 九节点台架实测——ACTIVE 中杀 agent，下一帧为失能帧（控制字 0x0c）、运动停止；重连后**不重发 SET_ENABLE**、仅新快照即恢复（会话电平纯派生）。双 AUTHORIZATION_LOST 事件语义 host 钉死。
+- [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode（整快照拒绝且不刷新 freshness，host 已覆盖）；厂家故障锁存、心跳丢失 100 ms OFFLINE 与恢复路径（30/100ms 级联逻辑 host 覆盖，真机注入待做）。
 - [ ] CERB 每总线 20 ms 单帧 SYNC、约 20 ms 状态上报、100 ms OFFLINE 边界实测（协议编解码 host 已覆盖）。
 - [x] **BUS_OFF 自清恢复**：HAL 错误状态回调清 `CCCR.INIT` 已实现，**2026-09-18 真机自恢复已实测通过**；持续物理故障下的反复 bus-off 计数随 TBD-CAN-01 故障注入观察。
 - [ ] BMI088 断线 / 阻塞 SPI / 停 DRDY：传输超时、降级重试、heater off、双缓冲不撕裂。
@@ -31,7 +31,7 @@
 ## 3. 参数链与 Profile
 
 - [ ] **TBD-CONFIG-01（台架实测部分）**：逐台确认上电回读四对象值；故意改一台设备参数 → 判未初始化（CONFIG_CONFLICT，`last_error=40`，拒绝使能）→ 写回恢复闭环；回读失败报 41 不拦。boot 比对/写回/恢复事务 host 已覆盖（决策日志 §6.3）。
-- [ ] REFRESH_PARAMS 按总线一问一答、四个 SDO upload 回读与 `system.save` W25Q64 双 sector 持久化真机验证（事务状态机 host 已覆盖，§6.5）。
+- [ ] REFRESH_PARAMS 按总线一问一答、四个 SDO upload 回读：**2026-09-18 模拟器台架已验证字节序列**（607D:01/02→6080→2538 顺序/值正确）；`system.save` W25Q64 双 sector 掉电保持模拟器阶段已验证（SWD 复位），真机驱动器的 0x2539 保存闭环仍待 dev-real。
 - [ ] **TBD-PROFILE-02**：CERB 规格书 Kt 三套口径互不一致，反馈扭矩估计仍依赖 Kt 链（真实值若仅名义一半，上层力矩偏大 1 倍）。判别实验：静止重力载荷同时读字典 `0x6077`（力矩传感器，0.01 N·m）与 `0x6078`（实际电流，mA）算 `Kt_eff = τ/(Iq×gear)`——驱动器自带传感器，不必外接；或 MIT 已知前馈扭矩最小二乘拟合。
 - [ ] Vaxor 80 速比型号无完整规格，型号目录刻意不收；规格到位并补 Profile 前不得开放控制。
 - [ ] 建立上层型号库（motor.yaml）与固件内置 Profile 的版本/内容一致性机制。

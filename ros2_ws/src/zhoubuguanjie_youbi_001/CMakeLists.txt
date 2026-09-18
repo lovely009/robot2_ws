@@ -1,14 +1,10 @@
-cmake_minimum_required(VERSION 2.8.3)
-
+cmake_minimum_required(VERSION 3.8)
 project(zhoubuguanjie_youbi_001)
 
-find_package(catkin REQUIRED)
+find_package(ament_cmake REQUIRED)
 
-catkin_package()
+# 纯资源包：只有 URDF / mesh / launch / config，无编译目标，安装即完成
+install(DIRECTORY config launch meshes urdf
+  DESTINATION share/${PROJECT_NAME})
 
-find_package(roslaunch)
-
-foreach(dir config launch meshes urdf)
-	install(DIRECTORY ${dir}/
-		DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/${dir})
-endforeach(dir)
+ament_package()

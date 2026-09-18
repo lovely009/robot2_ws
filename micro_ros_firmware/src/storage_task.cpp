@@ -2,9 +2,13 @@
 //
 // 双槽 A/B，每槽 2 个 4KB 扇区（W25Q64 最小擦除单位），各放一个 blob：
 // v3 为 7712B = 32B 头 + 64×120B 记录，槽 A 0x0000–0x1FFF、槽 B 0x2000–0x3FFF
-// （v2 记录 48B、v1 旧格式 32B，仍可读，见 read_slot 的迁移链）。save 总写非
+// （v2 记录 48B、v1 旧格式 32B，仍可读，见 read_blob_at 的迁移链）。save 总写非
 // 活动槽，boot 选 CRC 有效且 seq 最大者——erase/write 中掉电至少保留一个好槽
 // （擦 A 的扇区不碰 B）。
+//
+// 升级兼容：旧布局的槽 B 在 0x1000，新布局下它落进槽 A 的擦除范围。两个新槽
+// 都读不到时才兜底试一次 0x1000（见 load_boot_params），免得奇数存档次数的
+// 板子在升级后把持久化参数全丢成默认值。
 //
 // 并发：g_boot_records 只在 start 的加载阶段写（任务创建前）；save 路径用
 // motor_rt 临界区拍参数快照后离开临界区再擦写；结果单字由 micro_ros 任务
@@ -30,6 +34,17 @@ static const configSTACK_DEPTH_TYPE kStorageTaskStack = 1024U; // 4KB（HAL OSPI
 // seq 最大者——erase/write 中掉电至少保留一个好槽（擦 A 的扇区不碰 B）。
 static const uint32_t kSlotBase[2] = {0x000000U, 0x00002000U};
 static const uint32_t kSlotSectors = 2U;
+
+// 一个 blob 必须装得进一个槽。超了的话 perform_save 的整写会越过槽尽头写进
+// 下一个槽——w25q64_range_valid 只兜整片 8MB，不兜槽边界，会静默破坏另一个
+// 槽里的有效 blob。7712 对 8192 还剩 480B（记录尺寸涨到 127B 以上就越界）。
+static_assert(PARAM_STORE_BLOB_SIZE <= kSlotSectors * W25Q64_SECTOR_SIZE,
+              "blob 超出槽容量（2 个 4KB 扇区），整写会破坏下一个槽");
+
+// 升级前旧布局的槽 B 基址（旧 kSectorB = W25Q64_SECTOR_SIZE = 0x1000）。
+// 新布局下 0x1000 落在槽 A 的擦除范围内，read_slot() 永远读不到它，
+// 只有 load_boot_params() 的兜底分支会碰（见那里的说明）。
+static const uint32_t kLegacySlotBBase = W25Q64_SECTOR_SIZE;
 
 static uint32_t slot_base(uint8_t slot) { return kSlotBase[slot & 1U]; }
 
@@ -59,11 +74,12 @@ alignas(8) static uint8_t g_blob_scratch[PARAM_STORE_BLOB_SIZE];
 alignas(8) static uint8_t g_verify_page[W25Q64_PAGE_SIZE];
 static volatile storage_save_status_t g_result = STORAGE_SAVE_IDLE;
 
-// 读取一个槽到调用方缓冲并落到 v3 布局：优先按 v3 校验；不是 v3 时再依次尝试
-// v2（48B 记录）与 v1（升级前写入的 32B 记录格式）就地迁移——升级不该静默丢
-// 掉用户的 kp/kd、限值与设备端原值记录。
-static bool read_slot(uint8_t slot, uint8_t *buf) {
-  if (w25q64_read(slot_base(slot), buf, PARAM_STORE_BLOB_SIZE) != W25Q64_OK) {
+// 读 addr 处的 blob 到调用方缓冲并落到 v3 布局：优先按 v3 校验；不是 v3 时再
+// 依次尝试 v2（48B 记录）与 v1（升级前写入的 32B 记录格式）就地迁移——升级不
+// 该静默丢掉用户的 kp/kd、限值与设备端原值记录。迁移结果**再 validate 一遍**
+// （设计 §6 要求）：这条 true 是调用方对该缓冲唯一的信任来源。
+static bool read_blob_at(uint32_t addr, uint8_t *buf) {
+  if (w25q64_read(addr, buf, PARAM_STORE_BLOB_SIZE) != W25Q64_OK) {
     return false;
   }
   if (param_store_blob_validate(
@@ -72,17 +88,25 @@ static bool read_slot(uint8_t slot, uint8_t *buf) {
   }
   // v2 就地迁移（升级不该静默丢掉用户的记录）。
   alignas(8) static uint8_t v2_buf[PARAM_STORE_BLOB_SIZE_V2];
-  if (w25q64_read(slot_base(slot), v2_buf, sizeof(v2_buf)) == W25Q64_OK &&
+  if (w25q64_read(addr, v2_buf, sizeof(v2_buf)) == W25Q64_OK &&
       param_store_blob_migrate_v2(v2_buf, sizeof(v2_buf), buf,
-                                  PARAM_STORE_BLOB_SIZE) != nullptr) {
+                                  PARAM_STORE_BLOB_SIZE) != nullptr &&
+      param_store_blob_validate(
+          reinterpret_cast<const param_store_blob_t *>(buf))) {
     return true;
   }
   alignas(8) static uint8_t legacy_buf[PARAM_STORE_LEGACY_BLOB_SIZE];
-  if (w25q64_read(slot_base(slot), legacy_buf, sizeof(legacy_buf)) != W25Q64_OK) {
+  if (w25q64_read(addr, legacy_buf, sizeof(legacy_buf)) != W25Q64_OK) {
     return false;
   }
   return param_store_blob_migrate_v1(legacy_buf, sizeof(legacy_buf), buf,
-                                     PARAM_STORE_BLOB_SIZE) != nullptr;
+                                     PARAM_STORE_BLOB_SIZE) != nullptr &&
+         param_store_blob_validate(
+             reinterpret_cast<const param_store_blob_t *>(buf));
+}
+
+static bool read_slot(uint8_t slot, uint8_t *buf) {
+  return read_blob_at(slot_base(slot), buf);
 }
 
 static void load_boot_params() {
@@ -105,7 +129,27 @@ static void load_boot_params() {
   } else if (ok_a) {
     use_b = false;
   } else {
-    return; // 两槽皆无效：保持 g_boot_count = 0
+    // 两新槽皆无效：可能是从旧布局升级上来的板子。旧槽 B 在 0x1000，落在新槽
+    // A 的擦除范围内，read_slot() 再也读不到它——旧固件下存档次数为**奇数**的
+    // 板子（活动槽 = 旧 B，旧 A 是空的 0xFF）若不在这里兜底，会静默丢掉全部
+    // 持久化参数（kp/kd、位置/速度/力矩限值全归零），而那份完好的旧 blob 就
+    // 躺在 0x1000 无人读。只在新布局两槽都失败时试一次——已有合法新 blob 的
+    // 板子不付这个代价。
+    //
+    // 采用时 g_active_slot 必须是 0：数据物理上位于 0x1000（槽 A 的擦除范围
+    // 内），下次 save 只能写槽 B(0x2000) 且绝不能碰 0x1000，而 g_active_slot
+    // = 0 正好给出 target = 1。**不能**把它当成 slot 1 的内容返回——那会让
+    // use_b = 1、g_active_slot = 1，首次存档就把刚采用的数据擦掉。
+    if (!read_blob_at(kLegacySlotBBase, scratch)) {
+      return; // 两新槽 + 旧槽 B 皆无效：保持 g_boot_count = 0
+    }
+    g_active_slot = 0U;
+    const param_store_blob_t *adopted =
+        reinterpret_cast<const param_store_blob_t *>(scratch);
+    g_seq = adopted->seq;
+    g_boot_count = storage_projection_blob_to_boot(
+        adopted, g_boot_records, PARAM_STORE_RECORD_COUNT);
+    return;
   }
   // 胜者是 B 时它已在 scratch 里；是 A 时需要重读（顺带重新校验）。
   if (!use_b && !read_slot(0U, scratch)) {

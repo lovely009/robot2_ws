@@ -3,9 +3,9 @@
 #include <string.h>
 
 _Static_assert(sizeof(param_store_record_t) == PARAM_STORE_RECORD_SIZE,
-               "record 必须 48B");
+               "record 必须 120B（v3）");
 _Static_assert(sizeof(param_store_blob_t) == PARAM_STORE_BLOB_SIZE,
-               "blob 布局尺寸漂移");
+               "blob 布局尺寸漂移（v3 = 32 + 64*120）");
 
 // CRC32/IEEE 802.3（与 zlib 同多项式；软件按位，2KB 只在 boot/save 各算一次）。
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {

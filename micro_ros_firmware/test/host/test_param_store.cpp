@@ -63,6 +63,26 @@ void test_param_name_validation() {
 
 static const float kEps = 1e-6f;
 
+// v3 布局尺寸契约：改动尺寸必须先动这里的断言，防止静默漂移。
+void test_blob_v3_layout_size() {
+  static_assert(sizeof(param_store_record_t) == 120U, "v3 记录必须 120B");
+  static_assert(PARAM_STORE_RECORD_SIZE == 120U, "v3 记录尺寸常量");
+  static_assert(PARAM_STORE_BLOB_SIZE == 7712U, "v3 blob = 32 + 64*120");
+  static_assert(PARAM_STORE_VERSION == 3U, "v3 版本号");
+  // 槽区：每槽 2 个 4KB 扇区，blob 必须装得下。
+  assert(PARAM_STORE_BLOB_SIZE <= 2U * 4096U);
+  // 字段偏移契约（迁移与页读回都依赖它）。
+  param_store_record_t rec{};
+  assert(reinterpret_cast<uint8_t *>(&rec.present) == reinterpret_cast<uint8_t *>(&rec));
+  assert(reinterpret_cast<uint8_t *>(&rec.device_raw) - reinterpret_cast<uint8_t *>(&rec) == 32);
+  assert(reinterpret_cast<uint8_t *>(&rec.model_name) - reinterpret_cast<uint8_t *>(&rec) == 64);
+  assert(reinterpret_cast<uint8_t *>(&rec.identity_hash) - reinterpret_cast<uint8_t *>(&rec) == 80);
+  assert(reinterpret_cast<uint8_t *>(&rec.mit_pos_limit_rad) - reinterpret_cast<uint8_t *>(&rec) == 84);
+  assert(reinterpret_cast<uint8_t *>(&rec.profile_version) - reinterpret_cast<uint8_t *>(&rec) == 96);
+  assert(sizeof(rec.device_raw) == 32U);
+  assert(sizeof(rec.reserved) == 23U);
+}
+
 void test_blob_roundtrip_and_crc() {
   static uint8_t storage[PARAM_STORE_BLOB_SIZE];
   param_store_blob_t *blob = param_store_blob_reset(storage, sizeof(storage));
@@ -252,6 +272,7 @@ void test_param_units() {
 int main() {
   test_param_name_build_parse_roundtrip();
   test_param_name_validation();
+  test_blob_v3_layout_size();
   test_blob_roundtrip_and_crc();
   test_blob_rejects_bad_layout();
   test_blob_record_capacity();

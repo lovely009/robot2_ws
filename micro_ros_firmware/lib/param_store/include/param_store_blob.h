@@ -1,7 +1,12 @@
 // W25Q64 持久化参数 blob（纯 C，无 HAL 依赖，host 可直测）。
 //
-// 单 blob = 32B 头 + 64×48B 记录 = 3104B，放在一个 4KB sector 内（v2）。
-// 双 sector A/B 的选槽/seq 比较由 storage 任务负责，本模块只管布局与 CRC。
+// 单 blob = 32B 头 + 64×120B 记录 = 7712B。每槽占 2 个 4KB 扇区：
+// 槽 A 0x0000–0x1FFF，槽 B 0x2000–0x3FFF；双 sector A/B 的选槽/seq 比较
+// 由 storage 任务负责，本模块只管布局与 CRC。
+//
+// v3 相对 v2（48B 记录）扩大设备端原值槽位（4→8，现用 6，留 2）、新增型号
+// 身份（model_name/identity_hash）与写记录时固件假定的 MIT 全量程三标度
+// （mit_*_limit_* + profile_version），用途是让"固件升级改了型号目录"可被发现。
 //
 // v2 相对 v1（32B 记录）增加设备端原值：设备参数以设备内为准，固件记录是
 // 上电比对的基准，比对必须比原值——关节侧 SI 会与换算系数一起错，比对恒
@@ -21,14 +26,18 @@ extern "C" {
 
 // 小端序字节 'D','M','P',0x01。
 #define PARAM_STORE_MAGIC 0x01504D44U
-#define PARAM_STORE_VERSION 2U
+#define PARAM_STORE_VERSION 3U
+#define PARAM_STORE_VERSION_V2 2U
 #define PARAM_STORE_VERSION_LEGACY 1U
 #define PARAM_STORE_RECORD_COUNT 64U
 #define PARAM_STORE_HEADER_SIZE 32U
-#define PARAM_STORE_RECORD_SIZE 48U
+#define PARAM_STORE_RECORD_SIZE 120U
+#define PARAM_STORE_RECORD_SIZE_V2 48U
 #define PARAM_STORE_LEGACY_RECORD_SIZE 32U
 #define PARAM_STORE_BLOB_SIZE \
   (PARAM_STORE_HEADER_SIZE + PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE)
+#define PARAM_STORE_BLOB_SIZE_V2 \
+  (PARAM_STORE_HEADER_SIZE + PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2)
 #define PARAM_STORE_LEGACY_BLOB_SIZE \
   (PARAM_STORE_HEADER_SIZE + PARAM_STORE_RECORD_COUNT * \
    PARAM_STORE_LEGACY_RECORD_SIZE)
@@ -39,14 +48,25 @@ typedef struct {
   // 设备端原值存在性：位 = 1u << param_device_slot_t。有位的槽位
   // device_raw 就是设备里存的值（写核验或回读得来），上电比对照它。
   uint8_t device_raw_present;
-  uint8_t reserved;
+  uint8_t reserved0;
   float kp;
   float kd;
   float pos_min;
   float pos_max;
   float vel_limit;
   float torque_limit;
-  uint32_t device_raw[PARAM_DEVICE_SLOT_COUNT]; // cnt/cnt/RPM/mA
+  // v3：槽位 4→8（现用 6，留 2 给后续设备对象如 0x6081/0x6060）。
+  uint32_t device_raw[8]; // cnt/cnt/RPM/mA/0x2650:01/0x2541
+  // v3 新增：型号身份与来源链。
+  char model_name[16];     // 型号目录名，NUL 结尾；空 = 未绑定
+  uint32_t identity_hash;  // 设备 0x1008 自报串的 CRC32；0 = 未核验
+  // v3 新增：写记录时固件假定的 MIT 全量程（来源 = 型号目录）。
+  // 值 0 = 未知（迁移来的记录）。用途：让「固件升级改了 profile」可被发现。
+  float mit_pos_limit_rad;
+  float mit_vel_limit_rad_s;
+  float mit_torque_limit_nm;
+  uint8_t profile_version; // 型号目录版本
+  uint8_t reserved[23];    // 后续项：零点 epoch / 跨零 / 运行时长 / MIT 实测标度
 } param_store_record_t;
 
 typedef struct {

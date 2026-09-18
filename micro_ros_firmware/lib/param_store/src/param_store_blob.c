@@ -19,14 +19,20 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
   return ~crc;
 }
 
-static uint32_t blob_crc(const param_store_blob_t *blob) {
-  // CRC 覆盖：header（crc 字段置零）+ 全部记录。
+// CRC 覆盖集：header（crc 字段置零）+ 全部记录。v1/v2/v3 三种记录布局共用同一
+// 定义——加/改头字段时只有这里要动，否则某个布局会静默校验失败退回默认值。
+static uint32_t crc_over_blob(const uint8_t *header, const uint8_t *records,
+                              size_t records_bytes) {
   uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
-  memcpy(header_copy, blob, PARAM_STORE_HEADER_SIZE);
+  memcpy(header_copy, header, PARAM_STORE_HEADER_SIZE);
   memset(header_copy + 16, 0, sizeof(uint32_t)); // crc32 字段偏移 = 16
   uint32_t crc = crc32_update(0U, header_copy, PARAM_STORE_HEADER_SIZE);
-  return crc32_update(crc, (const uint8_t *)blob->records,
-                      sizeof(blob->records));
+  return crc32_update(crc, records, records_bytes);
+}
+
+static uint32_t blob_crc(const param_store_blob_t *blob) {
+  return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
+                       sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_reset(void *storage, size_t size) {
@@ -228,12 +234,8 @@ _Static_assert(sizeof(param_store_blob_v1_t) == PARAM_STORE_LEGACY_BLOB_SIZE,
                "v1 blob 尺寸漂移");
 
 static uint32_t blob_v1_crc(const param_store_blob_v1_t *blob) {
-  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
-  memcpy(header_copy, blob, PARAM_STORE_HEADER_SIZE);
-  memset(header_copy + 16, 0, sizeof(uint32_t));
-  uint32_t crc = crc32_update(0U, header_copy, PARAM_STORE_HEADER_SIZE);
-  return crc32_update(crc, (const uint8_t *)blob->records,
-                      sizeof(blob->records));
+  return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
+                       sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_size,
@@ -307,12 +309,8 @@ _Static_assert(sizeof(param_store_blob_v2_t) == PARAM_STORE_BLOB_SIZE_V2,
                "v2 blob 尺寸漂移");
 
 static uint32_t blob_v2_crc(const param_store_blob_v2_t *blob) {
-  uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
-  memcpy(header_copy, blob, PARAM_STORE_HEADER_SIZE);
-  memset(header_copy + 16, 0, sizeof(uint32_t));
-  uint32_t crc = crc32_update(0U, header_copy, PARAM_STORE_HEADER_SIZE);
-  return crc32_update(crc, (const uint8_t *)blob->records,
-                      sizeof(blob->records));
+  return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
+                       sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
@@ -341,7 +339,10 @@ param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
     param_store_record_t *to = &dst->records[i];
     to->present = from->present;
     to->motor_id = from->motor_id;
-    to->device_raw_present = from->device_raw_present;
+    // 只搬低 4 位：v2 合法的写路径 slot >= 4 即拒，位 4/5 恒 0；掩码是为了
+    // 对"CRC 合法但高位被置位"的畸形 blob 也强制"未核验 = 位 0"这一约定，
+    // 而不是假设它成立（否则安全/方向槽会被谎报为"已核验且值为 0"）。
+    to->device_raw_present = (uint8_t)(from->device_raw_present & 0x0FU);
     to->kp = from->kp;
     to->kd = from->kd;
     to->pos_min = from->pos_min;

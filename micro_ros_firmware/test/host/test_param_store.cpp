@@ -333,8 +333,11 @@ void test_blob_migrate_v2() {
   // 用户数据一字不丢。
   float v = 0.0f;
   assert(param_store_blob_get(blob, 5, PARAM_FIELD_KP, &v) && v == 30.0f);
-  assert(param_store_blob_get(blob, 5, PARAM_FIELD_TORQUE_LIMIT, &v) && v == 45.0f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_KD, &v) && v == 1.0f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_POS_MIN, &v) && v == -3.14f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_POS_MAX, &v) && v == 3.14f);
   assert(param_store_blob_get(blob, 5, PARAM_FIELD_VEL_LIMIT, &v) && v == 3.0f);
+  assert(param_store_blob_get(blob, 5, PARAM_FIELD_TORQUE_LIMIT, &v) && v == 45.0f);
   // 四个旧设备槽原值保留，新两个槽是"未核验"。
   uint32_t raw = 0U;
   assert(param_store_blob_get_device_raw(blob, 5, PARAM_DEVICE_SLOT_POS_MIN, &raw));

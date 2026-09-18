@@ -69,6 +69,17 @@
 #define CERB_SAVE_CODE_POS_UPPER 2U
 #define CERB_SAVE_CODE_POS_LOWER 4U
 
+// 0x2650:01「关闭看门狗和限位保护」（厂家协议说明书条目；手册只给了写命令
+// 23 50 26 00 01 …）：写 1 = 关闭看门狗 + 限位保护，0 = 保护开。这是设备侧
+// 唯一的独立安全超时（帧间隔 >500ms 电机自锁），且关掉会连限位保护一起失效
+// ——CERB 型号的 capability_flags 是 CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底。
+// 读子索引 0x01 未经台架实测，见 validation plan。
+#define CERB_OBJ_SAFETY_PROTECT 0x2650U
+#define CERB_SUB_SAFETY_PROTECT 0x01U
+// 0x2541「电机方向定义」：0=CW，1=CCW。方向一翻，记录里所有 cnt 限位与零点的
+// 含义整体镜像。
+#define CERB_OBJ_MOTION_DIR 0x2541U
+
 // 位置限位字典范围（0x607D:01/:02 均为 -32767~32768 cnt，默认 -32767/32768）：
 // -π rad 折算是 -32768，比字典下限低 1 cnt，写下去可能被设备拒绝，故按字典钳。
 #define CERB_POS_CNT_MIN (-32767)
@@ -390,6 +401,7 @@ enum {
   CERB_VALUE_POS_UPPER,
   CERB_VALUE_SPEED,      // 关节侧 rad/s → 电机端 RPM
   CERB_VALUE_CURRENT,    // 关节侧 N·m → 峰值电流 mA
+  CERB_VALUE_PASSTHROUGH, // 读：原值即 SI（安全开关/方向，无单位换算）
 };
 
 typedef struct {
@@ -444,8 +456,8 @@ static const cerb_stage_desc_t kStagesTorqueLimit[3] = {
   CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
 };
 
-// REFRESH_PARAMS：4 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
-// 不再依赖阶段号硬编码）。
+// REFRESH_PARAMS：6 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
+// 不再依赖阶段号硬编码）。末两个是 v3 设备侧安全事实，只读回读、写侧不提供。
 // CLEAR_FAULT：单阶段清错帧，无应答。是否真清掉由设备后续状态帧的
 // fault_active 判定（既有 FAULT → READY_DISABLED 路径），不引入新确认机制。
 static const cerb_stage_desc_t kStagesClearFault[1] = {
@@ -453,7 +465,7 @@ static const cerb_stage_desc_t kStagesClearFault[1] = {
     0U, 0U },
 };
 
-static const cerb_stage_desc_t kStagesRefresh[4] = {
+static const cerb_stage_desc_t kStagesRefresh[6] = {
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
@@ -462,6 +474,11 @@ static const cerb_stage_desc_t kStagesRefresh[4] = {
                  MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
   CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
                  MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+  // v3：设备侧安全事实。读回即比对基准，写侧不提供（恢复靠外部工具）。
+  CERB_DESC_READ(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_PASSTHROUGH),
+  CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
 };
 
 // 事务 kind → 阶段表。READ_IDENTITY（分段上传）与 SET_MODE（空阶段）不在
@@ -550,6 +567,12 @@ static bool cerb_refresh_raw_to_si(uint8_t slot, uint32_t raw,
       *out = (float)motor_protocol_limit_ma_to_joint_nm(
           (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
       return true;
+    case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
+    case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
+      // 原值透传：这两个是枚举/标志位，没有工程单位可换算。
+      // value_si 仅供页面显示，裁决一律用 raw。
+      *out = (float)raw;
+      return true;
     default:
       return false;
   }
@@ -620,7 +643,7 @@ static bool cerb_config_stage_info(uint8_t stage,
     return true;
   }
   if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
-    out->waits_response = true; // 4 个 upload，每阶段等应答
+    out->waits_response = true; // 6 个 upload，每阶段等应答
     out->param_raw_valid = true;
     out->param_slot = desc->param_slot;
     out->param_raw = 0U; // 原值由设备应答带回（读缓冲载荷）
@@ -792,7 +815,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     return MOTOR_PROTOCOL_STAGE_IGNORE;
   }
 
-  // 设备参数回读（REFRESH_PARAMS）：4 个加速 upload，每阶段追加一个
+  // 设备参数回读（REFRESH_PARAMS）：6 个加速 upload，每阶段追加一个
   // motor_protocol_param_stage_t（设备端原值 + 关节侧换算值）进读缓冲。
   if (request->kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
     if (response->can_id != sdo_response_id || response->dlc < 8U) {

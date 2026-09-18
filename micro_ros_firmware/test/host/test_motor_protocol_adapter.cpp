@@ -563,9 +563,10 @@ static void test_cerb_identity_read_transaction() {
 }
 
 
-// 设备参数回读事务（REFRESH_PARAMS）：4 个加速 SDO upload
-// （0x607D:01/02、0x6080、0x2538），回值换算成关节侧 SI 后以 4 个 float
-// 小端追加进读缓冲；Vaxor 无此事务（stage_count=0 → 内核回 UNSUPPORTED）。
+// 设备参数回读事务（REFRESH_PARAMS）：6 个加速 SDO upload
+// （0x607D:01/02、0x6080、0x2538、0x2650:01、0x2541），回值换算成关节侧 SI 后
+// 以 6 个 float 小端追加进读缓冲；末两个是枚举/标志位，原值透传不做换算。
+// Vaxor 无此事务（stage_count=0 → 内核回 UNSUPPORTED）。
 static void test_cerb_refresh_params_transaction() {
   const motor_protocol_model_profile_t *profile = nullptr;
   assert(find_profile("cerb_r58_101", &profile)); // gear=101, Kt=0.086, eff=1
@@ -573,14 +574,18 @@ static void test_cerb_refresh_params_transaction() {
   motor_protocol_config_request_t req = {};
   req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
   req.motor_id = 4U;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 4U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) ==
+         MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
 
   const uint8_t kReadLower[8] = {0x40, 0x7D, 0x60, 0x01, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadUpper[8] = {0x40, 0x7D, 0x60, 0x02, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadSpeed[8] = {0x40, 0x80, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadCurrent[8] = {0x40, 0x38, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
-  const uint8_t *expect[4] = {kReadLower, kReadUpper, kReadSpeed, kReadCurrent};
-  for (uint8_t stage = 0U; stage < 4U; ++stage) {
+  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t kReadDirection[8] = {0x40, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t *expect[6] = {kReadLower, kReadUpper,     kReadSpeed,
+                              kReadCurrent, kReadSafety,  kReadDirection};
+  for (uint8_t stage = 0U; stage < 6U; ++stage) {
     motor_protocol_tx_frame_t frame = {};
     assert(motor_protocol_cerb_adapter.config_encode_stage(
         stage, profile, 4U, 0U, &req, &frame));
@@ -593,9 +598,9 @@ static void test_cerb_refresh_params_transaction() {
   }
   motor_protocol_tx_frame_t frame = {};
   assert(!motor_protocol_cerb_adapter.config_encode_stage(
-      4U, profile, 4U, 0U, &req, &frame));
+      6U, profile, 4U, 0U, &req, &frame));
 
-  uint8_t storage[32] = {0};
+  uint8_t storage[64] = {0};
   motor_protocol_read_buffer_t read = {storage, sizeof(storage), 0U, false};
   motor_protocol_raw_frame_t r = {};
   r.can_id = 0x580U + 4U;
@@ -631,23 +636,26 @@ static void test_cerb_refresh_params_transaction() {
          MOTOR_PROTOCOL_STAGE_RETRY);
   assert(read.size == 0U);
 
-  // 四个正常应答：16384 cnt(+90°)、-16384 cnt(-90°)、600 RPM、1000 mA。
+  // 六个正常应答：16384 cnt(+90°)、-16384 cnt(-90°)、600 RPM、1000 mA、
+  // 保护开关 0（保护开）、方向 0（CW）。
   struct {
     uint8_t payload[8];
-  } ok_frames[4] = {
+  } ok_frames[6] = {
       {{0x43, 0x7D, 0x60, 0x01, 0x00, 0x40, 0x00, 0x00}},
       {{0x43, 0x7D, 0x60, 0x02, 0x00, 0xC0, 0xFF, 0xFF}},
       {{0x43, 0x80, 0x60, 0x00, 0x58, 0x02, 0x00, 0x00}}, // 600 LE
       {{0x43, 0x38, 0x25, 0x00, 0xE8, 0x03, 0x00, 0x00}}, // 1000 LE
+      {{0x43, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00}}, // 0x2650:01 = 0
+      {{0x43, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00}}, // 0x2541 = 0
   };
-  for (uint8_t stage = 0U; stage < 4U; ++stage) {
+  for (uint8_t stage = 0U; stage < 6U; ++stage) {
     memcpy(r.data, ok_frames[stage].payload, 8U);
     const auto outcome =
         motor_protocol_cerb_adapter.config_on_response(stage, profile, &req, &r, &read);
     assert(outcome == MOTOR_PROTOCOL_STAGE_ADVANCE);
   }
   // 每阶段一个 motor_protocol_param_stage_t：设备端原值 + 关节侧换算值。
-  assert(read.size == 4U * sizeof(motor_protocol_param_stage_t) && !read.overflow);
+  assert(read.size == 6U * sizeof(motor_protocol_param_stage_t) && !read.overflow);
   const motor_protocol_param_stage_t *values =
       reinterpret_cast<const motor_protocol_param_stage_t *>(storage);
   assert(values[0].raw == 16384U);   // +90° 的 cnt（原值原样带出）
@@ -659,13 +667,17 @@ static void test_cerb_refresh_params_transaction() {
   assert(fabs(values[2].value_si - 2.0 * MOTOR_PROTOCOL_PI * 10.0 / 101.0) < 1e-5);
   // 限值对象用规格书峰值对（45 N·m ÷ 10.8 A），不是反馈的 Kt×gear 链。
   assert(fabs(values[3].value_si - 45.0 / 10.8) < 1e-5);
+  // 安全开关/方向：原值透传（无单位换算），raw=0 → SI=0。
+  assert(values[4].raw == 0U && values[4].value_si == 0.0f);
+  assert(values[5].raw == 0U && values[5].value_si == 0.0f);
 
   // 阶段 → 设备端参数槽位（内核按槽位落袋，不硬编码阶段号）。
   {
-    const uint8_t expect_slots[4] = {
+    const uint8_t expect_slots[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
         MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX,
-        MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX};
-    for (uint8_t stage = 0U; stage < 4U; ++stage) {
+        MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX,
+        MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION};
+    for (uint8_t stage = 0U; stage < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++stage) {
       motor_protocol_config_stage_info_t info = {};
       assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
       assert(info.param_raw_valid);
@@ -779,7 +791,7 @@ static void test_cerb_descriptor_table_bounds() {
   kinds[2].kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
   kinds[3].kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   kinds[4].kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-  const uint8_t counts[] = {1U, 6U, 3U, 3U, 4U};
+  const uint8_t counts[] = {1U, 6U, 3U, 3U, 6U};
 
   motor_protocol_tx_frame_t frame = {};
   motor_protocol_config_stage_info_t info = {};
@@ -955,6 +967,65 @@ static void test_profile_catalog_only_exposes_supported_models() {
   }
 }
 
+// v3：REFRESH 回读必须覆盖新增的两个安全槽位（0x2650:01 保护开关 / 0x2541 方向），
+// 且两者是**只读**阶段——请求帧是 SDO 上传（0x40），没有写路径（设计 §8.1：
+// 设备真把保护关掉时恢复靠外部工具）。原值透传：value_si == (float)raw，
+// 这两个是枚举/标志位，没有工程单位可换算。
+static void test_cerb_refresh_covers_safety_slots() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r58_101", &profile));
+
+  motor_protocol_config_request_t req = {};
+  req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  req.motor_id = 1U;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 6U);
+
+  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t kReadDirection[8] = {0x40, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t *expect[2] = {kReadSafety, kReadDirection};
+  const uint8_t slots[2] = {MOTOR_PROTOCOL_PARAM_SLOT_SAFETY,
+                            MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION};
+  for (uint8_t i = 0U; i < 2U; ++i) {
+    const uint8_t stage = (uint8_t)(4U + i);
+    motor_protocol_config_stage_info_t info = {};
+    assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
+    assert(info.param_slot == slots[i]);
+    assert(info.waits_response); // 读回等应答
+    motor_protocol_tx_frame_t frame = {};
+    assert(motor_protocol_cerb_adapter.config_encode_stage(stage, profile, 1U, 0U,
+                                                           &req, &frame));
+    assert(frame.data[0] == 0x40U); // 上传请求 = 只读，无写路径
+    assert(memcmp(frame.data, expect[i], 8U) == 0);
+  }
+
+  // 原值透传：应答 raw=1 → value_si=1.0（不做任何换算）；raw=0 → 0.0。
+  // 走真实的 on_response 路径（不是内部换算助手）。
+  uint8_t storage[16] = {0};
+  motor_protocol_raw_frame_t r = {};
+  r.can_id = 0x580U + 1U;
+  r.dlc = 8U;
+  const uint32_t kRaws[2] = {1U, 0U};
+  for (uint8_t i = 0U; i < 2U; ++i) {
+    const uint8_t stage = (uint8_t)(4U + i);
+    motor_protocol_read_buffer_t read = {storage, sizeof(storage), 0U, false};
+    const uint32_t raw = kRaws[i];
+    const uint8_t payload[8] = {0x43U, expect[i][1], expect[i][2], expect[i][3],
+                                (uint8_t)(raw & 0xFFU),
+                                (uint8_t)((raw >> 8U) & 0xFFU),
+                                (uint8_t)((raw >> 16U) & 0xFFU),
+                                (uint8_t)((raw >> 24U) & 0xFFU)};
+    memcpy(r.data, payload, 8U);
+    assert(motor_protocol_cerb_adapter.config_on_response(stage, profile, &req, &r,
+                                                          &read) ==
+           MOTOR_PROTOCOL_STAGE_ADVANCE);
+    assert(read.size == sizeof(motor_protocol_param_stage_t));
+    const motor_protocol_param_stage_t *v =
+        reinterpret_cast<const motor_protocol_param_stage_t *>(storage);
+    assert(v->raw == raw);
+    assert(v->value_si == (float)raw);
+  }
+}
+
 int main() {
   test_vaxor_match_rx_frame();
   test_vaxor_decode_reply_converts_si();
@@ -980,6 +1051,7 @@ int main() {
   test_cerb_identity_read_transaction();
   test_cerb_descriptor_table_bounds();
   test_cerb_refresh_params_transaction();
+  test_cerb_refresh_covers_safety_slots();
   test_adapter_id_ranges_disjoint();
   test_profile_catalog_only_exposes_supported_models();
   printf("test_motor_protocol_adapter: all passed\n");

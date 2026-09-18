@@ -291,12 +291,14 @@ static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id
 // 完整使能链路（CERB 路径）：反馈 → 读设备自报身份 → 命中目录即绑定 →
 // 连接 → 授权。
 // ---------------------------------------------------------------------------
-// 设备参数（CERB 0x607D:01/:02、0x6080、0x2538）：上电回读 → 与固件记录比对。
+// 设备参数（CERB 0x607D:01/:02、0x6080、0x2538、0x2650:01、0x2541）：上电回读 → 与固件记录比对。
 // ---------------------------------------------------------------------------
 
-// 设备四个管理对象的顺序（与 adapter 的 REFRESH 阶段同序）。
-static const uint16_t kDevIndex[4] = {0x607DU, 0x607DU, 0x6080U, 0x2538U};
-static const uint8_t kDevSub[4] = {1U, 2U, 0U, 0U};
+// 设备六个管理对象的顺序（与 adapter 的 REFRESH 阶段同序）。
+static const uint16_t kDevIndex[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+    0x607DU, 0x607DU, 0x6080U, 0x2538U, 0x2650U, 0x2541U};
+static const uint8_t kDevSub[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {1U, 2U, 0U,
+                                                                0U, 1U, 0U};
 
 static motor_protocol_raw_frame_t sdo_read_ack(uint16_t node, uint8_t stage,
                                                uint32_t value, uint32_t tick) {
@@ -329,11 +331,12 @@ static motor_protocol_raw_frame_t sdo_write_ack(uint16_t node, uint16_t index,
 // out_saw_p0：本事务期间是否观测到该节点的 P0 帧（软停等安全帧）。喂帧过程
 // 会清空待发队列，事后 flush 看不到已被取走的帧，故在 drain 时顺手记录。
 static uint32_t feed_device_params(motor_control_context_t *ctx, uint16_t node,
-                                   const uint32_t raw[4], uint32_t tick,
-                                   bool keepalive, bool *out_saw_p0 = nullptr) {
+                                   const uint32_t raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT],
+                                   uint32_t tick, bool keepalive,
+                                   bool *out_saw_p0 = nullptr) {
   motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
   uint32_t t = tick;
-  for (uint8_t stage = 0U; stage < 4U; ++stage) {
+  for (uint8_t stage = 0U; stage < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++stage) {
     if (keepalive) {
       motor_control_command_snapshot_t snap = make_snapshot(1000U + stage, t);
       snapshot_add(&snap, node, 0.1f, 0.0f, 0.0f);
@@ -403,16 +406,20 @@ static uint32_t feed_torque_write(motor_control_context_t *ctx, uint16_t node,
 }
 
 // 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
-static motor_control_stored_params_t make_device_record(uint16_t motor_id,
-                                                        const uint32_t raw[4],
-                                                        uint8_t raw_present) {
+static motor_control_stored_params_t make_device_record(
+    uint16_t motor_id, const uint32_t raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT],
+    uint8_t raw_present) {
   motor_control_stored_params_t rec = {};
   rec.motor_id = motor_id;
   rec.has_position_limits = (raw_present & 0x03U) == 0x03U;
   rec.has_velocity_limit = (raw_present & 0x04U) != 0U;
   rec.has_torque_limit = (raw_present & 0x08U) != 0U;
-  rec.device_raw_present = raw_present;
-  for (size_t i = 0; i < 4U; ++i) {
+  // v3：安全开关(0x2650:01)/方向(0x2541)两槽总是随记录落袋（出厂默认
+  // 0=保护开 / 0=CW），上电比对据此也能发现设备侧保护被外部工具关掉。
+  rec.device_raw_present =
+      (uint8_t)(raw_present | (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+  for (size_t i = 0; i < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++i) {
     rec.device_raw[i] = raw[i];
   }
   return rec;
@@ -423,12 +430,15 @@ static motor_control_stored_params_t make_device_record(uint16_t motor_id,
 #define kR58PeakMa 10800U
 // 下限 -32768 cnt（int32 补码）＝ -180°，上限 +32768 cnt ＝ +180°；
 // 3030 RPM 电机端 ＝ π rad/s 关节侧；10800 mA ＝ 45 N·m（规格书峰值）。
-static const uint32_t kR58Raw[4] = {0xFFFF8000U, 32768U, 3030U, kR58PeakMa};
+// v3 末两槽：保护开关 0（保护开）、方向 0（CW）——出厂默认。非 const：
+// 安全槽用例需要临时改一台的期望值再还原。
+static uint32_t kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+    0xFFFF8000U, 32768U, 3030U, kR58PeakMa, 0U, 0U};
 // 关节侧 N·m/A（限值口径）。
 #define kR58LimitNmPerAmp (45.0f / 10.8f)
 
 // 设备参数初始化收尾（新流程的一部分）：把"本机无记录"告知内核，驱动自动
-// 回读，再喂四个 SDO 应答。不做这一步该台停在 PENDING，按新口径不可使能。
+// 回读，再喂六个 SDO 应答。不做这一步该台停在 PENDING，按新口径不可使能。
 static void complete_device_param_init(motor_control_context_t *ctx, uint16_t node,
                                        uint32_t tick) {
   motor_control_stored_params_t none = {};
@@ -2841,8 +2851,8 @@ static void run_all_tests() {
 }
 
 
-// CERB 设备参数回读（REFRESH_PARAMS）：4 个加速 upload（:01/:02/0x6080/
-// 0x2538）全通后设备影子更新，param 视图反映换算后的关节侧值。
+// CERB 设备参数回读（REFRESH_PARAMS）：6 个加速 upload（:01/:02/0x6080/
+// 0x2538/0x2650:01/0x2541）全通后设备影子更新，param 视图反映换算后的关节侧值。
 static void test_cerb_refresh_params_transaction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -2897,6 +2907,15 @@ static void test_cerb_refresh_params_transaction() {
   // 阶段 3：读 0x2538 = 1000 mA → 1 A × (45/10.8) = 4.1667 N·m（限值系数）
   motor_control_service(&ctx, t);
   r = sdo_read(0U, 0x2538U, 1000U, t + 1);
+  motor_control_on_raw_frame(&ctx, &r);
+  t += 10;
+  // 阶段 4/5：v3 只读安全槽（0x2650:01 保护开关、0x2541 方向），原值透传。
+  motor_control_service(&ctx, t);
+  r = sdo_read(1U, 0x2650U, 0U, t + 1);
+  motor_control_on_raw_frame(&ctx, &r);
+  t += 10;
+  motor_control_service(&ctx, t);
+  r = sdo_read(0U, 0x2541U, 0U, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
 
   assert(has_result_event(&ctx, 41U, MOTOR_PROTOCOL_CONFIG_OK));
@@ -3112,6 +3131,13 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
   t += 10; motor_control_service(&ctx, t);
   motor_protocol_raw_frame_t f4 = sdo(0, 0x2538, 1000, t + 1);
   motor_control_on_raw_frame(&ctx, &f4);
+  // v3：REFRESH 还有两个只读安全槽位（保护开关/方向），位图到齐才收尾。
+  t += 10; motor_control_service(&ctx, t);
+  motor_protocol_raw_frame_t f5 = sdo(1, 0x2650, 0, t + 1);
+  motor_control_on_raw_frame(&ctx, &f5);
+  t += 10; motor_control_service(&ctx, t);
+  motor_protocol_raw_frame_t f6 = sdo(0, 0x2541, 0, t + 1);
+  motor_control_on_raw_frame(&ctx, &f6);
   assert(has_result_event(&ctx, 51U, MOTOR_PROTOCOL_CONFIG_OK));
 
   // 回读之后：来源转为设备，记录不得再覆盖影子（设备为准）。
@@ -3145,7 +3171,7 @@ static void test_device_param_boot_verify_ok() {
 
   uint32_t t = feed_device_params(&ctx, 7, kR58Raw, 121, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
-  assert(entry_of(&ctx, 7)->dev_raw_present == 0x0FU);
+  assert(entry_of(&ctx, 7)->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   assert(entry_of(&ctx, 7)->dev_raw[3] == kR58PeakMa);
   assert(entry_of(&ctx, 7)->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
@@ -3171,7 +3197,8 @@ static void test_device_param_mismatch_blocks_motion() {
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
-  const uint32_t device_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  const uint32_t device_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+      0xFFFF8000U, 32768U, 3030U, 13300U, 0U, 0U};
   (void)feed_device_params(&ctx, 7, device_raw, 120, false);
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
@@ -3216,7 +3243,8 @@ static void test_device_param_write_syncs_record_and_recovers() {
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
-  const uint32_t bad_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  const uint32_t bad_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+      0xFFFF8000U, 32768U, 3030U, 13300U, 0U, 0U};
   (void)feed_device_params(&ctx, 7, bad_raw, 120, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
   assert(!motor_control_take_record_dirty(&ctx));
@@ -3263,7 +3291,7 @@ static void test_device_param_unverified_blocks_motion() {
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
 
-  // 只喂心跳、不回应答：单次尝试 = 4 阶段 ×(20ms 超时 ×3)，尝试之间退避
+  // 只喂心跳、不回应答：单次尝试 = 阶段 0 连续 3 次超时即定论，尝试之间退避
   // 500ms；用尽 MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 次才定论。
   uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 3000U);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
@@ -3379,7 +3407,8 @@ static void test_device_param_runtime_mismatch_soft_stops() {
   refresh.motor_id = 7;
   refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
   assert(motor_control_submit_config(&ctx, &refresh, 320));
-  const uint32_t bad_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  const uint32_t bad_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+      0xFFFF8000U, 32768U, 3030U, 13300U, 0U, 0U};
   bool saw_p0 = false;
   (void)feed_device_params(&ctx, 7, bad_raw, 321, true, &saw_p0);
 
@@ -3400,12 +3429,17 @@ static void test_device_param_partial_record_compare() {
   // 记录只含峰值电流一项；设备的位置/转速与记录里的值无关。
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x08U);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
-  const uint32_t device_raw[4] = {1024U, 2048U, 100U, kR58PeakMa};
+  const uint32_t device_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {1024U, 2048U,
+                                                                 100U,
+                                                                 kR58PeakMa,
+                                                                 0U, 0U};
   (void)feed_device_params(&ctx, 7, device_raw, 120, false);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
-  assert(e->dev_raw_present == 0x0FU);
-  assert(e->record_raw_present == 0x08U);
+  assert(e->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
+  assert(e->record_raw_present ==
+         (uint8_t)(0x08U | (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                   (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)));
 
   // 记录里声明的峰值电流对不上 → 未初始化（其余槽位不参与）。
   motor_control_context_t ctx2;
@@ -3413,7 +3447,9 @@ static void test_device_param_partial_record_compare() {
   bring_cerb_to_bound(&ctx2, 9, "cerb_r58_101", 100);
   motor_control_stored_params_t rec2 = make_device_record(9, kR58Raw, 0x08U);
   motor_control_apply_stored_params(&ctx2, &rec2, 1, 110);
-  const uint32_t bad_raw[4] = {1024U, 2048U, 100U, 13300U};
+  const uint32_t bad_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {1024U, 2048U,
+                                                             100U, 13300U, 0U,
+                                                             0U};
   (void)feed_device_params(&ctx2, 9, bad_raw, 120, false);
   assert(entry_of(&ctx2, 9)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
 }
@@ -3429,27 +3465,29 @@ static void test_device_param_view_exposes_record() {
 
   const motor_control_param_view_t *v = view_of(&ctx, 7);
   assert(v->dev_raw_present == 0U);        // 还没回读设备
-  assert(v->record_raw_present == 0x0FU);  // 记录基准在视图里可见
+  assert(v->record_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);  // 记录基准在视图里可见
   assert(v->record_raw[3] == kR58PeakMa);
   assert(v->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_RECORD);
   assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
 
   // 回读成功后：设备端原值就位，记录仍保留（比对依据）。
-  const uint32_t device_raw[4] = {0xFFFF8000U, 32768U, 3030U, 13300U};
+  const uint32_t device_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
+      0xFFFF8000U, 32768U, 3030U, 13300U, 0U, 0U};
   (void)feed_device_params(&ctx, 7, device_raw, 120, false);
   v = view_of(&ctx, 7);
   assert(v->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   assert(v->dev_raw[3] == 13300U);
-  assert(v->record_raw_present == 0x0FU);
+  assert(v->record_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   assert(v->record_raw[3] == kR58PeakMa);
   assert(v->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_DEVICE);
   assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
 }
 
-// 多台 CERB 并行上电回读：每台必须各发 4 个 SDO 读请求，对象顺序固定为
+// 多台 CERB 并行上电回读：每台必须各发 6 个 SDO 读请求，对象顺序固定为
 // 0x607D:01（位置下限）→ 0x607D:02（位置上限）→ 0x6080（最大转速）→
-// 0x2538（峰值电流）。多台并行时同一拍各台各推进一个阶段，总线上是
-// "逐台交错"而非"逐台跑完再下一台"——按台过滤日志时每台恰好 4 条读请求。
+// 0x2538（峰值电流）→ 0x2650:01（保护开关）→ 0x2541（方向）。多台并行时同一拍
+// 各台各推进一个阶段，总线上是"逐台交错"而非"逐台跑完再下一台"——按台过滤
+// 日志时每台恰好 6 条读请求。
 static void test_device_param_four_reads_per_motor() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3466,10 +3504,10 @@ static void test_device_param_four_reads_per_motor() {
   // 逐拍推进：每拍喂心跳保活 → service → 取帧（**同总线每拍至多一条 SDO
   // 请求**，一问一答）→ 立刻喂该请求的应答。
   uint8_t got_count[4] = {0};
-  uint8_t got_index[4][4] = {{0}};
+  uint8_t got_index[4][MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {{0}};
   uint32_t t = 120U;
   motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
-  for (uint8_t round = 0U; round < 40U; ++round) {
+  for (uint8_t round = 0U; round < 48U; ++round) {
     for (size_t i = 0; i < 4U; ++i) {
       motor_protocol_raw_frame_t hb = cerb_feedback(ids[i], t);
       motor_control_on_raw_frame(&ctx, &hb);
@@ -3487,8 +3525,16 @@ static void test_device_param_four_reads_per_motor() {
       const uint16_t index =
           (uint16_t)(frames[k].data[1] | ((uint16_t)frames[k].data[2] << 8U));
       const uint8_t sub = frames[k].data[3];
-      const size_t slot = (index == 0x607DU) ? (sub == 1U ? 0U : 1U)
-                                             : (index == 0x6080U ? 2U : 3U);
+      size_t slot = 5U; // 0x2541 方向
+      if (index == 0x607DU) {
+        slot = (sub == 1U) ? 0U : 1U;
+      } else if (index == 0x6080U) {
+        slot = 2U;
+      } else if (index == 0x2538U) {
+        slot = 3U;
+      } else if (index == 0x2650U) {
+        slot = 4U;
+      }
       assert(slot == got_count[node - 1U]); // 每台阶段顺序固定
       got_index[node - 1U][got_count[node - 1U]] = (uint8_t)index;
       got_count[node - 1U]++;
@@ -3501,7 +3547,7 @@ static void test_device_param_four_reads_per_motor() {
     t += 2U;
   }
   for (size_t i = 0; i < 4U; ++i) {
-    assert(got_count[i] == 4U); // 每台恰好 4 条读
+    assert(got_count[i] == MOTOR_PROTOCOL_PARAM_SLOT_COUNT); // 每台恰好 6 条读
     assert(entry_of(&ctx, ids[i])->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
     assert(entry_of(&ctx, ids[i])->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   }
@@ -3529,7 +3575,7 @@ static void test_device_param_reconnect_keeps_record() {
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING); // 结论作废，待重读
   assert(!e->dev_read_done);
   assert(e->record_valid);                    // 记录保留
-  assert(e->record_raw_present == 0x0FU);
+  assert(e->record_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   assert(e->record_raw[3] == kR58PeakMa);
   assert(e->dev_raw_present == 0U);           // 旧影子作废
 }

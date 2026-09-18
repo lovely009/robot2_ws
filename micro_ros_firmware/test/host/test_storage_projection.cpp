@@ -178,6 +178,83 @@ static void test_blob_to_boot_projection() {
   assert(storage_projection_blob_to_boot(blob, small, 0) == 0U);
 }
 
+// 设备侧安全开关（0x2650:01）与方向（0x2541）槽必须落盘：二者是纯原值事实，
+// 缺失则上电比对（dev_params_mismatch_mask）永远跳过，CONFIG_CONFLICT 永不触发。
+static void test_device_safety_and_direction_slots_persisted() {
+  auto *blob = reset_blob();
+  // id11：四个原限值 + 安全/方向都经设备核验（真机默认对：SAFETY=1、DIRECTION=0）
+  motor_control_param_view_t v = cerb_view(11);
+  v.dev_raw_present =
+      (1U << PARAM_DEVICE_SLOT_POS_MIN) | (1U << PARAM_DEVICE_SLOT_POS_MAX) |
+      (1U << PARAM_DEVICE_SLOT_VEL_LIMIT) |
+      (1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT) |
+      (1U << PARAM_DEVICE_SLOT_SAFETY) | (1U << PARAM_DEVICE_SLOT_DIRECTION);
+  v.dev_raw[PARAM_DEVICE_SLOT_POS_MIN] = 100;
+  v.dev_raw[PARAM_DEVICE_SLOT_POS_MAX] = 200;
+  v.dev_raw[PARAM_DEVICE_SLOT_VEL_LIMIT] = 300;
+  v.dev_raw[PARAM_DEVICE_SLOT_TORQUE_LIMIT] = 400;
+  v.dev_raw[PARAM_DEVICE_SLOT_SAFETY] = 1;
+  v.dev_raw[PARAM_DEVICE_SLOT_DIRECTION] = 0; // 0 值：靠位图而非数值判存在
+  // id12：安全/方向的位有、方向取 1——与 id11 互为镜像，槽位错位必挂
+  motor_control_param_view_t w = cerb_view(12);
+  w.dev_raw_present = (1U << PARAM_DEVICE_SLOT_SAFETY) |
+                      (1U << PARAM_DEVICE_SLOT_DIRECTION);
+  w.dev_raw[PARAM_DEVICE_SLOT_SAFETY] = 0;
+  w.dev_raw[PARAM_DEVICE_SLOT_DIRECTION] = 1;
+  motor_control_param_view_t views[2] = {v, w};
+  storage_projection_views_to_blob(blob, views, 2);
+
+  const param_store_record_t *r11 = find_record(blob, 11);
+  assert(r11 != nullptr);
+  // 新增两槽：位图与数值都要落盘
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_SAFETY));
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_DIRECTION));
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_SAFETY] == 1);
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_DIRECTION] == 0);
+  uint32_t raw = 0U;
+  assert(param_store_blob_get_device_raw(blob, 11, PARAM_DEVICE_SLOT_SAFETY,
+                                         &raw) &&
+         raw == 1);
+  assert(param_store_blob_get_device_raw(blob, 11,
+                                         PARAM_DEVICE_SLOT_DIRECTION,
+                                         &raw) &&
+         raw == 0);
+  // 原有四槽行为不变
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_POS_MIN));
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_POS_MAX));
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_VEL_LIMIT));
+  assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT));
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_POS_MIN] == 100);
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_POS_MAX] == 200);
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_VEL_LIMIT] == 300);
+  assert(r11->device_raw[PARAM_DEVICE_SLOT_TORQUE_LIMIT] == 400);
+  assert(r11->present & (1U << PARAM_FIELD_POS_MIN));
+  assert(r11->present & (1U << PARAM_FIELD_TORQUE_LIMIT));
+
+  const param_store_record_t *r12 = find_record(blob, 12);
+  assert(r12 != nullptr);
+  assert(r12->device_raw[PARAM_DEVICE_SLOT_SAFETY] == 0); // 值 0 仍算已核验
+  assert(r12->device_raw[PARAM_DEVICE_SLOT_DIRECTION] == 1);
+
+  // 位图没有 4/5：记录不得声称核验过，读接口按缺槽返回 false
+  auto *b2 = reset_blob();
+  motor_control_param_view_t x = cerb_view(13);
+  x.dev_raw_present =
+      (1U << PARAM_DEVICE_SLOT_POS_MIN) | (1U << PARAM_DEVICE_SLOT_POS_MAX);
+  x.dev_raw[PARAM_DEVICE_SLOT_POS_MIN] = 5;
+  x.dev_raw[PARAM_DEVICE_SLOT_POS_MAX] = 6;
+  motor_control_param_view_t vs[1] = {x};
+  storage_projection_views_to_blob(b2, vs, 1);
+  const param_store_record_t *r13 = find_record(b2, 13);
+  assert(r13 != nullptr);
+  assert((r13->device_raw_present & (1U << PARAM_DEVICE_SLOT_SAFETY)) == 0U);
+  assert((r13->device_raw_present & (1U << PARAM_DEVICE_SLOT_DIRECTION)) == 0U);
+  assert(!param_store_blob_get_device_raw(b2, 13, PARAM_DEVICE_SLOT_SAFETY,
+                                          &raw));
+  assert(!param_store_blob_get_device_raw(b2, 13, PARAM_DEVICE_SLOT_DIRECTION,
+                                          &raw));
+}
+
 // motor_id=0 的视图被跳过（0 非法）。
 static void test_zero_motor_id_skipped() {
   auto *blob = reset_blob();
@@ -194,6 +271,7 @@ int main() {
   test_cerb_falls_back_to_record_raw();
   test_vaxor_soft_limits_finite_only();
   test_blob_to_boot_projection();
+  test_device_safety_and_direction_slots_persisted();
   test_zero_motor_id_skipped();
   return 0;
 }

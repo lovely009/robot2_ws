@@ -78,6 +78,18 @@ void storage_projection_views_to_blob(
             blob, v->motor_id, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
             raw_values[PARAM_DEVICE_SLOT_TORQUE_LIMIT]);
       }
+      // 安全开关与方向是纯原值事实（无 SI 对应、无 PARAM_FIELD_*），
+      // 只落 raw、不做 isfinite 守卫；不落盘会让上电比对永远跳过这两项。
+      if ((raw_present & (uint8_t)(1U << PARAM_DEVICE_SLOT_SAFETY)) != 0U) {
+        param_store_blob_set_device_raw(blob, v->motor_id,
+                                        PARAM_DEVICE_SLOT_SAFETY,
+                                        raw_values[PARAM_DEVICE_SLOT_SAFETY]);
+      }
+      if ((raw_present & (uint8_t)(1U << PARAM_DEVICE_SLOT_DIRECTION)) != 0U) {
+        param_store_blob_set_device_raw(
+            blob, v->motor_id, PARAM_DEVICE_SLOT_DIRECTION,
+            raw_values[PARAM_DEVICE_SLOT_DIRECTION]);
+      }
       continue; // 设备侧型号的限值到此为止（不落软限位分支）
     }
     if (isfinite(v->pos_min_rad)) {

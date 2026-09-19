@@ -273,11 +273,12 @@ function renderMotors() {
           : (lc === 4 ? 'var(--ok)' : 'var(--warn)'));
       const stateText = fault ? (FAULT_NAMES[fault] || fault)
         : (LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '--');
+      const mo = r.motion || {};
       return `<li class="${id === state.selectedId ? 'on' : ''}" data-id="${id}"
           title="${devDetailTitle(id)}">
         <span class="jdot" style="background:${dot}"></span>
-        <span class="jid">m${id}</span>
-        <span class="jmodel">${t.model_name || '未绑定'}</span>
+        <span><span class="jid">m${id}</span><span class="jmodel">${t.model_name || '未绑定'}</span></span>
+        <span class="jpos">${fmt(mo.position, 3)}</span>
         <span class="jstate ${fault ? 'warn' : 'muted'}">${stateText}</span>
       </li>`;
     });
@@ -286,15 +287,22 @@ function renderMotors() {
     : '<li class="empty">暂无数据（等待 motor_topology）</li>';
 
   // 汇总 chips。
-  let onlineN = 0, faultN = 0;
+  let onlineN = 0, faultN = 0, activeN = 0, conflictN = 0;
   for (const r of state.motors.values()) {
-    const online = r.status && r.status.online !== undefined ? r.status.online
-      : (r.topo ? r.topo.online : false);
+    const st = r.status || {}, t = r.topo || {};
+    const online = st.online !== undefined ? st.online : t.online;
     if (online) onlineN++;
-    if (r.status && r.status.unified_fault_code) faultN++;
+    if (st.unified_fault_code) faultN++;
+    if (st.lifecycle === 4) activeN++;                       // ACTIVE = 固件此刻真在运动
+    if (t.conflict || st.lifecycle === 7) conflictN++;
   }
   $('chipOnline').textContent = `在线 ${onlineN}/${state.motors.size}`;
+  $('chipActive').textContent = `运行 ${activeN}`;
+  $('chipActive').classList.toggle('ok', activeN > 0);
+  $('chipConflict').textContent = `冲突 ${conflictN}`;
+  $('chipConflict').classList.toggle('warn', conflictN > 0);
   $('chipFault').textContent = `故障 ${faultN}`;
+  $('chipFault').classList.toggle('err', faultN > 0);
   renderSelected();
   arm3dSyncColors();
 }
@@ -336,6 +344,8 @@ function renderFoldSummaries() {
   $('sumSend').textContent = `${nCmd} 台目标` + (streamTimer ? ' · 连发中' : '');
   $('sumEvents').textContent = state.events.length
     ? `${state.events.length} 条` : '空';
+  $('sumChart').textContent = (chart.running ? '实时' : '暂停') + ' · ' + $('chartCh').value;
+  $('sumHist').textContent = history.length ? `${history.length} 条` : '空';
 }
 
 // ---------- 臂视图 ----------

@@ -26,6 +26,8 @@
     </div>
     <div class="chips">
       <span class="chip" id="chipOnline">在线 -/-</span>
+      <span class="chip" id="chipActive">运行 0</span>
+      <span class="chip" id="chipConflict">冲突 0</span>
       <span class="chip" id="chipFault">故障 0</span>
       <span class="chip" id="chipHz">运动流 -- Hz</span>
     </div>
@@ -72,12 +74,13 @@
       <canvas id="arm3d"></canvas>
       <div class="hud" id="armHud">臂视图加载中…</div>
       <div class="legend">
-        <span><i class="sw" style="background:#4da3ff"></i>实际</span>
-        <span><i class="sw ghost"></i>目标（页面下发的，非固件设定点）</span>
-        <span><i class="sw" style="background:#37d67a"></i>就绪</span>
-        <span><i class="sw" style="background:#f5b94a"></i>冲突/过渡</span>
-        <span><i class="sw" style="background:#ff6b6b"></i>故障</span>
-        <span class="muted">拖拽旋转 · 滚轮缩放 · 点小球选中</span>
+        <span><i class="sw" style="background:#3d9bff"></i>实际</span>
+        <span><i class="sw ghost"></i>目标</span>
+        <span><i class="dt" style="background:#2fd07a"></i>就绪</span>
+        <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
+        <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
+        <span class="spacer"></span>
+        <span>拖拽旋转 · 点击关节</span>
       </div>
     </section>
 
@@ -96,18 +99,12 @@
           <div><span>故障</span><b id="selFault">--</b></div>
           <div><span>测量年龄</span><b id="selAge">--</b></div>
         </div>
-        <p class="warn tiny">
-          「跟随误差」= <b>页面下发的目标</b> − 实测位置（幽灵用的是页面自己发的值）。
-          固件侧的钳位、软停、拒收<b>画不出来</b>——真实结论看事件日志的
-          <code>CONFIG_RESULT</code>。
-        </p>
       </details>
 
       <details class="card" data-fold="per" open>
         <summary>逐台参数与策略 <span class="spacer"></span>
           <span class="sum" id="sumPer">--</span></summary>
         <div class="ctrl-row wrap">
-          <span class="muted tiny">限值以驱动板为准；使能 / kp / kd 走策略话题，每台各自下发</span>
           <span class="spacer"></span>
           <label class="check tiny"><input type="checkbox" id="chkAllParams"> 显示全部</label>
         </div>
@@ -128,27 +125,13 @@
             </tbody>
           </table>
         </div>
-        <p class="warn tiny">
-          <b>限值</b>（位置 度 / 速度 度·秒⁻¹ / 力矩 安培，换算由固件在参数边界做）
-          与<b>限位保护</b>仅在电机未运动时受理；设零要求失能。取消「限位保护」=
-          关闭设备侧看门狗与限位保护，该关节将<b>没有任何限位在执行</b>（急停与机械
-          限位仍需就位），且该设置<b>掉电不保存</b>。
-        </p>
-        <p class="warn tiny">
-          <b>使能 / kp / kd 只能写、不能读回</b>——固件没有回读通路，所以框里显示的是
-          <b>页面最后一次下发出去的值</b>，不是固件当前值。落地结果看事件日志的
-          <code>CONFIG_RESULT</code>（reason 0=OK、2=非法；设备参数未核对的台会被
-          直接拒，这正是 <code>CONFIG_CONFLICT</code> 的含义）。代数必须严格前进才
-          受理「未武装 → 武装」，防止周期重发在故障后自动复权。
-        </p>
       </details>
     </aside>
   </main>
 
   <!-- ============ 常驻下发条 ============ -->
   <details class="sendbar" data-fold="send" open>
-    <summary>下发 <span class="muted tiny">/micro_ros_do/motor_command_array</span>
-      <span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+    <summary title="/micro_ros_do/motor_command_array">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
     <div class="table-wrap">
       <table class="cmd">
         <thead>
@@ -166,16 +149,12 @@
       <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
     </div>
     <div id="cmdResult" class="result tiny"></div>
-    <p class="warn tiny">
-      完整快照：缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
-      目标里含未初始化或离线的电机时会被点名提示——这些台<b>不会动，也不会有报错回显</b>。
-    </p>
   </details>
 
   <!-- ============ 底部抽屉 ============ -->
   <section class="drawer">
     <details class="sec" data-fold="d-chart">
-      <summary>曲线 <span class="muted tiny">位置 / 速度 / 力矩 / 电流</span></summary>
+      <summary>曲线<span class="spacer"></span><span class="sum" id="sumChart">--</span></summary>
       <div class="ctrl-row wrap">
         <label class="check">通道
           <select id="chartCh">
@@ -204,8 +183,7 @@
     </details>
 
     <details class="sec" data-fold="d-events">
-      <summary>事件日志 <span class="muted tiny">/micro_ros_up/motor_events</span>
-        <span class="spacer"></span><span class="sum" id="sumEvents">--</span></summary>
+      <summary title="/micro_ros_up/motor_events">事件日志<span class="spacer"></span><span class="sum" id="sumEvents">--</span></summary>
       <div class="ctrl-row wrap">
         <button id="btnExportEvents" class="tiny-btn">导出 JSON</button>
         <button id="btnExportEventsCsv" class="tiny-btn">导出 CSV</button>
@@ -215,7 +193,7 @@
     </details>
 
     <details class="sec" data-fold="d-hist">
-      <summary>命令历史 <span class="muted tiny">已发快照</span></summary>
+      <summary>命令历史<span class="spacer"></span><span class="sum" id="sumHist">--</span></summary>
       <div class="ctrl-row wrap">
         <button id="btnExportHist" class="tiny-btn">导出 JSON</button>
         <button id="btnClearHist" class="tiny-btn secondary">清空</button>
@@ -229,7 +207,7 @@
     </details>
 
     <details class="sec" data-fold="d-teach">
-      <summary>示教 <span class="muted tiny">点位序列</span></summary>
+      <summary>示教</summary>
       <div class="ctrl-row wrap">
         <button id="btnTeachRecord" class="tiny-btn primary">记录当前命令</button>
         <button id="btnTeachAdd" class="tiny-btn">+ 空点位</button>
@@ -242,9 +220,6 @@
         <label class="check"><input type="checkbox" id="chkTeachLoop"> 循环</label>
         <span class="muted tiny" id="teachStatus">空闲</span>
       </div>
-      <p class="muted tiny">
-        每行：等待 ms 后下发该行快照；电机目标用「ID:pos,vel,eff」文本表示（0 目标 = 该行不含此电机）。
-      </p>
       <div class="table-wrap">
         <table class="teach">
           <thead>
@@ -255,8 +230,21 @@
       </div>
     </details>
 
+    <details class="sec" data-fold="d-notes">
+      <summary>说明<span class="spacer"></span><span class="sum">F1</span></summary>
+      <ul class="notes">
+        <li><b>限位保护</b>取消勾选 = 关闭设备侧看门狗与限位保护，该关节将<b>没有任何限位在执行</b>（急停与机械限位仍需就位）；该设置掉电不保存。限值与保护开关仅在电机未运动时受理。</li>
+        <li>限值单位：位置 °、速度 °/s、力矩 A——换算由固件在参数边界做。设零要求失能。</li>
+        <li><b>使能 / kp / kd 只能写、不能读回</b>（固件无回读通路），框里是页面最后一次下发的值。落地结论看事件日志的 <code>CONFIG_RESULT</code>：0=OK、2=非法。设备参数未核对的台（<code>CONFIG_CONFLICT</code>）会被直接拒。代数必须严格前进才受理「未武装→武装」。</li>
+        <li>命令快照是<b>完整</b>快照：缺席的受控电机被软停；停止连发 30 ms 后全软停、100 ms 失能；任一 NaN/Inf 整包拒收。</li>
+        <li>示教：每行等待 ms 后下发该行快照，目标写成 <code>ID:pos,vel,eff</code>；0 目标 = 该行不含此电机。</li>
+        <li>臂视图与曲线都受 <code>motion_states</code> 的 50 Hz 限制。虚线幽灵 = <b>页面下发的目标</b>，不是固件设定点；固件的钳位/软停/拒收画不出来。</li>
+        <li>话题：上行 <code>micro_ros_up/{motor_topology, motion_states, motor_status_array, motor_events, diagnostics, trajectory_state, imu/data, imu/temp}</code>；下行 <code>micro_ros_do/{motor_command_array, motor_trajectory, motor_policy}</code>。</li>
+      </ul>
+    </details>
+
     <details class="sec" data-fold="d-imu">
-      <summary>IMU <span class="muted tiny">姿态 · 人工地平仪 <span class="hz" id="imuHz">-- Hz</span></span></summary>
+      <summary>IMU<span class="spacer"></span><span class="hz" id="imuHz">-- Hz</span></summary>
       <div class="imu-wrap">
         <div class="imu-row">
           <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>

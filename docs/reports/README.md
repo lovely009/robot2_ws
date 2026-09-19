@@ -10,3 +10,4 @@
 - [2026-09-18 固件高内聚重构九节点回归](2026-09-18-firmware-refactor-regression.md) — 重构行为保持回归（断连撤权/配置事务 golden/持久化/BUS_OFF），真机专项仍开放。
 - [2026-09-19 真机 CERB 台架记录](2026-09-19-cerb-real-hardware-bench.md) — `0x2650` 读子索引纠错（`:01` → `:00`）：修前四台真机全部 `DEV_INIT` UNVERIFIED、无法使能；修后 `last_error` 41 → 40、位图点名真实不一致槽位。
 - [2026-09-19 参数面容量重构交接](2026-09-19-firmware-param-surface-handoff.md) — **进行中**：`0x2650` 语义已定、`rclc` 参数树 48 台不可行（240 KB > 120 KB 池），决定「块话题配置 + `system.*` 保留 + 状态走话题」，代码半成品。
+- [2026-09-20 Web 臂视图与发送侧仪表](2026-09-20-web-arm-view-and-tx-instrument.md) — 下行控制链端到端打通（以模拟器逐帧日志为证）；修掉 `rx_hw_lost`/`tx_frame_count` 未接线互相覆盖（"发送帧率"此前报错数，50 vs 真值 208）；模拟器两处会打死进程的缺陷；Web 上位机改以臂为中心 + URDF 三维臂视图。**未决**：MIT 帧实测每台 ~39.4 Hz，非 200 Hz。

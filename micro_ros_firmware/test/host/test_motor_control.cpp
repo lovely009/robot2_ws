@@ -291,14 +291,16 @@ static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id
 // 完整使能链路（CERB 路径）：反馈 → 读设备自报身份 → 命中目录即绑定 →
 // 连接 → 授权。
 // ---------------------------------------------------------------------------
-// 设备参数（CERB 0x607D:01/:02、0x6080、0x2538、0x2650:01、0x2541）：上电回读 → 与固件记录比对。
+// 设备参数（CERB 0x607D:01/:02、0x6080、0x2538、0x2650:00、0x2541）：上电回读 → 与固件记录比对。
 // ---------------------------------------------------------------------------
 
 // 设备六个管理对象的顺序（与 adapter 的 REFRESH 阶段同序）。
 static const uint16_t kDevIndex[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
     0x607DU, 0x607DU, 0x6080U, 0x2538U, 0x2650U, 0x2541U};
+// 子索引镜像 adapter 的 REFRESH 阶段表；安全槽是 0x2650:**00**（2026-09-19 真机
+// 实测唯一存在的子索引，:01/:02 回 ABORT 0x06090011），不是固件早期假设的 :01。
 static const uint8_t kDevSub[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {1U, 2U, 0U,
-                                                                0U, 1U, 0U};
+                                                                0U, 0U, 0U};
 
 static motor_protocol_raw_frame_t sdo_read_ack(uint16_t node, uint8_t stage,
                                                uint32_t value, uint32_t tick) {
@@ -405,6 +407,23 @@ static uint32_t feed_torque_write(motor_control_context_t *ctx, uint16_t node,
   return tick + 4U;
 }
 
+// 保护开关写事务（写 0x2650:00 + 读回核验），无保存阶段。
+static uint32_t feed_safety_write(motor_control_context_t *ctx, uint16_t node,
+                                  uint32_t raw, uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(ctx, tick);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t ack = sdo_write_ack(node, 0x2650U, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t rd = sdo_read_ack(node, 4U, raw, tick + 3U);
+  motor_control_on_raw_frame(ctx, &rd);
+  motor_control_service(ctx, tick + 4U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  return tick + 4U;
+}
+
 // 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
 // include_safety_slots：true（默认）= 把 v3 的只读安全槽（4=保护开关 / 5=方向）
 // 一并置位——"设备端回读过后落盘"的记录形状。false = 按 raw_present 原样，模拟
@@ -418,7 +437,7 @@ static motor_control_stored_params_t make_device_record(
   rec.has_position_limits = (raw_present & 0x03U) == 0x03U;
   rec.has_velocity_limit = (raw_present & 0x04U) != 0U;
   rec.has_torque_limit = (raw_present & 0x08U) != 0U;
-  // v3：安全开关(0x2650:01)/方向(0x2541)两槽随记录落袋（出厂默认 0=保护开 /
+  // v3：安全开关(0x2650:00)/方向(0x2541)两槽随记录落袋（出厂默认 0=保护开 /
   // 0=CW），上电比对据此也能发现设备侧保护被外部工具关掉。
   rec.device_raw_present =
       include_safety_slots
@@ -2858,7 +2877,7 @@ static void run_all_tests() {
 
 
 // CERB 设备参数回读（REFRESH_PARAMS）：6 个加速 upload（:01/:02/0x6080/
-// 0x2538/0x2650:01/0x2541）全通后设备影子更新，param 视图反映换算后的关节侧值。
+// 0x2538/0x2650:00/0x2541）全通后设备影子更新，param 视图反映换算后的关节侧值。
 static void test_cerb_refresh_params_transaction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -2915,9 +2934,9 @@ static void test_cerb_refresh_params_transaction() {
   r = sdo_read(0U, 0x2538U, 1000U, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
   t += 10;
-  // 阶段 4/5：v3 只读安全槽（0x2650:01 保护开关、0x2541 方向），原值透传。
+  // 阶段 4/5：v3 只读安全槽（0x2650:00 保护开关、0x2541 方向），原值透传。
   motor_control_service(&ctx, t);
-  r = sdo_read(1U, 0x2650U, 0U, t + 1);
+  r = sdo_read(0U, 0x2650U, 0U, t + 1); // 子索引 0x00（真机实测）
   motor_control_on_raw_frame(&ctx, &r);
   t += 10;
   motor_control_service(&ctx, t);
@@ -3139,7 +3158,7 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
   motor_control_on_raw_frame(&ctx, &f4);
   // v3：REFRESH 还有两个只读安全槽位（保护开关/方向），位图到齐才收尾。
   t += 10; motor_control_service(&ctx, t);
-  motor_protocol_raw_frame_t f5 = sdo(1, 0x2650, 0, t + 1);
+  motor_protocol_raw_frame_t f5 = sdo(0, 0x2650, 0, t + 1); // 子索引 0x00（真机实测）
   motor_control_on_raw_frame(&ctx, &f5);
   t += 10; motor_control_service(&ctx, t);
   motor_protocol_raw_frame_t f6 = sdo(0, 0x2541, 0, t + 1);
@@ -3288,7 +3307,7 @@ static void test_device_param_write_syncs_record_and_recovers() {
   assert(has_result_event(&ctx, 82U, MOTOR_PROTOCOL_CONFIG_OK));
 }
 
-// v3：安全开关（槽 4 = 0x2650:01）纳入上电比对——记录说"保护开(0)"、设备第 4
+// v3：安全开关（槽 4 = 0x2650:00）纳入上电比对——记录说"保护开(0)"、设备第 4
 // 阶段回读说"保护已被关(1)" → MISMATCH，且位图须点名 bit4（否则上位机只能盲写）。
 static void test_dev_init_flags_safety_mismatch() {
   motor_control_context_t ctx;
@@ -3412,6 +3431,65 @@ static void test_limit_write_preserves_readonly_safety_slots() {
 
   kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved_safety;
   kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = saved_dir;
+}
+
+// 保护开关写事务：写成功后**记录必须跟着挪到新值**——否则刚写完就与记录
+// 不一致，下次上电必判"未初始化"，是自己给自己造的停机。同时验证
+// "运动中不得动安全边界"：ACTIVE 下写安全开关必须被拒。
+static void test_safety_protect_write_syncs_record_and_gates_motion() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(!motor_control_take_record_dirty(&ctx));
+
+  // 关掉设备侧保护：厂家原值 1（0 = 保护开）。
+  motor_protocol_config_request_t req = {};
+  req.request_id = 93U;
+  req.motor_id = 7;
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  req.safety_protect_raw = 1U;
+  motor_control_service(&ctx, 140);
+  assert(motor_control_submit_config(&ctx, &req, 141));
+  (void)feed_safety_write(&ctx, 7, 1U, 142);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(has_result_event(&ctx, 93U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  assert((e->record_raw_present &
+          (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK); // 写完仍然一致
+  assert(motor_control_take_record_dirty(&ctx));    // 已排入落盘
+  // 方向槽是只读的，本事务不得碰它。
+  assert(e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] ==
+         kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION]);
+
+  // 运动中不得动安全边界：先开到 ACTIVE。CERB 有 100ms 使能整定窗
+  // （enable_settle_ms），窗内只发使能帧不发运动目标——所以要持续喂反馈 +
+  // 快照把窗走完，不能一跳 100ms 过去（那会先被 100ms 新鲜度级联清权）。
+  for (uint32_t t = 160U; t <= 290U; t += 10U) {
+    motor_protocol_raw_frame_t fbk = cerb_feedback(7, t);
+    motor_control_on_raw_frame(&ctx, &fbk);
+    motor_control_command_snapshot_t s2 = make_snapshot(100U + t, t + 1U);
+    snapshot_add(&s2, 7, 0.1f, 0.0f, 0.0f);
+    assert(motor_control_apply_command_snapshot(&ctx, &s2, t + 1U));
+    motor_control_service(&ctx, t + 2U);
+  }
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) >= 1U);
+
+  motor_protocol_config_request_t reopen = req;
+  reopen.request_id = 95U;
+  reopen.safety_protect_raw = 0U; // 想重新打开保护
+  motor_control_service(&ctx, 295);
+  assert(!motor_control_submit_config(&ctx, &reopen, 296));
+  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  // 被拒后设备侧不得留下半截状态。
+  assert(entry_of(&ctx, 7)->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
 }
 
 // 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
@@ -3617,7 +3695,7 @@ static void test_device_param_view_exposes_record() {
 
 // 多台 CERB 并行上电回读：每台必须各发 6 个 SDO 读请求，对象顺序固定为
 // 0x607D:01（位置下限）→ 0x607D:02（位置上限）→ 0x6080（最大转速）→
-// 0x2538（峰值电流）→ 0x2650:01（保护开关）→ 0x2541（方向）。多台并行时同一拍
+// 0x2538（峰值电流）→ 0x2650:00（保护开关）→ 0x2541（方向）。多台并行时同一拍
 // 各台各推进一个阶段，总线上是"逐台交错"而非"逐台跑完再下一台"——按台过滤
 // 日志时每台恰好 6 条读请求。
 static void test_device_param_four_reads_per_motor() {
@@ -4450,6 +4528,7 @@ int main() {
   test_device_param_migrated_record_skips_safety_slots();
   test_device_param_write_syncs_record_and_recovers();
   test_limit_write_preserves_readonly_safety_slots();
+  test_safety_protect_write_syncs_record_and_gates_motion();
   test_device_param_read_retry_recovers();
   test_device_param_unverified_blocks_motion();
   test_device_param_pending_blocks_enable();

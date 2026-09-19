@@ -177,7 +177,10 @@ class MotorModel:
             self.sdo_offset = 0
             # 厂家管理对象（CANopen 字典）：位置限幅 cnt（±180°）、
             # 最大转速 RPM、峰值电流 mA。固件写后读回/REFRESH 上传的对端。
-            # 0x2650:01 保护开关：0 = 看门狗 + 限位保护开（出厂默认），1 = 关。
+            # 0x2650:00 保护开关：0 = 看门狗 + 限位保护开（出厂默认），1 = 关。
+            # 子索引 0x00 是 2026-09-19 真机实测确认的**唯一**存在的那一个
+            # （:01/:02 回 ABORT 0x06090011）；建错子索引会让台架永远复现不出固件
+            # 读不动的现象——模拟器要照对端建模，不是照固件假设建模。
             # 0x2541 方向：0 = CW，1 = CCW。
             # 0x6064 负载端位置当前值：设零后应为 0（设零生效核验用；固件暂未读）。
             self.sdo_params = {
@@ -185,7 +188,7 @@ class MotorModel:
                 (0x607D, 2): 32768,
                 (0x6080, 0): 600,
                 (0x2538, 0): 1000,
-                (0x2650, 0x01): 0,
+                (0x2650, 0x00): 0,
                 (0x2541, 0x00): 0,
                 (0x6064, 0x00): 0,
             }
@@ -252,7 +255,7 @@ class SlcanSim:
         # 故意制造与固件记录不一致的场景：保护关 / 方向 CCW。
         for mid in safety_off_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
-                self.models[mid].sdo_params[(0x2650, 0x01)] = 1
+                self.models[mid].sdo_params[(0x2650, 0x00)] = 1
         for mid in dir_ccw_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
                 self.models[mid].sdo_params[(0x2541, 0x00)] = 1
@@ -344,7 +347,8 @@ class SlcanSim:
                           True, self.use_brs, m, "sdo_write_ack")
             else:
                 self.send(0x580 + node,
-                          bytes([0x80, data[1], data[2], data[3], 0, 0, 0, 0]),
+                          bytes([0x80, data[1], data[2], data[3],
+                                 0x11, 0x00, 0x09, 0x06]),  # 0x06090011 子索引不存在
                           True, self.use_brs, m, "sdo_abort")
             return
         if command == 0x40:
@@ -357,7 +361,8 @@ class SlcanSim:
                 return
             if index != 0x1008:
                 self.send(0x580 + node,
-                          bytes([0x80, data[1], data[2], data[3], 0, 0, 0, 0]),
+                          bytes([0x80, data[1], data[2], data[3],
+                                 0x11, 0x00, 0x09, 0x06]),  # 0x06090011 子索引不存在
                           True, self.use_brs, m, "sdo_abort")
                 return
             m.sdo_offset = 0
@@ -522,7 +527,7 @@ def main():
                     help="自报 R58LITE_V2 身份的 CERB 节点（其余 CERB 节点"
                          "自报 R48LITE_V2；固件按身份串自动绑定型号）")
     ap.add_argument("--safety-off", type=int, nargs="*", default=[],
-                    help="把这些 CERB 节点的 0x2650:01 置 1（关闭看门狗+限位保护），"
+                    help="把这些 CERB 节点的 0x2650:00 置 1（关闭看门狗+限位保护），"
                          "用于制造与固件记录不一致的场景")
     ap.add_argument("--dir-ccw", type=int, nargs="*", default=[],
                     help="把这些 CERB 节点的 0x2541 置 1（CCW），用于制造方向不一致")

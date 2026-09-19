@@ -32,10 +32,11 @@ const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
 // micro_ros_agent/src/can_bridge_msgs/msg/MotorEvent.msg 的 EVENT_DEV_INIT
 // 注释块。固件新增槽位时，这里与那条注释必须同步改——只改一边会静默错位。
 const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流',
-  '保护开关(0x2650:01)', '方向(0x2541)'];
-// 参数面能改的槽位（0..3）；槽 4/5（保护开关/方向）不在参数面，写参数改不了。
-const DEV_SLOT_PARAM_MASK = 0x0F;
-const DEV_SLOT_EXTERNAL_MASK = 0x30;
+  '保护开关(0x2650:00)', '方向(0x2541)'];
+// 参数面能改的槽位：0..3（限值四项）+ 4（保护开关，m<id>.limit_protect）。
+// 只剩槽 5（方向 0x2541）不在参数面——它没有对应的参数项，写不回去。
+const DEV_SLOT_PARAM_MASK = 0x1F;
+const DEV_SLOT_EXTERNAL_MASK = 0x20;
 const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致', '回读不成功'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
@@ -964,7 +965,8 @@ function paramServiceName(typeName) {
 }
 // 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /motor_policy
 // 话题（固件起把这三项从参数面退役）。
-const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit'];
+const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit',
+  'limit_protect'];
 // 参数服务调用结果：id -> {enable, kp, ...}（字符串原值，NaN 为空）
 const paramCache = new Map();
 
@@ -1006,7 +1008,7 @@ function renderParamRows() {
   const tbody = $('paramRows');
   const ids = [...paramCache.keys()].sort((a, b) => a - b);
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="12">参数集为空（等待电机发现）</td></tr>';
+    tbody.innerHTML = '<tr class="empty"><td colspan="10">参数集为空（等待电机发现）</td></tr>';
     return;
   }
   tbody.innerHTML = ids.map((id) => {
@@ -1040,6 +1042,15 @@ function renderParamRows() {
       return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(v[f])}"` +
         (hint ? ` title="${hint}"` : '') + `>`;
     };
+    // 保护开关：参数 1 = 保护生效（设备侧原值 0）。设备还没回读到该对象时
+    // 固件给 NaN —— 这时勾选框禁用，不能让操作员以为自己看到了真值。
+    const protect = Number(v['limit_protect']);
+    const protectCell = Number.isFinite(protect)
+      ? `<input type="checkbox" data-id="${id}" data-field="limit_protect"` +
+        (protect === 1 ? ' checked' : '') +
+        ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
+        '（该关节将没有任何限位在执行）。仅未运动时受理。">'
+      : '<input type="checkbox" disabled title="设备还没回读到该对象">';
     return `<tr>
       <td class="num">${id}</td>
       <td>${model || '<span class="muted">--</span>'}</td>
@@ -1047,6 +1058,7 @@ function renderParamRows() {
       <td>${src}</td>
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
+      <td>${protectCell}</td>
       <td><button class="tiny-btn" data-refresh="${id}">回读</button>
         <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
         <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
@@ -1073,19 +1085,12 @@ function devSlotNames(mask) {
   return DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
 }
 
-// 恢复口径（MISMATCH 用）：槽 0..3 在参数面，写回对应项即可；槽 4/5
-// （0x2650:01 保护开关 / 0x2541 方向）**不在参数面**，重跑参数写事务改不了它们
-// ——只能拿 cangaroo 或厂商上位机把设备对象改回期望值，再重连重读。
+// 恢复口径（MISMATCH 用）：槽 0..4 在参数面，写回对应项即可；只剩槽 5
+// （0x2541 方向）没有参数项——它只能拿 cangaroo 或厂商上位机改回设备对象，
+// 再重连重读。
 function devRecoveryText(mask) {
-  const external = (mask & DEV_SLOT_EXTERNAL_MASK) !== 0;
-  const param = (mask & DEV_SLOT_PARAM_MASK) !== 0;
-  if (external && param) {
-    return '写回对应参数项即可，但保护开关/方向不在参数面——' +
-      '须用 cangaroo 或厂商工具改回设备对象后重连重读';
-  }
-  if (external) {
-    return '保护开关/方向不在参数面，写参数改不了——' +
-      '须用 cangaroo 或厂商工具改回设备对象后重连重读';
+  if ((mask & DEV_SLOT_EXTERNAL_MASK) !== 0) {
+    return '写回对应参数项即可；方向(0x2541)没有参数项，须用 cangaroo 或厂商工具改回后重连重读';
   }
   return '写回对应项即可恢复';
 }
@@ -1234,9 +1239,14 @@ async function applyParams() {
     const field = inp.dataset.field;
     const name = `m${id}.${field}`;
     try {
-      if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
-      const value = parseFloat(inp.value);
-      if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
+      let value;
+      if (inp.type === 'checkbox') {
+        value = inp.checked ? 1 : 0;
+      } else {
+        if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
+        value = parseFloat(inp.value);
+        if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
+      }
       const type = 3; // double
       const r = await paramSetValue(name, type, field, value);
       if (!r.results[0].successful) {

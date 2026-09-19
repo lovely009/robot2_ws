@@ -69,13 +69,22 @@
 #define CERB_SAVE_CODE_POS_UPPER 2U
 #define CERB_SAVE_CODE_POS_LOWER 4U
 
-// 0x2650:01「关闭看门狗和限位保护」（厂家协议说明书条目；手册只给了写命令
-// 23 50 26 00 01 …）：写 1 = 关闭看门狗 + 限位保护，0 = 保护开。这是设备侧
-// 唯一的独立安全超时（帧间隔 >500ms 电机自锁），且关掉会连限位保护一起失效
-// ——CERB 型号的 capability_flags 是 CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底。
-// 读子索引 0x01 未经台架实测，见 validation plan。
+// 0x2650 看门狗/限位保护开关（子索引 **0x00**）：
+//   读   40 50 26 00 00 … → 反馈 43 50 26 00 0x …（0x 即当前状态）
+//   开启 23 50 26 00 **00** …
+//   关闭 23 50 26 00 **01** …
+// 0 = 保护生效，1 = 关闭（官方 PR0002 §4.6 只列了"关闭"一条，开启/读法由
+// owner 手工核实 + SLCAN 复现）。这是设备侧唯一的独立安全超时（帧间隔 >500ms
+// 电机自锁），且关掉会连限位保护一起失效——CERB 型号的 capability_flags 是
+// CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底。
+// **易失**（2026-09-19 实测）：掉电后回到上电初值，0x2539 保存码对它无效
+// （官方 §4.11：码 1 只保存 PI 参数和最大电流）。要"保护必须开着"须每次上电
+// 显式发一次开启帧，不能指望设备记住。
+// **读子索引实测**（2026-09-19）：:01 / :02 一律 ABORT 0x06090011（子索引不
+// 存在），只有 :00 可读。此前按 0x01 读会让 REFRESH 恒挂在安全槽上 →
+// UNCONFIRMED → UNVERIFIED，全部 CERB 都到不了 DEV_INIT_OK、永远无法使能。
 #define CERB_OBJ_SAFETY_PROTECT 0x2650U
-#define CERB_SUB_SAFETY_PROTECT 0x01U
+#define CERB_SUB_SAFETY_PROTECT 0x00U
 // 0x2541「电机方向定义」：0=CW，1=CCW。方向一翻，记录里所有 cnt 限位与零点的
 // 含义整体镜像。
 #define CERB_OBJ_MOTION_DIR 0x2541U
@@ -402,6 +411,7 @@ enum {
   CERB_VALUE_SPEED,      // 关节侧 rad/s → 电机端 RPM
   CERB_VALUE_CURRENT,    // 关节侧 N·m → 峰值电流 mA
   CERB_VALUE_PASSTHROUGH, // 读：原值即 SI（安全开关/方向，无单位换算）
+  CERB_VALUE_SAFETY_RAW,  // 写/读：0x2650:00 原值（0=保护开，1=关），不换算
 };
 
 typedef struct {
@@ -481,6 +491,19 @@ static const cerb_stage_desc_t kStagesRefresh[6] = {
                  MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
 };
 
+// 0x2650:00 看门狗/限位保护开关：写 + 读回核验，**不跟 0x2539 保存阶段**。
+// 手册只给了关闭命令「23 50 26 00 01 00 00 00」，没给这个对象对应的保存码
+// （对比 0x607D 那句明确写着"设置完成后需要保存 Flash"），所以掉电是否保持
+// **实测无效**（2026-09-19）：发过码 1 后掉电，保护开关照样回退；官方 §4.11
+// 明确码 1 只保存 PI 参数和最大电流，覆盖面不含本对象。读回核验照旧：写下去的值必须能
+// 读回来，否则重发本阶段（≤2 次后内核收敛 UNCONFIRMED）。
+static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
+  CERB_DESC_WRITE(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
+                  MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
+  CERB_DESC_READ(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
+};
+
 // 事务 kind → 阶段表。READ_IDENTITY（分段上传）与 SET_MODE（空阶段）不在
 // 表内，由三个接口特殊处理；返回 NULL 表示该 kind 不走设备事务。
 static const cerb_stage_desc_t *cerb_stage_table(
@@ -508,6 +531,10 @@ static const cerb_stage_desc_t *cerb_stage_table(
       *count = (uint8_t)(sizeof(kStagesClearFault) /
                          sizeof(kStagesClearFault[0]));
       return kStagesClearFault;
+    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
+      *count = (uint8_t)(sizeof(kStagesSafetyProtect) /
+                         sizeof(kStagesSafetyProtect[0]));
+      return kStagesSafetyProtect;
     default:
       *count = 0U;
       return NULL;
@@ -542,6 +569,9 @@ static uint32_t cerb_stage_write_value(
                                             request->max_velocity_rad_s);
     case CERB_VALUE_CURRENT:
       return cerb_joint_nm_to_motor_ma(profile, request->max_torque_nm);
+    case CERB_VALUE_SAFETY_RAW:
+      // 厂家原值直通：本层不做方向语义反转（不认"保护是否生效"，只认字节）。
+      return request->safety_protect_raw;
     default:
       return 0U;
   }

@@ -76,12 +76,16 @@ static param_store_record_t *find_record(param_store_blob_t *blob,
   return NULL;
 }
 
+// 不落在 float 字段里的参数：`enable` 是策略位（不持久化），`limit_protect`
+// 的值持久化在 device_raw[槽 4]（见 param_store_blob_set_device_raw）——
+// 这两个走本组 get/set 只会拿到 false，不会静默丢值。
 bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
                           param_field_t field, float value) {
   if (blob == NULL || motor_id == 0U) {
     return false;
   }
-  if (field == PARAM_FIELD_ENABLE || field >= PARAM_FIELD_COUNT) {
+  if (field == PARAM_FIELD_ENABLE || field == PARAM_FIELD_LIMIT_PROTECT ||
+      field >= PARAM_FIELD_COUNT) {
     return false;
   }
   param_store_record_t *rec = find_record(blob, motor_id);
@@ -114,7 +118,7 @@ bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
 bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
                           param_field_t field, float *value) {
   if (blob == NULL || value == NULL || field == PARAM_FIELD_ENABLE ||
-      field >= PARAM_FIELD_COUNT) {
+      field == PARAM_FIELD_LIMIT_PROTECT || field >= PARAM_FIELD_COUNT) {
     return false;
   }
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {

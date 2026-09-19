@@ -5,8 +5,10 @@
 #include <string.h>
 
 static const char *const kFieldNames[PARAM_FIELD_COUNT] = {
-    "enable",         "kp",          "kd",         "pos_min",
-    "pos_max",        "vel_limit",   "torque_limit"};
+    "enable",     "kp",         "kd",           "pos_min",
+    "pos_max",    "vel_limit",  "torque_limit", "limit_protect",
+    "current_kp", "current_ki", "velocity_kp",  "velocity_ki",
+    "position_kp", "position_ki"};
 
 bool param_name_build_motor(char *buf, size_t size, uint16_t motor_id,
                             param_field_t field) {
@@ -77,6 +79,16 @@ bool param_value_ok(param_field_t field, float value, float upper_limit,
         return false;
       }
       break;
+    case PARAM_FIELD_LIMIT_PROTECT:
+      // 布尔量：只认 0/1。**不参与下面的 upper_limit 钳制**——把 2 钳成 1
+      // 会把"写错了"变成"静默关掉保护"，是这个对象上最不该发生的失败模式。
+      if (value != 0.0f && value != 1.0f) {
+        return false;
+      }
+      if (clamped != NULL) {
+        *clamped = value;
+      }
+      return true;
     default:
       break; // enable/位置字段不走本函数（enable 是 bool，位置成对校验）
   }

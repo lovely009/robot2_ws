@@ -8,3 +8,5 @@
 - [2026-09-11 第一轮 FDCAN1 台架记录](2026-09-11-fdcan1-bench-run1-findings.md) — 历史记录；Y7/物理层判断已被第二轮修正。
 - [2026-09-11 第二轮复测结论](2026-09-11-fdcan1-bench-run2-findings.md) — 当前 CANable2 `b158aa7` 使用 Y5；九节点 CAN FD+BRS 30 秒 GREEN。
 - [2026-09-18 固件高内聚重构九节点回归](2026-09-18-firmware-refactor-regression.md) — 重构行为保持回归（断连撤权/配置事务 golden/持久化/BUS_OFF），真机专项仍开放。
+- [2026-09-19 真机 CERB 台架记录](2026-09-19-cerb-real-hardware-bench.md) — `0x2650` 读子索引纠错（`:01` → `:00`）：修前四台真机全部 `DEV_INIT` UNVERIFIED、无法使能；修后 `last_error` 41 → 40、位图点名真实不一致槽位。
+- [2026-09-19 参数面容量重构交接](2026-09-19-firmware-param-surface-handoff.md) — **进行中**：`0x2650` 语义已定、`rclc` 参数树 48 台不可行（240 KB > 120 KB 池），决定「块话题配置 + `system.*` 保留 + 状态走话题」，代码半成品。

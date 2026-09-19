@@ -41,6 +41,10 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_CLEAR_FAULT) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT),
     "mailbox/protocol config kind 契约不一致：CLEAR_FAULT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT),
+    "mailbox/protocol config kind 契约不一致：SET_SAFETY_PROTECT");
 
 #include <cmath>
 #include <cstring>
@@ -418,6 +422,26 @@ static void test_config_gate_precedes_validation() {
 
 
 // REFRESH_PARAMS：无载荷请求，只凭 request_id/motor_id 即可入队。
+// 保护开关载荷是厂家原值 0/1：越界值必须在 mailbox 就挡掉（写出去的是
+// "关掉看门狗 + 限位保护"，不能靠猜）。
+static void test_safety_protect_request_validation() {
+  control_mailbox_t mailbox;
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_config_request_t req = make_mode_request(7U, 1U, 0U);
+  req.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
+  req.value.safety_protect_raw = 0U;
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.safety_protect_raw = 1U;
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.safety_protect_raw = 2U;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+  req.value.safety_protect_raw = 0xFFFFFFFFU;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+}
+
 static void test_refresh_params_request_is_accepted() {
   control_mailbox_t mailbox{};
   control_mailbox_init(&mailbox);
@@ -460,6 +484,7 @@ static void test_set_zero_request_is_accepted() {
 
 int main() {
   test_refresh_params_request_is_accepted();
+  test_safety_protect_request_validation();
   test_set_zero_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();

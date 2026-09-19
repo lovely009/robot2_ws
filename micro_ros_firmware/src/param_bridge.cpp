@@ -63,11 +63,16 @@ static const char *const kSystemClearFaultSeq = "system.clear_fault_seq";
 
 static const uint32_t kSyncPeriodMs = 100U;  // 影子同步周期
 static const uint32_t kRegisterPerPoll = 2U; // 每拍最多注册电机数
-// ROS 参数面上每电机只暴露 4 项（限位/限速/限流）。enable/kp/kd 是动态量，
-// 已移到 /motor_policy 话题（ARD §19.4 本就禁止它们进命令快照），不再占
-// 参数面预算。注意 param_field_t 仍是 7 项且**不要改**——它是 Flash blob 的
-// present 位图契约与记录布局；退役的字段只是不再被注册，布局不变、无需迁移。
-#define PARAM_MOTOR_FIELD_COUNT 4U
+// ROS 参数面上每电机暴露 5 项：限位×2 / 限速 / 限流 + 设备侧保护开关。
+// enable/kp/kd 是动态量，已移到 /motor_policy 话题（ARD §19.4 本就禁止它们进
+// 命令快照），不再占参数面预算。注意 param_field_t 仍是 8 项且**不要改**——
+// 它是 Flash blob 的 present 位图契约与记录布局；退役的字段只是不再被注册，
+// 布局不变、无需迁移。
+// **容量代价（未决，见 validation plan）**：4 → 5 项把
+// `kMaxMotors` 从 (176-10)/4 = 41 砍到 (176-10)/5 = **33**，够不到"实际部署
+// 约 40 台"。提到 215 槽需多吃 ~12.8 KB（实测 328 B/槽），而当前 heap_free
+// 只有 12,328 B —— 放不下。要么改回系统级命令形态，要么先扩容堆。
+#define PARAM_MOTOR_FIELD_COUNT 5U
 
 static const uint32_t kMaxMotors =
     (PARAM_BRIDGE_MAX_PARAMS - kSystemParamCount) / PARAM_MOTOR_FIELD_COUNT;
@@ -167,6 +172,10 @@ static void get_double_or_nan(const char *name, double *out) {
   }
 }
 
+// mark_outstanding 要的是地址，绑定到静态存储期对象上（局部 const 也行，
+// 但这里显式命名，免得读的人以为可以省掉）。
+static const param_field_t kSafetyField = PARAM_FIELD_LIMIT_PROTECT;
+
 static control_mailbox_config_kind_t field_config_kind(param_field_t field) {
   switch (field) {
     case PARAM_FIELD_ENABLE:
@@ -178,6 +187,8 @@ static control_mailbox_config_kind_t field_config_kind(param_field_t field) {
       return CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
     case PARAM_FIELD_TORQUE_LIMIT:
       return CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
+    case PARAM_FIELD_LIMIT_PROTECT:
+      return CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
     default:
       return (control_mailbox_config_kind_t)0;
   }
@@ -222,6 +233,31 @@ static bool submit_single_limit(MotorSlot *slot, param_field_t field,
   (void)param_name_build_motor(name, sizeof(name), slot->motor_id, field);
   get_double_or_nan(name, &slot->old_value[field]);
   mark_outstanding(slot, request.request_id, &field, 1);
+  return true;
+}
+
+// 保护开关提交（唯一的**反向**字段：参数 1 = 保护生效 ↔ 厂家原值 0）。
+// 反转只在这一处发生，protocol 层与 mailbox 只认原值。
+static bool submit_safety_protect(MotorSlot *slot, double value) {
+  if (!param_value_ok(PARAM_FIELD_LIMIT_PROTECT, (float)value, 0.0f, nullptr)) {
+    report_error(ERR_LOCAL_VALIDATION, slot->motor_id);
+    return false;
+  }
+  control_mailbox_config_request_t request = {};
+  request.request_id = next_request_id();
+  request.received_tick_ms = millis();
+  request.motor_id = slot->motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
+  request.value.safety_protect_raw = (value == 1.0) ? 0U : 1U;
+  if (!motor_rt_submit_config(&request)) {
+    report_error(ERR_SUBMIT_FAILED, slot->motor_id);
+    return false;
+  }
+  param_name_buf_t name;
+  (void)param_name_build_motor(name, sizeof(name), slot->motor_id,
+                               PARAM_FIELD_LIMIT_PROTECT);
+  get_double_or_nan(name, &slot->old_value[PARAM_FIELD_LIMIT_PROTECT]);
+  mark_outstanding(slot, request.request_id, &kSafetyField, 1);
   return true;
 }
 
@@ -422,6 +458,9 @@ static bool param_on_modification(const Parameter *old_param,
     case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
       slot->old_value[field] = old_value;
       return submit_single_limit(slot, field, new_value);
+    case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
+      slot->old_value[field] = old_value;
+      return submit_safety_protect(slot, new_value);
     default:
       return false;
   }
@@ -480,6 +519,16 @@ static double view_field(const motor_control_param_view_t *v,
       return param_units_rad_to_deg(v->velocity_limit_rad_s);
     case PARAM_FIELD_TORQUE_LIMIT:
       return param_units_nm_to_amp(v->torque_limit_nm, v->torque_per_amp);
+    case PARAM_FIELD_LIMIT_PROTECT: {
+      // 设备端原值 → 对外正向语义：设备 0 = 保护开 → 参数 1。
+      // 设备还没回读到该槽位时给 NaN（页面显示 --），**不给默认值**——
+      // 猜一个"保护是开的"会让操作员以为限位在生效。
+      const uint8_t bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_SAFETY);
+      if ((v->dev_raw_present & bit) == 0U) {
+        return NAN;
+      }
+      return v->dev_raw[PARAM_DEVICE_SLOT_SAFETY] == 0U ? 1.0 : 0.0;
+    }
     default:
       return NAN;
   }
@@ -524,7 +573,8 @@ static void register_motor_params(const motor_control_param_view_t *v) {
   slot->bound = v->bound;
   slot->torque_per_amp = v->torque_per_amp;
 
-  // 只注册静态量（限位/限速/限流）；enable/kp/kd 走 /motor_policy 话题。
+  // 注册静态量：限位×2 / 限速 / 限流 / 保护开关（POS_MIN..COUNT-1）。
+  // enable/kp/kd 是动态量，走 /motor_policy 话题，不占参数面。
   param_name_buf_t name;
   for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
     (void)param_name_build_motor(name, sizeof(name), v->motor_id,

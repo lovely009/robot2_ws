@@ -2,6 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **勘误（2026-09-19，真机台架）**：本计划全程把安全开关建模成 `0x2650:01`，是**错的**。
+> 四台真机上 `0x2650` 只有子索引 **`0x00`** 可读，`:01`/`:02` 回 ABORT `0x06090011`
+> （子索引不存在）——手册写命令 `23 50 26 00 01 …` 里 `00` 才是子索引，后面的 `01`
+> 是数据。按 `:01` 读会让 `REFRESH_PARAMS` 恒挂在安全槽上，全部 CERB 到不了
+> `DEV_INIT_OK`、永远无法使能。代码、模拟器与 host 测试都已改为 `0x00`。
+> 见[真机台架记录](../../../docs/reports/2026-09-19-cerb-real-hardware-bench.md)与
+> [validation plan](motor-runtime-validation.md) 的 TBD-CONFIG-02。
+> **下文保留当时原文**（含各任务里的代码片段与命令），不再逐行改写；
+> 读到时请按本勘误换算子索引。
+
 **Goal:** 把 W25 参数 blob 从 v2（48 B 记录 / 每槽 1 扇区）升到 v3（120 B 记录 / 每槽 2 扇区），
 并把设备侧安全事实（`0x2650:01` 看门狗+限位保护、`0x2541` 方向）纳入上电比对与拒绝使能门禁。
 
@@ -626,6 +636,7 @@ Expected: 断言失败（`count == 6U` 不成立，当前是 4）或编译失败
 `lib/motor_protocol/src/cerb_adapter.c` 在 `CERB_OBJ_SAVE_FLASH` 定义之后加：
 
 ```c
+// 【历史片段·勘误】子索引实为 0x00，且开启/读法已确认（见 cerb_adapter.c）。
 // 0x2650:01「关闭看门狗和限位保护」（厂家协议说明书条目；手册只给了写命令
 // 23 50 26 00 01 …）：写 1 = 关闭看门狗 + 限位保护，0 = 保护开。这是设备侧
 // 唯一的独立安全超时（帧间隔 >500ms 电机自锁），且关掉会连限位保护一起失效

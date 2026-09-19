@@ -56,7 +56,7 @@ typedef struct {
   float vel_limit;
   float torque_limit;
   // v3：槽位 4→8（现用 6，留 2 给后续设备对象如 0x6081/0x6060）。
-  uint32_t device_raw[8]; // cnt/cnt/RPM/mA/0x2650:01/0x2541
+  uint32_t device_raw[8]; // cnt/cnt/RPM/mA/0x2650:00/0x2541
   // v3 新增：型号身份与来源链。
   char model_name[16];     // 型号目录名，NUL 结尾；空 = 未绑定
   uint32_t identity_hash;  // 设备 0x1008 自报串的 CRC32；0 = 未核验

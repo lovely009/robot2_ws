@@ -124,38 +124,18 @@
           </h2>
           <div id="paramSummary" class="summary tiny">设备参数核对：连接后点「读取」</div>
           <p class="warn tiny">
-            <b>设零</b>：把该台当前姿态设为设备零点（写 0x2531=1）。厂家要求
-            <b>失能状态</b>下设置——运行中会被固件拒绝，不会隐式失能；零点改变后设备内的
-            位置限位随之移动，请重新确认限位与机械行程。
-            <br>
-            <b>清错</b>：清除该台的故障锁存（`system.clear_fault`）。仅<b>非运动态</b>受理；
-            跨总线/协议身份冲突的锁存刻意不可解除（会被拒绝）；设备参数未初始化会触发一次
-            回读重比对。清完仍须<b>显式使能</b>并重发完整快照/轨迹才可能回运动。
-            <b>单位</b>：位置 <b>度</b>、速度 <b>度/秒</b>、力矩 <b>安培</b>（设备里的对象就是
-            cnt / RPM / mA，rad 与 N·m 只在固件内核里用；换算由固件在参数边界做一次）。
-            参数在固件内核生效：<b>kp/kd/enable</b> 本地立即生效；<b>pos/vel/torque 限值</b>
-            VAXOR 为 MCU 本地软钳制，CERB 走 CANopen SDO 写后读回核验（要求电机未运动，
-            运行中写入会被拒绝并回弹）。set 仅表示「已受理」，最终成败看事件日志的
-            <code>CONFIG_RESULT</code>（失败自动回弹旧值）。「回读」对 CERB 逐条发 SDO upload
-            （设备是严格一问一答，4 个对象读完约 1 秒）刷新设备真实值。「保存到 W25」显式落盘；
-            设备侧限值/限位写成功即自动落盘，总线上能看到 <code>23 39 25 00</code> 保存帧。
-            <b>本页只有静态量</b>：enable/kp/kd 是动态量，走下方「逐电机策略」那条话题，不在参数树里。
-            <b>错误码</b>：<code>11</code>=提交失败（mailbox 被拒）、<code>20</code>=保存失败、
-            <code>30</code>=回读失败、<code>40</code>=设备与固件记录不一致（该台未初始化）、
-            <code>41</code>=回读不成功；<code>1..6</code> 为事务结果码（1=BUSY 2=INVALID
-            3=UNSUPPORTED 4=DEVICE_ERROR 5=TIMEOUT 6=UNCONFIRMED）。
-            <b>参数以驱动板内为准</b>：「来源」列标出这行数字取自驱动板（在线）还是固件记录
-            （离线回落）；上电时固件会逐台回读并与 Flash 记录比对，<b>初始化未完成（未回读完 /
-            与记录不一致 / 回读失败）的那台不可使能</b>（状态列显示 CONFIG_CONFLICT），
-            从本页写回参数即可恢复一致。运行中回读发现不一致会走软停（阻尼停机），不硬失能。
+            <b>单位</b>：位置 度、速度 度/秒、力矩 安培（换算由固件在参数边界做）。
+            限值与保护开关<b>仅在电机未运动时受理</b>；设零要求<b>失能</b>。
+            <b>限位保护</b>取消勾选 = 关闭设备侧看门狗与限位保护，该关节将
+            <b>没有任何限位在执行</b>（急停与机械限位仍需就位）；该设置<b>掉电不保存</b>，
+            每次上电需重新开启。
+            设备侧写成功后自动落盘，「保存到 W25」用于本地参数的显式落盘。
           </p>
           <section class="card">
             <h2>逐电机策略 <span class="muted tiny">/motor_policy</span></h2>
             <p class="warn tiny">
-              enable 与 MIT 增益走这条话题（<b>不在参数树里</b>）。<b>稀疏语义</b>：只影响下发的那些电机，
-              其余保持原状——与命令快照的「缺席即软停」不同。<b>代数</b>必须严格前进才受理「从未武装到武装」，
-              挡的是「周期重发同一条策略」在故障后把电机自动重新武装（固件会拒绝并回 CONFIG_RESULT 事件）。
-              故障清除后仍须重新武装 + 新的完整快照/轨迹才可能回运动。
+              <b>稀疏</b>：只影响下发的电机，其余保持原状（与命令快照的「缺席即软停」不同）。
+              <b>代数</b>必须严格前进才受理「未武装 → 武装」，防止周期重发在故障后自动复权。
             </p>
             <p>
               <label>ID <input id="polId" type="number" min="1" value="1" style="width:5em"></label>
@@ -172,7 +152,8 @@
                 <tr>
                   <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
                   <th>pos_min<small>(°)</small></th><th>pos_max<small>(°)</small></th>
-                  <th>vel_max<small>(°/s)</small></th><th>torque_max<small>(A)</small></th><th></th>
+                  <th>vel_max<small>(°/s)</small></th><th>torque_max<small>(A)</small></th>
+                  <th>限位保护</th><th></th>
                 </tr>
               </thead>
               <tbody id="paramRows">
@@ -193,7 +174,7 @@
           <section class="card">
             <h2>命令快照 <span class="muted tiny">/motor_command_array</span></h2>
             <p class="warn tiny">
-              完整快照语义：快照中缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
+              完整快照：缺席的受控电机会被软停；停止连发 30ms 后全部软停、100ms 失能；任一 NaN/Inf 整包拒收。
             </p>
             <table class="cmd">
               <thead>
@@ -265,8 +246,7 @@
             <button id="btnTeachImport" class="tiny-btn">导入 JSON</button>
           </h2>
           <p class="muted tiny">
-            每行：等待 ms（停留）后下发该行快照；电机目标列用「ID:pos,vel,eff」文本表示（0 目标 = 该行不含此电机）。
-            播放前电机须 READY（型号绑定/授权为固件编译期，复位即默认授权）；单发与 100Hz 连发互斥。
+            每行：等待 ms 后下发该行快照；电机目标用「ID:pos,vel,eff」文本表示（0 目标 = 该行不含此电机）。
           </p>
           <div class="ctrl-row wrap">
             <button id="btnTeachPlay" class="primary">播放</button>

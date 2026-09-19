@@ -184,7 +184,13 @@ typedef enum {
   // 逐电机策略（属 mailbox 契约，与 control_mailbox 侧同值 11 锁死）：enable +
   // MIT 增益，**一次原子更新**。走本地的 Policy 路径，不产生任何设备事务。
   // 拆成 SET_GAINS + SET_ENABLE 两次调用会留下「用旧 Kd 使能」的窗口。
-  MOTOR_PROTOCOL_CONFIG_SET_POLICY = 11U
+  MOTOR_PROTOCOL_CONFIG_SET_POLICY = 11U,
+  // 设备侧看门狗/限位保护开关（属 mailbox 契约，与 control_mailbox 侧同值 12
+  // 锁死）：CERB 写 0x2650:00 = 0（保护生效）/ 1（关闭看门狗 + 限位保护），
+  // 写后读回核验，**不跟 0x2539 保存帧**（手册没给这个对象对应的保存码，
+  // **掉电不保存**（2026-09-19 实测）；0x2539 保存码对它无效）。仅 CERB；
+  // Vaxor 阶段数 0 → 内核回 UNSUPPORTED。
+  MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT = 12U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -213,6 +219,10 @@ typedef struct {
   motor_protocol_position_limits_t position_limits; // SET_POSITION_LIMITS（rad）
   float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）
   float max_torque_nm;      // SET_TORQUE_LIMIT（关节侧 N·m）
+  // SET_SAFETY_PROTECT：设备端**原值**（0 = 保护开，1 = 关）。这里刻意收原值
+  // 而不是"保护是否生效"的布尔——协议层只认厂家字节，方向语义的反转只允许
+  // 发生在参数面（param_bridge 的 limit_protect → 本字段）一处。
+  uint32_t safety_protect_raw;
   // SET_POLICY：代数必须严格前进才受理「从未武装到武装」的迁移（防周期重发
   // 自动复权）。其余 kind 忽略本字段。
   uint32_t policy_generation;
@@ -227,7 +237,7 @@ typedef struct {
 #define MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX 2U
 #define MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX 3U
 // v3：设备侧安全事实（无 SI 换算，原值透传）。
-#define MOTOR_PROTOCOL_PARAM_SLOT_SAFETY 4U    // 0x2650:01
+#define MOTOR_PROTOCOL_PARAM_SLOT_SAFETY 4U    // 0x2650:00
 #define MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION 5U // 0x2541
 #define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 6U
 

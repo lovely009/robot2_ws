@@ -21,6 +21,11 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   ctest --test-dir .host-build --output-on-failure
 ```
 
+- **栈审计**（可选，改任务栈/加局部大数组后跑）：`platformio.ini` 的 `build_flags`
+  临时加 `-fstack-usage` 与 `-fcallgraph-info=su,da`（**勿提交**），`pio run -t clean && pio run`
+  后 `python3 tools/stack_audit.py [--orphans 16] [--root <回调名>]`，看完把 flag 撤掉再
+  clean 重建。逐任务数字**不含函数指针回调**（ROS executor 那一层），必须用 `--root`
+  补上；见 `docs/plans/active/motor-runtime-validation.md` 第 2 节的审计结论。
 - host 共 17 个测试（16 个 C++ ctest + 1 个 python 线协议），直接编译固件真实 .c、
   无桩无复制；白盒用例 `-I` 内核 src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
 - **必须 `-t clean` 全量重建**：改 `platformio.ini` 构建宏（USB CDC 两宏、
@@ -62,6 +67,18 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   ②mailbox 枚举 ③motor_rt_task.cpp 的 static_assert+convert_config
   ④control_mailbox.c 白名单（默认 false，漏加则总线零帧）⑤内核 submit_config 门禁。
 
+## 参数面与内存
+
+- **每电机 5 项**（`pos_min/pos_max/vel_limit/torque_limit/limit_protect`），
+  `PARAM_BRIDGE_MAX_PARAMS = 224` → 覆盖 42 台。改这个数或每台项数前先读
+  `include/param_bridge.h` 的容量注释：**堆池是 DTCM 全部减 8 KiB 主栈 = 120 KiB，
+  不可能再扩**（FreeRTOS `heap_useNewlib_ST` 与 newlib 共用），只能搬占用。
+- `m<id>.limit_protect` 是**正向语义**（1 = 设备侧保护生效），设备原值相反
+  （0 = 保护开）；反转只在 `src/param_bridge.cpp` 的 `submit_safety_protect`
+  一处发生，协议层只认原值。
+- `micro_ros` 任务栈是**静态分配**（32 KiB 落 RAM_D1 `.bss`，见 `micro_ros_task.cpp`），
+  目的是给参数槽腾 DTCM 堆；`motor_rt` 栈仍是动态分配、留在 0-wait DTCM。
+
 ## W25 / 存储
 
 - storage 任务（P1/1024 words）是 W25Q64 **唯一所有者**：boot 同步 init 并**顺序
@@ -79,7 +96,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   **回滚到旧固件会丢参数**：新固件存过一次后两槽都是 v3，旧固件判两槽皆无效、
   从零开始。
 - **上电比对是"变更检测"，不是"保护必须在位"**：基准 = 上次成功落盘时设备里的
-  值，所以先关 `0x2650:01` 保护再触发一次保存，记录就被重新基线化成"关"，下次
+  值，所以先关 `0x2650:00` 保护再触发一次保存，记录就被重新基线化成"关"，下次
   上电不再报冲突；v2 迁移上来的记录要等第一次保存才比较这两槽（迁移只搬低 4 位）。
   加固方向（未实现）见 `docs/plans/active/w25-blob-v3-design.md` §8.2。
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：

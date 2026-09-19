@@ -66,7 +66,7 @@ static void finish_identity_read(motor_control_context_t *ctx,
 // 设备参数初始化（上电/重连回读设备 → 与固件记录比对）
 //
 // 口径（2026-09-17 定）：**参数以设备内为准，固件记录只作比对基准**。
-//  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:01、0x2541）；
+//  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:00、0x2541）；
 //  - 回读值与记录逐槽位比对，比的是**设备端原值**：关节侧 SI 两端都过同一套
 //    Kt×减速比换算，系数配错时两边一起错、比对恒通过，等于没比；
 //  - 不一致或回读失败 → 该台"未初始化"：冻结授权、不出运动帧，直到参数被
@@ -109,9 +109,9 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   // 位图随事件带出去（1u<<slot；0 = 无此项信息），但两态语义不同：
   //  - MISMATCH：**对不上**的槽位（记录有、设备读到的值不同）；
   //  - UNVERIFIED：**没读到**的槽位（refresh_slots 是本次已落袋的槽位，
-  //    取补集即缺失项）。0x2650:01 的读子索引是本分支唯一未经真机验证的对象
-  //    （TBD-CONFIG-02），设备 abort 时若不给位图，操作者分不清是它没答还是
-  //    总线抖动——位图让事件直接点名"哪个对象没到"。
+  //    取补集即缺失项）。位图是操作者区分"它没答"与"总线抖动"的唯一线索；
+  //    曾靠它定位到 0x2650 读错子索引（2026-09-19 真机，TBD-CONFIG-02 见
+  //    cerb_adapter.c 的安全槽注释）。
   const uint32_t detail =
       (state == MOTOR_CONTROL_DEV_INIT_MISMATCH)
           ? (uint32_t)dev_params_mismatch_mask(entry)
@@ -194,6 +194,12 @@ static void update_record_after_write(motor_control_context_t *ctx,
       break;
     case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
       written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
+      break;
+    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
+      // 保护开关写成功后，记录与设备同值 → 上电比对不再报 CONFLICT。
+      // 注意这同时把"变更检测"的基准挪到了新值：写 1（关保护）再落盘即
+      // 基线化为"关"，与既有的语义一致（见决策日志）。
+      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
       break;
     default:
       return;
@@ -952,6 +958,25 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         motor_protocol_config_request_t refresh = *request;
         refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
         return start_tx(ctx, entry, &refresh, now_ms);
+      }
+      return start_tx(ctx, entry, request, now_ms);
+    }
+    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT: {
+      // 设备侧看门狗/限位保护开关（0x2650:00）。
+      //  - 关保护 = 该关节**没有任何限位在执行**（CERB 是
+      //    CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底），所以这条与限值写
+      //    同口径：**运动中不得变动安全边界**，仅未运动时受理。
+      //  - 开保护有自锁风险：手册「看门狗数据帧间隔要小于 500ms，否则电机
+      //    自锁」，而固件无命令时只发 50 Hz SYNC —— SYNC 是否算"看门狗数据
+      //    帧"。台架实测开保护后停发全部帧静置 5 秒**没有自锁**，但那是单机
+      //    空载静态观察。这里不拦（设备侧行为不是本层能保证的），但调用方
+      //    （web/上层）必须把它当需要台架实测的动作。
+      if (entry->profile == NULL || request->safety_protect_raw > 1U ||
+          !device_limit_write_allowed(entry)) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      if (entry->tx_active) {
+        return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, request, now_ms);
     }

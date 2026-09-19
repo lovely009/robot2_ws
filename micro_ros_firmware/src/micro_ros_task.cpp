@@ -14,6 +14,16 @@
 static const uint32_t kMicroRosTaskStack = 8192U;
 static const UBaseType_t kMicroRosTaskPriority = 2U;
 
+// 任务栈**静态分配**：本工程 FreeRTOS 用 heap_useNewlib_ST，`pvPortMalloc` 与
+// newlib `malloc` 共用同一个 DTCM 堆，而那个堆池总共只有 120 KiB
+// （0x20000000 → _estack−8 KiB，DTCM 就 128 KiB，**不可能再扩**），任务栈与
+// 参数槽互相挤。把这块 32 KiB 搬到 RAM_D1 的 .bss，给参数面腾出空间
+// （见 param_bridge.h 的 MAX_PARAMS 容量注释）。
+// 放普通 .bss 而不是 DTCM：本任务不实时，走带 D-cache 的 AXI SRAM 没有影响；
+// motor_rt 的栈保持动态分配，继续留在 DTCM 的 0-wait 上。
+static StackType_t g_micro_ros_task_stack[kMicroRosTaskStack];
+static StaticTask_t g_micro_ros_task_tcb;
+
 static TaskHandle_t g_micro_ros_task_handle = nullptr;
 static micro_ros_link_state_t g_link_state = MICRO_ROS_LINK_WAIT_AGENT;
 static bool g_ever_connected = false;
@@ -75,9 +85,11 @@ bool micro_ros_task_start(void) {
   if (g_micro_ros_task_handle != nullptr) {
     return true;
   }
-  return xTaskCreate(micro_ros_task_fn, "micro_ros", kMicroRosTaskStack,
-                     nullptr, kMicroRosTaskPriority,
-                     &g_micro_ros_task_handle) == pdPASS;
+  g_micro_ros_task_handle =
+      xTaskCreateStatic(micro_ros_task_fn, "micro_ros", kMicroRosTaskStack,
+                        nullptr, kMicroRosTaskPriority, g_micro_ros_task_stack,
+                        &g_micro_ros_task_tcb);
+  return g_micro_ros_task_handle != nullptr;
 }
 
 micro_ros_link_state_t micro_ros_task_get_link_state(void) {

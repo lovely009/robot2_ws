@@ -564,7 +564,7 @@ static void test_cerb_identity_read_transaction() {
 
 
 // 设备参数回读事务（REFRESH_PARAMS）：6 个加速 SDO upload
-// （0x607D:01/02、0x6080、0x2538、0x2650:01、0x2541），回值换算成关节侧 SI 后
+// （0x607D:01/02、0x6080、0x2538、0x2650:00、0x2541），回值换算成关节侧 SI 后
 // 以 6 个 float 小端追加进读缓冲；末两个是枚举/标志位，原值透传不做换算。
 // Vaxor 无此事务（stage_count=0 → 内核回 UNSUPPORTED）。
 static void test_cerb_refresh_params_transaction() {
@@ -581,7 +581,7 @@ static void test_cerb_refresh_params_transaction() {
   const uint8_t kReadUpper[8] = {0x40, 0x7D, 0x60, 0x02, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadSpeed[8] = {0x40, 0x80, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadCurrent[8] = {0x40, 0x38, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
-  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadDirection[8] = {0x40, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t *expect[6] = {kReadLower, kReadUpper,     kReadSpeed,
                               kReadCurrent, kReadSafety,  kReadDirection};
@@ -645,7 +645,7 @@ static void test_cerb_refresh_params_transaction() {
       {{0x43, 0x7D, 0x60, 0x02, 0x00, 0xC0, 0xFF, 0xFF}},
       {{0x43, 0x80, 0x60, 0x00, 0x58, 0x02, 0x00, 0x00}}, // 600 LE
       {{0x43, 0x38, 0x25, 0x00, 0xE8, 0x03, 0x00, 0x00}}, // 1000 LE
-      {{0x43, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00}}, // 0x2650:01 = 0
+      {{0x43, 0x50, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00}}, // 0x2650:00 = 0
       {{0x43, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00}}, // 0x2541 = 0
   };
   for (uint8_t stage = 0U; stage < 6U; ++stage) {
@@ -967,7 +967,7 @@ static void test_profile_catalog_only_exposes_supported_models() {
   }
 }
 
-// v3：REFRESH 回读必须覆盖新增的两个安全槽位（0x2650:01 保护开关 / 0x2541 方向），
+// v3：REFRESH 回读必须覆盖新增的两个安全槽位（0x2650:00 保护开关 / 0x2541 方向），
 // 且两者是**只读**阶段——请求帧是 SDO 上传（0x40），没有写路径（设计 §8.1：
 // 设备真把保护关掉时恢复靠外部工具）。原值透传：value_si == (float)raw，
 // 这两个是枚举/标志位，没有工程单位可换算。
@@ -980,7 +980,7 @@ static void test_cerb_refresh_covers_safety_slots() {
   req.motor_id = 1U;
   assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 6U);
 
-  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x01, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadDirection[8] = {0x40, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t *expect[2] = {kReadSafety, kReadDirection};
   const uint8_t slots[2] = {MOTOR_PROTOCOL_PARAM_SLOT_SAFETY,
@@ -1027,6 +1027,71 @@ static void test_cerb_refresh_covers_safety_slots() {
   }
 }
 
+// 保护开关写事务（0x2650:00）：写 + 读回核验，**没有保存阶段**。
+// 写帧必须与厂家说明书逐字节一致（手册给的唯一一条命令就是它）：
+//   23 50 26 00 01 00 00 00 —— 关闭看门狗和限位保护
+// 手册没给这个对象对应的 0x2539 保存码，所以断言阶段数恰好是 2（写+读），
+// 哪天有人"顺手补一条保存"就会在这里被拦住。
+static void test_cerb_safety_protect_write_frames() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r58_101", &profile));
+
+  motor_protocol_config_request_t req = {};
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  req.motor_id = 3U;
+  req.safety_protect_raw = 1U;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 2U);
+
+  motor_protocol_tx_frame_t frame = {};
+  assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 3U, 0U,
+                                                         &req, &frame));
+  const uint8_t kWriteCmd[8] = {0x23, 0x50, 0x26, 0x00, 0x01, 0x00, 0x00, 0x00};
+  assert(memcmp(frame.data, kWriteCmd, 8U) == 0);
+
+  // 重开：数据字节回到 0，其余不变（手册只给了关闭命令，重开是同一条写）。
+  req.safety_protect_raw = 0U;
+  assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 3U, 0U,
+                                                         &req, &frame));
+  assert(frame.data[0] == 0x23U && frame.data[4] == 0x00U);
+
+  req.safety_protect_raw = 1U;
+  assert(motor_protocol_cerb_adapter.config_encode_stage(1U, profile, 3U, 0U,
+                                                         &req, &frame));
+  assert(frame.data[0] == 0x40U && frame.data[1] == 0x50U &&
+         frame.data[2] == 0x26U && frame.data[3] == 0x00U);
+
+  // 写阶段登记槽 4（内核据此把记录一起挪到新值）。
+  motor_protocol_config_stage_info_t info = {};
+  assert(motor_protocol_cerb_adapter.config_stage_info(0U, profile, &req, &info));
+  assert(info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_SAFETY &&
+         info.param_raw_valid && info.param_raw == 1U);
+
+  motor_protocol_raw_frame_t r = {};
+  r.can_id = 0x580U + 3U;
+  r.dlc = 8U;
+  uint8_t scratch[16] = {0};
+  motor_protocol_read_buffer_t read = {scratch, sizeof(scratch), 0U, false};
+
+  memcpy(r.data, kWriteCmd, 8U);
+  r.data[0] = 0x60U; // 写 ack
+  assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r,
+                                                        &read) ==
+         MOTOR_PROTOCOL_STAGE_ADVANCE);
+
+  const uint8_t kReadBackOk[8] = {0x43, 0x50, 0x26, 0x00, 0x01, 0, 0, 0};
+  memcpy(r.data, kReadBackOk, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(1U, profile, &req, &r,
+                                                        &read) ==
+         MOTOR_PROTOCOL_STAGE_ADVANCE);
+
+  // 读回不一致（设备没接受）→ 重发本阶段，不得判成功。
+  const uint8_t kReadBackBad[8] = {0x43, 0x50, 0x26, 0x00, 0x00, 0, 0, 0};
+  memcpy(r.data, kReadBackBad, 8U);
+  assert(motor_protocol_cerb_adapter.config_on_response(1U, profile, &req, &r,
+                                                        &read) ==
+         MOTOR_PROTOCOL_STAGE_RETRY);
+}
+
 int main() {
   test_vaxor_match_rx_frame();
   test_vaxor_decode_reply_converts_si();
@@ -1053,6 +1118,7 @@ int main() {
   test_cerb_descriptor_table_bounds();
   test_cerb_refresh_params_transaction();
   test_cerb_refresh_covers_safety_slots();
+  test_cerb_safety_protect_write_frames();
   test_adapter_id_ranges_disjoint();
   test_profile_catalog_only_exposes_supported_models();
   printf("test_motor_protocol_adapter: all passed\n");

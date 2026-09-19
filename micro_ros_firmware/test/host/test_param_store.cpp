@@ -153,15 +153,20 @@ void test_blob_record_capacity() {
     assert(param_store_blob_set(blob, id, PARAM_FIELD_KP, 1.0f));
   }
   assert(!param_store_blob_set(blob, 65U, PARAM_FIELD_KP, 1.0f));
-  // 同一电机的 6 个持久化字段都在同一条记录（enable 不持久化）。
+  // 同一电机的 6 个持久化 float 字段都在同一条记录。
   float v = 0.0f;
-  for (int f = PARAM_FIELD_KP; f < PARAM_FIELD_COUNT; ++f) {
+  for (int f = PARAM_FIELD_KP; f <= PARAM_FIELD_TORQUE_LIMIT; ++f) {
     assert(param_store_blob_set(blob, 1, static_cast<param_field_t>(f), 1.0f));
   }
-  for (int f = PARAM_FIELD_KP; f < PARAM_FIELD_COUNT; ++f) {
+  for (int f = PARAM_FIELD_KP; f <= PARAM_FIELD_TORQUE_LIMIT; ++f) {
     assert(param_store_blob_get(blob, 1, static_cast<param_field_t>(f), &v));
   }
-  assert(!param_store_blob_set(blob, 1, PARAM_FIELD_ENABLE, true ? 1.0f : 0.0f));
+  // 两个字段刻意不在 float 存储里，必须**明确拒绝**而不是静默丢值：
+  // enable 是策略位不持久化；limit_protect 的值在 device_raw[槽 4]。
+  assert(!param_store_blob_set(blob, 1, PARAM_FIELD_ENABLE, 1.0f));
+  assert(!param_store_blob_set(blob, 1, PARAM_FIELD_LIMIT_PROTECT, 1.0f));
+  assert(!param_store_blob_get(blob, 1, PARAM_FIELD_ENABLE, &v));
+  assert(!param_store_blob_get(blob, 1, PARAM_FIELD_LIMIT_PROTECT, &v));
 }
 
 // 设备端原值（v2 新增）：与 SI 字段同记录、位图独立、互不干扰。
@@ -196,7 +201,7 @@ void test_blob_device_raw_roundtrip() {
   assert(!param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_COUNT, 1U));
 }
 
-// v3 新增两个设备槽位（0x2650:01 安全开关 / 0x2541 方向）：可独立于四个限值槽
+// v3 新增两个设备槽位（0x2650:00 安全开关 / 0x2541 方向）：可独立于四个限值槽
 // 落袋，位图互不干扰，越界拒绝。
 void test_blob_device_raw_safety_slots() {
   static uint8_t storage[PARAM_STORE_BLOB_SIZE];

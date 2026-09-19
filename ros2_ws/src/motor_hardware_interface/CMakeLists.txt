@@ -34,6 +34,11 @@ install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch urdf DESTINATION share/${PROJECT_NAME})
 install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
 
+# 固件 ↔ ROS 标准话题适配桥（节点入口；转换/校验在
+# motor_hardware_interface/topic_bridge.py，由单测共用）。
+install(PROGRAMS scripts/firmware_topic_bridge.py
+        DESTINATION lib/${PROJECT_NAME})
+
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(hardware_interface motor_drive pluginlib rclcpp rclcpp_lifecycle)
 
@@ -48,6 +53,7 @@ if(BUILD_TESTING)
   target_link_libraries(test_canfd_logic ${PROJECT_NAME})
   ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
   ament_add_pytest_test(test_xacro_consistency test/test_xacro_consistency.py)
+  ament_add_pytest_test(test_topic_bridge test/test_topic_bridge.py)
 endif()
 
 ament_python_install_package(motor_hardware_interface)

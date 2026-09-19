@@ -81,7 +81,14 @@ def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
     if can_id > 0x7FF:
         raise ValueError("standard ID out of range")
     cmd = "t" if not is_fd else ("b" if brs else "d")
-    return f"{cmd}{can_id:03X}{FD_LEN_CODE[len(payload)]}".encode() \
+    # 查表失败要报得清楚：隐式 KeyError 只留下一个数字，定位不到是哪条帧
+    # （曾因此把整个模拟器打死而看不出原因）。合法长度见 FD_LEN_CODE。
+    code = FD_LEN_CODE.get(len(payload))
+    if code is None:
+        raise ValueError(
+            f"CAN FD 非法负载长度 {len(payload)}（id=0x{can_id:03X}，"
+            f"合法：{sorted(FD_LEN_CODE)}）")
+    return f"{cmd}{can_id:03X}{code}".encode() \
         + payload.hex().upper().encode() + b"\r"
 
 
@@ -114,6 +121,12 @@ VAXOR_TICKS_PER_REV = 2_097_152
 VAXOR_POS_LIMIT = 0x7CFFFFFF
 VAXOR_VEL_LIMIT = 30_000
 VAXOR_CUR_SCALE = 11.0 / 4096.0
+
+# 串口写重试预算（秒）。CANable2 是 USB CDC，O_NONBLOCK 下 os.write 会在缓冲
+# 瞬时满时抛 BlockingIOError(EAGAIN)；以前这里没有兜底，一次背压就把整个模拟器
+# 打死，而它一死总线就失去 ACK 节点、控制板随即 bus-off——半秒的抖动毁掉整轮
+# 台架（2026-09-20 踩过）。反馈帧是周期性的，丢一帧无所谓，退出不行。
+TX_RETRY_S = 0.25
 
 
 def vaxor_pos_code(motor_rad: float) -> bytes:
@@ -225,11 +238,23 @@ class MotorModel:
         return out
 
     def vaxor_reply_frame(self) -> bytes:
+        """12B 回显帧（0x701+4n）——必须补满 12，不能只发内容那 10 字节。
+
+        固件侧 motor_protocol_pack_vaxor_reply 写的是 uint8_t[12]，解码
+        （motor_protocol.c 的 unpack_vaxor_feedback）认 size == 12 或 20，
+        11/13 直接拒（test_motor_protocol.cpp 有断言），并且只读字节 2..9
+        （位置 4B / 速度 2B / 电流 2B）——尾 2 字节固件不读。
+
+        而且 10 在 CAN FD 里根本不是合法长度（只有 0-8/12/16/20/24/32/48/64），
+        真硬件也发不出来：漏补会让 slcan_line 的 FD_LEN_CODE 查表 KeyError，
+        把整个模拟器打死在半路上（2026-09-20 踩过：武装 m7/m8 后第一条 VAXOR
+        回显就崩，之前所有台架轮次跑的都是 CERB，这条路从没被走到）。
+        """
         cmd_id = 0x501 + 4 * self.id
         return cmd_id.to_bytes(2, "little") + \
             vaxor_pos_code(self.pos_motor_rad) + \
             vaxor_vel_code(self.vel_motor_rad_s) + \
-            vaxor_cur_code(self.current_a)
+            vaxor_cur_code(self.current_a) + b"\x00\x00"
 
 
 # ---- 主循环 -------------------------------------------------------------
@@ -312,6 +337,7 @@ class SlcanSim:
             raise ValueError("SYNC and feedback periods must be positive")
         self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
         self.stagger = stagger_ms / 1000.0
+        self.tx_dropped = 0   # 串口持续背压而丢弃的帧（见 _write）
         self.models = {i: MotorModel(i, "cerb") for i in cerb_ids}
         self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
         for mid in r58_ids:
@@ -351,14 +377,35 @@ class SlcanSim:
         # 默认与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）；
         # 非上游 CANable2 固件可用 CLI 覆盖其 Y 索引。
         for cmd in slcan_config_commands(self.data_bitrate_index):
-            os.write(self.fd, cmd)
+            self._write(cmd, drop_ok=False)
             time.sleep(0.15)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
+
+    def _write(self, data: bytes, drop_ok: bool) -> bool:
+        """带 EAGAIN 重试的串口写。
+
+        drop_ok=False（开通道的配置命令）——重试超时后照旧抛出：启动期写不进去
+        是配置错误，要立刻暴露。
+        drop_ok=True（周期反馈/回显）——超时则丢这一帧并计数，绝不退出。
+        """
+        deadline = time.monotonic() + TX_RETRY_S
+        while True:
+            try:
+                os.write(self.fd, data)
+                return True
+            except BlockingIOError:
+                if not drop_ok:
+                    raise
+                if time.monotonic() >= deadline:
+                    self.tx_dropped += 1
+                    return False
+                time.sleep(0.001)
 
     def send(self, can_id: int, payload: bytes, is_fd: bool = True,
              brs: bool = True, model: "MotorModel | None" = None,
              tag: str = ""):
-        os.write(self.fd, slcan_line(can_id, payload, is_fd, brs))
+        if not self._write(slcan_line(can_id, payload, is_fd, brs), drop_ok=True):
+            return
         if model:
             model.tx_count += 1
         if self.log_f:
@@ -535,6 +582,8 @@ class SlcanSim:
                   f"rx={m.rx_count:4d} en={int(m.enabled)} {extra} "
                   f"last={m.last_cmd}")
         print(f"  SYNC(0x080) seen: {self.sync_seen}")
+        if self.tx_dropped:
+            print(f"  串口背压丢帧: {self.tx_dropped}（反馈是周期性的，丢帧可容忍）")
         if self.log_f:
             self.log_f.flush()
 

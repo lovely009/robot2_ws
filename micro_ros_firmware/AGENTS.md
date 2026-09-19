@@ -69,8 +69,10 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 ## 参数面与内存
 
-- **每电机 5 项**（`pos_min/pos_max/vel_limit/torque_limit/limit_protect`），
-  `PARAM_BRIDGE_MAX_PARAMS = 224` → 覆盖 42 台。改这个数或每台项数前先读
+- **每电机 5 项**（`pos_min/pos_max/vel_limit/torque_limit/limit_protect`），由
+  `src/param_bridge.cpp` 的 `kParamMotorFields[]` **显式列出**（不再由 `PARAM_FIELD_COUNT`
+  枚举边界决定——PID 六项曾因此被静默带进参数树），
+  `PARAM_BRIDGE_MAX_PARAMS = 64` → 覆盖 10 台。改这个数或每台项数前先读
   `include/param_bridge.h` 的容量注释：**堆池是 DTCM 全部减 8 KiB 主栈 = 120 KiB，
   不可能再扩**（FreeRTOS `heap_useNewlib_ST` 与 newlib 共用），只能搬占用。
 - `m<id>.limit_protect` 是**正向语义**（1 = 设备侧保护生效），设备原值相反

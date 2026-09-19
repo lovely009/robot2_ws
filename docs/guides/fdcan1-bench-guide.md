@@ -40,7 +40,7 @@
 ## 只读验收
 
 - 模拟器九节点反馈计数应均衡，长期相差不应持续扩大；
-- `/micro_ros/motor_topology` 应恰好包含 id 1–9，全部 online、无 conflict；
+- `/micro_ros_up/motor_topology` 应恰好包含 id 1–9，全部 online、无 conflict；
 - OpenOCD 只读寄存器应显示 `TEC=REC=0`、`EP=EW=BO=0`；
 - FDCAN2/3 悬空导致的 BUS_OFF 不属于本指南的 FDCAN1 失败；
 - 需要降低反馈负载时可用 `--fb-period-ms 50`，默认是 20 ms（50 Hz/节点）。

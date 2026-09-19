@@ -5,7 +5,7 @@
 >
 > 现状基线（架构不在此重复）：host CTest 19 个用例全绿（18 个 C++ cassert +
 > 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（**3 订 6 发** + rclc
-> 参数服务器：静态量在参数树、动态量走 `/motor_policy`）、构建与台架顺序以 [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
+> 参数服务器：静态量在参数树、动态量走 `/micro_ros_do/motor_policy`）、构建与台架顺序以 [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
 > [ADR 0007](../../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 2026-09-18 勘误和
 > [决策日志](../architecture/motor-runtime-decision-log.md)为准。
 > 标「host 已覆盖」表示逻辑有自动测试、仅缺真机证据；其余 `[ ]` 均需台架或设计动作。
@@ -28,9 +28,12 @@
 - [ ] **TBD-SAFETY-01**：以厂家文档和无负载台架确认两协议 30 ms 软停实际动作。缺席软停、30 ms/100 ms 时基与单电机隔离语义 host 已覆盖。
 - [ ] **TBD-SAFETY-02**：确定 RX ring overflow 触发安全降级的阈值与恢复条件。
 - [x] Agent 断连立即失能清授权：2026-09-18 九节点台架实测——ACTIVE 中杀 agent，下一帧为失能帧（控制字 0x0c）、运动停止；重连后**不重发 SET_ENABLE**、仅新快照即恢复（会话电平纯派生）。双 AUTHORIZATION_LOST 事件语义 host 钉死。
-- [ ] **策略通道真机**（新）：`/motor_policy` 的 enable/kp/kd 迁移后使能链路；**代数门**——故障后重发同一代数必须被拒（回 CONFIG_RESULT INVALID），代数前进才受理；稀疏语义（策略里没列出的电机保持原状）；断开重连后未重新武装不得自动复权。逻辑 host 已覆盖（`test_motor_control` 的策略用例 + `test_policy_mailbox`）。
+- [ ] **策略通道真机**（新）：`/micro_ros_do/motor_policy` 的 enable/kp/kd 迁移后使能链路；**代数门**——故障后重发同一代数必须被拒（回 CONFIG_RESULT INVALID），代数前进才受理；稀疏语义（策略里没列出的电机保持原状）；断开重连后未重新武装不得自动复权。逻辑 host 已覆盖（`test_motor_control` 的策略用例 + `test_policy_mailbox`）。
 - [x] **参数槽每槽实测成本**（2026-09-18 台架）：**328 B/槽**（对比结构估算 269 B，差值是分配器块开销）。
   `PARAM_BRIDGE_MAX_PARAMS = 208` 实测把堆吃到只剩 **1,776 B**，已降为 **176**（覆盖 41 台）→ `heap_free = 12,272 B`。
+  **此后变更**：176 → 224（2026-09-19，保护开关可写使每台 4→5 项；同轮把 micro_ros
+  32 KiB 任务栈改静态分配落 RAM_D1，`heap_free` 12,328 → 29,748 B）→ 256 → 416
+  （**未经复核，超出 120 KiB 堆池**）→ **64**（2026-09-20 修正）。当前值以 `include/param_bridge.h` 为准。
 - [ ] **堆高水位（残余）**：176 槽下 12,272 B 只是空载观测值；仍需 48 台发现/绑定 +
   长时间运行下的**稳态最低位**，以及最坏路径（并发 SDO 事务 + rosidl 字符串分配）的瞬态低点。
 - [ ] **轨迹真机**：单/多关节轨迹期间插值位置与上位期望一致、P1 帧仍严格 50Hz；
@@ -114,17 +117,21 @@
 
 ## 4. 上层迁移（ROS 2 侧，未动工）
 
-- [ ] `motor_hardware_interface` 迁移：维护 `joint_name ↔ motor_id`、方向、零位与关节语义；发 `MotorCommandArray` + `/motor_policy`、收 `MotorMotionStateArray`；静态量经 rclc 参数服务器对接。
+- [ ] `motor_hardware_interface` 迁移：维护 `joint_name ↔ motor_id`、方向、零位与关节语义；发 `MotorCommandArray` + `/micro_ros_do/motor_policy`、收 `MotorMotionStateArray`；静态量经 rclc 参数服务器对接。
 - [ ] 消息定义改动先改权威包 `micro_ros_agent/src/can_bridge_msgs` 再同步 ROS 工作区；固件不得恢复 name-to-ID 兼容层。
-- [x] 规模约束：**2026-09-18 已解**——参数面按静态/动态重新划界（`PARAM_BRIDGE_MAX_PARAMS`
-  128 → 208、每电机 4 项），覆盖 48 台上限。代价是参数槽 35.0 → 56.6 KB DTCM 堆，
-  **堆高水位仍待真机实测**（见第 2 节）。
+- [~] 规模约束：**2026-09-18 的「已解」被推翻**——128 → 208、每电机 4 项时看似覆盖 48 台，
+  但台架实测 208 槽只剩 1,776 B 堆余量；随后每台项数因保护开关变 5 项，
+  `PARAM_BRIDGE_MAX_PARAMS` 又经历 176 → 224 → 256 → 416（未经复核、超出堆池）→ **64**（2026-09-20）。
+  **结论**：rclc 参数槽按 328 B/槽 × max_params 常驻、**与在线上电机数无关**，48 台规模下
+  应把电机参数整体撤出参数树（配置改走块话题），参数树只留 `system.*`。
+  当前值与推导以 `include/param_bridge.h` 为唯一来源；方案见
+  [48 台规模设计](48-motor-scale-design.md)。**堆高水位仍待真机实测**（见第 2 节）。
 
 ## 近期已结案（不再追踪）
 
 - [x] 参数读写全链路、SDO 0x1008 读身份自动绑定（bind FIFO 已退役）、设零掉电持久化（2026-09-17 真机结案，§6.7）、DEV_INIT 不一致槽位位图事件、storage 任务接线、1 订 4 发消息面。
 - [x] 下行多点轨迹通道（`MotorTrajectory` + 归属仲裁 + 段内插值 + 通道级 freshness，2026-09-18）：消息、mailbox 通道、内核执行与桥接线完成，host 覆盖，固件 `pio run` 通过。真机项见第 1/2 节。
-- [x] 逐电机策略通道 `/motor_policy`（2026-09-18）：独立 mailbox + 内核批量落地 + 防复权代数门；参数面退役 enable/kp/kd 三项。host 覆盖，`pio run` 通过。
+- [x] 逐电机策略通道 `/micro_ros_do/motor_policy`（2026-09-18）：独立 mailbox + 内核批量落地 + 防复权代数门；参数面退役 enable/kp/kd 三项。host 覆盖，`pio run` 通过。
 - [x] **storage 任务栈溢出**（既有缺陷，2026-09-18 台架发现并修复）：`perform_save()` 的
   `motor_control_param_view_t views[64]`（5,120 B）放在 4,096 B 栈上，每次 W25 落盘必然溢出 →
   FreeRTOS 栈溢出钩子关中断死循环 → IWDG ~500ms 复位。表观现象是「一落盘就重启」，

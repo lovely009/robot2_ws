@@ -1102,12 +1102,12 @@ Expected: 重启后 `m5.vel_limit == 20.0`。
 pkill -f fdcan_motor_sim.py
 python3 tools/fdcan_motor_sim.py --dev /dev/serial/by-id/<CANable> --safety-off 5
 # 复位控制板后观察
-ros2 topic echo /micro_ros/motor_events | grep -A2 DEV_INIT
+ros2 topic echo /micro_ros_up/motor_events | grep -A2 DEV_INIT
 ros2 param get /micro_ros_node system.last_error       # 期望 40
 ros2 param get /micro_ros_node system.last_error_motor # 期望 5
 ```
 Expected: 该台 `CONFIG_CONFLICT`、事件 `EVENT_DEV_INIT` 的 `reason` 位图含 bit4（16）；
-经 `/motor_policy` 发 `enabled=true` 被拒，该台在 `motion_states` 无新值。
+经 `/micro_ros_do/motor_policy` 发 `enabled=true` 被拒，该台在 `motion_states` 无新值。
 
 - [ ] **Step 4: 验证擦写中掉电**
 

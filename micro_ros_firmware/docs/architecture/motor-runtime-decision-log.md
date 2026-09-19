@@ -457,7 +457,7 @@ FAULT/OFFLINE/CONFIG_CONFLICT/DEV_PARAM 四条冻结路径本来就都清 `polic
 槽所在的 DTCM 堆池只有约 116 KiB（FreeRTOS 任务栈另占 44.5 KiB）。
 
 **决定**：参数树只放**静态量**（`pos_min`/`pos_max`/`vel_limit`/`torque_limit`
-四项/台 + `system.*`），动态量 enable/kp/kd 移到 `/motor_policy`（§6.11）。
+四项/台 + `system.*`），动态量 enable/kp/kd 移到 `/micro_ros_do/motor_policy`（§6.11）。
 `PARAM_BRIDGE_MAX_PARAMS` 128 → 208，覆盖 48 台上限（48×4 + 10 = 202）。
 
 **`param_field_t` 保持 7 项不动**：它是 Flash blob 的 `present` 位图契约与记录

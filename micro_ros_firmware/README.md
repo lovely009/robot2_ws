@@ -76,7 +76,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | 模块 | 职责 |
 |---|---|
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
-| `imu_bridge` | `micro_ros/imu/data` 与 `micro_ros/imu/temp` 的缓冲/填充/发布 |
+| `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
 | `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics） |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 20ms 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
 | `session_sync` | 会话边沿/电平→内核授权的纯派生（20ms 边界调用，host 可测） |
@@ -134,7 +134,7 @@ micro_ros_firmware/
     ├── micro_ros_task.cpp     # micro-ROS agent 状态机
     ├── led_task.cpp           # WS2812 状态显示任务 + host 可测的颜色策略
     ├── ros_bridge.cpp         # node/executor/timer 生命周期 + 域桥编排
-    ├── imu_bridge.cpp         # IMU/温度发布（micro_ros/imu/data、temp）
+    ├── imu_bridge.cpp         # IMU/温度发布（micro_ros_up/imu/data、temp）
     ├── motor_bridge.cpp       # 电机 ID 化话题桥（订阅/发布，见"联调"节）
     ├── param_bridge.cpp       # ROS 2 参数服务器桥（静态量 + 运维动作）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
@@ -214,13 +214,13 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 
 订阅（下行，3 个话题）：
 
-- `/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
+- `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
-- `/motor_trajectory`（`MotorTrajectory`，best-effort）：多点轨迹，见下节。
-- `/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
+- `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，best-effort）：多点轨迹，见下节。
+- `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
 
-### 多点轨迹（`/motor_trajectory`）
+### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
 "未来一段时间怎么走"。MCU 在 20ms 控制边界按 `time_from_start_ms` 做段内
@@ -260,30 +260,32 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
   状态帧的 `fault_active` 判定，走既有 `FAULT → READY_DISABLED` 路径，无新确认
   机制。Vaxor 控制帧没有清错位 → 内核回 `UNSUPPORTED`（不猜厂家字节）。
 - 清错帧是控制类帧，**仅非运动态受理**（与设备侧限位写同口径）；清完仍须显式
-  **重新武装**（`/motor_policy` 的 `enabled=true`，且代数须前进）+ 新的完整
+  **重新武装**（`/micro_ros_do/motor_policy` 的 `enabled=true`，且代数须前进）+ 新的完整
   快照/轨迹才可能回运动（ARD §36）。
 
 只读完成序号 `system.clear_fault_seq`，用法同 `set_zero_seq`（写脉冲 → 轮询
 seq 收敛，不要只看 `last_error`）。**代价**：系统参数 8 → 10。
 
-### 参数树放静态量，动态量走 `/motor_policy`
+### 参数树放静态量，动态量走 `/micro_ros_do/motor_policy`
 
 2026-09-18 起参数面按「静态 / 动态」重新划界——**参数面 = 静态配置与运维动作，
 话题 = 动态控制与状态**：
 
-- **参数树**（每电机 4 项 + `system.*` 约 10 项）：`m<id>.pos_min/pos_max/`
+- **参数树**（每电机 5 项 + `system.*` 10 项；当前容量见 `include/param_bridge.h`）：`m<id>.pos_min/pos_max/`
   `vel_limit/torque_limit` 与 `system.*`。限位/限速/限流「只初始化一次」，
   正是参数的本职。
-- **`/motor_policy` 话题**：`enable`/`kp`/`kd`。这三项变化快，且 ARD §19.4 本就
+- **`/micro_ros_do/motor_policy` 话题**：`enable`/`kp`/`kd`。这三项变化快，且 ARD §19.4 本就
   禁止它们进 100Hz 命令快照。**稀疏语义**：只影响列出的电机，其余保持原状。
   **代数门**：「未武装 → 武装」要求 `policy_generation` 严格前进，挡住「周期
   重发同一条策略」在故障后自动复权（挡不住每次都递增代数的发布者——那与人工
   逐次授权不可区分，ARD §36 的「显式」在机制层面到此为止）。
-- **为什么改**：rclc 参数服务器每槽约 269 B（审计实测 `sizeof(Parameter)=112`、
-  `descriptor=68` + 50 B 名），且 init 时**一次性全部分配**。7 项/台在 48 台上限
-  下要 346 槽 ≈ 89 KB，而参数槽所在的 DTCM 堆池只有约 116 KiB（任务栈另占
-  44.5 KiB）。4 项/台时 `PARAM_BRIDGE_MAX_PARAMS = 208` 即可覆盖，占用约 56 KB。
-- `param_field_t` 仍是 7 项且**不要改**——它是 Flash blob 的 `present` 位图契约；
+- **为什么改**：rclc 参数服务器每槽**实测边际 328 B**（结构 269 B = `sizeof(Parameter)=112`
+  + `descriptor=68` + 50 B 名，余为分配器块开销），且 init 时**按 max_params 一次性
+  全部分配、与板上实际几台电机无关**。参数槽所在的 DTCM 堆池是 **120 KiB**
+  （= DTCM 128 KiB − 主栈 8 KiB；FreeRTOS 与 newlib 同池，**不可再扩**）。
+  48 台 × 5 项 + 10 = 250 槽 ≈ 80 KB，占池子的 2/3——所以 48 台目标下电机参数
+  **整体撤出参数树**、配置改走块话题（见 `docs/plans/active/48-motor-scale-design.md`）。
+- `param_field_t` 仍是 8 项且**不要改**——它是 Flash blob 的 `present` 位图契约；
   退役的三项只是不再被注册，记录布局不变、无需迁移。
 
 下行配置通道（`motor_enable`/`motor_policy`/`motor_config`/`motor_bind` 与
@@ -382,19 +384,19 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 发布（上行，6 个话题；均为 ID 化，缺失浮点 = NaN）：
 
-- `micro_ros/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
+- `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
   由 10ms bridge timer 驱动）。
-- `micro_ros/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
+- `micro_ros_up/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
   保护位/事务状态）。
-- `micro_ros/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
+- `micro_ros_up/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
   （`motor_id`/总线/协议/型号/能力/冲突标志）。
-- `micro_ros/motor_events`（`MotorEvent`）：生命周期/安全事件流（含身份识别
+- `micro_ros_up/motor_events`（`MotorEvent`）：生命周期/安全事件流（含身份识别
   的 PROFILE_BOUND / PROFILE_REJECTED）。带 `event_seq`（单调递增，相邻跳号即
   说明事件环满过；累计丢弃数见 diagnostics）。
-- `micro_ros/trajectory_state`（`MotorTrajectoryState`，10Hz）：轨迹执行状态——
+- `micro_ros_up/trajectory_state`（`MotorTrajectoryState`，10Hz）：轨迹执行状态——
   `trajectory_id`、active/completed、已执行/总时长、受控集合。轨迹是 best-effort
   下发的，没有它就只能靠猜「我发的计划受理了吗、跑到哪了」。
-- `micro_ros/diagnostics`（`MotorDiagnostics`，1Hz）：固件级计数器一次性曝光
+- `micro_ros_up/diagnostics`（`MotorDiagnostics`，1Hz）：固件级计数器一次性曝光
   （帧计数/解码错误/快照与配置拒绝/事件与 TX 丢弃/P0 重试/轨迹与策略收支/
   每总线 ring 溢出/堆余量）。这些此前只存在于芯片里，实时性与总线容量的问题
   只能靠 JTAG 定位。
@@ -465,7 +467,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后内核重新读
   设备自报身份（CERB SDO 0x1008）并重绑定收敛 READY_DISABLED，恢复运动必须
   显式 SET_ENABLE(true)（编译期冻结语义）+ 新完整快照，期间不得自行恢复或重放。
-- [ ] 身份识别台架核对：`ros2 topic echo micro_ros/motor_topology` 中各 CERB
+- [ ] 身份识别台架核对：`ros2 topic echo micro_ros_up/motor_topology` 中各 CERB
   节点的 `model_name` 应与铭牌一致（R48/R58 不得互相误判）；拔掉某台设备后
   该行消失，重新上电后被重新识别；目录外型号应停留在未绑定并出
   PROFILE_REJECTED 事件。

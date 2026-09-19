@@ -84,14 +84,14 @@ source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
 ```
 
-agent 会话建立后，`ros2 topic list` 应能看到 `/micro_ros/motor_topology`、
-`/micro_ros/motor_status_array`、`/micro_ros/imu/data` 等固件话题，
+agent 会话建立后，`ros2 topic list` 应能看到 `/micro_ros_up/motor_topology`、
+`/micro_ros_up/motor_status_array`、`/micro_ros_up/imu/data` 等固件话题，
 页面左侧监控区即有数据。需要 `/dev/ttyACM*` 写权限（用户在 `dialout` 组）。
 
 ## 验证
 
 ```bash
 ss -ltn | grep -E ':(9090|8080)'          # 两端口在监听
-ros2 topic list                            # 能看到 /micro_ros/* 说明 agent 也正常
+ros2 topic list                            # 能看到 /micro_ros_up/* 说明 agent 也正常
 curl -sI http://localhost:8080 | head -1  # 期望 HTTP/1.0 200 OK
 ```

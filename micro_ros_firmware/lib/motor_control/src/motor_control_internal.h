@@ -175,6 +175,12 @@ struct motor_control_context {
   // 纯派生——故障/离线/冲突/设备参数未核对各自把表项带离可动生命周期，
   // 自动脱离轨迹，无需在那些路径里额外清理归属。
   motor_control_trajectory_t trajectory;
+  // 每个路点的切矢（rad/s），下标与 trajectory.points 一一对应：**受理轨迹时
+  // 一次算好**，20 ms 控制边界上只做一次 Hermite 求值，不在热路径重算差分。
+  // 端点恒 0（起止零速）；内部点 = 中心差分经 Fritsch–Carlson 限幅，故逐段
+  // 不超调——这也让 entry_apply_target 的软限位钳制基本不会触发（钳位会破坏
+  // C¹ 连续性）。放 .bss（AXI/RAM_D1），不占 DTCM 堆。
+  float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
   bool trajectory_active;
   uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基
   uint32_t trajectory_accepted_count;

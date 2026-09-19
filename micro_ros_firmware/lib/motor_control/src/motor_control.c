@@ -779,6 +779,73 @@ static void release_trajectory_motor(motor_control_context_t *ctx,
   }
 }
 
+// 单调三次 Hermite 的内部切矢（Fritsch–Carlson）。p0/p1/p2 是同一条电机
+// 时间线上相邻的三个路点，返回值是 p1 处的切矢（rad/s）。
+// 三条规则：局部极值（两侧割线异号或为 0）取 0；否则取两侧割线均值，并限幅到
+// 3×min(|Δ|)——这条限幅正是"逐段不超调"的保证，缺了它不等间隔路点处曲线会
+// 冲过路点（关节越过给定位置、可能顶到限位，而为限位去钳位又会在钳位处留下
+// 尖角、把 C¹ 毁掉）。
+static float trajectory_monotone_tangent(
+    const motor_control_trajectory_point_t *p0,
+    const motor_control_trajectory_point_t *p1,
+    const motor_control_trajectory_point_t *p2) {
+  const float dt0 =
+      (float)(p1->time_from_start_ms - p0->time_from_start_ms) / 1000.0f;
+  const float dt1 =
+      (float)(p2->time_from_start_ms - p1->time_from_start_ms) / 1000.0f;
+  if (!(dt0 > 0.0f) || !(dt1 > 0.0f)) {
+    return 0.0f; // 校验已保证同电机时间严格递增，这里只做防御
+  }
+  const float d0 = (p1->position_rad - p0->position_rad) / dt0;
+  const float d1 = (p2->position_rad - p1->position_rad) / dt1;
+  if (d0 * d1 <= 0.0f) {
+    return 0.0f; // 局部极值（含任一割线为 0）：切矢 0，曲线在极值处停住
+  }
+  const float a0 = fabsf(d0);
+  const float a1 = fabsf(d1);
+  const float limit = 3.0f * (a0 < a1 ? a0 : a1);
+  float m = (d0 + d1) * 0.5f; // 中心差分（两侧等权）
+  if (m > limit) {
+    m = limit;
+  } else if (m < -limit) {
+    m = -limit;
+  }
+  return m;
+}
+
+// 为轨迹里每台电机的路点序列一次性算出全部切矢。按台分段流式推进：维护
+// 「前一点 p0 / 当前点 p1」，见到下一点 p2 时就能定下 p1 的切矢；每台的首点
+// 与末点恒为 0（端点零速）。复杂度与既有校验同量级，且只在受理时跑一次。
+static void trajectory_compute_tangents(motor_control_context_t *ctx) {
+  const motor_control_trajectory_t *trajectory = &ctx->trajectory;
+  for (uint16_t i = 0; i < trajectory->point_count; ++i) {
+    ctx->trajectory_tangent_rad_s[i] = 0.0f;
+  }
+  for (uint16_t m = 0; m < trajectory->target_count; ++m) {
+    const uint16_t id = trajectory->target_ids[m];
+    const motor_control_trajectory_point_t *p0 = NULL;
+    const motor_control_trajectory_point_t *p1 = NULL;
+    uint16_t i1 = 0U;
+    for (uint16_t i = 0; i < trajectory->point_count; ++i) {
+      const motor_control_trajectory_point_t *p2 = &trajectory->points[i];
+      if (p2->motor_id != id) {
+        continue;
+      }
+      if (p1 != NULL) {
+        // p1 是首点（p0 == NULL，端点零速）或内部点（中心差分 + 限幅）。
+        ctx->trajectory_tangent_rad_s[i1] =
+            (p0 == NULL) ? 0.0f : trajectory_monotone_tangent(p0, p1, p2);
+      }
+      p0 = p1;
+      p1 = p2;
+      i1 = i;
+    }
+    if (p1 != NULL) {
+      ctx->trajectory_tangent_rad_s[i1] = 0.0f; // 末点：端点零速
+    }
+  }
+}
+
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
                                     const motor_control_trajectory_t *trajectory,
                                     uint32_t now_ms) {
@@ -824,6 +891,7 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
 
   ctx->trajectory = *trajectory; // 整条锁存：时间线要跨控制边界使用
   ctx->trajectory_active = true;
+  trajectory_compute_tangents(ctx); // 切矢只在此算一次，热路径只做求值
   ctx->trajectory_start_tick_ms = now_ms; // 起点 = 本地受理 tick（ARD §12.2）
   // 新轨迹是新证据：与快照受理同语义（清「待新证据」门）。
   ctx->require_new_snapshot = false;
@@ -881,14 +949,30 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
       const uint32_t span_ms =
           right->time_from_start_ms - left->time_from_start_ms;
       if (span_ms > 0U) {
-        const float alpha =
+        // 单调三次 Hermite（切矢见 trajectory_compute_tangents）。
+        // 位置与速度**都连续**——线性插值的"每路点一次速度台阶"在此消除；
+        // 阶梯式速度前馈会让 MIT 律的 kd·v_des 项在每个路点跳一次（力矩台阶）。
+        const uint16_t li = (uint16_t)(left - trajectory->points);
+        const uint16_t ri = (uint16_t)(right - trajectory->points);
+        const float h = (float)span_ms / 1000.0f;
+        const float tau =
             (float)(elapsed - left->time_from_start_ms) / (float)span_ms;
-        position = left->position_rad +
-                   alpha * (right->position_rad - left->position_rad);
-        // 速度取段斜率，不直通 point.velocity：上层常把该字段填 0，
-        // 直通会让 MIT 律的 Kd 朝 0 速刹车（语义错误）。
-        velocity = (right->position_rad - left->position_rad) /
-                   ((float)span_ms / 1000.0f);
+        const float t2 = tau * tau;
+        const float t3 = t2 * tau;
+        const float m0 = ctx->trajectory_tangent_rad_s[li];
+        const float m1 = ctx->trajectory_tangent_rad_s[ri];
+        position = (2.0f * t3 - 3.0f * t2 + 1.0f) * left->position_rad +
+                   (t3 - 2.0f * t2 + tau) * h * m0 +
+                   (-2.0f * t3 + 3.0f * t2) * right->position_rad +
+                   (t3 - t2) * h * m1;
+        // 解析导数 v = (dx/dτ)/h —— 不直通 point.velocity（上层常填 0，
+        // 直通会让 Kd 朝 0 速刹车）。
+        const float dh00 = 6.0f * t2 - 6.0f * tau;
+        const float dh10 = 3.0f * t2 - 4.0f * tau + 1.0f;
+        const float dh01 = -6.0f * t2 + 6.0f * tau;
+        const float dh11 = 3.0f * t2 - 2.0f * tau;
+        velocity = (dh00 * left->position_rad + dh10 * h * m0 +
+                    dh01 * right->position_rad + dh11 * h * m1) / h;
       }
     }
     entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,

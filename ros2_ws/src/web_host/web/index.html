@@ -55,18 +55,6 @@
           <li class="empty">等待 motor_topology…</li>
         </ul>
       </details>
-
-      <details class="card" data-fold="params" open>
-        <summary>设备参数核对 <span class="spacer"></span>
-          <span class="sum" id="sumParams">未读取</span></summary>
-        <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
-        <div class="ctrl-row wrap">
-          <button id="btnParamLoad" class="tiny-btn">读取</button>
-          <button id="btnParamApply" class="tiny-btn primary">下发修改</button>
-          <button id="btnParamSave" class="tiny-btn">保存 W25</button>
-        </div>
-        <div id="paramResult" class="result tiny"></div>
-      </details>
     </aside>
 
     <!-- ============ 中栏：臂（主角） ============ -->
@@ -100,32 +88,6 @@
           <div><span>测量年龄</span><b id="selAge">--</b></div>
         </div>
       </details>
-
-      <details class="card" data-fold="per" open>
-        <summary>逐台参数与策略 <span class="spacer"></span>
-          <span class="sum" id="sumPer">--</span></summary>
-        <div class="ctrl-row wrap">
-          <span class="spacer"></span>
-          <label class="check tiny"><input type="checkbox" id="chkAllParams"> 显示全部</label>
-        </div>
-        <div class="table-wrap">
-          <table class="params">
-            <thead>
-              <tr>
-                <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
-                <th>pos_min<small>°</small></th><th>pos_max<small>°</small></th>
-                <th>vel_max<small>°/s</small></th><th>torque_max<small>A</small></th>
-                <th>限位保护</th>
-                <th>启用</th><th>kp</th><th>kd</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="paramRows">
-              <tr class="empty"><td colspan="13">连接后点「读取」载入当前参数</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
     </aside>
   </main>
 
@@ -150,6 +112,56 @@
     </div>
     <div id="cmdResult" class="result tiny"></div>
   </details>
+
+  <!-- ============ 参数与策略（页面下方，两栏） ============ -->
+  <!-- 设备限值与使能/增益不是一回事：前者以驱动板为准、可回读；后者只写不回读，
+       框里是页面最后一次下发的值。并排放、各自一栏，不混在同一张表里。 -->
+  <section class="bottom">
+    <details class="card" data-fold="dev" open>
+      <summary>设备参数 <span class="spacer"></span>
+        <span class="sum" id="sumDev">未读取</span></summary>
+      <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
+      <div class="ctrl-row wrap">
+        <button id="btnParamLoad" class="tiny-btn">读取</button>
+        <button id="btnParamApply" class="tiny-btn primary">下发修改</button>
+        <button id="btnParamSave" class="tiny-btn">保存 W25</button>
+        <span class="spacer"></span>
+        <label class="check tiny"><input type="checkbox" id="chkAllParams"> 显示全部</label>
+      </div>
+      <div id="paramResult" class="result tiny"></div>
+      <div class="table-wrap">
+        <table class="params">
+          <thead>
+            <tr>
+              <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
+              <th>pos_min<small>°</small></th><th>pos_max<small>°</small></th>
+              <th>vel_max<small>°/s</small></th><th>torque_max<small>A</small></th>
+              <th>限位保护</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="paramRows">
+            <tr class="empty"><td colspan="10">连接后点「读取」载入当前参数</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="card" data-fold="pol" open>
+      <summary>使能与增益 <span class="spacer"></span>
+        <span class="sum" id="sumPol">--</span></summary>
+      <div class="table-wrap">
+        <table class="params">
+          <thead>
+            <tr><th>ID</th><th>型号</th><th>启用</th><th>kp</th><th>kd</th><th></th></tr>
+          </thead>
+          <tbody id="polRows">
+            <tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="polResult" class="result tiny"></div>
+    </details>
+  </section>
 
   <!-- ============ 底部抽屉 ============ -->
   <section class="drawer">

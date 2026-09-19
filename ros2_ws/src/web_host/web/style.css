@@ -84,13 +84,13 @@ body {
 /* ---------- 骨架 ---------- */
 .shell {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr) clamp(320px, 26vw, 520px);
+  grid-template-columns: 176px minmax(0, 1fr) clamp(280px, 22vw, 380px);
   gap: 8px;
   padding: 8px 12px;
   align-items: start;
 }
 @media (max-width: 1240px) {
-  .shell { grid-template-columns: 150px minmax(0, 1fr) 320px; }
+  .shell { grid-template-columns: 150px minmax(0, 1fr) 300px; }
 }
 @media (max-width: 1000px) {
   .shell { grid-template-columns: 156px minmax(0, 1fr); }
@@ -107,6 +107,18 @@ body {
   .rail, .detail { grid-column: auto; }
   .detail { grid-template-columns: 1fr; }
 }
+
+/* 参数与策略：页面下方并排两栏——左「设备参数」（驱动板真值，可回读），
+   右「使能与增益」（策略话题，只写不回读）。两表行集一致，左右一一对应。 */
+.bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 12px 8px;
+  align-items: start;
+}
+.bottom > .card { margin-bottom: 0; }
+@media (max-width: 1000px) { .bottom { grid-template-columns: 1fr; } }
 
 /* ---------- 面板 ---------- */
 .card {

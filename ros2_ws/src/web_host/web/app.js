@@ -338,7 +338,10 @@ function renderFoldSummaries() {
     ? `${online}/${state.motors.size} 在线`
       + (conflict ? ` · 冲突 ${conflict}` : '') + (fault ? ` · 故障 ${fault}` : '')
     : '--';
-  $('sumPer').textContent = (state.selectedId ? `m${state.selectedId}` : '未选中')
+  $('sumDev').textContent = paramCache.size
+    ? `${paramCache.size} 台已读` + (conflict ? ` · 未初始化 ${conflict}` : '')
+    : '未读取';
+  $('sumPol').textContent = (state.selectedId ? `m${state.selectedId}` : '全部')
     + (state.policy.size ? ` · 已下发 ${state.policy.size} 台` : '');
   const nCmd = $('cmdRows').querySelectorAll('tr').length;
   $('sumSend').textContent = `${nCmd} 台目标` + (streamTimer ? ' · 连发中' : '');
@@ -1129,20 +1132,20 @@ setInterval(() => {
 let policyGeneration = 0;
 
 function polInputs(id) {
-  const q = (f) => $('paramRows').querySelector(
+  const q = (f) => $('polRows').querySelector(
     `[data-pol-field="${f}"][data-id="${id}"]`);
   return {enable: q('enabled'), kp: q('kp'), kd: q('kd')};
 }
 
 // 逐台下发（表格每行一个按钮）：改哪台发哪台。
 function sendPolicyRow(id) {
-  if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return; }
+  if (!state.connected) { setPolResult(false, '未连接 rosbridge'); return; }
   const el = polInputs(id);
   if (!el.enable || !el.kp || !el.kd) { return; }
   const kp = parseFloat(el.kp.value);
   const kd = parseFloat(el.kd.value);
   if (!Number.isFinite(kp) || !Number.isFinite(kd) || kp < 0 || kd < 0) {
-    setParamResult(false, `m${id}：kp/kd 必须是非负有限值`);
+    setPolResult(false, `m${id}：kp/kd 必须是非负有限值`);
     return;
   }
   policyGeneration = (policyGeneration + 1) >>> 0;
@@ -1155,7 +1158,7 @@ function sendPolicyRow(id) {
     targets: [{motor_id: id, enabled: el.enable.checked, kp, kd}],
   });
   state.policy.set(id, {enabled: el.enable.checked, kp, kd});
-  setParamResult(true, `策略已发 seq=${seq} gen=${policyGeneration}：m${id} ` +
+  setPolResult(true, `策略已发 seq=${seq} gen=${policyGeneration}：m${id} ` +
     (el.enable.checked ? '武装' : '失能') + ` kp=${kp} kd=${kd}` +
     '。受理/拒绝是异步的，看事件日志的 CONFIG_RESULT');
 }
@@ -1204,26 +1207,38 @@ function paramSetValue(name, type, key, value) {
   return paramService('SetParameters', {parameters: [{name, value: pv}]});
 }
 
-function setParamResult(ok, text) {
-  const el = $('paramResult');
+function writeResult(id, ok, text) {
+  const el = $(id);
+  if (!el) return;
   el.className = 'result tiny ' + (ok ? 'ok' : 'err');
   el.textContent = text;
 }
+// 参数结果写在「设备参数」栏里，策略结果写在「使能与增益」栏里——两块面板各自可
+// 收起，结果必须落在按下去的那个按钮旁边。
+function setParamResult(ok, text) { writeResult('paramResult', ok, text); }
+function setPolResult(ok, text) { writeResult('polResult', ok, text); }
 
-function renderParamRows() {
-  const tbody = $('paramRows');
-  const allIds = [...paramCache.keys()].sort((a, b) => a - b);
-  if (allIds.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="13">参数集为空（等待电机发现）</td></tr>';
-    return;
-  }
-  // 默认只展开选中的那一台（「点关节就地展开」）；勾「显示全部」看整条臂。
+// 两张表共用同一套行筛选：设备限值（可回读）与使能/增益（只写）并排放，行必须
+// 一一对齐，否则左右读起来会串台。默认只展开选中的那一台，勾「显示全部」看整条臂。
+function paramRowIds() {
+  const all = [...paramCache.keys()].sort((a, b) => a - b);
   const showAll = $('chkAllParams') && $('chkAllParams').checked;
-  const ids = (showAll || !state.selectedId)
-    ? allIds : allIds.filter((i) => i === state.selectedId);
+  return (showAll || !state.selectedId)
+    ? all : all.filter((i) => i === state.selectedId);
+}
+
+function renderParamRows() { renderDevRows(); renderPolicyRows(); }
+
+// ---------- 设备参数（以驱动板为准，可回读）----------
+function renderDevRows() {
+  const tbody = $('paramRows');
+  const ids = paramRowIds();
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="13">'
-      + `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余</td></tr>`;
+    tbody.innerHTML = '<tr class="empty"><td colspan="10">'
+      + (paramCache.size === 0
+        ? '参数集为空（等待电机发现）'
+        : `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余`)
+      + '</td></tr>';
     return;
   }
   tbody.innerHTML = ids.map((id) => {
@@ -1266,15 +1281,6 @@ function renderParamRows() {
         ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
         '（该关节将没有任何限位在执行）。仅未运动时受理。">'
       : '<input type="checkbox" disabled title="设备还没回读到该对象">';
-    // 使能 / kp / kd 走策略话题（不在参数树里），固件不回读——框里是**页面最后
-    // 一次下发出去的值**，不是固件当前值。
-    const pol = state.policy.get(id) || {};
-    const polNum = (f) => `<input class="pnum" type="number" min="0" step="0.1"
-      data-id="${id}" data-pol-field="${f}" value="${pol[f] !== undefined ? pol[f] : 0}"
-      title="页面最后一次下发的值；固件不回读 kp/kd。设备参数未核对的台会被直接拒">`;
-    const polEnable = `<input type="checkbox" data-id="${id}" data-pol-field="enabled"
-      ${pol.enabled ? ' checked' : ''}
-      title="页面最后一次下发的值。设备参数未核对的台会被直接拒（CONFIG_RESULT reason=2）">`;
     return `<tr>
       <td class="num">${id}</td>
       <td>${model || '<span class="muted">--</span>'}</td>
@@ -1283,11 +1289,9 @@ function renderParamRows() {
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td>${protectCell}</td>
-      <td>${polEnable}</td><td>${polNum('kp')}</td><td>${polNum('kd')}</td>
       <td><button class="tiny-btn" data-refresh="${id}">回读</button>
         <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
-        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button>
-        <button class="tiny-btn primary" data-pol="${id}" title="把这一行的 启用/kp/kd 作为一条策略下发（代数自动 +1）">策略</button></td>
+        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
     </tr>`;
   }).join('');
   tbody.querySelectorAll('input').forEach((inp) => {
@@ -1303,12 +1307,42 @@ function renderParamRows() {
   tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
     btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
   });
-  tbody.querySelectorAll('[data-pol]').forEach((btn) => {
-    btn.onclick = () => sendPolicyRow(parseInt(btn.dataset.pol, 10));
-  });
   renderParamSummary();
 }
 
+// ---------- 使能与增益（只写，固件不回读）----------
+// 走策略话题、不在参数树里：enable/kp/kd 确实是固件 param_field_t 的头三项，但没进
+// kParamMotorFields[] 注册表（每电机只注册 5 项限值类），而参数面总容量只有 64 项。
+// 每条策略只带一台（稀疏），改哪台发哪台。
+function renderPolicyRows() {
+  const tbody = $('polRows');
+  const ids = paramRowIds();
+  if (ids.length === 0) {
+    tbody.innerHTML = '<tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr>';
+    return;
+  }
+  tbody.innerHTML = ids.map((id) => {
+    const row = state.motors.get(id) || {};
+    const model = row.topo?.model_name || '';
+    const pol = state.policy.get(id) || {};
+    const polNum = (f) => `<input class="pnum" type="number" min="0" step="0.1"
+      data-id="${id}" data-pol-field="${f}" value="${pol[f] !== undefined ? pol[f] : 0}"
+      title="页面最后一次下发的值；固件不回读 kp/kd。设备参数未核对的台会被直接拒">`;
+    const polEnable = `<input type="checkbox" data-id="${id}" data-pol-field="enabled"
+      ${pol.enabled ? ' checked' : ''}
+      title="页面最后一次下发的值。设备参数未核对的台会被直接拒（CONFIG_RESULT reason=2）">`;
+    return `<tr>
+      <td class="num">${id}</td>
+      <td>${model || '<span class="muted">--</span>'}</td>
+      <td>${polEnable}</td>
+      <td>${polNum('kp')}</td><td>${polNum('kd')}</td>
+      <td><button class="tiny-btn primary" data-pol="${id}" title="把这一行的 启用/kp/kd 作为一条策略下发（代数自动 +1）">策略</button></td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('[data-pol]').forEach((btn) => {
+    btn.onclick = () => sendPolicyRow(parseInt(btn.dataset.pol, 10));
+  });
+}
 // 位图 → 槽位名列表（槽位顺序即 DEV_SLOT_NAMES 顺序）。
 function devSlotNames(mask) {
   return DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
@@ -1362,7 +1396,6 @@ function renderParamSummary() {
   if (ids.length === 0) {
     el.className = 'summary tiny';
     el.textContent = '设备参数核对：暂无电机';
-    if ($('sumParams')) $('sumParams').textContent = '无电机';
     return;
   }
   const offline = [], blocked = [], ok = [];
@@ -1402,11 +1435,6 @@ function renderParamSummary() {
   }
   el.className = 'summary tiny';
   el.innerHTML = parts.join(' ');
-  if ($('sumParams')) {
-    $('sumParams').textContent = `${ids.length} 台`
-      + (blocked.length ? ` · 未初始化 ${blocked.length}` : '')
-      + (offline.length ? ` · 离线 ${offline.length}` : '');
-  }
 }
 
 // last_error 快照：总览条与失败文案用它把错误码翻译成人话。

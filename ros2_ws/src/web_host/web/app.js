@@ -20,7 +20,6 @@ const TOPICS = {
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
   'ACTIVE', 'SAFE_STOP', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE'];
-const PROTOCOL = ['VAXOR', 'CERB'];
 const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'ACTIVE', 'SOFT_STOP', 'DISABLE', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
@@ -68,12 +67,29 @@ const state = {
   lastError: 0,       // system.last_error 快照（总览条与失败文案翻译用）
   lastErrorMotor: -1,
   devInit: new Map(), // motor_id -> {state, mask}：DEV_INIT 事件带来的核对结论
+  policy: new Map(),  // motor_id -> {enabled, kp, kd}：页面**最后下发**的值
   events: [],
   imu: {count: 0, last: 0, roll: 0, pitch: 0, yaw: 0, q: null},
   temp: undefined,
   tempLast: 0,
   motionCount: 0,
+  selectedId: 0,      // 左栏 / 臂上选中的电机 id（0 = 未选中）
 };
+
+// 电机 id → URDF 关节名。默认对齐现阶段实机（4 台）。换模型或换接线用 URL
+// 参数覆盖，页面不改：?joints=1:joint_link1,2:joint_link2&model=<模型目录名>
+const URLQ = new URLSearchParams(location.search);
+const JOINT_OF_MOTOR = (() => {
+  const q = URLQ.get('joints');
+  if (!q) return {1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4'};
+  const m = {};
+  for (const pair of q.split(',')) {
+    const [id, j] = pair.split(':');
+    if (id && j) m[parseInt(id, 10)] = j;
+  }
+  return m;
+})();
+const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_001';
 
 // 曲线缓冲：motor_id -> {t:[], position:[], velocity:[], effort:[], current:[]}
 const chartBuf = new Map();
@@ -172,6 +188,9 @@ function subscribeAll() {
       chartPush(s.motor_id, 'velocity', s.velocity, t);
       chartPush(s.motor_id, 'effort', s.effort, t);
     }
+    // 臂的关节角就来自这里（理由见 arm3dSyncJoints）。
+    arm3dSyncJoints();
+    arm3dSyncGhost();
   });
 
   sub('status', (m) => {
@@ -241,36 +260,30 @@ function lifecyclePill(lc) {
 function renderMotors() {
   // 参数页总览条依赖电机状态流（在线/生命周期），随之刷新；表未加载时是空操作。
   if (paramCache.size > 0) renderParamSummary();
-  const tbody = $('motorRows');
+  const list = $('motorRows');
   const rows = [...state.motors.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([id, r]) => {
-      const t = r.topo || {}, mo = r.motion || {}, st = r.status || {};
+      const t = r.topo || {}, st = r.status || {};
       const online = st.online !== undefined ? st.online : t.online;
       const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
       const fault = st.unified_fault_code || 0;
-      const model = t.model_name || '';
-      const proto = t.protocol !== undefined ? PROTOCOL[t.protocol] : '--';
-      const age = mo.state_age_ms !== undefined ? mo.state_age_ms : st.state_age_ms;
-      return `<tr${fault ? ' class="faultrow"' : ''}>
-        <td class="num">${id}</td>
-        <td>${proto}</td>
-        <td>${model ? model : '<span class="muted">未绑定</span>'}</td>
-        <td>${online === undefined ? '--'
-          : `<span class="pill ${online ? 'on' : 'off'}">${online ? '是' : '否'}</span>`}</td>
-        <td title="${devDetailTitle(id)}">${lifecyclePill(lc)}</td>
-        <td class="num">${fmt(mo.position, 3)}</td>
-        <td class="num">${fmt(mo.velocity, 3)}</td>
-        <td class="num">${fmt(mo.effort, 3)}</td>
-        <td class="num">${fmt(st.current, 2)}</td>
-        <td>${fault ? `<span class="pill off">${FAULT_NAMES[fault] || fault}</span>`
-                    : '<span class="muted">无</span>'}</td>
-        <td class="num">${ageText(age)}</td>
-      </tr>`;
+      const dot = !online ? 'var(--muted)'
+        : ((fault || lc === 6 || lc === 7) ? 'var(--err)'
+          : (lc === 4 ? 'var(--ok)' : 'var(--warn)'));
+      const stateText = fault ? (FAULT_NAMES[fault] || fault)
+        : (LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '--');
+      return `<li class="${id === state.selectedId ? 'on' : ''}" data-id="${id}"
+          title="${devDetailTitle(id)}">
+        <span class="jdot" style="background:${dot}"></span>
+        <span class="jid">m${id}</span>
+        <span class="jmodel">${t.model_name || '未绑定'}</span>
+        <span class="jstate ${fault ? 'warn' : 'muted'}">${stateText}</span>
+      </li>`;
     });
-  tbody.innerHTML = rows.length
+  list.innerHTML = rows.length
     ? rows.join('')
-    : '<tr class="empty"><td colspan="11">暂无数据（等待 motor_topology）</td></tr>';
+    : '<li class="empty">暂无数据（等待 motor_topology）</li>';
 
   // 汇总 chips。
   let onlineN = 0, faultN = 0;
@@ -282,6 +295,184 @@ function renderMotors() {
   }
   $('chipOnline').textContent = `在线 ${onlineN}/${state.motors.size}`;
   $('chipFault').textContent = `故障 ${faultN}`;
+  renderSelected();
+  arm3dSyncColors();
+}
+
+// ---------- 面板折叠 ----------
+// 折叠状态记进 localStorage：收起是操作员的意图，刷新不该被重置。收起后标题栏
+// 由 renderFoldSummaries() 补摘要，所以"收起"不等于变成一根没信息的横条。
+const FOLD_KEY = 'web_host.fold';
+let foldState = {};
+
+function initFold() {
+  try { foldState = JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; }
+  catch (e) { foldState = {}; }
+  document.querySelectorAll('details[data-fold]').forEach((d) => {
+    const k = d.dataset.fold;
+    if (foldState[k] !== undefined) d.open = foldState[k];
+    d.addEventListener('toggle', () => {
+      foldState[k] = d.open;
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify(foldState)); } catch (e) {}
+    });
+  });
+}
+
+function renderFoldSummaries() {
+  let online = 0, conflict = 0, fault = 0;
+  for (const r of state.motors.values()) {
+    const st = r.status || {}, t = r.topo || {};
+    if (st.online !== undefined ? st.online : t.online) online++;
+    if (t.conflict || st.lifecycle === 7) conflict++;
+    if (st.unified_fault_code) fault++;
+  }
+  $('sumJoints').textContent = state.motors.size
+    ? `${online}/${state.motors.size} 在线`
+      + (conflict ? ` · 冲突 ${conflict}` : '') + (fault ? ` · 故障 ${fault}` : '')
+    : '--';
+  $('sumPer').textContent = (state.selectedId ? `m${state.selectedId}` : '未选中')
+    + (state.policy.size ? ` · 已下发 ${state.policy.size} 台` : '');
+  const nCmd = $('cmdRows').querySelectorAll('tr').length;
+  $('sumSend').textContent = `${nCmd} 台目标` + (streamTimer ? ' · 连发中' : '');
+  $('sumEvents').textContent = state.events.length
+    ? `${state.events.length} 条` : '空';
+}
+
+// ---------- 臂视图 ----------
+// 关节角来源是**固件的 motion_states**，不是 /joint_states。理由：页面本来就在
+// 订阅它，字段就是关节侧 rad；而 /joint_states 要额外起 firmware_topic_bridge，
+// 且在 Gazebo 台架上会被 gz 自己的 joint_state_broadcaster 抢同名话题。
+function arm3dSyncJoints() {
+  if (!window.Arm3D) return;
+  const angles = {};
+  for (const [idStr, joint] of Object.entries(JOINT_OF_MOTOR)) {
+    const mo = (state.motors.get(Number(idStr)) || {}).motion;
+    if (mo && Number.isFinite(mo.position)) angles[joint] = mo.position;
+  }
+  window.Arm3D.setJoints(angles);
+}
+
+// 幽灵 / 跟随误差用的「目标」= 页面最后一次真正发出去的目标位置（history[0]）。
+// 这不是固件的设定点——固件会钳位、软停、整包拒收，那些结论页面看不到，
+// 所以图例与提示里都写明了出处，不冒充固件真值。
+function targetOf(id) {
+  const h = history[0];
+  if (!h) return NaN;
+  const t = h.targets.find((x) => x.motor_id === id);
+  return t ? t.position : NaN;
+}
+
+function arm3dSyncGhost() {
+  if (!window.Arm3D) return;
+  const angles = {};
+  let any = false;
+  for (const [idStr, joint] of Object.entries(JOINT_OF_MOTOR)) {
+    const id = Number(idStr);
+    const mo = (state.motors.get(id) || {}).motion;
+    // 轨迹在播期间目标是固件插值出来的，页面无从得知（固件不发设定点）——
+    // 宁可不画，也不画一个错的目标。target_source: 0=无 1=快照 2=轨迹
+    if (mo && mo.target_source === 2) continue;
+    const v = targetOf(id);
+    if (Number.isFinite(v)) { angles[joint] = v; any = true; }
+  }
+  window.Arm3D.setTargets(any ? angles : null);
+}
+
+function arm3dSyncColors() {
+  if (!window.Arm3D) return;
+  const colors = {};
+  for (const [idStr, joint] of Object.entries(JOINT_OF_MOTOR)) {
+    const r = state.motors.get(Number(idStr)) || {};
+    const st = r.status || {}, t = r.topo || {};
+    const online = st.online !== undefined ? st.online : t.online;
+    const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
+    const fault = st.unified_fault_code || 0;
+    colors[joint] = !online ? '#7e8bab'
+      : ((fault || lc === 6 || lc === 7) ? '#ff6b6b'
+        : (lc === 4 ? '#37d67a' : '#f5b94a'));
+  }
+  window.Arm3D.setJointColors(colors);
+}
+
+function selectMotor(id) {
+  state.selectedId = id || 0;
+  renderMotors();   // 内含 renderSelected + 颜色同步
+  if (paramCache.size > 0) renderParamRows();
+}
+
+// 右栏「选中关节」：纯显示，不参与任何下发。
+function renderSelected() {
+  const id = state.selectedId;
+  if (!id) {
+    $('selTitle').textContent = '未选中关节（点左栏或臂上的小球）';
+    for (const k of ['selPosition', 'selVelocity', 'selEffort', 'selCurrent',
+                     'selTemp', 'selErr', 'selSource', 'selFault', 'selAge']) {
+      $(k).textContent = '--';
+    }
+    if (window.Arm3D) window.Arm3D.setSelected(null);
+    return;
+  }
+  const r = state.motors.get(id) || {};
+  const t = r.topo || {}, mo = r.motion || {}, st = r.status || {};
+  const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
+  $('selTitle').textContent =
+    `m${id} · ${t.model_name || '未绑定'} · ${LIFECYCLE[lc] || '--'}`;
+  $('selPosition').textContent = fmt(mo.position, 3) + ' rad';
+  $('selVelocity').textContent = fmt(mo.velocity, 3) + ' rad/s';
+  $('selEffort').textContent = fmt(mo.effort, 3) + ' N·m';
+  $('selCurrent').textContent = fmt(st.current, 2) + ' A';
+  $('selTemp').textContent = fmt(st.temperature, 1) + ' °C';
+  const tgt = targetOf(id);
+  $('selErr').textContent =
+    (mo.target_source === 2 || !Number.isFinite(tgt) || !Number.isFinite(mo.position))
+      ? '--' : fmt(tgt - mo.position, 4) + ' rad';
+  $('selSource').textContent = ['无', '快照', '轨迹'][mo.target_source] || '--';
+  const fault = st.unified_fault_code || 0;
+  $('selFault').textContent = fault ? (FAULT_NAMES[fault] || fault) : '无';
+  $('selAge').textContent = ageText(mo.state_age_ms);
+  if (window.Arm3D) window.Arm3D.setSelected(JOINT_OF_MOTOR[id] || null);
+}
+
+function arm3dStart() {
+  const canvas = $('arm3d');
+  if (!canvas || !window.Arm3D) return;
+  const hud = $('armHud');
+  window.Arm3D.init(canvas, {
+    urdfUrl: `robot_arm_gazebo/models/${MODEL}/urdf/${MODEL}.urdf`,
+    // package://robot_arm_gazebo/... → web/robot_arm_gazebo/...（符号链接镜像）
+    packages: {robot_arm_gazebo: 'robot_arm_gazebo'},
+    onSelect: (joint) => {
+      for (const [idStr, j] of Object.entries(JOINT_OF_MOTOR)) {
+        if (j === joint) { selectMotor(Number(idStr)); return; }
+      }
+    },
+    // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
+    onProgress: (url, loaded, total) => {
+      if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
+        hud.textContent = `臂视图加载中 ${Math.round(loaded / total * 100)}%`;
+      }
+    },
+    onReady: (joints) => {
+      // 没进映射表的 URDF 关节要点名——否则「这根不动」会被当成故障去排查。
+      const mapped = Object.values(JOINT_OF_MOTOR);
+      const extra = joints.filter((j) => !mapped.includes(j));
+      hud.textContent = `臂视图就绪 · ${joints.length} 个关节`
+        + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
+        + ' · STL 约 20 MB（首次慢，之后走浏览器缓存）';
+      arm3dSyncColors();
+      arm3dSyncJoints();
+      arm3dSyncGhost();
+      setTimeout(() => { hud.style.opacity = '0.3'; }, 5000);
+    },
+    onError: (err) => {
+      hud.className = 'hud err';
+      hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
+        + '（查 web/robot_arm_gazebo 符号链接是否存在、static server 日志）';
+    },
+  });
+  window.addEventListener('resize', () => window.Arm3D.resize());
+  document.addEventListener('visibilitychange', () =>
+    window.Arm3D.setRunning(!document.hidden));
 }
 
 function renderEvents() {
@@ -896,6 +1087,7 @@ function teachImport() {
 
 // ---------- 定时刷新 ----------
 setInterval(renderMotors, 200);
+setInterval(renderFoldSummaries, 500);
 setInterval(renderImu, 200);
 setInterval(chartTrim, 1000);
 setInterval(drawChart, 200);
@@ -918,26 +1110,29 @@ setInterval(() => {
 // ---------- Tab 切换 ----------
 
 // ---------- 逐电机策略（/micro_ros_do/motor_policy）----------
-// enable 与 MIT 增益**不在参数树里**：它们是动态量（ARD §19.4 禁止进 100Hz
-// 快照）。固件侧是稀疏语义——只影响下发的那些电机，其余保持原状。
-// 代数必须严格前进才受理「从未武装到武装」，挡的是「周期重发同一条策略」在
-// 故障后自动复权；每次真正改变意图时自然 +1 即可。
+// 使能与 MIT 增益走策略话题，**不在参数树里**：它们确实是固件 param_field_t 的
+// 头三项，但没进 kParamMotorFields[] 注册表（每电机只注册 5 项限值类），而参数面
+// 总容量只有 64 项——再加 3 项会把可支持台数从 ~11 压到 ~8。策略这条路还带
+// 「代数严格前进」的防复权门。
+// 稀疏语义：只影响下发的那些电机，其余保持原状。
+// 固件**不回读** kp/kd，所以表格里显示的是页面最后一次发出去的值（state.policy）。
 let policyGeneration = 0;
 
-function setPolResult(ok, text) {
-  const el = $('polResult');
-  el.className = 'result tiny' + (ok ? '' : ' warn');
-  el.textContent = text;
+function polInputs(id) {
+  const q = (f) => $('paramRows').querySelector(
+    `[data-pol-field="${f}"][data-id="${id}"]`);
+  return {enable: q('enabled'), kp: q('kp'), kd: q('kd')};
 }
 
-function sendPolicyFromForm() {
-  if (!state.connected) { setPolResult(false, '未连接 rosbridge'); return; }
-  const id = parseInt($('polId').value, 10);
-  const kp = parseFloat($('polKp').value);
-  const kd = parseFloat($('polKd').value);
-  if (!Number.isInteger(id) || id < 1) { setPolResult(false, 'ID 非法'); return; }
+// 逐台下发（表格每行一个按钮）：改哪台发哪台。
+function sendPolicyRow(id) {
+  if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return; }
+  const el = polInputs(id);
+  if (!el.enable || !el.kp || !el.kd) { return; }
+  const kp = parseFloat(el.kp.value);
+  const kd = parseFloat(el.kd.value);
   if (!Number.isFinite(kp) || !Number.isFinite(kd) || kp < 0 || kd < 0) {
-    setPolResult(false, 'kp/kd 必须是非负有限值');
+    setParamResult(false, `m${id}：kp/kd 必须是非负有限值`);
     return;
   }
   policyGeneration = (policyGeneration + 1) >>> 0;
@@ -947,11 +1142,12 @@ function sendPolicyFromForm() {
     request_id: seq,
     policy_generation: policyGeneration,
     count: 1,
-    targets: [{motor_id: id, enabled: $('polEnable').checked, kp, kd}],
+    targets: [{motor_id: id, enabled: el.enable.checked, kp, kd}],
   });
-  setPolResult(true, `已发 seq=${seq} gen=${policyGeneration}：电机 ${id} ` +
-    ($('polEnable').checked ? '武装' : '失能') +
-    '。受理/拒绝是异步的，看事件表的 CONFIG_RESULT');
+  state.policy.set(id, {enabled: el.enable.checked, kp, kd});
+  setParamResult(true, `策略已发 seq=${seq} gen=${policyGeneration}：m${id} ` +
+    (el.enable.checked ? '武装' : '失能') + ` kp=${kp} kd=${kd}` +
+    '。受理/拒绝是异步的，看事件日志的 CONFIG_RESULT');
 }
 
 // ---------- 参数页（rcl_interfaces 参数服务直连）----------
@@ -1006,9 +1202,18 @@ function setParamResult(ok, text) {
 
 function renderParamRows() {
   const tbody = $('paramRows');
-  const ids = [...paramCache.keys()].sort((a, b) => a - b);
+  const allIds = [...paramCache.keys()].sort((a, b) => a - b);
+  if (allIds.length === 0) {
+    tbody.innerHTML = '<tr class="empty"><td colspan="13">参数集为空（等待电机发现）</td></tr>';
+    return;
+  }
+  // 默认只展开选中的那一台（「点关节就地展开」）；勾「显示全部」看整条臂。
+  const showAll = $('chkAllParams') && $('chkAllParams').checked;
+  const ids = (showAll || !state.selectedId)
+    ? allIds : allIds.filter((i) => i === state.selectedId);
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="10">参数集为空（等待电机发现）</td></tr>';
+    tbody.innerHTML = '<tr class="empty"><td colspan="13">'
+      + `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余</td></tr>`;
     return;
   }
   tbody.innerHTML = ids.map((id) => {
@@ -1051,6 +1256,15 @@ function renderParamRows() {
         ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
         '（该关节将没有任何限位在执行）。仅未运动时受理。">'
       : '<input type="checkbox" disabled title="设备还没回读到该对象">';
+    // 使能 / kp / kd 走策略话题（不在参数树里），固件不回读——框里是**页面最后
+    // 一次下发出去的值**，不是固件当前值。
+    const pol = state.policy.get(id) || {};
+    const polNum = (f) => `<input class="pnum" type="number" min="0" step="0.1"
+      data-id="${id}" data-pol-field="${f}" value="${pol[f] !== undefined ? pol[f] : 0}"
+      title="页面最后一次下发的值；固件不回读 kp/kd。设备参数未核对的台会被直接拒">`;
+    const polEnable = `<input type="checkbox" data-id="${id}" data-pol-field="enabled"
+      ${pol.enabled ? ' checked' : ''}
+      title="页面最后一次下发的值。设备参数未核对的台会被直接拒（CONFIG_RESULT reason=2）">`;
     return `<tr>
       <td class="num">${id}</td>
       <td>${model || '<span class="muted">--</span>'}</td>
@@ -1059,9 +1273,11 @@ function renderParamRows() {
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td>${protectCell}</td>
+      <td>${polEnable}</td><td>${polNum('kp')}</td><td>${polNum('kd')}</td>
       <td><button class="tiny-btn" data-refresh="${id}">回读</button>
         <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
-        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
+        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button>
+        <button class="tiny-btn primary" data-pol="${id}" title="把这一行的 启用/kp/kd 作为一条策略下发（代数自动 +1）">策略</button></td>
     </tr>`;
   }).join('');
   tbody.querySelectorAll('input').forEach((inp) => {
@@ -1076,6 +1292,9 @@ function renderParamRows() {
   });
   tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
     btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
+  });
+  tbody.querySelectorAll('[data-pol]').forEach((btn) => {
+    btn.onclick = () => sendPolicyRow(parseInt(btn.dataset.pol, 10));
   });
   renderParamSummary();
 }
@@ -1133,6 +1352,7 @@ function renderParamSummary() {
   if (ids.length === 0) {
     el.className = 'summary tiny';
     el.textContent = '设备参数核对：暂无电机';
+    if ($('sumParams')) $('sumParams').textContent = '无电机';
     return;
   }
   const offline = [], blocked = [], ok = [];
@@ -1172,6 +1392,11 @@ function renderParamSummary() {
   }
   el.className = 'summary tiny';
   el.innerHTML = parts.join(' ');
+  if ($('sumParams')) {
+    $('sumParams').textContent = `${ids.length} 台`
+      + (blocked.length ? ` · 未初始化 ${blocked.length}` : '')
+      + (offline.length ? ` · 离线 ${offline.length}` : '');
+  }
 }
 
 // last_error 快照：总览条与失败文案用它把错误码翻译成人话。
@@ -1480,13 +1705,6 @@ async function clearMotorFault(id) {
     '看 system.last_error 与 motor_events 定位是哪一层拒的');
 }
 
-function switchTab(page) {
-  document.querySelectorAll('.tab').forEach((b) =>
-    b.classList.toggle('on', b.dataset.page === page));
-  document.querySelectorAll('.page').forEach((p) =>
-    p.classList.toggle('on', p.id === 'page-' + page));
-}
-
 // ---------- 初始化 ----------
 function init() {
   $('rosUrl').value = (location.protocol === 'https:' ? 'wss://' : 'ws://')
@@ -1495,9 +1713,18 @@ function init() {
   $('btnDisconnect').onclick = disconnect;
   $('rosUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
 
-  document.querySelectorAll('.tab').forEach((b) => {
-    b.onclick = () => switchTab(b.dataset.page);
+  // 左栏关节索引：事件委托（列表每次 renderMotors 都会重建）。
+  $('motorRows').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (li) selectMotor(parseInt(li.dataset.id, 10));
   });
+  $('chkAllParams').onchange = renderParamRows;
+  initFold();
+
+  // 臂视图是 ES module（默认 defer），到这里可能还没加载完——用事件交接，
+  // 不赌脚本顺序。
+  if (window.Arm3D) arm3dStart();
+  else window.addEventListener('arm3d-ready', arm3dStart, {once: true});
 
   $('btnAddRow').onclick = () => addCmdRow();
   $('btnFillOnline').onclick = () => {
@@ -1545,7 +1772,6 @@ function init() {
   $('btnTeachImport').onclick = teachImport;
 
   $('btnParamLoad').onclick = loadParams;
-  $('btnPolSend').onclick = sendPolicyFromForm;
   $('btnParamApply').onclick = applyParams;
   $('btnParamSave').onclick = saveParamsToFlash;
 

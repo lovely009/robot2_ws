@@ -187,6 +187,12 @@ static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,
   return true;
 }
 
+static uint32_t g_rx_hw_lost[CAN_TX_BUS_COUNT] = {0U};
+
+uint32_t can_bsp_rx_hw_lost(uint8_t bus_index) {
+  return bus_index < CAN_TX_BUS_COUNT ? g_rx_hw_lost[bus_index] : 0U;
+}
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs) {
   int8_t bus_index = can_bus_index(hfdcan);
   if (bus_index < 0) {
@@ -201,6 +207,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     return;
   }
 
+  if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0U) {
+    ++g_rx_hw_lost[bus];   // 丢的是硬件 FIFO 里的帧，救不回来，只记数
+  }
   // 硬件 FIFO 深度为 8；只处理进入回调时已挂起的帧，后到帧由下一次 IRQ
   // 继续承接，避免持续满载时在单次 ISR 中无界循环。
   const uint32_t rx_tick_ms = isr_now_ms();

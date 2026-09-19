@@ -114,7 +114,7 @@ typedef struct {
   uint32_t config_overflow_count;  // 配置 FIFO 满（消费慢于生产）
   uint32_t config_session_count;   // Agent 未连接期的配置提交
   uint32_t command_rejected_count; // 被授权/会话门拒绝的命令提交
-                                   //（快照本身非法走 command.invalid_snapshot_count）
+                                   //（快照本身非法走同一计数，已导出）
   uint32_t trajectory_rejected_count; // 被授权/会话门拒绝的轨迹提交
                                       //（轨迹本身非法走 trajectory.invalid_trajectory_count）
   uint32_t policy_rejected_count; // 被授权/会话门拒绝的策略提交
@@ -132,7 +132,7 @@ typedef struct {
 void control_mailbox_init(control_mailbox_t *mailbox);
 
 // 高频输入：完整快照 latest-wins。未授权或 Agent 已断开时拒绝新命令
-// （计入 command_rejected_count；快照本身非法由 command.invalid_snapshot_count
+// （计入 command_rejected_count，已由诊断话题导出；快照本身非法同样走这里，
 // 计数，二者不重复）。
 bool control_mailbox_submit_command(
     control_mailbox_t *mailbox,

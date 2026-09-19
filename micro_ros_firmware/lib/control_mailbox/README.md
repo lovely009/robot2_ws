@@ -70,7 +70,7 @@
 | 计数 | 含义 |
 |---|---|
 | `command_rejected_count` | 命令被授权/会话门拒绝 |
-| `command.invalid_snapshot_count` | 快照非法（超 64 / 非有限浮点 / motor_id 重复） |
+| `mailbox_rejected_command`（诊断话题） | 快照非法（超 64 / 非有限浮点 / motor_id 重复）——**注意**：README 此前写的是 `command.invalid_snapshot_count`，那个计数器在代码里从未存在过 |
 | `command.overwrite_count` | 命令快照未取走即被覆盖 |
 | `config_invalid_count` | 配置请求非法（request_id==0 / 未知 kind / 负载非法） |
 | `config_session_count` | Agent 断开期的配置提交 |

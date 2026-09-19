@@ -40,6 +40,12 @@ can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index);
 bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame);
 
 
+// 每总线硬件 RX FIFO0 的 MESSAGE_LOST 计数：FIFO0 只有 8 深，一旦丢帧
+// **不可恢复**——这是协议层唯一会真丢数据的地方，必须能看见。
+// 注意：必须留在 extern "C" 块**内**——放外面会变成 C++ 链接，
+// 与 C 编译的定义对不上（undefined reference）。
+uint32_t can_bsp_rx_hw_lost(uint8_t bus_index);
+
 #ifdef __cplusplus
 }
 #endif

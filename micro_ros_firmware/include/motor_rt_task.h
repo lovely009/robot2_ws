@@ -83,7 +83,14 @@ size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity);
 // 堆余量由本任务采集（内核不感知堆），ring 溢出由 lib/fdcan 持有。
 typedef struct {
   motor_control_diagnostics_t kernel;
+  // mailbox 层拒绝：**到不了内核**的那批（NaN 快照 / 时间递减轨迹 / 越权电机）。
+  // 内核计数只看得到「进了内核又被拒」的；这批此前既没导出、调用方还 (void)
+  // 丢了返回值 —— 台架上表现为「发布成功却没反应、哪儿都查不到」。
+  uint32_t mailbox_rejected_command;
+  uint32_t mailbox_rejected_trajectory;
+  uint32_t mailbox_rejected_policy;
   uint32_t ring_drop[MOTOR_CONTROL_MAX_BUSES];
+  uint32_t rx_hw_lost[MOTOR_CONTROL_MAX_BUSES]; // 硬件 FIFO0 MESSAGE_LOST
   uint32_t heap_free;
 } motor_rt_diagnostics_t;
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);

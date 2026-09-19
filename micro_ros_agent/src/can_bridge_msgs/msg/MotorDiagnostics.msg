@@ -31,3 +31,16 @@ uint32 policy_accepted
 uint32 policy_rejected
 uint32[<=3] ring_drop
 uint32 heap_free
+
+# --- 2026-09-20 新增：把三类「看不见的丢」变成看得见 ---
+# mailbox 层拒绝（内核计数只看得到「到了内核又被拒」的，到不了内核的那批原先
+# 既没导出、调用方还 (void) 丢了返回值）。NaN 快照 / 时间递减轨迹 / 越权电机
+# 轨迹都落在这里。
+uint32 mailbox_rejected_command
+uint32 mailbox_rejected_trajectory
+uint32 mailbox_rejected_policy
+# 出站发布失败总数（含 best-effort 单条超传输上限的静默丢弃——48 台时
+# motion_states/status 会中招，此前 (void)rcl_publish 把返回值吞了）。
+uint32 publish_fail
+# 每总线硬件 RX FIFO0 的 MESSAGE_LOST 计数（帧不可恢复；FIFO 只有 8 深）。
+uint32[<=3] rx_hw_lost

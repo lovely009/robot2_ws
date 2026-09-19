@@ -38,7 +38,12 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-static const uint32_t kControlPeriodMs = 20U;
+// 2026-09-20：20 → 5 ms（50 → 200 Hz）。依据（4 台单总线的实测口径）：
+// 命令 4×200Hz×54.4µs = 17.4% + 回显同比 + 状态/SYNC ≈ 26% 总线负载；
+// TX pump 16 帧/5ms = 3.2 帧/ms（上限 8）、全局 collect 9.6 帧/ms（上限 16）。
+// **不是所有规模都成立**：48 台上限（16 台/总线）时 500Hz 需 52% 且打满配额
+// ——提频的可行区间随每总线台数收缩，见 docs/plans/active/48-motor-scale-design.md §3.2。
+static const uint32_t kControlPeriodMs = 5U;
 
 // 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
@@ -200,6 +205,22 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
     can_rx_ring_t *ring = can_bsp_rx_ring(bus);
     out->ring_drop[bus] = ring != nullptr ? ring->overflow_count : 0U;
+  }
+  // mailbox 层拒绝（整条消息在进入内核前就被拦下）。两半都要算：
+  //   ① 外层授权门拒绝（*_rejected_count）
+  //   ② **载荷本身非法**（内层 invalid_*_count）——NaN 快照 / 时间递减轨迹 /
+  //      越权电机都落在这半。此前它只记在**内层**结构里、从没有任何导出路径，
+  //      而调用方又把 submit 的返回值 (void) 掉了 → 台架上表现为「发布成功、
+  //      既不计数也不出事件」，哪儿都查不到。
+  out->mailbox_rejected_command = g_control_mailbox.command_rejected_count +
+                                  g_control_mailbox.command.invalid_snapshot_count;
+  out->mailbox_rejected_trajectory =
+      g_control_mailbox.trajectory_rejected_count +
+      g_control_mailbox.trajectory.invalid_trajectory_count;
+  out->mailbox_rejected_policy = g_control_mailbox.policy_rejected_count +
+                                 g_control_mailbox.policy.invalid_policy_count;
+  for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
+    out->rx_hw_lost[bus] = can_bsp_rx_hw_lost(bus);
   }
   out->heap_free = (uint32_t)xPortGetFreeHeapSize();
 }

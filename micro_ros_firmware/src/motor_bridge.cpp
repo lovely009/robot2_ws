@@ -248,7 +248,25 @@ static void policy_cb(const void *msgin) {
 // 发布填充
 // ---------------------------------------------------------------------------
 
+// 出站发布失败计数：best-effort 单条超传输上限时 rcl_publish 返回错误而消息
+// **静默丢弃**（48 台时 motion_states / motor_status_array 都会中招）。此前所有
+// 调用点都把返回值 (void) 掉了，故障在外部完全不可见。
+static uint32_t g_publish_fail = 0U;
+
+static void note_publish(rcl_ret_t rc) {
+  if (rc != RCL_RET_OK) {
+    ++g_publish_fail;
+  }
+}
+
 static void publish_motion_states() {
+  // 50 Hz（10ms tick ×2）：与**控制边界 20ms** 和设备的 20ms 反馈对齐。100Hz 里
+  // 有一半只是重复发同一份测量值——与 publish_statuses 降到 20Hz 是同一条理由
+  // （那边注释写的正是「100Hz 里绝大部分只是 state_age 自增的重复内容」）。
+  static uint8_t s_motion_phase = 0U;
+  if ((++s_motion_phase % 2U) != 0U) {
+    return;
+  }
   motor_control_motion_state_t states[kRosArrayCapacity];
   const size_t count =
       motor_rt_copy_motion_states(states, sizeof(states) / sizeof(states[0]));
@@ -265,7 +283,7 @@ static void publish_motion_states() {
   }
   g_motion_states_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_motion_states_pub, &g_motion_states_msg, nullptr);
-  (void)publish_rc;
+  note_publish(publish_rc);
 }
 
 static void publish_statuses() {
@@ -298,7 +316,7 @@ static void publish_statuses() {
   }
   g_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_status_pub, &g_status_msg, nullptr);
-  (void)publish_rc;
+  note_publish(publish_rc);
 }
 
 static uint32_t g_topology_tick = 0U; // 1s 节流的相位
@@ -328,7 +346,7 @@ static void publish_topology(uint32_t now_ms) {
   g_topology_msg.schema_version = kMotorMsgSchemaVersion;
   g_topology_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_topology_pub, &g_topology_msg, nullptr);
-  (void)publish_rc;
+  note_publish(publish_rc);
 }
 
 // 诊断：1Hz。这些计数器此前全在芯片里，除 heap_free 一个都不对外——实时性与
@@ -360,9 +378,17 @@ static void publish_diagnostics(uint32_t now_ms) {
     g_diagnostics_msg.ring_drop.data[i] = d.ring_drop[i];
   }
   g_diagnostics_msg.heap_free = d.heap_free;
+  g_diagnostics_msg.mailbox_rejected_command = d.mailbox_rejected_command;
+  g_diagnostics_msg.mailbox_rejected_trajectory = d.mailbox_rejected_trajectory;
+  g_diagnostics_msg.mailbox_rejected_policy = d.mailbox_rejected_policy;
+  g_diagnostics_msg.publish_fail = g_publish_fail;
+  g_diagnostics_msg.rx_hw_lost.size = MOTOR_CONTROL_MAX_BUSES;
+  for (uint32_t i = 0U; i < MOTOR_CONTROL_MAX_BUSES; ++i) {
+    g_diagnostics_msg.rx_hw_lost.data[i] = d.rx_hw_lost[i];
+  }
   const rcl_ret_t publish_rc =
       rcl_publish(&g_diagnostics_pub, &g_diagnostics_msg, nullptr);
-  (void)publish_rc;
+  note_publish(publish_rc);
 }
 
 // 轨迹执行状态：10Hz。补上「我发的轨迹受理了吗、跑到哪了」——轨迹是 best-effort
@@ -388,7 +414,7 @@ static void publish_trajectory_state(uint32_t now_ms) {
   }
   const rcl_ret_t publish_rc =
       rcl_publish(&g_trajectory_state_pub, &g_trajectory_state_msg, nullptr);
-  (void)publish_rc;
+  note_publish(publish_rc);
 }
 
 static void publish_events() {
@@ -406,7 +432,7 @@ static void publish_events() {
       g_event_msg.request_id = events[i].request_id;
       g_event_msg.event_seq = events[i].seq;
       const rcl_ret_t publish_rc = rcl_publish(&g_events_pub, &g_event_msg, nullptr);
-      (void)publish_rc;
+      note_publish(publish_rc);
     }
   }
 }

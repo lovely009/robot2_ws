@@ -63,16 +63,27 @@ static const char *const kSystemClearFaultSeq = "system.clear_fault_seq";
 
 static const uint32_t kSyncPeriodMs = 100U;  // 影子同步周期
 static const uint32_t kRegisterPerPoll = 2U; // 每拍最多注册电机数
-// ROS 参数面上每电机暴露 5 项：限位×2 / 限速 / 限流 + 设备侧保护开关。
-// enable/kp/kd 是动态量，已移到 /motor_policy 话题（ARD §19.4 本就禁止它们进
-// 命令快照），不再占参数面预算。注意 param_field_t 仍是 8 项且**不要改**——
-// 它是 Flash blob 的 present 位图契约与记录布局；退役的字段只是不再被注册，
-// 布局不变、无需迁移。
-// **容量代价（未决，见 validation plan）**：4 → 5 项把
-// `kMaxMotors` 从 (176-10)/4 = 41 砍到 (176-10)/5 = **33**，够不到"实际部署
-// 约 40 台"。提到 215 槽需多吃 ~12.8 KB（实测 328 B/槽），而当前 heap_free
-// 只有 12,328 B —— 放不下。要么改回系统级命令形态，要么先扩容堆。
-#define PARAM_MOTOR_FIELD_COUNT 5U
+// ROS 参数面上每电机暴露的字段**显式列出**（2026-09-20）。
+// enable/kp/kd 是动态量，走 /micro_ros_do/motor_policy 话题（ARD §19.4 本就禁止它们进
+// 命令快照），不占参数面预算。
+//
+// 为什么不能再用 `f < PARAM_FIELD_COUNT` 当上界：那是"枚举全集"，不是"注册
+// 集合"。2026-09-19 有人在 param_field_t 尾部追加了 6 个 PID 字段，注册循环
+// 立刻把它们带进参数树（恒 NaN、不可写、纯占槽），每电机项数 5 → 11，而
+// kMaxMotors 的分母仍是 5 → 门限虚高到 81、第 37 台起 rclc_add_parameter
+// 失败还被 (void) 吞掉。表与枚举分离后，加字段必须显式改这里，并被下面
+// 两条断言拦住。param_field_t 的次序仍是 Flash blob 的 present 位图契约。
+static const param_field_t kParamMotorFields[] = {
+    PARAM_FIELD_POS_MIN, PARAM_FIELD_POS_MAX, PARAM_FIELD_VEL_LIMIT,
+    PARAM_FIELD_TORQUE_LIMIT, PARAM_FIELD_LIMIT_PROTECT,
+};
+#define PARAM_MOTOR_FIELD_COUNT \
+  (sizeof(kParamMotorFields) / sizeof(kParamMotorFields[0]))
+
+static_assert(PARAM_MOTOR_FIELD_COUNT == 5U,
+              "每电机参数项数变了：同步改 include/param_bridge.h 的容量说明");
+static_assert(PARAM_MOTOR_FIELD_COUNT <= PARAM_FIELD_COUNT,
+              "注册字段必须落在 param_field_t 枚举内");
 
 static const uint32_t kMaxMotors =
     (PARAM_BRIDGE_MAX_PARAMS - kSystemParamCount) / PARAM_MOTOR_FIELD_COUNT;
@@ -436,7 +447,7 @@ static bool param_on_modification(const Parameter *old_param,
 
   if (field == PARAM_FIELD_ENABLE || field == PARAM_FIELD_KP ||
       field == PARAM_FIELD_KD) {
-    // 这三项是动态量，已移到 /motor_policy 话题（不占参数槽位预算）。
+    // 这三项是动态量，已移到 /micro_ros_do/motor_policy 话题（不占参数槽位预算）。
     // 名字仍会被 param_name_parse 解析出来，但从不注册，正常路径收不到；
     // 这里显式拒绝，免得将来有人把注册加回去，却发现写入被静默吞掉。
     report_error(ERR_LOCAL_VALIDATION, motor_id);
@@ -573,21 +584,19 @@ static void register_motor_params(const motor_control_param_view_t *v) {
   slot->bound = v->bound;
   slot->torque_per_amp = v->torque_per_amp;
 
-  // 注册静态量：限位×2 / 限速 / 限流 / 保护开关（POS_MIN..COUNT-1）。
-  // enable/kp/kd 是动态量，走 /motor_policy 话题，不占参数面。
+  // 注册静态量：见文件上方 kParamMotorFields[]（限位×2 / 限速 / 限流 / 保护开关）。
   param_name_buf_t name;
-  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
-    (void)param_name_build_motor(name, sizeof(name), v->motor_id,
-                                 (param_field_t)f);
+  for (size_t i = 0; i < PARAM_MOTOR_FIELD_COUNT; ++i) {
+    const param_field_t f = kParamMotorFields[i];
+    (void)param_name_build_motor(name, sizeof(name), v->motor_id, f);
     (void)rclc_add_parameter(&g_server, name, RCLC_PARAMETER_DOUBLE);
   }
   // 初值（内部写，不触发业务动作）。NaN 原值透传给 double 参数。
   g_internal_write = true;
-  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
-    (void)param_name_build_motor(name, sizeof(name), v->motor_id,
-                                 (param_field_t)f);
-    (void)rclc_parameter_set_double(&g_server, name,
-                                    view_field(v, (param_field_t)f));
+  for (size_t i = 0; i < PARAM_MOTOR_FIELD_COUNT; ++i) {
+    const param_field_t f = kParamMotorFields[i];
+    (void)param_name_build_motor(name, sizeof(name), v->motor_id, f);
+    (void)rclc_parameter_set_double(&g_server, name, view_field(v, f));
   }
   g_internal_write = false;
 }
@@ -605,15 +614,15 @@ static void sync_slot_from_view(MotorSlot *slot,
   slot->bound = v->bound;
   slot->torque_per_amp = v->torque_per_amp; // 绑定型号变化时换算系数随之更新
   param_name_buf_t name;
-  for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f) {
+  for (size_t i = 0; i < PARAM_MOTOR_FIELD_COUNT; ++i) {
+    const param_field_t f = kParamMotorFields[i];
     if (slot->outstanding[f] != 0U) {
       continue;
     }
     double current = NAN;
-    (void)param_name_build_motor(name, sizeof(name), slot->motor_id,
-                                 (param_field_t)f);
+    (void)param_name_build_motor(name, sizeof(name), slot->motor_id, f);
     (void)rclc_parameter_get_double(&g_server, name, &current);
-    const double target = view_field(v, (param_field_t)f);
+    const double target = view_field(v, f);
     if (doubles_differ(current, target)) {
       set_double_internal(name, target);
     }
@@ -827,6 +836,18 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return true; // 幂等
   }
   if (node == nullptr || executor == nullptr) {
+    return false;
+  }
+
+  // rclc 在 low_mem 模式下按 max_params **一次性全量分配**，且不对分配结果做
+  // NULL 检查（parameter_server.c:543 分配、:555 紧接着写 data[i].name）——
+  // 堆不够时表现为写非法地址，不是干净失败。这里是唯一的拦截点。
+  // 按实测边际 328 B/槽预估：该值是 176..256 槽区间的斜率，槽数更少时每槽占用
+  // 不会更高，作为"够不够"的下界是保守方向（宁可拒绝建服，不可写空指针）。
+  constexpr size_t kParamSlotBytes = 328U;
+  constexpr size_t kParamHeapReserve = 4096U;
+  if ((size_t)xPortGetFreeHeapSize() <
+      (size_t)PARAM_BRIDGE_MAX_PARAMS * kParamSlotBytes + kParamHeapReserve) {
     return false;
   }
 

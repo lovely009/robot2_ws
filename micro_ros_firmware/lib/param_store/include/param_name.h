@@ -29,14 +29,14 @@ typedef enum {
   // 追加在 COUNT 前：不重排既有字段（blob present 位图与注册顺序的契约）。
   // 值本身不入 blob 的 float 字段，它在 device_raw[槽 4] 里已有持久化。
   PARAM_FIELD_LIMIT_PROTECT,
-  // 【B 方案实测】PID 六项（字典 0x2532..0x2537，UINT32 寄存器原值 0..32768）。
-  // 追加在 COUNT 前，不重排既有字段（blob present 位图契约）。
-  PARAM_FIELD_CURRENT_P,
-  PARAM_FIELD_CURRENT_I,
-  PARAM_FIELD_VELOCITY_P,
-  PARAM_FIELD_VELOCITY_I,
-  PARAM_FIELD_POSITION_P,
-  PARAM_FIELD_POSITION_I,
+  // 【2026-09-20 删除】此处曾追加 PID 六项（0x2532..0x2537，B 方案实测）。
+  // 它们被 param_bridge 的注册循环以 PARAM_FIELD_COUNT 为界**自动带进参数树**，
+  // 变成 6 个恒 NaN、不可写、纯占槽的死项，并把每电机注册项数从 5 顶到 11
+  // （kMaxMotors 的推导分母仍是 5 → 门限虚高 → 第 37 台起静默注册失败）。
+  // PID 非安全项、驱动器自持（0x2539 保存码 1 覆盖），台架调参用离线 SDO 工具，
+  // **不再回到本枚举**。本枚举尾端即"可注册字段全集"，但注册哪些由
+  // src/param_bridge.cpp 的 kParamMotorFields[] 显式列出——加字段必须同时改两处。
+  // 既有 W25 blob 不受影响：present 位只用到 0..6（param_store_blob.c:110）。
   PARAM_FIELD_COUNT
 } param_field_t;
 

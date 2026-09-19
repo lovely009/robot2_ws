@@ -36,24 +36,29 @@ extern "C" {
 
 #define PARAM_BRIDGE_EXECUTOR_HANDLES 5U
 
-// 128 槽 = 5 系统参数 + 17 电机 × 7。ponytail: rclc 参数集在 DTCM newlib
-// 堆（low-mem 约 0.3KB/槽），远期三总线 ~40 台时需改自定义 srv 参数接口。
-// 槽位预算：每电机 4 项（限位/限速/限流）+ system.* 10 项。
-// **2026-09-18 台架实测修正**：原设 208（覆盖 48 台）在真机上把堆吃到只剩
-// 1,776 B——208 槽比 128 槽多吃约 21.5 KB，而 DTCM 堆池的实际余量远小于
-// 静态估算。当时降到 176。
+// 容量（2026-09-20 定）：**64 槽 = 10 system + 10 电机 × 5 项**。
 //
-// **2026-09-19 重新算账**：每槽实测 **328 B**（由 176/208 两点差得出，是
-// **边际值**，不可线性外推）。堆池是整个 DTCM 减去 8 KiB 主栈 = **120 KiB**，
-// 而 FreeRTOS（heap_useNewlib_ST）与 newlib 共用它——**池子不可能再扩**，只能
-// 搬走占用。最大的一块是 micro_ros 任务栈 32 KiB，已改静态分配落到 RAM_D1 的
-// .bss，`heap_free` 12,328 → 29,748 B。
+// 唯一稀缺资源是 DTCM 堆池：**122,880 B**（= DTCM 128 KiB − 主栈 8 KiB；.data/.bss
+// 落 AXI/RAM_D1，DTCM 只放堆/主栈，见 ldscript:178-213）。FreeRTOS
+// heap_useNewlib_ST 与 newlib 同池，**物理不可扩**。非参数常驻 19,660 B
+// （FreeRTOS 动态任务栈 11,264 + rcl/transport 启动分配约 8,396）。
+// rclc 在 low_mem 模式下于 init 时**按 max_params 一次性全量分配**（Parameter
+// 112 B + descriptor 68 B + 每槽名缓冲 50 B + 两个 range 序列 + list 响应的
+// String 头 → 结构约 269 B，加分配器块开销后**实测边际 328 B/槽**，由 176/208
+// 与 224/256 两对台架点各自算出同一斜率）。**与板上实际几台电机无关**。
 //
-// 目标规模 **48 台**：每电机 5 项（限位×2 / 限速 / 限流 / 保护开关）
-//   → 48×5 + 10 = **250 槽**；取 256 留余量（覆盖 (256-10)/5 = 49 台）。
-// **本板只有 4 台，测不出 48 台规模的真实占用**——这一版是按目标规模预留容量，
-// 上线前必须量 48 台 + 长时间运行的 heap_free 稳态最低位（见 validation plan）。
-#define PARAM_BRIDGE_MAX_PARAMS 416U
+//   64 槽  → 64 × 328 = 20,992 B → heap_free ≈ 82,228 B
+//   416 槽 → 136,448 B > 122,880 B 池 → **必然分配失败**
+//
+// 416 是 2026-09-19 一次未复核的改动，而 rclc 在该路径**不对分配结果做 NULL
+// 检查**（parameter_server.c:543/555 会写 data[i].name）——所以它不是"优雅失败"，
+// 而是写非法地址。故 param_bridge_create() 建服前先做堆预算拦截（见 .cpp）。
+//
+// 每电机项数由 src/param_bridge.cpp 的 kParamMotorFields[] 显式列出（当前 5 项：
+// 限位×2 / 限速 / 限流 / 保护开关），不再由 param_field_t 枚举边界隐式决定。
+// 目标规模 48 台时电机参数**整体撤出参数树**（配置改走块话题，见
+// docs/plans/active/48-motor-scale-design.md §4 P2）；届时本值收到 16（只留 system）。
+#define PARAM_BRIDGE_MAX_PARAMS 64U
 
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_destroy(rcl_node_t *node);

@@ -5,10 +5,8 @@
 #include <string.h>
 
 static const char *const kFieldNames[PARAM_FIELD_COUNT] = {
-    "enable",     "kp",         "kd",           "pos_min",
-    "pos_max",    "vel_limit",  "torque_limit", "limit_protect",
-    "current_kp", "current_ki", "velocity_kp",  "velocity_ki",
-    "position_kp", "position_ki"};
+    "enable",  "kp",        "kd",           "pos_min",
+    "pos_max", "vel_limit", "torque_limit", "limit_protect"};
 
 bool param_name_build_motor(char *buf, size_t size, uint16_t motor_id,
                             param_field_t field) {

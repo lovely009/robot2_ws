@@ -53,6 +53,15 @@ void test_param_name_build_parse_roundtrip() {
   assert(param_name_parse("m128.kp", &id, &field) == PARAM_NAME_UNKNOWN);
   assert(param_name_parse("m7.bogus", &id, &field) == PARAM_NAME_UNKNOWN);
   assert(param_name_parse("m.kp", &id, &field) == PARAM_NAME_UNKNOWN);
+  // PID 六项已于 2026-09-20 移出 param_field_t：它们曾被注册循环按
+  // PARAM_FIELD_COUNT 边界自动带进参数树（恒 NaN、纯占槽，并把每电机项数
+  // 从 5 顶到 11）。这里钉住"名字不再可解析"，防止有人只把名字加回名字表
+  // 而不改注册集合。
+  assert(param_name_parse("m7.current_kp", &id, &field) == PARAM_NAME_UNKNOWN);
+  assert(param_name_parse("m7.position_ki", &id, &field) == PARAM_NAME_UNKNOWN);
+  // 末位字段仍是 limit_protect —— 它是 present 位图契约的边界（索引 7）。
+  assert(param_name_parse("m7.limit_protect", &id, &field) == PARAM_NAME_MOTOR);
+  assert(field == PARAM_FIELD_LIMIT_PROTECT);
 }
 
 void test_param_name_validation() {

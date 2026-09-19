@@ -221,6 +221,7 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
                                  g_control_mailbox.policy.invalid_policy_count;
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
     out->rx_hw_lost[bus] = can_bsp_rx_hw_lost(bus);
+    out->tx_frame_count[bus] = can_bsp_tx_frame_count(bus);
   }
   out->heap_free = (uint32_t)xPortGetFreeHeapSize();
 }

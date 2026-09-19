@@ -91,6 +91,7 @@ typedef struct {
   uint32_t mailbox_rejected_policy;
   uint32_t ring_drop[MOTOR_CONTROL_MAX_BUSES];
   uint32_t rx_hw_lost[MOTOR_CONTROL_MAX_BUSES]; // 硬件 FIFO0 MESSAGE_LOST
+  uint32_t tx_frame_count[MOTOR_CONTROL_MAX_BUSES]; // 已提交硬件的发送帧数
   uint32_t heap_free;
 } motor_rt_diagnostics_t;
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);

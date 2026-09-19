@@ -44,3 +44,8 @@ uint32 mailbox_rejected_policy
 uint32 publish_fail
 # 每总线硬件 RX FIFO0 的 MESSAGE_LOST 计数（帧不可恢复；FIFO 只有 8 深）。
 uint32[<=3] rx_hw_lost
+# 每总线**真正提交给硬件**的发送帧数（在 HAL_FDCAN_AddMessageToTxFifoQ 成功处计）。
+# 这是"板子到底发没发、发了多少"的**直接**证据——SYNC 一直在发（50Hz×总线数），
+# 所以基线非零；命令一上来就跳。此前只有 tx_dropped/p0_retry 两个"失败"计数，
+# 没有任何"发了多少"的数，判断发送频率只能靠间接推断（踩过）。
+uint32[<=3] tx_frame_count

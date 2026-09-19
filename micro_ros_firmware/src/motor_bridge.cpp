@@ -122,7 +122,14 @@ static bool g_events_up = false;
 
 static rcl_publisher_t g_diagnostics_pub;
 static can_bridge_msgs__msg__MotorDiagnostics g_diagnostics_msg;
+// 诊断消息里三个 [<=3] 序列各有自己的静态缓冲，**必须逐条接线**。漏接的序列
+// .data 为 NULL，写入会落到地址 0（STM32H7 的 ITCM 在那儿，写不报错），两个
+// 漏接的序列于是互相覆盖——rx_hw_lost 曾整整一版都在报 tx 的数，而"板子到底
+// 发了多少帧"这个唯一的直接证据因此不可信（2026-09-20 拿模拟器实收帧对照才
+// 发现：日志算出 208 帧/s，它报 50）。
 static uint32_t g_diagnostics_ring_buf[MOTOR_CONTROL_MAX_BUSES];
+static uint32_t g_diagnostics_rx_lost_buf[MOTOR_CONTROL_MAX_BUSES];
+static uint32_t g_diagnostics_tx_count_buf[MOTOR_CONTROL_MAX_BUSES];
 static bool g_diagnostics_up = false;
 
 static rcl_publisher_t g_trajectory_state_pub;
@@ -383,8 +390,10 @@ static void publish_diagnostics(uint32_t now_ms) {
   g_diagnostics_msg.mailbox_rejected_policy = d.mailbox_rejected_policy;
   g_diagnostics_msg.publish_fail = g_publish_fail;
   g_diagnostics_msg.rx_hw_lost.size = MOTOR_CONTROL_MAX_BUSES;
+  g_diagnostics_msg.tx_frame_count.size = MOTOR_CONTROL_MAX_BUSES;
   for (uint32_t i = 0U; i < MOTOR_CONTROL_MAX_BUSES; ++i) {
     g_diagnostics_msg.rx_hw_lost.data[i] = d.rx_hw_lost[i];
+    g_diagnostics_msg.tx_frame_count.data[i] = d.tx_frame_count[i];
   }
   const rcl_ret_t publish_rc =
       rcl_publish(&g_diagnostics_pub, &g_diagnostics_msg, nullptr);
@@ -456,6 +465,25 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_policy_msg.targets.data = g_policy_targets_buf;
   g_diagnostics_msg.ring_drop.capacity = MOTOR_CONTROL_MAX_BUSES;
   g_diagnostics_msg.ring_drop.data = g_diagnostics_ring_buf;
+  g_diagnostics_msg.rx_hw_lost.capacity = MOTOR_CONTROL_MAX_BUSES;
+  g_diagnostics_msg.rx_hw_lost.data = g_diagnostics_rx_lost_buf;
+  g_diagnostics_msg.tx_frame_count.capacity = MOTOR_CONTROL_MAX_BUSES;
+  g_diagnostics_msg.tx_frame_count.data = g_diagnostics_tx_count_buf;
+  // 序列接线没有类型层面的保护，漏一条就是往 NULL 写。把它变成启动期硬失败，
+  // 而不是等读到"两个字段一模一样"才发现。
+  {
+    const rosidl_runtime_c__uint32__Sequence *buses[] = {
+        &g_diagnostics_msg.ring_drop,
+        &g_diagnostics_msg.rx_hw_lost,
+        &g_diagnostics_msg.tx_frame_count,
+    };
+    for (size_t i = 0U; i < sizeof(buses) / sizeof(buses[0]); ++i) {
+      if (buses[i]->data == NULL ||
+          buses[i]->capacity < MOTOR_CONTROL_MAX_BUSES) {
+        return false;
+      }
+    }
+  }
   g_trajectory_state_msg.target_ids.capacity =
       MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS;
   g_trajectory_state_msg.target_ids.data = g_trajectory_state_ids_buf;

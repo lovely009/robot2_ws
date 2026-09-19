@@ -122,6 +122,15 @@ void bsp_can_init(void) {
   HAL_FDCAN_ActivateNotification(&hfdcan3, error_notifications, 0);
 }
 
+// 每总线**成功提交给硬件**的发送帧数。放在这里（使用点之前）而不是文件后半段——
+// 顺序错了会报 undeclared（踩过）。它回答的是"板子到底发了多少帧"：SYNC 一直在发
+// （50Hz×总线数），所以基线非零，命令一上来就跳。
+static uint32_t g_tx_frame_count[CAN_TX_BUS_COUNT] = {0U};
+
+uint32_t can_bsp_tx_frame_count(uint8_t bus_index) {
+  return bus_index < CAN_TX_BUS_COUNT ? g_tx_frame_count[bus_index] : 0U;
+}
+
 bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
   if (bus_index >= CAN_TX_BUS_COUNT || frame == NULL ||
       frame->size > CAN_TX_FRAME_BYTES) {
@@ -148,6 +157,7 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
     can_tx_scheduler_note_hw_reject(&g_tx_schedulers[bus_index]);
     return false;
   }
+  ++g_tx_frame_count[bus_index]; // 只计**成功**进硬件 FIFO 的
   return true;
 }
 

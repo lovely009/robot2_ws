@@ -46,6 +46,10 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame);
 // 与 C 编译的定义对不上（undefined reference）。
 uint32_t can_bsp_rx_hw_lost(uint8_t bus_index);
 
+// 每总线**已提交给硬件**的发送帧数：在 HAL_FDCAN_AddMessageToTxFifoQ 成功处计。
+// 这是"板子发了多少帧"的直接证据（此前只有失败计数，判断发送频率只能靠推断）。
+uint32_t can_bsp_tx_frame_count(uint8_t bus_index);
+
 #ifdef __cplusplus
 }
 #endif

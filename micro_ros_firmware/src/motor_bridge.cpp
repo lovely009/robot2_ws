@@ -1,19 +1,19 @@
 // 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15；下行已精简）。
 //
 // 订阅（3 句柄）：
-//   /motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
-//   /motor_trajectory（多点轨迹，段级低频）→ 校验 → mailbox 轨迹通道
-//   /motor_policy（逐电机 enable/kp/kd，低频）→ 校验 → mailbox 策略通道
+//   /micro_ros_do/motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
+//   /micro_ros_do/motor_trajectory（多点轨迹，段级低频）→ 校验 → mailbox 轨迹通道
+//   /micro_ros_do/motor_policy（逐电机 enable/kp/kd，低频）→ 校验 → mailbox 策略通道
 //
 // 两条下行命令源的仲裁在内核：轨迹声明集合内的电机由轨迹独占，快照对它
 // 既不下发也不软停；集合外的电机仍由快照负责（缺失即软停，ARD §13.1）。
 // 策略与二者正交：它是控制律参数与武装位，不是运动目标（ARD §15.4 禁止
 // Kp/Kd/Enable 进入 100Hz 快照，故单独成一条）。
 // 发布（4）：
-//   micro_ros/motion_states（100Hz 运动状态，只读副本）
-//   micro_ros/motor_status_array（20Hz 诊断）
-//   micro_ros/motor_topology（1s 全量拓扑）
-//   micro_ros/motor_events（事件转发）
+//   micro_ros_up/motion_states（100Hz 运动状态，只读副本）
+//   micro_ros_up/motor_status_array（20Hz 诊断）
+//   micro_ros_up/motor_topology（1s 全量拓扑）
+//   micro_ros_up/motor_events（事件转发）
 //
 // 下行无配置通道：型号绑定由内核在发现建档/重连时经 READ_IDENTITY 事务读
 // 设备自报身份并查型号目录完成；授权/增益/限位取内核安全默认（建档
@@ -67,15 +67,19 @@ static uint16_t g_trajectory_target_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS]
 static can_bridge_msgs__msg__MotorPolicyTarget g_policy_targets_buf[kRosArrayCapacity];
 
 // ---- 话题名 ----
-static const char *kCommandTopic = "/motor_command_array";
-static const char *kTrajectoryTopic = "/motor_trajectory";
-static const char *kPolicyTopic = "/motor_policy";
-static const char *kMotionStatesTopic = "micro_ros/motion_states";
-static const char *kStatusTopic = "micro_ros/motor_status_array";
-static const char *kTopologyTopic = "micro_ros/motor_topology";
-static const char *kEventsTopic = "micro_ros/motor_events";
-static const char *kDiagnosticsTopic = "micro_ros/diagnostics";
-static const char *kTrajectoryStateTopic = "micro_ros/trajectory_state";
+// 订阅与发布统一用**相对名**（同在 micro_ros_up/ 命名空间）：整条固件接口因此
+// 可被 launch 重映射到别的前缀，且"哪些话题是固件私有接口"一眼可辨——根命名
+// 空间留给标准话题（/joint_states 等，由 motor_hardware_interface 的适配桥产出）。
+// 改名必须同步消费者：web_host/web/app.js 的 TOPICS。
+static const char *kCommandTopic = "micro_ros_do/motor_command_array";
+static const char *kTrajectoryTopic = "micro_ros_do/motor_trajectory";
+static const char *kPolicyTopic = "micro_ros_do/motor_policy";
+static const char *kMotionStatesTopic = "micro_ros_up/motion_states";
+static const char *kStatusTopic = "micro_ros_up/motor_status_array";
+static const char *kTopologyTopic = "micro_ros_up/motor_topology";
+static const char *kEventsTopic = "micro_ros_up/motor_events";
+static const char *kDiagnosticsTopic = "micro_ros_up/diagnostics";
+static const char *kTrajectoryStateTopic = "micro_ros_up/trajectory_state";
 
 // 消息面契约版本：随字段**语义**变更递增（字段只增不改序，故不是每次加字段
 // 都动）。上层据此检测漂移，而不是静默按旧布局解析。

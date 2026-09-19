@@ -7,15 +7,15 @@
 
 // ---------- 常量 ----------
 const TOPICS = {
-  topology: {name: '/micro_ros/motor_topology', type: 'can_bridge_msgs/msg/MotorTopology'},
-  motion: {name: '/micro_ros/motion_states', type: 'can_bridge_msgs/msg/MotorMotionStateArray'},
-  status: {name: '/micro_ros/motor_status_array', type: 'can_bridge_msgs/msg/MotorStatusArray'},
-  events: {name: '/micro_ros/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
-  imu: {name: '/micro_ros/imu/data', type: 'sensor_msgs/msg/Imu'},
-  temp: {name: '/micro_ros/imu/temp', type: 'std_msgs/msg/Float32'},
-  command: {name: '/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  trajectory: {name: '/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
-  policy: {name: '/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
+  topology: {name: '/micro_ros_up/motor_topology', type: 'can_bridge_msgs/msg/MotorTopology'},
+  motion: {name: '/micro_ros_up/motion_states', type: 'can_bridge_msgs/msg/MotorMotionStateArray'},
+  status: {name: '/micro_ros_up/motor_status_array', type: 'can_bridge_msgs/msg/MotorStatusArray'},
+  events: {name: '/micro_ros_up/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
+  imu: {name: '/micro_ros_up/imu/data', type: 'sensor_msgs/msg/Imu'},
+  temp: {name: '/micro_ros_up/imu/temp', type: 'std_msgs/msg/Float32'},
+  command: {name: '/micro_ros_do/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
+  trajectory: {name: '/micro_ros_do/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
 };
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -917,7 +917,7 @@ setInterval(() => {
 
 // ---------- Tab 切换 ----------
 
-// ---------- 逐电机策略（/motor_policy）----------
+// ---------- 逐电机策略（/micro_ros_do/motor_policy）----------
 // enable 与 MIT 增益**不在参数树里**：它们是动态量（ARD §19.4 禁止进 100Hz
 // 快照）。固件侧是稀疏语义——只影响下发的那些电机，其余保持原状。
 // 代数必须严格前进才受理「从未武装到武装」，挡的是「周期重发同一条策略」在
@@ -963,7 +963,7 @@ const PARAM_NODE = '/micro_ros_node';
 function paramServiceName(typeName) {
   return typeName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
-// 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /motor_policy
+// 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /micro_ros_do/motor_policy
 // 话题（固件起把这三项从参数面退役）。
 const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit',
   'limit_protect'];

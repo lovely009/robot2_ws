@@ -16,8 +16,8 @@
 #include "sensor_task.h"
 #include "time_utils.h"
 
-static const char *kImuTopic = "micro_ros/imu/data";
-static const char *kTempTopic = "micro_ros/imu/temp";
+static const char *kImuTopic = "micro_ros_up/imu/data";
+static const char *kTempTopic = "micro_ros_up/imu/temp";
 
 static rcl_publisher_t g_imu_pub;
 static rcl_publisher_t g_temp_pub;

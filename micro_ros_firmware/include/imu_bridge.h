@@ -1,6 +1,6 @@
 // IMU 域 ROS 桥接接口（agent 通信层下的 IMU 发布模块）。
-// 负责 sensor_msgs/Imu（micro_ros/imu/data）与 std_msgs/Float32
-// （micro_ros/imu/temp）的缓冲、填充与发布；生命周期由 ros_bridge 统一管理。
+// 负责 sensor_msgs/Imu（micro_ros_up/imu/data）与 std_msgs/Float32
+// （micro_ros_up/imu/temp）的缓冲、填充与发布；生命周期由 ros_bridge 统一管理。
 
 #ifndef IMU_BRIDGE_H
 #define IMU_BRIDGE_H

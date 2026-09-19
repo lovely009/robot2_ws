@@ -11,6 +11,13 @@
     arm_position_controller:
       type: forward_command_controller/ForwardCommandController
 
+    # MIT 驱动器替身用的力矩接口（与 position 控制器互斥使用：同一关节不能同时
+    # 被两条命令接口驱动）。切换：
+    #   ros2 control switch_controllers --deactivate arm_position_controller \
+    #                                    --activate arm_effort_controller
+    arm_effort_controller:
+      type: effort_controllers/JointGroupEffortController
+
 # joints 顺序即 Float64MultiArray 命令顺序，必须与 urdf/*.urdf.xacro 的
 # <ros2_control> 关节块一致（由 test_model_consistency.py 兜底）。
 /**/arm_position_controller:
@@ -21,3 +28,12 @@
       - joint_link3
       - joint_link4
     interface_name: position
+
+# JointGroupEffortController 无 interface_name（恒为 effort），只需关节清单。
+/**/arm_effort_controller:
+  ros__parameters:
+    joints:
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4

@@ -234,7 +234,72 @@ class MotorModel:
 
 # ---- 主循环 -------------------------------------------------------------
 
+class GazeboBridge:
+    """--gazebo：把 MIT 命令接到 Gazebo 的关节上（④）。
+
+    定位是**功能与逻辑验证**，不是保真：
+      · 反馈帧报的是 Gazebo 的实际关节角 → 固件看到的反馈来自真动力学；
+      · 力矩按标准 MIT 律 τ = kp(p_des−p) + kd(v_des−v) + τ_ff 算；驱动器内环的
+        真实行为未知（vendor questions 第 8 条），**不在这里猜**。
+      · 未映射的电机照旧走原来的假 plant（--joint-map 决定谁接 Gazebo）。
+    """
+
+    def __init__(self, joint_map, effort_topic, tau_limit):
+        import rclpy
+        from rclpy.node import Node
+        from sensor_msgs.msg import JointState
+        from std_msgs.msg import Float64MultiArray
+        self._rclpy = rclpy
+        self._msg_type = Float64MultiArray
+        rclpy.init()
+        self.node = Node("fdcan_sim_gazebo_bridge")
+        self.joint_map = dict(joint_map)          # {motor_id: joint_name}
+        self.joints = sorted(set(joint_map.values()))
+        self.pos = {j: 0.0 for j in self.joints}
+        self.vel = {j: 0.0 for j in self.joints}
+        self.tau_limit = tau_limit
+        self.last_pub = 0.0
+        self.node.create_subscription(JointState, "/joint_states",
+                                      self._on_state, 10)
+        self.pub = self.node.create_publisher(Float64MultiArray, effort_topic, 10)
+
+    def _on_state(self, msg):
+        for i, name in enumerate(msg.name):
+            if name in self.pos and i < len(msg.position):
+                self.pos[name] = msg.position[i]
+                self.vel[name] = msg.velocity[i] if i < len(msg.velocity) else 0.0
+
+    def mapped(self, motor_id) -> bool:
+        return motor_id in self.joint_map
+
+    def joint_deg(self, motor_id) -> float:
+        return self.pos[self.joint_map[motor_id]] * 180.0 / PI
+
+    def spin(self):
+        self._rclpy.spin_once(self.node, timeout_sec=0.0)
+
+    def publish_torque(self, models):
+        now = time.monotonic()
+        if now - self.last_pub < 0.015:   # ~66Hz 上限，别把串口/CPU 打满
+            return
+        self.last_pub = now
+        out = self._msg_type()
+        out.data = [0.0] * len(self.joints)
+        for mid, joint in self.joint_map.items():
+            m = models.get(mid)
+            cmd = m.last_cmd if m is not None else None
+            if m is None or not m.enabled or not cmd or "kp" not in cmd:
+                continue
+            tau = (cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
+                   + cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
+                   + cmd["tau_nm"])
+            out.data[self.joints.index(joint)] = max(-self.tau_limit,
+                                                     min(self.tau_limit, tau))
+        self.pub.publish(out)
+
+
 class SlcanSim:
+    bridge = None   # 由 main() 在 --gazebo 时注入 GazeboBridge
     def __init__(self, tty: str, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX,
@@ -497,8 +562,16 @@ class SlcanSim:
                     warned = True
                 continue
             dt = now - last_step
+            if self.bridge is not None:
+                self.bridge.spin()
             for m in self.models.values():
-                m.approach(dt)
+                if self.bridge is not None and self.bridge.mapped(m.id):
+                    # Gazebo 模式：该台的反馈取自真实关节角，假 plant 不参与
+                    m.pos_deg = self.bridge.joint_deg(m.id)
+                else:
+                    m.approach(dt)
+            if self.bridge is not None:
+                self.bridge.publish_torque(self.models)
             last_step = now
             # 错峰：频率由 --fb-period-ms 决定，默认每节点 50Hz。
             for mid in sorted(self.models):
@@ -543,6 +616,16 @@ def main():
     ap.add_argument("--stagger-ms", type=float, default=2.2,
                     help="多节点反馈相位错开间隔")
     ap.add_argument("--log", default=None)
+    ap.add_argument("--gazebo", action="store_true",
+                    help="把 MIT 命令接到 Gazebo：反馈取自 /joint_states，力矩按 MIT 律"
+                         "写 effort 命令接口（功能/逻辑验证用，不追保真）")
+    ap.add_argument("--joint-map",
+                    default="1:joint_link1,2:joint_link2,3:joint_link3,"
+                            "4:joint_link4",
+                    help="电机 id → Gazebo 关节名，逗号分隔")
+    ap.add_argument("--effort-topic", default="/arm_effort_controller/commands")
+    ap.add_argument("--tau-limit", type=float, default=10.0,
+                    help="力矩饱和 N·m；URDF 里关节 effort 限幅是 10.0")
     args = ap.parse_args()
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
@@ -555,6 +638,15 @@ def main():
                    r58_ids=r58_ids,
                    safety_off_ids=args.safety_off,
                    dir_ccw_ids=args.dir_ccw)
+
+    if args.gazebo:
+        jm = {}
+        for item in args.joint_map.split(","):
+            if item.strip():
+                mid, jname = item.split(":")
+                jm[int(mid)] = jname.strip()
+        sim.bridge = GazeboBridge(jm, args.effort_topic, args.tau_limit)
+        print("[sim] Gazebo 桥已接：%s → %s" % (jm, args.effort_topic))
 
     def _sig(_a, _b):
         sim.stop = True

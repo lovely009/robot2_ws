@@ -31,11 +31,17 @@
     </joint>
   </xacro:if>
 
-  <!-- 关节接口声明（position 命令 + position/velocity 状态）。宏名不带模型前缀，
-       拷去新模型时不用改；关节清单必须与 config/controllers.yaml 的顺序一致。 -->
+  <!-- 关节接口声明（position + effort 两条命令接口；position/velocity 状态）。
+       effort 是给「MIT 驱动器替身」用的：真机上 CERB 在 MIT 模式下收 (p, v, kp, kd, τ)
+       并自己算 τ = kp(p_des−p) + kd(v_des−v) + τ_ff；仿真里由 scripts/mit_gazebo_probe.py
+       算同一个式子写进 effort 命令接口，于是插补的平滑度能在一个**带动力学的被控对象**
+       上被看到（现有 CAN 模拟器不建模速度，看不出这件事）。
+       两条命令接口不会同时 active——用 controller_manager 切换，见 config/controllers.yaml。
+       宏名不带模型前缀，拷去新模型时不用改；关节清单必须与 controllers.yaml 的顺序一致。 -->
   <xacro:macro name="sim_control_joint" params="name">
     <joint name="${name}">
       <command_interface name="position"/>
+      <command_interface name="effort"/>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
       </state_interface>

@@ -813,6 +813,25 @@ static bool device_limit_write_allowed(const motor_control_entry_t *entry) {
          entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_SAFE_STOP;
 }
 
+// 设备参数回读的前置契约：**不得在该台自己的上电归一（0a）完成之前回读**。
+// 归一没走完时设备里还是上电初值（保护关 / 方向 CW），读回来必然与记录不符 →
+// 假 MISMATCH → apply_dev_init_result 把 lifecycle 锁到 CONFIG_CONFLICT；而 0a 的
+// lifecycle 门又把归一挡在外面，本次会话就再也回不来了（只能靠重连或人工写回
+// 参数）。触发面是主机的 system.refresh 与 clear_fault，窗口从记录落袋一直到该台
+// 归一收尾（归一失败时还有每次 ≥500ms 的退避窗，多台共享总线时更久）。
+// dev_read_done 是逃生口：本会话已有定论（归一成功，或归一失败已定论
+// UNVERIFIED）就允许读——运行中复查、以及"归一失败后手动重读"那条恢复路径
+// 都靠它。非设备侧型号（VAXOR）没有设备对象，门禁不适用。
+static bool device_refresh_allowed(const motor_control_entry_t *entry) {
+  if (entry->profile == NULL ||
+      (entry->profile->capability_flags &
+       MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+    return true;
+  }
+  return entry->dev_read_done ||
+         entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE;
+}
+
 static bool reject_invalid(motor_control_context_t *ctx,
                            motor_control_entry_t *entry,
                            const motor_protocol_config_request_t *request,
@@ -1081,6 +1100,13 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_busy(ctx, entry, request, now_ms);
       }
       if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM) {
+        // 清 DEV_PARAM = 重跑一次回读：与手动 REFRESH **同一门禁**。今天 DEV_PARAM
+        // 必然伴随 dev_read_done==true（两边都由 apply_dev_init_result 之外的定论
+        // 路径置位），也就是这条转换本来就过得了门；但契约不该靠"非局部不变量"
+        // 成立——就在这里显式挡一次。
+        if (!device_refresh_allowed(entry)) {
+          return reject_busy(ctx, entry, request, now_ms);
+        }
         motor_protocol_config_request_t refresh = *request;
         refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
         return start_tx(ctx, entry, &refresh, now_ms);
@@ -1158,8 +1184,13 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS: {
       // 设备参数回读：换算系数来自 Profile（未绑定拒绝）；上传只读，
       // ACTIVE 态也允许（不加 device_limit_write_allowed 门禁）。
+      // 但**必须等该台自己的归一完成**：否则比的是设备上电初值（假不一致），
+      // 而假不一致会冻结该台并把归一本身挡死（见 device_refresh_allowed）。
       if (entry->profile == NULL) {
         return reject_invalid(ctx, entry, request, now_ms);
+      }
+      if (!device_refresh_allowed(entry)) {
+        return reject_busy(ctx, entry, request, now_ms); // 归一未收尾：稍后重试
       }
       if (entry->tx_active) {
         return reject_busy(ctx, entry, request, now_ms);

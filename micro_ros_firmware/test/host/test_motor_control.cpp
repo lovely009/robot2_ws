@@ -461,6 +461,11 @@ static uint32_t feed_boot_normalize(motor_control_context_t *ctx, uint16_t node,
     // 判成"非本阶段应答"（RETRY）而白白吃掉回读的重试次数。
     return tick;
   }
+  if (e->tx_active && e->tx_request_id != e->boot_norm_request_id) {
+    // 在飞的是**别的**事务（人工写 / 归一失败后的手动回读）：同理，设备没被
+    // 问过保护/方向，不能喂那两条应答。
+    return tick;
+  }
   const uint8_t dir_bit = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
   const bool has_dir = (e->record_raw_present & dir_bit) != 0U &&
                        e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] <= 1U;
@@ -2984,11 +2989,21 @@ static void test_cerb_refresh_params_transaction() {
   // 未显式设置增益：视图回退 Profile 默认（cerb_r58_101：30/1）。
   assert(fabs(d0->kp - 30.0) < 1e-4 && fabs(d0->kd - 1.0) < 1e-4);
 
+  // 读契约：设备侧型号必须先走完该台自己的归一（0a）才允许回读（内核
+  // device_refresh_allowed）。用一份带方向基线的记录把归一走完；刻意用
+  // step_boot_norm_write（不补收尾那一拍）好让下面的**手动**回读抢在自动回读
+  // 之前发起——本用例测的正是手动回读这条路径。
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 104);
+  const uint32_t norm_end = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 105U);
+  (void)step_boot_norm_write(&ctx, 7, 0x2541U, 0U, norm_end + 1U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+
   motor_protocol_config_request_t req = {};
   req.request_id = 41U;
   req.motor_id = 7;
   req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-  assert(motor_control_submit_config(&ctx, &req, 105));
+  assert(motor_control_submit_config(&ctx, &req, 115));
 
   auto sdo_read = [](uint8_t sub, uint16_t index, uint32_t value, uint32_t tick) {
     uint8_t payload[8] = {0x43U, (uint8_t)(index & 0xFFU),
@@ -3001,7 +3016,7 @@ static void test_cerb_refresh_params_transaction() {
     f.is_fd = false;
     return f;
   };
-  uint32_t t = 110;
+  uint32_t t = 120;
   // 阶段 0：读 :01 = 16384 cnt(+90°) → π/2
   motor_control_service(&ctx, t);
   motor_protocol_raw_frame_t r = sdo_read(1U, 0x607DU, 16384U, t + 1);
@@ -3211,18 +3226,30 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
   rec.velocity_limit_rad_s = 1.5f;
   rec.has_torque_limit = true;
   rec.torque_limit_nm = 20.0f;
+  // 安全槽（保护 0 / 方向 0）也给全：归一（0a）要按记录写方向，缺槽就跳过方向
+  // 步、归一收不了尾；本用例要的是"归一走完之后手动回读照旧受理"。
+  rec.device_raw_present =
+      (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   // 尚未回读设备：影子取记录（来源 = RECORD），页面显示的就是记录值。
   assert(fabs(view_of(&ctx, 7)->velocity_limit_rad_s - 1.5) < 1e-4);
   assert(fabs(view_of(&ctx, 7)->torque_limit_nm - 20.0) < 1e-4);
   assert(view_of(&ctx, 7)->limits_source == MOTOR_CONTROL_LIMITS_SOURCE_RECORD);
 
+  // 读契约：设备侧型号必须先把该台归一（0a）走完才允许回读（内核
+  // device_refresh_allowed）。两步刻意不补收尾那一拍，好让下面的**手动**回读
+  // 抢在自动回读之前发起（本用例测的就是手动回读这条路径）。
+  const uint32_t norm_end = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 115U);
+  (void)step_boot_norm_write(&ctx, 7, 0x2541U, 0U, norm_end + 1U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+
   // 设备回读事务更新影子（模拟内核 refresh 成功路径：直接走一遍完整事务）。
   motor_protocol_config_request_t req = {};
   req.request_id = 51U;
   req.motor_id = 7;
   req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-  assert(motor_control_submit_config(&ctx, &req, 120));
+  assert(motor_control_submit_config(&ctx, &req, 140));
   auto sdo = [](uint8_t sub, uint16_t index, uint32_t value, uint32_t tick) {
     uint8_t p[8] = {0x43, (uint8_t)(index & 0xFFU), (uint8_t)(index >> 8), sub,
                     (uint8_t)(value & 0xFFU), (uint8_t)((value >> 8) & 0xFFU),
@@ -3231,7 +3258,7 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
     f.is_fd = false;
     return f;
   };
-  uint32_t t = 125;
+  uint32_t t = 145;
   motor_control_service(&ctx, t);
   motor_protocol_raw_frame_t f1 = sdo(1, 0x607D, 32768, t + 1);
   motor_control_on_raw_frame(&ctx, &f1);
@@ -3348,7 +3375,7 @@ static void test_boot_normalize_failure_blocks_before_refresh() {
 
   // 只喂心跳、一个 SDO 应答都不给：归一写超时重试用尽（3 次尝试，每次
   // 3×30ms 超时 + 500ms 退避）。
-  (void)run_heartbeat_only(&ctx, 7, 120U, 3000U);
+  uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 3000U);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
   assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
@@ -3360,6 +3387,25 @@ static void test_boot_normalize_failure_blocks_before_refresh() {
   assert(take_dev_init_event(&ctx, 7, &state, &mask));
   assert(state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
   assert(mask == (uint32_t)MOTOR_CONTROL_DEV_RAW_ALL); // 六槽全未核对
+
+  // 逃生口：归一失败**已定论**（dev_read_done=true，而 boot_norm_stage 仍非
+  // DONE）⇒ 手动回读照旧受理——恢复路径不得被门禁掐断（门禁是"别在该台归一
+  // **之前**读"，不是"永远不许读"）。clear_fault(DEV_PARAM) 走的就是同一条
+  // REFRESH 转换。
+  assert(entry_of(&ctx, 7)->boot_norm_stage != MOTOR_CONTROL_BOOT_NORM_DONE);
+  motor_protocol_config_request_t refresh = {};
+  refresh.request_id = 60U;
+  refresh.motor_id = 7;
+  refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  assert(motor_control_submit_config(&ctx, &refresh, t + 10U));
+  (void)feed_device_params(&ctx, 7, kR58Raw, t + 11U, false);
+  assert(has_result_event(&ctx, 60U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+
+  // 结论转好后 0a 的不变量复检自动补做归一（stage 一直停在 PROTECT）。
+  (void)feed_boot_normalize(&ctx, 7, t + 60U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
 }
 
 // 人工写保护用的是**同一个 kind**（SET_SAFETY_PROTECT）：它的收尾不得被当成
@@ -3406,6 +3452,49 @@ static void test_boot_normalize_not_advanced_by_manual_write() {
   // 方向步照常走完。
   (void)step_boot_norm_write(&ctx, 7, 0x2541U, 0U, 140U);
   assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+}
+
+// 归一窗口内（记录已落袋、该台 0a 还没走完）的人工回读必须在**入口**被挡住：
+// 此刻设备里还是上电初值（保护关 / 方向 CW），读回来必然与记录不符 → 假
+// MISMATCH → apply_dev_init_result 把 lifecycle 锁到 CONFIG_CONFLICT，而 0a 的
+// lifecycle 门又把归一挡在外面——本次会话再也回不来（只能靠重连）。
+// `system.refresh`（param_bridge）与 `clear_fault` 都走这条提交入口。
+// 门禁是"别在该台归一**之前**读"，不是"别再读"：定论之后照旧受理（见本用例
+// 尾部与 test_dev_init_flags_safety_mismatch_at_runtime）。
+static void test_manual_refresh_rejected_during_normalize_window() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  // 窗口形状：记录已落袋、归一还没发起（没有事务在飞、也没有失败退避）。
+  assert(entry_of(&ctx, 7)->boot_record_offered);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_PROTECT);
+  assert(!entry_of(&ctx, 7)->dev_read_done);
+  assert(!entry_of(&ctx, 7)->tx_active);
+
+  motor_protocol_config_request_t refresh = {};
+  refresh.request_id = 50U;
+  refresh.motor_id = 7;
+  refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  assert(!motor_control_submit_config(&ctx, &refresh, 111));
+  assert(has_result_event(&ctx, 50U, MOTOR_PROTOCOL_CONFIG_BUSY));
+  assert(!entry_of(&ctx, 7)->tx_active); // 被拒即不起事务
+
+  // 一步都没被带偏：归一照常走完，结论正确（OK，可运动前置条件齐）。
+  (void)feed_boot_normalize(&ctx, 7, 120U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 130U, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+
+  // 定论之后的人工回读照旧受理——拒绝不是靠"永远不许读"换来的。
+  motor_protocol_config_request_t again = refresh;
+  again.request_id = 51U;
+  assert(motor_control_submit_config(&ctx, &again, 200));
+  (void)feed_device_params(&ctx, 7, kR58Raw, 201U, false);
+  assert(has_result_event(&ctx, 51U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
 }
 
 // 记录无方向槽（v2 迁移上来的旧 blob / 新烧板）：归一**跳过**方向步、不写
@@ -5016,6 +5105,7 @@ int main() {
   test_boot_normalize_runs_before_refresh();
   test_boot_normalize_failure_blocks_before_refresh();
   test_boot_normalize_not_advanced_by_manual_write();
+  test_manual_refresh_rejected_during_normalize_window();
   test_boot_normalize_skips_direction_without_record();
   test_boot_normalize_skips_illegal_direction_value();
   test_dev_init_flags_safety_mismatch_at_runtime();

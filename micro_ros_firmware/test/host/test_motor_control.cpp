@@ -448,6 +448,20 @@ static uint32_t feed_direction_write(motor_control_context_t *ctx, uint16_t node
   return tick + 4U;
 }
 
+// 设零点事务（0x2531 写 1）：命令式，**无读回核验阶段**——单写阶段答完即收尾。
+// 返回值 = 事务收尾后的时间戳。
+static uint32_t feed_set_zero(motor_control_context_t *ctx, uint16_t node,
+                              uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(ctx, tick);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t ack = sdo_write_ack(node, 0x2531U, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  return tick + 2U;
+}
+
 // 走完一次上电归一（0a）：保护恒写 0；方向**仅在记录有槽 5 且值合法时**写，
 // 否则整个方向步跳过（不猜方向，交给比对判基线缺失）。
 // 必须在 feed_device_params 之前调用——0b 回读被 0a 阻塞。
@@ -3773,6 +3787,67 @@ static void test_boot_normalize_skips_illegal_direction_value() {
   assert(saved == 0U);
 }
 
+// 翻转方向 = 设备零点与 cnt 限位的物理含义整体镜像（原零点 P0 现在对应 -P0）。
+// 设备侧限位仍会拦住"跑出范围"，拦不住"基于旧零点朝反方向猛冲"，所以冻结到
+// 重新设零成功为止。
+static void test_direction_flip_freezes_until_zero() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+
+  // 翻向 CCW（记录里原为 CW=0）。
+  motor_protocol_config_request_t req = {};
+  req.request_id = 71U;
+  req.motor_id = 7;
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+  req.direction_raw = 1U;
+  motor_control_service(&ctx, 300);
+  assert(motor_control_submit_config(&ctx, &req, 301));
+  (void)feed_direction_write(&ctx, 7, 1U, 302);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(has_result_event(&ctx, 71U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] == 1U); // 基线与设备同值
+  assert(e->zero_stale);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_ZERO_STALE);
+  assert(!motor_control_dev_params_allow_motion(e)); // 武装会被拒
+
+  // 设零成功 → 解除冻结、回到 READY_DISABLED。
+  motor_protocol_config_request_t z = {};
+  z.request_id = 72U;
+  z.motor_id = 7;
+  z.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  assert(motor_control_submit_config(&ctx, &z, 400));
+  (void)feed_set_zero(&ctx, 7, 401); // 测试助手：走完 0x2531 写事务
+  // 设零是"写 1"命令式事务（无读回对象），CERB 的 config_verify_required=false
+  // → 内核按 OK 收尾；解除分支正是收这个码。
+  assert(has_result_event(&ctx, 72U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(!entry_of(&ctx, 7)->zero_stale);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(motor_control_dev_params_allow_motion(entry_of(&ctx, 7)));
+}
+
+// 上电归一把设备从 CW 写回 CCW（记录值）**不是**翻转：比较的是"写前记录值"，
+// 记录没变就不该触发重设零——否则每次上电都要重新标定。
+static void test_boot_normalize_direction_write_is_not_a_flip() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  uint32_t raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  memcpy(raw, kR58Raw, sizeof(raw));
+  raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = 1U; // 记录：CCW
+  motor_control_stored_params_t rec = make_device_record(7, raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, raw, 120, false); // 内含归一步
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(!e->zero_stale);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+}
+
 // 在页面上点一次方向（写事务建立基线）→ 重判转好。
 static void test_device_param_direction_write_establishes_baseline() {
   motor_control_context_t ctx;
@@ -5108,6 +5183,8 @@ int main() {
   test_manual_refresh_rejected_during_normalize_window();
   test_boot_normalize_skips_direction_without_record();
   test_boot_normalize_skips_illegal_direction_value();
+  test_direction_flip_freezes_until_zero();
+  test_boot_normalize_direction_write_is_not_a_flip();
   test_dev_init_flags_safety_mismatch_at_runtime();
   test_device_param_mismatch_blocks_motion();
   test_device_param_migrated_record_flags_protect_off();

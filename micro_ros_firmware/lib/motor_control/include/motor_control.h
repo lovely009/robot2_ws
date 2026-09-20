@@ -85,7 +85,11 @@ typedef enum {
   // 策略代数未前进（SET_POLICY：「未武装 → 武装」需要新意图）。只写入
   // last_failure_reason 供本机诊断，不进 unified_fault_code——它不是设备
   // 故障，而是本机拒绝了一条重复的授权请求。
-  MOTOR_CONTROL_FAULT_STALE_GENERATION = 7U
+  MOTOR_CONTROL_FAULT_STALE_GENERATION = 7U,
+  // 方向被翻转后必须重新设零：设备里零点与 cnt 限位的物理含义已整体镜像。
+  // 与 STALE_GENERATION 不同，它**是**安全状态（该台此刻不能动），因此进
+  // unified_fault_code 并冻结 lifecycle；解除靠 SET_ZERO 成功，不靠"清错"。
+  MOTOR_CONTROL_FAULT_ZERO_STALE = 8U
 } motor_control_fault_code_t;
 
 // 设备参数初始化状态（上电/重连后回读设备 → 与固件记录比对）。

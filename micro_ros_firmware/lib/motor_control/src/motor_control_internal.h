@@ -120,6 +120,12 @@ typedef struct {
   // 上电比对结论。PENDING/MISMATCH/UNVERIFIED 三态都不可控（见
   // motor_control_dev_params_ready）。
   motor_control_dev_init_t dev_init;
+  // 方向被翻转（写事务成功时写入值 ≠ **写前**记录值）后的冻结标志：设备的
+  // 零点基准与 cnt 限位的物理含义已整体镜像，必须先 SET_ZERO 重新标定才可
+  // 再次授权运动。与 dev_init 并列：两者都是"该台此刻不可动"的成因，但解除
+  // 手段不同（本项靠 SET_ZERO 成功，不靠清错）。上电归一写的正是记录值，
+  // 故不置位。
+  bool zero_stale;
   bool dev_read_done; // 本会话已对设备参数定论（成功后不再自动重读）
   // 自动回读的尝试计数与退避时刻：SDO 读是纯只读、对设备无副作用，读不到
   // 多半是总线抖动/设备忙，多给几次机会再判"未核对"，避免一次抖动就把该台
@@ -236,8 +242,11 @@ static inline size_t motor_control_entry_index(
 // PENDING/MISMATCH/UNVERIFIED 一律不放行——没核对完成就没有"用哪份值"的答案。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {
-  return entry != NULL && (entry->dev_init == MOTOR_CONTROL_DEV_INIT_NA ||
-                           entry->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  // zero_stale：方向翻过但还没重新设零。零点基准已被镜像，此刻放行就是让
+  // 电机基于旧零点朝反方向走一大段（设备限位拦得住"跑出范围"，拦不住这个）。
+  return entry != NULL && !entry->zero_stale &&
+         (entry->dev_init == MOTOR_CONTROL_DEV_INIT_NA ||
+          entry->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
 }
 
 // 顺序确定化选择器：取下一个「未输出且 motor_id 最小」表项并在 taken

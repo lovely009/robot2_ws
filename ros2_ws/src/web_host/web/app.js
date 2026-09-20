@@ -672,10 +672,13 @@ const TRAJ_POINT_BYTES = 20;
 // 固件单条轨迹的硬上限：点数组在**四处**各存一份（内核/mailbox 双缓冲/bridge/切矢），
 // 264 → 1024 要约 84 KB RAM，DTCM 池放不下，所以这是硬约束（motor_control.h:45）。
 const TRAJ_FW_MAX_POINTS = 256;
+// 留 4 点余量：**绝不能正好卡在上限**——超一点就是写穿内核的定长点数组，
+// 表现是整块板子卡死（只能复位）。253 点已足够（4 台 → 63 行/段）。
+const TRAJ_FW_POINT_MARGIN = 4;
 
 function trajRowsPerSegment(nMotors) {
   const n = Math.max(1, nMotors);
-  const byFw = Math.floor(TRAJ_FW_MAX_POINTS / n);                       // 固件上限
+  const byFw = Math.floor((TRAJ_FW_MAX_POINTS - TRAJ_FW_POINT_MARGIN) / n); // 固件上限
   const byLink = Math.floor(TRAJ_LINK_BUDGET_BYTES / TRAJ_POINT_BYTES / n); // 链路预算
   // −1：每段还要**多带一行当端点**（段间位置连续，端点行同时是下一段的起点）。
   return Math.max(1, Math.min(byFw, byLink) - 1);

@@ -179,7 +179,7 @@ static void test_blob_to_boot_projection() {
 }
 
 // 设备侧安全开关（0x2650:00）与方向（0x2541）槽必须落盘：二者是纯原值事实，
-// 缺失则上电比对（dev_params_mismatch_mask）永远跳过，CONFIG_CONFLICT 永不触发。
+// 缺失则上电比对（motor_control_dev_mismatch_mask）永远跳过，CONFIG_CONFLICT 永不触发。
 static void test_device_safety_and_direction_slots_persisted() {
   auto *blob = reset_blob();
   // id11：四个原限值 + 安全/方向都经设备核验（真机默认对：SAFETY=1、DIRECTION=0）

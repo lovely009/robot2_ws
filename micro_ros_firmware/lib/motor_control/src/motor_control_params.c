@@ -15,7 +15,7 @@
 
 // 绑定后首次设备影子：取 Profile 标定（±mit 位置限、额定转速、峰值扭矩）作
 // 占位，来源标 PROFILE——设备真值要等上电回读（dev_init=PENDING 期间该台
-// 不可运动，见 motor_control_dev_params_ready）。
+// 不可运动，见 motor_control_dev_params_allow_motion）。
 void motor_control_set_default_device_shadow(motor_control_entry_t *entry) {
   if (entry == NULL || entry->profile == NULL || entry->dev_limits_valid) {
     return;
@@ -92,12 +92,24 @@ static void fill_view(const motor_control_entry_t *entry,
                              : NAN;
   view->dev_raw_present = device_side ? entry->dev_raw_present : 0U;
   view->record_raw_present = device_side ? entry->record_raw_present : 0U;
+  // 报告要的两张位图：已写未保存（含易失槽）与"记录对不上设备的哪几项"
+  // （口径与 DEV_INIT 事件的 detail 相同，不另立一套判据）。
+  view->record_dirty_slots = device_side ? entry->record_dirty_slots : 0U;
+  view->dev_mismatch_mask =
+      (device_side && entry->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH)
+          ? motor_control_dev_mismatch_mask(entry)
+          : 0U;
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
     const uint8_t bit = (uint8_t)(1U << slot);
     view->dev_raw[slot] =
         (view->dev_raw_present & bit) != 0U ? entry->dev_raw[slot] : 0U;
     view->record_raw[slot] =
         (view->record_raw_present & bit) != 0U ? entry->record_raw[slot] : 0U;
+    // 缺失量一律 NaN：0 会在页面上冒充"限位设成了 0"，那是个能让人按下去的值。
+    view->dev_si[slot] =
+        (view->dev_raw_present & bit) != 0U ? entry->dev_si[slot] : NAN;
+    view->record_si[slot] =
+        (view->record_raw_present & bit) != 0U ? entry->record_si[slot] : NAN;
   }
 }
 
@@ -157,9 +169,35 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
     entry->record_raw_present = rec->device_raw_present;
     // 有设备参数的基线记录（device_raw_present 非零才算数：只存了 kp/kd 的
     // 记录对设备参数比对毫无用处，"无记录"是它诚实的结论）。
+    // 已知标签漂移：保存一旦把保护槽写进 W25，**下一次**上电这里就看到
+    // device_raw_present != 0 ⇒ 走"有记录"分支；若方向槽仍缺基线，结论会报
+    // MISMATCH（点名方向）而不是 NO_RECORD。两者都冻结、都拒绝使能，行为完全
+    // 一致，差的只是标签——别把它当成"记录莫名其妙冒出来了"。
     if (rec->device_raw_present != 0U) {
       entry->record_established = true;
     }
+    // 记录侧的 SI 值：blob 里本来就存了（写设备时同一笔事务产生的），直接搬。
+    // 缺字段的槽位保持 NaN。
+    for (uint8_t i = 0U; i < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++i) {
+      entry->record_si[i] = NAN;
+    }
+    if (rec->has_position_limits) {
+      entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN] = rec->pos_min_rad;
+      entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX] = rec->pos_max_rad;
+    }
+    if (rec->has_velocity_limit) {
+      entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX] =
+          rec->velocity_limit_rad_s;
+    }
+    if (rec->has_torque_limit) {
+      entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX] =
+          rec->torque_limit_nm;
+    }
+    // 两个安全槽是枚举/标志位，原值即 SI（与 adapter 的 passthrough 同口径）。
+    entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] =
+        (float)rec->device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+    entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] =
+        (float)rec->device_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
   }
 
   // rec == NULL（本机对该台还没拿到记录）：只完成"已告知"这一次性动作，

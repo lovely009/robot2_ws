@@ -498,6 +498,17 @@ typedef struct {
   // 会把比对基准整体抹掉，下次上电就再也发现不了不一致。
   uint8_t record_raw_present;
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  // 设备端原值对应的关节侧换算值（与 dev_raw 同槽位索引）：DeviceParamReport
+  // 的"驱动板"那一行。缺失槽位为 NaN。
+  float dev_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  // 记录的关节侧换算值："固件"那一行。缺失槽位为 NaN。
+  float record_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  // 已写、未保存的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*；0 = 已保存）。
+  // 含易失槽（保护开关 / 方向）——它们没有设备保存码，但记录要落 W25 才生效。
+  uint8_t record_dirty_slots;
+  // 记录与设备**对不上**的槽位位图（口径同 DEV_INIT 事件的 detail）。
+  // dev_init == MISMATCH 时它点名是哪几项；其余态为 0。
+  uint8_t dev_mismatch_mask;
 } motor_control_param_view_t;
 
 // 六个设备端原值是否齐全（页面/工具判"设备真值可完整显示"）。

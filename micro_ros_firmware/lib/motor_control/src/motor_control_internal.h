@@ -128,6 +128,11 @@ typedef struct {
   bool record_established;
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   uint8_t record_raw_present;
+  // 记录的关节侧换算值（与 record_raw 同槽位索引）。比对一律比 raw（系数配错时
+  // 两边一起错、比对恒通过），这份 SI 只供页面显示"固件这一行"——两行必须同
+  // 单位才可比。来源两处：W25 套用（blob 已存 SI）与写事务收尾（事务请求本身
+  // 就是 SI）。**不按 raw 重算**，否则显示值会比比对值乐观。
+  float record_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   // 已写进设备并核验、但**尚未保存**的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）。
   // "保存"= 写设备 0x2539（驱动器落 flash）+ W25 落盘；两者都由 system.save 触发。
   // 含易失槽（保护开关 / 方向）：它们没有保存码，但**记录**要落 W25 才能生效
@@ -312,6 +317,10 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
 
 // 绑定后首次设备影子填 Profile 默认（CERB；motor_control_params.c）。
 void motor_control_set_default_device_shadow(motor_control_entry_t *entry);
+
+// 记录与设备回读逐槽位比对（设备端原值）。返回值 = 不一致槽位位图
+// （1u << MOTOR_PROTOCOL_PARAM_SLOT_*；0 = 一致）。参数视图与 DEV_INIT 事件共用。
+uint8_t motor_control_dev_mismatch_mask(const motor_control_entry_t *entry);
 
 // 策略落地（motor_control_config.c）：SET_POLICY config kind 与批量入口
 // motor_control_apply_policy 共用，避免两条路径的门禁与钳制漂移。

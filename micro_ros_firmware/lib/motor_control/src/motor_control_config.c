@@ -96,14 +96,15 @@ static void finish_identity_read(motor_control_context_t *ctx,
 //    位图——上电归一会自己写保护开关（见 entry_has_record）；
 //  - 记录里没有的槽位不参与比对（刚烧录、Flash 半空的电机不该整体卡住），
 //    **唯一例外是方向槽（0x2541）**：设备侧它易失（每次上电回 0=CW），"设备读到
-//    0"不含信息，故记录缺这一槽 = 方向未知 = 未初始化（见 dev_params_mismatch_mask）。
+//    0"不含信息，故记录缺这一槽 = 方向未知 = 未初始化（见 motor_control_dev_mismatch_mask）。
 // ---------------------------------------------------------------------------
 
 // 记录与设备回读逐槽位比对（设备端原值）。返回值 = 不一致槽位位图
 // （1u << MOTOR_PROTOCOL_PARAM_SLOT_*；0 = 一致）。位图随 DEV_INIT 事件带出去，
-// 让上位机能直接说"是哪一项对不上"——否则操作者按页面写回一个槽位、别的槽位
-// 仍不一致，结论还是未初始化，看起来就像"设置不生效"。
-static uint8_t dev_params_mismatch_mask(const motor_control_entry_t *entry) {
+// 也经参数视图透出（DeviceParamReport 要能说"是页面哪一格对不上"）——否则
+// 操作者按页面写回一个槽位、别的槽位仍不一致，结论还是未初始化，看起来就像
+// "设置不生效"。
+uint8_t motor_control_dev_mismatch_mask(const motor_control_entry_t *entry) {
   uint8_t mask = 0U;
   // 方向基线**独立于"本机有无记录"判定**：方向是易失对象，设备每次上电都回
   // 0（CW），"设备当前读到 0"零信息量——记录是它唯一的权威来源。无记录 /
@@ -132,7 +133,7 @@ static uint8_t dev_params_mismatch_mask(const motor_control_entry_t *entry) {
 }
 
 static bool dev_params_match_record(const motor_control_entry_t *entry) {
-  return dev_params_mismatch_mask(entry) == 0U;
+  return motor_control_dev_mismatch_mask(entry) == 0U;
 }
 
 // 本机对该台有没有基线记录。**不能用 record_raw_present 判**：上电归一恒写保护
@@ -196,7 +197,7 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   //    cerb_adapter.c 的安全槽注释）。
   const uint32_t detail =
       (state == MOTOR_CONTROL_DEV_INIT_MISMATCH)
-          ? (uint32_t)dev_params_mismatch_mask(entry)
+          ? (uint32_t)motor_control_dev_mismatch_mask(entry)
           : (state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED)
                 ? (uint32_t)(MOTOR_CONTROL_DEV_RAW_ALL & ~entry->refresh_slots)
                 : 0U;
@@ -305,6 +306,36 @@ static void update_record_after_write(motor_control_entry_t *entry) {
     // 刚写并读回核验过：设备与记录同值。
     entry->record_raw[slot] = entry->tx_write_raw[slot];
     entry->dev_raw[slot] = entry->tx_write_raw[slot];
+    // 同一笔事务产生的关节侧值，两行（"固件" / "驱动板"）共用的那把尺子。
+    // 位置/速度/力矩取 tx_request（落事务的是钳制后的 bounded/clamped），
+    // 两个安全槽是枚举/标志位原值直通。
+    // 设备侧那一份也在写路径上更新（不只是 REFRESH）：写事务本就是**读回核验过**
+    // 的，设备里确实就是写的这个值——上面的 dev_raw[slot] 已经据此把它登记成
+    // "设备当前的值"，SI 若还留着写前的旧换算值，报告的"驱动板"那一行就会拿
+    // 刚写过的槽位显示一个陈旧数字，两行比对也就没意义了。
+    float si = NAN;
+    switch (slot) {
+      case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
+        si = entry->tx_request.position_limits.min_position_rad;
+        break;
+      case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
+        si = entry->tx_request.position_limits.max_position_rad;
+        break;
+      case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
+        si = entry->tx_request.max_velocity_rad_s;
+        break;
+      case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
+        si = entry->tx_request.max_torque_nm;
+        break;
+      case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
+      case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
+        si = (float)entry->tx_write_raw[slot];
+        break;
+      default:
+        break;
+    }
+    entry->record_si[slot] = si;
+    entry->dev_si[slot] = si;
   }
   if (changed) {
     // 只置脏位，**不落盘**：设备侧 0x2539 与 W25 都等到人工点「保存」。

@@ -3280,7 +3280,8 @@ static void test_device_param_mismatch_blocks_motion() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
-// 写事务 = 设备 + 固件记录一起写：写核验通过后记录同步、脏位置起、比对重判。
+// 写事务 = 设备 + 固件记录一起写：写核验通过后记录同步、比对重判。
+// （记录**内容**变了才排落盘——本用例写回的是记录里已有的值，故不排。）
 static void test_device_param_write_syncs_record_and_recovers() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3305,13 +3306,16 @@ static void test_device_param_write_syncs_record_and_recovers() {
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(has_result_event(&ctx, 81U, MOTOR_PROTOCOL_CONFIG_OK));
-  // 记录与设备同步（原值口径），并请求落盘。
+  // 记录与设备同步（原值口径）。但本次写下去的值与记录既有值相同（记录槽 3 本就
+  // 是峰值 10800 mA，用户只是把设备从越界的 13300 写回规格值）→ 落盘幂等化后
+  // **不排落盘**：Flash 里的记录字节没变，再擦写一遍纯属白擦两个扇区。
   assert(e->record_raw[3] == kR58PeakMa);
   assert((e->record_raw_present & 0x08U) != 0U);
   assert(e->dev_raw[3] == kR58PeakMa);
   // SI 限值随写核验同步进设备影子（record_* 镜像字段已删，原值仍在 record_raw）。
   assert(fabs(e->dev_max_torque_nm - 45.0) < 0.1);
-  assert(motor_control_take_record_dirty(&ctx));
+  // 值没变 → 不落盘（"变了才落"由保护开关用例覆盖）。
+  assert(!motor_control_take_record_dirty(&ctx));
 
   // 记录与设备重新一致 → 解除未初始化，回到可运动态。
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
@@ -3532,6 +3536,30 @@ static void test_safety_protect_write_syncs_record_and_gates_motion() {
   assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_INVALID));
   // 被拒后设备侧不得留下半截状态。
   assert(entry_of(&ctx, 7)->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+}
+
+// 写下去的值与记录里已有的一致 → 不排落盘。上电归一会每次写保护"开"，
+// 不做幂等化就等于每次上电白擦两个扇区（v2 单扇区 [实测] ~1s）。
+static void test_device_write_same_value_skips_flash() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  // 记录里已有槽 4（保护=开，0），设备也是 0。
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  (void)motor_control_take_record_dirty(&ctx); // 清掉上电期的脏位
+
+  motor_protocol_config_request_t req = {};
+  req.request_id = 95U;
+  req.motor_id = 7;
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  req.safety_protect_raw = 0U; // 与记录同值
+  motor_control_service(&ctx, 200);
+  assert(motor_control_submit_config(&ctx, &req, 201));
+  (void)feed_safety_write(&ctx, 7, 0U, 202);
+  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(!motor_control_take_record_dirty(&ctx)); // 没变 → 不落盘
 }
 
 // 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
@@ -4669,6 +4697,7 @@ int main() {
   test_device_param_write_syncs_record_and_recovers();
   test_limit_write_preserves_readonly_safety_slots();
   test_safety_protect_write_syncs_record_and_gates_motion();
+  test_device_write_same_value_skips_flash();
   test_device_param_read_retry_recovers();
   test_device_param_unverified_blocks_motion();
   test_device_param_pending_blocks_enable();

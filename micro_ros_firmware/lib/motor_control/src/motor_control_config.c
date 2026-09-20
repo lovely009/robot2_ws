@@ -219,11 +219,22 @@ static void update_record_after_write(motor_control_context_t *ctx,
     default:
       return;
   }
+  // 先算"是否真的变了"：值相同且记录已有该位 → 不排落盘。上电归一每次都会写
+  // 保护"开"，不做这一步就是每次上电白擦两个扇区（阻塞 v2 单扇区 [实测] ~1s）。
+  // 必须在 record_raw_present 置位**之前**判，否则首次基线会被误判成不变。
+  bool changed = false;
+  for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
+    const uint8_t bit = (uint8_t)(1U << slot);
+    if ((written_mask & bit) == 0U) {
+      continue;
+    }
+    if ((entry->record_raw_present & bit) == 0U ||
+        entry->record_raw[slot] != entry->tx_write_raw[slot]) {
+      changed = true; // 首次建立基线也算变化
+    }
+  }
   entry->record_raw_present |= written_mask;
   entry->dev_raw_present |= written_mask;
-  // 设备已核验写入 → 记录同步落盘（任务层响应）。不落盘就断电 = 下次上电
-  // 比对必然不一致 = 该台未初始化，属于自找的停机。
-  ctx->record_dirty = true;
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
     const uint8_t bit = (uint8_t)(1U << slot);
     if ((written_mask & bit) == 0U) {
@@ -232,6 +243,11 @@ static void update_record_after_write(motor_control_context_t *ctx,
     // 刚写并读回核验过：设备与记录同值。
     entry->record_raw[slot] = entry->tx_write_raw[slot];
     entry->dev_raw[slot] = entry->tx_write_raw[slot];
+  }
+  if (changed) {
+    // 设备已核验写入且记录内容有变 → 落盘（不落盘就断电 = 下次上电比对必然
+    // 不一致 = 该台未初始化，属于自找的停机）。
+    ctx->record_dirty = true;
   }
   entry->record_valid = true;
 }

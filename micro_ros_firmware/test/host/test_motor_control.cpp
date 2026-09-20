@@ -1753,8 +1753,8 @@ static void test_cerb_limits_sdo_transaction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
-  // CERB 位置限位改走 CANopen 快速 SDO：六阶段（写下限/读下限/写上限/读上限/
-  // **写 FLASH 0x2539 两次：4=负限位、2=正限位**）全通才 OK；读回不一致不得
+  // CERB 位置限位改走 CANopen 快速 SDO：四阶段（写下限/读下限/写上限/读上限）
+  // 全通才 OK；保存是独立的 SAVE_DEVICE_FLASH 事务，不在这里。读回不一致不得
   // 返回 OK（ARD §20.4 / 禁止项 9）。
   // ±1.0 rad → cnt = ±10430（0x28BE），字典标度 65536 cnt/360°。
   motor_protocol_config_request_t limits = {};
@@ -1815,22 +1815,9 @@ static void test_cerb_limits_sdo_transaction() {
   motor_control_service(&ctx, t);
   r = sdo_response(0x43U, kPosUpperSdoSub, kUpperCnt, t + 1);
   motor_control_on_raw_frame(&ctx, &r);
-  // 阶段 4/5：写 FLASH（0x2539，无应答）——字典表：4=负限位、2=正限位。
-  // 不按对应码保存，驱动器掉电就回出厂值，下次上电比对必然判"不一致"。
-  const uint32_t kSaveCodes[2] = {4U, 2U};
-  for (size_t s = 0; s < 2U; ++s) {
-    t += 10;
-    motor_control_service(&ctx, t);
-    const size_t n = motor_control_collect_tx(&ctx, frames, 16);
-    bool found = false;
-    for (size_t i = 0; i < n; ++i) {
-      if (frames[i].can_id == 0x607U && frames[i].data[0] == 0x23U &&
-          frames[i].data[1] == 0x39U && frames[i].data[4] == (uint8_t)kSaveCodes[s]) {
-        found = true;
-      }
-    }
-    assert(found);
-  }
+  // 阶段 3 的读回应答已由上面喂入；下一拍收尾（写事务不再跟保存阶段）。
+  t += 10;
+  motor_control_service(&ctx, t);
   assert(has_result_event(&ctx, 9U, MOTOR_PROTOCOL_CONFIG_OK));
   assert(!entry_of(&ctx, 7)->tx_active);
 
@@ -3138,7 +3125,7 @@ static void test_cerb_device_write_updates_shadow() {
   motor_protocol_raw_frame_t rrf = raw_frame(0, 0x587U, 8, rd, t + 1);
   motor_control_on_raw_frame(&ctx, &rrf);
   t += 10;
-  motor_control_service(&ctx, t); // 末阶段：写 FLASH（0x2539，无应答）后收尾
+  motor_control_service(&ctx, t); // 末阶段：读回核验之后收尾（写事务不含保存）
   (void)motor_control_collect_tx(&ctx, sent, 8U);
   assert(has_result_event(&ctx, 43U, MOTOR_PROTOCOL_CONFIG_OK));
   const motor_control_param_view_t *v = view_of(&ctx, 7);
@@ -4357,13 +4344,10 @@ static void test_device_write_clamped_to_hardware_table() {
   motor_protocol_raw_frame_t rd = sdo_read_ack(7, 2U, 3030U, 305U);
   motor_control_on_raw_frame(&ctx, &rd);
   assert(fabs(entry_of(&ctx, 7)->dev_max_velocity_rad_s - MOTOR_PROTOCOL_PI) < 1e-3f);
-  // 末阶段：写 FLASH（0x2539，码 1）落盘。无应答，服务一拍即发出并收尾——
-  // 不落盘的话驱动器一断电就回出厂值，下次上电比对必然判"不一致"。
+  // 读回核验之后收尾（写事务不含保存）：无后续帧发往设备。
   motor_control_service(&ctx, 306);
   m = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
-  assert(m == 1U && frames[0].can_id == 0x600U + 7U);
-  assert(frames[0].data[0] == 0x23U && frames[0].data[1] == 0x39U &&
-         frames[0].data[2] == 0x25U && frames[0].data[4] == 0x01U);
+  assert(m == 0U);
   assert(!entry_of(&ctx, 7)->tx_active);
 
   // ③ 位置请求 ±300°（超 ±180° 量化范围）→ 钳到 ±π，落到设备 = ±32768 cnt。

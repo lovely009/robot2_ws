@@ -197,7 +197,14 @@ typedef enum {
   // 帧**（同 0x2650：易失，掉电回上电初值）。值为**原值直通**，本层不做任何
   // 方向语义反转（方向没有 0x2650 那种"1 = 关"的反向陷阱）。
   // 仅 CERB；Vaxor 阶段数 0 → 内核回 UNSUPPORTED。
-  MOTOR_PROTOCOL_CONFIG_SET_DIRECTION = 13U
+  MOTOR_PROTOCOL_CONFIG_SET_DIRECTION = 13U,
+  // 设备侧保存（仅 CERB，写 0x2539 保存码）：把设备 RAM 里的值落到驱动器 flash。
+  // **与写事务分开**——"写"只改设备 RAM + 更新固件记录，"保存"才落盘；两次动作
+  // 之间该台处于「未保存」，由 DeviceParamReport 暴露、靠 system.save 收尾。
+  // 载荷 save_slots：待保存的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*），
+  // adapter 据此选保存码、不写无关对象（驱动器写 flash 期间会阻塞自身控制循环，
+  // 实测 ~1s，多存一个对象就是白等一秒）。
+  MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH = 14U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -238,6 +245,9 @@ typedef struct {
   // SET_ENABLE / SET_POLICY：该台保护**确知为关**时的显式武装确认。缺它一律拒
   // （内核判 UNPROTECTED_UNCONFIRMED）；保护为开或状态未知时本字段无作用。
   bool confirm_unprotected;
+  // SAVE_DEVICE_FLASH：待保存的槽位位图。只含**有厂家保存码**的槽位才有意义
+  // （位置上下限 + 速度/力矩限值）；保护开关与方向是易失对象，无保存码。
+  uint8_t save_slots;
 } motor_protocol_config_request_t;
 
 // 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；前四槽与
@@ -252,6 +262,15 @@ typedef struct {
 #define MOTOR_PROTOCOL_PARAM_SLOT_SAFETY 4U    // 0x2650:00
 #define MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION 5U // 0x2541
 #define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 6U
+
+// 有厂家保存码（0x2539）的槽位：位置上下限（码 4/2）+ 速度、力矩限值（码 1）。
+// 保护开关与方向**不在内**——易失对象，厂家没给保存码，靠上电归一从记录重建
+// （见 docs/plans/active/boot-normalize-design.md）。
+#define MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK \
+  ((uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |  \
+             (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |  \
+             (1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |  \
+             (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)))
 
 // REFRESH_PARAMS 每阶段回填载荷（读缓冲按阶段顺序追加，每阶段一个）。
 // raw = 设备端原值（cnt / 电机端 RPM / 电机端 mA），value_si = 关节侧换算值

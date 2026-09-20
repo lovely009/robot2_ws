@@ -452,8 +452,10 @@ static const cerb_stage_desc_t kStagesSetZero[1] = {
                   MOTOR_PROTOCOL_PARAM_SLOT_NONE, CERB_VALUE_ZERO),
 };
 
-// 下限写+读回、上限写+读回，最后两条保存（负限位码 4、正限位码 2）。
-static const cerb_stage_desc_t kStagesPositionLimits[6] = {
+// 下限写+读回、上限写+读回。**保存不在本表**：0x2539 是独立的保存事务
+// （MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH），写到这里就落盘会让"只改没存"
+// 变成不可观测的状态（见 param-authority-reversal-design.md §3.2）。
+static const cerb_stage_desc_t kStagesPositionLimits[4] = {
   CERB_DESC_WRITE(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
                   MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
@@ -462,24 +464,20 @@ static const cerb_stage_desc_t kStagesPositionLimits[6] = {
                   MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
-  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_LOWER),
-  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_UPPER),
 };
 
-static const cerb_stage_desc_t kStagesVelocityLimit[3] = {
+static const cerb_stage_desc_t kStagesVelocityLimit[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
                   MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
   CERB_DESC_READ(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
                  MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
-  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
 };
 
-static const cerb_stage_desc_t kStagesTorqueLimit[3] = {
+static const cerb_stage_desc_t kStagesTorqueLimit[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
                   MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
   CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
                  MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
-  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
 };
 
 // REFRESH_PARAMS：6 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
@@ -536,6 +534,55 @@ static const cerb_stage_desc_t kStagesDirection[2] = {
                  MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
 };
 
+// 保存阶段表集合（SAVE_DEVICE_FLASH）。落盘粒度只有两组：参数组（码 1，
+// 覆盖 PI 参数 + 最大电流 0x2538 + 最大转速 0x6080）与位置限位组（码 4/2）。
+// 位置上下限在写事务里是同一笔（SET_POSITION_LIMITS 一次写两槽），所以脏掩码
+// 实际上只出现"两组各自脏"或"两组都脏"；万一将来出现只脏一个位置槽的形状，
+// 按"多存一个对象"兜底——多写一次 FLASH 只是慢，少写一次就是掉电丢参数。
+static const cerb_stage_desc_t kStagesSavePosBoth[2] = {
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_LOWER),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_UPPER),
+};
+
+static const cerb_stage_desc_t kStagesSaveParams[1] = {
+  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
+};
+
+static const cerb_stage_desc_t kStagesSaveParamsAndPos[3] = {
+  CERB_DESC_SAVE(CERB_SAVE_CODE_PARAMS),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_LOWER),
+  CERB_DESC_SAVE(CERB_SAVE_CODE_POS_UPPER),
+};
+
+static const cerb_stage_desc_t *cerb_save_table(
+    const motor_protocol_config_request_t *request, uint8_t *count) {
+  const bool params =
+      (request->save_slots &
+       ((1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |
+        (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX))) != 0U;
+  const bool pos =
+      (request->save_slots &
+       ((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
+        (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX))) != 0U;
+  const cerb_stage_desc_t *table;
+  if (params && pos) {
+    table = kStagesSaveParamsAndPos;
+    *count = 3U;
+  } else if (params) {
+    table = kStagesSaveParams;
+    *count = 1U;
+  } else if (pos) {
+    table = kStagesSavePosBoth;
+    *count = 2U;
+  } else {
+    // 只脏易失槽（保护开关 / 方向）：没有保存码可发。count=0 让内核把这一步
+    // 收敛成"清脏位 + 落 W25"，而不是每拍重开一个空事务。
+    *count = 0U;
+    return NULL;
+  }
+  return table;
+}
+
 // 事务 kind → 阶段表。READ_IDENTITY（分段上传）与 SET_MODE（空阶段）不在
 // 表内，由三个接口特殊处理；返回 NULL 表示该 kind 不走设备事务。
 static const cerb_stage_desc_t *cerb_stage_table(
@@ -570,6 +617,8 @@ static const cerb_stage_desc_t *cerb_stage_table(
     case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
       *count = (uint8_t)(sizeof(kStagesDirection) / sizeof(kStagesDirection[0]));
       return kStagesDirection;
+    case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH:
+      return cerb_save_table(request, count);
     default:
       *count = 0U;
       return NULL;

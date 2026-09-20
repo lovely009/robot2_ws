@@ -478,9 +478,9 @@ static void test_cerb_config_unsupported_paths() {
   assert(motor_protocol_cerb_adapter.config_stage_count(profile, &gains) == 0);
 }
 
-// 位置限位：5 阶段（写下限/读下限/写上限/读上限/**写 FLASH**），字节序与
-// 《CANopen-V0.9 字典表》示例一致（0x607D:01 下限、:02 上限，单位 cnt）。
-// 末阶段 0x2539 是厂家手册的「写入 FLASH」：不落盘则驱动器掉电回出厂值。
+// 位置限位：4 阶段（写下限/读下限/写上限/读上限）。保存（0x2539）不在这里——
+// 它是独立的 SAVE_DEVICE_FLASH 事务（见 test_cerb_save_flash_transaction）。
+// 字节序与《CANopen-V0.9 字典表》示例一致（0x607D:01 下限、:02 上限，单位 cnt）。
 static void test_cerb_sdo_position_limit_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
   assert(find_profile("cerb_r58_101", &profile));
@@ -490,20 +490,16 @@ static void test_cerb_sdo_position_limit_frames() {
   req.position_limits.min_position_rad = -(float)MOTOR_PROTOCOL_PI / 2.0f; // 90°
   req.position_limits.max_position_rad = (float)MOTOR_PROTOCOL_PI / 2.0f;
 
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 6U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 4U);
 
   // 90° → cnt = 90 × 65536/360 = 16384 = 0x4000。
   const uint8_t kWriteLower[8] = {0x23, 0x7D, 0x60, 0x01, 0x00, 0xC0, 0xFF, 0xFF};
   const uint8_t kReadLower[8] = {0x40, 0x7D, 0x60, 0x01, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kWriteUpper[8] = {0x23, 0x7D, 0x60, 0x02, 0x00, 0x40, 0x00, 0x00};
   const uint8_t kReadUpper[8] = {0x40, 0x7D, 0x60, 0x02, 0x00, 0x00, 0x00, 0x00};
-  // 末两条是保存：负限位码 4、正限位码 2（字典表 0x2539 说明）。
-  const uint8_t kSaveLower[8] = {0x23, 0x39, 0x25, 0x00, 0x04, 0x00, 0x00, 0x00};
-  const uint8_t kSaveUpper[8] = {0x23, 0x39, 0x25, 0x00, 0x02, 0x00, 0x00, 0x00};
-  const uint8_t *expect[6] = {kWriteLower, kReadLower, kWriteUpper, kReadUpper,
-                              kSaveLower, kSaveUpper};
+  const uint8_t *expect[4] = {kWriteLower, kReadLower, kWriteUpper, kReadUpper};
 
-  for (uint8_t stage = 0U; stage < 6U; ++stage) {
+  for (uint8_t stage = 0U; stage < 4U; ++stage) {
     motor_protocol_tx_frame_t frame = {};
     assert(motor_protocol_cerb_adapter.config_encode_stage(
         stage, profile, 1U, 0U, &req, &frame));
@@ -515,19 +511,12 @@ static void test_cerb_sdo_position_limit_frames() {
     }
     motor_protocol_config_stage_info_t info = {};
     assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
-    if (stage < 4U) {
-      assert(info.waits_response); // 读回核验阶段等应答
-      assert(info.timeout_ms > 0U);
-    } else {
-      // 写 FLASH：无应答、不等超时（驱动器写 flash 期间会阻塞自己的控制循环，
-      // 等 ack 只会把它和总线一起拖住；落盘结果由下次上电的设备比对检出）。
-      assert(!info.waits_response);
-      assert(!info.param_raw_valid); // 保存码不是设备参数，不进记录/比对
-    }
+    assert(info.waits_response); // 四个 SDO 阶段都等应答（写等 ack、读等回读）
+    assert(info.timeout_ms > 0U);
   }
-  // 越界阶段无效（6 阶段：0..5）。
+  // 越界阶段无效（4 阶段：0..3）。
   motor_protocol_tx_frame_t frame = {};
-  assert(!motor_protocol_cerb_adapter.config_encode_stage(6U, profile, 1U, 0U, &req, &frame));
+  assert(!motor_protocol_cerb_adapter.config_encode_stage(4U, profile, 1U, 0U, &req, &frame));
 }
 
 // 身份读取事务（READ_IDENTITY）与设备侧管理对象共用同一裁决入口
@@ -724,7 +713,7 @@ static void test_cerb_sdo_velocity_torque_frames() {
   motor_protocol_config_request_t vel = {};
   vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
   vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &vel) == 3U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &vel) == 2U);
   motor_protocol_tx_frame_t f = {};
   assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 1U, 0U, &vel, &f));
   assert(f.data[0] == 0x23U && f.data[1] == 0x80U && f.data[2] == 0x60U && f.data[3] == 0x00U);
@@ -738,7 +727,7 @@ static void test_cerb_sdo_velocity_torque_frames() {
   motor_protocol_config_request_t trq = {};
   trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   trq.max_torque_nm = 30.0f;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &trq) == 3U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &trq) == 2U);
   assert(motor_protocol_cerb_adapter.config_encode_stage(0U, profile, 1U, 0U, &trq, &f));
   assert(f.data[0] == 0x23U && f.data[1] == 0x38U && f.data[2] == 0x25U && f.data[3] == 0x00U);
   const uint32_t ma = (uint32_t)f.data[4] | ((uint32_t)f.data[5] << 8U) |
@@ -772,16 +761,6 @@ static void test_cerb_sdo_velocity_torque_frames() {
   assert(motor_protocol_cerb_adapter.config_stage_info(2U, profile, &pos, &pos_info));
   assert(pos_info.param_slot == MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
 
-  // 末阶段（写 FLASH）不携带设备参数：它是保存码，不是设备参数。
-  motor_protocol_config_stage_info_t save_info = {};
-  assert(motor_protocol_cerb_adapter.config_stage_info(2U, profile, &trq, &save_info));
-  assert(!save_info.waits_response && !save_info.param_raw_valid);
-  motor_protocol_tx_frame_t save_frame = {};
-  assert(motor_protocol_cerb_adapter.config_encode_stage(2U, profile, 1U, 0U, &trq,
-                                                        &save_frame));
-  assert(save_frame.data[0] == 0x23U && save_frame.data[1] == 0x39U &&
-         save_frame.data[2] == 0x25U && save_frame.data[4] == 0x01U);
-
   // 身份读取不携带设备参数（不得混入记录）。
   motor_protocol_config_request_t ident = {};
   ident.kind = MOTOR_PROTOCOL_CONFIG_READ_IDENTITY;
@@ -814,7 +793,7 @@ static void test_cerb_descriptor_table_bounds() {
   kinds[2].kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
   kinds[3].kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   kinds[4].kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-  const uint8_t counts[] = {1U, 6U, 3U, 3U, 6U};
+  const uint8_t counts[] = {1U, 4U, 2U, 2U, 6U};
 
   motor_protocol_tx_frame_t frame = {};
   motor_protocol_config_stage_info_t info = {};
@@ -847,15 +826,15 @@ static void test_cerb_descriptor_table_bounds() {
              0U, profile, &mode, &mode_resp, nullptr) ==
          MOTOR_PROTOCOL_STAGE_FAIL);
 
-  // 保存阶段（速度 stage 2）的杂散应答：IGNORE，不得触发 FLASH 重写/推进。
-  motor_protocol_config_request_t vel = {};
-  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
-  vel.motor_id = 1U;
-  vel.max_velocity_rad_s = 1.0f;
+  // 保存阶段（SAVE_DEVICE_FLASH）的杂散应答：IGNORE，不得触发 FLASH 重写/推进。
+  motor_protocol_config_request_t save = {};
+  save.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  save.motor_id = 1U;
+  save.save_slots = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
   const uint8_t save_ack[8] = {0x60, 0x39, 0x25, 0x00, 0x01, 0x00, 0x00, 0x00};
   memcpy(resp.data, save_ack, 8U);
   assert(motor_protocol_cerb_adapter.config_on_response(
-             2U, profile, &vel, &resp, nullptr) ==
+             0U, profile, &save, &resp, nullptr) ==
          MOTOR_PROTOCOL_STAGE_IGNORE);
 }
 
@@ -1180,6 +1159,76 @@ static void test_cerb_direction_write_frames() {
          MOTOR_PROTOCOL_STAGE_RETRY);
 }
 
+// 保存事务（SAVE_DEVICE_FLASH）：0x2539 保存码按"哪些槽位脏"选表，全部无应答、
+// 发完即推进。**写事务里不再跟保存阶段**——"写"与"保存"是两次独立动作
+// （见 docs/plans/active/param-authority-reversal-design.md §3.2）。
+static void test_cerb_save_flash_transaction() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r58_101", &profile));
+
+  // 保存码位图 = 1u << MOTOR_PROTOCOL_PARAM_SLOT_*
+  // （POS_MIN=0, POS_MAX=1, VEL_MAX=2, TORQUE_MAX=3, SAFETY=4, DIRECTION=5）
+  // 地址即语义，这里直接写位图比引枚举更贴测试意图。
+  const uint8_t kPosBoth = 0x03U;       // 位置下限 | 位置上限
+  const uint8_t kTorque = 0x08U;        // 力矩限值
+  const uint8_t kParamsAndPos = 0x07U;  // 位置上下限 | 速度限值
+  const uint8_t kVolatileOnly = 0x30U;  // 保护开关 | 方向
+
+  // 0x2539 帧逐字节：23 39 25 00 <码> 00 00 00
+  // （快速 SDO 写 4 字节到 0x2539:00；码 1=PI 参数+最大电流 / 2=位置上限 / 4=位置下限）
+  auto expect_save = [&](const motor_protocol_config_request_t *req, uint8_t stage,
+                         uint8_t code) {
+    motor_protocol_tx_frame_t frame = {};
+    assert(motor_protocol_cerb_adapter.config_encode_stage(stage, profile, 1U, 0U,
+                                                          req, &frame));
+    assert(frame.size == 8U && frame.is_fd && frame.is_brs);
+    assert(frame.can_id == 0x600U + 1U);
+    assert(frame.data[0] == 0x23U && frame.data[1] == 0x39U &&
+           frame.data[2] == 0x25U && frame.data[3] == 0x00U);
+    assert(frame.data[4] == code);
+    motor_protocol_config_stage_info_t info = {};
+    assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, req, &info));
+    assert(!info.waits_response);  // 无应答：驱动器写 FLASH 期间不拖总线
+    assert(!info.param_raw_valid); // 保存码不是设备参数，不进记录/比对
+    assert(info.timeout_ms == 0U);
+  };
+
+  motor_protocol_config_request_t pos = {};
+  pos.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  pos.save_slots = kPosBoth;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &pos) == 2U);
+  expect_save(&pos, 0U, 4U); // 下限
+  expect_save(&pos, 1U, 2U); // 上限
+
+  motor_protocol_config_request_t trq = {};
+  trq.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  trq.save_slots = kTorque;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &trq) == 1U);
+  expect_save(&trq, 0U, 1U);
+
+  // 两组都脏 → 三条：先参数组，再位置两码（顺序只是确定性，不是协议要求）。
+  motor_protocol_config_request_t both = {};
+  both.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  both.save_slots = kParamsAndPos;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &both) == 3U);
+  expect_save(&both, 0U, 1U);
+  expect_save(&both, 1U, 4U);
+  expect_save(&both, 2U, 2U);
+
+  // 只脏易失槽（保护开关 / 方向）：厂家没给这两个对象保存码 → **0 阶段**。
+  // 内核据此只清脏位 + 落 W25，不发任何 0x2539；两者靠上电归一从记录重建。
+  motor_protocol_config_request_t volatile_only = {};
+  volatile_only.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  volatile_only.save_slots = kVolatileOnly;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &volatile_only) == 0U);
+
+  // Vaxor 无设备对象 → 0 阶段（内核回 UNSUPPORTED；其限值是本地软限位，
+  // 记录落 W25 即持久，没有设备侧 flash 要写）。
+  const motor_protocol_model_profile_t *vp = nullptr;
+  assert(find_profile("vaxor_2550", &vp));
+  assert(motor_protocol_vaxor_adapter.config_stage_count(vp, &both) == 0U);
+}
+
 int main() {
   test_vaxor_match_rx_frame();
   test_vaxor_decode_reply_converts_si();
@@ -1199,6 +1248,7 @@ int main() {
   test_cerb_encode_discovery_sync();
   test_cerb_config_unsupported_paths();
   test_cerb_sdo_position_limit_frames();
+  test_cerb_save_flash_transaction();
   test_cerb_set_zero_frames();
   test_cerb_sdo_velocity_torque_frames();
   test_cerb_sdo_response_judging();

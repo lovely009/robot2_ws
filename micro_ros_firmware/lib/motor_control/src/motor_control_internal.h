@@ -126,6 +126,16 @@ typedef struct {
   // 卡在不可使能（结论口径不变：没核对通过就不放行）。
   uint8_t dev_read_attempts;
   uint32_t dev_read_retry_tick_ms;
+  // 上电归一（config_step 的 0a 阶段）：把设备里**易失**的两个安全对象写成
+  // 定态——保护"生效"、方向取 W25 记录值。必须在 0b 回读比对**之前**完成，
+  // 否则比对比的是设备上电初值，每次上电都会白报一次不一致。
+  // 归一失败（重试用尽）判 DEV_INIT_UNVERIFIED：该台走不到回读，也就走不到
+  // 运动授权。boot_norm_request_id 是"在飞的是不是归一步骤"的唯一判据——
+  // 人工写保护用的是同一个 kind，按 kind 判会把人工写当成归一步进。
+  uint8_t boot_norm_stage;
+  uint32_t boot_norm_request_id;
+  uint8_t boot_norm_attempts;
+  uint32_t boot_norm_retry_tick_ms;
   // boot 存储参数套用状态：bit7=已见过存储记录（只初始化一次），
   // bit0=待套增益、bit1=待套限值；Profile 未就绪时低位保留由 20ms 边界
   // 重试，套尽后只留 bit7（之后的 refresh/设备写影子不被重复 apply 覆盖）。
@@ -240,6 +250,12 @@ const motor_control_entry_t *motor_control_entry_take_sorted(
 #define MOTOR_CONTROL_P0_SOFT_STOP 1U
 #define MOTOR_CONTROL_P0_DISABLE 2U
 #define MOTOR_CONTROL_P0_ENABLE 3U // 使能帧亦为 P0
+
+// 上电归一步骤（motor_control_entry_t::boot_norm_stage）。无设备对象的型号
+// （VAXOR）不参与本阶段，其 boot_norm_stage 停在 PROTECT 上不会被读取。
+#define MOTOR_CONTROL_BOOT_NORM_PROTECT 0U   // 待写保护 0x2650:00 = 0（生效）
+#define MOTOR_CONTROL_BOOT_NORM_DIRECTION 1U // 待写方向 0x2541:00 = 记录值
+#define MOTOR_CONTROL_BOOT_NORM_DONE 2U      // 归一完成（或无方向基线可写）
 
 // 追加事件（环满丢最旧并计数——保最新状态，ARD §18 精神；tick 为 MCU 单调时基）。
 void motor_control_push_event(motor_control_context_t *ctx, uint32_t now_ms,

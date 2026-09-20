@@ -150,6 +150,11 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->dev_read_done = false;
     entry->dev_read_attempts = 0U;
     entry->dev_read_retry_tick_ms = 0U;
+    // 归一结论与设备影子同批作废：重连后要重新把易失对象写回定态。
+    entry->boot_norm_stage = MOTOR_CONTROL_BOOT_NORM_PROTECT;
+    entry->boot_norm_request_id = 0U;
+    entry->boot_norm_attempts = 0U;
+    entry->boot_norm_retry_tick_ms = 0U;
     entry->dev_init = MOTOR_CONTROL_DEV_INIT_PENDING;
     motor_control_push_event(ctx, frame->rx_tick_ms,
                              MOTOR_CONTROL_EVENT_RECONNECTED, entry->motor_id,

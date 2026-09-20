@@ -284,11 +284,40 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
     finish_identity_read(ctx, entry, result, now_ms);
     return;
   }
+  // 上电归一收尾：按 request_id 认领（人工写用的是同一个 kind，不能按 kind 判）。
+  // 失败沿用回读那套退避重试，用尽才定论 UNVERIFIED——一次总线抖动不该让该台
+  // 在"初始化未完成不可使能"的口径下白白卡住。
+  bool boot_norm_failed_offline = false;
+  if (entry->boot_norm_request_id != 0U &&
+      entry->tx_request_id == entry->boot_norm_request_id) {
+    entry->boot_norm_request_id = 0U;
+    if (result == MOTOR_PROTOCOL_CONFIG_OK) {
+      entry->boot_norm_stage =
+          entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_PROTECT
+              ? MOTOR_CONTROL_BOOT_NORM_DIRECTION
+              : MOTOR_CONTROL_BOOT_NORM_DONE;
+    } else {
+      entry->boot_norm_attempts++;
+      if (entry->boot_norm_attempts >= MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS) {
+        boot_norm_failed_offline = true;
+      } else {
+        entry->boot_norm_retry_tick_ms = now_ms + MOTOR_CONTROL_DEV_READ_RETRY_MS;
+      }
+    }
+  }
   // 设备参数定论（回读结果）延后到 tx_active 复位之后再落地：apply_dev_init_result
   // 会走冻结路径，事务若仍在飞会被重入。
   bool dev_init_settled = false;
   motor_control_dev_init_t dev_state = MOTOR_CONTROL_DEV_INIT_NA;
-  if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
+  if (boot_norm_failed_offline) {
+    // 归一写不进去 = 保护/方向没到位。该台按"未核对"收口（UNVERIFIED），不发起
+    // 回读、不与记录比对——比对的是"归一的成果"，归一没成就没有成果可比。
+    // 结论把 lifecycle 打到 CONFIG_CONFLICT ⇒ 不可使能 ⇒ 0a 不再重试（脱困靠
+    // 重连/手动重读）。
+    dev_state = MOTOR_CONTROL_DEV_INIT_UNVERIFIED;
+    entry->dev_read_done = true;
+    dev_init_settled = true;
+  } else if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS) {
     entry->dev_read_attempts++; // 每次回读收尾都计入（成功也算一次尝试）
     // 回读成功的判据：全部槽位的原值位图到齐（每 ADVANCE 落袋一个槽，
     // 重复/缺失槽位图凑不齐 MOTOR_CONTROL_DEV_RAW_ALL）。
@@ -429,11 +458,74 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     break;
   }
 
-  // 0b) 设备参数上电回读：绑定完成 + Flash 记录已落袋 + 在线 + 无事务在飞 +
-  //     本会话未定论 → 自动发起一次 REFRESH_PARAMS。与身份识别同为不变量式
-  //     复检（重连后 record/结论复位，自然重跑），每拍至多一台。
-  //     记录先落袋再回读：比对基准必须在比对之前就位，否则"无记录可比"
-  //     会把不一致静默判成 OK。
+  // 0a) 上电归一：保护写"生效"、方向写 W25 记录值，**必须在 0b 回读之前**。
+  //     与 0b 同为不变量式复检、每拍至多一台、走总线一问一答串行。
+  //     记录里没有方向槽（新烧板 / v2 迁移的旧 blob）时跳过方向步：方向只能由
+  //     记录说了算，猜一个 CW 会让反装的关节朝反方向冲（比对层会判基线缺失）。
+  for (size_t i = 0; i < ctx->entry_count; ++i) {
+    motor_control_entry_t *entry = &ctx->entries[i];
+    if (!entry->used || !entry->online || entry->adapter == NULL ||
+        entry->tx_active ||
+        entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE) {
+      continue;
+    }
+    if (entry->profile == NULL ||
+        (entry->profile->capability_flags &
+         MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+      continue; // 未绑定 / 非设备侧型号（VAXOR）：无设备对象可写
+    }
+    if (!entry->boot_record_offered || entry->motion_enabled) {
+      continue; // 记录先落袋；运动中不动安全边界（防御，理论上到不了）
+    }
+    if (entry->boot_norm_attempts > 0U &&
+        (int32_t)(now_ms - entry->boot_norm_retry_tick_ms) < 0) {
+      continue; // 失败退避窗内
+    }
+    if (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_DISCOVERED &&
+        entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_IDENTIFYING &&
+        entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED) {
+      continue; // 运动中/异常态不归一（故障恢复回 READY_DISABLED 后会复检补做）
+    }
+
+    motor_protocol_config_request_t request = {0};
+    request.motor_id = entry->motor_id;
+    if (entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_PROTECT) {
+      request.request_id = MOTOR_CONTROL_INTERNAL_REQUEST_ID_BASE + 2U;
+      request.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+      request.safety_protect_raw = 0U; // 厂家原值 0 = 保护生效
+    } else {
+      const uint8_t dir_bit =
+          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+      const uint32_t dir_raw =
+          entry->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+      if ((entry->record_raw_present & dir_bit) == 0U || dir_raw > 1U) {
+        entry->boot_norm_stage = MOTOR_CONTROL_BOOT_NORM_DONE; // 不猜方向
+        continue;
+      }
+      request.request_id = MOTOR_CONTROL_INTERNAL_REQUEST_ID_BASE + 3U;
+      request.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+      request.direction_raw = dir_raw;
+    }
+    entry->boot_norm_request_id = request.request_id;
+    (void)start_tx(ctx, entry, &request, now_ms);
+    if (!entry->tx_active) {
+      // adapter 没有该 kind 的阶段表（设备侧型号却没有保护/方向对象）：
+      // start_tx 只出了一条 UNSUPPORTED 事件、没起事务。按"无对象可写"收尾，
+      // 否则每个节拍都会重开一次同样的空事务，而且 0b 永远等不到归一完成。
+      entry->boot_norm_request_id = 0U;
+      entry->boot_norm_stage = MOTOR_CONTROL_BOOT_NORM_DONE;
+    }
+    break;
+  }
+
+  // 0b) 设备参数上电回读：绑定完成 + Flash 记录已落袋 + **上电归一已完成** +
+  //     在线 + 无事务在飞 + 本会话未定论 → 自动发起一次 REFRESH_PARAMS。
+  //     与身份识别同为不变量式复检（重连后 record/结论复位，自然重跑），
+  //     每拍至多一台。记录先落袋再回读：比对基准必须在比对之前就位，否则
+  //     "无记录可比"会把不一致静默判成 OK。
+  //     归一的门（boot_norm_stage）不可省：比对的是**归一的成果**，归一没走完
+  //     就比，读到的是设备上电初值（保护关/方向 CW），每台 CERB 每次上电都会
+  //     白报一次不一致（见 docs/plans/active/boot-normalize-design.md §3.5）。
   for (size_t i = 0; i < ctx->entry_count; ++i) {
     motor_control_entry_t *entry = &ctx->entries[i];
     if (!entry->used || !entry->online || entry->adapter == NULL ||
@@ -447,6 +539,9 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     if (!entry->boot_record_offered) {
       continue; // 20ms 边界先套用 Flash 记录，再回读
+    }
+    if (entry->boot_norm_stage != MOTOR_CONTROL_BOOT_NORM_DONE) {
+      continue; // 0a 还没收尾：先写定保护/方向，再回读比对（顺序是契约）
     }
     if (entry->dev_read_attempts > 0U &&
         (int32_t)(now_ms - entry->dev_read_retry_tick_ms) < 0) {

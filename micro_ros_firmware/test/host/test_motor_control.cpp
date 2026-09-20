@@ -326,6 +326,11 @@ static motor_protocol_raw_frame_t sdo_write_ack(uint16_t node, uint16_t index,
   return f;
 }
 
+// 上电归一的一次驱动（0a）：定义在 feed_safety_write/feed_direction_write 之后
+// （本函数由它们实现），这里先声明——feed_device_params 要用。
+static uint32_t feed_boot_normalize(motor_control_context_t *ctx, uint16_t node,
+                                    uint32_t tick);
+
 // 走完一次 REFRESH_PARAMS：逐阶段 service 出请求 → 喂对应应答。
 // 返回结束时的时间戳。keepalive 为真时每阶段夹带周期心跳 + 新命令快照，
 // 让"运行中回读"的用例在该事务期间保持 ACTIVE（否则 30ms 快照缺席级联会
@@ -337,7 +342,9 @@ static uint32_t feed_device_params(motor_control_context_t *ctx, uint16_t node,
                                    uint32_t tick, bool keepalive,
                                    bool *out_saw_p0 = nullptr) {
   motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
-  uint32_t t = tick;
+  // 上电归一（0a）必须先走完，0b 的回读才有发起时机。测试侧统一在这里前置，
+  // 于是绝大多数既有用例无需改动——只有"故意不回读"的失败注入用例要显式处理。
+  uint32_t t = feed_boot_normalize(ctx, node, tick);
   for (uint8_t stage = 0U; stage < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++stage) {
     if (keepalive) {
       motor_control_command_snapshot_t snap = make_snapshot(1000U + stage, t);
@@ -439,6 +446,68 @@ static uint32_t feed_direction_write(motor_control_context_t *ctx, uint16_t node
   motor_control_service(ctx, tick + 4U);
   (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
   return tick + 4U;
+}
+
+// 走完一次上电归一（0a）：保护恒写 0；方向**仅在记录有槽 5 且值合法时**写，
+// 否则整个方向步跳过（不猜方向，交给比对判基线缺失）。
+// 必须在 feed_device_params 之前调用——0b 回读被 0a 阻塞。
+// 读表项的 record_* 是白盒（本文件本就 -I 内核 src）。
+static uint32_t feed_boot_normalize(motor_control_context_t *ctx, uint16_t node,
+                                    uint32_t tick) {
+  const motor_control_entry_t *e = entry_of(ctx, node);
+  if (e->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE) {
+    // 本会话早先已经归一过（重入 feed_device_params 的常见情形）：**不喂任何
+    // 应答**。此刻多半有回读事务在飞，设备根本不会答这两个对象，硬喂只会被
+    // 判成"非本阶段应答"（RETRY）而白白吃掉回读的重试次数。
+    return tick;
+  }
+  const uint8_t dir_bit = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+  const bool has_dir = (e->record_raw_present & dir_bit) != 0U &&
+                       e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] <= 1U;
+  const uint32_t dir_raw = e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+
+  uint32_t t = feed_safety_write(ctx, node, 0U, tick); // 保护：恒写"生效"
+  if (!has_dir) {
+    motor_control_service(ctx, t);
+    return t;
+  }
+  return feed_direction_write(ctx, node, dir_raw, t + 1U);
+}
+
+// 走归一的**一步**（写 + 读回核验），并断言这一拍发出去的正是该 index 的写请求
+// （含写下去的原值）。与 feed_safety_write/feed_direction_write 的差别：收尾
+// **不补最后一拍 service**，于是返回时归一事务已收尾、内核还没机会发起 0b 回读
+// ——要看"写事务之后紧接着是不是回读"就必须用这个（那两个助手的收尾 service +
+// drain 会把紧接着生成的回读首帧一并取走，断言会退化成空断言）。
+static uint32_t step_boot_norm_write(motor_control_context_t *ctx, uint16_t node,
+                                     uint16_t index, uint32_t raw, uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const uint8_t slot = (index == 0x2650U)
+                           ? (uint8_t)MOTOR_PROTOCOL_PARAM_SLOT_SAFETY
+                           : (uint8_t)MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION;
+  motor_control_service(ctx, tick);
+  const size_t n = motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  bool seen = false;
+  bool saw_refresh_read = false;
+  for (size_t i = 0U; i < n; ++i) {
+    if (drain[i].size == 8U && drain[i].data[0] == 0x23U &&
+        drain[i].data[1] == (uint8_t)(index & 0xFFU) &&
+        drain[i].data[2] == (uint8_t)(index >> 8U) && drain[i].data[4] == raw) {
+      seen = true;
+    }
+    if (drain[i].data[0] == 0x40U && drain[i].data[1] == 0x7DU) {
+      saw_refresh_read = true; // 0x607D 的上传＝回读，归一这一步时还不许有
+    }
+  }
+  assert(seen);            // 本步的写请求必须发出来
+  assert(!saw_refresh_read);
+  motor_protocol_raw_frame_t wack = sdo_write_ack(node, index, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &wack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t rack = sdo_read_ack(node, slot, raw, tick + 3U);
+  motor_control_on_raw_frame(ctx, &rack);
+  return tick + 3U;
 }
 
 // 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
@@ -3194,7 +3263,7 @@ static void test_stored_apply_does_not_override_refreshed_shadow() {
 }
 
 
-// 上电比对：记录已落袋后自动回读，一致 → OK（可运动）。
+// 上电比对：记录已落袋后**先归一、再自动回读**，一致 → OK（可运动）。
 static void test_device_param_boot_verify_ok() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3204,8 +3273,14 @@ static void test_device_param_boot_verify_ok() {
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
   assert(entry_of(&ctx, 7)->boot_record_offered);
 
-  // 自动回读：service 即发出第一个 SDO 读请求（0x600+node，P2）。
-  motor_control_service(&ctx, 120);
+  // 上电归一（0a）：保护恒写"生效"(0) → 方向写记录值(0)。零增益回读之前必须
+  // 先把设备里易失的两个安全对象写回定态，否则比对读的是上电初值。
+  uint32_t t = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 120U);
+  t = step_boot_norm_write(&ctx, 7, 0x2541U, 0U, t + 1U);
+
+  // 归一收尾后的下一拍即发起自动回读：第一个 SDO 请求是 0x607D:01 的上传
+  // （0x600+node，P2）。
+  motor_control_service(&ctx, t + 1U);
   motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
   assert(n == 1U);
@@ -3213,7 +3288,7 @@ static void test_device_param_boot_verify_ok() {
   assert(frames[0].tx_class == MOTOR_PROTOCOL_TX_CLASS_P2);
   assert(frames[0].data[0] == 0x40U && frames[0].data[1] == 0x7DU); // 读 0x607D
 
-  uint32_t t = feed_device_params(&ctx, 7, kR58Raw, 121, false);
+  t = feed_device_params(&ctx, 7, kR58Raw, t + 2U, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
   assert(entry_of(&ctx, 7)->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   assert(entry_of(&ctx, 7)->dev_raw[3] == kR58PeakMa);
@@ -3231,6 +3306,172 @@ static void test_device_param_boot_verify_ok() {
   // 自动回读每会话只发一次：再 service 不再产生 SDO 请求。
   motor_control_service(&ctx, t + 10U);
   assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0U);
+}
+
+// 归一的顺序是契约：保护/方向写事务必须先于六槽回读发生。
+static void test_boot_normalize_runs_before_refresh() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 逐拍看请求帧：前两条 SDO 写必须是 0x2650:00（保护）与 0x2541:00（方向），
+  // 之后才允许出现 0x607D 的读。每步都要喂应答才推进得下去——总线一问一答，
+  // 上一条写在飞时内核不会发起下一条。
+  const uint32_t t0 = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 120U);
+  // 归一未完成期间，回读不得发起：此时表项仍停在 0a。
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+  assert(!entry_of(&ctx, 7)->dev_read_done);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DIRECTION);
+  const uint32_t t1 = step_boot_norm_write(&ctx, 7, 0x2541U, 0U, t0 + 1U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+
+  // 两步都核验成功 → 归一收尾；下一拍才轮到回读，第一个请求是 0x607D:01。
+  motor_control_service(&ctx, t1 + 1U);
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U);
+  assert(drain[0].data[0] == 0x40U && drain[0].data[1] == 0x7DU);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+  assert(!entry_of(&ctx, 7)->dev_read_done);
+}
+
+// 归一失败（设备不应答写）→ 用尽重试判 UNVERIFIED、不可使能，且**绝不**
+// 发起回读——"归一没成功就绝不放行"这条是设计的安全内核。
+static void test_boot_normalize_failure_blocks_before_refresh() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 只喂心跳、一个 SDO 应答都不给：归一写超时重试用尽（3 次尝试，每次
+  // 3×30ms 超时 + 500ms 退避）。
+  (void)run_heartbeat_only(&ctx, 7, 120U, 3000U);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(!motor_control_dev_params_allow_motion(e));
+  // 一次回读都没发起过：六槽位图空着，"未核对"是它唯一说得出的话。
+  assert(e->dev_read_attempts == 0U);
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
+  assert(mask == (uint32_t)MOTOR_CONTROL_DEV_RAW_ALL); // 六槽全未核对
+}
+
+// 人工写保护用的是**同一个 kind**（SET_SAFETY_PROTECT）：它的收尾不得被当成
+// 归一的步进。内核按 boot_norm_request_id 认领（不按 kind），否则人工一关保护，
+// 归一的保护步就被"跳过"、直接进方向步——而设备里的保护还是关的（设计 §3.4）。
+static void test_boot_normalize_not_advanced_by_manual_write() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_PROTECT);
+
+  // 人工关保护先受理（事务由 submit 起、request_id 是人工那一个）。
+  motor_protocol_config_request_t off = {};
+  off.request_id = 40U;
+  off.motor_id = 7;
+  off.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  off.safety_protect_raw = 1U;
+  assert(motor_control_submit_config(&ctx, &off, 120));
+  (void)feed_safety_write(&ctx, 7, 1U, 121); // 人工写收尾：记录基线化为 1
+  assert(has_result_event(&ctx, 40U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  // 归一那一步没被这单人工写推进：仍停在 PROTECT，且在飞的事务是归一的
+  // （request_id 与内核登记的归一步一致，不是人工那个 40U）。
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_PROTECT);
+  assert(entry_of(&ctx, 7)->tx_active);
+  assert(entry_of(&ctx, 7)->boot_norm_request_id != 0U);
+  assert(entry_of(&ctx, 7)->tx_request_id == entry_of(&ctx, 7)->boot_norm_request_id);
+
+  // 让归一那一步（保护写 0）走完（帧已在收尾那一拍发出，这里只喂应答）。
+  motor_protocol_raw_frame_t wack = sdo_write_ack(7, 0x2650U, 0U, 129U);
+  motor_control_on_raw_frame(&ctx, &wack);
+  motor_control_service(&ctx, 130U);
+  motor_protocol_raw_frame_t rack =
+      sdo_read_ack(7, MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, 0U, 131U);
+  motor_control_on_raw_frame(&ctx, &rack);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DIRECTION);
+  // 归一写的是"生效"(0)，与刚被人工基线化的记录(1)不同 ⇒ 记录改回 0 并落盘
+  // ——"关保护不跨上电保留"的落点（设计 §5）。
+  assert(entry_of(&ctx, 7)->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U);
+  assert(motor_control_take_record_dirty(&ctx));
+
+  // 方向步照常走完。
+  (void)step_boot_norm_write(&ctx, 7, 0x2541U, 0U, 140U);
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+}
+
+// 记录无方向槽（v2 迁移上来的旧 blob / 新烧板）：归一**跳过**方向步、不写
+// 0x2541，回读照跑，比对判基线缺失。
+static void test_boot_normalize_skips_direction_without_record() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU, false);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  // 保护写 + 读回核验；随后**直接**是六槽回读，中间不许出现 0x2541 写。
+  const uint32_t t = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 120U);
+  motor_control_service(&ctx, t + 1U);
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U); // 只有回读首帧，没有方向写
+  for (size_t i = 0U; i < n; ++i) {
+    assert(!(drain[i].size == 8U && drain[i].data[0] == 0x23U &&
+             drain[i].data[1] == 0x41U && drain[i].data[2] == 0x25U));
+  }
+  assert(drain[0].data[0] == 0x40U && drain[0].data[1] == 0x7DU);
+  // 跳过后归一即完成，回读照跑。
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+  (void)feed_device_params(&ctx, 7, kR58Raw, t + 2U, false);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
+}
+
+// 运行中回读发现保护被外部工具关掉（归一之后的变化）→ MISMATCH 且位图点名 bit4。
+// 原 test_dev_init_flags_safety_mismatch 在新设计下的正确形态：上电那一次不可能
+// 再出现这个现象（归一先写开了），只有**运行中**的外部改动才走这条路。
+static void test_dev_init_flags_safety_mismatch_at_runtime() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+
+  // 运行中复查要走**手动回读**：自动回读每会话只发一次（dev_read_done），
+  // 上电那一次已经用掉了。
+  motor_protocol_config_request_t refresh = {};
+  refresh.request_id = 96U;
+  refresh.motor_id = 7;
+  refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+  assert(motor_control_submit_config(&ctx, &refresh, 140));
+
+  uint32_t bad[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
+  memcpy(bad, kR58Raw, sizeof(bad));
+  bad[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U; // 外部工具把保护关了
+  (void)feed_device_params(&ctx, 7, bad, 141U, false);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  // 不一致 → 不可使能（与既有 MISMATCH 用例同口径）。
+  assert(!e->policy_enable);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY));
 }
 
 // 上电比对：设备里的峰值电流与记录不一致（台架实测 13300 mA vs 记录 10800 mA）
@@ -3330,45 +3571,6 @@ static void test_device_param_write_syncs_record_and_recovers() {
   assert(has_result_event(&ctx, 82U, MOTOR_PROTOCOL_CONFIG_OK));
 }
 
-// v3：安全开关（槽 4 = 0x2650:00）纳入上电比对——记录说"保护开(0)"、设备第 4
-// 阶段回读说"保护已被关(1)" → MISMATCH，且位图须点名 bit4（否则上位机只能盲写）。
-static void test_dev_init_flags_safety_mismatch() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
-  // 记录：安全槽 = 0（保护开）——即 kR58Raw[4] 的出厂默认值。
-  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
-  assert(rec.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U);
-  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
-
-  // 设备回读：第 4 阶段（安全开关）返回 1 = 保护被关。临时改值后立即还原，
-  // 免得污染后续共用 kR58Raw 的夹具。
-  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
-  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved;
-
-  const motor_control_entry_t *e = entry_of(&ctx, 7);
-  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  // 位图须指出是 bit4（安全开关），不是别的槽位。
-  uint16_t state = 0U;
-  uint32_t detail = 0U;
-  assert(take_dev_init_event(&ctx, 7, &state, &detail));
-  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  assert(detail == (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY));
-  const motor_control_param_view_t *v = view_of(&ctx, 7);
-  assert(v != nullptr);
-  assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  assert((v->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
-  assert(v->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
-  // 不一致 → 不可使能（与既有 MISMATCH 用例同口径）。
-  assert(!e->policy_enable);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-
-  // 一致场景（记录与设备都是 0）走既有 bring_cerb_to_ready → OK 已被覆盖。
-  assert(saved == 0U);
-}
-
 // v2 迁移上来的记录只搬低 4 位（槽 4/5 = 未核验）。保护槽缺 → 不比对（上电
 // 归一会把设备写成"开"）；**方向槽缺 → 判未初始化**：设备每次上电都回 0，
 // "读到 0"不能证明任何事，方向只能由记录说了算。
@@ -3400,9 +3602,86 @@ static void test_device_param_no_record_blocks_on_direction() {
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   motor_control_stored_params_t none = {};
   motor_control_apply_stored_params(&ctx, &none, 0U, 110);
+  assert(!motor_control_take_record_dirty(&ctx)); // 还没写过设备：无脏位
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  // 本机无记录 + 归一写了保护槽 ⇒ 记录里**第一次**出现基线（槽 4）＝内容确有
+  // 变化 ⇒ 必须排落盘。这条钉住 update_record_after_write 里的顺序约束：先比
+  // "是否真的变了"、再 OR 进 record_raw_present。顺序颠倒会让首次基线永远不
+  // 落盘（看起来"没变"），下次上电仍是"无记录"。
+  assert(motor_control_take_record_dirty(&ctx));
+  // 位图恰好只有方向：保护槽刚被归一的写建立基线、且与设备读数一致，不点名。
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+}
+
+// v2 迁移形状的记录（只搬低 4 位，槽 4/5 位为 0）+ 设备侧保护被外部工具关掉
+// （回读报 slot4=1）：归一先把保护写回 0 并在记录里**建立 bit4 基线**，随后
+// 的回读报 1 与刚建立的基线不符 → 位图点名 bit4；方向槽仍缺基线 → 一并点名
+// bit5。于是这条过去"记录缺槽 4 ⇒ 不比对 ⇒ OK"的路径，在 0a 落地后变成
+// "归一建立基线 ⇒ 报不一致"——这正是"关保护不跨上电保留"的落点。
+static void test_device_param_migrated_record_flags_protect_off() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU, false);
+  assert(rec.device_raw_present == 0x0FU); // 槽 4/5 未核验
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+
+  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U; // 外部工具把保护关了
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved;
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  // 归一那一拍已经把保护写进记录（这一位是"归一成功"的证据）。
+  assert((e->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
+  assert(e->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U);
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == ((1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                  (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)));
+  assert(saved == 0U);
+}
+
+// 非法方向值（槽 5 > 1）：与"缺槽"同待遇——0a 跳过方向步（不拿非法值去写
+// 设备），比对层判基线缺失（设计 §3.5 的"槽值 > 1"）。
+static void test_boot_normalize_skips_illegal_direction_value() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = 2U; // 非法值
+  motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
+  motor_control_apply_stored_params(&ctx, &rec, 1, 110);
+  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = saved;
+
+  // 保护写照做；随后**不许**出现 0x2541 的写请求。
+  const uint32_t t = step_boot_norm_write(&ctx, 7, 0x2650U, 0U, 120U);
+  motor_control_service(&ctx, t + 1U);
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U); // 只有回读首帧，没有方向写
+  for (size_t i = 0U; i < n; ++i) {
+    assert(!(drain[i].size == 8U && drain[i].data[0] == 0x23U &&
+             drain[i].data[1] == 0x41U && drain[i].data[2] == 0x25U));
+  }
+  assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
+  (void)feed_device_params(&ctx, 7, kR58Raw, t + 2U, false);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
+  assert(saved == 0U);
 }
 
 // 在页面上点一次方向（写事务建立基线）→ 重判转好。
@@ -3429,15 +3708,15 @@ static void test_device_param_direction_write_establishes_baseline() {
 // 回归（P8）：限值写事务只写它自己那几个槽位，不得把只读安全槽（4=保护开关 /
 // 5=方向）清零。清零后记录落盘成 0，下次上电与设备(1)比对必然不一致 → 假
 // CONFIG_CONFLICT，该台在无外部工具的情况下永久不可使能。
-// 基线必须**非零**：基线为 0 时清零是空操作，这条路径根本测不出来。
+// 两个槽的基线都必须**非零**：基线为 0 时"清零"是空操作，这条路径根本测不出来。
+// 保护槽的非零基线只能靠一次手动关保护拿到——上电归一会把它写回 0（"关保护
+// 不跨上电保留"，见 boot-normalize-design §5），所以这里在归一之后补写一次。
 static void test_limit_write_preserves_readonly_safety_slots() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
-  // 设备侧保护被外部工具关掉(1)、方向 CCW(1)：记录与设备同为非零基线。
-  const uint32_t saved_safety = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+  // 方向 CCW(1)：设备与记录同为非零基线（归一会把它写成记录值，故先设好）。
   const uint32_t saved_dir = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
   kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = 1U;
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
@@ -3445,15 +3724,28 @@ static void test_limit_write_preserves_readonly_safety_slots() {
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
   assert(!motor_control_take_record_dirty(&ctx));
 
+  // 手动关掉设备侧保护（厂家原值 1）：设备与记录一起基线化为非零。
+  motor_protocol_config_request_t off = {};
+  off.request_id = 90U;
+  off.motor_id = 7;
+  off.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  off.safety_protect_raw = 1U;
+  assert(motor_control_submit_config(&ctx, &off, 140));
+  (void)feed_safety_write(&ctx, 7, 1U, 141);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(entry_of(&ctx, 7)->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
+  // 关保护是**值真的变了**（记录 0 → 1）⇒ 已排落盘（幂等化只放过"同值重写"）。
+  assert(motor_control_take_record_dirty(&ctx));
+
   // 写峰值扭矩（写 + 读回核验）：本次事务只写了槽 3。
   motor_protocol_config_request_t trq = {};
   trq.request_id = 91U;
   trq.motor_id = 7;
   trq.kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   trq.max_torque_nm = 100.0f; // 超峰值 → 钳到 45 N·m = 10800 mA
-  motor_control_service(&ctx, 140);
-  assert(motor_control_submit_config(&ctx, &trq, 141));
-  (void)feed_torque_write(&ctx, 7, kR58PeakMa, 142);
+  motor_control_service(&ctx, 200);
+  assert(motor_control_submit_config(&ctx, &trq, 201));
+  (void)feed_torque_write(&ctx, 7, kR58PeakMa, 202);
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_OK));
@@ -3475,7 +3767,6 @@ static void test_limit_write_preserves_readonly_safety_slots() {
   assert(v->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
   assert(v->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
 
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved_safety;
   kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] = saved_dir;
 }
 
@@ -3548,7 +3839,9 @@ static void test_device_write_same_value_skips_flash() {
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
-  (void)motor_control_take_record_dirty(&ctx); // 清掉上电期的脏位
+  // 上电归一写的是记录里已有的值（保护 0）→ 幂等，不排落盘；此刻没有在飞的
+  // 写事务，脏位本来就该是 0（脏位只由**完成**的写事务置，见下）。
+  assert(!motor_control_take_record_dirty(&ctx));
 
   motor_protocol_config_request_t req = {};
   req.request_id = 95U;
@@ -3571,9 +3864,14 @@ static void test_device_param_unverified_blocks_motion() {
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
 
+  // 上电归一（0a）先走完：本用例要测的是**回读**失败，不归一就得先过它，
+  // 否则超时先落在归一阶段（那是另一个用例：
+  // test_boot_normalize_failure_blocks_before_refresh）。
+  uint32_t t = feed_boot_normalize(&ctx, 7, 120U);
+
   // 只喂心跳、不回应答：单次尝试 = 阶段 0 连续 3 次超时即定论，尝试之间退避
   // 500ms；用尽 MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 次才定论。
-  uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 3000U);
+  t = run_heartbeat_only(&ctx, 7, t + 1U, 3000U);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_read_attempts >= MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
@@ -3606,8 +3904,11 @@ static void test_device_param_read_retry_recovers() {
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
 
+  // 上电归一（0a）先走完：本用例要测的是**回读**的退避重试。
+  uint32_t t = feed_boot_normalize(&ctx, 7, 120U);
+
   // 第一次尝试：设备不应答（只喂心跳）→ 未定论，排下次重试。
-  uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 500U);
+  t = run_heartbeat_only(&ctx, 7, t + 1U, t + 400U);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_read_attempts == 1U);
   assert(!e->dev_read_done);
@@ -3766,11 +4067,12 @@ static void test_device_param_view_exposes_record() {
   assert(v->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
 }
 
-// 多台 CERB 并行上电回读：每台必须各发 6 个 SDO 读请求，对象顺序固定为
-// 0x607D:01（位置下限）→ 0x607D:02（位置上限）→ 0x6080（最大转速）→
-// 0x2538（峰值电流）→ 0x2650:00（保护开关）→ 0x2541（方向）。多台并行时同一拍
-// 各台各推进一个阶段，总线上是"逐台交错"而非"逐台跑完再下一台"——按台过滤
-// 日志时每台恰好 6 条读请求。
+// 多台 CERB 并行上电：每台先走完归一（保护写 0 + 方向写记录值，各带读回核验），
+// 再各发 6 个 SDO 读请求，对象顺序固定为 0x607D:01（位置下限）→ 0x607D:02
+// （位置上限）→ 0x6080（最大转速）→ 0x2538（峰值电流）→ 0x2650:00（保护开关）
+// → 0x2541（方向）。多台并行时同一拍各台各推进一个阶段，总线上是"逐台交错"
+// 而非"逐台跑完再下一台"——按台过滤日志时每台恰好 2 条写 + 2 条写后读回 +
+// 6 条回读，且**每台的写事务都排在它自己的回读之前**（顺序是契约）。
 static void test_device_param_four_reads_per_motor() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3785,12 +4087,15 @@ static void test_device_param_four_reads_per_motor() {
   motor_control_apply_stored_params(&ctx, rec, 4U, 110U);
 
   // 逐拍推进：每拍喂心跳保活 → service → 取帧（**同总线每拍至多一条 SDO
-  // 请求**，一问一答）→ 立刻喂该请求的应答。
-  uint8_t got_count[4] = {0};
+  // 请求**，一问一答）→ 立刻喂该请求的应答。写请求（0x23）与读请求（0x40）
+  // 都要应答，否则归一那两步会超时重试、回读根本轮不上。
+  uint8_t got_count[4] = {0};     // 该台已收到的**回读**条数（归一读回不计）
+  uint8_t read_seen[4] = {0};     // 该台已收到的读请求条数（归一读回 + 回读）
   uint8_t got_index[4][MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {{0}};
   uint32_t t = 120U;
   motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
-  for (uint8_t round = 0U; round < 48U; ++round) {
+  // 每台 10 条请求（2 写 + 2 写后读回 + 6 回读），同总线一问一答 ⇒ ≥40 拍。
+  for (uint8_t round = 0U; round < 96U; ++round) {
     for (size_t i = 0; i < 4U; ++i) {
       motor_protocol_raw_frame_t hb = cerb_feedback(ids[i], t);
       motor_control_on_raw_frame(&ctx, &hb);
@@ -3799,15 +4104,23 @@ static void test_device_param_four_reads_per_motor() {
     const size_t n = motor_control_collect_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
     size_t requests = 0U;
     for (size_t k = 0; k < n; ++k) {
-      if (frames[k].data[0] != 0x40U) {
-        continue; // 只看上传（读）请求
-      }
-      requests++;
       const uint16_t node = (uint16_t)(frames[k].can_id - 0x600U);
       assert(node >= 1U && node <= 4U);
       const uint16_t index =
           (uint16_t)(frames[k].data[1] | ((uint16_t)frames[k].data[2] << 8U));
       const uint8_t sub = frames[k].data[3];
+      if (frames[k].data[0] == 0x23U) {
+        // 写请求（归一的 0x2650 / 0x2541）：回写应答，不占读位。
+        requests++;
+        assert(index == 0x2650U || index == 0x2541U);
+        motor_protocol_raw_frame_t wack = sdo_write_ack(node, index, sub, t + 1U);
+        motor_control_on_raw_frame(&ctx, &wack);
+        continue;
+      }
+      if (frames[k].data[0] != 0x40U) {
+        continue; // 只看上传（读）请求
+      }
+      requests++;
       size_t slot = 5U; // 0x2541 方向
       if (index == 0x607DU) {
         slot = (sub == 1U) ? 0U : 1U;
@@ -3818,9 +4131,18 @@ static void test_device_param_four_reads_per_motor() {
       } else if (index == 0x2650U) {
         slot = 4U;
       }
-      assert(slot == got_count[node - 1U]); // 每台阶段顺序固定
-      got_index[node - 1U][got_count[node - 1U]] = (uint8_t)index;
-      got_count[node - 1U]++;
+      if (read_seen[node - 1U] == 0U) {
+        // 该台的第一条读请求必须是归一保护写的读回核验（0x2650:00）。
+        assert(slot == MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+      } else if (read_seen[node - 1U] == 1U) {
+        // 第二条是归一方向写的读回核验——两次归一步都排在回读之前。
+        assert(slot == MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+      } else {
+        assert(slot == got_count[node - 1U]); // 回读阶段顺序固定
+        got_index[node - 1U][got_count[node - 1U]] = (uint8_t)index;
+        got_count[node - 1U]++;
+      }
+      read_seen[node - 1U]++;
       motor_protocol_raw_frame_t ack =
           sdo_read_ack(node, (uint8_t)slot, kR58Raw[slot], t + 1U);
       motor_control_on_raw_frame(&ctx, &ack);
@@ -3830,7 +4152,9 @@ static void test_device_param_four_reads_per_motor() {
     t += 2U;
   }
   for (size_t i = 0; i < 4U; ++i) {
-    assert(got_count[i] == MOTOR_PROTOCOL_PARAM_SLOT_COUNT); // 每台恰好 6 条读
+    assert(got_count[i] == MOTOR_PROTOCOL_PARAM_SLOT_COUNT); // 每台恰好 6 条回读
+    assert(read_seen[i] == (uint8_t)(2U + MOTOR_PROTOCOL_PARAM_SLOT_COUNT));
+    assert(entry_of(&ctx, ids[i])->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE);
     assert(entry_of(&ctx, ids[i])->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
     assert(entry_of(&ctx, ids[i])->dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL);
   }
@@ -4689,8 +5013,14 @@ static void test_status_exposes_device_safety_facts() {
 int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
+  test_boot_normalize_runs_before_refresh();
+  test_boot_normalize_failure_blocks_before_refresh();
+  test_boot_normalize_not_advanced_by_manual_write();
+  test_boot_normalize_skips_direction_without_record();
+  test_boot_normalize_skips_illegal_direction_value();
+  test_dev_init_flags_safety_mismatch_at_runtime();
   test_device_param_mismatch_blocks_motion();
-  test_dev_init_flags_safety_mismatch();
+  test_device_param_migrated_record_flags_protect_off();
   test_device_param_missing_direction_baseline_blocks();
   test_device_param_no_record_blocks_on_direction();
   test_device_param_direction_write_establishes_baseline();

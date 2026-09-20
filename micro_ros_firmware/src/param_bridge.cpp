@@ -30,8 +30,9 @@
 // 错误码（system.last_error）：0=无；1..6 对齐 CONFIG 结果七码（reason 1..6）；
 // 10=本地校验拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知电机；
 // 20=save 失败；30=refresh 失败；40=设备参数与固件记录不一致（未初始化，该台
-// 不可运动）；41=设备参数回读不成功（未核对，同样不可运动）。
-// 40/41 由内核结论驱动（dev_init），与请求回告无关：设备真值说了算。
+// 不可运动）；41=设备参数回读不成功（未核对，同样不可运动）；42=本机对该台
+// **无记录**（首次上电/新板，同样不可运动，须人工核对后写参数）。
+// 40/41/42 由内核结论驱动（dev_init），与请求回告无关：固件那份记录说了算。
 #define ERR_NONE 0
 #define ERR_LOCAL_VALIDATION 10
 #define ERR_SUBMIT_FAILED 11
@@ -40,6 +41,7 @@
 #define ERR_REFRESH_FAIL 30
 #define ERR_DEV_INIT_MISMATCH 40
 #define ERR_DEV_INIT_UNVERIFIED 41
+#define ERR_DEV_INIT_NO_RECORD 42
 
 static const char *const kSystemSave = "system.save";
 static const char *const kSystemRefresh = "system.refresh";
@@ -753,9 +755,33 @@ void param_bridge_poll(void) {
   }
   if (g_save_pending) {
     g_save_pending = false;
+    // 保存 = 设备侧落盘（0x2539，只对**有保存码的脏槽**）+ W25 落盘。
+    // 只处理脏的台：没写过的台一个字节都不发（驱动器写 flash 期间会阻塞自身
+    // 控制循环，实测 ~1s，白存一次就是白等一秒）。
+    // 只脏易失槽（保护开关/方向）的台由内核在受理时直接清脏位回 OK——那种台
+    // 只欠 W25 那一半，下面的 storage_task_request_save() 就是它的全部。
+    // 事务提交先于 W25：设备落盘是异步的（受理即回告），本拍只负责把请求塞进
+    // mailbox，不去等结果——内核受理成功时自会清掉该台的脏位。
+    for (size_t i = 0U; i < g_view_count; ++i) {
+      if (g_views[i].record_dirty_slots == 0U) {
+        continue;
+      }
+      control_mailbox_config_request_t request = {};
+      request.request_id = next_request_id();
+      request.received_tick_ms = millis();
+      request.motor_id = g_views[i].motor_id;
+      request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+      request.value.save_slots = g_views[i].record_dirty_slots;
+      if (!motor_rt_submit_config(&request)) {
+        report_error(ERR_SUBMIT_FAILED, g_views[i].motor_id);
+      }
+    }
     storage_task_request_save();
     set_bool_internal(kSystemSave, false);
   }
+  // W25 失败自有其报告路径（下面这条），不回退设备侧脏位：脏位是内核受理保存
+  // 时清的，到这一步已经没了。此时"未保存"标记已经消失，system.last_error 是
+  // 唯一剩下的信号——不要试图从这里重新推导或重设脏位（内核那份记录说了算）。
   if (storage_take_result() == STORAGE_SAVE_FAIL) {
     report_error(ERR_SAVE_FAIL, 0xFFFF);
   }
@@ -772,6 +798,8 @@ void param_bridge_poll(void) {
       report_error(ERR_DEV_INIT_MISMATCH, g_views[i].motor_id);
     } else if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED) {
       report_error(ERR_DEV_INIT_UNVERIFIED, g_views[i].motor_id);
+    } else if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
+      report_error(ERR_DEV_INIT_NO_RECORD, g_views[i].motor_id);
     } else if (g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_OK ||
                g_views[i].dev_init == MOTOR_CONTROL_DEV_INIT_NA) {
       // 结论转好也上报（last_error=0 + motor_id）：上位机据此确认"这次回读

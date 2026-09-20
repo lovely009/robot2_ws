@@ -128,9 +128,15 @@ typedef struct {
   bool record_established;
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   uint8_t record_raw_present;
+  // 已写进设备并核验、但**尚未保存**的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）。
+  // "保存"= 写设备 0x2539（驱动器落 flash）+ W25 落盘；两者都由 system.save 触发。
+  // 含易失槽（保护开关 / 方向）：它们没有保存码，但**记录**要落 W25 才能生效
+  //（方向尤其——上电归一的方向值就是从记录读的），所以照样置脏。
+  // 写事务成功时置位，保存事务成功时清零。
+  uint8_t record_dirty_slots;
   bool boot_record_offered; // 本会话已把 Flash 记录（或"无记录"）告知本表项
   // 上电比对结论。PENDING/MISMATCH/UNVERIFIED/NO_RECORD 四态都不可控（见
-  // motor_control_dev_params_ready）。
+  // motor_control_dev_params_allow_motion）。
   motor_control_dev_init_t dev_init;
   // 方向被翻转（写事务成功时写入值 ≠ **写前**记录值）后的冻结标志：设备的
   // 零点基准与 cnt 限位的物理含义已整体镜像，必须先 SET_ZERO 重新标定才可
@@ -232,10 +238,6 @@ struct motor_control_context {
   uint32_t snapshot_accepted_count;
   uint32_t snapshot_rejected_count;
   uint32_t config_rejected_count;
-
-  // "设备与固件记录一起写"的落盘信号：设备侧写事务成功（设备 + 记录已同步）
-  // 后置位。任务层取走并落 Flash——记录不落盘就断电，下次上电比对必然不一致。
-  bool record_dirty;
 };
 
 // 表项索引（tx_slot 的取值来源）：依赖"表项只增不减"不变量（见

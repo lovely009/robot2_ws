@@ -249,8 +249,8 @@ static void update_shadow_from_read(motor_control_entry_t *entry) {
 
 // 写事务成功：设备与固件记录一起更新（"写就是设备和驱动板一起写"）。
 // 记录落 raw + SI，下次上电比对才不会把刚写过的值判成不一致。
-static void update_record_after_write(motor_control_context_t *ctx,
-                                      motor_control_entry_t *entry) {
+// 只置脏位、**不落盘**（落盘由 system.save 触发，见 record_dirty_slots）。
+static void update_record_after_write(motor_control_entry_t *entry) {
   const uint8_t pos_min_bit =
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
   const uint8_t pos_max_bit =
@@ -280,8 +280,9 @@ static void update_record_after_write(motor_control_context_t *ctx,
     default:
       return;
   }
-  // 先算"是否真的变了"：值相同且记录已有该位 → 不排落盘。上电归一每次都会写
-  // 保护"开"，不做这一步就是每次上电白擦两个扇区（阻塞 v2 单扇区 [实测] ~1s）。
+  // 先算"是否真的变了"：值相同且记录已有该位 → 不置脏位。上电归一每次都会写
+  // 保护"开"，不做这一步就是每次上电白排一次保存（设备 0x2539 落 flash 会阻塞
+  // 自身控制循环）。
   // 必须在 record_raw_present 置位**之前**判，否则首次基线会被误判成不变。
   bool changed = false;
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
@@ -306,9 +307,9 @@ static void update_record_after_write(motor_control_context_t *ctx,
     entry->dev_raw[slot] = entry->tx_write_raw[slot];
   }
   if (changed) {
-    // 设备已核验写入且记录内容有变 → 落盘（不落盘就断电 = 下次上电比对必然
-    // 不一致 = 该台未初始化，属于自找的停机）。
-    ctx->record_dirty = true;
+    // 只置脏位，**不落盘**：设备侧 0x2539 与 W25 都等到人工点「保存」。
+    // 不保存就掉电 → 两边一起回到上一轮已保存的值（设计 §3.2）。
+    entry->record_dirty_slots |= written_mask;
   }
   // 只有**上层发起的写**才建立基线。上电归一（保护 / 方向）与它共用同一个收尾
   // 路径，但那是固件自己的动作：让它把 record_established 置起来，空 Flash 的
@@ -414,12 +415,17 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
     }
   } else if (result == MOTOR_PROTOCOL_CONFIG_OK) {
     update_shadow_after_write(entry);
-    update_record_after_write(ctx, entry);
+    update_record_after_write(entry);
     // 写后重判：刚核验过的槽位已与记录同值，其余槽位仍按上次回读结论。
     if (entry->dev_read_done) {
       dev_state = settle_dev_init(entry);
       dev_init_settled = true;
     }
+  }
+  // 保存事务成功：脏位清除（设备侧落盘已发出；W25 由上层在同一动作里落）。
+  if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH &&
+      result == MOTOR_PROTOCOL_CONFIG_OK) {
+    entry->record_dirty_slots = 0U;
   }
   entry->tx_active = false;
   entry->tx_awaiting = false;
@@ -1241,6 +1247,33 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         return reject_busy(ctx, entry, request, now_ms);
       }
       return start_tx(ctx, entry, request, now_ms);
+    }
+    case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH: {
+      // 保存 = 设备落盘 + W25 落盘。这里只管设备那一半。
+      // 没有设备侧落盘对象的两种台（VAXOR 的软限位只活在记录里；只脏了易失槽
+      // 的保护/方向——厂家没给保存码）**不发任何帧**，直接清脏位回 OK：它们要靠
+      // 上层落 W25 才算保存完成，走事务机器只会白开一个空事务。
+      if (entry->profile == NULL) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      const bool device_side =
+          (entry->profile->capability_flags &
+           MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U;
+      const uint8_t device_slots =
+          (uint8_t)(request->save_slots & MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK);
+      if (!device_side || device_slots == 0U) {
+        entry->record_dirty_slots = 0U;
+        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+                                 entry->motor_id, entry->bus_index,
+                                 MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+        return true;
+      }
+      if (entry->tx_active) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
+      motor_protocol_config_request_t bounded = *request;
+      bounded.save_slots = device_slots;
+      return start_tx(ctx, entry, &bounded, now_ms);
     }
     case MOTOR_PROTOCOL_CONFIG_SET_POLICY:
       return motor_control_apply_policy_entry(ctx, entry, request, now_ms);

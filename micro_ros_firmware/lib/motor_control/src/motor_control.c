@@ -1456,14 +1456,6 @@ void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
   out->policy_rejected = ctx->policy_rejected_count;
 }
 
-bool motor_control_take_record_dirty(motor_control_context_t *ctx) {
-  if (ctx == NULL || !ctx->record_dirty) {
-    return false;
-  }
-  ctx->record_dirty = false;
-  return true;
-}
-
 size_t motor_control_copy_topology(motor_control_context_t *ctx,
                                    motor_control_topology_entry_t *out,
                                    size_t capacity) {

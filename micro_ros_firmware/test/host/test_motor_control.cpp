@@ -210,6 +210,18 @@ static const motor_control_entry_t *entry_of(motor_control_context_t *ctx,
   return nullptr;
 }
 
+// 有没有"已写未保存"的台。新模型逐台记脏位（entry->record_dirty_slots），
+// 没有全局标志了——旧 API motor_control_take_record_dirty 已被删除，因为它会
+// 成为"需要保存"的第二个真相源，与逐台脏位漂移。
+static bool any_record_dirty(const motor_control_context_t *ctx) {
+  for (size_t i = 0U; i < ctx->entry_count; ++i) {
+    if (ctx->entries[i].used && ctx->entries[i].record_dirty_slots != 0U) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---- 设备身份读取（CERB SDO 0x1008）测试侧驱动器 --------------------------
 //
 // 与固件 adapter 对向实现同一线协议：上传发起应答（0x41 + 索引/子索引 +
@@ -431,6 +443,34 @@ static uint32_t feed_velocity_write(motor_control_context_t *ctx, uint16_t node,
   motor_control_service(ctx, tick + 4U);
   (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
   return tick + 4U;
+}
+
+// 走完一次 SET_POSITION_LIMITS（写/读回 ×2：下限 0x607D:01 → 上限 0x607D:02），
+// 与 feed_torque_write 同形。子索引 1/2 对应槽位 0/1；±1.0 rad 按 65536 cnt/360°
+// 折算 = ∓10430 cnt（写下去 = 读回来，核验同值）。
+static uint32_t feed_position_limits_write(motor_control_context_t *ctx,
+                                           uint16_t node, uint32_t tick) {
+  const uint32_t kCnt[2] = {0xFFFFD742U, 0x000028BEU}; // -10430 / +10430 cnt
+  const uint8_t kSub[2] = {1U, 2U};
+  const uint8_t kSlot[2] = {(uint8_t)MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN,
+                            (uint8_t)MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX};
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  for (size_t phase = 0U; phase < 2U; ++phase) {
+    motor_control_service(ctx, tick);
+    (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    motor_protocol_raw_frame_t ack =
+        sdo_write_ack(node, 0x607DU, kSub[phase], tick + 1U);
+    motor_control_on_raw_frame(ctx, &ack);
+    motor_control_service(ctx, tick + 2U);
+    (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    motor_protocol_raw_frame_t rd =
+        sdo_read_ack(node, kSlot[phase], kCnt[phase], tick + 3U);
+    motor_control_on_raw_frame(ctx, &rd);
+    motor_control_service(ctx, tick + 4U);
+    (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    tick += 4U;
+  }
+  return tick;
 }
 
 // 保护开关写事务（写 0x2650:00 + 读回核验），无保存阶段。
@@ -3480,10 +3520,12 @@ static void test_boot_normalize_not_advanced_by_manual_write() {
       sdo_read_ack(7, MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, 0U, 131U);
   motor_control_on_raw_frame(&ctx, &rack);
   assert(entry_of(&ctx, 7)->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DIRECTION);
-  // 归一写的是"生效"(0)，与刚被人工基线化的记录(1)不同 ⇒ 记录改回 0 并落盘
+  // 归一写的是"生效"(0)，与刚被人工基线化的记录(1)不同 ⇒ 记录改回 0 并置脏位
   // ——"关保护不跨上电保留"的落点（设计 §5）。
   assert(entry_of(&ctx, 7)->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U);
-  assert(motor_control_take_record_dirty(&ctx));
+  // 归一写回"生效"(0) 改了记录内容 ⇒ 该台进"未保存"，等 system.save 落盘。
+  assert(entry_of(&ctx, 7)->record_dirty_slots ==
+         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY));
 
   // 方向步照常走完。
   (void)step_boot_norm_write(&ctx, 7, 0x2541U, 0U, 140U);
@@ -3771,7 +3813,7 @@ static void test_device_param_write_syncs_record_and_recovers() {
       0xFFFF8000U, 32768U, 3030U, 13300U, 0U, 0U};
   (void)feed_device_params(&ctx, 7, bad_raw, 120, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  assert(!motor_control_take_record_dirty(&ctx));
+  assert(!any_record_dirty(&ctx));
 
   // 用户从参数页写回 45 N·m（峰值钳制上限）→ 规格书峰值电流 10800 mA。
   motor_protocol_config_request_t trq = {};
@@ -3793,8 +3835,8 @@ static void test_device_param_write_syncs_record_and_recovers() {
   assert(e->dev_raw[3] == kR58PeakMa);
   // SI 限值随写核验同步进设备影子（record_* 镜像字段已删，原值仍在 record_raw）。
   assert(fabs(e->dev_max_torque_nm - 45.0) < 0.1);
-  // 值没变 → 不落盘（"变了才落"由保护开关用例覆盖）。
-  assert(!motor_control_take_record_dirty(&ctx));
+  // 值没变 → 不置脏位（"变了才置"由保护开关用例覆盖）。
+  assert(!any_record_dirty(&ctx));
 
   // 记录与设备重新一致 → 解除未初始化，回到可运动态。
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
@@ -3842,16 +3884,17 @@ static void test_device_param_no_record_blocks_on_direction() {
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   motor_control_stored_params_t none = {};
   motor_control_apply_stored_params(&ctx, &none, 0U, 110);
-  assert(!motor_control_take_record_dirty(&ctx)); // 还没写过设备：无脏位
+  assert(!any_record_dirty(&ctx)); // 还没写过设备：无脏位
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
   assert(!motor_control_dev_params_allow_motion(e)); // 未初始化 = 不可使能
   // 本机无记录 + 归一写了保护槽 ⇒ 记录里**第一次**出现基线（槽 4）＝内容确有
-  // 变化 ⇒ 必须排落盘。这条钉住 update_record_after_write 里的顺序约束：先比
-  // "是否真的变了"、再 OR 进 record_raw_present。顺序颠倒会让首次基线永远不
-  // 落盘（看起来"没变"），下次上电仍是"无记录"。
-  assert(motor_control_take_record_dirty(&ctx));
+  // 变化 ⇒ 必须置脏位（等 system.save 才落 W25）。这条钉住
+  // update_record_after_write 里的顺序约束：先比"是否真的变了"、再 OR 进
+  // record_raw_present。顺序颠倒会让首次基线永远不置脏位（看起来"没变"），
+  // 下次上电仍是"无记录"。
+  assert(any_record_dirty(&ctx));
   // 归一的写**不**建立基线（record_established 仍为假）：那一笔走的是内部
   // request_id（bit31=1），不是"人写过"。否则空 Flash 的板子上电即"有记录"。
   assert(!e->record_established);
@@ -3968,7 +4011,7 @@ static void test_limit_write_preserves_readonly_safety_slots() {
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
-  assert(!motor_control_take_record_dirty(&ctx));
+  assert(!any_record_dirty(&ctx));
 
   // 手动关掉设备侧保护（厂家原值 1）：设备与记录一起基线化为非零。
   motor_protocol_config_request_t off = {};
@@ -3980,8 +4023,8 @@ static void test_limit_write_preserves_readonly_safety_slots() {
   (void)feed_safety_write(&ctx, 7, 1U, 141);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
   assert(entry_of(&ctx, 7)->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U);
-  // 关保护是**值真的变了**（记录 0 → 1）⇒ 已排落盘（幂等化只放过"同值重写"）。
-  assert(motor_control_take_record_dirty(&ctx));
+  // 关保护是**值真的变了**（记录 0 → 1）⇒ 已置脏位（幂等化只放过"同值重写"）。
+  assert(any_record_dirty(&ctx));
 
   // 写峰值扭矩（写 + 读回核验）：本次事务只写了槽 3。
   motor_protocol_config_request_t trq = {};
@@ -4027,7 +4070,7 @@ static void test_safety_protect_write_syncs_record_and_gates_motion() {
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
-  assert(!motor_control_take_record_dirty(&ctx));
+  assert(!any_record_dirty(&ctx));
 
   // 关掉设备侧保护：厂家原值 1（0 = 保护开）。
   motor_protocol_config_request_t req = {};
@@ -4046,7 +4089,7 @@ static void test_safety_protect_write_syncs_record_and_gates_motion() {
   assert((e->record_raw_present &
           (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK); // 写完仍然一致
-  assert(motor_control_take_record_dirty(&ctx));    // 已排入落盘
+  assert(any_record_dirty(&ctx));    // 已置脏位，等 system.save
   // 方向槽是只读的，本事务不得碰它。
   assert(e->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] ==
          kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION]);
@@ -4085,9 +4128,9 @@ static void test_device_write_same_value_skips_flash() {
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
-  // 上电归一写的是记录里已有的值（保护 0）→ 幂等，不排落盘；此刻没有在飞的
+  // 上电归一写的是记录里已有的值（保护 0）→ 幂等，不置脏位；此刻没有在飞的
   // 写事务，脏位本来就该是 0（脏位只由**完成**的写事务置，见下）。
-  assert(!motor_control_take_record_dirty(&ctx));
+  assert(!any_record_dirty(&ctx));
 
   motor_protocol_config_request_t req = {};
   req.request_id = 95U;
@@ -4098,7 +4141,137 @@ static void test_device_write_same_value_skips_flash() {
   assert(motor_control_submit_config(&ctx, &req, 201));
   (void)feed_safety_write(&ctx, 7, 0U, 202);
   assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_OK));
-  assert(!motor_control_take_record_dirty(&ctx)); // 没变 → 不落盘
+  assert(!any_record_dirty(&ctx)); // 没变 → 不置脏位
+}
+
+// 写不落盘：写事务成功只把记录改在内存里并置脏位；设备侧 0x2539 与 W25 都
+// **不许发生**，直到 system.save。这是 owner 第 9 条"只点了写必须有未保存标记"
+// 的机制面。
+static void test_write_does_not_persist_until_save() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  assert(entry_of(&ctx, 7)->record_dirty_slots == 0U);
+
+  motor_protocol_config_request_t vel = {};
+  vel.request_id = 70U;
+  vel.motor_id = 7;
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
+  assert(motor_control_submit_config(&ctx, &vel, 200));
+  const uint32_t t = feed_velocity_write(&ctx, 7, kR58Raw[2], 201U);
+  assert(has_result_event(&ctx, 70U, MOTOR_PROTOCOL_CONFIG_OK));
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->record_dirty_slots == (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX));
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK); // 写不影响可动性，只是"未保存"
+
+  // 事务已收尾，此后任一拍都不得冒出 0x2539（写事务不含保存阶段）。
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  for (uint32_t k = 0U; k < 5U; ++k) {
+    motor_control_service(&ctx, t + 10U + k);
+    const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    for (size_t i = 0U; i < n; ++i) {
+      assert(!(drain[i].size == 8U && drain[i].data[1] == 0x39U &&
+               drain[i].data[2] == 0x25U));
+    }
+  }
+}
+
+// 保存事务：按脏位图发对应保存码，收尾清脏位。**只保存脏的那台**。
+static void test_save_flash_clears_dirty_and_emits_codes() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  bring_cerb_to_ready(&ctx, 8, "cerb_r48_101", 100); // 不脏，保存时不许被碰
+
+  motor_protocol_config_request_t limits = {};
+  limits.request_id = 80U;
+  limits.motor_id = 7;
+  limits.kind = MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS;
+  limits.position_limits.min_position_rad = -1.0f;
+  limits.position_limits.max_position_rad = 1.0f;
+  assert(motor_control_submit_config(&ctx, &limits, 200));
+  uint32_t t = feed_position_limits_write(&ctx, 7, 201U);
+  assert(has_result_event(&ctx, 80U, MOTOR_PROTOCOL_CONFIG_OK));
+
+  motor_protocol_config_request_t vel = {};
+  vel.request_id = 81U;
+  vel.motor_id = 7;
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
+  assert(motor_control_submit_config(&ctx, &vel, t + 10U));
+  t = feed_velocity_write(&ctx, 7, kR58Raw[2], t + 11U);
+  assert(has_result_event(&ctx, 81U, MOTOR_PROTOCOL_CONFIG_OK));
+
+  const uint8_t want = (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
+                                 (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |
+                                 (1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX));
+  assert(entry_of(&ctx, 7)->record_dirty_slots == want);
+
+  motor_protocol_config_request_t save = {};
+  save.request_id = 82U;
+  save.motor_id = 7;
+  save.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  save.save_slots = want;
+  assert(motor_control_submit_config(&ctx, &save, t + 20U));
+
+  // 三条保存帧（码 1 / 4 / 2），无应答、逐拍推进；不得出现在 8 号节点上。
+  const uint8_t kCodes[3] = {1U, 4U, 2U};
+  uint8_t seen = 0U;
+  for (uint32_t k = 0U; k < 8U && seen < 3U; ++k) {
+    motor_control_service(&ctx, t + 21U + k);
+    motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+    const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+    for (size_t i = 0U; i < n; ++i) {
+      assert(drain[i].can_id != 0x600U + 8U); // 未脏的台一个字节都不发
+      if (drain[i].size == 8U && drain[i].data[0] == 0x23U &&
+          drain[i].data[1] == 0x39U && drain[i].data[2] == 0x25U) {
+        assert(drain[i].data[4] == kCodes[seen]);
+        seen++;
+      }
+    }
+  }
+  assert(seen == 3U);
+  assert(has_result_event(&ctx, 82U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->record_dirty_slots == 0U);
+  assert(entry_of(&ctx, 8)->record_dirty_slots == 0U);
+}
+
+// 只脏易失槽（方向）：没有 0x2539 可发 → 内核直接清脏位并回 OK，不发任何帧。
+// 方向靠记录才能在下次上电重建（记录会落 W25），所以它**必须有**未保存标记。
+static void test_save_of_volatile_only_slot_emits_nothing() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+
+  motor_protocol_config_request_t dir = {};
+  dir.request_id = 83U;
+  dir.motor_id = 7;
+  dir.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+  dir.direction_raw = 1U; // 与记录基线(0)不同 → 脏
+  assert(motor_control_submit_config(&ctx, &dir, 200));
+  const uint32_t t = feed_direction_write(&ctx, 7, 1U, 201U);
+  assert(has_result_event(&ctx, 83U, MOTOR_PROTOCOL_CONFIG_OK));
+  const uint8_t dirty = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+  assert(entry_of(&ctx, 7)->record_dirty_slots == dirty);
+
+  motor_protocol_config_request_t save = {};
+  save.request_id = 84U;
+  save.motor_id = 7;
+  save.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  save.save_slots = dirty;
+  assert(motor_control_submit_config(&ctx, &save, t + 10U));
+  motor_control_service(&ctx, t + 11U);
+  assert(has_result_event(&ctx, 84U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->record_dirty_slots == 0U);
+
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (size_t i = 0U; i < n; ++i) {
+    assert(!(drain[i].size == 8U && drain[i].data[1] == 0x39U &&
+             drain[i].data[2] == 0x25U));
+  }
 }
 
 // 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
@@ -5384,6 +5557,9 @@ int main() {
   test_limit_write_preserves_readonly_safety_slots();
   test_safety_protect_write_syncs_record_and_gates_motion();
   test_device_write_same_value_skips_flash();
+  test_write_does_not_persist_until_save();
+  test_save_flash_clears_dirty_and_emits_codes();
+  test_save_of_volatile_only_slot_emits_nothing();
   test_device_param_read_retry_recovers();
   test_device_param_unverified_blocks_motion();
   test_device_param_pending_blocks_enable();

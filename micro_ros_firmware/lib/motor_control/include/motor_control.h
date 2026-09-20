@@ -286,9 +286,6 @@ typedef struct motor_control_context motor_control_context_t;
 // 生产单例（库内静态分配）；白盒测试另用 motor_control_init 注入自建上下文。
 motor_control_context_t *motor_control_instance(void);
 
-// 取走并清除记录脏位（true = 自上次取走后有设备侧写成功，需要落盘）。
-bool motor_control_take_record_dirty(motor_control_context_t *ctx);
-
 // ---------------------------------------------------------------------------
 // 生命周期管理
 // ---------------------------------------------------------------------------

@@ -653,80 +653,16 @@ function sendTargets(targets) {
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
 
-// ── 链路预算：为什么轨迹必须分段发 ──────────────────────────────────────
-// 固件的轨迹订阅是 **best-effort**（motor_bridge.cpp 的 qos_stream），而 micro-ROS
-// 的 BE 流**不分片**（fragmented 退回对 BE 直接判 INVALID）：单条消息必须塞进一个
-// MTU。serial 传输 MTU = 512 B；每个路点线上 20 B（uint32 时间 + uint16 id +
-// 2 B 对齐 + 3×float32），加固定开销约 40 B → **一次最多约 23 个路点**，
-// 4 台电机时就是 **5 行**。
-// ⚠️ 超了不是报错，是**静默丢弃**（固件根本收不到，页面也无从知道）——所以必须
-// 在这里按预算切段，别指望固件侧的上限校验（那是 256 点，远高于链路能过的量）。
-// ⚠️ 2026-09-20 的教训：**单条不能超过固件的点数组容量**。
-// 固件 MAX_TRAJECTORY_POINTS = 256（四处各存一份，加不上去），点数组容量之外的消息
-// 整条塞进来会把板子卡死（1080 点 / 21.6 KB 实测把 MCU 打死，只能复位）。
-// 所以三处必须对齐：**固件 256 点 = 这里每段上限 = 6 KB 输入缓冲装得下（≈5.2 KB）**。
-// 4 台电机 → 64 行/段（256 点）；1080 点（270 行）→ 5 段，段尾仍挑在最安静的行上。
-const TRAJ_LINK_BUDGET_BYTES = 5200;
-const TRAJ_POINT_BYTES = 20;
-
-// 固件单条轨迹的硬上限：点数组在**四处**各存一份（内核/mailbox 双缓冲/bridge/切矢），
-// 264 → 1024 要约 84 KB RAM，DTCM 池放不下，所以这是硬约束（motor_control.h:45）。
-const TRAJ_FW_MAX_POINTS = 256;
-// 留 4 点余量：**绝不能正好卡在上限**——超一点就是写穿内核的定长点数组，
-// 表现是整块板子卡死（只能复位）。253 点已足够（4 台 → 63 行/段）。
-const TRAJ_FW_POINT_MARGIN = 4;
-
-function trajRowsPerSegment(nMotors) {
-  const n = Math.max(1, nMotors);
-  const byFw = Math.floor((TRAJ_FW_MAX_POINTS - TRAJ_FW_POINT_MARGIN) / n); // 固件上限
-  const byLink = Math.floor(TRAJ_LINK_BUDGET_BYTES / TRAJ_POINT_BYTES / n); // 链路预算
-  // −1：每段还要**多带一行当端点**（段间位置连续，端点行同时是下一段的起点）。
-  return Math.max(1, Math.min(byFw, byLink) - 1);
-}
-
-// 先把整条轨迹的切点一次算完：切点只取决于 rows/per（确定性），所以段数可以**精确**
-// 得到——此前用 ceil(行数/per) 估，而实际切点落在更早的"安静行"上，段数被低估
-// （真实 9 段却显示"6/5 段"，纯属我的估算错误）。
-function planSegmentEnds(rows, per) {
-  const ends = [];
-  let st = 0;
-  while (st < rows.length) {
-    const e = pickSegmentEnd(rows, st, per);
-    if (e <= st && st < rows.length - 1) break; // 不前进：护栏，宁可少播一段
-    ends.push(e);
-    if (e >= rows.length - 1) break;
-    st = e;
-  }
-  return ends;
-}
-
-// 段边界处固件会把端点切矢归零（F–C 规则）→ 速度短暂到 0。把断点选在**运动最慢**
-// 的那一行（停顿点/换向点），顿挫就基本看不出来。在 [start+per/2, start+per] 里挑
-// 位移最小的一行；没有更安静的就越靠后切（保证进展）。
-function pickSegmentEnd(rows, start, per) {
-  const hi = Math.min(rows.length - 1, start + per);
-  // lo 必须 ≤ hi：末段窗口不足时若不钳，循环体一次都不跑、返回 start = 不前进
-  // → 调用方死循环（真踩过：模拟里把 node 内存吃爆）。
-  const lo = Math.min(hi, start + Math.max(1, Math.floor(per / 2)));
-  const posOf = (row) => {
-    const m = new Map();
-    for (const t of row.targets) m.set(t.motor_id, t.position);
-    return m;
-  };
-  let best = hi;
-  let bestMove = Infinity;
-  for (let i = lo; i <= hi; ++i) {
-    const a = posOf(rows[i]);
-    const b = posOf(rows[i + 1] || rows[i]);
-    let move = 0;
-    for (const [id, p] of a) {
-      const q = b.get(id);
-      if (q !== undefined) move += Math.abs(q - p);
-    }
-    if (move < bestMove) { bestMove = move; best = i; }
-  }
-  return best;
-}
+// ── 为什么"播放"不走轨迹通道（2026-09-20 真机实测，别再走这条路）──────
+// 本板 micro-ROS 的 **reliable 分片路径不可用**：单条消息超过一个 MTU(512 B) 就把
+// MCU 写死，只能复位。实测对照：
+//     3 点 / 60 B   → 受理、completed ✓
+//     252 点 / 5 KB → 板子挂死 ✗（而 252 < 固件 256 点容量，所以**不是点数问题**）
+// `RMW_UXRCE_STREAM_HISTORY_INPUT` 加大也不生效（heap_free 纹丝不动），无法靠加缓冲
+// 绕过。**结论：轨迹单条必须 ≤ 一个 MTU ≈ 20 个点**，对 270 行的录制毫无用处。
+// 所以播放改走**快照通道**（每行一条 ~100 B 的单帧消息，即"单发一次"用的那条路）。
+// 轨迹通道仍保留 sendTrajectory() 仅供"取消轨迹"（空消息，极小）使用。
+const TRAJ_MTU_SAFE_POINTS = 20; // 单条轨迹的实测安全上限（一个 MTU 内）
 
 // 固件单条上限是 256 点 —— 但**不必再稀疏化**：播放时会自动分段，且段尾挑在
 // 运动最慢（常常是四个关节都不动）的行上，端点切矢归零落在真停顿处，看不出顿挫。
@@ -1138,70 +1074,55 @@ function teachRowsToTrajectory(rows) {
 
 // 播放改为把整条时间线交给 MCU 执行（不再由浏览器逐点 setTimeout）：
 // 定时抖动不再影响运动质量，松手/切页也不会中断。
+// 播放：**按行流式走快照通道**（/micro_ros_do/motor_command_array）。
+//
+// 为什么不用轨迹通道（2026-09-20 真机实测）：本板 micro-ROS 的 reliable 分片路径
+// 不可用——单条消息超过一个 MTU(512 B) 就会把 MCU 写死，只能复位。
+//   实测：3 点 / 60 B  → 受理并 completed ✓
+//         252 点 / 5 KB → 板子直接挂死 ✗（而 252 < 固件 256 点容量，所以不是点数问题）
+//   `RMW_UXRCE_STREAM_HISTORY_INPUT` 改了也不生效（heap_free 不动），故无法靠加大
+//   缓冲绕过。**结论：轨迹单条必须 ≤ 一个 MTU**，也就是 ≤ ~20 个点。
+// 快照通道每条只是一行的目标（~100 B，单帧），是被反复验证过可用的那条路
+// （"单发一次"就是它）。代价：节奏由浏览器定时器给（约 30Hz，抖动毫秒级），
+// 且中途若卡顿超过 100ms，固件的新鲜度级联会对这些台软停（安全，不会失控）。
 function teachPlay() {
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   if (!rows.length) { setTeach('err', '没有点位'); return; }
-  const {points, ids} = teachRowsToTrajectory(rows);
-  if (!points.length) { setTeach('err', '所有点位都是空的'); return; }
-  if (ids.length > 64) {
-    setTeach('err', `✗ 未下发：${ids.length} 台超固件上限（64 台）`);
-    return;
-  }
-  const per = trajRowsPerSegment(ids.length);
-  stopStream(); // 轨迹独占这些电机：先停 100Hz 连发，避免两条命令源分叉
+  const ids = new Set();
+  for (const r of rows) for (const x of r.targets) ids.add(x.motor_id);
+  if (ids.size > 64) { setTeach('err', `✗ 未下发：${ids.size} 台超上限 64`); return; }
+  stopStream();          // 我们自己就是快照通道：先停 100Hz 连发，避免两条流互踩
   teachStopTimer();
   teach.playing = true;
   teach.rows = rows;
-  teach.nMotors = ids.length;
-  teach.segEnds = planSegmentEnds(rows, per);
-  teach.seg = 0;
-  teach.segTotal = teach.segEnds.length; // 精确段数（不再是估算）
-  teach.nextRow = 0;
-  if (teach.segTotal === 0) {
-    teach.playing = false;
-    setTeach('err', '分段计划为空，未下发');
-    return;
-  }
-  teachPlaySegment();
+  teach.idx = 0;
+  teach.total = rows.length;
+  teachPlayRow();
 }
 
-// 逐段播放。每段取 ≤ per 行、**外加下一行当端点**——这样段与段之间位置是连续的
-// （端点那一行既是上一段的终点、也是下一段的起点）。段边界处固件按 F–C 规则把
-// 端点切矢置零，所以速度会在边界短暂降到 0（位置不跳）。
-// 分段的根源是**固件的点数组上限 256**（四处各存一份，加不上去），不是链路的锅：
-// 单条超过 256 点会把 MCU 打死。段尾挑在"最安静的行"上，正是为了让这些归零落在
-// 真停顿处、看不出来。
-function teachPlaySegment() {
+// 逐行下发：每行按它的"等待 MS"节奏推进；空行只等待、不下发（等价于停顿）。
+function teachPlayRow() {
   if (!teach.playing) return;
   const rows = teach.rows;
-  const start = teach.nextRow || 0;
-  if (teach.seg >= teach.segEnds.length) {
+  if (teach.idx >= rows.length) {
     teach.playing = false;
     teachStopTimer();
-    setTeach('ok', `✓ 播放完成：${teach.seg} 段 / ${rows.length} 行`);
+    setTeach('ok', `✓ 播放完成：${rows.length} 行`);
     return;
   }
-  const end = teach.segEnds[teach.seg];
-  teach.nextRow = end;
-  const slice = rows.slice(start, end + 1);
-  const {points, ids} = teachRowsToTrajectory(slice);
-  if (!points.length) {
-    teach.playing = false;
-    setTeach('err', '段内点位全空，已停止');
-    return;
+  const row = rows[teach.idx];
+  teach.idx++;
+  if (row.targets.length) {
+    const res = sendTargets(row.targets);
+    if (!res.ok) {
+      teach.playing = false;
+      setTeach('err', `✗ 第 ${teach.idx}/${rows.length} 行下发失败：${res.msg}`);
+      return;
+    }
   }
-  const res = sendTrajectory(points, ids);
-  if (!res.ok) {
-    teach.playing = false;
-    setTeach('err', '✗ ' + res.msg);
-    return;
-  }
-  // 本段时长 = 除端点行以外的等待之和（端点行只标位置、不再等）。
-  const durMs = slice.slice(0, -1).reduce((a, r) => a + r.wait, 0);
-  teach.seg++;
-  setTeach('ok', `▸ 播放中 ${teach.seg}/${teach.segTotal} 段（每段 ${per} 行）`);
-  teach.timer = setTimeout(teachPlaySegment, durMs + 150); // +150ms 余量：受理/启动
+  setTeach('ok', `▸ 播放中 ${teach.idx}/${rows.length} 行`);
+  teach.timer = setTimeout(teachPlayRow, Math.max(1, row.wait));
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消

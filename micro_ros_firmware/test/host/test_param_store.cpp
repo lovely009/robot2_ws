@@ -488,8 +488,27 @@ void test_param_units() {
 
 } // namespace
 
+// 方向是布尔量（0/1），不做钳制；越界值一律拒。
+static void test_param_value_ok_direction() {
+  assert(param_value_ok(PARAM_FIELD_DIRECTION, 0.0f, 0.0f, nullptr));
+  assert(param_value_ok(PARAM_FIELD_DIRECTION, 1.0f, 0.0f, nullptr));
+  assert(!param_value_ok(PARAM_FIELD_DIRECTION, 2.0f, 0.0f, nullptr));
+  assert(!param_value_ok(PARAM_FIELD_DIRECTION, -1.0f, 0.0f, nullptr));
+  assert(!param_value_ok(PARAM_FIELD_DIRECTION, NAN, 0.0f, nullptr));
+
+  // 名字生成/解析往返。
+  char buf[PARAM_NAME_MAX_LEN];
+  assert(param_name_build_motor(buf, sizeof(buf), 12U, PARAM_FIELD_DIRECTION));
+  assert(strcmp(buf, "m12.direction") == 0);
+  uint16_t id = 0U;
+  param_field_t f = PARAM_FIELD_ENABLE;
+  assert(param_name_parse(buf, &id, &f) == PARAM_NAME_MOTOR);
+  assert(id == 12U && f == PARAM_FIELD_DIRECTION);
+}
+
 int main() {
   test_param_name_build_parse_roundtrip();
+  test_param_value_ok_direction();
   test_param_name_validation();
   test_blob_v3_layout_size();
   test_blob_roundtrip_and_crc();

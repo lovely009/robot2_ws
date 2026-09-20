@@ -74,13 +74,14 @@ static const uint32_t kRegisterPerPoll = 2U; // 每拍最多注册电机数
 // 失败还被 (void) 吞掉。表与枚举分离后，加字段必须显式改这里，并被下面
 // 两条断言拦住。param_field_t 的次序仍是 Flash blob 的 present 位图契约。
 static const param_field_t kParamMotorFields[] = {
-    PARAM_FIELD_POS_MIN, PARAM_FIELD_POS_MAX, PARAM_FIELD_VEL_LIMIT,
+    PARAM_FIELD_POS_MIN,  PARAM_FIELD_POS_MAX,       PARAM_FIELD_VEL_LIMIT,
     PARAM_FIELD_TORQUE_LIMIT, PARAM_FIELD_LIMIT_PROTECT,
+    PARAM_FIELD_DIRECTION,
 };
 #define PARAM_MOTOR_FIELD_COUNT \
   (sizeof(kParamMotorFields) / sizeof(kParamMotorFields[0]))
 
-static_assert(PARAM_MOTOR_FIELD_COUNT == 5U,
+static_assert(PARAM_MOTOR_FIELD_COUNT == 6U,
               "每电机参数项数变了：同步改 include/param_bridge.h 的容量说明");
 static_assert(PARAM_MOTOR_FIELD_COUNT <= PARAM_FIELD_COUNT,
               "注册字段必须落在 param_field_t 枚举内");
@@ -186,6 +187,7 @@ static void get_double_or_nan(const char *name, double *out) {
 // mark_outstanding 要的是地址，绑定到静态存储期对象上（局部 const 也行，
 // 但这里显式命名，免得读的人以为可以省掉）。
 static const param_field_t kSafetyField = PARAM_FIELD_LIMIT_PROTECT;
+static const param_field_t kDirectionField = PARAM_FIELD_DIRECTION;
 
 static control_mailbox_config_kind_t field_config_kind(param_field_t field) {
   switch (field) {
@@ -200,6 +202,8 @@ static control_mailbox_config_kind_t field_config_kind(param_field_t field) {
       return CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
     case PARAM_FIELD_LIMIT_PROTECT:
       return CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
+    case PARAM_FIELD_DIRECTION:
+      return CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
     default:
       return (control_mailbox_config_kind_t)0;
   }
@@ -245,6 +249,32 @@ static bool submit_single_limit(MotorSlot *slot, param_field_t field,
   (void)param_name_build_motor(name, sizeof(name), slot->motor_id, field);
   get_double_or_nan(name, &slot->old_value[field]);
   mark_outstanding(slot, request.request_id, &field, 1);
+  return true;
+}
+
+// 方向提交（原值直通，**不反转**；0/1 由 param_value_ok 挡在前面）。
+// 值的副作用在设备侧：翻向会让零点与 cnt 限位的物理含义整体镜像，内核据此
+// 冻结该台直到重新设零（ZERO_STALE）——判据在内核，本层不重复判。
+static bool submit_direction(MotorSlot *slot, double value) {
+  if (!param_value_ok(PARAM_FIELD_DIRECTION, (float)value, 0.0f, nullptr)) {
+    report_error(ERR_LOCAL_VALIDATION, slot->motor_id);
+    return false;
+  }
+  control_mailbox_config_request_t request = {};
+  request.request_id = next_request_id();
+  request.received_tick_ms = millis();
+  request.motor_id = slot->motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
+  request.value.direction_raw = (value == 1.0) ? 1U : 0U;
+  if (!motor_rt_submit_config(&request)) {
+    report_error(ERR_SUBMIT_FAILED, slot->motor_id);
+    return false;
+  }
+  param_name_buf_t name;
+  (void)param_name_build_motor(name, sizeof(name), slot->motor_id,
+                               PARAM_FIELD_DIRECTION);
+  get_double_or_nan(name, &slot->old_value[PARAM_FIELD_DIRECTION]);
+  mark_outstanding(slot, request.request_id, &kDirectionField, 1);
   return true;
 }
 
@@ -473,6 +503,9 @@ static bool param_on_modification(const Parameter *old_param,
     case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
       slot->old_value[field] = old_value;
       return submit_safety_protect(slot, new_value);
+    case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
+      slot->old_value[field] = old_value;
+      return submit_direction(slot, new_value);
     default:
       return false;
   }
@@ -541,6 +574,16 @@ static double view_field(const motor_control_param_view_t *v,
         return NAN;
       }
       return v->dev_raw[PARAM_DEVICE_SLOT_SAFETY] == 0U ? 1.0 : 0.0;
+    }
+    case PARAM_FIELD_DIRECTION: {
+      // 与 limit_protect 同口径：设备还没回读到该槽位时给 NaN（页面显示 --
+      // 并禁用），**不给默认值**——猜一个 CW 会让操作员以为方向已确认。
+      // 原值直通：0 = CW，1 = CCW，本层不做任何反转。
+      const uint8_t bit = (uint8_t)(1U << PARAM_DEVICE_SLOT_DIRECTION);
+      if ((v->dev_raw_present & bit) == 0U) {
+        return NAN;
+      }
+      return (double)v->dev_raw[PARAM_DEVICE_SLOT_DIRECTION];
     }
     default:
       return NAN;

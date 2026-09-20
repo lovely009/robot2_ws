@@ -36,7 +36,9 @@ extern "C" {
 
 #define PARAM_BRIDGE_EXECUTOR_HANDLES 5U
 
-// 容量（2026-09-20 定）：**64 槽 = 10 system + 10 电机 × 5 项**。
+// 容量（2026-09-20 定）：**72 槽 = 10 system + 10 电机 × 6 项**。
+// （原 64 槽 = 10 system + 10 × 5；加 `m<id>.direction` 后按 6 项/台重算，
+// 取 72 以保住 10 台契约：kMaxMotors = (72 − 10) / 6 = 10。）
 //
 // 唯一稀缺资源是 DTCM 堆池：**122,880 B**（= DTCM 128 KiB − 主栈 8 KiB；.data/.bss
 // 落 AXI/RAM_D1，DTCM 只放堆/主栈，见 ldscript:178-213）。FreeRTOS
@@ -47,18 +49,18 @@ extern "C" {
 // String 头 → 结构约 269 B，加分配器块开销后**实测边际 328 B/槽**，由 176/208
 // 与 224/256 两对台架点各自算出同一斜率）。**与板上实际几台电机无关**。
 //
-//   64 槽  → 64 × 328 = 20,992 B → heap_free ≈ 82,228 B
+//   72 槽  → 72 × 328 = 23,616 B → heap_free ≈ 122,880 − 19,660 − 23,616 ≈ 79.6 KB [推导]
 //   416 槽 → 136,448 B > 122,880 B 池 → **必然分配失败**
 //
 // 416 是 2026-09-19 一次未复核的改动，而 rclc 在该路径**不对分配结果做 NULL
 // 检查**（parameter_server.c:543/555 会写 data[i].name）——所以它不是"优雅失败"，
 // 而是写非法地址。故 param_bridge_create() 建服前先做堆预算拦截（见 .cpp）。
 //
-// 每电机项数由 src/param_bridge.cpp 的 kParamMotorFields[] 显式列出（当前 5 项：
-// 限位×2 / 限速 / 限流 / 保护开关），不再由 param_field_t 枚举边界隐式决定。
+// 每电机项数由 src/param_bridge.cpp 的 kParamMotorFields[] 显式列出（当前 6 项：
+// 限位×2 / 限速 / 限流 / 保护开关 / 方向），不再由 param_field_t 枚举边界隐式决定。
 // 目标规模 48 台时电机参数**整体撤出参数树**（配置改走块话题，见
 // docs/plans/active/48-motor-scale-design.md §4 P2）；届时本值收到 16（只留 system）。
-#define PARAM_BRIDGE_MAX_PARAMS 64U
+#define PARAM_BRIDGE_MAX_PARAMS 72U
 
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_destroy(rcl_node_t *node);

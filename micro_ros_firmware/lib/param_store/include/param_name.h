@@ -37,6 +37,11 @@ typedef enum {
   // **不再回到本枚举**。本枚举尾端即"可注册字段全集"，但注册哪些由
   // src/param_bridge.cpp 的 kParamMotorFields[] 显式列出——加字段必须同时改两处。
   // 既有 W25 blob 不受影响：present 位只用到 0..6（param_store_blob.c:110）。
+  // 设备侧电机方向（0x2541:00）：0 = CW，1 = CCW。**原值直通、不做语义反转**
+  // ——它没有 0x2650 那种"1 = 关"的反向陷阱，别为了对称多加一层。
+  // 追加在 COUNT 前：present 位图与注册顺序是契约，不重排既有字段。
+  // 值持久化在 device_raw[槽 5]（见 param_store_blob_set_device_raw）。
+  PARAM_FIELD_DIRECTION,
   PARAM_FIELD_COUNT
 } param_field_t;
 

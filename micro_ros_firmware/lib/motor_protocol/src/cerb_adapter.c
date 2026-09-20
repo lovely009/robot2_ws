@@ -85,8 +85,11 @@
 // UNCONFIRMED → UNVERIFIED，全部 CERB 都到不了 DEV_INIT_OK、永远无法使能。
 #define CERB_OBJ_SAFETY_PROTECT 0x2650U
 #define CERB_SUB_SAFETY_PROTECT 0x00U
-// 0x2541「电机方向定义」：0=CW，1=CCW。方向一翻，记录里所有 cnt 限位与零点的
-// 含义整体镜像。
+// 0x2541「电机方向定义」：0=CW，1=CCW。**真机实测（2026-09-20）**：它只改驱动
+// 的力矩/转动方向，**不改位置坐标系**——同一物理方向转动关节时，0x6064 的计数
+// 方向不随 0x2541 变化（转两次同向，Δ 均为正：+2394 / +2573 cnt）。所以零点与
+// cnt 限位**不镜像**，翻转后也**不需要**重新设零。真正的风险是驱动器自持的位置
+// 环变成正反馈：使能后会朝远离目标的方向冲，直到撞上设备限位为止。
 #define CERB_OBJ_MOTION_DIR 0x2541U
 
 // 位置限位字典范围（0x607D:01/:02 均为 -32767~32768 cnt，默认 -32767/32768）：
@@ -518,7 +521,8 @@ static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
 };
 
 // 0x2541:00 方向：写 + 读回核验，**不跟 0x2539 保存阶段**（易失，见上）。
-// 翻转方向会让设备里零点与 cnt 限位的物理含义整体镜像——内核据此冻结该台
+// 翻转方向只改力矩方向、不改位置坐标系（见文件上方 0x2541 的实测注释）——
+// 内核**不**据此冻结该台
 // 直到重新设零（见 motor_control_config.c 的 ZERO_STALE）。
 // 读阶段同样用 CERB_VALUE_DIRECTION_RAW（**不得复用 CERB_VALUE_PASSTHROUGH**）：
 // 读回核验在 cerb_config_on_response 里就是从**本阶段的 value_kind** 反算期望

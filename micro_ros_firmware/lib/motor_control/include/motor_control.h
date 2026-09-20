@@ -86,10 +86,12 @@ typedef enum {
   // last_failure_reason 供本机诊断，不进 unified_fault_code——它不是设备
   // 故障，而是本机拒绝了一条重复的授权请求。
   MOTOR_CONTROL_FAULT_STALE_GENERATION = 7U,
-  // 方向被翻转后必须重新设零：设备里零点与 cnt 限位的物理含义已整体镜像。
-  // 与 STALE_GENERATION 不同，它**是**安全状态（该台此刻不能动），因此进
-  // unified_fault_code 并冻结 lifecycle；解除靠 SET_ZERO 成功，不靠"清错"。
-  MOTOR_CONTROL_FAULT_ZERO_STALE = 8U,
+  // 【2026-09-20 删除】此处曾用 8 = ZERO_STALE（翻方向→冻结到重新设零）。
+  // 真机实测证伪了它的前提：0x2541 只改驱动力矩方向，**不改位置坐标系**
+  // （同一物理方向转动时，0x6064 的计数方向不随 0x2541 变化），因此限位与
+  // 零点都不镜像、设零也不能消解任何东西。翻向真正的风险是位置环变正反馈
+  // （使能后朝远离目标冲），由"仅未运动时受理"这条门禁覆盖。**值 8 空置，
+  // 不得复用**（历史事件/日志里出现过）。
   // 武装时该台保护**确知为关**却没带显式确认位（2026-09-20 owner 决定）。
   // 与 STALE_GENERATION 同待遇：只写入 last_failure_reason 供本机诊断，**不进**
   // unified_fault_code、不改 lifecycle——它不是设备故障，而是本机拒绝了一条

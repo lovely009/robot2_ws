@@ -188,22 +188,6 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
                            detail);
 }
 
-// 方向翻转后的冻结：与"设备参数未初始化"同形（受控集合内先软停，再清授权、
-// 清目标、拒绝使能），但成因不同、解除方式也不同（SET_ZERO 成功即解，不需要
-// 点"清错"）。
-static void motor_control_freeze_zero_stale(motor_control_context_t *ctx,
-                                            motor_control_entry_t *entry,
-                                            uint32_t now_ms) {
-  freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_ZERO_STALE, now_ms);
-  // 成因走 CONFIG_CONFLICT 事件：它的 reason 域**就是**故障码表（与冲突锁存
-  // 的 reason=4 同形，见 MotorEvent.msg）。不能复用 DEV_INIT——那个事件的
-  // reason 域是 dev_init(0..4)，塞故障码 8 会让页面把该台误标"未初始化"并抹掉
-  // 槽位位图，反而看不见"方向已翻转，需重新设零"。
-  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_CONFLICT,
-                           entry->motor_id, entry->bus_index,
-                           (uint16_t)MOTOR_CONTROL_FAULT_ZERO_STALE, 0U);
-}
-
 // 回读成功：影子取设备真值（设备为准），六个槽位的 SI 值同步落袋。
 static void update_shadow_from_read(motor_control_entry_t *entry) {
   entry->dev_min_rad = entry->dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
@@ -376,25 +360,6 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
       }
     }
   } else if (result == MOTOR_PROTOCOL_CONFIG_OK) {
-    // 翻转判据必须在记录被覆盖之前算：比的是"写前的记录值"，不是设备值。
-    // 上电归一写的正是记录值 → 不触发；只有操作员真的改参数才触发。
-    if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_DIRECTION) {
-      const uint8_t dir_bit =
-          (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
-      if ((entry->record_raw_present & dir_bit) != 0U &&
-          entry->tx_write_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] !=
-              entry->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION]) {
-        entry->zero_stale = true;
-      }
-    }
-    // 设零点成功：方向翻转的后果（零点基准被镜像）被消解，冻结在下方的收尾
-    // 里解除。这里只清成因、不直接改 lifecycle——恢复仍要重走一遍常规授权
-    // （ARD §36：需显式 SET_ENABLE）。走到这一支即写事务被设备确认（收尾码
-    // OK）；UNCONFIRMED/TIMEOUT 不在此支，一律不解除——那时零点未必真的
-    // 重设了，解除等于把安全窗口又打开。
-    if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
-      entry->zero_stale = false;
-    }
     update_shadow_after_write(entry);
     update_record_after_write(ctx, entry);
     // 写后重判：刚核验过的槽位已与记录同值，其余槽位仍按上次回读结论。
@@ -419,26 +384,6 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
                            entry->tx_request_id);
   if (dev_init_settled) {
     apply_dev_init_result(ctx, entry, dev_state, now_ms);
-  }
-  // 方向翻转的冻结/解除：放在设备参数定论之后——两者都是"该台此刻能不能动"
-  // 的判据，ZERO_STALE 是更强的一条（零点基准已镜像），故它落地时覆盖 DEV_PARAM
-  // 的结论；反过来，SET_ZERO 成功把 ZERO_STALE 消解后，若设备参数仍不一致，
-  // 上面 apply_dev_init_result 已把 unified_fault_code 落成 DEV_PARAM，本块的
-  // 解除条件便不成立（继续冻结，符合预期）。
-  if (entry->zero_stale &&
-      entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
-    motor_control_freeze_zero_stale(ctx, entry, now_ms);
-  } else if (!entry->zero_stale &&
-             entry->unified_fault_code == MOTOR_CONTROL_FAULT_ZERO_STALE &&
-             entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
-    // 设零成功解除：清成因、回 READY_DISABLED，重新走一遍常规授权（ARD §36：
-    // 恢复运动仍要显式 SET_ENABLE）。
-    entry->unified_fault_code = MOTOR_CONTROL_FAULT_NONE;
-    entry->last_failure_reason = MOTOR_CONTROL_FAULT_NONE;
-    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
-    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_READY,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_NONE, 0U);
   }
 }
 
@@ -1229,8 +1174,10 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
       return start_tx(ctx, entry, request, now_ms);
     }
     case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION: {
-      // 方向也是安全边界：与限位/保护同口径，仅未运动时受理（运动中翻向 =
-      // 零点语义当场改变）。
+      // 方向也是安全边界：与限位/保护同口径，仅未运动时受理。**2026-09-20 真机
+      // 实测纠正**：翻向**不**改变位置坐标系（同一物理方向转，0x6064 的计数方向
+      // 不变），所以限位与零点都不镜像、也不需要重新设零；真正的风险是驱动器
+      // 自持的位置环变成正反馈——使能后会朝远离目标的方向冲到设备限位为止。
       if (entry->profile == NULL || request->direction_raw > 1U ||
           !device_limit_write_allowed(entry)) {
         return reject_invalid(ctx, entry, request, now_ms);

@@ -253,8 +253,9 @@ static bool submit_single_limit(MotorSlot *slot, param_field_t field,
 }
 
 // 方向提交（原值直通，**不反转**；0/1 由 param_value_ok 挡在前面）。
-// 值的副作用在设备侧：翻向会让零点与 cnt 限位的物理含义整体镜像，内核据此
-// 冻结该台直到重新设零（ZERO_STALE）——判据在内核，本层不重复判。
+// 值的副作用在设备侧：翻向改的是驱动器的**力矩方向**（位置坐标系不变，
+// 2026-09-20 真机实测）——风险是位置环变正反馈，故与限位/保护同口径"仅未运动
+// 时受理"；本层不做别的判断。
 static bool submit_direction(MotorSlot *slot, double value) {
   if (!param_value_ok(PARAM_FIELD_DIRECTION, (float)value, 0.0f, nullptr)) {
     report_error(ERR_LOCAL_VALIDATION, slot->motor_id);

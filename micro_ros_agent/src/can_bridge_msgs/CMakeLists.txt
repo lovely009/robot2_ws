@@ -46,6 +46,9 @@ rosidl_generate_interfaces(
   # 上行：轨迹执行状态与固件级诊断
   "msg/MotorTrajectoryState.msg"
   "msg/MotorDiagnostics.msg"
+  # 上行：参数核对双行快照（固件记录 vs 驱动板回读，低频 reliable）
+  "msg/DeviceParamEntry.msg"
+  "msg/DeviceParamReport.msg"
   DEPENDENCIES std_msgs
 )
 

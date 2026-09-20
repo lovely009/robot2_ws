@@ -74,6 +74,11 @@ void param_bridge_poll(void);
 // 消费 CONFIG_RESULT 做 outstanding 收敛/回滚。
 void param_bridge_on_config_result(const motor_control_event_t *event);
 
+// 最近一次 param_bridge_poll 的参数视图快照（只读，条数写入 *out_count）。
+// 设备参数报告（motor_bridge）复用这一份，而不是自己再拷一份：视图数组
+// 64 台约 6 KB，拷两份就是白占一份 RAM_D1。两者同在本任务里顺序调用，无并发。
+const motor_control_param_view_t *param_bridge_views(size_t *out_count);
+
 #ifdef __cplusplus
 }
 #endif

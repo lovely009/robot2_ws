@@ -799,6 +799,13 @@ void param_bridge_poll(void) {
   }
 }
 
+const motor_control_param_view_t *param_bridge_views(size_t *out_count) {
+  if (out_count != nullptr) {
+    *out_count = g_view_count;
+  }
+  return g_views;
+}
+
 void param_bridge_on_config_result(const motor_control_event_t *event) {
   if (!g_created || event == nullptr ||
       event->type != MOTOR_CONTROL_EVENT_CONFIG_RESULT) {

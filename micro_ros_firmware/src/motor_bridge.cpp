@@ -9,11 +9,12 @@
 // 既不下发也不软停；集合外的电机仍由快照负责（缺失即软停，ARD §13.1）。
 // 策略与二者正交：它是控制律参数与武装位，不是运动目标（ARD §15.4 禁止
 // Kp/Kd/Enable 进入 100Hz 快照，故单独成一条）。
-// 发布（4）：
+// 发布（5）：
 //   micro_ros_up/motion_states（100Hz 运动状态，只读副本）
 //   micro_ros_up/motor_status_array（20Hz 诊断）
 //   micro_ros_up/motor_topology（1s 全量拓扑）
 //   micro_ros_up/motor_events（事件转发）
+//   micro_ros_up/device_param_report（1 Hz + 变化即发，参数核对双行快照）
 //
 // 下行无配置通道：型号绑定由内核在发现建档/重连时经 READ_IDENTITY 事务读
 // 设备自报身份并查型号目录完成；授权/增益/限位取内核安全默认（建档
@@ -33,6 +34,7 @@
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
 
+#include <can_bridge_msgs/msg/device_param_report.h>
 #include <can_bridge_msgs/msg/motor_command_array.h>
 #include <can_bridge_msgs/msg/motor_event.h>
 #include <can_bridge_msgs/msg/motor_diagnostics.h>
@@ -80,6 +82,7 @@ static const char *kTopologyTopic = "micro_ros_up/motor_topology";
 static const char *kEventsTopic = "micro_ros_up/motor_events";
 static const char *kDiagnosticsTopic = "micro_ros_up/diagnostics";
 static const char *kTrajectoryStateTopic = "micro_ros_up/trajectory_state";
+static const char *kDeviceParamReportTopic = "micro_ros_up/device_param_report";
 
 // 消息面契约版本：随字段**语义**变更递增（字段只增不改序，故不是每次加字段
 // 都动）。上层据此检测漂移，而不是静默按旧布局解析。
@@ -103,7 +106,7 @@ static can_bridge_msgs__msg__MotorPolicyArray g_policy_msg;
 static bool g_policy_up = false;
 static bool g_policy_added = false;
 
-// ---- 发布（4）----
+// ---- 发布（5）----
 static rcl_publisher_t g_motion_states_pub;
 static can_bridge_msgs__msg__MotorMotionStateArray g_motion_states_msg;
 static bool g_motion_states_up = false;
@@ -136,6 +139,16 @@ static rcl_publisher_t g_trajectory_state_pub;
 static can_bridge_msgs__msg__MotorTrajectoryState g_trajectory_state_msg;
 static uint16_t g_trajectory_state_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
 static bool g_trajectory_state_up = false;
+
+static rcl_publisher_t g_device_param_pub;
+static can_bridge_msgs__msg__DeviceParamReport g_device_param_msg;
+// 每台 12 个 float + 若干小字段 ≈ 60 B；48 台约 3 KB。**静态而非栈上**：
+// 发布在 micro_ros 任务栈上跑，栈放不下。
+static can_bridge_msgs__msg__DeviceParamEntry
+    g_device_param_entries[MOTOR_CONTROL_MAX_MOTORS];
+static bool g_device_param_up = false;
+// 事件触发的"马上发一帧"标志（见 publish_events）。
+static bool g_device_param_pending = false;
 
 size_t motor_bridge_executor_handle_count(void) {
   // command + trajectory + policy 三个订阅（下行配置话题已删；型号绑定在
@@ -433,6 +446,58 @@ static void publish_trajectory_state(uint32_t now_ms) {
   note_publish(publish_rc);
 }
 
+// 设备参数核对快照：1 Hz 心跳 + 状态变化即时一帧。变化由内核事件触发
+// （CONFIG_RESULT / DEV_INIT）——写一项参数之后页面要立刻看到结论变绿，
+// 不必自己维护一份影子做比对。不在这里拷一份视图：复用 param_bridge 那一份。
+// 本函数在 motor_bridge_poll 里跑，而 param_bridge_poll 排在它**之后**（见
+// param_bridge.h 的既有契约）：读的是上一个 10ms 周期的快照，滞后一拍，
+// 对 1 Hz 心跳与"写完一项看结论变绿"无影响——勿为消除这一拍去调换两个 poll。
+static void publish_device_param_report(uint32_t now_ms) {
+  static uint32_t s_phase = 0U;
+  const bool heartbeat = (uint32_t)(now_ms - s_phase) >= 1000U;
+  if (!heartbeat && !g_device_param_pending) {
+    return;
+  }
+  if (heartbeat) {
+    s_phase = now_ms;
+  }
+  g_device_param_pending = false;
+  size_t view_count = 0U;
+  const motor_control_param_view_t *views = param_bridge_views(&view_count);
+  if (views == nullptr) {
+    return;
+  }
+  const uint16_t count = (uint16_t)(view_count < kRosArrayCapacity
+                                        ? view_count
+                                        : kRosArrayCapacity);
+  g_device_param_msg.entries.size = count;
+  for (uint16_t i = 0U; i < count; ++i) {
+    auto &out = g_device_param_msg.entries.data[i];
+    const motor_control_param_view_t &v = views[i];
+    out.motor_id = v.motor_id;
+    out.dev_init_state = v.dev_init;
+    out.record_dirty = v.record_dirty_slots != 0U;
+    out.mismatch_mask = v.dev_mismatch_mask;
+    out.rec_pos_min = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
+    out.rec_pos_max = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
+    out.rec_vel_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
+    out.rec_torque_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX];
+    out.rec_safety = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+    out.rec_direction = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+    out.dev_pos_min = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
+    out.dev_pos_max = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
+    out.dev_vel_limit = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
+    out.dev_torque_limit = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX];
+    out.dev_safety = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+    out.dev_direction = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+  }
+  // .msg 同时声明 count 与 entries（两者都上线），口径同
+  // MotorTrajectoryState.target_count：不设它消费者会读到 0 条。
+  g_device_param_msg.count = count;
+  g_device_param_msg.sync_time_ns = rmw_uros_epoch_nanos();
+  note_publish(rcl_publish(&g_device_param_pub, &g_device_param_msg, nullptr));
+}
+
 static void publish_events() {
   motor_control_event_t events[16];
   size_t n;
@@ -440,6 +505,12 @@ static void publish_events() {
     for (size_t i = 0; i < n; ++i) {
       // 参数桥先收敛 outstanding（同任务顺序调用，无线程问题），再发布。
       param_bridge_on_config_result(&events[i]);
+      // 参数面结论会变的两类事件：请求落地、比对定论。报告是低频电平视图，
+      // 只在有必要时才不等到下一个心跳。
+      if (events[i].type == MOTOR_CONTROL_EVENT_CONFIG_RESULT ||
+          events[i].type == MOTOR_CONTROL_EVENT_DEV_INIT) {
+        g_device_param_pending = true;
+      }
       g_event_msg.tick_ms = events[i].tick_ms;
       g_event_msg.event_type = (uint8_t)events[i].type;
       g_event_msg.motor_id = events[i].motor_id;
@@ -500,6 +571,8 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_status_msg.statuses.data = g_status_buf;
   g_topology_msg.entries.capacity = kRosArrayCapacity;
   g_topology_msg.entries.data = g_topology_buf;
+  g_device_param_msg.entries.capacity = kRosArrayCapacity;
+  g_device_param_msg.entries.data = g_device_param_entries;
 
   // model_name 是全桥唯一 String 成员：静态缓冲零值时 data==NULL，首个设备
   // 注册后的拓扑发布即向 NULL memcpy（BusFault）。static 守卫一次性初始化，
@@ -621,6 +694,19 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   }
   g_trajectory_state_up = true;
 
+  pub_opts = rcl_publisher_get_default_options();
+  // **可靠**：48 台时本消息约 3 KB，超过一个 MTU(512 B)；best-effort 流不分片，
+  // 会被静默丢弃（与 motor_topology 同一处理，那里也是 48 台量级）。
+  pub_opts.qos = qos_reliable(1);
+  if (rcl_publisher_init(&g_device_param_pub, node,
+                         ROSIDL_GET_MSG_TYPE_SUPPORT(
+                             can_bridge_msgs, msg, DeviceParamReport),
+                         kDeviceParamReportTopic, &pub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor);
+    return false;
+  }
+  g_device_param_up = true;
+
   // ---- executor ----
   if (rclc_executor_add_subscription(executor, &g_command_sub, &g_command_msg,
                                      command_array_cb,
@@ -704,6 +790,11 @@ void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
     (void)rc;
     g_trajectory_state_up = false;
   }
+  if (g_device_param_up) {
+    rcl_ret_t rc = rcl_publisher_fini(&g_device_param_pub, node);
+    (void)rc;
+    g_device_param_up = false;
+  }
 }
 
 void motor_bridge_poll(void) {
@@ -714,4 +805,5 @@ void motor_bridge_poll(void) {
   publish_events();
   publish_diagnostics(now_ms);
   publish_trajectory_state(now_ms);
+  publish_device_param_report(now_ms);
 }

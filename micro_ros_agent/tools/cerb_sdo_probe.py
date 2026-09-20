@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""CERB 只读 SDO 探针（真机台架专用）：只发「加速上传」请求，**永不写设备**。
+"""CERB SDO 探针（真机台架专用）：**默认只读**（只发「加速上传」请求）；
+带 `--write IDX:SUB=VAL` 时才发快速写（0x23），那会**改设备对象**。
 
 用途：核对某个对象/子索引在真机上是否可读。首要用例是 TBD-CONFIG-02——
 `0x2650:01` 的读子索引（TBD-CONFIG-02）——**已结案**：读子索引是 `0x00`，
@@ -9,11 +10,14 @@
 `23 50 26 00 **01** …` = 关闭；**掉电不保存**（实测）。
 见 `micro_ros_firmware/docs/plans/active/motor-runtime-validation.md` §3。
 
-本脚本发出去的字节只有一种形态（8 字节，恰好一个 SDO 上传发起）：
+默认只发一种字节形态（8 字节，恰好一个 SDO 上传发起）：
 
     40 <idx_lo> <idx_hi> <sub> 00 00 00 00
 
-不含使能帧、不含 MIT 帧、不含任何 SDO 写（0x23/0x2B/0x2F），电不会动。
+`--write` 时才会发快速写（0x23 + 4 字节小端值）并**读回核验**。两种形态都不含
+使能帧、不含 MIT 帧，电不会动——但写会改设备里的对象，只在明确知道后果时用：
+`0x2650:00` = 看门狗/限位保护开关（0 = 开、1 = 关），`0x2541:00` = 方向
+（0 = CW、1 = CCW）。两者都**掉电不保存**，要复原就再写回去或断一次电。
 
 台架前提（见 `micro_ros_firmware/docs/AGENTS.md` 与根 `docs/guides/fdcan1-bench-guide.md`）：
   - CANable2 先成为 ACK 节点（本脚本自动 C→S8→Y5→O，间隔 ≥150ms）；
@@ -31,6 +35,10 @@
   python3 tools/cerb_sdo_probe.py --dev /dev/serial/by-id/<CANable> --node 2
   python3 tools/cerb_sdo_probe.py --dev /dev/ttyACM1 --node 2 \
       --read 0x2650:00,0x2650:01,0x2650:02,0x2541:00
+
+  # 写方向为 CCW 并读回核验（会改设备对象）：
+  python3 tools/cerb_sdo_probe.py --dev /dev/ttyACM1 --node 2 \
+      --read 0x2541:00 --write 0x2541:00=1 --read 0x2541:00
 """
 
 from __future__ import annotations
@@ -76,6 +84,18 @@ ABORT_CODES = {
     0x06090032: "参数值过小",
     0x08000000: "通用错误",
 }
+
+
+def parse_write(text: str) -> tuple[int, int, int]:
+    """`0x2541:00=1` → (0x2541, 0x00, 1)。值可写十进制或 0x 十六进制。"""
+    if "=" not in text or ":" not in text:
+        raise argparse.ArgumentTypeError(f"写入写法应为 index:sub=value，得到 {text!r}")
+    obj, val = text.split("=", 1)
+    idx, sub = parse_obj(obj)
+    try:
+        return idx, sub, int(val, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"值不是整数：{val!r}") from exc
 
 
 def parse_obj(text: str) -> tuple[int, int]:
@@ -179,6 +199,34 @@ class SdoProbe:
             if time.monotonic() >= deadline:
                 return "timeout", None, None
 
+    def write_once(self, index: int, sub: int, value: int,
+                   timeout: float = 0.3):
+        """发一条快速 SDO 写（0x23 + 4 字节小端）并读回核验。
+
+        返回 (状态, 说明)。状态 ∈ {"ok", "abort", "mismatch", "timeout"}。
+        **会改设备对象**：只对明确知道后果的对象用（0x2650:00 保护 / 0x2541:00 方向）。
+        """
+        want = SDO_RESPONSE_ID_BASE + self.node
+        payload = int(value).to_bytes(4, "little", signed=True)
+        req = bytes([0x23, index & 0xFF, (index >> 8) & 0xFF, sub]) + payload
+        os.write(self.fd, slcan_line(self.node + SDO_REQUEST_ID_BASE, req,
+                                     True, True))
+        for can_id, data in self.drain(timeout):
+            if can_id != want or len(data) < 8:
+                continue
+            ccs = data[0] & 0xE0
+            got_idx = data[1] | (data[2] << 8)
+            if got_idx != index or data[3] != sub:
+                continue
+            if ccs == 0x80:
+                return "abort", int.from_bytes(data[4:8], "little")
+            if ccs == 0x60:
+                status, _, raw, _ = self.read(index, sub)
+                if status != "ok":
+                    return status, raw
+                return ("ok" if raw == value else "mismatch"), raw
+        return "timeout", None
+
     def read(self, index: int, sub: int, attempts: int = 3):
         """带重试的读。**只对超时重试**：CANable2 在 200 帧/秒反馈下会丢帧，
         丢一帧这条应答就没了（设备不会重发，SDO 是一问一答）；而设备一旦应答
@@ -214,6 +262,11 @@ def main() -> int:
     ap.add_argument("--read", type=parse_obj, action="append", default=None,
                     help="index:sub，可重复；缺省或 --default 时用内置对象清单")
     ap.add_argument("--default", action="store_true", help="用内置对象清单")
+    ap.add_argument("--write", type=parse_write, action="append", default=None,
+                    metavar="IDX:SUB=VAL",
+                    help="发一条快速 SDO 写（0x23）并读回核验。**会改设备对象**，"
+                         "只给 0x2650:00（保护开关）/ 0x2541:00（方向）这类"
+                         "明确知道后果的对象用；两者都掉电不保存")
     ap.add_argument("--listen-s", type=float, default=0.5,
                     help="开场静默监听时长（查第二个 SDO 主站）")
     ap.add_argument("--force", action="store_true", help="发现别的 SDO 主站也照发")
@@ -235,7 +288,12 @@ def main() -> int:
             print(f"[probe] 拒绝执行：总线上已有 node {args.node} 的 SDO 请求"
                   f"（控制板配置事务在飞）。等它结束再试，或用 --force。")
             return 2
-        print(f"[probe] node {args.node} @ {args.dev}，只读上传请求：")
+        for index, sub, value in (args.write or []):
+            status, detail = probe.write_once(index, sub, value)
+            print(f"  0x{index:04X}:{sub:02X}  WRITE {value} → {status}"
+                  f"{'' if detail is None else f' (读回 {detail})'}")
+        label = "只读上传请求" if not args.write else "只读上传请求（写已完成）"
+        print(f"[probe] node {args.node} @ {args.dev}，{label}：")
         for index, sub, note in targets:
             for attempt in range(max(1, args.repeat)):
                 status, detail, raw, tries = probe.read(index, sub)

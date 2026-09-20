@@ -96,3 +96,11 @@ sim.models[2] = MODULE.MotorModel(2, "cerb")
 sim.models[2].identity = b"R58LITE_V2"
 sim.handle_sdo(2, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
 assert sim.sent[-1][1] == bytes([0x41, 0x08, 0x10, 0x00, 10, 0, 0, 0])
+
+
+# 上电初值必须与**真机实测**一致（进程重启 = 掉电复现）：保护开关初值 1（关），
+# 方向初值 0（CW）。固件靠上电归一把它们写成定态——模拟器初值给错，台架就永远
+# 复现不出"上电后保护是关的"这个前提。
+_cerb = MODULE.MotorModel(1, "cerb")
+assert _cerb.sdo_params[(0x2650, 0x00)] == 1, "保护上电初值应为 1（关）"
+assert _cerb.sdo_params[(0x2541, 0x00)] == 0, "方向上电初值应为 0（CW）"

@@ -121,6 +121,19 @@ static int64_t g_last_error = 0;
 static int64_t g_last_error_motor = 0xFFFF;
 static bool g_error_pending = false;
 static bool g_save_pending = false;
+// 保存脉冲的进度游标：一次 system.save 可能要下发几十台，而配置 FIFO 只有 16 深
+// （CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY）、消费侧每 5ms 边界只抽 4 条。一次
+// poll 里全推出去必然溢出，而被拒的台设备侧没落盘、W25 却已经无条件落了盘
+// （storage_task_request_save 是整份视图快照）⇒ 下次上电就是"记录新、设备旧"的
+// 假不一致，操作者得逐台重核。故按拍分批、全部下发完才落 W25。
+// **不能拿脏位当游标**：被运动禁写门拒掉的台（ACTIVE/SAFE_STOP）脏位永远不清，
+// 用"还有脏台吗"判"扫完了吗"会永远不收敛，W25 就永远不落。
+// 游标下标对 g_views 稳定：内核表项只增不减，copy_param_views 按注册顺序输出。
+static uint16_t g_save_cursor = 0U;
+static bool g_save_active = false;
+// 每拍最多下发几台。必须**低于**消费侧的抽取速率（每 5ms 边界 4 条 = 每 10ms
+// 边界 8 条），否则队列仍会累积。
+#define kSaveSubmitsPerPoll 4U
 static bool g_refresh_pending = false;
 static uint16_t g_refresh_motor = 0;
 static uint32_t g_refresh_id = 0;
@@ -755,33 +768,49 @@ void param_bridge_poll(void) {
   }
   if (g_save_pending) {
     g_save_pending = false;
-    // 保存 = 设备侧落盘（0x2539，只对**有保存码的脏槽**）+ W25 落盘。
+    // 起航：真正的下发摊到后面几拍（见 g_save_cursor 的注释）。
+    g_save_cursor = 0U;
+    g_save_active = true;
+  }
+  if (g_save_active) {
+    // 保存 = 设备侧落盘（0x2539，只对**有保存码的脏槽**）+ W25 落盘，按拍分批。
     // 只处理脏的台：没写过的台一个字节都不发（驱动器写 flash 期间会阻塞自身
-    // 控制循环，实测 ~1s，白存一次就是白等一秒）。
-    // 只脏易失槽（保护开关/方向）的台由内核在受理时直接清脏位回 OK——那种台
-    // 只欠 W25 那一半，下面的 storage_task_request_save() 就是它的全部。
-    // 事务提交先于 W25：设备落盘是异步的（受理即回告），本拍只负责把请求塞进
-    // mailbox，不去等结果——内核受理成功时自会清掉该台的脏位。
-    for (size_t i = 0U; i < g_view_count; ++i) {
-      if (g_views[i].record_dirty_slots == 0U) {
+    // 控制循环，实测 ~1s，白存一次就是白等一秒），也不占本拍配额。
+    // 只脏易失槽（保护开关/方向）的台由内核在保存事务成功回 OK 时清脏位
+    // （只脏易失槽、零帧短路的台受理即清，见 motor_control_config.c）——那种台
+    // 只欠 W25 那一半，扫完一轮落盘就是它的全部。
+    uint32_t submitted = 0U;
+    while (g_save_cursor < g_view_count && submitted < kSaveSubmitsPerPoll) {
+      const motor_control_param_view_t *view = &g_views[g_save_cursor++];
+      // 干净的台一个字节都不发，也不占本拍配额（游标仍后自增推进，不卡住）。
+      if (view->record_dirty_slots == 0U) {
         continue;
       }
       control_mailbox_config_request_t request = {};
       request.request_id = next_request_id();
       request.received_tick_ms = millis();
-      request.motor_id = g_views[i].motor_id;
+      request.motor_id = view->motor_id;
       request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
-      request.value.save_slots = g_views[i].record_dirty_slots;
+      request.value.save_slots = view->record_dirty_slots;
       if (!motor_rt_submit_config(&request)) {
-        report_error(ERR_SUBMIT_FAILED, g_views[i].motor_id);
+        report_error(ERR_SUBMIT_FAILED, view->motor_id);
       }
+      submitted++;
     }
-    storage_task_request_save();
-    set_bool_internal(kSystemSave, false);
+    if (g_save_cursor >= g_view_count) {
+      // 扫完一轮才算保存动作结束：此时 W25 落盘才是安全的（上面那段注释的
+      // 因果），system.save 也在这时复位——页面读 true = 保存进行中。
+      g_save_active = false;
+      g_save_cursor = 0U;
+      storage_task_request_save();
+      set_bool_internal(kSystemSave, false);
+    }
   }
-  // W25 失败自有其报告路径（下面这条），不回退设备侧脏位：脏位是内核受理保存
-  // 时清的，到这一步已经没了。此时"未保存"标记已经消失，system.last_error 是
-  // 唯一剩下的信号——不要试图从这里重新推导或重设脏位（内核那份记录说了算）。
+  // 关于 W25 结果排空（每拍都跑，与保存路径无关）：save 失败自有其报告路径
+  // （下面这条），不回退设备侧脏位——脏位是内核在保存事务成功回 OK 时清的
+  // （只脏易失槽的台受理即清），到这一步已经没了。此时"未保存"标记已经消失，
+  // system.last_error 是唯一剩下的信号；不要试图从这里重新推导或重设脏位
+  // （内核那份记录说了算）。
   if (storage_take_result() == STORAGE_SAVE_FAIL) {
     report_error(ERR_SAVE_FAIL, 0xFFFF);
   }
@@ -961,6 +990,9 @@ void param_bridge_destroy(rcl_node_t *node) {
   memset(g_motors, 0, sizeof(g_motors));
   g_view_count = 0;
   g_save_pending = false;
+  // 进行中的保存不能在重建后带着旧游标续跑：g_views 会重填，游标下标已无意义
+  // （会跳过靠前的脏台、并触发一次没被要求的 W25 落盘）。
+  g_save_active = false;
   g_refresh_pending = false;
   g_refresh_id = 0;
   g_error_pending = false;

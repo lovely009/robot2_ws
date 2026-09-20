@@ -1158,6 +1158,14 @@ function teachPlaySegment() {
   }
   // 段尾 = 最安静的一行（含它当端点），下一段从**同一行**接着走。
   const end = pickSegmentEnd(rows, start, per);
+  // 兜底护栏：分段是页面里的循环。一旦断点不前进（或段数失控），循环会**卡死浏览器
+  // 标签页**——真踩过（旧版搜索区间为空时返回起点）。宁可停下报错，不要挂页面。
+  if ((end <= start && start < rows.length - 1) || teach.seg > 2000) {
+    teach.playing = false;
+    teachStopTimer();
+    setTeach('err', '分段未前进，已停止（把这条轨迹发我，是断点选择的 bug）');
+    return;
+  }
   // 末段结束时把 nextRow 推到末尾之后——否则"段尾=下一段起点"的不变量在最后一行
   // 上退化成原地不动（同上）。
   teach.nextRow = end >= rows.length - 1 ? rows.length : end;

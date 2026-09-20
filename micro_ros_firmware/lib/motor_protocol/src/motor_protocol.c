@@ -347,3 +347,13 @@ bool motor_protocol_unpack_cerb_feedback(
   state->effort = read_be_i16(data + 4U) / 1000.0;
   return true;
 }
+
+// data[8..9] 电机线圈温度：大端 int16，单位 0.1 °C。与运动量解码分开，
+// 因为故障帧（data[11] bit5）里运动量不可信而温度恰恰是故障时最该看的量。
+float motor_protocol_cerb_feedback_temperature_c(const uint8_t *data,
+                                                 size_t size) {
+  if (data == NULL || size != 12U) {
+    return NAN;
+  }
+  return (float)(read_be_i16(data + 8U) / 10.0);
+}

@@ -106,7 +106,7 @@ static void test_vaxor_decode_reply_converts_si() {
   // 关节扭矩 = Iq × Kt × 减速比 × 效率 = 0.5 × 0.042 × 50 × 0.65 = 0.6825
   assert(fabs(measured.effort_nm - 0.5 * 0.042 * 50.0 * 0.65) < 5e-3);
   assert(fabs(measured.current_a - kCurrentA) < 1e-3);
-  assert(nan_equal(measured.temperature_c, NAN)); // 无温度来源
+  assert(nan_equal(measured.temperature_c, NAN)); // vaxor 反馈无温度字段
 }
 
 // 解码 20B 状态帧：运动量 + 身份/诊断字段（fault/motor_type 透传）。
@@ -283,7 +283,9 @@ static void test_vaxor_config_mode_transaction_stages() {
 
 static motor_protocol_raw_frame_t cerb_feedback(uint16_t node, int16_t pos_deg_counts,
                                                 int16_t vel_rpm, int16_t effort_ma,
-                                                uint8_t tail_byte, uint32_t tick) {
+                                                uint8_t tail_byte, uint32_t tick,
+                                                int16_t temp_deci_c = 240,
+                                                uint16_t err_code = 0) {
   uint8_t data[12] = {};
   data[0] = (uint8_t)((uint16_t)pos_deg_counts >> 8);
   data[1] = (uint8_t)((uint16_t)pos_deg_counts & 0xff);
@@ -291,6 +293,10 @@ static motor_protocol_raw_frame_t cerb_feedback(uint16_t node, int16_t pos_deg_c
   data[3] = (uint8_t)((uint16_t)vel_rpm & 0xff);
   data[4] = (uint8_t)((uint16_t)effort_ma >> 8);
   data[5] = (uint8_t)((uint16_t)effort_ma & 0xff);
+  data[6] = (uint8_t)(err_code >> 8); // 错误代码（厂家「报错代码表」）
+  data[7] = (uint8_t)(err_code & 0xff);
+  data[8] = (uint8_t)((uint16_t)temp_deci_c >> 8); // 线圈温度 0.1 °C
+  data[9] = (uint8_t)((uint16_t)temp_deci_c & 0xff);
   data[11] = tail_byte;
   return make_frame(0, 0x300U + node, 12, data, tick);
 }
@@ -311,13 +317,30 @@ static void test_cerb_decode_feedback_converts_si() {
   assert(fabs(measured.velocity_rad_s - (120.0 * 2.0 * M_PI / 60.0) / 101.0) < 1e-4);
   assert(fabs(measured.effort_nm - 2.0 * 0.086 * 101.0) < 1e-3);
   assert(fabs(measured.current_a - 2.0) < 1e-6);
+  assert(fabs(measured.temperature_c - 24.0) < 1e-6); // data[8..9] 240 → 24.0 °C
+  assert(nan_equal(measured.voltage_v, NAN));         // 12B 反馈帧无电压来源
+  assert(measured.vendor_fault_code == 0U);
 
-  // 故障位帧：fault_active 置位，运动量缺失（NaN），帧本身有效。
-  motor_protocol_raw_frame_t faulted = cerb_feedback(3, 1820, 120, 2000, 0x20, 701);
+  // 故障位帧：fault_active 置位，运动量缺失（NaN），帧本身有效；温度照常可读；
+  // 厂家故障字取 data[6..7] 的错误码（原来是硬编码的 1）。
+  motor_protocol_raw_frame_t faulted =
+      cerb_feedback(3, 1820, 120, 2000, 0x20, 701, 855, 0x1234); // 85.5 °C
   motor_protocol_measured_state_t fault_state = {};
   assert(motor_protocol_cerb_adapter.decode_frame(profile, 3, &faulted, &fault_state));
   assert(fault_state.fault_active);
+  assert(fault_state.vendor_fault_code == 0x1234U);
+  assert(fabs(fault_state.temperature_c - 85.5) < 1e-6);
   assert(nan_equal(fault_state.position_rad, NAN));
+
+  // data[6..7] 非零但故障位未置 → 不透传：上游「vendor_fault_code 非零 ⟺
+  // 故障在册」的不变量靠这条守住（错误码可能是锁存的历史值）。
+  motor_protocol_raw_frame_t latched =
+      cerb_feedback(3, 1820, 120, 2000, 0x00, 702, 240, 0x1234);
+  motor_protocol_measured_state_t latched_state = {};
+  assert(motor_protocol_cerb_adapter.decode_frame(profile, 3, &latched, &latched_state));
+  assert(!latched_state.fault_active);
+  assert(latched_state.vendor_fault_code == 0U);
+  assert(latched_state.has_motion_state);
 }
 
 // 编码 MIT：关节侧 SI 直通（CERB 线协议即关节侧），使能位进控制字。

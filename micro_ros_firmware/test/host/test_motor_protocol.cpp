@@ -116,6 +116,21 @@ void test_cerb_feedback_decodes_big_endian_units() {
   assert(std::abs(state.position - 10.0 * MOTOR_PROTOCOL_PI / 180.0) < 1e-12);
   assert(std::abs(state.velocity + 2.0 * MOTOR_PROTOCOL_PI) < 1e-12);
   assert(state.effort == 1.5);
+  // data[8..9] = 0x00f0 = 240 → 24.0 °C
+  assert(motor_protocol_cerb_feedback_temperature_c(bytes, sizeof(bytes)) == 24.0f);
+}
+
+// 温度独占 data[8..9]：与运动量解码分开，故障帧同样可读（故障帧里运动量
+// 不可信，但过温恰恰是故障成因），帧形不成立时返回 NaN。
+void test_cerb_feedback_temperature_decoding() {
+  uint8_t bytes[12]{};
+  bytes[8] = 0xff;
+  bytes[9] = 0x38; // -200 → -20.0 °C
+  assert(motor_protocol_cerb_feedback_temperature_c(bytes, sizeof(bytes)) == -20.0f);
+  bytes[11] = 0x20; // 故障位：温度不受影响
+  assert(motor_protocol_cerb_feedback_temperature_c(bytes, sizeof(bytes)) == -20.0f);
+  assert(std::isnan(motor_protocol_cerb_feedback_temperature_c(bytes, 11U)));
+  assert(std::isnan(motor_protocol_cerb_feedback_temperature_c(NULL, 12U)));
 }
 
 void test_cerb_rejects_invalid_or_faulted_data() {
@@ -205,6 +220,7 @@ int main() {
   test_cerb_mit_frame_matches_new_protocol_layout();
   test_cerb_disabled_neutral_frame_is_safe();
   test_cerb_feedback_decodes_big_endian_units();
+  test_cerb_feedback_temperature_decoding();
   test_cerb_rejects_invalid_or_faulted_data();
   test_cerb_large_finite_limit_quantizes_without_overflow();
   test_cerb_node_ids_cover_declared_range();

@@ -91,7 +91,7 @@ ctest --test-dir .host-build --output-on-failure   # host 测试：CTest + casse
 ```
 
 - 改 `platformio.ini` 编译宏或 `ldscript/*.ld` 后必须 `pio run -t clean`（HAL SrcWrapper 对象不重编；增量构建不监听链接脚本改动、会静默跳过重新链接）；勿跑 `-t clean_microros`（联网重下环境）。
-- 当前固件应同时通过 host 测试（17 项 CTest）与 `pio run`；剩余上层迁移与真机台架项见 validation plan。
+- 当前固件应同时通过 host 测试（19 项 CTest）与 `pio run`；剩余上层迁移与真机台架项见 validation plan。
 
 ## micro_ros_agent（独立 colcon 工作区，勿在 ros2_ws 内构建）
 

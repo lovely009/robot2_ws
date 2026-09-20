@@ -24,7 +24,7 @@ extern "C" {
 // 具体位分配在 TBD-STATUS-01 关闭前为临时占位，跨协议语义保持稳定）。
 // ---------------------------------------------------------------------------
 #define MOTOR_PROTOCOL_PROT_VENDOR_FAULT (1UL << 0)    // 厂家故障字非零/故障位
-#define MOTOR_PROTOCOL_PROT_OVERTEMPERATURE (1UL << 1) // 暂无温度来源，预留
+#define MOTOR_PROTOCOL_PROT_OVERTEMPERATURE (1UL << 1) // 温度来源已有（CERB），阈值判定未接
 #define MOTOR_PROTOCOL_PROT_OVERCURRENT (1UL << 2)     // 预留
 #define MOTOR_PROTOCOL_PROT_UNDERVOLTAGE (1UL << 3)    // 预留
 #define MOTOR_PROTOCOL_PROT_DECODE_ERROR (1UL << 4)    // 帧解码失败
@@ -137,9 +137,10 @@ typedef struct {
   float effort_nm;       // 关节侧（Iq×Kt×减速比×效率）
   float current_a;       // 电机电流（vaxor/CERB 反馈均有）
   float voltage_v;       // 仅 vaxor 20B 状态帧
-  float temperature_c;   // 当前两协议均无来源，恒 NaN
+  float temperature_c;   // 线圈温度：仅 CERB 12B 反馈帧有（data[8..9]），vaxor 无来源
   uint8_t drive_mode;    // 厂家模式字节（原样透传）
-  uint32_t vendor_fault_code; // 厂家故障字（原样透传）
+  uint32_t vendor_fault_code; // 厂家故障字（原样透传；CERB 取反馈帧 data[6..7]，
+                              // 仅故障帧非零——见 cerb_adapter 的 cerb_error_code）
   uint8_t vendor_state;  // vaxor motor_state 字节
   uint8_t calibration_state;
   uint8_t motor_type;    // vaxor 型号线索（绑定 Profile 的诊断参考）

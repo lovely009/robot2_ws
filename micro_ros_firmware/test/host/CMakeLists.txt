@@ -166,7 +166,7 @@ fw_host_test(test_bmi088_register_config
 fw_host_test(test_param_store
   SOURCES test_param_store.cpp
   OBLIBS fw_param_store
-  INCLUDES ../../lib/motor_protocol/include) # param_units.h 引用 MOTOR_PROTOCOL_PI
+  INCLUDES ../../lib/motor_protocol/include) # 用例直接引 motor_protocol_adapter.h
 
 fw_host_test(test_w25q64_geometry
   SOURCES test_w25q64_geometry.cpp

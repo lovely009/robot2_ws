@@ -617,6 +617,24 @@ function sendTargets(targets) {
 // 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
 // "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
 // 并软停这些电机。
+// 固件轨迹容量（CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS / _MAX_MOTORS）。**是
+// 总量不是每台**：4 台电机时点数上限只够 64 个时刻。超限时固件静默丢弃——
+// trajectory_cb 在入口 return，既不发事件也不计数，所以页面必须自查，否则
+// 报"已托管给 MCU"而板子根本没收到。
+const TRAJ_MAX_POINTS = 256;
+const TRAJ_MAX_MOTORS = 64;
+
+function trajOverflowNote(points, ids) {
+  if (points <= TRAJ_MAX_POINTS && ids <= TRAJ_MAX_MOTORS) return '';
+  return `；⚠ ${points} 点 / ${ids} 台超固件上限（${TRAJ_MAX_POINTS} 点、`
+    + `${TRAJ_MAX_MOTORS} 台）——固件会整条丢弃，须稀疏化或缩短`;
+}
+
+function trajSizeNote(rows) {
+  const {points, ids} = teachRowsToTrajectory(rows);
+  return trajOverflowNote(points.length, ids.length);
+}
+
 function sendTrajectory(points, targetIds) {
   if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
   const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
@@ -1015,6 +1033,9 @@ function teachPlay() {
   if (!rows.length) { setTeach('err', '没有点位'); return; }
   const {points, ids} = teachRowsToTrajectory(rows);
   if (!points.length) { setTeach('err', '所有点位都是空的'); return; }
+  // 先自查上限再发：固件对超限轨迹是静默丢弃，页面不能替它报成功。
+  const over = trajOverflowNote(points.length, ids.length);
+  if (over) { setTeach('err', '✗ 未下发' + over); return; }
   stopStream(); // 轨迹独占这些电机：先停 100Hz 连发，避免两条命令源分叉
   teachStopTimer();
   teach.playing = true;
@@ -1058,9 +1079,7 @@ function teachRecordCmd() {
   const {targets, error} = readCmdTargets();
   if (error) { setTeach('err', error); return; }
   if (!targets.length) { setTeach('err', '命令表为空'); return; }
-  const text = targets
-    .map((x) => `${x.motor_id}:${x.position},${x.velocity},${x.effort}`).join(' ');
-  teachAddRow(1000, text);
+  teachAddRow(1000, targetsToText(targets));
   setTeach('ok', '已记录当前命令为点位');
 }
 
@@ -1068,6 +1087,50 @@ function teachExport() {
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   download('teach-' + Date.now() + '.json', JSON.stringify(rows, null, 2));
+}
+
+// 数字进目标文本框前一律按定点写：正则 `[-\d.]+` 不接受指数，而
+// String(1e-7) 就是 "1e-7"——按默认 toString 写进去会把自己导出的文件弄成
+// 导入失败。9 位小数远超设备分辨率（182 cnt/° ≈ 5.5e-5 rad）。
+function fmtTeachNum(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '0.0';
+  return n.toFixed(9).replace(/0+$/, '').replace(/\.$/, '.0');
+}
+
+function targetsToText(targets) {
+  return (targets || []).map((x) => `${x.motor_id}:${fmtTeachNum(x.position)},` +
+    `${fmtTeachNum(x.velocity)},${fmtTeachNum(x.effort)}`).join(' ');
+}
+
+// MotorTrajectory 话题载荷 → 示教行。示教表是"整快照序列"，轨迹是"扁平
+// (时刻, 电机) 路点表"，两者只差一个分组：同一时刻的各台合成一行，wait 取
+// 相邻时刻之差（示教行 wait 的语义是"本行到下一行"的时长，与轨迹的相对时间
+// 基准一致）。示教第一行恒在 t=0，故文件首点之前的时间偏移表达不出来，丢弃。
+function rowsFromTrajectory(msg) {
+  const byTime = new Map();
+  for (const p of Array.isArray(msg.points) ? msg.points : []) {
+    const t = Math.round(Number(p.time_from_start_ms));
+    const id = Number(p.motor_id);
+    if (!Number.isFinite(t) || !Number.isFinite(id)) continue;
+    if (!byTime.has(t)) byTime.set(t, []);
+    byTime.get(t).push({
+      motor_id: id,
+      position: Number(p.position) || 0,
+      // 固件执行侧不读这个字段（速度由位置时间线求导），原样带过来只作留痕。
+      velocity: Number(p.velocity) || 0,
+      // 字段名以 MotorTrajectoryPoint.msg 为准是 effort；torque 是手写文件的
+      // 常见误写，兼容读入（rosbridge 遇到未知字段会整包拒发，不会静默忽略）。
+      effort: Number(p.effort ?? p.torque) || 0,
+    });
+  }
+  // 升序：固件要求时间非递减，而 Map 保留的是文件顺序——乱序文件在这里理顺。
+  const times = [...byTime.keys()].sort((a, b) => a - b);
+  return times.map((t, i) => {
+    const next = i + 1 < times.length
+      ? times[i + 1] : t + (t - (times[i - 1] ?? t));
+    return {wait: Math.max(0, next - t), targets: byTime.get(t)};
+  }); // 末行的 wait 后面没有点可等，用上一段时长兜底（便于继续加行）
 }
 
 function teachImport() {
@@ -1080,15 +1143,19 @@ function teachImport() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const rows = JSON.parse(reader.result);
-        if (!Array.isArray(rows)) throw new Error('不是数组');
+        const data = JSON.parse(reader.result);
+        // 两种形状：本页导出的行数组，或 MotorTrajectory 话题载荷（有 points）。
+        const rows = Array.isArray(data) ? data : rowsFromTrajectory(data);
+        if (!Array.isArray(data) && !rows.length) {
+          throw new Error('既不是行数组，也没有可用的 points');
+        }
         $('teachRows').innerHTML = '';
         for (const r of rows) {
-          const text = (r.targets || [])
-            .map((x) => `${x.motor_id}:${x.position},${x.velocity},${x.effort}`).join(' ');
-          teachAddRow(r.wait || 1000, text);
+          teachAddRow(r.wait || 1000, targetsToText(r.targets));
         }
-        setTeach('ok', `导入 ${rows.length} 个点位`);
+        setTeach('ok', `导入 ${rows.length} 个点位`
+          + (Array.isArray(data) ? '' : '（轨迹载荷 → 按时刻合成行）')
+          + trajSizeNote(rows));
       } catch (e) {
         setTeach('err', '导入失败：' + e.message);
       }
@@ -1255,14 +1322,15 @@ function renderDevRows() {
       : (!online ? '<span class="pill off">记录</span>'
                  : (lcVerified ? '<span class="pill mid">驱动板</span>'
                                : '<span class="pill off">未核对</span>'));
-    // 设备端原值提示：页面已知"工程单位 → 设备原值"的换算（设备对象就是 cnt / mA），
-    // 直接写在输入框 title 里，省去对着 CAN 日志换算。速度的电机端 RPM 还要按减速比
-    // 折算，页面拿不到该系数，故不给。
+    // 设备端原值提示：页面已知"参数单位 → 设备原值"的换算（设备对象就是 cnt / mA），
+    // 直接写在输入框 title 里，省去对着 CAN 日志换算。位置参数本身就是 rad
+    // （与状态、URDF 同一套单位），cnt 用设备侧 65536 cnt/360° 折。速度的电机端
+    // RPM 还要按减速比折算，页面拿不到该系数，故不给。
     const isCerb = row.topo?.protocol === 1;
     const raw = (f, value) => {
       if (!isCerb || !Number.isFinite(value)) return '';
       if (f === 'pos_min' || f === 'pos_max') {
-        return `设备端 ${Math.round(value * 65536 / 360)} cnt`;
+        return `设备端 ${Math.round(value * 65536 / (2 * Math.PI))} cnt`;
       }
       if (f === 'torque_limit') return `设备端 ${Math.round(value * 1000)} mA`;
       return '';

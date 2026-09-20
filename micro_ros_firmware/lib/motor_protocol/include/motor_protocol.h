@@ -158,6 +158,12 @@ bool motor_protocol_pack_cerb_mit_frame(
 bool motor_protocol_unpack_cerb_feedback(
     const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
 
+// 解码 12B 反馈帧 data[8..9] 的电机线圈温度（大端 int16，单位 0.1 °C，
+// 《使用协议简易说明书》「执行器发给上位机」表）。不看故障位——故障帧里
+// 运动量不可信，温度反而是最该看的量。帧形不成立（null / DLC≠12）返回 NAN。
+float motor_protocol_cerb_feedback_temperature_c(const uint8_t *data,
+                                                 size_t size);
+
 #ifdef __cplusplus
 }
 #endif

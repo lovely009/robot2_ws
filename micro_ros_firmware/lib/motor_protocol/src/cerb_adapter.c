@@ -155,6 +155,12 @@ static uint32_t cerb_joint_nm_to_motor_ma(
 #define CERB_SDO_SEGMENT_BYTES 7U    // 分段上传每段有效载荷字节数
 #define CERB_IDENTITY_MAX_SEGMENTS 4U // 4×7B = 28B（实测身份串 10 字符）
 
+// 反馈帧 data[6..7] 错误代码（大端 uint16，含义查厂家「报错代码表」，固件只透传
+// 不解释）。调用方保证帧形已成立（DLC=12）。
+static uint32_t cerb_error_code(const motor_protocol_raw_frame_t *frame) {
+  return ((uint32_t)frame->data[6] << 8U) | (uint32_t)frame->data[7];
+}
+
 // 帧归属：反馈帧 0x300+node（12B）与 SDO 应答 0x580+node（8B）。
 // node ∈ 1..127；两段各自用 offset ≤ 127 界定上界，互不重叠。
 static bool cerb_match_rx_frame(const motor_protocol_raw_frame_t *frame,
@@ -206,16 +212,22 @@ static bool cerb_decode_frame(const motor_protocol_model_profile_t *profile,
     return false;
   }
   memset(out, 0, sizeof(*out));
-  out->temperature_c = NAN; // 无温度来源
+  // 温度先于故障分支取：data[8..9] 在故障帧里同样有效（规格书「执行器发给
+  // 上位机」表），而过温本身就是故障的常见成因。
+  out->temperature_c =
+      motor_protocol_cerb_feedback_temperature_c(frame->data, frame->dlc);
   out->voltage_v = NAN;
   out->position_rad = NAN;
   out->velocity_rad_s = NAN;
   out->effort_nm = NAN;
 
   // 故障位（data[11] bit5）帧本身有效：标注故障、运动量缺失，不当作坏帧丢。
+  // 错误代码只在故障帧取出：bit5 是「此刻在故障」的权威判据，代码是「是什么
+  // 故障」的线索，且可能是锁存的历史值。无故障帧里也透传它，上游「非零 ⟺ 故障
+  // 在册」的不变量就没了（motor_control_discovery 的清除分支依赖它）。
   out->fault_active = (frame->data[11] & 0x20U) != 0U;
   if (out->fault_active) {
-    out->vendor_fault_code = 1U;
+    out->vendor_fault_code = cerb_error_code(frame);
     return true;
   }
 

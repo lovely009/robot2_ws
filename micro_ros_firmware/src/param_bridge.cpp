@@ -225,9 +225,10 @@ static bool submit_single_limit(MotorSlot *slot, param_field_t field,
   request.received_tick_ms = millis();
   request.motor_id = slot->motor_id;
   request.kind = field_config_kind(field);
-  // 参数服务器对外是工程单位：速度 deg/s、力矩 A（见 param_units.h）。
+  // 单位口径见 param_units.h：速度对外就是 rad/s（与内核同单位，直通），
+  // 力矩对外是 A（设备对象 0x2538 存的就是电流）。
   if (field == PARAM_FIELD_VEL_LIMIT) {
-    request.value.max_velocity_rad_s = param_units_deg_to_rad((float)value);
+    request.value.max_velocity_rad_s = (float)value;
   } else {
     request.value.max_torque_nm = param_units_amp_to_nm((float)value,
                                                         slot->torque_per_amp);
@@ -355,9 +356,9 @@ static bool submit_position_limits(MotorSlot *slot, param_field_t changed,
   request.received_tick_ms = millis();
   request.motor_id = slot->motor_id;
   request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
-  // 成对校验在工程单位（deg）里做，只在提交边界折成内核 SI。
-  request.value.position_limits.min_position_rad = param_units_deg_to_rad((float)lo);
-  request.value.position_limits.max_position_rad = param_units_deg_to_rad((float)hi);
+  // 成对校验与提交都在内核 SI（rad）里做，边界不再折算角度。
+  request.value.position_limits.min_position_rad = (float)lo;
+  request.value.position_limits.max_position_rad = (float)hi;
   if (!motor_rt_submit_config(&request)) {
     report_error(ERR_SUBMIT_FAILED, slot->motor_id);
     return false;
@@ -521,13 +522,14 @@ static double view_field(const motor_control_param_view_t *v,
       return v->kp;
     case PARAM_FIELD_KD:
       return v->kd;
-    // 对外工程单位：deg / deg/s / A（见 param_units.h，换算只在这一层做一次）。
+    // 单位口径见 param_units.h：位置 rad、速度 rad/s 与内核同单位直通；
+    // 只有力矩列对外是 A（设备对象 0x2538 存的就是电流）。
     case PARAM_FIELD_POS_MIN:
-      return param_units_rad_to_deg(v->pos_min_rad);
+      return v->pos_min_rad;
     case PARAM_FIELD_POS_MAX:
-      return param_units_rad_to_deg(v->pos_max_rad);
+      return v->pos_max_rad;
     case PARAM_FIELD_VEL_LIMIT:
-      return param_units_rad_to_deg(v->velocity_limit_rad_s);
+      return v->velocity_limit_rad_s;
     case PARAM_FIELD_TORQUE_LIMIT:
       return param_units_nm_to_amp(v->torque_limit_nm, v->torque_per_amp);
     case PARAM_FIELD_LIMIT_PROTECT: {

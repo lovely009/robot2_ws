@@ -184,6 +184,9 @@ class MotorModel:
             self.tgt_deg = self.pos_deg
             self.rpm = 101.0
             self.iq_ma = 1000.0
+            # 电机线圈温度（°C），进反馈帧 data[8..9]（0.1 °C 定点）。
+            # 每台给不同初值，便于在页面上区分"读到了哪一臺"而不是一片同值。
+            self.temp_c = 30.0 + 2.0 * motor_id
             # 设备自报身份（SDO 0x1008 回串），由 --cerb-r58 分配；固件据此
             # 自动绑定型号，模拟器必须实现同一对象否则台架全是不绑定电机。
             self.identity = b"R48LITE_V2"
@@ -222,9 +225,19 @@ class MotorModel:
                 * min(1.0, rate)
 
     def cerb_frame(self) -> bytes:
+        """12B 周期状态帧（0x300+n）：位置 / 转速 / Iq / 错误码 / 线圈温度 / 模式 / 状态位。
+
+        温度在 data[8..9]（大端 int16，0.1 °C），固件 cerb_adapter 会读它填
+        MotorStatusArray.temperature——曾经这里是 6 字节零填充，页面上恒显示
+        "--"，看着像 UI 缺字段，实为台架不发。
+        """
         data = struct.pack(">hhh", round(self.pos_deg * 182.0),
                            round(self.rpm), round(self.iq_ma))
-        return data + b"\x00" * 6  # data[11] bit5=0（无故障）
+        data += struct.pack(">h", 0)                      # data[6..7] 错误代码
+        data += struct.pack(">h", round(self.temp_c * 10))  # data[8..9] 线圈温度
+        # data[10] 控制模式反馈、data[11] 状态位（使能/抱闸/报错/到位）本模拟器
+        # 不建模，保持 0；固件目前也只读 data[11] bit5（故障）。bit5=0 → 无故障。
+        return data + bytes([0x00, 0x00])
 
     def vaxor_status_frame(self) -> bytes:
         cmd_id = 0x501 + 4 * self.id

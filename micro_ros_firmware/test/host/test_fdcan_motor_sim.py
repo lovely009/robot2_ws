@@ -84,6 +84,13 @@ sent_before = len(sim.sent)
 sim.handle_sdo(9, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
 assert len(sim.sent) == sent_before
 
+# 12B 周期反馈帧：温度必须落在 data[8..9]（大端 int16，0.1 °C）——固件
+# cerb_adapter 从这里取 MotorStatusArray.temperature，模拟器不填则页面恒 "--"。
+frame = MODULE.MotorModel(4, "cerb").cerb_frame()
+assert len(frame) == 12
+assert frame[8:10] == round(38.0 * 10).to_bytes(2, "big")  # 30 + 2×4 = 38.0 °C
+assert frame[11] & 0x20 == 0  # 无故障
+
 # R58 身份分配：--cerb-r58 指定的节点自报 R58LITE_V2。
 sim.models[2] = MODULE.MotorModel(2, "cerb")
 sim.models[2].identity = b"R58LITE_V2"

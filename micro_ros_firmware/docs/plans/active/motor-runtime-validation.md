@@ -48,6 +48,11 @@
   物理条件消失后自动收敛 READY_DISABLED。
 - [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode（整快照拒绝且不刷新 freshness，host 已覆盖）；厂家故障锁存、心跳丢失 100 ms OFFLINE 与恢复路径（30/100ms 级联逻辑 host 覆盖，真机注入待做）。
 - [ ] CERB 每总线 20 ms 单帧 SYNC、约 20 ms 状态上报、100 ms OFFLINE 边界实测（协议编解码 host 已覆盖）。
+- [ ] **CERB 线圈温度真机**（2026-09-20 新增）：12B 反馈帧 `data[8..9]`（大端 int16，
+  0.1 °C）已由固件解码进 `MotorStatusArray.temperature`，字节→°C 与故障帧照读的语义
+  host 已覆盖；真机待确认冷态读数接近室温、带载升温方向正确。**过温保护未接**——
+  `protection_flags` 的 bit1 仍无阈值来源（`config/motor.yaml` 型号库无温度阈值项），
+  温度到判据之间还差一步。
 - [x] **BUS_OFF 自清恢复**：HAL 错误状态回调清 `CCCR.INIT` 已实现，**2026-09-18 真机自恢复已实测通过**；持续物理故障下的反复 bus-off 计数随 TBD-CAN-01 故障注入观察。
 - [x] **大局部变量的静态化审计**（2026-09-19，工具 `micro_ros_firmware/tools/stack_audit.py`）：
   用 `-fstack-usage` + `-fcallgraph-info` 产物按任务入口算最坏调用路径栈深

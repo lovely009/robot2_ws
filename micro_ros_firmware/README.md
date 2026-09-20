@@ -223,11 +223,16 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
-"未来一段时间怎么走"。MCU 在 20ms 控制边界按 `time_from_start_ms` 做段内
-**线性插值**，速度取段斜率（不直通路点里的 `velocity` 字段——上层常把它填 0，
-直通会让 MIT 律的 Kd 朝 0 速刹车），前馈 `effort` 段内保持左端点值。时间超出
-末点即**钳末点保持，绝不外推**。轨迹起点是 MCU 本地受理 tick，消息里的
-`sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
+"未来一段时间怎么走"。MCU 在受理时按每台的位置时间线算好单调三次 Hermite
+（Fritsch–Carlson）切矢，执行时每个 20ms 边界做段内插值并取**解析导数**当速度
+（位置与速度都连续，没有线性插值的速度台阶）。**路点里的 `velocity` 不参与执行**
+——上层常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈
+`effort` 段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是
+MCU 本地受理 tick，消息里的 `sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
+
+**容量：整条轨迹 ≤ 256 个路点**（`CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS`，是
+总路点数不按电机分——4 台电机时只够 64 个时刻）。**超限下行链路静默丢弃**：
+ROS 桥在入口 return，不发事件也不计数，上位机必须自己先判。
 
 - **归属仲裁**：`target_ids` 声明的电机在轨迹在播期间由轨迹**独占**——同一
   时刻到达的 100Hz 快照对它们既不下发也不软停（否则快照会立刻打死轨迹）。
@@ -300,11 +305,13 @@ seq 收敛，不要只看 `last_error`）。**代价**：系统参数 8 → 10�
 `0x2538` 电机端峰值电流）的写 + 读回核验留在内核/adapter 层（写仅限未运动
 状态，读回不一致收敛 `UNCONFIRMED`），ROS 侧入口是参数服务器（见下）。
 
-**参数单位（2026-09-17）**：ROS 参数对外用工程单位——位置**度**、速度**度/秒**、
-力矩**安培**（设备里的对象就是 cnt / RPM / mA）；rad、rad/s、N·m 只留在内核与
-W25 记录里，换算在 `param_bridge` 边界做一次（`param_units.h`）。力矩用 A 是因为
-设备侧权威对象是 `0x2538`（电机最大电流），折成 N·m 要过一次系数，而该系数存在
-未决争议（见 `docs/architecture/motor-runtime-decision-log.md` §6.4/§6.6）。
+**参数单位（2026-09-20 改）**：位置 **rad**、速度 **rad/s**、力矩 **安培**。前两项与内核、
+`motion_states`、URDF 同一套单位——参数与状态放在同一个页面上时要人脑换算两套角度
+是没有道理的（此前 2026-09-17 起对外用度/度每秒，已改）。力矩列仍用 A：设备侧权威
+对象是 `0x2538`（电机最大电流，「建议用默认」），读出来的正是设备里存的值；折成
+N·m 要过一次 Kt×减速比×效率，而该系数存在未决争议（见
+`docs/architecture/motor-runtime-decision-log.md` §6.4/§6.6）。力矩的 A ↔ N·m 换算在
+`param_bridge` 边界做一次（`lib/param_store/include/param_units.h`），位置/速度是直通。
 
 **外部写入不得超过固定硬件参数表（2026-09-17）**：型号目录
 （`lib/motor_control/src/motor_control_profile.c`，数值取自规格书

@@ -76,7 +76,7 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
     return false;
   }
   memset(out, 0, sizeof(*out));
-  out->temperature_c = NAN; // 两协议反馈均无温度来源
+  out->temperature_c = NAN; // vaxor 反馈帧（12B/20B）无温度字段
   out->voltage_v = NAN;
   out->position_rad = NAN;
   out->velocity_rad_s = NAN;

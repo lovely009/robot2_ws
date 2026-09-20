@@ -3,13 +3,15 @@
 #
 # time_from_start_ms：相对**本轨迹起点**的毫秒偏移。起点由 MCU 在受理时以
 # 本地单调时基落定，绝不用 ROS 时间做执行判定（ARD §12.2）。本字段是排序
-# 键，同一轨迹内必须严格递增（跨 motor_id 全局升序，校验见 MotorTrajectory）。
+# 键：整表**非递减**，同一电机内**严格递增**（不同电机允许共用同一时刻——
+# 并行的关节本就同拍采样，强行要求全局递增会逼上层去重时间轴）。
 #
 # motor_id 必须属于所属 MotorTrajectory.target_ids 声明的受控集合。
 #
 # 数值语义同 MotorCommandTarget：NaN/Inf → 整条轨迹拒收，不做占位语义。
-# position 是执行量（段内线性插值）；velocity 仅供诊断与上层自检，执行侧
-# 速度用相邻路点差分导出（上层填 0 是常见写法，直通会错误地让 Kd 刹车）；
+# position 是执行量：段内**单调三次 Hermite**（Fritsch–Carlson 切矢，位置与
+# 速度都连续）；velocity 仅供诊断与上层自检——执行侧速度由位置时间线解析
+# 求导得来（上层填 0 是常见写法，直通会错误地让 Kd 刹车）；
 # effort 为前馈 τ_ff，段内保持左端点值。
 uint32 time_from_start_ms
 uint16 motor_id

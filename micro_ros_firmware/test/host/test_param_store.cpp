@@ -469,15 +469,9 @@ void test_blob_migrate_chain_v1_to_v3() {
                                      sizeof(via_v2)) == nullptr);
 }
 
-// 参数服务器对外工程单位 ↔ 内核 SI（param_units.h）。
+// 参数服务器的对外单位（param_units.h）：位置/速度与内核同单位直通（rad、
+// rad/s，无换算函数），只有力矩列 A ↔ N·m 要过系数。
 void test_param_units() {
-  // 角度往返：±180° ↔ ±π，180 的整数度必须精确（页面显示的就是这些值）。
-  assert(std::fabs(param_units_rad_to_deg(3.141592653589793f) - 180.0f) < 1e-3f);
-  assert(std::fabs(param_units_rad_to_deg(-0.5235987756f) + 30.0f) < 1e-4f);
-  assert(std::fabs(param_units_deg_to_rad(180.0f) - 3.14159265f) < 1e-5f);
-  assert(std::fabs(param_units_deg_to_rad(-90.0f) + 1.5707963f) < 1e-6f);
-  // 速度同系数（deg/s ↔ rad/s）。
-  assert(std::fabs(param_units_rad_to_deg(1.0f) - 57.29578f) < 1e-3f);
   // 力矩：系数由固件按型号给出（这里是规格书峰值对 45 N·m ÷ 10.8 A）；
   // 设备里 13.3 A → 55.4 N·m → 回读仍是 13.3 A（往返一致，与系数取值无关）。
   const float r58 = 45.0f / 10.8f;

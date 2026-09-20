@@ -667,18 +667,57 @@ const TRAJ_MAX_MOTORS = 64;
 const TRAJ_LINK_BUDGET_BYTES = 22000;
 const TRAJ_POINT_BYTES = 20;
 
+// 固件单条轨迹的硬上限：点数组在**四处**各存一份（内核/mailbox 双缓冲/bridge/切矢），
+// 264 → 1024 要约 84 KB RAM，DTCM 池放不下，所以这是硬约束（motor_control.h:45）。
+const TRAJ_FW_MAX_POINTS = 256;
+
 function trajRowsPerSegment(nMotors) {
-  const maxPoints = Math.floor(TRAJ_LINK_BUDGET_BYTES / TRAJ_POINT_BYTES); // ≈23
-  // 每段还会**多带一行当端点**（段间位置连续），所以按 (per+1) 行算预算：
-  // 4 台电机 → maxPoints/4 = 5 → per = 4，即一段 5 行 = 20 点 ≈ 440 B < 512 ✓
-  const rows = Math.floor(maxPoints / Math.max(1, nMotors));
-  return Math.max(1, rows - 1);
+  const n = Math.max(1, nMotors);
+  const byFw = Math.floor(TRAJ_FW_MAX_POINTS / n);                       // 固件上限
+  const byLink = Math.floor(TRAJ_LINK_BUDGET_BYTES / TRAJ_POINT_BYTES / n); // 链路预算
+  // −1：每段还要**多带一行当端点**（段间位置连续，端点行同时是下一段的起点）。
+  return Math.max(1, Math.min(byFw, byLink) - 1);
 }
 
+// 段边界处固件会把端点切矢归零（F–C 规则）→ 速度短暂到 0。把断点选在**运动最慢**
+// 的那一行（停顿点/换向点），顿挫就基本看不出来。在 [start+per/2, start+per] 里挑
+// 位移最小的一行；没有更安静的就越靠后切（保证进展）。
+function pickSegmentEnd(rows, start, per) {
+  const hi = Math.min(rows.length - 1, start + per);
+  // lo 必须 ≤ hi：末段窗口不足时若不钳，循环体一次都不跑、返回 start = 不前进
+  // → 调用方死循环（真踩过：模拟里把 node 内存吃爆）。
+  const lo = Math.min(hi, start + Math.max(1, Math.floor(per / 2)));
+  const posOf = (row) => {
+    const m = new Map();
+    for (const t of row.targets) m.set(t.motor_id, t.position);
+    return m;
+  };
+  let best = hi;
+  let bestMove = Infinity;
+  for (let i = lo; i <= hi; ++i) {
+    const a = posOf(rows[i]);
+    const b = posOf(rows[i + 1] || rows[i]);
+    let move = 0;
+    for (const [id, p] of a) {
+      const q = b.get(id);
+      if (q !== undefined) move += Math.abs(q - p);
+    }
+    if (move < bestMove) { bestMove = move; best = i; }
+  }
+  return best;
+}
+
+// 固件单条上限是 256 点 —— 但**不必再稀疏化**：播放时会自动分段，且段尾挑在
+// 运动最慢（常常是四个关节都不动）的行上，端点切矢归零落在真停顿处，看不出顿挫。
+// 只有"台数"超 64 才是硬拒绝。
 function trajOverflowNote(points, ids) {
-  if (points <= TRAJ_MAX_POINTS && ids <= TRAJ_MAX_MOTORS) return '';
-  return `；⚠ ${points} 点 / ${ids} 台超固件上限（${TRAJ_MAX_POINTS} 点、`
-    + `${TRAJ_MAX_MOTORS} 台）——固件会整条丢弃，须稀疏化或缩短`;
+  if (ids > TRAJ_MAX_MOTORS) {
+    return `；⚠ ${ids} 台超固件上限（${TRAJ_MAX_MOTORS} 台）——必须减台`;
+  }
+  if (points > TRAJ_MAX_POINTS) {
+    return `；ℹ ${points} 点超单条上限（${TRAJ_MAX_POINTS}），播放时自动分段`;
+  }
+  return '';
 }
 
 function trajSizeNote(rows) {
@@ -988,7 +1027,7 @@ function drawHorizon() {
 }
 
 // ---------- 示教（点位序列） ----------
-const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4};
+const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4, nextRow: 0};
 
 function setTeach(cls, text) {
   const el = $('teachStatus');
@@ -1084,16 +1123,21 @@ function teachPlay() {
   if (!rows.length) { setTeach('err', '没有点位'); return; }
   const {points, ids} = teachRowsToTrajectory(rows);
   if (!points.length) { setTeach('err', '所有点位都是空的'); return; }
-  // 固件侧硬上限（256 点）先自查：那是"整条丢弃"，不是链路问题。
-  const over = trajOverflowNote(points.length, ids.length);
-  if (over) { setTeach('err', '✗ 未下发' + over); return; }
+  if (ids.length > 64) {
+    setTeach('err', `✗ 未下发：${ids.length} 台超固件上限（64 台）`);
+    return;
+  }
+  const per = trajRowsPerSegment(ids.length);
   stopStream(); // 轨迹独占这些电机：先停 100Hz 连发，避免两条命令源分叉
   teachStopTimer();
   teach.playing = true;
   teach.rows = rows;
   teach.seg = 0;
+  teach.nextRow = 0;
   teach.nMotors = ids.length;
-  teach.segTotal = Math.ceil(rows.length / trajRowsPerSegment(ids.length));
+  // 超过单条上限就自动分段（段尾挑最安静的一行，顿挫最小）。
+  teach.segTotal = rows.length <= per + 1
+    ? 1 : Math.ceil(rows.length / per);
   teachPlaySegment();
 }
 
@@ -1105,14 +1149,19 @@ function teachPlaySegment() {
   if (!teach.playing) return;
   const rows = teach.rows;
   const per = trajRowsPerSegment(teach.nMotors);
-  const start = teach.seg * per;
+  const start = teach.nextRow || 0;
   if (start >= rows.length) {
     teach.playing = false;
     teachStopTimer();
     setTeach('ok', `✓ 播放完成：${teach.seg} 段 / ${rows.length} 行`);
     return;
   }
-  const slice = rows.slice(start, Math.min(rows.length, start + per + 1));
+  // 段尾 = 最安静的一行（含它当端点），下一段从**同一行**接着走。
+  const end = pickSegmentEnd(rows, start, per);
+  // 末段结束时把 nextRow 推到末尾之后——否则"段尾=下一段起点"的不变量在最后一行
+  // 上退化成原地不动（同上）。
+  teach.nextRow = end >= rows.length - 1 ? rows.length : end;
+  const slice = rows.slice(start, end + 1);
   const {points, ids} = teachRowsToTrajectory(slice);
   if (!points.length) {
     teach.playing = false;

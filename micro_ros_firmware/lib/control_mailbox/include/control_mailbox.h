@@ -56,15 +56,9 @@ typedef enum {
   // 设备侧保存（仅 CERB，写 0x2539 保存码）：把设备 RAM 里的值落到驱动器
   // flash。**与写分开**——写只改设备 RAM + 固件记录，保存才落盘；两次动作
   // 之间该台处于「未保存」（DeviceParamReport.record_dirty）。
-  // 载荷 = 待保存槽位位图，只允许 CONTROL_MAILBOX_SAVE_SLOTS_MASK 内的位。
+  // 载荷 = 待保存槽位位图，非空即可；哪些槽真有厂家保存码由内核按掩码决定。
   CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH = 14U
 } control_mailbox_config_kind_t;
-
-// 有设备侧 flash 保存码的槽位位图（bit0..3 = 位置下限/位置上限/速度限值/力矩限值）。
-// 与 motor_protocol_adapter.h 的 MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK 是同一条
-// 事实——mailbox 是协议无关层，不引 motor_protocol 头；一致性由
-// test_control_mailbox.cpp 的 static_assert 双向锁死。
-#define CONTROL_MAILBOX_SAVE_SLOTS_MASK 0x0FU
 
 typedef struct {
   float kp;

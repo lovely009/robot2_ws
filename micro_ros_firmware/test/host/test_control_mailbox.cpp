@@ -4,7 +4,7 @@
 #include <cassert>
 
 // 配置 kind 枚举契约：mailbox 与内核协议层枚举逐值相等
-// （1..6、8、9，7 为内核专用不经 mailbox）——固件侧 motor_rt_task.cpp
+// （1..6、8..14，7 为内核专用不经 mailbox）——固件侧 motor_rt_task.cpp
 // 同款 static_assert，host 侧双链锁死，任一侧改动枚举值即编译失败。
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
                   static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
@@ -53,11 +53,6 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH),
     "mailbox/protocol config kind 契约不一致：SAVE_DEVICE_FLASH");
-// mailbox 是协议无关层，不引 motor_protocol 头；保存槽位位图这条事实在两处
-// 各写一遍，靠本断言双向锁死。
-static_assert(CONTROL_MAILBOX_SAVE_SLOTS_MASK ==
-                  (int)MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK,
-              "mailbox/protocol 保存槽位位图不一致");
 
 #include <cmath>
 #include <cstring>
@@ -455,8 +450,10 @@ static void test_safety_protect_request_validation() {
   assert(!control_mailbox_submit_config(&mailbox, &req));
 }
 
-// 保存请求：载荷是槽位位图，只允许"有厂家保存码"的槽位——空位图没有要保存的
-// 对象；含易失槽（保护开关/方向）的位图是概念错误（厂家没给保存码）。
+// 保存请求：载荷是脏槽位位图，只挡空位图（没有要保存的对象）。
+// **易失槽必须能被受理**——保护开关/方向同样要落 W25 才算持久，归一在空板上
+// 恒写保护 ⇒ bit4 恒脏；若这里按"有保存码的槽位"掩码挡，每台电机的首次保存
+// 都会在 mailbox 被拒，system.save 整条失效。哪个槽真有厂家保存码是内核策略。
 static void test_save_request_validation() {
   control_mailbox_t mailbox;
   control_mailbox_init(&mailbox);
@@ -474,8 +471,14 @@ static void test_save_request_validation() {
   req.value.save_slots = 0U;
   assert(!control_mailbox_submit_config(&mailbox, &req));
 
+  // 含易失槽（保护开关 bit4）的脏位图：必须受理（见上方注释）。
   req.value.save_slots = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
-  assert(!control_mailbox_submit_config(&mailbox, &req));
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  // 保护 + 方向（bit4|bit5，全易失）：同样受理。
+  req.value.save_slots = (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+                                   (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+  assert(control_mailbox_submit_config(&mailbox, &req));
 }
 
 // 方向载荷只有 0/1 两态：越界值在 mailbox 就挡掉，别让它进总线。

@@ -41,11 +41,15 @@ static bool config_request_is_valid(
       // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
       return request->value.direction_raw <= 1U;
     case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
-      // 只收"有厂家保存码"的槽位：空位图没有要保存的对象；含易失槽（保护开关
-      // 0x2650 / 方向 0x2541）的位图是概念错误——厂家没给这两个对象保存码。
-      return request->value.save_slots != 0U &&
-             (request->value.save_slots &
-              (uint8_t)~CONTROL_MAILBOX_SAVE_SLOTS_MASK) == 0U;
+      // 只挡空位图（没有要保存的对象）。**位图里允许含易失槽**（保护开关
+      // bit4 / 方向 bit5）：脏位图记的是"改过但还没落盘"，易失槽也在内 ——
+      // 它们没有厂家保存码，但记录要落 W25 才生效，所以必须能被"保存"这个
+      // 动作一并清掉。哪些槽真有保存码是**内核的策略**（它按
+      // MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK 掩掉之后再决定发不发帧），
+      // 不是本层能判的。
+      // 早先这里按那套掩码挡过：结果是凡写过保护/方向的台一律被挡在门外，
+      // 而归一恒写保护 ⇒ 空板首次保存必被拒 ⇒ system.save 整条失效。
+      return request->value.save_slots != 0U;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       return isfinite(request->value.policy.kp) &&
              isfinite(request->value.policy.kd) &&

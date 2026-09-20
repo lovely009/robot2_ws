@@ -71,7 +71,9 @@ static void finish_identity_read(motor_control_context_t *ctx,
 //    Kt×减速比换算，系数配错时两边一起错、比对恒通过，等于没比；
 //  - 不一致或回读失败 → 该台"未初始化"：冻结授权、不出运动帧，直到参数被
 //    重写（写事务会同时更新设备与记录）或重连后重新回读；
-//  - 记录里没有的槽位不参与比对（刚烧录、Flash 还空的电机不该整体卡住）。
+//  - 记录里没有的槽位不参与比对（刚烧录、Flash 还空的电机不该整体卡住），
+//    **唯一例外是方向槽（0x2541）**：设备侧它易失（每次上电回 0=CW），"设备读到
+//    0"不含信息，故记录缺这一槽 = 方向未知 = 未初始化（见 dev_params_mismatch_mask）。
 // ---------------------------------------------------------------------------
 
 // 记录与设备回读逐槽位比对（设备端原值）。返回值 = 不一致槽位位图
@@ -80,8 +82,18 @@ static void finish_identity_read(motor_control_context_t *ctx,
 // 仍不一致，结论还是未初始化，看起来就像"设置不生效"。
 static uint8_t dev_params_mismatch_mask(const motor_control_entry_t *entry) {
   uint8_t mask = 0U;
+  // 方向基线**独立于"本机有无记录"判定**：方向是易失对象，设备每次上电都回
+  // 0（CW），"设备当前读到 0"零信息量——记录是它唯一的权威来源。无记录 /
+  // 记录无此槽 / 槽值非法，一律等于"方向未知"，判未初始化（不猜 CW）。
+  // 这是 owner 2026-09-20 的决定，也是 09-19 交接文档"无记录 = 未初始化"的落地。
+  const uint8_t dir_bit =
+      (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+  if ((entry->record_raw_present & dir_bit) == 0U ||
+      entry->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] > 1U) {
+    mask |= dir_bit;
+  }
   if (!entry->record_valid) {
-    return 0U; // 本机无记录：没有比对基准
+    return mask; // 无记录：除方向基线外没有别的可比项
   }
   for (uint8_t slot = 0U; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot) {
     const uint8_t bit = (uint8_t)(1U << slot);
@@ -182,8 +194,8 @@ static void update_record_after_write(motor_control_context_t *ctx,
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);
   const uint8_t pos_max_bit =
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX);
-  // 本次事务实际写到的槽位（只写这些：安全/方向是只读 REFRESH 槽，
-  // tx_write_raw 里恒为 0，按 record_raw_present 全量刷会把它们抹成 0）。
+  // 本次事务实际写到的槽位（只写这些：REFRESH 的只读槽在 tx_write_raw 里恒为
+  // 0，按 record_raw_present 全量刷会把它们抹成 0）。
   uint8_t written_mask = 0U;
   switch (entry->tx_kind) {
     case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
@@ -200,6 +212,9 @@ static void update_record_after_write(motor_control_context_t *ctx,
       // 注意这同时把"变更检测"的基准挪到了新值：写 1（关保护）再落盘即
       // 基线化为"关"，与既有的语义一致（见决策日志）。
       written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+      break;
+    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
+      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
       break;
     default:
       return;
@@ -972,6 +987,18 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
       //    空载静态观察。这里不拦（设备侧行为不是本层能保证的），但调用方
       //    （web/上层）必须把它当需要台架实测的动作。
       if (entry->profile == NULL || request->safety_protect_raw > 1U ||
+          !device_limit_write_allowed(entry)) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      if (entry->tx_active) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
+      return start_tx(ctx, entry, request, now_ms);
+    }
+    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION: {
+      // 方向也是安全边界：与限位/保护同口径，仅未运动时受理（运动中翻向 =
+      // 零点语义当场改变）。
+      if (entry->profile == NULL || request->direction_raw > 1U ||
           !device_limit_write_allowed(entry)) {
         return reject_invalid(ctx, entry, request, now_ms);
       }

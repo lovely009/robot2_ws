@@ -424,6 +424,23 @@ static uint32_t feed_safety_write(motor_control_context_t *ctx, uint16_t node,
   return tick + 4U;
 }
 
+// 方向写事务（写 0x2541:00 + 读回核验），与 feed_safety_write 同形。
+static uint32_t feed_direction_write(motor_control_context_t *ctx, uint16_t node,
+                                     uint32_t raw, uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(ctx, tick);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t ack = sdo_write_ack(node, 0x2541U, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t rd = sdo_read_ack(node, 5U, raw, tick + 3U);
+  motor_control_on_raw_frame(ctx, &rd);
+  motor_control_service(ctx, tick + 4U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  return tick + 4U;
+}
+
 // 造一条 Flash 记录（只含设备端原值 + 对应 SI 值由内核按 profile 比对）。
 // include_safety_slots：true（默认）= 把 v3 的只读安全槽（4=保护开关 / 5=方向）
 // 一并置位——"设备端回读过后落盘"的记录形状。false = 按 raw_present 原样，模拟
@@ -462,12 +479,14 @@ static uint32_t kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
 // 关节侧 N·m/A（限值口径）。
 #define kR58LimitNmPerAmp (45.0f / 10.8f)
 
-// 设备参数初始化收尾（新流程的一部分）：把"本机无记录"告知内核，驱动自动
-// 回读，再喂六个 SDO 应答。不做这一步该台停在 PENDING，按新口径不可使能。
+// 设备参数初始化收尾：先声明一份含方向基线的记录（真实板子第一次写过方向后
+// 就是这个形状），再驱动自动回读与六槽比对。
+// 不能再用"无记录"：方向基线缺失会判未初始化（见 dev_params_mismatch_mask），
+// 那是产品行为，不是测试可以绕过的。
 static void complete_device_param_init(motor_control_context_t *ctx, uint16_t node,
                                        uint32_t tick) {
-  motor_control_stored_params_t none = {};
-  motor_control_apply_stored_params(ctx, &none, 0U, tick);
+  motor_control_stored_params_t rec = make_device_record(node, kR58Raw, 0x00U);
+  motor_control_apply_stored_params(ctx, &rec, 1U, tick);
   (void)feed_device_params(ctx, node, kR58Raw, tick + 1U, false);
 }
 
@@ -3346,38 +3365,61 @@ static void test_dev_init_flags_safety_mismatch() {
   assert(saved == 0U);
 }
 
-// v2 迁移形状的记录（只搬低 4 位，槽 4/5 位为 0）：记录里没写过的槽位不参与比对
-// ——设备即使报 slot4=1（保护被外部工具关掉），也不得判 CONFIG_CONFLICT。
-// 这是负载路径（dev_params_mismatch_mask 的 `record_raw_present` 跳过分支）：若
-// 有人把规则改成"设备有位 ⇒ 不一致"，每台刚升级的 CERB 都会被误判冲突且没有
-// 外部工具不可恢复，而 CI 仍全绿——所以在这里钉死。
-static void test_device_param_migrated_record_skips_safety_slots() {
+// v2 迁移上来的记录只搬低 4 位（槽 4/5 = 未核验）。保护槽缺 → 不比对（上电
+// 归一会把设备写成"开"）；**方向槽缺 → 判未初始化**：设备每次上电都回 0，
+// "读到 0"不能证明任何事，方向只能由记录说了算。
+static void test_device_param_missing_direction_baseline_blocks() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
-  // include_safety_slots=false：记录只有四个限值槽，槽 4/5 未核验。
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU, false);
-  assert(rec.device_raw_present == 0x0FU);
-  assert((rec.device_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
-
-  // 设备回读：第 4 槽（保护开关）报 1 = 保护被关——记录没这项，不构成不一致。
-  const uint32_t saved = kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = 1U;
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
-  kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] = saved;
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
-  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_OK); // 不是 CONFIG_CONFLICT
-  assert((e->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
-  // 设备端回读容有 slot4（设备确实读了），记录端没有——这是本用例的形状。
-  assert((e->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U);
-  // DEV_INIT 事件：state=OK、位图不含 bit4（既非冲突、也非缺失）。
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
   uint16_t state = 0U;
-  uint32_t detail = 0U;
-  assert(take_dev_init_event(&ctx, 7, &state, &detail));
-  assert(state == MOTOR_CONTROL_DEV_INIT_OK);
-  assert((detail & (1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) == 0U);
+  uint32_t mask = 0U;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+}
+
+// 本机完全无记录（新烧板）同样判未初始化——不是"无记录可比就放过"。
+// ⚠️ 这里**必须**显式声明"无记录"（apply_stored_params 传空数组），不能用
+// complete_device_param_init：Task 8 之后那个助手会注入一份**含方向基线**的
+// 记录（正常板子的路径），本用例要测的恰恰是"没有基线"。
+static void test_device_param_no_record_blocks_on_direction() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t none = {};
+  motor_control_apply_stored_params(&ctx, &none, 0U, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+}
+
+// 在页面上点一次方向（写事务建立基线）→ 重判转好。
+static void test_device_param_direction_write_establishes_baseline() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t none = {}; // 同上：显式无记录
+  motor_control_apply_stored_params(&ctx, &none, 0U, 110);
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+
+  motor_protocol_config_request_t req = {};
+  req.request_id = 77U;
+  req.motor_id = 7;
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+  req.direction_raw = 0U; // 认下 CW
+  motor_control_service(&ctx, 300);
+  assert(motor_control_submit_config(&ctx, &req, 301));
+  (void)feed_direction_write(&ctx, 7, 0U, 302);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
 }
 
 // 回归（P8）：限值写事务只写它自己那几个槽位，不得把只读安全槽（4=保护开关 /
@@ -3586,7 +3628,10 @@ static void test_device_param_pending_blocks_enable() {
 static void test_device_param_runtime_mismatch_soft_stops() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  // 用 bound 版而不是 ready 版：ready 注入的基线只含方向/保护两槽（0x30），而
+  // 记录**首次捕获即胜出**（record_valid 后不再被覆盖）——本用例要的"峰值电流
+  // 与记录不符"必须在第一次就落袋，否则限值槽不在基点里、比对恒通过。
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   motor_control_stored_params_t rec = make_device_record(7, kR58Raw, 0x0FU);
   motor_control_apply_stored_params(&ctx, &rec, 1, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
@@ -4618,7 +4663,9 @@ int main() {
   test_device_param_boot_verify_ok();
   test_device_param_mismatch_blocks_motion();
   test_dev_init_flags_safety_mismatch();
-  test_device_param_migrated_record_skips_safety_slots();
+  test_device_param_missing_direction_baseline_blocks();
+  test_device_param_no_record_blocks_on_direction();
+  test_device_param_direction_write_establishes_baseline();
   test_device_param_write_syncs_record_and_recovers();
   test_limit_write_preserves_readonly_safety_slots();
   test_safety_protect_write_syncs_record_and_gates_motion();

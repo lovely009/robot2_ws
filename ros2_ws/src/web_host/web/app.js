@@ -1085,6 +1085,14 @@ function teachRowsToTrajectory(rows) {
 // 快照通道每条只是一行的目标（~100 B，单帧），是被反复验证过可用的那条路
 // （"单发一次"就是它）。代价：节奏由浏览器定时器给（约 30Hz，抖动毫秒级），
 // 且中途若卡顿超过 100ms，固件的新鲜度级联会对这些台软停（安全，不会失控）。
+// 播放：**页面侧按 ~100 Hz 插值**，逐条走快照通道下发（每条约 100 B，单帧安全）。
+//
+// 两条硬约束（都是真机实测，别再试）：
+//  ① 本板单条 micro-ROS 消息 ≤ 一个 MTU ≈ 512 B：实测 5 KB 会把 MCU 写死、
+//     60 B 正常；`RMW_UXRCE_STREAM_HISTORY_INPUT` 改大**不生效**（heap_free 不变）。
+//     → 轨迹通道最多装 ~20 个点，喂不了 270 行的录制。
+//  ② 快照通道只给位置不给速度时运动很差（速度字段直通 MIT 的 kd·v_des 项）。
+//     → 这里把录制的时间线**在页面侧线性插值**，并把每段的斜率作为速度前馈一起发。
 function teachPlay() {
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
@@ -1092,37 +1100,67 @@ function teachPlay() {
   const ids = new Set();
   for (const r of rows) for (const x of r.targets) ids.add(x.motor_id);
   if (ids.size > 64) { setTeach('err', `✗ 未下发：${ids.size} 台超上限 64`); return; }
+  const timeline = buildTimeline(rows);
+  if (timeline.length < 1) { setTeach('err', '时间线为空'); return; }
   stopStream();          // 我们自己就是快照通道：先停 100Hz 连发，避免两条流互踩
   teachStopTimer();
   teach.playing = true;
-  teach.rows = rows;
+  teach.timeline = timeline;
   teach.idx = 0;
-  teach.total = rows.length;
-  teachPlayRow();
+  teach.t0 = performance.now();
+  teachPlayTick();
 }
 
-// 逐行下发：每行按它的"等待 MS"节奏推进；空行只等待、不下发（等价于停顿）。
-function teachPlayRow() {
-  if (!teach.playing) return;
-  const rows = teach.rows;
-  if (teach.idx >= rows.length) {
-    teach.playing = false;
-    teachStopTimer();
-    setTeach('ok', `✓ 播放完成：${rows.length} 行`);
-    return;
+// 行 → 时间线，并给每条目标补**速度前馈**（中心差分；端点用单侧差分）。
+function buildTimeline(rows) {
+  const tl = [];
+  let t = 0;
+  for (const row of rows) {
+    tl.push({t, targets: row.targets.map((x) => ({
+      motor_id: x.motor_id, position: x.position, velocity: 0, effort: x.effort || 0}))});
+    t += Math.max(1, row.wait);
   }
-  const row = rows[teach.idx];
-  teach.idx++;
-  if (row.targets.length) {
-    const res = sendTargets(row.targets);
-    if (!res.ok) {
-      teach.playing = false;
-      setTeach('err', `✗ 第 ${teach.idx}/${rows.length} 行下发失败：${res.msg}`);
-      return;
+  for (let i = 0; i < tl.length; ++i) {
+    const a = tl[Math.max(0, i - 1)];
+    const b = tl[Math.min(tl.length - 1, i + 1)];
+    const dt = (b.t - a.t) / 1000;
+    for (const x of tl[i].targets) {
+      const ya = a.targets.find((y) => y.motor_id === x.motor_id);
+      const yb = b.targets.find((y) => y.motor_id === x.motor_id);
+      x.velocity = (dt > 0 && ya && yb) ? (yb.position - ya.position) / dt : 0;
     }
   }
-  setTeach('ok', `▸ 播放中 ${teach.idx}/${rows.length} 行`);
-  teach.timer = setTimeout(teachPlayRow, Math.max(1, row.wait));
+  return tl;
+}
+
+// ~100 Hz 节拍：按实际经过时间定位区间、线性插值位置，带上该段速度前馈。
+function teachPlayTick() {
+  if (!teach.playing) return;
+  const tl = teach.timeline;
+  const last = tl[tl.length - 1];
+  const t = performance.now() - teach.t0;
+  if (t >= last.t) {
+    if (last.targets.length) sendTargets(last.targets); // 收尾停在末点
+    teach.playing = false;
+    teachStopTimer();
+    setTeach('ok', `✓ 播放完成：${tl.length} 行 / ${(last.t / 1000).toFixed(1)} s`);
+    return;
+  }
+  while (teach.idx + 1 < tl.length && tl[teach.idx + 1].t <= t) teach.idx++;
+  const a = tl[teach.idx];
+  const b = tl[Math.min(teach.idx + 1, tl.length - 1)];
+  const k = (t - a.t) / Math.max(1, b.t - a.t);
+  const targets = a.targets.map((x) => {
+    const y = b.targets.find((z) => z.motor_id === x.motor_id) || x;
+    return {motor_id: x.motor_id,
+            position: x.position + (y.position - x.position) * Math.min(1, k),
+            velocity: x.velocity, // 段内斜率（录制斜率，非插值瞬时值）
+            effort: 0};
+  });
+  if (targets.length) sendTargets(targets);
+  const pct = Math.round(t / last.t * 100);
+  setTeach('ok', `▸ 播放中 ${(t / 1000).toFixed(1)}/${(last.t / 1000).toFixed(1)} s（${pct}%）`);
+  teach.timer = setTimeout(teachPlayTick, 10); // ~100 Hz
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消

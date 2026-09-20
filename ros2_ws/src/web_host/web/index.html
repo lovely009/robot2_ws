@@ -136,7 +136,7 @@
               <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
               <th>pos_min<small>rad</small></th><th>pos_max<small>rad</small></th>
               <th>vel_max<small>rad/s</small></th><th>torque_max<small>A</small></th>
-              <th>限位保护</th><th></th>
+              <th>限位保护</th><th>方向</th><th></th>
             </tr>
           </thead>
           <tbody id="paramRows">
@@ -245,7 +245,8 @@
     <details class="sec" data-fold="d-notes">
       <summary>说明<span class="spacer"></span><span class="sum">F1</span></summary>
       <ul class="notes">
-        <li><b>限位保护</b>取消勾选 = 关闭设备侧看门狗与限位保护，该关节将<b>没有任何限位在执行</b>（急停与机械限位仍需就位）；该设置掉电不保存。限值与保护开关仅在电机未运动时受理。</li>
+        <li><b>限位保护</b>上电默认<b>开</b>（固件在回读比对之前写回设备）；取消勾选 = 关闭设备侧看门狗与限位保护，该关节将<b>没有任何限位在执行</b>（急停与机械限位仍需就位），此后该台每次武装都要二次确认，且下次上电会自动恢复为开。限值与保护开关仅在电机未运动时受理。</li>
+        <li><b>方向</b>点击切换 CW / CCW。设备方向<b>掉电不保存</b>，固件每次上电按记录写回。翻转会使设备零点与位置限位的物理含义<b>整体镜像</b>，该台随即被冻结（拒绝武装），必须重新设零才能运动。</li>
         <li>限值单位：位置 rad、速度 rad/s、力矩 A——前两项与固件状态/URDF 同一套单位，页面上不再出现度数；力矩列是设备对象 <code>0x2538</code> 的电流值（设备里存的就是电流，不折 N·m）。设零要求失能。</li>
         <li><b>使能 / kp / kd 只能写、不能读回</b>（固件无回读通路），框里是页面最后一次下发的值。落地结论看事件日志的 <code>CONFIG_RESULT</code>：0=OK、2=非法。设备参数未核对的台（<code>CONFIG_CONFLICT</code>）会被直接拒。代数必须严格前进才受理「未武装→武装」。</li>
         <li>命令快照是<b>完整</b>快照：缺席的受控电机被软停；停止连发 30 ms 后全软停、100 ms 失能；任一 NaN/Inf 整包拒收。</li>

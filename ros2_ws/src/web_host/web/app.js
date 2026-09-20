@@ -24,7 +24,8 @@ const EVENT_NAMES = ['DISCOVERED', 'PROFILE_BOUND', 'PROFILE_REJECTED', 'READY',
   'ACTIVE', 'SOFT_STOP', 'DISABLE', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE',
   'RECONNECTED', 'AUTHORIZATION_LOST', 'SNAPSHOT_REJECTED', 'CONFIG_RESULT',
   'REGISTRY_FULL', 'DEV_INIT', 'TRAJECTORY_REJECTED'];
-const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线'];
+const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线',
+  '设备参数', '策略代数', '方向待设零', '缺武装确认'];
 // 设备参数槽位名（DEV_INIT 事件 request_id 携带的槽位位图，1u<<slot）。
 // ⚠️ 这是与固件位图的**隐式契约**：槽位顺序必须逐位对齐 firmware 的
 // device_raw 槽索引（MOTOR_PROTOCOL_PARAM_SLOT_*），权威定义在
@@ -34,8 +35,6 @@ const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值�
   '保护开关(0x2650:00)', '方向(0x2541)'];
 // 参数面能改的槽位：0..3（限值四项）+ 4（保护开关，m<id>.limit_protect）。
 // 只剩槽 5（方向 0x2541）不在参数面——它没有对应的参数项，写不回去。
-const DEV_SLOT_PARAM_MASK = 0x1F;
-const DEV_SLOT_EXTERNAL_MASK = 0x20;
 const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致', '回读不成功'];
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
@@ -1205,6 +1204,30 @@ function polInputs(id) {
 }
 
 // 逐台下发（表格每行一个按钮）：改哪台发哪台。
+// 方向切换：写 m<id>.direction 的反值。翻转会让设备里零点与 cnt 限位的物理含义
+// 整体镜像（原零点 P0 对应 -P0），固件会冻结该台直到重新设零（ZERO_STALE）。
+async function flipDirection(id, cur) {
+  const next = cur === 1 ? 0 : 1;
+  const name = next === 1 ? 'CCW' : 'CW';
+  if (!window.confirm(`把 m${id} 的方向切成 ${name}？\n\n` +
+      '方向一翻，设备里零点与位置限位的物理含义整体镜像：该台会被固件冻结' +
+      '（拒绝武装），必须先重新设零才能运动。')) {
+    return;
+  }
+  try {
+    const r = await paramSetValue(`m${id}.direction`, 3, 'direction', next);
+    if (!r.results[0].successful) {
+      setParamResult(false,
+        `m${id}.direction 被拒：${r.results[0].reason || '见 last_error'}`);
+      return;
+    }
+    setParamResult(true, `m${id} 方向已下发 ${name}；受理后需重新设零才能运动`);
+    setTimeout(loadParams, 500); // 等写事务收尾后刷新
+  } catch (e) {
+    setParamResult(false, `m${id}.direction 失败：${e.message}`);
+  }
+}
+
 function sendPolicyRow(id) {
   if (!state.connected) { setPolResult(false, '未连接 rosbridge'); return; }
   const el = polInputs(id);
@@ -1215,6 +1238,18 @@ function sendPolicyRow(id) {
     setPolResult(false, `m${id}：kp/kd 必须是非负有限值`);
     return;
   }
+  // 保护被关掉的台：该关节没有任何限位在跑（CERB 是设备侧限位，固件没有软限位
+  // 兜底），所以每次武装都要显式确认。固件侧有同一道门禁（缺确认位直接拒），
+  // 这里只是把"为什么按不下去"提前说清楚。
+  const protect = Number((paramCache.get(id) || {})['limit_protect']);
+  const unprotected = Number.isFinite(protect) && protect === 0;
+  if (el.enable.checked && unprotected) {
+    if (!window.confirm(`m${id} 的设备侧限位保护当前是关闭的：\n\n` +
+        '该关节没有任何限位在执行（含看门狗自锁）。确认要武装它吗？')) {
+      el.enable.checked = false;
+      return;
+    }
+  }
   policyGeneration = (policyGeneration + 1) >>> 0;
   seq = (seq + 1) >>> 0;
   pub('policy', {
@@ -1222,7 +1257,8 @@ function sendPolicyRow(id) {
     request_id: seq,
     policy_generation: policyGeneration,
     count: 1,
-    targets: [{motor_id: id, enabled: el.enable.checked, kp, kd}],
+    targets: [{motor_id: id, enabled: el.enable.checked, kp, kd,
+               confirm_unprotected: el.enable.checked && unprotected}],
   });
   state.policy.set(id, {enabled: el.enable.checked, kp, kd});
   setPolResult(true, `策略已发 seq=${seq} gen=${policyGeneration}：m${id} ` +
@@ -1242,7 +1278,7 @@ function paramServiceName(typeName) {
 // 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /micro_ros_do/motor_policy
 // 话题（固件起把这三项从参数面退役）。
 const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit',
-  'limit_protect'];
+  'limit_protect', 'direction'];
 // 参数服务调用结果：id -> {enable, kp, ...}（字符串原值，NaN 为空）
 const paramCache = new Map();
 
@@ -1301,7 +1337,7 @@ function renderDevRows() {
   const tbody = $('paramRows');
   const ids = paramRowIds();
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="10">'
+    tbody.innerHTML = '<tr class="empty"><td colspan="11">'
       + (paramCache.size === 0
         ? '参数集为空（等待电机发现）'
         : `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余`)
@@ -1347,9 +1383,23 @@ function renderDevRows() {
       ? `<input type="checkbox" data-id="${id}" data-field="limit_protect"` +
         (protect === 1 ? ' checked' : '') +
         ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
-        '（该关节将没有任何限位在执行）。仅未运动时受理。">'
+        '（该关节将没有任何限位在执行）。仅未运动时受理。' +
+        '上电默认开（固件在回读比对之前写回）；取消后该台每次武装都要二次确认，' +
+        '且下次上电会自动恢复为开。">'
       : '<input type="checkbox" disabled title="设备还没回读到该对象">';
-    return `<tr>
+    // 方向：原值直通（0=CW / 1=CCW），点一下切换。翻转会让设备零点与 cnt 限位的
+    // 物理含义整体镜像，固件据此冻结该台（ZERO_STALE）直到重新设零成功。
+    const dir = Number(v['direction']);
+    const dirCell = Number.isFinite(dir)
+      ? `<button class="tiny-btn" data-dir="${id}" data-dir-cur="${dir}"` +
+        ' title="点击切换 CW / CCW。翻转会镜像设备零点与限位的物理含义，' +
+        '固件会冻结该台（拒绝武装）直到重新设零。仅未运动时受理。">' +
+        `${dir === 1 ? 'CCW' : 'CW'}</button>`
+      : '<button class="tiny-btn" disabled title="设备还没回读到该对象">--</button>';
+    // 保护确知为关的行标红：该关节此刻没有任何限位在跑。
+    const unprotected = Number.isFinite(protect) && protect === 0;
+    return `<tr${unprotected ? ' class="unprotected"' : ''}` +
+      `${unprotected ? ' title="保护已关：该关节无任何限位"' : ''}>
       <td class="num">${id}</td>
       <td>${model || '<span class="muted">--</span>'}</td>
       <td>${lifecyclePill(lc)}</td>
@@ -1357,6 +1407,7 @@ function renderDevRows() {
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td>${protectCell}</td>
+      <td>${dirCell}</td>
       <td><button class="tiny-btn" data-refresh="${id}">回读</button>
         <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
         <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
@@ -1365,6 +1416,10 @@ function renderDevRows() {
   tbody.querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('input', () => { inp.dataset.dirty = '1'; });
     inp.addEventListener('change', () => { inp.dataset.dirty = '1'; });
+  });
+  tbody.querySelectorAll('[data-dir]').forEach((btn) => {
+    btn.onclick = () => flipDirection(parseInt(btn.dataset.dir, 10),
+      parseInt(btn.dataset.dirCur, 10));
   });
   tbody.querySelectorAll('[data-refresh]').forEach((btn) => {
     btn.onclick = () => refreshDeviceParams(parseInt(btn.dataset.refresh, 10));
@@ -1419,9 +1474,10 @@ function devSlotNames(mask) {
 // 恢复口径（MISMATCH 用）：槽 0..4 在参数面，写回对应项即可；只剩槽 5
 // （0x2541 方向）没有参数项——它只能拿 cangaroo 或厂商上位机改回设备对象，
 // 再重连重读。
+// 恢复口径：六个槽位都在参数面里了。
 function devRecoveryText(mask) {
-  if ((mask & DEV_SLOT_EXTERNAL_MASK) !== 0) {
-    return '写回对应参数项即可；方向(0x2541)没有参数项，须用 cangaroo 或厂商工具改回后重连重读';
+  if ((mask & (1 << 5)) !== 0) {
+    return '方向(0x2541)无基线：在参数表点一次方向（CW/CCW）即建立基线并恢复';
   }
   return '写回对应项即可恢复';
 }

@@ -333,6 +333,10 @@ tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size:
 .pill.on { background: #0f2e20; border-color: #1d5537; color: var(--ok); }
 .pill.off { background: #331618; border-color: #5e2628; color: var(--err); }
 .pill.warn { background: #33280f; border-color: #5e4a1d; color: var(--warn); }
+
+/* 保护确知为关的行：该关节此刻没有任何限位在跑。 */
+tr.unprotected td { background: #2a1416; }
+tr.unprotected td.num { color: var(--err); }
 .pill.mid { background: #16233a; border-color: #2b4468; color: #9fb2d4; }
 
 /* ---------- 事件 ---------- */

@@ -5253,6 +5253,77 @@ static void test_status_exposes_device_safety_facts() {
   assert(!st[0].device_protect_enabled);
 }
 
+// 保护被手动关掉的台仍允许武装，但**每次**都要显式确认位：关保护 = 该关节没有
+// 任何限位在跑（CERB 是设备侧限位，固件没有软限位兜底）。
+static void test_enable_without_protection_needs_confirm() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  // 心跳必须持续喂：静默 100ms 会先被新鲜度级联判离线，测的就不是使能门禁了。
+  uint32_t t = run_heartbeat_only(&ctx, 7, 160U, 320U);
+
+  // 手动关保护（厂家原值 1 = 关）。
+  motor_protocol_config_request_t off = {};
+  off.request_id = 61U;
+  off.motor_id = 7;
+  off.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  off.safety_protect_raw = 1U;
+  motor_control_service(&ctx, t);
+  assert(motor_control_submit_config(&ctx, &off, t + 1U));
+  t = feed_safety_write(&ctx, 7, 1U, t + 2U);
+
+  motor_protocol_raw_frame_t hb = cerb_feedback(7, t);
+  motor_control_on_raw_frame(&ctx, &hb);
+  t += 2U;
+
+  motor_control_policy_snapshot_t snap = {};
+  snap.received_tick_ms = t;
+  snap.request_id = 500U;
+  snap.policy_generation = 1U;
+  snap.target_count = 1U;
+  snap.targets[0].motor_id = 7U;
+  snap.targets[0].enabled = true;
+  snap.targets[0].kp = 1.0f;
+  snap.targets[0].kd = 0.1f;
+  snap.targets[0].confirm_unprotected = false;
+  (void)motor_control_apply_policy(&ctx, &snap, t);
+
+  // ⚠️ 不能用 `policy_enable` 判别"这次武装被拒"：表项在发现时就把 policy_enable
+  // 默认为真（motor_control_discovery.c「未收到 Policy 前默认使能，全局门仍生效」）。
+  // 有判别力的证据是 ①该 request_id 的拒绝回告 ②代数未被推进。
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->last_failure_reason == MOTOR_CONTROL_FAULT_UNPROTECTED_UNCONFIRMED);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_NONE); // 不是设备故障
+  assert(has_result_event(&ctx, 500U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  assert(e->policy_generation == 0U); // 代数未被推进 = 没有落地
+
+  // 带确认位（代数继续前进）→ 受理。
+  snap.request_id = 501U;
+  snap.policy_generation = 2U;
+  snap.received_tick_ms = t + 2U;
+  snap.targets[0].confirm_unprotected = true;
+  (void)motor_control_apply_policy(&ctx, &snap, t + 2U);
+  assert(has_result_event(&ctx, 501U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->policy_generation == 2U); // 落地了
+
+  // 保护仍是"开"的台不受本门禁约束：确认位可有可无。
+  motor_control_context_t ctx2;
+  motor_control_init(&ctx2, g_adapters, 2);
+  bring_cerb_to_ready(&ctx2, 7, "cerb_r58_101", 100);
+  motor_control_policy_snapshot_t snap2 = {};
+  snap2.received_tick_ms = 400U;
+  snap2.request_id = 600U;
+  snap2.policy_generation = 1U;
+  snap2.target_count = 1U;
+  snap2.targets[0].motor_id = 7U;
+  snap2.targets[0].enabled = true;
+  snap2.targets[0].kp = 1.0f;
+  snap2.targets[0].kd = 0.1f;
+  snap2.targets[0].confirm_unprotected = false;
+  (void)motor_control_apply_policy(&ctx2, &snap2, 401U);
+  assert(has_result_event(&ctx2, 600U, MOTOR_PROTOCOL_CONFIG_OK)); // 保护在开 → 放行
+}
+
 int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
@@ -5263,6 +5334,7 @@ int main() {
   test_boot_normalize_skips_direction_without_record();
   test_boot_normalize_skips_illegal_direction_value();
   test_direction_flip_freezes_until_zero();
+  test_enable_without_protection_needs_confirm();
   test_boot_normalize_direction_write_is_not_a_flip();
   test_direction_flip_event_carries_fault_code();
   test_direction_flip_during_enable_settle_soft_stops();

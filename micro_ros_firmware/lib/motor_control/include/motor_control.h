@@ -89,7 +89,12 @@ typedef enum {
   // 方向被翻转后必须重新设零：设备里零点与 cnt 限位的物理含义已整体镜像。
   // 与 STALE_GENERATION 不同，它**是**安全状态（该台此刻不能动），因此进
   // unified_fault_code 并冻结 lifecycle；解除靠 SET_ZERO 成功，不靠"清错"。
-  MOTOR_CONTROL_FAULT_ZERO_STALE = 8U
+  MOTOR_CONTROL_FAULT_ZERO_STALE = 8U,
+  // 武装时该台保护**确知为关**却没带显式确认位（2026-09-20 owner 决定）。
+  // 与 STALE_GENERATION 同待遇：只写入 last_failure_reason 供本机诊断，**不进**
+  // unified_fault_code、不改 lifecycle——它不是设备故障，而是本机拒绝了一条
+  // 缺确认的授权请求（关保护 = 该关节没有任何限位在跑）。
+  MOTOR_CONTROL_FAULT_UNPROTECTED_UNCONFIRMED = 9U
 } motor_control_fault_code_t;
 
 // 设备参数初始化状态（上电/重连后回读设备 → 与固件记录比对）。
@@ -203,6 +208,9 @@ typedef struct {
   bool enabled;
   float kp;
   float kd;
+  // 该台设备侧保护**确知为关**时的显式武装确认（每次都要）。它不是代数门：
+  // policy_generation 承担「未武装 → 武装需新意图」，两者语义不同、不能互替。
+  bool confirm_unprotected;
 } motor_control_policy_target_t;
 
 typedef struct {

@@ -1027,6 +1027,9 @@ bool motor_control_apply_policy(motor_control_context_t *ctx,
     request.kp = snapshot->targets[i].kp;
     request.kd = snapshot->targets[i].kd;
     request.policy_generation = snapshot->policy_generation;
+    // 保护确知为关时的显式武装确认必须一路带到门禁——漏了这一行，字段从话题
+    // 漂到内核也是一路"存在但无效"，门禁永远不触发（实测踩过）。
+    request.confirm_unprotected = snapshot->targets[i].confirm_unprotected;
     (void)motor_control_apply_policy_entry(ctx, entry, &request, now_ms);
   }
   return true;

@@ -34,6 +34,9 @@ typedef struct {
   bool enabled;
   float kp;
   float kd;
+  // 保护确知为关时的显式武装确认（每次都要），见 motor_control_fault_code_t
+  // 的 UNPROTECTED_UNCONFIRMED。
+  bool confirm_unprotected;
 } control_policy_target_t;
 
 typedef struct {

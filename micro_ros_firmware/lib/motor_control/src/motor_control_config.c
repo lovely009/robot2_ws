@@ -925,6 +925,30 @@ static bool reject_busy(motor_control_context_t *ctx,
   return false;
 }
 
+// 该台设备侧保护是否**确知为关**（厂家原值 1 = 关）。未核验过（影子无该位）
+// 不算"确知"——那种情况本来也到不了使能路径（设备参数未初始化会先拦）。
+static bool motor_control_unprotected_needs_confirm(
+    const motor_control_entry_t *entry) {
+  const uint8_t bit = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+  return (entry->dev_raw_present & bit) != 0U &&
+         entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 1U;
+}
+
+// 保护被手动关掉的台仍允许武装，但**每次**都要显式确认：关保护 = 该关节没有
+// 任何限位在跑（CERB 是设备侧限位，固件没有软限位兜底）。判据取设备真值影子，
+// 拒绝只进 last_failure_reason（不是设备故障，与 STALE_GENERATION 同待遇）。
+static bool reject_if_unprotected_unconfirmed(
+    motor_control_context_t *ctx, motor_control_entry_t *entry,
+    const motor_protocol_config_request_t *request, uint32_t now_ms) {
+  if (!request->enable || request->confirm_unprotected ||
+      !motor_control_unprotected_needs_confirm(entry)) {
+    return false;
+  }
+  entry->last_failure_reason = MOTOR_CONTROL_FAULT_UNPROTECTED_UNCONFIRMED;
+  (void)reject_invalid(ctx, entry, request, now_ms);
+  return true;
+}
+
 // 策略落地：enable + MIT 增益，一次原子落地。SET_POLICY config kind 与批量
 // 入口 motor_control_apply_policy 共用，避免两条路径的门禁与钳制漂移。
 //
@@ -957,6 +981,9 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
   if (request->enable && !motor_control_dev_params_allow_motion(entry)) {
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
     return reject_invalid(ctx, entry, request, now_ms);
+  }
+  if (reject_if_unprotected_unconfirmed(ctx, entry, request, now_ms)) {
+    return false;
   }
   // 增益先在本地落定（钳到型号上限），再动使能位——顺序即语义。
   entry->kp =
@@ -1225,6 +1252,9 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         if (!motor_control_dev_params_allow_motion(entry)) {
           entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
           return reject_invalid(ctx, entry, request, now_ms);
+        }
+        if (reject_if_unprotected_unconfirmed(ctx, entry, request, now_ms)) {
+          return false;
         }
         entry->policy_enable = true;
         entry->motion_authorized = true;

@@ -412,6 +412,7 @@ static void convert_policy(const control_policy_snapshot_t *in,
     out->targets[i].enabled = in->targets[i].enabled;
     out->targets[i].kp = in->targets[i].kp;
     out->targets[i].kd = in->targets[i].kd;
+    out->targets[i].confirm_unprotected = in->targets[i].confirm_unprotected;
   }
 }
 
@@ -503,6 +504,7 @@ static void convert_config(const control_mailbox_config_request_t *in,
       break;
     case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
       out->enable = in->value.enable;
+      out->confirm_unprotected = in->value.confirm_unprotected;
       break;
     case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
       out->max_velocity_rad_s = in->value.max_velocity_rad_s;
@@ -527,6 +529,7 @@ static void convert_config(const control_mailbox_config_request_t *in,
       out->kp = in->value.policy.kp;
       out->kd = in->value.policy.kd;
       out->policy_generation = in->value.policy.generation;
+      out->confirm_unprotected = in->value.policy.confirm_unprotected;
       break;
     default:
       break;

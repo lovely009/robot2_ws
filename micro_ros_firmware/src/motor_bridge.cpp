@@ -247,6 +247,8 @@ static void policy_cb(const void *msgin) {
     snapshot.targets[i].enabled = msg->targets.data[i].enabled;
     snapshot.targets[i].kp = msg->targets.data[i].kp;
     snapshot.targets[i].kd = msg->targets.data[i].kd;
+    snapshot.targets[i].confirm_unprotected =
+        msg->targets.data[i].confirm_unprotected;
   }
   (void)motor_rt_submit_policy(&snapshot); // 非法策略由 mailbox 整条拒绝并计数
 }

@@ -73,6 +73,8 @@ typedef struct {
   bool enable;
   float kp;
   float kd;
+  // 保护确知为关时的显式武装确认（每次都要）。
+  bool confirm_unprotected;
 } control_mailbox_policy_t;
 
 typedef struct {
@@ -83,6 +85,9 @@ typedef struct {
   union {
     uint8_t mode;
     bool enable;
+    // SET_ENABLE：该台保护确知为关时的显式武装确认（每次都要）。与 SET_POLICY
+    // 载荷里的同名字段同义——两条使能入口共用内核同一道门禁。
+    bool confirm_unprotected;
     control_mailbox_gains_t gains;
     control_mailbox_position_limits_t position_limits;
     float max_velocity_rad_s; // SET_VELOCITY_LIMIT（关节侧 rad/s）

@@ -235,6 +235,9 @@ typedef struct {
   // SET_POLICY：代数必须严格前进才受理「从未武装到武装」的迁移（防周期重发
   // 自动复权）。其余 kind 忽略本字段。
   uint32_t policy_generation;
+  // SET_ENABLE / SET_POLICY：该台保护**确知为关**时的显式武装确认。缺它一律拒
+  // （内核判 UNPROTECTED_UNCONFIRMED）；保护为开或状态未知时本字段无作用。
+  bool confirm_unprotected;
 } motor_protocol_config_request_t;
 
 // 设备端参数槽位（顺序是内核影子/固件记录/比对的契约，勿重排；前四槽与

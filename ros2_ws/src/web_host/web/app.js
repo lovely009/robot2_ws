@@ -121,8 +121,17 @@ function pub(key, message) {
   return true;
 }
 
+// 自动重连：roslibjs 自身**不重连**。rosbridge 一重启（改 msg、改 launch 都会重启），
+// 页面就静默变哑——表还在（ID 来自参数缓存），但型号/生命周期/位置全空，看起来像
+// "固件没数据"。第一次踩这个坑花了不少时间，所以默认按 2s 退避自动重连；
+// 用户主动点"断开"时不重连。
+let reconnectTimer = null;
+let manualDisconnect = false;
+
 function connect() {
-  disconnect();
+  manualDisconnect = false;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  closeSocket();
   const url = $('rosUrl').value.trim();
   try {
     ros = new ROSLIB.Ros({url});
@@ -137,17 +146,33 @@ function connect() {
   });
   ros.on('error', () => setConn(false, '连接错误'));
   ros.on('close', () => {
-    setConn(false);
-    stopStream();
-    subs = [];
-    Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
-    Object.keys(publishers).forEach((k) => delete publishers[k]);
+    closeSocket();
+    // 掉线即清场：陈旧的表比空表更容易误导（曾把"页面掉线"看成"固件没数据"）。
+    state.motors.clear();
+    paramCache.clear();
+    renderMotors();
+    renderParamRows();
+    if (!manualDisconnect) {
+      setConn(false, '已断开，2s 后重连…');
+      reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 2000);
+    }
   });
 }
 
-function disconnect() {
+// 只关 socket，不动连接意图（自动重连要复用）。
+function closeSocket() {
   stopStream();
   if (ros) { try { ros.close(); } catch (e) {} ros = null; }
+  subs = [];
+  Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
+  Object.keys(publishers).forEach((k) => delete publishers[k]);
+}
+
+// 用户主动断开：不再自动重连。
+function disconnect() {
+  manualDisconnect = true;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  closeSocket();
   setConn(false);
 }
 

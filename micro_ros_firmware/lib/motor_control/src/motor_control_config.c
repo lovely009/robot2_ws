@@ -112,6 +112,33 @@ static bool dev_params_match_record(const motor_control_entry_t *entry) {
   return dev_params_mismatch_mask(entry) == 0U;
 }
 
+// 冻结为 CONFIG_CONFLICT 的统一入口（设备参数未初始化 / 方向翻转共用）：
+// 先把"受控集合"里的电机停下来，再清授权/目标/使能位并写成因。
+// 受控集合由 motor_control_soft_stop_entry 自己界定——ACTIVE，或**使能整定窗内
+// 的 READY_DISABLED（使能帧已发、motion_enabled=true，生命周期还没到 ACTIVE）**。
+// 那个窗内状态必须覆盖：跳过它就会让设备带着上一条命令保持使能，而内核已标记
+// 冻结——设备限位拦得住"跑出范围"，拦不住"带着旧零点/旧命令继续走"。
+// 事件由各调用方按自己的语义域补出（DEV_INIT 报定论、CONFIG_CONFLICT 报成因码），
+// 本助手只管"停/清/写码"。
+static void freeze_entry_as_conflict(motor_control_context_t *ctx,
+                                     motor_control_entry_t *entry, uint16_t fault,
+                                     uint32_t now_ms) {
+  if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
+      entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP ||
+      (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
+       entry->motion_enabled)) {
+    motor_control_soft_stop_entry(ctx, entry, now_ms);
+  }
+  entry->motion_enabled = false;
+  entry->enable_pending = false;
+  entry->has_target = false;
+  entry->motion_authorized = false;
+  entry->policy_enable = false;
+  entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
+  entry->unified_fault_code = fault;
+  entry->last_failure_reason = fault;
+}
+
 // 定论落地：写 dev_init，并按结论放行/冻结该台。调用点必须在 tx_active
 // 复位之后（冻结路径与故障路径同形，避免事务重入）。
 static void apply_dev_init_result(motor_control_context_t *ctx,
@@ -152,46 +179,27 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
     // 上电自检与写入都核验过，真出现不一致属于异常，此时按"停止运动但保留
     // 阻尼"处理（TBD-SAFETY-01 口径），不把力矩瞬间撤掉。
     // 静止态（READY_DISABLED 等）没有要停的东西，直接锁存结论。
-    if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
-        entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP ||
-        (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
-         entry->motion_enabled)) {
-      motor_control_soft_stop_entry(ctx, entry, now_ms);
-    }
     // 与冲突/故障同口径冻结（ARD §36：失败不自动恢复运动授权）：结论未转好
     // 之前不得使能，恢复需显式 SET_ENABLE(true) + 新快照。
-    entry->motion_enabled = false;
-    entry->enable_pending = false;
-    entry->has_target = false;
-    entry->motion_authorized = false;
-    entry->policy_enable = false;
-    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
-    entry->unified_fault_code = MOTOR_CONTROL_FAULT_DEV_PARAM;
-    entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
+    freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
                            entry->motor_id, entry->bus_index, (uint16_t)state,
                            detail);
 }
 
-// 方向翻转后的冻结：与"设备参数未初始化"同形（清授权、清目标、拒绝使能），
-// 但成因不同、解除方式也不同（SET_ZERO 成功即解，不需要点"清错"）。
+// 方向翻转后的冻结：与"设备参数未初始化"同形（受控集合内先软停，再清授权、
+// 清目标、拒绝使能），但成因不同、解除方式也不同（SET_ZERO 成功即解，不需要
+// 点"清错"）。
 static void motor_control_freeze_zero_stale(motor_control_context_t *ctx,
                                             motor_control_entry_t *entry,
                                             uint32_t now_ms) {
-  if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
-      entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
-    motor_control_soft_stop_entry(ctx, entry, now_ms); // 防御：写门禁本应已挡住
-  }
-  entry->motion_enabled = false;
-  entry->enable_pending = false;
-  entry->has_target = false;
-  entry->motion_authorized = false;
-  entry->policy_enable = false;
-  entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
-  entry->unified_fault_code = MOTOR_CONTROL_FAULT_ZERO_STALE;
-  entry->last_failure_reason = MOTOR_CONTROL_FAULT_ZERO_STALE;
-  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
+  freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_ZERO_STALE, now_ms);
+  // 成因走 CONFIG_CONFLICT 事件：它的 reason 域**就是**故障码表（与冲突锁存
+  // 的 reason=4 同形，见 MotorEvent.msg）。不能复用 DEV_INIT——那个事件的
+  // reason 域是 dev_init(0..4)，塞故障码 8 会让页面把该台误标"未初始化"并抹掉
+  // 槽位位图，反而看不见"方向已翻转，需重新设零"。
+  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_CONFLICT,
                            entry->motor_id, entry->bus_index,
                            (uint16_t)MOTOR_CONTROL_FAULT_ZERO_STALE, 0U);
 }

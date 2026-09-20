@@ -681,6 +681,22 @@ function trajRowsPerSegment(nMotors) {
   return Math.max(1, Math.min(byFw, byLink) - 1);
 }
 
+// 先把整条轨迹的切点一次算完：切点只取决于 rows/per（确定性），所以段数可以**精确**
+// 得到——此前用 ceil(行数/per) 估，而实际切点落在更早的"安静行"上，段数被低估
+// （真实 9 段却显示"6/5 段"，纯属我的估算错误）。
+function planSegmentEnds(rows, per) {
+  const ends = [];
+  let st = 0;
+  while (st < rows.length) {
+    const e = pickSegmentEnd(rows, st, per);
+    if (e <= st && st < rows.length - 1) break; // 不前进：护栏，宁可少播一段
+    ends.push(e);
+    if (e >= rows.length - 1) break;
+    st = e;
+  }
+  return ends;
+}
+
 // 段边界处固件会把端点切矢归零（F–C 规则）→ 速度短暂到 0。把断点选在**运动最慢**
 // 的那一行（停顿点/换向点），顿挫就基本看不出来。在 [start+per/2, start+per] 里挑
 // 位移最小的一行；没有更安静的就越靠后切（保证进展）。
@@ -1029,7 +1045,7 @@ function drawHorizon() {
 }
 
 // ---------- 示教（点位序列） ----------
-const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4, nextRow: 0};
+const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4, nextRow: 0, segEnds: []};
 
 function setTeach(cls, text) {
   const el = $('teachStatus');
@@ -1134,43 +1150,37 @@ function teachPlay() {
   teachStopTimer();
   teach.playing = true;
   teach.rows = rows;
-  teach.seg = 0;
-  teach.nextRow = 0;
   teach.nMotors = ids.length;
-  // 超过单条上限就自动分段（段尾挑最安静的一行，顿挫最小）。
-  teach.segTotal = rows.length <= per + 1
-    ? 1 : Math.ceil(rows.length / per);
+  teach.segEnds = planSegmentEnds(rows, per);
+  teach.seg = 0;
+  teach.segTotal = teach.segEnds.length; // 精确段数（不再是估算）
+  teach.nextRow = 0;
+  if (teach.segTotal === 0) {
+    teach.playing = false;
+    setTeach('err', '分段计划为空，未下发');
+    return;
+  }
   teachPlaySegment();
 }
 
 // 逐段播放。每段取 ≤ per 行、**外加下一行当端点**——这样段与段之间位置是连续的
 // （端点那一行既是上一段的终点、也是下一段的起点）。段边界处固件按 F–C 规则把
-// 端点切矢置零，所以速度会在边界短暂降到 0（位置不跳）——这是 BE 链路不分片
-// 换来的代价；把 per 调大能减少边界，但单条就又超预算了。
+// 端点切矢置零，所以速度会在边界短暂降到 0（位置不跳）。
+// 分段的根源是**固件的点数组上限 256**（四处各存一份，加不上去），不是链路的锅：
+// 单条超过 256 点会把 MCU 打死。段尾挑在"最安静的行"上，正是为了让这些归零落在
+// 真停顿处、看不出来。
 function teachPlaySegment() {
   if (!teach.playing) return;
   const rows = teach.rows;
-  const per = trajRowsPerSegment(teach.nMotors);
   const start = teach.nextRow || 0;
-  if (start >= rows.length) {
+  if (teach.seg >= teach.segEnds.length) {
     teach.playing = false;
     teachStopTimer();
     setTeach('ok', `✓ 播放完成：${teach.seg} 段 / ${rows.length} 行`);
     return;
   }
-  // 段尾 = 最安静的一行（含它当端点），下一段从**同一行**接着走。
-  const end = pickSegmentEnd(rows, start, per);
-  // 兜底护栏：分段是页面里的循环。一旦断点不前进（或段数失控），循环会**卡死浏览器
-  // 标签页**——真踩过（旧版搜索区间为空时返回起点）。宁可停下报错，不要挂页面。
-  if ((end <= start && start < rows.length - 1) || teach.seg > 2000) {
-    teach.playing = false;
-    teachStopTimer();
-    setTeach('err', '分段未前进，已停止（把这条轨迹发我，是断点选择的 bug）');
-    return;
-  }
-  // 末段结束时把 nextRow 推到末尾之后——否则"段尾=下一段起点"的不变量在最后一行
-  // 上退化成原地不动（同上）。
-  teach.nextRow = end >= rows.length - 1 ? rows.length : end;
+  const end = teach.segEnds[teach.seg];
+  teach.nextRow = end;
   const slice = rows.slice(start, end + 1);
   const {points, ids} = teachRowsToTrajectory(slice);
   if (!points.length) {

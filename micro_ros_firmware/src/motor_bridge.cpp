@@ -526,7 +526,13 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_command_up = true;
 
   sub_opts = rcl_subscription_get_default_options();
-  sub_opts.qos = qos_stream();
+  // 轨迹必须 reliable：它是**一条大消息**（1080 路点 ≈ 21.6 KB），而 best-effort
+  // 流**不分片**（fragmented 退回对 BE 判 INVALID）→ 超过一个 MTU(512 B) 就被
+  // **静默丢弃**（固件收不到，上位机也无从知道）。reliable 支持分片，配合
+  // microros_user.meta 的 RMW_UXRCE_STREAM_HISTORY_INPUT=48（24 KB 输入缓冲）
+  // 才能整条收下。发布侧 rosbridge 默认就是 reliable（TRANSIENT_LOCAL），能配上。
+  // ⚠️ 改这两个值必须**同时**改：只改 QoS 不加大缓冲，分片装不下照样丢。
+  sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_trajectory_sub, node,
                             ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
                                                         MotorTrajectory),

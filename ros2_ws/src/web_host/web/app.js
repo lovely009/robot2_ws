@@ -658,7 +658,13 @@ const TRAJ_MAX_MOTORS = 64;
 // 4 台电机时就是 **5 行**。
 // ⚠️ 超了不是报错，是**静默丢弃**（固件根本收不到，页面也无从知道）——所以必须
 // 在这里按预算切段，别指望固件侧的上限校验（那是 256 点，远高于链路能过的量）。
-const TRAJ_LINK_BUDGET_BYTES = 470; // ≈ MTU 512 − 固定开销
+// ⚠️ 2026-09-20 起固件侧已改：轨迹订阅 = reliable（支持分片）+ 输入流缓冲
+// RMW_UXRCE_STREAM_HISTORY_INPUT=48（512 B × 48 = 24 KB）→ 单条可到 ~23 KB。
+// 这里按 22 KB 保守取值：4 台电机约 275 行/段 → 1080 点（270 行）**一条就发完**，
+// 不再分段。
+// 但**预算必须与已烧录的固件匹配**：跑着旧固件（BE、512 B）时大消息会被静默丢弃，
+// 那种情况下要按 470 B 用（即每段 4 行）。改这两处务必同时改 meta 并重烧。
+const TRAJ_LINK_BUDGET_BYTES = 22000;
 const TRAJ_POINT_BYTES = 20;
 
 function trajRowsPerSegment(nMotors) {

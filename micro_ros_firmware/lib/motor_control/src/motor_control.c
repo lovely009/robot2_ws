@@ -1417,6 +1417,18 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
     status->limit_flags = entry->limit_flags;
     status->transaction_state = entry->tx_active ? 1U : 0U;
     status->last_failure_reason = entry->last_failure_reason;
+    // 设备侧安全事实：只暴露正向语义，厂家原值不越过协议层。
+    const uint8_t safety_bit =
+        (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+    const uint8_t dir_bit = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+    status->device_protect_known = (entry->dev_raw_present & safety_bit) != 0U;
+    // 设备原值 0 = 保护生效，向外一律给正向布尔。
+    status->device_protect_enabled =
+        status->device_protect_known &&
+        entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY] == 0U;
+    status->device_direction_known = (entry->dev_raw_present & dir_bit) != 0U;
+    status->device_direction =
+        (uint8_t)entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
   }
   return count;
 }

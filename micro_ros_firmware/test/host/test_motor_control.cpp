@@ -4585,6 +4585,34 @@ static void test_trajectory_reject_event_carries_id_and_index() {
   assert(found2);
 }
 
+// 状态视图暴露设备侧安全事实（正向语义！）：出厂的 kR58Raw[4]=0（保护开）→
+// enabled=true；未回读时两个 known 都是 false，值不得被当成真值。
+static void test_status_exposes_device_safety_facts() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+
+  motor_control_status_t st[MOTOR_CONTROL_MAX_MOTORS];
+  assert(motor_control_copy_statuses(&ctx, st, MOTOR_CONTROL_MAX_MOTORS, 200U) == 1U);
+  assert(st[0].device_protect_known);
+  assert(st[0].device_protect_enabled); // 设备 raw 0 = 保护生效
+  assert(st[0].device_direction_known);
+  assert(st[0].device_direction == 0U); // CW
+
+  // 手动关保护后：known 仍为真，enabled 翻假（正向语义取自设备 raw）。
+  motor_protocol_config_request_t req = {};
+  req.request_id = 91U;
+  req.motor_id = 7;
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT;
+  req.safety_protect_raw = 1U;
+  motor_control_service(&ctx, 200);
+  assert(motor_control_submit_config(&ctx, &req, 201));
+  (void)feed_safety_write(&ctx, 7, 1U, 202);
+  assert(motor_control_copy_statuses(&ctx, st, MOTOR_CONTROL_MAX_MOTORS, 210U) == 1U);
+  assert(st[0].device_protect_known);  // 写后核验落位 → 仍然"已知"
+  assert(!st[0].device_protect_enabled);
+}
+
 int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
@@ -4631,6 +4659,7 @@ int main() {
   test_diagnostics_counters_are_exposed();
   test_trajectory_state_reports_progress();
   test_trajectory_reject_event_carries_id_and_index();
+  test_status_exposes_device_safety_facts();
   run_all_tests();
   printf("test_motor_control: all passed\n");
   return 0;

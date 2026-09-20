@@ -320,6 +320,11 @@ static void publish_statuses() {
     out.limit_flags = statuses[i].limit_flags;
     out.online = statuses[i].online;
     out.lifecycle = statuses[i].lifecycle;
+    // 设备侧安全事实（正向语义；known=false 时值无意义，页面显示 --）。
+    out.device_protect_known = statuses[i].device_protect_known;
+    out.device_protect_enabled = statuses[i].device_protect_enabled;
+    out.device_direction_known = statuses[i].device_direction_known;
+    out.device_direction = statuses[i].device_direction;
   }
   g_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_status_pub, &g_status_msg, nullptr);

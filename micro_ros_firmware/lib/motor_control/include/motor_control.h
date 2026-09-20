@@ -241,6 +241,14 @@ typedef struct {
   uint32_t limit_flags;
   uint8_t transaction_state; // 0=空闲，1=配置事务进行中
   uint16_t last_failure_reason;
+  // 设备侧安全事实（只读遥测；与参数面 m<id>.limit_protect / m<id>.direction
+  // 同源，都是内核设备影子）。**正向语义**：enabled=true 表示保护生效，厂家
+  // 原值（1 = 关）止步于协议层，不许泄漏到这一层。
+  // known=false = 本会话尚未核验过该槽（回读/写后核验都没有），此时值无意义。
+  bool device_protect_known;
+  bool device_protect_enabled;
+  bool device_direction_known;
+  uint8_t device_direction; // 0 = CW，1 = CCW
 } motor_control_status_t;
 
 // ---------------------------------------------------------------------------

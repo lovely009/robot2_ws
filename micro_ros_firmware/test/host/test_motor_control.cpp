@@ -4618,6 +4618,44 @@ static void test_trajectory_hermite_no_overshoot_and_zero_endpoints() {
   assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s) < 1e-6f);
 }
 
+// 轨迹执行时 **位置与速度必须同向**：执行侧速度是位置时间线的解析导数（路点里的
+// velocity 字段被忽略，见 motor_control.c 的求值注释）。符号写反的后果不是"看着不对"
+// 而是 MIT 律里的 kd·(v_des − v) 变成**负阻尼**。这条同时钉死两件事：
+//   ① 上升段速度为正、下降段速度为负（同向）；
+//   ② 路点里塞一个假的 velocity 不影响执行速度（证明它是解析求导，不是直通）。
+static void test_trajectory_position_velocity_same_sign() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_two_active(&ctx, 5, 7, 100);
+
+  motor_control_trajectory_t t = make_trajectory(1U, 300U);
+  traj_add_motor(&t, 5);
+  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);      // 起 0
+  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);   // 1s 升到 +1.0
+  traj_add_point(&t, 2000U, 5, -0.5f, 0.0f);  // 2s 降到 −0.5
+  // 路点里塞满**负**的假速度：若固件直通它，上升段的 v ≥ 0 断言必然失败。
+  for (uint16_t i = 0U; i < t.point_count; ++i) {
+    t.points[i].velocity_rad_s = -9.0f;
+  }
+  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
+
+  int up = 0, down = 0;
+  float prev = 0.0f;
+  for (uint32_t e = 0U; e <= 2000U; e += 20U) {
+    motor_control_trajectory_step(&ctx, 300U + e);
+    const float x = entry_of(&ctx, 5)->target_position_rad;
+    const float v = entry_of(&ctx, 5)->target_velocity_rad_s;
+    if (e == 0U) { prev = x; continue; }
+    const float dx = x - prev;
+    prev = x;
+    // 单调段上解析导数是**弱**同号的：局部极值处切矢恰为 0（F–C 限幅），
+    // 而那一拍的位置差分仍可能非零——所以断言取 ≥/≤ 而不是 >/<。
+    if (dx > 1e-4f) { assert(v >= 0.0f); if (v > 1e-4f) up++; }
+    else if (dx < -1e-4f) { assert(v <= 0.0f); if (v < -1e-4f) down++; }
+  }
+  assert(up >= 10 && down >= 10); // 两个方向都真的采到了样本
+}
+
 // 取消（空轨迹）与被替换：移出集合的电机立即软停释放。
 static void test_trajectory_cancel_and_replacement_release_motors() {
   motor_control_context_t ctx;
@@ -5211,6 +5249,7 @@ int main() {
   test_trajectory_interpolates_and_clamps_at_end();
   test_trajectory_hermite_c1_continuity();
   test_trajectory_hermite_no_overshoot_and_zero_endpoints();
+  test_trajectory_position_velocity_same_sign();
   test_trajectory_cancel_and_replacement_release_motors();
   test_trajectory_survives_snapshot_timeout();
   test_snapshot_timeout_without_trajectory_revokes_globally();

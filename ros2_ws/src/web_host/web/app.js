@@ -625,6 +625,25 @@ function sendTargets(targets) {
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
 
+// ── 链路预算：为什么轨迹必须分段发 ──────────────────────────────────────
+// 固件的轨迹订阅是 **best-effort**（motor_bridge.cpp 的 qos_stream），而 micro-ROS
+// 的 BE 流**不分片**（fragmented 退回对 BE 直接判 INVALID）：单条消息必须塞进一个
+// MTU。serial 传输 MTU = 512 B；每个路点线上 20 B（uint32 时间 + uint16 id +
+// 2 B 对齐 + 3×float32），加固定开销约 40 B → **一次最多约 23 个路点**，
+// 4 台电机时就是 **5 行**。
+// ⚠️ 超了不是报错，是**静默丢弃**（固件根本收不到，页面也无从知道）——所以必须
+// 在这里按预算切段，别指望固件侧的上限校验（那是 256 点，远高于链路能过的量）。
+const TRAJ_LINK_BUDGET_BYTES = 470; // ≈ MTU 512 − 固定开销
+const TRAJ_POINT_BYTES = 20;
+
+function trajRowsPerSegment(nMotors) {
+  const maxPoints = Math.floor(TRAJ_LINK_BUDGET_BYTES / TRAJ_POINT_BYTES); // ≈23
+  // 每段还会**多带一行当端点**（段间位置连续），所以按 (per+1) 行算预算：
+  // 4 台电机 → maxPoints/4 = 5 → per = 4，即一段 5 行 = 20 点 ≈ 440 B < 512 ✓
+  const rows = Math.floor(maxPoints / Math.max(1, nMotors));
+  return Math.max(1, rows - 1);
+}
+
 function trajOverflowNote(points, ids) {
   if (points <= TRAJ_MAX_POINTS && ids <= TRAJ_MAX_MOTORS) return '';
   return `；⚠ ${points} 点 / ${ids} 台超固件上限（${TRAJ_MAX_POINTS} 点、`
@@ -938,7 +957,7 @@ function drawHorizon() {
 }
 
 // ---------- 示教（点位序列） ----------
-const teach = {playing: false, timer: null, idx: 0};
+const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4};
 
 function setTeach(cls, text) {
   const el = $('teachStatus');
@@ -1034,16 +1053,52 @@ function teachPlay() {
   if (!rows.length) { setTeach('err', '没有点位'); return; }
   const {points, ids} = teachRowsToTrajectory(rows);
   if (!points.length) { setTeach('err', '所有点位都是空的'); return; }
-  // 先自查上限再发：固件对超限轨迹是静默丢弃，页面不能替它报成功。
+  // 固件侧硬上限（256 点）先自查：那是"整条丢弃"，不是链路问题。
   const over = trajOverflowNote(points.length, ids.length);
   if (over) { setTeach('err', '✗ 未下发' + over); return; }
   stopStream(); // 轨迹独占这些电机：先停 100Hz 连发，避免两条命令源分叉
   teachStopTimer();
   teach.playing = true;
   teach.rows = rows;
+  teach.seg = 0;
+  teach.nMotors = ids.length;
+  teach.segTotal = Math.ceil(rows.length / trajRowsPerSegment(ids.length));
+  teachPlaySegment();
+}
+
+// 逐段播放。每段取 ≤ per 行、**外加下一行当端点**——这样段与段之间位置是连续的
+// （端点那一行既是上一段的终点、也是下一段的起点）。段边界处固件按 F–C 规则把
+// 端点切矢置零，所以速度会在边界短暂降到 0（位置不跳）——这是 BE 链路不分片
+// 换来的代价；把 per 调大能减少边界，但单条就又超预算了。
+function teachPlaySegment() {
+  if (!teach.playing) return;
+  const rows = teach.rows;
+  const per = trajRowsPerSegment(teach.nMotors);
+  const start = teach.seg * per;
+  if (start >= rows.length) {
+    teach.playing = false;
+    teachStopTimer();
+    setTeach('ok', `✓ 播放完成：${teach.seg} 段 / ${rows.length} 行`);
+    return;
+  }
+  const slice = rows.slice(start, Math.min(rows.length, start + per + 1));
+  const {points, ids} = teachRowsToTrajectory(slice);
+  if (!points.length) {
+    teach.playing = false;
+    setTeach('err', '段内点位全空，已停止');
+    return;
+  }
   const res = sendTrajectory(points, ids);
-  setTeach(res.ok ? 'ok' : 'err',
-    (res.ok ? '✓ 已托管给 MCU：' : '✗ ') + res.msg);
+  if (!res.ok) {
+    teach.playing = false;
+    setTeach('err', '✗ ' + res.msg);
+    return;
+  }
+  // 本段时长 = 除端点行以外的等待之和（端点行只标位置、不再等）。
+  const durMs = slice.slice(0, -1).reduce((a, r) => a + r.wait, 0);
+  teach.seg++;
+  setTeach('ok', `▸ 播放中 ${teach.seg}/${teach.segTotal} 段（每段 ${per} 行）`);
+  teach.timer = setTimeout(teachPlaySegment, durMs + 150); // +150ms 余量：受理/启动
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消

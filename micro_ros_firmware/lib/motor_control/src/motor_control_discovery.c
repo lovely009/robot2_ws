@@ -136,6 +136,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     // 重连后重新识别：身份是设备事实，可能在换机/改接线后已变；旧 profile
     // 与旧读数一并作废（identity_read_done 复位 → service 复检时重发）。
     entry->identity_read_done = false;
+    entry->identity_read_attempts = 0U;
+    entry->identity_read_retry_tick_ms = 0U;
     entry->identity_size = 0U;
     entry->identity_read_overflow = false;
     entry->profile = NULL;

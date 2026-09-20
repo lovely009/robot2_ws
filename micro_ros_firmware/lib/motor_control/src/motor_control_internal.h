@@ -27,6 +27,12 @@ typedef struct {
   size_t identity_size;
   bool identity_read_overflow; // 回串超出容量 → 读取失败（不用残缺串绑定）
   bool identity_read_done;
+  // 身份读取的重试（2026-09-20 新增）：**只对"读失败"重试**。此前成败皆置 done，
+  // 于是一次瞬态失败（超时 / 被 ABORT / CANable 拔插扰动总线）会让该台在**整场
+  // 上电周期**里不可控、总线上也不再有任何 SDO——真机踩过（m1 卡在 IDENTIFYING）。
+  // 读成功但目录里没有该串仍是立刻定论：那是设备事实，多问几次不会变。
+  uint8_t identity_read_attempts;
+  uint32_t identity_read_retry_tick_ms;
   motor_control_lifecycle_t lifecycle;
   bool online;
 

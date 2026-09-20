@@ -1024,39 +1024,59 @@ static void test_identity_string_match_is_exact() {
   assert(motor_control_profile_sole(&motor_protocol_vaxor_adapter) != NULL);
   assert(motor_control_profile_sole(&motor_protocol_cerb_adapter) == NULL);
 }
-
-// 身份读取失败的终态：不绑定、不逐帧重试（只发一次事务）；超时同理。
-static void test_identity_read_failure_stays_unbound_without_retry() {
+// 身份读**失败**（设备不应答）→ 退避重试 ≤3 次，用尽才判"不可识别"。
+// 这取代了旧的"读失败立刻定论"：那次行为让**一次瞬态失败**（超时/被 ABORT/
+// CANable 拔插扰动总线）把该台整场上电周期锁在 IDENTIFYING——真机踩过
+// （m1 型号空、总线上再无任何 SDO，只有重连能救）。
+static void test_identity_read_failure_retries_then_unbinds() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   motor_protocol_raw_frame_t f = cerb_feedback(9, 100);
   motor_control_on_raw_frame(&ctx, &f);
-  // 设备从容不应答（SDO 不实现/被滤掉）：每阶段 20ms 超时 ×≤2 次重试。
-  // 期间维持 20ms 心跳，隔离"事务超时"与"心跳丢失判离线"两条路径。
-  for (uint32_t t = 110U; t <= 260U; t += 10U) {
-    if (t % 40U == 0U) {
+
+  // 设备从容不应答；喂心跳隔离"事务超时"与"心跳丢失判离线"两条路径。
+  uint32_t t = 110U;
+  for (; t <= 400U; t += 10U) {
+    if (t % 20U == 0U) {
       motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
       motor_control_on_raw_frame(&ctx, &hb);
     }
     motor_control_service(&ctx, t);
   }
-  assert(entry_of(&ctx, 9)->online);
-  assert(entry_of(&ctx, 9)->profile == NULL);
-  // 读毕后不再发起新事务：排空待发队列后再看不再产生 SDO 请求帧。
-  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
-  (void)flush_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
-  for (uint32_t t = 270U; t <= 330U; t += 10U) {
-    motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
-    motor_control_on_raw_frame(&ctx, &hb);
+  const motor_control_entry_t *e = entry_of(&ctx, 9);
+  assert(e->online && e->profile == NULL);
+  assert(!e->identity_read_done);          // 还没定论——正是旧版缺的那一步
+  assert(e->identity_read_attempts >= 1U); // 失败已计入
+  assert(!events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 9));
+
+  // 跑过全部重试窗口（每次事务 ~100ms + 500ms 退避）→ 用尽后才定论。
+  for (; t <= 3000U; t += 10U) {
+    if (t % 20U == 0U) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
+      motor_control_on_raw_frame(&ctx, &hb);
+    }
     motor_control_service(&ctx, t);
   }
-  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
-  const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
-  for (size_t i = 0; i < n; ++i) {
-    assert(frames[i].can_id < 0x600U || frames[i].can_id > 0x67FU); // 无 SDO 请求
-  }
+  assert(entry_of(&ctx, 9)->identity_read_done);
+  assert(entry_of(&ctx, 9)->profile == NULL); // 认不出 → 未绑定不可控
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 9));
+
+  // 定论之后不再发 SDO 请求（不刷屏事件环、不占总线）。
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  (void)flush_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (; t <= 3600U; t += 10U) {
+    if (t % 20U == 0U) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
+      motor_control_on_raw_frame(&ctx, &hb);
+    }
+    motor_control_service(&ctx, t);
+  }
+  const size_t n = flush_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (size_t i = 0; i < n; ++i) {
+    assert(drain[i].can_id < 0x600U || drain[i].can_id > 0x67FU);
+  }
 }
+
 
 // 重连重新识别：profile 不沿用旧读数，重新读身份后才回到可绑定态。
 static void test_reconnect_reidentifies_device() {
@@ -1186,6 +1206,17 @@ static void test_identity_read_expedited_and_wrong_index() {
   uint8_t wrong[8] = {0x41, 0x00, 0x10, 0x00, 10, 0, 0, 0}; // 索引 0x1000
   motor_protocol_raw_frame_t wf = raw_frame(0, 0x580U + 3, 8, wrong, 102);
   motor_control_on_raw_frame(&ctx2, &wf);
+  // 索引不符 = **读失败**（不是"设备报了个陌生型号"），所以会退避重试 ≤3 次，
+  // 用尽才定论 PROFILE_REJECTED（2026-09-20：此前是立刻定论，一次瞬态失败会把
+  // 该台整场锁死）。这里把时间线推过全部重试窗口。
+  for (uint32_t t = 110U; t <= 3000U; t += 10U) {
+    if (t % 20U == 0U) {
+      motor_protocol_raw_frame_t hb = cerb_feedback(3, t);
+      motor_control_on_raw_frame(&ctx2, &hb);
+    }
+    motor_control_service(&ctx2, t);
+  }
+  assert(entry_of(&ctx2, 3)->identity_read_done);
   assert(entry_of(&ctx2, 3)->profile == NULL);
   assert(events_contain(&ctx2, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 3));
 }
@@ -2914,7 +2945,7 @@ static void run_all_tests() {
   test_p0_requeue_after_downstream_failure();
   test_identity_read_binds_and_unknown_stays_unbound();
   test_identity_string_match_is_exact();
-  test_identity_read_failure_stays_unbound_without_retry();
+  test_identity_read_failure_retries_then_unbinds();
   test_reconnect_reidentifies_device();
   test_identity_read_abort_is_not_a_verdict();
   test_sdo_response_alone_creates_no_entry();

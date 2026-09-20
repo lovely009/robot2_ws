@@ -27,6 +27,12 @@
 // request_id（低频计数器）碰撞。
 #define MOTOR_CONTROL_INTERNAL_REQUEST_ID_BASE 0x80000000U
 
+// 身份读取失败的重试预算（2026-09-20）：与设备参数回读同口径——读是幂等的只读
+// 事务，多问几次没有副作用，而"用尽才判不可识别"能挡住一次总线抖动把某个关节
+// 整场锁死。读**成功**（设备答了串）不在此列：目录里没有就是没有。
+#define MOTOR_CONTROL_IDENTITY_READ_MAX_ATTEMPTS 3U
+#define MOTOR_CONTROL_IDENTITY_READ_RETRY_MS 500U
+
 // 事务发起（定义在提交入口段；config_step 的自动回读 / 身份读取都要用）。
 static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
                      const motor_protocol_config_request_t *request,
@@ -43,10 +49,23 @@ static void finish_identity_read(motor_control_context_t *ctx,
                                  uint32_t now_ms) {
   entry->tx_active = false;
   entry->tx_awaiting = false;
+
+  const bool read_ok =
+      result == MOTOR_PROTOCOL_CONFIG_OK && !entry->identity_read_overflow;
+  if (!read_ok) {
+    // **读失败**（超时/被 ABORT/回串超容量）：退避重试，用尽才定论。此前这里
+    // 直接置 done，于是一次瞬态失败就让该台整场上电周期不可控（真机踩过）。
+    entry->identity_read_attempts++;
+    if (entry->identity_read_attempts < MOTOR_CONTROL_IDENTITY_READ_MAX_ATTEMPTS) {
+      entry->identity_read_retry_tick_ms =
+          now_ms + MOTOR_CONTROL_IDENTITY_READ_RETRY_MS;
+      return; // done 保持 false → 0) 的不变量复检会重发
+    }
+  }
   entry->identity_read_done = true;
 
   const motor_protocol_model_profile_t *profile = NULL;
-  if (result == MOTOR_PROTOCOL_CONFIG_OK && !entry->identity_read_overflow) {
+  if (read_ok) {
     profile = motor_control_profile_by_identity(entry->adapter, entry->identity,
                                                 entry->identity_size);
   }
@@ -54,7 +73,7 @@ static void finish_identity_read(motor_control_context_t *ctx,
     (void)motor_control_bind_profile_ptr(ctx, entry->motor_id, profile, now_ms);
     return;
   }
-  // 身份不可得（超时/拒绝/回串超容量/目录无此串）：保持未绑定不可控，
+  // 身份不可得（重试用尽 / 目录无此串）：保持未绑定不可控，
   // 出 PROFILE_REJECTED 让上层看见"这台设备不认识"。
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
@@ -462,6 +481,10 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     if (!entry->used || !entry->online || entry->adapter == NULL ||
         entry->identity_read_done || entry->tx_active) {
       continue; // adapter==NULL 防御：否则本拍 break 会挡住后续表项的识别
+    }
+    if (entry->identity_read_attempts > 0U &&
+        (int32_t)(now_ms - entry->identity_read_retry_tick_ms) < 0) {
+      continue; // 上一次读失败的退避窗内：到点再重试
     }
     if (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_DISCOVERED &&
         entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_IDENTIFYING &&

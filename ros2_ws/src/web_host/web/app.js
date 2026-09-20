@@ -146,13 +146,16 @@ function connect() {
   });
   ros.on('error', () => setConn(false, '连接错误'));
   ros.on('close', () => {
+    if (!ros) return; // 幂等：closeSocket 里已经收过尾，重复触发不再排重连
     closeSocket();
     // 掉线即清场：陈旧的表比空表更容易误导（曾把"页面掉线"看成"固件没数据"）。
     state.motors.clear();
     paramCache.clear();
     renderMotors();
     renderParamRows();
-    if (!manualDisconnect) {
+    // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
+    // 表现为页面一直连不上、看着"卡"）。
+    if (!manualDisconnect && !reconnectTimer) {
       setConn(false, '已断开，2s 后重连…');
       reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 2000);
     }
@@ -162,7 +165,7 @@ function connect() {
 // 只关 socket，不动连接意图（自动重连要复用）。
 function closeSocket() {
   stopStream();
-  if (ros) { try { ros.close(); } catch (e) {} ros = null; }
+  if (ros) { const r = ros; ros = null; try { r.close(); } catch (e) {} }
   subs = [];
   Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
   Object.keys(publishers).forEach((k) => delete publishers[k]);

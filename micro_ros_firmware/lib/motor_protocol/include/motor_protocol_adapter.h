@@ -190,7 +190,13 @@ typedef enum {
   // 写后读回核验，**不跟 0x2539 保存帧**（手册没给这个对象对应的保存码，
   // **掉电不保存**（2026-09-19 实测）；0x2539 保存码对它无效）。仅 CERB；
   // Vaxor 阶段数 0 → 内核回 UNSUPPORTED。
-  MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT = 12U
+  MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT = 12U,
+  // 设备侧电机方向定义（属 mailbox 契约，与 control_mailbox 侧同值 13 锁死）：
+  // CERB 写 0x2541:00 = 0（CW）/ 1（CCW），写后读回核验，**不跟 0x2539 保存
+  // 帧**（同 0x2650：易失，掉电回上电初值）。值为**原值直通**，本层不做任何
+  // 方向语义反转（方向没有 0x2650 那种"1 = 关"的反向陷阱）。
+  // 仅 CERB；Vaxor 阶段数 0 → 内核回 UNSUPPORTED。
+  MOTOR_PROTOCOL_CONFIG_SET_DIRECTION = 13U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -223,6 +229,8 @@ typedef struct {
   // 而不是"保护是否生效"的布尔——协议层只认厂家字节，方向语义的反转只允许
   // 发生在参数面（param_bridge 的 limit_protect → 本字段）一处。
   uint32_t safety_protect_raw;
+  // SET_DIRECTION：设备端原值（0 = CW，1 = CCW）。
+  uint32_t direction_raw;
   // SET_POLICY：代数必须严格前进才受理「从未武装到武装」的迁移（防周期重发
   // 自动复权）。其余 kind 忽略本字段。
   uint32_t policy_generation;

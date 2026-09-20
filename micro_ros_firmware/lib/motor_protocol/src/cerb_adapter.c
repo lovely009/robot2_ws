@@ -412,6 +412,7 @@ enum {
   CERB_VALUE_CURRENT,    // 关节侧 N·m → 峰值电流 mA
   CERB_VALUE_PASSTHROUGH, // 读：原值即 SI（安全开关/方向，无单位换算）
   CERB_VALUE_SAFETY_RAW,  // 写/读：0x2650:00 原值（0=保护开，1=关），不换算
+  CERB_VALUE_DIRECTION_RAW, // 写/读：0x2541:00 原值（0=CW，1=CCW），不换算
 };
 
 typedef struct {
@@ -504,6 +505,21 @@ static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
                  MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
 };
 
+// 0x2541:00 方向：写 + 读回核验，**不跟 0x2539 保存阶段**（易失，见上）。
+// 翻转方向会让设备里零点与 cnt 限位的物理含义整体镜像——内核据此冻结该台
+// 直到重新设零（见 motor_control_config.c 的 ZERO_STALE）。
+// 读阶段同样用 CERB_VALUE_DIRECTION_RAW（**不得复用 CERB_VALUE_PASSTHROUGH**）：
+// 读回核验在 cerb_config_on_response 里就是从**本阶段的 value_kind** 反算期望
+// 值（cerb_stage_write_value），PASSTHROUGH 落 default:return 0 → 期望恒为 CW，
+// 写 CCW 会被永久判 RETRY/UNCONFIRMED。与 kStagesSafetyProtect 的读阶段
+// 用 CERB_VALUE_SAFETY_RAW 同形。
+static const cerb_stage_desc_t kStagesDirection[2] = {
+  CERB_DESC_WRITE(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
+                  MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
+  CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
+                 MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
+};
+
 // 事务 kind → 阶段表。READ_IDENTITY（分段上传）与 SET_MODE（空阶段）不在
 // 表内，由三个接口特殊处理；返回 NULL 表示该 kind 不走设备事务。
 static const cerb_stage_desc_t *cerb_stage_table(
@@ -535,6 +551,9 @@ static const cerb_stage_desc_t *cerb_stage_table(
       *count = (uint8_t)(sizeof(kStagesSafetyProtect) /
                          sizeof(kStagesSafetyProtect[0]));
       return kStagesSafetyProtect;
+    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
+      *count = (uint8_t)(sizeof(kStagesDirection) / sizeof(kStagesDirection[0]));
+      return kStagesDirection;
     default:
       *count = 0U;
       return NULL;
@@ -572,6 +591,8 @@ static uint32_t cerb_stage_write_value(
     case CERB_VALUE_SAFETY_RAW:
       // 厂家原值直通：本层不做方向语义反转（不认"保护是否生效"，只认字节）。
       return request->safety_protect_raw;
+    case CERB_VALUE_DIRECTION_RAW:
+      return request->direction_raw;
     default:
       return 0U;
   }

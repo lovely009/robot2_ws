@@ -177,7 +177,7 @@ Expected: 编译失败，`MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH` 未定义 / `
   // 之间该台处于「未保存」，由 DeviceParamReport 暴露、靠 system.save 收尾。
   // 载荷 save_slots：待保存的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*），
   // adapter 据此选保存码、不写无关对象（驱动器写 flash 期间会阻塞自身控制循环，
-  // 实测 ~1s，多存一个对象就是白等一秒）。
+  // 此前实测 ~1s，多存一个对象就是白等一秒）。
   MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH = 14U
 } motor_protocol_config_kind_t;
 ```
@@ -1638,7 +1638,7 @@ git commit -m "feat(firmware): 新增 device_param_report 话题（参数核对�
     g_save_pending = false;
     // 保存 = 设备侧落盘（0x2539，只对**有保存码的脏槽**）+ W25 落盘。
     // 只处理脏的台：没写过的台一个字节都不发（驱动器写 flash 期间会阻塞自身
-    // 控制循环，实测 ~1s，白存一次就是白等一秒）。
+    // 控制循环，此前实测 ~1s，白存一次就是白等一秒）。
     // 只脏易失槽（保护开关/方向）的台由内核在受理时直接清脏位回 OK——那种台
     // 只欠 W25 那一半，下面的 storage_task_request_save() 就是它的全部。
     for (size_t i = 0U; i < g_view_count; ++i) {
@@ -1771,7 +1771,7 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
 (d) 决策表尾部追加一行：
 
 ```markdown
-| 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `param-authority-reversal-plan.md`。 |
+| 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环，此前实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `param-authority-reversal-plan.md`。 |
 ```
 
 - [ ] **Step 4: Web README**

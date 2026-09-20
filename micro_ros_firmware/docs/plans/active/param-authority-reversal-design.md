@@ -35,7 +35,7 @@ owner 2026-09-21 明确反转：**固件内部维护的那一份参数表是权�
 ### 3.1 判据状态机：三态拆四态
 
 现在 `DEV_INIT_NA` 同时承担两个含义——"本协议无设备侧对象"与"尚未定论"，
-且**是放行的**（[motor_control_config.c:179](../../../micro_ros_firmware/lib/motor_control/src/motor_control_config.c#L179)
+且**是放行的**（[motor_control_config.c:179](../../../lib/motor_control/src/motor_control_config.c#L179)
 `ready = (state == NA || state == OK)`）。必须拆开：
 
 | 态 | 含义 | 放行 |
@@ -53,7 +53,7 @@ owner 2026-09-21 明确反转：**固件内部维护的那一份参数表是权�
 `0x2650:00`（保护开关）与 `0x2541:00`（方向）**没有厂家保存码**：前者上电归一恒写
 `0`、后者按记录写回，都是"固件写下去"而非"用户设限值"，所以 §3.2 里它们的写只落
 W25、不发 `0x2539`。但它们**仍在 `mismatch_mask` 里各占一位**（bit4/bit5，见
-[`motor_control_dev_mismatch_mask()`](../../../micro_ros_firmware/lib/motor_control/src/motor_control_config.c#L107)）：
+[`motor_control_dev_mismatch_mask()`](../../../lib/motor_control/src/motor_control_config.c#L107)）：
 方向尤其没有设备侧基线，记录缺这一槽即判未初始化。**"不参与保存" ≠ "不参与比对"
 ≠ "不呈现"**——§3.3 报告的六对槽位全部成对呈现、供人核对。
 
@@ -80,7 +80,7 @@ W25、不发 `0x2539`。但它们**仍在 `mismatch_mask` 里各占一位**（bi
    这正是 owner 说的"只点了写就该是未保存"要消掉的行为。
 
 **机制落在逐表项的脏位图上**：`entry->record_dirty_slots`
-（[motor_control_internal.h:141](../../../micro_ros_firmware/lib/motor_control/src/motor_control_internal.h#L141)），
+（[motor_control_internal.h:141](../../../lib/motor_control/src/motor_control_internal.h#L141)），
 写事务只置位、不清零。聚合 API（`motor_control_take_record_dirty()` 与 `ctx->record_dirty`）
 **已在 469b16a 刻意删除**——生产侧删掉 500 ms 去抖后没有消费者，保留会让"需要保存"存在
 两个可能漂移的真相源。消费方是 `system.save`：`param_bridge` 读到该位图后**分批**下发
@@ -114,10 +114,10 @@ request_id 的写不算）——**实现期勘误：不是** `record_raw_present
 
 ### 3.3 新只读话题 `/micro_ros_up/device_param_report`
 
-**不走参数面**：`PARAM_BRIDGE_MAX_PARAMS = 72`（[param_bridge.h:39](../../../micro_ros_firmware/include/param_bridge.h#L39)
+**不走参数面**：`PARAM_BRIDGE_MAX_PARAMS = 72`（[param_bridge.h:39](../../../include/param_bridge.h#L39)
 容量注释：10 system + 10 电机 × 6 项，`kMaxMotors = (72 − 10) / 6 = 10`）、每台
 **6 项**，再加一列"设备侧影子"（7 项/台）会把支持台数从 10 压到 8。也**不塞进 `motor_status_array`**：那是每台 20 Hz 的流，
-加 8 个 float 会让每条状态消息涨约 34 B/台（48 台约 1.6 KB/条），而参数值几乎不变；
+加 12 个 float 会让每条状态消息涨约 50 B/台（48 台约 2.4 KB/条），而参数值几乎不变；
 "USB CDC 上行带宽余量"本就是验证计划的开放项。低频专用话题也更贴现有先例
 （`MotorTrajectoryState` 同为"MCU → 上层、低频"）。
 
@@ -157,7 +157,7 @@ float32 dev_direction
 - 双行对照表：固件列 / 驱动板列；`dev_init_state == NO_RECORD` 时固件列整行显示「无记录」。
 - `record_dirty == true` 的台标黄 + 「保存」按钮（发 `system.save`）。
 - 总览四计数：已核对 / 未初始化 / **未保存** / 离线。
-- 写仍走现有参数面写事务（`m<id>.*`，那条链已实测可用），不动。
+- 写仍走现有参数面写事务（`m<id>.*`，那条链已实测可用——指既有的写事务链，**不是**本次新的保存路径），不动。
 
 ## 4. 文档纠偏（已随本设计同期完成，2026-09-21；下表保留为改动记录）
 

@@ -229,6 +229,8 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
   对设备无副作用，多问几次不改变任何状态；用尽才定论 `UNVERIFIED`，避免一次
   总线抖动在"初始化未完成不可使能"的口径下把该台卡死。重试期间维持 PENDING。
 - **记录里没有的槽位不参与比对**（刚烧录、Flash 为空的电机不该整体卡住）；
+  **唯一例外是方向槽（`0x2541`）**：它易失、设备每次上电回 0，"设备读到 0"零信息量，
+  故记录缺这一槽 = 方向未知 = 未初始化（`motor_control_config.c:112-124`）。
   VAXOR 没有设备对象，恒不参与（`dev_init=NA`）。
 - **写 ≠ 保存（2026-09-21 分离）**：设备侧写事务读回核验通过后，内核用该事务
   实际编码出的原值同步固件记录并置 `record_dirty`，**写事务本身只改设备 RAM 与
@@ -609,4 +611,4 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 | 2026-09-20 | **CERB 12B 反馈帧补两个字段**：`data[8..9]` 线圈温度（大端 int16，0.1 °C）进 `MotorStatusArray.temperature`——此前适配器硬编码 NaN，页面恒显示 `--`，注释还写着"两协议均无温度来源"（规格书「执行器发给上位机」表里一直有这一列）。温度在故障分支之前取，故障帧照读。`data[6..7]` 错误代码同轮接上，替掉 `vendor_fault_code = 1U` 的硬编码，且**只在 `data[11] bit5` 置位时透传**，守住上游「非零 ⟺ 故障在册」的不变量。过温保护仍缺阈值来源。 |
 | 2026-09-20 | **上电归一 + 方向进参数面（owner 逐条拍板）**：①驱动板上电默认**开**保护，关才需要手动；归一写在**比对之前**（保护恒写 0、方向写 W25 记录值）——顺序是契约：写在比对之后会让每次上电白报一次不一致。②方向易失（owner 确认，`0x2541:00` 与 `0x2650:00` 同形）。③方向**无记录不猜**：不写设备，由比对判基线缺失 → `MISMATCH` bit5 → `CONFIG_CONFLICT`，页面点一次方向即建立基线。④翻转方向 → 冻结到 `SET_ZERO` 成功（新成因 `ZERO_STALE=8`）：设备零点与 cnt 限位的物理含义被整体镜像。⑤手动关保护后**仍允许武装**，但每次需 `confirm_unprotected` 显式确认、页面持续标红（新成因 `UNPROTECTED_UNCONFIRMED=9`，只进 `last_failure_reason`）。⑥保护/方向**同时**进状态话题（只读遥测，正向语义）与参数面（`m<id>.limit_protect` / `m<id>.direction`，控制入口）。
 **取代 09-19 交接文档 §二 的两条**：「保护只接受写 0」与「保护/方向不进参数面、`m<id>.limit_protect` 撤掉」。设计：`docs/plans/active/boot-normalize-design.md`；实现计划：`boot-normalize-plan.md`。参数面容量随之 64 → 72 槽（6 项/台，保住 10 台）。 |
-| 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `param-authority-reversal-plan.md`。**尚未上板验证**：三改目前只经 host 测试与静态审查，真机台架项（`NO_RECORD` 首启、写不落盘、`system.save` 闭环、写后不保存即复位）见 `motor-runtime-validation.md`，**未运行**。 |
+| 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环，此前实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `param-authority-reversal-plan.md`。**尚未上板验证**：三改目前只经 host 测试与静态审查，真机台架项（`NO_RECORD` 首启、写不落盘、`system.save` 闭环、写后不保存即复位）见 `motor-runtime-validation.md`，**未运行**。 |

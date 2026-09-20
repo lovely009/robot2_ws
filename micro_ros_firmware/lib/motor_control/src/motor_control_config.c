@@ -1268,6 +1268,14 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
                                  MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
         return true;
       }
+      // 设备侧 flash 写会让驱动器阻塞自身控制循环（实测 ~1s）。改动前 0x2539
+      // 只作为写事务的尾巴发出，而写事务本就被 device_limit_write_allowed 挡着
+      // ——ACTIVE 的电机从不会收到它。保存独立成事务后必须自己带这道门，否则
+      // 一个正在持位的关节会因为点了一下"保存"被抽掉一秒的控制环。
+      // 与限位/保护/方向同口径：安全边界相关的设备侧写，运动中一律拒绝。
+      if (!device_limit_write_allowed(entry)) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
       if (entry->tx_active) {
         return reject_busy(ctx, entry, request, now_ms);
       }

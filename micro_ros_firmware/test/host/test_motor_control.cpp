@@ -4274,6 +4274,61 @@ static void test_save_of_volatile_only_slot_emits_nothing() {
   }
 }
 
+// 运动中不得保存：设备侧 flash 写会让驱动器阻塞自身控制循环（实测 ~1s）。
+// 0x2539 以前只是写事务的尾巴、被 device_limit_write_allowed 顺带挡住；保存独立
+// 成事务后必须自带这道门——否则一个正在持位的关节会因为点了一下"保存"被抽掉
+// 一秒的控制环。被拒的保存**不得**清脏位（否则数据就真丢了）。
+static void test_save_rejected_while_active_keeps_dirty() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+
+  // 先制造"已写未保存"：速度上限写成功 → 置脏位（此时还不是 ACTIVE）。
+  motor_protocol_config_request_t vel = {};
+  vel.request_id = 90U;
+  vel.motor_id = 7;
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
+  assert(motor_control_submit_config(&ctx, &vel, 200));
+  uint32_t t = feed_velocity_write(&ctx, 7, kR58Raw[2], 201U);
+  assert(has_result_event(&ctx, 90U, MOTOR_PROTOCOL_CONFIG_OK));
+  const uint8_t dirty = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
+  assert(entry_of(&ctx, 7)->record_dirty_slots == dirty);
+
+  // 开到 ACTIVE：CERB 有 100ms 使能整定窗，窗内只发使能帧不发运动目标，
+  // 所以要持续喂反馈 + 快照把窗走完（照抄 test_safety_protect_* 的手法）。
+  for (uint32_t k = 60U; k <= 190U; k += 10U) {
+    motor_protocol_raw_frame_t fbk = cerb_feedback(7, k);
+    motor_control_on_raw_frame(&ctx, &fbk);
+    motor_control_command_snapshot_t s2 = make_snapshot(1000U + k, k + 1U);
+    snapshot_add(&s2, 7, 0.1f, 0.0f, 0.0f);
+    assert(motor_control_apply_command_snapshot(&ctx, &s2, k + 1U));
+    motor_control_service(&ctx, k + 2U);
+  }
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  t = 200U;
+
+  motor_protocol_config_request_t save = {};
+  save.request_id = 91U;
+  save.motor_id = 7;
+  save.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  save.save_slots = dirty;
+  motor_control_service(&ctx, t);
+  assert(!motor_control_submit_config(&ctx, &save, t + 1U));
+  assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  assert(!entry_of(&ctx, 7)->tx_active);              // 被拒即不起事务
+  assert(entry_of(&ctx, 7)->record_dirty_slots == dirty); // 脏位仍在
+
+  // 拒绝路径一个 0x2539 都不许发出去。
+  motor_control_service(&ctx, t + 2U);
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = motor_control_collect_tx(&ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  for (size_t i = 0U; i < n; ++i) {
+    assert(!(drain[i].size == 8U && drain[i].data[1] == 0x39U &&
+             drain[i].data[2] == 0x25U));
+  }
+}
+
 // 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
 // 结论出事件 + 错误码 41。恢复：重连重读或手动回读。
 static void test_device_param_unverified_blocks_motion() {
@@ -5560,6 +5615,7 @@ int main() {
   test_write_does_not_persist_until_save();
   test_save_flash_clears_dirty_and_emits_codes();
   test_save_of_volatile_only_slot_emits_nothing();
+  test_save_rejected_while_active_keeps_dirty();
   test_device_param_read_retry_recovers();
   test_device_param_unverified_blocks_motion();
   test_device_param_pending_blocks_enable();

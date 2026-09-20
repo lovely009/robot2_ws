@@ -6,6 +6,9 @@
 #   13=CONFIG_RESULT 14=REGISTRY_FULL 15=DEV_INIT（设备参数上电比对定论，
 #   reason = 0=NA 1=PENDING 2=OK 3=MISMATCH（未初始化，该台不可运动）
 #   4=UNVERIFIED（回读失败，不拦运动但结论可见））
+# reason 携带的故障码取值（`MOTOR_CONTROL_FAULT_*`，与 MotorStatusTarget.unified_fault_code 同一张表）：
+#    0=NONE 1=协议 2=厂家 3=Profile 4=冲突 5=离线 6=设备参数未初始化(DEV_PARAM)
+#    7=策略代数未前进(STALE_GENERATION) 8=方向已翻需重新设零(ZERO_STALE)
 # reason：事件相关的原因/结果码（故障码或配置结果码）；request_id 仅
 # CONFIG_RESULT 携带；EVENT_DEV_INIT 的 request_id 携带槽位位图
 #   （1u<<slot：1=位置下限 2=位置上限 4=最大转速 8=峰值电流

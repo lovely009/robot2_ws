@@ -84,13 +84,17 @@ static void finish_identity_read(motor_control_context_t *ctx,
 // ---------------------------------------------------------------------------
 // 设备参数初始化（上电/重连回读设备 → 与固件记录比对）
 //
-// 口径（2026-09-17 定）：**参数以设备内为准，固件记录只作比对基准**。
+// 口径（2026-09-21 owner 反转，此前是 09-17 的"以设备内为准"）：**固件记录是
+// 权威**，设备里的参数要与它对齐；不一致即"未初始化"。
 //  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:00、0x2541）；
 //  - 回读值与记录逐槽位比对，比的是**设备端原值**：关节侧 SI 两端都过同一套
 //    Kt×减速比换算，系数配错时两边一起错、比对恒通过，等于没比；
 //  - 不一致或回读失败 → 该台"未初始化"：冻结授权、不出运动帧，直到参数被
 //    重写（写事务会同时更新设备与记录）或重连后重新回读；
-//  - 记录里没有的槽位不参与比对（刚烧录、Flash 还空的电机不该整体卡住），
+//  - **本机一条记录都没有 → NO_RECORD**（也是"未初始化"，首次上电不得例外：
+//    "首次也当不一致，人工核对"）。判据是 record_established，不是记录结构里的
+//    位图——上电归一会自己写保护开关（见 entry_has_record）；
+//  - 记录里没有的槽位不参与比对（刚烧录、Flash 半空的电机不该整体卡住），
 //    **唯一例外是方向槽（0x2541）**：设备侧它易失（每次上电回 0=CW），"设备读到
 //    0"不含信息，故记录缺这一槽 = 方向未知 = 未初始化（见 dev_params_mismatch_mask）。
 // ---------------------------------------------------------------------------
@@ -129,6 +133,26 @@ static uint8_t dev_params_mismatch_mask(const motor_control_entry_t *entry) {
 
 static bool dev_params_match_record(const motor_control_entry_t *entry) {
   return dev_params_mismatch_mask(entry) == 0U;
+}
+
+// 本机对该台有没有基线记录。**不能用 record_raw_present 判**：上电归一恒写保护
+// 开关，那一笔会把它的 bit4 置起来，于是空 Flash 的板子在回读前就"有记录"了，
+// NO_RECORD 永远判不出来。判据是 record_established（见字段注释）。
+static bool entry_has_record(const motor_control_entry_t *entry) {
+  return entry->record_established;
+}
+
+// 统一的比对结论（自动回读收尾与写事务后的重判共用）：
+//   无记录 → NO_RECORD；有记录 → 逐槽位比 → OK / MISMATCH。
+// 写事务会就地建立记录，所以"写过一项"就不再是 NO_RECORD——但那不等于通过：
+// 记录没写齐（典型是方向无基线）仍判 MISMATCH 并由位图点名，不伪造 OK。
+static motor_control_dev_init_t settle_dev_init(
+    const motor_control_entry_t *entry) {
+  if (!entry_has_record(entry)) {
+    return MOTOR_CONTROL_DEV_INIT_NO_RECORD;
+  }
+  return dev_params_match_record(entry) ? MOTOR_CONTROL_DEV_INIT_OK
+                                        : MOTOR_CONTROL_DEV_INIT_MISMATCH;
 }
 
 // 冻结为 CONFIG_CONFLICT 的统一入口（设备参数未初始化 / 方向翻转共用）：
@@ -193,13 +217,17 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
       }
     }
   } else if (state == MOTOR_CONTROL_DEV_INIT_MISMATCH ||
-             state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED) {
-    // 未初始化（不一致 / 未能核对）：**运动中的走软停，不硬失能**——
-    // 上电自检与写入都核验过，真出现不一致属于异常，此时按"停止运动但保留
+             state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
+             state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
+    // 未初始化（不一致 / 未能核对 / 本机无记录）：**运动中的走软停，不硬失能**
+    // ——上电自检与写入都核验过，真出现不一致属于异常，此时按"停止运动但保留
     // 阻尼"处理（TBD-SAFETY-01 口径），不把力矩瞬间撤掉。
     // 静止态（READY_DISABLED 等）没有要停的东西，直接锁存结论。
     // 与冲突/故障同口径冻结（ARD §36：失败不自动恢复运动授权）：结论未转好
     // 之前不得使能，恢复需显式 SET_ENABLE(true) + 新快照。
+    //
+    // NO_RECORD 走同一条路（owner 2026-09-21："首次也当不一致，人工核对"）：
+    // 此前它落进 NA 而 NA 是放行的，等于首次上电未经核对即可使能。
     freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
@@ -282,6 +310,14 @@ static void update_record_after_write(motor_control_context_t *ctx,
     // 不一致 = 该台未初始化，属于自找的停机）。
     ctx->record_dirty = true;
   }
+  // 只有**上层发起的写**才建立基线。上电归一（保护 / 方向）与它共用同一个收尾
+  // 路径，但那是固件自己的动作：让它把 record_established 置起来，空 Flash 的
+  // 板子上电即"有记录"，NO_RECORD 永远判不出来。
+  // 判据 = 内部事务的 request_id 高位置位（MOTOR_CONTROL_INTERNAL_REQUEST_ID_BASE）；
+  // 上层请求走 mailbox，id 最高位是 0（param_bridge 用 bit30 做标签）。
+  if ((entry->tx_request_id & MOTOR_CONTROL_INTERNAL_REQUEST_ID_BASE) == 0U) {
+    entry->record_established = true;
+  }
   entry->record_valid = true;
 }
 
@@ -359,9 +395,7 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
       // 全部阶段到齐才提交：设备端原值位图一次性换成本次读到的槽位。
       entry->dev_raw_present = entry->refresh_slots;
       update_shadow_from_read(entry);
-      dev_state = dev_params_match_record(entry)
-                      ? MOTOR_CONTROL_DEV_INIT_OK
-                      : MOTOR_CONTROL_DEV_INIT_MISMATCH;
+      dev_state = settle_dev_init(entry);
       entry->dev_read_done = true;
       dev_init_settled = true;
     } else {
@@ -383,9 +417,7 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
     update_record_after_write(ctx, entry);
     // 写后重判：刚核验过的槽位已与记录同值，其余槽位仍按上次回读结论。
     if (entry->dev_read_done) {
-      dev_state = dev_params_match_record(entry)
-                      ? MOTOR_CONTROL_DEV_INIT_OK
-                      : MOTOR_CONTROL_DEV_INIT_MISMATCH;
+      dev_state = settle_dev_init(entry);
       dev_init_settled = true;
     }
   }

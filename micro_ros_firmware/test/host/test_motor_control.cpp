@@ -414,6 +414,25 @@ static uint32_t feed_torque_write(motor_control_context_t *ctx, uint16_t node,
   return tick + 4U;
 }
 
+// 走完一次 SET_VELOCITY_LIMIT（写 0x6080 + 读回核验），与 feed_torque_write 同形。
+// rpm 是设备端原值：写下去与读回来用它同一个（写事务的期望值 = 读回核验值）。
+static uint32_t feed_velocity_write(motor_control_context_t *ctx, uint16_t node,
+                                    uint32_t rpm, uint32_t tick) {
+  motor_protocol_tx_frame_t drain[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(ctx, tick);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t ack =
+      sdo_write_ack(node, 0x6080U, 0U, tick + 1U);
+  motor_control_on_raw_frame(ctx, &ack);
+  motor_control_service(ctx, tick + 2U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  motor_protocol_raw_frame_t rd = sdo_read_ack(node, 2U, rpm, tick + 3U);
+  motor_control_on_raw_frame(ctx, &rd);
+  motor_control_service(ctx, tick + 4U);
+  (void)motor_control_collect_tx(ctx, drain, MOTOR_CONTROL_MAX_TX_PENDING);
+  return tick + 4U;
+}
+
 // 保护开关写事务（写 0x2650:00 + 读回核验），无保存阶段。
 static uint32_t feed_safety_write(motor_control_context_t *ctx, uint16_t node,
                                   uint32_t raw, uint32_t tick) {
@@ -3546,6 +3565,119 @@ static void test_boot_normalize_skips_direction_without_record() {
   assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
 }
 
+// 首次上电（W25 对本机无记录）：**不再静默放行**。owner 2026-09-21：首次也当
+// 不一致，必须人工核对后才可动。此前"无记录"落进 DEV_INIT_NA，而 NA 是放行的。
+static void test_dev_init_no_record_blocks_enable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+
+  // Flash 全空：count=0 也必须调用——但 records 指针本身**不能**是 NULL：那是
+  // "本次没有数据可传"，函数会直接返回，连"记录已就位（哪怕是没有记录）"都不
+  // 声明，0b 回读永远不会发起（见 motor_control_apply_stored_params 的注释）。
+  motor_control_stored_params_t empty = {};
+  motor_control_apply_stored_params(&ctx, &empty, 0U, 110);
+  assert(entry_of(&ctx, 7)->boot_record_offered);
+  assert(!entry_of(&ctx, 7)->record_established);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+
+  (void)feed_device_params(&ctx, 7, kR58Raw, 120U, false);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+  assert(!motor_control_dev_params_allow_motion(e));
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM);
+
+  // 事件带的是本态本身（detail=0：没有"哪一项对不上"可报，整台没基线）。
+  uint16_t state = 0U;
+  uint32_t mask = 0xFFFFFFFFU;
+  assert(take_dev_init_event(&ctx, 7, &state, &mask));
+  assert(state == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+  assert(mask == 0U);
+
+  // 参数视图也带本态（页面据此把固件列整行显示「无记录」）。
+  assert(view_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+
+  // 使能请求被明确拒绝（不是静默吞掉）。
+  motor_protocol_config_request_t en = {};
+  en.request_id = 90U;
+  en.motor_id = 7;
+  en.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  en.enable = true;
+  assert(!motor_control_submit_config(&ctx, &en, 200));
+  assert(e->last_failure_reason == MOTOR_CONTROL_FAULT_DEV_PARAM);
+}
+
+// 写一项就建立记录 → 立刻重判；记录写齐（含方向基线）即转 OK、解冻。
+// 这正是 owner 第 6 条"下发修改后校验应通过、不再是未初始化"。
+static void test_dev_init_no_record_clears_after_write() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
+  motor_control_stored_params_t empty = {};
+  motor_control_apply_stored_params(&ctx, &empty, 0U, 110);
+  uint32_t t = feed_device_params(&ctx, 7, kR58Raw, 120U, false);
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+
+  // 只写速度限值一项：记录（内存里）建立了，但方向槽仍无基线 → 判 MISMATCH
+  // 且位图点名方向。**不伪造通过**。
+  motor_protocol_config_request_t vel = {};
+  vel.request_id = 30U;
+  vel.motor_id = 7;
+  vel.kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
+  vel.max_velocity_rad_s = (float)MOTOR_PROTOCOL_PI;
+  assert(motor_control_submit_config(&ctx, &vel, t + 1U));
+  t = feed_velocity_write(&ctx, 7, kR58Raw[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX],
+                          t + 2U);
+  const motor_control_entry_t *e = entry_of(&ctx, 7);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+
+  // 这一笔写事务一次产出两条结论事件（CONFIG_RESULT 在前、DEV_INIT 在后），而
+  // 两个取事件的助手（has_result_event / take_dev_init_event）都是**消费性**的
+  // ——先调哪个就把另一个吃掉。故按本文件既有做法一次取完整批再逐条断言
+  // （与 test_discovery_builds_entry 同）。
+  motor_control_event_t seen[64];
+  size_t seen_n = 0;
+  size_t got;
+  while ((got = motor_control_drain_events(&ctx, seen + seen_n, 64 - seen_n)) > 0) {
+    seen_n += got;
+  }
+  bool saw_ok = false;
+  bool saw_dev_init = false;
+  uint16_t state = 0U;
+  uint32_t mask = 0U;
+  for (size_t i = 0; i < seen_n; ++i) {
+    if (seen[i].type == MOTOR_CONTROL_EVENT_CONFIG_RESULT &&
+        seen[i].request_id == 30U &&
+        seen[i].reason == MOTOR_PROTOCOL_CONFIG_OK) {
+      saw_ok = true;
+    }
+    if (seen[i].type == MOTOR_CONTROL_EVENT_DEV_INIT && seen[i].motor_id == 7) {
+      state = seen[i].reason;
+      mask = seen[i].request_id;
+      saw_dev_init = true;
+    }
+  }
+  assert(saw_ok); // 上层收到"写成功了"
+  assert(saw_dev_init);
+  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只差方向基线
+
+  // 再写方向：记录写齐 → OK、解冻回 READY_DISABLED（可授权）。
+  motor_protocol_config_request_t dir = {};
+  dir.request_id = 31U;
+  dir.motor_id = 7;
+  dir.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+  dir.direction_raw = 0U;
+  assert(motor_control_submit_config(&ctx, &dir, t + 10U));
+  (void)feed_direction_write(&ctx, 7, 0U, t + 11U);
+  assert(has_result_event(&ctx, 31U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(motor_control_dev_params_allow_motion(entry_of(&ctx, 7)));
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+}
+
 // 运行中回读发现保护被外部工具关掉（归一之后的变化）→ MISMATCH 且位图点名 bit4。
 // 原 test_dev_init_flags_safety_mismatch 在新设计下的正确形态：上电那一次不可能
 // 再出现这个现象（归一先写开了），只有**运行中**的外部改动才走这条路。
@@ -3699,9 +3831,11 @@ static void test_device_param_missing_direction_baseline_blocks() {
 }
 
 // 本机完全无记录（新烧板）同样判未初始化——不是"无记录可比就放过"。
-// ⚠️ 这里**必须**显式声明"无记录"（apply_stored_params 传空数组），不能用
-// complete_device_param_init：Task 8 之后那个助手会注入一份**含方向基线**的
-// 记录（正常板子的路径），本用例要测的恰恰是"没有基线"。
+// 结论由"方向基线缺失 → MISMATCH"改成**整台无记录 → NO_RECORD**（2026-09-21
+// owner 反转）：连基线都没有时，逐槽位位图说不出任何东西，detail 恒 0；用例名
+// 沿用历史。⚠️ 这里**必须**显式声明"无记录"（apply_stored_params 传空数组），
+// 不能用 complete_device_param_init：那个助手会注入一份**含方向基线**的记录
+// （正常板子的路径），本用例要测的恰恰是"没有基线"。
 static void test_device_param_no_record_blocks_on_direction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3711,18 +3845,21 @@ static void test_device_param_no_record_blocks_on_direction() {
   assert(!motor_control_take_record_dirty(&ctx)); // 还没写过设备：无脏位
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
-  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+  assert(!motor_control_dev_params_allow_motion(e)); // 未初始化 = 不可使能
   // 本机无记录 + 归一写了保护槽 ⇒ 记录里**第一次**出现基线（槽 4）＝内容确有
   // 变化 ⇒ 必须排落盘。这条钉住 update_record_after_write 里的顺序约束：先比
   // "是否真的变了"、再 OR 进 record_raw_present。顺序颠倒会让首次基线永远不
   // 落盘（看起来"没变"），下次上电仍是"无记录"。
   assert(motor_control_take_record_dirty(&ctx));
-  // 位图恰好只有方向：保护槽刚被归一的写建立基线、且与设备读数一致，不点名。
+  // 归一的写**不**建立基线（record_established 仍为假）：那一笔走的是内部
+  // request_id（bit31=1），不是"人写过"。否则空 Flash 的板子上电即"有记录"。
+  assert(!e->record_established);
   uint16_t state = 0U;
-  uint32_t mask = 0U;
+  uint32_t mask = 0xFFFFFFFFU;
   assert(take_dev_init_event(&ctx, 7, &state, &mask));
-  assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+  assert(state == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
+  assert(mask == 0U); // 整台没基线：没有"哪一项对不上"可报
 }
 
 // v2 迁移形状的记录（只搬低 4 位，槽 4/5 位为 0）+ 设备侧保护被外部工具关掉
@@ -3797,7 +3934,8 @@ static void test_device_param_direction_write_establishes_baseline() {
   motor_control_stored_params_t none = {}; // 同上：显式无记录
   motor_control_apply_stored_params(&ctx, &none, 0U, 110);
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
-  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
+  // 无记录 = 未初始化（NO_RECORD），归一的写不算建立基线。
+  assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
 
   motor_protocol_config_request_t req = {};
   req.request_id = 77U;
@@ -3807,7 +3945,10 @@ static void test_device_param_direction_write_establishes_baseline() {
   motor_control_service(&ctx, 300);
   assert(motor_control_submit_config(&ctx, &req, 301));
   (void)feed_direction_write(&ctx, 7, 0U, 302);
+  // 人写过 = 基线建立（本用例该测的那条恢复路径），重判转 OK。
+  assert(entry_of(&ctx, 7)->record_established);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
 }
 
 // 回归（P8）：限值写事务只写它自己那几个槽位，不得把只读安全槽（4=保护开关 /
@@ -5229,6 +5370,8 @@ int main() {
   test_boot_normalize_not_advanced_by_manual_write();
   test_manual_refresh_rejected_during_normalize_window();
   test_boot_normalize_skips_direction_without_record();
+  test_dev_init_no_record_blocks_enable();
+  test_dev_init_no_record_clears_after_write();
   test_boot_normalize_skips_illegal_direction_value();
   test_enable_without_protection_needs_confirm();
   test_dev_init_flags_safety_mismatch_at_runtime();

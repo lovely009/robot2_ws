@@ -120,10 +120,16 @@ typedef struct {
   uint8_t refresh_slots;
   // 固件记录（Flash 投影）：上电比对的基准，也是电机未上线时页面的回落值。
   bool record_valid;
+  // 本机对该台有没有**设备参数的基线记录**：W25 里本来就有（device_raw_present
+  // 非零），或人写过（写事务的 request_id 来自上层，bit31=0）。
+  // 上电归一自己写保护/方向**不算**建立基线——否则空 Flash 的板子上电即"有记录"，
+  // NO_RECORD 永远判不出来（归一恒写保护开关）。
+  // 与 record_valid 的区别：后者只表示"记录结构里有内容"，归一的写也会置它。
+  bool record_established;
   uint32_t record_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   uint8_t record_raw_present;
   bool boot_record_offered; // 本会话已把 Flash 记录（或"无记录"）告知本表项
-  // 上电比对结论。PENDING/MISMATCH/UNVERIFIED 三态都不可控（见
+  // 上电比对结论。PENDING/MISMATCH/UNVERIFIED/NO_RECORD 四态都不可控（见
   // motor_control_dev_params_ready）。
   motor_control_dev_init_t dev_init;
   // 方向被翻转（写事务成功时写入值 ≠ **写前**记录值）后的冻结标志：设备的
@@ -241,7 +247,8 @@ static inline size_t motor_control_entry_index(
 }
 
 // 设备参数初始化是否放行运动（"初始化完成前不可使能"）。只有 NA/OK 放行：
-// PENDING/MISMATCH/UNVERIFIED 一律不放行——没核对完成就没有"用哪份值"的答案。
+// PENDING/MISMATCH/UNVERIFIED/NO_RECORD 一律不放行——没核对完成就没有"用哪份值"
+// 的答案，NO_RECORD（本机无该台记录）同样是"没核对过"，首次上电不得例外。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {
   return entry != NULL &&

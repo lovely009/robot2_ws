@@ -155,6 +155,11 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
     entry->record_valid = true;
     memcpy(entry->record_raw, rec->device_raw, sizeof(entry->record_raw));
     entry->record_raw_present = rec->device_raw_present;
+    // 有设备参数的基线记录（device_raw_present 非零才算数：只存了 kp/kd 的
+    // 记录对设备参数比对毫无用处，"无记录"是它诚实的结论）。
+    if (rec->device_raw_present != 0U) {
+      entry->record_established = true;
+    }
   }
 
   // rec == NULL（本机对该台还没拿到记录）：只完成"已告知"这一次性动作，

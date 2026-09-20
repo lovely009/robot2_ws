@@ -100,13 +100,19 @@ typedef enum {
 } motor_control_fault_code_t;
 
 // 设备参数初始化状态（上电/重连后回读设备 → 与固件记录比对）。
-// 参数以设备内为准、固件记录只作比对基准：不一致即"未初始化"，该台不可控。
+// **固件内部维护的这份记录是权威**，设备里的参数要与它对齐（2026-09-21 owner
+// 反转，此前口径是"以驱动板为准"）：不一致即"未初始化"，该台不可控。
 typedef enum {
   MOTOR_CONTROL_DEV_INIT_NA = 0U,        // 非设备侧型号（VAXOR）：无从比对
   MOTOR_CONTROL_DEV_INIT_PENDING = 1U,   // 尚未回读设备（上电/重连后）
-  MOTOR_CONTROL_DEV_INIT_OK = 2U,        // 与记录一致（或本机无记录可比）
-  MOTOR_CONTROL_DEV_INIT_MISMATCH = 3U,  // 与记录不一致 → 未初始化
-  MOTOR_CONTROL_DEV_INIT_UNVERIFIED = 4U // 回读失败（超时/中止）→ 未核对
+  MOTOR_CONTROL_DEV_INIT_OK = 2U,        // 有记录且逐槽一致
+  MOTOR_CONTROL_DEV_INIT_MISMATCH = 3U,  // 有记录、某些槽不一致 → 未初始化
+  MOTOR_CONTROL_DEV_INIT_UNVERIFIED = 4U, // 回读失败（超时/中止）→ 未核对
+  // 本机对该台**一条设备参数记录都没有**（首次上电 / 新板 / Flash 空）。
+  // 与 NA 必须分开：NA 是"本协议没有设备侧对象"（放行），无记录是"没核对过"
+  // （拦住）。此前两者共用 NA，于是首次上电静默通过、无人核对就可用。
+  // 只按"完全没有"判：部分槽位有记录时维持既有的"没写过的槽位不参与比对"。
+  MOTOR_CONTROL_DEV_INIT_NO_RECORD = 5U
 } motor_control_dev_init_t;
 
 // 限值来源（参数视图用）：设备回读 > Flash 记录 > 型号标定。

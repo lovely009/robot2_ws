@@ -477,11 +477,14 @@ static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POLICY) ==
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
                   static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT),
               "mailbox/protocol config kind 契约不一致：SET_SAFETY_PROTECT");
+static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_DIRECTION) ==
+                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_DIRECTION),
+              "mailbox/protocol config kind 契约不一致：SET_DIRECTION");
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
-  // kind 数值契约一致（1..6、8..12；7 是内核专用 READ_IDENTITY 不经
+  // kind 数值契约一致（1..6、8..13；7 是内核专用 READ_IDENTITY 不经
   // mailbox，上方 static_assert 编译期锁），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
@@ -515,6 +518,9 @@ static void convert_config(const control_mailbox_config_request_t *in,
       break; // 无载荷：只凭 motor_id 发厂家清错帧
     case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
       out->safety_protect_raw = in->value.safety_protect_raw;
+      break;
+    case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
+      out->direction_raw = in->value.direction_raw;
       break;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       out->enable = in->value.policy.enable;

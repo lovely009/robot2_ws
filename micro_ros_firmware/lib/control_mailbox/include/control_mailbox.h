@@ -49,7 +49,10 @@ typedef enum {
   CONTROL_MAILBOX_CONFIG_SET_POLICY = 11U,
   // 设备侧看门狗/限位保护开关（仅 CERB，写 0x2650:00）：载荷是**厂家原值**
   // 0 = 保护开 / 1 = 关。仅未运动时受理，写后读回核验，不跟保存帧。
-  CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT = 12U
+  CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT = 12U,
+  // 设备侧电机方向定义（仅 CERB，写 0x2541:00）：载荷是**原值** 0 = CW /
+  // 1 = CCW。仅未运动时受理，写后读回核验，不跟保存帧（易失）。
+  CONTROL_MAILBOX_CONFIG_SET_DIRECTION = 13U
 } control_mailbox_config_kind_t;
 
 typedef struct {
@@ -87,6 +90,9 @@ typedef struct {
     // SET_SAFETY_PROTECT：厂家原值 0/1（0 = 保护开，1 = 关）。收原值不收
     // 布尔——方向语义的反转只允许发生在参数面一处。
     uint32_t safety_protect_raw;
+    // SET_DIRECTION：厂家/设备原值 0/1（0 = CW，1 = CCW），收原值不收布尔，
+    // 与 SET_SAFETY_PROTECT 同口径——语义反转只允许发生在参数面一处。
+    uint32_t direction_raw;
     control_mailbox_policy_t policy; // SET_POLICY
   } value;
 } control_mailbox_config_request_t;

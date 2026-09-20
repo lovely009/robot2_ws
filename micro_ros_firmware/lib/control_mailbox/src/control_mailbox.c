@@ -37,6 +37,9 @@ static bool config_request_is_valid(
     case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
       // 厂家对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
       return request->value.safety_protect_raw <= 1U;
+    case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
+      // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
+      return request->value.direction_raw <= 1U;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       return isfinite(request->value.policy.kp) &&
              isfinite(request->value.policy.kd) &&

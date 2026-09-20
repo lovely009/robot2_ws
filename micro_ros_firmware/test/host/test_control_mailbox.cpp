@@ -442,6 +442,37 @@ static void test_safety_protect_request_validation() {
   assert(!control_mailbox_submit_config(&mailbox, &req));
 }
 
+// 方向载荷只有 0/1 两态：越界值在 mailbox 就挡掉，别让它进总线。
+static control_mailbox_config_request_t make_direction_request(uint32_t request_id,
+                                                               uint16_t motor_id,
+                                                               uint32_t raw) {
+  control_mailbox_config_request_t request{};
+  request.request_id = request_id;
+  request.received_tick_ms = request_id * 10U;
+  request.motor_id = motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
+  request.value.direction_raw = raw;
+  return request;
+}
+
+static void test_config_set_direction_value_range() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  const control_mailbox_config_request_t ccw = make_direction_request(1U, 3U, 1U);
+  assert(control_mailbox_submit_config(&mailbox, &ccw));
+
+  const control_mailbox_config_request_t cw = make_direction_request(2U, 3U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &cw));
+
+  const control_mailbox_config_request_t bad = make_direction_request(3U, 3U, 2U);
+  assert(!control_mailbox_submit_config(&mailbox, &bad));
+
+  const control_mailbox_config_request_t neg =
+      make_direction_request(4U, 3U, 0xFFFFFFFFU);
+  assert(!control_mailbox_submit_config(&mailbox, &neg));
+}
+
 static void test_refresh_params_request_is_accepted() {
   control_mailbox_t mailbox{};
   control_mailbox_init(&mailbox);
@@ -485,6 +516,7 @@ static void test_set_zero_request_is_accepted() {
 int main() {
   test_refresh_params_request_is_accepted();
   test_safety_protect_request_validation();
+  test_config_set_direction_value_range();
   test_set_zero_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();
   test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();

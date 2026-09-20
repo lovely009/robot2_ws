@@ -45,6 +45,19 @@ static_assert(
     static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
         static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT),
     "mailbox/protocol config kind 契约不一致：SET_SAFETY_PROTECT");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_DIRECTION) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_DIRECTION),
+    "mailbox/protocol config kind 契约不一致：SET_DIRECTION");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH),
+    "mailbox/protocol config kind 契约不一致：SAVE_DEVICE_FLASH");
+// mailbox 是协议无关层，不引 motor_protocol 头；保存槽位位图这条事实在两处
+// 各写一遍，靠本断言双向锁死。
+static_assert(CONTROL_MAILBOX_SAVE_SLOTS_MASK ==
+                  (int)MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK,
+              "mailbox/protocol 保存槽位位图不一致");
 
 #include <cmath>
 #include <cstring>
@@ -442,6 +455,29 @@ static void test_safety_protect_request_validation() {
   assert(!control_mailbox_submit_config(&mailbox, &req));
 }
 
+// 保存请求：载荷是槽位位图，只允许"有厂家保存码"的槽位——空位图没有要保存的
+// 对象；含易失槽（保护开关/方向）的位图是概念错误（厂家没给保存码）。
+static void test_save_request_validation() {
+  control_mailbox_t mailbox;
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_config_request_t req = make_mode_request(7U, 1U, 0U);
+  req.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+
+  // 位置上下限 | 力矩限值：合法。
+  req.value.save_slots =
+      (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
+                (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |
+                (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX));
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.save_slots = 0U;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.save_slots = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+}
+
 // 方向载荷只有 0/1 两态：越界值在 mailbox 就挡掉，别让它进总线。
 static control_mailbox_config_request_t make_direction_request(uint32_t request_id,
                                                                uint16_t motor_id,
@@ -516,6 +552,7 @@ static void test_set_zero_request_is_accepted() {
 int main() {
   test_refresh_params_request_is_accepted();
   test_safety_protect_request_validation();
+  test_save_request_validation();
   test_config_set_direction_value_range();
   test_set_zero_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();

@@ -40,6 +40,12 @@ static bool config_request_is_valid(
     case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
       // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
       return request->value.direction_raw <= 1U;
+    case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
+      // 只收"有厂家保存码"的槽位：空位图没有要保存的对象；含易失槽（保护开关
+      // 0x2650 / 方向 0x2541）的位图是概念错误——厂家没给这两个对象保存码。
+      return request->value.save_slots != 0U &&
+             (request->value.save_slots &
+              (uint8_t)~CONTROL_MAILBOX_SAVE_SLOTS_MASK) == 0U;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       return isfinite(request->value.policy.kp) &&
              isfinite(request->value.policy.kd) &&

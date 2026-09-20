@@ -481,6 +481,10 @@ static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
 static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_DIRECTION) ==
                   static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_DIRECTION),
               "mailbox/protocol config kind 契约不一致：SET_DIRECTION");
+static_assert(
+    static_cast<int>(CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) ==
+        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH),
+    "mailbox/protocol config kind 契约不一致：SAVE_DEVICE_FLASH");
 static void convert_config(const control_mailbox_config_request_t *in,
                            motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
@@ -523,6 +527,9 @@ static void convert_config(const control_mailbox_config_request_t *in,
       break;
     case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
       out->direction_raw = in->value.direction_raw;
+      break;
+    case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
+      out->save_slots = in->value.save_slots;
       break;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       out->enable = in->value.policy.enable;

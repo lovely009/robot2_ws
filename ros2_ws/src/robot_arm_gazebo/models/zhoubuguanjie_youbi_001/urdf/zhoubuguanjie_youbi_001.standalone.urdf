@@ -55,7 +55,7 @@
     <parent link="base_link" />
     <child link="Joint_link1" />
     <axis xyz="0 0 -1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="45.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
   </joint>
   <link name="Joint_link2">
     <inertial>
@@ -84,7 +84,7 @@
     <parent link="Joint_link1" />
     <child link="Joint_link2" />
     <axis xyz="0 0 1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="45.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
   </joint>
   <link name="Joint_link3">
     <inertial>
@@ -113,7 +113,7 @@
     <parent link="Joint_link2" />
     <child link="Joint_link3" />
     <axis xyz="0 0 -1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="45.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
   </joint>
   <link name="Joint_link4">
     <inertial>
@@ -142,6 +142,6 @@
     <parent link="Joint_link3" />
     <child link="Joint_link4" />
     <axis xyz="0 0 -1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="45.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
   </joint>
 </robot>

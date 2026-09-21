@@ -18,7 +18,8 @@ FDCAN1、FDCAN2、FDCAN3，三路均为 CAN-FD 仲裁段 1 Mbps、数据段 5 Mb
 - 固件和上层各维护一份按型号组织的 `MotorModelProfile`；上层维护
   `motor_id → joint_name`、方向、零位和关节语义。
 - 两类电机默认 MIT 模式。协议字节只存在于对应协议适配器中。
-- 控制和状态目标频率均为 100 Hz；`motor_rt_task` 以 1 ms 服务节拍运行。
+- 控制命令边界为 5 ms/200 Hz；上行运动状态按 50 Hz 发布，其他域节拍见工程
+  README；`motor_rt_task` 以 1 ms 服务节拍运行。
 - FDCAN ISR 只接收原始帧入环形缓冲；`motor_rt_task` 是唯一解码和正常发送的业务所有者。
 - ROS 聚合消息不能直接当 CAN 帧发送；实时任务必须经过协议适配器组帧和调度。
 - 实时路径使用固定容量和静态内存，不在 ISR、控制和 CAN 发送路径动态分配。
@@ -78,7 +79,7 @@ micro-ROS 状态消息。拓扑变化和配置结果走低频消息，不塞进 
 该节拍是服务频率，不是 1 kHz 控制频率。任何单次工作都必须有上限，不能在其中
 等待 ROS、Agent、设备响应或 W25Q64。
 
-### 3.3 10 ms 控制边界
+### 3.3 5 ms / 200 Hz 控制边界
 
 1. 复制 `command_snapshot_mailbox` 中最新的完整命令快照。
 2. 校验 `sequence`、时间、ID、数值、重复项、策略和设备生命周期。
@@ -238,12 +239,16 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
   **唯一例外是方向槽（`0x2541`）**：它易失、设备每次上电回 0，"设备读到 0"零信息量，
   故记录缺这一槽 = 方向未知 = 未初始化（`motor_control_config.c:112-124`）。
   VAXOR 没有设备对象，恒不参与（`dev_init=NA`）。
-- **写 ≠ 保存（2026-09-21 分离）**：设备侧写事务读回核验通过后，内核用该事务
-  实际编码出的原值同步固件记录并置 `record_dirty`，**写事务本身只改设备 RAM 与
-  记录、不落盘**；`0x2539` 已挪进独立的 `SAVE_DEVICE_FLASH` 保存事务，由
-  `system_command` 的 `COMMAND_SAVE` 触发（勘误：原 `system.save`），按脏槽位选保存码
-  （1/2/4，不写无关对象），同时落设备 flash 与 W25（§6.6）。控制边界里原先"写成功后 500 ms 去抖自动落盘"已删——记录不落盘
-  就断电，下次上电判不一致，那时该台未初始化，是设计使然。
+- **写 ≠ 保存（2026-09-21 分离，2026-09-22 收紧完成判据）**：设备侧写事务读回
+  核验通过后，内核用该事务实际编码出的原值同步固件记录并置 `record_dirty`，**写
+  事务本身只改设备 RAM 与记录、不落盘**；`0x2539` 已挪进独立的 `SAVE_DEVICE_FLASH`
+  保存事务，由 `system_command` 的 `COMMAND_SAVE` 触发（勘误：原 `system.save`），
+  按脏槽位选保存码（1/2/4，不写无关对象）。本轮收紧为：每台设备保存请求必须先
+  返回 `CONFIG_RESULT=OK`，之后才请求 W25；W25 的目标槽擦除、整 blob 写入、分页读回
+  校验和活动槽切换全部完成后，才把整笔 SAVE 判为成功。任一设备结果非 OK 时不启动
+  W25。控制边界里原先"写成功后 500 ms 去抖自动落盘"已删——记录不落盘就断电，下次
+  上电判不一致，那时该台未初始化，是设计使然。CERB 的 `0x2539` 阶段本身无设备应用
+  层应答，因此 `CONFIG_RESULT=OK` 不是物理 flash 耐久性的独立证明，仍待掉电台架。
 - **持久化格式**：W25 blob v2（32B 头 + 64×48B 记录，含 4 个 `device_raw`），
   v1 由 `param_store_blob_migrate_v1()` 就地升级。
 
@@ -380,7 +385,7 @@ PI 等）、**2 = 设置电机正限位**（0x607D:02）、**4 = 设置电机负
 运动质量受主机抖动影响，下行带宽也是随点数线性增长。
 
 **决定**：新增 `MotorTrajectory`（扁平、按时间升序的 (时间, 电机) 路点表 +
-独立的 `target_ids` 受控集合），MCU 在 5ms/200Hz 控制边界做段内插值（见下条）。
+独立的 `target_ids` 受控集合），MCU 在 5ms/200Hz 控制边界按整条拼接时间线插值（见下条）。
 
 - **扁平而非二级嵌套**：rosidl 的二级有界序列要为每个外层元素各自预分配内层
   buffer，静态初始化复杂且容量按 N×K 预留；扁平表单层一处预分配、按内容占用。
@@ -388,22 +393,22 @@ PI 等）、**2 = 设置电机正限位**（0x607D:02）、**4 = 设置电机负
   5ms，亚毫秒无意义；绝对时间会把 MCU 拖进 epoch/NTP 依赖（ARD §12.1）。
 - **速度取解析导数，不直通路点字段**：MIT 律是 `τ=Kp·Δp+Kd·Δv+τ_ff`，上层常把
   `velocity` 填 0，直通会让 Kd 朝 0 速刹车。字段保留作诊断。
-- **插值：段内线性（2026-09-21 由单调三次 Hermite 改回）**：位置沿相邻路点连线
-  走，速度取**段斜率**——段内恒定、**逐路点跳变**，执行侧每个 5ms 边界算一次，
-  **不读 `point.velocity`**（上层常填 0，直通会让 Kd 朝 0 速刹车；该字段只作诊断）。
-  **取舍**：代价是阶梯式速度前馈让 MIT 律的 `kd·v_des` 项在每个路点跳一次（力矩
-  台阶）；换来的是执行位置严格贴合路点连线，行为只由路点决定，不引入切矢限幅之类
-  的隐式修形，受理侧也零预计算（省下 256×4 B 的 `.bss` 切矢表）。**原 Hermite
-  实现与它的两条 host 用例按注释保留在码内**（`motor_control.c` 两处 + `test_motor_control.cpp`），
-  恢复只需解注释三处。
-  <!-- 2026-09-21 更正：本节此前写"单调三次 Hermite（Fritsch–Carlson）……位置与速度
-       都连续"（并有一条 2026-09-20 的更正注释，方向与本次相反）。现行为是线性：
-       速度在路点上**不**连续，这是有意的取舍而非回归。 -->
-  <!-- 2026-09-21 顺带更正：本节与 `motor_rt_task.h` 的节拍注释写的 "20ms 控制边界"
-       自 cb89e3e（控制边界 → 200Hz）起就已是 5ms，未跟上。 -->
-- **原 Hermite 设计的理由（存档，勿据此当成现行为）**：位置与速度都连续，消除了
-  线性插值"每路点一次速度台阶"。切矢在受理时对每台的位置时间线一次性算好（局部
-  极值取 0、否则中心差分并限幅到 3×min|Δ|——限幅是"逐段不超调"的保证）。
+- **插值：非均匀单调三次 Hermite（2026-09-22 owner 确认）**：位置按相邻路点的
+  不等时间间隔求 Fritsch–Carlson 切矢，段内使用三次 Hermite，速度由曲线解析求导，
+  不读取 `point.velocity` 作为执行速度。局部极值切矢为 0，并限幅到相邻割线的
+  `3×min(|Δ|)`，保持单调且避免超调；内部路点的切矢由左右时间间隔共同计算，
+  因此分段拼接后的边界速度连续，首尾端点保持零速。
+- **分段组装**：同一 `trajectory_id` 的可靠分段携带 `segment_index`（0-based）和
+  `segment_count`，固件要求按序到达，在固定 assembly 缓冲中拼接，拼接后总路点数
+  不超过 256。分段未收齐时当前轨迹继续运行；最后一段完成且整条校验通过后才
+  原子发布到 mailbox。时间采用整条轨迹共同的 `time_from_start_ms`，不按段重置。
+  相邻分段在同一电机同一时间的完全重复点合并，位置、速度或前馈冲突则整组拒收。
+  不引入动态内存；拼接缓冲增加的 RAM 需以目标链接图重新确认。
+- **2026-09-21 线性方案**：曾短暂作为实现决策，原因和测试记录保留在变更记录中；
+  已被 2026-09-22 owner 决策取代，不得作为当前行为依据。
+- **实现备注（2026-09-22）**：历史记录中“解注释三处即可恢复线性”的回滚提示不再
+  适用于当前树；死代码注释已删除，若要实验性恢复必须从历史提交或独立补丁取回，
+  不应在当前源码中寻找可切换开关。
 - **归属仲裁（关键）**：轨迹声明集合内的电机由轨迹**独占**，快照对它们既不下发
   也不软停；集合外仍受 §13.1「缺席即软停」。**快照不是解除路径**——任何 100Hz
   周期发布者都会立刻打死轨迹。解除只有三条：被新轨迹替换（移出者立即软停）、
@@ -416,13 +421,11 @@ PI 等）、**2 = 设置电机正限位**（0x607D:02）、**4 = 设置电机负
   无关）。**无活动轨迹时走原来的全局 `revoke_motion`，行为逐字节不变。**
 - **播完保持末点**：机构无抱闸，软停会掉臂。上层按自己发出的末点时刻判断结束。
 
-**代价**：静态占用按结构计算约 31 KB（20 B/点 × 256 点 × 6 份点数组：ROS 接收体 +
-mailbox 双缓冲 + 任务层 mailbox 副本 + 内核镜像副本 + 内核锁存，另加各自的
-`target_ids`）。**实测基线**：轨迹通道落地后 `.data`+`.bss` = 196,724 B，随后按 48 台
-上限校准容量常量（§6.10）再增 9,600 B → **206,324 B**。**RAM 口径**：这些数据全部
-落在 320 KiB 的 RAM_D1 上，即 **63.0%**；PlatformIO 报的 35.7% 分母是整芯片
-577,536 B，会把紧张度藏起来。轨迹校验是 O(路点×电机) 且在
-临界区内，发布是段级低频动作——最坏耗时列为 TBD-RT-02。
+**代价**：分段 assembly 增加一个固定 256 点轨迹缓冲，禁止动态内存。2026-09-22
+目标链接测得 `.data + .bss = 310,220 B`，其中落在 320 KiB RAM_D1，约 **94.7%**；
+PlatformIO 全 RAM 口径为 53.7%，Flash 为 20.5%。保存请求跟踪表又增加 256 B，历史 31 KB、196,724 B 和 206,324 B
+不能作为当前基线。轨迹校验是 O(路点×电机) 且在临界区内，分段发布是低频动作——
+最坏耗时列为 TBD-RT-02；RAM_D1 余量列为 P1 资源风险，后续不得继续增加静态大对象。
 
 ### 6.9 故障清除入口（2026-09-18）
 
@@ -569,7 +572,7 @@ FDCAN ISR 只完成取硬件 FIFO、加时间戳、写环和计数；满时丢�
 | 优先级 | 内容 | 规则 |
 |---|---|---|
 | P0 | 停机、失能、急停、安全帧 | 最高优先级，按电机去重 |
-| P1 | 100 Hz 默认 MIT 控制 | 每台电机一个 latest-wins 槽，不积压旧目标 |
+| P1 | MIT 控制（**控制边界 5 ms/200 Hz**，2026-09-21 起） | 每台电机一个 latest-wins 槽，不积压旧目标 |
 | P2 | SYNC、身份/能力读取、配置事务 | 有界管理队列，不能挤占 P0/P1 |
 
 默认 MIT 不使用聚合 CAN 帧：同一总线有多少台活动电机，就生成多少条单电机 MIT
@@ -599,9 +602,9 @@ CAN-FD 侧的正常性由三件事保证：协议适配器独立组帧、P1 只�
 | `lib/motor_protocol` | Vaxor/CERB 发现、编解码、停止、SYNC、配置事务 | 注册表和 ROS 消息 |
 | `lib/motor_control` | 注册表、型号 Profile、生命周期、安全、命令 freshness、状态快照 | ROS API、硬件 HAL 细节 |
 | `lib/control_mailbox` | 最新完整运动命令、Policy/Config 请求和连接事件的固定容量交换 | 策略、协议校验、设备等待、CAN 发送 |
-| `src/motor_rt_task` | 1 ms 服务、10 ms 控制边界、调用 runtime | 阻塞等待、动态分配 |
-| `src/motor_ros_bridge` | 消息校验、mailbox 写入、状态/拓扑发布 | 访问主 RX 环、直接发 CAN |
-| `src/storage_task` | W25Q64 低频日志和诊断读取 | 控制闭环、实时配置裁决 |
+| `src/motor_rt_task` | 1 ms 服务、5 ms/200 Hz 控制边界、调用 runtime | 阻塞等待、动态分配 |
+| `src/motor_bridge` + `src/param_bridge` | 消息校验、mailbox 写入、状态/拓扑/参数结果发布 | 访问主 RX 环、直接发 CAN、直接擦写 W25 |
+| `src/storage_task` | W25Q64 参数持久化、启动参数加载和低频结果 | 控制闭环、实时配置裁决 |
 | `src/led_task` | WS2812 状态显示 | 电机安全和总线操作 |
 
 核心 interface 应保持小而稳定：runtime 输入为“新命令/策略/配置请求”和“原始
@@ -673,4 +676,7 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 | 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环，此前实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `docs/archive/param-authority-reversal-plan.md`。**尚未上板验证**：三改目前只经 host 测试与静态审查，真机台架项（`NO_RECORD` 首启、写不落盘、`system.save` 闭环、写后不保存即复位）见 `motor-runtime-validation.md`，**未运行**。 |
 | 2026-09-21 | **参数服务器整体退役，参数面改为三条话题（owner 裁定）**。①下行 `micro_ros_do/param_set`（`ParamSetArray`，稀疏、**整条受理或整条拒绝**、`field` 用**设备槽序**）+ `micro_ros_do/system_command`（`SystemCommand`：SAVE / REFRESH / SET_ZERO / CLEAR_FAULT），上行 `micro_ros_up/system_status`（`SystemStatus`：`last_error` 电平 + `refresh`/`set_zero`/`clear_fault`/`save_seq` + `save_in_progress`）；读侧不变（`device_param_report` 已双行覆盖六槽）。②**行为修正**：`save_in_progress` 改为覆盖「设备分批下发 + W25 落盘」全程——旧实现在落盘请求发出的同一拍就报完成，而 v3 要擦 2 个扇区（量级 ~1s/扇区），此刻断电就是真丢数据；另加 5s 超时兜底防电平永久卡住（与 §5.3/`outstanding` 同类缺陷）。③`param_set` 目标上界 16 = `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`，有 `static_assert` 守着——参数面是**唯一**逐目标进 FIFO 的下行路径，调上界到 17+ 会立刻编译失败。④`PARAM_BRIDGE_EXECUTOR_HANDLES` 5 → 2（两条订阅），executor handle 9 → 6；meta `MAX_PUBLISHERS` 10 → 12、`MAX_SUBSCRIPTIONS` 5 → 6（`MAX_SERVICES` **有意保持 5**：退役后是纯余量，它只是静态数组、不占 DTCM 堆，降它不值那个风险）。⑤删除参数名生成/解析（`param_name_build_motor`/`param_name_parse`/`PARAM_NAME_MAX_LEN`）；`param_field_t` 序号**一个未动**（W25 blob present 位图 + `device_raw` 槽索引契约），记录布局不变、**无需迁移**。**收益口径（不要夸大）**：真正拿回来的是 **~23.6 KB DTCM 堆**（运行期量，不体现在 `.data`/`.bss`）；第 2+3 步实测 RAM 54.7% → 52.7%（−11.4 KB）、Flash 23.9% → 20.3%（−37.2 KB），那是库与代码的连带减少。`MAX_SERVICES` 的 5 个槽确成余量，但 **publisher/subscription 槽被新话题吃回去了（净收益 ≈ 0），executor handle 9 → 6**。**代价**：`ros2 param set/get` 全部失效、web_host 参数页报废（设计使然，台架期唯一配置通道是 `ros2 topic pub`）。**未上板验证**：三条话题、`field` 序陷阱专测、SAVE 的 `save_in_progress` 区间、16 目标满 FIFO、断连重连 ×3 见 `motor-runtime-validation.md`，**未运行**。 |
 | 2026-09-21 | **命令速率由控制边界决定，不由上行到达速率决定（owner 裁定：200Hz 是驱动器与固件的底线）**。09-20 把控制边界提到 5ms/200Hz 后总线仍只有 ~39Hz/台，根因有二：① 快照通道**只在受理新快照时**产生运动帧，而上行快照流的实测送达上限 ~72/s（best-effort depth 1 静默丢弃；web→rosbridge 路径台架 ~40/s），因此命令率被上行速率钉死；② 同日提交又加了 20ms/50Hz P1 发送门，理由是"避免 4 台 800 帧/s 压垮 SLCAN/CANable"——那是**台架仪器**的吞吐上限，不是总线余量（4 台 200Hz 命令仅 4.35% 负载，16 台/总线 26%，见 `48-motor-scale-design.md` §3.2），不该固化成固件语义。本轮：新增 `motor_control_hold_step`——快照机组在每个控制边界把已受理目标**原样重发**（零阶保持，仅快照新鲜 ≤30ms 期间；挂起 P0、整定窗、轨迹所属电机一律让路，且重发不取消挂起的 P0 重试）；移除 `kP1TransmitPeriodMs` 与只为它存在的 `can_tx_scheduler_pump_p0_p2`。安全口径未放松：过期/撤权/故障/离线/冲突/缺席仍由既有门禁立刻切断输出，且 30ms 保持窗比驱动器自带 500ms 看门狗更严。host 覆盖见 `test_motor_control` 的 `test_hold_step_*`。**未验**：SLCAN 台架看不到 200Hz 总线真值（~880 帧/s 超出通道），需 candleLight/socketcan 或真机。 |
-| 2026-09-21 | **轨迹插值改回段内线性（§6.8 第三次修订）**：位置沿路点连线、速度取段斜率（段内恒定、**逐路点跳变**），受理侧不再预计算切矢。**取舍**：代价是速度在路点上不连续——MIT 律的 `kd·v_des` 项逐路点跳一档（力矩台阶），这正是 §6.8 当初上 Hermite 的理由；换来的是执行位置严格贴合路点连线、行为只由路点决定、受理零开销，且省下 256×4 B 的 `.bss` 切矢表。**原实现按注释保留在码内**（`lib/motor_control/src/motor_control.c` 的求值块 + `trajectory_compute_tangents`/`trajectory_monotone_tangent`、`motor_control_internal.h` 的 `trajectory_tangent_rad_s`、`test_motor_control.cpp` 的两条 Hermite 用例与 main 调用），恢复=解注释三处。测试口径随之调整：`test_trajectory_interpolates_and_clamps_at_end` 的中点速度期望 1.5 → 1.0（段斜率）；`test_trajectory_position_velocity_same_sign` 增加**段号切换即跳过**——线性插值下速度在路点上真跳变，跨段比符号无意义（Hermite 时该处切矢恰为 0 才使旧断言成立）。host 19 项全绿、`pio run` 通过。**未验**：真机轨迹平滑度与力矩台阶的实际观感（`motor-runtime-validation.md` 轨迹真机项）。 |
+| 2026-09-21 | **（2026-09-22 已推翻：真机试过后否定，见下方 2026-09-22 行）轨迹插值改回段内线性（§6.8 第三次修订）**：位置沿路点连线、速度取段斜率（段内恒定、**逐路点跳变**），受理侧不再预计算切矢。**取舍**：代价是速度在路点上不连续——MIT 律的 `kd·v_des` 项逐路点跳一档（力矩台阶），这正是 §6.8 当初上 Hermite 的理由；换来的是执行位置严格贴合路点连线、行为只由路点决定、受理零开销，且省下 256×4 B 的 `.bss` 切矢表。**原实现按注释保留在码内**（`lib/motor_control/src/motor_control.c` 的求值块 + `trajectory_compute_tangents`/`trajectory_monotone_tangent`、`motor_control_internal.h` 的 `trajectory_tangent_rad_s`、`test_motor_control.cpp` 的两条 Hermite 用例与 main 调用），恢复=解注释三处。测试口径随之调整：`test_trajectory_interpolates_and_clamps_at_end` 的中点速度期望 1.5 → 1.0（段斜率）；`test_trajectory_position_velocity_same_sign` 增加**段号切换即跳过**——线性插值下速度在路点上真跳变，跨段比符号无意义（Hermite 时该处切矢恰为 0 才使旧断言成立）。host 19 项全绿、`pio run` 通过。**未验**：真机轨迹平滑度与力矩台阶的实际观感（`motor-runtime-validation.md` 轨迹真机项）。 |
+| 2026-09-22 | **轨迹分段传输 + 插值回到非均匀 Hermite（§6.8 第四次修订）**：①`MotorTrajectory` 增加 `segment_index`/`segment_count`，固件在 mailbox 内按序拼接（固定 256 点 assembly 缓冲，无动态内存），只有整条收齐且复验通过才原子发布；重叠边界的完全重复路点合并、位置/速度/前馈冲突则整组拒收；没有重叠时刻时按整条绝对时间线直接拼接，不把分段端点当成零速端点。对外发布的轨迹归一为单段，内核只见完整轨迹。②插值恢复**非均匀单调三次 Hermite**：切矢按相邻路点的实际时间间隔取 Fritsch–Carlson 加权调和平均（等间隔时退化为调和平均；旧的简单中心差分在不等间隔处切矢偏大），段边界速度由整条时间线共同决定。③删除码内被注释掉的线性求值块（"解注释三处即可恢复"的回滚路径作废）。host 覆盖：`test_trajectory_mailbox` 四条分段用例 + `test_motor_control` 的非均匀时间轴用例。**未验**：真机分段下发时序与轨迹平滑度（`motor-runtime-validation.md`）。 |
+| 2026-09-22 | **保存完成判据收紧**：`COMMAND_SAVE` 对每台 dirty 电机建立 request_id outstanding 表，只有全部 `CONFIG_RESULT=OK` 才请求 W25；W25 结果与保存令牌成对发布/取走，旧会话结果不能收敛新保存。任一设备失败不启动 W25；W25 仍是非活动槽擦写、分页读回校验和活动槽翻转。设备 flash 与 W25 没有跨介质原子提交，CERB `0x2539` 无应用层耐久 ack，掉电闭环仍待台架。 |
+| 2026-09-22 | **全总线统一 CANFD 加速：`0x080` SYNC 由经典 0B 改为 FD+BRS 0B**（`cerb_encode_discovery_sync` 是固件出经典帧的唯一处；SDO/MIT 早已 FD+BRS）。动因是**可观测性**：经典帧不经过数据相位（BRS 之前全是仲裁位率），所以**数据段位率配错时唯独 SYNC 还能通**，把「总线已通」这个假阳性喂给观察者。**该盲区已实测复现**：把模拟器数据段设成不匹配的 `Y2`，FD+BRS 的 SYNC 立刻收不到——`rx_frame_count=0`、零电机、模拟器自己打出「3s 未收到 SYNC」告警；而改动前同样的总线故障只会显示「收到首个 SYNC，链路已通」。零长度也照样验证数据相位：BRS 之后直到 CRC 定界符（含 17/21 位 CRC 与填充位）都按数据位率发。（同日的台架故障另有一因，与帧格式和位率都无关：`fdcan_motor_sim.py` 单线程循环在 `--gazebo` 负载下饿死 CANable 的串口服务，已修；见 `bench-canable-fdcan1` 记忆。两者不要混为一谈。）**混合本身不是问题**：ISO 11898-1:2015 支持经典/FD 混挂（前提是全总线节点都支持 FD），且**真机 CERB 器件自己就按字典发经典帧**（SDO 应答 DLC=8 经典帧，见 `test_motor_control.cpp` 的 `sdo_response`），所以「统一」只作用于固件 TX、总线仍必然是混合的；固件 RX 侧本来就不对帧格式分支。**未验**：厂家说明书 §3.1 只写明 SDO 是「CANFD 加速标准帧」，`0x080` SYNC 的帧格式无书面依据，真机是否接受 FD 的 SYNC 未验（README 开放项）；被拒时把该函数两行改回 `false` 即可（唯一改动点）。host 19/19 通过。 |

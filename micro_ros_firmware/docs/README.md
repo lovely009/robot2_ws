@@ -14,6 +14,15 @@
 - 根部平铺文件：厂商板卡与电机协议原件，不改内文；
 - `dm-mc02例程/`：厂商例程整树（仅本地参考，已 gitignore，勿入库）。
 
+## 参数接口现状
+
+固件生产代码不再编译或运行 `rclc_parameter` 参数服务器。当前参数控制面是
+`micro_ros_do/param_set`、`micro_ros_do/system_command`，状态面是
+`micro_ros_up/device_param_report`、`micro_ros_up/system_status`；Web 上位机不再启动
+`rosapi_node`。活动文档中保留的 `PARAM_BRIDGE_MAX_PARAMS`、`ros2 param` 和
+`parameter_server.c` 内容仅用于解释历史容量问题和退役决策，不是当前接口；操作和验证
+必须以当前 topic 契约为准。
+
 ## 开发文档
 
 | 文档 | 内容 | 状态 |
@@ -22,8 +31,9 @@
 | [AGENTS.md](../../AGENTS.md) | AI/人工操作手册：构建、台架顺序、坑 | 权威 |
 | [ADR 0007](adr/0007-micro-ros-discovery-driven-motor-runtime.md) | 发现驱动聚合式运行时决策（顶部含 2026-09-18 勘误） | Proposed + 勘误 |
 | [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 设计理由（参数链/一问一答/设零等） | 基线，含历史 |
+| [module-boundaries](architecture/module-boundaries.md) | 模块依赖、执行上下文、数据所有权与测试边界 | 当前结构基线 |
 | [motor-runtime-validation](plans/active/motor-runtime-validation.md) | 开放台架项唯一清单与验收记录要求 | 活动 |
-| [48-motor-scale-design](plans/active/48-motor-scale-design.md) | 48 台容量契约、只在 48 台才暴露的失效点、rclc 参数服务器必要性裁定 | 提案；§5 裁定已执行 |
+| [48-motor-scale-design](plans/active/48-motor-scale-design.md) | 48 台容量契约、只在 48 台才暴露的失效点、参数服务器退役的历史裁定 | 提案；§5 裁定已执行 |
 | [w25-blob-v3-design](plans/active/w25-blob-v3-design.md) | W25 参数 blob v3 布局（每槽 2 扇区、设备侧事实、迁移链、零点代被否的理由） | 已实现 |
 | [boot-normalize-design](plans/active/boot-normalize-design.md) | 上电归一（保护/方向）时序、方向无记录不猜、冻结成因与双出口语义 | 已实现 |
 | [param-authority-reversal-design](plans/active/param-authority-reversal-design.md) | 参数权威反转：固件记录为权威、写与保存分离、双行快照话题 | 已实现 |

@@ -26,7 +26,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   后 `python3 tools/stack_audit.py [--orphans 16] [--root <回调名>]`，看完把 flag 撤掉再
   clean 重建。逐任务数字**不含函数指针回调**（ROS executor 那一层），必须用 `--root`
   补上；见 `docs/plans/active/motor-runtime-validation.md` 第 2 节的审计结论。
-- host 共 17 个测试（16 个 C++ ctest + 1 个 python 线协议），直接编译固件真实 .c、
+- host 共 19 个测试（18 个 C++ ctest + 1 个 python 线协议），直接编译固件真实 .c、
   无桩无复制；白盒用例 `-I` 内核 src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
 - **必须 `-t clean` 全量重建**：改 `platformio.ini` 构建宏（USB CDC 两宏、
   HAL_FDCAN/IWDG、HSE_VALUE、-Os、FDCAN_SELF_ACK_BENCH）或 `ldscript/*.ld`。
@@ -51,6 +51,40 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   2–4=R48；默认 /dev/ttyACM1）；完整九节点台架需显式传入
   `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。完整流程见仓库根
   `docs/guides/fdcan1-bench-guide.md`。
+
+## 台架：模拟器与全链路（2026-09-22 实测）
+
+- **启动一律走 `micro_ros_agent/tools/bench_up.sh`**（模拟器先起当 ACK 节点 → 再复位板子）。
+  默认 `position` 模式，理由见下。
+- **模拟器的设备路径按 by-id 解析，别硬编码 `/dev/ttyACM*`**：USB 重新枚举（拔插、HUB
+  复位、板子重上电）后编号会交换——2026-09-22 实测 CANable 从 ttyACM1 变成 ttyACM0、
+  板子 CDC 变成 ttyACM2；硬编码的模拟器于是开到了**别的节点**，总线上没有 ACK 节点、
+  固件 FDCAN1 bus-off，现象是「总线全死」而与设备无关。`--tty` 不给就自动按
+  `/dev/serial/by-id/*CANable*` 解析。
+- **模拟器是单实例，已加 flock 独占锁**。两个实例同时开同一个 CANable 时，各自都会下发
+  `C/S8/Y/M0/A1/O` 并互发帧 → 表现为**随机总线错乱、SYNC 间隔异常、部分电机不跟**，
+  极难定位（2026-09-22 就是因为一个忘了停的残留实例，把排查带偏了很久）。第二个实例
+  现在会直接失败并说明原因——被挡下时先找残留进程，别怀疑总线。
+- **串口读必须与其它工作解耦**：模拟器的读在独立线程（`_reader_loop`）。原先读与
+  rclpy/Gazebo 桥共用一个循环，主机负载一上来（Gazebo + 测试脚本）循环周期涨到
+  0.1–0.6s → CANable 的 USB 缓冲被写满 → 它写阻塞、控制器出错、**停发 ACK** →
+  固件侧表现成 `TEC=128/LEC=ACK error/TXBRP=0xff`、`rx_frame_count=0`、整条总线像死了。
+  这台 CANable 对主机侧调度延迟极其敏感：**主机侧程序卡顿会直接表现成"总线故障"**，
+  而且报错方向指向"对端不发 ACK"，会把人往固件/CANable 上引。用 cangaroo 单独测一下
+  总线是最快的反证。
+- **effort 模式的力矩天花板**：URDF 四关节都是 `<limit effort="10.0">`，而 MIT 律
+  `tau = kp*err` 在 kp=30、误差 1.57 rad 时需要 ~47 N·m → 被模型钳到 10，肩/肘关节
+  顶不住重力、停在机械下限（实测 m2 停在 −1.5705 ≈ −π/2，抬 `--tau-limit` 到 80 也无效）。
+  要真跑 effort 动力学，得给轨迹的 `effort` 字段填**重力前馈**，或抬 URDF 的 effort
+  上限——两者都是模型层的事，**未经确认不要改**。做轨迹播放/全链路功能验证用
+  `position` 模式（模拟器 docstring 的默认口径也是它）。
+- **轨迹容量**：整条轨迹上限 `MOTOR_CONTROL_MAX_TRAJECTORY_POINTS=256` 个路点，且
+  **四台电机共用**（4 台 = 64 个时刻）。示教导出的文件动辄 600/1080/1800 点，装不下。
+  长轨迹用 `micro_ros_agent/tools/traj_play.py`：主机侧切成 ≤256 点的窗口、在窗口边界
+  交棒（下一窗口首点复用上一窗口末点，保证位置连续）。窗口切分可用 `--dry-run` 先看。
+- **轨迹播完不释放归属**：内核只在取消/替换时 `release_trajectory_motor`，播完仍由轨迹
+  通道持有该电机 → 期间发快照命令**被静默忽略、无任何报错**。要交还给快照通道，显式发
+  一条空轨迹取消（web 的"暂停"按钮即此）。
 
 ## micro-ROS 坑
 
@@ -142,8 +176,9 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 - `src/main.cpp` —— setup 板级初始化 + start_task 编排五任务；`loop()` 必须空。
 - `src/motor_rt_task.cpp` —— 唯一电机实时任务：1ms 服务（RX drain / 内核 service /
-  SYNC / TX 路由 pump / IWDG 喂狗）+ 20ms 控制边界（会话边沿、快照 apply、配置 FIFO、
-  boot 参数）；内核唯一调用者、唯一正常 FDCAN 发送者。
+  SYNC / TX 路由 pump / IWDG 喂狗）+ 5ms/200Hz 控制边界（会话边沿、快照 apply、配置
+  FIFO、boot 参数）；内核唯一调用者、唯一正常 FDCAN 发送者。20ms/50Hz 只用于
+  协议状态心跳，不是运动控制边界。
 - `lib/session_sync/` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
 - `lib/motor_control/` —— ID 驱动内核（注册表/型号目录/生命周期/安全级联/配置
   事务）；公共 API 只在 `include/`，内部布局 `src/motor_control_internal.h`

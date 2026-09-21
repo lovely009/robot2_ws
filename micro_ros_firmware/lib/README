@@ -13,9 +13,13 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 | `motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
 | `motor_control` | 动态注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS、HAL、厂家字节布局 |
 | `control_mailbox` | 高频完整命令、低频配置请求、授权/连接事件的跨任务交换 | 协议校验、限位裁决、CAN 发送 |
+| `session_sync` | 会话/授权电平与边沿到内核调用的纯逻辑派生 | 任务调度、ROS、CAN |
+| `storage_projection` | 参数视图与 Flash blob 记录的纯投影 | Flash 读写、保存时序、任务通知 |
+| `param_store` | 参数字段、单位、blob 布局、CRC 和版本迁移 | W25Q64 设备访问、控制策略 |
 | `imu` | BMI088、SPI2 阻塞通信、融合和 snapshot（不用 DMA） | 电机控制、ROS 发布 |
 | `w25q64` | OCTOSPI2 W25Q64 原始读写与 geometry | 参数策略、日志调度、控制闭环 |
 | `ws2812` | SPI6/PA7 的 LED 物理发送 | 系统状态判定、电机安全 |
+| `board` | 板级共享常量和中断优先级约束 | 设备业务、任务调度 |
 
 ### 模块内部边界
 
@@ -41,11 +45,12 @@ BDMA_Ch0 句柄与 handler，帧缓冲位于 `.bdma_noinit`/RAM_D3。设备库�
 ```text
 src/ros_bridge     -> motor_bridge + imu_bridge（ROS 实体编排）
 src/motor_bridge   -> motor_rt_task（经包装函数写 control_mailbox）
-src/motor_rt_task  -> control_mailbox + fdcan + motor_control
+src/motor_rt_task  -> control_mailbox + fdcan + motor_control + session_sync
 motor_control      -> motor_protocol（接口接缝，文档明载）
+storage_projection -> motor_control 类型 + param_store（纯投影）
 src/sensor_task    -> imu
 src/led_task       -> ws2812
-src/storage_task   -> w25q64 + param_store（Flash 唯一所有者，见 storage_task.h）
+src/storage_task   -> w25q64 + param_store + storage_projection（Flash 唯一所有者，见 storage_task.h）
 lib/w25q64         -> octospi 控制器层 + W25 命令层/geometry（仅 storage_task 使用）
 lib/param_store    -> blob 布局/CRC/v1 迁移 + 参数名/单位纯逻辑（无硬件依赖）
 ```

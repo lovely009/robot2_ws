@@ -18,7 +18,7 @@ adapter 接缝：厂家字节布局、CAN-ID 推导与 FD 属性只存在于该�
 CERB SYNC 上报心跳），型号由内核读设备 SDO 0x1008 自报身份、查内置型号目录
 自动绑定；命令是最多 64 目标的
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
-"命令实时回显（50Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
+"命令实时回显（200Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
 OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 `docs/plans/active/motor-runtime-validation.md`（唯一清单）。
 
@@ -67,11 +67,13 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
 | `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；只在收到 `SystemCommand` 的 `COMMAND_SAVE` 时落盘——写事务只置脏，没有自动落盘，见「W25Q64」节） |
-| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 5ms/200Hz 控制边界消费完整快照与配置 FIFO |
+| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 5ms/200Hz 控制边界消费完整快照、已拼接轨迹与配置 FIFO |
 
 ## 代码组织
 
 业务按“大任务”分域，ROS 实体不堆在 `ros_bridge`：
+模块依赖、执行上下文、数据所有权和测试边界的唯一索引见
+`docs/architecture/module-boundaries.md`。
 
 | 模块 | 职责 |
 |---|---|
@@ -190,8 +192,11 @@ blob v3 = 32B 头 + 64×120B 记录（7712B）；v2（48B 记录）与 v1（32B 
 加载时各自就地迁移到 v3（两条 fan-in 路径，**不是** v1→v2→v3 链）。
 保存**只有一个触发源**：`micro_ros_do/system_command` 的 `COMMAND_SAVE`。
 设备写事务成功后只置脏（`record_dirty`），没有任何自动落盘——2026-09-21 起
-连那 500ms 去抖也删掉了（它会在控制边界里偷偷擦 flash）。save 擦写非活动槽的**两个**扇区、写 7712B，按 256B 页读回 memcmp
-校验，任一失败不翻转活动槽（旧槽仍可启动）。
+连那 500ms 去抖也删掉了（它会在控制边界里偷偷擦 flash）。`COMMAND_SAVE` 先分批
+下发设备保存请求并等待每台 `CONFIG_RESULT=OK`，然后才擦写非活动槽的**两个**扇区、
+写 7712B，按 256B 页读回 memcmp 校验；任一失败不报告保存成功，W25 失败也不翻转活动槽
+（旧槽仍可启动）。设备侧保存和 W25 之间没有跨介质原子提交，W25 失败后的恢复是重试
+保存，不能宣称已回滚设备侧。
 
 **升级迁移（一次性，含已知缺口）**：旧布局槽 B 基址是 `0x1000`，新布局下它
 落进槽 A 的擦除范围；boot **只在两个新槽都无效**时兜底读一次 `0x1000`，把旧
@@ -233,19 +238,18 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
-"未来一段时间怎么走"。MCU 受理时原样锁存路点（不做任何预计算），执行时每个
-5ms/200Hz 边界做段内**线性**插值并取**解析导数**当速度（= 段斜率，段内恒定），
-CAN 命令**每台每个边界恰好一帧（200Hz）**。代价是速度在**每个路点跳一次**——
-阶梯式速度前馈会让 MIT 律的 `kd·v_des` 项逐路点跳一档（力矩台阶）；位置则严格
-贴合路点连线（原单调三次 Hermite 实现已停用保留，2026-09-21 见决策日志 §6.8）。
-**路点里的 `velocity` 不参与执行**
-——上层常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈
-`effort` 段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是
-MCU 本地受理 tick，消息里的 `sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
+"未来一段时间怎么走"。同一 `trajectory_id` 可拆成多个可靠分段，分段带有
+`segment_index`/`segment_count`；固件按序在固定缓冲区内拼接，只有收到完整组后才
+原子替换当前轨迹，分段未收齐时旧轨迹继续运行。执行时每个 5ms/200Hz 边界使用
+完整非均匀时间线做**单调三次 Hermite**插值（Fritsch–Carlson 切矢），段边界
+速度由左右不等时间间隔共同传递，位置和解析速度连续；重叠边界的完全相同路点
+只保留一次，冲突路点整组拒收；没有重叠时刻也按整条绝对时间线直接拼接，不把
+每个分段端点错误地当成零速端点。
 
-**容量：整条轨迹 ≤ 256 个路点**（`CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS`，是
-总路点数不按电机分——4 台电机时只够 64 个时刻）。**超限下行链路静默丢弃**：
-ROS 桥在入口 return，不发事件也不计数，上位机必须自己先判。
+CAN 命令**每台每个边界恰好一帧（200Hz）**。路点里的 `velocity` 不参与执行——上层
+常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈 `effort`
+段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是 MCU
+本地受理完整轨迹的 tick，消息里的 `sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
 
 - **归属仲裁**：`target_ids` 声明的电机在轨迹在播期间由轨迹**独占**——同一
   时刻到达的 100Hz 快照对它们既不下发也不软停（否则快照会立刻打死轨迹）。
@@ -257,13 +261,16 @@ ROS 桥在入口 return，不发事件也不计数，上位机必须自己先判
   逐台故障/离线/冲突约束。**没有任何活动轨迹时，行为与改动前逐字节一致。**
 - **播完**：保持末点位置（机构无抱闸，软停会掉臂）。上层按自己发出的末点
   时刻判断结束，再发新轨迹或取消。
-- **容量**：单条轨迹最多 256 个路点 / 64 台电机（`MOTOR_CONTROL_MAX_TRAJECTORY_
-  POINTS`），更长的时间线由上层分段链式下发（段边界速度不连续，MIT 的 Kd 平滑）。
-  静态占用约 31 KB（ROS 接收体 + mailbox 双缓冲 + 转换中间 + 内核锁存，20 B/点），
-  改小上面两个常量是唯一的省 RAM 手段。**RAM 口径**：`.data`+`.bss` 全部落在
-  320 KiB 的 RAM_D1 上，实测占用 **68.7%**（225,108 B / 327,680 B）。PlatformIO
-  报的 39.0% 分母是整芯片 577,536 B，会把紧张度藏起来——判断余量要用 RAM_D1
-  口径。参数面不占任何常驻堆（见「参数面」一节）。
+- **容量**：拼接后的整条轨迹最多 256 个路点（所有电机合计，
+  `CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS`）/ 64 台电机
+  （`MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS`）；单个分段的 `count` 是**该分段**的有效
+  路点数。分段乱序、缺段、时间回退、总点数超限或边界数据冲突时整组拒收，当前
+  轨迹不受影响。拼接增加一个固定 256 点 assembly 缓冲，禁止动态内存；实际静态
+  占用以当前目标链接图为准——2026-09-22 目标构建测得 `.data + .bss = 310,220 B`，
+  其中落在 320 KiB RAM_D1，约 **94.7%**；PlatformIO 全 RAM 口径为 53.7%，
+  Flash 为 20.4%。改小上面两个常量是唯一的省 RAM 手段。**RAM 口径**：`.data`+`.bss`
+  全部落在 320 KiB 的 RAM_D1 上；判断余量必须使用 RAM_D1 口径。历史 68.7% 数值
+  已过期，参数面不占任何常驻堆（见「参数面」一节）。
 
 ### 故障清除（`SystemCommand` 的 `COMMAND_CLEAR_FAULT`）
 
@@ -313,9 +320,9 @@ seq 收敛，不要只看 `last_error`）。
 - **完成判据是序号不是错误码**：`system_status` 的 `refresh_seq`/`set_zero_seq`/
   `clear_fault_seq`/`save_seq` 只增不减，每次命令收尾（**无论成败**）+1。只看
   `last_error` 分不清"上一轮成功留下的 0"和"这一轮还没跑"。
-- **`save_in_progress` 覆盖全程**：设备侧分批下发 + W25 落盘两段都算"保存中"，
-  必须等 W25 出终态才转 false。旧实现把落盘请求与"保存完成"放在同一拍，报告完成时
-  数据其实还没进 flash。
+- **`save_in_progress` 覆盖全程**：设备侧分批下发、等待每台 `CONFIG_RESULT`、W25
+  落盘三段都算"保存中"，必须等设备侧全部成功且 W25 出终态才转 false。旧实现把
+  设备请求推出完或落盘请求发出误当成"保存完成"，报告完成时设备/W25 可能仍未完成。
 - **`enable`/`kp`/`kd` 不在这里**：它们在 `/micro_ros_do/motor_policy`。这三项变化快，
   且 ARD §19.4 本就禁止它们进命令快照。**稀疏语义**：只影响列出的电机，其余保持原状。
   **代数门**：「未武装 → 武装」要求 `policy_generation` 严格前进，挡住「周期
@@ -475,8 +482,8 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 发布（上行，8 个话题；均为 ID 化，缺失浮点 = NaN）：
 
-- `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
-  由 10ms bridge timer 驱动）。
+- `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（50Hz，
+  由 10ms bridge timer 每 2 拍发一帧；控制边界独立为 5ms/200Hz）。
 - `micro_ros_up/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
   保护位/事务状态）。
 - `micro_ros_up/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
@@ -505,8 +512,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 故障码、保护/限位位）；motion_states = 运动学（位置/速度/力矩、`state_age_ms`、
 `target_source`）。`target_source` 让上层看见「我的快照为什么被忽略」。
 
-`motor_id ↔ joint_name` 的映射、方向与零位是**上层职责**（上层迁移进行中，
-见 HANDOFF「剩余工作」）；固件不做 name-to-ID 适配。
+`motor_id ↔ joint_name` 的映射、方向与零位是**上层职责**（上层分段转发的源代码
+已同步，rosbridge/Agent/MCU 端到端与真机连续性仍待验证）；固件不做 name-to-ID
+适配。
 
 ## 控制安全状态与恢复语义
 
@@ -563,7 +571,8 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 也不得据此宣称已达到硬件安全：
 
 - [ ] MIT 小幅零附近命令连续运行，示波器/logic analyzer 验证 motor_rt TX 为
-  50Hz，并记录 motor_rt cycle WCET 与周期 jitter。
+  200Hz（控制帧；另行核对 20ms/50Hz SYNC/状态心跳），并记录 motor_rt cycle
+  WCET 与周期 jitter。
 - [ ] 停止刷新快照，验证 30ms 边界进入默认 `kd` 阻尼软停、100ms 边界协议级
   失能并清授权；单电机从快照缺席，验证仅该电机软停、其他电机不受影响。
 - [ ] Agent 断连/重连，验证断连立即失能清授权、清旧命令；重连后内核重新读
@@ -588,6 +597,10 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   锁存不被离线/重连清除。
 - [ ] 示波器或 candump 验证 CERB 所在总线每 20ms 仅一帧 `0x080` SYNC，设备
   20ms 返回上报帧；确认上报密度与 100ms OFFLINE 边界匹配实际设备行为。
+  **同一趟一并核对 SYNC 的帧格式**：固件 2026-09-22 起发 FD+BRS 的 `0x080`，
+  但厂家说明书只写明 SDO 是「CANFD 加速标准帧」，SYNC 无书面依据。真机若
+  不接受 FD 的 SYNC（表现为发现不了任何电机、`rx_frame_count=0`），把
+  `cerb_encode_discovery_sync` 的 `is_fd`/`is_brs` 改回 `false`。
 - [ ] 断开/恢复 BMI088、阻塞 SPI 或停止 DRDY，验证 2ms transport bound、每秒
   初始化重试、heater off 与双缓冲不撕裂。
 
@@ -603,6 +616,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   固件侧只通过 `extra_packages/can_bridge_msgs` 符号链接复用。
 - CERB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、
   力矩 `±11/±45 Nm`，必须与真机参数设置页一致；`motor_rt_task` 每 20ms 发送
-  `0x080` SYNC 维持设备 20ms 状态心跳（总线检测）。
+  `0x080` SYNC 维持设备 20ms 状态心跳（总线检测）。SYNC 自 2026-09-22 起与
+  SDO/MIT 同为 **FD+BRS**（全总线统一 CANFD 加速）：经典帧不经过数据相位，
+  数据段位率配错时唯独 SYNC 还能通，会造成「链路正常」的假阳性。注意总线仍是
+  混合的——真机 CERB 器件自己按字典发经典帧（SDO 应答）。
 - RX burst 下的实际 motor_rt WCET/jitter、ring 容量余量及 30/100ms 动作边界
   尚需按上述清单在 `dev-real` 无负载测量；host/固件编译不能替代真机时序证据。

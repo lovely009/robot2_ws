@@ -1,5 +1,9 @@
-// param_store 纯库：W25 blob（header+present 位图+定长记录+CRC32）与
-// ROS 参数名模型（m<id>.<field> 的生成/解析/值域校验）。
+// param_store 纯库：W25 blob（header+present 位图+定长记录+CRC32）与参数值域
+// 校验（param_value_ok / param_position_limits_ok）。
+//
+// 名字生成/解析（m<id>.<field>）已随参数服务器退役删除（2026-09-21）：参数面
+// 改为话题后没有任何地方再拼/解参数名。值域校验则**留在这里并被生产路径使用**
+// ——param_bridge 的整条预校验直接调它（src/param_bridge.cpp），不再是死代码。
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -23,45 +27,6 @@ static uint32_t test_crc32(uint32_t crc, const uint8_t *data, size_t len) {
     }
   }
   return ~crc;
-}
-
-void test_param_name_build_parse_roundtrip() {
-  char buf[PARAM_NAME_MAX_LEN];
-  for (uint16_t id = 1U; id <= 127U; ++id) {
-    for (int f = 0; f < PARAM_FIELD_COUNT; ++f) {
-      auto field = static_cast<param_field_t>(f);
-      assert(param_name_build_motor(buf, sizeof(buf), id, field));
-      uint16_t got_id = 0;
-      param_field_t got_field = PARAM_FIELD_KP;
-      assert(param_name_parse(buf, &got_id, &got_field) == PARAM_NAME_MOTOR);
-      assert(got_id == id && got_field == field);
-    }
-  }
-  // 具体名字锁死（参数契约）。
-  param_name_build_motor(buf, sizeof(buf), 7, PARAM_FIELD_TORQUE_LIMIT);
-  assert(strcmp(buf, "m7.torque_limit") == 0);
-  param_name_build_motor(buf, sizeof(buf), 127, PARAM_FIELD_ENABLE);
-  assert(strcmp(buf, "m127.enable") == 0);
-
-  uint16_t id = 0;
-  param_field_t field = PARAM_FIELD_KP;
-  assert(param_name_parse("system.save", &id, &field) == PARAM_NAME_SYSTEM);
-  assert(param_name_parse("m7.kp", &id, &field) == PARAM_NAME_MOTOR);
-  assert(id == 7 && field == PARAM_FIELD_KP);
-  assert(param_name_parse("garbage", &id, &field) == PARAM_NAME_UNKNOWN);
-  assert(param_name_parse("m0.kp", &id, &field) == PARAM_NAME_UNKNOWN);
-  assert(param_name_parse("m128.kp", &id, &field) == PARAM_NAME_UNKNOWN);
-  assert(param_name_parse("m7.bogus", &id, &field) == PARAM_NAME_UNKNOWN);
-  assert(param_name_parse("m.kp", &id, &field) == PARAM_NAME_UNKNOWN);
-  // PID 六项已于 2026-09-20 移出 param_field_t：它们曾被注册循环按
-  // PARAM_FIELD_COUNT 边界自动带进参数树（恒 NaN、纯占槽，并把每电机项数
-  // 从 5 顶到 11）。这里钉住"名字不再可解析"，防止有人只把名字加回名字表
-  // 而不改注册集合。
-  assert(param_name_parse("m7.current_kp", &id, &field) == PARAM_NAME_UNKNOWN);
-  assert(param_name_parse("m7.position_ki", &id, &field) == PARAM_NAME_UNKNOWN);
-  // 末位字段仍是 limit_protect —— 它是 present 位图契约的边界（索引 7）。
-  assert(param_name_parse("m7.limit_protect", &id, &field) == PARAM_NAME_MOTOR);
-  assert(field == PARAM_FIELD_LIMIT_PROTECT);
 }
 
 void test_param_name_validation() {
@@ -496,18 +461,12 @@ static void test_param_value_ok_direction() {
   assert(!param_value_ok(PARAM_FIELD_DIRECTION, -1.0f, 0.0f, nullptr));
   assert(!param_value_ok(PARAM_FIELD_DIRECTION, NAN, 0.0f, nullptr));
 
-  // 名字生成/解析往返。
-  char buf[PARAM_NAME_MAX_LEN];
-  assert(param_name_build_motor(buf, sizeof(buf), 12U, PARAM_FIELD_DIRECTION));
-  assert(strcmp(buf, "m12.direction") == 0);
-  uint16_t id = 0U;
-  param_field_t f = PARAM_FIELD_ENABLE;
-  assert(param_name_parse(buf, &id, &f) == PARAM_NAME_MOTOR);
-  assert(id == 12U && f == PARAM_FIELD_DIRECTION);
+  // direction 必须落在 param_field_t 的末位——present 位图与 device_raw 槽序是
+  // 契约（追加在 COUNT 前，不重排既有字段）。不重排这件事没有类型保护，靠这条钉住。
+  assert(PARAM_FIELD_DIRECTION == PARAM_FIELD_COUNT - 1);
 }
 
 int main() {
-  test_param_name_build_parse_roundtrip();
   test_param_value_ok_direction();
   test_param_name_validation();
   test_blob_v3_layout_size();

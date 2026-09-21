@@ -15,7 +15,7 @@ reliable depth 1，本节点的轨迹发布者必须使用 reliable，不能复�
 from motor_hardware_interface.topic_bridge import (BridgeError,
                                                   motion_states_to_joint_state,
                                                   parse_joint_map,
-                                                  transpose_trajectory)
+                                                  split_trajectory)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
                     'effort': list(p.effort) or None,
                 })
             try:
-                target_ids, flat, warnings = transpose_trajectory(
+                target_ids, segments, warnings = split_trajectory(
                     list(msg.joint_names), samples, self.motor_of_joint)
             except BridgeError as exc:
                 # 关键：把固件会**静默丢弃**的失败在这里讲清楚。
@@ -125,24 +125,33 @@ def main():  # pragma: no cover - 需要 ROS 环境
             for w in warnings:
                 self.get_logger().warn(w)
 
-            out = MotorTrajectory()
-            out.sync_time_ns = self.get_clock().now().nanoseconds
             self.sequence += 1
-            out.sequence = self.sequence
-            out.trajectory_id = self.sequence
-            out.count = len(flat)
-            out.target_count = len(target_ids)
-            out.target_ids = target_ids
-            out.points = []
-            for (t_ms, motor_id, p, v, e) in flat:
-                pt = MotorTrajectoryPoint()
-                pt.time_from_start_ms = t_ms
-                pt.motor_id = motor_id
-                pt.position, pt.velocity, pt.effort = p, v, e
-                out.points.append(pt)
-            self.traj_pub.publish(out)
-            self.get_logger().info('轨迹已转发：%d 台 / %d 点 / 共 %d ms'
-                                   % (len(target_ids), len(flat),
+            trajectory_id = self.sequence
+            sync_time_ns = self.get_clock().now().nanoseconds
+            segment_count = len(segments)
+            for segment_index, flat in enumerate(segments):
+                out = MotorTrajectory()
+                out.sync_time_ns = sync_time_ns
+                out.sequence = self.sequence
+                out.trajectory_id = trajectory_id
+                out.segment_index = segment_index
+                out.segment_count = segment_count
+                out.count = len(flat)
+                out.target_count = len(target_ids)
+                out.target_ids = target_ids
+                out.points = []
+                for (t_ms, motor_id, p, v, e) in flat:
+                    pt = MotorTrajectoryPoint()
+                    pt.time_from_start_ms = t_ms
+                    pt.motor_id = motor_id
+                    pt.position, pt.velocity, pt.effort = p, v, e
+                    out.points.append(pt)
+                self.traj_pub.publish(out)
+            flat = segments[-1]
+            self.get_logger().info('轨迹已转发：%d 台 / %d 点 / %d 段 / 共 %d ms'
+                                   % (len(target_ids),
+                                      sum(len(segment) for segment in segments),
+                                      segment_count,
                                       flat[-1][0] if flat else 0))
 
     rclpy.init()

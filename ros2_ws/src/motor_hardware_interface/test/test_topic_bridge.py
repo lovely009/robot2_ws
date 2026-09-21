@@ -11,6 +11,7 @@ import pytest
 from motor_hardware_interface.topic_bridge import (BridgeError,
                                                   motion_states_to_joint_state,
                                                   parse_joint_map,
+                                                  split_trajectory,
                                                   transpose_trajectory)
 
 
@@ -89,6 +90,23 @@ def test_downlink_rejects_point_overflow():
     with pytest.raises(BridgeError) as e:
         transpose_trajectory(names, samples, REV)   # 4 × 65 = 260 > 256
     assert '超过固件上限' in str(e.value)
+
+
+def test_downlink_splits_same_absolute_timeline_without_overlap():
+    names = ['joint_link1', 'joint_link2', 'joint_link3', 'joint_link4']
+    samples = [
+        {'t_ms': t * 10, 'positions': [0.0] * 4}
+        for t in range(64)  # 256 total points: two 128-point messages
+    ]
+    ids, segments, warn = split_trajectory(names, samples, REV)
+    assert ids == [1, 2, 3, 4]
+    assert len(segments) == 2
+    assert [len(segment) for segment in segments] == [128, 128]
+    assert segments[0][-1][0] < segments[1][0][0]
+    assert segments[0][-1][0] == 310
+    assert segments[1][0][0] == 320
+    assert sum(len(segment) for segment in segments) == 256
+    assert warn == []
 
 
 def test_downlink_warns_out_of_range_position():

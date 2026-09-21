@@ -99,3 +99,11 @@ colcon test --packages-select motor_hardware_interface && colcon test-result --v
 `test_motor_config`（YAML 解析含 transport/tty）、`test_canfd_logic`（激活/超时/
 映射纯逻辑）、`test_hardware_launch`（launch 静态检查）、`test_xacro_consistency`
 （渲染一致性：ros2_control 清单 == YAML == 物理关节）。
+
+### 固件轨迹转发边界
+
+`firmware_topic_bridge` 把标准 `JointTrajectory` 展开为固件的
+`MotorTrajectory`。整条轨迹最多 256 个路点；在此容量内按约 128 点拆为同一
+`trajectory_id` 的有序 `segment_index`，所有分段重复完整 `target_ids`，并保留整条
+轨迹的绝对 `time_from_start_ms`。固件收到完整分段组后才替换当前轨迹，因此不得把
+不同分段重新计时为从 0 开始；超过 256 个总路点必须在桥侧拒绝。

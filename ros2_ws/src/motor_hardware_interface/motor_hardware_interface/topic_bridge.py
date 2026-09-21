@@ -14,6 +14,10 @@ import math
 # 固件侧硬上限（与 motor_control.h 的 MOTOR_CONTROL_MAX_TRAJECTORY_* 一致）。
 MAX_TRAJECTORY_POINTS = 256
 MAX_TRAJECTORY_MOTORS = 64
+# 单条消息不需要用满整条轨迹容量；可靠输入允许分片，桥按 128 点拆成
+# 同一 trajectory_id 的连续消息，固件再按绝对时间组装。总量仍由
+# MAX_TRAJECTORY_POINTS 限制，避免把“传输分段”误当成扩大固件轨迹容量。
+MAX_TRAJECTORY_SEGMENT_POINTS = 128
 # CERB 的 MIT 位置量程（关节侧 ±π）。
 POSITION_LIMIT_RAD = math.pi
 
@@ -118,6 +122,23 @@ def transpose_trajectory(joint_names, samples, joint_of_motor):
         raise BridgeError('展开后 %d 个点超过固件上限 %d（关节数 × 采样点数）'
                           % (len(flat), MAX_TRAJECTORY_POINTS))
     return sorted(set(motor_ids)), flat, warnings
+
+
+def split_trajectory(joint_names, samples, joint_of_motor):
+    """把一条合法轨迹拆成可靠传输分段，但不改变整条时间线。
+
+    返回 ``(target_ids, segments, warnings)``。``segments`` 内的每个元素都是
+    ``(t_ms, motor_id, position, velocity, effort)`` 列表，时间仍是整条轨迹的
+    absolute ``time_from_start_ms``，不会从 0 重置。总路点数仍不能超过固件的
+    256 点上限；分段只是传输边界，不是容量扩展。
+    """
+    target_ids, flat, warnings = transpose_trajectory(
+        joint_names, samples, joint_of_motor)
+    segments = [
+        flat[start:start + MAX_TRAJECTORY_SEGMENT_POINTS]
+        for start in range(0, len(flat), MAX_TRAJECTORY_SEGMENT_POINTS)
+    ]
+    return target_ids, segments, warnings
 
 
 def parse_joint_map(motor_ids, joint_names):

@@ -17,9 +17,8 @@ const TOPICS = {
   trajectory: {name: '/micro_ros_do/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
-  // 参数面：固件在 2026-09-21 把 rclc_parameter 参数服务器整体退役，改成这四条
-  // 话题（命令走下行、状态走上行）。旧页面调的 /micro_ros_node/*_parameters 已经
-  // 不存在了——所以这四行不是优化，是接线。
+  // 参数控制面只走以下四条 topic：命令下行、状态上行；不使用 ROS 参数树或服务。
+  // 这四项必须与固件的 topic 契约保持一致。
   devParams: {name: '/micro_ros_up/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
   sysStatus: {name: '/micro_ros_up/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   paramSet: {name: '/micro_ros_do/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
@@ -271,8 +270,8 @@ function subscribeAll() {
   });
 
   sub('trajectoryState', (m) => {
-    // 轨迹状态是 10Hz best-effort 回执；分段播放只在收到本段 completed
-    // 后发送下一段，避免 mailbox 的 latest-wins 把前一段覆盖掉。
+    // 轨迹状态是 10Hz best-effort 回执；同一 trajectory_id 的可靠分段已经
+    // 在发送侧一次发完，MCU 只会对完整组装后的整条时间线回报 completed。
     if (!teach.playing || teach.mode !== 'trajectory' || !teach.waitingState) return;
     if (Number(m.trajectory_id) !== teach.activeTrajectoryId || !m.completed) return;
     teachOnTrajectoryCompleted(m);
@@ -765,31 +764,31 @@ function sendTargets(targets) {
   return {ok: true, msg: `seq=${seq}，${targets.length} 台`};
 }
 
-// 发布一条多点轨迹：固件在自己的 5ms/200Hz 控制边界按 time_from_start_ms 段内
-// 做**线性**插值并计算速度（= 段斜率，段内恒定、逐路点跳变；原 C¹ Hermite 已
-// 停用）。轨迹声明集合内的电机由轨迹**独占**——同一时刻
+// 发布一条多点轨迹：固件在自己的 5ms/200Hz 控制边界按整条绝对时间线做
+// 非均匀单调三次 Hermite 插值。轨迹声明集合内的电机由轨迹**独占**——同一时刻
 // 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
 // "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
 // 并软停这些电机。
 // 固件轨迹容量（CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS / _MAX_MOTORS）。**是
-// 总量不是每台**：4 台电机时点数上限只够 64 个时刻。超限时固件静默丢弃——
-// trajectory_cb 在入口 return，既不发事件也不计数，所以页面必须自查，否则
-// 报"已托管给 MCU"而板子根本没收到。
+// 拼接总量不是每段/每台**：4 台电机时总点数上限只够 64 个时刻。超限时固件
+// 静默丢弃——trajectory_cb 在入口 return，既不发事件也不计数，所以页面必须
+// 自查，否则会报"已托管给 MCU"而板子根本没收到。
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
-// reliable/XRCE 分片的输入输出 history 已在固件构建配置中成对固定为 16；
-// 页面仍按固件 256 点总上限分段，避免把 1080 点示教整包塞进 MCU。
+// 固件仍按可靠话题接收一组分段；128 只是上层单消息边界，整组总量仍不能超过
+// 256。它降低单次序列化/传输峰值，但不改变轨迹容量。
+const TRAJ_SEGMENT_POINTS = 128;
 const TRAJ_STATE_TIMEOUT_PAD_MS = 3000;
 
-// 固件单条上限是 256 点 —— 但**不必再稀疏化**：播放时会自动分段，且段尾挑在
-// 运动最慢（常常是四个关节都不动）的行上，端点切矢归零落在真停顿处，看不出顿挫。
-// 只有"台数"超 64 才是硬拒绝。
+// 固件拼接后的整条轨迹上限是 256 点；页面在这个总量内按 128 点左右切成
+// 同一 trajectory_id 的可靠分段。超过总量不能改成多个独立轨迹，否则每段端点
+// 会重新变成整条轨迹端点，破坏速度连续性。
 function trajOverflowNote(points, ids) {
   if (ids > TRAJ_MAX_MOTORS) {
     return `；⚠ ${ids} 台超固件上限（${TRAJ_MAX_MOTORS} 台）——必须减台`;
   }
   if (points > TRAJ_MAX_POINTS) {
-    return `；ℹ ${points} 点超单条上限（${TRAJ_MAX_POINTS}），播放时自动分段`;
+    return `；⚠ ${points} 点超过整条轨迹上限（${TRAJ_MAX_POINTS}），为保持连续性不能播放`;
   }
   return '';
 }
@@ -799,31 +798,50 @@ function trajSizeNote(rows) {
   return trajOverflowNote(points.length, ids.length);
 }
 
-function sendTrajectory(points, targetIds) {
+function sendTrajectorySegments(segments, targetIds, totalPoints) {
   if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
-  const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
-  if (points.length > TRAJ_MAX_POINTS) {
-    return {ok: false, msg: `轨迹 ${points.length} 点超过固件上限 ${TRAJ_MAX_POINTS}`};
+  const ids = targetIds ?? [...new Set(segments.flatMap((segment) =>
+    segment.points.map((x) => x.motor_id)))];
+  const pointCount = totalPoints ?? segments.reduce(
+    (sum, segment) => sum + segment.points.length, 0);
+  if (!segments.length) return {ok: false, msg: '轨迹分段为空'};
+  if (pointCount > TRAJ_MAX_POINTS) {
+    return {ok: false, msg: `整条轨迹 ${pointCount} 点超过固件上限 ${TRAJ_MAX_POINTS}`};
   }
   if (ids.length > TRAJ_MAX_MOTORS) {
     return {ok: false, msg: `轨迹 ${ids.length} 台超过固件上限 ${TRAJ_MAX_MOTORS}`};
   }
   seq = (seq + 1) >>> 0;
   const trajectoryId = seq;
-  const published = pub('trajectory', {
-    sync_time_ns: Date.now() * 1e6, // 仅用于跨系统日志对齐
-    sequence: seq,
-    trajectory_id: trajectoryId,
-    count: points.length,
-    target_count: ids.length,
-    target_ids: ids,
-    points,
-  });
-  if (!published) return {ok: false, msg: '未连接 rosbridge'};
-  const total = points.length ? points[points.length - 1].time_from_start_ms : 0;
+  const syncTimeNs = Date.now() * 1e6; // 仅用于跨系统日志对齐
+  for (let segmentIndex = 0; segmentIndex < segments.length; ++segmentIndex) {
+    const points = segments[segmentIndex].points;
+    if (segments.length > 1 && points.length > TRAJ_SEGMENT_POINTS) {
+      return {ok: false, msg: `轨迹分段 ${segmentIndex + 1} 超过 ${TRAJ_SEGMENT_POINTS} 点`};
+    }
+    const published = pub('trajectory', {
+      sync_time_ns: syncTimeNs,
+      sequence: seq,
+      trajectory_id: trajectoryId,
+      segment_index: segmentIndex,
+      segment_count: segments.length,
+      count: points.length,
+      target_count: ids.length,
+      target_ids: ids,
+      points,
+    });
+    if (!published) return {ok: false, msg: '未连接 rosbridge'};
+  }
+  const last = segments[segments.length - 1].points;
+  const total = last.length ? last[last.length - 1].time_from_start_ms : 0;
   return {ok: true, trajectoryId,
-    msg: `轨迹 seq=${seq}：${points.length} 个路点 / ${ids.length} 台` +
-      (points.length ? `，总时长 ${total} ms` : '')};
+    msg: `轨迹 seq=${seq}：${pointCount} 个路点 / ${ids.length} 台 / ${segments.length} 段` +
+    (last.length ? `，总时长 ${total} ms` : '')};
+}
+
+function sendTrajectory(points, targetIds) {
+  const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
+  return sendTrajectorySegments([{points}], ids, points.length);
 }
 
 // 轨迹和快照共用固件的全局 freshness/授权门。示教播放会停止 100Hz 快照流，
@@ -1191,10 +1209,10 @@ function teachStopTimer() {
 // 示教行 → 轨迹路点：每行的 wait 是"从上一行到本行"的时长，累加成
 // time_from_start_ms。同一行的多台电机共用同一时刻（固件允许不同电机共用
 // 时间戳），行内重复 ID 取后者。
-function teachRowsToTrajectory(rows) {
+function teachRowsToTrajectory(rows, startTimeMs = 0) {
   const points = [];
   const ids = new Set();
-  let t = 0;
+  let t = startTimeMs;
   for (const row of rows) {
     for (const x of row.targets) {
       const point = {time_from_start_ms: t, motor_id: x.motor_id,
@@ -1209,11 +1227,11 @@ function teachRowsToTrajectory(rows) {
   return {points, ids: [...ids]};
 }
 
-// 轨迹播放由 MCU 托管；长示教按总路点上限切段，并通过 trajectory_state 的
-// completed 回执串行发送。段与段之间复用上一行作为边界点（若容量允许），
-// 这样不会把下一段的第一点变成突跳；每段仍是一个完整、可独立校验的轨迹。
-function segmentRowsToTrajectory(rows) {
-  const result = teachRowsToTrajectory(rows);
+// 轨迹播放由 MCU 托管；同一轨迹可拆成多个可靠分段，但所有分段都携带整条
+// 时间线的绝对 t_ms，并使用同一个 trajectory_id。固件只在完整组装后替换旧轨迹，
+// 因而段间没有共享时间点也不会把边界误判成零速端点。
+function segmentRowsToTrajectory(rows, startTimeMs, targetIds) {
+  const result = teachRowsToTrajectory(rows, startTimeMs);
   const lastTime = new Map();
   for (const point of result.points) {
     const previous = lastTime.get(point.motor_id);
@@ -1224,7 +1242,7 @@ function segmentRowsToTrajectory(rows) {
   }
   return {
     points: result.points,
-    ids: result.ids.slice().sort((a, b) => a - b),
+    ids: (targetIds ?? result.ids).slice().sort((a, b) => a - b),
     totalMs: result.points.length
       ? result.points[result.points.length - 1].time_from_start_ms : 0,
   };
@@ -1240,34 +1258,49 @@ function buildTrajectorySegments(rows) {
   while (source.length && !source[source.length - 1].targets.length) source.pop();
   if (!source.length) return {error: '时间线没有任何目标点'};
 
+  const complete = teachRowsToTrajectory(source);
+  if (complete.points.length > TRAJ_MAX_POINTS) {
+    return {error: `整条轨迹 ${complete.points.length} 点超过固件上限 ${TRAJ_MAX_POINTS}，`
+      + '不能拆成会破坏连续性的独立轨迹'};
+  }
+  const targetIds = complete.ids.slice().sort((a, b) => a - b);
+  const rowStartTimes = [];
+  let rowTime = 0;
+  for (const row of source) {
+    rowStartTimes.push(rowTime);
+    rowTime += row.wait;
+  }
+
   const segments = [];
   let start = 0;
   while (start < source.length) {
     let best = null;
     let bestEnd = start;
     for (let end = start + 1; end <= source.length; ++end) {
-      const candidate = segmentRowsToTrajectory(source.slice(start, end));
+      const candidate = segmentRowsToTrajectory(
+        source.slice(start, end), rowStartTimes[start], targetIds);
       if (candidate.error) return candidate;
-      if (candidate.points.length > TRAJ_MAX_POINTS) break;
+      if (candidate.points.length > TRAJ_SEGMENT_POINTS) break;
       if (candidate.points.length) {
         best = candidate;
         bestEnd = end;
       }
     }
-    if (!best) return {error: `示教段超过 ${TRAJ_MAX_POINTS} 个路点，无法切分`};
+    if (!best) return {error: `示教段超过 ${TRAJ_SEGMENT_POINTS} 个路点，无法切分`};
     segments.push(best);
     if (bestEnd >= source.length) break;
 
     // 有容量就重叠最后一行；若最后一行已经占满整个段，则从下一行开始，
     // 避免重复起点本身导致无限循环。
     let nextStart = bestEnd;
-    const overlap = segmentRowsToTrajectory(source.slice(bestEnd - 1, bestEnd + 1));
-    if (!overlap.error && overlap.points.length <= TRAJ_MAX_POINTS) {
+    const overlap = segmentRowsToTrajectory(
+      source.slice(bestEnd - 1, bestEnd + 1), rowStartTimes[bestEnd - 1], targetIds);
+    if (!overlap.error && overlap.points.length <= TRAJ_SEGMENT_POINTS) {
       nextStart = bestEnd - 1;
     }
     start = nextStart > start ? nextStart : bestEnd;
   }
-  return {segments};
+  return {segments, totalPoints: complete.points.length};
 }
 
 function teachPlay() {
@@ -1287,36 +1320,35 @@ function teachPlay() {
   teach.playing = true;
   teach.mode = 'trajectory';
   teach.segments = built.segments;
-  teach.segmentIndex = 0;
+  teach.totalPoints = built.totalPoints;
   teach.waitingState = false;
   teach.trajectoryHeld = false;
   teach.idx = 0;
-  teachSendTrajectorySegment();
+  teachSendTrajectoryGroup();
 }
 
-function teachSendTrajectorySegment() {
+function teachSendTrajectoryGroup() {
   if (!teach.playing || teach.mode !== 'trajectory') return;
-  const segment = teach.segments[teach.segmentIndex];
-  const readinessError = playbackReadinessError(segment.ids);
+  const ids = teach.segments.flatMap((segment) => segment.ids);
+  const readinessError = playbackReadinessError(ids);
   if (readinessError) {
     teach.playing = false;
     teach.mode = 'idle';
     teach.waitingState = false;
-    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发前检查失败：${readinessError}`);
+    setTeach('err', `轨迹组下发前检查失败：${readinessError}`);
     return;
   }
-  const res = sendTrajectory(segment.points, segment.ids);
+  const res = sendTrajectorySegments(teach.segments, [...new Set(ids)], teach.totalPoints);
   if (!res.ok) {
     teach.playing = false;
     teach.mode = 'idle';
-    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发失败：${res.msg}`);
+    setTeach('err', `轨迹组下发失败：${res.msg}`);
     return;
   }
   teach.activeTrajectoryId = res.trajectoryId;
   teach.waitingState = true;
   teach.trajectoryHeld = true;
-  setTeach('ok', `▸ 轨迹段 ${teach.segmentIndex + 1}/${teach.segments.length}：` +
-    `${segment.points.length} 点，等待 MCU 完成回执`);
+  setTeach('ok', `▸ 轨迹组：${teach.totalPoints} 点 / ${teach.segments.length} 段，等待 MCU 完成回执`);
   teachStopTimer();
   teach.timer = setTimeout(() => {
     if (!teach.playing || !teach.waitingState ||
@@ -1325,9 +1357,11 @@ function teachSendTrajectorySegment() {
     teach.mode = 'idle';
     teach.waitingState = false;
     const cancel = cancelTrajectory();
-    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 未收到 trajectory_state 回执` +
+    setTeach('err', `轨迹组未收到 trajectory_state 回执` +
       (cancel.ok ? '，已发送取消' : '，取消也未发布'));
-  }, Math.max(TRAJ_STATE_TIMEOUT_PAD_MS, segment.totalMs + TRAJ_STATE_TIMEOUT_PAD_MS));
+  }, Math.max(TRAJ_STATE_TIMEOUT_PAD_MS,
+              teach.segments[teach.segments.length - 1].totalMs +
+              TRAJ_STATE_TIMEOUT_PAD_MS));
 }
 
 function teachOnTrajectoryCompleted() {
@@ -1345,20 +1379,14 @@ function teachOnTrajectoryCompleted() {
       (cancel.ok ? '，已发送取消' : '，取消也未发布'));
     return;
   }
-  if (teach.segmentIndex + 1 < teach.segments.length) {
-    teach.segmentIndex++;
-    teachSendTrajectorySegment();
-    return;
-  }
   if ($('chkTeachLoop').checked) {
-    teach.segmentIndex = 0;
-    teachSendTrajectorySegment();
+    teachSendTrajectoryGroup();
     return;
   }
   teach.playing = false;
   teach.mode = 'idle';
   // 播放完成后 MCU 仍保持末点，直到用户点暂停/停止取消轨迹。
-  setTeach('ok', `✓ 播放完成：${teach.segments.length} 段；末点保持，点“暂停”软停`);
+  setTeach('ok', `✓ 播放完成：${teach.totalPoints} 点 / ${teach.segments.length} 段；末点保持，点“暂停”软停`);
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消

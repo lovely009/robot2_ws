@@ -49,6 +49,7 @@
 
 #include "motor_rt_task.h"
 #include "param_bridge.h"
+#include "param_units.h"
 
 // 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
 // 禁止反序列化路径上的动态分配）。
@@ -481,13 +482,22 @@ static void publish_device_param_report(uint32_t now_ms) {
     out.rec_pos_min = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
     out.rec_pos_max = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
     out.rec_vel_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
-    out.rec_torque_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX];
+    // 力矩列按 **A** 呈现，与参数面 m<id>.torque_limit 同口径（设备对象
+    // 0x2538 存的就是电流）。record_si/dev_si 是关节侧 N·m，这里过一次
+    // 换算；换算放固件不放页面——系数只有内核有（v.torque_per_amp），页面
+    // 不碰 mA。系数缺失（未绑定型号）时 param_units_nm_to_amp 回 NaN，守住
+    // "缺失量一律 NaN" 的契约（绝不落 0）。位置/速度列与参数面同为内核
+    // 单位（rad / rad/s），直通、不换算。
+    out.rec_torque_limit = param_units_nm_to_amp(
+        v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX], v.torque_per_amp);
     out.rec_safety = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     out.rec_direction = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
     out.dev_pos_min = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
     out.dev_pos_max = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
     out.dev_vel_limit = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
-    out.dev_torque_limit = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX];
+    out.dev_torque_limit =
+        param_units_nm_to_amp(v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX],
+                              v.torque_per_amp);
     out.dev_safety = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     out.dev_direction = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
   }

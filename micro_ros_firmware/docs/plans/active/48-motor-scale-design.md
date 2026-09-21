@@ -114,7 +114,7 @@ if (xPortGetFreeHeapSize() <
 for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f)   // 3 .. 13 = 11 项
 ```
 
-而 [param_name.h:18-41](../../../lib/param_store/include/param_name.h) 的 `PARAM_FIELD_COUNT = 14`
+而 [param_field.h:18-47](../../../lib/param_store/include/param_field.h) 的 `PARAM_FIELD_COUNT = 14`
 ——上一提交（`0a34618`）把 6 个 PID 字段（`CURRENT_P..POSITION_I`）追加在 `COUNT` 之前，
 于是**它们自动进了参数树**。`view_field()`（:504-535）对它们走 `default: return NAN`，
 所以是 6 个恒定 NaN、不可写、纯占槽的参数项，还会出现在 `ros2 param list` 与 web 参数页上。
@@ -409,7 +409,7 @@ CERB 的 CANopen 字典表共 **34 个对象**，其中**没有 PDO 映射（0x1
 |---|---|---|
 | `PARAM_BRIDGE_MAX_PARAMS` 按 §5 裁定取值 + 整段重写矛盾注释 | `include/param_bridge.h:39-56` | 头部注释里只剩一个数，且与 `#define` 一致 |
 | 加建服前堆预算拦截（§1.1 代码） | `src/param_bridge.cpp:825` 起 | 故意设 `MAX_PARAMS = 999` → 建服干净失败并报错，**不 HardFault** |
-| 注册字段改显式集合，PID 六项退出参数树 | `src/param_bridge.cpp:579-591`、`lib/param_store/include/param_name.h:18-41` | `_Static_assert(PARAM_MOTOR_FIELD_COUNT == 5)`；host 用例断言「注册项数 = 表长 × 台数」 |
+| 注册字段改显式集合，PID 六项退出参数树 | `src/param_bridge.cpp:579-591`、`lib/param_store/include/param_field.h:18-47` | `_Static_assert(PARAM_MOTOR_FIELD_COUNT == 5)`；host 用例断言「注册项数 = 表长 × 台数」 |
 | 文档漂移对齐到契约 | 见 §1.3 表 | 全仓库 `grep PARAM_BRIDGE_MAX_PARAMS` 只剩定义处 + 派生处 |
 
 > P0 与 48 台无关——**今天这块板子就有问题**。建议独立成一个 `fix(fw)` 提交先合。
@@ -696,7 +696,7 @@ service 槽，但新增的两条下行话题与一条上行话题把 publisher/s
 | rclc 按 `max_params` 一次性全量分配、不查 NULL | `.pio/…/rclc_parameter/src/rclc_parameter/parameter_server.c:543,548,555,595` |
 | 每槽 328 B（两对点同斜率） | `motor-runtime-validation.md:32-33`；`param_bridge.h:46-50` |
 | 堆池 120 KiB、不可扩 | `param_bridge.h:47-48`；`ldscript/stm32h723vgt6.ld:178-213` |
-| 注册循环以 `PARAM_FIELD_COUNT` 为界 | `src/param_bridge.cpp:579`；`lib/param_store/include/param_name.h:18-41` |
+| 注册循环以 `PARAM_FIELD_COUNT` 为界 | `src/param_bridge.cpp:579`；`lib/param_store/include/param_field.h:18-47` |
 | RX FIFO0 = 8 深、FIFO1 未用 | `lib/fdcan/src/fdcan.c:68,70` |
 | FDCAN ISR 优先级 = FreeRTOS 屏蔽阈值 | `lib/fdcan/src/fdcan.c:144-146`；`lib/board/include/board_irq.h:9`；`FreeRTOSConfig_Default.h:207` |
 | 回调体不用 FreeRTOS API | `lib/fdcan/src/can_bsp.c:190-217` |

@@ -1,11 +1,10 @@
-// 参数字段 / 设备槽序模型与值域校验（纯 C，无 rcl 依赖，host 可直测）。
+// 参数字段与设备槽序模型 + 值域校验（纯 C，无 rcl 依赖，host 可直测）。
 //
-// 历史：本文件原名"ROS 参数名模型"，承载 m<id>.<field> 的生成/解析。参数服务器
-// 2026-09-21 退役、参数面改为话题后，没有任何地方再拼/解参数名，那套 API 随之
-// 删除（param_name_build_motor / param_name_parse / param_name_kind_t /
-// PARAM_NAME_MAX_LEN）。留下的是仍被生产路径使用的两半：两套槽序枚举与值域校验。
-#ifndef PARAM_NAME_H
-#define PARAM_NAME_H
+// 原名 param_name.h，承载 m<id>.<field> 名的生成/解析；参数服务器 2026-09-21 退役、
+// 参数面改话题后没人再拼/解参数名，那套 API 随之删除，本文件按剩余内容改名。
+// 剩下两半仍被生产路径使用：两套槽序枚举 + 值域校验。
+#ifndef PARAM_FIELD_H
+#define PARAM_FIELD_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -75,4 +74,4 @@ bool param_position_limits_ok(float min_rad, float max_rad);
 }
 #endif
 
-#endif // PARAM_NAME_H
+#endif // PARAM_FIELD_H

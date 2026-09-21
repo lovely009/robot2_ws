@@ -1,7 +1,6 @@
-// 参数值域校验（原来这里还有 m<id>.<field> 名字的生成/解析；参数服务器
-// 2026-09-21 退役后无人拼/解参数名，那套代码随 .h 的声明一并删除）。
+// 参数值域校验。所有上限/符号判据集中在这里，param_bridge 的整条预校验直接用。
 
-#include "param_name.h"
+#include "param_field.h"
 
 #include <math.h>
 

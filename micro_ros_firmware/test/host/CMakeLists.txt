@@ -75,7 +75,7 @@ target_link_libraries(fw_imu_core PUBLIC fw_bmi088_status)
 
 add_library(fw_param_store OBJECT
   ../../lib/param_store/src/param_store_blob.c
-  ../../lib/param_store/src/param_name.c)
+  ../../lib/param_store/src/param_field.c)
 
 # storage 投影纯 C（lib/storage_projection；无 Arduino/RTOS 依赖）
 add_library(fw_storage_projection OBJECT

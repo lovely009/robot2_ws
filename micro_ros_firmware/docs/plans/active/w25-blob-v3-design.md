@@ -82,7 +82,7 @@ typedef struct {
 
 ### 4.2 设备槽位枚举扩展
 
-`lib/param_store/include/param_name.h:33-39` 与
+`lib/param_store/include/param_field.h:17-40` 与
 `lib/motor_protocol/include/motor_protocol_adapter.h` 的 `MOTOR_PROTOCOL_PARAM_SLOT_*`
 **两侧同步**：
 

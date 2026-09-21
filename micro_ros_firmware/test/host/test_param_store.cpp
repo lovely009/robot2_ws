@@ -11,7 +11,7 @@
 #include <cstdio>
 
 #include "motor_protocol_adapter.h" // MOTOR_PROTOCOL_PARAM_SLOT_*（跨库同序校验）
-#include "param_name.h"
+#include "param_field.h"
 #include "param_store_blob.h"
 #include "param_units.h"
 

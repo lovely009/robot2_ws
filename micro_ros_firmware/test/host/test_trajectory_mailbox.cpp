@@ -1,4 +1,4 @@
-// 轨迹 mailbox 契约测试：有界校验、latest-wins、取消语义、会话门。
+// 轨迹 mailbox 契约测试：有界校验、分段拼接、latest-wins、取消语义、会话门。
 // 全部为纯逻辑，host 直接编译固件真实 .c（无桩无复制）。
 
 #include "control_mailbox.h"
@@ -13,6 +13,8 @@ static control_trajectory_t make_trajectory(uint32_t sequence,
   control_trajectory_t trajectory{};
   trajectory.sequence = sequence;
   trajectory.received_tick_ms = received_tick_ms;
+  trajectory.segment_index = 0U;
+  trajectory.segment_count = 1U;
   return trajectory;
 }
 
@@ -171,6 +173,160 @@ static void test_multiple_motors_share_timestamps() {
   assert(taken.target_count == 2U && taken.point_count == 4U);
 }
 
+static void test_segments_assemble_atomically_and_merge_boundary_points() {
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  control_trajectory_t first = make_trajectory(10U, 1000U);
+  first.trajectory_id = 77U;
+  first.segment_index = 0U;
+  first.segment_count = 2U;
+  first.target_count = 2U;
+  first.target_ids[0] = 7U;
+  first.target_ids[1] = 9U;
+  first.point_count = 2U;
+  first.points[0] = {0U, 7U, 1.0F, 0.0F, 0.0F};
+  first.points[1] = {100U, 7U, 2.0F, 0.0F, 0.5F};
+
+  // 分段一只包含电机 7；完整性检查延迟到最后一段。
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+  assert(!mailbox.pending);
+  assert(mailbox.assembly_active);
+
+  control_trajectory_t second = make_trajectory(11U, 1010U);
+  second.trajectory_id = 77U;
+  second.segment_index = 1U;
+  second.segment_count = 2U;
+  second.target_count = 2U;
+  second.target_ids[0] = 9U;
+  second.target_ids[1] = 7U; // 集合顺序变化，但集合本身相同
+  second.point_count = 3U;
+  second.points[0] = {100U, 7U, 2.0F, 0.0F, 0.5F}; // 重叠边界：合并
+  second.points[1] = {100U, 9U, 3.0F, 0.0F, 0.0F};
+  second.points[2] = {200U, 9U, 4.0F, 0.0F, 0.0F};
+
+  assert(control_trajectory_mailbox_publish(&mailbox, &second));
+  assert(mailbox.pending);
+  assert(!mailbox.assembly_active);
+
+  control_trajectory_t complete{};
+  assert(control_trajectory_mailbox_take(&mailbox, &complete));
+  assert(complete.trajectory_id == 77U);
+  assert(complete.segment_index == 0U && complete.segment_count == 1U);
+  assert(complete.point_count == 4U); // 重叠点只保留一次
+  assert(complete.points[1].time_from_start_ms == 100U);
+  assert(complete.points[2].motor_id == 9U);
+  assert(complete.points[3].time_from_start_ms == 200U);
+  assert(complete.sequence == 11U);
+  assert(complete.received_tick_ms == 1010U);
+}
+
+static void test_segments_self_join_without_overlap_point() {
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  control_trajectory_t first = make_trajectory(20U, 2000U);
+  first.trajectory_id = 78U;
+  first.segment_index = 0U;
+  first.segment_count = 2U;
+  first.target_count = 1U;
+  first.target_ids[0] = 7U;
+  first.point_count = 2U;
+  first.points[0] = {0U, 7U, 0.0F, 0.0F, 0.0F};
+  first.points[1] = {100U, 7U, 1.0F, 0.0F, 0.0F};
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+
+  control_trajectory_t second = make_trajectory(21U, 2010U);
+  second.trajectory_id = 78U;
+  second.segment_index = 1U;
+  second.segment_count = 2U;
+  second.target_count = 1U;
+  second.target_ids[0] = 7U;
+  second.point_count = 2U;
+  // 没有共享时间点：固件必须把 100ms 与 150ms 直接拼成同一时间线。
+  second.points[0] = {150U, 7U, 1.5F, 0.0F, 0.0F};
+  second.points[1] = {250U, 7U, 2.0F, 0.0F, 0.0F};
+  assert(control_trajectory_mailbox_publish(&mailbox, &second));
+
+  control_trajectory_t complete{};
+  assert(control_trajectory_mailbox_take(&mailbox, &complete));
+  assert(complete.point_count == 4U);
+  assert(complete.points[1].time_from_start_ms == 100U);
+  assert(complete.points[2].time_from_start_ms == 150U);
+  assert(complete.points[3].time_from_start_ms == 250U);
+}
+
+static void test_segment_conflict_keeps_published_state_untouched() {
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  control_trajectory_t first = make_trajectory(1U, 100U);
+  first.trajectory_id = 88U;
+  first.segment_index = 0U;
+  first.segment_count = 2U;
+  first.target_count = 1U;
+  first.target_ids[0] = 7U;
+  first.point_count = 2U;
+  first.points[0] = {0U, 7U, 0.0F, 0.0F, 0.0F};
+  first.points[1] = {100U, 7U, 1.0F, 0.0F, 0.0F};
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+
+  control_trajectory_t conflicting = first;
+  conflicting.sequence = 2U;
+  conflicting.received_tick_ms = 200U;
+  conflicting.segment_index = 1U;
+  conflicting.points[0] = {100U, 7U, 9.0F, 0.0F, 0.0F};
+  conflicting.points[1] = {200U, 7U, 10.0F, 0.0F, 0.0F};
+  assert(!control_trajectory_mailbox_publish(&mailbox, &conflicting));
+  assert(!mailbox.pending);
+  assert(!mailbox.assembly_active);
+  assert(mailbox.invalid_trajectory_count == 1U);
+}
+
+static void test_segment_order_and_total_capacity_are_bounded() {
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  control_trajectory_t first = make_trajectory(1U, 100U);
+  first.trajectory_id = 99U;
+  first.segment_index = 0U;
+  first.segment_count = 3U;
+  first.target_count = 1U;
+  first.target_ids[0] = 7U;
+  first.point_count = 1U;
+  first.points[0] = {0U, 7U, 0.0F, 0.0F, 0.0F};
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+
+  control_trajectory_t out_of_order = first;
+  out_of_order.segment_index = 2U;
+  out_of_order.points[0] = {200U, 7U, 2.0F, 0.0F, 0.0F};
+  assert(!control_trajectory_mailbox_publish(&mailbox, &out_of_order));
+  assert(!mailbox.assembly_active);
+  assert(!mailbox.pending);
+
+  control_trajectory_mailbox_init(&mailbox);
+  first.segment_count = 2U;
+  first.point_count = CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS;
+  for (uint16_t i = 0U; i < first.point_count; ++i) {
+    first.points[i] = {i, 7U, static_cast<float>(i), 0.0F, 0.0F};
+  }
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+
+  control_trajectory_t overflow = make_trajectory(2U, 200U);
+  overflow.trajectory_id = 99U;
+  overflow.segment_index = 1U;
+  overflow.segment_count = 2U;
+  overflow.target_count = 1U;
+  overflow.target_ids[0] = 7U;
+  overflow.point_count = 1U;
+  overflow.points[0] = {CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS, 7U,
+                        static_cast<float>(CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS),
+                        0.0F, 0.0F};
+  assert(!control_trajectory_mailbox_publish(&mailbox, &overflow));
+  assert(!mailbox.assembly_active);
+  assert(!mailbox.pending);
+}
+
 static void test_clear_keeps_diagnostics() {
   control_trajectory_mailbox_t mailbox{};
   control_trajectory_mailbox_init(&mailbox);
@@ -219,6 +375,10 @@ int main() {
   test_cancel_is_valid_payload();
   test_rejects_malformed();
   test_multiple_motors_share_timestamps();
+  test_segments_assemble_atomically_and_merge_boundary_points();
+  test_segments_self_join_without_overlap_point();
+  test_segment_conflict_keeps_published_state_untouched();
+  test_segment_order_and_total_capacity_are_bounded();
   test_clear_keeps_diagnostics();
   test_session_gate_and_disconnect();
   return 0;

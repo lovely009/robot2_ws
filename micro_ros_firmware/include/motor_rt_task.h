@@ -5,7 +5,7 @@
 //    motor_control_on_raw_frame → motor_control_service（OFFLINE/新鲜度级联/
 //    配置事务步进）→ 每总线 can_tx_scheduler pump → can_bsp_submit_tx。
 //  - 5ms/200Hz 控制边界：mailbox 会话/授权边沿同步到内核 → 完整命令快照 →
-//    apply_command_snapshot → 多点轨迹受理与轨迹步进（段内线性插值）→
+//    apply_command_snapshot → 已拼接多点轨迹受理与 Hermite 步进 →
 //    配置 FIFO 逐条（每边界有界）→ submit_config。
 //
 // 线程边界：mailbox 是本任务与 ROS 桥之间的唯一通道。外部只允许通过本头
@@ -36,8 +36,9 @@ bool motor_rt_task_start(void);
 // 提交一份完整命令快照（latest-wins；非法快照由 mailbox 拒绝并计数）。
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
 
-// 提交一条多点轨迹（latest-wins；非法轨迹由 mailbox 拒绝并计数；
-// 空轨迹 = 取消）。轨迹在 5ms/200Hz 控制边界生效（段内线性插值），
+// 提交一条多点轨迹分段（按 trajectory_id/segment_index 在 mailbox 内拼接；
+// 只有完整轨迹才 latest-wins 发布；非法分段由 mailbox 拒绝并计数；
+// 空单段轨迹 = 取消）。完整轨迹在 5ms/200Hz 控制边界生效，
 // 与快照按电机归属仲裁。
 bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory);
 

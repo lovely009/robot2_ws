@@ -5074,8 +5074,8 @@ static void test_trajectory_interpolates_and_clamps_at_end() {
   assert(entry_of(&ctx, 5)->target_effort_nm == 0.25f);
 }
 
-// 单调三次 Hermite：段间速度连续（C¹）。路点单调递增（0 → 1 → 3），
-// 中间点的中心差分切矢 = (Δ_前 + Δ_后)/2 = (1.0 + 2.0)/2 = 1.5 rad/s。
+// 单调三次 Hermite：段间速度连续（C¹）。等间隔路点（0 → 1 → 3）的
+// Fritsch–Carlson 加权调和切矢 = 3 / (3/1 + 3/2) = 4/3 rad/s。
 // 线性插值在这里是一次速度台阶（左 1.0 / 右 2.0），本用例正是钉住"台阶消失"。
 static void test_trajectory_hermite_c1_continuity() {
   motor_control_context_t ctx;
@@ -5097,8 +5097,29 @@ static void test_trajectory_hermite_c1_continuity() {
 
   // 线性插值下这三个断言全不成立（1.0 / 2.0 / 差 1.0）。
   assert(std::fabs(v_before - v_after) < 1e-2f);  // 台阶消失
-  assert(std::fabs(v_before - 1.5f) < 1e-2f);     // 左极限 = 中心差分切矢
-  assert(std::fabs(v_after - 1.5f) < 1e-2f);      // 右极限同上（±1ms 内的曲率很小）
+  assert(std::fabs(v_before - (4.0f / 3.0f)) < 1e-2f);
+  assert(std::fabs(v_after - (4.0f / 3.0f)) < 1e-2f);
+}
+
+// 非均匀时间轴：0→1 用 1s，1→5 用 2s，割线为 1 和 2 rad/s。
+// 真正的非均匀 Fritsch–Carlson 切矢为
+// (5+4)/(5/1+4/2) = 9/7；简单算术平均会错误得到 1.5。
+static void test_trajectory_hermite_uses_nonuniform_time_weights() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_two_active(&ctx, 5, 7, 100);
+
+  motor_control_trajectory_t t = make_trajectory(1U, 300U);
+  traj_add_motor(&t, 5);
+  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);
+  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);
+  traj_add_point(&t, 3000U, 5, 5.0f, 0.0f);
+  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
+
+  motor_control_trajectory_step(&ctx, 300U + 1000U);
+  assert(std::fabs(entry_of(&ctx, 5)->target_position_rad - 1.0f) < 1e-6f);
+  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s - (9.0f / 7.0f)) <
+         1e-3f);
 }
 
 // 单调三次 Hermite：端点强制零速、局部极值处切矢限为 0（因而段内不超调）。
@@ -5882,6 +5903,7 @@ int main() {
   test_snapshot_absence_soft_stops_only_unowned_motors();
   test_trajectory_interpolates_and_clamps_at_end();
   test_trajectory_hermite_c1_continuity();
+  test_trajectory_hermite_uses_nonuniform_time_weights();
   test_trajectory_hermite_no_overshoot_and_zero_endpoints();
   test_trajectory_position_velocity_same_sign();
   test_trajectory_cancel_and_replacement_release_motors();

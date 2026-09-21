@@ -81,6 +81,20 @@ static bool agent_is_connected_or_unknown(const control_mailbox_t *mailbox) {
   return control_mailbox_session_authorized(mailbox);
 }
 
+// 在线输入（命令/轨迹/策略）的公共门：未授权或会话不可信即拒，并按通道计入
+// 各自的拒绝计数。**门先于数据校验**——断链期的非法载荷统一归因到会话门，
+// 三条通道诊断口径一致。config 走另一条门（不受 authorization_requested
+// 约束，见 control_mailbox_submit_config），故不共用本函数。
+static bool live_input_allowed(control_mailbox_t *mailbox,
+                               uint32_t *rejected_count) {
+  if (mailbox->authorization_requested &&
+      agent_is_connected_or_unknown(mailbox)) {
+    return true;
+  }
+  ++(*rejected_count);
+  return false;
+}
+
 static void revoke_authorization(control_mailbox_t *mailbox) {
   if (mailbox->authorization_requested) {
     mailbox->authorization_requested = false;
@@ -112,8 +126,7 @@ bool control_mailbox_submit_command(
   }
   // 授权/会话门拒绝计数可见（快照本身非法由 publish 侧 invalid_snapshot_count
   // 计数——两处互不重复：门拒绝发生在数据校验之前）。
-  if (!mailbox->authorization_requested || !agent_is_connected_or_unknown(mailbox)) {
-    ++mailbox->command_rejected_count;
+  if (!live_input_allowed(mailbox, &mailbox->command_rejected_count)) {
     return false;
   }
   return control_command_mailbox_publish(&mailbox->command, snapshot);
@@ -138,11 +151,8 @@ bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
   if (mailbox == NULL) {
     return false;
   }
-  // 与 submit_command 逐条同门同序：授权/会话门先于数据校验，两条提交
-  // 路径的诊断口径一致（门拒绝与载荷非法不重复计数）。
-  if (!mailbox->authorization_requested ||
-      !agent_is_connected_or_unknown(mailbox)) {
-    ++mailbox->trajectory_rejected_count;
+  // 与 submit_command 逐条同门同序（门拒绝与载荷非法不重复计数）。
+  if (!live_input_allowed(mailbox, &mailbox->trajectory_rejected_count)) {
     return false;
   }
   return control_trajectory_mailbox_publish(&mailbox->trajectory, trajectory);
@@ -167,10 +177,8 @@ bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
   if (mailbox == NULL) {
     return false;
   }
-  // 与 submit_command 同门同序：授权/会话门先于数据校验。
-  if (!mailbox->authorization_requested ||
-      !agent_is_connected_or_unknown(mailbox)) {
-    ++mailbox->policy_rejected_count;
+  // 与 submit_command 同门同序。
+  if (!live_input_allowed(mailbox, &mailbox->policy_rejected_count)) {
     return false;
   }
   return control_policy_mailbox_publish(&mailbox->policy, snapshot);

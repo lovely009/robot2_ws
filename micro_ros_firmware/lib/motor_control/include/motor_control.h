@@ -40,8 +40,9 @@ extern "C" {
 // config_step 限速在 1 台/ms，是摊开的。原值 64 对并发发现没有余量。
 #define MOTOR_CONTROL_MAX_EVENTS 128U
 // 轨迹通道容量：点数决定一条轨迹能带多少个 (时间, 电机) 样本，电机数
-// 对齐注册表。内存代价 = 3 份拷贝（ROS 接收体 + mailbox 双缓冲 + 内核
-// 锁存）× 20 B/点；改小这两个常量是唯一的省 RAM 手段（见 README）。
+// 对齐注册表。分段 assembly、mailbox 双缓冲、任务转换缓冲、内核锁存和切矢表
+// 都会贡献静态占用；不要再用固定的“3 份拷贝”估算，当前链接基线见 README
+// 与 motor-runtime-validation.md。改小这两个常量是唯一的直接省 RAM 手段。
 #define MOTOR_CONTROL_MAX_TRAJECTORY_POINTS 256U
 #define MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS 64U
 
@@ -183,7 +184,7 @@ typedef struct {
   motor_control_snapshot_target_t targets[MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS];
 } motor_control_command_snapshot_t;
 
-// 输入：多点轨迹（mailbox control_trajectory_t 的同形镜像）。
+// 输入：mailbox 已完成拼接的多点轨迹（control_trajectory_t 的同形镜像）。
 // 语义：轨迹声明集合内的电机由轨迹独占（快照对其既不下发也不软停）；
 // 集合外的电机仍由完整快照负责。起点 = 内核受理时刻的本地单调时基，
 // 消息里的 sync_time_ns 不参与任何裁决（ARD §12）。
@@ -192,7 +193,7 @@ typedef struct {
   uint32_t time_from_start_ms; // 相对轨迹起点；同一电机内严格递增
   uint16_t motor_id;
   float position_rad;
-  float velocity_rad_s; // 诊断用；执行速度由段斜率导出
+  float velocity_rad_s; // 诊断用；执行速度由非均匀 Hermite 解析求导
   float effort_nm;
 } motor_control_trajectory_point_t;
 
@@ -230,7 +231,7 @@ typedef struct {
 } motor_control_policy_snapshot_t;
 
 // ---------------------------------------------------------------------------
-// 输出：运动状态（100 Hz 发布用，ARD §16；缺失浮点 = NaN，state_age_ms
+// 输出：运动状态副本（50 Hz 发布用，ARD §16；缺失浮点 = NaN，state_age_ms
 // 为 MCU 单调时基下最近有效运动测量距今毫秒数，从无测量 = 0xFFFFFFFF）。
 typedef struct {
   uint16_t motor_id;
@@ -366,8 +367,9 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
                                     const motor_control_trajectory_t *trajectory,
                                     uint32_t now_ms);
 
-// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内**线性**插值并下发（位置沿
-// 路点连线，速度取段斜率——段内恒定、逐路点跳变；原单调三次 Hermite 已停用）。
+// 轨迹步进：按 elapsed = now_ms - 受理时刻，在完整非均匀时间线上进行单调三次
+// Hermite 插值并下发。内部路点切矢由相邻不等时间间隔共同计算，保证段边界
+// 速度传递；首尾端点不外推。无活动轨迹时 O(1) 返回。
 // 无活动轨迹时 O(1) 返回（未用轨迹 = 对既有行为零影响）。
 // 时间超出末点 → 钳末点保持，绝不外推。
 void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
@@ -436,7 +438,7 @@ bool motor_control_apply_policy(
 
 // 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；
-// 发现窗口复用同一路径）。禁止作为 50Hz 控制触发（ARD §23.4）。
+// 发现窗口复用同一路径）。禁止作为运动控制边界触发（ARD §23.4）。
 bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_index);
 
 // ---------------------------------------------------------------------------

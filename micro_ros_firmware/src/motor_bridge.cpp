@@ -1,14 +1,14 @@
 // 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15）。
 //
-// 下行 3 条（订阅）：motor_command_array（100Hz 完整快照）、motor_trajectory（多点
+// 下行 3 条（订阅）：motor_command_array（完整快照）、motor_trajectory（多点
 // 轨迹）、motor_policy（逐电机 enable/kp/kd）。
-// 上行 7 条（发布）：motion_states 100Hz、motor_status_array 20Hz、motor_topology 1s、
+// 上行 7 条（发布）：motion_states 50Hz、motor_status_array 20Hz、motor_topology 1s、
 // motor_events、trajectory_state 10Hz、diagnostics 1Hz、device_param_report 1Hz + 变化。
 // 全部用相对名，见下。
 //
 // 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），
 // 集合外仍归快照（缺失即软停，ARD §13.1）。策略与二者正交（ARD §15.4 禁止 kp/kd/enable
-// 进 100Hz 快照）。型号绑定由内核经 READ_IDENTITY 事务完成，本桥不经手下行配置。
+// 进命令快照）。型号绑定由内核经 READ_IDENTITY 事务完成，本桥不经手下行配置。
 //
 // 本桥不做：joint_name 语义、协议/CAN 字节、直接 RX 访问（ARD §28.1）。
 
@@ -177,9 +177,12 @@ static void trajectory_cb(const void *msgin) {
     return;
   }
   const auto *msg = (const can_bridge_msgs__msg__MotorTrajectory *)msgin;
-  // 声明计数必须在有界数组之内：超界一律拒绝，不做静默截断（截断会把
-  // 一条轨迹悄悄变成另一条）。
-  if (msg->count > msg->points.size ||
+  // 分段元数据和声明计数必须在有界范围内：超界或分段编号非法一律拒绝，
+  // 不做静默截断（截断会把一条轨迹悄悄变成另一条）。
+  if (msg->segment_count == 0U ||
+      msg->segment_count > CONTROL_TRAJECTORY_MAILBOX_MAX_SEGMENTS ||
+      msg->segment_index >= msg->segment_count ||
+      msg->count > msg->points.size ||
       msg->target_count > msg->target_ids.size ||
       msg->count > CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS ||
       msg->target_count > CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS) {
@@ -191,6 +194,8 @@ static void trajectory_cb(const void *msgin) {
   trajectory.sequence = msg->sequence;
   trajectory.trajectory_id = msg->trajectory_id;
   trajectory.received_tick_ms = millis(); // 本地接收 tick（ARD §12.2）
+  trajectory.segment_index = msg->segment_index;
+  trajectory.segment_count = msg->segment_count;
   trajectory.point_count = msg->count;
   trajectory.target_count = msg->target_count;
   for (uint16_t i = 0; i < msg->target_count; ++i) {

@@ -34,7 +34,7 @@
 - `control_mailbox_config_request_t`：`request_id`(非 0) + `motor_id` + `kind`
   （SET_MODE / SET_GAINS / SET_POSITION_LIMITS / SET_ENABLE，ARD §19）+ 联合负载。
 - 容量 `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`(16)；满时拒绝新请求，**绝不丢弃
-  或覆盖已入队项**；消费侧每 10ms 控制边界至多转发 4 条（`motor_rt_task` 的
+  或覆盖已入队项**；消费侧每 5ms/200Hz 控制边界至多转发 4 条（`motor_rt_task` 的
   `kConfigDrainPerBoundary`）。
 - 配置不属于运动授权：禁能/未授权下仍可排队，但会话门仍生效（Agent 断开即拒）。
 
@@ -63,7 +63,7 @@
 - 仅支持任务上下文：ISR 内 `taskENTER_CRITICAL` 非法，本层不做检测。
 - 现有调用点：写侧 `src/motor_rt_task.cpp` 的 `motor_rt_submit_*` /
   `motor_rt_set_agent_connected` 包装（micro_ros 任务，prio 2，逐调用临界区）；
-  读侧 `control_boundary`（motor_rt 任务，prio 3，10ms 边界逐调用临界区）。
+  读侧 `control_boundary`（motor_rt 任务，prio 3，5ms/200Hz 边界逐调用临界区）。
 
 ## 拒绝诊断（生命周期累计，clear 不清零）
 
@@ -89,7 +89,7 @@ FIFO 合计约 2.5 KB。`CONTROL_COMMAND_MAILBOX_BUFFER_COUNT` 固定为 2——
 ## 构建与测试
 
 固件侧：PlatformIO 自动发现 `lib/`（`library.json` 无依赖声明），经
-`src/motor_rt_task.h` 的 include 链接入构建。
+`include/motor_rt_task.h` 的 include 链接入构建。
 
 host 单测：`test/host/test_control_mailbox.cpp`（CTest 目标 `control_mailbox`，
 C17 + cassert，直接编译本库两个 `.c`）：

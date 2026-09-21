@@ -46,7 +46,7 @@ typedef struct {
   float target_velocity_rad_s;
   float target_effort_nm;
 
-  // Policy（低频，不进入 100 Hz 命令——ARD §19.4）。
+  // Policy（低频，不进入命令快照——ARD §19.4）。
   bool policy_enable;   // 逐电机 Enable（MotorPolicy；OFFLINE/厂家故障/冲突
                         // 冻结为 false，恢复需上层显式重发 SET_ENABLE(true)
                         // ——ARD §36）
@@ -212,10 +212,11 @@ struct motor_control_context {
   motor_control_trajectory_t trajectory;
   // 每个路点的切矢（rad/s），下标与 trajectory.points 一一对应：**受理轨迹时
   // 一次算好**，5 ms/200Hz 控制边界上只做一次 Hermite 求值，不在热路径重算差分。
-  // 端点恒 0（起止零速）；内部点 = 中心差分经 Fritsch–Carlson 限幅，故逐段
+  // 端点恒 0（起止零速）；内部点 = 按不等时间间隔计算的 Fritsch–Carlson
+  // 加权调和平均并限幅，故逐段
   // 不超调——这也让 entry_apply_target 的软限位钳制基本不会触发（钳位会破坏
   // C¹ 连续性）。放 .bss（AXI/RAM_D1），不占 DTCM 堆。
-  // 省掉本表的办法（段内线性，速度即段斜率）已被真机实测否定，见 motor_control.c。
+  // 该表不能在运行时按段重算；它同时承担跨消息分段后的边界速度传递。
   float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
   bool trajectory_active;
   uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基

@@ -354,7 +354,7 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
 // ---------------------------------------------------------------------------
 // 逐电机目标应用（快照通道与轨迹通道共用）
 //
-// 两条命令源（100Hz 完整快照 / 多点轨迹）必须共用同一套门禁与钳制：否则会
+// 两条命令源（完整快照 / 多点轨迹）必须共用同一套门禁与钳制：否则会
 // 出现「快照走限位、轨迹不走」这类只有一条路径才有的安全缺口。
 // ---------------------------------------------------------------------------
 
@@ -798,16 +798,16 @@ static void release_trajectory_motor(motor_control_context_t *ctx,
   }
 }
 
-// 现行插值方案：**单调三次 Hermite**（切矢在此算、求值在 trajectory_step）。
-// 备选的段内线性已被真机实测否定——速度逐路点跳变会被 MIT 律的 kd·v_des 放大
-// 成力矩台阶；完整理由与被保留的那份代码见 trajectory_step。
+// 现行插值方案：**非均匀单调三次 Hermite**（切矢在此算、求值在 trajectory_step）。
+// 切矢使用相邻路点的实际时间间隔，因此分段拼接不能把每一段当作独立曲线；
+// 设计取舍和边界契约见 docs/architecture/module-boundaries.md 与决策日志。
 
 // 单调三次 Hermite 的内部切矢（Fritsch–Carlson）。p0/p1/p2 是同一条电机
 // 时间线上相邻的三个路点，返回值是 p1 处的切矢（rad/s）。
-// 三条规则：局部极值（两侧割线异号或为 0）取 0；否则取两侧割线均值，并限幅到
-// 3×min(|Δ|)——这条限幅正是"逐段不超调"的保证，缺了它不等间隔路点处曲线会
-// 冲过路点（关节越过给定位置、可能顶到限位，而为限位去钳位又会在钳位处留下
-// 尖角、把 C¹ 毁掉）。
+// 三条规则：局部极值（两侧割线异号或为 0）取 0；否则按相邻不等时间间隔取
+// Fritsch–Carlson 加权调和平均，并限幅到 3×min(|Δ|)——这条限幅正是"逐段不
+// 超调"的保证，缺了它不等间隔路点处曲线会冲过路点（关节越过给定位置、可能
+// 顶到限位，而为限位去钳位又会在钳位处留下尖角、把 C¹ 毁掉）。
 static float trajectory_monotone_tangent(
     const motor_control_trajectory_point_t *p0,
     const motor_control_trajectory_point_t *p1,
@@ -827,7 +827,11 @@ static float trajectory_monotone_tangent(
   const float a0 = fabsf(d0);
   const float a1 = fabsf(d1);
   const float limit = 3.0f * (a0 < a1 ? a0 : a1);
-  float m = (d0 + d1) * 0.5f; // 中心差分（两侧等权）
+  // 对不等时间间隔不能使用简单中心差分。权重来自相邻两段时长，
+  // 加权调和平均在单调数据上保持正性并抑制短段造成的速度过冲。
+  const float w1 = 2.0f * dt1 + dt0;
+  const float w2 = dt1 + 2.0f * dt0;
+  float m = (w1 + w2) / (w1 / d0 + w2 / d1);
   if (m > limit) {
     m = limit;
   } else if (m < -limit) {
@@ -855,7 +859,7 @@ static void trajectory_compute_tangents(motor_control_context_t *ctx) {
         continue;
       }
       if (p1 != NULL) {
-        // p1 是首点（p0 == NULL，端点零速）或内部点（中心差分 + 限幅）。
+        // p1 是首点（p0 == NULL，端点零速）或内部点（不等时间加权 + 限幅）。
         ctx->trajectory_tangent_rad_s[i1] =
             (p0 == NULL) ? 0.0f : trajectory_monotone_tangent(p0, p1, p2);
       }
@@ -996,17 +1000,6 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
         const float dh11 = 3.0f * t2 - 2.0f * tau;
         velocity = (dh00 * left->position_rad + dh10 * h * m0 +
                     dh01 * right->position_rad + dh11 * h * m1) / h;
-
-        // --- 备选实现：段内线性。2026-09-21 真机试过后**否定**，保留备查。 ---
-        // 位置沿路点连线、速度取段斜率（段内恒定）。代价是速度**逐路点跳变**，
-        // MIT 律的 kd·v_des 把每个台阶放大成一次力矩台阶——kd 还是 0 时看不出来，
-        // 填上真值后就是路点处一顿一顿。正因如此退回 Hermite，别再改回去。
-        // const float h = (float)span_ms / 1000.0f;
-        // const float tau =
-        //     (float)(elapsed - left->time_from_start_ms) / (float)span_ms;
-        // position = left->position_rad +
-        //            (right->position_rad - left->position_rad) * tau;
-        // velocity = (right->position_rad - left->position_rad) / h;
       }
     }
     entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,
@@ -1129,7 +1122,7 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
       (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
        entry->motion_enabled);
   if (in_controlled_set) {
-    // 仅在进入软停的迁移沿发帧（去重，防 50Hz P0 刷屏）。
+    // 仅在进入软停的迁移沿发帧（去重，防 200Hz P0 刷屏）。
     // 编码失败/队列满都挂起重试（安全帧不静默消失），计数在 helper 内。
     (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_SOFT_STOP);
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_SAFE_STOP;

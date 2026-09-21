@@ -2,26 +2,63 @@
 #
 # 目的：挡住一类**静默且难排查**的故障——libmicroros.a 是用旧配置构建的。
 #
-# 背景：RMW_UXRCE_MAX_SERVICES 决定 rmw 库内部 custom_services[] 的静态数组大小，
-# 是**库编译期**的事实（见 platformio.ini 的「micro-ROS 库级配置覆盖」）。而
-# micro_ros_platformio 的 library_builder 见到 libmicroros.a 就 early return，
+# 背景：RMW_UXRCE_MAX_PUBLISHERS / MAX_SUBSCRIPTIONS / MAX_SERVICES 决定 rmw 库
+# 内部 custom_publishers[] / custom_subscriptions[] / custom_services[] 的静态
+# 数组大小，是**库编译期**的事实（见 platformio.ini 的「micro-ROS 库级配置覆盖」）。
+# 而 micro_ros_platformio 的 library_builder 见到 libmicroros.a 就 early return，
 # **不会**因 meta 变化自动重建。于是：把整个工程目录（含 .pio 缓存）拷给别人、
 # 或从旧版本升级上来时，库仍是旧配置，pio run 却一路成功，直到烧录后节点在
 # WAIT_AGENT 无限重连——看不到任何编译期线索。
 #
-# 校验的是 libmicroros/include/ 里的 config.h：它与库同源（打包时从
-# build/mcu/install/include 复制），因此能代表库的实际编译配置。
-# 更严格的 nm 校验（custom_services 符号大小）见 AGENTS.md，此处不引入工具链
-# 依赖，保证在没装 ARM toolchain 的机器上也能跑。
+# 三者用超了的表现完全同类：第 N+1 个 rcl_publisher_init / rcl_subscription_init
+# 返回非 OK → 该 bridge 回滚 → ros_bridge 整体失败。所以一并在此拦下。
+#
+# 期望值**不在这里硬编码**：唯一真相源是 microros_user.meta（本脚本直接解析它）。
+# 抄一份常量进来就会漂移——本文件早期版本正是这么写的，2026-09-21 参数服务器
+# 退役时那份副本已经和 meta 对不上了。
+#
+# 校验对象是 libmicroros/include/rmw_microxrcedds_c/config.h：它与库同源（打包时
+# 从 build/mcu/install/include 复制），因此能代表库的实际编译配置。更严格的 nm
+# 校验（custom_services 等符号大小）见 AGENTS.md，此处不引入工具链依赖，保证在
+# 没装 ARM toolchain 的机器上也能跑。
 
 Import("env")  # noqa: F821  (SCons 注入)
 
 import os
 import re
 
-# 与 platformio.ini / microros_user.meta 保持一致（rclc 参数服务器的 5 个 service）。
-REQUIRED_MAX_SERVICES = 5
-REQUIRED_STREAM_HISTORY = 16
+# meta 里被本脚本校验的宏（顺序即报错顺序）。STREAM_HISTORY 单独处理——它的
+# 生成逻辑带条件分支，不是简单比对数字。
+SLOT_MACROS = (
+    "RMW_UXRCE_MAX_PUBLISHERS",
+    "RMW_UXRCE_MAX_SUBSCRIPTIONS",
+    "RMW_UXRCE_MAX_SERVICES",
+)
+STREAM_HISTORY_MACRO = "RMW_UXRCE_STREAM_HISTORY"
+
+# 每条宏"用超了"时具体会死在什么地方——点名到文件，比"配置不符"有用得多。
+SLOT_CONSEQUENCE = {
+    "RMW_UXRCE_MAX_PUBLISHERS": (
+        "出站话题数超过静态槽位：新增 topic 的 rcl_publisher_init 会失败。\n"
+        "  当前固件用 10 个（imu 2 + motor_bridge 7 + system_status 1）。"
+    ),
+    "RMW_UXRCE_MAX_SUBSCRIPTIONS": (
+        "入站话题数超过静态槽位：新增 topic 的 rcl_subscription_init 会失败。\n"
+        "  当前固件用 5 个（motor_bridge 3 + param_set/system_command 2）。"
+    ),
+    "RMW_UXRCE_MAX_SERVICES": (
+        "service 数超过静态槽位（rclc 参数服务器已于 2026-09-21 退役，\n"
+        "  当前固件用 0 个；保留该余量是为了不动库配置，不是有人在用）。"
+    ),
+}
+
+REPAIR_GUIDANCE = (
+    "修复（库不会自动重建，必须显式刷新）：\n"
+    "    ../micro_ros_agent/tools/refresh_microros_messages.py\n"
+    "    pio run\n"
+    "  该工具是**离线增量**刷新，不联网、不调用 clean_microros。\n"
+    "  若必须走删目录重建（需网络可达 GitHub），方法见 AGENTS.md 的「高频踩坑」。"
+)
 
 
 def _libmicroros_dir():
@@ -30,6 +67,31 @@ def _libmicroros_dir():
     return os.path.join(
         libdeps, pio_env, "micro_ros_platformio", "libmicroros"
     )
+
+
+def _meta_macro_values():
+    """从 microros_user.meta 解析出各 RMW 宏的期望值。"""
+    meta_name = str(
+        env.GetProjectOption("board_microros_user_meta", "microros_user.meta")
+    )
+    meta_path = os.path.join(env["PROJECT_DIR"], meta_name)
+    try:
+        with open(meta_path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as err:
+        raise SystemExit(
+            "无法读取 %s（board_microros_user_meta 指向的库配置覆盖）：%s\n"
+            "该文件是库级配置的唯一真相源，本校验不会跳过。" % (meta_path, err)
+        )
+    return {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"-D(RMW_UXRCE_[A-Z_]+)=(\d+)", text)
+    }
+
+
+def _fail(title, body):
+    print("\n" + "=" * 72 + "\n" + title + "\n" + body + "\n" + "=" * 72 + "\n")
+    env.Exit(1)  # noqa: F821  (SCons)
 
 
 def _check():
@@ -46,65 +108,54 @@ def _check():
     except OSError:
         return  # 读不了就不阻断构建——本校验是辅助，不是构建契约
 
-    match = re.search(r"^#define\s+RMW_UXRCE_MAX_SERVICES\s+(\d+)", text, re.M)
-    if match is None:
-        return  # 上游改了 config.h 结构：不误报，交由人工确认
-    value = int(match.group(1))
-    if value >= REQUIRED_MAX_SERVICES:
-        # RMW 的 CMake 配置只有在 input/output 同时非空时才采用专用值；
-        # 否则 config.h 会回落到 RMW_UXRCE_STREAM_HISTORY（默认 4）。
-        # config.h 还会保留 CMake 条件的 inactive 分支。判断 #else 后的
-        # fallback 值即可验证当前预处理结果：旧的“只给 INPUT=12”会落到
-        # 4/4，新配置会落到 16/16。
-        fallback = text.split("#else", 1)[1] if "#else" in text else ""
-        input_value = re.search(
-            r"^#define\s+RMW_UXRCE_STREAM_HISTORY_INPUT\s+%d\s*$"
-            % REQUIRED_STREAM_HISTORY,
-            fallback,
-            re.M,
-        )
-        output_value = re.search(
-            r"^#define\s+RMW_UXRCE_STREAM_HISTORY_OUTPUT\s+%d\s*$"
-            % REQUIRED_STREAM_HISTORY,
-            fallback,
-            re.M,
-        )
-        if not all((input_value, output_value)):
-            print(
-                "\n"
-                + "=" * 72
-                + "\nmicro-ROS 库配置不符：可靠轨迹输入缓冲未按预期生成\n"
-                "  需要 input/output stream history = %d（各 8 KiB，512B MTU）。\n"
-                "  当前生成头：%s\n\n"
-                "这会让 MotorTrajectory 的可靠分片在到达 MCU 前失败或使会话异常。\n"
-                "修复：运行 ../micro_ros_agent/tools/refresh_microros_messages.py，\n"
-                "再重新执行 pio run；不要用 clean_microros。\n"
-                % (REQUIRED_STREAM_HISTORY, config_path)
-                + "=" * 72
-                + "\n"
-            )
-            env.Exit(1)  # noqa: F821  (SCons)
-        return
+    expected = _meta_macro_values()
 
-    print(
-        "\n"
-        + "=" * 72
-        + "\nmicro-ROS 库配置不符：RMW_UXRCE_MAX_SERVICES = %d（需要 >= %d）\n"
-        "  %s\n\n"
-        "rclc 参数服务器固定要建 5 个 service（get/get_types/set/list/describe），\n"
-        "此配置下初始化会在第 2 个 service 上失败 → param_bridge_create 失败 →\n"
-        "ros_bridge 整体回滚 → 节点在 WAIT_AGENT 无限重连。\n"
-        "该故障只在运行期暴露，编译期不会有任何提示，所以在这里拦下。\n\n"
-        "修复（库不会自动重建，必须手动删掉整个 libmicroros/ 再构建）：\n"
-        "    rm -rf %s\n"
-        "    pio run\n"
-        "  注意：这条路径会 git pull 各 micro-ROS 依赖，需要网络可达 GitHub；\n"
-        "  离线重建方法见 AGENTS.md 的「高频踩坑」。\n"
-        % (value, REQUIRED_MAX_SERVICES, config_path, libmicroros)
-        + "=" * 72
-        + "\n"
-    )
-    env.Exit(1)  # noqa: F821  (SCons)
+    # --- 三条静态槽位宏：meta 要求 vs 库里实际编出来的值 ---
+    for macro in SLOT_MACROS:
+        required = expected.get(macro)
+        if required is None:
+            continue
+        match = re.search(r"^#define\s+%s\s+(\d+)" % macro, text, re.M)
+        if match is None:
+            continue  # 上游改了 config.h 结构：不误报，交由人工确认
+        value = int(match.group(1))
+        if value >= required:
+            continue
+        _fail(
+            "micro-ROS 库配置不符：%s = %d（meta 要求 %d）" % (macro, value, required),
+            "  %s\n\n"
+            "%s\n\n"
+            "该故障只在运行期暴露，编译期不会有任何提示，所以在这里拦下。\n"
+            "这是库用旧配置构建过的证据——meta 改了但库没重建。\n\n%s"
+            % (config_path, SLOT_CONSEQUENCE[macro], REPAIR_GUIDANCE),
+        )
+
+    # --- STREAM_HISTORY：结构校验（input/output 必须成对） ---
+    required_stream = expected.get(STREAM_HISTORY_MACRO)
+    if required_stream is None or "#else" not in text:
+        return  # 上游改了 config.h 结构：不误报，交由人工确认
+    # RMW 的 CMake 配置只有在 input/output 同时非空时才采用专用值；
+    # 否则 config.h 会回落到 RMW_UXRCE_STREAM_HISTORY（默认 4）。
+    # config.h 还会保留 CMake 条件的 inactive 分支。判断 #else 后的
+    # fallback 值即可验证当前预处理结果：旧的“只给 INPUT=12”会落到
+    # 4/4，新配置会落到 16/16。
+    fallback = text.split("#else", 1)[1]
+    if not all(
+        re.search(
+            r"^#define\s+%s_%s\s+%d\s*$" % (STREAM_HISTORY_MACRO, side, required_stream),
+            fallback,
+            re.M,
+        )
+        for side in ("INPUT", "OUTPUT")
+    ):
+        _fail(
+            "micro-ROS 库配置不符：可靠轨迹输入缓冲未按预期生成",
+            "  需要 input/output stream history = %d（各 8 KiB，512B MTU）。\n"
+            "  当前生成头：%s\n\n"
+            "这会让 MotorTrajectory 的可靠分片在到达 MCU 前失败或使会话异常。\n"
+            "（上游要求 input/output 成对配置；只给 INPUT 会静默回退到默认 4。）\n\n%s"
+            % (required_stream, config_path, REPAIR_GUIDANCE),
+        )
 
 
 _check()

@@ -92,9 +92,10 @@ def main() -> None:
     # 第三个参数是 board_microros_user_meta：官方流程（extra_script.py）用
     # builder.run(meta, toolchain, microros_user_meta) 把它附加到 colcon 的
     # --metas 列表后面，覆盖包内 metas/colcon.meta 的默认值。漏掉它的后果是
-    # 库被按**默认**配置重建——本固件要求 RMW_UXRCE_MAX_SERVICES=5（rclc 参数
-    # 服务器要 5 个 service），默认是 1，重建后 pio run 会被
-    # tools/check_microros_config.py 拦下（且只有到运行期才会暴露）。
+    # 库被按**默认**配置重建——本固件要 RMW_UXRCE_MAX_PUBLISHERS=12 /
+    # MAX_SUBSCRIPTIONS=6 / MAX_SERVICES=5，默认分别是 4 / 4 / 1：重建后
+    # tools/check_microros_config.py 会在下一次 pio run 拦下（且只有到运行期
+    # 才会以 WAIT_AGENT 无限重连的形式暴露）。
     user_meta = firmware_root / "microros_user.meta"
     require(user_meta, "microros_user.meta 库级配置覆盖")
     builder.build_mcu_environment(
@@ -104,19 +105,20 @@ def main() -> None:
     )
     builder.package_mcu_library()
 
-    generated_header = (
-        platformio_root
-        / "libmicroros"
-        / "include"
-        / "can_bridge_msgs"
-        / "msg"
-        / "detail"
-        / "motor_topology_entry__struct.h"
+    detail_dir = (
+        platformio_root / "libmicroros" / "include" / "can_bridge_msgs" / "msg" / "detail"
     )
+    generated_header = detail_dir / "motor_topology_entry__struct.h"
     require(generated_header, "重新生成的 can_bridge_msgs 头文件")
     header_text = generated_header.read_text(encoding="utf-8")
     if "PROTOCOL_CERB" not in header_text or "PROTOCOL_CREB" in header_text:
         raise SystemExit("生成结果仍包含旧协议常量，拒绝报告成功")
+
+    # 新增消息同样要落到库里——只刷新了协议常量而新类型缺失，说明 colcon 用了
+    # 旧的 install 目录（增量构建没看到新 .msg），此时 pio run 会在编译期报
+    # "no member named 'param_set_array'" 之类的错，指向性远不如这里直接点名。
+    for struct_name in ("param_set_array", "system_command", "system_status"):
+        require(detail_dir / f"{struct_name}__struct.h", f"新消息 {struct_name} 的生成头")
 
     print("micro-ROS 自定义消息已从权威包增量刷新；未下载依赖。")
 

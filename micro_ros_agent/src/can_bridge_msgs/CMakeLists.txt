@@ -49,6 +49,12 @@ rosidl_generate_interfaces(
   # 上行：参数核对双行快照（固件记录 vs 驱动板回读，低频 reliable）
   "msg/DeviceParamEntry.msg"
   "msg/DeviceParamReport.msg"
+  # 下行：参数写（稀疏）与系统命令——取代已退役的 rclc 参数服务器
+  "msg/ParamSetTarget.msg"
+  "msg/ParamSetArray.msg"
+  "msg/SystemCommand.msg"
+  # 上行：系统状态（错误电平 + 四个完成序号，5 Hz best-effort）
+  "msg/SystemStatus.msg"
   DEPENDENCIES std_msgs
 )
 

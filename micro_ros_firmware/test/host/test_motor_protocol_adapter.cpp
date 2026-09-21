@@ -451,13 +451,14 @@ static void test_cerb_encode_soft_stop() {
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
-// 发现帧：0x080、零长度、经典帧、P2。
+// 发现帧：0x080、零长度、FD+BRS、P2（2026-09-22 起全总线统一 CANFD 加速）。
 static void test_cerb_encode_discovery_sync() {
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_cerb_adapter.encode_discovery_sync(2, &out));
   assert(out.can_id == 0x080U);
   assert(out.size == 0);
-  assert(!out.is_fd);
+  assert(out.is_fd);
+  assert(out.is_brs);
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P2);
   assert(out.bus_index == 2);
 }

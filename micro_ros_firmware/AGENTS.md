@@ -38,23 +38,28 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 ## 台架关键顺序
 
 - **CANable 先成为 ACK 节点，再复位/烧录控制板**：SLCAN 顺序
-  `C`→`S8`→`Y5`→`O`（间隔 ≥150ms；Y5=数据 5M，Y7 被静默拒绝），sim 自动做。
+  当前 `V=16e7497-dirty` 时 `C`→`S8`→`Y7`→`M0`→`A1`→`O`；上游 `b158aa7` 用
+  `Y5`（间隔 ≥150ms；错误索引会被静默拒绝），
+  sim 自动做。`M0`/`A1` 用来清掉前一个抓包工具遗留的 silent/禁止自动重发状态。
   顺序反了 FDCAN1 无人 ACK 进 bus-off（固件自清 INIT 已实测可恢复，但重同步仍需
   ACK 在先）；已 bus-off：停旧进程→重开通道→再复位板子，只重启 agent 没用。
 - **烧录前先停模拟器**：MCU 挂起期间总线无人 ACK，模拟器继续发帧会把 CANable
   打进错误态。
 - 控制板 CDC 与 CANable 的 `ttyACM` 编号会交换，一律按 `/dev/serial/by-id/` 区分。
 - FDCAN2/3 悬空导致的 bus-off 属预期，不算 FDCAN1 台架失败。
-- 模拟器在 `../micro_ros_agent/tools/fdcan_motor_sim.py`（CERB 1–6 + VAXOR 7–9，
-  默认 /dev/ttyACM1）；完整流程见仓库根 `docs/guides/fdcan1-bench-guide.md`。
+- 模拟器在 `../micro_ros_agent/tools/fdcan_motor_sim.py`（默认 CERB 1–4，1=R58、
+  2–4=R48；默认 /dev/ttyACM1）；完整九节点台架需显式传入
+  `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。完整流程见仓库根
+  `docs/guides/fdcan1-bench-guide.md`。
 
 ## micro-ROS 坑
 
 - **meta 5 service 上限**：rclc 参数服务器固定建 5 个 service（get/get_types/set/
   list/describe），要求 `RMW_UXRCE_MAX_SERVICES >= 5`（`microros_user.meta`）。
   这是 libmicroros.a 库编译期事实，-D 改不了；builder 见 .a 即 early return，改 meta
-  须删 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/` 再 `pio run`
-  （需联网），否则节点 WAIT_AGENT 无限重连且编译期零提示。
+  须删 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/` 和
+  `build/mcu/`（保留 `build/mcu/src` 源码缓存）再 `pio run`（可能需联网），否则
+  旧 CMake cache 会继续追加旧 `-D` 参数，节点 WAIT_AGENT 无限重连且编译期零提示。
   `tools/check_microros_config.py`（pre: 脚本）构建前校验旧缓存并 Exit(1)。
 - **改消息后**跑 `../micro_ros_agent/tools/refresh_microros_messages.py`
   增量刷新（复用缓存、不联网），勿 clean_microros。消息唯一来源是

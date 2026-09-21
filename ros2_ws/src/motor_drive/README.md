@@ -29,7 +29,7 @@ DriverConfig (buses[]/motors[]) -> MotorDriver
 | `protocol.*` | 物理量与线协议字段转换 |
 
 `BusConfig`：`name` + `interface_name`（socketcan）+ `transport` + `tty`
-（serial_slcan）。`serial_slcan` 固定 `C->S8(仲裁 1M)->Y5(数据 5M)->O`，POSIX
+（serial_slcan）。`serial_slcan` 固定 `C->S8(仲裁 1M)->Y5(数据 5M)->M0/A1/O`，POSIX
 termios，无额外依赖。CERB 使用标准 CAN FD 帧及 BRS，默认仲裁 1 Mbit/s、
 数据 5 Mbit/s。
 

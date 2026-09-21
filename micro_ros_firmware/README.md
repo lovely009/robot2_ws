@@ -63,11 +63,11 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | 任务 | 优先级 | 栈 | 职责 |
 |---|---|---|---|
 | `start_task` | 1 | 256 | 创建 `led`/`micro_ros`/`sensor`/`storage`/`motor_rt` 五任务后自删除 |
-| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）按域节拍发布：运动/IMU 数据 100Hz、状态 20Hz、拓扑 1Hz、温度 2Hz；断连自动重建 |
+| `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）按域节拍发布：运动状态 50Hz、IMU 数据 100Hz、状态 20Hz、拓扑 1Hz、温度 2Hz；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
 | `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；`system.save` 脉冲——写事务只置脏、不再自动落盘，见「W25Q64」节） |
-| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 20ms 控制边界消费完整快照与配置 FIFO |
+| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 5ms/200Hz 控制边界消费完整快照与配置 FIFO |
 
 ## 代码组织
 
@@ -78,8 +78,8 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
 | `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
 | `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
-| `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 20ms 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
-| `session_sync` | 会话边沿/电平→内核授权的纯派生（20ms 边界调用，host 可测） |
+| `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 5ms/200Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
+| `session_sync` | 会话边沿/电平→内核授权的纯派生（5ms/200Hz 边界调用，host 可测） |
 | `storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
 | `heater` | TIM3 加热 PWM 所有权 + 纯 PID（host 可测） |
 | `lib/fdcan` | FDCAN 初始化/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度 |
@@ -139,7 +139,7 @@ micro_ros_firmware/
     ├── param_bridge.cpp       # ROS 2 参数服务器桥（静态量 + 运维动作）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
     ├── storage_task.cpp       # W25Q64 唯一所有者：boot 加载双槽 blob（每槽 2 扇区）+ save 落盘
-    ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 20ms 控制边界
+    ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 5ms/200Hz 控制边界
     └── system_clock.cpp       # 覆盖 SystemClock_Config
 ```
 
@@ -217,14 +217,15 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
-- `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，best-effort）：多点轨迹，见下节。
+- `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，reliable）：多点轨迹，见下节。
 - `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
 
 ### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
 "未来一段时间怎么走"。MCU 在受理时按每台的位置时间线算好单调三次 Hermite
-（Fritsch–Carlson）切矢，执行时每个 20ms 边界做段内插值并取**解析导数**当速度
+（Fritsch–Carlson）切矢，执行时每个 5ms/200Hz 边界做段内插值并取**解析导数**当速度，
+P1 CAN 命令以 20ms/50Hz 发送（边界之间由 latest-wins 保留最新插值目标），
 （位置与速度都连续，没有线性插值的速度台阶）。**路点里的 `velocity` 不参与执行**
 ——上层常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈
 `effort` 段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是
@@ -457,7 +458,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 ## 控制安全状态与恢复语义
 
-- `motor_rt_task` 每 1ms 服务、每 20ms（50Hz）控制边界消费一次完整快照；
+- `motor_rt_task` 每 1ms 服务、每 5ms（200Hz）控制边界消费一次完整快照；
   内核是唯一生命周期裁决者，任务层是唯一正常 FDCAN 发送者（P0/P1/P2 分级）。
 - 快照 freshness（MCU 单调时基）：`>30ms` 无新快照 → 全体受控电机 MIT 默认
   `kd` 阻尼软停；`>100ms` → 协议级失能并清授权；Agent 断链立即失能清授权，

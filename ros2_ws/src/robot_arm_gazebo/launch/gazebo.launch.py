@@ -3,8 +3,8 @@
 模型由 `model:=` 选择（`models/<模型名>/`），默认 `zhoubuguanjie_youbi_001`。
 控制方式（启动完成后）：
 
-  ros2 topic pub --once /arm_position_controller/commands \\
-    std_msgs/msg/Float64MultiArray "{data: [0.5, -0.3, 1.0, 0.2]}"
+  ros2 topic pub --once /arm_effort_controller/commands \\
+    std_msgs/msg/Float64MultiArray "{data: [1.0, -1.0, 1.0, -1.0]}"
 """
 
 import os
@@ -17,6 +17,7 @@ from launch.actions import (
     RegisterEventHandler,
     SetEnvironmentVariable,
 )
+from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
@@ -24,6 +25,7 @@ from launch.substitutions import (
     FindExecutable,
     LaunchConfiguration,
     PathJoinSubstitution,
+    PythonExpression,
 )
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -33,11 +35,14 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     pkg_share = FindPackageShare("robot_arm_gazebo")
     model = LaunchConfiguration("model")
+    control_mode = LaunchConfiguration("control_mode")
+    gravity = LaunchConfiguration("gravity")
     xacro_file = PathJoinSubstitution(
         [pkg_share, "models", model, "urdf", [model, ".urdf.xacro"]]
     )
     controllers_file = LaunchConfiguration("controllers_file")
     world_file = LaunchConfiguration("world_file")
+    verbosity = LaunchConfiguration("verbosity")
 
     # Ignition 用 model:// 解析 mesh（URDF 的 package:// 会被转换），须把
     # install/robot_arm_gazebo/share 加入资源搜索路径（其下有 robot_arm_gazebo/models）。
@@ -59,6 +64,8 @@ def generate_launch_description():
                 controllers_file,
                 " fixed_base:=",
                 LaunchConfiguration("fixed_base"),
+                " gravity:=",
+                gravity,
             ]
         ),
         value_type=str,
@@ -72,7 +79,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             "on_exit_shutdown": "true",
-            "gz_args": ["-v 2 -r ", world_file],
+            "gz_args": ["-v ", verbosity, " -r ", world_file],
         }.items(),
     )
     robot_state_publisher = Node(
@@ -112,6 +119,18 @@ def generate_launch_description():
         executable="spawner",
         output="screen",
         arguments=["arm_position_controller", "--controller-manager-timeout", "60"],
+        condition=UnlessCondition(
+            PythonExpression(["'", control_mode, "' == 'effort'"])
+        ),
+    )
+    effort_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        output="screen",
+        arguments=["arm_effort_controller", "--controller-manager-timeout", "60"],
+        condition=IfCondition(
+            PythonExpression(["'", control_mode, "' == 'effort'"])
+        ),
     )
 
     return LaunchDescription(
@@ -137,6 +156,21 @@ def generate_launch_description():
                 description="把基座焊到世界原点（false = 自由浮动基座）",
             ),
             DeclareLaunchArgument(
+                "gravity",
+                default_value="true",
+                description="模型连杆是否受 Gazebo 重力；position 轨迹验收可设 false",
+            ),
+            DeclareLaunchArgument(
+                "control_mode",
+                default_value="effort",
+                description="控制器模式：effort（默认，FDCAN/Gazebo 电机后端）或 position",
+            ),
+            DeclareLaunchArgument(
+                "verbosity",
+                default_value="2",
+                description="Ignition Gazebo 日志级别；调试插件加载可设 4",
+            ),
+            DeclareLaunchArgument(
                 "controllers_file",
                 default_value=PathJoinSubstitution(
                     [pkg_share, "models", model, "config", "controllers.yaml"]
@@ -157,7 +191,7 @@ def generate_launch_description():
             RegisterEventHandler(
                 OnProcessExit(
                     target_action=joint_state_spawner,
-                    on_exit=[position_spawner],
+                    on_exit=[position_spawner, effort_spawner],
                 )
             ),
         ]

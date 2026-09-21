@@ -136,8 +136,8 @@ ros2 topic echo --once /micro_ros_up/device_param_report
 
 ## 工作区里未提交的东西（不是本轮的）
 
-工作树还压着**另一条工作流**的未提交改动（约 37 个已跟踪文件：`motor_rt_task.cpp` 的
+工作树还压着**另一条工作流**的未提交改动（34 个已跟踪文件：`motor_rt_task.cpp` 的
 5ms/200Hz 边界、P1 20ms 发送门、`pump_p0_p2`、`MotorTrajectoryState.msg`、若干 `tools/*.py`
-与注释 churn 等）。本轮 14 个提交**刻意逐 hunk 把它们排除在外**（每次都已核对它们仍在工作区
+与注释 churn 等）。本轮 15 个提交**刻意逐 hunk 把它们排除在外**（每次都已核对它们仍在工作区
 且未暂存），因为一条署名 `SAVE_DEVICE_FLASH` 的提交不该把别人的在飞改动捆进来。
-另有 Codex 留下的 `.firefox-profile.*` 两个目录，未动。
+（Codex 留下的 `.firefox-profile.*` 两个目录在本轮结束时已不在磁盘上；非本轮删除。）

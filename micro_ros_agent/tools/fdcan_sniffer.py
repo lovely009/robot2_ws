@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FDCAN1 真机台架只读嗅探：配置 CANable2（C/S8/Y5/O）后打印总线帧。
+"""FDCAN1 真机台架只读嗅探：配置 CANable2（C/S8/Y5/M0/A1/O）后打印总线帧。
 
 与 fdcan_motor_sim.py 的本质区别：本工具**只收不发**——除 SLCAN 通道配置
 与收尾 `C` 关通道外，不向总线写任何 CAN 帧，真机台架安全。复用模拟器的
@@ -46,7 +46,7 @@ def main() -> int:
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
 
     # CANable 必须先成为 ACK 节点，控制板才可复位（台架指南铁律）。
-    print(f"配置 {args.tty}：C/S8/Y{args.data_bitrate_index}/O（150ms 间隔）…")
+    print(f"配置 {args.tty}：C/S8/Y{args.data_bitrate_index}/M0/A1/O（150ms 间隔）…")
     for cmd in slcan_config_commands(args.data_bitrate_index):
         os.write(fd, cmd)
         time.sleep(0.15)

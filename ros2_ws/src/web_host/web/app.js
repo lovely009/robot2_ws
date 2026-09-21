@@ -15,6 +15,7 @@ const TOPICS = {
   temp: {name: '/micro_ros_up/imu/temp', type: 'std_msgs/msg/Float32'},
   command: {name: '/micro_ros_do/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
   trajectory: {name: '/micro_ros_do/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
 };
 
@@ -112,13 +113,22 @@ function setConn(ok, text) {
 
 function pub(key, message) {
   if (!state.connected) return false;
+  ensurePublisher(key).publish(new ROSLIB.Message(message));
+  return true;
+}
+
+// rosbridge 的 advertise 是异步 WebSocket 操作。若在第一次 advertise 后
+// 立刻 publish，低频的一次性 command（尤其是示教前的授权快照）可能在
+// micro-ROS 订阅端完成发现前丢掉；随后 trajectory_state 仍会回执，造成
+// “轨迹已完成但没有运动帧”的假成功。连接建立时先把三个下行发布端注册好，
+// 后续按钮/示教只发送已经存在的 publisher。
+function ensurePublisher(key) {
   if (!publishers[key]) {
     const t = TOPICS[key];
     publishers[key] = new ROSLIB.Topic({ros, name: t.name, messageType: t.type});
     publishers[key].advertise();
   }
-  publishers[key].publish(new ROSLIB.Message(message));
-  return true;
+  return publishers[key];
 }
 
 // 自动重连：roslibjs 自身**不重连**。rosbridge 一重启（改 msg、改 launch 都会重启），
@@ -142,6 +152,7 @@ function connect() {
   ros.on('connection', () => {
     setConn(true);
     subscribeAll();
+    ['command', 'trajectory', 'policy'].forEach(ensurePublisher);
     loadParams(); // 参数是默认页签：连上后自动读取，避免打开看到空表
   });
   ros.on('error', () => setConn(false, '连接错误'));
@@ -230,6 +241,14 @@ function subscribeAll() {
       state.motors.set(s.motor_id, row);
       chartPush(s.motor_id, 'current', s.current, t);
     }
+  });
+
+  sub('trajectoryState', (m) => {
+    // 轨迹状态是 10Hz best-effort 回执；分段播放只在收到本段 completed
+    // 后发送下一段，避免 mailbox 的 latest-wins 把前一段覆盖掉。
+    if (!teach.playing || teach.mode !== 'trajectory' || !teach.waitingState) return;
+    if (Number(m.trajectory_id) !== teach.activeTrajectoryId || !m.completed) return;
+    teachOnTrajectoryCompleted(m);
   });
 
   sub('events', (m) => {
@@ -547,8 +566,9 @@ function renderImu() {
 }
 
 // ---------- 控制：命令快照 ----------
-// sequence 仅作日志关联（固件序号门已移除，2026-09-15）。
-let seq = 0;
+// sequence 仅作日志关联；用页面启动时间降低刷新页面后复用旧 trajectory_id
+// 的概率（固件状态回执是低频 best-effort，不能接受旧回执误推进分段）。
+let seq = (Date.now() & 0x7fffffff) >>> 0;
 let streamTimer = null;
 
 function addCmdRow(id = 1, pos = 0, vel = 0, eff = 0) {
@@ -606,6 +626,33 @@ function noteBlockedTargets(targets) {
   return blocked;
 }
 
+// 示教不是普通的“发布成功”操作：trajectory_state 的 accepted/completed 只代表
+// MCU 轨迹 mailbox 的状态，不能替代实际电机在线和生命周期检查。播放前必须确认
+// 每个目标都处于 READY_DISABLED 或 ACTIVE；否则页面会出现“播放完成”但机构不动。
+function playbackReadinessError(ids) {
+  const blocked = [];
+  for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+    const row = state.motors.get(id);
+    if (!row) {
+      blocked.push(`m${id}(未发现)`);
+      continue;
+    }
+    const st = row.status || {}, topo = row.topo || {};
+    const online = st.online !== undefined ? st.online : topo.online;
+    const lc = st.lifecycle !== undefined ? st.lifecycle : topo.lifecycle;
+    const fault = Number(st.unified_fault_code || 0);
+    if (online !== true) blocked.push(`m${id}(离线)`);
+    else if (fault) blocked.push(`m${id}(故障${fault})`);
+    else if (lc !== 3 && lc !== 4) {
+      const name = LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '未就绪';
+      blocked.push(`m${id}(${name})`);
+    }
+  }
+  return blocked.length
+    ? `电机未就绪：${blocked.join('、')}；请先启动仿真后等待四台 READY_DISABLED，再播放`
+    : '';
+}
+
 function sendSnapshot() {
   if (!state.connected) { setCmdResult(false, '未连接 rosbridge'); return false; }
   const {targets, error} = readCmdTargets();
@@ -641,8 +688,8 @@ function sendTargets(targets) {
   return {ok: true, msg: `seq=${seq}，${targets.length} 台`};
 }
 
-// 发布一条多点轨迹：固件在自己的 20ms 控制边界按 time_from_start_ms 段内
-// 线性插值执行，速度取段斜率。轨迹声明集合内的电机由轨迹**独占**——同一时刻
+// 发布一条多点轨迹：固件在自己的 5ms/200Hz 控制边界按 time_from_start_ms 段内
+// 做 C¹ 插值并计算速度。轨迹声明集合内的电机由轨迹**独占**——同一时刻
 // 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
 // "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
 // 并软停这些电机。
@@ -652,17 +699,9 @@ function sendTargets(targets) {
 // 报"已托管给 MCU"而板子根本没收到。
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
-
-// ── 为什么"播放"不走轨迹通道（2026-09-20 真机实测，别再走这条路）──────
-// 本板 micro-ROS 的 **reliable 分片路径不可用**：单条消息超过一个 MTU(512 B) 就把
-// MCU 写死，只能复位。实测对照：
-//     3 点 / 60 B   → 受理、completed ✓
-//     252 点 / 5 KB → 板子挂死 ✗（而 252 < 固件 256 点容量，所以**不是点数问题**）
-// `RMW_UXRCE_STREAM_HISTORY_INPUT` 加大也不生效（heap_free 纹丝不动），无法靠加缓冲
-// 绕过。**结论：轨迹单条必须 ≤ 一个 MTU ≈ 20 个点**，对 270 行的录制毫无用处。
-// 所以播放改走**快照通道**（每行一条 ~100 B 的单帧消息，即"单发一次"用的那条路）。
-// 轨迹通道仍保留 sendTrajectory() 仅供"取消轨迹"（空消息，极小）使用。
-const TRAJ_MTU_SAFE_POINTS = 20; // 单条轨迹的实测安全上限（一个 MTU 内）
+// reliable/XRCE 分片的输入输出 history 已在固件构建配置中成对固定为 16；
+// 页面仍按固件 256 点总上限分段，避免把 1080 点示教整包塞进 MCU。
+const TRAJ_STATE_TIMEOUT_PAD_MS = 3000;
 
 // 固件单条上限是 256 点 —— 但**不必再稀疏化**：播放时会自动分段，且段尾挑在
 // 运动最慢（常常是四个关节都不动）的行上，端点切矢归零落在真停顿处，看不出顿挫。
@@ -685,18 +724,49 @@ function trajSizeNote(rows) {
 function sendTrajectory(points, targetIds) {
   if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
   const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
+  if (points.length > TRAJ_MAX_POINTS) {
+    return {ok: false, msg: `轨迹 ${points.length} 点超过固件上限 ${TRAJ_MAX_POINTS}`};
+  }
+  if (ids.length > TRAJ_MAX_MOTORS) {
+    return {ok: false, msg: `轨迹 ${ids.length} 台超过固件上限 ${TRAJ_MAX_MOTORS}`};
+  }
   seq = (seq + 1) >>> 0;
-  pub('trajectory', {
+  const trajectoryId = seq;
+  const published = pub('trajectory', {
     sync_time_ns: Date.now() * 1e6, // 仅用于跨系统日志对齐
     sequence: seq,
+    trajectory_id: trajectoryId,
     count: points.length,
     target_count: ids.length,
     target_ids: ids,
     points,
   });
+  if (!published) return {ok: false, msg: '未连接 rosbridge'};
   const total = points.length ? points[points.length - 1].time_from_start_ms : 0;
-  return {ok: true, msg: `轨迹 seq=${seq}：${points.length} 个路点 / ${ids.length} 台` +
-    (points.length ? `，总时长 ${total} ms` : '')};
+  return {ok: true, trajectoryId,
+    msg: `轨迹 seq=${seq}：${points.length} 个路点 / ${ids.length} 台` +
+      (points.length ? `，总时长 ${total} ms` : '')};
+}
+
+// 轨迹和快照共用固件的全局 freshness/授权门。示教播放会停止 100Hz 快照流，
+// 因此必须在第一段轨迹前补一份新鲜完整快照；否则页面虽然能看到
+// trajectory_state=accepted/completed，固件仍会因「从未有新快照」或会话超时门
+// 不生成 MIT 运动帧。轨迹受理后所属电机由轨迹独占，后续快照不会夺权。
+function primeTrajectorySnapshot(segment) {
+  const first = new Map();
+  for (const point of segment.points) {
+    if (point.time_from_start_ms !== 0 || first.has(point.motor_id)) continue;
+    first.set(point.motor_id, {
+      motor_id: point.motor_id,
+      position: point.position,
+      velocity: point.velocity,
+      effort: point.effort,
+    });
+  }
+  const targets = [...first.values()];
+  return targets.length
+    ? sendTargets(targets)
+    : {ok: false, msg: '轨迹第一时刻没有可用于授权的目标'};
 }
 
 function cancelTrajectory() {
@@ -984,7 +1054,11 @@ function drawHorizon() {
 }
 
 // ---------- 示教（点位序列） ----------
-const teach = {playing: false, timer: null, idx: 0, seg: 0, segTotal: 0, nMotors: 4, nextRow: 0, segEnds: []};
+const teach = {
+  playing: false, timer: null, idx: 0, mode: 'idle',
+  segments: [], segmentIndex: 0, activeTrajectoryId: 0,
+  waitingState: false, trajectoryHeld: false,
+};
 
 function setTeach(cls, text) {
   const el = $('teachStatus');
@@ -1019,7 +1093,12 @@ function teachReadRows() {
       for (const token of text.split(/[\s;]+/)) {
         const m = /^(\d+):([-\d.]+),([-\d.]+),([-\d.]+)$/.exec(token);
         if (!m) return {error: `目标格式非法：${token}（应为 ID:pos,vel,eff）`};
-        targets.push({motor_id: +m[1], position: +m[2], velocity: +m[3], effort: +m[4]});
+        const target = {motor_id: +m[1], position: +m[2], velocity: +m[3], effort: +m[4]};
+        if (![target.motor_id, target.position, target.velocity, target.effort]
+            .every(Number.isFinite)) {
+          return {error: `目标数值非法：${token}`};
+        }
+        targets.push(target);
       }
     }
     rows.push({wait: Number.isFinite(wait) && wait >= 0 ? wait : 0, targets});
@@ -1029,26 +1108,6 @@ function teachReadRows() {
 
 function teachStopTimer() {
   if (teach.timer) { clearTimeout(teach.timer); teach.timer = null; }
-}
-
-function teachStepGo() {
-  if (!teach.playing) return;
-  const row = teach.rows[teach.idx];
-  let res = {ok: true, msg: '空点位（不下发）'};
-  if (row.targets.length) res = sendTargets(row.targets);
-  setTeach(res.ok ? 'ok' : 'err',
-    (res.ok ? '✓' : '✗') + ` 点位 ${teach.idx + 1}/${teach.rows.length}: ${res.msg}`);
-  let next = teach.idx + 1;
-  if (next >= teach.rows.length) {
-    if ($('chkTeachLoop').checked) { next = 0; }
-    else {
-      teach.playing = false;
-      setTeach('ok', '播放完成');
-      return;
-    }
-  }
-  teach.idx = next;
-  teach.timer = setTimeout(teachStepGo, row.wait);
 }
 
 // 示教行 → 轨迹路点：每行的 wait 是"从上一行到本行"的时长，累加成
@@ -1072,122 +1131,203 @@ function teachRowsToTrajectory(rows) {
   return {points, ids: [...ids]};
 }
 
-// 播放改为把整条时间线交给 MCU 执行（不再由浏览器逐点 setTimeout）：
-// 定时抖动不再影响运动质量，松手/切页也不会中断。
-// 播放：**按行流式走快照通道**（/micro_ros_do/motor_command_array）。
-//
-// 为什么不用轨迹通道（2026-09-20 真机实测）：本板 micro-ROS 的 reliable 分片路径
-// 不可用——单条消息超过一个 MTU(512 B) 就会把 MCU 写死，只能复位。
-//   实测：3 点 / 60 B  → 受理并 completed ✓
-//         252 点 / 5 KB → 板子直接挂死 ✗（而 252 < 固件 256 点容量，所以不是点数问题）
-//   `RMW_UXRCE_STREAM_HISTORY_INPUT` 改了也不生效（heap_free 不动），故无法靠加大
-//   缓冲绕过。**结论：轨迹单条必须 ≤ 一个 MTU**，也就是 ≤ ~20 个点。
-// 快照通道每条只是一行的目标（~100 B，单帧），是被反复验证过可用的那条路
-// （"单发一次"就是它）。代价：节奏由浏览器定时器给（约 30Hz，抖动毫秒级），
-// 且中途若卡顿超过 100ms，固件的新鲜度级联会对这些台软停（安全，不会失控）。
-// 播放：**页面侧按 ~100 Hz 插值**，逐条走快照通道下发（每条约 100 B，单帧安全）。
-//
-// 两条硬约束（都是真机实测，别再试）：
-//  ① 本板单条 micro-ROS 消息 ≤ 一个 MTU ≈ 512 B：实测 5 KB 会把 MCU 写死、
-//     60 B 正常；`RMW_UXRCE_STREAM_HISTORY_INPUT` 改大**不生效**（heap_free 不变）。
-//     → 轨迹通道最多装 ~20 个点，喂不了 270 行的录制。
-//  ② 快照通道只给位置不给速度时运动很差（速度字段直通 MIT 的 kd·v_des 项）。
-//     → 这里把录制的时间线**在页面侧线性插值**，并把每段的斜率作为速度前馈一起发。
+// 轨迹播放由 MCU 托管；长示教按总路点上限切段，并通过 trajectory_state 的
+// completed 回执串行发送。段与段之间复用上一行作为边界点（若容量允许），
+// 这样不会把下一段的第一点变成突跳；每段仍是一个完整、可独立校验的轨迹。
+function segmentRowsToTrajectory(rows) {
+  const result = teachRowsToTrajectory(rows);
+  const lastTime = new Map();
+  for (const point of result.points) {
+    const previous = lastTime.get(point.motor_id);
+    if (previous !== undefined && point.time_from_start_ms <= previous) {
+      return {error: `motor ${point.motor_id} 的时间未严格递增；请把等待 ms 设为正数`};
+    }
+    lastTime.set(point.motor_id, point.time_from_start_ms);
+  }
+  return {
+    points: result.points,
+    ids: result.ids.slice().sort((a, b) => a - b),
+    totalMs: result.points.length
+      ? result.points[result.points.length - 1].time_from_start_ms : 0,
+  };
+}
+
+function buildTrajectorySegments(rows) {
+  // 空行只表达等待；轨迹必须从第一个有效目标起算，前导空行没有可执行语义。
+  const source = rows.map((row) => ({
+    wait: Math.max(0, Number(row.wait) || 0),
+    targets: (row.targets || []).map((x) => ({...x})),
+  }));
+  while (source.length && !source[0].targets.length) source.shift();
+  while (source.length && !source[source.length - 1].targets.length) source.pop();
+  if (!source.length) return {error: '时间线没有任何目标点'};
+
+  const segments = [];
+  let start = 0;
+  while (start < source.length) {
+    let best = null;
+    let bestEnd = start;
+    for (let end = start + 1; end <= source.length; ++end) {
+      const candidate = segmentRowsToTrajectory(source.slice(start, end));
+      if (candidate.error) return candidate;
+      if (candidate.points.length > TRAJ_MAX_POINTS) break;
+      if (candidate.points.length) {
+        best = candidate;
+        bestEnd = end;
+      }
+    }
+    if (!best) return {error: `示教段超过 ${TRAJ_MAX_POINTS} 个路点，无法切分`};
+    segments.push(best);
+    if (bestEnd >= source.length) break;
+
+    // 有容量就重叠最后一行；若最后一行已经占满整个段，则从下一行开始，
+    // 避免重复起点本身导致无限循环。
+    let nextStart = bestEnd;
+    const overlap = segmentRowsToTrajectory(source.slice(bestEnd - 1, bestEnd + 1));
+    if (!overlap.error && overlap.points.length <= TRAJ_MAX_POINTS) {
+      nextStart = bestEnd - 1;
+    }
+    start = nextStart > start ? nextStart : bestEnd;
+  }
+  return {segments};
+}
+
 function teachPlay() {
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   if (!rows.length) { setTeach('err', '没有点位'); return; }
-  const ids = new Set();
-  for (const r of rows) for (const x of r.targets) ids.add(x.motor_id);
-  if (ids.size > 64) { setTeach('err', `✗ 未下发：${ids.size} 台超上限 64`); return; }
-  const timeline = buildTimeline(rows);
-  if (timeline.length < 1) { setTeach('err', '时间线为空'); return; }
-  stopStream();          // 我们自己就是快照通道：先停 100Hz 连发，避免两条流互踩
+  const built = buildTrajectorySegments(rows);
+  if (built.error) { setTeach('err', built.error); return; }
+  if (!built.segments.length) { setTeach('err', '时间线为空'); return; }
+  const ids = built.segments.flatMap((segment) => segment.ids);
+  const readinessError = playbackReadinessError(ids);
+  if (readinessError) { setTeach('err', `播放前检查失败：${readinessError}`); return; }
+  stopStream();
   teachStopTimer();
+  const prime = primeTrajectorySnapshot(built.segments[0]);
+  if (!prime.ok) { setTeach('err', `轨迹授权快照下发失败：${prime.msg}`); return; }
   teach.playing = true;
-  teach.timeline = timeline;
+  teach.mode = 'trajectory';
+  teach.segments = built.segments;
+  teach.segmentIndex = 0;
+  teach.waitingState = false;
+  teach.trajectoryHeld = false;
   teach.idx = 0;
-  teach.t0 = performance.now();
-  teachPlayTick();
+  teachSendTrajectorySegment();
 }
 
-// 行 → 时间线，并给每条目标补**速度前馈**（中心差分；端点用单侧差分）。
-function buildTimeline(rows) {
-  const tl = [];
-  let t = 0;
-  for (const row of rows) {
-    tl.push({t, targets: row.targets.map((x) => ({
-      motor_id: x.motor_id, position: x.position, velocity: 0, effort: x.effort || 0}))});
-    t += Math.max(1, row.wait);
-  }
-  for (let i = 0; i < tl.length; ++i) {
-    const a = tl[Math.max(0, i - 1)];
-    const b = tl[Math.min(tl.length - 1, i + 1)];
-    const dt = (b.t - a.t) / 1000;
-    for (const x of tl[i].targets) {
-      const ya = a.targets.find((y) => y.motor_id === x.motor_id);
-      const yb = b.targets.find((y) => y.motor_id === x.motor_id);
-      x.velocity = (dt > 0 && ya && yb) ? (yb.position - ya.position) / dt : 0;
-    }
-  }
-  return tl;
-}
-
-// ~100 Hz 节拍：按实际经过时间定位区间、线性插值位置，带上该段速度前馈。
-function teachPlayTick() {
-  if (!teach.playing) return;
-  const tl = teach.timeline;
-  const last = tl[tl.length - 1];
-  const t = performance.now() - teach.t0;
-  if (t >= last.t) {
-    if (last.targets.length) sendTargets(last.targets); // 收尾停在末点
+function teachSendTrajectorySegment() {
+  if (!teach.playing || teach.mode !== 'trajectory') return;
+  const segment = teach.segments[teach.segmentIndex];
+  const readinessError = playbackReadinessError(segment.ids);
+  if (readinessError) {
     teach.playing = false;
-    teachStopTimer();
-    setTeach('ok', `✓ 播放完成：${tl.length} 行 / ${(last.t / 1000).toFixed(1)} s`);
+    teach.mode = 'idle';
+    teach.waitingState = false;
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发前检查失败：${readinessError}`);
     return;
   }
-  while (teach.idx + 1 < tl.length && tl[teach.idx + 1].t <= t) teach.idx++;
-  const a = tl[teach.idx];
-  const b = tl[Math.min(teach.idx + 1, tl.length - 1)];
-  const k = (t - a.t) / Math.max(1, b.t - a.t);
-  const targets = a.targets.map((x) => {
-    const y = b.targets.find((z) => z.motor_id === x.motor_id) || x;
-    return {motor_id: x.motor_id,
-            position: x.position + (y.position - x.position) * Math.min(1, k),
-            velocity: x.velocity, // 段内斜率（录制斜率，非插值瞬时值）
-            effort: 0};
-  });
-  if (targets.length) sendTargets(targets);
-  const pct = Math.round(t / last.t * 100);
-  setTeach('ok', `▸ 播放中 ${(t / 1000).toFixed(1)}/${(last.t / 1000).toFixed(1)} s（${pct}%）`);
-  teach.timer = setTimeout(teachPlayTick, 10); // ~100 Hz
+  const res = sendTrajectory(segment.points, segment.ids);
+  if (!res.ok) {
+    teach.playing = false;
+    teach.mode = 'idle';
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发失败：${res.msg}`);
+    return;
+  }
+  teach.activeTrajectoryId = res.trajectoryId;
+  teach.waitingState = true;
+  teach.trajectoryHeld = true;
+  setTeach('ok', `▸ 轨迹段 ${teach.segmentIndex + 1}/${teach.segments.length}：` +
+    `${segment.points.length} 点，等待 MCU 完成回执`);
+  teachStopTimer();
+  teach.timer = setTimeout(() => {
+    if (!teach.playing || !teach.waitingState ||
+        teach.activeTrajectoryId !== res.trajectoryId) return;
+    teach.playing = false;
+    teach.mode = 'idle';
+    teach.waitingState = false;
+    const cancel = cancelTrajectory();
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 未收到 trajectory_state 回执` +
+      (cancel.ok ? '，已发送取消' : '，取消也未发布'));
+  }, Math.max(TRAJ_STATE_TIMEOUT_PAD_MS, segment.totalMs + TRAJ_STATE_TIMEOUT_PAD_MS));
+}
+
+function teachOnTrajectoryCompleted() {
+  if (!teach.playing || teach.mode !== 'trajectory') return;
+  teachStopTimer();
+  teach.waitingState = false;
+  const ids = teach.segments.flatMap((segment) => segment.ids);
+  const readinessError = playbackReadinessError(ids);
+  if (readinessError) {
+    teach.playing = false;
+    teach.mode = 'idle';
+    const cancel = cancelTrajectory();
+    teach.trajectoryHeld = false;
+    setTeach('err', `收到轨迹完成回执，但执行状态异常：${readinessError}` +
+      (cancel.ok ? '，已发送取消' : '，取消也未发布'));
+    return;
+  }
+  if (teach.segmentIndex + 1 < teach.segments.length) {
+    teach.segmentIndex++;
+    teachSendTrajectorySegment();
+    return;
+  }
+  if ($('chkTeachLoop').checked) {
+    teach.segmentIndex = 0;
+    teachSendTrajectorySegment();
+    return;
+  }
+  teach.playing = false;
+  teach.mode = 'idle';
+  // 播放完成后 MCU 仍保持末点，直到用户点暂停/停止取消轨迹。
+  setTeach('ok', `✓ 播放完成：${teach.segments.length} 段；末点保持，点“暂停”软停`);
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消
 // （固件保持末点，机构无抱闸，软停会掉臂），所以"停"必须显式点。
 function teachPause() {
-  const wasPlaying = teach.playing;
+  const hadTrajectory = teach.trajectoryHeld;
   teach.playing = false;
+  teach.mode = 'idle';
+  teach.waitingState = false;
   teachStopTimer();
-  if (!wasPlaying) { setTeach('ok', '未在播放'); return; }
+  if (!hadTrajectory) { setTeach('ok', '未在播放'); return; }
   const res = cancelTrajectory();
+  teach.trajectoryHeld = false;
   setTeach(res.ok ? 'ok' : 'err',
     res.ok ? '✓ 已取消轨迹（这些电机软停并交回快照通道）' : `✗ ${res.msg}`);
 }
 
 function teachStep() {
   teach.playing = false;
+  teach.mode = 'idle';
+  teach.waitingState = false;
   teachStopTimer();
   const {rows, error} = teachReadRows();
   if (error) { setTeach('err', error); return; }
   if (!rows.length) { setTeach('err', '没有点位'); return; }
   teach.rows = rows;
   if (teach.idx >= rows.length) teach.idx = 0;
-  // 单步走快照通道：必须先取消轨迹，否则这些电机归轨迹管，快照会被挡下。
-  cancelTrajectory();
   const row = rows[teach.idx];
+  const readinessError = playbackReadinessError(row.targets.map((x) => x.motor_id));
+  if (readinessError) { setTeach('err', `单步前检查失败：${readinessError}`); return; }
+  // 单步也走轨迹通道；先取消旧归属，再以 t=0 的单点轨迹保持目标。
+  cancelTrajectory();
   let res = {ok: true, msg: '空点位（不下发）'};
-  if (row.targets.length) res = sendTargets(row.targets);
+  if (row.targets.length) {
+    const points = row.targets.map((x) => ({time_from_start_ms: 0, ...x}));
+    const prime = sendTargets(row.targets);
+    if (!prime.ok) {
+      setTeach('err', `单步授权快照下发失败：${prime.msg}`);
+      teach.idx++;
+      if (teach.idx >= rows.length) teach.idx = 0;
+      return;
+    }
+    res = sendTrajectory(points, [...new Set(row.targets.map((x) => x.motor_id))]);
+    teach.trajectoryHeld = res.ok;
+  } else {
+    teach.trajectoryHeld = false;
+  }
   setTeach(res.ok ? 'ok' : 'err', `单步 ${teach.idx + 1}/${rows.length}: ${res.msg}`);
   teach.idx++;
   if (teach.idx >= rows.length) teach.idx = 0;
@@ -1314,7 +1454,14 @@ setInterval(() => {
 // 「代数严格前进」的防复权门。
 // 稀疏语义：只影响下发的那些电机，其余保持原状。
 // 固件**不回读** kp/kd，所以表格里显示的是页面最后一次发出去的值（state.policy）。
-let policyGeneration = 0;
+// 固件的代数门是**跨页面持久**的：表项进 FAULT/OFFLINE/CONFIG_CONFLICT 时把当时
+// 的代数锁存下来，之后「enabled=true 且代数 <= 锁存值」一律拒绝（见
+// MotorPolicyArray.msg）。所以这个计数器不能从 0 起——刷新页面/重开浏览器只是把
+// 我们这一侧归零，固件那边记得的仍是上一轮的值，于是每一条「武装」都被静默拒
+// （只有事件日志的 CONFIG_RESULT reason=2 能看出），而轨迹照旧受理、照旧
+// completed：表现就是"播放完成但机构不动"。与 seq 同法，用启动时间把起点垫高。
+// 代价：代数不再连续可读，判"是不是新意图"看的是它是否前进，而不是它等于几。
+let policyGeneration = (Date.now() & 0x7fffffff) >>> 0;
 
 function polInputs(id) {
   const q = (f) => $('polRows').querySelector(
@@ -2059,6 +2206,12 @@ function init() {
 
   addCmdRow(1, 0, 0, 0);
   teachAddRow(1000, '1:0,0,0');
+
+  // 开页即连：rosUrl 已按 location.hostname 填好，没有"先改地址再连"的场景。
+  // 早先必须手点「连接」，页面开着却是哑的——看上去就是"上位机不可控"。
+  // 想换地址仍可改完按 Enter 或点「连接」；「断开」会立起 manualDisconnect，
+  // 之后不再自动重连。
+  connect();
 }
 
 init();

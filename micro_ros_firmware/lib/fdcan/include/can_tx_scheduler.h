@@ -101,6 +101,13 @@ bool can_tx_scheduler_submit_p2(can_tx_scheduler_t *sched,
 uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
                                uint32_t capacity, uint32_t *p0_count);
 
+// 仅泵 P0/P2，保留 P1 dirty 槽不动。motor_rt 以 5ms 计算轨迹、覆盖 P1
+// latest-wins 目标，但只在 20ms/50Hz 边界调用完整 pump；其余 1ms 服务拍
+// 调本函数，保证安全帧与管理流量不被 P1 限频连带延迟。
+uint32_t can_tx_scheduler_pump_p0_p2(can_tx_scheduler_t *sched,
+                                     can_tx_frame_t *out, uint32_t capacity,
+                                     uint32_t *p0_count);
+
 // 硬件提交结果记账（调用方在 HAL_FDCAN_AddMessageToTxFifoQ 失败时调用）。
 void can_tx_scheduler_note_hw_reject(can_tx_scheduler_t *sched);
 

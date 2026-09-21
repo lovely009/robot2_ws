@@ -38,19 +38,18 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 2026-09-20：20 → 5 ms（50 → 200 Hz）。依据（4 台单总线的实测口径）：
-// 命令 4×200Hz×54.4µs = 17.4% + 回显同比 + 状态/SYNC ≈ 26% 总线负载；
-// TX pump 16 帧/5ms = 3.2 帧/ms（上限 8）、全局 collect 9.6 帧/ms（上限 16）。
-// **不是所有规模都成立**：48 台上限（16 台/总线）时 500Hz 需 52% 且打满配额
-// ——提频的可行区间随每总线台数收缩，见 docs/plans/active/48-motor-scale-design.md §3.2。
+// 轨迹/策略计算保持 5ms/200Hz；P1 CAN 命令由下方独立 20ms 门限以 50Hz
+// 发出。5ms 间产生的目标在调度器 P1 槽 latest-wins 覆盖，既保留插值时间精度，
+// 又避免 4 台轨迹变成 800 帧/s，压垮持续运行的 SLCAN/CANable 通道。
 static const uint32_t kControlPeriodMs = 5U;
+static const uint32_t kP1TransmitPeriodMs = 20U;
 
 // 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
 static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈上界）
 static const uint32_t kTxCollectBudget = 16U;       // 每 1ms 最多取走内核待发帧数
 static const uint32_t kTxPumpBudgetPerBus = 8U;     // 每 1ms 每总线最多提交帧数
-static const uint32_t kConfigDrainPerBoundary = 4U; // 每 20ms 边界最多转发配置数
+static const uint32_t kConfigDrainPerBoundary = 4U; // 每个 5ms 控制边界最多转发配置数
 static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
                                                     // 20ms 状态上报，与 VAXOR
                                                     // 20ms 自推统一 50Hz）
@@ -60,7 +59,7 @@ static motor_control_context_t *const g_motor_control =
     motor_control_instance();
 static control_mailbox_t g_control_mailbox;
 
-// boot 存储参数（start 时从 storage 任务快照；20ms 边界套用到内核）。
+// boot 存储参数（start 时从 storage 任务快照；5ms 边界套用到内核）。
 static motor_control_stored_params_t
     g_stored_params[MOTOR_CONTROL_MAX_MOTORS];
 static size_t g_stored_count = 0U;
@@ -354,16 +353,26 @@ static void route_kernel_tx(void) {
 
 // 1ms 服务之三：每总线 TX 调度器 pump → 硬件提交。
 // 每周期恰好一次 pump：P2 配额按"每 pump"计，循环调用会叠加配额。
-static void pump_tx_schedulers(void) {
+static void pump_tx_schedulers(uint32_t now_ms) {
   static can_tx_frame_t pump[kTxPumpBudgetPerBus]; // 静态：固定容量、可审计
+  static uint32_t last_p1_ms = 0U;
+  const bool pump_p1 =
+      (uint32_t)(now_ms - last_p1_ms) >= kP1TransmitPeriodMs;
+  if (pump_p1) {
+    last_p1_ms = now_ms;
+  }
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
     can_tx_scheduler_t *sched = can_bsp_tx_scheduler(bus);
     if (sched == nullptr) {
       continue;
     }
     uint32_t p0_count = 0U;
-    const uint32_t n =
-        can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus, &p0_count);
+    const uint32_t n = pump_p1
+                           ? can_tx_scheduler_pump(sched, pump,
+                                                   kTxPumpBudgetPerBus,
+                                                   &p0_count)
+                           : can_tx_scheduler_pump_p0_p2(
+                                 sched, pump, kTxPumpBudgetPerBus, &p0_count);
     for (uint32_t i = 0; i < n; ++i) {
       if (!can_bsp_submit_tx(bus, &pump[i])) {
         // 回插 P0 队首，下一拍先于其他帧重试，确保离线电机的失能帧
@@ -377,7 +386,7 @@ static void pump_tx_schedulers(void) {
   }
 }
 
-// 20ms 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 5ms/200Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
@@ -677,14 +686,14 @@ static void motor_rt_task_fn(void *pv_parameters) {
     sustain_discovery_sync(now_ms);
     route_kernel_tx();
 
-    // 20ms 控制边界（漂移自校正：按 millis 差触发；50 Hz）。
+    // 5ms 控制边界（漂移自校正：按 millis 差触发；200 Hz）。
     if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
       last_control_ms = now_ms;
       control_boundary();
     }
 
     // 1ms 服务：每总线 P0/P1/P2 出队并提交硬件。
-    pump_tx_schedulers();
+    pump_tx_schedulers(now_ms);
   }
 }
 

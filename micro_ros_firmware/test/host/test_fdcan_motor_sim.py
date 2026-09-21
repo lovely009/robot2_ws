@@ -11,11 +11,13 @@ MODULE = module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 assert MODULE.DEFAULT_DATA_BITRATE_INDEX == 5
+assert MODULE.SLCAN_VERSION_DATA_BITRATE["16e7497"] == 7
+assert MODULE.SLCAN_VERSION_DATA_BITRATE["b158aa7"] == 5
 assert MODULE.slcan_config_commands(5) == (
-    b"C\r", b"S8\r", b"Y5\r", b"O\r",
+    b"C\r", b"S8\r", b"Y5\r", b"M0\r", b"A1\r", b"O\r",
 )
 assert MODULE.slcan_config_commands(7) == (
-    b"C\r", b"S8\r", b"Y7\r", b"O\r",
+    b"C\r", b"S8\r", b"Y7\r", b"M0\r", b"A1\r", b"O\r",
 )
 
 try:
@@ -96,6 +98,26 @@ sim.models[2] = MODULE.MotorModel(2, "cerb")
 sim.models[2].identity = b"R58LITE_V2"
 sim.handle_sdo(2, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
 assert sim.sent[-1][1] == bytes([0x41, 0x08, 0x10, 0x00, 10, 0, 0, 0])
+
+# VAXOR MIT 命令的字段布局必须与固件相同：位置从字节 0 开始，随后是
+# 速度、kp、kd、Iq。这个回归用例能抓住“误从 data[2:6] 取位置且丢失增益”
+# 的错误；解码结果同时验证电机轴量到关节量的 50:1 换算。
+_vaxor_payload = (
+    MODULE.vaxor_pos_code(1.25)
+    + MODULE.vaxor_vel_code(2.0)
+    + int(round(0.2 / MODULE.VAXOR_KP_SCALE)).to_bytes(2, "little")
+    + int(round(0.8 / MODULE.VAXOR_KD_SCALE)).to_bytes(2, "little")
+    + MODULE.vaxor_cur_code(0.4)
+)
+_vaxor_cmd = MODULE.vaxor_decode_command(_vaxor_payload)
+assert _vaxor_cmd is not None
+assert abs(_vaxor_cmd["position_motor_rad"] - 1.25) < 2e-5
+assert abs(_vaxor_cmd["pos_rad"] - 1.25 / 50.0) < 2e-5
+assert abs(_vaxor_cmd["velocity_motor_rad_s"] - 2.0) < 2e-3
+assert abs(_vaxor_cmd["kp"] - 0.2) < 1e-6
+assert abs(_vaxor_cmd["kd"] - 0.8) < 1e-6
+assert abs(_vaxor_cmd["tau_nm"] - 0.4 * 0.042 * 50.0 * 0.65) < 2e-3
+assert MODULE.vaxor_decode_command(_vaxor_payload[:-1]) is None
 
 
 # 上电初值必须与**真机实测**一致（进程重启 = 掉电复现）：保护开关初值 1（关），

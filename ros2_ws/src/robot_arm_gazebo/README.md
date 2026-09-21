@@ -22,7 +22,7 @@ robot_arm_gazebo/
 │   └── display.rviz                        # 跨模型共享的 RViz 预览配置
 ├── launch/
 │   ├── display.launch.py                   # RViz 预览（无 Gazebo、无控制器）
-│   └── gazebo.launch.py                    # Ignition 仿真 + 位置控制器
+│   └── gazebo.launch.py                    # Ignition 仿真 + effort/position 控制器
 ├── models/
 │   └── <模型名>/                            # 自包含：urdf / meshes / config / cad / README
 ├── dist/
@@ -45,6 +45,12 @@ ros2 launch robot_arm_gazebo display.launch.py
 # Ignition 仿真（空世界 + 生成模型 + 控制器）
 ros2 launch robot_arm_gazebo gazebo.launch.py
 ros2 launch robot_arm_gazebo gazebo.launch.py world_file:=/path/to/world.sdf
+
+# FDCAN/串口仿真电机后端：默认用 effort 控制器接收 MIT 等效力矩
+ros2 launch robot_arm_gazebo gazebo.launch.py gravity:=false
+
+# 若要测试 MIT 等效力矩动力学，显式切换两端为 effort
+ros2 launch robot_arm_gazebo gazebo.launch.py control_mode:=effort
 ```
 
 RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还需要 `ros_gz_sim` +
@@ -67,11 +73,16 @@ ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
 | `spawn_z` | `0.0` | 模型生成高度（m），按模型几何实测值定 |
 | `fixed_base` | `true` | 把基座焊到世界原点；`false` = 自由浮动基座 |
 | `controllers_file` | `models/<模型>/config/controllers.yaml` | controller_manager 参数 |
+| `control_mode` | `effort` | `effort` 接收 FDCAN/Gazebo 电机后端发布的 MIT 等效力矩；`position` 仅用于话题/单位对照 |
 
 ## 控制机械臂
 
-`gazebo.launch.py` 启动后自动激活 `joint_state_broadcaster` 与
-`arm_position_controller`（forward position）：
+`gazebo.launch.py` 默认自动激活 `joint_state_broadcaster` 与
+`arm_effort_controller`（MIT 等效力矩）。FDCAN/Gazebo 电机后端的
+`--gazebo-control-mode` 必须与这里的 `control_mode` 一致。effort 模式把 MIT 控制律送入
+`arm_effort_controller`，适合验收真实电机后端到 Gazebo 的闭环；position 模式把
+固件已解码的关节目标送入 position controller，适合做话题、单位、ID、顺序和
+轨迹插补对照。模型未内置重力补偿时需要单独调增益/前馈。两种控制器不会同时占用同一组关节命令接口：
 
 ```bash
 ros2 topic pub --once /arm_position_controller/commands \

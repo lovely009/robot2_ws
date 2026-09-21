@@ -162,7 +162,7 @@ typedef struct {
   uint8_t boot_norm_attempts;
   uint32_t boot_norm_retry_tick_ms;
   // boot 存储参数套用状态：bit7=已见过存储记录（只初始化一次），
-  // bit0=待套增益、bit1=待套限值；Profile 未就绪时低位保留由 20ms 边界
+  // bit0=待套增益、bit1=待套限值；Profile 未就绪时低位保留由 5ms/200Hz 边界
   // 重试，套尽后只留 bit7（之后的 refresh/设备写影子不被重复 apply 覆盖）。
   uint8_t stored_apply_mask;
 
@@ -211,7 +211,7 @@ struct motor_control_context {
   // 自动脱离轨迹，无需在那些路径里额外清理归属。
   motor_control_trajectory_t trajectory;
   // 每个路点的切矢（rad/s），下标与 trajectory.points 一一对应：**受理轨迹时
-  // 一次算好**，20 ms 控制边界上只做一次 Hermite 求值，不在热路径重算差分。
+  // 一次算好**，5 ms/200Hz 控制边界上只做一次 Hermite 求值，不在热路径重算差分。
   // 端点恒 0（起止零速）；内部点 = 中心差分经 Fritsch–Carlson 限幅，故逐段
   // 不超调——这也让 entry_apply_target 的软限位钳制基本不会触发（钳位会破坏
   // C¹ 连续性）。放 .bss（AXI/RAM_D1），不占 DTCM 堆。

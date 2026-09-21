@@ -21,6 +21,7 @@ import re
 
 # 与 platformio.ini / microros_user.meta 保持一致（rclc 参数服务器的 5 个 service）。
 REQUIRED_MAX_SERVICES = 5
+REQUIRED_STREAM_HISTORY = 16
 
 
 def _libmicroros_dir():
@@ -50,6 +51,39 @@ def _check():
         return  # 上游改了 config.h 结构：不误报，交由人工确认
     value = int(match.group(1))
     if value >= REQUIRED_MAX_SERVICES:
+        # RMW 的 CMake 配置只有在 input/output 同时非空时才采用专用值；
+        # 否则 config.h 会回落到 RMW_UXRCE_STREAM_HISTORY（默认 4）。
+        # config.h 还会保留 CMake 条件的 inactive 分支。判断 #else 后的
+        # fallback 值即可验证当前预处理结果：旧的“只给 INPUT=12”会落到
+        # 4/4，新配置会落到 16/16。
+        fallback = text.split("#else", 1)[1] if "#else" in text else ""
+        input_value = re.search(
+            r"^#define\s+RMW_UXRCE_STREAM_HISTORY_INPUT\s+%d\s*$"
+            % REQUIRED_STREAM_HISTORY,
+            fallback,
+            re.M,
+        )
+        output_value = re.search(
+            r"^#define\s+RMW_UXRCE_STREAM_HISTORY_OUTPUT\s+%d\s*$"
+            % REQUIRED_STREAM_HISTORY,
+            fallback,
+            re.M,
+        )
+        if not all((input_value, output_value)):
+            print(
+                "\n"
+                + "=" * 72
+                + "\nmicro-ROS 库配置不符：可靠轨迹输入缓冲未按预期生成\n"
+                "  需要 input/output stream history = %d（各 8 KiB，512B MTU）。\n"
+                "  当前生成头：%s\n\n"
+                "这会让 MotorTrajectory 的可靠分片在到达 MCU 前失败或使会话异常。\n"
+                "修复：运行 ../micro_ros_agent/tools/refresh_microros_messages.py，\n"
+                "再重新执行 pio run；不要用 clean_microros。\n"
+                % (REQUIRED_STREAM_HISTORY, config_path)
+                + "=" * 72
+                + "\n"
+            )
+            env.Exit(1)  # noqa: F821  (SCons)
         return
 
     print(

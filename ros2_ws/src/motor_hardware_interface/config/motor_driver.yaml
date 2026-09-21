@@ -11,7 +11,7 @@
 #   buses            —— 逻辑总线定义（传输类型由 transport 字段决定）：
 #                        socketcan    -> interface（Linux SocketCAN 接口，位率由 ip link 配置）
 #                        serial_slcan -> tty（CANable2 串口设备；驱动内固定
-#                                        C->S8(仲裁 1M)->Y5(数据 5M)->O 配置总线）
+#                                        C->S8(仲裁 1M)->Y5(数据 5M)->M0->A1->O 配置总线）
 #                        transport 缺省为 socketcan；bus_override 只覆盖设备路径。
 #   motors           —— 电机实例：type 引用 motor.yaml 型号；command.kp/kd 为
 #                        动态调参增益；单电机可覆盖 parameters。

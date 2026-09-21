@@ -644,7 +644,7 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
       continue; // 未绑定 / 非设备侧型号（VAXOR）：无设备对象可比
     }
     if (!entry->boot_record_offered) {
-      continue; // 20ms 边界先套用 Flash 记录，再回读
+      continue; // 5ms/200Hz 边界先套用 Flash 记录，再回读
     }
     if (entry->boot_norm_stage != MOTOR_CONTROL_BOOT_NORM_DONE) {
       continue; // 0a 还没收尾：先写定保护/方向，再回读比对（顺序是契约）

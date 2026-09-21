@@ -285,8 +285,8 @@ static void note_publish(rcl_ret_t rc) {
 }
 
 static void publish_motion_states() {
-  // 50 Hz（10ms tick ×2）：与**控制边界 20ms** 和设备的 20ms 反馈对齐。100Hz 里
-  // 有一半只是重复发同一份测量值——与 publish_statuses 降到 20Hz 是同一条理由
+  // 50 Hz（10ms tick ×2）：与设备的 20ms 反馈对齐；控制边界独立为 5ms/200Hz。
+  // 100Hz 里有一半只是重复发同一份测量值——与 publish_statuses 降到 20Hz 是同一条理由
   // （那边注释写的正是「100Hz 里绝大部分只是 state_age 自增的重复内容」）。
   static uint8_t s_motion_phase = 0U;
   if ((++s_motion_phase % 2U) != 0U) {
@@ -423,8 +423,9 @@ static void publish_diagnostics(uint32_t now_ms) {
   note_publish(publish_rc);
 }
 
-// 轨迹执行状态：10Hz。补上「我发的轨迹受理了吗、跑到哪了」——轨迹是 best-effort
-// 下发的，没有它就只能靠猜。被拒的细节另见事件流的 TRAJECTORY_REJECTED。
+// 轨迹执行状态：10Hz。补上「我发的轨迹受理了吗、跑到哪了」——轨迹下行是 reliable
+// 分片传输，但执行状态回执是 best-effort；没有它就只能靠猜。被拒的细节另见事件流
+// 的 TRAJECTORY_REJECTED。
 static void publish_trajectory_state(uint32_t now_ms) {
   static uint32_t s_phase = 0U;
   if ((uint32_t)(now_ms - s_phase) < 100U) {
@@ -611,12 +612,11 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_command_up = true;
 
   sub_opts = rcl_subscription_get_default_options();
-  // 轨迹必须 reliable：它是**一条大消息**（1080 路点 ≈ 21.6 KB），而 best-effort
-  // 流**不分片**（fragmented 退回对 BE 判 INVALID）→ 超过一个 MTU(512 B) 就被
-  // **静默丢弃**（固件收不到，上位机也无从知道）。reliable 支持分片，配合
-  // microros_user.meta 的 RMW_UXRCE_STREAM_HISTORY_INPUT=48（24 KB 输入缓冲）
-  // 才能整条收下。发布侧 rosbridge 默认就是 reliable（TRANSIENT_LOCAL），能配上。
-  // ⚠️ 改这两个值必须**同时**改：只改 QoS 不加大缓冲，分片装不下照样丢。
+  // 轨迹必须 reliable：它是允许跨 MTU 分片的大消息；best-effort 流不分片，
+  // 超过一个 MTU(512 B) 会被静默丢弃。当前库配置用
+  // RMW_UXRCE_STREAM_HISTORY=16（输入/输出各 8 KB），足以承载固件允许的
+  // 256 点上限（约 5.2 KB），网页对更长示教按 256 点总量分段，不能把 1080
+  // 点整条塞进 MCU。发布侧 rosbridge 必须使用 reliable 才能配上。
   sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_trajectory_sub, node,
                             ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,

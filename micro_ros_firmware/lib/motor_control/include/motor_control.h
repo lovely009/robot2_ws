@@ -10,7 +10,7 @@
 // 新增协议不改内核——ARD §24.3）。
 //
 // 所有权：motor_rt_task 是唯一调用者。1ms 服务节拍调
-// on_raw_frame()/service()；20ms 控制边界调 apply_command_snapshot()；
+// on_raw_frame()/service()；5ms/200Hz 控制边界调 apply_command_snapshot()；
 // TX 调度器（lib/fdcan）消费 collect_tx() 输出的 P0/P1/P2 帧。
 //
 // 时基：一切 freshness/超时判定使用 MCU 单调时基毫秒（调用方传入 now_ms
@@ -351,7 +351,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
 void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
-// 20ms 控制边界（ARD §11.3）：校验并消费一份完整快照；
+// 5ms/200Hz 控制边界（ARD §11.3）：校验并消费一份完整快照；
 // 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法载荷）。
 // ---------------------------------------------------------------------------
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
@@ -361,12 +361,12 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
 // 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
 // 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
 // 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
-// 20ms 控制边界完成。
+// 5ms/200Hz 控制边界完成。
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
                                     const motor_control_trajectory_t *trajectory,
                                     uint32_t now_ms);
 
-// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内线性插值并下发。
+// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内 Hermite 插值并下发。
 // 无活动轨迹时 O(1) 返回（未用轨迹 = 对既有行为零影响）。
 // 时间超出末点 → 钳末点保持，绝不外推。
 void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
@@ -414,7 +414,7 @@ typedef struct {
 void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
                                     motor_control_diagnostics_t *out);
 
-// 受理并落地一条策略快照（20ms 控制边界调用）。逐台走与 SET_POLICY 相同的
+// 受理并落地一条策略快照（5ms/200Hz 控制边界调用）。逐台走与 SET_POLICY 相同的
 // 落地逻辑（含防复权代数门）；**单台被拒不影响其余**，拒绝经 CONFIG_RESULT
 // 事件可见。注意：逐台成功也会各出一条事件，故策略是**低频**接口——高频
 // 发布会把事件环灌满（丢弃计数见 diagnostics 话题）。
@@ -521,7 +521,7 @@ size_t motor_control_copy_param_views(motor_control_context_t *ctx,
                                       size_t capacity);
 
 // boot 持久化参数（W25 blob 投影）；未保存字段对应 has_* 为 false。
-// 不含 enable（策略位不持久化）。调用方（motor_rt 20ms 边界）每边界传入，
+// 不含 enable（策略位不持久化）。调用方（motor_rt 5ms/200Hz 边界）每边界传入，
 // 内核按表项 stored_apply_mask 在 Profile 绑定后分批套用。
 typedef struct {
   uint16_t motor_id;

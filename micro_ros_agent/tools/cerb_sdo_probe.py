@@ -20,7 +20,7 @@
 （0 = CW、1 = CCW）。两者都**掉电不保存**，要复原就再写回去或断一次电。
 
 台架前提（见 `micro_ros_firmware/docs/AGENTS.md` 与根 `docs/guides/fdcan1-bench-guide.md`）：
-  - CANable2 先成为 ACK 节点（本脚本自动 C→S8→Y5→O，间隔 ≥150ms）；
+  - CANable2 先成为 ACK 节点（本脚本自动 C→S8→Y5→M0→A1→O，间隔 ≥150ms）；
   - **同总线不得有第二个 SDO 主站**：控制板的配置事务用同一 COB-ID
     （0x600+id），并发发问会撞帧。不要并发触发 `system.refresh`；本脚本
     开场先静默监听一小段，看到别人的 SDO 请求就拒绝开机（--force 可越过）。

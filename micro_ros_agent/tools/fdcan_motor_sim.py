@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""FDCAN1 台架电机模拟器（9 节点：CERB 1-6 + VAXOR 7-9）。
+"""FDCAN 台架电机模拟器（默认 4 节点：CERB 1=R58、2-4=R48）。
 
-主机经 CANable2（SLCAN 串口，默认 /dev/ttyACM1）在控制板 FDCAN1 上模拟电机，
+主机经 CANable2（SLCAN 串口，默认 /dev/ttyACM1）在控制板物理电机总线上模拟电机，
 用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。总线上无真机。
-仲裁段 1M（S8）、数据段 5M（上游 CANable2 固件 b158aa7 用 Y5）。
-自定义固件若使用其他 Y 索引，可通过 --data-bitrate-index 显式覆盖。
+仲裁段 1M（S8）、数据段 5M。CANable2 的数据位率索引按 V 查询自动选择；
+当前实机返回的自定义版本 16e7497-dirty 使用 Y7，上游 b158aa7 使用 Y5。
+也可通过 --data-bitrate-index 显式覆盖。
 
 线协议字节布局严格对齐固件：
   micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c
@@ -23,22 +24,29 @@
         --cerb-r58 分配 R58LITE_V2 / R48LITE_V2
 
 下行（固件 → 本脚本，仅记录/驱动趋近）：
-  CERB  SYNC 0x080（经典 0B，10ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  CERB  SYNC 0x080（经典 0B，默认 20ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
   CERB  SDO 请求 0x600+id（FD 8B；40 08 10 00 上传发起 → 60/70 取分段）
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
 用法：
-  python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 S8/Y5/O 开通道
+  python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 V/S8/Y*/M0/A1/O 开通道
   python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
   python3 fdcan_motor_sim.py --data-bitrate-index 7  # 仅用于对应的自定义固件
-节点清单与节奏可调：--cerb/--vaxor（默认 1-6 / 7-9）、--period-ms（板端 SYNC
-周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰）、--no-brs（数据段不切 5M）。
+  # 与 Gazebo effort 控制器做真实 MIT 等效力矩端到端验证：
+  python3 fdcan_motor_sim.py --gazebo --gazebo-control-mode effort \
+    --joint-map 7:joint_link1,8:joint_link2,9:joint_link3,10:joint_link4
+  # 需要真实 effort 动力学时，Gazebo 也必须用 control_mode:=effort：
+  python3 fdcan_motor_sim.py --gazebo --gazebo-control-mode effort \
+    --effort-topic /arm_effort_controller/commands
+节点清单与节奏可调：--cerb/--vaxor（默认 CERB 1-4 / 无 VAXOR）、--period-ms（板端 SYNC
+周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰，默认 60ms/台）、--no-brs（数据段不切 5M）。
 开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾并发 C 关通道。
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
 import os
 import select
@@ -51,6 +59,13 @@ import tty
 
 PI = 3.141592653589793
 DEFAULT_DATA_BITRATE_INDEX = 5
+AUTO_DATA_BITRATE_INDEX = None
+SLCAN_VERSION_DATA_BITRATE = {
+    # 当前现场 V 响应是自定义 16e7497-dirty；历史台架验证该版本的
+    # 5Mbps 索引为 Y7。上游 b158aa7 的官方语义则是 Y5=5Mbps。
+    "16e7497": 7,
+    "b158aa7": 5,
+}
 
 # ---- SLCAN -------------------------------------------------------------
 
@@ -62,10 +77,11 @@ _CODE_LEN = {v: k for k, v in FD_LEN_CODE.items()}
 
 def slcan_config_commands(
         data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX) -> tuple[bytes, ...]:
-    """构造关闭、1M 仲裁位率、数据位率和开通道命令。"""
+    """构造关闭、位率、正常模式、自动重发和开通道命令。"""
     if not 0 <= data_bitrate_index <= 9:
         raise ValueError("SLCAN data bitrate index must be one decimal digit")
-    return (b"C\r", b"S8\r", f"Y{data_bitrate_index}\r".encode(), b"O\r")
+    return (b"C\r", b"S8\r", f"Y{data_bitrate_index}\r".encode(),
+            b"M0\r", b"A1\r", b"O\r")
 
 
 def schedule_feedback_window(pending: dict[int, list[float]], motor_ids,
@@ -121,12 +137,17 @@ VAXOR_TICKS_PER_REV = 2_097_152
 VAXOR_POS_LIMIT = 0x7CFFFFFF
 VAXOR_VEL_LIMIT = 30_000
 VAXOR_CUR_SCALE = 11.0 / 4096.0
+VAXOR_KP_SCALE = 0.00001
+VAXOR_KD_SCALE = 0.01
+VAXOR_GEAR_RATIO = 50.0
+VAXOR_TORQUE_PER_AMP = 0.042 * VAXOR_GEAR_RATIO * 0.65
 
-# 串口写重试预算（秒）。CANable2 是 USB CDC，O_NONBLOCK 下 os.write 会在缓冲
-# 瞬时满时抛 BlockingIOError(EAGAIN)；以前这里没有兜底，一次背压就把整个模拟器
-# 打死，而它一死总线就失去 ACK 节点、控制板随即 bus-off——半秒的抖动毁掉整轮
-# 台架（2026-09-20 踩过）。反馈帧是周期性的，丢一帧无所谓，退出不行。
+# 启动期开通道命令的串口写重试预算（秒）。运行期数据帧不在收包路径里阻塞，
+# 统一进入发送队列，由主循环泵出；否则 SDO 应答遇到 USB CDC 背压会卡住反馈，
+# CERB 100ms 心跳门会把所有节点判成 OFFLINE。
 TX_RETRY_S = 0.25
+TX_QUEUE_MAX = 512
+TX_PUMP_BUDGET = 8192
 
 
 def vaxor_pos_code(motor_rad: float) -> bytes:
@@ -149,6 +170,41 @@ def vaxor_cur_code(current_a: float) -> bytes:
 def vaxor_decode_pos(code4: bytes) -> float:
     return (int.from_bytes(code4, "little", signed=False) - 0x80000000) \
         / VAXOR_TICKS_PER_REV * 2 * PI
+
+
+def vaxor_decode_vel(code2: bytes) -> float:
+    rpm10 = int.from_bytes(code2, "little", signed=False) - 0x8000
+    return rpm10 / 10.0 * 2 * PI / 60.0
+
+
+def vaxor_decode_current(code2: bytes) -> float:
+    raw = int.from_bytes(code2, "little", signed=False) - 0x8000
+    return raw * VAXOR_CUR_SCALE
+
+
+def vaxor_decode_command(data: bytes):
+    """固件下行 VAXOR MIT（12B）-> 关节侧控制量。
+
+    固件先把位置/速度从关节侧换算到电机轴，再按协议写入：
+    position[0:4]、velocity[4:6]、kp[6:8]、kd[8:10]、Iq[10:12]。
+    旧代码从 data[2:6] 取位置且没有增益，导致目标角和力矩都失真。
+    """
+    if len(data) != 12:
+        return None
+    position_motor = vaxor_decode_pos(data[0:4])
+    velocity_motor = vaxor_decode_vel(data[4:6])
+    kp = int.from_bytes(data[6:8], "little", signed=False) * VAXOR_KP_SCALE
+    kd = int.from_bytes(data[8:10], "little", signed=False) * VAXOR_KD_SCALE
+    feedforward_a = vaxor_decode_current(data[10:12])
+    return {
+        "position_motor_rad": position_motor,
+        "velocity_motor_rad_s": velocity_motor,
+        "pos_rad": position_motor / VAXOR_GEAR_RATIO,
+        "vel_rad_s": velocity_motor / VAXOR_GEAR_RATIO,
+        "kp": kp,
+        "kd": kd,
+        "tau_nm": feedforward_a * VAXOR_TORQUE_PER_AMP,
+    }
 
 
 def cerb_symmetric(code: int, limit: float, bits: int) -> float:
@@ -278,20 +334,25 @@ class MotorModel:
 # ---- 主循环 -------------------------------------------------------------
 
 class GazeboBridge:
-    """--gazebo：把 MIT 命令接到 Gazebo 的关节上（④）。
+    """--gazebo：把仿真电机命令接到 Gazebo 的关节上。
 
-    定位是**功能与逻辑验证**，不是保真：
-      · 反馈帧报的是 Gazebo 的实际关节角 → 固件看到的反馈来自真动力学；
-      · 力矩按标准 MIT 律 τ = kp(p_des−p) + kd(v_des−v) + τ_ff 算；驱动器内环的
-        真实行为未知（vendor questions 第 8 条），**不在这里猜**。
-      · 未映射的电机照旧走原来的假 plant（--joint-map 决定谁接 Gazebo）。
+    `position` 是端到端功能验证的默认模式：把固件已经解码出的关节目标
+    交给 Gazebo 的 position controller，反馈仍然来自真实 Gazebo 关节状态，
+    因而可稳定验证 ID/单位/关节顺序/轨迹时序，不把未建模的重力补偿误判为
+    通信故障。`effort` 是显式动力学模式，按 MIT 律计算力矩；使用它时必须
+    自己提供足够的增益/前馈来对抗模型重力。
+
+    未映射的电机照旧走原来的假 plant（--joint-map 决定谁接 Gazebo）。
     """
 
-    def __init__(self, joint_map, effort_topic, tau_limit):
+    def __init__(self, joint_map, control_mode, position_topic, effort_topic,
+                 tau_limit):
         import rclpy
         from rclpy.node import Node
         from sensor_msgs.msg import JointState
         from std_msgs.msg import Float64MultiArray
+        if control_mode not in ("position", "effort"):
+            raise ValueError("Gazebo control mode must be position or effort")
         self._rclpy = rclpy
         self._msg_type = Float64MultiArray
         rclpy.init()
@@ -300,11 +361,17 @@ class GazeboBridge:
         self.joints = sorted(set(joint_map.values()))
         self.pos = {j: 0.0 for j in self.joints}
         self.vel = {j: 0.0 for j in self.joints}
+        # 当前模型的 ros2_control 初始位置契约是 0 rad。position 模式在
+        # 控制器启动稍晚于模型生成时仍要把关节拉回这个已知安全姿态，不能把
+        # 启动窗口里因尚未收到命令而坠落的反馈当成新的 hold 目标。
+        self.hold_pos = {joint: 0.0 for joint in self.joints}
+        self.control_mode = control_mode
         self.tau_limit = tau_limit
         self.last_pub = 0.0
         self.node.create_subscription(JointState, "/joint_states",
                                       self._on_state, 10)
-        self.pub = self.node.create_publisher(Float64MultiArray, effort_topic, 10)
+        topic = position_topic if control_mode == "position" else effort_topic
+        self.pub = self.node.create_publisher(Float64MultiArray, topic, 10)
 
     def _on_state(self, msg):
         for i, name in enumerate(msg.name):
@@ -318,26 +385,41 @@ class GazeboBridge:
     def joint_deg(self, motor_id) -> float:
         return self.pos[self.joint_map[motor_id]] * 180.0 / PI
 
+    def joint_position(self, motor_id) -> float:
+        return self.pos[self.joint_map[motor_id]]
+
+    def joint_velocity(self, motor_id) -> float:
+        return self.vel[self.joint_map[motor_id]]
+
     def spin(self):
         self._rclpy.spin_once(self.node, timeout_sec=0.0)
 
-    def publish_torque(self, models):
+    def publish_commands(self, models):
         now = time.monotonic()
         if now - self.last_pub < 0.015:   # ~66Hz 上限，别把串口/CPU 打满
             return
         self.last_pub = now
         out = self._msg_type()
-        out.data = [0.0] * len(self.joints)
+        # 没有有效下行命令时保持仿真器启动时的姿态；不能每拍把当前反馈
+        # 重新当成目标，否则模型会在重力下自由下落后锁存新姿态。
+        out.data = [self.hold_pos.get(joint, self.pos[joint])
+                    for joint in self.joints]
         for mid, joint in self.joint_map.items():
             m = models.get(mid)
             cmd = m.last_cmd if m is not None else None
-            if m is None or not m.enabled or not cmd or "kp" not in cmd:
+            if m is None or not m.enabled or not cmd:
+                continue
+            index = self.joints.index(joint)
+            if self.control_mode == "position":
+                if "pos_rad" in cmd:
+                    out.data[index] = cmd["pos_rad"]
+                continue
+            if "kp" not in cmd:
                 continue
             tau = (cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
                    + cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
                    + cmd["tau_nm"])
-            out.data[self.joints.index(joint)] = max(-self.tau_limit,
-                                                     min(self.tau_limit, tau))
+            out.data[index] = max(-self.tau_limit, min(self.tau_limit, tau))
         self.pub.publish(out)
 
 
@@ -345,8 +427,8 @@ class SlcanSim:
     bridge = None   # 由 main() 在 --gazebo 时注入 GazeboBridge
     def __init__(self, tty: str, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
-                 data_bitrate_index: int = DEFAULT_DATA_BITRATE_INDEX,
-                 fb_period_ms: int = 20, stagger_ms: float = 2.2,
+                 data_bitrate_index: int | None = AUTO_DATA_BITRATE_INDEX,
+                 fb_period_ms: int = 60, stagger_ms: float = 2.2,
                  r58_ids=(), safety_off_ids=(), dir_ccw_ids=()):
         self.tty_path = tty
         self.use_brs = use_brs
@@ -355,7 +437,10 @@ class SlcanSim:
             raise ValueError("SYNC and feedback periods must be positive")
         self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
         self.stagger = stagger_ms / 1000.0
-        self.tx_dropped = 0   # 串口持续背压而丢弃的帧（见 _write）
+        self.tx_dropped = 0   # 发送队列满/串口错误丢帧
+        self._tx_control = deque()   # SDO/应答/管理帧：优先于周期反馈
+        self._tx_feedback = deque()  # 周期反馈：队列满时允许丢弃
+        self._tx_active = None
         self.models = {i: MotorModel(i, "cerb") for i in cerb_ids}
         self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
         for mid in r58_ids:
@@ -380,6 +465,8 @@ class SlcanSim:
         self.rx_buf = b""
         self.sync_seen = False
         self.sync_count = 0
+        self.last_sync_at = None
+        self.max_sync_gap = 0.0
         self.next_send = {}
         self.last_cerb_emit = 0.0
         self.stop = False
@@ -389,15 +476,57 @@ class SlcanSim:
     def configure(self):
         tty.setraw(self.fd, when=termios.TCSANOW)
         attrs = termios.tcgetattr(self.fd)
-        attrs[2] |= termios.CLOCAL | termios.CREAD
+        # tty.setraw 不会修正继承的字符宽度。手工查询 CANable 时若把 tty
+        # 留在 CS5/CS7，后续 SLCAN 命令会被截断，表现为“设备已打开但无帧”。
+        attrs[2] = ((attrs[2] & ~termios.CSIZE) | termios.CS8
+                    | termios.CLOCAL | termios.CREAD)
+        attrs[2] &= ~(termios.PARENB | termios.CSTOPB)
+        attrs[4] = termios.B115200
+        attrs[5] = termios.B115200
         termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
+        if self.data_bitrate_index is None:
+            version = self._probe_version()
+            self.data_bitrate_index = self._bitrate_for_version(version)
+            if version:
+                print(f"[sim] CANable V={version}; 自动选择 Y{self.data_bitrate_index}")
+            else:
+                print(f"[sim] 未读到 CANable V 响应；回退 Y{self.data_bitrate_index}，"
+                      "如仍 ACK error 请显式指定 --data-bitrate-index")
         # 默认与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）；
         # 非上游 CANable2 固件可用 CLI 覆盖其 Y 索引。
         for cmd in slcan_config_commands(self.data_bitrate_index):
             self._write(cmd, drop_ok=False)
             time.sleep(0.15)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
+
+    def _probe_version(self) -> str | None:
+        """读取 CANable 的 V 响应；只用于选择数据位率，不消费 CAN 帧。"""
+        self._write(b"V\r", drop_ok=False)
+        deadline = time.monotonic() + 0.6
+        buf = b""
+        while time.monotonic() < deadline:
+            wait = max(0.0, min(0.05, deadline - time.monotonic()))
+            readable, _, _ = select.select([self.fd], [], [], wait)
+            if not readable:
+                continue
+            try:
+                buf += os.read(self.fd, 256)
+            except BlockingIOError:
+                continue
+            for raw in buf.split(b"\r"):
+                line = raw.decode("ascii", errors="ignore").strip()
+                if line and not line.startswith(("t", "T", "d", "D", "b", "B")):
+                    return line
+        return None
+
+    @staticmethod
+    def _bitrate_for_version(version: str | None) -> int:
+        if version:
+            for prefix, index in SLCAN_VERSION_DATA_BITRATE.items():
+                if version.startswith(prefix):
+                    return index
+        return DEFAULT_DATA_BITRATE_INDEX
 
     def _write(self, data: bytes, drop_ok: bool) -> bool:
         """带 EAGAIN 重试的串口写。
@@ -419,17 +548,54 @@ class SlcanSim:
                     return False
                 time.sleep(0.001)
 
+    def _pump_tx(self):
+        """非阻塞泵出运行期 SLCAN 帧，绝不在收包路径等待 USB CDC。"""
+        budget = TX_PUMP_BUDGET
+        while budget > 0:
+            if self._tx_active is None:
+                if self._tx_control:
+                    self._tx_active = self._tx_control.popleft()
+                elif self._tx_feedback:
+                    self._tx_active = self._tx_feedback.popleft()
+                else:
+                    return
+            item = self._tx_active
+            try:
+                written = os.write(self.fd, item["line"][item["offset"]:])
+            except BlockingIOError:
+                return
+            except OSError:
+                self.tx_dropped += 1
+                self._tx_active = None
+                return
+            if written <= 0:
+                return
+            item["offset"] += written
+            budget -= written
+            if item["offset"] != len(item["line"]):
+                return
+            model = item["model"]
+            if model:
+                model.tx_count += 1
+            if self.log_f:
+                self.log_f.write(json.dumps({
+                    "t": round(time.monotonic(), 4), "dir": "tx",
+                    "tag": item["tag"], "id": item["can_id"],
+                    "data": item["payload"].hex()}) + "\n")
+            self._tx_active = None
+
     def send(self, can_id: int, payload: bytes, is_fd: bool = True,
              brs: bool = True, model: "MotorModel | None" = None,
              tag: str = ""):
-        if not self._write(slcan_line(can_id, payload, is_fd, brs), drop_ok=True):
+        line = slcan_line(can_id, payload, is_fd, brs)
+        # 周期反馈可丢；SDO/控制回显不能被反馈队列长期挤压。
+        queue = (self._tx_feedback if tag in ("cerb_fb", "vaxor_status")
+                 else self._tx_control)
+        if len(queue) >= TX_QUEUE_MAX:
+            self.tx_dropped += 1
             return
-        if model:
-            model.tx_count += 1
-        if self.log_f:
-            self.log_f.write(json.dumps({
-                "t": round(time.monotonic(), 4), "dir": "tx", "tag": tag,
-                "id": can_id, "data": payload.hex()}) + "\n")
+        queue.append({"line": line, "offset": 0, "model": model,
+                      "tag": tag, "can_id": can_id, "payload": payload})
 
     def log_rx(self, can_id: int, data: bytes, tag: str):
         m = self._model_for_downlink(can_id)
@@ -514,6 +680,12 @@ class SlcanSim:
     def handle_downlink(self, can_id: int, data: bytes, is_fd: bool):
         if can_id == 0x080:  # CERB SYNC（经典 0B），链路存活探针与调度基准
             now = time.monotonic()
+            if self.last_sync_at is not None:
+                gap = now - self.last_sync_at
+                self.max_sync_gap = max(self.max_sync_gap, gap)
+                if gap > 0.1:
+                    print(f"[sim] SYNC 间隔异常：{gap:.3f}s（可能是控制帧负载/总线错误）")
+            self.last_sync_at = now
             if not self.sync_seen:
                 self.sync_seen = True
                 print("[sim] 收到首个 SYNC，链路已通，开始 SYNC 对齐错峰上报")
@@ -543,9 +715,11 @@ class SlcanSim:
                           "mode": data[2]}
             self.log_rx(can_id, data, "vaxor_ctrl")
         elif m.kind == "vaxor" and can_id == 0x501 + 4 * m.id:
-            tgt = vaxor_decode_pos(data[2:6])
-            m.tgt_motor_rad = tgt
-            m.last_cmd = {"tgt_motor_rad": tgt}
+            cmd = vaxor_decode_command(data)
+            if cmd is None:
+                return
+            m.tgt_motor_rad = cmd["position_motor_rad"]
+            m.last_cmd = cmd
             self.log_rx(can_id, data, "vaxor_mit")
             # 手册：MIT 命令逐帧应答。
             self.send(0x701 + 4 * m.id, m.vaxor_reply_frame(), True,
@@ -600,15 +774,18 @@ class SlcanSim:
                   f"rx={m.rx_count:4d} en={int(m.enabled)} {extra} "
                   f"last={m.last_cmd}")
         print(f"  SYNC(0x080) seen: {self.sync_seen}")
+        print(f"  SYNC max gap: {self.max_sync_gap:.4f}s")
         if self.tx_dropped:
             print(f"  串口背压丢帧: {self.tx_dropped}（反馈是周期性的，丢帧可容忍）")
+        print(f"  TX queue: control={len(self._tx_control)} "
+              f"feedback={len(self._tx_feedback)}")
         if self.log_f:
             self.log_f.flush()
 
     def run(self):
         cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
-        print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/O opened; "
+        print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/M0/A1/O opened; "
               f"CERB {cerb_ids} "
               f"VAXOR {vaxor_ids}")
         print("[sim] 通道已开、静默监听中（仅做 ACK 节点）。请复位控制板；"
@@ -618,9 +795,11 @@ class SlcanSim:
         warned = False
         while not self.stop:
             now = time.monotonic()
+            self._pump_tx()
             r, _, _ = select.select([self.fd], [], [], 0.002)
             if r:
                 self.read_available()
+            self._pump_tx()
             if not self.sync_seen:
                 # 门控：板子上线前绝不发帧（否则无人 ACK 会把 CANable 自己打进
                 # bus-off，板子启动后也无人 ACK 其 SYNC，双双死锁）。
@@ -634,13 +813,21 @@ class SlcanSim:
             for m in self.models.values():
                 if self.bridge is not None and self.bridge.mapped(m.id):
                     # Gazebo 模式：该台的反馈取自真实关节角，假 plant 不参与
-                    m.pos_deg = self.bridge.joint_deg(m.id)
+                    if m.kind == "cerb":
+                        m.pos_deg = self.bridge.joint_deg(m.id)
+                    else:
+                        m.pos_motor_rad = (
+                            self.bridge.joint_position(m.id) * VAXOR_GEAR_RATIO
+                        )
+                        m.vel_motor_rad_s = (
+                            self.bridge.joint_velocity(m.id) * VAXOR_GEAR_RATIO
+                        )
                 else:
                     m.approach(dt)
             if self.bridge is not None:
-                self.bridge.publish_torque(self.models)
+                self.bridge.publish_commands(self.models)
             last_step = now
-            # 错峰：频率由 --fb-period-ms 决定，默认每节点 50Hz。
+            # 错峰：频率由 --fb-period-ms 决定，默认每节点约 16.7Hz。
             for mid in sorted(self.models):
                 deadlines = self.next_send.get(mid)
                 if deadlines and now >= deadlines[0]:
@@ -648,6 +835,7 @@ class SlcanSim:
                     deadlines.pop(0)
                     if not deadlines:
                         del self.next_send[mid]
+            self._pump_tx()
         self.report()
         try:
             os.write(self.fd, b"C\r")  # 收尾关通道
@@ -661,8 +849,8 @@ class SlcanSim:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tty", default="/dev/ttyACM1")
-    ap.add_argument("--cerb", default="1,2,3,4,5,6")
-    ap.add_argument("--vaxor", default="7,8,9")
+    ap.add_argument("--cerb", default="1,2,3,4")
+    ap.add_argument("--vaxor", default="")
     ap.add_argument("--cerb-r58", default="1",
                     help="自报 R58LITE_V2 身份的 CERB 节点（其余 CERB 节点"
                          "自报 R48LITE_V2；固件按身份串自动绑定型号）")
@@ -674,22 +862,25 @@ def main():
     ap.add_argument("--period-ms", type=int, default=20,
                     help="板端 SYNC 周期，用于换算反馈窗口（默认 20ms）")
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10),
-                    default=DEFAULT_DATA_BITRATE_INDEX,
-                    help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）")
+                    default=AUTO_DATA_BITRATE_INDEX,
+                    help="SLCAN Y 命令索引；省略时先发 V 自动识别（16e7497→7，b158aa7→5）")
     ap.add_argument("--no-brs", action="store_true",
                     help="FD 帧不切 5M 数据段（全程 1M），用于 BRS 数据相位对照")
-    ap.add_argument("--fb-period-ms", type=int, default=20,
-                    help="每电机反馈周期（默认 20ms=50Hz；降低反馈负载时可调到 50）")
+    ap.add_argument("--fb-period-ms", type=int, default=60,
+                    help="每电机反馈周期（默认 60ms≈16.7Hz；必须小于固件离线阈值）")
     ap.add_argument("--stagger-ms", type=float, default=2.2,
                     help="多节点反馈相位错开间隔")
     ap.add_argument("--log", default=None)
     ap.add_argument("--gazebo", action="store_true",
-                    help="把 MIT 命令接到 Gazebo：反馈取自 /joint_states，力矩按 MIT 律"
-                         "写 effort 命令接口（功能/逻辑验证用，不追保真）")
+                    help="把下行电机命令接到 Gazebo；反馈取自 /joint_states")
+    ap.add_argument("--gazebo-control-mode", choices=("position", "effort"),
+                    default="effort",
+                    help="Gazebo 接口：effort（默认，MIT 动力学）或 position（仅通信对照）")
     ap.add_argument("--joint-map",
                     default="1:joint_link1,2:joint_link2,3:joint_link3,"
                             "4:joint_link4",
                     help="电机 id → Gazebo 关节名，逗号分隔")
+    ap.add_argument("--position-topic", default="/arm_position_controller/commands")
     ap.add_argument("--effort-topic", default="/arm_effort_controller/commands")
     ap.add_argument("--tau-limit", type=float, default=10.0,
                     help="力矩饱和 N·m；URDF 里关节 effort 限幅是 10.0")
@@ -712,8 +903,13 @@ def main():
             if item.strip():
                 mid, jname = item.split(":")
                 jm[int(mid)] = jname.strip()
-        sim.bridge = GazeboBridge(jm, args.effort_topic, args.tau_limit)
-        print("[sim] Gazebo 桥已接：%s → %s" % (jm, args.effort_topic))
+        sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
+                                  args.position_topic, args.effort_topic,
+                                  args.tau_limit)
+        topic = (args.position_topic if args.gazebo_control_mode == "position"
+                 else args.effort_topic)
+        print("[sim] Gazebo 桥已接：%s → %s (%s)" %
+              (jm, topic, args.gazebo_control_mode))
 
     def _sig(_a, _b):
         sim.stop = True

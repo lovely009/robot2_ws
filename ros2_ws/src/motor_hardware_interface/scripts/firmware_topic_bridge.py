@@ -7,7 +7,8 @@
 固件接口是 ID 化、无关节名的私有话题（micro_ros_up/...）；ROS 生态用的是按关节名
 索引的标准话题。ARD-0007 禁止 MCU 维护 joint_name，所以映射放在这一侧。
 
-QoS：固件订阅是 best-effort depth 1，本节点的轨迹发布者必须同 QoS。
+QoS：运动状态是 best-effort depth 1；轨迹是一条可分片的大消息，固件订阅是
+reliable depth 1，本节点的轨迹发布者必须使用 reliable，不能复用状态流 QoS。
 单位：固件发 SI（rad / rad·s⁻¹ / N·m），与标准消息约定一致，零换算。
 """
 
@@ -32,9 +33,16 @@ def main():  # pragma: no cover - 需要 ROS 环境
                                      MotorTrajectoryPoint)
 
     def stream_qos():
-        """best-effort depth 1：与固件的订阅 QoS 对齐（不同就收不到）。"""
+        """best-effort depth 1：与固件运动状态流 QoS 对齐。"""
         return QoSProfile(depth=1,
                           reliability=QoSReliabilityPolicy.BEST_EFFORT,
+                          durability=QoSDurabilityPolicy.VOLATILE,
+                          history=QoSHistoryPolicy.KEEP_LAST)
+
+    def trajectory_qos():
+        """reliable depth 1：MotorTrajectory 允许 XRCE 分片传输。"""
+        return QoSProfile(depth=1,
+                          reliability=QoSReliabilityPolicy.RELIABLE,
                           durability=QoSDurabilityPolicy.VOLATILE,
                           history=QoSHistoryPolicy.KEEP_LAST)
 
@@ -62,7 +70,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 JointState, self.get_parameter('joint_state_topic').value, 10)
             self.traj_pub = self.create_publisher(
                 MotorTrajectory,
-                self.get_parameter('trajectory_out_topic').value, stream_qos())
+                self.get_parameter('trajectory_out_topic').value, trajectory_qos())
 
             self.create_subscription(
                 MotorMotionStateArray,

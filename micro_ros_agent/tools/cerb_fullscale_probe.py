@@ -22,7 +22,7 @@
   python3 tools/cerb_fullscale_probe.py --dev /dev/ttyACM1 --node 3 --hold-ms 300
 
 台架前提（见 `micro_ros_firmware/docs/guides/fdcan1-bench-guide.md`）：CANable 先
-成为 ACK 节点（本脚本自动 C→S8→Y5→O）。**本脚本会发使能 + 满量程出力帧，电机会
+成为 ACK 节点（本脚本自动 C→S8→Y5→M0→A1→O）。**本脚本会发使能 + 满量程出力帧，电机会
 真的出力**——务必保证机构已支撑/空载且急停可用。
 """
 
@@ -88,7 +88,7 @@ class CerbProbe:
         attrs[2] |= termios.CLOCAL | termios.CREAD
         termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
-        # 与 fdcan_motor_sim 同一序列（C→S8→Y?→O，150ms 间隔）。
+        # 与 fdcan_motor_sim 同一序列（C→S8→Y?→M0→A1→O，150ms 间隔）。
         for cmd in slcan_config_commands(self.data_bitrate_index):
             os.write(self.fd, cmd)
             time.sleep(0.15)

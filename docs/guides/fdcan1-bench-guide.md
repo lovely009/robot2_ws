@@ -1,6 +1,6 @@
-# FDCAN1 九电机模拟台架指南
+# FDCAN1 四电机模拟台架指南
 
-> **适用范围（2026-09-11）**：STM32H723 控制板 FDCAN1 + 上游 normaldotcom/canable2 `b158aa7` + 无真实电机的九节点模拟台架。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
+> **适用范围（2026-09-21）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的四节点模拟台架。默认节点为 CERB 1=R58、2–4=R48；若 CANable `V` 返回上游 `b158aa7`，自动配置会切换到 `Y5`。需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
 
 ## 连接与固定参数
 
@@ -10,10 +10,10 @@
 | CANable2 SLCAN | `/dev/ttyACM1` |
 | 控制板总线 | FDCAN1，PD0/PD1 |
 | 位率 | 仲裁 1 Mbps / 数据 5 Mbps，CAN FD+BRS |
-| SLCAN 配置 | `C` → `S8` → `Y5` → `O`，命令间隔至少 150 ms |
-| 模拟节点 | CERB id 1–6；VAXOR id 7–9 |
+| SLCAN 配置 | 当前 `V=16e7497-dirty`：`C` → `S8` → `Y7` → `M0` → `A1` → `O`；上游 `b158aa7` 用 `Y5`，命令间隔至少 150 ms |
+| 模拟节点 | CERB id 1=R58；id 2–4=R48 |
 
-当前 `b158aa7` 只接受 `Y2`/`Y5`；`Y5` 表示 5 Mbps。`Y7` 会静默拒绝并保留默认 2 Mbps。不能用“脚本写出了 Y7”推断设备已经接受配置。
+先用 `V` 识别 CANable 固件：当前现场返回 `16e7497-dirty`，历史台架已验证该自定义版本的 5 Mbps 索引是 `Y7`；上游 `b158aa7` 只接受 `Y2`/`Y5`，其中 `Y5` 表示 5 Mbps，`Y7` 会静默拒绝并保留默认 2 Mbps。不能用“脚本写出了 Y7”推断设备已经接受配置。
 
 ## 启动顺序
 
@@ -34,16 +34,16 @@
      --tty /dev/ttyACM1 --log /tmp/fdcan-motor-sim.jsonl
    ```
 
-3. 看到 `S8/Y5/O opened` 后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
+3. 看到 `S8/Y7/M0/A1/O opened`（若 V 为 b158aa7 则是 Y5）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
 4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 
 ## 只读验收
 
-- 模拟器九节点反馈计数应均衡，长期相差不应持续扩大；
-- `/micro_ros_up/motor_topology` 应恰好包含 id 1–9，全部 online、无 conflict；
+- 模拟器四节点反馈计数应均衡，长期相差不应持续扩大；
+- `/micro_ros_up/motor_topology` 应恰好包含 id 1–4，全部 online、无 conflict；
 - OpenOCD 只读寄存器应显示 `TEC=REC=0`、`EP=EW=BO=0`；
 - FDCAN2/3 悬空导致的 BUS_OFF 不属于本指南的 FDCAN1 失败；
-- 需要降低反馈负载时可用 `--fb-period-ms 50`，默认是 20 ms（50 Hz/节点）。
+- 需要降低反馈负载时可用 `--fb-period-ms 50`，默认是 60 ms（约 16.7 Hz/节点，必须小于固件离线阈值）。
 
 ## 设备参数上电比对（2026-09-17 起）
 

@@ -78,6 +78,13 @@ void SerialSlcanTransport::configure_bus() {
     write_all("Y" + std::to_string(data_index_) + "\r");
     ::usleep(kCommandDelayUs);
   }
+  // CANable2 保留上一次会话的 M/A 状态。若此前被抓包工具设成 silent
+  // 或关闭自动重发，仅 C/S/Y/O 不会恢复 ACK，表现为控制板 TEC 上升到
+  // bus-off；每次打开都显式恢复正常模式和自动重发。
+  write_all("M0\r");
+  ::usleep(kCommandDelayUs);
+  write_all("A1\r");
+  ::usleep(kCommandDelayUs);
   write_all("O\r");
   ::usleep(kCommandDelayUs);
   ::tcflush(fd_, TCIOFLUSH);

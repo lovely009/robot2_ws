@@ -250,7 +250,7 @@
         <li>限值单位：位置 rad、速度 rad/s、力矩 A——前两项与固件状态/URDF 同一套单位，页面上不再出现度数；力矩列是设备对象 <code>0x2538</code> 的电流值（设备里存的就是电流，不折 N·m）。设零要求失能。</li>
         <li><b>使能 / kp / kd 只能写、不能读回</b>（固件无回读通路），框里是页面最后一次下发的值。落地结论看事件日志的 <code>CONFIG_RESULT</code>：0=OK、2=非法。设备参数未核对的台（<code>CONFIG_CONFLICT</code>）会被直接拒。代数必须严格前进才受理「未武装→武装」。</li>
         <li>命令快照是<b>完整</b>快照：缺席的受控电机被软停；停止连发 30 ms 后全软停、100 ms 失能；任一 NaN/Inf 整包拒收。</li>
-        <li>示教：每行等待 ms 后下发该行快照，目标写成 <code>ID:pos,vel,eff</code>；0 目标 = 该行不含此电机。导入接受两种 JSON：本页导出的行数组，或 <code>MotorTrajectory</code> 话题载荷（按时刻合成行）。播放把整表打成<b>一条</b>轨迹交给 MCU，<b>上限 256 个路点</b>（是总点数：4 台时只够 64 行），超限会被固件静默丢弃，页面因此在下发前自查并拒绝。</li>
+        <li>示教：每行等待 ms 后形成轨迹路点，目标写成 <code>ID:pos,vel,eff</code>；空行只表示等待。导入接受两种 JSON：本页导出的行数组，或 <code>MotorTrajectory</code> 话题载荷（按时刻合成行）。播放经可靠轨迹话题交给 MCU；超过<b>256 个总路点</b>会自动分段，并等待 <code>trajectory_state.completed</code> 后再发下一段。播放完成后末点保持，点“暂停”才取消并软停。</li>
         <li>臂视图与曲线都受 <code>motion_states</code> 的 50 Hz 限制。虚线幽灵 = <b>页面下发的目标</b>，不是固件设定点；固件的钳位/软停/拒收画不出来。</li>
         <li>话题：上行 <code>micro_ros_up/{motor_topology, motion_states, motor_status_array, motor_events, diagnostics, trajectory_state, imu/data, imu/temp}</code>；下行 <code>micro_ros_do/{motor_command_array, motor_trajectory, motor_policy}</code>。</li>
       </ul>

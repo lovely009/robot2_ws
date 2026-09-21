@@ -2,13 +2,13 @@
 """通过 CANable2 的串口 slcan-FD 方言直接验证 25/30 mm（vaxor）电机。
 
 不依赖 SocketCAN、不刷固件：把 /dev/ttyACM0 当作 CAN 通道，
-按固件命令集（C/S8/Y5/O + t/b 帧）收发控制与反馈帧。
+按固件命令集（C/S8/Y5/M0/A1/O + t/b 帧）收发控制与反馈帧。
 
 用法：
     sudo python3 verify_2530_serial.py [--id 1] [--listen 3] [--motion-test]
 
 默认流程（安全）：
-    1. 配置总线：C（关闭）→ S8（仲裁 1M）→ Y5（数据 5M）→ O（打开）
+    1. 配置总线：C（关闭）→ S8（仲裁 1M）→ Y5（数据 5M）→ M0（正常）→ A1（自动重发）→ O（打开）
     2. 静默监听 1.5 s，确认反馈通路
     3. 发送使能帧（run=1，经典 CAN，ID 0x506）
     4. 监听并解码反馈（回复 0x705 / 状态 0x706）
@@ -303,8 +303,8 @@ def main() -> int:
 
     if ARGS.calibrate:
         ser.reset_input_buffer()
-        print("配置总线：C -> S8(1M) -> Y5(5M) -> O")
-        for cmd in ("C\r", "S8\r", "Y5\r", "O\r"):
+        print("配置总线：C -> S8(1M) -> Y5(5M) -> M0 -> A1 -> O")
+        for cmd in ("C\r", "S8\r", "Y5\r", "M0\r", "A1\r", "O\r"):
             send(ser, cmd)
             time.sleep(0.15)
         rc = run_calibration(ser, ARGS.node)
@@ -315,8 +315,8 @@ def main() -> int:
     print(f"命令 ID 0x{cmd_id:X}（FD+BRS）  控制 ID 0x{ctl_id:X}（经典）")
     ser.reset_input_buffer()
 
-    print("[1/6] 配置总线：C -> S8(1M) -> Y5(5M) -> O")
-    for cmd in ("C\r", "S8\r", "Y5\r", "O\r"):
+    print("[1/6] 配置总线：C -> S8(1M) -> Y5(5M) -> M0 -> A1 -> O")
+    for cmd in ("C\r", "S8\r", "Y5\r", "M0\r", "A1\r", "O\r"):
         send(ser, cmd)
         time.sleep(0.15)
 

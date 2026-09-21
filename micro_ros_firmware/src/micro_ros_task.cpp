@@ -25,42 +25,46 @@ static TaskHandle_t g_micro_ros_task_handle = nullptr;
 static micro_ros_link_state_t g_link_state = MICRO_ROS_LINK_WAIT_AGENT;
 static bool g_ever_connected = false;
 
+// 链路状态由本任务写、led 任务与 ROS 桥读：进出都走短临界区。
+static micro_ros_link_state_t link_state_get(void) {
+  taskENTER_CRITICAL();
+  const micro_ros_link_state_t state = g_link_state;
+  taskEXIT_CRITICAL();
+  return state;
+}
+
+static void link_state_set(micro_ros_link_state_t state) {
+  taskENTER_CRITICAL();
+  g_link_state = state;
+  taskEXIT_CRITICAL();
+}
+
 static void micro_ros_task_fn(void *parameters) {
   (void)parameters;
   for (;;) {
-    micro_ros_link_state_t state = MICRO_ROS_LINK_WAIT_AGENT;
-    taskENTER_CRITICAL();
-    state = g_link_state;
-    taskEXIT_CRITICAL();
-
-    switch (state) {
+    switch (link_state_get()) {
       case MICRO_ROS_LINK_WAIT_AGENT:
         if (RMW_RET_OK == rmw_uros_ping_agent(200, 3)) {
-          taskENTER_CRITICAL();
-          g_link_state = MICRO_ROS_LINK_CONNECT;
-          taskEXIT_CRITICAL();
+          link_state_set(MICRO_ROS_LINK_CONNECT);
         }
         break;
 
       case MICRO_ROS_LINK_CONNECT:
         if (ros_bridge_create()) {
+          // ever_connected 与状态在同一临界区发布：led_task 同时读这两个值。
           taskENTER_CRITICAL();
           g_ever_connected = true;
           g_link_state = MICRO_ROS_LINK_RUN;
           taskEXIT_CRITICAL();
         } else {
           ros_bridge_destroy();
-          taskENTER_CRITICAL();
-          g_link_state = MICRO_ROS_LINK_WAIT_AGENT;
-          taskEXIT_CRITICAL();
+          link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
         }
         break;
 
       case MICRO_ROS_LINK_RUN:
         if (RMW_RET_OK != rmw_uros_ping_agent(200, 3)) {
-          taskENTER_CRITICAL();
-          g_link_state = MICRO_ROS_LINK_LOST;
-          taskEXIT_CRITICAL();
+          link_state_set(MICRO_ROS_LINK_LOST);
         } else {
           ros_bridge_spin();
         }
@@ -69,9 +73,7 @@ static void micro_ros_task_fn(void *parameters) {
       case MICRO_ROS_LINK_LOST:
       default:
         ros_bridge_destroy();
-        taskENTER_CRITICAL();
-        g_link_state = MICRO_ROS_LINK_WAIT_AGENT;
-        taskEXIT_CRITICAL();
+        link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
         break;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -90,11 +92,7 @@ bool micro_ros_task_start(void) {
 }
 
 micro_ros_link_state_t micro_ros_task_get_link_state(void) {
-  micro_ros_link_state_t state;
-  taskENTER_CRITICAL();
-  state = g_link_state;
-  taskEXIT_CRITICAL();
-  return state;
+  return link_state_get();
 }
 
 bool micro_ros_task_ever_connected(void) {

@@ -133,8 +133,8 @@ size_t motor_control_copy_param_views(motor_control_context_t *ctx,
   return n;
 }
 
-// 复杂度上限：O(电机数×存储记录数) 线性查找；64 台 × 50Hz 边界仅 4k 比较，
-// 真到三总线 40 台规模仍可忽略；若记录查找变热点再改为 motor_id 索引表。
+// 复杂度上限：O(电机数×存储记录数) 线性查找；单次最坏为 64×64=4096 次比较，
+// 由 5ms/200Hz 边界分摊执行。若记录查找成为热点，再改为 motor_id 索引表。
 static const motor_control_stored_params_t *find_stored(
     const motor_control_stored_params_t *records, size_t count,
     uint16_t motor_id) {
@@ -164,9 +164,7 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
   //    进 offered 的守卫里，先"声明无记录"再拿到记录的路径会把记录永久丢掉，
   //    比对基准随之消失——不一致就再也发现不了。
   // 记录内容不需要 Profile，也不受 mask 影响：它是上电比对基准与离线回落值。
-  if (!entry->boot_record_offered) {
-    entry->boot_record_offered = true;
-  }
+  entry->boot_record_offered = true;
   if (rec != NULL && !entry->record_valid) {
     entry->record_valid = true;
     memcpy(entry->record_raw, rec->device_raw, sizeof(entry->record_raw));

@@ -9,7 +9,8 @@
 // 时才兜底试一次（见 load_boot_params），免得奇数存档次数的板子升级后丢光参数。
 //
 // 并发：g_boot_records 只在 start 的加载阶段写（任务创建前）；save 路径在 motor_rt
-// 临界区内拍快照、离开临界区再擦写；结果单字由 micro_ros 读、本任务写，可视为原子。
+// 临界区内拍快照、离开临界区再擦写；结果状态和 request_id 由本任务写、micro-ROS
+// 任务读，必须在短临界区内成对发布/取走，不能依赖单字原子性假设。
 
 #include "storage_task.h"
 
@@ -75,6 +76,14 @@ alignas(8) static uint8_t g_blob_scratch[PARAM_STORE_BLOB_SIZE];
 // 读回核验按页做：不需要 7712B 的第二份全量缓冲。
 alignas(8) static uint8_t g_verify_page[W25Q64_PAGE_SIZE];
 static volatile storage_save_status_t g_result = STORAGE_SAVE_IDLE;
+static volatile uint32_t g_result_request_id = 0U;
+
+static void publish_result(uint32_t request_id, storage_save_status_t result) {
+  taskENTER_CRITICAL();
+  g_result_request_id = request_id;
+  g_result = result;
+  taskEXIT_CRITICAL();
+}
 
 // 读 addr 处的 blob 到调用方缓冲并落到 v3 布局：优先按 v3 校验；不是 v3 时再
 // 依次尝试 v2（48B 记录）与 v1（升级前写入的 32B 记录格式）就地迁移——升级不
@@ -165,9 +174,9 @@ static void load_boot_params() {
 }
 
 // 拍快照 → 打包 → 擦写非活动槽 → 按页读回核验 → 翻转活动槽。
-static void perform_save() {
+static void perform_save(uint32_t request_id) {
   if (!g_flash_ok || g_snapshot_fn == nullptr) {
-    g_result = STORAGE_SAVE_FAIL;
+    publish_result(request_id, STORAGE_SAVE_FAIL);
     return;
   }
   // **静态而非栈上**：64 × 80 B = 5,120 B，本任务栈只有 4 KB，放栈上必然溢出 →
@@ -181,7 +190,7 @@ static void perform_save() {
   param_store_blob_t *blob =
       param_store_blob_reset(g_blob_scratch, sizeof(g_blob_scratch));
   if (blob == nullptr) {
-    g_result = STORAGE_SAVE_FAIL;
+    publish_result(request_id, STORAGE_SAVE_FAIL);
     return;
   }
   storage_projection_views_to_blob(blob, views, n);
@@ -195,12 +204,12 @@ static void perform_save() {
   // v3 每槽 2 个扇区，擦除时间约为原来的两倍（实测值见 validation plan）。
   for (uint32_t s = 0U; s < kSlotSectors; ++s) {
     if (w25q64_erase_sector(addr + s * W25Q64_SECTOR_SIZE) != W25Q64_OK) {
-      g_result = STORAGE_SAVE_FAIL; // 旧槽仍是当前槽，启动仍可加载
+      publish_result(request_id, STORAGE_SAVE_FAIL); // 旧槽仍是当前槽，启动仍可加载
       return;
     }
   }
   if (w25q64_write(addr, g_blob_scratch, PARAM_STORE_BLOB_SIZE) != W25Q64_OK) {
-    g_result = STORAGE_SAVE_FAIL;
+    publish_result(request_id, STORAGE_SAVE_FAIL);
     return;
   }
   // 按页读回核验（7712B = 30 整页 + 32B 残页）。
@@ -211,19 +220,20 @@ static void perform_save() {
             : W25Q64_PAGE_SIZE;
     if (w25q64_read(addr + off, g_verify_page, chunk) != W25Q64_OK ||
         memcmp(g_blob_scratch + off, g_verify_page, chunk) != 0) {
-      g_result = STORAGE_SAVE_FAIL;
+      publish_result(request_id, STORAGE_SAVE_FAIL);
       return;
     }
   }
   g_active_slot = target;
-  g_result = STORAGE_SAVE_OK;
+  publish_result(request_id, STORAGE_SAVE_OK);
 }
 
 static void storage_task_fn(void *pv_parameters) {
   (void)pv_parameters;
   for (;;) {
-    xTaskNotifyWait(0U, 0U, nullptr, portMAX_DELAY);
-    perform_save();
+    uint32_t request_id = 0U;
+    (void)xTaskNotifyWait(0U, 0U, &request_id, portMAX_DELAY);
+    perform_save(request_id);
   }
 }
 
@@ -245,17 +255,24 @@ bool storage_task_start(void) {
   return true;
 }
 
-void storage_task_request_save() {
-  if (!g_started) {
+void storage_task_request_save(uint32_t request_id) {
+  if (!g_started || request_id == 0U) {
     return;
   }
-  // eSetBits 语义下重复通知合并：保存进行中的脉冲不排队堆积。
-  (void)xTaskNotify(g_task, 0U, eNoAction);
+  // 任务通知值携带请求令牌。重复请求不排队，但不会丢失当前请求与结果的关联。
+  (void)xTaskNotify(g_task, request_id, eSetValueWithOverwrite);
 }
 
-storage_save_status_t storage_take_result(void) {
+storage_save_status_t storage_take_result(uint32_t *request_id) {
+  taskENTER_CRITICAL();
   const storage_save_status_t result = g_result;
+  const uint32_t result_request_id = g_result_request_id;
   g_result = STORAGE_SAVE_IDLE;
+  g_result_request_id = 0U;
+  taskEXIT_CRITICAL();
+  if (request_id != nullptr) {
+    *request_id = result_request_id;
+  }
   return result;
 }
 

@@ -38,6 +38,28 @@ static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
                      const motor_protocol_config_request_t *request,
                      uint32_t now_ms);
 
+// 逐电机失能（Policy enable=false 与 SET_ENABLE(false) 共用）：清授权与目标 →
+// 在动则发失能帧 → 仍在 ACTIVE/SAFE_STOP 的退回 READY_DISABLED 并出事件。
+// ARD §36 冻结语义：复运动必须显式重发 enable=true，本函数不留自动恢复路径。
+static void apply_entry_disable(motor_control_context_t *ctx,
+                                motor_control_entry_t *entry, uint32_t now_ms) {
+  entry->policy_enable = false;
+  entry->motion_authorized = false;
+  entry->has_target = false;
+  if (entry->motion_enabled) {
+    (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
+    entry->motion_enabled = false;
+  }
+  entry->enable_pending = false;
+  if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
+      entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
+    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
+    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
+                             entry->motor_id, entry->bus_index,
+                             MOTOR_CONTROL_FAULT_NONE, 0U);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 事务收尾与步进
 // ---------------------------------------------------------------------------
@@ -1033,21 +1055,7 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
     entry->policy_enable = true;
     entry->motion_authorized = true;
   } else {
-    entry->policy_enable = false;
-    entry->motion_authorized = false;
-    entry->has_target = false;
-    if (entry->motion_enabled) {
-      (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
-      entry->motion_enabled = false;
-    }
-    entry->enable_pending = false;
-    if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
-        entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
-      entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
-      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
-    }
+    apply_entry_disable(ctx, entry, now_ms);
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
                            entry->motor_id, entry->bus_index,
@@ -1070,7 +1078,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
   switch (request->kind) {
     case MOTOR_PROTOCOL_CONFIG_SET_GAINS: {
       // 增益是低频 Policy（ARD §19.4）：本地生效，上限来自 Profile，
-      // 不进入 100 Hz 命令、不刷新命令 freshness。
+      // 不进入命令快照、不刷新命令 freshness。
       if (entry->profile == NULL) {
         return reject_invalid(ctx, entry, request, now_ms);
       }
@@ -1333,21 +1341,7 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
         entry->policy_enable = true;
         entry->motion_authorized = true;
       } else {
-        entry->policy_enable = false;
-        entry->motion_authorized = false;
-        entry->has_target = false;
-        if (entry->motion_enabled) {
-          (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
-          entry->motion_enabled = false;
-        }
-        entry->enable_pending = false;
-        if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
-            entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
-          entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
-          motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
-                                   entry->motor_id, entry->bus_index,
-                                   MOTOR_CONTROL_FAULT_NONE, 0U);
-        }
+        apply_entry_disable(ctx, entry, now_ms);
       }
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
                                entry->motor_id, entry->bus_index,

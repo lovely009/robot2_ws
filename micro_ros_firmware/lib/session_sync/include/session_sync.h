@@ -1,4 +1,4 @@
-// 会话/授权同步纯逻辑（20ms 控制边界调用一次）：把 mailbox 边沿与
+// 会话/授权同步纯逻辑（5ms/200Hz 控制边界调用一次）：把 mailbox 边沿与
 // 会话电平翻译成内核状态变更，无 FreeRTOS 依赖，host 可直测。
 // 临界区由调用方负责（take_events 与 session 电平读取须在同一临界区内）。
 #ifndef SESSION_SYNC_H

@@ -142,8 +142,8 @@ static int64_t g_clear_fault_seq = 0;
 static uint32_t g_clear_fault_id = 0;
 
 // 保存脉冲的进度游标：一次保存可能要下发几十台，而配置 FIFO 只有 16 深、消费侧每
-// 5ms 边界只抽 4 条；全推出去必然溢出，被拒的台设备侧没落盘而 W25 已整份落盘 ⇒
-// 下次上电就是"记录新、设备旧"的假不一致。故按拍分批，全部下发完才落 W25。
+// 5ms 边界只抽 4 条；全推出去必然溢出。故按拍分批，并等待每个设备保存请求的
+// CONFIG_RESULT；全部成功后才落 W25，避免设备侧拒绝时仍把新记录写进 W25。
 // **不能拿脏位当游标**：被运动禁写门拒掉的台（ACTIVE/SAFE_STOP）脏位永远不清，
 // 用"还有脏台吗"判"扫完了吗"会永不收敛、W25 永不落。
 // 游标下标对 g_views 稳定：内核表项只增不减，copy_param_views 按注册顺序输出。
@@ -151,14 +151,21 @@ static uint16_t g_save_cursor = 0U;
 static bool g_save_requested = false;     // 收到 SAVE，尚未起航
 static bool g_save_active = false;        // 设备侧分批下发中
 static bool g_save_flash_pending = false; // 已请 W25 落盘，等终态
-static uint32_t g_save_phase_ms = 0U;     // 等落盘阶段的起点（看门狗用）
+static uint32_t g_save_phase_ms = 0U;     // 当前设备/W25 阶段起点（看门狗用）
 static int64_t g_save_seq = 0;
+// 设备侧保存请求的显式 outstanding 表。只有表内 request_id 的 CONFIG_RESULT
+// 才能收敛本次 SAVE；不能把所有 bit30 事件都当成保存回告，否则参数写/轨迹等
+// 内部请求会误推进保存事务。
+static uint32_t g_save_device_request_ids[MOTOR_CONTROL_MAX_MOTORS];
+static uint16_t g_save_device_pending = 0U;
+static bool g_save_device_failed = false;
+static uint32_t g_save_storage_request_id = 0U;
 // 每拍最多下发几台。必须**低于**消费侧的抽取速率（每 5ms 边界 4 条 = 每 10ms
 // 边界 8 条），否则队列仍会累积。
 #define kSaveSubmitsPerPoll 4U
-// W25 落盘看门狗：v3 要擦 2 个扇区（量级 ~1s/扇区），但存储任务卡死时
-// save_in_progress 会永久为真——那是**电平**，卡住就没有第二次机会了。与
-// 48-motor-scale §5.3 点名的 outstanding 永久残留同类，故必须兜底。
+// 保存阶段看门狗：设备 CONFIG_RESULT 事件丢失或 storage 任务卡死时，
+// save_in_progress 不能永久为真——那是**电平**，卡住就没有第二次机会了。与
+// 48-motor-scale §5.3 点名的 outstanding 永久残留同类，故设备阶段和 W25 阶段都兜底。
 #define kSaveTimeoutMs 5000U
 
 // 已上报的设备参数结论（下标 = motor_id；0xFF = 从未上报）。
@@ -180,6 +187,69 @@ static void report_error(uint16_t code, uint16_t motor_id) {
   g_status_dirty = true; // 回调内不发布，poll 里统一发
 }
 
+static void reset_save_device_requests(void) {
+  memset(g_save_device_request_ids, 0, sizeof(g_save_device_request_ids));
+  g_save_device_pending = 0U;
+  g_save_device_failed = false;
+}
+
+static bool track_save_device_request(uint32_t request_id) {
+  if (request_id == 0U) {
+    return false;
+  }
+  for (size_t i = 0; i < MOTOR_CONTROL_MAX_MOTORS; ++i) {
+    if (g_save_device_request_ids[i] == 0U) {
+      g_save_device_request_ids[i] = request_id;
+      ++g_save_device_pending;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool take_save_device_request(uint32_t request_id) {
+  if (request_id == 0U) {
+    return false;
+  }
+  for (size_t i = 0; i < MOTOR_CONTROL_MAX_MOTORS; ++i) {
+    if (g_save_device_request_ids[i] == request_id) {
+      g_save_device_request_ids[i] = 0U;
+      if (g_save_device_pending > 0U) {
+        --g_save_device_pending;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// 设备阶段失败：把游标推到末尾（不再推后续台），置失败标志；W25 绝不启动——
+// 跨设备 flash 与 W25 没有原子提交，"记录新、设备旧"比这次不保存更坏。
+// 已经在飞的请求仍会回告，由 poll_save 在 pending 清零后按失败收敛。
+static void fail_save_device_phase(uint16_t motor_id, uint16_t error_code) {
+  g_save_device_failed = true;
+  g_save_cursor = (uint16_t)g_view_count;
+  report_error(error_code, motor_id);
+}
+
+// 清空一次保存的进行态。**不动 save_seq**：完成序号只在收尾时推进，
+// 断连重建的清场不能对外假装"保存完成了"。
+static void clear_save_progress(void) {
+  g_save_active = false;
+  g_save_flash_pending = false;
+  g_save_cursor = 0U;
+  g_save_storage_request_id = 0U;
+  reset_save_device_requests();
+}
+
+static void finish_save_transaction(void) {
+  clear_save_progress();
+  // 这是保存动作的完成序号，不是成功计数；失败也必须推进，避免上层等待者永久
+  // 等待。成功与否由本次过程中的 CONFIG_RESULT / ERR_SAVE_FAIL 共同判定。
+  ++g_save_seq;
+  g_status_dirty = true;
+}
+
 // 代分配一个内部 id（调用方给 0 时）。恒带 PARAM_INTERNAL_ID_TAG，与调用方
 // 逐字透传的 id 天然不撞（那种 id 的 bit30 已被本地拒绝）。
 static uint32_t next_internal_id() {
@@ -192,17 +262,36 @@ static uint32_t next_internal_id() {
 
 // ---- 提交 ----
 
+// 配置请求公共头：request_id 逐字透传、接收 tick 取本地、motor_id 取自视图。
+static control_mailbox_config_request_t make_config_request(
+    const motor_control_param_view_t *v, control_mailbox_config_kind_t kind,
+    uint32_t request_id) {
+  control_mailbox_config_request_t request = {};
+  request.request_id = request_id;
+  request.received_tick_ms = millis();
+  request.motor_id = v->motor_id;
+  request.kind = kind;
+  return request;
+}
+
+// 提交并记账：此处失败只可能是 FIFO 满/断链（值域已在整条预校验阶段过完）。
+static bool submit_config_request(const control_mailbox_config_request_t *request,
+                                  uint16_t motor_id) {
+  if (!motor_rt_submit_config(request)) {
+    report_error(ERR_SUBMIT_FAILED, motor_id);
+    return false;
+  }
+  return true;
+}
+
 // 单个限值（速度/力矩）。
 // 返回 false = 提交失败（FIFO 满/断链）。**值域校验不在这里**：它必须在整条
 // 预校验阶段过完，否则中途失败会留下"部分生效"。
 static bool submit_single_limit(const motor_control_param_view_t *v,
                                 const param_field_desc_t *desc, float value,
                                 uint32_t request_id) {
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
-  request.received_tick_ms = millis();
-  request.motor_id = v->motor_id;
-  request.kind = desc->kind;
+  control_mailbox_config_request_t request =
+      make_config_request(v, desc->kind, request_id);
   // 单位口径见 param_units.h：速度对外就是 rad/s（内核同单位，直通），力矩对外
   // 是 A（设备对象 0x2538 存的就是电流）。换算只在这一处做。
   if (desc->param_field == PARAM_FIELD_VEL_LIMIT) {
@@ -210,11 +299,7 @@ static bool submit_single_limit(const motor_control_param_view_t *v,
   } else {
     request.value.max_torque_nm = param_units_amp_to_nm(value, v->torque_per_amp);
   }
-  if (!motor_rt_submit_config(&request)) {
-    report_error(ERR_SUBMIT_FAILED, v->motor_id);
-    return false;
-  }
-  return true;
+  return submit_config_request(&request, v->motor_id);
 }
 
 // 位置双限提交。成对值由调用方算好——不成对的半边在预校验阶段就被整条拒了，
@@ -222,19 +307,12 @@ static bool submit_single_limit(const motor_control_param_view_t *v,
 // 的产物，一条消息能带两边，它没有存在理由）。
 static bool submit_position_limits(const motor_control_param_view_t *v, float lo,
                                    float hi, uint32_t request_id) {
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
-  request.received_tick_ms = millis();
-  request.motor_id = v->motor_id;
-  request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
+  control_mailbox_config_request_t request = make_config_request(
+      v, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS, request_id);
   // 位置对外就是 rad（内核同单位，直通、不折算角度）。
   request.value.position_limits.min_position_rad = lo;
   request.value.position_limits.max_position_rad = hi;
-  if (!motor_rt_submit_config(&request)) {
-    report_error(ERR_SUBMIT_FAILED, v->motor_id);
-    return false;
-  }
-  return true;
+  return submit_config_request(&request, v->motor_id);
 }
 
 // 保护开关提交。**唯一反转点**：对外 1 = 保护生效 ↔ 厂家原值 0 = 保护开。
@@ -242,34 +320,20 @@ static bool submit_position_limits(const motor_control_param_view_t *v, float lo
 // SET_SAFETY_PROTECT 注释即此约定）。别为了"对称"在别处再加一层。
 static bool submit_safety_protect(const motor_control_param_view_t *v,
                                   float value, uint32_t request_id) {
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
-  request.received_tick_ms = millis();
-  request.motor_id = v->motor_id;
-  request.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
+  control_mailbox_config_request_t request = make_config_request(
+      v, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT, request_id);
   request.value.safety_protect_raw = (value == 1.0f) ? 0U : 1U;
-  if (!motor_rt_submit_config(&request)) {
-    report_error(ERR_SUBMIT_FAILED, v->motor_id);
-    return false;
-  }
-  return true;
+  return submit_config_request(&request, v->motor_id);
 }
 
 // 方向提交：**原值直通，不做语义反转**——0x2541 没有 0x2650 那种"1 = 关"的
 // 反向陷阱，别为了与保护开关对称而多加一层。
 static bool submit_direction(const motor_control_param_view_t *v, float value,
                              uint32_t request_id) {
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
-  request.received_tick_ms = millis();
-  request.motor_id = v->motor_id;
-  request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
+  control_mailbox_config_request_t request =
+      make_config_request(v, CONTROL_MAILBOX_CONFIG_SET_DIRECTION, request_id);
   request.value.direction_raw = (value == 1.0f) ? 1U : 0U;
-  if (!motor_rt_submit_config(&request)) {
-    report_error(ERR_SUBMIT_FAILED, v->motor_id);
-    return false;
-  }
-  return true;
+  return submit_config_request(&request, v->motor_id);
 }
 
 // 单目标分发（位置两项走成对路径，不到这里）。返回 false 时 last_error 已置。
@@ -531,6 +595,14 @@ void param_bridge_on_config_result(const motor_control_event_t *event) {
   const uint32_t id = event->request_id;
   const bool ok = event->reason == MOTOR_PROTOCOL_CONFIG_OK;
 
+  if (take_save_device_request(id)) {
+    if (!ok) {
+      fail_save_device_phase(event->motor_id, (uint16_t)event->reason);
+    }
+    g_status_dirty = true;
+    return;
+  }
+
   // 判据是**逐字等于**在飞 id 之一，不是"带 bit30 就算我的"——后者会把调用方
   // 恰好在 bit30 置位的 request_id 误认成自己的命令（现存的反向隐患）。
   if (id != 0U && id == g_refresh_id) {
@@ -583,7 +655,7 @@ static void publish_system_status() {
   g_system_status_msg.clear_fault_seq = (uint32_t)g_clear_fault_seq;
   g_system_status_msg.save_seq = (uint32_t)g_save_seq;
   g_system_status_msg.save_in_progress =
-      g_save_active || g_save_flash_pending;
+      g_save_requested || g_save_active || g_save_flash_pending;
   if (rcl_publish(&g_system_status_pub, &g_system_status_msg, nullptr) !=
       RCL_RET_OK) {
     // best-effort 超传输上限时 rcl_publish 静默丢；计数由 motor_bridge 合并进
@@ -594,17 +666,26 @@ static void publish_system_status() {
 
 // ---- 保存三段状态机 ----
 // **save_in_progress 覆盖全程**：① g_save_requested 起航（游标归零）；② g_save_active
-// 设备侧分批下发 0x2539；③ g_save_flash_pending W25 落盘、等 storage 终态。
-// 旧实现在 ② 扫完就报"保存完成"（清布尔与落盘请求同一拍），而 v3 的 W25 要擦 2 个
-// 扇区（~1s/扇区）——"完成"比真正落盘早一整段，此时断电就是真丢数据。必须 ③ 才算完。
+// 设备侧分批下发 0x2539，并等待每台 CONFIG_RESULT；③ g_save_flash_pending W25 落盘、
+// 等 storage 终态。只有②全部 OK 且③ W25 目标槽擦写、分页读回校验和活动槽翻转都
+// 完成后，保存动作才报告成功；失败也必须推进 save_seq。
 static void poll_save(uint32_t now) {
   if (g_save_requested && !g_save_active && !g_save_flash_pending) {
     g_save_requested = false;
     g_save_cursor = 0U;
+    reset_save_device_requests();
+    g_save_storage_request_id = 0U;
+    g_save_phase_ms = now;
     g_save_active = true;
     g_status_dirty = true;
   }
   if (g_save_active) {
+    if ((uint32_t)(now - g_save_phase_ms) >= kSaveTimeoutMs) {
+      // 设备回告丢失/内核停止时不能继续等，也绝不在未收齐 ACK 时启动 W25。
+      report_error(ERR_SAVE_FAIL, kMotorIdNone);
+      finish_save_transaction();
+      return;
+    }
     uint32_t submitted = 0U;
     while (g_save_cursor < g_view_count && submitted < kSaveSubmitsPerPoll) {
       const motor_control_param_view_t *view = &g_views[g_save_cursor++];
@@ -621,32 +702,53 @@ static void poll_save(uint32_t now) {
       request.motor_id = view->motor_id;
       request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
       request.value.save_slots = view->record_dirty_slots;
+      if (!track_save_device_request(request.request_id)) {
+        // 理论上 outstanding 数量不可能超过视图数量；保留显式失败路径，避免
+        // 出现一个无法关联回告的设备保存请求后仍错误启动 W25。
+        fail_save_device_phase(view->motor_id, ERR_SUBMIT_FAILED);
+        break;
+      }
       if (!motor_rt_submit_config(&request)) {
-        // 保存是幂等的整体动作：这一台漏了，重复发一次 SAVE 即可补上，不中断
-        // 整轮（中断会让后面的台永远轮不到）。
-        report_error(ERR_SUBMIT_FAILED, view->motor_id);
+        // 提交失败的请求没有 CONFIG_RESULT，先从 outstanding 表移除；本次保存
+        // 直接失败，不再把后续台推入设备侧。
+        (void)take_save_device_request(request.request_id);
+        fail_save_device_phase(view->motor_id, ERR_SUBMIT_FAILED);
+        break;
       }
       submitted++;
     }
-    if (g_save_cursor >= g_view_count) {
+    if (g_save_cursor >= g_view_count && g_save_device_pending == 0U) {
+      if (g_save_device_failed) {
+        // 已经有设备侧失败回告或提交失败；不触发 W25，保留设备/记录的 dirty
+        // 事实，等待调用方退出运动后重新 SAVE。
+        finish_save_transaction();
+        return;
+      }
       // 设备侧扫完 ≠ 保存完成：现在才请 W25 落盘，并把 save_in_progress 交给
       // 第三段。**不发 save_seq、不清 in_progress**。
       g_save_active = false;
       g_save_cursor = 0U;
       g_save_flash_pending = true;
       g_save_phase_ms = now;
-      storage_task_request_save();
+      g_save_storage_request_id = next_internal_id();
+      storage_task_request_save(g_save_storage_request_id);
     }
     return;
   }
   if (!g_save_flash_pending) {
     return;
   }
-  // 关于 W25 结果：save 失败自有其报告路径（下面这条），不回退设备侧脏位——
-  // 脏位是内核在保存事务成功回 OK 时清的（只脏易失槽的台受理即清），到这一步
-  // 已经没了。"未保存"标记消失后，last_error 是唯一剩下的信号；不要试图从这里
-  // 重新推导或重设脏位（内核那份记录说了算）。
-  const storage_save_status_t result = storage_take_result();
+  // 关于 W25 结果：设备侧脏位是在对应 CONFIG_RESULT=OK 时由内核清除的；跨设备
+  // flash 与 W25 没有原子提交，故 W25 失败时不能伪造回滚设备侧状态，只能报告失败
+  // 并要求重新执行保存。这里不从 W25 结果反推或重设脏位，内核记录仍是唯一来源。
+  uint32_t result_request_id = 0U;
+  const storage_save_status_t result = storage_take_result(&result_request_id);
+  // 断连重建或上一笔保存遗留的结果：已取走，但不能收敛当前事务。IDLE 是
+  // "还没有结果"，没有令牌可比，不走这条判据。
+  if (result != STORAGE_SAVE_IDLE &&
+      result_request_id != g_save_storage_request_id) {
+    return;
+  }
   if (result == STORAGE_SAVE_IDLE) {
     if ((uint32_t)(now - g_save_phase_ms) < kSaveTimeoutMs) {
       return; // 还在落盘
@@ -656,11 +758,7 @@ static void poll_save(uint32_t now) {
   } else if (result == STORAGE_SAVE_FAIL) {
     report_error(ERR_SAVE_FAIL, kMotorIdNone);
   }
-  g_save_flash_pending = false;
-  // 无论成败都推进序号：这是"保存动作收尾"的计数不是成功数。失败也 +1 是刻意
-  // 的——否则等序号的人会一直等下去（口径同 refresh_seq）。
-  g_save_seq++;
-  g_status_dirty = true;
+  finish_save_transaction();
 }
 
 // 设备参数结论（未初始化）：按"变化才报"推 last_error。结论由内核上电回读比对
@@ -810,9 +908,7 @@ void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   // 进行中的保存不能在重建后带着旧游标续跑：g_views 会重填，游标下标已无意义
   // （会跳过靠前的脏台、并触发一次没被要求的 W25 落盘）。
   g_save_requested = false;
-  g_save_active = false;
-  g_save_flash_pending = false;
-  g_save_cursor = 0U;
+  clear_save_progress();
   g_refresh_id = 0U;
   g_set_zero_id = 0U;
   g_clear_fault_id = 0U;

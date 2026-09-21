@@ -65,12 +65,32 @@ static bool record_occupied(const param_store_record_t *rec) {
   return rec->present != 0U || rec->device_raw_present != 0U;
 }
 
-static param_store_record_t *find_record(param_store_blob_t *blob,
-                                         uint16_t motor_id) {
+// 取记录；没有就占用第一个空槽（空槽 = 无字段位且无设备端原值位，motor_id
+// 可能有残留故不入判定——否则"先写原值后写字段"会占出两条记录）。表满返回 NULL。
+static param_store_record_t *find_or_alloc_record(param_store_blob_t *blob,
+                                                  uint16_t motor_id) {
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
     if (record_occupied(&blob->records[i]) &&
         blob->records[i].motor_id == motor_id) {
       return &blob->records[i];
+    }
+  }
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    if (!record_occupied(&blob->records[i])) {
+      blob->records[i].motor_id = motor_id;
+      return &blob->records[i];
+    }
+  }
+  return NULL;
+}
+
+// 只读查找（占用判定同上）。
+static const param_store_record_t *find_record_const(
+    const param_store_blob_t *blob, uint16_t motor_id) {
+  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
+    const param_store_record_t *rec = &blob->records[i];
+    if (record_occupied(rec) && rec->motor_id == motor_id) {
+      return rec;
     }
   }
   return NULL;
@@ -88,19 +108,9 @@ bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
       field >= PARAM_FIELD_COUNT) {
     return false;
   }
-  param_store_record_t *rec = find_record(blob, motor_id);
+  param_store_record_t *rec = find_or_alloc_record(blob, motor_id);
   if (rec == NULL) {
-    for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-      // 空槽 = present 无位且没被 device_raw 单独占用（可能先写原值后写字段）。
-      if (!record_occupied(&blob->records[i])) {
-        rec = &blob->records[i];
-        rec->motor_id = motor_id;
-        break;
-      }
-    }
-    if (rec == NULL) {
-      return false;
-    }
+    return false; // 64 条记录全占用
   }
   switch (field) {
     case PARAM_FIELD_KP: rec->kp = value; break;
@@ -121,25 +131,19 @@ bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
       field == PARAM_FIELD_LIMIT_PROTECT || field >= PARAM_FIELD_COUNT) {
     return false;
   }
-  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-    const param_store_record_t *rec = &blob->records[i];
-    if (!record_occupied(rec) || rec->motor_id != motor_id) {
-      continue;
-    }
-    if ((rec->present & ((uint32_t)1U << (unsigned)field)) == 0U) {
-      return false;
-    }
-    switch (field) {
-      case PARAM_FIELD_KP: *value = rec->kp; return true;
-      case PARAM_FIELD_KD: *value = rec->kd; return true;
-      case PARAM_FIELD_POS_MIN: *value = rec->pos_min; return true;
-      case PARAM_FIELD_POS_MAX: *value = rec->pos_max; return true;
-      case PARAM_FIELD_VEL_LIMIT: *value = rec->vel_limit; return true;
-      case PARAM_FIELD_TORQUE_LIMIT: *value = rec->torque_limit; return true;
-      default: return false;
-    }
+  const param_store_record_t *rec = find_record_const(blob, motor_id);
+  if (rec == NULL || (rec->present & ((uint32_t)1U << (unsigned)field)) == 0U) {
+    return false;
   }
-  return false;
+  switch (field) {
+    case PARAM_FIELD_KP: *value = rec->kp; return true;
+    case PARAM_FIELD_KD: *value = rec->kd; return true;
+    case PARAM_FIELD_POS_MIN: *value = rec->pos_min; return true;
+    case PARAM_FIELD_POS_MAX: *value = rec->pos_max; return true;
+    case PARAM_FIELD_VEL_LIMIT: *value = rec->vel_limit; return true;
+    case PARAM_FIELD_TORQUE_LIMIT: *value = rec->torque_limit; return true;
+    default: return false;
+  }
 }
 
 void param_store_blob_finalize(param_store_blob_t *blob, uint32_t seq) {
@@ -156,18 +160,9 @@ bool param_store_blob_set_device_raw(param_store_blob_t *blob, uint16_t motor_id
   if (blob == NULL || motor_id == 0U || slot >= PARAM_DEVICE_SLOT_COUNT) {
     return false;
   }
-  param_store_record_t *rec = find_record(blob, motor_id);
+  param_store_record_t *rec = find_or_alloc_record(blob, motor_id);
   if (rec == NULL) {
-    for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-      if (!record_occupied(&blob->records[i])) {
-        rec = &blob->records[i];
-        rec->motor_id = motor_id;
-        break;
-      }
-    }
-    if (rec == NULL) {
-      return false;
-    }
+    return false; // 64 条记录全占用
   }
   rec->device_raw[(unsigned)slot] = raw;
   rec->device_raw_present |= (uint8_t)(1U << (unsigned)slot);
@@ -180,18 +175,13 @@ bool param_store_blob_get_device_raw(const param_store_blob_t *blob,
   if (blob == NULL || raw == NULL || slot >= PARAM_DEVICE_SLOT_COUNT) {
     return false;
   }
-  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-    const param_store_record_t *rec = &blob->records[i];
-    if (!record_occupied(rec) || rec->motor_id != motor_id) {
-      continue;
-    }
-    if ((rec->device_raw_present & (uint8_t)(1U << (unsigned)slot)) == 0U) {
-      return false;
-    }
-    *raw = rec->device_raw[(unsigned)slot];
-    return true;
+  const param_store_record_t *rec = find_record_const(blob, motor_id);
+  if (rec == NULL ||
+      (rec->device_raw_present & (uint8_t)(1U << (unsigned)slot)) == 0U) {
+    return false;
   }
-  return false;
+  *raw = rec->device_raw[(unsigned)slot];
+  return true;
 }
 
 uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
@@ -199,13 +189,8 @@ uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
   if (blob == NULL) {
     return 0U;
   }
-  for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
-    const param_store_record_t *rec = &blob->records[i];
-    if (record_occupied(rec) && rec->motor_id == motor_id) {
-      return rec->device_raw_present;
-    }
-  }
-  return 0U;
+  const param_store_record_t *rec = find_record_const(blob, motor_id);
+  return rec != NULL ? rec->device_raw_present : 0U;
 }
 
 // v1 记录（32B，无设备端原值）：仅供读取迁移，不参与写入。

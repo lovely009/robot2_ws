@@ -1,11 +1,8 @@
 // QoS 判据（TBD-ROS-05 默认表）的唯一出处：motor_bridge 与 param_bridge 共用。
-//
-// 选哪条看**消息性质**，不看它属于哪个业务域：
-//   - 高频流、丢一帧无所谓（latest-wins 的电平/测量）→ qos_stream()
-//   - 低频状态声明、不允许静默丢（命令、配置、或 >512 B 需分片）→ qos_reliable(n)
-//
-// 此前这两条只存在于 motor_bridge.cpp 里；param_bridge 改造时一并提出来，
-// 避免两份判据各自漂移（同一个话题在两边用不同 QoS 会静默收不到）。
+// 选哪条看**消息性质**，不看业务域：
+//   高频流、丢一帧无所谓（latest-wins 的电平/测量）→ qos_stream()
+//   低频状态声明、不允许静默丢（命令、配置、>512 B 需分片）→ qos_reliable(n)
+// 同一个话题在两边用不同 QoS 会静默收不到，故两条判据只此一处。
 #ifndef ROS_QOS_H
 #define ROS_QOS_H
 

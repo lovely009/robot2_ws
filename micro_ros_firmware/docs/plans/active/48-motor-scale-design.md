@@ -103,7 +103,7 @@ if (xPortGetFreeHeapSize() <
 > 不可写空指针）。
 
 **撤掉电机参数注册不影响持久化**（P0 容易让人误以为会）：W25 记录由**内核视图投影**喂
-（`src/storage_projection.c:24-108`，回读在 `storage_task.cpp:159`），与 rclc 参数树无关；
+（`lib/storage_projection/src/storage_projection.c`，回读在 `storage_task.cpp`），与 rclc 参数树无关；
 `system.save` 走的是 storage 任务通知。撤的是"参数树的注册/写入口"，不是设备参数的落盘路径。
 
 ### 1.2 参数面每电机实际注册 11 项 [源码]

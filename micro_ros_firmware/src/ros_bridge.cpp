@@ -1,10 +1,6 @@
-// micro-ROS 桥接层（agent 通信生命周期）。
-//
-// 职责：node + executor + 周期定时器生命周期管理，agent 断连后整体重建。
-// 业务域实体由 imu_bridge / motor_bridge / param_bridge 各自维护，
-// 本模块只负责创建/销毁顺序与定时轮询分发。
-//
-// 注释规范：中文写意图，micro-ROS / ROS 2 API 保留英文。
+// micro-ROS 桥接层（agent 通信生命周期）：node + executor + 周期定时器，断连后整体
+// 重建。业务域实体由 imu_bridge / motor_bridge / param_bridge 各自维护，本模块只管
+// 创建/销毁顺序与定时轮询分发。
 
 #include "ros_bridge.h"
 

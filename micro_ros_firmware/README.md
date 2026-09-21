@@ -80,8 +80,8 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
 | `param_bridge` | 参数面：下行 `param_set`/`system_command` 两条订阅 + 上行 `system_status`；参数写是异步事务，成败经 `last_error` 与完成序号呈现 |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 5ms/200Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
-| `session_sync` | 会话边沿/电平→内核授权的纯派生（5ms/200Hz 边界调用，host 可测） |
-| `storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
+| `lib/session_sync` | 会话边沿/电平→内核授权的纯派生（200Hz 边界调用，host 可测） |
+| `lib/storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
 | `heater` | TIM3 加热 PWM 所有权 + 纯 PID（host 可测） |
 | `lib/fdcan` | FDCAN 初始化/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度 |
 | `lib/imu` | BMI088 驱动/通信层、SPI2 阻塞传输、Mahony/SI 聚合（单一 IMU 域） |

@@ -1,18 +1,15 @@
 // W25Q64 参数存储任务实现（协议见 storage_task.h）。
 //
-// 双槽 A/B，每槽 2 个 4KB 扇区（W25Q64 最小擦除单位），各放一个 blob：
-// v3 为 7712B = 32B 头 + 64×120B 记录，槽 A 0x0000–0x1FFF、槽 B 0x2000–0x3FFF
-// （v2 记录 48B、v1 旧格式 32B，仍可读，见 read_blob_at 的迁移链）。save 总写非
-// 活动槽，boot 选 CRC 有效且 seq 最大者——erase/write 中掉电至少保留一个好槽
-// （擦 A 的扇区不碰 B）。
+// 双槽 A/B，每槽 2 个 4KB 扇区（W25Q64 最小擦除单位）：v3 blob 7712B = 32B 头 +
+// 64×120B 记录，槽 A 0x0000–0x1FFF、槽 B 0x2000–0x3FFF（v2 记录 48B、v1 32B 仍可读，
+// 见 read_blob_at 的迁移链）。save 总写非活动槽，boot 选 CRC 有效且 seq 最大者——
+// erase/write 中掉电至少保留一个好槽（擦 A 的扇区不碰 B）。
 //
-// 升级兼容：旧布局的槽 B 在 0x1000，新布局下它落进槽 A 的擦除范围。两个新槽
-// 都读不到时才兜底试一次 0x1000（见 load_boot_params），免得奇数存档次数的
-// 板子在升级后把持久化参数全丢成默认值。
+// 升级兼容：旧布局的槽 B 在 0x1000，新布局下落进槽 A 的擦除范围；两个新槽都读不到
+// 时才兜底试一次（见 load_boot_params），免得奇数存档次数的板子升级后丢光参数。
 //
-// 并发：g_boot_records 只在 start 的加载阶段写（任务创建前）；save 路径用
-// motor_rt 临界区拍参数快照后离开临界区再擦写；结果单字由 micro_ros 任务
-// 读（take_result）与本任务写，可视为原子单字读写。
+// 并发：g_boot_records 只在 start 的加载阶段写（任务创建前）；save 路径在 motor_rt
+// 临界区内拍快照、离开临界区再擦写；结果单字由 micro_ros 读、本任务写，可视为原子。
 
 #include "storage_task.h"
 
@@ -29,11 +26,8 @@ static const UBaseType_t kStorageTaskPrio = 1U; // 与 led 同级最低；Flash 
                                                 // 阻塞期高优先级任务可抢占
 static const configSTACK_DEPTH_TYPE kStorageTaskStack = 1024U; // 4KB（HAL OSPI AutoPolling 深栈）
 
-// 双槽 A/B，每槽 2 个 4KB 扇区（W25Q64 最小擦除单位），各放一个 blob：
-// v3 为 7712B = 32B 头 + 64×120B 记录。save 总写非活动槽，boot 选 CRC 有效且
-// seq 最大者——erase/write 中掉电至少保留一个好槽（擦 A 的扇区不碰 B）。
-// constexpr 而非 const：下面的槽不重叠断言要在编译期索引 kSlotBase[1]，
-// const 数组不是常量表达式、索引不了。
+// 双槽 A/B 的基址：每槽 2 个 4KB 扇区，v3 blob 占 7712B（见文件头）。
+// constexpr 而非 const：下面的槽不重叠断言要在编译期索引 kSlotBase[1]。
 static constexpr uint32_t kSlotBase[2] = {0x000000U, 0x00002000U};
 static const uint32_t kSlotSectors = 2U;
 
@@ -73,11 +67,10 @@ static motor_control_stored_params_t
     g_boot_records[PARAM_STORE_RECORD_COUNT];
 static size_t g_boot_count = 0U;
 
-// 唯一一块整 blob 暂存：boot 阶段（任务创建前）读入胜者，save 阶段打包写出。
-// 两者无时间重叠——load_boot_params() 只在 storage_task_start() 内调用一次，
-// 且发生在 xTaskCreate 之前，其入口有 configASSERT(g_task == nullptr) 把关。
-// 必须 8 字节对齐：上层按 param_store_blob_t 结构体访问，-Os 会用 STRD，
-// 非对齐在 M7 上直接 UNDEFINSTR。
+// 唯一一块整 blob 暂存：boot 阶段（任务创建前）读入胜者，save 阶段打包写出，两者
+// 时间上不重叠（load_boot_params 只在 storage_task_start 内、xTaskCreate 之前）。
+// 必须 8 字节对齐：上层按 param_store_blob_t 访问，-Os 会用 STRD，非对齐在 M7 上
+// 直接 UNDEFINSTR。
 alignas(8) static uint8_t g_blob_scratch[PARAM_STORE_BLOB_SIZE];
 // 读回核验按页做：不需要 7712B 的第二份全量缓冲。
 alignas(8) static uint8_t g_verify_page[W25Q64_PAGE_SIZE];
@@ -138,17 +131,13 @@ static void load_boot_params() {
   } else if (ok_a) {
     use_b = false;
   } else {
-    // 两新槽皆无效：可能是从旧布局升级上来的板子。旧槽 B 在 0x1000，落在新槽
-    // A 的擦除范围内，read_slot() 再也读不到它——旧固件下存档次数为**奇数**的
-    // 板子（活动槽 = 旧 B，旧 A 是空的 0xFF）若不在这里兜底，会静默丢掉全部
-    // 持久化参数（kp/kd、位置/速度/力矩限值全归零），而那份完好的旧 blob 就
-    // 躺在 0x1000 无人读。只在新布局两槽都失败时试一次——已有合法新 blob 的
-    // 板子不付这个代价。
+    // 两新槽皆无效：可能是从旧布局升级上来的板子。旧槽 B 在 0x1000，落在新槽 A 的
+    // 擦除范围内，read_slot() 再也读不到它——旧固件下存档次数为**奇数**的板子若不
+    // 在这里兜底，会静默丢掉全部持久化参数。只在新布局两槽都失败时试一次。
     //
-    // 采用时 g_active_slot 必须是 0：数据物理上位于 0x1000（槽 A 的擦除范围
-    // 内），下次 save 只能写槽 B(0x2000) 且绝不能碰 0x1000，而 g_active_slot
-    // = 0 正好给出 target = 1。**不能**把它当成 slot 1 的内容返回——那会让
-    // use_b = 1、g_active_slot = 1，首次存档就把刚采用的数据擦掉。
+    // 采用时 g_active_slot 必须是 0：数据物理上位于 0x1000（槽 A 的擦除范围内），
+    // 下次 save 只能写槽 B(0x2000)，而 g_active_slot = 0 正好给出 target = 1。
+    // **不能**把它当成 slot 1 的内容返回——那会让 use_b = 1，首次存档就擦掉刚采用的数据。
     if (!read_blob_at(kLegacySlotBBase, scratch)) {
       return; // 两新槽 + 旧槽 B 皆无效：保持 g_boot_count = 0
     }
@@ -181,11 +170,9 @@ static void perform_save() {
     g_result = STORAGE_SAVE_FAIL;
     return;
   }
-  // **静态而非栈上**：64 × 80 B = 5,120 B，而本任务栈只有 4 KB
-  // （kStorageTaskStack = 1024 words）。放在栈上必然溢出 → FreeRTOS
-  // 栈溢出 fail-safe（main.cpp 的 hook：关中断死循环）→ IWDG 无人喂 →
-  // ~500ms 后复位。台架现象就是「一落盘就重启」。
-  // 本任务独占该缓冲（perform_save 只由 storage_task_fn 调用）。
+  // **静态而非栈上**：64 × 80 B = 5,120 B，本任务栈只有 4 KB，放栈上必然溢出 →
+  // 栈溢出 fail-safe（main.cpp 的 hook：关中断死循环）→ IWDG 无人喂 → ~500ms 复位。
+  // 台架现象就是「一落盘就重启」。本任务独占该缓冲（perform_save 只由 storage_task_fn 调）。
   static motor_control_param_view_t views[MOTOR_CONTROL_MAX_MOTORS];
   // 经注入的提供者拍快照（实现在 motor_rt：进内核临界区，仍在本任务
   // 上下文执行——与旧的直接互调逐字同构）。

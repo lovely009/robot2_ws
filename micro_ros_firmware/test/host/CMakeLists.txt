@@ -34,11 +34,11 @@ target_include_directories(fw_motor_control PUBLIC
   ../../lib/motor_control/include)
 target_link_libraries(fw_motor_control PUBLIC fw_adapters)
 
-# 会话同步纯逻辑（src 下；host 可直编）
+# 会话同步纯逻辑（lib/session_sync；host 可直编）
 add_library(fw_session_sync OBJECT
-  ../../src/session_sync.c)
+  ../../lib/session_sync/src/session_sync.c)
 target_include_directories(fw_session_sync PUBLIC
-  ../../src ../../include ../../lib/control_mailbox/include
+  ../../lib/session_sync/include ../../include ../../lib/control_mailbox/include
   ../../lib/motor_control/include ../../lib/motor_protocol/include)
 target_link_libraries(fw_session_sync PUBLIC fw_mailbox fw_motor_control)
 
@@ -77,11 +77,11 @@ add_library(fw_param_store OBJECT
   ../../lib/param_store/src/param_store_blob.c
   ../../lib/param_store/src/param_name.c)
 
-# storage 投影纯 C（src 下少有的 host 可编文件；无 Arduino/RTOS 依赖）
+# storage 投影纯 C（lib/storage_projection；无 Arduino/RTOS 依赖）
 add_library(fw_storage_projection OBJECT
-  ../../src/storage_projection.c)
+  ../../lib/storage_projection/src/storage_projection.c)
 target_include_directories(fw_storage_projection PUBLIC
-  ../../src ../../include ../../lib/param_store/include
+  ../../lib/storage_projection/include ../../include ../../lib/param_store/include
   ../../lib/motor_control/include ../../lib/motor_protocol/include)
 target_link_libraries(fw_storage_projection PUBLIC fw_param_store)
 target_include_directories(fw_param_store PUBLIC
@@ -193,7 +193,7 @@ fw_host_test(test_heater_pid
 fw_host_test(test_session_sync
   SOURCES test_session_sync.cpp
   OBLIBS fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
-  INCLUDES ../../src ../../lib/motor_control/src)
+  INCLUDES ../../lib/session_sync/include ../../lib/motor_control/src)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

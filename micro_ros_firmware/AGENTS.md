@@ -143,7 +143,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - `src/motor_rt_task.cpp` —— 唯一电机实时任务：1ms 服务（RX drain / 内核 service /
   SYNC / TX 路由 pump / IWDG 喂狗）+ 20ms 控制边界（会话边沿、快照 apply、配置 FIFO、
   boot 参数）；内核唯一调用者、唯一正常 FDCAN 发送者。
-- `src/session_sync.c` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
+- `lib/session_sync/` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
 - `lib/motor_control/` —— ID 驱动内核（注册表/型号目录/生命周期/安全级联/配置
   事务）；公共 API 只在 `include/`，内部布局 `src/motor_control_internal.h`
   不向 app 导出。
@@ -151,7 +151,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   adapter 与 codec；厂家字节/CAN-ID/FD 属性唯一归属地；事务由静态阶段描述符表驱动。
 - `lib/control_mailbox/` —— 命令快照 latest-wins 双缓冲 + 配置 FIFO（16）+
   会话/授权电平边沿；纯 C、静态内存、不自建锁。
-- `src/storage_task.cpp` + `src/storage_projection.c/.h` —— Flash 唯一所有者；
+- `src/storage_task.cpp` + `lib/storage_projection/` —— Flash 唯一所有者；
   参数视图 ↔ blob 的纯 C 投影（host 可测）。
 - `src/heater.cpp` —— 加热温度 PID 纯函数（HOST_TEST 可测），设备侧归 sensor_task。
 - `lib/board/include/board_irq.h` —— ISR syscall 阈值常量（5），板级库唯一门槛事实。

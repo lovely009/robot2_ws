@@ -1,15 +1,12 @@
-// 参数与系统命令桥实现（**话题面**，取代 2026-09-21 退役的 rclc 参数服务器）。
+// 参数与系统命令桥实现（话题面）。
 //
-// 三部分：
-//  1) 订阅回调（executor 上下文）：整条校验 + 提交 mailbox。设备写是异步事务，
-//     回调返回只表示「已受理」；最终成败经内核 CONFIG_RESULT 事件异步给出；
-//  2) on_config_result 钩子（motor_bridge 事件循环内同任务调用）：收敛三条系统
-//     命令的完成序号，并把其余失败报进 last_error；
+//  1) 订阅回调（executor 上下文）：整条校验 + 提交 mailbox，返回只表示"已受理"；
+//  2) on_config_result 钩子：收敛三条系统命令的完成序号，其余失败报进 last_error；
 //  3) poll（10ms 桥定时器）：发布 system_status、分批下发保存、上报设备参数结论。
 //
-// 线程边界：回调与 poll 都在 micro_ros 任务（executor/spin 与定时器同线程），
-// 彼此不并发；影响电机只经 motor_rt_submit_config，影响 Flash 只经 storage
-// 任务通知，本文件不直接发 FDCAN、不擦写 Flash（ARD §28.1）。
+// 线程边界：回调与 poll 同在 micro_ros 任务（executor/spin 与定时器同线程），
+// 彼此不并发；影响电机只经 motor_rt_submit_config，影响 Flash 只经 storage 任务
+// 通知——本文件不直接发 FDCAN、不擦写 Flash（ARD §28.1）。
 
 #include "param_bridge.h"
 
@@ -33,13 +30,11 @@ static const char *kParamSetTopic = "micro_ros_do/param_set";
 static const char *kSystemCommandTopic = "micro_ros_do/system_command";
 static const char *kSystemStatusTopic = "micro_ros_up/system_status";
 
-// 错误码（system_status.last_error）：0=无；1..6 对齐 CONFIG 结果七码（reason
-// 1..6）；10=本地校验拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知
-// 电机；20=save 失败；30=refresh 失败；40=设备参数与固件记录不一致（未初始化，
-// 该台不可运动）；41=设备参数回读不成功（未核对，同样不可运动）；42=本机对该台
-// **无记录**（首次上电/新板，同样不可运动，须人工核对后写参数）。
-// 40/41/42 由内核结论驱动（dev_init），与请求回告无关：固件那份记录说了算。
-// 码表逐字沿用参数面时期，操作员侧零迁移。
+// 错误码（system_status.last_error）：0=无；1..6 对齐 CONFIG 结果七码；10=本地校验
+// 拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知电机；20=save 失败；
+// 30=refresh 失败；40=设备参数与固件记录不一致（不可运动）；41=回读不成功（不可
+// 运动）；42=本机对该台**无记录**（首次上电/新板，须人工核对后写参数）。
+// 40/41/42 由内核 dev_init 结论驱动，与请求回告无关。码表沿用参数面时期，零迁移。
 #define ERR_NONE 0
 #define ERR_LOCAL_VALIDATION 10
 #define ERR_SUBMIT_FAILED 11
@@ -73,14 +68,13 @@ static_assert(PARAM_BRIDGE_EXECUTOR_HANDLES == 2U,
 // 下标 = ParamSetTarget.field = param_device_slot_t
 // （0=pos_min 1=pos_max 2=vel_limit 3=torque_limit 4=limit_protect 5=direction）。
 //
-// ⚠️ 右列 param_field **不是**左列 wire field 的镜像：两套编号数值上不同
-// （wire 3 = 力矩，param_field_t 3 = 位置下限），互用不会被任何校验拒绝，只会
-// **静默写错槽位**。所以映射必须逐行写出来，并由下面的断言钉住长度。
+// ⚠️ 右列 param_field **不是**左侧 wire field 的镜像（wire 3 = 力矩，param_field_t 3
+// = 位置下限），互用不会被任何校验拒绝，只会**静默写错槽位**——所以逐行写出，并由
+// 下面的断言钉住长度。
 //
-// 表与枚举分离是 2026-09-19 那次事故留下的规矩：当时有人在 param_field_t 尾部
-// 追加 6 个 PID 字段，注册循环以枚举边界为上界，把它们自动带进了参数树（恒
-// NaN、纯占槽、第 37 台起静默失败）。教训是"枚举全集 ≠ 可操作集合"，加字段
-// 必须显式改这张表。事故完整记录见 decision-log。
+// 表与枚举分离是 2026-09-19 事故留下的规矩：曾有人在 param_field_t 尾部追加 6 个 PID
+// 字段，被以枚举边界为上界的注册循环自动带进参数树。"枚举全集 ≠ 可操作集合"，加字段
+// 必须显式改这张表。详见 decision-log。
 typedef struct {
   param_field_t param_field;            // Flash blob / 视图槽位序
   control_mailbox_config_kind_t kind;   // 内核动作
@@ -147,13 +141,11 @@ static uint32_t g_set_zero_id = 0;
 static int64_t g_clear_fault_seq = 0;
 static uint32_t g_clear_fault_id = 0;
 
-// 保存脉冲的进度游标：一次保存可能要下发几十台，而配置 FIFO 只有 16 深、消费侧
-// 每 5ms 边界只抽 4 条。一次 poll 里全推出去必然溢出，而被拒的台设备侧没落盘、
-// W25 却已经无条件落了盘（storage_task_request_save 是整份视图快照）⇒ 下次上电
-// 就是"记录新、设备旧"的假不一致，操作者得逐台重核。故按拍分批、全部下发完才
-// 落 W25。
+// 保存脉冲的进度游标：一次保存可能要下发几十台，而配置 FIFO 只有 16 深、消费侧每
+// 5ms 边界只抽 4 条；全推出去必然溢出，被拒的台设备侧没落盘而 W25 已整份落盘 ⇒
+// 下次上电就是"记录新、设备旧"的假不一致。故按拍分批，全部下发完才落 W25。
 // **不能拿脏位当游标**：被运动禁写门拒掉的台（ACTIVE/SAFE_STOP）脏位永远不清，
-// 用"还有脏台吗"判"扫完了吗"会永远不收敛，W25 就永远不落。
+// 用"还有脏台吗"判"扫完了吗"会永不收敛、W25 永不落。
 // 游标下标对 g_views 稳定：内核表项只增不减，copy_param_views 按注册顺序输出。
 static uint16_t g_save_cursor = 0U;
 static bool g_save_requested = false;     // 收到 SAVE，尚未起航
@@ -297,10 +289,9 @@ static bool dispatch_target(const motor_control_param_view_t *v, uint8_t field,
 }
 
 // ---- 整条校验 ----
-//
 // 任一不成立 → false（last_error 已置），调用方直接返回、一个字节都不下发。
-// **纯函数式**：不碰 mailbox、不发布，所以"整条受理或整条拒绝"是能兑现的
-// 承诺而不是尽力而为——凡是能在这里判定的失败，都不会在分发阶段才冒出来。
+// **纯函数**：不碰 mailbox、不发布，所以"整条受理或整条拒绝"是能兑现的承诺——
+// 凡能在这里判定的失败，都不会拖到分发阶段才冒出来。
 static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
   // count 是 targets.size 的冗余声明（口径同 MotorPolicyArray.count）：对不上
   // 就说明发送方对契约的理解与固件不同，宁可整条拒。
@@ -602,14 +593,10 @@ static void publish_system_status() {
 }
 
 // ---- 保存三段状态机 ----
-//
-// **save_in_progress 覆盖全程**：
-//   ① g_save_requested     → 起航（游标归零）
-//   ② g_save_active        → 设备侧分批下发 0x2539
-//   ③ g_save_flash_pending → W25 落盘，等 storage 终态
-// 旧实现把 ② 扫完就直接报"保存完成"（清布尔与落盘请求同一拍），而 v3 的 W25 要
-// 擦 2 个扇区（量级 ~1s/扇区）——"完成"比真正落盘早了整整一段，此时断电就是真
-// 丢数据。现在必须 ③ 出终态才算完。
+// **save_in_progress 覆盖全程**：① g_save_requested 起航（游标归零）；② g_save_active
+// 设备侧分批下发 0x2539；③ g_save_flash_pending W25 落盘、等 storage 终态。
+// 旧实现在 ② 扫完就报"保存完成"（清布尔与落盘请求同一拍），而 v3 的 W25 要擦 2 个
+// 扇区（~1s/扇区）——"完成"比真正落盘早一整段，此时断电就是真丢数据。必须 ③ 才算完。
 static void poll_save(uint32_t now) {
   if (g_save_requested && !g_save_active && !g_save_flash_pending) {
     g_save_requested = false;

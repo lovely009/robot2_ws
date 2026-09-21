@@ -1,26 +1,18 @@
-// 参数与系统命令桥（**话题面**）：取代 2026-09-21 退役的 rclc 参数服务器。
+// 参数与系统命令桥（**话题面**）。
 //
-// 下行两条（订阅）：
-//   /micro_ros_do/param_set       ParamSetArray   稀疏参数写（整条受理/整条拒绝）
-//   /micro_ros_do/system_command  SystemCommand   save/refresh/set_zero/clear_fault
-// 上行一条（发布）：
-//   /micro_ros_up/system_status   SystemStatus    错误电平 + 四个完成序号，5 Hz
+// 下行：/micro_ros_do/param_set       ParamSetArray  稀疏参数写（整条受理/整条拒绝）
+//       /micro_ros_do/system_command  SystemCommand  save/refresh/set_zero/clear_fault
+// 上行：/micro_ros_up/system_status   SystemStatus   错误电平 + 四个完成序号，5 Hz
 //
-// **只读侧不在这里**：参数核对的双行快照（固件记录 vs 驱动板回读）由
-// motor_bridge 的 /micro_ros_up/device_param_report 承载，它消费本桥的
-// param_bridge_views()。写侧与读侧的槽位序是同一套（param_device_slot_t）。
+// **只读侧不在这里**：参数核对的双行快照由 motor_bridge 的 device_param_report 承载，
+// 它消费本桥的 param_bridge_views()。读写两侧的槽位序是同一套（param_device_slot_t）。
 //
-// 语义：参数写是**异步事务**——回调只做「整条校验 + 提交 mailbox」，同步返回
-// 不代表成功；最终成败经内核 CONFIG_RESULT 事件异步给出（on_config_result），
-// 并由 system_status.last_error 呈现。回调运行在 micro-ROS 任务上下文，不得
-// 直接发 FDCAN / 擦 Flash——一律经 mailbox 或 storage 任务通知（ARD §28.1）。
+// 参数写是**异步事务**：回调只做「整条校验 + 提交 mailbox」，同步返回不代表成功；
+// 成败经内核 CONFIG_RESULT 事件异步给出，并由 system_status.last_error 呈现。
+// 没有影子副本、没有回滚——话题是**命令**不是状态副本，失败 = last_error，操作员重发。
 //
-// 与参数面时期的差异（都是简化，不是新增能力）：
-//   - 没有影子副本、没有失败回滚：话题是**命令**不是状态副本，失败 = last_error
-//     + 脏位不翻转 + record_dirty 仍为真，由操作员重发。
-//   - 完成判据从"读 system.<x>_seq"变成"读 system_status.<x>_seq"，语义不变。
-//   - enable/kp/kd 仍在 /micro_ros_do/motor_policy（ARD §19.4 禁止它们进命令
-//     快照），本桥从不经手。
+// 回调运行在 micro-ROS 任务上下文，不得直接发 FDCAN / 擦 Flash（ARD §28.1）。
+// enable/kp/kd 走 /micro_ros_do/motor_policy（ARD §19.4），本桥从不经手。
 
 #ifndef PARAM_BRIDGE_H
 #define PARAM_BRIDGE_H
@@ -43,10 +35,8 @@ extern "C" {
 // 有 static_assert 与 .msg 上界共同守着（见 .cpp）。
 #define PARAM_BRIDGE_EXECUTOR_HANDLES 2U
 
-// 历史：本桥曾承载 rclc 参数服务器，容量按 72 槽（10 system + 10 电机 × 6 项）
-// 一次性预分配，常驻 23,616 B 的 DTCM 堆。那段推导（328 B/槽的实测斜率、
-// 416 槽必然分配失败、rclc 不检查分配结果）保留在
-// docs/architecture/motor-runtime-decision-log.md 与
+// 历史：本桥曾承载 rclc 参数服务器（72 槽一次性预分配，常驻 23,616 B DTCM 堆）。
+// 那段推导保留在 docs/architecture/motor-runtime-decision-log.md 与
 // docs/plans/active/48-motor-scale-design.md §5.2/§5.3，不在活注释里复制第二份
 // ——已经漂移过一次。话题面不预分配，容量随 .msg 的有界数组走。
 

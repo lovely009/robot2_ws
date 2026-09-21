@@ -1,9 +1,7 @@
-// 传感器业务任务（官方 CtrBoard-H7_IMU_TempCtrl 任务编排移植）。
-//
-// 官方流程：osDelay(500) → heater_init() 启 TIM3 PWM → BMI088_init() →
-// 等 ACC_INT(PE10) 二值信号量 → BMI088_read → heater PID → CCR4。
-// 本工程使用 Arduino attachInterrupt()，加热 PWM 在 heater 模块，保留 micro-ROS 发布；
-// 任务命名为 sensor，后续其他传感器也在此任务编排。
+// 传感器业务任务（移植自官方 CtrBoard-H7_IMU_TempCtrl 编排）：osDelay(500) →
+// heater_init() 启 TIM3 PWM → BMI088_init() → 等 ACC_INT(PE10) → BMI088_read →
+// heater PID → CCR4。本工程改用 Arduino attachInterrupt()，加热 PWM 在 heater 模块。
+// 后续其他传感器也在此任务编排。
 
 #include "sensor_task.h"
 

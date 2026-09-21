@@ -1,31 +1,16 @@
-// 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15；下行已精简）。
+// 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15）。
 //
-// 订阅（3 句柄）：
-//   /micro_ros_do/motor_command_array（100Hz 完整快照）→ 校验 → mailbox 快照
-//   /micro_ros_do/motor_trajectory（多点轨迹，段级低频）→ 校验 → mailbox 轨迹通道
-//   /micro_ros_do/motor_policy（逐电机 enable/kp/kd，低频）→ 校验 → mailbox 策略通道
+// 下行 3 条（订阅）：motor_command_array（100Hz 完整快照）、motor_trajectory（多点
+// 轨迹）、motor_policy（逐电机 enable/kp/kd）。
+// 上行 7 条（发布）：motion_states 100Hz、motor_status_array 20Hz、motor_topology 1s、
+// motor_events、trajectory_state 10Hz、diagnostics 1Hz、device_param_report 1Hz + 变化。
+// 全部用相对名，见下。
 //
-// 两条下行命令源的仲裁在内核：轨迹声明集合内的电机由轨迹独占，快照对它
-// 既不下发也不软停；集合外的电机仍由快照负责（缺失即软停，ARD §13.1）。
-// 策略与二者正交：它是控制律参数与武装位，不是运动目标（ARD §15.4 禁止
-// Kp/Kd/Enable 进入 100Hz 快照，故单独成一条）。
-// 发布（7）：
-//   micro_ros_up/motion_states（100Hz 运动状态，只读副本）
-//   micro_ros_up/motor_status_array（20Hz 诊断）
-//   micro_ros_up/motor_topology（1s 全量拓扑）
-//   micro_ros_up/motor_events（事件转发）
-//   micro_ros_up/trajectory_state（10Hz 轨迹执行状态）
-//   micro_ros_up/diagnostics（1Hz 固件计数器）
-//   micro_ros_up/device_param_report（1 Hz + 变化即发，参数核对双行快照）
-//
-// 下行无配置通道：型号绑定由内核在发现建档/重连时经 READ_IDENTITY 事务读
-// 设备自报身份并查型号目录完成；授权/增益/限位取内核安全默认（建档
-// policy_enable 默认 true、全局授权 mailbox 引导豁免、增益回退
-// profile default_kp/kd、CERB 限位在驱动器侧配置）。
+// 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），
+// 集合外仍归快照（缺失即软停，ARD §13.1）。策略与二者正交（ARD §15.4 禁止 kp/kd/enable
+// 进 100Hz 快照）。型号绑定由内核经 READ_IDENTITY 事务完成，本桥不经手下行配置。
 //
 // 本桥不做：joint_name 语义、协议/CAN 字节、直接 RX 访问（ARD §28.1）。
-// QoS（TBD-ROS-05 默认表）：命令/状态流 best-effort depth1（latest-wins、
-// 无历史积压，ARD §34）；事件/拓扑 reliable 小深度。
 
 #include "motor_bridge.h"
 
@@ -73,9 +58,8 @@ static uint16_t g_trajectory_target_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS]
 static can_bridge_msgs__msg__MotorPolicyTarget g_policy_targets_buf[kRosArrayCapacity];
 
 // ---- 话题名 ----
-// 订阅与发布统一用**相对名**（同在 micro_ros_up/ 命名空间）：整条固件接口因此
-// 可被 launch 重映射到别的前缀，且"哪些话题是固件私有接口"一眼可辨——根命名
-// 空间留给标准话题（/joint_states 等，由 motor_hardware_interface 的适配桥产出）。
+// 统一用**相对名**：整条固件接口可被 launch 重映射，且"哪些是固件私有接口"一眼可辨
+// ——根命名空间留给标准话题（/joint_states 等，由上层适配桥产出）。
 // 改名必须同步消费者：web_host/web/app.js 的 TOPICS。
 static const char *kCommandTopic = "micro_ros_do/motor_command_array";
 static const char *kTrajectoryTopic = "micro_ros_do/motor_trajectory";
@@ -129,11 +113,9 @@ static bool g_events_up = false;
 
 static rcl_publisher_t g_diagnostics_pub;
 static can_bridge_msgs__msg__MotorDiagnostics g_diagnostics_msg;
-// 诊断消息里三个 [<=3] 序列各有自己的静态缓冲，**必须逐条接线**。漏接的序列
-// .data 为 NULL，写入会落到地址 0（STM32H7 的 ITCM 在那儿，写不报错），两个
-// 漏接的序列于是互相覆盖——rx_hw_lost 曾整整一版都在报 tx 的数，而"板子到底
-// 发了多少帧"这个唯一的直接证据因此不可信（2026-09-20 拿模拟器实收帧对照才
-// 发现：日志算出 208 帧/s，它报 50）。
+// 诊断消息里三个 [<=3] 序列各有自己的静态缓冲，**必须逐条接线**：漏接的序列
+// .data 为 NULL，写入会落到地址 0（STM32H7 的 ITCM 在那儿，写不报错），两个漏接
+// 的序列于是互相覆盖——rx_hw_lost 曾整整一版都在报 tx 的数。
 static uint32_t g_diagnostics_ring_buf[MOTOR_CONTROL_MAX_BUSES];
 static uint32_t g_diagnostics_rx_lost_buf[MOTOR_CONTROL_MAX_BUSES];
 static uint32_t g_diagnostics_tx_count_buf[MOTOR_CONTROL_MAX_BUSES];
@@ -436,11 +418,9 @@ static void publish_trajectory_state(uint32_t now_ms) {
   note_publish(publish_rc);
 }
 
-// 设备参数核对快照：1 Hz 心跳 + 状态变化即时一帧。变化由内核事件触发
-// （CONFIG_RESULT / DEV_INIT）——写一项参数之后页面要立刻看到结论变绿，
-// 不必自己维护一份影子做比对。不在这里拷一份视图：复用 param_bridge 那一份。
-// 本函数在 motor_bridge_poll 里跑，而 param_bridge_poll 排在它**之后**（见
-// param_bridge.h 的既有契约）：读的是上一个 10ms 周期的快照，滞后一拍，
+// 设备参数核对快照：1 Hz 心跳 + 状态变化即时一帧（变化由内核 CONFIG_RESULT /
+// DEV_INIT 事件触发）。视图复用 param_bridge 那一份，不拷第二份。
+// 本函数在 param_bridge_poll **之前**跑，读的是上一个 10ms 周期的快照（滞后一拍），
 // 对 1 Hz 心跳与"写完一项看结论变绿"无影响——勿为消除这一拍去调换两个 poll。
 static void publish_device_param_report(uint32_t now_ms) {
   static uint32_t s_phase = 0U;
@@ -471,12 +451,10 @@ static void publish_device_param_report(uint32_t now_ms) {
     out.rec_pos_min = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
     out.rec_pos_max = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
     out.rec_vel_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
-    // 力矩列按 **A** 呈现，与参数面 param_set 的 field=3 同口径（设备对象
-    // 0x2538 存的就是电流）。record_si/dev_si 是关节侧 N·m，这里过一次
-    // 换算；换算放固件不放页面——系数只有内核有（v.torque_per_amp），页面
-    // 不碰 mA。系数缺失（未绑定型号）时 param_units_nm_to_amp 回 NaN，守住
-    // "缺失量一律 NaN" 的契约（绝不落 0）。位置/速度列与参数面同为内核
-    // 单位（rad / rad/s），直通、不换算。
+    // 力矩列按 **A** 呈现（设备对象 0x2538 存的就是电流），与 param_set 的 field=3
+    // 同口径；record_si/dev_si 是关节侧 N·m，这里过一次换算——系数只有内核有
+    // （v.torque_per_amp），页面不碰 mA。系数缺失时回 NaN，守住"缺失量一律 NaN"
+    // （绝不落 0）。位置/速度列与内核同为 rad / rad/s，直通不换算。
     out.rec_torque_limit = param_units_nm_to_amp(
         v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX], v.torque_per_amp);
     out.rec_safety = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
@@ -598,11 +576,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_command_up = true;
 
   sub_opts = rcl_subscription_get_default_options();
-  // 轨迹必须 reliable：它是允许跨 MTU 分片的大消息；best-effort 流不分片，
-  // 超过一个 MTU(512 B) 会被静默丢弃。当前库配置用
-  // RMW_UXRCE_STREAM_HISTORY=16（输入/输出各 8 KB），足以承载固件允许的
-  // 256 点上限（约 5.2 KB），网页对更长示教按 256 点总量分段，不能把 1080
-  // 点整条塞进 MCU。发布侧 rosbridge 必须使用 reliable 才能配上。
+  // 轨迹必须 reliable：它允许跨 MTU 分片，而 best-effort 流不分片，>512 B 会被静默
+  // 丢弃。当前 STREAM_HISTORY=16（输入/输出各 8 KB）足以承载 256 点上限（约 5.2 KB），
+  // 网页对更长示教按 256 点分段。发布侧 rosbridge 也必须 reliable 才配得上。
   sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_trajectory_sub, node,
                             ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,

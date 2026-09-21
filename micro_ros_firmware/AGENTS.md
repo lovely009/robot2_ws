@@ -72,12 +72,23 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   这台 CANable 对主机侧调度延迟极其敏感：**主机侧程序卡顿会直接表现成"总线故障"**，
   而且报错方向指向"对端不发 ACK"，会把人往固件/CANable 上引。用 cangaroo 单独测一下
   总线是最快的反证。
-- **effort 模式的力矩天花板**：URDF 四关节都是 `<limit effort="10.0">`，而 MIT 律
-  `tau = kp*err` 在 kp=30、误差 1.57 rad 时需要 ~47 N·m → 被模型钳到 10，肩/肘关节
-  顶不住重力、停在机械下限（实测 m2 停在 −1.5705 ≈ −π/2，抬 `--tau-limit` 到 80 也无效）。
-  要真跑 effort 动力学，得给轨迹的 `effort` 字段填**重力前馈**，或抬 URDF 的 effort
-  上限——两者都是模型层的事，**未经确认不要改**。做轨迹播放/全链路功能验证用
-  `position` 模式（模拟器 docstring 的默认口径也是它）。
+- **「某台不跟」先查 `motion_states.target_source`，别怀疑力矩**。`0 = NONE` 表示该台
+  没过 `entry_may_move` 的门（`policy_enable` / `motion_authorized` /
+  `dev_params_allow_motion` 之一）；此时**快照仍被受理、`snapshot_accepted` 照涨、
+  ROS 侧完全看不出是哪台被门住**，只是那台不动（实测 m2/m4 钉在 −π/2 就是这个形状，
+  与力矩无关）。`tools/traj_play.py` 在对齐阶段会逐台打印并告警。
+- **力矩上限不是本模型的瓶颈**（曾误判并把 effort 抬到 45，已 revert 400df13）。
+  用 URDF 自身的质量与几何对势能做数值求导（PE(q) 对关节角中心差分），四关节最大
+  静态重力力矩是 **joint_link1 1.87 / joint_link2 0.27 / joint_link3 0.27 /
+  joint_link4 0.00 N·m**——活动连杆合计仅约 0.73 kg。原有的 `<limit effort="10.0">`
+  比所需大 5–37 倍，**够用**。把 `kp*err` 当成"所需力矩"是拿控制增益当物理负载，两者
+  不是一回事。
+- **position 模式不可用（模型缺位置 PID）**：xacro 的 `sim_control_joint` 只声明
+  `position`/`effort` 两个命令接口，**没有位置 PID 参数**，gz_ros2_control 无增益即
+  输出零力矩。实测直接往 `/arm_position_controller/commands` 发 0.5，四关节不动或仅
+  重力下垂。**只能用 effort 模式**（xacro 注释的口径也是它）。
+- **示教轨迹只有时间与位置**（velocity/effort 恒 0），所以**没有前馈可用**，臂的保持
+  完全靠 MIT 的 kp 项——调参时别指望用 `effort` 字段补重力。
 - **轨迹容量**：整条轨迹上限 `MOTOR_CONTROL_MAX_TRAJECTORY_POINTS=256` 个路点，且
   **四台电机共用**（4 台 = 64 个时刻）。示教导出的文件动辄 600/1080/1800 点，装不下。
   长轨迹用 `micro_ros_agent/tools/traj_play.py`：主机侧切成 ≤256 点的窗口、在窗口边界

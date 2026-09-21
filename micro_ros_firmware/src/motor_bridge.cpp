@@ -52,6 +52,7 @@
 #include "motor_rt_task.h"
 #include "param_bridge.h"
 #include "param_units.h"
+#include "ros_qos.h"
 
 // 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
 // 禁止反序列化路径上的动态分配）。
@@ -158,24 +159,6 @@ size_t motor_bridge_executor_handle_count(void) {
   // 内核内自动完成）。加订阅必须同步本计数，否则 executor 句柄不足会静默
   // 丢回调。
   return 3U;
-}
-
-// QoS 助手（TBD-ROS-05 默认表）。
-static rmw_qos_profile_t qos_stream() {
-  // 高频流：best-effort + depth 1（latest-wins，无历史积压，ARD §34）。
-  rmw_qos_profile_t qos = rmw_qos_profile_default;
-  qos.reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
-  qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
-  qos.depth = 1;
-  return qos;
-}
-
-static rmw_qos_profile_t qos_reliable(size_t depth) {
-  rmw_qos_profile_t qos = rmw_qos_profile_default;
-  qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
-  qos.durability = RMW_QOS_POLICY_DURABILITY_VOLATILE;
-  qos.depth = depth;
-  return qos;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +394,10 @@ static void publish_diagnostics(uint32_t now_ms) {
   g_diagnostics_msg.mailbox_rejected_command = d.mailbox_rejected_command;
   g_diagnostics_msg.mailbox_rejected_trajectory = d.mailbox_rejected_trajectory;
   g_diagnostics_msg.mailbox_rejected_policy = d.mailbox_rejected_policy;
-  g_diagnostics_msg.publish_fail = g_publish_fail;
+  // 合并本模块与 param_bridge 的出站失败：同一根 USB CDC 链路上的同类故障，
+  // 分两个计数对外毫无意义（param_bridge 的 system_status 也是 best-effort）。
+  g_diagnostics_msg.publish_fail =
+      g_publish_fail + param_bridge_publish_fail_count();
   g_diagnostics_msg.rx_hw_lost.size = MOTOR_CONTROL_MAX_BUSES;
   g_diagnostics_msg.tx_frame_count.size = MOTOR_CONTROL_MAX_BUSES;
   for (uint32_t i = 0U; i < MOTOR_CONTROL_MAX_BUSES; ++i) {

@@ -30,9 +30,9 @@ static rclc_executor_t g_executor;
 static rcl_timer_t g_timer;
 static rcl_allocator_t g_allocator;
 
-// executor 最大句柄数：定时器 + 各业务桥订阅数 + 参数服务器（桥自报，
-// 避免魔法数截断）。参数服务器的 5 个 service handle 少算一个就会在
-// rclc_executor_add_parameter_server 上失败。
+// executor 最大句柄数：定时器 + 各业务桥订阅数（桥自报，避免魔法数截断）。
+// 只有订阅/定时器/服务占 handle，发布不占。少算一个就在 add_subscription 上
+// 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
 static size_t executor_handle_count() {
   return 1U + motor_bridge_executor_handle_count() +
          PARAM_BRIDGE_EXECUTOR_HANDLES;
@@ -50,7 +50,8 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   (void)last_call_time;
   imu_bridge_poll();
   motor_bridge_poll();
-  // 排在 motor 之后：同一拍 CONFIG_RESULT 钩子先于参数注册/同步处理。
+  // 排在 motor 之后：同一拍 motor_bridge 的 CONFIG_RESULT 钩子先推进完成序号，
+  // 本拍末尾发的 system_status 就带上最新值（顺序反了要等下一帧）。
   param_bridge_poll();
 }
 
@@ -62,9 +63,7 @@ void ros_bridge_destroy() {
   motor_rt_set_agent_connected(false);
   imu_bridge_destroy(&g_node);
   motor_bridge_destroy(&g_node, &g_executor);
-  // 参数服务器只 fini 自己的实体；留在 executor 里的 service handle 由下方
-  // rclc_executor_fini 一并回收（rclc 没有 remove_parameter_server）。
-  param_bridge_destroy(&g_node);
+  param_bridge_destroy(&g_node, &g_executor);
 
   if (g_timer_up) {
     rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);

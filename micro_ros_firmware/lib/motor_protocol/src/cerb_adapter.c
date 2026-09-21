@@ -10,7 +10,7 @@
 //
 // 能力边界（ARD §25 + 2026-09-05 协议核实）：0x080 SYNC 触发设备 20ms 周期
 // 状态上报——上报帧即心跳（承担总线检测），因此 SYNC 心跳属管理性使用，
-// 禁止作为 50Hz 控制触发（禁止项 14）；反馈帧（0x300+node）为命令的实时
+// 禁止作为运动控制边界触发（禁止项 14）；反馈帧（0x300+node）为命令的实时
 // 状态。0x200 多控仅在显式非 MIT 模式下由 adapter 提供，本阶段不实现
 // （禁止项 13）；设备侧限位必须走 request_id 事务 + 读回核验——厂家管理
 // 对象未决（TBD-CONFIG-01），当前一律 UNSUPPORTED，不猜厂家字节。
@@ -103,8 +103,8 @@
 #define CERB_SUB_DEFAULT 0x00U
 
 // 每阶段等待响应；超时自动重试 ≤2 次。
-// 30ms 是"设备在跑 50Hz 控制时仍从容应答"的量级：厂家 SDO 是一问一答，
-// 超时过短会重发、重发又让设备更慢，反而把整条读数链压成"一直超时"
+// 30ms 是厂家 SDO 一问一答的保守阶段超时，不是运动控制周期；超时过短会重发、
+// 重发又让设备更慢，反而把整条读数链压成"一直超时"
 // （2026-09-17 台架实测：20ms 下 node1 连续超时）。总线级串行见内核
 // bus_stage_in_flight。
 #define CERB_SDO_TIMEOUT_MS 30U
@@ -346,6 +346,18 @@ static bool cerb_encode_disable(const motor_protocol_model_profile_t *profile,
                              MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
+// 发现探测帧（0x080 SYNC）：**FD+BRS**，与 SDO/MIT 同格式——全总线统一走
+// CANFD 加速，不再有经典帧。理由不是风格，而是可观测性：经典帧不经过数据
+// 相位（BRS 之前全是仲裁位率），所以**数据段位率配错时唯独 SYNC 还能通**，
+// 观察者会据此误判链路正常。2026-09-22 台架实测正是如此：CANable 的 Y7 被
+// 静默拒绝、数据段停在默认位率，SYNC 照常、其余帧全灭，查了很久。
+// 统一为 FD+BRS 后每条出帧都过数据相位，配错必然整体不通，不再有假阳性。
+// 零长度也照样验证数据相位：BRS 之后直到 CRC 定界符（含 17/21 位 CRC 与
+// 填充位）都按数据位率发送，DLC=0 并不豁免。
+//
+// 未验（真机）：厂家说明书 §3.1 只写明 SDO 是「CANFD 加速标准帧」，0x080
+// SYNC 的帧格式无书面依据。README「示波器/candump 验证每 20ms 仅一帧 0x080」
+// 是核对点；真机若拒绝 FD 的 SYNC，把下面两行改回 false 即可（唯一改动点）。
 static bool cerb_encode_discovery_sync(uint8_t bus_index,
                                        motor_protocol_tx_frame_t *out) {
   if (out == NULL) {
@@ -356,9 +368,9 @@ static bool cerb_encode_discovery_sync(uint8_t bus_index,
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P2;
   out->can_id = MOTOR_PROTOCOL_CERB_SYNC_ID;
   out->size = 0U;
-  out->is_fd = false;
+  out->is_fd = true;
   out->is_extended = false;
-  out->is_brs = false;
+  out->is_brs = true;
   return true;
 }
 

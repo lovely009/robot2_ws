@@ -10,7 +10,7 @@
 //    Iq = τ ÷ (Kt × 减速比 × 效率)（命令方向，修正旧路径 N·m/A 混用）。
 //
 // 反馈模型（2026-09-05 与厂家行为核实，两部分）：
-//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，跟随控制边界 50Hz；
+//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，跟随控制边界 200Hz；
 //  - 20B 状态帧 @ status-id（0x702+4n）：20ms 周期自主上报，承担总线检测
 //    （心跳），并携带电压/故障/身份字段。
 //
@@ -85,7 +85,7 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
   motor_protocol_joint_state_t wire = {0};
   if (frame->can_id == motor_protocol_vaxor_reply_id(node) &&
       frame->dlc == 12U) {
-    // 回显帧恒 12B（实时反馈，跟随控制边界 50Hz）；20B 状态帧只在 status-id。
+    // 回显帧恒 12B（实时反馈，跟随控制边界 200Hz）；20B 状态帧只在 status-id。
     if (!motor_protocol_unpack_vaxor_feedback(frame->data, frame->dlc, &wire)) {
       return false;
     }

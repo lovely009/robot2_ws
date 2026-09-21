@@ -123,8 +123,8 @@ void bsp_can_init(void) {
 }
 
 // 每总线**成功提交给硬件**的发送帧数。放在这里（使用点之前）而不是文件后半段——
-// 顺序错了会报 undeclared（踩过）。它回答的是"板子到底发了多少帧"：SYNC 一直在发
-// （50Hz×总线数），所以基线非零，命令一上来就跳。
+// 顺序错了会报 undeclared（踩过）。它回答的是"板子到底发了多少帧"：管理性 SYNC
+// 一直在发（20ms/50Hz×总线数），所以基线非零；运动命令从控制边界开始才跳升。
 static uint32_t g_tx_frame_count[CAN_TX_BUS_COUNT] = {0U};
 
 uint32_t can_bsp_tx_frame_count(uint8_t bus_index) {

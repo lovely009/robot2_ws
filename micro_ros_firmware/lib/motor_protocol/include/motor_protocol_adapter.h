@@ -63,7 +63,7 @@ typedef struct {
 // 分配 P0/P1/P2 队列（ARD-0007 §22）。
 typedef enum {
   MOTOR_PROTOCOL_TX_CLASS_P0 = 0U, // 安全帧：软停/停机/失能（可抢占）
-  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 50 Hz MIT 控制（latest-wins 槽）
+  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 200 Hz MIT 控制（latest-wins 槽）
   MOTOR_PROTOCOL_TX_CLASS_P2 = 2U  // 发现/配置管理（有界配额）
 } motor_protocol_tx_class_t;
 
@@ -354,7 +354,7 @@ typedef struct motor_protocol_adapter {
                        const motor_protocol_raw_frame_t *frame,
                        motor_protocol_measured_state_t *out);
 
-  // 50 Hz MIT 控制帧（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
+  // 200 Hz MIT 控制帧（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
   bool (*encode_mit_command)(const motor_protocol_model_profile_t *profile, uint16_t node,
                              uint8_t bus_index,
                              const motor_protocol_control_intent_t *intent,
@@ -374,7 +374,8 @@ typedef struct motor_protocol_adapter {
                          uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 发现/重连/热插拔探测帧（CERB 0x080 SYNC；vaxor 无 → 返回 false）。
-  // 禁止作为常规 50Hz 控制触发（ARD §23.4、禁止项 14）。
+  // 禁止作为运动控制边界触发；它只负责发现、重连和协议状态心跳
+  // （ARD §23.4、禁止项 14）。
   bool (*encode_discovery_sync)(uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 配置事务：阶段数（0 = 该请求不被本协议支持 → 内核回 UNSUPPORTED）。

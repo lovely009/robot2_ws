@@ -54,13 +54,17 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 ## micro-ROS 坑
 
-- **meta 5 service 上限**：rclc 参数服务器固定建 5 个 service（get/get_types/set/
-  list/describe），要求 `RMW_UXRCE_MAX_SERVICES >= 5`（`microros_user.meta`）。
-  这是 libmicroros.a 库编译期事实，-D 改不了；builder 见 .a 即 early return，改 meta
-  须删 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/` 和
+- **meta 槽位上限（PUBLISHERS / SUBSCRIPTIONS / SERVICES / STREAM_HISTORY）**：
+  这些是 libmicroros.a 的**库编译期**事实，-D 改不了；builder 见 .a 即 early return。
+  改 meta 须删 `.pio/libdeps/stm32h723vgt6/micro_ros_platformio/libmicroros/` 和
   `build/mcu/`（保留 `build/mcu/src` 源码缓存）再 `pio run`（可能需联网），否则
   旧 CMake cache 会继续追加旧 `-D` 参数，节点 WAIT_AGENT 无限重连且编译期零提示。
+  首选**离线**路径：`../micro_ros_agent/tools/refresh_microros_messages.py`
+  （复用缓存、不联网，meta 与 .msg 改动同一趟生效）。
   `tools/check_microros_config.py`（pre: 脚本）构建前校验旧缓存并 Exit(1)。
+  当前用量：publishers 10/12、subscriptions 5/6、services 0/5（**参数服务器
+  2026-09-21 退役后 services 成纯余量，有意不降**——降它要改 check 阈值，收益只是
+  静态数组、不占 DTCM 堆）。
 - **改消息后**跑 `../micro_ros_agent/tools/refresh_microros_messages.py`
   增量刷新（复用缓存、不联网），勿 clean_microros。消息唯一来源是
   `../micro_ros_agent/src/can_bridge_msgs`，固件侧只经 extra_packages 符号链接复用。
@@ -74,17 +78,30 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 ## 参数面与内存
 
-- **每电机 5 项**（`pos_min/pos_max/vel_limit/torque_limit/limit_protect`），由
-  `src/param_bridge.cpp` 的 `kParamMotorFields[]` **显式列出**（不再由 `PARAM_FIELD_COUNT`
-  枚举边界决定——PID 六项曾因此被静默带进参数树），
-  `PARAM_BRIDGE_MAX_PARAMS = 64` → 覆盖 10 台。改这个数或每台项数前先读
-  `include/param_bridge.h` 的容量注释：**堆池是 DTCM 全部减 8 KiB 主栈 = 120 KiB，
-  不可能再扩**（FreeRTOS `heap_useNewlib_ST` 与 newlib 共用），只能搬占用。
-- `m<id>.limit_protect` 是**正向语义**（1 = 设备侧保护生效），设备原值相反
+- **参数面是三条话题，没有参数服务器**（2026-09-21 起）：下行
+  `micro_ros_do/param_set`（`ParamSetArray`，reliable）+ `micro_ros_do/system_command`
+  （`SystemCommand`，reliable），上行 `micro_ros_up/system_status`（`SystemStatus`，
+  best-effort 5 Hz）。`ros2 param set/get` 与 `rclc_parameter` 已整体退役；
+  参数不再占任何常驻堆（此前 72 槽常驻 23.6 KB DTCM 堆）。
+- **`param_set` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
+  3=torque_limit 4=limit_protect 5=direction），由 `src/param_bridge.cpp` 的
+  `kFields[]` 显式列出——**不是** `PARAM_FIELD_COUNT` 枚举边界（PID 六项曾因此被
+  静默带进参数树）。⚠️ 它也**不是** `param_field_t` 的次序（那里 3 = pos_min）：
+  两套里 `field=3` 都合法，互用不报错、只静默写错槽位。
+- 位置限位必须**成对**出现在同一条 `param_set` 里；上界 16 目标 =
+  `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`（有 `static_assert` 守着），
+  **改 .msg 上界到 17+ 会立刻编译失败**——那是故意的。
+- `field=4`（limit_protect）是**正向语义**（1 = 设备侧保护生效），设备原值相反
   （0 = 保护开）；反转只在 `src/param_bridge.cpp` 的 `submit_safety_protect`
   一处发生，协议层只认原值。
+- **写 ≠ 保存**：`param_set` 只改设备 RAM + 固件记录；`system_command` 的
+  `COMMAND_SAVE` 才触发设备 `0x2539` + W25 落盘。完成判据是 `system_status` 的
+  `save_seq` 前进且 `save_in_progress` 转 false——它覆盖**设备分批下发 + W25 落盘**
+  全程（旧实现在落盘前就报完成）。
 - `micro_ros` 任务栈是**静态分配**（32 KiB 落 RAM_D1 `.bss`，见 `micro_ros_task.cpp`），
-  目的是给参数槽腾 DTCM 堆；`motor_rt` 栈仍是动态分配、留在 0-wait DTCM。
+  `motor_rt` 栈仍是动态分配、留在 0-wait DTCM。*（历史：静态化的初衷是给参数槽腾
+  DTCM 堆；参数槽已随参数服务器退役，但**这个分配本身保留**——`motor_rt` 的动态栈
+  仍在 0-wait DTCM 上，别顺手改回去。）*
 
 ## W25 / 存储
 
@@ -109,11 +126,11 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
   `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
   与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。
-- **落盘只有一个触发：`system.save` 脉冲**（2026-09-21 写/保存分离后）。写事务成功
+- **落盘只有一个触发：`system_command` 的 `COMMAND_SAVE`**（2026-09-21 写/保存分离后）。写事务成功
   只把该台 `record_dirty_slots` 置脏（`device_param_report.record_dirty` 随之置真），
   不再是落盘触发；"设备写事务成功 → 500ms 去抖自动落盘"已删（聚合脏标志与
   `motor_control_take_record_dirty()` 一并移除）。只写不保存 = 未保存，下次上电不
-  通过——这正是 owner 要的行为。`system.save` 对 dirty 台写设备 `0x2539` 并落 W25。
+  通过——这正是 owner 要的行为。SAVE 对 dirty 台写设备 `0x2539` 并落 W25。
 - Flash 缓冲必须 ≥4 字节对齐（代码统一 `alignas(8)`）：-Os 下结构体访问生成
   STRD，非对齐直接 HardFault。
 - 擦写阻塞：v2 单扇区实测 ~1s（**旧值**）；v3 双扇区阻塞值**待台架实测**

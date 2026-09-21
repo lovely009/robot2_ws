@@ -1,6 +1,15 @@
 # 上电归一（保护/方向）与方向参数设计
 
-> **状态：设计已定（2026-09-20 owner 逐条拍板），待实现。**
+> **状态：设计已定（2026-09-20 owner 逐条拍板），已实现。**
+>
+> **⚠️ 勘误（2026-09-21，参数面退役）**：本文所有 `m<id>.*` 参数名与
+> `PARAM_BRIDGE_MAX_PARAMS` 槽位算式（§7、§9 等）**已随 rclc 参数服务器整体退役失效**
+> ——参数面改为 `micro_ros_do/param_set` / `system_command` + `micro_ros_up/system_status`
+> 三条话题。**本文的设计结论一条未变**（上电归一时序、方向无记录不猜、`ZERO_STALE` /
+> `UNPROTECTED_UNCONFIRMED` 成因、保护/方向双出口），变的只是承载通道：参数名
+> `m<id>.limit_protect` → `param_set` 的 `field=4`，`m<id>.direction` → `field=5`，
+> `system.save` → `system_command` 的 `COMMAND_SAVE`。**下文保留当时原文**，
+> 不再逐行改写。退役决定见 `../../architecture/motor-runtime-decision-log.md` §6.9 结案块。
 >
 > 本文取代 [交接文档](../../../docs/reports/2026-09-19-firmware-param-surface-handoff.md) §二
 > 的两条决定（"保护只接受写 0"、"保护/方向不进参数面"），并承接其余部分。

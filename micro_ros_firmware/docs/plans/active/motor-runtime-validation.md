@@ -4,8 +4,9 @@
 > 唯一的开放项清单；原交接文档已归档（[HANDOFF](../archive/HANDOFF-motor-runtime-refactor.md)）。
 >
 > 现状基线（架构不在此重复）：host CTest 19 个用例全绿（18 个 C++ cassert +
-> 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（**3 订 6 发** + rclc
-> 参数服务器：静态量在参数树、动态量走 `/micro_ros_do/motor_policy`）、构建与台架顺序以 [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
+> 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（**5 订 8 发**；参数面自
+> 2026-09-21 起是话题，`rclc` 参数服务器已退役）、构建与台架顺序以
+> [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
 > [ADR 0007](../../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 2026-09-18 勘误和
 > [决策日志](../architecture/motor-runtime-decision-log.md)为准。
 > 标「host 已覆盖」表示逻辑有自动测试、仅缺真机证据；其余 `[ ]` 均需台架或设计动作。
@@ -25,6 +26,12 @@
 
 ## 2. 安全语义真机确认
 
+> **2026-09-21：本节里写成 `system.set_zero = <id>` / `system.clear_fault = <id>`
+> 的动作已改走 `micro_ros_do/system_command`**（`command` 2 = SET_ZERO、3 =
+> CLEAR_FAULT，配 `motor_id`），完成判据是 `system_status` 的 `set_zero_seq` /
+> `clear_fault_seq` 推进。命令样例见仓库根 `docs/guides/fdcan1-bench-guide.md`。
+> 下文保留原措辞（记录当时的操作序列）。
+
 - [ ] **TBD-SAFETY-01**：以厂家文档和无负载台架确认两协议 30 ms 软停实际动作。缺席软停、30 ms/100 ms 时基与单电机隔离语义 host 已覆盖。
 - [ ] **TBD-SAFETY-02**：确定 RX ring overflow 触发安全降级的阈值与恢复条件。
 - [x] Agent 断连立即失能清授权：2026-09-18 九节点台架实测——ACTIVE 中杀 agent，下一帧为失能帧（控制字 0x0c）、运动停止；重连后**不重发 SET_ENABLE**、仅新快照即恢复（会话电平纯派生）。双 AUTHORIZATION_LOST 事件语义 host 钉死。
@@ -33,9 +40,13 @@
   `PARAM_BRIDGE_MAX_PARAMS = 208` 实测把堆吃到只剩 **1,776 B**，已降为 **176**（覆盖 41 台）→ `heap_free = 12,272 B`。
   **此后变更**：176 → 224（2026-09-19，保护开关可写使每台 4→5 项；同轮把 micro_ros
   32 KiB 任务栈改静态分配落 RAM_D1，`heap_free` 12,328 → 29,748 B）→ 256 → 416
-  （**未经复核，超出 120 KiB 堆池**）→ **64**（2026-09-20 修正）。当前值以 `include/param_bridge.h` 为准。
-- [ ] **堆高水位（残余）**：176 槽下 12,272 B 只是空载观测值；仍需 48 台发现/绑定 +
-  长时间运行下的**稳态最低位**，以及最坏路径（并发 SDO 事务 + rosidl 字符串分配）的瞬态低点。
+  （**未经复核，超出 120 KiB 堆池**）→ **64**（2026-09-20 修正）。
+  **结案（2026-09-21）**：参数槽整体退役，`PARAM_BRIDGE_MAX_PARAMS` 与这个池子
+  都不存在了——参数面现在占 **0 字节常驻堆**。328 B/槽这个数只留作史证
+  （决策日志 §6.12 与 §5.3 引用它），**别再去 `include/param_bridge.h` 找那个宏**。
+- [ ] **堆高水位（残余）**：参数槽退役后，堆上再没有按电机数线性增长的常驻项，
+  这项的对象只剩**瞬态**：最坏路径（并发 SDO 事务 + rosidl 字符串分配）的低点，
+  以及 48 台发现/绑定后的稳态最低位。
 - [ ] **轨迹真机**：单/多关节轨迹期间插值位置与上位期望一致、P1 帧仍严格 50Hz；
   轨迹运行中继续发 100Hz 快照 → 轨迹机组不受影响、集合外组正常；轨迹中杀 agent
   → 立即失能、轨迹作废、不重放；播完后保持末点（**机构无抱闸**，急停与机械
@@ -75,6 +86,44 @@
 - [ ] BMI088 断线 / 阻塞 SPI / 停 DRDY：传输超时、降级重试、heater off、双缓冲不撕裂。
 
 ## 3. 参数链与 Profile
+
+> **2026-09-21：参数面退役为话题，本节全部条目的承载通道已变。** `rclc` 参数服务器
+> 已删除，`ros2 param set/get` 与 web 参数页同时失效；现行接口是下行
+> `micro_ros_do/param_set`（`ParamSetArray`）/ `micro_ros_do/system_command`
+> （`SystemCommand`），上行 `micro_ros_up/system_status`（`SystemStatus`）。
+> 等价命令与单位口径见仓库根 `docs/guides/fdcan1-bench-guide.md`。
+> 下文历史条目里的 `m<id>.*` / `system.*` 保留原样（记录当时的实测过程），
+> 但**照抄命令会失败**。
+>
+> **本轮新增开放项（全部未运行）**：
+> - [ ] **TBD-PARAM-01（`field` 序陷阱专测）**：写 `param_set` 的 `field=3`
+>   （= 设备槽序的力矩上限）后，确认 `device_param_report` 里**只有
+>   `rec_torque_limit` 变、`rec_pos_min` 不变**。wire `field` 与内核
+>   `param_field_t` 里有歧义的 3（前者力矩、后者 pos_min）互用**不会被拒绝**，
+>   只会静默写错槽位——这是本轮唯一"错了也不报"的接口，必须有实测把它钉住。
+> - [ ] **TBD-PARAM-02（整条拒绝语义）**：单边位置限位（只发 `field=0` 不发
+>   `field=1`）→ `last_error=10` 且 `record_dirty` **不翻转**；同一
+>   `(motor_id, field)` 在一条消息里出现两次 → 同样 `10`；`count != targets.size`
+>   → 同样 `10`。
+> - [ ] **TBD-PARAM-03（`request_id` 逐字回告）**：发 `request_id=424242`，在
+>   `motor_events` 的 `CONFIG_RESULT` 里找得到它。`request_id=0` 由固件代分配
+>   （mailbox 拒 0）；带 bit30 的 caller id 本地拒绝。
+> - [ ] **TBD-PARAM-04（SAVE 的 `save_in_progress` 区间，本轮唯一行为变更）**：
+>   采样确认它转 false 的时刻**晚于** `record_dirty` 全清之后——即 W25 落盘出终态
+>   才报完成。旧实现在落盘请求发出的同一拍就报完成，而 v3 要擦 2 个扇区
+>   （~1s/扇区），该窗口内断电就是真丢数据。同时验 5s 超时兜底（构造落盘不返回
+>   终态 → 强制清位 + `last_error=20`）。
+> - [ ] **TBD-PARAM-05（FIFO 上界与满量）**：一条消息发 **16** 个目标（=
+>   `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`）全成功；16 台 × 4 标量字段的用例按两条发。
+>   上界由 `static_assert` 守着（改 .msg 到 17+ 立刻编译失败），本条只验运行期行为与之一致。
+> - [ ] **TBD-PARAM-06（断连重连 ×3）**：这是 `param_bridge_destroy` 漏调
+>   `rclc_executor_remove_subscription` 的**唯一**暴露路径，故障表现是第 6 条订阅
+>   init 失败 → `WAIT_AGENT` 无限重连（编译期零提示）。必须连做 3 次。
+> - [ ] **资源账（顺带）**：`ros2 topic echo /micro_ros_up/diagnostics --field heap_free`
+>   应比退役前**上升 ~23.6 KB**；`publish_fail` 稳态保持 0（三条新话题的发布失败已
+>   并入该计数）。
+> - [ ] **话题面存在性与 QoS**：三条新话题存在，下行两条 `RELIABLE`、
+>   `system_status` 是 `BEST_EFFORT` 且约 5 Hz。
 
 - [x] **保护开关可写**（2026-09-19）：`0x2650:00` 新增写事务（SDO 写 + 读回核验，
   不跟 `0x2539`），参数项 `m<id>.limit_protect`（正向语义：1 = 保护生效），
@@ -141,15 +190,16 @@
 
 ## 4. 上层迁移（ROS 2 侧，未动工）
 
-- [ ] `motor_hardware_interface` 迁移：维护 `joint_name ↔ motor_id`、方向、零位与关节语义；发 `MotorCommandArray` + `/micro_ros_do/motor_policy`、收 `MotorMotionStateArray`；静态量经 rclc 参数服务器对接。
+- [ ] `motor_hardware_interface` 迁移：维护 `joint_name ↔ motor_id`、方向、零位与关节语义；发 `MotorCommandArray` + `/micro_ros_do/motor_policy`、收 `MotorMotionStateArray`；静态量经 `micro_ros_do/param_set` / `system_command` 下发（**rclc 参数服务器已于 2026-09-21 退役**）。
 - [ ] 消息定义改动先改权威包 `micro_ros_agent/src/can_bridge_msgs` 再同步 ROS 工作区；固件不得恢复 name-to-ID 兼容层。
 - [~] 规模约束：**2026-09-18 的「已解」被推翻**——128 → 208、每电机 4 项时看似覆盖 48 台，
   但台架实测 208 槽只剩 1,776 B 堆余量；随后每台项数因保护开关变 5 项，
   `PARAM_BRIDGE_MAX_PARAMS` 又经历 176 → 224 → 256 → 416（未经复核、超出堆池）→ **64**（2026-09-20）。
   **结论**：rclc 参数槽按 328 B/槽 × max_params 常驻、**与在线上电机数无关**，48 台规模下
   应把电机参数整体撤出参数树（配置改走块话题），参数树只留 `system.*`。
-  当前值与推导以 `include/param_bridge.h` 为唯一来源；方案见
-  [48 台规模设计](48-motor-scale-design.md)。**堆高水位仍待真机实测**（见第 2 节）。
+  **结案（2026-09-21）**：owner 直接把参数树整体退役（不止电机项），配置改走
+  `param_set` / `system_command`；推导与方案见
+  [48 台规模设计](48-motor-scale-design.md) §5.3 结案块。**堆高水位仍待真机实测**（见第 2 节）。
 
 ## 近期已结案（不再追踪）
 

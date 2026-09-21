@@ -152,6 +152,11 @@ Vaxor 系列名中的 80 速比当前没有完整参数，不能用 30/50 档外
 > 本节与 §6.2 是 2026-09-04 基线原文，部分字段此后已变（`state_age_ms` 移出
 > status、`lifecycle` 移出 topology、`MotorPolicy`/`MotorConfig` 话题已不存在）；
 > **现行消息面以上方 ADR 勘误与 §6.11/§6.12 为准**。
+>
+> **2026-09-21 另有一项全局变更**：`rclc` 参数服务器整体退役，参数面改为三条话题
+> （§6.4 / §6.7 / §6.9 / §6.12 已就地标注）。本节内出现的 `system.*` / `m<id>.*`
+> 参数名、`PARAM_BRIDGE_MAX_PARAMS`、`system.heap_free` 等字样**均是历史名**，
+> 现行对应见各节的勘误块。
 
 ### 6.1 高频接口
 
@@ -218,9 +223,10 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
 - **初始化未完成一律不可使能**：`PENDING`（回读未收尾）/`MISMATCH`（与记录
   不一致）/`UNVERIFIED`（回读失败）/`NO_RECORD`（本机无该台记录）四种结论下进
   `CONFIG_CONFLICT`、冻结逐电机授权、拒绝 `SET_ENABLE`、不出运动帧；`param_bridge`
-  报 `system.last_error=40`（不一致）/`41`（未核对）/`42`（无记录）+ `last_error_motor`。
-  恢复路径是人工：从参数页写回该台参数（写事务成功即更新记录，随即重判），或重连后
-  再读一次。
+  报 `system_status.last_error=40`（不一致）/`41`（未核对）/`42`（无记录）+
+  `last_error_motor`（话题名勘误：参数服务器 2026-09-21 退役）。
+  恢复路径是人工：从 `param_set` 写回该台参数（写事务成功即更新记录，随即重判），
+  或重连后再读一次。
   不引入"固件侧出厂默认值"：首次上电（W25 无该台记录）固件侧显示「无记录」、判
   未初始化，走人工核对；写下去之后记录即成立（owner 2026-09-21 定）。
 - **运行中回读发现不一致 → 软停**（P0 MIT 阻尼帧、保留使能，TBD-SAFETY-01
@@ -235,8 +241,8 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
 - **写 ≠ 保存（2026-09-21 分离）**：设备侧写事务读回核验通过后，内核用该事务
   实际编码出的原值同步固件记录并置 `record_dirty`，**写事务本身只改设备 RAM 与
   记录、不落盘**；`0x2539` 已挪进独立的 `SAVE_DEVICE_FLASH` 保存事务，由
-  `system.save` 触发，按脏槽位选保存码（1/2/4，不写无关对象），同时落设备 flash
-  与 W25（§6.6）。控制边界里原先"写成功后 500 ms 去抖自动落盘"已删——记录不落盘
+  `system_command` 的 `COMMAND_SAVE` 触发（勘误：原 `system.save`），按脏槽位选保存码
+  （1/2/4，不写无关对象），同时落设备 flash 与 W25（§6.6）。控制边界里原先"写成功后 500 ms 去抖自动落盘"已删——记录不落盘
   就断电，下次上电判不一致，那时该台未初始化，是设计使然。
 - **持久化格式**：W25 blob v2（32B 头 + 64×48B 记录，含 4 个 `device_raw`），
   v1 由 `param_store_blob_migrate_v1()` 就地升级。
@@ -245,9 +251,16 @@ CERB 的位置限位（`0x607D:01/:02`）、最大转速（`0x6080`）、峰值�
 > 分离、`0x2539` 独立保存事务与 `device_param_report` 话题均只经 host 测试与静态审查，
 > 真机台架项见 `docs/plans/active/motor-runtime-validation.md`（**未运行**）。
 
-### 6.4 参数服务器的对外单位（2026-09-17 定；2026-09-20 改位置/速度）
+### 6.4 参数面的对外单位（2026-09-17 定；2026-09-20 改位置/速度）
 
-ROS 参数对外与内核 SI **同单位**，只有力矩列是工程单位：
+> **勘误（2026-09-21）**：承载这套单位的 `rclc` 参数服务器已整体退役，参数面改为
+> 下行 `micro_ros_do/param_set`（`ParamSetArray`）/ `system_command`、上行
+> `micro_ros_up/system_status`。**本节结论一字未改**：单位口径、`param_units.h`
+> 的换算位置、力矩列用 A 的理由全部照旧迁移——`param_bridge` 仍是唯一换算边界，
+> 写入侧的 A→SI 换算仍只在 `submit_single_limit` 一处。唯一命名变化：参数名
+> `m<id>.<field>` → `param_set` 的 `motor_id` + `field`（**设备槽序**，见 §6.12 勘误）。
+
+参数面对外与内核 SI **同单位**，只有力矩列是工程单位：
 
 | 参数 | 对外单位 | 内核 SI | 换算 |
 |---|---|---|---|
@@ -280,8 +293,11 @@ SLCAN 链路）出现"回读一直超时"：设备按序处理请求，迟到的
 - 内核在发送阶段前检查 `bus_stage_in_flight()`：**同一总线任一时刻至多一个
   "已发未答"阶段**。无应答阶段（VAXOR 本地策略）不受影响；不同总线互不阻塞。
 - CERB 阶段超时 20ms → 30ms。
-- 上位机判断回读收尾用只读参数 `system.refresh_seq`（每次 param 桥发起的回读
-  收尾 +1，无论成败）——只看 `last_error(_motor)` 分不清"这一轮"与上一轮残留。
+- 上位机判断回读收尾用只读量 `refresh_seq`（每次 param 桥发起的回读收尾 +1，
+  无论成败）——只看 `last_error(_motor)` 分不清"这一轮"与上一轮残留。
+  *（2026-09-21 勘误：原为 `system.refresh_seq` 参数，现为
+  `micro_ros_up/system_status` 的 `refresh_seq`；判据理由完全不变，仍是"序号只增
+  不减、每次收尾无论成败都 +1"。）*
 - 代价：多台并行收敛变慢（N 台 × 4 阶段串行）。配置事务本来低频，可接受。
 
 ### 6.6 固定硬件参数表与外部写入钳制（2026-09-17）
@@ -347,8 +363,10 @@ PI 等）、**2 = 设置电机正限位**（0x607D:02）、**4 = 设置电机负
 - 门禁：与设备侧限位同源，复用 `device_limit_write_allowed`（ACTIVE/SAFE_STOP
   一律 `INVALID` 拒绝，**不隐式失能**）。厂家手册明确要求失能态设置。
 - 不动任何本机状态：零点不是本机记录的参数，**不更新设备影子、不更新 W25 记录**。
-- 上位机入口：`system.set_zero = <电机 id>`（触发式，仿 refresh）+ 只读
-  `system.set_zero_seq` 完成序号（页面据此确认收尾，判据理由同 §6.5）。
+- 上位机入口：`micro_ros_do/system_command` 的 `COMMAND_SET_ZERO` + `motor_id`
+  （触发式，仿 refresh）+ `micro_ros_up/system_status` 的 `set_zero_seq` 完成序号
+  （据此确认收尾，判据理由同 §6.5）。*（2026-09-21 勘误：原为参数
+  `system.set_zero = <电机 id>` / `system.set_zero_seq`。）*
 - ⚠️ **零点改变 = 设备里 0x607D 限位的物理位置随之改变**：操作者必须重新确认
   限位与机械行程。本机记录里的限位原值（cnt）不变，故上电比对不会误报。
 - **持久化已实测（TBD-ZERO-01 结案，2026-09-17 台架）**：字典 0x2539 的保存码只列
@@ -404,10 +422,27 @@ mailbox 双缓冲 + 任务层 mailbox 副本 + 内核镜像副本 + 内核锁存
 **问题**：内核原本**没有**任何清故障 API；厂家故障只能等设备自报
 `fault_active==false`，DEV_PARAM 只能靠重写参数或重连。操作者在页面上"按了没反应"。
 
-**决定**：参数 `system.clear_fault = <电机 id>`（脉冲）+ 只读 `system.clear_fault_seq`，
-**不用话题/服务**：逐电机动作的既有台架已验证通道就是参数（`m<id>.enable`、
-`system.set_zero`、`system.refresh`）；且 MCU 侧的 service 额度（`MAX_SERVICES=5`）
-已被 rclc 参数服务器占满，加服务要重建 libmicroros。
+**决定**：`micro_ros_do/system_command` 的 `COMMAND_CLEAR_FAULT` + `motor_id`（脉冲）+
+`micro_ros_up/system_status` 的 `clear_fault_seq`。**不用服务**——判据是本条动作
+与 `REFRESH`/`SET_ZERO` 同类（"写 = 电机 id、轮询序号判完成"的命令/应答协议），
+不是可被同时多方调用的请求/响应接口。
+
+> **⚠️ 本节是"参数面为什么存在"的最后一处正面论证，2026-09-21 在此结案。**
+> 本节 09-18 原文给出的两条理由都要更正：
+> 1. ~~"逐电机动作的既有台架已验证通道就是参数（`m<id>.enable`、`system.set_zero`、
+>    `system.refresh`）"~~ —— 这是**当时的事实**，不是理由。`m<id>.enable` 今天已
+>    改由 `motor_policy` 话题承载（§6.11），同一批动作现在分散在两条话题上，
+>    参数面上的"统一通道"这个好处从来没有兑现过。
+> 2. ~~"MCU 侧的 service 额度（`MAX_SERVICES=5`）已被 rclc 参数服务器占满，加服务
+>    要重建 libmicroros"~~ —— 这是**沉没成本**，不是设计理由。它把"已经占了额度"
+>    当作"该继续占"的依据。事实是那 5 个槽位从来没用过（`system_status` 的四个
+>    完成序号已覆盖全部命令回执需求），退役后成为纯余量。
+>
+> **结论**：全仓库没有一句"为什么用参数服务器而不是话题"。它是一次未加论证的
+> 初始选择，被后续三轮决策（§6.4 / §6.9 / §6.12）当作既成事实继续引用，代价是
+> 每台电机 6 个槽位 × 328 B 的常驻 DTCM 堆。2026-09-21 owner 裁定整体退役为话题
+> （`param_set` / `system_command` / `system_status`）。**教训**：引用前一轮的
+> 选型作为本轮的理由之前，先问那个选型本身有没有理由。
 
 内核按**成因**三分支（不是按生命周期——DEV_PARAM 与身份冲突都在 `CONFIG_CONFLICT`）：
 
@@ -424,6 +459,11 @@ mailbox 双缓冲 + 任务层 mailbox 副本 + 内核镜像副本 + 内核锁存
 **代价**：系统参数 8 → 10，`kMaxMotors` 由 17 降到 **16**。这是容量回退，已在
 README 与验证计划记录；可读完成序号不能省（只看 `last_error` 会把上一轮残留
 当成这一轮的结果）。
+
+*（2026-09-21 勘误：`kMaxMotors` 这个容量本身是参数服务器的产物，随退役一起消失
+——`system_status` 的四个序号是固定字段，与电机数无关。上面那句"容量回退"的代价
+至此归零；但"可读完成序号不能省"这条结论**反向加强了**：没有服务器之后，
+`system_status` 是**唯一**的完成判据来源。）*
 
 ### 6.10 容量常量按 48 台上限校准（2026-09-18）
 
@@ -475,7 +515,15 @@ FAULT/OFFLINE/CONFIG_CONFLICT/DEV_PARAM 四条冻结路径本来就都清 `polic
 **已知的代价**：逐台成功也会各出一条 CONFIG_RESULT 事件，故策略是**低频接口**
 ——高频发布会把事件环灌满（丢弃数在 diagnostics 话题可见）。
 
-### 6.12 参数面按静态/动态重新划界（2026-09-18）
+### 6.12 参数面按静态/动态重新划界（2026-09-18；**2026-09-21 整体作废**）
+
+> **⚠️ 勘误（2026-09-21）：本节的全部槽位核算已随参数服务器退役作废。**
+> `PARAM_BRIDGE_MAX_PARAMS`、`PARAM_MOTOR_FIELD_COUNT`、`kMaxMotors`、
+> "参数槽 56.6 KB DTCM 堆"这些量与算式**都不再存在**——参数面现在占 0 字节常驻堆
+> （三条话题的订阅/发布控件与消息体是静态 `.bss`，与电机数无关）。
+> 本节保留作**历史推导**：它是"为什么参数服务器在 48 台设计下不成立"的完整论证，
+> 也是 §6.9 结论里"三轮决策把未加论证的选型当既成事实"的第二轮。
+> 下文原文不再逐行改写。**退役决定**见 §6.9 的结论块与变更记录末行。
 
 **问题**：rclc 参数服务器每槽约 269 B（反汇编实测 `sizeof(Parameter)=112` +
 `sizeof(ParameterDescriptor)=68` + 50 B 名 + 12 B names 数组），且 init 时**一次
@@ -532,6 +580,10 @@ CAN-FD 侧的正常性由三件事保证：协议适配器独立组帧、P1 只�
 > ~~`src/storage_task` 未创建（W25Q64 待接线）~~ **[2026-09-18 更新]**
 > storage_task 已实现并独占 W25Q64 参数持久化（非低频日志，见 README「W25Q64」）。
 > 下文 §8 的 MotorPolicy/MotorConfig 话题层已由 rclc 参数服务器取代，保留作设计理由追溯。
+>
+> **2026-09-21 反转**：参数服务器本身退役，参数面回到话题；`MotorPolicyArray` 与
+> 本轮新增的 `ParamSetArray` 属同一批"ID 化有界消息"契约，即 §8 的设计方向最终胜出。
+> `MotorConfig` 没有回归——它的职责被 `param_set` 与 `system_command` 分掉。
 
 | 模块 | 责任 | 不负责 |
 |---|---|---|
@@ -612,3 +664,4 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 | 2026-09-20 | **上电归一 + 方向进参数面（owner 逐条拍板）**：①驱动板上电默认**开**保护，关才需要手动；归一写在**比对之前**（保护恒写 0、方向写 W25 记录值）——顺序是契约：写在比对之后会让每次上电白报一次不一致。②方向易失（owner 确认，`0x2541:00` 与 `0x2650:00` 同形）。③方向**无记录不猜**：不写设备，由比对判基线缺失 → `MISMATCH` bit5 → `CONFIG_CONFLICT`，页面点一次方向即建立基线。④翻转方向 → 冻结到 `SET_ZERO` 成功（新成因 `ZERO_STALE=8`）：设备零点与 cnt 限位的物理含义被整体镜像。⑤手动关保护后**仍允许武装**，但每次需 `confirm_unprotected` 显式确认、页面持续标红（新成因 `UNPROTECTED_UNCONFIRMED=9`，只进 `last_failure_reason`）。⑥保护/方向**同时**进状态话题（只读遥测，正向语义）与参数面（`m<id>.limit_protect` / `m<id>.direction`，控制入口）。
 **取代 09-19 交接文档 §二 的两条**：「保护只接受写 0」与「保护/方向不进参数面、`m<id>.limit_protect` 撤掉」。设计：`docs/plans/active/boot-normalize-design.md`；实现计划：`boot-normalize-plan.md`。参数面容量随之 64 → 72 槽（6 项/台，保住 10 台）。 |
 | 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环，此前实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `param-authority-reversal-plan.md`。**尚未上板验证**：三改目前只经 host 测试与静态审查，真机台架项（`NO_RECORD` 首启、写不落盘、`system.save` 闭环、写后不保存即复位）见 `motor-runtime-validation.md`，**未运行**。 |
+| 2026-09-21 | **参数服务器整体退役，参数面改为三条话题（owner 裁定）**。①下行 `micro_ros_do/param_set`（`ParamSetArray`，稀疏、**整条受理或整条拒绝**、`field` 用**设备槽序**）+ `micro_ros_do/system_command`（`SystemCommand`：SAVE / REFRESH / SET_ZERO / CLEAR_FAULT），上行 `micro_ros_up/system_status`（`SystemStatus`：`last_error` 电平 + `refresh`/`set_zero`/`clear_fault`/`save_seq` + `save_in_progress`）；读侧不变（`device_param_report` 已双行覆盖六槽）。②**行为修正**：`save_in_progress` 改为覆盖「设备分批下发 + W25 落盘」全程——旧实现在落盘请求发出的同一拍就报完成，而 v3 要擦 2 个扇区（量级 ~1s/扇区），此刻断电就是真丢数据；另加 5s 超时兜底防电平永久卡住（与 §5.3/`outstanding` 同类缺陷）。③`param_set` 目标上界 16 = `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`，有 `static_assert` 守着——参数面是**唯一**逐目标进 FIFO 的下行路径，调上界到 17+ 会立刻编译失败。④`PARAM_BRIDGE_EXECUTOR_HANDLES` 5 → 2（两条订阅），executor handle 9 → 6；meta `MAX_PUBLISHERS` 10 → 12、`MAX_SUBSCRIPTIONS` 5 → 6（`MAX_SERVICES` **有意保持 5**：退役后是纯余量，它只是静态数组、不占 DTCM 堆，降它不值那个风险）。⑤删除参数名生成/解析（`param_name_build_motor`/`param_name_parse`/`PARAM_NAME_MAX_LEN`）；`param_field_t` 序号**一个未动**（W25 blob present 位图 + `device_raw` 槽索引契约），记录布局不变、**无需迁移**。**收益口径（不要夸大）**：真正拿回来的是 **~23.6 KB DTCM 堆**（运行期量，不体现在 `.data`/`.bss`）；第 2+3 步实测 RAM 54.7% → 52.7%（−11.4 KB）、Flash 23.9% → 20.3%（−37.2 KB），那是库与代码的连带减少。`MAX_SERVICES` 的 5 个槽确成余量，但 **publisher/subscription 槽被新话题吃回去了（净收益 ≈ 0），executor handle 9 → 6**。**代价**：`ros2 param set/get` 全部失效、web_host 参数页报废（设计使然，台架期唯一配置通道是 `ros2 topic pub`）。**未上板验证**：三条话题、`field` 序陷阱专测、SAVE 的 `save_in_progress` 区间、16 目标满 FIFO、断连重连 ×3 见 `motor-runtime-validation.md`，**未运行**。 |

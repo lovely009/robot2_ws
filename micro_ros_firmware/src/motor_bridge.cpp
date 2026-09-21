@@ -471,7 +471,7 @@ static void publish_device_param_report(uint32_t now_ms) {
     out.rec_pos_min = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN];
     out.rec_pos_max = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX];
     out.rec_vel_limit = v.record_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
-    // 力矩列按 **A** 呈现，与参数面 m<id>.torque_limit 同口径（设备对象
+    // 力矩列按 **A** 呈现，与参数面 param_set 的 field=3 同口径（设备对象
     // 0x2538 存的就是电流）。record_si/dev_si 是关节侧 N·m，这里过一次
     // 换算；换算放固件不放页面——系数只有内核有（v.torque_per_amp），页面
     // 不碰 mA。系数缺失（未绑定型号）时 param_units_nm_to_amp 回 NaN，守住

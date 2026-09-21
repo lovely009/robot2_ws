@@ -41,7 +41,7 @@ OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
 | W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `storage_task` 独占：双槽（每槽 2 扇区）A/B 参数持久化（见「W25Q64」节） |
-| 电机接口 | ID 化有界消息（3 个订阅 + 7 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
+| 电机接口 | ID 化有界消息（5 个订阅 + 8 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
 ## 时钟
@@ -66,7 +66,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）按域节拍发布：运动状态 50Hz、IMU 数据 100Hz、状态 20Hz、拓扑 1Hz、温度 2Hz；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
-| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；`system.save` 脉冲——写事务只置脏、不再自动落盘，见「W25Q64」节） |
+| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；只在收到 `SystemCommand` 的 `COMMAND_SAVE` 时落盘——写事务只置脏，没有自动落盘，见「W25Q64」节） |
 | `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 5ms/200Hz 控制边界消费完整快照与配置 FIFO |
 
 ## 代码组织
@@ -78,6 +78,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
 | `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
 | `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
+| `param_bridge` | 参数面：下行 `param_set`/`system_command` 两条订阅 + 上行 `system_status`；参数写是异步事务，成败经 `last_error` 与完成序号呈现 |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 5ms/200Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
 | `session_sync` | 会话边沿/电平→内核授权的纯派生（5ms/200Hz 边界调用，host 可测） |
 | `storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
@@ -118,7 +119,7 @@ micro_ros_firmware/
 │   ├── led_task.h             # LED 任务接口 + host 可测的状态到颜色策略
 │   ├── sensor_task.h          # 传感器任务接口（sensor_task_start）
 │   ├── storage_task.h         # W25Q64 参数持久化任务接口（storage_task_start）
-│   ├── param_bridge.h         # ROS 2 参数服务器桥接口
+│   ├── param_bridge.h         # 参数与系统命令话题桥接口
 │   └── motor_rt_task.h        # 电机实时任务接口（motor_rt_task_start）
 ├── lib/                       # 板级/协议库（PlatformIO 自动发现）
 │   ├── imu/                   # BMI088 驱动 + SPI2 阻塞传输 + Mahony + SI 聚合
@@ -136,7 +137,7 @@ micro_ros_firmware/
     ├── ros_bridge.cpp         # node/executor/timer 生命周期 + 域桥编排
     ├── imu_bridge.cpp         # IMU/温度发布（micro_ros_up/imu/data、temp）
     ├── motor_bridge.cpp       # 电机 ID 化话题桥（订阅/发布，见"联调"节）
-    ├── param_bridge.cpp       # ROS 2 参数服务器桥（静态量 + 运维动作）
+    ├── param_bridge.cpp       # 参数与系统命令话题桥（稀疏写 + 完成序号）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
     ├── storage_task.cpp       # W25Q64 唯一所有者：boot 加载双槽 blob（每槽 2 扇区）+ save 落盘
     ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 5ms/200Hz 控制边界
@@ -187,8 +188,9 @@ cd micro_ros_firmware
 头损坏时可能选错槽。无芯片/ID 不符静默降级为无持久化，不阻断启动。
 blob v3 = 32B 头 + 64×120B 记录（7712B）；v2（48B 记录）与 v1（32B 记录）
 加载时各自就地迁移到 v3（两条 fan-in 路径，**不是** v1→v2→v3 链）。
-保存有两个触发源：设备写事务成功后去抖 500ms 自动落盘、`system.save`
-手动脉冲。save 擦写非活动槽的**两个**扇区、写 7712B，按 256B 页读回 memcmp
+保存**只有一个触发源**：`micro_ros_do/system_command` 的 `COMMAND_SAVE`。
+设备写事务成功后只置脏（`record_dirty`），没有任何自动落盘——2026-09-21 起
+连那 500ms 去抖也删掉了（它会在控制边界里偷偷擦 flash）。save 擦写非活动槽的**两个**扇区、写 7712B，按 256B 页读回 memcmp
 校验，任一失败不翻转活动槽（旧槽仍可启动）。
 
 **升级迁移（一次性，含已知缺口）**：旧布局槽 B 基址是 `0x1000`，新布局下它
@@ -212,13 +214,17 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 建链后可见电机话题（消息均属 `can_bridge_msgs`，源在
 `../micro_ros_agent/src/can_bridge_msgs`）：
 
-订阅（下行，3 个话题）：
+订阅（下行，5 个话题）：
 
 - `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
 - `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，reliable）：多点轨迹，见下节。
 - `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
+- `/micro_ros_do/param_set`（`ParamSetArray`，reliable）：稀疏参数写（限位/限速/限流/
+  保护开关/方向），见「参数面」节。
+- `/micro_ros_do/system_command`（`SystemCommand`，reliable）：保存/回读/设零点/清故障，
+  见「参数面」节。
 
 ### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
@@ -251,9 +257,9 @@ ROS 桥在入口 return，不发事件也不计数，上位机必须自己先判
   改小上面两个常量是唯一的省 RAM 手段。**RAM 口径**：`.data`+`.bss` 全部落在
   320 KiB 的 RAM_D1 上，实测占用 **68.7%**（225,108 B / 327,680 B）。PlatformIO
   报的 39.0% 分母是整芯片 577,536 B，会把紧张度藏起来——判断余量要用 RAM_D1
-  口径。参数槽另占 DTCM 堆（见「参数」一节）。
+  口径。参数面不占任何常驻堆（见「参数面」一节）。
 
-### 故障清除（`system.clear_fault`）
+### 故障清除（`SystemCommand` 的 `COMMAND_CLEAR_FAULT`）
 
 参数写"电机 id"触发，只清**可清的**故障，按**成因**区分：
 
@@ -269,30 +275,60 @@ ROS 桥在入口 return，不发事件也不计数，上位机必须自己先判
   **重新武装**（`/micro_ros_do/motor_policy` 的 `enabled=true`，且代数须前进）+ 新的完整
   快照/轨迹才可能回运动（ARD §36）。
 
-只读完成序号 `system.clear_fault_seq`，用法同 `set_zero_seq`（写脉冲 → 轮询
-seq 收敛，不要只看 `last_error`）。**代价**：系统参数 8 → 10。
+只读完成序号 `system_status.clear_fault_seq`，用法同 `set_zero_seq`（发命令 → 轮询
+seq 收敛，不要只看 `last_error`）。
 
-### 参数树放静态量，动态量走 `/micro_ros_do/motor_policy`
+### 参数面：三条话题（2026-09-21 起，rclc 参数服务器已退役）
 
-2026-09-18 起参数面按「静态 / 动态」重新划界——**参数面 = 静态配置与运维动作，
-话题 = 动态控制与状态**：
+参数面**全部是话题**，没有 ROS 参数服务器：
 
-- **参数树**（每电机 5 项 + `system.*` 10 项；当前容量见 `include/param_bridge.h`）：`m<id>.pos_min/pos_max/`
-  `vel_limit/torque_limit` 与 `system.*`。限位/限速/限流「只初始化一次」，
-  正是参数的本职。
-- **`/micro_ros_do/motor_policy` 话题**：`enable`/`kp`/`kd`。这三项变化快，且 ARD §19.4 本就
-  禁止它们进 100Hz 命令快照。**稀疏语义**：只影响列出的电机，其余保持原状。
+| 方向 | 话题 | 类型 | QoS | 说明 |
+|---|---|---|---|---|
+| 下行 | `micro_ros_do/param_set` | `ParamSetArray` | reliable | 稀疏参数写，**整条受理或整条拒绝** |
+| 下行 | `micro_ros_do/system_command` | `SystemCommand` | reliable | `SAVE` / `REFRESH` / `SET_ZERO` / `CLEAR_FAULT` |
+| 上行 | `micro_ros_up/system_status` | `SystemStatus` | best-effort, 5 Hz | `last_error` 电平 + 四个完成序号 |
+
+- **`param_set` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
+  3=torque_limit 4=limit_protect 5=direction），与 `device_param_report` 的行序、
+  `mismatch_mask`/`record_dirty_slots` 的位序同一套——读写同序可比。
+  ⚠️ **它不等于 `param_field_t` 的次序**（那里 3 = pos_min、5 = vel_limit）；两套里
+  `field=3` 都合法，互用**不会被拒绝，只会静默写错槽位**。缓解三条并用：.msg 里
+  定义常量（调用方不手打数字）、两端注释写明、台架专测一条（写 `field=3` 后确认
+  只有 `rec_torque_limit` 变）。固件侧映射表 `src/param_bridge.cpp` 的 `kFields[]`。
+- **位置限位必须成对出现在同一条消息里**（只给一边 → 整条拒绝），因为成对提交才
+  表达得了"下限 < 上限"这个约束；只想改一边时另一边从 `device_param_report` 的
+  `rec_pos_*` 读回一起发。
+- **上界 16 是内核约束不是带宽约束**：每个目标一次配置 FIFO 提交，而该 FIFO 深 16。
+  参数面是唯一逐目标进 FIFO 的下行路径（command/trajectory/policy 都是整条快照一次
+  提交），有 `static_assert` 守着。
+- **写是异步事务**：`param_set` 同步返回只表示"已受理"，成败经内核 `CONFIG_RESULT`
+  事件异步给出，最终呈现为 `system_status.last_error`。**失败不回滚、没有影子**——
+  话题是命令不是状态副本；失败即 `last_error` + `record_dirty` 不翻转，重发即可。
+- **完成判据是序号不是错误码**：`system_status` 的 `refresh_seq`/`set_zero_seq`/
+  `clear_fault_seq`/`save_seq` 只增不减，每次命令收尾（**无论成败**）+1。只看
+  `last_error` 分不清"上一轮成功留下的 0"和"这一轮还没跑"。
+- **`save_in_progress` 覆盖全程**：设备侧分批下发 + W25 落盘两段都算"保存中"，
+  必须等 W25 出终态才转 false。旧实现把落盘请求与"保存完成"放在同一拍，报告完成时
+  数据其实还没进 flash。
+- **`enable`/`kp`/`kd` 不在这里**：它们在 `/micro_ros_do/motor_policy`。这三项变化快，
+  且 ARD §19.4 本就禁止它们进命令快照。**稀疏语义**：只影响列出的电机，其余保持原状。
   **代数门**：「未武装 → 武装」要求 `policy_generation` 严格前进，挡住「周期
   重发同一条策略」在故障后自动复权（挡不住每次都递增代数的发布者——那与人工
   逐次授权不可区分，ARD §36 的「显式」在机制层面到此为止）。
-- **为什么改**：rclc 参数服务器每槽**实测边际 328 B**（结构 269 B = `sizeof(Parameter)=112`
+- **为什么退役**：rclc 参数服务器每槽**实测边际 328 B**（结构 269 B = `sizeof(Parameter)=112`
   + `descriptor=68` + 50 B 名，余为分配器块开销），且 init 时**按 max_params 一次性
-  全部分配、与板上实际几台电机无关**。参数槽所在的 DTCM 堆池是 **120 KiB**
-  （= DTCM 128 KiB − 主栈 8 KiB；FreeRTOS 与 newlib 同池，**不可再扩**）。
-  48 台 × 5 项 + 10 = 250 槽 ≈ 80 KB，占池子的 2/3——所以 48 台目标下电机参数
-  **整体撤出参数树**、配置改走块话题（见 `docs/plans/active/48-motor-scale-design.md`）。
-- `param_field_t` 仍是 8 项且**不要改**——它是 Flash blob 的 `present` 位图契约；
-  退役的三项只是不再被注册，记录布局不变、无需迁移。
+  全部分配、与板上实际几台电机无关**——72 槽常驻 23,616 B 的 DTCM 堆，而那个池子
+  **物理不可扩**（= DTCM 128 KiB − 主栈 8 KiB；FreeRTOS 与 newlib 同池）。
+  它从未被正面论证过，且剩下的 `system.*` 本就是命令不是参数（"写 = 电机 id、
+  轮询序号判完成"）。历史推导留在
+  `docs/architecture/motor-runtime-decision-log.md` §6.9/§6.12 与
+  `docs/plans/active/48-motor-scale-design.md` §5.2/§5.3。
+- **收益口径（不要夸大）**：真正拿回来的是 **~23.6 KB DTCM 堆**（运行期，不体现在
+  `.data`/`.bss`）。`MAX_SERVICES` 的 5 个槽确实成了余量，但 publisher/subscription
+  槽被这三条新话题吃回去了（净收益 ≈ 0），executor handle 9 → 6。
+- `param_field_t` 仍是 8 项且**序号一个都不能动**——它是 Flash blob 的 `present`
+  位图与 `device_raw` 槽索引契约；记录布局不变、无需迁移。名字生成/解析
+  （`m<id>.<field>`）已随参数服务器删除。
 
 下行配置通道（`motor_enable`/`motor_policy`/`motor_config`/`motor_bind` 与
 `motor_config_result`）已删除：型号绑定由内核读设备自报身份自动完成
@@ -304,7 +340,8 @@ seq 收敛，不要只看 `last_error`）。**代价**：系统参数 8 → 10�
 
 设备侧管理对象（`0x607D:01/:02` 位置限位、`0x6080` 电机端最大转速、
 `0x2538` 电机端峰值电流）的写 + 读回核验留在内核/adapter 层（写仅限未运动
-状态，读回不一致收敛 `UNCONFIRMED`），ROS 侧入口是参数服务器（见下）。
+状态，读回不一致收敛 `UNCONFIRMED`），ROS 侧入口是 `param_set` 的
+`FIELD_POS_MIN`/`FIELD_POS_MAX`/`FIELD_VEL_LIMIT`/`FIELD_TORQUE_LIMIT`（见下）。
 
 **参数单位（2026-09-20 改）**：位置 **rad**、速度 **rad/s**、力矩 **安培**。前两项与内核、
 `motion_states`、URDF 同一套单位——参数与状态放在同一个页面上时要人脑换算两套角度
@@ -313,6 +350,8 @@ seq 收敛，不要只看 `last_error`）。**代价**：系统参数 8 → 10�
 N·m 要过一次 Kt×减速比×效率，而该系数存在未决争议（见
 `docs/architecture/motor-runtime-decision-log.md` §6.4/§6.6）。力矩的 A ↔ N·m 换算在
 `param_bridge` 边界做一次（`lib/param_store/include/param_units.h`），位置/速度是直通。
+**系数未知（未绑定型号）时拒写而不是猜**：换算失败在整条预校验阶段就把该条消息拒掉，
+不会留下"半个限位已下发"。
 
 **外部写入不得超过固定硬件参数表（2026-09-17）**：型号目录
 （`lib/motor_control/src/motor_control_profile.c`，数值取自规格书
@@ -321,7 +360,7 @@ N·m 要过一次 Kt×减速比×效率，而该系数存在未决争议（见
 位置（≤ ±π）。**限值对象 0x2538 的换算系数用规格书峰值对**（45/10.8、11/3.2），
 所以"写峰值扭矩"正好写出"峰值电流"；反馈扭矩估计仍走 Kt×减速比×效率。
 
-**设零点（2026-09-17）**：参数服务器 `system.set_zero = <电机 id>` 触发，内核写
+**设零点（2026-09-17）**：`SystemCommand` 的 `COMMAND_SET_ZERO` + `motor_id` 触发，内核写
 **0x2531 = 1**（字典表「设置电机输出端零位」）。单阶段、只等写应答；**仅失能态
 受理**（运动中被拒，不隐式失能）。零点不是本机记录的参数，不改影子/记录。
 ⚠️ 零点改变后设备内 0x607D 限位随之移动，须重认限位与机械行程。**持久化已实测**
@@ -337,7 +376,7 @@ N·m 要过一次 Kt×减速比×效率，而该系数存在未决争议（见
 **配置事务一问一答（2026-09-17）**：厂家 SDO 是严格请求-应答，固件按总线串行
 ——同一总线上任一时刻至多一个未决阶段（并发发问会让设备应答排队、迟到应答被判
 重试，表现为"回读一直超时"）；CERB 阶段超时 30ms。上位机判断"读完了"用只读的
-`system.refresh_seq`（每次回读收尾 +1），不要只看 `last_error`（分不清轮次）。
+`system_status.refresh_seq`（每次回读收尾 +1），不要只看 `last_error`（分不清轮次）。
 
 **固件记录为权威（2026-09-21 反转 09-17 口径）**：上电/重连绑定完成后，内核自动对
 CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件记录**逐槽位比设备端
@@ -347,17 +386,17 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - 一致 → 初始化通过，正常可控；
 - **初始化未完成一律不可使能**（`PENDING` 回读未收尾 / `MISMATCH` 不一致 /
   `UNVERIFIED` 回读失败 / `NO_RECORD` 本机无该台记录）：进 `CONFIG_CONFLICT`、
-  拒绝 `SET_ENABLE`、不出运动帧，`system.last_error=40`（不一致）/`41`（未核对）/
+  拒绝 `SET_ENABLE`、不出运动帧，`system_status.last_error=40`（不一致）/`41`（未核对）/
   `42`（无记录）+ `last_error_motor` 指出是哪一台；
-- **写 ≠ 保存**：从参数页写回该台参数只改设备 RAM 与固件记录（写后立即重判，
+- **写 ≠ 保存**：从 `param_set` 写回该台参数只改设备 RAM 与固件记录（写后立即重判，
   写齐即转好），要**持久化**必须再点「保存」（写 `0x2539` + 落 W25）。未保存的台在
   `micro_ros_up/device_param_report` 上 `record_dirty=true`，页面标黄。
 - **运行中回读发现不一致 → 软停**（阻尼帧、保留使能），不硬失能；
 - 自动回读失败会退避重试（≤3 次、间隔 500ms；读是只读事务，重试无副作用），
   用尽才判 `41`，避免一次总线抖动就让该台使能不了；
 - 设备侧写事务读回核验通过后，内核用该事务实际编码出的原值同步固件记录并置
-  `record_dirty`；**落盘只在 `system.save` 时发生**（写不再跟 `0x2539`、不再有
-  去抖自动落盘）。
+  `record_dirty`；**落盘只在收到 `COMMAND_SAVE` 时发生**（写不再跟 `0x2539`、
+  也没有去抖自动落盘）。
 - W25 blob 升 v3（记录 120 B：多 4 个设备端原值 + 保护开关/方向 + 型号身份），
   v1/v2 各自就地迁移，不丢已存参数。
 
@@ -373,10 +412,10 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 这一槽就**跳过、不猜**）。归一没成功（写/读回核验重试用尽）→ 该台判 `UNVERIFIED(41)`
 → `CONFIG_CONFLICT` → **不可使能**，且不会发起回读。
 ⚠️ **顺序是契约**：写在比对之后会让每次上电白报一次不一致（比对先看到上电初值）。
-⚠️ 归一未收尾前，人工 `system.refresh`（页面"回读"按钮）会被拒绝（BUSY）——否则
+⚠️ 归一未收尾前，人工 `COMMAND_REFRESH`（页面"回读"按钮）会被拒绝（BUSY）——否则
 读到的同样是归一前的值，还会把该台锁在冲突态、连归一都做不下去。
 
-**方向参数 `m<id>.direction`（0 = CW / 1 = CCW，原值直通不反转）**：可读可写，
+**方向参数（`param_set` 的 `FIELD_DIRECTION`，0 = CW / 1 = CCW，原值直通不反转）**：可读可写，
 写 = SDO 写 `0x2541:00` + 读回核验，仅未运动时受理。**真机实测（2026-09-20）纠正**：翻转**不**改变位置坐标系——同一物理方向转动
 关节时，设备侧 `0x6064` 的计数方向不随 `0x2541` 变化（同向转两次 Δ 均为正：
 +2394 / +2573 cnt），`0x607D` 限位对象也全程不变。所以**零点与限位都不镜像、
@@ -397,10 +436,12 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 `CONFIG_CONFLICT`、拒绝 `SET_ENABLE`、不出运动帧（同"初始化未完成不可使能"
 口径；`EVENT_DEV_INIT` 的 reason 位图新增 bit4=保护开关、bit5=方向）。
 **恢复路径（2026-09-19 起）**：`0x2650:00` 已进参数面，参数项
-`m<id>.limit_protect`（**1 = 保护生效**，0 = 关闭）可读可写，写事务 = SDO 写
-`23 50 26 00 00 …` + 读回核验，仅未运动时受理，写完记录自动同步。~~剩下的
+`FIELD_LIMIT_PROTECT`（**1 = 保护生效**，0 = 关闭）可读可写，写事务 = SDO 写
+`23 50 26 00 00 …` + 读回核验，仅未运动时受理，写完记录自动同步。**保护开关是
+参数面上唯一的反向字段**，反转只发生在 `src/param_bridge.cpp` 的
+`submit_safety_protect` 一处（mailbox 与协议层只认厂家原值）。~~剩下的
 `0x2541` 方向仍然不在参数面~~ **已于 2026-09-20 更正**：方向也进了参数面，
-参数项 `m<id>.direction`（原值直通：0 = CW，1 = CCW），写事务 = SDO 写
+参数项 `FIELD_DIRECTION`（原值直通：0 = CW，1 = CCW），写事务 = SDO 写
 `23 41 25 00 **0x** …` + 读回核验（`40 41 25 00 …`），仅未运动时受理。
 掉电不保存，由**上电归一**在回读比对之前按 W25 记录写回（见上面的新小节）。
 **对象语义**（经 owner 手工核实，SLCAN 复现）：读 `40 50 26 00 00 …` → 反馈
@@ -421,12 +462,12 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 **上次成功落盘时设备里的值**，不是"保护=0"这个常量。两处必须记住：
 - **先关保护、再触发任意一次保存，记录就被重新基线化成"关"**——下次上电设备
   与记录一致，该台正常使能（而它此刻确实没有限位在执行）。保存触发不要求写参数：
-  `CONFIG_CONFLICT` 的台仍受理限位写事务，写成功即去抖落盘。所以别把"上电没报
+  `CONFIG_CONFLICT` 的台仍受理限位写事务，写成功即置脏等保存。所以别把"上电没报
   冲突"当成"保护一定开着"。
 - **刚由 v2 迁移上来的记录，两槽不参与比对，直到第一次保存**（迁移只搬低 4 位），
   即每块刚升级的板子都处在这个状态里。
 
-发布（上行，7 个话题；均为 ID 化，缺失浮点 = NaN）：
+发布（上行，8 个话题；均为 ID 化，缺失浮点 = NaN）：
 
 - `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
   由 10ms bridge timer 驱动）。
@@ -446,7 +487,12 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   只能靠 JTAG 定位。
 - `micro_ros_up/device_param_report`（`DeviceParamReport`，1 Hz + 变化即发）：
   参数核对双行快照（固件记录列 / 驱动板回读列，同槽位同单位、力矩列按 A）+ 未
-  保存标记 + 不一致槽位位图。
+  保存标记 + 不一致槽位位图。**它是 `param_set` 的读侧对照**：写之前先读回
+  `rec_*` 列，位置限位要成对发就把两边一起读出来（行序与 `param_set` 的 `field`
+  是同一套）。
+- `micro_ros_up/system_status`（`SystemStatus`，5 Hz + 变化即发）：`last_error`
+  电平 + `last_error_motor` + `refresh/set_zero/clear_fault/save_seq` +
+  `save_in_progress`。参数面的"这次命令跑完没有"只由它回答（见「参数面」节）。
 
 **三份上行状态不重叠**：topology = 身份（谁在、哪条总线、什么协议、型号、能力、
 冲突、`schema_version`）；status = 状态与电气（`lifecycle`、在线、温度/电流/电压、
@@ -543,7 +589,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - 无 agent 时节点不注册、固件在 `kWaitAgent` 轮询，属正常。
 - `loop()` 被 STM32FreeRTOS 的 idle hook 调用，只能放非阻塞代码。
 - 电机运行时已完成 ID 驱动化（ARD-0007，剩余项见 HANDOFF「剩余工作」）；9 个
-  `can_bridge_msgs` 消息（5 个顶层消息 + Target/Entry 子消息）由
+  `can_bridge_msgs` 消息（13 个顶层消息 + 8 个 Target/Entry 子消息）由
   `../micro_ros_agent/src/can_bridge_msgs` 唯一维护，
   固件侧只通过 `extra_packages/can_bridge_msgs` 符号链接复用。
 - CERB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、

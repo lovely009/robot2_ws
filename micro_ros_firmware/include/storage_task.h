@@ -2,8 +2,9 @@
 //  - start：同步初始化 W25（无芯片/ID 不符则静默降级为无持久化，不阻断启动），
 //    读双 sector A/B 选 CRC 有效且 seq 最新的 blob；
 //  - boot 参数：start 后经 storage_boot_params() 供 motor_rt 在 20ms 边界套用；
-//  - save 两个触发源：设备参数写事务成功后 500ms 去抖自动落盘，以及
-//    system.save 手动脉冲；erase 阻塞最长约 1s，只能在本任务执行，
+//  - save **只有一个触发源**：param_bridge 收到 system_command 的 COMMAND_SAVE
+//    后经 storage_task_request_save() 请求（此前"设备写事务成功后 500ms 去抖自动
+//    落盘"已于 2026-09-21 删除）；erase 阻塞最长约 1s，只能在本任务执行，
 //    严禁从 micro-ROS/motor_rt 上下文直接调 W25。
 #ifndef STORAGE_TASK_H
 #define STORAGE_TASK_H

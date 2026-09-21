@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **勘误（2026-09-21，参数面退役）**：下文各任务里的 `ros2 param set/get` 命令与
+> `m<id>.*` / `system.save` / `system.heap_free` 参数名**全部失效**——`rclc` 参数服务器
+> 已退役，参数面改为三条话题（`param_set` / `system_command` / `system_status`）。
+> 等价命令见仓库根 `docs/guides/fdcan1-bench-guide.md` 的「设备参数上电比对」节。
+> **blob 格式本身不受影响**（`param_field_t` 序号与 `present` 位图是契约，一个未动，
+> 无需迁移），故本文关于 blob v3 的推导与结论仍然有效。
+>
 > **勘误（2026-09-19，真机台架）**：本计划全程把安全开关建模成 `0x2650:01`，是**错的**。
 > 四台真机上 `0x2650` 只有子索引 **`0x00`** 可读，`:01`/`:02` 回 ABORT `0x06090011`
 > （子索引不存在）——手册写命令 `23 50 26 00 01 …` 里 `00` 才是子索引，后面的 `01`

@@ -3,6 +3,17 @@
 **状态：Accepted（2026-09-21 实现）。** 反转 2026-09-17 决策 §6.3「设备参数以驱动板为准」。
 实现计划：`param-authority-reversal-plan.md`。
 
+**⚠️ 接口勘误（2026-09-21）：本文的语义决定全部有效且已实现，但承载通道已变。**
+下文出现的 `system.save`、`system.last_error`、`system.heap_free`、`m<id>.*` 参数名与
+"参数页"**均已随 `rclc` 参数服务器退役失效**：现在是 `micro_ros_do/param_set` /
+`micro_ros_do/system_command` / `micro_ros_up/system_status` 三条话题，`system.save` →
+`COMMAND_SAVE`，`system.last_error` → `system_status.last_error`，
+`system.heap_free` → `MotorDiagnostics.heap_free`，`m<id>.<field>` → `param_set` 的
+`motor_id` + `field`（设备槽序）。**本文不标 SUPERSEDED**——被取代的只有名字，
+"固件记录为权威 / 写保存分离 / `NO_RECORD` 首启判未初始化"这三条决定不但仍然有效，
+还是本轮退役得以成立的前提。退役决定见
+`../../architecture/motor-runtime-decision-log.md` §6.9 结案块。
+
 **尚未上板验证。** 本文所述新语义（`system.save` → `0x2539` 闭环、`NO_RECORD` 首启行为、
 `device_param_report` 低频话题、「写后不保存即掉电」判别）目前只经 host 测试与静态审查，
 真机台架项见 `motor-runtime-validation.md`（TBD-CONFIG-01 追加项，**未运行**）。

@@ -51,23 +51,61 @@
 回读一次，与 W25 里的固件记录**按设备端原值**比对：
 
 - **初始化未完成的那台不可使能**（不一致 `40` / 回读不成功 `41`）：进
-  `CONFIG_CONFLICT`、拒绝使能、不出运动帧，`system.last_error` +
-  `last_error_motor` 指出是哪一台。台架上看到某台"使能按不下去"时先查这两个参数。
+  `CONFIG_CONFLICT`、拒绝使能、不出运动帧，`system_status.last_error` +
+  `last_error_motor` 指出是哪一台。台架上看到某台"使能按不下去"时先查这两个字段：
+  `ros2 topic echo /micro_ros_up/system_status`。
 - 复位/换机/改接线后若记录与模拟器默认值不同（模拟器 CERB 默认
-  `0x2538=1000 mA`、`0x6080=600 RPM`、位置限 `±32768 cnt`），走一次参数写
-  （`ros2 param set /<node> m<id>.torque_limit <N·m>` 等）即可让设备与记录
-  重新一致——写事务同时更新设备与记录并自动落盘。
+  `0x2538=1000 mA`、`0x6080=600 RPM`、位置限 `±32768 cnt`），走一次参数写即可让
+  设备与记录重新一致。
+
+  **参数面自 2026-09-21 起是话题，没有 ROS 参数服务器**（`ros2 param set/get` 全部
+  失效，web 参数页同期报废）。`field` 用**设备槽序**，与 `device_param_report` 的行序
+  同一套：`0`=位置下限 `1`=位置上限 `2`=转速上限 `3`=力矩上限 `4`=保护开关
+  `5`=方向。**力矩列的单位是安培**——设备侧权威量是 `0x2538` 的最大电流，折 N·m 要过
+  Kt×减速比×效率，该系数本身有未决争议（见 `motor-runtime-decision-log.md` §6.4）。
+
+  ```bash
+  # 单字段：改 1 号机的力矩上限（安培）。count 必须显式给，且等于 targets 长度
+  ros2 topic pub --once /micro_ros_do/param_set can_bridge_msgs/msg/ParamSetArray \
+    "{count: 1, targets: [{motor_id: 1, field: 3, value: 2.5}]}"
+
+  # 位置限位必须在同一条消息内成对（只有一边 → 本地拒绝，last_error=10）
+  ros2 topic pub --once /micro_ros_do/param_set can_bridge_msgs/msg/ParamSetArray \
+    "{count: 2, targets: [{motor_id: 1, field: 0, value: -3.14},
+                          {motor_id: 1, field: 1, value: 3.14}]}"
+  ```
+
+  **写 ≠ 保存**：上面的写只改设备 RAM 与固件记录（写后立即重判，写齐即转好）。要
+  持久化必须再发一条 SAVE，并等 `save_in_progress` 转 false、`save_seq` 前进才叫
+  真落盘（W25 擦写有秒级耗时，此前报"完成"是错的）：
+
+  ```bash
+  ros2 topic pub --once /micro_ros_do/system_command can_bridge_msgs/msg/SystemCommand \
+    "{command: 0, motor_id: 65535}"       # 0=SAVE；SAVE 只接受 MOTOR_ID_NONE
+  ros2 topic echo /micro_ros_up/system_status
+  ```
+
+  没保存的台在 `/micro_ros_up/device_param_report` 上是 `record_dirty=true`。
 - 运行中（ACTIVE）回读发现不一致走**软停**（阻尼帧、保留使能），不硬失能。
-- **设零位**（页面「设零」按钮 / `ros2 param set /<node> system.set_zero <id>`）：写
-  0x2531=1，**仅失能态受理**；总线上应看到一条 `23 31 25 00 01 00 00 00`。零位改变后
-  设备内 0x607D 限位随之移动，须重认限位与机械行程。**持久化已实测**（2026-09-17）：设零 →
-  驱动器断电重上电 → 零位保持，无需额外保存码。
+- **设零位**（`command: 2`）：写 0x2531=1，**仅失能态受理**；总线上应看到一条
+  `23 31 25 00 01 00 00 00`。零位改变后设备内 0x607D 限位随之移动，须重认限位与机械
+  行程。**持久化已实测**（2026-09-17）：设零 → 驱动器断电重上电 → 零位保持，无需额外
+  保存码。
+
+  ```bash
+  ros2 topic pub --once /micro_ros_do/system_command can_bridge_msgs/msg/SystemCommand \
+    "{command: 2, motor_id: 1}"           # 1=REFRESH 回读, 3=CLEAR_FAULT 清故障
+  ```
+
+  完成判据同样看 `system_status` 的 `set_zero_seq` / `refresh_seq` / `clear_fault_seq`。
 - 设备侧写限值之后，总线上应能看到 `23 39 25 00 01/02/04` 的保存帧——看不到就说明
   落盘没做，驱动器一断电就回出厂值，下次上电会判"不一致 → 未初始化"。
 - 回读失败会自动退避重试（≤3 次、间隔 500ms；SDO upload 是只读的，重试不
-  改设备任何状态），用尽才判 `41`——偶发一次 `41` 通常重连或再点「回读」即可。
-- 想核对设备真值：`ros2 param get /<node> system.last_error`，或看 web 参数页
-  「来源」列（驱动板 / 记录）与「状态」列。
+  改设备任何状态），用尽才判 `41`——偶发一次 `41` 通常重连或再发一条
+  `{command: 1, motor_id: <id>}`（REFRESH）即可。
+- 想核对设备真值：`ros2 topic echo /micro_ros_up/system_status` 看 `last_error` /
+  `last_error_motor`；或看 `/micro_ros_up/device_param_report` 的 `dev_*`（驱动板回读）
+  与 `rec_*`（固件记录）两行，以及 `record_dirty`（未落盘）。
 
 ## 停止与恢复
 

@@ -261,8 +261,8 @@ typedef struct {
   uint32_t limit_flags;
   uint8_t transaction_state; // 0=空闲，1=配置事务进行中
   uint16_t last_failure_reason;
-  // 设备侧安全事实（只读遥测；与参数面 m<id>.limit_protect / m<id>.direction
-  // 同源，都是内核设备影子）。**正向语义**：enabled=true 表示保护生效，厂家
+  // 设备侧安全事实（只读遥测；与参数面 limit_protect / direction 两项同源，
+  // 都是内核设备影子）。**正向语义**：enabled=true 表示保护生效，厂家
   // 原值（1 = 关）止步于协议层，不许泄漏到这一层。
   // known=false = 本会话尚未核验过该槽（回读/写后核验都没有），此时值无意义。
   bool device_protect_known;
@@ -488,8 +488,10 @@ typedef struct {
   // 设备端原值有效性位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）：有位的槽位
   // 其 dev_raw 就是设备里真正存的值（回读或写后核验得来），持久化据此逐槽
   // 收录——不要求六个槽位齐全，刚写过一项也应当落盘。
-  // 关节侧 N·m/A（Kt × 减速比 × 效率）：参数服务器的力矩列按 A 呈现时要它
-  // 换算，未绑定/系数未知为 NaN。设备侧型号与反馈换算用的是同一个系数。
+  // 关节侧 N·m/A，来源 motor_protocol_profile_limit_nm_per_amp()：有规格书峰值
+  // 对就优先用它，否则退 Kt × 减速比 × 效率。参数面的力矩列按 A 呈现时用它换算，
+  // 未绑定/系数未知为 NaN。**反馈估计走的是 Kt 链，与它不是同一个数**——
+  // R48 上分别是 3.44 与 7.78 N·m/A（11/3.2 对 0.077×101），差 2.3 倍。
   float torque_per_amp;
   uint8_t dev_raw_present;
   uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // cnt/cnt/RPM/mA/保护开关/方向

@@ -200,7 +200,7 @@ typedef enum {
   MOTOR_PROTOCOL_CONFIG_SET_DIRECTION = 13U,
   // 设备侧保存（仅 CERB，写 0x2539 保存码）：把设备 RAM 里的值落到驱动器 flash。
   // **与写事务分开**——"写"只改设备 RAM + 更新固件记录，"保存"才落盘；两次动作
-  // 之间该台处于「未保存」，由 DeviceParamReport 暴露、靠 system.save 收尾。
+  // 之间该台处于「未保存」，由 DeviceParamReport 暴露、靠 SAVE 命令收尾。
   // 载荷 save_slots：待保存的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*），
   // adapter 据此选保存码、不写无关对象（驱动器写 flash 期间会阻塞自身控制循环，
   // 多存一个对象就是白等一截控制环；阻塞量级**未实测**，待台架，见

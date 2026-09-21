@@ -48,7 +48,7 @@ static bool config_request_is_valid(
       // MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK 掩掉之后再决定发不发帧），
       // 不是本层能判的。
       // 早先这里按那套掩码挡过：结果是凡写过保护/方向的台一律被挡在门外，
-      // 而归一恒写保护 ⇒ 空板首次保存必被拒 ⇒ system.save 整条失效。
+      // 而归一恒写保护 ⇒ 空板首次保存必被拒 ⇒ 保存命令整条失效。
       return request->value.save_slots != 0U;
     case CONTROL_MAILBOX_CONFIG_SET_POLICY:
       return isfinite(request->value.policy.kp) &&
@@ -239,6 +239,10 @@ void control_mailbox_clear_config(control_mailbox_t *mailbox) {
   }
 }
 
+// **仅供测试**的直接入口。生产路径不经过它：授权电平由
+// control_mailbox_request_agent_connected() 依会话状态派生。
+// 注意它与 revoke_authorization() 的**清空集不同**——后者额外清 policy，
+// 本函数的 false 分支只清 command/trajectory。两者不可互换，别顺手合并。
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
                                            bool authorized) {
   if (mailbox == NULL) {

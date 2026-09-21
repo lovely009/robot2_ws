@@ -57,15 +57,18 @@ typedef struct {
   float torque_limit;
   // v3：槽位 4→8（现用 6，留 2 给后续设备对象如 0x6081/0x6060）。
   uint32_t device_raw[8]; // cnt/cnt/RPM/mA/0x2650:00/0x2541
-  // v3 新增：型号身份与来源链。
+  // v3 **预留**：型号身份与来源链。写入路径**尚未实现**（属
+  // docs/plans/active/w25-blob-v3-design.md 序列第 3 项），故当前恒为全零。
+  // 字段先摆在这里，是为将来补实现时不必再迁移一次 blob 布局。
   char model_name[16];     // 型号目录名，NUL 结尾；空 = 未绑定
   uint32_t identity_hash;  // 设备 0x1008 自报串的 CRC32；0 = 未核验
-  // v3 新增：写记录时固件假定的 MIT 全量程（来源 = 型号目录）。
-  // 值 0 = 未知（迁移来的记录）。用途：让「固件升级改了 profile」可被发现。
+  // v3 **预留**：写记录时固件假定的 MIT 全量程（来源 = 型号目录），同样未实现
+  // ——写路径 storage_projection 只写 kp/kd/pos/vel/torque 六项 + device_raw。
+  // 将来的用途：让「固件升级改了 profile」可被发现。值 0 = 未知。
   float mit_pos_limit_rad;
   float mit_vel_limit_rad_s;
   float mit_torque_limit_nm;
-  uint8_t profile_version; // 型号目录版本
+  uint8_t profile_version; // 型号目录版本（预留，未实现）
   uint8_t reserved[23];    // 后续项：零点 epoch / 跨零 / 运行时长 / MIT 实测标度
 } param_store_record_t;
 

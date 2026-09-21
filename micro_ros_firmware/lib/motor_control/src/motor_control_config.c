@@ -250,7 +250,7 @@ static void update_shadow_from_read(motor_control_entry_t *entry) {
 
 // 写事务成功：设备与固件记录一起更新（"写就是设备和驱动板一起写"）。
 // 记录落 raw + SI，下次上电比对才不会把刚写过的值判成不一致。
-// 只置脏位、**不落盘**（落盘由 system.save 触发，见 record_dirty_slots）。
+// 只置脏位、**不落盘**（落盘由 SAVE 命令触发，见 record_dirty_slots）。
 static void update_record_after_write(motor_control_entry_t *entry) {
   const uint8_t pos_min_bit =
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN);

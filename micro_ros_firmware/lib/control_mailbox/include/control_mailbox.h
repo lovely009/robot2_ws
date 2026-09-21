@@ -190,8 +190,13 @@ bool control_mailbox_take_config(
 void control_mailbox_clear_config(control_mailbox_t *mailbox);
 
 // 连接/授权是状态请求：同状态重复调用幂等（不产生新边沿）；
-// 断链（曾连接后断开）清命令+配置并撤销授权；会话恢复不恢复授权
-// ——恢复必须显式 request_authorization(true)（ARD §33）。
+// 断链（曾连接后断开）清命令+配置并撤销授权。
+//
+// **仅供测试直接置电平**。生产路径不经过它：授权已改为由会话状态派生（会话恢复
+// 即重立授权电平，motor_enable 话题已删）——ARD §33「必须显式恢复」在机制层面
+// 已作废，见 motor-runtime-decision-log.md 的 2026-09 条目。固件里当前零调用。
+// 另注意它的 false 分支与 revoke_authorization() 的**清空集不同**（后者额外清
+// policy），两者不可互换。
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
                                            bool authorized);
 void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,

@@ -134,7 +134,7 @@ typedef struct {
   // 就是 SI）。**不按 raw 重算**，否则显示值会比比对值乐观。
   float record_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
   // 已写进设备并核验、但**尚未保存**的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）。
-  // "保存"= 写设备 0x2539（驱动器落 flash）+ W25 落盘；两者都由 system.save 触发。
+  // "保存"= 写设备 0x2539（驱动器落 flash）+ W25 落盘；两者都由 SAVE 命令触发。
   // 含易失槽（保护开关 / 方向）：它们没有保存码，但**记录**要落 W25 才能生效
   //（方向尤其——上电归一的方向值就是从记录读的），所以照样置脏。
   // 写事务成功时置位，保存事务成功时清零。

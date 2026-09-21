@@ -24,7 +24,7 @@
         --cerb-r58 分配 R58LITE_V2 / R48LITE_V2
 
 下行（固件 → 本脚本，仅记录/驱动趋近）：
-  CERB  SYNC 0x080（经典 0B，默认 20ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  CERB  SYNC 0x080（FD+BRS 0B，默认 20ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
   CERB  SDO 请求 0x600+id（FD 8B；40 08 10 00 上传发起 → 60/70 取分段）
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
@@ -47,13 +47,17 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+import fcntl
+import glob
 import json
 import os
+import queue
 import select
 import signal
 import struct
 import sys
 import termios
+import threading
 import time
 import tty
 
@@ -463,6 +467,8 @@ class SlcanSim:
                 print(f"[sim] 警告：{flag} 的 id {missed} 未匹配任何 CERB 节点，"
                       f"不会产生不一致场景", file=sys.stderr)
         self.rx_buf = b""
+        self._rxq = queue.Queue()   # 读线程 -> 主循环的已解析帧
+        self._reader = None
         self.sync_seen = False
         self.sync_count = 0
         self.last_sync_at = None
@@ -472,6 +478,15 @@ class SlcanSim:
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
         self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        # 独占锁：两个实例同时开同一个 CANable，会各自下发 SLCAN 配置并互相
+        # 打断 → 表现为随机总线错乱、SYNC 间隔异常、某些电机不跟（2026-09-22
+        # 踩过，排查了很久才发现是残留实例）。宁可第二个实例立刻失败。
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise SystemExit(
+                f"{tty} 已被另一个进程占用（很可能是残留的模拟器实例）；"
+                "先停掉它再启动，否则两条 SLCAN 流会互相打断。")
 
     def configure(self):
         tty.setraw(self.fd, when=termios.TCSANOW)
@@ -499,6 +514,9 @@ class SlcanSim:
             self._write(cmd, drop_ok=False)
             time.sleep(0.15)
         termios.tcflush(self.fd, termios.TCIOFLUSH)
+        # 配置期（含 V 探测）不用读线程；配置完再起，避免与探测抢 fd。
+        self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader.start()
 
     def _probe_version(self) -> str | None:
         """读取 CANable 的 V 响应；只用于选择数据位率，不消费 CAN 帧。"""
@@ -748,19 +766,46 @@ class SlcanSim:
                 self.send(0x702 + 4 * mid, m.vaxor_status_frame(), True, True,
                           m, "vaxor_status")
 
-    def read_available(self):
-        try:
-            chunk = os.read(self.fd, 4096)
-        except OSError:
-            return
-        if not chunk:
-            return
-        self.rx_buf += chunk
-        while b"\r" in self.rx_buf:
-            line, self.rx_buf = self.rx_buf.split(b"\r", 1)
-            parsed = parse_slcan(line.decode(errors="replace"))
-            if parsed:
-                self.handle_downlink(*parsed)
+    def _reader_loop(self):
+        """独立线程：只负责尽快把 CANable 的 SLCAN 数据读干净并入队。
+
+        为什么必须单开线程：串口读原先与 rclpy/Gazebo 桥共用一个循环，主机
+        负载一上来（Gazebo + 测试脚本），循环周期涨到 0.1–0.6s，CANable 的
+        USB 缓冲被写满 → 它写阻塞、控制器出错、**停发 ACK** → 固件侧表现为
+        `TEC=128/LEC=ACK error/TXBRP=0xff`、整条总线看着死掉。串口服务必须
+        与其它工作解耦：读线程只管读，主循环只管消费。
+        本线程独占 self.fd 的读与 self.rx_buf（主循环不再读 fd）。
+        """
+        while not self.stop:
+            try:
+                r, _, _ = select.select([self.fd], [], [], 0.05)
+            except (OSError, ValueError):
+                return
+            if not r:
+                continue
+            try:
+                chunk = os.read(self.fd, 4096)
+            except BlockingIOError:
+                continue
+            except OSError:
+                return
+            if not chunk:
+                continue
+            self.rx_buf += chunk
+            while b"\r" in self.rx_buf:
+                line, self.rx_buf = self.rx_buf.split(b"\r", 1)
+                parsed = parse_slcan(line.decode(errors="replace"))
+                if parsed:
+                    self._rxq.put(parsed)
+
+    def _drain_rx(self):
+        """主循环侧：把读线程已入队的帧全部处理掉。"""
+        while True:
+            try:
+                can_id, data, is_fd = self._rxq.get_nowait()
+            except queue.Empty:
+                return
+            self.handle_downlink(can_id, data, is_fd)
 
     def report(self):
         print("\n=== 模拟器节点状态 ===")
@@ -792,14 +837,15 @@ class SlcanSim:
               "收到首个 0x080 SYNC 后开始错峰上报。Ctrl-C 结束。")
         gate_start = time.monotonic()
         last_step = gate_start
+        last_bridge = 0.0
         warned = False
         while not self.stop:
             now = time.monotonic()
             self._pump_tx()
-            r, _, _ = select.select([self.fd], [], [], 0.002)
-            if r:
-                self.read_available()
+            # 串口由 _reader_loop 独占读取；这里只消费队列，不再碰 fd 读。
+            self._drain_rx()
             self._pump_tx()
+            time.sleep(0.002)          # 保持原有节拍，别忙等
             if not self.sync_seen:
                 # 门控：板子上线前绝不发帧（否则无人 ACK 会把 CANable 自己打进
                 # bus-off，板子启动后也无人 ACK 其 SYNC，双双死锁）。
@@ -808,8 +854,13 @@ class SlcanSim:
                     warned = True
                 continue
             dt = now - last_step
-            if self.bridge is not None:
+            # 桥的 spin 限到 100Hz（Gazebo 控制器 update_rate 就是 100）：
+            # 原先每圈都 spin，而循环周期由 2ms 的 select 决定，等于每秒几百次
+            # rclpy 调用，把串口服务挤在后面。
+            if self.bridge is not None and now - last_bridge >= 0.01:
                 self.bridge.spin()
+                last_bridge = now
+                self.bridge.publish_commands(self.models)
             for m in self.models.values():
                 if self.bridge is not None and self.bridge.mapped(m.id):
                     # Gazebo 模式：该台的反馈取自真实关节角，假 plant 不参与
@@ -824,8 +875,6 @@ class SlcanSim:
                         )
                 else:
                     m.approach(dt)
-            if self.bridge is not None:
-                self.bridge.publish_commands(self.models)
             last_step = now
             # 错峰：频率由 --fb-period-ms 决定，默认每节点约 16.7Hz。
             for mid in sorted(self.models):
@@ -837,6 +886,9 @@ class SlcanSim:
                         del self.next_send[mid]
             self._pump_tx()
         self.report()
+        self.stop = True
+        if self._reader is not None:
+            self._reader.join(timeout=0.5)
         try:
             os.write(self.fd, b"C\r")  # 收尾关通道
         except OSError:
@@ -846,9 +898,26 @@ class SlcanSim:
         os.close(self.fd)
 
 
+def default_canable_tty():
+    """按 by-id 找 CANable 的 tty。
+
+    **不要硬编码 /dev/ttyACM1**：USB 重新枚举（拔插、HUB 复位、板子重上电）后
+    ACM 编号会交换——2026-09-22 就因为模拟器硬编码 ttyACM1 而开到了别的节点，
+    总线上没有 ACK 节点 → 固件 FDCAN1 bus-off → 现象是"总线全死"，查了很久。
+    """
+    hits = sorted(glob.glob("/dev/serial/by-id/*CANable*"))
+    if hits:
+        return hits[0]
+    print("[sim] 警告：未在 /dev/serial/by-id/ 找到 CANable，回退 /dev/ttyACM1；"
+          "若总线无 ACK 节点，先核对设备节点（ACM 编号会交换）。", file=sys.stderr)
+    return "/dev/ttyACM1"
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tty", default="/dev/ttyACM1")
+    ap.add_argument("--tty", default=None,
+                    help="默认按 /dev/serial/by-id/ 里含 CANable 的节点解析；"
+                         "显式给路径可覆盖")
     ap.add_argument("--cerb", default="1,2,3,4")
     ap.add_argument("--vaxor", default="")
     ap.add_argument("--cerb-r58", default="1",
@@ -885,6 +954,9 @@ def main():
     ap.add_argument("--tau-limit", type=float, default=10.0,
                     help="力矩饱和 N·m；URDF 里关节 effort 限幅是 10.0")
     args = ap.parse_args()
+    if args.tty is None:
+        args.tty = default_canable_tty()
+        print(f"[sim] 设备: {args.tty}")
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
     r58_ids = [int(x) for x in args.cerb_r58.split(",") if x]

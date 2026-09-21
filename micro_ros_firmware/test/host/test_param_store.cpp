@@ -29,7 +29,7 @@ static uint32_t test_crc32(uint32_t crc, const uint8_t *data, size_t len) {
   return ~crc;
 }
 
-void test_param_name_validation() {
+void test_param_value_validation() {
   // kp/kd 非负；位置 min<max；速度/力矩为正有限值。
   float clamped = 0.0f;
   assert(param_value_ok(PARAM_FIELD_KP, 0.0f, 500.0f, &clamped) &&
@@ -468,7 +468,7 @@ static void test_param_value_ok_direction() {
 
 int main() {
   test_param_value_ok_direction();
-  test_param_name_validation();
+  test_param_value_validation();
   test_blob_v3_layout_size();
   test_blob_roundtrip_and_crc();
   test_blob_rejects_bad_layout();

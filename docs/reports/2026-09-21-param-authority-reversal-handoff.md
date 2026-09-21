@@ -5,7 +5,7 @@
 **哪些验过、哪些没验**、以及下一手要做什么。
 
 - 活规格：[param-authority-reversal-design.md](../../micro_ros_firmware/docs/plans/active/param-authority-reversal-design.md)
-- 实现计划（含「实现期勘误」一节，逐条记录计划自身被推翻的写法）：[param-authority-reversal-plan.md](../../micro_ros_firmware/docs/plans/active/param-authority-reversal-plan.md)
+- 实现计划（含「实现期勘误」一节，逐条记录计划自身被推翻的写法）：[param-authority-reversal-plan.md](../../micro_ros_firmware/docs/archive/param-authority-reversal-plan.md)
 - 提交范围：`0161ea6..7e87f8c`（14 个提交，27 文件，+3390/−205），均在 `dev/robot_ws` 本地，**未 push**。
 
 ## 一句话

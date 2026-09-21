@@ -1,5 +1,10 @@
 # 上电归一（保护/方向）与方向参数 实现计划
 
+> **已归档（2026-09-21）**：本计划已执行完毕。设计结论见
+> [boot-normalize-design](../plans/active/boot-normalize-design.md)（仍为活规格），
+> 残留真机项见 [运行时验证计划](../plans/active/motor-runtime-validation.md)。
+> 正文保留作历史追溯，不再维护。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 固件上电时在设备参数回读比对**之前**把 CERB 的保护开关写成"生效"、方向写成 W25 记录值，并新增可读写的 `m<id>.direction` 参数（页面点按切换 CW/CCW），翻向后冻结使能直到重新设零。
@@ -8,7 +13,7 @@
 
 **Tech Stack:** STM32H723 固件（C17 库 + C++17 任务层）、PlatformIO、micro-ROS + rclc_parameter、CTest + cassert host 测试、FDCAN SLCAN 台架、rosbridge web 上位机（原生 JS）。
 
-**Spec:** [`micro_ros_firmware/docs/plans/active/boot-normalize-design.md`](boot-normalize-design.md)
+**Spec:** [`docs/plans/active/boot-normalize-design.md`](../plans/active/boot-normalize-design.md)
 
 ## Global Constraints
 

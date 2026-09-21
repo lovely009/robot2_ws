@@ -1,14 +1,14 @@
 # 电机运行时验证计划（开放项唯一清单）
 
 > **状态：活动，2026-09-18 重构后更新。** 本文件是 ADR 0007 保持 Proposed 期间
-> 唯一的开放项清单；原交接文档已归档（[HANDOFF](../archive/HANDOFF-motor-runtime-refactor.md)）。
+> 唯一的开放项清单；原交接文档已归档（[HANDOFF](../../archive/HANDOFF-motor-runtime-refactor.md)）。
 >
 > 现状基线（架构不在此重复）：host CTest 19 个用例全绿（18 个 C++ cassert +
 > 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（**5 订 8 发**；参数面自
 > 2026-09-21 起是话题，`rclc` 参数服务器已退役）、构建与台架顺序以
-> [README](../../README.md)、[AGENTS.md](../../AGENTS.md)、
+> [README](../../../README.md)、[AGENTS.md](../../../README.md)、
 > [ADR 0007](../../adr/0007-micro-ros-discovery-driven-motor-runtime.md) 2026-09-18 勘误和
-> [决策日志](../architecture/motor-runtime-decision-log.md)为准。
+> [决策日志](../../architecture/motor-runtime-decision-log.md)为准。
 > 标「host 已覆盖」表示逻辑有自动测试、仅缺真机证据；其余 `[ ]` 均需台架或设计动作。
 
 ## 1. 实时性与总线容量
@@ -173,7 +173,7 @@
   的镜像假设；烧板复测 `last_error` 41 → 40、`EVENT_DEV_INIT` reason 4 → 3 且位图点名
   真实不一致槽位。**模拟器与 host 测试此前照固件假设建模（而非照对端），结构上不可能
   发现此错**——新增只读探针 `micro_ros_agent/tools/cerb_sdo_probe.py` 直接问真机。
-  见[台架记录](../../../docs/reports/2026-09-19-cerb-real-hardware-bench.md)。
+  见[台架记录](../../../../docs/reports/2026-09-19-cerb-real-hardware-bench.md)。
 - [ ] **TBD-STORAGE-02（升级迁移兜底）**：旧固件上 save **奇数次**使活动 blob 落在
   `0x1000`，再烧新固件，确认参数被一次性兜底读回而**不被清零**（不是从零开始）。
   同时确认已知缺口：旧槽 A 有效 + 旧槽 B 更新时会**静默回退一代**（文档记为不修）。
@@ -210,7 +210,7 @@
   `motor_control_param_view_t views[64]`（5,120 B）放在 4,096 B 栈上，每次 W25 落盘必然溢出 →
   FreeRTOS 栈溢出钩子关中断死循环 → IWDG ~500ms 复位。表观现象是「一落盘就重启」，
   影响 `system.save`/设备参数写回/设零/清错全部落盘路径。改为 static 后修复并实测通过。
-  详见 [台架记录](../../../docs/reports/2026-09-18-control-surface-bench.md)。
+  详见 [台架记录](../../../../docs/reports/2026-09-18-control-surface-bench.md)。
 - [x] 上行可观测性（2026-09-18）：`trajectory_state` 与 `diagnostics` 两条新话题、`target_source`、`event_seq`、`schema_version`、轨迹拒绝事件带 id 与路点下标。host 覆盖，`pio run` 通过。
 - [x] 故障清除入口 `system.clear_fault`（参数脉冲，2026-09-18）：内核按成因三分支 + CERB 清错帧编码完成，host 覆盖；真机项见第 2 节。
 - [x] CERB 管理对象确认与快速 SDO 实现（2026-09-16，TBD-CONFIG-01 对象部分）；台架实测部分仍开放，见第 3 节。

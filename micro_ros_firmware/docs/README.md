@@ -8,8 +8,9 @@
 
 - `adr/`：固件架构决策（含勘误），不存操作步骤；
 - `architecture/`：架构开发基线（decision-log 承载设计理由）；
-- `plans/active/`：未完成真机验收项（唯一开放清单）；
-- `archive/`：冻结的完整规范与历史交接，保留追溯、不再维护；
+- `plans/active/`：活规格（设计文档）与开放项；**开放项的唯一清单是
+  [motor-runtime-validation](plans/active/motor-runtime-validation.md)**；
+- `archive/`：冻结的完整规范、历史交接与已完成的设计/实现计划，保留追溯、不再维护；
 - 根部平铺文件：厂商板卡与电机协议原件，不改内文；
 - `dm-mc02例程/`：厂商例程整树（仅本地参考，已 gitignore，勿入库）。
 
@@ -22,10 +23,15 @@
 | [ADR 0007](adr/0007-micro-ros-discovery-driven-motor-runtime.md) | 发现驱动聚合式运行时决策（顶部含 2026-09-18 勘误） | Proposed + 勘误 |
 | [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 设计理由（参数链/一问一答/设零等） | 基线，含历史 |
 | [motor-runtime-validation](plans/active/motor-runtime-validation.md) | 开放台架项唯一清单与验收记录要求 | 活动 |
-| [w25-blob-v3-design](plans/active/w25-blob-v3-design.md) | W25 参数 blob v3 布局（每槽 2 扇区、设备侧事实、迁移链、零点代被否的理由） | 设计已定，待实现 |
-| [w25-blob-v3-plan](plans/active/w25-blob-v3-plan.md) | 上者的实现计划：8 个任务，host 可测部分在前、台架部分在后 | 待执行 |
+| [48-motor-scale-design](plans/active/48-motor-scale-design.md) | 48 台容量契约、只在 48 台才暴露的失效点、rclc 参数服务器必要性裁定 | 提案；§5 裁定已执行 |
+| [w25-blob-v3-design](plans/active/w25-blob-v3-design.md) | W25 参数 blob v3 布局（每槽 2 扇区、设备侧事实、迁移链、零点代被否的理由） | 已实现 |
+| [boot-normalize-design](plans/active/boot-normalize-design.md) | 上电归一（保护/方向）时序、方向无记录不猜、冻结成因与双出口语义 | 已实现 |
+| [param-authority-reversal-design](plans/active/param-authority-reversal-design.md) | 参数权威反转：固件记录为权威、写与保存分离、双行快照话题 | 已实现 |
+| [cerb-vendor-questions](plans/active/cerb-vendor-questions.md) | CERB 四份资料均无定义的项，阻塞 MIT 全量程核验 | 开放，待厂商 |
+| — 归档 — | | |
 | [ARD-0007 归档](archive/ARD-0007-micro-ros-motor-runtime.md) | 冻结的 55 章完整规范（10ms/旧话题等已被取代） | 历史 |
 | [HANDOFF 归档](archive/HANDOFF-motor-runtime-refactor.md) | 2026-09 重构交接快照（开放项已并入 validation plan） | 历史 |
+| [归档的三份实现计划](archive/) | w25-blob-v3 / boot-normalize / param-authority-reversal 的实现计划，均已执行完毕 | 历史 |
 
 ## 厂商参考资料（原件不改内文）
 

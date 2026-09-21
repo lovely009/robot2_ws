@@ -18,9 +18,9 @@
 > （53.6 → 54.4 µs，负载 +约 1%）、micro-ROS 消息尺寸需区分"rmw 判容量用的
 > `get_serialized_size`"与"真 ucdr 序列化大小"（§3.0）。
 >
-> **关系**：本文修正 [交接文档](../../../docs/reports/2026-09-19-firmware-param-surface-handoff.md)
+> **关系**：本文修正 [交接文档](../../../../docs/reports/2026-09-19-firmware-param-surface-handoff.md)
 > 的容量数字，承接其已拍板的决定，并补上它未覆盖的 48 台运行时失效点。决定成立后应写入
-> [决策日志](../architecture/motor-runtime-decision-log.md)（交接文档 §四已提示此步未做）。
+> [决策日志](../../architecture/motor-runtime-decision-log.md)（交接文档 §四已提示此步未做）。
 
 ---
 
@@ -41,7 +41,7 @@
 
 ### 1.1 `PARAM_BRIDGE_MAX_PARAMS = 416` 算不出来 [源码]
 
-[include/param_bridge.h:56](../../include/param_bridge.h) `#define PARAM_BRIDGE_MAX_PARAMS 416U`，
+[include/param_bridge.h:56](../../../include/param_bridge.h) `#define PARAM_BRIDGE_MAX_PARAMS 416U`，
 而**同一行上方的注释**（:52-53）自己算的是「48×5 + 10 = 250 槽；取 256 留余量」。
 416 这个数全仓库**没有任何推导来源**。
 
@@ -73,7 +73,7 @@ DTCM 128 KiB = 131,072 B
 `i=0` 时地址为 NULL（被 `RCL_CHECK_ARGUMENT_FOR_NULL` 挡下、只记错误码），
 `i=1` 时地址为 `0 + sizeof(Parameter)` ≈ 0x70，`RCL_CHECK` 放行 → **写非法地址**。
 
-`param_bridge_create()` 由 [ros_bridge.cpp:124](../../src/ros_bridge.cpp) 在会话建立时调用，
+`param_bridge_create()` 由 [ros_bridge.cpp:124](../../../src/ros_bridge.cpp) 在会话建立时调用，
 即**第一个 micro-ROS agent 连上就会踩到**。本板 4 台也测不出缓解——init 按 `max_params`
 预分配，与板上实际几台电机无关。
 
@@ -95,7 +95,7 @@ if (xPortGetFreeHeapSize() <
 }
 ```
 
-`xPortGetFreeHeapSize()` 已在 [param_bridge.cpp:743](../../src/param_bridge.cpp) 用于
+`xPortGetFreeHeapSize()` 已在 [param_bridge.cpp:743](../../../src/param_bridge.cpp) 用于
 `system.heap_free`，无新增依赖。
 
 > **328 B/槽在这里是保守值，不是外推**：它是 176..256 槽区间的边际斜率，含每槽的分配器块开销；
@@ -108,13 +108,13 @@ if (xPortGetFreeHeapSize() <
 
 ### 1.2 参数面每电机实际注册 11 项 [源码]
 
-[param_bridge.cpp:579](../../src/param_bridge.cpp) 的注册循环：
+[param_bridge.cpp:579](../../../src/param_bridge.cpp) 的注册循环：
 
 ```c
 for (int f = PARAM_FIELD_POS_MIN; f < PARAM_FIELD_COUNT; ++f)   // 3 .. 13 = 11 项
 ```
 
-而 [param_name.h:18-41](../../lib/param_store/include/param_name.h) 的 `PARAM_FIELD_COUNT = 14`
+而 [param_name.h:18-41](../../../lib/param_store/include/param_name.h) 的 `PARAM_FIELD_COUNT = 14`
 ——上一提交（`0a34618`）把 6 个 PID 字段（`CURRENT_P..POSITION_I`）追加在 `COUNT` 之前，
 于是**它们自动进了参数树**。`view_field()`（:504-535）对它们走 `default: return NAN`，
 所以是 6 个恒定 NaN、不可写、纯占槽的参数项，还会出现在 `ros2 param list` 与 web 参数页上。
@@ -165,7 +165,7 @@ static const param_field_t kRegisteredFields[] = {
 
 ## 2. 「48 台」到底是什么口径
 
-三个口径并存，且都是有意的（[决策日志 §6.10](../architecture/motor-runtime-decision-log.md)）：
+三个口径并存，且都是有意的（[决策日志 §6.10](../../architecture/motor-runtime-decision-log.md)）：
 
 | 口径 | 值 | 出处与约束力 |
 |---|---|---|
@@ -174,7 +174,7 @@ static const param_field_t kRegisteredFields[] = {
 | 实际部署 | **约 40** | 只用于文档与台架目标，**不得当尺寸基线** |
 
 **「16 台/总线」不是协议上限也不是时序上限**，唯一出处是 P0 容量的算术反推
-（[can_tx_scheduler.h:31-33](../../lib/fdcan/include/can_tx_scheduler.h)：「48 台分摊到 3 条总线是
+（[can_tx_scheduler.h:31-33](../../../lib/fdcan/include/can_tx_scheduler.h)：「48 台分摊到 3 条总线是
 16 台/总线，正好等于容量」）。协议真实节点空间是 vaxor 1..60 / CERB 1..127，
 固件里**没有任何按总线限 16 的校验**。
 
@@ -223,7 +223,7 @@ if (stream_id.type == UXR_BEST_EFFORT_STREAM || stream == NULL) {
 
 **更要紧的是这是双向的**。下行命令面撞的是同一堵墙：
 `MotorCommandArray` 与 `MotorTrajectory` 的订阅 QoS 是 `qos_stream()`
-（[motor_bridge.cpp:453,464](../../src/motor_bridge.cpp)，定义在 :137-144：BEST_EFFORT + depth 1），
+（[motor_bridge.cpp:453,464](../../../src/motor_bridge.cpp)，定义在 :137-144：BEST_EFFORT + depth 1），
 而输入侧 best-effort 流同样不分片（`uxr_create_input_best_effort_stream`，缓冲同受 MTU 约束）。
 **48 台的命令快照（约 788 B）因此也进不来**——不是"下发被忽略"，是执行器根本收不到。
 即：**48 台"能发现、报不出、也命令不动"**，三件事同一个根因。
@@ -235,7 +235,7 @@ if (stream_id.type == UXR_BEST_EFFORT_STREAM || stream == NULL) {
 | `motion_states`（100 Hz） | 12 + 21·⌈N/2⌉ + 23·⌊N/2⌋ = **1,068 B** | 20N + 13 = 973 B | **N ≥ 23** |
 | `motor_status_array`（20 Hz） | 12 + 34N = **1,644 B** | 32N + 14 = 1,550 B | **N ≥ 15** |
 | `motor_topology`（1 Hz） | 约 1,358 B（型号名 10 字符） | 同量级 | 走 **reliable** 输出流（`qos_reliable(1)`，:510），上限 = MTU×history = 2048 B，**不受 512 限制**；但分片发布要 flush 并阻塞 micro_ros 任务，且 48 个真实型号名长度未核实［未验］ |
-| `MotorCommandArray`（下行，**订阅**） | 12 + 48×16 = 784 B | — | **同样发不进来**：订阅 QoS 是 `qos_stream()`（BE，[motor_bridge.cpp:453](../../src/motor_bridge.cpp)），BE 输入流不分片 |
+| `MotorCommandArray`（下行，**订阅**） | 12 + 48×16 = 784 B | — | **同样发不进来**：订阅 QoS 是 `qos_stream()`（BE，[motor_bridge.cpp:453](../../../src/motor_bridge.cpp)），BE 输入流不分片 |
 | `MotorTrajectory`（下行，订阅） | 48 台受控 + 256 点 ≈ 5 KB | — | 同上（BE 订阅），**远超上限** |
 
 **闸门取哪个数**：`rmw_publish` 先调 `functions->get_serialized_size(ros_message)` 拿
@@ -300,7 +300,7 @@ get/get_types/set/list/describe 吃满；`RMW_UXRCE_MAX_PUBLISHERS = 10` 已用 
 ```
 
 **失效点在别处**：每总线硬件 RX FIFO0 只有 **8 深**
-（[fdcan.c:68](../../lib/fdcan/src/fdcan.c)，且 `RxFifo1ElmtsNbr = 0` 即 FIFO1 完全没用），
+（[fdcan.c:68](../../../lib/fdcan/src/fdcan.c)，且 `RxFifo1ElmtsNbr = 0` 即 FIFO1 完全没用），
 而 CERB 由**每总线同一条 20 ms SYNC** 触发上报。8 深 × 54.4 µs = **435 µs** 的排空窗口
 ——ISR 只要在 435 µs 内跑起来就不丢；超过就是 `FDCAN_IT_RX_FIFO0_MESSAGE_LOST`，
 **帧不可恢复**。
@@ -314,14 +314,14 @@ HAL_NVIC_SetPriority(it0/it1, BOARD_ISR_SYSCALL_THRESHOLD=5) （fdcan.c:144-146�
 → taskENTER_CRITICAL() / portSET_INTERRUPT_MASK_FROM_ISR() 期间 CAN 接收被屏蔽
 ```
 
-**关键机会**：RX 回调体内**不调用任何 FreeRTOS API**（[can_bsp.c:190-217](../../lib/fdcan/src/can_bsp.c)
+**关键机会**：RX 回调体内**不调用任何 FreeRTOS API**（[can_bsp.c:190-217](../../../lib/fdcan/src/can_bsp.c)
 只用 HAL 与 `can_rx_ring_push_from_isr`），所以它**有资格**被抬到阈值之上——移到优先级 4，
 临界区就再也屏蔽不了 CAN 接收，8 深 FIFO 的窗口从「整个临界区时长」缩回「ISR 自身延迟」。
 这是零成本的现成修法（详见 §4 P2）。
 
 ### 3.3 发现与就绪 —— 串行，但典型值可接受 [推导+源码]
 
-每总线严格一问一答（`bus_stage_in_flight`，[motor_control_config.c:358-371](../../lib/motor_control/src/motor_control_config.c)），
+每总线严格一问一答（`bus_stage_in_flight`，[motor_control_config.c:358-371](../../../lib/motor_control/src/motor_control_config.c)），
 每拍（1 ms）至多推进一个阶段、至多发起一台的识别/回读；单阶段超时 30 ms、最多重试 2 次。
 
 ```
@@ -348,10 +348,10 @@ HAL_NVIC_SetPriority(it0/it1, BOARD_ISR_SYSCALL_THRESHOLD=5) （fdcan.c:144-146�
 并把注释钉死「事件环是有损的，真值在拓扑/状态电平话题」；断链期间抑制入环或降级合并。
 
 **另一条 48 台专属风险（此前被误记为"尽力转发"）**：事件**话题**的 QoS 是
-`qos_reliable(8)`（[motor_bridge.cpp:521](../../src/motor_bridge.cpp)），而 rmw 对 reliable
+`qos_reliable(8)`（[motor_bridge.cpp:521](../../../src/motor_bridge.cpp)），而 rmw 对 reliable
 发布走 `uxr_run_session_until_confirm_delivery(…, session_timeout)`——**逐条同步等确认**。
 `publish_events()` 是「drain 16 条 → 逐条 publish → 再 drain」直到排空
-（[motor_bridge.cpp:390-408](../../src/motor_bridge.cpp)），所以 48 台冷启动约 192 条事件
+（[motor_bridge.cpp:390-408](../../../src/motor_bridge.cpp)），所以 48 台冷启动约 192 条事件
 = **约 192 次串行等确认**，全部发生在 10 ms 桥定时器里。这条通道**既不是有损的、也不是
 异步的**：真正的有损在内核那 128 深的事件环，而送到 ROS 的这一段是阻塞式的可靠流。
 48 台必须量这一段在桥定时器里占多少毫秒（否则 `motor_bridge_poll` 与 `param_bridge_poll`
@@ -418,7 +418,7 @@ CERB 的 CANopen 字典表共 **34 个对象**，其中**没有 PDO 映射（0x1
 
 新增一个**只含编译期常量、无 include** 的契约头。**放 `lib/motor_capacity/include/motor_capacity.h`，
 不要放工程级 `include/`**——理由：本仓库跨库共享编译期常量的既有先例正是
-[`lib/board/include/board_irq.h`](../../lib/board/include/board_irq.h)（`lib/fdcan/src/fdcan.c:10`
+[`lib/board/include/board_irq.h`](../../../lib/board/include/board_irq.h)（`lib/fdcan/src/fdcan.c:10`
 与 `lib/dma/src/dma.c:12` 都 include 它），而目前**没有任何 `lib/*` 编译单元引用工程级
 `include/` 头**——用已验证的机制，不赌平台隐式路径。
 
@@ -472,14 +472,14 @@ static_assert(MOTOR_CAP_DEPLOY_CEILING * 5U + 10U <= 256U,
 同时记录 `MESSAGE_LOST` 出现时的 ISR 延迟分布。
 
 > **不做**：`AutoRetransmission` 改 DISABLE。它能缓解「失联节点占住 8 深 TX FIFO」，
-> 但 [fdcan.c:36-47](../../lib/fdcan/src/fdcan.c) 明写「数值是台架实测基线，无示波器/总线分析仪
+> 但 [fdcan.c:36-47](../../../lib/fdcan/src/fdcan.c) 明写「数值是台架实测基线，无示波器/总线分析仪
 > 不得改动」——改变 TX 时序语义必须配一轮位时序与错误计数台架基线，不在本设计的射程内。
 
 **② node 全局唯一命名空间**
 
 `motor_id = 厂家 node 号`，注册表以它为全局键；同号出现在另一条总线 → `latch_config_conflict`
 → 该台禁运动、**锁存且无运行期解除路径（只能整机重启）**
-（[motor_control_discovery.c:100-118](../../lib/motor_control/src/motor_control_discovery.c)）。
+（[motor_control_discovery.c:100-118](../../../lib/motor_control/src/motor_control_discovery.c)）。
 **朴素的「三条总线各 1..16」接线会让 32 台直接锁死**，而固件里没有任何 node 分配表或校验。
 
 | 动作 | 说明 |

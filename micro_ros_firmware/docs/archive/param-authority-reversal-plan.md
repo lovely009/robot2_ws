@@ -1,5 +1,10 @@
 # 参数权威方向反转 实现计划
 
+> **已归档（2026-09-21）**：本计划已执行完毕。活规格是
+> [param-authority-reversal-design](../plans/active/param-authority-reversal-design.md)，
+> 残留真机项见 [运行时验证计划](../plans/active/motor-runtime-validation.md)。
+> 「实现期勘误」一节是计划自身被推翻的逐条记录，保留作历史追溯，不再维护。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把设备参数初始化的权威从驱动板反转回固件记录——无记录不再静默放行、写与保存拆成两次动作、固件与驱动板两份值同时可见供人工核对。

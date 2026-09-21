@@ -122,7 +122,8 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - **上电比对是"变更检测"，不是"保护必须在位"**：基准 = 上次成功落盘时设备里的
   值，所以先关 `0x2650:00` 保护再触发一次保存，记录就被重新基线化成"关"，下次
   上电不再报冲突；v2 迁移上来的记录要等第一次保存才比较这两槽（迁移只搬低 4 位）。
-  加固方向（未实现）见 `docs/plans/active/w25-blob-v3-design.md` §8.2。
+  这两条缺口**已由 2026-09-20 的上电归一实质关闭**（归一在比对之前把保护恒写为
+  「生效」）。可选加固方向的原文见 `docs/plans/active/w25-blob-v3-design.md` §8.2。
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
   `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
   与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。

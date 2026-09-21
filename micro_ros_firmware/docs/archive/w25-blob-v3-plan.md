@@ -1,5 +1,10 @@
 # W25 参数 blob v3 实现计划
 
+> **已归档（2026-09-21）**：本计划已执行完毕（blob v3 已在真机运行），残留项是
+> [运行时验证计划](../plans/active/motor-runtime-validation.md) 的 TBD-STORAGE-01/02/03。
+> 下文任务清单里的 `ros2 param set/get` 与 `m<id>.*` 参数名为当时原文（参数面自 2026-09-21
+> 起是话题），正文保留作历史追溯，不再维护。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **勘误（2026-09-21，参数面退役）**：下文各任务里的 `ros2 param set/get` 命令与
@@ -15,7 +20,7 @@
 > 是数据。按 `:01` 读会让 `REFRESH_PARAMS` 恒挂在安全槽上，全部 CERB 到不了
 > `DEV_INIT_OK`、永远无法使能。代码、模拟器与 host 测试都已改为 `0x00`。
 > 见[真机台架记录](../../../docs/reports/2026-09-19-cerb-real-hardware-bench.md)与
-> [validation plan](motor-runtime-validation.md) 的 TBD-CONFIG-02。
+> [validation plan](../plans/active/motor-runtime-validation.md) 的 TBD-CONFIG-02。
 > **下文保留当时原文**（含各任务里的代码片段与命令），不再逐行改写；
 > 读到时请按本勘误换算子索引。
 

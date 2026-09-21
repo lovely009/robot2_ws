@@ -11,7 +11,7 @@
 > `system.save` → `system_command` 的 `COMMAND_SAVE`。**下文保留当时原文**，
 > 不再逐行改写。退役决定见 `../../architecture/motor-runtime-decision-log.md` §6.9 结案块。
 >
-> 本文取代 [交接文档](../../../docs/reports/2026-09-19-firmware-param-surface-handoff.md) §二
+> 本文取代 [交接文档](../../../../docs/reports/2026-09-19-firmware-param-surface-handoff.md) §二
 > 的两条决定（"保护只接受写 0"、"保护/方向不进参数面"），并承接其余部分。
 > 涉及：固件启动状态机、设备写事务、参数面、状态话题、web、模拟器、文档。
 >

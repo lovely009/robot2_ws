@@ -380,23 +380,30 @@ PI 等）、**2 = 设置电机正限位**（0x607D:02）、**4 = 设置电机负
 运动质量受主机抖动影响，下行带宽也是随点数线性增长。
 
 **决定**：新增 `MotorTrajectory`（扁平、按时间升序的 (时间, 电机) 路点表 +
-独立的 `target_ids` 受控集合），MCU 在 20ms 控制边界做段内**单调三次 Hermite
-插值**（见下条）。
+独立的 `target_ids` 受控集合），MCU 在 5ms/200Hz 控制边界做段内插值（见下条）。
 
 - **扁平而非二级嵌套**：rosidl 的二级有界序列要为每个外层元素各自预分配内层
   buffer，静态初始化复杂且容量按 N×K 预留；扁平表单层一处预分配、按内容占用。
 - **整数毫秒的 `time_from_start_ms`**（相对起点），不用 ROS 时间：控制边界就是
-  20ms，亚毫秒无意义；绝对时间会把 MCU 拖进 epoch/NTP 依赖（ARD §12.1）。
-- **速度取段斜率，不直通路点字段**：MIT 律是 `τ=Kp·Δp+Kd·Δv+τ_ff`，上层常把
+  5ms，亚毫秒无意义；绝对时间会把 MCU 拖进 epoch/NTP 依赖（ARD §12.1）。
+- **速度取解析导数，不直通路点字段**：MIT 律是 `τ=Kp·Δp+Kd·Δv+τ_ff`，上层常把
   `velocity` 填 0，直通会让 Kd 朝 0 速刹车。字段保留作诊断。
-- **插值：单调三次 Hermite（Fritsch–Carlson），非通直路点速度**：位置与速度都
-  连续，消除了线性插值"每路点一次速度台阶"（阶梯式速度前馈会让 MIT 律的
-  `kd·v_des` 项在每个路点跳一次，即力矩台阶）。切矢在受理时对每台的位置时间线
-  一次性算好（局部极值取 0、否则中心差分并限幅到 3×min|Δ|——限幅是"逐段不超调"
-  的保证），执行侧每个 20ms 边界用解析导数求速度，**不读 `point.velocity`**
-  （上层常填 0，直通会让 Kd 朝 0 速刹车；该字段只作诊断）。
-  <!-- 2026-09-20 更正：此前本节写"线性而非三次……速度连续需求出现时再升级为
-       Hermite"，实现早已升级，是本节没跟上。 -->
+- **插值：段内线性（2026-09-21 由单调三次 Hermite 改回）**：位置沿相邻路点连线
+  走，速度取**段斜率**——段内恒定、**逐路点跳变**，执行侧每个 5ms 边界算一次，
+  **不读 `point.velocity`**（上层常填 0，直通会让 Kd 朝 0 速刹车；该字段只作诊断）。
+  **取舍**：代价是阶梯式速度前馈让 MIT 律的 `kd·v_des` 项在每个路点跳一次（力矩
+  台阶）；换来的是执行位置严格贴合路点连线，行为只由路点决定，不引入切矢限幅之类
+  的隐式修形，受理侧也零预计算（省下 256×4 B 的 `.bss` 切矢表）。**原 Hermite
+  实现与它的两条 host 用例按注释保留在码内**（`motor_control.c` 两处 + `test_motor_control.cpp`），
+  恢复只需解注释三处。
+  <!-- 2026-09-21 更正：本节此前写"单调三次 Hermite（Fritsch–Carlson）……位置与速度
+       都连续"（并有一条 2026-09-20 的更正注释，方向与本次相反）。现行为是线性：
+       速度在路点上**不**连续，这是有意的取舍而非回归。 -->
+  <!-- 2026-09-21 顺带更正：本节与 `motor_rt_task.h` 的节拍注释写的 "20ms 控制边界"
+       自 cb89e3e（控制边界 → 200Hz）起就已是 5ms，未跟上。 -->
+- **原 Hermite 设计的理由（存档，勿据此当成现行为）**：位置与速度都连续，消除了
+  线性插值"每路点一次速度台阶"。切矢在受理时对每台的位置时间线一次性算好（局部
+  极值取 0、否则中心差分并限幅到 3×min|Δ|——限幅是"逐段不超调"的保证）。
 - **归属仲裁（关键）**：轨迹声明集合内的电机由轨迹**独占**，快照对它们既不下发
   也不软停；集合外仍受 §13.1「缺席即软停」。**快照不是解除路径**——任何 100Hz
   周期发布者都会立刻打死轨迹。解除只有三条：被新轨迹替换（移出者立即软停）、
@@ -665,3 +672,5 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 **取代 09-19 交接文档 §二 的两条**：「保护只接受写 0」与「保护/方向不进参数面、`m<id>.limit_protect` 撤掉」。设计：`docs/plans/active/boot-normalize-design.md`；实现计划：`docs/archive/boot-normalize-plan.md`。参数面容量随之 64 → 72 槽（6 项/台，保住 10 台）。 |
 | 2026-09-21 | **参数权威方向反转（owner）**：固件记录为权威、驱动板向固件对齐（取代 09-17 §6.3 的反向口径）。配套三改：① `DEV_INIT` 增第五态 `NO_RECORD`——本机无该台记录不再落进放行的 `NA`，判未初始化、拒使能、`last_error=42`（"首次也当不一致，人工核对"）；② **写与保存分离**——写事务摘掉 `0x2539` 保存阶段，保存独立成 `SAVE_DEVICE_FLASH` 事务（按脏槽位选保存码 1/2/4，不写无关对象：驱动器写 flash 期间阻塞自身控制循环，此前实测 ~1s），`system.save` 同时触发设备落盘与 W25 落盘，控制边界里 500ms 去抖自动落盘删除；③ 新增只读低频话题 `micro_ros_up/device_param_report` 承载「固件记录 / 驱动板回读」双行 SI 快照 + 未保存标记 + 不一致槽位位图。设计 `docs/plans/active/param-authority-reversal-design.md`，实现 `docs/archive/param-authority-reversal-plan.md`。**尚未上板验证**：三改目前只经 host 测试与静态审查，真机台架项（`NO_RECORD` 首启、写不落盘、`system.save` 闭环、写后不保存即复位）见 `motor-runtime-validation.md`，**未运行**。 |
 | 2026-09-21 | **参数服务器整体退役，参数面改为三条话题（owner 裁定）**。①下行 `micro_ros_do/param_set`（`ParamSetArray`，稀疏、**整条受理或整条拒绝**、`field` 用**设备槽序**）+ `micro_ros_do/system_command`（`SystemCommand`：SAVE / REFRESH / SET_ZERO / CLEAR_FAULT），上行 `micro_ros_up/system_status`（`SystemStatus`：`last_error` 电平 + `refresh`/`set_zero`/`clear_fault`/`save_seq` + `save_in_progress`）；读侧不变（`device_param_report` 已双行覆盖六槽）。②**行为修正**：`save_in_progress` 改为覆盖「设备分批下发 + W25 落盘」全程——旧实现在落盘请求发出的同一拍就报完成，而 v3 要擦 2 个扇区（量级 ~1s/扇区），此刻断电就是真丢数据；另加 5s 超时兜底防电平永久卡住（与 §5.3/`outstanding` 同类缺陷）。③`param_set` 目标上界 16 = `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`，有 `static_assert` 守着——参数面是**唯一**逐目标进 FIFO 的下行路径，调上界到 17+ 会立刻编译失败。④`PARAM_BRIDGE_EXECUTOR_HANDLES` 5 → 2（两条订阅），executor handle 9 → 6；meta `MAX_PUBLISHERS` 10 → 12、`MAX_SUBSCRIPTIONS` 5 → 6（`MAX_SERVICES` **有意保持 5**：退役后是纯余量，它只是静态数组、不占 DTCM 堆，降它不值那个风险）。⑤删除参数名生成/解析（`param_name_build_motor`/`param_name_parse`/`PARAM_NAME_MAX_LEN`）；`param_field_t` 序号**一个未动**（W25 blob present 位图 + `device_raw` 槽索引契约），记录布局不变、**无需迁移**。**收益口径（不要夸大）**：真正拿回来的是 **~23.6 KB DTCM 堆**（运行期量，不体现在 `.data`/`.bss`）；第 2+3 步实测 RAM 54.7% → 52.7%（−11.4 KB）、Flash 23.9% → 20.3%（−37.2 KB），那是库与代码的连带减少。`MAX_SERVICES` 的 5 个槽确成余量，但 **publisher/subscription 槽被新话题吃回去了（净收益 ≈ 0），executor handle 9 → 6**。**代价**：`ros2 param set/get` 全部失效、web_host 参数页报废（设计使然，台架期唯一配置通道是 `ros2 topic pub`）。**未上板验证**：三条话题、`field` 序陷阱专测、SAVE 的 `save_in_progress` 区间、16 目标满 FIFO、断连重连 ×3 见 `motor-runtime-validation.md`，**未运行**。 |
+| 2026-09-21 | **命令速率由控制边界决定，不由上行到达速率决定（owner 裁定：200Hz 是驱动器与固件的底线）**。09-20 把控制边界提到 5ms/200Hz 后总线仍只有 ~39Hz/台，根因有二：① 快照通道**只在受理新快照时**产生运动帧，而上行快照流的实测送达上限 ~72/s（best-effort depth 1 静默丢弃；web→rosbridge 路径台架 ~40/s），因此命令率被上行速率钉死；② 同日提交又加了 20ms/50Hz P1 发送门，理由是"避免 4 台 800 帧/s 压垮 SLCAN/CANable"——那是**台架仪器**的吞吐上限，不是总线余量（4 台 200Hz 命令仅 4.35% 负载，16 台/总线 26%，见 `48-motor-scale-design.md` §3.2），不该固化成固件语义。本轮：新增 `motor_control_hold_step`——快照机组在每个控制边界把已受理目标**原样重发**（零阶保持，仅快照新鲜 ≤30ms 期间；挂起 P0、整定窗、轨迹所属电机一律让路，且重发不取消挂起的 P0 重试）；移除 `kP1TransmitPeriodMs` 与只为它存在的 `can_tx_scheduler_pump_p0_p2`。安全口径未放松：过期/撤权/故障/离线/冲突/缺席仍由既有门禁立刻切断输出，且 30ms 保持窗比驱动器自带 500ms 看门狗更严。host 覆盖见 `test_motor_control` 的 `test_hold_step_*`。**未验**：SLCAN 台架看不到 200Hz 总线真值（~880 帧/s 超出通道），需 candleLight/socketcan 或真机。 |
+| 2026-09-21 | **轨迹插值改回段内线性（§6.8 第三次修订）**：位置沿路点连线、速度取段斜率（段内恒定、**逐路点跳变**），受理侧不再预计算切矢。**取舍**：代价是速度在路点上不连续——MIT 律的 `kd·v_des` 项逐路点跳一档（力矩台阶），这正是 §6.8 当初上 Hermite 的理由；换来的是执行位置严格贴合路点连线、行为只由路点决定、受理零开销，且省下 256×4 B 的 `.bss` 切矢表。**原实现按注释保留在码内**（`lib/motor_control/src/motor_control.c` 的求值块 + `trajectory_compute_tangents`/`trajectory_monotone_tangent`、`motor_control_internal.h` 的 `trajectory_tangent_rad_s`、`test_motor_control.cpp` 的两条 Hermite 用例与 main 调用），恢复=解注释三处。测试口径随之调整：`test_trajectory_interpolates_and_clamps_at_end` 的中点速度期望 1.5 → 1.0（段斜率）；`test_trajectory_position_velocity_same_sign` 增加**段号切换即跳过**——线性插值下速度在路点上真跳变，跨段比符号无意义（Hermite 时该处切矢恰为 0 才使旧断言成立）。host 19 项全绿、`pio run` 通过。**未验**：真机轨迹平滑度与力矩台阶的实际观感（`motor-runtime-validation.md` 轨迹真机项）。 |

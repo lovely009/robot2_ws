@@ -5045,7 +5045,7 @@ static void test_snapshot_absence_soft_stops_only_unowned_motors() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 段内线性插值 / 段斜率速度 / 末点钳制不外推 / 前馈段内保持。
+// Hermite 求值 / 解析速度 / 末点钳制不外推 / 前馈段内保持。
 static void test_trajectory_interpolates_and_clamps_at_end() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -5725,6 +5725,113 @@ static void test_enable_without_protection_needs_confirm() {
   assert(has_result_event(&ctx2, 600U, MOTOR_PROTOCOL_CONFIG_OK)); // 保护在开 → 放行
 }
 
+// 边界保持重发：命令率由控制边界决定，与上行快照到达速率无关。
+//
+// 快照路径只在**受理新快照**时产生运动帧，而上行快照送达实测封顶 ~72/s
+// （best-effort 静默丢弃），驱动器侧要求的 200Hz 命令率靠"多发快照"永远
+// 达不到。hold_step 负责在每个控制边界把已受理目标原样再投递一次。
+static void test_hold_step_emits_held_target_every_boundary() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+
+  motor_control_command_snapshot_t s = make_snapshot(1U, 120U);
+  snapshot_add(&s, 5, 0.4f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 125U));
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 1); // 受理那一拍
+
+  // 此后没有新快照：1ms service 本身不发运动帧，hold_step 每个边界恰好一帧，
+  // 且目标零阶保持、逐位不变（不重算、不漂移）。
+  for (uint32_t t = 130U; t <= 150U; t += 5U) { // 快照龄 10..30ms，仍在窗口内
+    motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, t);
+    motor_control_on_raw_frame(&ctx, &keepalive); // 防 100ms 离线误判
+    motor_control_service(&ctx, t);
+    assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0); // service 不发
+    motor_control_hold_step(&ctx, t);
+    assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 1);
+    assert(entry_of(&ctx, 5)->target_position_rad == 0.4f);
+    assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  }
+  // 重发不带新证据：不得产生软停/ACTIVE 之类的迁移事件。
+  assert(!events_contain(&ctx, MOTOR_CONTROL_EVENT_SOFT_STOP, 5));
+
+  // 快照过期（龄 > 30ms）：hold_step 立即停发，由 freshness 服务走软停，
+  // 保持重发绝不能把这条级联盖过去。
+  const uint32_t stale_t = 120U + MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS + 5U;
+  motor_control_hold_step(&ctx, stale_t);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
+  motor_control_service(&ctx, stale_t);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
+  motor_control_hold_step(&ctx, stale_t + 5U);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0); // 已无目标
+}
+
+// 保持重发的两个让路条件：轨迹所属电机由 trajectory_step 驱动（同一拍不得
+// 重复发帧）；有挂起的 P0 时安全帧必须赢，重发不得把它取消掉。
+static void test_hold_step_yields_to_trajectory_and_pending_p0() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_two_active(&ctx, 5, 7, 100); // 最后一份快照 received_tick = 120
+
+  motor_control_trajectory_t t = make_trajectory(1U, 200U);
+  traj_add_motor(&t, 5);
+  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
+  traj_add_point(&t, 1000U, 5, 0.5f, 0.0f);
+  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
+
+  // 快照保持新鲜：7 的目标来自快照通道，5 的目标来自轨迹（忽略快照里的 5）。
+  motor_control_command_snapshot_t s = make_snapshot(2U, 296U);
+  snapshot_add(&s, 5, 0.0f, 0.0f, 0.0f);
+  snapshot_add(&s, 7, 0.3f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 298U));
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1); // 排空
+
+  // 一个控制边界：5 由 trajectory_step 发，7 由 hold_step 发——合计恰好 2 帧，
+  // hold_step 不得为轨迹所属的 5 重复发帧。
+  motor_control_trajectory_step(&ctx, 300U);
+  motor_control_hold_step(&ctx, 300U);
+  {
+    motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+    const size_t n =
+        motor_control_collect_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+    assert(n == 2U);
+    const uint16_t slot5 = (uint16_t)(entry_of(&ctx, 5) - &ctx.entries[0]);
+    const uint16_t slot7 = (uint16_t)(entry_of(&ctx, 7) - &ctx.entries[0]);
+    size_t seen5 = 0U, seen7 = 0U;
+    for (size_t i = 0U; i < n; ++i) {
+      if (frames[i].tx_slot == slot5) { seen5++; }
+      if (frames[i].tx_slot == slot7) { seen7++; }
+    }
+    assert(seen5 == 1U && seen7 == 1U);
+  }
+  assert(entry_of(&ctx, 5)->target_position_rad < 0.2f); // 轨迹在播（首点附近）
+  assert(entry_of(&ctx, 7)->target_position_rad == 0.3f); // 快照目标
+
+  // 挂起的 P0：队列塞满 P0 → 新的安全帧推不进去 → p0_pending。排空队列后
+  // （等于下游把 P0 发了出去）重试意图仍在，hold_step 必须照样让路——否则它
+  // 会把这条安全帧的补发取消掉。
+  motor_control_entry_t *seven = nullptr;
+  for (size_t i = 0U; i < ctx.entry_count; ++i) {
+    if (ctx.entries[i].used && ctx.entries[i].motor_id == 7U) {
+      seven = &ctx.entries[i];
+    }
+  }
+  assert(seven != nullptr);
+  motor_protocol_tx_frame_t p0 = {0};
+  p0.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
+  for (size_t i = 0U; i < MOTOR_CONTROL_MAX_TX_PENDING; ++i) {
+    assert(motor_control_push_tx_p0(&ctx, seven, &p0));
+  }
+  assert(!motor_control_push_tx_p0(&ctx, seven, &p0)); // 全是 P0 → 挂起重试
+  assert(seven->p0_pending);
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0); // 下游已发出去
+  assert(seven->p0_pending);
+  motor_control_hold_step(&ctx, 305U);
+  assert(seven->p0_pending); // 重发没有取消这条安全帧的重试
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0U);
+}
+
 int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
@@ -5779,6 +5886,8 @@ int main() {
   test_trajectory_position_velocity_same_sign();
   test_trajectory_cancel_and_replacement_release_motors();
   test_trajectory_survives_snapshot_timeout();
+  test_hold_step_emits_held_target_every_boundary();
+  test_hold_step_yields_to_trajectory_and_pending_p0();
   test_snapshot_timeout_without_trajectory_revokes_globally();
   test_trajectory_rejects_malformed_and_unknown_motor();
   test_clear_fault_protocol_capability();

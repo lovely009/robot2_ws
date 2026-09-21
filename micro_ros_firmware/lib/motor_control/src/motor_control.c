@@ -390,6 +390,53 @@ static bool entry_may_move(const motor_control_context_t *ctx,
   return true;
 }
 
+// MIT 组帧入队（用表项里**已钳制**的目标）。调用方必须先过
+// entry_target_eligible / entry_may_move / enable_pending 三道门。
+//
+// supersede_p0 区分两种投递：
+//  - true = 新目标（快照/轨迹路径）。新运动命令取代过期的安全帧（既有语义）。
+//  - false = 边界保持重发（motor_control_hold_step）。同一目标的重复投递**不是
+//    新证据**，不得把挂起的软停/失能重试取消掉——那会让一条迟到的 P0 永远发不
+//    出去。重发路径在调用前已挡掉 p0_pending，这里的 false 是第二道锁。
+static bool entry_push_mit(motor_control_context_t *ctx,
+                           motor_control_entry_t *entry, size_t index,
+                           uint32_t now_ms, bool supersede_p0) {
+  const motor_protocol_model_profile_t *profile = entry->profile;
+  motor_protocol_control_intent_t intent = {0};
+  intent.position_rad = entry->target_position_rad;
+  intent.velocity_rad_s = entry->target_velocity_rad_s;
+  intent.effort_nm = entry->target_effort_nm;
+  intent.kp = entry->has_kp_kd ? entry->kp : profile->default_kp;
+  intent.kd = entry->has_kp_kd ? entry->kd : profile->default_kd;
+  intent.enable = true;
+  motor_protocol_tx_frame_t mit_frame = {0};
+  if (entry->adapter->encode_mit_command == NULL ||
+      !entry->adapter->encode_mit_command(profile, entry->node, entry->bus_index,
+                                          &intent, &mit_frame)) {
+    entry->protocol_error_count++;
+    entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
+    return false;
+  }
+  mit_frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
+  mit_frame.tx_slot = (uint16_t)index; // P1 latest-wins 槽 = 表项索引（任务层路由用）
+  if (!motor_control_push_tx(ctx, &mit_frame)) {
+    return false;
+  }
+  if (supersede_p0) {
+    // 过期的 P0 重试帧作废（新命令取代旧安全帧）。
+    entry->p0_pending = false;
+    entry->p0_kind = MOTOR_CONTROL_P0_NONE;
+  }
+  entry->last_commanded_tick_ms = now_ms;
+  if (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE) {
+    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE;
+    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_ACTIVE,
+                             entry->motor_id, entry->bus_index,
+                             MOTOR_CONTROL_FAULT_NONE, 0U);
+  }
+  return true;
+}
+
 // 施加一个目标：限位/峰值钳制 → 使能序列 → MIT 组帧入队。
 // 调用方必须先过 entry_target_eligible 与 entry_may_move。
 static void entry_apply_target(motor_control_context_t *ctx,
@@ -492,35 +539,7 @@ static void entry_apply_target(motor_control_context_t *ctx,
     return; // 整定窗内（service 到期后恢复）
   }
 
-  motor_protocol_control_intent_t intent = {0};
-  intent.position_rad = entry->target_position_rad;
-  intent.velocity_rad_s = entry->target_velocity_rad_s;
-  intent.effort_nm = entry->target_effort_nm;
-  intent.kp = entry->has_kp_kd ? entry->kp : profile->default_kp;
-  intent.kd = entry->has_kp_kd ? entry->kd : profile->default_kd;
-  intent.enable = true;
-  motor_protocol_tx_frame_t mit_frame = {0};
-  if (entry->adapter->encode_mit_command == NULL ||
-      !entry->adapter->encode_mit_command(profile, entry->node, entry->bus_index,
-                                          &intent, &mit_frame)) {
-    entry->protocol_error_count++;
-    entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
-    return;
-  }
-  mit_frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
-  mit_frame.tx_slot = (uint16_t)index; // P1 latest-wins 槽 = 表项索引（任务层路由用）
-  if (motor_control_push_tx(ctx, &mit_frame)) {
-    // 新运动命令成功入队：过期的 P0 重试帧作废（新命令取代旧安全帧）。
-    entry->p0_pending = false;
-    entry->p0_kind = MOTOR_CONTROL_P0_NONE;
-    entry->last_commanded_tick_ms = now_ms;
-    if (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE) {
-      entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE;
-      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_ACTIVE,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
-    }
-  }
+  (void)entry_push_mit(ctx, entry, index, now_ms, true);
 }
 
 // 归属：轨迹声明集合内的电机由轨迹独占。纯派生（不落字段）——故障/离线/
@@ -779,6 +798,10 @@ static void release_trajectory_motor(motor_control_context_t *ctx,
   }
 }
 
+// 现行插值方案：**单调三次 Hermite**（切矢在此算、求值在 trajectory_step）。
+// 备选的段内线性已被真机实测否定——速度逐路点跳变会被 MIT 律的 kd·v_des 放大
+// 成力矩台阶；完整理由与被保留的那份代码见 trajectory_step。
+
 // 单调三次 Hermite 的内部切矢（Fritsch–Carlson）。p0/p1/p2 是同一条电机
 // 时间线上相邻的三个路点，返回值是 p1 处的切矢（rad/s）。
 // 三条规则：局部极值（两侧割线异号或为 0）取 0；否则取两侧割线均值，并限幅到
@@ -973,10 +996,69 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
         const float dh11 = 3.0f * t2 - 2.0f * tau;
         velocity = (dh00 * left->position_rad + dh10 * h * m0 +
                     dh01 * right->position_rad + dh11 * h * m1) / h;
+
+        // --- 备选实现：段内线性。2026-09-21 真机试过后**否定**，保留备查。 ---
+        // 位置沿路点连线、速度取段斜率（段内恒定）。代价是速度**逐路点跳变**，
+        // MIT 律的 kd·v_des 把每个台阶放大成一次力矩台阶——kd 还是 0 时看不出来，
+        // 填上真值后就是路点处一顿一顿。正因如此退回 Hermite，别再改回去。
+        // const float h = (float)span_ms / 1000.0f;
+        // const float tau =
+        //     (float)(elapsed - left->time_from_start_ms) / (float)span_ms;
+        // position = left->position_rad +
+        //            (right->position_rad - left->position_rad) * tau;
+        // velocity = (right->position_rad - left->position_rad) / h;
       }
     }
     entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,
                        velocity, effort, now_ms);
+  }
+}
+
+// 边界保持重发：把快照通道的命令速率从「上行快照到达速率」解耦到控制边界上。
+//
+// 为什么需要它：快照路径只在**受理新快照**时产生运动帧，而上行快照流的实测送达
+// 上限是 ~72/s（micro-ROS 下行通道，best-effort 静默丢弃；web→rosbridge 路径台架
+// 实测 ~40/s）。驱动器侧要求命令率 ≥200Hz，靠"多发快照"永远达不到——只能在每个
+// 控制边界把**已受理的目标**原样再投递一次（零阶保持）。
+//
+// 这不是放松安全：保持只在快照新鲜（≤30ms）时进行，比驱动器自带的 500ms 看门狗
+// 严得多，也比"不发帧、由驱动器自己保持"更紧——过期、撤权、故障、离线、冲突、
+// 缺席全部照旧由既有门禁立刻切断输出。
+//
+// 与 trajectory_step 的分工：轨迹机组由 trajectory_step 在**同一拍**驱动（它是
+// 边界驱动的），本函数跳过它们；两条通道合计每个边界每台恰好一帧，不重复。
+void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
+  if (ctx == NULL || !ctx->have_snapshot) {
+    return;
+  }
+  // 快照过期即停发：过了这条线由 service_snapshot_freshness 走软停/撤权，
+  // 保持重发绝不能把它盖过去。
+  if ((uint32_t)(now_ms - ctx->last_snapshot_tick_ms) >
+      MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS) {
+    return;
+  }
+  for (size_t i = 0; i < ctx->entry_count; ++i) {
+    motor_control_entry_t *entry = &ctx->entries[i];
+    if (!entry->used || !entry_target_eligible(entry)) {
+      continue;
+    }
+    // 轨迹机组由 trajectory_step 在同一拍发过（它是边界驱动的），跳过。
+    if (trajectory_owns(ctx, entry->motor_id)) {
+      continue;
+    }
+    // 只在"有已受理目标"时保持；缺席快照已在受理时软停并清 has_target。
+    if (!entry->has_target) {
+      continue;
+    }
+    // 两个"别的意图优先"的窗口：整定窗内不发运动目标；有挂起的 P0
+    // （软停/失能/使能重试）时必须让安全帧先出去。
+    if (entry->enable_pending || entry->p0_pending) {
+      continue;
+    }
+    if (!entry_may_move(ctx, entry)) {
+      continue;
+    }
+    (void)entry_push_mit(ctx, entry, i, now_ms, false);
   }
 }
 

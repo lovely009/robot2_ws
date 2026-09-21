@@ -38,11 +38,15 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 轨迹/策略计算保持 5ms/200Hz；P1 CAN 命令由下方独立 20ms 门限以 50Hz
-// 发出。5ms 间产生的目标在调度器 P1 槽 latest-wins 覆盖，既保留插值时间精度，
-// 又避免 4 台轨迹变成 800 帧/s，压垮持续运行的 SLCAN/CANable 通道。
+// 控制边界 5ms/200Hz —— 它同时**决定 CAN 命令速率**：轨迹机组由
+// trajectory_step 逐边界插值下发，快照机组由 hold_step 逐边界保持重发，两条通道
+// 合计每台每个边界恰好一帧，P1 调度槽 latest-wins 覆盖同一拍内的重投递。
+// 目标命令率 ≥200Hz 是驱动器侧的硬要求，不能再挂发送门限（2026-09-21 曾以
+// 20ms/50Hz 门限规避台架 SLCAN 通道的吞吐上限——那是**台架仪器**的限制，
+// 不是总线余量：4 台 200Hz 的命令负载仅 4.35% 总线，16 台/总线也不过 26%，
+// 见 docs/plans/active/48-motor-scale-design.md §3.2。台架上要验 200Hz 需换
+// candleLight/socketcan 或直接看固件侧 tx_frame_count）。
 static const uint32_t kControlPeriodMs = 5U;
-static const uint32_t kP1TransmitPeriodMs = 20U;
 
 // 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
@@ -353,26 +357,16 @@ static void route_kernel_tx(void) {
 
 // 1ms 服务之三：每总线 TX 调度器 pump → 硬件提交。
 // 每周期恰好一次 pump：P2 配额按"每 pump"计，循环调用会叠加配额。
-static void pump_tx_schedulers(uint32_t now_ms) {
+static void pump_tx_schedulers(void) {
   static can_tx_frame_t pump[kTxPumpBudgetPerBus]; // 静态：固定容量、可审计
-  static uint32_t last_p1_ms = 0U;
-  const bool pump_p1 =
-      (uint32_t)(now_ms - last_p1_ms) >= kP1TransmitPeriodMs;
-  if (pump_p1) {
-    last_p1_ms = now_ms;
-  }
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
     can_tx_scheduler_t *sched = can_bsp_tx_scheduler(bus);
     if (sched == nullptr) {
       continue;
     }
     uint32_t p0_count = 0U;
-    const uint32_t n = pump_p1
-                           ? can_tx_scheduler_pump(sched, pump,
-                                                   kTxPumpBudgetPerBus,
-                                                   &p0_count)
-                           : can_tx_scheduler_pump_p0_p2(
-                                 sched, pump, kTxPumpBudgetPerBus, &p0_count);
+    const uint32_t n =
+        can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus, &p0_count);
     for (uint32_t i = 0; i < n; ++i) {
       if (!can_bsp_submit_tx(bus, &pump[i])) {
         // 回插 P0 队首，下一拍先于其他帧重试，确保离线电机的失能帧
@@ -592,6 +586,9 @@ static void control_boundary(void) {
     (void)motor_control_apply_trajectory(g_motor_control, &trajectory, now_ms);
   }
   motor_control_trajectory_step(g_motor_control, now_ms);
+  // 快照通道的边界保持重发：与 trajectory_step 同拍、覆盖互斥的电机集合，
+  // 两者合计使每个边界每台恰好产生一帧 P1（见 motor_control.h 的说明）。
+  motor_control_hold_step(g_motor_control, now_ms);
 
   // 逐电机策略：批量、latest-wins。稀疏语义——只影响列出的电机，未列出的
   // 保持原状。约 0.8KB，静态避免压栈。
@@ -693,7 +690,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
     }
 
     // 1ms 服务：每总线 P0/P1/P2 出队并提交硬件。
-    pump_tx_schedulers(now_ms);
+    pump_tx_schedulers();
   }
 }
 

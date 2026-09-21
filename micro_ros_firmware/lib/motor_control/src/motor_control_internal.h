@@ -215,6 +215,7 @@ struct motor_control_context {
   // 端点恒 0（起止零速）；内部点 = 中心差分经 Fritsch–Carlson 限幅，故逐段
   // 不超调——这也让 entry_apply_target 的软限位钳制基本不会触发（钳位会破坏
   // C¹ 连续性）。放 .bss（AXI/RAM_D1），不占 DTCM 堆。
+  // 省掉本表的办法（段内线性，速度即段斜率）已被真机实测否定，见 motor_control.c。
   float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
   bool trajectory_active;
   uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基

@@ -481,6 +481,8 @@ static void test_cerb_config_unsupported_paths() {
 // 位置限位：4 阶段（写下限/读下限/写上限/读上限）。保存（0x2539）不在这里——
 // 它是独立的 SAVE_DEVICE_FLASH 事务（见 test_cerb_save_flash_transaction）。
 // 字节序与《CANopen-V0.9 字典表》示例一致（0x607D:01 下限、:02 上限，单位 cnt）。
+// **本条同时锁死子索引方向**：说明书"读取正限位/负限位"两行写反了（笔误），
+// 别照它把两张表对调——真机实测 :01 = -32768（见 cerb_adapter.c 顶部）。
 static void test_cerb_sdo_position_limit_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
   assert(find_profile("cerb_r58_101", &profile));

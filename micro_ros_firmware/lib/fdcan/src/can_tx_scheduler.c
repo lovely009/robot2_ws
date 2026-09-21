@@ -68,9 +68,8 @@ bool can_tx_scheduler_submit_p2(can_tx_scheduler_t *sched,
                    &sched->p2.count, &sched->p2.dropped_count, frame);
 }
 
-static uint32_t pump_impl(can_tx_scheduler_t *sched, can_tx_frame_t *out,
-                          uint32_t capacity, bool include_p1,
-                          uint32_t *p0_count) {
+uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
+                               uint32_t capacity, uint32_t *p0_count) {
   if (sched == NULL || out == NULL) {
     return 0U;
   }
@@ -87,16 +86,14 @@ static uint32_t pump_impl(can_tx_scheduler_t *sched, can_tx_frame_t *out,
     *p0_count = count; // out 前缀中的 P0 帧数，供硬件拒收时回插
   }
 
-  // 2) P1：仅在控制发送边界发全部脏槽位一次；其他 1ms 服务拍保留 dirty，
-  // 让 5ms 插值产生的新目标继续 latest-wins 覆盖，而不是把 CAN 发成 200Hz。
-  if (include_p1) {
-    for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS && count < capacity; ++slot) {
-      if (sched->p1.dirty[slot]) {
-        out[count] = sched->p1.slots[slot];
-        sched->p1.dirty[slot] = false;
-        sched->p1_sent++;
-        count++;
-      }
+  // 2) P1：发全部脏槽位一次（容量不足的脏槽保留到下轮）。脏槽由控制边界
+  // 逐边界置位，所以这里出队的节奏就等于控制边界（200Hz）× 每总线台数。
+  for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS && count < capacity; ++slot) {
+    if (sched->p1.dirty[slot]) {
+      out[count] = sched->p1.slots[slot];
+      sched->p1.dirty[slot] = false;
+      sched->p1_sent++;
+      count++;
     }
   }
 
@@ -110,17 +107,6 @@ static uint32_t pump_impl(can_tx_scheduler_t *sched, can_tx_frame_t *out,
     count++;
   }
   return count;
-}
-
-uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
-                               uint32_t capacity, uint32_t *p0_count) {
-  return pump_impl(sched, out, capacity, true, p0_count);
-}
-
-uint32_t can_tx_scheduler_pump_p0_p2(can_tx_scheduler_t *sched,
-                                     can_tx_frame_t *out, uint32_t capacity,
-                                     uint32_t *p0_count) {
-  return pump_impl(sched, out, capacity, false, p0_count);
 }
 
 bool can_tx_scheduler_requeue_p0_front(can_tx_scheduler_t *sched,

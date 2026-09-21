@@ -4,7 +4,7 @@
 //  - 1ms 服务：三路 RX ring 批量弹出（每总线有界配额，TBD-CAN-01）→
 //    motor_control_on_raw_frame → motor_control_service（OFFLINE/新鲜度级联/
 //    配置事务步进）→ 每总线 can_tx_scheduler pump → can_bsp_submit_tx。
-//  - 20ms 控制边界：mailbox 会话/授权边沿同步到内核 → 完整命令快照 →
+//  - 5ms/200Hz 控制边界：mailbox 会话/授权边沿同步到内核 → 完整命令快照 →
 //    apply_command_snapshot → 多点轨迹受理与轨迹步进（段内线性插值）→
 //    配置 FIFO 逐条（每边界有界）→ submit_config。
 //
@@ -37,7 +37,8 @@ bool motor_rt_task_start(void);
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
 
 // 提交一条多点轨迹（latest-wins；非法轨迹由 mailbox 拒绝并计数；
-// 空轨迹 = 取消）。轨迹在 20ms 控制边界生效，与快照按电机归属仲裁。
+// 空轨迹 = 取消）。轨迹在 5ms/200Hz 控制边界生效（段内线性插值），
+// 与快照按电机归属仲裁。
 bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory);
 
 // 提交一条批量策略（latest-wins；非法由 mailbox 整条拒绝并计数）。

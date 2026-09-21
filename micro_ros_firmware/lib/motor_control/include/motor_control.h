@@ -366,10 +366,21 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
                                     const motor_control_trajectory_t *trajectory,
                                     uint32_t now_ms);
 
-// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内 Hermite 插值并下发。
+// 轨迹步进：按 elapsed = now_ms - 受理时刻 在段内**线性**插值并下发（位置沿
+// 路点连线，速度取段斜率——段内恒定、逐路点跳变；原单调三次 Hermite 已停用）。
 // 无活动轨迹时 O(1) 返回（未用轨迹 = 对既有行为零影响）。
 // 时间超出末点 → 钳末点保持，绝不外推。
 void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
+
+// 快照通道的边界保持重发：在每个控制边界把已受理的目标原样再投递一次，使
+// **CAN 命令速率由控制边界决定（200Hz），与上行快照到达速率无关**。快照路径
+// 本身只在受理新快照时发帧，而上行送达上限实测 ~72/s（best-effort 静默丢弃），
+// 单靠快照驱动永远到不了驱动器要求的命令率。
+//
+// 只在快照新鲜（age ≤ 30ms）时重发；挂起的 P0（软停/失能/使能重试）、整定窗、
+// 轨迹所属电机一律跳过。无新证据时它是幂等的重复投递，不改变任何生命周期状态。
+// 必须与 motor_control_trajectory_step 在同一拍调用（两者覆盖互斥的电机集合）。
+void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms);
 
 // 「与路点无关的拒绝」占位（计数越界 / 归属重复 / 未注册 / 有归属无路点）。
 #define MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE 0xFFFFU

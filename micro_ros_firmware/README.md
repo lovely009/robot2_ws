@@ -219,6 +219,10 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
+  **快照到达速率不决定命令速率**：受理后的目标由内核在每个 5ms/200Hz 控制边界
+  保持重发（零阶保持，仅在快照新鲜 ≤30ms 期间），所以上行即使按 50Hz 发，
+  驱动器侧收到的仍是 200Hz 命令流。上行送达率实测封顶 ~72/s（best-effort
+  静默丢弃），因此**不要**靠提高快照频率去提高命令率——那是无效的。
 - `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，reliable）：多点轨迹，见下节。
 - `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
 - `/micro_ros_do/param_set`（`ParamSetArray`，reliable）：稀疏参数写（限位/限速/限流/
@@ -229,10 +233,12 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ### 多点轨迹（`/micro_ros_do/motor_trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
-"未来一段时间怎么走"。MCU 在受理时按每台的位置时间线算好单调三次 Hermite
-（Fritsch–Carlson）切矢，执行时每个 5ms/200Hz 边界做段内插值并取**解析导数**当速度，
-P1 CAN 命令以 20ms/50Hz 发送（边界之间由 latest-wins 保留最新插值目标），
-（位置与速度都连续，没有线性插值的速度台阶）。**路点里的 `velocity` 不参与执行**
+"未来一段时间怎么走"。MCU 受理时原样锁存路点（不做任何预计算），执行时每个
+5ms/200Hz 边界做段内**线性**插值并取**解析导数**当速度（= 段斜率，段内恒定），
+CAN 命令**每台每个边界恰好一帧（200Hz）**。代价是速度在**每个路点跳一次**——
+阶梯式速度前馈会让 MIT 律的 `kd·v_des` 项逐路点跳一档（力矩台阶）；位置则严格
+贴合路点连线（原单调三次 Hermite 实现已停用保留，2026-09-21 见决策日志 §6.8）。
+**路点里的 `velocity` 不参与执行**
 ——上层常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈
 `effort` 段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是
 MCU 本地受理 tick，消息里的 `sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
@@ -506,6 +512,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 - `motor_rt_task` 每 1ms 服务、每 5ms（200Hz）控制边界消费一次完整快照；
   内核是唯一生命周期裁决者，任务层是唯一正常 FDCAN 发送者（P0/P1/P2 分级）。
+  **控制边界同时决定 CAN 命令速率**：轨迹机组由 `trajectory_step` 逐边界插值、
+  快照机组由 `hold_step` 逐边界保持重发，两条通道合计每台每边界恰好一帧。
+  上位机的快照到达速率（实测 ~72/s 封顶）不参与决定命令率。
 - 快照 freshness（MCU 单调时基）：`>30ms` 无新快照 → 全体受控电机 MIT 默认
   `kd` 阻尼软停；`>100ms` → 协议级失能并清授权；Agent 断链立即失能清授权，
   不等 100ms。恢复必须 新授权 + 新完整快照，不复用旧目标。

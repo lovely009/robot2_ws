@@ -50,33 +50,6 @@ static void test_p1_latest_wins() {
   assert(out[0].data[0] == 0xBB); // 只发最新
 }
 
-// 5ms 插值期间 P1 只覆盖 dirty 槽；非 P1 发送拍仍须立即泵出 P0/P2。
-static void test_p1_rate_gate_keeps_latest_dirty() {
-  can_tx_scheduler_t sched;
-  can_tx_scheduler_init(&sched);
-  can_tx_frame_t out[8]{};
-  const can_tx_frame_t p0 = make_frame(0x100, 0x10);
-  const can_tx_frame_t p1_old = make_frame(0x200, 0x20);
-  const can_tx_frame_t p1_new = make_frame(0x201, 0x21);
-  const can_tx_frame_t p2 = make_frame(0x300, 0x30);
-
-  assert(can_tx_scheduler_submit_p0(&sched, &p0));
-  assert(can_tx_scheduler_submit_p1(&sched, 4, &p1_old));
-  assert(can_tx_scheduler_submit_p2(&sched, &p2));
-  uint32_t p0_count = 0U;
-  assert(can_tx_scheduler_pump_p0_p2(&sched, out, 8, &p0_count) == 2);
-  assert(p0_count == 1U);
-  assert(out[0].can_id == p0.can_id);
-  assert(out[1].can_id == p2.can_id);
-  assert(sched.p1.dirty[4]);
-
-  assert(can_tx_scheduler_submit_p1(&sched, 4, &p1_new));
-  assert(sched.p1.replaced_count == 1U);
-  assert(can_tx_scheduler_pump(&sched, out, 8, nullptr) == 1);
-  assert(out[0].can_id == p1_new.can_id);
-  assert(!sched.p1.dirty[4]);
-}
-
 // 优先级顺序：P0 → P1 → P2（ARD §22 / §43.3）。
 static void test_priority_order() {
   can_tx_scheduler_t sched;
@@ -187,7 +160,6 @@ static void test_hw_reject_accounting() {
 int main() {
   test_p1_send_once();
   test_p1_latest_wins();
-  test_p1_rate_gate_keeps_latest_dirty();
   test_priority_order();
   test_p2_quota();
   test_bounded_queues();

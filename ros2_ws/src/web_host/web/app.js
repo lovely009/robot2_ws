@@ -17,6 +17,13 @@ const TOPICS = {
   trajectory: {name: '/micro_ros_do/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
+  // 参数面：固件在 2026-09-21 把 rclc_parameter 参数服务器整体退役，改成这四条
+  // 话题（命令走下行、状态走上行）。旧页面调的 /micro_ros_node/*_parameters 已经
+  // 不存在了——所以这四行不是优化，是接线。
+  devParams: {name: '/micro_ros_up/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
+  sysStatus: {name: '/micro_ros_up/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
+  paramSet: {name: '/micro_ros_do/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
+  sysCmd: {name: '/micro_ros_do/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
 };
 
 const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -36,9 +43,18 @@ const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离线',
 // 注释块。固件新增槽位时，这里与那条注释必须同步改——只改一边会静默错位。
 const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流',
   '保护开关(0x2650:00)', '方向(0x2541)'];
-// 参数面能改的槽位：0..3（限值四项）+ 4（保护开关，m<id>.limit_protect）。
-// 只剩槽 5（方向 0x2541）不在参数面——它没有对应的参数项，写不回去。
-const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致', '回读不成功'];
+// DeviceParamEntry.dev_init_state。6 项全部可写（含此前写不回去的槽 5 方向）。
+const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致',
+  '回读不成功', '本机无记录'];
+// ParamSetTarget.field 的取值。⚠️ 这是 param_device_slot_t 的次序（= 上面
+// DEV_SLOT_NAMES 的下标、DeviceParamEntry 的行序、mismatch_mask 的位序），
+// **不是** param_field_t（那里 3 = pos_min、5 = vel_limit）。两套里 field=3 都
+// 合法 → 互用不会被拒绝，会静默写错槽位。别手打数字，一律走这张表。
+const PARAM_FIELD = {POS_MIN: 0, POS_MAX: 1, VEL_LIMIT: 2,
+  TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5};
+// SystemCommand.command
+const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3};
+const MOTOR_ID_NONE = 65535;
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
@@ -66,8 +82,12 @@ const rad2deg = (r) => r * 180 / Math.PI;
 const state = {
   connected: false,
   motors: new Map(),
-  lastError: 0,       // system.last_error 快照（总览条与失败文案翻译用）
+  lastError: 0,       // system_status.last_error 快照（总览条与失败文案翻译用）
   lastErrorMotor: -1,
+  // system_status 的四个完成序号 + 保存进行标志。所有「发命令 → 等它做完」的事务
+  // 都拿这里的值当基线，再轮询等它变大（见 sysSeq）。
+  sysStatus: {refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
+              save_seq: 0, save_in_progress: false, seen: false},
   devInit: new Map(), // motor_id -> {state, mask}：DEV_INIT 事件带来的核对结论
   policy: new Map(),  // motor_id -> {enabled, kp, kd}：页面**最后下发**的值
   events: [],
@@ -152,8 +172,12 @@ function connect() {
   ros.on('connection', () => {
     setConn(true);
     subscribeAll();
-    ['command', 'trajectory', 'policy'].forEach(ensurePublisher);
-    loadParams(); // 参数是默认页签：连上后自动读取，避免打开看到空表
+    ['command', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
+    // 参数是默认页签：连上后自动读取，避免打开看到空表。
+    // 必须**等**首帧 system_status（订阅刚建时它还没到，见 waitSysStatus），
+    // 否则每次连上都必然撞上 seen=false、弹一条假的红字。等不到（真没固件）
+    // 才让 loadParams 里的门禁去报错——那条路径下报错是真的。
+    waitSysStatus().then(() => loadParams());
   });
   ros.on('error', () => setConn(false, '连接错误'));
   ros.on('close', () => {
@@ -162,6 +186,9 @@ function connect() {
     // 掉线即清场：陈旧的表比空表更容易误导（曾把"页面掉线"看成"固件没数据"）。
     state.motors.clear();
     paramCache.clear();
+    // 序号是固件侧单调递增的，重连后第一帧就比掉线前的基线大——不清 seen 的话
+    // 一个还在飞的轮询会拿旧基线立刻"成功"。次帧到达前拒绝轮询。
+    state.sysStatus.seen = false;
     renderMotors();
     renderParamRows();
     // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
@@ -284,6 +311,56 @@ function subscribeAll() {
   });
 
   sub('temp', (m) => { state.temp = m.data; state.tempLast = Date.now(); });
+
+  // 设备参数报告（reliable，1 Hz + 变化即发）：一帧带全部台的**双行**——
+  // rec_* 固件记录（权威）+ dev_* 驱动板回读。表里显示 dev_*（"优先显示驱动板"），
+  // 该台没回读到（NaN）时才退回 rec_*。写事务收尾后固件即时发一帧，所以
+  // 「写 → 等报告变」就是这一侧的完成判据。
+  sub('devParams', (m) => {
+    // count 是 entries.size 的冗余声明（同 MotorPolicyArray.count）；不认它
+    // 会在固件侧 count 与数组长度不一致时读到 0 条。
+    const n = Math.min(m.count === undefined ? 0 : m.count, (m.entries || []).length);
+    for (let i = 0; i < n; ++i) {
+      const e = m.entries[i];
+      // 保护开关要**反转**：报文字段 rec_safety/dev_safety 是设备原值
+      // （0x2650:00 读回字节，**0 = 保护开**），而参数面 m<id>.limit_protect 与
+      // 本页这一格 checkbox 用的都是正向语义（1 = 保护生效）——两者相反。
+      // 契约见 DeviceParamEntry.msg；固件侧是原值透传（cerb_adapter.c 的
+      // CERB_VALUE_SAFETY_RAW），不改。两行一起转，rec/dev 仍彼此可比
+      // （rowsHint 拿它们对账），也仍与写回去的 field 同口径。
+      // 未回读到该对象时保持 NaN——不能落 0，那会被读成"保护关"（危险方向）。
+      const safety = (v) => (Number.isFinite(v) ? (v === 0 ? 1 : 0) : NaN);
+      const rec = {pos_min: e.rec_pos_min, pos_max: e.rec_pos_max,
+        vel_limit: e.rec_vel_limit, torque_limit: e.rec_torque_limit,
+        limit_protect: safety(e.rec_safety), direction: e.rec_direction};
+      const dev = {pos_min: e.dev_pos_min, pos_max: e.dev_pos_max,
+        vel_limit: e.dev_vel_limit, torque_limit: e.dev_torque_limit,
+        limit_protect: safety(e.dev_safety), direction: e.dev_direction};
+      const pick = {};
+      for (const f of Object.keys(rec)) {
+        pick[f] = Number.isFinite(dev[f]) ? dev[f] : rec[f];
+      }
+      paramCache.set(e.motor_id, {rec, dev, pick,
+        state: e.dev_init_state, dirty: e.record_dirty, mask: e.mismatch_mask});
+    }
+    // 有未下发的手改就跳过重绘——每帧重建 innerHTML 会把操作员正在敲的值抹掉。
+    // 两张表分别判：策略面板的勾选/增益不在 #paramRows 里，只判 dirty 会漏掉它。
+    if (!hasDirtyParamInput()) renderDevRows();
+    if (!hasPendingPolicyEdit()) renderPolicyRows();
+  });
+
+  // 系统状态（best-effort，5 Hz + 变化即发）。这是**电平**不是事件：last_error
+  // 保持到下次错误，四个 *_seq 是单调递增的完成计数（判完成 = 记下"发命令时读到
+  // 的值"再等它变大）。
+  sub('sysStatus', (m) => {
+    state.lastError = m.last_error;
+    state.lastErrorMotor = m.last_error_motor === MOTOR_ID_NONE ? -1 : m.last_error_motor;
+    state.sysStatus = {
+      refresh_seq: m.refresh_seq, set_zero_seq: m.set_zero_seq,
+      clear_fault_seq: m.clear_fault_seq, save_seq: m.save_seq,
+      save_in_progress: !!m.save_in_progress, seen: true,
+    };
+  });
 }
 
 // 曲线数据入缓冲；每通道独立时间轴（缺失 NaN 保留，绘制时跳过）。
@@ -689,7 +766,8 @@ function sendTargets(targets) {
 }
 
 // 发布一条多点轨迹：固件在自己的 5ms/200Hz 控制边界按 time_from_start_ms 段内
-// 做 C¹ 插值并计算速度。轨迹声明集合内的电机由轨迹**独占**——同一时刻
+// 做**线性**插值并计算速度（= 段斜率，段内恒定、逐路点跳变；原 C¹ Hermite 已
+// 停用）。轨迹声明集合内的电机由轨迹**独占**——同一时刻
 // 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
 // "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
 // 并软停这些电机。
@@ -1481,18 +1559,12 @@ async function flipDirection(id, cur) {
       '远离目标的方向冲，直到撞上设备限位。确认要翻吗？')) {
     return;
   }
-  try {
-    const r = await paramSetValue(`m${id}.direction`, 3, 'direction', next);
-    if (!r.results[0].successful) {
-      setParamResult(false,
-        `m${id}.direction 被拒：${r.results[0].reason || '见 last_error'}`);
-      return;
-    }
-    setParamResult(true, `m${id} 方向已下发 ${name}；受理后需重新设零才能运动`);
-    setTimeout(loadParams, 500); // 等写事务收尾后刷新
-  } catch (e) {
-    setParamResult(false, `m${id}.direction 失败：${e.message}`);
-  }
+  const req = sendParamSet([{motor_id: id, field: PARAM_FIELD.DIRECTION, value: next}]);
+  if (!req) return;
+  setParamResult(true, `m${id} 方向已下发 ${name}（req#${req}）；` +
+    '受理/拒绝是异步的——写事务通过才生效，看 CONFIG_RESULT');
+  // 写事务（写 + 读回核验）收尾后固件即时发一帧 device_param_report，这里只需重绘。
+  setTimeout(() => loadParams({skipDeviceRead: true}), 500);
 }
 
 function sendPolicyRow(id) {
@@ -1508,7 +1580,8 @@ function sendPolicyRow(id) {
   // 保护被关掉的台：该关节没有任何限位在跑（CERB 是设备侧限位，固件没有软限位
   // 兜底），所以每次武装都要显式确认。固件侧有同一道门禁（缺确认位直接拒），
   // 这里只是把"为什么按不下去"提前说清楚。
-  const protect = Number((paramCache.get(id) || {})['limit_protect']);
+  const pc = paramCache.get(id);
+  const protect = Number(pc ? pc.pick.limit_protect : NaN);
   const unprotected = Number.isFinite(protect) && protect === 0;
   if (el.enable.checked && unprotected) {
     if (!window.confirm(`m${id} 的设备侧限位保护当前是关闭的：\n\n` +
@@ -1534,47 +1607,85 @@ function sendPolicyRow(id) {
 }
 
 // ---------- 参数页（rcl_interfaces 参数服务直连）----------
-// 固件 rclc_parameter 为 low-mem 模式：每次 get/set 只能一个参数，
-// 不支持 ros2 param dump 式批量 get；逐参数调用。
-const PARAM_NODE = '/micro_ros_node';
-// 注意：ROS 参数服务名是蛇形小写（类型名才是驼峰）：
-//   list_parameters/get_parameters/set_parameters（含 describe_parameters 等）。
-function paramServiceName(typeName) {
-  return typeName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-}
-// 参数树只放静态量（限位/限速/限流）。enable/kp/kd 是动态量，走 /micro_ros_do/motor_policy
-// 话题（固件起把这三项从参数面退役）。
-const PARAM_NUM_FIELDS = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit',
-  'limit_protect', 'direction'];
-// 参数服务调用结果：id -> {enable, kp, ...}（字符串原值，NaN 为空）
+// 参数页的两条通道：读 = device_param_report 订阅，写 = param_set / system_command
+// 话题。已无参数服务——不要在这里复活 ROSLIB.Service。
+// id -> {rec, dev, pick, state, dirty, mask}，见 devParams 订阅。
 const paramCache = new Map();
 
-function paramService(service, request) {
-  return new Promise((resolve, reject) => {
-    const client = new ROSLIB.Service({
-      ros, name: `${PARAM_NODE}/${paramServiceName(service)}`,
-      serviceType: `rcl_interfaces/srv/${service}`,
-    });
-    client.callService(new ROSLIB.ServiceRequest(request), resolve,
-      (e) => reject(new Error(String(e))));
+// 写事务的关联 id。两个高位都不能碰：bit31 是内核身份读取的命名空间，bit30 是
+// 固件自发脉冲的命名空间（置位会被本地拒）。0 表示「固件代分配」，所以绕开它。
+let paramReq = (Date.now() & 0x3fffffff) >>> 0;
+function nextParamReq() {
+  paramReq = (paramReq + 1) & 0x3fffffff;
+  return paramReq === 0 ? (paramReq = 1) : paramReq;
+}
+
+// 下发一条稀疏写（整条受理或整条拒绝）。返回 request_id，失败返回 0。
+function sendParamSet(targets) {
+  if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return 0; }
+  if (!targets.length) { setParamResult(false, '没有要下发的改动'); return 0; }
+  // [<=16] 是内核 CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY 的映射，不是带宽限制：
+  // 每个目标一次 motor_rt_submit_config 提交。调用方负责分块（见 chunkedParamSet）。
+  if (targets.length > 16) { setParamResult(false, '内部错误：单条超过 16 个目标'); return 0; }
+  const request_id = nextParamReq();
+  pub('paramSet', {
+    sync_time_ns: Date.now() * 1e6, // uint64：rosbridge 入站要 JSON number
+    request_id, count: targets.length, targets,
   });
+  return request_id;
 }
 
-async function paramGet(name) {
-  const res = await paramService('GetParameters', {names: [name]});
-  const v = res.values[0];
-  if (!v || v.type === 0) return null; // NOT_SET
-  if (v.type === 1) return v.bool_value;
-  if (v.type === 2) return v.integer_value;
-  return v.double_value; // type 3
+// 按台切块：4 台 × 6 字段 = 24 > 16，必须拆。同一台**不得跨块**——位置限位成对的
+// 两边落在两块里就是两条各缺一边的消息，两条都被整条拒。
+function chunkedParamSet(byMotor) {
+  const chunks = [];
+  let cur = [];
+  for (const targets of byMotor.values()) {
+    if (cur.length + targets.length > 16) { chunks.push(cur); cur = []; }
+    cur.push(...targets);
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
 }
 
-function paramSetValue(name, type, key, value) {
-  const pv = {type};
-  if (type === 1) pv.bool_value = !!value;
-  else if (type === 2) pv.integer_value = value;
-  else pv.double_value = value; // 3 = DOUBLE
-  return paramService('SetParameters', {parameters: [{name, value: pv}]});
+function sendSystemCommand(command, motorId) {
+  if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return 0; }
+  const request_id = nextParamReq();
+  pub('sysCmd', {
+    sync_time_ns: Date.now() * 1e6, request_id, command,
+    motor_id: motorId === undefined ? MOTOR_ID_NONE : motorId,
+  });
+  return request_id;
+}
+
+// 「发命令 → 等它做完」的唯一判据：记下发送时读到的序号，等它变大。
+// 首帧未到达前拒绝（重连后旧基线会让还在飞的轮询立刻假成功，见 close 处理）。
+async function waitSysSeq(key, baseline, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!state.sysStatus.seen) return -2;      // 收不到 system_status
+    if (state.sysStatus[key] > baseline) return 0;
+    if (!state.connected) return -2;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return -3; // 超时未受理
+}
+
+// last_error 的中文说法。码表与固件零迁移（SystemStatus.msg）。
+const SYS_ERR_TEXT = {
+  1: '内核故障', 2: '内核故障', 3: '内核故障', 4: '内核故障', 5: '内核故障', 6: '内核故障',
+  10: '本地校验拒绝（多半是该台正在运动中，或位置限位没成对）',
+  11: '提交失败（配置队列满或链路异常）',
+  12: '未知电机（该台未绑定型号）',
+  20: '保存失败',
+  30: '回读失败',
+  40: '与该台固件记录不一致', 41: '回读不成功', 42: '本机无该台记录',
+};
+function lastErrorText() {
+  const e = state.lastError;
+  if (!e) return '无错误';
+  return (SYS_ERR_TEXT[e] || `错误码 ${e}`) +
+    (state.lastErrorMotor >= 0 ? `（m${state.lastErrorMotor}）` : '');
 }
 
 function writeResult(id, ok, text) {
@@ -1588,8 +1699,9 @@ function writeResult(id, ok, text) {
 function setParamResult(ok, text) { writeResult('paramResult', ok, text); }
 function setPolResult(ok, text) { writeResult('polResult', ok, text); }
 
-// 两张表共用同一套行筛选：设备限值（可回读）与使能/增益（只写）并排放，行必须
-// 一一对齐，否则左右读起来会串台。默认只展开选中的那一台，勾「显示全部」看整条臂。
+// 两张表共用同一套行筛选（「显示全部」那个勾选框在**设备参数**卡里，位于两张表
+// 之间）：设备限值（可回读）与使能/增益（只写）上下叠放，行必须一一对齐，否则
+// 对读会串台。默认只展开选中的那一台，勾「显示全部」看整条臂。
 function paramRowIds() {
   const all = [...paramCache.keys()].sort((a, b) => a - b);
   const showAll = $('chkAllParams') && $('chkAllParams').checked;
@@ -1604,15 +1716,16 @@ function renderDevRows() {
   const tbody = $('paramRows');
   const ids = paramRowIds();
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="11">'
+    tbody.innerHTML = '<tr class="empty"><td colspan="12">'
       + (paramCache.size === 0
-        ? '参数集为空（等待电机发现）'
+        ? '参数集为空（等待 device_param_report）'
         : `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余`)
       + '</td></tr>';
     return;
   }
   tbody.innerHTML = ids.map((id) => {
     const v = paramCache.get(id);
+    const pick = v.pick; // 逐字段：驱动板回读优先，没回读到才用固件记录
     const row = state.motors.get(id) || {};
     const model = row.topo?.model_name || '';
     const online = row.status?.online ?? row.topo?.online;
@@ -1638,14 +1751,30 @@ function renderDevRows() {
       if (f === 'torque_limit') return `设备端 ${Math.round(value * 1000)} mA`;
       return '';
     };
+    // 两行对照：显示的是 pick（驱动板优先），另一个值放 title。不一致时明说，
+    // 免得操作员把"记录与设备对不上"看成页面读错。
+    const rowsHint = (f) => (v.rec[f] === v.dev[f]) ? ''
+      : `；记录 ${fmtParam(v.rec[f])} / 驱动板 ${fmtParam(v.dev[f])}`;
     const cell = (f) => {
-      const hint = raw(f, Number(v[f]));
-      return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(v[f])}"` +
+      const hint = raw(f, Number(pick[f])) + rowsHint(f);
+      return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
         (hint ? ` title="${hint}"` : '') + `>`;
     };
+    // 限位教学：把该台**当前关节位置**写进对应的限位槽。厂商手册要求设置限位时
+    // 电机失能、人掰到限位再设——内核也只受理未运动状态（device_limit_write_allowed），
+    // 所以运动中的行直接禁用按钮，别让操作员白按。
+    const moving = lc === 4 || lc === 5; // ACTIVE / SAFE_STOP
+    const limBtn = (side, label, full) =>
+      `<button class="tiny-btn" data-setlim="${id}" data-lim="${side}"` +
+      (moving ? ' disabled' : '') +
+      ` title="${moving ? `该台正在运动中，限位只能在失能状态设置（先点「策略」失能）`
+        : `把 m${id} 的**当前位置**设为${full}。设置时电机必须失能；超出 ±180° 会被设备侧钳制。`}">` +
+      `${label}</button>`;
+    const limCell = limBtn('min', '设负', '位置下限 pos_min（负向 / 左）') +
+      limBtn('max', '设正', '位置上限 pos_max（正向 / 右）');
     // 保护开关：参数 1 = 保护生效（设备侧原值 0）。设备还没回读到该对象时
     // 固件给 NaN —— 这时勾选框禁用，不能让操作员以为自己看到了真值。
-    const protect = Number(v['limit_protect']);
+    const protect = Number(pick['limit_protect']);
     const protectCell = Number.isFinite(protect)
       ? `<input type="checkbox" data-id="${id}" data-field="limit_protect"` +
         (protect === 1 ? ' checked' : '') +
@@ -1656,7 +1785,7 @@ function renderDevRows() {
       : '<input type="checkbox" disabled title="设备还没回读到该对象">';
     // 方向：原值直通（0=CW / 1=CCW），点一下切换。翻转只改力矩方向，不改位置
     // 坐标系（实测）；风险是位置环反向，故仅在未运动时可改。
-    const dir = Number(v['direction']);
+    const dir = Number(pick['direction']);
     const dirCell = Number.isFinite(dir)
       ? `<button class="tiny-btn" data-dir="${id}" data-dir-cur="${dir}"` +
         ' title="点击切换 CW / CCW。翻转只改力矩方向（位置坐标不变），' +
@@ -1672,6 +1801,7 @@ function renderDevRows() {
       <td>${lifecyclePill(lc)}</td>
       <td>${src}</td>
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
+      <td>${limCell}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td>${protectCell}</td>
       <td>${dirCell}</td>
@@ -1697,7 +1827,39 @@ function renderDevRows() {
   tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
     btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
   });
+  tbody.querySelectorAll('[data-setlim]').forEach((btn) => {
+    btn.onclick = () => setLimitFromPosition(parseInt(btn.dataset.setlim, 10),
+      btn.dataset.lim);
+  });
   renderParamSummary();
+}
+
+// 表里有没有还没下发的改动。device_param_report 变化即发（1 Hz + 写事务收尾即发），
+// 每帧重建 innerHTML 会把操作员正在敲的值抹掉——有 dirty 就跳过重绘。
+function hasDirtyParamInput() {
+  const tb = $('paramRows');
+  return !!(tb && tb.querySelector('input[data-dirty]'));
+}
+
+// 策略面板里有没有「改了还没按策略」的输入。判据 = 控件当前值 ≠ state.policy 里
+// **最后一次下发**的记录；没记录过按 0 / 未勾对待，与 renderPolicyRows 的呈现口径
+// 一致。
+// 为什么需要它：device_param_report 是 1 Hz 电平帧，每帧都重建两张表的 innerHTML，
+// 而 hasDirtyParamInput 只看 #paramRows（策略面板在 #polRows）——漏判的后果是
+// 操作员勾上「启用」，不到一秒就被下一帧重建抹掉，看着像"勾不上/启用不了"。
+function hasPendingPolicyEdit() {
+  const tb = $('polRows');
+  if (!tb) return false;
+  for (const inp of tb.querySelectorAll('[data-pol-field]')) {
+    const last = state.policy.get(parseInt(inp.dataset.id, 10)) || {};
+    if (inp.dataset.polField === 'enabled') {
+      if (inp.checked !== (last.enabled === true)) return true;
+    } else if (parseFloat(inp.value) !== (last[inp.dataset.polField] !== undefined
+        ? last[inp.dataset.polField] : 0)) {
+      return true; // 清空输入框时 parseFloat 是 NaN，恒 != 记录 → 同样算未下发
+    }
+  }
+  return false;
 }
 
 // ---------- 使能与增益（只写，固件不回读）----------
@@ -1803,7 +1965,7 @@ function renderParamSummary() {
   if (blocked.length) {
     const code = Number(state.lastError || 0);
     const why = (code === 40) ? '与固件记录不一致'
-      : (code === 41 ? '回读不成功' : '未完成');
+      : (code === 41 ? '回读不成功' : (code === 42 ? '本机无该台记录' : '未完成'));
     // 逐台指出"哪几项"：位图来自 DEV_INIT 事件（收到前只显示结论）。code 40 的
     // 位图是"对不上"的槽位、41 是"没读到"的槽位——两者都只是槽位名，靠 why 区分。
     let blockedMask = 0;
@@ -1828,145 +1990,248 @@ function renderParamSummary() {
   el.innerHTML = parts.join(' ');
 }
 
-// last_error 快照：总览条与失败文案用它把错误码翻译成人话。
-async function refreshLastError() {
-  try {
-    const [code, motor] = await Promise.all(
-      ['system.last_error', 'system.last_error_motor'].map(paramGet));
-    state.lastError = Number(code) || 0;
-    state.lastErrorMotor = Number(motor);
-  } catch (e) { /* 读不到就保留旧值 */ }
-  return state.lastError;
+// 等第一个 system_status。它是 5Hz 的**电平**帧，实测「订阅 → 首帧」约 100 ms
+// （还是 DDS 发现已完成的**热**态；冷启动更久）。所以连上后同一 tick 就读必然撞上
+// seen=false——那是"订阅刚建、第一帧还没到"，不是固件故障。
+//
+// 为什么是"等"而不是"跳过检查"：轮询的完成判据是 `*_seq > 发命令时的基线`，而未
+// 收到任何帧时基线是初值 0，会让一个还在飞的轮询立刻判成"已完成"（见 closeSocket
+// 里清 seen 的注释）。所以首帧必须真等到，不能拿 0 当基线。
+function waitSysStatus(timeoutMs = 2000) {
+  if (state.sysStatus.seen) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const timer = setInterval(() => {
+      if (state.sysStatus.seen) { clearInterval(timer); resolve(true); }
+      else if (Date.now() >= deadline) { clearInterval(timer); resolve(false); }
+    }, 50);
+  });
 }
 
-// 读取 = 读驱动板 + 读参数。参数以驱动板为准，所以先把在线台逐台回读一遍
-// （拿到设备真值并触发核对结论），再取参数表——这样"读取"得到的永远是设备真值，
-// 而且核对结论会随 DEV_INIT 事件带到页面上（指出哪几项不一致）。
+// 读取 = 逐台回读驱动板。参数表本身不用拉：device_param_report 一直在流
+// （1 Hz + 变化即发），回读收尾固件就即时发一帧新报告。这里只负责把「设备真值」
+// 催出来 + 重绘。核对结论随 DEV_INIT 事件带到页面上（指出哪几项不一致）。
 async function loadParams({skipDeviceRead = false} = {}) {
   if (!state.connected) return;
-  setParamResult(true, '读取中…');
-  if (!skipDeviceRead) {
-    const online = [...state.motors.entries()]
-      .filter(([, r]) => (r.status?.online ?? r.topo?.online) === true)
-      .map(([id]) => id)
-      .sort((a, b) => a - b);
-    if (online.length) {
-      let done = 0, bad = 0;
-      for (const id of online) {
-        setParamResult(true, `读取中… 回读驱动板 ${id}（${done + 1}/${online.length}）`);
-        const r = await requestDeviceRead(id, 3000);
-        done++;
-        if (!r.ok) bad++;
-      }
-      if (bad) {
-        setParamResult(false, `已回读 ${done} 台，其中 ${bad} 台未通过核对（见下表「状态」与错误码）`);
-      }
-    }
+  // 纯重绘不碰设备，也就不需要回读基线——门禁只管下面的真回读那条路。
+  if (skipDeviceRead) { renderParamRows(); return; }
+  // 回读的收尾判据是 `*_seq > 发命令时的基线`；未收到任何帧时基线是初值 0，
+  // 会让一个还在飞的轮询立刻判成"已完成"。所以要有一帧真基线才放行（调用方
+  // 先 waitSysStatus 等首帧）。
+  if (!state.sysStatus.seen) {
+    setParamResult(false, '还没收到 system_status——固件/agent 未就绪，无法判断回读是否收尾');
+    return;
   }
-  try {
-    const res = await paramService('ListParameters', {prefixes: [], depth: 1});
-    const names = res.result.names.filter((n) => /^m\d+\./.test(n));
-    paramCache.clear();
-    for (const name of names) {
-      const [, idStr, field] = name.match(/^m(\d+)\.(.+)$/);
-      const id = parseInt(idStr, 10);
-      if (!PARAM_NUM_FIELDS.includes(field)) continue;
-      if (!paramCache.has(id)) paramCache.set(id, {});
-      paramCache.get(id)[field] = await paramGet(name);
-    }
-    await refreshLastError();
+  const online = [...state.motors.entries()]
+    .filter(([, r]) => (r.status?.online ?? r.topo?.online) === true)
+    .map(([id]) => id)
+    .sort((a, b) => a - b);
+  if (!online.length) {
+    setParamResult(true, '没有在线电机可回读');
     renderParamRows();
-    setParamResult(true, `已读取 ${paramCache.size} 台电机的参数`);
-  } catch (e) {
-    setParamResult(false, '读取失败：' + e.message);
+    return;
+  }
+  setParamResult(true, `读取中… 0/${online.length}`);
+  let bad = 0;
+  for (let i = 0; i < online.length; i++) {
+    setParamResult(true, `读取中… 回读驱动板 ${online[i]}（${i + 1}/${online.length}）`);
+    const r = await requestDeviceRead(online[i], 3000);
+    if (!r.ok) bad++;
+  }
+  renderParamRows();
+  if (bad) {
+    setParamResult(false, `已回读 ${online.length} 台，其中 ${bad} 台未通过核对` +
+      `（见下表「状态」与 last_error=${state.lastError}）`);
+  } else {
+    setParamResult(true, `已回读 ${online.length} 台，设备参数为驱动板真值`);
   }
 }
 
+// 下发手改项。三条硬约束（固件 validate_param_set，整条受理或整条拒绝）：
+//   1. count === targets.length
+//   2. 位置限位必须**成对**在同一条消息里，且 min < max
+//   3. ≤ 16 个 target（内核配置 FIFO 深度），故按台分块
+// 违反任一条整条被拒（last_error=10）——所以能在这里判的先在这里判，
+// 别让一个台的错配对把别的台的合法改动一起带走。
 async function applyParams() {
   if (!state.connected) return;
   const dirty = [...$('paramRows').querySelectorAll('input[data-dirty]')];
   if (dirty.length === 0) { setParamResult(true, '没有修改'); return; }
-  setParamResult(true, `下发 ${dirty.length} 项中…`);
-  let fail = 0;
+
+  // 先按台归拢。任一字段值非法就整批不发（局部下发会留下"改了一半"的表）。
+  const byMotor = new Map();
+  const note = (id) => {
+    if (!byMotor.has(id)) byMotor.set(id, new Map());
+    return byMotor.get(id);
+  };
   for (const inp of dirty) {
     const id = parseInt(inp.dataset.id, 10);
     const field = inp.dataset.field;
-    const name = `m${id}.${field}`;
-    try {
-      let value;
-      if (inp.type === 'checkbox') {
-        value = inp.checked ? 1 : 0;
-      } else {
-        if (inp.value.trim() === '') { delete inp.dataset.dirty; continue; }
-        value = parseFloat(inp.value);
-        if (!Number.isFinite(value)) throw new Error(`${name} 数值非法`);
+    const slot = PARAM_FIELD[field.toUpperCase()];
+    if (slot === undefined) continue;
+    if (inp.type !== 'checkbox' && inp.value.trim() === '') {
+      setParamResult(false, `m${id}.${field} 为空——填个数或刷新页面放弃这项改动`);
+      return;
+    }
+    const value = inp.type === 'checkbox' ? (inp.checked ? 1 : 0) : parseFloat(inp.value);
+    if (!Number.isFinite(value)) {
+      setParamResult(false, `m${id}.${field} 不是数字：${inp.value}`);
+      return;
+    }
+    note(id).set(slot, value);
+  }
+
+  // 成对补齐 + 本地判 min < max。
+  for (const [id, fields] of byMotor) {
+    const v = paramCache.get(id);
+    const hasMin = fields.has(PARAM_FIELD.POS_MIN);
+    const hasMax = fields.has(PARAM_FIELD.POS_MAX);
+    if (hasMin || hasMax) {
+      const lo = hasMin ? fields.get(PARAM_FIELD.POS_MIN) : (v ? v.pick.pos_min : NaN);
+      const hi = hasMax ? fields.get(PARAM_FIELD.POS_MAX) : (v ? v.pick.pos_max : NaN);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+        setParamResult(false, `m${id} 只想改一侧限位，但另一侧没有可用值——` +
+          '先点「回读」把该台设备参数读回来');
+        return;
       }
-      const type = 3; // double
-      const r = await paramSetValue(name, type, field, value);
-      if (!r.results[0].successful) {
-        fail++;
-        setParamResult(false, `${name} 被拒：${r.results[0].reason || '见 last_error'}`);
+      if (!(lo < hi)) {
+        setParamResult(false, `m${id} 位置下限 ${lo.toFixed(4)} 不小于上限 ${hi.toFixed(4)}：` +
+          '固件要求 min < max，整条会被拒。请先改正再下发。');
+        return;
       }
-      delete inp.dataset.dirty;
-    } catch (e) {
-      fail++;
-      setParamResult(false, `${name} 失败：${e.message}`);
+      // 两侧都塞进去——只发一侧会被整条拒（不做半边暂存）。
+      fields.set(PARAM_FIELD.POS_MIN, lo);
+      fields.set(PARAM_FIELD.POS_MAX, hi);
     }
   }
-  // 读固件侧最近错误码（设备类写最终成败是异步的）。
-  setTimeout(async () => {
-    try {
-      const [code, motor] = await Promise.all(
-        ['system.last_error', 'system.last_error_motor'].map(paramGet));
-      if (code) setParamResult(false, `完成，last_error=${code} motor=${motor}`);
-      else if (!fail) setParamResult(true, '下发已受理（设备限值最终成败见 CONFIG_RESULT 事件）');
-    } catch (e) { /* 忽略错误码读取 */ }
-  }, 400);
+
+  const motorTargets = new Map();
+  for (const [id, fields] of byMotor) {
+    motorTargets.set(id, [...fields].map(([field, value]) => ({motor_id: id, field, value})));
+  }
+  const chunks = chunkedParamSet(motorTargets);
+  let sent = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const req = sendParamSet(chunks[i]);
+    if (!req) return; // sendParamSet 已写结果
+    sent += chunks[i].length;
+    // 串行：块间不并发，块 2 被拒时不会与块 1 的结果混在一起。
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  dirty.forEach((inp) => { delete inp.dataset.dirty; });
+  renderParamRows();
+  setParamResult(true, `已下发 ${byMotor.size} 台 / ${sent} 项` +
+    (chunks.length > 1 ? `（分 ${chunks.length} 条）` : '') +
+    '。受理/拒绝是异步的，最终成败看 CONFIG_RESULT 事件');
 }
 
 async function saveParamsToFlash() {
   if (!state.connected) return;
-  try {
-    await paramSetValue('system.save', 1, 'save', true);
-    setParamResult(true, '保存请求已提交（Flash 写入约 0.5s）');
-  } catch (e) {
-    setParamResult(false, '保存失败：' + e.message);
+  if (!state.sysStatus.seen) { setParamResult(false, '还没收到 system_status'); return; }
+  // 完成判据是 save_seq 前进**且** save_in_progress 已转 false。参数面时期
+  // system.save 在 W25 落盘之前就被清掉，报的是假完成——这里等的是真终态。
+  // W25 要擦扇区（量级 ~1s/扇区），给足 10s。
+  const before = state.sysStatus.save_seq;
+  // SAVE 只接受 MOTOR_ID_NONE；给具体电机 id 会被本地拒（last_error=10）。
+  if (!sendSystemCommand(SYS_CMD.SAVE, MOTOR_ID_NONE)) return;
+  setParamResult(true, '保存中…（写 W25，约 1–2s）');
+  const rc = await waitSysSeq('save_seq', before, 10000);
+  if (rc === 0) {
+    const deadline = Date.now() + 5000;
+    while (state.sysStatus.save_in_progress && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    if (state.sysStatus.save_in_progress) {
+      setParamResult(false, 'save_seq 已前进，但 save_in_progress 仍是 true——' +
+        'W25 落盘未出终态，不要断电');
+      return;
+    }
+    renderParamRows();
+    setParamResult(true, `已保存到 W25（save_seq=${state.sysStatus.save_seq}，落盘已出终态）`);
+  } else if (rc === -2) {
+    setParamResult(false, '收不到 system_status，无法判断保存是否完成（勿断电）');
+  } else {
+    setParamResult(false, `保存超时未收尾：${lastErrorText()}——勿断电，重试一次`);
+  }
+}
+
+// 限位教学：把该台**当前关节位置**写进对应的限位槽。厂商手册要求"设置时电机失能、
+// 掰到限位再设置"，内核也只受理未运动状态（device_limit_write_allowed），所以
+// 先本地挡一道，再让固件的拒绝兜底（渲染与点击之间有竞态）。
+// 回读复用 requestDeviceRead：它顺带把内核的钳制（CERB mit_position_limit_rad
+// = ±π）暴露出来——超出 ±180° 的位置会被钳到 ±180°，读回来的是钳后的真值。
+async function setLimitFromPosition(id, side) {
+  if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return; }
+  const row = state.motors.get(id) || {};
+  const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
+  if (lc === 4 || lc === 5) {
+    setParamResult(false, `m${id} 正在运动中（${LIFECYCLE[lc]}）：限位只能在失能状态设置`);
+    return;
+  }
+  const mo = row.motion;
+  const pos = mo ? Number(mo.position) : NaN;
+  if (!Number.isFinite(pos)) {
+    setParamResult(false, `m${id} 还没有位置读数（motion_states 未到）——无法取当前位置`);
+    return;
+  }
+  const v = paramCache.get(id);
+  if (!v) {
+    setParamResult(false, `m${id} 还没有参数记录——先点「读取」`);
+    return;
+  }
+  // 另一侧取**显示中的现值**（驱动板优先），不是输入框里的值。
+  const lo = side === 'min' ? pos : v.pick.pos_min;
+  const hi = side === 'max' ? pos : v.pick.pos_max;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    setParamResult(false, `m${id} 的另一侧限位没有可用值——先点「回读」`);
+    return;
+  }
+  const which = side === 'min' ? '负限位（位置下限）' : '正限位（位置上限）';
+  if (!(lo < hi)) {
+    setParamResult(false, `m${id} 当前位置 ${pos.toFixed(4)} rad 作${which}后` +
+      `下限 ${lo.toFixed(4)} 不小于上限 ${hi.toFixed(4)}：固件要求 min < max，会被整条拒。\n` +
+      '先把关节掰到限位另一侧再设，或手动改另一侧的限位。');
+    return;
+  }
+  if (!window.confirm(`把 m${id} 的当前位置设为${which}？\n\n` +
+      `当前位置：${pos.toFixed(4)} rad（${(pos * 180 / Math.PI).toFixed(2)}°）\n` +
+      `设完：下限 ${lo.toFixed(4)} / 上限 ${hi.toFixed(4)} rad\n\n` +
+      '· 只能在该台失能时设置，请确认已经失能\n' +
+      '· 超出 ±180° 会被设备侧钳制到 ±180°\n' +
+      '· 设完自动回读一次，读回的才是设备真值')) {
+    return;
+  }
+  if (!sendParamSet([{motor_id: id, field: PARAM_FIELD.POS_MIN, value: lo},
+                     {motor_id: id, field: PARAM_FIELD.POS_MAX, value: hi}])) return;
+  setParamResult(true, `m${id} ${which}已下发（${pos.toFixed(4)} rad），回读中…`);
+  const r = await requestDeviceRead(id, 6000);
+  renderParamRows();
+  if (r.ok) {
+    const now = paramCache.get(id);
+    setParamResult(true, `m${id} ${which}已生效并回读：下限 ` +
+      `${fmtParam(now ? now.pick.pos_min : NaN)} / 上限 ${fmtParam(now ? now.pick.pos_max : NaN)} rad`);
+  } else if (r.code === -3) {
+    setParamResult(false, `m${id} 限位已下发，但回读未收尾（超时）：${lastErrorText()}`);
+  } else {
+    setParamResult(false, `m${id} 限位下发未被受理：${lastErrorText()}` +
+      '（10 = 被拒，多半是该台在运动中）');
   }
 }
 
 // 设备参数回读：固件侧是异步 SDO 事务（严格一问一答，4 个对象逐条读，最坏
-// 含超时重试要几秒）。完成判据用只读的 system.refresh_seq（单调递增）——只看
-// last_error(_motor) 分不清"这一轮"和"上一轮留下的"，会把没读当成成功。
+// 含超时重试要几秒）。完成判据用只读的 system_status.refresh_seq（单调递增）——
+// 只看 last_error(_motor) 分不清"这一轮"和"上一轮留下的"，会把没读当成成功。
 // 请求一次设备参数回读并等它收尾。返回 {ok, code}：
-//  code=0 一致；40/41 见内核；-1 固件未受理；-2 服务调用失败；-3 超时未收尾。
+//  code=0 一致；40/41 见内核；-2 收不到 system_status；-3 超时未收尾。
 async function requestDeviceRead(id, timeoutMs) {
-  const budget = timeoutMs || 9000;
-  let seqBefore = 0;
-  try {
-    seqBefore = Number(await paramGet('system.refresh_seq')) || 0;
-  } catch (e) { /* 读不到就按 0 处理，靠超时兜底 */ }
-  try {
-    const r = await paramSetValue('system.refresh', 2, 'refresh', id);
-    if (r.results && r.results[0] && !r.results[0].successful) {
-      return {ok: false, code: -1, reason: r.results[0].reason};
-    }
-  } catch (e) {
-    return {ok: false, code: -2, reason: e.message};
+  if (!state.sysStatus.seen) return {ok: false, code: -2, reason: '收不到 system_status'};
+  const before = state.sysStatus.refresh_seq;
+  if (!sendSystemCommand(SYS_CMD.REFRESH, id)) {
+    return {ok: false, code: -2, reason: '未连接 rosbridge'};
   }
-  const rounds = Math.max(1, Math.ceil(budget / 150));
-  for (let i = 0; i < rounds; i++) {
-    await new Promise((r) => setTimeout(r, 150));
-    let seq;
-    try {
-      seq = Number(await paramGet('system.refresh_seq'));
-    } catch (e) {
-      continue;
-    }
-    if (seq === seqBefore) continue; // 未收尾
-    await refreshLastError();
-    return {ok: state.lastError === 0, code: state.lastError};
-  }
-  return {ok: false, code: -3, timeout: true};
+  const rc = await waitSysSeq('refresh_seq', before, timeoutMs || 9000);
+  if (rc !== 0) return {ok: false, code: rc};
+  return {ok: state.lastError === 0, code: state.lastError};
 }
 
 async function refreshDeviceParams(id) {
@@ -1974,16 +2239,13 @@ async function refreshDeviceParams(id) {
   setParamResult(true, `电机 ${id} 设备参数回读已请求，等待驱动板应答…`);
 
   const r = await requestDeviceRead(id);
-  if (r.code === -1) {
-    setParamResult(false, `固件未受理 system.refresh（${r.reason || '见 last_error'}）`);
-  } else if (r.code === -2) {
-    setParamResult(false, '回读请求失败：' + r.reason);
+  if (r.code === -2) {
+    setParamResult(false, '回读请求失败：' + (r.reason || '收不到 system_status'));
   } else if (r.code === -3) {
-    setParamResult(false, `电机 ${id} 回读仍未收尾（超时）：固件最近错误码 ` +
-      `${state.lastError}（电机 ${state.lastErrorMotor}）` +
+    setParamResult(false, `电机 ${id} 回读仍未收尾（超时）：${lastErrorText()}` +
       (state.lastError === 11 ? '——11 是「提交失败」，请求在 mailbox 被拒' : ''));
   } else if (Number(state.lastErrorMotor) !== id) {
-    setParamResult(true, `电机 ${id} 回读已结束（固件最近错误码 ${state.lastError} 属于电机 ${state.lastErrorMotor}）`);
+    setParamResult(true, `电机 ${id} 回读已结束（最近错误码 ${state.lastError} 属于电机 ${state.lastErrorMotor}）`);
   } else if (r.code === 0) {
     setParamResult(true, `电机 ${id} 设备参数已从驱动板读回（驱动板真值）`);
   } else if (r.code === 40) {
@@ -2020,61 +2282,30 @@ async function setMotorZero(id) {
     '· 立即写入驱动器；是否掉电保存尚未实测确认');
   if (!ok) return;
 
-  let seqBefore = 0;
-  try {
-    seqBefore = Number(await paramGet('system.set_zero_seq')) || 0;
-  } catch (e) { /* 读不到就靠超时兜底 */ }
-  try {
-    const r = await paramSetValue('system.set_zero', 2, 'set_zero', id);
-    if (r.results && r.results[0] && !r.results[0].successful) {
-      // 固件侧被拒（例如未失能）或该版本根本没有这个参数——直接说清楚，
-      // 不要落到"未收尾"那种含糊超时。
-      setParamResult(false, `固件未受理 system.set_zero（${r.results[0].reason || '见 last_error'}）：` +
-        '该台可能未失能，或固件不是含「设零点」的版本');
-      return;
-    }
-  } catch (e) {
-    setParamResult(false, '设零点请求失败：' + e.message + '（固件是否已刷入含「设零点」的版本？）');
-    return;
-  }
+  if (!state.sysStatus.seen) { setParamResult(false, '收不到 system_status，无法判断是否收尾'); return; }
+  const before = state.sysStatus.set_zero_seq;
+  if (!sendSystemCommand(SYS_CMD.SET_ZERO, id)) return;
   setParamResult(true, `电机 ${id} 设零点已请求…`);
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 150));
-    let seq;
-    try {
-      seq = Number(await paramGet('system.set_zero_seq'));
-    } catch (e) {
-      continue;
-    }
-    if (seq === seqBefore) continue; // 事务未收尾
-
-    let code = 0, motor = -1;
-    try {
-      [code, motor] = await Promise.all(
-        ['system.last_error', 'system.last_error_motor'].map(paramGet));
-    } catch (e) { /* 读不到结论码：按成功兜底 */ }
-    const c = Number(code);
-    if (Number(motor) === id && c !== 0) {
-      setParamResult(false, `电机 ${id} 设零点失败：last_error=${c}` +
-        (c === 2 ? '（参数被拒——该台在运行中？厂家要求失能状态设置）' : ''));
-    } else {
-      setParamResult(true, `电机 ${id} 已设零点：当前姿态即零点` +
-        '——设备内限位随零点移动，请重新确认限位与机械行程');
-    }
-    await loadParams();
+  const rc = await waitSysSeq('set_zero_seq', before, 6000);
+  if (rc === -2) {
+    setParamResult(false, '收不到 system_status，无法判断设零点是否收尾');
     return;
   }
-  // 超时也要给出固件侧的错误码：请求可能在 mailbox/内核被拒（例如 FIFO 门、
-  // 参数槽、kind 校验），那时序号永远不动，只看"未收尾"查不出原因。
-  let code = 0, motor = -1;
-  try {
-    [code, motor] = await Promise.all(
-      ['system.last_error', 'system.last_error_motor'].map(paramGet));
-  } catch (e) { /* 读不到就算了 */ }
-  setParamResult(false, `电机 ${id} 设零点未收尾（已等 6 秒）：固件最近错误码 ` +
-    `${Number(code)}（电机 ${Number(motor)}）` +
-    (Number(code) === 11 ? '——11 是「提交失败」，请求在 mailbox 被拒' : '') +
-    (Number(code) === 0 ? '——错误码为 0 说明固件可能根本没有该参数（版本旧？）' : ''));
+  if (rc === -3) {
+    // 超时也要给出固件侧的错误码：请求可能在 mailbox/内核被拒（例如 FIFO 门、
+    // 参数槽、kind 校验），那时序号永远不动，只看"未收尾"查不出原因。
+    setParamResult(false, `电机 ${id} 设零点未收尾（已等 6 秒）：${lastErrorText()}` +
+      (state.lastError === 0 ? '——错误码为 0 说明该版本没有这条命令（版本旧？）' : ''));
+    return;
+  }
+  if (state.lastErrorMotor === id && state.lastError !== 0) {
+    setParamResult(false, `电机 ${id} 设零点失败：${lastErrorText()}` +
+      '（10 = 被拒——该台在运行中？厂家要求失能状态设置）');
+  } else {
+    setParamResult(true, `电机 ${id} 已设零点：当前姿态即零点` +
+      '——设备内限位随零点移动，请重新确认限位与机械行程');
+  }
+  await loadParams();
 }
 
 // 故障清除（固件参数 `system.clear_fault` = <电机 id>，脉冲；完成序号
@@ -2094,44 +2325,28 @@ async function clearMotorFault(id) {
     '· 清完仍须显式使能 + 新的完整快照/轨迹才可能回运动');
   if (!ok) return;
 
-  let seqBefore = 0;
-  try { seqBefore = Number(await paramGet('system.clear_fault_seq')) || 0; } catch (e) { /* 靠超时兜底 */ }
-  try {
-    const r = await paramSetValue('system.clear_fault', 2, 'clear_fault', id);
-    if (r.results && r.results[0] && !r.results[0].successful) {
-      setParamResult(false, `固件未受理 system.clear_fault（${r.results[0].reason || '见 last_error'}）：` +
-        '该台可能在运动中，或固件不是含「故障清除」的版本');
-      return;
-    }
-  } catch (e) {
-    setParamResult(false, '故障清除请求失败：' + e.message + '（固件是否已刷入含「故障清除」的版本？）');
-    return;
-  }
+  if (!state.sysStatus.seen) { setParamResult(false, '收不到 system_status，无法判断是否收尾'); return; }
+  const before = state.sysStatus.clear_fault_seq;
+  if (!sendSystemCommand(SYS_CMD.CLEAR_FAULT, id)) return;
   setParamResult(true, `电机 ${id} 故障清除已请求…`);
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 150));
-    let seq;
-    try { seq = Number(await paramGet('system.clear_fault_seq')); } catch (e) { continue; }
-    if (seq === seqBefore) continue; // 事务未收尾
-
-    let code = 0, motor = -1;
-    try {
-      [code, motor] = await Promise.all(
-        ['system.last_error', 'system.last_error_motor'].map(paramGet));
-    } catch (e) { /* 读不到结论码：按成功兜底 */ }
-    const c = Number(code);
-    if (Number(motor) === id && c !== 0) {
-      setParamResult(false, `电机 ${id} 故障清除未成功：last_error=${c}` +
-        '（身份冲突锁存不可解除、该台在运动中、或该协议无清错手段，都会被拒）');
-    } else {
-      setParamResult(true, `电机 ${id} 故障清除已受理：厂家故障需设备状态帧回报 ` +
-        'fault_active=false 才收敛到 READY_DISABLED，届时再显式使能');
-    }
-    await loadParams();
+  const rc = await waitSysSeq('clear_fault_seq', before, 6000);
+  if (rc === -2) {
+    setParamResult(false, '收不到 system_status，无法判断故障清除是否收尾');
     return;
   }
-  setParamResult(false, `电机 ${id} 故障清除未收尾（已等 6 秒）：` +
-    '看 system.last_error 与 motor_events 定位是哪一层拒的');
+  if (rc === -3) {
+    setParamResult(false, `电机 ${id} 故障清除未收尾（已等 6 秒）：${lastErrorText()}` +
+      '——看 motor_events 的 CONFIG_RESULT 定位是哪一层拒的');
+    return;
+  }
+  if (state.lastErrorMotor === id && state.lastError !== 0) {
+    setParamResult(false, `电机 ${id} 故障清除未成功：${lastErrorText()}` +
+      '（身份冲突锁存不可解除、该台在运动中、或该协议无清错手段，都会被拒）');
+  } else {
+    setParamResult(true, `电机 ${id} 故障清除已受理：厂家故障需设备状态帧回报 ` +
+      'fault_active=false 才收敛到 READY_DISABLED，届时再显式使能');
+  }
+  await loadParams();
 }
 
 // ---------- 初始化 ----------

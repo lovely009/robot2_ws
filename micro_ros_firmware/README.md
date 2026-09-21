@@ -41,7 +41,7 @@ OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
 | W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `storage_task` 独占：双槽（每槽 2 扇区）A/B 参数持久化（见「W25Q64」节） |
-| 电机接口 | ID 化有界消息（3 个订阅 + 6 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
+| 电机接口 | ID 化有界消息（3 个订阅 + 7 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
 
 ## 时钟
@@ -66,7 +66,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `micro_ros` | 2 | 8192 | 等 agent → 建实体 → 收发，10ms bridge timer（100Hz）按域节拍发布：运动/IMU 数据 100Hz、状态 20Hz、拓扑 1Hz、温度 2Hz；断连自动重建 |
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
-| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；设备写事务去抖 500ms 自动落盘 + `system.save` 脉冲，见「W25Q64」节） |
+| `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；`system.save` 脉冲——写事务只置脏、不再自动落盘，见「W25Q64」节） |
 | `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 20ms 控制边界消费完整快照与配置 FIFO |
 
 ## 代码组织
@@ -77,7 +77,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 |---|---|
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
 | `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
-| `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics） |
+| `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 20ms 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
 | `session_sync` | 会话边沿/电平→内核授权的纯派生（20ms 边界调用，host 可测） |
 | `storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
@@ -425,7 +425,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - **刚由 v2 迁移上来的记录，两槽不参与比对，直到第一次保存**（迁移只搬低 4 位），
   即每块刚升级的板子都处在这个状态里。
 
-发布（上行，6 个话题；均为 ID 化，缺失浮点 = NaN）：
+发布（上行，7 个话题；均为 ID 化，缺失浮点 = NaN）：
 
 - `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（100Hz，
   由 10ms bridge timer 驱动）。
@@ -443,6 +443,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   （帧计数/解码错误/快照与配置拒绝/事件与 TX 丢弃/P0 重试/轨迹与策略收支/
   每总线 ring 溢出/堆余量）。这些此前只存在于芯片里，实时性与总线容量的问题
   只能靠 JTAG 定位。
+- `micro_ros_up/device_param_report`（`DeviceParamReport`，1 Hz + 变化即发）：
+  参数核对双行快照（固件记录列 / 驱动板回读列，同槽位同单位、力矩列按 A）+ 未
+  保存标记 + 不一致槽位位图。
 
 **三份上行状态不重叠**：topology = 身份（谁在、哪条总线、什么协议、型号、能力、
 冲突、`schema_version`）；status = 状态与电气（`lifecycle`、在线、温度/电流/电压、

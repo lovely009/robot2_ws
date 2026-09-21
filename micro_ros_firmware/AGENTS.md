@@ -104,8 +104,11 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
   `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
   与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。
-- 两个落盘触发：`system.save` 脉冲；设备写事务成功 → 内核 record_dirty → motor_rt
-  去抖 **500ms** 自动落盘（写必须设备+驱动板一起写，不落盘下次上电必判不一致）。
+- **落盘只有一个触发：`system.save` 脉冲**（2026-09-21 写/保存分离后）。写事务成功
+  只把该台 `record_dirty_slots` 置脏（`device_param_report.record_dirty` 随之置真），
+  不再是落盘触发；"设备写事务成功 → 500ms 去抖自动落盘"已删（聚合脏标志与
+  `motor_control_take_record_dirty()` 一并移除）。只写不保存 = 未保存，下次上电不
+  通过——这正是 owner 要的行为。`system.save` 对 dirty 台写设备 `0x2539` 并落 W25。
 - Flash 缓冲必须 ≥4 字节对齐（代码统一 `alignas(8)`）：-Os 下结构体访问生成
   STRD，非对齐直接 HardFault。
 - 擦写阻塞：v2 单扇区实测 ~1s（**旧值**）；v3 双扇区阻塞值**待台架实测**
@@ -117,7 +120,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - `src/main.cpp` —— setup 板级初始化 + start_task 编排五任务；`loop()` 必须空。
 - `src/motor_rt_task.cpp` —— 唯一电机实时任务：1ms 服务（RX drain / 内核 service /
   SYNC / TX 路由 pump / IWDG 喂狗）+ 20ms 控制边界（会话边沿、快照 apply、配置 FIFO、
-  boot 参数、落盘去抖）；内核唯一调用者、唯一正常 FDCAN 发送者。
+  boot 参数）；内核唯一调用者、唯一正常 FDCAN 发送者。
 - `src/session_sync.c` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
 - `lib/motor_control/` —— ID 驱动内核（注册表/型号目录/生命周期/安全级联/配置
   事务）；公共 API 只在 `include/`，内部布局 `src/motor_control_internal.h`

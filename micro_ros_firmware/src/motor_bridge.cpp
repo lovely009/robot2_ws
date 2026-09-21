@@ -9,11 +9,13 @@
 // 既不下发也不软停；集合外的电机仍由快照负责（缺失即软停，ARD §13.1）。
 // 策略与二者正交：它是控制律参数与武装位，不是运动目标（ARD §15.4 禁止
 // Kp/Kd/Enable 进入 100Hz 快照，故单独成一条）。
-// 发布（5）：
+// 发布（7）：
 //   micro_ros_up/motion_states（100Hz 运动状态，只读副本）
 //   micro_ros_up/motor_status_array（20Hz 诊断）
 //   micro_ros_up/motor_topology（1s 全量拓扑）
 //   micro_ros_up/motor_events（事件转发）
+//   micro_ros_up/trajectory_state（10Hz 轨迹执行状态）
+//   micro_ros_up/diagnostics（1Hz 固件计数器）
 //   micro_ros_up/device_param_report（1 Hz + 变化即发，参数核对双行快照）
 //
 // 下行无配置通道：型号绑定由内核在发现建档/重连时经 READ_IDENTITY 事务读
@@ -107,7 +109,7 @@ static can_bridge_msgs__msg__MotorPolicyArray g_policy_msg;
 static bool g_policy_up = false;
 static bool g_policy_added = false;
 
-// ---- 发布（5）----
+// ---- 发布（7）----
 static rcl_publisher_t g_motion_states_pub;
 static can_bridge_msgs__msg__MotorMotionStateArray g_motion_states_msg;
 static bool g_motion_states_up = false;

@@ -21,6 +21,8 @@ float32 rec_pos_min
 float32 rec_pos_max
 float32 rec_vel_limit
 float32 rec_torque_limit
+# rec_safety / dev_safety = 设备原值（0x2650:00 读回字节，**0 = 保护开**），与参数面
+# m<id>.limit_protect 的正向语义（1 = 保护生效）**相反**；两行同为原值、彼此可比。
 float32 rec_safety
 float32 rec_direction
 # 驱动板回读侧（影子）

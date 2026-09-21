@@ -203,7 +203,8 @@ typedef enum {
   // 之间该台处于「未保存」，由 DeviceParamReport 暴露、靠 system.save 收尾。
   // 载荷 save_slots：待保存的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*），
   // adapter 据此选保存码、不写无关对象（驱动器写 flash 期间会阻塞自身控制循环，
-  // 实测 ~1s，多存一个对象就是白等一秒）。
+  // 多存一个对象就是白等一截控制环；阻塞量级**未实测**，待台架，见
+  // docs/plans/active/param-authority-reversal-design.md §6）。
   MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH = 14U
 } motor_protocol_config_kind_t;
 

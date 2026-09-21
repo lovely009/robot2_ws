@@ -94,6 +94,10 @@ static void fill_view(const motor_control_entry_t *entry,
   view->record_raw_present = device_side ? entry->record_raw_present : 0U;
   // 报告要的两张位图：已写未保存（含易失槽）与"记录对不上设备的哪几项"
   // （口径与 DEV_INIT 事件的 detail 相同，不另立一套判据）。
+  // 非设备侧型号（VAXOR）恒 0：其写路径走本地软限位、从不置
+  // entry->record_dirty_slots，这里把"没有设备保存概念"固化成视图契约。
+  // **静默收窄**：若将来某条非设备侧写路径开始置脏，这一行会把它吞掉——
+  // 届时改成无条件直通 entry->record_dirty_slots。
   view->record_dirty_slots = device_side ? entry->record_dirty_slots : 0U;
   view->dev_mismatch_mask =
       (device_side && entry->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH)

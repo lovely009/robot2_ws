@@ -113,6 +113,23 @@ class Player(Node):
                 return s.position
         return None
 
+    def src(self):
+        """逐台 target_source：0=NONE 1=SNAPSHOT 2=TRAJECTORY。
+
+        这是台架上「某台根本不跟」的第一判据——NONE 表示该台没过
+        entry_may_move 的门（policy_enable / motion_authorized /
+        dev_params_allow_motion 之一），此时发再多命令它都不动，
+        而 ROS 侧没有任何报错（快照仍被受理、计数照涨）。
+        """
+        if not self.motion:
+            return {}
+        return {s.motor_id: s.target_source for s in self.motion[1].states}
+
+    def age(self):
+        if not self.motion:
+            return {}
+        return {s.motor_id: s.state_age_ms for s in self.motion[1].states}
+
     def elapsed(self, tid):
         if self.tstate and self.tstate[1].trajectory_id == tid:
             return self.tstate[1].elapsed_ms, self.tstate[1].active, self.tstate[1].completed
@@ -182,7 +199,10 @@ def main():
     ap.add_argument("--kp", type=float, default=30.0)
     ap.add_argument("--kd", type=float, default=1.0)
     ap.add_argument("--hold-s", type=float, default=2.5, help="起点对齐保持时长")
-    ap.add_argument("--lead-ms", type=int, default=60, help="提前多少 ms 交棒")
+    ap.add_argument("--lead-ms", type=int, default=0,
+                    help="提前多少 ms 交棒。固件受理新轨迹时把 t=0 重设到受理时刻，"
+                         "所以交棒越贴近上一窗的末点、位置越连续；提前量补偿的是"
+                         "下行延迟，给大了反而让新窗起点跑到臂前面形成台阶")
     ap.add_argument("--loop", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -210,7 +230,16 @@ def main():
     log(f"[play] 起点对齐到轨迹首点 {start}，保持 {a.hold_s}s")
     n.hold(ids, start, a.hold_s)
     settled = {i: n.pos(i) for i in ids}
+    src, age = n.src(), n.age()
     log(f"[play] 对齐后实测 {({k: round(v,4) for k,v in settled.items() if v is not None})}")
+    log(f"[play] target_source {src}（1=快照 0=无目标 2=轨迹）")
+    stale = [i for i, a in age.items() if a > 200]
+    if stale:
+        log(f"[play] ⚠ 这些台的运动反馈已过期 { {i: age[i] for i in stale} } ms——"
+            f"它们不会跟随任何命令")
+    if any(src.get(i) == 0 for i in ids):
+        log("[play] ⚠ 有台 target_source=0（未被下发目标）：快照/轨迹命令会被静默忽略，"
+            "先查该台的 policy_enable / motion_authorized / dev_params_allow_motion")
 
     for rep in range(a.loop):
         n.trace.clear()
@@ -233,6 +262,17 @@ def main():
     for t, mid, p in n.trace:
         per.setdefault(mid, []).append((t, p))
     log("\n=== 结果 ===")
+    # 交棒是唯一可能产生位置台阶的地方：逐电机列出最大的几次单采样位移及其时刻，
+    # 台阶出现在窗口边界附近（时间戳与窗口起点的关系）就说明交棒时刻没压准。
+    for i in ids:
+        tr = per.get(i, [])
+        if len(tr) < 20:
+            continue
+        jumps = sorted(((abs(tr[j][1] - tr[j-1][1]), tr[j][0]) for j in range(1, len(tr))),
+                       reverse=True)[:3]
+        med = sorted(abs(tr[j][1] - tr[j-1][1]) for j in range(1, len(tr)))[len(tr)//2]
+        log(f"  m{i} 最大单采样位移 {jumps[0][0]:.4f} rad（中位 {med:.5f}）" +
+            ("  ⚠ 比值 >20× 提示有台阶" if med > 1e-6 and jumps[0][0] / med > 20 else ""))
     for i in ids:
         tr = per.get(i, [])
         if len(tr) < 10:

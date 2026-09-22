@@ -30,7 +30,7 @@
 - Produces the ROS package name `robot_dynamics` and declares the rosdep key `pinocchio` for the CMake package `pinocchio`.
 - Produces a package that can be discovered by `colcon` without depending on any existing workspace package.
 
-- [ ] **Step 1: Write the package manifest**
+- [x] **Step 1: Write the package manifest**
 
 Create the following package metadata, matching the existing ament package style:
 
@@ -54,7 +54,7 @@ Create the following package metadata, matching the existing ament package style
 </package>
 ```
 
-- [ ] **Step 2: Validate the manifest syntax**
+- [x] **Step 2: Validate the manifest syntax**
 
 Run:
 
@@ -68,7 +68,7 @@ PY
 
 Expected: `package.xml: valid XML`.
 
-- [ ] **Step 3: Commit the manifest**
+- [x] **Step 3: Commit the manifest**
 
 ```bash
 git add ros2_ws/src/robot_dynamics/package.xml
@@ -88,7 +88,7 @@ git commit -m "feat: add robot dynamics package manifest"
 - Produces the exported CMake target `robot_dynamics` and the dependency export `pinocchio`.
 - Registers the test executable `test_pinocchio_dependency` when `BUILD_TESTING` is enabled.
 
-- [ ] **Step 1: Add CMake dependency discovery and target definition**
+- [x] **Step 1: Add CMake dependency discovery and target definition**
 
 Create:
 
@@ -121,7 +121,7 @@ ament_package()
 
 The interface target intentionally has no runtime implementation or public wrapper header; its purpose is to make the Pinocchio dependency discoverable and linkable from the future package API without introducing speculative code.
 
-- [ ] **Step 2: Add the dependency smoke test source**
+- [x] **Step 2: Add the dependency smoke test source**
 
 Create `ros2_ws/src/robot_dynamics/test/test_pinocchio_dependency.cpp` with:
 
@@ -140,7 +140,7 @@ TEST(PinocchioDependencyTest, ConstructsEmptyModel) {
 
 This verifies that the exported headers and target are usable, while avoiding any URDF or robot-specific behavior.
 
-- [ ] **Step 3: Configure and run only the new package test**
+- [x] **Step 3: Configure and run only the new package test**
 
 If the system dependency is missing, install the already-available ROS package through the project’s approved sudo flow:
 
@@ -160,7 +160,7 @@ colcon test-result --verbose
 
 Expected: the package configures, builds, and `test_pinocchio_dependency` passes. No Gazebo or hardware process should start.
 
-- [ ] **Step 4: Commit the package build target and test**
+- [x] **Step 4: Commit the package build target and test**
 
 ```bash
 git add ros2_ws/src/robot_dynamics/CMakeLists.txt ros2_ws/src/robot_dynamics/test/test_pinocchio_dependency.cpp
@@ -178,7 +178,7 @@ git commit -m "feat: link Pinocchio in robot dynamics package"
 - Documents the prerequisite package, package-only build/test commands, and explicit non-goals for future maintainers.
 - Does not alter any launch or runtime configuration.
 
-- [ ] **Step 1: Write the package README**
+- [x] **Step 1: Write the package README**
 
 Create:
 
@@ -216,7 +216,7 @@ colcon test-result --verbose
 测试只构造一个空的 `pinocchio::Model`，不启动 Gazebo，也不连接真实硬件。
 ```
 
-- [ ] **Step 2: Run package-only and full workspace checks**
+- [x] **Step 2: Run package-only and full workspace checks**
 
 Run:
 
@@ -237,7 +237,7 @@ colcon test-result --verbose
 
 Expected: the new package test passes and existing tests retain their prior behavior. If an unrelated pre-existing test fails, report its exact failure instead of changing unrelated packages.
 
-- [ ] **Step 3: Verify the final diff boundary**
+- [x] **Step 3: Verify the final diff boundary**
 
 Run:
 
@@ -257,7 +257,7 @@ ros2_ws/src/robot_dynamics/README.md
 
 Generated workspace directories must remain untracked/ignored.
 
-- [ ] **Step 4: Commit the package documentation**
+- [x] **Step 4: Commit the package documentation**
 
 ```bash
 git add ros2_ws/src/robot_dynamics/README.md
@@ -265,6 +265,13 @@ git commit -m "docs: document Pinocchio dependency boundary"
 ```
 
 ---
+
+## Execution Record
+
+- 2026-09-22：已安装系统包 `ros-humble-pinocchio`（4.0.0-2jammy.20260606.100000）。
+- 2026-09-22：`colcon build --symlink-install --packages-select robot_dynamics` 成功；`test_pinocchio_dependency` 通过。
+- 2026-09-22：完整工作区 `colcon test` 通过，7 个包共 214 项测试，0 errors、0 failures、0 skipped。
+- Pinocchio 的 CMake 配置会输出外部 `FindBoost` 对 `python310` header 的非致命警告；不影响构建或测试。
 
 ## Self-Review Checklist
 

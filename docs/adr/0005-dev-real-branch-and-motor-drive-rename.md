@@ -1,6 +1,6 @@
 # dev-real 真机分支：motor_drive 更名与两包精简
 
-> **当前适用性（2026-09-11）：历史分支决策、部分被 ADR 0006 取代。** `motor_drive` 更名保留；当前 `dev/robot_ws` 已重新包含六包，串口能力也已恢复，不能按本文删除仿真包或 SLCAN 实现。
+> **当前适用性（2026-09-11）：历史分支决策、部分被 ADR 0006 取代。** `motor_drive` 更名保留；当前 `dev/robot_ws` 已演进为七包工作区，串口能力也已恢复，不能按本文删除仿真包或 SLCAN 实现。
 
 **Status**: accepted（`dev-real` 分支专用决策；`dev-sim`（原 develop）分支不受影响）
 

@@ -9,6 +9,7 @@
 | 底层驱动 | `motor_drive`：传输、线协议、通用电机映射（无 ROS） |
 | ROS 适配层 | `motor_hardware_interface`：ros2_control lifecycle、joint 映射、YAML 解析、真机 bring-up |
 | 仿真层 | `motor_sim`（共享仿真库：协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）+ `robot_arm_gazebo`（机械臂模型库 `models/<模型名>` / launch / Gazebo 集成） |
+| 运动学/动力学层 | `robot_dynamics`：独立 Pinocchio 计算边界，不属于电机驱动实时链路 |
 
 ## 配置术语
 

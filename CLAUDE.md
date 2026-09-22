@@ -4,19 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 这是什么
 
-ROS 2 Humble 工作空间（`dev` 开发分支），`ros2_ws/` 下六个 ament 包：
+ROS 2 Humble 工作空间（`dev` 开发分支），`ros2_ws/` 下七个 ament 包：
 
 - `can_bridge_msgs` —— 固件与 ROS 2 共用的 ID 化有界消息定义
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口
 - `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
 - `robot_arm_gazebo` —— 机械臂 URDF 模型库（`models/<模型名>/`）与 Ignition Gazebo 仿真集成
+- `robot_dynamics` —— 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖）
 - `web_host` —— rosbridge Web 上位机（姿态、IMU、电机状态与命令快照）
 
 另有两个独立工程区域：`micro_ros_firmware`（PlatformIO，非 ament 包）与
 `micro_ros_agent`（独立 colcon 工作区）。
 
-分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 6 包）、
+分支约定：`dev/robot_ws` 开发（本分支，真机 + 仿真 + 动力学 7 包）、
 `dev-sim` 仿真线、`main` 仅发布。
 
 权威文档（修改代码前先读）：各包 `README.md`（`ros2_ws/src/<pkg>/README.md`）、
@@ -121,6 +122,9 @@ motor_sim（共享仿真库）                      robot_arm_gazebo（模型库
   SimMotorHandler / plant_model / 帧路由        models/<模型名> / launch / Gazebo 集成
   （协议 / 传输 / 传动 / 锁存安全）            gazebo.launch.py（gz_ros2_control 位置控制）
 ```
+
+独立计算边界：`robot_dynamics -> Pinocchio`。它不依赖电机驱动、ros2_control 适配、
+`motor_sim` 或 Gazebo，也不进入现有实时控制路径；跨包集成须另立 ADR。
 
 核心是「三自适应」闭环，全部由配置驱动、编译代码不含机器人拓扑：
 

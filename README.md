@@ -1,6 +1,6 @@
 # robot_ws（dev/robot_ws）
 
-机器人的 ROS 2 Humble 工作空间（开发分支 `dev/robot_ws`）。六个 ament 包，真机、仿真、消息定义与 Web 上位机并存：
+机器人的 ROS 2 Humble 工作空间（开发分支 `dev/robot_ws`）。七个 ament 包，真机、仿真、消息定义与 Web 上位机并存：
 
 | 包 | 定位 |
 |---|---|
@@ -9,11 +9,12 @@
 | `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up |
 | `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
 | `robot_arm_gazebo` | 机械臂 URDF 模型库（`models/<模型名>`）与 Ignition Gazebo 集成 |
+| `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖） |
 | `web_host` | rosbridge Web 上位机（姿态、IMU、电机状态与命令快照） |
 
 ## 分支
 
-- `dev/robot_ws`：开发分支（本分支，真机 + 仿真 6 包）
+- `dev/robot_ws`：开发分支（本分支，真机 + 仿真 + 动力学 7 包）
 - `dev-sim`：仿真线（纯 `motor_sim` + `robot_arm_gazebo`）
 - `main`：发布
 

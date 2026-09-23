@@ -33,14 +33,14 @@ void test_param_value_validation() {
   // kp/kd 非负；位置 min<max；速度/力矩为正有限值。
   float clamped = 0.0f;
   assert(param_value_ok(PARAM_FIELD_KP, 0.0f, 500.0f, &clamped) &&
-         clamped == 0.0f);
+      clamped == 0.0f);
   assert(param_value_ok(PARAM_FIELD_KP, 600.0f, 500.0f, &clamped) &&
-         clamped == 500.0f); // 超上限钳到上限（受理）
+      clamped == 500.0f);    // 超上限钳到上限（受理）
   assert(!param_value_ok(PARAM_FIELD_KP, -1.0f, 500.0f, &clamped));
   assert(!param_value_ok(PARAM_FIELD_KP, NAN, 500.0f, &clamped));
   assert(!param_value_ok(PARAM_FIELD_KP, INFINITY, 500.0f, &clamped));
   assert(param_value_ok(PARAM_FIELD_VEL_LIMIT, 3.0f, 3.14f, &clamped) &&
-         clamped == 3.0f);
+      clamped == 3.0f);
   assert(!param_value_ok(PARAM_FIELD_TORQUE_LIMIT, 0.0f, 45.0f, &clamped));
   // 成对校验：min<max。
   assert(param_position_limits_ok(-1.0f, 1.0f));
@@ -84,13 +84,13 @@ void test_blob_roundtrip_and_crc() {
   param_store_blob_set(blob, 7, PARAM_FIELD_POS_MIN, -1.0f);
   param_store_blob_set(blob, 9, PARAM_FIELD_VEL_LIMIT, 2.5f);
   assert(param_store_blob_get(blob, 7, PARAM_FIELD_KP, &v) &&
-         std::abs(v - 30.0f) < kEps);
+      std::abs(v - 30.0f) < kEps);
   assert(param_store_blob_get(blob, 7, PARAM_FIELD_POS_MIN, &v) &&
-         std::abs(v + 1.0f) < kEps);
+      std::abs(v + 1.0f) < kEps);
   assert(!param_store_blob_get(blob, 7, PARAM_FIELD_KD, &v));
   assert(!param_store_blob_get(blob, 8, PARAM_FIELD_KP, &v));
   assert(param_store_blob_get(blob, 9, PARAM_FIELD_VEL_LIMIT, &v) &&
-         std::abs(v - 2.5f) < kEps);
+      std::abs(v - 2.5f) < kEps);
 
   // finalize 后 CRC 有效；改一个字节即失效。
   param_store_blob_finalize(blob, 1);
@@ -149,23 +149,23 @@ void test_blob_device_raw_roundtrip() {
   param_store_blob_t *blob = param_store_blob_reset(storage, sizeof(storage));
   // 先写原值、后写字段：必须落在同一条记录（空槽判定看两位图）。
   assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
-                                         13300U));
+      13300U));
   assert(param_store_blob_set(blob, 7, PARAM_FIELD_TORQUE_LIMIT, 115.5f));
   assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT,
-                                         3030U));
+      3030U));
   uint32_t raw = 0U;
   float v = 0.0f;
   assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_TORQUE_LIMIT,
-                                         &raw) && raw == 13300U);
+      &raw) && raw == 13300U);
   assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_VEL_LIMIT,
-                                         &raw) && raw == 3030U);
+      &raw) && raw == 3030U);
   assert(!param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_POS_MIN,
-                                          &raw));
+      &raw));
   assert(param_store_blob_device_raw_present(blob, 7) ==
-         (uint8_t)((1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT) |
-                   (1U << PARAM_DEVICE_SLOT_VEL_LIMIT)));
+      (uint8_t)((1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT) |
+      (1U << PARAM_DEVICE_SLOT_VEL_LIMIT)));
   assert(param_store_blob_get(blob, 7, PARAM_FIELD_TORQUE_LIMIT, &v) &&
-         std::fabs(v - 115.5f) < 1e-4f);
+      std::fabs(v - 115.5f) < 1e-4f);
   // 只占原值位的记录也必须能被查到（present 无位）。
   assert(param_store_blob_device_raw_present(blob, 7) != 0U);
   // 未记录原值的电机：位图为 0。
@@ -187,12 +187,12 @@ void test_blob_device_raw_safety_slots() {
   // 只写安全槽（不写限值）：记录必须存在且只有该位。
   assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_SAFETY, 1U));
   assert(param_store_blob_device_raw_present(blob, 7) ==
-         (uint8_t)(1U << PARAM_DEVICE_SLOT_SAFETY));
+      (uint8_t)(1U << PARAM_DEVICE_SLOT_SAFETY));
   // 再加方向槽，两位并存。
   assert(param_store_blob_set_device_raw(blob, 7, PARAM_DEVICE_SLOT_DIRECTION, 0U));
   assert(param_store_blob_device_raw_present(blob, 7) ==
-         (uint8_t)((1U << PARAM_DEVICE_SLOT_SAFETY) |
-                   (1U << PARAM_DEVICE_SLOT_DIRECTION)));
+      (uint8_t)((1U << PARAM_DEVICE_SLOT_SAFETY) |
+      (1U << PARAM_DEVICE_SLOT_DIRECTION)));
   // 值 0 也是有效记录（方向 CW = 0），不能与"未核验"混淆。
   uint32_t raw = 123U;
   assert(param_store_blob_get_device_raw(blob, 7, PARAM_DEVICE_SLOT_DIRECTION, &raw));
@@ -225,7 +225,7 @@ void test_blob_migrate_v1() {
   const size_t rec0 = PARAM_STORE_HEADER_SIZE;
   auto *p32 = reinterpret_cast<uint32_t *>(legacy + rec0);
   p32[0] = (1U << PARAM_FIELD_KP) | (1U << PARAM_FIELD_KD) |
-           (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX);
+      (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX);
   auto *p16 = reinterpret_cast<uint16_t *>(legacy + rec0);
   p16[2] = 3U; // motor_id
   auto *pf = reinterpret_cast<float *>(legacy + rec0);
@@ -239,7 +239,7 @@ void test_blob_migrate_v1() {
   std::memset(header_copy + 16, 0, sizeof(uint32_t));
   uint32_t crc = test_crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
   crc = test_crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
-                   PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
+      PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
   hdr[4] = crc; // crc32 字段（偏移 16）
 
   static uint8_t out[PARAM_STORE_BLOB_SIZE];
@@ -259,7 +259,7 @@ void test_blob_migrate_v1() {
   // CRC 损坏 → 拒绝迁移（当作无有效 blob）。
   hdr[4] ^= 0xFFU;
   assert(param_store_blob_migrate_v1(legacy, sizeof(legacy), out, sizeof(out)) ==
-         nullptr);
+      nullptr);
 }
 
 // 手搓一个合法 v2 blob（48B 记录）供迁移测试。
@@ -273,12 +273,12 @@ static void build_v2_blob(uint8_t *buf) {
   const size_t rec = PARAM_STORE_HEADER_SIZE;
   auto *p32 = reinterpret_cast<uint32_t *>(buf + rec);
   p32[0] = (1U << PARAM_FIELD_KP) | (1U << PARAM_FIELD_KD) |
-           (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX) |
-           (1U << PARAM_FIELD_VEL_LIMIT) | (1U << PARAM_FIELD_TORQUE_LIMIT);
+      (1U << PARAM_FIELD_POS_MIN) | (1U << PARAM_FIELD_POS_MAX) |
+      (1U << PARAM_FIELD_VEL_LIMIT) | (1U << PARAM_FIELD_TORQUE_LIMIT);
   auto *p16 = reinterpret_cast<uint16_t *>(buf + rec);
   p16[2] = 5U; // motor_id
   buf[rec + 6] = (uint8_t)((1U << PARAM_DEVICE_SLOT_POS_MIN) |
-                           (1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT));
+      (1U << PARAM_DEVICE_SLOT_TORQUE_LIMIT));
   auto *pf = reinterpret_cast<float *>(buf + rec);
   pf[2] = 30.0f;  // kp
   pf[3] = 1.0f;   // kd
@@ -296,7 +296,7 @@ static void build_v2_blob(uint8_t *buf) {
   std::memset(header_copy + 16, 0, sizeof(uint32_t));
   uint32_t crc = test_crc32(0U, header_copy, PARAM_STORE_HEADER_SIZE);
   crc = test_crc32(crc, buf + PARAM_STORE_HEADER_SIZE,
-                   PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+      PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
   hdr[4] = crc;
 }
 
@@ -343,14 +343,14 @@ void test_blob_migrate_v2() {
   build_v2_blob(bad);
   bad[PARAM_STORE_HEADER_SIZE + 6] |=
       (uint8_t)((1U << PARAM_DEVICE_SLOT_SAFETY) |
-                (1U << PARAM_DEVICE_SLOT_DIRECTION));
+      (1U << PARAM_DEVICE_SLOT_DIRECTION));
   uint8_t bhdr[PARAM_STORE_HEADER_SIZE];
   std::memcpy(bhdr, bad, PARAM_STORE_HEADER_SIZE);
   std::memset(bhdr + 16, 0, sizeof(uint32_t));
   uint32_t bcrc = test_crc32(0U, bhdr, PARAM_STORE_HEADER_SIZE);
   reinterpret_cast<uint32_t *>(bad)[4] =
       test_crc32(bcrc, bad + PARAM_STORE_HEADER_SIZE,
-                 PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+      PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
   blob = param_store_blob_migrate_v2(bad, sizeof(bad), out, sizeof(out));
   assert(blob != nullptr && param_store_blob_validate(blob));
   raw = 123U; // 读失败必须不写回
@@ -392,11 +392,11 @@ void test_blob_migrate_chain_v1_to_v3() {
   std::memset(hc + 16, 0, sizeof(uint32_t));
   uint32_t crc = test_crc32(0U, hc, PARAM_STORE_HEADER_SIZE);
   h1[4] = test_crc32(crc, legacy + PARAM_STORE_HEADER_SIZE,
-                     PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
+      PARAM_STORE_RECORD_COUNT * PARAM_STORE_LEGACY_RECORD_SIZE);
 
   static uint8_t via_v1[PARAM_STORE_BLOB_SIZE];
   assert(param_store_blob_migrate_v1(legacy, sizeof(legacy), via_v1,
-                                     sizeof(via_v1)) != nullptr);
+      sizeof(via_v1)) != nullptr);
   const auto *b1 = reinterpret_cast<const param_store_blob_t *>(via_v1);
   assert(param_store_blob_validate(b1) && b1->seq == seq);
   float v = 0.0f;
@@ -418,11 +418,11 @@ void test_blob_migrate_chain_v1_to_v3() {
   std::memset(hc + 16, 0, sizeof(uint32_t));
   crc = test_crc32(0U, hc, PARAM_STORE_HEADER_SIZE);
   h2[4] = test_crc32(crc, v2 + PARAM_STORE_HEADER_SIZE,
-                     PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
+      PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2);
 
   static uint8_t via_v2[PARAM_STORE_BLOB_SIZE];
   assert(param_store_blob_migrate_v2(v2, sizeof(v2), via_v2, sizeof(via_v2)) !=
-         nullptr);
+      nullptr);
   const auto *b2 = reinterpret_cast<const param_store_blob_t *>(via_v2);
   assert(param_store_blob_validate(b2) && b2->seq == seq);
   assert(param_store_blob_get(b2, 4, PARAM_FIELD_KP, &v) && v == 7.5f);
@@ -431,7 +431,7 @@ void test_blob_migrate_chain_v1_to_v3() {
   assert(std::memcmp(via_v1, via_v2, PARAM_STORE_BLOB_SIZE) == 0);
   // 已是 v3 的 blob 不会再被 v2 迁移吃一次（重复迁移必须被拒绝）。
   assert(param_store_blob_migrate_v2(via_v1, sizeof(via_v1), via_v2,
-                                     sizeof(via_v2)) == nullptr);
+      sizeof(via_v2)) == nullptr);
 }
 
 // 参数服务器的对外单位（param_units.h）：位置/速度与内核同单位直通（rad、

@@ -17,7 +17,7 @@ param_store_blob_t *reset_blob() {
 }
 
 const param_store_record_t *find_record(const param_store_blob_t *blob,
-                                        uint16_t motor_id) {
+    uint16_t motor_id) {
   for (uint32_t i = 0; i < blob->record_count; ++i) {
     const auto &r = blob->records[i];
     if (r.motor_id == motor_id &&
@@ -198,7 +198,7 @@ static void test_device_safety_and_direction_slots_persisted() {
   // id12：安全/方向的位有、方向取 1——与 id11 互为镜像，槽位错位必挂
   motor_control_param_view_t w = cerb_view(12);
   w.dev_raw_present = (1U << PARAM_DEVICE_SLOT_SAFETY) |
-                      (1U << PARAM_DEVICE_SLOT_DIRECTION);
+      (1U << PARAM_DEVICE_SLOT_DIRECTION);
   w.dev_raw[PARAM_DEVICE_SLOT_SAFETY] = 0;
   w.dev_raw[PARAM_DEVICE_SLOT_DIRECTION] = 1;
   motor_control_param_view_t views[2] = {v, w};
@@ -213,12 +213,12 @@ static void test_device_safety_and_direction_slots_persisted() {
   assert(r11->device_raw[PARAM_DEVICE_SLOT_DIRECTION] == 0);
   uint32_t raw = 0U;
   assert(param_store_blob_get_device_raw(blob, 11, PARAM_DEVICE_SLOT_SAFETY,
-                                         &raw) &&
-         raw == 1);
+      &raw) &&
+      raw == 1);
   assert(param_store_blob_get_device_raw(blob, 11,
-                                         PARAM_DEVICE_SLOT_DIRECTION,
-                                         &raw) &&
-         raw == 0);
+      PARAM_DEVICE_SLOT_DIRECTION,
+      &raw) &&
+      raw == 0);
   // 原有四槽行为不变
   assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_POS_MIN));
   assert(r11->device_raw_present & (1U << PARAM_DEVICE_SLOT_POS_MAX));
@@ -250,9 +250,9 @@ static void test_device_safety_and_direction_slots_persisted() {
   assert((r13->device_raw_present & (1U << PARAM_DEVICE_SLOT_SAFETY)) == 0U);
   assert((r13->device_raw_present & (1U << PARAM_DEVICE_SLOT_DIRECTION)) == 0U);
   assert(!param_store_blob_get_device_raw(b2, 13, PARAM_DEVICE_SLOT_SAFETY,
-                                          &raw));
+      &raw));
   assert(!param_store_blob_get_device_raw(b2, 13, PARAM_DEVICE_SLOT_DIRECTION,
-                                          &raw));
+      &raw));
 }
 
 // motor_id=0 的视图被跳过（0 非法）。
@@ -265,6 +265,21 @@ static void test_zero_motor_id_skipped() {
   assert(find_record(blob, 0) == nullptr);
 }
 
+// 无效输入不应触碰 blob/视图/输出缓冲；空容量仍允许 NULL 输出。
+static void test_null_inputs_are_noop() {
+  auto *blob = reset_blob();
+  motor_control_param_view_t view = cerb_view(1);
+  view.kp = 2.0f;
+  storage_projection_views_to_blob(nullptr, &view, 1U);
+  storage_projection_views_to_blob(blob, nullptr, 1U);
+  assert(find_record(blob, 1U) == nullptr);
+
+  motor_control_stored_params_t out[1] = {};
+  assert(storage_projection_blob_to_boot(nullptr, out, 1U) == 0U);
+  assert(storage_projection_blob_to_boot(blob, nullptr, 1U) == 0U);
+  assert(storage_projection_blob_to_boot(blob, nullptr, 0U) == 0U);
+}
+
 int main() {
   test_cerb_only_verified_objects_recorded();
   test_cerb_unpaired_position_excluded();
@@ -273,5 +288,6 @@ int main() {
   test_blob_to_boot_projection();
   test_device_safety_and_direction_slots_persisted();
   test_zero_motor_id_skipped();
+  test_null_inputs_are_noop();
   return 0;
 }

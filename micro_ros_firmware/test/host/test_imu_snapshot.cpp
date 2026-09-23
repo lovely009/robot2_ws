@@ -22,7 +22,7 @@ static imu_data_t make_sample(float sentinel) {
 }
 
 static void assert_sample_equals(const imu_data_t &actual,
-                                 const imu_data_t &expected) {
+    const imu_data_t &expected) {
   for (int index = 0; index < 3; ++index) {
     assert(actual.gyro[index] == expected.gyro[index]);
     assert(actual.accel[index] == expected.accel[index]);

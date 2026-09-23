@@ -21,5 +21,5 @@ int main() {
   const led_color_t reconnect_wait = led_status_select(
       MICRO_ROS_LINK_WAIT_AGENT, true, false, {1U, 0U, 0U});
   assert(reconnect_wait.r == 0U && reconnect_wait.g == 0U &&
-         reconnect_wait.b == 1U);
+      reconnect_wait.b == 1U);
 }

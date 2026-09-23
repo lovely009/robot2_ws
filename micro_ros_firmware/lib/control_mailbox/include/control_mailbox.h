@@ -153,28 +153,28 @@ void control_mailbox_init(control_mailbox_t *mailbox);
 // （计入 command_rejected_count，已由诊断话题导出；快照本身非法同样走这里，
 // 计数，二者不重复）。
 bool control_mailbox_submit_command(
-    control_mailbox_t *mailbox,
-    const control_command_snapshot_t *snapshot);
+  control_mailbox_t *mailbox,
+  const control_command_snapshot_t *snapshot);
 bool control_mailbox_take_command(control_mailbox_t *mailbox,
-                                  control_command_snapshot_t *snapshot);
+    control_command_snapshot_t *snapshot);
 // 只撤销"未取走"的输入；诊断计数保留为生命周期统计。
 void control_mailbox_clear_command(control_mailbox_t *mailbox);
 
 // 轨迹输入：多点时间线 latest-wins。与 submit_command 同门同序（授权 +
 // 会话门先于数据校验）；空轨迹 = 取消，是合法载荷。
 bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
-                                       const control_trajectory_t *trajectory);
+    const control_trajectory_t *trajectory);
 bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
-                                     control_trajectory_t *trajectory);
+    control_trajectory_t *trajectory);
 void control_mailbox_clear_trajectory(control_mailbox_t *mailbox);
 
 // 策略输入：批量、latest-wins。与 submit_command 同门同序（授权 + 会话门
 // 先于数据校验）。**不走 config FIFO**——那条队列深 16，装不下一条最多 64
 // 台的策略消息（详见 control_policy_mailbox.h）。
 bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
-                                   const control_policy_snapshot_t *snapshot);
+    const control_policy_snapshot_t *snapshot);
 bool control_mailbox_take_policy(control_mailbox_t *mailbox,
-                                 control_policy_snapshot_t *snapshot);
+    control_policy_snapshot_t *snapshot);
 void control_mailbox_clear_policy(control_mailbox_t *mailbox);
 
 // 低频输入：有界 FIFO，不覆盖、不丢弃已经入队的旧配置请求。
@@ -182,11 +182,11 @@ void control_mailbox_clear_policy(control_mailbox_t *mailbox);
 // 且会话门先于数据校验——与 submit_command 同序，断链期拒绝统一
 // 计入 config_session_count）。
 bool control_mailbox_submit_config(
-    control_mailbox_t *mailbox,
-    const control_mailbox_config_request_t *request);
+  control_mailbox_t *mailbox,
+  const control_mailbox_config_request_t *request);
 bool control_mailbox_take_config(
-    control_mailbox_t *mailbox,
-    control_mailbox_config_request_t *request);
+  control_mailbox_t *mailbox,
+  control_mailbox_config_request_t *request);
 void control_mailbox_clear_config(control_mailbox_t *mailbox);
 
 // 连接/授权是状态请求：同状态重复调用幂等（不产生新边沿）；
@@ -198,9 +198,9 @@ void control_mailbox_clear_config(control_mailbox_t *mailbox);
 // 另注意它的 false 分支与 revoke_authorization() 的**清空集不同**（后者额外清
 // policy），两者不可互换。
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
-                                           bool authorized);
+    bool authorized);
 void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
-                                             bool connected);
+    bool connected);
 // 返回值 = 自上次调用以来是否出现未读边沿；返回 false 时仍带货当前电平
 // ——任务层启动时应先调用一次以同步初始电平。
 // 会话电平（授权派生依据）：从未上报过连接状态（引导期，状态未知）或
@@ -208,7 +208,7 @@ void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
 bool control_mailbox_session_authorized(const control_mailbox_t *mailbox);
 
 bool control_mailbox_take_events(control_mailbox_t *mailbox,
-                                 control_mailbox_events_t *events);
+    control_mailbox_events_t *events);
 
 #ifdef __cplusplus
 }

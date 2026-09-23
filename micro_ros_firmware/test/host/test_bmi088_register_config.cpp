@@ -5,6 +5,8 @@
 constexpr auto kAccConf100Hz =
     BMI088_ACC_CONF_MUST_Set | BMI088_ACC_NORMAL | BMI088_ACC_100_HZ;
 static_assert(kAccConf100Hz == 0xA8U,
-              "BMI088 100 Hz ACC_CONF must use the datasheet ODR code");
+    "BMI088 100 Hz ACC_CONF must use the datasheet ODR code");
 
-int main() { return 0; }
+int main() {
+  return 0;
+}

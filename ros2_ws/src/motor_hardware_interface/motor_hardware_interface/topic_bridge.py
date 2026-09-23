@@ -14,10 +14,13 @@ import math
 # 固件侧硬上限（与 motor_control.h 的 MOTOR_CONTROL_MAX_TRAJECTORY_* 一致）。
 MAX_TRAJECTORY_POINTS = 256
 MAX_TRAJECTORY_MOTORS = 64
-# 单条消息不需要用满整条轨迹容量；可靠输入允许分片，桥按 128 点拆成
-# 同一 trajectory_id 的连续消息，固件再按绝对时间组装。总量仍由
-# MAX_TRAJECTORY_POINTS 限制，避免把“传输分段”误当成扩大固件轨迹容量。
-MAX_TRAJECTORY_SEGMENT_POINTS = 128
+# 单条消息容量 = 整条轨迹容量。总量本来就被 MAX_TRAJECTORY_POINTS 卡死，拆段
+# 不可能多发一个点，只会把同一份数据变成多条**背靠背**消息——而 MCU 的 XRCE
+# 输入流是 MTU(512) × STREAM_HISTORY(16) = 8 KB 的**分片**窗口：一条 256 点
+# 消息约 5.2 KB（≈11 片）放得下，两条 128 点就吃到 ≈12 片，且任何一片落在窗口
+# 外被丢都会让固件整组拼不齐（组装失败**不发事件也不回执**，总线侧全无报错）。
+# 与 web_host 的 TRAJ_SEGMENT_POINTS 同口径，别再往小调。
+MAX_TRAJECTORY_SEGMENT_POINTS = MAX_TRAJECTORY_POINTS
 # CERB 的 MIT 位置量程（关节侧 ±π）。
 POSITION_LIMIT_RAD = math.pi
 
@@ -125,12 +128,16 @@ def transpose_trajectory(joint_names, samples, joint_of_motor):
 
 
 def split_trajectory(joint_names, samples, joint_of_motor):
-    """把一条合法轨迹拆成可靠传输分段，但不改变整条时间线。
+    """把一条合法轨迹切成可靠下发消息，但不改变整条时间线。
 
     返回 ``(target_ids, segments, warnings)``。``segments`` 内的每个元素都是
     ``(t_ms, motor_id, position, velocity, effort)`` 列表，时间仍是整条轨迹的
     absolute ``time_from_start_ms``，不会从 0 重置。总路点数仍不能超过固件的
     256 点上限；分段只是传输边界，不是容量扩展。
+
+    分段容量等于总量上限（见 ``MAX_TRAJECTORY_SEGMENT_POINTS``），所以一条
+    合法轨迹**就是一条消息**；切分逻辑保留只是为了固定「按绝对时间线连续切」
+    这个语义，改了常量也不会变成多条独立轨迹。
     """
     target_ids, flat, warnings = transpose_trajectory(
         joint_names, samples, joint_of_motor)

@@ -18,6 +18,8 @@ target_include_directories(fw_motor_protocol PUBLIC
 add_library(fw_adapters OBJECT
   ../../lib/motor_protocol/src/vaxor_adapter.c
   ../../lib/motor_protocol/src/cerb_adapter.c
+  ../../lib/motor_protocol/src/motor_protocol_registry.c
+  ../../lib/motor_protocol/src/motor_protocol_batch.c
   ../../lib/motor_control/src/motor_control_profile.c)
 target_include_directories(fw_adapters PUBLIC
   ../../lib/motor_protocol/include
@@ -57,6 +59,19 @@ target_include_directories(fw_can_rx_ring PUBLIC ../../lib/fdcan/include)
 add_library(fw_can_tx_scheduler OBJECT
   ../../lib/fdcan/src/can_tx_scheduler.c)
 target_include_directories(fw_can_tx_scheduler PUBLIC ../../lib/fdcan/include)
+
+add_library(fw_motor_tx_router OBJECT
+  ../../lib/motor_tx_router/src/motor_tx_router.c)
+target_include_directories(fw_motor_tx_router PUBLIC
+  ../../lib/motor_tx_router/include ../../lib/fdcan/include
+  ../../lib/motor_protocol/include)
+target_link_libraries(fw_motor_tx_router PUBLIC
+  fw_can_tx_scheduler fw_adapters fw_motor_protocol)
+
+add_library(fw_save_transaction OBJECT
+  ../../lib/save_transaction/src/save_transaction.c)
+target_include_directories(fw_save_transaction PUBLIC
+  ../../lib/save_transaction/include)
 
 add_library(fw_imu_snapshot OBJECT
   ../../lib/imu/src/imu_snapshot.c)
@@ -125,11 +140,18 @@ fw_host_test(test_motor_control
   # 白盒：直读 ctx->entries 等内部布局（internal.h 不向 app 导出）
   INCLUDES ../../lib/motor_control/src)
 
-# config kind 枚举契约 static_assert 需要协议枚举定义
+# mailbox 与协议 kind 共享完整契约断言；枚举类型仍独立。
 fw_host_test(test_control_mailbox
   SOURCES test_control_mailbox.cpp
   OBLIBS fw_mailbox
-  INCLUDES ../../lib/motor_protocol/include)
+  INCLUDES ../../include ../../lib/motor_protocol/include)
+find_package(Threads REQUIRED)
+target_link_libraries(test_control_mailbox PRIVATE Threads::Threads)
+
+fw_host_test(test_config_kind_contract
+  SOURCES test_config_kind_contract.cpp
+  OBLIBS fw_mailbox fw_motor_protocol
+  INCLUDES ../../include ../../lib/motor_protocol/include)
 
 fw_host_test(test_trajectory_mailbox
   SOURCES test_trajectory_mailbox.cpp
@@ -146,6 +168,16 @@ fw_host_test(test_can_rx_ring
 fw_host_test(test_can_tx_scheduler
   SOURCES test_can_tx_scheduler.cpp
   OBLIBS fw_can_tx_scheduler)
+
+fw_host_test(test_motor_tx_router
+  SOURCES test_motor_tx_router.cpp
+  OBLIBS fw_motor_tx_router fw_can_tx_scheduler fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_tx_router/include)
+
+fw_host_test(test_save_transaction
+  SOURCES test_save_transaction.cpp
+  OBLIBS fw_save_transaction
+  INCLUDES ../../lib/save_transaction/include)
 
 fw_host_test(test_imu_snapshot
   SOURCES test_imu_snapshot.cpp

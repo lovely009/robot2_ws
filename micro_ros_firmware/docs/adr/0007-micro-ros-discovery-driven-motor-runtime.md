@@ -16,14 +16,15 @@
 
 ## 2026-09-18 勘误（实现现状优先）
 
+> 本节的时序和接口记录已被 2026-09-23 当前实现摘要覆盖；未更新的历史基线不作为当前代码描述。
+
 - **控制边界**：本条 2026-09-18 记录曾为 1 ms 服务（RX drain / 内核 service / SYNC / TX）+
-  20 ms 控制边界；当前实现已由 2026-09-21 决策改为 1 ms 服务 + 5 ms / 200 Hz 控制
-  边界，本文其余历史描述不作为当前节拍依据。
+  20 ms 控制边界；当时记录的 1 ms 服务 + 5 ms / 200 Hz 控制边界已被后续决策取代。
 - **消息面**：**3 个订阅** `/micro_ros_do/motor_command_array` + `/micro_ros_do/motor_trajectory` + `/micro_ros_do/motor_policy`，**6 个发布**（`motion_states`、`motor_status_array`、`motor_topology`、`motor_events`、`trajectory_state`、`diagnostics`）。MotorBind/MotorConfig 话题与独立 `motor_config_result` 话题均不存在。**参数树只放静态量**（`m<id>.pos_min/pos_max/vel_limit/torque_limit` + `system.*`）；动态量 enable/kp/kd 走 `/micro_ros_do/motor_policy`（稀疏 + 防复权代数）。结果经内核事件 `motor_events` 与参数错误码给出。
 - **型号绑定**：内核经 READ_IDENTITY 事务读设备 SDO 0x1008 自报身份、查内置型号目录自动完成，非上层 Profile 通道。
 - **参数持久化**：storage 任务独占 W25Q64 双槽 blob（v3 = 32 B 头 + 64×120 B 记录，每槽 2 个 4 KB 扇区；v1/v2 旧 blob 加载时各自就地迁移到 v3）；设备写事务只置 `record_dirty`，由 `COMMAND_SAVE` 分批等待每台 `CONFIG_RESULT=OK` 后再落 W25，W25 目标槽完成擦除/写入/分页读回校验和活动槽切换后才算保存完成。上电对**六对象**回读比对（位置限位×2 / 最大转速 / 峰值电流 + `0x2650:00` 保护开关 + `0x2541` 方向），不一致报 40、失败报 41。CERB `0x2539` 无设备应用层耐久 ACK，掉电保持仍待台架。
 - **授权**：会话电平每控制边界纯派生（`lib/session_sync/`）；未知或在线即授权，断连立即 P0 撤权；冻结态恢复需 `SET_ENABLE(true)` 后收到新快照。
-- **轨迹通道**：`MotorTrajectory` 支持以 `trajectory_id + segment_index + segment_count` 传输同一轨迹的可靠分段。固件在 5ms/200Hz 控制边界执行完整拼接时间线的非均匀单调三次 Hermite 插值；未收齐时旧轨迹继续运行，完整后原子替换。声明的电机由轨迹独占（快照对其既不下发也不软停），30/100ms 快照级联收窄到快照通道——轨迹自带时长，"多久没收到快照"不是它的失效判据（对 ARD §13.2 的范围限定）。无活动轨迹时行为与改动前逐字节一致。
+- **轨迹通道**：`MotorTrajectory` 支持以 `trajectory_id + segment_index + segment_count` 传输同一轨迹的可靠分段。历史 5ms/200Hz 描述已过时；当前边界见下方 2026-09-23 实现摘要。未收齐时旧轨迹继续运行，完整后原子替换。声明的电机由轨迹独占（快照对其既不下发也不软停），30/100ms 快照级联收窄到快照通道——轨迹自带时长，"多久没收到快照"不是它的失效判据（对 ARD §13.2 的范围限定）。
 - **故障清除**：参数 `system.clear_fault`。按成因区分——身份冲突锁存拒绝（ARD §9.3），DEV_PARAM 改走一次回读重比对，厂家故障发 CERB MIT 控制字 bit5（仅非运动态受理）。Vaxor 无清错手段 → `UNSUPPORTED`。
 - **参数面容量**：每电机参数由 7 项收缩到 **4 项**（enable/kp/kd 移到 `/micro_ros_do/motor_policy`），`PARAM_BRIDGE_MAX_PARAMS` 128 → **208**；系统参数 8 → 10。
   **2026-09-20 更新**：以上是当时的记录，此后该值又变更多次（176 → 224 → 256 → 416 → **64**，历次理由见 git 历史）。**当前值与推导以 `include/param_bridge.h` 的容量注释为唯一来源**，每电机项数由 `src/param_bridge.cpp` 的 `kParamMotorFields[]` 显式列出（当前 5 项）。「208 覆盖 48 台」已被台架推翻（208 槽实测只剩 1,776 B 堆余量）。
@@ -31,6 +32,14 @@
 - **BUS_OFF 恢复**：HAL 回调清 `CCCR.INIT` 自清恢复，非仅计数。
 - **W25Q64**：已接线使用，非休眠占位。
 - **ARD 正文归档**：完整 ARD-0007 正文已移至 [`docs/archive/ARD-0007-micro-ros-motor-runtime.md`](../archive/ARD-0007-micro-ros-motor-runtime.md)，现行设计以本勘误与 `docs/architecture/motor-runtime-decision-log.md` 为准。
+
+## 2026-09-23 当前实现摘要
+
+- **控制节拍**：`motor_rt_task` 每 1 ms 做有界服务，每 2 ms/500 Hz 消费控制快照并推进轨迹/策略/配置；运动控制边界为 500 Hz。WCET、jitter 和最大规模总线负载仍以验证计划中的台架项为准。
+- **TX 分层**：`lib/fdcan` 持有协议无关的 P0/P1/P2 队列；`lib/motor_tx_router` 每总线每次服务只 pump 一次，受 40 个逻辑帧工作区与最多 16 个物理提交约束。pump 开始时 P0 队列非空，则该轮只 pump P0；首个硬件拒收会停止本轮提交，并将该帧和其后未尝试帧按 FIFO 顺序放回队首。只有后续 pump 开始时 P0 已空，才调度 P1/P2；P2 配额仍生效，P1 保持 latest-wins。
+- **协议聚合**：`lib/motor_protocol` adapter 负责判断相邻 P1 帧是否兼容以及生成物理帧。CERB 仅聚合同总线、不同节点的 MIT 单轴命令，最多 6 轴；单帧及不兼容输入原样通过。路由器和 FDCAN scheduler 不解释厂家 CAN-ID 或 payload。
+- **SAVE**：纯 C `lib/save_transaction` 固定容量 64，保存设备 dirty-slot 快照，每次 poll 最多提交 4 个设备请求，按 request ID 等待结果；所有设备成功后才请求 W25，设备与存储阶段分别用 wrap-safe 5 秒超时。重复 SAVE 至多排一个后续事务；断连清除运行中与排队状态。`save_seq` 仍由 ROS 参数桥拥有，W25 仍由 `storage_task` 独占。
+- **配置 kind**：mailbox 与 protocol 枚举保持独立；`include/motor_config_contract.hpp` 对所有共享值逐项静态断言，协议专用 READ_IDENTITY 不属于映射。
 
 ## Context
 
@@ -56,7 +65,7 @@
 
 ### 2. 任务和时序
 
-- 只保留一个 `motor_rt_task`：每 1 ms 服务三路 FDCAN，每 5 ms/200 Hz 在控制边界
+- 只保留一个 `motor_rt_task`：每 1 ms 服务三路 FDCAN，每 2 ms/500 Hz 在控制边界
   处理一次完整命令快照；轨迹和快照保持通道均在该边界生成控制帧。
 - 命令快照超过 30 ms 未更新时软停；超过 100 ms 或 micro-ROS 会话断开时协议级停机/
   失能并清除运动授权。恢复必须重新 Enable 并收到新的完整快照。

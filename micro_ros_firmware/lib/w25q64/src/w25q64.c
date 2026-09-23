@@ -5,11 +5,11 @@
 
 // octospi 层状态枚举与本层数值对齐：跨层返回值依赖等值，编译期锁死。
 _Static_assert((int)W25Q64_ERROR_HAL == (int)OCTOSPI_ERROR_HAL,
-               "W25Q64/octospi 错误码 HAL 必须等值");
+    "W25Q64/octospi 错误码 HAL 必须等值");
 _Static_assert((int)W25Q64_ERROR_TIMEOUT == (int)OCTOSPI_ERROR_TIMEOUT,
-               "W25Q64/octospi 错误码 TIMEOUT 必须等值");
+    "W25Q64/octospi 错误码 TIMEOUT 必须等值");
 _Static_assert((int)W25Q64_ERROR_STATE == (int)OCTOSPI_ERROR_STATE,
-               "W25Q64/octospi 错误码 STATE 必须等值");
+    "W25Q64/octospi 错误码 STATE 必须等值");
 
 #define W25Q64_CMD_ENABLE_RESET 0x66U
 #define W25Q64_CMD_RESET_DEVICE 0x99U
@@ -26,10 +26,10 @@ _Static_assert((int)W25Q64_ERROR_STATE == (int)OCTOSPI_ERROR_STATE,
 #define W25Q64_SECTOR_ERASE_TIMEOUT_MS 1000U
 
 static w25q64_status_t w25q64_hal_status(const OSPI_HandleTypeDef *handle,
-                                          HAL_StatusTypeDef status) {
+    HAL_StatusTypeDef status) {
   if (status == HAL_TIMEOUT ||
       (handle != NULL &&
-       (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
+      (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
     return W25Q64_ERROR_TIMEOUT;
   }
   return W25Q64_ERROR_HAL;
@@ -37,13 +37,13 @@ static w25q64_status_t w25q64_hal_status(const OSPI_HandleTypeDef *handle,
 
 // HAL 状态 → 本层状态：超时单独成一类（上层据此区分可重试与否）。
 static w25q64_status_t w25q64_map_status(OSPI_HandleTypeDef *handle,
-                                         HAL_StatusTypeDef hal_status) {
+    HAL_StatusTypeDef hal_status) {
   return hal_status == HAL_OK ? W25Q64_OK : w25q64_hal_status(handle, hal_status);
 }
 
 // 下发一条常规命令（超时统一 W25Q64_HAL_TIMEOUT_MS），返回值已是本层状态。
 static w25q64_status_t w25q64_send_command(OSPI_HandleTypeDef *handle,
-                                           OSPI_RegularCmdTypeDef *command) {
+    OSPI_RegularCmdTypeDef *command) {
   return w25q64_map_status(
       handle, HAL_OSPI_Command(handle, command, W25Q64_HAL_TIMEOUT_MS));
 }
@@ -53,7 +53,7 @@ static OSPI_HandleTypeDef *w25q64_handle(void) {
 }
 
 static void w25q64_command_init(OSPI_RegularCmdTypeDef *command,
-                                 uint32_t instruction) {
+    uint32_t instruction) {
   *command = (OSPI_RegularCmdTypeDef){0};
   command->OperationType = HAL_OSPI_OPTYPE_COMMON_CFG;
   command->FlashId = HAL_OSPI_FLASH_ID_1;
@@ -94,7 +94,7 @@ static w25q64_status_t w25q64_wait_ready(uint32_t timeout_ms) {
   polling.Interval = 0x10U;
   polling.AutomaticStop = HAL_OSPI_AUTOMATIC_STOP_ENABLE;
   return w25q64_map_status(handle,
-                           HAL_OSPI_AutoPolling(handle, &polling, timeout_ms));
+      HAL_OSPI_AutoPolling(handle, &polling, timeout_ms));
 }
 
 static w25q64_status_t w25q64_write_enable(void) {
@@ -129,8 +129,8 @@ static w25q64_status_t w25q64_write_enable(void) {
 }
 
 static w25q64_status_t w25q64_erase(uint32_t address, uint32_t erase_size,
-                                     uint32_t instruction,
-                                     uint32_t timeout_ms) {
+    uint32_t instruction,
+    uint32_t timeout_ms) {
   if (!w25q64_erase_address_valid(address, erase_size)) {
     return W25Q64_ERROR_ARGUMENT;
   }
@@ -238,7 +238,7 @@ w25q64_status_t w25q64_read(uint32_t address, uint8_t *data, uint32_t size) {
 }
 
 w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
-                                      uint32_t size) {
+    uint32_t size) {
   if (data == NULL && size != 0U) {
     return W25Q64_ERROR_ARGUMENT;
   }
@@ -274,7 +274,7 @@ w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
 }
 
 w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
-                               uint32_t size) {
+    uint32_t size) {
   if (data == NULL && size != 0U) {
     return W25Q64_ERROR_ARGUMENT;
   }
@@ -307,5 +307,5 @@ w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
 
 w25q64_status_t w25q64_erase_sector(uint32_t address) {
   return w25q64_erase(address, W25Q64_SECTOR_SIZE, W25Q64_CMD_SECTOR_ERASE,
-                       W25Q64_SECTOR_ERASE_TIMEOUT_MS);
+      W25Q64_SECTOR_ERASE_TIMEOUT_MS);
 }

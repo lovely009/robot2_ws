@@ -29,7 +29,7 @@
 // 改为在 HAL 时钟配置完成后由下方的 VerifyCoreClocks() 强制检查。
 // 晶振频率是编译期常量，在此处用静态断言钉死。
 static_assert(HSE_VALUE == DM_MC_EXPECTED_HSE_HZ,
-              "HSE_VALUE does not match the 24 MHz crystal on DM-MC-Board02");
+    "HSE_VALUE does not match the 24 MHz crystal on DM-MC-Board02");
 
 namespace {
 
@@ -174,8 +174,8 @@ extern "C" void SystemClock_Config(void)
 
   // CPU 480 MHz；AHB/AXI 240 MHz；APB1/2/3/4 120 MHz。
   clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
-                  RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 |
-                  RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
+      RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 |
+      RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
   clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   clk.SYSCLKDivider = RCC_SYSCLK_DIV1;
   clk.AHBCLKDivider = RCC_HCLK_DIV2;
@@ -231,7 +231,8 @@ extern "C" void SystemClock_Config(void)
 // 弱定义：电机控制等应用应提供**强定义**覆盖它，且只使用在 HSE/PLL 失效时
 // 仍确认安全的操作（立即切断驱动输出/电源使能）。默认实现为空——即直接
 // 复位，这是有意保守的做法；在安全停机路径完备之前不要假定有更聪明的兜底。
-extern "C" __attribute__((weak)) void Board_ClockFaultSafeStop(void) {}
+extern "C" __attribute__((weak)) void Board_ClockFaultSafeStop(void) {
+}
 
 extern "C" void HAL_RCC_CSSCallback(void) {
   // HSE 失效：先让应用切断危险输出，再复位。

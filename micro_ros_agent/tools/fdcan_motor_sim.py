@@ -24,7 +24,7 @@
         --cerb-r58 分配 R58LITE_V2 / R48LITE_V2
 
 下行（固件 → 本脚本，仅记录/驱动趋近）：
-  CERB  SYNC 0x080（FD+BRS 0B，默认 20ms）；MIT 0x110+id（FD 12B，控制字 0xcc 使能/0x0c 失能）
+  CERB  SYNC 0x080（FD+BRS 0B，默认 20ms）；MIT 0x110+id（FD 12B）/多轴 0x210（FD 64B）
   CERB  SDO 请求 0x600+id（FD 8B；40 08 10 00 上传发起 → 60/70 取分段）
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
@@ -713,6 +713,23 @@ class SlcanSim:
             if (self.sync_count - 1) % self.feedback_sync_interval == 0:
                 schedule_feedback_window(
                     self.next_send, sorted(self.models), now, self.stagger)
+            return
+        if can_id == 0x210:
+            if not is_fd or len(data) != 64:
+                return
+            for slot in range(6):
+                node = data[56 + slot]
+                m = self.models.get(node)
+                if m is None or m.kind != "cerb":
+                    continue
+                subframe = data[slot * 9:slot * 9 + 9]
+                cmd = cerb_decode_command(subframe)
+                m.enabled = cmd["enabled"]
+                m.last_cmd = cmd
+                if cmd["enabled"]:
+                    m.tgt_deg = cmd["pos_rad"] * 180.0 / PI
+                m.rx_count += 1
+            self.log_rx(can_id, data, "cerb_multi_mit")
             return
         if 0x601 <= can_id <= 0x67F and len(data) >= 8:  # SDO 请求 0x600+node
             self.handle_sdo(can_id - 0x600, data)

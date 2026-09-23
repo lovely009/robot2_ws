@@ -15,10 +15,10 @@ int main() {
 
   assert(w25q64_erase_address_valid(0U, W25Q64_SECTOR_SIZE));
   assert(w25q64_erase_address_valid(W25Q64_SECTOR_SIZE,
-                                    W25Q64_SECTOR_SIZE));
+      W25Q64_SECTOR_SIZE));
   assert(!w25q64_erase_address_valid(1U, W25Q64_SECTOR_SIZE));
   assert(!w25q64_erase_address_valid(W25Q64_FLASH_SIZE,
-                                     W25Q64_SECTOR_SIZE));
+      W25Q64_SECTOR_SIZE));
   assert(w25q64_erase_address_valid(0U, 32768U));
   assert(w25q64_erase_address_valid(0U, 65536U));
   assert(!w25q64_erase_address_valid(0U, 8192U));

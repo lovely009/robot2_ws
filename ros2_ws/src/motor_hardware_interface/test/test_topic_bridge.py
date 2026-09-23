@@ -92,21 +92,30 @@ def test_downlink_rejects_point_overflow():
     assert '超过固件上限' in str(e.value)
 
 
-def test_downlink_splits_same_absolute_timeline_without_overlap():
+def test_downlink_full_trajectory_is_a_single_message():
+    """满容量轨迹必须是**一条**消息（单条消息容量 = 总量上限）。
+
+    拆成两条 128 点不会多送一个点，只会把同一份数据变成两条背靠背消息，
+    而 MCU 的 XRCE 输入流只有 16 × 512 B 的分片窗口：一条 256 点（≈5.2 KB）
+    放得下，两条 128 点更容易让分片落窗外 → 固件整组拼不齐（静默）→
+    标准接口上表现为"发了没反应"。
+    """
     names = ['joint_link1', 'joint_link2', 'joint_link3', 'joint_link4']
     samples = [
         {'t_ms': t * 10, 'positions': [0.0] * 4}
-        for t in range(64)  # 256 total points: two 128-point messages
+        for t in range(64)  # 256 total points
     ]
     ids, segments, warn = split_trajectory(names, samples, REV)
     assert ids == [1, 2, 3, 4]
-    assert len(segments) == 2
-    assert [len(segment) for segment in segments] == [128, 128]
-    assert segments[0][-1][0] < segments[1][0][0]
-    assert segments[0][-1][0] == 310
-    assert segments[1][0][0] == 320
-    assert sum(len(segment) for segment in segments) == 256
+    assert len(segments) == 1
+    assert len(segments[0]) == 256
+    assert segments[0][0][0] == 0
+    assert segments[0][-1][0] == 630   # 时间仍是整条绝对时间线，未按段重置
     assert warn == []
+    # 超出总量的轨迹在 transpose 阶段就被拒，不会退化成多条独立轨迹。
+    overflow = [{'t_ms': t * 10, 'positions': [0.0] * 4} for t in range(65)]
+    with pytest.raises(BridgeError):
+        split_trajectory(names, overflow, REV)
 
 
 def test_downlink_warns_out_of_range_position():

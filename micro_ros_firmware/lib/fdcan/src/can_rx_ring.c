@@ -30,7 +30,7 @@ bool can_rx_ring_push_from_isr(can_rx_ring_t *ring, const can_rx_frame_t *frame)
 }
 
 uint32_t can_rx_ring_pop(can_rx_ring_t *ring, can_rx_frame_t *out,
-                         uint32_t max_count) {
+    uint32_t max_count) {
   if (ring == NULL || out == NULL || max_count == 0U) {
     return 0U;
   }

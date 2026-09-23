@@ -24,6 +24,7 @@
 #include "param_field.h"
 #include "param_units.h"
 #include "ros_qos.h"
+#include "save_transaction.h"
 #include "storage_task.h"
 
 static const char *kParamSetTopic = "micro_ros_do/param_set";
@@ -56,12 +57,14 @@ static const char *kSystemStatusTopic = "micro_ros_up/system_status";
 // 这么深。上界必须 <= 它，否则一条消息自己就能把队列打满——被拒的台设备侧没落
 // 盘、W25 却落了整份视图 ⇒ 下次上电是"记录新、设备旧"的假不一致。
 static_assert(kParamSetMaxTargets <= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY,
-              "ParamSetArray 上界超过配置 FIFO 深度：一条消息能自己把队列打满");
+    "ParamSetArray 上界超过配置 FIFO 深度：一条消息能自己把队列打满");
 
 // executor 句柄数：两条订阅（发布不占 handle）。少算了会在 add_subscription 上
 // 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
 static_assert(PARAM_BRIDGE_EXECUTOR_HANDLES == 2U,
-              "PARAM_BRIDGE_EXECUTOR_HANDLES 必须等于本文件的订阅数");
+    "PARAM_BRIDGE_EXECUTOR_HANDLES 必须等于本文件的订阅数");
+static_assert(MOTOR_CONTROL_MAX_MOTORS == SAVE_TRANSACTION_MAX_TARGETS,
+    "SAVE 事务容量必须与电机视图容量一致");
 
 // ---- 线协议 field 表 ----
 //
@@ -81,19 +84,19 @@ typedef struct {
 } param_field_desc_t;
 
 static const param_field_desc_t kFields[PARAM_DEVICE_SLOT_COUNT] = {
-    {PARAM_FIELD_POS_MIN, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
-    {PARAM_FIELD_POS_MAX, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
-    {PARAM_FIELD_VEL_LIMIT, CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT},
-    {PARAM_FIELD_TORQUE_LIMIT, CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT},
-    {PARAM_FIELD_LIMIT_PROTECT, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT},
-    {PARAM_FIELD_DIRECTION, CONTROL_MAILBOX_CONFIG_SET_DIRECTION},
+  {PARAM_FIELD_POS_MIN, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
+  {PARAM_FIELD_POS_MAX, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
+  {PARAM_FIELD_VEL_LIMIT, CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT},
+  {PARAM_FIELD_TORQUE_LIMIT, CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT},
+  {PARAM_FIELD_LIMIT_PROTECT, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT},
+  {PARAM_FIELD_DIRECTION, CONTROL_MAILBOX_CONFIG_SET_DIRECTION},
 };
 
 static_assert(sizeof(kFields) / sizeof(kFields[0]) == PARAM_DEVICE_SLOT_COUNT,
-              "线协议 field 表长度必须等于设备槽位数：加槽位要同时改 .msg");
+    "线协议 field 表长度必须等于设备槽位数：加槽位要同时改 .msg");
 // 线协议 field 的取值范围就是设备槽序，两端同序由这条断言与 host 测试共同保证。
 static_assert(PARAM_DEVICE_SLOT_COUNT == 6U,
-              "设备槽位数变了：同步改 .msg 的 ParamSetTarget 常量与线协议表");
+    "设备槽位数变了：同步改 .msg 的 ParamSetTarget 常量与线协议表");
 
 // 固件自发请求的 id 命名空间（bit30）。调用方给的 request_id 逐字进内核，只有
 // 落在这一位上的会被本地拒绝——bit31 已被内核身份读取的伪 id 占用。
@@ -141,32 +144,8 @@ static uint32_t g_set_zero_id = 0;
 static int64_t g_clear_fault_seq = 0;
 static uint32_t g_clear_fault_id = 0;
 
-// 保存脉冲的进度游标：一次保存可能要下发几十台，而配置 FIFO 只有 16 深、消费侧每
-// 5ms 边界只抽 4 条；全推出去必然溢出。故按拍分批，并等待每个设备保存请求的
-// CONFIG_RESULT；全部成功后才落 W25，避免设备侧拒绝时仍把新记录写进 W25。
-// **不能拿脏位当游标**：被运动禁写门拒掉的台（ACTIVE/SAFE_STOP）脏位永远不清，
-// 用"还有脏台吗"判"扫完了吗"会永不收敛、W25 永不落。
-// 游标下标对 g_views 稳定：内核表项只增不减，copy_param_views 按注册顺序输出。
-static uint16_t g_save_cursor = 0U;
-static bool g_save_requested = false;     // 收到 SAVE，尚未起航
-static bool g_save_active = false;        // 设备侧分批下发中
-static bool g_save_flash_pending = false; // 已请 W25 落盘，等终态
-static uint32_t g_save_phase_ms = 0U;     // 当前设备/W25 阶段起点（看门狗用）
+static save_transaction_t g_save_transaction;
 static int64_t g_save_seq = 0;
-// 设备侧保存请求的显式 outstanding 表。只有表内 request_id 的 CONFIG_RESULT
-// 才能收敛本次 SAVE；不能把所有 bit30 事件都当成保存回告，否则参数写/轨迹等
-// 内部请求会误推进保存事务。
-static uint32_t g_save_device_request_ids[MOTOR_CONTROL_MAX_MOTORS];
-static uint16_t g_save_device_pending = 0U;
-static bool g_save_device_failed = false;
-static uint32_t g_save_storage_request_id = 0U;
-// 每拍最多下发几台。必须**低于**消费侧的抽取速率（每 5ms 边界 4 条 = 每 10ms
-// 边界 8 条），否则队列仍会累积。
-#define kSaveSubmitsPerPoll 4U
-// 保存阶段看门狗：设备 CONFIG_RESULT 事件丢失或 storage 任务卡死时，
-// save_in_progress 不能永久为真——那是**电平**，卡住就没有第二次机会了。与
-// 48-motor-scale §5.3 点名的 outstanding 永久残留同类，故设备阶段和 W25 阶段都兜底。
-#define kSaveTimeoutMs 5000U
 
 // 已上报的设备参数结论（下标 = motor_id；0xFF = 从未上报）。
 // 用电机 id 做 key 而不是视图下标：视图顺序不是契约，内核表项只增不减。
@@ -187,69 +166,6 @@ static void report_error(uint16_t code, uint16_t motor_id) {
   g_status_dirty = true; // 回调内不发布，poll 里统一发
 }
 
-static void reset_save_device_requests(void) {
-  memset(g_save_device_request_ids, 0, sizeof(g_save_device_request_ids));
-  g_save_device_pending = 0U;
-  g_save_device_failed = false;
-}
-
-static bool track_save_device_request(uint32_t request_id) {
-  if (request_id == 0U) {
-    return false;
-  }
-  for (size_t i = 0; i < MOTOR_CONTROL_MAX_MOTORS; ++i) {
-    if (g_save_device_request_ids[i] == 0U) {
-      g_save_device_request_ids[i] = request_id;
-      ++g_save_device_pending;
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool take_save_device_request(uint32_t request_id) {
-  if (request_id == 0U) {
-    return false;
-  }
-  for (size_t i = 0; i < MOTOR_CONTROL_MAX_MOTORS; ++i) {
-    if (g_save_device_request_ids[i] == request_id) {
-      g_save_device_request_ids[i] = 0U;
-      if (g_save_device_pending > 0U) {
-        --g_save_device_pending;
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
-// 设备阶段失败：把游标推到末尾（不再推后续台），置失败标志；W25 绝不启动——
-// 跨设备 flash 与 W25 没有原子提交，"记录新、设备旧"比这次不保存更坏。
-// 已经在飞的请求仍会回告，由 poll_save 在 pending 清零后按失败收敛。
-static void fail_save_device_phase(uint16_t motor_id, uint16_t error_code) {
-  g_save_device_failed = true;
-  g_save_cursor = (uint16_t)g_view_count;
-  report_error(error_code, motor_id);
-}
-
-// 清空一次保存的进行态。**不动 save_seq**：完成序号只在收尾时推进，
-// 断连重建的清场不能对外假装"保存完成了"。
-static void clear_save_progress(void) {
-  g_save_active = false;
-  g_save_flash_pending = false;
-  g_save_cursor = 0U;
-  g_save_storage_request_id = 0U;
-  reset_save_device_requests();
-}
-
-static void finish_save_transaction(void) {
-  clear_save_progress();
-  // 这是保存动作的完成序号，不是成功计数；失败也必须推进，避免上层等待者永久
-  // 等待。成功与否由本次过程中的 CONFIG_RESULT / ERR_SAVE_FAIL 共同判定。
-  ++g_save_seq;
-  g_status_dirty = true;
-}
-
 // 代分配一个内部 id（调用方给 0 时）。恒带 PARAM_INTERNAL_ID_TAG，与调用方
 // 逐字透传的 id 天然不撞（那种 id 的 bit30 已被本地拒绝）。
 static uint32_t next_internal_id() {
@@ -259,6 +175,72 @@ static uint32_t next_internal_id() {
   }
   return PARAM_INTERNAL_ID_TAG | (g_next_request_id & 0x3FFFFFFFU);
 }
+
+static uint32_t save_next_request_id(void *context) {
+  (void)context;
+  return next_internal_id();
+}
+
+static bool save_submit_device(void *context, uint32_t request_id,
+    uint16_t motor_id, uint8_t dirty_slots) {
+  (void)context;
+  control_mailbox_config_request_t request = {};
+  request.request_id = request_id;
+  request.received_tick_ms = millis();
+  request.motor_id = motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+  request.value.save_slots = dirty_slots;
+  return motor_rt_submit_config(&request);
+}
+
+static bool save_request_storage(void *context, uint32_t request_id) {
+  (void)context;
+  storage_task_request_save(request_id);
+  return true;
+}
+
+static save_transaction_storage_result_t save_take_storage_result(
+    void *context, uint32_t *request_id) {
+  (void)context;
+  switch (storage_take_result(request_id)) {
+  case STORAGE_SAVE_OK:
+    return SAVE_TRANSACTION_STORAGE_OK;
+  case STORAGE_SAVE_FAIL:
+    return SAVE_TRANSACTION_STORAGE_FAIL;
+  case STORAGE_SAVE_IDLE:
+  default:
+    return SAVE_TRANSACTION_STORAGE_IDLE;
+  }
+}
+
+static void save_report_error(void *context,
+    save_transaction_error_t reason,
+    uint16_t motor_id,
+    uint16_t device_error_code) {
+  (void)context;
+  switch (reason) {
+  case SAVE_TRANSACTION_ERROR_SUBMIT:
+    report_error(ERR_SUBMIT_FAILED, motor_id);
+    break;
+  case SAVE_TRANSACTION_ERROR_DEVICE:
+    report_error(device_error_code, motor_id);
+    break;
+  case SAVE_TRANSACTION_ERROR_TIMEOUT:
+  case SAVE_TRANSACTION_ERROR_STORAGE:
+  default:
+    report_error(ERR_SAVE_FAIL, kMotorIdNone);
+    break;
+  }
+}
+
+static const save_transaction_ports_t kSaveTransactionPorts = {
+  .context = nullptr,
+  .next_request_id = save_next_request_id,
+  .submit_device_save = save_submit_device,
+  .request_storage_save = save_request_storage,
+  .take_storage_result = save_take_storage_result,
+  .report_error = save_report_error,
+};
 
 // ---- 提交 ----
 
@@ -276,7 +258,7 @@ static control_mailbox_config_request_t make_config_request(
 
 // 提交并记账：此处失败只可能是 FIFO 满/断链（值域已在整条预校验阶段过完）。
 static bool submit_config_request(const control_mailbox_config_request_t *request,
-                                  uint16_t motor_id) {
+    uint16_t motor_id) {
   if (!motor_rt_submit_config(request)) {
     report_error(ERR_SUBMIT_FAILED, motor_id);
     return false;
@@ -288,8 +270,8 @@ static bool submit_config_request(const control_mailbox_config_request_t *reques
 // 返回 false = 提交失败（FIFO 满/断链）。**值域校验不在这里**：它必须在整条
 // 预校验阶段过完，否则中途失败会留下"部分生效"。
 static bool submit_single_limit(const motor_control_param_view_t *v,
-                                const param_field_desc_t *desc, float value,
-                                uint32_t request_id) {
+    const param_field_desc_t *desc, float value,
+    uint32_t request_id) {
   control_mailbox_config_request_t request =
       make_config_request(v, desc->kind, request_id);
   // 单位口径见 param_units.h：速度对外就是 rad/s（内核同单位，直通），力矩对外
@@ -306,7 +288,7 @@ static bool submit_single_limit(const motor_control_param_view_t *v,
 // 这里没有暂存/补齐逻辑（参数面时期的 staged_pos 是 rclc 一次只能 set 一个标量
 // 的产物，一条消息能带两边，它没有存在理由）。
 static bool submit_position_limits(const motor_control_param_view_t *v, float lo,
-                                   float hi, uint32_t request_id) {
+    float hi, uint32_t request_id) {
   control_mailbox_config_request_t request = make_config_request(
       v, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS, request_id);
   // 位置对外就是 rad（内核同单位，直通、不折算角度）。
@@ -319,7 +301,7 @@ static bool submit_position_limits(const motor_control_param_view_t *v, float lo
 // 反转只在这一处发生，protocol 层与 mailbox 只认原值（control_mailbox.h 的
 // SET_SAFETY_PROTECT 注释即此约定）。别为了"对称"在别处再加一层。
 static bool submit_safety_protect(const motor_control_param_view_t *v,
-                                  float value, uint32_t request_id) {
+    float value, uint32_t request_id) {
   control_mailbox_config_request_t request = make_config_request(
       v, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT, request_id);
   request.value.safety_protect_raw = (value == 1.0f) ? 0U : 1U;
@@ -329,7 +311,7 @@ static bool submit_safety_protect(const motor_control_param_view_t *v,
 // 方向提交：**原值直通，不做语义反转**——0x2541 没有 0x2650 那种"1 = 关"的
 // 反向陷阱，别为了与保护开关对称而多加一层。
 static bool submit_direction(const motor_control_param_view_t *v, float value,
-                             uint32_t request_id) {
+    uint32_t request_id) {
   control_mailbox_config_request_t request =
       make_config_request(v, CONTROL_MAILBOX_CONFIG_SET_DIRECTION, request_id);
   request.value.direction_raw = (value == 1.0f) ? 1U : 0U;
@@ -338,17 +320,17 @@ static bool submit_direction(const motor_control_param_view_t *v, float value,
 
 // 单目标分发（位置两项走成对路径，不到这里）。返回 false 时 last_error 已置。
 static bool dispatch_target(const motor_control_param_view_t *v, uint8_t field,
-                            float value, uint32_t request_id) {
+    float value, uint32_t request_id) {
   switch (field) {
-    case can_bridge_msgs__msg__ParamSetTarget__FIELD_VEL_LIMIT:
-    case can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT:
-      return submit_single_limit(v, &kFields[field], value, request_id);
-    case can_bridge_msgs__msg__ParamSetTarget__FIELD_LIMIT_PROTECT:
-      return submit_safety_protect(v, value, request_id);
-    case can_bridge_msgs__msg__ParamSetTarget__FIELD_DIRECTION:
-      return submit_direction(v, value, request_id);
-    default:
-      return false; // POS_MIN/POS_MAX 走成对路径；越界 field 已被预校验拒掉
+  case can_bridge_msgs__msg__ParamSetTarget__FIELD_VEL_LIMIT:
+  case can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT:
+    return submit_single_limit(v, &kFields[field], value, request_id);
+  case can_bridge_msgs__msg__ParamSetTarget__FIELD_LIMIT_PROTECT:
+    return submit_safety_protect(v, value, request_id);
+  case can_bridge_msgs__msg__ParamSetTarget__FIELD_DIRECTION:
+    return submit_direction(v, value, request_id);
+  default:
+    return false;   // POS_MIN/POS_MAX 走成对路径；越界 field 已被预校验拒掉
   }
 }
 
@@ -398,7 +380,7 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
   }
   // 位置限位成对：同一条消息内该台必须两边都给，且 min < max。
   const uint8_t pos_bits = (uint8_t)((1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN) |
-                                     (1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX));
+      (1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX));
   for (uint16_t i = 0; i < msg->count; ++i) {
     const uint16_t id = msg->targets.data[i].motor_id;
     uint8_t mask = 0U;
@@ -435,7 +417,7 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
 
 // 逐目标分发。此刻预校验已全部通过，除提交失败（FIFO 满/断链）外不会再失败。
 static void apply_param_set(const can_bridge_msgs__msg__ParamSetArray *msg,
-                            uint32_t request_id) {
+    uint32_t request_id) {
   bool consumed[kParamSetMaxTargets] = {};
   for (uint16_t i = 0; i < msg->count; ++i) {
     if (consumed[i]) {
@@ -461,7 +443,7 @@ static void apply_param_set(const can_bridge_msgs__msg__ParamSetArray *msg,
           lo = p.value;
           consumed[j] = true;
         } else if (p.field ==
-                   can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
+            can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
           hi = p.value;
           consumed[j] = true;
         }
@@ -505,7 +487,7 @@ static void param_set_array_cb(const void *msgin) {
 
 // 系统命令：refresh / set_zero / clear_fault 直接提交（与 motor_bridge 的三个
 // 回调同构——校验与提交都在回调里做）；save 只置请求，实际的设备侧分批下发与
-// W25 落盘摊到 poll 里（见 g_save_cursor 的注释）。
+// W25 落盘由 save_transaction 在 poll 中推进。
 static void system_command_cb(const void *msgin) {
   const can_bridge_msgs__msg__SystemCommand *msg =
       (const can_bridge_msgs__msg__SystemCommand *)msgin;
@@ -520,24 +502,24 @@ static void system_command_cb(const void *msgin) {
       report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
       return;
     }
-    g_save_requested = true; // 进行中的重复请求合并（保存是幂等的整体动作）
+    save_transaction_request(&g_save_transaction);
     return;
   }
 
   control_mailbox_config_kind_t kind;
   switch (msg->command) {
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
-      kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
-      break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO:
-      kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
-      break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT:
-      kind = CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
-      break;
-    default:
-      report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
-      return;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
+    kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
+    break;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO:
+    kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
+    break;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT:
+    kind = CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
+    break;
+  default:
+    report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
+    return;
   }
 
   const motor_control_param_view_t *v = (msg->motor_id < MOTOR_CONTROL_MAX_MOTORS)
@@ -571,17 +553,17 @@ static void system_command_cb(const void *msgin) {
   // 同一命令重复下发：**后来的取代先前的**（旧的在飞事件到达时 id 已不匹配，
   // 自然被忽略）。三条命令各自只有一份在飞状态，这是参数面时期的既有语义。
   switch (msg->command) {
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
-      g_refresh_id = request_id;
-      break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO:
-      g_set_zero_id = request_id;
-      break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT:
-      g_clear_fault_id = request_id;
-      break;
-    default:
-      break;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
+    g_refresh_id = request_id;
+    break;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO:
+    g_set_zero_id = request_id;
+    break;
+  case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT:
+    g_clear_fault_id = request_id;
+    break;
+  default:
+    break;
   }
 }
 
@@ -595,10 +577,9 @@ void param_bridge_on_config_result(const motor_control_event_t *event) {
   const uint32_t id = event->request_id;
   const bool ok = event->reason == MOTOR_PROTOCOL_CONFIG_OK;
 
-  if (take_save_device_request(id)) {
-    if (!ok) {
-      fail_save_device_phase(event->motor_id, (uint16_t)event->reason);
-    }
+  if (save_transaction_on_device_result(
+      &g_save_transaction, id, ok, event->motor_id,
+      (uint16_t)event->reason, &kSaveTransactionPorts)) {
     g_status_dirty = true;
     return;
   }
@@ -655,7 +636,7 @@ static void publish_system_status() {
   g_system_status_msg.clear_fault_seq = (uint32_t)g_clear_fault_seq;
   g_system_status_msg.save_seq = (uint32_t)g_save_seq;
   g_system_status_msg.save_in_progress =
-      g_save_requested || g_save_active || g_save_flash_pending;
+      save_transaction_in_progress(&g_save_transaction);
   if (rcl_publish(&g_system_status_pub, &g_system_status_msg, nullptr) !=
       RCL_RET_OK) {
     // best-effort 超传输上限时 rcl_publish 静默丢；计数由 motor_bridge 合并进
@@ -664,101 +645,29 @@ static void publish_system_status() {
   }
 }
 
-// ---- 保存三段状态机 ----
-// **save_in_progress 覆盖全程**：① g_save_requested 起航（游标归零）；② g_save_active
-// 设备侧分批下发 0x2539，并等待每台 CONFIG_RESULT；③ g_save_flash_pending W25 落盘、
-// 等 storage 终态。只有②全部 OK 且③ W25 目标槽擦写、分页读回校验和活动槽翻转都
-// 完成后，保存动作才报告成功；失败也必须推进 save_seq。
+// SAVE 状态机独立于 ROS 消息、motor_control 视图和 storage_task 实现；本桥只
+// 转换视图快照、提供设备/存储端口，并发布状态序号。
 static void poll_save(uint32_t now) {
-  if (g_save_requested && !g_save_active && !g_save_flash_pending) {
-    g_save_requested = false;
-    g_save_cursor = 0U;
-    reset_save_device_requests();
-    g_save_storage_request_id = 0U;
-    g_save_phase_ms = now;
-    g_save_active = true;
+  save_transaction_target_t targets[SAVE_TRANSACTION_MAX_TARGETS] = {};
+  size_t target_count = g_view_count;
+  if (target_count > SAVE_TRANSACTION_MAX_TARGETS) {
+    target_count = SAVE_TRANSACTION_MAX_TARGETS;
+  }
+  for (size_t i = 0U; i < target_count; ++i) {
+    targets[i].motor_id = g_views[i].motor_id;
+    targets[i].dirty_slots = g_views[i].record_dirty_slots;
+  }
+
+  const save_transaction_effects_t effects = save_transaction_poll(
+      &g_save_transaction, now, targets, target_count,
+      &kSaveTransactionPorts);
+  if (effects.completed) {
+    // 完成序号是动作结束序号，不是成功计数；失败也必须推进，避免上层永久等待。
+    ++g_save_seq;
+  }
+  if (effects.status_changed) {
     g_status_dirty = true;
   }
-  if (g_save_active) {
-    if ((uint32_t)(now - g_save_phase_ms) >= kSaveTimeoutMs) {
-      // 设备回告丢失/内核停止时不能继续等，也绝不在未收齐 ACK 时启动 W25。
-      report_error(ERR_SAVE_FAIL, kMotorIdNone);
-      finish_save_transaction();
-      return;
-    }
-    uint32_t submitted = 0U;
-    while (g_save_cursor < g_view_count && submitted < kSaveSubmitsPerPoll) {
-      const motor_control_param_view_t *view = &g_views[g_save_cursor++];
-      // 只处理脏的台：没写过的台一个字节都不发（驱动器写 flash 期间会阻塞自身
-      // 控制循环，白存一次就是白等一截控制环），也不占本拍配额。
-      // 只脏易失槽（保护开关/方向）的台由内核在保存事务成功回 OK 时清脏位——
-      // 那种台只欠 W25 那一半，扫完一轮落盘就是它的全部。
-      if (view->record_dirty_slots == 0U) {
-        continue;
-      }
-      control_mailbox_config_request_t request = {};
-      request.request_id = next_internal_id();
-      request.received_tick_ms = millis();
-      request.motor_id = view->motor_id;
-      request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
-      request.value.save_slots = view->record_dirty_slots;
-      if (!track_save_device_request(request.request_id)) {
-        // 理论上 outstanding 数量不可能超过视图数量；保留显式失败路径，避免
-        // 出现一个无法关联回告的设备保存请求后仍错误启动 W25。
-        fail_save_device_phase(view->motor_id, ERR_SUBMIT_FAILED);
-        break;
-      }
-      if (!motor_rt_submit_config(&request)) {
-        // 提交失败的请求没有 CONFIG_RESULT，先从 outstanding 表移除；本次保存
-        // 直接失败，不再把后续台推入设备侧。
-        (void)take_save_device_request(request.request_id);
-        fail_save_device_phase(view->motor_id, ERR_SUBMIT_FAILED);
-        break;
-      }
-      submitted++;
-    }
-    if (g_save_cursor >= g_view_count && g_save_device_pending == 0U) {
-      if (g_save_device_failed) {
-        // 已经有设备侧失败回告或提交失败；不触发 W25，保留设备/记录的 dirty
-        // 事实，等待调用方退出运动后重新 SAVE。
-        finish_save_transaction();
-        return;
-      }
-      // 设备侧扫完 ≠ 保存完成：现在才请 W25 落盘，并把 save_in_progress 交给
-      // 第三段。**不发 save_seq、不清 in_progress**。
-      g_save_active = false;
-      g_save_cursor = 0U;
-      g_save_flash_pending = true;
-      g_save_phase_ms = now;
-      g_save_storage_request_id = next_internal_id();
-      storage_task_request_save(g_save_storage_request_id);
-    }
-    return;
-  }
-  if (!g_save_flash_pending) {
-    return;
-  }
-  // 关于 W25 结果：设备侧脏位是在对应 CONFIG_RESULT=OK 时由内核清除的；跨设备
-  // flash 与 W25 没有原子提交，故 W25 失败时不能伪造回滚设备侧状态，只能报告失败
-  // 并要求重新执行保存。这里不从 W25 结果反推或重设脏位，内核记录仍是唯一来源。
-  uint32_t result_request_id = 0U;
-  const storage_save_status_t result = storage_take_result(&result_request_id);
-  // 断连重建或上一笔保存遗留的结果：已取走，但不能收敛当前事务。IDLE 是
-  // "还没有结果"，没有令牌可比，不走这条判据。
-  if (result != STORAGE_SAVE_IDLE &&
-      result_request_id != g_save_storage_request_id) {
-    return;
-  }
-  if (result == STORAGE_SAVE_IDLE) {
-    if ((uint32_t)(now - g_save_phase_ms) < kSaveTimeoutMs) {
-      return; // 还在落盘
-    }
-    // 看门狗：存储任务卡死（或从未启动）时不能永远停在"保存中"。
-    report_error(ERR_SAVE_FAIL, kMotorIdNone);
-  } else if (result == STORAGE_SAVE_FAIL) {
-    report_error(ERR_SAVE_FAIL, kMotorIdNone);
-  }
-  finish_save_transaction();
 }
 
 // 设备参数结论（未初始化）：按"变化才报"推 last_error。结论由内核上电回读比对
@@ -772,23 +681,23 @@ static void report_dev_init_changes(void) {
     }
     g_reported_dev_init[v->motor_id] = v->dev_init;
     switch (v->dev_init) {
-      case MOTOR_CONTROL_DEV_INIT_MISMATCH:
-        report_error(ERR_DEV_INIT_MISMATCH, v->motor_id);
-        break;
-      case MOTOR_CONTROL_DEV_INIT_UNVERIFIED:
-        report_error(ERR_DEV_INIT_UNVERIFIED, v->motor_id);
-        break;
-      case MOTOR_CONTROL_DEV_INIT_NO_RECORD:
-        report_error(ERR_DEV_INIT_NO_RECORD, v->motor_id);
-        break;
-      case MOTOR_CONTROL_DEV_INIT_OK:
-      case MOTOR_CONTROL_DEV_INIT_NA:
-        // 结论转好也上报（last_error=0 + motor_id）：上位机据此确认"这次回读
-        // 成功"，否则一个陈旧的 40 会永远挂在那里，分不清新旧。
-        report_error(ERR_NONE, v->motor_id);
-        break;
-      default:
-        break; // PENDING 不是结论，不报
+    case MOTOR_CONTROL_DEV_INIT_MISMATCH:
+      report_error(ERR_DEV_INIT_MISMATCH, v->motor_id);
+      break;
+    case MOTOR_CONTROL_DEV_INIT_UNVERIFIED:
+      report_error(ERR_DEV_INIT_UNVERIFIED, v->motor_id);
+      break;
+    case MOTOR_CONTROL_DEV_INIT_NO_RECORD:
+      report_error(ERR_DEV_INIT_NO_RECORD, v->motor_id);
+      break;
+    case MOTOR_CONTROL_DEV_INIT_OK:
+    case MOTOR_CONTROL_DEV_INIT_NA:
+      // 结论转好也上报（last_error=0 + motor_id）：上位机据此确认"这次回读
+      // 成功"，否则一个陈旧的 40 会永远挂在那里，分不清新旧。
+      report_error(ERR_NONE, v->motor_id);
+      break;
+    default:
+      break;   // PENDING 不是结论，不报
     }
   }
 }
@@ -811,7 +720,9 @@ void param_bridge_poll(void) {
   }
 }
 
-uint32_t param_bridge_publish_fail_count(void) { return g_status_publish_fail; }
+uint32_t param_bridge_publish_fail_count(void) {
+  return g_status_publish_fail;
+}
 
 const motor_control_param_view_t *param_bridge_views(size_t *out_count) {
   if (out_count != nullptr) {
@@ -830,6 +741,8 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
 
+  save_transaction_init(&g_save_transaction);
+
   // 序列静态存储：rosidl C 序列是 data/size/capacity 三元组，反序列化会写进来，
   // 必须在 init 之前接好（漏了就是往 NULL 写）。rclc/std 都不分配。
   g_param_set_msg.targets.capacity =
@@ -847,9 +760,9 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   rcl_publisher_options_t pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_stream();
   if (rcl_publisher_init(&g_system_status_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     SystemStatus),
-                         kSystemStatusTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      SystemStatus),
+      kSystemStatusTopic, &pub_opts) != RCL_RET_OK) {
     return false;
   }
   g_pub_up = true;
@@ -860,34 +773,34 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
   sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_param_set_sub, node,
-                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                        ParamSetArray),
-                            kParamSetTopic, &sub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      ParamSetArray),
+      kParamSetTopic, &sub_opts) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
   g_sub_up = true;
 
   if (rcl_subscription_init(&g_system_cmd_sub, node,
-                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                        SystemCommand),
-                            kSystemCommandTopic, &sub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      SystemCommand),
+      kSystemCommandTopic, &sub_opts) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
   g_cmd_sub_up = true;
 
   if (rclc_executor_add_subscription(executor, &g_param_set_sub,
-                                     &g_param_set_msg, param_set_array_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+      &g_param_set_msg, param_set_array_cb,
+      ON_NEW_DATA) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
   g_sub_added = true;
 
   if (rclc_executor_add_subscription(executor, &g_system_cmd_sub,
-                                     &g_system_cmd_msg, system_command_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+      &g_system_cmd_msg, system_command_cb,
+      ON_NEW_DATA) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
@@ -907,8 +820,7 @@ void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   memset(g_reported_dev_init, 0xFF, sizeof(g_reported_dev_init));
   // 进行中的保存不能在重建后带着旧游标续跑：g_views 会重填，游标下标已无意义
   // （会跳过靠前的脏台、并触发一次没被要求的 W25 落盘）。
-  g_save_requested = false;
-  clear_save_progress();
+  save_transaction_disconnect(&g_save_transaction);
   g_refresh_id = 0U;
   g_set_zero_id = 0U;
   g_clear_fault_id = 0U;

@@ -26,7 +26,7 @@ void imu_snapshot_publish(imu_snapshot_t *snapshot) {
 }
 
 bool imu_snapshot_copy(const imu_snapshot_t *snapshot, imu_data_t *out,
-                       uint32_t *sequence) {
+    uint32_t *sequence) {
   if (snapshot == NULL || out == NULL || !snapshot->valid) {
     return false;
   }

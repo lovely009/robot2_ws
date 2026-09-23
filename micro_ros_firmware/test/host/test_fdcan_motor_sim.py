@@ -119,6 +119,20 @@ assert abs(_vaxor_cmd["kd"] - 0.8) < 1e-6
 assert abs(_vaxor_cmd["tau_nm"] - 0.4 * 0.042 * 50.0 * 0.65) < 2e-3
 assert MODULE.vaxor_decode_command(_vaxor_payload[:-1]) is None
 
+# 多轴 0x210 一帧的两个 ID 必须各自更新对应模型；空槽不可触碰其他节点。
+multi = MODULE.SlcanSim.__new__(MODULE.SlcanSim)
+multi.models = {i: MODULE.MotorModel(i, "cerb") for i in (1, 2, 3)}
+multi.log_f = None
+mit1 = bytes([0xcc, 0x80, 0, 0x80, 3, 0xe8, 0x14, 0x18, 0])
+mit2 = bytes([0x0c, 0x80, 1, 0x80, 3, 0xe8, 0x14, 0x18, 1])
+payload = (mit1 + mit2 + bytes(36) + bytes(2)
+           + bytes([1, 2, 0, 0, 0, 0]) + bytes(2))
+assert len(payload) == 64
+multi.handle_downlink(0x210, payload, True)
+assert multi.models[1].last_cmd is not None and multi.models[1].enabled
+assert multi.models[2].last_cmd is not None and not multi.models[2].enabled
+assert multi.models[3].last_cmd is None
+
 
 # 上电初值必须与**真机实测**一致（进程重启 = 掉电复现）：保护开关初值 1（关），
 # 方向初值 0（CW）。固件靠上电归一把它们写成定态——模拟器初值给错，台架就永远

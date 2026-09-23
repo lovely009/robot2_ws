@@ -18,7 +18,7 @@ volatile float integralFBx = 0.0f, integralFBy = 0.0f, integralFBz = 0.0f;
 static float invSqrt(float x);
 
 void MahonyAHRSupdateIMU(float q[4], float gx, float gy, float gz, float ax,
-                         float ay, float az) {
+    float ay, float az) {
   float recipNorm;
   float halfvx, halfvy, halfvz;
   float halfex, halfey, halfez;

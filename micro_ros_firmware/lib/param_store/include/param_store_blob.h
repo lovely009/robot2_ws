@@ -40,7 +40,7 @@ extern "C" {
   (PARAM_STORE_HEADER_SIZE + PARAM_STORE_RECORD_COUNT * PARAM_STORE_RECORD_SIZE_V2)
 #define PARAM_STORE_LEGACY_BLOB_SIZE \
   (PARAM_STORE_HEADER_SIZE + PARAM_STORE_RECORD_COUNT * \
-   PARAM_STORE_LEGACY_RECORD_SIZE)
+  PARAM_STORE_LEGACY_RECORD_SIZE)
 
 typedef struct {
   uint32_t present; // 位 = 1u << param_field_t（bit0 enable 永不置位）
@@ -92,36 +92,36 @@ bool param_store_blob_validate(const param_store_blob_t *blob);
 
 // 写一个字段（稀疏占用记录槽，满 64 条不同电机返回 false）。
 bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
-                          param_field_t field, float value);
+    param_field_t field, float value);
 // 读一个字段；未保存返回 false。
 bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
-                          param_field_t field, float *value);
+    param_field_t field, float *value);
 
 // 写 seq 并重算 CRC（落盘前最后一步）。
 void param_store_blob_finalize(param_store_blob_t *blob, uint32_t seq);
 
 // 设备端原值：写/读单个槽位（写会把该槽位计入 device_raw_present）。
 bool param_store_blob_set_device_raw(param_store_blob_t *blob, uint16_t motor_id,
-                                     param_device_slot_t slot, uint32_t raw);
+    param_device_slot_t slot, uint32_t raw);
 bool param_store_blob_get_device_raw(const param_store_blob_t *blob,
-                                     uint16_t motor_id, param_device_slot_t slot,
-                                     uint32_t *raw);
+    uint16_t motor_id, param_device_slot_t slot,
+    uint32_t *raw);
 // 该电机记录里的设备端原值位图；无记录返回 0。
 uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
-                                            uint16_t motor_id);
+    uint16_t motor_id);
 
 // 旧版（v1，32B 记录、无设备端原值）blob → v2。校验 v1 头与 CRC，逐字段搬运，
 // device_raw_present 保持 0（升级后首次上电不做设备参数比对，直到参数被重写）。
 // 成功返回 out，失败返回 NULL（调用方按"无有效 blob"处理）。
 param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_size,
-                                                void *out, size_t out_size);
+    void *out, size_t out_size);
 
 // v2（48B 记录、device_raw 4 槽）→ v3。校验 v2 头与 CRC，逐字段搬运；
 // device_raw[4..7] 清零（新增的安全/方向槽为"未核验"，与 v1→v2 时
 // device_raw_present = 0 同口径）；型号身份与 MIT 标度一律写 0 = 未知。
 // 成功返回 out，失败返回 NULL（调用方按"无有效 blob"处理）。
 param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
-                                                void *out, size_t out_size);
+    void *out, size_t out_size);
 
 #ifdef __cplusplus
 }

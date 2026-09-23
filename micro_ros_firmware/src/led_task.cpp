@@ -2,19 +2,19 @@
 
 // ---- host 可测：链路状态到颜色（不依赖 Arduino/FreeRTOS）----
 led_color_t led_status_select(micro_ros_link_state_t state,
-                              bool ever_connected, bool blink_on,
-                              led_color_t previous) {
+    bool ever_connected, bool blink_on,
+    led_color_t previous) {
   switch (state) {
-    case MICRO_ROS_LINK_CONNECT:
-      return previous;
-    case MICRO_ROS_LINK_RUN:
-      return led_color_t{
-          0U, static_cast<uint8_t>(blink_on ? 1U : 0U), 0U};
-    case MICRO_ROS_LINK_LOST:
-      return led_color_t{0U, 0U, 1U};
-    case MICRO_ROS_LINK_WAIT_AGENT:
-    default:
-      return ever_connected ? led_color_t{0U, 0U, 1U}
+  case MICRO_ROS_LINK_CONNECT:
+    return previous;
+  case MICRO_ROS_LINK_RUN:
+    return led_color_t{
+      0U, static_cast<uint8_t>(blink_on ? 1U : 0U), 0U};
+  case MICRO_ROS_LINK_LOST:
+    return led_color_t{0U, 0U, 1U};
+  case MICRO_ROS_LINK_WAIT_AGENT:
+  default:
+    return ever_connected ? led_color_t{0U, 0U, 1U}
                             : led_color_t{1U, 0U, 0U};
   }
 }
@@ -58,6 +58,6 @@ bool led_task_start(void) {
     return true;
   }
   return xTaskCreate(led_task_fn, "led", kLedTaskStack, nullptr,
-                     kLedTaskPriority, &g_led_task_handle) == pdPASS;
+      kLedTaskPriority, &g_led_task_handle) == pdPASS;
 }
 #endif  // HOST_TEST

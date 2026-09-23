@@ -2,5 +2,6 @@
   "name": "storage_projection",
   "version": "0.1.0",
   "description": "内核参数视图 ↔ W25 blob 的纯投影（无 Arduino/RTOS 依赖）",
-  "build": { "includeDir": "include", "srcDir": "src" }
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": { "motor_control": "*", "param_store": "*" }
 }

@@ -12,7 +12,8 @@
 #include <string.h>
 
 static FDCAN_HandleTypeDef *const kCanHandles[CAN_RX_BUS_COUNT] = {
-    &hfdcan1, &hfdcan2, &hfdcan3};
+  &hfdcan1, &hfdcan2, &hfdcan3
+};
 
 static can_rx_ring_t g_rx_rings[CAN_RX_BUS_COUNT];
 static can_tx_scheduler_t g_tx_schedulers[CAN_TX_BUS_COUNT];
@@ -34,46 +35,46 @@ can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index) {
 // FD 帧仅允许 0-8/12/16/20/24/32/48/64 字节；DLC 代码即 HAL 宏值
 static uint32_t fdcan_bytes_to_dlc(uint32_t len) {
   switch (len) {
-    case 0: return FDCAN_DLC_BYTES_0;
-    case 1: return FDCAN_DLC_BYTES_1;
-    case 2: return FDCAN_DLC_BYTES_2;
-    case 3: return FDCAN_DLC_BYTES_3;
-    case 4: return FDCAN_DLC_BYTES_4;
-    case 5: return FDCAN_DLC_BYTES_5;
-    case 6: return FDCAN_DLC_BYTES_6;
-    case 7: return FDCAN_DLC_BYTES_7;
-    case 8: return FDCAN_DLC_BYTES_8;
-    case 12: return FDCAN_DLC_BYTES_12;
-    case 16: return FDCAN_DLC_BYTES_16;
-    case 20: return FDCAN_DLC_BYTES_20;
-    case 24: return FDCAN_DLC_BYTES_24;
-    case 32: return FDCAN_DLC_BYTES_32;
-    case 48: return FDCAN_DLC_BYTES_48;
-    case 64: return FDCAN_DLC_BYTES_64;
-    default: return 0xFFFFFFFFU;
+  case 0: return FDCAN_DLC_BYTES_0;
+  case 1: return FDCAN_DLC_BYTES_1;
+  case 2: return FDCAN_DLC_BYTES_2;
+  case 3: return FDCAN_DLC_BYTES_3;
+  case 4: return FDCAN_DLC_BYTES_4;
+  case 5: return FDCAN_DLC_BYTES_5;
+  case 6: return FDCAN_DLC_BYTES_6;
+  case 7: return FDCAN_DLC_BYTES_7;
+  case 8: return FDCAN_DLC_BYTES_8;
+  case 12: return FDCAN_DLC_BYTES_12;
+  case 16: return FDCAN_DLC_BYTES_16;
+  case 20: return FDCAN_DLC_BYTES_20;
+  case 24: return FDCAN_DLC_BYTES_24;
+  case 32: return FDCAN_DLC_BYTES_32;
+  case 48: return FDCAN_DLC_BYTES_48;
+  case 64: return FDCAN_DLC_BYTES_64;
+  default: return 0xFFFFFFFFU;
   }
 }
 
 static uint32_t fdcan_dlc_to_bytes(uint32_t dlc) {
   switch (dlc) {
-    case FDCAN_DLC_BYTES_0:
-    case FDCAN_DLC_BYTES_1:
-    case FDCAN_DLC_BYTES_2:
-    case FDCAN_DLC_BYTES_3:
-    case FDCAN_DLC_BYTES_4:
-    case FDCAN_DLC_BYTES_5:
-    case FDCAN_DLC_BYTES_6:
-    case FDCAN_DLC_BYTES_7:
-    case FDCAN_DLC_BYTES_8:
-      return dlc;
-    case FDCAN_DLC_BYTES_12: return 12;
-    case FDCAN_DLC_BYTES_16: return 16;
-    case FDCAN_DLC_BYTES_20: return 20;
-    case FDCAN_DLC_BYTES_24: return 24;
-    case FDCAN_DLC_BYTES_32: return 32;
-    case FDCAN_DLC_BYTES_48: return 48;
-    case FDCAN_DLC_BYTES_64: return 64;
-    default: return 0;
+  case FDCAN_DLC_BYTES_0:
+  case FDCAN_DLC_BYTES_1:
+  case FDCAN_DLC_BYTES_2:
+  case FDCAN_DLC_BYTES_3:
+  case FDCAN_DLC_BYTES_4:
+  case FDCAN_DLC_BYTES_5:
+  case FDCAN_DLC_BYTES_6:
+  case FDCAN_DLC_BYTES_7:
+  case FDCAN_DLC_BYTES_8:
+    return dlc;
+  case FDCAN_DLC_BYTES_12: return 12;
+  case FDCAN_DLC_BYTES_16: return 16;
+  case FDCAN_DLC_BYTES_20: return 20;
+  case FDCAN_DLC_BYTES_24: return 24;
+  case FDCAN_DLC_BYTES_32: return 32;
+  case FDCAN_DLC_BYTES_48: return 48;
+  case FDCAN_DLC_BYTES_64: return 64;
+  default: return 0;
   }
 }
 
@@ -93,7 +94,7 @@ void can_filter_init(void) {
       Error_Handler();
     }
     HAL_FDCAN_ConfigGlobalFilter(kCanHandles[i], FDCAN_REJECT, FDCAN_REJECT,
-                                 FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+        FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   }
 }
 
@@ -152,7 +153,7 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
   tx.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
   tx.MessageMarker = 0;
   if (HAL_FDCAN_AddMessageToTxFifoQ(kCanHandles[bus_index], &tx,
-                                    (uint8_t *)frame->data) != HAL_OK) {
+      (uint8_t *)frame->data) != HAL_OK) {
     // 硬件 FIFO 满/拒绝：记账后交由上层策略（调度器下轮重泵）。
     can_tx_scheduler_note_hw_reject(&g_tx_schedulers[bus_index]);
     return false;
@@ -179,8 +180,8 @@ static uint32_t isr_now_ms(void) {
 }
 
 static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,
-                                     uint8_t bus_index, uint32_t rx_tick_ms,
-                                     can_rx_frame_t *frame) {
+    uint8_t bus_index, uint32_t rx_tick_ms,
+    can_rx_frame_t *frame) {
   FDCAN_RxHeaderTypeDef rx = {0};
   *frame = (can_rx_frame_t){0};
   if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx, frame->data) !=
@@ -241,7 +242,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 // 之后上层收发循环继续提交帧。总线仍故障会再次进 bus-off 并再次触发回调，
 // 恢复动作幂等（台架 T12 故障恢复路径）。
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
-                                   uint32_t ErrorStatusITs) {
+    uint32_t ErrorStatusITs) {
   int8_t bus_index = can_bus_index(hfdcan);
   if (bus_index < 0) {
     return;

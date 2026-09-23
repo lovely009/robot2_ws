@@ -9,11 +9,11 @@ static constexpr float kPidKd = 10.0f;
 static constexpr float kMaxCcr = 500.0f; // CCR 上限（≤ ARR=10000，即 5%）
 
 extern "C" float heater_pid_update(heater_pid_state_t *state,
-                                   float measured_c) {
+    float measured_c) {
   const float err = kDesiredTempC - measured_c;
   float out = kPidKp * err +
-              kPidKi * (err + state->err_l + state->err_ll) +
-              kPidKd * (err - state->err_l);
+      kPidKi * (err + state->err_l + state->err_ll) +
+      kPidKd * (err - state->err_l);
   state->err_ll = state->err_l;
   state->err_l = err;
   if (out > kMaxCcr) {

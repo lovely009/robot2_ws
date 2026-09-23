@@ -35,14 +35,14 @@
 
 // 事务发起（定义在提交入口段；config_step 的自动回读 / 身份读取都要用）。
 static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
-                     const motor_protocol_config_request_t *request,
-                     uint32_t now_ms);
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms);
 
 // 逐电机失能（Policy enable=false 与 SET_ENABLE(false) 共用）：清授权与目标 →
 // 在动则发失能帧 → 仍在 ACTIVE/SAFE_STOP 的退回 READY_DISABLED 并出事件。
 // ARD §36 冻结语义：复运动必须显式重发 enable=true，本函数不留自动恢复路径。
 static void apply_entry_disable(motor_control_context_t *ctx,
-                                motor_control_entry_t *entry, uint32_t now_ms) {
+    motor_control_entry_t *entry, uint32_t now_ms) {
   entry->policy_enable = false;
   entry->motion_authorized = false;
   entry->has_target = false;
@@ -55,8 +55,8 @@ static void apply_entry_disable(motor_control_context_t *ctx,
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_NONE, 0U);
+        entry->motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_NONE, 0U);
   }
 }
 
@@ -67,8 +67,8 @@ static void apply_entry_disable(motor_control_context_t *ctx,
 // 身份读取收尾：拓扑上等价于配置事务，但语义是"识别"而非"配置"——
 // 不回 CONFIG_RESULT（上层没提过请求），只在成功时按身份串绑定型号。
 static void finish_identity_read(motor_control_context_t *ctx,
-                                 motor_control_entry_t *entry, uint16_t result,
-                                 uint32_t now_ms) {
+    motor_control_entry_t *entry, uint16_t result,
+    uint32_t now_ms) {
   entry->tx_active = false;
   entry->tx_awaiting = false;
 
@@ -89,7 +89,7 @@ static void finish_identity_read(motor_control_context_t *ctx,
   const motor_protocol_model_profile_t *profile = NULL;
   if (read_ok) {
     profile = motor_control_profile_by_identity(entry->adapter, entry->identity,
-                                                entry->identity_size);
+        entry->identity_size);
   }
   if (profile != NULL) {
     (void)motor_control_bind_profile_ptr(ctx, entry->motor_id, profile, now_ms);
@@ -99,8 +99,8 @@ static void finish_identity_read(motor_control_context_t *ctx,
   // 出 PROFILE_REJECTED 让上层看见"这台设备不认识"。
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                           entry->motor_id, entry->bus_index,
-                           MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
+      entry->motor_id, entry->bus_index,
+      MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,12 +187,12 @@ static motor_control_dev_init_t settle_dev_init(
 // 事件由各调用方按自己的语义域补出（DEV_INIT 报定论、CONFIG_CONFLICT 报成因码），
 // 本助手只管"停/清/写码"。
 static void freeze_entry_as_conflict(motor_control_context_t *ctx,
-                                     motor_control_entry_t *entry, uint16_t fault,
-                                     uint32_t now_ms) {
+    motor_control_entry_t *entry, uint16_t fault,
+    uint32_t now_ms) {
   if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP ||
       (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
-       entry->motion_enabled)) {
+      entry->motion_enabled)) {
     motor_control_soft_stop_entry(ctx, entry, now_ms);
   }
   entry->motion_enabled = false;
@@ -208,9 +208,9 @@ static void freeze_entry_as_conflict(motor_control_context_t *ctx,
 // 定论落地：写 dev_init，并按结论放行/冻结该台。调用点必须在 tx_active
 // 复位之后（冻结路径与故障路径同形，避免事务重入）。
 static void apply_dev_init_result(motor_control_context_t *ctx,
-                                  motor_control_entry_t *entry,
-                                  motor_control_dev_init_t state,
-                                  uint32_t now_ms) {
+    motor_control_entry_t *entry,
+    motor_control_dev_init_t state,
+    uint32_t now_ms) {
   // 位图随事件带出去（1u<<slot；0 = 无此项信息），但两态语义不同：
   //  - MISMATCH：**对不上**的槽位（记录有、设备读到的值不同）；
   //  - UNVERIFIED：**没读到**的槽位（refresh_slots 是本次已落袋的槽位，
@@ -224,7 +224,7 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
                 ? (uint32_t)(MOTOR_CONTROL_DEV_RAW_ALL & ~entry->refresh_slots)
                 : 0U;
   const bool ready = (state == MOTOR_CONTROL_DEV_INIT_NA ||
-                      state == MOTOR_CONTROL_DEV_INIT_OK);
+      state == MOTOR_CONTROL_DEV_INIT_OK);
   const bool was_dev_block =
       entry->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM;
   entry->dev_init = state;
@@ -235,13 +235,13 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
       if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
         entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
         motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_READY,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_CONTROL_FAULT_NONE, 0U);
+            entry->motor_id, entry->bus_index,
+            MOTOR_CONTROL_FAULT_NONE, 0U);
       }
     }
   } else if (state == MOTOR_CONTROL_DEV_INIT_MISMATCH ||
-             state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
-             state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
+      state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
+      state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
     // 未初始化（不一致 / 未能核对 / 本机无记录）：**运动中的走软停，不硬失能**
     // ——上电自检与写入都核验过，真出现不一致属于异常，此时按"停止运动但保留
     // 阻尼"处理（TBD-SAFETY-01 口径），不把力矩瞬间撤掉。
@@ -254,8 +254,8 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
     freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
-                           entry->motor_id, entry->bus_index, (uint16_t)state,
-                           detail);
+      entry->motor_id, entry->bus_index, (uint16_t)state,
+      detail);
 }
 
 // 回读成功：影子取设备真值（设备为准），六个槽位的 SI 值同步落袋。
@@ -282,26 +282,26 @@ static void update_record_after_write(motor_control_entry_t *entry) {
   // 0，按 record_raw_present 全量刷会把它们抹成 0）。
   uint8_t written_mask = 0U;
   switch (entry->tx_kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      written_mask = (uint8_t)(pos_min_bit | pos_max_bit);
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
-      // 保护开关写成功后，记录与设备同值 → 上电比对不再报 CONFLICT。
-      // 注意这同时把"变更检测"的基准挪到了新值：写 1（关保护）再落盘即
-      // 基线化为"关"，与既有的语义一致（见决策日志）。
-      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
-      written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
-      break;
-    default:
-      return;
+  case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
+    written_mask = (uint8_t)(pos_min_bit | pos_max_bit);
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX);
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX);
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
+    // 保护开关写成功后，记录与设备同值 → 上电比对不再报 CONFLICT。
+    // 注意这同时把"变更检测"的基准挪到了新值：写 1（关保护）再落盘即
+    // 基线化为"关"，与既有的语义一致（见决策日志）。
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+    break;
+  default:
+    return;
   }
   // 先算"是否真的变了"：值相同且记录已有该位 → 不置脏位。上电归一每次都会写
   // 保护"开"，不做这一步就是每次上电白排一次保存（设备 0x2539 落 flash 会阻塞
@@ -337,24 +337,24 @@ static void update_record_after_write(motor_control_entry_t *entry) {
     // 刚写过的槽位显示一个陈旧数字，两行比对也就没意义了。
     float si = NAN;
     switch (slot) {
-      case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
-        si = entry->tx_request.position_limits.min_position_rad;
-        break;
-      case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
-        si = entry->tx_request.position_limits.max_position_rad;
-        break;
-      case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
-        si = entry->tx_request.max_velocity_rad_s;
-        break;
-      case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
-        si = entry->tx_request.max_torque_nm;
-        break;
-      case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
-      case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
-        si = (float)entry->tx_write_raw[slot];
-        break;
-      default:
-        break;
+    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
+      si = entry->tx_request.position_limits.min_position_rad;
+      break;
+    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
+      si = entry->tx_request.position_limits.max_position_rad;
+      break;
+    case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
+      si = entry->tx_request.max_velocity_rad_s;
+      break;
+    case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
+      si = entry->tx_request.max_torque_nm;
+      break;
+    case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
+    case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
+      si = (float)entry->tx_write_raw[slot];
+      break;
+    default:
+      break;
     }
     entry->record_si[slot] = si;
     entry->dev_si[slot] = si;
@@ -380,29 +380,29 @@ static void update_record_after_write(motor_control_entry_t *entry) {
 static void update_shadow_after_write(motor_control_entry_t *entry) {
   if (entry->profile == NULL ||
       (entry->profile->capability_flags &
-       MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+      MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
     return;
   }
   switch (entry->tx_kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      entry->dev_min_rad = entry->tx_request.position_limits.min_position_rad;
-      entry->dev_max_rad = entry->tx_request.position_limits.max_position_rad;
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      entry->dev_max_velocity_rad_s = entry->tx_request.max_velocity_rad_s;
-      break;
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      entry->dev_max_torque_nm = entry->tx_request.max_torque_nm;
-      break;
-    default:
-      return;
+  case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
+    entry->dev_min_rad = entry->tx_request.position_limits.min_position_rad;
+    entry->dev_max_rad = entry->tx_request.position_limits.max_position_rad;
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
+    entry->dev_max_velocity_rad_s = entry->tx_request.max_velocity_rad_s;
+    break;
+  case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
+    entry->dev_max_torque_nm = entry->tx_request.max_torque_nm;
+    break;
+  default:
+    return;
   }
   entry->dev_limits_valid = true;
 }
 
 void motor_control_finish_tx(motor_control_context_t *ctx,
-                             motor_control_entry_t *entry, uint16_t result,
-                             uint32_t now_ms) {
+    motor_control_entry_t *entry, uint16_t result,
+    uint32_t now_ms) {
   if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_READ_IDENTITY) {
     finish_identity_read(ctx, entry, result, now_ms);
     return;
@@ -490,8 +490,8 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
     entry->enable_pending = false;
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                           entry->motor_id, entry->bus_index, result,
-                           entry->tx_request_id);
+      entry->motor_id, entry->bus_index, result,
+      entry->tx_request_id);
   if (dev_init_settled) {
     apply_dev_init_result(ctx, entry, dev_state, now_ms);
   }
@@ -505,7 +505,7 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
 //    若在这里定论为"识别失败"，一次断链就能让电机在本次上电周期内永久
 //    不可控。
 void motor_control_abort_tx(motor_control_context_t *ctx,
-                            motor_control_entry_t *entry, uint32_t now_ms) {
+    motor_control_entry_t *entry, uint32_t now_ms) {
   if (ctx == NULL || entry == NULL || !entry->tx_active) {
     return;
   }
@@ -522,7 +522,7 @@ void motor_control_abort_tx(motor_control_context_t *ctx,
 // 事务成功收尾：无确认手段的协议不得谎报 OK（ARD §20.5 / 禁止项 9）。
 // 例外是读事务：确认就是设备回帧本身，与"写阶段无读回对象"判据无关。
 static void finish_tx_success(motor_control_context_t *ctx,
-                              motor_control_entry_t *entry, uint32_t now_ms) {
+    motor_control_entry_t *entry, uint32_t now_ms) {
   const bool confirmed =
       entry->tx_kind == MOTOR_PROTOCOL_CONFIG_READ_IDENTITY ||
       entry->adapter == NULL || !entry->adapter->config_verify_required;
@@ -540,7 +540,7 @@ static void finish_tx_success(motor_control_context_t *ctx,
 // 未决阶段（新阶段发出前先让上一问落地）。无应答阶段（VAXOR 的本地策略）不受
 // 影响；bus_index 相同的表项才是同一物理总线。
 static bool bus_stage_in_flight(const motor_control_context_t *ctx,
-                               const motor_control_entry_t *exclude) {
+    const motor_control_entry_t *exclude) {
   for (size_t i = 0; i < ctx->entry_count; ++i) {
     const motor_control_entry_t *other = &ctx->entries[i];
     if (other == exclude || !other->used) {
@@ -599,7 +599,7 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     if (entry->profile == NULL ||
         (entry->profile->capability_flags &
-         MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+        MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
       continue; // 未绑定 / 非设备侧型号（VAXOR）：无设备对象可写
     }
     if (!entry->boot_record_offered || entry->motion_enabled) {
@@ -662,11 +662,11 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     if (entry->profile == NULL ||
         (entry->profile->capability_flags &
-         MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+        MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
       continue; // 未绑定 / 非设备侧型号（VAXOR）：无设备对象可比
     }
     if (!entry->boot_record_offered) {
-      continue; // 5ms/200Hz 边界先套用 Flash 记录，再回读
+      continue; // 2ms/500Hz 边界先套用 Flash 记录，再回读
     }
     if (entry->boot_norm_stage != MOTOR_CONTROL_BOOT_NORM_DONE) {
       continue; // 0a 还没收尾：先写定保护/方向，再回读比对（顺序是契约）
@@ -722,7 +722,7 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     motor_protocol_config_stage_info_t info = {0};
     if (adapter->config_stage_info == NULL ||
         !adapter->config_stage_info(entry->tx_stage, entry->profile,
-                                    &entry->tx_request, &info)) {
+        &entry->tx_request, &info)) {
       motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_DEVICE_ERROR, now_ms);
       continue;
     }
@@ -734,8 +734,8 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     motor_protocol_tx_frame_t frame = {0};
     if (adapter->config_encode_stage != NULL &&
         adapter->config_encode_stage(entry->tx_stage, entry->profile, entry->node,
-                                     entry->bus_index, &entry->tx_request,
-                                     &frame) &&
+        entry->bus_index, &entry->tx_request,
+        &frame) &&
         frame.size > 0U) {
       frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P2;
       if (!motor_control_push_tx(ctx, &frame)) {
@@ -751,7 +751,7 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     entry->tx_stage++;
     entry->tx_retries = 0U;
     if (entry->tx_stage >= adapter->config_stage_count(entry->profile,
-                                                       &entry->tx_request)) {
+        &entry->tx_request)) {
       finish_tx_success(ctx, entry, now_ms);
     }
   }
@@ -760,8 +760,8 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
 // 响应帧裁决（on_raw_frame 调用）。返回 true 表示帧被事务消费
 // （帧同时是反馈时，解码仍会在调用方继续执行）。
 bool motor_control_config_on_frame(motor_control_context_t *ctx,
-                                   motor_control_entry_t *entry,
-                                   const motor_protocol_raw_frame_t *frame) {
+    motor_control_entry_t *entry,
+    const motor_protocol_raw_frame_t *frame) {
   if (ctx == NULL || entry == NULL || !entry->tx_active || !entry->tx_awaiting) {
     return false;
   }
@@ -771,7 +771,7 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
   }
   motor_protocol_config_stage_info_t info = {0};
   if (!adapter->config_stage_info(entry->tx_stage, entry->profile,
-                                  &entry->tx_request, &info) ||
+      &entry->tx_request, &info) ||
       !info.waits_response) {
     return false;
   }
@@ -795,7 +795,7 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
   }
   const motor_protocol_stage_outcome_t outcome =
       adapter->config_on_response(entry->tx_stage, entry->profile,
-                                  &entry->tx_request, frame, &read);
+      &entry->tx_request, frame, &read);
   if (is_refresh) {
     entry->refresh_count = (uint8_t)(read.size / param_stage_bytes);
   } else {
@@ -814,46 +814,46 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
       entry->dev_si[info.param_slot] = stage_payload->value_si;
       entry->refresh_slots |= (uint8_t)(1U << info.param_slot);
     } else if (info.param_raw_valid &&
-               info.param_slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT) {
+        info.param_slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT) {
       // 写阶段：登记本事务实际编码出的设备端原值（成功收尾时同步记录）。
       entry->tx_write_raw[info.param_slot] = info.param_raw;
     }
   }
   switch (outcome) {
-    case MOTOR_PROTOCOL_STAGE_ADVANCE:
-      entry->tx_stage++;
-      entry->tx_retries = 0U;
-      entry->tx_awaiting = false;
-      if (entry->tx_stage >=
-          adapter->config_stage_count(entry->profile, &entry->tx_request)) {
-        finish_tx_success(ctx, entry, frame->rx_tick_ms);
-      }
-      return true;
-    case MOTOR_PROTOCOL_STAGE_COMPLETE:
-      // 设备提前给出终态（分段传输末段）：剩余阶段不再发送。
+  case MOTOR_PROTOCOL_STAGE_ADVANCE:
+    entry->tx_stage++;
+    entry->tx_retries = 0U;
+    entry->tx_awaiting = false;
+    if (entry->tx_stage >=
+        adapter->config_stage_count(entry->profile, &entry->tx_request)) {
       finish_tx_success(ctx, entry, frame->rx_tick_ms);
-      return true;
-    case MOTOR_PROTOCOL_STAGE_IGNORE:
-      // 非事务应答（同节点周期上报等）：不消费本帧，不计重试——调用方仍会
-      // 用它走解码/反馈路径。
-      return false;
-    case MOTOR_PROTOCOL_STAGE_RETRY:
-      // 无需回退缓冲：adapter 契约规定只在 ADVANCE/COMPLETE 前追加，判
-      // RETRY 前不得写入（见 motor_protocol_adapter.h 的 config_on_response），
-      // 因此已收下的前序分段不会被重试重复拼接或丢弃。
-      entry->tx_retries++;
-      entry->tx_awaiting = false; // 读回不一致 → 重发本阶段（≤2 次）
-      if (entry->tx_retries > 2U) {
-        // 读回核验不一致：不得返回 OK（禁止项 9）→ UNCONFIRMED。
-        motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                                frame->rx_tick_ms);
-      }
-      return true;
-    case MOTOR_PROTOCOL_STAGE_FAIL:
-    default:
+    }
+    return true;
+  case MOTOR_PROTOCOL_STAGE_COMPLETE:
+    // 设备提前给出终态（分段传输末段）：剩余阶段不再发送。
+    finish_tx_success(ctx, entry, frame->rx_tick_ms);
+    return true;
+  case MOTOR_PROTOCOL_STAGE_IGNORE:
+    // 非事务应答（同节点周期上报等）：不消费本帧，不计重试——调用方仍会
+    // 用它走解码/反馈路径。
+    return false;
+  case MOTOR_PROTOCOL_STAGE_RETRY:
+    // 无需回退缓冲：adapter 契约规定只在 ADVANCE/COMPLETE 前追加，判
+    // RETRY 前不得写入（见 motor_protocol_adapter.h 的 config_on_response），
+    // 因此已收下的前序分段不会被重试重复拼接或丢弃。
+    entry->tx_retries++;
+    entry->tx_awaiting = false;   // 读回不一致 → 重发本阶段（≤2 次）
+    if (entry->tx_retries > 2U) {
+      // 读回核验不一致：不得返回 OK（禁止项 9）→ UNCONFIRMED。
       motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
-                              frame->rx_tick_ms);
-      return true;
+          frame->rx_tick_ms);
+    }
+    return true;
+  case MOTOR_PROTOCOL_STAGE_FAIL:
+  default:
+    motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_UNCONFIRMED,
+        frame->rx_tick_ms);
+    return true;
   }
 }
 
@@ -862,8 +862,8 @@ bool motor_control_config_on_frame(motor_control_context_t *ctx,
 // ---------------------------------------------------------------------------
 
 static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
-                     const motor_protocol_config_request_t *request,
-                     uint32_t now_ms) {
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms) {
   const motor_protocol_adapter_t *adapter = entry->adapter;
   const uint8_t stages =
       adapter->config_stage_count != NULL
@@ -872,8 +872,8 @@ static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
   if (stages == 0U) {
     // 厂家对象未决 / 协议不支持：统一 UNSUPPORTED（不猜厂家字节，TBD-CONFIG-01）。
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_PROTOCOL_CONFIG_UNSUPPORTED, request->request_id);
+        entry->motor_id, entry->bus_index,
+        MOTOR_PROTOCOL_CONFIG_UNSUPPORTED, request->request_id);
     return true;
   }
   entry->tx_active = true;
@@ -896,8 +896,8 @@ static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
 //   2) 协议无身份读对象 → 目录内该协议唯一型号时直接绑定，多于一型则留
 //      未绑定（不猜，保持不可控安全侧）。
 void motor_control_start_identity_read(motor_control_context_t *ctx,
-                                       motor_control_entry_t *entry,
-                                       uint32_t now_ms) {
+    motor_control_entry_t *entry,
+    uint32_t now_ms) {
   if (ctx == NULL || entry == NULL || entry->adapter == NULL ||
       entry->identity_read_done) {
     return;
@@ -929,8 +929,8 @@ void motor_control_start_identity_read(motor_control_context_t *ctx,
   }
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                           entry->motor_id, entry->bus_index,
-                           MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
+      entry->motor_id, entry->bus_index,
+      MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
 }
 
 // 设备侧限位/限值写必须在电机未运动时进行：厂家手册要求设置限位时电机失能；
@@ -953,7 +953,7 @@ static bool device_limit_write_allowed(const motor_control_entry_t *entry) {
 static bool device_refresh_allowed(const motor_control_entry_t *entry) {
   if (entry->profile == NULL ||
       (entry->profile->capability_flags &
-       MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
+      MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) == 0U) {
     return true;
   }
   return entry->dev_read_done ||
@@ -961,26 +961,26 @@ static bool device_refresh_allowed(const motor_control_entry_t *entry) {
 }
 
 static bool reject_invalid(motor_control_context_t *ctx,
-                           motor_control_entry_t *entry,
-                           const motor_protocol_config_request_t *request,
-                           uint32_t now_ms) {
+    motor_control_entry_t *entry,
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms) {
   ctx->config_rejected_count++;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                           entry != NULL ? entry->motor_id : request->motor_id,
-                           entry != NULL ? entry->bus_index : 0U,
-                           MOTOR_PROTOCOL_CONFIG_INVALID, request->request_id);
+      entry != NULL ? entry->motor_id : request->motor_id,
+      entry != NULL ? entry->bus_index : 0U,
+      MOTOR_PROTOCOL_CONFIG_INVALID, request->request_id);
   return false;
 }
 
 // 事务进行中的统一拒绝（一问一答：同一电机新请求直接 BUSY，不排队）。
 static bool reject_busy(motor_control_context_t *ctx,
-                        motor_control_entry_t *entry,
-                        const motor_protocol_config_request_t *request,
-                        uint32_t now_ms) {
+    motor_control_entry_t *entry,
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms) {
   ctx->config_rejected_count++;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                           entry->motor_id, entry->bus_index,
-                           MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
+      entry->motor_id, entry->bus_index,
+      MOTOR_PROTOCOL_CONFIG_BUSY, request->request_id);
   return false;
 }
 
@@ -1022,10 +1022,10 @@ static bool reject_if_unprotected_unconfirmed(
 // 它挡不住「每次都递增代数的周期发布者」：那与人工逐次授权在行为上不可
 // 区分。ARD §36 的「显式」在机制层面到此为止，再往上靠上层自律。
 bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
-                                      motor_control_entry_t *entry,
-                                      const motor_protocol_config_request_t *request,
-                                      uint32_t now_ms) {
-      if (entry->profile == NULL) {
+    motor_control_entry_t *entry,
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms) {
+  if (entry->profile == NULL) {
     return reject_invalid(ctx, entry, request, now_ms);
   }
   if (!isfinite(request->kp) || !isfinite(request->kd) ||
@@ -1058,14 +1058,14 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
     apply_entry_disable(ctx, entry, now_ms);
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                           entry->motor_id, entry->bus_index,
-                           MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+      entry->motor_id, entry->bus_index,
+      MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
   return true;
-    }
+}
 
 bool motor_control_submit_config(motor_control_context_t *ctx,
-                                 const motor_protocol_config_request_t *request,
-                                 uint32_t now_ms) {
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms) {
   if (ctx == NULL || request == NULL || request->request_id == 0U) {
     return false;
   }
@@ -1076,315 +1076,315 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
   }
 
   switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_GAINS: {
-      // 增益是低频 Policy（ARD §19.4）：本地生效，上限来自 Profile，
-      // 不进入命令快照、不刷新命令 freshness。
-      if (entry->profile == NULL) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (!isfinite(request->kp) || !isfinite(request->kd) || request->kp < 0.0f ||
-          request->kd < 0.0f) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      entry->kp = request->kp > entry->profile->kp_max ? entry->profile->kp_max
-                                                       : request->kp;
-      entry->kd = request->kd > entry->profile->kd_max ? entry->profile->kd_max
-                                                       : request->kd;
-      entry->has_kp_kd = true;
-      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
-      return true;
+  case MOTOR_PROTOCOL_CONFIG_SET_GAINS: {
+    // 增益是低频 Policy（ARD §19.4）：本地生效，上限来自 Profile，
+    // 不进入命令快照、不刷新命令 freshness。
+    if (entry->profile == NULL) {
+      return reject_invalid(ctx, entry, request, now_ms);
     }
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS: {
-      if (!isfinite(request->position_limits.min_position_rad) ||
-          !isfinite(request->position_limits.max_position_rad) ||
-          request->position_limits.min_position_rad >=
-              request->position_limits.max_position_rad) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      // 硬件参数表第三条：位置限位不得超过型号表的 MIT 量化范围
-      // （CERB = ±π，与设备 0x607D 字典 ±32768 cnt 同域）。0 = 未确认不钳制。
-      motor_protocol_config_request_t bounded = *request;
-      const float pos_limit = entry->profile != NULL
+    if (!isfinite(request->kp) || !isfinite(request->kd) || request->kp < 0.0f ||
+        request->kd < 0.0f) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    entry->kp = request->kp > entry->profile->kp_max ? entry->profile->kp_max
+                                                       : request->kp;
+    entry->kd = request->kd > entry->profile->kd_max ? entry->profile->kd_max
+                                                       : request->kd;
+    entry->has_kp_kd = true;
+    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+        entry->motor_id, entry->bus_index,
+        MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+    return true;
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS: {
+    if (!isfinite(request->position_limits.min_position_rad) ||
+        !isfinite(request->position_limits.max_position_rad) ||
+        request->position_limits.min_position_rad >=
+        request->position_limits.max_position_rad) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    // 硬件参数表第三条：位置限位不得超过型号表的 MIT 量化范围
+    // （CERB = ±π，与设备 0x607D 字典 ±32768 cnt 同域）。0 = 未确认不钳制。
+    motor_protocol_config_request_t bounded = *request;
+    const float pos_limit = entry->profile != NULL
                                   ? entry->profile->mit_position_limit_rad
                                   : 0.0f;
-      if (pos_limit > 0.0f) {
-        if (bounded.position_limits.min_position_rad < -pos_limit) {
-          bounded.position_limits.min_position_rad = -pos_limit;
-        }
-        if (bounded.position_limits.max_position_rad > pos_limit) {
-          bounded.position_limits.max_position_rad = pos_limit;
-        }
+    if (pos_limit > 0.0f) {
+      if (bounded.position_limits.min_position_rad < -pos_limit) {
+        bounded.position_limits.min_position_rad = -pos_limit;
       }
-      if (entry->profile != NULL &&
-          (entry->profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
-        // 软件限位协议（Vaxor）：本地保存，打包前钳制（ARD §26.1）。
-        entry->soft_min_rad = bounded.position_limits.min_position_rad;
-        entry->soft_max_rad = bounded.position_limits.max_position_rad;
-        entry->has_soft_limits = true;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
-        return true;
+      if (bounded.position_limits.max_position_rad > pos_limit) {
+        bounded.position_limits.max_position_rad = pos_limit;
       }
-      // 设备侧限位（CERB）：必须走 request_id 事务 + 读回核验（ARD §26.2），
-      // 且仅限未运动状态（见 device_limit_write_allowed）。
-      if (!device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, &bounded, now_ms); // 落事务的是钳制后的请求
     }
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT: {
-      // 设备侧管理对象（仅 CERB）：0x6080 电机端最大转速 / 0x2538 电机端峰值
-      // 电流，走 CANopen 快速 SDO 写 + 读回核验（ARD §20.4、§26.2）。
-      // 请求为关节侧 SI；换算到电机端量由 adapter 依 profile 完成。
-      if (entry->profile == NULL) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      motor_protocol_config_request_t clamped = *request;
-      if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT) {
-        if (!isfinite(request->max_velocity_rad_s) ||
-            request->max_velocity_rad_s <= 0.0f) {
-          return reject_invalid(ctx, entry, request, now_ms);
-        }
-        // 已确认额定转速的型号：限值不得高于额定（与 effort 峰值钳制同口径，
-        // 不允许把驱动限值抬到型号标定之上）。
-        const float rated = entry->profile->rated_speed_rad_s;
-        if (rated > 0.0f && clamped.max_velocity_rad_s > rated) {
-          clamped.max_velocity_rad_s = rated;
-        }
-      } else {
-        if (!isfinite(request->max_torque_nm) || request->max_torque_nm <= 0.0f) {
-          return reject_invalid(ctx, entry, request, now_ms);
-        }
-        const float peak = entry->profile->peak_torque_nm;
-        if (peak > 0.0f && clamped.max_torque_nm > peak) {
-          clamped.max_torque_nm = peak;
-        }
-        // 硬件参数表第二条：设备侧 0x2538 是**电气**上限，外部写入不得把设备里
-        // 的电流推到规格书峰值电流之上。两条上限取更严者——今天两者等价
-        // （限值系数就是峰值对），但任一列被改动后这条规则仍然成立。
-        const float peak_amp = entry->profile->peak_current_amp;
-        if (peak_amp > 0.0f) {
-          const float cap_nm =
-              peak_amp * motor_protocol_profile_limit_nm_per_amp(entry->profile);
-          if (cap_nm > 0.0f && clamped.max_torque_nm > cap_nm) {
-            clamped.max_torque_nm = cap_nm;
-          }
-        }
-      }
-      // 软件限位型号（VAXOR 无厂家管理对象）：本地保存，打包前钳制
-      // （ARD §26.1，与位置软限位同口径）。只影响目标、不触发驱动器保护，
-      // 故与增益一样**无生命周期门禁**——门禁只针对设备侧写。
-      if ((entry->profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
-        if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT) {
-          entry->soft_max_velocity_rad_s = clamped.max_velocity_rad_s;
-          entry->has_soft_vel_limit = true;
-        } else {
-          entry->soft_max_torque_nm = clamped.max_torque_nm;
-          entry->has_soft_torque_limit = true;
-        }
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
-        return true;
-      }
-      // 设备侧（CERB）：0x6080 / 0x2538，SDO 写 + 读回核验；仅未运动时允许。
-      if (!device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, &clamped, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SET_ZERO: {
-      // 设零点（字典 0x2531 写 1）：厂家要求**失能状态**下设置——已使能一律
-      // 拒绝，不隐式失能（与设备侧限位同口径：安全边界不得在运动中变动）。
-      // 命令式事务：只等写应答，不读回；也不更新设备影子/记录（零点不是本机
-      // 记录的参数，它改变的是设备的位置基准）。
-      // 注意：零点一变，设备里 0x607D 的限位也随之换了物理位置，操作者需要
-      // 重新确认限位与机械行程（见 docs 决策日志）。
-      if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT: {
-      // 故障清除：只清「可清的」。三类故障的判据是**成因**（unified_fault_code）
-      // 而不是生命周期——DEV_PARAM 与身份冲突都会把表项带进 CONFIG_CONFLICT，
-      // 按生命周期判会把两者混为一谈。
-      //  - 身份冲突锁存（latch_config_conflict）：ARD §9.3 刻意不可解除，复位
-      //    只能整机重启 → 拒绝。
-      //  - 设备参数未初始化（DEV_PARAM）：改走一次 REFRESH_PARAMS 事务，重跑
-      //    回读与比对。真不一致仍然由 apply_dev_init_result 判 MISMATCH 保持
-      //    CONFIG_CONFLICT——清除只负责「允许重走授权链」，不伪造一致。
-      //  - 厂家故障：发起设备侧清错事务（协议无手段则 UNSUPPORTED）。设备清掉
-      //    后下一帧状态帧走既有 FAULT → READY_DISABLED 路径收敛。
-      // 清错帧是控制类帧（MIT 控制字），运动中的电机不得收到——与设备侧限位
-      // 写同口径：安全边界不在运动中变动。
-      if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_CONFIG_CONFLICT) {
-        return reject_invalid(ctx, entry, request, now_ms); // 身份冲突不可解除
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM) {
-        // 清 DEV_PARAM = 重跑一次回读：与手动 REFRESH **同一门禁**。今天 DEV_PARAM
-        // 必然伴随 dev_read_done==true（两边都由 apply_dev_init_result 之外的定论
-        // 路径置位），也就是这条转换本来就过得了门；但契约不该靠"非局部不变量"
-        // 成立——就在这里显式挡一次。
-        if (!device_refresh_allowed(entry)) {
-          return reject_busy(ctx, entry, request, now_ms);
-        }
-        motor_protocol_config_request_t refresh = *request;
-        refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-        return start_tx(ctx, entry, &refresh, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT: {
-      // 设备侧看门狗/限位保护开关（0x2650:00）。
-      //  - 关保护 = 该关节**没有任何限位在执行**（CERB 是
-      //    CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底），所以这条与限值写
-      //    同口径：**运动中不得变动安全边界**，仅未运动时受理。
-      //  - 开保护有自锁风险：手册「看门狗数据帧间隔要小于 500ms，否则电机
-      //    自锁」，而固件无命令时只发 50 Hz SYNC —— SYNC 是否算"看门狗数据
-      //    帧"。台架实测开保护后停发全部帧静置 5 秒**没有自锁**，但那是单机
-      //    空载静态观察。这里不拦（设备侧行为不是本层能保证的），但调用方
-      //    （web/上层）必须把它当需要台架实测的动作。
-      if (entry->profile == NULL || request->safety_protect_raw > 1U ||
-          !device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION: {
-      // 方向也是安全边界：与限位/保护同口径，仅未运动时受理。**2026-09-20 真机
-      // 实测纠正**：翻向**不**改变位置坐标系（同一物理方向转，0x6064 的计数方向
-      // 不变），所以限位与零点都不镜像、也不需要重新设零；真正的风险是驱动器
-      // 自持的位置环变成正反馈——使能后会朝远离目标的方向冲到设备限位为止。
-      if (entry->profile == NULL || request->direction_raw > 1U ||
-          !device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH: {
-      // 保存 = 设备落盘 + W25 落盘。这里只管设备那一半。
-      // 没有设备侧落盘对象的两种台（VAXOR 的软限位只活在记录里；只脏了易失槽
-      // 的保护/方向——厂家没给保存码）**不发任何帧**，直接清脏位回 OK：它们要靠
-      // 上层落 W25 才算保存完成，走事务机器只会白开一个空事务。
-      if (entry->profile == NULL) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      const bool device_side =
-          (entry->profile->capability_flags &
-           MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U;
-      const uint8_t device_slots =
-          (uint8_t)(request->save_slots & MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK);
-      if (!device_side || device_slots == 0U) {
-        entry->record_dirty_slots = 0U;
-        motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                                 entry->motor_id, entry->bus_index,
-                                 MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
-        return true;
-      }
-      // 设备侧 flash 写会让驱动器阻塞自身控制循环（阻塞量级未实测）。改动前 0x2539
-      // 只作为写事务的尾巴发出，而写事务本就被 device_limit_write_allowed 挡着
-      // ——ACTIVE 的电机从不会收到它。保存独立成事务后必须自己带这道门，否则
-      // 一个正在持位的关节会因为点了一下"保存"被抽掉一秒的控制环。
-      // 与限位/保护/方向同口径：安全边界相关的设备侧写，运动中一律拒绝。
-      if (!device_limit_write_allowed(entry)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      motor_protocol_config_request_t bounded = *request;
-      bounded.save_slots = device_slots;
-      return start_tx(ctx, entry, &bounded, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SET_POLICY:
-      return motor_control_apply_policy_entry(ctx, entry, request, now_ms);
-    case MOTOR_PROTOCOL_CONFIG_SET_ENABLE: {
-      // 逐电机 Enable（ARD §19）：本地策略位，非事务。
-      // true = 重立运动授权（仍需新快照才能运动）；false = 立即退出运动：
-      // 软停 + 失能帧 + 清授权位（ARD §36 冻结语义）。
-      if (request->enable) {
-        // 设备参数初始化未完成（未回读/回读失败/与记录不一致）：使能请求直接
-        // 拒绝并说明原因，不静默吞掉——页面要能立刻看到"为什么按不下去"。
-        if (!motor_control_dev_params_allow_motion(entry)) {
-          entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
-          return reject_invalid(ctx, entry, request, now_ms);
-        }
-        if (reject_if_unprotected_unconfirmed(ctx, entry, request, now_ms)) {
-          return false;
-        }
-        entry->policy_enable = true;
-        entry->motion_authorized = true;
-      } else {
-        apply_entry_disable(ctx, entry, now_ms);
-      }
+    if (entry->profile != NULL &&
+        (entry->profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
+      // 软件限位协议（Vaxor）：本地保存，打包前钳制（ARD §26.1）。
+      entry->soft_min_rad = bounded.position_limits.min_position_rad;
+      entry->soft_max_rad = bounded.position_limits.max_position_rad;
+      entry->has_soft_limits = true;
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+          entry->motor_id, entry->bus_index,
+          MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
       return true;
     }
-    case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS: {
-      // 设备参数回读：换算系数来自 Profile（未绑定拒绝）；上传只读，
-      // ACTIVE 态也允许（不加 device_limit_write_allowed 门禁）。
-      // 但**必须等该台自己的归一完成**：否则比的是设备上电初值（假不一致），
-      // 而假不一致会冻结该台并把归一本身挡死（见 device_refresh_allowed）。
-      if (entry->profile == NULL) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (!device_refresh_allowed(entry)) {
-        return reject_busy(ctx, entry, request, now_ms); // 归一未收尾：稍后重试
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    case MOTOR_PROTOCOL_CONFIG_SET_MODE: {
-      if (request->mode > MOTOR_CONTROL_CONFIG_MODE_MAX) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      // 事务会驱动厂家使能序列：只对身份已确认、处于可配置生命周期且系统
-      // 已授权的电机受理（未识别/未授权设备不得收到厂家使能帧）。
-      if (entry->profile == NULL ||
-          (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
-           entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE &&
-           entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_SAFE_STOP)) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (!ctx->authorized) {
-        return reject_invalid(ctx, entry, request, now_ms);
-      }
-      if (entry->tx_active) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
-      return start_tx(ctx, entry, request, now_ms);
-    }
-    default:
+    // 设备侧限位（CERB）：必须走 request_id 事务 + 读回核验（ARD §26.2），
+    // 且仅限未运动状态（见 device_limit_write_allowed）。
+    if (!device_limit_write_allowed(entry)) {
       return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, &bounded, now_ms);   // 落事务的是钳制后的请求
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
+  case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT: {
+    // 设备侧管理对象（仅 CERB）：0x6080 电机端最大转速 / 0x2538 电机端峰值
+    // 电流，走 CANopen 快速 SDO 写 + 读回核验（ARD §20.4、§26.2）。
+    // 请求为关节侧 SI；换算到电机端量由 adapter 依 profile 完成。
+    if (entry->profile == NULL) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    motor_protocol_config_request_t clamped = *request;
+    if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT) {
+      if (!isfinite(request->max_velocity_rad_s) ||
+          request->max_velocity_rad_s <= 0.0f) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      // 已确认额定转速的型号：限值不得高于额定（与 effort 峰值钳制同口径，
+      // 不允许把驱动限值抬到型号标定之上）。
+      const float rated = entry->profile->rated_speed_rad_s;
+      if (rated > 0.0f && clamped.max_velocity_rad_s > rated) {
+        clamped.max_velocity_rad_s = rated;
+      }
+    } else {
+      if (!isfinite(request->max_torque_nm) || request->max_torque_nm <= 0.0f) {
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      const float peak = entry->profile->peak_torque_nm;
+      if (peak > 0.0f && clamped.max_torque_nm > peak) {
+        clamped.max_torque_nm = peak;
+      }
+      // 硬件参数表第二条：设备侧 0x2538 是**电气**上限，外部写入不得把设备里
+      // 的电流推到规格书峰值电流之上。两条上限取更严者——今天两者等价
+      // （限值系数就是峰值对），但任一列被改动后这条规则仍然成立。
+      const float peak_amp = entry->profile->peak_current_amp;
+      if (peak_amp > 0.0f) {
+        const float cap_nm =
+            peak_amp * motor_protocol_profile_limit_nm_per_amp(entry->profile);
+        if (cap_nm > 0.0f && clamped.max_torque_nm > cap_nm) {
+          clamped.max_torque_nm = cap_nm;
+        }
+      }
+    }
+    // 软件限位型号（VAXOR 无厂家管理对象）：本地保存，打包前钳制
+    // （ARD §26.1，与位置软限位同口径）。只影响目标、不触发驱动器保护，
+    // 故与增益一样**无生命周期门禁**——门禁只针对设备侧写。
+    if ((entry->profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
+      if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT) {
+        entry->soft_max_velocity_rad_s = clamped.max_velocity_rad_s;
+        entry->has_soft_vel_limit = true;
+      } else {
+        entry->soft_max_torque_nm = clamped.max_torque_nm;
+        entry->has_soft_torque_limit = true;
+      }
+      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+          entry->motor_id, entry->bus_index,
+          MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+      return true;
+    }
+    // 设备侧（CERB）：0x6080 / 0x2538，SDO 写 + 读回核验；仅未运动时允许。
+    if (!device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, &clamped, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_ZERO: {
+    // 设零点（字典 0x2531 写 1）：厂家要求**失能状态**下设置——已使能一律
+    // 拒绝，不隐式失能（与设备侧限位同口径：安全边界不得在运动中变动）。
+    // 命令式事务：只等写应答，不读回；也不更新设备影子/记录（零点不是本机
+    // 记录的参数，它改变的是设备的位置基准）。
+    // 注意：零点一变，设备里 0x607D 的限位也随之换了物理位置，操作者需要
+    // 重新确认限位与机械行程（见 docs 决策日志）。
+    if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT: {
+    // 故障清除：只清「可清的」。三类故障的判据是**成因**（unified_fault_code）
+    // 而不是生命周期——DEV_PARAM 与身份冲突都会把表项带进 CONFIG_CONFLICT，
+    // 按生命周期判会把两者混为一谈。
+    //  - 身份冲突锁存（latch_config_conflict）：ARD §9.3 刻意不可解除，复位
+    //    只能整机重启 → 拒绝。
+    //  - 设备参数未初始化（DEV_PARAM）：改走一次 REFRESH_PARAMS 事务，重跑
+    //    回读与比对。真不一致仍然由 apply_dev_init_result 判 MISMATCH 保持
+    //    CONFIG_CONFLICT——清除只负责「允许重走授权链」，不伪造一致。
+    //  - 厂家故障：发起设备侧清错事务（协议无手段则 UNSUPPORTED）。设备清掉
+    //    后下一帧状态帧走既有 FAULT → READY_DISABLED 路径收敛。
+    // 清错帧是控制类帧（MIT 控制字），运动中的电机不得收到——与设备侧限位
+    // 写同口径：安全边界不在运动中变动。
+    if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_CONFIG_CONFLICT) {
+      return reject_invalid(ctx, entry, request, now_ms);   // 身份冲突不可解除
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    if (entry->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM) {
+      // 清 DEV_PARAM = 重跑一次回读：与手动 REFRESH **同一门禁**。今天 DEV_PARAM
+      // 必然伴随 dev_read_done==true（两边都由 apply_dev_init_result 之外的定论
+      // 路径置位），也就是这条转换本来就过得了门；但契约不该靠"非局部不变量"
+      // 成立——就在这里显式挡一次。
+      if (!device_refresh_allowed(entry)) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
+      motor_protocol_config_request_t refresh = *request;
+      refresh.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
+      return start_tx(ctx, entry, &refresh, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT: {
+    // 设备侧看门狗/限位保护开关（0x2650:00）。
+    //  - 关保护 = 该关节**没有任何限位在执行**（CERB 是
+    //    CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底），所以这条与限值写
+    //    同口径：**运动中不得变动安全边界**，仅未运动时受理。
+    //  - 开保护有自锁风险：手册「看门狗数据帧间隔要小于 500ms，否则电机
+    //    自锁」，而固件无命令时只发 50 Hz SYNC —— SYNC 是否算"看门狗数据
+    //    帧"。台架实测开保护后停发全部帧静置 5 秒**没有自锁**，但那是单机
+    //    空载静态观察。这里不拦（设备侧行为不是本层能保证的），但调用方
+    //    （web/上层）必须把它当需要台架实测的动作。
+    if (entry->profile == NULL || request->safety_protect_raw > 1U ||
+        !device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION: {
+    // 方向也是安全边界：与限位/保护同口径，仅未运动时受理。**2026-09-20 真机
+    // 实测纠正**：翻向**不**改变位置坐标系（同一物理方向转，0x6064 的计数方向
+    // 不变），所以限位与零点都不镜像、也不需要重新设零；真正的风险是驱动器
+    // 自持的位置环变成正反馈——使能后会朝远离目标的方向冲到设备限位为止。
+    if (entry->profile == NULL || request->direction_raw > 1U ||
+        !device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH: {
+    // 保存 = 设备落盘 + W25 落盘。这里只管设备那一半。
+    // 没有设备侧落盘对象的两种台（VAXOR 的软限位只活在记录里；只脏了易失槽
+    // 的保护/方向——厂家没给保存码）**不发任何帧**，直接清脏位回 OK：它们要靠
+    // 上层落 W25 才算保存完成，走事务机器只会白开一个空事务。
+    if (entry->profile == NULL) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    const bool device_side =
+        (entry->profile->capability_flags &
+        MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U;
+    const uint8_t device_slots =
+        (uint8_t)(request->save_slots & MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK);
+    if (!device_side || device_slots == 0U) {
+      entry->record_dirty_slots = 0U;
+      motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+          entry->motor_id, entry->bus_index,
+          MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+      return true;
+    }
+    // 设备侧 flash 写会让驱动器阻塞自身控制循环（阻塞量级未实测）。改动前 0x2539
+    // 只作为写事务的尾巴发出，而写事务本就被 device_limit_write_allowed 挡着
+    // ——ACTIVE 的电机从不会收到它。保存独立成事务后必须自己带这道门，否则
+    // 一个正在持位的关节会因为点了一下"保存"被抽掉一秒的控制环。
+    // 与限位/保护/方向同口径：安全边界相关的设备侧写，运动中一律拒绝。
+    if (!device_limit_write_allowed(entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    motor_protocol_config_request_t bounded = *request;
+    bounded.save_slots = device_slots;
+    return start_tx(ctx, entry, &bounded, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_POLICY:
+    return motor_control_apply_policy_entry(ctx, entry, request, now_ms);
+  case MOTOR_PROTOCOL_CONFIG_SET_ENABLE: {
+    // 逐电机 Enable（ARD §19）：本地策略位，非事务。
+    // true = 重立运动授权（仍需新快照才能运动）；false = 立即退出运动：
+    // 软停 + 失能帧 + 清授权位（ARD §36 冻结语义）。
+    if (request->enable) {
+      // 设备参数初始化未完成（未回读/回读失败/与记录不一致）：使能请求直接
+      // 拒绝并说明原因，不静默吞掉——页面要能立刻看到"为什么按不下去"。
+      if (!motor_control_dev_params_allow_motion(entry)) {
+        entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;
+        return reject_invalid(ctx, entry, request, now_ms);
+      }
+      if (reject_if_unprotected_unconfirmed(ctx, entry, request, now_ms)) {
+        return false;
+      }
+      entry->policy_enable = true;
+      entry->motion_authorized = true;
+    } else {
+      apply_entry_disable(ctx, entry, now_ms);
+    }
+    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+        entry->motor_id, entry->bus_index,
+        MOTOR_PROTOCOL_CONFIG_OK, request->request_id);
+    return true;
+  }
+  case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS: {
+    // 设备参数回读：换算系数来自 Profile（未绑定拒绝）；上传只读，
+    // ACTIVE 态也允许（不加 device_limit_write_allowed 门禁）。
+    // 但**必须等该台自己的归一完成**：否则比的是设备上电初值（假不一致），
+    // 而假不一致会冻结该台并把归一本身挡死（见 device_refresh_allowed）。
+    if (entry->profile == NULL) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (!device_refresh_allowed(entry)) {
+      return reject_busy(ctx, entry, request, now_ms);   // 归一未收尾：稍后重试
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_MODE: {
+    if (request->mode > MOTOR_CONTROL_CONFIG_MODE_MAX) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    // 事务会驱动厂家使能序列：只对身份已确认、处于可配置生命周期且系统
+    // 已授权的电机受理（未识别/未授权设备不得收到厂家使能帧）。
+    if (entry->profile == NULL ||
+        (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
+        entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE &&
+        entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_SAFE_STOP)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (!ctx->authorized) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  default:
+    return reject_invalid(ctx, entry, request, now_ms);
   }
 }

@@ -7,11 +7,11 @@
 // publish 的缓冲翻转写入 published 的补集，按双缓冲硬编码；
 // 变更容量须同步修改翻转逻辑，勿单独调整宏。
 _Static_assert(CONTROL_TRAJECTORY_MAILBOX_BUFFER_COUNT == 2U,
-               "publish buffer flip assumes exactly 2 buffers");
+    "publish buffer flip assumes exactly 2 buffers");
 
 // 路点在 target_ids 中的下标；不在集合内返回 -1。
 static int trajectory_motor_slot(const control_trajectory_t *trajectory,
-                                 uint16_t motor_id) {
+    uint16_t motor_id) {
   for (uint16_t i = 0U; i < trajectory->target_count; ++i) {
     if (trajectory->target_ids[i] == motor_id) {
       return (int)i;
@@ -27,7 +27,7 @@ static int trajectory_motor_slot(const control_trajectory_t *trajectory,
 // 在同一时刻交错排列，因而同一电机的重复时间点不一定相邻；轨迹分段是低频
 // 输入，明确拒绝这种数据比把零时间间隔带入 Hermite 分母更安全。
 static bool trajectory_points_are_valid(const control_trajectory_t *trajectory,
-                                        bool require_target_coverage) {
+    bool require_target_coverage) {
   if (trajectory == NULL ||
       trajectory->point_count > CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS ||
       trajectory->target_count > CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS ||
@@ -112,7 +112,7 @@ static bool trajectory_segment_is_valid(const control_trajectory_t *trajectory) 
 }
 
 static bool trajectory_target_sets_equal(const control_trajectory_t *left,
-                                         const control_trajectory_t *right) {
+    const control_trajectory_t *right) {
   if (left->target_count != right->target_count) {
     return false;
   }
@@ -132,7 +132,7 @@ static bool trajectory_target_sets_equal(const control_trajectory_t *left,
 }
 
 static bool trajectory_point_equal(const control_trajectory_point_t *left,
-                                   const control_trajectory_point_t *right) {
+    const control_trajectory_point_t *right) {
   return left->time_from_start_ms == right->time_from_start_ms &&
          left->motor_id == right->motor_id &&
          left->position == right->position &&
@@ -147,7 +147,7 @@ static void clear_assembly(control_trajectory_mailbox_t *mailbox) {
 }
 
 static void publish_complete(control_trajectory_mailbox_t *mailbox,
-                             const control_trajectory_t *trajectory) {
+    const control_trajectory_t *trajectory) {
   // 对外发布的轨迹统一归一为单段：内核只认完整轨迹，分段元数据到此为止。
   const uint8_t next_buffer = mailbox->published_buffer == 0U ? 1U : 0U;
   if (mailbox->pending) {
@@ -161,19 +161,16 @@ static void publish_complete(control_trajectory_mailbox_t *mailbox,
 }
 
 static bool append_segment(control_trajectory_mailbox_t *mailbox,
-                           const control_trajectory_t *segment) {
+    const control_trajectory_t *segment) {
   control_trajectory_t *assembly = &mailbox->assembly;
   if (assembly->trajectory_id != segment->trajectory_id ||
       assembly->segment_count != segment->segment_count ||
       !trajectory_target_sets_equal(assembly, segment)) {
     return false;
   }
-  if (segment->point_count >
-      (uint16_t)(CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS -
-                 assembly->point_count)) {
-    return false;
-  }
-
+  // 容量按**去重合并后**的拼接总量判（在下方真正写入时检查），不能按原始
+  // 分段载荷之和判：上层允许边界行重叠，原始合计可超过 MAX_POINTS 而合并后
+  // 恰好在容量内，提前按载荷判会把这类合法整条轨迹误拒。
   const uint32_t last_time =
       assembly->point_count == 0U
           ? 0U
@@ -206,6 +203,9 @@ static bool append_segment(control_trajectory_mailbox_t *mailbox,
       if (duplicate) {
         continue;
       }
+    }
+    if (assembly->point_count >= CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS) {
+      return false; // 去重后仍超 256：整组非法，由调用方 clear_assembly
     }
     assembly->points[assembly->point_count++] = *point;
   }
@@ -281,7 +281,7 @@ bool control_trajectory_mailbox_publish(
 }
 
 bool control_trajectory_mailbox_take(control_trajectory_mailbox_t *mailbox,
-                                     control_trajectory_t *trajectory) {
+    control_trajectory_t *trajectory) {
   if (mailbox == NULL || trajectory == NULL || !mailbox->pending) {
     return false;
   }

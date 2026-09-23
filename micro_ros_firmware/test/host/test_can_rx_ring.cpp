@@ -9,7 +9,7 @@
 #include "can_rx_ring.h"
 
 static can_rx_frame_t make_frame(uint8_t bus, uint32_t id, uint8_t dlc,
-                                 uint32_t tick) {
+    uint32_t tick) {
   can_rx_frame_t f = {};
   f.bus_index = bus;
   f.can_id = id;

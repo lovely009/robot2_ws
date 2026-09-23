@@ -1,5 +1,6 @@
 {
   "name": "board",
   "version": "0.1.0",
-  "description": "板级共享常量（ISR 优先级阈值等），供板级库无 RTOS 依赖引用"
+  "description": "板级共享常量（ISR 优先级阈值等），供板级库无 RTOS 依赖引用",
+  "build": { "includeDir": "include" }
 }

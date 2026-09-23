@@ -912,14 +912,20 @@ function sendTargets(targets) {
 // 自查，否则会报"已托管给 MCU"而板子根本没收到。
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
-// 固件仍按可靠话题接收一组分段；128 只是上层单消息边界，整组总量仍不能超过
-// 256。它降低单次序列化/传输峰值，但不改变轨迹容量。
-const TRAJ_SEGMENT_POINTS = 128;
+// 单条消息容量 = 整条轨迹容量：网页能发出去的总量本来就受 TRAJ_MAX_POINTS 限制，
+// 拆段不可能多发一个点，只会把同一份数据变成多条**背靠背**消息。而 MCU 的 XRCE
+// 输入流是 16 × 512 B = 8 KB 的分片窗口（RMW_UXRCE_STREAM_HISTORY=16）：一条
+// 256 点消息约 5.2 KB（≈11 片）放得下，三条 128 点消息合计约 18 片放不下 ——
+// 分片落在窗口外被丢，组装永远拼不齐，页面只能等到超时（实测形状：≤128 点 1 段、
+// 132–252 点 2 段、**恰好 256 点才 3 段**（128/128/8），所以只有 256 点会失败）。
+// 固件侧的分段组装仍然支持（乱序/缺段整组拒收），将来看高总量时可用；
+// 台架播放器 traj_play.py 也是单段（segment_count=1）。
+const TRAJ_SEGMENT_POINTS = TRAJ_MAX_POINTS;
 const TRAJ_STATE_TIMEOUT_PAD_MS = 3000;
 
-// 固件拼接后的整条轨迹上限是 256 点；页面在这个总量内按 128 点左右切成
-// 同一 trajectory_id 的可靠分段。超过总量不能改成多个独立轨迹，否则每段端点
-// 会重新变成整条轨迹端点，破坏速度连续性。
+// 固件拼接后的整条轨迹上限是 256 点；页面在总量内按 TRAJ_SEGMENT_POINTS 切段
+// （当前等于总量 ⇒ 一条轨迹一条消息）。超过总量不能改成多个独立轨迹，否则每段
+// 端点会重新变成整条轨迹端点，破坏速度连续性。
 function trajOverflowNote(points, ids) {
   if (ids > TRAJ_MAX_MOTORS) {
     return `；⚠ ${ids} 台超固件上限（${TRAJ_MAX_MOTORS} 台）——必须减台`;

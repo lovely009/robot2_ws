@@ -17,7 +17,7 @@
 void MX_DMA_Init(void) {
   // 与 FreeRTOS FromISR 的兼容性在编译期钉死（禁止项：静默违反 RTOS 约定）。
   _Static_assert(DMA_STREAM_IRQ_PRIORITY >= BOARD_ISR_SYSCALL_THRESHOLD,
-                 "DMA IRQ priority must not preempt the FreeRTOS syscall threshold");
+      "DMA IRQ priority must not preempt the FreeRTOS syscall threshold");
 
   __HAL_RCC_DMA1_CLK_ENABLE(); // 当前 DMA1 无占用（lib/imu 不用 DMA）；控制器时钟为未来设备保留
 

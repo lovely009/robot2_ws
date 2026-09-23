@@ -3,9 +3,9 @@
 #include <string.h>
 
 _Static_assert(sizeof(param_store_record_t) == PARAM_STORE_RECORD_SIZE,
-               "record 必须 120B（v3）");
+    "record 必须 120B（v3）");
 _Static_assert(sizeof(param_store_blob_t) == PARAM_STORE_BLOB_SIZE,
-               "blob 布局尺寸漂移（v3 = 32 + 64*120）");
+    "blob 布局尺寸漂移（v3 = 32 + 64*120）");
 
 // CRC32/IEEE 802.3（与 zlib 同多项式；软件按位，2KB 只在 boot/save 各算一次）。
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
@@ -22,7 +22,7 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
 // CRC 覆盖集：header（crc 字段置零）+ 全部记录。v1/v2/v3 三种记录布局共用同一
 // 定义——加/改头字段时只有这里要动，否则某个布局会静默校验失败退回默认值。
 static uint32_t crc_over_blob(const uint8_t *header, const uint8_t *records,
-                              size_t records_bytes) {
+    size_t records_bytes) {
   uint8_t header_copy[PARAM_STORE_HEADER_SIZE];
   memcpy(header_copy, header, PARAM_STORE_HEADER_SIZE);
   memset(header_copy + 16, 0, sizeof(uint32_t)); // crc32 字段偏移 = 16
@@ -32,7 +32,7 @@ static uint32_t crc_over_blob(const uint8_t *header, const uint8_t *records,
 
 static uint32_t blob_crc(const param_store_blob_t *blob) {
   return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
-                       sizeof(blob->records));
+      sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_reset(void *storage, size_t size) {
@@ -68,7 +68,7 @@ static bool record_occupied(const param_store_record_t *rec) {
 // 取记录；没有就占用第一个空槽（空槽 = 无字段位且无设备端原值位，motor_id
 // 可能有残留故不入判定——否则"先写原值后写字段"会占出两条记录）。表满返回 NULL。
 static param_store_record_t *find_or_alloc_record(param_store_blob_t *blob,
-                                                  uint16_t motor_id) {
+    uint16_t motor_id) {
   for (uint32_t i = 0; i < PARAM_STORE_RECORD_COUNT; ++i) {
     if (record_occupied(&blob->records[i]) &&
         blob->records[i].motor_id == motor_id) {
@@ -100,7 +100,7 @@ static const param_store_record_t *find_record_const(
 // 的值持久化在 device_raw[槽 4]（见 param_store_blob_set_device_raw）——
 // 这两个走本组 get/set 只会拿到 false，不会静默丢值。
 bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
-                          param_field_t field, float value) {
+    param_field_t field, float value) {
   if (blob == NULL || motor_id == 0U) {
     return false;
   }
@@ -113,20 +113,20 @@ bool param_store_blob_set(param_store_blob_t *blob, uint16_t motor_id,
     return false; // 64 条记录全占用
   }
   switch (field) {
-    case PARAM_FIELD_KP: rec->kp = value; break;
-    case PARAM_FIELD_KD: rec->kd = value; break;
-    case PARAM_FIELD_POS_MIN: rec->pos_min = value; break;
-    case PARAM_FIELD_POS_MAX: rec->pos_max = value; break;
-    case PARAM_FIELD_VEL_LIMIT: rec->vel_limit = value; break;
-    case PARAM_FIELD_TORQUE_LIMIT: rec->torque_limit = value; break;
-    default: return false;
+  case PARAM_FIELD_KP: rec->kp = value; break;
+  case PARAM_FIELD_KD: rec->kd = value; break;
+  case PARAM_FIELD_POS_MIN: rec->pos_min = value; break;
+  case PARAM_FIELD_POS_MAX: rec->pos_max = value; break;
+  case PARAM_FIELD_VEL_LIMIT: rec->vel_limit = value; break;
+  case PARAM_FIELD_TORQUE_LIMIT: rec->torque_limit = value; break;
+  default: return false;
   }
   rec->present |= (uint32_t)1U << (unsigned)field;
   return true;
 }
 
 bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
-                          param_field_t field, float *value) {
+    param_field_t field, float *value) {
   if (blob == NULL || value == NULL || field == PARAM_FIELD_ENABLE ||
       field == PARAM_FIELD_LIMIT_PROTECT || field >= PARAM_FIELD_COUNT) {
     return false;
@@ -136,13 +136,13 @@ bool param_store_blob_get(const param_store_blob_t *blob, uint16_t motor_id,
     return false;
   }
   switch (field) {
-    case PARAM_FIELD_KP: *value = rec->kp; return true;
-    case PARAM_FIELD_KD: *value = rec->kd; return true;
-    case PARAM_FIELD_POS_MIN: *value = rec->pos_min; return true;
-    case PARAM_FIELD_POS_MAX: *value = rec->pos_max; return true;
-    case PARAM_FIELD_VEL_LIMIT: *value = rec->vel_limit; return true;
-    case PARAM_FIELD_TORQUE_LIMIT: *value = rec->torque_limit; return true;
-    default: return false;
+  case PARAM_FIELD_KP: *value = rec->kp; return true;
+  case PARAM_FIELD_KD: *value = rec->kd; return true;
+  case PARAM_FIELD_POS_MIN: *value = rec->pos_min; return true;
+  case PARAM_FIELD_POS_MAX: *value = rec->pos_max; return true;
+  case PARAM_FIELD_VEL_LIMIT: *value = rec->vel_limit; return true;
+  case PARAM_FIELD_TORQUE_LIMIT: *value = rec->torque_limit; return true;
+  default: return false;
   }
 }
 
@@ -156,7 +156,7 @@ void param_store_blob_finalize(param_store_blob_t *blob, uint32_t seq) {
 }
 
 bool param_store_blob_set_device_raw(param_store_blob_t *blob, uint16_t motor_id,
-                                     param_device_slot_t slot, uint32_t raw) {
+    param_device_slot_t slot, uint32_t raw) {
   if (blob == NULL || motor_id == 0U || slot >= PARAM_DEVICE_SLOT_COUNT) {
     return false;
   }
@@ -170,8 +170,8 @@ bool param_store_blob_set_device_raw(param_store_blob_t *blob, uint16_t motor_id
 }
 
 bool param_store_blob_get_device_raw(const param_store_blob_t *blob,
-                                     uint16_t motor_id, param_device_slot_t slot,
-                                     uint32_t *raw) {
+    uint16_t motor_id, param_device_slot_t slot,
+    uint32_t *raw) {
   if (blob == NULL || raw == NULL || slot >= PARAM_DEVICE_SLOT_COUNT) {
     return false;
   }
@@ -185,7 +185,7 @@ bool param_store_blob_get_device_raw(const param_store_blob_t *blob,
 }
 
 uint8_t param_store_blob_device_raw_present(const param_store_blob_t *blob,
-                                            uint16_t motor_id) {
+    uint16_t motor_id) {
   if (blob == NULL) {
     return 0U;
   }
@@ -218,17 +218,17 @@ typedef struct {
 } param_store_blob_v1_t;
 
 _Static_assert(sizeof(param_store_record_v1_t) == PARAM_STORE_LEGACY_RECORD_SIZE,
-               "v1 record 必须 32B");
+    "v1 record 必须 32B");
 _Static_assert(sizeof(param_store_blob_v1_t) == PARAM_STORE_LEGACY_BLOB_SIZE,
-               "v1 blob 尺寸漂移");
+    "v1 blob 尺寸漂移");
 
 static uint32_t blob_v1_crc(const param_store_blob_v1_t *blob) {
   return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
-                       sizeof(blob->records));
+      sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_migrate_v1(void *legacy_src, size_t src_size,
-                                                void *out, size_t out_size) {
+    void *out, size_t out_size) {
   if (legacy_src == NULL || out == NULL ||
       src_size < PARAM_STORE_LEGACY_BLOB_SIZE ||
       out_size < PARAM_STORE_BLOB_SIZE) {
@@ -293,17 +293,17 @@ typedef struct {
 } param_store_blob_v2_t;
 
 _Static_assert(sizeof(param_store_record_v2_t) == PARAM_STORE_RECORD_SIZE_V2,
-               "v2 record 必须 48B");
+    "v2 record 必须 48B");
 _Static_assert(sizeof(param_store_blob_v2_t) == PARAM_STORE_BLOB_SIZE_V2,
-               "v2 blob 尺寸漂移");
+    "v2 blob 尺寸漂移");
 
 static uint32_t blob_v2_crc(const param_store_blob_v2_t *blob) {
   return crc_over_blob((const uint8_t *)blob, (const uint8_t *)blob->records,
-                       sizeof(blob->records));
+      sizeof(blob->records));
 }
 
 param_store_blob_t *param_store_blob_migrate_v2(void *v2_src, size_t src_size,
-                                                void *out, size_t out_size) {
+    void *out, size_t out_size) {
   if (v2_src == NULL || out == NULL || src_size < PARAM_STORE_BLOB_SIZE_V2 ||
       out_size < PARAM_STORE_BLOB_SIZE) {
     return NULL;

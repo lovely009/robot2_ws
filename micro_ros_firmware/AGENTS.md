@@ -26,8 +26,8 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   后 `python3 tools/stack_audit.py [--orphans 16] [--root <回调名>]`，看完把 flag 撤掉再
   clean 重建。逐任务数字**不含函数指针回调**（ROS executor 那一层），必须用 `--root`
   补上；见 `docs/plans/active/motor-runtime-validation.md` 第 2 节的审计结论。
-- host 共 19 个测试（18 个 C++ ctest + 1 个 python 线协议），直接编译固件真实 .c、
-  无桩无复制；白盒用例 `-I` 内核 src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
+- host 测试由 CTest 枚举，直接编译固件真实 .c、无桩无复制；白盒用例 `-I` 内核
+  src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
 - **必须 `-t clean` 全量重建**：改 `platformio.ini` 构建宏（USB CDC 两宏、
   HAL_FDCAN/IWDG、HSE_VALUE、-Os、FDCAN_SELF_ACK_BENCH）或 `ldscript/*.ld`。
   SrcWrapper HAL 对象不随 flag 重编、增量链接不监听 .ld，不 clean 静默用旧 ELF；
@@ -116,10 +116,10 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - **配置事务总线级一问一答**：同一总线任一时刻至多一个已发未答的 SDO 阶段
   （`motor_control_config.c` 的 `bus_stage_in_flight`）；并发发问必表现为
   「回读一直超时」，CERB 阶段超时 30ms——改收发节奏时别删这层串行。
-  `kind=7 READ_IDENTITY` 内核专用（建档/重连自动发，不经 mailbox；mailbox 契约
-  为 1..6、8、9）。新增 config kind 须同步五处否则静默失效：①adapter 枚举
-  ②mailbox 枚举 ③motor_rt_task.cpp 的 static_assert+convert_config
-  ④control_mailbox.c 白名单（默认 false，漏加则总线零帧）⑤内核 submit_config 门禁。
+  `kind=7 READ_IDENTITY` 协议内核专用（建档/重连自动发，不经 mailbox；共享映射为
+  1..6、8..14）。新增共享 kind 时同步两侧枚举和
+  `include/motor_config_contract.hpp` 的穷举断言，并更新 mailbox 白名单、内核门禁、
+  `convert_config` 与 host 契约测试；协议专用 kind 不进入共享映射。
 
 ## 参数面与内存
 
@@ -187,15 +187,17 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 - `src/main.cpp` —— setup 板级初始化 + start_task 编排五任务；`loop()` 必须空。
 - `src/motor_rt_task.cpp` —— 唯一电机实时任务：1ms 服务（RX drain / 内核 service /
-  SYNC / TX 路由 pump / IWDG 喂狗）+ 5ms/200Hz 控制边界（会话边沿、快照 apply、配置
+  SYNC / TX 路由 pump / IWDG 喂狗）+ 2ms/500Hz 控制边界（会话边沿、快照 apply、配置
   FIFO、boot 参数）；内核唯一调用者、唯一正常 FDCAN 发送者。20ms/50Hz 只用于
   协议状态心跳，不是运动控制边界。
 - `lib/session_sync/` —— 会话电平 → 逐电机授权的纯派生（host 白盒可测）。
 - `lib/motor_control/` —— ID 驱动内核（注册表/型号目录/生命周期/安全级联/配置
   事务）；公共 API 只在 `include/`，内部布局 `src/motor_control_internal.h`
   不向 app 导出。
-- `lib/motor_protocol/` —— adapter 接缝 `motor_protocol_adapter.h` + vaxor/cerb
-  adapter 与 codec；厂家字节/CAN-ID/FD 属性唯一归属地；事务由静态阶段描述符表驱动。
+- `lib/motor_protocol/` —— 唯一 adapter 注册表 + vaxor/CERB adapter、codec 与 P1
+  聚合；厂家字节/CAN-ID/FD 属性唯一归属地；事务由静态阶段描述符表驱动。
+- `lib/motor_tx_router/` —— P0/P1/P2 有界出队、物理帧预算、P0 重试与 HAL submit seam。
+- `lib/save_transaction/` —— 设备保存结果关联与 W25 阶段门控的纯 C 状态机。
 - `lib/control_mailbox/` —— 命令快照 latest-wins 双缓冲 + 配置 FIFO（16）+
   会话/授权电平边沿；纯 C、静态内存、不自建锁。
 - `src/storage_task.cpp` + `lib/storage_projection/` —— Flash 唯一所有者；
@@ -219,10 +221,28 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   合规只用 `BOARD_ISR_SYSCALL_THRESHOLD`（board_irq.h），main.cpp 有编译期反向断言。
 - 固定所有权：FDCAN ISR → SPSC ring → motor_rt 唯一消费者；ROS 桥只写 mailbox、
   经 `motor_rt_copy_*()`/`drain_events()` 读副本，禁止第二任务碰 ring/HAL 发送。
-- 新增电机协议：实现 adapter + 静态阶段描述符，注册进 motor_rt_task.cpp 的
-  `kAdapters`（构造注入），**不改内核收发循环**；型号数值进
+- 新增电机协议：实现 adapter + 静态阶段描述符，注册进
+  `lib/motor_protocol/src/motor_protocol_registry.c` 的唯一列表（运行时和协议帧辅助逻辑
+  共用；追加新项以保持现有拓扑 protocol 编号），**不改内核收发循环**；型号数值进
   `motor_control_profile.c` 编译期目录，改动同步 host 用例。
 - 本平台 `int32_t` 是 `long`，模板（如 std::clamp）须显式指定类型参数。
 - 固件不用 printf：`src/syscalls.cpp` 已给强符号空 `_write`，禁止动态日志接 USB CDC。
 - 真机只允许 `dev-real` 无负载验证且硬件急停可用；软件 stop 不替代急停/机械限位
   （当前无抱闸）。验证项与 WCET/overflow 待实测条目见 validation plan。
+
+## 架构约束与格式化
+
+- 模块设计遵循**高内聚、低耦合**。所有权、允许依赖和测试边界以
+  `docs/architecture/module-boundaries.md` 为准；领域术语见 `CONTEXT.md`。
+- `lib/fdcan` 只管理协议无关队列；`lib/motor_protocol` 适配器拥有厂商 P1 聚合；
+  `lib/motor_tx_router` 选择 P0/P1/P2、核算物理帧预算并提交帧。正常 CAN TX 仍只由
+  `motor_rt_task` 发起。
+- `lib/save_transaction` 是无 ROS/RTOS/Flash 依赖的 SAVE 状态机；
+  `src/param_bridge.cpp` 只提供请求、结果、时钟和错误回调，`storage_task` 仍独占 W25。
+- mailbox 与 protocol 的配置 kind 保持独立枚举。新增共享 kind 时同步修改两边枚举、
+  `include/motor_config_contract.hpp` 的逐项映射和 host 契约测试；协议专用 kind 不进入映射。
+- C/C++ 使用 Uncrustify 0.72.0 和 `.uncrustify.cfg` 规定的格式，空白文件规则见
+  `.editorconfig`。提交前执行
+  `tools/format_firmware.sh --check`；有意格式化固件源码时执行
+  `tools/format_firmware.sh --write`。固件 host Python 测试使用 4 空格缩进，遵循
+  `.editorconfig` 的 `*.py` 规则。

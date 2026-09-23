@@ -13,5 +13,6 @@
   ],
   "platforms": [
     "ststm32"
-  ]
+  ],
+  "build": { "includeDir": "include", "srcDir": "src" }
 }

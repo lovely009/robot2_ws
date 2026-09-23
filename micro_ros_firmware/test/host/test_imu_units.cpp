@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <cstdio>
 
-extern "C" uint8_t BMI088_init(void) { return 0U; }
+extern "C" uint8_t BMI088_init(void) {
+  return 0U;
+}
 
 extern "C" void BMI088_read(float gyro[3], float accel[3], float *temperature) {
   gyro[0] = 0.0f;
@@ -23,7 +25,7 @@ static bool near(float actual, float expected, float tolerance) {
     return true;
   }
   std::fprintf(stderr, "actual=%f expected=%f tolerance=%f\n", actual,
-               expected, tolerance);
+      expected, tolerance);
   return false;
 }
 

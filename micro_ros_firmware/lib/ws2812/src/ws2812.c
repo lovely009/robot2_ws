@@ -16,7 +16,7 @@
 
 // BDMA 仅能访问 DTCM/SRAM4：帧缓冲必须落在 RAM_D3（.bdma_noinit，见链接脚本）
 static uint8_t g_ws2812_frame[WS2812_FRAME_BYTES]
-    __attribute__((section(".bdma_noinit"), aligned(4)));
+__attribute__((section(".bdma_noinit"), aligned(4)));
 
 static SPI_HandleTypeDef hspi6;
 static DMA_HandleTypeDef hdma_spi6_tx;
@@ -89,7 +89,7 @@ bool ws2812_submit_rgb(uint8_t r, uint8_t g, uint8_t b) {
     g_ws2812_frame[23 - i] = (((b >> i) & 0x01) ? 0x78 : 0x60);
   }
   return HAL_SPI_Transmit_DMA(&hspi6, g_ws2812_frame,
-                              WS2812_FRAME_BYTES) == HAL_OK;
+      WS2812_FRAME_BYTES) == HAL_OK;
 }
 
 // BDMA TC 完成缓冲搬运；SPI6 EOT 清发送标志并将 HAL 状态置回 READY。

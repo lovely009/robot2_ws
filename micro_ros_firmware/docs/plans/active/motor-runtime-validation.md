@@ -3,7 +3,7 @@
 > **状态：活动，2026-09-22 重构后更新。** 本文件是 ADR 0007 保持 Proposed 期间
 > 唯一的开放项清单；原交接文档已归档（[HANDOFF](../../archive/HANDOFF-motor-runtime-refactor.md)）。
 >
-> 现状基线（架构不在此重复）：host CTest 19 个用例全绿（18 个 C++ cassert +
+> 现状基线（架构不在此重复）：host CTest 22 个用例全绿（21 个 C++ cassert +
 > 1 个 python 线协议测试，`test/host/`）。任务结构、消息面（**5 订 10 发**；参数面自
 > 2026-09-21 起是话题，`rclc` 参数服务器已退役）、构建与台架顺序以
 > [README](../../../README.md)、[AGENTS.md](../../../AGENTS.md)、
@@ -17,6 +17,7 @@
   含 **TBD-RT-02**：轨迹步进（每边界 O(电机数×路点数) 线性扫描）、分段 assembly
   和 mailbox 轨迹校验（O(路点数×电机数)，在临界区内）的最坏耗时——台架前为静态上界估算。
 - [ ] **TBD-CAN-01**：最坏反馈流量下 RX ring / P2 配额 / TX 队列容量，记录 overflow、backlog、队列峰值、总线负载。
+- [ ] **TBD-CAN-02（单总线 VAXOR 容量）**：VAXOR P1 不能多轴聚合；当前每总线 1 ms 最多提交 16 个物理帧，按 500 Hz 控制周期估算，单总线 32 台 VAXOR 已用满理想 P1 预算（尚未计 P0/P2）。明确拓扑上限，或重新评估调度预算；最大规模验证须覆盖实际 VAXOR/CERB 分布、P2 积压、`p1_replaced` 和持续 backlog。
 - [ ] 三总线约 40 台 Vaxor/CERB 混合持续压测；测量 USB CDC 状态上行带宽余量。
 - [ ] 故障注入下 P0 不静默丢失：CAN 无 ACK、RX burst、下游硬件拒收（重入队/抢占逻辑 host 已覆盖）。
 - [ ] 长时间热插拔、离线/恢复循环稳定性。
@@ -47,18 +48,48 @@
 - [ ] **堆高水位（残余）**：参数槽退役后，堆上再没有按电机数线性增长的常驻项，
   这项的对象只剩**瞬态**：最坏路径（并发 SDO 事务 + rosidl 字符串分配）的低点，
   以及 48 台发现/绑定后的稳态最低位。
-- [ ] **轨迹真机**：单/多关节轨迹期间插值位置与上位期望一致、**P1 帧严格 200Hz**
+- [ ] **500Hz 多轴快控复测（2026-09-23 代码调整，尚未上板）**：在 `dev-real`、无负载且硬件急停就绪时，分别让轨迹通道与快照保持通道持续控制同总线 4 台，按固件侧 `tx_frame_count` 每总线差分确认约 **550 帧/s = 500 帧 `0x210`（每帧 4 轴）+ 50 SYNC**；另用具备相应吞吐量的抓包设备核对 `0x210` 的 64B/ID 槽位。混合总线还须核对 VAXOR 单轴命令、CERB 多轴命令与 P2 SYNC/配置共存时，两次 1ms 服务拍能排空一轮 P1、SYNC 不持续积压；TX FIFO 已扩为每路 16 槽。按实际接线规模记录 `tx_hw_reject`、`p1_replaced`、`tx_dropped`、`rx_hw_lost`、motor_rt WCET/jitter，确认没有持续积压。快照通道需持续刷新（间隔小于 30ms），并复测停发后 30/100ms 安全级联。此前 200Hz 单轴台架数据是旧版本基线，不能用来证明本项。
+- [~] **轨迹真机（200Hz 旧版本记录，500Hz 待上项复测）**：单/多关节轨迹期间插值位置与上位期望一致、**P1 帧严格 200Hz**
   （每台每 5ms 边界一帧；判据用固件侧 `tx_frame_count` 差分或模拟器逐帧日志的
   中位间隔 ≈5ms）；轨迹运行中继续发 100Hz 快照 → 轨迹机组不受影响、集合外组正常；
   轨迹中杀 agent → 立即失能、轨迹作废、不重放；播完后保持末点（**机构无抱闸**，
   急停与机械支撑须就绪）。仲裁与级联语义 host 已覆盖（`test_motor_control` 的
   7 个轨迹用例 + `test_hold_step_*`）。
-- [ ] **快照通道 200Hz 命令率真机**：手动/快照控制下**把上位机快照降到 20Hz 发**，
-  驱动器侧收到的仍是 200Hz 命令流（`hold_step` 保持重发）。反向对照：停发快照
+  **2026-09-22 部分通过（4 台 CERB / bus0）**：实播 248 点 ×2 与恰好 256 点 ×2，
+  四台 `ACTIVE`、`completed=True`；`tx_frame_count` 差分 **851 帧/s = 4×200 + 50 SYNC
+  ⇒ 每台 200.0 Hz**，`rx_hw_lost=0`。
+  **两处「空闲」必须分开（本项先前含混，实测纠正）**：①**软停之后**的空闲是
+  **50 帧/s = 纯 SYNC**（轨迹已清、快照通道又无可动目标，顺带把 SYNC 基线实测了出来）；
+  ②**播完不按停不是空闲**——`completed=True` 并不释放轨迹所有权，轨迹组继续以
+  200 Hz 压着末点：实测 `trajectory_state` 为 `active=true, completed=true,
+  elapsed_ms=141043 / total 5240`（27 倍总时长）而 bus0 同期仍是 **850.3 帧/s**。
+  ②正是「播完后保持末点」的实现方式（靠持续通电保持，不是松手让驱动器自己停），
+  代价是**那四台在撤权前一直被抓在轨迹通道里**：快照通道显式跳过轨迹拥有的电机
+  （`motor_control.c` 的 `trajectory_owns` 分支），新快照抢不回来，必须走一次撤权/
+  软停/失能——台架上表现为要**逐台 `disable` 再重新使能**才拿得回手动控制。
+  连续 soak：**79 条满容量轨迹（248/256 点）零** `trajectory_rejected` /
+  `mailbox_rejected_trajectory` / `mailbox_rejected_command` / `event_dropped` /
+  `tx_dropped`，`heap_free` 恒定 **104,836 B**（反复受理满容量轨迹不吃堆）。
+  **仍未做**：插值位置与上位期望的逐点比对、轨迹运行中并发 100Hz 快照、轨迹中杀
+  agent、播完后末点保持的**机构与温升观测**（本轮只观察到 2 号 38.8 → 43.6 °C
+  / 11 分钟，持续通电抱位下的稳态温度未测）。
+- [ ] **快照通道 500Hz 命令率真机**：手动/快照控制下**把上位机快照按 50Hz 发**（20ms 间隔，低于 30ms 新鲜度阈值），
+  驱动器侧收到的仍是 500Hz 命令流（`hold_step` 保持重发）。反向对照：停发快照
   → 30ms 内软停，不得继续重发旧目标。
-- [ ] **台架通道能力**（200Hz 验证的前置）：SLCAN/CANable 通道在 ~880 帧/s
+  **2026-09-22 仍未通过——当天一度记成「部分通过」，随后自查撤回**：本项要测的是
+  `hold_step` 路径，而当时看到的 849–851 帧/s 出在「轨迹播完到下一次下发之间」那段，
+  事后查明 `completed=True` 不释放轨迹所有权，命令流其实来自**轨迹通道**（同段证据：
+  `snapshot_accepted` 全程冻结在 8、`trajectory_state.active=true`）。误判的成因是把
+  「没有新下发」等同于「没有活动轨迹」——**这两件事在固件里不等价**。要真测这一项，
+  必须先让四条电机都不被轨迹拥有（撤权/软停后重新使能），再进手动模式量。
+  反向对照**这一半成立**：软停后实测掉到 50 帧/s（只剩 SYNC），确认不再重发旧目标。
+- [x] **台架通道能力**（200Hz 验证的前置）：SLCAN/CANable 通道在 ~880 帧/s
   （4 台 200Hz 命令 + 回显 + 反馈）下会掉帧，**台架上的总线真值不可信**。要么换
   candleLight/socketcan，要么只以固件侧计数为准并显式标注该限制。
+  **2026-09-22 取第二条路线并已执行**：所有 200Hz 结论只用固件侧 `tx_frame_count`
+  （数的是固件交给 FDCAN 的帧，不经过 SLCAN 仪器，仪器吞吐不影响它），限制已在
+  决策日志与上面两条里显式标注。换 candleLight/socketcan 未做，且对**这个判据**而言
+  不需要——该限制只影响「用仪器观测总线」的做法。
 - [ ] **CERB 清错帧真机**（对新硬件参数表）：注入厂家故障 → FAULT →
   `system.clear_fault = <id>` 发 MIT 控制字 bit5 → 状态帧 `fault_active=false`
   → READY_DISABLED → 显式使能 + 新快照恢复。**未决**：bit5 是否要求驱动器处于
@@ -201,13 +232,19 @@
 
 ## 4. 上层同步（ROS 2 侧，2026-09-22 已完成源代码同步，构建/HIL 仍待验证）
 
-- [x] `motor_hardware_interface` 的 `MotorTrajectory` 转发已同步 `segment_index`/`segment_count`：同一条标准轨迹最多 256 个总路点，桥按 128 点分成同一 `trajectory_id` 的有序消息，时间保持整条绝对时间线；单条仍经可靠 QoS 发布。
-- [x] `web_host` 示教播放已同步同一分段契约：页面在总量不超过 256 点时按约 128 点分段并一次发完整组；超过总量直接拒绝，不退化成会破坏段边界速度连续性的独立轨迹。
+- [x] `motor_hardware_interface` 的 `MotorTrajectory` 转发已同步 `segment_index`/`segment_count`：同一条标准轨迹最多 256 个总路点，**一条轨迹发一条消息**（`MAX_TRAJECTORY_SEGMENT_POINTS = MAX_TRAJECTORY_POINTS`，2026-09-22 由 128 回调），时间保持整条绝对时间线；分段字段仍照填（`segment_index=0` / `segment_count=1`）并经可靠 QoS 发布。
+- [x] `web_host` 示教播放已同步同一分段契约：页面在总量不超过 256 点时**一条轨迹发一条消息**（`TRAJ_SEGMENT_POINTS = TRAJ_MAX_POINTS`，2026-09-22 由 128 回调——分段只把同一份数据变成多条背靠背消息，而 MCU 的 XRCE 输入流只有 16 × 512 B 分片窗口：一条 256 点约 11 片放得下，三条 128 点约 18 片放不下，**恰好 256 点是唯一会切三段（128/128/8）的形状**，台架即栽在这里）；超过总量直接拒绝，不退化成会破坏段边界速度连续性的独立轨迹。
+- [x] `motor_hardware_interface` 桥的 `MAX_TRAJECTORY_SEGMENT_POINTS` 已与 web 同口径对齐（2026-09-22 = `MAX_TRAJECTORY_POINTS`）：满容量 256 点时不再拆成两条 ≈12 片的消息，而是一条 ≈11 片——**两条虽然也落在 16 片窗口内，但没有余地**，任何一片丢失即整组拼不齐。桥单测 `test_downlink_full_trajectory_is_a_single_message` 钉住此契约。
 - [x] 消息定义先改权威包 `micro_ros_agent/src/can_bridge_msgs`；固件桥接只消费 ID 化字段，不恢复 name-to-ID 兼容层。
 - [x] 上层源代码级验证：`micro_ros_agent` 的 `can_bridge_msgs` 构建成功；`ros2_ws` 的
   `motor_hardware_interface` `colcon test` 成功，`colcon test-result --verbose` 汇总
   212 tests / 0 failures；桥纯 Python 分片测试 12/12，Web `node --check` 通过。
-- [ ] rosbridge 实际分片传输、agent↔MCU 可靠分段到达顺序和真机连续性仍待验证；本轮未连接硬件。
+- [x] rosbridge 实际传输与真机连续性：2026-09-22 台架实测（web_host 示教播放 → rosbridge
+  → agent → MCU → 真机 4 台），248 点 ×2 与恰好 256 点 ×2 均为 `段 1/1` 单条消息，全部
+  受理并跑完（四台 `ACTIVE`、`completed=True`），会话内 `mailbox_rejected_trajectory=0`。
+- [ ] **多段组装（`segment_count>1`）仍未上真机**：两侧发送方现在恒发单段，乱序/缺段的
+  整组拒收语义只有多段发送方才能触发，固件侧目前仅由 host 用例
+  （`test_trajectory_mailbox`）覆盖。
 - [~] 规模约束：**2026-09-18 的「已解」被推翻**——128 → 208、每电机 4 项时看似覆盖 48 台，
   但台架实测 208 槽只剩 1,776 B 堆余量；随后每台项数因保护开关变 5 项，
   `PARAM_BRIDGE_MAX_PARAMS` 又经历 176 → 224 → 256 → 416（未经复核、超出堆池）→ **64**（2026-09-20）。

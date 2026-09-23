@@ -33,7 +33,7 @@ void BMI088_GPIO_init(void) {
   gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(ACC_CS_PORT, &gpio);
   HAL_GPIO_WritePin(GPIOC, POWER_5V_PIN | ACC_CS_PIN | GYRO_CS_PIN,
-                    GPIO_PIN_SET);
+      GPIO_PIN_SET);
 
   // PA0：官方例程固定输出的保留引脚，置低
   __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -100,7 +100,7 @@ uint8_t BMI088_read_write_byte(uint8_t reg) {
     return 0U;
   }
   if (HAL_SPI_TransmitReceive(&hspi_bmi088, &tx, &rx, 1,
-                              kBmi088SpiTransferTimeoutMs) != HAL_OK) {
+      kBmi088SpiTransferTimeoutMs) != HAL_OK) {
     BMI088_transport_error_latch();
     return 0U;
   }

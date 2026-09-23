@@ -9,10 +9,10 @@ static bool g_initialized = false;
 #define OCTOSPI2_TIMEOUT_MS 1000U
 
 static octospi_status_t ospi_status(const OSPI_HandleTypeDef *handle,
-                                   HAL_StatusTypeDef status) {
+    HAL_StatusTypeDef status) {
   if (status == HAL_TIMEOUT ||
       (handle != NULL &&
-       (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
+      (HAL_OSPI_GetError(handle) & HAL_OSPI_ERROR_TIMEOUT) != 0U)) {
     return OCTOSPI_ERROR_TIMEOUT;
   }
   return OCTOSPI_ERROR_HAL;

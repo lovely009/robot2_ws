@@ -28,9 +28,9 @@ w25q64_status_t w25q64_reset(void);
 uint32_t w25q64_read_id(void);
 w25q64_status_t w25q64_read(uint32_t address, uint8_t *data, uint32_t size);
 w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
-                                      uint32_t size);
+    uint32_t size);
 w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
-                               uint32_t size);
+    uint32_t size);
 w25q64_status_t w25q64_erase_sector(uint32_t address);
 
 #ifdef __cplusplus

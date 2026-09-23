@@ -19,8 +19,8 @@ extern "C" {
 #endif
 
 led_color_t led_status_select(micro_ros_link_state_t state,
-                              bool ever_connected, bool blink_on,
-                              led_color_t previous);
+    bool ever_connected, bool blink_on,
+    led_color_t previous);
 
 bool led_task_start(void);
 

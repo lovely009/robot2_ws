@@ -11,8 +11,8 @@
 // 能力边界（ARD §25 + 2026-09-05 协议核实）：0x080 SYNC 触发设备 20ms 周期
 // 状态上报——上报帧即心跳（承担总线检测），因此 SYNC 心跳属管理性使用，
 // 禁止作为运动控制边界触发（禁止项 14）；反馈帧（0x300+node）为命令的实时
-// 状态。0x200 多控仅在显式非 MIT 模式下由 adapter 提供，本阶段不实现
-// （禁止项 13）；设备侧限位必须走 request_id 事务 + 读回核验——厂家管理
+// 状态。MIT 多轴快控使用 0x210，在任务层 P1 出队后按总线合帧；
+// 0x200 非 MIT 多控仍不实现。设备侧限位必须走 request_id 事务 + 读回核验——厂家管理
 // 对象未决（TBD-CONFIG-01），当前一律 UNSUPPORTED，不猜厂家字节。
 //
 // TBD 标注：软停 = MIT 阻尼帧保持使能（TBD-SAFETY-01 占位）；使能整定
@@ -23,6 +23,9 @@
 #include <math.h>
 #include <string.h>
 
+// ===========================================================================
+// CERB：CANopen SDO、MIT/PDO、反馈与设备参数事务
+// ===========================================================================
 // ---------------------------------------------------------------------------
 // CANopen 快速 SDO（《CANopen-V0.9 字典表》「SDO 协议内容详解」）
 //
@@ -171,7 +174,7 @@ static uint32_t cerb_error_code(const motor_protocol_raw_frame_t *frame) {
 // 帧归属：反馈帧 0x300+node（12B）与 SDO 应答 0x580+node（8B）。
 // node ∈ 1..127；两段各自用 offset ≤ 127 界定上界，互不重叠。
 static bool cerb_match_rx_frame(const motor_protocol_raw_frame_t *frame,
-                                uint16_t *out_node) {
+    uint16_t *out_node) {
   if (frame == NULL || out_node == NULL || frame->is_extended) {
     return false;
   }
@@ -207,9 +210,9 @@ static bool cerb_is_discovery_frame(const motor_protocol_raw_frame_t *frame) {
 }
 
 static bool cerb_decode_frame(const motor_protocol_model_profile_t *profile,
-                              uint16_t node,
-                              const motor_protocol_raw_frame_t *frame,
-                              motor_protocol_measured_state_t *out) {
+    uint16_t node,
+    const motor_protocol_raw_frame_t *frame,
+    motor_protocol_measured_state_t *out) {
   if (profile != NULL && profile->protocol != &motor_protocol_cerb_adapter) {
     return false;
   }
@@ -249,7 +252,7 @@ static bool cerb_decode_frame(const motor_protocol_model_profile_t *profile,
     out->velocity_rad_s =
         (float)(wire.velocity / profile->gear_ratio); // 电机侧 → 关节侧
     out->effort_nm = (float)(wire.effort * profile->torque_constant_nm_per_amp *
-                             profile->gear_ratio * profile->gear_efficiency);
+        profile->gear_ratio * profile->gear_efficiency);
   } else {
     out->velocity_rad_s = NAN;
     out->effort_nm = NAN;
@@ -258,9 +261,9 @@ static bool cerb_decode_frame(const motor_protocol_model_profile_t *profile,
 }
 
 static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profile,
-                                    uint16_t node, uint8_t bus_index,
-                                    const motor_protocol_control_intent_t *intent,
-                                    motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    const motor_protocol_control_intent_t *intent,
+    motor_protocol_tx_frame_t *out) {
   if (profile == NULL || profile->protocol != &motor_protocol_cerb_adapter ||
       intent == NULL || out == NULL) {
     return false;
@@ -282,9 +285,9 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
   wire.kd = intent->kd;
   wire.feedforward = intent->effort_nm;
   const motor_protocol_cerb_limits_t limits = {
-      profile->mit_position_limit_rad,
-      profile->mit_velocity_limit_rad_s,
-      profile->mit_torque_limit_nm,
+    profile->mit_position_limit_rad,
+    profile->mit_velocity_limit_rad_s,
+    profile->mit_torque_limit_nm,
   };
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
@@ -298,7 +301,7 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
   out->is_extended = false;
   out->is_brs = true;
   if (!motor_protocol_pack_cerb_mit_frame(&wire, &limits, intent->enable,
-                                          out->data)) {
+      out->data)) {
     return false;
   }
   return true;
@@ -306,9 +309,9 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
 
 // 中性目标帧（使能/失能共用形状，控制字区分）。
 static bool cerb_encode_neutral(const motor_protocol_model_profile_t *profile,
-                                uint16_t node, uint8_t bus_index, bool enable,
-                                float kd, motor_protocol_tx_class_t tx_class,
-                                motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index, bool enable,
+    float kd, motor_protocol_tx_class_t tx_class,
+    motor_protocol_tx_frame_t *out) {
   motor_protocol_control_intent_t neutral = {0};
   neutral.kd = kd;
   neutral.enable = enable;
@@ -320,30 +323,30 @@ static bool cerb_encode_neutral(const motor_protocol_model_profile_t *profile,
 }
 
 static bool cerb_encode_enable(const motor_protocol_model_profile_t *profile,
-                               uint16_t node, uint8_t bus_index,
-                               motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   // 使能 = 中性目标 + 使能位（0xcc）；运动目标待整定窗结束后下发。
   return cerb_encode_neutral(profile, node, bus_index, true, 0.0f,
-                             MOTOR_PROTOCOL_TX_CLASS_P1, out);
+      MOTOR_PROTOCOL_TX_CLASS_P1, out);
 }
 
 // TBD-SAFETY-01：软停暂取阻尼帧（零目标 + 默认 kd，保持使能）。
 static bool cerb_encode_soft_stop(const motor_protocol_model_profile_t *profile,
-                                  uint16_t node, uint8_t bus_index,
-                                  motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   if (profile == NULL) {
     return false;
   }
   return cerb_encode_neutral(profile, node, bus_index, true, profile->default_kd,
-                             MOTOR_PROTOCOL_TX_CLASS_P0, out);
+      MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
 static bool cerb_encode_disable(const motor_protocol_model_profile_t *profile,
-                                uint16_t node, uint8_t bus_index,
-                                motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   // 失能 = 中性目标 + 控制字使能位清零（0x0c）。
   return cerb_encode_neutral(profile, node, bus_index, false, 0.0f,
-                             MOTOR_PROTOCOL_TX_CLASS_P0, out);
+      MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
 // 发现探测帧（0x080 SYNC）：**FD+BRS**，与 SDO/MIT 同格式——全总线统一走
@@ -359,7 +362,7 @@ static bool cerb_encode_disable(const motor_protocol_model_profile_t *profile,
 // SYNC 的帧格式无书面依据。README「示波器/candump 验证每 20ms 仅一帧 0x080」
 // 是核对点；真机若拒绝 FD 的 SYNC，把下面两行改回 false 即可（唯一改动点）。
 static bool cerb_encode_discovery_sync(uint8_t bus_index,
-                                       motor_protocol_tx_frame_t *out) {
+    motor_protocol_tx_frame_t *out) {
   if (out == NULL) {
     return false;
   }
@@ -380,7 +383,7 @@ static bool cerb_encode_discovery_sync(uint8_t bus_index,
 
 // 追加设备回传载荷；容量不足只置 overflow（由内核判失败，不静默截断）。
 static void cerb_read_append(motor_protocol_read_buffer_t *buffer,
-                             const uint8_t *data, size_t length) {
+    const uint8_t *data, size_t length) {
   if (buffer == NULL || buffer->data == NULL || data == NULL) {
     return;
   }
@@ -395,8 +398,8 @@ static void cerb_read_append(motor_protocol_read_buffer_t *buffer,
 
 // SDO 请求帧（0x600+node，DLC 8，CANFD 加速标准帧）。
 static bool cerb_sdo_request(uint16_t node, uint8_t bus_index,
-                             const uint8_t payload[8],
-                             motor_protocol_tx_frame_t *out) {
+    const uint8_t payload[8],
+    motor_protocol_tx_frame_t *out) {
   if (out == NULL || node < 1U || node > 127U) {
     return false;
   }
@@ -465,7 +468,7 @@ typedef struct {
 
 static const cerb_stage_desc_t kStagesSetZero[1] = {
   CERB_DESC_WRITE(CERB_OBJ_SET_ZERO, CERB_SUB_DEFAULT,
-                  MOTOR_PROTOCOL_PARAM_SLOT_NONE, CERB_VALUE_ZERO),
+      MOTOR_PROTOCOL_PARAM_SLOT_NONE, CERB_VALUE_ZERO),
 };
 
 // 下限写+读回、上限写+读回。**保存不在本表**：0x2539 是独立的保存事务
@@ -473,27 +476,27 @@ static const cerb_stage_desc_t kStagesSetZero[1] = {
 // 变成不可观测的状态（见 param-authority-reversal-design.md §3.2）。
 static const cerb_stage_desc_t kStagesPositionLimits[4] = {
   CERB_DESC_WRITE(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
-                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
-                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_WRITE(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
-                  MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
-                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
 };
 
 static const cerb_stage_desc_t kStagesVelocityLimit[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
-                  MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+      MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
   CERB_DESC_READ(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+      MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
 };
 
 static const cerb_stage_desc_t kStagesTorqueLimit[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
-                  MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+      MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
   CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+      MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
 };
 
 // REFRESH_PARAMS：6 个加速 upload（槽位与阶段顺序同源，内核按槽位落袋，
@@ -507,18 +510,18 @@ static const cerb_stage_desc_t kStagesClearFault[1] = {
 
 static const cerb_stage_desc_t kStagesRefresh[6] = {
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
-                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
-                 MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
+      MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX, CERB_VALUE_POS_UPPER),
   CERB_DESC_READ(CERB_OBJ_MAX_SPEED, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
+      MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, CERB_VALUE_SPEED),
   CERB_DESC_READ(CERB_OBJ_MAX_CURRENT, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
+      MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX, CERB_VALUE_CURRENT),
   // v3：设备侧安全事实。读回即比对基准，写侧不提供（恢复靠外部工具）。
   CERB_DESC_READ(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_PASSTHROUGH),
+      MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_PASSTHROUGH),
   CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
+      MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
 };
 
 // 0x2650:00 看门狗/限位保护开关：写 + 读回核验，**不跟 0x2539 保存阶段**。
@@ -529,9 +532,9 @@ static const cerb_stage_desc_t kStagesRefresh[6] = {
 // 读回来，否则重发本阶段（≤2 次后内核收敛 UNCONFIRMED）。
 static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
   CERB_DESC_WRITE(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
-                  MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
+      MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
   CERB_DESC_READ(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
+      MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
 };
 
 // 0x2541:00 方向：写 + 读回核验，**不跟 0x2539 保存阶段**（易失，见上）。
@@ -545,9 +548,9 @@ static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
 // 用 CERB_VALUE_SAFETY_RAW 同形。
 static const cerb_stage_desc_t kStagesDirection[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
-                  MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
+      MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
   CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
-                 MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
+      MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
 };
 
 // 保存阶段表集合（SAVE_DEVICE_FLASH）。落盘粒度只有两组：参数组（码 1，
@@ -574,12 +577,12 @@ static const cerb_stage_desc_t *cerb_save_table(
     const motor_protocol_config_request_t *request, uint8_t *count) {
   const bool params =
       (request->save_slots &
-       ((1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |
-        (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX))) != 0U;
+      ((1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX))) != 0U;
   const bool pos =
       (request->save_slots &
-       ((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
-        (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX))) != 0U;
+      ((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX))) != 0U;
   const cerb_stage_desc_t *table;
   if (params && pos) {
     table = kStagesSaveParamsAndPos;
@@ -604,40 +607,40 @@ static const cerb_stage_desc_t *cerb_save_table(
 static const cerb_stage_desc_t *cerb_stage_table(
     const motor_protocol_config_request_t *request, uint8_t *count) {
   switch (request->kind) {
-    case MOTOR_PROTOCOL_CONFIG_SET_ZERO:
-      *count = (uint8_t)(sizeof(kStagesSetZero) / sizeof(kStagesSetZero[0]));
-      return kStagesSetZero;
-    case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
-      *count = (uint8_t)(sizeof(kStagesPositionLimits) /
-                         sizeof(kStagesPositionLimits[0]));
-      return kStagesPositionLimits;
-    case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
-      *count = (uint8_t)(sizeof(kStagesVelocityLimit) /
-                         sizeof(kStagesVelocityLimit[0]));
-      return kStagesVelocityLimit;
-    case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
-      *count = (uint8_t)(sizeof(kStagesTorqueLimit) /
-                         sizeof(kStagesTorqueLimit[0]));
-      return kStagesTorqueLimit;
-    case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS:
-      *count = (uint8_t)(sizeof(kStagesRefresh) / sizeof(kStagesRefresh[0]));
-      return kStagesRefresh;
-    case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT:
-      *count = (uint8_t)(sizeof(kStagesClearFault) /
-                         sizeof(kStagesClearFault[0]));
-      return kStagesClearFault;
-    case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
-      *count = (uint8_t)(sizeof(kStagesSafetyProtect) /
-                         sizeof(kStagesSafetyProtect[0]));
-      return kStagesSafetyProtect;
-    case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
-      *count = (uint8_t)(sizeof(kStagesDirection) / sizeof(kStagesDirection[0]));
-      return kStagesDirection;
-    case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH:
-      return cerb_save_table(request, count);
-    default:
-      *count = 0U;
-      return NULL;
+  case MOTOR_PROTOCOL_CONFIG_SET_ZERO:
+    *count = (uint8_t)(sizeof(kStagesSetZero) / sizeof(kStagesSetZero[0]));
+    return kStagesSetZero;
+  case MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS:
+    *count = (uint8_t)(sizeof(kStagesPositionLimits) /
+        sizeof(kStagesPositionLimits[0]));
+    return kStagesPositionLimits;
+  case MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT:
+    *count = (uint8_t)(sizeof(kStagesVelocityLimit) /
+        sizeof(kStagesVelocityLimit[0]));
+    return kStagesVelocityLimit;
+  case MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT:
+    *count = (uint8_t)(sizeof(kStagesTorqueLimit) /
+        sizeof(kStagesTorqueLimit[0]));
+    return kStagesTorqueLimit;
+  case MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS:
+    *count = (uint8_t)(sizeof(kStagesRefresh) / sizeof(kStagesRefresh[0]));
+    return kStagesRefresh;
+  case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT:
+    *count = (uint8_t)(sizeof(kStagesClearFault) /
+        sizeof(kStagesClearFault[0]));
+    return kStagesClearFault;
+  case MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT:
+    *count = (uint8_t)(sizeof(kStagesSafetyProtect) /
+        sizeof(kStagesSafetyProtect[0]));
+    return kStagesSafetyProtect;
+  case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
+    *count = (uint8_t)(sizeof(kStagesDirection) / sizeof(kStagesDirection[0]));
+    return kStagesDirection;
+  case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH:
+    return cerb_save_table(request, count);
+  default:
+    *count = 0U;
+    return NULL;
   }
 }
 
@@ -656,63 +659,63 @@ static uint32_t cerb_stage_write_value(
     uint8_t value_kind, const motor_protocol_model_profile_t *profile,
     const motor_protocol_config_request_t *request) {
   switch (value_kind) {
-    case CERB_VALUE_ZERO:
-      return CERB_SET_ZERO_CODE;
-    case CERB_VALUE_POS_LOWER:
-      return (uint32_t)cerb_rad_to_limit_cnt(
-          request->position_limits.min_position_rad);
-    case CERB_VALUE_POS_UPPER:
-      return (uint32_t)cerb_rad_to_limit_cnt(
-          request->position_limits.max_position_rad);
-    case CERB_VALUE_SPEED:
-      return cerb_joint_rad_s_to_motor_rpm(profile,
-                                            request->max_velocity_rad_s);
-    case CERB_VALUE_CURRENT:
-      return cerb_joint_nm_to_motor_ma(profile, request->max_torque_nm);
-    case CERB_VALUE_SAFETY_RAW:
-      // 厂家原值直通：本层不做方向语义反转（不认"保护是否生效"，只认字节）。
-      return request->safety_protect_raw;
-    case CERB_VALUE_DIRECTION_RAW:
-      return request->direction_raw;
-    default:
-      return 0U;
+  case CERB_VALUE_ZERO:
+    return CERB_SET_ZERO_CODE;
+  case CERB_VALUE_POS_LOWER:
+    return (uint32_t)cerb_rad_to_limit_cnt(
+        request->position_limits.min_position_rad);
+  case CERB_VALUE_POS_UPPER:
+    return (uint32_t)cerb_rad_to_limit_cnt(
+        request->position_limits.max_position_rad);
+  case CERB_VALUE_SPEED:
+    return cerb_joint_rad_s_to_motor_rpm(profile,
+        request->max_velocity_rad_s);
+  case CERB_VALUE_CURRENT:
+    return cerb_joint_nm_to_motor_ma(profile, request->max_torque_nm);
+  case CERB_VALUE_SAFETY_RAW:
+    // 厂家原值直通：本层不做方向语义反转（不认"保护是否生效"，只认字节）。
+    return request->safety_protect_raw;
+  case CERB_VALUE_DIRECTION_RAW:
+    return request->direction_raw;
+  default:
+    return 0U;
   }
 }
 
 // REFRESH 回读原值 → 关节侧 SI（按槽位选换算，不再按阶段号 switch）。
 static bool cerb_refresh_raw_to_si(uint8_t slot, uint32_t raw,
-                                   const motor_protocol_model_profile_t *profile,
-                                   float *out) {
+    const motor_protocol_model_profile_t *profile,
+    float *out) {
   switch (slot) {
-    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
-    case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
-      // INTEGER32 cnt（负载端，与关节同轴）。
-      *out = (float)motor_protocol_cerb_limit_cnt_to_rad((int32_t)raw);
-      return true;
-    case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
-      *out = (float)motor_protocol_cerb_motor_rpm_to_joint_rad_s(
-          (double)profile->gear_ratio, raw);
-      return true;
-    case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
-      // 0x2538 是电气电流上限：与写入侧同一套限值系数，保证"读到的 A"
-      // 与"写回去的 A"是同一个数（换算系数换了也不会来回漂）。
-      *out = (float)motor_protocol_limit_ma_to_joint_nm(
-          (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
-      return true;
-    case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
-    case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
-      // 原值透传：这两个是枚举/标志位，没有工程单位可换算。
-      // value_si 仅供页面显示，裁决一律用 raw。
-      *out = (float)raw;
-      return true;
-    default:
-      return false;
+  case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
+  case MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX:
+    // INTEGER32 cnt（负载端，与关节同轴）。
+    *out = (float)motor_protocol_cerb_limit_cnt_to_rad((int32_t)raw);
+    return true;
+  case MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX:
+    *out = (float)motor_protocol_cerb_motor_rpm_to_joint_rad_s(
+        (double)profile->gear_ratio, raw);
+    return true;
+  case MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX:
+    // 0x2538 是电气电流上限：与写入侧同一套限值系数，保证"读到的 A"
+    // 与"写回去的 A"是同一个数（换算系数换了也不会来回漂）。
+    *out = (float)motor_protocol_limit_ma_to_joint_nm(
+        (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
+    return true;
+  case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
+  case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
+    // 原值透传：这两个是枚举/标志位，没有工程单位可换算。
+    // value_si 仅供页面显示，裁决一律用 raw。
+    *out = (float)raw;
+    return true;
+  default:
+    return false;
   }
 }
 
 static uint8_t
 cerb_config_stage_count(const motor_protocol_model_profile_t *profile,
-                        const motor_protocol_config_request_t *request) {
+    const motor_protocol_config_request_t *request) {
   if (request == NULL) {
     return 0U;
   }
@@ -731,9 +734,9 @@ cerb_config_stage_count(const motor_protocol_model_profile_t *profile,
 }
 
 static bool cerb_config_stage_info(uint8_t stage,
-                                   const motor_protocol_model_profile_t *profile,
-                                   const motor_protocol_config_request_t *request,
-                                   motor_protocol_config_stage_info_t *out) {
+    const motor_protocol_model_profile_t *profile,
+    const motor_protocol_config_request_t *request,
+    motor_protocol_config_stage_info_t *out) {
   if (request == NULL || out == NULL) {
     return false;
   }
@@ -785,7 +788,7 @@ static bool cerb_config_stage_info(uint8_t stage,
   out->waits_response = true; // 每个 SDO 阶段都等应答（写等 ack、读等回读）
   // set_zero 虽走 SDO 写，但写的是命令码不是设备参数，不进记录/比对。
   out->param_raw_valid = desc->action == CERB_STAGE_SDO_WRITE &&
-                         desc->param_slot != MOTOR_PROTOCOL_PARAM_SLOT_NONE;
+      desc->param_slot != MOTOR_PROTOCOL_PARAM_SLOT_NONE;
   out->param_slot = out->param_raw_valid ? desc->param_slot
                                          : MOTOR_PROTOCOL_PARAM_SLOT_NONE;
   out->param_raw = cerb_stage_write_value(desc->value_kind, profile, request);
@@ -814,7 +817,7 @@ static bool cerb_config_encode_stage(
       // 分段上传请求：60/70 交替（bit4 = 切换位，从 0 起）。
       payload[0] =
           (uint8_t)(CERB_SDO_CCS_UPLOAD_SEGMENT |
-                    (uint8_t)(((stage - 1U) & 1U) << 4));
+          (uint8_t)(((stage - 1U) & 1U) << 4));
     }
     return cerb_sdo_request(node, bus_index, payload, out);
   }
@@ -924,7 +927,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
       return MOTOR_PROTOCOL_STAGE_FAIL; // 非法未用字节数
     }
     cerb_read_append(read_out, &response->data[1],
-                     (size_t)CERB_SDO_SEGMENT_BYTES - unused);
+        (size_t)CERB_SDO_SEGMENT_BYTES - unused);
     return last ? MOTOR_PROTOCOL_STAGE_COMPLETE : MOTOR_PROTOCOL_STAGE_ADVANCE;
   }
 
@@ -989,7 +992,7 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     return MOTOR_PROTOCOL_STAGE_FAIL; // 设备明确拒绝（含字典越界/不支持）
   }
   const uint16_t got_index = (uint16_t)((uint16_t)response->data[1] |
-                                        ((uint16_t)response->data[2] << 8U));
+      ((uint16_t)response->data[2] << 8U));
   if (got_index != desc->index || response->data[3] != desc->sub) {
     return MOTOR_PROTOCOL_STAGE_RETRY; // 非本阶段应答（上一阶段迟到帧）
   }
@@ -1009,24 +1012,82 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
              : MOTOR_PROTOCOL_STAGE_RETRY;
 }
 
+static size_t cerb_aggregate_p1_frames(
+    const motor_protocol_tx_frame_t *frames, size_t available,
+    motor_protocol_tx_frame_t *out) {
+  if (frames == NULL || out == NULL || available < 2U) {
+    return 0U;
+  }
+
+  const size_t limit = available < MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES
+                           ? available
+                           : MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES;
+  motor_protocol_cerb_multi_axis_t axes[MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES] =
+  {0};
+  size_t count = 0U;
+  for (size_t i = 0U; i < limit; ++i) {
+    uint8_t node = 0U;
+    const motor_protocol_tx_frame_t *frame = &frames[i];
+    if (frame->bus_index != frames[0].bus_index ||
+        frame->tx_class != MOTOR_PROTOCOL_TX_CLASS_P1 ||
+        !motor_protocol_cerb_single_mit_node(
+        frame->can_id, frame->is_extended, frame->is_fd, frame->is_brs,
+        frame->data, frame->size, &node)) {
+      break;
+    }
+    bool duplicate = false;
+    for (size_t axis = 0U; axis < count; ++axis) {
+      if (axes[axis].node == node) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      break;
+    }
+    axes[count].node = node;
+    memcpy(axes[count].data, frame->data, sizeof(axes[count].data));
+    ++count;
+  }
+  if (count < 2U) {
+    return 0U;
+  }
+
+  motor_protocol_tx_frame_t aggregated = {0};
+  aggregated.bus_index = frames[0].bus_index;
+  aggregated.tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
+  aggregated.tx_slot = UINT16_MAX; // 一个物理帧对应多个 latest-wins 槽。
+  aggregated.can_id = MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID;
+  aggregated.is_fd = true;
+  aggregated.is_brs = true;
+  aggregated.size = MOTOR_PROTOCOL_MAX_FRAME_BYTES;
+  if (!motor_protocol_pack_cerb_multi_mit(axes, count, aggregated.data)) {
+    return 0U;
+  }
+  *out = aggregated;
+  return count;
+}
+
 const motor_protocol_adapter_t motor_protocol_cerb_adapter = {
-    .protocol_name = "cerb",
-    .node_id_min = 1U,
-    .node_id_max = 127U,
-    .offline_timeout_ms = 100U, // 5×20ms SYNC 上报心跳（总线检测）
-    .enable_settle_ms = 100U,   // 使能后 ≥100ms 才发运动目标（既有经验行为）
-    .autonomous_feedback = true, // SYNC 上报帧 = 20ms 状态心跳（承担总线检测）
-    .config_verify_required = false, // 写阶段均为「写 → 读回」成对，读回核验即确认
-    .match_rx_frame = cerb_match_rx_frame,
-    .is_discovery_frame = cerb_is_discovery_frame,
-    .decode_frame = cerb_decode_frame,
-    .encode_mit_command = cerb_encode_mit_command,
-    .encode_enable = cerb_encode_enable,
-    .encode_soft_stop = cerb_encode_soft_stop,
-    .encode_disable = cerb_encode_disable,
-    .encode_discovery_sync = cerb_encode_discovery_sync,
-    .config_stage_count = cerb_config_stage_count,
-    .config_stage_info = cerb_config_stage_info,
-    .config_encode_stage = cerb_config_encode_stage,
-    .config_on_response = cerb_config_on_response,
+  .protocol_name = "cerb",
+  .node_id_min = 1U,
+  .node_id_max = 127U,
+  .offline_timeout_ms = 100U,   // 5×20ms SYNC 上报心跳（总线检测）
+  .enable_settle_ms = 100U,     // 使能后 ≥100ms 才发运动目标（既有经验行为）
+  .autonomous_feedback = true,   // SYNC 上报帧 = 20ms 状态心跳（承担总线检测）
+  .config_verify_required = false,   // 写阶段均为「写 → 读回」成对，读回核验即确认
+  .p1_batch_max = MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES,
+  .match_rx_frame = cerb_match_rx_frame,
+  .is_discovery_frame = cerb_is_discovery_frame,
+  .decode_frame = cerb_decode_frame,
+  .encode_mit_command = cerb_encode_mit_command,
+  .encode_enable = cerb_encode_enable,
+  .encode_soft_stop = cerb_encode_soft_stop,
+  .encode_disable = cerb_encode_disable,
+  .aggregate_p1_frames = cerb_aggregate_p1_frames,
+  .encode_discovery_sync = cerb_encode_discovery_sync,
+  .config_stage_count = cerb_config_stage_count,
+  .config_stage_info = cerb_config_stage_info,
+  .config_encode_stage = cerb_config_encode_stage,
+  .config_on_response = cerb_config_on_response,
 };

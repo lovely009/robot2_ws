@@ -9,7 +9,7 @@
 #include <limits>
 
 static control_trajectory_t make_trajectory(uint32_t sequence,
-                                            uint32_t received_tick_ms) {
+    uint32_t received_tick_ms) {
   control_trajectory_t trajectory{};
   trajectory.sequence = sequence;
   trajectory.received_tick_ms = received_tick_ms;
@@ -327,6 +327,112 @@ static void test_segment_order_and_total_capacity_are_bounded() {
   assert(!mailbox.pending);
 }
 
+// 上层（web 示教）允许段边界重叠一行：原始分段载荷之和可超过 256，但去重
+// 合并后恰好在容量内。容量必须按合并后的总量判，2026-09-22 实测 256 点
+// 轨迹曾因此被误拒（页面报「未收到 trajectory_state 回执」）。
+static void test_segment_capacity_counts_merged_points() {
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  control_trajectory_t first = make_trajectory(1U, 100U);
+  first.trajectory_id = 101U;
+  first.segment_index = 0U;
+  first.segment_count = 2U;
+  first.target_count = 1U;
+  first.target_ids[0] = 7U;
+  first.point_count = 128U;
+  for (uint16_t i = 0U; i < first.point_count; ++i) {
+    first.points[i] = {i, 7U, static_cast<float>(i), 0.0F, 0.0F};
+  }
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+
+  // 原始合计 128+129=257 > 256，t=127 是重叠边界点，合并后恰为 256。
+  control_trajectory_t second = make_trajectory(2U, 200U);
+  second.trajectory_id = 101U;
+  second.segment_index = 1U;
+  second.segment_count = 2U;
+  second.target_count = 1U;
+  second.target_ids[0] = 7U;
+  second.point_count = 129U;
+  for (uint16_t i = 0U; i < second.point_count; ++i) {
+    const uint16_t t = static_cast<uint16_t>(127U + i);
+    second.points[i] = {t, 7U, static_cast<float>(t), 0.0F, 0.0F};
+  }
+  assert(control_trajectory_mailbox_publish(&mailbox, &second));
+  assert(mailbox.pending);
+  assert(!mailbox.assembly_active);
+
+  control_trajectory_t complete{};
+  assert(control_trajectory_mailbox_take(&mailbox, &complete));
+  assert(complete.point_count ==
+      CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS);    // 合并后 256，重叠点只留一次
+  assert(complete.points[127].time_from_start_ms == 127U);
+  assert(complete.points[128].time_from_start_ms == 128U);
+
+  // 去重后仍超 256：写入前的容量门必须整组拒绝。
+  control_trajectory_mailbox_init(&mailbox);
+  assert(control_trajectory_mailbox_publish(&mailbox, &first));
+  control_trajectory_t overflow = make_trajectory(3U, 300U);
+  overflow.trajectory_id = 102U;
+  overflow.segment_index = 1U;
+  overflow.segment_count = 2U;
+  overflow.target_count = 1U;
+  overflow.target_ids[0] = 7U;
+  overflow.point_count = 130U; // 合并后 257
+  for (uint16_t i = 0U; i < overflow.point_count; ++i) {
+    const uint16_t t = static_cast<uint16_t>(127U + i);
+    overflow.points[i] = {t, 7U, static_cast<float>(t), 0.0F, 0.0F};
+  }
+  assert(!control_trajectory_mailbox_publish(&mailbox, &overflow));
+  assert(!mailbox.pending);
+  assert(!mailbox.assembly_active);
+  assert(mailbox.invalid_trajectory_count == 1U);
+}
+
+// 三段拼接 + 多电机 + 极短尾段：64 行 × 4 台 = 256 点，按 128 点/段切分并
+// 重叠边界行 → [128, 128, 8]（第三段只剩两行）。这是 2026-09-22 之前网页发的
+// 形状（网页现已改为一条轨迹一条消息，原因见 web_host 的 TRAJ_SEGMENT_POINTS
+// 注释）；此处钉住拼接侧行为：合并后恰好 256 点必须被受理，且不留非法计数。
+static void test_three_segments_with_two_row_tail_assemble_at_capacity() {
+  static const uint16_t kMotors[4] = {1U, 2U, 3U, 4U};
+  static const uint16_t kRowStart[3] = {0U, 31U, 62U};
+  static const uint16_t kRowEnd[3] = {32U, 63U, 64U};
+
+  control_trajectory_mailbox_t mailbox{};
+  control_trajectory_mailbox_init(&mailbox);
+
+  for (uint16_t seg = 0U; seg < 3U; ++seg) {
+    control_trajectory_t s = make_trajectory(seg + 1U, 1000U + seg);
+    s.trajectory_id = 4242U;
+    s.segment_index = seg;
+    s.segment_count = 3U;
+    s.target_count = 4U;
+    for (uint16_t m = 0U; m < 4U; ++m) {
+      s.target_ids[m] = kMotors[m];
+    }
+    uint16_t n = 0U;
+    for (uint16_t row = kRowStart[seg]; row < kRowEnd[seg]; ++row) {
+      const uint32_t t = static_cast<uint32_t>(row) * 100U; // 每行 wait=100ms
+      for (uint16_t m = 0U; m < 4U; ++m) {
+        s.points[n++] = {t, kMotors[m], 0.01F * static_cast<float>(row), 0.0F,
+                         0.0F};
+      }
+    }
+    s.point_count = n;
+    assert(control_trajectory_mailbox_publish(&mailbox, &s));
+  }
+
+  assert(mailbox.pending);
+  assert(!mailbox.assembly_active);
+  control_trajectory_t complete{};
+  assert(control_trajectory_mailbox_take(&mailbox, &complete));
+  assert(complete.point_count == 256U);
+  assert(complete.segment_index == 0U && complete.segment_count == 1U);
+  assert(complete.points[255].time_from_start_ms == 6300U);
+  assert(mailbox.invalid_trajectory_count == 0U);
+  assert(mailbox.overwrite_count == 0U);
+}
+
 static void test_clear_keeps_diagnostics() {
   control_trajectory_mailbox_t mailbox{};
   control_trajectory_mailbox_init(&mailbox);
@@ -379,6 +485,8 @@ int main() {
   test_segments_self_join_without_overlap_point();
   test_segment_conflict_keeps_published_state_untouched();
   test_segment_order_and_total_capacity_are_bounded();
+  test_segment_capacity_counts_merged_points();
+  test_three_segments_with_two_row_tail_assemble_at_capacity();
   test_clear_keeps_diagnostics();
   test_session_gate_and_disconnect();
   return 0;

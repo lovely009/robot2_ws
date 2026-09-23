@@ -1,67 +1,19 @@
 #include "control_mailbox.h"
-#include "motor_protocol_adapter.h"
+#include "motor_config_contract.hpp"
 
 #include <cassert>
-
-// 配置 kind 枚举契约：mailbox 与内核协议层枚举逐值相等
-// （1..6、8..14，7 为内核专用不经 mailbox）——固件侧 motor_rt_task.cpp
-// 同款 static_assert，host 侧双链锁死，任一侧改动枚举值即编译失败。
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
-              "mailbox/protocol config kind 契约不一致：SET_MODE");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_GAINS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_GAINS),
-    "mailbox/protocol config kind 契约不一致：SET_GAINS");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS),
-    "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
-    "mailbox/protocol config kind 契约不一致：SET_ENABLE");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT),
-    "mailbox/protocol config kind 契约不一致：SET_VELOCITY_LIMIT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT),
-    "mailbox/protocol config kind 契约不一致：SET_TORQUE_LIMIT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
-    "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ZERO) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ZERO),
-    "mailbox/protocol config kind 契约不一致：SET_ZERO");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_CLEAR_FAULT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT),
-    "mailbox/protocol config kind 契约不一致：CLEAR_FAULT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT),
-    "mailbox/protocol config kind 契约不一致：SET_SAFETY_PROTECT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_DIRECTION) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_DIRECTION),
-    "mailbox/protocol config kind 契约不一致：SET_DIRECTION");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH),
-    "mailbox/protocol config kind 契约不一致：SAVE_DEVICE_FLASH");
 
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 static control_command_snapshot_t make_snapshot(uint32_t sequence,
-                                                uint32_t received_tick_ms,
-                                                uint16_t motor_id,
-                                                float position) {
+    uint32_t received_tick_ms,
+    uint16_t motor_id,
+    float position) {
   control_command_snapshot_t snapshot{};
   snapshot.sequence = sequence;
   snapshot.received_tick_ms = received_tick_ms;
@@ -71,8 +23,8 @@ static control_command_snapshot_t make_snapshot(uint32_t sequence,
 }
 
 static control_mailbox_config_request_t make_mode_request(uint32_t request_id,
-                                                          uint16_t motor_id,
-                                                          uint8_t mode) {
+    uint16_t motor_id,
+    uint8_t mode) {
   control_mailbox_config_request_t request{};
   request.request_id = request_id;
   request.received_tick_ms = request_id * 10U;
@@ -152,10 +104,10 @@ static void test_config_is_neutral_bounded_fifo() {
   control_mailbox_init(&mailbox);
 
   for (uint32_t index = 0U;
-       index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
+      index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
     const control_mailbox_config_request_t request =
         make_mode_request(index + 1U, static_cast<uint16_t>(index + 10U),
-                          static_cast<uint8_t>(index));
+        static_cast<uint8_t>(index));
     assert(control_mailbox_submit_config(&mailbox, &request));
   }
   const control_mailbox_config_request_t full_request =
@@ -166,7 +118,7 @@ static void test_config_is_neutral_bounded_fifo() {
   assert(mailbox.config_invalid_count == 0U);
 
   for (uint32_t index = 0U;
-       index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
+      index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
     control_mailbox_config_request_t out{};
     assert(control_mailbox_take_config(&mailbox, &out));
     assert(out.request_id == index + 1U);
@@ -464,8 +416,8 @@ static void test_save_request_validation() {
   // 位置上下限 | 力矩限值：合法。
   req.value.save_slots =
       (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
-                (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |
-                (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX));
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX));
   assert(control_mailbox_submit_config(&mailbox, &req));
 
   req.value.save_slots = 0U;
@@ -477,14 +429,14 @@ static void test_save_request_validation() {
 
   // 保护 + 方向（bit4|bit5，全易失）：同样受理。
   req.value.save_slots = (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
-                                   (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
   assert(control_mailbox_submit_config(&mailbox, &req));
 }
 
 // 方向载荷只有 0/1 两态：越界值在 mailbox 就挡掉，别让它进总线。
 static control_mailbox_config_request_t make_direction_request(uint32_t request_id,
-                                                               uint16_t motor_id,
-                                                               uint32_t raw) {
+    uint16_t motor_id,
+    uint32_t raw) {
   control_mailbox_config_request_t request{};
   request.request_id = request_id;
   request.received_tick_ms = request_id * 10U;
@@ -552,6 +504,95 @@ static void test_set_zero_request_is_accepted() {
   assert(taken.motor_id == 5U);
 }
 
+// clear 只撤销待消费输入，生命周期诊断计数继续保留。
+static void test_clear_discards_pending_but_keeps_diagnostics() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  const auto command = make_snapshot(1U, 10U, 1U, 1.0F);
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(!control_mailbox_submit_command(&mailbox, nullptr));
+  const auto config = make_mode_request(1U, 1U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &config));
+  assert(!control_mailbox_submit_config(&mailbox, nullptr));
+
+  control_mailbox_clear_command(&mailbox);
+  control_mailbox_clear_config(&mailbox);
+  control_command_snapshot_t command_out{};
+  control_mailbox_config_request_t config_out{};
+  assert(!control_mailbox_take_command(&mailbox, &command_out));
+  assert(!control_mailbox_take_config(&mailbox, &config_out));
+  assert(mailbox.command.overwrite_count == 1U);
+  assert(mailbox.command.invalid_snapshot_count == 1U);
+  assert(mailbox.config_invalid_count == 1U);
+
+  control_policy_snapshot_t policy{};
+  policy.request_id = 1U;
+  assert(control_mailbox_submit_policy(&mailbox, &policy));
+  assert(!control_mailbox_submit_policy(&mailbox, nullptr));
+  control_mailbox_clear_policy(&mailbox);
+  assert(!control_mailbox_take_policy(&mailbox, &policy));
+  assert(mailbox.policy.invalid_policy_count == 1U);
+
+  control_trajectory_t cancel{};
+  cancel.segment_count = 1U;
+  assert(control_mailbox_submit_trajectory(&mailbox, &cancel));
+  assert(!control_mailbox_submit_trajectory(&mailbox, nullptr));
+  control_mailbox_clear_trajectory(&mailbox);
+  assert(!control_mailbox_take_trajectory(&mailbox, &cancel));
+  assert(mailbox.trajectory.invalid_trajectory_count == 1U);
+}
+
+// 库本身不加锁；双任务共用同一互斥域时，消费结果必须始终是一份完整快照。
+static void test_command_concurrent_publish_take_with_shared_lock() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  std::mutex critical_section;
+  std::atomic<bool> finished{false};
+  constexpr uint32_t kIterations = 2000U;
+  uint32_t last_seen = 0U;
+
+  std::thread producer([&] {
+      for (uint32_t sequence = 1U; sequence <= kIterations; ++sequence) {
+        auto snapshot = make_snapshot(sequence, sequence * 2U, 1U,
+            static_cast<float>(sequence));
+        snapshot.target_count = 2U;
+        snapshot.targets[1] = {2U, static_cast<float>(sequence) + 1.0F,
+                               0.0F, 0.0F};
+        std::lock_guard<std::mutex> guard(critical_section);
+        assert(control_mailbox_submit_command(&mailbox, &snapshot));
+      }
+      finished = true;
+    });
+  std::thread consumer([&] {
+      for (;;) {
+        control_command_snapshot_t snapshot{};
+        bool taken;
+        {
+          std::lock_guard<std::mutex> guard(critical_section);
+          taken = control_mailbox_take_command(&mailbox, &snapshot);
+          if (!taken && finished) {
+            break;
+          }
+        }
+        if (!taken) {
+          std::this_thread::yield();
+          continue;
+        }
+        assert(snapshot.sequence > last_seen);
+        assert(snapshot.received_tick_ms == snapshot.sequence * 2U);
+        assert(snapshot.target_count == 2U);
+        assert(snapshot.targets[0].position == static_cast<float>(snapshot.sequence));
+        assert(snapshot.targets[1].position ==
+        static_cast<float>(snapshot.sequence) + 1.0F);
+        last_seen = snapshot.sequence;
+      }
+    });
+  producer.join();
+  consumer.join();
+  assert(last_seen == kIterations);
+}
+
 int main() {
   test_refresh_params_request_is_accepted();
   test_safety_protect_request_validation();
@@ -567,5 +608,7 @@ int main() {
   test_session_edge_matrix();
   test_config_set_enable_queues();
   test_config_gate_precedes_validation();
+  test_clear_discards_pending_but_keeps_diagnostics();
+  test_command_concurrent_publish_take_with_shared_lock();
   return 0;
 }

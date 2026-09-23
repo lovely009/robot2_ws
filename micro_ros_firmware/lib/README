@@ -12,7 +12,7 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 | `dma` | DMA 控制器、通道配置和 IRQ 资源管理 | IMU/LED 采样策略和设备业务 |
 | `motor_protocol` | Vaxor/CERB 发现、编解码、MIT、停止、SYNC、配置帧 | 注册表、ROS、HAL |
 | `motor_control` | 动态注册表、型号 Profile、生命周期、安全、freshness、状态快照 | ROS、HAL、厂家字节布局 |
-| `control_mailbox` | 高频完整命令、低频配置请求、授权/连接事件的跨任务交换 | 协议校验、限位裁决、CAN 发送 |
+| `control_mailbox` | 完整命令、分段轨迹、批量策略、低频配置和会话事件的跨任务交换 | 协议校验、限位裁决、CAN 发送 |
 | `session_sync` | 会话/授权电平与边沿到内核调用的纯逻辑派生 | 任务调度、ROS、CAN |
 | `storage_projection` | 参数视图与 Flash blob 记录的纯投影 | Flash 读写、保存时序、任务通知 |
 | `param_store` | 参数字段、单位、blob 布局、CRC 和版本迁移 | W25Q64 设备访问、控制策略 |
@@ -29,10 +29,10 @@ ROS/micro-ROS 消息转换和应用编排留在 `src/`。顶层库按所有权�
 `motor_safety` 和 `motor_snapshot`。Profile 是固件内置的型号目录，不是安装台账；
 当前只收录已确认参数的 CERB R48/R58 和 Vaxor 25/30mm 型号。
 
-`control_mailbox` 内部使用相互独立的 command/config/event 存储和 API。当前实现为：
-高频命令使用完整 ID 快照的双缓冲 latest-wins；低频模式、增益、位置限位和逐电机
-enable 使用固定容量 FIFO；连接和授权使用状态电平加一次性边沿。库不保存 joint 名、
-协议类型或电机型号，也不做厂家协议能力裁决。
+`control_mailbox` 内部使用相互独立的 command/trajectory/policy/config/event 存储
+和 API。命令、完整轨迹和批量策略分别使用双缓冲 latest-wins；轨迹分段使用独立
+固定容量拼接缓冲；低频配置使用固定容量 FIFO；连接和授权使用状态电平加一次性
+边沿。库不保存 joint 名、协议类型或电机型号，也不做厂家协议能力裁决。
 
 `dma` 是共享的板级资源门卫，只管控制器级资源（DMA1 + BDMA/DMAMUX2 时钟、
 通道 NVIC、占用登记、优先级合规断言），由 `main` 板级初始化统一使能。设备
@@ -52,7 +52,7 @@ src/sensor_task    -> imu
 src/led_task       -> ws2812
 src/storage_task   -> w25q64 + param_store + storage_projection（Flash 唯一所有者，见 storage_task.h）
 lib/w25q64         -> octospi 控制器层 + W25 命令层/geometry（仅 storage_task 使用）
-lib/param_store    -> blob 布局/CRC/v1 迁移 + 参数名/单位纯逻辑（无硬件依赖）
+lib/param_store    -> blob 布局/CRC/v1-v2 迁移 + 参数字段/单位纯逻辑（无硬件依赖）
 ```
 
 库不能反向依赖 `src/`、ROS 或其他任务。实时路径不使用动态内存、阻塞等待或
@@ -71,9 +71,33 @@ lib/param_store    -> blob 布局/CRC/v1 迁移 + 参数名/单位纯逻辑（�
 
 - `control_mailbox_submit_command()` / `take_command()`：最多 64 个唯一
   `uint16 motor_id`，位置/速度/力矩为 `float32`，携带 sequence 和 MCU 接收 tick；
+- `control_mailbox_submit_trajectory()` / `take_trajectory()`：有界分段拼接，完成后
+  发布一条轨迹；空轨迹用于取消；
+- `control_mailbox_submit_policy()` / `take_policy()`：最多 64 台的独立批量策略快照；
 - `control_mailbox_submit_config()` / `take_config()`：固定容量 16 的低频语义请求队列，
   不覆盖已入队请求；
 - `control_mailbox_request_authorization()`、`request_agent_connected()` 和
   `take_events()`：只传递连接/授权状态及边沿；
 - 所有 API 都是纯 C、静态内存；并发临界区由任务调用方提供，mailbox 不创建锁、任务
   或动态内存。
+
+## 库级文档与审查
+
+每个库的接口、所有权、测试覆盖和审查结论分别记录在库目录下的 `README.md`：
+
+| 库 | 文档 |
+|---|---|
+| `board` | [board/README.md](board/README.md) |
+| `control_mailbox` | [control_mailbox/README.md](control_mailbox/README.md) |
+| `dma` | [dma/README.md](dma/README.md) |
+| `fdcan` | [fdcan/README.md](fdcan/README.md) |
+| `imu` | [imu/README.md](imu/README.md) |
+| `motor_control` | [motor_control/README.md](motor_control/README.md) |
+| `motor_protocol` | [motor_protocol/README.md](motor_protocol/README.md) |
+| `param_store` | [param_store/README.md](param_store/README.md) |
+| `session_sync` | [session_sync/README.md](session_sync/README.md) |
+| `storage_projection` | [storage_projection/README.md](storage_projection/README.md) |
+| `w25q64` | [w25q64/README.md](w25q64/README.md) |
+| `ws2812` | [ws2812/README.md](ws2812/README.md) |
+
+总审查矩阵和整改建议见 [docs/architecture/lib-library-audit.md](../docs/architecture/lib-library-audit.md)。本文件仍是跨库分层和依赖方向的架构总览；库级 README 不替代它。

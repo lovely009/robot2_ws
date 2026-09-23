@@ -4,7 +4,9 @@
 #include <cassert>
 #include <cmath>
 
-static bool near(float a, float b) { return std::fabs(a - b) < 1e-4f; }
+static bool near(float a, float b) {
+  return std::fabs(a - b) < 1e-4f;
+}
 
 int main() {
   heater_pid_state_t s{};

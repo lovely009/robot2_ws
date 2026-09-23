@@ -255,7 +255,7 @@ static void note_publish(rcl_ret_t rc) {
 }
 
 static void publish_motion_states() {
-  // 50 Hz（10ms tick ×2）：与设备的 20ms 反馈对齐；控制边界独立为 5ms/200Hz。
+  // 50 Hz（10ms tick ×2）：与设备的 20ms 反馈对齐；控制边界独立为 2ms/500Hz。
   // 100Hz 里有一半只是重复发同一份测量值——与 publish_statuses 降到 20Hz 是同一条理由
   // （那边注释写的正是「100Hz 里绝大部分只是 state_age 自增的重复内容」）。
   static uint8_t s_motion_phase = 0U;
@@ -337,8 +337,8 @@ static void publish_topology(uint32_t now_ms) {
     out.bus_index = entries[i].bus_index;
     out.protocol = entries[i].protocol;
     (void)rosidl_runtime_c__String__assignn(&out.model_name,
-                                            entries[i].model_name,
-                                            strlen(entries[i].model_name));
+        entries[i].model_name,
+        strlen(entries[i].model_name));
     out.capability_flags = entries[i].capability_flags;
     out.online = entries[i].online;
     out.conflict = entries[i].conflict;
@@ -469,7 +469,7 @@ static void publish_device_param_report(uint32_t now_ms) {
     out.dev_vel_limit = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX];
     out.dev_torque_limit =
         param_units_nm_to_amp(v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX],
-                              v.torque_per_amp);
+        v.torque_per_amp);
     out.dev_safety = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     out.dev_direction = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
   }
@@ -533,9 +533,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   // 而不是等读到"两个字段一模一样"才发现。
   {
     const rosidl_runtime_c__uint32__Sequence *buses[] = {
-        &g_diagnostics_msg.ring_drop,
-        &g_diagnostics_msg.rx_hw_lost,
-        &g_diagnostics_msg.tx_frame_count,
+      &g_diagnostics_msg.ring_drop,
+      &g_diagnostics_msg.rx_hw_lost,
+      &g_diagnostics_msg.tx_frame_count,
     };
     for (size_t i = 0U; i < sizeof(buses) / sizeof(buses[0]); ++i) {
       if (buses[i]->data == NULL ||
@@ -562,7 +562,7 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   static bool s_topology_strings_ready = false;
   if (!s_topology_strings_ready) {
     for (size_t i = 0; i < sizeof(g_topology_buf) / sizeof(g_topology_buf[0]);
-         ++i) {
+        ++i) {
       (void)rosidl_runtime_c__String__init(&g_topology_buf[i].model_name);
     }
     s_topology_strings_ready = true;
@@ -572,9 +572,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
   sub_opts.qos = qos_stream();
   if (rcl_subscription_init(&g_command_sub, node,
-                            ROSIDL_GET_MSG_TYPE_SUPPORT(
-                                can_bridge_msgs, msg, MotorCommandArray),
-                            kCommandTopic, &sub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(
+      can_bridge_msgs, msg, MotorCommandArray),
+      kCommandTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -586,9 +586,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   // 网页对更长示教按 256 点分段。发布侧 rosbridge 也必须 reliable 才配得上。
   sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_trajectory_sub, node,
-                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                        MotorTrajectory),
-                            kTrajectoryTopic, &sub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorTrajectory),
+      kTrajectoryTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -598,9 +598,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   // 策略是低频状态声明，允许重发；用 reliable 小深度避免"没生效"被静默。
   sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_policy_sub, node,
-                            ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                        MotorPolicyArray),
-                            kPolicyTopic, &sub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorPolicyArray),
+      kPolicyTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -610,9 +610,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   rcl_publisher_options_t pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_stream();
   if (rcl_publisher_init(&g_motion_states_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(
-                             can_bridge_msgs, msg, MotorMotionStateArray),
-                         kMotionStatesTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(
+      can_bridge_msgs, msg, MotorMotionStateArray),
+      kMotionStatesTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -621,9 +621,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_stream();
   if (rcl_publisher_init(&g_status_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     MotorStatusArray),
-                         kStatusTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorStatusArray),
+      kStatusTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -632,9 +632,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_reliable(1);
   if (rcl_publisher_init(&g_topology_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     MotorTopology),
-                         kTopologyTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorTopology),
+      kTopologyTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -643,9 +643,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_reliable(8);
   if (rcl_publisher_init(&g_events_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     MotorEvent),
-                         kEventsTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorEvent),
+      kEventsTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -654,9 +654,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_stream();
   if (rcl_publisher_init(&g_diagnostics_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     MotorDiagnostics),
-                         kDiagnosticsTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorDiagnostics),
+      kDiagnosticsTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -665,9 +665,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   pub_opts = rcl_publisher_get_default_options();
   pub_opts.qos = qos_stream();
   if (rcl_publisher_init(&g_trajectory_state_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-                                                     MotorTrajectoryState),
-                         kTrajectoryStateTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
+      MotorTrajectoryState),
+      kTrajectoryStateTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -678,9 +678,9 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   // 会被静默丢弃（与 motor_topology 同一处理，那里也是 48 台量级）。
   pub_opts.qos = qos_reliable(1);
   if (rcl_publisher_init(&g_device_param_pub, node,
-                         ROSIDL_GET_MSG_TYPE_SUPPORT(
-                             can_bridge_msgs, msg, DeviceParamReport),
-                         kDeviceParamReportTopic, &pub_opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(
+      can_bridge_msgs, msg, DeviceParamReport),
+      kDeviceParamReportTopic, &pub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
@@ -688,22 +688,22 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 
   // ---- executor ----
   if (rclc_executor_add_subscription(executor, &g_command_sub, &g_command_msg,
-                                     command_array_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+      command_array_cb,
+      ON_NEW_DATA) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
   g_command_added = true;
   if (rclc_executor_add_subscription(executor, &g_trajectory_sub,
-                                     &g_trajectory_msg, trajectory_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+      &g_trajectory_msg, trajectory_cb,
+      ON_NEW_DATA) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }
   g_trajectory_added = true;
   if (rclc_executor_add_subscription(executor, &g_policy_sub, &g_policy_msg,
-                                     policy_cb,
-                                     ON_NEW_DATA) != RCL_RET_OK) {
+      policy_cb,
+      ON_NEW_DATA) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
   }

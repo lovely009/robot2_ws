@@ -10,7 +10,7 @@
 //    Iq = τ ÷ (Kt × 减速比 × 效率)（命令方向，修正旧路径 N·m/A 混用）。
 //
 // 反馈模型（2026-09-05 与厂家行为核实，两部分）：
-//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，跟随控制边界 200Hz；
+//  - 12B 回显帧 @ reply-id（0x701+4n）：控制帧的实时反馈，跟随控制边界 500Hz；
 //  - 20B 状态帧 @ status-id（0x702+4n）：20ms 周期自主上报，承担总线检测
 //    （心跳），并携带电压/故障/身份字段。
 //
@@ -25,8 +25,11 @@
 #include <math.h>
 #include <string.h>
 
+// ===========================================================================
+// VAXOR：MIT 控制、状态反馈与本地配置边界
+// ===========================================================================
 static bool vaxor_match_rx_frame(const motor_protocol_raw_frame_t *frame,
-                                 uint16_t *out_node) {
+    uint16_t *out_node) {
   if (frame == NULL || out_node == NULL || frame->is_extended) {
     return false;
   }
@@ -49,8 +52,8 @@ static bool vaxor_match_rx_frame(const motor_protocol_raw_frame_t *frame,
 }
 
 static void vaxor_fill_si(const motor_protocol_model_profile_t *profile,
-                          const motor_protocol_joint_state_t *wire,
-                          motor_protocol_measured_state_t *out) {
+    const motor_protocol_joint_state_t *wire,
+    motor_protocol_measured_state_t *out) {
   // 线协议值 = 电机轴量；effort 字段由 codec 暂存 Iq(A)。
   out->current_a = (float)wire->effort;
   if (profile == NULL || profile->gear_ratio <= 0.0f) {
@@ -62,13 +65,13 @@ static void vaxor_fill_si(const motor_protocol_model_profile_t *profile,
   out->position_rad = (float)(wire->position / profile->gear_ratio);
   out->velocity_rad_s = (float)(wire->velocity / profile->gear_ratio);
   out->effort_nm = (float)(wire->effort * profile->torque_constant_nm_per_amp *
-                           profile->gear_ratio * profile->gear_efficiency);
+      profile->gear_ratio * profile->gear_efficiency);
 }
 
 static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
-                               uint16_t node,
-                               const motor_protocol_raw_frame_t *frame,
-                               motor_protocol_measured_state_t *out) {
+    uint16_t node,
+    const motor_protocol_raw_frame_t *frame,
+    motor_protocol_measured_state_t *out) {
   if (profile != NULL && profile->protocol != &motor_protocol_vaxor_adapter) {
     return false;
   }
@@ -85,7 +88,7 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
   motor_protocol_joint_state_t wire = {0};
   if (frame->can_id == motor_protocol_vaxor_reply_id(node) &&
       frame->dlc == 12U) {
-    // 回显帧恒 12B（实时反馈，跟随控制边界 200Hz）；20B 状态帧只在 status-id。
+    // 回显帧恒 12B（实时反馈，跟随控制边界 500Hz）；20B 状态帧只在 status-id。
     if (!motor_protocol_unpack_vaxor_feedback(frame->data, frame->dlc, &wire)) {
       return false;
     }
@@ -119,9 +122,9 @@ static bool vaxor_decode_frame(const motor_protocol_model_profile_t *profile,
 }
 
 static bool vaxor_encode_mit_command(const motor_protocol_model_profile_t *profile,
-                                     uint16_t node, uint8_t bus_index,
-                                     const motor_protocol_control_intent_t *intent,
-                                     motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    const motor_protocol_control_intent_t *intent,
+    motor_protocol_tx_frame_t *out) {
   if (profile == NULL || profile->protocol != &motor_protocol_vaxor_adapter ||
       intent == NULL || out == NULL) {
     return false;
@@ -132,7 +135,7 @@ static bool vaxor_encode_mit_command(const motor_protocol_model_profile_t *profi
     return false;
   }
   const double torque_per_amp = (double)profile->torque_constant_nm_per_amp *
-                                profile->gear_ratio * profile->gear_efficiency;
+      profile->gear_ratio * profile->gear_efficiency;
   if (torque_per_amp <= 0.0) {
     return false; // Profile 换算参数不完整，拒绝生成运动帧
   }
@@ -155,8 +158,8 @@ static bool vaxor_encode_mit_command(const motor_protocol_model_profile_t *profi
 }
 
 static bool vaxor_encode_control(uint16_t node, uint8_t bus_index, bool run,
-                                 motor_protocol_tx_class_t tx_class,
-                                 motor_protocol_tx_frame_t *out) {
+    motor_protocol_tx_class_t tx_class,
+    motor_protocol_tx_frame_t *out) {
   if (out == NULL) {
     return false;
   }
@@ -175,18 +178,18 @@ static bool vaxor_encode_control(uint16_t node, uint8_t bus_index, bool run,
 }
 
 static bool vaxor_encode_enable(const motor_protocol_model_profile_t *profile,
-                                uint16_t node, uint8_t bus_index,
-                                motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   (void)profile;
   return vaxor_encode_control(node, bus_index, true, MOTOR_PROTOCOL_TX_CLASS_P1,
-                              out);
+      out);
 }
 
 // TBD-SAFETY-01：软停暂取 MIT 阻尼帧（零目标 + 默认 kd，保持使能），
 // 与既有经验行为一致；升级为 100ms 硬停的路径由内核负责。
 static bool vaxor_encode_soft_stop(const motor_protocol_model_profile_t *profile,
-                                   uint16_t node, uint8_t bus_index,
-                                   motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   if (profile == NULL || profile->protocol != &motor_protocol_vaxor_adapter ||
       out == NULL) {
     return false;
@@ -202,18 +205,18 @@ static bool vaxor_encode_soft_stop(const motor_protocol_model_profile_t *profile
 }
 
 static bool vaxor_encode_disable(const motor_protocol_model_profile_t *profile,
-                                 uint16_t node, uint8_t bus_index,
-                                 motor_protocol_tx_frame_t *out) {
+    uint16_t node, uint8_t bus_index,
+    motor_protocol_tx_frame_t *out) {
   (void)profile;
   if (!vaxor_encode_control(node, bus_index, false, MOTOR_PROTOCOL_TX_CLASS_P0,
-                            out)) {
+      out)) {
     return false;
   }
   return true;
 }
 
 static bool vaxor_encode_discovery_sync(uint8_t bus_index,
-                                        motor_protocol_tx_frame_t *out) {
+    motor_protocol_tx_frame_t *out) {
   (void)bus_index;
   (void)out;
   return false; // vaxor 靠 ~20ms 自主上报发现，无 SYNC 帧（ARD §25）
@@ -221,7 +224,7 @@ static bool vaxor_encode_discovery_sync(uint8_t bus_index,
 
 static uint8_t
 vaxor_config_stage_count(const motor_protocol_model_profile_t *profile,
-                         const motor_protocol_config_request_t *request) {
+    const motor_protocol_config_request_t *request) {
   if (request == NULL) {
     return 0U;
   }
@@ -237,9 +240,9 @@ vaxor_config_stage_count(const motor_protocol_model_profile_t *profile,
 }
 
 static bool vaxor_config_stage_info(uint8_t stage,
-                                    const motor_protocol_model_profile_t *profile,
-                                    const motor_protocol_config_request_t *request,
-                                    motor_protocol_config_stage_info_t *out) {
+    const motor_protocol_model_profile_t *profile,
+    const motor_protocol_config_request_t *request,
+    motor_protocol_config_stage_info_t *out) {
   (void)profile;
   if (request == NULL || out == NULL || request->kind != MOTOR_PROTOCOL_CONFIG_SET_MODE ||
       stage >= 2U) {
@@ -286,24 +289,25 @@ static motor_protocol_stage_outcome_t vaxor_config_on_response(
 }
 
 const motor_protocol_adapter_t motor_protocol_vaxor_adapter = {
-    .protocol_name = "vaxor",
-    .node_id_min = 1U,
-    .node_id_max = 60U,
-    .offline_timeout_ms = 100U, // TBD-SAFETY-03 占位：5×20ms 自主上报
-    .enable_settle_ms = 0U,     // 使能后即可发运动目标（既有经验行为）
-    .autonomous_feedback = true,
-    .config_verify_required = true, // 模式切换无厂家确认对象（TBD-CONFIG-01）
-    .match_rx_frame = vaxor_match_rx_frame,
-    // 无 SDO/事务应答对象：match 命中的 12B 回显帧与 20B 状态帧都是存在证据。
-    .is_discovery_frame = NULL,
-    .decode_frame = vaxor_decode_frame,
-    .encode_mit_command = vaxor_encode_mit_command,
-    .encode_enable = vaxor_encode_enable,
-    .encode_soft_stop = vaxor_encode_soft_stop,
-    .encode_disable = vaxor_encode_disable,
-    .encode_discovery_sync = vaxor_encode_discovery_sync,
-    .config_stage_count = vaxor_config_stage_count,
-    .config_stage_info = vaxor_config_stage_info,
-    .config_encode_stage = vaxor_config_encode_stage,
-    .config_on_response = vaxor_config_on_response,
+  .protocol_name = "vaxor",
+  .node_id_min = 1U,
+  .node_id_max = 60U,
+  .offline_timeout_ms = 100U,   // TBD-SAFETY-03 占位：5×20ms 自主上报
+  .enable_settle_ms = 0U,       // 使能后即可发运动目标（既有经验行为）
+  .autonomous_feedback = true,
+  .config_verify_required = true,   // 模式切换无厂家确认对象（TBD-CONFIG-01）
+  .p1_batch_max = 1U,
+  .match_rx_frame = vaxor_match_rx_frame,
+  // 无 SDO/事务应答对象：match 命中的 12B 回显帧与 20B 状态帧都是存在证据。
+  .is_discovery_frame = NULL,
+  .decode_frame = vaxor_decode_frame,
+  .encode_mit_command = vaxor_encode_mit_command,
+  .encode_enable = vaxor_encode_enable,
+  .encode_soft_stop = vaxor_encode_soft_stop,
+  .encode_disable = vaxor_encode_disable,
+  .encode_discovery_sync = vaxor_encode_discovery_sync,
+  .config_stage_count = vaxor_config_stage_count,
+  .config_stage_info = vaxor_config_stage_info,
+  .config_encode_stage = vaxor_config_encode_stage,
+  .config_on_response = vaxor_config_on_response,
 };

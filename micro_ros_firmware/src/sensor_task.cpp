@@ -84,7 +84,7 @@ bool sensor_task_start(void) {
   // 共享 DMA 控制器资源已由 main 初始化；BMI088 的阻塞 SPI2 配置归
   // lib/imu 自持，当前不占用 DMA。
   return xTaskCreate(sensor_task_fn, "sensor", kSensorTaskStack, nullptr,
-                     kSensorTaskPrio, nullptr) == pdPASS;
+      kSensorTaskPrio, nullptr) == pdPASS;
 }
 
 bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence) {

@@ -11,16 +11,10 @@
 extern "C" {
 #endif
 
+// ===========================================================================
+// 公共：协议无关类型、模式与通用量化
+// ===========================================================================
 #define MOTOR_PROTOCOL_PI 3.14159265358979323846
-
-// ---------------- vaxor（25/30mm）协议常量 ----------------
-// 码值比例依据《25-30mm 驱控一体使用说明手册》V20260204 §3
-#define MOTOR_PROTOCOL_VAXOR_TICKS_PER_REV 2097152LL
-#define MOTOR_PROTOCOL_VAXOR_POSITION_TICK_LIMIT 0x7cffffffL
-#define MOTOR_PROTOCOL_VAXOR_VELOCITY_CODE_LIMIT 30000
-#define MOTOR_PROTOCOL_VAXOR_CURRENT_SCALE_A (11.0 / 4096.0)
-#define MOTOR_PROTOCOL_VAXOR_KP_SCALE 0.00001
-#define MOTOR_PROTOCOL_VAXOR_KD_SCALE 0.01
 
 typedef enum {
   MOTOR_PROTOCOL_MODE_MIT = 0,
@@ -42,6 +36,99 @@ typedef struct {
   double effort;
 } motor_protocol_joint_state_t;
 
+uint32_t motor_protocol_float_to_uint(double value, double low, double high,
+    unsigned bits);
+
+// ===========================================================================
+// CERB：自定义 PDO / MIT、CANopen SDO 与设备参数换算
+// ===========================================================================
+// 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
+// 以下常量是 CERB CAN-ID 推导的唯一来源（历史上 cerb_adapter.c 曾自带一份
+// 0x300/0x110 副本并内联重算命令 ID）。
+#define MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE 0x110U
+#define MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID 0x210U
+#define MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES 6U
+#define MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE 0x300U
+#define MOTOR_PROTOCOL_CERB_SYNC_ID 0x080U
+
+// CANopen SDO（《CANopen-V0.9 字典表》§SDO 协议内容详解）：
+//   请求 0x600|node，响应 0x580|node，DLC 恒 8，CANFD 加速标准帧
+//   （说明书 §3.1：1M 仲裁段 / 5M 数据段）。
+//   管理对象均 ≤4 字节，走快速（expedited）SDO；设备身份对象 0x1008 超
+//   4 字节，走分段（segmented）上传。
+#define MOTOR_PROTOCOL_CERB_SDO_REQUEST_ID_BASE 0x600U
+#define MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE 0x580U
+
+typedef struct {
+  double position_rad;
+  double velocity_rad_s;
+  double torque_nm;
+} motor_protocol_cerb_limits_t;
+
+bool motor_protocol_cerb_node_valid(unsigned node);
+bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id);
+bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
+
+// 0x210 多轴快控：每槽复用单轴 9B 命令，64B 其余位置填 0。
+typedef struct {
+  uint8_t node;
+  uint8_t data[9];
+} motor_protocol_cerb_multi_axis_t;
+bool motor_protocol_cerb_single_mit_node(uint32_t can_id, bool is_extended,
+    bool is_fd, bool is_brs,
+    const uint8_t *data, size_t size,
+    uint8_t *node);
+bool motor_protocol_pack_cerb_multi_mit(
+  const motor_protocol_cerb_multi_axis_t *axes, size_t count,
+  uint8_t out[64]);
+
+// SDO 管理对象反向换算（设备影子回读，REFRESH_PARAMS 事务用）：
+// 0x607D cnt（负载端，65536 cnt/360°）→ 关节侧 rad；
+// 0x6080 电机端 RPM → 关节侧 rad/s（÷gear）；0x2538 电机端 mA → 关节侧 N·m。
+double motor_protocol_cerb_limit_cnt_to_rad(int32_t cnt);
+double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
+    uint32_t rpm);
+// 限值对象专用换算（0x2538 电流上限 ↔ 关节侧扭矩），系数 = 关节侧 N·m/A，
+// 由 motor_protocol_profile_limit_nm_per_amp() 给出（规格书峰值对优先）。
+// 与反馈换算分开：反馈是"电流 → 实测扭矩估计"（走 Kt 链），限值是"规格书
+// 峰值对的两端映射"，规格书自身额定/峰值两点隐含效率不同，不能共用一个常数。
+double motor_protocol_limit_ma_to_joint_nm(double joint_nm_per_amp,
+    uint32_t milliamp);
+uint32_t motor_protocol_limit_joint_nm_to_ma(double joint_nm_per_amp,
+    double joint_nm);
+
+double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
+    double gear_ratio,
+    double gear_efficiency,
+    uint32_t milliamp);
+
+// 输出 CAN FD DLC=9 对应的 12 Byte 载荷：控制字 + 8 Byte MIT + 3 Byte 零填充。
+bool motor_protocol_pack_cerb_mit_frame(
+  const motor_protocol_joint_command_t *command,
+  const motor_protocol_cerb_limits_t *limits, bool enabled,
+  uint8_t out[12]);
+
+// 解码位置(rad)、电机端速度(rad/s)和 Iq(A)；故障状态反馈返回 false。
+bool motor_protocol_unpack_cerb_feedback(
+  const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
+
+// 解码 12B 反馈帧 data[8..9] 的电机线圈温度（大端 int16，单位 0.1 °C，
+// 《使用协议简易说明书》「执行器发给上位机」表）。不看故障位——故障帧里
+// 运动量不可信，温度反而是最该看的量。帧形不成立（null / DLC≠12）返回 NAN。
+float motor_protocol_cerb_feedback_temperature_c(const uint8_t *data,
+    size_t size);
+
+// ===========================================================================
+// VAXOR：25/30 mm MIT 与自主状态反馈
+// ===========================================================================
+// 码值比例依据《25-30mm 驱控一体使用说明手册》V20260204 §3。
+#define MOTOR_PROTOCOL_VAXOR_TICKS_PER_REV 2097152LL
+#define MOTOR_PROTOCOL_VAXOR_POSITION_TICK_LIMIT 0x7cffffffL
+#define MOTOR_PROTOCOL_VAXOR_VELOCITY_CODE_LIMIT 30000
+#define MOTOR_PROTOCOL_VAXOR_CURRENT_SCALE_A (11.0 / 4096.0)
+#define MOTOR_PROTOCOL_VAXOR_KP_SCALE 0.00001
+#define MOTOR_PROTOCOL_VAXOR_KD_SCALE 0.01
+
 typedef struct {
   double voltage_v;
   uint32_t fault;
@@ -52,26 +139,13 @@ typedef struct {
 } motor_protocol_vaxor_status_t;
 
 typedef struct {
-  double position_rad;
-  double velocity_rad_s;
-  double torque_nm;
-} motor_protocol_cerb_limits_t;
-
-typedef struct {
   bool run;
   bool set_zero;
   uint8_t mode;
 } motor_protocol_vaxor_control_t;
 
-uint32_t motor_protocol_float_to_uint(double value, double low, double high,
-                                      unsigned bits);
-
 // 节点 ID：base + stride*node（node 合法范围 1..60）。基址对应 node 0，
-// 因 node 0 非法而不冲突。
-//
-// 以下常量是 vaxor CAN-ID 推导的唯一来源：本文件的 *_id() 与 adapter 的
-// 接收匹配均须引用，勿在别处重新定义字面量（历史上 vaxor_adapter.c 曾
-// 自带一份 0x701/0x702 副本并与取模算术重复实现）。
+// 因 node 0 非法而不冲突。以下常量是 VAXOR CAN-ID 推导的唯一来源。
 #define MOTOR_PROTOCOL_VAXOR_COMMAND_ID_BASE 0x501U
 #define MOTOR_PROTOCOL_VAXOR_CONTROL_ID_BASE 0x502U
 #define MOTOR_PROTOCOL_VAXOR_REPLY_ID_BASE 0x701U
@@ -83,86 +157,28 @@ uint32_t motor_protocol_vaxor_control_id(unsigned node);
 uint32_t motor_protocol_vaxor_reply_id(unsigned node);
 uint32_t motor_protocol_vaxor_status_id(unsigned node);
 
-// —— 对端仿真/host 测试专用分区 ——
-// 以下 4 个函数站在「设备侧」视角（构造设备来帧、解码固件下发帧），
-// 生产固件不调用，仅供 host 测试伪造九节点对端；总线对端另有 Python 仿真
-// （micro_ros_agent/tools/fdcan_motor_sim.py）独立实现，改动需双侧对齐。
+// 对端仿真/host 测试专用分区：生产固件不调用，仅用于伪造设备侧帧。
 void motor_protocol_pack_vaxor_command(const motor_protocol_joint_command_t *command,
-                                       uint8_t out[12]);
-bool motor_protocol_unpack_vaxor_command(const uint8_t *data, size_t size,
-                                         motor_protocol_joint_command_t *command);
-void motor_protocol_pack_vaxor_control(const motor_protocol_vaxor_control_t *control,
-                                       uint8_t out[8]);
-bool motor_protocol_unpack_vaxor_control(const uint8_t *data, size_t size,
-                                         motor_protocol_vaxor_control_t *control);
-void motor_protocol_pack_vaxor_reply(unsigned node,
-                                     const motor_protocol_joint_state_t *state,
-                                     uint8_t out[12]);
-void motor_protocol_pack_vaxor_status(unsigned node,
-                                      const motor_protocol_joint_state_t *state,
-                                      double voltage_v, uint32_t fault,
-                                      uint8_t motor_state,
-                                      uint8_t calibration_state, uint8_t mode,
-                                      uint8_t motor_type, uint8_t out[20]);
-bool motor_protocol_unpack_vaxor_feedback(const uint8_t *data, size_t size,
-                                          motor_protocol_joint_state_t *state);
-bool motor_protocol_unpack_vaxor_status(
-    const uint8_t *data, size_t size, motor_protocol_vaxor_status_t *status);
-
-// ---------------- CERB 自定义 PDO / MIT ----------------
-// 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
-// 与 vaxor 同理：以下常量是 CERB CAN-ID 推导的唯一来源（历史上
-// cerb_adapter.c 曾自带一份 0x300/0x110 副本并内联重算命令 ID）。
-#define MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE 0x110U
-#define MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE 0x300U
-#define MOTOR_PROTOCOL_CERB_SYNC_ID 0x080U
-// CANopen SDO（《CANopen-V0.9 字典表》§SDO 协议内容详解）：
-//   请求 0x600|node，响应 0x580|node，DLC 恒 8，CANFD 加速标准帧
-//   （说明书 §3.1：1M 仲裁段 / 5M 数据段）。
-//   管理对象均 ≤4 字节，走快速（expedited）SDO；设备身份对象 0x1008 超
-//   4 字节，走分段（segmented）上传。
-#define MOTOR_PROTOCOL_CERB_SDO_REQUEST_ID_BASE 0x600U
-#define MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE 0x580U
-
-bool motor_protocol_cerb_node_valid(unsigned node);
-bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id);
-bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
-
-// SDO 管理对象反向换算（设备影子回读，REFRESH_PARAMS 事务用）：
-// 0x607D cnt（负载端，65536 cnt/360°）→ 关节侧 rad；
-// 0x6080 电机端 RPM → 关节侧 rad/s（÷gear）；0x2538 电机端 mA → 关节侧 N·m。
-double motor_protocol_cerb_limit_cnt_to_rad(int32_t cnt);
-double motor_protocol_cerb_motor_rpm_to_joint_rad_s(double gear_ratio,
-                                                    uint32_t rpm);
-// 限值对象专用换算（0x2538 电流上限 ↔ 关节侧扭矩），系数 = 关节侧 N·m/A，
-// 由 motor_protocol_profile_limit_nm_per_amp() 给出（规格书峰值对优先）。
-// 与反馈换算分开：反馈是"电流 → 实测扭矩估计"（走 Kt 链），限值是"规格书
-// 峰值对的两端映射"，规格书自身额定/峰值两点隐含效率不同，不能共用一个常数。
-double motor_protocol_limit_ma_to_joint_nm(double joint_nm_per_amp,
-                                           uint32_t milliamp);
-uint32_t motor_protocol_limit_joint_nm_to_ma(double joint_nm_per_amp,
-                                             double joint_nm);
-
-double motor_protocol_cerb_motor_ma_to_joint_nm(double torque_constant,
-                                                double gear_ratio,
-                                                double gear_efficiency,
-                                                uint32_t milliamp);
-
-// 输出 CAN FD DLC=9 对应的 12 Byte 载荷：控制字 + 8 Byte MIT + 3 Byte 零填充。
-bool motor_protocol_pack_cerb_mit_frame(
-    const motor_protocol_joint_command_t *command,
-    const motor_protocol_cerb_limits_t *limits, bool enabled,
     uint8_t out[12]);
-
-// 解码位置(rad)、电机端速度(rad/s)和 Iq(A)；故障状态反馈返回 false。
-bool motor_protocol_unpack_cerb_feedback(
-    const uint8_t *data, size_t size, motor_protocol_joint_state_t *state);
-
-// 解码 12B 反馈帧 data[8..9] 的电机线圈温度（大端 int16，单位 0.1 °C，
-// 《使用协议简易说明书》「执行器发给上位机」表）。不看故障位——故障帧里
-// 运动量不可信，温度反而是最该看的量。帧形不成立（null / DLC≠12）返回 NAN。
-float motor_protocol_cerb_feedback_temperature_c(const uint8_t *data,
-                                                 size_t size);
+bool motor_protocol_unpack_vaxor_command(const uint8_t *data, size_t size,
+    motor_protocol_joint_command_t *command);
+void motor_protocol_pack_vaxor_control(const motor_protocol_vaxor_control_t *control,
+    uint8_t out[8]);
+bool motor_protocol_unpack_vaxor_control(const uint8_t *data, size_t size,
+    motor_protocol_vaxor_control_t *control);
+void motor_protocol_pack_vaxor_reply(unsigned node,
+    const motor_protocol_joint_state_t *state,
+    uint8_t out[12]);
+void motor_protocol_pack_vaxor_status(unsigned node,
+    const motor_protocol_joint_state_t *state,
+    double voltage_v, uint32_t fault,
+    uint8_t motor_state,
+    uint8_t calibration_state, uint8_t mode,
+    uint8_t motor_type, uint8_t out[20]);
+bool motor_protocol_unpack_vaxor_feedback(const uint8_t *data, size_t size,
+    motor_protocol_joint_state_t *state);
+bool motor_protocol_unpack_vaxor_status(
+  const uint8_t *data, size_t size, motor_protocol_vaxor_status_t *status);
 
 #ifdef __cplusplus
 }

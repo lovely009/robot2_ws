@@ -43,38 +43,38 @@ static void micro_ros_task_fn(void *parameters) {
   (void)parameters;
   for (;;) {
     switch (link_state_get()) {
-      case MICRO_ROS_LINK_WAIT_AGENT:
-        if (RMW_RET_OK == rmw_uros_ping_agent(200, 3)) {
-          link_state_set(MICRO_ROS_LINK_CONNECT);
-        }
-        break;
+    case MICRO_ROS_LINK_WAIT_AGENT:
+      if (RMW_RET_OK == rmw_uros_ping_agent(200, 3)) {
+        link_state_set(MICRO_ROS_LINK_CONNECT);
+      }
+      break;
 
-      case MICRO_ROS_LINK_CONNECT:
-        if (ros_bridge_create()) {
-          // ever_connected 与状态在同一临界区发布：led_task 同时读这两个值。
-          taskENTER_CRITICAL();
-          g_ever_connected = true;
-          g_link_state = MICRO_ROS_LINK_RUN;
-          taskEXIT_CRITICAL();
-        } else {
-          ros_bridge_destroy();
-          link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
-        }
-        break;
-
-      case MICRO_ROS_LINK_RUN:
-        if (RMW_RET_OK != rmw_uros_ping_agent(200, 3)) {
-          link_state_set(MICRO_ROS_LINK_LOST);
-        } else {
-          ros_bridge_spin();
-        }
-        break;
-
-      case MICRO_ROS_LINK_LOST:
-      default:
+    case MICRO_ROS_LINK_CONNECT:
+      if (ros_bridge_create()) {
+        // ever_connected 与状态在同一临界区发布：led_task 同时读这两个值。
+        taskENTER_CRITICAL();
+        g_ever_connected = true;
+        g_link_state = MICRO_ROS_LINK_RUN;
+        taskEXIT_CRITICAL();
+      } else {
         ros_bridge_destroy();
         link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
-        break;
+      }
+      break;
+
+    case MICRO_ROS_LINK_RUN:
+      if (RMW_RET_OK != rmw_uros_ping_agent(200, 3)) {
+        link_state_set(MICRO_ROS_LINK_LOST);
+      } else {
+        ros_bridge_spin();
+      }
+      break;
+
+    case MICRO_ROS_LINK_LOST:
+    default:
+      ros_bridge_destroy();
+      link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
+      break;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
@@ -86,8 +86,8 @@ bool micro_ros_task_start(void) {
   }
   g_micro_ros_task_handle =
       xTaskCreateStatic(micro_ros_task_fn, "micro_ros", kMicroRosTaskStack,
-                        nullptr, kMicroRosTaskPriority, g_micro_ros_task_stack,
-                        &g_micro_ros_task_tcb);
+      nullptr, kMicroRosTaskPriority, g_micro_ros_task_stack,
+      &g_micro_ros_task_tcb);
   return g_micro_ros_task_handle != nullptr;
 }
 

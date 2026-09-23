@@ -36,21 +36,23 @@ static const uint32_t kSlotSectors = 2U;
 // 下一个槽——w25q64_range_valid 只兜整片 8MB，不兜槽边界，会静默破坏另一个
 // 槽里的有效 blob。7712 对 8192 还剩 480B（记录尺寸涨到 127B 以上就越界）。
 static_assert(PARAM_STORE_BLOB_SIZE <= kSlotSectors * W25Q64_SECTOR_SIZE,
-              "blob 超出槽容量（2 个 4KB 扇区），整写会破坏下一个槽");
+    "blob 超出槽容量（2 个 4KB 扇区），整写会破坏下一个槽");
 
 // 槽区不重叠：槽 B 的基址必须在槽 A 的擦除范围之外。上面那条只保证 blob 装得进
 // 一个槽，不保证两槽首尾相接——kSlotBase 一旦手滑改小（如把 B 写成 0x1000），
 // 擦 A 会连带擦掉 B，双槽冗余静默失效。范围由 W25Q64_SECTOR_SIZE 与 kSlotSectors
 // 派生，改布局时这条会先炸。
 static_assert(kSlotBase[1] >= kSlotSectors * W25Q64_SECTOR_SIZE,
-              "槽 B 与槽 A 的擦除范围重叠，双槽冗余失效");
+    "槽 B 与槽 A 的擦除范围重叠，双槽冗余失效");
 
 // 升级前旧布局的槽 B 基址（旧 kSectorB = W25Q64_SECTOR_SIZE = 0x1000）。
 // 新布局下 0x1000 落在槽 A 的擦除范围内，read_slot() 永远读不到它，
 // 只有 load_boot_params() 的兜底分支会碰（见那里的说明）。
 static const uint32_t kLegacySlotBBase = W25Q64_SECTOR_SIZE;
 
-static uint32_t slot_base(uint8_t slot) { return kSlotBase[slot & 1U]; }
+static uint32_t slot_base(uint8_t slot) {
+  return kSlotBase[slot & 1U];
+}
 
 static TaskHandle_t g_task = nullptr;
 static bool g_started = false;
@@ -94,16 +96,16 @@ static bool read_blob_at(uint32_t addr, uint8_t *buf) {
     return false;
   }
   if (param_store_blob_validate(
-          reinterpret_cast<const param_store_blob_t *>(buf))) {
+      reinterpret_cast<const param_store_blob_t *>(buf))) {
     return true;
   }
   // v2 就地迁移（升级不该静默丢掉用户的记录）。
   alignas(8) static uint8_t v2_buf[PARAM_STORE_BLOB_SIZE_V2];
   if (w25q64_read(addr, v2_buf, sizeof(v2_buf)) == W25Q64_OK &&
       param_store_blob_migrate_v2(v2_buf, sizeof(v2_buf), buf,
-                                  PARAM_STORE_BLOB_SIZE) != nullptr &&
+      PARAM_STORE_BLOB_SIZE) != nullptr &&
       param_store_blob_validate(
-          reinterpret_cast<const param_store_blob_t *>(buf))) {
+      reinterpret_cast<const param_store_blob_t *>(buf))) {
     return true;
   }
   alignas(8) static uint8_t legacy_buf[PARAM_STORE_LEGACY_BLOB_SIZE];
@@ -111,9 +113,9 @@ static bool read_blob_at(uint32_t addr, uint8_t *buf) {
     return false;
   }
   return param_store_blob_migrate_v1(legacy_buf, sizeof(legacy_buf), buf,
-                                     PARAM_STORE_BLOB_SIZE) != nullptr &&
+      PARAM_STORE_BLOB_SIZE) != nullptr &&
          param_store_blob_validate(
-             reinterpret_cast<const param_store_blob_t *>(buf));
+      reinterpret_cast<const param_store_blob_t *>(buf));
 }
 
 static bool read_slot(uint8_t slot, uint8_t *buf) {
@@ -170,7 +172,7 @@ static void load_boot_params() {
       reinterpret_cast<const param_store_blob_t *>(scratch);
   g_seq = chosen->seq;
   g_boot_count = storage_projection_blob_to_boot(chosen, g_boot_records,
-                                                PARAM_STORE_RECORD_COUNT);
+      PARAM_STORE_RECORD_COUNT);
 }
 
 // 拍快照 → 打包 → 擦写非活动槽 → 按页读回核验 → 翻转活动槽。
@@ -248,7 +250,7 @@ bool storage_task_start(void) {
     load_boot_params();
   }
   if (xTaskCreate(storage_task_fn, "storage", kStorageTaskStack, nullptr,
-                  kStorageTaskPrio, &g_task) != pdPASS) {
+      kStorageTaskPrio, &g_task) != pdPASS) {
     return false;
   }
   g_started = true;

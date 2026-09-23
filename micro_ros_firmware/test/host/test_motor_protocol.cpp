@@ -2,6 +2,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #include "motor_protocol.h"
 
@@ -58,7 +59,7 @@ void test_vaxor_status_encodes_voltage_as_unbiased_signed_tenths() {
   const motor_protocol_joint_state_t input{};
   uint8_t bytes[20]{};
   motor_protocol_pack_vaxor_status(2U, &input, 48.6, 0U,
-                                   0U, 0U, 0U, 0U, bytes);
+      0U, 0U, 0U, 0U, bytes);
   assert(bytes[10] == 0xe6U);
   assert(bytes[11] == 0x01U);
 }
@@ -83,7 +84,7 @@ void test_unpack_rejects_invalid_lengths() {
 
 void test_cerb_mit_frame_matches_new_protocol_layout() {
   const motor_protocol_joint_command_t command{12.5, -30.0, 500.0, 5.0,
-                                                -10.0};
+                                               -10.0};
   const motor_protocol_cerb_limits_t limits{12.5, 30.0, 10.0};
   uint8_t bytes[12]{};
   assert(motor_protocol_pack_cerb_mit_frame(&command, &limits, true, bytes));
@@ -157,7 +158,7 @@ void test_cerb_rejects_invalid_or_faulted_data() {
 void test_cerb_large_finite_limit_quantizes_without_overflow() {
   const motor_protocol_cerb_limits_t limits{DBL_MAX / 4.0, 30.0, 10.0};
   const motor_protocol_joint_command_t command{limits.position_rad, 0.0, 0.0,
-                                                0.0, 0.0};
+                                               0.0, 0.0};
   uint8_t bytes[12]{};
   assert(motor_protocol_pack_cerb_mit_frame(&command, &limits, false, bytes));
   assert(bytes[1] == 0xff);
@@ -181,6 +182,56 @@ void test_cerb_node_ids_cover_declared_range() {
   assert(id == 0x301U);
 }
 
+// 0x210 的槽位顺序、ID 表和保留字节必须与厂家 64B 示例一致。
+void test_cerb_multi_mit_packs_two_axes_and_zeroes_unused_slots() {
+  const motor_protocol_cerb_multi_axis_t axes[2] = {
+    {1U, {0xcc, 0x80, 0x00, 0x80, 0x03, 0xe8, 0x14, 0x18, 0x00}},
+    {2U, {0xcc, 0x80, 0x01, 0x80, 0x03, 0xe8, 0x14, 0x18, 0x01}},
+  };
+  uint8_t out[64];
+  memset(out, 0xff, sizeof(out));
+  assert(motor_protocol_pack_cerb_multi_mit(axes, 2U, out));
+  assert(memcmp(out, axes[0].data, 9U) == 0);
+  assert(memcmp(out + 9U, axes[1].data, 9U) == 0);
+  for (size_t i = 18U; i < 56U; ++i) assert(out[i] == 0U);
+  assert(out[56] == 1U && out[57] == 2U);
+  for (size_t i = 58U; i < 64U; ++i) assert(out[i] == 0U);
+}
+
+void test_cerb_multi_mit_rejects_invalid_axes_without_partial_output() {
+  motor_protocol_cerb_multi_axis_t axes[7] = {};
+  axes[0].node = 1U;
+  axes[1].node = 1U;
+  uint8_t out[64];
+  memset(out, 0x5a, sizeof(out));
+  assert(!motor_protocol_pack_cerb_multi_mit(axes, 2U, out));
+  for (uint8_t b : out) assert(b == 0x5a);
+  axes[1].node = 2U;
+  assert(!motor_protocol_pack_cerb_multi_mit(axes, 7U, out));
+  assert(!motor_protocol_pack_cerb_multi_mit(axes, 0U, out));
+  axes[1].node = 0U;
+  assert(!motor_protocol_pack_cerb_multi_mit(axes, 2U, out));
+}
+
+void test_cerb_multi_mit_recognizes_only_cerb_control_frames() {
+  const uint8_t mit[12] = {0xcc, 0x80, 0, 0x80, 3, 0xe8, 0x14, 0x18, 0};
+  uint8_t node = 0U;
+  assert(motor_protocol_cerb_single_mit_node(0x111, false, true, true,
+      mit, 12U, &node));
+  assert(node == 1U);
+  assert(!motor_protocol_cerb_single_mit_node(0x210, false, true, true,
+      mit, 12U, &node));
+  assert(!motor_protocol_cerb_single_mit_node(0x111, false, false, false,
+      mit, 12U, &node));
+  assert(!motor_protocol_cerb_single_mit_node(0x111, false, true, true,
+      mit, 9U, &node));
+  uint8_t clear_fault[12];
+  memcpy(clear_fault, mit, sizeof(mit));
+  clear_fault[0] |= 0x20U;
+  assert(!motor_protocol_cerb_single_mit_node(0x111, false, true, true,
+      clear_fault, 12U, &node));
+}
+
 
 void test_cerb_sdo_limit_scales_invert_forward_encodings() {
   // 0x607D 位置限位：65536 cnt/360°（负载端，与关节同轴）。
@@ -189,23 +240,23 @@ void test_cerb_sdo_limit_scales_invert_forward_encodings() {
   assert(motor_protocol_cerb_limit_cnt_to_rad(0) == 0.0);
   // 90° = 16384 cnt
   assert(std::abs(motor_protocol_cerb_limit_cnt_to_rad(16384) -
-                  MOTOR_PROTOCOL_PI / 2.0) < 1e-9);
+      MOTOR_PROTOCOL_PI / 2.0) < 1e-9);
 
   // 0x6080 电机端 RPM → 关节侧 rad/s（÷gear；正向换算的逆函数）。
   // 600 RPM @ gear=101：电机侧 20π rad/s，关节侧 20π/101。
   const double gear = 101.0;
   assert(std::abs(motor_protocol_cerb_motor_rpm_to_joint_rad_s(gear, 600U) -
-                  2.0 * MOTOR_PROTOCOL_PI * 10.0 / gear) < 1e-12);
+      2.0 * MOTOR_PROTOCOL_PI * 10.0 / gear) < 1e-12);
   assert(motor_protocol_cerb_motor_rpm_to_joint_rad_s(gear, 0U) == 0.0);
 
   // 0x2538 电机端 mA → 关节侧 N·m：τ = Iq × Kt × gear × eff。
   // 1000 mA, Kt=0.077, gear=101, eff=1.0 → 7.777 N·m。
   assert(std::abs(motor_protocol_cerb_motor_ma_to_joint_nm(
-                      0.077, gear, 1.0, 1000U) -
-                  0.077 * gear) < 1e-12);
+      0.077, gear, 1.0, 1000U) -
+      0.077 * gear) < 1e-12);
   assert(std::abs(motor_protocol_cerb_motor_ma_to_joint_nm(
-                      0.077, gear, 0.8, 2500U) -
-                  2.5 * 0.077 * gear * 0.8) < 1e-12);
+      0.077, gear, 0.8, 2500U) -
+      2.5 * 0.077 * gear * 0.8) < 1e-12);
 }
 
 }  // namespace
@@ -224,6 +275,9 @@ int main() {
   test_cerb_rejects_invalid_or_faulted_data();
   test_cerb_large_finite_limit_quantizes_without_overflow();
   test_cerb_node_ids_cover_declared_range();
+  test_cerb_multi_mit_packs_two_axes_and_zeroes_unused_slots();
+  test_cerb_multi_mit_rejects_invalid_axes_without_partial_output();
+  test_cerb_multi_mit_recognizes_only_cerb_control_frames();
   test_cerb_sdo_limit_scales_invert_forward_encodings();
   return 0;
 }

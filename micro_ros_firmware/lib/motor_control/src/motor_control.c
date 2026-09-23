@@ -1,4 +1,4 @@
-// motor_control v2 内核主体：初始化、会话/授权、5ms/200Hz 控制边界、1ms 服务、
+// motor_control v2 内核主体：初始化、会话/授权、2ms/500Hz 控制边界、1ms 服务、
 // TX 收集与状态/事件副本（ARD-0007 §8/§9/§11/§13）。
 //
 // 所有权与边界：
@@ -25,16 +25,16 @@
 // ---------------------------------------------------------------------------
 
 void motor_control_push_event(motor_control_context_t *ctx, uint32_t now_ms,
-                              motor_control_event_type_t type, uint16_t motor_id,
-                              uint8_t bus_index, uint16_t reason,
-                              uint32_t request_id) {
+    motor_control_event_type_t type, uint16_t motor_id,
+    uint8_t bus_index, uint16_t reason,
+    uint32_t request_id) {
   if (ctx == NULL) {
     return;
   }
   if (ctx->event_count >= MOTOR_CONTROL_MAX_EVENTS) {
     // 环满：丢最旧、保最新，丢弃计数可见（不静默）。
     memmove(&ctx->events[0], &ctx->events[1],
-            (MOTOR_CONTROL_MAX_EVENTS - 1U) * sizeof(ctx->events[0]));
+        (MOTOR_CONTROL_MAX_EVENTS - 1U) * sizeof(ctx->events[0]));
     ctx->event_count = MOTOR_CONTROL_MAX_EVENTS - 1U;
     ctx->event_dropped_count++;
   }
@@ -49,7 +49,7 @@ void motor_control_push_event(motor_control_context_t *ctx, uint32_t now_ms,
 }
 
 bool motor_control_push_tx(motor_control_context_t *ctx,
-                           const motor_protocol_tx_frame_t *frame) {
+    const motor_protocol_tx_frame_t *frame) {
   if (ctx == NULL || frame == NULL) {
     return false;
   }
@@ -62,8 +62,8 @@ bool motor_control_push_tx(motor_control_context_t *ctx,
 }
 
 bool motor_control_push_tx_p0(motor_control_context_t *ctx,
-                              motor_control_entry_t *entry,
-                              const motor_protocol_tx_frame_t *frame) {
+    motor_control_entry_t *entry,
+    const motor_protocol_tx_frame_t *frame) {
   if (ctx == NULL || frame == NULL) {
     return false;
   }
@@ -77,7 +77,7 @@ bool motor_control_push_tx_p0(motor_control_context_t *ctx,
   for (size_t i = 0; i < ctx->tx_count; ++i) {
     if (ctx->tx_pending[i].tx_class != MOTOR_PROTOCOL_TX_CLASS_P0) {
       memmove(&ctx->tx_pending[i], &ctx->tx_pending[i + 1],
-              (ctx->tx_count - i - 1U) * sizeof(ctx->tx_pending[0]));
+          (ctx->tx_count - i - 1U) * sizeof(ctx->tx_pending[0]));
       ctx->tx_count--;
       ctx->tx_dropped_count++;
       ctx->tx_pending[ctx->tx_count++] = *frame;
@@ -96,7 +96,7 @@ bool motor_control_push_tx_p0(motor_control_context_t *ctx,
 }
 
 motor_control_entry_t *motor_control_find_entry(motor_control_context_t *ctx,
-                                                uint16_t motor_id) {
+    uint16_t motor_id) {
   if (ctx == NULL) {
     return NULL;
   }
@@ -122,7 +122,7 @@ static bool tick_elapsed(uint32_t now, uint32_t then, uint32_t threshold) {
 // 下游（调度器 P0 FIFO 满 / 硬件拒收）回告重入队：帧由本内核
 // 生成（tx_slot = 表项索引），任务层原样回传即可定位表项。
 bool motor_control_requeue_p0(motor_control_context_t *ctx,
-                              const motor_protocol_tx_frame_t *frame) {
+    const motor_protocol_tx_frame_t *frame) {
   if (ctx == NULL || frame == NULL ||
       frame->tx_class != MOTOR_PROTOCOL_TX_CLASS_P0 ||
       frame->tx_slot >= ctx->entry_count) {
@@ -148,7 +148,7 @@ bool motor_control_requeue_p0(motor_control_context_t *ctx,
 // 编码失败与队列满都不静默丢安全帧：挂 p0_pending 交 service 逐节拍重试
 // 并计入 protocol_error_count（与 service_p0_retries 同一语义）。
 bool motor_control_send_p0(motor_control_context_t *ctx,
-                           motor_control_entry_t *entry, uint8_t kind) {
+    motor_control_entry_t *entry, uint8_t kind) {
   if (ctx == NULL || entry == NULL || entry->adapter == NULL) {
     return false;
   }
@@ -156,14 +156,14 @@ bool motor_control_send_p0(motor_control_context_t *ctx,
   bool encoded = false;
   if (kind == MOTOR_CONTROL_P0_DISABLE) {
     encoded = entry->adapter->encode_disable != NULL &&
-              entry->adapter->encode_disable(entry->profile, entry->node,
-                                             entry->bus_index, &frame);
+        entry->adapter->encode_disable(entry->profile, entry->node,
+        entry->bus_index, &frame);
   } else if (kind == MOTOR_CONTROL_P0_SOFT_STOP) {
     // 软停编码需要 Profile 的力矩/限位量，缺失即视为编码失败。
     encoded = entry->profile != NULL &&
-              entry->adapter->encode_soft_stop != NULL &&
-              entry->adapter->encode_soft_stop(entry->profile, entry->node,
-                                               entry->bus_index, &frame);
+        entry->adapter->encode_soft_stop != NULL &&
+        entry->adapter->encode_soft_stop(entry->profile, entry->node,
+        entry->bus_index, &frame);
   }
   if (!encoded) {
     entry->p0_pending = true;
@@ -189,8 +189,8 @@ motor_control_context_t *motor_control_instance(void) {
 }
 
 void motor_control_init(motor_control_context_t *ctx,
-                        const motor_protocol_adapter_t *const *adapters,
-                        size_t adapter_count) {
+    const motor_protocol_adapter_t *const *adapters,
+    size_t adapter_count) {
   if (ctx == NULL) {
     return;
   }
@@ -226,8 +226,8 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
+          entry->motor_id, entry->bus_index,
+          MOTOR_CONTROL_FAULT_NONE, 0U);
     }
   }
   ctx->authorized = false;
@@ -238,11 +238,11 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
   ctx->trajectory.point_count = 0U;
   ctx->trajectory.target_count = 0U;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST,
-                           0U, 0U, MOTOR_CONTROL_FAULT_NONE, 0U);
+      0U, 0U, MOTOR_CONTROL_FAULT_NONE, 0U);
 }
 
 void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connected,
-                                       uint32_t now_ms) {
+    uint32_t now_ms) {
   if (ctx == NULL) {
     return;
   }
@@ -259,7 +259,7 @@ void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connec
 }
 
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
-                                     uint32_t now_ms) {
+    uint32_t now_ms) {
   if (ctx == NULL) {
     return false;
   }
@@ -277,7 +277,7 @@ bool motor_control_set_authorization(motor_control_context_t *ctx, bool authoriz
           ctx->entries[i].lifecycle != MOTOR_CONTROL_LIFECYCLE_FAULT &&
           ctx->entries[i].lifecycle != MOTOR_CONTROL_LIFECYCLE_OFFLINE &&
           ctx->entries[i].lifecycle !=
-              MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
+          MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
         ctx->entries[i].motion_authorized = true;
       }
     }
@@ -289,18 +289,18 @@ bool motor_control_set_authorization(motor_control_context_t *ctx, bool authoriz
 }
 
 bool motor_control_bind_profile(motor_control_context_t *ctx, uint16_t motor_id,
-                                size_t profile_index, uint32_t now_ms) {
+    size_t profile_index, uint32_t now_ms) {
   if (ctx == NULL || profile_index >= motor_control_profile_count()) {
     return false;
   }
   return motor_control_bind_profile_ptr(ctx, motor_id,
-                                        motor_control_profile_at(profile_index),
-                                        now_ms);
+      motor_control_profile_at(profile_index),
+      now_ms);
 }
 
 bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor_id,
-                                    const motor_protocol_model_profile_t *profile,
-                                    uint32_t now_ms) {
+    const motor_protocol_model_profile_t *profile,
+    uint32_t now_ms) {
   if (ctx == NULL || profile == NULL) {
     return false;
   }
@@ -309,8 +309,8 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
     // 设备未发现：无表项（bus_index=0），仍回告 PROFILE_REJECTED，避免
     // 上层请求悬挂。
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                             motor_id, 0U,
-                             MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
+        motor_id, 0U,
+        MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
     return false;
   }
   // 门禁：只允许未定型的发现/识别/就绪态换绑；运行中（ACTIVE/SAFE_STOP）与
@@ -320,35 +320,35 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
       entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED) {
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                             motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
+        motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
     return false;
   }
   if (profile->protocol != entry->adapter) {
     // 协议身份不符：按能力冲突拒绝，不得绑定（ARD §9.3）。
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_REJECTED,
-                             motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
+        motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
     return false;
   }
   entry->profile = profile;
   motor_control_set_default_device_shadow(entry);
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_PROFILE_BOUND, motor_id,
-                           entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
+      entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
   // 身份确认完成 → 识别态收敛到 READY_DISABLED（ARD §9：DISCOVERED→IDENTIFYING
   // →READY_DISABLED；绑定即识别来源，Vaxor-80 不在目录 → 永远无法到这）。
   if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_DISCOVERED ||
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING) {
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_READY, motor_id,
-                             entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
+        entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
   }
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// 5ms/200Hz 控制边界（ARD §11.3 / §51.3）
+// 2ms/500Hz 控制边界（当前运行时配置）
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -368,7 +368,7 @@ static bool entry_target_eligible(const motor_control_entry_t *entry) {
 // 运动前置门（授权 / 逐电机 Enable / 逐电机运动授权 / 型号绑定 / 设备参数
 // 结论 / 模式事务独占）。
 static bool entry_may_move(const motor_control_context_t *ctx,
-                           const motor_control_entry_t *entry) {
+    const motor_control_entry_t *entry) {
   if (!ctx->authorized || ctx->require_new_snapshot) {
     return false; // 无授权/待新证据：不得产生运动帧
   }
@@ -399,8 +399,8 @@ static bool entry_may_move(const motor_control_context_t *ctx,
 //    新证据**，不得把挂起的软停/失能重试取消掉——那会让一条迟到的 P0 永远发不
 //    出去。重发路径在调用前已挡掉 p0_pending，这里的 false 是第二道锁。
 static bool entry_push_mit(motor_control_context_t *ctx,
-                           motor_control_entry_t *entry, size_t index,
-                           uint32_t now_ms, bool supersede_p0) {
+    motor_control_entry_t *entry, size_t index,
+    uint32_t now_ms, bool supersede_p0) {
   const motor_protocol_model_profile_t *profile = entry->profile;
   motor_protocol_control_intent_t intent = {0};
   intent.position_rad = entry->target_position_rad;
@@ -412,7 +412,7 @@ static bool entry_push_mit(motor_control_context_t *ctx,
   motor_protocol_tx_frame_t mit_frame = {0};
   if (entry->adapter->encode_mit_command == NULL ||
       !entry->adapter->encode_mit_command(profile, entry->node, entry->bus_index,
-                                          &intent, &mit_frame)) {
+      &intent, &mit_frame)) {
     entry->protocol_error_count++;
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
     return false;
@@ -431,8 +431,8 @@ static bool entry_push_mit(motor_control_context_t *ctx,
   if (entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE) {
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_ACTIVE,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_NONE, 0U);
+        entry->motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_NONE, 0U);
   }
   return true;
 }
@@ -440,9 +440,9 @@ static bool entry_push_mit(motor_control_context_t *ctx,
 // 施加一个目标：限位/峰值钳制 → 使能序列 → MIT 组帧入队。
 // 调用方必须先过 entry_target_eligible 与 entry_may_move。
 static void entry_apply_target(motor_control_context_t *ctx,
-                               motor_control_entry_t *entry, size_t index,
-                               float position, float velocity, float effort,
-                               uint32_t now_ms) {
+    motor_control_entry_t *entry, size_t index,
+    float position, float velocity, float effort,
+    uint32_t now_ms) {
   // Policy 软件限位（Vaxor，打包前钳制——ARD §26.1）；限位标志逐拍重算，
   // 不粘滞（目标回到限内即清除）。
   float target_pos = position;
@@ -450,8 +450,8 @@ static void entry_apply_target(motor_control_context_t *ctx,
   float target_effort = effort;
   const motor_protocol_model_profile_t *profile = entry->profile;
   entry->limit_flags &= ~(MOTOR_PROTOCOL_LIMIT_POS_MIN | MOTOR_PROTOCOL_LIMIT_POS_MAX |
-                          MOTOR_PROTOCOL_LIMIT_VEL |
-                          MOTOR_PROTOCOL_LIMIT_EFFORT);
+      MOTOR_PROTOCOL_LIMIT_VEL |
+      MOTOR_PROTOCOL_LIMIT_EFFORT);
   if (entry->has_soft_limits &&
       (profile->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_SOFTWARE) != 0U) {
     if (target_pos < entry->soft_min_rad) {
@@ -507,7 +507,7 @@ static void entry_apply_target(motor_control_context_t *ctx,
     motor_protocol_tx_frame_t enable_frame = {0};
     if (entry->adapter->encode_enable == NULL ||
         !entry->adapter->encode_enable(profile, entry->node, entry->bus_index,
-                                       &enable_frame)) {
+        &enable_frame)) {
       entry->protocol_error_count++;
       entry->last_failure_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
       return;
@@ -545,7 +545,7 @@ static void entry_apply_target(motor_control_context_t *ctx,
 // 归属：轨迹声明集合内的电机由轨迹独占。纯派生（不落字段）——故障/离线/
 // 冲突/设备参数未核对各自把表项带离可动生命周期，自动脱离轨迹。
 static bool trajectory_owns(const motor_control_context_t *ctx,
-                            uint16_t motor_id) {
+    uint16_t motor_id) {
   if (!ctx->trajectory_active) {
     return false;
   }
@@ -558,7 +558,7 @@ static bool trajectory_owns(const motor_control_context_t *ctx,
 }
 
 static bool snapshot_contains(const motor_control_command_snapshot_t *snapshot,
-                              uint16_t motor_id, const motor_control_snapshot_target_t **out) {
+    uint16_t motor_id, const motor_control_snapshot_target_t **out) {
   for (uint8_t i = 0; i < snapshot->target_count; ++i) {
     if (snapshot->targets[i].motor_id == motor_id) {
       *out = &snapshot->targets[i];
@@ -608,7 +608,7 @@ bool motor_control_apply_command_snapshot(
   if (rejected) {
     ctx->snapshot_rejected_count++;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_SNAPSHOT_REJECTED,
-                             0U, 0U, reject_reason, 0U);
+        0U, 0U, reject_reason, 0U);
     return false;
   }
 
@@ -659,13 +659,13 @@ bool motor_control_apply_command_snapshot(
       continue;
     }
     entry_apply_target(ctx, entry, i, target->position_rad, target->velocity_rad_s,
-                       target->effort_nm, now_ms);
+        target->effort_nm, now_ms);
   }
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// 多点轨迹（MotorTrajectory）：在 5ms/200Hz 控制边界上按时间线确定性插值
+// 多点轨迹（MotorTrajectory）：在 2ms/500Hz 控制边界上按时间线确定性插值
 // ---------------------------------------------------------------------------
 
 // 轨迹结构校验（与 mailbox 同规则，另加注册表存在性——内核不信任调用方：
@@ -674,8 +674,8 @@ bool motor_control_apply_command_snapshot(
 // *bad_index = MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE 表示与路点无关
 // （计数越界 / 归属重复 / 未注册 / 有归属无路点）。
 static bool trajectory_validate(const motor_control_context_t *ctx,
-                                const motor_control_trajectory_t *trajectory,
-                                uint16_t *bad_index) {
+    const motor_control_trajectory_t *trajectory,
+    uint16_t *bad_index) {
   *bad_index = MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE;
   if (trajectory->point_count > MOTOR_CONTROL_MAX_TRAJECTORY_POINTS ||
       trajectory->target_count > MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS) {
@@ -693,7 +693,7 @@ static bool trajectory_validate(const motor_control_context_t *ctx,
   for (uint16_t i = 0; i < trajectory->target_count; ++i) {
     motor_control_entry_t *owner =
         motor_control_find_entry((motor_control_context_t *)ctx,
-                                 trajectory->target_ids[i]);
+        trajectory->target_ids[i]);
     if (owner == NULL || !owner->used) {
       return false; // 不存在/未注册设备（与快照的未知 motor_id 同口径）
     }
@@ -762,9 +762,9 @@ static bool trajectory_validate(const motor_control_context_t *ctx,
 // 段定位：取该电机「不晚于 elapsed 的最后一个路点」与其后的第一个路点。
 // 返回 false = 该电机在轨迹里没有任何路点（合法载荷不会出现，防御用）。
 static bool trajectory_segment(const motor_control_trajectory_t *trajectory,
-                               uint16_t motor_id, uint32_t elapsed,
-                               const motor_control_trajectory_point_t **left,
-                               const motor_control_trajectory_point_t **right) {
+    uint16_t motor_id, uint32_t elapsed,
+    const motor_control_trajectory_point_t **left,
+    const motor_control_trajectory_point_t **right) {
   const motor_control_trajectory_point_t *lower = NULL;
   const motor_control_trajectory_point_t *upper = NULL;
   for (uint16_t i = 0; i < trajectory->point_count; ++i) {
@@ -791,7 +791,7 @@ static bool trajectory_segment(const motor_control_trajectory_t *trajectory,
 // 释放归属：软停被移出集合的电机。轨迹结束/取消/被替换都是显式交接，
 // 不靠快照隐式夺权（周期发布者会误杀轨迹）。
 static void release_trajectory_motor(motor_control_context_t *ctx,
-                                     uint16_t motor_id, uint32_t now_ms) {
+    uint16_t motor_id, uint32_t now_ms) {
   motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
   if (entry != NULL) {
     motor_control_soft_stop_entry(ctx, entry, now_ms);
@@ -874,8 +874,8 @@ static void trajectory_compute_tangents(motor_control_context_t *ctx) {
 }
 
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
-                                    const motor_control_trajectory_t *trajectory,
-                                    uint32_t now_ms) {
+    const motor_control_trajectory_t *trajectory,
+    uint32_t now_ms) {
   if (ctx == NULL || trajectory == NULL) {
     return false;
   }
@@ -885,7 +885,7 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
     // 字段重载（本事件只由结构非法触发，reason 放故障码没有第二重信息）：
     //   request_id = 被拒的 trajectory_id，reason = 首个非法路点下标。
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED,
-                             0U, 0U, bad_index, trajectory->trajectory_id);
+        0U, 0U, bad_index, trajectory->trajectory_id);
     return false;
   }
 
@@ -989,9 +989,9 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
         const float m0 = ctx->trajectory_tangent_rad_s[li];
         const float m1 = ctx->trajectory_tangent_rad_s[ri];
         position = (2.0f * t3 - 3.0f * t2 + 1.0f) * left->position_rad +
-                   (t3 - 2.0f * t2 + tau) * h * m0 +
-                   (-2.0f * t3 + 3.0f * t2) * right->position_rad +
-                   (t3 - t2) * h * m1;
+            (t3 - 2.0f * t2 + tau) * h * m0 +
+            (-2.0f * t3 + 3.0f * t2) * right->position_rad +
+            (t3 - t2) * h * m1;
         // 解析导数 v = (dx/dτ)/h —— 不直通 point.velocity（上层常填 0，
         // 直通会让 Kd 朝 0 速刹车）。
         const float dh00 = 6.0f * t2 - 6.0f * tau;
@@ -999,11 +999,11 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
         const float dh01 = -6.0f * t2 + 6.0f * tau;
         const float dh11 = 3.0f * t2 - 2.0f * tau;
         velocity = (dh00 * left->position_rad + dh10 * h * m0 +
-                    dh01 * right->position_rad + dh11 * h * m1) / h;
+            dh01 * right->position_rad + dh11 * h * m1) / h;
       }
     }
     entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,
-                       velocity, effort, now_ms);
+        velocity, effort, now_ms);
   }
 }
 
@@ -1056,8 +1056,8 @@ void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
 }
 
 bool motor_control_apply_policy(motor_control_context_t *ctx,
-                                const motor_control_policy_snapshot_t *snapshot,
-                                uint32_t now_ms) {
+    const motor_control_policy_snapshot_t *snapshot,
+    uint32_t now_ms) {
   if (ctx == NULL || snapshot == NULL) {
     return false;
   }
@@ -1089,9 +1089,9 @@ bool motor_control_apply_policy(motor_control_context_t *ctx,
         motor_control_find_entry(ctx, snapshot->targets[i].motor_id);
     if (entry == NULL) {
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
-                               snapshot->targets[i].motor_id, 0U,
-                               MOTOR_PROTOCOL_CONFIG_INVALID,
-                               snapshot->request_id);
+          snapshot->targets[i].motor_id, 0U,
+          MOTOR_PROTOCOL_CONFIG_INVALID,
+          snapshot->request_id);
       continue;
     }
     motor_protocol_config_request_t request = {0};
@@ -1111,7 +1111,7 @@ bool motor_control_apply_policy(motor_control_context_t *ctx,
 }
 
 void motor_control_soft_stop_entry(motor_control_context_t *ctx,
-                                   motor_control_entry_t *entry, uint32_t now_ms) {
+    motor_control_entry_t *entry, uint32_t now_ms) {
   if (entry == NULL || !entry->used) {
     return;
   }
@@ -1120,16 +1120,16 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
   const bool in_controlled_set =
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
       (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
-       entry->motion_enabled);
+      entry->motion_enabled);
   if (in_controlled_set) {
-    // 仅在进入软停的迁移沿发帧（去重，防 200Hz P0 刷屏）。
+    // 仅在进入软停的迁移沿发帧（去重，防 500Hz P0 刷屏）。
     // 编码失败/队列满都挂起重试（安全帧不静默消失），计数在 helper 内。
     (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_SOFT_STOP);
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_SAFE_STOP;
     entry->has_target = false;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_SOFT_STOP,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_NONE, 0U);
+        entry->motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_NONE, 0U);
   }
 }
 
@@ -1149,8 +1149,8 @@ static void service_lifecycle_advance(motor_control_context_t *ctx, uint32_t now
         entry->profile != NULL) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_READY,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
+          entry->motor_id, entry->bus_index,
+          MOTOR_CONTROL_FAULT_NONE, 0U);
     }
   }
 }
@@ -1167,16 +1167,16 @@ static void service_p0_retries(motor_control_context_t *ctx) {
         entry->adapter != NULL && entry->profile != NULL &&
         entry->adapter->encode_soft_stop != NULL) {
       encoded = entry->adapter->encode_soft_stop(entry->profile, entry->node,
-                                                 entry->bus_index, &frame);
+          entry->bus_index, &frame);
     } else if (entry->p0_kind == MOTOR_CONTROL_P0_DISABLE &&
-               entry->adapter != NULL && entry->adapter->encode_disable != NULL) {
+        entry->adapter != NULL && entry->adapter->encode_disable != NULL) {
       encoded = entry->adapter->encode_disable(entry->profile, entry->node,
-                                               entry->bus_index, &frame);
+          entry->bus_index, &frame);
     } else if (entry->p0_kind == MOTOR_CONTROL_P0_ENABLE &&
-               entry->adapter != NULL && entry->profile != NULL &&
-               entry->adapter->encode_enable != NULL) {
+        entry->adapter != NULL && entry->profile != NULL &&
+        entry->adapter->encode_enable != NULL) {
       encoded = entry->adapter->encode_enable(entry->profile, entry->node,
-                                              entry->bus_index, &frame);
+          entry->bus_index, &frame);
     } else {
       encoded = false;
     }
@@ -1219,12 +1219,12 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     bool offline = false;
     if (adapter->autonomous_feedback) {
       offline = tick_elapsed(now_ms, entry->last_rx_tick_ms,
-                             adapter->offline_timeout_ms);
+          adapter->offline_timeout_ms);
     } else if (entry->last_commanded_tick_ms != 0U &&
-               !tick_elapsed(now_ms, entry->last_commanded_tick_ms,
-                             adapter->offline_timeout_ms) &&
-               tick_elapsed(now_ms, entry->last_rx_tick_ms,
-                            adapter->offline_timeout_ms)) {
+        !tick_elapsed(now_ms, entry->last_commanded_tick_ms,
+        adapter->offline_timeout_ms) &&
+        tick_elapsed(now_ms, entry->last_rx_tick_ms,
+        adapter->offline_timeout_ms)) {
       offline = true;
     }
     if (!offline) {
@@ -1247,8 +1247,8 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_OFFLINE;
     ctx->require_new_snapshot = true; // 重连后旧授权/目标不复用（ARD §10.4）
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_OFFLINE,
-                             entry->motor_id, entry->bus_index,
-                             MOTOR_CONTROL_FAULT_OFFLINE, 0U);
+        entry->motor_id, entry->bus_index,
+        MOTOR_CONTROL_FAULT_OFFLINE, 0U);
   }
 }
 
@@ -1275,15 +1275,15 @@ static void disable_snapshot_owned(motor_control_context_t *ctx, uint32_t now_ms
         entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
       motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DISABLE,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
+          entry->motor_id, entry->bus_index,
+          MOTOR_CONTROL_FAULT_NONE, 0U);
     }
   }
   if (disabled_motion) {
     // 快照通道的运动授权确实丢了：事件照发（诊断口径不变）。全局授权电平
     // 不动——它由会话电平每边界纯派生，与快照流是否活跃无关（ARD §33）。
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST,
-                             0U, 0U, MOTOR_CONTROL_FAULT_NONE, 0U);
+        0U, 0U, MOTOR_CONTROL_FAULT_NONE, 0U);
   }
 }
 
@@ -1340,7 +1340,7 @@ void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms) {
     motor_control_entry_t *entry = &ctx->entries[i];
     if (entry->used && entry->enable_pending && entry->adapter != NULL &&
         tick_elapsed(now_ms, entry->enable_started_tick_ms,
-                     entry->adapter->enable_settle_ms)) {
+        entry->adapter->enable_settle_ms)) {
       entry->enable_pending = false;
     }
   }
@@ -1371,7 +1371,7 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 }
 
 size_t motor_control_collect_tx(motor_control_context_t *ctx,
-                                motor_protocol_tx_frame_t *out, size_t capacity) {
+    motor_protocol_tx_frame_t *out, size_t capacity) {
   if (ctx == NULL || out == NULL || capacity == 0U) {
     return 0U;
   }
@@ -1380,7 +1380,7 @@ size_t motor_control_collect_tx(motor_control_context_t *ctx,
   const size_t remainder = ctx->tx_count - count;
   if (remainder > 0U) {
     memmove(&ctx->tx_pending[0], &ctx->tx_pending[count],
-            remainder * sizeof(ctx->tx_pending[0]));
+        remainder * sizeof(ctx->tx_pending[0]));
   }
   ctx->tx_count = remainder;
   return count;
@@ -1418,8 +1418,8 @@ const motor_control_entry_t *motor_control_entry_take_sorted(
 }
 
 size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
-                                        motor_control_motion_state_t *out,
-                                        size_t capacity, uint32_t now_ms) {
+    motor_control_motion_state_t *out,
+    size_t capacity, uint32_t now_ms) {
   if (ctx == NULL || out == NULL) {
     return 0U;
   }
@@ -1462,8 +1462,8 @@ size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
 }
 
 size_t motor_control_copy_statuses(motor_control_context_t *ctx,
-                                   motor_control_status_t *out, size_t capacity,
-                                   uint32_t now_ms) {
+    motor_control_status_t *out, size_t capacity,
+    uint32_t now_ms) {
   if (ctx == NULL || out == NULL) {
     return 0U;
   }
@@ -1512,7 +1512,7 @@ size_t motor_control_copy_statuses(motor_control_context_t *ctx,
 }
 
 void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
-                                    motor_control_diagnostics_t *out) {
+    motor_control_diagnostics_t *out) {
   if (ctx == NULL || out == NULL) {
     return;
   }
@@ -1532,8 +1532,8 @@ void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
 }
 
 size_t motor_control_copy_topology(motor_control_context_t *ctx,
-                                   motor_control_topology_entry_t *out,
-                                   size_t capacity) {
+    motor_control_topology_entry_t *out,
+    size_t capacity) {
   if (ctx == NULL || out == NULL) {
     return 0U;
   }
@@ -1563,7 +1563,7 @@ size_t motor_control_copy_topology(motor_control_context_t *ctx,
 }
 
 size_t motor_control_drain_events(motor_control_context_t *ctx,
-                                  motor_control_event_t *out, size_t capacity) {
+    motor_control_event_t *out, size_t capacity) {
   if (ctx == NULL || out == NULL || capacity == 0U) {
     return 0U;
   }
@@ -1572,7 +1572,7 @@ size_t motor_control_drain_events(motor_control_context_t *ctx,
   const size_t remainder = ctx->event_count - count;
   if (remainder > 0U) {
     memmove(&ctx->events[0], &ctx->events[count],
-            remainder * sizeof(ctx->events[0]));
+        remainder * sizeof(ctx->events[0]));
   }
   ctx->event_count = remainder;
   return count;

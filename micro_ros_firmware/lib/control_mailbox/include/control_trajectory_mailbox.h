@@ -64,9 +64,9 @@ typedef struct {
 
 void control_trajectory_mailbox_init(control_trajectory_mailbox_t *mailbox);
 bool control_trajectory_mailbox_publish(control_trajectory_mailbox_t *mailbox,
-                                       const control_trajectory_t *trajectory);
+    const control_trajectory_t *trajectory);
 bool control_trajectory_mailbox_take(control_trajectory_mailbox_t *mailbox,
-                                     control_trajectory_t *trajectory);
+    control_trajectory_t *trajectory);
 void control_trajectory_mailbox_clear(control_trajectory_mailbox_t *mailbox);
 
 #ifdef __cplusplus

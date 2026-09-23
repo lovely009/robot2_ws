@@ -22,7 +22,7 @@ void imu_snapshot_init(imu_snapshot_t *snapshot);
 imu_data_t *imu_snapshot_begin_write(imu_snapshot_t *snapshot);
 void imu_snapshot_publish(imu_snapshot_t *snapshot);
 bool imu_snapshot_copy(const imu_snapshot_t *snapshot, imu_data_t *out,
-                       uint32_t *sequence);
+    uint32_t *sequence);
 
 #ifdef __cplusplus
 }

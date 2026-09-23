@@ -37,7 +37,7 @@ void motor_control_set_default_device_shadow(motor_control_entry_t *entry) {
 }
 
 static void fill_view(const motor_control_entry_t *entry,
-                      motor_control_param_view_t *view) {
+    motor_control_param_view_t *view) {
   memset(view, 0, sizeof(*view));
   view->motor_id = entry->motor_id;
   view->online = entry->online;
@@ -59,7 +59,7 @@ static void fill_view(const motor_control_entry_t *entry,
   const bool device_side =
       entry->profile != NULL &&
       (entry->profile->capability_flags &
-       MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U;
+      MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U;
   view->device_side_limits = device_side;
   if (device_side) {
     view->pos_min_rad = entry->dev_limits_valid ? entry->dev_min_rad : NAN;
@@ -88,7 +88,7 @@ static void fill_view(const motor_control_entry_t *entry,
   // 反馈侧的扭矩估计仍走 Kt×减速比×效率（见 motor_protocol.h 的说明）。
   view->torque_per_amp = entry->profile != NULL
                              ? motor_protocol_profile_limit_nm_per_amp(
-                                   entry->profile)
+      entry->profile)
                              : NAN;
   view->dev_raw_present = device_side ? entry->dev_raw_present : 0U;
   view->record_raw_present = device_side ? entry->record_raw_present : 0U;
@@ -118,8 +118,8 @@ static void fill_view(const motor_control_entry_t *entry,
 }
 
 size_t motor_control_copy_param_views(motor_control_context_t *ctx,
-                                      motor_control_param_view_t *out,
-                                      size_t capacity) {
+    motor_control_param_view_t *out,
+    size_t capacity) {
   if (ctx == NULL || out == NULL || capacity == 0U) {
     return 0U;
   }
@@ -134,7 +134,7 @@ size_t motor_control_copy_param_views(motor_control_context_t *ctx,
 }
 
 // 复杂度上限：O(电机数×存储记录数) 线性查找；单次最坏为 64×64=4096 次比较，
-// 由 5ms/200Hz 边界分摊执行。若记录查找成为热点，再改为 motor_id 索引表。
+// 由 2ms/500Hz 边界分摊执行。若记录查找成为热点，再改为 motor_id 索引表。
 static const motor_control_stored_params_t *find_stored(
     const motor_control_stored_params_t *records, size_t count,
     uint16_t motor_id) {
@@ -154,7 +154,7 @@ static const motor_control_stored_params_t *find_stored(
 #define STORED_MASK_LIMITS 0x02U
 
 static void apply_stored_to_entry(motor_control_entry_t *entry,
-                                  const motor_control_stored_params_t *rec) {
+    const motor_control_stored_params_t *rec) {
   const motor_protocol_model_profile_t *p = entry->profile;
 
   // 两件事分开做，别互相挡：
@@ -251,7 +251,7 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
         entry->has_soft_torque_limit = true;
       }
     } else if ((p->capability_flags &
-                MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U) {
+        MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U) {
       // CERB：记录只作显示回落，绝不发 SDO 写；设备真值以回读为准。
       // 已经回读过设备的（source=DEVICE）不再被记录覆盖——设备为准。
       if (entry->limits_source != MOTOR_CONTROL_LIMITS_SOURCE_DEVICE) {

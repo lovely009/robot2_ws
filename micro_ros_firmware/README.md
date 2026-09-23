@@ -18,7 +18,7 @@ adapter 接缝：厂家字节布局、CAN-ID 推导与 FD 属性只存在于该�
 CERB SYNC 上报心跳），型号由内核读设备 SDO 0x1008 自报身份、查内置型号目录
 自动绑定；命令是最多 64 目标的
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
-"命令实时回显（200Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
+"命令实时回显（500Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
 OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 `docs/plans/active/motor-runtime-validation.md`（唯一清单）。
 
@@ -67,7 +67,7 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `led` | 1 | 256 | 每 50ms 读取 micro-ROS 链路状态并作为 WS2812 唯一运行期写入者；红/绿闪/蓝 |
 | `sensor` | 2 | 512 | 500ms 延时 → 加热 PWM → BMI088 单次初始化；失败时每 1s 降级重试，成功后由约 100Hz ACC DRDY 触发采样/Mahony/PID（IMU 非关键路径：低于 motor_rt，栈台架 TBD-RT-01 复测） |
 | `storage` | 1 | 1024 | W25Q64 唯一所有者：W25 参数持久化（boot 顺序整读双槽 blob，每槽 2 扇区；只在收到 `SystemCommand` 的 `COMMAND_SAVE` 时落盘——写事务只置脏，没有自动落盘，见「W25Q64」节） |
-| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 5ms/200Hz 控制边界消费完整快照、已拼接轨迹与配置 FIFO |
+| `motor_rt` | 3 | 1024 | FDCAN1/2/3 初始化；每 1ms 有界服务（RX drain/内核服务/SYNC 心跳/TX 路由），每 2ms/500Hz 控制边界消费完整快照、已拼接轨迹与配置 FIFO |
 
 ## 代码组织
 
@@ -81,15 +81,17 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 | `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
 | `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
 | `param_bridge` | 参数面：下行 `param_set`/`system_command` 两条订阅 + 上行 `system_status`；参数写是异步事务，成败经 `last_error` 与完成序号呈现 |
-| `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 5ms/200Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
-| `lib/session_sync` | 会话边沿/电平→内核授权的纯派生（200Hz 边界调用，host 可测） |
+| `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 2ms/500Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
+| `lib/session_sync` | 会话边沿/电平→内核授权的纯派生（500Hz 边界调用，host 可测） |
 | `lib/storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
 | `heater` | TIM3 加热 PWM 所有权 + 纯 PID（host 可测） |
 | `lib/fdcan` | FDCAN 初始化/中断回调/每总线 SPSC RX ring/P0-P1-P2 TX 调度 |
+| `lib/motor_tx_router` | 有界 P0/P1/P2 出队、物理帧预算、P0 重试和 HAL 提交回调；不含厂商帧布局 |
 | `lib/imu` | BMI088 驱动/通信层、SPI2 阻塞传输、Mahony/SI 聚合（单一 IMU 域） |
-| `lib/motor_protocol` | adapter 接缝 + vaxor/CERB 编解码（厂家字节唯一归属地） |
+| `lib/motor_protocol` | 唯一 adapter 注册表、vaxor/CERB 编解码和协议自有 P1 聚合（厂家字节唯一归属地） |
 | `lib/motor_control` | ID 驱动运行时内核：注册表/型号目录/九态生命周期/安全级联/配置事务 |
 | `lib/control_mailbox` | ID 完整命令快照、多点轨迹、逐电机策略、低频配置 FIFO 与连接/授权边沿（纯逻辑） |
+| `lib/save_transaction` | 设备 Flash 保存与 W25 持久化的异步顺序、request ID 关联及超时（纯 C） |
 | `lib/board` | 板级共享常量（ISR syscall 阈值），板级库经它免依赖 FreeRTOS |
 | `lib/dma` | DMA1/BDMA 控制器级资源（时钟、NVIC、占用登记）；设备配置由各设备库自持 |
 | `lib/w25q64` | OCTOSPI2 W25Q64 驱动；唯一所有者为 `storage_task`（见「W25Q64」节） |
@@ -97,7 +99,12 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 
 数据流：FDCAN1/2/3 ISR → 每总线 SPSC ring → `motor_rt_task` 有界 drain 并经
 adapter 解码进内核 → 内核按完整快照/会话/心跳裁决生命周期与运动 → 待发帧
-按 P0/P1/P2 路由进每总线 TX 调度器 → 由任务层统一提交 HAL。
+按 P0/P1/P2 放入 `lib/fdcan` 队列 → `motor_tx_router` 核算逻辑/物理预算并选择
+优先级 → `motor_protocol` adapter 可将兼容 CERB MIT P1 帧聚合 → 由
+`motor_rt_task` 唯一提交 HAL。P0 队列非空时路由器只出队 P0；首个硬件拒收会
+停止本轮提交，并把该帧及后续未尝试的 P0 按 FIFO 顺序放回队首。P0 清空后才
+在后续 pump 开始时确认 P0 队列为空后，才调度 P1/P2；P1 保持 latest-wins，
+P2 配额由路由器按每次 pump 管理。
 ROS 桥只通过 mailbox（写侧）与内核只读副本/事件队列（读侧）交互；
 原始 CAN 帧不进入 ROS 域。IMU 则由 sensor task 写双缓冲 snapshot，
 10ms bridge timer（100Hz）复制后发布；桥接层不持有 sensor task 的内部源指针。
@@ -112,7 +119,8 @@ micro_ros_firmware/
 ├── extra_packages/
 │   └── can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs
 │                               # micro-ROS 构建复用同仓库权威消息定义
-├── include/                   # 应用层头文件（任务/ROS 桥）
+├── include/                   # 应用接口与跨库契约头
+│   ├── motor_config_contract.hpp # mailbox/protocol 配置 kind 数值契约
 │   ├── ros_bridge.h           # micro-ROS 生命周期与域桥编排接口
 │   ├── imu_bridge.h           # IMU/温度域 ROS 桥接接口
 │   ├── motor_bridge.h         # 电机域 ROS 桥接接口
@@ -126,9 +134,11 @@ micro_ros_firmware/
 ├── lib/                       # 板级/协议库（PlatformIO 自动发现）
 │   ├── imu/                   # BMI088 驱动 + SPI2 阻塞传输 + Mahony + SI 聚合
 │   ├── fdcan/                 # 三路 FDCAN/中断回调/SPSC RX ring/P0-P1-P2 TX 调度
+│   ├── motor_tx_router/       # host 可测的 P0/P1/P2 预算、聚合分发与 HAL 提交 seam
 │   ├── motor_control/         # ID 驱动运行时内核（host 可测）
 │   ├── control_mailbox/       # 固定容量 mailbox 与边沿锁存（host 可测）
-│   ├── motor_protocol/        # adapter 接缝 + vaxor/CERB 编解码（纯逻辑）
+│   ├── motor_protocol/        # 唯一 adapter 注册表 + vaxor/CERB 编解码与 P1 聚合
+│   ├── save_transaction/      # host 可测的设备保存 → W25 异步事务协调器
 │   ├── dma/                   # DMA1/BDMA 控制器级资源（设备配置由各库自持）
 │   ├── w25q64/                # OCTOSPI2 W25Q64 驱动（storage_task 独占访问）
 │   └── ws2812/                # WS2812 彩灯驱动（SPI6 MOSI=PA7）
@@ -142,9 +152,17 @@ micro_ros_firmware/
     ├── param_bridge.cpp       # 参数与系统命令话题桥（稀疏写 + 完成序号）
     ├── sensor_task.cpp        # 传感器任务：EXTI/信号量/温度 PID/加热 PWM
     ├── storage_task.cpp       # W25Q64 唯一所有者：boot 加载双槽 blob（每槽 2 扇区）+ save 落盘
-    ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 5ms/200Hz 控制边界
+    ├── motor_rt_task.cpp      # 电机实时任务：1ms 服务 + 2ms/500Hz 控制边界
     └── system_clock.cpp       # 覆盖 SystemClock_Config
 ```
+
+## C/C++ 格式化
+
+C/C++ 使用 Uncrustify 0.72.0，规则集中在 `.uncrustify.cfg`；UTF-8、LF、缩进和换行
+由 `.editorconfig` 统一；Python 使用 4 空格缩进。检查 C/C++ 格式执行
+`tools/format_firmware.sh --check`，
+有意重排源码时执行 `tools/format_firmware.sh --write`。脚本只处理固件的
+`src/`、`include/`、`lib/` 与 `test/host/` C/C++ 文件。
 
 ## 硬件接线
 
@@ -224,9 +242,9 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
   position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
   缺席的受控电机立即软停，禁止沿用旧目标。
-  **快照到达速率不决定命令速率**：受理后的目标由内核在每个 5ms/200Hz 控制边界
+  **快照到达速率不决定命令速率**：受理后的目标由内核在每个 2ms/500Hz 控制边界
   保持重发（零阶保持，仅在快照新鲜 ≤30ms 期间），所以上行即使按 50Hz 发，
-  驱动器侧收到的仍是 200Hz 命令流。上行送达率实测封顶 ~72/s（best-effort
+  驱动器侧收到的目标为 500Hz 命令流。上行送达率实测封顶 ~72/s（best-effort
   静默丢弃），因此**不要**靠提高快照频率去提高命令率——那是无效的。
 - `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，reliable）：多点轨迹，见下节。
 - `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
@@ -240,13 +258,14 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
 "未来一段时间怎么走"。同一 `trajectory_id` 可拆成多个可靠分段，分段带有
 `segment_index`/`segment_count`；固件按序在固定缓冲区内拼接，只有收到完整组后才
-原子替换当前轨迹，分段未收齐时旧轨迹继续运行。执行时每个 5ms/200Hz 边界使用
+原子替换当前轨迹，分段未收齐时旧轨迹继续运行。执行时每个 2ms/500Hz 边界使用
 完整非均匀时间线做**单调三次 Hermite**插值（Fritsch–Carlson 切矢），段边界
 速度由左右不等时间间隔共同传递，位置和解析速度连续；重叠边界的完全相同路点
 只保留一次，冲突路点整组拒收；没有重叠时刻也按整条绝对时间线直接拼接，不把
 每个分段端点错误地当成零速端点。
 
-CAN 命令**每台每个边界恰好一帧（200Hz）**。路点里的 `velocity` 不参与执行——上层
+CAN 命令**每台每个边界恰好一条（500Hz）**；CERB 同总线最多 6 条命令合成一帧
+`0x210`（FD+BRS、64B），VAXOR 保持单轴帧。路点里的 `velocity` 不参与执行——上层
 常把它填 0，直通会让 MIT 律的 Kd 朝 0 速刹车，该字段只作诊断；前馈 `effort`
 段内保持左端点值。时间超出末点即**钳末点保持，绝不外推**。轨迹起点是 MCU
 本地受理完整轨迹的 tick，消息里的 `sync_time_ns` 只用于跨系统日志对齐（ARD §12）。
@@ -483,7 +502,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 发布（上行，8 个话题；均为 ID 化，缺失浮点 = NaN）：
 
 - `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（50Hz，
-  由 10ms bridge timer 每 2 拍发一帧；控制边界独立为 5ms/200Hz）。
+  由 10ms bridge timer 每 2 拍发一帧；控制边界独立为 2ms/500Hz）。
 - `micro_ros_up/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
   保护位/事务状态）。
 - `micro_ros_up/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
@@ -518,10 +537,10 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 ## 控制安全状态与恢复语义
 
-- `motor_rt_task` 每 1ms 服务、每 5ms（200Hz）控制边界消费一次完整快照；
+- `motor_rt_task` 每 1ms 服务、每 2ms（500Hz）控制边界消费一次完整快照；
   内核是唯一生命周期裁决者，任务层是唯一正常 FDCAN 发送者（P0/P1/P2 分级）。
   **控制边界同时决定 CAN 命令速率**：轨迹机组由 `trajectory_step` 逐边界插值、
-  快照机组由 `hold_step` 逐边界保持重发，两条通道合计每台每边界恰好一帧。
+  快照机组由 `hold_step` 逐边界保持重发，两条通道合计每台每边界恰好一条命令。
   上位机的快照到达速率（实测 ~72/s 封顶）不参与决定命令率。
 - 快照 freshness（MCU 单调时基）：`>30ms` 无新快照 → 全体受控电机 MIT 默认
   `kd` 阻尼软停；`>100ms` → 协议级失能并清授权；Agent 断链立即失能清授权，
@@ -571,7 +590,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 也不得据此宣称已达到硬件安全：
 
 - [ ] MIT 小幅零附近命令连续运行，示波器/logic analyzer 验证 motor_rt TX 为
-  200Hz（控制帧；另行核对 20ms/50Hz SYNC/状态心跳），并记录 motor_rt cycle
+  500Hz（控制帧；另行核对 20ms/50Hz SYNC/状态心跳），并记录 motor_rt cycle
   WCET 与周期 jitter。
 - [ ] 停止刷新快照，验证 30ms 边界进入默认 `kd` 阻尼软停、100ms 边界协议级
   失能并清授权；单电机从快照缺席，验证仅该电机软停、其他电机不受影响。

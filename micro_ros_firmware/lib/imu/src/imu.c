@@ -57,15 +57,15 @@ bool imu_update(void) {
 
   // BMI088 驱动输出 °/s；Mahony 的四元数微分要求 rad/s。
   MahonyAHRSupdateIMU(g_quat, g_gyro[0] * kDeg2Rad,
-                      g_gyro[1] * kDeg2Rad, g_gyro[2] * kDeg2Rad,
-                      g_accel[0], g_accel[1], g_accel[2]);
+      g_gyro[1] * kDeg2Rad, g_gyro[2] * kDeg2Rad,
+      g_accel[0], g_accel[1], g_accel[2]);
 
   // 四元数 → 欧拉角（yaw/pitch/roll，rad）
   g_angle[0] = atan2f(2.0f * (g_quat[0] * g_quat[3] + g_quat[1] * g_quat[2]),
-                      2.0f * (g_quat[0] * g_quat[0] + g_quat[1] * g_quat[1]) - 1.0f);
+      2.0f * (g_quat[0] * g_quat[0] + g_quat[1] * g_quat[1]) - 1.0f);
   g_angle[1] = asinf(-2.0f * (g_quat[1] * g_quat[3] - g_quat[0] * g_quat[2]));
   g_angle[2] = atan2f(2.0f * (g_quat[0] * g_quat[1] + g_quat[2] * g_quat[3]),
-                      2.0f * (g_quat[0] * g_quat[0] + g_quat[3] * g_quat[3]) - 1.0f);
+      2.0f * (g_quat[0] * g_quat[0] + g_quat[3] * g_quat[3]) - 1.0f);
   return true;
 }
 
@@ -82,4 +82,6 @@ void imu_get_data(imu_data_t *out) {
   out->temp = g_temp;
 }
 
-bool imu_ready(void) { return g_ready; }
+bool imu_ready(void) {
+  return g_ready;
+}

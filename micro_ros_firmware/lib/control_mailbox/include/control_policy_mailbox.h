@@ -59,9 +59,9 @@ typedef struct {
 
 void control_policy_mailbox_init(control_policy_mailbox_t *mailbox);
 bool control_policy_mailbox_publish(control_policy_mailbox_t *mailbox,
-                                    const control_policy_snapshot_t *snapshot);
+    const control_policy_snapshot_t *snapshot);
 bool control_policy_mailbox_take(control_policy_mailbox_t *mailbox,
-                                 control_policy_snapshot_t *snapshot);
+    control_policy_snapshot_t *snapshot);
 void control_policy_mailbox_clear(control_policy_mailbox_t *mailbox);
 
 #ifdef __cplusplus

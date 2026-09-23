@@ -10,7 +10,7 @@
 // 新增协议不改内核——ARD §24.3）。
 //
 // 所有权：motor_rt_task 是唯一调用者。1ms 服务节拍调
-// on_raw_frame()/service()；5ms/200Hz 控制边界调 apply_command_snapshot()；
+// on_raw_frame()/service()；2ms/500Hz 控制边界调 apply_command_snapshot()；
 // TX 调度器（lib/fdcan）消费 collect_tx() 输出的 P0/P1/P2 帧。
 //
 // 时基：一切 freshness/超时判定使用 MCU 单调时基毫秒（调用方传入 now_ms
@@ -148,7 +148,7 @@ typedef enum {
 // 轨迹被整条拒绝（结构与 mailbox 同规则，另加注册表存在性）：reason =
 // motor_control_fault_code_t。轨迹合法但被拒属于异常路径（mailbox 已先
 // 校验过一遍），出事件便于定位是哪一侧放行的非法载荷。
-MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED = 16U
+  MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED = 16U
 } motor_control_event_type_t;
 
 typedef struct {
@@ -295,8 +295,8 @@ motor_control_context_t *motor_control_instance(void);
 // 注意：上电默认 *未* 授权（安全默认）——任务层启动时应把 mailbox 的
 // 授权电平转发进来（mailbox 引导期默认 true）。
 void motor_control_init(motor_control_context_t *ctx,
-                        const motor_protocol_adapter_t *const *adapters,
-                        size_t adapter_count);
+    const motor_protocol_adapter_t *const *adapters,
+    size_t adapter_count);
 
 // 静态拓扑注入已删除：型号绑定改为建档/重连时读设备自报身份（协议 adapter
 // 的 READ_IDENTITY 事务），无身份读对象的协议回退到"协议内唯一型号"。
@@ -304,40 +304,40 @@ void motor_control_init(motor_control_context_t *ctx,
 // 会话边沿。断链（曾连接后断开）立即对全部可控电机发协议级停机/失能（P0）、
 // 清运动授权与目标，不等待 100ms（ARD §13.2/§33）。
 void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connected,
-                                       uint32_t now_ms);
+    uint32_t now_ms);
 
 // 授权门：全局授权与逐电机 MotorPolicy Enable 共同控制运动。撤销授权执行
 // 与断链相同的安全路径；
 // 恢复授权后必须等新的完整快照才可能回 ACTIVE（require_new_snapshot）。
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
-                                     uint32_t now_ms);
+    uint32_t now_ms);
 
 // Profile 绑定（型号目录索引版）。生产路径只有一条：建档/重连读设备自报
 // 身份后由内核内部绑定（见 motor_control_start_identity_read）；本入口保留
 // 给测试与目录内定向绑定。型号不在目录 → 拒绝并出 PROFILE_REJECTED 事件，
 // 该电机永不出运动帧。
 bool motor_control_bind_profile(motor_control_context_t *ctx, uint16_t motor_id,
-                                size_t profile_index, uint32_t now_ms);
+    size_t profile_index, uint32_t now_ms);
 
 // 指针版绑定（深层接口）：供测试注入自定义 Profile，或未来接入目录之外的
 // 识别来源。同样受协议一致性与生命周期门禁约束。
 bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor_id,
-                                    const motor_protocol_model_profile_t *profile,
-                                    uint32_t now_ms);
+    const motor_protocol_model_profile_t *profile,
+    uint32_t now_ms);
 
 // P0 安全帧下游回告重入队：调度器 P0 FIFO 满或硬件拒收时，任务层
 // 把内核生成的帧原样回传（tx_slot = 表项索引）。重入队复用 P0 驱逐语义；
 // 待发队列全 P0 的病态下转 p0_pending 挂起（按 last_p0_kind 重新编码，
 // service 逐节拍补发）——安全帧不允许在任何一段搬运中静默消失。
 bool motor_control_requeue_p0(motor_control_context_t *ctx,
-                              const motor_protocol_tx_frame_t *frame);
+    const motor_protocol_tx_frame_t *frame);
 
 // 低频配置入口（mailbox config FIFO 逐条转发）。SET_GAINS/SET_POSITION_LIMITS
 // 在 Vaxor 上是本地 Policy；SET_MODE 与 CERB 限位走 request_id 事务。
 // 结果统一经 CONFIG_RESULT 事件异步给出；本函数返回值仅表示"已受理/校验拒绝"。
 bool motor_control_submit_config(motor_control_context_t *ctx,
-                                 const motor_protocol_config_request_t *request,
-                                 uint32_t now_ms);
+    const motor_protocol_config_request_t *request,
+    uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
 // 实时路径（1ms 服务节拍）
@@ -345,27 +345,27 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
 
 // 原始帧输入（ISR→RX ring→任务 drain 后逐帧投递；帧内 rx_tick_ms 必填）。
 void motor_control_on_raw_frame(motor_control_context_t *ctx,
-                                const motor_protocol_raw_frame_t *frame);
+    const motor_protocol_raw_frame_t *frame);
 
 // 1ms 服务：OFFLINE 判定、快照 30/100ms 级联、使能整定、配置事务步进。
 // 有界：不等待设备、不等待 Agent、不动态分配。
 void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
-// 5ms/200Hz 控制边界（ARD §11.3）：校验并消费一份完整快照；
+// 2ms/500Hz 控制边界：校验并消费一份完整快照；
 // 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法载荷）。
 // ---------------------------------------------------------------------------
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
-                                          const motor_control_command_snapshot_t *snapshot,
-                                          uint32_t now_ms);
+    const motor_control_command_snapshot_t *snapshot,
+    uint32_t now_ms);
 
 // 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
 // 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
 // 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
-// 5ms/200Hz 控制边界完成。
+// 2ms/500Hz 控制边界完成。
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
-                                    const motor_control_trajectory_t *trajectory,
-                                    uint32_t now_ms);
+    const motor_control_trajectory_t *trajectory,
+    uint32_t now_ms);
 
 // 轨迹步进：按 elapsed = now_ms - 受理时刻，在完整非均匀时间线上进行单调三次
 // Hermite 插值并下发。内部路点切矢由相邻不等时间间隔共同计算，保证段边界
@@ -375,7 +375,7 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
 void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
 
 // 快照通道的边界保持重发：在每个控制边界把已受理的目标原样再投递一次，使
-// **CAN 命令速率由控制边界决定（200Hz），与上行快照到达速率无关**。快照路径
+// **CAN 命令速率由控制边界决定（500Hz），与上行快照到达速率无关**。快照路径
 // 本身只在受理新快照时发帧，而上行送达上限实测 ~72/s（best-effort 静默丢弃），
 // 单靠快照驱动永远到不了驱动器要求的命令率。
 //
@@ -399,8 +399,8 @@ typedef struct {
 } motor_control_trajectory_state_t;
 
 void motor_control_copy_trajectory_state(
-    const motor_control_context_t *ctx,
-    motor_control_trajectory_state_t *out, uint32_t now_ms);
+  const motor_control_context_t *ctx,
+  motor_control_trajectory_state_t *out, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
 // 诊断快照（ARD §32）：固件级计数器一次性可读。这些量此前只存在于运行上下文
@@ -425,16 +425,16 @@ typedef struct {
 } motor_control_diagnostics_t;
 
 void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
-                                    motor_control_diagnostics_t *out);
+    motor_control_diagnostics_t *out);
 
-// 受理并落地一条策略快照（5ms/200Hz 控制边界调用）。逐台走与 SET_POLICY 相同的
+// 受理并落地一条策略快照（2ms/500Hz 控制边界调用）。逐台走与 SET_POLICY 相同的
 // 落地逻辑（含防复权代数门）；**单台被拒不影响其余**，拒绝经 CONFIG_RESULT
 // 事件可见。注意：逐台成功也会各出一条事件，故策略是**低频**接口——高频
 // 发布会把事件环灌满（丢弃计数见 diagnostics 话题）。
 // 返回 false = 整条非法（计数越界/非有限或负增益/重复 motor_id）。
 bool motor_control_apply_policy(
-    motor_control_context_t *ctx,
-    const motor_control_policy_snapshot_t *snapshot, uint32_t now_ms);
+  motor_control_context_t *ctx,
+  const motor_control_policy_snapshot_t *snapshot, uint32_t now_ms);
 
 // 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；
@@ -448,16 +448,16 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 // 取走待发送帧（最多 capacity 帧，余量保留待下次）。每总线
 // TX 调度器按 tx_class 分配 P0/P1/P2 队列。
 size_t motor_control_collect_tx(motor_control_context_t *ctx,
-                                motor_protocol_tx_frame_t *out, size_t capacity);
+    motor_protocol_tx_frame_t *out, size_t capacity);
 
 size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
-                                        motor_control_motion_state_t *out,
-                                        size_t capacity, uint32_t now_ms);
+    motor_control_motion_state_t *out,
+    size_t capacity, uint32_t now_ms);
 size_t motor_control_copy_statuses(motor_control_context_t *ctx,
-                                   motor_control_status_t *out, size_t capacity,
-                                   uint32_t now_ms);
+    motor_control_status_t *out, size_t capacity,
+    uint32_t now_ms);
 size_t motor_control_drain_events(motor_control_context_t *ctx,
-                                  motor_control_event_t *out, size_t capacity);
+    motor_control_event_t *out, size_t capacity);
 
 // 拓扑条目（motor_id 升序；指针指向内核静态存储，调用方只在本临界区内读，
 // model_name 为 NULL 表示未绑定）。
@@ -473,8 +473,8 @@ typedef struct {
 
 // 固定容量拓扑副本（最多 capacity 条，按 motor_id 升序；并发由调用方临界区）。
 size_t motor_control_copy_topology(motor_control_context_t *ctx,
-                                   motor_control_topology_entry_t *out,
-                                   size_t capacity);
+    motor_control_topology_entry_t *out,
+    size_t capacity);
 
 
 // ---------------------------------------------------------------------------
@@ -532,11 +532,11 @@ typedef struct {
 
 // 只读参数视图副本（固定容量，按注册表顺序）；未发现电机不在结果中。
 size_t motor_control_copy_param_views(motor_control_context_t *ctx,
-                                      motor_control_param_view_t *out,
-                                      size_t capacity);
+    motor_control_param_view_t *out,
+    size_t capacity);
 
 // boot 持久化参数（W25 blob 投影）；未保存字段对应 has_* 为 false。
-// 不含 enable（策略位不持久化）。调用方（motor_rt 5ms/200Hz 边界）每边界传入，
+// 不含 enable（策略位不持久化）。调用方（motor_rt 2ms/500Hz 边界）每边界传入，
 // 内核按表项 stored_apply_mask 在 Profile 绑定后分批套用。
 typedef struct {
   uint16_t motor_id;
@@ -559,9 +559,9 @@ typedef struct {
 // 套用 boot 存储参数（幂等：套尽的电机 mask 清零；Profile 未绑定的电机
 // 保留 mask 等后续边界）。CERB 设备值只填影子，不发任何 SDO 写。
 void motor_control_apply_stored_params(
-    motor_control_context_t *ctx,
-    const motor_control_stored_params_t *records, size_t count,
-    uint32_t now_ms);
+  motor_control_context_t *ctx,
+  const motor_control_stored_params_t *records, size_t count,
+  uint32_t now_ms);
 
 #ifdef __cplusplus
 }

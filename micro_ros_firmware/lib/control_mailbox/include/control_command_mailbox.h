@@ -49,10 +49,10 @@ typedef struct {
 
 void control_command_mailbox_init(control_command_mailbox_t *mailbox);
 bool control_command_mailbox_publish(
-    control_command_mailbox_t *mailbox,
-    const control_command_snapshot_t *snapshot);
+  control_command_mailbox_t *mailbox,
+  const control_command_snapshot_t *snapshot);
 bool control_command_mailbox_take(control_command_mailbox_t *mailbox,
-                                  control_command_snapshot_t *snapshot);
+    control_command_snapshot_t *snapshot);
 void control_command_mailbox_clear(control_command_mailbox_t *mailbox);
 
 #ifdef __cplusplus

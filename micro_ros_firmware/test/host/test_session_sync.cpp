@@ -20,7 +20,7 @@ static void test_boot_exempt() {
   control_mailbox_events_t events{};
   assert(!control_mailbox_take_events(&mb, &events)); // 引导期无边沿
   session_sync_apply(&g_ctx, &events,
-                     control_mailbox_session_authorized(&mb), 10);
+      control_mailbox_session_authorized(&mb), 10);
   assert(g_ctx.authorized);
   assert(!g_ctx.agent_connected && !g_ctx.agent_ever_connected);
 
@@ -38,7 +38,7 @@ static void test_connect() {
   assert(control_mailbox_take_events(&mb, &events));
   assert(events.agent_state_pending && events.agent_connected_requested);
   session_sync_apply(&g_ctx, &events,
-                     control_mailbox_session_authorized(&mb), 20);
+      control_mailbox_session_authorized(&mb), 20);
   assert(g_ctx.agent_connected && g_ctx.agent_ever_connected);
   assert(g_ctx.authorized);
   motor_control_event_t out[8] = {};
@@ -63,7 +63,7 @@ static void test_disconnect_double_lost() {
   (void)control_mailbox_take_events(&mb, &e2);
   assert(e2.agent_state_pending && !e2.agent_connected_requested);
   session_sync_apply(&g_ctx, &e2,
-                     control_mailbox_session_authorized(&mb), 40);
+      control_mailbox_session_authorized(&mb), 40);
   assert(!g_ctx.agent_connected && !g_ctx.authorized);
   assert(g_ctx.require_new_snapshot);
 
@@ -93,7 +93,7 @@ static void test_reconnect_reauthorizes() {
   control_mailbox_events_t e3{};
   (void)control_mailbox_take_events(&mb, &e3);
   session_sync_apply(&g_ctx, &e3,
-                     control_mailbox_session_authorized(&mb), 60);
+      control_mailbox_session_authorized(&mb), 60);
   assert(g_ctx.agent_connected && g_ctx.authorized);
   assert(g_ctx.require_new_snapshot); // 新快照由 apply_command_snapshot 清除
 }

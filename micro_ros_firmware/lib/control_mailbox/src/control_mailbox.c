@@ -10,53 +10,53 @@ static bool config_request_is_valid(
   }
 
   switch (request->kind) {
-    case CONTROL_MAILBOX_CONFIG_SET_MODE:
-      return true;
-    case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
-      return true; // bool 无可校验域
-    case CONTROL_MAILBOX_CONFIG_SET_GAINS:
-      return isfinite(request->value.gains.kp) &&
-             isfinite(request->value.gains.kd) &&
-             request->value.gains.kp >= 0.0F &&
-             request->value.gains.kd >= 0.0F;
-    case CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS:
-      return isfinite(request->value.position_limits.min_position_rad) &&
-             isfinite(request->value.position_limits.max_position_rad) &&
-             request->value.position_limits.min_position_rad <
-                 request->value.position_limits.max_position_rad;
-    case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
-      return isfinite(request->value.max_velocity_rad_s) &&
-             request->value.max_velocity_rad_s > 0.0F;
-    case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
-      return isfinite(request->value.max_torque_nm) &&
-             request->value.max_torque_nm > 0.0F;
-    case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
-    case CONTROL_MAILBOX_CONFIG_SET_ZERO:
-    case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
-      return true; // 无载荷，只凭 request_id/motor_id
-    case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
-      // 厂家对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
-      return request->value.safety_protect_raw <= 1U;
-    case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
-      // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
-      return request->value.direction_raw <= 1U;
-    case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
-      // 只挡空位图（没有要保存的对象）。**位图里允许含易失槽**（保护开关
-      // bit4 / 方向 bit5）：脏位图记的是"改过但还没落盘"，易失槽也在内 ——
-      // 它们没有厂家保存码，但记录要落 W25 才生效，所以必须能被"保存"这个
-      // 动作一并清掉。哪些槽真有保存码是**内核的策略**（它按
-      // MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK 掩掉之后再决定发不发帧），
-      // 不是本层能判的。
-      // 早先这里按那套掩码挡过：结果是凡写过保护/方向的台一律被挡在门外，
-      // 而归一恒写保护 ⇒ 空板首次保存必被拒 ⇒ 保存命令整条失效。
-      return request->value.save_slots != 0U;
-    case CONTROL_MAILBOX_CONFIG_SET_POLICY:
-      return isfinite(request->value.policy.kp) &&
-             isfinite(request->value.policy.kd) &&
-             request->value.policy.kp >= 0.0F &&
-             request->value.policy.kd >= 0.0F;
-    default:
-      return false;
+  case CONTROL_MAILBOX_CONFIG_SET_MODE:
+    return true;
+  case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
+    return true;   // bool 无可校验域
+  case CONTROL_MAILBOX_CONFIG_SET_GAINS:
+    return isfinite(request->value.gains.kp) &&
+           isfinite(request->value.gains.kd) &&
+           request->value.gains.kp >= 0.0F &&
+           request->value.gains.kd >= 0.0F;
+  case CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS:
+    return isfinite(request->value.position_limits.min_position_rad) &&
+           isfinite(request->value.position_limits.max_position_rad) &&
+           request->value.position_limits.min_position_rad <
+           request->value.position_limits.max_position_rad;
+  case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
+    return isfinite(request->value.max_velocity_rad_s) &&
+           request->value.max_velocity_rad_s > 0.0F;
+  case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
+    return isfinite(request->value.max_torque_nm) &&
+           request->value.max_torque_nm > 0.0F;
+  case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
+  case CONTROL_MAILBOX_CONFIG_SET_ZERO:
+  case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
+    return true;   // 无载荷，只凭 request_id/motor_id
+  case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
+    // 厂家对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
+    return request->value.safety_protect_raw <= 1U;
+  case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
+    // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
+    return request->value.direction_raw <= 1U;
+  case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
+    // 只挡空位图（没有要保存的对象）。**位图里允许含易失槽**（保护开关
+    // bit4 / 方向 bit5）：脏位图记的是"改过但还没落盘"，易失槽也在内 ——
+    // 它们没有厂家保存码，但记录要落 W25 才生效，所以必须能被"保存"这个
+    // 动作一并清掉。哪些槽真有保存码是**内核的策略**（它按
+    // MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK 掩掉之后再决定发不发帧），
+    // 不是本层能判的。
+    // 早先这里按那套掩码挡过：结果是凡写过保护/方向的台一律被挡在门外，
+    // 而归一恒写保护 ⇒ 空板首次保存必被拒 ⇒ 保存命令整条失效。
+    return request->value.save_slots != 0U;
+  case CONTROL_MAILBOX_CONFIG_SET_POLICY:
+    return isfinite(request->value.policy.kp) &&
+           isfinite(request->value.policy.kd) &&
+           request->value.policy.kp >= 0.0F &&
+           request->value.policy.kd >= 0.0F;
+  default:
+    return false;
   }
 }
 
@@ -74,7 +74,7 @@ static void clear_live_inputs(control_mailbox_t *mailbox) {
 
 bool control_mailbox_session_authorized(const control_mailbox_t *mailbox) {
   return mailbox != NULL && (!mailbox->agent_state_seen ||
-                             mailbox->agent_connected_requested);
+         mailbox->agent_connected_requested);
 }
 
 static bool agent_is_connected_or_unknown(const control_mailbox_t *mailbox) {
@@ -86,7 +86,7 @@ static bool agent_is_connected_or_unknown(const control_mailbox_t *mailbox) {
 // 三条通道诊断口径一致。config 走另一条门（不受 authorization_requested
 // 约束，见 control_mailbox_submit_config），故不共用本函数。
 static bool live_input_allowed(control_mailbox_t *mailbox,
-                               uint32_t *rejected_count) {
+    uint32_t *rejected_count) {
   if (mailbox->authorization_requested &&
       agent_is_connected_or_unknown(mailbox)) {
     return true;
@@ -133,7 +133,7 @@ bool control_mailbox_submit_command(
 }
 
 bool control_mailbox_take_command(control_mailbox_t *mailbox,
-                                  control_command_snapshot_t *snapshot) {
+    control_command_snapshot_t *snapshot) {
   if (mailbox == NULL) {
     return false;
   }
@@ -147,7 +147,7 @@ void control_mailbox_clear_command(control_mailbox_t *mailbox) {
 }
 
 bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
-                                       const control_trajectory_t *trajectory) {
+    const control_trajectory_t *trajectory) {
   if (mailbox == NULL) {
     return false;
   }
@@ -159,7 +159,7 @@ bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
 }
 
 bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
-                                     control_trajectory_t *trajectory) {
+    control_trajectory_t *trajectory) {
   if (mailbox == NULL) {
     return false;
   }
@@ -173,7 +173,7 @@ void control_mailbox_clear_trajectory(control_mailbox_t *mailbox) {
 }
 
 bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
-                                   const control_policy_snapshot_t *snapshot) {
+    const control_policy_snapshot_t *snapshot) {
   if (mailbox == NULL) {
     return false;
   }
@@ -185,7 +185,7 @@ bool control_mailbox_submit_policy(control_mailbox_t *mailbox,
 }
 
 bool control_mailbox_take_policy(control_mailbox_t *mailbox,
-                                 control_policy_snapshot_t *snapshot) {
+    control_policy_snapshot_t *snapshot) {
   if (mailbox == NULL) {
     return false;
   }
@@ -252,7 +252,7 @@ void control_mailbox_clear_config(control_mailbox_t *mailbox) {
 // 注意它与 revoke_authorization() 的**清空集不同**——后者额外清 policy，
 // 本函数的 false 分支只清 command/trajectory。两者不可互换，别顺手合并。
 void control_mailbox_request_authorization(control_mailbox_t *mailbox,
-                                           bool authorized) {
+    bool authorized) {
   if (mailbox == NULL) {
     return;
   }
@@ -272,7 +272,7 @@ void control_mailbox_request_authorization(control_mailbox_t *mailbox,
 }
 
 void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
-                                             bool connected) {
+    bool connected) {
   if (mailbox == NULL) {
     return;
   }
@@ -305,7 +305,7 @@ void control_mailbox_request_agent_connected(control_mailbox_t *mailbox,
 }
 
 bool control_mailbox_take_events(control_mailbox_t *mailbox,
-                                 control_mailbox_events_t *events) {
+    control_mailbox_events_t *events) {
   if (mailbox == NULL || events == NULL) {
     return false;
   }

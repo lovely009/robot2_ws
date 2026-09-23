@@ -102,7 +102,7 @@ bool ros_bridge_create() {
   g_node_up = true;
 
   if (rclc_executor_init(&g_executor, &g_support.context, executor_handle_count(),
-                         &g_allocator) != RCL_RET_OK) {
+      &g_allocator) != RCL_RET_OK) {
     ros_bridge_destroy();
     return false;
   }
@@ -124,7 +124,7 @@ bool ros_bridge_create() {
   // 10ms 周期（100Hz）：发布各域的最新 motion_states 与 IMU 快照；
   // USB CDC 带宽余量仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
-                              bridge_timer_cb) != RCL_RET_OK) {
+      bridge_timer_cb) != RCL_RET_OK) {
     ros_bridge_destroy();
     return false;
   }

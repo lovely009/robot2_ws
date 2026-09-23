@@ -8,7 +8,7 @@
 #include <limits>
 
 static control_policy_snapshot_t make_snapshot(uint32_t request_id,
-                                               uint32_t generation) {
+    uint32_t generation) {
   control_policy_snapshot_t s{};
   s.received_tick_ms = 1000U;
   s.request_id = request_id;
@@ -17,7 +17,7 @@ static control_policy_snapshot_t make_snapshot(uint32_t request_id,
 }
 
 static void add_target(control_policy_snapshot_t *s, uint16_t motor_id,
-                       bool enabled, float kp, float kd) {
+    bool enabled, float kp, float kd) {
   s->targets[s->target_count] = {motor_id, enabled, kp, kd};
   s->target_count++;
 }

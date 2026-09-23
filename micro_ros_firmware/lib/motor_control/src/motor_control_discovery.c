@@ -18,7 +18,7 @@
 
 // 冲突置位：禁运动 + P0 失能帧（推送失败挂起重试）+ 事件（只触发一次）。
 static void latch_config_conflict(motor_control_context_t *ctx,
-                                  motor_control_entry_t *entry, uint32_t now_ms) {
+    motor_control_entry_t *entry, uint32_t now_ms) {
   if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT) {
     return;
   }
@@ -39,12 +39,12 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   entry->unified_fault_code = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
   entry->last_failure_reason = MOTOR_CONTROL_FAULT_CONFIG_CONFLICT;
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_CONFLICT,
-                           entry->motor_id, entry->bus_index,
-                           MOTOR_CONTROL_FAULT_CONFIG_CONFLICT, 0U);
+      entry->motor_id, entry->bus_index,
+      MOTOR_CONTROL_FAULT_CONFIG_CONFLICT, 0U);
 }
 
 void motor_control_on_raw_frame(motor_control_context_t *ctx,
-                                const motor_protocol_raw_frame_t *frame) {
+    const motor_protocol_raw_frame_t *frame) {
   if (ctx == NULL || frame == NULL) {
     return;
   }
@@ -73,7 +73,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
 
   // 注册表定位/建档（motor_id 全局键；满表拒绝并出事件，不静默截断）。
   const bool presence = adapter->is_discovery_frame == NULL ||
-                        adapter->is_discovery_frame(frame);
+      adapter->is_discovery_frame(frame);
   motor_control_entry_t *entry = motor_control_find_entry(ctx, node);
   const bool created = entry == NULL;
   if (!presence) {
@@ -92,8 +92,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
   if (created) {
     if (ctx->entry_count >= MOTOR_CONTROL_MAX_MOTORS) {
       motor_control_push_event(ctx, frame->rx_tick_ms,
-                               MOTOR_CONTROL_EVENT_REGISTRY_FULL, node,
-                               frame->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
+          MOTOR_CONTROL_EVENT_REGISTRY_FULL, node,
+          frame->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
       return;
     }
     entry = &ctx->entries[ctx->entry_count++];
@@ -110,8 +110,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
                                       // 故障/离线/撤权路径显式清除后不复立
     entry->last_rx_tick_ms = frame->rx_tick_ms;
     motor_control_push_event(ctx, frame->rx_tick_ms,
-                             MOTOR_CONTROL_EVENT_DISCOVERED, node,
-                             frame->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
+        MOTOR_CONTROL_EVENT_DISCOVERED, node,
+        frame->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
   } else if (entry->bus_index != frame->bus_index || entry->adapter != adapter) {
     // 同 motor_id 出现在别的总线/别的协议 → 冲突，不后到覆盖（REV-08）。
     latch_config_conflict(ctx, entry, frame->rx_tick_ms);
@@ -121,7 +121,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->last_rx_tick_ms = frame->rx_tick_ms;
     return;
   } else if (!entry->online ||
-             entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE) {
+      entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_OFFLINE) {
     // 重新上线：重新走 DISCOVERED 流（ARD §36），不直达 READY；
     // 旧运动授权/目标不复用（§10.4）；诊断残留一并清除。
     entry->online = true;
@@ -159,8 +159,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->boot_norm_retry_tick_ms = 0U;
     entry->dev_init = MOTOR_CONTROL_DEV_INIT_PENDING;
     motor_control_push_event(ctx, frame->rx_tick_ms,
-                             MOTOR_CONTROL_EVENT_RECONNECTED, entry->motor_id,
-                             entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
+        MOTOR_CONTROL_EVENT_RECONNECTED, entry->motor_id,
+        entry->bus_index, MOTOR_CONTROL_FAULT_NONE, 0U);
   }
 
   entry->last_rx_tick_ms = frame->rx_tick_ms;
@@ -222,8 +222,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       motor_control_abort_tx(ctx, entry, frame->rx_tick_ms);
       entry->last_failure_reason = MOTOR_CONTROL_FAULT_VENDOR;
       motor_control_push_event(ctx, frame->rx_tick_ms, MOTOR_CONTROL_EVENT_FAULT,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_VENDOR, 0U);
+          entry->motor_id, entry->bus_index,
+          MOTOR_CONTROL_FAULT_VENDOR, 0U);
     }
     return;
   }
@@ -236,8 +236,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_FAULT) {
       entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
       motor_control_push_event(ctx, frame->rx_tick_ms, MOTOR_CONTROL_EVENT_READY,
-                               entry->motor_id, entry->bus_index,
-                               MOTOR_CONTROL_FAULT_NONE, 0U);
+          entry->motor_id, entry->bus_index,
+          MOTOR_CONTROL_FAULT_NONE, 0U);
     }
   }
 }

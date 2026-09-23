@@ -65,7 +65,7 @@ typedef enum {
 // （布尔量，不做钳制）。超过 profile 上限时钳到 upper_limit
 // （upper_limit <= 0 表示不钳），仍返回 true。
 bool param_value_ok(param_field_t field, float value, float upper_limit,
-                    float *clamped);
+    float *clamped);
 
 // 位置限位成对校验：两者有限且 min < max。
 bool param_position_limits_ok(float min_rad, float max_rad);

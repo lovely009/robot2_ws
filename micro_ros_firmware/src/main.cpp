@@ -19,8 +19,8 @@
 #error "configCHECK_FOR_STACK_OVERFLOW must be 2 (see include/STM32FreeRTOSConfig.h)"
 #endif
 static_assert(BOARD_ISR_SYSCALL_THRESHOLD ==
-                  configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
-              "board_irq.h 阈值必须与 FreeRTOS syscall 门槛一致");
+    configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY,
+    "board_irq.h 阈值必须与 FreeRTOS syscall 门槛一致");
 
 static const uint32_t START_STK_SIZE = 256U;
 static const UBaseType_t START_TASK_PRIO = 1U;
@@ -61,7 +61,7 @@ extern "C" void vApplicationGetTimerTaskMemory(
 static const char *volatile g_stack_overflow_task = nullptr;
 
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t pxTask,
-                                              char *pcTaskName) {
+    char *pcTaskName) {
   (void)pxTask;
   g_stack_overflow_task = pcTaskName;
   taskDISABLE_INTERRUPTS();
@@ -108,7 +108,7 @@ static void start_task(void *pv_parameters) {
   if (!motor_rt_task_start()) {
     Error_Handler();
   }
-  
+
   // 子任务创建完成后释放一次性的启动任务资源。
   vTaskDelete(StartTask_Handler);
 }
@@ -119,7 +119,7 @@ void setup() {
 
   // 通过低优先级启动任务统一创建业务任务，确保其初始化发生在调度器启动后。
   if (xTaskCreate(start_task, "start_task", START_STK_SIZE, nullptr,
-                  START_TASK_PRIO, &StartTask_Handler) != pdPASS) {
+      START_TASK_PRIO, &StartTask_Handler) != pdPASS) {
     Error_Handler();
   }
 
@@ -130,4 +130,5 @@ void setup() {
 }
 
 // STM32FreeRTOS 将 Arduino loop() 作为 idle hook 调用，因此必须保持非阻塞且不承载业务逻辑；所有周期性工作均由独立任务负责。
-void loop() {}
+void loop() {
+}

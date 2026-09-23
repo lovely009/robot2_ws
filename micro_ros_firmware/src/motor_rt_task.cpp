@@ -11,49 +11,50 @@
 #include <cstring>
 
 #include "can_bsp.h"
-#include "storage_task.h"
 #include "fdcan.h"
+#include "motor_config_contract.hpp"
 #include "motor_protocol_adapter.h"
+#include "motor_tx_router.h"
 #include "session_sync.h"
+#include "storage_task.h"
 
 // 跨库容量契约：64 这一物理容量在各库独立定义，单侧改小会静默截断，
 // 编译期锁齐。RX ring 的 64 是环深语义（非设备数），刻意不纳入。
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
-              "命令快照容量必须与注册表容量一致");
+    "命令快照容量必须与注册表容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CAN_TX_P1_SLOTS,
-              "P1 调度槽数必须与注册表容量一致");
+    "P1 调度槽数必须与注册表容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS,
-              "内核快照目标容量必须与注册表容量一致");
+    "内核快照目标容量必须与注册表容量一致");
 static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_POINTS ==
-                  CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS,
-              "轨迹点数容量必须与 mailbox 容量一致");
+    CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS,
+    "轨迹点数容量必须与 mailbox 容量一致");
 static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS ==
-                  CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS,
-              "轨迹电机容量必须与 mailbox 容量一致");
+    CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS,
+    "轨迹电机容量必须与 mailbox 容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
-              "策略容量必须与注册表容量一致");
+    "策略容量必须与注册表容量一致");
 
 // 任务参数：栈 1024 字（4KB）。1ms 节拍任务的栈/WCET 需按台架数据复测
 // （TBD-RT-01），不得沿用 10ms 旧任务的假设。
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 控制边界 5ms/200Hz —— 它同时**决定 CAN 命令速率**：轨迹机组由
+// 控制边界 2ms/500Hz —— 它同时**决定 CAN 命令速率**：轨迹机组由
 // trajectory_step 逐边界插值下发，快照机组由 hold_step 逐边界保持重发，两条通道
-// 合计每台每个边界恰好一帧，P1 调度槽 latest-wins 覆盖同一拍内的重投递。
-// 目标命令率 ≥200Hz 是驱动器侧的硬要求，不能再挂发送门限（2026-09-21 曾以
-// 20ms/50Hz 门限规避台架 SLCAN 通道的吞吐上限——那是**台架仪器**的限制，
-// 不是总线余量：4 台 200Hz 的命令负载仅 4.35% 总线，16 台/总线也不过 26%，
-// 见 docs/plans/active/48-motor-scale-design.md §3.2。台架上要验 200Hz 需换
-// candleLight/socketcan 或直接看固件侧 tx_frame_count）。
-static const uint32_t kControlPeriodMs = 5U;
+// 合计每台每个边界恰好一条命令，P1 调度槽 latest-wins 覆盖同一拍内的重投递；
+// CERB 命令在出队后合成每帧最多 6 轴的 0x210。
+// 目标命令率为 500Hz；20ms/50Hz SYNC 与上行状态节拍独立。总线负载、
+// motor_rt WCET/jitter 需要在无负载台架复测，不能沿用 200Hz 时的结论。
+static const uint32_t kControlPeriodMs = 2U;
 
 // 每周期配额（TBD-CAN-01 占位；均为具名可调常量）。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
 static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈上界）
-static const uint32_t kTxCollectBudget = 16U;       // 每 1ms 最多取走内核待发帧数
-static const uint32_t kTxPumpBudgetPerBus = 8U;     // 每 1ms 每总线最多提交帧数
-static const uint32_t kConfigDrainPerBoundary = 4U; // 每个 5ms 控制边界最多转发配置数
+// 两次服务拍至少搬完 64 台的控制帧，并给 P0/P2/SYNC 留余量。
+static const uint32_t kTxCollectBudget =
+    MOTOR_TX_ROUTER_LOGICAL_CAPACITY; // 每 1ms 最多取走内核待发帧数
+static const uint32_t kConfigDrainPerBoundary = 4U; // 每个控制边界最多转发配置数
 static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
                                                     // 20ms 状态上报，与 VAXOR
                                                     // 20ms 自推统一 50Hz）
@@ -63,18 +64,14 @@ static motor_control_context_t *const g_motor_control =
     motor_control_instance();
 static control_mailbox_t g_control_mailbox;
 
-// boot 存储参数（start 时从 storage 任务快照；5ms 边界套用到内核）。
+// boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
 static motor_control_stored_params_t
     g_stored_params[MOTOR_CONTROL_MAX_MOTORS];
 static size_t g_stored_count = 0U;
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
 
-// 协议 adapter 注册表（构造注入内核；新增协议 = 加一项，内核零改动）。
-static const motor_protocol_adapter_t *const kAdapters[2] = {
-    &motor_protocol_vaxor_adapter,
-    &motor_protocol_cerb_adapter,
-};
+static motor_tx_router_t g_tx_router;
 
 // ---------------------------------------------------------------------------
 // mailbox 写入口（外部任务上下文；短临界区保护 mailbox）
@@ -125,7 +122,7 @@ void motor_rt_set_agent_connected(bool connected) {
 // ---------------------------------------------------------------------------
 
 size_t motor_rt_copy_motion_states(motor_control_motion_state_t *out,
-                                   size_t capacity) {
+    size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
@@ -150,7 +147,7 @@ size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity) {
 }
 
 size_t motor_rt_copy_param_views(motor_control_param_view_t *out,
-                                 size_t capacity) {
+    size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
@@ -200,7 +197,7 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   taskEXIT_CRITICAL();
   // ring 溢出在 lib/fdcan 侧，堆余量只有本任务能问（内核不感知堆）。
   static_assert(MOTOR_CONTROL_MAX_BUSES == CAN_RX_BUS_COUNT,
-                "总线数契约：内核与 fdcan 必须一致");
+      "总线数契约：内核与 fdcan 必须一致");
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
     can_rx_ring_t *ring = can_bsp_rx_ring(bus);
     out->ring_drop[bus] = ring != nullptr ? ring->overflow_count : 0U;
@@ -212,12 +209,12 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   //      而调用方又把 submit 的返回值 (void) 掉了 → 台架上表现为「发布成功、
   //      既不计数也不出事件」，哪儿都查不到。
   out->mailbox_rejected_command = g_control_mailbox.command_rejected_count +
-                                  g_control_mailbox.command.invalid_snapshot_count;
+      g_control_mailbox.command.invalid_snapshot_count;
   out->mailbox_rejected_trajectory =
       g_control_mailbox.trajectory_rejected_count +
       g_control_mailbox.trajectory.invalid_trajectory_count;
   out->mailbox_rejected_policy = g_control_mailbox.policy_rejected_count +
-                                 g_control_mailbox.policy.invalid_policy_count;
+      g_control_mailbox.policy.invalid_policy_count;
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
     out->rx_hw_lost[bus] = can_bsp_rx_hw_lost(bus);
     out->tx_frame_count[bus] = can_bsp_tx_frame_count(bus);
@@ -232,6 +229,9 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
   taskENTER_CRITICAL();
   // 内核按 motor_id 升序产出拓扑，这里只做协议编号映射与字符串落地。
   motor_control_topology_entry_t topo_in[MOTOR_CONTROL_MAX_MOTORS];
+  size_t adapter_count = 0U;
+  const motor_protocol_adapter_t *const *adapters =
+      motor_protocol_adapter_registry(&adapter_count);
   const size_t kernel_count =
       motor_control_copy_topology(g_motor_control, topo_in, capacity);
   for (size_t i = 0; i < kernel_count; ++i) {
@@ -240,8 +240,8 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
     topo->motor_id = in->motor_id;
     topo->bus_index = in->bus_index;
     topo->protocol = 0xFFU; // 未登记协议（防御；当前两协议均可命中）
-    for (size_t k = 0; k < sizeof(kAdapters) / sizeof(kAdapters[0]); ++k) {
-      if (kAdapters[k] == in->protocol) {
+    for (size_t k = 0U; k < adapter_count; ++k) {
+      if (adapters[k] == in->protocol) {
         topo->protocol = (uint8_t)k; // 注册顺序 = MotorTopologyEntry 协议枚举
         break;
       }
@@ -249,7 +249,7 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
     topo->model_name[0] = '\0';
     if (in->model_name != nullptr) {
       strncpy(topo->model_name, in->model_name,
-              sizeof(topo->model_name) - 1U);
+          sizeof(topo->model_name) - 1U);
       topo->model_name[sizeof(topo->model_name) - 1U] = '\0';
     }
     topo->capability_flags = in->capability_flags;
@@ -337,61 +337,54 @@ static void route_kernel_tx(void) {
     frame.size = (uint8_t)bytes;
     memcpy(frame.data, batch[i].data, bytes);
     switch (batch[i].tx_class) {
-      case MOTOR_PROTOCOL_TX_CLASS_P0:
-        // 调度器 FIFO 满时回告内核重入队，由 p0_pending 逐拍补发；
-        // 安全帧不允许在搬运链路中静默丢弃。
-        if (!can_tx_scheduler_submit_p0(sched, &frame)) {
-          (void)motor_control_requeue_p0(g_motor_control, &batch[i]);
-        }
-        break;
-      case MOTOR_PROTOCOL_TX_CLASS_P1:
-        (void)can_tx_scheduler_submit_p1(sched, batch[i].tx_slot, &frame);
-        break;
-      case MOTOR_PROTOCOL_TX_CLASS_P2:
-      default:
-        (void)can_tx_scheduler_submit_p2(sched, &frame);
-        break;
+    case MOTOR_PROTOCOL_TX_CLASS_P0:
+      // 调度器 FIFO 满时回告内核重入队，由 p0_pending 逐拍补发；
+      // 安全帧不允许在搬运链路中静默丢弃。
+      if (!can_tx_scheduler_submit_p0(sched, &frame)) {
+        (void)motor_control_requeue_p0(g_motor_control, &batch[i]);
+      }
+      break;
+    case MOTOR_PROTOCOL_TX_CLASS_P1:
+      (void)can_tx_scheduler_submit_p1(sched, batch[i].tx_slot, &frame);
+      break;
+    case MOTOR_PROTOCOL_TX_CLASS_P2:
+    default:
+      (void)can_tx_scheduler_submit_p2(sched, &frame);
+      break;
     }
   }
 }
 
-// 1ms 服务之三：每总线 TX 调度器 pump → 硬件提交。
-// 每周期恰好一次 pump：P2 配额按"每 pump"计，循环调用会叠加配额。
+static bool submit_routed_tx(void *context, uint8_t bus_index,
+    const can_tx_frame_t *frame) {
+  (void)context;
+  return can_bsp_submit_tx(bus_index, frame);
+}
+
+// 1ms 服务之三：每总线只调用一次路由器；HAL 提交仍由本任务独占。
 static void pump_tx_schedulers(void) {
-  static can_tx_frame_t pump[kTxPumpBudgetPerBus]; // 静态：固定容量、可审计
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
-    can_tx_scheduler_t *sched = can_bsp_tx_scheduler(bus);
-    if (sched == nullptr) {
+    can_tx_scheduler_t *scheduler = can_bsp_tx_scheduler(bus);
+    if (scheduler == nullptr) {
       continue;
     }
-    uint32_t p0_count = 0U;
-    const uint32_t n =
-        can_tx_scheduler_pump(sched, pump, kTxPumpBudgetPerBus, &p0_count);
-    for (uint32_t i = 0; i < n; ++i) {
-      if (!can_bsp_submit_tx(bus, &pump[i])) {
-        // 回插 P0 队首，下一拍先于其他帧重试，确保离线电机的失能帧
-        // 在总线恢复后落地。P1 由下一周期最新目标取代，P2 为管理流量；
-        // 二者只保留拒收计数，不重试。
-        if (i < p0_count) {
-          (void)can_tx_scheduler_requeue_p0_front(sched, &pump[i]);
-        }
-      }
-    }
+    (void)motor_tx_router_pump(&g_tx_router, scheduler, bus,
+        submit_routed_tx, nullptr);
   }
 }
 
-// 5ms/200Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 2ms/500Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
 
 static void convert_snapshot(const control_command_snapshot_t *in,
-                             motor_control_command_snapshot_t *out) {
+    motor_control_command_snapshot_t *out) {
   out->sequence = in->sequence;
   out->received_tick_ms = in->received_tick_ms;
   out->target_count = in->target_count;
   for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS;
-       ++i) {
+      ++i) {
     out->targets[i].motor_id = in->targets[i].motor_id;
     out->targets[i].position_rad = in->targets[i].position;
     out->targets[i].velocity_rad_s = in->targets[i].velocity;
@@ -400,13 +393,13 @@ static void convert_snapshot(const control_command_snapshot_t *in,
 }
 
 static void convert_policy(const control_policy_snapshot_t *in,
-                           motor_control_policy_snapshot_t *out) {
+    motor_control_policy_snapshot_t *out) {
   out->received_tick_ms = in->received_tick_ms;
   out->request_id = in->request_id;
   out->policy_generation = in->policy_generation;
   out->target_count = in->target_count;
   for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_MOTORS;
-       ++i) {
+      ++i) {
     out->targets[i].motor_id = in->targets[i].motor_id;
     out->targets[i].enabled = in->targets[i].enabled;
     out->targets[i].kp = in->targets[i].kp;
@@ -416,18 +409,18 @@ static void convert_policy(const control_policy_snapshot_t *in,
 }
 
 static void convert_trajectory(const control_trajectory_t *in,
-                               motor_control_trajectory_t *out) {
+    motor_control_trajectory_t *out) {
   out->sequence = in->sequence;
   out->received_tick_ms = in->received_tick_ms;
   out->trajectory_id = in->trajectory_id;
   out->point_count = in->point_count;
   out->target_count = in->target_count;
   for (uint16_t i = 0;
-       i < in->target_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS; ++i) {
+      i < in->target_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS; ++i) {
     out->target_ids[i] = in->target_ids[i];
   }
   for (uint16_t i = 0;
-       i < in->point_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_POINTS; ++i) {
+      i < in->point_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_POINTS; ++i) {
     out->points[i].time_from_start_ms = in->points[i].time_from_start_ms;
     out->points[i].motor_id = in->points[i].motor_id;
     out->points[i].position_rad = in->points[i].position;
@@ -436,109 +429,62 @@ static void convert_trajectory(const control_trajectory_t *in,
   }
 }
 
-// mailbox 与内核协议层的配置 kind 枚举类型独立，但数值必须逐值相等；
-// convert_config 的显式转换依赖此前提，以下断言防止单侧修改。
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_MODE) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_MODE),
-              "mailbox/protocol config kind 契约不一致：SET_MODE");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_GAINS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_GAINS),
-    "mailbox/protocol config kind 契约不一致：SET_GAINS");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS),
-    "mailbox/protocol config kind 契约不一致：SET_POSITION_LIMITS");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ENABLE) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ENABLE),
-    "mailbox/protocol config kind 契约不一致：SET_ENABLE");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT),
-    "mailbox/protocol config kind 契约不一致：SET_VELOCITY_LIMIT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT),
-    "mailbox/protocol config kind 契约不一致：SET_TORQUE_LIMIT");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS),
-    "mailbox/protocol config kind 契约不一致：REFRESH_PARAMS");
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_ZERO) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_ZERO),
-              "mailbox/protocol config kind 契约不一致：SET_ZERO");
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_CLEAR_FAULT) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT),
-              "mailbox/protocol config kind 契约不一致：CLEAR_FAULT");
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_POLICY) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_POLICY),
-              "mailbox/protocol config kind 契约不一致：SET_POLICY");
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT),
-              "mailbox/protocol config kind 契约不一致：SET_SAFETY_PROTECT");
-static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_SET_DIRECTION) ==
-                  static_cast<int>(MOTOR_PROTOCOL_CONFIG_SET_DIRECTION),
-              "mailbox/protocol config kind 契约不一致：SET_DIRECTION");
-static_assert(
-    static_cast<int>(CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) ==
-        static_cast<int>(MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH),
-    "mailbox/protocol config kind 契约不一致：SAVE_DEVICE_FLASH");
+// 两侧枚举类型独立；motor_config_contract.hpp 锁住完整数值映射。
 static void convert_config(const control_mailbox_config_request_t *in,
-                           motor_protocol_config_request_t *out) {
+    motor_protocol_config_request_t *out) {
   out->request_id = in->request_id;
   out->motor_id = in->motor_id;
   // kind 数值契约一致（1..6、8..14；7 是内核专用 READ_IDENTITY 不经
   // mailbox，上方 static_assert 编译期锁），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
   switch (in->kind) {
-    case CONTROL_MAILBOX_CONFIG_SET_MODE:
-      out->mode = in->value.mode;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_GAINS:
-      out->kp = in->value.gains.kp;
-      out->kd = in->value.gains.kd;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS:
-      out->position_limits.min_position_rad =
-          in->value.position_limits.min_position_rad;
-      out->position_limits.max_position_rad =
-          in->value.position_limits.max_position_rad;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
-      out->enable = in->value.enable;
-      out->confirm_unprotected = in->value.confirm_unprotected;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
-      out->max_velocity_rad_s = in->value.max_velocity_rad_s;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
-      out->max_torque_nm = in->value.max_torque_nm;
-      break;
-    case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
-      break; // 无载荷：只凭 motor_id 发起 4 个 SDO upload
-    case CONTROL_MAILBOX_CONFIG_SET_ZERO:
-      break; // 无载荷：只凭 motor_id 写 0x2531（设零位，仅失能态）
-    case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
-      break; // 无载荷：只凭 motor_id 发厂家清错帧
-    case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
-      out->safety_protect_raw = in->value.safety_protect_raw;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
-      out->direction_raw = in->value.direction_raw;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
-      out->save_slots = in->value.save_slots;
-      break;
-    case CONTROL_MAILBOX_CONFIG_SET_POLICY:
-      out->enable = in->value.policy.enable;
-      out->kp = in->value.policy.kp;
-      out->kd = in->value.policy.kd;
-      out->policy_generation = in->value.policy.generation;
-      out->confirm_unprotected = in->value.policy.confirm_unprotected;
-      break;
-    default:
-      break;
+  case CONTROL_MAILBOX_CONFIG_SET_MODE:
+    out->mode = in->value.mode;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_GAINS:
+    out->kp = in->value.gains.kp;
+    out->kd = in->value.gains.kd;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS:
+    out->position_limits.min_position_rad =
+        in->value.position_limits.min_position_rad;
+    out->position_limits.max_position_rad =
+        in->value.position_limits.max_position_rad;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
+    out->enable = in->value.enable;
+    out->confirm_unprotected = in->value.confirm_unprotected;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
+    out->max_velocity_rad_s = in->value.max_velocity_rad_s;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
+    out->max_torque_nm = in->value.max_torque_nm;
+    break;
+  case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
+    break;   // 无载荷：只凭 motor_id 发起 4 个 SDO upload
+  case CONTROL_MAILBOX_CONFIG_SET_ZERO:
+    break;   // 无载荷：只凭 motor_id 写 0x2531（设零位，仅失能态）
+  case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
+    break;   // 无载荷：只凭 motor_id 发厂家清错帧
+  case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
+    out->safety_protect_raw = in->value.safety_protect_raw;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
+    out->direction_raw = in->value.direction_raw;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
+    out->save_slots = in->value.save_slots;
+    break;
+  case CONTROL_MAILBOX_CONFIG_SET_POLICY:
+    out->enable = in->value.policy.enable;
+    out->kp = in->value.policy.kp;
+    out->kd = in->value.policy.kd;
+    out->policy_generation = in->value.policy.generation;
+    out->confirm_unprotected = in->value.policy.confirm_unprotected;
+    break;
+  default:
+    break;
   }
 }
 
@@ -568,7 +514,7 @@ static void control_boundary(void) {
   if (got_snapshot) {
     convert_snapshot(&snapshot_in, &snapshot);
     (void)motor_control_apply_command_snapshot(g_motor_control, &snapshot,
-                                               now_ms);
+        now_ms);
   }
 
   // 多点轨迹：先受理（校验在 mailbox 与内核各做一次），再按时间线插值
@@ -622,7 +568,7 @@ static void control_boundary(void) {
   // 无记录（count=0）时也必须调用：内核据此把"记录已就位（哪怕是没有记录）"
   // 告知每个表项，上电设备参数回读才会发起（见 motor_control_config_step 0b）。
   motor_control_apply_stored_params(g_motor_control, g_stored_params,
-                                    g_stored_count, now_ms);
+      g_stored_count, now_ms);
 
   // 落盘**不再自动**：写事务只改内存记录 + 置脏位，"保存"由人工发 system_command
   // 的 COMMAND_SAVE 触发（param_bridge 发 SAVE_DEVICE_FLASH 事务 + 落 W25）。此前
@@ -652,10 +598,14 @@ static void watchdog_start(void) {
 #endif
 }
 
-static void watchdog_feed(void) { (void)HAL_IWDG_Refresh(&g_iwdg); }
+static void watchdog_feed(void) {
+  (void)HAL_IWDG_Refresh(&g_iwdg);
+}
 #else
-static void watchdog_start(void) {}
-static void watchdog_feed(void) {}
+static void watchdog_start(void) {
+}
+static void watchdog_feed(void) {
+}
 #endif
 
 static void motor_rt_task_fn(void *pv_parameters) {
@@ -683,7 +633,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
     sustain_discovery_sync(now_ms);
     route_kernel_tx();
 
-    // 5ms 控制边界（漂移自校正：按 millis 差触发；200 Hz）。
+    // 2ms 控制边界（漂移自校正：按 millis 差触发；500 Hz）。
     if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
       last_control_ms = now_ms;
       control_boundary();
@@ -702,9 +652,12 @@ bool motor_rt_task_start(void) {
   // 任务头反向依赖；临界区仍在 motor_rt_copy_param_views 内部）。
   storage_task_set_param_snapshot(motor_rt_copy_param_views);
   // mailbox 与内核先于任务初始化；内核 adapter 列表构造注入。
+  motor_tx_router_init(&g_tx_router);
   control_mailbox_init(&g_control_mailbox);
-  motor_control_init(g_motor_control, kAdapters,
-                     sizeof(kAdapters) / sizeof(kAdapters[0]));
+  size_t adapter_count = 0U;
+  const motor_protocol_adapter_t *const *adapters =
+      motor_protocol_adapter_registry(&adapter_count);
+  motor_control_init(g_motor_control, adapters, adapter_count);
   // boot 存储参数快照（storage 任务先于本任务启动；无有效 blob 时 count=0）。
   // 保存进静态副本：W25 的新值下次启动才生效，运行期不再引用 storage 任务。
   size_t stored_count = 0U;
@@ -714,7 +667,7 @@ bool motor_rt_task_start(void) {
     stored_count = MOTOR_CONTROL_MAX_MOTORS;
   }
   memcpy(g_stored_params, stored,
-         stored_count * sizeof(motor_control_stored_params_t));
+      stored_count * sizeof(motor_control_stored_params_t));
   g_stored_count = stored_count;
   // 型号绑定不需要注入：内核在发现建档/重连时向设备读自报身份并查型号
   // 目录（协议 adapter 的 READ_IDENTITY 事务），无身份读对象的协议回退到
@@ -724,7 +677,7 @@ bool motor_rt_task_start(void) {
   watchdog_start();
 
   if (xTaskCreate(motor_rt_task_fn, "motor_rt", kMotorRtTaskStack, nullptr,
-                  kMotorRtTaskPrio, &g_task_handle) != pdPASS) {
+      kMotorRtTaskPrio, &g_task_handle) != pdPASS) {
     // 任务创建失败是致命配置错误：停在这里，禁止系统带残缺实时层运行。
     Error_Handler();
     return false;

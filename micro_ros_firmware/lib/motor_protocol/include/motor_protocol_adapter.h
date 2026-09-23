@@ -19,10 +19,11 @@
 extern "C" {
 #endif
 
-// ---------------------------------------------------------------------------
-// 公共故障/限位位标志（ARD-0007 §17.4：唯一公共定义点，业务模块不得重新编号；
-// 具体位分配在 TBD-STATUS-01 关闭前为临时占位，跨协议语义保持稳定）。
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 公共：故障/限位标志、帧类型、Profile 与 adapter 契约
+// ===========================================================================
+// 故障/限位位标志是唯一公共定义点，业务模块不得重新编号；具体位分配在
+// TBD-STATUS-01 关闭前为临时占位，跨协议语义保持稳定。
 #define MOTOR_PROTOCOL_PROT_VENDOR_FAULT (1UL << 0)    // 厂家故障字非零/故障位
 #define MOTOR_PROTOCOL_PROT_OVERTEMPERATURE (1UL << 1) // 温度来源已有（CERB），阈值判定未接
 #define MOTOR_PROTOCOL_PROT_OVERCURRENT (1UL << 2)     // 预留
@@ -47,6 +48,7 @@ extern "C" {
 // data[64]/rx_tick/bus_index）。ISR 盖 MCU 单调时基戳；内核不发原始帧。
 // ---------------------------------------------------------------------------
 #define MOTOR_PROTOCOL_MAX_FRAME_BYTES 64U
+#define MOTOR_PROTOCOL_P1_BATCH_MAX 6U
 
 typedef struct {
   uint8_t bus_index;
@@ -63,7 +65,7 @@ typedef struct {
 // 分配 P0/P1/P2 队列（ARD-0007 §22）。
 typedef enum {
   MOTOR_PROTOCOL_TX_CLASS_P0 = 0U, // 安全帧：软停/停机/失能（可抢占）
-  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 200 Hz MIT 控制（latest-wins 槽）
+  MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 500 Hz MIT 控制（latest-wins 槽）
   MOTOR_PROTOCOL_TX_CLASS_P2 = 2U  // 发现/配置管理（有界配额）
 } motor_protocol_tx_class_t;
 
@@ -269,9 +271,9 @@ typedef struct {
 // （见 docs/plans/active/boot-normalize-design.md）。
 #define MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK \
   ((uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |  \
-             (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |  \
-             (1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |  \
-             (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)))
+  (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |  \
+  (1U << MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX) |  \
+  (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)))
 
 // REFRESH_PARAMS 每阶段回填载荷（读缓冲按阶段顺序追加，每阶段一个）。
 // raw = 设备端原值（cnt / 电机端 RPM / 电机端 mA），value_si = 关节侧换算值
@@ -318,7 +320,6 @@ typedef struct {
   bool overflow;
 } motor_protocol_read_buffer_t;
 
-// ---------------------------------------------------------------------------
 // adapter 接口（C 函数表）。所有 encode/decode 均为纯函数：不持静态状态，
 // 使能时序/事务状态由内核保存；字段顺序/帧长/FD 属性只出现在本库实现内
 // （TBD-CAN-03：各帧型 FD/BRS/DLC 属性确认后改实现，不改接口）。
@@ -337,6 +338,8 @@ typedef struct motor_protocol_adapter {
   // UNCONFIRMED 不得报 OK（ARD §20.5 / 禁止项 9）。确认对象在 TBD-CONFIG-01
   // 关闭后由该协议 adapter 更新。
   bool config_verify_required;
+  // 最大可合并 P1 逻辑帧数。1 表示不聚合；实际帧规则由 adapter 回调定义。
+  uint8_t p1_batch_max;
 
   // 帧归属：该帧是否属于本协议；是则给出厂家节点号。两协议 ID 段不重叠。
   // 含协议内一切可归属帧——含事务响应帧（如 CERB 的 SDO 应答 0x580+node），
@@ -351,27 +354,33 @@ typedef struct motor_protocol_adapter {
   // 解码 + SI 换算。profile 为 NULL（未绑定）时运动量为 NaN，
   // 身份/状态字段照常填充。失败（长度/魔数不符）返回 false。
   bool (*decode_frame)(const motor_protocol_model_profile_t *profile, uint16_t node,
-                       const motor_protocol_raw_frame_t *frame,
-                       motor_protocol_measured_state_t *out);
+      const motor_protocol_raw_frame_t *frame,
+      motor_protocol_measured_state_t *out);
 
-  // 200 Hz MIT 控制帧（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
+  // 500 Hz MIT 控制命令（SI 关节侧目标；软件限位钳制发生在内核，量化在 codec）。
   bool (*encode_mit_command)(const motor_protocol_model_profile_t *profile, uint16_t node,
-                             uint8_t bus_index,
-                             const motor_protocol_control_intent_t *intent,
-                             motor_protocol_tx_frame_t *out);
+      uint8_t bus_index,
+      const motor_protocol_control_intent_t *intent,
+      motor_protocol_tx_frame_t *out);
+
+  // 把输入前缀编码为一个物理 P1 帧并返回消耗的逻辑帧数；不适用、单帧或
+  // 无效组合返回 0。调度层只负责预算，不需要了解厂家帧格式。
+  size_t (*aggregate_p1_frames)(const motor_protocol_tx_frame_t *frames,
+      size_t available,
+      motor_protocol_tx_frame_t *out);
 
   // 使能帧（中性目标 + 使能位）。vaxor=control(run=1,mode)，CERB=中性 MIT。
   bool (*encode_enable)(const motor_protocol_model_profile_t *profile, uint16_t node,
-                        uint8_t bus_index, motor_protocol_tx_frame_t *out);
+      uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 软停帧（30ms 无快照/快照缺席路径）。TBD-SAFETY-01：默认 MIT 阻尼帧
   // {0,0,0,default_kd,0} 且保持使能——厂家级语义关闭前不得更改安全边界。
   bool (*encode_soft_stop)(const motor_protocol_model_profile_t *profile, uint16_t node,
-                           uint8_t bus_index, motor_protocol_tx_frame_t *out);
+      uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 协议级停机/失能帧（100ms 超时/断链路径，P0）。
   bool (*encode_disable)(const motor_protocol_model_profile_t *profile, uint16_t node,
-                         uint8_t bus_index, motor_protocol_tx_frame_t *out);
+      uint8_t bus_index, motor_protocol_tx_frame_t *out);
 
   // 发现/重连/热插拔探测帧（CERB 0x080 SYNC；vaxor 无 → 返回 false）。
   // 禁止作为运动控制边界触发；它只负责发现、重连和协议状态心跳
@@ -382,16 +391,16 @@ typedef struct motor_protocol_adapter {
   // READ_IDENTITY 上返回 0 = 本协议无身份读对象（内核回退到"协议内唯一型号"
   // 兜底绑定，不再发帧）。
   uint8_t (*config_stage_count)(const motor_protocol_model_profile_t *profile,
-                                const motor_protocol_config_request_t *request);
+      const motor_protocol_config_request_t *request);
   bool (*config_stage_info)(uint8_t stage,
-                            const motor_protocol_model_profile_t *profile,
-                            const motor_protocol_config_request_t *request,
-                            motor_protocol_config_stage_info_t *out);
+      const motor_protocol_model_profile_t *profile,
+      const motor_protocol_config_request_t *request,
+      motor_protocol_config_stage_info_t *out);
   bool (*config_encode_stage)(uint8_t stage,
-                              const motor_protocol_model_profile_t *profile, uint16_t node,
-                              uint8_t bus_index,
-                              const motor_protocol_config_request_t *request,
-                              motor_protocol_tx_frame_t *out);
+      const motor_protocol_model_profile_t *profile, uint16_t node,
+      uint8_t bus_index,
+      const motor_protocol_config_request_t *request,
+      motor_protocol_tx_frame_t *out);
   // profile 传入的原因：设备侧管理对象的读回核验要做单位换算
   // （0x6080 电机端 RPM、0x2538 电机端 mA），换算系数在 profile 里。
   // read_out 仅读取类事务（READ_IDENTITY）使用：adapter 追加设备回传载荷，
@@ -399,14 +408,34 @@ typedef struct motor_protocol_adapter {
   // 契约：只在返回 ADVANCE/COMPLETE 的路径上追加；判 RETRY/FAIL/IGNORE
   // 之前不得写入缓冲——重试会重发同一阶段，内核不替 adapter 回退载荷。
   motor_protocol_stage_outcome_t (*config_on_response)(
-      uint8_t stage, const motor_protocol_model_profile_t *profile,
-      const motor_protocol_config_request_t *request,
-      const motor_protocol_raw_frame_t *response,
-      motor_protocol_read_buffer_t *read_out);
+    uint8_t stage, const motor_protocol_model_profile_t *profile,
+    const motor_protocol_config_request_t *request,
+    const motor_protocol_raw_frame_t *response,
+    motor_protocol_read_buffer_t *read_out);
 } motor_protocol_adapter_t;
 
-// 内置 adapter（新增协议家族 = 新增一个实例，内核零改动）。
-extern const motor_protocol_adapter_t motor_protocol_vaxor_adapter;
+// 唯一内置 adapter 注册表，运行时与协议辅助逻辑共用同一列表。
+// out_count 为 NULL 时返回 NULL；否则返回静态数组并写入元素数量。
+const motor_protocol_adapter_t *const *motor_protocol_adapter_registry(
+  size_t *out_count);
+
+// 按已注册 adapter 探测一段 P1 逻辑帧。返回 1 表示原样输出 frames[0]，
+// 返回 2..N 表示 adapter 已编码出一个聚合物理帧；参数无效返回 0。
+size_t motor_protocol_aggregate_p1_frames(
+  const motor_protocol_tx_frame_t *frames, size_t available,
+  motor_protocol_tx_frame_t *out);
+size_t motor_protocol_p1_batch_max(void);
+
+// 节点号合法性（vaxor ID 算术函数不校验范围，入口统一在此把关）。
+static inline bool motor_protocol_adapter_valid_node(
+    const motor_protocol_adapter_t *adapter, uint16_t node) {
+  return adapter != NULL && node >= adapter->node_id_min &&
+         node <= adapter->node_id_max;
+}
+
+// ===========================================================================
+// CERB：内置 adapter 实例与设备侧限值换算辅助
+// ===========================================================================
 extern const motor_protocol_adapter_t motor_protocol_cerb_adapter;
 
 // 限值对象（0x2538 电流上限）的关节侧换算系数 N·m/A。
@@ -428,12 +457,11 @@ static inline float motor_protocol_profile_limit_nm_per_amp(
          profile->gear_efficiency;
 }
 
-// 节点号合法性（vaxor ID 算术函数不校验范围，入口统一在此把关）。
-static inline bool motor_protocol_adapter_valid_node(
-    const motor_protocol_adapter_t *adapter, uint16_t node) {
-  return adapter != NULL && node >= adapter->node_id_min &&
-         node <= adapter->node_id_max;
-}
+// ===========================================================================
+// VAXOR：内置 adapter 实例
+// ===========================================================================
+// 新增协议家族 = 新增一个实例，内核零改动。
+extern const motor_protocol_adapter_t motor_protocol_vaxor_adapter;
 
 #ifdef __cplusplus
 }

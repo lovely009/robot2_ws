@@ -1,7 +1,7 @@
 // W25Q64 参数存储任务（Flash 的唯一所有者，ARD 安全边界）：
 //  - start：同步初始化 W25（无芯片/ID 不符则静默降级为无持久化，不阻断启动），
 //    读双 sector A/B 选 CRC 有效且 seq 最新的 blob；
-//  - boot 参数：start 后经 storage_boot_params() 供 motor_rt 在 5ms/200Hz 边界套用；
+//  - boot 参数：start 后经 storage_boot_params() 供 motor_rt 在 2ms/500Hz 边界套用；
 //  - save **只有一个触发源**：param_bridge 收到 system_command 的 COMMAND_SAVE 后经
 //    storage_task_request_save(request_id) 请求。erase 阻塞最长约 1s，只能在本任务执行——
 //    严禁从 micro-ROS/motor_rt 上下文直接调 W25。
@@ -21,7 +21,7 @@ extern "C" {
 // 参数快照提供者（由 motor_rt 注册）：在本任务上下文、内核临界区内拍视图。
 // 未注册时 save 直接回 STORAGE_SAVE_FAIL（等价无 Flash 降级）。
 typedef size_t (*storage_param_snapshot_fn_t)(
-    motor_control_param_view_t *out, size_t capacity);
+  motor_control_param_view_t *out, size_t capacity);
 void storage_task_set_param_snapshot(storage_param_snapshot_fn_t fn);
 
 typedef enum {

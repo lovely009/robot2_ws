@@ -1,0 +1,7 @@
+{
+  "name": "save_transaction",
+  "version": "0.1.0",
+  "description": "Host-testable state machine for device-flash and W25 SAVE coordination",
+  "keywords": ["firmware", "storage", "transaction"],
+  "build": { "includeDir": "include", "srcDir": "src" }
+}

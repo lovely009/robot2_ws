@@ -47,24 +47,24 @@ static void fill_imu_msg(const imu_data_t *data) {
 
   // 协方差全 0：表示未知/未标定，符合 sensor_msgs 惯例
   memset(g_imu_msg.orientation_covariance, 0,
-         sizeof(g_imu_msg.orientation_covariance));
+      sizeof(g_imu_msg.orientation_covariance));
   memset(g_imu_msg.angular_velocity_covariance, 0,
-         sizeof(g_imu_msg.angular_velocity_covariance));
+      sizeof(g_imu_msg.angular_velocity_covariance));
   memset(g_imu_msg.linear_acceleration_covariance, 0,
-         sizeof(g_imu_msg.linear_acceleration_covariance));
+      sizeof(g_imu_msg.linear_acceleration_covariance));
 
   g_temp_msg.data = data->temp;
 }
 
 bool imu_bridge_create(rcl_node_t *node) {
   if (rclc_publisher_init_default(&g_imu_pub, node,
-                                  ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-                                  kImuTopic) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
+      kImuTopic) != RCL_RET_OK) {
     return false;
   }
   if (rclc_publisher_init_default(&g_temp_pub, node,
-                                  ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-                                  kTempTopic) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+      kTempTopic) != RCL_RET_OK) {
     rcl_ret_t rc = rcl_publisher_fini(&g_imu_pub, node);
     (void)rc;
     return false;

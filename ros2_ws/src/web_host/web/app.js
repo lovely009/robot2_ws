@@ -62,6 +62,7 @@ const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v === null || v === undefined || !Number.isFinite(v))
   ? '--' : v.toFixed(d);
+const CONTROLLER_PORT_STORAGE_KEY = 'robot2.controllerSerialPort';
 const ageText = (ms) => {
   if (ms === null || ms === undefined) return '--';
   if (ms === 0xFFFFFFFF) return '从未';
@@ -128,6 +129,142 @@ function setConn(ok, text) {
   state.connected = ok;
   $('connDot').classList.toggle('on', ok);
   $('connText').textContent = text || (ok ? '已连接' : '未连接');
+}
+
+function setAgentStatus(status) {
+  const el = $('agentText');
+  el.classList.remove('running', 'failed');
+  if (status.state === 'running') {
+    el.textContent = `Agent 进程运行中${status.device ? ` · ${status.device}` : ''}`;
+    el.classList.add('running');
+    el.title = '由 web_host 管理的 micro-ROS Agent 进程';
+    $('btnAgentStop').disabled = false;
+  } else if (status.state === 'failed') {
+    el.textContent = `Agent 已退出${status.returncode === null ? '' :
+      ` · code ${status.returncode}`}`;
+    el.classList.add('failed');
+    el.title = status.error || status.device || 'Agent 进程已退出';
+    $('btnAgentStop').disabled = true;
+  } else if (status.state === 'error') {
+    el.textContent = status.canStop
+      ? `Agent 已运行${status.device ? ` · ${status.device}` : ''}`
+      : (status.error ? `Agent 启动失败 · ${status.error}` : 'Agent 启动失败');
+    el.classList.add('failed');
+    el.title = status.error || '启动 Agent 失败';
+    $('btnAgentStop').disabled = !status.canStop;
+  } else {
+    el.textContent = 'Agent 未启动';
+    el.title = '';
+    $('btnAgentStop').disabled = true;
+  }
+}
+
+async function agentApi(path, options = {}) {
+  const response = await fetch(path, {cache: 'no-store', ...options});
+  let body;
+  try { body = await response.json(); }
+  catch (_e) { throw new Error(`Agent API 返回无效响应（HTTP ${response.status}）`); }
+  if (!response.ok) {
+    const error = new Error(body.error || `Agent API 失败（HTTP ${response.status}）`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+}
+
+async function refreshAgentControls() {
+  const select = $('serialPort');
+  const savedPort = localStorage.getItem(CONTROLLER_PORT_STORAGE_KEY) || '';
+  select.disabled = true;
+  try {
+    const [portResult, status] = await Promise.all([
+      agentApi('/api/serial-ports'), agentApi('/api/agent/status'),
+    ]);
+    setAgentStatus(status);
+    const ports = Array.isArray(portResult.ports) ? portResult.ports : [];
+    const activeDevice = status.state === 'running' ? status.device : '';
+    const known = new Set(ports.map((port) => port.path));
+    if (activeDevice && !known.has(activeDevice)) {
+      ports.push({path: activeDevice,
+        label: `${activeDevice}（Agent 正在使用，设备当前未枚举）`, accessible: true});
+    }
+
+    select.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = ports.length ? '选择控制板串口' : '未检测到串口';
+    select.append(placeholder);
+    for (const port of ports) {
+      const option = document.createElement('option');
+      option.value = port.path;
+      option.textContent = port.label + (port.accessible === false ? '（无读写权限）' : '');
+      option.disabled = port.accessible === false && port.path !== activeDevice;
+      select.append(option);
+    }
+
+    const selected = activeDevice || savedPort;
+    if (selected && known.has(selected)) select.value = selected;
+    else if (activeDevice) select.value = activeDevice;
+    if (select.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, select.value);
+  } catch (error) {
+    select.replaceChildren();
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '无法读取主机串口列表';
+    select.append(option);
+    setAgentStatus({state: 'error', error: error.message, returncode: null});
+  } finally {
+    select.disabled = false;
+  }
+}
+
+async function refreshAgentStatus() {
+  try { setAgentStatus(await agentApi('/api/agent/status')); }
+  catch (_error) { /* 串口列表刷新会显示后端 API 错误；状态轮询不刷屏。 */ }
+}
+
+async function connectWithAgent() {
+  const device = $('serialPort').value;
+  if (!device) {
+    setAgentStatus({state: 'error', error: '请先选择控制板串口', returncode: null});
+    return;
+  }
+  const button = $('btnConnect');
+  button.disabled = true;
+  $('agentText').textContent = '正在启动 Agent…';
+  $('agentText').classList.remove('running', 'failed');
+  try {
+    const status = await agentApi('/api/agent/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({device}),
+    });
+    localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, device);
+    setAgentStatus(status);
+    connect();
+    // Process creation is immediate; give a fast startup failure a chance to surface.
+    setTimeout(() => refreshAgentControls(), 700);
+  } catch (error) {
+    setAgentStatus({state: 'error', error: error.message,
+      canStop: error.body?.status?.state === 'running',
+      device: error.body?.status?.device || '', returncode: null});
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function stopAgent() {
+  const button = $('btnAgentStop');
+  button.disabled = true;
+  $('agentText').textContent = '正在停止 Agent…';
+  $('agentText').classList.remove('running', 'failed');
+  try {
+    setAgentStatus(await agentApi('/api/agent/stop', {method: 'POST'}));
+  } catch (error) {
+    setAgentStatus({state: 'error', error: error.message,
+      canStop: true, returncode: null});
+  }
 }
 
 function pub(key, message) {
@@ -2381,9 +2518,16 @@ async function clearMotorFault(id) {
 function init() {
   $('rosUrl').value = (location.protocol === 'https:' ? 'wss://' : 'ws://')
     + (location.hostname || 'localhost') + ':9090';
-  $('btnConnect').onclick = connect;
+  $('btnConnect').onclick = connectWithAgent;
   $('btnDisconnect').onclick = disconnect;
-  $('rosUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+  $('btnAgentStop').onclick = stopAgent;
+  $('btnPortRefresh').onclick = refreshAgentControls;
+  $('serialPort').addEventListener('change', (e) => {
+    if (e.target.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, e.target.value);
+  });
+  $('rosUrl').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') connectWithAgent();
+  });
 
   // 左栏关节索引：事件委托（列表每次 renderMotors 都会重建）。
   $('motorRows').addEventListener('click', (e) => {
@@ -2454,6 +2598,8 @@ function init() {
   // 早先必须手点「连接」，页面开着却是哑的——看上去就是"上位机不可控"。
   // 想换地址仍可改完按 Enter 或点「连接」；「断开」会立起 manualDisconnect，
   // 之后不再自动重连。
+  refreshAgentControls();
+  setInterval(refreshAgentStatus, 2000);
   connect();
 }
 

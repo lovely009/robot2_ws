@@ -18,6 +18,7 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 
 | 区域 | 功能 |
 |---|---|
+| 顶栏连接区 | 主机侧枚举 `/dev/serial/by-id/` 的稳定串口路径，并以 `/dev/ttyACM*`、`/dev/ttyUSB*` 补缺。选择控制板后点「启动并连接」会启动或复用该端口的 micro-ROS Agent，再连接 rosbridge；「断开」只断开网页 rosbridge，「停止 Agent」只停止本页面管理的 Agent 子进程。Agent 状态表示进程状态，不代表固件客户端已建立会话 |
 | 臂视图（中栏） | `robot_arm_gazebo` 的 URDF 经 three.js 实时渲染，关节角来自固件 `micro_ros_up/motion_states`（**不是** `/joint_states`：页面本来就订阅它；而 `/joint_states` 要额外起桥，且在 Gazebo 台架上会被 gz 自己的 broadcaster 抢同名话题）。关节小球着色 = 生命周期九态；半透明幽灵 = 页面自己下发的目标，见下「臂视图（3D）」一节。拖拽旋转 / 滚轮缩放 / 点小球选中 |
 | 选中关节（右栏） | 位置/速度/力矩/电流/温度/跟随误差/命令源/故障/测量年龄。点左栏或臂上的小球切换 |
 | 设备参数（下方左栏） | **以固件记录为准**，驱动板向记录对齐：位置 **rad**、速度 **rad/s**、力矩 **A**（设备对象 `0x2538` 存的就是电流；位置/速度在固件参数边界是直通，只有力矩过一次 A↔N·m 换算，见决策日志 §6.4）。两行对照取自只读话题 `micro_ros_up/device_param_report`（固件记录列 / 驱动板回读列，同槽位同单位），`dev_init_state` 5（无记录）时固件列整行显示「无记录」。**写 ≠ 保存**——写只改设备 RAM 与固件记录（写后立即重判），要持久化必须再点「保存」（发 `0x2539` + 落 W25），未保存的台标黄。「读取」= **先逐台回读驱动板**（在线台，设备真值）+ 再读参数表；数值用 7 位有效数字显示（内核按 float32 存，原始值会拖出 0.20000000298023224 这类尾巴）。总览条一眼给出「已核对/未初始化/离线」台数与原因（40=与记录不一致、41=回读不成功、42=本机无记录），并**逐台列出不一致的具体项**（位置下限/位置上限/最大转速/峰值电流，来自固件 DEV_INIT 事件的槽位位图）；状态列悬停同样显示该明细；行内「来源」列标出固件记录/驱动板回读/未核对，「状态」列显示生命周期；位置与力矩输入框悬停显示设备端原值（cnt / mA，位置按 65536 cnt/360° 折算）。逐项 `m<id>.{pos_min,pos_max,vel_limit,torque_limit,limit_protect}` 读写 + 逐台「回读」。回读是严格一问一答的 SDO 事务（约 1 秒），完成判据是只读的 `system.refresh_seq`（每次收尾 +1），结论取自 `system.last_error`（0=一致 / 40=与固件记录不一致 → 该台未初始化 / 41=回读不成功 / 42=本机无该台记录 → 该台未初始化），随后重载表格。「设零」把该台当前姿态设为设备零点（写 0x2531=1，仅失能态受理，运行中被拒），零点改变后设备内限位随之移动、须重认限位与机械行程；掉电是否持久待实测。⚠️ **「两行对照（固件记录 / 驱动板回读）」与「未保存标黄」是 P2（web 大修）要实现的行为契约**：话题 `micro_ros_up/device_param_report` 已在固件侧实现，页面重写未开工、**当前页面尚未接线** |
@@ -103,9 +104,16 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
+source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
 source /home/ly/robot_ws/ros2_ws/install/setup.bash
 ros2 launch web_host web_host.launch.py
 ```
+
+Agent 自动启动由 `web_static_server` 子进程执行固定命令
+`ros2 run micro_ros_agent micro_ros_agent serial --dev <已枚举串口>`；启动 Web 前要构建
+`micro_ros_agent` 工作区并 source 其 `install/setup.bash`。`web_host` 的运行用户需对所选
+串口有读写权限（通常加入 `dialout` 组）。页面只管理自己启动的一个 Agent；换端口前先点
+「停止 Agent」。终端里另行启动且占用该串口的 Agent 不会被页面接管。
 
 默认端口（launch 参数可覆盖）：
 

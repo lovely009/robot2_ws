@@ -67,9 +67,11 @@ body {
 .chip.ok { color: var(--ok); border-color: #1d5537; }
 .chip.warn { color: var(--warn); border-color: #5e4a1d; }
 .chip.err { color: var(--err); border-color: #5e2628; }
-.conn { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.conn { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; flex-wrap: wrap; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex: none; }
 .dot.on { background: var(--ok); box-shadow: 0 0 5px rgba(47, 208, 122, .7); }
+.port-picker { display: flex; align-items: center; gap: 4px; color: var(--dim); white-space: nowrap; }
+.conn select { width: 235px; max-width: 30vw; }
 .conn input {
   width: 190px;
   background: var(--panel-2);
@@ -80,6 +82,10 @@ body {
   font-size: 11px;
   font-family: var(--mono);
 }
+.agent-state { color: var(--dim); font-size: 10px; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.agent-state.running { color: var(--ok); }
+.agent-state.failed { color: var(--err); }
+button:disabled, select:disabled { opacity: .55; cursor: wait; }
 
 /* ---------- 骨架 ---------- */
 .shell {

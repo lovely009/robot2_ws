@@ -34,9 +34,18 @@
     <div class="conn">
       <span class="dot" id="connDot"></span>
       <span id="connText">未连接</span>
+      <label class="port-picker" title="选择 micro-ROS 控制板串口">
+        <span>控制板</span>
+        <select id="serialPort" aria-label="控制板串口">
+          <option value="">扫描串口中…</option>
+        </select>
+      </label>
+      <button id="btnPortRefresh" class="secondary" title="重新扫描串口">扫描</button>
       <input id="rosUrl" type="text" spellcheck="false" placeholder="ws://localhost:9090">
-      <button id="btnConnect">连接</button>
+      <button id="btnConnect" title="启动所选串口的 micro-ROS Agent，然后连接 rosbridge">启动并连接</button>
       <button id="btnDisconnect" class="secondary">断开</button>
+      <span id="agentText" class="agent-state">Agent 未启动</span>
+      <button id="btnAgentStop" class="secondary" title="停止由本页面启动的 Agent" disabled>停止 Agent</button>
     </div>
   </header>
 

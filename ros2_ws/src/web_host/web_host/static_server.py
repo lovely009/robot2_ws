@@ -1,8 +1,15 @@
+import json
 import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import rclpy
 from rclpy.node import Node
+
+from .agent_manager import AgentProcessManager, enumerate_serial_ports
+
+
+_MAX_API_BODY_BYTES = 4096
 
 
 def main(args=None):
@@ -40,6 +47,8 @@ def main(args=None):
     node.get_logger().info(
         '模型挂载：%s -> %s' % (prefix or '(无)', model_dir or '(无)'))
 
+    agent_manager = AgentProcessManager()
+
     class Handler(SimpleHTTPRequestHandler):
 
         def __init__(self, *a, **kw):
@@ -57,19 +66,95 @@ def main(args=None):
                     self.directory = saved
             return SimpleHTTPRequestHandler.translate_path(self, path)
 
+        def _send_json(self, status, payload):
+            body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = urlsplit(self.path).path
+            if path == '/api/serial-ports':
+                ports = []
+                for port in enumerate_serial_ports():
+                    ports.append({
+                        **port,
+                        'accessible': os.access(
+                            port['path'], os.R_OK | os.W_OK),
+                    })
+                self._send_json(200, {'ports': ports})
+                return
+            if path == '/api/agent/status':
+                self._send_json(200, agent_manager.status())
+                return
+            super().do_GET()
+
+        def do_POST(self):
+            path = urlsplit(self.path).path
+            if path == '/api/agent/stop':
+                try:
+                    self._send_json(200, agent_manager.stop())
+                except OSError as exc:
+                    self._send_json(
+                        500, {'error': 'could not stop Agent: %s' % exc})
+                return
+            if path != '/api/agent/start':
+                self._send_json(404, {'error': 'unknown API endpoint'})
+                return
+
+            try:
+                content_length = int(self.headers.get('Content-Length', '0'))
+            except ValueError:
+                self._send_json(400, {'error': 'invalid Content-Length'})
+                return
+            if content_length < 0 or content_length > _MAX_API_BODY_BYTES:
+                self._send_json(413, {'error': 'request body too large'})
+                return
+            try:
+                request = json.loads(self.rfile.read(content_length))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._send_json(400, {'error': 'invalid JSON request'})
+                return
+            device = (request.get('device')
+                      if isinstance(request, dict) else None)
+            if not isinstance(device, str) or not device:
+                self._send_json(400, {'error': 'device is required'})
+                return
+
+            try:
+                self._send_json(200, agent_manager.start(device))
+            except ValueError as exc:
+                self._send_json(400, {'error': str(exc)})
+            except PermissionError as exc:
+                self._send_json(403, {'error': str(exc)})
+            except RuntimeError as exc:
+                self._send_json(409, {
+                    'error': str(exc), 'status': agent_manager.status(),
+                })
+            except OSError as exc:
+                self._send_json(
+                    500, {'error': 'could not start Agent: %s' % exc})
+
         def log_message(self, fmt, *args):
-            node.get_logger().info('%s %s' % (self.address_string(), fmt % args))
+            node.get_logger().info(
+                '%s %s' % (self.address_string(), fmt % args))
 
     server = ThreadingHTTPServer((host, port), Handler)
-    node.get_logger().info('Serving %s at http://%s:%d' % (web_root, host, port))
+    node.get_logger().info(
+        'Serving %s at http://%s:%d' % (web_root, host, port))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        agent_manager.stop()
         server.server_close()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

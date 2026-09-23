@@ -67,3 +67,20 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/pts/N -v
 > 无客户端时 Agent 节点不会出现在 `ros2 node list`（节点在客户端建立会话后才注册），
 > 属正常现象；与固件的端到端联调见固件 README「与 micro_ros_agent 联调」与
 > [FDCAN1 台架指南](../docs/guides/fdcan1-bench-guide.md)。
+
+## FDCAN 电机节点模拟器
+
+`tools/fdcan_motor_sim.py` 在 CAN 总线上模拟 CERB/VAXOR 电机节点，处理固件发现用的
+身份 SDO、周期反馈和 MIT 控制帧；可选连接 Gazebo effort 控制器。总线端支持 CANable
+SLCAN 串口和 Linux CAN-FD SocketCAN：
+
+```bash
+# CANable SLCAN
+python3 tools/fdcan_motor_sim.py --tty /dev/serial/by-id/CANABLE
+
+# CAN-FD SocketCAN；can0 的位率须预先设成与 STM32 固件一致
+python3 tools/fdcan_motor_sim.py --interface can0
+```
+
+一键组合 Gazebo、该模拟器与 STM32 micro-ROS Agent 的入口和完整拓扑参数见
+[`robot_arm_gazebo` 仿真说明](../ros2_ws/src/robot_arm_gazebo/README.md)。

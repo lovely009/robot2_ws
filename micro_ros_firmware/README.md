@@ -503,8 +503,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 
 - `micro_ros_up/motion_states`（`MotorMotionStateArray`）：运动状态（50Hz，
   由 10ms bridge timer 每 2 拍发一帧；控制边界独立为 2ms/500Hz）。
-- `micro_ros_up/motor_status_array`（`MotorStatusArray`）：诊断（生命周期/故障码/
-  保护位/事务状态）。
+- `micro_ros_up/motor_status_array`（`MotorStatusArray`，20Hz）：诊断与电气状态
+  （生命周期/故障码/保护位/事务状态）；每个 `MotorStatusTarget` 也带有实际发现的
+  `bus_index`（0..2 = FDCAN1..3）。
 - `micro_ros_up/motor_topology`（`MotorTopology`，1s 节流）：发现式拓扑
   （`motor_id`/总线/协议/型号/能力/冲突标志）。
 - `micro_ros_up/motor_events`（`MotorEvent`）：生命周期/安全事件流（含身份识别
@@ -526,10 +527,11 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   电平 + `last_error_motor` + `refresh/set_zero/clear_fault/save_seq` +
   `save_in_progress`。参数面的"这次命令跑完没有"只由它回答（见「参数面」节）。
 
-**三份上行状态不重叠**：topology = 身份（谁在、哪条总线、什么协议、型号、能力、
-冲突、`schema_version`）；status = 状态与电气（`lifecycle`、在线、温度/电流/电压、
-故障码、保护/限位位）；motion_states = 运动学（位置/速度/力矩、`state_age_ms`、
-`target_source`）。`target_source` 让上层看见「我的快照为什么被忽略」。
+**三份上行状态分工**：topology 是身份与总线映射的权威（谁在、哪条总线、什么协议、
+型号、能力、冲突、`schema_version`）；status 提供 20Hz 状态/电气遥测，并重复携带
+`bus_index`，让 Web 能从同一条实时状态流关联总线；motion_states 只提供运动学
+（位置/速度/力矩、`state_age_ms`、`target_source`）。`target_source` 让上层看见
+「我的快照为什么被忽略」。当前消息面版本为 3（status 追加了 `bus_index`）。
 
 `motor_id ↔ joint_name` 的映射、方向与零位是**上层职责**（上层分段转发的源代码
 已同步，rosbridge/Agent/MCU 端到端与真机连续性仍待验证）；固件不做 name-to-ID

@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
+from .simulation_manager import SimulationProcessManager
 
 
 _MAX_API_BODY_BYTES = 4096
@@ -48,6 +49,7 @@ def main(args=None):
         '模型挂载：%s -> %s' % (prefix or '(无)', model_dir or '(无)'))
 
     agent_manager = AgentProcessManager()
+    simulation_manager = SimulationProcessManager()
 
     class Handler(SimpleHTTPRequestHandler):
 
@@ -90,6 +92,12 @@ def main(args=None):
             if path == '/api/agent/status':
                 self._send_json(200, agent_manager.status())
                 return
+            if path == '/api/simulation/options':
+                self._send_json(200, simulation_manager.options())
+                return
+            if path == '/api/simulation/status':
+                self._send_json(200, simulation_manager.status())
+                return
             super().do_GET()
 
         def do_POST(self):
@@ -101,7 +109,14 @@ def main(args=None):
                     self._send_json(
                         500, {'error': 'could not stop Agent: %s' % exc})
                 return
-            if path != '/api/agent/start':
+            if path == '/api/simulation/stop':
+                try:
+                    self._send_json(200, simulation_manager.stop())
+                except OSError as exc:
+                    self._send_json(
+                        500, {'error': 'could not stop simulation: %s' % exc})
+                return
+            if path not in {'/api/agent/start', '/api/simulation/start'}:
                 self._send_json(404, {'error': 'unknown API endpoint'})
                 return
 
@@ -118,6 +133,24 @@ def main(args=None):
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self._send_json(400, {'error': 'invalid JSON request'})
                 return
+
+            if path == '/api/simulation/start':
+                try:
+                    self._send_json(200, simulation_manager.start(request))
+                except ValueError as exc:
+                    self._send_json(400, {'error': str(exc)})
+                except PermissionError as exc:
+                    self._send_json(403, {'error': str(exc)})
+                except RuntimeError as exc:
+                    self._send_json(409, {
+                        'error': str(exc),
+                        'status': simulation_manager.status(),
+                    })
+                except OSError as exc:
+                    self._send_json(
+                        500, {'error': 'could not start simulation: %s' % exc})
+                return
+
             device = (request.get('device')
                       if isinstance(request, dict) else None)
             if not isinstance(device, str) or not device:
@@ -150,11 +183,19 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        agent_manager.stop()
-        server.server_close()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            simulation_manager.stop()
+        except Exception as exc:
+            node.get_logger().error('Could not stop simulation launch: %s' % exc)
+        try:
+            agent_manager.stop()
+        except Exception as exc:
+            node.get_logger().error('Could not stop micro-ROS Agent: %s' % exc)
+        finally:
+            server.server_close()
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
 
 
 if __name__ == '__main__':

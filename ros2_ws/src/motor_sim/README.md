@@ -4,9 +4,10 @@
 
 ## 定位
 
-作为 `ros2_ws` 仿真栈的核心组件，为机器人侧提供电机仿真能力（当前与 `robot_arm_gazebo`
-的模型仿真回路尚未联动，两者各自独立运行）。
-与真机栈 `motor_drive` 接口兼容，但实现完全独立，不依赖真实硬件。
+作为 `ros2_ws` 仿真栈的核心组件，为机器人侧提供与协议兼容的电机节点。
+它保持机器人无关，可单独接入外部 `/joint_states`；`robot_arm_gazebo` 的
+`simulation.launch.py` 负责组合 Gazebo、CAN 驱动端和本节点，组成端到端机械臂仿真。
+实现不依赖真实电机硬件。
 
 ## 核心组件
 
@@ -23,7 +24,7 @@
 | 模块 | 职责 |
 |---|---|
 | `SocketCanTransport` | Linux SocketCAN 传输后端 |
-| `SerialTransport` | 串口传输后端（模拟） |
+| `SerialTransport` | USB 串口与 SLCAN CAN 适配器后端 |
 | `FrameRecord` | 帧记录与回放 |
 
 ### 核心层 (`core/`)
@@ -54,8 +55,28 @@ motor_sim
 │   └── yaml-cpp（配置解析）
 └── motor_sim_node（ROS 节点）
     ├── motor_sim_core
-    └── ROS 2（rclcpp, sensor_msgs, std_msgs, std_srvs）
+└── ROS 2（rclcpp, sensor_msgs, std_msgs, std_srvs）
 ```
+
+## Gazebo 组合仿真
+
+在 `robot_arm_gazebo` 包中可用单一入口启动完整回路：各模型目录的
+`models/<模型名>/config/simulation_topology.yaml` 维护参与仿真的电机映射和 plant 参数；电机 ID、协议、
+总线、类型和增益直接读取 `motor_hardware_interface` 的权威配置：
+
+```bash
+ros2 launch robot_arm_gazebo simulation.launch.py                 # vcan 默认闭环
+ros2 launch robot_arm_gazebo simulation.launch.py transport:=socketcan \
+  driver_interface:=can0 sim_interface:=can1
+ros2 launch robot_arm_gazebo simulation.launch.py transport:=slcan \
+  driver_tty:=/dev/serial/by-id/DRIVER sim_tty:=/dev/serial/by-id/SIM
+```
+
+`vcan` 与 `socketcan` 都使用 `SocketCanTransport`；`vcan` 是无需物理 CAN 适配器的
+纯软件回环。SocketCAN host 闭环可用两个接口分开连接驱动与模拟器；SLCAN host 闭环
+需要两只适配器接同一物理总线。单个 SocketCAN 接口或 CANable 均可通过
+`controller_mode:=firmware` 接入 STM32 固件 HIL。模型映射、命令方式和注意事项见
+[`robot_arm_gazebo/README.md`](../robot_arm_gazebo/README.md)。
 
 ## 与真机栈对比
 

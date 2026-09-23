@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """FDCAN 台架电机模拟器（默认 4 节点：CERB 1=R58、2-4=R48）。
 
-主机经 CANable2（SLCAN 串口，默认 /dev/ttyACM1）在控制板物理电机总线上模拟电机，
-用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。总线上无真机。
-仲裁段 1M（S8）、数据段 5M。CANable2 的数据位率索引按 V 查询自动选择；
+主机可经 CANable2（SLCAN 串口）或 Linux CAN-FD SocketCAN 接口，在控制板物理
+电机总线上模拟电机，用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。
+总线上无真机。SLCAN 仲裁段 1M（S8）、数据段 5M；SocketCAN 位率由系统预先配置。
+CANable2 的数据位率索引按 V 查询自动选择；
 当前实机返回的自定义版本 16e7497-dirty 使用 Y7，上游 b158aa7 使用 Y5。
 也可通过 --data-bitrate-index 显式覆盖。
 
@@ -31,6 +32,7 @@
 用法：
   python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 V/S8/Y*/M0/A1/O 开通道
   python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
+  python3 fdcan_motor_sim.py --interface can0 --gazebo --joint-map 1:joint_link1
   python3 fdcan_motor_sim.py --data-bitrate-index 7  # 仅用于对应的自定义固件
   # 与 Gazebo effort 控制器做真实 MIT 等效力矩端到端验证：
   python3 fdcan_motor_sim.py --gazebo --gazebo-control-mode effort \
@@ -40,7 +42,8 @@
     --effort-topic /arm_effort_controller/commands
 节点清单与节奏可调：--cerb/--vaxor（默认 CERB 1-4 / 无 VAXOR）、--period-ms（板端 SYNC
 周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰，默认 60ms/台）、--no-brs（数据段不切 5M）。
-开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾并发 C 关通道。
+开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾；SLCAN 关闭
+通道，SocketCAN 关闭 raw socket。
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ import os
 import queue
 import select
 import signal
+import socket
 import struct
 import sys
 import termios
@@ -77,6 +81,54 @@ FD_LEN_CODE = {0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
                7: "7", 8: "8", 12: "9", 16: "A", 20: "B", 24: "C",
                32: "D", 48: "E", 64: "F"}
 _CODE_LEN = {v: k for k, v in FD_LEN_CODE.items()}
+
+# ---- SocketCAN ---------------------------------------------------------
+
+CAN_MTU = 16
+CANFD_MTU = 72
+CAN_EFF_FLAG = 0x80000000
+CAN_RTR_FLAG = 0x40000000
+CAN_ERR_FLAG = 0x20000000
+CAN_SFF_MASK = 0x7FF
+CANFD_BRS = 0x01
+CAN_RAW_FD_FRAMES = 5
+
+
+def pack_socketcan_frame(can_id: int, payload: bytes, is_fd: bool,
+                         brs: bool) -> bytes:
+    """编码 Linux CAN_RAW 帧；本模拟器只发送标准 11 bit CAN ID。"""
+    if not 0 <= can_id <= CAN_SFF_MASK:
+        raise ValueError(f"standard CAN ID out of range: 0x{can_id:X}")
+    if is_fd:
+        if len(payload) not in FD_LEN_CODE:
+            raise ValueError(
+                f"invalid CAN FD payload length {len(payload)}; "
+                f"valid lengths are {sorted(FD_LEN_CODE)}"
+            )
+        flags = CANFD_BRS if brs else 0
+        return struct.pack("=IBBBB64s", can_id, len(payload), flags, 0, 0,
+                           payload.ljust(64, bytes(1)))
+    if len(payload) > 8:
+        raise ValueError("classical CAN payload exceeds 8 bytes")
+    return struct.pack("=IBBBB8s", can_id, len(payload), 0, 0, 0,
+                       payload.ljust(8, bytes(1)))
+
+
+def parse_socketcan_frame(frame: bytes):
+    """解析 CAN_RAW recv() 数据 -> (id, payload, is_fd)，忽略错误帧。"""
+    if len(frame) not in (CAN_MTU, CANFD_MTU):
+        return None
+    can_id, length, _flags, _res0, _res1 = struct.unpack_from("=IBBBB", frame)
+    if can_id & (CAN_ERR_FLAG | CAN_RTR_FLAG | CAN_EFF_FLAG):
+        return None
+    normalized_id = can_id & CAN_SFF_MASK
+    if len(frame) == CAN_MTU:
+        if length > 8:
+            return None
+        return normalized_id, frame[8:8 + length], False
+    if length > 64:
+        return None
+    return normalized_id, frame[8:8 + length], True
 
 
 def slcan_config_commands(
@@ -427,14 +479,17 @@ class GazeboBridge:
         self.pub.publish(out)
 
 
-class SlcanSim:
+class CanMotorSim:
     bridge = None   # 由 main() 在 --gazebo 时注入 GazeboBridge
-    def __init__(self, tty: str, cerb_ids, vaxor_ids, period_ms: int,
+    def __init__(self, tty: str | None, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int | None = AUTO_DATA_BITRATE_INDEX,
                  fb_period_ms: int = 60, stagger_ms: float = 2.2,
-                 r58_ids=(), safety_off_ids=(), dir_ccw_ids=()):
+                 r58_ids=(), safety_off_ids=(), dir_ccw_ids=(),
+                 can_interface: str | None = None):
         self.tty_path = tty
+        self.can_interface = can_interface
+        self.bus_socket = None
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
         if period_ms <= 0 or fb_period_ms <= 0:
@@ -442,6 +497,7 @@ class SlcanSim:
         self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
         self.stagger = stagger_ms / 1000.0
         self.tx_dropped = 0   # 发送队列满/串口错误丢帧
+        self._tx_error_reported = False
         self._tx_control = deque()   # SDO/应答/管理帧：优先于周期反馈
         self._tx_feedback = deque()  # 周期反馈：队列满时允许丢弃
         self._tx_active = None
@@ -477,18 +533,47 @@ class SlcanSim:
         self.last_cerb_emit = 0.0
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
-        self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        # 独占锁：两个实例同时开同一个 CANable，会各自下发 SLCAN 配置并互相
-        # 打断 → 表现为随机总线错乱、SYNC 间隔异常、某些电机不跟（2026-09-22
-        # 踩过，排查了很久才发现是残留实例）。宁可第二个实例立刻失败。
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise SystemExit(
-                f"{tty} 已被另一个进程占用（很可能是残留的模拟器实例）；"
-                "先停掉它再启动，否则两条 SLCAN 流会互相打断。")
+        self.fd = None
+        if can_interface is None:
+            if tty is None:
+                raise ValueError("SLCAN transport requires a tty")
+            self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+            # 独占锁：两个实例同时开同一个 CANable，会各自下发 SLCAN 配置并互相
+            # 打断 → 表现为随机总线错乱、SYNC 间隔异常、某些电机不跟。宁可第二个
+            # 实例立刻失败。
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise SystemExit(
+                    f"{tty} 已被另一个进程占用（很可能是残留的模拟器实例）；"
+                    "先停掉它再启动，否则两条 SLCAN 流会互相打断。")
 
     def configure(self):
+        if self.can_interface is not None:
+            protocol = getattr(socket, "CAN_RAW", 1)
+            level = getattr(socket, "SOL_CAN_RAW", 101)
+            try:
+                self.bus_socket = socket.socket(
+                    socket.PF_CAN, socket.SOCK_RAW, protocol
+                )
+                self.bus_socket.setsockopt(
+                    level, CAN_RAW_FD_FRAMES, struct.pack("=I", 1)
+                )
+                self.bus_socket.bind((self.can_interface,))
+                self.bus_socket.setblocking(False)
+            except OSError as error:
+                if self.bus_socket is not None:
+                    self.bus_socket.close()
+                self.bus_socket = None
+                raise RuntimeError(
+                    f"cannot open CAN FD SocketCAN interface "
+                    f"'{self.can_interface}': {error}; check that it exists, is UP, "
+                    "and has CAN-FD bitrates configured"
+                ) from error
+            self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+            self._reader.start()
+            return
+
         tty.setraw(self.fd, when=termios.TCSANOW)
         attrs = termios.tcgetattr(self.fd)
         # tty.setraw 不会修正继承的字符宽度。手工查询 CANable 时若把 tty
@@ -567,7 +652,42 @@ class SlcanSim:
                 time.sleep(0.001)
 
     def _pump_tx(self):
-        """非阻塞泵出运行期 SLCAN 帧，绝不在收包路径等待 USB CDC。"""
+        """非阻塞发送 CAN 帧；控制响应优先于可丢弃的周期反馈。"""
+        if self.bus_socket is not None:
+            budget = TX_PUMP_BUDGET
+            while budget > 0:
+                if self._tx_active is None:
+                    if self._tx_control:
+                        self._tx_active = self._tx_control.popleft()
+                    elif self._tx_feedback:
+                        self._tx_active = self._tx_feedback.popleft()
+                    else:
+                        return
+                item = self._tx_active
+                try:
+                    written = self.bus_socket.send(item["line"])
+                except BlockingIOError:
+                    return
+                except OSError:
+                    self.tx_dropped += 1
+                    if not self._tx_error_reported:
+                        print(
+                            f"[sim] SocketCAN send on {self.can_interface} failed; "
+                            "check interface state and CAN-FD configuration",
+                            file=sys.stderr,
+                        )
+                        self._tx_error_reported = True
+                    self._tx_active = None
+                    return
+                if written != len(item["line"]):
+                    self.tx_dropped += 1
+                    self._tx_active = None
+                    continue
+                self._record_tx(item)
+                self._tx_active = None
+                budget -= written
+            return
+
         budget = TX_PUMP_BUDGET
         while budget > 0:
             if self._tx_active is None:
@@ -592,27 +712,34 @@ class SlcanSim:
             budget -= written
             if item["offset"] != len(item["line"]):
                 return
-            model = item["model"]
-            if model:
-                model.tx_count += 1
-            if self.log_f:
-                self.log_f.write(json.dumps({
-                    "t": round(time.monotonic(), 4), "dir": "tx",
-                    "tag": item["tag"], "id": item["can_id"],
-                    "data": item["payload"].hex()}) + "\n")
+            self._record_tx(item)
             self._tx_active = None
+
+    def _record_tx(self, item) -> None:
+        model = item["model"]
+        if model:
+            model.tx_count += 1
+        if self.log_f:
+            self.log_f.write(json.dumps({
+                "t": round(time.monotonic(), 4), "dir": "tx",
+                "tag": item["tag"], "id": item["can_id"],
+                "data": item["payload"].hex()}) + "\n")
 
     def send(self, can_id: int, payload: bytes, is_fd: bool = True,
              brs: bool = True, model: "MotorModel | None" = None,
              tag: str = ""):
-        line = slcan_line(can_id, payload, is_fd, brs)
+        frame = (
+            pack_socketcan_frame(can_id, payload, is_fd, brs)
+            if self.bus_socket is not None
+            else slcan_line(can_id, payload, is_fd, brs)
+        )
         # 周期反馈可丢；SDO/控制回显不能被反馈队列长期挤压。
         queue = (self._tx_feedback if tag in ("cerb_fb", "vaxor_status")
                  else self._tx_control)
         if len(queue) >= TX_QUEUE_MAX:
             self.tx_dropped += 1
             return
-        queue.append({"line": line, "offset": 0, "model": model,
+        queue.append({"line": frame, "offset": 0, "model": model,
                       "tag": tag, "can_id": can_id, "payload": payload})
 
     def log_rx(self, can_id: int, data: bytes, tag: str):
@@ -784,15 +911,27 @@ class SlcanSim:
                           m, "vaxor_status")
 
     def _reader_loop(self):
-        """独立线程：只负责尽快把 CANable 的 SLCAN 数据读干净并入队。
+        """独立读取线程：尽快读取物理总线，并把帧交给主循环处理。"""
+        if self.bus_socket is not None:
+            while not self.stop:
+                try:
+                    readable, _, _ = select.select([self.bus_socket], [], [], 0.05)
+                except (OSError, ValueError):
+                    return
+                if not readable:
+                    continue
+                try:
+                    frame = self.bus_socket.recv(CANFD_MTU)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    return
+                parsed = parse_socketcan_frame(frame)
+                if parsed:
+                    self._rxq.put(parsed)
+            return
 
-        为什么必须单开线程：串口读原先与 rclpy/Gazebo 桥共用一个循环，主机
-        负载一上来（Gazebo + 测试脚本），循环周期涨到 0.1–0.6s，CANable 的
-        USB 缓冲被写满 → 它写阻塞、控制器出错、**停发 ACK** → 固件侧表现为
-        `TEC=128/LEC=ACK error/TXBRP=0xff`、整条总线看着死掉。串口服务必须
-        与其它工作解耦：读线程只管读，主循环只管消费。
-        本线程独占 self.fd 的读与 self.rx_buf（主循环不再读 fd）。
-        """
+        # SLCAN 串口接收与 rclpy/Gazebo 桥隔离，避免串口压力令 CANable 停发 ACK。
         while not self.stop:
             try:
                 r, _, _ = select.select([self.fd], [], [], 0.05)
@@ -838,7 +977,7 @@ class SlcanSim:
         print(f"  SYNC(0x080) seen: {self.sync_seen}")
         print(f"  SYNC max gap: {self.max_sync_gap:.4f}s")
         if self.tx_dropped:
-            print(f"  串口背压丢帧: {self.tx_dropped}（反馈是周期性的，丢帧可容忍）")
+            print(f"  发送背压丢帧: {self.tx_dropped}（周期反馈可丢，控制响应应检查总线负载）")
         print(f"  TX queue: control={len(self._tx_control)} "
               f"feedback={len(self._tx_feedback)}")
         if self.log_f:
@@ -847,10 +986,13 @@ class SlcanSim:
     def run(self):
         cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
-        print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/M0/A1/O opened; "
-              f"CERB {cerb_ids} "
-              f"VAXOR {vaxor_ids}")
-        print("[sim] 通道已开、静默监听中（仅做 ACK 节点）。请复位控制板；"
+        if self.bus_socket is not None:
+            print(f"[sim] {self.can_interface} SocketCAN CAN-FD opened; "
+                  f"CERB {cerb_ids} VAXOR {vaxor_ids}")
+        else:
+            print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/M0/A1/O opened; "
+                  f"CERB {cerb_ids} VAXOR {vaxor_ids}")
+        print("[sim] 总线已开、静默监听中（电机响应暂不发送）。请复位控制板；"
               "收到首个 0x080 SYNC 后开始错峰上报。Ctrl-C 结束。")
         gate_start = time.monotonic()
         last_step = gate_start
@@ -859,21 +1001,20 @@ class SlcanSim:
         while not self.stop:
             now = time.monotonic()
             self._pump_tx()
-            # 串口由 _reader_loop 独占读取；这里只消费队列，不再碰 fd 读。
+            # 总线由 _reader_loop 独占读取；这里只消费队列。
             self._drain_rx()
             self._pump_tx()
             time.sleep(0.002)          # 保持原有节拍，别忙等
             if not self.sync_seen:
-                # 门控：板子上线前绝不发帧（否则无人 ACK 会把 CANable 自己打进
-                # bus-off，板子启动后也无人 ACK 其 SYNC，双双死锁）。
+                # 门控：板子上线前不发电机反馈帧，避免启动次序错误时总线没有
+                # ACK 节点而进入 bus-off；收到 SYNC 代表控制板已进入总线。
                 if not warned and now - gate_start > 3.0:
                     print("[sim] 警告：3s 未收到 SYNC，请确认板子已复位且接线正确")
                     warned = True
                 continue
             dt = now - last_step
-            # 桥的 spin 限到 100Hz（Gazebo 控制器 update_rate 就是 100）：
-            # 原先每圈都 spin，而循环周期由 2ms 的 select 决定，等于每秒几百次
-            # rclpy 调用，把串口服务挤在后面。
+            # 桥的 spin 限到 100Hz（Gazebo 控制器 update_rate 就是 100），让 CAN
+            # 收发在每轮主循环里优先完成。
             if self.bridge is not None and now - last_bridge >= 0.01:
                 self.bridge.spin()
                 last_bridge = now
@@ -906,13 +1047,17 @@ class SlcanSim:
         self.stop = True
         if self._reader is not None:
             self._reader.join(timeout=0.5)
-        try:
-            os.write(self.fd, b"C\r")  # 收尾关通道
-        except OSError:
-            pass
+        if self.bus_socket is not None:
+            self.bus_socket.close()
+            self.bus_socket = None
+        else:
+            try:
+                os.write(self.fd, b"C\r")  # 收尾关通道
+            except OSError:
+                pass
+            os.close(self.fd)
         if self.log_f:
             self.log_f.close()
-        os.close(self.fd)
 
 
 def default_canable_tty():
@@ -932,9 +1077,11 @@ def default_canable_tty():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tty", default=None,
-                    help="默认按 /dev/serial/by-id/ 里含 CANable 的节点解析；"
-                         "显式给路径可覆盖")
+    endpoint = ap.add_mutually_exclusive_group()
+    endpoint.add_argument("--tty", default=None,
+                          help="SLCAN 设备；默认按 /dev/serial/by-id/ 解析 CANable")
+    endpoint.add_argument("--interface", default=None,
+                          help="CAN-FD SocketCAN 接口，例如 can0（位率需预先配置）")
     ap.add_argument("--cerb", default="1,2,3,4")
     ap.add_argument("--vaxor", default="")
     ap.add_argument("--cerb-r58", default="1",
@@ -957,6 +1104,8 @@ def main():
     ap.add_argument("--stagger-ms", type=float, default=2.2,
                     help="多节点反馈相位错开间隔")
     ap.add_argument("--log", default=None)
+    ap.add_argument("--ready-file", default=None,
+                    help="CAN 接口打开且读线程就绪后创建该文件，供总启动器排序")
     ap.add_argument("--gazebo", action="store_true",
                     help="把下行电机命令接到 Gazebo；反馈取自 /joint_states")
     ap.add_argument("--gazebo-control-mode", choices=("position", "effort"),
@@ -971,20 +1120,21 @@ def main():
     ap.add_argument("--tau-limit", type=float, default=10.0,
                     help="力矩饱和 N·m；URDF 里关节 effort 限幅是 10.0")
     args = ap.parse_args()
-    if args.tty is None:
+    if args.interface is None and args.tty is None:
         args.tty = default_canable_tty()
         print(f"[sim] 设备: {args.tty}")
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
     r58_ids = [int(x) for x in args.cerb_r58.split(",") if x]
-    sim = SlcanSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
+    sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
                    use_brs=not args.no_brs,
                    data_bitrate_index=args.data_bitrate_index,
                    fb_period_ms=args.fb_period_ms,
                    stagger_ms=args.stagger_ms,
                    r58_ids=r58_ids,
                    safety_off_ids=args.safety_off,
-                   dir_ccw_ids=args.dir_ccw)
+                   dir_ccw_ids=args.dir_ccw,
+                   can_interface=args.interface)
 
     if args.gazebo:
         jm = {}
@@ -1006,6 +1156,14 @@ def main():
     signal.signal(signal.SIGINT, _sig)
 
     sim.configure()
+    if args.ready_file:
+        ready_parent = os.path.dirname(os.path.abspath(args.ready_file))
+        os.makedirs(ready_parent, exist_ok=True)
+        with open(args.ready_file, "w", encoding="utf-8") as ready_handle:
+            ready_handle.write(f"{os.getpid()}\n")
+            ready_handle.flush()
+            os.fsync(ready_handle.fileno())
+        print(f"[sim] CAN 接口已就绪: {args.ready_file}")
     sim.run()
 
 

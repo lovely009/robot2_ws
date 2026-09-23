@@ -196,6 +196,7 @@ details[open] > summary::before { content: '▾'; }
 .joints li.empty { display: block; color: var(--dim-2); cursor: default; padding: 10px 0; text-align: center; }
 .joints .jdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim-2); }
 .joints .jid { font-family: var(--mono); font-weight: 600; font-size: 11px; }
+.joints .jbus { color: var(--accent); font: 9px var(--mono); margin-left: 5px; white-space: nowrap; }
 .joints .jmodel { color: var(--dim-2); font-size: 10px; margin-left: 4px; }
 .joints .jpos { font-family: var(--mono); font-size: 11px; text-align: right; }
 .joints .jstate { grid-column: 2 / 4; font-size: 10px; color: var(--dim-2); letter-spacing: .02em; }
@@ -409,6 +410,32 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .chart { width: 100%; height: auto; background: #070a10; border: 1px solid var(--line); border-radius: 4px; display: block; }
 .teach input[type="number"] { width: 80px; }
 .teach .t-targets { width: 100%; min-width: 300px; }
+
+/* ---------- 仿真启动 ---------- */
+.sim-panel { display: flex; flex-direction: column; gap: 4px; }
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 7px 10px;
+}
+.sim-field { display: flex; flex-direction: column; gap: 2px; color: var(--dim); font-size: 10px; }
+.sim-field input, .sim-field select { width: 100%; min-width: 0; }
+.sim-safety { color: var(--warn); margin: 5px 0; }
+.sim-hint { padding: 2px 0; }
+.sim-log {
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #080c13;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: #aab8cc;
+  font: 10px/1.45 var(--mono);
+}
+.sim-panel [hidden] { display: none !important; }
 
 /* 「说明」面板：操作注记集中放这里、默认收起——面板里不写句子。 */
 .notes { margin: 0; padding: 0 0 0 14px; font-size: 11px; color: var(--dim); }

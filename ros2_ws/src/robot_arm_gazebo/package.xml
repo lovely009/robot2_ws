@@ -3,7 +3,7 @@
 <package format="3">
   <name>robot_arm_gazebo</name>
   <version>1.0.0</version>
-  <description>机械臂 URDF 模型库（models/&lt;模型名&gt;）与 Ignition Gazebo 仿真集成。</description>
+  <description>机械臂模型、Gazebo 仿真及 CAN 电机端到端组合仿真入口。</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
@@ -17,10 +17,18 @@
   <exec_depend>joint_state_publisher_gui</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>micro_ros_agent</exec_depend>
+  <exec_depend>motor_hardware_interface</exec_depend>
+  <exec_depend>motor_sim</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>web_host</exec_depend>
   <exec_depend>xacro</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>

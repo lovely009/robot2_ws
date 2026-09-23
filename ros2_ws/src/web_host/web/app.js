@@ -518,6 +518,11 @@ function lifecyclePill(lc) {
   return `<span class="pill ${cls}">${name}</span>`;
 }
 
+function busLabel(index) {
+  return Number.isInteger(index) && index >= 0 && index < 3
+    ? `FDCAN${index + 1}` : 'CAN --';
+}
+
 function renderMotors() {
   // 参数页总览条依赖电机状态流（在线/生命周期），随之刷新；表未加载时是空操作。
   if (paramCache.size > 0) renderParamSummary();
@@ -535,10 +540,12 @@ function renderMotors() {
       const stateText = fault ? (FAULT_NAMES[fault] || fault)
         : (LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '--');
       const mo = r.motion || {};
+      // 优先取状态流字段；字段缺失时回退到低频拓扑消息。
+      const busIndex = Number.isInteger(st.bus_index) ? st.bus_index : t.bus_index;
       return `<li class="${id === state.selectedId ? 'on' : ''}" data-id="${id}"
           title="${devDetailTitle(id)}">
         <span class="jdot" style="background:${dot}"></span>
-        <span><span class="jid">m${id}</span><span class="jmodel">${t.model_name || '未绑定'}</span></span>
+        <span><span class="jid">m${id}</span><span class="jbus">${busLabel(busIndex)}</span><span class="jmodel">${t.model_name || '未绑定'}</span></span>
         <span class="jpos">${fmt(mo.position, 3)}</span>
         <span class="jstate ${fault ? 'warn' : 'muted'}">${stateText}</span>
       </li>`;
@@ -689,8 +696,9 @@ function renderSelected() {
   const r = state.motors.get(id) || {};
   const t = r.topo || {}, mo = r.motion || {}, st = r.status || {};
   const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
+  const busIndex = Number.isInteger(st.bus_index) ? st.bus_index : t.bus_index;
   $('selTitle').textContent =
-    `m${id} · ${t.model_name || '未绑定'} · ${LIFECYCLE[lc] || '--'}`;
+    `m${id} · ${busLabel(busIndex)} · ${t.model_name || '未绑定'} · ${LIFECYCLE[lc] || '--'}`;
   $('selPosition').textContent = fmt(mo.position, 3) + ' rad';
   $('selVelocity').textContent = fmt(mo.velocity, 3) + ' rad/s';
   $('selEffort').textContent = fmt(mo.effort, 3) + ' N·m';

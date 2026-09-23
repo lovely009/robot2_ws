@@ -15,8 +15,14 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    OpaqueFunction,
+    RegisterEventHandler,
+)
 from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import (
     Command,
     FindExecutable,
@@ -71,6 +77,16 @@ def generate_launch_description() -> LaunchDescription:
             default_value=default_motor_config,
             description="真机电机拓扑配置；默认 motor_hardware_interface/config/motor_driver.yaml",
         ),
+        DeclareLaunchArgument(
+            "shutdown_on_manager_exit",
+            default_value="false",
+            description="controller_manager 退出时是否关闭整个 launch",
+        ),
+        DeclareLaunchArgument(
+            "controller_manager_name",
+            default_value="/controller_manager",
+            description="controller_manager 完整 ROS 名称",
+        ),
         OpaqueFunction(function=launch_control_stack),
     ])
 
@@ -99,6 +115,13 @@ def launch_control_stack(context: LaunchContext):
     control_joints = ",".join(joints)
     # 与 driver_controllers.yaml 同构的临时 joints 参数文件，随 manager 一起加载。
     position_joints_param_file = write_position_joints_params_file(joints)
+    controller_manager_name = perform_substitutions(
+        context, [LaunchConfiguration("controller_manager_name")]
+    ).strip()
+    if not controller_manager_name:
+        raise RuntimeError("controller_manager_name cannot be empty")
+    if not controller_manager_name.startswith("/"):
+        controller_manager_name = f"/{controller_manager_name}"
 
     model_xacro = perform_substitutions(
         context, [LaunchConfiguration("model_xacro")]
@@ -139,7 +162,7 @@ def launch_control_stack(context: LaunchContext):
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
-            "/controller_manager",
+            controller_manager_name,
         ],
     )
     position = Node(
@@ -149,11 +172,11 @@ def launch_control_stack(context: LaunchContext):
         arguments=[
             "position_controller",
             "--controller-manager",
-            "/controller_manager",
+            controller_manager_name,
         ],
     )
 
-    return [
+    actions = [
         manager,
         state_publisher,
         RegisterEventHandler(
@@ -161,3 +184,23 @@ def launch_control_stack(context: LaunchContext):
         ),
         jsb,
     ]
+    shutdown_on_manager_exit = perform_substitutions(
+        context, [LaunchConfiguration("shutdown_on_manager_exit")]
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if shutdown_on_manager_exit:
+        actions.append(
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=manager,
+                    on_exit=[
+                        EmitEvent(
+                            event=Shutdown(
+                                reason="motor_hardware_interface controller_manager exited"
+                            )
+                        )
+                    ],
+                )
+            )
+        )
+
+    return actions

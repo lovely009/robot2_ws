@@ -74,9 +74,9 @@ static const char *kDeviceParamReportTopic = "micro_ros_up/device_param_report";
 
 // 消息面契约版本：随字段**语义**变更递增（字段只增不改序，故不是每次加字段
 // 都动）。上层据此检测漂移，而不是静默按旧布局解析。
-// 2 = 上行按「拓扑=身份 / 状态=状态与电气 / 运动=运动学」三分去重：
-//     lifecycle 只留 status、state_age_ms 只留 motion、topology 加版本号。
-static constexpr uint16_t kMotorMsgSchemaVersion = 2U;
+// 3 = MotorStatusTarget 追加实际发现总线 bus_index；拓扑仍是身份权威，状态同时
+//     携带本次运行时总线，运动状态保持只含运动学数据。
+static constexpr uint16_t kMotorMsgSchemaVersion = 3U;
 
 // ---- 订阅（2）----
 static rcl_subscription_t g_command_sub;
@@ -313,6 +313,7 @@ static void publish_statuses() {
     out.device_protect_enabled = statuses[i].device_protect_enabled;
     out.device_direction_known = statuses[i].device_direction_known;
     out.device_direction = statuses[i].device_direction;
+    out.bus_index = statuses[i].bus_index;
   }
   g_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
   const rcl_ret_t publish_rc = rcl_publish(&g_status_pub, &g_status_msg, nullptr);

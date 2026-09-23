@@ -1,0 +1,38 @@
+# Gazebo-specific map of the simulated motors onto this arm model.
+# Motor IDs, protocol, bus, driver type, command gains and motor constants are
+# resolved from motor_hardware_interface/config/motor_driver.yaml and motor.yaml.
+simulation:
+  model: zhoubuguanjie_youbi_001
+
+  timing:
+    control_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+
+  # Gazebo mechanics and simulated plant safety/dynamics are model-specific.
+  profiles:
+    cerb_r58:
+      hard_lower_deg: -90.0
+      hard_upper_deg: 90.0
+      command_lower_deg: -85.0
+      command_upper_deg: 85.0
+      velocity_rad_s: 1.0
+      effort_nm: 10.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+
+  # motor names reference motor_driver.yaml; joint names belong to this model.
+  motors:
+    - motor: right_shoulder_yaw
+      joint: joint_link1
+      profile: cerb_r58
+    - motor: right_shoulder_roll
+      joint: joint_link2
+      profile: cerb_r58
+    - motor: right_shoulder_pitch
+      joint: joint_link3
+      profile: cerb_r58
+    - motor: right_elbow_pitch
+      joint: joint_link4
+      profile: cerb_r58

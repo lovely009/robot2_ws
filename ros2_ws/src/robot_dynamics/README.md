@@ -11,12 +11,16 @@
 - 不参与 ros2_control、`motor_drive`、`motor_sim` 或 Gazebo 的运行路径。
 - 不实现正逆运动学、逆动力学、重力补偿或轨迹前馈。
 
-## 安装前提
+## 依赖安装
 
 ```bash
 source /opt/ros/humble/setup.bash
-sudo -A apt install ros-humble-pinocchio
+cd ros2_ws
+rosdep install --from-paths src/robot_dynamics --ignore-src -r -y
 ```
+
+Pinocchio 通过 `package.xml` 的 `depend` 声明，rosdep 会为 ROS 2 Humble 安装
+`ros-humble-pinocchio`。
 
 ## 构建与测试
 

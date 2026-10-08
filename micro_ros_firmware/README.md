@@ -518,11 +518,12 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   （帧计数/解码错误/快照与配置拒绝/事件与 TX 丢弃/P0 重试/轨迹与策略收支/
   每总线 ring 溢出/堆余量）。这些此前只存在于芯片里，实时性与总线容量的问题
   只能靠 JTAG 定位。
-- `micro_ros_up/device_param_report`（`DeviceParamReport`，1 Hz + 变化即发）：
+- `micro_ros_up/device_param_report`（`DeviceParamReport`，**按需**：REPORT
+  命令 / CONFIG_RESULT 写事务收尾 / DEV_INIT 设备初始化结论）：
   参数核对双行快照（固件记录列 / 驱动板回读列，同槽位同单位、力矩列按 A）+ 未
   保存标记 + 不一致槽位位图。**它是 `param_set` 的读侧对照**：写之前先读回
   `rec_*` 列，位置限位要成对发就把两边一起读出来（行序与 `param_set` 的 `field`
-  是同一套）。
+  是同一套）。没有在线电机时帧里 `dev_*` 全为 NaN，上层看到的就是板内参数表。
 - `micro_ros_up/system_status`（`SystemStatus`，5 Hz + 变化即发）：`last_error`
   电平 + `last_error_motor` + `refresh/set_zero/clear_fault/save_seq` +
   `save_in_progress`。参数面的"这次命令跑完没有"只由它回答（见「参数面」节）。

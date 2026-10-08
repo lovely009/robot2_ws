@@ -43,11 +43,20 @@ ros2 launch motor_hardware_interface hardware.launch.py
 ## 仿真 bring-up
 
 ```bash
+# 纯 Gazebo：Ignition + gz_ros2_control 位置控制器直接驱动模型
 ros2 launch robot_arm_gazebo gazebo.launch.py
+
+# 端到端电机—机械臂仿真：Gazebo + motor_sim + effort 门控 + motor_hardware_interface
+ros2 launch robot_arm_gazebo simulation.launch.py
 ```
 
-`gazebo.launch.py` 走 Ignition + `gz_ros2_control` 位置控制器，不经过 `motor_sim` 的 vcan 回路
-（`motor_sim` 的接口选择由 `transport_mode` 与显式的 bus→端口参数决定，无默认值）。
+`gazebo.launch.py` 不经过 `motor_sim` 的 vcan 回路（`motor_sim` 的接口选择由
+`transport_mode` 与显式的 bus→端口参数决定，无默认值）。`simulation.launch.py`
+默认用本机自动创建/清理的 `robot_vcan0` 把两条串成闭环，拓扑由
+`models/<模型名>/config/simulation_topology.yaml` 叠加权威电机配置生成；
+传输可选 `transport:=vcan|socketcan|slcan`，控制端可选
+`controller_mode:=host|external|firmware`（`firmware` 走 STM32 HIL，需先 source
+`micro_ros_agent` 工作区）。详见 `ros2_ws/src/robot_arm_gazebo/README.md`。
 
 ## 配置（两份文件）
 

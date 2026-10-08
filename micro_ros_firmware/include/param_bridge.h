@@ -1,7 +1,7 @@
 // 参数与系统命令桥（**话题面**）。
 //
 // 下行：/micro_ros_do/param_set       ParamSetArray  稀疏参数写（整条受理/整条拒绝）
-//       /micro_ros_do/system_command  SystemCommand  save/refresh/set_zero/clear_fault
+//       /micro_ros_do/system_command  SystemCommand  save/refresh/set_zero/clear_fault/report
 // 上行：/micro_ros_up/system_status   SystemStatus   错误电平 + 四个完成序号，5 Hz
 //
 // **只读侧不在这里**：参数核对的双行快照由 motor_bridge 的 device_param_report 承载，
@@ -61,6 +61,16 @@ uint32_t param_bridge_publish_fail_count(void);
 // 设备参数报告（motor_bridge）复用这一份，而不是自己再拷一份：视图数组
 // 64 台约 6 KB，拷两份就是白占一份 RAM_D1。两者同在本任务里顺序调用，无并发。
 const motor_control_param_view_t *param_bridge_views(size_t *out_count);
+
+// 取出并清除一次性的「上报参数视图」请求（SystemCommand COMMAND_REPORT 置位）。
+// motor_bridge 每拍 poll 调用：为 true 就发一帧 device_param_report。请求不进
+// mailbox、不访问设备——REPORT 与 REFRESH 的区别就在这里。
+bool param_bridge_take_report_request(void);
+
+// W25 boot 参数记录（直通 storage_task 的只读快照，条数写入 *out_count）。
+// motor_bridge 据此给「未发现但有板内记录」的电机补行：没有在线电机时
+// device_param_report 呈现的就是这份板内参数表。
+const motor_control_stored_params_t *param_bridge_stored_records(size_t *out_count);
 
 #ifdef __cplusplus
 }

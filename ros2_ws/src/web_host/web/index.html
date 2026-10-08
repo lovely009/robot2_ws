@@ -34,6 +34,9 @@
     <div class="conn">
       <span class="dot" id="connDot"></span>
       <span id="connText">未连接</span>
+      <input id="rosUrl" type="text" spellcheck="false"
+        placeholder="ws://localhost:9090" aria-label="rosbridge WebSocket 地址"
+        title="地址自动保存；刷新页面自动连接或重连 rosbridge，不会启动或停止 Agent">
       <label class="port-picker" title="选择 micro-ROS 控制板串口">
         <span>控制板</span>
         <select id="serialPort" aria-label="控制板串口">
@@ -41,11 +44,9 @@
         </select>
       </label>
       <button id="btnPortRefresh" class="secondary" title="重新扫描串口">扫描</button>
-      <input id="rosUrl" type="text" spellcheck="false" placeholder="ws://localhost:9090">
-      <button id="btnConnect" title="启动所选串口的 micro-ROS Agent，然后连接 rosbridge">启动并连接</button>
-      <button id="btnDisconnect" class="secondary">断开</button>
+      <button id="btnConnect" title="启动所选控制板串口的 micro-ROS Agent；不改变 rosbridge 连接">启动并连接</button>
+      <button id="btnDisconnect" class="secondary" title="停止由本页面启动的 micro-ROS Agent" disabled>断开</button>
       <span id="agentText" class="agent-state">Agent 未启动</span>
-      <button id="btnAgentStop" class="secondary" title="停止由本页面启动的 Agent" disabled>停止 Agent</button>
     </div>
   </header>
 
@@ -122,12 +123,12 @@
     <div id="cmdResult" class="result tiny"></div>
   </details>
 
-  <!-- ============ 参数与策略（页面下方，两栏） ============ -->
+  <!-- ============ 参数表（页面下方，整宽） ============ -->
   <!-- 设备限值与使能/增益不是一回事：前者以驱动板为准、可回读；后者只写不回读，
-       框里是页面最后一次下发的值。并排放、各自一栏，不混在同一张表里。 -->
+       框里是页面最后一次下发的值。故分开放——本表整宽，策略单独一个抽屉行。 -->
   <section class="bottom">
     <details class="card" data-fold="dev" open>
-      <summary>设备参数 <span class="spacer"></span>
+      <summary>全部参数 <span class="spacer"></span>
         <span class="sum" id="sumDev">未读取</span></summary>
       <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
       <div class="ctrl-row wrap">
@@ -142,26 +143,31 @@
         <table class="params">
           <thead>
             <tr>
-              <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
-              <th>pos_min<small>rad</small></th><th>pos_max<small>rad</small></th>
-              <th>vel_max<small>rad/s</small></th><th>torque_max<small>A</small></th>
+              <th class="num">ID</th><th>型号</th><th>状态</th><th>来源</th>
+              <th class="num">pos_min<small>rad</small></th><th class="num">pos_max<small>rad</small></th>
+              <th class="num">当前位置<small>rad</small></th>
+              <th>限位设置</th>
+              <th class="num">vel_max<small>rad/s</small></th><th class="num">torque_max<small>A</small></th>
               <th>限位保护</th><th>方向</th><th></th>
             </tr>
           </thead>
           <tbody id="paramRows">
-            <tr class="empty"><td colspan="10">连接后点「读取」载入当前参数</td></tr>
+            <tr class="empty"><td colspan="13">连接后点「读取」载入当前参数</td></tr>
           </tbody>
         </table>
       </div>
     </details>
+  </section>
 
-    <details class="card" data-fold="pol" open>
-      <summary>使能与增益 <span class="spacer"></span>
-        <span class="sum" id="sumPol">--</span></summary>
+  <!-- ============ 底部抽屉 ============ -->
+  <section class="drawer">
+    <!-- 使能与增益：只写不回读的策略面，单独一行，不再与参数表并排挤在一栏里 -->
+    <details class="sec" data-fold="pol" open>
+      <summary>使能与增益<span class="spacer"></span><span class="sum" id="sumPol">--</span></summary>
       <div class="table-wrap">
         <table class="params">
           <thead>
-            <tr><th>ID</th><th>型号</th><th>启用</th><th>kp</th><th>kd</th><th></th></tr>
+            <tr><th class="num">ID</th><th>型号</th><th>启用</th><th class="num">kp</th><th class="num">kd</th><th></th></tr>
           </thead>
           <tbody id="polRows">
             <tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr>
@@ -170,10 +176,7 @@
       </div>
       <div id="polResult" class="result tiny"></div>
     </details>
-  </section>
 
-  <!-- ============ 底部抽屉 ============ -->
-  <section class="drawer">
     <details class="sec" data-fold="d-simulation" open>
       <summary>仿真<span class="spacer"></span><span class="sum" id="simSummary">未启动</span></summary>
       <div class="sim-panel">
@@ -319,9 +322,10 @@
         <li>限值单位：位置 rad、速度 rad/s、力矩 A——前两项与固件状态/URDF 同一套单位，页面上不再出现度数；力矩列是设备对象 <code>0x2538</code> 的电流值（设备里存的就是电流，不折 N·m）。设零要求失能。</li>
         <li><b>使能 / kp / kd 只能写、不能读回</b>（固件无回读通路），框里是页面最后一次下发的值。落地结论看事件日志的 <code>CONFIG_RESULT</code>：0=OK、2=非法。设备参数未核对的台（<code>CONFIG_CONFLICT</code>）会被直接拒。代数必须严格前进才受理「未武装→武装」。</li>
         <li>命令快照是<b>完整</b>快照：缺席的受控电机被软停；停止连发 30 ms 后全软停、100 ms 失能；任一 NaN/Inf 整包拒收。</li>
-        <li>示教：每行等待 ms 后形成轨迹路点，目标写成 <code>ID:pos,vel,eff</code>；空行只表示等待。导入接受两种 JSON：本页导出的行数组，或 <code>MotorTrajectory</code> 话题载荷（按时刻合成行）。播放经可靠轨迹话题交给 MCU；超过<b>256 个总路点</b>会自动分段，并等待 <code>trajectory_state.completed</code> 后再发下一段。播放完成后末点保持，点“暂停”才取消并软停。</li>
+        <li>示教：每行等待 ms 后形成轨迹路点，目标写成 <code>ID:pos,vel,eff</code>；空行只表示等待。导入接受两种 JSON：本页导出的行数组，或 <code>MotorTrajectory</code> 话题载荷（按时刻合成行）。播放经可靠轨迹话题交给 MCU；超过<b>单条 256 个路点</b>会自动切成多条独立轨迹<b>串行</b>下发（等 <code>trajectory_state.completed</code> 回执后再发下一条，段界位置连续但会短暂停顿一下），段尾尽量挑在运动最安静的行上。播放完成后末点保持，点“暂停”才取消并软停。</li>
         <li>臂视图与曲线都受 <code>motion_states</code> 的 50 Hz 限制。虚线幽灵 = <b>页面下发的目标</b>，不是固件设定点；固件的钳位/软停/拒收画不出来。</li>
-        <li>话题：上行 <code>micro_ros_up/{motor_topology, motion_states, motor_status_array, motor_events, diagnostics, trajectory_state, imu/data, imu/temp}</code>；下行 <code>micro_ros_do/{motor_command_array, motor_trajectory, motor_policy}</code>。</li>
+        <li>话题：上行 <code>micro_ros_up/{motor_topology, motion_states, motor_status_array, motor_events, diagnostics, trajectory_state, device_param_report, imu/data, imu/temp}</code>；下行 <code>micro_ros_do/{motor_command_array, motor_trajectory, motor_policy, param_set, system_command}</code>。</li>
+        <li><b>读取</b>发 <code>system_command(REPORT)</code>：固件把当前参数视图立刻回一帧 <code>device_param_report</code>，不触发 SDO、不访问电机——没有在线电机时，显示的就是驱动板 W25 内的参数表（<code>dev_*</code> 为 NaN 时退回 <code>rec_*</code>）。设限位等写事务收尾也会自动回一帧，无需单独回读。</li>
       </ul>
     </details>
 

@@ -128,8 +128,14 @@ raw CAN FD 或 SLCAN 两种主机总线接口，使用 `micro_ros_agent/tools/fd
 `start_web_host:=false start_micro_ros_agent:=true agent_tty:=/dev/serial/by-id/STM32_CDC`。
 当前完整组合入口按该机械臂的单条 CAN 总线拓扑运行；`motor_sim` 库自身仍支持多总线。
 
-`vcan` 创建需要当前用户具有 `CAP_NET_ADMIN`。若没有权限，可预先执行一次
-`sudo ip link add dev robot_vcan0 type vcan`，再启动总仿真；已存在的接口不会在退出时删除。
+`vcan` 创建和启用需要当前用户具有 `CAP_NET_ADMIN`。若没有权限，可预先创建并启用接口：
+
+```bash
+sudo ip link add dev robot_vcan0 type vcan
+sudo ip link set dev robot_vcan0 up
+```
+
+随后普通用户即可启动总仿真；launch 会复用已启用的接口，退出时不会删除或关闭它。
 SocketCAN 物理总线须在启动前配置与固件一致的仲裁/数据位率并置为 UP。host 双接口闭环
 要把 `driver_interface` 与 `sim_interface` 接在同一条总线上；固件 HIL 只需一个
 SocketCAN 适配器与 STM32 FDCAN 接到同一物理总线，USB CDC 另接主机供 micro-ROS Agent

@@ -363,19 +363,24 @@ def _ensure_vcan(name: str) -> tuple[bool, bool]:
                 f"interface '{name}' already exists as '{kind}', expected vcan"
             )
         was_up = "UP" in (link.get("flags") or [])
-    result = subprocess.run(
-        ["ip", "link", "set", "dev", name, "up"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        if created:
-            subprocess.run(
-                ["ip", "link", "delete", "dev", name],
-                capture_output=True,
-                text=True,
+    if not was_up:
+        result = subprocess.run(
+            ["ip", "link", "set", "dev", name, "up"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            if created:
+                subprocess.run(
+                    ["ip", "link", "delete", "dev", name],
+                    capture_output=True,
+                    text=True,
+                )
+            raise RuntimeError(
+                f"cannot bring {name} up; check CAP_NET_ADMIN. Run "
+                f"'sudo ip link set dev {name} up' once, or grant CAP_NET_ADMIN "
+                f"to the launch environment. {result.stderr.strip()}"
             )
-        raise RuntimeError(f"cannot bring {name} up: {result.stderr.strip()}")
     return created, was_up
 
 

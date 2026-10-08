@@ -232,8 +232,9 @@
 
 ## 4. 上层同步（ROS 2 侧，2026-09-22 已完成源代码同步，构建/HIL 仍待验证）
 
-- [x] `motor_hardware_interface` 的 `MotorTrajectory` 转发已同步 `segment_index`/`segment_count`：同一条标准轨迹最多 256 个总路点，**一条轨迹发一条消息**（`MAX_TRAJECTORY_SEGMENT_POINTS = MAX_TRAJECTORY_POINTS`，2026-09-22 由 128 回调），时间保持整条绝对时间线；分段字段仍照填（`segment_index=0` / `segment_count=1`）并经可靠 QoS 发布。
-- [x] `web_host` 示教播放已同步同一分段契约：页面在总量不超过 256 点时**一条轨迹发一条消息**（`TRAJ_SEGMENT_POINTS = TRAJ_MAX_POINTS`，2026-09-22 由 128 回调——分段只把同一份数据变成多条背靠背消息，而 MCU 的 XRCE 输入流只有 16 × 512 B 分片窗口：一条 256 点约 11 片放得下，三条 128 点约 18 片放不下，**恰好 256 点是唯一会切三段（128/128/8）的形状**，台架即栽在这里）；超过总量直接拒绝，不退化成会破坏段边界速度连续性的独立轨迹。
+- [x] `motor_hardware_interface` 的 `MotorTrajectory` 转发已同步 `segment_index`/`segment_count`：同一条标准轨迹最多 256 个总路点，**一条轨迹发一条消息**（`MAX_TRAJECTORY_SEGMENT_POINTS = MAX_TRAJECTORY_POINTS`，2026-09-22 由 128 回调），时间保持整条绝对时间线；分段字段仍照填（`segment_index=0` / `segment_count=1`）并经可靠 QoS 发布。**2026-10-08 起与网页不再对称**：网页长示教改走"独立轨迹串行"，桥仍是"超 256 整条拒绝"——标准 `JointTrajectory` 这侧没有 `trajectory_state.completed` 的握手时序，要同步得先在桥里加一个等回执的发送序（未做）。
+- [x] `web_host` 示教播放（**2026-10-08 修订**）：单条轨迹 ≤ 256 点（`TRAJ_MAX_POINTS`）；更长的示教切成多条**独立轨迹串行下发**（每条 `segment_index=0`/`segment_count=1`、各自 `trajectory_id`，等 `trajectory_state.completed` 回执再发下一条），段界重复一行保证位置连续，段尾在容量窗口尾部挑"进出位移都最小"的行。09-22 的「总量 >256 直接拒绝 + `TRAJ_SEGMENT_POINTS = TRAJ_MAX_POINTS`」随之撤回：那次改动的理由是"分段只把同一份数据变成多条**背靠背**消息"（XRCE 8 KB 分片窗口，台架实测三条 128 点必失败），该理由对背靠背成立，对**等回执的串行**不成立——09-21 的串行形态已在台架验收过（1080 点 = 256×4+72）。代价：每个段界一次速度归零 + 回执往返停顿（2148 点 4 台 → 9 段 / 8 个界）。离线验证：切段纯函数属性检查（6 份真实轨迹 JSON + 合成 2148 点：每段 ≤256、段首 t=0、段界位置连续、声明台数都有路点）+ 假 DOM 驱动播放状态机五条分支（9 段串行 / 循环 / 暂停取消 / 段间掉线 / 无回执超时），`node --check` 通过。
+- [ ] **长示教串行播放未上真机**（2026-10-08 起）：需验 2148 点级示教的分段播放——段界位置无跳变、每段 `trajectory_accepted` 与 `completed` 逐次到齐、整轮 `mailbox_rejected_trajectory=0`、机构在段界的停顿可接受；并实测一次"段界停顿"时长（10 Hz 回执 + publish 往返），它决定这个方案对连续性要求高的轨迹还够不够用。
 - [x] `motor_hardware_interface` 桥的 `MAX_TRAJECTORY_SEGMENT_POINTS` 已与 web 同口径对齐（2026-09-22 = `MAX_TRAJECTORY_POINTS`）：满容量 256 点时不再拆成两条 ≈12 片的消息，而是一条 ≈11 片——**两条虽然也落在 16 片窗口内，但没有余地**，任何一片丢失即整组拼不齐。桥单测 `test_downlink_full_trajectory_is_a_single_message` 钉住此契约。
 - [x] 消息定义先改权威包 `micro_ros_agent/src/can_bridge_msgs`；固件桥接只消费 ID 化字段，不恢复 name-to-ID 兼容层。
 - [x] 上层源代码级验证：`micro_ros_agent` 的 `can_bridge_msgs` 构建成功；`ros2_ws` 的

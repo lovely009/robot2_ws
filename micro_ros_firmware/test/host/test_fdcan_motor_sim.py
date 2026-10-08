@@ -41,7 +41,7 @@ assert pending[8] == [1.0222]
 
 # 身份读取应答（SDO 0x1008 分段上传）：字节格式必须与固件 cerb_adapter 对向，
 # 否则台架上固件永远读不到身份串、全部电机停在未绑定。
-sim = MODULE.SlcanSim.__new__(MODULE.SlcanSim)
+sim = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
 sim.models = {1: MODULE.MotorModel(1, "cerb")}
 sim.use_brs = True
 sim.sent = []
@@ -120,7 +120,7 @@ assert abs(_vaxor_cmd["tau_nm"] - 0.4 * 0.042 * 50.0 * 0.65) < 2e-3
 assert MODULE.vaxor_decode_command(_vaxor_payload[:-1]) is None
 
 # 多轴 0x210 一帧的两个 ID 必须各自更新对应模型；空槽不可触碰其他节点。
-multi = MODULE.SlcanSim.__new__(MODULE.SlcanSim)
+multi = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
 multi.models = {i: MODULE.MotorModel(i, "cerb") for i in (1, 2, 3)}
 multi.log_f = None
 mit1 = bytes([0xcc, 0x80, 0, 0x80, 3, 0xe8, 0x14, 0x18, 0])

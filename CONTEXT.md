@@ -30,9 +30,14 @@
 
 - 驱动侧 controller：`/driver/controller_manager` 下的 position controller。
 - 真机 bring-up：`motor_hardware_interface` 提供，默认 serial_slcan 双总线。
-- 仿真链路：`MotorDriver -> vcan -> motor_sim -> Gazebo effort controller`（`motor_sim` 独立回路）；
-  `robot_arm_gazebo` 的 `gazebo.launch.py` 用 `gz_ros2_control` 位置控制器直接驱动模型，
-  不经 vcan 也不经 `motor_drive`（两个仿真回路尚未联动）。
+- 仿真链路（两条，`robot_arm_gazebo` 各有一个入口）：
+  - 纯 Gazebo：`gazebo.launch.py` 用 `gz_ros2_control` 位置控制器直接驱动模型，
+    不经 vcan 也不经 `motor_drive`。
+  - 端到端：`simulation.launch.py` 把上面两条串成一个闭环——
+    position controller → `motor_hardware_interface` → CAN 传输（默认 vcan，
+    也可 socketcan/slcan）→ `motor_sim` → Gazebo effort controller →
+    `/joint_states` → `motor_sim`；effort 由 `simulation_gate` 按全轴就绪门控。
+    `controller_mode:=external` 只起 Gazebo 与模拟端，`firmware` 换成 STM32 HIL。
 - fail-fast 停机：激活重试 3 次（每次 1 s 窗口）或运行期反馈超时即终止，人工诊断后重跑。
 
 ## 命名

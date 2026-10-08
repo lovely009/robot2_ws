@@ -3,7 +3,8 @@
 // 下行 3 条（订阅）：motor_command_array（完整快照）、motor_trajectory（多点
 // 轨迹）、motor_policy（逐电机 enable/kp/kd）。
 // 上行 7 条（发布）：motion_states 50Hz、motor_status_array 20Hz、motor_topology 1s、
-// motor_events、trajectory_state 10Hz、diagnostics 1Hz、device_param_report 1Hz + 变化。
+// motor_events、trajectory_state 10Hz、diagnostics 1Hz、device_param_report 按需
+// （REPORT 命令 / 写事务收尾 / 设备初始化结论）。
 // 全部用相对名，见下。
 //
 // 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），
@@ -15,6 +16,7 @@
 #include "motor_bridge.h"
 
 #include <Arduino.h>
+#include <math.h>
 
 #include <string.h>
 
@@ -424,18 +426,14 @@ static void publish_trajectory_state(uint32_t now_ms) {
   note_publish(publish_rc);
 }
 
-// 设备参数核对快照：1 Hz 心跳 + 状态变化即时一帧（变化由内核 CONFIG_RESULT /
-// DEV_INIT 事件触发）。视图复用 param_bridge 那一份，不拷第二份。
+// 设备参数核对快照：**按需**一帧——SystemCommand(REPORT) 请求、内核
+// CONFIG_RESULT（写事务收尾）/ DEV_INIT（设备初始化结论）事件。视图复用
+// param_bridge 那一份，不拷第二份。
 // 本函数在 param_bridge_poll **之前**跑，读的是上一个 10ms 周期的快照（滞后一拍），
-// 对 1 Hz 心跳与"写完一项看结论变绿"无影响——勿为消除这一拍去调换两个 poll。
-static void publish_device_param_report(uint32_t now_ms) {
-  static uint32_t s_phase = 0U;
-  const bool heartbeat = (uint32_t)(now_ms - s_phase) >= 1000U;
-  if (!heartbeat && !g_device_param_pending) {
+// 对"写完一项看结论变绿"与手动读取无影响——勿为消除这一拍去调换两个 poll。
+static void publish_device_param_report() {
+  if (!g_device_param_pending && !param_bridge_take_report_request()) {
     return;
-  }
-  if (heartbeat) {
-    s_phase = now_ms;
   }
   g_device_param_pending = false;
   size_t view_count = 0U;
@@ -443,7 +441,8 @@ static void publish_device_param_report(uint32_t now_ms) {
   if (views == nullptr) {
     return;
   }
-  const uint16_t count = (uint16_t)(view_count < kRosArrayCapacity
+  // count 会在合并「未发现但有板内记录」行时增长，不能 const。
+  uint16_t count = (uint16_t)(view_count < kRosArrayCapacity
                                         ? view_count
                                         : kRosArrayCapacity);
   g_device_param_msg.entries.size = count;
@@ -474,8 +473,77 @@ static void publish_device_param_report(uint32_t now_ms) {
     out.dev_safety = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     out.dev_direction = v.dev_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
   }
+
+  // 补上「有 W25 记录但本次上电未发现」的电机——内核视图按契约不含未发现电机
+  // （motor_control.h：未发现电机不在结果中），不补这一行的话总线空载时
+  // REPORT 上来就是空表。补行只有记录列、dev_* 全 NaN、状态 UNVERIFIED。
+  size_t stored_count = 0U;
+  const motor_control_stored_params_t *stored =
+      param_bridge_stored_records(&stored_count);
+  for (size_t s = 0U; s < stored_count; ++s) {
+    const motor_control_stored_params_t &r = stored[s];
+    bool already = false;
+    for (uint16_t i = 0U; i < count; ++i) {
+      if (g_device_param_msg.entries.data[i].motor_id == r.motor_id) {
+        already = true;
+        break;
+      }
+    }
+    if (already || count >= kRosArrayCapacity) {
+      continue;
+    }
+    auto &out = g_device_param_msg.entries.data[count++];
+    out.motor_id = r.motor_id;
+    out.dev_init_state = MOTOR_CONTROL_DEV_INIT_UNVERIFIED;
+    out.record_dirty = false;
+    out.mismatch_mask = 0U;
+    out.rec_pos_min = r.has_position_limits ? r.pos_min_rad : NAN;
+    out.rec_pos_max = r.has_position_limits ? r.pos_max_rad : NAN;
+    out.rec_vel_limit = r.has_velocity_limit ? r.velocity_limit_rad_s : NAN;
+    // 力矩列按 **A** 呈现：stored 记录里有设备写入时的 mA 原值，直接折 A，
+    // 不需要未绑定 Profile 拿不到的 torque_per_amp；原值缺失则 NaN。
+    out.rec_torque_limit = NAN;
+    if ((r.device_raw_present &
+         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)) != 0U) {
+      out.rec_torque_limit =
+          (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX] / 1000.0f;
+    }
+    out.rec_safety = NAN;
+    if ((r.device_raw_present &
+         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U) {
+      out.rec_safety =
+          (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
+    }
+    out.rec_direction = NAN;
+    if ((r.device_raw_present &
+         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)) != 0U) {
+      out.rec_direction =
+          (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+    }
+    // 未发现 = 本上电没与设备通过话：驱动板侧整行 NaN（绝不落 0）。
+    out.dev_pos_min = NAN;
+    out.dev_pos_max = NAN;
+    out.dev_vel_limit = NAN;
+    out.dev_torque_limit = NAN;
+    out.dev_safety = NAN;
+    out.dev_direction = NAN;
+  }
+  // 内核视图顺序 + 追加的记录行，按 id 排一遍保持页面行序稳定。
+  for (uint16_t i = 1U; i < count; ++i) {
+    for (uint16_t j = i; j > 0U; --j) {
+      auto &a = g_device_param_msg.entries.data[j - 1U];
+      auto &b = g_device_param_msg.entries.data[j];
+      if (a.motor_id <= b.motor_id) {
+        break;
+      }
+      auto tmp = a;
+      a = b;
+      b = tmp;
+    }
+  }
   // .msg 同时声明 count 与 entries（两者都上线），口径同
   // MotorTrajectoryState.target_count：不设它消费者会读到 0 条。
+  g_device_param_msg.entries.size = count;
   g_device_param_msg.count = count;
   g_device_param_msg.sync_time_ns = rmw_uros_epoch_nanos();
   note_publish(rcl_publish(&g_device_param_pub, &g_device_param_msg, nullptr));
@@ -785,5 +853,5 @@ void motor_bridge_poll(void) {
   publish_events();
   publish_diagnostics(now_ms);
   publish_trajectory_state(now_ms);
-  publish_device_param_report(now_ms);
+  publish_device_param_report();
 }

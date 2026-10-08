@@ -11,7 +11,7 @@ micro-ROS Agent 的独立 colcon 工作区（ROS 2 Humble / Ubuntu 22.04）。�
 |---|---|---|
 | `micro_ros_msgs` | https://github.com/micro-ROS/micro_ros_msgs.git | `humble` |
 | `micro-ROS-Agent` | https://github.com/micro-ROS/micro-ROS-Agent.git | `humble` |
-| `can_bridge_msgs` | 本地自定义（13 个 ID 化有界消息） | 固件 `extra_packages/` 以符号链接复用 |
+| `can_bridge_msgs` | 本地自定义（21 个 ID 化有界消息 = 13 个顶层 + 8 个 Target/Entry 子消息） | 固件 `extra_packages/` 以符号链接复用 |
 
 > 说明：官方仓库已由 `micro_ros_agent` 更名为 `micro-ROS-Agent`；官方 apt 仓库
 > **没有** `ros-humble-micro-ros-agent`，故采用源码构建。第三方 `.git` 已移除，

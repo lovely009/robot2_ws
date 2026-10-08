@@ -144,6 +144,10 @@ static uint32_t g_set_zero_id = 0;
 static int64_t g_clear_fault_seq = 0;
 static uint32_t g_clear_fault_id = 0;
 
+// COMMAND_REPORT 的一次性请求：回调置位，motor_bridge 下一拍 poll 取走并发一帧
+// device_param_report。不进 mailbox、不触发 SDO——没在线电机时帧里就是板内表。
+static bool g_report_pending = false;
+
 static save_transaction_t g_save_transaction;
 static int64_t g_save_seq = 0;
 
@@ -487,7 +491,8 @@ static void param_set_array_cb(const void *msgin) {
 
 // 系统命令：refresh / set_zero / clear_fault 直接提交（与 motor_bridge 的三个
 // 回调同构——校验与提交都在回调里做）；save 只置请求，实际的设备侧分批下发与
-// W25 落盘由 save_transaction 在 poll 中推进。
+// W25 落盘由 save_transaction 在 poll 中推进；report 只置一次性请求，
+// 由 motor_bridge 下一拍拍快照发帧，全程不碰设备与 mailbox。
 static void system_command_cb(const void *msgin) {
   const can_bridge_msgs__msg__SystemCommand *msg =
       (const can_bridge_msgs__msg__SystemCommand *)msgin;
@@ -503,6 +508,13 @@ static void system_command_cb(const void *msgin) {
       return;
     }
     save_transaction_request(&g_save_transaction);
+    return;
+  }
+
+  if (msg->command ==
+      can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT) {
+    // 总是整机一帧，motor_id 忽略（契约见 .msg）。重复 REPORT 合并为一次。
+    g_report_pending = true;
     return;
   }
 
@@ -731,6 +743,17 @@ const motor_control_param_view_t *param_bridge_views(size_t *out_count) {
   return g_views;
 }
 
+bool param_bridge_take_report_request(void) {
+  const bool pending = g_report_pending;
+  g_report_pending = false;
+  return pending;
+}
+
+const motor_control_stored_params_t *param_bridge_stored_records(
+    size_t *out_count) {
+  return storage_boot_params(out_count);
+}
+
 // ---- 生命周期 ----
 
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
@@ -824,6 +847,7 @@ void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   g_refresh_id = 0U;
   g_set_zero_id = 0U;
   g_clear_fault_id = 0U;
+  g_report_pending = false;
 
   // **订阅必须先自己移除再 fini**：rclc 的 executor 不感知 fini，残留句柄会在
   // 重连后顶掉后面话题的 init（表现为第 6 条订阅失败 → WAIT_AGENT 无限重连，

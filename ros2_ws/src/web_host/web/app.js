@@ -52,7 +52,7 @@ const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录�
 const PARAM_FIELD = {POS_MIN: 0, POS_MAX: 1, VEL_LIMIT: 2,
   TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5};
 // SystemCommand.command
-const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3};
+const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
 const MOTOR_ID_NONE = 65535;
 const STREAM_PERIOD_MS = 10; // 100Hz 连发
 const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
@@ -76,6 +76,7 @@ function quatToEuler(x, y, z, w) {
   return {roll, pitch, yaw};
 }
 const rad2deg = (r) => r * 180 / Math.PI;
+const ROS_URL_STORAGE_KEY = 'robot2.rosbridgeUrl';
 
 // ---------- 状态 ----------
 // motors: id -> {topo, motion, status}
@@ -88,6 +89,9 @@ const state = {
   // 都拿这里的值当基线，再轮询等它变大（见 sysSeq）。
   sysStatus: {refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
               save_seq: 0, save_in_progress: false, seen: false},
+  // device_param_report 的帧计数（单调即可）：「读取」(REPORT) 与写事务都靠
+  // "记下基线 → 等它变大"确认帧到了，没有对应完成序号。
+  devParamSeq: 0,
   devInit: new Map(), // motor_id -> {state, mask}：DEV_INIT 事件带来的核对结论
   policy: new Map(),  // motor_id -> {enabled, kp, kd}：页面**最后下发**的值
   events: [],
@@ -138,24 +142,24 @@ function setAgentStatus(status) {
     el.textContent = `Agent 进程运行中${status.device ? ` · ${status.device}` : ''}`;
     el.classList.add('running');
     el.title = '由 web_host 管理的 micro-ROS Agent 进程';
-    $('btnAgentStop').disabled = false;
+    $('btnDisconnect').disabled = false;
   } else if (status.state === 'failed') {
     el.textContent = `Agent 已退出${status.returncode === null ? '' :
       ` · code ${status.returncode}`}`;
     el.classList.add('failed');
     el.title = status.error || status.device || 'Agent 进程已退出';
-    $('btnAgentStop').disabled = true;
+    $('btnDisconnect').disabled = true;
   } else if (status.state === 'error') {
     el.textContent = status.canStop
       ? `Agent 已运行${status.device ? ` · ${status.device}` : ''}`
       : (status.error ? `Agent 启动失败 · ${status.error}` : 'Agent 启动失败');
     el.classList.add('failed');
     el.title = status.error || '启动 Agent 失败';
-    $('btnAgentStop').disabled = !status.canStop;
+    $('btnDisconnect').disabled = !status.canStop;
   } else {
     el.textContent = 'Agent 未启动';
     el.title = '';
-    $('btnAgentStop').disabled = true;
+    $('btnDisconnect').disabled = true;
   }
 }
 
@@ -224,7 +228,7 @@ async function refreshAgentStatus() {
   catch (_error) { /* 串口列表刷新会显示后端 API 错误；状态轮询不刷屏。 */ }
 }
 
-async function connectWithAgent() {
+async function startAgent() {
   const device = $('serialPort').value;
   if (!device) {
     setAgentStatus({state: 'error', error: '请先选择控制板串口', returncode: null});
@@ -242,7 +246,6 @@ async function connectWithAgent() {
     });
     localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, device);
     setAgentStatus(status);
-    connect();
     // Process creation is immediate; give a fast startup failure a chance to surface.
     setTimeout(() => refreshAgentControls(), 700);
   } catch (error) {
@@ -255,9 +258,9 @@ async function connectWithAgent() {
 }
 
 async function stopAgent() {
-  const button = $('btnAgentStop');
+  const button = $('btnDisconnect');
   button.disabled = true;
-  $('agentText').textContent = '正在停止 Agent…';
+  $('agentText').textContent = '正在断开 Agent…';
   $('agentText').classList.remove('running', 'failed');
   try {
     setAgentStatus(await agentApi('/api/agent/stop', {method: 'POST'}));
@@ -290,12 +293,9 @@ function ensurePublisher(key) {
 // 自动重连：roslibjs 自身**不重连**。rosbridge 一重启（改 msg、改 launch 都会重启），
 // 页面就静默变哑——表还在（ID 来自参数缓存），但型号/生命周期/位置全空，看起来像
 // "固件没数据"。第一次踩这个坑花了不少时间，所以默认按 2s 退避自动重连；
-// 用户主动点"断开"时不重连。
 let reconnectTimer = null;
-let manualDisconnect = false;
 
 function connect() {
-  manualDisconnect = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   closeSocket();
   const url = $('rosUrl').value.trim();
@@ -310,9 +310,8 @@ function connect() {
     subscribeAll();
     ['command', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
     // 参数是默认页签：连上后自动读取，避免打开看到空表。
-    // 必须**等**首帧 system_status（订阅刚建时它还没到，见 waitSysStatus），
-    // 否则每次连上都必然撞上 seen=false、弹一条假的红字。等不到（真没固件）
-    // 才让 loadParams 里的门禁去报错——那条路径下报错是真的。
+    // 先等首帧 system_status 确认固件侧已在总线上（订阅刚建时 DDS 发现可能
+    // 还没完成，REPORT 太早发出可能白等）；真没固件时由 loadParams 的超时兜底。
     waitSysStatus().then(() => loadParams());
   });
   ros.on('error', () => setConn(false, '连接错误'));
@@ -329,7 +328,7 @@ function connect() {
     renderParamRows();
     // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
     // 表现为页面一直连不上、看着"卡"）。
-    if (!manualDisconnect && !reconnectTimer) {
+    if (!reconnectTimer) {
       setConn(false, '已断开，2s 后重连…');
       reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 2000);
     }
@@ -343,14 +342,6 @@ function closeSocket() {
   subs = [];
   Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
   Object.keys(publishers).forEach((k) => delete publishers[k]);
-}
-
-// 用户主动断开：不再自动重连。
-function disconnect() {
-  manualDisconnect = true;
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  closeSocket();
-  setConn(false);
 }
 
 function sub(key, cb) {
@@ -407,8 +398,9 @@ function subscribeAll() {
   });
 
   sub('trajectoryState', (m) => {
-    // 轨迹状态是 10Hz best-effort 回执；同一 trajectory_id 的可靠分段已经
-    // 在发送侧一次发完，MCU 只会对完整组装后的整条时间线回报 completed。
+    // 轨迹状态是 10Hz best-effort 回执。回执里的 trajectory_id 就是**这一段**
+    // 的 id：长示教被切成多条独立轨迹串行下发，页面等这一段的 completed 才发
+    // 下一段（一次只让一条轨迹消息在飞，见 TRAJ_MAX_POINTS 上方的分片窗口）。
     if (!teach.playing || teach.mode !== 'trajectory' || !teach.waitingState) return;
     if (Number(m.trajectory_id) !== teach.activeTrajectoryId || !m.completed) return;
     teachOnTrajectoryCompleted(m);
@@ -448,11 +440,13 @@ function subscribeAll() {
 
   sub('temp', (m) => { state.temp = m.data; state.tempLast = Date.now(); });
 
-  // 设备参数报告（reliable，1 Hz + 变化即发）：一帧带全部台的**双行**——
-  // rec_* 固件记录（权威）+ dev_* 驱动板回读。表里显示 dev_*（"优先显示驱动板"），
-  // 该台没回读到（NaN）时才退回 rec_*。写事务收尾后固件即时发一帧，所以
+  // 设备参数报告（reliable，按需：REPORT 命令 / 写事务收尾 / 设备初始化结论）：
+  // 一帧带全部台的**双行**——rec_* 固件记录（权威）+ dev_* 驱动板回读。
+  // 表里显示 dev_*（"优先显示驱动板"），该台没回读到（NaN，含电机不在线）时
+  // 才退回 rec_*（即板内参数表）。写事务收尾后固件即时发一帧，所以
   // 「写 → 等报告变」就是这一侧的完成判据。
   sub('devParams', (m) => {
+    state.devParamSeq++;
     // count 是 entries.size 的冗余声明（同 MotorPolicyArray.count）；不认它
     // 会在固件侧 count 与数组长度不一致时读到 0 条。
     const n = Math.min(m.count === undefined ? 0 : m.count, (m.entries || []).length);
@@ -914,85 +908,71 @@ function sendTargets(targets) {
 // 到达的 100Hz 快照对它们既不下发也不软停，所以播放前必须停掉连发，否则
 // "命令表说的"与"机器人做的"会分叉。空轨迹（无路点）= 取消：固件释放归属
 // 并软停这些电机。
-// 固件轨迹容量（CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS / _MAX_MOTORS）。**是
-// 拼接总量不是每段/每台**：4 台电机时总点数上限只够 64 个时刻。超限时固件
-// 静默丢弃——trajectory_cb 在入口 return，既不发事件也不计数，所以页面必须
-// 自查，否则会报"已托管给 MCU"而板子根本没收到。
+// 固件单条轨迹容量（CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS / _MAX_MOTORS）：
+// 4 台电机时 256 点只够 64 个时刻。超限时固件是**静默丢弃**——trajectory_cb 在
+// 入口 return，既不发事件也不计数，所以页面必须自查，否则会报"已托管给 MCU"
+// 而板子根本没收到。这是硬约束：路点数组在内核/mailbox 双缓冲/assembly/bridge
+// 各存一份，加到 1024 要约 84 KB RAM，DTCM 池放不下。
 const TRAJ_MAX_POINTS = 256;
 const TRAJ_MAX_MOTORS = 64;
-// 单条消息容量 = 整条轨迹容量：网页能发出去的总量本来就受 TRAJ_MAX_POINTS 限制，
-// 拆段不可能多发一个点，只会把同一份数据变成多条**背靠背**消息。而 MCU 的 XRCE
-// 输入流是 16 × 512 B = 8 KB 的分片窗口（RMW_UXRCE_STREAM_HISTORY=16）：一条
-// 256 点消息约 5.2 KB（≈11 片）放得下，三条 128 点消息合计约 18 片放不下 ——
-// 分片落在窗口外被丢，组装永远拼不齐，页面只能等到超时（实测形状：≤128 点 1 段、
-// 132–252 点 2 段、**恰好 256 点才 3 段**（128/128/8），所以只有 256 点会失败）。
-// 固件侧的分段组装仍然支持（乱序/缺段整组拒收），将来看高总量时可用；
-// 台架播放器 traj_play.py 也是单段（segment_count=1）。
-const TRAJ_SEGMENT_POINTS = TRAJ_MAX_POINTS;
+// 更长的示教由页面切成多条**独立轨迹**串行下发（见 buildTrajectorySegments）。
+// 为什么不能一次塞下、也不能背靠背发多条：MCU 的 XRCE 输入流是
+// MTU(512) × STREAM_HISTORY(16) = 8 KB 的**分片**窗口，一条 256 点消息约
+// 5.2 KB（≈11 片）放得下，三条 128 点就吃到 ≈18 片——落在窗口外的分片被丢，
+// 固件拼不齐即整组拒收（既不发事件也不回执），页面只能等到超时（2026-09-22
+// 台架实测形状：≤128 点 1 段、132–252 点 2 段、**恰好 256 点才 3 段**）。
+// 所以串行是唯一的办法：一次只让一条消息在飞，等 completed 回执再发下一条。
 const TRAJ_STATE_TIMEOUT_PAD_MS = 3000;
 
-// 固件拼接后的整条轨迹上限是 256 点；页面在总量内按 TRAJ_SEGMENT_POINTS 切段
-// （当前等于总量 ⇒ 一条轨迹一条消息）。超过总量不能改成多个独立轨迹，否则每段
-// 端点会重新变成整条轨迹端点，破坏速度连续性。
-function trajOverflowNote(points, ids) {
-  if (ids > TRAJ_MAX_MOTORS) {
-    return `；⚠ ${ids} 台超固件上限（${TRAJ_MAX_MOTORS} 台）——必须减台`;
-  }
-  if (points > TRAJ_MAX_POINTS) {
-    return `；⚠ ${points} 点超过整条轨迹上限（${TRAJ_MAX_POINTS}），为保持连续性不能播放`;
-  }
-  return '';
-}
-
+// 超过单条上限不再是拒绝：播放时切段串行下发（段尾挑在运动最安静的行上，见
+// pickSegmentEnd）。只有"台数"超 64 才是硬拒绝。
 function trajSizeNote(rows) {
   const {points, ids} = teachRowsToTrajectory(rows);
-  return trajOverflowNote(points.length, ids.length);
+  if (ids.length > TRAJ_MAX_MOTORS) {
+    return `；⚠ ${ids.length} 台超固件上限（${TRAJ_MAX_MOTORS} 台）——必须减台`;
+  }
+  if (points.length <= TRAJ_MAX_POINTS) return '';
+  const built = buildTrajectorySegments(rows);
+  return built.error
+    ? `；⚠ ${built.error}`
+    : `；ℹ ${points.length} 点超单条上限（${TRAJ_MAX_POINTS}），`
+      + `播放时自动切成 ${built.segments.length} 段串行下发`;
 }
 
-function sendTrajectorySegments(segments, targetIds, totalPoints) {
+// 发布**一条**轨迹（= 一条消息，segment_index 0 / segment_count 1）。更长的
+// 示教由 buildTrajectorySegments 切成多条这样的独立轨迹串行下发。
+function sendTrajectory(points, targetIds) {
   if (!state.connected) return {ok: false, msg: '未连接 rosbridge'};
-  const ids = targetIds ?? [...new Set(segments.flatMap((segment) =>
-    segment.points.map((x) => x.motor_id)))];
-  const pointCount = totalPoints ?? segments.reduce(
-    (sum, segment) => sum + segment.points.length, 0);
-  if (!segments.length) return {ok: false, msg: '轨迹分段为空'};
-  if (pointCount > TRAJ_MAX_POINTS) {
-    return {ok: false, msg: `整条轨迹 ${pointCount} 点超过固件上限 ${TRAJ_MAX_POINTS}`};
+  const ids = [...new Set(targetIds ?? points.map((x) => x.motor_id))]
+    .sort((a, b) => a - b);
+  if (points.length > TRAJ_MAX_POINTS) {
+    return {ok: false, msg: `轨迹 ${points.length} 点超过固件单条上限 ${TRAJ_MAX_POINTS}`};
   }
   if (ids.length > TRAJ_MAX_MOTORS) {
     return {ok: false, msg: `轨迹 ${ids.length} 台超过固件上限 ${TRAJ_MAX_MOTORS}`};
   }
+  // 半条轨迹（有路点无归属 / 有归属无路点）固件整条拒收；只有空/空才是取消。
+  if (!points.length !== !ids.length) {
+    return {ok: false, msg: '轨迹路点与受控电机要么同时为空（取消），要么同时非空'};
+  }
   seq = (seq + 1) >>> 0;
   const trajectoryId = seq;
-  const syncTimeNs = Date.now() * 1e6; // 仅用于跨系统日志对齐
-  for (let segmentIndex = 0; segmentIndex < segments.length; ++segmentIndex) {
-    const points = segments[segmentIndex].points;
-    if (segments.length > 1 && points.length > TRAJ_SEGMENT_POINTS) {
-      return {ok: false, msg: `轨迹分段 ${segmentIndex + 1} 超过 ${TRAJ_SEGMENT_POINTS} 点`};
-    }
-    const published = pub('trajectory', {
-      sync_time_ns: syncTimeNs,
-      sequence: seq,
-      trajectory_id: trajectoryId,
-      segment_index: segmentIndex,
-      segment_count: segments.length,
-      count: points.length,
-      target_count: ids.length,
-      target_ids: ids,
-      points,
-    });
-    if (!published) return {ok: false, msg: '未连接 rosbridge'};
-  }
-  const last = segments[segments.length - 1].points;
-  const total = last.length ? last[last.length - 1].time_from_start_ms : 0;
+  const published = pub('trajectory', {
+    sync_time_ns: Date.now() * 1e6, // 仅用于跨系统日志对齐
+    sequence: seq,
+    trajectory_id: trajectoryId,
+    segment_index: 0,
+    segment_count: 1,
+    count: points.length,
+    target_count: ids.length,
+    target_ids: ids,
+    points,
+  });
+  if (!published) return {ok: false, msg: '未连接 rosbridge'};
+  const total = points.length ? points[points.length - 1].time_from_start_ms : 0;
   return {ok: true, trajectoryId,
-    msg: `轨迹 seq=${seq}：${pointCount} 个路点 / ${ids.length} 台 / ${segments.length} 段` +
-    (last.length ? `，总时长 ${total} ms` : '')};
-}
-
-function sendTrajectory(points, targetIds) {
-  const ids = targetIds ?? [...new Set(points.map((x) => x.motor_id))];
-  return sendTrajectorySegments([{points}], ids, points.length);
+    msg: `轨迹 seq=${seq}：${points.length} 个路点 / ${ids.length} 台` +
+      (points.length ? `，时长 ${total} ms` : '（取消归属）')};
 }
 
 // 轨迹和快照共用固件的全局 freshness/授权门。示教播放会停止 100Hz 快照流，
@@ -1360,10 +1340,10 @@ function teachStopTimer() {
 // 示教行 → 轨迹路点：每行的 wait 是"从上一行到本行"的时长，累加成
 // time_from_start_ms。同一行的多台电机共用同一时刻（固件允许不同电机共用
 // 时间戳），行内重复 ID 取后者。
-function teachRowsToTrajectory(rows, startTimeMs = 0) {
+function teachRowsToTrajectory(rows) {
   const points = [];
   const ids = new Set();
-  let t = startTimeMs;
+  let t = 0;
   for (const row of rows) {
     for (const x of row.targets) {
       const point = {time_from_start_ms: t, motor_id: x.motor_id,
@@ -1378,11 +1358,11 @@ function teachRowsToTrajectory(rows, startTimeMs = 0) {
   return {points, ids: [...ids]};
 }
 
-// 轨迹播放由 MCU 托管；同一轨迹可拆成多个可靠分段，但所有分段都携带整条
-// 时间线的绝对 t_ms，并使用同一个 trajectory_id。固件只在完整组装后替换旧轨迹，
-// 因而段间没有共享时间点也不会把边界误判成零速端点。
-function segmentRowsToTrajectory(rows, startTimeMs, targetIds) {
-  const result = teachRowsToTrajectory(rows, startTimeMs);
+// 示教行 → 一段**可独立下发**的轨迹。时间从 t=0 起算：固件把"受理时刻"当轨迹
+// 起点，段内的时间必须相对本段，否则第一点之前的那段时间会被钳在首点上当停顿
+// （轨迹起点是受理时刻，绝对时间没有意义）。
+function segmentRowsToTrajectory(rows, targetIds) {
+  const result = teachRowsToTrajectory(rows);
   const lastTime = new Map();
   for (const point of result.points) {
     const previous = lastTime.get(point.motor_id);
@@ -1399,6 +1379,62 @@ function segmentRowsToTrajectory(rows, startTimeMs, targetIds) {
   };
 }
 
+// 两行之间的总位移（只算两行都出现过的电机）：用来找"运动最安静"的段边界。
+function rowsMove(a, b) {
+  if (!a || !b) return 0;
+  const previous = new Map(a.targets.map((t) => [t.motor_id, t.position]));
+  let move = 0;
+  for (const t of b.targets) {
+    const p = previous.get(t.motor_id);
+    if (p !== undefined) move += Math.abs(t.position - p);
+  }
+  return move;
+}
+
+// 挑本段的末行（含）：容量窗口（≤ TRAJ_MAX_POINTS）内选**进出位移都最小**的一行。
+// 每条独立轨迹的首末端点切矢归零（固件的 F–C 规则），段边界速度必然降到 0——
+// 把边界落在真停顿/换向处，顿挫就基本看不出来。
+function pickSegmentEnd(rows, start, targetIds) {
+  const covered = new Set();
+  let hi = -1;
+  for (let end = start; end < rows.length; ++end) {
+    for (const t of rows[end].targets) covered.add(t.motor_id);
+    const probe = segmentRowsToTrajectory(rows.slice(start, end + 1), targetIds);
+    if (probe.error) return {error: probe.error};
+    if (probe.points.length > TRAJ_MAX_POINTS) break;
+    // 固件要求声明的每台至少有一个路点（trajectory_validate 拒"有归属无路点"），
+    // 覆盖不全的行不能当段尾。
+    if (covered.size === targetIds.length) hi = end;
+  }
+  if (hi < 0) {
+    return {error: `第 ${start + 1} 行起切不出 ≤${TRAJ_MAX_POINTS} 点的段：`
+      + `单行路点就超上限，或某台电机在这几行里一个路点都没有`};
+  }
+  // 只在窗口**尾部**挑安静行：段界必然要停（等回执的那几十毫秒也停不住），
+  // 所以"少切几段"比"挑到最安静那一行"值钱。取最后 1/8 是为了留点余地让停顿
+  // 落在真停顿/换向处。lo ≥ start+1 让候选至少推进一行；hi == start 时窗口为空、
+  // 循环一次都不跑，直接返回 hi，由调用方的"必须推进"护栏判错（不死循环）。
+  const lo = Math.max(start + 1, hi - Math.max(1, Math.floor((hi - start) / 8)));
+  // 段尾只剩一两行时不为它单开一段：那一段的两次停顿比它走的位移还显眼。
+  // 全部候选都被这条挡掉时退回 hi（默认值），不会切不出段。
+  const tailGuard = 3;
+  let best = hi;
+  let bestMove = Infinity;
+  for (let end = lo; end <= hi; ++end) {
+    const remaining = rows.length - 1 - end;
+    if (remaining > 0 && remaining < tailGuard) continue;
+    const move = rowsMove(rows[end - 1], rows[end]) + rowsMove(rows[end], rows[end + 1]);
+    if (move < bestMove) { bestMove = move; best = end; }
+  }
+  return {end: best};
+}
+
+// 整条示教 → 一串可独立播放的轨迹段：每段 ≤ TRAJ_MAX_POINTS（固件单条容量），
+// 段与段之间**重复边界行**（上段的终点就是下段的起点 → 段界位置连续），一个接
+// 一个等 trajectory_state.completed 回执再发下一条。
+//
+// 每段都声明**整条时间线**的目标集合：轨迹独占它声明的电机，某段少声明一台就
+// 等于把那台交还给快照通道（而播放期间连发已经停了）→ 那台会掉下来。
 function buildTrajectorySegments(rows) {
   // 空行只表达等待；轨迹必须从第一个有效目标起算，前导空行没有可执行语义。
   const source = rows.map((row) => ({
@@ -1410,48 +1446,30 @@ function buildTrajectorySegments(rows) {
   if (!source.length) return {error: '时间线没有任何目标点'};
 
   const complete = teachRowsToTrajectory(source);
-  if (complete.points.length > TRAJ_MAX_POINTS) {
-    return {error: `整条轨迹 ${complete.points.length} 点超过固件上限 ${TRAJ_MAX_POINTS}，`
-      + '不能拆成会破坏连续性的独立轨迹'};
+  if (!complete.points.length) return {error: '时间线没有任何路点'};
+  if (complete.ids.length > TRAJ_MAX_MOTORS) {
+    return {error: `轨迹 ${complete.ids.length} 台超过固件上限 ${TRAJ_MAX_MOTORS} 台`};
   }
   const targetIds = complete.ids.slice().sort((a, b) => a - b);
-  const rowStartTimes = [];
-  let rowTime = 0;
-  for (const row of source) {
-    rowStartTimes.push(rowTime);
-    rowTime += row.wait;
-  }
 
   const segments = [];
   let start = 0;
   while (start < source.length) {
-    let best = null;
-    let bestEnd = start;
-    for (let end = start + 1; end <= source.length; ++end) {
-      const candidate = segmentRowsToTrajectory(
-        source.slice(start, end), rowStartTimes[start], targetIds);
-      if (candidate.error) return candidate;
-      if (candidate.points.length > TRAJ_SEGMENT_POINTS) break;
-      if (candidate.points.length) {
-        best = candidate;
-        bestEnd = end;
-      }
+    const picked = pickSegmentEnd(source, start, targetIds);
+    if (picked.error) return {error: picked.error};
+    const segment = segmentRowsToTrajectory(
+      source.slice(start, picked.end + 1), targetIds);
+    if (segment.error) return {error: segment.error};
+    segments.push(segment);
+    if (picked.end >= source.length - 1) break; // 本段已吃到时间线末尾
+    // 护栏：段尾必须比段首靠后，否则 start 不前进 → 死循环。上面 `hi < 0` 那条
+    // 挡不到这里（最后一行单独成段是合法的），所以另判一次。
+    if (picked.end <= start) {
+      return {error: `第 ${start + 1} 行起无法继续切段：剩下的行凑不出一次推进`};
     }
-    if (!best) return {error: `示教段超过 ${TRAJ_SEGMENT_POINTS} 个路点，无法切分`};
-    segments.push(best);
-    if (bestEnd >= source.length) break;
-
-    // 有容量就重叠最后一行；若最后一行已经占满整个段，则从下一行开始，
-    // 避免重复起点本身导致无限循环。
-    let nextStart = bestEnd;
-    const overlap = segmentRowsToTrajectory(
-      source.slice(bestEnd - 1, bestEnd + 1), rowStartTimes[bestEnd - 1], targetIds);
-    if (!overlap.error && overlap.points.length <= TRAJ_SEGMENT_POINTS) {
-      nextStart = bestEnd - 1;
-    }
-    start = nextStart > start ? nextStart : bestEnd;
+    start = picked.end; // 边界行重叠：既是本段终点，又是下段起点
   }
-  return {segments, totalPoints: complete.points.length};
+  return {segments, totalPoints: complete.points.length, ids: targetIds};
 }
 
 function teachPlay() {
@@ -1461,45 +1479,49 @@ function teachPlay() {
   const built = buildTrajectorySegments(rows);
   if (built.error) { setTeach('err', built.error); return; }
   if (!built.segments.length) { setTeach('err', '时间线为空'); return; }
-  const ids = built.segments.flatMap((segment) => segment.ids);
-  const readinessError = playbackReadinessError(ids);
+  const readinessError = playbackReadinessError(built.ids);
   if (readinessError) { setTeach('err', `播放前检查失败：${readinessError}`); return; }
   stopStream();
   teachStopTimer();
+  // 授权快照只在第一段之前补一次：轨迹受理本身清 require_new_snapshot，播出期间
+  // 快照的 30/100ms 级联也不作用于轨迹所属电机；段与段之间那几十毫秒悬空由
+  // "上一段 completed 仍持所有权"兜住。
   const prime = primeTrajectorySnapshot(built.segments[0]);
   if (!prime.ok) { setTeach('err', `轨迹授权快照下发失败：${prime.msg}`); return; }
   teach.playing = true;
   teach.mode = 'trajectory';
   teach.segments = built.segments;
   teach.totalPoints = built.totalPoints;
+  teach.segmentIndex = 0;
   teach.waitingState = false;
   teach.trajectoryHeld = false;
   teach.idx = 0;
-  teachSendTrajectoryGroup();
+  teachSendTrajectorySegment();
 }
 
-function teachSendTrajectoryGroup() {
+function teachSendTrajectorySegment() {
   if (!teach.playing || teach.mode !== 'trajectory') return;
-  const ids = teach.segments.flatMap((segment) => segment.ids);
-  const readinessError = playbackReadinessError(ids);
+  const segment = teach.segments[teach.segmentIndex];
+  const readinessError = playbackReadinessError(segment.ids);
   if (readinessError) {
     teach.playing = false;
     teach.mode = 'idle';
     teach.waitingState = false;
-    setTeach('err', `轨迹组下发前检查失败：${readinessError}`);
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发前检查失败：${readinessError}`);
     return;
   }
-  const res = sendTrajectorySegments(teach.segments, [...new Set(ids)], teach.totalPoints);
+  const res = sendTrajectory(segment.points, segment.ids);
   if (!res.ok) {
     teach.playing = false;
     teach.mode = 'idle';
-    setTeach('err', `轨迹组下发失败：${res.msg}`);
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 下发失败：${res.msg}`);
     return;
   }
   teach.activeTrajectoryId = res.trajectoryId;
   teach.waitingState = true;
   teach.trajectoryHeld = true;
-  setTeach('ok', `▸ 轨迹组：${teach.totalPoints} 点 / ${teach.segments.length} 段，等待 MCU 完成回执`);
+  setTeach('ok', `▸ 轨迹段 ${teach.segmentIndex + 1}/${teach.segments.length}：` +
+    `${segment.points.length} 点（共 ${teach.totalPoints} 点），等待 MCU 完成回执`);
   teachStopTimer();
   teach.timer = setTimeout(() => {
     if (!teach.playing || !teach.waitingState ||
@@ -1508,19 +1530,19 @@ function teachSendTrajectoryGroup() {
     teach.mode = 'idle';
     teach.waitingState = false;
     const cancel = cancelTrajectory();
-    setTeach('err', `轨迹组未收到 trajectory_state 回执` +
+    setTeach('err', `轨迹段 ${teach.segmentIndex + 1} 未收到 trajectory_state 回执` +
       (cancel.ok ? '，已发送取消' : '，取消也未发布'));
-  }, Math.max(TRAJ_STATE_TIMEOUT_PAD_MS,
-              teach.segments[teach.segments.length - 1].totalMs +
-              TRAJ_STATE_TIMEOUT_PAD_MS));
+  }, Math.max(TRAJ_STATE_TIMEOUT_PAD_MS, segment.totalMs + TRAJ_STATE_TIMEOUT_PAD_MS));
 }
 
+// 一段播完 → 立刻发下一段（同一次播放里的下一段，段界位置连续、速度按固件
+// 端点规则归零）。只有整条时间线走完才收尾。
 function teachOnTrajectoryCompleted() {
   if (!teach.playing || teach.mode !== 'trajectory') return;
   teachStopTimer();
   teach.waitingState = false;
-  const ids = teach.segments.flatMap((segment) => segment.ids);
-  const readinessError = playbackReadinessError(ids);
+  // 每段下发前重查：段间悬空期间某台掉线/失能，继续发下一段等于让机构带病走。
+  const readinessError = playbackReadinessError(teach.segments[teach.segmentIndex].ids);
   if (readinessError) {
     teach.playing = false;
     teach.mode = 'idle';
@@ -1530,14 +1552,21 @@ function teachOnTrajectoryCompleted() {
       (cancel.ok ? '，已发送取消' : '，取消也未发布'));
     return;
   }
+  if (teach.segmentIndex + 1 < teach.segments.length) {
+    teach.segmentIndex++;
+    teachSendTrajectorySegment();
+    return;
+  }
   if ($('chkTeachLoop').checked) {
-    teachSendTrajectoryGroup();
+    teach.segmentIndex = 0;
+    teachSendTrajectorySegment();
     return;
   }
   teach.playing = false;
   teach.mode = 'idle';
   // 播放完成后 MCU 仍保持末点，直到用户点暂停/停止取消轨迹。
-  setTeach('ok', `✓ 播放完成：${teach.totalPoints} 点 / ${teach.segments.length} 段；末点保持，点“暂停”软停`);
+  setTeach('ok', `✓ 播放完成：${teach.totalPoints} 点 / ${teach.segments.length} 段；`
+    + '末点保持，点“暂停”软停');
 }
 
 // 停止 = 发空轨迹取消：固件释放归属并软停这些电机。播完不会自动取消
@@ -1682,6 +1711,8 @@ function teachImport() {
 
 // ---------- 定时刷新 ----------
 setInterval(renderMotors, 200);
+// 「当前位置」列就地刷新（见 updateDevCurPos）：跟着状态流的拍子走，不重建表格。
+setInterval(updateDevCurPos, 200);
 setInterval(renderFoldSummaries, 500);
 setInterval(renderImu, 200);
 setInterval(chartTrim, 1000);
@@ -1743,7 +1774,7 @@ async function flipDirection(id, cur) {
   setParamResult(true, `m${id} 方向已下发 ${name}（req#${req}）；` +
     '受理/拒绝是异步的——写事务通过才生效，看 CONFIG_RESULT');
   // 写事务（写 + 读回核验）收尾后固件即时发一帧 device_param_report，这里只需重绘。
-  setTimeout(() => loadParams({skipDeviceRead: true}), 500);
+  setTimeout(renderParamRows, 500);
 }
 
 function sendPolicyRow(id) {
@@ -1873,14 +1904,14 @@ function writeResult(id, ok, text) {
   el.className = 'result tiny ' + (ok ? 'ok' : 'err');
   el.textContent = text;
 }
-// 参数结果写在「设备参数」栏里，策略结果写在「使能与增益」栏里——两块面板各自可
-// 收起，结果必须落在按下去的那个按钮旁边。
+// 参数结果写在「全部参数」表里，策略结果写在「使能与增益」抽屉行里——两块面板
+// 各自可收起，结果必须落在按下去的那个按钮旁边。
 function setParamResult(ok, text) { writeResult('paramResult', ok, text); }
 function setPolResult(ok, text) { writeResult('polResult', ok, text); }
 
-// 两张表共用同一套行筛选（「显示全部」那个勾选框在**设备参数**卡里，位于两张表
-// 之间）：设备限值（可回读）与使能/增益（只写）上下叠放，行必须一一对齐，否则
-// 对读会串台。默认只展开选中的那一台，勾「显示全部」看整条臂。
+// 两张表共用同一套行筛选（「显示全部」那个勾选框在**全部参数**卡里）：设备限值
+// （可回读）与使能/增益（只写）分处两行、行序仍按同一套 id 排，勾「显示全部」
+// 看整条臂。默认只展开选中的那一台。
 function paramRowIds() {
   const all = [...paramCache.keys()].sort((a, b) => a - b);
   const showAll = $('chkAllParams') && $('chkAllParams').checked;
@@ -1890,12 +1921,12 @@ function paramRowIds() {
 
 function renderParamRows() { renderDevRows(); renderPolicyRows(); }
 
-// ---------- 设备参数（以驱动板为准，可回读）----------
+// ---------- 全部参数（以驱动板为准，可回读）----------
 function renderDevRows() {
   const tbody = $('paramRows');
   const ids = paramRowIds();
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="12">'
+    tbody.innerHTML = '<tr class="empty"><td colspan="13">'
       + (paramCache.size === 0
         ? '参数集为空（等待 device_param_report）'
         : `m${state.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余`)
@@ -1973,6 +2004,10 @@ function renderDevRows() {
       : '<button class="tiny-btn" disabled title="设备还没回读到该对象">--</button>';
     // 保护确知为关的行标红：该关节此刻没有任何限位在跑。
     const unprotected = Number.isFinite(protect) && protect === 0;
+    // 当前位置：与限位同单位（rad），取 50 Hz 状态流。初始值渲染一次，
+    // 之后由 updateDevCurPos（200 ms 拍）就地改文本——整表 innerHTML 重建
+    // 会抹掉操作员正在敲的值，不能拿它来刷这个 50 Hz 量。
+    const curPos = Number(row.motion?.position);
     return `<tr${unprotected ? ' class="unprotected"' : ''}` +
       `${unprotected ? ' title="保护已关：该关节无任何限位"' : ''}>
       <td class="num">${id}</td>
@@ -1980,12 +2015,12 @@ function renderDevRows() {
       <td>${lifecyclePill(lc)}</td>
       <td>${src}</td>
       <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
+      <td class="num curpos" data-cur="${id}">${fmt(curPos, 4)}</td>
       <td>${limCell}</td>
       <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
       <td>${protectCell}</td>
       <td>${dirCell}</td>
-      <td><button class="tiny-btn" data-refresh="${id}">回读</button>
-        <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
+      <td><button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
         <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
     </tr>`;
   }).join('');
@@ -1996,9 +2031,6 @@ function renderDevRows() {
   tbody.querySelectorAll('[data-dir]').forEach((btn) => {
     btn.onclick = () => flipDirection(parseInt(btn.dataset.dir, 10),
       parseInt(btn.dataset.dirCur, 10));
-  });
-  tbody.querySelectorAll('[data-refresh]').forEach((btn) => {
-    btn.onclick = () => refreshDeviceParams(parseInt(btn.dataset.refresh, 10));
   });
   tbody.querySelectorAll('[data-zero]').forEach((btn) => {
     btn.onclick = () => setMotorZero(parseInt(btn.dataset.zero, 10));
@@ -2013,8 +2045,21 @@ function renderDevRows() {
   renderParamSummary();
 }
 
-// 表里有没有还没下发的改动。device_param_report 变化即发（1 Hz + 写事务收尾即发），
-// 每帧重建 innerHTML 会把操作员正在敲的值抹掉——有 dirty 就跳过重绘。
+// 「当前位置」列的就地刷新：只改单元格文本，**不重建 innerHTML**——整表重建会把
+// 操作员正在敲的限位值抹掉（同 hasDirtyParamInput 那条理由），所以这个 50 Hz 量
+// 走独立的文本更新路径，由 200 ms 定时器驱动。
+function updateDevCurPos() {
+  const tb = $('paramRows');
+  if (!tb) return;
+  tb.querySelectorAll('td.curpos').forEach((td) => {
+    const row = state.motors.get(parseInt(td.dataset.cur, 10)) || {};
+    const text = fmt(Number(row.motion?.position), 4);
+    if (td.textContent !== text) td.textContent = text;
+  });
+}
+
+// 表里有没有还没下发的改动。device_param_report 按需发帧（REPORT 命令 +
+// 写事务收尾），每帧重建 innerHTML 会把操作员正在敲的值抹掉——有 dirty 就跳过重绘。
 function hasDirtyParamInput() {
   const tb = $('paramRows');
   return !!(tb && tb.querySelector('input[data-dirty]'));
@@ -2023,7 +2068,7 @@ function hasDirtyParamInput() {
 // 策略面板里有没有「改了还没按策略」的输入。判据 = 控件当前值 ≠ state.policy 里
 // **最后一次下发**的记录；没记录过按 0 / 未勾对待，与 renderPolicyRows 的呈现口径
 // 一致。
-// 为什么需要它：device_param_report 是 1 Hz 电平帧，每帧都重建两张表的 innerHTML，
+// 为什么需要它：device_param_report 是按需电平帧，每帧都重建两张表的 innerHTML，
 // 而 hasDirtyParamInput 只看 #paramRows（策略面板在 #polRows）——漏判的后果是
 // 操作员勾上「启用」，不到一秒就被下一帧重建抹掉，看着像"勾不上/启用不了"。
 function hasPendingPolicyEdit() {
@@ -2100,7 +2145,7 @@ function devDetailTitle(id) {
     return `设备参数与固件记录不一致：${slots}（${devRecoveryText(info.mask)}）`;
   }
   if (info.state === 4) {
-    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「回读」重试）`;
+    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「读取」重试）`;
   }
   return '';
 }
@@ -2187,43 +2232,42 @@ function waitSysStatus(timeoutMs = 2000) {
   });
 }
 
-// 读取 = 逐台回读驱动板。参数表本身不用拉：device_param_report 一直在流
-// （1 Hz + 变化即发），回读收尾固件就即时发一帧新报告。这里只负责把「设备真值」
-// 催出来 + 重绘。核对结论随 DEV_INIT 事件带到页面上（指出哪几项不一致）。
-async function loadParams({skipDeviceRead = false} = {}) {
+// 读取 = 发 SystemCommand(REPORT)，固件把**当前手里的参数视图**立刻发一帧
+// device_param_report（不触发 SDO、不访问设备）。电机在线且此前核对过，
+// dev_* 就是驱动板真值；电机不在线/没核对，dev_* 为 NaN，页面呈现 rec_*
+// 即驱动板 W25 参数表。帧到达后订阅回调自行渲染，这里只等帧、给结论。
+async function loadParams() {
   if (!state.connected) return;
-  // 纯重绘不碰设备，也就不需要回读基线——门禁只管下面的真回读那条路。
-  if (skipDeviceRead) { renderParamRows(); return; }
-  // 回读的收尾判据是 `*_seq > 发命令时的基线`；未收到任何帧时基线是初值 0，
-  // 会让一个还在飞的轮询立刻判成"已完成"。所以要有一帧真基线才放行（调用方
-  // 先 waitSysStatus 等首帧）。
-  if (!state.sysStatus.seen) {
-    setParamResult(false, '还没收到 system_status——固件/agent 未就绪，无法判断回读是否收尾');
+  const before = state.devParamSeq;
+  if (!sendSystemCommand(SYS_CMD.REPORT, MOTOR_ID_NONE)) return;
+  setParamResult(true, '读取中…');
+  const rc = await waitDevParamSeq(before, 2000);
+  if (rc === -2) {
+    setParamResult(false, '读取失败：未连接 rosbridge');
     return;
   }
-  const online = [...state.motors.entries()]
-    .filter(([, r]) => (r.status?.online ?? r.topo?.online) === true)
-    .map(([id]) => id)
-    .sort((a, b) => a - b);
-  if (!online.length) {
-    setParamResult(true, '没有在线电机可回读');
-    renderParamRows();
+  if (rc === -3) {
+    setParamResult(false, '读取超时：未收到 device_param_report——固件/agent 未就绪？');
     return;
   }
-  setParamResult(true, `读取中… 0/${online.length}`);
-  let bad = 0;
-  for (let i = 0; i < online.length; i++) {
-    setParamResult(true, `读取中… 回读驱动板 ${online[i]}（${i + 1}/${online.length}）`);
-    const r = await requestDeviceRead(online[i], 3000);
-    if (!r.ok) bad++;
+  let withDev = 0;
+  for (const v of paramCache.values()) {
+    if (Number.isFinite(v.dev.pos_min)) withDev++;
   }
-  renderParamRows();
-  if (bad) {
-    setParamResult(false, `已回读 ${online.length} 台，其中 ${bad} 台未通过核对` +
-      `（见下表「状态」与 last_error=${state.lastError}）`);
-  } else {
-    setParamResult(true, `已回读 ${online.length} 台，设备参数为驱动板真值`);
+  setParamResult(true, `已读取参数表：共 ${paramCache.size} 台，其中 ${withDev} 台` +
+    '有驱动板回读值（显示驱动板真值），其余显示板内记录');
+}
+
+// 等下一帧 device_param_report（帧计数变大）。无完成序号可用，REPORT/写事务
+// 都靠它确认帧到了。
+async function waitDevParamSeq(baseline, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.devParamSeq > baseline) return 0;
+    if (!state.connected) return -2;
+    await new Promise((r) => setTimeout(r, 100));
   }
+  return -3;
 }
 
 // 下发手改项。三条硬约束（固件 validate_param_set，整条受理或整条拒绝）：
@@ -2270,7 +2314,7 @@ async function applyParams() {
       const hi = hasMax ? fields.get(PARAM_FIELD.POS_MAX) : (v ? v.pick.pos_max : NaN);
       if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
         setParamResult(false, `m${id} 只想改一侧限位，但另一侧没有可用值——` +
-          '先点「回读」把该台设备参数读回来');
+          '先点「读取」把该台参数读回来');
         return;
       }
       if (!(lo < hi)) {
@@ -2337,8 +2381,9 @@ async function saveParamsToFlash() {
 // 限位教学：把该台**当前关节位置**写进对应的限位槽。厂商手册要求"设置时电机失能、
 // 掰到限位再设置"，内核也只受理未运动状态（device_limit_write_allowed），所以
 // 先本地挡一道，再让固件的拒绝兜底（渲染与点击之间有竞态）。
-// 回读复用 requestDeviceRead：它顺带把内核的钳制（CERB mit_position_limit_rad
-// = ±π）暴露出来——超出 ±180° 的位置会被钳到 ±180°，读回来的是钳后的真值。
+// 写事务（写 + 读回核验）收尾后固件即时发一帧 device_param_report，顺带把
+// 内核的钳制（CERB mit_position_limit_rad = ±π）暴露出来——超出 ±180° 的
+// 位置会被钳到 ±180°，帧里就是钳后的真值，无需再单独发 REFRESH。
 async function setLimitFromPosition(id, side) {
   if (!state.connected) { setParamResult(false, '未连接 rosbridge'); return; }
   const row = state.motors.get(id) || {};
@@ -2380,72 +2425,21 @@ async function setLimitFromPosition(id, side) {
       '· 设完自动回读一次，读回的才是设备真值')) {
     return;
   }
+  const before = state.devParamSeq;
   if (!sendParamSet([{motor_id: id, field: PARAM_FIELD.POS_MIN, value: lo},
                      {motor_id: id, field: PARAM_FIELD.POS_MAX, value: hi}])) return;
-  setParamResult(true, `m${id} ${which}已下发（${pos.toFixed(4)} rad），回读中…`);
-  const r = await requestDeviceRead(id, 6000);
-  renderParamRows();
-  if (r.ok) {
+  setParamResult(true, `m${id} ${which}已下发（${pos.toFixed(4)} rad），写事务收尾自动刷新…`);
+  const rc = await waitDevParamSeq(before, 6000);
+  if (rc === 0) {
     const now = paramCache.get(id);
-    setParamResult(true, `m${id} ${which}已生效并回读：下限 ` +
-      `${fmtParam(now ? now.pick.pos_min : NaN)} / 上限 ${fmtParam(now ? now.pick.pos_max : NaN)} rad`);
-  } else if (r.code === -3) {
-    setParamResult(false, `m${id} 限位已下发，但回读未收尾（超时）：${lastErrorText()}`);
+    setParamResult(true, `m${id} ${which}写事务已收尾：下限 ` +
+      `${fmtParam(now ? now.pick.pos_min : NaN)} / 上限 ` +
+      `${fmtParam(now ? now.pick.pos_max : NaN)} rad`);
+  } else if (rc === -3) {
+    setParamResult(false, `m${id} 限位已下发，但写事务收尾帧超时未到：${lastErrorText()}`);
   } else {
-    setParamResult(false, `m${id} 限位下发未被受理：${lastErrorText()}` +
-      '（10 = 被拒，多半是该台在运动中）');
+    setParamResult(false, `m${id} 限位下发后连接中断：${lastErrorText()}`);
   }
-}
-
-// 设备参数回读：固件侧是异步 SDO 事务（严格一问一答，4 个对象逐条读，最坏
-// 含超时重试要几秒）。完成判据用只读的 system_status.refresh_seq（单调递增）——
-// 只看 last_error(_motor) 分不清"这一轮"和"上一轮留下的"，会把没读当成成功。
-// 请求一次设备参数回读并等它收尾。返回 {ok, code}：
-//  code=0 一致；40/41 见内核；-2 收不到 system_status；-3 超时未收尾。
-async function requestDeviceRead(id, timeoutMs) {
-  if (!state.sysStatus.seen) return {ok: false, code: -2, reason: '收不到 system_status'};
-  const before = state.sysStatus.refresh_seq;
-  if (!sendSystemCommand(SYS_CMD.REFRESH, id)) {
-    return {ok: false, code: -2, reason: '未连接 rosbridge'};
-  }
-  const rc = await waitSysSeq('refresh_seq', before, timeoutMs || 9000);
-  if (rc !== 0) return {ok: false, code: rc};
-  return {ok: state.lastError === 0, code: state.lastError};
-}
-
-async function refreshDeviceParams(id) {
-  if (!state.connected) return;
-  setParamResult(true, `电机 ${id} 设备参数回读已请求，等待驱动板应答…`);
-
-  const r = await requestDeviceRead(id);
-  if (r.code === -2) {
-    setParamResult(false, '回读请求失败：' + (r.reason || '收不到 system_status'));
-  } else if (r.code === -3) {
-    setParamResult(false, `电机 ${id} 回读仍未收尾（超时）：${lastErrorText()}` +
-      (state.lastError === 11 ? '——11 是「提交失败」，请求在 mailbox 被拒' : ''));
-  } else if (Number(state.lastErrorMotor) !== id) {
-    setParamResult(true, `电机 ${id} 回读已结束（最近错误码 ${state.lastError} 属于电机 ${state.lastErrorMotor}）`);
-  } else if (r.code === 0) {
-    setParamResult(true, `电机 ${id} 设备参数已从驱动板读回（驱动板真值）`);
-  } else if (r.code === 40) {
-    const info = state.devInit.get(id);
-    const slots = info && info.mask
-      ? '（不一致项：' + devSlotNames(info.mask).join('、') + '）'
-      : '';
-    const recovery = info && info.mask ? devRecoveryText(info.mask) : '写回对应项即可恢复';
-    setParamResult(false, `电机 ${id} 参数不一致${slots}：固件记录与驱动板不符 → 该台未初始化，` +
-      recovery);
-  } else if (r.code === 41) {
-    const info = state.devInit.get(id);
-    const missing = info && info.mask
-      ? '（未收到的对象：' + devSlotNames(info.mask).join('、') + '）'
-      : '';
-    setParamResult(false, `电机 ${id} 回读不成功（last_error=41）${missing}：驱动板未应答。` +
-      '该台初始化未完成，不可使能——重连或再点一次「回读」');
-  } else {
-    setParamResult(false, `电机 ${id} 回读失败：last_error=${r.code}`);
-  }
-  await loadParams({skipDeviceRead: true});
 }
 
 // 设零点（设备对象 0x2531 写 1，字典表「设置电机输出端零位」）：
@@ -2530,19 +2524,19 @@ async function clearMotorFault(id) {
 
 // ---------- 初始化 ----------
 function init() {
-  $('rosUrl').value = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+  const defaultRosUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
     + (location.hostname || 'localhost') + ':9090';
-  $('btnConnect').onclick = connectWithAgent;
-  $('btnDisconnect').onclick = disconnect;
-  $('btnAgentStop').onclick = stopAgent;
+  const rosUrl = $('rosUrl');
+  rosUrl.value = localStorage.getItem(ROS_URL_STORAGE_KEY) || defaultRosUrl;
+  rosUrl.addEventListener('input', () => {
+    localStorage.setItem(ROS_URL_STORAGE_KEY, rosUrl.value.trim());
+  });
+  $('btnConnect').onclick = startAgent;
+  $('btnDisconnect').onclick = stopAgent;
   $('btnPortRefresh').onclick = refreshAgentControls;
   $('serialPort').addEventListener('change', (e) => {
     if (e.target.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, e.target.value);
   });
-  $('rosUrl').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') connectWithAgent();
-  });
-
   // 左栏关节索引：事件委托（列表每次 renderMotors 都会重建）。
   $('motorRows').addEventListener('click', (e) => {
     const li = e.target.closest('li[data-id]');
@@ -2608,10 +2602,8 @@ function init() {
   addCmdRow(1, 0, 0, 0);
   teachAddRow(1000, '1:0,0,0');
 
-  // 开页即连：rosUrl 已按 location.hostname 填好，没有"先改地址再连"的场景。
-  // 早先必须手点「连接」，页面开着却是哑的——看上去就是"上位机不可控"。
-  // 想换地址仍可改完按 Enter 或点「连接」；「断开」会立起 manualDisconnect，
-  // 之后不再自动重连。
+  // rosbridge 开页即连；自定义地址保存在浏览器本地，刷新后自动重连。
+  // 启动和断开按钮只管理 micro-ROS Agent，不影响 WebSocket。
   refreshAgentControls();
   setInterval(refreshAgentStatus, 2000);
   connect();

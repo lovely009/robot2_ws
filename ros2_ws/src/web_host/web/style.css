@@ -114,17 +114,17 @@ button:disabled, select:disabled { opacity: .55; cursor: wait; }
   .detail { grid-template-columns: 1fr; }
 }
 
-/* 参数与策略：页面下方并排两栏——左「设备参数」（驱动板真值，可回读），
-   右「使能与增益」（策略话题，只写不回读）。两表行集一致，左右一一对应。 */
+/* 参数表：页面下方整宽一行（「全部参数」，驱动板真值 + 板内记录，可回读）。
+   使能与增益（策略面，只写不回读）已移到底部抽屉单独一行——两张表的行集仍
+   一致，但不再并排挤在一栏里。 */
 .bottom {
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin: 0 12px 8px;
   align-items: start;
 }
 .bottom > .card { margin-bottom: 0; }
-@media (max-width: 1000px) { .bottom { grid-template-columns: 1fr; } }
 
 /* ---------- 面板 ---------- */
 .card {
@@ -324,6 +324,12 @@ thead th {
 }
 th small { color: var(--dim-2); opacity: .8; font-weight: 400; font-size: 9px; text-transform: none; }
 td.num { font-family: var(--mono); text-align: right; }
+/* 数值列表头跟着数值右对齐：表头左对齐、数字右对齐时，列一多就看着"对不上"。
+   th.num 只取对齐，不取 td.num 的等宽字体（表头统一走 thead th 的字形）。 */
+th.num { text-align: right; }
+/* 参数表的数值输入框：定宽 + 右对齐。不定宽时浏览器按内容给宽，同一列各行的框
+   宽窄不一，数字自然对不齐；等宽字体来自上面的 input 全局规则。 */
+.params .pnum { width: 86px; text-align: right; }
 tbody tr:hover { background: #151d2c; }
 tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size: 11px; }
 

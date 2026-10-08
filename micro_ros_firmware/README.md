@@ -20,7 +20,8 @@ CERB SYNC 上报心跳），型号由内核读设备 SDO 0x1008 自报身份、�
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
 "命令实时回显（500Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
 OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
-`docs/plans/active/motor-runtime-validation.md`（唯一清单）。
+`docs/plans/active/motor-runtime-validation.md`（唯一清单）；开发顺序、阶段门槛与
+「什么明确不做」见 `docs/plans/active/firmware-development-roadmap.md`。
 
 ## 关键决策
 

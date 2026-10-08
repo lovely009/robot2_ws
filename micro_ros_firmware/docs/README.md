@@ -9,7 +9,9 @@
 - `adr/`：固件架构决策（含勘误），不存操作步骤；
 - `architecture/`：架构开发基线（decision-log 承载设计理由）；
 - `plans/active/`：活规格（设计文档）与开放项；**开放项的唯一清单是
-  [motor-runtime-validation](plans/active/motor-runtime-validation.md)**；
+  [motor-runtime-validation](plans/active/motor-runtime-validation.md)**。
+  [firmware-development-roadmap](plans/active/firmware-development-roadmap.md)
+  只排「顺序与门槛」，不承载开放项、不新增 `TBD-*` 编号。
 - `archive/`：冻结的完整规范、历史交接与已完成的设计/实现计划，保留追溯、不再维护；
 - 根部平铺文件：厂商板卡与电机协议原件，不改内文；
 - `dm-mc02例程/`：厂商例程整树（仅本地参考，已 gitignore，勿入库）。
@@ -33,6 +35,7 @@
 | [motor-runtime-decision-log](architecture/motor-runtime-decision-log.md) | 设计理由（参数链/一问一答/设零等） | 基线，含历史 |
 | [module-boundaries](architecture/module-boundaries.md) | 模块依赖、执行上下文、数据所有权与测试边界 | 当前结构基线 |
 | [motor-runtime-validation](plans/active/motor-runtime-validation.md) | 开放台架项唯一清单与验收记录要求 | 活动 |
+| [firmware-development-roadmap](plans/active/firmware-development-roadmap.md) | 开发顺序与阶段门槛、对标外部调研的逐条裁决、不做清单、待 owner 裁定项 | 活动 |
 | [48-motor-scale-design](plans/active/48-motor-scale-design.md) | 48 台容量契约、只在 48 台才暴露的失效点、参数服务器退役的历史裁定 | 提案；§5 裁定已执行 |
 | [w25-blob-v3-design](plans/active/w25-blob-v3-design.md) | W25 参数 blob v3 布局（每槽 2 扇区、设备侧事实、迁移链、零点代被否的理由） | 已实现 |
 | [boot-normalize-design](plans/active/boot-normalize-design.md) | 上电归一（保护/方向）时序、方向无记录不猜、冻结成因与双出口语义 | 已实现 |

@@ -1,5 +1,7 @@
 # Handoff：右臂模型更新与腕部连杆闭环求解（2026-10-09）
 
+> **本报告的 §2.4 / §2.5 数值已被 [2026-10-10 腕部连杆闭环实施](2026-10-10-wrist-closure-implementation.md) 取代**（球心偏差约 10 mm、摇臂轴方向收敛到 20° 内）；§1/§3 仍有效。
+
 **接手先读**：本报告 → `ros2_ws/src/robot_arm_gazebo/models/zhoubuguanjie_youbi_001/README.md`
 （模型权威文档，含「腕部机构与闭环说明」）→ 本目录 `…-assets/`（本次分析工具）。
 

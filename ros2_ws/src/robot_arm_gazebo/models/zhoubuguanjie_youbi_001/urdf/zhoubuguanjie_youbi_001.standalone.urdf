@@ -203,6 +203,13 @@
     <axis xyz="0 0 1" />
     <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
   </joint>
+  <link name="wrist_ball_a">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="1e-06" />
+      <inertia ixx="1e-09" ixy="0" ixz="0" iyy="1e-09" iyz="0" izz="1e-09" />
+    </inertial>
+  </link>
   <link name="Joint_link7">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.0415902374399889 -0.00405023526112674 0.000181863839963201" />
@@ -225,9 +232,16 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_link7" type="revolute">
+  <joint name="joint_wrist_ball_a" type="revolute">
     <origin rpy="0 0 0" xyz="0.00070789 -0.0098747 0.0065" />
     <parent link="Joint_link6" />
+    <child link="wrist_ball_a" />
+    <axis xyz="0 1 0" />
+    <limit effort="10.0" lower="-1.0" upper="1.0" velocity="1.0" />
+  </joint>
+  <joint name="joint_link7" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="wrist_ball_a" />
     <child link="Joint_link7" />
     <axis xyz="0 0 1" />
     <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
@@ -288,6 +302,13 @@
     <parent link="Joint_link9" />
     <child link="Joint_link10" />
   </joint>
+  <link name="wrist_ball_b">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="1e-06" />
+      <inertia ixx="1e-09" ixy="0" ixz="0" iyy="1e-09" iyz="0" izz="1e-09" />
+    </inertial>
+  </link>
   <link name="Joint_link7_0">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.0244734153293439 -0.00225426538894358 -0.00255007069438049" />
@@ -310,9 +331,16 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_link7_0" type="revolute">
+  <joint name="joint_wrist_ball_b" type="revolute">
     <origin rpy="0 0 0" xyz="0.00070789 -0.0098747 -0.033386" />
     <parent link="Joint_link6" />
+    <child link="wrist_ball_b" />
+    <axis xyz="0 1 0" />
+    <limit effort="10.0" lower="-1.0" upper="1.0" velocity="1.0" />
+  </joint>
+  <joint name="joint_link7_0" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="wrist_ball_b" />
     <child link="Joint_link7_0" />
     <axis xyz="0 0 1" />
     <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />

@@ -3,11 +3,16 @@
      与 gz_ros2_control 插件。display.launch.py 直接加载 urdf（无需控制器），
      gazebo.launch.py 加载本文件。
 
-     模型共 12 个关节：10 个 revolute（joint_link1..6 主链 + joint_link7/9 与
-     joint_link7_0/9_0 腕部远置驱动连杆）+ 2 个 fixed（joint_link10/10_0，电机锁在轴承座上）。
-     <ros2_control> 声明全部 10 个 revolute 关节（顺序 = URDF 物理关节顺序）；控制器
-     只接管当前接入电机拓扑的肩肘 4 个关节（见 config/controllers.yaml），腕部 6 个
-     关节有状态接口、无命令控制器，在 Gazebo 里按被动动力学运动。
+     模型共 14 个关节：12 个 revolute + 2 个 fixed（joint_link10/10_0，电机锁在轴承座上）。
+     12 个 revolute = joint_link1..6 主链 + 两条腕部分支
+     （joint_wrist_ball_a → joint_link7 → joint_link9 与 _b/_0 那条）。
+     其中 joint_wrist_ball_a/_b 是**虚拟**关节：真实连杆两端都是关节轴承（球铰），
+     SolidWorks 树导出只能给单轴 revolute，于是各补一个正交 revolute 与零质量虚拟连杆
+     构成二自由度球铰（见 urdf/*.urdf 注释与 README 的腕部章节）。它们没有电机，
+     被动角由 scripts/wrist_closure_solver.py 按闭环约束解出。
+     <ros2_control> 声明全部 12 个 revolute（顺序 = URDF 物理关节顺序）；控制器只接管
+     当前接入电机拓扑的肩肘 4 个关节（见 config/controllers.yaml），腕部关节有状态接口、
+     无命令控制器，在 Gazebo 里按被动动力学运动。
 
      参数：
        controllers_file  控制器参数文件（gazebo.launch.py 按模型目录传入）
@@ -69,8 +74,10 @@
     <xacro:sim_control_joint name="joint_link4"/>
     <xacro:sim_control_joint name="joint_link5"/>
     <xacro:sim_control_joint name="joint_link6"/>
+    <xacro:sim_control_joint name="joint_wrist_ball_a"/>
     <xacro:sim_control_joint name="joint_link7"/>
     <xacro:sim_control_joint name="joint_link9"/>
+    <xacro:sim_control_joint name="joint_wrist_ball_b"/>
     <xacro:sim_control_joint name="joint_link7_0"/>
     <xacro:sim_control_joint name="joint_link9_0"/>
   </ros2_control>

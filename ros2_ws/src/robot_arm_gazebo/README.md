@@ -11,7 +11,7 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
-| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，R58 肩座 + 6 关节主链 + 腕部远置驱动连杆） | 6 revolute + 2 fixed |
+| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，R58 肩座 + 6 关节主链 + 腕部远置驱动连杆） | 12 revolute + 2 fixed |
 
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 

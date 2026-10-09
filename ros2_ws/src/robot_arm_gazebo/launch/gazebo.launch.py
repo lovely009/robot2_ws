@@ -95,8 +95,8 @@ def generate_launch_description():
         output="screen",
         arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
     )
-    # spawn_z 默认 0.0：本模型的 base_link 几何底面就在 z=0，配合 xacro 的 fixed_base
-    # 正好坐落在地面上。换模型要重新核这个值。
+    # spawn_z 默认 0.03：本模型的 base_link 几何 z = −0.030 ~ 0.033，底面在 −0.030，
+    # 抬起 0.03 后正好坐落在地面上（配合 xacro 的 fixed_base）。换模型要重新核这个值。
     spawn_robot = Node(
         package="ros_gz_sim",
         executable="create",
@@ -147,7 +147,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "spawn_z",
-                default_value="0.0",
+                default_value="0.03",
                 description="模型生成高度（m）",
             ),
             DeclareLaunchArgument(

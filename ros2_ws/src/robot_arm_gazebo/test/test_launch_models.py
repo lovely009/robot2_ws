@@ -97,6 +97,7 @@ def test_gazebo_launch_wires_model_into_xacro_and_controllers():
     assert controllers_file.is_file(), f"控制器参数文件不存在：{controllers_file}"
     assert controllers_file.parent == _package_share() / "models" / MODEL / "config"
 
-    # 生成高度默认 0.0：base_link 几何底面就在 z=0（见模型 README 的实测几何）。
-    assert context.launch_configurations["spawn_z"] == "0.0"
+    # 生成高度默认 0.03：base_link 几何 z = −0.030 ~ 0.033（见模型 README 的实测几何），
+    # 抬起 0.03 后底面落地。
+    assert context.launch_configurations["spawn_z"] == "0.03"
     assert context.launch_configurations["world_file"] == "empty.sdf"

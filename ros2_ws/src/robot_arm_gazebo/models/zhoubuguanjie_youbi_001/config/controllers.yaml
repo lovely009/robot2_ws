@@ -18,8 +18,11 @@
     arm_effort_controller:
       type: effort_controllers/JointGroupEffortController
 
-# joints 顺序即 Float64MultiArray 命令顺序，必须与 urdf/*.urdf.xacro 的
-# <ros2_control> 关节块一致（由 test_model_consistency.py 兜底）。
+# joints 顺序即 Float64MultiArray 命令顺序，必须是 urdf/*.urdf.xacro 的
+# <ros2_control> 关节清单的有序子集（由 test_model_consistency.py 兜底）。
+# 当前只列接入电机拓扑的肩肘 4 台 CERB 关节；腕部（joint_link5/6 及连杆
+# joint_link7/9/7_0/9_0）已在 <ros2_control> 声明，但没有可仿真的电机映射，
+# 故意不进控制器（在 Gazebo 里按被动关节运动）。
 /**/arm_position_controller:
   ros__parameters:
     joints:

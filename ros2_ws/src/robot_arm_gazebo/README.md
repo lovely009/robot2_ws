@@ -11,7 +11,7 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
-| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，固定基座 + 4 个 revolute 关节） | 4 |
+| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，R58 肩座 + 6 关节主链 + 腕部远置驱动连杆） | 6 revolute + 2 fixed |
 
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 
@@ -75,8 +75,8 @@ ros2 topic echo /joint_states
 电机 ID、协议、总线、类型和控制增益取自
 `motor_hardware_interface/config/motor_driver.yaml` 与 `motor.yaml`；
 `models/<模型名>/config/simulation_topology.yaml` 只记录参与仿真的电机子集、Gazebo 关节
-映射和 plant 参数。当前右臂模型接入肩部到肘部四台 CERB 电机；现有 14 电机拓扑中的
-腕部和左臂尚未纳入这个 Gazebo 模型。
+映射和 plant 参数。当前右臂模型接入肩部到肘部四台 CERB 电机；腕部（`joint_link5`
+之后的被动连杆机构，见模型 README 的闭环说明）与左臂尚未纳入这个 Gazebo 模型。
 启动时从这两处配置生成 Gazebo、`motor_sim` 与 CAN 驱动端的临时配置，并检查关节名
 属于所选机械模型。Gazebo 的关节状态
 进入 `motor_sim`；模拟器回出的 effort 接到 `/arm_effort_controller/commands`。
@@ -160,7 +160,7 @@ ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `world_file` | `empty.sdf` | Ignition 世界文件 |
-| `spawn_z` | `0.0` | 模型生成高度（m），按模型几何实测值定 |
+| `spawn_z` | `0.03` | 模型生成高度（m），按模型几何实测值定（本模型基座底面在 z=−0.030） |
 | `fixed_base` | `true` | 把基座焊到世界原点；`false` = 自由浮动基座 |
 | `controllers_file` | `models/<模型>/config/controllers.yaml` | controller_manager 参数 |
 | `control_mode` | `effort` | `effort` 接收 FDCAN/Gazebo 电机后端发布的 MIT 等效力矩；`position` 仅用于话题/单位对照 |
@@ -181,9 +181,9 @@ ros2 topic pub --once /arm_position_controller/commands \
 ros2 topic echo /joint_states
 ```
 
-命令向量顺序 = 该模型 `config/controllers.yaml` 里 `joints` 的顺序 =
-URDF 关节串联顺序（三者由 `test_model_consistency.py` 锁死）。当前模型顺序为
-`joint_link1` → `joint_link4`。
+命令向量顺序 = 该模型 `config/controllers.yaml` 里 `joints` 的顺序（
+`test_model_consistency.py` 保证它是 URDF 可控关节的有序子集）。当前模型顺序为
+`joint_link1` → `joint_link4`；腕部关节已在 URDF 建模但未接入控制器。
 
 ## 加一个新模型
 

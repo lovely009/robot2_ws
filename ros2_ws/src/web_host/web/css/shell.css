@@ -63,6 +63,8 @@ body.offline .main, body.offline .wing { opacity: .6; }
 .stale-badge { color: var(--warn); font-size: var(--fs-xs); }
 
 /* ---------- 状态翼 ---------- */
+/* 三态：wing-collapsed = 用户显式收起；wing-expanded = 用户显式展开；两个类都没有
+   = 未选择，收起与否由断点决定（见下方断点段）。收起外观 = 只剩竖条。 */
 .wing-head { display: flex; align-items: center; justify-content: space-between; color: var(--dim); font-size: var(--fs-xs); }
 .wing-toggle { background: transparent; border: none; color: var(--dim); cursor: pointer; padding: 0 3px; }
 body.wing-collapsed .wing > *:not(.wing-rail) { display: none; }
@@ -77,7 +79,14 @@ body.wing-collapsed .wing-rail { display: flex; }
   max-width: 900px; width: min(92vw, 900px); max-height: 84vh; overflow: auto; padding: var(--pad-panel); }
 
 /* ---------- 断点 ---------- */
-@media (max-width: 1360px) { :root { --wing-w: var(--wing-w-min); } }
+/* 断点默认收起：未显式展开（无 body.wing-expanded）时宽度收窄**并且**真的只剩竖条。
+   只改宽度是不够的——头/正文会被挤进 34px 轨道里滚动。body.wing-expanded 时本块
+   整体不匹配，于是 ≥821 保持 168px 与完整内容；<820 由窄屏段强制压回竖条。 */
+@media (max-width: 1360px) {
+  body:not(.wing-expanded) { --wing-w: var(--wing-w-min); }
+  body:not(.wing-expanded) .wing > *:not(.wing-rail) { display: none; }
+  body:not(.wing-expanded) .wing-rail { display: flex; }
+}
 @media (max-width: 1080px) {
   :root { --nav-w: var(--nav-w-icon); }
   .nav button .navlabel { display: none; }
@@ -87,8 +96,14 @@ body.wing-collapsed .wing-rail { display: flex; }
   .shell { grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--topbar-h) auto minmax(0, 1fr) auto;
     grid-template-areas: "top" "wing" "main" "nav"; }
+  /* 收起变体在窄屏同样必须单列：body.wing-collapsed .shell 的三轨（高特异性）
+     会和这里的单列 areas 打架，内容塌进第一轨 */
+  body.wing-collapsed .shell { grid-template-columns: minmax(0, 1fr); }
   /* 翼在窄屏只剩一条状态带；导航变底部标签栏 */
   :root { --wing-w: 100%; }
+  /* 窄屏强制竖条：本块无条件命中，压得住 body.wing-expanded */
+  .wing > *:not(.wing-rail) { display: none; }
+  .wing-rail { display: flex; }
   .wing { flex-direction: row; align-items: center; }
   .nav { flex-direction: row; justify-content: space-around; }
   .conn .detail { display: none; }   /* 连接细节进「连接」浮层 */

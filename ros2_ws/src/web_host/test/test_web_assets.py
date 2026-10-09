@@ -205,8 +205,17 @@ def test_index_assets_exist(index):
     assert not missing, f'index.html 引用了不存在的文件：{missing}'
 
 
-# 11. data_files 必须覆盖 web/ 下的每个文件（防「构建成功但页面 404」）
+# 11. setup.py 声明的 web/ 文件必须真的落进 colcon 安装树（防「构建成功但页面 404」）
 def test_data_files_cover_web_tree(monkeypatch):
+    """setup.py 声明的 web/ 文件都要以**真实文件**出现在 colcon 安装树里。
+
+    比的是源树与 colcon 安装树这**两棵不同的树**：只往 web/ 加了文件、却没重跑
+    colcon build 时，安装树里就没有它（symlink-install 下还可能只剩悬空符号链接），
+    故用 is_file()（跟随符号链接，悬空即缺失）。这是「构建成功但页面 404」的根因，
+    也是本测试唯一要防的失效。安装树不存在 → skip，让未构建的工作区仍能跑本文件。
+    只查「源树 ⊆ 安装树」这一个方向；反方向（安装树里的历史残留）跨次构建不稳定，
+    不查。
+    """
     captured = {}
     import setuptools
 
@@ -220,10 +229,18 @@ def test_data_files_cover_web_tree(monkeypatch):
 
     assert 'data_files' in captured, 'setup.py 没有调用 setuptools.setup'
     declared = {(PKG / f).resolve() for _dest, files in captured['data_files'] for f in files}
-    on_disk = {p.resolve() for p in WEB.rglob('*') if p.is_file()}
-    uncovered = sorted(str(p.relative_to(WEB)) for p in on_disk - declared)
-    assert not uncovered, (
-        f'web/ 下这些文件不会被安装（新增文件后必须重跑 colcon build）：{uncovered}')
+    # 源侧：declared 里落在 web/ 下的文件，取相对 web/ 的路径
+    source = sorted(p.relative_to(WEB) for p in declared if WEB in p.parents)
+
+    install_web = PKG.parents[1] / 'install' / 'web_host' / 'share' / 'web_host' / 'web'
+    if not install_web.is_dir():
+        pytest.skip('未构建 web_host：先 colcon build --symlink-install --packages-select web_host')
+
+    # is_file() 跟符号链接：源文件不在安装树时链接悬空，算缺失
+    missing = sorted(str(rel) for rel in source if not (install_web / rel).is_file())
+    assert not missing, (
+        f'web/ 下这些文件没有装进 {install_web}（新增文件后必须重跑 '
+        f'colcon build --symlink-install --packages-select web_host）：{missing}')
 
 
 # 12. importmap 的每个映射目标存在

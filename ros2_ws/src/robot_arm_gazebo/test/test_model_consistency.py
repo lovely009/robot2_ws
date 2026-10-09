@@ -1,9 +1,10 @@
-"""模型目录自洽性：URDF / xacro / controllers.yaml 的关节清单必须逐项一致。
+"""模型目录自洽性：URDF / xacro / controllers.yaml 的关节清单必须自洽。
 
 不启动 ROS 节点与 Gazebo，只做静态渲染与解析。每个 models/<模型名>/ 都要满足：
 - 三件套齐全：urdf/<模型名>.urdf、urdf/<模型名>.urdf.xacro、config/controllers.yaml；
-- 关节顺序：URDF == xacro 渲染出的 <ros2_control> == controllers.yaml 的 joints
-  （顺序即 Float64MultiArray 的命令顺序，错位会静默给错关节）；
+- 关节清单：<ros2_control> 声明全部非 fixed 物理关节且顺序与 URDF 一致（fixed 关节
+  没有 command/state interface，不进 ros2_control）；controllers.yaml 的 joints 是
+  可控关节的有序子集（顺序即 Float64MultiArray 的命令顺序，错位会静默给错关节）；
 - URDF 引用的 mesh 文件真实存在；
 - 关节限位不退化：lower < upper、effort > 0、velocity > 0
   （SolidWorks 导出的 0/0/0/0 会让 RViz 滑杆拖不动、Gazebo 锁死关节）；
@@ -75,6 +76,20 @@ def _physical_joints(root):
     return [joint.get("name") for joint in root.findall("joint")]
 
 
+def _controllable_joints(root):
+    """按 URDF 顺序取非 fixed 物理关节（fixed 关节没有可声明的命令/状态接口）。"""
+    return [
+        joint.get("name")
+        for joint in root.findall("joint")
+        if joint.get("type") != "fixed"
+    ]
+
+
+def _is_ordered_subsequence(sub, seq):
+    iterator = iter(seq)
+    return all(item in iterator for item in sub)
+
+
 def _control_joints(root):
     return [joint.get("name") for joint in root.findall("ros2_control/joint")]
 
@@ -105,16 +120,17 @@ def test_joint_lists_agree_in_order(model_dir):
         model_dir / "urdf" / f"{name}.urdf.xacro", controllers_file
     )
 
-    physical = _physical_joints(urdf_root)
+    controllable = _controllable_joints(urdf_root)
     control = _control_joints(xacro_root)
     controllers = _controller_joints(controllers_file)
 
-    assert control == physical, (
-        f"{name}: ros2_control 关节清单 {control} 与 URDF 物理关节 {physical} 不一致"
+    assert control == controllable, (
+        f"{name}: ros2_control 关节清单 {control} 与 URDF 可控关节 {controllable} 不一致"
     )
-    assert controllers == physical, (
-        f"{name}: controllers.yaml 的 joints {controllers} 与 URDF 物理关节 "
-        f"{physical} 不一致（顺序即命令顺序）"
+    assert controllers, f"{name}: controllers.yaml 的 joints 为空"
+    assert _is_ordered_subsequence(controllers, controllable), (
+        f"{name}: controllers.yaml 的 joints {controllers} 必须是可控关节 "
+        f"{controllable} 的有序子序列（顺序即命令顺序）"
     )
 
 

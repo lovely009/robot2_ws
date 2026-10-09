@@ -95,14 +95,21 @@ function gotoScreen(id) {
   location.hash = `#/${id}`;
 }
 
-// 状态翼的折叠：记忆优先，<820 由 CSS 强制
+// 状态翼三态：用户显式选择（'1' 收起 / '0' 展开）优先；localStorage 无值 = 未选择，
+// 由断点决定（≤1360 默认收起，>1360 默认展开）；<820 由 CSS 强制收起。
 function initWing() {
-  const collapsed = localStorage.getItem(WING_KEY) === '1';
-  document.body.classList.toggle('wing-collapsed', collapsed);
+  const saved = localStorage.getItem(WING_KEY);
+  document.body.classList.toggle('wing-collapsed', saved === '1');
+  document.body.classList.toggle('wing-expanded', saved === '0');
   $('wingToggle').onclick = () => {
-    const next = !document.body.classList.contains('wing-collapsed');
-    document.body.classList.toggle('wing-collapsed', next);
-    localStorage.setItem(WING_KEY, next ? '1' : '0');
+    // 从「当前生效」状态翻转：未选择时按断点判断是否处于收起
+    const collapsed = document.body.classList.contains('wing-collapsed')
+      || (!document.body.classList.contains('wing-expanded')
+          && window.matchMedia('(max-width: 1360px)').matches);
+    const next = collapsed ? '0' : '1';   // 翻转：收起 → 展开，展开 → 收起
+    document.body.classList.toggle('wing-collapsed', next === '1');
+    document.body.classList.toggle('wing-expanded', next === '0');
+    localStorage.setItem(WING_KEY, next);   // 始终写显式值，绝不删除键
     markDirty(DIRTY.ALERTS);
   };
 }

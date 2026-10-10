@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<!-- zhoubuguanjie_youbi_002 的仿真薄壳：引入 SolidWorks 导出的原始 URDF，注入 ros2_control
+     与 gz_ros2_control 插件。display.launch.py 直接加载 urdf（无需控制器），
+     gazebo.launch.py 加载本文件。
+
+     与 zhoubuguanjie_youbi_001 的关键差别：本模型**取消了腕部远置驱动连杆机构**，
+     全模型是纯树 —— 6 个 revolute（joint_link1..6）+ 0 个 fixed，没有任何闭环，
+     也不需要 wrist_closure_solver 之类的补环节点。腕部 joint_link5 / joint_link6
+     是直接驱动的串联关节，在电机拓扑里有对应（right_wrist_yaw / right_wrist_pitch，
+     见 motor_hardware_interface/config/motor_driver.yaml）。
+     <ros2_control> 声明全部 6 个 revolute（顺序 = URDF 物理关节顺序），控制器接管全部 6 个。
+     真机拓扑里 right_wrist_roll 暂无对应关节，本模型不含该自由度。
+
+     参数：
+       controllers_file  控制器参数文件（gazebo.launch.py 按模型目录传入）
+       fixed_base        true（默认）= 把 base_link 焊到世界原点：真机上这条臂是固定在
+                         台面上的，焊死后基座不再依赖地面接触摩擦来保持不动，行为可复现。
+       gravity           true（默认）= 保留 Gazebo 重力；position 模式做通信/轨迹验收时
+                         可设 false，避免未建模的重力补偿影响位置闭环。
+
+     ⚠ 本模型含手臂支撑座，base_link 几何底面在 z = -0.002729、柱顶 z = 0.65。
+     gazebo.launch.py 的 spawn_z 默认 0.03 是给 001 的，用本模型时要显式传
+     spawn_z:=0.0027，否则整条臂会悬空 3 cm。
+
+     模型目录是自包含的：include 用相对文件名（xacro 按被包含文件所在目录解析，见
+     xacro/__init__.py:abs_filename_spec），整个目录拷进 models/ 即可新增一个模型。 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="zhoubuguanjie_youbi_002">
+  <xacro:arg name="controllers_file"
+             default="$(find robot_arm_gazebo)/models/zhoubuguanjie_youbi_002/config/controllers.yaml"/>
+  <xacro:arg name="fixed_base" default="true"/>
+  <xacro:arg name="gravity" default="true"/>
+
+  <xacro:include filename="zhoubuguanjie_youbi_002.urdf"/>
+
+  <xacro:if value="$(arg fixed_base)">
+    <link name="world"/>
+    <joint name="world_to_base_link" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="world"/>
+      <child link="base_link"/>
+    </joint>
+  </xacro:if>
+
+  <!-- 关节接口声明（position + effort 两条命令接口；position/velocity 状态）。
+       effort 是给「MIT 驱动器替身」用的：真机上 CERB 在 MIT 模式下收 (p, v, kp, kd, τ)
+       并自己算 τ = kp(p_des−p) + kd(v_des−v) + τ_ff；仿真里由 scripts/mit_gazebo_probe.py
+       算同一个式子写进 effort 命令接口。两条命令接口不会同时 active —— 用 controller_manager
+       切换，见 config/controllers.yaml。声明顺序必须与 urdf 的物理关节顺序一致
+       （由 test_model_consistency.py 兜底），控制器取其中子集。 -->
+  <xacro:macro name="sim_control_joint" params="name">
+    <joint name="${name}">
+      <command_interface name="position"/>
+      <command_interface name="effort"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="zhoubuguanjie_youbi_002_system" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <xacro:sim_control_joint name="joint_link1"/>
+    <xacro:sim_control_joint name="joint_link2"/>
+    <xacro:sim_control_joint name="joint_link3"/>
+    <xacro:sim_control_joint name="joint_link4"/>
+    <xacro:sim_control_joint name="joint_link5"/>
+    <xacro:sim_control_joint name="joint_link6"/>
+  </ros2_control>
+
+  <!-- FDCAN 仿真器的 position 模式是通信/轨迹闭环验收，不包含重力补偿；
+       由 launch 的 gravity:=false 显式关闭各活动连杆重力。默认仍保留物理模型重力。 -->
+  <gazebo reference="Joint_link1"><gravity>$(arg gravity)</gravity></gazebo>
+  <gazebo reference="Joint_link2"><gravity>$(arg gravity)</gravity></gazebo>
+  <gazebo reference="Joint_link3"><gravity>$(arg gravity)</gravity></gazebo>
+  <gazebo reference="Joint_link4"><gravity>$(arg gravity)</gravity></gazebo>
+  <gazebo reference="Joint_link5"><gravity>$(arg gravity)</gravity></gazebo>
+  <gazebo reference="Joint_link6"><gravity>$(arg gravity)</gravity></gazebo>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+    </plugin>
+  </gazebo>
+</robot>

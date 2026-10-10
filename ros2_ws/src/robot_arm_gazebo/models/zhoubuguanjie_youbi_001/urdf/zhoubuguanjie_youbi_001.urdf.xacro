@@ -3,13 +3,16 @@
      与 gz_ros2_control 插件。display.launch.py 直接加载 urdf（无需控制器），
      gazebo.launch.py 加载本文件。
 
-     模型共 14 个关节：12 个 revolute + 2 个 fixed（joint_link10/10_0，电机锁在轴承座上）。
-     12 个 revolute = joint_link1..6 主链 + 两条腕部分支
-     （joint_wrist_ball_a → joint_link7 → joint_link9 与 _b/_0 那条）。
+     模型共 14 个关节：12 个 revolute + 2 个 fixed（joint_motor_a/_b，两台 X25S 电机
+     固定在小臂 Joint_link4 上）。
+     12 个 revolute = joint_link1..6 主链 + 两条腕部分支的「球铰两轴 + 摇臂」：
+       joint_wrist_ball_a → joint_link7（球铰两轴）与 joint_crank_a（摇臂绕电机输出轴）
+       以及 _b/_0 那一组。
      其中 joint_wrist_ball_a/_b 是**虚拟**关节：真实连杆两端都是关节轴承（球铰），
      SolidWorks 树导出只能给单轴 revolute，于是各补一个正交 revolute 与零质量虚拟连杆
      构成二自由度球铰（见 urdf/*.urdf 注释与 README 的腕部章节）。它们没有电机，
-     被动角由 scripts/wrist_closure_solver.py 按闭环约束解出。
+     被动角由 scripts/wrist_closure_solver.py 按闭环约束解出；joint_crank_a/_b 同理，
+     是闭环的驱动自由度（真机上对应 X25S 的输出转角）。
      <ros2_control> 声明全部 12 个 revolute（顺序 = URDF 物理关节顺序）；控制器只接管
      当前接入电机拓扑的肩肘 4 个关节（见 config/controllers.yaml），腕部关节有状态接口、
      无命令控制器，在 Gazebo 里按被动动力学运动。
@@ -76,17 +79,17 @@
     <xacro:sim_control_joint name="joint_link6"/>
     <xacro:sim_control_joint name="joint_wrist_ball_a"/>
     <xacro:sim_control_joint name="joint_link7"/>
-    <xacro:sim_control_joint name="joint_link9"/>
+    <xacro:sim_control_joint name="joint_crank_a"/>
     <xacro:sim_control_joint name="joint_wrist_ball_b"/>
     <xacro:sim_control_joint name="joint_link7_0"/>
-    <xacro:sim_control_joint name="joint_link9_0"/>
+    <xacro:sim_control_joint name="joint_crank_b"/>
   </ros2_control>
 
   <!-- FDCAN 仿真器的 position 模式是通信/轨迹闭环验收，不包含重力补偿；
        由 launch 的 gravity:=false 显式关闭各活动连杆重力。默认仍保留物理模型重力，
-       effort 模式与原有动力学测试不被改变。腕部连杆（Joint_link7 之后）物理上由
-       两台 X25S 电机经摇臂驱动并构成闭环，URDF 树只保留切开的一支（见 README），
-       它们活重力下会按被动连杆摆动。 -->
+       effort 模式与原有动力学测试不被改变。腕部物理上是闭环（小臂—摇臂—连杆—十字轴），
+       URDF 树切在「连杆末端球心」这条边上，闭环由 scripts/wrist_closure_solver.py 在
+       运行时补平（见 README）；Gazebo 里这些被动关节会按被动动力学摆动，尚未接受驱动。 -->
   <gazebo reference="Joint_link1"><gravity>$(arg gravity)</gravity></gazebo>
   <gazebo reference="Joint_link2"><gravity>$(arg gravity)</gravity></gazebo>
   <gazebo reference="Joint_link3"><gravity>$(arg gravity)</gravity></gazebo>

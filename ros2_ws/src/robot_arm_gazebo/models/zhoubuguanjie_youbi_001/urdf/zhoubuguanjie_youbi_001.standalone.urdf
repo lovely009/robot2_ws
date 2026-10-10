@@ -237,43 +237,19 @@
     <parent link="Joint_link6" />
     <child link="wrist_ball_a" />
     <axis xyz="0 1 0" />
-    <limit effort="10.0" lower="-1.0" upper="1.0" velocity="1.0" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
   </joint>
   <joint name="joint_link7" type="revolute">
     <origin rpy="0 0 0" xyz="0 0 0" />
     <parent link="wrist_ball_a" />
     <child link="Joint_link7" />
     <axis xyz="0 0 1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
   </joint>
-  <link name="Joint_link9">
-    <inertial>
-      <origin rpy="0 0 0" xyz="-0.00037751675498876 -0.00989279945655956 0.0025030928618862" />
-      <mass value="0.00278330910931876" />
-      <inertia ixx="2.85188429504038E-08" ixy="1.14706686506377E-24" ixz="-1.64729303139528E-23" iyy="2.85188429504038E-08" iyz="-1.46824558728162E-23" izz="4.9627386827426E-08" />
-    </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9.STL" />
-      </geometry>
-      <material name="Joint_link9_material">
-        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint name="joint_link9" type="revolute">
-    <origin rpy="0 0 0.11021" xyz="-0.10173 3.6337E-05 -0.004" />
-    <parent link="Joint_link7" />
-    <child link="Joint_link9" />
-    <axis xyz="0 0 1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  <joint name="joint_motor_a" type="fixed">
+    <origin rpy="-1.57072810389 1.46386637316 -0.117728514829" xyz="-0.00290823242838 0.0179657756876 -0.0370047460742" />
+    <parent link="Joint_link4" />
+    <child link="Joint_link10" />
   </joint>
   <link name="Joint_link10">
     <inertial>
@@ -297,10 +273,46 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_link10" type="fixed">
-    <origin rpy="0 0 -0.11021" xyz="0 0 0" />
-    <parent link="Joint_link9" />
-    <child link="Joint_link10" />
+  <link name="crank_a">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="1e-06" />
+      <inertia ixx="1e-09" ixy="0" ixz="0" iyy="1e-09" iyz="0" izz="1e-09" />
+    </inertial>
+  </link>
+  <joint name="joint_crank_a" type="revolute">
+    <origin rpy="-1.1567128603 -1.48687657556 -0.27843411856" xyz="-0.00225840153701 8.47458548841e-05 -0.0177987642911" />
+    <parent link="Joint_link10" />
+    <child link="crank_a" />
+    <axis xyz="0 0 1" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
+  </joint>
+  <link name="Joint_link9">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00037751675498876 -0.00989279945655956 0.0025030928618862" />
+      <mass value="0.00278330910931876" />
+      <inertia ixx="2.85188429504038E-08" ixy="1.14706686506377E-24" ixz="-1.64729303139528E-23" iyy="2.85188429504038E-08" iyz="-1.46824558728162E-23" izz="4.9627386827426E-08" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9.STL" />
+      </geometry>
+      <material name="Joint_link9_material">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_pin_a" type="fixed">
+    <origin rpy="1.53705452493 0.0241285895514 1.49312546616" xyz="0.0179200908739 0.000853297092509 0.000214001858844" />
+    <parent link="crank_a" />
+    <child link="Joint_link9" />
   </joint>
   <link name="wrist_ball_b">
     <inertial>
@@ -336,43 +348,19 @@
     <parent link="Joint_link6" />
     <child link="wrist_ball_b" />
     <axis xyz="0 1 0" />
-    <limit effort="10.0" lower="-1.0" upper="1.0" velocity="1.0" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
   </joint>
   <joint name="joint_link7_0" type="revolute">
     <origin rpy="0 0 0" xyz="0 0 0" />
     <parent link="wrist_ball_b" />
     <child link="Joint_link7_0" />
     <axis xyz="0 0 1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
   </joint>
-  <link name="Joint_link9_0">
-    <inertial>
-      <origin rpy="0 0 0" xyz="-0.00121302171944215 -0.0098254047395599 0.00270309286188255" />
-      <mass value="0.0027833091093188" />
-      <inertia ixx="2.85188429504042E-08" ixy="8.27180612553028E-25" ixz="-1.99557322778418E-23" iyy="2.85188429504042E-08" iyz="4.54949336904165E-24" izz="4.96273868274268E-08" />
-    </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9_0.STL" />
-      </geometry>
-      <material name="Joint_link9_0_material">
-        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9_0.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint name="joint_link9_0" type="revolute">
-    <origin rpy="-3.1416 0 3.1416" xyz="-0.066935 0.0037717 0.0010865" />
-    <parent link="Joint_link7_0" />
-    <child link="Joint_link9_0" />
-    <axis xyz="0 0 1" />
-    <limit effort="10.0" lower="-1.5708" upper="1.5708" velocity="1.0" />
+  <joint name="joint_motor_b" type="fixed">
+    <origin rpy="-1.57087190078 -1.46387371957 3.02386414346" xyz="-0.00675165038005 -0.0145068092878 -0.0719999101717" />
+    <parent link="Joint_link4" />
+    <child link="Joint_link10_0" />
   </joint>
   <link name="Joint_link10_0">
     <inertial>
@@ -396,9 +384,45 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_link10_0" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 -0.0021" />
-    <parent link="Joint_link9_0" />
-    <child link="Joint_link10_0" />
+  <link name="crank_b">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="1e-06" />
+      <inertia ixx="1e-09" ixy="0" ixz="0" iyy="1e-09" iyz="0" izz="1e-09" />
+    </inertial>
+  </link>
+  <joint name="joint_crank_b" type="revolute">
+    <origin rpy="1.8297795274 -1.44309944606 2.79362869275" xyz="0.00215385410504 -0.000566808875719 -0.0154781471717" />
+    <parent link="Joint_link10_0" />
+    <child link="crank_b" />
+    <axis xyz="0 0 1" />
+    <limit effort="10.0" lower="-3.1416" upper="3.1416" velocity="1.0" />
+  </joint>
+  <link name="Joint_link9_0">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00121302171944215 -0.0098254047395599 0.00270309286188255" />
+      <mass value="0.0027833091093188" />
+      <inertia ixx="2.85188429504042E-08" ixy="8.27180612553028E-25" ixz="-1.99557322778418E-23" iyy="2.85188429504042E-08" iyz="4.54949336904165E-24" izz="4.96273868274268E-08" />
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9_0.STL" />
+      </geometry>
+      <material name="Joint_link9_0_material">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_arm_gazebo/models/zhoubuguanjie_youbi_001/meshes/Joint_link9_0.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_pin_b" type="fixed">
+    <origin rpy="1.60355162102 -0.0909489449129 1.69130250851" xyz="0.0177174910513 -1.43197823746e-05 -0.000204752506436" />
+    <parent link="crank_b" />
+    <child link="Joint_link9_0" />
   </joint>
 </robot>

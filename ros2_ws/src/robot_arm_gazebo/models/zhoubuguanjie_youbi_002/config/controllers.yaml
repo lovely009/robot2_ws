@@ -1,0 +1,48 @@
+# zhoubuguanjie_youbi_002 的 gz_ros2_control 参数。
+# 顶层键用通配 /**/：无论是否加命名空间都能匹配，避免参数文件被静默忽略。
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 100
+    use_sim_time: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    # MIT 驱动器替身用的力矩接口（与 position 控制器互斥使用：同一关节不能同时
+    # 被两条命令接口驱动）。切换：
+    #   ros2 control switch_controllers --deactivate arm_position_controller \
+    #                                    --activate arm_effort_controller
+    arm_effort_controller:
+      type: effort_controllers/JointGroupEffortController
+
+# joints 顺序即 Float64MultiArray 命令顺序，必须是 urdf/*.urdf.xacro 的
+# <ros2_control> 关节清单的有序子集（由 test_model_consistency.py 兜底）。
+#
+# 本模型是**纯串联 6 轴**（取消了 001 的腕部远置驱动连杆机构），6 个关节全部直接驱动，
+# 对应电机拓扑里的 right_shoulder_yaw / right_shoulder_roll / right_shoulder_pitch /
+# right_elbow_pitch（CERB R58）+ right_wrist_yaw / right_wrist_pitch（vaxor_2550）。
+# 真机拓扑里还有一个 right_wrist_roll，本模型不含该自由度，故不列出。
+/**/arm_position_controller:
+  ros__parameters:
+    joints:
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4
+      - joint_link5
+      - joint_link6
+    interface_name: position
+
+# JointGroupEffortController 无 interface_name（恒为 effort），只需关节清单。
+/**/arm_effort_controller:
+  ros__parameters:
+    joints:
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4
+      - joint_link5
+      - joint_link6

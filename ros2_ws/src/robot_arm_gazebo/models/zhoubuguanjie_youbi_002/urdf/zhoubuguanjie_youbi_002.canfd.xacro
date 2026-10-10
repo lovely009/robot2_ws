@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- 与 Gazebo 描述共用同一份机械 URDF，供独立的 motor_hardware_interface
+     controller_manager 使用（simulation.launch.py 的 controller_mode:=host）。
+     该 manager 只把 ros2_control 命令编码到 CAN；Gazebo 自己的 manager 仍由
+     <名>.urdf.xacro 中的 GazeboSimSystem 驱动。
+
+     与 001 的差别：002 取消了腕部远置驱动连杆，6 个关节全部直驱，因此控制关节
+     清单是 joint_link1..6（001 只接管肩肘 4 台）。清单由 launch 在运行期按
+     motor_config_file 生成后从 control_joints 传入，本文件不写死。 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="zhoubuguanjie_youbi_002_driver">
+  <xacro:arg name="motor_config_file" default=""/>
+  <xacro:arg name="bus_overrides" default=""/>
+  <xacro:arg name="control_joints" default=""/>
+
+  <xacro:include filename="zhoubuguanjie_youbi_002.urdf"/>
+  <xacro:include filename="$(find motor_hardware_interface)/urdf/canfd_hardware.xacro"/>
+
+  <ros2_control name="zhoubuguanjie_youbi_002_canfd_system" type="system">
+    <xacro:canfd_hardware
+        motor_config_file="$(arg motor_config_file)"
+        bus_overrides="$(arg bus_overrides)"/>
+    <xacro:emit_control_joints
+        joints="${[name.strip() for name in '$(arg control_joints)'.split(',') if name.strip()]}"/>
+  </ros2_control>
+</robot>

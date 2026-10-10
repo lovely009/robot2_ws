@@ -1,6 +1,6 @@
 """启动 Ignition Gazebo 仿真：空世界 + 生成模型 + gz_ros2_control 控制器。
 
-模型由 `model:=` 选择（`models/<模型名>/`），默认 `zhoubuguanjie_youbi_001`。
+模型由 `model:=` 选择（`models/<模型名>/`），默认 `zhoubuguanjie_youbi_002`。
 控制方式（启动完成后）：
 
   ros2 topic pub --once /arm_effort_controller/commands \\
@@ -137,7 +137,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "model",
-                default_value="zhoubuguanjie_youbi_001",
+                default_value="zhoubuguanjie_youbi_002",
                 description="models/ 下的模型目录名",
             ),
             DeclareLaunchArgument(

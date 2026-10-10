@@ -21,7 +21,7 @@ from launch_ros.actions import Node
 
 HERE = Path(__file__).parent
 LAUNCH_DIR = HERE.parent / "launch"
-MODEL = "zhoubuguanjie_youbi_001"
+MODEL = "zhoubuguanjie_youbi_002"
 
 
 def _execute(launch_file):

@@ -872,7 +872,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "model",
-                default_value="zhoubuguanjie_youbi_001",
+                default_value="zhoubuguanjie_youbi_002",
                 description="models/ 下含 simulation_topology.yaml 的模型目录",
             ),
             DeclareLaunchArgument(

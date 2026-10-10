@@ -13,7 +13,6 @@ install(DIRECTORY
 )
 install(PROGRAMS
   scripts/simulation_gate.py
-  scripts/wrist_closure_solver.py
   scripts/agent_after_sim_ready.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -22,7 +21,6 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_model_consistency test/test_model_consistency.py)
   ament_add_pytest_test(test_launch_models test/test_launch_models.py)
-  ament_add_pytest_test(test_wrist_closure test/test_wrist_closure.py)
 endif()
 
 ament_package()

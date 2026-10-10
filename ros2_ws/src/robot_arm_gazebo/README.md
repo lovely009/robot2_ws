@@ -11,9 +11,15 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
-| `zhoubuguanjie_youbi_001` | 右臂（SolidWorks 导出，R58 肩座 + 6 关节主链 + 腕部远置驱动连杆） | 12 revolute + 2 fixed |
+| `zhoubuguanjie_youbi_002` | 右臂（SolidWorks 导出，R58 肩座 + 支撑座 + 6 关节主链，**无腕部连杆**） | 6 revolute + 0 fixed |
 
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
+
+> 2026-10-10 清理：原 `zhoubuguanjie_youbi_001`（腕部为远置驱动**并联连杆**机构，
+> 12 revolute + 2 fixed，闭环在 URDF 里被切开、需 `wrist_closure_solver` 运行期补环）
+> 及其求解器、测试与 `dist/` 发布件已一并移除。当前模型是同一台臂的另一次导出，
+> **取消了连杆**，腕部退化为直接驱动的串联关节，全模型是纯树、不需要任何补环。
+> 旧版本仍在 git 历史里（`git show 3f1839e^:ros2_ws/src/robot_arm_gazebo/models/zhoubuguanjie_youbi_001/`）。
 
 ## 目录结构
 
@@ -148,7 +154,7 @@ RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还�
 `ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
 
 独立的 `gazebo.launch.py` 接受 `model:=<模型名>` 选择 `models/` 下的模型，默认
-`zhoubuguanjie_youbi_001`。完整 `simulation.launch.py` 要求所选模型目录带有
+`zhoubuguanjie_youbi_002`。完整 `simulation.launch.py` 要求所选模型目录带有
 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与 launch 参数一致：
 
 ```bash
@@ -224,7 +230,7 @@ ros2 run robot_state_publisher robot_state_publisher --ros-args \
 `dist/<模型名>_urdf/` 是不依赖 ROS 的单文件模型 + 网格，可以直接打包发给别人：
 
 ```bash
-cd dist/zhoubuguanjie_youbi_001_urdf && zip -r ../zhoubuguanjie_youbi_001_urdf.zip .
+cd dist/zhoubuguanjie_youbi_002_urdf && zip -r ../zhoubuguanjie_youbi_002_urdf.zip .
 ```
 
 zip 不入库（内容在目录里都有，随时可重打）；`dist/` 也不随包安装。

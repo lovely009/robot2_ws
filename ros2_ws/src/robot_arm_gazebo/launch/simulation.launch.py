@@ -13,6 +13,7 @@ CAN 设备。slcan 的 host 模式需要两只 CANable 接在同一条物理总�
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import socket
@@ -569,10 +570,12 @@ def launch_simulation(context):
                 / "robot_arm_gazebo"
                 / "agent_after_sim_ready.py"
             )
-            if not agent_waiter_script.is_file():
+            # 必须连可执行位一起查：--symlink-install 下安装件是指向源文件的
+            # 符号链接，源文件丢了 +x 就只剩「文件在、但起不来」这种假通过。
+            if not (agent_waiter_script.is_file() and os.access(agent_waiter_script, os.X_OK)):
                 raise RuntimeError(
-                    f"installed micro-ROS Agent launcher helper not found: "
-                    f"{agent_waiter_script}"
+                    f"installed micro-ROS Agent launcher helper not found or not "
+                    f"executable: {agent_waiter_script}"
                 )
     elif controller_mode == "host":
         driver_model = (

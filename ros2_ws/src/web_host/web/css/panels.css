@@ -27,6 +27,45 @@
     grid-template-areas: "index" "stage" "side" "command" "drawer"; }
 }
 
+/* teach 屏：与 run 同栅格，只是底部抽屉改成示教区（col-teach）。 */
+.screen.teach {
+  grid-template-columns: 250px minmax(0, 1fr) 330px;
+  grid-template-areas:
+    "index stage side"
+    "command command command"
+    "teach teach teach";
+}
+.col-teach { grid-area: teach; grid-column: 1 / -1; min-width: 0; }
+@media (max-width: 1360px) {
+  .screen.teach { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+}
+@media (max-width: 1080px) {
+  .screen.teach { grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-areas: "index stage" "side side" "command command" "teach teach"; }
+}
+@media (max-width: 820px) {
+  .screen.teach { grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "index" "stage" "side" "command" "teach"; }
+}
+
+/* ---------- 臂视图舞台（canvas 与 hud 由 panels/arm.js 建） ---------- */
+.stage { position: relative; background: #070a10; border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; }
+.stage .arm3d { display: block; width: 100%; height: clamp(300px, 48vh, 640px); touch-action: none; }
+.stage .hud { position: absolute; top: 6px; left: 8px; font-size: var(--fs-xs);
+  font-family: var(--mono); color: var(--dim); background: rgba(10, 14, 22, .8);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px 7px;
+  pointer-events: none; transition: opacity .4s; max-width: 80%; }
+.stage .hud.err { color: var(--err); border-color: #4a1f1f; }
+.stage .legend { position: absolute; left: 0; right: 0; bottom: 0; display: flex;
+  align-items: center; gap: 14px; padding: 4px 9px; font-size: var(--fs-xs);
+  color: var(--dim); background: rgba(10, 14, 22, .82); border-top: 1px solid var(--line); }
+.stage .legend .sw { display: inline-block; width: 12px; height: 2px; border-radius: 1px;
+  margin-right: 4px; vertical-align: middle; }
+.stage .legend .sw.ghost { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
+.stage .legend .dt { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle; }
+
 /* ---------- 卡片 / 可折叠区 ---------- */
 .card, .sec { background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: var(--pad-panel); margin-bottom: var(--gap); }

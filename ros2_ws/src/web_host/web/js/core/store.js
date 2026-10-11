@@ -98,7 +98,9 @@ export const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
-export const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_001';
+// 默认模型与 robot_arm_gazebo/launch/gazebo.launch.py 的默认值保持一致；
+// _001 已随模型改名退役（c549d29 删除了它的 URDF），旧默认值会让臂视图默认 404。
+export const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_002';
 
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，

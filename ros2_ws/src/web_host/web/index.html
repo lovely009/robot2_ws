@@ -136,11 +136,27 @@
     </details>
   </template>
 
+  <!-- 臂视图：canvas 与 hud 由 js/panels/arm.js 建（旧 id arm3d/armHud 退役），
+       这里只留舞台与图例 -->
+  <template data-panel-template="arm">
+    <div class="stage" id="armStage">
+      <div class="legend">
+        <span><i class="sw" style="background:#3d9bff"></i>实际</span>
+        <span><i class="sw ghost"></i>目标</span>
+        <span><i class="dt" style="background:#2fd07a"></i>就绪</span>
+        <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
+        <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
+        <span class="spacer"></span>
+        <span>拖拽旋转 · 点击关节</span>
+      </div>
+    </div>
+  </template>
+
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
   <template data-screen="run">
     <div class="screen run">
       <section class="col-index"><div data-panel="jointList"></div></section>
-      <section class="col-stage"></section>
+      <section class="col-stage"><div data-panel="arm"></div></section>
       <section class="col-side">
         <div data-panel="readout"></div>
         <div data-panel="policy"></div>
@@ -149,7 +165,15 @@
       <section class="col-drawer"></section>
     </div>
   </template>
-  <template data-screen="teach"></template>
+  <template data-screen="teach">
+    <div class="screen teach">
+      <section class="col-index"><div data-panel="jointList"></div></section>
+      <section class="col-stage"><div data-panel="arm"></div></section>
+      <section class="col-side"></section>
+      <section class="col-command"></section>
+      <section class="col-teach"></section>
+    </div>
+  </template>
   <template data-screen="device"></template>
   <template data-screen="sim"></template>
   <template data-screen="diag"></template>

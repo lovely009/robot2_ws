@@ -1,6 +1,7 @@
 // 共享状态：所有跨屏数据都住在这里。面板只读它、只通过 ui 动作改它。
 // 订阅在 main.js 全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
 // 脏标记与 rAF 渲染循环也在本文件内实现，不另开模块。
+import { devSlotNames, devRecoveryText } from './format.js';
 
 export const store = {
   // text：顶栏连接文案（setConn 写它，renderShell 画它）
@@ -83,4 +84,51 @@ export function countMotors() {
     if (t.conflict || st.lifecycle === 7) conflict++;
   }
   return {online, total: store.motors.size, fault, active, conflict};
+}
+
+// URL 参数：换模型或换接线不改代码（?joints=1:joint_link1,2:joint_link2&model=<模型目录名>）
+export const URLQ = new URLSearchParams(location.search);
+export const JOINT_OF_MOTOR = (() => {
+  const q = URLQ.get('joints');
+  if (!q) return {1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4'};
+  const m = {};
+  for (const pair of q.split(',')) {
+    const [id, j] = pair.split(':');
+    if (id && j) m[parseInt(id, 10)] = j;
+  }
+  return m;
+})();
+export const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_001';
+
+// 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
+// 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，
+// 页面无从得知，此时宁可不画（调用方负责判 target_source）。
+export function targetOf(id) {
+  const h = store.history[0];
+  if (!h) return NaN;
+  const t = h.targets.find((x) => x.id === id);
+  return t ? t.pos : NaN;
+}
+
+// 状态列悬停提示：DEV_INIT 事件带来的槽位位图。state=3(MISMATCH) 位图是"对不上"
+// 的槽位，state=4(UNVERIFIED) 位图是"没读到"的槽位（见 MotorEvent.msg）。
+export function devDetailTitle(id) {
+  const info = store.devInit.get(id);
+  if (!info || !info.mask) return '';
+  const slots = devSlotNames(info.mask).join('、');
+  if (info.state === 3) {
+    return `设备参数与固件记录不一致：${slots}（${devRecoveryText(info.mask)}）`;
+  }
+  if (info.state === 4) {
+    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「读取」重试）`;
+  }
+  return '';
+}
+
+// 行筛选（两张表各自的「显示全部」都走它）。原来直接读旧复选框的选中态，现在改为
+// 调用方传入 showAll —— 重构后设备参数表与使能表分处两屏，各自一个复选框，不再
+// 共用一个 DOM 元素。
+export function paramRowIds(showAll) {
+  const all = [...store.paramCache.keys()].sort((a, b) => a - b);
+  return (showAll || !store.selectedId) ? all : all.filter((i) => i === store.selectedId);
 }

@@ -14,6 +14,11 @@ const mounted = new Map();
 export function mountPanel(panelId, container) {
   // 动态 import：未使用的面板模块不会被下载
   return import(`./panels/${panelId}.js`).then((mod) => {
+    // 面板标记的唯一来源是 index.html 的 <template data-panel-template>：克隆进
+    // 屏模板里的 [data-panel] 占位后交给模块（JS 不生成带 id 的标记，只克隆）。
+    // wing 例外：标记直接写在外壳 #wingBody 里，没有模板可克隆。
+    const tpl = document.querySelector(`template[data-panel-template="${panelId}"]`);
+    if (tpl && container) container.append(tpl.content.cloneNode(true));
     const inst = mod.mount(container, ctx);
     mounted.set(panelId, inst);
     return inst;

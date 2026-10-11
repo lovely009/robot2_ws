@@ -85,6 +85,33 @@ export function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 
+// 位图 → 槽位名列表（槽位顺序即 DEV_SLOT_NAMES 顺序）。
+export function devSlotNames(mask) {
+  return DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
+}
+
+// 恢复口径（MISMATCH 用）：六个槽位都在参数面里了——槽 5（0x2541 方向）也能
+// 通过参数表点一次方向建立基线并恢复。
+export function devRecoveryText(mask) {
+  if ((mask & (1 << 5)) !== 0) {
+    return '方向(0x2541)无基线：在参数表点一次方向（CW/CCW）即建立基线并恢复';
+  }
+  return '写回对应项即可恢复';
+}
+
+// 参数值显示：内核把这些量存成 float32，拓宽成 double 后会出现
+// 0.20000000298023224 这类尾巴——显示时收敛到有效位，别让人误以为是精度问题。
+// 只影响显示；未编辑的字段不会下发。
+export function fmtParam(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const s = Math.abs(n) >= 1e6 || (n !== 0 && Math.abs(n) < 1e-4)
+    ? n.toExponential(6)
+    : String(Number(n.toPrecision(7)));
+  return s;
+}
+
 export const CONTROLLER_PORT_STORAGE_KEY = 'robot2.controllerSerialPort';
 export const ROS_URL_STORAGE_KEY = 'robot2.rosbridgeUrl';
 export const FOLD_KEY = 'web_host.fold';

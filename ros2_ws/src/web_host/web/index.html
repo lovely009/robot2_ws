@@ -90,8 +90,65 @@
     </div>
   </div>
 
+  <!-- ============ 面板模板：每个面板一项，屏模板按 data-panel 引用 ============ -->
+  <!-- 关节索引 -->
+  <template data-panel-template="jointList">
+    <details class="card" data-fold="joints" open>
+      <summary>关节 <span class="spacer"></span><span class="sum" id="sumJoints">--</span></summary>
+      <ul class="joints" id="motorRows">
+        <li class="empty">等待 motor_topology…</li>
+      </ul>
+    </details>
+  </template>
+
+  <!-- 选中关节读数 -->
+  <template data-panel-template="readout">
+    <details class="card" data-fold="sel" open>
+      <summary id="selTitle">未选中关节（点左栏或臂上的小球）</summary>
+      <div class="kv">
+        <div><span>位置</span><b id="selPosition">--</b></div>
+        <div><span>速度</span><b id="selVelocity">--</b></div>
+        <div><span>力矩</span><b id="selEffort">--</b></div>
+        <div><span>电流</span><b id="selCurrent">--</b></div>
+        <div><span>温度</span><b id="selTemp">--</b></div>
+        <div><span>跟随误差</span><b id="selErr">--</b></div>
+        <div><span>命令源</span><b id="selSource">--</b></div>
+        <div><span>故障</span><b id="selFault">--</b></div>
+        <div><span>测量年龄</span><b id="selAge">--</b></div>
+      </div>
+    </details>
+  </template>
+
+  <!-- 使能与增益（策略面，只写不回读；设备限值在「设备」屏） -->
+  <template data-panel-template="policy">
+    <details class="sec" data-fold="pol" open>
+      <summary>使能与增益<span class="spacer"></span><span class="sum" id="sumPol">--</span></summary>
+      <div class="ctrl-row wrap">
+        <label class="check tiny"><input type="checkbox" id="chkAllPolicy"> 显示全部</label>
+      </div>
+      <div class="table-wrap">
+        <table class="params">
+          <thead><tr><th class="num">ID</th><th>型号</th><th>启用</th><th class="num">kp</th><th class="num">kd</th><th></th></tr></thead>
+          <tbody id="polRows"><tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr></tbody>
+        </table>
+      </div>
+      <div id="polResult" class="result tiny"></div>
+    </details>
+  </template>
+
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
-  <template data-screen="run"></template>
+  <template data-screen="run">
+    <div class="screen run">
+      <section class="col-index"><div data-panel="jointList"></div></section>
+      <section class="col-stage"></section>
+      <section class="col-side">
+        <div data-panel="readout"></div>
+        <div data-panel="policy"></div>
+      </section>
+      <section class="col-command"></section>
+      <section class="col-drawer"></section>
+    </div>
+  </template>
   <template data-screen="teach"></template>
   <template data-screen="device"></template>
   <template data-screen="sim"></template>

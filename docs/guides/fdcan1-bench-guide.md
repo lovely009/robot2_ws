@@ -1,6 +1,6 @@
 # FDCAN1 四电机模拟台架指南
 
-> **适用范围（2026-09-21）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的四节点模拟台架。默认节点为 CERB 1=R58、2–4=R48；若 CANable `V` 返回上游 `b158aa7`，自动配置会切换到 `Y5`。需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
+> **适用范围（2026-10-12 修订）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的模拟台架。默认节点为 CERB 1=R58、2–4=R48；需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。**两只已知 CANable 版本的 5 Mbps 索引都是 `Y5`**（2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见下）。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
 
 ## 连接与固定参数
 
@@ -10,10 +10,19 @@
 | CANable2 SLCAN | `/dev/ttyACM1` |
 | 控制板总线 | FDCAN1，PD0/PD1 |
 | 位率 | 仲裁 1 Mbps / 数据 5 Mbps，CAN FD+BRS |
-| SLCAN 配置 | 当前 `V=16e7497-dirty`：`C` → `S8` → `Y7` → `M0` → `A1` → `O`；上游 `b158aa7` 用 `Y5`，命令间隔至少 150 ms |
+| SLCAN 配置 | `C` → `S8` → `Y5` → `M0` → `A1` → `O`（`16e7497-dirty` 与 `b158aa7` 均为 `Y5`），命令间隔至少 150 ms |
 | 模拟节点 | CERB id 1=R58；id 2–4=R48 |
 
-先用 `V` 识别 CANable 固件：当前现场返回 `16e7497-dirty`，历史台架已验证该自定义版本的 5 Mbps 索引是 `Y7`；上游 `b158aa7` 只接受 `Y2`/`Y5`，其中 `Y5` 表示 5 Mbps，`Y7` 会静默拒绝并保留默认 2 Mbps。不能用“脚本写出了 Y7”推断设备已经接受配置。
+先用 `V` 识别 CANable 固件。**2026-10-12 实测修正**：现场这只 CANable（USB 描述符
+`b158aa7`、`V` 响应 `16e7497-dirty`）的 5 Mbps 索引是 **`Y5`**，历史注释记的 `Y7`
+是错的。判据（同硬件、同固件，只换索引做 A/B）：`Y7` → 九台全部 OFFLINE、fault=5，
+固件 tx/rx 计数几十秒内冻结；`Y5` → 全部 READY_DISABLED、fault=0、online=true，
+长期稳定。`Y7` 的失败指纹是 FDCAN1 `PSR.DLEC=3`（**数据相位** ACK error）——仲裁
+相位对、数据相位位率/采样点不匹配。注意 `0x080` SYNC 是 DLC=0 帧、没有数据相位，
+所以"能收到 SYNC"或"CAN 分析仪 0 错误"都**不能**证明数据位率正确，必须看带载荷的
+FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
+`micro_ros_agent/tools/fdcan_motor_sim.py` 的 `SLCAN_VERSION_DATA_BITRATE` 与
+`_recover_latched_bus`。
 
 ## 启动顺序
 
@@ -34,7 +43,7 @@
      --tty /dev/ttyACM1 --log /tmp/fdcan-motor-sim.jsonl
    ```
 
-3. 看到 `S8/Y7/M0/A1/O opened`（若 V 为 b158aa7 则是 Y5）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
+3. 看到 `S8/Y5/M0/A1/O opened`（若误配成 Y7，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
 4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 
 ## 只读验收
@@ -50,10 +59,17 @@
 固件上电会把每台 CERB 的驱动板参数（`0x607D:01/:02`、`0x6080`、`0x2538`）
 回读一次，与 W25 里的固件记录**按设备端原值**比对：
 
-- **初始化未完成的那台不可使能**（不一致 `40` / 回读不成功 `41`）：进
-  `CONFIG_CONFLICT`、拒绝使能、不出运动帧，`system_status.last_error` +
-  `last_error_motor` 指出是哪一台。台架上看到某台"使能按不下去"时先查这两个字段：
-  `ros2 topic echo /micro_ros_up/system_status`。
+- ⚠ **2026-10-12：设备参数核对不再是安全门（owner 为台架效率作的取舍）**。
+  重构前的语义（2026-09-17 起）：初始化未完成（不一致 `40` / 回读不成功 `41` /
+  本机无记录）的那台进 `CONFIG_CONFLICT`、拒绝使能、不出运动帧。**现语义**：只把
+  结论如实上报（`dev_init`、`DEV_INIT` 事件位图、`device_param_report`），
+  **不再改 lifecycle、不再拒绝使能、不再拦运动帧**。代价：`dev_init ≠ OK` 时该台的
+  限位/速度/力矩可能不是核对过的值，兜底只剩硬件急停与机械限位。
+  恢复门禁（两处，缺一不可）：`lib/motor_control/src/motor_control_internal.h` 的
+  `motor_control_dev_params_allow_motion` 改回 `(dev_init == NA || dev_init == OK)`；
+  `lib/motor_control/src/motor_control_config.c` 放开注释掉的
+  `freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);`。
+  不恢复门禁时，"哪台没核对上"仍可从 `device_param_report` 与 `dev_init` 事件读出。
 - 复位/换机/改接线后若记录与模拟器默认值不同（模拟器 CERB 默认
   `0x2538=1000 mA`、`0x6080=600 RPM`、位置限 `±32768 cnt`），走一次参数写即可让
   设备与记录重新一致。

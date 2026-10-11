@@ -11,7 +11,10 @@ MODULE = module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 assert MODULE.DEFAULT_DATA_BITRATE_INDEX == 5
-assert MODULE.SLCAN_VERSION_DATA_BITRATE["16e7497"] == 7
+# 2026-10-12 现场实测：这只 CANable（V=16e7497-dirty）的 5 Mbps 索引是 Y5，
+# 不是历史注释里的 Y7——Y7 会让带上数据载荷的 FD 帧数据相位 ACK error，
+# 9 台全部 OFFLINE、fault=5。判据见 fdcan_motor_sim.py 的 SLCAN_VERSION_DATA_BITRATE。
+assert MODULE.SLCAN_VERSION_DATA_BITRATE["16e7497"] == 5
 assert MODULE.SLCAN_VERSION_DATA_BITRATE["b158aa7"] == 5
 assert MODULE.slcan_config_commands(5) == (
     b"C\r", b"S8\r", b"Y5\r", b"M0\r", b"A1\r", b"O\r",

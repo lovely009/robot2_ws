@@ -27,8 +27,11 @@ fi
 echo "[1/2] 起 Gazebo（control_mode:=$GZ_CM）与模拟器（--gazebo-control-mode $SIM_CM）"
 ros2 launch robot_arm_gazebo gazebo.launch.py control_mode:="$GZ_CM" &
 sleep 3
+# 不传 --data-bitrate-index：让模拟器自己 V 探测。2026-10-12 实测两只已知
+# CANable 版本的 5Mbps 索引都是 Y5，这里曾硬编码 Y7，会让数据相位 ACK error、
+# 九台全部 OFFLINE（固件 tx/rx 计数几十秒内冻结）。
 python3 -u "$root/tools/fdcan_motor_sim.py" \
-  --data-bitrate-index 7 --gazebo --gazebo-control-mode "$SIM_CM" &
+  --gazebo --gazebo-control-mode "$SIM_CM" &
 echo "      等通道就绪（会自动 V 探测并选 Y 索引）..."
 sleep 6
 

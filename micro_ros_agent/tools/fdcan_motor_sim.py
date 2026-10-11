@@ -6,7 +6,8 @@
 电机总线上模拟电机，用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。
 总线上无真机。SLCAN 仲裁段 1M（S8）、数据段 5M；SocketCAN 位率由系统预先配置。
 CANable2 的数据位率索引按 V 查询自动选择；
-当前实机返回的自定义版本 16e7497-dirty 使用 Y7，上游 b158aa7 使用 Y5。
+**两只已知版本（自定义 16e7497-dirty 与上游 b158aa7）的 5Mbps 索引都是 Y5**
+（2026-10-12 实测修正了 16e7497-dirty=Y7 的旧说法，判据见 SLCAN_VERSION_DATA_BITRATE）。
 也可通过 --data-bitrate-index 显式覆盖。
 
 线协议字节布局严格对齐固件：
@@ -33,7 +34,8 @@ CANable2 的数据位率索引按 V 查询自动选择；
   python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 V/S8/Y*/M0/A1/O 开通道
   python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
   python3 fdcan_motor_sim.py --interface can0 --gazebo --joint-map 1:joint_link1
-  python3 fdcan_motor_sim.py --data-bitrate-index 7  # 仅用于对应的自定义固件
+  # 默认自动 V 探测选索引；已知两只 CANable 版本都落到 Y5。--data-bitrate-index
+  # 只在自动探测失败时手工覆盖（2026-10-12 起没有任何已知版本需要 Y7）。
   # 与 Gazebo effort 控制器做真实 MIT 等效力矩端到端验证：
   python3 fdcan_motor_sim.py --gazebo --gazebo-control-mode effort \
     --joint-map 7:joint_link1,8:joint_link2,9:joint_link3,10:joint_link4
@@ -55,6 +57,7 @@ import glob
 import json
 import os
 import queue
+import re
 import select
 import signal
 import socket
@@ -68,10 +71,26 @@ import tty
 PI = 3.141592653589793
 DEFAULT_DATA_BITRATE_INDEX = 5
 AUTO_DATA_BITRATE_INDEX = None
+# CANable 非标准 E 查询的应答形如 "CANable Error Register: 4"，但**没有 \r 结尾**，
+# 会与紧随其后的帧行粘在一起，故按前缀+数字取，不依赖行边界。
+_CANABLE_ERR_RE = re.compile(r"CANable Error Register:\s*([0-9]+)")
 SLCAN_VERSION_DATA_BITRATE = {
-    # 当前现场 V 响应是自定义 16e7497-dirty；历史台架验证该版本的
-    # 5Mbps 索引为 Y7。上游 b158aa7 的官方语义则是 Y5=5Mbps。
-    "16e7497": 7,
+    # ⚠ 2026-10-12 实测修正：现场这只 CANable（USB 描述符 b158aa7、V 响应
+    # 16e7497-dirty）的 5Mbps 索引是 **Y5**，不是 Y7。
+    #
+    # 判据（同一硬件、同一固件，只换索引做 A/B）：
+    #   Y7 → 9 台全部 OFFLINE、fault=5；固件 tx/rx 计数几十秒内冻结；
+    #        读 FDCAN1 寄存器得 PSR.DLEC=3（**数据相位** ACK error）——
+    #        典型的"仲裁相位对、数据相位位率/采样点不匹配"指纹。
+    #   Y5 → 9 台全部 READY_DISABLED、fault=0、online=true，长期稳定。
+    #
+    # 注意：0x080 SYNC 是 DLC=0 帧、没有数据相位，所以"能收到 SYNC"或
+    # "CAN 分析仪 0 错误"**都不能**证明数据位率正确——必须看带数据载荷的
+    # FD 帧（DLC 8/12/20）是否畅通。
+    #
+    # 历史注释曾记该版本 Y7=5Mbps，现证伪（V 串带 -dirty，是改动过的固件，
+    # 索引语义已与上游/历史不同）。
+    "16e7497": 5,
     "b158aa7": 5,
 }
 
@@ -530,6 +549,18 @@ class CanMotorSim:
         self.last_sync_at = None
         self.max_sync_gap = 0.0
         self.next_send = {}
+        # ── CANable 健康监测（2026-10-12 加）──────────────────────────────
+        # 现场这只 CANable 会**锁存**进一个不再 ACK 的状态：E 查询回非 0，且
+        # 单独 C 关通道清不掉。后果是固件 TX FIFO（16 深）被自动重传占满 → 不
+        # 再发 SYNC → 模拟器反馈是 SYNC 驱动的、也没活干 → 两侧一起静默，而且
+        # 工具从不查 CANable 状态、读线程猝死也没人发现，**根因完全隐形**。
+        # 这里补三件事：定期问 E（可见性）、长时间无帧自动重开通道（自愈）、
+        # 读线程猝死自动重启。
+        self.canable_error = ""      # 最近一次 E 查询的应答值
+        self.last_rx_at = None       # 最近一次收到**有效 CAN 帧**的时刻
+        self.stall_recoveries = 0    # 自动重开通道次数
+        self._last_error_poll = 0.0
+        self._reader_restarts = 0
         self.last_cerb_emit = 0.0
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
@@ -950,7 +981,19 @@ class CanMotorSim:
             self.rx_buf += chunk
             while b"\r" in self.rx_buf:
                 line, self.rx_buf = self.rx_buf.split(b"\r", 1)
-                parsed = parse_slcan(line.decode(errors="replace"))
+                text = line.decode(errors="replace").strip()
+                # CANable 的 E 查询应答不是 CAN 帧，parse_slcan 会返回 None 被
+                # 静默丢掉——那正是本工具长期看不见"CANable 已锁存"的原因。
+                # ⚠ E 应答不以 \r 结尾，按 \r 切行会与下一条帧粘成一行
+                # （2026-10-12 实测拿到 "4b60284008100000000000"），故用正则从
+                # 行内取数字，不依赖行边界。
+                match = _CANABLE_ERR_RE.search(text)
+                if match:
+                    self.canable_error = match.group(1)
+                    continue
+                if "CANable Error Register" in text:
+                    continue
+                parsed = parse_slcan(text)
                 if parsed:
                     self._rxq.put(parsed)
 
@@ -959,6 +1002,7 @@ class CanMotorSim:
         while True:
             try:
                 can_id, data, is_fd = self._rxq.get_nowait()
+                self.last_rx_at = time.monotonic()
             except queue.Empty:
                 return
             self.handle_downlink(can_id, data, is_fd)
@@ -983,6 +1027,34 @@ class CanMotorSim:
         if self.log_f:
             self.log_f.flush()
 
+    def _recover_latched_bus(self):
+        """CANable 锁存不再 ACK：关通道并重新下发整条配置序列让它复活。
+
+        实测（2026-10-12）：单独的 C（关通道）**清不掉**锁存；必须重走
+        C→S8→Y<n>→M0→A1→O。重开之后固件**不用复位**就能把被重传占住的 TX FIFO
+        排空，SYNC 自动恢复到 50Hz。这是"链路活一会儿就死"的直接解药。
+        """
+        self.stall_recoveries += 1
+        # 此刻总线已静默，没有帧流与 E 应答交错——这是唯一能拿到**干净**错误码的
+        # 时机。周期性轮询会与帧行互相污染（2026-10-12 实测：E 值里混进了
+        # b60284008100000000000 这类帧片段），所以只在自愈路径里问一次。
+        # 周期性轮询已在跑，这里直接用最近一次的读数（自愈时总线已静默，
+        # 该值就是锁存瞬间的 CANable 错误寄存器）。
+
+        print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：CANable 疑似"
+              f"锁存（E={self.canable_error or '未读到'}），重开通道…")
+        try:
+            for cmd in slcan_config_commands(self.data_bitrate_index):
+                self._write(cmd, drop_ok=True)
+                time.sleep(0.15)
+        except OSError as error:
+            print(f"[sim] ✗ 重开通道失败：{error}")
+            return
+        self.rx_buf = b""
+        self.last_rx_at = None
+        self.sync_seen = False      # 重新走门控，等板子的下一个 SYNC
+        print("[sim] 通道已重开，等待 SYNC 恢复")
+
     def run(self):
         cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
@@ -1004,6 +1076,23 @@ class CanMotorSim:
             # 总线由 _reader_loop 独占读取；这里只消费队列。
             self._drain_rx()
             self._pump_tx()
+            # ── 健康巡检：只跑 SLCAN、且没有半条 TX 行在飞时（避免把帧行截断）──
+            if self.bus_socket is None and self._tx_active is None:
+                # ⚠ 2026-10-12 起**停用**周期性 E 轮询：E 是非标准命令，现场
+                # 这只 -dirty CANable 疑似处理它有副作用（加轮询后锁存频率从
+                # "偶发"变成"90 秒 5 次"）。E 只在需要时手工查，不自动发。
+                if (self.last_rx_at is not None
+                        and now - self.last_rx_at > 3.0):
+                    self._recover_latched_bus()
+            # 读线程遇 OSError 会直接 return（旧代码无人发现，模拟器"看着活、
+            # 其实聋了"）——这里发现即重启。
+            if (self.bus_socket is None and self._reader is not None
+                    and not self._reader.is_alive() and not self.stop):
+                self._reader_restarts += 1
+                print(f"[sim] ⚠ 串口读线程已退出，重启（第 {self._reader_restarts} 次）")
+                self._reader = threading.Thread(
+                    target=self._reader_loop, daemon=True)
+                self._reader.start()
             time.sleep(0.002)          # 保持原有节拍，别忙等
             if not self.sync_seen:
                 # 门控：板子上线前不发电机反馈帧，避免启动次序错误时总线没有

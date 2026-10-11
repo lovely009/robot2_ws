@@ -1,4 +1,15 @@
 /* ---------- 骨架：顶栏 / 左导航 / 主区 / 状态翼 ---------- */
+/* 滚动条：深色细条。默认（未定制）时 Chromium/Linux 会画浅色轨道 + 上下箭头，
+   在深色界面里非常扎眼（用户明说太丑）。::-webkit-scrollbar 不带前缀作用于所有
+   可滚动元素；Firefox 走 scrollbar-width/color。 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }   /* 去掉经典滚动条的 ▲▼ 箭头块 */
+
 .shell {
   display: grid;
   grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--wing-w);

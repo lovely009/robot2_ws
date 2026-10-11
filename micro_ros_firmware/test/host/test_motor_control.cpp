@@ -3446,9 +3446,14 @@ static void test_boot_normalize_runs_before_refresh() {
   assert(!entry_of(&ctx, 7)->dev_read_done);
 }
 
-// 归一失败（设备不应答写）→ 用尽重试判 UNVERIFIED、不可使能，且**绝不**
-// 发起回读——"归一没成功就绝不放行"这条是设计的安全内核。
-static void test_boot_normalize_failure_blocks_before_refresh() {
+// 归一失败（设备不应答写）→ 用尽重试判 UNVERIFIED，且**绝不**发起回读。
+//
+// ⚠ 2026-10-12 owner 决定取消设备参数门禁：UNVERIFIED 不再拦住运动/使能，也不再
+// 冻结生命周期（见 motor_control_internal.h 的 motor_control_dev_params_allow_motion）。
+// 因此本用例现在验的是**状态与遥测仍如实呈现**（dev_init / lifecycle / 事件位图 /
+// 回读逃生口），而不再是"拦住"——门禁解除后该台停在 READY_DISABLED，不是
+// CONFIG_CONFLICT。
+static void test_boot_normalize_failure_state_before_refresh() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -3460,8 +3465,9 @@ static void test_boot_normalize_failure_blocks_before_refresh() {
   uint32_t t = run_heartbeat_only(&ctx, 7, 120U, 3000U);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-  assert(!motor_control_dev_params_allow_motion(e));
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  // 门禁已取消（2026-10-12 owner 决定）：UNVERIFIED 不再拦住运动/使能。
+  assert(motor_control_dev_params_allow_motion(e));
   // 一次回读都没发起过：六槽位图空着，"未核对"是它唯一说得出的话。
   assert(e->dev_read_attempts == 0U);
   uint16_t state = 0U;
@@ -3613,9 +3619,10 @@ static void test_boot_normalize_skips_direction_without_record() {
   assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
 }
 
-// 首次上电（W25 对本机无记录）：**不再静默放行**。owner 2026-09-21：首次也当
-// 不一致，必须人工核对后才可动。此前"无记录"落进 DEV_INIT_NA，而 NA 是放行的。
-static void test_dev_init_no_record_blocks_enable() {
+// 首次上电（W25 对本机无记录）：结论如实报 NO_RECORD，但**不再因此拦运动**
+// （2026-10-12 owner 取消设备参数门禁）。owner 2026-09-21 曾要求"首次也当不一致，
+// 必须人工核对后才可动"，该门禁现已解除——本用例改验"报得准、不拦"。
+static void test_dev_init_no_record_reports_without_gate() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -3633,9 +3640,9 @@ static void test_dev_init_no_record_blocks_enable() {
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
-  assert(!motor_control_dev_params_allow_motion(e));
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM);
+  assert(motor_control_dev_params_allow_motion(e));
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_NONE);
 
   // 事件带的是本态本身（detail=0：没有"哪一项对不上"可报，整台没基线）。
   uint16_t state = 0U;
@@ -3647,14 +3654,16 @@ static void test_dev_init_no_record_blocks_enable() {
   // 参数视图也带本态（页面据此把固件列整行显示「无记录」）。
   assert(view_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
 
-  // 使能请求被明确拒绝（不是静默吞掉）。
+  // 门禁已取消：使能请求照旧受理（不再回 CONFIG_INVALID / 不再记 DEV_PARAM）。
   motor_protocol_config_request_t en = {};
   en.request_id = 90U;
   en.motor_id = 7;
   en.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
   en.enable = true;
-  assert(!motor_control_submit_config(&ctx, &en, 200));
-  assert(e->last_failure_reason == MOTOR_CONTROL_FAULT_DEV_PARAM);
+  assert(motor_control_submit_config(&ctx, &en, 200));
+  assert(has_result_event(&ctx, 90U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(e->policy_enable && e->motion_authorized);
+  assert(e->last_failure_reason != MOTOR_CONTROL_FAULT_DEV_PARAM);
 }
 
 // 写一项就建立记录 → 立刻重判；记录写齐（含方向基线）即转 OK、解冻。
@@ -3749,9 +3758,10 @@ static void test_dev_init_flags_safety_mismatch_at_runtime() {
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  // 不一致 → 不可使能（与既有 MISMATCH 用例同口径）。
-  assert(!e->policy_enable);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  // 门禁已取消：不一致只报不改状态。发现时 policy_enable 默认就是 true（未收到
+  // Policy 前），现在也没有任何东西去清它——生命周期更不得因此落锁。
+  assert(e->policy_enable);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   uint16_t state = 0U;
   uint32_t mask = 0U;
   assert(take_dev_init_event(&ctx, 7, &state, &mask));
@@ -3760,8 +3770,12 @@ static void test_dev_init_flags_safety_mismatch_at_runtime() {
 }
 
 // 上电比对：设备里的峰值电流与记录不一致（台架实测 13300 mA vs 记录 10800 mA）
-// → 未初始化：冻结授权、拒绝使能、不出运动帧；影子仍取设备真值。
-static void test_device_param_mismatch_blocks_motion() {
+// → 判 MISMATCH、位图点名是哪一项；影子仍取设备真值。
+//
+// ⚠ 2026-10-12 owner 取消设备参数门禁：MISMATCH 不再冻结授权、不再拒绝使能、
+// 不再拦截运动帧（代价见 motor_control_internal.h 的注解）。本用例改验**定论与
+// 遥测仍如实呈现**，而不再是"拦住"。
+static void test_device_param_mismatch_reports_without_gate() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -3774,9 +3788,9 @@ static void test_device_param_mismatch_blocks_motion() {
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
   assert(e->dev_raw[3] == 13300U);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_DEV_PARAM);
-  assert(!e->policy_enable);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_NONE);
+  assert(e->policy_enable); // 发现时默认使能，未被 MISMATCH 冻结
   // 事件必须点名"是哪一项对不上"：记录里只有峰值电流(槽 3)与设备不同 →
   // 位图 = 1<<3。操作者据此知道该写哪一项，而不是盲写一通还看不到结果。
   uint16_t state = 0U;
@@ -3787,23 +3801,19 @@ static void test_device_param_mismatch_blocks_motion() {
   // 影子 = 设备真值（设备为准），不是记录值。
   assert(fabs(e->dev_max_torque_nm - 13.3 * kR58LimitNmPerAmp) < 0.1);
 
-  // 使能被拒（显式回告，不静默吞掉）。
+  // 门禁已取消：使能照旧受理（不再回 CONFIG_INVALID），授权位落地。
   motor_protocol_config_request_t enable = {};
   enable.request_id = 71U;
   enable.motor_id = 7;
   enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
   enable.enable = true;
   motor_control_service(&ctx, 140);
-  assert(!motor_control_submit_config(&ctx, &enable, 141));
-  assert(has_result_event(&ctx, 71U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  assert(motor_control_submit_config(&ctx, &enable, 141));
+  assert(has_result_event(&ctx, 71U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->policy_enable && entry_of(&ctx, 7)->motion_authorized);
 
-  // 快照也不得产生任何 MIT（P1）帧。
-  motor_control_command_snapshot_t snap = make_snapshot(1U, 150);
-  snapshot_add(&snap, 7, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &snap, 152));
-  motor_control_service(&ctx, 154);
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  // 生命周期不得因 MISMATCH 落锁（使能整定窗内仍停在 READY_DISABLED）。
+  assert(entry_of(&ctx, 7)->lifecycle != MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
 // 写事务 = 设备 + 固件记录一起写：写核验通过后记录同步、比对重判。
@@ -3859,7 +3869,7 @@ static void test_device_param_write_syncs_record_and_recovers() {
 // v2 迁移上来的记录只搬低 4 位（槽 4/5 = 未核验）。保护槽缺 → 不比对（上电
 // 归一会把设备写成"开"）；**方向槽缺 → 判未初始化**：设备每次上电都回 0，
 // "读到 0"不能证明任何事，方向只能由记录说了算。
-static void test_device_param_missing_direction_baseline_blocks() {
+static void test_device_param_missing_direction_baseline_reports() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -3874,7 +3884,8 @@ static void test_device_param_missing_direction_baseline_blocks() {
   assert(take_dev_init_event(&ctx, 7, &state, &mask));
   assert(state == MOTOR_CONTROL_DEV_INIT_MISMATCH);
   assert(mask == (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)); // 只有方向
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  // 门禁已取消：结论只报，不改生命周期。
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
 }
 
 // 本机完全无记录（新烧板）同样判未初始化——不是"无记录可比就放过"。
@@ -3883,7 +3894,7 @@ static void test_device_param_missing_direction_baseline_blocks() {
 // 沿用历史。⚠️ 这里**必须**显式声明"无记录"（apply_stored_params 传空数组），
 // 不能用 complete_device_param_init：那个助手会注入一份**含方向基线**的记录
 // （正常板子的路径），本用例要测的恰恰是"没有基线"。
-static void test_device_param_no_record_blocks_on_direction() {
+static void test_device_param_no_record_reports_on_direction() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -3893,7 +3904,7 @@ static void test_device_param_no_record_blocks_on_direction() {
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_NO_RECORD);
-  assert(!motor_control_dev_params_allow_motion(e)); // 未初始化 = 不可使能
+  assert(motor_control_dev_params_allow_motion(e)); // 门禁已取消：未初始化也不再拦
   // 本机无记录 + 归一写了保护槽 ⇒ 记录里**第一次**出现基线（槽 4）＝内容确有
   // 变化 ⇒ 必须置脏位（等 system.save 才落 W25）。这条钉住
   // update_record_after_write 里的顺序约束：先比"是否真的变了"、再 OR 进
@@ -3990,6 +4001,10 @@ static void test_device_param_direction_write_establishes_baseline() {
   req.motor_id = 7;
   req.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
   req.direction_raw = 0U; // 认下 CW
+  // 保持在线：静默 ≥100 ms 会先把该台判 OFFLINE——门禁取消后不再有
+  // CONFIG_CONFLICT 锁存替它挡下离线检测，那时测的就不是"方向写建立基线"了。
+  motor_protocol_raw_frame_t hb = cerb_feedback(7, 290);
+  motor_control_on_raw_frame(&ctx, &hb);
   motor_control_service(&ctx, 300);
   assert(motor_control_submit_config(&ctx, &req, 301));
   (void)feed_direction_write(&ctx, 7, 0U, 302);
@@ -4389,9 +4404,10 @@ static void test_save_volatile_only_accepted_while_active() {
   }
 }
 
-// 回读失败（设备不答）：结论 UNVERIFIED——初始化未完成，**同样不可使能**，
-// 结论出事件 + 错误码 41。恢复：重连重读或手动回读。
-static void test_device_param_unverified_blocks_motion() {
+// 回读失败（设备不答）：结论 UNVERIFIED，出事件 + 错误码 41。恢复：重连重读或
+// 手动回读。⚠ 2026-10-12 owner 取消门禁后它**不再拦住使能/运动**，本用例改验
+// "报得准、不拦"。
+static void test_device_param_unverified_reports_without_gate() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -4400,7 +4416,7 @@ static void test_device_param_unverified_blocks_motion() {
 
   // 上电归一（0a）先走完：本用例要测的是**回读**失败，不归一就得先过它，
   // 否则超时先落在归一阶段（那是另一个用例：
-  // test_boot_normalize_failure_blocks_before_refresh）。
+  // test_boot_normalize_failure_state_before_refresh）。
   uint32_t t = feed_boot_normalize(&ctx, 7, 120U);
 
   // 只喂心跳、不回应答：单次尝试 = 阶段 0 连续 3 次超时即定论，尝试之间退避
@@ -4410,24 +4426,21 @@ static void test_device_param_unverified_blocks_motion() {
   assert(e->dev_read_attempts >= MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
   assert(e->dev_read_done);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-  assert(!e->policy_enable);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(e->policy_enable); // 发现时默认使能，未被 UNVERIFIED 冻结
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
 
-  // 初始化未完成：使能被拒，快照也不出 MIT。
+  // 门禁已取消：使能照旧受理（不再回 CONFIG_INVALID），授权位落地。
   motor_protocol_config_request_t enable = {};
   enable.request_id = 91U;
   enable.motor_id = 7;
   enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
   enable.enable = true;
-  assert(!motor_control_submit_config(&ctx, &enable, t));
-  assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_INVALID));
-  motor_control_command_snapshot_t snap = make_snapshot(1U, t + 2U);
-  snapshot_add(&snap, 7, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &snap, t + 4U));
-  motor_control_service(&ctx, t + 6U);
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(motor_control_submit_config(&ctx, &enable, t));
+  assert(has_result_event(&ctx, 91U, MOTOR_PROTOCOL_CONFIG_OK));
+  assert(entry_of(&ctx, 7)->policy_enable && entry_of(&ctx, 7)->motion_authorized);
+  // 生命周期不得因 UNVERIFIED 落锁。
+  assert(entry_of(&ctx, 7)->lifecycle != MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
 // 首次回读失败 → 退避重试、期间仍 PENDING；重试成功即 OK，不退化 UNVERIFIED。
@@ -4446,8 +4459,8 @@ static void test_device_param_read_retry_recovers() {
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_read_attempts == 1U);
   assert(!e->dev_read_done);
-  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING); // 仍不可使能
-  assert(!motor_control_dev_params_allow_motion(e));
+  assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_PENDING);
+  assert(motor_control_dev_params_allow_motion(e)); // 门禁已取消：PENDING 也不再拦
 
   // 退避窗内继续喂心跳保持在线（静默 100ms 会被判离线，测的就不是重试路径），
   // 到点后设备正常应答 → 第二次尝试成功。
@@ -4460,9 +4473,9 @@ static void test_device_param_read_retry_recovers() {
   assert(motor_control_dev_params_allow_motion(e));
 }
 
-// 上电回读未收尾（PENDING）：同样不可使能——"初始化完成前不可使能"。
-// 回读收尾后立即可使能（不等重连、不需人工干预）。
-static void test_device_param_pending_blocks_enable() {
+// 上电回读未收尾（PENDING）：门禁已取消，PENDING 不再拦使能。
+// 回读收尾后结论转 OK（不等重连、不需人工干预）。
+static void test_device_param_pending_does_not_block_enable() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
@@ -4476,19 +4489,18 @@ static void test_device_param_pending_blocks_enable() {
   enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
   enable.enable = true;
   motor_control_service(&ctx, 112);
-  assert(!motor_control_submit_config(&ctx, &enable, 113));
-  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_INVALID));
+  assert(motor_control_submit_config(&ctx, &enable, 113));
+  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_OK));
 
-  // 设备参数回读收尾 → OK → 使能被受理。
+  // 设备参数回读收尾 → 结论转 OK（本条只验遥测收敛，使能早已受理）。
   (void)feed_device_params(&ctx, 7, kR58Raw, 120, false);
   assert(entry_of(&ctx, 7)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
-  assert(motor_control_submit_config(&ctx, &enable, 140));
-  assert(has_result_event(&ctx, 95U, MOTOR_PROTOCOL_CONFIG_OK));
 }
 
-// 运行中（ACTIVE）手动回读发现不一致：走**软停**（阻尼帧、保留使能），
-// 不硬失能；随后锁存未初始化结论。
-static void test_device_param_runtime_mismatch_soft_stops() {
+// 运行中（ACTIVE）手动回读发现不一致：只把结论报成 MISMATCH，**不动运行态**
+// ——不软停、不失能、不掉授权（2026-10-12 owner 取消门禁后运行中复查也不再是
+// 安全门）。本用例钉住"报而不动"：运动中的电机不能被一次比对结论打断。
+static void test_device_param_runtime_mismatch_reports_only() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   // 用 bound 版而不是 ready 版：ready 注入的基线只含方向/保护两槽（0x30），而
@@ -4519,7 +4531,7 @@ static void test_device_param_runtime_mismatch_soft_stops() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1); // 清空 P1 待发
 
-  // 手动回读，设备里的峰值电流与记录不符 → 软停而不是硬失能。
+  // 手动回读，设备里的峰值电流与记录不符 → 结论转 MISMATCH，但运行态不动。
   motor_protocol_config_request_t refresh = {};
   refresh.request_id = 97U;
   refresh.motor_id = 7;
@@ -4532,11 +4544,12 @@ static void test_device_param_runtime_mismatch_soft_stops() {
 
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_MISMATCH);
-  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_SOFT_STOP, 7));
-  assert(!e->policy_enable && !e->motion_authorized);
-  // 软停帧（P0、MIT 阻尼）已发出——不是失能帧。
-  assert(saw_p0);
+  // 运行态原样：仍在 ACTIVE，授权/使能/运动位都没被动过。
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  assert(e->policy_enable && e->motion_authorized && e->motion_enabled);
+  // 不得因为一次比对结论就软停/失能。
+  assert(!events_contain(&ctx, MOTOR_CONTROL_EVENT_SOFT_STOP, 7));
+  assert(!saw_p0);
 }
 
 // 记录里没写过的槽位不参与比对：只比记录声明过的字段。
@@ -5859,19 +5872,19 @@ int main() {
   bind_real_adapters();
   test_device_param_boot_verify_ok();
   test_boot_normalize_runs_before_refresh();
-  test_boot_normalize_failure_blocks_before_refresh();
+  test_boot_normalize_failure_state_before_refresh();
   test_boot_normalize_not_advanced_by_manual_write();
   test_manual_refresh_rejected_during_normalize_window();
   test_boot_normalize_skips_direction_without_record();
-  test_dev_init_no_record_blocks_enable();
+  test_dev_init_no_record_reports_without_gate();
   test_dev_init_no_record_clears_after_write();
   test_boot_normalize_skips_illegal_direction_value();
   test_enable_without_protection_needs_confirm();
   test_dev_init_flags_safety_mismatch_at_runtime();
-  test_device_param_mismatch_blocks_motion();
+  test_device_param_mismatch_reports_without_gate();
   test_device_param_migrated_record_flags_protect_off();
-  test_device_param_missing_direction_baseline_blocks();
-  test_device_param_no_record_blocks_on_direction();
+  test_device_param_missing_direction_baseline_reports();
+  test_device_param_no_record_reports_on_direction();
   test_device_param_direction_write_establishes_baseline();
   test_device_param_write_syncs_record_and_recovers();
   test_limit_write_preserves_readonly_safety_slots();
@@ -5883,9 +5896,9 @@ int main() {
   test_save_rejected_while_active_keeps_dirty();
   test_save_volatile_only_accepted_while_active();
   test_device_param_read_retry_recovers();
-  test_device_param_unverified_blocks_motion();
-  test_device_param_pending_blocks_enable();
-  test_device_param_runtime_mismatch_soft_stops();
+  test_device_param_unverified_reports_without_gate();
+  test_device_param_pending_does_not_block_enable();
+  test_device_param_runtime_mismatch_reports_only();
   test_device_param_partial_record_compare();
   test_device_param_view_exposes_record();
   test_param_view_carries_report_fields();

@@ -242,16 +242,28 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   } else if (state == MOTOR_CONTROL_DEV_INIT_MISMATCH ||
       state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
       state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
-    // 未初始化（不一致 / 未能核对 / 本机无记录）：**运动中的走软停，不硬失能**
-    // ——上电自检与写入都核验过，真出现不一致属于异常，此时按"停止运动但保留
-    // 阻尼"处理（TBD-SAFETY-01 口径），不把力矩瞬间撤掉。
-    // 静止态（READY_DISABLED 等）没有要停的东西，直接锁存结论。
-    // 与冲突/故障同口径冻结（ARD §36：失败不自动恢复运动授权）：结论未转好
-    // 之前不得使能，恢复需显式 SET_ENABLE(true) + 新快照。
+    // 【2026-10-12 owner 决定：固件侧不再需要参数核对 —— 本分支不再冻结】
     //
-    // NO_RECORD 走同一条路（owner 2026-09-21："首次也当不一致，人工核对"）：
-    // 此前它落进 NA 而 NA 是放行的，等于首次上电未经核对即可使能。
-    freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
+    // 原语义：结论为"未初始化"（不一致 / 未能核对 / 本机无记录）时调用
+    // freeze_entry_as_conflict 冻结该台 —— lifecycle 锁 CONFIG_CONFLICT、
+    // fault 记 DEV_PARAM、清 policy_enable / motion_authorized，须人工核对后
+    // 显式重新使能。owner 2026-09-21 曾把 NO_RECORD 也纳入同一条路
+    // （"首次也当不一致，人工核对"）。
+    //
+    // 现语义：**只落状态、不冻结**。dev_init 仍如实记录并随 DEV_INIT 事件与
+    // device_param_report 上报（"不一致 / 未核对"这件事本身照报），但不再因此
+    // 改 lifecycle、不置 DEV_PARAM 故障、不清运动授权 —— 该台保持
+    // READY_DISABLED，可直接使能与运动。
+    //
+    // ⚠ 代价（恢复前请确认已知悉）：设备参数核对**不再是一道安全门**。
+    //   dev_init ≠ OK 时该台的限位/速度/力矩可能不是核对过的值（影子取设备真值，
+    //   读不到时回落型号标定），运动许可建立在未核对的参数之上；兜底只剩硬件
+    //   急停与机械限位。这是 owner 为台架作出的取舍，不是疏漏。
+    //
+    // 恢复原语义：把下面这行注释放开即可，其余逻辑无需改动。
+    // freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
+    (void)ctx;
+    (void)now_ms;
   }
   motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_DEV_INIT,
       entry->motor_id, entry->bus_index, (uint16_t)state,

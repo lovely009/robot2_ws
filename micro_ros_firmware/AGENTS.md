@@ -38,8 +38,9 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 ## 台架关键顺序
 
 - **CANable 先成为 ACK 节点，再复位/烧录控制板**：SLCAN 顺序
-  当前 `V=16e7497-dirty` 时 `C`→`S8`→`Y7`→`M0`→`A1`→`O`；上游 `b158aa7` 用
-  `Y5`（间隔 ≥150ms；错误索引会被静默拒绝），
+  `C`→`S8`→`Y5`→`M0`→`A1`→`O`（**两只已知 CANable 版本的 5Mbps 索引都是
+  `Y5`**；2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见
+  `docs/guides/fdcan1-bench-guide.md`。间隔 ≥150ms；错误索引会被静默拒绝），
   sim 自动做。`M0`/`A1` 用来清掉前一个抓包工具遗留的 silent/禁止自动重发状态。
   顺序反了 FDCAN1 无人 ACK 进 bus-off（固件自清 INIT 已实测可恢复，但重同步仍需
   ACK 在先）；已 bus-off：停旧进程→重开通道→再复位板子，只重启 agent 没用。
@@ -73,8 +74,8 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   而且报错方向指向"对端不发 ACK"，会把人往固件/CANable 上引。用 cangaroo 单独测一下
   总线是最快的反证。
 - **「某台不跟」先查 `motion_states.target_source`，别怀疑力矩**。`0 = NONE` 表示该台
-  没过 `entry_may_move` 的门（`policy_enable` / `motion_authorized` /
-  `dev_params_allow_motion` 之一）；此时**快照仍被受理、`snapshot_accepted` 照涨、
+  没过 `entry_may_move` 的门（`policy_enable` / `motion_authorized` 之一；
+  `dev_params_allow_motion` 自 2026-10-12 起恒放行，已不再是原因）；此时**快照仍被受理、`snapshot_accepted` 照涨、
   ROS 侧完全看不出是哪台被门住**，只是那台不动（实测 m2/m4 钉在 −π/2 就是这个形状，
   与力矩无关）。`tools/traj_play.py` 在对齐阶段会逐台打印并告警。
 - **力矩上限不是本模型的瓶颈**（曾误判并把 effort 抬到 45，已 revert 400df13）。

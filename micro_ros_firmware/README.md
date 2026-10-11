@@ -298,9 +298,10 @@ CAN 命令**每台每个边界恰好一条（500Hz）**；CERB 同总线最多 6
 
 - **身份冲突锁存**（同 `motor_id` 跨总线/协议身份不符，`CONFIG_CONFLICT`）：
   ARD §9.3 刻意不可解除，**拒绝**（复位只能整机重启）。
-- **设备参数未初始化**（`last_error=40/41`，同为 `CONFIG_CONFLICT` 生命周期）：
-  改走一次 `REFRESH_PARAMS` 事务重跑回读与比对。真不一致仍判 `MISMATCH` 保持
-  锁存——清除只负责"允许重走授权链"，**不伪造一致**。
+- **设备参数未初始化**：⚠️ 2026-10-12 起它**不再是 `CONFIG_CONFLICT` 生命周期**、
+  也不进 `last_error`（只报 `dev_init`）。要重跑回读与比对仍走一次
+  `REFRESH_PARAMS` 事务；真不一致仍判 `MISMATCH`——清除只负责"允许重走授权链"，
+  **不伪造一致**。
 - **厂家故障**：发厂家清错帧（CERB 的 MIT 控制字 bit5）。是否真清掉由设备后续
   状态帧的 `fault_active` 判定，走既有 `FAULT → READY_DISABLED` 路径，无新确认
   机制。Vaxor 控制帧没有清错位 → 内核回 `UNSUPPORTED`（不猜厂家字节）。
@@ -417,14 +418,23 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 不是记录**——初始化语义的来源是固件那份表。
 
 - 一致 → 初始化通过，正常可控；
-- **初始化未完成一律不可使能**（`PENDING` 回读未收尾 / `MISMATCH` 不一致 /
-  `UNVERIFIED` 回读失败 / `NO_RECORD` 本机无该台记录）：进 `CONFIG_CONFLICT`、
-  拒绝 `SET_ENABLE`、不出运动帧，`system_status.last_error=40`（不一致）/`41`（未核对）/
-  `42`（无记录）+ `last_error_motor` 指出是哪一台；
+- ⚠️ **2026-10-12：初始化结论只报不拦（owner 为台架取消设备参数门禁）**。
+  `PENDING` 回读未收尾 / `MISMATCH` 不一致 / `UNVERIFIED` 回读失败 / `NO_RECORD`
+  本机无该台记录，**都不再改 lifecycle、不再拒绝 `SET_ENABLE`、不再拦运动帧**：该台
+  停在 `READY_DISABLED`，可直接使能与运动。结论仍如实上报——`dev_init`、
+  `EVENT_DEV_INIT`（reason = 结论、detail = 不一致槽位位图）、
+  `device_param_report`。代价：`dev_init ≠ OK` 时该台的限位/速度/力矩可能不是核对过的
+  值（影子取设备真值，读不到时回落型号标定），兜底只剩硬件急停与机械限位。
+  恢复门禁需改两处，缺一不可：`lib/motor_control/src/motor_control_internal.h` 的
+  `motor_control_dev_params_allow_motion` 改回 `(dev_init == NA || dev_init == OK)`；
+  `lib/motor_control/src/motor_control_config.c` 放开注释掉的
+  `freeze_entry_as_conflict(...)`。设备参数结论不再驱动 `CONFIG_CONFLICT` 生命周期与
+  `system_status.last_error`（那两者现在只对**身份冲突**保留）；
 - **写 ≠ 保存**：从 `param_set` 写回该台参数只改设备 RAM 与固件记录（写后立即重判，
   写齐即转好），要**持久化**必须再点「保存」（写 `0x2539` + 落 W25）。未保存的台在
   `micro_ros_up/device_param_report` 上 `record_dirty=true`，页面标黄。
-- **运行中回读发现不一致 → 软停**（阻尼帧、保留使能），不硬失能；
+- **运行中回读发现不一致 → 只报结论**（`dev_init=MISMATCH`），**不动运行态**：
+  不软停、不失能、不掉授权（2026-10-12 起；此前是"软停、保留使能"）；
 - 自动回读失败会退避重试（≤3 次、间隔 500ms；读是只读事务，重试无副作用），
   用尽才判 `41`，避免一次总线抖动就让该台使能不了；
 - 设备侧写事务读回核验通过后，内核用该事务实际编码出的原值同步固件记录并置
@@ -433,8 +443,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - W25 blob 升 v3（记录 120 B：多 4 个设备端原值 + 保护开关/方向 + 型号身份），
   v1/v2 各自就地迁移，不丢已存参数。
 
-⚠️ **本节新口径尚未上板验证**：`NO_RECORD`（`last_error=42`）、写/保存分离、
-`0x2539` 独立保存事务与 `device_param_report` 话题为 2026-09-21 的设计/host 口径；
+⚠️ **本节新口径尚未上板验证**：`NO_RECORD`（`dev_init=NO_RECORD`；2026-10-12 起不再有
+`last_error=42`）、写/保存分离、`0x2539` 独立保存事务与 `device_param_report` 话题为
+2026-09-21 的设计/host 口径；
 **「写后不保存即复位」仅台架可判**（host 没有 W25 与掉电语义）。真机台架项见
 `docs/plans/active/motor-runtime-validation.md`（TBD-CONFIG-01 追加项，**未运行**）。
 
@@ -443,7 +454,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 `1`（保护关）与 `0`（CW）。固件因此在设备参数**回读比对之前**插入 **0a 上电归一**阶段
 （`motor_control_config_step`）：保护恒写 `0`（生效），方向写 W25 记录值（记录里没有
 这一槽就**跳过、不猜**）。归一没成功（写/读回核验重试用尽）→ 该台判 `UNVERIFIED(41)`
-→ `CONFIG_CONFLICT` → **不可使能**，且不会发起回读。
+（2026-10-12 起只报结论，不再进 `CONFIG_CONFLICT`、不再拦使能），且不会发起回读。
 ⚠️ **顺序是契约**：写在比对之后会让每次上电白报一次不一致（比对先看到上电初值）。
 ⚠️ 归一未收尾前，人工 `COMMAND_REFRESH`（页面"回读"按钮）会被拒绝（BUSY）——否则
 读到的同样是归一前的值，还会把该台锁在冲突态、连归一都做不下去。
@@ -465,9 +476,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 （看门狗+限位保护开关：`0` = 保护生效、`1` = 关闭）与 `0x2541`（方向，0 = CW）也并入
 `REFRESH_PARAMS` 回读，与记录逐槽位比对。CERB 的关节限位**完全靠设备侧
 `0x607D` 强制执行**（`CAP_LIMIT_DEVICE_SIDE`，固件没有软限位兜底），所以
-`0x2650:00 = 1` 等于该关节**没有任何限位在执行**。任一不一致 → 该台进
-`CONFIG_CONFLICT`、拒绝 `SET_ENABLE`、不出运动帧（同"初始化未完成不可使能"
-口径；`EVENT_DEV_INIT` 的 reason 位图新增 bit4=保护开关、bit5=方向）。
+`0x2650:00 = 1` 等于该关节**没有任何限位在执行**。任一不一致 → 该台判
+`MISMATCH`，并在 `EVENT_DEV_INIT` 的 reason 位图点名 bit4=保护开关、bit5=方向
+（2026-10-12 起只报结论，不再进 `CONFIG_CONFLICT`、不再拒绝 `SET_ENABLE`）。
 **恢复路径（2026-09-19 起）**：`0x2650:00` 已进参数面，参数项
 `FIELD_LIMIT_PROTECT`（**1 = 保护生效**，0 = 关闭）可读可写，写事务 = SDO 写
 `23 50 26 00 00 …` + 读回核验，仅未运动时受理，写完记录自动同步。**保护开关是
@@ -495,8 +506,8 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 **上次成功落盘时设备里的值**，不是"保护=0"这个常量。两处必须记住：
 - **先关保护、再触发任意一次保存，记录就被重新基线化成"关"**——下次上电设备
   与记录一致，该台正常使能（而它此刻确实没有限位在执行）。保存触发不要求写参数：
-  `CONFIG_CONFLICT` 的台仍受理限位写事务，写成功即置脏等保存。所以别把"上电没报
-  冲突"当成"保护一定开着"。
+  `dev_init ≠ OK` 的台仍受理限位写事务，写成功即置脏等保存。所以别把"上电没报
+  不一致"当成"保护一定开着"。
 - **刚由 v2 迁移上来的记录，两槽不参与比对，直到第一次保存**（迁移只搬低 4 位），
   即每块刚升级的板子都处在这个状态里。
 

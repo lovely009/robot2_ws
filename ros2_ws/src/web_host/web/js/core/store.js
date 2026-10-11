@@ -69,3 +69,18 @@ export function syncWriteButtons(ids, allow) {
     if (el) el.disabled = !allow;
   }
 }
+
+// 电机汇总计数：顶栏 chips 与状态翼共用同一口径（在线/运行/冲突/故障），避免
+// 两处各算一遍导致漂移。
+export function countMotors() {
+  let online = 0, fault = 0, active = 0, conflict = 0;
+  for (const r of store.motors.values()) {
+    const st = r.status || {}, t = r.topo || {};
+    const isOnline = st.online !== undefined ? st.online : t.online;
+    if (isOnline) online++;
+    if (st.unified_fault_code) fault++;
+    if (st.lifecycle === 4) active++;                       // ACTIVE = 固件此刻真在运动
+    if (t.conflict || st.lifecycle === 7) conflict++;
+  }
+  return {online, total: store.motors.size, fault, active, conflict};
+}

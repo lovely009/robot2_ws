@@ -72,7 +72,12 @@
     <aside class="wing" id="wingPanel" aria-label="状态翼">
       <div class="wing-rail" id="wingRail"></div>
       <div class="wing-head">状态<span><button class="wing-toggle" id="wingToggle" aria-label="收起或展开状态翼">◂</button></span></div>
-      <div id="wingBody"></div>
+      <div id="wingBody">
+        <div id="wingArm" class="wing-arm"></div>
+        <div class="wing-counts" id="wingCounts">--</div>
+        <ul class="wing-alerts" id="wingAlerts"><li class="empty">无告警</li></ul>
+        <div class="wing-last tiny muted" id="wingLast">--</div>
+      </div>
     </aside>
   </div>
 

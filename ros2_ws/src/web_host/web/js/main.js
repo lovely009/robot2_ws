@@ -1,6 +1,6 @@
 // 入口：装外壳、初始化路由、挂面板、建立全局订阅、起 rAF 渲染循环。
 // 屏切换只换主区里克隆的模板与其面板；顶栏/左导航/状态翼不重建。
-import { store, markDirty, onDirty, runRenderLoop, DIRTY } from './core/store.js';
+import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors } from './core/store.js';
 import { $, FOLD_KEY, WING_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
   from './core/format.js';
 import { SCREENS, initRouter, currentScreen } from './core/router.js';
@@ -113,25 +113,17 @@ function renderShell(dirty) {
   }
 }
 
-// 顶栏汇总 chips（在线/运行/冲突/故障）：统计口径与重构前 renderMotors 的 chips 段
-// 逐字一致；chipHz 是 1 s 窗口计数，在 boot 里起定时器（脏帧驱动做不到"每秒"）。
+// 顶栏汇总 chips（在线/运行/冲突/故障）：计数口径与状态翼共用 store.js 的
+// countMotors()；chipHz 是 1 s 窗口计数，在 boot 里起定时器（脏帧驱动做不到"每秒"）。
 function renderChips() {
-  let onlineN = 0, faultN = 0, activeN = 0, conflictN = 0;
-  for (const r of store.motors.values()) {
-    const st = r.status || {}, t = r.topo || {};
-    const online = st.online !== undefined ? st.online : t.online;
-    if (online) onlineN++;
-    if (st.unified_fault_code) faultN++;
-    if (st.lifecycle === 4) activeN++;                       // ACTIVE = 固件此刻真在运动
-    if (t.conflict || st.lifecycle === 7) conflictN++;
-  }
-  $('chipOnline').textContent = `在线 ${onlineN}/${store.motors.size}`;
-  $('chipActive').textContent = `运行 ${activeN}`;
-  $('chipActive').classList.toggle('ok', activeN > 0);
-  $('chipConflict').textContent = `冲突 ${conflictN}`;
-  $('chipConflict').classList.toggle('warn', conflictN > 0);
-  $('chipFault').textContent = `故障 ${faultN}`;
-  $('chipFault').classList.toggle('err', faultN > 0);
+  const {online, total, active, conflict, fault} = countMotors();
+  $('chipOnline').textContent = `在线 ${online}/${total}`;
+  $('chipActive').textContent = `运行 ${active}`;
+  $('chipActive').classList.toggle('ok', active > 0);
+  $('chipConflict').textContent = `冲突 ${conflict}`;
+  $('chipConflict').classList.toggle('warn', conflict > 0);
+  $('chipFault').textContent = `故障 ${fault}`;
+  $('chipFault').classList.toggle('err', fault > 0);
 }
 
 onDirty((dirty) => {
@@ -231,6 +223,8 @@ function boot() {
   initKeys();
   initTopbar();
   initRouter({onScreenChange: showScreen});
+  // 状态翼是外壳的一部分（不进屏模板），在这里挂一次后常驻。
+  mountPanel('wing', $('wingBody'));
   runRenderLoop();
   // 运动流频率：1 s 窗口计数。
   let lastMotionCount = 0;

@@ -68,8 +68,22 @@ body.offline .main, body.offline .wing { opacity: .6; }
 .wing-head { display: flex; align-items: center; justify-content: space-between; color: var(--dim); font-size: var(--fs-xs); }
 .wing-toggle { background: transparent; border: none; color: var(--dim); cursor: pointer; padding: 0 3px; }
 body.wing-collapsed .wing > *:not(.wing-rail) { display: none; }
-.wing-rail { display: none; flex-direction: column; align-items: center; gap: 6px; font: var(--fs-xs) var(--mono); }
+.wing-rail { display: none; flex-direction: column; align-items: center; gap: 6px; font: var(--fs-xs) var(--mono); cursor: pointer; }
 body.wing-collapsed .wing-rail { display: flex; }
+
+/* ---- 状态翼正文：js/panels/wing.js 直接渲染 #wingBody 的子元素（不克隆模板） ---- */
+.wing-arm { height: 150px; }   /* 臂缩略图挂载点（arm 面板接入后填充） */
+.wing-counts { padding: 4px 0; font: var(--fs-sm) var(--mono); color: var(--dim); }
+.wing-counts.err { color: var(--warn); }
+.wing-alerts { list-style: none; margin: 0; padding: 0; display: flex;
+  flex-direction: column; gap: 4px; }
+.wing-alerts .alert { padding: 4px 8px; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--panel-2);
+  font-size: var(--fs-sm); cursor: pointer; }
+.wing-alerts .alert:hover { border-color: var(--warn); }
+.wing-alerts .empty { color: var(--dim-2); font-size: var(--fs-sm); }
+.wing-last { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line);
+  color: var(--dim-2); font-size: var(--fs-xs); }
 
 /* ---------- 浮层（说明 / 窄屏连接控件） ---------- */
 .overlay { position: fixed; inset: 0; background: rgba(4, 7, 12, .72); display: none;

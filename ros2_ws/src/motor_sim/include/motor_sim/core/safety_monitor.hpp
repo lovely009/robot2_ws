@@ -76,6 +76,9 @@ private:
   struct RecentFrame {
     std::vector<uint8_t> payload;
     TimePoint received_at;
+    // 窗口内连续出现 payload 冲突的次数；单个冲突可能是同一控制器的合法状态
+    // 切换（激活轮询帧 -> 使能帧），只有连续冲突才是双控制器证据。
+    std::size_t conflict_streak{0U};
   };
 
   std::size_t axis_count_;

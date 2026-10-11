@@ -6,6 +6,16 @@
 
 namespace motor_sim::core {
 
+namespace {
+
+// 窗口内连续 payload 冲突达到该次数才判定"双控制器"。单个冲突不足以定罪：
+// 驱动器激活时先以 2 ms 节拍发零增益轮询帧、收齐反馈后 0.1 ms 内紧接着发
+// 使能帧（见 canfd_system.cpp on_activate），同一 CAN ID 的 payload 会在
+// duplicate_window 内变化——那是同一个控制器的合法状态切换，不是冲突。
+constexpr std::size_t kConflictsToLatch = 2U;
+
+}  // namespace
+
 SafetyMonitor::SafetyMonitor(
     const std::size_t axis_count,
     const std::chrono::milliseconds command_timeout,
@@ -72,10 +82,15 @@ void SafetyMonitor::observe_valid_command(
       now >= existing->second.received_at &&
       now - existing->second.received_at <= duplicate_window_ &&
       existing->second.payload != payload) {
-    latch(Fault::DuplicateController);
-    return;
+    const std::size_t conflicts = existing->second.conflict_streak + 1U;
+    if (conflicts >= kConflictsToLatch) {
+      latch(Fault::DuplicateController);
+      return;
+    }
+    recent_frames_[key] = {payload, now, conflicts};
+  } else {
+    recent_frames_[key] = {payload, now, 0U};
   }
-  recent_frames_[key] = {payload, now};
   if (enabled_[motor_index]) {
     last_valid_commands_[motor_index] = now;
   }

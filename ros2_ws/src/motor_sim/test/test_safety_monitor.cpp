@@ -56,8 +56,29 @@ TEST(SafetyMonitor, DifferentDuplicatePayloadWithinWindowLatches) {
   core::SafetyMonitor safety(30U, 150ms, 2ms);
   safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));
   safety.observe_valid_command(0U, "legs", 3U, {0x02U}, at_us(1500));
+  // 单次冲突不锁存（可能是同一控制器的合法切换）；连续冲突才是双控制器。
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+  safety.observe_valid_command(0U, "legs", 3U, {0x03U}, at_us(3000));
   EXPECT_EQ(safety.fault(), core::Fault::DuplicateController);
   EXPECT_TRUE(safety.latched());
+}
+
+TEST(SafetyMonitor, SingleConflictingPayloadDoesNotLatch) {
+  // 驱动器激活序列：零增益轮询帧后 0.1 ms 内发使能帧，payload 变化但只有一个
+  // 控制器，不得锁存（canfd_system.cpp on_activate 的合法节奏）。
+  core::SafetyMonitor safety(30U, 150ms, 2ms);
+  safety.observe_valid_command(0U, "legs", 3U, {0x0CU}, at_us(0));
+  safety.observe_valid_command(0U, "legs", 3U, {0xCCU}, at_us(100));
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+  EXPECT_FALSE(safety.latched());
+  // 窗口内的相同重发复位冲突计数，之后再来单次冲突也不锁存。
+  safety.observe_valid_command(0U, "legs", 3U, {0xCCU}, at_us(1200));
+  safety.observe_valid_command(0U, "legs", 3U, {0x0CU}, at_us(2300));
+  EXPECT_FALSE(safety.latched());
+  // 超出冲突窗口到达的命令同样复位冲突计数。
+  safety.observe_valid_command(0U, "legs", 3U, {0xCCU}, at_us(100000));
+  safety.observe_valid_command(0U, "legs", 3U, {0x0CU}, at_us(115000));
+  EXPECT_FALSE(safety.latched());
 }
 
 TEST(SafetyMonitor, IdenticalRetransmissionDoesNotLatch) {
@@ -155,6 +176,7 @@ TEST(SafetyMonitorDebugMode, DuplicateControllerBrakesUntilExplicitDisable) {
   safety.set_enabled(0U, true, at_us(0));
   safety.observe_valid_command(0U, "arm", 3U, {0x01U}, at_us(0));
   safety.observe_valid_command(0U, "arm", 3U, {0x02U}, at_us(1500));
+  safety.observe_valid_command(0U, "arm", 3U, {0x03U}, at_us(3000));
 
   EXPECT_FALSE(safety.latched());
   EXPECT_EQ(safety.snapshot().fault, core::Fault::DuplicateController);

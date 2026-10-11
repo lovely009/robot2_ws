@@ -1,0 +1,1091 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="胸部整体结构装配体-上身部分">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.000149061925499128 0.0057171849062671 0.40677126376833"
+        rpy="0 0 0" />
+      <mass
+        value="8.57778312811093" />
+      <inertia
+        ixx="0.113565078565821"
+        ixy="1.34156454353532E-05"
+        ixz="1.21913303081908E-05"
+        iyy="0.119654698226899"
+        iyz="-6.27528770800969E-05"
+        izz="0.0134266191819063" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Joint_link1">
+    <inertial>
+      <origin
+        xyz="0.00357026354143647 0.000508636144403884 0.00510937312340899"
+        rpy="0 0 0" />
+      <mass
+        value="0.064857596848963" />
+      <inertia
+        ixx="1.02785921486613E-05"
+        ixy="-3.21717474625362E-09"
+        ixz="6.52724602959559E-09"
+        iyy="8.15659789109352E-06"
+        iyz="-3.70031872976409E-10"
+        izz="1.40314556585274E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link1"
+    type="revolute">
+    <origin
+      xyz="0.059 0.067 0.684"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link2">
+    <inertial>
+      <origin
+        xyz="-0.00851146551893234 0.017449582327289 -0.0285000231223018"
+        rpy="0 0 0" />
+      <mass
+        value="0.159413233762392" />
+      <inertia
+        ixx="7.15839396019313E-05"
+        ixy="-3.07741799097935E-06"
+        ixz="5.10456957579686E-11"
+        iyy="8.16976495749618E-05"
+        iyz="-2.3500174756146E-11"
+        izz="3.51540600938213E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link2"
+    type="revolute">
+    <origin
+      xyz="0.005 -0.0285 0.015"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Joint_link1" />
+    <child
+      link="Joint_link2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link3">
+    <inertial>
+      <origin
+        xyz="0.00809999925830085 0.000188339730015238 0.0258610297744193"
+        rpy="0 0 0" />
+      <mass
+        value="0.14416652274236" />
+      <inertia
+        ixx="7.48622743025778E-05"
+        ixy="-2.85539310227506E-07"
+        ixz="-4.6681861421269E-06"
+        iyy="3.94233244539478E-05"
+        iyz="3.19796497440859E-07"
+        izz="8.4643276299202E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3"
+    type="revolute">
+    <origin
+      xyz="0.0245943163971717 0.0413233541832598 -0.0285000000000001"
+      rpy="0.263244389000761 1.5707963267949 0" />
+    <parent
+      link="Joint_link2" />
+    <child
+      link="Joint_link3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link4">
+    <inertial>
+      <origin
+        xyz="0.00525932600825252 -0.0444901751738818 -0.00591399791499397"
+        rpy="0 0 0" />
+      <mass
+        value="0.153514246684906" />
+      <inertia
+        ixx="0.000149490137115832"
+        ixy="1.12402567770464E-05"
+        ixz="2.06604341330504E-06"
+        iyy="5.50647807114408E-05"
+        iyz="-1.74834741822185E-05"
+        izz="0.000180464371123789" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link4"
+    type="revolute">
+    <origin
+      xyz="-0.0224999470062313 4.88335575208193E-05 0.0384999999999998"
+      rpy="3.14159265358979 -1.5707963267949 0" />
+    <parent
+      link="Joint_link3" />
+    <child
+      link="Joint_link4" />
+    <axis
+      xyz="0 0.00217038033425075 0.999997644721829" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link5">
+    <inertial>
+      <origin
+        xyz="0.00108297941851598 -0.000156932848028812 0.106203320148766"
+        rpy="0 0 0" />
+      <mass
+        value="0.369502137946348" />
+      <inertia
+        ixx="0.00046741491449372"
+        ixy="3.89315517372897E-07"
+        ixz="-1.50703640119046E-06"
+        iyy="0.000489052318837031"
+        iyz="9.4038174398903E-07"
+        izz="0.000100330767633753" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5"
+    type="revolute">
+    <origin
+      xyz="0.0116401694807474 -0.0986661682631066 -0.0232859117335455"
+      rpy="1.19005347632264 1.56499608495549 -0.263244389000761" />
+    <parent
+      link="Joint_link4" />
+    <child
+      link="Joint_link5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link6">
+    <inertial>
+      <origin
+        xyz="-0.00473463332937096 -0.0304340260016498 -0.00534409476444236"
+        rpy="0 0 0" />
+      <mass
+        value="0.0846833753062099" />
+      <inertia
+        ixx="6.7174421842715E-05"
+        ixy="-6.47534161825887E-06"
+        ixz="-2.16187947588102E-06"
+        iyy="4.0745994127565E-05"
+        iyz="-1.61125680599712E-05"
+        izz="6.40616755651339E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link6"
+    type="revolute">
+    <origin
+      xyz="0.00612809594797811 0.0226976854306357 0.192800000000001"
+      rpy="-1.5707963267949 0.00225725350078335 -0.00563930559871364" />
+    <parent
+      link="Joint_link5" />
+    <child
+      link="Joint_link6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link7">
+    <inertial>
+      <origin
+        xyz="0.000374045397747214 0.00269340257844891 0.0536110283097775"
+        rpy="0 0 0" />
+      <mass
+        value="0.169185128298962" />
+      <inertia
+        ixx="0.000123585301705816"
+        ixy="-2.14913792509885E-08"
+        ixz="1.47931881236953E-07"
+        iyy="0.000124753752171267"
+        iyz="-2.06960403120358E-06"
+        izz="1.78478434675954E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link7"
+    type="revolute">
+    <origin
+      xyz="-0.00653008315051462 -0.0904123775011198 -0.0267999999999953"
+      rpy="1.5707963267949 0.0682118101004119 0.0273487668265212" />
+    <parent
+      link="Joint_link6" />
+    <child
+      link="Joint_link7" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link8">
+    <inertial>
+      <origin
+        xyz="-1.35449002014454E-09 -1.15049098026176E-09 0.0142698989540326"
+        rpy="0 0 0" />
+      <mass
+        value="0.00316185105050286" />
+      <inertia
+        ixx="6.2965242336549E-08"
+        ixy="3.26103386359427E-09"
+        ixz="-1.03124258399328E-14"
+        iyy="1.82084171024789E-07"
+        iyz="3.01022154029566E-14"
+        izz="1.36807739327045E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link8.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link8.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link8"
+    type="revolute">
+    <origin
+      xyz="-0.000817907110266025 0.0119720937165971 0.138800000000188"
+      rpy="-1.5707963267949 0.0273487668265213 -3.07338084348938" />
+    <parent
+      link="Joint_link7" />
+    <child
+      link="Joint_link8" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link9">
+    <inertial>
+      <origin
+        xyz="0.00492636887208575 -0.00680837214055263 -0.0150161543405093"
+        rpy="0 0 0" />
+      <mass
+        value="0.00996523801395195" />
+      <inertia
+        ixx="1.7948654373367E-06"
+        ixy="5.22538343332756E-08"
+        ixz="-7.9706063338922E-10"
+        iyy="1.43130246495061E-06"
+        iyz="1.12159779178907E-09"
+        izz="7.20074574064282E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link9.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link9.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link9"
+    type="revolute">
+    <origin
+      xyz="0.0149943906867874 -0.00041018036518975 0.0160000000003834"
+      rpy="-1.5707963267949 1.18993078739065 -1.59814509362142" />
+    <parent
+      link="Joint_link8" />
+    <child
+      link="Joint_link9" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link1.1">
+    <inertial>
+      <origin
+        xyz="-0.00325577982856901 0.000661699297615975 0.00977986697648946"
+        rpy="0 0 0" />
+      <mass
+        value="0.0657862226139903" />
+      <inertia
+        ixx="1.02892791086549E-05"
+        ixy="-3.21717206077311E-09"
+        ixz="-6.52721121576844E-09"
+        iyy="8.16728484384517E-06"
+        iyz="3.69955786825892E-10"
+        izz="1.40339732053682E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link1.1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link1.1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link1.1"
+    type="revolute">
+    <origin
+      xyz="-0.059 0.067 0.6792"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_link1.1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link2.2">
+    <inertial>
+      <origin
+        xyz="0.0085114664146142 0.0174495884649991 -0.0327999785776854"
+        rpy="0 0 0" />
+      <mass
+        value="0.159413207765203" />
+      <inertia
+        ixx="7.15839566324302E-05"
+        ixy="3.07741945943327E-06"
+        ixz="4.29222261619789E-11"
+        iyy="8.16976523037537E-05"
+        iyz="-3.33831050836403E-11"
+        izz="3.51540682232004E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link2.2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link2.2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link2.2"
+    type="revolute">
+    <origin
+      xyz="-0.005 -0.0328 0.0198"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Joint_link1.1" />
+    <child
+      link="Joint_link2.2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link3.3">
+    <inertial>
+      <origin
+        xyz="-0.00822301839856973 0.000182965653620693 0.0260498021633785"
+        rpy="0 0 0" />
+      <mass
+        value="0.147880114471696" />
+      <inertia
+        ixx="7.49046832063616E-05"
+        ixy="2.85488378728636E-07"
+        ixz="4.6678676774477E-06"
+        iyy="3.94670133651195E-05"
+        iyz="3.19364008511377E-07"
+        izz="8.46526826491487E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link3.3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link3.3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.3"
+    type="revolute">
+    <origin
+      xyz="-0.0247874265620014 0.041375397090937 -0.0328000000000001"
+      rpy="2.87834826458903 -1.5707963267949 0" />
+    <parent
+      link="Joint_link2.2" />
+    <child
+      link="Joint_link3.3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link4.4">
+    <inertial>
+      <origin
+        xyz="0.0068989316738151 -0.0442654988615287 0.0059144798628924"
+        rpy="0 0 0" />
+      <mass
+        value="0.153514207318388" />
+      <inertia
+        ixx="0.000148484954426596"
+        ixy="1.48406692471775E-05"
+        ixz="-2.73063606326189E-06"
+        iyy="5.60703352742507E-05"
+        iyz="1.73935207965128E-05"
+        izz="0.00018046397109149" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link4.4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link4.4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link4.4"
+    type="revolute">
+    <origin
+      xyz="0.0224999470062341 4.8833557566158E-05 0.0383000000000045"
+      rpy="3.14159265358979 -1.5707963267949 0" />
+    <parent
+      link="Joint_link3.3" />
+    <child
+      link="Joint_link4.4" />
+    <axis
+      xyz="0 0.00217038033425239 -0.999997644721829" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link5.5">
+    <inertial>
+      <origin
+        xyz="-0.0010846183907402 0.000145225452851869 0.106203351056385"
+        rpy="0 0 0" />
+      <mass
+        value="0.369502040522477" />
+      <inertia
+        ixx="0.000467408600148213"
+        ixy="1.55578785138283E-07"
+        ixz="1.51720168729356E-06"
+        iyy="0.000489057722582705"
+        iyz="-9.23940807669994E-07"
+        izz="0.0001003307584867" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link5.5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link5.5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.5"
+    type="revolute">
+    <origin
+      xyz="0.0153164675611487 -0.0981624225837178 0.0232870050558366"
+      rpy="-1.98890889147474 1.56551498470161 2.87834826458903" />
+    <parent
+      link="Joint_link4.4" />
+    <child
+      link="Joint_link5.5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link6.6">
+    <inertial>
+      <origin
+        xyz="-0.00473573373188627 -0.0304339068740307 -0.00554409755326042"
+        rpy="0 0 0" />
+      <mass
+        value="0.0846835530197676" />
+      <inertia
+        ixx="6.71739807985806E-05"
+        ixy="-6.47629976266083E-06"
+        ixz="-2.16245206642336E-06"
+        iyy="4.07464496030114E-05"
+        iyz="-1.61124918577152E-05"
+        izz="6.40616680209295E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link6.6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link6.6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link6.6"
+    type="revolute">
+    <origin
+      xyz="-0.00588156530846468 -0.022962543987859 0.192800000000001"
+      rpy="-1.5707963267949 0.00229314761102623 -3.13643148533512" />
+    <parent
+      link="Joint_link5.5" />
+    <child
+      link="Joint_link6.6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link7.7">
+    <inertial>
+      <origin
+        xyz="-0.00106564795386641 -0.00255096690431171 0.0519502064427584"
+        rpy="0 0 0" />
+      <mass
+        value="0.166521141816697" />
+      <inertia
+        ixx="0.00012355014481859"
+        ixy="1.30281453287688E-07"
+        ixz="1.20780468606104E-07"
+        iyy="0.000124711865124757"
+        iyz="2.07136746340222E-06"
+        izz="1.78201615744877E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link7.7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link7.7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link7.7"
+    type="revolute">
+    <origin
+      xyz="-0.00652513557524406 -0.0907120311595487 -0.0269999999999949"
+      rpy="-1.5707963267949 0.0613885804210941 -3.11427978087351" />
+    <parent
+      link="Joint_link6.6" />
+    <child
+      link="Joint_link7.7" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link8.8">
+    <inertial>
+      <origin
+        xyz="1.42331721408873E-09 -1.68111236042989E-09 -0.0142698990437963"
+        rpy="0 0 0" />
+      <mass
+        value="0.00316185096500011" />
+      <inertia
+        ixx="6.29650075866137E-08"
+        ixy="-3.25675796127739E-09"
+        ixz="-1.10439109193465E-14"
+        iyy="1.82084404770054E-07"
+        iyz="-4.00512286713947E-14"
+        izz="1.36807736288919E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link8.8.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link8.8.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link8.8"
+    type="revolute">
+    <origin
+      xyz="-0.000736200359401584 -0.0119773957532853 0.1385"
+      rpy="-1.5707963267949 -0.0273128727162783 3.0802040731687" />
+    <parent
+      link="Joint_link7.7" />
+    <child
+      link="Joint_link8.8" />
+    <axis
+      xyz="0.0005945091986395 0.716549536606689 0.69753595473463" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+  <link
+    name="Joint_link9.9">
+    <inertial>
+      <origin
+        xyz="-0.00161360346968593 -0.0086500603585653 0.0147550467915644"
+        rpy="0 0 0" />
+      <mass
+        value="0.00996523949181607" />
+      <inertia
+        ixx="1.66030931813487E-06"
+        ixy="-1.83340386449628E-07"
+        ixz="6.44454907421276E-09"
+        iyy="1.56524029652487E-06"
+        iyz="2.03533895307192E-08"
+        izz="7.20693165801382E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link9.9.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胸部整体结构装配体-上身部分/meshes/Joint_link9.9.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link9.9"
+    type="revolute">
+    <origin
+      xyz="0.0149944054001872 0.000409642154613421 -0.0160000000003833"
+      rpy="-1.56997183563519 -1.15268952877548 1.56989411882467" />
+    <parent
+      link="Joint_link8.8" />
+    <child
+      link="Joint_link9.9" />
+    <axis
+      xyz="0.0114546791943321 0.0249570205409516 -0.999622897622035" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="10.0"
+      velocity="1.0" />
+  </joint>
+</robot>

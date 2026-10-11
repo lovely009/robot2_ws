@@ -253,3 +253,19 @@ def test_importmap_targets_exist(index):
         if value.startswith(('http://', 'https://', '//')):
             continue
         assert (WEB / value).exists(), f'importmap 目标不存在：{value}'
+
+
+# 13. 旧版页面（/legacy.html）引用的资源都在磁盘上。
+#     它跟新版并存、走同一份静态服务，但不在新版的屏/面板契约里——也就没有任何东西
+#     拦得住「app.js 被当成死代码删掉」这类改动，而页面只在浏览器里静默失效。
+LEGACY = WEB / 'legacy.html'
+
+
+def test_legacy_assets_exist():
+    assert LEGACY.is_file(), f'缺少旧版入口 {LEGACY}（对应 http://<host>:8080/legacy.html）'
+    parser = IndexParser()
+    parser.feed(LEGACY.read_text(encoding='utf-8'))
+    missing = [ref for ref in parser.assets
+               if not ref.startswith(('http://', 'https://', '//', 'data:'))
+               and not (WEB / ref).is_file()]
+    assert not missing, f'legacy.html 引用了不存在的文件：{missing}'

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<!--
+  旧版界面（legacy）。与新版（index.html：外壳/屏/面板三层）并存，走同一份静态服务
+  与 /api 后端，入口是 /legacy.html。新版仍在 /。
+
+  内容取自 34e9554 的 web/index.html（重构前最后一版：以臂为中心的单页 + 8 抽屉），
+  除下列三处为使它在重构后的资源布局下仍能工作所必需的最小改动外，与原文一致：
+    1. 标题加「（旧版）」——两版会同时开在两个标签页里；
+    2. 臂视图几何从 web/robot_arm_gazebo 符号链接改为 static_server 的 /robot_arm_gazebo
+       挂载（该符号链接随重构退役，见 ADR 0010）；
+    3. 默认模型由已退役的 zhoubuguanjie_youbi_001 改为 _002。
+
+  它不参与新版的契约测试（test_web_assets.py 只解析 index.html），但
+  test_legacy_assets_exist 会盯住它引用的这四份资源不被当成死代码删掉。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot2 · Web 上位机（旧版）</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- vendor 依赖走原生 import map：three 与 urdf-loader 都 vendor 在 web/vendor/，
+       不需要 Node 构建链（web/ 现在仍只有静态文件）。
+       "three/examples/jsm/" 前缀映射是必需的——URDFLoader 顶层就 import 了
+       STLLoader 与 ColladaLoader（后者又拉 TGALoader）。 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.min.js",
+      "three/examples/jsm/": "./vendor/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <h1>Robot2 Web 上位机</h1>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chipOnline">在线 -/-</span>
+      <span class="chip" id="chipActive">运行 0</span>
+      <span class="chip" id="chipConflict">冲突 0</span>
+      <span class="chip" id="chipFault">故障 0</span>
+      <span class="chip" id="chipHz">运动流 -- Hz</span>
+    </div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">未连接</span>
+      <label class="port-picker" title="选择 micro-ROS 控制板串口">
+        <span>控制板</span>
+        <select id="serialPort" aria-label="控制板串口">
+          <option value="">扫描串口中…</option>
+        </select>
+      </label>
+      <button id="btnPortRefresh" class="secondary" title="重新扫描串口">扫描</button>
+      <input id="rosUrl" type="text" spellcheck="false" placeholder="ws://localhost:9090">
+      <button id="btnConnect" title="启动所选串口的 micro-ROS Agent，然后连接 rosbridge">启动并连接</button>
+      <button id="btnDisconnect" class="secondary">断开</button>
+      <span id="agentText" class="agent-state">Agent 未启动</span>
+      <button id="btnAgentStop" class="secondary" title="停止由本页面启动的 Agent" disabled>停止 Agent</button>
+    </div>
+  </header>
+
+  <!-- 单页骨架：臂恒在中间，点关节 → 右栏就地展开该台。
+       所有面板都是 <details>（默认展开、可收起）——收起时内容仍留在 DOM 上，
+       页面的定时渲染一直在往里写。summary 里只放标题：放按钮/开关进去会连带
+       触发展开收起。 -->
+  <main class="shell">
+
+    <!-- ============ 左栏：关节索引 ============ -->
+    <aside class="rail">
+      <details class="card" data-fold="joints" open>
+        <summary>关节 <span class="spacer"></span>
+          <span class="sum" id="sumJoints">--</span></summary>
+        <ul class="joints" id="motorRows">
+          <li class="empty">等待 motor_topology…</li>
+        </ul>
+      </details>
+    </aside>
+
+    <!-- ============ 中栏：臂（主角） ============ -->
+    <section class="stage">
+      <canvas id="arm3d"></canvas>
+      <div class="hud" id="armHud">臂视图加载中…</div>
+      <div class="legend">
+        <span><i class="sw" style="background:#3d9bff"></i>实际</span>
+        <span><i class="sw ghost"></i>目标</span>
+        <span><i class="dt" style="background:#2fd07a"></i>就绪</span>
+        <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
+        <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
+        <span class="spacer"></span>
+        <span>拖拽旋转 · 点击关节</span>
+      </div>
+    </section>
+
+    <!-- ============ 右栏：选中关节就地 ============ -->
+    <aside class="detail">
+      <details class="card" data-fold="sel" open>
+        <summary id="selTitle">未选中关节（点左栏或臂上的小球）</summary>
+        <div class="kv">
+          <div><span>位置</span><b id="selPosition">--</b></div>
+          <div><span>速度</span><b id="selVelocity">--</b></div>
+          <div><span>力矩</span><b id="selEffort">--</b></div>
+          <div><span>电流</span><b id="selCurrent">--</b></div>
+          <div><span>温度</span><b id="selTemp">--</b></div>
+          <div><span>跟随误差</span><b id="selErr">--</b></div>
+          <div><span>命令源</span><b id="selSource">--</b></div>
+          <div><span>故障</span><b id="selFault">--</b></div>
+          <div><span>测量年龄</span><b id="selAge">--</b></div>
+        </div>
+      </details>
+    </aside>
+  </main>
+
+  <!-- ============ 常驻下发条 ============ -->
+  <details class="sendbar" data-fold="send" open>
+    <summary title="/micro_ros_do/motor_command_array">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+    <div class="table-wrap">
+      <table class="cmd">
+        <thead>
+          <tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr>
+        </thead>
+        <tbody id="cmdRows"></tbody>
+      </table>
+    </div>
+    <div class="ctrl-row wrap">
+      <button id="btnAddRow">+ 添加</button>
+      <button id="btnFillOnline" class="secondary">填入在线电机（原位）</button>
+      <button id="btnClearRows" class="secondary">清空</button>
+      <span class="spacer"></span>
+      <button id="btnSendOnce" class="primary">单发一次</button>
+      <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
+    </div>
+    <div id="cmdResult" class="result tiny"></div>
+  </details>
+
+  <!-- ============ 参数与策略（页面下方，两栏） ============ -->
+  <!-- 设备限值与使能/增益不是一回事：前者以驱动板为准、可回读；后者只写不回读，
+       框里是页面最后一次下发的值。并排放、各自一栏，不混在同一张表里。 -->
+  <section class="bottom">
+    <details class="card" data-fold="dev" open>
+      <summary>设备参数 <span class="spacer"></span>
+        <span class="sum" id="sumDev">未读取</span></summary>
+      <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
+      <div class="ctrl-row wrap">
+        <button id="btnParamLoad" class="tiny-btn">读取</button>
+        <button id="btnParamApply" class="tiny-btn primary">下发修改</button>
+        <button id="btnParamSave" class="tiny-btn">保存 W25</button>
+        <span class="spacer"></span>
+        <label class="check tiny"><input type="checkbox" id="chkAllParams"> 显示全部</label>
+      </div>
+      <div id="paramResult" class="result tiny"></div>
+      <div class="table-wrap">
+        <table class="params">
+          <thead>
+            <tr>
+              <th>ID</th><th>型号</th><th>状态</th><th>来源</th>
+              <th>pos_min<small>rad</small></th><th>pos_max<small>rad</small></th>
+              <th>vel_max<small>rad/s</small></th><th>torque_max<small>A</small></th>
+              <th>限位保护</th><th>方向</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="paramRows">
+            <tr class="empty"><td colspan="10">连接后点「读取」载入当前参数</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="card" data-fold="pol" open>
+      <summary>使能与增益 <span class="spacer"></span>
+        <span class="sum" id="sumPol">--</span></summary>
+      <div class="table-wrap">
+        <table class="params">
+          <thead>
+            <tr><th>ID</th><th>型号</th><th>启用</th><th>kp</th><th>kd</th><th></th></tr>
+          </thead>
+          <tbody id="polRows">
+            <tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="polResult" class="result tiny"></div>
+    </details>
+  </section>
+
+  <!-- ============ 底部抽屉 ============ -->
+  <section class="drawer">
+    <details class="sec" data-fold="d-simulation" open>
+      <summary>仿真<span class="spacer"></span><span class="sum" id="simSummary">未启动</span></summary>
+      <div class="sim-panel">
+        <div class="sim-grid">
+          <label class="sim-field">控制端
+            <select id="simMode">
+              <option value="host">主机驱动闭环</option>
+              <option value="external">外部控制器</option>
+              <option value="firmware">STM32 固件 HIL</option>
+            </select>
+          </label>
+          <label class="sim-field">CAN 接口
+            <select id="simTransport">
+              <option value="vcan">vcan（纯软件）</option>
+              <option value="socketcan">SocketCAN</option>
+              <option value="slcan">SLCAN / CANable</option>
+            </select>
+          </label>
+          <label class="sim-field">模型
+            <select id="simModel"><option value="">读取模型中…</option></select>
+          </label>
+          <div class="sim-field" id="simVcanFields">
+            <label for="simVcanName">vcan 接口名</label>
+            <input id="simVcanName" type="text" value="robot_vcan0" maxlength="15" spellcheck="false">
+          </div>
+          <label class="sim-field" id="simSocketFields" hidden>模拟器 CAN
+            <select id="simInterface"><option value="">扫描 SocketCAN…</option></select>
+          </label>
+          <label class="sim-field" id="simDriverCanField" hidden>驱动端 CAN
+            <select id="simDriverInterface"><option value="">扫描 SocketCAN…</option></select>
+          </label>
+          <label class="sim-field" id="simSlcanFields" hidden>模拟器串口
+            <select id="simTty"><option value="">扫描串口…</option></select>
+          </label>
+          <label class="sim-field" id="simDriverTtyField" hidden>驱动端串口
+            <select id="simDriverTty"><option value="">扫描串口…</option></select>
+          </label>
+        </div>
+        <div class="sim-hint tiny muted" id="simHostBusHint" hidden>
+          主机驱动闭环的驱动端与模拟器端要接在同一条 CAN 总线上。
+        </div>
+        <label class="check sim-safety" id="simPhysicalGuard" hidden title="SocketCAN/SLCAN 会接入物理总线；启动前确认该总线上没有真实电机">
+          <input id="simBusIsolated" type="checkbox">
+          物理 CAN 总线仅连接仿真器与控制端，没有真机电机
+        </label>
+        <div class="sim-hint tiny muted" id="simFirmwareHint" hidden>
+          启动后在顶栏选择 STM32 USB CDC 串口，再点「启动并连接」接入 micro-ROS Agent。
+        </div>
+        <div class="ctrl-row wrap">
+          <button id="btnSimStart" class="primary">启动仿真</button>
+          <button id="btnSimStop" class="danger" disabled>停止仿真</button>
+          <button id="btnSimRefresh" class="secondary">刷新设备</button>
+          <span class="spacer"></span>
+          <span class="tiny muted" id="simState" aria-live="polite">仿真进程未启动</span>
+        </div>
+        <div class="result tiny" id="simResult" role="status" aria-live="polite"></div>
+        <pre class="sim-log" id="simLog" aria-label="仿真启动日志">等待启动</pre>
+      </div>
+    </details>
+
+    <details class="sec" data-fold="d-chart">
+      <summary>曲线<span class="spacer"></span><span class="sum" id="sumChart">--</span></summary>
+      <div class="ctrl-row wrap">
+        <label class="check">通道
+          <select id="chartCh">
+            <option value="position">位置 rad</option>
+            <option value="velocity">速度 rad/s</option>
+            <option value="effort">力矩 N·m</option>
+            <option value="current">电流 A</option>
+          </select>
+        </label>
+        <label class="check">电机
+          <select id="chartMotor"><option value="0">全部</option></select>
+        </label>
+        <label class="check">窗口
+          <select id="chartWindow">
+            <option value="5000">5 s</option>
+            <option value="10000" selected>10 s</option>
+            <option value="30000">30 s</option>
+          </select>
+        </label>
+        <span class="muted tiny" id="chartHint">--</span>
+        <span class="spacer"></span>
+        <button id="btnChartPause" class="tiny-btn">暂停</button>
+        <button id="btnChartClear" class="tiny-btn secondary">清空</button>
+      </div>
+      <canvas id="chart" width="980" height="380" class="chart"></canvas>
+    </details>
+
+    <details class="sec" data-fold="d-events">
+      <summary title="/micro_ros_up/motor_events">事件日志<span class="spacer"></span><span class="sum" id="sumEvents">--</span></summary>
+      <div class="ctrl-row wrap">
+        <button id="btnExportEvents" class="tiny-btn">导出 JSON</button>
+        <button id="btnExportEventsCsv" class="tiny-btn">导出 CSV</button>
+        <button id="btnClearEvents" class="tiny-btn secondary">清空</button>
+      </div>
+      <ul class="events" id="eventLog"></ul>
+    </details>
+
+    <details class="sec" data-fold="d-hist">
+      <summary>命令历史<span class="spacer"></span><span class="sum" id="sumHist">--</span></summary>
+      <div class="ctrl-row wrap">
+        <button id="btnExportHist" class="tiny-btn">导出 JSON</button>
+        <button id="btnClearHist" class="tiny-btn secondary">清空</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>seq</th><th>电机</th><th>状态</th></tr></thead>
+          <tbody id="histRows"><tr class="empty"><td colspan="4">暂无记录</td></tr></tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="sec" data-fold="d-teach">
+      <summary>示教</summary>
+      <div class="ctrl-row wrap">
+        <button id="btnTeachRecord" class="tiny-btn primary">记录当前命令</button>
+        <button id="btnTeachAdd" class="tiny-btn">+ 空点位</button>
+        <button id="btnTeachExport" class="tiny-btn">导出 JSON</button>
+        <button id="btnTeachImport" class="tiny-btn">导入 JSON</button>
+        <span class="spacer"></span>
+        <button id="btnTeachPlay" class="primary">播放</button>
+        <button id="btnTeachPause" class="secondary">暂停</button>
+        <button id="btnTeachStep" class="secondary">单步</button>
+        <label class="check"><input type="checkbox" id="chkTeachLoop"> 循环</label>
+        <span class="muted tiny" id="teachStatus">空闲</span>
+      </div>
+      <div class="table-wrap">
+        <table class="teach">
+          <thead>
+            <tr><th>#</th><th>等待 ms</th><th>电机目标（ID:pos,vel,eff）</th><th></th></tr>
+          </thead>
+          <tbody id="teachRows"></tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="sec" data-fold="d-notes">
+      <summary>说明<span class="spacer"></span><span class="sum">F1</span></summary>
+      <ul class="notes">
+        <li><b>限位保护</b>上电默认<b>开</b>（固件在回读比对之前写回设备）；取消勾选 = 关闭设备侧看门狗与限位保护，该关节将<b>没有任何限位在执行</b>（急停与机械限位仍需就位），此后该台每次武装都要二次确认，且下次上电会自动恢复为开。限值与保护开关仅在电机未运动时受理。</li>
+        <li><b>方向</b>点击切换 CW / CCW。设备方向<b>掉电不保存</b>，固件每次上电按记录写回。翻转只改驱动器的<b>力矩方向</b>，零点与限位都不变（真机实测），但位置环会反向：<b>使能后会朝远离目标的方向冲</b>直到撞上设备限位，所以别在装反的情况下使能。</li>
+        <li>限值单位：位置 rad、速度 rad/s、力矩 A——前两项与固件状态/URDF 同一套单位，页面上不再出现度数；力矩列是设备对象 <code>0x2538</code> 的电流值（设备里存的就是电流，不折 N·m）。设零要求失能。</li>
+        <li><b>使能 / kp / kd 只能写、不能读回</b>（固件无回读通路），框里是页面最后一次下发的值。落地结论看事件日志的 <code>CONFIG_RESULT</code>：0=OK、2=非法。设备参数未核对的台（<code>CONFIG_CONFLICT</code>）会被直接拒。代数必须严格前进才受理「未武装→武装」。</li>
+        <li>命令快照是<b>完整</b>快照：缺席的受控电机被软停；停止连发 30 ms 后全软停、100 ms 失能；任一 NaN/Inf 整包拒收。</li>
+        <li>示教：每行等待 ms 后形成轨迹路点，目标写成 <code>ID:pos,vel,eff</code>；空行只表示等待。导入接受两种 JSON：本页导出的行数组，或 <code>MotorTrajectory</code> 话题载荷（按时刻合成行）。播放经可靠轨迹话题交给 MCU；超过<b>256 个总路点</b>会自动分段，并等待 <code>trajectory_state.completed</code> 后再发下一段。播放完成后末点保持，点“暂停”才取消并软停。</li>
+        <li>臂视图与曲线都受 <code>motion_states</code> 的 50 Hz 限制。虚线幽灵 = <b>页面下发的目标</b>，不是固件设定点；固件的钳位/软停/拒收画不出来。</li>
+        <li>话题：上行 <code>micro_ros_up/{motor_topology, motion_states, motor_status_array, motor_events, diagnostics, trajectory_state, imu/data, imu/temp}</code>；下行 <code>micro_ros_do/{motor_command_array, motor_trajectory, motor_policy}</code>。</li>
+      </ul>
+    </details>
+
+    <details class="sec" data-fold="d-imu">
+      <summary>IMU<span class="spacer"></span><span class="hz" id="imuHz">-- Hz</span></summary>
+      <div class="imu-wrap">
+        <div class="imu-row">
+          <div class="num-row"><span>Roll</span><b id="valRoll">--</b></div>
+          <div class="num-row"><span>Pitch</span><b id="valPitch">--</b></div>
+          <div class="num-row"><span>Yaw</span><b id="valYaw">--</b></div>
+          <div class="num-row"><span>温度</span><b id="valTemp">--</b></div>
+          <div class="num-row"><span>更新</span><b id="imuAge">--</b></div>
+        </div>
+        <canvas id="imu3d" width="200" height="200" class="imu3d" title="3D 姿态"></canvas>
+        <div class="imu-row">
+          <div class="num-row"><span>Roll</span><b id="valRollBig">--</b></div>
+          <div class="num-row"><span>Pitch</span><b id="valPitchBig">--</b></div>
+          <div class="num-row"><span>Yaw</span><b id="valYawBig">--</b></div>
+          <div class="num-row"><span>四元数</span><b id="valQuat" class="muted">--</b></div>
+        </div>
+        <canvas id="attitudeHorizon" width="260" height="150" class="horizon" title="人工地平仪"></canvas>
+      </div>
+    </details>
+  </section>
+
+  <footer class="foot muted tiny">
+    rosbridge ws·9090 ｜ 页面 http·8080 ｜ 仅限内网，rosbridge 无鉴权
+  </footer>
+
+  <script src="roslib.min.js"></script>
+  <script src="app.js"></script>
+  <script src="simulation.js"></script>
+  <script type="module" src="arm3d.js"></script>
+</body>
+</html>

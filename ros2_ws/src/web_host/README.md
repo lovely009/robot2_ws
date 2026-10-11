@@ -46,6 +46,19 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 
 抽屉用原生 `<details>`：收起时内容仍留在 DOM 上——页面的定时渲染一直在往里写。
 
+## 两版界面并存
+
+URL 根 `/` 是重构后的新版（外壳 / 屏 / 面板三层，见
+`docs/adr/0010-web-host-frontend-layering-without-build-chain.md` 与同期的重构设计）；
+`/legacy.html` 是重构前的单页界面（以臂为中心 + 8 抽屉，含仿真启动器与 Agent 端口
+选择器）。两版**共用同一份静态服务与 `/api` 后端**——Agent 与仿真子进程是同一个，
+不存在两套状态。
+
+旧版页面加载的 `web/app.js`、`web/style.css`、`web/arm3d.js`、`web/simulation.js` 是它
+专用的资源（新版已把这些逻辑搬进 `web/js/`），**不要当成重构后的死代码删掉**；
+`test/test_web_assets.py::test_legacy_assets_exist` 兜住这条。它的臂视图几何同样走
+`/robot_arm_gazebo` 挂载（重构前的 `web/robot_arm_gazebo` 目录符号链接已退役）。
+
 ## 臂视图（3D）
 
 `web/arm3d.js`（ES module）+ `web/vendor/` 里的 three 0.160.1 与 urdf-loader 0.13.1，
@@ -66,7 +79,7 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `?model=` | `zhoubuguanjie_youbi_001` | `robot_arm_gazebo/models/` 下的模型目录名 |
+| `?model=` | `zhoubuguanjie_youbi_002` | `robot_arm_gazebo/models/` 下的模型目录名 |
 | `?joints=` | `1:joint_link1,2:joint_link2,3:joint_link3,4:joint_link4` | 电机 id → URDF 关节名 |
 
 **两条已写在界面上的限制**（别把它们当固件真值）：

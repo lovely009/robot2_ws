@@ -6,10 +6,9 @@
 // 依赖全部 vendor 在 web/vendor/（three 0.160.1 + urdf-loader 0.13.1），
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
-// 几何来源：web/robot_arm_gazebo 是指向 ../../robot_arm_gazebo 的符号链接，
-// 所以 URDF 里的 package://robot_arm_gazebo/... 相对页面原样可用（20 MB 的
-// STL 因此不进 web/、也不进 git）。static server 的 SimpleHTTPRequestHandler
-// 跟随符号链接。
+// 几何来源：static_server 把 robot_arm_gazebo 的 share 目录挂到 URL 根部的
+// /robot_arm_gazebo，页面侧按绝对前缀取（20 MB 的 STL 因此不进 web/、也不进
+// git）。旧版走的是 web/robot_arm_gazebo 目录符号链接，已随重构退役（ADR 0010）。
 //
 // 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
 

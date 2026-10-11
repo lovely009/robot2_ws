@@ -115,7 +115,9 @@ const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
-const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_001';
+// 与新版 store.js 及 gazebo.launch.py 的默认值一致：_001 已退役（c549d29 删了它的
+// URDF），旧默认值会让臂视图默认 404。
+const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_002';
 
 // 曲线缓冲：motor_id -> {t:[], position:[], velocity:[], effort:[], current:[]}
 const chartBuf = new Map();
@@ -714,9 +716,10 @@ function arm3dStart() {
   if (!canvas || !window.Arm3D) return;
   const hud = $('armHud');
   window.Arm3D.init(canvas, {
-    urdfUrl: `robot_arm_gazebo/models/${MODEL}/urdf/${MODEL}.urdf`,
-    // package://robot_arm_gazebo/... → web/robot_arm_gazebo/...（符号链接镜像）
-    packages: {robot_arm_gazebo: 'robot_arm_gazebo'},
+    urdfUrl: `/robot_arm_gazebo/models/${MODEL}/urdf/${MODEL}.urdf`,
+    // package://robot_arm_gazebo/... → static_server 挂在 URL 根部的 share 目录
+    // （web/robot_arm_gazebo 目录符号链接已随重构退役，见 ADR 0010）
+    packages: {robot_arm_gazebo: '/robot_arm_gazebo'},
     onSelect: (joint) => {
       for (const [idStr, j] of Object.entries(JOINT_OF_MOTOR)) {
         if (j === joint) { selectMotor(Number(idStr)); return; }
@@ -743,7 +746,7 @@ function arm3dStart() {
     onError: (err) => {
       hud.className = 'hud err';
       hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
-        + '（查 web/robot_arm_gazebo 符号链接是否存在、static server 日志）';
+        + '（查 static_server 是否挂载 /robot_arm_gazebo、static server 日志）';
     },
   });
   window.addEventListener('resize', () => window.Arm3D.resize());

@@ -1,6 +1,6 @@
 """启动 Ignition Gazebo 仿真：空世界 + 生成模型 + gz_ros2_control 控制器。
 
-模型由 `model:=` 选择（`models/<模型名>/`），默认 `zhoubuguanjie_youbi_002`。
+模型由 `model:=` 选择（`models/<模型名>/`），默认 `chest_upper_00`。
 控制方式（启动完成后）：
 
   ros2 topic pub --once /arm_effort_controller/commands \\
@@ -95,8 +95,9 @@ def generate_launch_description():
         output="screen",
         arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
     )
-    # spawn_z 默认 0.03：本模型的 base_link 几何 z = −0.030 ~ 0.033，底面在 −0.030，
-    # 抬起 0.03 后正好坐落在地面上（配合 xacro 的 fixed_base）。换模型要重新核这个值。
+    # spawn_z 默认 0.0：默认模型 chest_upper_00 的 base_link 网格
+    # z ∈ [0.0000, 0.7029]，零位下全模型最低点恰为 z = 0.000000，故无需抬起。
+    # 换模型要重新核这个值（zhoubuguanjie_youbi_002 底面在 z = −0.002729，需 spawn_z:=0.0027）。
     spawn_robot = Node(
         package="ros_gz_sim",
         executable="create",
@@ -137,7 +138,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "model",
-                default_value="zhoubuguanjie_youbi_002",
+                default_value="chest_upper_00",
                 description="models/ 下的模型目录名",
             ),
             DeclareLaunchArgument(
@@ -147,8 +148,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "spawn_z",
-                default_value="0.03",
-                description="模型生成高度（m）",
+                default_value="0.0",
+                description="模型生成高度（m）；默认模型底面在 z = 0，故为 0",
             ),
             DeclareLaunchArgument(
                 "fixed_base",

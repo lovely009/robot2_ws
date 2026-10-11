@@ -11,7 +11,14 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
+| `chest_upper_00` | 上身结构装配体（SolidWorks 导出，纯串联 9 轴，关节名大写 `Joint_link1..9`）。**默认模型**，已接入端到端电机仿真（`config/simulation_topology.yaml` + 仿真专用的 `config/motor_driver.yaml`） | 9 revolute + 0 fixed |
 | `zhoubuguanjie_youbi_002` | 右臂（SolidWorks 导出，R58 肩座 + 支撑座 + 6 关节主链，**无腕部连杆**） | 6 revolute + 0 fixed |
+
+> `models/` 下另有三个**原始资产目录**（`g1_description`、`pro_urdf_publish`、`robot-001`），
+> 是导入的厂商/CAD 导出件，不满足 `models/<模型名>/` 的自包含契约三件套
+> （`urdf/<名>.urdf` + `urdf/<名>.urdf.xacro` + `config/controllers.yaml` + `README.md`），
+> 因此 `test_model_consistency.py` 对它们持续报红（每目录 5 项）。要么补齐契约、要么移出
+> `models/`，见该测试文件头部对契约的说明。
 
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 
@@ -153,9 +160,11 @@ RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还�
 缺包时 launch 在启动任何进程之前就抛 `package ... not found`（例如本机缺
 `ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
 
-独立的 `gazebo.launch.py` 接受 `model:=<模型名>` 选择 `models/` 下的模型，默认
-`zhoubuguanjie_youbi_002`。完整 `simulation.launch.py` 要求所选模型目录带有
-`models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与 launch 参数一致：
+独立的 `gazebo.launch.py` 与 `display.launch.py` 接受 `model:=<模型名>` 选择 `models/` 下的
+模型，默认 `chest_upper_00`。完整 `simulation.launch.py` 同样默认 `chest_upper_00`，要求所选
+模型目录带有 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与 launch
+参数一致；`motor_config_file` **留空**时优先用模型目录自带的 `config/motor_driver.yaml`，
+其次才用权威整机配置（选不带拓扑的模型会显式 `RuntimeError`，不会静默退化）：
 
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>

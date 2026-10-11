@@ -21,7 +21,7 @@ from launch_ros.actions import Node
 
 HERE = Path(__file__).parent
 LAUNCH_DIR = HERE.parent / "launch"
-MODEL = "zhoubuguanjie_youbi_002"
+MODEL = "chest_upper_00"
 
 
 def _execute(launch_file):
@@ -97,7 +97,7 @@ def test_gazebo_launch_wires_model_into_xacro_and_controllers():
     assert controllers_file.is_file(), f"控制器参数文件不存在：{controllers_file}"
     assert controllers_file.parent == _package_share() / "models" / MODEL / "config"
 
-    # 生成高度默认 0.03：base_link 几何 z = −0.030 ~ 0.033（见模型 README 的实测几何），
-    # 抬起 0.03 后底面落地。
-    assert context.launch_configurations["spawn_z"] == "0.03"
+    # 生成高度默认 0.0：默认模型的 base_link 网格 z ∈ [0.0000, 0.7029]，零位下全模型
+    # 最低点恰为 z = 0.000000（见该模型 README 的实测几何），故无需抬起。
+    assert context.launch_configurations["spawn_z"] == "0.0"
     assert context.launch_configurations["world_file"] == "empty.sdf"

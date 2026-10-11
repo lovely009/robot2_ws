@@ -445,16 +445,30 @@ def launch_simulation(context):
         )
 
     share = Path(get_package_share_directory("robot_arm_gazebo"))
-    motor_driver_path = Path(
-        LaunchConfiguration("motor_config_file").perform(context)
-    ).resolve()
+    model = LaunchConfiguration("model").perform(context)
+    # 电机拓扑来源：显式 motor_config_file 优先；留空时优先**模型目录自带**的
+    # config/motor_driver.yaml（模型专属仿真拓扑），否则回落权威整机配置。
+    # 默认模型 chest_upper_00 的 joint_link1..9 尚未并入 upper_body.urdf.xacro
+    # （并进去会让 test_xacro_consistency 变红、真机 bring-up 去驱动不存在的关节），
+    # 所以它只能用自带那份。
+    requested_config = LaunchConfiguration("motor_config_file").perform(context)
+    if requested_config:
+        motor_driver_path = Path(requested_config).resolve()
+    else:
+        model_local = share / "models" / model / "config" / "motor_driver.yaml"
+        motor_driver_path = (
+            model_local.resolve()
+            if model_local.is_file()
+            else Path(get_package_share_directory("motor_hardware_interface"))
+            / "config"
+            / "motor_driver.yaml"
+        )
     if not motor_driver_path.is_file():
         raise RuntimeError(f"motor configuration file does not exist: {motor_driver_path}")
     motor_specs_path = _resolve_motor_specs_path(motor_driver_path)
     if not motor_specs_path.is_file():
         raise RuntimeError(f"motor specs file does not exist: {motor_specs_path}")
     hardware_share = Path(get_package_share_directory("motor_hardware_interface"))
-    model = LaunchConfiguration("model").perform(context)
     topology_file = share / "models" / model / "config" / "simulation_topology.yaml"
     if not topology_file.is_file():
         raise RuntimeError(
@@ -688,6 +702,10 @@ def launch_simulation(context):
             and motor["type"] == "cerb_r58_101"
         ]
         ready_file = runtime_dir / "motor_bus_sim_ready"
+        # 透传给模拟器的额外参数（空格分隔）。用于台架对照实验，例如
+        # --no-brs（FD 数据段也走 1M，隔离 BRS 数据相位）、--fb-period-ms 100
+        # （降反馈负载）。不设默认：正常路径行为不变。
+        extra_sim_args = LaunchConfiguration("sim_args").perform(context).split()
         firmware_bus_args = (
             ["--interface", sim_endpoint]
             if transport == "socketcan"
@@ -714,6 +732,7 @@ def launch_simulation(context):
                 "/arm_effort_controller/commands",
                 "--ready-file",
                 str(ready_file),
+                *extra_sim_args,
             ],
             output="screen",
             sigterm_timeout="5",
@@ -889,17 +908,16 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "model",
-                default_value="zhoubuguanjie_youbi_002",
+                default_value="chest_upper_00",
                 description="models/ 下含 simulation_topology.yaml 的模型目录",
             ),
             DeclareLaunchArgument(
                 "motor_config_file",
-                default_value=str(
-                    Path(get_package_share_directory("motor_hardware_interface"))
-                    / "config"
-                    / "motor_driver.yaml"
+                default_value="",
+                description=(
+                    "电机拓扑配置；留空则优先模型目录自带的 "
+                    "config/motor_driver.yaml，其次用权威整机配置"
                 ),
-                description="权威电机拓扑配置；仿真只选取模型目录映射的电机",
             ),
             DeclareLaunchArgument("world_file", default_value="empty.sdf"),
             DeclareLaunchArgument("gravity", default_value="true"),
@@ -913,6 +931,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_web_host", default_value="true"),
             DeclareLaunchArgument("start_micro_ros_agent", default_value="false"),
             DeclareLaunchArgument("firmware_sim_script", default_value=""),
+            DeclareLaunchArgument(
+                "sim_args",
+                default_value="",
+                description="追加给 FDCAN 模拟器的额外参数（空格分隔），"
+                            "如 --no-brs / --fb-period-ms 100",
+            ),
             OpaqueFunction(function=launch_simulation),
         ]
     )

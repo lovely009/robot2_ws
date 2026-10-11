@@ -203,12 +203,26 @@ def _bind_motor_topology(
     simulation["motors"] = selected_motors
     simulation["profiles"] = sim_profiles
     hardware_timing = hardware.get("timing", {})
-    simulation["driver_timing"] = {
+    # 仿真驱动时序默认继承权威硬件配置；模型可在 simulation_topology.yaml 的
+    # driver_timing 覆盖（例如仿真侧 CERB 只在收到命令帧后回帧，激活窗口需要
+    # 比真机更宽）。只允许覆盖已知键，拼错即报错而不是静默忽略。
+    driver_timing = {
         "feedback_timeout_s": hardware_timing.get("feedback_timeout_s", 0.10),
         "initial_feedback_wait_s": hardware_timing.get(
             "initial_feedback_wait_s", 1.0
         ),
     }
+    override = simulation.get("driver_timing", {})
+    if not isinstance(override, dict):
+        raise RuntimeError("driver_timing in simulation_topology.yaml must be a mapping")
+    unknown = set(override) - set(driver_timing)
+    if unknown:
+        raise RuntimeError(
+            "unknown driver_timing keys in simulation_topology.yaml: "
+            + ", ".join(sorted(str(key) for key in unknown))
+        )
+    driver_timing.update(override)
+    simulation["driver_timing"] = driver_timing
     return simulation
 
 

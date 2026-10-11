@@ -18,6 +18,14 @@ simulation:
     vaxor_feedback_hz: 50
     command_timeout_ms: 150
 
+  # 仿真驱动时序覆盖（默认继承 motor_driver.yaml 的 timing）。CERB 在仿真里
+  # 只在收到命令帧后回帧（无周期上报），而驱动器激活路径自带 100ms 上伺服等待
+  # 加控制器首拍延迟，合计约 215ms 命令空窗；权威配置的 0.1s 会把这段静默误判
+  # 成反馈超时（实测 joint_link1）。放宽到 0.5s 仅作用于仿真生成的驱动配置，
+  # 不影响真机。
+  driver_timing:
+    feedback_timeout_s: 0.5
+
   profiles:
     # 与 001 的 cerb_r58 profile 逐字相同（已实测跑通的配置）。
     cerb_r58:

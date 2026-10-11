@@ -150,11 +150,43 @@ async function showScreen(screen) {
   for (const btn of document.querySelectorAll('#nav button')) {
     btn.setAttribute('aria-current', btn.dataset.goto === screen ? 'page' : 'false');
   }
-  // 屏内所有 [data-panel] 占位按出现顺序挂载
+  // 屏内所有 [data-panel] 占位按出现顺序挂载（含抽屉里的，未展开也挂——展开即有形）
   for (const slot of root.querySelectorAll('[data-panel]')) {
     await mountPanel(slot.dataset.panel, slot);
   }
+  initDrawers(screen);
   markDirty(DIRTY.ALERTS);
+}
+
+// 屏内抽屉：开合状态与当前 tab 按屏记忆（web_host.fold.<屏>）。
+// tab 行的 .on、面板的 hidden 与标题栏的 .drawer-sum 都在这里统一管。
+function initDrawers(screen) {
+  const key = FOLD_OF_SCREEN(screen);
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { saved = {}; }
+  const save = () => localStorage.setItem(key, JSON.stringify(saved));
+
+  const details = document.querySelector('#screenRoot details.drawer');
+  if (!details) return;
+  if (saved.drawerOpen !== undefined) details.open = !!saved.drawerOpen;
+  details.addEventListener('toggle', () => { saved.drawerOpen = details.open; save(); });
+
+  const tabs = [...document.querySelectorAll('#screenRoot [data-drawer-tab]')];
+  const panels = [...document.querySelectorAll('#screenRoot [data-drawer-panel]')];
+  const sum = document.querySelector('#screenRoot .drawer-sum');
+  const activate = (name) => {
+    for (const p of panels) p.hidden = p.dataset.drawerPanel !== name;
+    for (const t of tabs) {
+      const on = t.dataset.drawerTab === name;
+      t.classList.toggle('on', on);
+      if (on && sum) sum.textContent = t.textContent;   // 收起时标题栏仍有信息
+    }
+    saved.tab = name; save();
+  };
+  for (const t of tabs) t.onclick = () => activate(t.dataset.drawerTab);
+  const want = tabs.some((t) => t.dataset.drawerTab === saved.tab)
+    ? saved.tab : (tabs[0] && tabs[0].dataset.drawerTab);
+  activate(want);
 }
 
 function gotoScreen(id) {
@@ -163,7 +195,7 @@ function gotoScreen(id) {
 }
 
 // 状态翼三态：用户显式选择（'1' 收起 / '0' 展开）优先；localStorage 无值 = 未选择，
-// 由断点决定（≤1360 默认收起，>1360 默认展开）；<820 由 CSS 强制收起。
+// 默认展开；<820 由 CSS 强制收起。
 function initWing() {
   const saved = localStorage.getItem(WING_KEY);
   document.body.classList.toggle('wing-collapsed', saved === '1');

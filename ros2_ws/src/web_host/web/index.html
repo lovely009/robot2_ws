@@ -174,6 +174,63 @@
     </details>
   </template>
 
+  <!-- 曲线（canvas 由 js/panels/curve.js 绘制；数据源 = store.chartBuf） -->
+  <template data-panel-template="curve">
+    <div class="ctrl-row wrap">
+      <label class="check">通道
+        <select id="chartCh">
+          <option value="position">位置 rad</option>
+          <option value="velocity">速度 rad/s</option>
+          <option value="effort">力矩 N·m</option>
+          <option value="current">电流 A</option>
+        </select>
+      </label>
+      <label class="check">电机
+        <select id="chartMotor"><option value="0">全部</option></select>
+      </label>
+      <label class="check">窗口
+        <select id="chartWindow">
+          <option value="5000">5 s</option>
+          <option value="10000" selected>10 s</option>
+          <option value="30000">30 s</option>
+        </select>
+      </label>
+      <span class="muted tiny" id="chartHint">--</span>
+      <span class="spacer"></span>
+      <button id="btnChartPause" class="tiny-btn">暂停</button>
+      <button id="btnChartClear" class="tiny-btn secondary">清空</button>
+    </div>
+    <canvas id="chart" width="980" height="380" class="chart"></canvas>
+  </template>
+
+  <!-- 事件日志（/micro_ros_up/motor_events） -->
+  <template data-panel-template="events">
+    <div class="ctrl-row wrap">
+      <span class="sum" id="sumEvents" title="/micro_ros_up/motor_events">--</span>
+      <span class="spacer"></span>
+      <button id="btnExportEvents" class="tiny-btn">导出 JSON</button>
+      <button id="btnExportEventsCsv" class="tiny-btn">导出 CSV</button>
+      <button id="btnClearEvents" class="tiny-btn secondary">清空</button>
+    </div>
+    <ul class="events" id="eventLog"></ul>
+  </template>
+
+  <!-- 命令历史（页面最后下发的快照记录） -->
+  <template data-panel-template="history">
+    <div class="ctrl-row wrap">
+      <span class="sum" id="sumHist">--</span>
+      <span class="spacer"></span>
+      <button id="btnExportHist" class="tiny-btn">导出 JSON</button>
+      <button id="btnClearHist" class="tiny-btn secondary">清空</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>时间</th><th>seq</th><th>电机</th><th>状态</th></tr></thead>
+        <tbody id="histRows"><tr class="empty"><td colspan="4">暂无记录</td></tr></tbody>
+      </table>
+    </div>
+  </template>
+
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
   <template data-screen="run">
     <div class="screen run">
@@ -184,7 +241,22 @@
         <div data-panel="policy"></div>
       </section>
       <section class="col-command"><div data-panel="command"></div></section>
-      <section class="col-drawer"></section>
+      <section class="col-drawer">
+        <details class="drawer">
+          <summary>观察<span class="spacer"></span><span class="sum drawer-sum">--</span></summary>
+          <!-- tab 行放在 summary **之外**：放进去点 tab 会连带触发展开/收起 -->
+          <div class="tabs" data-drawer-tabs>
+            <button class="tab" data-drawer-tab="curve">曲线</button>
+            <button class="tab" data-drawer-tab="events">事件日志</button>
+            <button class="tab" data-drawer-tab="history">命令历史</button>
+          </div>
+          <div class="drawer-body">
+            <div data-drawer-panel="curve"><div data-panel="curve"></div></div>
+            <div data-drawer-panel="events" hidden><div data-panel="events"></div></div>
+            <div data-drawer-panel="history" hidden><div data-panel="history"></div></div>
+          </div>
+        </details>
+      </section>
     </div>
   </template>
   <template data-screen="teach">
@@ -194,11 +266,45 @@
       <section class="col-side"></section>
       <section class="col-command"><div data-panel="command"></div></section>
       <section class="col-teach"></section>
+      <section class="col-drawer">
+        <details class="drawer">
+          <summary>观察<span class="spacer"></span><span class="sum drawer-sum">--</span></summary>
+          <div class="tabs" data-drawer-tabs>
+            <button class="tab" data-drawer-tab="curve">曲线</button>
+            <button class="tab" data-drawer-tab="events">事件日志</button>
+          </div>
+          <div class="drawer-body">
+            <div data-drawer-panel="curve"><div data-panel="curve"></div></div>
+            <div data-drawer-panel="events" hidden><div data-panel="events"></div></div>
+          </div>
+        </details>
+      </section>
     </div>
   </template>
-  <template data-screen="device"></template>
+  <template data-screen="device">
+    <div class="screen device">
+      <section class="col-params"></section>
+      <section class="col-drawer">
+        <details class="drawer">
+          <summary>观察<span class="spacer"></span><span class="sum drawer-sum">--</span></summary>
+          <div class="tabs" data-drawer-tabs>
+            <button class="tab" data-drawer-tab="events">事件日志</button>
+          </div>
+          <div class="drawer-body">
+            <div data-drawer-panel="events"><div data-panel="events"></div></div>
+          </div>
+        </details>
+      </section>
+    </div>
+  </template>
   <template data-screen="sim"></template>
-  <template data-screen="diag"></template>
+  <template data-screen="diag">
+    <div class="screen diag">
+      <section class="col-curve"><div data-panel="curve"></div></section>
+      <section class="col-events"><div data-panel="events"></div></section>
+      <section class="col-history"><div data-panel="history"></div></section>
+    </div>
+  </template>
 
   <script src="roslib.min.js"></script>
   <script type="module" src="js/main.js"></script>

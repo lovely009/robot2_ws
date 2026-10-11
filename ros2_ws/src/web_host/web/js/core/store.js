@@ -86,6 +86,25 @@ export function countMotors() {
   return {online, total: store.motors.size, fault, active, conflict};
 }
 
+// 曲线数据入缓冲：每通道独立时间轴（缺失 NaN 保留，绘制时跳过）。
+// 上限 1500 样本/通道 = 30 s × 50 Hz，恰好是最大时间窗；超过就从头丢。
+// 上限放在这里而不是绘制侧：没有曲线面板时缓冲也必须收敛，否则切屏一整天后内存只涨不落。
+const CHART_CAP = 1500;
+
+export function chartPush(id, ch, val, t) {
+  let b = store.chartBuf.get(id);
+  if (!b) {
+    b = {t: [], position: [], velocity: [], effort: [], current: []};
+    store.chartBuf.set(id, b);
+  }
+  b[ch].push(Number.isFinite(val) ? val : NaN);
+  b.t.push(t);
+  if (b.t.length > CHART_CAP) {
+    b.t.shift();
+    for (const k of ['position', 'velocity', 'effort', 'current']) b[k].shift();
+  }
+}
+
 // URL 参数：换模型或换接线不改代码（?joints=1:joint_link1,2:joint_link2&model=<模型目录名>）
 export const URLQ = new URLSearchParams(location.search);
 export const JOINT_OF_MOTOR = (() => {

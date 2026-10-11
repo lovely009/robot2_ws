@@ -3,7 +3,7 @@
 //   state → store；写入 store 后 markDirty；撤掉全部 renderXxx() 调用
 //   （渲染是面板的职责，本层不再认识任何 DOM）；setConn 改写为写 store +
 //   切 body.offline（断连禁用写操作的样式钩子）。
-import { store, markDirty, DIRTY } from './store.js';
+import { store, markDirty, DIRTY, chartPush } from './store.js';
 import { $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler } from './format.js';
 
 let ros = null;
@@ -233,17 +233,6 @@ function subscribeAll() {
     };
     markDirty(DIRTY.ALERTS);
   });
-}
-
-// 曲线数据入缓冲；每通道独立时间轴（缺失 NaN 保留，绘制时跳过）。
-function chartPush(id, ch, val, t) {
-  let b = store.chartBuf.get(id);
-  if (!b) {
-    b = {t: [], position: [], velocity: [], effort: [], current: []};
-    store.chartBuf.set(id, b);
-  }
-  b[ch].push(Number.isFinite(val) ? val : NaN);
-  b.t.push(t);
 }
 
 // 等首帧 system_status 到达（连接后参数自动读取的前置，Task 8 用）。

@@ -169,10 +169,9 @@ function initWing() {
   document.body.classList.toggle('wing-collapsed', saved === '1');
   document.body.classList.toggle('wing-expanded', saved === '0');
   $('wingToggle').onclick = () => {
-    // 从「当前生效」状态翻转：未选择时按断点判断是否处于收起
-    const collapsed = document.body.classList.contains('wing-collapsed')
-      || (!document.body.classList.contains('wing-expanded')
-          && window.matchMedia('(max-width: 1360px)').matches);
+    // 从「当前生效」状态翻转。默认（无显式选择）是展开——<820 由 CSS 无条件压成
+    // 竖条、与类无关，所以只有真正带 wing-collapsed 类时才算收起。
+    const collapsed = document.body.classList.contains('wing-collapsed');
     const next = collapsed ? '0' : '1';   // 翻转：收起 → 展开，展开 → 收起
     document.body.classList.toggle('wing-collapsed', next === '1');
     document.body.classList.toggle('wing-expanded', next === '0');

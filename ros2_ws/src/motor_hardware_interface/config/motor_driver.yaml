@@ -35,6 +35,17 @@ motor_hardware:
   # 这里是唯一与具体机器人拓扑相关的电机映射。
   # motors 数量不限，也可以混合任意已注册的电机类型与逻辑总线。
   # 当前 14 台仅为示例：电机数量/类型/ID/总线完全由本文件决定，增删改零代码改动。
+  #
+  # ⚠ 同一总线上 id 必须全局唯一（协议无关），否则：
+  #   - 固件侧注册表以 motor_id 为键，而 motor_id 直接等于厂家 node 号
+  #     （micro_ros_firmware/lib/motor_control/src/motor_control_discovery.c:102），
+  #     重号即进 CONFIG_CONFLICT、拒绝使能；
+  #   - 固件 HIL 模拟器 fdcan_motor_sim.py 的 --joint-map 同样以裸 ID 为键，
+  #     重号会让 dict() 静默塌缩、关节被顶替。
+  #   注意 CERB 与 vaxor 的 CAN 仲裁 ID 空间本可独立（协议位不同），纯主机路径
+  #   靠 MotorDriver 按 (bus, type) 分组掩盖了重号，但接固件即暴露。
+  #   当前取值对齐 docs/guides/fdcan1-bench-guide.md 的九节点台架方案：
+  #   CERB 1–6 + vaxor 7–9（本机每侧 4 台 CERB，故用 1–4 + 7–9）。
   # CERB 的三个 mit_*_limit 必须与电机参数设置页一致（见 cerb-series.md），
   # 此处为示例值。
   motors:
@@ -70,19 +81,19 @@ motor_hardware:
       joint: left_wrist_yaw_joint
       bus: left_arm
       type: vaxor_2550
-      id: 1
+      id: 7
       command: {kp: 0.008, kd: 1.0}
     left_wrist_pitch:
       joint: left_wrist_pitch_joint
       bus: left_arm
       type: vaxor_2550
-      id: 2
+      id: 8
       command: {kp: 0.008, kd: 1.0}
     left_wrist_roll:
       joint: left_wrist_roll_joint
       bus: left_arm
       type: vaxor_2550
-      id: 3
+      id: 9
       command: {kp: 0.008, kd: 1.0}
 
     right_shoulder_yaw:
@@ -117,17 +128,17 @@ motor_hardware:
       joint: right_wrist_yaw_joint
       bus: right_arm
       type: vaxor_2550
-      id: 1
+      id: 7
       command: {kp: 0.008, kd: 1.0}
     right_wrist_pitch:
       joint: right_wrist_pitch_joint
       bus: right_arm
       type: vaxor_2550
-      id: 2
+      id: 8
       command: {kp: 0.008, kd: 1.0}
     right_wrist_roll:
       joint: right_wrist_roll_joint
       bus: right_arm
       type: vaxor_2550
-      id: 3
+      id: 9
       command: {kp: 0.008, kd: 1.0}

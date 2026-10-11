@@ -67,6 +67,10 @@
     grid-template-areas: "curve" "events" "history"; }
 }
 
+/* sim 屏：仿真启动器整宽一个面板（无抽屉、无副栏）。 */
+.screen.sim { grid-template-columns: minmax(0, 1fr); }
+.screen.sim > .col-full { min-width: 0; }
+
 /* ---------- 曲线：canvas 随容器缩放（980×380 的绘制缓冲，旧版同口径） ---------- */
 .chart { display: block; width: 100%; height: auto; background: #070a10;
   border: 1px solid var(--line); border-radius: var(--radius-sm); }
@@ -94,6 +98,33 @@
 .stage .legend .sw.ghost { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
 .stage .legend .dt { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 4px; vertical-align: middle; }
+
+/* ---------- 仿真启动器（sim 屏） ---------- */
+.sim-panel { display: flex; flex-direction: column; gap: var(--gap-sm); }
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--gap) 10px;
+}
+.sim-field { display: flex; flex-direction: column; gap: 2px; color: var(--dim); font-size: var(--fs-xs); }
+.sim-field input, .sim-field select { width: 100%; min-width: 0; }
+.sim-safety { color: var(--warn); margin: var(--gap-sm) 0; }
+.sim-hint { padding: 2px 0; }
+.sim-log {
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #080c13;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: #aab8cc;
+  font: var(--fs-xs)/1.45 var(--mono);
+}
+/* 字段按 transport/mode 显示隐藏，[hidden] 必须在 flex 列里也生效 */
+.sim-panel [hidden] { display: none !important; }
 
 /* ---------- 卡片 / 可折叠区（含屏内抽屉） ---------- */
 .card, .sec, .sendbar, .drawer { background: var(--panel); border: 1px solid var(--line);

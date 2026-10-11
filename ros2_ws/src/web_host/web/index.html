@@ -264,6 +264,70 @@
     </details>
   </template>
 
+  <!-- 仿真启动器（HTTP /api/simulation/*；与 rosbridge 无关，数据不进 store，
+       切屏靠后端 status 接口恢复状态与日志） -->
+  <template data-panel-template="sim">
+    <details class="card" data-fold="sim" open>
+      <summary>仿真<span class="spacer"></span><span class="sum" id="simSummary">未启动</span></summary>
+      <div class="sim-panel">
+        <div class="sim-grid">
+          <label class="sim-field">控制端
+            <select id="simMode">
+              <option value="host">主机驱动闭环</option>
+              <option value="external">外部控制器</option>
+              <option value="firmware">STM32 固件 HIL</option>
+            </select>
+          </label>
+          <label class="sim-field">CAN 接口
+            <select id="simTransport">
+              <option value="vcan">vcan（纯软件）</option>
+              <option value="socketcan">SocketCAN</option>
+              <option value="slcan">SLCAN / CANable</option>
+            </select>
+          </label>
+          <label class="sim-field">模型
+            <select id="simModel"><option value="">读取模型中…</option></select>
+          </label>
+          <div class="sim-field" id="simVcanFields">
+            <label for="simVcanName">vcan 接口名</label>
+            <input id="simVcanName" type="text" value="robot_vcan0" maxlength="15" spellcheck="false">
+          </div>
+          <label class="sim-field" id="simSocketFields" hidden>模拟器 CAN
+            <select id="simInterface"><option value="">扫描 SocketCAN…</option></select>
+          </label>
+          <label class="sim-field" id="simDriverCanField" hidden>驱动端 CAN
+            <select id="simDriverInterface"><option value="">扫描 SocketCAN…</option></select>
+          </label>
+          <label class="sim-field" id="simSlcanFields" hidden>模拟器串口
+            <select id="simTty"><option value="">扫描串口…</option></select>
+          </label>
+          <label class="sim-field" id="simDriverTtyField" hidden>驱动端串口
+            <select id="simDriverTty"><option value="">扫描串口…</option></select>
+          </label>
+        </div>
+        <div class="sim-hint tiny muted" id="simHostBusHint" hidden>
+          主机驱动闭环的驱动端与模拟器端要接在同一条 CAN 总线上。
+        </div>
+        <label class="check sim-safety" id="simPhysicalGuard" hidden title="SocketCAN/SLCAN 会接入物理总线；启动前确认该总线上没有真实电机">
+          <input id="simBusIsolated" type="checkbox">
+          物理 CAN 总线仅连接仿真器与控制端，没有真机电机
+        </label>
+        <div class="sim-hint tiny muted" id="simFirmwareHint" hidden>
+          启动后在顶栏选择 STM32 USB CDC 串口，再点「启动并连接」接入 micro-ROS Agent。
+        </div>
+        <div class="ctrl-row wrap">
+          <button id="btnSimStart" class="primary">启动仿真</button>
+          <button id="btnSimStop" class="danger" disabled>停止仿真</button>
+          <button id="btnSimRefresh" class="secondary">刷新设备</button>
+          <span class="spacer"></span>
+          <span class="tiny muted" id="simState" aria-live="polite">仿真进程未启动</span>
+        </div>
+        <div class="result tiny" id="simResult" role="status" aria-live="polite"></div>
+        <pre class="sim-log" id="simLog" aria-label="仿真启动日志">等待启动</pre>
+      </div>
+    </details>
+  </template>
+
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
   <template data-screen="run">
     <div class="screen run">
@@ -330,7 +394,9 @@
       </section>
     </div>
   </template>
-  <template data-screen="sim"></template>
+  <template data-screen="sim">
+    <div class="screen sim"><section class="col-full"><div data-panel="sim"></div></section></div>
+  </template>
   <template data-screen="diag">
     <div class="screen diag">
       <section class="col-curve"><div data-panel="curve"></div></section>

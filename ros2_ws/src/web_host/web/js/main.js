@@ -1,8 +1,12 @@
 // 入口：装外壳、初始化路由、挂面板、建立全局订阅、起 rAF 渲染循环。
 // 屏切换只换主区里克隆的模板与其面板；顶栏/左导航/状态翼不重建。
 import { store, markDirty, onDirty, runRenderLoop, DIRTY } from './core/store.js';
-import { $, FOLD_KEY, WING_KEY } from './core/format.js';
+import { $, FOLD_KEY, WING_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
+  from './core/format.js';
 import { SCREENS, initRouter, currentScreen } from './core/router.js';
+import { connect } from './core/ros.js';
+import { refreshAgentControls, refreshAgentStatus, startAgent, stopAgent }
+  from './core/agent.js';
 
 // 已挂载面板：panelId -> 面板实例
 const mounted = new Map();
@@ -66,9 +70,75 @@ function renderPanels(dirty, now) {
   }
 }
 
-// 外壳文案（顶栏与 chips）由 core/agent.js 与 core/ros.js 写 store 后标脏，
-// 渲染在 Task 2 接上。本任务先只分发面板。
-onDirty((dirty) => renderPanels(dirty, performance.now()));
+// 外壳文案（顶栏与 chips）：core/agent.js 与 core/ros.js 只写 store 并标脏，
+// 这里在脏帧里统一画——订阅层不碰 DOM，壳层不认识面板数据来源。
+function renderShell(dirty) {
+  if (dirty.has(DIRTY.CONN)) {
+    $('connDot').classList.toggle('on', store.conn.connected);
+    $('connText').textContent = store.conn.text || (store.conn.connected ? '已连接' : '未连接');
+    const c = store.conn;
+    const el = $('agentText');
+    el.classList.remove('running', 'failed');
+    // 「正在启动/断开」是瞬时态：文案与按钮禁用与重构前 startAgent/stopAgent 一致。
+    $('btnConnect').disabled = c.agent === 'starting';
+    if (c.agent === 'starting' || c.agent === 'stopping') {
+      el.textContent = c.agent === 'starting' ? '正在启动 Agent…' : '正在断开 Agent…';
+      el.title = '';
+      $('btnDisconnect').disabled = true;
+    } else if (c.agent === 'running') {
+      el.textContent = `Agent 进程运行中${c.agentDevice ? ` · ${c.agentDevice}` : ''}`;
+      el.classList.add('running');
+      el.title = '由 web_host 管理的 micro-ROS Agent 进程';
+      $('btnDisconnect').disabled = false;
+    } else if (c.agent === 'failed') {
+      el.textContent = `Agent 已退出${c.agentReturncode === null ? '' : ` · code ${c.agentReturncode}`}`;
+      el.classList.add('failed');
+      el.title = c.agentError || c.agentDevice || 'Agent 进程已退出';
+      $('btnDisconnect').disabled = true;
+    } else if (c.agent === 'error') {
+      el.textContent = c.canStop
+        ? `Agent 已运行${c.agentDevice ? ` · ${c.agentDevice}` : ''}`
+        : (c.agentError ? `Agent 启动失败 · ${c.agentError}` : 'Agent 启动失败');
+      el.classList.add('failed');
+      el.title = c.agentError || '启动 Agent 失败';
+      $('btnDisconnect').disabled = !c.canStop;
+    } else {
+      el.textContent = 'Agent 未启动';
+      el.title = '';
+      $('btnDisconnect').disabled = true;
+    }
+  }
+  if (dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.STATUS) || dirty.has(DIRTY.MOTION)) {
+    renderChips();
+  }
+}
+
+// 顶栏汇总 chips（在线/运行/冲突/故障）：统计口径与重构前 renderMotors 的 chips 段
+// 逐字一致；chipHz 是 1 s 窗口计数，在 boot 里起定时器（脏帧驱动做不到"每秒"）。
+function renderChips() {
+  let onlineN = 0, faultN = 0, activeN = 0, conflictN = 0;
+  for (const r of store.motors.values()) {
+    const st = r.status || {}, t = r.topo || {};
+    const online = st.online !== undefined ? st.online : t.online;
+    if (online) onlineN++;
+    if (st.unified_fault_code) faultN++;
+    if (st.lifecycle === 4) activeN++;                       // ACTIVE = 固件此刻真在运动
+    if (t.conflict || st.lifecycle === 7) conflictN++;
+  }
+  $('chipOnline').textContent = `在线 ${onlineN}/${store.motors.size}`;
+  $('chipActive').textContent = `运行 ${activeN}`;
+  $('chipActive').classList.toggle('ok', activeN > 0);
+  $('chipConflict').textContent = `冲突 ${conflictN}`;
+  $('chipConflict').classList.toggle('warn', conflictN > 0);
+  $('chipFault').textContent = `故障 ${faultN}`;
+  $('chipFault').classList.toggle('err', faultN > 0);
+}
+
+onDirty((dirty) => {
+  const now = performance.now();
+  renderShell(dirty);          // 顶栏连接文案与 Agent 状态
+  renderPanels(dirty, now);
+});
 
 const FOLD_OF_SCREEN = (screen) => `${FOLD_KEY}.${screen}`;
 
@@ -137,13 +207,42 @@ function initNav() {
   });
 }
 
+// 顶栏控件接线：rosbridge 地址与控制板串口都记忆在浏览器本地；启动/断开按钮只
+// 管理 micro-ROS Agent 进程，不影响 WebSocket 连接（搬迁自旧 init()）。
+function initTopbar() {
+  const defaultRosUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+    + (location.hostname || 'localhost') + ':9090';
+  $('rosUrl').value = localStorage.getItem(ROS_URL_STORAGE_KEY) || defaultRosUrl;
+  $('rosUrl').addEventListener('input', () => {
+    localStorage.setItem(ROS_URL_STORAGE_KEY, $('rosUrl').value.trim());
+  });
+  $('btnConnect').onclick = startAgent;
+  $('btnDisconnect').onclick = stopAgent;
+  $('btnPortRefresh').onclick = refreshAgentControls;
+  $('serialPort').addEventListener('change', (e) => {
+    if (e.target.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, e.target.value);
+  });
+}
+
 function boot() {
   initNav();
   initWing();
   initHelp();
   initKeys();
+  initTopbar();
   initRouter({onScreenChange: showScreen});
   runRenderLoop();
+  // 运动流频率：1 s 窗口计数。
+  let lastMotionCount = 0;
+  setInterval(() => {
+    const hz = store.motionCount - lastMotionCount;
+    lastMotionCount = store.motionCount;
+    $('chipHz').textContent = `运动流 ${store.conn.connected ? hz + ' Hz' : '-- Hz'}`;
+  }, 1000);
+  // rosbridge 开页即连（断线自动重连在 core/ros.js）；Agent 状态轮询 2 s。
+  refreshAgentControls();
+  setInterval(refreshAgentStatus, 2000);
+  connect();
 }
 
 boot();

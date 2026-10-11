@@ -57,3 +57,15 @@ export const DIRTY = {
   EVENTS: 'events', HISTORY: 'history', PARAMS: 'params', TRAJ: 'traj',
   IMU: 'imu', POLICY: 'policy', SELECTED: 'selected', ALERTS: 'alerts',
 };
+
+// 写操作是否可用。断连时页面不猜、不降级、不静默重试（与 motor_hardware_interface 的
+// fail-fast 语义一致）：按钮直接禁用，而不是等请求超时。
+export function writesAllowed() { return store.conn.connected; }
+
+// 统一给一组按钮设禁用态；面板在自己的 render 里调用。
+export function syncWriteButtons(ids, allow) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !allow;
+  }
+}

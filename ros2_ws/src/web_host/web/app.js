@@ -102,12 +102,19 @@ const state = {
   selectedId: 0,      // 左栏 / 臂上选中的电机 id（0 = 未选中）
 };
 
-// 电机 id → URDF 关节名。默认对齐现阶段实机（4 台）。换模型或换接线用 URL
-// 参数覆盖，页面不改：?joints=1:joint_link1,2:joint_link2&model=<模型目录名>
+// 电机 id → URDF 关节名。默认对齐默认模型 chest_upper_00（9 台电机同一条 chest
+// 总线，id N ↔ joint_linkN，见该模型 config/simulation_topology.yaml）。换模型或换
+// 接线用 URL 参数覆盖，页面不改：?joints=1:joint_link1,2:joint_link2&model=<模型目录名>
 const URLQ = new URLSearchParams(location.search);
 const JOINT_OF_MOTOR = (() => {
   const q = URLQ.get('joints');
-  if (!q) return {1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4'};
+  if (!q) {
+    return {
+      1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
+      5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
+      9: 'joint_link9',
+    };
+  }
   const m = {};
   for (const pair of q.split(',')) {
     const [id, j] = pair.split(':');
@@ -115,9 +122,9 @@ const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
-// 与新版 store.js 及 gazebo.launch.py 的默认值一致：_001 已退役（c549d29 删了它的
-// URDF），旧默认值会让臂视图默认 404。
-const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_002';
+// 与新版 store.js 及 gazebo.launch.py 的默认值一致（最新模型 chest_upper_00）：
+// _001 已退役（c549d29 删了它的 URDF），旧默认值会让臂视图默认 404。
+const MODEL = URLQ.get('model') || 'chest_upper_00';
 
 // 曲线缓冲：motor_id -> {t:[], position:[], velocity:[], effort:[], current:[]}
 const chartBuf = new Map();

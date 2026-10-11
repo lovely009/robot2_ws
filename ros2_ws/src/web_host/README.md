@@ -79,8 +79,8 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `?model=` | `zhoubuguanjie_youbi_002` | `robot_arm_gazebo/models/` 下的模型目录名 |
-| `?joints=` | `1:joint_link1,2:joint_link2,3:joint_link3,4:joint_link4` | 电机 id → URDF 关节名 |
+| `?model=` | `chest_upper_00` | `robot_arm_gazebo/models/` 下的模型目录名 |
+| `?joints=` | `1:joint_link1,…,9:joint_link9` | 电机 id → URDF 关节名（默认对齐 `chest_upper_00` 的 id N ↔ `joint_linkN`） |
 
 **两条已写在界面上的限制**（别把它们当固件真值）：
 
@@ -192,7 +192,7 @@ ros2 topic list                            # 能看到 /micro_ros_up/* 说明 ag
 curl -sI http://localhost:8080 | head -1  # 期望 HTTP/1.0 200 OK
 # 臂视图的三个必需资源（缺任何一个页面都会在浮标上报加载失败）
 for f in arm3d.js vendor/three.module.min.js \
-         robot_arm_gazebo/models/zhoubuguanjie_youbi_001/urdf/zhoubuguanjie_youbi_001.urdf; do
+         robot_arm_gazebo/models/chest_upper_00/urdf/chest_upper_00.urdf; do
   curl -o /dev/null -s -w "%{http_code} $f\n" "http://localhost:8080/$f"
 done
 ```

@@ -111,9 +111,17 @@ export function chartPush(id, ch, val, t) {
 
 // URL 参数：换模型或换接线不改代码（?joints=1:joint_link1,2:joint_link2&model=<模型目录名>）
 export const URLQ = new URLSearchParams(location.search);
+// 默认对齐默认模型 chest_upper_00：9 台电机同一条 chest 总线，编号与关节序号一一对应
+// （id N ↔ joint_linkN，见 models/chest_upper_00/config/simulation_topology.yaml）。
 export const JOINT_OF_MOTOR = (() => {
   const q = URLQ.get('joints');
-  if (!q) return {1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4'};
+  if (!q) {
+    return {
+      1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
+      5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
+      9: 'joint_link9',
+    };
+  }
   const m = {};
   for (const pair of q.split(',')) {
     const [id, j] = pair.split(':');
@@ -121,9 +129,10 @@ export const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
-// 默认模型与 robot_arm_gazebo/launch/gazebo.launch.py 的默认值保持一致；
-// _001 已随模型改名退役（c549d29 删除了它的 URDF），旧默认值会让臂视图默认 404。
-export const MODEL = URLQ.get('model') || 'zhoubuguanjie_youbi_002';
+// 默认模型与 robot_arm_gazebo/launch/gazebo.launch.py 的默认值保持一致（最新模型
+// chest_upper_00）；_001 已随模型改名退役（c549d29 删除了它的 URDF），旧默认值会让
+// 臂视图默认 404。
+export const MODEL = URLQ.get('model') || 'chest_upper_00';
 
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，

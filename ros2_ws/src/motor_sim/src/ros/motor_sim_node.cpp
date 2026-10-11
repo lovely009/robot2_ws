@@ -209,6 +209,12 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
       "control_gate_topic", defaults.control_gate_topic);
   defaults.reset_fault_service = declare_parameter<std::string>(
       "reset_fault_service", defaults.reset_fault_service);
+  defaults.joint_states_topic = declare_parameter<std::string>(
+      "joint_states_topic", defaults.joint_states_topic);
+  defaults.effort_topic =
+      declare_parameter<std::string>("effort_topic", defaults.effort_topic);
+  defaults.diagnostics_topic = declare_parameter<std::string>(
+      "diagnostics_topic", defaults.diagnostics_topic);
 
   std::vector<std::string> expected_buses;
   expected_buses.reserve(config.buses.size());
@@ -260,6 +266,12 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
       "control_gate_topic", defaults.control_gate_topic);
   defaults.reset_fault_service = declare_parameter<std::string>(
       "reset_fault_service", defaults.reset_fault_service);
+  defaults.joint_states_topic = declare_parameter<std::string>(
+      "joint_states_topic", defaults.joint_states_topic);
+  defaults.effort_topic =
+      declare_parameter<std::string>("effort_topic", defaults.effort_topic);
+  defaults.diagnostics_topic = declare_parameter<std::string>(
+      "diagnostics_topic", defaults.diagnostics_topic);
   validate_node_parameters(parameters, contract);
 
   auto config = ::motor_sim::core::load_system_config(parameters.config_file,

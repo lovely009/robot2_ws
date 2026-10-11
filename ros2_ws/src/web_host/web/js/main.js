@@ -4,9 +4,10 @@ import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors } from './
 import { $, FOLD_KEY, WING_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
   from './core/format.js';
 import { SCREENS, initRouter, currentScreen } from './core/router.js';
-import { connect } from './core/ros.js';
+import { connect, waitSysStatus } from './core/ros.js';
 import { refreshAgentControls, refreshAgentStatus, startAgent, stopAgent }
   from './core/agent.js';
+import { loadParams } from './core/device.js';
 
 // 已挂载面板：panelId -> 面板实例
 const mounted = new Map();
@@ -133,6 +134,14 @@ function renderChips() {
 
 onDirty((dirty) => {
   const now = performance.now();
+  // 连上后自动读取一次参数：使能面板的电机列表来自 paramCache，设备屏不挂载时也要有。
+  // 先等首帧 system_status 确认固件侧已在总线上（订阅刚建时 DDS 发现可能还没完成，
+  // REPORT 太早发出可能白等）；真没固件时由 loadParams 自己的超时兜底。
+  // 掉线时 core/ros.js 会复位 autoLoaded，重连后自动再读一次。
+  if (dirty.has(DIRTY.CONN) && store.conn.connected && !store.conn.autoLoaded) {
+    store.conn.autoLoaded = true;
+    waitSysStatus().then(() => loadParams());
+  }
   renderShell(dirty);          // 顶栏连接文案与 Agent 状态
   renderPanels(dirty, now);
 });

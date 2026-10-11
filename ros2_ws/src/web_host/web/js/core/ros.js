@@ -71,6 +71,8 @@ export function connect() {
     // 序号是固件侧单调递增的，重连后第一帧就比掉线前的基线大——不清 seen 的话
     // 一个还在飞的轮询会拿旧基线立刻"成功"。次帧到达前拒绝轮询。
     store.sysStatus.seen = false;
+    // 自动读取只在本连接内做一次；复位后重连会重新触发（设备参数以新会话为准）。
+    store.conn.autoLoaded = false;
     markDirty(DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.PARAMS, DIRTY.ALERTS);
     // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
     // 表现为页面一直连不上、看着"卡"）。

@@ -6,7 +6,8 @@ import { devSlotNames, devRecoveryText } from './format.js';
 export const store = {
   // text：顶栏连接文案（setConn 写它，renderShell 画它）
   conn: {connected: false, text: '未连接', url: '', agent: 'stopped', agentDevice: '',
-         agentError: '', agentReturncode: null, canStop: false, lastMsgAt: 0},
+         agentError: '', agentReturncode: null, canStop: false, lastMsgAt: 0,
+         autoLoaded: false},
   // motors: id -> {topo, motion, status}（与重构前的 state.motors 同形状，搬迁期不改字段名）
   motors: new Map(),
   lastError: 0,
@@ -27,6 +28,9 @@ export const store = {
   chart: {running: true, windowMs: 10000},
   history: [],
   paramCache: new Map(),
+  // 写事务的结果文本（key -> {ok, text, t}）：同一事务的按钮分布在设备屏与使能屏，
+  // 结果不能只写给某一个 DOM。core/device.js 的 writeResult 写它。
+  results: new Map(),
   traj: {activeTrajectoryId: 0, waitingState: false, segmentIndex: 0, segmentCount: 0},
 };
 

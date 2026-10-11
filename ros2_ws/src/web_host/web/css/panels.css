@@ -175,6 +175,18 @@ tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size:
 .pill.warn { background: #33280f; border-color: #5e4a1d; color: var(--warn); }
 .pill.mid { background: #16233a; border-color: #2b4468; color: #9fb2d4; }
 
+/* ---------- 设备参数表 ---------- */
+/* 表头单位小字（pos_min <small>rad</small>…） */
+th small { color: var(--dim-2); opacity: .8; font-weight: 400; font-size: 9px;
+  text-transform: none; }
+/* 核对总览条（paramSummary）：结论放最显眼处 */
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding: 6px 9px; margin-bottom: var(--gap-sm); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--panel-2); }
+/* 保护确知为关的行：该关节此刻没有任何限位在跑。 */
+tr.unprotected td { background: #2a1416; }
+tr.unprotected td.num { color: var(--err); }
+
 /* ---------- 控件 ---------- */
 .ctrl-row { display: flex; gap: 6px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
 input, select { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);

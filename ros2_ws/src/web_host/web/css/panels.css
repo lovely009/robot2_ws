@@ -67,22 +67,24 @@
   margin-right: 4px; vertical-align: middle; }
 
 /* ---------- 卡片 / 可折叠区 ---------- */
-.card, .sec { background: var(--panel); border: 1px solid var(--line);
+.card, .sec, .sendbar { background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: var(--pad-panel); margin-bottom: var(--gap); }
-details.card, details.sec { padding: 0; }
-details.card > summary, details.sec > summary {
+details.card, details.sec, details.sendbar { padding: 0; }
+details.card > summary, details.sec > summary, details.sendbar > summary {
   font-size: var(--fs-sm); font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; color: var(--dim);
   margin: 0; padding: 7px 11px; cursor: pointer;
   display: flex; align-items: center; gap: 7px; user-select: none;
 }
-details.card > summary:hover, details.sec > summary:hover { background: var(--panel-2); color: var(--text); }
-details.card[open] > summary, details.sec[open] > summary {
-  border-bottom: 1px solid var(--line); margin-bottom: 7px;
-}
-details.card > *:not(summary), details.sec > *:not(summary) { margin: 6px 11px; }
+details.card > summary:hover, details.sec > summary:hover,
+details.sendbar > summary:hover { background: var(--panel-2); color: var(--text); }
+details.card[open] > summary, details.sec[open] > summary,
+details.sendbar[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 7px; }
+details.card > *:not(summary), details.sec > *:not(summary),
+details.sendbar > *:not(summary) { margin: 6px 11px; }
 details.card > *:not(summary):last-child,
-details.sec > *:not(summary):last-child { margin-bottom: 10px; }
+details.sec > *:not(summary):last-child,
+details.sendbar > *:not(summary):last-child { margin-bottom: 10px; }
 /* display:flex 会吃掉 summary 默认的三角标记，自己补一个。 */
 details > summary::before { content: '▸'; color: var(--dim-2); font-size: 9px; flex: none; }
 details[open] > summary::before { content: '▾'; }
@@ -139,6 +141,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 input:focus, select:focus { outline: none; border-color: var(--accent); }
 .check { font-size: var(--fs-sm); display: flex; align-items: center; gap: 4px; color: var(--dim); }
 .params .pnum { width: 86px; text-align: right; }
+
+/* 下发表：输入框吃满单元格宽度（数值列宽窄随内容漂移会难对齐）。 */
+.cmd input { width: 100%; min-width: 80px; padding: 3px 6px; }
+.cmd td { padding: 2px 4px; }
 
 /* ---------- 文本工具 ---------- */
 .muted { color: var(--dim); }

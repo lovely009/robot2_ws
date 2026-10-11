@@ -152,6 +152,28 @@
     </div>
   </template>
 
+  <!-- 下发（命令快照 / 100Hz 连发） -->
+  <template data-panel-template="command">
+    <details class="sendbar" data-fold="send" open>
+      <summary title="/micro_ros_do/motor_command_array">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+      <div class="table-wrap">
+        <table class="cmd">
+          <thead><tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr></thead>
+          <tbody id="cmdRows"></tbody>
+        </table>
+      </div>
+      <div class="ctrl-row wrap">
+        <button id="btnAddRow">+ 添加</button>
+        <button id="btnFillOnline" class="secondary">填入在线电机（原位）</button>
+        <button id="btnClearRows" class="secondary">清空</button>
+        <span class="spacer"></span>
+        <button id="btnSendOnce" class="primary">单发一次</button>
+        <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
+      </div>
+      <div id="cmdResult" class="result tiny"></div>
+    </details>
+  </template>
+
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
   <template data-screen="run">
     <div class="screen run">
@@ -161,7 +183,7 @@
         <div data-panel="readout"></div>
         <div data-panel="policy"></div>
       </section>
-      <section class="col-command"></section>
+      <section class="col-command"><div data-panel="command"></div></section>
       <section class="col-drawer"></section>
     </div>
   </template>
@@ -170,7 +192,7 @@
       <section class="col-index"><div data-panel="jointList"></div></section>
       <section class="col-stage"><div data-panel="arm"></div></section>
       <section class="col-side"></section>
-      <section class="col-command"></section>
+      <section class="col-command"><div data-panel="command"></div></section>
       <section class="col-teach"></section>
     </div>
   </template>

@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import os
+
 import mujoco
 import numpy as np
 import rclpy
@@ -79,6 +81,12 @@ class MujocoEffortBridge(Node):
         self.viewer = None
         if not headless:
             try:
+                # pyglfw 在 Wayland 会话默认加载 wheel 里的 wayland 版库，本机实测该后端
+                # 窗口无响应、sync() 自旋（主线程 87% CPU、3D 区全黑）；wheel 里同时带
+                # X11 变体，强制用它走 XWayland。注意必须在 import glfw 之前设。
+                if os.environ.get("XDG_SESSION_TYPE") == "wayland" and os.environ.get("DISPLAY"):
+                    os.environ["PYGLFW_LIBRARY_VARIANT"] = "x11"
+                    os.environ.pop("WAYLAND_DISPLAY", None)
                 # mujoco 3.6 的 __init__ 不自动导入 viewer 子模块，必须显式导入
                 # （用别名以免把 `mujoco` 变成局部名，影响本函数其它引用）
                 from mujoco import viewer as mujoco_viewer
@@ -130,7 +138,11 @@ class MujocoEffortBridge(Node):
         message.effort = self.data.qfrc_actuator[self.dof_address].tolist()
         self.publisher.publish(message)
         if self.viewer is not None:
-            self.viewer.sync()
+            if self.viewer.is_running():
+                self.viewer.sync()
+            else:                           # 用户关掉窗口后继续无头仿真，别卡在 sync 上
+                self.get_logger().info("MuJoCo viewer 已关闭，改为无头继续仿真")
+                self.viewer = None
 
 
 def main() -> None:

@@ -24,9 +24,6 @@
 # 顺序必须与 URDF 的物理关节顺序一致：第一链 joint_link1..9 → 第二链 joint_link1.1..9.9。
 # 关节名是小写（link 名才是大写 Joint_linkN）—— 导出器原本让二者同名，在 SDFormat 里
 # 会导致模型建不起来，故 joint 改小写；`.N` 后缀是导出器对第二链的编号。
-#
-# ⚠ 本模型尚未接入 motor_hardware_interface 的电机拓扑：没有 simulation_topology.yaml，
-# 因此这 18 个关节暂时没有对应的电机名映射，simulation.launch.py 不能选本模型。
 /**/arm_position_controller:
   ros__parameters:
     joints:

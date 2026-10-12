@@ -66,7 +66,8 @@ def _robot_description_command(entities, context):
     raise AssertionError("未找到 robot_state_publisher 的 robot_description 命令")
 
 
-@pytest.mark.parametrize("launch_name", ["display.launch.py", "gazebo.launch.py"])
+@pytest.mark.parametrize(
+    "launch_name", ["display.launch.py", "gazebo.launch.py", "mujoco.launch.py"])
 def test_launch_selects_an_existing_model(launch_name):
     entities, context = _execute(LAUNCH_DIR / launch_name)
 

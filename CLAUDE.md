@@ -120,9 +120,9 @@ ros2 launch web_host web_host.launch.py      # rosbridge_port:=9090、web_port:=
 不改动 rosbridge 连接；运行用户需对所选串口有读写权限（`dialout`）。
 
 - `--symlink-install` **不能**兜住 `setup.py` 的清单改动：新增/改名 `console_scripts`（如
-  `rosbridge_shim`）或 `web/` 下**新增文件**（如 `arm3d.js`、`vendor/`）都必须重跑 colcon build，
+  `rosbridge_shim`）或 `web/` 下**新增文件**（如 `js/panels/*.js`、`vendor/`）都必须重跑 colcon build，
   否则分别报 `executable not found` 与页面 404（构建"成功"）。
-- 臂视图几何（URDF + 约 20 MB STL）不在 `web/` 里，由 `static_server` 把
+- 臂视图几何（URDF + 约 70 MB STL）不在 `web/` 里，由 `static_server` 把
   `robot_arm_gazebo` share 目录挂到 `/robot_arm_gazebo`；`web/` 内不能放目录符号链接
   （`os.walk` 与 setuptools 都会漏）。
 - 页面职守点在**固件话题**（如 `micro_ros_up/motion_states`），不是 `/joint_states`——

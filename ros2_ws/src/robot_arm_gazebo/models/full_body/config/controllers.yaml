@@ -1,0 +1,71 @@
+# full_body（全身机器人，双臂 18 轴）的 gz_ros2_control 参数。
+# 顶层键用通配 /**/：无论是否加命名空间都能匹配，避免参数文件被静默忽略。
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 100
+    use_sim_time: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    arm_effort_controller:
+      type: effort_controllers/JointGroupEffortController
+
+# 本模型**只导出 effort 命令接口**（见 urdf/full_body.urdf.xacro 的说明：同时声明
+# position+effort 会让 position 命令在 gz-sim 里被静默忽略）。因此本控制器没有可认领的
+# 接口，spawn 它会明确失败——这是有意的：gazebo.launch.py 的 control_mode 默认 effort，
+# 不要传 position。
+#
+# 这一节保留（joints 列全）是因为 robot_arm_gazebo/launch/simulation.launch.py 的配置
+# 生成器要求 position/effort 两个控制器节都存在（它按仿真拓扑重写两节的 joints）。
+/**/arm_position_controller:
+  ros__parameters:
+    joints:
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4
+      - joint_link5
+      - joint_link6
+      - joint_link7
+      - joint_link8
+      - joint_link9
+      - joint_link1.1
+      - joint_link2.2
+      - joint_link3.3
+      - joint_link4.4
+      - joint_link5.5
+      - joint_link6.6
+      - joint_link7.7
+      - joint_link8.8
+      - joint_link9.9
+    interface_name: position
+
+# 唯一实际使用的控制器：力矩直通（JointGroupEffortController 无 interface_name，恒 effort）。
+# joints 顺序即 Float64MultiArray 命令顺序，必须是 urdf/*.urdf.xacro 的 <ros2_control>
+# 关节清单的有序子集（由 test_model_consistency.py 兜底）。
+# 顺序 = 物理关节顺序：第一链 joint_link1..9 → 第二链 joint_link1.1..9.9。
+/**/arm_effort_controller:
+  ros__parameters:
+    joints:
+      - joint_link1
+      - joint_link2
+      - joint_link3
+      - joint_link4
+      - joint_link5
+      - joint_link6
+      - joint_link7
+      - joint_link8
+      - joint_link9
+      - joint_link1.1
+      - joint_link2.2
+      - joint_link3.3
+      - joint_link4.4
+      - joint_link5.5
+      - joint_link6.6
+      - joint_link7.7
+      - joint_link8.8
+      - joint_link9.9

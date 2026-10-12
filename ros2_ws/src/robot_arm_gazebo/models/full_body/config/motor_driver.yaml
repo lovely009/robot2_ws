@@ -1,0 +1,162 @@
+# full_body（全身机器人）的**仿真专用**电机拓扑，只供 simulation.launch.py 的
+# motor_config_file:= 使用，不参与真机 bring-up（hardware.launch.py 读的是权威配置）。
+#
+# 为什么不并进权威的 motor_hardware_interface/config/motor_driver.yaml：
+#   那份描述**整机**，且 motor_hardware_interface/test/test_xacro_consistency.py 断言
+#   其中每台电机的 joint 必须存在于机器人物理模型 urdf/upper_body.urdf.xacro
+#   （docstring 原话：「防止 YAML 与物理模型脱节」）。full_body 的 joint_link1..9 与
+#   joint_link1.1..9.9 目前只存在于 Gazebo 模型，放进权威文件会让该测试变红，也会让
+#   真机 bring-up 去驱动不存在的关节。
+#   ⚠ 待这些关节并入 upper_body.urdf.xacro 后，应把本文件并回权威配置并删除本文件。
+#
+# 拓扑：18 台电机同一条 arm 总线（同一 CAN 域），**两条手臂都驱动**。
+# 编号：id 1..9 = 第一链 joint_link1..9；id 10..18 = 第二链 joint_link1.1..9.9。
+# **每条手臂的型号从上到下（靠躯干 → 末端）依次为**
+#   rb48  rb48  rb58  rb58  rb48  rb48  rb48  vaxor  vaxor
+# 即 cerb_r48_101 ×5、cerb_r58_101 ×2、vaxor_2550 ×2（两条链同序列；若实机不对称请改这里）。
+# 同总线 ID 必须唯一：固件注册表以 motor_id 为键（= 厂家 node 号，重号即 CONFIG_CONFLICT），
+# 固件 HIL 模拟器 fdcan_motor_sim.py 的 --joint-map 同样以裸 ID 为键。
+#
+# MIT 三项（parameters）是发给电机的协议限幅，必须与真机参数设置页一致：
+#   cerb 的 mit_torque_limit_nm 取型号库 peak_torque_nm（r58 45.0 / r48 11.0），
+#   位置/速度限幅沿用 robot_all 的同一组占位值（12.5 rad / 30 rad·s⁻¹）。
+#   vaxor 型号库只给 Kt/减速比/效率，没有力矩限幅，靠仿真 topology 的 current_limit_a 收住。
+#
+# motor_specs_file 指向权威型号库（相对本文件所在目录）。
+#
+# 本文件不写 timing：仿真侧时序默认继承权威 motor_driver.yaml，本模型在
+# simulation_topology.yaml 的 driver_timing 里覆盖要改的那一项（feedback_timeout_s 0.5）。
+motor_hardware:
+  motor_specs_file: ../../../../motor_hardware_interface/config/motor.yaml
+
+  buses:
+    arm:
+      transport: serial_slcan
+      tty: /dev/ttyACM0
+
+  motors:
+    # ── 第一链（joint_link1..9，joint id 1..9）──
+    arm_joint1:
+      joint: joint_link1
+      bus: arm
+      type: cerb_r48_101
+      id: 1
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint2:
+      joint: joint_link2
+      bus: arm
+      type: cerb_r48_101
+      id: 2
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint3:
+      joint: joint_link3
+      bus: arm
+      type: cerb_r58_101
+      id: 3
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
+    arm_joint4:
+      joint: joint_link4
+      bus: arm
+      type: cerb_r58_101
+      id: 4
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
+    arm_joint5:
+      joint: joint_link5
+      bus: arm
+      type: cerb_r48_101
+      id: 5
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint6:
+      joint: joint_link6
+      bus: arm
+      type: cerb_r48_101
+      id: 6
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint7:
+      joint: joint_link7
+      bus: arm
+      type: cerb_r48_101
+      id: 7
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint8:
+      joint: joint_link8
+      bus: arm
+      type: vaxor_2550
+      id: 8
+      command: {kp: 0.008, kd: 1.0}
+    arm_joint9:
+      joint: joint_link9
+      bus: arm
+      type: vaxor_2550
+      id: 9
+      command: {kp: 0.008, kd: 1.0}
+
+    # ── 第二链（joint_link1.1..9.9，joint id 10..18；型号序列与第一链相同）──
+    arm_joint1.1:
+      joint: joint_link1.1
+      bus: arm
+      type: cerb_r48_101
+      id: 10
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint2.2:
+      joint: joint_link2.2
+      bus: arm
+      type: cerb_r48_101
+      id: 11
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint3.3:
+      joint: joint_link3.3
+      bus: arm
+      type: cerb_r58_101
+      id: 12
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
+    arm_joint4.4:
+      joint: joint_link4.4
+      bus: arm
+      type: cerb_r58_101
+      id: 13
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 45.0}
+    arm_joint5.5:
+      joint: joint_link5.5
+      bus: arm
+      type: cerb_r48_101
+      id: 14
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint6.6:
+      joint: joint_link6.6
+      bus: arm
+      type: cerb_r48_101
+      id: 15
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint7.7:
+      joint: joint_link7.7
+      bus: arm
+      type: cerb_r48_101
+      id: 16
+      command: {kp: 30.0, kd: 1.0}
+      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 11.0}
+    arm_joint8.8:
+      joint: joint_link8.8
+      bus: arm
+      type: vaxor_2550
+      id: 17
+      command: {kp: 0.008, kd: 1.0}
+    arm_joint9.9:
+      joint: joint_link9.9
+      bus: arm
+      type: vaxor_2550
+      id: 18
+      command: {kp: 0.008, kd: 1.0}

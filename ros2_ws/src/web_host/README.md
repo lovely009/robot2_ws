@@ -75,7 +75,7 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 vendor 那几个文件是一个整体：`urdf-loader` 顶层就 import 了 STLLoader 与
 ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个会在运行时才炸。
 
-几何（URDF + 约 20 MB 的 STL）**不放在 `web/` 里**：`setup.py` 用 `os.walk('web')`
+几何（URDF + 约 70 MB 的 STL）**不放在 `web/` 里**：`setup.py` 用 `os.walk('web')`
 逐目录列 data_files，而 setuptools 的 symlink-install 处理不了**目录**符号链接
 （会把整目录当文件 copy，报 `not a regular file`）。改为由 `static_server` 把
 `robot_arm_gazebo` 的 share 目录挂到 `/robot_arm_gazebo`——于是 URDF 里的

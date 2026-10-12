@@ -22,9 +22,10 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 
 > 2026-10-12 清理：`chest_upper_00`、`chest_dual_00`、`robot-001`、`zhoubuguanjie_youbi_002`
-> 及其 `dist/` 发布件已移除，`robot_all` 成为唯一可加载模型与默认模型。`robot_all` 的仿真
+> 及其 `dist/` 发布件已移除，`robot_all` 成为默认模型。`robot_all` 的仿真
 > 拓扑沿用被移除的 `chest_upper_00` 的映射（两者是同一上身装配体的不同 CAD 导出，第一条链的
-> 关节名与顺序完全相同）。这些模型仍在 git 历史里，例如
+> 关节名与顺序完全相同）。同日新增 `full_body`（双臂 18 关节，力矩控制）——当前可加载模型是
+> `robot_all` 与 `full_body`。这些模型仍在 git 历史里，例如
 > `git show 3d843d1:ros2_ws/src/robot_arm_gazebo/models/chest_upper_00/`。
 
 ## 目录结构
@@ -36,10 +37,12 @@ robot_arm_gazebo/
 ├── launch/
 │   ├── display.launch.py                   # RViz 预览（无 Gazebo、无控制器）
 │   ├── gazebo.launch.py                    # Ignition 仿真 + effort/position 控制器
+│   ├── mujoco.launch.py                    # MuJoCo 仿真（自写力矩直通桥，话题契约同 Gazebo）
 │   └── simulation.launch.py                # Gazebo + 电机总线 + 驱动/固件 HIL 组合入口
 ├── scripts/
 │   ├── simulation_gate.py                  # 电机生命周期到 Gazebo effort 门控
-│   └── agent_after_sim_ready.py             # 模拟总线 ready 后启动 micro-ROS Agent
+│   ├── agent_after_sim_ready.py             # 模拟总线 ready 后启动 micro-ROS Agent
+│   └── mujoco_effort_bridge.py             # MuJoCo ↔ ROS 2 力矩/关节状态直通桥
 ├── models/
 │   └── <模型名>/                            # 自包含：urdf / meshes / config / cad / README
 ├── dist/
@@ -68,6 +71,10 @@ ros2 launch robot_arm_gazebo gazebo.launch.py gravity:=false
 
 # 若要测试 MIT 等效力矩动力学，显式切换两端为 effort
 ros2 launch robot_arm_gazebo gazebo.launch.py control_mode:=effort
+
+# MuJoCo 替代后端（不依赖 ros2_control/Gazebo，力矩直通；话题契约与上面一致）
+ros2 launch robot_arm_gazebo mujoco.launch.py model:=full_body             # 带 viewer
+ros2 launch robot_arm_gazebo mujoco.launch.py model:=full_body headless:=true
 ```
 
 ## 完整电机—机械臂仿真
@@ -164,8 +171,10 @@ RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还�
 缺包时 launch 在启动任何进程之前就抛 `package ... not found`（例如本机缺
 `ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
 
-独立的 `gazebo.launch.py` 与 `display.launch.py` 接受 `model:=<模型名>` 选择 `models/` 下的
-模型，默认 `robot_all`（唯一可加载模型）。完整 `simulation.launch.py` 同样默认 `robot_all`，
+独立的 `gazebo.launch.py`、`display.launch.py` 与 `mujoco.launch.py` 接受 `model:=<模型名>`
+选择 `models/` 下的模型，默认 `robot_all`；`mujoco.launch.py` 要求模型目录
+带有 `mujoco/<模型名>.xml`（由模型自己的 `tools/build_mujoco_model.py` 生成）。完整
+`simulation.launch.py` 同样默认 `robot_all`，
 要求所选模型目录带有 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与
 launch 参数一致；`motor_config_file` **留空**时优先用模型目录自带的
 `config/motor_driver.yaml`，其次才用权威整机配置（选不带拓扑的模型会显式 `RuntimeError`，

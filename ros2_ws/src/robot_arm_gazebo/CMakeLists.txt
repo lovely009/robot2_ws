@@ -14,6 +14,7 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/simulation_gate.py
   scripts/agent_after_sim_ready.py
+  scripts/mujoco_effort_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

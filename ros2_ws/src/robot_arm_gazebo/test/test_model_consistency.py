@@ -1,6 +1,7 @@
 """模型目录自洽性：URDF / xacro / controllers.yaml 的关节清单必须自洽。
 
-不启动 ROS 节点与 Gazebo，只做静态渲染与解析。每个 models/<模型名>/ 都要满足：
+不启动 ROS 节点与 Gazebo，只做静态渲染与解析。扫描范围是 models/ 下**带
+urdf/<目录名>.urdf.xacro 的契约模型**（一个模型 = 一个自包含目录），每个都要满足：
 - 三件套齐全：urdf/<模型名>.urdf、urdf/<模型名>.urdf.xacro、config/controllers.yaml；
 - 关节清单：<ros2_control> 声明全部非 fixed 物理关节且顺序与 URDF 一致（fixed 关节
   没有 command/state interface，不进 ros2_control）；controllers.yaml 的 joints 是
@@ -54,7 +55,17 @@ def _link_masses(root):
 
 
 def _model_dirs():
-    return sorted(path for path in MODELS_DIR.iterdir() if path.is_dir())
+    """契约模型 = models/ 下同时有 urdf/<目录名>.urdf 与 urdf/<目录名>.urdf.xacro 的目录。
+
+    models/ 里还会有别的产物：模型库（如 g1_description：一批第三方 *.urdf 平铺）、第三方
+    导出件（如 pro_urdf_publish：外面多套一层）、以及**刚导出、还没做适配的件**（有 urdf/ 但
+    缺 xacro / controllers.yaml / README）。它们不是「一个模型一个自包含目录」的契约模型，
+    不参与本文件的断言；做完适配（至少补上 <名>.urdf.xacro）后会被自动纳入。
+    """
+    return sorted(
+        path for path in MODELS_DIR.iterdir()
+        if path.is_dir() and (path / "urdf" / f"{path.name}.urdf.xacro").is_file()
+    )
 
 
 def _model_ids(model_dir):

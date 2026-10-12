@@ -6,7 +6,7 @@
 // 依赖全部 vendor 在 web/vendor/（three 0.160.1 + urdf-loader 0.13.1），
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
-// 几何来源：几何体不在 web/ 里（约 20 MB STL）——static_server 把
+// 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把
 // robot_arm_gazebo 的 share 目录挂到 /robot_arm_gazebo，URDF 里的
 // package://robot_arm_gazebo/... 经 loader.packages 映射成 /robot_arm_gazebo/...。
 //
@@ -317,7 +317,7 @@ export function mount(rootEl, ctx) {
       const extra = joints.filter((j) => !mapped.includes(j));
       hud.textContent = `臂视图就绪 · ${joints.length} 个关节`
         + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
-        + ' · STL 约 20 MB（首次慢，之后走浏览器缓存）';
+        + ' · STL 约 70 MB（首次慢，之后走浏览器缓存）';
       ready = true;
       // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
       // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。

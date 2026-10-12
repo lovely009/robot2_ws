@@ -1,12 +1,15 @@
 // 仿真启动器面板：控制端 / CAN 接口 / 模型 / 端点选择，启动与停止
 // robot_arm_gazebo 的 simulation.launch.py，子进程状态与最近日志来自
-// /api/simulation/*（HTTP，与 rosbridge 无关）。因此本面板不读写 store；
+// /api/simulation/*（HTTP，与 rosbridge 无关）。因此本面板不订阅、不写 store（只取
+// core/store.js 的 MODEL 常量）；
 // 切屏后状态与日志由后端 status 接口整段恢复，日志不重复追加。
 // 搬自重构前的 web/simulation.js（页面级 IIFE 单例），只改挂载方式：ui 映射与
 // 全部逻辑移进 mount 作用域（切屏会反复挂载，模块级 ui 会指向已卸载的 DOM），
 // 1.8 s 状态轮询由 mount 持有句柄并在 unmount 清理——旧代码是页面级单例，
 // 切屏会重复注册轮询。
 import { $ } from '../core/format.js';
+// 默认模型名与臂视图共用一份（core/store.js 的 MODEL），别在这里再写一个字符串。
+import { MODEL } from '../core/store.js';
 
 const STORAGE_KEY = 'robot2.simulation.options.v1';
 const stateLabels = {
@@ -136,8 +139,9 @@ export function mount(root, ctx) {
       value: model,
       label: model,
     }));
-    // 兜底默认 = robot_all（旧默认值对应的模型都已删除，留着会选不中任何项）
-    replaceOptions(ui.model, models, '选择仿真模型', saved.model || 'robot_all');
+    // 兜底默认取 MODEL（与臂视图同一个默认值；不在列表里的值由 replaceOptions 落到
+    // 第一个可用模型，旧的写死字符串已随模型改名失效过两次）。
+    replaceOptions(ui.model, models, '选择仿真模型', saved.model || MODEL);
 
     const cans = (options.can_interfaces || []).map((item) => ({
       value: item.name,

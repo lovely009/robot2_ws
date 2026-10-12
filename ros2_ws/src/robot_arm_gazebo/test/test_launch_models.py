@@ -21,7 +21,7 @@ from launch_ros.actions import Node
 
 HERE = Path(__file__).parent
 LAUNCH_DIR = HERE.parent / "launch"
-MODEL = "chest_upper_00"
+MODEL = "robot_all"
 
 
 def _execute(launch_file):

@@ -1,6 +1,6 @@
 """启动 Ignition Gazebo 仿真：空世界 + 生成模型 + gz_ros2_control 控制器。
 
-模型由 `model:=` 选择（`models/<模型名>/`），默认 `chest_upper_00`。
+模型由 `model:=` 选择（`models/<模型名>/`），默认 `robot_all`。
 控制方式（启动完成后）：
 
   ros2 topic pub --once /arm_effort_controller/commands \\
@@ -95,9 +95,9 @@ def generate_launch_description():
         output="screen",
         arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
     )
-    # spawn_z 默认 0.0：默认模型 chest_upper_00 的 base_link 网格
+    # spawn_z 默认 0.0：默认模型 robot_all 的 base_link 网格
     # z ∈ [0.0000, 0.7029]，零位下全模型最低点恰为 z = 0.000000，故无需抬起。
-    # 换模型要重新核这个值（zhoubuguanjie_youbi_002 底面在 z = −0.002729，需 spawn_z:=0.0027）。
+    # 换模型要重新核这个值。
     spawn_robot = Node(
         package="ros_gz_sim",
         executable="create",
@@ -138,7 +138,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "model",
-                default_value="chest_upper_00",
+                default_value="robot_all",
                 description="models/ 下的模型目录名",
             ),
             DeclareLaunchArgument(
@@ -159,7 +159,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "gravity",
                 default_value="true",
-                description="模型连杆是否受 Gazebo 重力；position 轨迹验收可设 false",
+                description="第一链连杆是否受 Gazebo 重力（第二链恒关）；position 轨迹验收可设 false",
             ),
             DeclareLaunchArgument(
                 "control_mode",

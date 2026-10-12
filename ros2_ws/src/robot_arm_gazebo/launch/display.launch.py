@@ -11,7 +11,8 @@ zhoubuguanjie_youbi_001 —— 那类模型的闭环在 URDF 里被切开，直�
 joint_link5/6 会让连杆与电机「散架」，所以默认要启动 wrist_closure_solver：
 滑杆改发 /joint_states_raw，求解器按闭环约束补出被动关节后再发 /joint_states。
 **该模型与求解器已一并移除**：现有模型导出时都取消了连杆，是纯串联树，不需要任何补环。
-默认模型为 chest_upper_00（纯串联 9 轴，关节名大写 Joint_link1..9）。
+默认模型为 robot_all（两条互不相连的 9 轴链共 18 轴，link 名大写 `Joint_linkN` /
+`Joint_linkN.N`，joint 名小写）。
 """
 
 from launch import LaunchDescription
@@ -46,7 +47,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "model",
-                default_value="chest_upper_00",
+                default_value="robot_all",
                 description="models/ 下的模型目录名",
             ),
             DeclareLaunchArgument(

@@ -448,9 +448,9 @@ def launch_simulation(context):
     model = LaunchConfiguration("model").perform(context)
     # 电机拓扑来源：显式 motor_config_file 优先；留空时优先**模型目录自带**的
     # config/motor_driver.yaml（模型专属仿真拓扑），否则回落权威整机配置。
-    # 默认模型 chest_upper_00 的 joint_link1..9 尚未并入 upper_body.urdf.xacro
+    # 默认模型 robot_all 的 joint_link1..9 尚未并入 upper_body.urdf.xacro
     # （并进去会让 test_xacro_consistency 变红、真机 bring-up 去驱动不存在的关节），
-    # 所以它只能用自带那份。
+    # 所以它只能用自带那份（第二条链 joint_link1.1..9.9 无电机，不在拓扑里）。
     requested_config = LaunchConfiguration("motor_config_file").perform(context)
     if requested_config:
         motor_driver_path = Path(requested_config).resolve()
@@ -908,7 +908,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "model",
-                default_value="chest_upper_00",
+                default_value="robot_all",
                 description="models/ 下含 simulation_topology.yaml 的模型目录",
             ),
             DeclareLaunchArgument(

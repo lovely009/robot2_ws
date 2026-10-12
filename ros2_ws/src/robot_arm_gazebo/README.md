@@ -11,22 +11,21 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
-| `chest_upper_00` | 上身结构装配体（SolidWorks 导出，纯串联 9 轴，关节名大写 `Joint_link1..9`）。**默认模型**，已接入端到端电机仿真（`config/simulation_topology.yaml` + 仿真专用的 `config/motor_driver.yaml`） | 9 revolute + 0 fixed |
-| `zhoubuguanjie_youbi_002` | 右臂（SolidWorks 导出，R58 肩座 + 支撑座 + 6 关节主链，**无腕部连杆**） | 6 revolute + 0 fixed |
+| `robot_all` | **默认模型**。上身 + 双臂整体装配体（SolidWorks 导出，躯干 `base_link` 上挂**两条互不相连**的 9 轴链，link `Joint_link1..9` / `Joint_link1.1..9.9`，joint 小写，第二链非严格镜像）。已接入端到端电机仿真，但只覆盖第一条链的 9 个关节（第二条链无电机、Gazebo 里恒关重力） | 18 revolute + 0 fixed |
 
-> `models/` 下另有三个**原始资产目录**（`g1_description`、`pro_urdf_publish`、`robot-001`），
+> `models/` 下另有**两个原始资产目录**（`g1_description`、`pro_urdf_publish`），
 > 是导入的厂商/CAD 导出件，不满足 `models/<模型名>/` 的自包含契约三件套
 > （`urdf/<名>.urdf` + `urdf/<名>.urdf.xacro` + `config/controllers.yaml` + `README.md`），
 > 因此 `test_model_consistency.py` 对它们持续报红（每目录 5 项）。要么补齐契约、要么移出
-> `models/`，见该测试文件头部对契约的说明。
+> `models/`，见该测试文件头部对契约的说明。它们不是可加载的模型，`model:=` 不要指向它们。
 
 模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
 
-> 2026-10-10 清理：原 `zhoubuguanjie_youbi_001`（腕部为远置驱动**并联连杆**机构，
-> 12 revolute + 2 fixed，闭环在 URDF 里被切开、需 `wrist_closure_solver` 运行期补环）
-> 及其求解器、测试与 `dist/` 发布件已一并移除。当前模型是同一台臂的另一次导出，
-> **取消了连杆**，腕部退化为直接驱动的串联关节，全模型是纯树、不需要任何补环。
-> 旧版本仍在 git 历史里（`git show 3f1839e^:ros2_ws/src/robot_arm_gazebo/models/zhoubuguanjie_youbi_001/`）。
+> 2026-10-12 清理：`chest_upper_00`、`chest_dual_00`、`robot-001`、`zhoubuguanjie_youbi_002`
+> 及其 `dist/` 发布件已移除，`robot_all` 成为唯一可加载模型与默认模型。`robot_all` 的仿真
+> 拓扑沿用被移除的 `chest_upper_00` 的映射（两者是同一上身装配体的不同 CAD 导出，第一条链的
+> 关节名与顺序完全相同）。这些模型仍在 git 历史里，例如
+> `git show 3d843d1:ros2_ws/src/robot_arm_gazebo/models/chest_upper_00/`。
 
 ## 目录结构
 
@@ -79,17 +78,22 @@ ros2 launch robot_arm_gazebo gazebo.launch.py control_mode:=effort
 ```bash
 ros2 launch robot_arm_gazebo simulation.launch.py
 
-# 发送四关节位置目标；数组顺序取自所选模型的 simulation_topology.yaml
+# 发送 9 个关节的目标；数组顺序 = 所选模型 simulation_topology.yaml 里 motors 的顺序
 ros2 topic pub --once /driver/position_controller/commands \
-  std_msgs/msg/Float64MultiArray "{data: [0.5, -0.3, 1.0, 0.2]}"
+  std_msgs/msg/Float64MultiArray "{data: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ros2 topic echo /joint_states
 ```
 
-电机 ID、协议、总线、类型和控制增益取自
-`motor_hardware_interface/config/motor_driver.yaml` 与 `motor.yaml`；
-`models/<模型名>/config/simulation_topology.yaml` 只记录参与仿真的电机子集、Gazebo 关节
-映射和 plant 参数。当前右臂模型接入肩部到肘部四台 CERB 电机；腕部（`joint_link5`
-之后的被动连杆机构，见模型 README 的闭环说明）与左臂尚未纳入这个 Gazebo 模型。
+默认模型 `robot_all`：9 台电机（`chest_joint1..9`，id 1–7 为 CERB、8–9 为 vaxor_2550）
+全部挂在同一条 `chest` 总线上，一一驱动第一条链的 `joint_link1..9`；第二条链
+（`joint_link1.1..9.9`）没有电机名/ID，不参与闭环。电机本体（总线、id、型号、增益）与
+plant 参数取自模型目录自带的仿真专用 `config/motor_driver.yaml` +
+`config/simulation_topology.yaml` —— 这 9 台**不在**权威的
+`motor_hardware_interface/config/motor_driver.yaml` 里（那些关节尚未并入
+`upper_body.urdf.xacro`，并进去会让 `test_xacro_consistency` 变红、真机 bring-up 去驱动
+不存在的关节）。`simulation.launch.py` 会在模型目录有 `config/motor_driver.yaml` 时优先取它，
+否则回落权威配置。
+
 启动时从这两处配置生成 Gazebo、`motor_sim` 与 CAN 驱动端的临时配置，并检查关节名
 属于所选机械模型。Gazebo 的关节状态
 进入 `motor_sim`；模拟器回出的 effort 接到 `/arm_effort_controller/commands`。
@@ -161,10 +165,11 @@ RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还�
 `ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
 
 独立的 `gazebo.launch.py` 与 `display.launch.py` 接受 `model:=<模型名>` 选择 `models/` 下的
-模型，默认 `chest_upper_00`。完整 `simulation.launch.py` 同样默认 `chest_upper_00`，要求所选
-模型目录带有 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与 launch
-参数一致；`motor_config_file` **留空**时优先用模型目录自带的 `config/motor_driver.yaml`，
-其次才用权威整机配置（选不带拓扑的模型会显式 `RuntimeError`，不会静默退化）：
+模型，默认 `robot_all`（唯一可加载模型）。完整 `simulation.launch.py` 同样默认 `robot_all`，
+要求所选模型目录带有 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与
+launch 参数一致；`motor_config_file` **留空**时优先用模型目录自带的
+`config/motor_driver.yaml`，其次才用权威整机配置（选不带拓扑的模型会显式 `RuntimeError`，
+不会静默退化）：
 
 ```bash
 ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
@@ -175,7 +180,7 @@ ros2 launch robot_arm_gazebo gazebo.launch.py model:=<模型名>
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `world_file` | `empty.sdf` | Ignition 世界文件 |
-| `spawn_z` | `0.03` | 模型生成高度（m），按模型几何实测值定（本模型基座底面在 z=−0.030） |
+| `spawn_z` | `0.0` | 模型生成高度（m），按模型几何实测值定（`robot_all` 零位最低点恰为 z = 0.000000） |
 | `fixed_base` | `true` | 把基座焊到世界原点；`false` = 自由浮动基座 |
 | `controllers_file` | `models/<模型>/config/controllers.yaml` | controller_manager 参数 |
 | `control_mode` | `effort` | `effort` 接收 FDCAN/Gazebo 电机后端发布的 MIT 等效力矩；`position` 仅用于话题/单位对照 |
@@ -197,8 +202,8 @@ ros2 topic echo /joint_states
 ```
 
 命令向量顺序 = 该模型 `config/controllers.yaml` 里 `joints` 的顺序（
-`test_model_consistency.py` 保证它是 URDF 可控关节的有序子集）。当前模型顺序为
-`joint_link1` → `joint_link4`；腕部关节已在 URDF 建模但未接入控制器。
+`test_model_consistency.py` 保证它是 URDF 可控关节的有序子集）。`robot_all` 是 18 个关节
+全接管，顺序为第一链 `joint_link1..9` → 第二链 `joint_link1.1..9.9`。
 
 ## 加一个新模型
 
@@ -239,7 +244,7 @@ ros2 run robot_state_publisher robot_state_publisher --ros-args \
 `dist/<模型名>_urdf/` 是不依赖 ROS 的单文件模型 + 网格，可以直接打包发给别人：
 
 ```bash
-cd dist/zhoubuguanjie_youbi_002_urdf && zip -r ../zhoubuguanjie_youbi_002_urdf.zip .
+cd dist/robot_all_urdf && zip -r ../robot_all_urdf.zip .
 ```
 
 zip 不入库（内容在目录里都有，随时可重打）；`dist/` 也不随包安装。

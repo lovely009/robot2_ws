@@ -221,8 +221,8 @@ ROS 生态侧按关节名索引，映射只存在于主机侧：
 - `urdf/upper_body.urdf.xacro`：物理模型（几何/惯性）**人工维护**；其 ros2_control 关节清单由 launch 注入，不手抄。两者一致性由 `test_xacro_consistency.py` 兜底。
 - `motor_hardware_interface/helpers.py`：launch 与测试共用（读取 buses/joints、生成参数文件）。
 - `robot_arm_gazebo/launch/gazebo.launch.py` 与 `display.launch.py` 用 `model:=<模型名>` 选
-  `models/` 下的模型（默认 `chest_upper_00`），控制器参数挂该模型自己的
-  `config/controllers.yaml`。`simulation.launch.py` 的 `model` 默认同为 `chest_upper_00`
+  `models/` 下的模型（默认 `robot_all`，当前唯一可加载模型），控制器参数挂该模型自己的
+  `config/controllers.yaml`。`simulation.launch.py` 的 `model` 默认同为 `robot_all`
   （`motor_config_file` 留空时优先用模型目录自带的 `config/motor_driver.yaml`）。
 - `robot_arm_gazebo/launch/simulation.launch.py` 是端到端组合入口，配
   `scripts/simulation_gate.py`（全轴就绪才开放 effort）与 `scripts/agent_after_sim_ready.py`；

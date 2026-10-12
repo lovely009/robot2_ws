@@ -136,7 +136,8 @@ export function mount(root, ctx) {
       value: model,
       label: model,
     }));
-    replaceOptions(ui.model, models, '选择仿真模型', saved.model || 'zhoubuguanjie_youbi_001');
+    // 兜底默认 = robot_all（旧默认值对应的模型都已删除，留着会选不中任何项）
+    replaceOptions(ui.model, models, '选择仿真模型', saved.model || 'robot_all');
 
     const cans = (options.can_interfaces || []).map((item) => ({
       value: item.name,

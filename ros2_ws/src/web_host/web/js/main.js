@@ -1,6 +1,6 @@
 // 入口：装外壳、初始化路由、挂面板、建立全局订阅、起 rAF 渲染循环。
 // 屏切换只换主区里克隆的模板与其面板；顶栏/左导航/状态翼不重建。
-import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors } from './core/store.js';
+import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors, loadModelJoints } from './core/store.js';
 import { $, FOLD_KEY, WING_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
   from './core/format.js';
 import { SCREENS, initRouter, currentScreen } from './core/router.js';
@@ -270,6 +270,10 @@ function boot() {
   initRouter({onScreenChange: showScreen});
   // 状态翼是外壳的一部分（不进屏模板），在这里挂一次后常驻。
   mountPanel('wing', $('wingBody'));
+  // 臂视图的 motor_id → 关节名 映射按**当前模型**去服务器取（权威来源是模型自己的
+  // config/motor_driver.yaml）。不 await：拿不到就退回内置表并在控制台留痕，
+  // 不阻塞开页。成功时标脏 TOPOLOGY，已挂载的臂视图下一帧重算。
+  loadModelJoints();
   runRenderLoop();
   // 运动流频率：1 s 窗口计数。
   let lastMotionCount = 0;

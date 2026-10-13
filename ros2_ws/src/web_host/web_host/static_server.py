@@ -1,13 +1,13 @@
 import json
 import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import rclpy
 from rclpy.node import Node
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
-from .simulation_manager import SimulationProcessManager
+from .simulation_manager import SimulationProcessManager, simulation_model_joints
 
 
 _MAX_API_BODY_BYTES = 4096
@@ -94,6 +94,25 @@ def main(args=None):
                 return
             if path == '/api/simulation/options':
                 self._send_json(200, simulation_manager.options())
+                return
+            if path == '/api/model-joints':
+                # 臂视图的 motor_id → 关节名 映射**从模型配置取**（单一来源），
+                # 不再由前端硬编码。此前前端写死 half_body_robot 的 18 台，
+                # 换模型就静默失效（关节角恒 0、小球点不中，像"没注册"）。
+                requested = (parse_qs(
+                    urlsplit(self.path).query).get('model') or [''])[0]
+                try:
+                    joints = simulation_model_joints(requested)
+                except ValueError as exc:
+                    # 明确 404 + 原因：前端据此告警，而不是悄悄退化成错映射
+                    self._send_json(404, {'error': str(exc)})
+                    return
+                self._send_json(200, {
+                    'model': requested,
+                    # JSON 对象的键只能是字符串；前端解析回 int
+                    'joints': {str(mid): joint
+                               for mid, joint in joints.items()},
+                })
                 return
             if path == '/api/simulation/status':
                 self._send_json(200, simulation_manager.status())

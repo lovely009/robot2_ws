@@ -253,3 +253,40 @@ def test_importmap_targets_exist(index):
         if value.startswith(('http://', 'https://', '//')):
             continue
         assert (WEB / value).exists(), f'importmap 目标不存在：{value}'
+
+
+# 13. 内置兜底表必须覆盖**默认模型**的全部电机
+def test_builtin_joint_map_covers_default_model():
+    """内置表只是 `/api/model-joints` 不可达时的兜底，但兜底也必须是对的。
+
+    它曾经是**唯一**来源且只写了第一链 1..9，默认模型又早已是 18 台的
+    half_body_robot → 开箱即坏：10-18 关节角恒 0、小球点不中，像"电机没注册"。
+    权威来源现在在模型配置（见 test_model_joint_api_is_wired_across_layers），
+    这里只保证最后一道兜底不会又写成半个模型。
+    """
+    store_src = (WEB / 'js' / 'core' / 'store.js').read_text(encoding='utf-8')
+
+    m = re.search(r'if \(!q\) \{\s*return \{(.*?)\};', store_src, re.S)
+    assert m, 'store.js 里找不到 JOINT_OF_MOTOR 的默认表'
+    mapped = {int(k) for k in re.findall(r'(\d+)\s*:', m.group(1))}
+    assert mapped, 'JOINT_OF_MOTOR 默认表解析为空'
+
+    # 默认模型名从同一个文件取，避免两处各写一份而漂移
+    mm = re.search(r"URLQ\.get\('model'\)\s*\|\|\s*'([^']+)'", store_src)
+    assert mm, 'store.js 里找不到默认模型名'
+    model_name = mm.group(1)
+
+    driver = (PKG.parent / 'robot_sim' / 'models' / model_name /
+              'config' / 'motor_driver.yaml')
+    if not driver.is_file():
+        pytest.skip(f'默认模型 {model_name} 的 motor_driver.yaml 不在源码树里')
+    declared = {int(v) for v in
+                re.findall(r'^\s*id:\s*(\d+)\s*$',
+                           driver.read_text(encoding='utf-8'), re.M)}
+    assert declared, f'{driver} 里没解析到任何电机 id'
+
+    missing = sorted(declared - mapped)
+    assert not missing, (
+        f'默认 JOINT_OF_MOTOR 漏了默认模型 {model_name} 的电机 {missing}：'
+        f'它们在臂视图里不可见、不可点选。请在 store.js 的默认表里补齐，'
+        f'或先确认"?joints= 覆盖"是否仍是有意设计。')

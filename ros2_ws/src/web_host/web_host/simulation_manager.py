@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
+import yaml
 
 from .agent_manager import enumerate_serial_ports
 
@@ -69,13 +70,18 @@ def enumerate_can_interfaces():
     return interfaces
 
 
+def _models_root():
+    """模型根目录（安装树的 robot_sim share）；取不到返回 None。"""
+    try:
+        return Path(get_package_share_directory("robot_sim")) / "models"
+    except Exception:
+        return None
+
+
 def enumerate_simulation_models():
     """List installed models that provide a full simulation topology."""
-    try:
-        models_root = Path(get_package_share_directory("robot_sim")) / "models"
-    except Exception:
-        return []
-    if not models_root.is_dir():
+    models_root = _models_root()
+    if models_root is None or not models_root.is_dir():
         return []
     return sorted(
         entry.name
@@ -93,11 +99,8 @@ def enumerate_mujoco_models():
     还要 `urdf/<模型名>.standalone.urdf`：mujoco.launch.py 用它渲染 robot_description，
     缺了虽然能起，但 rsp 拿到的是空模型——这种半残组合不该出现在下拉里。
     """
-    try:
-        models_root = Path(get_package_share_directory("robot_sim")) / "models"
-    except Exception:
-        return []
-    if not models_root.is_dir():
+    models_root = _models_root()
+    if models_root is None or not models_root.is_dir():
         return []
     return sorted(
         entry.name
@@ -106,6 +109,54 @@ def enumerate_mujoco_models():
         and (entry / "mujoco" / f"{entry.name}.xml").is_file()
         and (entry / "urdf" / f"{entry.name}.standalone.urdf").is_file()
     )
+
+
+def simulation_model_joints(model):
+    """读出某模型的**电机 id → 关节名**映射，供前端臂视图使用。
+
+    前端靠这张表把 motor_id 落到关节上（关节角同步、状态选色、臂上小球点选）。
+    它此前硬编码在 `web/js/core/store.js`，写死成 half_body_robot 的 18 台，
+    于是**换模型就静默失效**：关节名对不上 → 那些关节角恒为 0、小球点不中，
+    表现得像"电机没注册"。这里改为向模型配置取同一个真相源，加模型/改关节名
+    不必再动前端。
+
+    单一来源取 `config/motor_driver.yaml` 的 `motor_hardware.motors`：每个条目
+    同时带 `joint:` 与 `id:`。不用 `simulation_topology.yaml`——那里只有电机名，
+    还得再和本文件做一次连接。
+
+    Raises:
+        ValueError: 目录/模型缺失、非法模型名、解析不出条目、条目缺 id/joint、id 重复。
+    """
+    root = _models_root()
+    if root is None or not root.is_dir():
+        raise ValueError("找不到 robot_sim 的 models 目录（安装树不完整？）")
+    # 防目录穿越：模型名只允许是单层目录名
+    if not model or model != Path(model).name or model in (".", ".."):
+        raise ValueError(f"非法模型名：{model!r}")
+    config = root / model / "config" / "motor_driver.yaml"
+    if not config.is_file():
+        raise ValueError(f"模型 {model!r} 没有 config/motor_driver.yaml")
+
+    with config.open("r", encoding="utf-8") as handle:
+        doc = yaml.safe_load(handle) or {}
+    motors = (doc.get("motor_hardware") or {}).get("motors")
+    if not isinstance(motors, dict) or not motors:
+        raise ValueError(f"{config} 里没有 motor_hardware.motors")
+
+    joints = {}
+    for name, spec in motors.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"电机 {name!r} 的条目不是映射")
+        motor_id, joint = spec.get("id"), spec.get("joint")
+        if motor_id is None or joint is None:
+            raise ValueError(f"电机 {name!r} 缺 id 或 joint")
+        motor_id = int(motor_id)
+        if motor_id in joints:
+            raise ValueError(
+                f"电机 id {motor_id} 重复（{joints[motor_id]!r} 与 {joint!r}）："
+                f"固件注册表以裸 motor_id 为键，重号会锁存 CONFIG_CONFLICT")
+        joints[motor_id] = str(joint)
+    return dict(sorted(joints.items()))
 
 
 class SimulationProcessManager:

@@ -111,27 +111,11 @@ export function chartPush(id, ch, val, t) {
 
 // URL 参数：换模型或换接线不改代码（?joints=1:joint_link1,2:joint_link2&model=<模型目录名>）
 export const URLQ = new URLSearchParams(location.search);
-// 默认对齐默认模型 half_body_robot。**两条链都要列全**：id N ↔ joint_linkN
-// （第一链 1..9）、id N+9 ↔ joint_linkN.N（第二链 10..18），
-// 见 models/half_body_robot/config/simulation_topology.yaml 与 motor_driver.yaml。
-//
-// 此前这里只列了第一链 1..9，注释还写着"第二链需要时用 ?joints= 覆盖"——而
-// 模型默认值早已是 18 台的 half_body_robot，于是**开箱即坏**：10-18 没有关节
-// 映射，臂视图里它们的关节角恒为 0、小球也点不中（arm.js 用本表做角度同步、
-// 选色与点选反查），看起来就是"左臂没注册、不可控"。默认值必须覆盖默认模型，
-// 否则"默认"二字无意义。需要非常规接线时仍可用 ?joints= 整表覆盖。
-export const JOINT_OF_MOTOR = (() => {
+// 手工覆盖（?joints=1:joint_link1,2:joint_link2）——最高优先，给了就不问服务器。
+// 保留它是为了非常规接线与排查，不是常规路径。
+const JOINT_OVERRIDE = (() => {
   const q = URLQ.get('joints');
-  if (!q) {
-    return {
-      1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
-      5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
-      9: 'joint_link9',
-      10: 'joint_link1.1', 11: 'joint_link2.2', 12: 'joint_link3.3',
-      13: 'joint_link4.4', 14: 'joint_link5.5', 15: 'joint_link6.6',
-      16: 'joint_link7.7', 17: 'joint_link8.8', 18: 'joint_link9.9',
-    };
-  }
+  if (!q) return null;
   const m = {};
   for (const pair of q.split(',')) {
     const [id, j] = pair.split(':');
@@ -139,6 +123,56 @@ export const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
+
+// motor_id → 关节名。**权威来源是模型自己的 config/motor_driver.yaml**，
+// 由 static_server 的 /api/model-joints 提供，启动时经 loadModelJoints() 装入。
+//
+// 下面这张内置表**只是默认模型 half_body_robot 的兜底**（接口不可达时用），
+// 不是真相源。它此前是唯一来源、且写死成 18 台，于是换模型就静默失效：关节名
+// 对不上 → 那些关节角恒为 0、臂上小球点不中，表现得像"电机没注册"。
+// 对象**就地更新**（loadModelJoints 先清空再写入）：arm.js 持有本对象的引用。
+export const JOINT_OF_MOTOR = JOINT_OVERRIDE || {
+  1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
+  5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
+  9: 'joint_link9',
+  10: 'joint_link1.1', 11: 'joint_link2.2', 12: 'joint_link3.3',
+  13: 'joint_link4.4', 14: 'joint_link5.5', 15: 'joint_link6.6',
+  16: 'joint_link7.7', 17: 'joint_link8.8', 18: 'joint_link9.9',
+};
+
+// 映射来源：'url'（?joints=）| 'api'（模型配置）| 'builtin'（兜底，可能不对）
+export const jointMapSource = {kind: JOINT_OVERRIDE ? 'url' : 'builtin', error: ''};
+
+// 启动时按当前模型取映射。失败**不静默**：退回内置表并在控制台留痕——
+// 内置表只对默认模型正确，换过模型时臂视图就是错的，而它本身不会报任何错。
+export async function loadModelJoints() {
+  if (JOINT_OVERRIDE) return jointMapSource;
+  try {
+    const resp = await fetch(
+      `/api/model-joints?model=${encodeURIComponent(MODEL)}`, {cache: 'no-store'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const joints = data && data.joints;
+    if (!joints || typeof joints !== 'object' || !Object.keys(joints).length) {
+      throw new Error('接口返回的映射为空');
+    }
+    for (const k of Object.keys(JOINT_OF_MOTOR)) delete JOINT_OF_MOTOR[k];
+    for (const [id, joint] of Object.entries(joints)) {
+      JOINT_OF_MOTOR[parseInt(id, 10)] = joint;
+    }
+    jointMapSource.kind = 'api';
+    jointMapSource.error = '';
+    markDirty(DIRTY.TOPOLOGY);
+  } catch (e) {
+    jointMapSource.kind = 'builtin';
+    jointMapSource.error = String((e && e.message) || e);
+    console.warn(
+      `[web_host] /api/model-joints?model=${MODEL} 取不到（${jointMapSource.error}）：`
+      + '已退回内置默认表，它只对 half_body_robot 正确——'
+      + '若当前用的是别的模型，臂视图的关节映射会是错的。');
+  }
+  return jointMapSource;
+}
 // 默认模型与 robot_sim 的 launch 默认值保持一致（half_body_robot，四个 launch 都是它）。
 // 旧默认值（zhoubuguanjie_youbi_001 / chest_upper_00 / robot_all）对应的模型都已删除，
 // 留着会让臂视图默认 404。

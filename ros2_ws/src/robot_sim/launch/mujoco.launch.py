@@ -152,7 +152,12 @@ def generate_launch_description():
             DeclareLaunchArgument("headless", default_value="false",
                                   description="true = 不开 MuJoCo viewer 窗口"),
             DeclareLaunchArgument("control_hz", default_value="100.0",
-                                  description="控制/发布频率"),
+                                  description="控制/发布频率。HIL 闭环里它决定"
+                                              "被控对象状态帧的节拍，是 PD 回路的"
+                                              "死区主项（100 Hz ⇒ 10ms 一拍）；"
+                                              "kp=30/kd=1 在合成 ~20ms 死区下正好"
+                                              "压线（2026-10-14 实测 ±1 rad 极限环）。"
+                                              "物理步数同比减少，CPU 基本不变"),
             DeclareLaunchArgument("sim_speed_factor", default_value="1.0",
                                   description="仿真速度倍率（1.0 = 实时）"),
             DeclareLaunchArgument("command_timeout_s", default_value="0.5",

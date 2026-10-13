@@ -17,7 +17,14 @@ URDF 转成"body 树 + 关节 + 惯量 + **visual** geom"，**不带碰撞几何
       `Joint_link9/.9` 与 URDF 一致地**不给**碰撞体。
     * 加 18 个 `<contact><exclude>`：MuJoCo 不会自动排除相邻连杆（dartsim 会），
       不排除的话关节处贴合的网格会立刻自锁。
- 4. 自检：用 mujoco_ros2_control 的 venv 加载 MJCF，跑几步物理并核对关节/限位/接触数。
+
+ 4. 关节折算惯量 `<joint armature>` + `<option timestep/integrator>`：URDF 只有
+    **纯连杆**惯量（1e-5~1e-7 kg·m²），缺减速器折算的转子惯量（J_rotor·N²，本机
+    N=30~101）——而齿轮关节的惯量主要由电机+减速器贡献。缺了它，把电机的 MIT 律
+    （kp=30 / kd=1）当**外力**注入时，显式积分条件 `dt < 2J/kd` 对 J=1.8e-7 要求
+    dt < 0.4 µs，而 MuJoCo 默认 2 ms → 数值发散（2026-10-14 实测 joint_link1
+    v=+9595 rad/s、位置冲到 33 rad，表现为"整条臂乱动"）。见 `armature_by_joint()`。
+ 5. 自检：用 mujoco_ros2_control 的 venv 加载 MJCF，跑几步物理并核对关节/限位/接触数。
 
 用法（在模型目录内）：
   python3 tools/build_mujoco_model.py            # 生成 + 自检
@@ -27,6 +34,7 @@ URDF 转成"body 树 + 关节 + 惯量 + **visual** geom"，**不带碰撞几何
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import subprocess
 import sys
@@ -42,8 +50,58 @@ OUTPUT = MODEL_DIR / "mujoco" / f"{MODEL_DIR.name}.xml"
 CONVERTER = Path("/opt/ros/humble/lib/mujoco_ros2_control/robot_description_to_mjcf.sh")
 VENV_PYTHON = Path.home() / ".ros/ros2_control/.venv/bin/python"
 FRICTION = "0.8 0.005 0.0001"
+# 关节折算惯量（armature）的目标闭环带宽。URDF 只有纯连杆惯量，缺电机+减速器折算
+# 的转子惯量；这里按 `armature = kp / ω²` 反推一个**与配置增益自洽**的惯量：
+# ω = 5 Hz 时 kp=30 → armature ≈ 0.030 kg·m²，同时阻尼比 ζ = kd/(2√(kp·J)) ≈ 0.5
+# （欠阻尼、有物理意义），并且在 MuJoCo 步长 1 ms 下对 PD 外力项有 ~60 倍裕度
+# （显式稳定条件 dt < 2J/kd = 0.06 s）。真机 101:1 减速器折算惯量量级与此相当。
+ARM_BANDWIDTH_HZ = 5.0
+# 找不到该关节的 kp（其他模型/无拓扑文件）时的兜底折算惯量。
+DEFAULT_ARMATURE = 0.03
+# 仿真步长与折算惯量的下限裕度。**下限是必须的，而且判据是回路死区不是积分步长**：
+# 假电机的速度反馈经 CAN/ROS 绕一圈回来有 T_loop 的延迟，带延迟的阻尼等价于叠加了
+# `−kd·T_loop` 的惯量 ⇒ 回路稳定要求 `J > kd·T_loop`（比"积分稳定 dt < 2J/kd"严得多：
+# T_loop≈20 ms 而 dt=1 ms）。只按 `kp/ω²` 推会在 kp 极小的关节上失效——本模型 4 台
+# vaxor 腕关节 kp=0.008 ⇒ 8.1e-06 kg·m²，比 `kd·T_loop`=0.02 小三个数量级 ⇒ 腕关节
+# 反阻尼自激（2026-10-14 实测 ±100 rad/s），反作用把整条臂带抖。
+SIM_TIMESTEP_S = 0.001
+ARM_LOOP_DELAY_S = 0.02          # HIL 回路死区（被控对象拍 + 发力线程 + DDS）
+ARM_LOOP_MARGIN = 2.0
 # URDF 里没有碰撞体的 link（与 Gazebo 侧一致：被 link7 的凸包包住，实心形状会假接触）
 NO_COLLISION = ("Joint_link9", "Joint_link9.9")
+
+
+def armature_by_joint() -> dict[str, float]:
+    """{关节名: 折算惯量 kg·m²}，由模型自带拓扑的 `command.kp` 反推。
+
+    kp 必须取**假电机 MIT 律实际用的那个**（`config/motor_driver.yaml` 的
+    `command.kp`，由 simulation.launch.py 经 CAN 下发给假电机），不是 URDF 里的
+    `<limit effort>`：URDF 的 effort 限幅只决定饱和值，不决定刚度。
+    读不到拓扑时返回空表（调用方退回 DEFAULT_ARMATURE）。
+    """
+    config = MODEL_DIR / "config" / "motor_driver.yaml"
+    if not config.is_file():
+        return {}
+    try:
+        import yaml
+        motors = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}) \
+            .get("motor_hardware", {}).get("motors", {}) or {}
+    except Exception as error:          # 拓扑缺失/损坏不该挡住模型生成
+        print(f"[build_mujoco_model] 读不到 {config}（{error}），折算惯量取默认值",
+              file=sys.stderr)
+        return {}
+    omega = 2.0 * math.pi * ARM_BANDWIDTH_HZ
+    out = {}
+    for spec in motors.values():
+        joint = spec.get("joint")
+        command = spec.get("command") or {}
+        kp = command.get("kp")
+        kd = command.get("kd")
+        if not joint or not kp:
+            continue
+        floor = ARM_LOOP_MARGIN * float(kd or 0.0) * ARM_LOOP_DELAY_S
+        out[str(joint)] = max(float(kp) / (omega * omega), floor)
+    return out
 
 
 def convert(workdir: Path) -> Path:
@@ -165,6 +223,21 @@ def postprocess(mjcf: Path) -> None:
         if parent == "base_link":
             parent = "world"
         ET.SubElement(contact, "exclude", {"body1": parent, "body2": child})
+
+    # 积分器与关节折算惯量（见文件头 4.）。timestep 从 MuJoCo 默认 2 ms 降到 1 ms
+    # （mujoco_effort_bridge 按 timestep 折算 steps_per_tick，实时倍率不变），
+    # implicitfast 让关节自身的 damping/armature 项隐式积分。
+    option = root.find("option")
+    if option is None:
+        option = ET.Element("option")
+        root.insert(list(root).index(compiler) + 1, option)
+    option.set("timestep", "0.001")
+    option.set("integrator", "implicitfast")
+
+    armatures = armature_by_joint()
+    for joint in root.find("worldbody").iter("joint"):
+        armature = armatures.get(joint.get("name"), DEFAULT_ARMATURE)
+        joint.set("armature", f"{armature:.6g}")
 
     # 力矩执行器：每个关节一个 <motor>（gear=1 → ctrl 就是关节力矩）。
     # 没有 actuator 时 mujoco_ros2_control 会把关节注册成 passive，effort 命令无处施加。

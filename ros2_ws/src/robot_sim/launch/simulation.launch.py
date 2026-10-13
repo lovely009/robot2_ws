@@ -166,6 +166,17 @@ def _bind_motor_topology(
             )
         type_parameters = dict(type_spec.get("parameters") or {})
         type_parameters.update(source.get("parameters") or {})
+        # 关节侧峰值力矩：HIL（firmware）那条路上它**只**由模拟器的力矩饱和值
+        # 体现——MJCF 的 <motor> 不带 forcerange、MuJoCo 桥直接写 data.ctrl 不夹，
+        # 所以这里是唯一的执行器权限来源。取型号库的 peak_torque_nm（真机峰值，
+        # r58=45 / r48=11）；没写该字段的型号（vaxor）留 None，模拟器退回全局值。
+        peak_torque = type_parameters.get("peak_torque_nm")
+        try:
+            peak_torque = float(peak_torque)
+        except (TypeError, ValueError):
+            peak_torque = None
+        if peak_torque is not None and peak_torque <= 0.0:
+            peak_torque = None
         source_profile = simulation["profiles"][profile_name]
         sim_profile = dict(source_profile)
         plant = dict(source_profile.get("plant", {}))
@@ -201,6 +212,7 @@ def _bind_motor_topology(
                 "type": motor_type,
                 "command": command,
                 "driver_parameters": source.get("parameters", {}),
+                "peak_torque_nm": peak_torque,
                 "profile": profile_name,
             }
         )
@@ -768,6 +780,14 @@ def launch_simulation(context):
         joint_map = ",".join(
             f"{motor['id']}:{motor['joint']}" for motor in simulation["motors"]
         )
+        # 逐电机力矩饱和值（关节侧 N·m）＝型号库的 peak_torque_nm：HIL 下它是
+        # **唯一**的执行器权限来源（MJCF 无 forcerange、MuJoCo 桥不夹），
+        # 用一个全局小值会让大关节出不上力（2026-10-14 台架实测的"乱动"主因）。
+        tau_limits = ",".join(
+            f"{motor['id']}:{motor['peak_torque_nm']:g}"
+            for motor in simulation["motors"]
+            if motor.get("peak_torque_nm")
+        )
         r58_ids = [
             str(motor["id"])
             for motor in simulation["motors"]
@@ -798,6 +818,8 @@ def launch_simulation(context):
                 ",".join(r58_ids),
                 "--joint-map",
                 joint_map,
+                "--tau-limits",
+                tau_limits,
                 "--gazebo",
                 "--gazebo-control-mode",
                 "effort",
@@ -805,15 +827,19 @@ def launch_simulation(context):
                 "/arm_effort_controller/commands",
                 "--ready-file",
                 str(ready_file),
-                # 反馈周期对齐真机契约：适配器侧的 offline_timeout_ms=100ms 就是按
-                # 「20ms 自主上报 ×5」定的（vaxor_adapter.c:295），真实电机也确实
-                # 20ms 报一次。模拟器自带的默认是 60ms/台（省总线），只有 1.67×
-                # 余量，实测会让个别电机的到达间隔尖峰擦过 100ms 门 → 触发
-                # OFFLINE↔RECONNECTED 抖动、重连清空 profile → 速度/力矩 NaN。
-                # 20ms 给出 5× 余量，且反馈周期降为 1/3（窗口实测 50/s）。
+                # 反馈周期：**负载与离线余量的折中**（2026-10-14 实测重定）。
+                # 适配器侧 offline_timeout_ms=100ms 是按「20ms 自主上报 ×5」定的
+                # （vaxor_adapter.c:295），所以 20ms 有 5× 余量；但 20ms × 18 台
+                # = 900 帧/s（sim→总线），叠加本路径固件**逐台**下发的控制帧
+                # （18 台 × 快照率 100 Hz ≈ 1800 帧/s），单只 SLCAN 适配器要中继
+                # ~2700 帧/s —— 台架实测这就是它周期性锁存（静默 ~3.9s、18 台判
+                # OFFLINE）的主因：同一累计计数差分下，100 Hz 快照 40s 内 8 次锁存、
+                # 50 Hz 时 2 次。
+                # 40ms 把 sim→总线降到 450 帧/s（-50%），离线余量仍有 2.5×；窗口
+                # 跨度 37.4ms ≈ 周期 ⇒ 反馈近似连续而非突发，适配器输入端不易溢出。
                 # 排在 extra_sim_args 之前：命令行后出现者胜，故 sim_args 仍可覆盖。
                 "--fb-period-ms",
-                "20",
+                "40",
                 *extra_sim_args,
             ],
             output="screen",

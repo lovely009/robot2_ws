@@ -239,6 +239,62 @@ ros2 launch robot_sim simulation.launch.py backend:=mujoco \
 - **MuJoCo 的物理是简化近似**（接触形状、软限位、`frictionloss`），与 Gazebo 不逐位一致，
   见 `models/half_body_robot/README.md`。
 
+### firmware（HIL）后端下被控对象的三个关键量（2026-10-14 实测修正）
+
+HIL 时被控对象由 `fdcan_motor_sim` 驱动，它同时是假电机与被控对象的力矩源，因此：
+
+- **关节必须有折算惯量（armature），否则整条臂乱动**：假电机的 MIT 律是当**外力**
+  注入的（`mujoco_effort_bridge` 直接写 `data.ctrl`），显式积分条件 `dt < 2J/kd` 对
+  URDF 的纯连杆惯量（`1e-5~1e-7 kg·m²`）要求 `dt < 0.4 µs`，而 MuJoCo 默认 2 ms
+  ⇒ 数值发散（实测 `joint_link1 v=+9595 rad/s`、位置冲到 33 rad）。URDF 缺的是
+  减速器折算的转子惯量（`J_rotor·N²`，N=30~101），而它是齿轮关节的主要惯量来源。
+  `tools/build_mujoco_model.py` 现按 `armature = kp/ω²`（ω=5 Hz，kp 取模型
+  `config/motor_driver.yaml` 的 `command.kp`）写每个 `<joint armature>` 并设
+  `<option timestep="0.001" integrator="implicitfast"/>`；本模型为 0.0304 kg·m²。
+  修后实测：目标 +0.658 / 实测 +0.705（误差 0.048 rad，0.5 s 内收敛）。
+- **力矩饱和值逐台取型号库**：`simulation.launch.py` 从 `motor.yaml` 读每台的
+  `peak_torque_nm`（`cerb_r58=45` / `cerb_r48=11` Nm）并逐台传给
+  `fdcan_motor_sim --tau-limits`；没有该字段的型号（vaxor）退回 `--tau-limit`
+  （默认 10 Nm）。**这是 HIL 下唯一的力矩上限**——MJCF 的 `<motor>` 不带 `forcerange`，
+  `mujoco_effort_bridge` 直接写 `data.ctrl` 不夹取。此前用一个全局的 10 Nm（照抄 URDF 的
+  effort 限幅，只对 Gazebo 那条路成立）会让 r58 关节出不上力：机构被推歪后 PD 一路饱和、
+  再也收不回来，表现为"乱动且停不下来"。
+- **假电机 MIT 律的更新率**：`--effort-rate-hz`（默认 200）让发力矩与 CAN 主循环
+  （`--period-ms`，20 ms）解耦。它是本回路的**死区**：跟随主循环时只有 ~50 Hz，加上被控对象
+  100 Hz 的 `/joint_states` ≈ 30 ms 死区，配置里的 `(kp=30, kd=1)` 恰好越过稳定边界
+  （判据 `atan(kd·ω/kp) > ω·T`，`ω≈√(kp/J)`），于是**静止目标下也有 ±0.3 rad 的极限环**。
+- **被控对象没有抱闸**：力矩为 0 时机构按重力自由下落。所以任何未武装/撤权/冻结的时段它都会
+  塌下去；`填入在线电机（原位）` 会把"塌下去的位姿"当成目标——重新武装前先看清当前位姿。
+- **整链间歇静默 = CAN FD 数据相位时序，不是适配器锁存（2026-10-14 定案）**：此前记的
+  "CANable 每 20–60 s 锁存一次"已被证伪——真因是 5 Mbps 数据相位在本台架余量不足，板子一发
+  带数据相位的 FD 命令帧整条总线就崩（板 `tx_frame_count` 掉到 0、`rx_frame_count`=0、18 台
+  抖动，与快照率无关；撤负载即恢复）。台架固件用 `-DFDCAN_DATA_2M_BENCH` 把数据段降到
+  2 Mbps、模拟器用 `--data-bitrate-index 2`，100 Hz 快照下实测 **0 次离线事件**。详见
+  `docs/guides/fdcan1-bench-guide.md` 的"数据相位"一节。另有硬性顺序：**板子必须在 ACK
+  节点（模拟器）已在场时才复位**，否则无 ACK 会填满 TX FIFO（16 帧）后永久发不出帧。
+- **冻结过的台要重新武装**：OFFLINE/FAULT/CONFIG_CONFLICT 的台按 ARD §36 不会自动复权，
+  需要**新的策略代数 + 新鲜完整快照**——所以**先等 18/18 稳定几秒再武装**，武装后确认
+  `运行 18`（全部 ACTIVE）再下发目标。
+- **「运行 18/18」不等于每台都在被控制（2026-10-14 实测）**：抓原始 CAN 帧解码 MIT 命令后
+  发现，稳态下可能只有个别台在收真命令，其余台停在武装前的中性帧（`kp=0`、目标=0）⇒ 假电机
+  力矩恒 0 ⇒ 那些关节只在地球重力下甩动，看起来就像"整臂乱动"。排查手段：把
+  `/arm_effort_controller/commands` 与 `kp×(目标−实测)` 对照，或把 `kp` 改小看行为是否变化
+  （完全不变即为该信号）。另外 **vaxor 的 `command.kp=0.008` 是占位值，会被 MIT 12 位量化
+  （[0,500] 步长 0.122）归零**，那几台腕关节只剩阻尼项、不可能被位置控制。
+- **台架验证用 `micro_ros_agent/tools/snapshot_stream.py`，不要用浏览器当命令源**：
+  浏览器面板的 100 Hz 连发靠 `setInterval`，页面渲染一卡就 >100 ms ⇒ 固件 `revoke_motion`
+  撤权；该工具以固定节奏（`--hz`，默认 100）持续下发，并在发现电机掉出运行态时**自动
+  重新武装**（新代数 + 新策略），且把保持目标改成**当前实测位姿**（不是抖前的旧目标——
+  对着旧目标重新发力会把机构弹回去）。模式 `echo`（只看反馈）/`arm`/`hold`/`step`；
+  注意 `arm` 单独用**不会**进运行态（>100 ms 无快照即撤权），必须持续下发。
+- **`policy_generation` 必须跨进程单调递增**：内核按表项锁存上次成功武装的代数，
+  `enable` 时要求严格大于它（ARD §36 防「周期重发自动复权」）；只从进程启动时间
+  推导起点会在重启后变小 ⇒ 每次武装都被拒，而且内核把它**报成
+  `CONFIG_RESULT reason=2`（INVALID）**，看不出真因。`snapshot_stream.py` 现已把
+  代数落地到 `~/.ros/micro_ros_policy_generation`（起点 `0x80000000`、只增不减、
+  被拒翻倍）。自查：订阅 `/micro_ros_up/motor_events`（`[事件] 配置结果 … reason=`），
+  以及 `/micro_ros_up/motor_topology` 确认 18 台都在且 model 已绑定。
+
 ## 控制机械臂
 
 `gazebo.launch.py` 默认自动激活 `joint_state_broadcaster` 与

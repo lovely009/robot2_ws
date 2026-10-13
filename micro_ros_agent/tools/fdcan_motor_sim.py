@@ -184,6 +184,21 @@ def parse_joint_map(spec: str) -> dict[int, str]:
     return out
 
 
+def parse_tau_limits(spec: str) -> dict[int, float]:
+    """解析 --tau-limits（"id:Nm,id:Nm"）→ {motor_id: 关节侧饱和力矩}。
+
+    与 --tau-limit（全局兜底）并存：型号库里写了 peak_torque_nm 的电机走逐台值，
+    其余（如 vaxor 未给峰值力矩）退回全局值。重复 motor_id 同 parse_joint_map，
+    取后者、不报错。
+    """
+    out: dict[int, float] = {}
+    for item in spec.split(","):
+        if item.strip():
+            mid, value = item.split(":")
+            out[int(mid)] = float(value)
+    return out
+
+
 def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
     """标准 11bit ID 的 SLCAN 行（CANable2 方言），以 \\r 结尾。"""
     if can_id > 0x7FF:
@@ -467,7 +482,7 @@ class GazeboBridge:
     """
 
     def __init__(self, joint_map, control_mode, position_topic, effort_topic,
-                 tau_limit):
+                 tau_limit, tau_limits=None, publish_interval_s=0.015):
         import rclpy
         from rclpy.node import Node
         from sensor_msgs.msg import JointState
@@ -495,6 +510,20 @@ class GazeboBridge:
         self.hold_pos = {joint: 0.0 for joint in self.joints}
         self.control_mode = control_mode
         self.tau_limit = tau_limit
+        # 逐电机饱和力矩（关节侧 N·m）。**必须逐台**：真机每个型号的峰值差很多
+        # （r58 45 Nm / r48 11 Nm），用一个全局小值（历史默认 10 Nm，照抄 URDF
+        # 的 effort 限幅）会让大关节出不上力——2026-10-14 台架实测：被推歪之后
+        # PD 一路饱和、机构收不回来（表现为"乱动且停不下来"）。真值来自型号库的
+        # peak_torque_nm，由 simulation.launch.py 逐台传入。
+        self.tau_limits = dict(tau_limits or {})
+        # 发力矩的最小间隔。**这是回路的死区**：假电机的"内部环路"本该像真机
+        # 一样跑在 kHz 级，而这里只能在 ROS/IPC 之间来回——间隔越大，MIT 律的
+        # 相位滞后越大。2026-10-14 实测：跟随 CAN 主循环（50 Hz，20ms）+ 被控
+        # 对象 100 Hz 的 /joint_states ≈ 30ms 死区，配置里的 (kp=30, kd=1) 恰好
+        # 越过稳定边界（判据 atan(kd·ω/kp) > ω·T，ω≈√(kp/J)），表现为
+        # 静止目标下 ±0.3 rad 的极限环。由 --effort-rate-hz 提到 200 Hz 后死区
+        # 降到 ~15ms，留出裕度。
+        self.publish_interval = publish_interval_s
         self.last_pub = 0.0
         self.node.create_subscription(JointState, "/joint_states",
                                       self._on_state, 10)
@@ -524,7 +553,7 @@ class GazeboBridge:
 
     def publish_commands(self, models):
         now = time.monotonic()
-        if now - self.last_pub < 0.015:   # ~66Hz 上限，别把串口/CPU 打满
+        if now - self.last_pub < self.publish_interval:
             return
         self.last_pub = now
         out = self._msg_type()
@@ -547,7 +576,8 @@ class GazeboBridge:
             tau = (cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
                    + cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
                    + cmd["tau_nm"])
-            out.data[index] = max(-self.tau_limit, min(self.tau_limit, tau))
+            limit = self.tau_limits.get(mid, self.tau_limit)
+            out.data[index] = max(-limit, min(limit, tau))
         self.pub.publish(out)
 
 
@@ -1306,6 +1336,11 @@ def main():
     ap.add_argument("--log", default=None)
     ap.add_argument("--ready-file", default=None,
                     help="CAN 接口打开且读线程就绪后创建该文件，供总启动器排序")
+    ap.add_argument("--effort-rate-hz", type=float, default=200.0,
+                    help="假电机发力矩的频率（Hz）；它是被控对象回路的执行器更新率，"
+                         "不是 CAN 节拍。0 = 关（退回随 CAN 主循环，约 50 Hz）。"
+                         "200 Hz 是为了把 MIT 律的死区压到 ~15ms：50 Hz 时配置的 "
+                         "(kp=30, kd=1) 会越过稳定边界、静止目标下也振荡")
     ap.add_argument("--gazebo", action="store_true",
                     help="把下行电机命令接到 Gazebo；反馈取自 /joint_states")
     ap.add_argument("--gazebo-control-mode", choices=("position", "effort"),
@@ -1318,7 +1353,13 @@ def main():
     ap.add_argument("--position-topic", default="/arm_position_controller/commands")
     ap.add_argument("--effort-topic", default="/arm_effort_controller/commands")
     ap.add_argument("--tau-limit", type=float, default=10.0,
-                    help="力矩饱和 N·m；URDF 里关节 effort 限幅是 10.0")
+                    help="未被 --tau-limits 覆盖的电机用的力矩饱和兜底 N·m；"
+                         "10.0 是照抄 URDF 关节 effort 限幅的历史值，只对 Gazebo "
+                         "ros2_control 那条路成立")
+    ap.add_argument("--tau-limits", default="",
+                    help="逐电机力矩饱和 N·m（关节侧），形如 1:11.0,3:45.0；"
+                         "取值来自型号库 peak_torque_nm（真机峰值），"
+                         "未列出的电机退回 --tau-limit")
     args = ap.parse_args()
     if args.interface is None and args.tty is None:
         args.tty = default_canable_tty()
@@ -1338,13 +1379,30 @@ def main():
 
     if args.gazebo:
         jm = parse_joint_map(args.joint_map)
+        tau_limits = parse_tau_limits(args.tau_limits)
+        effort_rate = args.effort_rate_hz if args.effort_rate_hz > 0 else 0.0
         sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
                                   args.position_topic, args.effort_topic,
-                                  args.tau_limit)
+                                  args.tau_limit, tau_limits,
+                                  publish_interval_s=(1.0 / effort_rate
+                                                      if effort_rate else 0.015))
         topic = (args.position_topic if args.gazebo_control_mode == "position"
                  else args.effort_topic)
-        print("[sim] Gazebo 桥已接：%s → %s (%s)" %
-              (jm, topic, args.gazebo_control_mode))
+        print("[sim] Gazebo 桥已接：%s → %s (%s)；力矩饱和：%s（兜底 %.1f N·m）；"
+              "发力矩 %s" %
+              (jm, topic, args.gazebo_control_mode,
+               ", ".join(f"{k}:{v:g}" for k, v in sorted(tau_limits.items())) or "无",
+               args.tau_limit,
+               f"{effort_rate:g} Hz（独立线程）" if effort_rate else "随 CAN 主循环"))
+        # MIT 律跑在独立线程里，与 CAN 主循环（SYNC 20ms）解耦：主循环里那份
+        # 调用留着做兜底，但会被 publish_interval 节流掉，实际生效的是本线程。
+        if effort_rate:
+            def _effort_loop():
+                while not sim.stop:
+                    sim.bridge.publish_commands(sim.models)
+                    time.sleep(1.0 / effort_rate * 0.5)
+            threading.Thread(target=_effort_loop, name="effort-publish",
+                             daemon=True).start()
 
     def _sig(_a, _b):
         sim.stop = True

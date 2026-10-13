@@ -125,10 +125,16 @@
       <summary>使能与增益<span class="spacer"></span><span class="sum" id="sumPol">--</span></summary>
       <div class="ctrl-row wrap">
         <label class="check tiny"><input type="checkbox" id="chkAllPolicy"> 显示全部</label>
+        <label class="check tiny"
+          title="只勾选/取消下面所有行的使能框，本身不下发；要生效再点行内「下发」或「一键下发」">
+          <input type="checkbox" id="chkPolEnableAll"> 全选使能</label>
+        <span class="spacer"></span>
+        <button id="btnPolSendAll" class="tiny-btn primary"
+          title="把当前列出的所有行（勾「显示全部」即整条臂）的 使能/kp/kd 合成一条策略一次下发；代数只 +1，未核对的台会被固件逐台拒绝">一键下发</button>
       </div>
       <div class="table-wrap">
         <table class="params">
-          <thead><tr><th class="num">ID</th><th>型号</th><th>启用</th><th class="num">kp</th><th class="num">kd</th><th></th></tr></thead>
+          <thead><tr><th class="num">ID</th><th>型号</th><th>使能</th><th class="num">kp</th><th class="num">kd</th><th></th></tr></thead>
           <tbody id="polRows"><tr class="empty"><td colspan="6">连接后点「读取」载入电机列表</td></tr></tbody>
         </table>
       </div>
@@ -201,6 +207,25 @@
       <button id="btnChartClear" class="tiny-btn secondary">清空</button>
     </div>
     <canvas id="chart" width="980" height="380" class="chart"></canvas>
+  </template>
+
+  <!-- IMU（诊断屏；canvas 由 js/panels/imu.js 绘制，数据源 = micro_ros_up/imu/{data,temp}） -->
+  <template data-panel-template="imu">
+    <details class="card" data-fold="imu" open>
+      <summary>IMU<span class="spacer"></span><span class="sum" id="imuHz">-- Hz</span></summary>
+      <div class="imu-wrap">
+        <div class="kv">
+          <div><span>Roll</span><b id="imuRoll">--</b></div>
+          <div><span>Pitch</span><b id="imuPitch">--</b></div>
+          <div><span>Yaw</span><b id="imuYaw">--</b></div>
+          <div><span>温度</span><b id="imuTemp">--</b></div>
+          <div><span>更新</span><b id="imuAge">--</b></div>
+          <div><span>四元数</span><b id="imuQuat" class="muted">--</b></div>
+        </div>
+        <canvas id="imu3d" width="200" height="200" class="imu3d" title="3D 姿态"></canvas>
+        <canvas id="attitudeHorizon" width="260" height="150" class="horizon" title="人工地平仪"></canvas>
+      </div>
+    </details>
   </template>
 
   <!-- 事件日志（/micro_ros_up/motor_events） -->
@@ -406,6 +431,7 @@
   <template data-screen="diag">
     <div class="screen diag">
       <section class="col-curve"><div data-panel="curve"></div></section>
+      <section class="col-imu"><div data-panel="imu"></div></section>
       <section class="col-events"><div data-panel="events"></div></section>
       <section class="col-history"><div data-panel="history"></div></section>
     </div>

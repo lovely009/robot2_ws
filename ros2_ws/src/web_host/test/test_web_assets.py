@@ -266,10 +266,13 @@ def test_builtin_joint_map_covers_default_model():
     """
     store_src = (WEB / 'js' / 'core' / 'store.js').read_text(encoding='utf-8')
 
-    m = re.search(r'if \(!q\) \{\s*return \{(.*?)\};', store_src, re.S)
-    assert m, 'store.js 里找不到 JOINT_OF_MOTOR 的默认表'
+    m = re.search(
+        r'export const JOINT_OF_MOTOR\s*=\s*JOINT_OVERRIDE\s*\|\|\s*\{(.*?)\n\};',
+        store_src, re.S)
+    assert m, ('store.js 里找不到 JOINT_OF_MOTOR 的兜底表——'
+               '期望 `export const JOINT_OF_MOTOR = JOINT_OVERRIDE || {…};`')
     mapped = {int(k) for k in re.findall(r'(\d+)\s*:', m.group(1))}
-    assert mapped, 'JOINT_OF_MOTOR 默认表解析为空'
+    assert mapped, 'JOINT_OF_MOTOR 兜底表解析为空'
 
     # 默认模型名从同一个文件取，避免两处各写一份而漂移
     mm = re.search(r"URLQ\.get\('model'\)\s*\|\|\s*'([^']+)'", store_src)

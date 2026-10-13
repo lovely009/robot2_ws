@@ -27,6 +27,36 @@
     grid-template-areas: "index" "stage" "side" "command" "drawer"; }
 }
 
+/* ≥1081px（三栏并排）时，左右两栏不得高过中栏的臂视图：封顶到同一高度、各自内部
+   滚动，三栏底部齐平。中栏高度由 --stage-h 定，左右两栏只受它约束。
+   收窄到两栏/一栏堆叠时不封顶——那时高度本来就不需要对齐。 */
+@media (min-width: 1081px) {
+  /* 用确定高度而不是 max-height：只有确定高度才会让 flex 子项收缩，max-height
+     下的 auto 高度是不确定的，卡片会照原样撑出去、内部滚动条永远不出现。
+     面板标记外还有一层 [data-panel] 占位 div（index.html 模板克隆），两层都要
+     收缩，任一层的 min-height: auto 都会把内容顶回来。 */
+  .col-index, .col-side { display: flex; flex-direction: column;
+    height: calc(var(--stage-h) + 2px); }   /* +2px 补 .stage 的上下边框 */
+  .col-index > [data-panel], .col-side > [data-panel] {
+    display: flex; flex-direction: column; min-height: 0; }
+  .col-index > [data-panel] > details, .col-side > [data-panel] > details {
+    display: flex; flex-direction: column; min-height: 0; }
+  /* details 的正文不在 details 盒子下，而是被 UA 包在 ::details-content 里
+     （Chromium 131+）——不补这一层，里面的 ul/table 就不是 flex 子项、不会收缩。 */
+  .col-index > [data-panel] > details::details-content,
+  .col-side > [data-panel] > details::details-content {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  /* 封顶后最后一格不再留底边距，否则卡片底边比中栏高一截 */
+  .col-index > [data-panel]:last-child > details,
+  .col-side > [data-panel]:last-child > details { margin-bottom: 0; }
+  .col-index .joints { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  /* 右栏两格：读数卡按内容高，策略卡吃掉剩余高度、表格自己滚 */
+  .col-side > [data-panel]:has(> details.card) { flex: 0 0 auto; }
+  .col-side > [data-panel]:has(> details.sec) { flex: 1 1 auto; }
+  .col-side > [data-panel] > details.sec > .table-wrap {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
+
 /* teach 屏：与 run 同栅格，底部是示教区（col-teach）与观察抽屉。 */
 .screen.teach {
   grid-template-columns: 250px minmax(0, 1fr) 330px;
@@ -54,17 +84,18 @@
   grid-template-areas: "params" "drawer"; }
 .screen.device > .col-params { grid-area: params; min-width: 0; }
 
-/* diag 屏：观察类面板直接放主区（无抽屉）；曲线占满一行，事件与历史并排。 */
+/* diag 屏：观察类面板直接放主区（无抽屉）；曲线占满一行，IMU 与事件/历史并排。 */
 .screen.diag {
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  grid-template-areas: "curve curve" "events history";
+  grid-template-areas: "curve curve" "imu events" "imu history";
 }
 .screen.diag > .col-curve { grid-area: curve; min-width: 0; }
+.screen.diag > .col-imu { grid-area: imu; min-width: 0; }
 .screen.diag > .col-events { grid-area: events; min-width: 0; }
 .screen.diag > .col-history { grid-area: history; min-width: 0; }
 @media (max-width: 1080px) {
   .screen.diag { grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "curve" "events" "history"; }
+    grid-template-areas: "curve" "imu" "events" "history"; }
 }
 
 /* sim 屏：仿真启动器整宽一个面板（无抽屉、无副栏）。 */
@@ -73,6 +104,15 @@
 
 /* ---------- 曲线：canvas 随容器缩放（980×380 的绘制缓冲，旧版同口径） ---------- */
 .chart { display: block; width: 100%; height: auto; background: #070a10;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
+/* ---------- IMU：姿态数值 + 3D 姿态 + 人工地平仪 ---------- */
+.imu-wrap { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 14px; align-items: start; }
+@media (max-width: 1080px) { .imu-wrap { grid-template-columns: minmax(0, 1fr); } }
+.imu3d { display: block; width: 130px; height: 130px; background: #070a10;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.horizon { display: block; width: 260px; height: 150px; background: #070a10;
   border: 1px solid var(--line); border-radius: var(--radius-sm); }
 
 /* ---------- 事件日志 ---------- */
@@ -84,7 +124,7 @@
 /* ---------- 臂视图舞台（canvas 与 hud 由 panels/arm.js 建） ---------- */
 .stage { position: relative; background: #070a10; border: 1px solid var(--line);
   border-radius: var(--radius); overflow: hidden; }
-.stage .arm3d { display: block; width: 100%; height: clamp(300px, 48vh, 640px); touch-action: none; }
+.stage .arm3d { display: block; width: 100%; height: var(--stage-h); touch-action: none; }
 .stage .hud { position: absolute; top: 6px; left: 8px; font-size: var(--fs-xs);
   font-family: var(--mono); color: var(--dim); background: rgba(10, 14, 22, .8);
   border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px 7px;

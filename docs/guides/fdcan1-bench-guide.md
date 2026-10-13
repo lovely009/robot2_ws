@@ -1,6 +1,6 @@
 # FDCAN1 四电机模拟台架指南
 
-> **适用范围（2026-10-12 修订）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的模拟台架。默认节点为 CERB 1=R58、2–4=R48；需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。**两只已知 CANable 版本的 5 Mbps 索引都是 `Y5`**（2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见下）。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
+> **适用范围（2026-10-14 修订）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的模拟台架。默认节点为 CERB 1=R58、2–4=R48；需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。**两只已知 CANable 版本的 5 Mbps 索引都是 `Y5`**（2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见下）。**2026-10-14 起台架固件默认把数据段降到 2 Mbps**（`-DFDCAN_DATA_2M_BENCH`，见下"数据相位"一节）——5 Mbps 在本台架的收发器/接线余量不足，会周期性整链静默。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
 
 ## 连接与固定参数
 
@@ -9,8 +9,8 @@
 | 控制板 micro-ROS CDC | `/dev/ttyACM0` |
 | CANable2 SLCAN | `/dev/ttyACM1` |
 | 控制板总线 | FDCAN1，PD0/PD1 |
-| 位率 | 仲裁 1 Mbps / 数据 5 Mbps，CAN FD+BRS |
-| SLCAN 配置 | `C` → `S8` → `Y5` → `M0` → `A1` → `O`（`16e7497-dirty` 与 `b158aa7` 均为 `Y5`），命令间隔至少 150 ms |
+| 位率 | 仲裁 1 Mbps / 数据 **2 Mbps**（台架固件 `-DFDCAN_DATA_2M_BENCH`），CAN FD+BRS |
+| SLCAN 配置 | `C` → `S8` → **`Y2`** → `M0` → `A1` → `O`（数据段 2 Mbps 对应 `Y2`；5 Mbps 才是 `Y5`），命令间隔至少 150 ms |
 | 模拟节点 | CERB id 1=R58；id 2–4=R48 |
 
 先用 `V` 识别 CANable 固件。**2026-10-12 实测修正**：现场这只 CANable（USB 描述符
@@ -24,9 +24,39 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
 `micro_ros_agent/tools/fdcan_motor_sim.py` 的 `SLCAN_VERSION_DATA_BITRATE` 与
 `_recover_latched_bus`。
 
+## 数据相位：5 Mbps 在本台架不可用（2026-10-14 定案）
+
+**长期"间歇静默、全台架 OFFLINE、重刷固件无效"的根因就是数据相位时序，不是适配器损坏、
+不是模拟器、也不是带宽。** 判据（板子自身单调计数 + 空闲/负载三段对照）：
+
+- 空闲时只发 `0x080`（DLC=0，**没有数据相位**）→ `tx_frame_count` 稳定 50/s、零抖动；
+- **一旦板子发带数据相位的 FD 帧（运动命令），总线立刻崩**：`tx_frame_count` 掉到 0、
+  `rx_frame_count=0`、18 台 OFFLINE↔ACTIVE 抖动、模拟器看到的 SYNC 最大间隔涨到 4~9 s；
+- **与快照率无关**（33/50/100 Hz 表现相同）⇒ 是逐帧层面的失败，不是流量过载；
+- 撤掉负载**下一拍就恢复** ⇒ 不是 BUS_OFF 残留、也不是适配器锁存（两者都会持续）；
+- `tx_dropped`/`p0_retry`/`rx_hw_lost`/`ring_drop` 全 0，正是"每次提交都被硬件拒绝却看不见"
+  的样子（`can_tx_scheduler` 的 `tx_hw_reject_count` 未导出到诊断）。
+
+原理：5 Mbps 下 1 bit 只有 200 ns，与本台架收发器环路延迟同量级；两侧采样点本来就不同
+（板子 16 tq → 81.25%，CANable2 上游固件 17 tq → 88.24%，见 `/tmp/canable2-fw/src/can.c`），
+余量被吃光。`--no-brs`（只改模拟器方向的帧）无效，可反证问题在板子的发送侧。
+
+**修复**：固件加编译开关 `-DFDCAN_DATA_2M_BENCH`（`lib/fdcan/src/fdcan.c` + `platformio.ini`，
+**默认关，接真实电机前必须关**），数据段降到 2 Mbps（N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq，
+采样点 85%），模拟器同步用 `--data-bitrate-index 2`（即 `Y2`）。实测 100 Hz 快照下
+`tx_frame_count` 稳定 4050/s、18/18 ACTIVE、**0 次离线事件**、SYNC 最大间隔 23 ms。
+
+要在台架上跑回 5 Mbps：应改**适配器**的数据段采样点（`DataTimeSeg1/2` 14/2 → 13/3，
+17 tq 不变 → 82.35%，贴近板子的 81.25%）再烧适配器，而不是改板子——板子 81.25% 与真机
+电机的 80% 是匹配的，改板子反而会把真机链路做坏。⚠️ 注意 DBTP 的 `DTSEG1` 只有 5 位、
+HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。
+
 ## 启动顺序
 
-顺序不可颠倒：CANable2 必须先成为 ACK 节点，控制板才复位；否则 FDCAN1 会因无人 ACK 进入 BUS_OFF。固件自清 INIT 恢复（2026-09-18 已实测），但仍须 ACK 节点在先才能重新同步。
+**顺序不可颠倒，而且"板子先于 ACK 节点启动"会永久卡死**：CANable2 必须先成为 ACK 节点，
+控制板才复位。板子若在无 ACK 节点的总线上启动，SYNC 拿不到 ACK → `AutoRetransmission`
+重传把三路 TX FIFO 全部填满（诊断显示 `tx_frame_count == 16`，恰好是 FIFO 深度）→ 此后
+再也发不出任何帧（`rx_frame_count` 也停在 0），**再复位也好不了**（会立刻重演）。
 
 1. 启动 micro-ROS Agent：
 
@@ -36,14 +66,17 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
    ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
    ```
 
-2. 启动主机模拟器：
+2. 启动主机模拟器（台架固件是 2 Mbps 数据段，索引必须显式给 `2`）：
 
    ```bash
    python3 /home/ly/robot_ws/micro_ros_agent/tools/fdcan_motor_sim.py \
-     --tty /dev/ttyACM1 --log /tmp/fdcan-motor-sim.jsonl
+     --tty /dev/ttyACM1 --data-bitrate-index 2
    ```
 
-3. 看到 `S8/Y5/M0/A1/O opened`（若误配成 Y7，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
+   `--log <jsonl>` 会逐帧落盘并把主循环拖慢，反馈窗口可能越过固件 100 ms 离线门而
+   触发全体 OFFLINE——只在需要抓原始帧定位时开，抓完即关。
+
+3. 看到 `S8/Y2/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
 4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 
 ## 只读验收

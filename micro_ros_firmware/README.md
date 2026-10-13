@@ -191,6 +191,20 @@ cd micro_ros_firmware
 ~/.platformio/penv/bin/pio device monitor # 串口监视（115200，USB CDC 下波特率无效）
 ```
 
+### 台架编译开关
+
+`platformio.ini` 的 `build_flags` 里有几个默认关闭、只给模拟台架用的开关。**接真实电机
+或量产前必须确认它们都关着**；改这些宏后须 `pio run -t clean` 全量重建。
+
+| 宏 | 作用 | 代价 / 何时用 |
+|---|---|---|
+| `FDCAN_DATA_2M_BENCH` | 数据段 5 Mbps → 2 Mbps（`lib/fdcan/src/fdcan.c`，N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq，采样点 85%） | 与真机标定的 5 Mbps 不一致。台架必须开：5 Mbps 在本台架收发器/接线余量不足，板子一发带数据相位的 FD 帧整链就静默（根因与实测见 `docs/guides/fdcan1-bench-guide.md`）。⚠️ DBTP 的 `DTSEG1` 只有 5 位、HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。 |
+| `FDCAN_SELF_ACK_BENCH` | 三路 FDCAN 走 EXTERNAL_LOOPBACK，空总线也能自发自收供嗅探 | MON 位使本节点**不应答**总线上其他节点，接真实电机/完整台架前必须关 |
+
+**启动顺序是硬要求**：板子必须在 ACK 节点（主机模拟器）已在场时才复位。板子若在无 ACK
+节点的总线上启动，SYNC 拿不到 ACK → `AutoRetransmission` 重传把三路 TX FIFO 全部填满
+（诊断里 `tx_frame_count == 16`，恰好是 FIFO 深度）→ 此后发不出任何帧，**再复位也好不了**。
+
 自定义消息通过仓库内符号链接
 `extra_packages/can_bridge_msgs -> ../../micro_ros_agent/src/can_bridge_msgs`
 复用同一份 `can_bridge_msgs` 定义；不要复制或另建第二份消息包。已缓存

@@ -41,10 +41,25 @@ static uint32_t HAL_RCC_FDCAN_CLK_ENABLED = 0;
 #define FDCAN_ARB_SJW_TQ             16U
 #define FDCAN_ARB_SEG1_TQ            63U
 #define FDCAN_ARB_SEG2_TQ            16U
+// 台架 2 Mbps 数据段变体（-DFDCAN_DATA_2M_BENCH，默认关）：5 Mbps 时 1 bit
+// 只有 200 ns，与收发器环路延迟同量级，接收方采样点余量仅数 ns；2 Mbps 把
+// 余量放大 2.5 倍，用于在台架上把"数据相位时序"与其它故障区分开。接真实
+// 电机时必须回到 5 Mbps（协议标定值）。
+#ifdef FDCAN_DATA_2M_BENCH
+// N=2, SJW=2, Seg1=16, Seg2=3 → 20 tq/bit → 2.0 Mbps，采样点 85%
+// （DTSEG1 字段只有 5 位、HAL 上界 32：Seg1 不得超过 32，否则 DBTP 被截断）
+#pragma message("FDCAN data phase = 2.0 Mbps (FDCAN_DATA_2M_BENCH bench variant)")
+#define FDCAN_DATA_BITRATE_PRESCALER 2U
+#define FDCAN_DATA_SJW_TQ             2U
+#define FDCAN_DATA_SEG1_TQ            16U
+#define FDCAN_DATA_SEG2_TQ            3U
+#else
+#pragma message("FDCAN data phase = 5.0 Mbps (default)")
 #define FDCAN_DATA_BITRATE_PRESCALER 1U
 #define FDCAN_DATA_SJW_TQ            2U
 #define FDCAN_DATA_SEG1_TQ           12U
 #define FDCAN_DATA_SEG2_TQ           3U
+#endif
 
 // HAL 消息 RAM：标准过滤器 4 字、扩展过滤器 4×2 字，64B 元素每个 18 字。
 #define FDCAN_MESSAGE_RAM_WORDS_PER_BUS \

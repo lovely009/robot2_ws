@@ -11,12 +11,12 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('web_host')
     web_root = os.path.join(pkg_share, 'web')
 
-    # 臂视图的几何（URDF + 约 20 MB STL）在 robot_arm_gazebo 的 share 目录里，
-    # 由 static_server 挂到 /robot_arm_gazebo 下（目录符号链接装不进包，
+    # 臂视图的几何（URDF + 约 20 MB STL）在 robot_sim 的 share 目录里，
+    # 由 static_server 挂到 /robot_sim 下（目录符号链接装不进包，
     # 见 static_server.py 的注释）。缺这个包时降级：静态页面照常，只有臂视图
     # 提示加载失败——所以这里吞掉查找异常。
     try:
-        model_dir = get_package_share_directory('robot_arm_gazebo')
+        model_dir = get_package_share_directory('robot_sim')
     except Exception:
         model_dir = ''
 
@@ -54,7 +54,7 @@ def generate_launch_description():
                 'host': '0.0.0.0',
                 'port': web_port,
                 'web_root': web_root,
-                'model_url_prefix': '/robot_arm_gazebo',
+                'model_url_prefix': '/robot_sim',
                 'model_dir': LaunchConfiguration('model_dir'),
             }],
         ),

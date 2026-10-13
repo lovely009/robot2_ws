@@ -41,6 +41,13 @@ static void link_state_set(micro_ros_link_state_t state) {
 
 static void micro_ros_task_fn(void *parameters) {
   (void)parameters;
+  // 固定 10ms 节拍（100Hz）。vTaskDelay(10ms) 的语义是"做完本轮事再睡 10ms"，
+  // 实际周期 = 本轮工作耗时 + 10ms ≈ 11ms → 有效节拍 ~90Hz；而 motion_states
+  // 取 tick/2、imu 取 tick/1，于是一个报成 ~45Hz（文档标称 50Hz）、另一个 ~91Hz。
+  // vTaskDelayUntil 以**上一次唤醒时刻**为基准推进，把工作耗时吸收进睡眠，
+  // 周期恒为 10ms。motor_rt 的 1ms 服务用的是同一模式。
+  TickType_t last_wake = xTaskGetTickCount();
+  const TickType_t period = pdMS_TO_TICKS(10);
   for (;;) {
     switch (link_state_get()) {
     case MICRO_ROS_LINK_WAIT_AGENT:
@@ -76,7 +83,19 @@ static void micro_ros_task_fn(void *parameters) {
       link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
       break;
     }
-    vTaskDelay(pdMS_TO_TICKS(10));
+    // 超时保护：ping 在链路异常时会阻塞到数百 ms（WAIT_AGENT/LOST 态下
+    // 200ms×3 次尝试），此时 last_wake 已远落后于当前时刻。继续调
+    // vTaskDelayUntil 会**连续立即返回**去追帧（空转），饿死低优先级任务；
+    // 本任务优先级仅 2。落后达到一个周期就重新对齐，放弃追帧。
+    if ((xTaskGetTickCount() - last_wake) < period) {
+      vTaskDelayUntil(&last_wake, period);
+    } else {
+      // 重新对齐必须在**睡完之后**取时刻：若在 vTaskDelay 之前重置，下一轮
+      // 的差值又会 ≥ 周期，于是永远走这一支、退化成原来的「工作耗时 + 10ms」，
+      // 节拍与修复前无异（2026-10-13 首次修复即踩此坑，实测 imu 仍 90.5Hz）。
+      vTaskDelay(period);
+      last_wake = xTaskGetTickCount();
+    }
   }
 }
 

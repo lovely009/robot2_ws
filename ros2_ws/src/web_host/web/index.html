@@ -271,6 +271,12 @@
       <summary>仿真<span class="spacer"></span><span class="sum" id="simSummary">未启动</span></summary>
       <div class="sim-panel">
         <div class="sim-grid">
+          <label class="sim-field">仿真后端
+            <select id="simBackend">
+              <option value="gazebo">Gazebo（gz sim）</option>
+              <option value="mujoco">MuJoCo（本地窗口）</option>
+            </select>
+          </label>
           <label class="sim-field">控制端
             <select id="simMode">
               <option value="host">主机驱动闭环</option>

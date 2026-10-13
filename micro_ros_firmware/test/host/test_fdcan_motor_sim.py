@@ -143,3 +143,98 @@ assert multi.models[3].last_cmd is None
 _cerb = MODULE.MotorModel(1, "cerb")
 assert _cerb.sdo_params[(0x2650, 0x00)] == 1, "保护上电初值应为 1（关）"
 assert _cerb.sdo_params[(0x2541, 0x00)] == 0, "方向上电初值应为 0（CW）"
+
+
+# ── --joint-map 的重号是**静默**的（2026-10-13 固化）────────────────────────
+# 与固件侧"重号进 CONFIG_CONFLICT"完全不同：模拟器这一侧 dict 赋值直接覆盖，
+# 不报错、不告警。接线把两个关节接到同一个 motor_id 时，表现是"某台电机不跟"，
+# 而不是任何错误码——台架上极易误判成固件或动力学问题。要让行为变响（告警或
+# 硬失败）之前，先确认不会打断既有台架命令行：simulation.launch.py 是按
+# simulation_topology 的电机顺序拼这一串的。
+_jm = MODULE.parse_joint_map("1:joint_link1,2:joint_link2")
+assert _jm == {1: "joint_link1", 2: "joint_link2"}
+assert MODULE.parse_joint_map("1:joint_a,1:joint_b") == {1: "joint_b"}  # 后者覆盖
+assert MODULE.parse_joint_map("1:a,,2:b,") == {1: "a", 2: "b"}  # 空项跳过
+assert MODULE.parse_joint_map(" 1 : a ") == {1: "a"}  # 两侧空白容忍
+
+
+# ── 反馈窗口的墙钟兜底（2026-10-13 修复的回归测试）────────────────────────
+# 窗口原本**只**由 SYNC 计数驱动，周期 = interval × **实际** SYNC 周期。SYNC 是
+# 固件侧事件，实测节拍可远慢于 --period-ms 假定值（本台架 2026-10-13 实测仅
+# 12~24Hz），窗口于是被拉长到 3×SYNC ≈ 120ms，越过固件 100ms 离线门
+# （vaxor_adapter.c / cerb_adapter.c 的 offline_timeout_ms）→ 全台架
+# OFFLINE↔重连抖动 → 重连清空 profile → 速度/力矩大面积 NaN。
+# 兜底让 --fb-period-ms 成为周期的**上界**，与 SYNC 快慢解耦。
+def _bare_sim(fb_period_ms=60, stagger_ms=2.2):
+    s = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+    s.models = {1: MODULE.MotorModel(1, "cerb"),
+                2: MODULE.MotorModel(2, "vaxor")}
+    s.next_send = {}
+    s.fb_period = fb_period_ms / 1000.0
+    s.stagger = stagger_ms / 1000.0
+    s.last_window_at = 100.0
+    s.window_count = 0
+    return s
+
+
+_w = _bare_sim()
+# 未到周期：不补，且不留任何 deadline
+assert not _w.maybe_fallback_window(100.0 + 0.059)
+assert _w.window_count == 0 and _w.next_send == {}
+# 到周期：补一轮，两台各一条 deadline，按 stagger 错峰
+assert _w.maybe_fallback_window(100.0 + 0.060)
+assert _w.window_count == 1
+assert len(_w.next_send[1]) == 1 and abs(_w.next_send[1][0] - 100.06) < 1e-9
+assert len(_w.next_send[2]) == 1
+assert abs(_w.next_send[2][0] - _w.next_send[1][0] - 0.0022) < 1e-9
+# "到点才补"，不是每拍都补：紧接着的下一拍不补
+assert not _w.maybe_fallback_window(100.0 + 0.061)
+assert _w.window_count == 1
+# SYNC 长期不来（模拟实测的 12~24Hz）：仍严格按 fb_period 出窗口。
+# 推进量用 1/16 秒（二进制精确）而非 60ms：0.06 不是精确值，
+# "刚好到点"会被浮点算成差 1e-14 → 误判成"还没到点"（本用例第一版即踩此坑，
+# 与产品代码无关，纯断言写法问题）。
+_we = _bare_sim()
+_we.fb_period = 0.0625
+for _i in range(5):
+    assert _we.maybe_fallback_window(_we.last_window_at + 0.0625)
+assert _we.window_count == 5, _we.window_count
+assert _we.last_window_at == 100.0 + 0.0625 * 5
+
+# 周期参数生效：--fb-period-ms 20 把阈值降到 20ms。用"同一个 21ms 间隔在两种
+# 周期下结论相反"来断言，既绕开浮点（100.02-100.0 会算成 0.0199999999999996），
+# 也比单点比较更能说明阈值真的跟着参数走。
+_w60_ref = _bare_sim()          # 默认 60ms
+_w20 = _bare_sim(fb_period_ms=20)
+assert not _w20.maybe_fallback_window(100.0 + 0.019)
+assert not _w60_ref.maybe_fallback_window(100.0 + 0.021)  # 60ms 周期：还没到
+assert _w20.maybe_fallback_window(100.0 + 0.021)          # 20ms 周期：到点了
+assert _w20.window_count == 1
+assert _w60_ref.window_count == 0 and _w60_ref.next_send == {}
+
+
+# ── 反馈编码越界不得打死进程（2026-10-13 台架实测的崩溃）──────────────────
+# 武装后关节瞬时摆过 ±180°，cerb_frame 的 pos_deg*182 溢出 int16 → struct.error
+# 打死整个模拟器进程，launch 随即关掉全部（含 MuJoCo 桥，exit -11），台架全下线、
+# 固件侧 18 台全 OFFLINE/fault=5。vaxor 的三个编码函数一直有 clamp，CERB 这条路
+# 漏了——而它的失效方式是**崩进程**，不是丢一帧。
+_cb = MODULE.MotorModel(1, "cerb")
+_cb.pos_deg = 400.0     # 远超 ±180°（int16 只能表示 ±180.04°）
+_cb.rpm = 10 ** 9
+_cb.iq_ma = -(10 ** 9)
+_cb.temp_c = 10 ** 6
+_frame = _cb.cerb_frame()  # 修复前这里抛 struct.error
+assert len(_frame) == 12
+assert _frame[0:2] == (32767).to_bytes(2, "big")                 # 正越界 → 上端
+assert _frame[2:4] == (32767).to_bytes(2, "big")                 # rpm 正越界
+assert _frame[4:6] == (-32768).to_bytes(2, "big", signed=True)   # Iq 负越界
+assert _frame[8:10] == (32767).to_bytes(2, "big")                # 温度越界
+
+_cb2 = MODULE.MotorModel(2, "cerb")
+_cb2.pos_deg = -400.0
+assert _cb2.cerb_frame()[0:2] == (-32768).to_bytes(2, "big", signed=True)
+
+# 量程内不得变形（夹取只对越界生效）
+_cb3 = MODULE.MotorModel(3, "cerb")
+_cb3.pos_deg = 90.0
+assert _cb3.cerb_frame()[0:2] == (90 * 182).to_bytes(2, "big", signed=True)

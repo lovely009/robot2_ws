@@ -167,6 +167,23 @@ def schedule_feedback_window(pending: dict[int, list[float]], motor_ids,
             window_start + slot * stagger)
 
 
+def parse_joint_map(spec: str) -> dict[int, str]:
+    """解析 --joint-map（"id:关节名,id:关节名"）→ {motor_id: 关节名}。
+
+    ⚠ **重复 motor_id 静默取后者**：dict 赋值天然覆盖，不给任何提示。这与
+    固件侧"重号进 CONFIG_CONFLICT"完全不同——模拟器这一侧不报，接线错位只会
+    表现为"某台电机不跟"，不会报错。测试固化此行为（见
+    tools 测试 test_fdcan_motor_sim.py 的 test_joint_map_duplicate_*），
+    要改成报警或硬失败请先想清楚会不会打断既有台架命令。
+    """
+    out: dict[int, str] = {}
+    for item in spec.split(","):
+        if item.strip():
+            mid, jname = item.split(":")
+            out[int(mid)] = jname.strip()
+    return out
+
+
 def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
     """标准 11bit ID 的 SLCAN 行（CANable2 方言），以 \\r 结尾。"""
     if can_id > 0x7FF:
@@ -223,6 +240,33 @@ VAXOR_TORQUE_PER_AMP = 0.042 * VAXOR_GEAR_RATIO * 0.65
 TX_RETRY_S = 0.25
 TX_QUEUE_MAX = 512
 TX_PUMP_BUDGET = 8192
+
+
+_CLAMP_WARNED: set[str] = set()
+
+
+def clamp_i16(value: float, what: str) -> int:
+    """把值夹进 int16 再交给 struct.pack。
+
+    CERB 反馈帧把位置/转速/Iq/温度都塞进 int16，越界时 struct.pack 抛
+    struct.error，**打死整个模拟器进程**——2026-10-13 台架实测：武装后关节
+    瞬时摆过 ±180°，pos_deg*182 溢出，模拟器崩溃，launch 连同 MuJoCo 一起
+    关掉，台架全下线（固件侧 18 台全 OFFLINE、fault=5，mujoco 桥 exit -11）。
+    vaxor 那三个编码函数一直有 clamp，CERB 这条路漏了。
+
+    夹取而非抛错：真机上报的是有符号 16 位量，越界在物理上就是"到量程端点"，
+    崩溃不是它的语义。但**首次**越界必须响一声——静默夹取会把"关节真的跑出
+    量程"这个建模/限位问题藏起来。
+    """
+    rounded = int(round(value))
+    if -32768 <= rounded <= 32767:
+        return rounded
+    if what not in _CLAMP_WARNED:
+        _CLAMP_WARNED.add(what)
+        print(f"[sim] ⚠ {what} 越界 {value:.1f}，已夹取到 int16 端点"
+              f"（后续同类不再重复打印）——真实电机到量程端也会这样，"
+              f"但若常态出现说明关节确实跑出了 ±180° 量程", file=sys.stderr)
+    return -32768 if rounded < 0 else 32767
 
 
 def vaxor_pos_code(motor_rad: float) -> bytes:
@@ -367,10 +411,12 @@ class MotorModel:
         MotorStatusArray.temperature——曾经这里是 6 字节零填充，页面上恒显示
         "--"，看着像 UI 缺字段，实为台架不发。
         """
-        data = struct.pack(">hhh", round(self.pos_deg * 182.0),
-                           round(self.rpm), round(self.iq_ma))
+        data = struct.pack(">hhh", clamp_i16(self.pos_deg * 182.0, "CERB 位置"),
+                           clamp_i16(self.rpm, "CERB 转速"),
+                           clamp_i16(self.iq_ma, "CERB Iq"))
         data += struct.pack(">h", 0)                      # data[6..7] 错误代码
-        data += struct.pack(">h", round(self.temp_c * 10))  # data[8..9] 线圈温度
+        data += struct.pack(">h",
+                            clamp_i16(self.temp_c * 10, "CERB 温度"))  # data[8..9]
         # data[10] 控制模式反馈、data[11] 状态位（使能/抱闸/报错/到位）本模拟器
         # 不建模，保持 0；固件目前也只读 data[11] bit5（故障）。bit5=0 → 无故障。
         return data + bytes([0x00, 0x00])
@@ -433,7 +479,14 @@ class GazeboBridge:
         rclpy.init()
         self.node = Node("fdcan_sim_gazebo_bridge")
         self.joint_map = dict(joint_map)          # {motor_id: joint_name}
-        self.joints = sorted(set(joint_map.values()))
+        # 顺序必须与**订阅端解释命令数组的顺序**一致：上游（simulation.launch.py 的
+        # firmware 分支）按 simulation_topology 的电机顺序拼 --joint-map，而被控对象
+        # （Gazebo 控制器 / MuJoCo 桥）也按拓扑顺序解释这一串数。
+        # 这里曾经是 sorted(set(...))：对 chest_joint1..9 那种名字恰好等于声明顺序，
+        # 但 half_body_robot 第二链的名字带点号（joint_link1.1..9.9）时字典序会把 link2 排到
+        # link1.1 前面（link1, link1.1, link2, link2.2 …）→ 除首尾关节外力矩全部错位，
+        # 而且两边的长度都一样，不会报错。改为保留声明顺序并去重。
+        self.joints = list(dict.fromkeys(joint_map.values()))
         self.pos = {j: 0.0 for j in self.joints}
         self.vel = {j: 0.0 for j in self.joints}
         # 当前模型的 ros2_control 初始位置契约是 0 rad。position 模式在
@@ -515,6 +568,24 @@ class CanMotorSim:
             raise ValueError("SYNC and feedback periods must be positive")
         self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
         self.stagger = stagger_ms / 1000.0
+        # 反馈窗口的墙钟周期与兜底（2026-10-13 加）。窗口原本**只**由 SYNC 计数
+        # 驱动：每 feedback_sync_interval 个 SYNC 登记一轮 deadline。但 SYNC 是
+        # 固件侧事件，其实际节拍可能慢于 --period-ms 假定的 20ms——本台架实测
+        # 反馈窗口约 110~120ms（固件侧 rx 160~170 帧/s ÷ 18 台 ≈ 106ms/台，
+        # 模拟器侧写入 4931B/s ÷ 604B/窗口 ≈ 8.2 窗口/s ≈ 122ms），即 SYNC 实际
+        # ≈40ms 而非 20ms。窗口 = interval×SYNC 被拉长后**越过固件 100ms 离线门**
+        # （vaxor_adapter.c / cerb_adapter.c 的 offline_timeout_ms），全台架陷入
+        # 3~5Hz 的 OFFLINE→RECONNECTED 循环，每次重连清空 profile → 速度/力矩
+        # 大面积 NaN、state_age 抖动到秒级。
+        # 兜底：窗口至少每 fb_period_ms 登记一次，与 SYNC 快慢解耦，
+        # 使 --fb-period-ms 成为**上界**而不是"SYNC 快才成立"的愿望值。
+        self.fb_period = fb_period_ms / 1000.0
+        self.last_window_at = 0.0
+        self.window_count = 0          # 累计反馈窗口数（含 SYNC 驱动与兜底）
+        self.sync_window_count = 0     # 其中由 SYNC 驱动的部分
+        self.last_stats_at = 0.0
+        self._stats_sync_mark = 0      # 体检差分的上一次采样基准
+        self._stats_window_mark = 0
         self.tx_dropped = 0   # 发送队列满/串口错误丢帧
         self._tx_error_reported = False
         self._tx_control = deque()   # SDO/应答/管理帧：优先于周期反馈
@@ -869,8 +940,8 @@ class CanMotorSim:
             # 真实设备在 SYNC 后窗口上报：按反馈周期折算 SYNC 间隔，9 帧从
             # 窗口起点按 stagger 错峰，跨窗口的末槽 deadline 进入队列而不覆盖。
             if (self.sync_count - 1) % self.feedback_sync_interval == 0:
-                schedule_feedback_window(
-                    self.next_send, sorted(self.models), now, self.stagger)
+                self.register_feedback_window(now)
+                self.sync_window_count += 1
             return
         if can_id == 0x210:
             if not is_fd or len(data) != 64:
@@ -917,6 +988,27 @@ class CanMotorSim:
             # 手册：MIT 命令逐帧应答。
             self.send(0x701 + 4 * m.id, m.vaxor_reply_frame(), True,
                       self.use_brs, m, "vaxor_reply")
+
+    def register_feedback_window(self, now: float) -> None:
+        """登记一轮反馈窗口（按 stagger 错峰），并记账。"""
+        schedule_feedback_window(self.next_send, sorted(self.models), now,
+                                 self.stagger)
+        self.last_window_at = now
+        self.window_count += 1
+
+    def maybe_fallback_window(self, now: float) -> bool:
+        """墙钟兜底：距上次窗口已达 fb_period 就补一轮，返回是否补了。
+
+        窗口原本**只**由 SYNC 计数驱动，周期 = interval × **实际** SYNC 周期；
+        而 SYNC 是固件侧事件，实际节拍可能远慢于 --period-ms 假定值（本台架
+        2026-10-13 实测仅 12~24Hz），窗口被拉长到 3×SYNC ≈ 120ms，越过固件
+        100ms 离线门 → 全台架 OFFLINE↔重连抖动 → 重连清空 profile → NaN。
+        兜底让 --fb-period-ms 成为反馈周期的**上界**，与 SYNC 快慢解耦。
+        """
+        if now - self.last_window_at < self.fb_period:
+            return False
+        self.register_feedback_window(now)
+        return True
 
     def emit_one(self, mid: int):
         m = self.models[mid]
@@ -1070,6 +1162,7 @@ class CanMotorSim:
         last_step = gate_start
         last_bridge = 0.0
         warned = False
+        self.last_stats_at = gate_start   # 体检从门控起点开始计
         while not self.stop:
             now = time.monotonic()
             self._pump_tx()
@@ -1123,7 +1216,10 @@ class CanMotorSim:
                 else:
                     m.approach(dt)
             last_step = now
-            # 错峰：频率由 --fb-period-ms 决定，默认每节点约 16.7Hz。
+            # 墙钟兜底（理由见 maybe_fallback_window）：SYNC 驱动的窗口若迟迟
+            # 不来，这里按 fb_period 补一轮，保证反馈周期不超过 --fb-period-ms。
+            self.maybe_fallback_window(now)
+            # 错峰：周期由 --fb-period-ms 决定（默认每节点约 16.7Hz）。
             for mid in sorted(self.models):
                 deadlines = self.next_send.get(mid)
                 if deadlines and now >= deadlines[0]:
@@ -1131,6 +1227,21 @@ class CanMotorSim:
                     deadlines.pop(0)
                     if not deadlines:
                         del self.next_send[mid]
+            # 周期体检（每 5s 一行）：把链路健康从"退出时才打印"变成在线可见。
+            # SYNC 实际节拍 = sync_count 差分，窗口里 SYNC 驱动占比 = sync_window，
+            # 两者一起就能分辨「窗口被 SYNC 拉长」与「发送队列丢帧」。
+            if now - self.last_stats_at >= 5.0:
+                sync_hz = (self.sync_count - self._stats_sync_mark) / (now - self.last_stats_at)
+                win_hz = (self.window_count - self._stats_window_mark) / (now - self.last_stats_at)
+                print(f"[sim] 体检 SYNC={sync_hz:.1f}Hz 窗口={win_hz:.2f}/s "
+                      f"(SYNC驱动 {self.sync_window_count}/{self.window_count}) "
+                      f"错峰跨度={(len(self.models) - 1) * self.stagger * 1000:.1f}ms "
+                      f"tx_dropped={self.tx_dropped} "
+                      f"queue=ctrl{len(self._tx_control)}/fb{len(self._tx_feedback)} "
+                      f"SYNC最大间隔={self.max_sync_gap * 1000:.0f}ms")
+                self.last_stats_at = now
+                self._stats_sync_mark = self.sync_count
+                self._stats_window_mark = self.window_count
             self._pump_tx()
         self.report()
         self.stop = True
@@ -1226,11 +1337,7 @@ def main():
                    can_interface=args.interface)
 
     if args.gazebo:
-        jm = {}
-        for item in args.joint_map.split(","):
-            if item.strip():
-                mid, jname = item.split(":")
-                jm[int(mid)] = jname.strip()
+        jm = parse_joint_map(args.joint_map)
         sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
                                   args.position_topic, args.effort_topic,
                                   args.tau_limit)

@@ -83,4 +83,4 @@ python3 tools/fdcan_motor_sim.py --interface can0
 ```
 
 一键组合 Gazebo、该模拟器与 STM32 micro-ROS Agent 的入口和完整拓扑参数见
-[`robot_arm_gazebo` 仿真说明](../ros2_ws/src/robot_arm_gazebo/README.md)。
+[`robot_sim` 仿真说明](../ros2_ws/src/robot_sim/README.md)。

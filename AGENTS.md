@@ -13,7 +13,7 @@
 
 真机 `motor_drive`（无 ROS 底层驱动，双传输 `socketcan`/`serial_slcan`，协议 `vaxor`/`cerb`）
 + `motor_hardware_interface`（ros2_control 适配 + 真机入口）+ 仿真 `motor_sim` +
-`robot_arm_gazebo`；`robot_dynamics` 是独立 Pinocchio 运动学/动力学计算边界；
+`robot_sim`；`robot_dynamics` 是独立 Pinocchio 运动学/动力学计算边界；
 `can_bridge_msgs` 提供固件/ROS 2 共用消息，`web_host` 提供 rosbridge Web 上位机。
 **电机拓扑唯一来源是 YAML**：数量/类型/ID/关节名/总线/传输由
 `motor_hardware_interface/config/motor_driver.yaml` 决定，增删改不修改 C++、launch
@@ -36,7 +36,9 @@ cd ros2_ws
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose
 ros2 launch motor_hardware_interface hardware.launch.py  # 真机，默认 tty 双总线
-ros2 launch robot_arm_gazebo gazebo.launch.py           # 仿真（Ignition，model:= 选模型）
+ros2 launch robot_sim gazebo.launch.py           # 仿真（Ignition，model:= 选模型，默认 half_body_robot）
+ros2 launch robot_sim mujoco.launch.py           # 同一模型换 MuJoCo 后端（自写力矩直通桥）
+ros2 launch robot_sim simulation.launch.py backend:=mujoco   # 端到端闭环，被控对象换成 MuJoCo
 ```
 
 - 覆盖设备路径：`interface_<逻辑总线名>:=<路径>`；传输类型切换改 YAML `transport`。

@@ -1,5 +1,5 @@
 // 仿真启动器面板：控制端 / CAN 接口 / 模型 / 端点选择，启动与停止
-// robot_arm_gazebo 的 simulation.launch.py，子进程状态与最近日志来自
+// robot_sim 的 simulation.launch.py，子进程状态与最近日志来自
 // /api/simulation/*（HTTP，与 rosbridge 无关）。因此本面板不订阅、不写 store（只取
 // core/store.js 的 MODEL 常量）；
 // 切屏后状态与日志由后端 status 接口整段恢复，日志不重复追加。
@@ -19,9 +19,11 @@ const stateLabels = {
   stopping: '停止中',
   failed: '启动失败',
 };
+const backendLabels = { gazebo: 'Gazebo', mujoco: 'MuJoCo' };
 
 export function mount(root, ctx) {
   const ui = {
+    backend: $('simBackend'),
     mode: $('simMode'),
     transport: $('simTransport'),
     model: $('simModel'),
@@ -48,7 +50,8 @@ export function mount(root, ctx) {
     log: $('simLog'),
   };
 
-  let deviceOptions = { can_interfaces: [], serial_ports: [], models: [] };
+  let deviceOptions = { can_interfaces: [], serial_ports: [], models: [], mujoco_models: [] };
+  let optionsLoaded = false;
   let latestStatus = { state: 'stopped', log: [] };
   let polling = false;
   let pollTimer = null;
@@ -66,6 +69,7 @@ export function mount(root, ctx) {
   function saveOptions() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        backend: ui.backend.value,
         controller_mode: ui.mode.value,
         transport: ui.transport.value,
         model: ui.model.value,
@@ -133,15 +137,28 @@ export function mount(root, ctx) {
     }
   }
 
+  // MuJoCo 后端的被控对象是模型目录自带的 MJCF，不是 ros2_control：只能列有
+  // mujoco/<模型名>.xml 的模型（后端也做同样校验，这里只是别让人选到必然报错的组合）。
+  function modelEntries() {
+    const names = ui.backend.value === 'mujoco'
+      ? (deviceOptions.mujoco_models || [])
+      : (deviceOptions.models || []);
+    return names.map((model) => ({ value: model, label: model }));
+  }
+
+  function refreshModelOptions(preferredValue) {
+    const placeholder = ui.backend.value === 'mujoco'
+      ? '该后端没有可用模型（需要模型自带 MJCF）'
+      : '选择仿真模型';
+    replaceOptions(ui.model, modelEntries(), placeholder, preferredValue);
+  }
+
   function loadDeviceOptions(options) {
     deviceOptions = options;
-    const models = (options.models || []).map((model) => ({
-      value: model,
-      label: model,
-    }));
+    optionsLoaded = true;
     // 兜底默认取 MODEL（与臂视图同一个默认值；不在列表里的值由 replaceOptions 落到
     // 第一个可用模型，旧的写死字符串已随模型改名失效过两次）。
-    replaceOptions(ui.model, models, '选择仿真模型', saved.model || MODEL);
+    refreshModelOptions(saved.model || MODEL);
 
     const cans = (options.can_interfaces || []).map((item) => ({
       value: item.name,
@@ -197,6 +214,8 @@ export function mount(root, ctx) {
       syncFields();
       return;
     }
+    // 后端决定模型候选集：切换时重列，当前模型仍在新列表里就保留
+    if (optionsLoaded) refreshModelOptions();
     saveOptions();
   }
 
@@ -211,11 +230,12 @@ export function mount(root, ctx) {
       external: '外部控制器',
       firmware: 'STM32 HIL',
     }[config.controller_mode] || config.controller_mode;
+    const backend = backendLabels[config.backend] || config.backend || '';
     const endpoint = config.vcan_interface
       || config.sim_interface
       || config.sim_tty
       || '';
-    return `${mode} · ${config.transport} · ${endpoint}`;
+    return [backend, mode, config.transport, endpoint].filter(Boolean).join(' · ');
   }
 
   function renderStatus(status) {
@@ -235,7 +255,7 @@ export function mount(root, ctx) {
     ui.stop.disabled = !active;
 
     for (const control of [
-      ui.mode, ui.transport, ui.model, ui.vcanName, ui.simInterface,
+      ui.backend, ui.mode, ui.transport, ui.model, ui.vcanName, ui.simInterface,
       ui.driverInterface, ui.simTty, ui.driverTty, ui.busIsolated,
     ]) {
       control.disabled = active;
@@ -272,6 +292,7 @@ export function mount(root, ctx) {
 
   function buildStartRequest() {
     return {
+      backend: ui.backend.value,
       controller_mode: ui.mode.value,
       transport: ui.transport.value,
       model: ui.model.value,
@@ -287,7 +308,11 @@ export function mount(root, ctx) {
   async function startSimulation() {
     const request = buildStartRequest();
     if (!request.model) {
-      setResult('没有可用仿真模型；请先构建并 source robot_arm_gazebo。', 'err');
+      setResult(
+        request.backend === 'mujoco'
+          ? '该后端没有可用模型：MuJoCo 需要模型自带 mujoco/<模型名>.xml。'
+          : '没有可用仿真模型；请先构建并 source robot_sim。',
+        'err');
       return;
     }
     if (request.transport !== 'vcan' && !request.physical_bus_isolated) {
@@ -325,6 +350,7 @@ export function mount(root, ctx) {
     }
   }
 
+  ui.backend.value = saved.backend || 'gazebo';
   ui.mode.value = saved.controller_mode || 'host';
   ui.transport.value = saved.transport || 'vcan';
   ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
@@ -336,6 +362,8 @@ export function mount(root, ctx) {
     });
   }
   ui.model.addEventListener('change', syncFields);
+  // 后端只改变模型候选集，不涉及物理总线，所以不清安全确认勾选
+  ui.backend.addEventListener('change', syncFields);
   ui.vcanName.addEventListener('input', saveOptions);
   ui.start.addEventListener('click', startSimulation);
   ui.stop.addEventListener('click', stopSimulation);

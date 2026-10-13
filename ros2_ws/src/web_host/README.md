@@ -28,8 +28,8 @@ rosbridge Web 上位机：一个 launch 同时起两个节点——
 | 区域 | 功能 |
 |---|---|
 | 顶栏连接区 | rosbridge WebSocket 地址位于控制板串口选择前；地址自动保存在浏览器本地，页面打开或刷新时自动连接/重连 rosbridge。主机侧枚举 `/dev/serial/by-id/` 的稳定串口路径，并以 `/dev/ttyACM*`、`/dev/ttyUSB*` 补缺。「启动并连接」只启动或复用所选端口的 micro-ROS Agent；「断开」只停止本页面管理的 Agent 子进程，两者都不改变 rosbridge 连接。Agent 状态表示进程状态，不代表固件客户端已建立会话 |
-| 仿真（`#/sim` 屏，整宽） | 从页面启动或停止 `robot_arm_gazebo/simulation.launch.py`；按模型拓扑列出可用模型，并支持 `vcan`、`SocketCAN`、`SLCAN`。控制端可选主机驱动闭环、外部控制器或 STM32 固件 HIL；设备列表来自主机当前 CAN 接口与串口。页面展示 launch 子进程状态和最近日志，进程存活不等于 Gazebo 已就绪 |
-| 臂视图（`#/run`、`#/teach` 的中栏） | `robot_arm_gazebo` 的 URDF 经 three.js 实时渲染，关节角来自固件 `micro_ros_up/motion_states`（**不是** `/joint_states`：页面本来就订阅它；而 `/joint_states` 要额外起桥，且在 Gazebo 台架上会被 gz 自己的 broadcaster 抢同名话题）。关节小球着色 = 生命周期九态；半透明幽灵 = 页面自己下发的目标，见下「臂视图（3D）」一节。拖拽旋转 / 滚轮缩放 / 点小球选中 |
+| 仿真（`#/sim` 屏，整宽） | 从页面启动或停止 `robot_sim/simulation.launch.py`；**仿真后端可选 Gazebo / MuJoCo**（`backend:=`，MuJoCo 只列自带 MJCF 的模型），按模型拓扑列出可用模型，并支持 `vcan`、`SocketCAN`、`SLCAN`。控制端可选主机驱动闭环、外部控制器或 STM32 固件 HIL；设备列表来自主机当前 CAN 接口与串口。页面展示 launch 子进程状态和最近日志，进程存活不等于 Gazebo 已就绪 |
+| 臂视图（`#/run`、`#/teach` 的中栏） | `robot_sim` 的 URDF 经 three.js 实时渲染，关节角来自固件 `micro_ros_up/motion_states`（**不是** `/joint_states`：页面本来就订阅它；而 `/joint_states` 要额外起桥，且在 Gazebo 台架上会被 gz 自己的 broadcaster 抢同名话题）。关节小球着色 = 生命周期九态；半透明幽灵 = 页面自己下发的目标，见下「臂视图（3D）」一节。拖拽旋转 / 滚轮缩放 / 点小球选中 |
 | 选中关节（`#/run` 右栏） | 位置/速度/力矩/电流/温度/跟随误差/命令源/故障/测量年龄。点左栏或臂上的小球切换 |
 | 全部参数（`#/device` 屏） | **以固件记录为准**，驱动板向记录对齐：位置 **rad**、速度 **rad/s**、力矩 **A**（设备对象 `0x2538` 存的就是电流；位置/速度在固件参数边界是直通，只有力矩过一次 A↔N·m 换算，见决策日志 §6.4）。两行对照取自只读话题 `micro_ros_up/device_param_report`（固件记录列 / 驱动板回读列，同槽位同单位），`dev_init_state` 5（无记录）时固件列整行显示「无记录」。**写 ≠ 保存**——写只改设备 RAM 与固件记录（写后立即重判），要持久化必须再点「保存」（发 `0x2539` + 落 W25），未保存的台标黄。「读取」= 发 `system_command(REPORT)`，固件把**当前参数视图**立刻回一帧 `device_param_report`（不触发 SDO、不访问电机）；电机在线且已核对时显示驱动板真值，不在线/未核对（`dev_*` 为 NaN）时显示的就是板内 W25 参数表；数值用 7 位有效数字显示（内核按 float32 存，原始值会拖出 0.20000000298023224 这类尾巴）。总览条一眼给出「已核对/未初始化/离线」台数与原因（40=与记录不一致、41=回读不成功、42=本机无记录），并**逐台列出不一致的具体项**（位置下限/位置上限/最大转速/峰值电流，来自固件 DEV_INIT 事件的槽位位图）；状态列悬停同样显示该明细；行内「来源」列标出固件记录/驱动板回读/未核对，「状态」列显示生命周期；位置与力矩输入框悬停显示设备端原值（cnt / mA，位置按 65536 cnt/360° 折算）。逐项 `m<id>.{pos_min,pos_max,vel_limit,torque_limit,limit_protect}` 与方向均可写；写事务（写 + 读回核验的 SDO，约 1 秒）收尾后固件自动发一帧新报告，页面无需单独回读。「设零」把该台当前姿态设为设备零点（写 0x2531=1，仅失能态受理，运行中被拒），零点改变后设备内限位随之移动、须重认限位与机械行程；掉电是否持久待实测。|
 | 使能与增益（`#/run` 右栏，紧邻选中关节） | 与参数表<b>同一套行筛选</b>（默认只显示选中那台，勾「显示全部」看整条臂）。逐台 `m<id>.{enable,kp,kd}` 一行一个「策略」按钮单独下发——**改哪台发哪台**，走 `/micro_ros_do/motor_policy`话题而非参数树（原因见下「为什么使能/kp/kd 不走参数面」）。**固件不回读 kp/kd**，框里是页面最后一次下发出去的值；受理/拒绝是异步的，看事件日志的 `CONFIG_RESULT` |
@@ -78,18 +78,18 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 几何（URDF + 约 70 MB 的 STL）**不放在 `web/` 里**：`setup.py` 用 `os.walk('web')`
 逐目录列 data_files，而 setuptools 的 symlink-install 处理不了**目录**符号链接
 （会把整目录当文件 copy，报 `not a regular file`）。改为由 `static_server` 把
-`robot_arm_gazebo` 的 share 目录挂到 `/robot_arm_gazebo`——于是 URDF 里的
-`package://robot_arm_gazebo/...` 相对页面原样可用。挂载点由
+`robot_sim` 的 share 目录挂到 `/robot_sim`——于是 URDF 里的
+`package://robot_sim/...` 相对页面原样可用。挂载点由
 `web_host.launch.py` 的 `model_dir:=` 控制（默认取
-`get_package_share_directory('robot_arm_gazebo')`）；取不到时只影响臂视图，
+`get_package_share_directory('robot_sim')`）；取不到时只影响臂视图，
 静态页面照常，臂视图自己的浮标会报加载失败。
 
 页面 URL 参数（换模型 / 换接线不用改代码）：
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `?model=` | `robot_all` | `robot_arm_gazebo/models/` 下的模型目录名 |
-| `?joints=` | `1:joint_link1,…,9:joint_link9` | 电机 id → URDF 关节名（默认对齐默认模型 `robot_all` 第一条链的 id N ↔ `joint_linkN`） |
+| `?model=` | `half_body_robot` | `robot_sim/models/` 下的模型目录名 |
+| `?joints=` | `1:joint_link1,…,9:joint_link9` | 电机 id → URDF 关节名（默认对齐默认模型 `half_body_robot` 第一条链的 id N ↔ `joint_linkN`；第二条链的 id 见该模型拓扑） |
 
 **两条已写在界面上的限制**（别把它们当固件真值）：
 
@@ -165,7 +165,16 @@ ros2 launch web_host web_host.launch.py rosbridge_port:=9091 web_port:=8081
 
 ### 从页面启动仿真
 
-「仿真」屏（`#/sim`）会读取已安装模型拓扑、当前 SocketCAN 接口和串口设备。选择控制端、传输、模型与端点后点「启动仿真」；日志显示 `Complete arm simulation` 后再使用对应控制端。停止按钮只结束本页面启动的仿真 launch 进程组。
+「仿真」屏（`#/sim`）会读取已安装模型拓扑、当前 SocketCAN 接口和串口设备。选择**仿真后端**、控制端、传输、模型与端点后点「启动仿真」；日志显示 `Complete arm simulation` 后再使用对应控制端。停止按钮只结束本页面启动的仿真 launch 进程组。
+
+**仿真后端**（`backend:=`，透传给 `simulation.launch.py`）：
+
+| 后端 | 被控对象 | 面板上的差别 |
+| --- | --- | --- |
+| `Gazebo`（默认） | `gz sim` + `gz_ros2_control` 的 effort 控制器 | 无 |
+| `MuJoCo` | 模型自带的 `mujoco/<模型名>.xml` + 自写力矩直通桥 | 模型下拉只列**同时有** `mujoco/<名>.xml` 与 `urdf/<名>.standalone.urdf` 的模型；选别的会被后端拒绝 |
+
+两个后端的话题契约相同（吃 `/arm_effort_controller/commands`、出 `/joint_states`），传输与控制端的规则完全一样。MuJoCo 的 viewer 窗口开在 **web_host 所在的那台机器**上（不是打开浏览器的机器），所以从面板起 MuJoCo 时 web_host 必须有可用的显示会话（`DISPLAY`）；Wayland 下 launch 会强制 pyGLFW 走 X11 变体，否则窗口自旋、`/joint_states` 一帧不发（桥启动时会打印实际平台）。
 
 | 传输 / 控制端 | 页面端点 |
 |---|---|
@@ -206,7 +215,7 @@ ros2 topic list                            # 能看到 /micro_ros_up/* 说明 ag
 curl -sI http://localhost:8080 | head -1  # 期望 HTTP/1.0 200 OK
 # 臂视图的三个必需资源（缺任何一个页面都会在浮标上报加载失败）
 for f in index.html js/panels/arm.js vendor/three.module.min.js \
-         robot_arm_gazebo/models/robot_all/urdf/robot_all.urdf; do
+         robot_sim/models/half_body_robot/urdf/half_body_robot.urdf; do
   curl -o /dev/null -s -w "%{http_code} $f\n" "http://localhost:8080/$f"
 done
 ```

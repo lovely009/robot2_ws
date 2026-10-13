@@ -8,7 +8,7 @@
 |---|---|
 | 底层驱动 | `motor_drive`：传输、线协议、通用电机映射（无 ROS） |
 | ROS 适配层 | `motor_hardware_interface`：ros2_control lifecycle、joint 映射、YAML 解析、真机 bring-up |
-| 仿真层 | `motor_sim`（共享仿真库：协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）+ `robot_arm_gazebo`（机械臂模型库 `models/<模型名>` / launch / Gazebo 集成） |
+| 仿真层 | `motor_sim`（共享仿真库：协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）+ `robot_sim`（机械臂模型库 `models/<模型名>` / launch / Gazebo 集成） |
 | 运动学/动力学层 | `robot_dynamics`：独立 Pinocchio 计算边界，不属于电机驱动实时链路 |
 
 ## 配置术语
@@ -30,14 +30,18 @@
 
 - 驱动侧 controller：`/driver/controller_manager` 下的 position controller。
 - 真机 bring-up：`motor_hardware_interface` 提供，默认 serial_slcan 双总线。
-- 仿真链路（两条，`robot_arm_gazebo` 各有一个入口）：
+- 仿真链路（两条，`robot_sim` 各有一个入口）：
   - 纯 Gazebo：`gazebo.launch.py` 用 `gz_ros2_control` 位置控制器直接驱动模型，
     不经 vcan 也不经 `motor_drive`。
+  - 纯 MuJoCo：`mujoco.launch.py` 用自写力矩直通桥（`mujoco_effort_bridge.py`）自己步进
+    物理，话题契约与 effort 回环一致（吃 `/arm_effort_controller/commands`、出
+    `/joint_states`），完全不经 ros2_control。
   - 端到端：`simulation.launch.py` 把上面两条串成一个闭环——
     position controller → `motor_hardware_interface` → CAN 传输（默认 vcan，
-    也可 socketcan/slcan）→ `motor_sim` → Gazebo effort controller →
-    `/joint_states` → `motor_sim`；effort 由 `simulation_gate` 按全轴就绪门控。
-    `controller_mode:=external` 只起 Gazebo 与模拟端，`firmware` 换成 STM32 HIL。
+    也可 socketcan/slcan）→ `motor_sim` → **被控对象** → `/joint_states` → `motor_sim`；
+    effort 由 `simulation_gate` 按全轴就绪门控。被控对象由 `backend:=gazebo|mujoco` 选
+    （gz effort 控制器 / MuJoCo 桥），其余接线共用。
+    `controller_mode:=external` 只起被控对象与模拟端，`firmware` 换成 STM32 HIL。
 - fail-fast 停机：激活重试 3 次（每次 1 s 窗口）或运行期反馈超时即终止，人工诊断后重跑。
 
 ## 命名

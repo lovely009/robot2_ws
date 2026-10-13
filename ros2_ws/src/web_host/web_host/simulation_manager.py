@@ -1,4 +1,8 @@
-"""Enumerate CAN devices and supervise one unified robot simulation launch."""
+"""Enumerate CAN devices and supervise one unified robot simulation launch.
+
+`backend` 选择被控对象（gazebo | mujoco），只影响传给 simulation.launch.py 的参数与
+「模型是否有 MJCF」这条校验；传输与控制端的校验对两个后端一致。
+"""
 
 from collections import deque
 import json
@@ -16,6 +20,7 @@ from .agent_manager import enumerate_serial_ports
 
 _TRANSPORTS = {"vcan", "socketcan", "slcan"}
 _CONTROLLER_MODES = {"host", "external", "firmware"}
+_BACKENDS = {"gazebo", "mujoco"}
 _INTERFACE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,15}$")
 _LOG_LINES = 80
 _LOG_LINE_CHARS = 1000
@@ -67,7 +72,7 @@ def enumerate_can_interfaces():
 def enumerate_simulation_models():
     """List installed models that provide a full simulation topology."""
     try:
-        models_root = Path(get_package_share_directory("robot_arm_gazebo")) / "models"
+        models_root = Path(get_package_share_directory("robot_sim")) / "models"
     except Exception:
         return []
     if not models_root.is_dir():
@@ -80,15 +85,41 @@ def enumerate_simulation_models():
     )
 
 
+def enumerate_mujoco_models():
+    """List installed models that provide an MJCF for the MuJoCo backend.
+
+    MuJoCo 后端不经过 ros2_control，被控对象是该模型自己的 `mujoco/<模型名>.xml`
+    （由模型目录的 tools/build_mujoco_model.py 生成），缺它就只能跑 Gazebo。
+    还要 `urdf/<模型名>.standalone.urdf`：mujoco.launch.py 用它渲染 robot_description，
+    缺了虽然能起，但 rsp 拿到的是空模型——这种半残组合不该出现在下拉里。
+    """
+    try:
+        models_root = Path(get_package_share_directory("robot_sim")) / "models"
+    except Exception:
+        return []
+    if not models_root.is_dir():
+        return []
+    return sorted(
+        entry.name
+        for entry in models_root.iterdir()
+        if entry.is_dir()
+        and (entry / "mujoco" / f"{entry.name}.xml").is_file()
+        and (entry / "urdf" / f"{entry.name}.standalone.urdf").is_file()
+    )
+
+
 class SimulationProcessManager:
     """Own a single ROS 2 simulation launch process and its recent output."""
 
     def __init__(self, can_provider=None, serial_provider=None,
-                 model_provider=None, popen_factory=None,
-                 stop_timeout_s=12):
+                 model_provider=None, mujoco_model_provider=None,
+                 popen_factory=None, stop_timeout_s=12):
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
+        self._mujoco_model_provider = (
+            mujoco_model_provider or enumerate_mujoco_models
+        )
         self._popen_factory = popen_factory or subprocess.Popen
         self._stop_timeout_s = stop_timeout_s
         self._lock = threading.RLock()
@@ -111,6 +142,8 @@ class SimulationProcessManager:
             "can_interfaces": self._can_provider(),
             "serial_ports": serial_ports,
             "models": self._model_provider(),
+            # 后端能力：MuJoCo 需要模型自带 MJCF，前端据此过滤模型下拉
+            "mujoco_models": self._mujoco_model_provider(),
         }
 
     def _validate_and_build(self, request):
@@ -119,21 +152,31 @@ class SimulationProcessManager:
         transport = request.get("transport")
         mode = request.get("controller_mode")
         model = request.get("model")
+        backend = request.get("backend")
         if not isinstance(transport, str) or transport not in _TRANSPORTS:
             raise ValueError("transport must be vcan, socketcan or slcan")
         if not isinstance(mode, str) or mode not in _CONTROLLER_MODES:
             raise ValueError("controller_mode must be host, external or firmware")
+        if not isinstance(backend, str) or backend not in _BACKENDS:
+            raise ValueError("backend must be gazebo or mujoco")
         if mode == "firmware" and transport == "vcan":
             raise ValueError("vcan is software-only and cannot connect to an MCU")
         if not isinstance(model, str) or model not in self._model_provider():
             raise ValueError("model has no installed full-simulation topology")
+        if backend == "mujoco" and model not in self._mujoco_model_provider():
+            raise ValueError(
+                f"model '{model}' has no MuJoCo model "
+                f"(models/{model}/mujoco/{model}.xml); use backend gazebo"
+            )
 
         config = {
+            "backend": backend,
             "transport": transport,
             "controller_mode": mode,
             "model": model,
         }
         launch_args = [
+            f"backend:={backend}",
             f"transport:={transport}",
             f"controller_mode:={mode}",
             f"model:={model}",
@@ -257,7 +300,7 @@ class SimulationProcessManager:
                 raise RuntimeError("a simulation launch is already running")
 
             command = [
-                "ros2", "launch", "robot_arm_gazebo", "simulation.launch.py",
+                "ros2", "launch", "robot_sim", "simulation.launch.py",
                 *launch_args,
             ]
             self._log.clear()

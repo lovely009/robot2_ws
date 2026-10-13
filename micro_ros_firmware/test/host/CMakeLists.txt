@@ -134,6 +134,12 @@ fw_host_test(test_motor_protocol_adapter
   SOURCES test_motor_protocol_adapter.cpp
   OBLIBS fw_adapters fw_motor_protocol)
 
+# 族间隔离：全 ID×DLC 扫描断言两协议认领集不相交、跨族真帧互相拒绝、
+# 绑定受协议门禁。此前这条只有注释守着（见 docs/plans/active/protocol-family-isolation-tests.md）。
+fw_host_test(test_protocol_family_isolation
+  SOURCES test_protocol_family_isolation.cpp
+  OBLIBS fw_adapters fw_motor_protocol)
+
 fw_host_test(test_motor_control
   SOURCES test_motor_control.cpp
   OBLIBS fw_motor_control fw_adapters fw_motor_protocol

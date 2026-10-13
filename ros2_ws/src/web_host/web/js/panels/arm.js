@@ -7,8 +7,8 @@
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
 // 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把
-// robot_arm_gazebo 的 share 目录挂到 /robot_arm_gazebo，URDF 里的
-// package://robot_arm_gazebo/... 经 loader.packages 映射成 /robot_arm_gazebo/...。
+// robot_sim 的 share 目录挂到 /robot_sim，URDF 里的
+// package://robot_sim/... 经 loader.packages 映射成 /robot_sim/...。
 //
 // 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
 // 与重构前的 arm3d.js 相比：去掉 window.Arm3D 全局桥（改由 mount 直接调用），
@@ -301,9 +301,9 @@ export function mount(rootEl, ctx) {
   };
 
   init(canvas, {
-    urdfUrl: `/robot_arm_gazebo/models/${MODEL}/urdf/${MODEL}.urdf`,
-    // package://robot_arm_gazebo/... → static_server 挂在根部的 share 目录
-    packages: {'robot_arm_gazebo': '/robot_arm_gazebo'},
+    urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
+    // package://robot_sim/... → static_server 挂在根部的 share 目录
+    packages: {'robot_sim': '/robot_sim'},
     onSelect: pickJoint,
     // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
     onProgress: (url, loaded, total) => {
@@ -328,7 +328,7 @@ export function mount(rootEl, ctx) {
     onError: (err) => {
       hud.className = 'hud err';
       hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
-        + '（查 static_server 是否挂载 /robot_arm_gazebo、static server 日志）';
+        + '（查 static_server 是否挂载 /robot_sim、static server 日志）';
     },
   });
   window.addEventListener('resize', onWindowResize);

@@ -8,14 +8,14 @@
 | `motor_drive` | 无 ROS 底层驱动库（传输 / 线协议 / 电机映射） |
 | `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up |
 | `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
-| `robot_arm_gazebo` | 机械臂 URDF 模型库（`models/<模型名>`）与 Ignition Gazebo 集成 |
+| `robot_sim` | 机械臂 URDF 模型库（`models/<模型名>`）与 Ignition Gazebo 集成 |
 | `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖） |
 | `web_host` | rosbridge Web 上位机（姿态、IMU、电机状态与命令快照） |
 
 ## 分支
 
 - `dev/robot_ws`：开发分支（本分支，真机 + 仿真 + 动力学 7 包）
-- `dev-sim`：仿真线（纯 `motor_sim` + `robot_arm_gazebo`）
+- `dev-sim`：仿真线（纯 `motor_sim` + `robot_sim`）
 - `main`：发布
 
 ## 构建与测试
@@ -44,10 +44,10 @@ ros2 launch motor_hardware_interface hardware.launch.py
 
 ```bash
 # 纯 Gazebo：Ignition + gz_ros2_control 位置控制器直接驱动模型
-ros2 launch robot_arm_gazebo gazebo.launch.py
+ros2 launch robot_sim gazebo.launch.py
 
 # 端到端电机—机械臂仿真：Gazebo + motor_sim + effort 门控 + motor_hardware_interface
-ros2 launch robot_arm_gazebo simulation.launch.py
+ros2 launch robot_sim simulation.launch.py
 ```
 
 `gazebo.launch.py` 不经过 `motor_sim` 的 vcan 回路（`motor_sim` 的接口选择由
@@ -56,7 +56,7 @@ ros2 launch robot_arm_gazebo simulation.launch.py
 `models/<模型名>/config/simulation_topology.yaml` 叠加权威电机配置生成；
 传输可选 `transport:=vcan|socketcan|slcan`，控制端可选
 `controller_mode:=host|external|firmware`（`firmware` 走 STM32 HIL，需先 source
-`micro_ros_agent` 工作区）。详见 `ros2_ws/src/robot_arm_gazebo/README.md`。
+`micro_ros_agent` 工作区）。详见 `ros2_ws/src/robot_sim/README.md`。
 
 ## 配置（两份文件）
 

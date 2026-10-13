@@ -1,31 +1,44 @@
 #!/usr/bin/env bash
 # 台架启动：模拟器（成为 ACK 节点）→ 复位控制板。顺序反了 FDCAN1 会 bus-off。
 #
-#   tools/bench_up.sh                 # position 模式（播轨迹用这个，见下）
-#   tools/bench_up.sh effort          # effort 模式（真实 MIT 动力学）
+#   tools/bench_up.sh                      # effort 模式（默认，真实 MIT 动力学）
+#   tools/bench_up.sh effort <模型名>       # 指定 Gazebo 侧模型（默认 half_body_robot）
+#   tools/bench_up.sh position             # position 模式，需要模型带 position 命令接口
 #
-# 为什么默认 position：URDF 四关节都是 <limit effort="10.0">，而 MIT 律
-# tau=kp*err 在 kp=30、误差 1.57rad 时需要 ~47 N·m，被模型钳到 10 → 肩/肘
-# 关节顶不住重力，停在机械下限（实测 m2 停在 -1.5705 ≈ -π/2）。effort 模式
-# 要能用得先给轨迹里的 effort 字段填重力前馈，或抬 URDF 的 effort 上限——
-# 两者都是模型层的事，未经确认不要改。position 模式不经过力矩，用它做
-# 「轨迹播放/全链路功能验证」，与模拟器自己的 docstring 口径一致。
+# 为什么默认 effort（2026-10-13 变更）：原来默认 position，因为 URDF 四关节都是
+# <limit effort="10.0">，而 MIT 律 tau=kp*err 在 kp=30、误差 1.57rad 时需要 ~47 N·m，
+# 被模型钳到 10 → 肩/肘关节顶不住重力，停在机械下限（实测 m2 停在 -1.5705 ≈ -π/2）。
+# 现在仓库里**唯一**同时声明 position + effort 命令接口的模型（models/robot_all）
+# 已按"只保留 half_body_robot"删除，而 half_body_robot 只导出 effort（理由见
+# models/half_body_robot/urdf/half_body_robot.urdf.xacro：同时声明 position+effort 会让
+# gz_ros2_control 每拍写 JointForceCmd，gz-sim 随即忽略 JointVelocityCmd，
+# position 命令静默失效），所以默认档改成 effort。
+#
+# position 模式仍保留，但需要显式传一个带 position 命令接口的模型，否则会在
+# `spawner arm_position_controller` 处明确报错。effort 模式在真机上的已知限制没变：
+# 要稳定跟轨迹，得先给轨迹的 effort 字段填重力前馈、或抬 URDF 的 effort 上限——两者
+# 都是模型层的事，未经确认不要改。
 set -euo pipefail
-MODE="${1:-position}"
+MODE="${1:-effort}"
+MODEL="${2:-}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 case "$MODE" in
   position) SIM_CM=position; GZ_CM=position ;;
   effort)   SIM_CM=effort;   GZ_CM=effort ;;
-  *) echo "用法: $0 [position|effort]"; exit 2 ;;
+  *) echo "用法: $0 [position|effort] [模型名]"; exit 2 ;;
 esac
+MODEL_ARG=()
+if [ -n "$MODEL" ]; then
+  MODEL_ARG=("model:=$MODEL")
+fi
 
 if pgrep -f fdcan_motor_sim >/dev/null; then
   echo "已有模拟器在跑——它会和新的实例抢 CANable（各自下发 SLCAN 配置、互相打断）。"
   echo "先停掉它（模拟器现在有 flock 独占锁，第二个实例会直接失败）。"; exit 1
 fi
 
-echo "[1/2] 起 Gazebo（control_mode:=$GZ_CM）与模拟器（--gazebo-control-mode $SIM_CM）"
-ros2 launch robot_arm_gazebo gazebo.launch.py control_mode:="$GZ_CM" &
+echo "[1/2] 起 Gazebo（control_mode:=$GZ_CM${MODEL:+，model=$MODEL}）与模拟器（--gazebo-control-mode $SIM_CM）"
+ros2 launch robot_sim gazebo.launch.py control_mode:="$GZ_CM" "${MODEL_ARG[@]}" &
 sleep 3
 # 不传 --data-bitrate-index：让模拟器自己 V 探测。2026-10-12 实测两只已知
 # CANable 版本的 5Mbps 索引都是 Y5，这里曾硬编码 Y7，会让数据相位 ACK error、

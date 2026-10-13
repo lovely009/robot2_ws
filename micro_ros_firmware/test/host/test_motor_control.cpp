@@ -2335,6 +2335,108 @@ static void test_conflict_survives_offline_reconnect() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
 }
 
+// ---------------------------------------------------------------------------
+// 重号冲突的未覆盖边界（2026-10-13 补；
+// 方案见 docs/plans/active/protocol-family-isolation-tests.md §C）。
+//
+// 已有覆盖，勿重复：跨总线重号 test_duplicate_motor_id_across_buses_conflicts、
+// 同总线跨协议重号 test_identity_conflict_same_bus_different_protocol、
+// 冲突穿越离线/重连 test_conflict_survives_offline_reconnect、
+// 孤儿 SDO 应答不建档 test_sdo_response_alone_creates_no_entry。
+// ---------------------------------------------------------------------------
+
+// 事件计数（drain 是消费性的，一次扫完；与 events_contain 同源）。
+static size_t count_events(motor_control_context_t *ctx,
+    motor_control_event_type_t type, uint16_t motor_id) {
+  motor_control_event_t events[64];
+  size_t total = 0;
+  size_t n;
+  while ((n = motor_control_drain_events(ctx, events, 64)) > 0) {
+    for (size_t i = 0; i < n; ++i) {
+      if (events[i].type == type && events[i].motor_id == motor_id) {
+        total++;
+      }
+    }
+  }
+  return total;
+}
+
+// 同总线 + 同协议 + 同节点号 —— **检测不到**，且这是设计使然，不是缺陷。
+// 注册表以裸 motor_id 为键（motor_control_discovery.c:98），而冲突判据要求
+// bus_index 与 adapter **全等**才算"同一个号来自两个来源"；两台设备这两个字段
+// 完全一致时被当成同一台，固件无从分辨。固化它：真机上这种接线会在 CAN 层
+// 自毁（同 ID 双发送 → 位错误/错误帧），固件**不会**判成 ID 冲突，只会表现为
+// 反馈超时或总线错误。故"节点号唯一"是配置层的责任，编码层不提供保护。
+static void test_same_bus_same_protocol_duplicate_is_undetectable() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t first = cerb_feedback(7, 100);
+  motor_control_on_raw_frame(&ctx, &first);
+  motor_protocol_raw_frame_t second = cerb_feedback(7, 110);
+  motor_control_on_raw_frame(&ctx, &second); // 同节点、同总线、同协议
+
+  assert(ctx.entry_count == 1); // 仍只建一台，不报冲突
+  // 非首帧观测会把 DISCOVERED 推进到 IDENTIFYING（discovery.c:169-172）——
+  // 即重号的那两台在固件看来就是"一台正常往前走的电机"，毫无异常迹象。
+  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_IDENTIFYING);
+  assert(count_events(&ctx, MOTOR_CONTROL_EVENT_CONFIG_CONFLICT, 7) == 0);
+}
+
+// 锁存瞬间必须冻结运动面并推 P0 失能帧。此前只断言了 lifecycle 与事件，
+// "冻结"这句话没有内容——先驱动到 ACTIVE 再注入冲突，断言才有意义。
+static void test_conflict_latch_freezes_motion_and_disables() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t f = vaxor_reply(5, 0.0, 0.0, 0.0, 100);
+  motor_control_on_raw_frame(&ctx, &f);
+  size_t idx;
+  assert(find_profile("vaxor_2550", &idx));
+  assert(motor_control_bind_profile(&ctx, 5, idx, 110));
+  motor_control_set_agent_connected(&ctx, true, 120);
+  motor_control_set_authorization(&ctx, true, 130);
+  motor_control_command_snapshot_t s = make_snapshot(1, 140);
+  snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 150));
+  motor_control_service(&ctx, 160);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  assert(entry_of(&ctx, 5)->motion_enabled);
+  {
+    // 排空使能帧(P0)与 MIT 帧(P1)，让下面的 P0 计数干净。
+    motor_protocol_tx_frame_t junk[MOTOR_CONTROL_MAX_TX_PENDING];
+    while (motor_control_collect_tx(&ctx, junk, MOTOR_CONTROL_MAX_TX_PENDING) > 0) {
+    }
+  }
+
+  // 同 node 走 CERB → 跨协议冲突。
+  motor_protocol_raw_frame_t conflict = cerb_feedback(5, 170);
+  motor_control_on_raw_frame(&ctx, &conflict);
+
+  const motor_control_entry_t *e = entry_of(&ctx, 5);
+  assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT);
+  assert(!e->motion_enabled);
+  assert(!e->has_target);
+  assert(!e->motion_authorized);
+  // policy_enable 一并冻结：否则锁存清除后会仅凭全局授权 + 新快照自动复运动，
+  // 违反 ARD §36「失败不自动恢复运动授权」。
+  assert(!e->policy_enable);
+  assert(!e->enable_pending);
+  assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_CONFIG_CONFLICT);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 1); // 失能帧
+}
+
+// 冲突事件只推一次：重复的冲突帧不得刷屏事件环。
+static void test_conflict_event_pushed_once() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  motor_protocol_raw_frame_t seed = cerb_feedback(7, 100);
+  motor_control_on_raw_frame(&ctx, &seed);
+  for (uint32_t t = 110; t <= 300; t += 10) {
+    motor_protocol_raw_frame_t conflict = vaxor_reply(7, 0.0, 0.0, 0.0, t);
+    motor_control_on_raw_frame(&ctx, &conflict);
+  }
+  assert(count_events(&ctx, MOTOR_CONTROL_EVENT_CONFIG_CONFLICT, 7) == 1);
+}
+
 // 识别只在服务节拍上发生：帧路径只推进 DISCOVERED → IDENTIFYING，不绑定
 // （识别要发事务帧，属于服务路径的职责，RX 路径不做总线输出）。
 // DISCOVERED→IDENTIFYING 中间态可观测（ARD §43.1 第 1 条）。
@@ -3032,6 +3134,9 @@ static void run_all_tests() {
   test_p0_preempts_full_buffer();
   test_stale_snapshot_gates();
   test_conflict_survives_offline_reconnect();
+  test_same_bus_same_protocol_duplicate_is_undetectable();
+  test_conflict_latch_freezes_motion_and_disables();
+  test_conflict_event_pushed_once();
   test_identifying_state_observed();
   test_event_carries_tick();
   test_tx_drop_counted();

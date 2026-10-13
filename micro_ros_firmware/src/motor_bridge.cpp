@@ -688,7 +688,14 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   g_motion_states_up = true;
 
   pub_opts = rcl_publisher_get_default_options();
-  pub_opts.qos = qos_stream();
+  // 可靠 QoS：本消息 18 台时约 735 B，**超过 best-effort 输出流的单条上限**
+  // （UXR_CONFIG_CUSTOM_TRANSPORT_MTU=512，且分片只对 reliable 流有效——
+  // 见 docs/plans/active/48-motor-scale-design.md §3.0）。走 best-effort 时
+  // 每次都发不出去，而失败是静默的：话题在、发布者计数为 1、messages 恒为 0，
+  // 只有 publish_fail 以发布频率增长。元素 ≈40.8 B，故 N ≥ 13 台即越线
+  // （18 台台架上从未成功发出过一条）。判据与取值见 ros_qos.h
+  // 「>512 B 需分片」，与 motor_topology 是同一条（它走 reliable 亦为此）。
+  pub_opts.qos = qos_reliable(1);
   if (rcl_publisher_init(&g_status_pub, node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
       MotorStatusArray),

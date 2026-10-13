@@ -12,7 +12,7 @@
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosbridge_library</exec_depend>
   <exec_depend>can_bridge_msgs</exec_depend>
-  <!-- 臂视图可选使用 robot_arm_gazebo 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
+  <!-- 臂视图可选使用 robot_sim 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>ros2launch</exec_depend>

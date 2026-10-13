@@ -1,0 +1,304 @@
+# robot_sim
+
+机械臂 URDF 模型库与 Ignition Gazebo 仿真集成。每个模型是一个**自包含目录**
+（`models/<模型名>/`：几何 + 网格 + 控制器参数 + 自己的 README）。RViz/Gazebo 基础
+launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
+`models/<模型名>/config/simulation_topology.yaml`，声明电机到关节的映射。
+
+仿真后端是 Ignition（`ros_gz_sim` + `gz_ros2_control`）。
+
+## 模型
+
+| 模型 | 说明 | 自由度 |
+| --- | --- | --- |
+| `half_body_robot` | **默认模型**（四个 launch 的默认值都是它）。半身机器人 = 上身 + 双臂整体装配体（SolidWorks 导出，躯干 `base_link` 上挂**两条互不相连**的 9 轴链，link `Joint_link1..9` / `Joint_link1.1..9.9`，joint 小写，第二链非严格镜像）。两条链的 18 个关节都有电机、都接入端到端仿真；命令接口**只有 effort**（不支持 `control_mode:=position`，原因见模型 README），并自带 `mujoco/half_body_robot.xml`（MuJoCo 后端可用） | 18 revolute + 0 fixed |
+
+> `models/` 下另有**两个原始资产目录**（`g1_description`、`pro_urdf_publish`），
+> 是导入的厂商/CAD 导出件，不满足 `models/<模型名>/` 的自包含契约四件套
+> （`urdf/<名>.urdf` + `urdf/<名>.urdf.xacro` + `config/controllers.yaml` + `README.md`）。
+> 它们**不在** `test_model_consistency.py` 的参数化范围内（该文件只收「带
+> `urdf/<目录名>.urdf.xacro` 的契约模型」），所以测试既不会为它们报红、也不会替它们兜底——
+> 契约缺项是静默的，改这些目录时不要指望测试拦住你。要么补齐契约、要么移出 `models/`，
+> 见该测试文件头部对契约的说明。它们不是可加载的模型，`model:=` 不要指向它们。
+>
+> 模型自己的 **CAD 溯源件放在 `models/<模型名>/cad/`**（如 `half_body_robot/cad/`），
+> 不放在 `models/` 顶层——顶层多一个目录就会多一个「看起来像模型但不是」的东西。
+
+模型细节、CAD 出处、关节表与占位参数告警见各目录自己的 `README.md`。
+
+> 2026-10-12 清理：`chest_upper_00`、`chest_dual_00`、`robot-001`、`zhoubuguanjie_youbi_002`
+> 及其 `dist/` 发布件已移除；同日新增 `full_body`（双臂 18 关节，力矩控制）。
+> 2026-10-13：`robot_all`（原始导出薄壳，也是唯一带 position 命令接口的模型）一并删除——
+> **现在唯一可加载模型是 `half_body_robot`**，四个 launch 的默认模型都是它。
+> 同日稍后 CAD 重新导出（**10 个关节的 `lower`/`upper` 收窄**）后 `full_body` **更名为
+> `half_body_robot`**，`models/full_body/` 与 `dist/full_body_urdf/` 已删除；网格是同一份几何
+> 重新导出（顶点集合一致），因此碰撞凸包与简化网格沿用即可，`--check` 已复核。
+> 被移除/更名的模型仍在 git 与备份里可回滚，例如
+> `git show fa57f56:ros2_ws/src/robot_sim/models/robot_all/`。
+
+## 目录结构
+
+```
+robot_sim/
+├── config/
+│   └── display.rviz                        # RViz 预览配置
+├── launch/
+│   ├── display.launch.py                   # RViz 预览（无 Gazebo、无控制器）
+│   ├── gazebo.launch.py                    # Ignition 仿真 + effort/position 控制器
+│   ├── mujoco.launch.py                    # MuJoCo 仿真（自写力矩直通桥，话题契约同 Gazebo）
+│   └── simulation.launch.py                # Gazebo + 电机总线 + 驱动/固件 HIL 组合入口
+├── scripts/
+│   ├── simulation_gate.py                  # 电机生命周期到 Gazebo effort 门控
+│   ├── agent_after_sim_ready.py             # 模拟总线 ready 后启动 micro-ROS Agent
+│   └── mujoco_effort_bridge.py             # MuJoCo ↔ ROS 2 力矩/关节状态直通桥
+├── models/
+│   └── <模型名>/                            # 自包含：urdf / meshes / config / cad / README
+├── dist/
+│   └── <模型名>_urdf/                       # ROS 无关的对外发布件（相对路径网格），不安装
+└── test/
+    ├── test_model_consistency.py           # 模型目录三件套一致性
+    └── test_launch_models.py               # launch 的模型选择链路
+```
+
+## 构建与使用
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select robot_sim
+source install/setup.bash
+
+# RViz 预览（滑杆拖动关节）
+ros2 launch robot_sim display.launch.py
+
+# Ignition 仿真（空世界 + 生成模型 + 控制器）
+ros2 launch robot_sim gazebo.launch.py
+ros2 launch robot_sim gazebo.launch.py world_file:=/path/to/world.sdf
+
+# FDCAN/串口仿真电机后端：默认用 effort 控制器接收 MIT 等效力矩
+ros2 launch robot_sim gazebo.launch.py gravity:=false
+
+# 若要测试 MIT 等效力矩动力学，显式切换两端为 effort
+ros2 launch robot_sim gazebo.launch.py control_mode:=effort
+
+# MuJoCo 替代后端（不依赖 ros2_control/Gazebo，力矩直通；话题契约与上面一致）
+ros2 launch robot_sim mujoco.launch.py model:=half_body_robot             # 带 viewer
+ros2 launch robot_sim mujoco.launch.py model:=half_body_robot headless:=true
+```
+
+## 完整电机—机械臂仿真
+
+`simulation.launch.py` 一条命令启动 Gazebo、`motor_sim`、effort 门控和
+`motor_hardware_interface`。默认用本机自动创建的 `robot_vcan0` 闭环：
+
+```bash
+ros2 launch robot_sim simulation.launch.py
+
+# 发送目标（个数 = 该模型的电机数，half_body_robot 是 18）；数组顺序 = simulation_topology.yaml 里
+# motors 的顺序（与 launch 重写后的控制器 joints 顺序一致）
+ros2 topic pub --once /driver/position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+ros2 topic echo /joint_states
+```
+
+默认模型 `half_body_robot`：18 台电机（`arm_joint1..9` 驱第一条链、`arm_joint1.1..9.9` 驱第二条链，
+id 1–18；3/4/12/13 是 CERB R58，8/9/17/18 是 vaxor_2550，其余是 CERB R48）全部挂在同一条
+`arm` 总线上。电机本体（总线、id、型号、增益）与
+plant 参数取自模型目录自带的 `config/motor_driver.yaml` +
+`config/simulation_topology.yaml` —— 这 18 台**不在**权威的
+`motor_hardware_interface/config/motor_driver.yaml` 里（那些关节尚未并入
+`upper_body.urdf.xacro`，并进去会让 `test_xacro_consistency` 变红、真机 bring-up 去驱动
+不存在的关节）。`simulation.launch.py` 会在模型目录有 `config/motor_driver.yaml` 时优先取它，
+否则回落权威配置。
+
+启动时从这两处配置生成 Gazebo、`motor_sim` 与 CAN 驱动端的临时配置，并检查关节名
+属于所选机械模型。Gazebo 的关节状态
+进入 `motor_sim`；模拟器回出的 effort 接到 `/arm_effort_controller/commands`。
+全轴就绪后门控节点才开放 effort；故障或失能时关门。
+
+控制端和总线覆盖：
+
+| 控制端 | vcan | SocketCAN | SLCAN |
+| --- | --- | --- | --- |
+| `host`：主机 ros2_control 驱动 | 支持，自动建虚拟总线 | 支持，驱动与模拟器各接一个接口 | 支持，两只适配器接同一物理总线 |
+| `external`：外部 CAN 控制器 | 支持同机软件节点 | 支持单接口接入 | 支持单适配器接入 |
+| `firmware`：STM32 FDCAN 固件 HIL | 不可连接物理 MCU | 支持单接口 + STM32 USB CDC | 支持单 CANable + STM32 USB CDC |
+
+传输选择：
+
+```bash
+# 默认：纯软件 CAN-FD 闭环；启动时创建 robot_vcan0，退出时删除本次创建的接口
+ros2 launch robot_sim simulation.launch.py transport:=vcan
+
+# 物理 SocketCAN；接口和位率需要事先配置。纯软件仿真优先使用 vcan
+ros2 launch robot_sim simulation.launch.py transport:=socketcan \
+  driver_interface:=can0 sim_interface:=can1
+
+# 主机 ROS 驱动闭环需要两只 SLCAN 适配器，并接在同一物理 CAN-FD 总线上
+ros2 launch robot_sim simulation.launch.py transport:=slcan \
+  driver_tty:=/dev/serial/by-id/DRIVER_CANABLE \
+  sim_tty:=/dev/serial/by-id/SIM_CANABLE
+
+# 单 CANable + 实体 STM32 固件 HIL；默认启动 WebHost，由页面连接 Agent
+ros2 launch robot_sim simulation.launch.py transport:=slcan \
+  controller_mode:=firmware \
+  sim_tty:=/dev/serial/by-id/CANABLE
+
+# 单个 SocketCAN 适配器 + STM32 固件 HIL；自动启动 Agent，不经过 WebHost
+ros2 launch robot_sim simulation.launch.py transport:=socketcan \
+  controller_mode:=firmware sim_interface:=can0 \
+  start_web_host:=false start_micro_ros_agent:=true \
+  agent_tty:=/dev/serial/by-id/STM32_CDC
+```
+
+`controller_mode:=external` 会启动 Gazebo 和电机模拟端，但不启动主机
+`motor_hardware_interface`，用于接外部 CAN 控制器。SLCAN host 闭环要用两只适配器，
+因为一个串口不能同时被驱动和模拟器占用。`controller_mode:=firmware` 支持 SocketCAN
+raw CAN FD 或 SLCAN 两种主机总线接口，使用 `micro_ros_agent/tools/fdcan_motor_sim.py`，
+保留固件发现、身份和 SDO 参数应答；
+启动前需 source `micro_ros_agent` 工作区。该模式默认同时启动 WebHost
+（`http://localhost:8080`）；在页面选择 STM32 CDC 端口并点「启动并连接」，WebHost 会在
+模拟器就绪后启动 micro-ROS Agent。若需自动启动 Agent 并跳过页面操作，可设置
+`start_web_host:=false start_micro_ros_agent:=true agent_tty:=/dev/serial/by-id/STM32_CDC`。
+当前完整组合入口按该机械臂的单条 CAN 总线拓扑运行；`motor_sim` 库自身仍支持多总线。
+
+`vcan` 创建和启用需要当前用户具有 `CAP_NET_ADMIN`。若没有权限，可预先创建并启用接口：
+
+```bash
+sudo ip link add dev robot_vcan0 type vcan
+sudo ip link set dev robot_vcan0 up
+```
+
+随后普通用户即可启动总仿真；launch 会复用已启用的接口，退出时不会删除或关闭它。
+SocketCAN 物理总线须在启动前配置与固件一致的仲裁/数据位率并置为 UP。host 双接口闭环
+要把 `driver_interface` 与 `sim_interface` 接在同一条总线上；固件 HIL 只需一个
+SocketCAN 适配器与 STM32 FDCAN 接到同一物理总线，USB CDC 另接主机供 micro-ROS Agent
+使用。`vcan` 只能用于主机软件闭环，不能连实体 MCU。SLCAN host 闭环也需两只适配器
+接同一条总线。以上传输路径不替代真机机械限位、硬件急停或电机标定。
+
+RViz 预览还需要 `joint_state_publisher_gui` / `rviz2`，Ignition 仿真还需要 `ros_gz_sim` +
+`gz_ros2_control`。它们都写在 `package.xml` 的 `exec_depend` 里，但 **rosdep 不会自动装**；
+缺包时 launch 在启动任何进程之前就抛 `package ... not found`（例如本机缺
+`ros-humble-joint-state-publisher-gui`），补装即可，不是模型问题。
+
+独立的 `gazebo.launch.py`、`display.launch.py` 与 `mujoco.launch.py` 接受 `model:=<模型名>`
+选择 `models/` 下的模型，默认 `half_body_robot`；`mujoco.launch.py` 要求模型目录
+带有 `mujoco/<模型名>.xml`（由模型自己的 `tools/build_mujoco_model.py` 生成）与
+`urdf/<模型名>.standalone.urdf`（rsp 的 robot_description 用它，缺了会「起来了但模型是空的」）。完整
+`simulation.launch.py` 同样默认 `half_body_robot`，
+要求所选模型目录带有 `models/<模型名>/config/simulation_topology.yaml`，且拓扑中的模型名与
+launch 参数一致；`motor_config_file` **留空**时优先用模型目录自带的
+`config/motor_driver.yaml`，其次才用权威整机配置（选不带拓扑的模型会显式 `RuntimeError`，
+不会静默退化）：
+
+```bash
+ros2 launch robot_sim gazebo.launch.py model:=<模型名>
+```
+
+`gazebo.launch.py` 的其余参数：
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `world_file` | `empty.sdf` | Ignition 世界文件 |
+| `spawn_z` | `0.0` | 模型生成高度（m），按模型几何实测值定（`half_body_robot` 零位最低点恰为 z = 0.000000） |
+| `fixed_base` | `true` | 把基座焊到世界原点；`false` = 自由浮动基座 |
+| `controllers_file` | `models/<模型>/config/controllers.yaml` | controller_manager 参数 |
+| `control_mode` | `effort` | `effort` 接收 FDCAN/Gazebo 电机后端发布的 MIT 等效力矩；`position` 仅用于话题/单位对照 |
+
+## 仿真后端（`backend:=gazebo|mujoco`）
+
+`simulation.launch.py` 的**被控对象**可替换：两个后端对外契约相同（吃
+`/arm_effort_controller/commands`、出 `/joint_states`），所以传输（vcan/SocketCAN/SLCAN）、
+控制端（host/external/firmware）、被控电机模型（`motor_sim`）、effort 门控与驱动端接线完全共用。
+
+| backend | 被控对象 | 说明 |
+| --- | --- | --- |
+| `gazebo`（默认） | `gz sim` + `gz_ros2_control` 的 effort 控制器 | 现状；`gravity:=false` 只有它有对应开关 |
+| `mujoco` | `mujoco.launch.py`（自写力矩直通桥 + MuJoCo 物理） | 需要模型的 `mujoco/<名>.xml`；viewer 窗口开在**启动它的那台机器**上（从 web_host 面板启动时即 web_host 所在机器） |
+
+```bash
+# vcan + 主机驱动闭环，被控对象换成 MuJoCo
+ros2 launch robot_sim simulation.launch.py backend:=mujoco
+
+# 物理 SocketCAN + 外部控制器
+ros2 launch robot_sim simulation.launch.py backend:=mujoco \
+  transport:=socketcan sim_interface:=can1 controller_mode:=external
+```
+
+- **命令数组的顺序**：`motor_sim` 按模型拓扑的电机顺序发。Gazebo 侧由 launch 重写控制器的
+  `joints` 保证同序；MuJoCo 侧把**同一份关节名**通过 `joint_names` 交给桥，桥按**名字**落到
+  actuator（`scripts/mujoco_command_mapping.py`），因此不依赖「MJCF 关节顺序恰好等于拓扑顺序」
+  这个巧合——顺序漂移在 Gazebo 侧踩过一次，且两边长度相同不会报错。
+- **`/clock`**：两条路都发（Gazebo 走 `ros_gz_bridge`，MuJoCo 由桥按物理时间发），
+  robot_state_publisher 的 `use_sim_time:=true` 因此都有意义。
+- **`gravity:=false` 不支持 MuJoCo**：MJCF 的重力在生成期固定，运行期没有开关，launch 会显式
+  拒绝而不是静默忽略。
+- **Wayland 下的 viewer**：pyGLFW 在 Wayland 会话默认载入 wayland 变体，实测该后端窗口自旋
+  （`sync()` 不返回、主线程 ~39% CPU、`/joint_states` 一帧不发）。`mujoco.launch.py` 在**进程外**
+  给桥进程置 `PYGLFW_LIBRARY_VARIANT=x11` 并删掉 `WAYLAND_DISPLAY`（脚本内设置太晚：
+  `import mujoco` 已经先把 glfw 载入了）。桥启动时会打印实际平台，出问题先看那行。
+- **MuJoCo 的物理是简化近似**（接触形状、软限位、`frictionloss`），与 Gazebo 不逐位一致，
+  见 `models/half_body_robot/README.md`。
+
+## 控制机械臂
+
+`gazebo.launch.py` 默认自动激活 `joint_state_broadcaster` 与
+`arm_effort_controller`（MIT 等效力矩）。FDCAN/Gazebo 电机后端的
+`--gazebo-control-mode` 必须与这里的 `control_mode` 一致。effort 模式把 MIT 控制律送入
+`arm_effort_controller`，适合验收真实电机后端到 Gazebo 的闭环；position 模式把
+固件已解码的关节目标送入 position controller，适合做话题、单位、ID、顺序和
+轨迹插补对照。模型未内置重力补偿时需要单独调增益/前馈。两种控制器不会同时占用同一组关节命令接口：
+
+```bash
+ros2 topic pub --once /arm_position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [0.5, -0.3, 1.0, 0.2]}"
+
+ros2 topic echo /joint_states
+```
+
+命令向量顺序 = 该模型 `config/controllers.yaml` 里 `joints` 的顺序（
+`test_model_consistency.py` 保证它是 URDF 可控关节的有序子集）。`half_body_robot` 是 18 个关节
+全接管，顺序为第一链 `joint_link1..9` → 第二链 `joint_link1.1..9.9`。
+
+## 加一个新模型
+
+1. 在 `models/` 下建 `<新模型名>/`，含 `urdf/`（`<名>.urdf`、`<名>.standalone.urdf`、
+   `<名>.urdf.xacro`）、`meshes/`、`config/controllers.yaml`、`cad/`、`README.md`；
+2. 网格路径写成 `package://robot_sim/models/<新模型名>/meshes/...`；
+3. 薄壳 xacro 用相对文件名 include 同目录的 URDF（`<xacro:include filename="<名>.urdf"/>`），
+   不要用 `$(dirname)`——它只在 `ros2 launch` 的文件上下文里可用，本包 launch 是以子进程
+   方式调 `xacro` 的；
+4. 跑 `colcon test --packages-select robot_sim`，测试会以新目录为参数自动覆盖它。
+
+已知限制：
+
+- **一次只生成一个模型**：控制器名（`joint_state_broadcaster` /
+  `arm_position_controller`）是全局的，同一仿真里生成两个模型会撞名。
+- `config/display.rviz` 的 Fixed Frame 写死 `base_link`，根连杆不叫 `base_link` 的模型
+  需要自行覆盖 `rviz_config`。
+- 模型是**仿真/可视化资产**：几何与惯性来自 CAD 未做真机标定，关节限位/力矩/速度是
+  占位值，接真机前必须替换。真机链路（`motor_drive` + `motor_hardware_interface` +
+  `motor_driver.yaml` 拓扑）与本包没有代码依赖。
+
+## 单文件纯模型
+
+每个模型的 `urdf/<名>.standalone.urdf` 是把薄壳展开、剥掉 `<ros2_control>` 与
+`<gazebo>` 插件块后的纯模型，单个文件即可加载（RViz、第三方工具、拖到别处都行），
+不需要 xacro 处理：
+
+```bash
+ros2 run robot_state_publisher robot_state_publisher --ros-args \
+  -p robot_description:="$(cat install/robot_sim/share/robot_sim/models/<模型名>/urdf/<模型名>.standalone.urdf)"
+```
+
+网格仍走 `package://robot_sim/models/<模型名>/meshes/`，因此加载前须 source
+本工作空间；要脱离 ROS 使用，用 `dist/<模型名>_urdf/` 那份（网格是相对路径）。
+
+## 对外发布件（`dist/`）
+
+`dist/<模型名>_urdf/` 是不依赖 ROS 的单文件模型 + 网格，可以直接打包发给别人：
+
+```bash
+cd dist/half_body_robot_urdf && zip -r ../half_body_robot_urdf.zip .
+```
+
+zip 不入库（内容在目录里都有，随时可重打）；`dist/` 也不随包安装。

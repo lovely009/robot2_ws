@@ -111,8 +111,15 @@ export function chartPush(id, ch, val, t) {
 
 // URL 参数：换模型或换接线不改代码（?joints=1:joint_link1,2:joint_link2&model=<模型目录名>）
 export const URLQ = new URLSearchParams(location.search);
-// 默认对齐默认模型 robot_all：9 台电机同一条 chest 总线，编号与关节序号一一对应
-// （id N ↔ joint_linkN，驱动第一条链，见 models/robot_all/config/simulation_topology.yaml）。
+// 默认对齐默认模型 half_body_robot。**两条链都要列全**：id N ↔ joint_linkN
+// （第一链 1..9）、id N+9 ↔ joint_linkN.N（第二链 10..18），
+// 见 models/half_body_robot/config/simulation_topology.yaml 与 motor_driver.yaml。
+//
+// 此前这里只列了第一链 1..9，注释还写着"第二链需要时用 ?joints= 覆盖"——而
+// 模型默认值早已是 18 台的 half_body_robot，于是**开箱即坏**：10-18 没有关节
+// 映射，臂视图里它们的关节角恒为 0、小球也点不中（arm.js 用本表做角度同步、
+// 选色与点选反查），看起来就是"左臂没注册、不可控"。默认值必须覆盖默认模型，
+// 否则"默认"二字无意义。需要非常规接线时仍可用 ?joints= 整表覆盖。
 export const JOINT_OF_MOTOR = (() => {
   const q = URLQ.get('joints');
   if (!q) {
@@ -120,6 +127,9 @@ export const JOINT_OF_MOTOR = (() => {
       1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
       5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
       9: 'joint_link9',
+      10: 'joint_link1.1', 11: 'joint_link2.2', 12: 'joint_link3.3',
+      13: 'joint_link4.4', 14: 'joint_link5.5', 15: 'joint_link6.6',
+      16: 'joint_link7.7', 17: 'joint_link8.8', 18: 'joint_link9.9',
     };
   }
   const m = {};
@@ -129,10 +139,10 @@ export const JOINT_OF_MOTOR = (() => {
   }
   return m;
 })();
-// 默认模型与 robot_arm_gazebo 的 launch 默认值保持一致（robot_all：唯一可加载模型）。
-// 旧默认值（zhoubuguanjie_youbi_001 / chest_upper_00）对应的模型都已删除，留着会让
-// 臂视图默认 404。
-export const MODEL = URLQ.get('model') || 'robot_all';
+// 默认模型与 robot_sim 的 launch 默认值保持一致（half_body_robot，四个 launch 都是它）。
+// 旧默认值（zhoubuguanjie_youbi_001 / chest_upper_00 / robot_all）对应的模型都已删除，
+// 留着会让臂视图默认 404。
+export const MODEL = URLQ.get('model') || 'half_body_robot';
 
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，

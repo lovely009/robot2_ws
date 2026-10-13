@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!-- 与 Gazebo 描述共用同一份机械 URDF，供独立的 motor_hardware_interface
+     controller_manager 使用（simulation.launch.py 的 controller_mode:=host）。
+     该 manager 只把 ros2_control 命令编码到 CAN；Gazebo 自己的 manager 仍由
+     half_body_robot.urdf.xacro 中的 GazeboSimSystem 驱动。
+
+     与 models/robot_all/urdf/robot_all.canfd.xacro 相同，只换成本模型的 URDF
+     （差异见模型 README：<dynamics>、简化碰撞体，机械几何与惯量逐字相同）。
+
+     控制关节清单由 launch 在运行期按 motor_config_file 生成后从 control_joints 传入
+     （本模型 18 个关节都有电机，见 config/simulation_topology.yaml），本文件不写死。
+
+     参数（由 motor_hardware_interface/launch/hardware.launch.py 注入）：
+       motor_config_file  运行时生成的驱动配置（含总线、id、增益、时序）
+       bus_overrides      <逻辑总线名>=<设备路径> 覆盖
+       control_joints     逗号分隔的可控关节清单 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="half_body_robot_driver">
+  <xacro:arg name="motor_config_file" default=""/>
+  <xacro:arg name="bus_overrides" default=""/>
+  <xacro:arg name="control_joints" default=""/>
+
+  <xacro:include filename="half_body_robot.urdf"/>
+  <xacro:include filename="$(find motor_hardware_interface)/urdf/canfd_hardware.xacro"/>
+
+  <ros2_control name="half_body_robot_canfd_system" type="system">
+    <xacro:canfd_hardware
+        motor_config_file="$(arg motor_config_file)"
+        bus_overrides="$(arg bus_overrides)"/>
+    <xacro:emit_control_joints
+        joints="${[name.strip() for name in '$(arg control_joints)'.split(',') if name.strip()]}"/>
+  </ros2_control>
+</robot>

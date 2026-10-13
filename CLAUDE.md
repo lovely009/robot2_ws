@@ -18,7 +18,8 @@ ros2_ws 七包：
 - `motor_drive` —— 无 ROS 依赖的 C++17 底层驱动库（CAN 传输、线协议、电机映射）
 - `motor_hardware_interface` —— ros2_control 适配层 + 真机 bring-up 入口 + 固件话题桥
 - `motor_sim` —— 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全）
-- `robot_arm_gazebo` —— 机械臂 URDF 模型库（`models/<模型名>/`）与 Ignition Gazebo 仿真集成
+- `robot_sim` —— 机械臂模型库（`models/<模型名>/`）+ 两个可互换的被控对象后端（Gazebo / MuJoCo）
+  与端到端组合入口（2026-10-13 由 `robot_arm_gazebo` 更名，只改名、内部布局不变）
 - `robot_dynamics` —— 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖，无节点/话题）
 - `web_host` —— rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、轨迹、仿真启动器）
 
@@ -61,9 +62,11 @@ colcon test --packages-select motor_hardware_interface --pytest-args "-k <表达
 + `test_motor_probe`（pytest）；`motor_hardware_interface` —— `test_motor_config`/`test_canfd_logic`（gtest）
 + `test_hardware_launch`/`test_xacro_consistency`/`test_topic_bridge`（pytest）；
 `motor_sim` —— 协议/cerb 协议/传输/帧路由/frame record/plant/传动/安全/配置/节点等 gtest；
-`robot_arm_gazebo` —— `test_model_consistency`/`test_launch_models`（pytest，模型目录自洽与 launch 契约）；
-`robot_dynamics` —— `test_pinocchio_dependency`；`web_host` —— `test/test_agent_manager.py`。
-测试不得启动 Gazebo 或真实硬件。
+`robot_sim` —— `test_model_consistency`（含 MJCF↔URDF 关节契约）/`test_launch_models`（含默认模型自带 MJCF）
+/`test_mujoco_command_mapping`（pytest，纯映射逻辑）；
+`robot_dynamics` —— `test_pinocchio_dependency`；`web_host` —— `test_agent_manager.py`/
+`test_simulation_manager.py`（仿真后端校验，注入假 popen）/`test_web_assets.py`（DOM 与资产契约）。
+测试不得启动 Gazebo、不得开 MuJoCo 窗口、不得占 vcan/串口或真实硬件（`web_host/test/conftest.py` 有守卫）。
 
 真机 bring-up（默认 serial_slcan 双总线 `/dev/ttyACM0`、`/dev/ttyACM1`）：
 
@@ -76,14 +79,18 @@ ros2 launch motor_hardware_interface hardware.launch.py interface_left_arm:=can0
 
 ```bash
 # 纯 Gazebo（Ignition + gz_ros2_control 位置控制），不经 motor_sim 的 CAN 回路
-ros2 launch robot_arm_gazebo gazebo.launch.py [model:=<模型名>]
+ros2 launch robot_sim gazebo.launch.py [model:=<模型名>]
 
-# 端到端电机—机械臂仿真：Gazebo + motor_sim + effort 门控 + motor_hardware_interface
-ros2 launch robot_arm_gazebo simulation.launch.py [transport:=vcan|socketcan|slcan] \
-  [controller_mode:=host|external|firmware]
+# 端到端电机—机械臂仿真：被控对象 + motor_sim + effort 门控 + motor_hardware_interface
+ros2 launch robot_sim simulation.launch.py [backend:=gazebo|mujoco] \
+  [transport:=vcan|socketcan|slcan] [controller_mode:=host|external|firmware]
 ```
 
-`simulation.launch.py` 默认用本机自动创建/清理的 `robot_vcan0` 闭环（需 `CAP_NET_ADMIN`，
+`simulation.launch.py` 的被控对象由 `backend:=` 选（默认 `gazebo`）：`gazebo` 走 `gz sim` +
+`gz_ros2_control`，`mujoco` 走 `mujoco.launch.py` 的力矩直通桥；两者对外契约相同（吃
+`/arm_effort_controller/commands`、出 `/joint_states`），传输/控制端/`motor_sim`/门控/驱动端
+完全共用。MuJoCo 要求模型自带 `mujoco/<名>.xml` 与 `urdf/<名>.standalone.urdf`，不支持
+`gravity:=false`。`simulation.launch.py` 默认用本机自动创建/清理的 `robot_vcan0` 闭环（需 `CAP_NET_ADMIN`，
 否则预先 `sudo ip link add/set ... type vcan`）；拓扑由
 `models/<模型名>/config/simulation_topology.yaml`（电机名 → Gazebo 关节映射 + plant 参数，
 只记参与仿真的子集）叠加 `motor_hardware_interface` 的权威配置生成。`controller_mode:=firmware`
@@ -123,7 +130,7 @@ ros2 launch web_host web_host.launch.py      # rosbridge_port:=9090、web_port:=
   `rosbridge_shim`）或 `web/` 下**新增文件**（如 `js/panels/*.js`、`vendor/`）都必须重跑 colcon build，
   否则分别报 `executable not found` 与页面 404（构建"成功"）。
 - 臂视图几何（URDF + 约 70 MB STL）不在 `web/` 里，由 `static_server` 把
-  `robot_arm_gazebo` share 目录挂到 `/robot_arm_gazebo`；`web/` 内不能放目录符号链接
+  `robot_sim` share 目录挂到 `/robot_sim`；`web/` 内不能放目录符号链接
   （`os.walk` 与 setuptools 都会漏）。
 - 页面职守点在**固件话题**（如 `micro_ros_up/motion_states`），不是 `/joint_states`——
   `/joint_states` 在 Gazebo 台架上会被 gz 自己的 broadcaster 抢同名话题。
@@ -170,10 +177,12 @@ motor_drive（纯 C++，无 ROS）              motor_hardware_interface（ROS 2
   protocol.cpp（物理量 <-> 线协议字段）       launch + xacro（真机 bring-up）
                                               topic_bridge（固件 ID 话题 <-> ROS 关节话题）
 
-motor_sim（共享仿真库）                      robot_arm_gazebo（模型库 + 仿真集成）
+motor_sim（共享仿真库）                      robot_sim（模型库 + Gazebo/MuJoCo 后端）
   SimMotorHandler / plant_model / 帧路由        models/<模型名> / launch / Gazebo 集成
   （协议 / 传输 / 传动 / 锁存安全）            gazebo.launch.py（纯 Gazebo）
-                                              simulation.launch.py（端到端组合入口）
+                                              mujoco.launch.py（纯 MuJoCo）
+                                              simulation.launch.py（端到端组合入口，
+                                                backend:=gazebo|mujoco）
 ```
 
 `web_host` 是纯消费方：直连 rosbridge 订阅固件话题，不依赖 `motor_drive`。
@@ -220,11 +229,11 @@ ROS 生态侧按关节名索引，映射只存在于主机侧：
 - `urdf/canfd_hardware.xacro`：与拓扑无关的 ros2_control 硬件片段（`canfd_hardware`/`emit_bus_overrides`/`emit_control_joints` 宏），不写死任何关节。
 - `urdf/upper_body.urdf.xacro`：物理模型（几何/惯性）**人工维护**；其 ros2_control 关节清单由 launch 注入，不手抄。两者一致性由 `test_xacro_consistency.py` 兜底。
 - `motor_hardware_interface/helpers.py`：launch 与测试共用（读取 buses/joints、生成参数文件）。
-- `robot_arm_gazebo/launch/gazebo.launch.py` 与 `display.launch.py` 用 `model:=<模型名>` 选
-  `models/` 下的模型（默认 `robot_all`，当前唯一可加载模型），控制器参数挂该模型自己的
-  `config/controllers.yaml`。`simulation.launch.py` 的 `model` 默认同为 `robot_all`
-  （`motor_config_file` 留空时优先用模型目录自带的 `config/motor_driver.yaml`）。
-- `robot_arm_gazebo/launch/simulation.launch.py` 是端到端组合入口，配
+- `robot_sim/launch/gazebo.launch.py` 与 `display.launch.py` 用 `model:=<模型名>` 选
+  `models/` 下的模型（**默认 `half_body_robot`，当前唯一可加载模型**），控制器参数挂该模型自己的
+  `config/controllers.yaml`。`simulation.launch.py` 与 `mujoco.launch.py` 的 `model` 默认同为
+  `half_body_robot`（`motor_config_file` 留空时优先用模型目录自带的 `config/motor_driver.yaml`）。
+- `robot_sim/launch/simulation.launch.py` 是端到端组合入口，配
   `scripts/simulation_gate.py`（全轴就绪才开放 effort）与 `scripts/agent_after_sim_ready.py`；
   `controller_mode:=firmware` 时默认连带启动 WebHost。模型是仿真资产：几何/惯性取自 CAD
   未标定，关节限位/力矩是占位值。

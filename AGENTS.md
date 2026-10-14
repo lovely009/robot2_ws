@@ -49,8 +49,9 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 
 - C++17、`-Wall -Wextra -Wpedantic`、2 空格缩进；snake_case（文件/函数/变量）、PascalCase
   （类）、`k` 前缀常量。Python snake_case，测试带类型注解。
-- 中文注释只写意图（数据流 / 单位 / 安全边界 / 非直觉陷阱），不写设计论证、变更沿革或实测
-  过程；协议名与 ROS 2 API 保持英文。单个注释块不超过 5 行。
+- 中文注释只写意图（数据流 / 单位 / 安全边界 / 非直觉陷阱），**不写**设计论证、变更沿革、实测
+  排查过程或与他处重复的事实；协议名与 ROS 2 API 保持英文。叙述性注释块控制在 5 行内，
+  枚举/字段/话题这类纯契约清单可略长但仍不写散文。
 
 ## 测试规范
 

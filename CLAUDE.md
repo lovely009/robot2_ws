@@ -59,8 +59,9 @@ ctest --test-dir .host-build --output-on-failure  # host 测试：CTest + casser
   （实施计划、任务台账、逐次运行报告）不进仓库，结论并入宿主文档。
 - **提交**：conventional 前缀（`feat:`/`fix:`/`refactor:`/`docs:`/`test:`），正文写原因；
   功能经 PR 合入 `dev/robot_ws`，`main` 仅发布；PR 附验证方式。
-- **注释**：中文注释只写意图（数据流 / 单位 / 安全边界 / 非直觉陷阱），不写设计论证、
-  变更沿革或实测过程——那些归 ADR 与 decision-log。单个注释块不超过 5 行。
+- **注释**：只写意图（数据流 / 单位 / 安全边界 / 非直觉陷阱），**不写**设计论证、变更沿革、
+  实测排查过程或与他处重复的事实——那些归 ADR、decision-log 与区域 README。叙述性注释块
+  控制在 5 行内；枚举/字段/话题这类纯契约清单可略长，但同样不写散文。
 
 ## 环境坑
 

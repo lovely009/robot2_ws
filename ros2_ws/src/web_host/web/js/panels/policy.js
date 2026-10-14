@@ -2,23 +2,11 @@
 // 页面最后一次发出去的值（store.policy）。搬自重构前 app.js 的策略段。
 import { store, DIRTY, paramRowIds, writesAllowed } from '../core/store.js';
 import { $ } from '../core/format.js';
-import { pub, isConnected } from '../core/ros.js';
+import { pub, isConnected, nextPolicyGeneration } from '../core/ros.js';
 
-// 每个下行消息一条关联 id。与 seq 同法用启动时间把起点垫高（见下方代数记录的
-// 说明）；只用于跨系统日志对齐与回执关联，从 0 起也能跑，但垫高后更易读。
+// 每个下行消息一条关联 id。与代数同法用启动时间把起点垫高（见 ros.js 的
+// nextPolicyGeneration 说明）；只用于跨系统日志对齐与回执关联。
 let polSeq = (Date.now() & 0x7fffffff) >>> 0;
-
-// 「代数严格前进」的防复权门。
-// 稀疏语义：只影响下发的那些电机，其余保持原状。
-// 固件**不回读** kp/kd，所以表格里显示的是页面最后一次发出去的值（store.policy）。
-// 固件的代数门是**跨页面持久**的：表项进 FAULT/OFFLINE/CONFIG_CONFLICT 时把当时
-// 的代数锁存下来，之后「enabled=true 且代数 <= 锁存值」一律拒绝（见
-// MotorPolicyArray.msg）。所以这个计数器不能从 0 起——刷新页面/重开浏览器只是把
-// 我们这一侧归零，固件那边记得的仍是上一轮的值，于是每一条「武装」都被静默拒
-// （只有事件日志的 CONFIG_RESULT reason=2 能看出），而轨迹照旧受理、照旧
-// completed：表现就是"播放完成但机构不动"。与 seq 同法，用启动时间把起点垫高。
-// 代价：代数不再连续可读，判"是不是新意图"看的是它是否前进，而不是它等于几。
-let policyGeneration = (Date.now() & 0x7fffffff) >>> 0;
 
 function writeResult(id, ok, text) {
   const el = $(id);
@@ -36,8 +24,8 @@ function polInputs(id) {
 
 // 设备侧限位保护被关掉的台：该关节没有任何限位在跑（CERB 是设备侧限位，固件没有
 // 软限位兜底），所以每次武装都要显式确认。固件侧有同一道门禁（缺确认位直接拒），
-// 这里只是把"为什么按不下去"提前说清楚。
-function isUnprotected(id) {
+// 这里只是把"为什么按不下去"提前说清楚。动作库播放前也会用它做同一确认。
+export function isUnprotected(id) {
   const pc = store.paramCache.get(id);
   const protect = Number(pc ? pc.pick.limit_protect : NaN);
   return Number.isFinite(protect) && protect === 0;
@@ -63,18 +51,18 @@ function sendPolicyRow(id) {
       return;
     }
   }
-  policyGeneration = (policyGeneration + 1) >>> 0;
+  const generation = nextPolicyGeneration();
   polSeq = (polSeq + 1) >>> 0;
   pub('policy', {
     sync_time_ns: Date.now() * 1e6,
     request_id: polSeq,
-    policy_generation: policyGeneration,
+    policy_generation: generation,
     count: 1,
     targets: [{motor_id: id, enabled: el.enable.checked, kp, kd,
                confirm_unprotected: el.enable.checked && unprotected}],
   });
   store.policy.set(id, {enabled: el.enable.checked, kp, kd});
-  setPolResult(true, `已下发 seq=${polSeq} gen=${policyGeneration}：m${id} ` +
+  setPolResult(true, `已下发 seq=${polSeq} gen=${generation}：m${id} ` +
     (el.enable.checked ? '武装' : '失能') + ` kp=${kp} kd=${kd}` +
     '。受理/拒绝是异步的，看事件日志的 CONFIG_RESULT');
 }
@@ -108,12 +96,12 @@ function sendPolicyAll() {
       `m${unprotected.join('、m')} 的设备侧限位保护当前是关闭的：\n\n` +
       '这些关节没有任何限位在执行（含看门狗自锁）。确认要武装它们吗？')) return;
   for (const t of targets) t.confirm_unprotected = t.enabled && unprotected.includes(t.motor_id);
-  policyGeneration = (policyGeneration + 1) >>> 0;
+  const generation = nextPolicyGeneration();
   polSeq = (polSeq + 1) >>> 0;
   pub('policy', {
     sync_time_ns: Date.now() * 1e6,
     request_id: polSeq,
-    policy_generation: policyGeneration,
+    policy_generation: generation,
     count: targets.length,
     targets,
   });
@@ -121,7 +109,7 @@ function sendPolicyAll() {
     store.policy.set(t.motor_id, {enabled: t.enabled, kp: t.kp, kd: t.kd});
   }
   const armed = targets.filter((t) => t.enabled).length;
-  setPolResult(true, `已一键下发 seq=${polSeq} gen=${policyGeneration}：${targets.length} 台` +
+  setPolResult(true, `已一键下发 seq=${polSeq} gen=${generation}：${targets.length} 台` +
     `（武装 ${armed} / 失能 ${targets.length - armed}）` +
     '。受理/拒绝是异步的，看事件日志的 CONFIG_RESULT');
 }

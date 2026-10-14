@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Regression checks for FDCAN simulator setup and feedback scheduling."""
 
+import json
+import os
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+import socket
+import tempfile
 
 SCRIPT_PATH = Path(__file__).parents[3] / "micro_ros_agent" / "tools" / "fdcan_motor_sim.py"
 SPEC = spec_from_file_location("fdcan_motor_sim", SCRIPT_PATH)
@@ -238,3 +242,143 @@ assert _cb2.cerb_frame()[0:2] == (-32768).to_bytes(2, "big", signed=True)
 _cb3 = MODULE.MotorModel(3, "cerb")
 _cb3.pos_deg = 90.0
 assert _cb3.cerb_frame()[0:2] == (90 * 182).to_bytes(2, "big", signed=True)
+
+
+# ── 运行期控制（--control-socket 的纯逻辑层，2026-10-14 加）────────────────
+# web 上位机仿真页的功能面：add 往总线上加电机（id 在 joint_map 里自动挂关节，
+# 否则是只走线协议的裸假节点）；remove 从模拟集合移除（再 add 回来是全新电机）；
+# link 断/连。linked=False 时**完全静默**——不发反馈、不回 SDO、忽略下行帧，
+# 对固件等价于设备掉电（心跳超时判 OFFLINE）；恢复时清命令状态像重新上电
+# （固件走 RECONNECTED 重识别）。
+_cnt = {1: MODULE.MotorModel(1, "cerb")}
+_joints = {1: "joint_link1"}
+_r = MODULE.apply_sim_control(_cnt, {"cmd": "status"}, _joints)
+assert _r["ok"] and _r["motors"][0]["joint"] == "joint_link1"
+
+_r = MODULE.apply_sim_control(_cnt, {"cmd": "add", "id": 7, "kind": "vaxor"})
+assert _r["ok"] and _cnt[7].kind == "vaxor" and _cnt[7].linked
+# 重号拒绝：不能静默覆盖已有模型
+assert not MODULE.apply_sim_control(
+    _cnt, {"cmd": "add", "id": 7, "kind": "vaxor"})["ok"]
+# R58 身份由 add 参数指定（缺省 R48，与启动期 --cerb-r58 的语义一致）
+assert MODULE.apply_sim_control(
+    _cnt, {"cmd": "add", "id": 5, "kind": "cerb", "model": "r58"})["ok"]
+assert _cnt[5].identity == b"R58LITE_V2"
+assert MODULE.apply_sim_control(
+    _cnt, {"cmd": "add", "id": 6, "kind": "cerb"})["ok"]
+assert _cnt[6].identity == b"R48LITE_V2"
+# id 上限：CERB ≤127（0x300+id 与 SDO 0x580+node），VAXOR ≤63（0x501+4n 不出 0x600）
+assert not MODULE.apply_sim_control(
+    _cnt, {"cmd": "add", "id": 128, "kind": "cerb"})["ok"]
+assert not MODULE.apply_sim_control(
+    _cnt, {"cmd": "add", "id": 64, "kind": "vaxor"})["ok"]
+assert not MODULE.apply_sim_control(_cnt, {"cmd": "add", "id": 0, "kind": "cerb"})["ok"]
+assert not MODULE.apply_sim_control(_cnt, {"cmd": "frobnicate"})["ok"]
+
+# link=False 三处拦截：下行路由、SDO 应答、反馈窗口
+_sim = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_sim.models = _cnt
+_sim.next_send = {}
+_r = MODULE.apply_sim_control(_cnt, {"cmd": "link", "id": 1, "up": False})
+assert _r["ok"] and not _cnt[1].linked
+assert _sim._model_for_downlink(0x110 + 1) is None       # 下行不再归属
+assert _sim._model_for_downlink(0x110 + 5) is not None
+_sim.use_brs = True
+_sim.sent = []
+_sim.send = lambda *a, **kw: _sim.sent.append(a)
+_sim.handle_sdo(1, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
+assert not _sim.sent, "静默电机的 SDO 不应答"
+_sim.models[1].linked = True
+_sim.handle_sdo(1, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
+assert _sim.sent, "恢复后 SDO 照常应答"
+
+# link=True = 重新上电：清 enabled/last_cmd（不残留旧运动授权）
+_cnt[1].enabled = True
+_cnt[1].last_cmd = {"enabled": True}
+_r = MODULE.apply_sim_control(_cnt, {"cmd": "link", "id": 1, "up": True})
+assert _r["ok"] and _cnt[1].linked and not _cnt[1].enabled \
+    and _cnt[1].last_cmd is None
+
+# apply_control 随 link/remove 清掉残留的待发 deadline
+_purge = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_purge.models = {1: MODULE.MotorModel(1, "cerb")}
+_purge.next_send = {1: [0.0]}
+assert _purge.apply_control({"cmd": "link", "id": 1, "up": False})["ok"]
+assert _purge.next_send == {}
+assert _purge.apply_control({"cmd": "remove", "id": 1})["ok"]
+assert 1 not in _purge.models
+
+# register_feedback_window 只排 linked 电机（静默电机不占窗口）
+_win = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_win.models = {1: MODULE.MotorModel(1, "cerb"),
+               2: MODULE.MotorModel(2, "cerb")}
+_win.models[1].linked = False
+_win.next_send = {}
+_win.stagger = 0.0022
+_win.last_window_at = 0.0
+_win.window_count = 0
+_win.register_feedback_window(10.0)
+assert sorted(_win.next_send) == [2]
+
+# 0x210 多轴快照对静默电机不生效（帧里仍带它的槽位）
+_multi = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_multi.models = {1: MODULE.MotorModel(1, "cerb")}
+_multi.models[1].linked = False
+_multi.log_f = None
+_multi_payload = bytes(56) + bytes([1, 0, 0, 0, 0, 0]) + bytes(2)
+assert len(_multi_payload) == 64
+_multi.handle_downlink(0x210, _multi_payload, True)
+assert _multi.models[1].last_cmd is None
+_multi.models[1].linked = True
+_multi.handle_downlink(0x210, _multi_payload, True)
+assert _multi.models[1].last_cmd is not None
+
+# 控制 socket 端到端（真实 Unix socket，不碰 CAN 总线）：一行 JSON 一问一答、
+# 0600 权限、teardown 后死文件可复用。
+_ctrl = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_ctrl.models = {1: MODULE.MotorModel(1, "cerb")}
+_ctrl.next_send = {}
+_ctrl.control_socket_path = os.path.join(tempfile.mkdtemp(), "sim.sock")
+_ctrl._control_srv = None
+_ctrl._setup_control_socket()
+assert os.stat(_ctrl.control_socket_path).st_mode & 0o777 == 0o600
+_client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+_client.settimeout(2.0)
+_client.connect(_ctrl.control_socket_path)
+_client.sendall(b'{"cmd":"add","id":9,"kind":"cerb","model":"r58"}\n')
+_ctrl._service_control_socket()
+_reply = b""
+while b"\n" not in _reply:
+    _reply += _client.recv(4096)
+assert json.loads(_reply.split(b"\n", 1)[0])["ok"]
+assert _ctrl.models[9].identity == b"R58LITE_V2"
+# 服务端一连接一命令（答完即关），第二条命令要重新连接
+_client.close()
+_client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+_client.settimeout(2.0)
+_client.connect(_ctrl.control_socket_path)
+_client.sendall(b"not json\n")
+_ctrl._service_control_socket()
+_reply = b""
+while b"\n" not in _reply:
+    _reply += _client.recv(4096)
+assert json.loads(_reply.split(b"\n", 1)[0])["ok"] is False
+_client.close()
+_ctrl._teardown_control_socket()
+assert not os.path.exists(_ctrl.control_socket_path)
+# 路径被活实例占用 → 拒绝启动（两个模拟器同一条总线会互相打断）
+_ctrl2 = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_ctrl2.control_socket_path = os.path.join(
+    os.path.dirname(_ctrl.control_socket_path), "taken.sock")
+_ctrl2._control_srv = None
+_ctrl2._setup_control_socket()
+_ctrl3 = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_ctrl3.control_socket_path = _ctrl2.control_socket_path
+_ctrl3._control_srv = None
+try:
+    _ctrl3._setup_control_socket()
+except SystemExit:
+    pass
+else:
+    raise AssertionError("控制 socket 被占用时应拒绝启动")
+_ctrl2._teardown_control_socket()

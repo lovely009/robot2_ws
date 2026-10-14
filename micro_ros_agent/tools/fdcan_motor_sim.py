@@ -44,6 +44,9 @@ CANable2 的数据位率索引按 V 查询自动选择；
     --effort-topic /arm_effort_controller/commands
 节点清单与节奏可调：--cerb/--vaxor（默认 CERB 1-4 / 无 VAXOR）、--period-ms（板端 SYNC
 周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰，默认 60ms/台）、--no-brs（数据段不切 5M）。
+运行期控制（可选）：--control-socket <path> 开一条 Unix socket JSON 行协议，
+支持 status/add/remove/link（加电机、移除、断开/恢复），供 web 上位机仿真页使用；
+协议与语义见 micro_ros_agent/README.md。
 开场时序要求：先开本脚本（成为 ACK 节点），再复位控制板。Ctrl-C 收尾；SLCAN 关闭
 通道，SocketCAN 关闭 raw socket。
 """
@@ -255,6 +258,8 @@ VAXOR_TORQUE_PER_AMP = 0.042 * VAXOR_GEAR_RATIO * 0.65
 TX_RETRY_S = 0.25
 TX_QUEUE_MAX = 512
 TX_PUMP_BUDGET = 8192
+# 控制 socket 单条请求的读取上限（超出的部分截断后按非法 JSON 处理）
+CONTROL_MAX_REQUEST_BYTES = 4096
 
 
 _CLAMP_WARNED: set[str] = set()
@@ -368,6 +373,9 @@ class MotorModel:
         self.rx_count = 0
         self.enabled = False
         self.last_cmd = None
+        # 链路开关（运行期控制通道）：False = 完全静默（不发反馈、不回 SDO、
+        # 忽略下行帧），对固件等价于设备掉电；恢复时按"重新上电"清命令状态。
+        self.linked = True
         if kind == "cerb":
             # 关节侧：初值每台 10° 递增、101rpm(=0.1047rad/s 关节)、1A
             self.pos_deg = float(10 * motor_id)
@@ -465,6 +473,87 @@ class MotorModel:
             vaxor_pos_code(self.pos_motor_rad) + \
             vaxor_vel_code(self.vel_motor_rad_s) + \
             vaxor_cur_code(self.current_a) + b"\x00\x00"
+
+
+# ---- 运行期控制（--control-socket） --------------------------------------
+
+# 各族 id 上限：CERB 状态帧 0x300+id 与 SDO 0x580+node 都要求 ≤127；
+# VAXOR 命令帧 0x501+4n 到 0x600 之前，n ≤ 63。
+SIM_CONTROL_ID_LIMITS = {"cerb": 127, "vaxor": 63}
+
+
+def _control_motor_info(motor_id: int, model: MotorModel,
+                        joint_map: dict[int, str] | None) -> dict:
+    return {
+        "id": motor_id,
+        "kind": model.kind,
+        "model": ("r58" if model.identity == b"R58LITE_V2" else "r48")
+        if model.kind == "cerb" else None,
+        "joint": (joint_map or {}).get(motor_id),
+        "linked": model.linked,
+        "enabled": bool(model.enabled),
+        "rx": model.rx_count,
+        "tx": model.tx_count,
+    }
+
+
+def apply_sim_control(models: dict[int, MotorModel], command,
+                      joint_map: dict[int, str] | None = None) -> dict:
+    """应用一条控制命令，返回响应 dict（纯逻辑，不碰 IO 与调度）。
+
+    命令：{"cmd": "status"}；{"cmd": "add", "id", "kind", "model"?}（model 只对
+    cerb 有意义：r48/r58）；{"cmd": "remove", "id"}；{"cmd": "link", "id", "up"}。
+    add 的 id 若在 joint_map 里（--gazebo 的拓扑电机）自动挂对应关节；否则是
+    只走线协议的裸假节点（反馈取内部假 plant）。
+    """
+    if not isinstance(command, dict):
+        return {"ok": False, "error": "命令必须是 JSON 对象"}
+    action = command.get("cmd")
+    if action == "status":
+        return {
+            "ok": True,
+            "motors": [_control_motor_info(mid, m, joint_map)
+                       for mid, m in sorted(models.items())],
+        }
+    if action not in ("add", "remove", "link"):
+        return {"ok": False, "error": f"未知命令 {action!r}"}
+    motor_id = command.get("id")
+    if not isinstance(motor_id, int) or isinstance(motor_id, bool) or motor_id <= 0:
+        return {"ok": False, "error": "id 必须是正整数"}
+    if action == "add":
+        kind = command.get("kind")
+        if kind not in SIM_CONTROL_ID_LIMITS:
+            return {"ok": False, "error": "kind 必须是 cerb 或 vaxor"}
+        if motor_id in models:
+            return {"ok": False, "error": f"id {motor_id} 已在模拟集合中"}
+        if motor_id > SIM_CONTROL_ID_LIMITS[kind]:
+            return {"ok": False, "error":
+                    f"{kind} 的 id 上限是 {SIM_CONTROL_ID_LIMITS[kind]}"}
+        model_name = command.get("model")
+        if kind == "cerb" and model_name not in (None, "r48", "r58"):
+            return {"ok": False, "error": "model 必须是 r48 或 r58"}
+        model = MotorModel(motor_id, kind)
+        if kind == "cerb" and model_name == "r58":
+            model.identity = b"R58LITE_V2"
+        models[motor_id] = model
+        return {"ok": True, "id": motor_id,
+                "motor": _control_motor_info(motor_id, model, joint_map)}
+    if motor_id not in models:
+        return {"ok": False, "error": f"id {motor_id} 不在模拟集合中"}
+    if action == "remove":
+        del models[motor_id]
+        return {"ok": True, "id": motor_id}
+    up = command.get("up")
+    if not isinstance(up, bool):
+        return {"ok": False, "error": "up 必须是布尔值"}
+    model = models[motor_id]
+    model.linked = up
+    if up:
+        # 重新上线 = 重新上电：丢弃旧命令状态，等固件重识别后重新使能
+        model.enabled = False
+        model.last_cmd = None
+    return {"ok": True, "id": motor_id,
+            "motor": _control_motor_info(motor_id, model, joint_map)}
 
 
 # ---- 主循环 -------------------------------------------------------------
@@ -588,7 +677,8 @@ class CanMotorSim:
                  data_bitrate_index: int | None = AUTO_DATA_BITRATE_INDEX,
                  fb_period_ms: int = 60, stagger_ms: float = 2.2,
                  r58_ids=(), safety_off_ids=(), dir_ccw_ids=(),
-                 can_interface: str | None = None):
+                 can_interface: str | None = None,
+                 control_socket_path: str | None = None):
         self.tty_path = tty
         self.can_interface = can_interface
         self.bus_socket = None
@@ -663,6 +753,8 @@ class CanMotorSim:
         self._last_error_poll = 0.0
         self._reader_restarts = 0
         self.last_cerb_emit = 0.0
+        self.control_socket_path = control_socket_path
+        self._control_srv = None
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
         self.fd = None
@@ -887,12 +979,14 @@ class CanMotorSim:
         # CERB MIT 0x110+id(1..127)；VAXOR 命令 0x501+4n / 控制 0x502+4n
         node = can_id - 0x110
         if 1 <= node <= 127 and node in self.models \
-                and self.models[node].kind == "cerb":
+                and self.models[node].kind == "cerb" \
+                and self.models[node].linked:
             return self.models[node]
         for base, kind in ((0x501, "vaxor"), (0x502, "vaxor")):
             delta = can_id - base
             if delta >= 4 and delta % 4 == 0 and (delta // 4) in self.models \
-                    and self.models[delta // 4].kind == kind:
+                    and self.models[delta // 4].kind == kind \
+                    and self.models[delta // 4].linked:
                 return self.models[delta // 4]
         return None
 
@@ -903,7 +997,7 @@ class CanMotorSim:
         随后 60/70 交替取段 → 应答 000 t nnn c + 7 字节数据。
         """
         m = self.models.get(node)
-        if m is None or m.kind != "cerb":
+        if m is None or m.kind != "cerb" or not m.linked:
             return
         m.rx_count += 1
         command = data[0]
@@ -979,7 +1073,7 @@ class CanMotorSim:
             for slot in range(6):
                 node = data[56 + slot]
                 m = self.models.get(node)
-                if m is None or m.kind != "cerb":
+                if m is None or m.kind != "cerb" or not m.linked:
                     continue
                 subframe = data[slot * 9:slot * 9 + 9]
                 cmd = cerb_decode_command(subframe)
@@ -1021,8 +1115,10 @@ class CanMotorSim:
 
     def register_feedback_window(self, now: float) -> None:
         """登记一轮反馈窗口（按 stagger 错峰），并记账。"""
-        schedule_feedback_window(self.next_send, sorted(self.models), now,
-                                 self.stagger)
+        schedule_feedback_window(
+            self.next_send,
+            sorted(mid for mid, m in self.models.items() if m.linked),
+            now, self.stagger)
         self.last_window_at = now
         self.window_count += 1
 
@@ -1042,6 +1138,8 @@ class CanMotorSim:
 
     def emit_one(self, mid: int):
         m = self.models[mid]
+        if not m.linked:
+            return
         # --no-brs：FD 帧数据段也走仲裁 1M，用于隔离 BRS 数据相位问题。
         if m.kind == "cerb":
             self.send(0x300 + mid, m.cerb_frame(), True, self.use_brs, m,
@@ -1177,7 +1275,92 @@ class CanMotorSim:
         self.sync_seen = False      # 重新走门控，等板子的下一个 SYNC
         print("[sim] 通道已重开，等待 SYNC 恢复")
 
+    # ---- 运行期控制 socket ---------------------------------------------
+
+    def _setup_control_socket(self):
+        """开 Unix socket 控制通道（0600）。路径被真正占用时报错退出。
+
+        残留的**死** socket 文件（异常退出留下的）直接清掉复用；但如果有人
+        在监听，说明另一个模拟器实例活着——两个实例会互相打断总线，宁可拒绝。
+        """
+        path = self.control_socket_path
+        if not path:
+            return
+        if os.path.exists(path):
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                probe.settimeout(0.3)
+                probe.connect(path)
+            except OSError:
+                os.unlink(path)
+            else:
+                raise SystemExit(
+                    f"控制 socket {path} 已在监听（另一个模拟器实例？）；"
+                    "先停掉它，否则两个实例会互相打断总线。")
+            finally:
+                probe.close()
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        os.chmod(path, 0o600)
+        server.listen(4)
+        server.setblocking(False)
+        self._control_srv = server
+        print(f"[sim] 控制通道就绪: {path}")
+
+    def _teardown_control_socket(self):
+        if self._control_srv is not None:
+            self._control_srv.close()
+            self._control_srv = None
+        if self.control_socket_path:
+            try:
+                os.unlink(self.control_socket_path)
+            except OSError:
+                pass
+
+    def apply_control(self, command: dict) -> dict:
+        """控制命令入口：应用后清掉被撤销电机的待发调度。"""
+        joint_map = self.bridge.joint_map if self.bridge is not None else None
+        response = apply_sim_control(self.models, command, joint_map)
+        if response.get("ok") and command.get("cmd") in ("remove", "link"):
+            motor_id = response.get("id")
+            if isinstance(motor_id, int):
+                # 未链接/已移除电机的残留 deadline 一并清掉，避免恢复后
+                # 补发一串旧窗口的反馈。
+                self.next_send.pop(motor_id, None)
+        return response
+
+    def _service_control_socket(self):
+        """每轮主循环至多处理一条命令（非阻塞 accept + 短超时读写）。"""
+        if self._control_srv is None:
+            return
+        try:
+            conn, _ = self._control_srv.accept()
+        except (BlockingIOError, OSError):
+            return
+        with conn:
+            conn.settimeout(0.2)
+            data = b""
+            try:
+                while b"\n" not in data and len(data) < CONTROL_MAX_REQUEST_BYTES:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            except OSError:
+                return
+            line = data.split(b"\n", 1)[0]
+            try:
+                response = self.apply_control(json.loads(line.decode("utf-8")))
+            except (ValueError, UnicodeDecodeError):
+                response = {"ok": False, "error": "请求不是合法 JSON"}
+            try:
+                conn.sendall(json.dumps(response, ensure_ascii=False)
+                             .encode("utf-8") + b"\n")
+            except OSError:
+                pass
+
     def run(self):
+        self._setup_control_socket()
         cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
         if self.bus_socket is not None:
@@ -1198,6 +1381,7 @@ class CanMotorSim:
             self._pump_tx()
             # 总线由 _reader_loop 独占读取；这里只消费队列。
             self._drain_rx()
+            self._service_control_socket()
             self._pump_tx()
             # ── 健康巡检：只跑 SLCAN、且没有半条 TX 行在飞时（避免把帧行截断）──
             if self.bus_socket is None and self._tx_active is None:
@@ -1273,6 +1457,7 @@ class CanMotorSim:
                 self._stats_sync_mark = self.sync_count
                 self._stats_window_mark = self.window_count
             self._pump_tx()
+        self._teardown_control_socket()
         self.report()
         self.stop = True
         if self._reader is not None:
@@ -1336,6 +1521,10 @@ def main():
     ap.add_argument("--log", default=None)
     ap.add_argument("--ready-file", default=None,
                     help="CAN 接口打开且读线程就绪后创建该文件，供总启动器排序")
+    ap.add_argument("--control-socket", default=None,
+                    help="运行期控制通道：Unix socket 路径（JSON 行协议，"
+                         "status/add/remove/link），供 web 上位机的仿真页使用；"
+                         "省略 = 不开控制通道")
     ap.add_argument("--effort-rate-hz", type=float, default=200.0,
                     help="假电机发力矩的频率（Hz）；它是被控对象回路的执行器更新率，"
                          "不是 CAN 节拍。0 = 关（退回随 CAN 主循环，约 50 Hz）。"
@@ -1375,7 +1564,8 @@ def main():
                    r58_ids=r58_ids,
                    safety_off_ids=args.safety_off,
                    dir_ccw_ids=args.dir_ccw,
-                   can_interface=args.interface)
+                   can_interface=args.interface,
+                   control_socket_path=args.control_socket)
 
     if args.gazebo:
         jm = parse_joint_map(args.joint_map)

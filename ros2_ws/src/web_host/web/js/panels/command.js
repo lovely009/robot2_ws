@@ -65,7 +65,7 @@ function noteBlockedTargets(targets) {
   return blocked;
 }
 
-// 示教不是普通的“发布成功”操作：trajectory_state 的 accepted/completed 只代表
+// 动作不是普通的“发布成功”操作：trajectory_state 的 accepted/completed 只代表
 // MCU 轨迹 mailbox 的状态，不能替代实际电机在线和生命周期检查。播放前必须确认
 // 每个目标都处于 READY_DISABLED 或 ACTIVE；否则页面会出现“播放完成”但机构不动。
 export function playbackReadinessError(ids) {
@@ -88,7 +88,8 @@ export function playbackReadinessError(ids) {
     }
   }
   return blocked.length
-    ? `电机未就绪：${blocked.join('、')}；请先启动仿真后等待四台 READY_DISABLED，再播放`
+    ? `电机未就绪：${blocked.join('、')}；请先连接/启动仿真，等目标电机到 `
+      + `READY_DISABLED（或 ACTIVE）后重试`
     : '';
 }
 
@@ -104,7 +105,7 @@ function sendSnapshot() {
   return res.ok;
 }
 
-// 发送完整快照（命令表与示教共用）；记录历史。
+// 发送完整快照（命令表与动作共用）；记录历史。
 export function sendTargets(targets) {
   if (!isConnected()) return {ok: false, msg: '未连接 rosbridge'};
   if (!targets.length) return {ok: false, msg: '快照为空'};
@@ -179,7 +180,7 @@ export function mount(root, ctx) {
   };
 }
 
-// 供 teach 面板「记录当前命令」用（面板依赖面板的唯一一处：示教记录的正是下发
+// 供 teach 面板「记录当前命令」用（面板依赖面板的唯一一处：动作记录的正是下发
 // 快照里的目标值）。command 面板未挂载时 #cmdRows 不在 DOM 上，返回空数组而不是抛错。
 export function currentTargets() {
   return $('cmdRows') ? readCmdTargets() : [];

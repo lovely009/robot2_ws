@@ -1,5 +1,6 @@
-// 关节索引：一行一台，点击选中（与臂上的小球双向联动）。只读 store。
-import { store, DIRTY, devDetailTitle } from '../core/store.js';
+// 关节索引：一行一台，点击选中并置顶（与臂上的小球双向联动；行序与右栏状态表共用
+// store 的置顶序）。只读 store。
+import { store, DIRTY, devDetailTitle, pinMotor, orderedMotorIds } from '../core/store.js';
 import { $, fmt, busLabel, LIFECYCLE, FAULT_NAMES } from '../core/format.js';
 
 export function mount(root, ctx) {
@@ -9,16 +10,18 @@ export function mount(root, ctx) {
   // 事件委托：列表每次渲染都整体重建。
   list.addEventListener('click', (e) => {
     const li = e.target.closest('li[data-id]');
-    if (li) ctx.ui.selectMotor(parseInt(li.dataset.id, 10));
+    if (!li) return;
+    const id = parseInt(li.dataset.id, 10);
+    pinMotor(id);
+    ctx.ui.selectMotor(id);
   });
 
   const render = (dirty) => {
     if (!(dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.STATUS) || dirty.has(DIRTY.MOTION)
           || dirty.has(DIRTY.SELECTED) || dirty.has(DIRTY.PARAMS))) return;
     // 行渲染搬自重构前的 renderMotors（app.js:522-554），只改数据来源。
-    const rows = [...store.motors.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([id, r]) => {
+    const rows = orderedMotorIds().map((id) => {
+        const r = store.motors.get(id) || {};
         const t = r.topo || {}, st = r.status || {};
         const online = st.online !== undefined ? st.online : t.online;
         const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
@@ -36,7 +39,9 @@ export function mount(root, ctx) {
         return `<li class="${id === store.selectedId ? 'on' : ''}" data-id="${id}"
             title="${devDetailTitle(id)}">
           <span class="jdot" style="background:${dot}"></span>
-          <span><span class="jid">m${id}</span><span class="jbus">${busLabel(busIndex)}</span><span class="jmodel">${t.model_name || '未绑定'}</span></span>
+          <span class="jid">m${id}</span>
+          <span class="jbus">${busLabel(busIndex)}</span>
+          <span class="jmodel">${t.model_name || '未绑定'}</span>
           <span class="jpos">${fmt(mo.position, 3)}</span>
           <span class="jstate ${fault ? 'warn' : 'muted'}">${stateText}</span>
         </li>`;

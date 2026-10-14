@@ -48,11 +48,27 @@ export function mount(root, ctx) {
     state: $('simState'),
     result: $('simResult'),
     log: $('simLog'),
+    backendSummary: $('motorBackendSummary'),
+    backendState: $('motorBackendState'),
+    backendResult: $('motorBackendResult'),
+    backendLog: $('motorBackendLog'),
+    backendStart: $('btnMotorBackendStart'),
+    backendStop: $('btnMotorBackendStop'),
+    motorPanel: $('simMotorPanel'),
+    motorHint: $('simMotorHint'),
+    motorList: $('simMotorList'),
+    motorAddId: $('simMotorAddId'),
+    motorAddKind: $('simMotorAddKind'),
+    motorAddModel: $('simMotorAddModel'),
+    motorAddModelField: $('simMotorAddModelField'),
+    motorAdd: $('btnSimMotorAdd'),
   };
 
   let deviceOptions = { can_interfaces: [], serial_ports: [], models: [], mujoco_models: [] };
   let optionsLoaded = false;
   let latestStatus = { state: 'stopped', log: [] };
+  let motorBackend = { state: 'stopped', log: [] };
+  let motorSim = { motors: [] };
   let polling = false;
   let pollTimer = null;
 
@@ -100,7 +116,13 @@ export function mount(root, ctx) {
       payload = {};
     }
     if (!response.ok) {
-      const error = new Error(payload.error || `HTTP ${response.status}`);
+      // 旧版 static_server 没有新 API 时会退到静态文件处理（HTML 体、无 error
+      // 字段）——这是"改了 .py 没重启 web_host.launch.py"的固定指纹，直接点名
+      const message = payload.error
+        || (response.status === 404
+          ? '后端没有该接口：web_host 进程可能是旧版，请重启 web_host.launch.py'
+          : `HTTP ${response.status}`);
+      const error = new Error(message);
       error.payload = payload;
       throw error;
     }
@@ -217,6 +239,9 @@ export function mount(root, ctx) {
     // 后端决定模型候选集：切换时重列，当前模型仍在新列表里就保留
     if (optionsLoaded) refreshModelOptions();
     saveOptions();
+    // vcan（纯软）下电机后端不可用；切传输时立即反映，不等下一次轮询
+    ui.backendStart.disabled = activeState(motorBackend.state)
+      || !motorBackendStartable();
   }
 
   function activeState(state) {
@@ -266,6 +291,220 @@ export function mount(root, ctx) {
     ui.log.scrollTop = ui.log.scrollHeight;
   }
 
+  // ---- 电机后端（独立进程：fdcan_motor_sim.py）------------------------
+  // HIL 启动仿真时由后端默认联动拉起（auto_started），停止时联动收起；
+  // 也可脱离仿真单独起停（只连板子验证固件行为）。参数取仿真抽屉的选择。
+  function describeBackendConfig(config) {
+    if (!config) return '';
+    const endpoint = config.sim_tty || config.sim_interface || '';
+    return [config.transport, config.model, endpoint].filter(Boolean).join(' · ');
+  }
+
+  function motorBackendStartable() {
+    return ui.transport.value !== 'vcan';
+  }
+
+  function renderMotorBackend(status) {
+    motorBackend = status || { state: 'stopped', log: [] };
+    const state = motorBackend.state || 'stopped';
+    const label = stateLabels[state] || state;
+    const active = activeState(state);
+    ui.backendSummary.textContent = label;
+    ui.backendState.textContent = motorBackend.config
+      ? `${label} · ${describeBackendConfig(motorBackend.config)}`
+        + (motorBackend.auto_started ? ' · 随仿真' : '')
+      : state === 'failed'
+        ? `${label} · exit ${motorBackend.returncode}`
+        : `电机后端${label}`;
+    ui.backendStart.disabled = active || !motorBackendStartable();
+    ui.backendStop.disabled = !active;
+    const lines = motorBackend.log || [];
+    ui.backendLog.textContent = lines.length ? lines.join('\n') : '等待启动';
+    ui.backendLog.scrollTop = ui.backendLog.scrollHeight;
+  }
+
+  function setBackendResult(message, kind = '') {
+    ui.backendResult.textContent = message;
+    ui.backendResult.className = `result tiny${kind ? ` ${kind}` : ''}`;
+  }
+
+  async function refreshMotorBackend() {
+    try {
+      renderMotorBackend(await requestJson('/api/motor-sim/process'));
+    } catch (error) {
+      setBackendResult(`读取电机后端状态失败：${error.message}`, 'err');
+    }
+  }
+
+  function motorBackendRequest() {
+    const transport = ui.transport.value;
+    const request = {
+      model: ui.model.value,
+      transport,
+      physical_bus_isolated: ui.busIsolated.checked,
+    };
+    if (transport === 'socketcan') request.sim_interface = ui.simInterface.value;
+    else request.sim_tty = ui.simTty.value;
+    return request;
+  }
+
+  async function startMotorBackend() {
+    const request = motorBackendRequest();
+    if (!request.model) {
+      setBackendResult('先在上方「仿真」里选择模型。', 'err');
+      return;
+    }
+    if (request.transport === 'vcan') {
+      setBackendResult('纯软 vcan 不需要电机后端（总线电机由 motor_sim 节点扮演）。', 'err');
+      return;
+    }
+    if (!request.physical_bus_isolated) {
+      setBackendResult('请先勾选「物理 CAN 总线仅连接仿真器与控制端」。', 'err');
+      return;
+    }
+    if (request.transport === 'socketcan' && !request.sim_interface) {
+      setBackendResult('先在上方选择模拟器 SocketCAN 接口。', 'err');
+      return;
+    }
+    if (request.transport === 'slcan' && !request.sim_tty) {
+      setBackendResult('先在上方选择模拟器串口。', 'err');
+      return;
+    }
+    ui.backendStart.disabled = true;
+    setBackendResult('正在启动电机后端…');
+    try {
+      renderMotorBackend(await requestJson('/api/motor-sim/process/start', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }));
+      setBackendResult('电机后端进程已启动；CAN 就绪情况见下方日志。', 'ok');
+    } catch (error) {
+      if (error.payload && error.payload.status) renderMotorBackend(error.payload.status);
+      setBackendResult(error.message, 'err');
+    } finally {
+      await refreshMotorBackend();
+      await refreshMotorSim();
+    }
+  }
+
+  async function stopMotorBackend() {
+    ui.backendStop.disabled = true;
+    setBackendResult('正在停止电机后端…');
+    try {
+      renderMotorBackend(await requestJson('/api/motor-sim/process/stop', { method: 'POST' }));
+      setBackendResult('电机后端已停止', 'ok');
+    } catch (error) {
+      setBackendResult(`停止失败：${error.message}`, 'err');
+    } finally {
+      await refreshMotorBackend();
+      await refreshMotorSim();
+    }
+  }
+
+  // ---- 电机表与增删/断连（后端内模拟器的控制通道）--------------------
+  function motorPanelActive() {
+    return activeState(motorBackend.state);
+  }
+
+  function renderMotorSim(note) {
+    const active = motorPanelActive();
+    ui.motorPanel.hidden = !active;
+    if (!active) return;
+    ui.motorHint.textContent = note || `${motorSim.motors.length} 台在模拟`;
+    ui.motorList.replaceChildren();
+    for (const motor of motorSim.motors) {
+      const row = document.createElement('div');
+      row.className = motor.linked ? 'sim-motor-row' : 'sim-motor-row offline';
+      const label = document.createElement('span');
+      label.className = 'sim-motor-label';
+      const kindText = motor.kind.toUpperCase()
+        + (motor.model ? ` ${motor.model.toUpperCase()}` : '');
+      label.textContent = `#${motor.id} ${kindText}`;
+      const where = document.createElement('span');
+      where.className = 'sim-motor-joint tiny muted';
+      where.textContent = motor.joint || '裸节点';
+      where.title = motor.joint
+        ? `Gazebo 关节：${motor.joint}`
+        : '不在 joint-map：只走线协议的假节点（反馈取内部假 plant）';
+      const state = document.createElement('span');
+      state.className = motor.linked ? 'ok' : 'warn';
+      state.textContent = !motor.linked ? '已断开'
+        : (motor.enabled ? '在线·使能' : '在线');
+      const link = document.createElement('button');
+      link.className = 'secondary';
+      link.dataset.action = 'link';
+      link.dataset.id = String(motor.id);
+      link.dataset.up = motor.linked ? '0' : '1';
+      link.textContent = motor.linked ? '断开' : '恢复';
+      link.title = motor.linked
+        ? '停止该台的一切帧（反馈/SDO 应答），固件将判其离线'
+        : '恢复发帧；固件会重新识别该台（RECONNECTED）';
+      const remove = document.createElement('button');
+      remove.className = 'danger';
+      remove.dataset.action = 'remove';
+      remove.dataset.id = String(motor.id);
+      remove.textContent = '移除';
+      remove.title = '从模拟集合删除；再加回来是全新电机（SDO/位置回初值）';
+      row.append(label, where, state, link, remove);
+      ui.motorList.append(row);
+    }
+  }
+
+  async function refreshMotorSim() {
+    if (!motorPanelActive()) {
+      motorSim = { motors: [] };
+      renderMotorSim();
+      return;
+    }
+    try {
+      const payload = await requestJson('/api/motor-sim/status');
+      motorSim = { motors: payload.motors || [] };
+      renderMotorSim();
+    } catch (error) {
+      motorSim = { motors: [] };
+      renderMotorSim(`控制通道不可用：${error.message}`);
+    }
+  }
+
+  async function sendMotorCommand(command, labelText) {
+    try {
+      await requestJson('/api/motor-sim/command', {
+        method: 'POST',
+        body: JSON.stringify(command),
+      });
+      setResult(`${labelText} 已下发`, 'ok');
+    } catch (error) {
+      setResult(`${labelText} 失败：${error.message}`, 'err');
+    } finally {
+      await refreshMotorSim();
+    }
+  }
+
+  function onMotorListClick(event) {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const id = Number(button.dataset.id);
+    if (button.dataset.action === 'link') {
+      const up = button.dataset.up === '1';
+      sendMotorCommand({ cmd: 'link', id, up },
+        `电机 ${id} ${up ? '恢复' : '断开'}`);
+    } else if (button.dataset.action === 'remove') {
+      sendMotorCommand({ cmd: 'remove', id }, `移除电机 ${id}`);
+    }
+  }
+
+  function addMotor() {
+    const id = Number(ui.motorAddId.value);
+    if (!Number.isInteger(id) || id <= 0) {
+      setResult('添加电机需要一个正整数 ID', 'err');
+      return;
+    }
+    const command = { cmd: 'add', id, kind: ui.motorAddKind.value };
+    if (command.kind === 'cerb') command.model = ui.motorAddModel.value;
+    ui.motorAddId.value = '';
+    sendMotorCommand(command, `添加电机 ${id}`);
+  }
+
   async function refreshOptions() {
     ui.refresh.disabled = true;
     try {
@@ -283,6 +522,8 @@ export function mount(root, ctx) {
     polling = true;
     try {
       renderStatus(await requestJson('/api/simulation/status'));
+      await refreshMotorBackend();
+      await refreshMotorSim();
     } catch (error) {
       setResult(`读取仿真状态失败：${error.message}`, 'err');
     } finally {
@@ -368,9 +609,18 @@ export function mount(root, ctx) {
   ui.start.addEventListener('click', startSimulation);
   ui.stop.addEventListener('click', stopSimulation);
   ui.refresh.addEventListener('click', refreshOptions);
+  ui.backendStart.addEventListener('click', startMotorBackend);
+  ui.backendStop.addEventListener('click', stopMotorBackend);
+  ui.motorAdd.addEventListener('click', addMotor);
+  ui.motorList.addEventListener('click', onMotorListClick);
+  ui.motorAddKind.addEventListener('change', () => {
+    ui.motorAddModelField.hidden = ui.motorAddKind.value !== 'cerb';
+  });
 
   syncFields();
+  ui.motorAddModelField.hidden = ui.motorAddKind.value !== 'cerb';
   renderStatus(latestStatus);
+  renderMotorBackend(motorBackend);
   refreshOptions();
   refreshStatus();
   pollTimer = window.setInterval(refreshStatus, 1800);

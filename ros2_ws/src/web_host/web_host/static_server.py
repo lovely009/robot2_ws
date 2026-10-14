@@ -1,20 +1,30 @@
 import json
 import os
+import signal
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import rclpy
 from rclpy.node import Node
 
+from .actions import list_actions, read_action, save_action
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
+from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
 from .simulation_manager import SimulationProcessManager, simulation_model_joints
 
 
 _MAX_API_BODY_BYTES = 4096
+# 动作库导入：单个 JSON 载荷可达数百 KB（motion.json 2868 点）
+_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
 
 def main(args=None):
     rclpy.init(args=args)
+    # rclpy.init 会装它自己的 SIGINT handler（期待 rclpy.spin 消费）；本进程的
+    # 主循环是 serve_forever，不恢复默认 handler 的话 SIGINT 被吞——ros2 launch
+    # 得等满 5+10 秒升级到 SIGKILL，且 finally 里的 manager 清理（仿真/电机后端/
+    # Agent）全部跳过，Agent 变孤儿占着串口。
+    signal.signal(signal.SIGINT, signal.default_int_handler)
     node = Node('web_static_server')
     node.declare_parameter('host', '0.0.0.0')
     node.declare_parameter('port', 8080)
@@ -50,6 +60,7 @@ def main(args=None):
 
     agent_manager = AgentProcessManager()
     simulation_manager = SimulationProcessManager()
+    motor_sim_manager = MotorSimProcessManager()
 
     class Handler(SimpleHTTPRequestHandler):
 
@@ -117,6 +128,40 @@ def main(args=None):
             if path == '/api/simulation/status':
                 self._send_json(200, simulation_manager.status())
                 return
+            if path == '/api/actions':
+                # 动作库列表（动作屏「动作库播放」的数据源）
+                self._send_json(200, {'actions': list_actions(web_root)})
+                return
+            if path.startswith('/api/actions/'):
+                # 单个动作原文（保留文件原格式，前端自行解析）
+                name = unquote(path[len('/api/actions/'):])
+                try:
+                    text = read_action(web_root, name)
+                except FileNotFoundError:
+                    self._send_json(404, {'error': '动作不存在'})
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {'error': str(exc)})
+                    return
+                body = text.encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path == '/api/motor-sim/status':
+                # 电机后端（FDCAN 模拟器）内部的电机表：未运行时 409
+                try:
+                    self._send_json(200, motor_sim_manager.motor_request(
+                        {'cmd': 'status'}))
+                except RuntimeError as exc:
+                    self._send_json(409, {'error': str(exc)})
+                return
+            if path == '/api/motor-sim/process':
+                self._send_json(200, motor_sim_manager.status())
+                return
             super().do_GET()
 
         def do_POST(self):
@@ -130,12 +175,31 @@ def main(args=None):
                 return
             if path == '/api/simulation/stop':
                 try:
-                    self._send_json(200, simulation_manager.stop())
+                    response = simulation_manager.stop()
                 except OSError as exc:
                     self._send_json(
                         500, {'error': 'could not stop simulation: %s' % exc})
+                    return
+                # 随仿真自动拉起的电机后端联动停；用户手动起的保持运行
+                if motor_sim_manager.status().get('auto_started'):
+                    try:
+                        motor_sim_manager.stop()
+                    except OSError as exc:
+                        node.get_logger().error(
+                            'Could not stop motor backend: %s' % exc)
+                self._send_json(200, response)
                 return
-            if path not in {'/api/agent/start', '/api/simulation/start'}:
+            if path == '/api/motor-sim/process/stop':
+                try:
+                    self._send_json(200, motor_sim_manager.stop())
+                except OSError as exc:
+                    self._send_json(
+                        500, {'error': 'could not stop motor backend: %s' % exc})
+                return
+            if path not in {'/api/agent/start', '/api/simulation/start',
+                            '/api/motor-sim/command',
+                            '/api/motor-sim/process/start',
+                            '/api/actions'}:
                 self._send_json(404, {'error': 'unknown API endpoint'})
                 return
 
@@ -144,7 +208,9 @@ def main(args=None):
             except ValueError:
                 self._send_json(400, {'error': 'invalid Content-Length'})
                 return
-            if content_length < 0 or content_length > _MAX_API_BODY_BYTES:
+            limit = (_MAX_UPLOAD_BYTES if path == '/api/actions'
+                     else _MAX_API_BODY_BYTES)
+            if content_length < 0 or content_length > limit:
                 self._send_json(413, {'error': 'request body too large'})
                 return
             try:
@@ -154,8 +220,83 @@ def main(args=None):
                 return
 
             if path == '/api/simulation/start':
+                # HIL + 物理总线：先把电机后端拉起来（配置冲突/CANable 占用在
+                # 这里就地拒绝，不对仿真产生副作用）；仿真启动失败则回滚。
+                bus_request = hil_motor_backend_request(request)
+                backend_started = False
+
+                def rollback_backend():
+                    if backend_started:
+                        try:
+                            motor_sim_manager.stop()
+                        except OSError:
+                            pass
+
+                if bus_request is not None:
+                    was_running = (
+                        motor_sim_manager.status().get('state') == 'running')
+                    try:
+                        motor_sim_manager.start(bus_request, auto=True)
+                    except ValueError as exc:
+                        self._send_json(400, {'error': str(exc)})
+                        return
+                    except PermissionError as exc:
+                        self._send_json(403, {'error': str(exc)})
+                        return
+                    except RuntimeError as exc:
+                        self._send_json(409, {
+                            'error': str(exc),
+                            'status': motor_sim_manager.status(),
+                        })
+                        return
+                    except OSError as exc:
+                        self._send_json(
+                            500, {'error':
+                                  'could not start motor backend: %s' % exc})
+                        return
+                    backend_started = (
+                        not was_running
+                        and motor_sim_manager.status().get('state') == 'running')
                 try:
                     self._send_json(200, simulation_manager.start(request))
+                except ValueError as exc:
+                    rollback_backend()
+                    self._send_json(400, {'error': str(exc)})
+                except PermissionError as exc:
+                    rollback_backend()
+                    self._send_json(403, {'error': str(exc)})
+                except RuntimeError as exc:
+                    rollback_backend()
+                    self._send_json(409, {
+                        'error': str(exc),
+                        'status': simulation_manager.status(),
+                    })
+                except OSError as exc:
+                    rollback_backend()
+                    self._send_json(
+                        500, {'error': 'could not start simulation: %s' % exc})
+                return
+
+            if path == '/api/motor-sim/command':
+                if not isinstance(request, dict):
+                    self._send_json(400, {'error': 'invalid JSON request'})
+                    return
+                try:
+                    response = motor_sim_manager.motor_request(request)
+                except RuntimeError as exc:
+                    self._send_json(409, {'error': str(exc)})
+                    return
+                if not response.get('ok'):
+                    # 模拟器给出的**语义**拒绝（id 冲突、范围外……）→ 400 透传原因
+                    self._send_json(400, {
+                        'error': response.get('error') or '模拟器拒绝了该命令'})
+                    return
+                self._send_json(200, response)
+                return
+
+            if path == '/api/motor-sim/process/start':
+                try:
+                    self._send_json(200, motor_sim_manager.start(request))
                 except ValueError as exc:
                     self._send_json(400, {'error': str(exc)})
                 except PermissionError as exc:
@@ -163,11 +304,35 @@ def main(args=None):
                 except RuntimeError as exc:
                     self._send_json(409, {
                         'error': str(exc),
-                        'status': simulation_manager.status(),
+                        'status': motor_sim_manager.status(),
                     })
                 except OSError as exc:
                     self._send_json(
-                        500, {'error': 'could not start simulation: %s' % exc})
+                        500, {'error': 'could not start motor backend: %s' % exc})
+                return
+
+            if path == '/api/actions':
+                # 导入动作到内置库；同名默认拒绝，显式 overwrite 才覆盖
+                name = request.get('name') if isinstance(request, dict) else None
+                text = request.get('text') if isinstance(request, dict) else None
+                overwrite = bool(
+                    request.get('overwrite')) if isinstance(request, dict) else False
+                try:
+                    entry = save_action(web_root, name, text, overwrite=overwrite)
+                except FileExistsError:
+                    self._send_json(409, {
+                        'error': '同名动作已存在；确认覆盖后重试',
+                        'exists': True,
+                    })
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {'error': str(exc)})
+                    return
+                except OSError as exc:
+                    self._send_json(
+                        500, {'error': '动作库写入失败：%s' % exc})
+                    return
+                self._send_json(200, {'ok': True, 'action': entry})
                 return
 
             device = (request.get('device')
@@ -206,6 +371,10 @@ def main(args=None):
             simulation_manager.stop()
         except Exception as exc:
             node.get_logger().error('Could not stop simulation launch: %s' % exc)
+        try:
+            motor_sim_manager.stop()
+        except Exception as exc:
+            node.get_logger().error('Could not stop motor backend: %s' % exc)
         try:
             agent_manager.stop()
         except Exception as exc:

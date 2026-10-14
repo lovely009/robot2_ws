@@ -297,10 +297,13 @@ class SimulationProcessManager:
                     launch_args.append(f"driver_tty:={driver_tty}")
 
         if mode == "firmware":
+            # 模拟器（FDCAN 电机后端）由 web_host 的独立进程管理（可单独起停，
+            # 见 motor_sim_manager.py）：本 launch 只编排被控对象/驱动端/Agent。
             # WebHost already manages its own Agent and HTTP/WebSocket listeners.
             launch_args.extend([
                 "start_web_host:=false",
                 "start_micro_ros_agent:=false",
+                "start_fdcan_sim:=false",
             ])
         return config, launch_args
 

@@ -3,7 +3,7 @@
 /* ---------- 屏栅格：router 把屏模板克隆进 .main，每个屏自排自己的栅格 ---------- */
 .screen { display: grid; gap: var(--gap); align-items: start; }
 .screen.run {
-  grid-template-columns: 250px minmax(0, 1fr) 330px;
+  grid-template-columns: 300px minmax(0, 1fr) 310px;
   grid-template-areas:
     "index stage side"
     "command command command"
@@ -16,7 +16,7 @@
 .col-drawer { grid-area: drawer; }
 .col-index, .col-stage, .col-side, .col-command, .col-drawer { min-width: 0; }
 @media (max-width: 1360px) {
-  .screen.run { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+  .screen.run { grid-template-columns: 285px minmax(0, 1fr) 270px; }
 }
 @media (max-width: 1080px) {
   .screen.run { grid-template-columns: 200px minmax(0, 1fr);
@@ -37,10 +37,13 @@
      收缩，任一层的 min-height: auto 都会把内容顶回来。 */
   .col-index, .col-side { display: flex; flex-direction: column;
     height: calc(var(--stage-h) + 2px); }   /* +2px 补 .stage 的上下边框 */
+  /* flex 链三层都要 flex: 1：容器给了确定高度后，[data-panel] 占位与 details 卡片
+     还要能**伸展**才能让可见卡片的底边贴到栏底——只靠 min-height: 0 只有"内容溢出
+     时收缩"的一半，内容短于栏高时卡片会停在内容处、底边不齐。 */
   .col-index > [data-panel], .col-side > [data-panel] {
-    display: flex; flex-direction: column; min-height: 0; }
+    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
   .col-index > [data-panel] > details, .col-side > [data-panel] > details {
-    display: flex; flex-direction: column; min-height: 0; }
+    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
   /* details 的正文不在 details 盒子下，而是被 UA 包在 ::details-content 里
      （Chromium 131+）——不补这一层，里面的 ul/table 就不是 flex 子项、不会收缩。 */
   .col-index > [data-panel] > details::details-content,
@@ -50,33 +53,29 @@
   .col-index > [data-panel]:last-child > details,
   .col-side > [data-panel]:last-child > details { margin-bottom: 0; }
   .col-index .joints { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-  /* 右栏两格：读数卡按内容高，策略卡吃掉剩余高度、表格自己滚 */
-  .col-side > [data-panel]:has(> details.card) { flex: 0 0 auto; }
-  .col-side > [data-panel]:has(> details.sec) { flex: 1 1 auto; }
-  .col-side > [data-panel] > details.sec > .table-wrap {
+  /* 状态表体自身可滚（行多时），正常 18 行在封顶高度内全部可见 */
+  .col-side > [data-panel] > details.card > .table-wrap {
     flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 }
 
-/* teach 屏：与 run 同栅格，底部是示教区（col-teach）与观察抽屉。 */
+/* teach 屏：与 run 同栅格；上部是关节/臂/侧栏，下部整宽是动作库播放。
+   观察抽屉与下发条已按 2026-10-14 指令移出本屏。 */
 .screen.teach {
   grid-template-columns: 250px minmax(0, 1fr) 330px;
   grid-template-areas:
     "index stage side"
-    "command command command"
-    "teach teach teach"
-    "drawer drawer drawer";
+    "command command command";
 }
-.col-teach { grid-area: teach; grid-column: 1 / -1; min-width: 0; }
 @media (max-width: 1360px) {
   .screen.teach { grid-template-columns: 220px minmax(0, 1fr) 300px; }
 }
 @media (max-width: 1080px) {
   .screen.teach { grid-template-columns: 200px minmax(0, 1fr);
-    grid-template-areas: "index stage" "side side" "command command" "teach teach" "drawer drawer"; }
+    grid-template-areas: "index stage" "side side" "command command"; }
 }
 @media (max-width: 820px) {
   .screen.teach { grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "index" "stage" "side" "command" "teach" "drawer"; }
+    grid-template-areas: "index" "stage" "side" "command"; }
 }
 
 /* device 屏：参数表吃满宽度 + 底部抽屉（本批只有事件日志一个 tab）。 */
@@ -163,6 +162,48 @@
   color: #aab8cc;
   font: var(--fs-xs)/1.45 var(--mono);
 }
+/* 电机模拟控制台（HIL 模式）：动态行由 JS 生成，只用 class（契约测试禁止 JS 生成 id） */
+.sim-motors { margin-top: var(--gap-sm); padding-top: var(--gap-sm); border-top: 1px solid var(--line); }
+.sim-motors-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--dim); }
+.sim-motor-add { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 4px 0; }
+.sim-motor-add label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--dim); }
+.sim-motor-add input { width: 72px; }
+.sim-motor-list { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow: auto; }
+.sim-motor-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.sim-motor-row .sim-motor-label { min-width: 104px; }
+.sim-motor-row .sim-motor-joint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-motor-row .ok { color: var(--ok); }
+.sim-motor-row .warn { color: var(--warn); }
+.sim-motor-row.offline .sim-motor-label { opacity: 0.55; }
+.sim-motor-row button { padding: 1px 8px; }
+
+/* 动作库（#/teach）：行 = 播放按钮 + 文件名 + 摘要 */
+.act-list { display: flex; flex-direction: column; max-height: 400px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.act-list:empty { display: none; }
+.act-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px;
+  font-size: var(--fs-xs); border-bottom: 1px solid var(--line);
+  flex: 0 0 auto; }   /* 列表限高时行与预览不得被 flex 压缩 */
+.act-row:last-child { border-bottom: none; }
+.act-row .act-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: pointer; }
+.act-row .act-name:hover { text-decoration: underline; color: var(--text); }
+.act-row .act-meta { white-space: nowrap; }
+.act-row.playing { background: rgba(61, 155, 255, 0.12); }
+.act-preview { margin: 0 0 4px; padding: 4px 6px; max-height: 300px; overflow: auto;
+  background: #080c13; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  color: #aab8cc; font-size: var(--fs-xs); flex: 0 0 auto; }
+.act-preview-sum { padding: 1px 0; color: var(--dim); }
+.act-preview-table { border-collapse: collapse; margin-top: 3px;
+  font-family: var(--mono); }
+.act-preview-table th, .act-preview-table td {
+  padding: 1px 10px 1px 0; text-align: right; white-space: nowrap; }
+.act-preview-table th { position: sticky; top: 0; background: #080c13;
+  color: var(--dim); border-bottom: 1px solid var(--line); }
+.act-preview-table .gap td { color: var(--dim-2); text-align: center; }
+.act-gain { width: 68px; }
+.act-gain input { width: 100%; }
+.ctrl-row input[type="file"] { max-width: 260px; }
 /* 字段按 transport/mode 显示隐藏，[hidden] 必须在 flex 列里也生效 */
 .sim-panel [hidden] { display: none !important; }
 
@@ -203,20 +244,41 @@ details[open] > summary::before { content: '▾'; }
 .drawer-body { padding-bottom: 4px; }
 
 /* ---------- 关节索引 ---------- */
+/* 单行紧凑排布：id/总线/型号/位置/状态同一行，18 台不滚动全部可见（三栏齐平高度内）。
+   jid/bus/pos/state 定宽（每行是独立网格，不定宽则列随内容参差）；型号列 1fr 可截断，
+   状态列 52px 防 CONFIG_CONFLICT 这类长名挤爆布局，完整信息看行的 title。 */
 .joints { list-style: none; margin: 0; padding: 0; }
-.joints li { display: grid; grid-template-columns: 8px 1fr auto; align-items: center;
-  gap: 6px; padding: 4px 7px; border: 1px solid transparent;
+.joints li { display: grid; grid-template-columns: 8px 26px 34px minmax(0, 1fr) 45px 52px;
+  align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid transparent;
   border-left: 2px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
 .joints li:hover { background: var(--panel-2); }
 .joints li.on { background: #14243c; border-color: #24456e; border-left-color: var(--accent); }
 .joints li.empty { display: block; color: var(--dim-2); cursor: default; padding: 10px 0; text-align: center; }
 .joints .jdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim-2); }
 .joints .jid { font-family: var(--mono); font-weight: 600; font-size: var(--fs-sm); }
-.joints .jbus { color: var(--accent); font: 9px var(--mono); margin-left: 5px; white-space: nowrap; }
-.joints .jmodel { color: var(--dim-2); font-size: var(--fs-xs); margin-left: 4px; }
+.joints .jbus { color: var(--accent); font: 9px var(--mono); white-space: nowrap; }
+.joints .jmodel { color: var(--dim-2); font-size: var(--fs-xs);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .joints .jpos { font-family: var(--mono); font-size: var(--fs-sm); text-align: right; }
-.joints .jstate { grid-column: 2 / 4; font-size: var(--fs-xs); color: var(--dim-2); letter-spacing: .02em; }
+.joints .jstate { font-size: var(--fs-xs); color: var(--dim-2); letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .joints .jstate.warn { color: var(--warn); }
+
+/* ---------- 关节状态表（右栏：全部电机同屏，行点击置顶） ---------- */
+/* 定宽百分比列：auto 布局会被 CONFIG_CONFLICT 这类长状态名撑出横向滚动。 */
+.jstates { table-layout: fixed; }
+.jstates td, .jstates th { padding: 2px 6px; }
+.jstates th:nth-child(1) { width: 16%; }   /* ID */
+.jstates th:nth-child(2) { width: 21%; }   /* 位置 */
+.jstates th:nth-child(3) { width: 21%; }   /* 力矩 */
+.jstates th:nth-child(4) { width: 19%; }   /* 温度 */
+.jstates th:nth-child(5) { width: 23%; }   /* 状态 */
+.jstates tbody tr { cursor: pointer; }
+.jstates tbody tr.on { background: #14243c; }
+.jstates .jid { font-family: var(--mono); font-weight: 600; }
+.jstates .jst { font-size: var(--fs-xs); color: var(--dim-2);
+  overflow: hidden; text-overflow: ellipsis; }
+.jstates .jst.warn { color: var(--warn); }
 
 /* ---------- 读数栅格 ---------- */
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }

@@ -19,6 +19,20 @@ export function setConn(ok, text) {
 
 export function isConnected() { return store.conn.connected; }
 
+// 策略代数：跨面板共享的单调计数器（使能屏与动作库的「武装」共用同一序列）。
+// 固件的代数门是**跨页面持久**的：表项进 FAULT/OFFLINE/CONFIG_CONFLICT 时把当时
+// 的代数锁存下来，之后「enabled=true 且代数 <= 锁存值」一律拒绝（见
+// MotorPolicyArray.msg）。所以计数器不能从 0 起——刷新页面只把这一侧归零，固件
+// 那边记得的仍是上一轮的值，于是每一条「武装」都被静默拒（只有事件日志的
+// CONFIG_RESULT reason=2 能看出），表现为"播放完成但机构不动"。用启动时间垫高
+// 起点；判"是不是新意图"看的是它是否前进，而不是它等于几。
+let policyGeneration = (Date.now() & 0x7fffffff) >>> 0;
+
+export function nextPolicyGeneration() {
+  policyGeneration = (policyGeneration + 1) >>> 0;
+  return policyGeneration;
+}
+
 export function pub(key, message) {
   if (!store.conn.connected) return false;
   ensurePublisher(key).publish(new ROSLIB.Message(message));
@@ -26,10 +40,10 @@ export function pub(key, message) {
 }
 
 // rosbridge 的 advertise 是异步 WebSocket 操作。若在第一次 advertise 后
-// 立刻 publish，低频的一次性 command（尤其是示教前的授权快照）可能在
+// 立刻 publish，低频的一次性 command（尤其是动作前的授权快照）可能在
 // micro-ROS 订阅端完成发现前丢掉；随后 trajectory_state 仍会回执，造成
 // “轨迹已完成但没有运动帧”的假成功。连接建立时先把三个下行发布端注册好，
-// 后续按钮/示教只发送已经存在的 publisher。
+// 后续按钮/动作只发送已经存在的 publisher。
 export function ensurePublisher(key) {
   if (!publishers[key]) {
     const t = TOPICS[key];
@@ -144,6 +158,21 @@ function subscribeAll() {
       chartPush(s.motor_id, 'current', s.current, t);
     }
     markDirty(DIRTY.STATUS, DIRTY.ALERTS);
+  });
+
+  // 轨迹执行状态（低频）：动作屏的窗口交棒（elapsed_ms 到达窗口时长）与
+  // 进度显示都读 store.traj.state；不在条目上做裁决，原样存最近一帧。
+  sub('trajectoryState', (m) => {
+    store.traj.activeTrajectoryId = m.trajectory_id;
+    store.traj.state = {
+      trajectory_id: m.trajectory_id,
+      active: !!m.active,
+      completed: !!m.completed,
+      elapsed_ms: m.elapsed_ms,
+      total_ms: m.total_ms,
+      target_ids: m.target_ids || [],
+    };
+    markDirty(DIRTY.TRAJ);
   });
 
   sub('events', (m) => {

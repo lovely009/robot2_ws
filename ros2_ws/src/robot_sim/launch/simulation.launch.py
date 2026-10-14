@@ -472,12 +472,21 @@ def launch_simulation(context):
     transport = _required(context, "transport")
     controller_mode = _required(context, "controller_mode")
     backend = LaunchConfiguration("backend").perform(context).strip()
+    simulator_only = _bool(
+        LaunchConfiguration("simulator_only").perform(context))
+    start_fdcan_sim = _bool(
+        LaunchConfiguration("start_fdcan_sim").perform(context))
     if transport not in {"vcan", "socketcan", "slcan"}:
         raise RuntimeError("transport must be vcan, socketcan or slcan")
     if controller_mode not in {"host", "external", "firmware"}:
         raise RuntimeError("controller_mode must be host, external or firmware")
     if backend not in {"gazebo", "mujoco"}:
         raise RuntimeError("backend must be gazebo or mujoco")
+    if simulator_only and controller_mode != "firmware":
+        raise RuntimeError(
+            "simulator_only:=true 是 FDCAN 模拟器单起路径（web 上位机的"
+            "「电机后端」），要求 controller_mode:=firmware"
+        )
     if controller_mode == "firmware" and transport not in {"socketcan", "slcan"}:
         raise RuntimeError(
             "controller_mode:=firmware requires transport:=socketcan or slcan"
@@ -632,27 +641,34 @@ def launch_simulation(context):
                 "start_web_host and start_micro_ros_agent cannot both be true: "
                 "web_host manages the Agent when the browser connects"
             )
-        sim_script_arg = (
-            LaunchConfiguration("firmware_sim_script").perform(context).strip()
-        )
-        if sim_script_arg:
-            sim_script = Path(sim_script_arg)
-        else:
-            prefix = Path(get_package_prefix("robot_sim")).resolve()
-            candidates = [
-                parent / "micro_ros_agent" / "tools" / "fdcan_motor_sim.py"
-                for parent in (prefix, *prefix.parents)
-            ]
-            sim_script = next(
-                (candidate for candidate in candidates if candidate.is_file()), None
+        if start_agent and not start_fdcan_sim:
+            raise RuntimeError(
+                "start_micro_ros_agent:=true 依赖模拟器写出的 ready-file 排序；"
+                "start_fdcan_sim:=false 时模拟器由外部管理，请让外部起 Agent"
+                "（或 start_web_host:=true）"
             )
-            if sim_script is None:
-                raise RuntimeError(
-                    "cannot locate micro_ros_agent/tools/fdcan_motor_sim.py; "
-                    "set firmware_sim_script:=<path>"
+        if start_fdcan_sim:
+            sim_script_arg = (
+                LaunchConfiguration("firmware_sim_script").perform(context).strip()
+            )
+            if sim_script_arg:
+                sim_script = Path(sim_script_arg)
+            else:
+                prefix = Path(get_package_prefix("robot_sim")).resolve()
+                candidates = [
+                    parent / "micro_ros_agent" / "tools" / "fdcan_motor_sim.py"
+                    for parent in (prefix, *prefix.parents)
+                ]
+                sim_script = next(
+                    (candidate for candidate in candidates if candidate.is_file()), None
                 )
-        if not sim_script.is_file():
-            raise RuntimeError(f"firmware simulator script not found: {sim_script}")
+                if sim_script is None:
+                    raise RuntimeError(
+                        "cannot locate micro_ros_agent/tools/fdcan_motor_sim.py; "
+                        "set firmware_sim_script:=<path>"
+                    )
+            if not sim_script.is_file():
+                raise RuntimeError(f"firmware simulator script not found: {sim_script}")
         if start_web_host:
             web_share = Path(get_package_share_directory("web_host"))
             if not (web_share / "launch" / "web_host.launch.py").is_file():
@@ -756,15 +772,28 @@ def launch_simulation(context):
             }.items(),
         )
 
-    actions = [
-        LogInfo(
-            msg=(
-                f"Complete arm simulation: transport={transport}, "
-                f"controller_mode={controller_mode}, model={model}, backend={backend}"
-            )
-        ),
-        plant_launch,
-    ]
+    if simulator_only:
+        # 「电机后端」单起：被控对象/控制器/驱动端全部跳过，只跑模拟器
+        # （plant_launch 仍被构造但不注册，不会执行）。
+        actions = [
+            LogInfo(
+                msg=(
+                    f"FDCAN motor backend only: transport={transport}, "
+                    f"model={model}"
+                )
+            ),
+        ]
+    else:
+        actions = [
+            LogInfo(
+                msg=(
+                    f"Complete arm simulation: transport={transport}, "
+                    f"controller_mode={controller_mode}, model={model}, "
+                    f"backend={backend}"
+                )
+            ),
+            plant_launch,
+        ]
 
     if controller_mode == "firmware":
         cerb_ids = [
@@ -799,67 +828,75 @@ def launch_simulation(context):
         # --no-brs（FD 数据段也走 1M，隔离 BRS 数据相位）、--fb-period-ms 100
         # （降反馈负载）。不设默认：正常路径行为不变。
         extra_sim_args = LaunchConfiguration("sim_args").perform(context).split()
+        # 运行期控制通道（web 上位机仿真页用）：仅当显式给出路径才开
+        control_socket = (
+            LaunchConfiguration("sim_control_socket").perform(context).strip()
+        )
         firmware_bus_args = (
             ["--interface", sim_endpoint]
             if transport == "socketcan"
             else ["--tty", sim_endpoint]
         )
-        simulator = ExecuteProcess(
-            cmd=[
-                "python3",
-                "-u",
-                str(sim_script),
-                *firmware_bus_args,
-                "--cerb",
-                ",".join(cerb_ids),
-                "--vaxor",
-                ",".join(vaxor_ids),
-                "--cerb-r58",
-                ",".join(r58_ids),
-                "--joint-map",
-                joint_map,
-                "--tau-limits",
-                tau_limits,
-                "--gazebo",
-                "--gazebo-control-mode",
-                "effort",
-                "--effort-topic",
-                "/arm_effort_controller/commands",
-                "--ready-file",
-                str(ready_file),
-                # 反馈周期：**负载与离线余量的折中**（2026-10-14 实测重定）。
-                # 适配器侧 offline_timeout_ms=100ms 是按「20ms 自主上报 ×5」定的
-                # （vaxor_adapter.c:295），所以 20ms 有 5× 余量；但 20ms × 18 台
-                # = 900 帧/s（sim→总线），叠加本路径固件**逐台**下发的控制帧
-                # （18 台 × 快照率 100 Hz ≈ 1800 帧/s），单只 SLCAN 适配器要中继
-                # ~2700 帧/s —— 台架实测这就是它周期性锁存（静默 ~3.9s、18 台判
-                # OFFLINE）的主因：同一累计计数差分下，100 Hz 快照 40s 内 8 次锁存、
-                # 50 Hz 时 2 次。
-                # 40ms 把 sim→总线降到 450 帧/s（-50%），离线余量仍有 2.5×；窗口
-                # 跨度 37.4ms ≈ 周期 ⇒ 反馈近似连续而非突发，适配器输入端不易溢出。
-                # 排在 extra_sim_args 之前：命令行后出现者胜，故 sim_args 仍可覆盖。
-                "--fb-period-ms",
-                "40",
-                *extra_sim_args,
-            ],
-            output="screen",
-            sigterm_timeout="5",
-        )
-        actions.extend(
-            [
-                simulator,
-                RegisterEventHandler(
-                    OnProcessExit(
-                        target_action=simulator,
-                        on_exit=[
-                            EmitEvent(
-                                event=Shutdown(reason="FDCAN simulator exited")
-                            )
-                        ],
-                    )
-                ),
-            ]
-        )
+        # start_fdcan_sim:=false 时不构造模拟器动作（web 上位机「电机后端」
+        # 以独立的 simulator_only launch 管它，避免两个实例争同一条总线）。
+        if start_fdcan_sim:
+            simulator = ExecuteProcess(
+                cmd=[
+                    "python3",
+                    "-u",
+                    str(sim_script),
+                    *firmware_bus_args,
+                    "--cerb",
+                    ",".join(cerb_ids),
+                    "--vaxor",
+                    ",".join(vaxor_ids),
+                    "--cerb-r58",
+                    ",".join(r58_ids),
+                    "--joint-map",
+                    joint_map,
+                    "--tau-limits",
+                    tau_limits,
+                    "--gazebo",
+                    "--gazebo-control-mode",
+                    "effort",
+                    "--effort-topic",
+                    "/arm_effort_controller/commands",
+                    "--ready-file",
+                    str(ready_file),
+                    # 反馈周期：**负载与离线余量的折中**（2026-10-14 实测重定）。
+                    # 适配器侧 offline_timeout_ms=100ms 是按「20ms 自主上报 ×5」定的
+                    # （vaxor_adapter.c:295），所以 20ms 有 5× 余量；但 20ms × 18 台
+                    # = 900 帧/s（sim→总线），叠加本路径固件**逐台**下发的控制帧
+                    # （18 台 × 快照率 100 Hz ≈ 1800 帧/s），单只 SLCAN 适配器要中继
+                    # ~2700 帧/s —— 台架实测这就是它周期性锁存（静默 ~3.9s、18 台判
+                    # OFFLINE）的主因：同一累计计数差分下，100 Hz 快照 40s 内 8 次锁存、
+                    # 50 Hz 时 2 次。
+                    # 40ms 把 sim→总线降到 450 帧/s（-50%），离线余量仍有 2.5×；窗口
+                    # 跨度 37.4ms ≈ 周期 ⇒ 反馈近似连续而非突发，适配器输入端不易溢出。
+                    # 排在 extra_sim_args 之前：命令行后出现者胜，故 sim_args 仍可覆盖。
+                    "--fb-period-ms",
+                    "40",
+                    *(["--control-socket", control_socket] if control_socket else []),
+                    *extra_sim_args,
+                ],
+                output="screen",
+                sigterm_timeout="5",
+            )
+            actions.extend(
+                [
+                    simulator,
+                    RegisterEventHandler(
+                        OnProcessExit(
+                            target_action=simulator,
+                            on_exit=[
+                                EmitEvent(
+                                    event=Shutdown(reason="FDCAN simulator exited")
+                                )
+                            ],
+                        )
+                    ),
+                ]
+            )
         if start_web_host:
             actions.append(
                 IncludeLaunchDescription(
@@ -1048,6 +1085,26 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_web_host", default_value="true"),
             DeclareLaunchArgument("start_micro_ros_agent", default_value="false"),
             DeclareLaunchArgument("firmware_sim_script", default_value=""),
+            DeclareLaunchArgument(
+                "simulator_only",
+                default_value="false",
+                description="只起 FDCAN 模拟器（跳过被控对象/控制器/驱动端），"
+                            "要求 controller_mode:=firmware + 非 vcan 传输；"
+                            "供 web 上位机把「电机后端」作为独立进程管理",
+            ),
+            DeclareLaunchArgument(
+                "start_fdcan_sim",
+                default_value="true",
+                description="firmware 流程内嵌启动 FDCAN 模拟器；false = 由"
+                            "外部（web 上位机）负责，本 launch 不拉模拟器",
+            ),
+            DeclareLaunchArgument(
+                "sim_control_socket",
+                default_value="",
+                description="FDCAN 模拟器的运行期控制通道（Unix socket 路径，"
+                            "JSON 行协议）；留空 = 不开。web 上位机的仿真页经"
+                            "它做加/减电机与断连，见 micro_ros_agent/README.md",
+            ),
             DeclareLaunchArgument(
                 "sim_args",
                 default_value="",

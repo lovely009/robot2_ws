@@ -26,6 +26,16 @@ def _web_data_files():
     return out
 
 
+def _action_library_files():
+    """内置动作库 JSON（动作屏经 /api/actions 读写；导入的新文件落在安装树）。"""
+    if not os.path.isdir('action_library'):
+        return []
+    return [(os.path.join('share', package_name, 'action_library'),
+             [os.path.join('action_library', name)
+              for name in sorted(os.listdir('action_library'))
+              if os.path.isfile(os.path.join('action_library', name))])]
+
+
 setup(
     name=package_name,
     version='0.1.0',
@@ -36,6 +46,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         *_web_data_files(),
+        *_action_library_files(),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

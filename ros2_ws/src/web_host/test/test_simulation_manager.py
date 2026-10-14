@@ -171,3 +171,44 @@ def test_model_joints_rejects_bad_model_names(bad: str) -> None:
     """非法模型名必须显式报错，不能悄悄返回空表或读到目录外。"""
     with pytest.raises(ValueError):
         simulation_model_joints(bad)
+
+
+# --- 电机后端（HIL 的 FDCAN 模拟器）不再由仿真 launch 内嵌 -------------------
+#
+# 2026-10-14 起：HIL 启动仿真时模拟器由 web_host 的独立进程管理（「电机后端」，
+# 可单独起停、随仿真联动；见 motor_sim_manager.py 与 test_motor_sim_manager.py），
+# 本 launch 只编排被控对象/驱动端/Agent（start_fdcan_sim:=false）。
+
+def _firmware_request(**overrides: Any) -> dict[str, Any]:
+    request = _request(controller_mode='firmware', transport='socketcan',
+                       sim_interface='can0', physical_bus_isolated=True)
+    request.update(overrides)
+    return request
+
+
+def _firmware_manager(
+    spawned: list[tuple[list[str], dict[str, Any]]],
+) -> SimulationProcessManager:
+    def fake_popen(command: list[str], **kwargs: Any) -> FakeProcess:
+        spawned.append((command, kwargs))
+        return FakeProcess()
+
+    return SimulationProcessManager(
+        can_provider=lambda: [{'name': 'can0', 'up': True, 'label': 'can0'}],
+        serial_provider=lambda: [],
+        model_provider=lambda: ['half_body_robot'],
+        mujoco_model_provider=lambda: [],
+        popen_factory=fake_popen,
+    )
+
+
+def test_firmware_start_defers_motor_backend_to_web_host() -> None:
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _firmware_manager(spawned)
+
+    status = manager.start(_firmware_request())
+
+    command, _ = spawned[0]
+    assert 'start_fdcan_sim:=false' in command
+    assert not any(arg.startswith('sim_control_socket:=') for arg in command)
+    assert status['config']['controller_mode'] == 'firmware'

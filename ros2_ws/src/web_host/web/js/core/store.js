@@ -23,6 +23,9 @@ export const store = {
   tempLast: 0,
   motionCount: 0,
   selectedId: 0,
+  // 置顶序（点击过的电机，最近在前）。左栏关节列表与右栏状态表共用一个次序：
+  // 点一台 → 两处都排最上，观察与操作对照不用来回找。
+  pinned: [],
   // 曲线：motor_id -> {t:[], position:[], velocity:[], effort:[], current:[]}
   chartBuf: new Map(),
   chart: {running: true, windowMs: 10000},
@@ -31,8 +34,31 @@ export const store = {
   // 写事务的结果文本（key -> {ok, text, t}）：同一事务的按钮分布在设备屏与使能屏，
   // 结果不能只写给某一个 DOM。core/device.js 的 writeResult 写它。
   results: new Map(),
-  traj: {activeTrajectoryId: 0, waitingState: false, segmentIndex: 0, segmentCount: 0},
+  // 轨迹：activeTrajectoryId = 页面最近下发的轨迹；state = 最近一帧
+  // trajectory_state（动作屏的窗口交棒判定与进度显示都读它，见 core/ros.js）
+  traj: {activeTrajectoryId: 0, waitingState: false, segmentIndex: 0, segmentCount: 0,
+         state: null},
 };
+
+// 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
+export function pinMotor(id) {
+  const i = store.pinned.indexOf(id);
+  if (i === 0) return;
+  if (i > 0) store.pinned.splice(i, 1);
+  store.pinned.unshift(id);
+}
+
+// 面板行序：置顶优先（最近点击的在前），其余按 id 升序。陈旧 id 无害（motors 里
+// 没有就排不上来）。
+export function orderedMotorIds() {
+  return [...store.motors.keys()].sort((a, b) => {
+    const pa = store.pinned.indexOf(a), pb = store.pinned.indexOf(b);
+    if (pa >= 0 && pb >= 0) return pa - pb;
+    if (pa >= 0) return -1;
+    if (pb >= 0) return 1;
+    return a - b;
+  });
+}
 
 let dirty = new Set();
 let dirtyListener = null;

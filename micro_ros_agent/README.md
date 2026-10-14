@@ -82,5 +82,20 @@ python3 tools/fdcan_motor_sim.py --tty /dev/serial/by-id/CANABLE
 python3 tools/fdcan_motor_sim.py --interface can0
 ```
 
+运行期控制（可选）：`--control-socket <path>` 开一条 Unix socket（0600）做 JSON 行
+协议，一连接一命令：
+
+| 命令 | 语义 |
+|---|---|
+| `{"cmd":"status"}` | 列出当前模拟的电机（id/协议/型号/关节/链接/使能） |
+| `{"cmd":"add","id","kind","model"?}` | 加一台；`model` 只对 CERB 有意义（`r48`/`r58`）。id 在 `--joint-map` 里则自动挂对应 Gazebo 关节，否则是只走线协议的裸假节点（反馈取内部假 plant） |
+| `{"cmd":"remove","id"}` | 从模拟集合移除；再加回来是全新电机（SDO/位置回初值） |
+| `{"cmd":"link","id","up":false\|true}` | 断开/恢复。断开 = **完全静默**（停发反馈、不回 SDO、忽略下行帧），对固件等价于设备掉电；恢复时清命令状态，固件走 RECONNECTED 重识别 |
+
+`ros2_ws` 的 web 上位机把它当「电机后端」独立进程管理（可脱离仿真单独起停；
+HIL 启动仿真时默认拉起、停止时联动收起）：经 `simulation.launch.py` 的
+`simulator_only:=true` 启动并传 `sim_control_socket:=<path>`，页面经
+`/api/motor-sim/*` 转发命令；手动启动时可自行指定路径。
+
 一键组合 Gazebo、该模拟器与 STM32 micro-ROS Agent 的入口和完整拓扑参数见
 [`robot_sim` 仿真说明](../ros2_ws/src/robot_sim/README.md)。

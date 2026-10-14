@@ -161,6 +161,29 @@ raw CAN FD 或 SLCAN 两种主机总线接口，使用 `micro_ros_agent/tools/fd
 `start_web_host:=false start_micro_ros_agent:=true agent_tty:=/dev/serial/by-id/STM32_CDC`。
 当前完整组合入口按该机械臂的单条 CAN 总线拓扑运行；`motor_sim` 库自身仍支持多总线。
 
+firmware 模式还支持把**电机模拟器拆成独立进程**（web 上位机「电机后端」即此形态）：
+
+```bash
+# 只起 FDCAN 模拟器（不拉 Gazebo/控制器）：可单独用于固件发现/离线/重连验证
+ros2 launch robot_sim simulation.launch.py simulator_only:=true \
+  controller_mode:=firmware transport:=slcan \
+  sim_tty:=/dev/serial/by-id/CANABLE \
+  start_web_host:=false start_micro_ros_agent:=false \
+  sim_control_socket:=/tmp/motor_sim.sock
+
+# 仿真流程不再内嵌模拟器（由外部/页面负责，避免两个实例争同一条总线）
+ros2 launch robot_sim simulation.launch.py controller_mode:=firmware \
+  transport:=slcan sim_tty:=/dev/serial/by-id/CANABLE \
+  start_fdcan_sim:=false
+```
+
+- `simulator_only:=true` 跳过被控对象/控制器/驱动端，只跑模拟器（要求
+  `controller_mode:=firmware` + 非 vcan 传输）；参数推导（电机/关节/力矩）与完整仿真完全同源。
+- `start_fdcan_sim:=false` 让 firmware 流程不内嵌模拟器；与
+  `start_micro_ros_agent:=true` 冲突（Agent 排序依赖模拟器写出的 ready-file）。
+- `sim_control_socket:=<path>` 开运行期控制通道（status/add/remove/link），协议见
+  [`micro_ros_agent/README.md`](../../../micro_ros_agent/README.md)。
+
 `vcan` 创建和启用需要当前用户具有 `CAP_NET_ADMIN`。若没有权限，可预先创建并启用接口：
 
 ```bash

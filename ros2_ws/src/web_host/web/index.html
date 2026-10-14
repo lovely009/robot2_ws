@@ -59,7 +59,7 @@
     <!-- ============ 左导航：屏切换（1–5 快捷键），data-goto 与 SCREENS 一致 ============ -->
     <nav class="nav" id="nav">
       <button data-goto="run"    aria-current="page"><span class="navlabel">运行</span><span class="navkey">1</span></button>
-      <button data-goto="teach"><span class="navlabel">示教</span><span class="navkey">2</span></button>
+      <button data-goto="teach"><span class="navlabel">动作</span><span class="navkey">2</span></button>
       <button data-goto="device"><span class="navlabel">设备</span><span class="navkey">3</span></button>
       <button data-goto="sim"><span class="navlabel">仿真</span><span class="navkey">4</span></button>
       <button data-goto="diag"><span class="navlabel">诊断</span><span class="navkey">5</span></button>
@@ -101,20 +101,16 @@
     </details>
   </template>
 
-  <!-- 选中关节读数 -->
+  <!-- 关节状态：全部电机同屏表（点击行 = 置顶 + 选中，行序与左栏列表联动）。
+       完整读数（速度/电流/跟随误差/命令源/测量年龄等）在行的 title 里 -->
   <template data-panel-template="readout">
     <details class="card" data-fold="sel" open>
-      <summary id="selTitle">未选中关节（点左栏或臂上的小球）</summary>
-      <div class="kv">
-        <div><span>位置</span><b id="selPosition">--</b></div>
-        <div><span>速度</span><b id="selVelocity">--</b></div>
-        <div><span>力矩</span><b id="selEffort">--</b></div>
-        <div><span>电流</span><b id="selCurrent">--</b></div>
-        <div><span>温度</span><b id="selTemp">--</b></div>
-        <div><span>跟随误差</span><b id="selErr">--</b></div>
-        <div><span>命令源</span><b id="selSource">--</b></div>
-        <div><span>故障</span><b id="selFault">--</b></div>
-        <div><span>测量年龄</span><b id="selAge">--</b></div>
+      <summary><span id="selTitle">关节状态</span><span class="spacer"></span><span class="sum" id="selSum">--</span></summary>
+      <div class="table-wrap">
+        <table class="jstates">
+          <thead><tr><th>ID</th><th class="num">位置</th><th class="num">力矩</th><th class="num">温度</th><th>状态</th></tr></thead>
+          <tbody id="selRows"><tr class="empty"><td colspan="5">等待 motor_topology…</td></tr></tbody>
+        </table>
       </div>
     </details>
   </template>
@@ -177,6 +173,29 @@
         <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
       </div>
       <div id="cmdResult" class="result tiny"></div>
+    </details>
+  </template>
+
+  <!-- 动作库播放（#/teach）：action_library/*.json → 分段轨迹（见
+       js/panels/actionLibrary.js 与主机侧参考实现 traj_play.py） -->
+  <template data-panel-template="actionLibrary">
+    <details class="card" data-fold="actionLibrary" open>
+      <summary>动作库<span class="spacer"></span><span class="sum" id="actionSummary">--</span></summary>
+      <div class="sim-panel">
+        <div class="ctrl-row wrap">
+          <label class="check" title="播放前自动武装（发 policy：enable=true + kp/kd）；取消勾选则不动策略，需自行保证电机已使能"><input id="actEnable" type="checkbox" checked> 使能</label>
+          <label class="check" title="播完自动从头再播，直到点停止"><input id="actLoop" type="checkbox"> 循环</label>
+          <label class="sim-field act-gain">kp<input id="actKp" type="number" value="30" min="0" step="1"></label>
+          <label class="sim-field act-gain">kd<input id="actKd" type="number" value="1" min="0" step="0.1"></label>
+          <span class="spacer"></span>
+          <input id="actFile" type="file" accept=".json,application/json">
+          <button id="btnActImport" class="secondary">导入到动作库</button>
+          <button id="btnActStop" class="danger" disabled>停止</button>
+        </div>
+        <div class="result tiny" id="actResult" role="status" aria-live="polite"></div>
+        <div class="act-list" id="actList"></div>
+        <div class="sim-hint tiny muted" id="actHint"></div>
+      </div>
     </details>
   </template>
 
@@ -357,6 +376,51 @@
         <pre class="sim-log" id="simLog" aria-label="仿真启动日志">等待启动</pre>
       </div>
     </details>
+    <!-- 电机后端 = 总线上扮演 CERB/VAXOR 电机的独立进程（fdcan_motor_sim.py）：
+         HIL 启动仿真时默认拉起、停止时联动收起，也可脱离仿真单独起停。 -->
+    <details class="card" data-fold="motorSim" open>
+      <summary>电机后端<span class="spacer"></span><span class="sum" id="motorBackendSummary">未启动</span></summary>
+      <div class="sim-panel">
+        <div class="sim-hint tiny muted" id="motorBackendHint">
+          参数取上方「仿真」的模型 / CAN 接口 / 设备选择（纯软 vcan 的总线电机由
+          motor_sim 节点扮演，不需要本后端）；HIL 启动仿真时自动拉起，也可只连
+          板子单独起停（验证固件发现 / 离线 / 重连）。
+        </div>
+        <div class="ctrl-row wrap">
+          <button id="btnMotorBackendStart" class="primary">启动电机后端</button>
+          <button id="btnMotorBackendStop" class="danger" disabled>停止电机后端</button>
+          <span class="spacer"></span>
+          <span class="tiny muted" id="motorBackendState" aria-live="polite">电机后端未启动</span>
+        </div>
+        <div class="result tiny" id="motorBackendResult" role="status" aria-live="polite"></div>
+        <pre class="sim-log" id="motorBackendLog" aria-label="电机后端日志">等待启动</pre>
+        <!-- 电机表与增删/断连控制台：后端运行中显示（/api/motor-sim/*） -->
+        <div class="sim-motors" id="simMotorPanel" hidden>
+          <div class="sim-motors-head">
+            <span>电机模拟</span>
+            <span class="spacer"></span>
+            <span class="tiny muted" id="simMotorHint" aria-live="polite"></span>
+          </div>
+          <div class="sim-motor-add">
+            <label>ID<input id="simMotorAddId" type="number" min="1" max="127" step="1" inputmode="numeric"></label>
+            <label>协议
+              <select id="simMotorAddKind">
+                <option value="cerb">CERB</option>
+                <option value="vaxor">VAXOR</option>
+              </select>
+            </label>
+            <label id="simMotorAddModelField">型号
+              <select id="simMotorAddModel">
+                <option value="r48">R48</option>
+                <option value="r58">R58</option>
+              </select>
+            </label>
+            <button id="btnSimMotorAdd" class="secondary">添加电机</button>
+          </div>
+          <div class="sim-motor-list" id="simMotorList"></div>
+        </div>
+      </div>
+    </details>
   </template>
 
   <!-- ============ 屏模板：每个屏一项，主区按 hash 克隆其中之一 ============ -->
@@ -366,9 +430,11 @@
       <section class="col-stage"><div data-panel="arm"></div></section>
       <section class="col-side">
         <div data-panel="readout"></div>
-        <div data-panel="policy"></div>
       </section>
-      <section class="col-command"><div data-panel="command"></div></section>
+      <section class="col-command">
+        <div data-panel="policy"></div>
+        <div data-panel="command"></div>
+      </section>
       <section class="col-drawer">
         <details class="drawer">
           <summary>观察<span class="spacer"></span><span class="sum drawer-sum">--</span></summary>
@@ -392,21 +458,7 @@
       <section class="col-index"><div data-panel="jointList"></div></section>
       <section class="col-stage"><div data-panel="arm"></div></section>
       <section class="col-side"></section>
-      <section class="col-command"><div data-panel="command"></div></section>
-      <section class="col-teach"></section>
-      <section class="col-drawer">
-        <details class="drawer">
-          <summary>观察<span class="spacer"></span><span class="sum drawer-sum">--</span></summary>
-          <div class="tabs" data-drawer-tabs>
-            <button class="tab" data-drawer-tab="curve">曲线</button>
-            <button class="tab" data-drawer-tab="events">事件日志</button>
-          </div>
-          <div class="drawer-body">
-            <div data-drawer-panel="curve"><div data-panel="curve"></div></div>
-            <div data-drawer-panel="events" hidden><div data-panel="events"></div></div>
-          </div>
-        </details>
-      </section>
+      <section class="col-command"><div data-panel="actionLibrary"></div></section>
     </div>
   </template>
   <template data-screen="device">

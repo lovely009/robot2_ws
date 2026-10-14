@@ -50,8 +50,8 @@ ros2 run micro_ros_agent micro_ros_agent --help
 - 两套工作区独立构建；运行时同时 source 两个 `install/setup.bash`（先 `/opt/ros`，
   再 `ros2_ws` 与 `micro_ros_agent`，顺序无强依赖）。
 - 默认 DDS 域（domain 0）下，micro-ROS 客户端发布的 topic 与 `ros2_ws` 节点直接互通，
-  无需额外桥接；上层 joint↔motor_id 映射的迁移进度见固件 HANDOFF
-  （`../micro_ros_firmware/docs/handoffs/HANDOFF-motor-runtime-refactor.md`）。
+  无需额外桥接；上层 joint↔motor_id 映射见固件 `README.md` 的话题契约与
+  `docs/architecture/module-boundaries.md`。
 
 ## 冒烟验证（无固件）
 

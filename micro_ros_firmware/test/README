@@ -11,19 +11,8 @@ cmake --build .host-build --clean-first -j2
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 14 个目标：
-
-- `motor_protocol`
-- `motor_protocol_adapter`
-- `motor_control`
-- `control_mailbox`
-- `can_rx_ring`
-- `can_tx_scheduler`
-- `imu_snapshot`
-- `bmi088_transport_status`
-- `w25q64_geometry`
-- `led_status`
-- `fdcan_motor_sim`
+该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 **23 个用例**（22 个 C++ 目标 + 1 个 python 线协议用例）。目标清单的唯一来源是 `test/host/CMakeLists.txt` 的 `fw_host_test()` 注册处——不要在别处复刻清单，
+历史上正是复刻导致了漂移。
 
 host 测试不模拟 HAL、FreeRTOS 或 rclc；目标板编译也只证明静态集成和链接，
 二者均不能替代真机时序与失效测试。

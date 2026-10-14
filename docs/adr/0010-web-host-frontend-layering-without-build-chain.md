@@ -75,4 +75,4 @@
 
 ## References
 
-- 设计：[2026-10-09-web-host-frontend-restructure-design.md](../superpowers/specs/2026-10-09-web-host-frontend-restructure-design.md)
+- 设计稿随 2026-10-14 文档收敛删除；层边界以本 ADR 为准。

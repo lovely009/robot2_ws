@@ -135,8 +135,8 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
-source /home/ly/robot_ws/ros2_ws/install/setup.bash
+source "$(git rev-parse --show-toplevel)/micro_ros_agent/install/setup.bash"
+source "$(git rev-parse --show-toplevel)/ros2_ws/install/setup.bash"
 ros2 launch web_host web_host.launch.py
 ```
 
@@ -200,7 +200,7 @@ domain 0 看到。两者无启动顺序要求，页面上话题无数据时先�
 ```bash
 # 另一个终端；ttyACM0=控制板 USB CDC（VID 0483）
 source /opt/ros/humble/setup.bash
-source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
+source "$(git rev-parse --show-toplevel)/micro_ros_agent/install/setup.bash"
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
 ```
 

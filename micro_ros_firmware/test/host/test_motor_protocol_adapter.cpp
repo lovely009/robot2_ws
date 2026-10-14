@@ -1183,7 +1183,7 @@ static void test_cerb_safety_protect_write_frames() {
 }
 
 // 方向写事务（0x2541:00）：写 + 读回核验，**没有保存阶段**（易失，同 0x2650）。
-// 写命令 `23 41 25 00 0X 00 00 00` 由 owner 手工核实（手册未给这个对象的写命令），
+// 写命令 `23 41 25 00 0X 00 00 00` 由 维护者 手工核实（手册未给这个对象的写命令），
 // 逐字节锁死；阶段数恰好 2——哪天有人"顺手补一条保存"会在这里被拦住。
 static void test_cerb_direction_write_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;

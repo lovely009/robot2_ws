@@ -12,7 +12,7 @@
 > | 单一 `motor_rt_task`、每总线 SPSC RX ring、P0/P1/P2 | RX/P2/TX 最坏预算、WCET/jitter、P0/P1 延迟 |
 > | 消息、QoS 基线、结果事件、公共状态位 | BUS_OFF 恢复与 Profile 自动一致性机制 |
 >
-> 详细现状见 [ARD-0007](../archive/ARD-0007-micro-ros-motor-runtime.md)；开放项由[运行时验证计划](../plans/active/motor-runtime-validation.md)维护。
+> 详细现状见 [README.md](../../README.md) 的话题契约；开放项见同一文件的「开放项与开发计划」一节。
 
 ## 2026-09-18 勘误（实现现状优先）
 
@@ -31,7 +31,7 @@
 - **策略通道**：`/micro_ros_do/motor_policy` 走**独立的有界 mailbox**（不走 config FIFO——那队列深 16，装不下最多 64 台的策略消息）。内核 `SET_POLICY` 单台入口与批量入口 `motor_control_apply_policy` 共用同一套落地逻辑；代数门是「`policy_enable` 为 false 时 `enabled=true` 要求代数严格前进」一处判定，四条冻结路径无需改动。
 - **BUS_OFF 恢复**：HAL 回调清 `CCCR.INIT` 自清恢复，非仅计数。
 - **W25Q64**：已接线使用，非休眠占位。
-- **ARD 正文归档**：完整 ARD-0007 正文已移至 [`docs/archive/ARD-0007-micro-ros-motor-runtime.md`](../archive/ARD-0007-micro-ros-motor-runtime.md)，现行设计以本勘误与 `docs/architecture/motor-runtime-decision-log.md` 为准。
+- **ARD 正文归档**：完整 ARD-0007 正文（55 章冻结规范）已于 2026-10-14 随文档收敛删除（见 git 历史）；现行设计以本勘误与 `docs/architecture/motor-runtime-decision-log.md` 为准。
 
 ## 2026-09-23 当前实现摘要
 
@@ -136,4 +136,4 @@ Vaxor/CERB 适配器分别封装发现、编解码、MIT 控制、反馈、停�
 ## 参考
 
 - [micro-ROS 电机运行时架构开发基线](../architecture/motor-runtime-decision-log.md)
-- [电机运行时架构验证计划](../plans/active/motor-runtime-validation.md)
+- 开放项与阶段门槛：[README.md](../../README.md) 的「开放项与开发计划」

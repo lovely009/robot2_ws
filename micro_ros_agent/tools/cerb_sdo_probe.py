@@ -8,7 +8,7 @@
 `:01`/`:02` 一律 ABORT `0x06090011`（子索引不存在）。对象语义：读
 `40 50 26 00 00 …` → 反馈 `43 50 26 00 0x …`；`23 50 26 00 **00** …` = 开启、
 `23 50 26 00 **01** …` = 关闭；**掉电不保存**（实测）。
-见 `micro_ros_firmware/docs/plans/active/motor-runtime-validation.md` §3。
+见 `micro_ros_firmware/README.md` 的开放项一节（参数链与 Profile）。
 
 默认只发一种字节形态（8 字节，恰好一个 SDO 上传发起）：
 

@@ -5,12 +5,10 @@ STM32H723VGT6 上的 **micro-ROS 固件**（PlatformIO + STM32duino + FreeRTOS�
 `../micro_ros_agent/` 通信，桥接进 ROS 2 Humble 域。
 
 当前业务为 **BMI088 IMU** 与 **三路 FDCAN**，底层功能移植自达妙官方例程
-`docs/dm-mc02例程/CtrBoard-H7_IMU_TempCtrl`（例程整树未纳 git）：
-SPI2 阻塞传输、POWER_5V/CS/EXTI、TIM3 加热与温度 PID 均保留；
-Mahony 姿态解算与 micro-ROS 发布为本工程增强，不属于官方例程内容。
-三路 FDCAN（FDCAN1/2/3）移植自
-`docs/dm-mc02例程/CtrBoard-H7_FDCAN`：FD + BRS、标称
-1Mbps / 数据 5Mbps、接收中断回调保留；官方例程的周期测试帧未移植。
+（CtrBoard-H7 的 `IMU_TempCtrl` 与 `FDCAN` 两例；例程整树不入库）：SPI2 阻塞传输、
+POWER_5V/CS/EXTI、TIM3 加热与温度 PID 均保留；Mahony 姿态解算与 micro-ROS 发布为
+本工程增强，不属于官方例程内容。三路 FDCAN（FDCAN1/2/3）的 FD + BRS、接收中断回调
+同样来自例程；官方例程的周期测试帧未移植。
 电机协议（vaxor 25/30mm + CERB CAN FD/MIT）已收敛为 `lib/motor_protocol`
 adapter 接缝：厂家字节布局、CAN-ID 推导与 FD 属性只存在于该库，内核只见 SI
 关节侧物理量。电机运行时为 **ID 驱动、发现式**（ARD-0007）：固件
@@ -19,9 +17,8 @@ CERB SYNC 上报心跳），型号由内核读设备 SDO 0x1008 自报身份、�
 自动绑定；命令是最多 64 目标的
 ID 化完整快照。反馈模型（2026-09-05 与实际设备核实）：两协议反馈均分
 "命令实时回显（500Hz，跟随控制边界）"与"20ms 周期状态心跳（承担总线检测）"两部分；
-OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
-`docs/plans/active/motor-runtime-validation.md`（唯一清单）；开发顺序、阶段门槛与
-「什么明确不做」见 `docs/plans/active/firmware-development-roadmap.md`。
+OFFLINE = 心跳丢失 100ms。**开放项、阶段门槛与「什么明确不做」见本文件末尾的
+「开放项与开发计划」一节。**
 
 ## 关键决策
 
@@ -42,8 +39,32 @@ OFFLINE = 心跳丢失 100ms。上层迁移与真机台架开放项见
 | CANFD 时钟 | **PLL2Q = 80MHz**（标称 1Mbps / 数据 5Mbps） | 官方例程用 PLL1Q=80MHz；本工程 PLL1Q 已给 SPI2，故改用 PLL2Q |
 | CANFD 构建 | `-DHAL_FDCAN_MODULE_ENABLED` | STM32duino 默认关闭 FDCAN HAL 模块 |
 | W25Q64 Flash | OCTOSPI2 Port 1：PA1 / PA3 / PB0 / PB2 / PE11 / PD11，Quad page-program / Quad I/O read | `storage_task` 独占：双槽（每槽 2 扇区）A/B 参数持久化（见「W25Q64」节） |
-| 电机接口 | ID 化有界消息（5 个订阅 + 8 个发布） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
+| 电机接口 | ID 化有界消息（5 订 10 发） | 发现式运行时，无 `joint_name`/固定电机表（ARD-0007） |
 | 板卡变体 | `STM32H7xx/H723V(E-G)(H-T)_H730VB(H-T)_H733VG(H-T)` + `variant_generic.h` | STM32duino 官方 GENERIC_H723VGTX 变体 |
+
+## 领域术语与所有权
+
+固件拥有设备发现、电机安全与执行、CAN 传输、IMU 采集与设备参数持久化；ROS 桥只做
+应用边界的消息转换，**不拥有硬件状态**。
+
+| 术语 | 含义与所有者 |
+|---|---|
+| CAN TX 路由 | `lib/motor_tx_router`：挑有界 P0/P1/P2 工作、核算物理帧预算、调用注入的 submit 端口。起手有 P0 的泵只处理 P0，首次被拒即停止提交并把该帧与未尝试的 P0 按序放回；P1/P2 只在不带 P0 的泵上跑。`motor_rt_task` 持有路由器实例，是唯一正常 HAL 提交者 |
+| P0 / P1 / P2 | 调度类别：安全动作 / latest-wins 控制 / 发现与配置。协议无关队列归 `lib/fdcan`，出队与物理提交策略归路由器 |
+| P1 聚合 | `lib/motor_protocol` 适配器行为：CERB 合并相邻兼容的 MIT 命令，Vaxor 与不兼容或单条输入直通。调度器不知道协议布局 |
+| 设备 SAVE | 请求驱动器把脏的、可保存的参数字段落到它自己的 flash；`lib/save_transaction` 等到关联结果才继续 |
+| W25 SAVE | 固件参数投影落到外部 W25Q64。**只有 `storage_task` 访问 flash**，且只在设备保存阶段成功后进行 |
+| 脏槽位 | 设备侧活值与本机持久化记录不一致的槽位；脏状态来自运行时快照，由事务协调器过滤 |
+
+**变更约束**
+
+- 协议字节与 CAN ID 留 `lib/motor_protocol`；队列存储与 P0/P1/P2 类别机制留 `lib/fdcan`；
+  两者的有界连接留 `lib/motor_tx_router`。SAVE 时序留在纯 C 事务模块，ROS 与 storage
+  回调留 `src/param_bridge.cpp`。
+- 新增协议适配器**只能追加**到注册表：注册顺序同时是拓扑快照里的数字协议 ID，改序会移动既有条目。
+- mailbox 的配置类别枚举与协议配置类别枚举保持**不同类型**（共享数值由
+  `include/motor_config_contract.hpp` 穷举校验，纯协议值不进该映射）。
+- 保持单写者所有权：电机运行时、正常 CAN TX、W25Q64 各只有一个所有者。
 
 ## 时钟
 
@@ -439,7 +460,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 不是记录**——初始化语义的来源是固件那份表。
 
 - 一致 → 初始化通过，正常可控；
-- ⚠️ **2026-10-12：初始化结论只报不拦（owner 为台架取消设备参数门禁）**。
+- ⚠️ **2026-10-12：初始化结论只报不拦（维护者 为台架取消设备参数门禁）**。
   `PENDING` 回读未收尾 / `MISMATCH` 不一致 / `UNVERIFIED` 回读失败 / `NO_RECORD`
   本机无该台记录，**都不再改 lifecycle、不再拒绝 `SET_ENABLE`、不再拦运动帧**：该台
   停在 `READY_DISABLED`，可直接使能与运动。结论仍如实上报——`dev_init`、
@@ -509,7 +530,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 参数项 `FIELD_DIRECTION`（原值直通：0 = CW，1 = CCW），写事务 = SDO 写
 `23 41 25 00 **0x** …` + 读回核验（`40 41 25 00 …`），仅未运动时受理。
 掉电不保存，由**上电归一**在回读比对之前按 W25 记录写回（见上面的新小节）。
-**对象语义**（经 owner 手工核实，SLCAN 复现）：读 `40 50 26 00 00 …` → 反馈
+**对象语义**（经 维护者 手工核实，SLCAN 复现）：读 `40 50 26 00 00 …` → 反馈
 `43 50 26 00 **0x** …`（`0x` 即当前状态）；`23 50 26 00 **00** …` = 开启保护、
 `23 50 26 00 **01** …` = 关闭保护。
 
@@ -659,21 +680,179 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - [ ] 断开/恢复 BMI088、阻塞 SPI 或停止 DRDY，验证 2ms transport bound、每秒
   初始化重试、heater off 与双缓冲不撕裂。
 
-## 已知问题与后续
+## 已知问题
 
-- BMI088 收发固定走阻塞 `HAL_SPI_TransmitReceive`，当前不占用 DMA stream；
-  若后续切换 DMA，设备句柄/回调仍归 `lib/imu`，控制器资源须向 `lib/dma` 登记。
+- BMI088 收发固定走阻塞 `HAL_SPI_TransmitReceive`，当前不占用 DMA stream；若后续切换
+  DMA，设备句柄/回调仍归 `lib/imu`，控制器资源须向 `lib/dma` 登记。
 - 无 agent 时节点不注册、固件在 `kWaitAgent` 轮询，属正常。
 - `loop()` 被 STM32FreeRTOS 的 idle hook 调用，只能放非阻塞代码。
-- 电机运行时已完成 ID 驱动化（ARD-0007，剩余项见 HANDOFF「剩余工作」）；9 个
-  `can_bridge_msgs` 消息（13 个顶层消息 + 8 个 Target/Entry 子消息）由
-  `../micro_ros_agent/src/can_bridge_msgs` 唯一维护，
-  固件侧只通过 `extra_packages/can_bridge_msgs` 符号链接复用。
-- CERB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、
-  力矩 `±11/±45 Nm`，必须与真机参数设置页一致；`motor_rt_task` 每 20ms 发送
-  `0x080` SYNC 维持设备 20ms 状态心跳（总线检测）。SYNC 自 2026-09-22 起与
-  SDO/MIT 同为 **FD+BRS**（全总线统一 CANFD 加速）：经典帧不经过数据相位，
-  数据段位率配错时唯独 SYNC 还能通，会造成「链路正常」的假阳性。注意总线仍是
-  混合的——真机 CERB 器件自己按字典发经典帧（SDO 应答）。
-- RX burst 下的实际 motor_rt WCET/jitter、ring 容量余量及 30/100ms 动作边界
-  尚需按上述清单在 `dev-real` 无负载测量；host/固件编译不能替代真机时序证据。
+- `can_bridge_msgs` 共 **21 个** `.msg`（13 个顶层 + 8 个 Target/Entry 子消息），唯一来源是
+  `../micro_ros_agent/src/can_bridge_msgs`；固件侧只用 `extra_packages/can_bridge_msgs`
+  符号链接复用，不存在第二份副本。
+- CERB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、力矩 `±11/±45 Nm`，
+  必须与真机参数设置页一致。`motor_rt_task` 每 20 ms 发 `0x080` SYNC 维持设备状态心跳，
+  SYNC 与 SDO/MIT 同为 **FD+BRS**：经典帧不经过数据相位，数据段位率配错时唯独 SYNC 还能通，
+  会造成「链路正常」的假阳性。总线仍是混合的——真机 CERB 器件自己按字典发经典帧（SDO 应答）。
+
+## 开放项与开发计划
+
+**瓶颈是验证债，不是能力债**：能力基本已实现，绝大多数开放项缺的是真机/HIL 证据。
+本节是开放项的**唯一清单**（原 `docs/plans/active/` 与 `docs/architecture/lib-library-audit.md`
+于 2026-10-14 文档收敛时并入）。TBD 编号沿用原清单，不重编。
+
+### 三条硬约束（动任何东西前先看）
+
+1. **RAM_D1 余量 17,460 B**（310,220 / 327,680 = 94.7%）。唯一的直接省 RAM 手段是调小
+   `MOTOR_CONTROL_MAX_TRAJECTORY_POINTS` / `MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS`
+   （见 `lib/motor_control/include/motor_control.h`）。
+2. **机构无抱闸，且软停帧本身是零位置刚度**（`kp = 0`）——30 ms 与 100 ms 两级都是「撒手」，
+   对承重关节不是安全停止（见 TBD-SAFETY-03）。软件停机不替代硬件急停与机械限位。
+3. **`libmicroros.a` 的 meta 槽位是库编译期事实**（publishers 10/12、subscriptions 5/6、
+   services 0/5），`-D` 改不动；改 meta 或 `.msg` 只能走
+   `../micro_ros_agent/tools/refresh_microros_messages.py`（增量、离线），不是 `-t clean_microros`。
+4. **单条消息上限 512 B，且 best-effort 输出流只有一块全局静态缓冲、所有 publisher 共用**
+   （`UXR_CONFIG_CUSTOM_TRANSPORT_MTU = 512`，输出流在 `rmw_init` 建一次）。所以「按总线拆话题」、
+   「加一条诊断话题」、「加一个自定义服务」这类改动都会在 init 阶段撞墙；大消息（如多点轨迹）
+   必须自行分段，段间还要考虑 XRCE 分片窗口。
+
+### 开放项
+
+> 「host 已覆盖」= 逻辑有自动测试、只缺真机证据；其余 `[ ]` 均需台架或设计动作。
+
+**实时性与总线容量**
+
+- [ ] **TBD-RT-01** 实测 `motor_rt_task` WCET、1 ms 周期 jitter、P0/P1 最坏发送延迟；含
+  **TBD-RT-02** 轨迹步进与 mailbox 轨迹校验的最坏耗时（台架前只有静态上界）。
+- [ ] **TBD-CAN-01** 最坏反馈流量下 RX ring / P2 配额 / TX 队列容量：记录 overflow、backlog、
+  队列峰值、总线负载。
+- [ ] **TBD-CAN-02（单总线 VAXOR 容量）** VAXOR 的 P1 不能多轴聚合，每总线每 1 ms 最多提交
+  16 个物理帧；按 500 Hz 控制周期估算，单总线 32 台 VAXOR 已用满理想 P1 预算（尚未计 P0/P2）。
+  参考负载：4 台 200 Hz 命令仅 4.35%，16 台/总线 26%——**总线负载不是约束，中断余量才是**。
+  需明确拓扑上限，或重新评估调度预算。
+- [ ] 三总线约 40 台 VAXOR/CERB 混合持续压测；量 USB CDC 状态上行带宽余量。
+- [ ] 故障注入下 P0 不静默丢失（CAN 无 ACK、RX burst、下游硬件拒收；重入队/抢占逻辑 host 已覆盖）。
+- [ ] 长时间热插拔、离线/恢复循环稳定性。
+- [ ] **TBD-STORAGE-01（v3 双扇区擦写阻塞）** save 从擦 1 个扇区变擦 2 个，阻塞时间约翻倍。
+  本文档与 `AGENTS.md` 里的 "~1 s" 是 v2 单扇区旧值，**v3 实测值待台架**（与「擦写中掉电」同轮记录）。
+
+**安全语义（需真机）**
+
+- [ ] **TBD-SAFETY-01** 以厂家文档 + 无负载台架确认两协议 30 ms 软停的实际动作（缺席软停、
+  30/100 ms 时基与单电机隔离语义 host 已覆盖）。
+- [ ] **TBD-SAFETY-02** 确定 RX ring overflow 触发安全降级的**阈值与恢复条件**——当前只有 TBD
+  标记，机制未定义，属真缺能力而非仅缺证据。
+- [ ] **TBD-SAFETY-03（软停是「撒手」，设计缺口）** 30/100 ms 两级软停分别走
+  `cerb_encode_neutral` / `vaxor_encode_soft_stop`，二者只填 `kd` 与 `enable` ⇒ `kp = 0`、
+  目标位置 0、前馈 0，即「零刚度 + 保持使能」。受控保持的能力其实已存在（轨迹通道的
+  末点钳持 + `motor_control_hold_step` 每 2 ms 重发），缺的是**安全级联没有第三档去调用它**。
+  另一前提：真正的前馈来源在上位，`robot_dynamics` 目前不实现重力补偿。
+- [ ] 策略通道真机（`micro_ros_do/motor_policy` 的 enable/kp/kd）：代数门（故障后重发同一代数
+  必须被拒）、稀疏语义（未列出的电机保持原状）、断连重连后未重新武装不得自动复权。逻辑 host 已覆盖。
+- [ ] 快照通道 500 Hz 命令率真机（把上位快照按 50 Hz 发，低于 30 ms 新鲜度阈值）。
+- [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode；厂家故障锁存、心跳丢失
+  100 ms OFFLINE 与恢复路径（级联逻辑 host 已覆盖）。
+- [ ] CERB 清错帧真机（对新硬件参数表）；Vaxor 故障恢复（`system.clear_fault` 应回 `UNSUPPORTED`）。
+- [ ] CERB 每总线 20 ms 单帧 SYNC、约 20 ms 状态上报、100 ms OFFLINE 边界实测；线圈温度
+  字段（12B 反馈 `data[8..9]`，大端 int16）真机核对。
+- [ ] BMI088 断线 / 阻塞 SPI / 停 DRDY：传输超时、降级重试、heater off、双缓冲不撕裂。
+- [ ] 500 Hz 多轴快控复测（同总线 4 台）：按固件侧 `tx_frame_count` 差分确认约 550 帧/s
+  （500 × `0x210` + 50 SYNC），并核对 `tx_hw_reject` / `p1_replaced` / `tx_dropped` /
+  `rx_hw_lost` 无持续积压。此前 200 Hz 单轴台架数据是旧版本基线，不能用来证明本项。
+- [ ] 堆高水位（残余）：参数槽退役后，堆上不应再有按电机数线性增长的常驻项。
+- [ ] **TBD-STORAGE-02（升级迁移兜底）** 旧固件上 save 奇数次会让活动 blob 落在另一槽，
+  需确认新固件仍能选对。
+
+**参数链与 Profile**
+
+- [ ] REFRESH_PARAMS 按总线一问一答 + 四个 SDO upload 回读：模拟器台架已验证字节序列，
+  真机 `0x2539` 保存闭环仍待 `dev-real`。
+- [ ] **TBD-PROFILE-02** CERB 规格书的 Kt 三套口径互不一致，反馈扭矩估计仍依赖 Kt 链
+  （真值若只有名义一半，上层力矩会偏大 1 倍）。判别实验：静止重力载荷下同时读字典
+  `0x6077`（力矩，0.01 N·m）与 `0x6078`（实际电流，mA），算 `Kt_eff = τ/(Iq×gear)`。
+- [ ] Vaxor 80 速比型号无完整规格，型号目录刻意不收；规格到位并补 Profile 前不得开放控制。
+- [ ] 建立上层型号库（`motor.yaml`）与固件内置 Profile 的一致性机制（零机制）。
+
+**上层同步**
+
+- [ ] 长示教串行播放未上真机（2148 点级）：段界位置无跳变、每段 `trajectory_accepted` 与
+  `completed` 逐次到齐、`mailbox_rejected_trajectory=0`，并实测一次段界停顿时长。
+- [ ] 多段组装（`segment_count>1`）仍未上真机：两侧发送方现在恒发单段，乱序/缺段路径未验。
+
+CERB 设备对象事实与三条待厂商答复项见 `docs/architecture/motor-runtime-decision-log.md` §12。
+
+### 阶段与门禁
+
+顺序是「先还哪一笔债」，不是「还要做什么功能」。阶段出口即门禁全绿。
+
+| 阶段 | 内容 | 门禁 |
+|---|---|---|
+| 0 测量底座 | GPIO 翻转探针（进出 `motor_rt_task` 服务拍各翻一次）+ 每拍 `DWT->CYCCNT` 差值最小统计，让 WCET/jitter 从测不出变成可测。复用现有结构，不新增大数组 | G0：示波器可见 1 ms 周期方波，`pio run` 绿 |
+| 1A 实时与总线容量取证 | 开放项「实时性与总线容量」全部；前置 `dev-real`、无负载、硬件急停就绪 | G1A：该节开放项归零，单总线 VAXOR 上限有具体数字 |
+| 1B 安全带 | following-error / 过温监测；TBD-SAFETY-02 的降级阈值与恢复条件 | G1B：新增 host 用例全绿 |
+| 2 安全语义真机 | 开放项「安全语义」全部 | G2：有结案记录，软停真机行为写成结论 |
+| 3 Profile 一致性 | `motor.yaml` ↔ 固件 Profile 一致性机制；Kt 结论入 Profile | G3：「改 `motor.yaml` 即红」可复现 |
+| 4 架构收口 | ADR 0007 转 `accepted`；RAM 减压决策记录（做或不做都要记） | G4 |
+
+判据一律以**固件侧计数**为准，不依赖仪器——台架 SLCAN 在约 880 帧/s 已证不可信。
+
+### 不做清单
+
+| 不做 | 理由 |
+|---|---|
+| 在 STM32 上做动力学 / MPC / WBC | Pinocchio 已是独立计算边界（ADR 0008），不进实时路径 |
+| 拆出第二个实时任务（`SafetyTask`/`MotionTask`/`ServoBusTask` 分家） | 新增所有者、新锁、新队列；收益（检测延迟 ≤1 ms → ≤0.5 ms）相对 30 ms 软停阈值与约 500 ms 看门狗无意义，且 TCB/栈要落在已满 94.7% 的 RAM_D1 |
+| `DebugShellTask` / CAN 调试桥 | 调试桥已删除；`src/syscalls.cpp` 用强符号空 `_write` 禁止 MCU 侧 printf；调试走诊断话题 + SWD |
+| 在 MCU 侧维护 `joint_name` / 建 JointRegistry 关节语义 | ADR 0007 §1 禁止项；映射只存在于主机侧 |
+| 复活参数服务器（`rclc_parameter`） | 2026-09-21 整体退役；`services 0/5` 是有意保留的余量，不降 |
+| 恢复 name-to-ID 兼容层 | ARD-0007 禁止项 |
+| 在 RAM 预算审计前加任何静态大对象 | RAM_D1 仅余 17,460 B |
+| 拿到容量数据前动架构或做减压 | 数据可能直接推翻扩展的必要性 |
+| 给未标定型号（Vaxor 80 速比）开控制 | 没有规格就没有正确的 Kt 与限值 |
+| 由 `motor.yaml` 代码生成 Profile 表 | 引入构建期依赖与生成物入库问题，收益不值（用一致性测试替代） |
+
+### 待裁定（启动对应阶段前必须答复）
+
+| # | 问题 | 影响 |
+|---|---|---|
+| 1 | 目标规模是 14 台还是约 40 台？ADR 0007 写「约 40 台外置电机」，而 `motor_driver.yaml` 是 14 台 | 阶段 1A 的容量判据与阶段 4 的 ADR 收口判据全取决于它 |
+| 2 | R58/R48 实际带不带抱闸？本文档写「机构当前无抱闸」，但 CERB MIT 控制字 bit6 就是抱闸释放且固件恒置 | 决定 1B 的正解是「重新夹紧抱闸」还是「kp 保持」，实现完全不同 |
+| 3 | 硬件急停是否已有物理通道（板上按钮 / EXTI 引脚），还是只有外部断电？ | 决定软件急停在 1B 里是纯逻辑还是要动板级 |
+| 4 | 是否接受在 TBD-SAFETY-01 出结论前先动安全边界？ | 阶段 1B 的范围开关 |
+| 5 | RAM_D1 减压是否获授权？ | 不授权则接入新执行器家族永久锁死 |
+| 6 | 上位 `robot_dynamics` 的重力前馈是否作为外部依赖写进路线？ | 直接决定受控保持能否真的不掉臂（见 TBD-SAFETY-03） |
+
+### 库结构与测试边界
+
+14 个库的目录归属、职责与依赖方向经审查整体符合：无库 include `src/`或任务实现，
+`motor_control → motor_protocol`、`storage_projection → motor_control + param_store`、
+`session_sync → control_mailbox + motor_control` 均为单向、无反向环。测试边界：
+
+- 依赖目标板验证的路径：`fdcan` 的 `can_bsp.c`/`fdcan.c`、`imu` 的 SPI/HAL middleware、
+  `w25q64` 的 OCTOSPI 命令层、`dma`、`ws2812`。
+- `control_mailbox` 的共享锁并发、NULL 提交、clear 与计数持久性有 host 用例，板级临界区
+  调度时序仍需台架确认。
+- `param_store` v3 的 `model_name` / `identity_hash` / MIT 三标度 / `profile_version`
+  是**预留未实现**字段，当前不应宣称已持久化。
+- `motor_protocol` 的 CAN FD 属性、配置确认对象、软停与离线阈值仍有 TBD；`fdcan` 的过滤器
+  与 P2 配额也有待冻结项。
+- **「两协议 ID 段不重叠」由 `test/host/test_protocol_family_isolation.cpp` 的全 ID × DLC 扫描
+  守住**：归属循环是「首个命中即 break」，真重叠不会报错、只会把电机按错协议解码，所以该不变量
+  必须有测试盯着，不能只靠一句注释。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| 本文件 | 工程事实 + 话题契约 + 开放项与开发计划 |
+| [AGENTS.md](AGENTS.md) | 操作手册：构建、烧录、台架顺序与坑 |
+| [docs/adr/0007](docs/adr/0007-micro-ros-discovery-driven-motor-runtime.md) | 架构决策（顶部含 2026-09-18 勘误） |
+| [docs/architecture/module-boundaries.md](docs/architecture/module-boundaries.md) | 模块依赖、执行上下文、数据所有权与测试边界 |
+| [docs/architecture/motor-runtime-decision-log.md](docs/architecture/motor-runtime-decision-log.md) | 设计理由与变更史（§12 为 CERB 设备对象事实与待厂商项） |
+| [lib/README.md](lib/README.md) | 库分层与各库契约细则 |
+| [../docs/guides/fdcan1-bench-guide.md](../docs/guides/fdcan1-bench-guide.md) | 台架操作指南（仓库根） |
+
+厂商参考资料（原件不改内文）平铺在 `docs/` 根：控制板原理图与管脚标注图、VAXOR/达妙
+16–30 mm 协议手册与 25–30 mm 参数规格、CERB/巨蟹协议说明书与 CANopen 字典表、R48/R58 参数规格。
+
+协议文档中的电机轴/输出轴、角度、转速、电流和力矩单位不可直接渗透到上层；换算边界统一在
+`lib/motor_protocol` 与型号 Profile。

@@ -1,97 +1,48 @@
-# robot_ws（dev/robot_ws）
+# robot_ws
 
-机器人的 ROS 2 Humble 工作空间（开发分支 `dev/robot_ws`）。七个 ament 包，真机、仿真、消息定义与 Web 上位机并存：
+机器人的三区域工作空间（开发分支 `dev/robot_ws`）。三个区域**各自独立构建**，不是一个
+colcon 工作区；改哪个区域就读哪个区域的文档。
 
-| 包 | 定位 |
-|---|---|
-| `can_bridge_msgs` | 固件与 ROS 2 共用的 ID 化有界消息定义 |
-| `motor_drive` | 无 ROS 底层驱动库（传输 / 线协议 / 电机映射） |
-| `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up |
-| `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
-| `robot_sim` | 机械臂 URDF 模型库（`models/<模型名>`）与 Ignition Gazebo 集成 |
-| `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖） |
-| `web_host` | rosbridge Web 上位机（姿态、IMU、电机状态与命令快照） |
+| 区域 | 内容 | 构建系统 | 权威文档 |
+|---|---|---|---|
+| `ros2_ws/` | ROS 2 Humble 七个 ament 包：真机 + 仿真 + 动力学 + 消息 + Web 上位机 | colcon | [ros2_ws/README.md](ros2_ws/README.md) + 各包 `README.md` |
+| `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件 | PlatformIO | [micro_ros_firmware/README.md](micro_ros_firmware/README.md)（工程事实）+ [AGENTS.md](micro_ros_firmware/AGENTS.md)（操作手册） |
+| `micro_ros_agent/` | micro-ROS Agent 独立 colcon 工作区与主机侧台架工具 | colcon（在该目录内独立构建） | [micro_ros_agent/README.md](micro_ros_agent/README.md) |
+
+三个区域的构建与运行边界互相独立；改动前先读对应区域的文档。固件与 ROS 2 之间的
+ID 化话题桥、消息单源位置见 `micro_ros_firmware/README.md`。
+
+## 快速开始
+
+```bash
+# ROS 2 侧
+source /opt/ros/humble/setup.bash
+cd ros2_ws && colcon build --symlink-install && source install/setup.bash
+
+# 固件侧（PlatformIO，不能用 colcon）
+cd micro_ros_firmware && ~/.platformio/penv/bin/pio run
+
+# micro-ROS Agent（独立工作区）
+cd micro_ros_agent && colcon build --symlink-install
+```
 
 ## 分支
 
 - `dev/robot_ws`：开发分支（本分支，真机 + 仿真 + 动力学 7 包）
-- `dev-sim`：仿真线（纯 `motor_sim` + `robot_sim`）
-- `main`：发布
+- `dev-sim`：仿真线、`dev-real`：真机线、`main`：仅发布
 
-## 构建与测试
+## 文档地图
 
-```bash
-source /opt/ros/humble/setup.bash
-cd ros2_ws
-colcon build --symlink-install
-source install/setup.bash
-colcon test && colcon test-result --verbose
-```
-
-## 真机 bring-up
-
-默认 serial_slcan 双总线（`/dev/ttyACM0`、`/dev/ttyACM1`），无需传参：
-
-```bash
-ros2 launch motor_hardware_interface hardware.launch.py
-```
-
-覆盖设备路径：`interface_<逻辑总线名>:=<路径>`（如 `interface_left_arm:=can0`）。
-传输类型由 YAML 决定：切换 socketcan ↔ serial_slcan 须改
-`motor_hardware_interface/config/motor_driver.yaml`；`bus_override` 只覆盖设备路径。
-
-## 仿真 bring-up
-
-```bash
-# 纯 Gazebo：Ignition + gz_ros2_control 位置控制器直接驱动模型
-ros2 launch robot_sim gazebo.launch.py
-
-# 端到端电机—机械臂仿真：Gazebo + motor_sim + effort 门控 + motor_hardware_interface
-ros2 launch robot_sim simulation.launch.py
-```
-
-`gazebo.launch.py` 不经过 `motor_sim` 的 vcan 回路（`motor_sim` 的接口选择由
-`transport_mode` 与显式的 bus→端口参数决定，无默认值）。`simulation.launch.py`
-默认用本机自动创建/清理的 `robot_vcan0` 把两条串成闭环，拓扑由
-`models/<模型名>/config/simulation_topology.yaml` 叠加权威电机配置生成；
-传输可选 `transport:=vcan|socketcan|slcan`，控制端可选
-`controller_mode:=host|external|firmware`（`firmware` 走 STM32 HIL，需先 source
-`micro_ros_agent` 工作区）。详见 `ros2_ws/src/robot_sim/README.md`。
-
-## 配置（两份文件）
-
-- **`config/motor.yaml`（型号库）**：每型号**协议运行所需静态参数**（如
-  `torque_constant_nm_per_amp`、`gear_ratio`）与软件侧**安全阈值**（额定/峰值
-  扭矩等），与拓扑无关、可跨机器人复用。完整电机规格（电磁参数、背隙、
-  电流/电压/温度范围等）见 `ros2_ws/src/motor_drive/docs/` 规格书。
-- **`config/motor_driver.yaml`（拓扑，唯一入口）**：`motor_specs_file` 引用型号库 +
-  `timing` + `buses` + `motors` 装配（每台电机 `type` 引用 motor.yaml 型号，
-  单电机可覆盖参数；`command.kp/kd` 为每台电机的动态控制增益）。
-
-## 核心契约
-
-- **双文件配置**：拓扑 `motor_driver.yaml`（电机数量/类型/ID/关节名/总线/传输/
-  动态增益）与型号参数 `motor.yaml`（协议运行参数/安全阈值）分离；增删改电机
-  零代码改动（新增物理关节时同步 URDF，测试兜底）。
-- **接口自适应**：`CanTransportRegistry` + YAML `transport` 字段，内置
-  `socketcan` / `serial_slcan`。
-- **协议自适应**：`MotorProtocolRegistry` + YAML `type`，内置 `vaxor` / `cerb`。
-- **清单自动生成**：controller joints 与 URDF ros2_control 关节清单由 launch 按
-  实际配置生成，不手抄；`motor_config_file:=` 覆盖后以实际配置为准。
-
-## 扩展指南
-
-| 场景 | 改动 |
+| 文档 | 内容 |
 |---|---|
-| 增删电机 | 只改 `motor_driver.yaml` `motors`（新物理关节时同步 URDF） |
-| 修改电机物理参数 | 改 `motor.yaml` 型号段（torque_constant / gear_ratio 等） |
-| 新增电机类型 | 实现 `MotorProtocol` + 注册工厂 + `motor.yaml` 声明 |
-| 新增传输 | 实现 `CanTransport` + 注册工厂 + YAML `transport` |
+| [ros2_ws/README.md](ros2_ws/README.md) | ROS 2 区域：七包、构建测试、bring-up、配置契约、扩展指南 |
+| [micro_ros_firmware/README.md](micro_ros_firmware/README.md) | 固件区域：工程事实、话题契约、术语与所有权、开放项与开发计划 |
+| [micro_ros_firmware/AGENTS.md](micro_ros_firmware/AGENTS.md) | 固件操作手册：构建、烧录、台架顺序与坑 |
+| [micro_ros_agent/README.md](micro_ros_agent/README.md) | Agent 工作区与台架工具 |
+| [docs/adr/](docs/adr/) | 架构决策记录（ros2_ws 与仓库级） |
+| [docs/guides/fdcan1-bench-guide.md](docs/guides/fdcan1-bench-guide.md) | FDCAN 台架操作与只读验收流程 |
+| [docs/research/](docs/research/) | 外部调研与参考 |
+| [AGENTS.md](AGENTS.md) | Agent 即用指南：区域 × 权威文档映射、命令、代码与测试规范 |
+| [CLAUDE.md](CLAUDE.md) | 仓库约定（Claude Code 自动加载） |
 
-## 文档
-
-- 包说明：`ros2_ws/src/<pkg>/README.md`
-- Agent 指南：[AGENTS.md](AGENTS.md)
-- 术语与命名：[CONTEXT.md](CONTEXT.md)
-- 架构决策：[docs/adr/](docs/adr/)
-- 协议手册：`ros2_ws/src/motor_drive/docs/`
+文档分类规则与状态词表见 [docs/README.md](docs/README.md)。

@@ -3,7 +3,7 @@
 这些 ADR 保留作出决策时的包名、分支和上下文。表中“当前适用性”才是当前工作区的导航；历史正文中的旧包名不是现行目录说明。
 
 > **更名记录（2026-10-13）**：`robot_arm_gazebo` 更名为 `robot_sim`（只改名，内部布局不变：`launch/`、`scripts/`、`models/`、`config/`、`dist/`、`test/`）。
-> 历史 ADR 与 `docs/reports/`、`docs/superpowers/{specs,plans}/` 里的旧包名按上一条规则**原样保留**；现行导航文档（`CLAUDE.md`、`AGENTS.md`、`CONTEXT.md`、各 `README.md`）已改为 `robot_sim`。
+> 历史 ADR 里的旧包名按上一条规则**原样保留**；现行导航文档（`CLAUDE.md`、`AGENTS.md`、各 `README.md`）已改为 `robot_sim`。
 
 | ADR | 原始状态 | 当前适用性（2026-10-09） |
 |---|---|---|

@@ -35,7 +35,7 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 ## 关节限位（来自 CAD 角度配合）
 
 来源：`cad/urdf/胸部整体结构装配体-上身部分.urdf`（本目录 `cad/` 保存的 SolidWorks 导出件，
-2026-10-13 09:11 的 sw2urdf 重导出，`cad/export.log` 是导出日志）。历史薄壳里是统一占位
+2026-10-13 的 sw2urdf 重导出）。历史薄壳里是统一占位
 `±1.5708`；本模型取真实值，**只取 `lower`/`upper`**，`effort`/`velocity` 沿用占位。
 
 | 关节 | 限位 (rad) | ≈ 度 | 关节 | 限位 (rad) | ≈ 度 |
@@ -119,7 +119,7 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 | `config/controllers.yaml` | `gz_ros2_control` 参数：`joint_state_broadcaster` + `arm_effort_controller`（`arm_position_controller` 节保留但不可用，见文件内注释） |
 | `config/motor_driver.yaml` | **电机拓扑**：18 台电机（型号/id/增益/MIT 限幅），总线逻辑名 `arm` |
 | `config/simulation_topology.yaml` | 端到端仿真的电机↔关节映射（18 条）+ 三档 profile |
-| `cad/` | **CAD 溯源**：2026-10-13 的 SolidWorks 导出件原样（`urdf/`、`export.log`、sw2urdf 的 `package.xml`/`CMakeLists.txt`/`launch/`/`config/`）。关节限位与几何的唯一来源；`cad/meshes/` 是指向 `../meshes/` 的**硬链接**（不占额外磁盘），因此原始 URDF 的网格路径仍能解析。**改限位要改这里再重跑派生** |
+| `cad/` | **CAD 溯源**：2026-10-13 的 SolidWorks 导出件原样（`urdf/` 与 sw2urdf 的 `package.xml`/`CMakeLists.txt`/`launch/`/`config/`）。关节限位与几何的唯一来源；`cad/meshes/` 是指向 `../meshes/` 的**硬链接**（不占额外磁盘），因此原始 URDF 的网格路径仍能解析。**改限位要改这里再重跑派生** |
 | `meshes/*.STL` | 19 个二进制可视网格：与 `dist/half_body_robot_urdf/meshes/` 和 `cad/meshes/` 三处 **硬链接同一份文件**（同 inode，不占额外磁盘，改一处三处同时变，别单独改） |
 | `meshes/base_link_simplified.STL` | `base_link` 降采样版（50 万面 → 2.3 万面，MuJoCo 解码上限 20 万面），由 `tools/simplify_mesh.py` 生成 |
 | `meshes/collision/*.STL` | 14 个凸包碰撞网格，由 `tools/build_simplified_collision_meshes.py` 生成（`dist/` 侧是它们的硬链接；`*_simplified.STL` 不进发布件） |

@@ -65,7 +65,7 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
 
    ```bash
    source /opt/ros/humble/setup.bash
-   source /home/ly/robot_ws/micro_ros_agent/install/setup.bash
+   source "$(git rev-parse --show-toplevel)/micro_ros_agent/install/setup.bash"
    ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
    ```
 
@@ -73,7 +73,7 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
    `--data-bitrate-index 5`）：
 
    ```bash
-   python3 /home/ly/robot_ws/micro_ros_agent/tools/fdcan_motor_sim.py \
+   python3 "$(git rev-parse --show-toplevel)/micro_ros_agent/tools/fdcan_motor_sim.py" \
      --tty /dev/ttyACM1
    ```
 
@@ -96,7 +96,7 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
 固件上电会把每台 CERB 的驱动板参数（`0x607D:01/:02`、`0x6080`、`0x2538`）
 回读一次，与 W25 里的固件记录**按设备端原值**比对：
 
-- ⚠ **2026-10-12：设备参数核对不再是安全门（owner 为台架效率作的取舍）**。
+- ⚠ **2026-10-12：设备参数核对不再是安全门（维护者 为台架效率作的取舍）**。
   重构前的语义（2026-09-17 起）：初始化未完成（不一致 `40` / 回读不成功 `41` /
   本机无记录）的那台进 `CONFIG_CONFLICT`、拒绝使能、不出运动帧。**现语义**：只把
   结论如实上报（`dev_init`、`DEV_INIT` 事件位图、`device_param_report`），
@@ -166,6 +166,11 @@ Ctrl-C 停止模拟器时脚本发送 `C` 关闭 CANable 通道并输出每节�
 
 ## 已验证基线与剩余操作
 
-30 秒九节点基线：`ECR=0`、1–9 全 online、反馈计数 `1546/1545×8`，详见[第二轮报告](../reports/2026-09-11-fdcan1-bench-run2-findings.md)。
+**历史基线（九节点台架，已非默认拓扑）**：30 秒运行 `ECR=0`、节点 1–9 全 online、
+反馈计数 `1546/1545×8`（2026-09-11 复测，当时数据段索引 `Y5`）。九节点拓扑现已让位于
+默认的 CERB 1=R58、2–4=R48 四节点拓扑；要重做九节点须显式传入节点参数。
 
-以下不属于只读指南：发布 `motor_command_array` 或发送任何电机运动目标（`MotorBind`/`motor_enable` 话题已删除）。继续前必须按[活动计划](../reports/2026-09-11-fdcan1-bench-9motors-goal.md)逐项记录环境和证据。
+以下不属于只读指南：发布 `motor_command_array` 或发送任何电机运动目标
+（`MotorBind`/`motor_enable` 话题已删除）。继续前必须逐项记录环境与证据（拓扑、
+CANable 版本与索引、固件版本与位时序、每总线计数），并确认总线无真实电机且已取得
+外部操作权限。

@@ -572,7 +572,7 @@ static void control_boundary(void) {
 
   // 落盘**不再自动**：写事务只改内存记录 + 置脏位，"保存"由人工发 system_command
   // 的 COMMAND_SAVE 触发（param_bridge 发 SAVE_DEVICE_FLASH 事务 + 落 W25）。此前
-  // 这里 500ms 去抖自动落盘，于是"只点了写"与"点了保存"无法区分——正是 owner
+  // 这里 500ms 去抖自动落盘，于是"只点了写"与"点了保存"无法区分——正是维护者
   // 要求消掉的行为（设计 §3.2）。
 }
 

@@ -106,7 +106,7 @@ static void finish_identity_read(motor_control_context_t *ctx,
 // ---------------------------------------------------------------------------
 // 设备参数初始化（上电/重连回读设备 → 与固件记录比对）
 //
-// 口径（2026-09-21 owner 反转，此前是 09-17 的"以设备内为准"）：**固件记录是
+// 口径（2026-09-21 维护者 反转，此前是 09-17 的"以设备内为准"）：**固件记录是
 // 权威**，设备里的参数要与它对齐；不一致即"未初始化"。
 //  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:00、0x2541）；
 //  - 回读值与记录逐槽位比对，比的是**设备端原值**：关节侧 SI 两端都过同一套
@@ -131,7 +131,7 @@ uint8_t motor_control_dev_mismatch_mask(const motor_control_entry_t *entry) {
   // 方向基线**独立于"本机有无记录"判定**：方向是易失对象，设备每次上电都回
   // 0（CW），"设备当前读到 0"零信息量——记录是它唯一的权威来源。无记录 /
   // 记录无此槽 / 槽值非法，一律等于"方向未知"，判未初始化（不猜 CW）。
-  // 这是 owner 2026-09-20 的决定，也是 09-19 交接文档"无记录 = 未初始化"的落地。
+  // 这是 维护者 2026-09-20 的决定，也是 09-19 交接文档"无记录 = 未初始化"的落地。
   const uint8_t dir_bit =
       (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
   if ((entry->record_raw_present & dir_bit) == 0U ||
@@ -242,12 +242,12 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   } else if (state == MOTOR_CONTROL_DEV_INIT_MISMATCH ||
       state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
       state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
-    // 【2026-10-12 owner 决定：固件侧不再需要参数核对 —— 本分支不再冻结】
+    // 【2026-10-12 维护者 决定：固件侧不再需要参数核对 —— 本分支不再冻结】
     //
     // 原语义：结论为"未初始化"（不一致 / 未能核对 / 本机无记录）时调用
     // freeze_entry_as_conflict 冻结该台 —— lifecycle 锁 CONFIG_CONFLICT、
     // fault 记 DEV_PARAM、清 policy_enable / motion_authorized，须人工核对后
-    // 显式重新使能。owner 2026-09-21 曾把 NO_RECORD 也纳入同一条路
+    // 显式重新使能。维护者 2026-09-21 曾把 NO_RECORD 也纳入同一条路
     // （"首次也当不一致，人工核对"）。
     //
     // 现语义：**只落状态、不冻结**。dev_init 仍如实记录并随 DEV_INIT 事件与
@@ -258,7 +258,7 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
     // ⚠ 代价（恢复前请确认已知悉）：设备参数核对**不再是一道安全门**。
     //   dev_init ≠ OK 时该台的限位/速度/力矩可能不是核对过的值（影子取设备真值，
     //   读不到时回落型号标定），运动许可建立在未核对的参数之上；兜底只剩硬件
-    //   急停与机械限位。这是 owner 为台架作出的取舍，不是疏漏。
+    //   急停与机械限位。这是 维护者 为台架作出的取舍，不是疏漏。
     //
     // 恢复原语义：把下面这行注释放开即可，其余逻辑无需改动。
     // freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);

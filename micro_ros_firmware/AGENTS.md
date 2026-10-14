@@ -2,11 +2,9 @@
 
 STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS，USB CDC）。
 本文件只放即用命令、硬约束与踩坑；架构细节看权威文档，勿在此复制：
-`README.md`（硬件/时钟/任务/话题/安全级联/真机清单）、`lib/README`（库分层）、
+`README.md`（硬件/时钟/任务/话题/安全级联/开放项）、`lib/README.md`（库分层与各库契约）、
 `docs/adr/0007-micro-ros-discovery-driven-motor-runtime.md`、
-`docs/architecture/motor-runtime-decision-log.md`、
-`docs/plans/active/motor-runtime-validation.md`（开放台架项 TBD-*）、
-`docs/archive/`（冻结 ARD 规范与历史交接）。
+`docs/architecture/motor-runtime-decision-log.md`（设计理由与变更史）。
 
 ## 构建与烧录 / host 测试
 
@@ -25,7 +23,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   临时加 `-fstack-usage` 与 `-fcallgraph-info=su,da`（**勿提交**），`pio run -t clean && pio run`
   后 `python3 tools/stack_audit.py [--orphans 16] [--root <回调名>]`，看完把 flag 撤掉再
   clean 重建。逐任务数字**不含函数指针回调**（ROS executor 那一层），必须用 `--root`
-  补上；见 `docs/plans/active/motor-runtime-validation.md` 第 2 节的审计结论。
+  补上；见 `README.md` 的开放项一节。
 - host 测试由 CTest 枚举，直接编译固件真实 .c、无桩无复制；白盒用例 `-I` 内核
   src。新增内核 .c 只改 `test/host/CMakeLists.txt`。
 - **必须 `-t clean` 全量重建**：改 `platformio.ini` 构建宏（USB CDC 两宏、
@@ -169,7 +167,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   值，所以先关 `0x2650:00` 保护再触发一次保存，记录就被重新基线化成"关"，下次
   上电不再报冲突；v2 迁移上来的记录要等第一次保存才比较这两槽（迁移只搬低 4 位）。
   这两条缺口**已由 2026-09-20 的上电归一实质关闭**（归一在比对之前把保护恒写为
-  「生效」）。可选加固方向的原文见 `docs/plans/active/w25-blob-v3-design.md` §8.2。
+  「生效」）。可选加固方向见 `docs/architecture/motor-runtime-decision-log.md` 的 2026-09-19 条目。
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
   `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
   与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。
@@ -177,7 +175,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   只把该台 `record_dirty_slots` 置脏（`device_param_report.record_dirty` 随之置真），
   不再是落盘触发；"设备写事务成功 → 500ms 去抖自动落盘"已删（聚合脏标志与
   `motor_control_take_record_dirty()` 一并移除）。只写不保存 = 未保存，下次上电不
-  通过——这正是 owner 要的行为。SAVE 对 dirty 台写设备 `0x2539` 并落 W25。
+  通过——这正是 维护者 要的行为。SAVE 对 dirty 台写设备 `0x2539` 并落 W25。
 - Flash 缓冲必须 ≥4 字节对齐（代码统一 `alignas(8)`）：-Os 下结构体访问生成
   STRD，非对齐直接 HardFault。
 - 擦写阻塞：v2 单扇区实测 ~1s（**旧值**）；v3 双扇区阻塞值**待台架实测**
@@ -208,7 +206,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - `src/system_clock.cpp` —— 外设时钟单点（SYSCLK 480M / PLL1Q=SPI2 240M /
   PLL2Q=FDCAN 80M / HSI48=USB）；勿为 FDCAN 动 PLL1Q（连带改 SPI2 速率）。
 - 其余：`lib/fdcan`（ISR→SPSC ring 64→P0/P1/P2 TX 调度）、`lib/imu`、`lib/dma`、
-  `lib/w25q64`、`lib/ws2812`、`lib/param_store`；分层与依赖方向见 `lib/README`。
+  `lib/w25q64`、`lib/ws2812`、`lib/param_store`；分层与依赖方向见 `lib/README.md`。
 
 ## 代码规范
 
@@ -217,7 +215,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - 中文注释写意图（数据流/单位/安全边界）；协议名（vaxor/cerb/CANopen/MIT/SDO）
   与 ROS 2 API 保留英文。
 - `src/` 只放任务编排与 ROS 桥，驱动/协议进 `lib/`；库不得反向依赖 `src/`、ROS
-  或其他任务，设备库之间不互相调用（见 `lib/README`）。
+  或其他任务，设备库之间不互相调用（见 `lib/README.md`）。
 - **板级库（lib/fdcan、lib/dma、lib/board）不得 include FreeRTOS**；ISR 优先级
   合规只用 `BOARD_ISR_SYSCALL_THRESHOLD`（board_irq.h），main.cpp 有编译期反向断言。
 - 固定所有权：FDCAN ISR → SPSC ring → motor_rt 唯一消费者；ROS 桥只写 mailbox、
@@ -234,7 +232,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 ## 架构约束与格式化
 
 - 模块设计遵循**高内聚、低耦合**。所有权、允许依赖和测试边界以
-  `docs/architecture/module-boundaries.md` 为准；领域术语见 `CONTEXT.md`。
+  `docs/architecture/module-boundaries.md` 为准；领域术语与所有权见 `README.md`。
 - `lib/fdcan` 只管理协议无关队列；`lib/motor_protocol` 适配器拥有厂商 P1 聚合；
   `lib/motor_tx_router` 选择 P0/P1/P2、核算物理帧预算并提交帧。正常 CAN TX 仍只由
   `motor_rt_task` 发起。

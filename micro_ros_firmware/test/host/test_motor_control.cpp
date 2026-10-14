@@ -3553,7 +3553,7 @@ static void test_boot_normalize_runs_before_refresh() {
 
 // 归一失败（设备不应答写）→ 用尽重试判 UNVERIFIED，且**绝不**发起回读。
 //
-// ⚠ 2026-10-12 owner 决定取消设备参数门禁：UNVERIFIED 不再拦住运动/使能，也不再
+// ⚠ 2026-10-12 维护者 决定取消设备参数门禁：UNVERIFIED 不再拦住运动/使能，也不再
 // 冻结生命周期（见 motor_control_internal.h 的 motor_control_dev_params_allow_motion）。
 // 因此本用例现在验的是**状态与遥测仍如实呈现**（dev_init / lifecycle / 事件位图 /
 // 回读逃生口），而不再是"拦住"——门禁解除后该台停在 READY_DISABLED，不是
@@ -3571,7 +3571,7 @@ static void test_boot_normalize_failure_state_before_refresh() {
   const motor_control_entry_t *e = entry_of(&ctx, 7);
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
   assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  // 门禁已取消（2026-10-12 owner 决定）：UNVERIFIED 不再拦住运动/使能。
+  // 门禁已取消（2026-10-12 维护者 决定）：UNVERIFIED 不再拦住运动/使能。
   assert(motor_control_dev_params_allow_motion(e));
   // 一次回读都没发起过：六槽位图空着，"未核对"是它唯一说得出的话。
   assert(e->dev_read_attempts == 0U);
@@ -3725,7 +3725,7 @@ static void test_boot_normalize_skips_direction_without_record() {
 }
 
 // 首次上电（W25 对本机无记录）：结论如实报 NO_RECORD，但**不再因此拦运动**
-// （2026-10-12 owner 取消设备参数门禁）。owner 2026-09-21 曾要求"首次也当不一致，
+// （2026-10-12 维护者 取消设备参数门禁）。维护者 2026-09-21 曾要求"首次也当不一致，
 // 必须人工核对后才可动"，该门禁现已解除——本用例改验"报得准、不拦"。
 static void test_dev_init_no_record_reports_without_gate() {
   motor_control_context_t ctx;
@@ -3772,7 +3772,7 @@ static void test_dev_init_no_record_reports_without_gate() {
 }
 
 // 写一项就建立记录 → 立刻重判；记录写齐（含方向基线）即转 OK、解冻。
-// 这正是 owner 第 6 条"下发修改后校验应通过、不再是未初始化"。
+// 这正是 维护者 第 6 条"下发修改后校验应通过、不再是未初始化"。
 static void test_dev_init_no_record_clears_after_write() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -3877,7 +3877,7 @@ static void test_dev_init_flags_safety_mismatch_at_runtime() {
 // 上电比对：设备里的峰值电流与记录不一致（台架实测 13300 mA vs 记录 10800 mA）
 // → 判 MISMATCH、位图点名是哪一项；影子仍取设备真值。
 //
-// ⚠ 2026-10-12 owner 取消设备参数门禁：MISMATCH 不再冻结授权、不再拒绝使能、
+// ⚠ 2026-10-12 维护者 取消设备参数门禁：MISMATCH 不再冻结授权、不再拒绝使能、
 // 不再拦截运动帧（代价见 motor_control_internal.h 的注解）。本用例改验**定论与
 // 遥测仍如实呈现**，而不再是"拦住"。
 static void test_device_param_mismatch_reports_without_gate() {
@@ -3995,7 +3995,7 @@ static void test_device_param_missing_direction_baseline_reports() {
 
 // 本机完全无记录（新烧板）同样判未初始化——不是"无记录可比就放过"。
 // 结论由"方向基线缺失 → MISMATCH"改成**整台无记录 → NO_RECORD**（2026-09-21
-// owner 反转）：连基线都没有时，逐槽位位图说不出任何东西，detail 恒 0；用例名
+// 维护者 反转）：连基线都没有时，逐槽位位图说不出任何东西，detail 恒 0；用例名
 // 沿用历史。⚠️ 这里**必须**显式声明"无记录"（apply_stored_params 传空数组），
 // 不能用 complete_device_param_init：那个助手会注入一份**含方向基线**的记录
 // （正常板子的路径），本用例要测的恰恰是"没有基线"。
@@ -4270,7 +4270,7 @@ static void test_device_write_same_value_skips_flash() {
 }
 
 // 写不落盘：写事务成功只把记录改在内存里并置脏位；设备侧 0x2539 与 W25 都
-// **不许发生**，直到 system.save。这是 owner 第 9 条"只点了写必须有未保存标记"
+// **不许发生**，直到 system.save。这是 维护者 第 9 条"只点了写必须有未保存标记"
 // 的机制面。
 static void test_write_does_not_persist_until_save() {
   motor_control_context_t ctx;
@@ -4510,7 +4510,7 @@ static void test_save_volatile_only_accepted_while_active() {
 }
 
 // 回读失败（设备不答）：结论 UNVERIFIED，出事件 + 错误码 41。恢复：重连重读或
-// 手动回读。⚠ 2026-10-12 owner 取消门禁后它**不再拦住使能/运动**，本用例改验
+// 手动回读。⚠ 2026-10-12 维护者 取消门禁后它**不再拦住使能/运动**，本用例改验
 // "报得准、不拦"。
 static void test_device_param_unverified_reports_without_gate() {
   motor_control_context_t ctx;
@@ -4603,7 +4603,7 @@ static void test_device_param_pending_does_not_block_enable() {
 }
 
 // 运行中（ACTIVE）手动回读发现不一致：只把结论报成 MISMATCH，**不动运行态**
-// ——不软停、不失能、不掉授权（2026-10-12 owner 取消门禁后运行中复查也不再是
+// ——不软停、不失能、不掉授权（2026-10-12 维护者 取消门禁后运行中复查也不再是
 // 安全门）。本用例钉住"报而不动"：运动中的电机不能被一次比对结论打断。
 static void test_device_param_runtime_mismatch_reports_only() {
   motor_control_context_t ctx;

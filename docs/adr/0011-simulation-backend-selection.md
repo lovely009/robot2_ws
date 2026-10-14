@@ -91,7 +91,7 @@ MuJoCo 那条路已经存在，但只是一个**独立入口**：`launch/mujoco.
    因此「从面板起 MuJoCo」隐含前提是 web_host 从有 `DISPLAY` 的会话启动；无显示时桥自己降级为
    无头并打 warning（既有行为，不改）。
 6. **默认模型收敛到 `full_body`，删除 `models/robot_all/`**：4 个 launch 的默认值、
-   `test_launch_models.py`、`store.js` 的 `MODEL`、`CLAUDE.md` / `CONTEXT.md` / `AGENTS.md` /
+   `test_launch_models.py`、`store.js` 的 `MODEL`、`CLAUDE.md` / `AGENTS.md` /
    各 README 同步改，并清理 `install/` 里的陈旧副本。删除依据：它的全部引用都是注释或默认值，
    `full_body` 只 include 自己的 URDF，`models/full_body/meshes/` 的硬链接指向的是
    `dist/full_body_urdf/`（实测 19/19 同 inode）而不是 `models/robot_all/`。

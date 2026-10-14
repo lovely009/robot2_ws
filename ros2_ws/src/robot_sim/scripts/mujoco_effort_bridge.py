@@ -114,6 +114,34 @@ class MujocoEffortBridge(Node):
         self.steps_per_tick = max(
             1, int(round(speed / (control_hz * self.model.opt.timestep)))
         )
+        # 关节速度上限。URDF 的 `<limit velocity>` 有这条，**MuJoCo 的 `<joint>` 没有
+        # 对应属性**，所以 MJCF 靠执行器的 `user` 字段携带它（见 build_mujoco_model.py）。
+        # 缺了它被控对象会跑到真机不可能达到的转速——2026-10-15 实测 40 rad/s，MIT 律的
+        # `kd·vel` 项自己就把力矩顶进 ±peak 饱和 ⇒ 阻尼退化成 bang-bang，整臂陷入饱和
+        # 极限环（速度不衰减、力矩在两个峰值间反复打满）。Gazebo 侧由 Dart 执行该限幅，
+        # 所以只有 MuJoCo 这条路发作。
+        self.command_dofs = np.array([
+            self.model.jnt_dofadr[self.model.actuator_trnid[actuator, 0]]
+            for _, actuator in self.command_pairs
+        ])
+        # 峰值力矩：MuJoCo 的 `actuatorfrcrange` 只**标注**关节合力上限，**不夹**
+        # actuator 的 ctrl（2026-10-15 实测：给 30 N·m 就是 30 N·m），所以这里自己执行。
+        # MJCF 的值由 build_mujoco_model.py 从拓扑的 `mit_torque_limit_nm` 逐台写入
+        # （r58 45 / r48 11 / vaxor 兜底 10），与假电机侧 `--tau-limits` 同源。
+        self.command_torque_limits = np.array([
+            float(self.model.jnt_actfrcrange[self.model.actuator_trnid[actuator, 0]][1])
+            for _, actuator in self.command_pairs
+        ])
+        if self.model.nuser_actuator > 0:
+            self.command_velocity_limits = np.array([
+                abs(float(self.model.actuator_user[actuator, 0]))
+                for _, actuator in self.command_pairs
+            ])
+        else:
+            self.command_velocity_limits = None
+            self.get_logger().warning(
+                "MJCF 未携带关节速度上限（执行器 user 字段），被控对象可以跑到任意转速"
+            )
 
         self.create_subscription(Float64MultiArray, effort_topic, self._on_command, 10)
         self.publisher = self.create_publisher(JointState, joint_states_topic, 50)
@@ -165,6 +193,28 @@ class MujocoEffortBridge(Node):
         self.command[:] = message.data
         self.command_stamp = self.get_clock().now()
 
+    def _apply_effort(self, applied) -> None:
+        """把力矩写进 ctrl（不在命令里的 actuator 清零），并按关节速度上限截断。
+
+        限幅按**物理步**做而不是按控制拍：一拍 `steps_per_tick` 步，只在拍首限一次
+        会让关节在拍内多冲好几步（实测冲到上限的 2.5 倍）。只挡"继续加速"、不挡反向
+        制动，所以减速与回程不受影响。
+        """
+        self.data.ctrl[:] = 0.0
+        velocity_limits = self.command_velocity_limits
+        for slot, (command_index, actuator) in enumerate(self.command_pairs):
+            torque = float(np.clip(applied[command_index],
+                                   -self.command_torque_limits[slot],
+                                   self.command_torque_limits[slot]))
+            if velocity_limits is not None:
+                limit = velocity_limits[slot]
+                if limit > 0.0:
+                    velocity = self.data.qvel[self.command_dofs[slot]]
+                    if (velocity >= limit and torque > 0.0) or \
+                            (velocity <= -limit and torque < 0.0):
+                        torque = 0.0
+            self.data.ctrl[actuator] = torque
+
     def _tick(self) -> None:
         now = self.get_clock().now()
         timed_out = (
@@ -174,11 +224,8 @@ class MujocoEffortBridge(Node):
         applied = (
             np.zeros(len(self.command_joint_names)) if timed_out else self.command
         )
-        # 不在命令里的 actuator 每拍清零，避免残留上一拍力矩
-        self.data.ctrl[:] = 0.0
-        for command_index, actuator in self.command_pairs:
-            self.data.ctrl[actuator] = applied[command_index]
         for _ in range(self.steps_per_tick):
+            self._apply_effort(applied)
             mujoco.mj_step(self.model, self.data)
 
         message = JointState()

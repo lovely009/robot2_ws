@@ -104,6 +104,79 @@ def armature_by_joint() -> dict[str, float]:
     return out
 
 
+def torque_limits_by_joint() -> dict[str, float]:
+    """{关节名: 峰值力矩 N·m}，取自拓扑的 `mit_torque_limit_nm`（输出端）。
+
+    URDF 的 `<limit effort="10.0">` 是占位值，**对所有关节一视同仁**，会把 r58 的
+    45 N·m 削到 10——真机按型号库 peak_torque_nm（r58 45 / r48 11）出力，MJCF 必须
+    跟上，否则被控对象里大关节永远出不上力。读不到时返回空表（MJCF 沿用 URDF 值）。
+    """
+    config = MODEL_DIR / "config" / "motor_driver.yaml"
+    if not config.is_file():
+        return {}
+    try:
+        import yaml
+        motors = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}) \
+            .get("motor_hardware", {}).get("motors", {}) or {}
+    except Exception as error:
+        print(f"[build_mujoco_model] 读不到 {config}（{error}），峰值力矩沿用 URDF",
+              file=sys.stderr)
+        return {}
+    out = {}
+    for spec in motors.values():
+        joint = spec.get("joint")
+        limit = (spec.get("parameters") or {}).get("mit_torque_limit_nm")
+        if joint and limit:
+            out[str(joint)] = float(limit)
+    return out
+
+
+def _topology_and_specs() -> tuple[dict, dict]:
+    """(拓扑的 motor_hardware 段, {型号名: parameters})；读不到就给空 dict。
+
+    型号库路径取自拓扑的 `motor_specs_file`（相对拓扑所在目录）。
+    """
+    config = MODEL_DIR / "config" / "motor_driver.yaml"
+    if not config.is_file():
+        return {}, {}
+    try:
+        import yaml
+        section = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}) \
+            .get("motor_hardware", {}) or {}
+    except Exception as error:          # 拓扑缺失/损坏不该挡住模型生成
+        print(f"[build_mujoco_model] 读不到 {config}（{error}）", file=sys.stderr)
+        return {}, {}
+    rel = section.get("motor_specs_file")
+    specs = {}
+    if rel:
+        path = (config.parent / rel).resolve()
+        try:
+            types = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}) \
+                .get("motor_types", {}) or {}
+            specs = {n: (s.get("parameters") or {}) for n, s in types.items()}
+        except Exception as error:
+            print(f"[build_mujoco_model] 读不到型号库 {path}（{error}）", file=sys.stderr)
+    return section, specs
+
+
+def velocity_limits_by_joint() -> dict[str, float]:
+    """{关节名: 速度上限 rad/s}，取自型号库的 `rated_speed_rad_s`（**关节侧**）。
+
+    MuJoCo 的 `<joint>` 没有速度上限属性，所以这条约束只能搭执行器的 `user` 字段
+    进 MJCF（见 convert()）。**不能用 URDF 的 `<limit velocity>`**——那是 CAD 导出的
+    占位值（全关节 1.0）；也不是拓扑里的 `mit_velocity_limit_rad_s`（那是协议的量化
+    范围 30 rad/s，不是物理上限）。真值在厂商参数页，落在型号库。
+    """
+    section, specs = _topology_and_specs()
+    out = {}
+    for spec in (section.get("motors") or {}).values():
+        joint = spec.get("joint")
+        rated = (specs.get(spec.get("type")) or {}).get("rated_speed_rad_s")
+        if joint and rated:
+            out[str(joint)] = float(rated)
+    return out
+
+
 def convert(workdir: Path) -> Path:
     """把 dist 版 URDF 转成 MJCF，返回生成的 MJCF 路径。"""
     meshes = workdir / "meshes"
@@ -235,18 +308,31 @@ def postprocess(mjcf: Path) -> None:
     option.set("integrator", "implicitfast")
 
     armatures = armature_by_joint()
+    torques = torque_limits_by_joint()
     for joint in root.find("worldbody").iter("joint"):
         armature = armatures.get(joint.get("name"), DEFAULT_ARMATURE)
         joint.set("armature", f"{armature:.6g}")
+        # 峰值力矩：URDF 的 ±10 是全关节占位值，按型号库逐台改写
+        torque = torques.get(joint.get("name"))
+        if torque:
+            joint.set("actuatorfrcrange", f"{-torque:g} {torque:g}")
 
     # 力矩执行器：每个关节一个 <motor>（gear=1 → ctrl 就是关节力矩）。
     # 没有 actuator 时 mujoco_ros2_control 会把关节注册成 passive，effort 命令无处施加。
-    # 力矩上限继承关节的 actuatorfrcrange（= URDF 的 <limit effort>，±10 N·m）。
+    # 关节速度上限（URDF 的 `<limit velocity>`）搭在 `user` 字段上：**MuJoCo 的
+    # `<joint>` 没有对应属性**，只能靠执行器的 user 带过去，由 mujoco_effort_bridge
+    # 在写 data.ctrl 时执行。缺了它被控对象会跑到真机不可能达到的转速（2026-10-15
+    # 实测 40 rad/s），MIT 律的 kd·vel 项自己就顶进 ±peak 饱和 ⇒ 整臂陷入饱和极限环。
+    velocities = velocity_limits_by_joint()
     actuator = ET.SubElement(root, "actuator")
     for joint in root.find("worldbody").iter("joint"):
-        ET.SubElement(actuator, "motor", {
+        attrs = {
             "name": f"actuator_{joint.get('name')}", "joint": joint.get("name"), "gear": "1",
-        })
+        }
+        velocity = velocities.get(joint.get("name"))
+        if velocity:
+            attrs["user"] = f"{velocity:g}"
+        ET.SubElement(actuator, "motor", attrs)
 
     ET.indent(tree, space="  ")
     tree.write(mjcf, encoding="utf-8", xml_declaration=False)
@@ -277,12 +363,18 @@ for _ in range(2000):
 print(f"执行器数={{model.nu}}；1.5 N·m 2s 后 joint_link1 = "
       f"{{data.qpos[model.jnt_qposadr[index]]:+.4f}}"
       f"（限位 {{model.jnt_range[index][0]:+.2f}}..{{model.jnt_range[index][1]:+.2f}}）")
-# 力矩上限：给 30 N·m，应被 joint 的 actuatorfrcrange(±10) 收住
+# 力矩：joint 的 actuatorfrcrange 只声明关节上的合力上限，**不夹 actuator 的 ctrl**
+# ——实测给 30 N·m 就是 30 N·m（2026-10-15）。真正决定出力大小的是上游：假电机按
+# 型号库的 peak_torque_nm 逐台限幅（simulation.launch.py 的 --tau-limits）。
 for _ in range(50):
     data.ctrl[actuator] = 30.0
     mujoco.mj_step(model, data)
 print(f"指令 30 N·m 时的实际执行器力 = {{data.actuator_force[actuator]:+.2f}} N·m"
-      f"（actuatorfrcrange 上限 {{model.jnt_actfrcrange[index][1]:+.2f}}）")
+      f"（actuatorfrcrange 标注 {{model.jnt_actfrcrange[index][1]:+.2f}}，不参与夹取）")
+# 速度上限：URDF 每条 <limit velocity> 都要落到执行器 user 上，桥据此限幅
+velocity_user = (model.actuator_user[:, 0] if model.nuser_actuator else None)
+print(f"执行器 user（关节速度上限）= "
+      f"{{sorted(set(velocity_user.tolist())) if velocity_user is not None else '未携带'}}")
 '''
     result = subprocess.run([str(VENV_PYTHON), "-c", script],
                             capture_output=True, text=True, check=False)

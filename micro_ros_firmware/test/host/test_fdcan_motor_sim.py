@@ -130,6 +130,7 @@ assert MODULE.vaxor_decode_command(_vaxor_payload[:-1]) is None
 multi = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
 multi.models = {i: MODULE.MotorModel(i, "cerb") for i in (1, 2, 3)}
 multi.log_f = None
+multi.mit_torque_limits = {}
 mit1 = bytes([0xcc, 0x80, 0, 0x80, 3, 0xe8, 0x14, 0x18, 0])
 mit2 = bytes([0x0c, 0x80, 1, 0x80, 3, 0xe8, 0x14, 0x18, 1])
 payload = (mit1 + mit2 + bytes(36) + bytes(2)
@@ -139,6 +140,22 @@ multi.handle_downlink(0x210, payload, True)
 assert multi.models[1].last_cmd is not None and multi.models[1].enabled
 assert multi.models[2].last_cmd is not None and not multi.models[2].enabled
 assert multi.models[3].last_cmd is None
+
+# MIT 力矩量化上限**逐型号**（规格书：P/V/T Max 必须与电机参数页一致）。固件按 Profile
+# 的 `mit_torque_limit_nm` 编码，解码端必须跟着对应——写死单一常数会让另一个型号的 τ_ff
+# 被整体缩放（R48 真值 11 用 45 解 = +4.09×，R58 真值 45 用 11 解 = +0.24×）。
+# 两个型号都断言，任一侧写死都会红。
+def _mit_tau_frame(tau_nm: float, limit: float) -> bytes:
+    code = round((tau_nm + limit) / (2.0 * limit) * 4095)
+    frame = bytearray(12)
+    frame[7] = (code >> 8) & 0x0F
+    frame[8] = code & 0xFF
+    return bytes(frame)
+
+
+for _limit in (11.0, 45.0):
+    _decoded = MODULE.cerb_decode_command(_mit_tau_frame(5.0, _limit), _limit)
+    assert abs(_decoded["tau_nm"] - 5.0) < 0.02, (_limit, _decoded["tau_nm"])
 
 
 # 上电初值必须与**真机实测**一致（进程重启 = 掉电复现）：保护开关初值 1（关），
@@ -325,6 +342,7 @@ _multi = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
 _multi.models = {1: MODULE.MotorModel(1, "cerb")}
 _multi.models[1].linked = False
 _multi.log_f = None
+_multi.mit_torque_limits = {}
 _multi_payload = bytes(56) + bytes([1, 0, 0, 0, 0, 0]) + bytes(2)
 assert len(_multi_payload) == 64
 _multi.handle_downlink(0x210, _multi_payload, True)

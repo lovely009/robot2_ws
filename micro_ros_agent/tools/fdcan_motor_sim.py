@@ -77,6 +77,16 @@ AUTO_DATA_BITRATE_INDEX = None
 # CANable 非标准 E 查询的应答形如 "CANable Error Register: 4"，但**没有 \r 结尾**，
 # 会与紧随其后的帧行粘在一起，故按前缀+数字取，不依赖行边界。
 _CANABLE_ERR_RE = re.compile(r"CANable Error Register:\s*([0-9]+)")
+# 缓冲里未成行时也要认得出 E 应答，故另备字节版（见 _consume_control_reply）。
+_CANABLE_ERR_RE_B = re.compile(rb"CANable Error Register:\s*([0-9]+)")
+# SLCAN 帧行首字符；不以这些开头的文本是命令应答（V 的版本串、E 的错误码行）。
+# r/R 是远程帧，漏了会把帧行当应答文本吃掉（见 _consume_control_reply）。
+_SLCAN_FRAME_HEADS = b"tTdDrRbB"
+# CERB 的 MIT 力矩量化上限是**逐型号**的（R48 11 N·m / R58 45 N·m），由调用方按
+# 电机传入。这个常量只在拿不到型号时兜底——用错会让 τ_ff 被整体缩放。
+CERB_MIT_TORQUE_FALLBACK = 45.0
+# 固件生命周期九态里的"运行"（与 can_bridge_msgs/MotorStatusTarget.msg 对齐）。
+LIFECYCLE_ACTIVE = 4
 SLCAN_VERSION_DATA_BITRATE = {
     # ⚠ 2026-10-12 实测修正：现场这只 CANable（USB 描述符 b158aa7、V 响应
     # 16e7497-dirty）的 5Mbps 索引是 **Y5**，不是 Y7。
@@ -350,14 +360,20 @@ def cerb_symmetric(code: int, limit: float, bits: int) -> float:
     return (code / float((1 << bits) - 1)) * 2.0 * limit - limit
 
 
-def cerb_decode_command(data: bytes):
-    """固件下行 CERB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。"""
+def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLBACK):
+    """固件下行 CERB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。
+
+    `torque_limit` 是这台电机的 **MIT 力矩量化上限**（规格书：P/V/T Max 必须与
+    电机参数页一致）——**逐型号**：R48 11 N·m、R58 45 N·m。固件编码端用的就是
+    Profile 里的 `mit_torque_limit_nm`，这里必须跟着对应，否则 τ_ff 会被缩放
+    （历史 bug：写死 45.0 ⇒ R48 的 τ_ff 被缩成 11/45）。
+    """
     enabled = (data[0] & 0x80) != 0
     pos = cerb_symmetric((data[1] << 8) | data[2], PI, 16)
     vel = cerb_symmetric(((data[3] & 0xF0) << 4) | data[4], PI, 12)
     kp_raw = ((data[4] & 0x0F) << 8) | data[5]
     kd_raw = (data[6] << 4) | ((data[7] & 0xF0) >> 4)
-    tau = cerb_symmetric(((data[7] & 0x0F) << 8) | data[8], 45.0, 12)
+    tau = cerb_symmetric(((data[7] & 0x0F) << 8) | data[8], torque_limit, 12)
     return {"enabled": enabled, "pos_rad": pos, "vel_rad_s": vel,
             "kp": kp_raw * 500.0 / 4095.0, "kd": kd_raw * 5.0 / 4095.0,
             "tau_nm": tau}
@@ -576,6 +592,13 @@ class GazeboBridge:
         from rclpy.node import Node
         from sensor_msgs.msg import JointState
         from std_msgs.msg import Float64MultiArray
+        try:
+            from can_bridge_msgs.msg import MotorStatusArray
+        except ImportError:
+            # 只在 HIL 用得上；纯台架可能没构建电机栈，缺了就跳过固件镜像。
+            MotorStatusArray = None
+            print("[sim] 未找到 can_bridge_msgs：不镜像固件生命周期——HIL 场合"
+                  "应当没装电机栈，请先 source 两个工作区", file=sys.stderr)
         if control_mode not in ("position", "effort"):
             raise ValueError("Gazebo control mode must be position or effort")
         self._rclpy = rclpy
@@ -616,8 +639,21 @@ class GazeboBridge:
         self.last_pub = 0.0
         self.node.create_subscription(JointState, "/joint_states",
                                       self._on_state, 10)
+        # HIL 下**固件是权威**：它撤权（OFFLINE/FAULT/冻结；ARD §36 下不会自动
+        # 复权）时，主机侧若还按自己的 enabled 发力矩，被控对象就被一个幽灵控制器
+        # 驱动——2026-10-14 实测 MuJoCo 关节点冲到 24 rad/s、4 路顶死在 r48 峰值
+        # 钳位，而板子侧 18 台全是"就绪未使能"。只在本话题出现过之后才启用这条
+        # 镜像：纯台架没有固件，也就没有该话题，行为不变。
+        self.fw_lifecycle = {}
+        if MotorStatusArray is not None:
+            self.node.create_subscription(MotorStatusArray,
+                                          "/micro_ros_up/motor_status_array",
+                                          self._on_fw_status, 10)
         topic = position_topic if control_mode == "position" else effort_topic
         self.pub = self.node.create_publisher(Float64MultiArray, topic, 10)
+
+    def _on_fw_status(self, msg):
+        self.fw_lifecycle = {s.motor_id: s.lifecycle for s in msg.statuses}
 
     def _on_state(self, msg):
         for i, name in enumerate(msg.name):
@@ -655,6 +691,10 @@ class GazeboBridge:
             cmd = m.last_cmd if m is not None else None
             if m is None or not m.enabled or not cmd:
                 continue
+            # 固件没把这台放在运行态 ⇒ 真机上它就是没力矩（无抱闸，关节会塌）。
+            # 主机侧照做：不发这一路，让它保持 0，别用幽灵力矩把机构顶住。
+            if self.fw_lifecycle and self.fw_lifecycle.get(mid) != LIFECYCLE_ACTIVE:
+                continue
             index = self.joints.index(joint)
             if self.control_mode == "position":
                 if "pos_rad" in cmd:
@@ -678,7 +718,18 @@ class CanMotorSim:
                  fb_period_ms: int = 60, stagger_ms: float = 2.2,
                  r58_ids=(), safety_off_ids=(), dir_ccw_ids=(),
                  can_interface: str | None = None,
-                 control_socket_path: str | None = None):
+                 control_socket_path: str | None = None,
+                 probe_adapter: bool = False,
+                 mit_torque_limits=None):
+        # {motor_id: N·m}——**MIT 力矩量化上限**，逐型号（R48 11 / R58 45）。
+        # 与桥的 tau_limits 同值同源（型号库 peak_torque_nm），但角色不同：
+        # 这个是解码量程，那个是饱和钳位。固件按 Profile 的 mit_torque_limit_nm
+        # 编码，解码端必须跟着对应，否则 τ_ff 被整体缩放（曾是写死 45.0）。
+        self.mit_torque_limits = dict(mit_torque_limits or {})
+        # 静默期是否向适配器问 V/E 取证。**默认关**：诊断不得改变被测对象——
+        # 2026-10-12 记录过周期问 E 会让锁存从"偶发"变"90 秒 5 次"，而 2026-10-14
+        # 加基线 V 后首次静默由 169s 提前到 0.6s。要取判据时显式开。
+        self.probe_adapter = probe_adapter
         self.tty_path = tty
         self.can_interface = can_interface
         self.bus_socket = None
@@ -740,17 +791,19 @@ class CanMotorSim:
         self.last_sync_at = None
         self.max_sync_gap = 0.0
         self.next_send = {}
-        # ── CANable 健康监测（2026-10-12 加）──────────────────────────────
-        # 现场这只 CANable 会**锁存**进一个不再 ACK 的状态：E 查询回非 0，且
-        # 单独 C 关通道清不掉。后果是固件 TX FIFO（16 深）被自动重传占满 → 不
-        # 再发 SYNC → 模拟器反馈是 SYNC 驱动的、也没活干 → 两侧一起静默，而且
-        # 工具从不查 CANable 状态、读线程猝死也没人发现，**根因完全隐形**。
-        # 这里补三件事：定期问 E（可见性）、长时间无帧自动重开通道（自愈）、
-        # 读线程猝死自动重启。
-        self.canable_error = ""      # 最近一次 E 查询的应答值
+        # ── 链路健康监测 ─────────────────────────────────────────────
+        # 两侧一起静默时根因完全隐形：固件 TX FIFO（16 深）被自动重传占满后不再发
+        # SYNC，而模拟器反馈是 SYNC 驱动的、也没活干。这里补两件事：长时间无帧自动
+        # 重开通道（自愈；重开前先取一次 E 留判据），读线程猝死自动重启。
+        self.canable_error = ""      # 最近一次 E 查询的应答值（仅静默期查）
+        # 读线程留下的非帧文本行（V 的版本串等）——静默期没有帧行，不靠队列就只能
+        # 靠 fd 直读，那会和读线程抢；故由读线程留痕、主线程消费。
+        self._reply_lines = deque(maxlen=4)
+        # V 探针的阳性对照是否已取得（configure() 里打基线）。没有它，静默期的
+        # "V 无应答"分不清是适配器死了还是探针路径本身不工作。
+        self._adapter_baseline = False
         self.last_rx_at = None       # 最近一次收到**有效 CAN 帧**的时刻
         self.stall_recoveries = 0    # 自动重开通道次数
-        self._last_error_poll = 0.0
         self._reader_restarts = 0
         self.last_cerb_emit = 0.0
         self.control_socket_path = control_socket_path
@@ -826,6 +879,14 @@ class CanMotorSim:
         # 配置期（含 V 探测）不用读线程；配置完再起，避免与探测抢 fd。
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
+        # 基线：此刻总线健康，走**读线程那条路**再问一次 V。它同时验证探针路径
+        # 本身可用——静默期的 "V 无应答" 只有在这条基线存在时才是判据。
+        if self.probe_adapter:
+            baseline = self._probe_adapter_alive()
+            self._adapter_baseline = baseline is not None
+            print(f"[sim] CANable V 基线={baseline!r}" if baseline is not None else
+                  "[sim] ⚠ CANable V 基线未取到（探针路径不工作，静默期的无应答"
+                  "不可作判据）")
 
     def _probe_version(self) -> str | None:
         """读取 CANable 的 V 响应；只用于选择数据位率，不消费 CAN 帧。"""
@@ -1076,7 +1137,9 @@ class CanMotorSim:
                 if m is None or m.kind != "cerb" or not m.linked:
                     continue
                 subframe = data[slot * 9:slot * 9 + 9]
-                cmd = cerb_decode_command(subframe)
+                cmd = cerb_decode_command(
+                    subframe, self.mit_torque_limits.get(
+                        m.id, CERB_MIT_TORQUE_FALLBACK))
                 m.enabled = cmd["enabled"]
                 m.last_cmd = cmd
                 if cmd["enabled"]:
@@ -1091,7 +1154,8 @@ class CanMotorSim:
         if m is None:
             return
         if m.kind == "cerb" and can_id == 0x110 + m.id and len(data) >= 9:
-            cmd = cerb_decode_command(data)
+            cmd = cerb_decode_command(
+                data, self.mit_torque_limits.get(m.id, CERB_MIT_TORQUE_FALLBACK))
             m.enabled = cmd["enabled"]
             m.last_cmd = cmd
             if cmd["enabled"]:
@@ -1201,21 +1265,48 @@ class CanMotorSim:
             self.rx_buf += chunk
             while b"\r" in self.rx_buf:
                 line, self.rx_buf = self.rx_buf.split(b"\r", 1)
-                text = line.decode(errors="replace").strip()
-                # CANable 的 E 查询应答不是 CAN 帧，parse_slcan 会返回 None 被
-                # 静默丢掉——那正是本工具长期看不见"CANable 已锁存"的原因。
-                # ⚠ E 应答不以 \r 结尾，按 \r 切行会与下一条帧粘成一行
-                # （2026-10-12 实测拿到 "4b60284008100000000000"），故用正则从
-                # 行内取数字，不依赖行边界。
-                match = _CANABLE_ERR_RE.search(text)
-                if match:
-                    self.canable_error = match.group(1)
-                    continue
-                if "CANable Error Register" in text:
-                    continue
-                parsed = parse_slcan(text)
-                if parsed:
-                    self._rxq.put(parsed)
+                self._classify_line(line)
+            self._consume_control_reply()
+
+    def _classify_line(self, line: bytes):
+        """一条以 \\r 收尾的输入：CAN 帧入队，命令应答（V/E）留痕。
+
+        命令应答不是 CAN 帧，parse_slcan 会返回 None——此前被静默丢掉，那正是
+        本工具长期看不见适配器状态的原因。
+        """
+        text = line.decode(errors="replace").strip()
+        match = _CANABLE_ERR_RE.search(text)
+        if match:
+            self.canable_error = match.group(1)
+            return
+        if "CANable Error Register" in text:
+            return
+        parsed = parse_slcan(text)
+        if parsed:
+            self._rxq.put(parsed)
+        elif text:
+            self._reply_lines.append(text)
+
+    def _consume_control_reply(self):
+        """取出缓冲里**未成行**的命令应答。
+
+        ⚠ V/E 的应答都不以 \\r 结尾（2026-10-12 实测：E 应答会与下一条帧粘成
+        一行）。正常有帧流时下一条帧的 \\r 会把它们顶出来；但**静默期正是要问
+        V/E 的时候**，没有帧流 ⇒ 应答会一直留在 rx_buf 里读不到。判据：帧行必
+        以 t/T/d/D/b/B 开头，否则就是应答文本。
+        """
+        if not self.rx_buf:
+            return
+        match = _CANABLE_ERR_RE_B.search(self.rx_buf)
+        if match:
+            self.canable_error = match.group(1).decode()
+            self.rx_buf = self.rx_buf[match.end():]
+            return
+        if self.rx_buf[:1] and self.rx_buf[:1] not in _SLCAN_FRAME_HEADS:
+            text = self.rx_buf.decode(errors="replace").strip()
+            if text:
+                self._reply_lines.append(text)
+            self.rx_buf = b""
 
     def _drain_rx(self):
         """主循环侧：把读线程已入队的帧全部处理掉。"""
@@ -1247,22 +1338,78 @@ class CanMotorSim:
         if self.log_f:
             self.log_f.flush()
 
-    def _recover_latched_bus(self):
-        """CANable 锁存不再 ACK：关通道并重新下发整条配置序列让它复活。
+    def _probe_adapter_alive(self, timeout: float = 0.6) -> str | None:
+        """问一次 V（版本）判断适配器**串口侧**是否还活着；无应答返回 None。
 
-        实测（2026-10-12）：单独的 C（关通道）**清不掉**锁存；必须重走
-        C→S8→Y<n>→M0→A1→O。重开之后固件**不用复位**就能把被重传占住的 TX FIFO
-        排空，SYNC 自动恢复到 50Hz。这是"链路活一会儿就死"的直接解药。
+        V 有阳性对照：开通道时 _probe_version 用同一条命令读到过版本串，且
+        configure() 会把基线打进日志。所以"静默期问 V 无应答"只可能是适配器真的
+        哑了，不是这条命令不被支持——这正是 E 做不到的（E 是非标准命令，且曾有
+        周期轮询加剧锁存的观察，见 __init__ 的健康监测注释）。
+        """
+        self._reply_lines.clear()
+        try:
+            self._write(b"V\r", drop_ok=True)
+        except OSError:
+            return None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._reply_lines:
+                return self._reply_lines[-1]
+            time.sleep(0.01)
+        return None
+
+    def _query_canable_error(self, timeout: float = 0.5) -> str | None:
+        """问一次 CANable 的 E（错误寄存器）；无应答返回 None。
+
+        E 读的是适配器**CAN 控制器**的错误态，与 V 的串口侧存活是两件事——只有
+        V 答得出来时这个读数才有意义。非标准命令，只在静默期问。
+        """
+        self.canable_error = ""
+        try:
+            self._write(b"E\r", drop_ok=True)
+        except OSError:
+            return None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.canable_error:
+                return self.canable_error
+            time.sleep(0.01)
+        return None
+
+    def _recover_latched_bus(self):
+        """长时间收不到帧：先取适配器判据，再重下发整条 SLCAN 配置序列。
+
+        实测（2026-10-12）：单独 C（关通道）清不掉；必须重走
+        C→S8→Y<n>→M0→A1→O。重开后固件**不用复位**就能把被重传占住的 TX FIFO
+        排空，SYNC 自动回到 50Hz。
+
+        适配器是否真的"锁存"是**未决**问题（2026-10-14 的数据相位结论与之冲突）。
+        加了 --probe-adapter 时，重开前先问 V/E 留判据：V 无应答 ⇒ 适配器串口侧已
+        死（锁存说成立）；V 有应答而 E≠0 ⇒ 适配器活着但它的 CAN 控制器在错误态。
+        默认**不问**——诊断不应改变被测对象，理由见 __init__ 的 probe_adapter。
         """
         self.stall_recoveries += 1
-        # 此刻总线已静默，没有帧流与 E 应答交错——这是唯一能拿到**干净**错误码的
-        # 时机。周期性轮询会与帧行互相污染（2026-10-12 实测：E 值里混进了
-        # b60284008100000000000 这类帧片段），所以只在自愈路径里问一次。
-        # 周期性轮询已在跑，这里直接用最近一次的读数（自愈时总线已静默，
-        # 该值就是锁存瞬间的 CANable 错误寄存器）。
+        if not self.probe_adapter:
+            print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：重开通道…"
+                  "（加 --probe-adapter 可在重开前取适配器 V/E 判据）")
+            self._reopen_channel()
+            return
+        alive = self._probe_adapter_alive()
+        if alive is None:
+            # 基线由 configure() 打印；无基线时（老进程/异常启动）不下结论。
+            verdict = ("无应答 ⇒ 适配器串口侧已死" if self._adapter_baseline
+                       else "无应答（无基线，不能作判据）")
+            error_text = ""
+        else:
+            error = self._query_canable_error()
+            verdict = f"应答={alive!r} ⇒ 适配器串口侧存活"
+            error_text = f"；E={error if error is not None else '无应答'}"
+        print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：V={verdict}"
+              f"{error_text}；重开通道…")
+        self._reopen_channel()
 
-        print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：CANable 疑似"
-              f"锁存（E={self.canable_error or '未读到'}），重开通道…")
+    def _reopen_channel(self):
+        """关通道再整条重配；成功后重新走 SYNC 门控。"""
         try:
             for cmd in slcan_config_commands(self.data_bitrate_index):
                 self._write(cmd, drop_ok=True)
@@ -1521,6 +1668,9 @@ def main():
     ap.add_argument("--log", default=None)
     ap.add_argument("--ready-file", default=None,
                     help="CAN 接口打开且读线程就绪后创建该文件，供总启动器排序")
+    ap.add_argument("--probe-adapter", action="store_true",
+                    help="总线静默时向适配器问 V/E 取证（默认关：问 E 在本台架有"
+                         "加剧静默的记录，诊断不应改变被测对象）")
     ap.add_argument("--control-socket", default=None,
                     help="运行期控制通道：Unix socket 路径（JSON 行协议，"
                          "status/add/remove/link），供 web 上位机的仿真页使用；"
@@ -1565,7 +1715,9 @@ def main():
                    safety_off_ids=args.safety_off,
                    dir_ccw_ids=args.dir_ccw,
                    can_interface=args.interface,
-                   control_socket_path=args.control_socket)
+                   control_socket_path=args.control_socket,
+                   probe_adapter=args.probe_adapter,
+                   mit_torque_limits=tau_limits)
 
     if args.gazebo:
         jm = parse_joint_map(args.joint_map)

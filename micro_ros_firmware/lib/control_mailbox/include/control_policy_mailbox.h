@@ -1,19 +1,8 @@
-// 逐电机策略的最新值 mailbox（enable + MIT 增益）。
-//
-// 与 control_command_mailbox 的关系：那条是「运动目标」，本条是「控制律参数
-// 与武装位」。二者独立，互不覆盖。
-//
-// **为什么不走 config FIFO**：config 队列深 16，是给「低频、逐台、带设备事务」
-// 的请求用的；一条策略消息最多 64 台，按台提交会有一半以上被 FIFO 拒掉，
-// 策略变成部分生效。策略是「批量、本地立即生效」的类别，理应有自己的有界
-// 通道（与命令/轨迹同构）。
-//
-// 并发契约：与 control_command_mailbox 逐字相同——本层无内部锁、无原子字段，
-// publish/take/clear 的每一次调用都必须位于调用方提供的临界区内，且写侧与
-// 读侧必须共用同一互斥域。仅支持任务上下文调用。
-//
-// 语义：双缓冲 latest-wins。空策略（target_count==0）是合法载荷（等价于
-// 无操作），不是非法。
+// 逐电机策略的最新值 mailbox（enable + MIT 增益）：control_command_mailbox 是「运动目标」，
+// 本条是「控制律参数与武装位」，二者独立、互不覆盖。**不走 config FIFO**：config 队列深 16、
+// 面向低频逐台带设备事务的请求，而一条策略最多 64 台，按台提交会有一半以上被拒、策略变成
+// 部分生效。并发契约与 control_command_mailbox 逐字相同（无锁、调用方临界区、写读同域、
+// 仅任务上下文）；语义为双缓冲 latest-wins，空策略是合法载荷、等价于无操作。
 
 #ifndef CONTROL_POLICY_MAILBOX_H
 #define CONTROL_POLICY_MAILBOX_H

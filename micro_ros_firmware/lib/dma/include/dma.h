@@ -1,13 +1,7 @@
-// DMA 共享资源门卫（ARD-0007 §28/§30）：
-//   1. 管理 DMA1、BDMA/DMAMUX2 控制器时钟与通道中断优先级；
-//   2. 记录编译期固定的资源占用，设备句柄和传输配置仍归设备库；
-//   3. DMA 缓冲的 cache 约束由非缓存 MPU 区域承担（.dma_noinit/.bdma_noinit，
-//      见 src/system_clock.cpp）；D-cache 实为开启（Arduino 核心使能，
-//      SystemClock_Config 在 MPU 配置后恢复），设备库无需手工维护 cache。
-//
-// 当前占用：DMA1 Stream0/1 空闲；WS2812 使用 BDMA Channel0，句柄、IRQ
-// handler 与位于 .bdma_noinit/RAM_D3 的帧缓冲均归 lib/ws2812。
-// BMI088 使用阻塞 SPI2，不占用 DMA。设备库之间禁止互相 include 或调用。
+// DMA 共享资源门卫：管理 DMA1、BDMA/DMAMUX2 的控制器时钟与通道中断优先级，记录编译期固定的
+// 资源占用。**设备句柄与传输配置归设备库**——WS2812 自持 BDMA Channel0 的句柄、IRQ handler 与位于
+// .bdma_noinit/RAM_D3 的帧缓冲；BMI088 走阻塞 SPI2、不占 DMA。设备库之间禁止互相 include 或调用。
+// DMA 缓冲的 cache 约束由非缓存 MPU 区域承担（.dma_noinit/.bdma_noinit），设备库无需手工维护 cache。
 
 #ifndef DMA_H
 #define DMA_H

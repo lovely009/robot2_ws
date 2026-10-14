@@ -1,13 +1,8 @@
-// 每总线静态 RX 环（ARD-0007 §21.1/§21.2）：FDCAN ISR 为唯一生产者，
-// motor_rt_task 为唯一消费者（SPSC 无锁）。
-//
-// 并发约定：push 只在 ISR 上下文调用（只推进 head）；pop/pending 只在任务
-// 上下文调用（只推进 tail）。head/tail 均 32 位自然对齐，Cortex-M7 上
-// 单加载/存储原子。环满丢弃**新帧**并计数，不移动 tail，因为 ISR 侧不能
-// 回收仍可能由消费者读取的槽位（ARD §51.1）。
-//
-// 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms，与内核 millis() 同一
-// HAL 计数器——见 can_bsp.c isr_now_ms）与 is_brs 属性（ARD §21.2）；
+// 每总线静态 RX 环：FDCAN ISR 是唯一生产者、motor_rt_task 是唯一消费者（SPSC 无锁）。
+// push 只在 ISR 上下文（只推进 head），pop/pending 只在任务上下文（只推进 tail）；head/tail 均为
+// 32 位自然对齐，Cortex-M7 上单加载/存储原子。**环满丢弃新帧并计数、不移动 tail**——ISR 侧不能
+// 回收仍可能被消费者读取的槽位。
+// 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms，与内核 millis() 同一 HAL 计数器）与 is_brs，
 // bus_index 由 ISR 填写。
 
 #ifndef CAN_RX_RING_H

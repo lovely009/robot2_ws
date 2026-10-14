@@ -1,19 +1,8 @@
-// 与电机协议和运行时策略无关的多点轨迹 mailbox。
-//
-// 与 control_command_mailbox 的关系：命令快照是「当前设定点」，轨迹是
-// 「未来一段时间的设定点时间线」。二者各有独立通道，由内核按电机归属
-// 仲裁（同一电机同一时刻只有一个是权威），此层不做仲裁。
-//
-// 并发契约：与 control_command_mailbox 逐字相同——本层无内部锁、无原子
-// 字段，publish/take/clear 的每一次调用都必须位于调用方提供的临界区内，
-// 且写侧与读侧必须共用同一互斥域。仅支持任务上下文调用。
-//
-// 语义：分段先在 assembly 中按序拼接，只有完整轨迹才进入双缓冲
-// latest-wins。未取走时再次提交完整轨迹只覆盖「后台」并计入 overwrite_count；
-// take 取走已发布轨迹并清除 pending；clear 同时撤销未取走轨迹和未完成组装。
-//
-// 空轨迹（point_count==0 && target_count==0）是**合法输入**，语义为「取消
-// 当前轨迹」——它必须能被受理，因此不能当作非法载荷拒绝。
+// 与电机协议和运行时策略无关的多点轨迹 mailbox。与 control_command_mailbox 的关系：那条是
+// 「当前设定点」，本条是「未来的设定点时间线」，同一电机同一时刻只有一个是权威，由内核按
+// 归属仲裁、此层不做仲裁。并发契约与 control_command_mailbox 逐字相同：无锁、调用方临界区、
+// 写读同域、仅任务上下文。语义：分段先按序拼进 assembly，只有完整轨迹才进双缓冲 latest-wins，
+// 未取走时再提交只覆盖「后台」并计 overwrite_count。空轨迹是**合法输入**＝取消当前轨迹。
 
 #ifndef CONTROL_TRAJECTORY_MAILBOX_H
 #define CONTROL_TRAJECTORY_MAILBOX_H

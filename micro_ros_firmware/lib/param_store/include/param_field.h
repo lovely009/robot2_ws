@@ -29,19 +29,13 @@ typedef enum {
   // 追加在 COUNT 前：不重排既有字段（blob present 位图与槽索引的契约）。
   // 值本身不入 blob 的 float 字段，它在 device_raw[槽 4] 里已有持久化。
   PARAM_FIELD_LIMIT_PROTECT,
-  // 【2026-09-20 删除】此处曾追加 PID 六项（0x2532..0x2537，B 方案实测）。
-  // 它们被 param_bridge 的注册循环以 PARAM_FIELD_COUNT 为界**自动带进参数树**，
-  // 变成 6 个恒 NaN、不可写、纯占槽的死项，并把每电机项数从 5 顶到 11
-  // （kMaxMotors 的推导分母仍是 5 → 门限虚高 → 第 37 台起静默失败）。
-  // PID 非安全项、驱动器自持（0x2539 保存码 1 覆盖），台架调参用离线 SDO 工具，
-  // **不再回到本枚举**。教训仍然通用：本枚举尾端是"全集"，而"可经参数面下发的
-  // 集合"由 src/param_bridge.cpp 的 kFields[] 显式列出（线协议 field 序）——
-  // 加字段必须同时改两处，别拿 PARAM_FIELD_COUNT 当上界。
-  // 既有 W25 blob 不受影响：present 位只用到 0..6（param_store_blob.c:110）。
-  // 设备侧电机方向（0x2541:00）：0 = CW，1 = CCW。**原值直通、不做语义反转**
-  // ——它没有 0x2650 那种"1 = 关"的反向陷阱，别为了对称多加一层。
-  // 追加在 COUNT 前：present 位图与槽索引是契约，不重排既有字段。
-  // 值持久化在 device_raw[槽 5]（见 param_store_blob_set_device_raw）。
+  // 【已删除，不得回归】此处曾追加 PID 六项（0x2532..0x2537），被以 PARAM_FIELD_COUNT 为界的注册
+  // 循环自动带进参数树，变成 6 个恒 NaN、不可写的死项，并把每电机项数从 5 顶到 11 → 门限虚高 →
+  // 第 37 台起静默失败。PID 非安全项、驱动器自持，台架调参用离线 SDO 工具。
+  // 教训：本枚举尾端是「全集」，而「可经参数面下发的集合」由 src/param_bridge.cpp 的 kFields[] 显式
+  // 列出（线协议 field 序）——加字段必须同时改两处，别拿 PARAM_FIELD_COUNT 当上界。
+  // 设备侧方向 0x2541:00：0 = CW、1 = CCW，**原值直通、不做语义反转**（没有 0x2650 那种「1 = 关」的
+  // 反向陷阱），持久化在 device_raw[槽 5]；追加字段必须放在 COUNT 前——present 位图与槽索引是契约。
   PARAM_FIELD_DIRECTION,
   PARAM_FIELD_COUNT
 } param_field_t;

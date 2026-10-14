@@ -1,17 +1,10 @@
-// 电机域 ROS 桥实现：ID 化消息面（ARD-0007 §15）。
-//
-// 下行 3 条（订阅）：motor_command_array（完整快照）、motor_trajectory（多点
-// 轨迹）、motor_policy（逐电机 enable/kp/kd）。
-// 上行 7 条（发布）：motion_states 50Hz、motor_status_array 20Hz、motor_topology 1s、
-// motor_events、trajectory_state 10Hz、diagnostics 1Hz、device_param_report 按需
-// （REPORT 命令 / 写事务收尾 / 设备初始化结论）。
-// 全部用相对名，见下。
-//
-// 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），
-// 集合外仍归快照（缺失即软停，ARD §13.1）。策略与二者正交（ARD §15.4 禁止 kp/kd/enable
-// 进命令快照）。型号绑定由内核经 READ_IDENTITY 事务完成，本桥不经手下行配置。
-//
-// 本桥不做：joint_name 语义、协议/CAN 字节、直接 RX 访问（ARD §28.1）。
+// 电机域 ROS 桥实现：ID 化消息面。下行 3 条订阅：motor_command_array（完整快照）、
+// motor_trajectory（多点轨迹）、motor_policy（逐电机 enable/kp/kd）；上行 7 条发布：motion_states 50Hz、
+// motor_status_array 20Hz、motor_topology 1s、motor_events、trajectory_state 10Hz、diagnostics 1Hz、
+// device_param_report 按需（REPORT 命令 / 写事务收尾 / 设备初始化结论）。全部用相对名。
+// 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），集合外归快照
+// （缺失即软停）；策略与二者正交（kp/kd/enable 不进命令快照）；型号绑定由内核经 READ_IDENTITY 完成。
+// 本桥不做 joint_name 语义、协议/CAN 字节与直接 RX 访问。
 
 #include "motor_bridge.h"
 
@@ -504,19 +497,19 @@ static void publish_device_param_report() {
     // 不需要未绑定 Profile 拿不到的 torque_per_amp；原值缺失则 NaN。
     out.rec_torque_limit = NAN;
     if ((r.device_raw_present &
-         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)) != 0U) {
+        (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX)) != 0U) {
       out.rec_torque_limit =
           (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX] / 1000.0f;
     }
     out.rec_safety = NAN;
     if ((r.device_raw_present &
-         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U) {
+        (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY)) != 0U) {
       out.rec_safety =
           (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     }
     out.rec_direction = NAN;
     if ((r.device_raw_present &
-         (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)) != 0U) {
+        (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION)) != 0U) {
       out.rec_direction =
           (float)r.device_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
     }

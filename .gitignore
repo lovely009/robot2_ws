@@ -61,3 +61,6 @@
 
 # MuJoCo 运行时日志（工作目录下自动生成）
 /MUJOCO_LOG.TXT
+
+# ROS 2 运行时日志目录（在包源码目录内就地运行 launch 会生成）
+/ros2_ws/src/**/log/

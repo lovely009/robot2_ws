@@ -1,16 +1,9 @@
 // W25Q64 持久化参数 blob（纯 C，无 HAL 依赖，host 可直测）。
-//
-// 单 blob = 32B 头 + 64×120B 记录 = 7712B。每槽占 2 个 4KB 扇区：
-// 槽 A 0x0000–0x1FFF，槽 B 0x2000–0x3FFF；双 sector A/B 的选槽/seq 比较
-// 由 storage 任务负责，本模块只管布局与 CRC。
-//
-// v3 相对 v2（48B 记录）扩大设备端原值槽位（4→8，现用 6，留 2）、新增型号
-// 身份（model_name/identity_hash）与写记录时固件假定的 MIT 全量程三标度
-// （mit_*_limit_* + profile_version），用途是让"固件升级改了型号目录"可被发现。
-//
-// v2 相对 v1（32B 记录）增加设备端原值：设备参数以设备内为准，固件记录是
-// 上电比对的基准，比对必须比原值——关节侧 SI 会与换算系数一起错，比对恒
-// 通过。v1 blob 仍可读：param_store_blob_migrate_v1() 就地升级。
+// 单 blob = 32B 头 + 64×120B 记录 = 7712B；每槽占 2 个 4KB 扇区（槽 A 0x0000–0x1FFF、槽 B
+// 0x2000–0x3FFF）——选槽与 seq 比较归 storage 任务，本模块只管布局与 CRC。
+// v3 相对 v2（48B 记录）扩大设备端原值槽位（4→8，现用 6、留 2），新增型号身份（model_name /
+// identity_hash）与写记录时固件假定的 MIT 全量程三标度（mit_*_limit_* + profile_version），用途是让
+// 「固件升级改了型号目录」可被发现。v2 相对 v1 增加设备端原值；v1 blob 仍可读（migrate_v1）。
 #ifndef PARAM_STORE_BLOB_H
 #define PARAM_STORE_BLOB_H
 

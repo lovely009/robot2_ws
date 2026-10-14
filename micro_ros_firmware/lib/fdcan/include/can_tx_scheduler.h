@@ -1,19 +1,8 @@
-// 每总线 TX 软件调度器（ARD-0007 §22 / §37）：P0 安全 > P1 周期控制 >
-// P2 管理流量。每总线一个实例（三路硬件独立调度）。
-//
-// 语义：
-//  - P0（停机/失能/使能/急停/安全帧）：最高优先级，pump 时先于一切出队；
-//    上层（运行时内核）已按电机去重，本层为有界 FIFO，满则丢新并计数；
-//    P2 队列积压绝不影响 P0 出队（§22.1 MUST）。
-//  - P1（500Hz MIT）：每个电机槽位 latest-wins——新目标覆盖未发送旧目标
-//    （slot 为电机在总线上的槽索引，0..CAN_TX_P1_SLOTS-1），无 FIFO 历史
-//    （禁止项 5）。pump 只发送"脏"槽位一次。
-//  - P2（发现/配置/管理）：有界 FIFO + 每次 pump 配额上限，绝不让 P2
-//    挤占 P0/P1（TBD-CAN-01：配额值为具名占位常量）。
-//
-// pump() 返回本轮应提交到硬件 FIFO 的帧（调用方按序 HAL_FDCAN_AddMessage）。
-// 纯 C、无 HAL/FreeRTOS 依赖，可宿主测试；硬件忙/拒绝的反馈由调用方
-// 统计后通过 can_tx_scheduler_note_result() 记账。
+// 每总线 TX 软件调度器：P0 安全 > P1 周期控制 > P2 管理流量，每总线一个实例。
+// P0（停机/失能/使能/急停）最高优先级、pump 先于一切出队，**P2 积压绝不影响它**；P1（500Hz
+// MIT）每电机槽位 latest-wins、无 FIFO 历史，只发「脏」槽位；P2（发现/配置/管理）有界 FIFO +
+// 每次 pump 配额上限。pump() 返回本轮该提交硬件 FIFO 的帧，纯 C、无 HAL/FreeRTOS 依赖、
+// 可宿主测试，硬件忙/拒收由调用方经 can_tx_scheduler_note_result() 记账。
 
 #ifndef CAN_TX_SCHEDULER_H
 #define CAN_TX_SCHEDULER_H

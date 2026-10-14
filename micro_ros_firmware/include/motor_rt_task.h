@@ -1,18 +1,8 @@
-// 唯一电机实时业务所有者（ARD-0007 AR-005 / §11 / §28）。
-//
-// 节拍：
-//  - 1ms 服务：三路 RX ring 批量弹出（每总线有界配额，TBD-CAN-01）→
-//    motor_control_on_raw_frame → motor_control_service（OFFLINE/新鲜度级联/
-//    配置事务步进）→ 每总线 motor_tx_router → can_bsp_submit_tx。
-//  - 2ms/500Hz 控制边界：mailbox 会话/授权边沿同步到内核 → 完整命令快照 →
-//    apply_command_snapshot → 已拼接多点轨迹受理与 Hermite 步进 →
-//    配置 FIFO 逐条（每边界有界）→ submit_config。
-//
-// 线程边界：mailbox 是本任务与 ROS 桥之间的唯一通道。外部只允许通过本头
-// 文件的写入口（临界区内转发 mailbox）与只读状态副本交互；内核上下文仅由
-// 本任务写（ARD §28.1 单一所有者）。
-//
-// 无 raw CAN 调试出口，不转发旧 control_task_* 符号（禁止项 10）。
+// 唯一电机实时业务所有者。1ms 服务：三路 RX ring 批量弹出（每总线有界配额）→
+// motor_control_on_raw_frame → motor_control_service（OFFLINE / 新鲜度级联 / 配置事务步进）→
+// 每总线 motor_tx_router → can_bsp_submit_tx。2ms/500Hz 控制边界：mailbox 会话/授权边沿同步 →
+// 完整命令快照 → apply_command_snapshot → 轨迹受理与 Hermite 步进 → 配置 FIFO 逐条。
+// mailbox 是本任务与 ROS 桥之间的**唯一通道**，内核上下文仅由本任务写。无 raw CAN 调试出口。
 
 #ifndef MOTOR_RT_TASK_H
 #define MOTOR_RT_TASK_H

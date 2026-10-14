@@ -255,19 +255,12 @@ static inline size_t motor_control_entry_index(
   return (size_t)(entry - ctx->entries);
 }
 
-// 设备参数初始化门禁 —— 【2026-10-12 维护者 决定：台架暂时取消】
+// 设备参数初始化门禁 ——【台架暂时取消，见 decision-log 2026-10-12】
 //
-// 原语义：只有 NA/OK 放行，PENDING/MISMATCH/UNVERIFIED/NO_RECORD 一律拦截
-// （"初始化完成前不可使能"）——没核对完成就没有"用哪份值"的答案。
-// 现语义：**除 NULL 表项外恒放行**。维护者 明确要求台架不再受设备参数初始化与
-// 比对结果阻塞（见 fdcan1-bench-guide 的 CONFIG_CONFLICT 一节）。
-//
-// ⚠ 代价（恢复门禁前请确认已知悉）：
-//   dev_init ≠ OK 时，该台的限位/速度/力矩可能**不是核对过的值**，运动许可因此
-//   建立在未核对的参数之上；此时真正兜底的只剩硬件急停与机械限位。
-//
-// 本改动**只解除"拦"，不解除"报"**：dev_init 状态机、上电回读、device_param_report
-// 遥测全部保持原样，页面照样看得到 MISMATCH/NO_RECORD。
+// 现语义：**除 NULL 表项外恒放行**；原语义是只有 NA/OK 放行，PENDING/MISMATCH/UNVERIFIED/NO_RECORD
+// 一律拦截（"初始化完成前不可使能"）。⚠ 代价：dev_init ≠ OK 时该台的限位/速度/力矩可能**不是核对过的
+// 值**，运动许可建立在未核对的参数之上，真正兜底的只剩硬件急停与机械限位。
+// 本改动**只解除「拦」不解除「报」**：dev_init 状态机、上电回读、device_param_report 全部保持原样。
 // 恢复门禁：把返回值改回 (dev_init == NA || dev_init == OK)。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {

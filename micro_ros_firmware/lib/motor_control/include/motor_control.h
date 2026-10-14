@@ -1,20 +1,13 @@
 #ifndef MOTOR_CONTROL_H
 #define MOTOR_CONTROL_H
 
-// ID 驱动的电机运行时内核（ARD-0007 §8/§9/§13/§20）。
+// ID 驱动的电机运行时内核：注册表、型号 Profile 目录、生命周期、安全、freshness、状态/事件快照。
 //
-// 定位：纯 C 运行时内核——注册表、型号 Profile 目录、生命周期、安全、
-// freshness、状态/事件快照。不依赖 ROS、HAL、FreeRTOS、control_mailbox，
-// 也不感知 joint_name（关节语义在 upper 层，AR-003）。
-// 厂家字节只经 motor_protocol 的 adapter 接口（构造时注入 adapter 列表，
-// 新增协议不改内核——ARD §24.3）。
-//
-// 所有权：motor_rt_task 是唯一调用者。1ms 服务节拍调
-// on_raw_frame()/service()；2ms/500Hz 控制边界调 apply_command_snapshot()；
-// TX 调度器（lib/fdcan）消费 collect_tx() 输出的 P0/P1/P2 帧。
-//
-// 时基：一切 freshness/超时判定使用 MCU 单调时基毫秒（调用方传入 now_ms
-// 与帧内 rx_tick_ms），绝不用 ROS 时间（ARD §12）。
+// 不依赖 ROS/HAL/FreeRTOS/control_mailbox，也不感知 joint_name（关节语义在 upper 层）；厂家字节只
+// 经 motor_protocol 的 adapter 接口——构造时注入 adapter 列表，新增协议不改内核。
+// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，2ms/500Hz 边界调
+// apply_command_snapshot()，TX 调度器消费 collect_tx() 的 P0/P1/P2 帧。
+// 一切 freshness/超时判定用 MCU 单调时基毫秒（now_ms 与帧内 rx_tick_ms），绝不用 ROS 时间。
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -87,16 +80,12 @@ typedef enum {
   // last_failure_reason 供本机诊断，不进 unified_fault_code——它不是设备
   // 故障，而是本机拒绝了一条重复的授权请求。
   MOTOR_CONTROL_FAULT_STALE_GENERATION = 7U,
-  // 【2026-09-20 删除】此处曾用 8 = ZERO_STALE（翻方向→冻结到重新设零）。
-  // 真机实测证伪了它的前提：0x2541 只改驱动力矩方向，**不改位置坐标系**
-  // （同一物理方向转动时，0x6064 的计数方向不随 0x2541 变化），因此限位与
-  // 零点都不镜像、设零也不能消解任何东西。翻向真正的风险是位置环变正反馈
-  // （使能后朝远离目标冲），由"仅未运动时受理"这条门禁覆盖。**值 8 空置，
-  // 不得复用**（历史事件/日志里出现过）。
-  // 武装时该台保护**确知为关**却没带显式确认位（2026-09-20 维护者 决定）。
-  // 与 STALE_GENERATION 同待遇：只写入 last_failure_reason 供本机诊断，**不进**
-  // unified_fault_code、不改 lifecycle——它不是设备故障，而是本机拒绝了一条
-  // 缺确认的授权请求（关保护 = 该关节没有任何限位在跑）。
+  // 【值 8 空置，不得复用】此处曾用 8 = ZERO_STALE（翻方向→冻结到重新设零）。真机实测证伪了它的前提：
+  // 0x2541 只改驱动力矩方向、**不改位置坐标系**，限位与零点都不镜像、设零也消解不了任何东西；翻向真正的
+  // 风险是位置环变正反馈，由「仅未运动时受理」这条门禁覆盖（历史事件/日志里出现过值 8）。
+  // 武装时该台保护**确知为关**却没带显式确认位：与 STALE_GENERATION 同待遇——只写入 last_failure_reason
+  // 供本机诊断，**不进** unified_fault_code、不改 lifecycle；它不是设备故障，而是本机拒绝了一条缺确认的
+  // 授权请求（关保护 = 该关节没有任何限位在跑）。
   MOTOR_CONTROL_FAULT_UNPROTECTED_UNCONFIRMED = 9U
 } motor_control_fault_code_t;
 

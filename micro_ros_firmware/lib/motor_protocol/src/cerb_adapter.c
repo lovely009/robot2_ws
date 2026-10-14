@@ -1,45 +1,20 @@
-// CERB CAN-FD/MIT 协议 adapter（ARD-0007 §24 能力清单的 CERB 实现）。
-//
-// 单位约定（命令与反馈分向）：
-//  - 命令（encode）：关节侧 rad/s 直通 MIT 12 位对称量化，上限 = Profile
-//    mit_velocity_limit_rad_s（π）。命令侧不乘减速比——若按 ×gear 换算到
-//    电机侧，正常关节速度（×101）将远超 π 满码饱和失真。
-//  - 反馈（decode）：线协议速度为电机侧 rpm（codec 转 rad/s）→ ÷ 减速比
-//    → 关节侧 rad/s；位置为关节侧原样；反馈 Iq(A) × Kt × 减速比 → 关节扭矩。
-//  - MIT 量化范围（π/π/峰值）来自 Profile，与真机参数页一致。
-//
-// 能力边界（ARD §25 + 2026-09-05 协议核实）：0x080 SYNC 触发设备 20ms 周期
-// 状态上报——上报帧即心跳（承担总线检测），因此 SYNC 心跳属管理性使用，
-// 禁止作为运动控制边界触发（禁止项 14）；反馈帧（0x300+node）为命令的实时
-// 状态。MIT 多轴快控使用 0x210，在任务层 P1 出队后按总线合帧；
-// 0x200 非 MIT 多控仍不实现。设备侧限位必须走 request_id 事务 + 读回核验——厂家管理
-// 对象未决（TBD-CONFIG-01），当前一律 UNSUPPORTED，不猜厂家字节。
-//
-// TBD 标注：软停 = MIT 阻尼帧保持使能（TBD-SAFETY-01 占位）；使能整定
-// 100ms（既有经验行为）；OFFLINE = 5×20ms 心跳丢失（100ms）。
+// CERB CAN-FD/MIT 协议 adapter。命令侧关节 rad/s 直通 MIT 12 位对称量化、**不乘减速比**（×101 会让
+// 正常关节速度远超 π 满码饱和）；反馈侧速度由电机端 rpm 经 codec 转 rad/s 后 ÷ 减速比，位置为关节侧
+// 原样，Iq × Kt × 减速比 → 关节扭矩。MIT 量化范围（π/π/峰值）来自 Profile，与真机参数页一致。
+// 0x080 SYNC 触发设备 20ms 状态上报（上报帧即心跳、承担总线检测），故属**管理性**使用、不得作为运动
+// 控制边界触发；MIT 多轴快控用 0x210（P1 出队后按总线合帧）；设备侧限位须走 request_id 事务 + 读回
+// 核验，厂家管理对象未决、当前一律 UNSUPPORTED。软停 = MIT 阻尼帧保持使能。
 
 #include "motor_protocol_adapter.h"
 
 #include <math.h>
 #include <string.h>
 
-// ===========================================================================
-// CERB：CANopen SDO、MIT/PDO、反馈与设备参数事务
-// ===========================================================================
-// ---------------------------------------------------------------------------
-// CANopen 快速 SDO（《CANopen-V0.9 字典表》「SDO 协议内容详解」）
-//
-// 帧格式（DLC 恒 8、CANFD 加速标准帧、数据小端）：
-//   写请求 0x600|node : 23 idx_lo idx_hi sub d0 d1 d2 d3   （0x23 = 写 4 字节）
-//   读请求 0x600|node : 40 idx_lo idx_hi sub 00 00 00 00   （0x40 = 上传请求）
-//   写应答 0x580|node : 60 idx_lo idx_hi sub 00 00 00 00   （0x60 = 写成功）
-//   读应答 0x580|node : 43 idx_lo idx_hi sub d0 d1 d2 d3   （0x43 = 上传 4 字节）
-//   中止   0x580|node : 80 ...                              （设备拒绝）
-//
-// 管理对象全部 ≤4 字节，走快速 SDO，事务阶段数固定为「写 → 读回」成对，
-// 写后必读回核验（ARD §20.4 / 禁止项 9）。设备身份对象 0x1008 超 4 字节，
-// 走分段上传（见下 READ_IDENTITY 段）。
-// ---------------------------------------------------------------------------
+// ===== CERB：CANopen SDO、MIT/PDO、反馈与设备参数事务 =====
+// 快速 SDO（《CANopen-V0.9 字典表》「SDO 协议内容详解」）：DLC 恒 8、CANFD 加速标准帧、数据小端。
+// 写请求 0x600|node 首字节 0x23、读请求 0x40、写应答 0x580|node 首字节 0x60、读应答 0x43、中止 0x80。
+// 管理对象全部 ≤4 字节，事务固定「写 → 读回核验」成对；身份对象 0x1008 超 4 字节走分段上传
+// （见下 READ_IDENTITY 段）。
 #define CERB_SDO_CCS_WRITE4 0x23U
 #define CERB_SDO_CCS_UPLOAD_INITIATE 0x40U
 #define CERB_SDO_SCS_WRITE_ACK 0x60U
@@ -47,14 +22,11 @@
 #define CERB_SDO_CMD_ABORT 0x80U
 
 // 管理对象（主索引/子索引）与标度：
-//   0x607D:01/02 负载位置下限/上限（INTEGER32，cnt）—— 字典 -32767..32768 cnt
-//                对应 -180..180 度，即 65536 cnt / 360 度。
-//   子索引方向以字典表 + 真机为准，**不采信说明书**：说明书"读取正限位/读取负
-//   限位"两行的子索引与它自己的设置行相反（设置正限位写 :02、负限位写 :01）——
-//   照它读会把 -32568 当"正限位"。真机四台（2026-09-19）只读 SDO 实测
-//   :01 = -32768、:02 = +32768。别照说明书"修正"下面两张表。
-//   0x6080       电机最大转速（UNS32，电机端 RPM）
-//   0x2538       电机峰值电流（UINT32，电机端 mA）
+//   0x607D:01/02 负载位置下限/上限（INTEGER32，cnt），65536 cnt/360 度。
+//     **子索引方向以字典表 + 真机为准，不采信说明书**：说明书「读取正/负限位」两行与它自己
+//     的设置行相反（设置正限位写 :02、负限位写 :01），照它读会把 -32568 当「正限位」；真机
+//     只读 SDO 实测 :01 = -32768（下限）、:02 = +32768（上限）。
+//   0x6080 电机最大转速（UNS32，电机端 RPM）；0x2538 电机峰值电流（UINT32，电机端 mA）。
 #define CERB_OBJ_POS_LIMIT 0x607DU
 #define CERB_SUB_POS_LOWER 0x01U
 #define CERB_SUB_POS_UPPER 0x02U
@@ -64,39 +36,27 @@
 // 手册注「设置时电机需要在失能状态」。命令式对象：只等 SDO 写应答，不读回。
 #define CERB_OBJ_SET_ZERO 0x2531U
 #define CERB_SET_ZERO_CODE 1U
-// 0x2539「Flash保存参数代码」（《CERB巨蟹智能-CANopen-V0.9字典表》字典表）：
-//   1 = 断电保存**设置的电机参数**（最大电流/最大转速/PI 等）
-//   2 = 设置电机**正限位**（0x607D:02）
-//   4 = 设置电机**负限位**（0x607D:01）
-// 手册另注明「0x607D 设置完成后需要保存 Flash」。
-// **不按对应码保存 = 驱动器掉电回出厂值**：本机上电比对会因此判"不一致 →
-// 未初始化"。所以写 0x2538/0x6080 之后发 1，写 :01 之后发 4、写 :02 之后发 2。
+// 0x2539「Flash 保存参数代码」（字典表）：1 = 保存设置的电机参数（最大电流/最大转速/PI 等），
+// 2 = 保存正限位（0x607D:02），4 = 保存负限位（0x607D:01）。**不保存则驱动器掉电回出厂值**，
+// 本机比对会因此判「不一致」⇒ 写 0x2538/0x6080 后发 1，写 :01 后发 4、写 :02 后发 2。
 #define CERB_OBJ_SAVE_FLASH 0x2539U
 #define CERB_SAVE_CODE_PARAMS 1U
 #define CERB_SAVE_CODE_POS_UPPER 2U
 #define CERB_SAVE_CODE_POS_LOWER 4U
 
-// 0x2650 看门狗/限位保护开关（子索引 **0x00**）：
-//   读   40 50 26 00 00 … → 反馈 43 50 26 00 0x …（0x 即当前状态）
-//   开启 23 50 26 00 **00** …
-//   关闭 23 50 26 00 **01** …
-// 0 = 保护生效，1 = 关闭（官方 PR0002 §4.6 只列了"关闭"一条，开启/读法由
-// 维护者 手工核实 + SLCAN 复现）。这是设备侧唯一的独立安全超时（帧间隔 >500ms
-// 电机自锁），且关掉会连限位保护一起失效——CERB 型号的 capability_flags 是
-// CAP_LIMIT_DEVICE_SIDE，固件没有软限位兜底。
-// **易失**（2026-09-19 实测）：掉电后回到上电初值，0x2539 保存码对它无效
-// （官方 §4.11：码 1 只保存 PI 参数和最大电流）。要"保护必须开着"须每次上电
-// 显式发一次开启帧，不能指望设备记住。
-// **读子索引实测**（2026-09-19）：:01 / :02 一律 ABORT 0x06090011（子索引不
-// 存在），只有 :00 可读。此前按 0x01 读会让 REFRESH 恒挂在安全槽上 →
-// UNCONFIRMED → UNVERIFIED，全部 CERB 都到不了 DEV_INIT_OK、永远无法使能。
+// 0x2650 看门狗/限位保护开关（子索引 **0x00**）：0 = 保护生效，1 = 关闭。读 40 50 26 00 00 …
+// → 反馈 43 50 26 00 0x …；开启 23 50 26 00 **00** …；关闭 23 50 26 00 **01** …（官方只列了
+// 「关闭」，开启/读法由手工 SLCAN 复现）。这是设备侧唯一的独立安全超时（帧间隔 >500ms 电机
+// 自锁），且关掉会连限位保护一起失效——CERB 的 capability_flags 是 CAP_LIMIT_DEVICE_SIDE，
+// 固件没有软限位兜底。
+// **易失**：掉电回上电初值，0x2539 保存码对它无效 ⇒ 要「保护必须开着」须每次上电显式发一次
+// 开启帧。**只有 :00 可读**：:01/:02 一律 ABORT 0x06090011（子索引不存在），按 0x01 读会让
+// REFRESH 恒挂在安全槽上 → UNCONFIRMED → 全部 CERB 到不了 DEV_INIT_OK。
 #define CERB_OBJ_SAFETY_PROTECT 0x2650U
 #define CERB_SUB_SAFETY_PROTECT 0x00U
-// 0x2541「电机方向定义」：0=CW，1=CCW。**真机实测（2026-09-20）**：它只改驱动
-// 的力矩/转动方向，**不改位置坐标系**——同一物理方向转动关节时，0x6064 的计数
-// 方向不随 0x2541 变化（转两次同向，Δ 均为正：+2394 / +2573 cnt）。所以零点与
-// cnt 限位**不镜像**，翻转后也**不需要**重新设零。真正的风险是驱动器自持的位置
-// 环变成正反馈：使能后会朝远离目标的方向冲，直到撞上设备限位为止。
+// 0x2541「电机方向定义」：0=CW，1=CCW。它**只改力矩/转动方向，不改位置坐标系**——同一物理
+// 方向转动时 0x6064 的计数方向不随它变化，所以零点与 cnt 限位不镜像、翻转后不需重新设零。
+// 真正的风险是驱动器自持的位置环变成正反馈：使能后会朝远离目标的方向冲，直到撞设备限位。
 #define CERB_OBJ_MOTION_DIR 0x2541U
 
 // 位置限位字典范围（0x607D:01/:02 均为 -32767~32768 cnt，默认 -32767/32768）：
@@ -105,11 +65,9 @@
 #define CERB_POS_CNT_MAX (32768)
 #define CERB_SUB_DEFAULT 0x00U
 
-// 每阶段等待响应；超时自动重试 ≤2 次。
-// 30ms 是厂家 SDO 一问一答的保守阶段超时，不是运动控制周期；超时过短会重发、
-// 重发又让设备更慢，反而把整条读数链压成"一直超时"
-// （2026-09-17 台架实测：20ms 下 node1 连续超时）。总线级串行见内核
-// bus_stage_in_flight。
+// 每阶段等待响应；超时自动重试 ≤2 次。30ms 是厂家 SDO 一问一答的保守阶段超时，不是运动
+// 控制周期：超时过短会重发，重发又让设备更慢，反而把整条读数链压成"一直超时"。
+// 总线级串行见内核 bus_stage_in_flight。
 #define CERB_SDO_TIMEOUT_MS 30U
 
 static uint32_t cerb_read_le32(const uint8_t *data) {
@@ -349,18 +307,13 @@ static bool cerb_encode_disable(const motor_protocol_model_profile_t *profile,
       MOTOR_PROTOCOL_TX_CLASS_P0, out);
 }
 
-// 发现探测帧（0x080 SYNC）：**FD+BRS**，与 SDO/MIT 同格式——全总线统一走
-// CANFD 加速，不再有经典帧。理由不是风格，而是可观测性：经典帧不经过数据
-// 相位（BRS 之前全是仲裁位率），所以**数据段位率配错时唯独 SYNC 还能通**，
-// 观察者会据此误判链路正常。2026-09-22 台架实测正是如此：CANable 的 Y7 被
-// 静默拒绝、数据段停在默认位率，SYNC 照常、其余帧全灭，查了很久。
-// 统一为 FD+BRS 后每条出帧都过数据相位，配错必然整体不通，不再有假阳性。
-// 零长度也照样验证数据相位：BRS 之后直到 CRC 定界符（含 17/21 位 CRC 与
-// 填充位）都按数据位率发送，DLC=0 并不豁免。
+// 发现探测帧（0x080 SYNC）：**FD+BRS**，与 SDO/MIT 同格式。理由是可观测性——经典帧不经过
+// 数据相位（BRS 之前全是仲裁位率），**数据段位率配错时唯独 SYNC 还能通**，观察者会据此误判
+// 链路正常；统一为 FD+BRS 后每条出帧都过数据相位，配错必然整体不通。零长度也一样：BRS 之后
+// 直到 CRC 定界符（含 CRC 与填充位）都按数据位率发送，DLC=0 不豁免。
 //
-// 未验（真机）：厂家说明书 §3.1 只写明 SDO 是「CANFD 加速标准帧」，0x080
-// SYNC 的帧格式无书面依据。README「示波器/candump 验证每 20ms 仅一帧 0x080」
-// 是核对点；真机若拒绝 FD 的 SYNC，把下面两行改回 false 即可（唯一改动点）。
+// 未验（真机）：说明书只写明 SDO 是「CANFD 加速标准帧」，0x080 的帧格式无书面依据；真机若
+// 拒绝 FD 的 SYNC，把下面两行改回 false 即可（唯一改动点）。
 static bool cerb_encode_discovery_sync(uint8_t bus_index,
     motor_protocol_tx_frame_t *out) {
   if (out == NULL) {
@@ -418,10 +371,9 @@ static bool cerb_sdo_request(uint16_t node, uint8_t bus_index,
 // ---------------------------------------------------------------------------
 // 配置事务阶段描述符表
 //
-// 除分段上传的 READ_IDENTITY 与 SET_MODE 空阶段外，所有事务的阶段知识
-// （对象/子索引/读写/保存码/原值槽位）只存在于下表；stage_count/info/encode/
-// on_response 四个接口都是这张表的解释器，新增一种事务 = 加一行表，不再
-// 散改 8 个 switch。
+// 除分段上传的 READ_IDENTITY 与 SET_MODE 空阶段外，所有事务的阶段知识（对象/子索引/
+// 读写/保存码/原值槽位）只存在于下表——四个接口都是这张表的解释器，新增一种事务 =
+// 加一行表，不再散改 8 个 switch。
 // ---------------------------------------------------------------------------
 
 enum {
@@ -524,12 +476,8 @@ static const cerb_stage_desc_t kStagesRefresh[6] = {
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
 };
 
-// 0x2650:00 看门狗/限位保护开关：写 + 读回核验，**不跟 0x2539 保存阶段**。
-// 手册只给了关闭命令「23 50 26 00 01 00 00 00」，没给这个对象对应的保存码
-// （对比 0x607D 那句明确写着"设置完成后需要保存 Flash"），所以掉电是否保持
-// **实测无效**（2026-09-19）：发过码 1 后掉电，保护开关照样回退；官方 §4.11
-// 明确码 1 只保存 PI 参数和最大电流，覆盖面不含本对象。读回核验照旧：写下去的值必须能
-// 读回来，否则重发本阶段（≤2 次后内核收敛 UNCONFIRMED）。
+// 0x2650:00 看门狗/限位保护开关：写 + 读回核验，**不跟 0x2539 保存阶段**（该对象易失，见上）。
+// 读回核验照旧：写下去的值必须能读回来，否则重发本阶段（≤2 次后收敛 UNCONFIRMED）。
 static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
   CERB_DESC_WRITE(CERB_OBJ_SAFETY_PROTECT, CERB_SUB_SAFETY_PROTECT,
       MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
@@ -537,15 +485,10 @@ static const cerb_stage_desc_t kStagesSafetyProtect[2] = {
       MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_SAFETY_RAW),
 };
 
-// 0x2541:00 方向：写 + 读回核验，**不跟 0x2539 保存阶段**（易失，见上）。
-// 翻转方向只改力矩方向、不改位置坐标系（见文件上方 0x2541 的实测注释）——
-// 内核**不**据此冻结该台
-// 直到重新设零（见 motor_control_config.c 的 ZERO_STALE）。
-// 读阶段同样用 CERB_VALUE_DIRECTION_RAW（**不得复用 CERB_VALUE_PASSTHROUGH**）：
-// 读回核验在 cerb_config_on_response 里就是从**本阶段的 value_kind** 反算期望
-// 值（cerb_stage_write_value），PASSTHROUGH 落 default:return 0 → 期望恒为 CW，
-// 写 CCW 会被永久判 RETRY/UNCONFIRMED。与 kStagesSafetyProtect 的读阶段
-// 用 CERB_VALUE_SAFETY_RAW 同形。
+// 0x2541:00 方向：写 + 读回核验，**不跟 0x2539 保存阶段**（易失）。
+// 读阶段**不得复用 CERB_VALUE_PASSTHROUGH**：读回核验从本阶段的 value_kind 反算期望值，
+// PASSTHROUGH 落 default:return 0 → 期望恒为 CW，写 CCW 会被永久判 RETRY/UNCONFIRMED
+// （与 kStagesSafetyProtect 的读阶段用 CERB_VALUE_SAFETY_RAW 同形）。
 static const cerb_stage_desc_t kStagesDirection[2] = {
   CERB_DESC_WRITE(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
@@ -553,11 +496,10 @@ static const cerb_stage_desc_t kStagesDirection[2] = {
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
 };
 
-// 保存阶段表集合（SAVE_DEVICE_FLASH）。落盘粒度只有两组：参数组（码 1，
-// 覆盖 PI 参数 + 最大电流 0x2538 + 最大转速 0x6080）与位置限位组（码 4/2）。
-// 位置上下限在写事务里是同一笔（SET_POSITION_LIMITS 一次写两槽），所以脏掩码
-// 实际上只出现"两组各自脏"或"两组都脏"；万一将来出现只脏一个位置槽的形状，
-// 按"多存一个对象"兜底——多写一次 FLASH 只是慢，少写一次就是掉电丢参数。
+// 保存阶段表集合（SAVE_DEVICE_FLASH）。落盘粒度只有两组：参数组（码 1，覆盖 PI 参数 +
+// 最大电流 0x2538 + 最大转速 0x6080）与位置限位组（码 4/2）。位置上下限在写事务里是同一笔，
+// 故脏掩码实际只出现「两组各自脏」或「两组都脏」；万一只脏一个位置槽，按「多存一个对象」兜底
+// ——多写一次 FLASH 只是慢，少写一次就是掉电丢参数。
 static const cerb_stage_desc_t kStagesSavePosBoth[2] = {
   CERB_DESC_SAVE(CERB_SAVE_CODE_POS_LOWER),
   CERB_DESC_SAVE(CERB_SAVE_CODE_POS_UPPER),

@@ -1,19 +1,11 @@
-// motor_control v2 内核主体：初始化、会话/授权、2ms/500Hz 控制边界、1ms 服务、
-// TX 收集与状态/事件副本（ARD-0007 §8/§9/§11/§13）。
+// motor_control 内核主体：初始化、会话/授权、2ms/500Hz 控制边界、1ms 服务、TX 收集与状态/事件副本。
 //
-// 所有权与边界：
-//  - 本模块不依赖 ROS / HAL / FreeRTOS / control_mailbox；
-//  - 厂家字节只经 motor_protocol 的 adapter 接口（ARD §24）；
-//  - 一切时序判定用 MCU 单调时基毫秒（ARD §12），禁止 ROS 时间。
-//
-// 安全实现要点：
-//  - P0 帧（软停/失能）推送失败不静默丢弃：先驱逐最旧非 P0 帧腾位（§22.1
-//    抢占），仍失败挂 p0_pending 由 service 逐节拍重发；新 MIT 或使能帧
-//    成功出队后作废——过期软停/失能重试帧不得晚于新安全意图出门；
-//  - 受控集合 = ACTIVE ∪ READY_DISABLED(已使能)（§13.1 DERIVED：使能整定窗内
-//    的电机已在受控集合，缺席/30ms 级联同样必须停它）；
-//  - apply 前置 staleness 门（§51.3）：age>30ms 不下发目标、age>100ms 撤权，
-//    过期快照不记录、不复位级联去重标志。
+// 不依赖 ROS/HAL/FreeRTOS/control_mailbox；厂家字节只经 motor_protocol 的 adapter 接口；一切时序
+// 判定用 MCU 单调时基毫秒。
+// 安全要点：P0 帧（软停/失能）推送失败不静默丢弃——先驱逐最旧非 P0 帧腾位，仍失败则挂 p0_pending
+// 由 service 逐节拍重发，新 MIT/使能帧成功出队后作废（过期重试帧不得晚于新安全意图出门）。
+// 受控集合 = ACTIVE ∪ READY_DISABLED(已使能)；apply 前置 staleness 门：age>30ms 不下发目标、
+// age>100ms 撤权，过期快照不记录、不复位级联去重标志。
 
 #include "motor_control_internal.h"
 
@@ -1007,19 +999,11 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
   }
 }
 
-// 边界保持重发：把快照通道的命令速率从「上行快照到达速率」解耦到控制边界上。
-//
-// 为什么需要它：快照路径只在**受理新快照**时产生运动帧，而上行快照流的实测送达
-// 上限是 ~72/s（micro-ROS 下行通道，best-effort 静默丢弃；web→rosbridge 路径台架
-// 实测 ~40/s）。驱动器侧要求命令率 ≥200Hz，靠"多发快照"永远达不到——只能在每个
-// 控制边界把**已受理的目标**原样再投递一次（零阶保持）。
-//
-// 这不是放松安全：保持只在快照新鲜（≤30ms）时进行，比驱动器自带的 500ms 看门狗
-// 严得多，也比"不发帧、由驱动器自己保持"更紧——过期、撤权、故障、离线、冲突、
-// 缺席全部照旧由既有门禁立刻切断输出。
-//
-// 与 trajectory_step 的分工：轨迹机组由 trajectory_step 在**同一拍**驱动（它是
-// 边界驱动的），本函数跳过它们；两条通道合计每个边界每台恰好一帧，不重复。
+// 边界保持重发：把快照通道的命令率从「上行快照到达速率」解耦到控制边界上。快照路径只在**受理新快照**
+// 时产生运动帧，而上行送达上限约 72/s（web→rosbridge 路径台架实测 ~40/s），靠"多发快照"永远到不了
+// 驱动器要求的 ≥200Hz——只能在每个控制边界把**已受理的目标**原样再投递一次（零阶保持）。
+// 这不是放松安全：保持只在快照新鲜（≤30ms）时进行，比驱动器自带的 500ms 看门狗严；过期、撤权、故障、
+// 离线、冲突、缺席仍由既有门禁立刻切断输出。轨迹机组由 trajectory_step 在同一拍驱动，本函数跳过它们。
 void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
   if (ctx == NULL || !ctx->have_snapshot) {
     return;
@@ -1386,16 +1370,11 @@ size_t motor_control_collect_tx(motor_control_context_t *ctx,
   return count;
 }
 
-// 顺序确定化辅助：取下一个「未输出且 motor_id 最小」的表项，并在 taken 中
-// 标记（taken 按表项索引、容量 MOTOR_CONTROL_MAX_MOTORS，由调用方清零）；
-// 无可取时返回 NULL。
-//
-// 为什么需要：注册表顺序 = 发现序，会随上线顺序漂移，而状态/拓扑发布顺序
-// 必须稳定（上层处理、人工对读都依赖）。n <= 64 的 O(n^2) 只出现在 10ms
-// 桥接轮询路径，不在 1ms 实时环内。
-//
-// motion states / statuses / topology 三处共用本函数；勿再各自展开选择
-// 循环——早期副本散落三处，其一还跨越模块边界直读 ctx->entries。
+// 顺序确定化辅助：取下一个「未输出且 motor_id 最小」的表项并在 taken 中标记（taken 按表项索引、容量
+// MOTOR_CONTROL_MAX_MOTORS，由调用方清零）；无可取时返回 NULL。
+// 注册表顺序 = 发现序、会随上线顺序漂移，而状态/拓扑发布顺序必须稳定（上层处理与人工对读都依赖它）；
+// n ≤ 64 的 O(n²) 只出现在 10ms 桥接轮询路径，不在 1ms 实时环内。
+// motion states / statuses / topology 三处共用本函数，勿再各自展开选择循环。
 const motor_control_entry_t *motor_control_entry_take_sorted(
     const motor_control_context_t *ctx, bool *taken) {
   if (ctx == NULL || taken == NULL) {

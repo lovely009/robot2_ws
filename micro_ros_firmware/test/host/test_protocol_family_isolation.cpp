@@ -38,8 +38,8 @@ static motor_protocol_raw_frame_t make_frame(uint32_t id, size_t len,
 // 参与扫描的 adapter 全集。**新增协议必须加到这里**，否则 A1 的不相交断言
 // 覆盖不到它——这是本文件唯一需要人工维护的点。
 static const motor_protocol_adapter_t *const kAdapters[] = {
-    &motor_protocol_cerb_adapter,
-    &motor_protocol_vaxor_adapter,
+  &motor_protocol_cerb_adapter,
+  &motor_protocol_vaxor_adapter,
 };
 static const size_t kAdapterCount = sizeof(kAdapters) / sizeof(kAdapters[0]);
 
@@ -182,23 +182,23 @@ struct bound_case_t {
 
 static void test_boundaries() {
   const bound_case_t cases[] = {
-      // CERB 反馈段：0x301..0x37F（DLC 12）
-      {0x300U, 12U, false, "CERB 反馈基址本身：vaxor 不认（远低于 0x701）"},
-      {0x37FU, 12U, false, "CERB 反馈末格"},
-      {0x380U, 12U, false, "CERB 反馈越界一格"},
-      // CERB SDO 应答段：0x581..0x5FF（DLC 8）
-      {0x580U, 8U, false, "CERB SDO 基址本身"},
-      {0x5FFU, 8U, false, "CERB SDO 末格"},
-      {0x600U, 8U, false, "CERB SDO 越界一格"},
-      // vaxor reply 段：0x701+4n；基址本身必须被 > 排除
-      {0x701U, 12U, false, "vaxor reply 基址：n=0 非法，用 > 排除"},
-      {0x705U, 12U, true, "vaxor reply n=1（首合法）"},
-      // vaxor status 段：0x702+4n
-      {0x702U, 20U, false, "vaxor status 基址：n=0 非法"},
-      {0x706U, 20U, true, "vaxor status n=1（首合法）"},
-      // 非 stride 倍数的邻格必须拒绝
-      {0x707U, 12U, false, "偏移非 4 的倍数（reply）"},
-      {0x707U, 20U, false, "偏移非 4 的倍数（status）"},
+    // CERB 反馈段：0x301..0x37F（DLC 12）
+    {0x300U, 12U, false, "CERB 反馈基址本身：vaxor 不认（远低于 0x701）"},
+    {0x37FU, 12U, false, "CERB 反馈末格"},
+    {0x380U, 12U, false, "CERB 反馈越界一格"},
+    // CERB SDO 应答段：0x581..0x5FF（DLC 8）
+    {0x580U, 8U, false, "CERB SDO 基址本身"},
+    {0x5FFU, 8U, false, "CERB SDO 末格"},
+    {0x600U, 8U, false, "CERB SDO 越界一格"},
+    // vaxor reply 段：0x701+4n；基址本身必须被 > 排除
+    {0x701U, 12U, false, "vaxor reply 基址：n=0 非法，用 > 排除"},
+    {0x705U, 12U, true, "vaxor reply n=1（首合法）"},
+    // vaxor status 段：0x702+4n
+    {0x702U, 20U, false, "vaxor status 基址：n=0 非法"},
+    {0x706U, 20U, true, "vaxor status n=1（首合法）"},
+    // 非 stride 倍数的邻格必须拒绝
+    {0x707U, 12U, false, "偏移非 4 的倍数（reply）"},
+    {0x707U, 20U, false, "偏移非 4 的倍数（status）"},
   };
   const size_t count = sizeof(cases) / sizeof(cases[0]);
   for (size_t i = 0; i < count; ++i) {
@@ -312,12 +312,12 @@ static void test_binding_is_protocol_scoped() {
   // B2：同样的串喂给 cerb → 命中 R48
   const motor_protocol_model_profile_t *p =
       motor_control_profile_by_identity(&motor_protocol_cerb_adapter,
-          r48, sizeof(r48));
+      r48, sizeof(r48));
   assert(p != NULL && strcmp(p->model_name, "cerb_r48_101") == 0);
   // R58 也应命中，且与 R48 不同型
   const motor_protocol_model_profile_t *p58 =
       motor_control_profile_by_identity(&motor_protocol_cerb_adapter,
-          r58, sizeof(r58));
+      r58, sizeof(r58));
   assert(p58 != NULL && strcmp(p58->model_name, "cerb_r58_101") == 0);
   assert(p58 != p);
 

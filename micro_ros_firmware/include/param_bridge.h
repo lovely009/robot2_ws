@@ -1,18 +1,10 @@
-// 参数与系统命令桥（**话题面**）。
-//
-// 下行：/micro_ros_do/param_set       ParamSetArray  稀疏参数写（整条受理/整条拒绝）
-//       /micro_ros_do/system_command  SystemCommand  save/refresh/set_zero/clear_fault/report
-// 上行：/micro_ros_up/system_status   SystemStatus   错误电平 + 四个完成序号，5 Hz
-//
-// **只读侧不在这里**：参数核对的双行快照由 motor_bridge 的 device_param_report 承载，
-// 它消费本桥的 param_bridge_views()。读写两侧的槽位序是同一套（param_device_slot_t）。
-//
-// 参数写是**异步事务**：回调只做「整条校验 + 提交 mailbox」，同步返回不代表成功；
-// 成败经内核 CONFIG_RESULT 事件异步给出，并由 system_status.last_error 呈现。
-// 没有影子副本、没有回滚——话题是**命令**不是状态副本，失败 = last_error，操作员重发。
-//
-// 回调运行在 micro-ROS 任务上下文，不得直接发 FDCAN / 擦 Flash（ARD §28.1）。
-// enable/kp/kd 走 /micro_ros_do/motor_policy（ARD §19.4），本桥从不经手。
+// 参数与系统命令桥（**话题面**）。下行 /micro_ros_do/param_set（稀疏写、整条受理或整条拒绝）
+// 与 /micro_ros_do/system_command；上行 /micro_ros_up/system_status（错误电平 + 四个完成序号，
+// 5 Hz）。参数核对的**双行快照由 motor_bridge 的 device_param_report 承载**，它消费本桥的
+// param_bridge_views()，两侧槽位序同一套。参数写是**异步事务**：回调只做「整条校验 + 提交
+// mailbox」，成败经内核 CONFIG_RESULT 异步给出、由 system_status.last_error 呈现，没有影子
+// 副本也没有回滚。回调在 micro-ROS 任务上下文，不得直接发 FDCAN 或擦 Flash；enable/kp/kd
+// 走 /micro_ros_do/motor_policy，本桥从不经手。
 
 #ifndef PARAM_BRIDGE_H
 #define PARAM_BRIDGE_H

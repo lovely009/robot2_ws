@@ -1,18 +1,12 @@
-// motor_control 低频配置：Policy 本地项（增益/软件限位）与 request_id 事务
-// （ARD-0007 §19/§20/§26）。
+// motor_control 低频配置：Policy 本地项（增益/软件限位）与 request_id 事务。
 //
-// 事务规则（ARD §20）：每电机至多一个未决事务，新请求立即 BUSY（不排队、
-// 不覆盖）；分阶段、跨 1ms 服务节拍推进（每节拍至多一个阶段迁移），绝不
-// 等待设备；可重试阶段自动重试 ≤2 次；结果码统一七种；读回不一致不得
-// 返回 OK（禁止项 9），失败不自动恢复运动授权。
+// 事务规则：每电机至多一个未决事务，新请求立即 BUSY（不排队、不覆盖）；分阶段跨
+// 1ms 服务节拍推进（每节拍至多一次迁移），绝不等待设备；可重试阶段自动重试 ≤2 次；
+// 读回不一致不得返回 OK，失败不自动恢复运动授权。
 //
-// SET_MODE 门禁：事务会驱动厂家使能序列（vaxor stop/start 控制帧），因此
-// 仅对已完成身份确认（Profile 已绑定）、处于可配置生命周期且系统已授权的
-// 电机受理；模式值域为 mailbox 契约常量（0=MIT 1=velocity 2=position），
-// 具体模式是否被型号支持由 adapter 的阶段数回答（0 → UNSUPPORTED）。
-//
-// OK 语义（禁止项 9）：无响应写阶段无法确认设备状态的协议
-// （adapter->config_verify_required）不得返回 OK，统一收敛为 UNCONFIRMED。
+// SET_MODE 门禁：事务会驱动厂家使能序列（vaxor stop/start 控制帧），故仅对已完成
+// 身份确认、处于可配置生命周期且系统已授权的电机受理；模式是否被型号支持由 adapter
+// 的阶段数回答（0 → UNSUPPORTED）。
 
 #include "motor_control_internal.h"
 
@@ -103,23 +97,12 @@ static void finish_identity_read(motor_control_context_t *ctx,
       MOTOR_CONTROL_FAULT_PROFILE_UNAVAILABLE, 0U);
 }
 
-// ---------------------------------------------------------------------------
-// 设备参数初始化（上电/重连回读设备 → 与固件记录比对）
-//
-// 口径（2026-09-21 维护者 反转，此前是 09-17 的"以设备内为准"）：**固件记录是
-// 权威**，设备里的参数要与它对齐；不一致即"未初始化"。
-//  - 绑定完成后自动回读一次设备六对象（0x607D:01/02、0x6080、0x2538、0x2650:00、0x2541）；
-//  - 回读值与记录逐槽位比对，比的是**设备端原值**：关节侧 SI 两端都过同一套
-//    Kt×减速比换算，系数配错时两边一起错、比对恒通过，等于没比；
-//  - 不一致或回读失败 → 该台"未初始化"：冻结授权、不出运动帧，直到参数被
-//    重写（写事务会同时更新设备与记录）或重连后重新回读；
-//  - **本机一条记录都没有 → NO_RECORD**（也是"未初始化"，首次上电不得例外：
-//    "首次也当不一致，人工核对"）。判据是 record_established，不是记录结构里的
-//    位图——上电归一会自己写保护开关（见 entry_has_record）；
-//  - 记录里没有的槽位不参与比对（刚烧录、Flash 半空的电机不该整体卡住），
-//    **唯一例外是方向槽（0x2541）**：设备侧它易失（每次上电回 0=CW），"设备读到
-//    0"不含信息，故记录缺这一槽 = 方向未知 = 未初始化（见 motor_control_dev_mismatch_mask）。
-// ---------------------------------------------------------------------------
+// 设备参数初始化：上电/重连回读设备 → 与固件记录比对。**固件记录是权威**，设备里的参数要与它对齐，
+// 不一致即「未初始化」。比的是**设备端原值**：关节侧 SI 两端过同一套 Kt×减速比换算，系数配错会两边
+// 一起错、比对恒通过。判据是 record_established 而非记录结构里的位图——上电归一会自己写保护开关。
+// 记录里没有的槽位不参与比对（刚烧录、Flash 半空的电机不该整体卡住），**唯一例外是方向槽 0x2541**：
+// 它易失（每次上电回 0=CW），"设备读到 0"不含信息，故记录缺这一槽即方向未知。
+// 结论**只报不拦**：dev_init ≠ OK 不再冻结该台（见 decision-log 2026-10-12）。
 
 // 记录与设备回读逐槽位比对（设备端原值）。返回值 = 不一致槽位位图
 // （1u << MOTOR_PROTOCOL_PARAM_SLOT_*；0 = 一致）。位图随 DEV_INIT 事件带出去，
@@ -178,14 +161,10 @@ static motor_control_dev_init_t settle_dev_init(
                                         : MOTOR_CONTROL_DEV_INIT_MISMATCH;
 }
 
-// 冻结为 CONFIG_CONFLICT 的统一入口（设备参数未初始化 / 方向翻转共用）：
-// 先把"受控集合"里的电机停下来，再清授权/目标/使能位并写成因。
-// 受控集合由 motor_control_soft_stop_entry 自己界定——ACTIVE，或**使能整定窗内
-// 的 READY_DISABLED（使能帧已发、motion_enabled=true，生命周期还没到 ACTIVE）**。
-// 那个窗内状态必须覆盖：跳过它就会让设备带着上一条命令保持使能，而内核已标记
-// 冻结——设备限位拦得住"跑出范围"，拦不住"带着旧零点/旧命令继续走"。
-// 事件由各调用方按自己的语义域补出（DEV_INIT 报定论、CONFIG_CONFLICT 报成因码），
-// 本助手只管"停/清/写码"。
+// 冻结为 CONFIG_CONFLICT 的统一入口（设备参数未初始化 / 方向翻转共用）：先停受控
+// 集合里的电机，再清授权/目标/使能位并写成因。受控集合含 ACTIVE 与**使能整定窗内的
+// READY_DISABLED**——跳过后者会让设备带着上一条命令继续保持使能，而内核已标记冻结。
+// 事件由各调用方按自己的语义域补出，本助手只管"停/清/写码"。
 static void freeze_entry_as_conflict(motor_control_context_t *ctx,
     motor_control_entry_t *entry, uint16_t fault,
     uint32_t now_ms) {
@@ -211,12 +190,9 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
     motor_control_entry_t *entry,
     motor_control_dev_init_t state,
     uint32_t now_ms) {
-  // 位图随事件带出去（1u<<slot；0 = 无此项信息），但两态语义不同：
-  //  - MISMATCH：**对不上**的槽位（记录有、设备读到的值不同）；
-  //  - UNVERIFIED：**没读到**的槽位（refresh_slots 是本次已落袋的槽位，
-  //    取补集即缺失项）。位图是操作者区分"它没答"与"总线抖动"的唯一线索；
-  //    曾靠它定位到 0x2650 读错子索引（2026-09-19 真机，TBD-CONFIG-02 见
-  //    cerb_adapter.c 的安全槽注释）。
+  // 位图随事件带出（1u<<slot；0 = 无此项信息），两态语义不同：MISMATCH = **对不上**
+  // 的槽位，UNVERIFIED = **没读到**的槽位（取 refresh_slots 的补集）。它是操作者区分
+  // "设备没答"与"总线抖动"的唯一线索。
   const uint32_t detail =
       (state == MOTOR_CONTROL_DEV_INIT_MISMATCH)
           ? (uint32_t)motor_control_dev_mismatch_mask(entry)
@@ -242,26 +218,11 @@ static void apply_dev_init_result(motor_control_context_t *ctx,
   } else if (state == MOTOR_CONTROL_DEV_INIT_MISMATCH ||
       state == MOTOR_CONTROL_DEV_INIT_UNVERIFIED ||
       state == MOTOR_CONTROL_DEV_INIT_NO_RECORD) {
-    // 【2026-10-12 维护者 决定：固件侧不再需要参数核对 —— 本分支不再冻结】
-    //
-    // 原语义：结论为"未初始化"（不一致 / 未能核对 / 本机无记录）时调用
-    // freeze_entry_as_conflict 冻结该台 —— lifecycle 锁 CONFIG_CONFLICT、
-    // fault 记 DEV_PARAM、清 policy_enable / motion_authorized，须人工核对后
-    // 显式重新使能。维护者 2026-09-21 曾把 NO_RECORD 也纳入同一条路
-    // （"首次也当不一致，人工核对"）。
-    //
-    // 现语义：**只落状态、不冻结**。dev_init 仍如实记录并随 DEV_INIT 事件与
-    // device_param_report 上报（"不一致 / 未核对"这件事本身照报），但不再因此
-    // 改 lifecycle、不置 DEV_PARAM 故障、不清运动授权 —— 该台保持
-    // READY_DISABLED，可直接使能与运动。
-    //
-    // ⚠ 代价（恢复前请确认已知悉）：设备参数核对**不再是一道安全门**。
-    //   dev_init ≠ OK 时该台的限位/速度/力矩可能不是核对过的值（影子取设备真值，
-    //   读不到时回落型号标定），运动许可建立在未核对的参数之上；兜底只剩硬件
-    //   急停与机械限位。这是 维护者 为台架作出的取舍，不是疏漏。
-    //
-    // 恢复原语义：把下面这行注释放开即可，其余逻辑无需改动。
-    // freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms);
+    // 初始化结论只报不拦（见 decision-log 2026-10-12）：dev_init ≠ OK 时只落状态、
+    // 不冻结——不改 lifecycle、不置 DEV_PARAM 故障、不清运动授权，该台保持
+    // READY_DISABLED、可直接使能与运动。
+    // ⚠ 设备参数核对**因此不再是安全门**：限位/速度/力矩可能是未核对过的值（读不到
+    //   时回落型号标定），兜底只剩硬件急停与机械限位。
     (void)ctx;
     (void)now_ms;
   }
@@ -340,13 +301,9 @@ static void update_record_after_write(motor_control_entry_t *entry) {
     // 刚写并读回核验过：设备与记录同值。
     entry->record_raw[slot] = entry->tx_write_raw[slot];
     entry->dev_raw[slot] = entry->tx_write_raw[slot];
-    // 同一笔事务产生的关节侧值，两行（"固件" / "驱动板"）共用的那把尺子。
-    // 位置/速度/力矩取 tx_request（落事务的是钳制后的 bounded/clamped），
-    // 两个安全槽是枚举/标志位原值直通。
-    // 设备侧那一份也在写路径上更新（不只是 REFRESH）：写事务本就是**读回核验过**
-    // 的，设备里确实就是写的这个值——上面的 dev_raw[slot] 已经据此把它登记成
-    // "设备当前的值"，SI 若还留着写前的旧换算值，报告的"驱动板"那一行就会拿
-    // 刚写过的槽位显示一个陈旧数字，两行比对也就没意义了。
+    // 同一笔事务产生的关节侧值，是"固件"与"驱动板"两行共用的尺子：位置/速度/力矩取
+    // tx_request（钳制后的值），两个安全槽原值直通。设备侧这份在写路径上也要更新——
+    // 写事务本就是**读回核验过**的，否则报告里"驱动板"那行会显示写前的旧换算值。
     float si = NAN;
     switch (slot) {
     case MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN:
@@ -1020,19 +977,12 @@ static bool reject_if_unprotected_unconfirmed(
   return true;
 }
 
-// 策略落地：enable + MIT 增益，一次原子落地。SET_POLICY config kind 与批量
-// 入口 motor_control_apply_policy 共用，避免两条路径的门禁与钳制漂移。
-//
-// 为什么必须原子：增益要先于使能到位，否则存在一个用旧 Kd 使能的窗口；拆成
-// SET_GAINS + SET_ENABLE 两次调用会留下它，也会让「两笔只成一半」变成可观测
-// 状态。
-//
-// 代数门（防「周期重发自动复权」）：「未武装 → 武装」是一次新意图，
-// policy_generation 必须严格前进（初值 0，故首次武装至少要 1）。冻结态
-// （FAULT/OFFLINE/CONFIG_CONFLICT/DEV_PARAM）与显式失能都会清掉
-// policy_enable，所以本规则**不需要在那几条路径上额外锁存任何东西**。
-// 它挡不住「每次都递增代数的周期发布者」：那与人工逐次授权在行为上不可
-// 区分。ARD §36 的「显式」在机制层面到此为止，再往上靠上层自律。
+// 策略落地：enable + MIT 增益一次原子落地，SET_POLICY 与 motor_control_apply_policy 共用，避免两条
+// 路径的门禁与钳制漂移。**必须原子**：增益要先于使能到位，否则存在一个用旧 Kd 使能的窗口；拆成两次
+// 调用会留下它，也会让「两笔只成一半」变成可观测状态。
+// 代数门（防「周期重发自动复权」）：「未武装 → 武装」是一次新意图，policy_generation 必须严格前进
+// （初值 0，故首次武装至少为 1）。冻结态与显式失能都会清掉 policy_enable，故无需在那些路径额外锁存。
+// 它挡不住「每次都递增代数的周期发布者」——那与人工逐次授权在行为上不可区分，机制层面到此为止。
 bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
     motor_control_entry_t *entry,
     const motor_protocol_config_request_t *request,
@@ -1231,18 +1181,13 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     return start_tx(ctx, entry, request, now_ms);
   }
   case MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT: {
-    // 故障清除：只清「可清的」。三类故障的判据是**成因**（unified_fault_code）
-    // 而不是生命周期——DEV_PARAM 与身份冲突都会把表项带进 CONFIG_CONFLICT，
-    // 按生命周期判会把两者混为一谈。
-    //  - 身份冲突锁存（latch_config_conflict）：ARD §9.3 刻意不可解除，复位
-    //    只能整机重启 → 拒绝。
-    //  - 设备参数未初始化（DEV_PARAM）：改走一次 REFRESH_PARAMS 事务，重跑
-    //    回读与比对。真不一致仍然由 apply_dev_init_result 判 MISMATCH 保持
-    //    CONFIG_CONFLICT——清除只负责「允许重走授权链」，不伪造一致。
-    //  - 厂家故障：发起设备侧清错事务（协议无手段则 UNSUPPORTED）。设备清掉
-    //    后下一帧状态帧走既有 FAULT → READY_DISABLED 路径收敛。
-    // 清错帧是控制类帧（MIT 控制字），运动中的电机不得收到——与设备侧限位
-    // 写同口径：安全边界不在运动中变动。
+    // 故障清除：只清「可清的」，判据是**成因**（unified_fault_code）而不是生命周期——DEV_PARAM 与
+    // 身份冲突都会把表项带进 CONFIG_CONFLICT，按生命周期判会把两者混为一谈。
+    //  - 身份冲突锁存：刻意不可解除（ARD §9.3），复位只能整机重启 → 拒绝。
+    //  - DEV_PARAM（设备参数未初始化）：改走一次 REFRESH_PARAMS 重跑回读与比对；真不一致仍由
+    //    apply_dev_init_result 判 MISMATCH 保持 CONFIG_CONFLICT——清除只允许重走授权链，不伪造一致。
+    //  - 厂家故障：发起设备侧清错事务（协议无手段则 UNSUPPORTED），清掉后下一帧状态帧走既有
+    //    FAULT → READY_DISABLED 路径收敛。清错帧是控制类帧，运动中的电机不得收到。
     if (entry->profile == NULL || !device_limit_write_allowed(entry)) {
       return reject_invalid(ctx, entry, request, now_ms);
     }

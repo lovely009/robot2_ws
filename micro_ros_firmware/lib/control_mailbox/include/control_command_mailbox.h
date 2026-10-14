@@ -1,16 +1,9 @@
 // 与电机协议和运行时策略无关的完整命令快照 mailbox。
-//
-// 并发契约：本层无内部锁、无原子字段。publish/take/clear 的每一次调用
-// 都必须位于调用方提供的临界区内，且写侧与读侧必须共用同一互斥域
-// （单核下 FreeRTOS taskENTER_CRITICAL 或等效关中断即满足；"两侧各自
-// 加锁"不构成互斥，会产生数据竞争）。仅支持任务上下文调用（ISR 内
-// taskENTER_CRITICAL 非法，本层不做检测）。违反契约（如无锁双写者）
-// 不属于受支持用法。
-//
-// 语义：双缓冲 latest-wins——publish 写后台缓冲并翻转，未取走时再次
-// publish 只覆盖"后台"并计入 overwrite_count（已发布的快照不会被撕碎）；
-// take 取走已发布快照并清除 pending；clear 只撤销"未取走"的输入，
-// 诊断计数（overwrite/invalid）保留为生命周期统计。
+// 并发契约：无内部锁、无原子字段——publish/take/clear 的每次调用都必须在调用方临界区内，写侧与
+// 读侧共用同一互斥域（单核下关中断即满足；两侧各自加锁不构成互斥）。仅支持任务上下文调用，
+// ISR 内关中断非法且本层不做检测。
+// 语义：双缓冲 latest-wins——publish 写后台并翻转，未取走时再次 publish 只覆盖「后台」并计入
+// overwrite_count；take 取走并清 pending；clear 只撤销未取走的输入，诊断计数保留为生命周期统计。
 
 #ifndef CONTROL_COMMAND_MAILBOX_H
 #define CONTROL_COMMAND_MAILBOX_H

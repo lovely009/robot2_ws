@@ -67,17 +67,13 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == SAVE_TRANSACTION_MAX_TARGETS,
     "SAVE 事务容量必须与电机视图容量一致");
 
 // ---- 线协议 field 表 ----
-//
 // 下标 = ParamSetTarget.field = param_device_slot_t
 // （0=pos_min 1=pos_max 2=vel_limit 3=torque_limit 4=limit_protect 5=direction）。
 //
-// ⚠️ 右列 param_field **不是**左侧 wire field 的镜像（wire 3 = 力矩，param_field_t 3
-// = 位置下限），互用不会被任何校验拒绝，只会**静默写错槽位**——所以逐行写出，并由
-// 下面的断言钉住长度。
-//
-// 表与枚举分离是 2026-09-19 事故留下的规矩：曾有人在 param_field_t 尾部追加 6 个 PID
-// 字段，被以枚举边界为上界的注册循环自动带进参数树。"枚举全集 ≠ 可操作集合"，加字段
-// 必须显式改这张表。详见 decision-log。
+// ⚠️ 右列的 param_field **不是**左侧 wire field 的镜像（wire 3 = 力矩，param_field_t 3 = 位置下限），
+// 互用不会被任何校验拒绝，只会**静默写错槽位**——所以逐行写出，并由下面的断言钉住长度。
+// 表与枚举分离是 2026-09-19 事故留下的规矩：曾有人在 param_field_t 尾部追加 6 个 PID 字段，被以枚举
+// 边界为上界的注册循环自动带进参数树。「枚举全集 ≠ 可操作集合」，加字段必须显式改这张表。
 typedef struct {
   param_field_t param_field;            // Flash blob / 视图槽位序
   control_mailbox_config_kind_t kind;   // 内核动作

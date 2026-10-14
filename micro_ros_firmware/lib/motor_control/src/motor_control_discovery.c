@@ -1,15 +1,10 @@
-// motor_control 发现与注册：原始帧 → adapter 归属 → 注册表条目 → 解码 →
-// 生命周期/冲突/故障处理（ARD-0007 §9/§10/§21/§36）。
+// motor_control 发现与注册：原始帧 → adapter 归属 → 注册表条目 → 解码 → 生命周期/冲突/故障处理。
 //
-// 键与冲突：注册表以全局唯一 uint16 motor_id 为键（当前派生：= 厂家 node 号，
-// 部署保证全局唯一；同号再现即冲突兜底）。同 motor_id 跨总线/跨协议身份不符
-// → CONFIG_CONFLICT：禁运动、出事件、禁止"后到数据覆盖旧表项"（REV-08）。
-// 冲突态穿越 OFFLINE/重连保持锁存——不存在自动解除路径（§9.3：不以任何
-// 形式自动覆盖冲突，复位只能通过整机重启/未来的显式运维接口）。
-//
-// 重连（ARD §36/§10.4）：重新走 DISCOVERED 流（不直达 READY）；旧运动授权
-// （逐电机 motion_authorized）与目标清除，Profile 保留时由 service 的识别流
-// 推进收敛 READY_DISABLED。
+// 注册表以全局唯一 uint16 motor_id 为键（当前派生自厂家 node 号，由部署保证全局唯一）。同 motor_id
+// 跨总线/跨协议身份不符 → CONFIG_CONFLICT：禁运动、出事件，**禁止后到数据覆盖旧表项**；冲突态穿越
+// OFFLINE/重连保持锁存，不存在自动解除路径（只能整机重启或未来的显式运维接口）。
+// 重连重新走 DISCOVERED 流（不直达 READY）：旧运动授权与目标被清除，Profile 保留时由 service 的
+// 识别流推进收敛到 READY_DISABLED。
 
 #include "motor_control_internal.h"
 

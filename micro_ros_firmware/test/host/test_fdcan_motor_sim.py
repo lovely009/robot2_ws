@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Regression checks for FDCAN simulator setup and feedback scheduling."""
+"""Regression checks for FDCAN simulator startup, setup and feedback scheduling."""
 
 import json
 import os
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import socket
+import subprocess
+import sys
 import tempfile
 
 SCRIPT_PATH = Path(__file__).parents[3] / "micro_ros_agent" / "tools" / "fdcan_motor_sim.py"
@@ -400,3 +402,25 @@ except SystemExit:
 else:
     raise AssertionError("控制 socket 被占用时应拒绝启动")
 _ctrl2._teardown_control_socket()
+
+
+# ── 启动路径不得因自身缺陷崩溃（2026-10-15 加）────────────────────────────
+# 回归：HEAD 5b7e90e 把 tau_limits 的赋值留在 main() 的 `if args.gazebo:` 分支
+# 里，却在分支之前作为 CanMotorSim(...) 的实参读取——Python 函数作用域下 main()
+# 内的赋值让该名字成为局部名，于是**带不带 --gazebo 都在构造前抛
+# UnboundLocalError**，脚本任何参数组合都起不来；295 项测试却全绿，因为此前没有
+# 任何用例执行过 main()。这里用真子进程跑真脚本、给一个确定不存在的设备路径：
+# 它必须一路走到 os.open 才失败，而不是死在脚本自身的名字错误上。
+_startup = subprocess.run(
+    [sys.executable, str(SCRIPT_PATH), "--tty", "/nonexistent/robot_ws-probe"],
+    capture_output=True, text=True, encoding="utf-8", errors="replace",
+    timeout=15,  # 挂住即判失败；run() 超时会杀掉子进程并抛 TimeoutExpired
+)
+assert _startup.returncode != 0, _startup.stdout
+assert "UnboundLocalError" not in _startup.stderr, _startup.stderr
+assert "NameError" not in _startup.stderr, _startup.stderr
+# 正向判据，比"扫 traceback 末帧是不是 main"更结实：失败必须来自设备打开这一步
+# ——os.open 抛的 FileNotFoundError 且指到探针路径。走到这里就证明 main() 的前段
+# （含 CanMotorSim 构造，正是原 bug 的死点）全部跑通了。
+assert "FileNotFoundError" in _startup.stderr, _startup.stderr
+assert "/nonexistent/robot_ws-probe" in _startup.stderr, _startup.stderr

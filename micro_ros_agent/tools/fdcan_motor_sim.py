@@ -1706,6 +1706,10 @@ def main():
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
     r58_ids = [int(x) for x in args.cerb_r58.split(",") if x]
+    # 必须在构造之前解析：CanMotorSim 的 mit_torque_limits 要用它。放进 --gazebo
+    # 分支里赋值会让这个名字在分支外成为未绑定局部名（构造处 UnboundLocalError，
+    # 任何参数组合都起不来）。
+    tau_limits = parse_tau_limits(args.tau_limits)
     sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
                    use_brs=not args.no_brs,
                    data_bitrate_index=args.data_bitrate_index,
@@ -1721,7 +1725,6 @@ def main():
 
     if args.gazebo:
         jm = parse_joint_map(args.joint_map)
-        tau_limits = parse_tau_limits(args.tau_limits)
         effort_rate = args.effort_rate_hz if args.effort_rate_hz > 0 else 0.0
         sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
                                   args.position_topic, args.effort_topic,

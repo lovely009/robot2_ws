@@ -361,6 +361,14 @@ def main():
         return 0
 
     hold = dict(node.pos)
+    # 步进目标在进场时**一次性算成绝对值**。下面的重新武装分支会把 hold 重置为
+    # 当前实测位姿（那是有意为之：对着抖前的旧目标重新发力会让机构弹回去），若
+    # 步进仍按「hold + step_rad」逐拍算，只要有台进不了运行态就会每 0.5s 重置一
+    # 次，目标永远跑在关节前面 → 持续漂移直到撞限位。
+    step_target = (
+        hold.get(args.step_id, 0.0) + args.step_rad
+        if args.mode == "step" else None
+    )
     end = time.monotonic() + args.seconds
     last_status = 0.0
     last_arm_log = 0.0
@@ -369,9 +377,8 @@ def main():
     while time.monotonic() < end:
         commands = []
         for mid, joint, _kind, _kp, _kd in motors:
-            p = hold.get(mid, 0.0)
-            if args.mode == "step" and mid == args.step_id:
-                p += args.step_rad
+            p = (step_target if step_target is not None and mid == args.step_id
+                 else hold.get(mid, 0.0))
             commands.append((mid, p, 0.0, 0.0))
         node.send_snapshot(commands)
         sent += 1
@@ -399,7 +406,7 @@ def main():
             err = ""
             if args.mode == "step":
                 got = node.pos.get(args.step_id, float("nan"))
-                want = hold.get(args.step_id, 0.0) + args.step_rad
+                want = step_target      # 与下发值同源，别照 hold 再算一遍
                 err = f" | m{args.step_id} 目标{want:+.3f} 实测{got:+.3f} " \
                       f"误差{want - got:+.3f} rad"
             log(f"[stream] 已发 {sent} 帧 | {node.lifecycle_line()}"

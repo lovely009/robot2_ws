@@ -278,26 +278,41 @@ HIL 时被控对象由 `fdcan_motor_sim` 驱动，它同时是假电机与被控
 - **力矩饱和值逐台取型号库**：`simulation.launch.py` 从 `motor.yaml` 读每台的
   `peak_torque_nm`（`cerb_r58=45` / `cerb_r48=11` Nm）并逐台传给
   `fdcan_motor_sim --tau-limits`；没有该字段的型号（vaxor）退回 `--tau-limit`
-  （默认 10 Nm）。**这是 HIL 下唯一的力矩上限**——MJCF 的 `<motor>` 不带 `forcerange`，
-  `mujoco_effort_bridge` 直接写 `data.ctrl` 不夹取。此前用一个全局的 10 Nm（照抄 URDF 的
-  effort 限幅，只对 Gazebo 那条路成立）会让 r58 关节出不上力：机构被推歪后 PD 一路饱和、
-  再也收不回来，表现为"乱动且停不下来"。
+  （默认 10 Nm）。**这是 HIL 下力矩上限的唯一定义点**——MJCF 的 `actuatorfrcrange`
+  （照抄 URDF 的 `<limit effort>`，±10）只标注关节上的合力上限，MuJoCo **不**用它夹
+  actuator 的 `ctrl`（2026-10-15 实测：给 30 N·m 就是 30 N·m）。
+- **关节速度上限必须写进 MJCF，否则 MuJoCo 会自激**：URDF 每条 `<limit velocity>` 在
+  MuJoCo 侧没有对应属性，靠执行器的 `user` 字段携带（即 `actuator_user`），由
+  `mujoco_effort_bridge` 在**每个物理步**写 `data.ctrl` 前执行（只挡继续加速、不挡反向
+  制动）。缺了它被控对象会跑到真机不可能达到的转速（2026-10-15 实测 40 rad/s），MIT 律的
+  `kd·vel` 项自己就顶进 ±peak 饱和 ⇒ 阻尼退化成 bang-bang、整臂陷入饱和极限环
+  （速度不衰减、力矩在两个峰值间反复打满）。**只有 MuJoCo 这条路发作**：Gazebo 侧由 Dart
+  执行 URDF 的 velocity 限幅。补上后峰值速度 43 → 1.4 rad/s、饱和路数 10/18 → 0/18。
 - **假电机 MIT 律的更新率**：`--effort-rate-hz`（默认 200）让发力矩与 CAN 主循环
   （`--period-ms`，20 ms）解耦。它是本回路的**死区**：跟随主循环时只有 ~50 Hz，加上被控对象
   100 Hz 的 `/joint_states` ≈ 30 ms 死区，配置里的 `(kp=30, kd=1)` 恰好越过稳定边界
   （判据 `atan(kd·ω/kp) > ω·T`，`ω≈√(kp/J)`），于是**静止目标下也有 ±0.3 rad 的极限环**。
 - **被控对象没有抱闸**：力矩为 0 时机构按重力自由下落。所以任何未武装/撤权/冻结的时段它都会
   塌下去；`填入在线电机（原位）` 会把"塌下去的位姿"当成目标——重新武装前先看清当前位姿。
-- **整链间歇静默 = CAN FD 数据相位时序，不是适配器锁存（2026-10-14 定案）**：此前记的
-  "CANable 每 20–60 s 锁存一次"已被证伪——真因是 5 Mbps 数据相位在本台架余量不足，板子一发
-  带数据相位的 FD 命令帧整条总线就崩（板 `tx_frame_count` 掉到 0、`rx_frame_count`=0、18 台
-  抖动，与快照率无关；撤负载即恢复）。**不动固件**——1 Mbps/5 Mbps 是冻结的标定值，
-  板子的 81.25% 采样点匹配真机电机的 80%；修法是改**适配器**的数据段采样点
-  （`DataTimeSeg1/2` 14/2 → 13/3 → 82.35%）后重烧适配器，尚未实施 ⇒ **适配器改好前，
-  5 Mbps 台架会复现该静默，属已知未决项**。此前曾用固件开关 `-DFDCAN_DATA_2M_BENCH`
-  把数据段降到 2 Mbps 绕开（100 Hz 快照下实测 0 次离线事件），该开关 2026-10-14 已删除。
-  详见 `docs/guides/fdcan1-bench-guide.md` 的"数据相位"一节。另有硬性顺序：**板子必须在 ACK
-  节点（模拟器）已在场时才复位**，否则无 ACK 会填满 TX FIFO（16 帧）后永久发不出帧。
+- **整链间歇静默 = 适配器是总线上一个采样点配错的节点（2026-10-15 寄存器定案）**：
+  静默时板子 TX 与 RX **同时**冻结（`TXBRP=0x0000ffff` 十六个发送缓冲全挂起、
+  `TFFL=0`/`TFQF=1` FIFO 满），而 USB CDC 侧 `snapshot_accepted` 一路照涨——只有 CAN 侧死。
+  出错到静默的寄存器序列：前导 `DLEC=4`（**数据相位** Bit1Error）+ `BO=1`（bus-off），
+  静默期定格在 `TEC=128`、`DLEC=3`（数据相位 ACK error）。**根因是 SLCAN CANable 以
+  88.24% 的数据段采样点在总线上当第二个节点**：它把板子每个带数据相位的 FD 帧采样越界 ⇒
+  发错误帧、不给 ACK ⇒ 板子 TEC 累加 ⇒ 负载下冲过 255 进 bus-off。
+  **板子侧一个字节都不该动**——1 Mbps/5 Mbps、81.25% 是冻结标定，匹配真机电机的 80%。
+  把那只 CANable 请出总线、改用**可在主机侧精确设位时序**的 gs_usb/SocketCAN 适配器后，
+  负载下实测 `TEC=0`、`DLEC=0`、`BO=0`、`TFQF=0`（380 个采样全零），静默 0 次：
+  ```bash
+  ip link set can0 type can bitrate 1000000 sample-point 0.8 \
+      dbitrate 5000000 dsample-point 0.8125 fd on
+  ```
+  `dsample-point` 取 **0.8125**（26/32）与板子逐位相同——160 MHz 时钟下 5 Mbps 取
+  `dbrp=1` 共 32 tq，恰好 80% 需要 25.6 tq、整数不可达，而 81.25% 正是板子的值。
+  若必须用那只 SLCAN CANable，则要改它的数据段采样点（`DataTimeSeg1/2` 14/2 → 13/3
+  → 82.35%）后重烧，尚未实施。另有硬性顺序：**板子必须在 ACK 节点（模拟器）已在场时才
+  复位**，否则无 ACK 会填满 TX FIFO（16 帧）后永久发不出帧。
 - **冻结过的台要重新武装**：OFFLINE/FAULT/CONFIG_CONFLICT 的台按 ARD §36 不会自动复权，
   需要**新的策略代数 + 新鲜完整快照**——所以**先等 18/18 稳定几秒再武装**，武装后确认
   `运行 18`（全部 ACTIVE）再下发目标。

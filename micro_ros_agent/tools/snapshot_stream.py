@@ -114,11 +114,12 @@ def load_topology(path: Path):
 
 
 class Streamer(Node):
-    def __init__(self, rate_hz: float):
+    def __init__(self, rate_hz: float, command_topic: str):
         super().__init__("snapshot_stream")
-        # QoS 按对端各配各的（实测，2026-10-14）：
-        #   - 下行命令/策略：固件的订阅端 **requesting RELIABLE**，所以这里必须
-        #     RELIABLE（best_effort 会被拒收，只在 rclpy 打一行 incompatible QoS）。
+        # QoS 按对端各配各的（2026-10-15 用 `ros2 topic info -v` 逐话题实测）：
+        #   - 下行命令：固件的订阅端 **BEST_EFFORT**。这里给 RELIABLE 是"提供强于
+        #     请求"，兼容；反过来（发 best_effort 而对方请求 reliable）才会被静默拒收。
+        #   - 下行策略：固件的订阅端 **RELIABLE**，所以这里必须 RELIABLE。
         #   - 上行 motion_states：固件的发布端 **offering BEST_EFFORT**，订阅端用
         #     reliable 会"静默收不到"（DDS 规则：sub 的可靠性不能高于 pub）。
         # depth=1/keep_last：实时流只保最新，积压的旧快照没有意义（过期即撤权）。
@@ -127,7 +128,7 @@ class Streamer(Node):
         qos_rx = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                             history=HistoryPolicy.KEEP_LAST)
         self.pub_cmd = self.create_publisher(
-            MotorCommandArray, "/micro_ros_do/motor_command_array", qos_tx)
+            MotorCommandArray, command_topic, qos_tx)
         self.pub_pol = self.create_publisher(
             MotorPolicyArray, "/micro_ros_do/motor_policy", qos_tx)
         self.create_subscription(MotorMotionStateArray,
@@ -297,6 +298,10 @@ def main():
     ap.add_argument("--confirm-unprotected", action="store_true",
                     help="武装时带「设备侧保护确知为关」的显式确认（真机必带；"
                          "仿真里假电机不上报保护，通常不需要）")
+    ap.add_argument("--command-topic", default="/micro_ros_do/motor_command_array",
+                    help="快照下发话题。改指 /robot_dynamics/command_array 可经"
+                         "重力前馈叠加节点中转；默认直连固件，行为不变"
+                         "（见 robot_dynamics/README.md）")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parents[2]
@@ -308,7 +313,7 @@ def main():
         f"{[m[0] for m in motors]}")
 
     rclpy.init()
-    node = Streamer(args.hz)
+    node = Streamer(args.hz, args.command_topic)
     log(f"[stream] mode={args.mode} hz={args.hz:g} seconds={args.seconds:g}；"
         "先等反馈（无反馈说明 agent/固件链路没通）…")
     wait_until = time.monotonic() + min(10.0, args.seconds)

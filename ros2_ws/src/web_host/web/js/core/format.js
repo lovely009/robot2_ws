@@ -1,6 +1,11 @@
 // 常量与格式化：从重构前的 app.js 常量区与工具区原样搬移。
 // 与固件的隐式契约（DEV_SLOT_NAMES 位序、PARAM_FIELD 次序）在下方注释里保留原样。
 
+// 下行话题可经 URL 覆盖（?command_topic=… / ?trajectory_topic=…）：把命令源接到
+// 重力前馈叠加节点的入口 /robot_dynamics/*（见 robot_dynamics/README.md）。
+// 默认直连固件，不启用前馈时行为逐字不变。与 store.js 的 ?joints= 同属排查/非常规接线。
+const DOWN_TOPIC = new URLSearchParams(location.search);
+
 export const TOPICS = {
   topology: {name: '/micro_ros_up/motor_topology', type: 'can_bridge_msgs/msg/MotorTopology'},
   motion: {name: '/micro_ros_up/motion_states', type: 'can_bridge_msgs/msg/MotorMotionStateArray'},
@@ -8,8 +13,12 @@ export const TOPICS = {
   events: {name: '/micro_ros_up/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
   imu: {name: '/micro_ros_up/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/micro_ros_up/imu/temp', type: 'std_msgs/msg/Float32'},
-  command: {name: '/micro_ros_do/motor_command_array', type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  trajectory: {name: '/micro_ros_do/motor_trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  command: {
+    name: DOWN_TOPIC.get('command_topic') || '/micro_ros_do/motor_command_array',
+    type: 'can_bridge_msgs/msg/MotorCommandArray'},
+  trajectory: {
+    name: DOWN_TOPIC.get('trajectory_topic') || '/micro_ros_do/motor_trajectory',
+    type: 'can_bridge_msgs/msg/MotorTrajectory'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
   devParams: {name: '/micro_ros_up/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},

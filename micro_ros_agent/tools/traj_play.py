@@ -76,11 +76,11 @@ def make_windows(steps, max_steps=WINDOW_STEPS, overlap=True):
 
 
 class Player(Node):
-    def __init__(self, kp, kd):
+    def __init__(self, kp, kd, traj_topic, command_topic):
         super().__init__("traj_play")
         self.kp, self.kd = kp, kd
-        self.pub_tr = self.create_publisher(MotorTrajectory, "/micro_ros_do/motor_trajectory", 10)
-        self.pub_cmd = self.create_publisher(MotorCommandArray, "/micro_ros_do/motor_command_array", 10)
+        self.pub_tr = self.create_publisher(MotorTrajectory, traj_topic, 10)
+        self.pub_cmd = self.create_publisher(MotorCommandArray, command_topic, 10)
         self.pub_pol = self.create_publisher(MotorPolicyArray, "/micro_ros_do/motor_policy", 10)
         be = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST, depth=50)
@@ -205,6 +205,11 @@ def main():
                          "下行延迟，给大了反而让新窗起点跑到臂前面形成台阶")
     ap.add_argument("--loop", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--trajectory-topic", default="/micro_ros_do/motor_trajectory",
+                    help="轨迹下发话题。改指 /robot_dynamics/trajectory 可经重力前馈"
+                         "叠加节点补上逐点 τ_ff；默认直连固件，行为不变")
+    ap.add_argument("--command-topic", default="/micro_ros_do/motor_command_array",
+                    help="起点对齐阶段的快照话题（同 --trajectory-topic 的用法）")
     a = ap.parse_args()
 
     ids, steps = load_series(a.json)
@@ -222,7 +227,7 @@ def main():
         log("[play] dry-run 结束（未动臂）"); return 0
 
     rclpy.init()
-    n = Player(a.kp, a.kd)
+    n = Player(a.kp, a.kd, a.trajectory_topic, a.command_topic)
     log(f"[play] 武装 kp={a.kp} kd={a.kd}")
     n.cancel_traj()
     n.arm(ids)

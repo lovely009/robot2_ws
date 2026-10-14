@@ -27,6 +27,10 @@ _CONTROL_MAX_RESPONSE_BYTES = 65536
 # 电机后端只接物理/虚拟 CAN 端点；纯 vcan 软件闭环的总线电机是 motor_sim
 # 节点（随仿真自带），不需要本后端。
 _BACKEND_TRANSPORTS = ("socketcan", "slcan")
+# 终端启动 HIL 时，simulation.launch.py 内嵌拉起模拟器并落在**固定路径**上
+# （见 robot_sim/launch/simulation.launch.py 的同名路径，两边必须一致）。
+# 本模块自己没有进程时接管它：只能转发命令，不能起停——那份进程的主人是 launch。
+_EXTERNAL_CONTROL_SOCKET = "/tmp/robot_sim_motor_backend.sock"
 
 
 def query_motor_sim(socket_path: str, request: dict,
@@ -92,7 +96,11 @@ class MotorSimProcessManager:
     """Own at most one standalone FDCAN motor backend process and its log."""
 
     def __init__(self, can_provider=None, serial_provider=None,
-                 model_provider=None, popen_factory=None, stop_timeout_s=8):
+                 model_provider=None, popen_factory=None, stop_timeout_s=8,
+                 external_socket=_EXTERNAL_CONTROL_SOCKET):
+        # external_socket=None 关掉「接管 launch 内嵌模拟器」——测试必须显式关，
+        # 否则台架上真跑着 HIL 时 status() 会答 external，测试就随台架状态红绿。
+        self._external_socket = external_socket
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
@@ -166,6 +174,15 @@ class MotorSimProcessManager:
             elif self._state == "starting":
                 # This reports process liveness, not bus readiness.
                 self._state = "running"
+        elif self._external_alive():
+            # launch 内嵌的那份。命令可转发，起停不归本模块（进程主人是 launch）。
+            return {
+                "state": "external",
+                "config": {"motor_sim_control_socket": self._external_socket},
+                "returncode": self._returncode,
+                "auto_started": False,
+                "log": list(self._log),
+            }
         return {
             "state": self._state,
             "config": dict(self._config) if self._config else None,
@@ -174,17 +191,32 @@ class MotorSimProcessManager:
             "log": list(self._log),
         }
 
+    def _external_alive(self) -> bool:
+        """固定路径上是否活着一个**不是本模块启动的**模拟器。
+
+        真连一次而不是只看文件：异常退出的残留 socket 文件会一直在，存在性不作数。
+        """
+        if not self._external_socket or not os.path.exists(self._external_socket):
+            return False
+        try:
+            query_motor_sim(self._external_socket, {"cmd": "status"}, timeout_s=0.5)
+        except RuntimeError:
+            return False
+        return True
+
     def status(self):
         with self._lock:
             return self._status_locked()
 
     def motor_request(self, request: dict) -> dict:
-        """转发一条模拟器控制命令；电机后端未运行时抛 RuntimeError。"""
+        """转发一条模拟器控制命令；两个来源都没有时抛 RuntimeError。"""
         with self._lock:
             self._status_locked()
             path = None
             if self._process is not None and self._config:
                 path = self._config.get("motor_sim_control_socket")
+            elif self._external_alive():
+                path = self._external_socket
         if not path:
             raise RuntimeError("电机后端未运行，模拟器控制通道不可用")
         return query_motor_sim(path, request)
@@ -208,6 +240,11 @@ class MotorSimProcessManager:
         config = self._validate(request)
         with self._lock:
             status = self._status_locked()
+            if status.get("state") == "external":
+                raise RuntimeError(
+                    "固定路径上已有 launch 内嵌的模拟器在跑（终端启动的 HIL），"
+                    "不能再起一个——同一条总线上两个模拟器会互相打断。"
+                    "页面可直接对它增删电机；要换端点请先停那次仿真 launch。")
             if self._process is not None:
                 if self._config == config:
                     # 幂等复用；**不改** auto 归属（用户手动起的不能因停仿真被停）

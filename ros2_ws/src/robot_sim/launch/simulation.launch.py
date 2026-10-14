@@ -828,9 +828,13 @@ def launch_simulation(context):
         # --no-brs（FD 数据段也走 1M，隔离 BRS 数据相位）、--fb-period-ms 100
         # （降反馈负载）。不设默认：正常路径行为不变。
         extra_sim_args = LaunchConfiguration("sim_args").perform(context).split()
-        # 运行期控制通道（web 上位机仿真页用）：仅当显式给出路径才开
+        # 运行期控制通道（web 上位机仿真页用）。留空时落到**固定路径**：页面的
+        # 「电机后端」面板只能控制路径已知的模拟器，而内嵌启动的这份此前没有控制
+        # 通道，面板对它完全够不着。路径与 web_host/motor_sim_manager.py 的
+        # _EXTERNAL_CONTROL_SOCKET 必须一致（残留的死 socket 由模拟器自行清理复用）。
         control_socket = (
             LaunchConfiguration("sim_control_socket").perform(context).strip()
+            or "/tmp/robot_sim_motor_backend.sock"
         )
         firmware_bus_args = (
             ["--interface", sim_endpoint]
@@ -867,12 +871,13 @@ def launch_simulation(context):
                     # 适配器侧 offline_timeout_ms=100ms 是按「20ms 自主上报 ×5」定的
                     # （vaxor_adapter.c:295），所以 20ms 有 5× 余量；但 20ms × 18 台
                     # = 900 帧/s（sim→总线），叠加本路径固件**逐台**下发的控制帧
-                    # （18 台 × 快照率 100 Hz ≈ 1800 帧/s），单只 SLCAN 适配器要中继
-                    # ~2700 帧/s —— 台架实测这就是它周期性锁存（静默 ~3.9s、18 台判
-                    # OFFLINE）的主因：同一累计计数差分下，100 Hz 快照 40s 内 8 次锁存、
-                    # 50 Hz 时 2 次。
+                    # （18 台 × 快照率 100 Hz ≈ 1800 帧/s），中继压力偏高。
                     # 40ms 把 sim→总线降到 450 帧/s（-50%），离线余量仍有 2.5×；窗口
                     # 跨度 37.4ms ≈ 周期 ⇒ 反馈近似连续而非突发，适配器输入端不易溢出。
+                    # ⚠ 2026-10-15 定案：曾经的"周期性锁存"不是本参数能解的——真因是
+                    # SLCAN CANable 以 88.24% 的数据段采样点在总线上当节点，对板子的 FD
+                    # 帧采样越界导致 bus-off。换 gs_usb/SocketCAN 并把 dsample-point 设成
+                    # 0.8125 后，100 Hz 快照下锁存 0 次。见 robot_sim/README.md。
                     # 排在 extra_sim_args 之前：命令行后出现者胜，故 sim_args 仍可覆盖。
                     "--fb-period-ms",
                     "40",

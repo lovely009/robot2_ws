@@ -51,6 +51,9 @@ def _manager(
         serial_provider=lambda: list(serial),
         model_provider=lambda: list(models),
         popen_factory=fake_popen,
+        # 关掉「接管 launch 内嵌模拟器」：否则台架上真跑着 HIL 时固定路径上确实
+        # 活着一个模拟器，status() 会答 external，这些用例就随台架状态红绿。
+        external_socket=None,
     )
 
 

@@ -18,6 +18,9 @@ const stateLabels = {
   running: '启动进程运行中',
   stopping: '停止中',
   failed: '启动失败',
+  // 终端启动的 HIL：模拟器由 simulation.launch.py 内嵌拉起。命令能转发，
+  // 起停不归本页面（进程主人是那次 launch）。
+  external: '外部（launch 内嵌）',
 };
 const backendLabels = { gazebo: 'Gazebo', mujoco: 'MuJoCo' };
 
@@ -296,7 +299,8 @@ export function mount(root, ctx) {
   // 也可脱离仿真单独起停（只连板子验证固件行为）。参数取仿真抽屉的选择。
   function describeBackendConfig(config) {
     if (!config) return '';
-    const endpoint = config.sim_tty || config.sim_interface || '';
+    const endpoint = config.sim_tty || config.sim_interface
+      || config.motor_sim_control_socket || '';
     return [config.transport, config.model, endpoint].filter(Boolean).join(' · ');
   }
 
@@ -316,8 +320,10 @@ export function mount(root, ctx) {
       : state === 'failed'
         ? `${label} · exit ${motorBackend.returncode}`
         : `电机后端${label}`;
-    ui.backendStart.disabled = active || !motorBackendStartable();
-    ui.backendStop.disabled = !active;
+    // external：命令可转发，但起停归那次 launch，两个按钮都锁掉。
+    ui.backendStart.disabled = active || state === 'external'
+      || !motorBackendStartable();
+    ui.backendStop.disabled = !active || state === 'external';
     const lines = motorBackend.log || [];
     ui.backendLog.textContent = lines.length ? lines.join('\n') : '等待启动';
     ui.backendLog.scrollTop = ui.backendLog.scrollHeight;

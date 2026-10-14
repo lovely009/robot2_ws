@@ -193,13 +193,20 @@ cd micro_ros_firmware
 
 ### 台架编译开关
 
-`platformio.ini` 的 `build_flags` 里有几个默认关闭、只给模拟台架用的开关。**接真实电机
-或量产前必须确认它们都关着**；改这些宏后须 `pio run -t clean` 全量重建。
+`platformio.ini` 的 `build_flags` 里有一个默认关闭、只给模拟台架用的开关。**接真实电机
+或量产前必须确认它关着**；改宏后须 `pio run -t clean` 全量重建。
 
 | 宏 | 作用 | 代价 / 何时用 |
 |---|---|---|
-| `FDCAN_DATA_2M_BENCH` | 数据段 5 Mbps → 2 Mbps（`lib/fdcan/src/fdcan.c`，N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq，采样点 85%） | 与真机标定的 5 Mbps 不一致。台架必须开：5 Mbps 在本台架收发器/接线余量不足，板子一发带数据相位的 FD 帧整链就静默（根因与实测见 `docs/guides/fdcan1-bench-guide.md`）。⚠️ DBTP 的 `DTSEG1` 只有 5 位、HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。 |
 | `FDCAN_SELF_ACK_BENCH` | 三路 FDCAN 走 EXTERNAL_LOOPBACK，空总线也能自发自收供嗅探 | MON 位使本节点**不应答**总线上其他节点，接真实电机/完整台架前必须关 |
+
+**FDCAN 位时序是冻结的标定值，不提供台架变体**：仲裁 1 Mbps（N=1/SJW=16/Seg1=63/Seg2=16
+→ 80 tq，采样点 80%）、数据 5 Mbps（N=1/SJW=2/Seg1=12/Seg2=3 → 16 tq，采样点 81.25%），
+定义在 `lib/fdcan/src/fdcan.c`，每次编译会打印一行
+`FDCAN bit timing frozen: arb 1.0 Mbps (SP 80.0%), data 5.0 Mbps (SP 81.25%)`。板子的
+81.25% 与真机电机的 80% 是匹配的，**改板子会把真机链路做坏**。2026-10-14 曾加过
+`-DFDCAN_DATA_2M_BENCH` 把台架数据段降到 2 Mbps 来绕开总线间歇静默，当日已删除——台架
+余量问题只能在适配器侧修（见 `docs/guides/fdcan1-bench-guide.md` 的"数据相位"一节）。
 
 **启动顺序是硬要求**：板子必须在 ACK 节点（主机模拟器）已在场时才复位。板子若在无 ACK
 节点的总线上启动，SYNC 拿不到 ACK → `AutoRetransmission` 重传把三路 TX FIFO 全部填满

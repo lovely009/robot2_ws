@@ -1,6 +1,6 @@
 # FDCAN1 四电机模拟台架指南
 
-> **适用范围（2026-10-14 修订）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的模拟台架。默认节点为 CERB 1=R58、2–4=R48；需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。**两只已知 CANable 版本的 5 Mbps 索引都是 `Y5`**（2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见下）。**2026-10-14 起台架固件默认把数据段降到 2 Mbps**（`-DFDCAN_DATA_2M_BENCH`，见下"数据相位"一节）——5 Mbps 在本台架的收发器/接线余量不足，会周期性整链静默。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
+> **适用范围（2026-10-14 修订）**：STM32H723 控制板 FDCAN1 + 当前现场 CANable `16e7497-dirty` + 无真实电机的模拟台架。默认节点为 CERB 1=R58、2–4=R48；需要旧九节点台架时显式传入 `--cerb 1,2,3,4,5,6 --vaxor 7,8,9`。**两只已知 CANable 版本的 5 Mbps 索引都是 `Y5`**（2026-10-12 实测修正了 `16e7497-dirty`=Y7 的旧说法，见下）。**固件位时序是冻结的标定值：仲裁 1 Mbps / 数据 5 Mbps，板子侧没有台架变体**——5 Mbps 在本台架收发器/接线余量不足、会周期性整链静默，修法在适配器侧且尚未实施（见下"数据相位"一节）。本文只定义稳定启动和只读观察流程；Profile 绑定、使能和运动命令必须另行确认总线无真实电机并取得外部操作权限。
 
 ## 连接与固定参数
 
@@ -9,8 +9,8 @@
 | 控制板 micro-ROS CDC | `/dev/ttyACM0` |
 | CANable2 SLCAN | `/dev/ttyACM1` |
 | 控制板总线 | FDCAN1，PD0/PD1 |
-| 位率 | 仲裁 1 Mbps / 数据 **2 Mbps**（台架固件 `-DFDCAN_DATA_2M_BENCH`），CAN FD+BRS |
-| SLCAN 配置 | `C` → `S8` → **`Y2`** → `M0` → `A1` → `O`（数据段 2 Mbps 对应 `Y2`；5 Mbps 才是 `Y5`），命令间隔至少 150 ms |
+| 位率 | 仲裁 1 Mbps / 数据 5 Mbps（固件冻结标定值，板子侧无台架变体），CAN FD+BRS |
+| SLCAN 配置 | `C` → `S8` → **`Y5`** → `M0` → `A1` → `O`（`16e7497-dirty` 与 `b158aa7` 均为 `Y5`），命令间隔至少 150 ms |
 | 模拟节点 | CERB id 1=R58；id 2–4=R48 |
 
 先用 `V` 识别 CANable 固件。**2026-10-12 实测修正**：现场这只 CANable（USB 描述符
@@ -24,7 +24,7 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
 `micro_ros_agent/tools/fdcan_motor_sim.py` 的 `SLCAN_VERSION_DATA_BITRATE` 与
 `_recover_latched_bus`。
 
-## 数据相位：5 Mbps 在本台架不可用（2026-10-14 定案）
+## 数据相位：5 Mbps 在本台架余量不足（2026-10-14 定案，修法在适配器侧）
 
 **长期"间歇静默、全台架 OFFLINE、重刷固件无效"的根因就是数据相位时序，不是适配器损坏、
 不是模拟器、也不是带宽。** 判据（板子自身单调计数 + 空闲/负载三段对照）：
@@ -41,15 +41,18 @@ FD 帧（DLC 8/12/20）是否畅通。索引与 CANable 健康自愈逻辑见
 （板子 16 tq → 81.25%，CANable2 上游固件 17 tq → 88.24%，见 `/tmp/canable2-fw/src/can.c`），
 余量被吃光。`--no-brs`（只改模拟器方向的帧）无效，可反证问题在板子的发送侧。
 
-**修复**：固件加编译开关 `-DFDCAN_DATA_2M_BENCH`（`lib/fdcan/src/fdcan.c` + `platformio.ini`，
-**默认关，接真实电机前必须关**），数据段降到 2 Mbps（N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq，
-采样点 85%），模拟器同步用 `--data-bitrate-index 2`（即 `Y2`）。实测 100 Hz 快照下
-`tx_frame_count` 稳定 4050/s、18/18 ACTIVE、**0 次离线事件**、SYNC 最大间隔 23 ms。
+**修法（2026-10-14 修订）**：改**适配器**的数据段采样点（`DataTimeSeg1/2` 14/2 → 13/3，
+17 tq 不变 → 82.35%，贴近板子的 81.25%）再烧适配器——**不是改板子**：板子 81.25% 与真机
+电机的 80% 是匹配的，改板子反而会把真机链路做坏。适配器固件源码见 `/tmp/canable2-fw/src/can.c`。
 
-要在台架上跑回 5 Mbps：应改**适配器**的数据段采样点（`DataTimeSeg1/2` 14/2 → 13/3，
-17 tq 不变 → 82.35%，贴近板子的 81.25%）再烧适配器，而不是改板子——板子 81.25% 与真机
-电机的 80% 是匹配的，改板子反而会把真机链路做坏。⚠️ 注意 DBTP 的 `DTSEG1` 只有 5 位、
-HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。
+⚠️ 注意 DBTP 的 `DTSEG1` 只有 5 位、HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。
+
+**已删除的错误绕法**：2026-10-14 曾在固件加编译开关 `-DFDCAN_DATA_2M_BENCH` 把数据段降到
+2 Mbps（N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq，采样点 85%）绕开本问题，台架实测 100 Hz 快照下
+`tx_frame_count` 稳定 4050/s、18/18 ACTIVE、**0 次离线事件**、SYNC 最大间隔 23 ms。当日已把该
+开关从 `lib/fdcan/src/fdcan.c` 与 `platformio.ini` 删除：它是往真机标定上打补丁，且必须靠人
+记着"接真实电机前关掉"，漏关就把真机链路做坏。**在适配器改好之前，5 Mbps 台架会复现上面的
+间歇静默，这是已知未决项**——观察到静默时先按本节判据确认是数据相位，不要去动板子。
 
 ## 启动顺序
 
@@ -66,17 +69,18 @@ HAL 上界 **32**（仲裁段 `NTSEG1` 是 8 位，别照搬）。
    ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
    ```
 
-2. 启动主机模拟器（台架固件是 2 Mbps 数据段，索引必须显式给 `2`）：
+2. 启动主机模拟器（板子数据段是 5 Mbps，索引走自动探测 `Y5`；自动探测不上再显式加
+   `--data-bitrate-index 5`）：
 
    ```bash
    python3 /home/ly/robot_ws/micro_ros_agent/tools/fdcan_motor_sim.py \
-     --tty /dev/ttyACM1 --data-bitrate-index 2
+     --tty /dev/ttyACM1
    ```
 
    `--log <jsonl>` 会逐帧落盘并把主循环拖慢，反馈窗口可能越过固件 100 ms 离线门而
    触发全体 OFFLINE——只在需要抓原始帧定位时开，抓完即关。
 
-3. 看到 `S8/Y2/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
+3. 看到 `S8/Y5/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
 4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 
 ## 只读验收

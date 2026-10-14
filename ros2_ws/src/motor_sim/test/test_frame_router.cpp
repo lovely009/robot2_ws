@@ -176,22 +176,27 @@ core::FrameRouter make_cerb_router(const bool fault_latching_enabled = true) {
                            fault_latching_enabled);
 }
 
-protocol::CanFrame cerb_command(const bool enabled, const double position) {
+protocol::CanFrame cerb_command(const bool enabled, const double position,
+                                const double feedforward_nm = 0.0,
+                                const double torque_limit_nm = 11.0,
+                                const unsigned id = 1U) {
   protocol::CanFrame frame;
-  // CERB MIT 命令帧 ID：0x110 + 电机 ID（本 fixture 固定 id=1）。
-  frame.id = 0x110U + 1U;
+  // CERB MIT 命令帧 ID：0x110 + 电机 ID。
+  frame.id = 0x110U + id;
   frame.fd = true;
   frame.brs = true;
   frame.size = 12U;
   // Data0 控制/模式半字节：bit7=使能、bit6=抱闸释放、bit4:1=MIT(0x06)。
   frame.data[0] = (enabled ? 0x80U : 0x00U) | 0x40U | 0x0CU;
   // 与 cerb_protocol.cpp 的 MIT 解码布局一致：pos 12.5 rad/16bit、vel
-  // 30 rad/s/12bit、kp 500/12bit、kd 5/12bit、torque 11 Nm/12bit。
+  // 30 rad/s/12bit、kp 500/12bit、kd 5/12bit；τ_ff 的满量程**逐型号**，由调用方给出。
   const uint32_t pos = protocol::float_to_uint(position, -12.5, 12.5, 16);
   const uint32_t vel = protocol::float_to_uint(0.0, -30.0, 30.0, 12);
   const uint32_t kp = protocol::float_to_uint(0.5, 0.0, 500.0, 12);
   const uint32_t kd = protocol::float_to_uint(0.02, 0.0, 5.0, 12);
-  const uint32_t tq = protocol::float_to_uint(0.0, -11.0, 11.0, 12);
+  const uint32_t tq =
+      protocol::float_to_uint(feedforward_nm, -torque_limit_nm,
+                              torque_limit_nm, 12);
   frame.data[1] = static_cast<uint8_t>((pos >> 8U) & 0xffU);
   frame.data[2] = static_cast<uint8_t>(pos & 0xffU);
   frame.data[3] = static_cast<uint8_t>((vel >> 4U) & 0xffU);
@@ -239,4 +244,26 @@ TEST(FrameRouterDriveState, CerbAxisDisableAfterLatchAllowsFullReset) {
   EXPECT_EQ(router.drive_state(), core::DriveState::ReadyForControl);
   router.set_control_gate(true);
   EXPECT_EQ(router.drive_state(), core::DriveState::MotorControlActive);
+}
+
+// 整链贯通：YAML(profile) → MotorConfig → 工厂 → CerbProtocol → 关节力矩。
+// 5.0 N·m 按 R58 的 45.0 满量程编码；若这条链上任何一环退回默认的 R48 11.0，
+// 读出来就是 1.222 N·m。
+TEST(FrameRouterMitTorque, DecodesR58FeedforwardWithConfiguredLimit) {
+  const core::TopologyContract contract{
+      {"arm"}, {{"joint_cerb58", "arm", "cerb", 3U}}};
+  const auto path =
+      std::string(TEST_SOURCE_DIR) + "/test/fixtures/cerb_r58_axis.yaml";
+  core::FrameRouter router(core::load_system_config(path, contract), true);
+  ASSERT_EQ(router.handle("arm", cerb_command(true, 0.0, 5.0, 45.0, 3U),
+                          TimePoint{})
+                .status,
+            core::RouterStatus::Applied);
+  router.set_control_gate(true);
+
+  // 命令 position≈0、反馈全零，kp/kd 项可忽略，plant 输出即 τ_ff 本身。
+  const std::vector<core::JointSample> states(1U);
+  const auto efforts = router.compute_efforts(states, 0.01, TimePoint{} + 3ms);
+  ASSERT_EQ(efforts.size(), 1U);
+  EXPECT_NEAR(efforts[0], 5.0, 2.0 * 45.0 / 4095.0);
 }

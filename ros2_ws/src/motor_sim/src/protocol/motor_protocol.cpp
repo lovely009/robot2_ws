@@ -80,12 +80,13 @@ constexpr uint8_t kVaxorSimulatedMotorType = 0x01U;
 
 }  // namespace
 
-std::unique_ptr<MotorProtocol> make_motor_protocol(const std::string_view name) {
+std::unique_ptr<MotorProtocol> make_motor_protocol(
+    const std::string_view name, const double mit_torque_limit_nm) {
   if (name == "vaxor") {
     return std::make_unique<VaxorProtocol>();
   }
   if (name == "cerb") {
-    return std::make_unique<CerbProtocol>();
+    return std::make_unique<CerbProtocol>(mit_torque_limit_nm);
   }
   throw std::invalid_argument("unsupported motor protocol");
 }

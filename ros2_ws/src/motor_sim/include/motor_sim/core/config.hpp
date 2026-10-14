@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "motor_sim/protocol/motor_protocol.hpp"
+
 namespace motor_sim::core {
 
 struct TimingConfig {
@@ -44,6 +46,11 @@ struct MotorConfig {
   std::string bus;
   std::string protocol;
   unsigned id{0U};
+  // CERB MIT τ_ff 的 12 位量化满量程（N·m），逐型号（R48 11.0 / R58 45.0）；
+  // 与 plant.effort_limit_nm（plant 的力矩饱和）既不同义也不等值。缺省值取
+  // kCerbDefaultMitTorqueLimitNm（R48），只保证不写该字段的旧配置行为不变。
+  double mit_torque_limit_nm{
+      ::motor_sim::protocol::kCerbDefaultMitTorqueLimitNm};
   TransmissionConfig transmission;
   JointLimits limits;
   PlantConfig plant;

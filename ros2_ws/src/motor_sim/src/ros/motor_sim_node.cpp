@@ -395,11 +395,11 @@ void MotorSimNode::transport_tick() {
         for (const auto index : router_result.reply_motor_indices) {
           const auto feedback = router_->motor_feedback(
               index, joint_states_[index], last_efforts_[index]);
-          const auto frame = protocol::make_motor_protocol(
-                                 router_->config().motors[index].protocol)
-                                 ->encode_feedback(feedback,
-                                                   protocol::FeedbackKind::
-                                                       Reply);
+          const auto &motor = router_->config().motors[index];
+          const auto frame =
+              protocol::make_motor_protocol(motor.protocol,
+                                            motor.mit_torque_limit_nm)
+                  ->encode_feedback(feedback, protocol::FeedbackKind::Reply);
           if (!endpoint->send(frame)) {
             handle_disconnect(bus);
             return;
@@ -445,8 +445,8 @@ void MotorSimNode::send_feedback(const std::size_t tick) {
     const auto feedback =
         router_->motor_feedback(index, joint_states_[index], last_efforts_[index]);
     const auto frame =
-        protocol::make_motor_protocol(motor.protocol)->encode_feedback(
-            feedback, protocol::FeedbackKind::Status);
+        protocol::make_motor_protocol(motor.protocol, motor.mit_torque_limit_nm)
+            ->encode_feedback(feedback, protocol::FeedbackKind::Status);
     const auto endpoint = transports_.find(motor.bus);
     if (endpoint == transports_.end() || !endpoint->second->send(frame)) {
       handle_disconnect(motor.bus);

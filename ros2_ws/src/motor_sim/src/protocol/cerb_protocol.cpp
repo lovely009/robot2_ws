@@ -12,7 +12,6 @@ constexpr double kCerbPositionMaxRad = 12.5;
 constexpr double kCerbVelocityMaxRadS = 30.0;
 constexpr double kCerbKpMax = 500.0;
 constexpr double kCerbKdMax = 5.0;
-constexpr double kCerbTorqueMaxNm = 11.0;  // CE-RB-R48-101 峰值扭矩 11 Nm
 
 // 反馈帧负载端位置：±32768 对应 ±180°。
 constexpr double kCerbFeedbackCountsPerRad = 32768.0 / kPi;
@@ -35,6 +34,14 @@ uint16_t pack_u16(const int32_t value) {
 }
 
 }  // namespace
+
+CerbProtocol::CerbProtocol(const double mit_torque_limit_nm)
+    : mit_torque_limit_nm_(mit_torque_limit_nm) {
+  if (!std::isfinite(mit_torque_limit_nm) || mit_torque_limit_nm <= 0.0) {
+    throw std::invalid_argument(
+        "CERB MIT torque limit must be positive and finite");
+  }
+}
 
 void CerbProtocol::validate_motor_id(const unsigned motor_id) const {
   if (motor_id < 1U || motor_id > 127U) {
@@ -81,8 +88,8 @@ CerbProtocol::decode_command(const CanFrame &frame,
                                    kCerbVelocityMaxRadS, 12);
   command.kp = uint_to_float(kp, 0.0, kCerbKpMax, 12);
   command.kd = uint_to_float(kd, 0.0, kCerbKdMax, 12);
-  command.feedforward =
-      uint_to_float(torque, -kCerbTorqueMaxNm, kCerbTorqueMaxNm, 12);
+  command.feedforward = uint_to_float(torque, -mit_torque_limit_nm_,
+                                      mit_torque_limit_nm_, 12);
   return command;
 }
 

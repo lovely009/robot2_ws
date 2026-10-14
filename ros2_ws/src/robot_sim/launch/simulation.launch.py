@@ -200,6 +200,18 @@ def _bind_motor_topology(
         sim_profile["gear_ratio"] = type_parameters.get("gear_ratio", 1.0)
         sim_profile["efficiency"] = type_parameters.get("gear_efficiency", 1.0)
         sim_profile["plant"] = plant
+        # τ_ff 的 MIT 定点量化满量程（逐型号真值）：真机驱动参数优先，回落型号库
+        # peak_torque_nm。motor_sim 的解码端必须用同一量程，否则 R58 的前馈被按
+        # 11/45 缩放。取不到就不写（vaxor 不涉及），由 motor_sim 用自己的默认量程。
+        mit_torque = type_parameters.get(
+            "mit_torque_limit_nm", type_parameters.get("peak_torque_nm")
+        )
+        try:
+            mit_torque = float(mit_torque)
+        except (TypeError, ValueError):
+            mit_torque = None
+        if mit_torque is not None and mit_torque > 0.0:
+            sim_profile["mit_torque_limit_nm"] = mit_torque
         sim_profiles[profile_name] = sim_profile
 
         selected_motors.append(

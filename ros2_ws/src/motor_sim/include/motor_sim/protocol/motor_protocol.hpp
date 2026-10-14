@@ -19,6 +19,11 @@ constexpr double kVaxorCurrentScaleA = 11.0 / 4096.0;
 constexpr double kVaxorKpScale = 0.00001;
 constexpr double kVaxorKdScale = 0.01;
 
+// CERB MIT 帧 τ_ff 的 12 位量化满量程（N·m），**逐型号**：CE-RB-R48-101 = 11.0、
+// CE-RB-R58-101 = 45.0（与真机参数页、motor.yaml 的 peak_torque_nm 同源）。
+// 此默认值取 R48，只服务未传逐台量程的旧调用与无参构造，不是通用真值。
+constexpr double kCerbDefaultMitTorqueLimitNm = 11.0;
+
 enum class CommandMode : uint8_t {
   Mit = 0x00,
   Velocity = 0x01,
@@ -65,7 +70,11 @@ public:
                                    FeedbackKind kind) const = 0;
 };
 
-std::unique_ptr<MotorProtocol> make_motor_protocol(std::string_view name);
+// mit_torque_limit_nm 是 CERB MIT τ_ff 的 12 位量化满量程（逐台/逐型号，单位 N·m），
+// 必须与真机编码端一致；Vaxor 忽略该参数。缺省值仅为兼容既有调用。
+std::unique_ptr<MotorProtocol>
+make_motor_protocol(std::string_view name,
+                    double mit_torque_limit_nm = kCerbDefaultMitTorqueLimitNm);
 
 uint32_t float_to_uint(double value, double low, double high, unsigned bits);
 double uint_to_float(uint32_t value, double low, double high, unsigned bits);

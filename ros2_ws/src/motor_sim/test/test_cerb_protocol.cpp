@@ -129,3 +129,32 @@ TEST(CerbProtocol, RejectsUnsupportedOrForeignFrames) {
 TEST(CerbProtocol, FactoryCreatesCerbProtocol) {
   EXPECT_NO_THROW(protocol::make_motor_protocol("cerb"));
 }
+
+// τ_ff 的 12 位定点满量程**逐型号**（CE-RB-R48-101 = 11 N·m、R58-101 = 45 N·m）。
+// 真机编码端按型号的 mit_torque_limit_nm 写；解码端写死任一侧都会整体缩放 τ_ff
+// （历史 bug：写死 11.0 ⇒ R58 的 5.0 N·m 被读成 1.222）。
+TEST(CerbProtocol, DecodesFeedforwardWithPerModelQuantizationLimit) {
+  for (const double limit_nm : {11.0, 45.0}) {
+    const auto torque = protocol::float_to_uint(5.0, -limit_nm, limit_nm, 12U);
+    // 复用 golden 帧，只替换 τ_ff 的 12 位（Data7 低半字节 + Data8）。
+    std::vector<uint8_t> bytes{0xCC, 0x8A, 0x3C, 0x7F, 0xF0, 0x51,
+                               0x33, 0x37, 0xFF, 0x00, 0x00, 0x00};
+    bytes[7] = static_cast<uint8_t>((bytes[7] & 0xf0U) |
+                                    ((torque >> 8U) & 0x0fU));
+    bytes[8] = static_cast<uint8_t>(torque & 0xffU);
+    const protocol::CerbProtocol cerb(limit_nm);
+    const auto command =
+        cerb.decode_command(frame_from_bytes(0x111U, bytes, true), 1U);
+    ASSERT_TRUE(command.has_value()) << "limit=" << limit_nm;
+    // 容差 = 两倍量化步长（2·limit/4095）。
+    EXPECT_NEAR(command->feedforward, 5.0, 2.0 * limit_nm / 4095.0)
+        << "limit=" << limit_nm;
+  }
+}
+
+TEST(CerbProtocol, RejectsNonPositiveQuantizationLimit) {
+  EXPECT_THROW(protocol::CerbProtocol(0.0), std::invalid_argument);
+  EXPECT_THROW(protocol::CerbProtocol(-11.0), std::invalid_argument);
+  EXPECT_NO_THROW(
+      protocol::CerbProtocol(protocol::kCerbDefaultMitTorqueLimitNm));
+}

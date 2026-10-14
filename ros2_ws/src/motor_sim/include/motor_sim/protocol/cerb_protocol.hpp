@@ -14,11 +14,20 @@ namespace motor_sim::protocol {
 // SDO（0x600/0x580）、多控广播（0x200）与同步帧触发不在仿真范围内。
 class CerbProtocol final : public MotorProtocol {
 public:
+  // mit_torque_limit_nm：MIT 帧 τ_ff 的 12 位量化满量程（N·m）。**逐型号**，取自
+  // 配置的 profile（R48 11.0 / R58 45.0）；无参构造退回 kCerbDefaultMitTorqueLimitNm
+  // ——那是 R48 的兼容默认量程，不是通用真值。
+  explicit CerbProtocol(
+      double mit_torque_limit_nm = kCerbDefaultMitTorqueLimitNm);
+
   void validate_motor_id(unsigned motor_id) const override;
   std::optional<MotorCommand>
   decode_command(const CanFrame &frame, unsigned motor_id) const override;
   CanFrame encode_feedback(const MotorFeedback &feedback,
                            FeedbackKind kind) const override;
+
+private:
+  double mit_torque_limit_nm_;
 };
 
 }  // namespace motor_sim::protocol

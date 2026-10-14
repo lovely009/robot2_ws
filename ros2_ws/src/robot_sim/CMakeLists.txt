@@ -25,6 +25,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_model_consistency test/test_model_consistency.py)
   ament_add_pytest_test(test_launch_models test/test_launch_models.py)
   ament_add_pytest_test(test_mujoco_command_mapping test/test_mujoco_command_mapping.py)
+  ament_add_pytest_test(test_simulation_config test/test_simulation_config.py)
 endif()
 
 ament_package()

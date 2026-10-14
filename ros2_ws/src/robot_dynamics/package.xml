@@ -2,12 +2,15 @@
 <package format="3">
   <name>robot_dynamics</name>
   <version>0.1.0</version>
-  <description>Standalone Pinocchio dependency boundary for robot kinematics and dynamics.</description>
+  <description>Pinocchio-based robot kinematics and dynamics: URDF gravity torque model and node.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>can_bridge_msgs</depend>
   <depend>pinocchio</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 

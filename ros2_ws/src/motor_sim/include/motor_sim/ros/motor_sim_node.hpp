@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "motor_sim/core/frame_router.hpp"
+#include "motor_sim/core/sdo_server.hpp"
 #include "motor_sim/transport/frame_transport.hpp"
 #include "motor_sim/transport/serial_transport.hpp"
 
@@ -93,8 +94,13 @@ private:
       const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
       std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   void handle_disconnect(const std::string &bus);
+  // SDO 请求（0x600+node）由从站应答；返回 true 表示该帧已处理、不进 MIT 路由。
+  bool handle_sdo_request(const std::string &bus,
+                          transport::FrameTransport &endpoint,
+                          const protocol::CanFrame &frame);
 
   std::unique_ptr<FrameRouter> router_;
+  ::motor_sim::core::CerbSdoServer sdo_server_;
   TransportMap transports_;
   std::vector<JointSample> joint_states_;
   std::vector<double> last_efforts_;

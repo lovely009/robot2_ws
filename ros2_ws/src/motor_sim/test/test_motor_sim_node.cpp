@@ -6,7 +6,10 @@
 #include <pty.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -251,4 +254,106 @@ TEST(MotorSimNodeInterfaces, PublishesBrakeStateAndRejectsResetWithoutFault) {
   executor.remove_node(observer);
   executor.remove_node(motor_node);
   rclcpp::shutdown();
+}
+
+namespace {
+
+// 可注入一帧、记录发出去所有帧的替身；不碰任何真实设备。
+class ScriptedTransport final : public transport::FrameTransport {
+public:
+  void open() override { opened_ = true; }
+  void close() noexcept override { opened_ = false; }
+  bool send(const motor_sim::protocol::CanFrame &frame) override {
+    sent_.push_back(frame);
+    return opened_;
+  }
+  transport::ReceiveResult receive(transport::ReceivedFrame &out) override {
+    if (cursor_ >= inbound_.size()) {
+      return transport::ReceiveResult::NoData;
+    }
+    out.frame = inbound_[cursor_];
+    out.received_at = std::chrono::steady_clock::now();
+    ++cursor_;
+    return transport::ReceiveResult::Frame;
+  }
+  void push(const motor_sim::protocol::CanFrame &frame) {
+    inbound_.push_back(frame);
+  }
+  const std::vector<motor_sim::protocol::CanFrame> &sent() const {
+    return sent_;
+  }
+
+private:
+  bool opened_{false};
+  std::vector<motor_sim::protocol::CanFrame> inbound_;
+  std::size_t cursor_{0U};
+  std::vector<motor_sim::protocol::CanFrame> sent_;
+};
+
+motor_sim::protocol::CanFrame sdo_request(
+    const std::uint32_t id, const std::array<std::uint8_t, 8> &body) {
+  motor_sim::protocol::CanFrame frame;
+  frame.id = id;
+  frame.fd = true;
+  frame.brs = true;
+  frame.size = 8U;
+  std::copy(body.begin(), body.end(), frame.data.begin());
+  return frame;
+}
+
+// 一台带 SDO 从站的 CERB 配置，总线指向注入的替身。
+core::SystemConfig cerb_bus_config() {
+  auto config = bus_config(core::BusTransport::SocketCan, "lo");
+  config.motors[0].protocol = "cerb";
+  config.motors[0].device_identity = "R48LITE_V2";
+  config.motors[0].device_max_speed_rpm = 3325;
+  config.motors[0].device_max_current_ma = 5000;
+  return config;
+}
+
+}  // namespace
+
+// 固件靠 0x600+node 发 SDO 请求、听 0x580+node 的应答。请求帧必须被 SDO 从站
+// 接走，**不能**流进 MIT 路由（否则会被当成一条畸形命令）。
+TEST(MotorSimNodeSdo, AnswersIdentityRequestOnTheResponseId) {
+  ensure_rclcpp_initialized();
+  auto transport = std::make_unique<ScriptedTransport>();
+  auto *scripted = transport.get();
+  ros::TransportMap transports;
+  transports.emplace("arm", std::move(transport));
+
+  scripted->push(sdo_request(0x601U, {0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0}));
+  auto node = std::make_shared<ros::MotorSimNode>(
+      rclcpp::NodeOptions{}, cerb_bus_config(), std::move(transports));
+
+  for (int attempt = 0; attempt < 100 && scripted->sent().empty(); ++attempt) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_FALSE(scripted->sent().empty());
+  const auto &reply = scripted->sent().back();
+  EXPECT_EQ(reply.id, 0x581U);
+  EXPECT_EQ(reply.data[0], 0x41);
+  EXPECT_EQ(reply.data[4], 10);  // 身份串长度
+}
+
+// 非本从站的节点号：完全静默。
+TEST(MotorSimNodeSdo, StaysSilentForNodesItDoesNotServe) {
+  ensure_rclcpp_initialized();
+  auto transport = std::make_unique<ScriptedTransport>();
+  auto *scripted = transport.get();
+  ros::TransportMap transports;
+  transports.emplace("arm", std::move(transport));
+
+  scripted->push(sdo_request(0x609U, {0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0}));
+  auto node = std::make_shared<ros::MotorSimNode>(
+      rclcpp::NodeOptions{}, cerb_bus_config(), std::move(transports));
+
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  EXPECT_TRUE(scripted->sent().empty());
 }

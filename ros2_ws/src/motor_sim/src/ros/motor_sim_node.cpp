@@ -246,6 +246,14 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
     found->second->open();
   }
 
+  for (const auto &motor : router_->config().motors) {
+    if (motor.protocol != "cerb") {
+      continue;  // 只有 CERB 有 SDO 从站；vaxor 不回 SDO。
+    }
+    sdo_server_.add_node(motor.id, motor.device_identity,
+                         core::cerb_sdo_initial_objects(motor));
+  }
+
   joint_states_.resize(router_->config().motors.size());
   last_efforts_.assign(router_->config().motors.size(), 0.0);
   for (std::size_t index = 0U; index < router_->config().motors.size(); ++index) {
@@ -318,6 +326,10 @@ void MotorSimNode::transport_tick() {
       if (result == transport::ReceiveResult::NoData) {
         break;
       }
+      // SDO 是独立的一问一答命名空间（0x600/0x580 + node），不能流进 MIT 路由。
+      if (handle_sdo_request(bus, *endpoint, received_frame.frame)) {
+        continue;
+      }
       // 使用独立 I/O 线程记录的到达时间，ROS executor 延迟后成批消费
       // 也不会压缩帧间隔，避免 2 ms duplicate-controller 误报。
       const auto router_result = router_->handle(bus, received_frame.frame,
@@ -340,6 +352,34 @@ void MotorSimNode::transport_tick() {
       }
     }
   }
+}
+
+bool MotorSimNode::handle_sdo_request(const std::string &bus,
+                                      transport::FrameTransport &endpoint,
+                                      const protocol::CanFrame &frame) {
+  constexpr uint32_t kSdoRequestBase = 0x600U;
+  constexpr uint32_t kSdoResponseBase = 0x580U;
+  constexpr uint32_t kSdoIdSpan = 0x80U;  // CERB 的 node id 上限
+  if (frame.id < kSdoRequestBase || frame.id >= kSdoRequestBase + kSdoIdSpan) {
+    return false;
+  }
+  const auto node_id = frame.id - kSdoRequestBase;
+  core::SdoFrame request{};
+  std::copy_n(frame.data.begin(), request.size(), request.begin());
+  core::SdoFrame response{};
+  if (!sdo_server_.handle(node_id, request, response)) {
+    return true;  // 是 SDO 命名空间但不是本从站管的：吞掉，不喂 MIT 路由
+  }
+  protocol::CanFrame reply;
+  reply.id = kSdoResponseBase + node_id;
+  reply.fd = true;
+  reply.brs = frame.brs;  // 与请求同 BRS，别自作主张改成经典帧
+  reply.size = response.size();
+  std::copy(response.begin(), response.end(), reply.data.begin());
+  if (!endpoint.send(reply)) {
+    handle_disconnect(bus);
+  }
+  return true;
 }
 
 void MotorSimNode::control_tick() {

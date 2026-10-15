@@ -26,4 +26,9 @@ motor_simulation:
       efficiency: 0.8
       plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.012, current_limit_a: 11.0}
   motors:
-    - {joint: joint_a, bus: arm, protocol: vaxor, id: 1, profile: vaxor_axis}
+    - joint: joint_a
+      bus: arm
+      protocol: vaxor
+      id: 1
+      profile: vaxor_axis
+      sdo_overrides: {protection_enabled: 0, direction: 1}

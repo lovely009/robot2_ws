@@ -130,3 +130,24 @@ TEST(SystemConfig, RejectsNegativeStagger) {
   EXPECT_THROW(core::load_system_config(fixture_path("bad_stagger.yaml")),
                std::runtime_error);
 }
+
+TEST(SystemConfig, ReadsSdoOverrides) {
+  const auto config = core::load_system_config(fixture_path("bus_transport.yaml"));
+  ASSERT_EQ(config.motors.size(), 1U);
+  EXPECT_EQ(config.motors[0].sdo_overrides.protection_enabled, 0U);
+  EXPECT_EQ(config.motors[0].sdo_overrides.direction, 1U);
+}
+
+// 缺省 = 真机上电初值（保护开关 1，方向 0=CW）。这两个对象不落盘，"进程重启 =
+// 掉电复现"，初值给错，台架就永远复现不出"上电后保护是关的"这个前提。
+TEST(SystemConfig, DefaultsSdoOverridesToRealHardwarePowerOnValues) {
+  const auto config = core::load_system_config(fixture_path("cerb_axis.yaml"));
+  ASSERT_EQ(config.motors.size(), 1U);
+  EXPECT_EQ(config.motors[0].sdo_overrides.protection_enabled, 1U);
+  EXPECT_EQ(config.motors[0].sdo_overrides.direction, 0U);
+}
+
+TEST(SystemConfig, RejectsSdoOverrideOutsideBooleanDomain) {
+  EXPECT_THROW(core::load_system_config(fixture_path("bad_sdo_overrides.yaml")),
+               std::runtime_error);
+}

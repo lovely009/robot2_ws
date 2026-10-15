@@ -1,0 +1,25 @@
+motor_simulation:
+  timing:
+    control_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+  buses:
+    - {name: arm, transport: socket_can, endpoint: robot_vcan0}
+  profiles:
+    cerb_axis:
+      hard_lower_deg: -360
+      hard_upper_deg: 360
+      command_lower_deg: -355
+      command_upper_deg: 355
+      velocity_rad_s: 2.0
+      effort_nm: 11.0
+      gear_ratio: 101.0
+      efficiency: 1.0
+      plant: {kp: 30.0, kd: 1.0, torque_constant_nm_per_a: 0.077, current_limit_a: 3.2}
+  motors:
+    - joint: joint_cerb
+      bus: arm
+      protocol: cerb
+      id: 1
+      profile: cerb_axis
+      sdo_overrides: {protection_enabled: 2}

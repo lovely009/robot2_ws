@@ -63,6 +63,14 @@ struct PlantConfig {
   double current_limit_a{0.0};
 };
 
+// CERB SDO 易失对象的初值覆盖。真机上电初值：保护开关 0x2650:00 = 1（保护关）、
+// 方向 0x2541:00 = 0（CW）。这两个对象不落盘，"进程重启 = 掉电复现"，
+// 所以覆盖初值是复现真机特定场景的唯一手段。
+struct SdoOverrides {
+  unsigned protection_enabled{1U};  // 0x2650:00，仅 0/1
+  unsigned direction{0U};           // 0x2541:00，0=CW 1=CCW
+};
+
 struct MotorConfig {
   std::string joint;
   std::string bus;
@@ -76,6 +84,7 @@ struct MotorConfig {
   TransmissionConfig transmission;
   JointLimits limits;
   PlantConfig plant;
+  SdoOverrides sdo_overrides;
 };
 
 struct SystemConfig {

@@ -348,6 +348,20 @@ SystemConfig parse_config_common(const YAML::Node &root,
     motor.limits = profile->second.limits;
     motor.plant = profile->second.plant;
     motor.mit_torque_limit_nm = profile->second.mit_torque_limit_nm;
+    if (const auto overrides = node["sdo_overrides"]) {
+      if (!overrides.IsMap()) {
+        throw std::runtime_error(context + ".sdo_overrides must be a map");
+      }
+      motor.sdo_overrides.protection_enabled = optional_unsigned(
+          overrides, "protection_enabled", 1U, context + ".sdo_overrides");
+      motor.sdo_overrides.direction = optional_unsigned(
+          overrides, "direction", 0U, context + ".sdo_overrides");
+      if (motor.sdo_overrides.protection_enabled > 1U ||
+          motor.sdo_overrides.direction > 1U) {
+        throw std::runtime_error(context +
+                                 ".sdo_overrides values must be 0 or 1");
+      }
+    }
     // Vaxor 与 CERB 的反馈电流都由关节力矩除以 Kt（含传动）换算，
     // 必须提供正的转矩常数与电流限幅。
     if ((motor.protocol == "vaxor" || motor.protocol == "cerb") &&

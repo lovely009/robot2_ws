@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import subprocess
+from conftest import FakeSystemd
 
 from bench_manager.systemd_units import (
     AUTO_STARTED_ENV,
@@ -18,32 +18,6 @@ from bench_manager.systemd_units import (
     UnitState,
     ros_environment,
 )
-
-
-class FakeSystemd:
-    """最小 systemd 假体：只建模本模块用到的命令与 unit 属性。
-
-    `properties[unit]` 是 `systemctl --user show <unit>` 会答的属性表；
-    `fail[argv]` 指定某条命令的退出码与 stderr。
-    """
-
-    def __init__(self, properties: dict[str, dict[str, str]] | None = None,
-                 fail: dict[tuple[str, ...], tuple[int, str]] | None = None) -> None:
-        self.calls: list[list[str]] = []
-        self.properties = dict(properties or {})
-        self.fail = dict(fail or {})
-
-    def __call__(self, argv: list[str], timeout_s: float) -> subprocess.CompletedProcess:
-        self.calls.append(list(argv))
-        rc, err = self.fail.get(tuple(argv), (0, ''))
-        out = ''
-        if argv[1:3] == ['--user', 'show']:
-            out = ''.join(f'{k}={v}\n'
-                          for k, v in self.properties.get(argv[3], {}).items())
-        return subprocess.CompletedProcess(argv, rc, out, err)
-
-    def commands(self) -> list[list[str]]:
-        return self.calls
 
 
 def units(**properties: str) -> SystemdUnits:
@@ -226,6 +200,21 @@ def test_auto_ownership_is_persisted_into_the_unit() -> None:
 
     create = next(c for c in systemd.commands() if c[0] == 'systemd-run')
     assert f'--setenv={AUTO_STARTED_ENV}=1' in create
+
+
+def test_session_description_is_persisted_into_the_unit() -> None:
+    """会话自身的描述（哪台设备/哪个模型/哪条总线）随 unit 持久化。
+
+    以前这些活在 manager 的内存里，bench_manager 一重启就丢——页面只能显示「在跑」，
+    说不清在跑什么。
+    """
+    systemd = FakeSystemd({UNIT_AGENT: {'LoadState': 'not-found'}})
+    SystemdUnits(runner=systemd).start(
+        UNIT_AGENT, ['true'], auto=False,
+        session_env={'BENCH_DEVICE': '/dev/serial/by-id/usb-STMicro-if00'})
+
+    create = next(c for c in systemd.commands() if c[0] == 'systemd-run')
+    assert '--setenv=BENCH_DEVICE=/dev/serial/by-id/usb-STMicro-if00' in create
 
 
 def test_unit_environment_is_readable_for_ownership_checks() -> None:

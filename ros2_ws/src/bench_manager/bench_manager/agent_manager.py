@@ -1,14 +1,23 @@
-"""Enumerate controller serial devices and supervise one micro-ROS Agent."""
+"""Enumerate controller serial devices and supervise the micro-ROS Agent unit."""
 
 import glob
 import os
 import re
-import signal
-import subprocess
-import threading
 
+from .systemd_units import AUTO_STARTED_ENV, UNIT_AGENT, SystemdUnits, UnitState
 
 _SUPPORTED_TTY = re.compile(r'tty(?:ACM|USB)\d+$')
+
+# 会话描述随 unit 持久化：以前它活在 manager 的内存里，bench_manager 一重启就丢，
+# 页面只能显示「在跑」却说不清跑在哪台设备上。
+DEVICE_ENV = 'BENCH_DEVICE'
+
+_STATE_NAMES = {
+    UnitState.ABSENT: 'stopped',
+    UnitState.STOPPED: 'stopped',
+    UnitState.RUNNING: 'running',
+    UnitState.FAILED: 'failed',
+}
 
 
 def enumerate_serial_ports(dev_root='/dev'):
@@ -51,102 +60,80 @@ def enumerate_serial_ports(dev_root='/dev'):
 
 
 class AgentProcessManager:
-    """Own at most one Agent child process and constrain it to listed ports."""
+    """Own the Agent unit, constrained to enumerated ports."""
 
-    def __init__(self, port_provider=enumerate_serial_ports,
-                 popen_factory=None, stop_timeout_s=5):
+    def __init__(self, port_provider=enumerate_serial_ports, systemd=None,
+                 proc_root='/proc'):
         self._port_provider = port_provider
-        self._popen_factory = popen_factory or subprocess.Popen
-        self._stop_timeout_s = stop_timeout_s
-        self._lock = threading.RLock()
-        self._process = None
-        self._device = None
-        self._last_status = {
-            'state': 'stopped', 'device': '', 'returncode': None,
-        }
+        self._systemd = systemd or SystemdUnits()
+        self._proc_root = proc_root
 
-    def _status_locked(self):
-        if self._process is None:
-            return dict(self._last_status)
+    def _holders(self, path):
+        """谁正开着这个设备。
 
-        returncode = self._process.poll()
-        if returncode is not None:
-            self._last_status = {
-                'state': 'failed' if returncode else 'stopped',
-                'device': self._device or '',
-                'returncode': returncode,
-            }
-            self._process = None
-            self._device = None
-            return dict(self._last_status)
+        串口没有 O_EXCL 语义——两个进程可以同时打开同一个 tty 互相抢字节，所以
+        「已经有人占着」只能自己查：扫 `/proc/<pid>/fd` 里指向该设备的符号链接。
+        这正是「孤儿 agent 还占着 ttyACM1，新起的 bench_manager 照起第二个」的堵口。
+        """
+        target = os.path.realpath(path)
+        holders = []
+        for entry in glob.glob(os.path.join(self._proc_root, '[0-9]*', 'fd', '*')):
+            try:
+                if os.path.realpath(entry) != target:
+                    continue
+            except OSError:  # 进程在扫描途中退出：fd 目录消失
+                continue
+            pid = entry[len(self._proc_root):].split('/')[1]
+            holders.append(int(pid))
+        return holders
 
+    def _status(self):
+        unit = self._systemd.probe(UNIT_AGENT)
+        env = ({} if unit.state is UnitState.ABSENT
+               else self._systemd.environment(UNIT_AGENT))
         return {
-            'state': 'running', 'device': self._device or '',
-            'returncode': None,
+            'state': _STATE_NAMES[unit.state],
+            'device': env.get(DEVICE_ENV, ''),
+            'returncode': unit.returncode,
+            'auto_started': env.get(AUTO_STARTED_ENV) == '1',
         }
 
     def status(self):
-        with self._lock:
-            return self._status_locked()
+        return self._status()
 
-    def start(self, device):
-        """Start Agent on an enumerated device, or reuse this process."""
-        with self._lock:
-            status = self._status_locked()
-            if status['state'] == 'running':
-                if self._device == device:
-                    return status
-                raise RuntimeError(
-                    'Agent is already running on %s; stop it before '
-                    'switching ports' % self._device)
+    def start(self, device, auto=False):
+        """Start Agent on an enumerated device, or adopt the running one."""
+        status = self._status()
+        if status['state'] == 'running':
+            if status['device'] == device:
+                return status
+            raise RuntimeError(
+                'Agent is already running on %s; stop it before '
+                'switching ports' % status['device'])
 
-            available = {item['path'] for item in self._port_provider()}
-            if device not in available:
-                raise ValueError('device is not an available serial port')
-            if not os.access(device, os.R_OK | os.W_OK):
-                raise PermissionError(
-                    'bench_manager cannot read and write %s; grant serial access '
-                    '(for example, add its user to dialout)' % device)
+        available = {item['path'] for item in self._port_provider()}
+        if device not in available:
+            raise ValueError('device is not an available serial port')
+        if not os.access(device, os.R_OK | os.W_OK):
+            raise PermissionError(
+                'bench_manager cannot read and write %s; grant serial access '
+                '(for example, add its user to dialout)' % device)
 
-            command = [
-                'ros2', 'run', 'micro_ros_agent', 'micro_ros_agent',
-                'serial', '--dev', device,
-            ]
-            self._process = self._popen_factory(
-                command, stdin=subprocess.DEVNULL, start_new_session=True)
-            self._device = device
-            self._last_status = {
-                'state': 'running', 'device': device, 'returncode': None,
-            }
-            return dict(self._last_status)
+        holders = self._holders(device)
+        if holders:
+            raise RuntimeError(
+                '%s 已被进程 %s 占用——多半是上一次会话留下的 agent。先停掉它再起；'
+                '同一个 tty 上两个 agent 会互相抢字节。'
+                % (device, ', '.join(str(pid) for pid in holders)))
+
+        self._systemd.start(
+            UNIT_AGENT,
+            ['ros2', 'run', 'micro_ros_agent', 'micro_ros_agent',
+             'serial', '--dev', device],
+            auto=auto, session_env={DEVICE_ENV: device})
+        return self._status()
 
     def stop(self):
-        """Stop only the Agent process started by this manager."""
-        with self._lock:
-            status = self._status_locked()
-            process = self._process
-            device = self._device or status['device']
-            if process is None:
-                return status
-
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-            try:
-                returncode = process.wait(timeout=self._stop_timeout_s)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                returncode = process.wait()
-
-            self._process = None
-            self._device = None
-            self._last_status = {
-                'state': 'stopped', 'device': device or '',
-                'returncode': returncode,
-            }
-            return dict(self._last_status)
+        """Stop the Agent unit (no-op when it is not running)."""
+        self._systemd.stop(UNIT_AGENT)
+        return self._status()

@@ -138,12 +138,17 @@ class SystemdUnits:
 
     # --- 起停 ---------------------------------------------------------------
 
-    def start(self, unit: str, argv: list[str], auto: bool = False) -> UnitStatus:
+    def start(self, unit: str, argv: list[str], auto: bool = False,
+              session_env: Mapping[str, str] | None = None) -> UnitStatus:
         """让 unit 以**当前** argv 跑起来；已在跑则原样认领，不重启。
 
         重启会打断正在跑的仿真，所以 RUNNING 直接返回。这也正是 systemd 免费给的
         「单写者所有权」：unit 名被占用时第二个 bench_manager 根本建不出来，
         「在跑」就意味着「有人管着」。
+
+        `session_env` 是**会话自身的描述**（哪台设备、哪个模型、哪条总线），随 unit 一起
+        持久化：以前这些活在 manager 的内存里，bench_manager 一重启就丢了，页面只能显示
+        「在跑」却说不清在跑什么。读回用 `environment()`。
 
         注意没有 `systemctl start` 分支：transient unit 干净退出后会被卸载，非干净退出
         留在 failed 态；两种情况都该按当前 argv **重建**，而不是拿旧定义启动。
@@ -156,7 +161,7 @@ class SystemdUnits:
             # 直接报 "Unit already exists"。
             self.stop(unit)
             self._reset_failed(unit)
-        self._create(unit, argv, auto)
+        self._create(unit, argv, auto, session_env or {})
         return self.probe(unit)
 
     def stop(self, unit: str) -> None:
@@ -188,11 +193,14 @@ class SystemdUnits:
         # 它本身失败不算错（unit 可能已经不在了）。
         self._run(["systemctl", "--user", "reset-failed", unit], _TIMEOUT_S)
 
-    def _create(self, unit: str, argv: list[str], auto: bool) -> None:
+    def _create(self, unit: str, argv: list[str], auto: bool,
+                session_env: Mapping[str, str]) -> None:
         command = ["systemd-run", "--user", f"--unit={unit}", f"--slice={SLICE}"]
         for name, value in ros_environment(self._environ).items():
             command.append(f"--setenv={name}={value}")
         command.append(f"--setenv={AUTO_STARTED_ENV}={'1' if auto else '0'}")
+        for name, value in session_env.items():
+            command.append(f"--setenv={name}={value}")
         command.extend(argv)
         result = self._run(command, _TIMEOUT_S)
         if result.returncode == 0:

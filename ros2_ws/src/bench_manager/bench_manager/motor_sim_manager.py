@@ -1,37 +1,37 @@
-"""Supervise the standalone FDCAN motor backend (`simulator_only` launch)。
+"""监督 `bench-motor-backend.service`（独立的 FDCAN 电机后端）。
 
 「电机后端」= fdcan_motor_sim.py 的独立进程：页面/脚本经 StartMotorBackend 服务
 按需单独起停（不依赖仿真——只连板子即可验证固件发现/离线/重连）；HIL（firmware）
 + 物理总线启动仿真时由 StartSimulation 服务默认联动拉起、停止时联动收起（见
-hil_motor_backend_request 与 auto_started 标志）。控制通道（Unix socket）路径由本
-模块生成并随 launch 透传；电机表与增删断连命令经 query_motor_sim 转发（协议见
-micro_ros_agent/README.md）。
+hil_motor_backend_request 与 auto_started 标志）。电机表与增删断连命令经
+query_motor_sim 转发到控制通道（协议见 micro_ros_agent/README.md）。
+
+进程归属在 systemd（user transient unit）：控制通道路径因此是**固定**的——以前它
+带 `bench_manager` 的 pid，unit 化之后那个 pid 跟 unit 没关系，而且重启就变。
 """
 
-from collections import deque
 import json
 import os
-import signal
 import socket
-import subprocess
-import threading
 
 from .agent_manager import enumerate_serial_ports
 from .simulation_manager import (
     enumerate_can_interfaces,
     enumerate_simulation_models,
 )
+from .systemd_units import (
+    AUTO_STARTED_ENV, STATE_NAMES, UNIT_MOTOR_BACKEND, SystemdUnits, UnitState,
+    config_env, config_from_env,
+)
 
-_LOG_LINES = 80
-_LOG_LINE_CHARS = 1000
 _CONTROL_MAX_RESPONSE_BYTES = 65536
 # 电机后端只接物理/虚拟 CAN 端点；纯 vcan 软件闭环的总线电机是 motor_sim
 # 节点（随仿真自带），不需要本后端。
 _BACKEND_TRANSPORTS = ("socketcan", "slcan")
-# 终端启动 HIL 时，simulation.launch.py 内嵌拉起模拟器并落在**固定路径**上
-# （见 robot_sim/launch/simulation.launch.py 的同名路径，两边必须一致）。
-# 本模块自己没有进程时接管它：只能转发命令，不能起停——那份进程的主人是 launch。
-_EXTERNAL_CONTROL_SOCKET = "/tmp/robot_sim_motor_backend.sock"
+# 控制通道的固定路径（见模块 docstring）。终端路径与 unit 路径共用它，靠
+# fdcan_motor_sim.py 的 flock 互斥，不靠路径区分。
+_CONTROL_SOCKET = "/tmp/robot_sim_motor_backend.sock"
+_CONFIG_ENV_PREFIX = "BENCH_MOTOR_"
 
 
 def query_motor_sim(socket_path: str, request: dict,
@@ -97,28 +97,14 @@ def hil_motor_backend_request(request) -> dict | None:
 
 
 class MotorSimProcessManager:
-    """Own at most one standalone FDCAN motor backend process and its log."""
+    """Own the `bench-motor-backend.service` unit and forward its control commands."""
 
     def __init__(self, can_provider=None, serial_provider=None,
-                 model_provider=None, popen_factory=None, stop_timeout_s=8,
-                 external_socket=_EXTERNAL_CONTROL_SOCKET):
-        # external_socket=None 关掉「接管 launch 内嵌模拟器」——测试必须显式关，
-        # 否则台架上真跑着 HIL 时 status() 会答 external，测试就随台架状态红绿。
-        self._external_socket = external_socket
+                 model_provider=None, systemd=None):
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
-        self._popen_factory = popen_factory or subprocess.Popen
-        self._stop_timeout_s = stop_timeout_s
-        self._lock = threading.RLock()
-        self._process = None
-        self._reader = None
-        self._generation = 0
-        self._config = None
-        self._state = "stopped"
-        self._returncode = None
-        self._auto_started = False
-        self._log = deque(maxlen=_LOG_LINES)
+        self._systemd = systemd or SystemdUnits()
 
     def _validate(self, request):
         if not isinstance(request, dict):
@@ -137,9 +123,8 @@ class MotorSimProcessManager:
         config = {
             "model": model,
             "transport": transport,
-            # 控制通道路径随 bench_manager 进程恒定；放进 config 让幂等比较单一表达
-            "motor_sim_control_socket":
-                f"/tmp/bench_motor_backend_{os.getpid()}.sock",
+            # 控制通道路径是常量；放进 config 让页面与幂等比较都从同一处取
+            "motor_sim_control_socket": _CONTROL_SOCKET,
         }
         if transport == "socketcan":
             available = {
@@ -165,191 +150,59 @@ class MotorSimProcessManager:
             config["sim_tty"] = path
         return config
 
-    def _status_locked(self):
-        if self._process is not None:
-            returncode = self._process.poll()
-            if returncode is not None:
-                self._returncode = returncode
-                if self._state != "stopping":
-                    self._state = "stopped" if returncode == 0 else "failed"
-                    self._process = None
-                    self._reader = None
-                    self._auto_started = False
-            elif self._state == "starting":
-                # This reports process liveness, not bus readiness.
-                self._state = "running"
-        elif self._external_alive():
-            # launch 内嵌的那份。命令可转发，起停不归本模块（进程主人是 launch）。
-            return {
-                "state": "external",
-                "config": {"motor_sim_control_socket": self._external_socket},
-                "returncode": self._returncode,
-                "auto_started": False,
-                "log": list(self._log),
-            }
+    def _status(self):
+        """状态与配置都从 unit 派生（见 simulation_manager._status 的同款理由）。"""
+        unit = self._systemd.probe(UNIT_MOTOR_BACKEND)
+        env = ({} if unit.state is UnitState.ABSENT
+               else self._systemd.environment(UNIT_MOTOR_BACKEND))
         return {
-            "state": self._state,
-            "config": dict(self._config) if self._config else None,
-            "returncode": self._returncode,
-            "auto_started": self._auto_started,
-            "log": list(self._log),
+            "state": STATE_NAMES[unit.state],
+            "config": config_from_env(_CONFIG_ENV_PREFIX, env),
+            "returncode": unit.returncode,
+            "auto_started": env.get(AUTO_STARTED_ENV) == "1",
         }
 
-    def _external_alive(self) -> bool:
-        """固定路径上是否活着一个**不是本模块启动的**模拟器。
-
-        真连一次而不是只看文件：异常退出的残留 socket 文件会一直在，存在性不作数。
-        """
-        if not self._external_socket or not os.path.exists(self._external_socket):
-            return False
-        try:
-            query_motor_sim(self._external_socket, {"cmd": "status"}, timeout_s=0.5)
-        except RuntimeError:
-            return False
-        return True
-
     def status(self):
-        with self._lock:
-            return self._status_locked()
+        return self._status()
 
     def motor_request(self, request: dict) -> dict:
-        """转发一条模拟器控制命令；两个来源都没有时抛 RuntimeError。"""
-        with self._lock:
-            self._status_locked()
-            path = None
-            if self._process is not None and self._config:
-                path = self._config.get("motor_sim_control_socket")
-            elif self._external_alive():
-                path = self._external_socket
-        if not path:
+        """转发一条模拟器控制命令；后端没在跑时抛 RuntimeError。"""
+        config = self._status()["config"]
+        if not config:
             raise RuntimeError("电机后端未运行，模拟器控制通道不可用")
-        return query_motor_sim(path, request)
-
-    def _read_output(self, process, generation):
-        stream = process.stdout
-        if stream is None:
-            return
-        try:
-            for line in stream:
-                with self._lock:
-                    if generation == self._generation:
-                        self._log.append(
-                            line.rstrip("\r\n")[-_LOG_LINE_CHARS:]
-                        )
-        finally:
-            stream.close()
+        return query_motor_sim(config["motor_sim_control_socket"], request)
 
     def start(self, request, auto=False):
         """启动或复用后端。auto 标记「随仿真拉起」，供停止联动判断。"""
         config = self._validate(request)
-        with self._lock:
-            status = self._status_locked()
-            if status.get("state") == "external":
-                raise RuntimeError(
-                    "固定路径上已有 launch 内嵌的模拟器在跑（终端启动的 HIL），"
-                    "不能再起一个——同一条总线上两个模拟器会互相打断。"
-                    "页面可直接对它增删电机；要换端点请先停那次仿真 launch。")
-            if self._process is not None:
-                if self._config == config:
-                    # 幂等复用；**不改** auto 归属（用户手动起的不能因停仿真被停）
-                    return status
-                raise RuntimeError(
-                    "motor backend is already running with a different "
-                    "configuration; stop it first")
+        status = self._status()
+        if status["state"] == "running":
+            if status["config"] == config:
+                # 幂等复用；**不改** auto 归属（用户手动起的不能因停仿真被停）
+                return status
+            raise RuntimeError(
+                "motor backend is already running with a different "
+                "configuration; stop it first")
 
-            control_socket = config["motor_sim_control_socket"]
-            command = [
-                "ros2", "launch", "robot_sim", "simulation.launch.py",
-                "simulator_only:=true",
-                "controller_mode:=firmware",
-                f"transport:={config['transport']}",
-                f"model:={config['model']}",
-                "start_web_host:=false",
-                "start_micro_ros_agent:=false",
-                f"sim_control_socket:={control_socket}",
-            ]
-            if config["transport"] == "socketcan":
-                command.append(f"sim_interface:={config['sim_interface']}")
-            else:
-                command.append(f"sim_tty:={config['sim_tty']}")
+        command = [
+            "ros2", "launch", "robot_sim", "simulation.launch.py",
+            "simulator_only:=true",
+            "controller_mode:=firmware",
+            f"transport:={config['transport']}",
+            f"model:={config['model']}",
+            "start_web_host:=false",
+            "start_micro_ros_agent:=false",
+            f"sim_control_socket:={config['motor_sim_control_socket']}",
+        ]
+        if config["transport"] == "socketcan":
+            command.append(f"sim_interface:={config['sim_interface']}")
+        else:
+            command.append(f"sim_tty:={config['sim_tty']}")
 
-            self._log.clear()
-            self._generation += 1
-            generation = self._generation
-            self._returncode = None
-            self._state = "starting"
-            self._config = config
-            self._auto_started = bool(auto)
-            try:
-                self._process = self._popen_factory(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    start_new_session=True,
-                )
-            except OSError:
-                self._state = "failed"
-                self._config = None
-                self._auto_started = False
-                raise
-            self._reader = threading.Thread(
-                target=self._read_output,
-                args=(self._process, generation),
-                name="motor-backend-output",
-                daemon=True,
-            )
-            self._reader.start()
-            return self._status_locked()
+        self._systemd.start(UNIT_MOTOR_BACKEND, command, auto=auto,
+                            session_env=config_env(_CONFIG_ENV_PREFIX, config))
+        return self._status()
 
     def stop(self):
-        with self._lock:
-            self._status_locked()
-            process = self._process
-            reader = self._reader
-            generation = self._generation
-            if process is None:
-                return self._status_locked()
-            self._state = "stopping"
-
-        try:
-            os.killpg(process.pid, signal.SIGINT)
-        except ProcessLookupError:
-            pass
-        try:
-            returncode = process.wait(timeout=self._stop_timeout_s)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                returncode = process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                returncode = process.wait()
-
-        if reader is not None:
-            reader.join(timeout=1)
-
-        with self._lock:
-            if self._process is process and self._generation == generation:
-                self._returncode = returncode
-                # A non-zero code is expected when ros2 launch receives SIGINT.
-                self._state = "stopped"
-                self._process = None
-                self._reader = None
-            self._auto_started = False
-            # 模拟器正常退出会自己删控制 socket；这里兜底清异常退出的残留
-            socket_path = (self._config or {}).get("motor_sim_control_socket")
-            if socket_path:
-                try:
-                    os.unlink(socket_path)
-                except OSError:
-                    pass
-            return self._status_locked()
+        self._systemd.stop(UNIT_MOTOR_BACKEND)
+        return self._status()

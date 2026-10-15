@@ -4,10 +4,14 @@
 命令调用。收成一个可注入的 runner，单测才能在不启真 systemd 的前提下覆盖认领、复用、失败态
 这些分支——CI 与容器里往往没有 user manager。
 
-三条实测事实决定了这里的形状（2026-10-16 在本机核过）：
+实测事实决定了这里的形状（2026-10-16 在本机 systemd 249 上核过）：
 
 * 不存在的 unit 与「干净停过」的 unit 在 `ActiveState` 上**无法区分**——两者都答
   `inactive/dead/ExecMainStatus=0`。必须一起看 `LoadState`（`not-found` vs `loaded`）。
+* **干净退出与失败退出的持久性不同**：退出码为 0 的 transient unit 当场被卸载
+  （`LoadState=not-found`，`Environment` 一并消失）；非零退出的**留得住**
+  （`LoadState=loaded` / `ActiveState=failed`，`ExecMainStatus` 与 `Environment` 都在）。
+  所以「报退出码」只对失败态有意义，而失败态恰好是页面唯一需要报退出码的情形。
 * `systemctl --user stop` 对不存在的 **service** 返回 exit 5「Unit not loaded.」，
   对不存在的 **slice** 返回 exit 0。两者都得当成功，否则 `deactivate` 卡在 deactivating。
 * transient **service** 跑在 "clean and detached execution environment" 里，**不继承调用者
@@ -52,6 +56,58 @@ class UnitState(Enum):
 class UnitStatus(NamedTuple):
     state: UnitState
     returncode: int | None = None
+
+
+# 页面与 srv 契约里的三个词。`absent`（从未创建）与 `stopped`（干净停过）同义：
+# 页面不必区分，而 `LoadState` 已经把区分做在了 UnitState 这一层。
+STATE_NAMES = {
+    UnitState.ABSENT: "stopped",
+    UnitState.STOPPED: "stopped",
+    UnitState.RUNNING: "running",
+    UnitState.FAILED: "failed",
+}
+
+
+def _encode(value: object) -> str:
+    return ("true" if value else "false") if isinstance(value, bool) else str(value)
+
+
+def config_env(prefix: str, config: Mapping[str, object]) -> dict[str, str]:
+    """会话描述（跑的是哪个模型、哪条总线、哪台设备）→ unit 的环境变量。
+
+    以前这些活在 manager 的内存里，`bench_manager` 一重启就丢，页面只能显示「在跑」
+    却说不清在跑什么。存进 unit 后它跟着会话走，重启也读得回来。
+
+    **值必须是无空白、无引号的单词**：`systemctl show -p Environment` 对含空格或 `"`
+    的值做 C 风格转义（实测 `{"a":"b c"}` 出来是 `"{\\"a\\":\\"b c\\"}"`），而读回是按
+    空白切词的，塞 JSON 会静默解析成半个对象。所以一个键一个变量，编码失败宁可当场报错。
+    """
+    env: dict[str, str] = {}
+    for key, value in config.items():
+        text = _encode(value)
+        if any(char.isspace() or char == '"' for char in text):
+            raise ValueError(
+                f"{key} 的值含空白或引号，systemd 会转义它、读回来会散架：{text!r}")
+        env[prefix + key.upper()] = text
+    return env
+
+
+def config_from_env(prefix: str, env: Mapping[str, str],
+                    types: Mapping[str, Callable[[str], object]] | None = None
+                    ) -> dict[str, object] | None:
+    """`config_env()` 的逆；环境里没有本前缀的键时返回 None（＝没在跑）。
+
+    `types` 给出需要还原类型的键（bool / float）；其余按字符串读回。类型信息只能由
+    调用方给——环境变量本身是无类型的。
+    """
+    decoders = types or {}
+    config: dict[str, object] = {}
+    for name, value in env.items():
+        if not name.startswith(prefix):
+            continue
+        key = name[len(prefix):].lower()
+        config[key] = decoders.get(key, str)(value)
+    return config or None
 
 
 def ros_environment(environ: Mapping[str, str]) -> dict[str, str]:

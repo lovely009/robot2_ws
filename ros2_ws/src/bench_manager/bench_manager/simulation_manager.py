@@ -1,4 +1,8 @@
-"""枚举 CAN 设备并监督一个统一的 robot_sim simulation.launch.py 进程。
+"""枚举 CAN 设备并监督 `bench-simulation.service`（robot_sim simulation.launch.py）。
+
+进程归属在 systemd（user transient unit），不在本模块：状态由 unit 状态派生、停止靠
+systemd 默认的 `KillMode=control-group`。本模块只剩两件事——**校验请求**与**把校验过的
+请求翻译成命令行**，那是 unit ExecStart 的唯一出处。
 
 本模块归 bench_manager（web 前端经 /bench/* 服务间接使用）；`backend` 选择被控对象
 （gazebo | mujoco），只影响传给 simulation.launch.py 的参数与「模型是否有 MJCF」这条
@@ -8,28 +12,35 @@
 这里——它们服务臂视图与前端静态域，归 web_host/models.py。
 """
 
-from collections import deque
 import json
 import math
 import os
 import re
-import signal
 import subprocess
-import threading
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
-import yaml
 
 from .agent_manager import enumerate_serial_ports
+from .systemd_units import (
+    STATE_NAMES, UNIT_SIMULATION, SystemdUnits, UnitState, config_env,
+    config_from_env,
+)
 
 
 _TRANSPORTS = {"vcan", "socketcan", "slcan"}
 _CONTROLLER_MODES = {"host", "external", "firmware"}
 _BACKENDS = {"gazebo", "mujoco"}
 _INTERFACE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,15}$")
-_LOG_LINES = 80
-_LOG_LINE_CHARS = 1000
+
+def _as_bool(text: str) -> bool:
+    return text == "true"
+
+
+# 会话描述在 unit 环境里的前缀；需要还原类型的键只有这三个——bool 由 config_env 统一
+# 编码成 true/false，`spawn_z` 是唯一的浮点。
+_CONFIG_ENV_PREFIX = "BENCH_SIM_"
+_CONFIG_DECODERS = {"spawn_z": float, "gravity": _as_bool, "fixed_base": _as_bool}
 
 
 def enumerate_can_interfaces():
@@ -153,23 +164,14 @@ class SimulationProcessManager:
 
     def __init__(self, can_provider=None, serial_provider=None,
                  model_provider=None, mujoco_model_provider=None,
-                 popen_factory=None, stop_timeout_s=12):
+                 systemd=None):
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
         self._mujoco_model_provider = (
             mujoco_model_provider or enumerate_mujoco_models
         )
-        self._popen_factory = popen_factory or subprocess.Popen
-        self._stop_timeout_s = stop_timeout_s
-        self._lock = threading.RLock()
-        self._process = None
-        self._reader = None
-        self._generation = 0
-        self._config = None
-        self._state = "stopped"
-        self._returncode = None
-        self._log = deque(maxlen=_LOG_LINES)
+        self._systemd = systemd or SystemdUnits()
 
     def options(self):
         serial_ports = []
@@ -304,123 +306,45 @@ class SimulationProcessManager:
             ])
         return config, launch_args
 
-    def _status_locked(self):
-        if self._process is not None:
-            returncode = self._process.poll()
-            if returncode is not None:
-                self._returncode = returncode
-                if self._state != "stopping":
-                    self._state = "stopped" if returncode == 0 else "failed"
-                    self._process = None
-                    self._reader = None
-            elif self._state == "starting":
-                # This reports process liveness, not Gazebo/controller readiness.
-                self._state = "running"
+    def _status(self):
+        """状态权威是 unit，不是内存里的进程句柄。
+
+        `config` 从 unit 环境读回：以前它活在本对象的字段里，`bench_manager` 一重启
+        就丢，页面只剩「在跑」两个字。`state` 由后端派生（页面不再自己拼四态）。
+        """
+        unit = self._systemd.probe(UNIT_SIMULATION)
+        env = ({} if unit.state is UnitState.ABSENT
+               else self._systemd.environment(UNIT_SIMULATION))
         return {
-            "state": self._state,
-            "config": dict(self._config) if self._config else None,
-            "returncode": self._returncode,
-            "log": list(self._log),
+            "state": STATE_NAMES[unit.state],
+            "config": config_from_env(_CONFIG_ENV_PREFIX, env, _CONFIG_DECODERS),
+            "returncode": unit.returncode,
         }
 
     def status(self):
-        with self._lock:
-            return self._status_locked()
-
-    def _read_output(self, process, generation):
-        stream = process.stdout
-        if stream is None:
-            return
-        try:
-            for line in stream:
-                with self._lock:
-                    if generation == self._generation:
-                        self._log.append(
-                            line.rstrip("\r\n")[-_LOG_LINE_CHARS:]
-                        )
-        finally:
-            stream.close()
+        return self._status()
 
     def start(self, request):
-        config, launch_args = self._validate_and_build(request)
-        with self._lock:
-            status = self._status_locked()
-            if self._process is not None:
-                if self._config == config:
-                    return status
-                raise RuntimeError("a simulation launch is already running")
+        """按当前请求起 `bench-simulation.service`；已在跑则原样认领，不重启。
 
-            command = [
-                "ros2", "launch", "robot_sim", "simulation.launch.py",
-                *launch_args,
-            ]
-            self._log.clear()
-            self._generation += 1
-            generation = self._generation
-            self._returncode = None
-            self._state = "starting"
-            self._config = config
-            try:
-                self._process = self._popen_factory(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    start_new_session=True,
-                )
-            except OSError:
-                self._state = "failed"
-                self._config = None
-                raise
-            self._reader = threading.Thread(
-                target=self._read_output,
-                args=(self._process, generation),
-                name="simulation-launch-output",
-                daemon=True,
-            )
-            self._reader.start()
-            return self._status_locked()
+        重启会打断正在跑的仿真，所以 RUNNING 且配置相同直接返回。配置不同则拒绝：
+        换后端/模型/端点不是「重启一下」，那是另一次会话，该先显式停掉。
+        """
+        config, launch_args = self._validate_and_build(request)
+        status = self._status()
+        if status["state"] == "running":
+            if status["config"] == config:
+                return status
+            raise RuntimeError(
+                "a simulation launch is already running with a different "
+                "configuration; stop it first")
+        self._systemd.start(
+            UNIT_SIMULATION,
+            ["ros2", "launch", "robot_sim", "simulation.launch.py",
+             *launch_args],
+            session_env=config_env(_CONFIG_ENV_PREFIX, config))
+        return self._status()
 
     def stop(self):
-        with self._lock:
-            self._status_locked()
-            process = self._process
-            reader = self._reader
-            generation = self._generation
-            if process is None:
-                return self._status_locked()
-            self._state = "stopping"
-
-        try:
-            os.killpg(process.pid, signal.SIGINT)
-        except ProcessLookupError:
-            pass
-        try:
-            returncode = process.wait(timeout=self._stop_timeout_s)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                returncode = process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                returncode = process.wait()
-
-        if reader is not None:
-            reader.join(timeout=1)
-
-        with self._lock:
-            if self._process is process and self._generation == generation:
-                self._returncode = returncode
-                # A non-zero code is expected when ros2 launch receives SIGINT.
-                self._state = "stopped"
-                self._process = None
-                self._reader = None
-            return self._status_locked()
+        self._systemd.stop(UNIT_SIMULATION)
+        return self._status()

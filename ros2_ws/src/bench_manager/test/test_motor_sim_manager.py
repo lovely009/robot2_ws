@@ -1,7 +1,8 @@
-"""`MotorSimProcessManager` 与联动规则的测试（电机后端：bench_manager 独立进程）。
+"""`MotorSimProcessManager` 与联动规则的测试（电机后端：`bench-motor-backend.service`）。
 
-同 test_simulation_manager：不产生真实子进程（fake popen 注入），不碰
-CAN 接口与串口；socket 通信用临时目录里的真实 Unix socket 端到端。
+同 test_simulation_manager：不产生真实进程、不启任何 unit（systemd 走
+`conftest.FakeSystemd`），不碰 CAN 接口与串口；socket 通信用临时目录里的真实
+Unix socket 端到端。
 """
 
 from __future__ import annotations
@@ -14,46 +15,42 @@ from typing import Any
 
 import pytest
 
+from conftest import FakeSystemd
+
 from bench_manager.motor_sim_manager import (
     MotorSimProcessManager,
     hil_motor_backend_request,
     query_motor_sim,
 )
+from bench_manager.systemd_units import (
+    AUTO_STARTED_ENV, UNIT_MOTOR_BACKEND, SystemdUnits,
+)
 
 
-class FakeProcess:
-    pid = 4321
+def _systemd() -> FakeSystemd:
+    return FakeSystemd({UNIT_MOTOR_BACKEND: {'LoadState': 'not-found'}})
 
-    def __init__(self) -> None:
-        self.returncode: int | None = None
-        self.stdout = None
 
-    def poll(self) -> int | None:
-        return self.returncode
+def _creations(systemd: FakeSystemd) -> list[list[str]]:
+    return [call for call in systemd.commands() if call[0] == 'systemd-run']
 
-    def wait(self, timeout: float | None = None) -> int:
-        self.returncode = -2  # SIGINT
-        return self.returncode
+
+def _exec_start(systemd: FakeSystemd) -> list[str]:
+    create = _creations(systemd)[0]
+    return create[create.index('ros2'):]
 
 
 def _manager(
-    spawned: list[tuple[list[str], dict[str, Any]]],
+    systemd: FakeSystemd,
     can: tuple[dict[str, Any], ...] = (),
     serial: tuple[dict[str, Any], ...] = (),
     models: tuple[str, ...] = ('half_body_robot',),
 ) -> MotorSimProcessManager:
-    def fake_popen(command: list[str], **kwargs: Any) -> FakeProcess:
-        spawned.append((command, kwargs))
-        return FakeProcess()
-
     return MotorSimProcessManager(
         can_provider=lambda: list(can),
         serial_provider=lambda: list(serial),
         model_provider=lambda: list(models),
-        popen_factory=fake_popen,
-        # 关掉「接管 launch 内嵌模拟器」：否则台架上真跑着 HIL 时固定路径上确实
-        # 活着一个模拟器，status() 会答 external，这些用例就随台架状态红绿。
-        external_socket=None,
+        systemd=SystemdUnits(runner=systemd),
     )
 
 
@@ -122,15 +119,13 @@ def test_hil_backend_request_carries_the_confirmation_verbatim() -> None:
 
 # --- MotorSimProcessManager：校验与启动命令 ---------------------------------
 
-def test_start_builds_simulator_only_launch(canable: str,
-                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65001)
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable))
+def test_start_builds_simulator_only_launch(canable: str) -> None:
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable))
 
     status = manager.start(_request(sim_tty=canable))
 
-    command, kwargs = spawned[0]
+    command = _exec_start(systemd)
     assert command[:3] == ['ros2', 'launch', 'robot_sim']
     assert 'simulation.launch.py' in command
     assert 'simulator_only:=true' in command
@@ -139,21 +134,21 @@ def test_start_builds_simulator_only_launch(canable: str,
     assert f'sim_tty:={canable}' in command
     assert 'start_web_host:=false' in command
     assert 'start_micro_ros_agent:=false' in command
-    assert 'sim_control_socket:=/tmp/bench_motor_backend_65001.sock' in command
-    assert kwargs['start_new_session'] is True
+    # 固定路径：unit 化之后不能再带 bench_manager 的 pid（重启就变）
+    assert 'sim_control_socket:=/tmp/robot_sim_motor_backend.sock' in command
     assert status['state'] == 'running'
     assert status['config']['sim_tty'] == canable
     assert status['auto_started'] is False
 
 
 def test_socketcan_backend_uses_interface(canable: str) -> None:
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, can=({'name': 'can0', 'up': True},))
+    systemd = _systemd()
+    manager = _manager(systemd, can=({'name': 'can0', 'up': True},))
 
     manager.start(_request(transport='socketcan', sim_interface='can0',
                            sim_tty=None))
 
-    command, _ = spawned[0]
+    command = _exec_start(systemd)
     assert 'sim_interface:=can0' in command
     assert not any(a.startswith('sim_tty:=') for a in command)
 
@@ -166,51 +161,49 @@ def test_socketcan_backend_uses_interface(canable: str) -> None:
 ])
 def test_validation_rejects_bad_requests(canable: str, overrides: Any,
                                          message: str) -> None:
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable))
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable))
     request = _request(sim_tty=canable)
     request.update(overrides)
 
     with pytest.raises(ValueError, match=message):
         manager.start(request)
 
-    assert spawned == []
+    assert _creations(systemd) == []
 
 
 def test_validation_rejects_down_socketcan_interface() -> None:
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, can=({'name': 'can0', 'up': False},))
+    systemd = _systemd()
+    manager = _manager(systemd, can=({'name': 'can0', 'up': False},))
 
     with pytest.raises(ValueError, match='down'):
         manager.start(_request(transport='socketcan', sim_interface='can0',
                                sim_tty=None))
 
-    assert spawned == []
+    assert _creations(systemd) == []
 
 
 def test_same_config_is_reused_and_conflict_rejected(
         canable: str, tmp_path: Path) -> None:
     other = tmp_path / 'other-tty'
     other.write_text('')
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable) + _serial(str(other)))
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable) + _serial(str(other)))
 
     first = manager.start(_request(sim_tty=canable))
     again = manager.start(_request(sim_tty=canable))
 
-    assert len(spawned) == 1
+    assert len(_creations(systemd)) == 1
     assert again == first
 
     with pytest.raises(RuntimeError, match='different configuration'):
         manager.start(_request(sim_tty=str(other)))
-    assert len(spawned) == 1
+    assert len(_creations(systemd)) == 1
 
 
-def test_auto_started_flag_is_not_stolen_on_reuse(
-        canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65002)
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable))
+def test_auto_started_flag_is_not_stolen_on_reuse(canable: str) -> None:
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable))
     request = _request(sim_tty=canable)
 
     # 用户手动起（auto=False）；仿真启动时以 auto=True 复用 → 归属仍属用户
@@ -218,28 +211,31 @@ def test_auto_started_flag_is_not_stolen_on_reuse(
     assert manager.start(request, auto=True)['auto_started'] is False
 
     # 反过来：随仿真起（auto=True）→ 状态里带标记，供停止联动判断
-    spawned2: list[tuple[list[str], dict[str, Any]]] = []
-    manager2 = _manager(spawned2, serial=_serial(canable))
+    systemd2 = _systemd()
+    manager2 = _manager(systemd2, serial=_serial(canable))
     assert manager2.start(request, auto=True)['auto_started'] is True
 
 
-def test_stop_removes_control_socket_file(
-        canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    # FakeProcess 的 pid 是假的；别让 stop 真的 killpg 到无关进程组
-    monkeypatch.setattr('bench_manager.motor_sim_manager.os.killpg',
-                        lambda *args, **kwargs: None)
-    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65003)
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable))
-    status = manager.start(_request(sim_tty=canable), auto=True)
-    path = Path(status['config']['motor_sim_control_socket'])
-    path.write_text('')  # 模拟器异常退出留下的死 socket 文件
-    try:
-        stopped = manager.stop()
-        assert not path.exists()
-        assert stopped['auto_started'] is False
-    finally:
-        path.unlink(missing_ok=True)
+def test_auto_started_survives_a_bench_manager_restart() -> None:
+    """归属标记存在 unit 里，不在内存里——重启后停仿真仍敢停它。"""
+    systemd = FakeSystemd({UNIT_MOTOR_BACKEND: {
+        'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running',
+        'Environment': f'{AUTO_STARTED_ENV}=1'}})
+
+    assert _manager(systemd).status()['auto_started'] is True
+
+
+def test_stop_stops_the_backend_unit(canable: str) -> None:
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable))
+    manager.start(_request(sim_tty=canable), auto=True)
+
+    status = manager.stop()
+
+    assert ['systemctl', '--user', 'stop', UNIT_MOTOR_BACKEND] in systemd.commands()
+    assert status['state'] == 'stopped'
+    assert status['auto_started'] is False
+    assert status['config'] is None
 
 
 # --- 控制通道转发（/api/motor-sim/status|command 的底座） -------------------
@@ -283,18 +279,21 @@ def _serve_control_once(
 
 
 def test_motor_request_requires_running_backend() -> None:
-    manager = _manager([])
+    manager = _manager(_systemd())
     with pytest.raises(RuntimeError, match='未运行'):
         manager.motor_request({'cmd': 'status'})
 
 
 def test_motor_request_forwards_through_manager(
-        canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65004)
-    spawned: list[tuple[list[str], dict[str, Any]]] = []
-    manager = _manager(spawned, serial=_serial(canable))
+        canable: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 控制通道路径是模块常量、指向 /tmp 上的固定名——台架上真跑着 HIL 时它会被人占着，
+    # 所以这里改指临时目录，测试不碰台架状态。
+    socket_path = str(tmp_path / 'motor-backend.sock')
+    monkeypatch.setattr(
+        'bench_manager.motor_sim_manager._CONTROL_SOCKET', socket_path)
+    systemd = _systemd()
+    manager = _manager(systemd, serial=_serial(canable))
     manager.start(_request(sim_tty=canable))
-    socket_path = '/tmp/bench_motor_backend_65004.sock'
     seen: list[dict[str, Any]] = []
     response = {'ok': True, 'motors': [{'id': 1, 'linked': True}]}
     server, thread = _serve_control_once(socket_path, response, seen)
@@ -303,7 +302,6 @@ def test_motor_request_forwards_through_manager(
     finally:
         thread.join(timeout=2)
         server.close()
-        Path(socket_path).unlink(missing_ok=True)
     assert seen == [{'cmd': 'status'}]
 
 

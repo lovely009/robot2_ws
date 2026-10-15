@@ -4,20 +4,15 @@ import glob
 import os
 import re
 
-from .systemd_units import AUTO_STARTED_ENV, UNIT_AGENT, SystemdUnits, UnitState
+from .systemd_units import (
+    AUTO_STARTED_ENV, STATE_NAMES, UNIT_AGENT, SystemdUnits, UnitState,
+)
 
 _SUPPORTED_TTY = re.compile(r'tty(?:ACM|USB)\d+$')
 
 # 会话描述随 unit 持久化：以前它活在 manager 的内存里，bench_manager 一重启就丢，
 # 页面只能显示「在跑」却说不清跑在哪台设备上。
 DEVICE_ENV = 'BENCH_DEVICE'
-
-_STATE_NAMES = {
-    UnitState.ABSENT: 'stopped',
-    UnitState.STOPPED: 'stopped',
-    UnitState.RUNNING: 'running',
-    UnitState.FAILED: 'failed',
-}
 
 
 def enumerate_serial_ports(dev_root='/dev'):
@@ -92,7 +87,7 @@ class AgentProcessManager:
         env = ({} if unit.state is UnitState.ABSENT
                else self._systemd.environment(UNIT_AGENT))
         return {
-            'state': _STATE_NAMES[unit.state],
+            'state': STATE_NAMES[unit.state],
             'device': env.get(DEVICE_ENV, ''),
             'returncode': unit.returncode,
             'auto_started': env.get(AUTO_STARTED_ENV) == '1',

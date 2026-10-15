@@ -1,13 +1,20 @@
 # 电机模拟器收敛为单一后端（C++ `motor_sim`）
 
-**Status**: proposed（待用户确认后转 accepted）
+**Status**: accepted（2026-10-15 用户裁定：先更正论据、再接受）
+
+> **论据更正（2026-10-15，代码复查）**：本 ADR 初稿称 Python 后端「1770 行、无单测」，与代码不符——
+> 实为 **1851 行**，且已有 **523 行 / 121 条 assert** 的 CTest 断言
+> （`micro_ros_firmware/test/host/test_fdcan_motor_sim.py`）。初稿行数与今日实测之差也说明：本 ADR
+> 写完之后 Python 侧仍在继续改动。据此改写了 Context 的代价 4 与 Decision §1 的移植代价——
+> **删 Python 的代价比初稿估计的高**：不是「没有测试可丢」，而是「契约测试寄居在另一个区域、
+> 且无法复用到 C++」。
 
 ## Context
 
 仓库里有**两个**都能"在 CAN FD 总线上扮 CERB/VAXOR 电机节点"的后端，按 `controller_mode`
 分叉使用，能力不重叠：
 
-| | C++ `motor_sim`（`ros2_ws/src/motor_sim/`） | Python `fdcan_motor_sim.py`（`micro_ros_agent/tools/`，1770 行，无单测） |
+| | C++ `motor_sim`（`ros2_ws/src/motor_sim/`） | Python `fdcan_motor_sim.py`（`micro_ros_agent/tools/`，1851 行） |
 |---|---|---|
 | 谁在用 | `controller_mode:=host/external`，`simulation.launch.py:968` 起 `motor_sim_node` | `controller_mode:=firmware`（HIL），`simulation.launch.py:874` 起该脚本；bench/web 的「电机后端」 |
 | 配置 | YAML（launch 生成 `motor_sim.yaml`，`simulation.launch.py:349-366`），`TopologyContract` 逐项校验 | 30 项 CLI，由 launch 逐项翻译（`simulation.launch.py:874-925`） |
@@ -20,8 +27,10 @@
 2. **HIL 只能单总线**：Python 侧单 `--tty/--interface`；`simulation.launch.py:651` 只好靠
    「ID 跨协议全局唯一」绕开。
 3. **一个字段改三处**：模型 YAML → launch 翻译 → 两实现各读一次。
-4. **HIL 的 CAN 侧逻辑无测试兜底**：Python 侧 `tools/` 无任何单测，而它承载的恰是台架上反复
-   踩坑的细节。
+4. **HIL 的 CAN 侧契约测试寄居在固件区域**：Python 模拟器的断言不在 `micro_ros_agent/tools/`，
+   而在 `micro_ros_firmware/test/host/test_fdcan_motor_sim.py`（523 行、121 条 assert，已注册为
+   CTest）。代价有二：① 改模拟器要去**另一个区域**的测试树改断言；② 断言是 Python import +
+   assert，**无法复用**到 C++ 后端，必须逐条重表达为 gtest。
 
 已核对的事实（2026-10-15，本工作区）：
 
@@ -46,6 +55,10 @@
   bit0 驱动芯片 / bit1 过压 / bit2 欠压 / bit3 过流 / bit4 编码器（`motor_drive/docs/motor-2530-series.md:147`）。
 - `docs/README.md` 规定**过程性产物（实施计划、任务台账、逐次运行报告）不进仓库**：本决定的实施
   计划留在评审对话里，本 ADR 是唯一入库宿主。
+- Python 后端的契约断言寄居在固件区域：`micro_ros_firmware/test/host/test_fdcan_motor_sim.py`
+  （523 行、121 条 assert，经 `test/host/CMakeLists.txt:239-240` 注册为 CTest），覆盖 SDO 中止码
+  分层、上电初值、温度字段偏移、逐型号 τ_ff 量化、反馈窗口墙钟兜底等——即本 ADR 初稿误记为
+  「无单测」的那部分。
 
 ## Decision
 
@@ -66,8 +79,9 @@
 - **性能余量**：HIL 负载已是 18 台 × 100 Hz 快照 + 20 ms 反馈（≈1800 + 450 帧/s），加上 200 Hz
   力矩更新；C++ 无线程与解释器开销的顾虑。
 - 代价必须写清：**台架现场改一行就要重新 `colcon build`**，Python 时代「改完直接跑」的迭代方式
-  消失；以及需要把 Python 里那些注释级经验（如「子索引 `:01/:02` 回 ABORT」「上电初值 = 真机
-  实测值」）逐条转成代码与测试，转漏了就是回归。
+  消失；以及要把 `micro_ros_firmware/test/host/test_fdcan_motor_sim.py` 里那 121 条断言（如
+  「子索引 `:01/:02` 回 ABORT」「上电初值 = 真机实测值」）逐条**重表达**为 gtest——它们已经是测试，
+  但宿主语言与位置都不对，转漏了就是回归。
 
 ### 2. 配置单源：一份 YAML，schema 由 `motor_sim` 定义与校验
 
@@ -95,6 +109,24 @@
 连带消失的三样东西：`/tmp/robot_sim_motor_backend.sock` 固定路径与死 socket 清理、launch 与
 bench_manager 两处必须一致的路径常量、「external vs owned」这套只在 socket 下才有意义的区分。
 JSON 解析用系统 jsoncpp（已装、有 CMake config；`package.xml` 的 rosdep key 在实现时确认）。
+
+### 3b. 电机后端自成一包：由 `motor_sim` 自己的 launch 承载，不再经 `robot_sim`
+
+`bench_manager` 现在为了起一个电机后端，拼的是
+`ros2 launch robot_sim simulation.launch.py simulator_only:=true controller_mode:=firmware …`
+（`motor_sim_manager.py:257-278`）——bench_manager 因此硬依赖 `robot_sim` 的 launch 接口与一串
+`controller_mode` / `transport` / `model` 参数。**判决（2026-10-15 用户裁定）**：电机后端归
+`motor_sim` 包自己，出一个自己的 launch（或直接 `ros2 run motor_sim motor_sim_node` 加参数文件），
+`bench_manager` 改为起它；web 仿真页「电机后端」的起停、日志与电机增删能力**不得退化**。
+
+**顺序约束（先决条件，不可颠倒）**：`bench_manager` 只有在 C++ 节点具备第 4 节那些 HIL 能力
+（至少 SDO 从站与传输健康）之后才能切过去，否则台架当场退化。因此本条的落地位置在第一步的
+**收尾**，与「firmware 分支改起同一节点」「删除 Python 后端」同一批。在此之前 `motor_sim`
+包可以先有自己的 launch，但 `bench_manager` 仍走旧路径。
+
+**跨区域注意**：Python 后端 `fdcan_motor_sim.py` 在 `micro_ros_agent/tools/`，属**另一个构建
+区域**，所以「`motor_sim` 自己的 launch」只有等 C++ 节点接管后才是干净的。把该脚本搬进
+`ros2_ws` 是反向做法，不做。
 
 ### 4. 内核补齐 HIL 必需能力（逐块落、逐块测）
 

@@ -84,7 +84,10 @@ def hil_motor_backend_request(request) -> dict | None:
     backend_request = {
         "model": request.get("model"),
         "transport": transport,
-        "physical_bus_isolated": True,
+        # 与仿真请求同源：确认位由页面传下来，这里不再自己写死 True。写死会让
+        # 未确认时后端先起、再被仿真那侧的校验拒掉后回滚——白起停一次进程，而
+        # 回滚只兜 OSError。传下来则后端就地拒绝，报的还是同一条原因。
+        "physical_bus_isolated": request.get("physical_bus_isolated") is True,
     }
     if transport == "socketcan":
         backend_request["sim_interface"] = request.get("sim_interface")

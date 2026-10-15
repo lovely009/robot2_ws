@@ -55,6 +55,9 @@ def _simulation_request(message):
         'transport': message.transport,
         'controller_mode': message.controller_mode,
         'model': message.model,
+        # 非 vcan 的放行条件，simulation_manager 里校验；页面自己拦一道不等于
+        # 服务端收到过，漏传会让物理总线上的仿真永远起不来。
+        'physical_bus_isolated': bool(message.physical_bus_isolated),
     }
     for key in ('vcan_interface', 'sim_interface', 'driver_interface',
                 'sim_tty', 'driver_tty'):

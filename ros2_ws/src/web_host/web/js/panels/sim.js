@@ -553,9 +553,12 @@ export function mount(root, ctx) {
       driver_interface: ui.driverInterface.value,
       sim_tty: ui.simTty.value,
       driver_tty: ui.driverTty.value,
+      // 必须进请求：bench_manager 拿它当非 vcan 的放行条件（见 simulation_manager
+      // 的校验）。页面自己拦一道只是快速反馈，不等于服务端收到过。
+      physical_bus_isolated: ui.busIsolated.checked,
     };
     // 模型参数只对 Gazebo 有意义（MuJoCo 侧由服务端显式拒绝，见 syncModelParams）；
-    // 空串 = 未给该参数（缺省不进命令行）。物理总线确认是本页面的安全校验，不进请求。
+    // 空串 = 未给该参数（缺省不进命令行）。
     if (request.backend === 'gazebo') {
       request.gravity = ui.gravity.checked ? 'true' : 'false';
       request.fixed_base = ui.fixedBase.checked ? 'true' : 'false';

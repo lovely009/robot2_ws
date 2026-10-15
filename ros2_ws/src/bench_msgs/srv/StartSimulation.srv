@@ -12,6 +12,7 @@ string driver_tty
 string spawn_z            # "" 或米制数值
 string gravity            # "" | "true" | "false"
 string fixed_base         # "" | "true" | "false"
+bool physical_bus_isolated # 确认物理总线仅连接仿真器与控制端；非 vcan 时必为 true
 ---
 bool ok
 string error

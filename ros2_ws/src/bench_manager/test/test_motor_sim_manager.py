@@ -92,16 +92,32 @@ def test_hil_backend_request_rules() -> None:
         {'controller_mode': 'firmware', 'transport': 'vcan'}) is None
     slcan = hil_motor_backend_request({
         'controller_mode': 'firmware', 'transport': 'slcan',
-        'sim_tty': 'x', 'model': 'm'})
+        'sim_tty': 'x', 'model': 'm', 'physical_bus_isolated': True})
     assert slcan == {
         'model': 'm', 'transport': 'slcan',
         'physical_bus_isolated': True, 'sim_tty': 'x'}
     socketcan = hil_motor_backend_request({
         'controller_mode': 'firmware', 'transport': 'socketcan',
-        'sim_interface': 'can0', 'model': 'm'})
+        'sim_interface': 'can0', 'model': 'm', 'physical_bus_isolated': True})
     assert socketcan == {
         'model': 'm', 'transport': 'socketcan',
         'physical_bus_isolated': True, 'sim_interface': 'can0'}
+
+
+def test_hil_backend_request_carries_the_confirmation_verbatim() -> None:
+    """确认位与仿真请求同源，本函数不再写死 True。
+
+    写死会让未确认时后端先起、再被仿真的校验拒掉后回滚——白起停一次进程，而回滚
+    只兜 OSError。透传则后端就地拒绝，报的还是同一条原因（见 motor_sim_manager
+    的 _validate）。
+    """
+    request = {'controller_mode': 'firmware', 'transport': 'socketcan',
+               'sim_interface': 'can0', 'model': 'm'}
+
+    assert hil_motor_backend_request(request)['physical_bus_isolated'] is False
+
+    request['physical_bus_isolated'] = True
+    assert hil_motor_backend_request(request)['physical_bus_isolated'] is True
 
 
 # --- MotorSimProcessManager：校验与启动命令 ---------------------------------

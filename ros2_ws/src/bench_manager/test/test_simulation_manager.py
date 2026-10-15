@@ -261,3 +261,50 @@ def test_firmware_start_defers_motor_backend_to_bench_manager() -> None:
     assert 'start_fdcan_sim:=false' in command
     assert not any(arg.startswith('sim_control_socket:=') for arg in command)
     assert status['config']['controller_mode'] == 'firmware'
+
+
+# --- 全链：服务消息 → _simulation_request → _validate -------------------------
+#
+# 2026-10-16：这两段之间的缝漏过一次真错。_validate 要求非 vcan 请求带
+# physical_bus_isolated，而 StartSimulation.srv 当时**没有**这个字段、
+# _simulation_request 也不搬它——于是物理总线上的仿真永远起不来（socketcan/slcan
+# 下 host / external / firmware 三种模式全被拒，只有 vcan 能起）。既有测试都直接
+# 构造 dict 并预先塞好这个键，所以一路全绿。下面两条从**真实服务消息**出发，
+# 把缝焊上：一条证明确认位能传到校验、一条证明不确认仍然被拒。
+
+
+def _start_simulation_message(**fields: Any):
+    from bench_msgs.srv import StartSimulation
+
+    message = StartSimulation.Request()
+    for key, value in fields.items():
+        setattr(message, key, value)
+    return message
+
+
+def test_service_message_clears_validation_on_a_physical_bus() -> None:
+    from bench_manager.node import _simulation_request
+
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _firmware_manager(spawned)
+
+    manager.start(_simulation_request(_start_simulation_message(
+        backend='gazebo', transport='socketcan', controller_mode='firmware',
+        model='half_body_robot', sim_interface='can0',
+        physical_bus_isolated=True)))
+
+    assert spawned, '确认位传到了却仍被拒——物理总线上的仿真起不来'
+
+
+def test_service_message_without_confirmation_is_rejected() -> None:
+    from bench_manager.node import _simulation_request
+
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _firmware_manager(spawned)
+
+    with pytest.raises(ValueError, match='no real motor load'):
+        manager.start(_simulation_request(_start_simulation_message(
+            backend='gazebo', transport='socketcan', controller_mode='firmware',
+            model='half_body_robot', sim_interface='can0')))
+
+    assert not spawned, '被拒了却起了进程'

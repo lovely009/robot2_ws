@@ -48,3 +48,55 @@ TEST(SystemConfig, DefaultsMitTorqueLimitForConfigsWithoutTheField) {
   ASSERT_EQ(legacy.motors.size(), 1U);
   EXPECT_DOUBLE_EQ(legacy.motors[0].mit_torque_limit_nm, 11.0);
 }
+
+TEST(SystemConfig, ReadsBusTransportEndpointAndSerialFields) {
+  const auto config = core::load_system_config(fixture_path("bus_transport.yaml"));
+  ASSERT_EQ(config.buses.size(), 1U);
+  EXPECT_EQ(config.buses[0].name, "arm");
+  EXPECT_TRUE(config.buses[0].transport == core::BusTransport::SerialSlcan);
+  EXPECT_EQ(config.buses[0].endpoint, "/dev/ttyACM1");
+  EXPECT_EQ(config.buses[0].baud_rate, 3000000);
+  EXPECT_EQ(config.buses[0].data_bitrate_index, 5);
+  EXPECT_TRUE(config.buses[0].probe_adapter);
+  EXPECT_TRUE(config.buses[0].allow_external_canfd);
+}
+
+// socket_can 收接口名，串口字段一律缺省；缺省值必须让既有夹具行为不变。
+TEST(SystemConfig, DefaultsSocketCanBusWithoutSerialFields) {
+  const auto config = core::load_system_config(fixture_path("cerb_axis.yaml"));
+  ASSERT_EQ(config.buses.size(), 1U);
+  EXPECT_TRUE(config.buses[0].transport == core::BusTransport::SocketCan);
+  EXPECT_EQ(config.buses[0].endpoint, "robot_vcan0");
+  EXPECT_EQ(config.buses[0].data_bitrate_index, -1);
+  EXPECT_FALSE(config.buses[0].probe_adapter);
+}
+
+// 旧的 buses: [arm] 形状必须明确报错，不能静默当成空总线——否则节点会带着
+// 零条总线起来，诊断里只说"没有总线"，与真因（配置形状不对）隔了一层。
+TEST(SystemConfig, RejectsLegacyBusNameSequence) {
+  EXPECT_THROW(core::load_system_config(fixture_path("legacy_bus_sequence.yaml")),
+               std::runtime_error);
+}
+
+// socket_can 的 endpoint 是接口名；写设备路径必须被拒，否则下游会拿
+// "/dev/..." 去 if_nametoindex，报出的却是"接口不存在"这种与真因无关的错。
+TEST(SystemConfig, RejectsSocketCanEndpointWithSlash) {
+  EXPECT_THROW(
+      core::load_system_config(fixture_path("socket_can_path_endpoint.yaml")),
+      std::runtime_error);
+}
+
+TEST(SystemConfig, RejectsOutOfRangeDataBitrateIndex) {
+  EXPECT_THROW(core::load_system_config(fixture_path("bad_bitrate_index.yaml")),
+               std::runtime_error);
+}
+
+// --no-brs 是取证用的对照开关：默认开 BRS（与固件冻结位时序一致），
+// 关掉用于取"数据相位不切换"的对照样本。
+TEST(SystemConfig, DefaultsBrsOnAndReadsOverride) {
+  const auto with_brs =
+      core::load_system_config(fixture_path("bus_transport.yaml"));
+  EXPECT_TRUE(with_brs.buses[0].brs);
+  const auto without = core::load_system_config(fixture_path("brs_off.yaml"));
+  EXPECT_FALSE(without.buses[0].brs);
+}

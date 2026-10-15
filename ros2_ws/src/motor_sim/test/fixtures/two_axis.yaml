@@ -4,7 +4,8 @@ motor_simulation:
     vaxor_feedback_hz: 50
     command_timeout_ms: 150
   command_margin_deg: 5.0
-  buses: [arm]
+  buses:
+    - {name: arm, transport: socket_can, endpoint: robot_vcan0}
   profiles:
     vaxor_axis:
       hard_lower_deg: -90

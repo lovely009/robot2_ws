@@ -4,8 +4,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <climits>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -76,6 +78,41 @@ std::string required_string(const YAML::Node &parent, const char *key,
 
 double radians(const double degrees) {
   return degrees * protocol::kPi / 180.0;
+}
+
+bool optional_bool(const YAML::Node &parent, const char *key, const bool fallback,
+                   const std::string &context) {
+  if (!parent[key]) {
+    return fallback;
+  }
+  return required_node(parent, key, context).as<bool>();
+}
+
+int optional_int(const YAML::Node &parent, const char *key, const int fallback,
+                 const std::string &context) {
+  if (!parent[key]) {
+    return fallback;
+  }
+  const auto raw = required_node(parent, key, context).as<int64_t>();
+  if (raw < INT32_MIN || raw > INT32_MAX) {
+    throw std::runtime_error(context + " '" + key + "' is out of range");
+  }
+  return static_cast<int>(raw);
+}
+
+BusTransport parse_bus_transport(const YAML::Node &node,
+                                 const std::string &context) {
+  const auto value = required_string(node, "transport", context);
+  if (value == "usb_serial") {
+    return BusTransport::UsbSerial;
+  }
+  if (value == "serial_slcan") {
+    return BusTransport::SerialSlcan;
+  }
+  if (value == "socket_can") {
+    return BusTransport::SocketCan;
+  }
+  throw std::runtime_error(context + " has unknown transport '" + value + "'");
 }
 
 MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
@@ -158,13 +195,53 @@ SystemConfig parse_config_common(const YAML::Node &root,
   if (!buses.IsSequence()) {
     throw std::runtime_error("buses must be a sequence");
   }
+  // 串口可选位率的白名单：从 ROS 层搬来（原 validate_port_mapping_common），
+  // 因为它是配置取值域，而不是运行期环境事实。
+  const std::set<int> kSupportedBaudRates{115200, 460800,  921600,
+                                          1000000, 2000000, 3000000};
   std::unordered_set<std::string> bus_names;
-  for (const auto &node : buses) {
-    const auto name = node.as<std::string>();
-    if (name.empty() || !bus_names.insert(name).second) {
+  std::unordered_set<std::string> bus_endpoints;
+  for (std::size_t index = 0U; index < buses.size(); ++index) {
+    const std::string context = "bus[" + std::to_string(index) + "]";
+    const auto node = buses[index];
+    if (!node.IsMap()) {
+      throw std::runtime_error(context +
+                               " must be a map with name/transport/endpoint");
+    }
+    BusConfig bus;
+    bus.name = required_string(node, "name", context);
+    bus.transport = parse_bus_transport(node, context);
+    bus.endpoint = required_string(node, "endpoint", context);
+    bus.baud_rate = optional_int(node, "baud_rate", 3000000, context);
+    bus.data_bitrate_index =
+        optional_int(node, "data_bitrate_index", -1, context);
+    bus.brs = optional_bool(node, "brs", true, context);
+    bus.probe_adapter = optional_bool(node, "probe_adapter", false, context);
+    bus.allow_external_canfd =
+        optional_bool(node, "allow_external_canfd", false, context);
+    if (bus.transport == BusTransport::SocketCan) {
+      // 接口名不是设备路径；带 '/' 会让下游拿路径去 if_nametoindex，
+      // 报出的却是"接口不存在"这种与真因无关的错。
+      if (bus.endpoint.find('/') != std::string::npos) {
+        throw std::runtime_error(
+            context + " socket_can endpoint must be an interface name");
+      }
+    } else if (kSupportedBaudRates.find(bus.baud_rate) ==
+               kSupportedBaudRates.end()) {
+      throw std::runtime_error(context + " has unsupported baud_rate");
+    }
+    if (bus.transport == BusTransport::SerialSlcan &&
+        !(bus.data_bitrate_index == -1 ||
+          (bus.data_bitrate_index >= 0 && bus.data_bitrate_index <= 9))) {
+      throw std::runtime_error(context + " data_bitrate_index must be -1..9");
+    }
+    if (!bus_names.insert(bus.name).second) {
       throw std::runtime_error("bus names must be nonempty and unique");
     }
-    config.buses.push_back({name});
+    if (!bus_endpoints.insert(bus.endpoint).second) {
+      throw std::runtime_error("bus endpoints must be unique");
+    }
+    config.buses.push_back(std::move(bus));
   }
   if (contract != nullptr) {
     std::vector<std::string> parsed_buses;

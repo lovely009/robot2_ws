@@ -13,8 +13,21 @@ struct TimingConfig {
   unsigned command_timeout_ms{150U};
 };
 
+// 总线传输类型。core 层不依赖 motor_transport（CMakeLists.txt:34-46 只链
+// motor_protocol 与 yaml-cpp），故此处自定义枚举，由 ROS 层映射到
+// transport::TransportMode（见 motor_sim_node.cpp 的 bus_transport_mode）。
+enum class BusTransport { UsbSerial, SerialSlcan, SocketCan };
+
 struct BusConfig {
   std::string name;
+  BusTransport transport{BusTransport::UsbSerial};
+  // socket_can 时为接口名（如 robot_vcan0），其余为设备路径。
+  std::string endpoint;
+  int baud_rate{3000000};            // 仅串口；socket_can 忽略
+  int data_bitrate_index{-1};        // 仅 serial_slcan；-1 = 自动 V 探测
+  bool probe_adapter{false};         // 仅 serial_slcan；E 取证
+  bool allow_external_canfd{false};  // 仅 serial_slcan
+  bool brs{true};                    // CAN FD 位率切换；false = 取证对照
 };
 
 struct TransmissionConfig {

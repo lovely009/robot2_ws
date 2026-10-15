@@ -58,6 +58,30 @@ double optional_finite_double(const YAML::Node &parent, const char *key,
   return value;
 }
 
+// positive_unsigned 要求 > 0，而节拍类字段的 0 有语义（"跟随旧行为"），故另写。
+unsigned optional_unsigned(const YAML::Node &parent, const char *key,
+                           const unsigned fallback,
+                           const std::string &context) {
+  if (!parent[key]) {
+    return fallback;
+  }
+  const auto raw = required_node(parent, key, context).as<int64_t>();
+  if (raw < 0 || raw > static_cast<int64_t>(UINT32_MAX)) {
+    throw std::runtime_error(context + " '" + key + "' cannot be negative");
+  }
+  return static_cast<unsigned>(raw);
+}
+
+double optional_nonnegative_double(const YAML::Node &parent, const char *key,
+                                   const double fallback,
+                                   const std::string &context) {
+  const double value = optional_finite_double(parent, key, fallback, context);
+  if (value < 0.0) {
+    throw std::runtime_error(context + " '" + key + "' cannot be negative");
+  }
+  return value;
+}
+
 unsigned positive_unsigned(const YAML::Node &parent, const char *key,
                            const std::string &context) {
   const auto raw = required_node(parent, key, context).as<int64_t>();
@@ -190,6 +214,14 @@ SystemConfig parse_config_common(const YAML::Node &root,
       positive_unsigned(timing, "vaxor_feedback_hz", "timing");
   config.timing.command_timeout_ms =
       positive_unsigned(timing, "command_timeout_ms", "timing");
+  config.timing.feedback_period_ms =
+      optional_unsigned(timing, "feedback_period_ms", 0U, "timing");
+  config.timing.stagger_ms =
+      optional_nonnegative_double(timing, "stagger_ms", 0.0, "timing");
+  config.timing.effort_rate_hz =
+      optional_nonnegative_double(timing, "effort_rate_hz", 0.0, "timing");
+  config.timing.can_period_ms =
+      optional_unsigned(timing, "can_period_ms", 0U, "timing");
 
   const auto buses = required_node(simulation, "buses", "motor_simulation");
   if (!buses.IsSequence()) {

@@ -4,6 +4,10 @@ motor_simulation:
     control_hz: 100
     vaxor_feedback_hz: 50
     command_timeout_ms: 150
+    feedback_period_ms: 20
+    stagger_ms: 2.2
+    effort_rate_hz: 200.0
+    can_period_ms: 20
   buses:
     - name: arm
       transport: serial_slcan

@@ -11,6 +11,15 @@ struct TimingConfig {
   unsigned control_hz{100U};
   unsigned vaxor_feedback_hz{50U};
   unsigned command_timeout_ms{150U};
+  // 逐台反馈周期（ms）。0 = 沿用 vaxor_feedback_hz 抽帧（旧行为）。
+  unsigned feedback_period_ms{0U};
+  // 逐台相位错开（ms）。0 = 不错开。
+  double stagger_ms{0.0};
+  // 假电机 MIT 律更新率（Hz）。0 = 跟随 control_hz。
+  double effort_rate_hz{0.0};
+  // CAN 主循环周期（ms）。0 = 跟随 control_hz。与 control_hz 不同义：
+  // control_hz 驱动控制节拍，本字段驱动总线收发节拍。
+  unsigned can_period_ms{0U};
 };
 
 // 总线传输类型。core 层不依赖 motor_transport（CMakeLists.txt:34-46 只链

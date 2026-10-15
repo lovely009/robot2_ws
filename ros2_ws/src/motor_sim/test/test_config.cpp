@@ -108,3 +108,25 @@ TEST(SystemConfig, RejectsSerialSlcanWithoutExplicitOptIn) {
   EXPECT_THROW(core::load_system_config(fixture_path("slcan_without_optin.yaml")),
                std::runtime_error);
 }
+
+TEST(SystemConfig, ReadsFeedbackSchedulingFields) {
+  const auto config = core::load_system_config(fixture_path("bus_transport.yaml"));
+  EXPECT_EQ(config.timing.feedback_period_ms, 20U);
+  EXPECT_DOUBLE_EQ(config.timing.stagger_ms, 2.2);
+  EXPECT_DOUBLE_EQ(config.timing.effort_rate_hz, 200.0);
+  EXPECT_EQ(config.timing.can_period_ms, 20U);
+}
+
+// 新字段的缺省必须等于旧行为，否则既有台架配置一加载就换了节拍。
+TEST(SystemConfig, DefaultsSchedulingFieldsToLegacyBehaviour) {
+  const auto config = core::load_system_config(fixture_path("cerb_axis.yaml"));
+  EXPECT_EQ(config.timing.feedback_period_ms, 0U);
+  EXPECT_DOUBLE_EQ(config.timing.stagger_ms, 0.0);
+  EXPECT_DOUBLE_EQ(config.timing.effort_rate_hz, 0.0);
+  EXPECT_EQ(config.timing.can_period_ms, 0U);
+}
+
+TEST(SystemConfig, RejectsNegativeStagger) {
+  EXPECT_THROW(core::load_system_config(fixture_path("bad_stagger.yaml")),
+               std::runtime_error);
+}

@@ -19,8 +19,8 @@ PKG = Path(__file__).resolve().parent.parent
 WEB = PKG / 'web'
 INDEX = WEB / 'index.html'
 
-# 不属任何屏的面板：wing 由外壳挂载，notes 由说明浮层挂载
-SHELL_ONLY_PANELS = {'wing', 'notes'}
+# 不属任何屏的面板：notes 由说明浮层挂载
+SHELL_ONLY_PANELS = {'notes'}
 
 
 class IndexParser(HTMLParser):
@@ -145,7 +145,7 @@ def test_panel_templates_have_modules(index):
     assert not missing, f'缺少面板模块 js/panels/*.js：{missing}'
 
 
-# 7. 每个面板模块都被某屏引用（wing/notes 由外壳挂载，豁免）
+# 7. 每个面板模块都被某屏引用（notes 由外壳挂载，豁免）
 def test_panel_modules_are_referenced(index):
     used = set(index.panel_slots) | SHELL_ONLY_PANELS
     unused = sorted(f.stem for f in (WEB / 'js' / 'panels').glob('*.js')
@@ -275,8 +275,8 @@ def test_builtin_joint_map_covers_default_model():
     assert mapped, 'JOINT_OF_MOTOR 兜底表解析为空'
 
     # 默认模型名从同一个文件取，避免两处各写一份而漂移
-    mm = re.search(r"URLQ\.get\('model'\)\s*\|\|\s*'([^']+)'", store_src)
-    assert mm, 'store.js 里找不到默认模型名'
+    mm = re.search(r"const DEFAULT_MODEL = '([^']+)'", store_src)
+    assert mm, 'store.js 里找不到默认模型名 DEFAULT_MODEL'
     model_name = mm.group(1)
 
     driver = (PKG.parent / 'robot_sim' / 'models' / model_name /

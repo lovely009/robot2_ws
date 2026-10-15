@@ -3,7 +3,7 @@
 //   state → store；写入 store 后 markDirty；撤掉全部 renderXxx() 调用
 //   （渲染是面板的职责，本层不再认识任何 DOM）；setConn 改写为写 store +
 //   切 body.offline（断连禁用写操作的样式钩子）。
-import { store, markDirty, DIRTY, chartPush } from './store.js';
+import { store, markDirty, DIRTY, chartPush, applyBenchStatus } from './store.js';
 import { $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler } from './format.js';
 
 let ros = null;
@@ -82,12 +82,15 @@ export function connect() {
     // 掉线即清场：陈旧的表比空表更容易误导（曾把"页面掉线"看成"固件没数据"）。
     store.motors.clear();
     store.paramCache.clear();
+    store.tf.clear();
     // 序号是固件侧单调递增的，重连后第一帧就比掉线前的基线大——不清 seen 的话
     // 一个还在飞的轮询会拿旧基线立刻"成功"。次帧到达前拒绝轮询。
     store.sysStatus.seen = false;
     // 自动读取只在本连接内做一次；复位后重连会重新触发（设备参数以新会话为准）。
     store.conn.autoLoaded = false;
-    markDirty(DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.PARAMS, DIRTY.ALERTS);
+    // 台架枚举（串口下拉等）同样按连接复位，重连后重取一次。
+    store.conn.benchLoaded = false;
+    markDirty(DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.PARAMS, DIRTY.TF);
     // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
     // 表现为页面一直连不上、看着"卡"）。
     if (!reconnectTimer) {
@@ -131,7 +134,7 @@ function subscribeAll() {
     for (const id of [...store.motors.keys()]) {
       if (!seen.has(id)) store.motors.delete(id);
     }
-    markDirty(DIRTY.TOPOLOGY, DIRTY.ALERTS);
+    markDirty(DIRTY.TOPOLOGY);
   });
 
   sub('motion', (m) => {
@@ -157,7 +160,7 @@ function subscribeAll() {
       store.motors.set(s.motor_id, row);
       chartPush(s.motor_id, 'current', s.current, t);
     }
-    markDirty(DIRTY.STATUS, DIRTY.ALERTS);
+    markDirty(DIRTY.STATUS);
   });
 
   // 轨迹执行状态（低频）：动作屏的窗口交棒（elapsed_ms 到达窗口时长）与
@@ -192,8 +195,28 @@ function subscribeAll() {
         mask: m.request_id || 0,
       });
     }
-    markDirty(DIRTY.EVENTS, DIRTY.PARAMS, DIRTY.ALERTS);
+    markDirty(DIRTY.EVENTS, DIRTY.PARAMS);
   });
+
+  // TF（关节侧）：child frame → 帧对与变换；关节列表据此配对模型 URDF 的关节。
+  // /tf_static 只在启动时发一次，收到即留在表里，不按新鲜度判它陈旧。
+  const ingestTf = (m, dynamic) => {
+    for (const tr of (m.transforms || [])) {
+      if (!tr.child_frame_id || !tr.transform) continue;
+      const prev = store.tf.get(tr.child_frame_id);
+      store.tf.set(tr.child_frame_id, {
+        parent: tr.header ? tr.header.frame_id : '',
+        xyz: tr.transform.translation,
+        quat: tr.transform.rotation,
+        dynamic,
+        at: Date.now(),
+        count: (prev ? prev.count : 0) + 1,
+      });
+    }
+    markDirty(DIRTY.TF);
+  };
+  sub('tf', (m) => ingestTf(m, true));
+  sub('tfStatic', (m) => ingestTf(m, false));
 
   sub('imu', (m) => {
     const q = m.orientation;
@@ -262,7 +285,42 @@ function subscribeAll() {
       clear_fault_seq: m.clear_fault_seq, save_seq: m.save_seq,
       save_in_progress: !!m.save_in_progress, seen: true,
     };
-    markDirty(DIRTY.ALERTS);
+  });
+
+  // 台架状态（bench_manager，JSON 字符串）：仿真 / Agent / 电机后端三段的唯一
+  // 数据入口（命令的服务响应也经 applyBenchStatus 写同一份）。
+  sub('bench', (m) => {
+    try { applyBenchStatus(JSON.parse(m.data)); }
+    catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
+  });
+}
+
+// 调 ROS 服务（bench_manager 的 /bench/*）。服务不存在/节点未起时，roslibjs 的
+// 失败回调行为不统一，所以恒有超时兜底；resolve 出来的是响应对象（是否成功看
+// 调用方——bench 服务的 ok/error 字段由 core/bench.js 统一裁决）。
+export function callService(name, type, request, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!ros || !store.conn.connected) {
+      reject(new Error('未连接 rosbridge'));
+      return;
+    }
+    const service = new ROSLIB.Service({ros, name, serviceType: type});
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error(`服务无响应：${name}`)); }
+    }, timeoutMs);
+    service.callService(new ROSLIB.Message(request || {}), (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    }, (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(typeof error === 'string'
+        ? error : `服务调用失败：${name}`));
+    });
   });
 }
 

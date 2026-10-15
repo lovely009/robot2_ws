@@ -1,0 +1,5 @@
+# 停止仿真 launch；随仿真自动拉起的电机后端联动停止（手动起的保持）。
+---
+bool ok
+string error
+string status_json

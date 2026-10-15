@@ -1,4 +1,4 @@
-# ros2_ws —— ROS 2 Humble 七包工作区
+# ros2_ws —— ROS 2 Humble 九包工作区
 
 真机、仿真、消息定义与 Web 上位机并存。构建与测试、真机/仿真 bring-up、配置与扩展
 入口都在这里；各包细节见 `src/<pkg>/README.md`。架构取舍见 [../docs/adr/](../docs/adr/)。
@@ -11,7 +11,9 @@
 | `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
 | `robot_sim` | 机械臂模型库（`models/<模型名>/`）+ 两个可互换被控对象后端（Gazebo / MuJoCo）与端到端组合入口 |
 | `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖，无节点/话题） |
-| `web_host` | rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、轨迹、仿真启动器） |
+| `web_host` | rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、轨迹）＋静态文件与模型域 API（模型枚举 / 关节映射 / 动作库） |
+| `bench_msgs` | 台架主机侧控制服务定义（`/bench/*`：仿真 / Agent / 电机后端） |
+| `bench_manager` | 台架进程管理节点：`/bench/*` 服务 + `/bench/status` 话题；web 的仿真屏与顶栏 Agent 控件走它 |
 
 ## 分层与命名边界
 

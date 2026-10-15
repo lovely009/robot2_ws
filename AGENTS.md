@@ -6,7 +6,7 @@
 
 | 区域 | 内容 | 权威文档 |
 |---|---|---|
-| `ros2_ws/` | ROS 2 Humble 七包：消息、真机、仿真、动力学与 Web 上位机 | [ros2_ws/README.md](ros2_ws/README.md) + 各包 `README.md` + [docs/adr/](docs/adr/) |
+| `ros2_ws/` | ROS 2 Humble 九包：消息、真机、仿真、动力学、台架管理与 Web 上位机 | [ros2_ws/README.md](ros2_ws/README.md) + 各包 `README.md` + [docs/adr/](docs/adr/) |
 | `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件（PlatformIO + STM32duino + FreeRTOS） | [README.md](micro_ros_firmware/README.md)（工程事实/开放项）、[AGENTS.md](micro_ros_firmware/AGENTS.md)（构建/烧录/台架顺序与坑）、[decision-log](micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md)（设计理由）、[lib/README.md](micro_ros_firmware/lib/README.md)（库分层与契约） |
 | `micro_ros_agent/` | micro-ROS Agent 独立 colcon 工作区与主机侧台架工具 | [README.md](micro_ros_agent/README.md) |
 

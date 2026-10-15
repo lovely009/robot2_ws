@@ -2,12 +2,17 @@
 
 SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z ∈ `0.0000 .. 0.7029`）
 分出两条 9 轴链 —— 第一链 `Joint_link1..9`（x ≈ +0.06 侧）与第二链 `Joint_link1.1..9.9`
-（x ≈ −0.05 侧）。机械几何、关节原点/轴、质量与惯量与 `cad/` 里的 SolidWorks 导出件**逐字相同**，
-差别只在「仿真侧参数」「控制接口」与「电机映射」（另加 `cad/` 未带、由脚本派生的
-`<dynamics>`、简化碰撞体、MJCF、standalone 与 `dist/`）：
+（x ≈ −0.05 侧）。机械几何、关节原点/轴、质量与惯量与 `cad/` 里的 SolidWorks 导出件相同
+（导出件按 5 位有效数字书写），差别只在「仿真侧参数」「控制接口」与「电机映射」（另加 `cad/`
+未带、由脚本派生的 `<dynamics>`、简化碰撞体、MJCF、standalone 与 `dist/`）：
+
+> **2026-10-15 重导出**：CAD 首次填了 `<limit effort>`/`<limit velocity>`（此前是 0/0，模型里
+> 只能用占位 10 N·m / 1 rad·s⁻¹），本模型据此换成型号库额定值，见「关节限位与 effort/velocity」节。
+> 关节限位 `lower`/`upper`、质量、惯量、18 个关节的拓扑与网格（除 `Joint_link2.2` 外逐一 md5 相同）
+> **全部未变**；`Joint_link2.2` 只换了坐标系的写法（转轴直线与零件位姿不变，见同节）。
 
 > **本模型 2026-10-13 由 `full_body` 更名而来**（同时删除旧目录）：CAD 重新导出后
-> **10 个关节的 `lower`/`upper` 收窄**（见「关节限位」节），网格是同一份几何重新导出
+> **10 个关节的 `lower`/`upper` 收窄**（见「关节限位与 effort/velocity」节），网格是同一份几何重新导出
 > （顶点集合量化到 1 µm 完全一致、三角面数逐个相同，仅面序与法线编码不同），
 > 因此碰撞凸包与简化网格沿用上一版即可（`--check` 复核通过）。
 > 旧 `full_body` 不应再被任何 launch / 文档引用。
@@ -22,21 +27,23 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 | 2 | 状态接口 | position / velocity | position / velocity / **effort** | 历史件的 `/joint_states` 里 effort 恒为 NaN，仿真里看不到关节力矩 |
 | 3 | 关节动力学 | 无 `<dynamics>` | 18 个关节都有 `damping` / `friction` | 无阻尼时除控制器 kd 外没有任何耗散，撞限位后持续振荡 |
 | 4 | 碰撞体 | 复用全分辨率可视网格（全模型 ≈146 万三角面，`base_link` 一个就 50 万） | 3 个 `<box>`（躯干每边内缩 10 mm）+ 14 个凸包（顶点内缩 3 mm，每个 384–554 面）+ 腕端 `Joint_link9/.9` 不参与 | 接触检测开销；配合自碰撞后还必须留出接触余量，见「碰撞体为什么这么配」 |
-| 5 | 自碰撞 | SDF 默认 `false`（两臂可互相穿透） | `<self_collide>true</self_collide>`（必须用 SDF 名：gazebo-classic 的 `<selfCollide>` 会被 sdformat 静默丢弃） | 双臂模型做轨迹验收必须能真的碰到。实测两条链都能被力矩驱动（`joint_link2.2` 施加 −2 N·m：+0.97 → −1.53 rad，速度一路贴着 1 rad/s 速度限），而"撞躯干/自身"的方向会被真实挡住（指令力矩全被接触吸收） |
+| 5 | 自碰撞 | SDF 默认 `false`（两臂可互相穿透） | `<self_collide>true</self_collide>`（必须用 SDF 名：gazebo-classic 的 `<selfCollide>` 会被 sdformat 静默丢弃） | 双臂模型做轨迹验收必须能真的碰到。实测两条链都能被力矩驱动（`joint_link2.2` 施加 −2 N·m：+0.97 → −1.53 rad，速度一路贴着速度限——当时是占位 1 rad/s，2026-10-15 起为 3.1416），而"撞躯干/自身"的方向会被真实挡住（指令力矩全被接触吸收） |
 | 6 | 接触摩擦 | SDF 默认（mu = 1） | 19 个 link 显式 `<mu1>`/`<mu2>` = 0.8 | 参数可查、可标定；`<ode><kp>/<kd>` 对 dartsim 无效故不写 |
 | 7 | 电机映射 | 9 台（只第一链，id 1–7 全 r58 + 8–9 vaxor） | **18 台，两条手臂都驱动**（id 1..9 + 10..18，型号序列见下） | 全身模型两臂都要能被力矩驱动 |
 | 8 | 重力 | 第一链受 `gravity` 参数控制，第二链恒关（无电机） | 两条链都由 `gravity` 参数统一控制 | 第二链现在有电机，不需要"关重力防空转"的例外 |
-| 9 | 关节限位 `lower/upper` | 18 个关节统一占位 `±1.5708` | **CAD 真实角度限位**（逐关节不同、第二链镜像；见「关节限位」节） | 仿真的可达范围要反映真实机械边界，轨迹验收才有意义 |
+| 9 | 关节限位 `lower/upper` | 18 个关节统一占位 `±1.5708` | **CAD 真实角度限位**（逐关节不同、第二链镜像；见「关节限位与 effort/velocity」节） | 仿真的可达范围要反映真实机械边界，轨迹验收才有意义 |
 
-机械本体的**关节限位 `lower`/`upper` 是 CAD 真实角度限位**（见下一节）；`effort`（10 N·m）与
-`velocity`（1 rad·s⁻¹）仍是占位值——导出件里这两项是 0，会让 Gazebo 锁死关节，接真机前必须按
-执行器参数替换。
+机械本体的**关节限位 `lower`/`upper` 是 CAD 真实角度限位**、**`effort`/`velocity` 是型号库
+额定值**（见下一节）。这两项都是实值，不再是占位：`<limit effort>` 不决定 Gazebo 侧能出多大力
+（仿真侧力矩钳位在 `motor_sim` 的 `effort_limit_nm`），但它决定 RViz 滑杆的可拖范围与
+`robot_sim` 的一致性检查；`<limit velocity>` 则是 dartsim 真会执行的速度限（见「已知缺口」）。
 
-## 关节限位（来自 CAD 角度配合）
+## 关节限位与 effort/velocity（来自 CAD + 型号库）
 
 来源：`cad/urdf/胸部整体结构装配体-上身部分.urdf`（本目录 `cad/` 保存的 SolidWorks 导出件，
-2026-10-13 的 sw2urdf 重导出）。历史薄壳里是统一占位
-`±1.5708`；本模型取真实值，**只取 `lower`/`upper`**，`effort`/`velocity` 沿用占位。
+**2026-10-15 15:11 的 sw2urdf 重导出**，见 `cad/export.log`；上一版是 2026-10-13 的）。历史薄壳里
+18 个关节统一占位 `±1.5708`；本模型 `lower`/`upper` 取 CAD 真实值，`effort`/`velocity`
+取型号库额定值（**只有 2026-10-15 这版导出件里 CAD 才填了这两项**，上一版是 0/0）。
 
 | 关节 | 限位 (rad) | ≈ 度 | 关节 | 限位 (rad) | ≈ 度 |
 |---|---|---|---|---|---|
@@ -50,7 +57,7 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 | `joint_link8` | ±1.047 | ±60 | `joint_link8.8` | ±1.047 | ±60 |
 | `joint_link9` | ±1.22 | ±70 | `joint_link9.9` | ±1.22 | ±70 |
 
-本次（2026-10-13 重导出）相对上一版的逐项变化——**10 个关节收窄，`joint_link3/4/5/7` 两链未动**：
+上一轮（2026-10-13 重导出）相对再上一版的逐项变化——**10 个关节收窄，`joint_link3/4/5/7` 两链未动**：
 
 | 关节 | 上一版 | 本版 | 关节 | 上一版 | 本版 |
 |---|---|---|---|---|---|
@@ -73,6 +80,46 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
   验过的示教轨迹/动作请重新核对——例如 `joint_link2.2` 上一版能到 ±0.26，现在只到 −0.14/+0.12。
 - ⚠ `config/simulation_topology.yaml` 里 profile 的硬/命令限位是**型号级**粗检查（±90°/±85°），
   比逐关节的真实限位宽——两者口径不同：真实限位由 Gazebo 物理层强制，profile 只做整体兜底。
+
+### effort / velocity（2026-10-15 起为实值）
+
+| 关节 | effort (N·m) | velocity (rad·s⁻¹) | 型号 |
+|---|---|---|---|
+| `joint_link1/.1`、`2/.2`、`5/.5`、`6/.6`、`7/.7`（10 个） | 5.0 | 3.1416 | `cerb_r48_101` |
+| `joint_link3/.3`、`4/.4`（4 个） | 20.0 | 3.1416 | `cerb_r58_101` |
+| `joint_link8/.8`、`9/.9`（4 个） | 1.15 | 4.189 | `vaxor_2550` |
+
+数值都取自型号库 `motor.yaml` 的 `rated_torque_nm` / `rated_speed_rad_s`（CAD 的 20 / 5 / 3.14
+与之吻合，3.14 是 π 的截断）。注意三处口径不同、各有其位：URDF 是**额定**、`motor_sim` 的
+`effort_limit_nm` 是 profile 粗钳位（10 N·m）、MJCF 执行器 ctrlrange 取型号库**峰值**
+（cerb 的 `mit_torque_limit_nm`；vaxor 四台没有这一项，回退到 URDF 的额定值 1.15）。
+
+- **CAD 与本表有一处不同**：CAD 给 `joint_link1/.1`、`2/.2` 也填了 20 N·m（r58 档），而电机拓扑
+  （`config/motor_driver.yaml`）把 id 1,2 配成 `cerb_r48_101`。本表**以拓扑为准**取 5 N·m；
+  若实机肩部确实是 r58，改拓扑后再回来改 URDF。
+- **CAD 给腕部填的 `velocity=209` 未采用**：209 rad·s⁻¹ 正是 vaxor 参数页「额定 ≤2000 rpm」的
+  电机端换算值，而 `<limit velocity>` 要关节侧（÷ 减速比 50 ⇒ 4.189）。
+- `velocity` 从占位 1.0 提到 3.1416 / 4.189 **会真的改变 Gazebo 行为**（dartsim 执行这条限速）：
+  无力矩时手臂被重力甩到限位的末速变了，之前贴着 1 rad/s 验过的轨迹请复核。MuJoCo 侧不变
+  （它的速度上限本来就取型号库，见 `tools/build_mujoco_model.py`）。
+
+### `joint_link2.2` 的坐标系改写（2026-10-15，机械行为不变）
+
+2026-10-15 的导出件把第二链 `joint_link2.2`（靠躯干第 2 个关节）的连杆坐标系换了写法，级联到
+`joint_link3.3`（它的原点写在 `Joint_link2.2` 系里）：
+
+| | 2026-10-13 | 2026-10-15 |
+|---|---|---|
+| `joint_link2.2` origin | `-0.006047 -0.028296 0.0198` | `-0.006205 -0.032594 0.0198` |
+| `joint_link2.2` rpy | `1.5708 0 0` | `1.5708 0 -0.036849` |
+| `joint_link2.2` axis | `-0.03684 0 0.99932` | `0 0 1` |
+| `joint_link3.3` origin | `-0.032233 0.034869 -0.030208` | `-0.033324 0.034869 -0.0333` |
+| `joint_link3.3` rpy | `3.1013 -1.5339 3.1416` | `3.1019 -1.5708 3.1416` |
+
+**不是机械改动**，三项查实：① 两版的轴在父 link 系里方向完全相同（夹角 0.0000°）；② 原点位移
+4.297 mm 与轴方向平行（垂直分量 0.019 mm）⇒ **转轴直线不变**；③ 把旧 `Joint_link2.2.STL` 按
+新旧坐标系变换后与新的 bbox 一致到 1e-5 ⇒ 零件没动，只是网格坐标随连杆坐标系重写（该网格与
+`meshes/collision/Joint_link2.2.STL` 凸包已同步重生成）。
 
 > ⚠ **不支持 `control_mode:=position`**：本模型没有 position 命令接口，`arm_position_controller`
 > 会在 spawn 时明确报错（有意的失败，而不是静默不动）。仿真统一走力矩：`gazebo.launch.py`
@@ -102,11 +149,19 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 - 拓扑唯一来源是 YAML：`config/motor_driver.yaml`（型号/id/增益/MIT 限幅）+
   `config/simulation_topology.yaml`（关节映射 + profile）。
 - 仿真 profile 分三档（`cerb_r48` / `cerb_r58` / `vaxor_2550`）：硬/命令限位是**型号级粗兜底**
-  （±90°/±85°、1 rad/s）——比 URDF 里逐关节的真实限位宽，真实边界由 Gazebo 物理层强制；
-  `effort_nm` 统一取保守的 10 N·m（= URDF 的占位 `effort`；按型号可放宽到型号库峰值：
-  r48 11 N·m、r58 45 N·m）。
+  （±90°/±85°）——比 URDF 里逐关节的真实限位宽，真实边界由 Gazebo 物理层强制；`effort_nm`
+  统一取保守的 10 N·m（`motor_sim` 的力矩钳位，与 URDF 的 `effort` 口径不同，后者是型号库额定值）。
+- ⚠ **`velocity_rad_s: 1.0` 现在比 URDF 窄**：三档 profile 的它是假电机 MIT 速度的量化满量程
+  （`motor_sim` 的 `limits.velocity_rad_s`，沿用 robot_all 的占位口径），2026-10-15 之前与 URDF 的
+  占位 `1.0` 同值所以看不出来，现在 URDF 是 3.1416 / 4.189，**端到端仿真（`simulation.launch.py`）
+  仍被 1 rad/s 卡住**，而裸 `gazebo.launch.py` 不受影响。要不要跟着放宽是独立决定（它改的是假电机
+  的协议量化范围，不是 URDF 参数），未动。
 - MIT 限幅（发给电机的协议参数，见 `motor_driver.yaml` 的 `parameters`）：cerb 取型号库
   `peak_torque_nm`（r58 45 / r48 11），位置/速度限幅沿用 12.5 rad / 30 rad·s⁻¹（未标定）。
+  ⚠ **vaxor 四台没有 `parameters`**（`mit_torque_limit_nm` 是 CERB 专有的 τ_ff 量化满量程，
+  对 vaxor 协议无意义）。副作用：`tools/build_mujoco_model.py` 的力矩回退会取 URDF 的
+  `<limit effort>`，因此 MJCF 里腕部执行器的 `actuatorfrcrange` 由 ±10 变成 ±1.15（额定值）——
+  该字段**只声明不夹取**（见生成器自检），不影响仿真动力学。
 
 ## 目录
 
@@ -119,7 +174,7 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 | `config/controllers.yaml` | `gz_ros2_control` 参数：`joint_state_broadcaster` + `arm_effort_controller`（`arm_position_controller` 节保留但不可用，见文件内注释） |
 | `config/motor_driver.yaml` | **电机拓扑**：18 台电机（型号/id/增益/MIT 限幅），总线逻辑名 `arm` |
 | `config/simulation_topology.yaml` | 端到端仿真的电机↔关节映射（18 条）+ 三档 profile |
-| `cad/` | **CAD 溯源**：2026-10-13 的 SolidWorks 导出件原样（`urdf/` 与 sw2urdf 的 `package.xml`/`CMakeLists.txt`/`launch/`/`config/`）。关节限位与几何的唯一来源；`cad/meshes/` 是指向 `../meshes/` 的**硬链接**（不占额外磁盘），因此原始 URDF 的网格路径仍能解析。**改限位要改这里再重跑派生** |
+| `cad/` | **CAD 溯源**：2026-10-15 15:11 的 SolidWorks 导出件（`urdf/` 与 sw2urdf 的 `package.xml`/`CMakeLists.txt`/`launch/`/`config/`，另存 `export.log`）。导出时写的是 `…-上身部分00`，入库时文件名与包名改回 `…-上身部分`（内容只差这一处）。关节限位、effort/velocity 与几何的唯一来源；`cad/meshes/` 是指向 `../meshes/` 的**硬链接**（不占额外磁盘），因此原始 URDF 的网格路径仍能解析。**改限位/几何要改这里再重跑派生** |
 | `meshes/*.STL` | 19 个二进制可视网格：与 `dist/half_body_robot_urdf/meshes/` 和 `cad/meshes/` 三处 **硬链接同一份文件**（同 inode，不占额外磁盘，改一处三处同时变，别单独改） |
 | `meshes/base_link_simplified.STL` | `base_link` 降采样版（50 万面 → 2.3 万面，MuJoCo 解码上限 20 万面），由 `tools/simplify_mesh.py` 生成 |
 | `meshes/collision/*.STL` | 14 个凸包碰撞网格，由 `tools/build_simplified_collision_meshes.py` 生成（`dist/` 侧是它们的硬链接；`*_simplified.STL` 不进发布件） |
@@ -137,8 +192,8 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 
 | 参数 | 取值 | 依据 | 替换建议 |
 |---|---|---|---|
-| `<limit>` `lower`/`upper` | 逐关节不同（见「关节限位」节） | **CAD 角度配合的真实设计值**（`cad/` 里的 sw2urdf 导出件） | 机械改动后在 SolidWorks 里重导出到 `cad/`，改主 URDF 的 `lower`/`upper`，再跑 `tools/regen_derived.py` + `tools/build_mujoco_model.py` |
-| `<limit>` `effort` / `velocity` | 10 N·m / 1 rad·s⁻¹（占位） | 导出件里这两项是 0（会锁死关节），暂沿用原始薄壳的占位 | 按执行器额定值替换 |
+| `<limit>` `lower`/`upper` | 逐关节不同（见「关节限位与 effort/velocity」节） | **CAD 角度配合的真实设计值**（`cad/` 里的 sw2urdf 导出件） | 机械改动后在 SolidWorks 里重导出到 `cad/`，改主 URDF 的 `lower`/`upper`，再跑 `tools/regen_derived.py` + `tools/build_mujoco_model.py` |
+| `<limit>` `effort` / `velocity` | 逐关节不同（r58 20 / r48 5 / vaxor 1.15 N·m；3.1416 / 4.189 rad·s⁻¹） | **型号库额定值** `motor.yaml` 的 `rated_torque_nm` / `rated_speed_rad_s`（2026-10-15 的 CAD 导出件也填了这两项，20/5/3.14 与之吻合） | 换电机后改型号库；型号与拓扑对不上时以 `config/motor_driver.yaml` 为准（见同节的 ⚠） |
 | `<dynamics damping>` | 逐关节不同（`joint_link2` 0.0473 … `joint_link9/.9` 1.42e-06） | 该关节**零位等效惯量**（Pinocchio CRBA 对角，kg·m²）数值，等效 1 s 时间常数 | 真机可用「同幅值阶跃下的速度衰减时间」反推 |
 | `<dynamics friction>` | 0.0（显式写出） | 库仑摩擦没有实测数据；给非零值会让腕部小关节出现未建模死区 | 真机用小力矩斜坡测起动力矩后填回 |
 | `<mu1>`/`<mu2>` | 0.8 | 铝/塑料件干摩擦量级估计 | 需要接触滑移类结论时按实测摩擦角替换 |
@@ -234,8 +289,9 @@ ros2 launch robot_sim simulation.launch.py backend:=mujoco
   「关节传递力矩」略有差别。
 - 实测：上一版限位（`joint_link2` ±0.26）下 joint_link2 加 2 N·m 到 0.264、镜像链对称到
   −0.264（2026-10-12，MuJoCo 3.6.0，软约束允许 ~4e-3 rad 穿透；停命令后重力把臂拉回下部
-  限位）。**这两个数字随本版限位失效**：现在 `joint_link2` 只到 −0.12/+0.14。本版重生成后的
-  自检实测是 `joint_link1` 加 1.5 N·m 两秒停在 **+0.5400**（上限 +0.52，过冲 ~0.02 rad）。
+  限位）。**这两个数字随本版限位失效**：现在 `joint_link2` 只到 −0.12/+0.14。自检实测是
+  `joint_link1` 加 1.5 N·m 两秒停在 **+0.5208**（上限 +0.52）——早先记的 +0.5400 是
+  2026-10-13 的值，之后 10-14 补了 `<armature>`、10-15 补了执行器速度 `user`，过冲随之收小。
 - **为什么不用 `mujoco_ros2_control` 的 ros2_control 集成**：本机 0.1.2（apt）在注册
   actuator 时创建话题 `pid_gains/position/<joint>/<index>/pid_state`，ROS 2 话题名不允许
   纯数字 token → `InvalidTopicNameError` 直接 abort（第 11 个 actuator 起必崩）。
@@ -261,7 +317,8 @@ ros2 launch robot_sim simulation.launch.py backend:=mujoco
 - 力矩幅值**不由 URDF 或控制器钳位**：`<limit effort>` / 命令接口的 min/max 在
   gz_ros2_control + dartsim 这条链上都不生效；仿真侧的力矩钳位在 `motor_sim` 的
   `effort_limit_nm`（见 `config/simulation_topology.yaml` 的 profiles）。
-- 关节速度限 `1 rad/s` 实测**是生效的**（dartsim 的速度限），快速轨迹验收时注意它是瓶颈。
+- 关节速度限实测**是生效的**（dartsim 的速度限），快速轨迹验收时注意它是瓶颈：2026-10-15 起
+  这条件由占位 `1 rad/s` 换成型号库额定值（cerb 3.1416、vaxor 4.189 rad·s⁻¹），瓶颈随之放宽。
 - 本体惯量未含减速器反射转子惯量（型号库只有 Kt / 减速比 / 效率），仿真里关节比真机「轻」；
   轨迹跟随/整定的绝对结论不能直接搬真机。
 - 两条链的型号序列相同是**假设**；id 1..9 / 10..18 的分配是本模型的约定，接实机前请按真机

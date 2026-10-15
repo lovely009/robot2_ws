@@ -90,6 +90,30 @@ sim2 = MODULE.MotorModel(3, "cerb")
 assert sim2.sdo_params[(0x607D, 1)] == -32768
 assert sim2.sdo_params[(0x607D, 2)] == 32768
 
+# 中止码**分层**（2026-10-15 真机 node 1 实测）：索引不在字典 → 0x06020000
+# （对象不存在，实测 0x9999:00）；索引在而子索引没有 → 0x06090011（实测 0x6080:01）。
+sim.handle_sdo(1, bytes([0x40, 0x99, 0x99, 0x00, 0, 0, 0, 0]))
+assert sim.sent[-1][1] == bytes([0x80, 0x99, 0x99, 0x00, 0x00, 0x00, 0x02, 0x06])
+sim.handle_sdo(1, bytes([0x40, 0x80, 0x60, 0x01, 0, 0, 0, 0]))
+assert sim.sent[-1][1] == bytes([0x80, 0x80, 0x60, 0x01, 0x11, 0x00, 0x09, 0x06])
+# 身份串只挂在 0x1008:00；真机 :01/:02 回"子索引不存在"，这里不能回身份串。
+sim.handle_sdo(1, bytes([0x40, 0x08, 0x10, 0x01, 0, 0, 0, 0]))
+assert sim.sent[-1][1] == bytes([0x80, 0x08, 0x10, 0x01, 0x11, 0x00, 0x09, 0x06])
+
+# 型号落到**出厂值**：身份串与 0x6080/0x2538 同源。2026-10-15 真机 node 1 实测
+# R58 = 3325 RPM / 13300 mA、R48 = 3325 RPM / 5000 mA（0x6080 两台相同：
+# 它是模块侧共用值，逐型号的是 0x2538）。
+r58 = MODULE.MotorModel(1, "cerb")
+MODULE.apply_cerb_device_model(r58, "r58")
+assert r58.identity == b"R58LITE_V2"
+assert r58.sdo_params[(0x6080, 0)] == 3325
+assert r58.sdo_params[(0x2538, 0)] == 13300
+r48 = MODULE.MotorModel(2, "cerb")
+MODULE.apply_cerb_device_model(r48, "r48")
+assert r48.identity == b"R48LITE_V2"
+assert r48.sdo_params[(0x6080, 0)] == 3325
+assert r48.sdo_params[(0x2538, 0)] == 5000
+
 # 非 CERB 节点（无此模型/是 vaxor）不回 SDO。
 sent_before = len(sim.sent)
 sim.handle_sdo(9, bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0]))
@@ -199,6 +223,22 @@ def _bare_sim(fb_period_ms=60, stagger_ms=2.2):
     s.window_count = 0
     return s
 
+
+# 反馈节拍（默认 = 对端保真）：真机 TPDO 传输类型 = 1（2026-10-15 实测
+# 0x1800:02），每个 SYNC 立即回一帧，不错峰、无墙钟兜底。降载模式才抽帧错峰。
+assert MODULE.feedback_cadence(20, 0, 2.2) == (True, 1, 0.0, float("inf"))
+_dev, _interval, _stagger, _period = MODULE.feedback_cadence(20, 60, 2.2)
+assert (_dev, _interval, abs(_stagger - 0.0022) < 1e-9) == (False, 3, True)
+assert abs(_period - 0.06) < 1e-9
+# 降载模式下 fb_period 是**上界**：SYNC 快于假定值时不额外抽帧（round 到 1）。
+assert MODULE.feedback_cadence(20, 20, 0.0)[1] == 1
+for _bad in ((0, 60, 2.2), (20, -1, 2.2)):
+    try:
+        MODULE.feedback_cadence(*_bad)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"非法节拍参数被接受：{_bad}")
 
 _w = _bare_sim()
 # 未到周期：不补，且不留任何 deadline
@@ -424,3 +464,60 @@ assert "NameError" not in _startup.stderr, _startup.stderr
 # （含 CanMotorSim 构造，正是原 bug 的死点）全部跑通了。
 assert "FileNotFoundError" in _startup.stderr, _startup.stderr
 assert "/nonexistent/robot_ws-probe" in _startup.stderr, _startup.stderr
+
+# SocketCAN 成帧（cerb_sdo_probe.py 的 --interface 路径）：打包要能往返，解析要
+# **拒绝扩展帧**——设备只认标准帧，同 ID 的扩展帧照样被 ACK 却被按 ID 静默忽略，
+# 这类"发得出去、一条不回"的假故障必须在这一层挡掉。
+sys.modules.setdefault("fdcan_motor_sim", MODULE)
+PROBE_PATH = SCRIPT_PATH.parent / "cerb_sdo_probe.py"
+PROBE_SPEC = spec_from_file_location("cerb_sdo_probe", PROBE_PATH)
+assert PROBE_SPEC is not None and PROBE_SPEC.loader is not None
+PROBE = module_from_spec(PROBE_SPEC)
+PROBE_SPEC.loader.exec_module(PROBE)
+
+_req = bytes([0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0])
+_frame = PROBE.pack_socketcan_fd(0x601, _req)
+assert len(_frame) == 72, "canfd_frame 是 72 字节定长（8B 头 + 64B 数据）"
+assert PROBE.parse_socketcan_fd(_frame) == (0x601, _req)
+_e = PROBE.parse_socketcan_fd(PROBE.pack_socketcan_fd(0x80000000 | 0x601, _req))
+assert _e is None, "扩展帧必须被解析层拒绝"
+
+print("[test_fdcan_motor_sim] OK")
+
+# 分段上传拼接（cerb_sdo_probe.py）：身份串只能靠分段取回（0x41 发起 → 0x60/0x70
+# 交替取段 → 末段截断）。切换位、总长截断与末段标志错了就永远读不到身份串，
+# 而固件正是靠这串绑型号。用假传输层测，不碰硬件。
+class _FakeProbe(PROBE.SlcanSdoProbe):
+    def __init__(self, identity):
+        self.node = 1
+        self.identity = identity
+        self.offset = 0
+        self.replies = []
+
+    def send_request(self, req):
+        if req[0] == 0x40:                       # 上传发起
+            size = len(self.identity)
+            self.offset = 0
+            self.replies.append(bytes([0x41, req[1], req[2], req[3],
+                                       size & 0xFF, (size >> 8) & 0xFF, 0, 0]))
+            return
+        chunk = self.identity[self.offset:self.offset + 7]
+        self.offset += len(chunk)
+        last = self.offset >= len(self.identity)
+        unused = (7 - len(chunk)) if last else 0
+        head = (((req[0] >> 4) & 1) << 4) | (unused << 1) | (1 if last else 0)
+        self.replies.append(bytes([head]) + chunk.ljust(7, b"\x00"))
+
+    def drain(self, timeout):
+        out, self.replies = self.replies, []
+        return [(0x581, r) for r in out]
+
+
+for _identity in (b"R48LITE_V2", b"R58LITE_V2", b"AB"):   # 含不足一段的短串
+    _fp = _FakeProbe(_identity)
+    _status, _size, _body, _tries = _fp.read(0x1008, 0x00)
+    assert _status == "upload", (_status, _identity)
+    assert _size == len(_identity)
+    assert _body == _identity, (_body, _identity)
+
+print("[test_fdcan_motor_sim] OK")

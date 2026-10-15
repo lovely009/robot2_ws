@@ -59,7 +59,7 @@
     <parent link="base_link"/>
     <child link="Joint_link1"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-0.17" upper="0.52" velocity="1.0"/>
+    <limit effort="5.0" lower="-0.17" upper="0.52" velocity="3.1416"/>
     <dynamics damping="0.00621" friction="0.0"/>
   </joint>
   <link name="Joint_link2">
@@ -89,7 +89,7 @@
     <parent link="Joint_link1"/>
     <child link="Joint_link2"/>
     <axis xyz="0.03684 0 0.99932"/>
-    <limit effort="10.0" lower="-0.12" upper="0.14" velocity="1.0"/>
+    <limit effort="5.0" lower="-0.12" upper="0.14" velocity="3.1416"/>
     <dynamics damping="0.0473" friction="0.0"/>
   </joint>
   <link name="Joint_link3">
@@ -119,7 +119,7 @@
     <parent link="Joint_link2"/>
     <child link="Joint_link3"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-3.14" upper="0.52" velocity="1.0"/>
+    <limit effort="20.0" lower="-3.14" upper="0.52" velocity="3.1416"/>
     <dynamics damping="0.0537" friction="0.0"/>
   </joint>
   <link name="Joint_link4">
@@ -149,7 +149,7 @@
     <parent link="Joint_link3"/>
     <child link="Joint_link4"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="0" upper="1.57" velocity="1.0"/>
+    <limit effort="20.0" lower="0" upper="1.57" velocity="3.1416"/>
     <dynamics damping="0.0536" friction="0.0"/>
   </joint>
   <link name="Joint_link5">
@@ -179,7 +179,7 @@
     <parent link="Joint_link4"/>
     <child link="Joint_link5"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.57" upper="1.57" velocity="3.1416"/>
     <dynamics damping="0.000181" friction="0.0"/>
   </joint>
   <link name="Joint_link6">
@@ -209,7 +209,7 @@
     <parent link="Joint_link5"/>
     <child link="Joint_link6"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-1.85" upper="0.09" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.85" upper="0.09" velocity="3.1416"/>
     <dynamics damping="0.00454" friction="0.0"/>
   </joint>
   <link name="Joint_link7">
@@ -239,7 +239,7 @@
     <parent link="Joint_link6"/>
     <child link="Joint_link7"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.57" upper="1.57" velocity="3.1416"/>
     <dynamics damping="2.08e-05" friction="0.0"/>
   </joint>
   <link name="Joint_link8">
@@ -269,7 +269,7 @@
     <parent link="Joint_link7"/>
     <child link="Joint_link8"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-1.047" upper="1.047" velocity="1.0"/>
+    <limit effort="1.15" lower="-1.047" upper="1.047" velocity="4.189"/>
     <dynamics damping="2.58e-06" friction="0.0"/>
   </joint>
   <link name="Joint_link9">
@@ -293,7 +293,7 @@
     <parent link="Joint_link8"/>
     <child link="Joint_link9"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-1.22" upper="1.22" velocity="1.0"/>
+    <limit effort="1.15" lower="-1.22" upper="1.22" velocity="4.189"/>
     <dynamics damping="1.42e-06" friction="0.0"/>
   </joint>
   <link name="Joint_link1.1">
@@ -323,7 +323,7 @@
     <parent link="base_link"/>
     <child link="Joint_link1.1"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-0.52" upper="0.17" velocity="1.0"/>
+    <limit effort="5.0" lower="-0.52" upper="0.17" velocity="3.1416"/>
     <dynamics damping="0.00632" friction="0.0"/>
   </joint>
   <link name="Joint_link2.2">
@@ -349,11 +349,11 @@
     </collision>
   </link>
   <joint name="joint_link2.2" type="revolute">
-    <origin rpy="1.5708 0 0" xyz="-0.0060466 -0.028296 0.0198"/>
+    <origin rpy="1.5708 0 -0.036849" xyz="-0.006205 -0.032594 0.0198"/>
     <parent link="Joint_link1.1"/>
     <child link="Joint_link2.2"/>
-    <axis xyz="-0.03684 0 0.99932"/>
-    <limit effort="10.0" lower="-0.14" upper="0.12" velocity="1.0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="5.0" lower="-0.14" upper="0.12" velocity="3.1416"/>
     <dynamics damping="0.047" friction="0.0"/>
   </joint>
   <link name="Joint_link3.3">
@@ -379,11 +379,11 @@
     </collision>
   </link>
   <joint name="joint_link3.3" type="revolute">
-    <origin rpy="3.1013 -1.5339 3.1416" xyz="-0.032233 0.034869 -0.030208"/>
+    <origin rpy="3.1019 -1.5708 3.1416" xyz="-0.033324 0.034869 -0.0333"/>
     <parent link="Joint_link2.2"/>
     <child link="Joint_link3.3"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-0.52" upper="3.14" velocity="1.0"/>
+    <limit effort="20.0" lower="-0.52" upper="3.14" velocity="3.1416"/>
     <dynamics damping="0.0533" friction="0.0"/>
   </joint>
   <link name="Joint_link4.4">
@@ -413,7 +413,7 @@
     <parent link="Joint_link3.3"/>
     <child link="Joint_link4.4"/>
     <axis xyz="-0.035238 0.039111 0.99861"/>
-    <limit effort="10.0" lower="-1.57" upper="0" velocity="1.0"/>
+    <limit effort="20.0" lower="-1.57" upper="0" velocity="3.1416"/>
     <dynamics damping="0.0532" friction="0.0"/>
   </joint>
   <link name="Joint_link5.5">
@@ -443,7 +443,7 @@
     <parent link="Joint_link4.4"/>
     <child link="Joint_link5.5"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.57" upper="1.57" velocity="3.1416"/>
     <dynamics damping="0.000181" friction="0.0"/>
   </joint>
   <link name="Joint_link6.6">
@@ -473,7 +473,7 @@
     <parent link="Joint_link5.5"/>
     <child link="Joint_link6.6"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-1.85" upper="0.09" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.85" upper="0.09" velocity="3.1416"/>
     <dynamics damping="0.00451" friction="0.0"/>
   </joint>
   <link name="Joint_link7.7">
@@ -503,7 +503,7 @@
     <parent link="Joint_link6.6"/>
     <child link="Joint_link7.7"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+    <limit effort="5.0" lower="-1.57" upper="1.57" velocity="3.1416"/>
     <dynamics damping="2.08e-05" friction="0.0"/>
   </joint>
   <link name="Joint_link8.8">
@@ -533,7 +533,7 @@
     <parent link="Joint_link7.7"/>
     <child link="Joint_link8.8"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10.0" lower="-1.047" upper="1.047" velocity="1.0"/>
+    <limit effort="1.15" lower="-1.047" upper="1.047" velocity="4.189"/>
     <dynamics damping="2.58e-06" friction="0.0"/>
   </joint>
   <link name="Joint_link9.9">
@@ -557,7 +557,7 @@
     <parent link="Joint_link8.8"/>
     <child link="Joint_link9.9"/>
     <axis xyz="0.03632 -0.0095339 -0.99929"/>
-    <limit effort="10.0" lower="-1.22" upper="1.22" velocity="1.0"/>
+    <limit effort="1.15" lower="-1.22" upper="1.22" velocity="4.189"/>
     <dynamics damping="1.42e-06" friction="0.0"/>
   </joint>
 </robot>

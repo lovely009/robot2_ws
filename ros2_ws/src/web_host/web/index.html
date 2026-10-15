@@ -67,45 +67,35 @@
 
     <!-- ============ 主区：屏模板克隆到这里 ============ -->
     <main class="main" id="screenRoot"></main>
-
-    <!-- ============ 状态翼：外壳挂载，不属任何屏 ============ -->
-    <aside class="wing" id="wingPanel" aria-label="状态翼">
-      <div class="wing-rail" id="wingRail"></div>
-      <div class="wing-head">状态<span><button class="wing-toggle" id="wingToggle" aria-label="收起或展开状态翼">◂</button></span></div>
-      <div id="wingBody">
-        <div id="wingArm" class="wing-arm"></div>
-        <div class="wing-counts" id="wingCounts">--</div>
-        <ul class="wing-alerts" id="wingAlerts"><li class="empty">无告警</li></ul>
-        <div class="wing-last tiny muted" id="wingLast">--</div>
-      </div>
-    </aside>
   </div>
 
   <!-- ============ 浮层：说明（Esc 或点遮罩关闭） ============ -->
   <div class="overlay" id="helpOverlay">
     <div class="sheet">
-      <div class="wing-head">说明
+      <div class="sheet-head">说明
         <button class="tiny-btn secondary" id="helpClose">关闭</button></div>
       <div id="helpBody"></div>
     </div>
   </div>
 
   <!-- ============ 面板模板：每个面板一项，屏模板按 data-panel 引用 ============ -->
-  <!-- 关节索引 -->
+  <!-- 关节索引（TF 侧）：模型 URDF 的关节名 + /tf 的数值与年龄；与右栏电机状态表
+       不是一类东西，这里的行点选会置顶/选中对应电机 -->
   <template data-panel-template="jointList">
     <details class="card" data-fold="joints" open>
-      <summary>关节 <span class="spacer"></span><span class="sum" id="sumJoints">--</span></summary>
-      <ul class="joints" id="motorRows">
-        <li class="empty">等待 motor_topology…</li>
+      <summary title="关节表来自臂视图加载的模型 URDF；数值与年龄来自 /tf（robot_state_publisher）">
+        关节 <span class="spacer"></span><span class="sum" id="sumJoints">--</span></summary>
+      <ul class="joints" id="jointRows">
+        <li class="empty">等待模型 URDF…</li>
       </ul>
     </details>
   </template>
 
-  <!-- 关节状态：全部电机同屏表（点击行 = 置顶 + 选中，行序与左栏列表联动）。
+  <!-- 电机状态：全部电机同屏表（点击行 = 置顶 + 选中，行序与左栏关节列表联动）。
        完整读数（速度/电流/跟随误差/命令源/测量年龄等）在行的 title 里 -->
   <template data-panel-template="readout">
     <details class="card" data-fold="sel" open>
-      <summary><span id="selTitle">关节状态</span><span class="spacer"></span><span class="sum" id="selSum">--</span></summary>
+      <summary><span id="selTitle">电机状态</span><span class="spacer"></span><span class="sum" id="selSum">--</span></summary>
       <div class="table-wrap">
         <table class="jstates">
           <thead><tr><th>ID</th><th class="num">位置</th><th class="num">力矩</th><th class="num">温度</th><th>状态</th></tr></thead>
@@ -149,6 +139,8 @@
         <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
         <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
         <span class="spacer"></span>
+        <select id="armModel" class="arm-model"
+                title="臂视图与关节映射使用的模型；选择会记住（刷新后保持），不影响仿真屏的模型选择"></select>
         <span>拖拽旋转 · 点击关节</span>
       </div>
     </div>
@@ -335,9 +327,6 @@
               <option value="slcan">SLCAN / CANable</option>
             </select>
           </label>
-          <label class="sim-field">模型
-            <select id="simModel"><option value="">读取模型中…</option></select>
-          </label>
           <div class="sim-field" id="simVcanFields">
             <label for="simVcanName">vcan 接口名</label>
             <input id="simVcanName" type="text" value="robot_vcan0" maxlength="15" spellcheck="false">
@@ -374,6 +363,31 @@
         </div>
         <div class="result tiny" id="simResult" role="status" aria-live="polite"></div>
         <pre class="sim-log" id="simLog" aria-label="仿真启动日志">等待启动</pre>
+      </div>
+    </details>
+    <!-- 模型：加载哪个模型 + 该模型的仿真参数。生成高度按模型几何的底面定
+         （换模型必须核对，见各模型 README）；三个参数只有 Gazebo 有对应实现。 -->
+    <details class="card" data-fold="model" open>
+      <summary>模型<span class="spacer"></span><span class="sum" id="simModelSummary">--</span></summary>
+      <div class="sim-panel">
+        <div class="sim-grid">
+          <label class="sim-field">加载模型
+            <select id="simModel"><option value="">读取模型中…</option></select>
+          </label>
+          <label class="sim-field"
+            title="Gazebo 模型生成高度（m），按模型几何底面定：默认模型底面在 z = 0，故为 0">
+            生成高度 z (m)
+            <input id="simSpawnZ" type="number" step="0.001" value="0" inputmode="decimal">
+          </label>
+        </div>
+        <div class="ctrl-row wrap">
+          <label class="check tiny" title="第一链连杆是否受 Gazebo 重力（第二链恒关）；位置轨迹验收可关">
+            <input type="checkbox" id="simGravity" checked> 重力</label>
+          <label class="check tiny" title="把基座焊到世界原点；关闭 = 自由浮动基座">
+            <input type="checkbox" id="simFixedBase" checked> 固定基座</label>
+          <span class="spacer"></span>
+          <span class="tiny muted" id="simModelHint"></span>
+        </div>
       </div>
     </details>
     <!-- 电机后端 = 总线上扮演 CERB/VAXOR 电机的独立进程（fdcan_motor_sim.py）：

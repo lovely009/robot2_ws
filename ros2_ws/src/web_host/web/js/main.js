@@ -1,11 +1,11 @@
 // 入口：装外壳、初始化路由、挂面板、建立全局订阅、起 rAF 渲染循环。
-// 屏切换只换主区里克隆的模板与其面板；顶栏/左导航/状态翼不重建。
-import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors, loadModelJoints } from './core/store.js';
-import { $, FOLD_KEY, WING_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
+// 屏切换只换主区里克隆的模板与其面板；顶栏与左导航不重建。
+import { store, markDirty, onDirty, runRenderLoop, DIRTY, countMotors, loadModelJoints, setModel } from './core/store.js';
+import { $, FOLD_KEY, ROS_URL_STORAGE_KEY, CONTROLLER_PORT_STORAGE_KEY }
   from './core/format.js';
 import { SCREENS, initRouter, currentScreen } from './core/router.js';
 import { connect, waitSysStatus } from './core/ros.js';
-import { refreshAgentControls, refreshAgentStatus, startAgent, stopAgent }
+import { refreshAgentControls, startAgent, stopAgent }
   from './core/agent.js';
 import { loadParams } from './core/device.js';
 
@@ -17,7 +17,6 @@ export function mountPanel(panelId, container) {
   return import(`./panels/${panelId}.js`).then((mod) => {
     // 面板标记的唯一来源是 index.html 的 <template data-panel-template>：克隆进
     // 屏模板里的 [data-panel] 占位后交给模块（JS 不生成带 id 的标记，只克隆）。
-    // wing 例外：标记直接写在外壳 #wingBody 里，没有模板可克隆。
     const tpl = document.querySelector(`template[data-panel-template="${panelId}"]`);
     if (tpl && container) container.append(tpl.content.cloneNode(true));
     const inst = mod.mount(container, ctx);
@@ -42,7 +41,7 @@ export function unmountPanel(panelId) {
 
 // 面板契约（权威）：
 //   mount(root, ctx) -> { render(dirty), unmount(), intervalMs? }
-//   - root：屏模板里的 [data-panel] 占位元素（wing 例外，见 Task 3）
+//   - root：屏模板里的 [data-panel] 占位元素
 //   - render(dirty)：dirty 是自上次渲染以来变脏的键集合（core/store.js 的 DIRTY）
 //   - intervalMs：可选，>0 时该面板的 render 至多每 N 毫秒一次（重表用 200）
 //   - unmount()：解绑事件、释放 canvas/three 资源；**不得清空 store**
@@ -55,6 +54,7 @@ export const ctx = {
       store.selectedId = id;
       markDirty(DIRTY.SELECTED);
     },
+    setModel(name) { setModel(name); },
     gotoScreen(id) { gotoScreen(id); },
     toast(text, level = '') { /* Task 2 接事件日志；本任务只记 console */ console.log('[toast]', level, text); },
   },
@@ -94,7 +94,7 @@ function renderShell(dirty) {
     } else if (c.agent === 'running') {
       el.textContent = `Agent 进程运行中${c.agentDevice ? ` · ${c.agentDevice}` : ''}`;
       el.classList.add('running');
-      el.title = '由 web_host 管理的 micro-ROS Agent 进程';
+      el.title = '由 bench_manager 管理的 micro-ROS Agent 进程';
       $('btnDisconnect').disabled = false;
     } else if (c.agent === 'failed') {
       el.textContent = `Agent 已退出${c.agentReturncode === null ? '' : ` · code ${c.agentReturncode}`}`;
@@ -119,7 +119,7 @@ function renderShell(dirty) {
   }
 }
 
-// 顶栏汇总 chips（在线/运行/冲突/故障）：计数口径与状态翼共用 store.js 的
+// 顶栏汇总 chips（在线/运行/冲突/故障）：计数口径与「电机状态」表共用 store.js 的
 // countMotors()；chipHz 是 1 s 窗口计数，在 boot 里起定时器（脏帧驱动做不到"每秒"）。
 function renderChips() {
   const {online, total, active, conflict, fault} = countMotors();
@@ -141,6 +141,12 @@ onDirty((dirty) => {
   if (dirty.has(DIRTY.CONN) && store.conn.connected && !store.conn.autoLoaded) {
     store.conn.autoLoaded = true;
     waitSysStatus().then(() => loadParams());
+  }
+  // 台架枚举（串口下拉）与 Agent 状态来自 rosbridge 服务：每次连接建立后取一次；
+  // 掉线时 core/ros.js 复位 benchLoaded，重连自动重取（Agent 状态本身走话题）。
+  if (dirty.has(DIRTY.CONN) && store.conn.connected && !store.conn.benchLoaded) {
+    store.conn.benchLoaded = true;
+    refreshAgentControls();
   }
   renderShell(dirty);          // 顶栏连接文案与 Agent 状态
   renderPanels(dirty, now);
@@ -164,7 +170,6 @@ async function showScreen(screen) {
     await mountPanel(slot.dataset.panel, slot);
   }
   initDrawers(screen);
-  markDirty(DIRTY.ALERTS);
 }
 
 // 屏内抽屉：开合状态与当前 tab 按屏记忆（web_host.fold.<屏>）。
@@ -201,24 +206,6 @@ function initDrawers(screen) {
 function gotoScreen(id) {
   if (id === currentScreen()) return;
   location.hash = `#/${id}`;
-}
-
-// 状态翼三态：用户显式选择（'1' 收起 / '0' 展开）优先；localStorage 无值 = 未选择，
-// 默认展开；<820 由 CSS 强制收起。
-function initWing() {
-  const saved = localStorage.getItem(WING_KEY);
-  document.body.classList.toggle('wing-collapsed', saved === '1');
-  document.body.classList.toggle('wing-expanded', saved === '0');
-  $('wingToggle').onclick = () => {
-    // 从「当前生效」状态翻转。默认（无显式选择）是展开——<820 由 CSS 无条件压成
-    // 竖条、与类无关，所以只有真正带 wing-collapsed 类时才算收起。
-    const collapsed = document.body.classList.contains('wing-collapsed');
-    const next = collapsed ? '0' : '1';   // 翻转：收起 → 展开，展开 → 收起
-    document.body.classList.toggle('wing-collapsed', next === '1');
-    document.body.classList.toggle('wing-expanded', next === '0');
-    localStorage.setItem(WING_KEY, next);   // 始终写显式值，绝不删除键
-    markDirty(DIRTY.ALERTS);
-  };
 }
 
 function initHelp() {
@@ -263,13 +250,10 @@ function initTopbar() {
 
 function boot() {
   initNav();
-  initWing();
   initHelp();
   initKeys();
   initTopbar();
   initRouter({onScreenChange: showScreen});
-  // 状态翼是外壳的一部分（不进屏模板），在这里挂一次后常驻。
-  mountPanel('wing', $('wingBody'));
   // 臂视图的 motor_id → 关节名 映射按**当前模型**去服务器取（权威来源是模型自己的
   // config/motor_driver.yaml）。不 await：拿不到就退回内置表并在控制台留痕，
   // 不阻塞开页。成功时标脏 TOPOLOGY，已挂载的臂视图下一帧重算。
@@ -282,9 +266,8 @@ function boot() {
     lastMotionCount = store.motionCount;
     $('chipHz').textContent = `运动流 ${store.conn.connected ? hz + ' Hz' : '-- Hz'}`;
   }, 1000);
-  // rosbridge 开页即连（断线自动重连在 core/ros.js）；Agent 状态轮询 2 s。
-  refreshAgentControls();
-  setInterval(refreshAgentStatus, 2000);
+  // rosbridge 开页即连（断线自动重连在 core/ros.js）；Agent 状态走 /bench/status
+  // 话题，串口下拉与台架枚举在连接建立后取一次（见 onDirty 里的 benchLoaded 钩子）。
   connect();
 }
 

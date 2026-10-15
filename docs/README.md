@@ -8,7 +8,7 @@
 | 需要了解 | 入口 | 状态 |
 |---|---|---|
 | 三个区域组成与构建 | [根 README](../README.md) | 当前 |
-| ROS 2 区域（七包、bring-up、配置契约） | [ros2_ws/README.md](../ros2_ws/README.md) | 当前 |
+| ROS 2 区域（九包、bring-up、配置契约） | [ros2_ws/README.md](../ros2_ws/README.md) | 当前 |
 | 固件工程事实、话题契约、开放项 | [micro_ros_firmware/README.md](../micro_ros_firmware/README.md) | 当前 |
 | 固件操作手册（构建 / 烧录 / 台架） | [micro_ros_firmware/AGENTS.md](../micro_ros_firmware/AGENTS.md) | 当前 |
 | micro-ROS Agent 工作区 | [micro_ros_agent/README.md](../micro_ros_agent/README.md) | 当前 |
@@ -41,6 +41,7 @@
 | 固件设计理由与变更史 | `micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md` |
 | 固件开放项与阶段门槛 | `micro_ros_firmware/README.md` 的「开放项与开发计划」 |
 | 电机拓扑与型号参数 | `motor_hardware_interface/config/*.yaml`（代码不复制） |
+| CERB 设备侧对象字典 / 帧 / 故障码 / 保护逻辑 | [`research/cerb-device-reference.md`](research/cerb-device-reference.md) |
 | 消息定义 | `micro_ros_agent/src/can_bridge_msgs/`（两处为符号链接，无副本） |
 
 **过程性产物（实施计划、任务台账、逐次运行报告）不进仓库**：结论落进上表的宿主，

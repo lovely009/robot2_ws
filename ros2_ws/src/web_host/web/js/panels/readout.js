@@ -1,4 +1,5 @@
-// 关节状态：全部电机同屏表（行点击 = 置顶 + 选中，行序与左栏列表共用 store 的置顶序）。
+// 电机状态：全部电机同屏表（行点击 = 置顶 + 选中，行序与左栏关节列表共用 store 的
+// 置顶序）。电机是固件的执行器，与左栏的关节（TF 侧）不是一类东西。
 // 列只放常用 5 项；完整读数（速度/电流/跟随误差/命令源/测量年龄）在行的 title 里。
 import { store, DIRTY, pinMotor, orderedMotorIds, targetOf } from '../core/store.js';
 import { $, fmt, ageText, busLabel, LIFECYCLE, FAULT_NAMES } from '../core/format.js';
@@ -58,7 +59,7 @@ function renderRows() {
   // 标题：选中台明细（与旧读数卡一致）；未选中时是栏目名。
   const id = store.selectedId;
   if (!id) {
-    $('selTitle').textContent = '关节状态';
+    $('selTitle').textContent = '电机状态';
   } else {
     const r = store.motors.get(id) || {};
     const t = r.topo || {}, st = r.status || {};

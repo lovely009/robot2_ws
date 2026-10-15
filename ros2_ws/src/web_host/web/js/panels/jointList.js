@@ -1,10 +1,61 @@
-// 关节索引：一行一台，点击选中并置顶（与臂上的小球双向联动；行序与右栏状态表共用
-// store 的置顶序）。只读 store。
-import { store, DIRTY, devDetailTitle, pinMotor, orderedMotorIds } from '../core/store.js';
-import { $, fmt, busLabel, LIFECYCLE, FAULT_NAMES } from '../core/format.js';
+// 关节索引（TF 侧）：一行一个关节——模型 URDF 的关节表 × /tf 的帧变换。
+// 「关节」与「电机」不是一类东西：本面板不读固件的电机流；点击行 = 选中并置顶
+// 该关节对应的电机（3D 小球与右栏电机状态表随之联动，行序共用 store.pinned）。
+import { store, DIRTY, pinMotor, JOINT_OF_MOTOR } from '../core/store.js';
+import { $, fmt, ageText } from '../core/format.js';
+import { jointReading } from '../core/tf.js';
+
+// 新鲜度阈值：动态 TF 超过 1.5 s 没更新算陈旧（sim 与真机都是 ≥10 Hz 级）。
+const STALE_MS = 1500;
+
+function motorOfJoint(name) {
+  for (const [id, joint] of Object.entries(JOINT_OF_MOTOR)) {
+    if (joint === name) return parseInt(id, 10);
+  }
+  return 0;
+}
+
+// 置顶优先（按关节对应的电机），其余保持模型里的顺序。
+function orderedJoints() {
+  return store.modelJoints
+    .map((joint, i) => {
+      const motor = motorOfJoint(joint.name);
+      const at = store.pinned.indexOf(motor);
+      return {joint, rank: at < 0 ? Infinity : at, i};
+    })
+    .sort((a, b) => (a.rank === b.rank ? a.i - b.i : a.rank - b.rank))
+    .map((e) => e.joint);
+}
+
+function titleOf(joint, reading, motor) {
+  const parts = [`关节 ${joint.name}（${joint.type}）`, `${joint.parent} → ${joint.child}`];
+  if (motor) parts.push(`电机 m${motor}`);
+  if (reading) {
+    parts.push(`位置 ${fmt(reading.value, 4)} rad`);
+    parts.push(reading.dynamic ? `TF 年龄 ${ageText(reading.ageMs)}` : 'TF 静态帧（/tf_static）');
+  } else {
+    parts.push('总线没有该帧对的 TF（/tf、/tf_static）');
+  }
+  return parts.join(' · ');
+}
+
+function rowHtml(joint, now) {
+  const r = jointReading(joint, now);
+  const motor = motorOfJoint(joint.name);
+  const stale = !!r && r.dynamic && r.ageMs >= STALE_MS;
+  const dot = !r ? 'var(--dim-2)' : (stale ? 'var(--warn)' : 'var(--ok)');
+  const age = !r ? '无 TF' : (r.dynamic ? ageText(r.ageMs) : '静态');
+  return `<li class="${motor && motor === store.selectedId ? 'on' : ''}"
+      ${motor ? `data-id="${motor}"` : ''} title="${titleOf(joint, r, motor)}">
+    <span class="jdot" style="background:${dot}"></span>
+    <span class="jid">${joint.name}</span>
+    <span class="jpos">${r ? fmt(r.value, 3) : '--'}</span>
+    <span class="jstate${stale ? ' warn' : ''}">${age}</span>
+  </li>`;
+}
 
 export function mount(root, ctx) {
-  const list = $('motorRows');
+  const list = $('jointRows');
   const summary = $('sumJoints');
 
   // 事件委托：列表每次渲染都整体重建。
@@ -17,54 +68,24 @@ export function mount(root, ctx) {
   });
 
   const render = (dirty) => {
-    if (!(dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.STATUS) || dirty.has(DIRTY.MOTION)
-          || dirty.has(DIRTY.SELECTED) || dirty.has(DIRTY.PARAMS))) return;
-    // 行渲染搬自重构前的 renderMotors（app.js:522-554），只改数据来源。
-    const rows = orderedMotorIds().map((id) => {
-        const r = store.motors.get(id) || {};
-        const t = r.topo || {}, st = r.status || {};
-        const online = st.online !== undefined ? st.online : t.online;
-        const lc = st.lifecycle !== undefined ? st.lifecycle : t.lifecycle;
-        const fault = st.unified_fault_code || 0;
-        // 旧 style.css 里这个色点写的是 var(--muted)；新 token 里叫 --dim-2（写错
-        // 不会报错，色点会静默变透明）。
-        const dot = !online ? 'var(--dim-2)'
-          : ((fault || lc === 6 || lc === 7) ? 'var(--err)'
-            : (lc === 4 ? 'var(--ok)' : 'var(--warn)'));
-        const stateText = fault ? (FAULT_NAMES[fault] || fault)
-          : (LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '--');
-        const mo = r.motion || {};
-        // 优先取状态流字段；字段缺失时回退到低频拓扑消息。
-        const busIndex = Number.isInteger(st.bus_index) ? st.bus_index : t.bus_index;
-        return `<li class="${id === store.selectedId ? 'on' : ''}" data-id="${id}"
-            title="${devDetailTitle(id)}">
-          <span class="jdot" style="background:${dot}"></span>
-          <span class="jid">m${id}</span>
-          <span class="jbus">${busLabel(busIndex)}</span>
-          <span class="jmodel">${t.model_name || '未绑定'}</span>
-          <span class="jpos">${fmt(mo.position, 3)}</span>
-          <span class="jstate ${fault ? 'warn' : 'muted'}">${stateText}</span>
-        </li>`;
-      });
-    list.innerHTML = rows.length
-      ? rows.join('')
-      : '<li class="empty">暂无数据（等待 motor_topology）</li>';
+    if (!(dirty.has(DIRTY.TF) || dirty.has(DIRTY.SELECTED))) return;
+    const now = Date.now();
+    const joints = orderedJoints();
+    list.innerHTML = joints.length
+      ? joints.map((j) => rowHtml(j, now)).join('')
+      : '<li class="empty">等待模型 URDF…（关节表来自臂视图加载的模型）</li>';
 
-    // 摘要（搬 renderFoldSummaries 的 sumJoints 段，口径与顶栏 chips 一致）。
-    const c = {online: 0, conflict: 0, fault: 0};
-    for (const r of store.motors.values()) {
-      const st = r.status || {}, t = r.topo || {};
-      if (st.online !== undefined ? st.online : t.online) c.online++;
-      if (t.conflict || st.lifecycle === 7) c.conflict++;
-      if (st.unified_fault_code) c.fault++;
+    let fresh = 0;
+    for (const j of joints) {
+      const r = jointReading(j, now);
+      if (r && (!r.dynamic || r.ageMs < STALE_MS)) fresh++;
     }
-    summary.textContent = store.motors.size
-      ? `${c.online}/${store.motors.size} 在线`
-        + (c.conflict ? ` · 冲突 ${c.conflict}` : '') + (c.fault ? ` · 故障 ${c.fault}` : '')
-      : '--';
+    summary.textContent = joints.length ? `${fresh}/${joints.length} TF` : '--';
   };
 
-  render(new Set([DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.MOTION, DIRTY.SELECTED, DIRTY.PARAMS]));
-  // 重表节流：motion 是 50 Hz，逐帧重建表格会比旧版 200 ms 定时刷新更糟。
-  return {render, intervalMs: 200, unmount() {}};
+  render(new Set([DIRTY.TF, DIRTY.SELECTED]));
+  // TF 停发后脏帧也停，年龄会冻在最后一次的值上——新鲜度指标冻结最误导，
+  // 用 1 s 定时器补算（与 imu 面板的年龄刷新同一口径）。
+  const ageTimer = setInterval(() => render(new Set([DIRTY.TF])), 1000);
+  return {render, intervalMs: 200, unmount() { clearInterval(ageTimer); }};
 }

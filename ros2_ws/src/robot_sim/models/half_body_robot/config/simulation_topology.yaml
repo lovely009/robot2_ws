@@ -34,9 +34,12 @@ simulation:
 
   profiles:
     # RB48（cerb_r48_101）：id 1,2,5,6,7 与 10,11,14,15,16。
-    # 硬限位/命令限位与 effort 沿用 robot_all 的占位口径（±90°/±85°、1 rad/s、10 N·m）；
+    # 硬限位/命令限位与 effort 沿用 robot_all 的占位口径（±90°/±85°、10 N·m）；
     # 型号库的峰值力矩 11 N·m 与峰值电流 3.2 A 参与换算（current_limit_a 由
     # simulation.launch.py 自动取 peak_current_amp）。
+    # ⚠ velocity_rad_s 是假电机 MIT 速度的量化满量程，1.0 现在**比 URDF 的
+    # <limit velocity> 窄**（3.1416/4.189），端到端仿真仍被它卡住；见模型 README
+    # 的「电机映射」节，未动。
     cerb_r48:
       hard_lower_deg: -90.0
       hard_upper_deg: 90.0

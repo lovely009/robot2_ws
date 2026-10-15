@@ -137,6 +137,8 @@
 .stage .legend .sw.ghost { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
 .stage .legend .dt { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 4px; vertical-align: middle; }
+/* 模型选择器：压进图例一行的高度与字号，宽模型名截断显示（完整名看 title） */
+.stage .legend .arm-model { max-width: 200px; padding: 1px 4px; font-size: var(--fs-xs); }
 
 /* ---------- 仿真启动器（sim 屏） ---------- */
 .sim-panel { display: flex; flex-direction: column; gap: var(--gap-sm); }
@@ -243,28 +245,26 @@ details[open] > summary::before { content: '▾'; }
 .tab.on { background: #14243c; border-color: #24456e; color: var(--text); }
 .drawer-body { padding-bottom: 4px; }
 
-/* ---------- 关节索引 ---------- */
-/* 单行紧凑排布：id/总线/型号/位置/状态同一行，18 台不滚动全部可见（三栏齐平高度内）。
-   jid/bus/pos/state 定宽（每行是独立网格，不定宽则列随内容参差）；型号列 1fr 可截断，
-   状态列 52px 防 CONFIG_CONFLICT 这类长名挤爆布局，完整信息看行的 title。 */
+/* ---------- 关节索引（TF 侧） ---------- */
+/* 单行紧凑排布：关节名 / 数值 / TF 年龄同一行，18 根不滚动全部可见（三栏齐平高度内）。
+   每行是独立网格：名字列 1fr 可截断，数值与年龄定宽（不定宽则列随内容参差），
+   完整信息（帧对、类型、对应电机）看行的 title。 */
 .joints { list-style: none; margin: 0; padding: 0; }
-.joints li { display: grid; grid-template-columns: 8px 26px 34px minmax(0, 1fr) 45px 52px;
+.joints li { display: grid; grid-template-columns: 8px minmax(0, 1fr) 52px 52px;
   align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid transparent;
   border-left: 2px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
 .joints li:hover { background: var(--panel-2); }
 .joints li.on { background: #14243c; border-color: #24456e; border-left-color: var(--accent); }
 .joints li.empty { display: block; color: var(--dim-2); cursor: default; padding: 10px 0; text-align: center; }
 .joints .jdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim-2); }
-.joints .jid { font-family: var(--mono); font-weight: 600; font-size: var(--fs-sm); }
-.joints .jbus { color: var(--accent); font: 9px var(--mono); white-space: nowrap; }
-.joints .jmodel { color: var(--dim-2); font-size: var(--fs-xs);
+.joints .jid { font-family: var(--mono); font-weight: 600; font-size: var(--fs-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .joints .jpos { font-family: var(--mono); font-size: var(--fs-sm); text-align: right; }
 .joints .jstate { font-size: var(--fs-xs); color: var(--dim-2); letter-spacing: .02em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  text-align: right; white-space: nowrap; }
 .joints .jstate.warn { color: var(--warn); }
 
-/* ---------- 关节状态表（右栏：全部电机同屏，行点击置顶） ---------- */
+/* ---------- 电机状态表（右栏：全部电机同屏，行点击置顶） ---------- */
 /* 定宽百分比列：auto 布局会被 CONFIG_CONFLICT 这类长状态名撑出横向滚动。 */
 .jstates { table-layout: fixed; }
 .jstates td, .jstates th { padding: 2px 6px; }
@@ -328,6 +328,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 input:focus, select:focus { outline: none; border-color: var(--accent); }
 .check { font-size: var(--fs-sm); display: flex; align-items: center; gap: 4px; color: var(--dim); }
 .params .pnum { width: 86px; text-align: right; }
+/* 设备端原值：压在输入框下的一行小字（cnt / mA / 电机端 RPM） */
+.params .rawval { display: block; text-align: right; line-height: 1.1; }
 
 /* 下发表：输入框吃满单元格宽度（数值列宽窄随内容漂移会难对齐）。 */
 .cmd input { width: 100%; min-width: 80px; padding: 3px 6px; }

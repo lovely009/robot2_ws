@@ -3,7 +3,7 @@
 <package format="3">
   <name>web_host</name>
   <version>0.1.0</version>
-  <description>Humanoid robot web station: rosbridge websocket + static web UI.</description>
+  <description>Web 上位机（前端静态资产 + rosbridge + 文件域 API）；台架进程管理在 bench_manager。</description>
   <maintainer email="ly@todo.todo">ly</maintainer>
   <license>Apache-2.0</license>
 
@@ -13,10 +13,11 @@
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosbridge_library</exec_depend>
   <exec_depend>can_bridge_msgs</exec_depend>
-  <!-- 臂视图可选使用 robot_sim 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>ros2launch</exec_depend>
+  <!-- launch 默认同时起 bench_manager（/bench/* 进程管理服务）；可 start_bench_manager:=false 关掉。 -->
+  <exec_depend>bench_manager</exec_depend>
+  <!-- 臂视图可选使用 robot_sim 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

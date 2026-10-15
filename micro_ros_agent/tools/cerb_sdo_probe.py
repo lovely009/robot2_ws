@@ -24,14 +24,19 @@
   - **同总线不得有第二个 SDO 主站**：控制板的配置事务用同一 COB-ID
     （0x600+id），并发发问会撞帧。不要并发触发 `system.refresh`；本脚本
     开场先静默监听一小段，看到别人的 SDO 请求就拒绝开机（--force 可越过）。
-  - **控制板必须在总线上并已运行**（2026-09-19 实测）：把固件与总线断开后，
-    这些 CERB **对外部 SDO 主站一概不应答**——即使 CANable2 在发 0x080
-    （周期反馈照常触发、能收到 0x30x），SDO 请求也是零应答，无论抢安静窗口、
-    拉长等待都不行。接回控制板后同一条请求立刻拿到应答。
-    所以本探针**不是**一个独立于固件的取证工具：它测的是"设备答复设备侧
-    请求"的能力，前提是控制板在同一总线上。
+  - **控制板不是前置条件**：2026-10-15 用 gs_usb/SocketCAN 在**无控制板**的总线上
+    读 node 1 成功（0x1008 回 R58LITE_V2）。2026-09-19 记录的"断开固件后 CERB
+    对外部 SDO 主站一概不应答"作废——当时用的是数据段采样点配错的 SLCAN
+    CANable，收不到设备的 FD+BRS 应答帧，看着像不应答。
+  - **设备只认标准（11 位）帧**：用扩展帧发同 ID 的请求照样被 ACK（错误计数不涨），
+    但设备按 ID 过滤后静默忽略，现象是"发得出去、一条不回"。SocketCAN 路径已按
+    标准帧发送（见 cerb_sdo_probe.py 的 pack_socketcan_fd）。
 
 用法：
+  # gs_usb / SocketCAN（现场当前配置）
+  python3 tools/cerb_sdo_probe.py --interface can0 --node 1
+
+  # SLCAN 串口（旧适配器）
   python3 tools/cerb_sdo_probe.py --dev /dev/serial/by-id/<CANable> --node 2
   python3 tools/cerb_sdo_probe.py --dev /dev/ttyACM1 --node 2 \
       --read 0x2650:00,0x2650:01,0x2650:02,0x2541:00
@@ -46,12 +51,20 @@ from __future__ import annotations
 import argparse
 import os
 import select
+import socket
+import struct
 import sys
 import termios
 import time
 import tty
 
 from fdcan_motor_sim import parse_slcan, slcan_config_commands, slcan_line
+
+# SocketCAN 常量：部分 Python 版本不导出 SOL_CAN_RAW / CAN_RAW_FD_FRAMES，兜住。
+SOL_CAN_RAW = getattr(socket, "SOL_CAN_RAW", 101)
+CAN_RAW_FD_FRAMES = getattr(socket, "CAN_RAW_FD_FRAMES", 5)
+CANFD_MTU = 72          # struct canfd_frame：8B 头 + 64B 数据
+CANFD_BRS = 0x01        # flags 位：数据段切换位率
 
 SDO_REQUEST_ID_BASE = 0x600
 SDO_RESPONSE_ID_BASE = 0x580
@@ -107,7 +120,28 @@ def parse_obj(text: str) -> tuple[int, int]:
     return int(idx_s, 16), int(sub_s, 16)
 
 
-class SdoProbe:
+def pack_socketcan_fd(can_id: int, data: bytes, brs: bool = True) -> bytes:
+    """打包一帧 CAN FD 标准帧（struct canfd_frame，72 字节定长）。"""
+    if len(data) > 64:
+        raise ValueError(f"CAN FD 负载超长：{len(data)}")
+    flags = CANFD_BRS if brs else 0
+    return struct.pack("=IBBBB", can_id, len(data), flags, 0, 0) \
+        + data.ljust(64, b"\x00")
+
+
+def parse_socketcan_fd(frame: bytes):
+    """解析 struct canfd_frame → (can_id, data)；扩展帧返回 None。"""
+    if len(frame) < 8:
+        return None
+    can_id, length, _flags, _r0, _r1 = struct.unpack("=IBBBB", frame[:8])
+    if can_id & 0x80000000:      # CAN_EFF_FLAG：本工具只认标准帧（设备也只认标准帧）
+        return None
+    return can_id, frame[8:8 + min(length, 64)]
+
+
+class SlcanSdoProbe:
+    """SLCAN 串口传输（上游 CANable2 等）。"""
+
     def __init__(self, dev: str, node: int, data_bitrate_index: int):
         self.dev = dev
         self.node = node
@@ -169,12 +203,11 @@ class SdoProbe:
         """
         want = SDO_RESPONSE_ID_BASE + self.node
         req = bytes([0x40, index & 0xFF, (index >> 8) & 0xFF, sub, 0, 0, 0, 0])
-        line = slcan_line(self.node + SDO_REQUEST_ID_BASE, req, True, True)
         deadline = time.monotonic() + timeout
         sent = False
         while True:
             if not sent:
-                os.write(self.fd, line)
+                self.send_request(req)
                 sent = True
             for can_id, data in self.drain(max(0.0, deadline - time.monotonic())):
                 if can_id != want or len(data) < 8:
@@ -193,7 +226,8 @@ class SdoProbe:
                     continue
                 n = 4 - ((data[0] >> 2) & 0x03)  # 0x43→4B，0x4B→2B，0x4F→1B
                 if (data[0] & 0x02) == 0:  # 非加速：分段上传
-                    return "segmented", data[0], None
+                    total = int.from_bytes(data[4:8], "little")
+                    return "segmented", total, None
                 raw = int.from_bytes(data[4:4 + n], "little", signed=True)
                 return "ok", n, raw
             if time.monotonic() >= deadline:
@@ -209,8 +243,7 @@ class SdoProbe:
         want = SDO_RESPONSE_ID_BASE + self.node
         payload = int(value).to_bytes(4, "little", signed=True)
         req = bytes([0x23, index & 0xFF, (index >> 8) & 0xFF, sub]) + payload
-        os.write(self.fd, slcan_line(self.node + SDO_REQUEST_ID_BASE, req,
-                                     True, True))
+        self.send_request(req)
         for can_id, data in self.drain(timeout):
             if can_id != want or len(data) < 8:
                 continue
@@ -235,9 +268,90 @@ class SdoProbe:
         """
         for attempt in range(1, attempts + 1):
             status, detail, raw = self.read_once(index, sub)
+            if status == "segmented":
+                body = self.upload_segments(detail)
+                if body is None:
+                    continue          # 取段丢帧：重试整条事务
+                return "upload", detail, body, attempt
             if status != "timeout":
                 return status, detail, raw, attempt
         return "timeout", None, None, attempts
+
+    def upload_segments(self, total: int, timeout: float = 0.3):
+        """分段上传取段并拼接（命令字 bit4 = 切换位，0x60/0x70 交替）。
+
+        段应答 ccs 位为 0，末段带 n（未用字节数）与 c=1。丢一段就返回 None——调用方
+        重试整条事务：SDO 是一问一答，中间断一次就无法续上。
+        """
+        want = SDO_RESPONSE_ID_BASE + self.node
+        body, toggle = b"", 0
+        while len(body) < total:
+            self.send_request(bytes([0x60 | (toggle << 4), 0, 0, 0, 0, 0, 0, 0]))
+            deadline = time.monotonic() + timeout
+            got = None
+            while got is None:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return None
+                for can_id, data in self.drain(left):
+                    if can_id == want and len(data) >= 8 and (data[0] & 0xE0) == 0:
+                        got = data
+                        break
+            if got[0] & 0x80:            # 段应答里不该出现的位：当作丢帧重来
+                return None
+            body += got[1:8]
+            toggle ^= 1
+            if got[0] & 0x01:
+                break
+        return body[:total]
+
+    def send_request(self, req: bytes) -> None:
+        os.write(self.fd, slcan_line(self.node + SDO_REQUEST_ID_BASE, req,
+                                     True, True))
+
+
+class SocketCanSdoProbe(SlcanSdoProbe):
+    """SocketCAN 传输（gs_usb 等）。现场适配器换成 gs_usb 后，SLCAN 路径用不上。"""
+
+    def __init__(self, interface: str, node: int):
+        self.interface = interface
+        self.node = node
+        self.sock = None
+        self.rx_buf = b""
+
+    def open(self):
+        self.sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW,
+                                  socket.CAN_RAW)
+        self.sock.setsockopt(SOL_CAN_RAW, CAN_RAW_FD_FRAMES, 1)
+        self.sock.bind((self.interface,))
+        self.sock.setblocking(False)
+
+    def close(self):
+        if self.sock is not None:
+            self.sock.close()
+            self.sock = None
+
+    def send_request(self, req: bytes) -> None:
+        # 设备只认**标准帧**：同 ID 的扩展帧照样被 ACK，但按 ID 过滤后静默忽略。
+        self.sock.send(pack_socketcan_fd(self.node + SDO_REQUEST_ID_BASE, req))
+
+    def drain(self, timeout: float) -> list[tuple[int, bytes]]:
+        frames: list[tuple[int, bytes]] = []
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return frames
+            readable, _, _ = select.select([self.sock], [], [], left)
+            if not readable:
+                return frames
+            try:
+                raw = self.sock.recv(CANFD_MTU)
+            except (BlockingIOError, OSError):
+                continue
+            parsed = parse_socketcan_fd(raw)
+            if parsed:
+                frames.append(parsed)
 
 
 def format_result(index: int, sub: int, note: str, status, detail, raw,
@@ -245,8 +359,9 @@ def format_result(index: int, sub: int, note: str, status, detail, raw,
     head = f"  0x{index:04X}:{sub:02X}  "
     if status == "ok":
         body = f"OK   {detail} 字节  raw={raw} (0x{raw & 0xFFFFFFFF:08X})"
-    elif status == "segmented":
-        body = f"分段上传（非加速，首字节 0x{detail:02X}）——本工具不拼接"
+    elif status == "upload":
+        text = raw.decode("ascii", "replace")
+        body = (f"分段上传 {detail} 字节 = {text!r}  hex={' '.join(f'{b:02X}' for b in raw)}")
     elif status == "abort":
         name = ABORT_CODES.get(detail, "（未收录的中止码）")
         body = f"**ABORT 0x{detail:08X}  {name}**"
@@ -257,7 +372,9 @@ def format_result(index: int, sub: int, note: str, status, detail, raw,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--dev", required=True, help="CANable SLCAN 串口")
+    target = ap.add_mutually_exclusive_group(required=True)
+    target.add_argument("--dev", help="SLCAN 串口（旧适配器）")
+    target.add_argument("--interface", help="SocketCAN 接口（gs_usb，如 can0）")
     ap.add_argument("--node", type=int, required=True, help="CERB 节点 id")
     ap.add_argument("--read", type=parse_obj, action="append", default=None,
                     help="index:sub，可重复；缺省或 --default 时用内置对象清单")
@@ -273,7 +390,8 @@ def main() -> int:
     ap.add_argument("--repeat", type=int, default=1,
                     help="每条对象重复读几遍（区分稳定读不动 vs 偶发丢帧）")
     ap.add_argument("--data-bitrate-index", type=int, choices=range(10), default=5,
-                    help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）")
+                    help="SLCAN Y 命令索引（上游 CANable2 的 5Mbps 为 5）；"
+                         "--interface 时忽略")
     args = ap.parse_args()
 
     targets = ([(i, s, "命令行指定") for i, s in args.read] if args.read
@@ -281,7 +399,8 @@ def main() -> int:
     if not args.read and not args.default:
         print("[probe] 未指定 --read，改用内置对象清单")
 
-    probe = SdoProbe(args.dev, args.node, args.data_bitrate_index)
+    probe = (SocketCanSdoProbe(args.interface, args.node) if args.interface
+             else SlcanSdoProbe(args.dev, args.node, args.data_bitrate_index))
     probe.open()
     try:
         if probe.foreign_master_seen(args.listen_s) and not args.force:
@@ -293,7 +412,8 @@ def main() -> int:
             print(f"  0x{index:04X}:{sub:02X}  WRITE {value} → {status}"
                   f"{'' if detail is None else f' (读回 {detail})'}")
         label = "只读上传请求" if not args.write else "只读上传请求（写已完成）"
-        print(f"[probe] node {args.node} @ {args.dev}，{label}：")
+        where = args.interface or args.dev
+        print(f"[probe] node {args.node} @ {where}，{label}：")
         for index, sub, note in targets:
             for attempt in range(max(1, args.repeat)):
                 status, detail, raw, tries = probe.read(index, sub)

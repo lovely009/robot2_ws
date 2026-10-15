@@ -1,0 +1,18 @@
+# 启动 robot_sim/simulation.launch.py。空串 = 未给该参数（缺省不进命令行），
+# 与旧 HTTP 请求的「键缺省 = 用 launch 默认值」语义一致。
+string backend            # gazebo | mujoco
+string transport          # vcan | socketcan | slcan
+string controller_mode    # host | external | firmware
+string model
+string vcan_interface
+string sim_interface
+string driver_interface
+string sim_tty
+string driver_tty
+string spawn_z            # "" 或米制数值
+string gravity            # "" | "true" | "false"
+string fixed_base         # "" | "true" | "false"
+---
+bool ok
+string error
+string status_json        # 与 /bench/status 话题同构的快照（失败时也带，供页面回显）

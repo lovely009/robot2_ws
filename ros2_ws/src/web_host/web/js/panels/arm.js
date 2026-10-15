@@ -6,9 +6,9 @@
 // 依赖全部 vendor 在 web/vendor/（three 0.160.1 + urdf-loader 0.13.1），
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
-// 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把
-// robot_sim 的 share 目录挂到 /robot_sim，URDF 里的
-// package://robot_sim/... 经 loader.packages 映射成 /robot_sim/...。
+// 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把模型包根
+// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_sim/... 经
+// loader.packages 映射成 /robot_sim/...。模型可在页内切换（底栏选择器，见 mount）。
 //
 // 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
 // 与重构前的 arm3d.js 相比：去掉 window.Arm3D 全局桥（改由 mount 直接调用），
@@ -17,7 +17,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import URDFLoader from '../../vendor/URDFLoader.js';
-import { store, DIRTY, markDirty, JOINT_OF_MOTOR, MODEL, targetOf } from '../core/store.js';
+import { store, DIRTY, markDirty, JOINT_OF_MOTOR, MODEL, targetOf, availableModels } from '../core/store.js';
+import { collectModelJoints } from '../core/tf.js';
+import { $ } from '../core/format.js';
 
 // URDF 是 **Z-up**（ROS 约定），three.js 默认 Y-up——不设这一行整条臂会"躺着"。
 // urdf-loader 自己不管这件事：它只把 box/cylinder 这类**图元**转 90° 适配 Y-up，
@@ -40,6 +42,7 @@ const picked = [];           // 供射线拾取的 marker 列表
 let selected = null;
 let onSelect = null;
 let ghostMat = null;         // 幽灵共用一份半透明材质（几何与实体共享）
+let loadGen = 0;             // URDF 加载代次：切换模型/卸载时作废在途回调
 
 function tick() {
   controls.update();
@@ -90,7 +93,10 @@ export function init(canvas, opts) {
 
   const loader = new URDFLoader();
   loader.packages = packages;      // { 包名: 路径前缀 } —— package:// 的解析表
+  // 代次守卫：切换模型/卸载会作废在途加载，过期回调不得再碰新的场景对象。
+  const gen = ++loadGen;
   loader.load(urdfUrl, (r) => {
+    if (gen !== loadGen) { return; }
     robot = r;
     // 这臂没有关节限位动画，包围盒按几何算；关掉剔除免得绕到背后就整段消失。
     robot.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; } });
@@ -105,8 +111,14 @@ export function init(canvas, opts) {
 
     frameCamera(robot);
     resize();
-    if (onReady) { onReady(Object.keys(robot.joints || {})); }
-  }, onProgress, (err) => { if (onError) { onError(err); } });
+    // 「关节」列表（TF 侧）的元数据（父子 link / 轴 / 原点）取自这次解析结果。
+    if (onReady) { onReady(collectModelJoints(robot)); }
+  }, (url, loaded, total) => {
+    if (gen === loadGen && onProgress) { onProgress(url, loaded, total); }
+  }, (err) => {
+    if (gen !== loadGen) { return; }
+    if (onError) { onError(err); }
+  });
 
   renderer.setAnimationLoop(tick);
 }
@@ -209,8 +221,7 @@ const onVisibilityChange = () => setRunning(!document.hidden);
 // 释放 three.js 资源。切屏会反复 mount/unmount，不释放会一路涨显存。
 // 几何与材质在幽灵与实体之间共享（ghostMat 是共用材质），故先收集再释放，避免重复。
 function disposeScene() {
-  window.removeEventListener('resize', onWindowResize);
-  document.removeEventListener('visibilitychange', onVisibilityChange);
+  loadGen += 1;               // 作废在途的 URDF 加载（见 init 的代次守卫）
   if (!scene) return;
   const geoms = new Set();
   const mats = new Set();
@@ -283,7 +294,7 @@ function armSyncColors() {
 
 export function mount(rootEl, ctx) {
   const stage = rootEl.querySelector('.stage') || rootEl;
-  const canvas = document.createElement('canvas');
+  let canvas = document.createElement('canvas');
   canvas.className = 'arm3d';
   const hud = document.createElement('div');
   hud.className = 'hud';
@@ -294,54 +305,99 @@ export function mount(rootEl, ctx) {
   stage.prepend(canvas);
 
   let ready = false;
+  let hudFadeTimer = 0;
+  let modelSelect = null;
   const pickJoint = (jointName) => {
     // 臂上小球 → 电机 id（JOINT_OF_MOTOR 反查），点击与左栏选中双向联动
     const entry = Object.entries(JOINT_OF_MOTOR).find(([, j]) => j === jointName);
     if (entry) ctx.ui.selectMotor(parseInt(entry[0], 10));
   };
 
-  init(canvas, {
-    urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
-    // package://robot_sim/... → static_server 挂在根部的 share 目录
-    packages: {'robot_sim': '/robot_sim'},
-    onSelect: pickJoint,
-    // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
-    onProgress: (url, loaded, total) => {
-      if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
-        hud.textContent = `臂视图加载中 ${Math.round(loaded / total * 100)}%`;
-      }
-    },
-    onReady: (joints) => {
-      // 没进映射表的 URDF 关节要点名——否则「这根不动」会被当成故障去排查。
-      const mapped = Object.values(JOINT_OF_MOTOR);
-      const extra = joints.filter((j) => !mapped.includes(j));
-      hud.textContent = `臂视图就绪 · ${joints.length} 个关节`
-        + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
-        + ' · STL 约 70 MB（首次慢，之后走浏览器缓存）';
-      ready = true;
-      // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
-      // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。
-      setSelected(JOINT_OF_MOTOR[store.selectedId] || null);
-      markDirty(DIRTY.MOTION);
-      setTimeout(() => { hud.style.opacity = '0.3'; }, 5000);
-    },
-    onError: (err) => {
-      hud.className = 'hud err';
-      hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
-        + '（查 static_server 是否挂载 /robot_sim、static server 日志）';
-    },
-  });
+  // 模型选择器（图例栏）：候选来自 static_server 的 /api/models（有 urdf 的模型）；
+  // 接口不可用时只留当前项。切换 → ctx.ui.setModel → DIRTY.MODEL → startLoad() 重载。
+  modelSelect = $('armModel');
+  if (modelSelect) {
+    const fillOptions = (names) => {
+      const list = names.includes(MODEL) ? names : [MODEL, ...names];
+      modelSelect.replaceChildren(...list.map((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        return option;
+      }));
+      modelSelect.value = MODEL;
+    };
+    fillOptions([]);
+    availableModels().then(fillOptions).catch(() => { /* 列表取不到：保留当前项 */ });
+    modelSelect.addEventListener('change', () => {
+      if (modelSelect.value) { ctx.ui.setModel(modelSelect.value); }
+    });
+  }
+
+  // 加载/按当前 MODEL 重载：整场景重建，canvas 也换一块新的——同一 canvas 上重建
+  // WebGLRenderer 会复用旧 context，新元素最省心（与切屏同一套释放路径）。
+  // window/visibility 监听只随面板开关、不随模型切换（disposeScene 不摘它们）。
+  function startLoad() {
+    ready = false;
+    window.clearTimeout(hudFadeTimer);
+    hud.className = 'hud';
+    hud.style.opacity = '';
+    hud.textContent = '臂视图加载中…';
+    if (renderer) {
+      disposeScene();
+      canvas.remove();
+      canvas = document.createElement('canvas');
+      canvas.className = 'arm3d';
+      stage.prepend(canvas);
+    }
+    init(canvas, {
+      urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
+      // package://robot_sim/... → static_server 挂在根部的模型包根
+      packages: {'robot_sim': '/robot_sim'},
+      onSelect: pickJoint,
+      // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
+      onProgress: (url, loaded, total) => {
+        if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
+          hud.textContent = `臂视图加载中 ${Math.round(loaded / total * 100)}%`;
+        }
+      },
+      onReady: (joints) => {
+        // 没进映射表的 URDF 关节要点名——否则「这根不动」会被当成故障去排查。
+        const names = joints.map((j) => j.name);
+        const mapped = Object.values(JOINT_OF_MOTOR);
+        const extra = names.filter((j) => !mapped.includes(j));
+        hud.textContent = `臂视图就绪 · ${names.length} 个关节`
+          + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
+          + ' · STL 约 70 MB（首次慢，之后走浏览器缓存）';
+        ready = true;
+        // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
+        // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。
+        setSelected(JOINT_OF_MOTOR[store.selectedId] || null);
+        markDirty(DIRTY.MOTION);
+        hudFadeTimer = setTimeout(() => { hud.style.opacity = '0.3'; }, 5000);
+      },
+      onError: (err) => {
+        hud.className = 'hud err';
+        hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
+          + '（查 static_server 是否挂载 /robot_sim、static server 日志）';
+      },
+    });
+    setRunning(!document.hidden);     // 后台标签页不空转渲染
+  }
+
+  startLoad();
   window.addEventListener('resize', onWindowResize);
   document.addEventListener('visibilitychange', onVisibilityChange);
-  setRunning(!document.hidden);     // 后台标签页不空转渲染
 
   const render = (dirty) => {
-    if (!ready) return;
+    if (dirty.has(DIRTY.MODEL)) { startLoad(); }
+    if (modelSelect && modelSelect.value !== MODEL) { modelSelect.value = MODEL; }
+    if (!ready) { return; }
     if (dirty.has(DIRTY.MOTION)) { armSyncJoints(); armSyncGhost(); }
     if (dirty.has(DIRTY.MOTION) || dirty.has(DIRTY.STATUS) || dirty.has(DIRTY.TOPOLOGY)) {
       armSyncColors();
     }
-    if (dirty.has(DIRTY.SELECTED)) setSelected(JOINT_OF_MOTOR[store.selectedId] || null);
+    if (dirty.has(DIRTY.SELECTED)) { setSelected(JOINT_OF_MOTOR[store.selectedId] || null); }
   };
   render(new Set([DIRTY.MOTION, DIRTY.STATUS]));
   return {
@@ -350,6 +406,8 @@ export function mount(rootEl, ctx) {
       // three.js 资源必须显式释放：切屏会反复 mount/unmount，不释放会一路涨显存
       setRunning(false);
       disposeScene();
+      window.removeEventListener('resize', onWindowResize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       ready = false;
     },
   };

@@ -19,6 +19,8 @@
 | [0010 web_host 前端的无构建链分层](0010-web-host-frontend-layering-without-build-chain.md) | accepted | **当前有效**：`web_host` 前端保持纯静态（原生 ES module + import map），按外壳/屏/面板三层组织，状态集中在 store，DOM 单一来源，可测性由 Python 侧静态契约测试承担。 |
 | [0011 仿真后端可选与默认模型收敛](0011-simulation-backend-selection.md) | accepted | **当前有效、模型已更名**：`simulation.launch.py` 增 `backend:=gazebo|mujoco`（后端只替换被控对象入口，其余接线共用）；默认模型收敛到一个模型（`full_body`，2026-10-13 更名为 `half_body_robot` 且关节限位收窄）并删除 `models/robot_all/`；连带修 `fdcan_motor_sim.py` 的命令顺序与 `bench_up.sh` 默认档。与 0009 的关系见该 ADR 的 Consequences。 |
 
+| [0012 电机模拟器收敛为单一后端](0012-single-motor-simulator-backend.md) | proposed | **待确认**：把 `motor_sim`（C++/ROS）与 `fdcan_motor_sim.py`（Python/HIL）收敛为一个 C++ 后端、一份配置、一个控制面；分两步交付，第二步补故障建模。 |
+
 ## 维护规则
 
 - 修改已 accepted ADR 的决策边界时，新建 ADR 或明确 `superseded-by`，不静默重写历史理由。

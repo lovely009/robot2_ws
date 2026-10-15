@@ -107,9 +107,9 @@ def armature_by_joint() -> dict[str, float]:
 def torque_limits_by_joint() -> dict[str, float]:
     """{关节名: 峰值力矩 N·m}，取自拓扑的 `mit_torque_limit_nm`（输出端）。
 
-    URDF 的 `<limit effort="10.0">` 是占位值，**对所有关节一视同仁**，会把 r58 的
-    45 N·m 削到 10——真机按型号库 peak_torque_nm（r58 45 / r48 11）出力，MJCF 必须
-    跟上，否则被控对象里大关节永远出不上力。读不到时返回空表（MJCF 沿用 URDF 值）。
+    **不能用 URDF 的 `<limit effort>`**：那是**额定**力矩（r58 20 / r48 5 / vaxor
+    1.15），真机按型号库 peak_torque_nm 出力（r58 45 / r48 11），照 URDF 取会把大关节
+    削掉一半多。读不到时返回空表（MJCF 沿用 URDF 值）。
     """
     config = MODEL_DIR / "config" / "motor_driver.yaml"
     if not config.is_file():
@@ -163,9 +163,9 @@ def velocity_limits_by_joint() -> dict[str, float]:
     """{关节名: 速度上限 rad/s}，取自型号库的 `rated_speed_rad_s`（**关节侧**）。
 
     MuJoCo 的 `<joint>` 没有速度上限属性，所以这条约束只能搭执行器的 `user` 字段
-    进 MJCF（见 convert()）。**不能用 URDF 的 `<limit velocity>`**——那是 CAD 导出的
-    占位值（全关节 1.0）；也不是拓扑里的 `mit_velocity_limit_rad_s`（那是协议的量化
-    范围 30 rad/s，不是物理上限）。真值在厂商参数页，落在型号库。
+    进 MJCF（见 convert()）。**口径取型号库**：2026-10-15 起 URDF 的 `<limit velocity>`
+    也是这几个额定值（此前是占位 1.0），但真值在厂商参数页、宿主是型号库；拓扑里的
+    `mit_velocity_limit_rad_s` 不是物理上限（那是协议的量化范围 30 rad/s）。
     """
     section, specs = _topology_and_specs()
     out = {}

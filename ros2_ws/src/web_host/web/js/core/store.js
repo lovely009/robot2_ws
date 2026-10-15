@@ -7,7 +7,7 @@ export const store = {
   // text：顶栏连接文案（setConn 写它，renderShell 画它）
   conn: {connected: false, text: '未连接', url: '', agent: 'stopped', agentDevice: '',
          agentError: '', agentReturncode: null, canStop: false, lastMsgAt: 0,
-         autoLoaded: false},
+         autoLoaded: false, benchLoaded: false},
   // motors: id -> {topo, motion, status}（与重构前的 state.motors 同形状，搬迁期不改字段名）
   motors: new Map(),
   lastError: 0,
@@ -22,6 +22,11 @@ export const store = {
   temp: undefined,
   tempLast: 0,
   motionCount: 0,
+  // TF（关节侧）：child_frame → {parent, xyz, quat, dynamic, at, count}。关节列表
+  // 按模型 URDF 的父子 link 配这里的条目，与电机流（motion_states）互不相干。
+  tf: new Map(),
+  // 模型关节表（collectModelJoints 装入）：关节列表除 TF 之外的另一半来源。
+  modelJoints: [],
   selectedId: 0,
   // 置顶序（点击过的电机，最近在前）。左栏关节列表与右栏状态表共用一个次序：
   // 点一台 → 两处都排最上，观察与操作对照不用来回找。
@@ -38,6 +43,10 @@ export const store = {
   // trajectory_state（动作屏的窗口交棒判定与进度显示都读它，见 core/ros.js）
   traj: {activeTrajectoryId: 0, waitingState: false, segmentIndex: 0, segmentCount: 0,
          state: null},
+  // 台架（bench_manager 的 /bench/status 快照）：simulation / agent / motor_backend
+  // 三段；core/ros.js 订阅写入，台架服务（core/agent.js）的命令响应也经
+  // applyBenchStatus 写同一份。
+  bench: {simulation: null, agent: null, motor_backend: null},
 };
 
 // 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
@@ -86,7 +95,8 @@ export function runRenderLoop() {
 export const DIRTY = {
   CONN: 'conn', TOPOLOGY: 'topology', MOTION: 'motion', STATUS: 'status',
   EVENTS: 'events', HISTORY: 'history', PARAMS: 'params', TRAJ: 'traj',
-  IMU: 'imu', POLICY: 'policy', SELECTED: 'selected', ALERTS: 'alerts',
+  IMU: 'imu', POLICY: 'policy', SELECTED: 'selected', TF: 'tf', MODEL: 'model',
+  BENCH: 'bench',
 };
 
 // 写操作是否可用。断连时页面不猜、不降级、不静默重试（与 motor_hardware_interface 的
@@ -101,8 +111,31 @@ export function syncWriteButtons(ids, allow) {
   }
 }
 
-// 电机汇总计数：顶栏 chips 与状态翼共用同一口径（在线/运行/冲突/故障），避免
-// 两处各算一遍导致漂移。
+// 台架状态入 store（/bench/status 话题帧与 bench 服务的响应共用这一条路）。
+// agent 段顺带同步进 conn.agent*（顶栏文案由 main.js 的 renderShell 画）；
+// 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
+export function applyBenchStatus(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  const bench = store.bench;
+  if (snapshot.simulation) bench.simulation = snapshot.simulation;
+  if (snapshot.motor_backend) bench.motor_backend = snapshot.motor_backend;
+  if (snapshot.agent) {
+    bench.agent = snapshot.agent;
+    const c = store.conn;
+    c.agent = snapshot.agent.state || 'stopped';
+    c.agentDevice = snapshot.agent.device || '';
+    c.agentError = snapshot.agent.error || '';
+    c.agentReturncode = snapshot.agent.returncode === undefined
+      ? null : snapshot.agent.returncode;
+    // 服务端状态没有 canStop 字段时按 state 推导；页面合成的错误态可显式带它
+    c.canStop = c.agent === 'running' || !!snapshot.agent.canStop;
+    markDirty(DIRTY.CONN);
+  }
+  markDirty(DIRTY.BENCH);
+}
+
+// 电机汇总计数：顶栏 chips 与「电机状态」表共用同一口径（在线/运行/冲突/故障），
+// 避免两处各算一遍导致漂移。
 export function countMotors() {
   let online = 0, fault = 0, active = 0, conflict = 0;
   for (const r of store.motors.values()) {
@@ -202,7 +235,31 @@ export async function loadModelJoints() {
 // 默认模型与 robot_sim 的 launch 默认值保持一致（half_body_robot，四个 launch 都是它）。
 // 旧默认值（zhoubuguanjie_youbi_001 / chest_upper_00 / robot_all）对应的模型都已删除，
 // 留着会让臂视图默认 404。
-export const MODEL = URLQ.get('model') || 'half_body_robot';
+const DEFAULT_MODEL = 'half_body_robot';
+const MODEL_STORAGE_KEY = 'web_host.model';
+function readSavedModel() {
+  try { return localStorage.getItem(MODEL_STORAGE_KEY) || ''; } catch (_e) { return ''; }
+}
+// 当前显示的模型：?model= 最高优先，其次上次页内切换（localStorage），最后默认值。
+export let MODEL = URLQ.get('model') || readSavedModel() || DEFAULT_MODEL;
+
+// 页内切换模型：臂视图重载（DIRTY.MODEL）+ 重取关节映射。?joints= 手工覆盖仍最高
+// 优先（loadModelJoints 直接返回，换模型不改变手工映射）。
+export function setModel(name) {
+  if (!name || name === MODEL) return;
+  MODEL = name;
+  try { localStorage.setItem(MODEL_STORAGE_KEY, name); } catch (_e) { /* 存储禁用时仅本次会话生效 */ }
+  markDirty(DIRTY.MODEL);
+  loadModelJoints();
+}
+
+// 臂视图可切换的模型（有 urdf/<名>.urdf 的目录，由 static_server 的 /api/models 枚举）。
+export async function availableModels() {
+  const resp = await fetch('/api/models', {cache: 'no-store'});
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return Array.isArray(data && data.models) ? data.models : [];
+}
 
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，

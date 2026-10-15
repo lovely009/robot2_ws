@@ -1,10 +1,8 @@
 """测试守卫：web_host 的单测**不得**真起进程。
 
-仿真面板能起 `ros2 launch robot_sim simulation.launch.py`（会拉起 Gazebo 或
-MuJoCo 窗口、创建 vcan），`AgentProcessManager` 能起 micro-ROS Agent 抢串口——一个误写
-的测试就能真占端口、真开窗口。这里把 `subprocess.Popen` 换成「一调用就报错」，逼测试
-显式注入 `popen_factory` 假体（现有测试都这么做）。某个测试确实需要真进程时，请在那个
-测试里显式 monkeypatch 回来，并说明为什么。
+进程管理（仿真 / Agent / 电机后端会真占端口、真开窗口）已迁去 bench_manager，
+那边有自己的守卫；web_host 现在只剩静态服务与文件域，本守卫防的是将来误加的
+测试真起进程。确实需要真进程时请在那个测试里显式 monkeypatch 回来并说明原因。
 """
 
 from __future__ import annotations

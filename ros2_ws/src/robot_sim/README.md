@@ -253,8 +253,10 @@ ros2 launch robot_sim simulation.launch.py backend:=mujoco \
   这个巧合——顺序漂移在 Gazebo 侧踩过一次，且两边长度相同不会报错。
 - **`/clock`**：两条路都发（Gazebo 走 `ros_gz_bridge`，MuJoCo 由桥按物理时间发），
   robot_state_publisher 的 `use_sim_time:=true` 因此都有意义。
-- **`gravity:=false` 不支持 MuJoCo**：MJCF 的重力在生成期固定，运行期没有开关，launch 会显式
-  拒绝而不是静默忽略。
+- **`gravity` / `spawn_z` / `fixed_base` 只有 Gazebo 有实现**：`simulation.launch.py` 把三者
+  原样透传给 `gazebo.launch.py`（默认值与上表逐字一致，避免「不设置」也改变行为）；MuJoCo 的
+  重力、生成高度与基座焊接都在 MJCF 生成期固定，给了非默认值就显式拒绝而不是静默忽略。
+  web 上位机「模型」抽屉调的正是这三个。
 - **Wayland 下的 viewer**：pyGLFW 在 Wayland 会话默认载入 wayland 变体，实测该后端窗口自旋
   （`sync()` 不返回、主线程 ~39% CPU、`/joint_states` 一帧不发）。`mujoco.launch.py` 在**进程外**
   给桥进程置 `PYGLFW_LIBRARY_VARIANT=x11` 并删掉 `WAYLAND_DISPLAY`（脚本内设置太晚：

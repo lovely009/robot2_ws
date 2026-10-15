@@ -25,6 +25,12 @@ export const TOPICS = {
   sysStatus: {name: '/micro_ros_up/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   paramSet: {name: '/micro_ros_do/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
   sysCmd: {name: '/micro_ros_do/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
+  // TF（关节侧）：robot_state_publisher 发；页面只读，用来与电机流对照。
+  tf: {name: '/tf', type: 'tf2_msgs/msg/TFMessage'},
+  tfStatic: {name: '/tf_static', type: 'tf2_msgs/msg/TFMessage'},
+  // 台架状态（bench_manager 节点，1 Hz + 命令后立即发）：仿真 / Agent / 电机
+  // 后端三段快照的 JSON 字符串。
+  bench: {name: '/bench/status', type: 'std_msgs/msg/String'},
 };
 
 export const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -124,4 +130,3 @@ export function fmtParam(value) {
 export const CONTROLLER_PORT_STORAGE_KEY = 'robot2.controllerSerialPort';
 export const ROS_URL_STORAGE_KEY = 'robot2.rosbridgeUrl';
 export const FOLD_KEY = 'web_host.fold';
-export const WING_KEY = 'web_host.wing';

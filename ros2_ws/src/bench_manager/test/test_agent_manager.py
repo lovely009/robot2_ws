@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from web_host.agent_manager import AgentProcessManager, enumerate_serial_ports
+from bench_manager.agent_manager import AgentProcessManager, enumerate_serial_ports
 
 
 def test_enumerate_serial_ports_prefers_stable_by_id_names(tmp_path):

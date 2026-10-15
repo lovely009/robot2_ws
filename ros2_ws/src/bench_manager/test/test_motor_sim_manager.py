@@ -1,4 +1,4 @@
-"""`MotorSimProcessManager` 与联动规则的测试（电机后端：web 上位机独立进程）。
+"""`MotorSimProcessManager` 与联动规则的测试（电机后端：bench_manager 独立进程）。
 
 同 test_simulation_manager：不产生真实子进程（fake popen 注入），不碰
 CAN 接口与串口；socket 通信用临时目录里的真实 Unix socket 端到端。
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from web_host.motor_sim_manager import (
+from bench_manager.motor_sim_manager import (
     MotorSimProcessManager,
     hil_motor_backend_request,
     query_motor_sim,
@@ -108,7 +108,7 @@ def test_hil_backend_request_rules() -> None:
 
 def test_start_builds_simulator_only_launch(canable: str,
                                             monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('web_host.motor_sim_manager.os.getpid', lambda: 65001)
+    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65001)
     spawned: list[tuple[list[str], dict[str, Any]]] = []
     manager = _manager(spawned, serial=_serial(canable))
 
@@ -123,7 +123,7 @@ def test_start_builds_simulator_only_launch(canable: str,
     assert f'sim_tty:={canable}' in command
     assert 'start_web_host:=false' in command
     assert 'start_micro_ros_agent:=false' in command
-    assert 'sim_control_socket:=/tmp/web_host_motor_backend_65001.sock' in command
+    assert 'sim_control_socket:=/tmp/bench_motor_backend_65001.sock' in command
     assert kwargs['start_new_session'] is True
     assert status['state'] == 'running'
     assert status['config']['sim_tty'] == canable
@@ -192,7 +192,7 @@ def test_same_config_is_reused_and_conflict_rejected(
 
 def test_auto_started_flag_is_not_stolen_on_reuse(
         canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('web_host.motor_sim_manager.os.getpid', lambda: 65002)
+    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65002)
     spawned: list[tuple[list[str], dict[str, Any]]] = []
     manager = _manager(spawned, serial=_serial(canable))
     request = _request(sim_tty=canable)
@@ -210,9 +210,9 @@ def test_auto_started_flag_is_not_stolen_on_reuse(
 def test_stop_removes_control_socket_file(
         canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
     # FakeProcess 的 pid 是假的；别让 stop 真的 killpg 到无关进程组
-    monkeypatch.setattr('web_host.motor_sim_manager.os.killpg',
+    monkeypatch.setattr('bench_manager.motor_sim_manager.os.killpg',
                         lambda *args, **kwargs: None)
-    monkeypatch.setattr('web_host.motor_sim_manager.os.getpid', lambda: 65003)
+    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65003)
     spawned: list[tuple[list[str], dict[str, Any]]] = []
     manager = _manager(spawned, serial=_serial(canable))
     status = manager.start(_request(sim_tty=canable), auto=True)
@@ -274,11 +274,11 @@ def test_motor_request_requires_running_backend() -> None:
 
 def test_motor_request_forwards_through_manager(
         canable: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('web_host.motor_sim_manager.os.getpid', lambda: 65004)
+    monkeypatch.setattr('bench_manager.motor_sim_manager.os.getpid', lambda: 65004)
     spawned: list[tuple[list[str], dict[str, Any]]] = []
     manager = _manager(spawned, serial=_serial(canable))
     manager.start(_request(sim_tty=canable))
-    socket_path = '/tmp/web_host_motor_backend_65004.sock'
+    socket_path = '/tmp/bench_motor_backend_65004.sock'
     seen: list[dict[str, Any]] = []
     response = {'ok': True, 'motors': [{'id': 1, 'linked': True}]}
     server, thread = _serve_control_once(socket_path, response, seen)

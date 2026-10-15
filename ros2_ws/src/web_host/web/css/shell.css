@@ -1,4 +1,4 @@
-/* ---------- 骨架：顶栏 / 左导航 / 主区 / 状态翼 ---------- */
+/* ---------- 骨架：顶栏 / 左导航 / 主区 ---------- */
 /* 滚动条：深色细条。默认（未定制）时 Chromium/Linux 会画浅色轨道 + 上下箭头，
    在深色界面里非常扎眼（用户明说太丑）。::-webkit-scrollbar 不带前缀作用于所有
    可滚动元素；Firefox 走 scrollbar-width/color。 */
@@ -12,14 +12,13 @@
 
 .shell {
   display: grid;
-  grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--wing-w);
+  grid-template-columns: var(--nav-w) minmax(0, 1fr);
   grid-template-rows: var(--topbar-h) minmax(0, 1fr);
-  grid-template-areas: "top top top" "nav main wing";
+  grid-template-areas: "top top" "nav main";
   height: 100vh;
   gap: var(--gap-sm);
   padding: var(--gap-sm);
 }
-body.wing-collapsed .shell { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--wing-w-min); }
 
 .topbar { grid-area: top; display: flex; align-items: center; gap: var(--gap-sm);
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -27,9 +26,6 @@ body.wing-collapsed .shell { grid-template-columns: var(--nav-w) minmax(0, 1fr) 
 .nav { grid-area: nav; background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: var(--gap-sm); display: flex; flex-direction: column; gap: 3px; }
 .main { grid-area: main; min-width: 0; overflow: auto; }
-.wing { grid-area: wing; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: var(--gap-sm); overflow: auto;
-  display: flex; flex-direction: column; gap: var(--gap-sm); }
 
 /* 左导航项：按钮不是链接——切屏不产生历史记录栈，hash 由 router 写 */
 .nav button { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
@@ -70,31 +66,8 @@ button.tiny-btn { font-size: var(--fs-xs); padding: 3px 8px; }
 button:disabled, select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ---------- 断连置灰：不隐藏，保留最后一帧数值并标注陈旧 ---------- */
-body.offline .main, body.offline .wing { opacity: .6; }
+body.offline .main { opacity: .6; }
 .stale-badge { color: var(--warn); font-size: var(--fs-xs); }
-
-/* ---------- 状态翼 ---------- */
-/* 三态：wing-collapsed = 用户显式收起；wing-expanded = 用户显式展开；两个类都没有
-   = 未选择，收起与否由断点决定（见下方断点段）。收起外观 = 只剩竖条。 */
-.wing-head { display: flex; align-items: center; justify-content: space-between; color: var(--dim); font-size: var(--fs-xs); }
-.wing-toggle { background: transparent; border: none; color: var(--dim); cursor: pointer; padding: 0 3px; }
-body.wing-collapsed .wing > *:not(.wing-rail) { display: none; }
-.wing-rail { display: none; flex-direction: column; align-items: center; gap: 6px; font: var(--fs-xs) var(--mono); cursor: pointer; }
-body.wing-collapsed .wing-rail { display: flex; }
-
-/* ---- 状态翼正文：js/panels/wing.js 直接渲染 #wingBody 的子元素（不克隆模板） ---- */
-.wing-arm { height: 150px; }   /* 臂缩略图挂载点（arm 面板接入后填充） */
-.wing-counts { padding: 4px 0; font: var(--fs-sm) var(--mono); color: var(--dim); }
-.wing-counts.err { color: var(--warn); }
-.wing-alerts { list-style: none; margin: 0; padding: 0; display: flex;
-  flex-direction: column; gap: 4px; }
-.wing-alerts .alert { padding: 4px 8px; border: 1px solid var(--line);
-  border-radius: var(--radius-sm); background: var(--panel-2);
-  font-size: var(--fs-sm); cursor: pointer; }
-.wing-alerts .alert:hover { border-color: var(--warn); }
-.wing-alerts .empty { color: var(--dim-2); font-size: var(--fs-sm); }
-.wing-last { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line);
-  color: var(--dim-2); font-size: var(--fs-xs); }
 
 /* ---------- 浮层（说明 / 窄屏连接控件） ---------- */
 .overlay { position: fixed; inset: 0; background: rgba(4, 7, 12, .72); display: none;
@@ -102,24 +75,15 @@ body.wing-collapsed .wing-rail { display: flex; }
 .overlay[open], .overlay.on { display: flex; }
 .overlay .sheet { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius);
   max-width: 900px; width: min(92vw, 900px); max-height: 84vh; overflow: auto; padding: var(--pad-panel); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between;
+  color: var(--dim); font-size: var(--fs-xs); }
 
 /* ---------- 断点 ---------- */
-/* 状态翼不再按断点自动收起（2026-10-11 按用户要求改）：≥821 一律显示完整状态翼，
-   只有用户显式点「◂」才收成 34px 竖条（记忆在 web_host.wing）；<820 空间确实不够，
-   仍由窄屏段强制压回竖条。 */
 @media (max-width: 820px) {
   .shell { grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--topbar-h) auto minmax(0, 1fr) auto;
-    grid-template-areas: "top" "wing" "main" "nav"; }
-  /* 收起变体在窄屏同样必须单列：body.wing-collapsed .shell 的三轨（高特异性）
-     会和这里的单列 areas 打架，内容塌进第一轨 */
-  body.wing-collapsed .shell { grid-template-columns: minmax(0, 1fr); }
-  /* 翼在窄屏只剩一条状态带；导航变底部标签栏 */
-  :root { --wing-w: 100%; }
-  /* 窄屏强制竖条：本块无条件命中，压得住 body.wing-expanded */
-  .wing > *:not(.wing-rail) { display: none; }
-  .wing-rail { display: flex; }
-  .wing { flex-direction: row; align-items: center; }
+    grid-template-rows: var(--topbar-h) minmax(0, 1fr) auto;
+    grid-template-areas: "top" "main" "nav"; }
+  /* 窄屏导航变底部标签栏 */
   .nav { flex-direction: row; justify-content: space-around; }
   .conn .detail { display: none; }   /* 连接细节进「连接」浮层 */
 }

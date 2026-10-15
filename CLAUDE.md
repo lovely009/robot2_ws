@@ -9,7 +9,7 @@
 
 | 区域 | 内容 | 构建 | 权威文档 |
 |---|---|---|---|
-| `ros2_ws/` | ROS 2 Humble 七包（真机 + 仿真 + 动力学 + 消息 + Web 上位机） | colcon | [ros2_ws/README.md](ros2_ws/README.md) + 各包 `README.md` + [docs/adr/](docs/adr/) |
+| `ros2_ws/` | ROS 2 Humble 九包（真机 + 仿真 + 动力学 + 消息 + 台架管理 + Web 上位机） | colcon | [ros2_ws/README.md](ros2_ws/README.md) + 各包 `README.md` + [docs/adr/](docs/adr/) |
 | `micro_ros_firmware/` | STM32H723VGT6 micro-ROS 固件 | PlatformIO | [README.md](micro_ros_firmware/README.md)（事实）、[AGENTS.md](micro_ros_firmware/AGENTS.md)（操作）、[decision-log](micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md)（理由）、[lib/README.md](micro_ros_firmware/lib/README.md)（库契约） |
 | `micro_ros_agent/` | micro-ROS Agent 与主机侧台架工具 | colcon（目录内独立） | [README.md](micro_ros_agent/README.md) |
 
@@ -20,7 +20,7 @@
 ## 构建与测试
 
 ```bash
-# ROS 2（七包）
+# ROS 2（九包）
 source /opt/ros/humble/setup.bash && cd ros2_ws
 colcon build --symlink-install && source install/setup.bash
 colcon test && colcon test-result --verbose

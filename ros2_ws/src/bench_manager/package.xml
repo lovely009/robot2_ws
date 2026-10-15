@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>bench_manager</name>
+  <version>0.1.0</version>
+  <description>台架主机侧进程管理节点：仿真 launch / micro-ROS Agent / FDCAN 电机后端，
+    以 /bench/* 服务与 /bench/status 话题对外（web 前端只依赖 rosbridge）。</description>
+  <maintainer email="ly@todo.todo">ly</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>bench_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+  <!-- 仿真/电机后端是 robot_sim 的 simulation.launch.py（运行期经 ros2 launch 调用）。
+       刻意不声明 exec_depend：robot_sim 反向依赖 web_host、web_host 又依赖
+       bench_manager，声明会成环；旧 web_host 同样是运行期引用而未声明。 -->
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

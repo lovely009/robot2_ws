@@ -1,0 +1,5 @@
+# 停止本节点启动的电机后端（launch 内嵌的那份不归本服务管）。
+---
+bool ok
+string error
+string status_json

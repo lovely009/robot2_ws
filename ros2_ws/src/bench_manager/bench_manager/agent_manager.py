@@ -105,7 +105,7 @@ class AgentProcessManager:
                 raise ValueError('device is not an available serial port')
             if not os.access(device, os.R_OK | os.W_OK):
                 raise PermissionError(
-                    'web_host cannot read and write %s; grant serial access '
+                    'bench_manager cannot read and write %s; grant serial access '
                     '(for example, add its user to dialout)' % device)
 
             command = [

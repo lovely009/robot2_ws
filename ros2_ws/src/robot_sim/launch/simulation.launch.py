@@ -494,6 +494,10 @@ def launch_simulation(context):
         raise RuntimeError("controller_mode must be host, external or firmware")
     if backend not in {"gazebo", "mujoco"}:
         raise RuntimeError("backend must be gazebo or mujoco")
+    try:
+        spawn_z = float(LaunchConfiguration("spawn_z").perform(context))
+    except ValueError:
+        raise RuntimeError("spawn_z must be a number (metres)")
     if simulator_only and controller_mode != "firmware":
         raise RuntimeError(
             "simulator_only:=true 是 FDCAN 模拟器单起路径（web 上位机的"
@@ -511,6 +515,15 @@ def launch_simulation(context):
         raise RuntimeError(
             "backend:=mujoco 不支持 gravity:=false：MJCF 的重力在生成期固定"
             "（models/<模型>/tools/build_mujoco_model.py），运行期没有对应开关"
+        )
+    if backend == "mujoco" and (
+        not _bool(LaunchConfiguration("fixed_base").perform(context))
+        or spawn_z != 0.0
+    ):
+        # 同理：生成高度与基座焊接都写进 MJCF，gazebo.launch.py 的这两个参数到不了 MuJoCo。
+        raise RuntimeError(
+            "backend:=mujoco 不支持 spawn_z/fixed_base：MJCF 的生成高度与基座"
+            "在生成期固定（models/<模型>/tools/build_mujoco_model.py）"
         )
 
     share = Path(get_package_share_directory("robot_sim"))
@@ -781,6 +794,9 @@ def launch_simulation(context):
                 "controllers_file": str(gazebo_controller_config),
                 "control_mode": "effort",
                 "gravity": LaunchConfiguration("gravity"),
+                # 生成高度与基座焊接按模型几何定：换模型必须核对（见各模型 README）。
+                "spawn_z": LaunchConfiguration("spawn_z"),
+                "fixed_base": LaunchConfiguration("fixed_base"),
             }.items(),
         )
 
@@ -1092,6 +1108,18 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument("world_file", default_value="empty.sdf"),
             DeclareLaunchArgument("gravity", default_value="true"),
+            DeclareLaunchArgument(
+                "spawn_z",
+                default_value="0.0",
+                description="Gazebo 模型生成高度（m），按模型几何底面定"
+                            "（默认模型底面 z = 0）；mujoco 后端拒绝非 0",
+            ),
+            DeclareLaunchArgument(
+                "fixed_base",
+                default_value="true",
+                description="Gazebo 把基座焊到世界原点（false = 自由浮动基座）；"
+                            "mujoco 后端拒绝 false",
+            ),
             DeclareLaunchArgument("vcan_interface", default_value="robot_vcan0"),
             DeclareLaunchArgument("remove_vcan_on_exit", default_value="true"),
             DeclareLaunchArgument("sim_interface", default_value="can1"),

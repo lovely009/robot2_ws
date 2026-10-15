@@ -1,10 +1,11 @@
 """Supervise the standalone FDCAN motor backend (`simulator_only` launch)。
 
-「电机后端」= fdcan_motor_sim.py 的独立进程：web 上位机按需单独起停（不依赖
-仿真——只连板子即可验证固件发现/离线/重连）；HIL（firmware）+ 物理总线启动
-仿真时由 static_server 默认联动拉起、停止时联动收起（见 hil_motor_backend_request
-与 auto_started 标志）。控制通道（Unix socket）路径由本模块生成并随 launch
-透传；电机表与增删断连命令经 query_motor_sim 转发（协议见 micro_ros_agent/README.md）。
+「电机后端」= fdcan_motor_sim.py 的独立进程：页面/脚本经 StartMotorBackend 服务
+按需单独起停（不依赖仿真——只连板子即可验证固件发现/离线/重连）；HIL（firmware）
++ 物理总线启动仿真时由 StartSimulation 服务默认联动拉起、停止时联动收起（见
+hil_motor_backend_request 与 auto_started 标志）。控制通道（Unix socket）路径由本
+模块生成并随 launch 透传；电机表与增删断连命令经 query_motor_sim 转发（协议见
+micro_ros_agent/README.md）。
 """
 
 from collections import deque
@@ -133,9 +134,9 @@ class MotorSimProcessManager:
         config = {
             "model": model,
             "transport": transport,
-            # 控制通道路径随 web_host 进程恒定；放进 config 让幂等比较单一表达
+            # 控制通道路径随 bench_manager 进程恒定；放进 config 让幂等比较单一表达
             "motor_sim_control_socket":
-                f"/tmp/web_host_motor_backend_{os.getpid()}.sock",
+                f"/tmp/bench_motor_backend_{os.getpid()}.sock",
         }
         if transport == "socketcan":
             available = {
@@ -157,7 +158,7 @@ class MotorSimProcessManager:
                     "select an enumerated serial device for the motor backend")
             if not os.access(path, os.R_OK | os.W_OK):
                 raise PermissionError(
-                    f"web_host cannot read and write {path}")
+                    f"bench_manager cannot read and write {path}")
             config["sim_tty"] = path
         return config
 

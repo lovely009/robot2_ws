@@ -29,6 +29,9 @@ motor_types:
       torque_constant_nm_per_amp: 0.042   # Kt：反馈电流 → 电机轴 Nm
       gear_ratio: 50                       # 电机↔关节换算
       gear_efficiency: 0.65                # effort × 效率（50 档最大效率）
+      # 连续堵转扭矩（绕组 145 ℃），**关节侧**；规格书 motor-2530-series.md 的表
+      # 「装减速器后 · 减速比 50」= 1150 mNm。软件侧无消费者，供被控对象取额定值。
+      rated_torque_nm: 1.15
       # 额定转速，**关节侧**。参数页给的是电机端「额定 ≤2000 rpm」，除速比 50
       # ⇒ 40 rpm。被控对象的速度上限用它（见 robot_sim 的 build_mujoco_model）。
       rated_speed_rad_s: 4.189             # = 2000/50 rpm

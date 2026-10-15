@@ -1,0 +1,10 @@
+# 独立启动 FDCAN 电机模拟器（fdcan_motor_sim.py，simulator_only 的 launch）。
+string model                  # 有 config/simulation_topology.yaml 的模型
+string transport              # socketcan | slcan（vcan 纯软闭环不涉及本后端）
+string sim_interface          # transport=socketcan 时必填
+string sim_tty                # transport=slcan 时必填
+bool physical_bus_isolated    # 确认物理总线仅连接仿真器与控制端
+---
+bool ok
+string error
+string status_json

@@ -119,7 +119,9 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
 - `/micro_ros_up/motor_topology` 应恰好包含 id 1–4，全部 online、无 conflict；
 - OpenOCD 只读寄存器应显示 `TEC=REC=0`、`EP=EW=BO=0`；
 - FDCAN2/3 悬空导致的 BUS_OFF 不属于本指南的 FDCAN1 失败；
-- 需要降低反馈负载时可用 `--fb-period-ms 50`，默认是 60 ms（约 16.7 Hz/节点，必须小于固件离线阈值）。
+- 反馈节拍**默认照真机**：每个 SYNC 回一帧（真机 TPDO 传输类型 = 1，2026-10-15 实测
+  50 Hz 下 48 发 48 收、延迟约 124 µs）。要降低总线负载用 `--fb-period-ms 50` 切到
+  降载模式（可配 `--stagger-ms` 错峰）；该周期是**上界**，必须小于固件离线阈值（100 ms）。
 
 ## 设备参数上电比对（2026-09-17 起）
 

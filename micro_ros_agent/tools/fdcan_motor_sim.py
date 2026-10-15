@@ -43,7 +43,8 @@ CANable2 的数据位率索引按 V 查询自动选择；
   python3 fdcan_motor_sim.py --gazebo --gazebo-control-mode effort \
     --effort-topic /arm_effort_controller/commands
 节点清单与节奏可调：--cerb/--vaxor（默认 CERB 1-4 / 无 VAXOR）、--period-ms（板端 SYNC
-周期）、--fb-period-ms/--stagger-ms（反馈周期/错峰，默认 60ms/台）、--no-brs（数据段不切 5M）。
+周期）、--fb-period-ms/--stagger-ms（台架降载用的反馈周期/错峰，默认 0 = 照真机每个 SYNC
+都回）、--no-brs（数据段不切 5M）。
 运行期控制（可选）：--control-socket <path> 开一条 Unix socket JSON 行协议，
 支持 status/add/remove/link（加电机、移除、断开/恢复），供 web 上位机仿真页使用；
 协议与语义见 micro_ros_agent/README.md。
@@ -85,6 +86,47 @@ _SLCAN_FRAME_HEADS = b"tTdDrRbB"
 # CERB 的 MIT 力矩量化上限是**逐型号**的（R48 11 N·m / R58 45 N·m），由调用方按
 # 电机传入。这个常量只在拿不到型号时兜底——用错会让 τ_ff 被整体缩放。
 CERB_MIT_TORQUE_FALLBACK = 45.0
+# SDO 中止码：设备是**分层**的——索引不在字典里回"对象不存在"，索引在而子索引没有
+# 回"子索引不存在"（2026-10-15 真机 node 1 实测：0x9999:00 → 0x06020000、
+# 0x6080:01 → 0x06090011）。一律回后者就复现不出对端的这一层语义。
+CERB_SDO_ABORT_NO_OBJECT = 0x06020000
+CERB_SDO_ABORT_NO_SUBINDEX = 0x06090011
+# 设备对象字典里**存在**的主索引（厂家 PR0002/TN0002 + 2026-10-15 实测）。只用来
+# 选上面两个中止码，不表示本模拟器实现了它们——没实现的对象仍按"只有这些子索引"答。
+CERB_OBJECT_INDICES = frozenset({
+    0x1000,          # 设备类型
+    0x1008,          # 设备名（身份串，分段上传）
+    0x1009, 0x100A,  # 硬件 / 软件版本
+    0x1011,          # 恢复默认参数
+    0x1017,          # 心跳时间
+    0x1018,          # 厂商识别对象
+    0x1800,          # TPDO1 通信参数
+    0x2530,          # 设备 ID
+    0x2531,          # 设置零位
+    0x2538,          # 电机最大电流
+    0x2539,          # Flash 保存码
+    0x2540,          # CAN 通信速率
+    0x2541,          # 方向
+    0x2650,          # 看门狗 / 限位保护开关
+    0x2654,          # 故障项控制
+    0x3100,          # Boot / 主线版本
+    0x4500,          # 最近故障诊断 ID
+    0x603F,          # 当前错误码
+    0x6041,          # 状态字
+    0x6060, 0x6061,  # 模式命令 / 模式显示
+    0x6064,          # 负载端实际位置
+    0x607D,          # 位置限位
+    0x6080,          # 电机最大转速
+})
+# 设备出厂值（对端真值，**不是**固件假设）：0x6080 电机端最大转速 RPM、
+# 0x2538 电机端最大电流 mA。2026-10-15 真机 node 1 实测 R58 = 3325/13300、
+# R48 = 3325/5000。**0x6080 两台相同**——它是模块侧共用值，不是逐型号额定；
+# 真正逐型号的是 0x2538。这两个量在固件侧会换算成关节侧 rad/s 与 N·m，用错会把
+# 台架的速度/力矩天花板整体缩放（见 docs/research/cerb-device-reference.md）。
+CERB_DEVICE_DEFAULTS = {
+    "r48": {"max_speed_rpm": 3325, "max_current_ma": 5000},
+    "r58": {"max_speed_rpm": 3325, "max_current_ma": 13300},
+}
 # 固件生命周期九态里的"运行"（与 can_bridge_msgs/MotorStatusTarget.msg 对齐）。
 LIFECYCLE_ACTIVE = 4
 SLCAN_VERSION_DATA_BITRATE = {
@@ -421,8 +463,8 @@ class MotorModel:
             self.sdo_params = {
                 (0x607D, 1): -32768,
                 (0x607D, 2): 32768,
-                (0x6080, 0): 600,
-                (0x2538, 0): 1000,
+                (0x6080, 0): CERB_DEVICE_DEFAULTS["r48"]["max_speed_rpm"],
+                (0x2538, 0): CERB_DEVICE_DEFAULTS["r48"]["max_current_ma"],
                 (0x2650, 0x00): 1,
                 (0x2541, 0x00): 0,
                 (0x6064, 0x00): 0,
@@ -498,6 +540,35 @@ class MotorModel:
 SIM_CONTROL_ID_LIMITS = {"cerb": 127, "vaxor": 63}
 
 
+def feedback_cadence(period_ms: int, fb_period_ms: int, stagger_ms: float):
+    """反馈节拍 → (device_sync_feedback, sync_interval, stagger_s, fb_period_s)。
+
+    `fb_period_ms = 0`（默认）是**对端保真**：真机 TPDO 传输类型 = 1，每个 SYNC 立即
+    回一帧，不错峰、无墙钟兜底。2026-10-15 单机 R58 实测 50Hz 下 48 发 48 收、延迟约
+    124us，无 SYNC 时零帧。`> 0` 是台架降载模式（历史默认 60ms）：按周期出窗口 +
+    stagger 错峰，墙钟兜底把该周期变成**上界**（SYNC 慢于假定值时仍按时出窗口）。
+    """
+    if period_ms <= 0 or fb_period_ms < 0:
+        raise ValueError(
+            "SYNC period must be positive and feedback period non-negative")
+    if fb_period_ms == 0:
+        return True, 1, 0.0, float("inf")
+    return (False, max(1, round(fb_period_ms / period_ms)),
+            stagger_ms / 1000.0, fb_period_ms / 1000.0)
+
+
+def apply_cerb_device_model(model: MotorModel, name: str) -> None:
+    """把型号落到一台 CERB 上：身份串 + 该型号的出厂值。
+
+    身份串是固件绑定型号的依据，0x6080/0x2538 是它回读比对的依据——**必须同源**，
+    否则会出现"自报 R58、参数却是 R48"这种真机上不存在的组合。
+    """
+    defaults = CERB_DEVICE_DEFAULTS[name]
+    model.identity = b"R58LITE_V2" if name == "r58" else b"R48LITE_V2"
+    model.sdo_params[(0x6080, 0)] = defaults["max_speed_rpm"]
+    model.sdo_params[(0x2538, 0)] = defaults["max_current_ma"]
+
+
 def _control_motor_info(motor_id: int, model: MotorModel,
                         joint_map: dict[int, str] | None) -> dict:
     return {
@@ -549,8 +620,8 @@ def apply_sim_control(models: dict[int, MotorModel], command,
         if kind == "cerb" and model_name not in (None, "r48", "r58"):
             return {"ok": False, "error": "model 必须是 r48 或 r58"}
         model = MotorModel(motor_id, kind)
-        if kind == "cerb" and model_name == "r58":
-            model.identity = b"R58LITE_V2"
+        if kind == "cerb":
+            apply_cerb_device_model(model, model_name or "r48")
         models[motor_id] = model
         return {"ok": True, "id": motor_id,
                 "motor": _control_motor_info(motor_id, model, joint_map)}
@@ -715,7 +786,7 @@ class CanMotorSim:
     def __init__(self, tty: str | None, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int | None = AUTO_DATA_BITRATE_INDEX,
-                 fb_period_ms: int = 60, stagger_ms: float = 2.2,
+                 fb_period_ms: int = 0, stagger_ms: float = 2.2,
                  r58_ids=(), safety_off_ids=(), dir_ccw_ids=(),
                  can_interface: str | None = None,
                  control_socket_path: str | None = None,
@@ -735,10 +806,11 @@ class CanMotorSim:
         self.bus_socket = None
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
-        if period_ms <= 0 or fb_period_ms <= 0:
-            raise ValueError("SYNC and feedback periods must be positive")
-        self.feedback_sync_interval = max(1, round(fb_period_ms / period_ms))
-        self.stagger = stagger_ms / 1000.0
+        (self.device_sync_feedback, self.feedback_sync_interval,
+         self.stagger, self.fb_period) = feedback_cadence(
+            period_ms, fb_period_ms, stagger_ms)
+        # 下面这段兜底**只在 --fb-period-ms > 0 的降载模式生效**（保真模式
+        # fb_period = inf，兜底恒不触发）。
         # 反馈窗口的墙钟周期与兜底（2026-10-13 加）。窗口原本**只**由 SYNC 计数
         # 驱动：每 feedback_sync_interval 个 SYNC 登记一轮 deadline。但 SYNC 是
         # 固件侧事件，其实际节拍可能慢于 --period-ms 假定的 20ms——本台架实测
@@ -750,7 +822,6 @@ class CanMotorSim:
         # 大面积 NaN、state_age 抖动到秒级。
         # 兜底：窗口至少每 fb_period_ms 登记一次，与 SYNC 快慢解耦，
         # 使 --fb-period-ms 成为**上界**而不是"SYNC 快才成立"的愿望值。
-        self.fb_period = fb_period_ms / 1000.0
         self.last_window_at = 0.0
         self.window_count = 0          # 累计反馈窗口数（含 SYNC 驱动与兜底）
         self.sync_window_count = 0     # 其中由 SYNC 驱动的部分
@@ -766,7 +837,7 @@ class CanMotorSim:
         self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
         for mid in r58_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
-                self.models[mid].identity = b"R58LITE_V2"
+                apply_cerb_device_model(self.models[mid], "r58")
         # 故意制造与固件记录不一致的场景：保护关 / 方向 CCW。
         for mid in safety_off_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
@@ -1051,8 +1122,20 @@ class CanMotorSim:
                 return self.models[delta // 4]
         return None
 
+    def send_sdo_abort(self, node: int, data: bytes, index: int,
+                       model) -> None:
+        """回一条 SDO 中止，**码分层**：索引不在字典 → 对象不存在；索引在而子索引
+        没有 → 子索引不存在（2026-10-15 真机实测）。"""
+        code = (CERB_SDO_ABORT_NO_SUBINDEX if index in CERB_OBJECT_INDICES
+                else CERB_SDO_ABORT_NO_OBJECT)
+        self.send(0x580 + node,
+                  bytes([0x80, data[1], data[2], data[3],
+                         code & 0xFF, (code >> 8) & 0xFF,
+                         (code >> 16) & 0xFF, (code >> 24) & 0xFF]),
+                  True, self.use_brs, model, "sdo_abort")
+
     def handle_sdo(self, node: int, data: bytes) -> None:
-        """CERB 身份读取应答（SDO 0x1008 分段上传），与固件 cerb_adapter 对向。
+        """SDO 从站：身份串（0x1008:00 分段上传）+ 易失管理对象（快速读/写）。
 
         厂家属具书 §4.3：上传发起 40 08 10 00 → 应答 41 08 10 00 + 总字节数；
         随后 60/70 交替取段 → 应答 000 t nnn c + 7 字节数据。
@@ -1066,7 +1149,7 @@ class CanMotorSim:
         sub = data[3]
         key = (index, sub)
         if command == 0x23:
-            # 4 字节快速写：存储并回写成功 ack（0x60），无有对象则 abort。
+            # 4 字节快速写：存储并回写成功 ack（0x60），无此对象则 abort。
             if key in m.sdo_params:
                 m.sdo_params[key] = int.from_bytes(data[4:8], "little",
                                                    signed=True)
@@ -1074,10 +1157,7 @@ class CanMotorSim:
                           bytes([0x60, data[1], data[2], data[3], 0, 0, 0, 0]),
                           True, self.use_brs, m, "sdo_write_ack")
             else:
-                self.send(0x580 + node,
-                          bytes([0x80, data[1], data[2], data[3],
-                                 0x11, 0x00, 0x09, 0x06]),  # 0x06090011 子索引不存在
-                          True, self.use_brs, m, "sdo_abort")
+                self.send_sdo_abort(node, data, index, m)
             return
         if command == 0x40:
             if key in m.sdo_params:
@@ -1087,11 +1167,9 @@ class CanMotorSim:
                           bytes([0x43, data[1], data[2], data[3]]) + raw,
                           True, self.use_brs, m, "sdo_read")
                 return
-            if index != 0x1008:
-                self.send(0x580 + node,
-                          bytes([0x80, data[1], data[2], data[3],
-                                 0x11, 0x00, 0x09, 0x06]),  # 0x06090011 子索引不存在
-                          True, self.use_brs, m, "sdo_abort")
+            # 身份串只挂在 :00（真机 :01/:02 回"子索引不存在"）。
+            if index != 0x1008 or sub != 0x00:
+                self.send_sdo_abort(node, data, index, m)
                 return
             m.sdo_offset = 0
             size = len(m.identity)
@@ -1661,10 +1739,13 @@ def main():
                     help="SLCAN Y 命令索引；省略时先发 V 自动识别（16e7497→7，b158aa7→5）")
     ap.add_argument("--no-brs", action="store_true",
                     help="FD 帧不切 5M 数据段（全程 1M），用于 BRS 数据相位对照")
-    ap.add_argument("--fb-period-ms", type=int, default=60,
-                    help="每电机反馈周期（默认 60ms≈16.7Hz；必须小于固件离线阈值）")
+    ap.add_argument("--fb-period-ms", type=int, default=0,
+                    help="台架降载用的每电机反馈周期；0（默认）= 照真机每个 SYNC 都回"
+                         "（真机 TPDO 传输类型=1）。>0 时按该周期出窗口并带墙钟兜底，"
+                         "必须小于固件离线阈值（100ms）")
     ap.add_argument("--stagger-ms", type=float, default=2.2,
-                    help="多节点反馈相位错开间隔")
+                    help="多节点反馈相位错开间隔；仅 --fb-period-ms > 0 时生效"
+                         "（真机不错峰，回帧在 SYNC 后约 124us）")
     ap.add_argument("--log", default=None)
     ap.add_argument("--ready-file", default=None,
                     help="CAN 接口打开且读线程就绪后创建该文件，供总启动器排序")

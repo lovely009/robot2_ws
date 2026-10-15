@@ -1,4 +1,4 @@
-"""`SimulationProcessManager` 的单测（仿真面板后端）。
+"""`SimulationProcessManager` 的单测（仿真进程管理）。
 
 不产生真实子进程：`popen_factory` 注入假体，CAN 接口 / 串口 / 模型列表全部用桩，
 所以本文件既不启 Gazebo、也不开 MuJoCo 窗口、更不碰 vcan 与串口。
@@ -7,14 +7,15 @@
 from __future__ import annotations
 
 import signal
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
-from web_host.simulation_manager import (
+from bench_manager.simulation_manager import (
     SimulationProcessManager,
+    enumerate_mujoco_models,
     enumerate_simulation_models,
-    simulation_model_joints,
 )
 
 
@@ -134,48 +135,96 @@ def test_same_config_is_idempotent_but_backend_change_conflicts() -> None:
     assert len(spawned) == 1
 
 
-# --- simulation_model_joints：臂视图映射的权威来源 ---------------------------
+# --- 模型级仿真参数（生成高度 / 重力 / 固定基座）-----------------------------
 #
-# 背景：这张 motor_id → 关节名 映射原先硬编码在前端 store.js、写死成
-# half_body_robot 的 18 台，换模型就**静默失效**（关节名对不上 → 那些关节角恒为 0、
-# 臂上小球点不中，表现得像"电机没注册"）。现在改为向模型自己的
-# config/motor_driver.yaml 取。这几条守的就是"换模型不再静默失效"。
+# 前端「模型」抽屉调的就是这三个：只有 Gazebo 有实现，MuJoCo 在 MJCF 生成期固定
+# （launch 侧同样拒绝），所以缺省不放命令行、给了 Mujoco 就显式报错。
 
-def test_model_joints_covers_every_installed_model() -> None:
-    models = enumerate_simulation_models()
-    if not models:
-        pytest.skip('安装树里没有完整模型，测试前提不成立')
-    for model in models:
-        joints = simulation_model_joints(model)
-        assert joints, f'{model} 取不出 id→关节映射'
-        for motor_id, joint in joints.items():
-            assert isinstance(motor_id, int) and motor_id > 0
-            assert isinstance(joint, str) and joint, f'{model} 的 id {motor_id} 关节名为空'
+def test_start_forwards_model_parameters_to_launch() -> None:
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _manager(spawned)
 
+    status = manager.start(_request(gravity=False, fixed_base=False, spawn_z=0.0027))
 
-def test_model_joints_pins_current_half_body_model() -> None:
-    """钉住当前唯一模型的内容，与 simulation_topology.yaml 逐条一致。"""
-    joints = simulation_model_joints('half_body_robot')
-    assert set(joints) == set(range(1, 19)), '必须是 1..18 连续——曾经漏掉 10..18'
-    assert joints[1] == 'joint_link1'
-    assert joints[9] == 'joint_link9'
-    assert joints[10] == 'joint_link1.1'   # 第二链首台
-    assert joints[18] == 'joint_link9.9'   # 第二链末台
-    # 两条链的关节名不能混：第一链无点号，第二链有点号
-    assert all('.' not in joints[i] for i in range(1, 10))
-    assert all('.' in joints[i] for i in range(10, 19))
+    command, _kwargs = spawned[0]
+    assert 'gravity:=false' in command
+    assert 'fixed_base:=false' in command
+    assert 'spawn_z:=0.0027' in command
+    assert status['config']['spawn_z'] == 0.0027
+    assert status['config']['gravity'] is False
 
 
-@pytest.mark.parametrize('bad', ['', '..', '../etc', 'a/b', 'nope_does_not_exist'])
-def test_model_joints_rejects_bad_model_names(bad: str) -> None:
-    """非法模型名必须显式报错，不能悄悄返回空表或读到目录外。"""
-    with pytest.raises(ValueError):
-        simulation_model_joints(bad)
+def test_start_omits_model_parameters_when_absent() -> None:
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _manager(spawned)
+
+    manager.start(_request())
+
+    command, _kwargs = spawned[0]
+    assert not [
+        arg for arg in command
+        if arg.startswith(('gravity:', 'fixed_base:', 'spawn_z:'))
+    ], '缺省的模型参数不该进命令行（否则「不设置」会变成「改行为」）'
+
+
+@pytest.mark.parametrize('key, value', [
+    ('gravity', 'true'),
+    ('gravity', 1),
+    ('fixed_base', 0),
+    ('spawn_z', '0.03'),
+    ('spawn_z', True),
+    ('spawn_z', float('inf')),
+    ('spawn_z', 100.0),
+])
+def test_start_rejects_bad_model_parameters(key: str, value: Any) -> None:
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _manager(spawned)
+
+    with pytest.raises(ValueError, match=key):
+        manager.start(_request(**{key: value}))
+
+    assert spawned == []
+
+
+def test_start_rejects_model_parameters_for_mujoco() -> None:
+    spawned: list[tuple[list[str], dict[str, Any]]] = []
+    manager = _manager(spawned)
+
+    with pytest.raises(ValueError, match='mujoco'):
+        manager.start(_request(backend='mujoco', gravity=False))
+
+    assert spawned == []
+
+
+# --- 模型枚举（root 可配置）--------------------------------------------------
+#
+# 模型列表来自节点参数 models_dir（可指源码目录，改模型不必重构建）；root 缺省
+# 时回落 robot_sim 安装树。臂视图的映射/枚举**不在这里**——那批只读文件的函数
+# 归 web_host/models.py（见 web_host/test/test_models.py）。
+
+def test_enumerate_simulation_models_uses_root(tmp_path: Path) -> None:
+    full = tmp_path / 'full_model'
+    (full / 'config').mkdir(parents=True)
+    (full / 'config' / 'simulation_topology.yaml').write_text(
+        'simulation:\n', encoding='utf-8')
+    (tmp_path / 'no_topology').mkdir()
+    assert enumerate_simulation_models(tmp_path) == ['full_model']
+
+
+def test_enumerate_mujoco_models_uses_root(tmp_path: Path) -> None:
+    full = tmp_path / 'mj_model'
+    (full / 'mujoco').mkdir(parents=True)
+    (full / 'urdf').mkdir()
+    (full / 'mujoco' / 'mj_model.xml').write_text('<mujoco/>', encoding='utf-8')
+    (full / 'urdf' / 'mj_model.standalone.urdf').write_text(
+        '<robot/>', encoding='utf-8')
+    (tmp_path / 'no_mjcf').mkdir()
+    assert enumerate_mujoco_models(tmp_path) == ['mj_model']
 
 
 # --- 电机后端（HIL 的 FDCAN 模拟器）不再由仿真 launch 内嵌 -------------------
 #
-# 2026-10-14 起：HIL 启动仿真时模拟器由 web_host 的独立进程管理（「电机后端」，
+# 2026-10-14 起：HIL 启动仿真时模拟器由 bench_manager 的独立进程管理（「电机后端」，
 # 可单独起停、随仿真联动；见 motor_sim_manager.py 与 test_motor_sim_manager.py），
 # 本 launch 只编排被控对象/驱动端/Agent（start_fdcan_sim:=false）。
 
@@ -202,7 +251,7 @@ def _firmware_manager(
     )
 
 
-def test_firmware_start_defers_motor_backend_to_web_host() -> None:
+def test_firmware_start_defers_motor_backend_to_bench_manager() -> None:
     spawned: list[tuple[list[str], dict[str, Any]]] = []
     manager = _firmware_manager(spawned)
 

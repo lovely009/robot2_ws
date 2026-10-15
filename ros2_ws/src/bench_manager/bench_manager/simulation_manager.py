@@ -1,11 +1,16 @@
-"""Enumerate CAN devices and supervise one unified robot simulation launch.
+"""枚举 CAN 设备并监督一个统一的 robot_sim simulation.launch.py 进程。
 
-`backend` 选择被控对象（gazebo | mujoco），只影响传给 simulation.launch.py 的参数与
-「模型是否有 MJCF」这条校验；传输与控制端的校验对两个后端一致。
+本模块归 bench_manager（web 前端经 /bench/* 服务间接使用）；`backend` 选择被控对象
+（gazebo | mujoco），只影响传给 simulation.launch.py 的参数与「模型是否有 MJCF」这条
+校验；传输与控制端的校验对两个后端一致。
+
+只读模型目录的**文件域**函数（simulation_model_joints / enumerate_arm_models）不在
+这里——它们服务臂视图与前端静态域，归 web_host/models.py。
 """
 
 from collections import deque
 import json
+import math
 import os
 import re
 import signal
@@ -71,16 +76,20 @@ def enumerate_can_interfaces():
 
 
 def _models_root():
-    """模型根目录（安装树的 robot_sim share）；取不到返回 None。"""
+    """默认模型根目录（安装树的 robot_sim share）；取不到返回 None。
+
+    各枚举函数的 `root=` 参数可覆盖它：bench_manager 节点的 models_dir 参数
+    就是把这个根显式传下来（可指源码目录，改模型不必重构建）。
+    """
     try:
         return Path(get_package_share_directory("robot_sim")) / "models"
     except Exception:
         return None
 
 
-def enumerate_simulation_models():
+def enumerate_simulation_models(root=None):
     """List installed models that provide a full simulation topology."""
-    models_root = _models_root()
+    models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         return []
     return sorted(
@@ -91,7 +100,7 @@ def enumerate_simulation_models():
     )
 
 
-def enumerate_mujoco_models():
+def enumerate_mujoco_models(root=None):
     """List installed models that provide an MJCF for the MuJoCo backend.
 
     MuJoCo 后端不经过 ros2_control，被控对象是该模型自己的 `mujoco/<模型名>.xml`
@@ -99,7 +108,7 @@ def enumerate_mujoco_models():
     还要 `urdf/<模型名>.standalone.urdf`：mujoco.launch.py 用它渲染 robot_description，
     缺了虽然能起，但 rsp 拿到的是空模型——这种半残组合不该出现在下拉里。
     """
-    models_root = _models_root()
+    models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         return []
     return sorted(
@@ -111,52 +120,32 @@ def enumerate_mujoco_models():
     )
 
 
-def simulation_model_joints(model):
-    """读出某模型的**电机 id → 关节名**映射，供前端臂视图使用。
+def _model_parameters(request, backend):
+    """模型级仿真参数：重力 / 生成高度 / 固定基座。
 
-    前端靠这张表把 motor_id 落到关节上（关节角同步、状态选色、臂上小球点选）。
-    它此前硬编码在 `web/js/core/store.js`，写死成 half_body_robot 的 18 台，
-    于是**换模型就静默失效**：关节名对不上 → 那些关节角恒为 0、小球点不中，
-    表现得像"电机没注册"。这里改为向模型配置取同一个真相源，加模型/改关节名
-    不必再动前端。
-
-    单一来源取 `config/motor_driver.yaml` 的 `motor_hardware.motors`：每个条目
-    同时带 `joint:` 与 `id:`。不用 `simulation_topology.yaml`——那里只有电机名，
-    还得再和本文件做一次连接。
-
-    Raises:
-        ValueError: 目录/模型缺失、非法模型名、解析不出条目、条目缺 id/joint、id 重复。
+    只透传给 Gazebo——MuJoCo 的世界参数在 MJCF 生成期固定（launch 侧同样拒绝），
+    给了就显式报错而不是静默忽略。键**缺省** = 用 launch 默认值，不进命令行。
     """
-    root = _models_root()
-    if root is None or not root.is_dir():
-        raise ValueError("找不到 robot_sim 的 models 目录（安装树不完整？）")
-    # 防目录穿越：模型名只允许是单层目录名
-    if not model or model != Path(model).name or model in (".", ".."):
-        raise ValueError(f"非法模型名：{model!r}")
-    config = root / model / "config" / "motor_driver.yaml"
-    if not config.is_file():
-        raise ValueError(f"模型 {model!r} 没有 config/motor_driver.yaml")
-
-    with config.open("r", encoding="utf-8") as handle:
-        doc = yaml.safe_load(handle) or {}
-    motors = (doc.get("motor_hardware") or {}).get("motors")
-    if not isinstance(motors, dict) or not motors:
-        raise ValueError(f"{config} 里没有 motor_hardware.motors")
-
-    joints = {}
-    for name, spec in motors.items():
-        if not isinstance(spec, dict):
-            raise ValueError(f"电机 {name!r} 的条目不是映射")
-        motor_id, joint = spec.get("id"), spec.get("joint")
-        if motor_id is None or joint is None:
-            raise ValueError(f"电机 {name!r} 缺 id 或 joint")
-        motor_id = int(motor_id)
-        if motor_id in joints:
-            raise ValueError(
-                f"电机 id {motor_id} 重复（{joints[motor_id]!r} 与 {joint!r}）："
-                f"固件注册表以裸 motor_id 为键，重号会锁存 CONFIG_CONFLICT")
-        joints[motor_id] = str(joint)
-    return dict(sorted(joints.items()))
+    params = {}
+    for key in ("gravity", "fixed_base"):
+        if key in request:
+            value = request[key]
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
+            params[key] = value
+    if "spawn_z" in request:
+        value = request["spawn_z"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("spawn_z must be a number (metres)")
+        if not math.isfinite(value) or not -10.0 <= value <= 10.0:
+            raise ValueError("spawn_z must be a finite number within [-10, 10]")
+        params["spawn_z"] = float(value)
+    if params and backend == "mujoco":
+        raise ValueError(
+            "mujoco fixes gravity, spawn height and base welding in the MJCF at "
+            "build time; model parameters apply to the gazebo backend only"
+        )
+    return params
 
 
 class SimulationProcessManager:
@@ -220,18 +209,26 @@ class SimulationProcessManager:
                 f"(models/{model}/mujoco/{model}.xml); use backend gazebo"
             )
 
+        model_params = _model_parameters(request, backend)
+
         config = {
             "backend": backend,
             "transport": transport,
             "controller_mode": mode,
             "model": model,
         }
+        config.update(model_params)
         launch_args = [
             f"backend:={backend}",
             f"transport:={transport}",
             f"controller_mode:={mode}",
             f"model:={model}",
         ]
+        for key, value in model_params.items():
+            if isinstance(value, bool):
+                launch_args.append(f"{key}:={'true' if value else 'false'}")
+            else:
+                launch_args.append(f"{key}:={value}")
 
         if transport == "vcan":
             interface = request.get("vcan_interface", "robot_vcan0")
@@ -280,7 +277,7 @@ class SimulationProcessManager:
                     if not isinstance(path, str) or path not in serial_ports:
                         raise ValueError(f"select an enumerated serial device for {field}")
                     if not os.access(path, os.R_OK | os.W_OK):
-                        raise PermissionError(f"web_host cannot read and write {path}")
+                        raise PermissionError(f"bench_manager cannot read and write {path}")
 
                 sim_tty = request.get("sim_tty")
                 require_tty(sim_tty, "simulation endpoint")
@@ -297,7 +294,7 @@ class SimulationProcessManager:
                     launch_args.append(f"driver_tty:={driver_tty}")
 
         if mode == "firmware":
-            # 模拟器（FDCAN 电机后端）由 web_host 的独立进程管理（可单独起停，
+            # 模拟器（FDCAN 电机后端）由 bench_manager 的独立进程管理（可单独起停，
             # 见 motor_sim_manager.py）：本 launch 只编排被控对象/驱动端/Agent。
             # WebHost already manages its own Agent and HTTP/WebSocket listeners.
             launch_args.extend([

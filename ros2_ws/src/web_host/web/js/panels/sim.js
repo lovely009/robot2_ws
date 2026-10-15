@@ -1,15 +1,15 @@
 // 仿真启动器面板：控制端 / CAN 接口 / 模型 / 端点选择，启动与停止
-// robot_sim 的 simulation.launch.py，子进程状态与最近日志来自
-// /api/simulation/*（HTTP，与 rosbridge 无关）。因此本面板不订阅、不写 store（只取
-// core/store.js 的 MODEL 常量）；
-// 切屏后状态与日志由后端 status 接口整段恢复，日志不重复追加。
+// robot_sim 的 simulation.launch.py。状态/日志来自 store.bench（bench_manager 的
+// /bench/status 话题，1 Hz）；命令走 /bench/* 服务（core/agent.js 的台架服务层），
+// 响应里的快照会立刻入 store——面板不再自己轮询状态，只按 DIRTY.BENCH 渲染。
+// 切屏后状态与日志由 store 里的快照整段恢复，日志不重复追加。
 // 搬自重构前的 web/simulation.js（页面级 IIFE 单例），只改挂载方式：ui 映射与
 // 全部逻辑移进 mount 作用域（切屏会反复挂载，模块级 ui 会指向已卸载的 DOM），
-// 1.8 s 状态轮询由 mount 持有句柄并在 unmount 清理——旧代码是页面级单例，
-// 切屏会重复注册轮询。
+// 电机表轮询由 mount 持有句柄并在 unmount 清理——旧代码是页面级单例，切屏会重复注册。
 import { $ } from '../core/format.js';
 // 默认模型名与臂视图共用一份（core/store.js 的 MODEL），别在这里再写一个字符串。
-import { MODEL } from '../core/store.js';
+import { store, DIRTY, MODEL } from '../core/store.js';
+import * as bench from '../core/agent.js';
 
 const STORAGE_KEY = 'robot2.simulation.options.v1';
 const stateLabels = {
@@ -30,6 +30,11 @@ export function mount(root, ctx) {
     mode: $('simMode'),
     transport: $('simTransport'),
     model: $('simModel'),
+    modelSummary: $('simModelSummary'),
+    modelHint: $('simModelHint'),
+    spawnZ: $('simSpawnZ'),
+    gravity: $('simGravity'),
+    fixedBase: $('simFixedBase'),
     vcanName: $('simVcanName'),
     simInterface: $('simInterface'),
     driverInterface: $('simDriverInterface'),
@@ -72,7 +77,6 @@ export function mount(root, ctx) {
   let latestStatus = { state: 'stopped', log: [] };
   let motorBackend = { state: 'stopped', log: [] };
   let motorSim = { motors: [] };
-  let polling = false;
   let pollTimer = null;
 
   function readSaved() {
@@ -97,39 +101,13 @@ export function mount(root, ctx) {
         driver_interface: ui.driverInterface.value,
         sim_tty: ui.simTty.value,
         driver_tty: ui.driverTty.value,
+        spawn_z: ui.spawnZ.value,
+        gravity: ui.gravity.checked,
+        fixed_base: ui.fixedBase.checked,
       }));
     } catch (_error) {
       // The simulation controls remain usable when browser storage is disabled.
     }
-  }
-
-  async function requestJson(path, options = {}) {
-    const response = await fetch(path, {
-      cache: 'no-store',
-      ...options,
-      headers: {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    });
-    let payload;
-    try {
-      payload = await response.json();
-    } catch (_error) {
-      payload = {};
-    }
-    if (!response.ok) {
-      // 旧版 static_server 没有新 API 时会退到静态文件处理（HTML 体、无 error
-      // 字段）——这是"改了 .py 没重启 web_host.launch.py"的固定指纹，直接点名
-      const message = payload.error
-        || (response.status === 404
-          ? '后端没有该接口：web_host 进程可能是旧版，请重启 web_host.launch.py'
-          : `HTTP ${response.status}`);
-      const error = new Error(message);
-      error.payload = payload;
-      throw error;
-    }
-    return payload;
   }
 
   function setResult(message, kind = '') {
@@ -176,6 +154,21 @@ export function mount(root, ctx) {
       ? '该后端没有可用模型（需要模型自带 MJCF）'
       : '选择仿真模型';
     replaceOptions(ui.model, modelEntries(), placeholder, preferredValue);
+  }
+
+  // 生成高度/重力/固定基座只有 Gazebo 有实现（MuJoCo 在 MJCF 生成期固定，launch
+  // 侧也拒绝）；运行中连同其它控件一起锁住。摘要栏常显当前模型。
+  function syncModelParams(active = false) {
+    const gazebo = ui.backend.value === 'gazebo';
+    for (const control of [ui.spawnZ, ui.gravity, ui.fixedBase]) {
+      control.disabled = active || !gazebo;
+    }
+    ui.modelHint.textContent = gazebo
+      ? '生成高度按模型几何的底面定，换模型要核对'
+      : 'MuJoCo 的世界参数在 MJCF 生成期固定：生成高度/重力/固定基座不可调';
+    ui.modelSummary.textContent = ui.model.value
+      ? `${ui.model.value}${gazebo ? ` · z ${ui.spawnZ.value || '0'}` : ''}`
+      : '--';
   }
 
   function loadDeviceOptions(options) {
@@ -241,6 +234,7 @@ export function mount(root, ctx) {
     }
     // 后端决定模型候选集：切换时重列，当前模型仍在新列表里就保留
     if (optionsLoaded) refreshModelOptions();
+    syncModelParams();
     saveOptions();
     // vcan（纯软）下电机后端不可用；切传输时立即反映，不等下一次轮询
     ui.backendStart.disabled = activeState(motorBackend.state)
@@ -263,7 +257,15 @@ export function mount(root, ctx) {
       || config.sim_interface
       || config.sim_tty
       || '';
-    return [backend, mode, config.transport, endpoint].filter(Boolean).join(' · ');
+    // 模型参数只在偏离默认值时报出来（生成高度错了正是要一眼看见的那类事）
+    const params = [];
+    if (config.gravity === false) params.push('无重力');
+    if (config.fixed_base === false) params.push('浮动基座');
+    if (typeof config.spawn_z === 'number' && config.spawn_z !== 0) {
+      params.push(`z ${config.spawn_z}`);
+    }
+    return [backend, mode, config.transport, endpoint, ...params]
+      .filter(Boolean).join(' · ');
   }
 
   function renderStatus(status) {
@@ -288,6 +290,7 @@ export function mount(root, ctx) {
     ]) {
       control.disabled = active;
     }
+    syncModelParams(active);
 
     const lines = latestStatus.log || [];
     ui.log.textContent = lines.length ? lines.join('\n') : '等待启动';
@@ -334,14 +337,6 @@ export function mount(root, ctx) {
     ui.backendResult.className = `result tiny${kind ? ` ${kind}` : ''}`;
   }
 
-  async function refreshMotorBackend() {
-    try {
-      renderMotorBackend(await requestJson('/api/motor-sim/process'));
-    } catch (error) {
-      setBackendResult(`读取电机后端状态失败：${error.message}`, 'err');
-    }
-  }
-
   function motorBackendRequest() {
     const transport = ui.transport.value;
     const request = {
@@ -379,16 +374,11 @@ export function mount(root, ctx) {
     ui.backendStart.disabled = true;
     setBackendResult('正在启动电机后端…');
     try {
-      renderMotorBackend(await requestJson('/api/motor-sim/process/start', {
-        method: 'POST',
-        body: JSON.stringify(request),
-      }));
+      await bench.startMotorBackend(request);
       setBackendResult('电机后端进程已启动；CAN 就绪情况见下方日志。', 'ok');
     } catch (error) {
-      if (error.payload && error.payload.status) renderMotorBackend(error.payload.status);
       setBackendResult(error.message, 'err');
     } finally {
-      await refreshMotorBackend();
       await refreshMotorSim();
     }
   }
@@ -397,12 +387,11 @@ export function mount(root, ctx) {
     ui.backendStop.disabled = true;
     setBackendResult('正在停止电机后端…');
     try {
-      renderMotorBackend(await requestJson('/api/motor-sim/process/stop', { method: 'POST' }));
+      await bench.stopMotorBackend();
       setBackendResult('电机后端已停止', 'ok');
     } catch (error) {
       setBackendResult(`停止失败：${error.message}`, 'err');
     } finally {
-      await refreshMotorBackend();
       await refreshMotorSim();
     }
   }
@@ -463,7 +452,7 @@ export function mount(root, ctx) {
       return;
     }
     try {
-      const payload = await requestJson('/api/motor-sim/status');
+      const payload = await bench.motorBackendCommand({cmd: 'status'});
       motorSim = { motors: payload.motors || [] };
       renderMotorSim();
     } catch (error) {
@@ -474,10 +463,7 @@ export function mount(root, ctx) {
 
   async function sendMotorCommand(command, labelText) {
     try {
-      await requestJson('/api/motor-sim/command', {
-        method: 'POST',
-        body: JSON.stringify(command),
-      });
+      await bench.motorBackendCommand(command);
       setResult(`${labelText} 已下发`, 'ok');
     } catch (error) {
       setResult(`${labelText} 失败：${error.message}`, 'err');
@@ -514,7 +500,7 @@ export function mount(root, ctx) {
   async function refreshOptions() {
     ui.refresh.disabled = true;
     try {
-      loadDeviceOptions(await requestJson('/api/simulation/options'));
+      loadDeviceOptions(await bench.getBenchOptions());
       setResult('设备与模型列表已刷新', 'ok');
     } catch (error) {
       setResult(`读取设备失败：${error.message}`, 'err');
@@ -523,22 +509,15 @@ export function mount(root, ctx) {
     }
   }
 
-  async function refreshStatus() {
-    if (polling) return;
-    polling = true;
-    try {
-      renderStatus(await requestJson('/api/simulation/status'));
-      await refreshMotorBackend();
-      await refreshMotorSim();
-    } catch (error) {
-      setResult(`读取仿真状态失败：${error.message}`, 'err');
-    } finally {
-      polling = false;
-    }
+  // 仿真/电机后端的状态与日志全部来自 store.bench（话题 + 命令响应的快照）；
+  // 只在 DIRTY.BENCH 脏帧里整段重绘，不做状态轮询。
+  function renderFromStore() {
+    renderStatus(store.bench.simulation || { state: 'stopped', log: [] });
+    renderMotorBackend(store.bench.motor_backend || { state: 'stopped', log: [] });
   }
 
   function buildStartRequest() {
-    return {
+    const request = {
       backend: ui.backend.value,
       controller_mode: ui.mode.value,
       transport: ui.transport.value,
@@ -548,8 +527,15 @@ export function mount(root, ctx) {
       driver_interface: ui.driverInterface.value,
       sim_tty: ui.simTty.value,
       driver_tty: ui.driverTty.value,
-      physical_bus_isolated: ui.busIsolated.checked,
     };
+    // 模型参数只对 Gazebo 有意义（MuJoCo 侧由服务端显式拒绝，见 syncModelParams）；
+    // 空串 = 未给该参数（缺省不进命令行）。物理总线确认是本页面的安全校验，不进请求。
+    if (request.backend === 'gazebo') {
+      request.gravity = ui.gravity.checked ? 'true' : 'false';
+      request.fixed_base = ui.fixedBase.checked ? 'true' : 'false';
+      request.spawn_z = ui.spawnZ.value.trim();
+    }
+    return request;
   }
 
   async function startSimulation() {
@@ -562,25 +548,29 @@ export function mount(root, ctx) {
         'err');
       return;
     }
-    if (request.transport !== 'vcan' && !request.physical_bus_isolated) {
+    if (request.transport !== 'vcan' && !ui.busIsolated.checked) {
       setResult('请先确认物理总线上没有真机电机。', 'err');
       return;
+    }
+    if (request.backend === 'gazebo') {
+      const spawnZ = Number(request.spawn_z);
+      if (!Number.isFinite(spawnZ) || Math.abs(spawnZ) > 10) {
+        setResult('生成高度必须是 -10 ~ 10 m 之间的数字。', 'err');
+        return;
+      }
     }
     ui.start.disabled = true;
     setResult('正在启动仿真 launch…');
     try {
-      renderStatus(await requestJson('/api/simulation/start', {
-        method: 'POST',
-        body: JSON.stringify(request),
-      }));
+      await bench.startSimulation(request);
       setResult('仿真 launch 进程已启动；就绪情况见下方日志。', 'ok');
       saveOptions();
     } catch (error) {
-      if (error.payload && error.payload.status) renderStatus(error.payload.status);
       setResult(error.message, 'err');
     } finally {
-      await refreshStatus();
-      if (!activeState(latestStatus.state)) ui.start.disabled = false;
+      if (!activeState((store.bench.simulation || {}).state)) {
+        ui.start.disabled = false;
+      }
     }
   }
 
@@ -588,12 +578,12 @@ export function mount(root, ctx) {
     ui.stop.disabled = true;
     setResult('正在停止仿真…');
     try {
-      renderStatus(await requestJson('/api/simulation/stop', { method: 'POST' }));
+      await bench.stopSimulation();
       setResult('仿真已停止', 'ok');
     } catch (error) {
       setResult(`停止失败：${error.message}`, 'err');
     } finally {
-      await refreshStatus();
+      await refreshMotorSim();
     }
   }
 
@@ -601,6 +591,9 @@ export function mount(root, ctx) {
   ui.mode.value = saved.controller_mode || 'host';
   ui.transport.value = saved.transport || 'vcan';
   ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
+  ui.spawnZ.value = saved.spawn_z !== undefined ? String(saved.spawn_z) : '0';
+  ui.gravity.checked = saved.gravity !== false;
+  ui.fixedBase.checked = saved.fixed_base !== false;
   for (const select of [ui.mode, ui.transport, ui.simInterface,
     ui.driverInterface, ui.simTty, ui.driverTty]) {
     select.addEventListener('change', () => {
@@ -612,6 +605,12 @@ export function mount(root, ctx) {
   // 后端只改变模型候选集，不涉及物理总线，所以不清安全确认勾选
   ui.backend.addEventListener('change', syncFields);
   ui.vcanName.addEventListener('input', saveOptions);
+  ui.spawnZ.addEventListener('input', () => {
+    syncModelParams();
+    saveOptions();
+  });
+  ui.gravity.addEventListener('change', saveOptions);
+  ui.fixedBase.addEventListener('change', saveOptions);
   ui.start.addEventListener('click', startSimulation);
   ui.stop.addEventListener('click', stopSimulation);
   ui.refresh.addEventListener('click', refreshOptions);
@@ -625,15 +624,17 @@ export function mount(root, ctx) {
 
   syncFields();
   ui.motorAddModelField.hidden = ui.motorAddKind.value !== 'cerb';
-  renderStatus(latestStatus);
-  renderMotorBackend(motorBackend);
+  renderFromStore();
   refreshOptions();
-  refreshStatus();
-  pollTimer = window.setInterval(refreshStatus, 1800);
+  refreshMotorSim();
+  // 电机表只有一问一答的模拟器查询（无对应话题），保持低频轮询；
+  // 仿真/电机后端的状态与日志由 DIRTY.BENCH 脏帧重绘。
+  pollTimer = window.setInterval(refreshMotorSim, 1800);
 
   return {
-    // 本面板的数据全部来自 HTTP 轮询，与 store 脏键无关；render 只满足面板契约。
-    render() {},
+    render(dirty) {
+      if (dirty.has(DIRTY.BENCH)) renderFromStore();
+    },
     unmount() {
       if (pollTimer !== null) {
         clearInterval(pollTimer);

@@ -97,5 +97,13 @@ HIL 启动仿真时默认拉起、停止时联动收起）：经 `simulation.lau
 `simulator_only:=true` 启动并传 `sim_control_socket:=<path>`，页面经
 `/api/motor-sim/*` 转发命令；手动启动时可自行指定路径。
 
+反馈节拍默认**照真机**：每个 SYNC 回一帧（真机 TPDO 传输类型 = 1）。`--fb-period-ms`
+给的不是 0 时切到台架降载模式（按周期出窗口 + `--stagger-ms` 错峰 + 墙钟兜底）。
+
+取证工具 `tools/cerb_sdo_probe.py` 支持两种传输：`--interface can0`（gs_usb/SocketCAN，
+现场当前配置）与 `--dev <串口>`（SLCAN）。**默认只读**，带 `--write` 才改设备对象。
+设备侧对象字典、帧格式与故障码见
+[`docs/research/cerb-device-reference.md`](../docs/research/cerb-device-reference.md)。
+
 一键组合 Gazebo、该模拟器与 STM32 micro-ROS Agent 的入口和完整拓扑参数见
 [`robot_sim` 仿真说明](../ros2_ws/src/robot_sim/README.md)。

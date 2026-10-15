@@ -115,3 +115,20 @@ def test_gazebo_launch_wires_model_into_xacro_and_controllers():
     # 最低点恰为 z = 0.000000（见该模型 README 的实测几何），故无需抬起。
     assert context.launch_configurations["spawn_z"] == "0.0"
     assert context.launch_configurations["world_file"] == "empty.sdf"
+
+
+@pytest.mark.parametrize("argument", ["spawn_z", "fixed_base"])
+def test_simulation_launch_exposes_gazebo_model_parameters(argument):
+    """web 上位机「模型」抽屉调的这两个参数要能穿过 simulation.launch.py。
+
+    默认值必须与 gazebo.launch.py 一致——两处不一致时，上位机「不设置」就悄悄
+    变成了「改行为」（发出的是 simulation 的默认，被控对象却按另一个默认起）。
+    """
+    _sim_entities, sim_context = _execute(LAUNCH_DIR / "simulation.launch.py")
+    _gazebo_entities, gazebo_context = _execute(LAUNCH_DIR / "gazebo.launch.py")
+
+    assert argument in sim_context.launch_configurations, (
+        f"simulation.launch.py 没有声明 {argument}：web 上位机的模型抽屉传不进去")
+    assert (sim_context.launch_configurations[argument]
+            == gazebo_context.launch_configurations[argument]), (
+        f"{argument} 在两处的默认值不一致")

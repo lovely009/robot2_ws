@@ -76,12 +76,12 @@
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Joint_link7" />
                   <body name="Joint_link8" pos="0.0053653 0.010734 0.1325" quat="0.688965 -0.687421 0.165694 -0.159141">
                     <inertial pos="1.04366e-09 -1.08225e-09 -0.0142699" quat="0.502375 0.502375 0.497614 0.497614" mass="0.00316185" diaginertia="1.82173e-07 1.36808e-07 6.2876e-08" />
-                    <joint name="joint_link8" pos="0 0 0" axis="0 0 1" range="-1.047 1.047" actuatorfrcrange="-10 10" damping="2.58e-06" armature="0.04" />
+                    <joint name="joint_link8" pos="0 0 0" axis="0 0 1" range="-1.047 1.047" actuatorfrcrange="-1.15 1.15" damping="2.58e-06" armature="0.04" />
                     <geom name="collision_Joint_link8" group="3" density="0" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" pos="5e-05 0 -0.00975" type="box" size="0.01605 0.0036 0.00975" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link8" />
                     <body name="Joint_link9" pos="0.0099995 -9.5222e-05 -0.016" quat="0.707099 0.01011 0.707035 0.0033928">
                       <inertial pos="-0.00219742 -0.00811137 -0.00998385" quat="0.993853 -0.000894962 0.000194502 0.110705" mass="0.00996524" diaginertia="1.80223e-06 1.42394e-06 7.20072e-07" />
-                      <joint name="joint_link9" pos="0 0 0" axis="0 0 1" range="-1.22 1.22" actuatorfrcrange="-10 10" damping="1.42e-06" armature="0.04" />
+                      <joint name="joint_link9" pos="0 0 0" axis="0 0 1" range="-1.22 1.22" actuatorfrcrange="-1.15 1.15" damping="1.42e-06" armature="0.04" />
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link9" />
                     </body>
                   </body>
@@ -97,12 +97,12 @@
       <joint name="joint_link1.1" pos="0 0 0" axis="0 0 -1" range="-0.52 0.17" actuatorfrcrange="-11 11" damping="0.00632" armature="0.04" />
       <geom name="collision_Joint_link1.1" group="3" density="0" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" pos="0 0 0" type="mesh" mesh="collision_Joint_link1.1" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link1.1" />
-      <body name="Joint_link2.2" pos="-0.0060466 -0.028296 0.0198" quat="0.707105 0.707108 0 0">
+      <body name="Joint_link2.2" pos="-0.006205 -0.032594 0.0198" quat="0.706985 0.706988 -0.0130274 -0.0130273">
         <inertial pos="0.00534836 0.0180451 -0.0288225" quat="0.72454 -0.012696 -0.0133512 0.688987" mass="0.152067" diaginertia="8.25258e-05 7.06199e-05 3.50529e-05" />
-        <joint name="joint_link2.2" pos="0 0 0" axis="-0.03684 0 0.999321" range="-0.14 0.12" actuatorfrcrange="-11 11" damping="0.047" armature="0.04" />
+        <joint name="joint_link2.2" pos="0 0 0" axis="0 0 1" range="-0.14 0.12" actuatorfrcrange="-11 11" damping="0.047" armature="0.04" />
         <geom name="collision_Joint_link2.2" group="3" density="0" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" pos="0 0 0" type="mesh" mesh="collision_Joint_link2.2" />
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link2.2" />
-        <body name="Joint_link3.3" pos="-0.032233 0.034869 -0.030208" quat="-0.693802 0.0139768 0.719884 0.0145024">
+        <body name="Joint_link3.3" pos="-0.033324 0.034869 -0.0333" quat="-0.706969 0.01403 0.706966 0.0140299">
           <inertial pos="-0.00808533 -0.000522849 0.025661" quat="0.576996 0.594209 -0.387399 0.404861" mass="0.144166" diaginertia="8.65169e-05 7.29924e-05 3.94193e-05" />
           <joint name="joint_link3.3" pos="0 0 0" axis="0 0 1" range="-0.52 3.14" actuatorfrcrange="-45 45" damping="0.0533" armature="0.04" />
           <geom name="collision_Joint_link3.3" group="3" density="0" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" pos="0 0 0" type="mesh" mesh="collision_Joint_link3.3" />
@@ -129,12 +129,12 @@
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link7.7" />
                   <body name="Joint_link8.8" pos="0.0030973 -0.011593 0.1385" quat="0.0953913 -0.0887031 0.701522 -0.700642">
                     <inertial pos="1.52732e-09 -1.75343e-09 -0.0142699" quat="0.502379 0.502379 0.497609 0.497609" mass="0.00316185" diaginertia="1.82173e-07 1.36808e-07 6.2876e-08" />
-                    <joint name="joint_link8.8" pos="0 0 0" axis="0 0 1" range="-1.047 1.047" actuatorfrcrange="-10 10" damping="2.58e-06" armature="0.04" />
+                    <joint name="joint_link8.8" pos="0 0 0" axis="0 0 1" range="-1.047 1.047" actuatorfrcrange="-1.15 1.15" damping="2.58e-06" armature="0.04" />
                     <geom name="collision_Joint_link8.8" group="3" density="0" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" pos="5e-05 0 -0.00975" type="box" size="0.01605 0.0036 0.00975" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link8.8" />
                     <body name="Joint_link9.9" pos="-0.014999 0.0001431 -0.016" quat="0.719844 -0.0128536 -0.693906 0.0123941">
                       <inertial pos="0.00229169 -0.00836225 -0.0148637" quat="0.990272 -0.00131681 -0.0184775 -0.13791" mass="0.00996524" diaginertia="1.80223e-06 1.42394e-06 7.20072e-07" />
-                      <joint name="joint_link9.9" pos="0 0 0" axis="0.0363202 -0.00953395 -0.999295" range="-1.22 1.22" actuatorfrcrange="-10 10" damping="1.42e-06" armature="0.04" />
+                      <joint name="joint_link9.9" pos="0 0 0" axis="0.0363202 -0.00953395 -0.999295" range="-1.22 1.22" actuatorfrcrange="-1.15 1.15" damping="1.42e-06" armature="0.04" />
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="Joint_link9.9" />
                     </body>
                   </body>

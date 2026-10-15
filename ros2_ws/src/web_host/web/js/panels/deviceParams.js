@@ -2,10 +2,19 @@
 // 事务函数在 core/device.js（连接后自动读取也走它）；本面板只做渲染与按钮接线。
 // 防抹除保护从订阅处理器挪进 render：订阅层已不认识面板，正在编辑的输入框仍不能被
 // device_param_report 的下一帧重建抹掉。
-import { store, DIRTY, paramRowIds, writesAllowed, syncWriteButtons } from '../core/store.js';
+import { store, DIRTY, markDirty, paramRowIds, writesAllowed,
+  syncWriteButtons } from '../core/store.js';
 import { $, fmt, fmtParam, lifecyclePill, devSlotNames, devRecoveryText } from '../core/format.js';
 import { loadParams, applyParams, saveParamsToFlash, setLimitFromPosition,
   setMotorZero, clearMotorFault, flipDirection, hasDirtyParamInput } from '../core/device.js';
+
+// 型号库（减速比等）——设备端 RPM 的折算系数。取一次缓存；拿到后重绘一次把
+// 设备端原值填上。取不到就只显示 cnt / mA 两项，不报错。
+let motorSpecs = null;
+fetch('/api/motor-specs')
+  .then((r) => r.json())
+  .then((d) => { motorSpecs = d.motor_types || {}; markDirty(DIRTY.PARAMS); })
+  .catch(() => { motorSpecs = {}; });
 
 // ---------- 全部参数（以驱动板为准，可回读） ----------
 function renderDevRows() {
@@ -34,17 +43,22 @@ function renderDevRows() {
       : (!online ? '<span class="pill off">记录</span>'
                  : (lcVerified ? '<span class="pill mid">驱动板</span>'
                                : '<span class="pill off">未核对</span>'));
-    // 设备端原值提示：页面已知"参数单位 → 设备原值"的换算（设备对象就是 cnt / mA），
-    // 直接写在输入框 title 里，省去对着 CAN 日志换算。位置参数本身就是 rad
-    // （与状态、URDF 同一套单位），cnt 用设备侧 65536 cnt/360° 折。速度的电机端
-    // RPM 还要按减速比折算，页面拿不到该系数，故不给。
+    // 设备端原值：页面已知"参数单位 → 设备原值"的换算（设备对象就是 cnt / mA /
+    // 电机端 RPM），显示在输入框下，省去对着 CAN 日志换算。位置参数本身就是 rad
+    // （与状态、URDF 同一套单位），cnt 用设备侧 65536 cnt/360° 折；转速是**电机端**
+    // RPM，乘减速比——系数取自型号库（/api/motor-specs），取不到就不显示这一项。
     const isCerb = row.topo?.protocol === 1;
+    const gear = motorSpecs && motorSpecs[model]
+      ? Number(motorSpecs[model].gear_ratio) : NaN;
     const raw = (f, value) => {
       if (!isCerb || !Number.isFinite(value)) return '';
       if (f === 'pos_min' || f === 'pos_max') {
-        return `设备端 ${Math.round(value * 65536 / (2 * Math.PI))} cnt`;
+        return `${Math.round(value * 65536 / (2 * Math.PI))} cnt`;
       }
-      if (f === 'torque_limit') return `设备端 ${Math.round(value * 1000)} mA`;
+      if (f === 'torque_limit') return `${Math.round(value * 1000)} mA`;
+      if (f === 'vel_limit' && Number.isFinite(gear) && gear > 0) {
+        return `${Math.round(value * gear * 60 / (2 * Math.PI))} RPM`;
+      }
       return '';
     };
     // 两行对照：显示的是 pick（驱动板优先），另一个值放 title。不一致时明说，
@@ -52,9 +66,11 @@ function renderDevRows() {
     const rowsHint = (f) => (v.rec[f] === v.dev[f]) ? ''
       : `；记录 ${fmtParam(v.rec[f])} / 驱动板 ${fmtParam(v.dev[f])}`;
     const cell = (f) => {
-      const hint = raw(f, Number(pick[f])) + rowsHint(f);
+      const dev = raw(f, Number(pick[f]));
+      const hint = (dev ? `设备端 ${dev}` : '') + rowsHint(f);
       return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
-        (hint ? ` title="${hint}"` : '') + `>`;
+        (hint ? ` title="${hint}"` : '') + `>` +
+        (dev ? `<span class="rawval muted tiny">${dev}</span>` : '');
     };
     // 限位教学：把该台**当前关节位置**写进对应的限位槽。厂商手册要求设置限位时
     // 电机失能、人掰到限位再设——内核也只受理未运动状态（device_limit_write_allowed），

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ⚠ 本文件派生自 cad/urdf/ 里的 SolidWorks 导出件（`胸部整体结构装配体-上身部分`，
-     2026-10-13 09:11 的 sw2urdf 导出；机械几何/惯量/关节原点与轴**逐字取用它**，只改
-     下面四类），与历史 models/robot_all 的差异见 models/half_body_robot/README.md：
+     2026-10-15 15:11 的 sw2urdf 导出；机械几何/惯量/关节原点与轴取用它），与历史
+     models/robot_all 的差异见 models/half_body_robot/README.md。只改下面四类：
      1. <robot name> 与网格路径改到本模型目录；导出件的关节名是大写 `Joint_linkN`（那是
         link 名，与 joint 同名会被 SDFormat 拒绝），这里的 joint 名一律小写。
      2. 18 个 revolute 关节补 <dynamics damping="…" friction="0.0" />：damping 取该关节
@@ -11,12 +11,12 @@
         14 个 link 指向 meshes/collision/ 下的凸包（顶点朝质心内缩 3 mm 留接触余量）；
         Joint_link9/.9 **不提供 collision**——它们被 Joint_link7 的凸包整个包住。
         生成工具见 tools/build_simplified_collision_meshes.py。visual 仍用全分辨率网格。
-     4. **关节 lower/upper 取 CAD 真实角度限位**（SolidWorks 角度配合上下限，逐关节不同、
-        两条链镜像对称，唯独 joint_link6/.6 两侧同值、按 CAD 原值保留）。本次（2026-10-13）
-        相对上一版导出收窄了 8 个值：joint_link1/.1（±0.52 一侧）、joint_link2/.2、
-        joint_link6/.6、joint_link8/.8（±1.047）、joint_link9/.9（±1.22）；逐项对照见
-        README 的「关节限位」节。导出件里 effort/velocity 是 0，会让 Gazebo 锁死关节，
-        因此沿用占位的 effort（10 N·m）与 velocity（1 rad/s），接真机前必须替换。 -->
+     4. **<limit> 四项全部取实值**：lower/upper 是 CAD 真实角度限位（逐关节不同、两条链
+        镜像对称，唯独 joint_link6/.6 两侧同值、按 CAD 原值保留）；effort/velocity 取型号库
+        motor.yaml 的 rated_torque_nm / rated_speed_rad_s（r58 20 N·m、r48 5 N·m / 3.1416
+        rad·s⁻¹；vaxor 1.15 N·m / 4.189 rad·s⁻¹）——2026-10-15 的导出件首次填了这两项。
+        逐项对照与口径说明见 README 的「关节限位与 effort/velocity」「物理参数依据」两节。
+     数值按导出件的 5 位有效数字书写（与 2026-10-13 那版一致）；全精度原样件在 cad/。 -->
 <robot
   name="half_body_robot">
   <link
@@ -114,8 +114,8 @@
     <limit
       lower="-0.17"
       upper="0.52"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.00621"
       friction="0.0" />
@@ -175,8 +175,8 @@
     <limit
       lower="-0.12"
       upper="0.14"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.0473"
       friction="0.0" />
@@ -236,8 +236,8 @@
     <limit
       lower="-3.14"
       upper="0.52"
-      effort="10.0"
-      velocity="1.0" />
+      effort="20.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.0537"
       friction="0.0" />
@@ -297,8 +297,8 @@
     <limit
       lower="0"
       upper="1.57"
-      effort="10.0"
-      velocity="1.0" />
+      effort="20.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.0536"
       friction="0.0" />
@@ -358,8 +358,8 @@
     <limit
       lower="-1.57"
       upper="1.57"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.000181"
       friction="0.0" />
@@ -419,8 +419,8 @@
     <limit
       lower="-1.85"
       upper="0.09"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.00454"
       friction="0.0" />
@@ -480,8 +480,8 @@
     <limit
       lower="-1.57"
       upper="1.57"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="2.08e-05"
       friction="0.0" />
@@ -541,8 +541,8 @@
     <limit
       lower="-1.047"
       upper="1.047"
-      effort="10.0"
-      velocity="1.0" />
+      effort="1.15"
+      velocity="4.189" />
     <dynamics
       damping="2.58e-06"
       friction="0.0" />
@@ -593,8 +593,8 @@
     <limit
       lower="-1.22"
       upper="1.22"
-      effort="10.0"
-      velocity="1.0" />
+      effort="1.15"
+      velocity="4.189" />
     <dynamics
       damping="1.42e-06"
       friction="0.0" />
@@ -654,8 +654,8 @@
     <limit
       lower="-0.52"
       upper="0.17"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.00632"
       friction="0.0" />
@@ -704,19 +704,19 @@
     name="joint_link2.2"
     type="revolute">
     <origin
-      xyz="-0.0060466 -0.028296 0.0198"
-      rpy="1.5708 0 0" />
+      xyz="-0.006205 -0.032594 0.0198"
+      rpy="1.5708 0 -0.036849" />
     <parent
       link="Joint_link1.1" />
     <child
       link="Joint_link2.2" />
     <axis
-      xyz="-0.03684 0 0.99932" />
+      xyz="0 0 1" />
     <limit
       lower="-0.14"
       upper="0.12"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.047"
       friction="0.0" />
@@ -765,8 +765,8 @@
     name="joint_link3.3"
     type="revolute">
     <origin
-      xyz="-0.032233 0.034869 -0.030208"
-      rpy="3.1013 -1.5339 3.1416" />
+      xyz="-0.033324 0.034869 -0.0333"
+      rpy="3.1019 -1.5708 3.1416" />
     <parent
       link="Joint_link2.2" />
     <child
@@ -776,8 +776,8 @@
     <limit
       lower="-0.52"
       upper="3.14"
-      effort="10.0"
-      velocity="1.0" />
+      effort="20.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.0533"
       friction="0.0" />
@@ -837,8 +837,8 @@
     <limit
       lower="-1.57"
       upper="0"
-      effort="10.0"
-      velocity="1.0" />
+      effort="20.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.0532"
       friction="0.0" />
@@ -898,8 +898,8 @@
     <limit
       lower="-1.57"
       upper="1.57"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.000181"
       friction="0.0" />
@@ -959,8 +959,8 @@
     <limit
       lower="-1.85"
       upper="0.09"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="0.00451"
       friction="0.0" />
@@ -1020,8 +1020,8 @@
     <limit
       lower="-1.57"
       upper="1.57"
-      effort="10.0"
-      velocity="1.0" />
+      effort="5.0"
+      velocity="3.1416" />
     <dynamics
       damping="2.08e-05"
       friction="0.0" />
@@ -1081,8 +1081,8 @@
     <limit
       lower="-1.047"
       upper="1.047"
-      effort="10.0"
-      velocity="1.0" />
+      effort="1.15"
+      velocity="4.189" />
     <dynamics
       damping="2.58e-06"
       friction="0.0" />
@@ -1133,8 +1133,8 @@
     <limit
       lower="-1.22"
       upper="1.22"
-      effort="10.0"
-      velocity="1.0" />
+      effort="1.15"
+      velocity="4.189" />
     <dynamics
       damping="1.42e-06"
       friction="0.0" />

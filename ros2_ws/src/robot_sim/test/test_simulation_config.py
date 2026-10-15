@@ -38,7 +38,10 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
     """
     module = _launch_module()
     simulation, specs = _bound_simulation(module)
-    module._write_runtime_configs(simulation, tmp_path, "vcan", "robot_vcan0", specs)
+    # vcan 场景下驱动侧与模拟器侧共用同一个接口。
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "robot_vcan0", "robot_vcan0", specs
+    )
     profiles = yaml.safe_load(
         (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
     )["motor_simulation"]["profiles"]

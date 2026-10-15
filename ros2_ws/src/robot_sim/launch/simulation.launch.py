@@ -319,6 +319,7 @@ def _write_runtime_configs(
     output_dir: Path,
     transport: str,
     driver_endpoint: str,
+    sim_endpoint: str,
     motor_specs_path: Path,
 ) -> tuple[Path, Path]:
     timing = simulation.get("timing", {})
@@ -354,7 +355,21 @@ def _write_runtime_configs(
                 "vaxor_feedback_hz": timing.get("vaxor_feedback_hz", 50),
                 "command_timeout_ms": timing.get("command_timeout_ms", 150),
             },
-            "buses": list(simulation["buses"]),
+            # buses[] 是每条总线端点与传输的唯一宿主：节点不再收
+            # transport_mode / <bus>_port / baud_rate / allow_external_canfd。
+            "buses": [
+                {
+                    "name": simulation["buses"][0],
+                    "transport": (
+                        "serial_slcan" if transport == "slcan"
+                        else "socket_can" if transport in {"socketcan", "vcan"}
+                        else "usb_serial"
+                    ),
+                    "endpoint": sim_endpoint,
+                    "baud_rate": 115200 if transport == "slcan" else 3000000,
+                    "allow_external_canfd": transport == "slcan",
+                }
+            ],
             "profiles": profiles,
             "motors": sim_motors,
         }
@@ -749,6 +764,7 @@ def launch_simulation(context):
             runtime_dir,
             transport,
             driver_endpoint,
+            sim_endpoint,
             motor_specs_path,
         )
         # Gazebo 的控制器参数只有 Gazebo 路需要；MuJoCo 桥自己就是被控对象，
@@ -973,12 +989,6 @@ def launch_simulation(context):
             parameters=[
                 {
                     "config_file": str(motor_sim_config),
-                    "transport_mode": (
-                        "serial_slcan" if transport == "slcan" else "socket_can"
-                    ),
-                    f"{simulation['buses'][0]}_port": sim_endpoint,
-                    "baud_rate": 115200 if transport == "slcan" else 3000000,
-                    "allow_external_canfd": transport == "slcan",
                     "joint_states_topic": "/joint_states",
                     "effort_topic": "/arm_effort_controller/commands",
                     "drive_state_topic": "/motor_sim/drive_state",

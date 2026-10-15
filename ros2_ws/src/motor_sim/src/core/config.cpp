@@ -219,6 +219,14 @@ SystemConfig parse_config_common(const YAML::Node &root,
     bus.probe_adapter = optional_bool(node, "probe_adapter", false, context);
     bus.allow_external_canfd =
         optional_bool(node, "allow_external_canfd", false, context);
+    // serial_slcan 会把帧打到真实 CANable 所在的物理总线上，必须由配置显式声明
+    // 才允许（原 ROS 层 validate_port_mapping_common 的守卫）。
+    if (bus.transport == BusTransport::SerialSlcan &&
+        !bus.allow_external_canfd) {
+      throw std::runtime_error(context +
+                               " serial_slcan requires allow_external_canfd: "
+                               "true");
+    }
     if (bus.transport == BusTransport::SocketCan) {
       // 接口名不是设备路径；带 '/' 会让下游拿路径去 if_nametoindex，
       // 报出的却是"接口不存在"这种与真因无关的错。

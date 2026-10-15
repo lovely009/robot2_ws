@@ -35,12 +35,10 @@ using PortMap = std::vector<BusPort>;
 using TransportMap =
     std::map<std::string, std::unique_ptr<transport::FrameTransport>>;
 
+// 节点参数面只剩配置路径：总线端点、传输类型与串口参数一律来自 config_file
+// 的 buses[]，不再有第二个宿主。
 struct NodeParameters {
-  transport::TransportMode transport_mode{transport::TransportMode::UsbSerial};
-  PortMap ports;
-  int baud_rate{3000000};
   std::string config_file;
-  bool allow_external_canfd{false};
 };
 
 struct NodeDefaults {
@@ -55,15 +53,9 @@ struct NodeDefaults {
   bool fault_latching_enabled{true};
 };
 
-// 按外部拓扑契约校验参数：buses 顺序、数量与每台电机地址必须与契约一致。
-void validate_node_parameters(
-    const NodeParameters &parameters,
-    const ::motor_sim::core::TopologyContract &contract);
-
-// 仅按一组预期 bus 名校验参数：用于独立入口，总线集合来自配置文件而非外部契约。
-void validate_node_parameters(
-    const NodeParameters &parameters,
-    const std::vector<std::string> &expected_buses);
+// 环境校验：结构合法性已由 core::load_system_config 判定，这里只看运行期事实——
+// 设备存在、能开成 tty、接口存在，以及各总线不得指向同一设备。
+void validate_bus_endpoints(const SystemConfig &config);
 
 class MotorSimNode final : public rclcpp::Node {
 public:

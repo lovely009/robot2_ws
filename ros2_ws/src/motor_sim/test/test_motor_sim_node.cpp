@@ -57,20 +57,58 @@ private:
   std::string slave_path_;
 };
 
-core::TopologyContract arm_contract() {
-  return {{"arm"}, {{"joint_a", "arm", "vaxor", 1U}}};
+// 环境校验的输入现在是一份已解析的 SystemConfig（总线端点来自 YAML 的 buses[]），
+// 不再是 ROS 节点参数——所以测试直接构造 config，逐条总线给端点。
+// 传输类型的结构约束（如 serial_slcan 必须显式 opt-in）归 core，这里只测环境。
+void add_serial_bus(core::SystemConfig &config, const std::string &name,
+                    const std::string &endpoint) {
+  core::BusConfig bus;
+  bus.name = name;
+  bus.transport = core::BusTransport::SerialSlcan;
+  bus.endpoint = endpoint;
+  bus.baud_rate = 3000000;
+  bus.data_bitrate_index = -1;
+  bus.allow_external_canfd = true;
+  config.buses.push_back(bus);
 }
 
-core::TopologyContract three_bus_contract() {
-  return {{"left_arm", "right_arm", "legs"}, {}};
+void add_socket_can_bus(core::SystemConfig &config, const std::string &name,
+                        const std::string &interface) {
+  core::BusConfig bus;
+  bus.name = name;
+  bus.transport = core::BusTransport::SocketCan;
+  bus.endpoint = interface;
+  config.buses.push_back(bus);
 }
 
-ros::NodeParameters parameters(const std::string &device) {
-  ros::NodeParameters result;
-  result.transport_mode = transport::TransportMode::UsbSerial;
-  result.config_file = "/tmp/motors.yaml";
-  result.ports = {{"arm", device}};
-  return result;
+void add_one_axis_motor(core::SystemConfig &config, const std::string &bus) {
+  core::MotorConfig motor;
+  motor.joint = "joint_a";
+  motor.bus = bus;
+  motor.protocol = "vaxor";
+  motor.id = 1U;
+  motor.limits.command_lower_rad = -1.0;
+  motor.limits.command_upper_rad = 1.0;
+  motor.limits.effort_nm = 10.0;
+  motor.plant.kp = 10.0;
+  motor.plant.kd = 1.0;
+  motor.plant.effort_limit_nm = 10.0;
+  config.motors.push_back(motor);
+}
+
+core::SystemConfig bus_config(core::BusTransport transport,
+                              const std::string &endpoint) {
+  core::SystemConfig config;
+  config.timing.control_hz = 100U;
+  config.timing.vaxor_feedback_hz = 50U;
+  config.timing.command_timeout_ms = 150U;
+  if (transport == core::BusTransport::SocketCan) {
+    add_socket_can_bus(config, "arm", endpoint);
+  } else {
+    add_serial_bus(config, "arm", endpoint);
+  }
+  add_one_axis_motor(config, "arm");
+  return config;
 }
 
 core::SystemConfig one_axis_config() {
@@ -106,87 +144,57 @@ void ensure_rclcpp_initialized() {
 
 TEST(MotorSimNodeParameters, AcceptsSingleArmPty) {
   PseudoTerminal arm;
-  EXPECT_NO_THROW(ros::validate_node_parameters(parameters(arm.slave_path()),
-                                                 arm_contract()));
+  EXPECT_NO_THROW(ros::validate_bus_endpoints(
+      bus_config(core::BusTransport::SerialSlcan, arm.slave_path())));
 }
 
 TEST(MotorSimNodeParameters, AcceptsThreeBusPtys) {
   PseudoTerminal left;
   PseudoTerminal right;
   PseudoTerminal legs;
-  auto value = parameters(left.slave_path());
-  value.ports = {{"left_arm", left.slave_path()},
-                 {"right_arm", right.slave_path()},
-                 {"legs", legs.slave_path()}};
-  EXPECT_NO_THROW(ros::validate_node_parameters(value, three_bus_contract()));
+  auto config = bus_config(core::BusTransport::SerialSlcan, left.slave_path());
+  config.buses[0].name = "left_arm";
+  add_serial_bus(config, "right_arm", right.slave_path());
+  add_serial_bus(config, "legs", legs.slave_path());
+  EXPECT_NO_THROW(ros::validate_bus_endpoints(config));
 }
 
-TEST(MotorSimNodeParameters, RejectsMissingBusAndDuplicateDevice) {
+// 两条总线指向同一个设备：旧行为在 validate_port_mapping_common 里拒绝，
+// 改成配置驱动后不能丢——否则两条总线会去开同一个 tty 互相抢字节。
+TEST(MotorSimNodeParameters, RejectsDuplicateSerialDevice) {
   PseudoTerminal arm;
-  auto missing = parameters(arm.slave_path());
-  missing.ports.clear();
-  EXPECT_THROW(ros::validate_node_parameters(missing, arm_contract()),
-               std::invalid_argument);
+  auto config = bus_config(core::BusTransport::SerialSlcan, arm.slave_path());
+  add_serial_bus(config, "legs", arm.slave_path());
+  EXPECT_THROW(ros::validate_bus_endpoints(config), std::invalid_argument);
+}
 
-  auto duplicate = parameters(arm.slave_path());
-  duplicate.ports.push_back({"other", arm.slave_path()});
-  const core::TopologyContract two_buses{{"arm", "other"}, {}};
-  EXPECT_THROW(ros::validate_node_parameters(duplicate, two_buses),
+// 不存在的设备路径：期望加载期就拒绝，而不是等到 open() 才失败。
+TEST(MotorSimNodeParameters, RejectsMissingSerialDevice) {
+  EXPECT_THROW(ros::validate_bus_endpoints(bus_config(
+                   core::BusTransport::SerialSlcan, "/dev/definitely-not-here")),
                std::invalid_argument);
 }
 
-TEST(MotorSimNodeParameters, SerialSlcanRequiresExplicitOptIn) {
-  PseudoTerminal arm;
-  auto value = parameters(arm.slave_path());
-  value.transport_mode = transport::TransportMode::SerialSlcan;
-  EXPECT_THROW(ros::validate_node_parameters(value, arm_contract()),
+TEST(MotorSimNodeParameters, RejectsMissingSocketCanInterface) {
+  EXPECT_THROW(ros::validate_bus_endpoints(bus_config(
+                   core::BusTransport::SocketCan, "no_such_iface")),
                std::invalid_argument);
-  value.allow_external_canfd = true;
-  EXPECT_NO_THROW(ros::validate_node_parameters(value, arm_contract()));
 }
 
 TEST(MotorSimNodeParameters, SocketCanAcceptsExistingInterfaceName) {
-  auto value = parameters("/dev/null");
-  value.transport_mode = transport::TransportMode::SocketCan;
-  // socket_can 不使用波特率，非法值也应被忽略。
-  value.baud_rate = 12345;
-  value.ports = {{"arm", "lo"}};
-  EXPECT_NO_THROW(ros::validate_node_parameters(value, arm_contract()));
+  // socket_can 不使用波特率，取值应被忽略。
+  auto config = bus_config(core::BusTransport::SocketCan, "lo");
+  config.buses[0].baud_rate = 12345;
+  EXPECT_NO_THROW(ros::validate_bus_endpoints(config));
 }
 
-TEST(MotorSimNodeParameters, SocketCanRejectsMissingOrPathLikeInterfaces) {
-  auto missing = parameters("");
-  missing.transport_mode = transport::TransportMode::SocketCan;
-  missing.ports = {{"arm", "no_such_vcan_interface"}};
-  EXPECT_THROW(ros::validate_node_parameters(missing, arm_contract()),
-               std::invalid_argument);
-
-  auto path_like = parameters("");
-  path_like.transport_mode = transport::TransportMode::SocketCan;
-  path_like.ports = {{"arm", "/dev/serial/by-id/usb-arm"}};
-  EXPECT_THROW(ros::validate_node_parameters(path_like, arm_contract()),
-               std::invalid_argument);
-
-  auto empty = parameters("");
-  empty.transport_mode = transport::TransportMode::SocketCan;
-  empty.ports = {{"arm", ""}};
-  EXPECT_THROW(ros::validate_node_parameters(empty, arm_contract()),
-               std::invalid_argument);
-}
-
-TEST(MotorSimNodeParameters, RejectsRegularFileAndUnsupportedBaud) {
+TEST(MotorSimNodeParameters, RejectsRegularFileAsSerialPort) {
   const std::string path = "/tmp/motor_sim_regular_file";
   std::ofstream(path) << "not a tty";
-  auto regular = parameters(path);
-  EXPECT_THROW(ros::validate_node_parameters(regular, arm_contract()),
+  EXPECT_THROW(ros::validate_bus_endpoints(
+                   bus_config(core::BusTransport::SerialSlcan, path)),
                std::invalid_argument);
   static_cast<void>(::unlink(path.c_str()));
-
-  PseudoTerminal arm;
-  auto unsupported = parameters(arm.slave_path());
-  unsupported.baud_rate = 12345;
-  EXPECT_THROW(ros::validate_node_parameters(unsupported, arm_contract()),
-               std::invalid_argument);
 }
 
 TEST(MotorSimNodeInterfaces, PublishesBrakeStateAndRejectsResetWithoutFault) {

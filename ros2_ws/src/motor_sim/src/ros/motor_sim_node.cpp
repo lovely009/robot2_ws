@@ -18,18 +18,19 @@ namespace motor_sim::ros {
 using ::motor_sim::core::Fault;
 namespace {
 
-transport::TransportMode parse_transport_mode(const std::string &value) {
-  if (value == "usb_serial") {
-    return transport::TransportMode::UsbSerial;
+// core 层不依赖 motor_transport，故传输类型在 core::BusTransport 里定义，
+// 到传输实现的映射落在这一层。
+transport::TransportMode bus_transport_mode(
+    const ::motor_sim::core::BusTransport value) {
+  switch (value) {
+    case ::motor_sim::core::BusTransport::UsbSerial:
+      return transport::TransportMode::UsbSerial;
+    case ::motor_sim::core::BusTransport::SerialSlcan:
+      return transport::TransportMode::SerialSlcan;
+    case ::motor_sim::core::BusTransport::SocketCan:
+      return transport::TransportMode::SocketCan;
   }
-  if (value == "serial_slcan") {
-    return transport::TransportMode::SerialSlcan;
-  }
-  if (value == "socket_can") {
-    return transport::TransportMode::SocketCan;
-  }
-  throw std::invalid_argument(
-      "transport_mode must be usb_serial, serial_slcan or socket_can");
+  throw std::invalid_argument("unhandled bus transport");
 }
 
 std::string fault_message(const Fault fault) {
@@ -60,114 +61,58 @@ diagnostic_msgs::msg::KeyValue diagnostic_value(const std::string &key,
 
 }  // namespace
 
-namespace {
-
-// 通用参数校验：mode 基础规则、baud_rate、每个 port 的 endpoint 合法性、
-// 以及 buses 集合是否与 expected_buses 精确匹配（顺序不敏感）。
-void validate_port_mapping_common(
-    const NodeParameters &parameters,
-    const std::vector<std::string> &expected_buses) {
-  if (parameters.config_file.empty()) {
-    throw std::invalid_argument("config_file cannot be empty");
-  }
-  if (parameters.transport_mode == transport::TransportMode::SerialSlcan &&
-      !parameters.allow_external_canfd) {
-    throw std::invalid_argument(
-        "serial_slcan requires allow_external_canfd:=true");
-  }
-  if (parameters.transport_mode != transport::TransportMode::SocketCan) {
-    const std::set<int> supported_baud_rates{
-        115200, 460800, 921600, 1000000, 2000000, 3000000};
-    if (supported_baud_rates.find(parameters.baud_rate) ==
-        supported_baud_rates.end()) {
-      throw std::invalid_argument("unsupported baud_rate");
-    }
-  }
-  const std::set<std::string> expected(expected_buses.begin(),
-                                       expected_buses.end());
-  std::set<std::string> buses;
-  std::set<std::string> endpoints;
-  for (const auto &[bus, endpoint] : parameters.ports) {
-    if (expected.find(bus) == expected.end() || !buses.insert(bus).second) {
-      throw std::invalid_argument("ports must define each logical bus once");
-    }
-    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
-      // SocketCAN 端口是接口名（如 vcan0），不是设备路径；必须已存在
-      // （ip link 可见）且各逻辑总线互不重复。
-      if (endpoint.empty() || endpoint.find('/') != std::string::npos) {
-        throw std::invalid_argument(
-            "socketcan port must be an interface name without '/'");
-      }
-      if (::if_nametoindex(endpoint.c_str()) == 0U) {
-        throw std::invalid_argument("socketcan interface must exist");
-      }
-      if (!endpoints.insert(endpoint).second) {
-        throw std::invalid_argument("socketcan interfaces must be unique");
+// 定义在 motor_sim::ros 作用域（头文件对外声明，集成层入口的守卫）：
+// 结构合法性归 core，这里只看运行期环境事实。
+void validate_bus_endpoints(const ::motor_sim::core::SystemConfig &config) {
+  std::set<std::string> resolved;
+  for (const auto &bus : config.buses) {
+    const std::string context = "bus '" + bus.name + "'";
+    if (bus.transport == ::motor_sim::core::BusTransport::SocketCan) {
+      if (::if_nametoindex(bus.endpoint.c_str()) == 0U) {
+        throw std::invalid_argument(context +
+                                    " socketcan interface must exist");
       }
       continue;
     }
-    if (endpoint.empty() || !std::filesystem::exists(endpoint)) {
-      throw std::invalid_argument("serial port must exist");
+    if (!std::filesystem::exists(bus.endpoint)) {
+      throw std::invalid_argument(context + " serial port must exist");
     }
     const int descriptor =
-        ::open(endpoint.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+        ::open(bus.endpoint.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (descriptor < 0 || ::isatty(descriptor) != 1) {
       if (descriptor >= 0) {
         ::close(descriptor);
       }
-      throw std::invalid_argument("serial port must open as a tty");
+      throw std::invalid_argument(context + " serial port must open as a tty");
     }
     ::close(descriptor);
-    const auto resolved = std::filesystem::canonical(endpoint).string();
-    if (!endpoints.insert(resolved).second) {
+    if (!resolved.insert(std::filesystem::canonical(bus.endpoint).string())
+             .second) {
       throw std::invalid_argument("serial ports must be unique");
     }
   }
-  if (buses != expected) {
-    throw std::invalid_argument("ports must match the expected bus set");
-  }
-}
-
-}  // namespace
-
-void validate_node_parameters(
-    const NodeParameters &parameters,
-    const ::motor_sim::core::TopologyContract &contract) {
-  validate_port_mapping_common(parameters, contract.buses);
-}
-
-void validate_node_parameters(
-    const NodeParameters &parameters,
-    const std::vector<std::string> &expected_buses) {
-  validate_port_mapping_common(parameters, expected_buses);
 }
 
 namespace {
 
 // 从 config 构造 transports，并返回按 bus 排序的端口映射（用于诊断发布）。
+// 每条总线各自持有传输类型：多总线可以混合 socket_can 与串口。
 std::pair<TransportMap, PortMap> build_transports(
-    const NodeParameters &parameters,
     const SystemConfig &config) {
   TransportMap transports;
   PortMap ordered;
   for (const auto &bus_cfg : config.buses) {
-    const auto found = std::find_if(
-        parameters.ports.begin(), parameters.ports.end(),
-        [&](const BusPort &p) { return p.bus == bus_cfg.name; });
-    if (found == parameters.ports.end()) {
-      throw std::invalid_argument("missing port for bus '" + bus_cfg.name + "'");
-    }
-    ordered.push_back(*found);
-    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
-      transports.emplace(
-          bus_cfg.name,
-          std::make_unique<transport::SocketCanTransport>(found->device));
+    ordered.push_back({bus_cfg.name, bus_cfg.endpoint});
+    const auto mode = bus_transport_mode(bus_cfg.transport);
+    if (mode == transport::TransportMode::SocketCan) {
+      transports.emplace(bus_cfg.name,
+                         std::make_unique<transport::SocketCanTransport>(
+                             bus_cfg.endpoint));
     } else {
       transports.emplace(
           bus_cfg.name,
-          std::make_unique<transport::SerialTransport>(
-              found->device, parameters.transport_mode,
-              parameters.baud_rate));
+          std::make_unique<transport::SerialTransport>(bus_cfg.endpoint, mode,
+                                                       bus_cfg.baud_rate));
     }
   }
   return {std::move(transports), ordered};
@@ -186,19 +131,9 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   if (parameters.config_file.empty()) {
     throw std::invalid_argument("config_file cannot be empty");
   }
-  const auto config =
+  auto config =
       ::motor_sim::core::load_system_config(parameters.config_file);
-
-  const auto mode_name =
-      declare_parameter<std::string>("transport_mode", "usb_serial");
-  parameters.transport_mode = parse_transport_mode(mode_name);
-  for (const auto &bus : config.buses) {
-    parameters.ports.push_back(
-        {bus.name, declare_parameter<std::string>(bus.name + "_port", "")});
-  }
-  parameters.baud_rate = declare_parameter<int>("baud_rate", 3000000);
-  parameters.allow_external_canfd =
-      declare_parameter<bool>("allow_external_canfd", false);
+  validate_bus_endpoints(config);
   // 调试开关：false 时故障只记录不锁存；默认 true 保持安全语义。
   defaults.fault_latching_enabled =
       declare_parameter<bool>("fault_latching_enabled",
@@ -216,17 +151,16 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   defaults.diagnostics_topic = declare_parameter<std::string>(
       "diagnostics_topic", defaults.diagnostics_topic);
 
-  std::vector<std::string> expected_buses;
-  expected_buses.reserve(config.buses.size());
+  std::set<std::string> socket_can_buses;
   for (const auto &bus : config.buses) {
-    expected_buses.push_back(bus.name);
+    if (bus.transport == ::motor_sim::core::BusTransport::SocketCan) {
+      socket_can_buses.insert(bus.name);
+    }
   }
-  validate_node_parameters(parameters, expected_buses);
-
-  auto [transports, ordered] = build_transports(parameters, config);
+  auto [transports, ordered] = build_transports(config);
   initialize(std::move(config), std::move(transports), defaults);
   for (const auto &[bus, device] : ordered) {
-    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
+    if (socket_can_buses.count(bus) != 0U) {
       publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::OK,
                          "socketcan bus '" + bus + "' bound to '" + device +
                              "'");
@@ -246,16 +180,12 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   NodeParameters parameters;
   parameters.config_file = declare_parameter<std::string>(
       "config_file", defaults.config_file);
-  const auto mode_name =
-      declare_parameter<std::string>("transport_mode", "usb_serial");
-  parameters.transport_mode = parse_transport_mode(mode_name);
-  for (const auto &bus : contract.buses) {
-    parameters.ports.push_back(
-        {bus, declare_parameter<std::string>(bus + "_port", "")});
+  if (parameters.config_file.empty()) {
+    throw std::invalid_argument("config_file cannot be empty");
   }
-  parameters.baud_rate = declare_parameter<int>("baud_rate", 3000000);
-  parameters.allow_external_canfd =
-      declare_parameter<bool>("allow_external_canfd", false);
+  auto config = ::motor_sim::core::load_system_config(parameters.config_file,
+                                                      contract);
+  validate_bus_endpoints(config);
   // 调试开关：false 时故障只记录不锁存；默认 true 保持安全语义。
   defaults.fault_latching_enabled =
       declare_parameter<bool>("fault_latching_enabled",
@@ -272,14 +202,16 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
       declare_parameter<std::string>("effort_topic", defaults.effort_topic);
   defaults.diagnostics_topic = declare_parameter<std::string>(
       "diagnostics_topic", defaults.diagnostics_topic);
-  validate_node_parameters(parameters, contract);
-
-  auto config = ::motor_sim::core::load_system_config(parameters.config_file,
-                                                      contract);
-  auto [transports, ordered] = build_transports(parameters, config);
+  std::set<std::string> socket_can_buses;
+  for (const auto &bus : config.buses) {
+    if (bus.transport == ::motor_sim::core::BusTransport::SocketCan) {
+      socket_can_buses.insert(bus.name);
+    }
+  }
+  auto [transports, ordered] = build_transports(config);
   initialize(std::move(config), std::move(transports), defaults);
   for (const auto &[bus, device] : ordered) {
-    if (parameters.transport_mode == transport::TransportMode::SocketCan) {
+    if (socket_can_buses.count(bus) != 0U) {
       publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::OK,
                          "socketcan bus '" + bus + "' bound to '" + device +
                              "'");

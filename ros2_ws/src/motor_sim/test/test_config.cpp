@@ -100,3 +100,11 @@ TEST(SystemConfig, DefaultsBrsOnAndReadsOverride) {
   const auto without = core::load_system_config(fixture_path("brs_off.yaml"));
   EXPECT_FALSE(without.buses[0].brs);
 }
+
+// serial_slcan 会把帧打到真实 CANable 所在的物理总线上，所以必须由配置显式声明
+// 才允许——这是从 ROS 层 validate_port_mapping_common 搬过来的守卫，搬丢就等于
+// 让一个笔误的 transport 值静默接上真总线。
+TEST(SystemConfig, RejectsSerialSlcanWithoutExplicitOptIn) {
+  EXPECT_THROW(core::load_system_config(fixture_path("slcan_without_optin.yaml")),
+               std::runtime_error);
+}

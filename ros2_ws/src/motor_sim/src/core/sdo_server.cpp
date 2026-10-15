@@ -111,6 +111,12 @@ bool CerbSdoServer::handle(unsigned node_id, const SdoFrame &request,
       put_read_reply(request, object->second, response);
       return true;
     }
+    // 身份串是字典里唯一的分段上传对象（厂家说明书 §4.3：40 08 10 00 →
+    // 41 08 10 00 + 总字节数，随后 60/70 交替取段）。
+    if (index == 0x1008U && sub == 0x00U) {
+      put_identity_initiate(node, response);
+      return true;
+    }
     put_abort(index, sub,
               is_known_index(index) ? kCerbSdoAbortNoSubindex
                                     : kCerbSdoAbortNoObject,
@@ -118,7 +124,43 @@ bool CerbSdoServer::handle(unsigned node_id, const SdoFrame &request,
     return true;
   }
 
-  return false;  // 分段上传的请求由 Task 3 处理
+  if ((command & 0xE0U) == 0x60U) {  // 分段上传请求（bit4 = 切换位）
+    put_identity_segment(node, command, response);
+    return true;
+  }
+
+  return false;
+}
+
+void CerbSdoServer::put_identity_initiate(Node &node, SdoFrame &response) {
+  node.segment_offset = 0U;
+  const std::size_t size = node.identity.size();
+  response = SdoFrame{};
+  response[0] = 0x41;  // 分段上传，且长度已知
+  response[1] = 0x08;
+  response[2] = 0x10;
+  response[3] = 0x00;
+  response[4] = static_cast<uint8_t>(size & 0xFFU);
+  response[5] = static_cast<uint8_t>((size >> 8) & 0xFFU);
+}
+
+void CerbSdoServer::put_identity_segment(Node &node, const uint8_t command,
+                                         SdoFrame &response) {
+  // 每段 7 字节；head = toggle(bit4) | 未用字节数(4 位) | 末段标志。
+  constexpr std::size_t kChunkBytes = 7U;
+  const std::size_t remaining = node.identity.size() - node.segment_offset;
+  const std::size_t take = remaining < kChunkBytes ? remaining : kChunkBytes;
+  const bool last = node.segment_offset + take >= node.identity.size();
+  const std::size_t unused = last ? kChunkBytes - take : 0U;
+
+  response = SdoFrame{};
+  response[0] = static_cast<uint8_t>(((command >> 4) & 0x01U) << 4 |
+                                     (unused << 1) | (last ? 1U : 0U));
+  for (std::size_t i = 0U; i < take; ++i) {
+    response[1U + i] =
+        static_cast<uint8_t>(node.identity[node.segment_offset + i]);
+  }
+  node.segment_offset += take;
 }
 
 }  // namespace motor_sim::core

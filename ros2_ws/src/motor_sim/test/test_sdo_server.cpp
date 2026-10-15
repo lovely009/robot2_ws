@@ -135,3 +135,51 @@ TEST(CerbSdoServer, PowerOnObjectsComeFromSdoOverrides) {
       1U, core::SdoFrame{0x40, 0x41, 0x25, 0x00, 0, 0, 0, 0}, response));
   EXPECT_EQ(response[4], 1);  // 方向 CCW
 }
+
+// 身份读取应答（SDO 0x1008 分段上传）：字节格式必须与固件 cerb_adapter 对向，
+// 否则台架上固件永远读不到身份串、全部电机停在未绑定。
+TEST(CerbSdoServer, SegmentedUploadServesTheDeviceIdentity) {
+  auto server = server_with(cerb_motor("R48LITE_V2", 3325, 5000, 1U, 0U));
+  core::SdoFrame response{};
+  const core::SdoFrame initiate{0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0};
+
+  ASSERT_TRUE(server.handle(1U, initiate, response));
+  // 字节 4-5 = 总长（10），命令字 0x41 = 分段上传且长度已知。
+  EXPECT_EQ(response, (core::SdoFrame{0x41, 0x08, 0x10, 0x00, 10, 0, 0, 0}));
+
+  ASSERT_TRUE(server.handle(1U, core::SdoFrame{0x60, 0, 0, 0, 0, 0, 0, 0},
+                            response));
+  // 非末段：head = toggle(0)<<4 | unused(0)<<1 | last(0) = 0x00。
+  EXPECT_EQ(response[0], 0x00);
+  EXPECT_EQ(std::string(response.begin() + 1, response.begin() + 8), "R48LITE");
+
+  ASSERT_TRUE(server.handle(1U, core::SdoFrame{0x70, 0, 0, 0, 0, 0, 0, 0},
+                            response));
+  // 末段：head = toggle(1)<<4 | unused(4)<<1 | last(1) = 0x19，数据 "_V2" + 4 字节填充。
+  EXPECT_EQ(response[0], 0x19);
+  EXPECT_EQ(std::string(response.begin() + 1, response.begin() + 4), "_V2");
+}
+
+// 身份串只挂在 :00；真机 :01/:02 回"子索引不存在"，这里不能回身份串。
+TEST(CerbSdoServer, IdentitySubindicesOtherThanZeroAbort) {
+  auto server = server_with(cerb_motor("R48LITE_V2", 3325, 5000, 1U, 0U));
+  core::SdoFrame response{};
+  ASSERT_TRUE(server.handle(1U, core::SdoFrame{0x40, 0x08, 0x10, 0x01, 0, 0, 0, 0},
+                            response));
+  EXPECT_EQ(response, (core::SdoFrame{0x80, 0x08, 0x10, 0x01, 0x11, 0x00, 0x09,
+                                      0x06}));
+}
+
+// 取段游标按节点保存：两次上传之间会被 initiate 重置（否则第二次读到空串）。
+TEST(CerbSdoServer, IdentityCursorResetsOnEachInitiate) {
+  auto server = server_with(cerb_motor("R58LITE_V2", 3325, 13300, 1U, 0U));
+  core::SdoFrame response{};
+  const core::SdoFrame initiate{0x40, 0x08, 0x10, 0x00, 0, 0, 0, 0};
+  ASSERT_TRUE(server.handle(1U, initiate, response));
+  ASSERT_TRUE(server.handle(1U, core::SdoFrame{0x60, 0, 0, 0, 0, 0, 0, 0},
+                            response));
+  ASSERT_TRUE(server.handle(1U, initiate, response));
+  ASSERT_TRUE(server.handle(1U, core::SdoFrame{0x60, 0, 0, 0, 0, 0, 0, 0},
+                            response));
+  EXPECT_EQ(std::string(response.begin() + 1, response.begin() + 8), "R58LITE");
+}

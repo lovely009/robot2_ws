@@ -45,6 +45,11 @@ class CerbSdoServer {
     std::map<SdoObjectKey, int32_t> objects;
     std::size_t segment_offset{0U};
   };
+
+  // 身份串的分段上传：initiate 回总长，随后 0x60/0x70 交替取段。
+  void put_identity_initiate(Node &node, SdoFrame &response);
+  void put_identity_segment(Node &node, uint8_t command, SdoFrame &response);
+
   std::map<unsigned, Node> nodes_;
 };
 

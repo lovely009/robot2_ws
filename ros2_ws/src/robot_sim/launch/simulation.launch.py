@@ -336,11 +336,14 @@ def _write_runtime_configs(
                 "protocol": motor["protocol"],
                 "id": motor["id"],
                 "profile": motor["profile"],
-                # 保护开关 0x2650:00 与方向 0x2541:00 的真机上电初值；拓扑未声明时
-                # 取真机初值（保护开在 1、方向 CW）。
+                # 保护开关 0x2650:00 与方向 0x2541:00 的真机上电初值。
+                # 本增量只让配置能表达这两个字段，**还没有输入通路**：拓扑与
+                # motor_driver.yaml 都不声明它们，节点侧也还没有消费方。通路随
+                # SDO 从站增量一起接（ADR §6 的「保护被关掉」场景）——所以这里写
+                # 常量而不是 motor.get(...)，后者会让人以为拓扑能改得动。
                 "sdo_overrides": {
-                    "protection_enabled": motor.get("protection_enabled", 1),
-                    "direction": motor.get("direction", 0),
+                    "protection_enabled": 1,
+                    "direction": 0,
                 },
             }
         )
@@ -356,17 +359,18 @@ def _write_runtime_configs(
     motor_sim_config = output_dir / "motor_sim.yaml"
     motor_sim_document = {
         "motor_simulation": {
-            # 节拍字段的缺省镜像 Python 后端 CLI 的缺省
-            # （--period-ms 20 / --fb-period-ms 0 / --stagger-ms 2.2 /
-            # --effort-rate-hz 200），否则删掉 Python 后帧级对照会失配。
+            # 节拍字段的缺省 = 旧行为（0 = 沿用 control_hz、不错峰），与
+            # config.hpp 里这些字段的语义一致。CPU 侧今天只有 host/external 读这份
+            # YAML，而它们跑的正是旧节拍；Python 侧那些数值（20 ms / 2.2 ms / 200 Hz）
+            # 要等 firmware 分支切过来时由拓扑显式声明，不能预置成缺省。
             "timing": {
                 "control_hz": timing.get("control_hz", 100),
                 "vaxor_feedback_hz": timing.get("vaxor_feedback_hz", 50),
                 "command_timeout_ms": timing.get("command_timeout_ms", 150),
-                "can_period_ms": timing.get("can_period_ms", 20),
+                "can_period_ms": timing.get("can_period_ms", 0),
                 "feedback_period_ms": timing.get("feedback_period_ms", 0),
-                "stagger_ms": timing.get("stagger_ms", 2.2),
-                "effort_rate_hz": timing.get("effort_rate_hz", 200.0),
+                "stagger_ms": timing.get("stagger_ms", 0),
+                "effort_rate_hz": timing.get("effort_rate_hz", 0),
             },
             # buses[] 是每条总线端点与传输的唯一宿主：节点不再收
             # transport_mode / <bus>_port / baud_rate / allow_external_canfd。

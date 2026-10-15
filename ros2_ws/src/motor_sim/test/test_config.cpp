@@ -151,3 +151,16 @@ TEST(SystemConfig, RejectsSdoOverrideOutsideBooleanDomain) {
   EXPECT_THROW(core::load_system_config(fixture_path("bad_sdo_overrides.yaml")),
                std::runtime_error);
 }
+
+// Review Focus #1：buses 某项缺 endpoint 必须在加载期抛错并指名第几条总线，
+// 而不是留空串到 open()/if_nametoindex 才失败。
+TEST(SystemConfig, RejectsBusWithoutEndpoint) {
+  EXPECT_THROW(core::load_system_config(fixture_path("bus_without_endpoint.yaml")),
+               std::runtime_error);
+}
+
+// 串口位率白名单：非白名单值必须在加载期拒绝（原 ROS 层用例随搬家一度失去覆盖）。
+TEST(SystemConfig, RejectsUnsupportedBaudRate) {
+  EXPECT_THROW(core::load_system_config(fixture_path("bad_baud_rate.yaml")),
+               std::runtime_error);
+}

@@ -84,6 +84,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_package_surface test/test_package_surface.cpp)
   target_compile_features(test_package_surface PUBLIC cxx_std_17)
   target_include_directories(test_package_surface PRIVATE include)
+  # 包内 launch 的参数面回归：要读 launch/ 下的文件。
+  target_compile_definitions(test_package_surface PRIVATE
+    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(test_package_surface motor_protocol motor_transport)
 
   ament_add_gtest(test_motor_protocol test/test_motor_protocol.cpp)

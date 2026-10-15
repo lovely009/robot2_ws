@@ -40,7 +40,7 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
     simulation, specs = _bound_simulation(module)
     # vcan 场景下驱动侧与模拟器侧共用同一个接口。
     module._write_runtime_configs(
-        simulation, tmp_path, "vcan", "robot_vcan0", "robot_vcan0", specs
+        simulation, tmp_path, "vcan", "driver_iface", "sim_iface", specs
     )
     profiles = yaml.safe_load(
         (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
@@ -50,14 +50,11 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
     assert profiles["cerb_r58"]["mit_torque_limit_nm"] == pytest.approx(45.0)
 
 
-def test_motor_sim_config_carries_feedback_scheduling_and_sdo_overrides(tmp_path):
-    """逐台反馈节拍与 SDO 初值覆盖必须落到 motor_sim.yaml。
+def test_motor_sim_config_carries_bus_transport_and_endpoint(tmp_path):
+    """buses[] 必须带上传输类型与端点——节点已不再收任何总线类参数。
 
-    这两组字段在默认工况下不影响观感：节拍缺省等于旧节拍，sdo_overrides 缺省等于
-    真机初值。接错时构建、启动与既有测试都不报错，只在台架上表现为「节拍没变」或
-    「复现不出保护被关掉的场景」。取值一律镜像 Python 后端 CLI 的缺省
-    （--period-ms 20 / --fb-period-ms 0 / --stagger-ms 2.2 / --effort-rate-hz 200），
-    否则删掉 Python 后帧级对照会失配。
+    这是配置单源的落点：写成旧形状（只有总线名）会让节点拿不到端点，
+    而节拍与 SDO 初值另有专门的用例（见本文件后两条）。
     """
     module = _launch_module()
     simulation, specs = _bound_simulation(module)
@@ -68,18 +65,76 @@ def test_motor_sim_config_carries_feedback_scheduling_and_sdo_overrides(tmp_path
         (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
     )["motor_simulation"]
 
-    timing = document["timing"]
-    assert timing["can_period_ms"] == 20
-    assert timing["feedback_period_ms"] == 0
-    assert timing["stagger_ms"] == pytest.approx(2.2)
-    assert timing["effort_rate_hz"] == pytest.approx(200.0)
-
-    for motor in document["motors"]:
-        assert motor["sdo_overrides"]["protection_enabled"] in (0, 1)
-        assert motor["sdo_overrides"]["direction"] in (0, 1)
-
     buses = document["buses"]
     assert len(buses) == 1
     assert buses[0]["name"] == "arm"
     assert buses[0]["transport"] == "socket_can"
     assert buses[0]["endpoint"] == "robot_vcan0"
+    assert buses[0]["baud_rate"] == 3000000
+    assert buses[0]["allow_external_canfd"] is False
+
+
+def test_motor_sim_config_endpoint_is_the_simulator_side_not_the_driver_side(tmp_path):
+    """模拟器侧的端点必须取 sim_endpoint，不能串成 driver_endpoint。
+
+    slcan/socketcan + controller_mode:=host 时两侧是两个不同设备，两个端点都存在
+    且都是 tty ⇒ 所有校验都会通过。传反了不会有任何报错，只会让模拟器开驱动器那
+    只口、驱动器开模拟器那只口。
+    """
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "driver_iface", "sim_iface", specs
+    )
+    sim = yaml.safe_load(
+        (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
+    )["motor_simulation"]
+    driver = yaml.safe_load(
+        (tmp_path / "motor_driver.yaml").read_text(encoding="utf-8")
+    )["motor_hardware"]
+
+    assert sim["buses"][0]["endpoint"] == "sim_iface"
+    assert driver["buses"]["arm"]["interface"] == "driver_iface"
+
+
+def test_motor_sim_config_timing_defaults_stay_on_legacy_cadence(tmp_path):
+    """timing 新字段的缺省必须等于旧节拍，不能预置 Python 后端的数值。
+
+    这几个字段的消费方是后续的反馈调度增量；今天写进 Python 的数值
+    （20 ms / 2.2 ms 错峰 / 200 Hz），等于在配置缺省里把 host/external 场景
+    提前换成 HIL 的节拍。0 = 沿用 control_hz、不错峰，才是旧行为。
+    """
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "driver_iface", "sim_iface", specs
+    )
+    timing = yaml.safe_load(
+        (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
+    )["motor_simulation"]["timing"]
+
+    assert timing["can_period_ms"] == 0
+    assert timing["feedback_period_ms"] == 0
+    assert timing["stagger_ms"] == 0
+    assert timing["effort_rate_hz"] == 0
+
+
+def test_motor_sim_config_sdo_overrides_are_real_hardware_power_on_values(tmp_path):
+    """sdo_overrides 本增量没有输入通路，写出的必须是真机初值本身。
+
+    它不能被写成"从拓扑取"的样子：拓扑、motor_driver.yaml 与 launch 参数都不声明
+    这两个键，`motor.get(...)` 恒等缺省值，却让生成的 YAML 看起来像有权威来源。
+    通路随 SDO 从站增量一起接（ADR §6 的「保护被关掉」场景）。
+    """
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "driver_iface", "sim_iface", specs
+    )
+    document = yaml.safe_load(
+        (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
+    )["motor_simulation"]
+
+    assert document["motors"]
+    for motor in document["motors"]:
+        assert motor["sdo_overrides"] == {"protection_enabled": 1, "direction": 0}

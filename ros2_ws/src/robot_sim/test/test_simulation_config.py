@@ -48,3 +48,38 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
 
     assert profiles["cerb_r48"]["mit_torque_limit_nm"] == pytest.approx(11.0)
     assert profiles["cerb_r58"]["mit_torque_limit_nm"] == pytest.approx(45.0)
+
+
+def test_motor_sim_config_carries_feedback_scheduling_and_sdo_overrides(tmp_path):
+    """逐台反馈节拍与 SDO 初值覆盖必须落到 motor_sim.yaml。
+
+    这两组字段在默认工况下不影响观感：节拍缺省等于旧节拍，sdo_overrides 缺省等于
+    真机初值。接错时构建、启动与既有测试都不报错，只在台架上表现为「节拍没变」或
+    「复现不出保护被关掉的场景」。取值一律镜像 Python 后端 CLI 的缺省
+    （--period-ms 20 / --fb-period-ms 0 / --stagger-ms 2.2 / --effort-rate-hz 200），
+    否则删掉 Python 后帧级对照会失配。
+    """
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "robot_vcan0", "robot_vcan0", specs
+    )
+    document = yaml.safe_load(
+        (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
+    )["motor_simulation"]
+
+    timing = document["timing"]
+    assert timing["can_period_ms"] == 20
+    assert timing["feedback_period_ms"] == 0
+    assert timing["stagger_ms"] == pytest.approx(2.2)
+    assert timing["effort_rate_hz"] == pytest.approx(200.0)
+
+    for motor in document["motors"]:
+        assert motor["sdo_overrides"]["protection_enabled"] in (0, 1)
+        assert motor["sdo_overrides"]["direction"] in (0, 1)
+
+    buses = document["buses"]
+    assert len(buses) == 1
+    assert buses[0]["name"] == "arm"
+    assert buses[0]["transport"] == "socket_can"
+    assert buses[0]["endpoint"] == "robot_vcan0"

@@ -336,6 +336,12 @@ def _write_runtime_configs(
                 "protocol": motor["protocol"],
                 "id": motor["id"],
                 "profile": motor["profile"],
+                # 保护开关 0x2650:00 与方向 0x2541:00 的真机上电初值；拓扑未声明时
+                # 取真机初值（保护开在 1、方向 CW）。
+                "sdo_overrides": {
+                    "protection_enabled": motor.get("protection_enabled", 1),
+                    "direction": motor.get("direction", 0),
+                },
             }
         )
         driver_motors[motor["name"]] = {
@@ -350,10 +356,17 @@ def _write_runtime_configs(
     motor_sim_config = output_dir / "motor_sim.yaml"
     motor_sim_document = {
         "motor_simulation": {
+            # 节拍字段的缺省镜像 Python 后端 CLI 的缺省
+            # （--period-ms 20 / --fb-period-ms 0 / --stagger-ms 2.2 /
+            # --effort-rate-hz 200），否则删掉 Python 后帧级对照会失配。
             "timing": {
                 "control_hz": timing.get("control_hz", 100),
                 "vaxor_feedback_hz": timing.get("vaxor_feedback_hz", 50),
                 "command_timeout_ms": timing.get("command_timeout_ms", 150),
+                "can_period_ms": timing.get("can_period_ms", 20),
+                "feedback_period_ms": timing.get("feedback_period_ms", 0),
+                "stagger_ms": timing.get("stagger_ms", 2.2),
+                "effort_rate_hz": timing.get("effort_rate_hz", 200.0),
             },
             # buses[] 是每条总线端点与传输的唯一宿主：节点不再收
             # transport_mode / <bus>_port / baud_rate / allow_external_canfd。

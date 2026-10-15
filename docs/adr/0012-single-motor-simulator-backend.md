@@ -99,6 +99,18 @@
 | `--ready-file` / `--log` | 节点参数（就绪文件、日志目标） |
 | `--control-socket` | 见下条：改为 ROS 服务 |
 
+**两条落实口径（2026-10-15，增量 1 落地时定）**：
+
+- **`timing` 新字段的缺省 = 旧行为**：0 表示沿用 `control_hz`、不错峰、不另设力矩更新率，
+  不预置 Python 后端的数值（`--period-ms 20` / `--stagger-ms 2.2` / `--effort-rate-hz 200`）。
+  理由：CPU 侧今天只有 `host`/`external` 读这份 YAML，而它们跑的正是旧节拍；把 Python 的数值
+  写进缺省，等于替后续的反馈调度增量提前改掉这两个场景。**firmware 分支切过来时那些数值由
+  模型拓扑显式声明**，不靠缺省。
+- **`sdo_overrides` 在增量 1 只有 schema、没有输入通路**：模型拓扑与 `motor_driver.yaml` 都不
+  声明保护开关与方向，launch 写的是真机初值常量（`1` / `0`）。通路随第 4 节的 SDO 从站一起接；
+  在那之前生成的 YAML 里这两个值是常量，**不是**"从拓扑取到的"——写成 `motor.get(...)` 会让
+  它看起来有权威来源而实际恒等缺省值。
+
 ### 3. 控制面从 Unix socket 改为 ROS 服务
 
 模拟器既然是 ROS 节点，运行期控制面就用 ROS 服务：`motor_sim` 包内定义 `srv/MotorSimCommand.srv`

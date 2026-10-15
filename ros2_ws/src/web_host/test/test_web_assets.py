@@ -293,3 +293,45 @@ def test_builtin_joint_map_covers_default_model():
         f'默认 JOINT_OF_MOTOR 漏了默认模型 {model_name} 的电机 {missing}：'
         f'它们在臂视图里不可见、不可点选。请在 store.js 的默认表里补齐，'
         f'或先确认"?joints= 覆盖"是否仍是有意设计。')
+
+
+# 14. 「电机后端」面板的接口控件必须与「仿真」抽屉**同值**
+def test_motor_backend_interface_mirrors_the_simulation_drawer():
+    """面板里的 CAN 接口 / 设备下拉是同一份值的第二个入口，不是第二份配置。
+
+    这个契约是纯运行时行为，上面 13 条一条都盖不到：删掉任一方向的绑定，构建、
+    测试、页面加载全部照常，只在浏览器里表现成"面板里改了不生效"或"面板下拉只剩
+    占位项"——正是本文件要防的那类静默失效。所以按源码形状断言（与第 13 条同一
+    取舍）：改机制可以，但三个入口的两向绑定与候选同源都得一起搬过去。
+    """
+    src = (WEB / 'js' / 'panels' / 'sim.js').read_text(encoding='utf-8')
+    # (宿主 ui 名, 镜像 ui 名, 候选来源数组)
+    pairs = [
+        ('transport', 'backendTransport', None),
+        ('simInterface', 'backendInterface', 'cans'),
+        ('simTty', 'backendTty', 'serials'),
+    ]
+
+    # 镜像 → 宿主：三个帧对必须在**注册 change 监听的那个循环**里
+    loop = 'for (const [primary, mirror] of ['
+    start = src.find(loop)
+    assert start != -1, f'sim.js 里找不到镜像绑定循环：{loop!r}'
+    block = src[start:start + 900]
+    assert 'addEventListener' in block, (
+        '镜像绑定循环里没有注册 change 监听——面板改动不会写回宿主')
+
+    missing = []
+    for primary, mirror, source in pairs:
+        if f'[ui.{primary}, ui.{mirror}]' not in block:
+            missing.append(f'镜像绑定循环里缺 [ui.{primary}, ui.{mirror}]')
+        # 宿主 → 镜像：syncBackendInterface 里逐个赋值
+        if not re.search(rf'ui\.{mirror}\.value\s*=\s*ui\.{primary}\.value', src):
+            missing.append(f'ui.{mirror} 没有从 ui.{primary} 取值的赋值')
+        # 候选同源：镜像下拉的 option 必须与宿主同一份来源，否则只剩占位项
+        if source and not re.search(
+                rf'replaceOptions\(\s*ui\.{mirror}\s*,\s*{source}\b', src):
+            missing.append(f'ui.{mirror} 的候选没有从 {source} 填充')
+
+    assert not missing, (
+        '「电机后端」面板与「仿真」抽屉的同值契约被破坏（面板显示会与实际生效值'
+        f'分叉，且页面不报错）：{missing}')

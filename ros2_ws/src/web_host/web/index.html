@@ -396,9 +396,31 @@
       <summary>电机后端<span class="spacer"></span><span class="sum" id="motorBackendSummary">未启动</span></summary>
       <div class="sim-panel">
         <div class="sim-hint tiny muted" id="motorBackendHint">
-          参数取上方「仿真」的模型 / CAN 接口 / 设备选择（纯软 vcan 的总线电机由
-          motor_sim 节点扮演，不需要本后端）；HIL 启动仿真时自动拉起，也可只连
-          板子单独起停（验证固件发现 / 离线 / 重连）。
+          接口与设备在这里改和在上方「仿真」里改是同一份值；模型仍取上方「仿真」。
+          纯软 vcan 的总线电机由 motor_sim 节点扮演，不需要本后端；HIL 启动仿真时
+          自动拉起，也可只连板子单独起停（验证固件发现 / 离线 / 重连）。
+        </div>
+        <!-- 与上方「仿真」同值的第二个入口：只镜像传输与端点，模型不镜像。
+             标签文字与上方逐字相同（同一份值），故 aria-label 补上归属，否则
+             同屏会出现两组同名下拉，读屏/语音无法分辨哪组属于哪个卡片。 -->
+        <div class="sim-grid">
+          <label class="sim-field">CAN 接口
+            <select id="motorBackendTransport" aria-label="电机后端 CAN 接口">
+              <option value="vcan">vcan（纯软件）</option>
+              <option value="socketcan">SocketCAN</option>
+              <option value="slcan">SLCAN / CANable</option>
+            </select>
+          </label>
+          <label class="sim-field" id="motorBackendCanField" hidden>模拟器 CAN
+            <select id="motorBackendInterface" aria-label="电机后端模拟器 CAN">
+              <option value="">扫描 SocketCAN…</option>
+            </select>
+          </label>
+          <label class="sim-field" id="motorBackendTtyField" hidden>模拟器串口
+            <select id="motorBackendTty" aria-label="电机后端模拟器串口">
+              <option value="">扫描串口…</option>
+            </select>
+          </label>
         </div>
         <div class="ctrl-row wrap">
           <button id="btnMotorBackendStart" class="primary">启动电机后端</button>

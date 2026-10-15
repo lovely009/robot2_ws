@@ -60,6 +60,11 @@ export function mount(root, ctx) {
     backendState: $('motorBackendState'),
     backendResult: $('motorBackendResult'),
     backendLog: $('motorBackendLog'),
+    backendTransport: $('motorBackendTransport'),
+    backendInterface: $('motorBackendInterface'),
+    backendTty: $('motorBackendTty'),
+    backendCanField: $('motorBackendCanField'),
+    backendTtyField: $('motorBackendTtyField'),
     backendStart: $('btnMotorBackendStart'),
     backendStop: $('btnMotorBackendStop'),
     motorPanel: $('simMotorPanel'),
@@ -188,6 +193,7 @@ export function mount(root, ctx) {
       ui.simInterface, cans, '选择 SocketCAN 接口', saved.sim_interface || 'can1');
     replaceOptions(
       ui.driverInterface, cans, '选择 SocketCAN 接口', saved.driver_interface || 'can0');
+    replaceOptions(ui.backendInterface, cans, '选择 SocketCAN 接口', '');
 
     const rawSerials = options.serial_ports || [];
     const serials = rawSerials.map((item) => ({
@@ -202,11 +208,31 @@ export function mount(root, ctx) {
     replaceOptions(
       ui.driverTty, serials, '选择驱动端串口',
       saved.driver_tty || (secondAccessibleSerial && secondAccessibleSerial.path) || '');
+    replaceOptions(ui.backendTty, serials, '选择模拟器串口', '');
 
     if (!ui.vcanName.value || ui.vcanName.value === 'robot_vcan0') {
       ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
     }
     syncFields();
+  }
+
+  // firmware 模式必须走物理总线，两个传输选择器的 vcan 项一起禁掉。
+  function syncVcanOption(select, disabled) {
+    const option = [...select.options].find((item) => item.value === 'vcan');
+    if (option) option.disabled = disabled;
+  }
+
+  // 电机后端面板的接口控件不是第二份配置，只是同一份值的第二个入口：值由上方
+  // 单向推下来（反向在上面的 change 监听里推回去），可见项也照上方那套规则走。
+  // 单向推不会来回弹——程序化赋值不触发 change。
+  function syncBackendInterface() {
+    ui.backendTransport.value = ui.transport.value;
+    ui.backendInterface.value = ui.simInterface.value;
+    ui.backendTty.value = ui.simTty.value;
+    const transport = ui.transport.value;
+    ui.backendCanField.hidden = transport !== 'socketcan';
+    ui.backendTtyField.hidden = transport !== 'slcan';
+    syncVcanOption(ui.backendTransport, ui.mode.value === 'firmware');
   }
 
   function syncFields() {
@@ -222,9 +248,7 @@ export function mount(root, ctx) {
     ui.hostBusHint.hidden = transport === 'vcan' || !isHost;
     ui.firmwareHint.hidden = mode !== 'firmware';
 
-    const vcanOption = [...ui.transport.options]
-      .find((option) => option.value === 'vcan');
-    if (vcanOption) vcanOption.disabled = mode === 'firmware';
+    syncVcanOption(ui.transport, mode === 'firmware');
     if (mode === 'firmware' && transport === 'vcan') {
       ui.transport.value = deviceOptions.can_interfaces.some((item) => item.up)
         ? 'socketcan'
@@ -236,6 +260,7 @@ export function mount(root, ctx) {
     if (optionsLoaded) refreshModelOptions();
     syncModelParams();
     saveOptions();
+    syncBackendInterface();
     // vcan（纯软）下电机后端不可用；切传输时立即反映，不等下一次轮询
     ui.backendStart.disabled = activeState(motorBackend.state)
       || !motorBackendStartable();
@@ -287,6 +312,7 @@ export function mount(root, ctx) {
     for (const control of [
       ui.backend, ui.mode, ui.transport, ui.model, ui.vcanName, ui.simInterface,
       ui.driverInterface, ui.simTty, ui.driverTty, ui.busIsolated,
+      ui.backendTransport, ui.backendInterface, ui.backendTty,
     ]) {
       control.disabled = active;
     }
@@ -364,11 +390,11 @@ export function mount(root, ctx) {
       return;
     }
     if (request.transport === 'socketcan' && !request.sim_interface) {
-      setBackendResult('先在上方选择模拟器 SocketCAN 接口。', 'err');
+      setBackendResult('先选择模拟器 SocketCAN 接口。', 'err');
       return;
     }
     if (request.transport === 'slcan' && !request.sim_tty) {
-      setBackendResult('先在上方选择模拟器串口。', 'err');
+      setBackendResult('先选择模拟器串口。', 'err');
       return;
     }
     ui.backendStart.disabled = true;
@@ -597,6 +623,19 @@ export function mount(root, ctx) {
   for (const select of [ui.mode, ui.transport, ui.simInterface,
     ui.driverInterface, ui.simTty, ui.driverTty]) {
     select.addEventListener('change', () => {
+      ui.busIsolated.checked = false;
+      syncFields();
+    });
+  }
+  // 面板里的接口控件是同一份值的第二个入口：写回上方，其余连带影响（清物理总线
+  // 确认、重列模型、落盘）全部交给 syncFields，与在上方改完全一致。
+  for (const [primary, mirror] of [
+    [ui.transport, ui.backendTransport],
+    [ui.simInterface, ui.backendInterface],
+    [ui.simTty, ui.backendTty],
+  ]) {
+    mirror.addEventListener('change', () => {
+      primary.value = mirror.value;
       ui.busIsolated.checked = false;
       syncFields();
     });

@@ -164,3 +164,21 @@ TEST(SystemConfig, RejectsUnsupportedBaudRate) {
   EXPECT_THROW(core::load_system_config(fixture_path("bad_baud_rate.yaml")),
                std::runtime_error);
 }
+
+// 设备身份串与 SDO 出厂值随 profile 落到逐台 MotorConfig：固件靠 0x1008 绑型号、
+// 靠 0x6080/0x2538 回读核验，两者必须同源。
+TEST(SystemConfig, ReadsCerbDeviceIdentityAndSdoDefaults) {
+  const auto r58 = core::load_system_config(fixture_path("cerb_r58_axis.yaml"));
+  ASSERT_EQ(r58.motors.size(), 1U);
+  EXPECT_EQ(r58.motors[0].device_identity, "R58LITE_V2");
+  EXPECT_EQ(r58.motors[0].device_max_speed_rpm, 3325);
+  EXPECT_EQ(r58.motors[0].device_max_current_ma, 13300);
+}
+
+// 0x6080 是模块侧共用值，两台相同；逐型号的是 0x2538。
+TEST(SystemConfig, CerbMaxSpeedIsSharedAcrossModelsButCurrentIsNot) {
+  const auto r48 = core::load_system_config(fixture_path("cerb_axis.yaml"));
+  ASSERT_EQ(r48.motors.size(), 1U);
+  EXPECT_EQ(r48.motors[0].device_max_speed_rpm, 3325);
+  EXPECT_EQ(r48.motors[0].device_max_current_ma, 5000);
+}

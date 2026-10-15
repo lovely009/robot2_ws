@@ -58,6 +58,14 @@ motor_types:
       peak_current_amp: 10.8
       # 参数页「输出转速 30 RPM」——CERB 给的就是**输出端**转速，换算 = π rad/s
       rated_speed_rad_s: 3.1416
+      # ── SDO 从站对端契约：固件靠这些绑型号与回读核验 ──
+      # 身份串（0x1008:00）是固件按串绑型号的依据；0x6080/0x2538 是它回读比对的
+      # 依据，三者必须同源。2026-10-15 真机 node 1 实测：
+      # R58 = 3325 RPM / 13300 mA。0x6080 是**模块侧共用值**
+      # （两型号同为 3325），逐型号的是 0x2538。
+      device_identity: R58LITE_V2
+      device_max_speed_rpm: 3325
+      device_max_current_ma: 13300
 
   cerb_r48_101:
     protocol: cerb
@@ -70,3 +78,11 @@ motor_types:
       peak_current_amp: 3.2
       # 参数页「输出转速 30 RPM」——输出端转速，换算 = π rad/s
       rated_speed_rad_s: 3.1416
+      # ── SDO 从站对端契约：固件靠这些绑型号与回读核验 ──
+      # 身份串（0x1008:00）是固件按串绑型号的依据；0x6080/0x2538 是它回读比对的
+      # 依据，三者必须同源。2026-10-15 真机 node 1 实测：
+      # R48 = 3325 RPM / 5000 mA。0x6080 是**模块侧共用值**
+      # （两型号同为 3325），逐型号的是 0x2538。
+      device_identity: R48LITE_V2
+      device_max_speed_rpm: 3325
+      device_max_current_ma: 5000

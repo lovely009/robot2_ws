@@ -212,6 +212,22 @@ def _bind_motor_topology(
             mit_torque = None
         if mit_torque is not None and mit_torque > 0.0:
             sim_profile["mit_torque_limit_nm"] = mit_torque
+        # SDO 从站的对端契约：固件靠 0x1008:00 身份串绑型号、靠 0x6080:00 /
+        # 0x2538:00 回读核验，三者必须同源。身份串没有合理的缺省，型号库缺字段
+        # 就报错——否则节点会起一个固件永远绑不上的从站，而构建期毫无提示。
+        if protocol == "cerb":
+            for field in (
+                "device_identity",
+                "device_max_speed_rpm",
+                "device_max_current_ma",
+            ):
+                value = type_parameters.get(field)
+                if value is None:
+                    raise RuntimeError(
+                        f"motor type '{motor_type}' needs {field} for the "
+                        "CERB SDO slave"
+                    )
+                sim_profile[field] = value
         sim_profiles[profile_name] = sim_profile
 
         selected_motors.append(

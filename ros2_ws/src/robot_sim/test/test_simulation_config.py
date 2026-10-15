@@ -138,3 +138,26 @@ def test_motor_sim_config_sdo_overrides_are_real_hardware_power_on_values(tmp_pa
     assert document["motors"]
     for motor in document["motors"]:
         assert motor["sdo_overrides"] == {"protection_enabled": 1, "direction": 0}
+
+
+def test_motor_sim_config_carries_cerb_device_identity_and_sdo_defaults(tmp_path):
+    """身份串与 SDO 出厂值必须逐型号落到 motor_sim.yaml。
+
+    固件靠 0x1008 身份串绑型号、靠 0x6080/0x2538 回读核验。缺了它们台架表现为
+    「全部电机停在未绑定」，而构建与既有测试都不报错。0x6080 是模块侧共用值，
+    逐型号的是 0x2538。
+    """
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "driver_iface", "sim_iface", specs
+    )
+    profiles = yaml.safe_load(
+        (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
+    )["motor_simulation"]["profiles"]
+
+    assert profiles["cerb_r58"]["device_identity"] == "R58LITE_V2"
+    assert profiles["cerb_r58"]["device_max_speed_rpm"] == 3325
+    assert profiles["cerb_r58"]["device_max_current_ma"] == 13300
+    assert profiles["cerb_r48"]["device_identity"] == "R48LITE_V2"
+    assert profiles["cerb_r48"]["device_max_current_ma"] == 5000

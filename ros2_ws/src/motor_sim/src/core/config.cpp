@@ -23,6 +23,10 @@ struct MotorProfile {
   TransmissionConfig transmission;
   JointLimits limits;
   PlantConfig plant;
+  // SDO 从站的对端契约；非 CERB 型号为空/0，由 motors 循环按协议决定是否必须。
+  std::string device_identity;
+  int device_max_speed_rpm{0};
+  int device_max_current_ma{0};
   // MIT τ_ff 的 12 位量化满量程（N·m）：型号属性，见 profile 的 mit_torque_limit_nm。
   double mit_torque_limit_nm{protocol::kCerbDefaultMitTorqueLimitNm};
 };
@@ -98,6 +102,15 @@ std::string required_string(const YAML::Node &parent, const char *key,
     throw std::runtime_error(context + " '" + key + "' cannot be empty");
   }
   return value;
+}
+
+std::string optional_string(const YAML::Node &parent, const char *key,
+                            const std::string &fallback,
+                            const std::string &context) {
+  if (!parent[key]) {
+    return fallback;
+  }
+  return required_string(parent, key, context);
 }
 
 double radians(const double degrees) {
@@ -180,6 +193,13 @@ MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
       profile.transmission.efficiency > 1.0) {
     throw std::runtime_error(context + " has invalid transmission values");
   }
+
+  profile.device_identity =
+      optional_string(node, "device_identity", "", context);
+  profile.device_max_speed_rpm =
+      optional_int(node, "device_max_speed_rpm", 0, context);
+  profile.device_max_current_ma =
+      optional_int(node, "device_max_current_ma", 0, context);
 
   const auto plant = required_node(node, "plant", context);
   profile.plant.kp = finite_double(plant, "kp", context + ".plant");
@@ -348,6 +368,19 @@ SystemConfig parse_config_common(const YAML::Node &root,
     motor.limits = profile->second.limits;
     motor.plant = profile->second.plant;
     motor.mit_torque_limit_nm = profile->second.mit_torque_limit_nm;
+    motor.device_identity = profile->second.device_identity;
+    motor.device_max_speed_rpm = profile->second.device_max_speed_rpm;
+    motor.device_max_current_ma = profile->second.device_max_current_ma;
+    // CERB 的 SDO 从站靠这三个量成为固件的合格对端。缺了它们节点会起一个固件
+    // 永远绑不上型号的从站，所以在加载期就拒绝——身份串没有合理的缺省。
+    if (motor.protocol == "cerb" &&
+        (motor.device_identity.empty() || motor.device_max_speed_rpm <= 0 ||
+         motor.device_max_current_ma <= 0)) {
+      throw std::runtime_error(
+          context +
+          " cerb motor needs device_identity, device_max_speed_rpm and "
+          "device_max_current_ma");
+    }
     if (const auto overrides = node["sdo_overrides"]) {
       if (!overrides.IsMap()) {
         throw std::runtime_error(context + ".sdo_overrides must be a map");

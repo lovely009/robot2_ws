@@ -37,7 +37,8 @@ add_library(motor_sim_core
   src/core/frame_router.cpp
   src/core/transmission.cpp
   src/core/plant_model.cpp
-  src/core/safety_monitor.cpp)
+  src/core/safety_monitor.cpp
+  src/core/sdo_server.cpp)
 target_compile_features(motor_sim_core PUBLIC cxx_std_17)
 target_compile_options(motor_sim_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motor_sim_core PUBLIC
@@ -121,7 +122,8 @@ if(BUILD_TESTING)
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(test_config motor_sim_core)
 
-  foreach(CORE_TEST transmission plant_model safety_monitor drive_lifecycle)
+  foreach(CORE_TEST transmission plant_model safety_monitor drive_lifecycle
+                     sdo_server)
     ament_add_gtest(test_${CORE_TEST} test/test_${CORE_TEST}.cpp)
     target_compile_features(test_${CORE_TEST} PUBLIC cxx_std_17)
     target_compile_options(test_${CORE_TEST} PRIVATE -Wall -Wextra -Wpedantic)

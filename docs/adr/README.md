@@ -15,11 +15,12 @@
 | [0006 三自适应与默认 tty](0006-dev-real-three-adaptation-and-default-tty.md) | accepted | **当前有效**：transport/protocol/数量配置驱动；生产 tty 仍须按现场设备校准。 |
 | [固件 ADR 0007](../../micro_ros_firmware/docs/adr/0007-micro-ros-discovery-driven-motor-runtime.md) | proposed | **固件专属提议**：大部分代码已实现，仍缺最大规模和实时性台架证据。 |
 | [0008 robot_dynamics 独立依赖边界](0008-robot-dynamics-dependency-boundary.md) | accepted | **部分被 0009 取代**：Pinocchio 仍只由独立计算包承载，仍不进入 ros2_control 实时循环；「不提供节点/话题」「不进入 Gazebo 运行路径」两条由 0009 取代。 （包已更名 `robot_sim`） |
-| [0009 仿真重力前馈的归属与边界](0009-simulation-gravity-feedforward-boundary.md) | accepted | **当前有效、边界待复核**：重力矩由 `robot_dynamics` 计算并发布话题，`robot_sim` 在仿真侧叠加到关节力矩；真机 CAN 前馈路径待另立 ADR。该前馈的叠加点写在 Gazebo 的 `/arm_effort_controller/commands` 上（至今未落地，见 0011 的 Consequences：两后端共用该话题，因此大概率仍然成立，但需在实现时确认）。 （包已更名 `robot_sim`） |
+| [0009 仿真重力前馈的归属与边界](0009-simulation-gravity-feedforward-boundary.md) | accepted | **决定 2、3、5 被 0013 取代**：τ_g 仍由 `robot_dynamics` 计算（决定 1 有效），但实际落地的叠加点是**发往固件的 CAN 命令帧**，不是 Gazebo 的 `/arm_effort_controller/commands`；决定 2 的 `gravity_feedforward_mixer.py` 从未落地，决定 5 的真机路径已由 `00065f7` 落地并被 0013 追认。纯 Gazebo / 纯 MuJoCo / `controller_mode:=host` 三路至今没有重力补偿。 （包已更名 `robot_sim`） |
 | [0010 web_host 前端的无构建链分层](0010-web-host-frontend-layering-without-build-chain.md) | accepted | **当前有效**：`web_host` 前端保持纯静态（原生 ES module + import map），按外壳/屏/面板三层组织，状态集中在 store，DOM 单一来源，可测性由 Python 侧静态契约测试承担。 |
 | [0011 仿真后端可选与默认模型收敛](0011-simulation-backend-selection.md) | accepted | **当前有效、模型已更名**：`simulation.launch.py` 增 `backend:=gazebo|mujoco`（后端只替换被控对象入口，其余接线共用）；默认模型收敛到一个模型（`full_body`，2026-10-13 更名为 `half_body_robot` 且关节限位收窄）并删除 `models/robot_all/`；连带修 `fdcan_motor_sim.py` 的命令顺序与 `bench_up.sh` 默认档。与 0009 的关系见该 ADR 的 Consequences。 |
 
 | [0012 电机模拟器收敛为单一后端](0012-single-motor-simulator-backend.md) | accepted | **论据已更正（2026-10-15）**：把 `motor_sim`（C++/ROS）与 `fdcan_motor_sim.py`（Python/HIL）收敛为一个 C++ 后端、一份配置、一个控制面；分两步交付，第二步补故障建模。 |
+| [0013 重力前馈的落地边界与 web 端一键开关](0013-gravity-feedforward-ownership-and-web-toggle.md) | accepted | **当前有效（2026-10-16）**：`gravity_feedforward_overlay` 是 τ_g 的唯一落地叠加点，由 `bench_manager` 托管为第四个 unit，web 上位机提供一键开关（仅 STM32 在环时可用）；断链人工一键回退，不自动改接线。取代 0009 的决定 2、3、5。 |
 
 ## 维护规则
 

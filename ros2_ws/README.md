@@ -10,10 +10,10 @@
 | `motor_hardware_interface` | ros2_control 适配层 + 真机 bring-up 入口 |
 | `motor_sim` | 与机器人无关的共享仿真库（协议 / 传输 / 传动 / plant / 帧路由 / 锁存安全） |
 | `robot_sim` | 机械臂模型库（`models/<模型名>/`）+ 两个可互换被控对象后端（Gazebo / MuJoCo）与端到端组合入口 |
-| `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界（当前仅验证依赖，无节点/话题） |
-| `web_host` | rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、轨迹）＋静态文件与模型域 API（模型枚举 / 关节映射 / 动作库） |
-| `bench_msgs` | 台架主机侧控制服务定义（`/bench/*`：仿真 / Agent / 电机后端） |
-| `bench_manager` | 台架进程管理节点：`/bench/*` 服务 + `/bench/status` 话题；web 的仿真屏与顶栏 Agent 控件走它 |
+| `robot_dynamics` | 独立 Pinocchio 运动学/动力学计算边界：重力矩库 `ArmModel` + `gravity_torque_node`（只算）与 `gravity_feedforward_overlay`（把 τ_g 叠进命令帧） |
+| `web_host` | rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、重力补偿开关、轨迹）＋静态文件与模型域 API（模型枚举 / 关节映射 / 动作库） |
+| `bench_msgs` | 台架主机侧控制服务定义（`/bench/*`：仿真 / Agent / 电机后端 / 重力前馈） |
+| `bench_manager` | 台架会话的唯一编排者：`/bench/*` 服务 + `/bench/status` 话题，会话进程由 systemd user unit 承载；web 的仿真屏、顶栏 Agent 控件与重力补偿开关走它 |
 
 ## 分层与命名边界
 

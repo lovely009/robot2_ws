@@ -21,12 +21,19 @@ const SVC = {
   stopMotorBackend: ['/bench/stop_motor_backend', 'bench_msgs/srv/StopMotorBackend'],
   motorBackendCommand: ['/bench/motor_backend_command', 'bench_msgs/srv/MotorBackendCommand'],
   unitLog: ['/bench/get_unit_log', 'bench_msgs/srv/GetUnitLog'],
+  startGravityFeedforward: ['/bench/start_gravity_feedforward',
+    'bench_msgs/srv/StartGravityFeedforward'],
+  stopGravityFeedforward: ['/bench/stop_gravity_feedforward',
+    'bench_msgs/srv/StopGravityFeedforward'],
+  setGravityFeedforwardGain: ['/bench/set_gravity_feedforward_gain',
+    'bench_msgs/srv/SetGravityFeedforwardGain'],
 };
 
 // unit 名是契约（bench_manager/systemd_units.py 定义一次，这里与文档各引用一份）。
 export const UNIT_SIMULATION = 'bench-simulation.service';
 export const UNIT_MOTOR_BACKEND = 'bench-motor-backend.service';
 export const UNIT_AGENT = 'bench-agent.service';
+export const UNIT_GRAVITY_FEEDFORWARD = 'bench-gravity-feedforward.service';
 
 function parseJson(text, fallback) {
   try { return JSON.parse(text); } catch (_e) { return fallback; }
@@ -79,7 +86,26 @@ export function startMotorBackend(request) {
 }
 export function stopMotorBackend() { return call(SVC.stopMotorBackend, {}); }
 
-// 按需拉一个会话 unit 的尾部日志。日志**不在** 1 Hz 状态快照里：三个 unit 各留 80 行
+// 重力前馈叠加节点（ADR 0013）。起停的是**节点**，命令源改接到它前面是前端自己的事
+// （core/ros.js 的 setDownlinkRoute）——顺序由 panels/feedforward.js 按「先起节点、
+// 确认 running，再切话题」执行，服务这一层不管接线。
+export function startGravityFeedforward(request) {
+  return call(SVC.startGravityFeedforward, {
+    model: request.model,
+    joint_map: request.joint_map,
+    effort_gain: Number(request.effort_gain),
+  });
+}
+export function stopGravityFeedforward() {
+  return call(SVC.stopGravityFeedforward, {});
+}
+// 运行期改增益：服务只代表「写请求已发出」，真正生效与否看返回快照里的 effort_gain
+// 与 gain_error（节点回执确认后才更新）。
+export function setGravityFeedforwardGain(effortGain) {
+  return call(SVC.setGravityFeedforwardGain, {effort_gain: Number(effortGain)});
+}
+
+// 按需拉一个会话 unit 的尾部日志。日志**不在** 1 Hz 状态快照里：四个 unit 各留 80 行
 // 会把这个每秒都发的话题撑成几十 KB，而页面只在抽屉里看它。
 export async function getUnitLog(unitName, lines = 80) {
   const response = await callService(SVC.unitLog[0], SVC.unitLog[1],

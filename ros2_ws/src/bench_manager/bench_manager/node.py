@@ -1,16 +1,17 @@
 """bench_manager 节点：台架会话在 ROS 侧的**唯一编排者**。
 
-会话进程（仿真 / micro-ROS Agent / 电机后端）由 systemd user transient unit 承载，
-本节点不持有任何进程句柄——状态权威是 unit 状态，会话描述存在 unit 环境里，所以本
-节点重启后能原样认领上一轮的会话，而不是把它们变成孤儿。
+会话进程（仿真 / micro-ROS Agent / 电机后端 / 重力前馈叠加节点）由 systemd user
+transient unit 承载，本节点不持有任何进程句柄——状态权威是 unit 状态，会话描述存在 unit
+环境里，所以本节点重启后能原样认领上一轮的会话，而不是把它们变成孤儿。
 
 - 服务全在 `/bench/` 绝对命名空间下（web 前端按固定名调用，不做 remap）：
   `/bench/options`、`/bench/agent_status`、`/bench/{start,stop}_simulation`、
   `/bench/{start,stop}_agent`、`/bench/{start,stop}_motor_backend`、
-  `/bench/motor_backend_command`、`/bench/get_unit_log`；
+  `/bench/motor_backend_command`、`/bench/get_unit_log`、
+  `/bench/{start,stop}_gravity_feedforward`、`/bench/set_gravity_feedforward_gain`；
 - 状态 `/bench/status`（std_msgs/String，JSON）1 Hz 周期发布 + 每条命令后立即发布，
   无订阅者时不构造；命令响应里也带同一份快照（status_json），失败时供页面回显；
-- 日志**不进快照**：三个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，而页面
+- 日志**不进快照**：四个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，而页面
   只在抽屉展开时才看它。改成按需拉 `/bench/get_unit_log`。
 
 lifecycle 语义（`robot_bringup` 的 `robot.launch.py` 负责 configure → activate）：
@@ -32,7 +33,9 @@ import json
 import os
 
 import rclpy
+from rcl_interfaces.srv import SetParametersAtomically
 from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
+from rclpy.parameter import Parameter
 from std_msgs.msg import String
 
 from bench_msgs.srv import (
@@ -40,15 +43,19 @@ from bench_msgs.srv import (
     GetBenchOptions,
     GetUnitLog,
     MotorBackendCommand,
+    SetGravityFeedforwardGain,
     StartAgent,
+    StartGravityFeedforward,
     StartMotorBackend,
     StartSimulation,
     StopAgent,
+    StopGravityFeedforward,
     StopMotorBackend,
     StopSimulation,
 )
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
+from .gravity_feedforward_manager import GravityFeedforwardProcessManager
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
 from .simulation_manager import (
     SimulationProcessManager,
@@ -57,18 +64,26 @@ from .simulation_manager import (
     enumerate_simulation_models,
 )
 from .systemd_units import (
-    UNIT_AGENT, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, SystemdUnits,
+    UNIT_AGENT, UNIT_GRAVITY_FEEDFORWARD, UNIT_MOTOR_BACKEND, UNIT_SIMULATION,
+    SystemdUnits,
 )
 
 _STATUS_PERIOD_S = 1.0
 # 管理器契约内的可预期失败；其余异常照常冒泡（rclpy 记日志，那是 bug）
 _EXPECTED_ERRORS = (ValueError, PermissionError, RuntimeError, OSError)
 
-# 日志服务的白名单：`unit_name` 直接进 `journalctl -u`，只认这三个契约名，
+# 日志服务的白名单：`unit_name` 直接进 `journalctl -u`，只认这四个契约名，
 # 免得页面（或任何服务调用方）拿它去翻别的 unit。
-_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT)
+_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT,
+          UNIT_GRAVITY_FEEDFORWARD)
 _LOG_LINES_DEFAULT = 80
 _LOG_LINES_MAX = 2000
+
+# 叠加节点的参数服务。Humble 的 rclpy 没有 parameters client 封装（那是 Iron+ 的
+# rclpy.parameter_client），所以直接调节点的 set_parameters_atomically。
+_GAIN_NODE = 'gravity_feedforward_overlay'
+_GAIN_SERVICE = f'/{_GAIN_NODE}/set_parameters_atomically'
+_GAIN_DISCOVERY_TIMEOUT_S = 0.5
 
 
 def _simulation_request(message):
@@ -130,7 +145,10 @@ class BenchManager(LifecycleNode):
             systemd=self._systemd)
         self.motor_backend = MotorSimProcessManager(
             model_provider=self._model_provider, systemd=self._systemd)
+        self.feedforward = GravityFeedforwardProcessManager(
+            systemd=self._systemd, gain_writer=self._write_effort_gain)
 
+        self._gain_client = None
         self._status_pub = None
         self._timer = None
 
@@ -158,6 +176,12 @@ class BenchManager(LifecycleNode):
             (MotorBackendCommand, '/bench/motor_backend_command',
              self._on_motor_backend_command),
             (GetUnitLog, '/bench/get_unit_log', self._on_get_unit_log),
+            (StartGravityFeedforward, '/bench/start_gravity_feedforward',
+             self._on_start_gravity_feedforward),
+            (StopGravityFeedforward, '/bench/stop_gravity_feedforward',
+             self._on_stop_gravity_feedforward),
+            (SetGravityFeedforwardGain, '/bench/set_gravity_feedforward_gain',
+             self._on_set_gravity_feedforward_gain),
         ):
             self.create_service(srv_type, name, callback)
         self._timer = self.create_timer(_STATUS_PERIOD_S, self._publish_status)
@@ -193,6 +217,9 @@ class BenchManager(LifecycleNode):
         # 只释放句柄：会话不回收（见模块 docstring）。
         self.destroy_timer(self._timer)
         self.destroy_publisher(self._status_pub)
+        if self._gain_client is not None:
+            self.destroy_client(self._gain_client)
+            self._gain_client = None
         self._timer = None
         self._status_pub = None
         return TransitionCallbackReturn.SUCCESS
@@ -200,7 +227,8 @@ class BenchManager(LifecycleNode):
     def _sessions(self):
         return (('simulation', self.simulation),
                 ('motor backend', self.motor_backend),
-                ('micro-ROS Agent', self.agent))
+                ('micro-ROS Agent', self.agent),
+                ('gravity feedforward', self.feedforward))
 
     # ---------- 状态快照与响应收尾 ----------
 
@@ -209,6 +237,7 @@ class BenchManager(LifecycleNode):
             'simulation': self.simulation.status(),
             'agent': self.agent.status(),
             'motor_backend': self.motor_backend.status(),
+            'gravity_feedforward': self.feedforward.status(),
         }, ensure_ascii=False)
 
     def _publish_status(self):
@@ -369,6 +398,64 @@ class BenchManager(LifecycleNode):
         response.ok = True
         response.error = ''
         return response
+
+    # ---------- 重力前馈（ADR 0013）----------
+
+    def _on_start_gravity_feedforward(self, request, response):
+        try:
+            self.feedforward.start({
+                'model': request.model,
+                'joint_map': request.joint_map,
+                'effort_gain': request.effort_gain,
+            })
+        except _EXPECTED_ERRORS as exc:
+            return self._finish(response, exc)
+        return self._finish(response)
+
+    def _on_stop_gravity_feedforward(self, _request, response):
+        try:
+            self.feedforward.stop()
+        except _EXPECTED_ERRORS as exc:
+            return self._finish(response, exc)
+        return self._finish(response)
+
+    def _on_set_gravity_feedforward_gain(self, request, response):
+        try:
+            self.feedforward.set_gain(request.effort_gain)
+        except _EXPECTED_ERRORS as exc:
+            return self._finish(response, exc)
+        return self._finish(response)
+
+    def _write_effort_gain(self, gain: float) -> None:
+        """把增益写进运行中的叠加节点（异步，结果由回调回报）。
+
+        服务未就绪时**不能**静默发出去：没有对端时请求会被中间件丢掉，future 永不
+        完成，于是「界面显示已改、节点其实没改」。宁可在这里短暂等一下，就绪不了就报错。
+        """
+        if self._gain_client is None:
+            self._gain_client = self.create_client(
+                SetParametersAtomically, _GAIN_SERVICE)
+        if not self._gain_client.wait_for_service(
+                timeout_sec=_GAIN_DISCOVERY_TIMEOUT_S):
+            raise RuntimeError(
+                f'{_GAIN_NODE} 的参数服务不可达——叠加节点可能没在跑')
+        request = SetParametersAtomically.Request()
+        request.parameters = [
+            Parameter('effort_gain', value=float(gain)).to_parameter_msg()]
+        self._gain_client.call_async(request).add_done_callback(
+            partial(self._on_gain_written, gain))
+
+    def _on_gain_written(self, gain: float, future) -> None:
+        try:
+            result = future.result().result
+        except Exception as exc:  # noqa: BLE001 - 回执里的任何失败都要说出来
+            self.feedforward.note_gain_failed(f'增益写入失败：{exc}')
+            return
+        if not result.successful:
+            self.feedforward.note_gain_failed(
+                result.reason or '增益写入被节点拒绝')
+            return
+        self.feedforward.note_gain_applied(gain)
 
 
 def main(args=None):

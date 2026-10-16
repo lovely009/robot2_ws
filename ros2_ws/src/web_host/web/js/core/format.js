@@ -1,11 +1,6 @@
 // 常量与格式化：从重构前的 app.js 常量区与工具区原样搬移。
 // 与固件的隐式契约（DEV_SLOT_NAMES 位序、PARAM_FIELD 次序）在下方注释里保留原样。
 
-// 下行话题可经 URL 覆盖（?command_topic=… / ?trajectory_topic=…）：把命令源接到
-// 重力前馈叠加节点的入口 /robot_dynamics/*（见 robot_dynamics/README.md）。
-// 默认直连固件，不启用前馈时行为逐字不变。与 store.js 的 ?joints= 同属排查/非常规接线。
-const DOWN_TOPIC = new URLSearchParams(location.search);
-
 export const TOPICS = {
   topology: {name: '/micro_ros_up/motor_topology', type: 'can_bridge_msgs/msg/MotorTopology'},
   motion: {name: '/micro_ros_up/motion_states', type: 'can_bridge_msgs/msg/MotorMotionStateArray'},
@@ -13,11 +8,12 @@ export const TOPICS = {
   events: {name: '/micro_ros_up/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
   imu: {name: '/micro_ros_up/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/micro_ros_up/imu/temp', type: 'std_msgs/msg/Float32'},
-  command: {
-    name: DOWN_TOPIC.get('command_topic') || '/micro_ros_do/motor_command_array',
+  // ⚠️ 下行的这两个 name 是**运行期可变**的：web 的「重力补偿」开关把命令源在
+  // 「直连固件」与「经叠加节点」之间切换。唯一改写点是 core/ros.js 的
+  // setDownlinkRoute（换名必须连带换发布者，散着改会让命令发到没人订阅的话题上）。
+  command: {name: '/micro_ros_do/motor_command_array',
     type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  trajectory: {
-    name: DOWN_TOPIC.get('trajectory_topic') || '/micro_ros_do/motor_trajectory',
+  trajectory: {name: '/micro_ros_do/motor_trajectory',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
@@ -25,13 +21,26 @@ export const TOPICS = {
   sysStatus: {name: '/micro_ros_up/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   paramSet: {name: '/micro_ros_do/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
   sysCmd: {name: '/micro_ros_do/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
+  // 关节侧实测构型：施加前馈时它是 τ_g 的**唯一**输入，而叠加节点在它超时/缺席时
+  // 整帧原样转发（见 robot_dynamics/README.md 的安全不变式）——所以「开关亮着但
+  // 没有补偿」是静默的，页面得自己看得见这条流的死活。
+  jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
   // TF（关节侧）：robot_state_publisher 发；页面只读，用来与电机流对照。
   tf: {name: '/tf', type: 'tf2_msgs/msg/TFMessage'},
   tfStatic: {name: '/tf_static', type: 'tf2_msgs/msg/TFMessage'},
   // 台架状态（bench_manager 节点，1 Hz + 命令后立即发）：仿真 / Agent / 电机
-  // 后端三段快照的 JSON 字符串。
+  // 后端 / 重力前馈四段快照的 JSON 字符串。
   bench: {name: '/bench/status', type: 'std_msgs/msg/String'},
 };
+
+// 下行接线的两个落点（core/ros.js 的 setDownlinkRoute 用，ADR 0013）。
+// 叠加侧的 `/robot_dynamics/*` 是 gravity_feedforward_overlay 的**输入**话题，是节点契约。
+export const DOWNLINK_ROUTE = {
+  DIRECT: 'direct',
+  OVERLAY: 'overlay',
+};
+export const OVERLAY_COMMAND_TOPIC = '/robot_dynamics/command_array';
+export const OVERLAY_TRAJECTORY_TOPIC = '/robot_dynamics/trajectory';
 
 export const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
   'ACTIVE', 'SAFE_STOP', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE'];

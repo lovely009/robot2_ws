@@ -335,3 +335,140 @@ def test_motor_backend_interface_mirrors_the_simulation_drawer():
     assert not missing, (
         '「电机后端」面板与「仿真」抽屉的同值契约被破坏（面板显示会与实际生效值'
         f'分叉，且页面不报错）：{missing}')
+
+
+# ---------------------------------------------------------------------------
+# 重力补偿开关（ADR 0013）：下面四条打的是**跨包契约**——前端这边的名字都是副本，
+# 权威在别的包（bench_manager 的服务注册与 unit 名、robot_dynamics 的话题默认值）。
+# 名字对不上时页面完全正常，只是命令发进没人订阅的话题 / 调不存在的服务，所以必须
+# 从权威那份源码里读出来对账，而不是在前端再抄一遍字面量。
+# ---------------------------------------------------------------------------
+
+SRC = PKG.parent                      # ros2_ws/src
+BENCH_NODE = SRC / 'bench_manager' / 'bench_manager' / 'node.py'
+SYSTEMD_UNITS = SRC / 'bench_manager' / 'bench_manager' / 'systemd_units.py'
+OVERLAY_NODE = (SRC / 'robot_dynamics' / 'src' / 'ros' /
+                'gravity_feedforward_overlay_node.cpp')
+AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
+FORMAT_JS = WEB / 'js' / 'core' / 'format.js'
+FEEDFORWARD_JS = WEB / 'js' / 'panels' / 'feedforward.js'
+
+
+def _skip_without(path):
+    if not path.is_file():
+        pytest.skip(f'{path} 不在源码树里（单独部署 web_host？）')
+
+
+def test_frontend_service_table_matches_bench_manager():
+    """前端 SVC 表与 `bench_manager` 注册的 `/bench/*` 服务必须**一一对应**。
+
+    多一条 = 页面上有个调用必然失败；少一条 = 后端的能力页面够不着（本次新增的三个
+    重力前馈服务就是后者）。类型名同样对账：roslibjs 按 serviceType 构造请求，错了
+    会在服务端反序列化失败，而页面只看到"服务无响应"。
+    """
+    _skip_without(BENCH_NODE)
+    node_src = BENCH_NODE.read_text(encoding='utf-8')
+    # 只认 `(类型, '/bench/名字', self._on_…)` 这个形状：`/bench/status` 是话题
+    # （`create_publisher`），不长这样。
+    registered = {
+        (name, f'bench_msgs/srv/{srv}')
+        for srv, name in re.findall(
+            r"\(\s*([A-Z]\w+),\s*'(/bench/[a-z_]+)',\s*self\._on_", node_src)
+    }
+    assert registered, 'node.py 的 on_configure 里没解析到任何服务注册'
+
+    declared = {
+        (name, srv) for name, srv in re.findall(
+            r"\[\s*'(/bench/[a-z_]+)'\s*,\s*'(bench_msgs/srv/\w+)'\s*\]",
+            AGENT_JS.read_text(encoding='utf-8'))
+    }
+    assert declared, 'agent.js 里没解析到 SVC 表'
+
+    assert declared == registered, (
+        '前端 SVC 表与 bench_manager 的服务注册不一致：'
+        f'前端多出 {sorted(declared - registered)}，'
+        f'缺 {sorted(registered - declared)}')
+
+
+def test_frontend_unit_names_match_bench_manager():
+    """四个 unit 名是同一份契约的三处副本（后端常量、前端常量、文档）。"""
+    _skip_without(SYSTEMD_UNITS)
+    backend = dict(re.findall(
+        r'^(UNIT_\w+)\s*=\s*"([^"]+)"', SYSTEMD_UNITS.read_text(encoding='utf-8'),
+        re.M))
+    assert backend, 'systemd_units.py 里没解析到 UNIT_* 常量'
+    frontend = dict(re.findall(
+        r'^export const (UNIT_\w+)\s*=\s*\'([^\']+)\'',
+        AGENT_JS.read_text(encoding='utf-8'), re.M))
+    assert frontend, 'agent.js 里没解析到 UNIT_* 常量'
+    assert frontend == backend, (
+        f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
+
+
+@pytest.mark.parametrize('constant, parameter', [
+    ('OVERLAY_COMMAND_TOPIC', 'command_input_topic'),
+    ('OVERLAY_TRAJECTORY_TOPIC', 'trajectory_input_topic'),
+])
+def test_overlay_topics_match_the_overlay_node_defaults(constant, parameter):
+    """开关把下行切到的 `/robot_dynamics/*` 是叠加节点的**输入**话题，权威在那份 C++。
+
+    节点里是相对名（默认命名空间下解析成 `/robot_dynamics/...`）；对它 remap 或改名，
+    前端的开关就会把命令发进没人订阅的话题——页面一切正常，机构不动。
+    """
+    _skip_without(OVERLAY_NODE)
+    cpp = OVERLAY_NODE.read_text(encoding='utf-8')
+    m = re.search(
+        rf'declare_parameter<std::string>\(\s*"{parameter}",\s*"([^"]+)"',
+        cpp)
+    assert m, f'叠加节点里找不到参数 {parameter} 的默认值'
+    expected = '/' + m.group(1)
+
+    js = FORMAT_JS.read_text(encoding='utf-8')
+    m = re.search(rf'export const {constant}\s*=\s*\'([^\']+)\'', js)
+    assert m, f'format.js 里找不到 {constant}'
+    assert m.group(1) == expected, (
+        f'{constant} 与叠加节点的话题默认值不一致：前端 {m.group(1)}，节点 {expected}')
+
+
+def test_downlink_switch_rewires_the_publisher():
+    """切接线是「改话题名 + 换发布者」一件事的两半，只做一半就是静默失效。
+
+    发布者在连接建立时就按旧名字 advertise 过了；只改 `TOPICS[key].name`，命令会继续
+    发到旧话题上——rosbridge 侧毫无异常，micro-ROS 侧没人收。所以这一条按源码形状断言
+    （纯运行时行为，浏览器里才看得见）。
+    """
+    src = (WEB / 'js' / 'core' / 'ros.js').read_text(encoding='utf-8')
+    start = src.find('export function setDownlinkRoute(')
+    assert start != -1, 'ros.js 里找不到 setDownlinkRoute'
+    body = src[start:src.find('\n}', start)]
+
+    for needed, why in [
+        ('TOPICS[key].name', '改了路由却没改话题名，publish 还发到旧话题'),
+        ('unadvertise', '没有撤掉旧名字上的发布者'),
+        ('ensurePublisher', '没有在新名字上立即 advertise：开头的命令会丢'),
+    ]:
+        assert needed in body, f'setDownlinkRoute 缺了「{needed}」：{why}'
+
+
+def test_the_switch_starts_the_node_before_rewiring():
+    """顺序即安全边界（ADR 0013 决定 7），反过来会出现「话题已切、节点没起」的空窗。
+
+    开：先起节点并确认 running，再切到叠加；关：先切回直连，再停节点。两处顺序都无法
+    在浏览器外自动验证，这里按源码形状钉住（与第 14 条同一取舍）。
+    """
+    src = FEEDFORWARD_JS.read_text(encoding='utf-8')
+
+    def body(signature):
+        start = src.index(signature)
+        return src[start:src.index('\n  }\n', start)]
+
+    on = body('async function turnOn()')
+    off = body('async function turnOff()')
+    # 起节点：`await bench.startGravityFeedforward` 必须早于 `setDownlinkRoute(…OVERLAY)`
+    assert on.index('startGravityFeedforward') < on.index('setDownlinkRoute'), (
+        'turnOn 先切了话题再起节点：切换那一瞬间命令全部落空')
+    assert 'OVERLAY' in on, 'turnOn 没有切到叠加侧'
+    # 停节点：`setDownlinkRoute(…DIRECT)` 必须早于 `stopGravityFeedforward`
+    assert off.index('setDownlinkRoute') < off.index('stopGravityFeedforward'), (
+        'turnOff 先停了节点再切回直连：停止那一瞬间命令全部落空')
+    assert 'DIRECT' in off, 'turnOff 没有切回直连侧'

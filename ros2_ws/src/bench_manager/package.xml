@@ -10,10 +10,13 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>bench_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>ros2launch</exec_depend>
+  <!-- 重力前馈叠加节点是 robot_dynamics 的可执行（运行期经 ros2 run 调用），同上
+       不声明 exec_depend 以免成环。 -->
   <!-- 仿真/电机后端是 robot_sim 的 simulation.launch.py（运行期经 ros2 launch 调用）。
        刻意不声明 exec_depend：robot_sim 反向依赖 web_host、web_host 又依赖
        bench_manager，声明会成环；旧 web_host 同样是运行期引用而未声明。 -->

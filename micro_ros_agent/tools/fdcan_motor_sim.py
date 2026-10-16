@@ -66,6 +66,7 @@ import select
 import signal
 import socket
 import struct
+import subprocess
 import sys
 import termios
 import threading
@@ -239,12 +240,10 @@ def parse_joint_map(spec: str) -> dict[int, str]:
     return out
 
 
-def parse_tau_limits(spec: str) -> dict[int, float]:
-    """解析 --tau-limits（"id:Nm,id:Nm"）→ {motor_id: 关节侧饱和力矩}。
+def parse_id_floats(spec: str) -> dict[int, float]:
+    """解析 "id:值,id:值" → {motor_id: 值}。空串 → 空字典。
 
-    与 --tau-limit（全局兜底）并存：型号库里写了 peak_torque_nm 的电机走逐台值，
-    其余（如 vaxor 未给峰值力矩）退回全局值。重复 motor_id 同 parse_joint_map，
-    取后者、不报错。
+    重复 motor_id 取后者、不报错（同 parse_joint_map 的约定，见那里的理由）。
     """
     out: dict[int, float] = {}
     for item in spec.split(","):
@@ -252,6 +251,15 @@ def parse_tau_limits(spec: str) -> dict[int, float]:
             mid, value = item.split(":")
             out[int(mid)] = float(value)
     return out
+
+
+def parse_tau_limits(spec: str) -> dict[int, float]:
+    """解析 --tau-limits（"id:Nm,id:Nm"）→ {motor_id: 关节侧饱和力矩}。
+
+    与 --tau-limit（全局兜底）并存：型号库里写了 peak_torque_nm 的电机走逐台值，
+    其余（如 vaxor 未给峰值力矩）退回全局值。
+    """
+    return parse_id_floats(spec)
 
 
 def slcan_line(can_id: int, payload: bytes, is_fd: bool, brs: bool) -> bytes:
@@ -303,6 +311,11 @@ VAXOR_KP_SCALE = 0.00001
 VAXOR_KD_SCALE = 0.01
 VAXOR_GEAR_RATIO = 50.0
 VAXOR_TORQUE_PER_AMP = 0.042 * VAXOR_GEAR_RATIO * 0.65
+
+# CERB 反馈里的线圈温度上报值（℃）。本模拟器不建模热学，报名义值——与 C++
+# motor_sim 的 kCerbNominalTemperatureDeciDegC = 250（25.0 ℃）同值，两个后端
+# 在页面上必须给出同一个数。
+CERB_NOMINAL_TEMPERATURE_C = 25.0
 
 # 启动期开通道命令的串口写重试预算（秒）。运行期数据帧不在收包路径里阻塞，
 # 统一进入发送队列，由主循环泵出；否则 SDO 应答遇到 USB CDC 背压会卡住反馈，
@@ -424,25 +437,38 @@ def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLB
 # ---- 节点模型 -----------------------------------------------------------
 
 class MotorModel:
-    def __init__(self, motor_id: int, kind: str):
+    def __init__(self, motor_id: int, kind: str, gear_ratio: float | None = None,
+                 joint_nm_per_amp: float | None = None):
         self.id = motor_id
         self.kind = kind  # "cerb" | "vaxor"
         self.tx_count = 0
         self.rx_count = 0
         self.enabled = False
         self.last_cmd = None
+        # 传动与 Kt（关节侧 N·m/A）。反馈里的电流与转速都由它们换算，值来自型号库
+        # （launch 逐台传入），模拟器不自带第二个真相源——重复定义正是两边漂移的成因。
+        self.gear_ratio = gear_ratio or (VAXOR_GEAR_RATIO if kind == "vaxor" else None)
+        self.joint_nm_per_amp = joint_nm_per_amp
+        # 本拍**实际施加**给被控对象的关节力矩（N·m）。反馈的 Iq 由它反算——这是
+        # 「台架告诉固件的电流」与「假电机真出了多少力」之间唯一的联系。纯台架
+        # （无 --gazebo）没有被控对象，恒为 0。
+        self.applied_joint_nm = 0.0
+        # 关节侧速度（rad/s）。两种模式各有来源：桥模式取真实关节速度，纯台架取
+        # 玩具模型一阶趋近的导数。反馈帧按各自协议换算成电机侧量。
+        self.vel_joint_rad_s = 0.0
         # 链路开关（运行期控制通道）：False = 完全静默（不发反馈、不回 SDO、
         # 忽略下行帧），对固件等价于设备掉电；恢复时按"重新上电"清命令状态。
         self.linked = True
         if kind == "cerb":
-            # 关节侧：初值每台 10° 递增、101rpm(=0.1047rad/s 关节)、1A
+            # 位置保留"每台上电初值递增"，用于在页面上区分读到了哪一台。转速、
+            # 电流、温度都**不再**是上电常量：前两个由被控对象状态每拍导出，
+            # 温度是名义值（见下）。曾经这里是 rpm=101 / iq_ma=1000 的写死值，
+            # 于是不发任何指令时页面也恒有力矩与转速，而真机未使能就是 0。
             self.pos_deg = float(10 * motor_id)
             self.tgt_deg = self.pos_deg
-            self.rpm = 101.0
-            self.iq_ma = 1000.0
-            # 电机线圈温度（°C），进反馈帧 data[8..9]（0.1 °C 定点）。
-            # 每台给不同初值，便于在页面上区分"读到了哪一臺"而不是一片同值。
-            self.temp_c = 30.0 + 2.0 * motor_id
+            # 线圈温度：名义值，与 C++ motor_sim 的 kCerbNominalTemperatureDeciDegC
+            # 同值。模拟器不建模热学，报一个常量比报一条按 id 递增的假升温曲线诚实。
+            self.temp_c = CERB_NOMINAL_TEMPERATURE_C
             # 设备自报身份（SDO 0x1008 回串），由 --cerb-r58 分配；固件据此
             # 自动绑定型号，模拟器必须实现同一对象否则台架全是不绑定电机。
             self.identity = b"R48LITE_V2"
@@ -470,20 +496,53 @@ class MotorModel:
                 (0x6064, 0x00): 0,
             }
         else:
-            # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad，gear=50
-            self.pos_motor_rad = 0.1 * (motor_id - 6) * 50.0
+            # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad。速度与电流同 CERB：
+            # 状态导出，不设写死初值。
+            self.pos_motor_rad = 0.1 * (motor_id - 6) * self.gear_ratio
             self.tgt_motor_rad = self.pos_motor_rad
-            self.vel_motor_rad_s = 2.5
-            self.current_a = 0.5
 
     def approach(self, dt_s: float):
         # 极简一阶趋近，仅用于演示「命令影响反馈」，不模拟真实动力学。
         rate = 2.0 * dt_s
         if self.kind == "cerb":
             self.pos_deg += (self.tgt_deg - self.pos_deg) * min(1.0, rate)
+            # 上报速度取本模型位置律的导数（连续形式），而不是另编一个常量：
+            # 否则纯台架会出现「位置在动、转速恒 0」的自相矛盾。
+            self.vel_joint_rad_s = (self.tgt_deg - self.pos_deg) * 2.0 * PI / 180.0
         else:
             self.pos_motor_rad += (self.tgt_motor_rad - self.pos_motor_rad) \
                 * min(1.0, rate)
+            gear = self.gear_ratio or VAXOR_GEAR_RATIO
+            self.vel_joint_rad_s = \
+                (self.tgt_motor_rad - self.pos_motor_rad) * 2.0 / gear
+
+    def report_current_a(self) -> float:
+        """反馈电流（电机侧 A）＝ 实际施加的关节力矩经传动与 Kt 反算。
+
+        与 C++ `motor_sim` 的 `frame_router.cpp` 同式：
+        `joint_nm / (Kt × 速比 × 效率)`。未施加的场合（未使能 / 无命令 / 固件未
+        授权 / 纯台架无被控对象）`applied_joint_nm` 为 0，于是报 0——真机未使能
+        就是没有电流，不发指令不该看到力矩。
+
+        不另设电流上限钳位：力矩已在上游按 `peak_torque_nm` 饱和，电流天然有界；
+        编码层另有 `clamp_i16` 兜底。缺 `joint_nm_per_amp`（型号未知，如控制通道
+        动态 add 进来的电机）时报 0 而不是猜一个系数。
+        """
+        if not self.joint_nm_per_amp:
+            return 0.0
+        return self.applied_joint_nm / self.joint_nm_per_amp
+
+    def report_motor_rpm(self) -> float:
+        """反馈转速（电机侧 RPM）：CERB 帧按此编码，固件解码后除速比回关节侧。"""
+        if not self.gear_ratio:
+            return 0.0
+        return self.vel_joint_rad_s * self.gear_ratio * 60.0 / (2.0 * PI)
+
+    def report_motor_rad_s(self) -> float:
+        """反馈速度（电机侧 rad/s）：VAXOR 帧按此编码。"""
+        if not self.gear_ratio:
+            return 0.0
+        return self.vel_joint_rad_s * self.gear_ratio
 
     def cerb_frame(self) -> bytes:
         """12B 周期状态帧（0x300+n）：位置 / 转速 / Iq / 错误码 / 线圈温度 / 模式 / 状态位。
@@ -493,8 +552,8 @@ class MotorModel:
         "--"，看着像 UI 缺字段，实为台架不发。
         """
         data = struct.pack(">hhh", clamp_i16(self.pos_deg * 182.0, "CERB 位置"),
-                           clamp_i16(self.rpm, "CERB 转速"),
-                           clamp_i16(self.iq_ma, "CERB Iq"))
+                           clamp_i16(self.report_motor_rpm(), "CERB 转速"),
+                           clamp_i16(self.report_current_a() * 1000.0, "CERB Iq"))
         data += struct.pack(">h", 0)                      # data[6..7] 错误代码
         data += struct.pack(">h",
                             clamp_i16(self.temp_c * 10, "CERB 温度"))  # data[8..9]
@@ -506,8 +565,8 @@ class MotorModel:
         cmd_id = 0x501 + 4 * self.id
         out = cmd_id.to_bytes(2, "little")
         out += vaxor_pos_code(self.pos_motor_rad)
-        out += vaxor_vel_code(self.vel_motor_rad_s)
-        out += vaxor_cur_code(self.current_a)
+        out += vaxor_vel_code(self.report_motor_rad_s())
+        out += vaxor_cur_code(self.report_current_a())
         out += struct.pack("<h", 150)          # 15.0 V
         out += (0).to_bytes(4, "little")       # fault=0
         out += bytes([4, 0, 0, 0x02])          # motor_state/calib/mode(MIT)/25mm
@@ -529,8 +588,8 @@ class MotorModel:
         cmd_id = 0x501 + 4 * self.id
         return cmd_id.to_bytes(2, "little") + \
             vaxor_pos_code(self.pos_motor_rad) + \
-            vaxor_vel_code(self.vel_motor_rad_s) + \
-            vaxor_cur_code(self.current_a) + b"\x00\x00"
+            vaxor_vel_code(self.report_motor_rad_s()) + \
+            vaxor_cur_code(self.report_current_a()) + b"\x00\x00"
 
 
 # ---- 运行期控制（--control-socket） --------------------------------------
@@ -585,14 +644,21 @@ def _control_motor_info(motor_id: int, model: MotorModel,
 
 
 def apply_sim_control(models: dict[int, MotorModel], command,
-                      joint_map: dict[int, str] | None = None) -> dict:
+                      joint_map: dict[int, str] | None = None,
+                      joint_nm_per_amp=None, gear_ratios=None) -> dict:
     """应用一条控制命令，返回响应 dict（纯逻辑，不碰 IO 与调度）。
 
     命令：{"cmd": "status"}；{"cmd": "add", "id", "kind", "model"?}（model 只对
     cerb 有意义：r48/r58）；{"cmd": "remove", "id"}；{"cmd": "link", "id", "up"}。
     add 的 id 若在 joint_map 里（--gazebo 的拓扑电机）自动挂对应关节；否则是
     只走线协议的裸假节点（反馈取内部假 plant）。
+
+    joint_nm_per_amp / gear_ratios 是型号库的逐台投影（见 CanMotorSim.__init__），
+    add 出来的电机在这里挂上，否则它会上报 0 电流、0 转速——不是"没使能"，
+    而是压根不知道自己的 Kt 与速比。
     """
+    joint_nm_per_amp = joint_nm_per_amp or {}
+    gear_ratios = gear_ratios or {}
     if not isinstance(command, dict):
         return {"ok": False, "error": "命令必须是 JSON 对象"}
     action = command.get("cmd")
@@ -619,7 +685,9 @@ def apply_sim_control(models: dict[int, MotorModel], command,
         model_name = command.get("model")
         if kind == "cerb" and model_name not in (None, "r48", "r58"):
             return {"ok": False, "error": "model 必须是 r48 或 r58"}
-        model = MotorModel(motor_id, kind)
+        model = MotorModel(motor_id, kind,
+                           gear_ratio=gear_ratios.get(motor_id),
+                           joint_nm_per_amp=joint_nm_per_amp.get(motor_id))
         if kind == "cerb":
             apply_cerb_device_model(model, model_name or "r48")
         models[motor_id] = model
@@ -752,6 +820,13 @@ class GazeboBridge:
         if now - self.last_pub < self.publish_interval:
             return
         self.last_pub = now
+        # 本拍**实际施加**的力矩先全部清零，再只给真正下发的那几台赋值——反馈电流
+        # 从这里反算（见 MotorModel.report_current_a）。不能只清"这一拍被跳过的"，
+        # 未使能 / 无命令 / 固件未授权的电机也在此一并归零：真机在这些状态下就是
+        # 没电流。限频提前 return 的那几拍不动它，因为被控对象仍在吃上一次的力矩，
+        # 反馈跟着保持才与台架现场一致。
+        for m in models.values():
+            m.applied_joint_nm = 0.0
         out = self._msg_type()
         # 没有有效下行命令时保持仿真器启动时的姿态；不能每拍把当前反馈
         # 重新当成目标，否则模型会在重力下自由下落后锁存新姿态。
@@ -768,30 +843,48 @@ class GazeboBridge:
                 continue
             index = self.joints.index(joint)
             if self.control_mode == "position":
+                # 位置模式下发的是目标点，实际力矩由被控对象的位置环决定，本处
+                # 读不到 ⇒ 电流按 0 上报。台架固定用 effort 模式，这条只在把
+                # sim 当独立位置环用时走到。
                 if "pos_rad" in cmd:
                     out.data[index] = cmd["pos_rad"]
                 continue
             if "kp" not in cmd:
                 continue
-            tau = (cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
-                   + cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
-                   + cmd["tau_nm"])
+            driver = cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
+            damp = cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
+            torque = driver + damp + cmd["tau_nm"]
             limit = self.tau_limits.get(mid, self.tau_limit)
-            out.data[index] = max(-limit, min(limit, tau))
+            out.data[index] = max(-limit, min(limit, torque))
+            m.applied_joint_nm = out.data[index]
         self.pub.publish(out)
 
 
 class CanMotorSim:
     bridge = None   # 由 main() 在 --gazebo 时注入 GazeboBridge
+    # 型号库的逐台投影，由 __init__ 覆盖。类级缺省是给 `__new__` 造出来的测试替身
+    # 用的——host 测试用 __new__ 跳过 __init__ 来单测某个方法，apply_control 会把
+    # 这两个转交给 apply_sim_control（它自己就把 None 当"没配"）。
+    joint_nm_per_amp = None
+    gear_ratios = None
     def __init__(self, tty: str | None, cerb_ids, vaxor_ids, period_ms: int,
                  log_path: str | None, use_brs: bool = True,
                  data_bitrate_index: int | None = AUTO_DATA_BITRATE_INDEX,
                  fb_period_ms: int = 0, stagger_ms: float = 2.2,
                  r58_ids=(), safety_off_ids=(), dir_ccw_ids=(),
                  can_interface: str | None = None,
+                 setup_can: bool = True,
                  control_socket_path: str | None = None,
                  probe_adapter: bool = False,
-                 mit_torque_limits=None):
+                 mit_torque_limits=None,
+                 joint_nm_per_amp=None, gear_ratios=None):
+        # {motor_id: N·m/A}——**关节侧**「力矩 ÷ 电流」= Kt × 速比 × 效率。
+        # 反馈电流由它反算（见 MotorModel.report_current_a），因而必须与真机
+        # 型号库同源；launch 逐台传入。查不到的电机报 0 电流而不是猜系数。
+        self.joint_nm_per_amp = dict(joint_nm_per_amp or {})
+        # {motor_id: 速比}——反馈转速按它换算到电机侧。缺省时 vaxor 退回
+        # VAXOR_GEAR_RATIO、cerb 无从可退（报 0 转速）。
+        self.gear_ratios = dict(gear_ratios or {})
         # {motor_id: N·m}——**MIT 力矩量化上限**，逐型号（R48 11 / R58 45）。
         # 与桥的 tau_limits 同值同源（型号库 peak_torque_nm），但角色不同：
         # 这个是解码量程，那个是饱和钳位。固件按 Profile 的 mit_torque_limit_nm
@@ -803,6 +896,7 @@ class CanMotorSim:
         self.probe_adapter = probe_adapter
         self.tty_path = tty
         self.can_interface = can_interface
+        self.setup_can = setup_can
         self.bus_socket = None
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
@@ -833,8 +927,14 @@ class CanMotorSim:
         self._tx_control = deque()   # SDO/应答/管理帧：优先于周期反馈
         self._tx_feedback = deque()  # 周期反馈：队列满时允许丢弃
         self._tx_active = None
-        self.models = {i: MotorModel(i, "cerb") for i in cerb_ids}
-        self.models.update({i: MotorModel(i, "vaxor") for i in vaxor_ids})
+        self.models = {i: MotorModel(i, "cerb",
+                                     gear_ratio=self.gear_ratios.get(i),
+                                     joint_nm_per_amp=self.joint_nm_per_amp.get(i))
+                       for i in cerb_ids}
+        self.models.update({i: MotorModel(i, "vaxor",
+                                          gear_ratio=self.gear_ratios.get(i),
+                                          joint_nm_per_amp=self.joint_nm_per_amp.get(i))
+                            for i in vaxor_ids})
         for mid in r58_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
                 apply_cerb_device_model(self.models[mid], "r58")
@@ -896,8 +996,44 @@ class CanMotorSim:
                     f"{tty} 已被另一个进程占用（很可能是残留的模拟器实例）；"
                     "先停掉它再启动，否则两条 SLCAN 流会互相打断。")
 
+    def _ensure_socketcan_config(self):
+        """SocketCAN 的前置条件归本模拟器负责——它是这条口唯一的消费者。
+
+        SLCAN 那条路位时序在**适配器**里，本脚本能无权限自配（`S8/Y5/M0/A1/O`）；
+        SocketCAN 的位时序在**内核**里、只有 root 能设，这就是两者的不对称。
+
+        先 `--check` 与标定比对：**符合就一个字节都不碰**（与 udev/networkd 配好的
+        情况共存，也不打断已经跑着的控制板）。不符才调 can_up.sh 施加；拿不到权限时
+        拒绝启动并打印那一行命令——绝不"打开了就当能用"：2026-10-16 就是 bind 成功、
+        打印 opened，然后 40 分钟发不出帧，页面表现为"一台电机都没有"。
+        """
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "can_up.sh")
+        if not os.path.isfile(script):
+            print(f"[sim] 警告：找不到 {script}，跳过 CAN 配置校验", file=sys.stderr)
+            return
+        check = subprocess.run([script, "--check", self.can_interface],
+                               capture_output=True, text=True)
+        if check.returncode == 0:
+            print(f"[sim] {self.can_interface} 配置符合台架标定（未改动接口）")
+            return
+        why = (check.stdout + check.stderr).strip() or "与标定不符"
+        print(f"[sim] {self.can_interface} 配置不符台架标定（{why}），"
+              f"调 can_up.sh 施加…")
+        fix = subprocess.run([script, self.can_interface],
+                             capture_output=True, text=True)
+        if fix.returncode != 0:
+            raise RuntimeError(
+                f"{self.can_interface} 的位时序/txqueuelen 不符台架标定，自动施加也"
+                f"失败：{(fix.stderr or fix.stdout).strip()}；请手动执行 "
+                f"{script} {self.can_interface}")
+        print(f"[sim] {self.can_interface} 已按标定重配——若控制板此前已在运行，"
+              f"这次 down/up 会打断链路，需要复位控制板")
+
     def configure(self):
         if self.can_interface is not None:
+            if self.setup_can:
+                self._ensure_socketcan_config()
             protocol = getattr(socket, "CAN_RAW", 1)
             level = getattr(socket, "SOL_CAN_RAW", 101)
             try:
@@ -1545,7 +1681,8 @@ class CanMotorSim:
     def apply_control(self, command: dict) -> dict:
         """控制命令入口：应用后清掉被撤销电机的待发调度。"""
         joint_map = self.bridge.joint_map if self.bridge is not None else None
-        response = apply_sim_control(self.models, command, joint_map)
+        response = apply_sim_control(self.models, command, joint_map,
+                                     self.joint_nm_per_amp, self.gear_ratios)
         if response.get("ok") and command.get("cmd") in ("remove", "link"):
             motor_id = response.get("id")
             if isinstance(motor_id, int):
@@ -1646,12 +1783,12 @@ class CanMotorSim:
                     if m.kind == "cerb":
                         m.pos_deg = self.bridge.joint_deg(m.id)
                     else:
-                        m.pos_motor_rad = (
-                            self.bridge.joint_position(m.id) * VAXOR_GEAR_RATIO
-                        )
-                        m.vel_motor_rad_s = (
-                            self.bridge.joint_velocity(m.id) * VAXOR_GEAR_RATIO
-                        )
+                        # VAXOR 反馈为电机轴量，按本台自己的速比换算
+                        m.pos_motor_rad = (self.bridge.joint_position(m.id)
+                                           * (m.gear_ratio or VAXOR_GEAR_RATIO))
+                    # 速度同样取自被控对象。两个 kind 都要设：CERB 反馈里的转速
+                    # 是电机侧量（report_motor_rpm 里再乘速比），缺了它这一路恒 0。
+                    m.vel_joint_rad_s = self.bridge.joint_velocity(m.id)
                 else:
                     m.approach(dt)
             last_step = now
@@ -1721,7 +1858,10 @@ def main():
     endpoint.add_argument("--tty", default=None,
                           help="SLCAN 设备；默认按 /dev/serial/by-id/ 解析 CANable")
     endpoint.add_argument("--interface", default=None,
-                          help="CAN-FD SocketCAN 接口，例如 can0（位率需预先配置）")
+                          help="CAN-FD SocketCAN 接口，例如 can0")
+    ap.add_argument("--no-can-setup", action="store_true",
+                    help="不校验/施加 SocketCAN 位时序——给接口由 udev/networkd 等"
+                         "外部机制管理的情况（正常路径下 --check 通过就不会动手）")
     ap.add_argument("--cerb", default="1,2,3,4")
     ap.add_argument("--vaxor", default="")
     ap.add_argument("--cerb-r58", default="1",
@@ -1780,6 +1920,13 @@ def main():
                     help="逐电机力矩饱和 N·m（关节侧），形如 1:11.0,3:45.0；"
                          "取值来自型号库 peak_torque_nm（真机峰值），"
                          "未列出的电机退回 --tau-limit")
+    ap.add_argument("--joint-nm-per-amp", default="",
+                    help="逐电机关节侧 Kt×速比×效率（N·m/A），形如 1:8.686,7:1.365；"
+                         "反馈电流由「实际施加力矩 ÷ 它」反算。取值来自型号库，"
+                         "未列出的电机上报 0 电流")
+    ap.add_argument("--gear", default="",
+                    help="逐电机速比，形如 1:101,7:50；反馈转速按它换算到电机侧。"
+                         "未列出的 vaxor 退回内置 50，cerb 上报 0 转速")
     args = ap.parse_args()
     if args.interface is None and args.tty is None:
         args.tty = default_canable_tty()
@@ -1791,6 +1938,8 @@ def main():
     # 分支里赋值会让这个名字在分支外成为未绑定局部名（构造处 UnboundLocalError，
     # 任何参数组合都起不来）。
     tau_limits = parse_tau_limits(args.tau_limits)
+    joint_nm_per_amp = parse_id_floats(args.joint_nm_per_amp)
+    gear_ratios = parse_id_floats(args.gear)
     sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
                    use_brs=not args.no_brs,
                    data_bitrate_index=args.data_bitrate_index,
@@ -1800,9 +1949,12 @@ def main():
                    safety_off_ids=args.safety_off,
                    dir_ccw_ids=args.dir_ccw,
                    can_interface=args.interface,
+                   setup_can=not args.no_can_setup,
                    control_socket_path=args.control_socket,
                    probe_adapter=args.probe_adapter,
-                   mit_torque_limits=tau_limits)
+                   mit_torque_limits=tau_limits,
+                   joint_nm_per_amp=joint_nm_per_amp,
+                   gear_ratios=gear_ratios)
 
     if args.gazebo:
         jm = parse_joint_map(args.joint_map)
@@ -1820,6 +1972,19 @@ def main():
                ", ".join(f"{k}:{v:g}" for k, v in sorted(tau_limits.items())) or "无",
                args.tau_limit,
                f"{effort_rate:g} Hz（独立线程）" if effort_rate else "随 CAN 主循环"))
+        print("[sim] 反馈换算：Kt×速比×效率 %s；速比 %s" %
+              (", ".join(f"{k}:{v:g}" for k, v in sorted(joint_nm_per_amp.items()))
+               or "无（反馈电流恒 0）",
+               ", ".join(f"{k}:{v:g}" for k, v in sorted(gear_ratios.items()))
+               or "无（vaxor 用内置 50，cerb 转速恒 0）"))
+        # 缺 --joint-nm-per-amp 的后果是"页面显示 0 A，胳膊照样动"——比不模拟更误导，
+        # 且与本次修复的初衷（不发指令才该是 0）恰好反向。宁可吵一句。
+        missing = sorted(set(jm) - set(joint_nm_per_amp))
+        if missing:
+            print("[sim] 警告：电机 %s 没给 --joint-nm-per-amp，其反馈电流将恒报 0，"
+                  "即使正在出力。取值 = 型号库的 Kt×速比×效率（motor.yaml）；"
+                  "simulation.launch.py 已按拓扑自动生成。"
+                  % ",".join(str(i) for i in missing))
         # MIT 律跑在独立线程里，与 CAN 主循环（SYNC 20ms）解耦：主循环里那份
         # 调用留着做兜底，但会被 publish_interval 节流掉，实际生效的是本线程。
         if effort_rate:

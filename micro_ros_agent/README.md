@@ -100,6 +100,31 @@ HIL 启动仿真时默认拉起、停止时联动收起）：经 `simulation.lau
 反馈节拍默认**照真机**：每个 SYNC 回一帧（真机 TPDO 传输类型 = 1）。`--fb-period-ms`
 给的不是 0 时切到台架降载模式（按周期出窗口 + `--stagger-ms` 错峰 + 墙钟兜底）。
 
+**反馈里的电流与转速是状态导出，不是上电常量**（2026-10-16 修）。曾经两者写死在
+`MotorModel.__init__` 里（`rpm=101`、`iq_ma=1000`），于是**不发任何指令、电机没使能，
+页面上也恒有转速与力矩**——固件把那个假电流乘 Kt×速比，显示成 7.777/8.686 N·m，
+与真机"未使能就是 0"相反。现在：
+
+| 反馈量 | 来源 | 缺参数时 |
+|---|---|---|
+| 位置 | 被控对象真实关节角（`--gazebo`）/ 内部假 plant | — |
+| 转速 | 关节速度 × 速比，编码到电机侧（CERB 为 RPM，VAXOR 为 rad/s） | 报 0 |
+| 电流 | **本拍实际施加的关节力矩** ÷ (Kt×速比×效率)，电机侧 A | 报 0 |
+| 温度 | 名义值 25.0 ℃（不建模热学；与 C++ `motor_sim` 的 `kCerbNominalTemperatureDeciDegC` 同值） | — |
+
+"实际施加"只有一个产生路径：`GazeboBridge.publish_commands` 把力矩写进命令数组的
+那一刻（含饱和钳位后的值）。未使能 / 无命令 / 固件撤权 / 位置模式因此都自动落到 0 A，
+与真机一致。换算公式与 C++ `motor_sim` 的 `frame_router` 同式，两个后端在页面上给出
+同一个数（ADR 0012 的收敛要求）。
+
+两个系数由型号库（`motor_hardware_interface/config/motor.yaml`）逐台传入，
+`simulation.launch.py` 按 `simulation_topology.yaml` 自动生成：
+
+- `--joint-nm-per-amp`（`id:值`）＝ `torque_constant_nm_per_amp × gear_ratio ×
+  gear_efficiency`。未列的电机上报 0 电流（不猜系数）；启动时会告警——**缺了它页面
+  显示 0 A 而胳膊照样动**，比不模拟更误导。
+- `--gear`（`id:值`）＝ `gear_ratio`。未列的 vaxor 退回内置 50，cerb 上报 0 转速。
+
 取证工具 `tools/cerb_sdo_probe.py` 支持两种传输：`--interface can0`（gs_usb/SocketCAN，
 现场当前配置）与 `--dev <串口>`（SLCAN）。**默认只读**，带 `--write` 才改设备对象。
 设备侧对象字典、帧格式与故障码见

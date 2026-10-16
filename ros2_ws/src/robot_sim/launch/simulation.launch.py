@@ -242,6 +242,15 @@ def _bind_motor_topology(
                 "driver_parameters": source.get("parameters", {}),
                 "peak_torque_nm": peak_torque,
                 "profile": profile_name,
+                # 反馈换算的两个系数：关节侧 N·m/A 与速比。与 C++ motor_sim 的
+                # transmission + Kt 同式（joint_effort_to_motor_torque 后除 Kt），
+                # 模拟器用它把「实际施加的关节力矩」还原成上报电流/转速。
+                "joint_nm_per_amp": (
+                    float(plant["torque_constant_nm_per_a"])
+                    * float(sim_profile["gear_ratio"])
+                    * float(sim_profile["efficiency"])
+                ),
+                "gear_ratio": float(sim_profile["gear_ratio"]),
             }
         )
 
@@ -894,6 +903,18 @@ def launch_simulation(context):
             for motor in simulation["motors"]
             if motor.get("peak_torque_nm")
         )
+        # 反馈电流/转速的换算系数（逐台，来自型号库）。模拟器没有第二个真相源：
+        # 它把**实际施加的关节力矩**除以 joint_nm_per_amp 得到上报电流，把关节速度
+        # 乘速比得到上报转速——与 C++ motor_sim 的 frame_router 同式，两个后端在
+        # 页面上给出同一个数。缺了它们，模拟器只会报 0（宁可为 0 也不猜系数）。
+        joint_nm_per_amp = ",".join(
+            f"{motor['id']}:{motor['joint_nm_per_amp']:g}"
+            for motor in simulation["motors"]
+        )
+        gear_ratios = ",".join(
+            f"{motor['id']}:{motor['gear_ratio']:g}"
+            for motor in simulation["motors"]
+        )
         r58_ids = [
             str(motor["id"])
             for motor in simulation["motors"]
@@ -937,6 +958,10 @@ def launch_simulation(context):
                     joint_map,
                     "--tau-limits",
                     tau_limits,
+                    "--joint-nm-per-amp",
+                    joint_nm_per_amp,
+                    "--gear",
+                    gear_ratios,
                     "--gazebo",
                     "--gazebo-control-mode",
                     "effort",

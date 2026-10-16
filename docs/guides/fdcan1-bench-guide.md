@@ -110,6 +110,10 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
    `--log <jsonl>` 会逐帧落盘并把主循环拖慢，反馈窗口可能越过固件 100 ms 离线门而
    触发全体 OFFLINE——只在需要抓原始帧定位时开，抓完即关。
 
+   本指南只验收总线与发现/离线，不跑力矩，所以不传 `--joint-nm-per-amp`：反馈电流
+   会恒报 0（模拟器启动时会就此告警）。要看真实电流刻度走
+   `robot_bringup` 的 `robot.launch.py`，那条路从型号库自动带上换算系数。
+
 3. 看到 `S8/Y5/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
 4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 

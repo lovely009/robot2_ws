@@ -121,9 +121,10 @@ assert len(sim.sent) == sent_before
 
 # 12B 周期反馈帧：温度必须落在 data[8..9]（大端 int16，0.1 °C）——固件
 # cerb_adapter 从这里取 MotorStatusArray.temperature，模拟器不填则页面恒 "--"。
+# 报的是**名义值**，与 C++ motor_sim 的 kCerbNominalTemperatureDeciDegC 同值。
 frame = MODULE.MotorModel(4, "cerb").cerb_frame()
 assert len(frame) == 12
-assert frame[8:10] == round(38.0 * 10).to_bytes(2, "big")  # 30 + 2×4 = 38.0 °C
+assert frame[8:10] == round(MODULE.CERB_NOMINAL_TEMPERATURE_C * 10).to_bytes(2, "big")
 assert frame[11] & 0x20 == 0  # 无故障
 
 # R58 身份分配：--cerb-r58 指定的节点自报 R58LITE_V2。
@@ -276,15 +277,51 @@ assert _w20.window_count == 1
 assert _w60_ref.window_count == 0 and _w60_ref.next_send == {}
 
 
+# ── 反馈电流/转速是**状态导出**，不是上电常量（2026-10-16 修）─────────────
+# 曾经 rpm=101 / iq_ma=1000 是写死的上电常量：不发任何指令、电机没使能，页面上
+# 也恒显示 101 rpm 与 1.0 A，再被固件乘 Kt×速比 变成"一直有力矩输出"。真机未
+# 使能就是 0。现在两者都从**本拍实际施加的关节力矩**与关节速度导出，公式与 C++
+# motor_sim 的 frame_router 一致（joint_effort_to_motor_torque 后除 Kt）。
+_fb = MODULE.MotorModel(1, "cerb", gear_ratio=101.0, joint_nm_per_amp=7.777)
+# ① 未施加力矩（未使能 / 无命令 / 固件未授权）→ 电流 0、转速 0。
+assert _fb.report_current_a() == 0.0
+assert _fb.report_motor_rpm() == 0.0
+_fb_zero = _fb.cerb_frame()
+assert _fb_zero[2:4] == (0).to_bytes(2, "big")                   # 转速
+assert _fb_zero[4:6] == (0).to_bytes(2, "big")                   # Iq
+# ② 施加 7.777 N·m（= 1 A × Kt×速比×效率）→ 上报 1000 mA，与真机同刻度。
+_fb.applied_joint_nm = 7.777
+assert abs(_fb.report_current_a() - 1.0) < 1e-9
+assert _fb.cerb_frame()[4:6] == (1000).to_bytes(2, "big")
+# ③ 转速按速比换算到电机侧：关节 1 rad/s × 101 → 964.4 RPM。
+_fb.vel_joint_rad_s = 1.0
+assert abs(_fb.report_motor_rpm() - 101.0 * 60.0 / (2 * 3.141592653589793)) < 1e-6
+# ④ 缺型号参数（型号库里查不到这台）时报 0，不猜系数——vaxor 有内置速比 50，
+#    cerb 没有可退的速比，两者都不能凭空造一个 Kt。
+_unknown = MODULE.MotorModel(9, "cerb")
+assert _unknown.report_current_a() == 0.0 and _unknown.report_motor_rpm() == 0.0
+_vaxor_fb = MODULE.MotorModel(7, "vaxor", joint_nm_per_amp=1.365)
+assert abs(_vaxor_fb.report_motor_rad_s() - 0.0) < 1e-12   # 静止
+_vaxor_fb.vel_joint_rad_s = 0.5
+assert abs(_vaxor_fb.report_motor_rad_s() - 25.0) < 1e-9   # 内置速比 50
+_vaxor_fb.applied_joint_nm = 1.365
+assert abs(_vaxor_fb.report_current_a() - 1.0) < 1e-9
+_vaxor_frame = _vaxor_fb.vaxor_reply_frame()
+assert len(_vaxor_frame) == 12
+# 帧布局：id(2) | 位置(4) | 速度(2) | 电流(2) | 填充(2)。固件只读 2..9。
+assert abs(MODULE.vaxor_decode_vel(_vaxor_frame[6:8]) - 25.0) < 0.02
+assert abs(MODULE.vaxor_decode_current(_vaxor_frame[8:10]) - 1.0) < 0.01
+
+
 # ── 反馈编码越界不得打死进程（2026-10-13 台架实测的崩溃）──────────────────
 # 武装后关节瞬时摆过 ±180°，cerb_frame 的 pos_deg*182 溢出 int16 → struct.error
 # 打死整个模拟器进程，launch 随即关掉全部（含 MuJoCo 桥，exit -11），台架全下线、
 # 固件侧 18 台全 OFFLINE/fault=5。vaxor 的三个编码函数一直有 clamp，CERB 这条路
 # 漏了——而它的失效方式是**崩进程**，不是丢一帧。
-_cb = MODULE.MotorModel(1, "cerb")
+_cb = MODULE.MotorModel(1, "cerb", gear_ratio=101.0, joint_nm_per_amp=7.777)
 _cb.pos_deg = 400.0     # 远超 ±180°（int16 只能表示 ±180.04°）
-_cb.rpm = 10 ** 9
-_cb.iq_ma = -(10 ** 9)
+_cb.vel_joint_rad_s = 10 ** 9
+_cb.applied_joint_nm = -(10 ** 9)
 _cb.temp_c = 10 ** 6
 _frame = _cb.cerb_frame()  # 修复前这里抛 struct.error
 assert len(_frame) == 12
@@ -442,6 +479,77 @@ except SystemExit:
 else:
     raise AssertionError("控制 socket 被占用时应拒绝启动")
 _ctrl2._teardown_control_socket()
+
+
+# ── 「不发指令就不出力」：publish_commands 只给真正下发的那几台记力矩 ──────
+# 这是本次修复的**行为契约**：反馈电流 = 本拍实际施加的关节力矩 ÷ (Kt×速比×效率)，
+# 而实际施加的力矩只有一条产生路径（effort 分支真正写进命令数组的那一刻）。于是
+# 未使能 / 无命令 / 固件撤权 / 位置模式全都自动落到 0 A，不需要各处分别处理。
+class _Pub:
+    def __init__(self):
+        self.msg = None
+
+    def publish(self, msg):
+        self.msg = msg
+
+
+class _Arr:
+    def __init__(self):
+        self.data = []
+
+
+def _bridge():
+    """不碰 rclpy 的桥（host 测试无 ROS）：只装 publish_commands 用到的字段。"""
+    b = MODULE.GazeboBridge.__new__(MODULE.GazeboBridge)
+    b.joint_map = {1: "joint_link1", 2: "joint_link2"}
+    b.joints = ["joint_link1", "joint_link2"]
+    b.pos = {"joint_link1": 0.0, "joint_link2": 0.0}
+    b.vel = {"joint_link1": 0.0, "joint_link2": 0.0}
+    b.hold_pos = {"joint_link1": 0.0, "joint_link2": 0.0}
+    b.control_mode = "effort"
+    b.tau_limit = 10.0
+    b.tau_limits = {}
+    b.publish_interval = 0.0
+    b.last_pub = 0.0
+    b.fw_lifecycle = {}
+    b._msg_type = _Arr
+    b.pub = _Pub()
+    return b
+
+
+def _model(mid, kind="cerb"):
+    m = MODULE.MotorModel(mid, kind, gear_ratio=101.0, joint_nm_per_amp=7.777)
+    m.enabled = True
+    m.last_cmd = {"kp": 30.0, "kd": 1.0, "pos_rad": 0.0, "vel_rad_s": 0.0,
+                  "tau_nm": 0.5}
+    return m
+
+
+_b = _bridge()
+_ms = {1: _model(1), 2: _model(2)}
+_ms[2].enabled = False                      # 未使能
+_b.publish_commands(_ms)
+assert _ms[1].applied_joint_nm == 0.5, _ms[1].applied_joint_nm   # 前馈直通
+assert _ms[2].applied_joint_nm == 0.0, "未使能的电机必须报 0 力矩"
+
+# 撤掉命令 ⇒ 下一拍就回到 0（曾经这里会一直留着上一次的值）。
+_ms[1].last_cmd = None
+_b.publish_commands(_ms)
+assert _ms[1].applied_joint_nm == 0.0, "没有命令就不该出力"
+
+# 固件撤权（非 ACTIVE）即使主机侧还有命令也不发力矩。
+_ms[1].last_cmd = {"kp": 30.0, "kd": 1.0, "pos_rad": 0.0, "vel_rad_s": 0.0,
+                   "tau_nm": 0.5}
+_b.fw_lifecycle = {1: 1}                    # 非 LIFECYCLE_ACTIVE
+_b.publish_commands(_ms)
+assert _ms[1].applied_joint_nm == 0.0, "固件撤权后不得有幽灵力矩"
+
+# 授权恢复 ⇒ 力矩恢复；饱和后记的必须是**钳位后**的值（反馈与出力一致）。
+_b.fw_lifecycle = {1: MODULE.LIFECYCLE_ACTIVE}
+_ms[1].last_cmd["tau_nm"] = 100.0
+_b.publish_commands(_ms)
+assert _ms[1].applied_joint_nm == 10.0, _ms[1].applied_joint_nm
+assert _b.pub.msg.data == [10.0, 0.0]
 
 
 # ── 启动路径不得因自身缺陷崩溃（2026-10-15 加）────────────────────────────

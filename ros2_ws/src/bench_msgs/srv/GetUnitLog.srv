@@ -2,7 +2,7 @@
 #
 # 日志不进 1 Hz 状态快照：三个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，
 # 而页面只在抽屉展开时才看它。改成「页面要的时候拉一次」。
-string unit_name        # 三个固定 unit 名之一（bench-simulation / bench-motor-backend / bench-agent）
+string unit_name        # 四个固定 unit 名之一（bench-simulation / bench-motor-backend / bench-agent / bench-gravity-feedforward）
 int32 lines             # 尾部行数
 ---
 bool ok

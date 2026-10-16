@@ -4,7 +4,10 @@
 //   （渲染是面板的职责，本层不再认识任何 DOM）；setConn 改写为写 store +
 //   切 body.offline（断连禁用写操作的样式钩子）。
 import { store, markDirty, DIRTY, chartPush, applyBenchStatus } from './store.js';
-import { $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler } from './format.js';
+import {
+  $, TOPICS, DOWNLINK_ROUTE, EVENT_NAMES, MOTOR_ID_NONE, OVERLAY_COMMAND_TOPIC,
+  OVERLAY_TRAJECTORY_TOPIC, quatToEuler,
+} from './format.js';
 
 let ros = null;
 let subs = [];
@@ -53,6 +56,43 @@ export function ensurePublisher(key) {
   return publishers[key];
 }
 
+// ---- 下行接线：直连固件 ↔ 经重力前馈叠加（ADR 0013）------------------------
+// 切换是「改话题名 + 换发布者」一件事的两半：TOPICS 里那两个 name 是运行期可变的，
+// 而发布者在连接建立时就按旧名字 advertise 好了，只改 name 会让命令继续发到旧话题上
+// （rosbridge 侧一切正常，micro-ROS 侧没人收）。所以唯一改写点在这里，且两半一起做。
+//
+// 直连名以 TOPICS 里声明的为准；叠加名是叠加节点的输入话题（robot_dynamics 契约）。
+const DOWNLINK = {
+  command: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.command.name,
+    [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_COMMAND_TOPIC},
+  trajectory: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.trajectory.name,
+    [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_TRAJECTORY_TOPIC},
+};
+let downlinkRoute = DOWNLINK_ROUTE.DIRECT;
+
+export function getDownlinkRoute() { return downlinkRoute; }
+
+export function setDownlinkRoute(next) {
+  if (next !== DOWNLINK_ROUTE.DIRECT && next !== DOWNLINK_ROUTE.OVERLAY) {
+    throw new Error(`未知的下行接线：${next}`);
+  }
+  if (next === downlinkRoute) return downlinkRoute;
+  downlinkRoute = next;
+  for (const key of Object.keys(DOWNLINK)) TOPICS[key].name = DOWNLINK[key][next];
+  // 未连接时没有发布者要换（closeSocket 已清空），重连时 connect() 会按新名字建。
+  if (store.conn.connected) {
+    for (const key of Object.keys(DOWNLINK)) {
+      const old = publishers[key];
+      if (old) { try { old.unadvertise(); } catch (_e) { /* 连接已断，无需回收 */ } }
+      delete publishers[key];
+      // 立刻在新名字上 advertise，理由同上：等第一次 publish 才建会丢掉开头的命令。
+      ensurePublisher(key);
+    }
+  }
+  markDirty(DIRTY.CONN);
+  return downlinkRoute;
+}
+
 // 自动重连：roslibjs 自身**不重连**。rosbridge 一重启（改 msg、改 launch 都会重启），
 // 页面就静默变哑——表还在（ID 来自参数缓存），但型号/生命周期/位置全空，看起来像
 // "固件没数据"。第一次踩这个坑花了不少时间，所以默认按 2s 退避自动重连；
@@ -71,6 +111,8 @@ export function connect() {
   ros.on('connection', () => {
     setConn(true);
     subscribeAll();
+    // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
+    // 断线时那份已被 closeSocket 清掉）。开关的落点不带状态，重连不会悄悄切回直连。
     ['command', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
@@ -234,6 +276,14 @@ function subscribeAll() {
     store.temp = m.data;
     store.tempLast = Date.now();
     markDirty(DIRTY.IMU);
+  });
+
+  // 关节侧实测构型（HIL 下由 firmware_topic_bridge 从 motion_states 转出，
+  // 仿真下由 joint_state_broadcaster / MuJoCo 桥发布）。页面只用它的**新鲜度**：
+  // 叠加节点拿不到它就整帧直通，于是「开关亮着但没有补偿」不留任何痕迹。
+  sub('jointStates', (m) => {
+    store.jointStates.count++;
+    store.jointStates.last = Date.now();
   });
 
   // 设备参数报告（reliable，按需：REPORT 命令 / 写事务收尾 / 设备初始化结论）：

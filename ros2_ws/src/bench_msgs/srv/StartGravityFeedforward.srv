@@ -1,0 +1,11 @@
+# 启动重力前馈叠加节点（bench-gravity-feedforward.service）。
+#
+# 只对 STM32 在环的会话有效：叠加节点输出的话题 /micro_ros_do/* 的唯一订阅者是固件，
+# 纯 Gazebo / 纯 MuJoCo / controller_mode:=host 三路没有订阅者（见 ADR 0013）。
+string model             # robot_sim 安装树里得有 models/<model>/urdf/<model>.urdf
+string joint_map         # motor_id:关节名 逗号分隔，由前端按模型算出（权威在 web_host）
+float64 effort_gain      # 乘在 τ_g 上；0 = 逐字段直通（多一跳但没补）
+---
+bool ok
+string error
+string status_json

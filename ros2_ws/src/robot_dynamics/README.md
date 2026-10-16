@@ -1,9 +1,11 @@
 # robot_dynamics
 
 独立的 Pinocchio 运动学/动力学计算包（边界见 [ADR 0008](../../../docs/adr/0008-robot-dynamics-dependency-boundary.md)）。
-当前提供 URDF 重力矩计算库 `ArmModel` 与两个节点：只做计算的 `gravity_torque_node`、
+当前提供 URDF 重力矩计算库 `ArmModel` 与两个节点：只做计算的 `gravity_torque_node`
+（[ADR 0009](../../../docs/adr/0009-simulation-gravity-feedforward-boundary.md) 决定 1）、
 把 τ_g 叠进命令帧的 `gravity_feedforward_overlay`
-（[ADR 0009](../../../docs/adr/0009-simulation-gravity-feedforward-boundary.md) 决定 1）。
+（[ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)：
+叠加路径的授权与所有权；0009 的决定 2、3、5 已被它取代）。
 
 ## 当前范围
 
@@ -135,8 +137,14 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
 
 ### 怎么启用
 
-命令源不再直接发 `/micro_ros_do/*`，改指到 `/robot_dynamics/*`（各命令源自己改话题名或
-remap）；然后起节点：
+**常规路径是 web 上位机运行屏的「重力补偿」开关**
+（[ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)）：它把
+本节点当第四个案台 unit 托管（`bench-gravity-feedforward.service`），并**同时**把页面自己的
+下行改指到 `/robot_dynamics/*`——「起节点」与「改接线」是两件事，按钮按「先起节点、确认
+running，再切话题」的顺序做，关的时候反过来。
+
+手工路径（其它命令源 / 排查）：命令源不再直接发 `/micro_ros_do/*`，改指到
+`/robot_dynamics/*`（各命令源自己改话题名或 remap）；然后起节点：
 
 ```bash
 ros2 launch robot_dynamics gravity_feedforward.launch.py \
@@ -145,7 +153,9 @@ ros2 launch robot_dynamics gravity_feedforward.launch.py \
 ```
 
 launch 只透传 `urdf_path` 与 `joint_map`，只起本节点，不 include 也不修改
-`simulation.launch.py`。A/B 对照：运行期 `ros2 param set /gravity_feedforward_overlay
+`simulation.launch.py`——**接线始终是命令源自己的事**，本节点不旁观谁在发命令。所以页面
+按钮管不到 `snapshot_stream.py` / `traj_play.py` / `command_streamer.py`，它们与前馈同时跑
+就是混流。A/B 对照：运行期 `ros2 param set /gravity_feedforward_overlay
 effort_gain 0.0` 时两个通道都逐字段等于输入。
 
 ## C++ 接口

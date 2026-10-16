@@ -30,6 +30,7 @@ from typing import Callable, Mapping, NamedTuple
 UNIT_SIMULATION = "bench-simulation.service"
 UNIT_MOTOR_BACKEND = "bench-motor-backend.service"
 UNIT_AGENT = "bench-agent.service"
+UNIT_GRAVITY_FEEDFORWARD = "bench-gravity-feedforward.service"
 SLICE = "bench.slice"
 
 # auto 归属（「随仿真拉起」）持久化在 unit 的环境里：只活在内存里的话，bench_manager
@@ -161,7 +162,7 @@ def _exit_code(raw: str | None) -> int | None:
 
 
 class SystemdUnits:
-    """三个台架会话 unit 的起停与状态查询。
+    """四个台架会话 unit 的起停与状态查询。
 
     `runner` 的契约是 `(argv, timeout_s) -> CompletedProcess`（默认 `subprocess.run`）；
     单测注入假体，生产不换。
@@ -249,7 +250,8 @@ class SystemdUnits:
         if result.returncode not in (0, _NOT_LOADED_RC):
             detail = (result.stderr or result.stdout).strip()
             raise RuntimeError(f"无法停止 {SLICE}：{detail}")
-        for unit in (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT):
+        for unit in (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT,
+                     UNIT_GRAVITY_FEEDFORWARD):
             self._reset_failed(unit)
 
     def log(self, unit: str, lines: int) -> str:

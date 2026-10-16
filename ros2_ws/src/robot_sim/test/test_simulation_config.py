@@ -74,6 +74,32 @@ def test_motor_sim_config_carries_bus_transport_and_endpoint(tmp_path):
     assert buses[0]["allow_external_canfd"] is False
 
 
+def test_motor_topology_carries_feedback_conversion_factors():
+    """反馈电流/转速的换算系数必须逐台落到模拟器的 --joint-nm-per-amp / --gear。
+
+    HIL 下这两个系数是「假电机实际出了多少力」与「反馈报多少 A / RPM」之间唯一的
+    联系（见 micro_ros_agent/README.md）。它们派生自型号库的
+    torque_constant_nm_per_amp × gear_ratio × gear_efficiency，任何一项改名或漏取
+    都不会报错——只会让页面上的电流整体缩放，或者干脆恒为 0（模拟器查不到就报 0，
+    不猜系数）。vaxor 那台尤其容易漏：效率只在它这一档非 1.0。
+    """
+    module = _launch_module()
+    simulation, _ = _bound_simulation(module)
+    by_profile = {}
+    for motor in simulation["motors"]:
+        by_profile.setdefault(motor["profile"], set()).add(
+            (round(motor["joint_nm_per_amp"], 4), motor["gear_ratio"])
+        )
+    # 每个 profile 内逐台同值（型号库是逐型号的事实，不是逐台的）
+    assert by_profile["cerb_r48"] == {(7.777, 101.0)}
+    assert by_profile["cerb_r58"] == {(8.686, 101.0)}
+    assert by_profile["vaxor_2550"] == {(1.365, 50.0)}
+    # 18 台全部带上，一台都不能缺（缺了那台反馈恒 0 A）
+    assert len(simulation["motors"]) == 18
+    assert all(motor["joint_nm_per_amp"] > 0.0 and motor["gear_ratio"] > 0.0
+               for motor in simulation["motors"])
+
+
 def test_motor_sim_config_endpoint_is_the_simulator_side_not_the_driver_side(tmp_path):
     """模拟器侧的端点必须取 sim_endpoint，不能串成 driver_endpoint。
 

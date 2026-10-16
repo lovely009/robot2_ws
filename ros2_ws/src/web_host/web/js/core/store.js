@@ -43,10 +43,14 @@ export const store = {
   // trajectory_state（动作屏的窗口交棒判定与进度显示都读它，见 core/ros.js）
   traj: {activeTrajectoryId: 0, waitingState: false, segmentIndex: 0, segmentCount: 0,
          state: null},
-  // 台架（bench_manager 的 /bench/status 快照）：simulation / agent / motor_backend
-  // 三段；core/ros.js 订阅写入，台架服务（core/agent.js）的命令响应也经
-  // applyBenchStatus 写同一份。
-  bench: {simulation: null, agent: null, motor_backend: null},
+  // 台架（bench_manager 的 /bench/status 快照）：simulation / agent / motor_backend /
+  // gravity_feedforward 四段；core/ros.js 订阅写入，台架服务（core/agent.js）的命令响应
+  // 也经 applyBenchStatus 写同一份。
+  bench: {simulation: null, agent: null, motor_backend: null,
+          gravity_feedforward: null},
+  // /joint_states（关节侧实测构型）：页面只关心它的**新鲜度**——叠加节点的 τ_g 全靠
+  // 它，超时即整帧直通（见 core/format.js 的 jointStates 话题注释）。
+  jointStates: {count: 0, last: 0},
 };
 
 // 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
@@ -119,6 +123,9 @@ export function applyBenchStatus(snapshot) {
   const bench = store.bench;
   if (snapshot.simulation) bench.simulation = snapshot.simulation;
   if (snapshot.motor_backend) bench.motor_backend = snapshot.motor_backend;
+  if (snapshot.gravity_feedforward) {
+    bench.gravity_feedforward = snapshot.gravity_feedforward;
+  }
   if (snapshot.agent) {
     bench.agent = snapshot.agent;
     const c = store.conn;
@@ -266,6 +273,35 @@ export async function availableModels() {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return Array.isArray(data && data.models) ? data.models : [];
+}
+
+// 任意模型的 motor_id → 关节名（按名字缓存）。与 loadModelJoints 同源同接口
+// （/api/model-joints，权威是模型自己的 config/motor_driver.yaml），区别只在**不问
+// 当前模型**：重力前馈面板可以选一个不同于臂视图的模型——HIL 会话是操作者手起的，
+// 页面没有别的途径知道台上是哪台。
+const modelJointsCache = new Map();
+
+export async function modelJointsFor(name) {
+  if (!name) throw new Error('未指定模型');
+  if (!modelJointsCache.has(name)) {
+    const resp = await fetch(
+      `/api/model-joints?model=${encodeURIComponent(name)}`, {cache: 'no-store'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const joints = data && data.joints;
+    if (!joints || typeof joints !== 'object' || !Object.keys(joints).length) {
+      throw new Error(`模型 ${name} 没有可用关节映射`);
+    }
+    modelJointsCache.set(name, joints);
+  }
+  return modelJointsCache.get(name);
+}
+
+// `motor_id:关节名,电机:关节…`——服务端（bench_manager）逐条校验的表形状。
+export function jointMapSpec(joints) {
+  return Object.entries(joints)
+    .map(([id, joint]) => `${id}:${joint}`)
+    .join(',');
 }
 
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、

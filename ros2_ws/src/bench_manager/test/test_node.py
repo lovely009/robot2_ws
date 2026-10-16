@@ -9,20 +9,27 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
 from conftest import FakeSystemd
 
 from bench_manager.agent_manager import AgentProcessManager
+from bench_manager.gravity_feedforward_manager import (
+    GravityFeedforwardProcessManager,
+)
 from bench_manager.motor_sim_manager import MotorSimProcessManager
 from bench_manager.node import BenchManager, _simulation_request
 from bench_manager.simulation_manager import SimulationProcessManager
 from bench_manager.systemd_units import (
-    SLICE, UNIT_AGENT, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, SystemdUnits,
+    SLICE, UNIT_AGENT, UNIT_GRAVITY_FEEDFORWARD, UNIT_MOTOR_BACKEND,
+    UNIT_SIMULATION, SystemdUnits,
 )
 
-_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT)
+_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT,
+          UNIT_GRAVITY_FEEDFORWARD)
+_MODEL = 'half_body_robot'
 
 
 class _Response:
@@ -31,8 +38,21 @@ class _Response:
     text = ''
 
 
-def _shell(systemd: FakeSystemd) -> BenchManager:
-    """跳过 `__init__`（那要 rclpy 上下文）造一个节点外壳。"""
+@pytest.fixture
+def model_urdf(tmp_path: Path) -> str:
+    """前馈管理器按 `is_file()` 判 URDF 存不存在，所以这里得给真文件。"""
+    path = tmp_path / 'models' / _MODEL / 'urdf' / f'{_MODEL}.urdf'
+    path.parent.mkdir(parents=True)
+    path.write_text('<robot name="x"/>', encoding='utf-8')
+    return str(path)
+
+
+def _shell(systemd: FakeSystemd, urdf_path: str = '',
+           written: list[float] | None = None) -> BenchManager:
+    """跳过 `__init__`（那要 rclpy 上下文）造一个节点外壳。
+
+    `urdf_path` 缺省为空串＝解析不出任何模型，前馈相关之外的用例不必关心它。
+    """
     node = BenchManager.__new__(BenchManager)
     node._systemd = SystemdUnits(runner=systemd)
     node.agent = AgentProcessManager(
@@ -44,6 +64,11 @@ def _shell(systemd: FakeSystemd) -> BenchManager:
     node.motor_backend = MotorSimProcessManager(
         can_provider=lambda: [], serial_provider=lambda: [],
         model_provider=lambda: [], systemd=node._systemd)
+    node.feedforward = GravityFeedforwardProcessManager(
+        urdf_provider=lambda _model: urdf_path,
+        gain_writer=(written.append if written is not None else None),
+        systemd=node._systemd)
+    node._gain_client = None
     node._status_pub = None
     node._timer = None
     node.get_logger = lambda: logging.getLogger('bench_manager-test')
@@ -59,17 +84,18 @@ def _all_absent() -> FakeSystemd:
 
 # --- 快照形状（前端与 srv 的共同契约）---------------------------------------
 
-def test_snapshot_has_three_sections_and_no_log_key() -> None:
+def test_snapshot_has_four_sections_and_no_log_key() -> None:
     """日志**不进**快照。
 
-    三个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，而页面只在抽屉展开时
+    四个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，而页面只在抽屉展开时
     才看它——改成按需拉 `/bench/get_unit_log`。
     """
     node = _shell(_all_absent())
 
     snapshot = json.loads(node._snapshot_json())
 
-    assert set(snapshot) == {'simulation', 'agent', 'motor_backend'}
+    assert set(snapshot) == {'simulation', 'agent', 'motor_backend',
+                             'gravity_feedforward'}
     for section in snapshot.values():
         assert 'log' not in section
     assert snapshot['simulation'] == {
@@ -80,6 +106,10 @@ def test_snapshot_has_three_sections_and_no_log_key() -> None:
     assert snapshot['motor_backend'] == {
         'state': 'stopped', 'config': None, 'returncode': None,
         'auto_started': False}
+    # 前馈没起时 config 是 None：页面据此判断按钮该显示「开」还是「关」。
+    assert snapshot['gravity_feedforward'] == {
+        'state': 'stopped', 'config': None, 'returncode': None,
+        'gain_error': ''}
 
 
 def test_snapshot_state_is_derived_from_the_unit() -> None:
@@ -140,7 +170,7 @@ def test_activate_adopts_running_units_without_rebuilding_them() -> None:
 # --- 日志服务白名单 ---------------------------------------------------------
 
 @pytest.mark.parametrize('unit', _UNITS)
-def test_unit_log_accepts_the_three_contract_units(unit: str) -> None:
+def test_unit_log_accepts_the_four_contract_units(unit: str) -> None:
     systemd = _all_absent()
     node = _shell(systemd)
 
@@ -157,7 +187,7 @@ def test_unit_log_accepts_the_three_contract_units(unit: str) -> None:
 
 @pytest.mark.parametrize('unit', ['', 'bench.slice', 'sshd.service', '../etc'])
 def test_unit_log_rejects_anything_else(unit: str) -> None:
-    """`unit_name` 直接进 `journalctl -u`，只认三个契约名。"""
+    """`unit_name` 直接进 `journalctl -u`，只认四个契约名。"""
     systemd = _all_absent()
     node = _shell(systemd)
 
@@ -189,3 +219,104 @@ def test_simulation_request_keeps_the_confirmation_bit() -> None:
     assert request['physical_bus_isolated'] is True
     assert request['sim_interface'] == 'can0'
     assert 'driver_interface' not in request, '空串＝未给该参数，不该进命令行'
+
+
+# --- 重力前馈服务（ADR 0013）------------------------------------------------
+
+def _start_request(model: str = _MODEL, joint_map: str = '1:joint_link1',
+                   effort_gain: float = 1.0):
+    from bench_msgs.srv import StartGravityFeedforward
+
+    message = StartGravityFeedforward.Request()
+    message.model = model
+    message.joint_map = joint_map
+    message.effort_gain = effort_gain
+    return message
+
+
+def _creations(systemd: FakeSystemd) -> list[list[str]]:
+    return [call for call in systemd.commands() if call[0] == 'systemd-run']
+
+
+def test_start_gravity_feedforward_passes_the_three_fields_through(
+        model_urdf: str) -> None:
+    """服务的三个字段都要真进 unit：漏一个页面就会拿到「起来了但不是你要的」。"""
+    systemd = _all_absent()
+    node = _shell(systemd, urdf_path=model_urdf)
+
+    response = BenchManager._on_start_gravity_feedforward(
+        node, _start_request(effort_gain=0.6), _Response())
+
+    assert response.ok
+    assert json.loads(response.status_json)['gravity_feedforward']['config'] == {
+        'model': _MODEL, 'urdf_path': model_urdf,
+        'joint_map': '1:joint_link1', 'effort_gain': 0.6}
+
+
+def test_start_gravity_feedforward_rejects_before_touching_systemd() -> None:
+    """解析不出 URDF 就当场拒：unit 起来再退出，页面只看到一条没头没尾的 failed。"""
+    systemd = _all_absent()
+    node = _shell(systemd)  # 没有模型可解析
+
+    response = BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    assert not response.ok
+    assert 'urdf' in response.error
+    assert not _creations(systemd)
+
+
+def test_stop_gravity_feedforward_stops_the_unit(model_urdf: str) -> None:
+    systemd = _all_absent()
+    node = _shell(systemd, urdf_path=model_urdf)
+    BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    response = BenchManager._on_stop_gravity_feedforward(node, None, _Response())
+
+    assert response.ok
+    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD] \
+        in systemd.commands()
+    assert json.loads(response.status_json)[
+        'gravity_feedforward']['state'] == 'stopped'
+
+
+def test_set_gain_requires_a_running_overlay() -> None:
+    """没在跑就别写：参数服务根本不存在，静默发出去会让界面显示「已改」。"""
+    systemd = _all_absent()
+    written: list[float] = []
+    node = _shell(systemd, written=written)
+
+    class _Request:
+        effort_gain = 0.5
+
+    response = BenchManager._on_set_gravity_feedforward_gain(
+        node, _Request(), _Response())
+
+    assert not response.ok
+    assert 'not running' in response.error
+    assert written == []
+
+
+def test_set_gain_defers_to_the_confirmation_callback(model_urdf: str) -> None:
+    """服务返回 ok 只代表「写请求发出去了」，状态里的增益等回执确认才变。"""
+    systemd = _all_absent()
+    written: list[float] = []
+    node = _shell(systemd, urdf_path=model_urdf, written=written)
+    BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    class _Request:
+        effort_gain = 0.25
+
+    response = BenchManager._on_set_gravity_feedforward_gain(
+        node, _Request(), _Response())
+
+    assert response.ok
+    assert written == [0.25]
+    assert json.loads(response.status_json)['gravity_feedforward'][
+        'config']['effort_gain'] == 1.0
+
+    node.feedforward.note_gain_applied(0.25)
+    assert json.loads(node._snapshot_json())['gravity_feedforward'][
+        'config']['effort_gain'] == 0.25

@@ -146,6 +146,33 @@
     </div>
   </template>
 
+  <!-- 重力补偿（ADR 0013）：把本页面下发的命令与轨迹在「直连固件」与「经叠加节点
+       gravity_feedforward_overlay」之间切换，并托管那个节点。只在 STM32 在环
+       （顶栏 Agent 在线）时可用——叠加节点的输出话题只有固件订阅。 -->
+  <template data-panel-template="feedforward">
+    <details class="sec" data-fold="ff" open>
+      <summary title="本页面的下行命令源改接到 /robot_dynamics/*，由叠加节点按模型 URDF 加上 τ_g 后转发给固件">重力补偿<span class="spacer"></span><span class="sum" id="ffSummary">直连</span></summary>
+      <div class="ctrl-row wrap">
+        <label class="check" title="打开 = 先起叠加节点并确认它 running，再把本页面的下行切到 /robot_dynamics/*；关闭 = 先切回直连再停节点">
+          <input type="checkbox" id="ffRoute"> 经重力前馈</label>
+        <label class="sim-field">模型
+          <select id="ffModel" aria-label="前馈模型"><option value="">读取模型中…</option></select>
+        </label>
+        <label class="sim-field">增益
+          <input id="ffGain" type="number" min="0" step="0.05" inputmode="decimal"
+            aria-label="重力前馈增益" title="乘在 τ_g 上；运行中改动即时生效（不重起节点）">
+        </label>
+        <span class="spacer"></span>
+        <button id="btnFfRevert" class="tiny-btn danger" hidden
+          title="只把本页面的下行切回直连固件，不停叠加节点">立即回退</button>
+        <span class="tiny muted" id="ffState" aria-live="polite">--</span>
+      </div>
+      <div id="ffAlarm" class="result tiny err" role="alert" hidden></div>
+      <div class="result tiny" id="ffResult" role="status" aria-live="polite"></div>
+      <div class="sim-hint tiny muted" id="ffHint"></div>
+    </details>
+  </template>
+
   <!-- 下发（命令快照 / 100Hz 连发） -->
   <template data-panel-template="command">
     <details class="sendbar" data-fold="send" open>
@@ -469,6 +496,7 @@
       </section>
       <section class="col-command">
         <div data-panel="policy"></div>
+        <div data-panel="feedforward"></div>
         <div data-panel="command"></div>
       </section>
       <section class="col-drawer">

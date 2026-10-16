@@ -12,16 +12,14 @@ import { store, DIRTY, MODEL } from '../core/store.js';
 import * as bench from '../core/agent.js';
 
 const STORAGE_KEY = 'robot2.simulation.options.v1';
+// 四态由后端派生（unit 状态），页面只负责翻译；`external` 随「launch 内嵌模拟器」
+// 那条路径一起删了——现在进程归属在 systemd，只有「本页面管得着」这一种。
 const stateLabels = {
   stopped: '未启动',
-  starting: '启动中',
-  running: '启动进程运行中',
-  stopping: '停止中',
+  running: '运行中',
   failed: '启动失败',
-  // 终端启动的 HIL：模拟器由 simulation.launch.py 内嵌拉起。命令能转发，
-  // 起停不归本页面（进程主人是那次 launch）。
-  external: '外部（launch 内嵌）',
 };
+const LOG_LINES = 80;
 const backendLabels = { gazebo: 'Gazebo', mujoco: 'MuJoCo' };
 
 export function mount(root, ctx) {
@@ -79,10 +77,31 @@ export function mount(root, ctx) {
 
   let deviceOptions = { can_interfaces: [], serial_ports: [], models: [], mujoco_models: [] };
   let optionsLoaded = false;
-  let latestStatus = { state: 'stopped', log: [] };
-  let motorBackend = { state: 'stopped', log: [] };
+  let latestStatus = { state: 'stopped' };
+  let motorBackend = { state: 'stopped' };
   let motorSim = { motors: [] };
   let pollTimer = null;
+
+  // 日志不进状态快照，按需拉（见 core/agent.js 的 getUnitLog）。文本活在挂载作用域里，
+  // 切屏重挂会重新拉一次。
+  function paintLog(element, text, error) {
+    element.textContent = error ? `日志不可用：${error}` : (text || '暂无输出');
+    element.scrollTop = element.scrollHeight;
+  }
+
+  async function refreshLogs() {
+    const targets = [
+      [bench.UNIT_SIMULATION, ui.log],
+      [bench.UNIT_MOTOR_BACKEND, ui.backendLog],
+    ];
+    await Promise.all(targets.map(async ([unit, element]) => {
+      try {
+        paintLog(element, await bench.getUnitLog(unit, LOG_LINES));
+      } catch (error) {
+        paintLog(element, '', error.message);
+      }
+    }));
+  }
 
   function readSaved() {
     try {
@@ -266,8 +285,10 @@ export function mount(root, ctx) {
       || !motorBackendStartable();
   }
 
+  // unit 状态只有 stopped / running / failed 三种——起停是同步的服务调用，
+  // 响应回来时状态已经落定，不存在「启动中」这种中间态。
   function activeState(state) {
-    return ['starting', 'running', 'stopping'].includes(state);
+    return state === 'running';
   }
 
   function describeConfig(config) {
@@ -294,7 +315,7 @@ export function mount(root, ctx) {
   }
 
   function renderStatus(status) {
-    latestStatus = status || { state: 'stopped', log: [] };
+    latestStatus = status || { state: 'stopped' };
     const state = latestStatus.state || 'stopped';
     const label = stateLabels[state] || state;
     const active = activeState(state);
@@ -317,10 +338,6 @@ export function mount(root, ctx) {
       control.disabled = active;
     }
     syncModelParams(active);
-
-    const lines = latestStatus.log || [];
-    ui.log.textContent = lines.length ? lines.join('\n') : '等待启动';
-    ui.log.scrollTop = ui.log.scrollHeight;
   }
 
   // ---- 电机后端（独立进程：fdcan_motor_sim.py）------------------------
@@ -338,7 +355,7 @@ export function mount(root, ctx) {
   }
 
   function renderMotorBackend(status) {
-    motorBackend = status || { state: 'stopped', log: [] };
+    motorBackend = status || { state: 'stopped' };
     const state = motorBackend.state || 'stopped';
     const label = stateLabels[state] || state;
     const active = activeState(state);
@@ -349,13 +366,8 @@ export function mount(root, ctx) {
       : state === 'failed'
         ? `${label} · exit ${motorBackend.returncode}`
         : `电机后端${label}`;
-    // external：命令可转发，但起停归那次 launch，两个按钮都锁掉。
-    ui.backendStart.disabled = active || state === 'external'
-      || !motorBackendStartable();
-    ui.backendStop.disabled = !active || state === 'external';
-    const lines = motorBackend.log || [];
-    ui.backendLog.textContent = lines.length ? lines.join('\n') : '等待启动';
-    ui.backendLog.scrollTop = ui.backendLog.scrollHeight;
+    ui.backendStart.disabled = active || !motorBackendStartable();
+    ui.backendStop.disabled = !active;
   }
 
   function setBackendResult(message, kind = '') {
@@ -406,6 +418,7 @@ export function mount(root, ctx) {
       setBackendResult(error.message, 'err');
     } finally {
       await refreshMotorSim();
+      await refreshLogs();
     }
   }
 
@@ -419,6 +432,7 @@ export function mount(root, ctx) {
       setBackendResult(`停止失败：${error.message}`, 'err');
     } finally {
       await refreshMotorSim();
+      await refreshLogs();
     }
   }
 
@@ -495,6 +509,7 @@ export function mount(root, ctx) {
       setResult(`${labelText} 失败：${error.message}`, 'err');
     } finally {
       await refreshMotorSim();
+      await refreshLogs();
     }
   }
 
@@ -538,8 +553,17 @@ export function mount(root, ctx) {
   // 仿真/电机后端的状态与日志全部来自 store.bench（话题 + 命令响应的快照）；
   // 只在 DIRTY.BENCH 脏帧里整段重绘，不做状态轮询。
   function renderFromStore() {
-    renderStatus(store.bench.simulation || { state: 'stopped', log: [] });
-    renderMotorBackend(store.bench.motor_backend || { state: 'stopped', log: [] });
+    renderStatus(store.bench.simulation || { state: 'stopped' });
+    renderMotorBackend(store.bench.motor_backend || { state: 'stopped' });
+  }
+
+  // 只在有会话在跑时跟日志：跑起来才需要看进展，停着的时候没必要每秒拉一遍。
+  async function poll() {
+    await refreshMotorSim();
+    if (activeState((store.bench.simulation || {}).state)
+        || activeState((store.bench.motor_backend || {}).state)) {
+      await refreshLogs();
+    }
   }
 
   function buildStartRequest() {
@@ -597,6 +621,7 @@ export function mount(root, ctx) {
     } catch (error) {
       setResult(error.message, 'err');
     } finally {
+      await refreshLogs();
       if (!activeState((store.bench.simulation || {}).state)) {
         ui.start.disabled = false;
       }
@@ -613,6 +638,7 @@ export function mount(root, ctx) {
       setResult(`停止失败：${error.message}`, 'err');
     } finally {
       await refreshMotorSim();
+      await refreshLogs();
     }
   }
 
@@ -669,9 +695,10 @@ export function mount(root, ctx) {
   renderFromStore();
   refreshOptions();
   refreshMotorSim();
-  // 电机表只有一问一答的模拟器查询（无对应话题），保持低频轮询；
-  // 仿真/电机后端的状态与日志由 DIRTY.BENCH 脏帧重绘。
-  pollTimer = window.setInterval(refreshMotorSim, 1800);
+  refreshLogs();
+  // 电机表只有一问一答的模拟器查询（无对应话题），保持低频轮询；有会话在跑时顺带
+  // 跟一次日志。仿真/电机后端的状态由 DIRTY.BENCH 脏帧重绘，不走轮询。
+  pollTimer = window.setInterval(poll, 1800);
 
   return {
     render(dirty) {

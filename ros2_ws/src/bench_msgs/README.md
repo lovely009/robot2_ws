@@ -10,6 +10,7 @@
 | `StartAgent` / `StopAgent` | micro-ROS Agent 起停（枚举串口参数） |
 | `StartMotorBackend` / `StopMotorBackend` | FDCAN 电机模拟器独立进程起停 |
 | `MotorBackendCommand` | 模拟器控制通道命令转发（JSON，一连接一命令） |
+| `GetUnitLog` | 按需拉某个会话 unit 的尾部日志（`journalctl`，不进 1 Hz 快照） |
 
 约定：
 

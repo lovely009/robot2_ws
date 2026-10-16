@@ -121,8 +121,17 @@ def ros_environment(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 def _default_runner(argv: list[str], timeout_s: float) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True,
-                          timeout=timeout_s, check=False)
+    try:
+        return subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout_s, check=False)
+    except subprocess.TimeoutExpired:
+        # user manager 卡住时不能让服务回调炸掉（`TimeoutExpired` 不是 `OSError`，
+        # 会穿透调用方的 except）。当成一条退出码 124 的失败命令交回去，由各调用点
+        # 按自己的语义处理：`available()` 变 False（configure fail-fast），
+        # `stop()` 报无法停止，`probe()` 落到 STOPPED。
+        return subprocess.CompletedProcess(
+            argv, 124, "",
+            f"{' '.join(argv)} 在 {timeout_s:g}s 内没有返回")
 
 
 def _parse_properties(text: str) -> dict[str, str]:
@@ -227,15 +236,21 @@ class SystemdUnits:
             raise RuntimeError(f"无法停止 {unit}：{detail}")
 
     def stop_slice(self) -> None:
-        """停掉整个会话（`bench.slice` 下全部 unit）。
+        """停掉整个会话（`bench.slice` 下全部 unit），并清掉失败态的残留。
 
         这是「安全停止」的唯一显式语义，也是 lifecycle `deactivate` 的实现。首次运行时
         slice 不存在，`stop` 返回 exit 0——不必特判。
+
+        `stop` 只停**活跃**的 unit：非零退出的那份已经 inactive，会留在 `failed` 态
+        （实测 systemd 249）。留着它，下一次 `on_activate` 就会把它认领成「上一轮的
+        会话」，页面顶一条早就过期的失败——所以「干净停止」要连残留一起清。
         """
         result = self._run(["systemctl", "--user", "stop", SLICE], _TIMEOUT_S)
         if result.returncode not in (0, _NOT_LOADED_RC):
             detail = (result.stderr or result.stdout).strip()
             raise RuntimeError(f"无法停止 {SLICE}：{detail}")
+        for unit in (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT):
+            self._reset_failed(unit)
 
     def log(self, unit: str, lines: int) -> str:
         result = self._run(["journalctl", "--user", "-u", unit, "-n", str(lines),

@@ -1,0 +1,10 @@
+# 按需拉某个台架会话 unit 的尾部日志。
+#
+# 日志不进 1 Hz 状态快照：三个 unit 各留 80 行会把这个每秒都发的 JSON 撑成几十 KB，
+# 而页面只在抽屉展开时才看它。改成「页面要的时候拉一次」。
+string unit_name        # 三个固定 unit 名之一（bench-simulation / bench-motor-backend / bench-agent）
+int32 lines             # 尾部行数
+---
+bool ok
+string error
+string text             # journalctl --user -u <unit> -n <lines> --output=cat

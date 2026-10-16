@@ -122,9 +122,16 @@ export function applyBenchStatus(snapshot) {
   if (snapshot.agent) {
     bench.agent = snapshot.agent;
     const c = store.conn;
-    c.agent = snapshot.agent.state || 'stopped';
+    const state = snapshot.agent.state || 'stopped';
     c.agentDevice = snapshot.agent.device || '';
-    c.agentError = snapshot.agent.error || '';
+    // 1 Hz 快照只管**进程状态**，说不了「为什么没起来」（它压根没有 error 字段）。
+    // 上一次命令失败后进程就是 stopped，若无条件覆盖，顶栏的失败原因活不过一秒。
+    // 所以只要进程还没起来就整段留着，由下一次命令（startAgent/stopAgent 会重置）
+    // 或真的起来清掉。
+    if (c.agent !== 'error' || state !== 'stopped') {
+      c.agent = state;
+      c.agentError = snapshot.agent.error || '';
+    }
     c.agentReturncode = snapshot.agent.returncode === undefined
       ? null : snapshot.agent.returncode;
     // 服务端状态没有 canStop 字段时按 state 推导；页面合成的错误态可显式带它

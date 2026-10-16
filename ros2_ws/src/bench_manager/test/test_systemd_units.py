@@ -147,6 +147,23 @@ def test_stop_slice_targets_the_bench_slice() -> None:
     assert ['systemctl', '--user', 'stop', SLICE] in systemd.commands()
 
 
+def test_stop_slice_clears_failed_units_too() -> None:
+    """失败退出的 unit 不是「活跃」的，`stop` 停不掉它——必须另外清。
+
+    留着的话，下一次 `on_activate` 会把它认领成「上一轮的会话」，页面顶一条早就过期
+    的失败（实测踩到：Ctrl-C 之后 bench-simulation.service 仍是 loaded/failed）。
+    """
+    systemd = FakeSystemd({UNIT_SIMULATION: {
+        'LoadState': 'loaded', 'ActiveState': 'failed', 'SubState': 'failed',
+        'ExecMainStatus': '1'}})
+
+    SystemdUnits(runner=systemd).stop_slice()
+
+    assert systemd.properties[UNIT_SIMULATION]['LoadState'] == 'not-found'
+    for unit in (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT):
+        assert ['systemctl', '--user', 'reset-failed', unit] in systemd.commands()
+
+
 def test_stop_slice_is_safe_when_the_slice_never_existed() -> None:
     """首次运行（一个 unit 都没起过）时 slice 不存在，`stop bench.slice` 返回 exit 0。"""
     systemd = FakeSystemd(fail={('systemctl', '--user', 'stop', SLICE): (0, '')})

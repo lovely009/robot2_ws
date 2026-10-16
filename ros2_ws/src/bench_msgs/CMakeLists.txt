@@ -16,6 +16,7 @@ rosidl_generate_interfaces(
   "srv/StartMotorBackend.srv"
   "srv/StopMotorBackend.srv"
   "srv/MotorBackendCommand.srv"
+  "srv/GetUnitLog.srv"
 )
 
 ament_export_dependencies(rosidl_default_runtime)

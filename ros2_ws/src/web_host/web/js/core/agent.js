@@ -20,7 +20,13 @@ const SVC = {
   startMotorBackend: ['/bench/start_motor_backend', 'bench_msgs/srv/StartMotorBackend'],
   stopMotorBackend: ['/bench/stop_motor_backend', 'bench_msgs/srv/StopMotorBackend'],
   motorBackendCommand: ['/bench/motor_backend_command', 'bench_msgs/srv/MotorBackendCommand'],
+  unitLog: ['/bench/get_unit_log', 'bench_msgs/srv/GetUnitLog'],
 };
+
+// unit 名是契约（bench_manager/systemd_units.py 定义一次，这里与文档各引用一份）。
+export const UNIT_SIMULATION = 'bench-simulation.service';
+export const UNIT_MOTOR_BACKEND = 'bench-motor-backend.service';
+export const UNIT_AGENT = 'bench-agent.service';
 
 function parseJson(text, fallback) {
   try { return JSON.parse(text); } catch (_e) { return fallback; }
@@ -72,6 +78,15 @@ export function startMotorBackend(request) {
   });
 }
 export function stopMotorBackend() { return call(SVC.stopMotorBackend, {}); }
+
+// 按需拉一个会话 unit 的尾部日志。日志**不在** 1 Hz 状态快照里：三个 unit 各留 80 行
+// 会把这个每秒都发的话题撑成几十 KB，而页面只在抽屉里看它。
+export async function getUnitLog(unitName, lines = 80) {
+  const response = await callService(SVC.unitLog[0], SVC.unitLog[1],
+    {unit_name: unitName, lines});
+  if (!response.ok) throw new Error(response.error || '读取日志失败');
+  return response.text || '';
+}
 
 // 转发一条模拟器控制命令（add/remove/link/status…）；返回控制通道响应对象。
 // 服务层 ok 只管转发本身；模拟器给出的**语义**拒绝（id 冲突、范围外……）是
@@ -146,7 +161,9 @@ export async function startAgent() {
     return;
   }
   // 「正在启动…」是瞬时态：写 store 让 renderShell 画（按钮禁用也在那里）。
+  // 上一次的失败原因到这里作废——新的命令要么成功要么给出新的原因。
   store.conn.agent = 'starting';
+  store.conn.agentError = '';
   markDirty(DIRTY.CONN);
   try {
     await startAgentService(device);
@@ -164,6 +181,7 @@ export async function startAgent() {
 export async function stopAgent() {
   // 同 startAgent：「正在断开…」也是瞬时态。
   store.conn.agent = 'stopping';
+  store.conn.agentError = '';
   markDirty(DIRTY.CONN);
   try {
     await stopAgentService();

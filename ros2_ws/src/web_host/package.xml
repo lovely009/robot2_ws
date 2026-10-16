@@ -15,8 +15,9 @@
   <exec_depend>can_bridge_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- launch 默认同时起 bench_manager（/bench/* 进程管理服务）；可 start_bench_manager:=false 关掉。 -->
-  <exec_depend>bench_manager</exec_depend>
+  <!-- 台架进程管理（bench_manager）不在本包的依赖里：本 launch 只做 L1（rosbridge +
+       静态页），编排者是 robot_bringup 的 robot.launch.py。声明它反而会成环
+       （bench_manager 依赖 bench_msgs，robot_bringup 依赖两者）。 -->
   <!-- 臂视图可选使用 robot_sim 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
 
   <test_depend>ament_copyright</test_depend>

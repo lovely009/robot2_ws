@@ -1442,7 +1442,7 @@ TEST(EncodeConfig, ParamSetRejectsUnpairedLimit) {
   EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
 }
 
-TEST(EncodeConfig, ParamSetRejectsDuplicateAndLengthMismatch) {
+TEST(EncodeConfig, ParamSetRejectsDuplicateAndCountMismatch) {
   can_bridge_msgs::msg::ConfigRequest out;
 
   can_bridge_msgs::msg::ParamSetArray dup;

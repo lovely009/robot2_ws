@@ -26,6 +26,24 @@ target_include_directories(${PROJECT_NAME}_messages PUBLIC
 target_link_libraries(${PROJECT_NAME}_messages PUBLIC ${PROJECT_NAME}_codec)
 ament_target_dependencies(${PROJECT_NAME}_messages PUBLIC can_bridge_msgs)
 
+# 桥节点：主机侧 /motor/* 与线上 /micro_ros/* 之间的唯一翻译点。
+add_library(${PROJECT_NAME}_node src/bridge_node.cpp)
+target_compile_features(${PROJECT_NAME}_node PUBLIC cxx_std_17)
+target_compile_options(${PROJECT_NAME}_node PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(${PROJECT_NAME}_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
+ament_target_dependencies(${PROJECT_NAME}_node rclcpp sensor_msgs std_msgs can_bridge_msgs)
+
+# CMake 目标名必须全局唯一：${PROJECT_NAME}_node 就是 micro_ros_bridge_node，
+# 与可执行同名会撞（add_executable 报 CMP0002）。所以可执行目标另取目标名，
+# 产物名仍用 OUTPUT_NAME 钉成 micro_ros_bridge_node（launch 引用的是产物名）。
+add_executable(${PROJECT_NAME}_node_main src/bridge_node_main.cpp)
+set_target_properties(${PROJECT_NAME}_node_main PROPERTIES OUTPUT_NAME micro_ros_bridge_node)
+target_link_libraries(${PROJECT_NAME}_node_main ${PROJECT_NAME}_node)
+install(TARGETS ${PROJECT_NAME}_node_main RUNTIME DESTINATION lib/${PROJECT_NAME})
+
 install(DIRECTORY include/ DESTINATION include)
 ament_export_include_directories(include)
 ament_export_dependencies(can_bridge_msgs)
@@ -47,6 +65,12 @@ if(BUILD_TESTING)
   target_compile_features(test_messages PRIVATE cxx_std_17)
   target_compile_options(test_messages PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_messages ${PROJECT_NAME}_messages)
+
+  ament_add_gtest(test_bridge_node test/test_bridge_node.cpp)
+  target_compile_features(test_bridge_node PRIVATE cxx_std_17)
+  target_compile_options(test_bridge_node PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_bridge_node ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
+  ament_target_dependencies(test_bridge_node rclcpp)
 endif()
 
 ament_package()

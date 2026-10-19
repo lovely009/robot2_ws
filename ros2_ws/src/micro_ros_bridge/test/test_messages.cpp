@@ -135,7 +135,7 @@ TEST(EncodeConfig, ParamSetRejectsUnpairedLimit) {
   EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
 }
 
-TEST(EncodeConfig, ParamSetRejectsDuplicateAndOverCapacity) {
+TEST(EncodeConfig, ParamSetRejectsDuplicateAndCountMismatch) {
   can_bridge_msgs::msg::ConfigRequest out;
 
   can_bridge_msgs::msg::ParamSetArray dup;
@@ -146,8 +146,7 @@ TEST(EncodeConfig, ParamSetRejectsDuplicateAndOverCapacity) {
   dup.targets = {a, a};
   EXPECT_FALSE(micro_ros_bridge::encode_config(dup, out).ok);
 
-  // 17 > 内核配置 FIFO 容量 16。序列上界也是 16，第 17 条装不进 BoundedVector，
-  // 所以 count 声明 17、只填 16 条：整条仍必须被拒。
+  // count 声明 17 但只填 16 条：命中长度守卫（序列上界 16，装不下第 17 条）。
   can_bridge_msgs::msg::ParamSetArray many;
   many.count = 17;
   for (int i = 0; i < 16; ++i) {
@@ -264,6 +263,33 @@ TEST(DecodeMotorStatus, RejectsRaggedArrays) {
   in.count = 2;
   in.motor_ids = {0, 1};
   in.state_age_ms = {0};  // 长度与 count 不符
+
+  can_bridge_msgs::msg::MotorStatusArray statuses;
+  can_bridge_msgs::msg::MotorTrajectoryState traj;
+  can_bridge_msgs::msg::SystemStatus sys;
+  can_bridge_msgs::msg::MotorDiagnostics diag;
+  std::vector<micro_ros_bridge::MotorFreshness> fresh;
+  EXPECT_FALSE(micro_ros_bridge::decode_motor_status(in, statuses, traj, sys, diag, fresh).ok);
+}
+
+// motor_id 是 uint8（0..255），freshness 缓存只有 64：越界 id 若不拦会越界写。
+TEST(DecodeMotorStatus, RejectsOutOfRangeMotorId) {
+  can_bridge_msgs::msg::MotorStatus in;
+  in.count = 1;
+  in.motor_ids = {200};  // > 63：越界，必须整条拒收（不 clamp）
+  in.state_age_ms = {0};
+  in.target_source = {0};
+  in.lifecycle = {0};
+  in.unified_fault_code = {0};
+  in.vendor_fault_code = {0};
+  in.protection_flags = {0};
+  in.limit_flags = {0};
+  in.temperature_dc = {0};
+  in.current_ma = {0};
+  in.voltage_mv = {0};
+  in.drive_mode = {0};
+  in.status_flags = {0};
+  in.bus_index = {0};
 
   can_bridge_msgs::msg::MotorStatusArray statuses;
   can_bridge_msgs::msg::MotorTrajectoryState traj;

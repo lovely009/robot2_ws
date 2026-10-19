@@ -25,6 +25,9 @@ Result encode_low_command(
     r.error = "count 与 targets 长度不一致";
     return r;
   }
+  // 防御性：经 ROS C++ API 不可达——targets 是 BoundedVector<...,64>（size 恒 ≤64），
+  // 上面长度守卫又要求 count == size，count > 64 到不了这里。留着是因为它对应
+  // MOTOR_COUNT_MAX；将来若放宽 .msg 上界，它是唯一拦截点。
   if (in.count > kIdLimit) {
     r.ok = false;
     r.error = "目标数超过 MOTOR_COUNT_MAX";
@@ -115,6 +118,9 @@ Result encode_config(
     r.error = "count 与 targets 长度不一致";
     return r;
   }
+  // 防御性：经 ROS C++ API 不可达——targets 是 BoundedVector<...,16>（size 恒 ≤16），
+  // 上面长度守卫又要求 count == size，count > 16 到不了这里。留着是因为它对应
+  // ConfigRequest.msg 的内核 FIFO 容量约束；将来若放宽 .msg 上界，它是唯一拦截点。
   if (in.count > kConfigTargetsMax) {
     r.ok = false;
     r.error = "目标数超过配置 FIFO 容量 16";
@@ -241,6 +247,16 @@ Result decode_motor_status(
     r.ok = false;
     r.error = "逐台数组长度与 count 不一致";
     return r;
+  }
+  // motor_id 是 uint8（0..255），而 freshness 是定长 64 的缓存：越界 id 会越界写。
+  // 这座桥是信任边界，任一条越界即整条拒收——不 clamp、不跳过（跳过会让上层拿到
+  // 一条残缺的帧却以为它完整）。
+  for (size_t i = 0; i < n; ++i) {
+    if (in.motor_ids[i] >= kIdLimit) {
+      r.ok = false;
+      r.error = "motor_id 越界（注册表下标 0..63）";
+      return r;
+    }
   }
 
   // ---- MotorStatusArray ----

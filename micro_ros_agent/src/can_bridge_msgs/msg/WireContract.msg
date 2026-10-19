@@ -1,10 +1,8 @@
 # 线上契约的机器可读唯一来源：话题名、定点量程、哨兵、schema 版本、QoS 类别码。
-# 固件与主机 bridge 都只引用这里生成出来的常量，不各自写字符串字面量——
-# 「两端拼错话题名」「量程各写一份」这类故障从此不可能发生。
+# 固件与主机 bridge 都只引用这里生成出来的常量，不各自写字符串字面量。
 #
 # 方向：do = 主机→固件，up = 固件→主机。
 #
-# 生成形态（Humble 实测）：C 为 static const char * const，C++ 为 static const std::string。
 # 本消息**从不发布**，只作常量载体；placeholder 的唯一作用是避免空结构体。
 #
 # 定点：q = clamp(round(x * 32767 / SCALE), -32767, 32767)；-32768 留给 SENTINEL_MISSING。

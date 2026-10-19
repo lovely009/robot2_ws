@@ -55,6 +55,7 @@ rosidl_generate_interfaces(
   "msg/SystemCommand.msg"
   # 上行：系统状态（错误电平 + 四个完成序号，5 Hz best-effort）
   "msg/SystemStatus.msg"
+  "msg/WireContract.msg"
   DEPENDENCIES std_msgs
 )
 

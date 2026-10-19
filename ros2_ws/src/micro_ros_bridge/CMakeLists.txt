@@ -16,6 +16,16 @@ target_include_directories(${PROJECT_NAME}_codec INTERFACE
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(${PROJECT_NAME}_codec INTERFACE can_bridge_msgs)
 
+# 消息级编解码：依赖 codec 的标量换算，不依赖 rclcpp。
+add_library(${PROJECT_NAME}_messages src/messages.cpp)
+target_compile_features(${PROJECT_NAME}_messages PUBLIC cxx_std_17)
+target_compile_options(${PROJECT_NAME}_messages PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(${PROJECT_NAME}_messages PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(${PROJECT_NAME}_messages PUBLIC ${PROJECT_NAME}_codec)
+ament_target_dependencies(${PROJECT_NAME}_messages PUBLIC can_bridge_msgs)
+
 install(DIRECTORY include/ DESTINATION include)
 ament_export_include_directories(include)
 ament_export_dependencies(can_bridge_msgs)
@@ -32,6 +42,11 @@ if(BUILD_TESTING)
   target_compile_features(test_codec PRIVATE cxx_std_17)
   target_compile_options(test_codec PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_codec ${PROJECT_NAME}_codec)
+
+  ament_add_gtest(test_messages test/test_messages.cpp)
+  target_compile_features(test_messages PRIVATE cxx_std_17)
+  target_compile_options(test_messages PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_messages ${PROJECT_NAME}_messages)
 endif()
 
 ament_package()

@@ -56,6 +56,9 @@ rosidl_generate_interfaces(
   # 上行：系统状态（错误电平 + 四个完成序号，5 Hz best-effort）
   "msg/SystemStatus.msg"
   "msg/WireContract.msg"
+  # 循环面：SoA + int16 定点，count=64 时 480 B，落在 best-effort MTU 内（永不分片）
+  "msg/LowCommand.msg"
+  "msg/LowState.msg"
   DEPENDENCIES std_msgs
 )
 

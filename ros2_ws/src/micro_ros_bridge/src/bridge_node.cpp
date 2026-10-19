@@ -118,7 +118,7 @@ bool BridgeNode::peer_schema_mismatch() const
   return known != 0 && known != contract::kSchemaVersion;
 }
 
-void BridgeNode::on_command(const MotorCommandArray::SharedPtr msg)
+void BridgeNode::on_command(const can_bridge_msgs::msg::MotorCommandArray::SharedPtr msg)
 {
   // ADR 0015 决定 8：镜像不同步时**拒绝下发**，不静默按旧布局解析。
   if (peer_schema_mismatch()) {
@@ -128,7 +128,7 @@ void BridgeNode::on_command(const MotorCommandArray::SharedPtr msg)
       peer_schema_.load(), contract::kSchemaVersion);
     return;
   }
-  LowCommand out;
+  can_bridge_msgs::msg::LowCommand out;
   const auto r = encode_low_command(*msg, out);
   if (!r.ok) {
     // 整条拒绝：一个字节都不下发（与固件侧同口径）。
@@ -143,9 +143,9 @@ void BridgeNode::on_command(const MotorCommandArray::SharedPtr msg)
   pub_low_cmd_->publish(out);
 }
 
-void BridgeNode::on_low_state(const LowState::SharedPtr msg)
+void BridgeNode::on_low_state(const can_bridge_msgs::msg::LowState::SharedPtr msg)
 {
-  MotorMotionStateArray out;
+  can_bridge_msgs::msg::MotorMotionStateArray out;
   const auto r = decode_low_state(*msg, out);
   if (!r.ok) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "low_state 丢弃：%s", r.error);

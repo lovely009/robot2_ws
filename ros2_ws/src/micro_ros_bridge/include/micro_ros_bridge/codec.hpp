@@ -6,6 +6,7 @@
 #ifndef MICRO_ROS_BRIDGE__CODEC_HPP_
 #define MICRO_ROS_BRIDGE__CODEC_HPP_
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -45,6 +46,45 @@ inline const std::string & kImuData = can_bridge_msgs::msg::WireContract::TOPIC_
 inline const std::string & kImuTemp = can_bridge_msgs::msg::WireContract::TOPIC_IMU_TEMP;
 }  // namespace topic
 }  // namespace contract
+}  // namespace micro_ros_bridge
+
+namespace micro_ros_bridge
+{
+struct Quantized
+{
+  int16_t q;
+  bool saturated;
+};
+
+// 定点：q = clamp(round(value * 32767 / scale), -32767, 32767)。
+// 与固件 wire_quantize 同式；非有限输入返回哨兵（命令路径的 NaN 由消息级
+// 编码函数拒收，不在这里兜）。
+inline Quantized quantize(double value, double scale)
+{
+  constexpr double kQMax = 32767.0;
+  if (!std::isfinite(value)) {
+    return {contract::kSentinelMissing, false};
+  }
+  const double raw = value * kQMax / scale;
+  // 严格不等，与固件 wire_quantize 逐字同式：**恰好**±full-scale 可精确表示，不算越界、
+  // 不置饱和位（Codec.SaturatesInsteadOfRejecting 的 EXPECT_FALSE 钉这一点）。
+  if (raw > kQMax) {
+    return {static_cast<int16_t>(32767), true};
+  }
+  if (raw < -kQMax) {
+    return {static_cast<int16_t>(-32767), true};
+  }
+  return {static_cast<int16_t>(std::lround(raw)), false};
+}
+
+// 反定点。q == SENTINEL_MISSING → NaN。
+inline double dequantize(int16_t q, double scale)
+{
+  if (q == contract::kSentinelMissing) {
+    return std::nan("");
+  }
+  return static_cast<double>(q) * scale / 32767.0;
+}
 }  // namespace micro_ros_bridge
 
 #endif  // MICRO_ROS_BRIDGE__CODEC_HPP_

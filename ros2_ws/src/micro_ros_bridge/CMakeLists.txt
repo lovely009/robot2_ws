@@ -27,6 +27,11 @@ if(BUILD_TESTING)
   target_compile_features(test_contract PRIVATE cxx_std_17)
   target_compile_options(test_contract PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_contract ${PROJECT_NAME}_codec)
+
+  ament_add_gtest(test_codec test/test_codec.cpp)
+  target_compile_features(test_codec PRIVATE cxx_std_17)
+  target_compile_options(test_codec PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_codec ${PROJECT_NAME}_codec)
 endif()
 
 ament_package()

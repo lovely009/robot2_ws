@@ -106,6 +106,12 @@ add_library(fw_w25_geometry OBJECT
   ../../lib/w25q64/src/w25q64_geometry.c)
 target_include_directories(fw_w25_geometry PUBLIC ../../lib/w25q64/include)
 
+# 定点编解码纯逻辑（lib/wire_codec；无 ROS 依赖，host 可直编）
+add_library(fw_wire_codec OBJECT
+  ../../lib/wire_codec/src/wire_codec.c)
+target_include_directories(fw_wire_codec PUBLIC
+  ../../lib/wire_codec/include)
+
 # 声明一个 host 测试目标：SOURCES 测试自身源文件，OBLIBS 依赖的固件 OBJECT
 # 库，INCLUDES 额外包含目录，DEFINES 编译宏（如 led 的 HOST_TEST）。
 # 注意 CMake 3.16 不传递 OBJECT 库的目标文件（只传播 include），
@@ -232,6 +238,10 @@ fw_host_test(test_session_sync
   SOURCES test_session_sync.cpp
   OBLIBS fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
   INCLUDES ../../lib/session_sync/include ../../lib/motor_control/src)
+
+fw_host_test(test_wire_codec
+  SOURCES test_wire_codec.cpp
+  OBLIBS fw_wire_codec)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

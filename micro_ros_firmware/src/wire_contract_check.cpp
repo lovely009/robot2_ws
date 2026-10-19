@@ -10,6 +10,8 @@
 #include <can_bridge_msgs/msg/detail/motor_status__struct.h>
 #include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 
+#include "wire_codec.h"
+
 namespace {
 
 // CDR：uint64 + uint32 + uint8 + 3 B 对齐填充，然后 4 个有界序列。
@@ -39,6 +41,11 @@ static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == -32768,
     "哨兵值变了：定点编解码两端都会错");
 static_assert(can_bridge_msgs__msg__WireContract__MOTOR_COUNT_MAX == 64,
     "电机数上界与内核 MOTOR_CONTROL_MAX_MOTORS 脱钩了");
+
+// wire_codec 的哨兵是**受控的第二份**（该库刻意不依赖 ROS，host 可直编，拿不到生成常量）。
+// 宏与枚举都是整型常量表达式，所以这条能进 static_assert —— 两份漂移在这里就编不过。
+static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == WIRE_SENTINEL_MISSING,
+    "wire_codec 的哨兵与 WireContract 漂移了：两端定点解码会错位");
 
 // 量程与话题名在这里**故意不设断言**：rosidl 给 C 侧生成的是 `static const float` 与
 // `static const char * const`，两者都不是 C++ 常量表达式（[expr.const] 只放行 constexpr

@@ -59,6 +59,8 @@ rosidl_generate_interfaces(
   # 循环面：SoA + int16 定点，count=64 时 480 B，落在 best-effort MTU 内（永不分片）
   "msg/LowCommand.msg"
   "msg/LowState.msg"
+  # 低频状态面：10 Hz 合并状态（reliable，允许分片）
+  "msg/MotorStatus.msg"
   DEPENDENCIES std_msgs
 )
 

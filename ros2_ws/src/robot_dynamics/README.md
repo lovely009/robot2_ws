@@ -138,10 +138,15 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
 ### 怎么启用
 
 **常规路径是 web 上位机运行屏的「重力补偿」开关**
-（[ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)）：它把
-本节点当第四个案台 unit 托管（`bench-gravity-feedforward.service`），并**同时**把页面自己的
-下行改指到 `/robot_dynamics/*`——「起节点」与「改接线」是两件事，按钮按「先起节点、确认
-running，再切话题」的顺序做，关的时候反过来。
+（[ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)、
+[0014](../../../docs/adr/0014-host-side-command-pacing.md)）：它把本节点当第四个案台 unit
+托管（`bench-gravity-feedforward.service`），并把下行切到本节点的输入话题。**两条通道的
+归属不同**：命令那条（`command_array`）由 `bench_manager` 改 `command_streamer` 的
+`output_topic` 切——页面只下设定值，切不了它；轨迹那条仍由页面自己切。
+
+「起节点」与「改接线」是两件事，服务按「先起节点、确认 running，再改道」的顺序做；
+关的时候反过来（先改道回直连、**确认成功才**停节点）。顺序反过来会出现「话题已切、
+节点没起」的空窗，或停止时「节点没了、接线还指着它」——两种都让命令落进没人订阅的话题。
 
 手工路径（其它命令源 / 排查）：命令源不再直接发 `/micro_ros_do/*`，改指到
 `/robot_dynamics/*`（各命令源自己改话题名或 remap）；然后起节点：
@@ -154,8 +159,8 @@ ros2 launch robot_dynamics gravity_feedforward.launch.py \
 
 launch 只透传 `urdf_path` 与 `joint_map`，只起本节点，不 include 也不修改
 `simulation.launch.py`——**接线始终是命令源自己的事**，本节点不旁观谁在发命令。所以页面
-按钮管不到 `snapshot_stream.py` / `traj_play.py` / `command_streamer.py`，它们与前馈同时跑
-就是混流。A/B 对照：运行期 `ros2 param set /gravity_feedforward_overlay
+按钮管不到 `snapshot_stream.py` / `traj_play.py`，它们与前馈同时跑就是混流。
+（`command_streamer` 不在此列：它是页面下行的**唯一**通道，本就该经本节点。）A/B 对照：运行期 `ros2 param set /gravity_feedforward_overlay
 effort_gain 0.0` 时两个通道都逐字段等于输入。
 
 ## C++ 接口

@@ -1,13 +1,16 @@
 # web_host
 
-rosbridge Web 上位机：一个 launch 默认同时起三个节点（`start_bench_manager:=false`
-可只留前两个）——
+rosbridge Web 上位机：一个 launch 起 L1 的三个节点——
 
 | 节点 | 可执行 | 作用 |
 |---|---|---|
 | `rosbridge_websocket` | `rosbridge_shim` | 官方 rosbridge 的**启动垫片**，先给 `rosbridge_library` 补上有界字符串原语（`string<31>` / `string<=31`，见 `web_host/rosbridge_shim.py` 模块注释），再 runpy 运行官方入口；解决 `can_bridge_msgs` 的 `MotorTopology` 等含 `string<=31` 字段时 rosbridge 2.0.7 序列化报 `inst is not a ROS Message, but a str` 的问题 |
 | `web_static_server` | `static_server` | 纯标准库 `ThreadingHTTPServer` 托管 `web/`（`index.html` + `js/` + `css/` + `vendor/` + `roslib.min.js`），无 Node 等构建依赖；文件域 API 只余 `/api/models`、`/api/model-joints` 与 `/api/actions*`，静态几何挂在 `model_dir`（默认 robot_sim 的 share，可指源码目录） |
-| `bench_manager` | `bench_manager`（独立包） | 仿真 / micro-ROS Agent / FDCAN 电机后端的进程管理，全走 `/bench/*` 服务 + `/bench/status` 话题（事实见 `bench_manager/README.md`）。2026-10-15 从 web_host 的私有 HTTP API 迁出 |
+| `command_streamer` | `command_streamer`（`motor_command` 包） | **命令节拍**：页面只下**设定值**，100 Hz 的完整快照流由它出——浏览器把后台标签页的定时器钳到 1 Hz，而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力（见 [ADR 0014](../../../docs/adr/0014-host-side-command-pacing.md)）。命令从哪条路出去由 `bench_manager` 改它的 `output_topic` |
+
+> 台架会话的编排者 `bench_manager` **不在本 launch**（2026-10-15 迁出，现由
+> [`robot_bringup`](../robot_bringup/README.md) 的 `robot.launch.py` 起）。本 launch 只做
+> L1，「只想看页面」不必带上进程管理权限。
 
 **前端只依赖两个通用面**：rosbridge（实时数据 + 台架命令）与静态 HTTP（页面资产、
 几何、模型枚举、动作库）。`web/` 因此可以搬到任意静态服务器独立部署；台架管理能力
@@ -40,8 +43,8 @@ rosbridge Web 上位机：一个 launch 默认同时起三个节点（`start_ben
 | 电机状态表（`#/run` 右栏） | **全部电机同屏**（ID / 位置 / 力矩 / 温度 / 状态，18 行不滚动），数据源 = 固件的 `motion_states` / `motor_status_array`（执行器侧；与左栏的关节不是一类东西）。行悬停 title 显示完整读数（速度/电流/跟随误差/命令源/测量年龄）。行序与左栏列表联动（置顶优先）。点击行 = **置顶 + 选中**（与左栏一致）；点臂上的小球只选中不置顶 |
 | 全部参数（`#/device` 屏） | **以固件记录为准**，驱动板向记录对齐：位置 **rad**、速度 **rad/s**、力矩 **A**（设备对象 `0x2538` 存的就是电流；位置/速度在固件参数边界是直通，只有力矩过一次 A↔N·m 换算，见决策日志 §6.4）。两行对照取自只读话题 `micro_ros_up/device_param_report`（固件记录列 / 驱动板回读列，同槽位同单位），`dev_init_state` 5（无记录）时固件列整行显示「无记录」。**写 ≠ 保存**——写只改设备 RAM 与固件记录（写后立即重判），要持久化必须再点「保存」（发 `0x2539` + 落 W25），未保存的台标黄。「读取」= 发 `system_command(REPORT)`，固件把**当前参数视图**立刻回一帧 `device_param_report`（不触发 SDO、不访问电机）；电机在线且已核对时显示驱动板真值，不在线/未核对（`dev_*` 为 NaN）时显示的就是板内 W25 参数表；数值用 7 位有效数字显示（内核按 float32 存，原始值会拖出 0.20000000298023224 这类尾巴）。总览条一眼给出「已核对/未初始化/离线」台数与原因（40=与记录不一致、41=回读不成功、42=本机无记录），并**逐台列出不一致的具体项**（位置下限/位置上限/最大转速/峰值电流，来自固件 DEV_INIT 事件的槽位位图）；状态列悬停同样显示该明细；行内「来源」列标出固件记录/驱动板回读/未核对，「状态」列显示生命周期；位置与力矩输入框悬停显示设备端原值（cnt / mA，位置按 65536 cnt/360° 折算）。逐项 `m<id>.{pos_min,pos_max,vel_limit,torque_limit,limit_protect}` 与方向均可写；写事务（写 + 读回核验的 SDO，约 1 秒）收尾后固件自动发一帧新报告，页面无需单独回读。「设零」把该台当前姿态设为设备零点（写 0x2531=1，仅失能态受理，运行中被拒），零点改变后设备内限位随之移动、须重认限位与机械行程；掉电是否持久待实测。|
 | 使能与增益（`#/run` 下部，下发上方） | 与参数表<b>同一套行筛选</b>（默认只显示选中那台，勾「显示全部」看整条臂）。逐台 `m<id>.{enable,kp,kd}` 一行一个「下发」按钮单独下发——**改哪台发哪台**；「全选使能」只改勾选状态（不下发），「一键下发」把当前列出的所有行合成**一条**多目标策略（`targets` 上限 64，代数只 +1，而不是 18 台各 +1）。都走 `/micro_ros_do/motor_policy`话题而非参数树（原因见下「为什么使能/kp/kd 不走参数面」）。**固件不回读 kp/kd**，框里是页面最后一次下发出去的值；受理/拒绝是异步的，看事件日志的 `CONFIG_RESULT`（每台一条回执，突发时页面可能收不全，判定以生命周期列与 `diagnostics` 计数为准） |
-| 重力补偿（`#/run`，下发上方） | 本页面下行的**接线开关**（ADR 0013）：打开 = 先经 `/bench/start_gravity_feedforward` 起 `gravity_feedforward_overlay`（第四个案台 unit）并确认它 `running`，再把本页面下发的命令与轨迹改指到 `/robot_dynamics/*`，由它按模型 URDF 加上 τ_g 再转发给固件；关闭 = 先切回 `/micro_ros_do/*` 直连、再停节点。顺序是安全边界，反过来会出现「话题已切、节点没起」的空窗。**只在 STM32 在环（顶栏 Agent 在线）时可用**——叠加节点的输出话题只有固件订阅，纯 Gazebo / 纯 MuJoCo / 主机驱动闭环三路没有接收者，按钮置灰并写明原因。模型默认取臂视图当前模型（HIL 会话是操作者手起的，页面没有别的途径知道台上是哪台），关节映射按所选模型现取（`/api/model-joints`，与臂视图同源）；增益框运行中改动即时生效（走节点的参数服务，**不重起**——重起会断命令流，撞上固件的命令超时软停）。面板同时说清三件互相独立的事：本页面的接线、节点进程状态（`/bench/status` 的 `gravity_feedforward` 段）、τ_g 的输入流 `/joint_states` 是否新鲜。**断链不自动回退**：路由开着而节点不在（或 `/joint_states` 不新鲜、节点跑的是另一个模型）时给红条告警 + 「立即回退」按钮，改接线必须由人按下。按钮只覆盖本页面的下发通道——`snapshot_stream.py` / `traj_play.py` / `command_streamer.py` 是独立命令源，同时跑就是混流（页面不依赖 `rosapi`，检测不到） |
-| 下发（`#/run` 的下发条） | 命令快照单发/100Hz 连发（目标里含未初始化或离线的电机时点名提示——这些台不会动且不会有报错回显）（下行配置话题已随固件裁剪移除——型号绑定由固件读设备自报身份自动完成，授权/增益/限位取固件安全默认，见 `micro_ros_firmware/README.md` 下行配置通道一节）。话题名是**运行期可变**的：由上面的「重力补偿」开关在直连与叠加之间切换（`core/ros.js` 的 `setDownlinkRoute` 是唯一改写点，它同时换发布者；旧版的 `?command_topic=` / `?trajectory_topic=` URL 覆盖已随该开关删除） |
+| 重力补偿（`#/run`，下发上方） | 本页面下行的**接线开关**（ADR 0013）：打开 = 先经 `/bench/start_gravity_feedforward` 起 `gravity_feedforward_overlay`（第四个案台 unit）并确认它 `running`，**服务端**再把命令流改道到 `/robot_dynamics/*`（改 `command_streamer` 的 `output_topic`），页面同时把自己发的那一条（轨迹）切过去，由叠加节点按模型 URDF 加上 τ_g 再转发给固件；关闭 = 页面先把轨迹切回直连，服务端再**先改道回直连、确认成功才**停节点。顺序是安全边界，反过来会出现「话题已切、节点没起」的空窗。**只在 STM32 在环（顶栏 Agent 在线）时可用**——叠加节点的输出话题只有固件订阅，纯 Gazebo / 纯 MuJoCo / 主机驱动闭环三路没有接收者，按钮置灰并写明原因。模型默认取臂视图当前模型（HIL 会话是操作者手起的，页面没有别的途径知道台上是哪台），关节映射按所选模型现取（`/api/model-joints`，与臂视图同源）；增益框运行中改动即时生效（走节点的参数服务，**不重起**——重起会断命令流，撞上固件的命令超时软停）。面板同时说清四件互相独立的事：开关的**意图**、命令**实际发往**哪里（`/motor_command/status` 的 `output_topic`，服务端改的，与意图不符就是「亮着但没切过去」）、节点进程状态（`/bench/status` 的 `gravity_feedforward` 段）、τ_g 的输入流 `/joint_states` 是否新鲜。**断链不自动回退**：节点不在、或接线与开关对不上（或 `/joint_states` 不新鲜、节点跑的是另一个模型）时给红条告警 + 「立即回退」按钮（经 stop 服务切回直连并停节点），改接线必须由人按下。按钮只覆盖本页面的下发通道——`snapshot_stream.py` / `traj_play.py` 是独立命令源，同时跑就是混流（页面不依赖 `rosapi`，检测不到） |
+| 下发（`#/run` 的下发条） | 把表格读成**设定值**发给 `/motor_command/setpoint`（[ADR 0014](../../../docs/adr/0014-host-side-command-pacing.md)），100 Hz 的完整快照流由主机侧 `command_streamer` 出——**页面不再持有节拍**，所以页面失焦不影响台架。「下发」= 改设定值并持续保持（旧版单发一条，30 ms 后固件就软停了）；「停止」= 发空目标列表（固件发阻尼帧、100 ms 后失能）；**清空表格不停台架**。目标里含未初始化或离线的电机时点名提示——这些台不会动且不会有报错回显（下行配置话题已随固件裁剪移除——型号绑定由固件读设备自报身份自动完成，授权/增益/限位取固件安全默认，见 `micro_ros_firmware/README.md` 下行配置通道一节）。折叠条下方那行状态显示命令**当前实际发往**哪里。话题名只有**轨迹**那条是运行期可变的，由上面的「重力补偿」开关切（`core/ros.js` 的 `setDownlinkRoute` 是唯一改写点，它同时换发布者；旧版的 `?command_topic=` / `?trajectory_topic=` URL 覆盖已随该开关删除） |
 | 曲线（`#/run` 观察抽屉 / `#/diag`） | 位置/速度/力矩/电流实时折线（canvas，多电机可选、时间窗可调） |
 | IMU（`#/diag`） | 两个 canvas：**3D 姿态**（四元数 → 立方体 + 三轴投影，X 前红 / Y 上绿 / Z 右蓝）与**人工地平仪**（按 roll 旋转、pitch 平移地平线，含 ±30° 俯仰刻度与机身符号）；配 Roll/Pitch/Yaw（°）、温度（`micro_ros_up/imu/temp`）、更新年龄、四元数与频率。数据源是 `micro_ros_up/imu/data`（`sensor_msgs/Imu`）；首帧前各角显示 `--`、两个 canvas 显示「等待 IMU…」，`render` 只由脏帧驱动，频率与「更新」年龄另用 1 s 定时器刷新（数据停发后年龄仍会走成「超时」，卸屏即清） |
 | 事件日志 / 命令历史（观察抽屉 / `#/diag`；事件日志也在 `#/device` 抽屉） | 固件事件流与已发快照 |
@@ -124,13 +127,14 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 
 ## 构建
 
-ament_python 包，在 `ros2_ws/` 内构建（首次或改了 bench_manager / bench_msgs
-时必须一起构建——launch 默认起 bench_manager）：
+ament_python 包，在 `ros2_ws/` 内构建（改了 `motor_command` 时必须一起构建——本 launch
+默认起它的 `command_streamer`；改了 `bench_manager` / `bench_msgs` 也要，那是
+`robot_bringup` 起的）：
 
 ```bash
 source /opt/ros/humble/setup.bash
 cd ros2_ws
-colcon build --symlink-install --packages-select bench_msgs bench_manager web_host
+colcon build --symlink-install --packages-select bench_msgs bench_manager motor_command web_host
 source install/setup.bash
 ```
 
@@ -142,6 +146,26 @@ source install/setup.bash
 > 同理，`web/` 下**新增**文件（例如新增面板 `js/panels/*.js`、`vendor/`）也必须重跑：data_files
 > 的清单在构建时求值，新文件不会自动补进 `install/web_host/share/web_host/web/`，
 > 表现为页面 404 而构建"成功"。
+>
+> **静态资产的缓存策略**（`static_server`）：文档 / JS / CSS 一律 `Cache-Control: no-store`
+> ——页面是几十个 ES module 拼起来的，只要**一个**是旧的，模块链接期就报
+> `does not provide an export named …`，而且报在 import 它的那个面板上，表现成「面板整块
+> 消失」；加 `no-store` 后改过的文件刷新即生效，不用清缓存。模型几何（URDF / 约 70 MB STL）
+> 走 `no-cache`：每次重验证、命中返 304，不重下内容。
+>
+> 但 `no-store` **只对新取到的响应生效，清不掉浏览器里已有的旧副本**——那份来自只发
+> `Last-Modified` 的旧版本，浏览器按启发式新鲜度认为它还新鲜，刷新时**根本不来问服务器**
+> （实测访问日志里那批 js 一条请求都没有）。所以文档响应会带 `Clear-Site-Data: "cache"`
+> 让浏览器清一次该源的 HTTP 缓存，用 **cookie `web_ver` 记账**：每个浏览器在每次服务启动
+> 后各清一次。之所以不是"每个进程只发一次"——那个一次性标志会被任何一次非浏览器请求
+> （`curl` 验证、探活）吃掉，真正要用的浏览器反而收不到。也只清一次：它会把模型几何的
+> 缓存一起清掉，每次清等于每次重下 70 MB 的 STL。
+>
+> 因此**重启服务后浏览器刷新两次**即可回到干净状态（第一次收到清缓存指令并种下 cookie，
+> 第二次全部重新取）。`Clear-Site-Data` 要求安全上下文（`http://localhost` 算，局域网 IP
+> 不算）；用 IP 访问时仍需手动清一次缓存。
+>
+> `main.js` 逐个面板隔离挂载失败并把错误写在原位——看到那行红字，就照上面两条做。
 >
 > **删文件或改名**是同一个坑的镜像：`build/web_host/web/` 里会留下指向已删文件的陈旧符号
 > 链接，下次构建直接报 `error: can't copy '.../build/web_host/web/<已删文件>': doesn't exist

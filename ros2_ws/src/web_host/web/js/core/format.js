@@ -8,13 +8,21 @@ export const TOPICS = {
   events: {name: '/micro_ros_up/motor_events', type: 'can_bridge_msgs/msg/MotorEvent'},
   imu: {name: '/micro_ros_up/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/micro_ros_up/imu/temp', type: 'std_msgs/msg/Float32'},
-  // ⚠️ 下行的这两个 name 是**运行期可变**的：web 的「重力补偿」开关把命令源在
-  // 「直连固件」与「经叠加节点」之间切换。唯一改写点是 core/ros.js 的
-  // setDownlinkRoute（换名必须连带换发布者，散着改会让命令发到没人订阅的话题上）。
-  command: {name: '/micro_ros_do/motor_command_array',
+  // 下·设定值（ADR 0014）：页面只下**设定值**，100 Hz 的完整快照流由主机侧
+  // command_streamer 出。节拍不能留在页面里——浏览器把后台标签页的定时器钳到 1 Hz，
+  // 而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力。
+  // 它**不是**运行期可变的：命令从哪条路出去（直连固件 / 经叠加节点）由 bench_manager
+  // 改 streamer 的 output_topic 决定，页面只读回执核对（见 TOPICS.commandStatus）。
+  setpoint: {name: '/motor_command/setpoint',
     type: 'can_bridge_msgs/msg/MotorCommandArray'},
+  // ⚠️ 轨迹的 name 是**运行期可变**的：重力补偿开关在「直连固件」与「经叠加节点」
+  // 之间切它。唯一改写点是 core/ros.js 的 setDownlinkRoute（换名必须连带换发布者，
+  // 散着改会让轨迹发到没人订阅的话题上）。
   trajectory: {name: '/micro_ros_do/motor_trajectory',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  // 命令节拍节点的状态（JSON）：`output_topic` 是命令**当前实际发往**哪里。
+  // 改道由服务端做，页面切不了，所以只能读它来核对开关与接线是否一致。
+  commandStatus: {name: '/motor_command/status', type: 'std_msgs/msg/String'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
   devParams: {name: '/micro_ros_up/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
@@ -35,11 +43,12 @@ export const TOPICS = {
 
 // 下行接线的两个落点（core/ros.js 的 setDownlinkRoute 用，ADR 0013）。
 // 叠加侧的 `/robot_dynamics/*` 是 gravity_feedforward_overlay 的**输入**话题，是节点契约。
+// 页面自己只切**轨迹**那一条（命令那一条归服务端，见 TOPICS.setpoint 的注释）——
+// 命令落点那两个名字的权威在 bench_manager/gravity_feedforward_manager.py。
 export const DOWNLINK_ROUTE = {
   DIRECT: 'direct',
   OVERLAY: 'overlay',
 };
-export const OVERLAY_COMMAND_TOPIC = '/robot_dynamics/command_array';
 export const OVERLAY_TRAJECTORY_TOPIC = '/robot_dynamics/trajectory';
 
 export const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
@@ -64,7 +73,6 @@ export const PARAM_FIELD = {POS_MIN: 0, POS_MAX: 1, VEL_LIMIT: 2,
   TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5};
 export const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
 export const MOTOR_ID_NONE = 65535;
-export const STREAM_PERIOD_MS = 10;
 export const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
 export const TRAJ_MAX_POINTS = 256;

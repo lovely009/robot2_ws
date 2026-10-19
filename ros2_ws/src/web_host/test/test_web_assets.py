@@ -104,6 +104,51 @@ def test_js_dom_refs_exist(index):
     assert not missing, f'JS 引用了 index.html 里不存在的 id：{missing}'
 
 
+def test_js_does_not_use_unimported_core_constants():
+    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被 main.js 吞掉。
+
+    实锤：`feedforward.js` 用了 `DIRTY.BENCH` 却从没 import 过 `DIRTY`。mount 照常成功
+    （那一行在 render 里，脏帧才走到），而 main.js 的渲染循环把 render 的异常
+    `try/catch` 掉只打 console——于是这个面板的脏帧刷新一直是死的，且没人发现
+    （2026-10-19 查实并修复）。同一个循环在**挂载**期没有保护时更狠：一个面板抛异常会
+    把它之后的占位一起吞掉，表现成"整屏静默缺块"。
+
+    只查全大写常量（`DIRTY` / `TOPICS` / `LIFECYCLE` …）：它们是"用了就一定得 import"
+    的裸标识符，误报面最小。查之前先去注释，免得注释里提到名字就误报。
+    """
+    exported = set()
+    for path in sorted((WEB / 'js' / 'core').glob('*.js')):
+        exported |= set(re.findall(
+            r'export\s+(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)',
+            path.read_text(encoding='utf-8')))
+    constants = {n for n in exported if re.fullmatch(r'[A-Z][A-Z0-9_]*', n)}
+    assert constants, 'core 模块里没解析到全大写导出——本测试的前提没了'
+
+    problems = []
+    for path in sorted((WEB / 'js').rglob('*.js')):
+        if 'vendor' in path.parts:
+            continue
+        src = path.read_text(encoding='utf-8')
+        code = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
+        code = re.sub(r'//[^\n]*', '', code)
+        imported = set()
+        for m in re.finditer(r'import\s*\{([^}]*)\}', src):
+            for part in m.group(1).split(','):
+                part = part.strip()
+                if part:
+                    imported.add(part.split(' as ')[-1].strip())
+        for name in sorted(constants):
+            # 前面不是 `.` 也不是标识符字符 = 当裸标识符在用（排除 obj.NAME）
+            if not re.search(rf'(?<![\w.]){name}\b', code):
+                continue
+            if name in imported:
+                continue
+            if re.search(rf'\b(?:const|let|var|function|class)\s+{name}\b', code):
+                continue
+            problems.append(f'{path.relative_to(WEB).as_posix()} 用了 {name} 却没 import')
+    assert not problems, '引用了未导入的 core 常量：\n' + '\n'.join(problems)
+
+
 # 3. JS 不得生成带 id 的 DOM（否则 id 会随数据重复，契约测试也失去意义）
 def test_no_ids_generated_in_js():
     bad = {}
@@ -347,6 +392,8 @@ def test_motor_backend_interface_mirrors_the_simulation_drawer():
 SRC = PKG.parent                      # ros2_ws/src
 BENCH_NODE = SRC / 'bench_manager' / 'bench_manager' / 'node.py'
 SYSTEMD_UNITS = SRC / 'bench_manager' / 'bench_manager' / 'systemd_units.py'
+MANAGER_PY = (SRC / 'bench_manager' / 'bench_manager' /
+              'gravity_feedforward_manager.py')
 OVERLAY_NODE = (SRC / 'robot_dynamics' / 'src' / 'ros' /
                 'gravity_feedforward_overlay_node.cpp')
 AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
@@ -405,29 +452,58 @@ def test_frontend_unit_names_match_bench_manager():
         f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
 
 
-@pytest.mark.parametrize('constant, parameter', [
-    ('OVERLAY_COMMAND_TOPIC', 'command_input_topic'),
-    ('OVERLAY_TRAJECTORY_TOPIC', 'trajectory_input_topic'),
-])
-def test_overlay_topics_match_the_overlay_node_defaults(constant, parameter):
-    """开关把下行切到的 `/robot_dynamics/*` 是叠加节点的**输入**话题，权威在那份 C++。
+def test_overlay_topics_match_the_overlay_node_defaults():
+    """改道切到的 `/robot_dynamics/*` 是叠加节点的**输入**话题，权威在那份 C++。
 
     节点里是相对名（默认命名空间下解析成 `/robot_dynamics/...`）；对它 remap 或改名，
-    前端的开关就会把命令发进没人订阅的话题——页面一切正常，机构不动。
+    改道就会把命令发进没人订阅的话题——页面一切正常，机构不动。
+
+    两条通道的副本在两处（ADR 0014 决定 3）：轨迹仍由页面自己切，副本在 format.js；
+    命令改由 bench_manager 切，副本在 gravity_feedforward_manager.py。分别对账。
     """
     _skip_without(OVERLAY_NODE)
     cpp = OVERLAY_NODE.read_text(encoding='utf-8')
-    m = re.search(
-        rf'declare_parameter<std::string>\(\s*"{parameter}",\s*"([^"]+)"',
-        cpp)
-    assert m, f'叠加节点里找不到参数 {parameter} 的默认值'
-    expected = '/' + m.group(1)
+
+    def node_default(parameter):
+        m = re.search(
+            rf'declare_parameter<std::string>\(\s*"{parameter}",\s*"([^"]+)"', cpp)
+        assert m, f'叠加节点里找不到参数 {parameter} 的默认值'
+        return '/' + m.group(1)
 
     js = FORMAT_JS.read_text(encoding='utf-8')
-    m = re.search(rf'export const {constant}\s*=\s*\'([^\']+)\'', js)
-    assert m, f'format.js 里找不到 {constant}'
-    assert m.group(1) == expected, (
-        f'{constant} 与叠加节点的话题默认值不一致：前端 {m.group(1)}，节点 {expected}')
+    m = re.search(r'export const OVERLAY_TRAJECTORY_TOPIC\s*=\s*\'([^\']+)\'', js)
+    assert m, 'format.js 里找不到 OVERLAY_TRAJECTORY_TOPIC'
+    assert m.group(1) == node_default('trajectory_input_topic'), (
+        f'OVERLAY_TRAJECTORY_TOPIC 与叠加节点不一致：前端 {m.group(1)}')
+
+    _skip_without(MANAGER_PY)
+    m = re.search(r'^OVERLAY_COMMAND_TOPIC\s*=\s*"([^"]+)"',
+                  MANAGER_PY.read_text(encoding='utf-8'), re.M)
+    assert m, 'gravity_feedforward_manager.py 里找不到 OVERLAY_COMMAND_TOPIC'
+    assert m.group(1) == node_default('command_input_topic'), (
+        f'OVERLAY_COMMAND_TOPIC 与叠加节点不一致：后端 {m.group(1)}')
+
+
+def test_command_route_topics_match_bench_manager():
+    """命令流两个落点的副本：agent.js（页面拿它核对回执）对 bench_manager（权威）。
+
+    页面切不了命令那条通道，只能读 /motor_command/status 的 output_topic 与这两个名字
+    比对。副本对不上，页面就会把「切成功了」显示成「接线没切过去」，或反过来——后者
+    更糟：亮着绿灯而命令其实发在另一条路上。
+    """
+    _skip_without(MANAGER_PY)
+    backend = dict(re.findall(
+        r'^(DIRECT_COMMAND_TOPIC|OVERLAY_COMMAND_TOPIC)\s*=\s*"([^"]+)"',
+        MANAGER_PY.read_text(encoding='utf-8'), re.M))
+    assert len(backend) == 2, (
+        f'gravity_feedforward_manager.py 里没解析到两个落点：{backend}')
+
+    js = AGENT_JS.read_text(encoding='utf-8')
+    for name, expected in backend.items():
+        m = re.search(rf'export const {name}\s*=\s*\'([^\']+)\'', js)
+        assert m, f'agent.js 里找不到 {name}'
+        assert m.group(1) == expected, (
+            f'{name} 与 bench_manager 不一致：前端 {m.group(1)}，后端 {expected}')
 
 
 def test_downlink_switch_rewires_the_publisher():

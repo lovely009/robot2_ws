@@ -7,12 +7,13 @@ import json
 
 import pytest
 import rclpy
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import Int32
 
 from can_bridge_msgs.msg import MotorCommandArray, MotorCommandTarget
-from motor_command.command_streamer import (SETPOINT_QOS, STREAM_QOS,
-                                            CommandStreamer)
+from motor_command.command_streamer import (CLIENT_COUNT_QOS, SETPOINT_QOS,
+                                            STREAM_QOS, CommandStreamer)
 
 
 class _Recorder:
@@ -179,3 +180,60 @@ def test_setpoint_qos_is_reliable():
     assert SETPOINT_QOS.reliability == ReliabilityPolicy.RELIABLE
     assert SETPOINT_QOS.durability == DurabilityPolicy.VOLATILE
     assert SETPOINT_QOS.depth == 1
+
+
+def test_client_count_qos_matches_the_rosbridge_publisher():
+    """客户端数的订阅必须与 rosbridge 的 publisher 同为 TRANSIENT_LOCAL。
+
+    那个 publisher 是 latched（client_manager.py 的 ClientManager），VOLATILE 订阅者
+    收不到迟到的锁存样本——浏览器已连着时启动本节点就会读不到当前值，require_client
+    在启动那一刻失效。这条断言锁住的是"启动即可见"这个行为的前提。
+    """
+    assert CLIENT_COUNT_QOS.durability == DurabilityPolicy.TRANSIENT_LOCAL
+    assert CLIENT_COUNT_QOS.reliability == ReliabilityPolicy.RELIABLE
+    assert CLIENT_COUNT_QOS.depth == 1
+
+
+def test_output_topic_switches_at_runtime():
+    """重力补偿开关切接线时改的是本节点的输出话题（ADR 0014），不重起进程。
+
+    用真实发布者断言 topic_name——换话题是"发布者被换掉"，替身捕获看不出这件事。
+    """
+    node = CommandStreamer()
+    try:
+        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+
+        result = node._on_set_parameters(
+            [Parameter("output_topic", value="/robot_dynamics/command_array")])
+        assert result.successful
+        # 推迟到下一拍才换：回调跑在参数值落定之前，那里动发布者会让
+        # "参数已改"与"实际发往哪"短暂不一致
+        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+        node._tick()
+        assert node.pub.topic_name == "/robot_dynamics/command_array"
+        assert node.output_topic == "/robot_dynamics/command_array"
+
+        # 切回来（关开关走同一条路）
+        node._on_set_parameters(
+            [Parameter("output_topic", value="/micro_ros_do/motor_command_array")])
+        node._tick()
+        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+    finally:
+        node.destroy_node()
+
+
+def test_malformed_output_topic_is_refused(streamer):
+    """空串或相对名会让命令发到没人订阅的话题上——参数面就拒掉，别等断流。"""
+    for bad in ("", "robot_dynamics/command_array", 3):
+        result = streamer._on_set_parameters(
+            [Parameter("output_topic", value=bad)])
+        assert not result.successful, bad
+        assert streamer._pending_output_topic is None
+    # 被拒的设定值不改变现状：还是发原话题
+    streamer._tick()
+    assert streamer.output_topic == "/micro_ros_do/motor_command_array"
+
+
+def test_status_reports_the_current_output_topic(streamer):
+    """页面要能看见命令当前发往哪里——断链时不静默换路，就得让它可核对。"""
+    assert _status(streamer)["output_topic"] == "/micro_ros_do/motor_command_array"

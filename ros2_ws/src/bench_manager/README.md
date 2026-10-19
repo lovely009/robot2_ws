@@ -24,9 +24,10 @@ ros2 topic echo /bench/status
 | lifecycle | `on_configure` 只做校验，其中 systemd 可达性（`systemctl --user show-environment`）是 fail-fast——没有 user manager 就承载不了任何会话，早说好过等页面点「启动」才报错；`on_activate` 认领已在跑的 unit（只报告，不动它们）；`on_deactivate` 停整个 slice |
 | HIL 联动 | `StartSimulation` 在 firmware + 物理总线时先起电机后端（auto 标记），仿真启动失败回滚；`StopSimulation` 只联动停 auto 起的后端，手动起的保持。**重力前馈不随会话自动起**：HIL 会话常常是操作者在终端手起的，随会话起的方案在那条路上不成立（见 ADR 0013） |
 | 控制 socket | 本节点起的模拟器在 `/tmp/bench_motor_backend_<pid>.sock`；launch 内嵌模拟器固定在 `/tmp/robot_sim_motor_backend.sock`（status 报 `external`：命令可转发，起停归那次 launch） |
+| 命令改道 | 两个前馈服务顺带切 `command_streamer` 的 `output_topic`（直连固件 ↔ 经叠加节点）。改道**不重起**那个节点；页面切不了它，只能读 `/motor_command/status` 核对 |
 | 参数 | `model_dir`：模型包根（含 models/），枚举根 = `<model_dir>/models`；空 = 回落 robot_sim 安装树 |
 
-重力前馈那一路的两条非常规细节（其余见 [ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)）：
+重力前馈那一路的三条非常规细节（其余见 [ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)、[0014](../../../docs/adr/0014-host-side-command-pacing.md)）：
 
 - **增益走参数服务，不重起 unit**。重起会断掉命令流，撞上固件的命令超时软停，而机构没有
   抱闸。Humble 的 rclpy 没有 parameters client 封装，节点直接调
@@ -35,6 +36,13 @@ ros2 topic echo /bench/status
   且**只有回执确认成功才更新状态里的 `effort_gain`**，失败落进 `gain_error`。
 - **已在跑另一个模型时拒绝启动**，不静默替换：换模型拿到旧模型的 τ_g 是这个功能最危险的
   失效模式。要换模型必须先停。
+- **命令流的改道归这两个服务**（ADR 0014 决定 3）：`start` 在 unit 确认 running 之后把
+  `command_streamer` 的 `output_topic` 改到 `/robot_dynamics/command_array`；`stop` 反过来
+  **先**改回直连、**确认成功才**停 unit。停 unit 挂在改道的成功回执上，不是顺序写两句
+  ——`Client.call()` 在回调里会死锁（rclpy 明文禁止），所以顺序只能靠异步链保证。
+  两个方向的失败处置不同：开启时改道失败**不回滚** unit（命令继续走直连是有命令、只是
+  没补偿，安全方向），停止时改道失败则**不许**停 unit（否则命令落进没人订阅的话题，
+  固件命令超时软停，而机构没有抱闸）。两者都写进状态的 `route_error`，页面看得见。
 
 依赖边界：本包运行期经 `ros2 launch` / `ros2 run` 引用 robot_sim 与 robot_dynamics，
 但**都不声明** `exec_depend`——robot_sim 反向依赖 web_host、web_host 又依赖本包，声明会

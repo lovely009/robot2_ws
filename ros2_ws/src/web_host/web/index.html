@@ -173,10 +173,10 @@
     </details>
   </template>
 
-  <!-- 下发（命令快照 / 100Hz 连发） -->
+  <!-- 下发（设定值 → 主机侧命令节拍节点，ADR 0014） -->
   <template data-panel-template="command">
     <details class="sendbar" data-fold="send" open>
-      <summary title="/micro_ros_do/motor_command_array">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+      <summary title="/motor_command/setpoint（主机侧 command_streamer 按 100 Hz 出完整快照流）">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
       <div class="table-wrap">
         <table class="cmd">
           <thead><tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr></thead>
@@ -188,9 +188,12 @@
         <button id="btnFillOnline" class="secondary">填入在线电机（原位）</button>
         <button id="btnClearRows" class="secondary">清空</button>
         <span class="spacer"></span>
-        <button id="btnSendOnce" class="primary">单发一次</button>
-        <label class="check"><input type="checkbox" id="chkStream"> 100Hz 连发</label>
+        <button id="btnSendOnce" class="primary"
+                title="改设定值并持续保持（节拍在主机侧，页面失焦不影响）">下发</button>
+        <button id="btnStopCmd" class="secondary"
+                title="发空目标列表 = 全部软停（固件发阻尼帧，100 ms 后失能）">停止</button>
       </div>
+      <div id="cmdStatus" class="result tiny"></div>
       <div id="cmdResult" class="result tiny"></div>
     </details>
   </template>

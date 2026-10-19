@@ -63,4 +63,16 @@ def generate_launch_description():
                 'model_dir': LaunchConfiguration('model_dir'),
             }],
         ),
+
+        # 命令节拍持有者（ADR 0014）：页面只下**设定值**，100 Hz 的完整快照流由它出。
+        # 节拍不能留在页面里——浏览器把后台标签页的定时器钳到 1 Hz，而固件的快照新鲜度
+        # 线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力。
+        # 它只服务页面（页面在，它就该在），所以随 L1 常驻，不做成台架 unit；依赖单向
+        # 无环，package.xml 里是真声明。
+        Node(
+            package='motor_command',
+            executable='command_streamer',
+            name='command_streamer',
+            output='screen',
+        ),
     ])

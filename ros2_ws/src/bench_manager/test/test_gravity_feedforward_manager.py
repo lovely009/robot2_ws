@@ -206,7 +206,7 @@ def test_status_before_any_start_has_no_config(urdfs: dict[str, str]) -> None:
     status = _manager(urdfs, _systemd()).status()
 
     assert status == {'state': 'stopped', 'config': None, 'returncode': None,
-                      'gain_error': ''}
+                      'gain_error': '', 'command_topic': None, 'route_error': ''}
 
 
 def test_stop_clears_the_gain_override(urdfs: dict[str, str]) -> None:

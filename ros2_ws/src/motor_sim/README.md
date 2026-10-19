@@ -49,14 +49,15 @@
 ```
 motor_sim
 ├── motor_protocol（协议编解码）
-├── motor_transport（传输抽象）
-├── motor_sim_core（核心仿真逻辑）
-│   ├── motor_protocol
-│   └── yaml-cpp（配置解析）
-└── motor_sim_node（ROS 节点）
-    ├── motor_sim_core
-└── ROS 2（rclcpp, sensor_msgs, std_msgs, std_srvs）
+├── motor_transport（传输抽象）          → motor_protocol, Threads
+├── motor_sim_core（核心仿真逻辑）        → motor_protocol, yaml-cpp
+├── motor_sim_ros（ROS 节点库 MotorSimNode）→ motor_sim_core, motor_transport
+│   └── ROS 2（rclcpp, diagnostic_msgs, sensor_msgs, std_msgs, std_srvs）
+└── motor_sim_node（可执行入口）          → motor_sim_ros
 ```
+
+目标名是**契约**：`ros2 run motor_sim motor_sim_node` 里的 `motor_sim_node` 是可执行，
+而库目标叫 `motor_sim_ros`（`MotorSimNode` 供独立可执行与机器人集成层链接，两者刻意区分）。
 
 ## Gazebo 组合仿真
 

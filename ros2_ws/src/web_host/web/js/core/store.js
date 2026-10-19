@@ -51,6 +51,9 @@ export const store = {
   // /joint_states（关节侧实测构型）：页面只关心它的**新鲜度**——叠加节点的 τ_g 全靠
   // 它，超时即整帧直通（见 core/format.js 的 jointStates 话题注释）。
   jointStates: {count: 0, last: 0},
+  // 命令节拍节点（/motor_command/status）：`data.output_topic` 是命令**当前实际发往**
+  // 哪里——改道由服务端做（ADR 0014），页面只有读它才能核对开关与接线是否一致。
+  commandStatus: {last: 0, data: null},
 };
 
 // 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
@@ -100,7 +103,7 @@ export const DIRTY = {
   CONN: 'conn', TOPOLOGY: 'topology', MOTION: 'motion', STATUS: 'status',
   EVENTS: 'events', HISTORY: 'history', PARAMS: 'params', TRAJ: 'traj',
   IMU: 'imu', POLICY: 'policy', SELECTED: 'selected', TF: 'tf', MODEL: 'model',
-  BENCH: 'bench',
+  BENCH: 'bench', COMMAND: 'command',
 };
 
 // 写操作是否可用。断连时页面不猜、不降级、不静默重试（与 motor_hardware_interface 的
@@ -118,6 +121,15 @@ export function syncWriteButtons(ids, allow) {
 // 台架状态入 store（/bench/status 话题帧与 bench 服务的响应共用这一条路）。
 // agent 段顺带同步进 conn.agent*（顶栏文案由 main.js 的 renderShell 画）；
 // 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
+// 命令节拍节点状态入 store（/motor_command/status）。整段留原样：页面不解释它的
+// 字段，只把 output_topic 与开关的意图对账，其余原样显示给操作者。
+export function applyCommandStatus(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  store.commandStatus.data = snapshot;
+  store.commandStatus.last = Date.now();
+  markDirty(DIRTY.COMMAND);
+}
+
 export function applyBenchStatus(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return;
   const bench = store.bench;

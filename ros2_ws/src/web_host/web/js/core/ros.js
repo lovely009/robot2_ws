@@ -3,9 +3,11 @@
 //   state → store；写入 store 后 markDirty；撤掉全部 renderXxx() 调用
 //   （渲染是面板的职责，本层不再认识任何 DOM）；setConn 改写为写 store +
 //   切 body.offline（断连禁用写操作的样式钩子）。
-import { store, markDirty, DIRTY, chartPush, applyBenchStatus } from './store.js';
 import {
-  $, TOPICS, DOWNLINK_ROUTE, EVENT_NAMES, MOTOR_ID_NONE, OVERLAY_COMMAND_TOPIC,
+  store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus,
+} from './store.js';
+import {
+  $, TOPICS, DOWNLINK_ROUTE, EVENT_NAMES, MOTOR_ID_NONE,
   OVERLAY_TRAJECTORY_TOPIC, quatToEuler,
 } from './format.js';
 
@@ -62,9 +64,10 @@ export function ensurePublisher(key) {
 // （rosbridge 侧一切正常，micro-ROS 侧没人收）。所以唯一改写点在这里，且两半一起做。
 //
 // 直连名以 TOPICS 里声明的为准；叠加名是叠加节点的输入话题（robot_dynamics 契约）。
+// 只列**页面自己发**的下行通道。命令不在其中：页面发的是设定值（固定话题），
+// 命令从哪条路出去由 bench_manager 改 command_streamer 的 output_topic 决定
+// （ADR 0014 决定 3），页面切不了、只能读 TOPICS.commandStatus 核对。
 const DOWNLINK = {
-  command: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.command.name,
-    [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_COMMAND_TOPIC},
   trajectory: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.trajectory.name,
     [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_TRAJECTORY_TOPIC},
 };
@@ -113,7 +116,7 @@ export function connect() {
     subscribeAll();
     // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
     // 断线时那份已被 closeSocket 清掉）。开关的落点不带状态，重连不会悄悄切回直连。
-    ['command', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
+    ['setpoint', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -341,6 +344,13 @@ function subscribeAll() {
   // 数据入口（命令的服务响应也经 applyBenchStatus 写同一份）。
   sub('bench', (m) => {
     try { applyBenchStatus(JSON.parse(m.data)); }
+    catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
+  });
+
+  // 命令节拍节点的状态：命令**当前实际发往**哪里（output_topic）。重力补偿开关的
+  // 改道是服务端做的，页面只有读它才知道接线有没有真的切过去。
+  sub('commandStatus', (m) => {
+    try { applyCommandStatus(JSON.parse(m.data)); }
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 }

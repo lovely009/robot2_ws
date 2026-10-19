@@ -55,7 +55,10 @@ from bench_msgs.srv import (
 )
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
-from .gravity_feedforward_manager import GravityFeedforwardProcessManager
+from .gravity_feedforward_manager import (
+    DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC,
+    GravityFeedforwardProcessManager,
+)
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
 from .simulation_manager import (
     SimulationProcessManager,
@@ -84,6 +87,11 @@ _LOG_LINES_MAX = 2000
 _GAIN_NODE = 'gravity_feedforward_overlay'
 _GAIN_SERVICE = f'/{_GAIN_NODE}/set_parameters_atomically'
 _GAIN_DISCOVERY_TIMEOUT_S = 0.5
+
+# 命令节拍持有者的参数服务（ADR 0014）。命令流改道 = 改它的 output_topic：页面只下
+# 设定值，命令从哪条路出去由这里决定。同 _GAIN_SERVICE，Humble 没有 parameters client。
+_ROUTE_NODE = 'command_streamer'
+_ROUTE_SERVICE = f'/{_ROUTE_NODE}/set_parameters_atomically'
 
 
 def _simulation_request(message):
@@ -149,6 +157,7 @@ class BenchManager(LifecycleNode):
             systemd=self._systemd, gain_writer=self._write_effort_gain)
 
         self._gain_client = None
+        self._route_client = None
         self._status_pub = None
         self._timer = None
 
@@ -220,6 +229,9 @@ class BenchManager(LifecycleNode):
         if self._gain_client is not None:
             self.destroy_client(self._gain_client)
             self._gain_client = None
+        if self._route_client is not None:
+            self.destroy_client(self._route_client)
+            self._route_client = None
         self._timer = None
         self._status_pub = None
         return TransitionCallbackReturn.SUCCESS
@@ -410,14 +422,25 @@ class BenchManager(LifecycleNode):
             })
         except _EXPECTED_ERRORS as exc:
             return self._finish(response, exc)
+        # 顺序（ADR 0013 决定 7）：unit 确认 running **之后**才切接线。切不过去不回滚
+        # unit——命令继续走直连是有命令、只是没补偿（安全方向），回滚反而多一次断流。
+        self._request_command_route(OVERLAY_COMMAND_TOPIC)
         return self._finish(response)
 
     def _on_stop_gravity_feedforward(self, _request, response):
+        # 顺序与开启镜像：**先**切回直连、**确认成功**再停 unit。反过来，命令会在
+        # 「接线还指着叠加节点、节点已经没了」的窗口里全部落空 → 固件命令超时软停，
+        # 而机构没有抱闸。所以停 unit 挂在改道的成功回执上（见 _request_command_route）。
+        self._request_command_route(
+            DIRECT_COMMAND_TOPIC, on_success=self._stop_feedforward_unit)
+        return self._finish(response)
+
+    def _stop_feedforward_unit(self):
         try:
             self.feedforward.stop()
         except _EXPECTED_ERRORS as exc:
-            return self._finish(response, exc)
-        return self._finish(response)
+            self.get_logger().error(f'停叠加节点失败：{exc}')
+        self._publish_status()
 
     def _on_set_gravity_feedforward_gain(self, request, response):
         try:
@@ -444,6 +467,46 @@ class BenchManager(LifecycleNode):
             Parameter('effort_gain', value=float(gain)).to_parameter_msg()]
         self._gain_client.call_async(request).add_done_callback(
             partial(self._on_gain_written, gain))
+
+    def _request_command_route(self, topic: str, on_success=None) -> None:
+        """把命令流改道到 topic（异步，结果由回调回报）。
+
+        失败方向按调用点分岔，见两个服务处理的注释：开启时失败就留在直连，停止时
+        失败则**不执行** on_success（即不停 unit）。
+        """
+        if self._route_client is None:
+            self._route_client = self.create_client(
+                SetParametersAtomically, _ROUTE_SERVICE)
+        if not self._route_client.wait_for_service(
+                timeout_sec=_GAIN_DISCOVERY_TIMEOUT_S):
+            self.feedforward.note_route_failed(
+                f'{_ROUTE_NODE} 的参数服务不可达——命令节拍节点没在跑，'
+                '命令流改道未执行')
+            self._publish_status()
+            return
+        request = SetParametersAtomically.Request()
+        request.parameters = [
+            Parameter('output_topic', value=str(topic)).to_parameter_msg()]
+        self._route_client.call_async(request).add_done_callback(
+            partial(self._on_route_written, topic, on_success))
+
+    def _on_route_written(self, topic: str, on_success, future) -> None:
+        try:
+            result = future.result().result
+        except Exception as exc:  # noqa: BLE001 - 回执里的任何失败都要说出来
+            self.feedforward.note_route_failed(f'命令流改道失败：{exc}')
+            self._publish_status()
+            return
+        if not result.successful:
+            self.feedforward.note_route_failed(
+                result.reason or '命令流改道被节点拒绝')
+            self._publish_status()
+            return
+        self.feedforward.note_route_applied(topic)
+        if on_success is not None:
+            on_success()
+        else:
+            self._publish_status()
 
     def _on_gain_written(self, gain: float, future) -> None:
         try:

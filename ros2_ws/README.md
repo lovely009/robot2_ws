@@ -1,4 +1,4 @@
-# ros2_ws —— ROS 2 Humble 九包工作区
+# ros2_ws —— ROS 2 Humble 十一包工作区
 
 真机、仿真、消息定义与 Web 上位机并存。构建与测试、真机/仿真 bring-up、配置与扩展
 入口都在这里；各包细节见 `src/<pkg>/README.md`。架构取舍见 [../docs/adr/](../docs/adr/)。
@@ -14,6 +14,8 @@
 | `web_host` | rosbridge Web 上位机（臂视图、IMU、设备参数、使能/增益、重力补偿开关、轨迹）＋静态文件与模型域 API（模型枚举 / 关节映射 / 动作库） |
 | `bench_msgs` | 台架主机侧控制服务定义（`/bench/*`：仿真 / Agent / 电机后端 / 重力前馈） |
 | `bench_manager` | 台架会话的唯一编排者：`/bench/*` 服务 + `/bench/status` 话题，会话进程由 systemd user unit 承载；web 的仿真屏、顶栏 Agent 控件与重力补偿开关走它 |
+| `motor_command` | 主机侧命令节拍：持有台架设定值，按固定节拍出命令快照（GUI 只下设定值——浏览器定时器会被后台标签页节流） |
+| `robot_bringup` | 台架唯一入口：一个 launch 起 L1（rosbridge + 静态页）与 L2（`bench_manager`）；L3 会话（仿真 / 电机后端 / Agent / 重力前馈）由 `bench_manager` 按需起停 |
 
 ## 分层与命名边界
 
@@ -37,6 +39,17 @@ colcon test && colcon test-result --verbose
 ```
 
 按包构建：`colcon build --symlink-install --packages-select motor_drive`。
+
+## 台架入口
+
+```bash
+ros2 launch robot_bringup robot.launch.py
+```
+
+一条命令起 L1（rosbridge + 静态页 + 命令节拍 `command_streamer`）与 L2（`bench_manager`）；
+L3 会话（仿真 / 电机后端 / micro-ROS Agent / 重力前馈）由 `bench_manager` 按需起停。只想看页面
+（不带进程管理权限）用 `ros2 launch web_host web_host.launch.py`。详见
+[`src/robot_bringup/README.md`](src/robot_bringup/README.md)。
 
 ## 控制链路
 

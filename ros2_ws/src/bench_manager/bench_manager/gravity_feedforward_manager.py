@@ -20,6 +20,12 @@ from .systemd_units import (
     config_env, config_from_env,
 )
 
+# 命令流的两个落点（ADR 0014）：直连固件，或经叠加节点。**本文件是这两个名字的权威**
+# ——切换由本包执行（改 command_streamer 的 output_topic），前端只读回执核对，所以
+# web_host 的静态契约测试从这里对账，而不是在前端再抄一份字面量。
+DIRECT_COMMAND_TOPIC = "/micro_ros_do/motor_command_array"
+OVERLAY_COMMAND_TOPIC = "/robot_dynamics/command_array"
+
 _CONFIG_ENV_PREFIX = "BENCH_FEEDFORWARD_"
 # 模型名直接进文件路径：只认单段、无分隔符的名字，挡掉 `../../` 这类穿越。
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -99,6 +105,10 @@ class GravityFeedforwardProcessManager:
         self._gain_override: float | None = None
         # 写入失败要说出来：静默没生效正是这个按钮要消除的失效模式。
         self._gain_error = ""
+        # 命令流当前发往哪里：None = 本次进程内还没确认过（进程重启后由页面从
+        # /motor_command/status 读真值，这里只报自己确认过的）。同 gain，失败要说出来。
+        self._command_topic: str | None = None
+        self._route_error = ""
 
     def _status(self):
         unit = self._systemd.probe(UNIT_GRAVITY_FEEDFORWARD)
@@ -113,6 +123,8 @@ class GravityFeedforwardProcessManager:
             "config": config,
             "returncode": unit.returncode,
             "gain_error": self._gain_error,
+            "command_topic": self._command_topic,
+            "route_error": self._route_error,
         }
 
     def status(self):
@@ -189,3 +201,17 @@ class GravityFeedforwardProcessManager:
     def note_gain_failed(self, message: str) -> None:
         """写入失败由调用方回报：状态里带出来，页面能看见，不静默。"""
         self._gain_error = str(message)
+
+    def note_route_applied(self, topic: str) -> None:
+        """命令流改道成功（调用方确认回执后回报）。"""
+        self._command_topic = str(topic)
+        self._route_error = ""
+
+    def note_route_failed(self, message: str) -> None:
+        """命令流改道失败：状态里带出来。
+
+        失败的**处置方向**由调用方决定，两条路不同（见 node.py 的两个服务处理）：
+        开启时切不过去就让它留在直连（有命令、只是没补偿），停止时切不回来就**不许**
+        停 unit（否则命令落进没人订阅的话题，固件命令超时软停，而机构没有抱闸）。
+        """
+        self._route_error = str(message)

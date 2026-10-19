@@ -8,6 +8,7 @@
 import json
 import os
 import signal
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -25,10 +26,20 @@ _MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
 def main(args=None):
     rclpy.init(args=args)
-    # rclpy.init 会装它自己的 SIGINT handler（期待 rclpy.spin 消费）；本进程的
-    # 主循环是 serve_forever，不恢复默认 handler 的话 SIGINT 被吞——ros2 launch
-    # 得等满 5+10 秒升级到 SIGKILL，finally 里的清理全部跳过。
+    # rclpy.init 装的是 **SIGINT 与 SIGTERM 两个** handler（见 rclpy/__init__.py 的
+    # SignalHandlerOptions 说明），而它们都期待 `rclpy.spin` 来消费；本进程的主循环是
+    # serve_forever，没人消费 ⇒ 两个信号都被吞。
+    # SIGINT 恢复默认 handler（抛 KeyboardInterrupt）；SIGTERM 不能设 SIG_DFL——那会
+    # 直接终止进程、跳过下面的 finally（server_close / destroy_node / rclpy.shutdown），
+    # 所以也让它抛 KeyboardInterrupt，与 SIGINT 走同一条清理路径。
+    # 不修的话，`ros2 launch` 停止时要等满 5+10 秒升级到 SIGKILL；launch 被强杀时
+    # 这个进程就留在 8080 上（2026-10-19 实测：kill 不掉，得 kill -9）。
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    def _sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _sigterm)
     node = Node('web_static_server')
     node.declare_parameter('host', '0.0.0.0')
     node.declare_parameter('port', 8080)
@@ -68,10 +79,64 @@ def main(args=None):
         '模型挂载：%s -> %s；模型枚举根：%s'
         % (prefix or '(无)', model_dir or '(无)', models_dir or '(robot_sim 安装树)'))
 
+    # 本次服务启动的标识：写进 cookie，用来判断"这个浏览器还欠不欠一次缓存清理"
+    # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
+    build_token = str(int(time.time()))
+
     class Handler(SimpleHTTPRequestHandler):
+
+        # 这些后缀是"页面本身"，一个旧的就是一次链接期失败；其余（模型几何）允许
+        # 走重验证，别为了省事让 70 MB 的 STL 每次重下。
+        _NO_STORE_SUFFIXES = ('.html', '.js', '.mjs', '.css', '.json')
 
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=web_root, **kw)
+
+        def _cookie(self, name):
+            """取请求里某个 cookie 的值（没有则 None）。只服务于 web_ver 这一个自设标记。"""
+            for part in self.headers.get('Cookie', '').split(';'):
+                key, sep, value = part.strip().partition('=')
+                if sep and key == name:
+                    return value
+            return None
+
+        def end_headers(self):
+            # 页面自身的资产（文档 / ES module / 样式）**不复用**：`no-store`。
+            # 页面是几十个模块拼起来的，只要有**一个**来自旧版本，模块链接期就报错
+            # （`does not provide an export named …`），而且报在 import 它的那个面板上，
+            # 表现成"面板整块消失"——2026-10-19 栽过一次：浏览器手里是回滚窗口期取到的
+            # 旧 command.js 配上恢复后的新 format.js。这些文件都小，每次重下无妨。
+            #
+            # 但 `no-store` **只对新取到的响应生效，清不掉浏览器里已有的副本**：那份是
+            # 早些时候从"只发 Last-Modified"的服务器取的，浏览器按启发式新鲜度认为它还
+            # 新鲜，于是刷新时**根本不来问**（实测访问日志里那批 js 一条请求都没有）。
+            # 所以文档响应里带 `Clear-Site-Data: "cache"` 让浏览器清一次该源的 HTTP 缓存。
+            #
+            # 用 **cookie 记账**，不是"每个进程只发一次"：后者会被任何一次非浏览器请求
+            # （curl 验证、探活）吃掉，真正要用的浏览器反而收不到——2026-10-19 就是这么
+            # 白忙一轮的。带 cookie 后每个浏览器各自在每次服务启动后清一次；也只清一次，
+            # 因为它会把模型几何的缓存一起清掉（每次清 = 每次重下 70 MB 的 STL）。
+            # 要求安全上下文（`http://localhost` 算，局域网 IP 不算）。
+            #
+            # 其余（URDF / 约 70 MB 的 STL 等）走 `no-cache`：不是不缓存，是**每次重
+            # 验证**——仍带 If-Modified-Since 走 Last-Modified，命中即 304，不重下内容。
+            buffer = getattr(self, '_headers_buffer', None) or []
+            path = urlsplit(self.path).path.lower()
+            if b' 200 ' in b''.join(buffer[:1]) and (
+                    path == '/' or path.endswith('.html')):
+                if self._cookie('web_ver') != build_token:
+                    self.send_header('Clear-Site-Data', '"cache"')
+                    self.send_header(
+                        'Set-Cookie',
+                        f'web_ver={build_token}; Path=/; SameSite=Lax')
+            if b'Cache-Control' not in b''.join(buffer):
+                # `/` 也是文档（映射到 index.html）：契约测试按 id 比对的就是它，
+                # 它必须与那批 JS 同代，所以一并按"不复用"处理。
+                if path == '/' or path.endswith(self._NO_STORE_SUFFIXES):
+                    self.send_header('Cache-Control', 'no-store')
+                else:
+                    self.send_header('Cache-Control', 'no-cache')
+            super().end_headers()
 
         def translate_path(self, path):
             # 命中挂载前缀时临时换根，其余一律走 web_root。每个请求都是新的

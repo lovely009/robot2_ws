@@ -1,13 +1,18 @@
-// 下发面板：命令快照（/micro_ros_do/motor_command_array）与 100Hz 连发。
-// 搬自重构前 app.js 的控制段；seq/streamTimer 收进本模块（不再跨面板共享）。
+// 下发面板：把表格读成**设定值**发给主机侧命令节拍节点（ADR 0014）。
+//
+// 页面不再持有节拍：它只声明目标，100 Hz 的完整快照流由 command_streamer 出。
+// 原因是浏览器会把后台标签页的定时器钳到 1 Hz（实测前台 88 Hz / 后台 1.0 Hz），
+// 而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能——页面一失焦台架就整臂掉力。
+// 由此带来的两处行为变化，都写在界面文案里：
+//   · 「下发」= 改设定值并**持续保持**（旧版单发一条，30 ms 后固件就软停了）；
+//   · 停台架要用「停止」（发空目标列表 = 全部软停），清空表格**不**停台架。
 import { store, markDirty, DIRTY } from '../core/store.js';
-import { $, STREAM_PERIOD_MS, LIFECYCLE } from '../core/format.js';
+import { $, LIFECYCLE } from '../core/format.js';
 import { pub, isConnected } from '../core/ros.js';
 
-// sequence 仅作日志关联；用页面启动时间降低刷新页面后复用旧 trajectory_id
-// 的概率（固件状态回执是低频 best-effort，不能接受旧回执误推进分段）。
+// sequence 仅作日志关联（固件侧的序号门 2026-09-15 已移除）；用页面启动时间降低
+// 刷新页面后复用旧值的概率，让日志里仍分得清是哪个页面会话发的。
 let sequence = (Date.now() & 0x7fffffff) >>> 0;
-let streamTimer = null;
 
 function addCmdRow(id = 1, pos = 0, vel = 0, eff = 0) {
   const tr = document.createElement('tr');
@@ -98,11 +103,24 @@ function sendSnapshot() {
   const {targets, error} = readCmdTargets();
   if (error) { setCmdResult(false, error); return false; }
   const res = sendTargets(targets);
-  // 连发时只在启动那一拍提示一次，避免 100Hz 刷 DOM。
-  const blocked = streamTimer ? [] : noteBlockedTargets(targets);
+  const blocked = noteBlockedTargets(targets);
   setCmdResult(res.ok, `已发 ${res.msg}` +
     (blocked.length ? ` ｜ ⚠ ${blocked.join('、')} 不会动（未初始化或离线）` : ''));
   return res.ok;
+}
+
+// 停止台架：空目标列表在完整快照语义下是「全部软停」这条**真消息**，显式停止不靠
+// 断流实现（固件收到后发阻尼帧，100 ms 后失能）。
+function sendStop() {
+  if (!isConnected()) { setCmdResult(false, '未连接 rosbridge'); return; }
+  sequence = (sequence + 1) >>> 0;
+  pub('setpoint', {
+    sync_time_ns: Date.now() * 1e6,
+    sequence,
+    count: 0,
+    targets: [],
+  });
+  setCmdResult(true, `已发全部软停（seq=${sequence}）`);
 }
 
 // 发送完整快照（命令表与动作共用）；记录历史。
@@ -110,7 +128,7 @@ export function sendTargets(targets) {
   if (!isConnected()) return {ok: false, msg: '未连接 rosbridge'};
   if (!targets.length) return {ok: false, msg: '快照为空'};
   sequence = (sequence + 1) >>> 0;
-  pub('command', {
+  pub('setpoint', {
     // uint64：rosbridge 2.x 入站要求 JSON number（float64 会丢失末几位
     // 精度；该字段仅用于跨系统日志对齐，freshness 以 MCU 本地 tick 为准）。
     sync_time_ns: Date.now() * 1e6,
@@ -128,24 +146,42 @@ export function sendTargets(targets) {
   return {ok: true, msg: `seq=${sequence}，${targets.length} 台`};
 }
 
-function startStream() {
-  if (streamTimer) return;
-  if (!sendSnapshot()) { $('chkStream').checked = false; return; }
-  streamTimer = setInterval(sendSnapshot, STREAM_PERIOD_MS);
-  markDirty(DIRTY.HISTORY);
-}
-function stopStream() {
-  if (streamTimer) { clearInterval(streamTimer); streamTimer = null; markDirty(DIRTY.HISTORY); }
-  const chk = $('chkStream');
-  if (chk) chk.checked = false;
-}
-
-// 摘要（搬 renderFoldSummaries 的 sumSend 段）：目标台数与连发状态。
+// 摘要（搬 renderFoldSummaries 的 sumSend 段）：目标台数。
 function updateSummary() {
   const rows = $('cmdRows');
   if (!rows) return;
   const n = rows.querySelectorAll('tr').length;
-  $('sumSend').textContent = `${n} 台目标` + (streamTimer ? ' · 连发中' : '');
+  $('sumSend').textContent = `${n} 台目标`;
+}
+
+// 命令节拍节点的状态：**命令当前实际发往哪里**、有没有在发。
+// 改道（直连固件 ↔ 经叠加节点）是服务端做的，页面切不了，所以这一行是操作者核对
+// 「开关亮着但接线没切」的唯一入口。
+const REASON_TEXT = {
+  no_setpoint: '未收到设定值',
+  no_client: '页面未连接（自动停流）',
+  ok: '保持中',
+};
+
+function renderCommandStatus() {
+  const el = $('cmdStatus');
+  if (!el) return;
+  const {data, last} = store.commandStatus;
+  if (!data || !last) {
+    el.textContent = '命令节拍：未上报（command_streamer 没在跑？）';
+    el.className = 'result tiny err';
+    return;
+  }
+  const parts = [`发往 ${data.output_topic}`];
+  parts.push(REASON_TEXT[data.reason] || data.reason || '--');
+  if (data.clients === null || data.clients === undefined) {
+    parts.push('无 /client_count');
+  } else {
+    parts.push(`${data.clients} 个客户端`);
+  }
+  if (data.reject) parts.push(`⚠ 设定值被拒：${data.reject}`);
+  el.textContent = `命令节拍：${parts.join(' · ')}`;
+  el.className = `result tiny${data.reject ? ' err' : ''}`;
 }
 
 export function mount(root, ctx) {
@@ -161,23 +197,23 @@ export function mount(root, ctx) {
     $('cmdRows').innerHTML = '';
     for (const [id, pos] of online.sort((a, b) => a[0] - b[0])) addCmdRow(id, pos, 0, 0);
   };
-  $('btnClearRows').onclick = () => { stopStream(); $('cmdRows').innerHTML = ''; updateSummary(); };
-  $('btnSendOnce').onclick = () => { stopStream(); sendSnapshot(); };
-  $('chkStream').onchange = (e) => e.target.checked ? startStream() : stopStream();
+  // 清空表格**不停台架**：目标还在主机侧保持（要停请按「停止」）。
+  $('btnClearRows').onclick = () => { $('cmdRows').innerHTML = ''; updateSummary(); };
+  $('btnSendOnce').onclick = () => sendSnapshot();
+  $('btnStopCmd').onclick = () => sendStop();
 
   addCmdRow(1, 0, 0, 0);      // 等价旧 UI 的初始行
 
   const render = (dirty) => {
-    if (dirty.has(DIRTY.CONN) && !isConnected()) stopStream();  // 断线即停连发（旧 closeSocket 行为）
     if (dirty.has(DIRTY.HISTORY)) updateSummary();
+    // 断线不再需要页面做任何事：rosbridge 一断，/client_count 归零，主机侧的
+    // command_streamer 自己停流，固件 100 ms 内失能——失效方向是安全的。
+    if (dirty.has(DIRTY.COMMAND) || dirty.has(DIRTY.CONN)) renderCommandStatus();
   };
   render(new Set());
-  // 连发定时器与 unmount：切屏必须停连发——否则离开运行屏后 100 Hz 还在发，
-  // 而按钮已经不在 DOM 上、用户没法停。
-  return {
-    render,
-    unmount() { stopStream(); },
-  };
+  // 没有 unmount 收尾：节拍归主机侧持有，**切屏不该停台架**（这正是把节拍搬出
+  // 浏览器的目的）。要停请按「停止」或关掉页面。
+  return { render };
 }
 
 // 供 teach 面板「记录当前命令」用（面板依赖面板的唯一一处：动作记录的正是下发

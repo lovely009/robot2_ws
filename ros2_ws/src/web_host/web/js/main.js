@@ -167,7 +167,22 @@ async function showScreen(screen) {
   }
   // 屏内所有 [data-panel] 占位按出现顺序挂载（含抽屉里的，未展开也挂——展开即有形）
   for (const slot of root.querySelectorAll('[data-panel]')) {
-    await mountPanel(slot.dataset.panel, slot);
+    // 逐个隔离：一个面板挂载失败**不能**把它之后的占位一起吞掉。之前没有这层保护，
+    // 结果是整屏静默缺块——页面不报错、元素就是不在，排查方向全跑偏（2026-10-19
+    // 踩过：`command` 挂载抛异常，运行屏的下发条与观察抽屉一起消失）。失败当场写进
+    // 占位里，并说清往哪看。
+    try {
+      await mountPanel(slot.dataset.panel, slot);
+    } catch (error) {
+      console.error(`面板 ${slot.dataset.panel} 挂载失败`, error);
+      slot.replaceChildren();
+      const note = document.createElement('div');
+      note.className = 'result tiny err';
+      note.textContent = `面板 ${slot.dataset.panel} 加载失败：${error.message}`;
+      note.title = '若刚改过前端：安装树里的 JS 可能还没更新，或浏览器缓存了旧版——'
+        + '先 Ctrl+Shift+R 强制刷新；仍失败就看浏览器控制台的完整堆栈。';
+      slot.append(note);
+    }
   }
   initDrawers(screen);
 }

@@ -29,6 +29,12 @@ const SVC = {
     'bench_msgs/srv/SetGravityFeedforwardGain'],
 };
 
+// 命令流的两个落点（ADR 0014）：改道由 bench_manager 改 command_streamer 的
+// output_topic 执行，页面切不了、只拿这两个名字去核对回执。权威定义在
+// bench_manager/gravity_feedforward_manager.py，静态契约测试从那里对账。
+export const DIRECT_COMMAND_TOPIC = '/micro_ros_do/motor_command_array';
+export const OVERLAY_COMMAND_TOPIC = '/robot_dynamics/command_array';
+
 // unit 名是契约（bench_manager/systemd_units.py 定义一次，这里与文档各引用一份）。
 export const UNIT_SIMULATION = 'bench-simulation.service';
 export const UNIT_MOTOR_BACKEND = 'bench-motor-backend.service';

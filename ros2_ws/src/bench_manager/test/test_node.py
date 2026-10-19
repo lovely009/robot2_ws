@@ -12,11 +12,14 @@ import logging
 from pathlib import Path
 
 import pytest
+from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.srv import SetParametersAtomically
 
 from conftest import FakeSystemd
 
 from bench_manager.agent_manager import AgentProcessManager
 from bench_manager.gravity_feedforward_manager import (
+    DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC,
     GravityFeedforwardProcessManager,
 )
 from bench_manager.motor_sim_manager import MotorSimProcessManager
@@ -38,6 +41,57 @@ class _Response:
     text = ''
 
 
+class _RouteFuture:
+    def __init__(self, client):
+        self._client = client
+
+    def add_done_callback(self, callback):
+        if self._client.defer:
+            self._client.pending.append((callback, self))
+        else:
+            callback(self)
+
+    def result(self):
+        response = SetParametersAtomically.Response()
+        response.result = SetParametersResult(
+            successful=self._client.successful, reason=self._client.reason)
+        return response
+
+
+class _RouteClient:
+    """假改道通道（command_streamer 的参数服务）。
+
+    默认**同步回执**：`call_async` 当场把 future 交给回调，于是「切接线 → 停 unit」
+    这条链在一个调用栈里走完，断言好写。`defer=True` 把回执扣住、由测试显式
+    `fire()`——验「切成功之前不许停 unit」要的就是这个窗口。
+    """
+
+    def __init__(self, ready=True, successful=True, reason='', defer=False):
+        self.ready = ready
+        self.successful = successful
+        self.reason = reason
+        self.defer = defer
+        self.topics: list[str] = []
+        self.pending: list = []
+        # 请求改道那一刻 unit 的状态，由测试在拿到 node 后挂上。
+        self.probe = None
+        self.seen_states: list[str] = []
+
+    def wait_for_service(self, timeout_sec=None):
+        return self.ready
+
+    def call_async(self, request):
+        self.topics.append(request.parameters[0].value.string_value)
+        if self.probe is not None:
+            self.seen_states.append(self.probe())
+        return _RouteFuture(self)
+
+    def fire(self):
+        pending, self.pending = self.pending, []
+        for callback, future in pending:
+            callback(future)
+
+
 @pytest.fixture
 def model_urdf(tmp_path: Path) -> str:
     """前馈管理器按 `is_file()` 判 URDF 存不存在，所以这里得给真文件。"""
@@ -48,7 +102,8 @@ def model_urdf(tmp_path: Path) -> str:
 
 
 def _shell(systemd: FakeSystemd, urdf_path: str = '',
-           written: list[float] | None = None) -> BenchManager:
+           written: list[float] | None = None,
+           route: _RouteClient | None = None) -> BenchManager:
     """跳过 `__init__`（那要 rclpy 上下文）造一个节点外壳。
 
     `urdf_path` 缺省为空串＝解析不出任何模型，前馈相关之外的用例不必关心它。
@@ -69,6 +124,7 @@ def _shell(systemd: FakeSystemd, urdf_path: str = '',
         gain_writer=(written.append if written is not None else None),
         systemd=node._systemd)
     node._gain_client = None
+    node._route_client = route if route is not None else _RouteClient()
     node._status_pub = None
     node._timer = None
     node.get_logger = lambda: logging.getLogger('bench_manager-test')
@@ -109,7 +165,7 @@ def test_snapshot_has_four_sections_and_no_log_key() -> None:
     # 前馈没起时 config 是 None：页面据此判断按钮该显示「开」还是「关」。
     assert snapshot['gravity_feedforward'] == {
         'state': 'stopped', 'config': None, 'returncode': None,
-        'gain_error': ''}
+        'gain_error': '', 'command_topic': None, 'route_error': ''}
 
 
 def test_snapshot_state_is_derived_from_the_unit() -> None:
@@ -251,6 +307,104 @@ def test_start_gravity_feedforward_passes_the_three_fields_through(
     assert json.loads(response.status_json)['gravity_feedforward']['config'] == {
         'model': _MODEL, 'urdf_path': model_urdf,
         'joint_map': '1:joint_link1', 'effort_gain': 0.6}
+
+
+# --- 命令流改道（ADR 0014 决定 3）------------------------------------------
+# 页面只下设定值，命令从哪条路出去由 bench_manager 改 command_streamer 的 output_topic
+# 决定。两个方向的顺序都是安全边界，失败方向还不同，所以逐条钉住。
+
+def test_start_switches_the_command_route_only_after_the_unit_is_up(
+        model_urdf: str) -> None:
+    """开：unit 确认 running **之后**才切接线。
+
+    切早了，命令会在「接线已指叠加节点、节点还没起」的窗口里落进没人订阅的话题。
+    """
+    systemd = _all_absent()
+    route = _RouteClient()
+    node = _shell(systemd, urdf_path=model_urdf, route=route)
+    route.probe = lambda: node.feedforward.status()['state']
+
+    response = BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    assert response.ok
+    assert route.topics == [OVERLAY_COMMAND_TOPIC]
+    assert route.seen_states == ['running'], '改道请求发出时 unit 还不是 running'
+    assert json.loads(response.status_json)['gravity_feedforward'][
+        'command_topic'] == OVERLAY_COMMAND_TOPIC
+
+
+def test_stop_switches_the_route_back_before_stopping_the_unit(
+        model_urdf: str) -> None:
+    """关：**先**切回直连、**确认成功**再停 unit。
+
+    反过来，命令会在「接线还指着叠加节点、节点已经没了」的窗口里全部落空 → 固件
+    命令超时软停，而机构没有抱闸。
+    """
+    systemd = _all_absent()
+    route = _RouteClient(defer=True)
+    node = _shell(systemd, urdf_path=model_urdf, route=route)
+    BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+    route.fire()  # 收尾开启那一步的改道
+
+    BenchManager._on_stop_gravity_feedforward(node, None, _Response())
+
+    assert route.topics[-1] == DIRECT_COMMAND_TOPIC
+    # 回执还没到：unit 必须还活着
+    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         not in systemd.commands(), '改道没确认就把 unit 停了'
+
+    route.fire()
+    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         in systemd.commands()
+
+
+def test_failed_route_switch_keeps_the_unit_running_on_start(
+        model_urdf: str) -> None:
+    """切不过去**不回滚** unit：命令继续走直连是有命令、只是没补偿（安全方向），
+    回滚反而多一次断流。失败要留在状态里，页面才看得见。"""
+    systemd = _all_absent()
+    node = _shell(systemd, urdf_path=model_urdf,
+                  route=_RouteClient(successful=False, reason='参数被拒'))
+
+    response = BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    assert response.ok
+    ff = json.loads(response.status_json)['gravity_feedforward']
+    assert ff['state'] == 'running'
+    assert ff['command_topic'] is None
+    assert '参数被拒' in ff['route_error']
+
+
+def test_failed_route_switch_blocks_stopping_the_unit(model_urdf: str) -> None:
+    """切不回来就**不许**停 unit——那正是「命令落进没人订阅的话题」那条路。"""
+    systemd = _all_absent()
+    route = _RouteClient()
+    node = _shell(systemd, urdf_path=model_urdf, route=route)
+    BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    route.successful = False
+    route.reason = '参数被拒'
+    response = BenchManager._on_stop_gravity_feedforward(node, None, _Response())
+
+    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         not in systemd.commands()
+    ff = json.loads(response.status_json)['gravity_feedforward']
+    assert ff['state'] == 'running'
+    assert '参数被拒' in ff['route_error']
+
+
+def test_unreachable_streamer_is_reported_not_silently_skipped(
+        model_urdf: str) -> None:
+    """命令节拍节点没在跑（页面那条路整个下不了命令）时要说出来，不能静默跳过改道。"""
+    node = _shell(_all_absent(), urdf_path=model_urdf,
+                  route=_RouteClient(ready=False))
+
+    response = BenchManager._on_start_gravity_feedforward(
+        node, _start_request(), _Response())
+
+    ff = json.loads(response.status_json)['gravity_feedforward']
+    assert 'command_streamer' in ff['route_error']
 
 
 def test_start_gravity_feedforward_rejects_before_touching_systemd() -> None:

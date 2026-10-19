@@ -21,6 +21,8 @@
 
 | [0012 电机模拟器收敛为单一后端](0012-single-motor-simulator-backend.md) | accepted | **论据已更正（2026-10-15）**：把 `motor_sim`（C++/ROS）与 `fdcan_motor_sim.py`（Python/HIL）收敛为一个 C++ 后端、一份配置、一个控制面；分两步交付，第二步补故障建模。 |
 | [0013 重力前馈的落地边界与 web 端一键开关](0013-gravity-feedforward-ownership-and-web-toggle.md) | accepted | **当前有效（2026-10-16）**：`gravity_feedforward_overlay` 是 τ_g 的唯一落地叠加点，由 `bench_manager` 托管为第四个 unit，web 上位机提供一键开关（仅 STM32 在环时可用）；断链人工一键回退，不自动改接线。取代 0009 的决定 2、3、5。 |
+| [0014 命令节拍迁到主机侧](0014-host-side-command-pacing.md) | accepted | **当前有效（2026-10-19）**：命令节拍搬出浏览器——页面只下设定值，100 Hz 快照流由 `command_streamer` 出，随 L1（`web_host.launch.py`）常驻、不做 unit。重力补偿的**命令改道**移入 `bench_manager` 的两个前馈服务（先起 unit 再改道；停止时先改道、确认成功才停 unit），页面只切轨迹并读 `/motor_command/status` 核对；`/client_count` 订阅改 `TRANSIENT_LOCAL`（原来那个"边沿触发"是 QoS 不匹配的产物）。 |
+| [0015 固件消息流收敛为三平面](0015-firmware-message-planes-pdo-sdo.md) | accepted | **提议、实现未开始（2026-10-19）**：5 下行 + 10 上行收敛为循环面 / 低频状态面 / 配置事件面三平面，`WireContract.msg` 做话题名与定点量程的单一来源，循环面 480 B 永不分片，主机侧新增 `micro_ros_bridge` 作唯一边界节点（`/micro_ros/*` = 线上契约、`/motor/*` = 主机侧），旧消息保留为 facade 类型。只取代 0014 决定 3 的话题名，改道机制不变。 |
 
 ## 维护规则
 

@@ -35,7 +35,7 @@ cd micro_ros_agent && colcon build --symlink-install
 
 | 文档 | 内容 |
 |---|---|
-| [ros2_ws/README.md](ros2_ws/README.md) | ROS 2 区域：九包、构建测试、bring-up、配置契约、扩展指南 |
+| [ros2_ws/README.md](ros2_ws/README.md) | ROS 2 区域：十一包、构建测试、bring-up、配置契约、扩展指南 |
 | [micro_ros_firmware/README.md](micro_ros_firmware/README.md) | 固件区域：工程事实、话题契约、术语与所有权、开放项与开发计划 |
 | [micro_ros_firmware/AGENTS.md](micro_ros_firmware/AGENTS.md) | 固件操作手册：构建、烧录、台架顺序与坑 |
 | [micro_ros_agent/README.md](micro_ros_agent/README.md) | Agent 工作区与台架工具 |

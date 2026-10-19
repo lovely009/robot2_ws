@@ -10,8 +10,10 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
+from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import Int32, String
 
 from can_bridge_msgs.msg import MotorCommandArray
@@ -35,6 +37,18 @@ SETPOINT_QOS = QoSProfile(
     depth=1,
 )
 
+# 入·客户端数：**必须与 rosbridge 的 publisher 同为 TRANSIENT_LOCAL**。那个 publisher 是
+# depth 1 + TRANSIENT_LOCAL（rosbridge_server/client_manager.py 的 ClientManager），即
+# latched；订阅侧用 VOLATILE 会**收不到迟到的锁存样本**，于是浏览器已经连着时启动本节点
+# 读不到当前值，表现为"只在连接数变化时才知道"（曾被记成 rosbridge 的边沿触发性质，实为
+# 此处 QoS 不匹配）。改掉它，require_client 才真的在启动那一刻就生效。
+CLIENT_COUNT_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
+
 
 class CommandStreamer(Node):
     """持有最近一次设定值，按 stream_hz 出完整快照。
@@ -50,18 +64,23 @@ class CommandStreamer(Node):
             raise ValueError("stream_hz 必须为正")
         setpoint_topic = self.declare_parameter(
             "setpoint_topic", "/motor_command/setpoint").value
-        output_topic = self.declare_parameter(
+        # output_topic 是**运行期可改**的：重力补偿开关（ADR 0013 / 0014）把命令流在
+        # 「直连固件」与「经 gravity_feedforward_overlay」之间切，切换由 bench_manager
+        # 的服务执行，不重起本进程——重起会断流，撞上固件的命令超时软停。
+        self.output_topic = self.declare_parameter(
             "output_topic", "/micro_ros_do/motor_command_array").value
         client_count_topic = self.declare_parameter(
             "client_count_topic", "/client_count").value
         status_topic = self.declare_parameter(
             "status_topic", "/motor_command/status").value
         # 客户端归零即停流（网页关了）。**没出现过 /client_count 时保持 None 不拦**：
-        # 没有 rosbridge 就没有网页这条路，操作者只可能从命令行驱动。
+        # 连 rosbridge 都没有时就没有网页这条路，操作者只可能从命令行驱动。
+        # 浏览器已连着时启动也能读到当前值——靠 CLIENT_COUNT_QOS 的 TRANSIENT_LOCAL。
         self.require_client = bool(
             self.declare_parameter("require_client", True).value)
 
         self.setpoint = None
+        self._pending_output_topic = None
         self.setpoint_sequence = 0
         self.setpoint_at = None
         # 不叫 clients：那是 rclpy Node 的只读属性（本节点的 service client 列表）。
@@ -76,13 +95,44 @@ class CommandStreamer(Node):
         self.create_subscription(MotorCommandArray, setpoint_topic,
                                  self._on_setpoint, SETPOINT_QOS)
         self.create_subscription(Int32, client_count_topic,
-                                 self._on_client_count, SETPOINT_QOS)
-        self.pub = self.create_publisher(MotorCommandArray, output_topic,
+                                 self._on_client_count, CLIENT_COUNT_QOS)
+        self.pub = self.create_publisher(MotorCommandArray, self.output_topic,
                                          STREAM_QOS)
         self.status_pub = self.create_publisher(String, status_topic,
                                                 SETPOINT_QOS)
         self.create_timer(1.0 / self.stream_hz, self._tick)
         self.create_timer(1.0, self._publish_status)
+        self.add_on_set_parameters_callback(self._on_set_parameters)
+
+    def _on_set_parameters(self, params):
+        """校验 output_topic；真正的换发布者推迟到下一拍（_apply_pending_output_topic）。
+
+        不在回调里做发布者手术：回调跑在参数值落定**之前**，此时换掉发布者会让
+        「参数已改」与「实际发往哪」短暂不一致。推迟一拍（10 ms）换来的是一致性，
+        且换话题本来就不是高频动作。
+        """
+        for param in params:
+            if param.name != "output_topic":
+                continue
+            value = param.value
+            if not isinstance(value, str) or not value.startswith("/"):
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"output_topic 必须是以 / 开头的非空话题名，收到 {value!r}")
+            self._pending_output_topic = value
+        return SetParametersResult(successful=True)
+
+    def _apply_pending_output_topic(self):
+        """换输出话题：先建新发布者再拆旧的，任何时刻都只有一个发布者在写总线。"""
+        topic = self._pending_output_topic
+        self._pending_output_topic = None
+        if topic is None or topic == self.output_topic:
+            return
+        previous = self.pub
+        self.pub = self.create_publisher(MotorCommandArray, topic, STREAM_QOS)
+        self.destroy_publisher(previous)
+        self.output_topic = topic
+        self.get_logger().info(f"命令输出话题切到 {topic}")
 
     def _on_client_count(self, msg):
         self.connected_clients = int(msg.data)
@@ -116,6 +166,7 @@ class CommandStreamer(Node):
         return None
 
     def _tick(self):
+        self._apply_pending_output_topic()
         if self.setpoint is None:
             self.reason = "no_setpoint"
             return
@@ -143,6 +194,7 @@ class CommandStreamer(Node):
             "reject": self.reject_reason,
             "rejected_setpoints": self.rejected_setpoints,
             "stream_hz": self.stream_hz,
+            "output_topic": self.output_topic,
             "frames": self.frames,
             "clients": self.connected_clients,
             "setpoint_sequence": self.setpoint_sequence,

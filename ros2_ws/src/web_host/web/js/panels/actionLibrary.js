@@ -256,19 +256,42 @@ async function armMotors() {
   await sleep(ARM_SETTLE_MS);
 }
 
-// 对齐起点：把轨迹首点作为快照目标压过去并保持（traj_play.hold 同法，20Hz 重发）。
+// 对齐起点：把轨迹首点作为**设定值**压过去并保持。保持由主机侧的 command_streamer
+// 负责（它按 100 Hz 重发同一份完整快照），所以这里只发一次再等——旧版是页面自己
+// 20 Hz 重发，那正是 ADR 0014 要搬出浏览器的东西。
 async function alignToStart() {
   const first = player.windows[0][0];
   const targets = player.ids.map((id) => {
     const [position] = first.vals[id] || [0, 0, 0];
     return { motor_id: id, position, velocity: 0, effort: 0 };
   });
+  if (player.cancelRequested) throw new Error('已停止');
+  sendTargets(targets);
   const endAt = Date.now() + ALIGN_MS;
   while (Date.now() < endAt) {
+    // 仍按 ALIGN_PERIOD_MS 醒一次：只为了尽快响应「停止」，不是为了重发。
     if (player.cancelRequested) throw new Error('已停止');
-    sendTargets(targets);
     await sleep(ALIGN_PERIOD_MS);
   }
+}
+
+// 取消轨迹**之前**先把当前实测位姿写成设定值（ADR 0014 决定 5）。
+//
+// 轨迹一取消，固件立刻把电机归属交还快照通道，而主机侧的 command_streamer 一直在
+// 发它手里那份设定值——那是**对齐起点时**压进去的轨迹首点（或更早的目标）。不先压
+// 一帧实测位姿，机构会在取消的瞬间朝那个旧目标弹回去。
+// 拿不到实测位置（电机离线/未上报）时返回 false，由调用方说明——**不**因此拦住取消：
+// 操作者按的就是「停止」。
+function holdCurrentPose() {
+  const targets = [];
+  for (const id of player.ids) {
+    const row = store.motors.get(id);
+    const position = row && row.motion ? row.motion.position : null;
+    if (!Number.isFinite(position)) return false;
+    targets.push({ motor_id: id, position, velocity: 0, effort: 0 });
+  }
+  if (!targets.length) return false;
+  return sendTargets(targets).ok;
 }
 
 export async function playAction(name, options) {
@@ -307,6 +330,9 @@ export async function playAction(name, options) {
 
     player.detail = '取消旧轨迹…';
     announce();
+    // 同 stopPlayback：取消会把归属交还快照通道，而设定值此刻还停在**上一条**轨迹
+    // 留下的目标上。先压实测位姿，别让机构在重播的间隙朝旧目标动一下。
+    holdCurrentPose();
     cancelTrajectory();
     await sleep(CANCEL_SETTLE_MS);
     if (player.cancelRequested) throw new Error('已停止');
@@ -356,10 +382,14 @@ export function stopPlayback() {
   // 运行中先置停止位（各 await 点会退出）；保持态（done）直接取消释放
   const wasRunning = player.phase === 'running';
   player.cancelRequested = true;
+  // **顺序是安全边界**：先压实测位姿、再取消轨迹。取消会立刻把归属交还快照通道，
+  // 而设定值还停在「对齐起点」那一刻的目标上（见 holdCurrentPose）。
+  const held = holdCurrentPose();
   cancelTrajectory();
   if (!wasRunning) {
     player.phase = 'idle';
-    player.detail = '已取消（释放归属）';
+    player.detail = held ? '已取消（释放归属）'
+      : '已取消（释放归属）；取不到实测位姿，设定值仍是旧目标——确认台上位姿';
     announce();
   }
 }

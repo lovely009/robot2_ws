@@ -61,6 +61,8 @@ rosidl_generate_interfaces(
   "msg/LowState.msg"
   # 低频状态面：10 Hz 合并状态（reliable，允许分片）
   "msg/MotorStatus.msg"
+  # 配置面：参数写与系统命令合一，kind 区分互斥两组（reliable）
+  "msg/ConfigRequest.msg"
   DEPENDENCIES std_msgs
 )
 

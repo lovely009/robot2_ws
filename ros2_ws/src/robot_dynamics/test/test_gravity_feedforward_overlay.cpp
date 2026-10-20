@@ -158,7 +158,7 @@ bool trajectory_frames_identical(
   return true;
 }
 
-// fixture URDF 的 joint_1..3，话题名按测试前缀隔离（绝不碰现场的 /micro_ros_do/*）。
+// fixture URDF 的 joint_1..3，话题名按测试前缀隔离（绝不碰现场的 /motor/*）。
 robot_dynamics::GravityFeedforwardOverlayParameters test_parameters(
     const std::string & prefix) {
   robot_dynamics::GravityFeedforwardOverlayParameters parameters;

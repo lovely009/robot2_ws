@@ -8,7 +8,7 @@
 | 需要了解 | 入口 | 状态 |
 |---|---|---|
 | 三个区域组成与构建 | [根 README](../README.md) | 当前 |
-| ROS 2 区域（十一包、bring-up、配置契约） | [ros2_ws/README.md](../ros2_ws/README.md) | 当前 |
+| ROS 2 区域（十二包、bring-up、配置契约） | [ros2_ws/README.md](../ros2_ws/README.md) | 当前 |
 | 固件工程事实、话题契约、开放项 | [micro_ros_firmware/README.md](../micro_ros_firmware/README.md) | 当前 |
 | 固件操作手册（构建 / 烧录 / 台架） | [micro_ros_firmware/AGENTS.md](../micro_ros_firmware/AGENTS.md) | 当前 |
 | micro-ROS Agent 工作区 | [micro_ros_agent/README.md](../micro_ros_agent/README.md) | 当前 |

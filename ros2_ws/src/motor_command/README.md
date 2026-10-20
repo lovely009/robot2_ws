@@ -5,8 +5,9 @@
 
 ## 为什么节拍不能留在网页里
 
-`/micro_ros_do/motor_command_array` 的唯一发布者曾是网页 JS（经 rosbridge），节拍来自
-`setInterval`。浏览器会把**后台标签页**的定时器钳到 1 Hz——2026-10-16 实测同一页面：
+`/micro_ros_do/motor_command_array`（2026-10-20 前的旧下行名）的唯一发布者曾是网页 JS
+（经 rosbridge），节拍来自 `setInterval`。浏览器会把**后台标签页**的定时器钳到 1 Hz——
+2026-10-16 实测同一页面：
 前台 88 Hz，后台整整 25 秒钉在 1.0 Hz（间隔中位 1000.5 ms）。而固件的快照新鲜度线是
 `MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS = 30` / `..._DISABLE_MS = 100`（照真机 CANopen
 命令超时）。两者天生冲突：**页面一失去焦点，台架就整臂掉力**，现场表现为"关节绕目标
@@ -17,12 +18,12 @@
 | 面 | 默认名 | 类型 | QoS |
 |---|---|---|---|
 | 入·设定值 | `/motor_command/setpoint` | `can_bridge_msgs/msg/MotorCommandArray` | `qos_reliable(1)`：低频声明、不允许静默丢（丢一条会拿旧目标继续跑） |
-| 出·流 | `/micro_ros_do/motor_command_array` | 同上 | `qos_stream()`：best-effort + VOLATILE + depth 1，与固件对该话题的订阅**逐字一致** |
+| 出·流 | `/motor/command_array` | 同上 | reliable + VOLATILE + depth 1：这是主机内通路，`micro_ros_bridge` 对它的订阅就是 reliable，best-effort 在 ROS 2 里不建连接 |
 | 入·活跃判据 | `/client_count` | `std_msgs/msg/Int32` | reliable |
 | 出·状态 | `/motor_command/status` | `std_msgs/msg/String`（JSON） | reliable |
 
-QoS 的判据只有一处：固件 `include/ros_qos.h`。**同一话题两边 QoS 不一致是静默失败**
-——话题存在、发布也"成功"，固件就是收不到。
+QoS 的判据只有两处：固件 `include/ros_qos.h` 与 `micro_ros_bridge` 的 `bridge_node.cpp`。
+**同一话题两边 QoS 不一致是静默失败**——话题存在、发布也"成功"，对端就是收不到。
 
 **网页侧必须改发设定值话题、并且不再自己定节拍**（`web_host/web/js/core/format.js` 的
 `command_topic`）。两个发布者同时发同一话题，固件会收到混合流。
@@ -65,7 +66,7 @@ QoS 的判据只有一处：固件 `include/ros_qos.h`。**同一话题两边 Qo
 
 | 落点 | 话题 | 谁切 |
 |---|---|---|
-| 直连固件 | `/micro_ros_do/motor_command_array` | — |
+| 直连 bridge | `/motor/command_array` | — |
 | 经重力前馈叠加 | `/robot_dynamics/command_array` | `bench_manager` 的 `/bench/{start,stop}_gravity_feedforward` |
 
 改道**不重起本进程**（重起会断流，撞上固件的命令超时软停，而机构没有抱闸），也不是
@@ -86,8 +87,8 @@ ros2 param set /command_streamer output_topic /robot_dynamics/command_array
 # 常态随 L1 起（web_host.launch.py）；单起用于排查
 ros2 run motor_command command_streamer
 ros2 topic echo /motor_command/status        # 常态观察看这条（reliable）
-# 真正下发的帧是 best-effort，看它要显式指定：
-ros2 topic echo /micro_ros_do/motor_command_array --qos-reliability best_effort
+# 真正下发的帧是 reliable，看它要显式指定：
+ros2 topic echo /motor/command_array --qos-reliability reliable
 ```
 
 参数：`stream_hz`(100)、`setpoint_topic`、`output_topic`（运行期可改）、

@@ -148,18 +148,20 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
   设备与记录重新一致。
 
   **参数面自 2026-09-21 起是话题，没有 ROS 参数服务器**（`ros2 param set/get` 全部
-  失效，web 参数页同期报废）。`field` 用**设备槽序**，与 `device_param_report` 的行序
-  同一套：`0`=位置下限 `1`=位置上限 `2`=转速上限 `3`=力矩上限 `4`=保护开关
-  `5`=方向。**力矩列的单位是安培**——设备侧权威量是 `0x2538` 的最大电流，折 N·m 要过
-  Kt×减速比×效率，该系数本身有未决争议（见 `motor-runtime-decision-log.md` §6.4）。
+  失效，web 参数页同期报废）。主机入口是 `/motor/param_set` 与 `/motor/system_command`，
+  由 `micro_ros_bridge` 统一编成线上 `/micro_ros_do/config`（`kind` 区分）。`field` 用
+  **设备槽序**，与 `device_param_report` 的行序同一套：`0`=位置下限 `1`=位置上限
+  `2`=转速上限 `3`=力矩上限 `4`=保护开关 `5`=方向。**力矩列的单位是安培**——设备侧
+  权威量是 `0x2538` 的最大电流，折 N·m 要过 Kt×减速比×效率，该系数本身有未决争议
+  （见 `motor-runtime-decision-log.md` §6.4）。
 
   ```bash
   # 单字段：改 1 号机的力矩上限（安培）。count 必须显式给，且等于 targets 长度
-  ros2 topic pub --once /micro_ros_do/param_set can_bridge_msgs/msg/ParamSetArray \
+  ros2 topic pub --once /motor/param_set can_bridge_msgs/msg/ParamSetArray \
     "{count: 1, targets: [{motor_id: 1, field: 3, value: 2.5}]}"
 
   # 位置限位必须在同一条消息内成对（只有一边 → 本地拒绝，last_error=10）
-  ros2 topic pub --once /micro_ros_do/param_set can_bridge_msgs/msg/ParamSetArray \
+  ros2 topic pub --once /motor/param_set can_bridge_msgs/msg/ParamSetArray \
     "{count: 2, targets: [{motor_id: 1, field: 0, value: -3.14},
                           {motor_id: 1, field: 1, value: 3.14}]}"
   ```
@@ -169,7 +171,7 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
   真落盘（W25 擦写有秒级耗时，此前报"完成"是错的）：
 
   ```bash
-  ros2 topic pub --once /micro_ros_do/system_command can_bridge_msgs/msg/SystemCommand \
+  ros2 topic pub --once /motor/system_command can_bridge_msgs/msg/SystemCommand \
     "{command: 0, motor_id: 65535}"       # 0=SAVE；SAVE 只接受 MOTOR_ID_NONE
   ros2 topic echo /micro_ros_up/system_status
   ```
@@ -182,7 +184,7 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
   保存码。
 
   ```bash
-  ros2 topic pub --once /micro_ros_do/system_command can_bridge_msgs/msg/SystemCommand \
+  ros2 topic pub --once /motor/system_command can_bridge_msgs/msg/SystemCommand \
     "{command: 2, motor_id: 1}"           # 1=REFRESH 回读, 3=CLEAR_FAULT 清故障
   ```
 
@@ -206,7 +208,7 @@ Ctrl-C 停止模拟器时脚本发送 `C` 关闭 CANable 通道并输出每节�
 反馈计数 `1546/1545×8`（2026-09-11 复测，当时数据段索引 `Y5`）。九节点拓扑现已让位于
 默认的 CERB 1=R58、2–4=R48 四节点拓扑；要重做九节点须显式传入节点参数。
 
-以下不属于只读指南：发布 `motor_command_array` 或发送任何电机运动目标
+以下不属于只读指南：发布 `/motor/command_array` 或发送任何电机运动目标
 （`MotorBind`/`motor_enable` 话题已删除）。继续前必须逐项记录环境与证据（拓扑、
 CANable 版本与索引、固件版本与位时序、每总线计数），并确认总线无真实电机且已取得
 外部操作权限。

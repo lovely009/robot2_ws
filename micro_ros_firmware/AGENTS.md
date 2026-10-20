@@ -122,17 +122,17 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 
 ## 参数面与内存
 
-- **参数面是三条话题，没有参数服务器**（2026-09-21 起）：下行
-  `micro_ros_do/param_set`（`ParamSetArray`，reliable）+ `micro_ros_do/system_command`
-  （`SystemCommand`，reliable），上行 `micro_ros_up/system_status`（`SystemStatus`，
+- **参数面是两条话题，没有参数服务器**（2026-09-21 起；2026-10-20 起下行为一条
+  `config`）：下行 `micro_ros_do/config`（`ConfigRequest`，reliable，`kind` 区分
+  `PARAM_SET` / `SYSTEM_COMMAND`），上行 `micro_ros_up/system_status`（`SystemStatus`，
   best-effort 5 Hz）。`ros2 param set/get` 与 `rclc_parameter` 已整体退役；
   参数不再占任何常驻堆（此前 72 槽常驻 23.6 KB DTCM 堆）。
-- **`param_set` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
+- **`ParamSetTarget` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
   3=torque_limit 4=limit_protect 5=direction），由 `src/param_bridge.cpp` 的
   `kFields[]` 显式列出——**不是** `PARAM_FIELD_COUNT` 枚举边界（PID 六项曾因此被
   静默带进参数树）。⚠️ 它也**不是** `param_field_t` 的次序（那里 3 = pos_min）：
   两套里 `field=3` 都合法，互用不报错、只静默写错槽位。
-- 位置限位必须**成对**出现在同一条 `param_set` 里；上界 16 目标 =
+- 位置限位必须**成对**出现在同一条 `PARAM_SET` 消息里；上界 16 目标 =
   `CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY`（有 `static_assert` 守着），
   **改 .msg 上界到 17+ 会立刻编译失败**——那是故意的。
 - `field=4`（limit_protect）是**正向语义**（1 = 设备侧保护生效），设备原值相反

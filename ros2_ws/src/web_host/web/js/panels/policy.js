@@ -1,4 +1,4 @@
-// 使能与增益（/micro_ros_do/motor_policy）：只写、固件不回读——表格里显示的是
+// 使能与增益（/motor/policy_array）：只写、固件不回读——表格里显示的是
 // 页面最后一次发出去的值（store.policy）。搬自重构前 app.js 的策略段。
 import { store, DIRTY, paramRowIds, writesAllowed } from '../core/store.js';
 import { $ } from '../core/format.js';

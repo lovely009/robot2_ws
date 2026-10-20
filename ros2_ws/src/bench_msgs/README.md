@@ -22,7 +22,8 @@
 - 空串字段 = "未给该参数"（与 launch 参数的缺省语义一致）；
 - 只有 `StartSimulation` 会编排其它子进程（HIL 时先起电机后端、失败回滚）。
 - **接线顺序是安全边界**：`StopGravityFeedforward` 的调用方要**先**把命令源话题切回
-  `/micro_ros_do/*` 直连再调本服务——反过来会出现「话题已切、节点没起」的空窗（见
+  `/motor/*` 直连（`micro_ros_bridge` 的主机入口）再调本服务——反过来会出现「话题已切、
+  节点没起」的空窗（见
   [ADR 0013](../../../docs/adr/0013-gravity-feedforward-ownership-and-web-toggle.md)）。
 
 构建：`colcon build --packages-select bench_msgs`（rosidl 生成，无运行代码）。

@@ -101,8 +101,8 @@ IMU 初始化不得放回 `setup()`：`BMI088_delay_ms` 内部使用 `vTaskDelay
 |---|---|
 | `ros_bridge` | agent 通信生命周期：node/executor/timer，断连整体重建；定时器依次轮询各域桥 |
 | `imu_bridge` | `micro_ros_up/imu/data` 与 `micro_ros_up/imu/temp` 的缓冲/填充/发布 |
-| `motor_bridge` | ID 化下行订阅（command/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
-| `param_bridge` | 参数面：下行 `param_set`/`system_command` 两条订阅 + 上行 `system_status`；参数写是异步事务，成败经 `last_error` 与完成序号呈现 |
+| `motor_bridge` | ID 化下行订阅（low_cmd/trajectory/policy）+ 上行发布（motion/status/topology/events/trajectory_state/diagnostics/device_param_report） |
+| `param_bridge` | 参数面：下行 `config` 一条订阅（`kind` 分参数写/系统命令）+ 上行 `system_status`；参数写是异步事务，成败经 `last_error` 与完成序号呈现 |
 | `motor_rt_task` | 唯一电机实时任务：1ms 服务 + 2ms/500Hz 控制边界，内核唯一调用者（消费快照/轨迹/策略/配置） |
 | `lib/session_sync` | 会话边沿/电平→内核授权的纯派生（500Hz 边界调用，host 可测） |
 | `lib/storage_projection` | 内核参数视图↔W25 blob 纯投影（持久化字段语义，host 可测） |
@@ -251,7 +251,7 @@ cd micro_ros_firmware
 头损坏时可能选错槽。无芯片/ID 不符静默降级为无持久化，不阻断启动。
 blob v3 = 32B 头 + 64×120B 记录（7712B）；v2（48B 记录）与 v1（32B 记录）
 加载时各自就地迁移到 v3（两条 fan-in 路径，**不是** v1→v2→v3 链）。
-保存**只有一个触发源**：`micro_ros_do/system_command` 的 `COMMAND_SAVE`。
+保存**只有一个触发源**：`micro_ros_do/config` 的 `kind=SYSTEM_COMMAND`、`COMMAND_SAVE`。
 设备写事务成功后只置脏（`record_dirty`），没有任何自动落盘——2026-09-21 起
 连那 500ms 去抖也删掉了（它会在控制边界里偷偷擦 flash）。`COMMAND_SAVE` 先分批
 下发设备保存请求并等待每台 `CONFIG_RESULT=OK`，然后才擦写非活动槽的**两个**扇区、
@@ -280,23 +280,24 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 建链后可见电机话题（消息均属 `can_bridge_msgs`，源在
 `../micro_ros_agent/src/can_bridge_msgs`）：
 
-订阅（下行，5 个话题）：
+订阅（下行，4 个话题；线上契约见 `WireContract.msg`）：
 
-- `/micro_ros_do/motor_command_array`（`MotorCommandArray`，best-effort）：`motor_id +
-  position/velocity/effort` 完整快照；NaN/Inf、未知或重复 `motor_id` 整体拒绝。
-  缺席的受控电机立即软停，禁止沿用旧目标。
-  **快照到达速率不决定命令速率**：受理后的目标由内核在每个 2ms/500Hz 控制边界
-  保持重发（零阶保持，仅在快照新鲜 ≤30ms 期间），所以上行即使按 50Hz 发，
-  驱动器侧收到的目标为 500Hz 命令流。上行送达率实测封顶 ~72/s（best-effort
-  静默丢弃），因此**不要**靠提高快照频率去提高命令率——那是无效的。
-- `/micro_ros_do/motor_trajectory`（`MotorTrajectory`，reliable）：多点轨迹，见下节。
-- `/micro_ros_do/motor_policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd，见下节。
-- `/micro_ros_do/param_set`（`ParamSetArray`，reliable）：稀疏参数写（限位/限速/限流/
-  保护开关/方向），见「参数面」节。
-- `/micro_ros_do/system_command`（`SystemCommand`，reliable）：保存/回读/设零点/清故障，
-  见「参数面」节。
+- `/micro_ros_do/low_cmd`（`LowCommand`，best-effort）：100 Hz 完整命令快照，
+  位置/速度/力矩是 int16 定点（量程见 `WireContract`）；未列出的电机 = 软停。
+- `/micro_ros_do/config`（`ConfigRequest`，reliable）：参数写与系统命令合一，
+  `kind` 区分 `PARAM_SET` / `SYSTEM_COMMAND`，两组字段互斥。
+- `/micro_ros_do/policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd。
+- `/micro_ros_do/trajectory`（`MotorTrajectory`，reliable）：多点轨迹。
 
-### 多点轨迹（`/micro_ros_do/motor_trajectory`）
+上行仍是旧话题（名称与节拍见下一节）；S4 切流后本节与上行表一起重写。
+
+`low_cmd` 的 NaN/Inf、未知或重复 `motor_id` 整体拒绝；缺席的受控电机立即软停，
+禁止沿用旧目标。**快照到达速率不决定命令速率**：受理后的目标由内核在每个
+2ms/500Hz 控制边界保持重发（零阶保持，仅在快照新鲜 ≤30ms 期间），所以上行即使
+按 50Hz 发，驱动器侧收到的目标为 500Hz 命令流。上行送达率实测封顶 ~72/s
+（best-effort 静默丢弃），因此**不要**靠提高快照频率去提高命令率——那是无效的。
+
+### 多点轨迹（`/micro_ros_do/trajectory`）
 
 轨迹是完整快照的**时序补充**通道，不是替代品：快照给"现在在哪"，轨迹给
 "未来一段时间怎么走"。同一 `trajectory_id` 可拆成多个可靠分段，分段带有
@@ -348,23 +349,22 @@ CAN 命令**每台每个边界恰好一条（500Hz）**；CERB 同总线最多 6
   状态帧的 `fault_active` 判定，走既有 `FAULT → READY_DISABLED` 路径，无新确认
   机制。Vaxor 控制帧没有清错位 → 内核回 `UNSUPPORTED`（不猜厂家字节）。
 - 清错帧是控制类帧，**仅非运动态受理**（与设备侧限位写同口径）；清完仍须显式
-  **重新武装**（`/micro_ros_do/motor_policy` 的 `enabled=true`，且代数须前进）+ 新的完整
+  **重新武装**（`/micro_ros_do/policy` 的 `enabled=true`，且代数须前进）+ 新的完整
   快照/轨迹才可能回运动（ARD §36）。
 
 只读完成序号 `system_status.clear_fault_seq`，用法同 `set_zero_seq`（发命令 → 轮询
 seq 收敛，不要只看 `last_error`）。
 
-### 参数面：三条话题（2026-09-21 起，rclc 参数服务器已退役）
+### 参数面：两条话题（2026-09-21 起，rclc 参数服务器已退役）
 
 参数面**全部是话题**，没有 ROS 参数服务器：
 
 | 方向 | 话题 | 类型 | QoS | 说明 |
 |---|---|---|---|---|
-| 下行 | `micro_ros_do/param_set` | `ParamSetArray` | reliable | 稀疏参数写，**整条受理或整条拒绝** |
-| 下行 | `micro_ros_do/system_command` | `SystemCommand` | reliable | `SAVE` / `REFRESH` / `SET_ZERO` / `CLEAR_FAULT` |
+| 下行 | `micro_ros_do/config` | `ConfigRequest` | reliable | `kind=PARAM_SET`：稀疏参数写，**整条受理或整条拒绝**；`kind=SYSTEM_COMMAND`：`SAVE` / `REFRESH` / `SET_ZERO` / `CLEAR_FAULT` / `REPORT` |
 | 上行 | `micro_ros_up/system_status` | `SystemStatus` | best-effort, 5 Hz | `last_error` 电平 + 四个完成序号 |
 
-- **`param_set` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
+- **`ParamSetTarget` 的 `field` 是设备槽序**（0=pos_min 1=pos_max 2=vel_limit
   3=torque_limit 4=limit_protect 5=direction），与 `device_param_report` 的行序、
   `mismatch_mask`/`record_dirty_slots` 的位序同一套——读写同序可比。
   ⚠️ **它不等于 `param_field_t` 的次序**（那里 3 = pos_min、5 = vel_limit）；两套里
@@ -375,18 +375,19 @@ seq 收敛，不要只看 `last_error`）。
   表达得了"下限 < 上限"这个约束；只想改一边时另一边从 `device_param_report` 的
   `rec_pos_*` 读回一起发。
 - **上界 16 是内核约束不是带宽约束**：每个目标一次配置 FIFO 提交，而该 FIFO 深 16。
-  参数面是唯一逐目标进 FIFO 的下行路径（command/trajectory/policy 都是整条快照一次
+  参数面是唯一逐目标进 FIFO 的下行路径（low_cmd/trajectory/policy 都是整条快照一次
   提交），有 `static_assert` 守着。
-- **写是异步事务**：`param_set` 同步返回只表示"已受理"，成败经内核 `CONFIG_RESULT`
-  事件异步给出，最终呈现为 `system_status.last_error`。**失败不回滚、没有影子**——
-  话题是命令不是状态副本；失败即 `last_error` + `record_dirty` 不翻转，重发即可。
+- **写是异步事务**：`config`（`kind=PARAM_SET`）同步返回只表示"已受理"，成败经内核
+  `CONFIG_RESULT` 事件异步给出，最终呈现为 `system_status.last_error`。**失败不回滚、
+  没有影子**——话题是命令不是状态副本；失败即 `last_error` + `record_dirty` 不翻转，
+  重发即可。
 - **完成判据是序号不是错误码**：`system_status` 的 `refresh_seq`/`set_zero_seq`/
   `clear_fault_seq`/`save_seq` 只增不减，每次命令收尾（**无论成败**）+1。只看
   `last_error` 分不清"上一轮成功留下的 0"和"这一轮还没跑"。
 - **`save_in_progress` 覆盖全程**：设备侧分批下发、等待每台 `CONFIG_RESULT`、W25
   落盘三段都算"保存中"，必须等设备侧全部成功且 W25 出终态才转 false。旧实现把
   设备请求推出完或落盘请求发出误当成"保存完成"，报告完成时设备/W25 可能仍未完成。
-- **`enable`/`kp`/`kd` 不在这里**：它们在 `/micro_ros_do/motor_policy`。这三项变化快，
+- **`enable`/`kp`/`kd` 不在这里**：它们在 `/micro_ros_do/policy`。这三项变化快，
   且 ARD §19.4 本就禁止它们进命令快照。**稀疏语义**：只影响列出的电机，其余保持原状。
   **代数门**：「未武装 → 武装」要求 `policy_generation` 严格前进，挡住「周期
   重发同一条策略」在故障后自动复权（挡不住每次都递增代数的发布者——那与人工
@@ -416,7 +417,7 @@ seq 收敛，不要只看 `last_error`）。
 
 设备侧管理对象（`0x607D:01/:02` 位置限位、`0x6080` 电机端最大转速、
 `0x2538` 电机端峰值电流）的写 + 读回核验留在内核/adapter 层（写仅限未运动
-状态，读回不一致收敛 `UNCONFIRMED`），ROS 侧入口是 `param_set` 的
+状态，读回不一致收敛 `UNCONFIRMED`），ROS 侧入口是 `config`（`kind=PARAM_SET`）的
 `FIELD_POS_MIN`/`FIELD_POS_MAX`/`FIELD_VEL_LIMIT`/`FIELD_TORQUE_LIMIT`（见下）。
 
 **参数单位（2026-09-20 改）**：位置 **rad**、速度 **rad/s**、力矩 **安培**。前两项与内核、
@@ -472,9 +473,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   `lib/motor_control/src/motor_control_config.c` 放开注释掉的
   `freeze_entry_as_conflict(...)`。设备参数结论不再驱动 `CONFIG_CONFLICT` 生命周期与
   `system_status.last_error`（那两者现在只对**身份冲突**保留）；
-- **写 ≠ 保存**：从 `param_set` 写回该台参数只改设备 RAM 与固件记录（写后立即重判，
-  写齐即转好），要**持久化**必须再点「保存」（写 `0x2539` + 落 W25）。未保存的台在
-  `micro_ros_up/device_param_report` 上 `record_dirty=true`，页面标黄。
+- **写 ≠ 保存**：从 `config`（`kind=PARAM_SET`）写回该台参数只改设备 RAM 与固件记录
+  （写后立即重判，写齐即转好），要**持久化**必须再点「保存」（写 `0x2539` + 落 W25）。
+  未保存的台在 `micro_ros_up/device_param_report` 上 `record_dirty=true`，页面标黄。
 - **运行中回读发现不一致 → 只报结论**（`dev_init=MISMATCH`），**不动运行态**：
   不软停、不失能、不掉授权（2026-10-12 起；此前是"软停、保留使能"）；
 - 自动回读失败会退避重试（≤3 次、间隔 500ms；读是只读事务，重试无副作用），
@@ -501,7 +502,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 ⚠️ 归一未收尾前，人工 `COMMAND_REFRESH`（页面"回读"按钮）会被拒绝（BUSY）——否则
 读到的同样是归一前的值，还会把该台锁在冲突态、连归一都做不下去。
 
-**方向参数（`param_set` 的 `FIELD_DIRECTION`，0 = CW / 1 = CCW，原值直通不反转）**：可读可写，
+**方向参数（`ParamSetTarget` 的 `FIELD_DIRECTION`，0 = CW / 1 = CCW，原值直通不反转）**：可读可写，
 写 = SDO 写 `0x2541:00` + 读回核验，仅未运动时受理。**真机实测（2026-09-20）纠正**：翻转**不**改变位置坐标系——同一物理方向转动
 关节时，设备侧 `0x6064` 的计数方向不随 `0x2541` 变化（同向转两次 Δ 均为正：
 +2394 / +2573 cnt），`0x607D` 限位对象也全程不变。所以**零点与限位都不镜像、
@@ -575,9 +576,9 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - `micro_ros_up/device_param_report`（`DeviceParamReport`，**按需**：REPORT
   命令 / CONFIG_RESULT 写事务收尾 / DEV_INIT 设备初始化结论）：
   参数核对双行快照（固件记录列 / 驱动板回读列，同槽位同单位、力矩列按 A）+ 未
-  保存标记 + 不一致槽位位图。**它是 `param_set` 的读侧对照**：写之前先读回
-  `rec_*` 列，位置限位要成对发就把两边一起读出来（行序与 `param_set` 的 `field`
-  是同一套）。没有在线电机时帧里 `dev_*` 全为 NaN，上层看到的就是板内参数表。
+  保存标记 + 不一致槽位位图。**它是 `config`（`kind=PARAM_SET`）的读侧对照**：写之前
+  先读回 `rec_*` 列，位置限位要成对发就把两边一起读出来（行序与 `ParamSetTarget` 的
+  `field` 是同一套）。没有在线电机时帧里 `dev_*` 全为 NaN，上层看到的就是板内参数表。
 - `micro_ros_up/system_status`（`SystemStatus`，5 Hz + 变化即发）：`last_error`
   电平 + `last_error_motor` + `refresh/set_zero/clear_fault/save_seq` +
   `save_in_progress`。参数面的"这次命令跑完没有"只由它回答（见「参数面」节）。
@@ -746,7 +747,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
   目标位置 0、前馈 0，即「零刚度 + 保持使能」。受控保持的能力其实已存在（轨迹通道的
   末点钳持 + `motor_control_hold_step` 每 2 ms 重发），缺的是**安全级联没有第三档去调用它**。
   另一前提：真正的前馈来源在上位，`robot_dynamics` 目前不实现重力补偿。
-- [ ] 策略通道真机（`micro_ros_do/motor_policy` 的 enable/kp/kd）：代数门（故障后重发同一代数
+- [ ] 策略通道真机（`micro_ros_do/policy` 的 enable/kp/kd）：代数门（故障后重发同一代数
   必须被拒）、稀疏语义（未列出的电机保持原状）、断连重连后未重新武装不得自动复权。逻辑 host 已覆盖。
 - [ ] 快照通道 500 Hz 命令率真机（把上位快照按 50 Hz 发，低于 30 ms 新鲜度阈值）。
 - [ ] 快照拒绝真机注入：NaN/Inf、未知/重复/跨总线 ID、非法 mode；厂家故障锁存、心跳丢失

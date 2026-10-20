@@ -57,9 +57,10 @@ CAN MIT 帧给电机：`τ = kp(p_des−p) + kd(v_des−v) + τ_ff`。**τ_ff �
 `MotorTrajectoryPoint.effort` 就是它。
 
 三个命令源（web 上位机、`micro_ros_agent/tools/snapshot_stream.py`、`traj_play.py`）默认直接
-发 `/micro_ros_do/motor_command_array`（轨迹走 `/micro_ros_do/motor_trajectory`）。micro-ROS
-Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名又是编译期常量——所以「夹在
-中间加前馈」只能靠**改命令源的话题名**，本节点就是那个中间层：
+发 `/motor/command_array`（轨迹走 `/motor/trajectory`），再由 `micro_ros_bridge` 编成线上
+`low_cmd` / `trajectory`。micro-ROS Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，
+固件侧话题名又是编译期常量——所以「夹在中间加前馈」只能靠**改命令源的话题名**，本节点
+就是那个中间层：
 
     命令源 ──► /robot_dynamics/command_array ─┐
     命令源 ──► /robot_dynamics/trajectory    ─┤
@@ -68,7 +69,7 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
                                                │
                              ┌─────────────────┴─────────────────┐
                              ▼                                   ▼
-               /micro_ros_do/motor_command_array   /micro_ros_do/motor_trajectory ──► 固件
+               /motor/command_array   /motor/trajectory ──► micro_ros_bridge ──► 固件
 
 **按需旁路，默认不变**：命令源的默认话题保持原样，只有启用前馈时才被指到
 `/robot_dynamics/*`。本节点不是必经一跳。
@@ -80,11 +81,12 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
 | 订阅 | `robot_dynamics/command_array` | `can_bridge_msgs/MotorCommandArray` | reliable + volatile，深度 1 |
 | 订阅 | `robot_dynamics/trajectory` | `can_bridge_msgs/MotorTrajectory` | reliable + volatile，深度 10 |
 | 订阅 | `joint_states` | `sensor_msgs/JointState` | reliable + volatile，深度 1 |
-| 发布 | `micro_ros_do/motor_command_array` | `can_bridge_msgs/MotorCommandArray` | **best_effort** + volatile，深度 1 |
-| 发布 | `micro_ros_do/motor_trajectory` | `can_bridge_msgs/MotorTrajectory` | **reliable** + volatile，深度 1 |
+| 发布 | `/motor/command_array` | `can_bridge_msgs/MotorCommandArray` | **reliable** + volatile，深度 1 |
+| 发布 | `/motor/trajectory` | `can_bridge_msgs/MotorTrajectory` | **reliable** + volatile，深度 1 |
 
-输出 QoS 是**照固件订阅端定的**，不是本节点的偏好：固件对命令的订阅是 BEST_EFFORT/VOLATILE、
-对轨迹是 RELIABLE——轨迹发 best_effort 会被**静默拒收**，别按"更可靠总是更好"顺手改。
+输出 QoS 是**照 `micro_ros_bridge` 主机入口的订阅端定的**，不是本节点的偏好：bridge 对
+`/motor/*` 的订阅是 RELIABLE（随后它按线上契约重新编码并选用线上 QoS）——发
+best_effort 在 ROS 2 里不建连接、静默失效，别按"更可靠总是更好"顺手改。
 
 ### 参数
 
@@ -94,8 +96,8 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
 | `joint_map` | string | `1:joint_link1,...,9:joint_link9,10:joint_link1.1,...,18:joint_link9.9` | `motor_id:关节名` 逗号分隔；空串 = 用内置兜底表。**兜底表只对默认模型 `half_body_robot` 正确**，换模型必须传参（该表此前因换模型静默失效过一次）。条目畸形、id 非 0..65535、id 重复、关节名为空 → 构造期抛异常 |
 | `command_input_topic` | string | `robot_dynamics/command_array` |  |
 | `trajectory_input_topic` | string | `robot_dynamics/trajectory` |  |
-| `command_output_topic` | string | `micro_ros_do/motor_command_array` | 固件订阅的话题 |
-| `trajectory_output_topic` | string | `micro_ros_do/motor_trajectory` | 固件订阅的话题 |
+| `command_output_topic` | string | `/motor/command_array` | `micro_ros_bridge` 的主机入口 |
+| `trajectory_output_topic` | string | `/motor/trajectory` | `micro_ros_bridge` 的主机入口 |
 | `joint_states_topic` | string | `joint_states` | 快照通道的构型来源 |
 | `joint_states_timeout_s` | double | `0.5` | 超过这么久没有新的 `/joint_states` 就视为 τ_g 不可用（原样转发）；`0` = 永远视为过期（A/B 直通用） |
 | `effort_gain` | double | `1.0` | 乘在 τ_g 上；**运行期可改**（`ros2 param set /gravity_feedforward_overlay effort_gain 0.0`），0 时输出逐字段等于输入 |
@@ -148,7 +150,7 @@ Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，固件侧话题名�
 关的时候反过来（先改道回直连、**确认成功才**停节点）。顺序反过来会出现「话题已切、
 节点没起」的空窗，或停止时「节点没了、接线还指着它」——两种都让命令落进没人订阅的话题。
 
-手工路径（其它命令源 / 排查）：命令源不再直接发 `/micro_ros_do/*`，改指到
+手工路径（其它命令源 / 排查）：命令源不再直接发 `/motor/*`，改指到
 `/robot_dynamics/*`（各命令源自己改话题名或 remap）；然后起节点：
 
 ```bash

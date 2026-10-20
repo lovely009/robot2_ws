@@ -23,3 +23,9 @@ def test_bridge_node_is_started():
         and action.node_executable == 'micro_ros_bridge_node'
     ]
     assert found, 'robot.launch.py 没有起 micro_ros_bridge：下行没有编码者'
+    assert len(found) == 1, (
+        f'robot.launch.py 起了 {len(found)} 个 micro_ros_bridge：下行只允许一个编码者')
+    # Node.node_name 要 execute 后才可读（launch_ros 的实现），这里取构造参数。
+    raw_name = getattr(found[0], '_Node__node_name')
+    assert raw_name == 'micro_ros_bridge', (
+        f'micro_ros_bridge 节点名是 {raw_name!r}，应为微固件侧约定的名字')

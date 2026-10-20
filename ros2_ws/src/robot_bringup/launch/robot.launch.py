@@ -1,4 +1,4 @@
-"""台架唯一入口：L1（rosbridge + 静态页）+ L2（bench_manager）。
+"""台架唯一入口：L1（rosbridge + 静态页 + micro_ros_bridge）+ L2（bench_manager）。
 
 L3 的三个会话 unit（仿真 / 电机后端 / micro-ROS Agent）由 bench_manager 按需起停——
 那是页面上「启动」按钮的事，本 launch 不碰它们。

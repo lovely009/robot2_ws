@@ -11,24 +11,24 @@ export const TOPICS = {
   // 下·设定值（ADR 0014）：页面只下**设定值**，100 Hz 的完整快照流由主机侧
   // command_streamer 出。节拍不能留在页面里——浏览器把后台标签页的定时器钳到 1 Hz，
   // 而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力。
-  // 它**不是**运行期可变的：命令从哪条路出去（直连固件 / 经叠加节点）由 bench_manager
+  // 它**不是**运行期可变的：命令从哪条路出去（直连 bridge / 经叠加节点）由 bench_manager
   // 改 streamer 的 output_topic 决定，页面只读回执核对（见 TOPICS.commandStatus）。
   setpoint: {name: '/motor_command/setpoint',
     type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  // ⚠️ 轨迹的 name 是**运行期可变**的：重力补偿开关在「直连固件」与「经叠加节点」
+  // ⚠️ 轨迹的 name 是**运行期可变**的：重力补偿开关在「直连 bridge」与「经叠加节点」
   // 之间切它。唯一改写点是 core/ros.js 的 setDownlinkRoute（换名必须连带换发布者，
   // 散着改会让轨迹发到没人订阅的话题上）。
-  trajectory: {name: '/micro_ros_do/motor_trajectory',
+  trajectory: {name: '/motor/trajectory',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
   // 命令节拍节点的状态（JSON）：`output_topic` 是命令**当前实际发往**哪里。
   // 改道由服务端做，页面切不了，所以只能读它来核对开关与接线是否一致。
   commandStatus: {name: '/motor_command/status', type: 'std_msgs/msg/String'},
   trajectoryState: {name: '/micro_ros_up/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
-  policy: {name: '/micro_ros_do/motor_policy', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
+  policy: {name: '/motor/policy_array', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
   devParams: {name: '/micro_ros_up/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
   sysStatus: {name: '/micro_ros_up/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
-  paramSet: {name: '/micro_ros_do/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
-  sysCmd: {name: '/micro_ros_do/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
+  paramSet: {name: '/motor/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
+  sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
   // 关节侧实测构型：施加前馈时它是 τ_g 的**唯一**输入，而叠加节点在它超时/缺席时
   // 整帧原样转发（见 robot_dynamics/README.md 的安全不变式）——所以「开关亮着但
   // 没有补偿」是静默的，页面得自己看得见这条流的死活。

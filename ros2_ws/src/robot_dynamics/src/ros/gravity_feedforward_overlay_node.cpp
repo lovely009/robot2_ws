@@ -117,9 +117,9 @@ GravityFeedforwardOverlayNode::GravityFeedforwardOverlayNode(
   parameters.trajectory_input_topic = declare_parameter<std::string>(
       "trajectory_input_topic", "robot_dynamics/trajectory");
   parameters.command_output_topic = declare_parameter<std::string>(
-      "command_output_topic", "micro_ros_do/motor_command_array");
+      "command_output_topic", "/motor/command_array");
   parameters.trajectory_output_topic = declare_parameter<std::string>(
-      "trajectory_output_topic", "micro_ros_do/motor_trajectory");
+      "trajectory_output_topic", "/motor/trajectory");
   parameters.joint_states_topic =
       declare_parameter<std::string>("joint_states_topic", "joint_states");
   parameters.joint_states_timeout_s =
@@ -170,12 +170,13 @@ void GravityFeedforwardOverlayNode::initialize(
         return result;
       });
 
-  // 输出 QoS 按固件订阅端（见 README）：命令 BEST_EFFORT，轨迹 RELIABLE。
-  // 发错会被固件静默拒收，别按"本节点自己的偏好"改。深度 1：快照/分段都是覆盖语义。
+  // 输出落到 bridge 的主机入口：那条订阅端是 RELIABLE，发 BEST_EFFORT
+  // 在 ROS 2 里不建连接（静默失效）。轨迹仍是 reliable。
+  // 深度 1：快照/分段都是覆盖语义。
   command_publisher_ =
       create_publisher<can_bridge_msgs::msg::MotorCommandArray>(
           parameters.command_output_topic,
-          rclcpp::QoS(1).best_effort().durability_volatile());
+          rclcpp::QoS(1).reliable().durability_volatile());
   trajectory_publisher_ =
       create_publisher<can_bridge_msgs::msg::MotorTrajectory>(
           parameters.trajectory_output_topic,

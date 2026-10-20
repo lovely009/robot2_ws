@@ -173,7 +173,7 @@ robot_dynamics::GravityFeedforwardOverlayParameters test_parameters(
 }
 
 // in-process 装置：被测节点 + 观察节点 + 单线程执行器 + 收件箱。
-// 观察侧的 QoS 必须与节点输出端兼容：命令输出是 best_effort，轨迹输出 reliable。
+// 观察侧的 QoS 必须与节点输出端兼容：命令输出是 reliable（bridge 订阅端），轨迹输出 reliable。
 struct Harness {
   Harness(std::shared_ptr<robot_dynamics::GravityFeedforwardOverlayNode> node_in,
           const robot_dynamics::GravityFeedforwardOverlayParameters & topics_in)
@@ -183,7 +183,7 @@ struct Harness {
     command_subscription =
         observer->create_subscription<can_bridge_msgs::msg::MotorCommandArray>(
             topics.command_output_topic,
-            rclcpp::QoS(1).best_effort().durability_volatile(),
+            rclcpp::QoS(1).reliable().durability_volatile(),
             [this](const can_bridge_msgs::msg::MotorCommandArray & message) {
               commands.push_back(message);
             });
@@ -606,4 +606,12 @@ TEST(GravityFeedforwardOverlayNode, EffortGainIsRuntimeChangeableAndZeroIsIdenti
       });
   EXPECT_TRUE(command_frames_identical(passthrough, command));
   rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayDefaults, OutputsGoThroughBridge) {
+  // 叠加节点是主机侧命令源之一：输出必须落在 bridge 的主机入口，
+  // 直发线上话题会让命令绕过 schema 门禁与定点编码。
+  robot_dynamics::GravityFeedforwardOverlayParameters parameters;
+  EXPECT_EQ(parameters.command_output_topic, "/motor/command_array");
+  EXPECT_EQ(parameters.trajectory_output_topic, "/motor/trajectory");
 }

@@ -4,8 +4,8 @@
 那条路上不存在。会话描述（模型 / URDF / 关节映射 / 增益）存进 unit 环境，bench_manager
 重启后仍读得回来。
 
-适用面是「STM32 在环」：叠加节点输出话题 `/micro_ros_do/*` 的唯一订阅者是固件，纯
-Gazebo / 纯 MuJoCo / `controller_mode:=host` 三路没有订阅者。边界见 ADR 0013。
+适用面是「STM32 在环」。叠加节点与 bridge 的入口是主机侧 `/motor/*`；线上
+`/micro_ros_*` 只由 `micro_ros_bridge` 读写。边界见 ADR 0013。
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ from .systemd_units import (
     config_env, config_from_env,
 )
 
-# 命令流的两个落点（ADR 0014）：直连固件，或经叠加节点。**本文件是这两个名字的权威**
+# 命令流的两个落点（ADR 0014）：直连 bridge，或经叠加节点。**本文件是这两个名字的权威**
 # ——切换由本包执行（改 command_streamer 的 output_topic），前端只读回执核对，所以
 # web_host 的静态契约测试从这里对账，而不是在前端再抄一份字面量。
-DIRECT_COMMAND_TOPIC = "/micro_ros_do/motor_command_array"
+DIRECT_COMMAND_TOPIC = "/motor/command_array"
 OVERLAY_COMMAND_TOPIC = "/robot_dynamics/command_array"
 
 _CONFIG_ENV_PREFIX = "BENCH_FEEDFORWARD_"

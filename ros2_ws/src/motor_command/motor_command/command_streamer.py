@@ -18,11 +18,11 @@ from std_msgs.msg import Int32, String
 
 from can_bridge_msgs.msg import MotorCommandArray
 
-# 出·流：与固件对 motor_command_array 的订阅（lib 的 qos_stream()）同一条判据——
-# 高频流、latest-wins，depth 1 保证不积压过期快照。订阅方要用 best-effort 才收得到
-# （ros2 topic echo --qos-reliability best_effort）；常态观察看 ~/status。
-STREAM_QOS = QoSProfile(
-    reliability=ReliabilityPolicy.BEST_EFFORT,
+# 出·流：落点是主机侧 /motor/command_array（micro_ros_bridge 的入口）。
+# 这是**主机内**通路，用 reliable depth 1：bridge 的订阅端就是 reliable，
+# 且叠加路线的命令输入也是 reliable——发 best-effort 在 ROS 2 里不建连接。
+COMMAND_OUTPUT_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.RELIABLE,
     durability=DurabilityPolicy.VOLATILE,
     history=HistoryPolicy.KEEP_LAST,
     depth=1,
@@ -65,10 +65,10 @@ class CommandStreamer(Node):
         setpoint_topic = self.declare_parameter(
             "setpoint_topic", "/motor_command/setpoint").value
         # output_topic 是**运行期可改**的：重力补偿开关（ADR 0013 / 0014）把命令流在
-        # 「直连固件」与「经 gravity_feedforward_overlay」之间切，切换由 bench_manager
+        # 「直连 bridge」与「经 gravity_feedforward_overlay」之间切，切换由 bench_manager
         # 的服务执行，不重起本进程——重起会断流，撞上固件的命令超时软停。
         self.output_topic = self.declare_parameter(
-            "output_topic", "/micro_ros_do/motor_command_array").value
+            "output_topic", "/motor/command_array").value
         client_count_topic = self.declare_parameter(
             "client_count_topic", "/client_count").value
         status_topic = self.declare_parameter(
@@ -97,7 +97,7 @@ class CommandStreamer(Node):
         self.create_subscription(Int32, client_count_topic,
                                  self._on_client_count, CLIENT_COUNT_QOS)
         self.pub = self.create_publisher(MotorCommandArray, self.output_topic,
-                                         STREAM_QOS)
+                                         COMMAND_OUTPUT_QOS)
         self.status_pub = self.create_publisher(String, status_topic,
                                                 SETPOINT_QOS)
         self.create_timer(1.0 / self.stream_hz, self._tick)
@@ -129,7 +129,8 @@ class CommandStreamer(Node):
         if topic is None or topic == self.output_topic:
             return
         previous = self.pub
-        self.pub = self.create_publisher(MotorCommandArray, topic, STREAM_QOS)
+        self.pub = self.create_publisher(MotorCommandArray, topic,
+                                         COMMAND_OUTPUT_QOS)
         self.destroy_publisher(previous)
         self.output_topic = topic
         self.get_logger().info(f"命令输出话题切到 {topic}")

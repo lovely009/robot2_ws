@@ -506,6 +506,30 @@ def test_command_route_topics_match_bench_manager():
             f'{name} 与 bench_manager 不一致：前端 {m.group(1)}，后端 {expected}')
 
 
+def test_downlink_topics_are_host_facade():
+    """页面的下行只发主机侧 /motor/*：线上编码与文件名是 bridge 的私有实现。
+
+    这五条在 S3 之后不再由固件直接订阅；页面若漏改一条，症状是「按钮点了没反应」
+    而 ROS 侧毫无报错。
+    """
+    js = FORMAT_JS.read_text(encoding='utf-8')
+    expected = {
+        'trajectory': '/motor/trajectory',
+        'policy': '/motor/policy_array',
+        'paramSet': '/motor/param_set',
+        'sysCmd': '/motor/system_command',
+    }
+    for key, topic in expected.items():
+        m = re.search(
+            rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
+        assert m, f'format.js 里找不到 TOPICS.{key}'
+        assert m.group(1) == topic, f'{key} 仍发线上话题：{m.group(1)}'
+
+    agent_js = AGENT_JS.read_text(encoding='utf-8')
+    m = re.search(r"DIRECT_COMMAND_TOPIC\s*=\s*'([^']+)'", agent_js)
+    assert m and m.group(1) == '/motor/command_array', '直连落点仍是线上话题'
+
+
 def test_downlink_switch_rewires_the_publisher():
     """切接线是「改话题名 + 换发布者」一件事的两半，只做一半就是静默失效。
 

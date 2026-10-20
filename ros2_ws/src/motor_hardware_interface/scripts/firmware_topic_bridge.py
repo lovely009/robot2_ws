@@ -2,7 +2,7 @@
 """固件 ↔ ROS 标准话题适配桥（节点入口；转换与校验见 topic_bridge 模块）。
 
     上行  micro_ros_up/motion_states         → /joint_states
-    下行  /arm_controller/joint_trajectory → micro_ros_do/motor_trajectory
+    下行  /arm_controller/joint_trajectory → /motor/trajectory
 
 固件接口是 ID 化、无关节名的私有话题（micro_ros_up/...）；ROS 生态用的是按关节名
 索引的标准话题。ARD-0007 禁止 MCU 维护 joint_name，所以映射放在这一侧。
@@ -59,7 +59,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.declare_parameter('trajectory_in_topic',
                                    '/arm_controller/joint_trajectory')
             self.declare_parameter('trajectory_out_topic',
-                                   'micro_ros_do/motor_trajectory')
+                                   '/motor/trajectory')
 
             ids = list(self.get_parameter('motor_ids').value)
             names = list(self.get_parameter('joint_names').value)

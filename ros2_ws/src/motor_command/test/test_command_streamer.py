@@ -12,8 +12,8 @@ from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import Int32
 
 from can_bridge_msgs.msg import MotorCommandArray, MotorCommandTarget
-from motor_command.command_streamer import (CLIENT_COUNT_QOS, SETPOINT_QOS,
-                                            STREAM_QOS, CommandStreamer)
+from motor_command.command_streamer import (CLIENT_COUNT_QOS, COMMAND_OUTPUT_QOS,
+                                            SETPOINT_QOS, CommandStreamer)
 
 
 class _Recorder:
@@ -165,14 +165,15 @@ def test_status_reports_stream_state(streamer):
     assert status["setpoint_age_s"] >= 0.0
 
 
-def test_stream_qos_matches_the_firmware_subscription():
-    """出·流的 QoS 必须与固件对同一话题的订阅同判据（lib 的 qos_stream()）。
+def test_command_output_qos_is_reliable():
+    """命令流在主机内走：bridge 订阅端是 reliable，节拍器必须同一条判据。
 
-    两边不一致是静默失败：话题存在、发布也"成功"，固件就是收不到。
+    也顺带修掉叠加路线：overlay 的命令输入订阅是 reliable，发 best-effort
+    在 ROS 2 里**不建连接**（静默失效）。
     """
-    assert STREAM_QOS.reliability == ReliabilityPolicy.BEST_EFFORT
-    assert STREAM_QOS.durability == DurabilityPolicy.VOLATILE
-    assert STREAM_QOS.depth == 1
+    assert COMMAND_OUTPUT_QOS.reliability == ReliabilityPolicy.RELIABLE
+    assert COMMAND_OUTPUT_QOS.durability == DurabilityPolicy.VOLATILE
+    assert COMMAND_OUTPUT_QOS.depth == 1
 
 
 def test_setpoint_qos_is_reliable():
@@ -201,23 +202,23 @@ def test_output_topic_switches_at_runtime():
     """
     node = CommandStreamer()
     try:
-        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+        assert node.pub.topic_name == "/motor/command_array"
 
         result = node._on_set_parameters(
             [Parameter("output_topic", value="/robot_dynamics/command_array")])
         assert result.successful
         # 推迟到下一拍才换：回调跑在参数值落定之前，那里动发布者会让
         # "参数已改"与"实际发往哪"短暂不一致
-        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+        assert node.pub.topic_name == "/motor/command_array"
         node._tick()
         assert node.pub.topic_name == "/robot_dynamics/command_array"
         assert node.output_topic == "/robot_dynamics/command_array"
 
         # 切回来（关开关走同一条路）
         node._on_set_parameters(
-            [Parameter("output_topic", value="/micro_ros_do/motor_command_array")])
+            [Parameter("output_topic", value="/motor/command_array")])
         node._tick()
-        assert node.pub.topic_name == "/micro_ros_do/motor_command_array"
+        assert node.pub.topic_name == "/motor/command_array"
     finally:
         node.destroy_node()
 
@@ -231,9 +232,9 @@ def test_malformed_output_topic_is_refused(streamer):
         assert streamer._pending_output_topic is None
     # 被拒的设定值不改变现状：还是发原话题
     streamer._tick()
-    assert streamer.output_topic == "/micro_ros_do/motor_command_array"
+    assert streamer.output_topic == "/motor/command_array"
 
 
 def test_status_reports_the_current_output_topic(streamer):
     """页面要能看见命令当前发往哪里——断链时不静默换路，就得让它可核对。"""
-    assert _status(streamer)["output_topic"] == "/micro_ros_do/motor_command_array"
+    assert _status(streamer)["output_topic"] == "/motor/command_array"

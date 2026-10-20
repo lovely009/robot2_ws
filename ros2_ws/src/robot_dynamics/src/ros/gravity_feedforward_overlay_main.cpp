@@ -2,7 +2,8 @@
 //
 // 参数：见 README「重力前馈叠加节点」一节。urdf_path 必填（空或解析失败即起不来）。
 // 命令源启用前馈时把话题指到 /robot_dynamics/command_array 与
-// /robot_dynamics/trajectory，本节点加上 τ_g 后转发到固件订阅的 /micro_ros_do/*。
+// /robot_dynamics/trajectory，本节点加上 τ_g 后转发到 micro_ros_bridge 的
+// /motor/* 主机入口。
 
 #include <robot_dynamics/ros/gravity_feedforward_overlay_node.hpp>
 

@@ -116,10 +116,9 @@ def load_topology(path: Path):
 class Streamer(Node):
     def __init__(self, rate_hz: float, command_topic: str):
         super().__init__("snapshot_stream")
-        # QoS 按对端各配各的（2026-10-15 用 `ros2 topic info -v` 逐话题实测）：
-        #   - 下行命令：固件的订阅端 **BEST_EFFORT**。这里给 RELIABLE 是"提供强于
-        #     请求"，兼容；反过来（发 best_effort 而对方请求 reliable）才会被静默拒收。
-        #   - 下行策略：固件的订阅端 **RELIABLE**，所以这里必须 RELIABLE。
+        # QoS 按对端各配各的：
+        #   - 主机入口（bridge）：命令与策略的订阅端都是 **RELIABLE**，这里必须
+        #     RELIABLE；发 best_effort 在 ROS 2 里不建连接（静默失效）。
         #   - 上行 motion_states：固件的发布端 **offering BEST_EFFORT**，订阅端用
         #     reliable 会"静默收不到"（DDS 规则：sub 的可靠性不能高于 pub）。
         # depth=1/keep_last：实时流只保最新，积压的旧快照没有意义（过期即撤权）。
@@ -130,7 +129,7 @@ class Streamer(Node):
         self.pub_cmd = self.create_publisher(
             MotorCommandArray, command_topic, qos_tx)
         self.pub_pol = self.create_publisher(
-            MotorPolicyArray, "/micro_ros_do/motor_policy", qos_tx)
+            MotorPolicyArray, "/motor/policy_array", qos_tx)
         self.create_subscription(MotorMotionStateArray,
                                  "/micro_ros_up/motion_states", self._on_motion,
                                  qos_rx)
@@ -298,10 +297,9 @@ def main():
     ap.add_argument("--confirm-unprotected", action="store_true",
                     help="武装时带「设备侧保护确知为关」的显式确认（真机必带；"
                          "仿真里假电机不上报保护，通常不需要）")
-    ap.add_argument("--command-topic", default="/micro_ros_do/motor_command_array",
-                    help="快照下发话题。改指 /robot_dynamics/command_array 可经"
-                         "重力前馈叠加节点中转；默认直连固件，行为不变"
-                         "（见 robot_dynamics/README.md）")
+    ap.add_argument("--command-topic", default="/motor/command_array",
+                    help="快照下发话题（bridge 的主机入口）。改指 "
+                         "/robot_dynamics/command_array 可经重力前馈叠加节点中转")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parents[2]

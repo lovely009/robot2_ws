@@ -81,7 +81,7 @@ class Player(Node):
         self.kp, self.kd = kp, kd
         self.pub_tr = self.create_publisher(MotorTrajectory, traj_topic, 10)
         self.pub_cmd = self.create_publisher(MotorCommandArray, command_topic, 10)
-        self.pub_pol = self.create_publisher(MotorPolicyArray, "/micro_ros_do/motor_policy", 10)
+        self.pub_pol = self.create_publisher(MotorPolicyArray, "/motor/policy_array", 10)
         be = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST, depth=50)
         self.motion = None
@@ -205,11 +205,11 @@ def main():
                          "下行延迟，给大了反而让新窗起点跑到臂前面形成台阶")
     ap.add_argument("--loop", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--trajectory-topic", default="/micro_ros_do/motor_trajectory",
-                    help="轨迹下发话题。改指 /robot_dynamics/trajectory 可经重力前馈"
-                         "叠加节点补上逐点 τ_ff；默认直连固件，行为不变")
-    ap.add_argument("--command-topic", default="/micro_ros_do/motor_command_array",
-                    help="起点对齐阶段的快照话题（同 --trajectory-topic 的用法）")
+    ap.add_argument("--trajectory-topic", default="/motor/trajectory",
+                    help="轨迹下发话题（bridge 的主机入口）。改指 "
+                         "/robot_dynamics/trajectory 可经重力前馈叠加节点补上逐点 τ_ff")
+    ap.add_argument("--command-topic", default="/motor/command_array",
+                    help="起点对齐阶段的快照话题（同上）")
     a = ap.parse_args()
 
     ids, steps = load_series(a.json)

@@ -33,8 +33,8 @@ struct GravityFeedforwardOverlayParameters {
   std::string joint_map{kDefaultJointMap};  // 空串 = 用 kDefaultJointMap
   std::string command_input_topic{"robot_dynamics/command_array"};
   std::string trajectory_input_topic{"robot_dynamics/trajectory"};
-  std::string command_output_topic{"micro_ros_do/motor_command_array"};
-  std::string trajectory_output_topic{"micro_ros_do/motor_trajectory"};
+  std::string command_output_topic{"/motor/command_array"};
+  std::string trajectory_output_topic{"/motor/trajectory"};
   std::string joint_states_topic{"joint_states"};
   double joint_states_timeout_s{0.5};
   double effort_gain{1.0};  // 运行期可改（ros2 param set）

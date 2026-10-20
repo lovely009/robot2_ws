@@ -87,6 +87,13 @@ Result decode_low_state(
     r.error = "count 与各数组长度不一致";
     return r;
   }
+  for (const auto id : in.motor_ids) {
+    if (id >= kIdLimit) {
+      r.ok = false;
+      r.error = "motor_id 越界（注册表下标 0..63）";
+      return r;
+    }
+  }
   out.sync_time_ns = in.sync_time_ns;
   // seq 直通：主机侧唯一的丢帧判据（best-effort 无重传）。facade 的
   // MotorMotionStateArray 末尾为此追加了 seq 字段。

@@ -38,6 +38,17 @@ void BridgeNode::make_pass_through(
   pass_subs_.push_back(sub);
 }
 
+template<typename T>
+void BridgeNode::make_host_to_wire(
+  const std::string & host_topic, const std::string & wire_topic, const rclcpp::QoS & qos)
+{
+  auto pub = create_publisher<T>(wire_topic, qos);
+  auto sub = create_subscription<T>(
+    host_topic, qos, [pub](typename T::SharedPtr m) {pub->publish(*m);});
+  pass_pubs_.push_back(pub);
+  pass_subs_.push_back(sub);
+}
+
 BridgeNode::BridgeNode()
 : rclcpp::Node("micro_ros_bridge")
 {
@@ -102,8 +113,8 @@ BridgeNode::BridgeNode()
     [this](MotorStatus::SharedPtr m) {on_motor_status(m);});
 
   // ---- 纯改名透传（消息类型不变） ----
-  make_pass_through<MotorPolicyArray>(T::kPolicy, "/motor/policy_array", reliable_qos());
-  make_pass_through<MotorTrajectory>(T::kTrajectory, "/motor/trajectory", reliable_qos());
+  make_host_to_wire<MotorPolicyArray>("/motor/policy_array", T::kPolicy, reliable_qos());
+  make_host_to_wire<MotorTrajectory>("/motor/trajectory", T::kTrajectory, reliable_qos());
   make_pass_through<MotorTopology>(T::kTopology, "/motor/topology", reliable_qos());
   make_pass_through<MotorEvent>(T::kEvents, "/motor/events", reliable_qos());
   make_pass_through<DeviceParamReport>(
@@ -114,8 +125,7 @@ BridgeNode::BridgeNode()
 
 bool BridgeNode::peer_schema_mismatch() const
 {
-  const uint16_t known = peer_schema_.load();
-  return known != 0 && known != contract::kSchemaVersion;
+  return peer_schema_known_.load() && peer_schema_.load() != contract::kSchemaVersion;
 }
 
 void BridgeNode::on_command(const can_bridge_msgs::msg::MotorCommandArray::SharedPtr msg)
@@ -151,10 +161,7 @@ void BridgeNode::on_low_state(const can_bridge_msgs::msg::LowState::SharedPtr ms
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "low_state 丢弃：%s", r.error);
     return;
   }
-  // 新鲜度不在这条消息里（循环面不分片），用低频面 10 Hz 缓存的值盖章。
-  // 页面读的正是 motion_states 元素上的这两个字段（readout.js:34 的「测量年龄」、
-  // arm.js:270 的 target_source），spec §4.7 承诺 JS 一个字段都不用改。
-  // 代价：显示值最多滞后一个 motor_status 周期（100 ms）——年龄本身是陈旧度度量。
+  // 用低频面缓存补足循环面未携带的新鲜度。
   for (auto & s : out.states) {
     s.state_age_ms = freshness_[s.motor_id].state_age_ms;
     s.target_source = freshness_[s.motor_id].target_source;
@@ -164,20 +171,6 @@ void BridgeNode::on_low_state(const can_bridge_msgs::msg::LowState::SharedPtr ms
 
 void BridgeNode::on_motor_status(const can_bridge_msgs::msg::MotorStatus::SharedPtr msg)
 {
-  // ADR 0015 决定 8：schema_version 由低频状态面带回，这里 latch 一次。
-  // 只在**变化**时报，避免 10 Hz 刷屏。
-  const uint16_t peer = msg->schema_version;
-  if (peer != peer_schema_.load()) {
-    peer_schema_.store(peer);
-    if (peer == contract::kSchemaVersion) {
-      RCLCPP_INFO(get_logger(), "固件 schema_version=%u 与本机一致，放行命令", peer);
-    } else {
-      RCLCPP_ERROR(
-        get_logger(), "固件 schema_version=%u 与本机 %u 不一致：已停止下发命令",
-        peer, contract::kSchemaVersion);
-    }
-  }
-
   can_bridge_msgs::msg::MotorStatusArray statuses;
   can_bridge_msgs::msg::MotorTrajectoryState traj;
   can_bridge_msgs::msg::SystemStatus sys;
@@ -186,6 +179,18 @@ void BridgeNode::on_motor_status(const can_bridge_msgs::msg::MotorStatus::Shared
   if (!r.ok) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "motor_status 丢弃：%s", r.error);
     return;
+  }
+  const uint16_t peer = msg->schema_version;
+  if (!peer_schema_known_.load() || peer != peer_schema_.load()) {
+    peer_schema_.store(peer);
+    peer_schema_known_.store(true);
+    if (peer == contract::kSchemaVersion) {
+      RCLCPP_INFO(get_logger(), "固件 schema_version=%u 与本机一致，放行命令", peer);
+    } else {
+      RCLCPP_ERROR(
+        get_logger(), "固件 schema_version=%u 与本机 %u 不一致：已停止下发命令",
+        peer, contract::kSchemaVersion);
+    }
   }
   pub_status_array_->publish(statuses);
   pub_traj_state_->publish(traj);

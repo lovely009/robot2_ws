@@ -99,6 +99,20 @@ TEST(DecodeLowState, SentinelBecomesNaN) {
   EXPECT_FALSE(std::isnan(out.states[0].position));
 }
 
+TEST(DecodeLowState, RejectsOutOfRangeMotorIdWithoutPartialOutput) {
+  LowState in;
+  in.count = 2;
+  in.motor_ids = {5, micro_ros_bridge::contract::kMotorCountMax};
+  in.position_q = {100, 200};
+  in.velocity_q = {0, 0};
+  in.effort_q = {0, 0};
+
+  MotorMotionStateArray out;
+  const auto r = micro_ros_bridge::decode_low_state(in, out);
+  EXPECT_FALSE(r.ok);
+  EXPECT_TRUE(out.states.empty());
+}
+
 TEST(EncodeConfig, ParamSetOverloadFillsParamGroup) {
   can_bridge_msgs::msg::ParamSetArray in;
   in.request_id = 7;

@@ -54,6 +54,9 @@ static_assert(WIRE_CONFIG_KIND_PARAM_SET ==
 static_assert(WIRE_CONFIG_KIND_SYSTEM_COMMAND ==
     can_bridge_msgs__msg__ConfigRequest__CONFIG_KIND_SYSTEM_COMMAND,
     "wire_codec 与 ConfigRequest 的 SYSTEM_COMMAND 常量漂移了");
+static_assert(WIRE_CONFIG_COMMAND_SAVE ==
+    can_bridge_msgs__msg__SystemCommand__COMMAND_SAVE,
+    "wire_codec 的 COMMAND_SAVE 与 SystemCommand 漂移了");
 static_assert(WIRE_MOTOR_ID_NONE ==
     can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE,
     "wire_codec 的 MOTOR_ID_NONE 与 SystemCommand 漂移了");

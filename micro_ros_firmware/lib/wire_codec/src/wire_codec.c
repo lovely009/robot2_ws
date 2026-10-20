@@ -48,7 +48,8 @@ bool wire_config_groups_exclusive(uint8_t kind, uint16_t count,
     return false;
   }
   if (kind == WIRE_CONFIG_KIND_PARAM_SET) {
-    return command == 0U && motor_id == WIRE_MOTOR_ID_NONE;
+    return command == WIRE_CONFIG_COMMAND_SAVE &&
+           motor_id == WIRE_MOTOR_ID_NONE;
   }
   if (kind == WIRE_CONFIG_KIND_SYSTEM_COMMAND) {
     return count == 0U;

@@ -160,8 +160,8 @@ static void low_command_cb(const void *msgin) {
   // 声明长度与四组数组必须自洽；超内核容量一律整条拒绝。NaN/Inf 在编码端已被
   // 拒收，这里解出来的 -32768 只会来自畸形帧——mailbox 的 isfinite 会整条拒。
   if (!wire_frame_shape_ok(msg->count, msg->motor_ids.size,
-          msg->position_q.size, msg->velocity_q.size, msg->effort_q.size,
-          CONTROL_COMMAND_MAILBOX_MAX_TARGETS)) {
+      msg->position_q.size, msg->velocity_q.size, msg->effort_q.size,
+      CONTROL_COMMAND_MAILBOX_MAX_TARGETS)) {
     return;
   }
   control_command_snapshot_t snapshot = {0};

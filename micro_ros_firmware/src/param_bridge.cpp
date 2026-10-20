@@ -360,6 +360,7 @@ static bool validate_param_set(
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
       return false;
     }
+    // 力矩 A→N·m 的系数未知时换算非有限，不能下发；放进整条预校验避免部分生效。
     if (t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT &&
         !isfinite(param_units_amp_to_nm(t.value, v->torque_per_amp))) {
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
@@ -535,7 +536,7 @@ static void config_cb(const void *msgin) {
   }
   // kind 决定哪组有效，另一组必须为空——两组混装是发送方误解契约，整条拒。
   if (!wire_config_groups_exclusive(msg->kind, msg->count,
-          msg->targets.size, msg->command, msg->motor_id)) {
+      msg->targets.size, msg->command, msg->motor_id)) {
     report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
     return;
   }

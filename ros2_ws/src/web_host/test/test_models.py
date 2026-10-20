@@ -17,6 +17,7 @@ import pytest
 
 from web_host.models import (
     enumerate_arm_models,
+    has_joint_mapping_source,
     motor_library,
     simulation_model_joints,
 )
@@ -135,13 +136,43 @@ def test_model_joints_rejects_model_without_any_config(tmp_path: Path) -> None:
         simulation_model_joints('empty_model', root=tmp_path / 'models')
 
 
+# --- 映射来源判据：区分「没配」与「配错了」----------------------------------
+
+def test_has_joint_mapping_source_needs_config_not_just_urdf(tmp_path: Path) -> None:
+    """只有主 URDF 的模型（预览件）算「没配」，不算契约缺项。
+
+    臂视图候选的判据只有主 URDF，映射另要 config 里的文件——两者本就不一致，
+    页面选到这类模型时退回内置兜底表。集成测试靠本判据跳过它们。
+    """
+    models_root = tmp_path / 'models'
+    (models_root / 'preview' / 'urdf').mkdir(parents=True)
+    (models_root / 'preview' / 'urdf' / 'preview.urdf').write_text(
+        '<robot/>', encoding='utf-8')
+    assert enumerate_arm_models(models_root) == ['preview'], '前提：它确实可枚举'
+    assert not has_joint_mapping_source('preview', root=models_root)
+
+    (models_root / 'preview' / 'config').mkdir()
+    (models_root / 'preview' / 'config' / 'simulation_topology.yaml').write_text(
+        'simulation:\n  motors: []\n', encoding='utf-8')
+    assert has_joint_mapping_source('preview', root=models_root), '有拓扑就算配了'
+
+
+@pytest.mark.parametrize('bad', ['', '..', '../etc', 'a/b', 'nope_does_not_exist'])
+def test_has_joint_mapping_source_rejects_bad_names(bad: str) -> None:
+    """非法/不存在的模型名一律 False——不能借它读到目录外。"""
+    assert not has_joint_mapping_source(bad)
+
+
 # --- 与真实源码树的集成（臂视图 model_dir 可指源码目录）----------------------
 
 def test_model_joints_cover_source_tree_arm_models() -> None:
-    """源码树里每个可渲染模型都必须取得到映射。
+    """源码树里每个**配了映射**的可渲染模型都必须取得到映射。
 
     臂视图的模型候选由 model_dir 指向的目录枚举（可指源码树，改模型不必重构建）；
     新模型常常先有拓扑、后补 motor_driver.yaml——解析顺序的②就是为它们准备的。
+
+    只跳过 `has_joint_mapping_source` 为假的模型（预览件：只有 URDF，页面上本来
+    就退回内置兜底表）。配了文件却解析不出来的仍报红——那是契约缺项，不是预览。
     """
     from ament_index_python.packages import get_package_share_directory
     try:
@@ -155,22 +186,32 @@ def test_model_joints_cover_source_tree_arm_models() -> None:
     models = enumerate_arm_models(models_root)
     if not models:
         pytest.skip('源码树没有可渲染模型')
+    checked = 0
     for model in models:
+        if not has_joint_mapping_source(model, root=models_root):
+            continue
         joints = simulation_model_joints(model, root=models_root)
         assert joints, f'{model} 取不出 id→关节映射'
         for motor_id, joint in joints.items():
             assert isinstance(motor_id, int) and motor_id > 0
             assert isinstance(joint, str) and joint, f'{model} 的 id {motor_id} 关节名为空'
+        checked += 1
+    assert checked, '一个配了映射的模型都没查到：本用例已空转，检查枚举判据'
 
 
 def test_model_joints_covers_installed_arm_models() -> None:
-    """安装树（默认 root）里的每个可渲染模型也必须能取到映射。"""
+    """安装树（默认 root）里每个配了映射的可渲染模型也必须能取到映射。"""
     models = enumerate_arm_models()
     if not models:
         pytest.skip('安装树里没有可渲染模型，测试前提不成立')
+    checked = 0
     for model in models:
+        if not has_joint_mapping_source(model):
+            continue
         joints = simulation_model_joints(model)
         assert joints, f'{model} 取不出 id→关节映射'
+        checked += 1
+    assert checked, '一个配了映射的模型都没查到：本用例已空转，检查枚举判据'
 
 
 # --- 型号库：设备页折算设备端原值 ---------------------------------------------

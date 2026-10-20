@@ -10,6 +10,10 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 import yaml
 
+# motor_id → 关节映射的来源文件，按 simulation_model_joints 的解析优先级排列。
+_DRIVER_CONFIG = "config/motor_driver.yaml"
+_TOPOLOGY_CONFIG = "config/simulation_topology.yaml"
+
 
 def _models_root():
     """默认模型根目录（安装树的 robot_sim share）；取不到返回 None。
@@ -27,7 +31,9 @@ def enumerate_arm_models(root=None):
     """List models the arm view can switch between (have `urdf/<模型名>.urdf`)。
 
     判据只有主 URDF——臂视图不要求模型接进端到端仿真（那要
-    simulation_topology.yaml / MJCF，见 bench_manager 的模型枚举）。
+    simulation_topology.yaml / MJCF，见 bench_manager 的模型枚举）。因此列表里
+    **可能**有没配电机映射的预览件（`has_joint_mapping_source` 为假）：它们渲染
+    得出几何、没有电机小球，页面退回内置兜底表。
     """
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
@@ -37,6 +43,22 @@ def enumerate_arm_models(root=None):
         for entry in models_root.iterdir()
         if entry.is_dir() and (entry / "urdf" / f"{entry.name}.urdf").is_file()
     )
+
+
+def has_joint_mapping_source(model, root=None):
+    """该模型有没有声明 motor_id → 关节映射的来源（`simulation_model_joints` 的 ①② 任一）。
+
+    臂视图候选的判据只有主 URDF——几何能渲染就列出来；而**映射**另要 config 里的
+    一份文件。两者不一致的模型（如只有 URDF 的预览件 `robot_leg`）在页面上退化成
+    前端内置兜底表 + 控制台告警，那不是错误。调用方用它区分「没配」与「配错了」：
+    前者可以跳过，后者必须报错——配了文件却解析不出来仍是契约缺项。
+    """
+    models_root = Path(root) if root is not None else _models_root()
+    if (models_root is None or not model or model != Path(model).name
+            or model in (".", "..")):
+        return False
+    return any((models_root / model / rel).is_file()
+               for rel in (_DRIVER_CONFIG, _TOPOLOGY_CONFIG))
 
 
 def simulation_model_joints(model, root=None):
@@ -65,7 +87,7 @@ def simulation_model_joints(model, root=None):
     if not model or model != Path(model).name or model in (".", ".."):
         raise ValueError(f"非法模型名：{model!r}")
 
-    driver_config = models_root / model / "config" / "motor_driver.yaml"
+    driver_config = models_root / model / _DRIVER_CONFIG
     if driver_config.is_file():
         return _joints_from_driver_config(driver_config)
     return _joints_from_topology(model, models_root / model)
@@ -92,7 +114,7 @@ def _joints_from_driver_config(config):
 
 def _joints_from_topology(model, model_dir):
     """二路：拓扑给 (电机名 → 关节)，id 由电机名回查权威驱动配置。"""
-    topology_file = model_dir / "config" / "simulation_topology.yaml"
+    topology_file = model_dir / _TOPOLOGY_CONFIG
     if not topology_file.is_file():
         raise ValueError(
             f"模型 {model!r} 既没有 config/motor_driver.yaml，"

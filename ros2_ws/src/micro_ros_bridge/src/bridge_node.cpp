@@ -44,7 +44,15 @@ void BridgeNode::make_host_to_wire(
 {
   auto pub = create_publisher<T>(wire_topic, qos);
   auto sub = create_subscription<T>(
-    host_topic, qos, [pub](typename T::SharedPtr m) {pub->publish(*m);});
+    host_topic, qos, [this, pub](typename T::SharedPtr m) {
+      if (peer_schema_mismatch()) {
+        RCLCPP_ERROR_THROTTLE(
+          get_logger(), *get_clock(), 5000, "schema_version 不一致：拒绝下发 %s",
+          pub->get_topic_name());
+        return;
+      }
+      pub->publish(*m);
+    });
   pass_pubs_.push_back(pub);
   pass_subs_.push_back(sub);
 }

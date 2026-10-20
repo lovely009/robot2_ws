@@ -152,6 +152,62 @@ TEST(BridgeNode, TrajectoryFlowsFromHostToWire) {
   EXPECT_EQ(got.segment_count, 1u);
 }
 
+TEST(BridgeNode, SchemaMismatchBlocksPolicyAndTrajectoryDownlink) {
+  RclcppSession session;
+  auto node = std::make_shared<micro_ros_bridge::BridgeNode>();
+  using Policy = can_bridge_msgs::msg::MotorPolicyArray;
+  using Trajectory = can_bridge_msgs::msg::MotorTrajectory;
+  auto status_pub = node->create_publisher<can_bridge_msgs::msg::MotorStatus>(
+    micro_ros_bridge::contract::topic::kMotorStatus, rclcpp::QoS(10).reliable());
+  auto policy_pub = node->create_publisher<Policy>(
+    "/motor/policy_array", rclcpp::QoS(10).reliable());
+  auto trajectory_pub = node->create_publisher<Trajectory>(
+    "/motor/trajectory", rclcpp::QoS(10).reliable());
+  int status_count = 0;
+  int policy_count = 0;
+  int trajectory_count = 0;
+  auto status_sub = node->create_subscription<can_bridge_msgs::msg::MotorStatusArray>(
+    "/motor/status_array", rclcpp::QoS(10).reliable(),
+    [&](can_bridge_msgs::msg::MotorStatusArray::SharedPtr) {++status_count;});
+  auto policy_sub = node->create_subscription<Policy>(
+    micro_ros_bridge::contract::topic::kPolicy, rclcpp::QoS(10).reliable(),
+    [&](Policy::SharedPtr) {++policy_count;});
+  auto trajectory_sub = node->create_subscription<Trajectory>(
+    micro_ros_bridge::contract::topic::kTrajectory, rclcpp::QoS(10).reliable(),
+    [&](Trajectory::SharedPtr) {++trajectory_count;});
+
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node);
+  ASSERT_TRUE(spin_until(exec, [&] {
+    return status_pub->get_subscription_count() > 0 &&
+           policy_pub->get_subscription_count() > 0 &&
+           trajectory_pub->get_subscription_count() > 0 &&
+           status_sub->get_publisher_count() > 0 &&
+           policy_sub->get_publisher_count() > 0 &&
+           trajectory_sub->get_publisher_count() > 0;
+  }));
+
+  Policy policy;
+  policy.request_id = 123;
+  Trajectory trajectory;
+  trajectory.trajectory_id = 456;
+  policy_pub->publish(policy);
+  trajectory_pub->publish(trajectory);
+  ASSERT_TRUE(spin_until(exec, [&] {return policy_count == 1 && trajectory_count == 1;}));
+
+  can_bridge_msgs::msg::MotorStatus status;
+  status.schema_version = 99;
+  status.count = 0;
+  status_pub->publish(status);
+  ASSERT_TRUE(spin_until(exec, [&] {return status_count == 1;}));
+
+  policy_pub->publish(policy);
+  trajectory_pub->publish(trajectory);
+  spin_for(exec, 150ms);
+  EXPECT_EQ(policy_count, 1);
+  EXPECT_EQ(trajectory_count, 1);
+}
+
 TEST(BridgeNode, StreamAndReliableEndpointsUseExpectedQoS) {
   RclcppSession session;
   auto node = std::make_shared<micro_ros_bridge::BridgeNode>();

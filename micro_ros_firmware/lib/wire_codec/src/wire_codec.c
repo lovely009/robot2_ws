@@ -33,3 +33,11 @@ double wire_dequantize(int16_t q, double scale) {
   }
   return (double)q * scale / WIRE_Q_MAX;
 }
+
+bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
+    size_t position_q_len, size_t velocity_q_len, size_t effort_q_len,
+    size_t max_slots) {
+  return count <= max_slots &&
+         motor_ids_len == count && position_q_len == count &&
+         velocity_q_len == count && effort_q_len == count;
+}

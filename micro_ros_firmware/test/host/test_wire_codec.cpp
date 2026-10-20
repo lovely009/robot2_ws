@@ -59,6 +59,18 @@ void test_non_finite_yields_sentinel()
   assert(wire_quantize(NAN, kScalePos).q == WIRE_SENTINEL_MISSING);
   assert(wire_quantize(INFINITY, kScalePos).q == WIRE_SENTINEL_MISSING);
 }
+
+void test_frame_shape()
+{
+  // count 必须等于四个序列的声明长度，且不超过内核容量。
+  // 0 = 空目标列表 = 全部软停，合法。
+  assert(wire_frame_shape_ok(2, 2, 2, 2, 2, 64));
+  assert(wire_frame_shape_ok(0, 0, 0, 0, 0, 64));
+  assert(!wire_frame_shape_ok(2, 2, 2, 2, 1, 64));
+  assert(!wire_frame_shape_ok(2, 1, 2, 2, 2, 64));
+  assert(!wire_frame_shape_ok(2, 2, 2, 2, 2, 1));
+  assert(!wire_frame_shape_ok(65, 65, 65, 65, 65, 64));
+}
 }  // namespace
 
 int main()
@@ -68,6 +80,7 @@ int main()
   test_round_trip_within_half_step();
   test_sentinel_is_not_a_value();
   test_non_finite_yields_sentinel();
+  test_frame_shape();
   std::printf("test_wire_codec: ok\n");
   return 0;
 }

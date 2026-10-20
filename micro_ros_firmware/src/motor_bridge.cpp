@@ -1,7 +1,7 @@
-// 电机域 ROS 桥实现：ID 化消息面。下行 3 条订阅：motor_command_array（完整快照）、
-// motor_trajectory（多点轨迹）、motor_policy（逐电机 enable/kp/kd）；上行 7 条发布：motion_states 50Hz、
+// 电机域 ROS 桥实现：ID 化消息面。下行 3 条订阅：low_cmd（完整快照）、
+// trajectory（多点轨迹）、policy（逐电机 enable/kp/kd）；上行 7 条发布：motion_states 50Hz、
 // motor_status_array 20Hz、motor_topology 1s、motor_events、trajectory_state 10Hz、diagnostics 1Hz、
-// device_param_report 按需（REPORT 命令 / 写事务收尾 / 设备初始化结论）。全部用相对名。
+// device_param_report 按需（REPORT 命令 / 写事务收尾 / 设备初始化结论）。下行用契约绝对名，上行用相对名。
 // 轨迹与快照的仲裁在内核：轨迹声明集合内的电机由轨迹独占（快照对它不下发也不软停），集合外归快照
 // （缺失即软停）；策略与二者正交（kp/kd/enable 不进命令快照）；型号绑定由内核经 READ_IDENTITY 完成。
 // 本桥不做 joint_name 语义、协议/CAN 字节与直接 RX 访问。
@@ -16,8 +16,9 @@
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
 
+#include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 #include <can_bridge_msgs/msg/device_param_report.h>
-#include <can_bridge_msgs/msg/motor_command_array.h>
+#include <can_bridge_msgs/msg/low_command.h>
 #include <can_bridge_msgs/msg/motor_event.h>
 #include <can_bridge_msgs/msg/motor_diagnostics.h>
 #include <can_bridge_msgs/msg/motor_motion_state_array.h>
@@ -33,6 +34,7 @@
 #include "param_bridge.h"
 #include "param_units.h"
 #include "ros_qos.h"
+#include "wire_codec.h"
 
 // 序列静态存储（rosidl C 序列为 data/size/capacity 三元组；容量预分配，
 // 禁止反序列化路径上的动态分配）。
@@ -43,7 +45,10 @@ static can_bridge_msgs__msg__MotorMotionStateTarget
     g_motion_states_buf[kRosArrayCapacity];
 static can_bridge_msgs__msg__MotorStatusTarget g_status_buf[kRosArrayCapacity];
 static can_bridge_msgs__msg__MotorTopologyEntry g_topology_buf[kRosArrayCapacity];
-static can_bridge_msgs__msg__MotorCommandTarget g_command_targets_buf[kRosArrayCapacity];
+static uint8_t g_command_ids_buf[kRosArrayCapacity];
+static int16_t g_command_position_buf[kRosArrayCapacity];
+static int16_t g_command_velocity_buf[kRosArrayCapacity];
+static int16_t g_command_effort_buf[kRosArrayCapacity];
 // 轨迹两层有界序列各自预分配（点数容量独立于电机数，见 .msg 契约）。
 static constexpr size_t kRosTrajectoryPointCapacity =
     MOTOR_CONTROL_MAX_TRAJECTORY_POINTS;
@@ -53,12 +58,17 @@ static uint16_t g_trajectory_target_ids_buf[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS]
 static can_bridge_msgs__msg__MotorPolicyTarget g_policy_targets_buf[kRosArrayCapacity];
 
 // ---- 话题名 ----
-// 统一用**相对名**：整条固件接口可被 launch 重映射，且"哪些是固件私有接口"一眼可辨
+// 上行用**相对名**：整条固件接口可被 launch 重映射，且"哪些是固件私有接口"一眼可辨
 // ——根命名空间留给标准话题（/joint_states 等，由上层适配桥产出）。
 // 改名必须同步消费者：web_host/web/app.js 的 TOPICS。
-static const char *kCommandTopic = "micro_ros_do/motor_command_array";
-static const char *kTrajectoryTopic = "micro_ros_do/motor_trajectory";
-static const char *kPolicyTopic = "micro_ros_do/motor_policy";
+// 下行三条改用契约常量（绝对名，根命名空间下与旧相对名解析结果相同）。
+// 上行仍是旧话题：S4 切流之前页面靠它们取数。
+static const char *kCommandTopic =
+    can_bridge_msgs__msg__WireContract__TOPIC_LOW_CMD;
+static const char *kTrajectoryTopic =
+    can_bridge_msgs__msg__WireContract__TOPIC_TRAJECTORY;
+static const char *kPolicyTopic =
+    can_bridge_msgs__msg__WireContract__TOPIC_POLICY;
 static const char *kMotionStatesTopic = "micro_ros_up/motion_states";
 static const char *kStatusTopic = "micro_ros_up/motor_status_array";
 static const char *kTopologyTopic = "micro_ros_up/motor_topology";
@@ -75,7 +85,7 @@ static constexpr uint16_t kMotorMsgSchemaVersion = 3U;
 
 // ---- 订阅（2）----
 static rcl_subscription_t g_command_sub;
-static can_bridge_msgs__msg__MotorCommandArray g_command_msg;
+static can_bridge_msgs__msg__LowCommand g_command_msg;
 static bool g_command_up = false;
 static bool g_command_added = false;
 
@@ -142,28 +152,34 @@ size_t motor_bridge_executor_handle_count(void) {
 // 回调：消息校验 → mailbox 写入
 // ---------------------------------------------------------------------------
 
-static void command_array_cb(const void *msgin) {
+static void low_command_cb(const void *msgin) {
   if (msgin == nullptr) {
     return;
   }
-  const auto *msg = (const can_bridge_msgs__msg__MotorCommandArray *)msgin;
-  if (msg->count > msg->targets.size) {
-    return; // 有界数组外的声明：拒绝
+  const auto *msg = (const can_bridge_msgs__msg__LowCommand *)msgin;
+  // 声明长度与四组数组必须自洽；超内核容量一律整条拒绝。NaN/Inf 在编码端已被
+  // 拒收，这里解出来的 -32768 只会来自畸形帧——mailbox 的 isfinite 会整条拒。
+  if (!wire_frame_shape_ok(msg->count, msg->motor_ids.size,
+          msg->position_q.size, msg->velocity_q.size, msg->effort_q.size,
+          CONTROL_COMMAND_MAILBOX_MAX_TARGETS)) {
+    return;
   }
   control_command_snapshot_t snapshot = {0};
   snapshot.sequence = msg->sequence;
-  snapshot.received_tick_ms = millis(); // 本地接收 tick（ARD §12.2）
-  const uint8_t count =
-      msg->count < CONTROL_COMMAND_MAILBOX_MAX_TARGETS
-          ? msg->count
-          : CONTROL_COMMAND_MAILBOX_MAX_TARGETS;
-  for (uint8_t i = 0; i < count; ++i) {
-    snapshot.targets[i].motor_id = msg->targets.data[i].motor_id;
-    snapshot.targets[i].position = msg->targets.data[i].position;
-    snapshot.targets[i].velocity = msg->targets.data[i].velocity;
-    snapshot.targets[i].effort = msg->targets.data[i].effort;
+  snapshot.received_tick_ms = millis();
+  snapshot.target_count = msg->count;
+  for (uint8_t i = 0; i < msg->count; ++i) {
+    snapshot.targets[i].motor_id = msg->motor_ids.data[i];
+    snapshot.targets[i].position = (float)wire_dequantize(
+        msg->position_q.data[i],
+        can_bridge_msgs__msg__WireContract__SCALE_POSITION_RAD);
+    snapshot.targets[i].velocity = (float)wire_dequantize(
+        msg->velocity_q.data[i],
+        can_bridge_msgs__msg__WireContract__SCALE_VELOCITY_RAD_S);
+    snapshot.targets[i].effort = (float)wire_dequantize(
+        msg->effort_q.data[i],
+        can_bridge_msgs__msg__WireContract__SCALE_EFFORT_NM);
   }
-  snapshot.target_count = count;
   (void)motor_rt_submit_command(&snapshot); // 非法快照由 mailbox 拒绝并计数
 }
 
@@ -577,8 +593,14 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     return false;
   }
 
-  g_command_msg.targets.capacity = kRosArrayCapacity;
-  g_command_msg.targets.data = g_command_targets_buf;
+  g_command_msg.motor_ids.capacity = kRosArrayCapacity;
+  g_command_msg.motor_ids.data = g_command_ids_buf;
+  g_command_msg.position_q.capacity = kRosArrayCapacity;
+  g_command_msg.position_q.data = g_command_position_buf;
+  g_command_msg.velocity_q.capacity = kRosArrayCapacity;
+  g_command_msg.velocity_q.data = g_command_velocity_buf;
+  g_command_msg.effort_q.capacity = kRosArrayCapacity;
+  g_command_msg.effort_q.data = g_command_effort_buf;
   g_trajectory_msg.points.capacity = kRosTrajectoryPointCapacity;
   g_trajectory_msg.points.data = g_trajectory_points_buf;
   g_trajectory_msg.target_ids.capacity = MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS;
@@ -635,7 +657,7 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   sub_opts.qos = qos_stream();
   if (rcl_subscription_init(&g_command_sub, node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(
-      can_bridge_msgs, msg, MotorCommandArray),
+      can_bridge_msgs, msg, LowCommand),
       kCommandTopic, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;
@@ -757,7 +779,7 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 
   // ---- executor ----
   if (rclc_executor_add_subscription(executor, &g_command_sub, &g_command_msg,
-      command_array_cb,
+      low_command_cb,
       ON_NEW_DATA) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor);
     return false;

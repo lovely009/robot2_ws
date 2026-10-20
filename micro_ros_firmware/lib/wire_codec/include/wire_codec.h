@@ -6,6 +6,7 @@
 #ifndef WIRE_CODEC_H
 #define WIRE_CODEC_H
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -30,6 +31,12 @@ wire_quantize_result_t wire_quantize(double value, double scale);
 
 // 反定点。q == WIRE_SENTINEL_MISSING → NAN。
 double wire_dequantize(int16_t q, double scale);
+
+// 循环面槽位形状：count 必须等于四个序列的声明长度，且不超过内核容量。
+// 只校验「同一帧内的自洽性」，不解释内容——值的合法性归 mailbox。
+bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
+    size_t position_q_len, size_t velocity_q_len, size_t effort_q_len,
+    size_t max_slots);
 
 #ifdef __cplusplus
 }

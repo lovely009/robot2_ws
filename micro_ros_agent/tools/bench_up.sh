@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 台架启动：模拟器（成为 ACK 节点）→ 复位控制板。顺序反了 FDCAN1 会 bus-off。
+# 台架启动：模拟器（成为 ACK 节点）→ 复位控制板 → 起 micro_ros_bridge。
+# 前两步顺序反了 FDCAN1 会 bus-off；最后一步让 /motor/* 能被编成线上下行。
 #
 #   tools/bench_up.sh                      # effort 模式（默认，真实 MIT 动力学）
 #   tools/bench_up.sh effort <模型名>       # 指定 Gazebo 侧模型（默认 half_body_robot）
@@ -37,7 +38,7 @@ if pgrep -f fdcan_motor_sim >/dev/null; then
   echo "先停掉它（模拟器现在有 flock 独占锁，第二个实例会直接失败）。"; exit 1
 fi
 
-echo "[1/2] 起 Gazebo（control_mode:=$GZ_CM${MODEL:+，model=$MODEL}）与模拟器（--gazebo-control-mode $SIM_CM）"
+echo "[1/3] 起 Gazebo（control_mode:=$GZ_CM${MODEL:+，model=$MODEL}）与模拟器（--gazebo-control-mode $SIM_CM）"
 ros2 launch robot_sim gazebo.launch.py control_mode:="$GZ_CM" "${MODEL_ARG[@]}" &
 sleep 3
 # 不传 --data-bitrate-index：让模拟器自己 V 探测。2026-10-12 实测两只已知
@@ -48,13 +49,19 @@ python3 -u "$root/tools/fdcan_motor_sim.py" \
 echo "      等通道就绪（会自动 V 探测并选 Y 索引）..."
 sleep 6
 
-echo "[2/2] 复位控制板（必须在通道打开之后）"
+echo "[2/3] 复位控制板（必须在通道打开之后）"
 ~/.platformio/packages/tool-openocd/bin/openocd \
   -s ~/.platformio/packages/tool-openocd/openocd/scripts \
   -f interface/stlink.cfg -c 'transport select swd' -f target/stm32h7x.cfg \
   -c 'init' -c 'reset run' -c 'shutdown' >/dev/null 2>&1 || {
     echo "  OpenOCD 复位失败——检查 ST-LINK 是否还在 USB 总线上（lsusb | grep 0483）"; }
 sleep 12
+
+# 下行唯一编码者：traj_play.py / snapshot_stream.py 发的是 /motor/*，
+# 没有它命令与轨迹会静默落空。用 robot.launch.py 时 L1 已起，勿重复。
+echo "[3/3] 起 micro_ros_bridge（/motor/* → /micro_ros_do/*）"
+ros2 run micro_ros_bridge micro_ros_bridge_node &
+
 echo "就绪。验证: ros2 topic echo /micro_ros_up/motor_topology --once"
-echo "播轨迹:  python3 $root/tools/traj_play.py --json <示教JSON>"
+echo "播轨迹:  python3 $root/tools/traj_play.py --json <示教JSON>（走 /motor/trajectory，需上面 bridge 在跑）"
 wait

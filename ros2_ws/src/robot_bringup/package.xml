@@ -13,10 +13,13 @@
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>web_host</exec_depend>
   <exec_depend>bench_manager</exec_depend>
+  <exec_depend>micro_ros_bridge</exec_depend>
   <!-- 模型枚举根与臂视图几何来自模型包（默认 robot_sim）；缺包时 launch 自己降级，
        所以是运行期引用而非硬依赖。反向声明会成环：robot_sim 的
        simulation.launch.py 会 include web_host，bench_manager 又经 ros2 launch
        调 robot_sim 的 simulation.launch.py。 -->
+
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -1,6 +1,9 @@
 # micro_ros_bridge
 
-本包的 `micro_ros_bridge_node` 是主机 facade 消息与 micro-ROS 线上契约之间的边界节点。线上话题名由 [`WireContract.msg`](../can_bridge_msgs/msg/WireContract.msg) 定义；固件侧接线与发布节奏见 [`micro_ros_firmware/README.md`](../../../micro_ros_firmware/README.md)。**节点目前没有接入任何 launch**，构建本包不会切换现有话题流。
+本包的 `micro_ros_bridge_node` 是主机 facade 消息与 micro-ROS 线上契约之间的边界节点。
+线上话题名由 [`WireContract.msg`](../can_bridge_msgs/msg/WireContract.msg) 定义；固件侧
+接线与发布节奏见 [`micro_ros_firmware/README.md`](../../../micro_ros_firmware/README.md)。
+节点由 [`robot_bringup/robot.launch.py`](../robot_bringup/launch/robot.launch.py) 随 L1 启动。
 
 | 方向 | 主机话题 | 线上话题 | 线上消息 | QoS |
 |---|---|---|---|---|

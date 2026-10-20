@@ -26,7 +26,7 @@ from launch.actions import (
 from launch.event_handlers import OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.events.matchers import matches_node_name
@@ -43,6 +43,15 @@ def generate_launch_description():
 
     web_launch = os.path.join(
         get_package_share_directory('web_host'), 'launch', 'web_host.launch.py')
+
+    # 下行唯一的编码者：主机 /motor/* ↔ 线上 /micro_ros_*。纯 ROS 节点，
+    # 不碰设备，所以随 L1 常驻；没有固件时话题空转，不报错。
+    micro_ros_bridge = Node(
+        package='micro_ros_bridge',
+        executable='micro_ros_bridge_node',
+        name='micro_ros_bridge',
+        output='screen',
+    )
 
     bench_manager = LifecycleNode(
         package='bench_manager',
@@ -71,6 +80,8 @@ def generate_launch_description():
                 'web_port': LaunchConfiguration('web_port'),
             }.items(),
         ),
+
+        micro_ros_bridge,
 
         bench_manager,
 

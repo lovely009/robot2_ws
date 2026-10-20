@@ -162,7 +162,7 @@ void BridgeNode::on_low_state(const can_bridge_msgs::msg::LowState::SharedPtr ms
   pub_motion_states_->publish(out);
 }
 
-void BridgeNode::on_motor_status(const MotorStatus::SharedPtr msg)
+void BridgeNode::on_motor_status(const can_bridge_msgs::msg::MotorStatus::SharedPtr msg)
 {
   // ADR 0015 决定 8：schema_version 由低频状态面带回，这里 latch 一次。
   // 只在**变化**时报，避免 10 Hz 刷屏。
@@ -178,10 +178,10 @@ void BridgeNode::on_motor_status(const MotorStatus::SharedPtr msg)
     }
   }
 
-  MotorStatusArray statuses;
-  MotorTrajectoryState traj;
-  SystemStatus sys;
-  MotorDiagnostics diag;
+  can_bridge_msgs::msg::MotorStatusArray statuses;
+  can_bridge_msgs::msg::MotorTrajectoryState traj;
+  can_bridge_msgs::msg::SystemStatus sys;
+  can_bridge_msgs::msg::MotorDiagnostics diag;
   const auto r = decode_motor_status(*msg, statuses, traj, sys, diag, freshness_);
   if (!r.ok) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "motor_status 丢弃：%s", r.error);

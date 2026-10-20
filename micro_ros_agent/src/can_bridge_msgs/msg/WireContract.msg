@@ -8,17 +8,17 @@
 # 定点：q = clamp(round(x * 32767 / SCALE), -32767, 32767)；-32768 留给 SENTINEL_MISSING。
 # 单位边界：换算只发生在两侧 codec 里，控制逻辑仍用 rad / rad/s / A / N·m。
 
-string TOPIC_LOW_CMD=/micro_ros/do/low_cmd
-string TOPIC_POLICY=/micro_ros/do/policy
-string TOPIC_TRAJECTORY=/micro_ros/do/trajectory
-string TOPIC_CONFIG=/micro_ros/do/config
-string TOPIC_LOW_STATE=/micro_ros/up/low_state
-string TOPIC_MOTOR_STATUS=/micro_ros/up/motor_status
-string TOPIC_TOPOLOGY=/micro_ros/up/topology
-string TOPIC_EVENTS=/micro_ros/up/events
-string TOPIC_DEVICE_PARAM=/micro_ros/up/device_param
-string TOPIC_IMU_DATA=/micro_ros/up/imu/data
-string TOPIC_IMU_TEMP=/micro_ros/up/imu/temp
+string TOPIC_LOW_CMD=/micro_ros_do/low_cmd
+string TOPIC_POLICY=/micro_ros_do/policy
+string TOPIC_TRAJECTORY=/micro_ros_do/trajectory
+string TOPIC_CONFIG=/micro_ros_do/config
+string TOPIC_LOW_STATE=/micro_ros_up/low_state
+string TOPIC_MOTOR_STATUS=/micro_ros_up/motor_status
+string TOPIC_TOPOLOGY=/micro_ros_up/topology
+string TOPIC_EVENTS=/micro_ros_up/events
+string TOPIC_DEVICE_PARAM=/micro_ros_up/device_param
+string TOPIC_IMU_DATA=/micro_ros_up/imu/data
+string TOPIC_IMU_TEMP=/micro_ros_up/imu/temp
 
 # 消息面契约版本：随字段**语义**变更递增（字段只增不改序）。
 uint16 SCHEMA_VERSION=1

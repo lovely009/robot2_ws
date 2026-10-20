@@ -10,10 +10,19 @@
 
 #include "micro_ros_bridge/codec.hpp"
 
-TEST(Contract, TopicNamesAreAbsoluteAndUnderMicroRos) {
-  using micro_ros_bridge::contract::topic::kLowCmd;
-  EXPECT_EQ(kLowCmd, "/micro_ros/do/low_cmd");
-  EXPECT_EQ(std::string(kLowCmd).rfind("/micro_ros/", 0), 0u);
+// 前缀同时编码方向：do = 主机→固件，up = 固件→主机。按前缀逐条钉住，
+// 防止某条话题被挪到反方向（两端都有实现时不会报错，只会永远收不到）。
+TEST(Contract, TopicNamesCarryDirectionPrefix) {
+  namespace topic = micro_ros_bridge::contract::topic;
+  EXPECT_EQ(topic::kLowCmd, "/micro_ros_do/low_cmd");
+  for (const std::string & name : {topic::kLowCmd, topic::kPolicy, topic::kTrajectory, topic::kConfig}) {
+    EXPECT_EQ(std::string(name).rfind("/micro_ros_do/", 0), 0u) << name;
+  }
+  for (const std::string & name : {topic::kLowState, topic::kMotorStatus, topic::kTopology,
+      topic::kEvents, topic::kDeviceParam, topic::kImuData, topic::kImuTemp})
+  {
+    EXPECT_EQ(std::string(name).rfind("/micro_ros_up/", 0), 0u) << name;
+  }
 }
 
 TEST(Contract, ScalesAndSentinel) {

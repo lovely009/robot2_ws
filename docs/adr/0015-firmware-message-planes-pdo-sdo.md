@@ -41,7 +41,7 @@
 
 2. **`WireContract.msg` 是线上契约的机器可读单一来源**：话题名、定点量程、哨兵、
    `schema_version`、QoS 类别码全部作为 `.msg` 常量，两端只引用生成常量，不写字符串字面量。
-   话题命名 `/micro_ros/do/*`（主机→固件）与 `/micro_ros/up/*`（固件→主机）。
+   话题命名 `/micro_ros_do/*`（主机→固件）与 `/micro_ros_up/*`（固件→主机）。
 
 3. **循环面永不跨 MTU 分片**：`low_cmd`/`low_state` 用 SoA + int16 定点，64 台时
    序列化 **480 B**（可用约 490 B）。量程 ±12.5 rad / ±64 rad/s / ±64 N·m，−32768 留作

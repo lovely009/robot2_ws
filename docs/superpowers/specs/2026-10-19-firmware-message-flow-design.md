@@ -85,17 +85,17 @@ IMU 是**标准 ROS 类型、无需编解码**，bridge 只做话题改名的透
 ```
 # 线上契约的机器可读唯一来源。固件与主机 bridge 都只引用这里的生成常量，
 # 不各自写字符串字面量 —— 两端拼错话题名这类故障从此不可能发生。
-string TOPIC_LOW_CMD      = "/micro_ros/do/low_cmd"
-string TOPIC_POLICY       = "/micro_ros/do/policy"
-string TOPIC_TRAJECTORY   = "/micro_ros/do/trajectory"
-string TOPIC_CONFIG       = "/micro_ros/do/config"
-string TOPIC_LOW_STATE    = "/micro_ros/up/low_state"
-string TOPIC_MOTOR_STATUS = "/micro_ros/up/motor_status"
-string TOPIC_TOPOLOGY     = "/micro_ros/up/topology"
-string TOPIC_EVENTS       = "/micro_ros/up/events"
-string TOPIC_DEVICE_PARAM = "/micro_ros/up/device_param"
-string TOPIC_IMU_DATA     = "/micro_ros/up/imu/data"
-string TOPIC_IMU_TEMP     = "/micro_ros/up/imu/temp"
+string TOPIC_LOW_CMD      = "/micro_ros_do/low_cmd"
+string TOPIC_POLICY       = "/micro_ros_do/policy"
+string TOPIC_TRAJECTORY   = "/micro_ros_do/trajectory"
+string TOPIC_CONFIG       = "/micro_ros_do/config"
+string TOPIC_LOW_STATE    = "/micro_ros_up/low_state"
+string TOPIC_MOTOR_STATUS = "/micro_ros_up/motor_status"
+string TOPIC_TOPOLOGY     = "/micro_ros_up/topology"
+string TOPIC_EVENTS       = "/micro_ros_up/events"
+string TOPIC_DEVICE_PARAM = "/micro_ros_up/device_param"
+string TOPIC_IMU_DATA     = "/micro_ros_up/imu/data"
+string TOPIC_IMU_TEMP     = "/micro_ros_up/imu/temp"
 
 uint16  SCHEMA_VERSION        = 1
 uint8   MOTOR_COUNT_MAX       = 64
@@ -329,11 +329,11 @@ uint16 motor_id                     # MOTOR_ID_NONE = 65535
 
 ### 6.2 命名边界
 
-`/micro_ros/do` 与 `/micro_ros/up` 从此**只表示线上契约（固件私有）**；主机侧统一 `/motor/*`。
+`/micro_ros_do` 与 `/micro_ros_up` 从此**只表示线上契约（固件私有）**；主机侧统一 `/motor/*`。
 
 | 侧 | 话题 |
 |---|---|
-| 线上（bridge ↔ 固件） | `/micro_ros/do/{low_cmd,policy,trajectory,config}`、`/micro_ros/up/{low_state,motor_status,topology,events,device_param,imu/data,imu/temp}` |
+| 线上（bridge ↔ 固件） | `/micro_ros_do/{low_cmd,policy,trajectory,config}`、`/micro_ros_up/{low_state,motor_status,topology,events,device_param,imu/data,imu/temp}` |
 | 主机（页面 / 动作库 / ros2_control 之间） | `/motor/{command_array,motion_states,status_array,topology,events,trajectory_state,diagnostics,system_status,device_param_report,param_set,system_command,policy_array,trajectory}`、`/imu/{data,temp}` |
 
 `micro_ros_bridge` 是**唯一边界节点**：5 条主机下行 → 4 条线上消息；4 条线上消息 → 9 条
@@ -398,7 +398,7 @@ S5 之前旧 publisher 仍在，排障时可临时双跑——但双跑会让 be
 | 主机 gtest | codec 边界/哨兵/越界饱和；golden 向量（与固件 host 用例取同值，两边注释互指）；QoS 类别码映射完备；`MotorStatus` count=64 序列化 ≤ 2048 B |
 | 仓库 | `colcon test`（ros2_ws）、`ctest --test-dir .host-build`、`pio run` 的 RAM_D1 百分比 |
 | 台架（不进 CI） | S3/S4 验收清单 + `publish_fail` / `mailbox_rejected_*` / `rx_hw_lost` 全零 |
-| 命名门禁 | 全仓库 grep：`/micro_ros/do/` 与 `/micro_ros/up/` 的**源码字面量**只应出现在 `WireContract.msg`（文档与注释不算）；`web_host` 的 `test_web_assets` 兜住 JS 侧前缀 |
+| 命名门禁 | 全仓库 grep：`/micro_ros_do/` 与 `/micro_ros_up/` 的**源码字面量**只应出现在 `WireContract.msg`（文档与注释不算）；`web_host` 的 `test_web_assets` 兜住 JS 侧前缀 |
 
 **不启动 Gazebo、不启动 MuJoCo、不占 vcan / 串口 / 真实硬件**——沿用仓库测试规矩。
 

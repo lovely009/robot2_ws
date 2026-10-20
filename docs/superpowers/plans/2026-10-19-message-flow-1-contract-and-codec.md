@@ -75,17 +75,17 @@
 # 定点：q = clamp(round(x * 32767 / SCALE), -32767, 32767)；-32768 留给 SENTINEL_MISSING。
 # 单位边界：换算只发生在两侧 codec 里，控制逻辑仍用 rad / rad/s / A / N·m。
 
-string TOPIC_LOW_CMD=/micro_ros/do/low_cmd
-string TOPIC_POLICY=/micro_ros/do/policy
-string TOPIC_TRAJECTORY=/micro_ros/do/trajectory
-string TOPIC_CONFIG=/micro_ros/do/config
-string TOPIC_LOW_STATE=/micro_ros/up/low_state
-string TOPIC_MOTOR_STATUS=/micro_ros/up/motor_status
-string TOPIC_TOPOLOGY=/micro_ros/up/topology
-string TOPIC_EVENTS=/micro_ros/up/events
-string TOPIC_DEVICE_PARAM=/micro_ros/up/device_param
-string TOPIC_IMU_DATA=/micro_ros/up/imu/data
-string TOPIC_IMU_TEMP=/micro_ros/up/imu/temp
+string TOPIC_LOW_CMD=/micro_ros_do/low_cmd
+string TOPIC_POLICY=/micro_ros_do/policy
+string TOPIC_TRAJECTORY=/micro_ros_do/trajectory
+string TOPIC_CONFIG=/micro_ros_do/config
+string TOPIC_LOW_STATE=/micro_ros_up/low_state
+string TOPIC_MOTOR_STATUS=/micro_ros_up/motor_status
+string TOPIC_TOPOLOGY=/micro_ros_up/topology
+string TOPIC_EVENTS=/micro_ros_up/events
+string TOPIC_DEVICE_PARAM=/micro_ros_up/device_param
+string TOPIC_IMU_DATA=/micro_ros_up/imu/data
+string TOPIC_IMU_TEMP=/micro_ros_up/imu/temp
 
 # 消息面契约版本：随字段**语义**变更递增（字段只增不改序）。
 uint16 SCHEMA_VERSION=1
@@ -131,14 +131,14 @@ grep -n "TOPIC_LOW_CMD\|SCALE_POSITION_RAD" $H/detail/wire_contract__struct.hpp
 
 预期（C）：
 ```c
-static const char * const can_bridge_msgs__msg__WireContract__TOPIC_LOW_CMD = "/micro_ros/do/low_cmd";
+static const char * const can_bridge_msgs__msg__WireContract__TOPIC_LOW_CMD = "/micro_ros_do/low_cmd";
 enum { can_bridge_msgs__msg__WireContract__SENTINEL_MISSING = -32768 };
 static const float can_bridge_msgs__msg__WireContract__SCALE_POSITION_RAD = 12.5;
 ```
 预期（C++）：`static const std::string TOPIC_LOW_CMD;` 与
-`const std::string WireContract::TOPIC_LOW_CMD = "/micro_ros/do/low_cmd";`
+`const std::string WireContract::TOPIC_LOW_CMD = "/micro_ros_do/low_cmd";`
 
-**值里不能出现引号**。若出现（`""/micro_ros/do/low_cmd""`），说明 .msg 里误写了引号，去掉重来。
+**值里不能出现引号**。若出现（`""/micro_ros_do/low_cmd""`），说明 .msg 里误写了引号，去掉重来。
 
 - [ ] **Step 4: 提交**
 
@@ -928,7 +928,7 @@ static_assert 钉住，两份漂移即编不过。"
 
 TEST(Contract, TopicNamesAreAbsoluteAndUnderMicroRos) {
   using micro_ros_bridge::contract::topic::kLowCmd;
-  EXPECT_EQ(kLowCmd, "/micro_ros/do/low_cmd");
+  EXPECT_EQ(kLowCmd, "/micro_ros_do/low_cmd");
   EXPECT_EQ(std::string(kLowCmd).rfind("/micro_ros/", 0), 0u);
 }
 
@@ -2590,7 +2590,7 @@ QoS 判据、以及"本包尚未接线任何 launch"的状态说明。
 ```bash
 cd /home/ly/robot_ws
 grep -rn --include=*.cpp --include=*.hpp --include=*.c --include=*.h --include=*.py --include=*.js \
-  -e '"micro_ros/do/' -e '"micro_ros/up/' -e '"/micro_ros/do/' -e '"/micro_ros/up/' . \
+  -e '"micro_ros/do/' -e '"micro_ros/up/' -e '"/micro_ros_do/' -e '"/micro_ros_up/' . \
   --exclude-dir=build --exclude-dir=install --exclude-dir=.pio --exclude-dir=libmicroros \
   | grep -v WireContract \
   | grep -v '^ros2_ws/src/micro_ros_bridge/test/test_contract.cpp:'
@@ -2600,7 +2600,7 @@ grep -rn --include=*.cpp --include=*.hpp --include=*.c --include=*.h --include=*
 生成头与文档不算）。有输出说明某处自己拼了话题名，改回引用常量。
 
 最后一行排除的是**唯一一处故意的例外**：`test_contract.cpp` 的
-`EXPECT_EQ(kLowCmd, "/micro_ros/do/low_cmd")` 是"按精确值钉住"的钉子本身——它存在的意义
+`EXPECT_EQ(kLowCmd, "/micro_ros_do/low_cmd")` 是"按精确值钉住"的钉子本身——它存在的意义
 就是持有那份字面量，好让 `WireContract.msg` 被改动时测试变红。它**不是**第二份事实来源
 （别名仍指向常量），所以不能算违反门禁。除它之外任何命中都是缺陷。
 派发前已实测：加上这行排除后，全仓库该 grep 无输出。

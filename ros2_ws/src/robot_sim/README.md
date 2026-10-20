@@ -12,14 +12,15 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 | 模型 | 说明 | 自由度 |
 | --- | --- | --- |
 | `half_body_robot` | **默认模型**（四个 launch 的默认值都是它）。半身机器人 = 上身 + 双臂整体装配体（SolidWorks 导出，躯干 `base_link` 上挂**两条互不相连**的 9 轴链，link `Joint_link1..9` / `Joint_link1.1..9.9`，joint 小写，第二链非严格镜像）。两条链的 18 个关节都有电机、都接入端到端仿真；命令接口**只有 effort**（不支持 `control_mode:=position`，原因见模型 README），并自带 `mujoco/half_body_robot.xml`（MuJoCo 后端可用） | 18 revolute + 0 fixed |
+| `robot_leg` | **预览件，非契约模型**：单条腿（骨盆 `base_link` → 髋 → 张合 → 大腿 → 膝 → 踝 2 轴，SolidWorks 导出），带一段平行四边形张合连杆（`joint_link2.1` → `joint_link2.2`，靠 `<mimic>` 1:1 跟随）。**关节限位未从 CAD 获得**（导出件 `<limit>` 全是 `0/0/0/0`），6 个关节暂写 `continuous` 只为预览时滑杆能拖；无 xacro / 控制器 / 仿真拓扑，**只能被 `display.launch.py` 加载** | 8 continuous（含 1 个 mimic 从动） |
 
-> `models/` 下另有**两个原始资产目录**（`g1_description`、`pro_urdf_publish`），
-> 是导入的厂商/CAD 导出件，不满足 `models/<模型名>/` 的自包含契约四件套
-> （`urdf/<名>.urdf` + `urdf/<名>.urdf.xacro` + `config/controllers.yaml` + `README.md`）。
+> `models/` 下**除契约模型外还有非契约资产**：`robot_leg`（单腿预览件，只有
+> `urdf/<名>.urdf`，缺 `urdf/<名>.urdf.xacro` 与 `config/controllers.yaml`）。
 > 它们**不在** `test_model_consistency.py` 的参数化范围内（该文件只收「带
 > `urdf/<目录名>.urdf.xacro` 的契约模型」），所以测试既不会为它们报红、也不会替它们兜底——
 > 契约缺项是静默的，改这些目录时不要指望测试拦住你。要么补齐契约、要么移出 `models/`，
-> 见该测试文件头部对契约的说明。它们不是可加载的模型，`model:=` 不要指向它们。
+> 见该测试文件头部对契约的说明。非契约资产只有 `display.launch.py` 能加载，
+> `model:=` 指向它们时 `gazebo` / `mujoco` / `simulation` 都起不来。
 >
 > 模型自己的 **CAD 溯源件放在 `models/<模型名>/cad/`**（如 `half_body_robot/cad/`），
 > 不放在 `models/` 顶层——顶层多一个目录就会多一个「看起来像模型但不是」的东西。
@@ -29,7 +30,8 @@ launch 按模型名选择资产；完整电机仿真拓扑随模型存放在
 > 2026-10-12 清理：`chest_upper_00`、`chest_dual_00`、`robot-001`、`zhoubuguanjie_youbi_002`
 > 及其 `dist/` 发布件已移除；同日新增 `full_body`（双臂 18 关节，力矩控制）。
 > 2026-10-13：`robot_all`（原始导出薄壳，也是唯一带 position 命令接口的模型）一并删除——
-> **现在唯一可加载模型是 `half_body_robot`**，四个 launch 的默认模型都是它。
+> **现在唯一可接入仿真/控制的模型是 `half_body_robot`**，四个 launch 的默认模型都是它
+> （`robot_leg` 是 2026-10-20 加入的预览件，只能走 `display.launch.py`）。
 > 同日稍后 CAD 重新导出（**10 个关节的 `lower`/`upper` 收窄**）后 `full_body` **更名为
 > `half_body_robot`**，`models/full_body/` 与 `dist/full_body_urdf/` 已删除；网格是同一份几何
 > 重新导出（顶点集合一致），因此碰撞凸包与简化网格沿用即可，`--check` 已复核。

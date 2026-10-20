@@ -277,6 +277,9 @@ source ../micro_ros_agent/install/setup.bash
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 ```
 
+> 下行命令/轨迹需 `micro_ros_bridge` 在跑（`../micro_ros_agent/tools/bench_up.sh` 会起；
+> 用 `robot.launch.py` 时 L1 已起，勿重复）。
+
 建链后可见电机话题（消息均属 `can_bridge_msgs`，源在
 `../micro_ros_agent/src/can_bridge_msgs`）：
 
@@ -289,9 +292,10 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -v
 - `/micro_ros_do/policy`（`MotorPolicyArray`，reliable）：逐电机 enable/kp/kd。
 - `/micro_ros_do/trajectory`（`MotorTrajectory`，reliable）：多点轨迹。
 
-上行仍是旧话题（名称与节拍见下一节）；S4 切流后本节与上行表一起重写。
+上行仍是旧话题（名称与节拍见本节后面的「发布（上行）」清单）；S4 切流后本节与上行表一起重写。
 
-`low_cmd` 的 NaN/Inf、未知或重复 `motor_id` 整体拒绝；缺席的受控电机立即软停，
+`low_cmd` 的 NaN/Inf 在主机编码端（`micro_ros_bridge`）整帧拒绝，线上只带 −32768 哨兵；
+未知或重复 `motor_id` 由固件整体拒绝。缺席的受控电机立即软停，
 禁止沿用旧目标。**快照到达速率不决定命令速率**：受理后的目标由内核在每个
 2ms/500Hz 控制边界保持重发（零阶保持，仅在快照新鲜 ≤30ms 期间），所以上行即使
 按 50Hz 发，驱动器侧收到的目标为 500Hz 命令流。上行送达率实测封顶 ~72/s
@@ -708,7 +712,7 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
    （见 `lib/motor_control/include/motor_control.h`）。
 2. **机构无抱闸，且软停帧本身是零位置刚度**（`kp = 0`）——30 ms 与 100 ms 两级都是「撒手」，
    对承重关节不是安全停止（见 TBD-SAFETY-03）。软件停机不替代硬件急停与机械限位。
-3. **`libmicroros.a` 的 meta 槽位是库编译期事实**（publishers 10/12、subscriptions 5/6、
+3. **`libmicroros.a` 的 meta 槽位是库编译期事实**（publishers 10/12、subscriptions 4/6、
    services 0/5），`-D` 改不动；改 meta 或 `.msg` 只能走
    `../micro_ros_agent/tools/refresh_microros_messages.py`（增量、离线），不是 `-t clean_microros`。
 4. **单条消息上限 512 B，且 best-effort 输出流只有一块全局静态缓冲、所有 publisher 共用**

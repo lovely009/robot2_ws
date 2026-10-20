@@ -56,9 +56,10 @@ CAN MIT 帧给电机：`τ = kp(p_des−p) + kd(v_des−v) + τ_ff`。**τ_ff �
 命令消息 `can_bridge_msgs/MotorCommandTarget.effort`（关节侧 N·m）与轨迹点
 `MotorTrajectoryPoint.effort` 就是它。
 
-三个命令源（web 上位机、`micro_ros_agent/tools/snapshot_stream.py`、`traj_play.py`）默认直接
-发 `/motor/command_array`（轨迹走 `/motor/trajectory`），再由 `micro_ros_bridge` 编成线上
-`low_cmd` / `trajectory`。micro-ROS Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，
+三个命令源（web 上位机的 `command_streamer`（页面发 `/motor_command/setpoint`）、
+`snapshot_stream.py`、`traj_play.py`）默认直接发 `/motor/command_array`（轨迹走
+`/motor/trajectory`），再由 `micro_ros_bridge` 编成线上 `low_cmd` / `trajectory`。
+micro-ROS Agent 的 CLI 显式丢弃 `--ros-args`、无 remap 能力，
 固件侧话题名又是编译期常量——所以「夹在中间加前馈」只能靠**改命令源的话题名**，本节点
 就是那个中间层：
 
@@ -76,7 +77,7 @@ CAN MIT 帧给电机：`τ = kp(p_des−p) + kd(v_des−v) + τ_ff`。**τ_ff �
 
 ### 话题与 QoS
 
-| 方向 | 话题（默认，相对名） | 类型 | QoS |
+| 方向 | 话题（默认） | 类型 | QoS |
 |---|---|---|---|
 | 订阅 | `robot_dynamics/command_array` | `can_bridge_msgs/MotorCommandArray` | reliable + volatile，深度 1 |
 | 订阅 | `robot_dynamics/trajectory` | `can_bridge_msgs/MotorTrajectory` | reliable + volatile，深度 10 |

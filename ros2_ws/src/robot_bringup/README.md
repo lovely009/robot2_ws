@@ -4,7 +4,7 @@
 
 | 层 | 内容 | 由谁起 |
 |---|---|---|
-| L1 | rosbridge WebSocket + 静态页面 + 命令节拍（`command_streamer`）（include `web_host` 的 `web_host.launch.py`） | 本 launch |
+| L1 | rosbridge WebSocket + 静态页面 + 命令节拍（`command_streamer`）（include `web_host` 的 `web_host.launch.py`）+ `micro_ros_bridge`（`/motor/*` ↔ `/micro_ros_do/*`） | 本 launch |
 | L2 | `bench_manager`（lifecycle 节点，`/bench/*` 服务 + `/bench/status`） | 本 launch |
 | L3 | 会话 unit：仿真 / 电机后端 / micro-ROS Agent / 重力前馈叠加 | `bench_manager`，页面点「启动」时 |
 
@@ -12,7 +12,7 @@ L3 不在本 launch 里：那是页面上按钮的事。本包**只装一个 lau
 
 ## 与 web_host.launch.py 的分工
 
-`web_host.launch.py` 只做 L1——「只想看页面」不必带上进程管理权限；「起一套台架」才是本
+`web_host.launch.py` 只做 L1 的 Web 部分——「只想看页面」不必带上进程管理权限；「起一套台架」才是本
 入口。两者不是新旧关系，是能力范围不同：本 launch include 前者，不重复它的节点定义。
 
 ## lifecycle 推进

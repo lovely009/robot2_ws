@@ -25,6 +25,8 @@
 
 `stream` 是高频、下一拍可替代的消息，使用 best-effort、depth 1；`reliable` 是低频声明、配置或事件，使用 reliable、depth 10。`/motor/command_array` 主机订阅端单独使用 reliable、depth 1，线上 `low_cmd` 发布端为 stream。每条透传链路的订阅和发布两端使用相同的 QoS 类别。
 
+上行线上话题（`low_state` / `motor_status`）从 S4 起才由固件发布；本阶段固件仍发旧的 `/micro_ros_up/*`（页面直接读），桥的上行订阅暂时收不到数据。
+
 命令和状态的定点换算为 `q = clamp(round(x × 32767 / scale), -32767, 32767)`，反算为 `x = q × scale / 32767`。位置量程为 ±12.5 rad，速度为 ±64 rad/s，力矩为 ±64 N·m；`-32768` 是缺失测量哨兵。超量程命令钳位并报告饱和，NaN/Inf 命令整帧拒绝。低状态帧的电机 ID 必须在 `[0, 63]`，否则整帧拒绝。
 
 在收到首条有效 `MotorStatus` 前，schema 门禁允许下行。之后只接受与本机 `SCHEMA_VERSION` 相同的有效状态帧；版本为 0 或其他值时拒绝所有下行（`low_cmd`、`config`、`policy`、`trajectory`），畸形状态帧不改变门禁。

@@ -54,7 +54,8 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 ## 台架：模拟器与全链路（2026-09-22 实测）
 
 - **启动一律走 `micro_ros_agent/tools/bench_up.sh`**（模拟器先起当 ACK 节点 → 再复位板子）。
-  默认 `position` 模式，理由见下。
+  默认 `position` 模式，理由见下。`bench_up.sh` 同时起 `micro_ros_bridge`（`/motor/*` →
+  `/micro_ros_do/*`）：**下行命令/轨迹需它在跑**；用 `robot.launch.py` 时 L1 已起，勿重复。
 - **模拟器的设备路径按 by-id 解析，别硬编码 `/dev/ttyACM*`**：USB 重新枚举（拔插、HUB
   复位、板子重上电）后编号会交换——2026-09-22 实测 CANable 从 ttyACM1 变成 ttyACM0、
   板子 CDC 变成 ttyACM2；硬编码的模拟器于是开到了**别的节点**，总线上没有 ACK 节点、
@@ -106,7 +107,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
   首选**离线**路径：`../micro_ros_agent/tools/refresh_microros_messages.py`
   （复用缓存、不联网，meta 与 .msg 改动同一趟生效）。
   `tools/check_microros_config.py`（pre: 脚本）构建前校验旧缓存并 Exit(1)。
-  当前用量：publishers 10/12、subscriptions 5/6、services 0/5（**参数服务器
+  当前用量：publishers 10/12、subscriptions 4/6、services 0/5（**参数服务器
   2026-09-21 退役后 services 成纯余量，有意不降**——降它要改 check 阈值，收益只是
   静态数组、不占 DTCM 堆）。
 - **改消息后**跑 `../micro_ros_agent/tools/refresh_microros_messages.py`
@@ -138,8 +139,8 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - `field=4`（limit_protect）是**正向语义**（1 = 设备侧保护生效），设备原值相反
   （0 = 保护开）；反转只在 `src/param_bridge.cpp` 的 `submit_safety_protect`
   一处发生，协议层只认原值。
-- **写 ≠ 保存**：`param_set` 只改设备 RAM + 固件记录；`system_command` 的
-  `COMMAND_SAVE` 才触发设备 `0x2539` + W25 落盘。完成判据是 `system_status` 的
+- **写 ≠ 保存**：`config`（`kind=PARAM_SET`）只改设备 RAM + 固件记录；`config` 的
+  `kind=SYSTEM_COMMAND`（`COMMAND_SAVE`）才触发设备 `0x2539` + W25 落盘。完成判据是 `system_status` 的
   `save_seq` 前进且 `save_in_progress` 转 false——它覆盖**设备分批下发 + W25 落盘**
   全程（旧实现在落盘前就报完成）。
 - `micro_ros` 任务栈是**静态分配**（32 KiB 落 RAM_D1 `.bss`，见 `micro_ros_task.cpp`），
@@ -171,7 +172,7 @@ cmake -S test/host -B .host-build && cmake --build .host-build -j2 && \
 - boot 的「胜者 blob」缓冲与 `g_write_buf` **共用同一块 scratch**（`g_blob_scratch`）：
   `load_boot_params()` 只在 `storage_task_start()` 内、`xTaskCreate` 之前跑一次，
   与 `perform_save()` 无时间重叠；入口 `configASSERT(g_task == nullptr)` 把关。
-- **落盘只有一个触发：`system_command` 的 `COMMAND_SAVE`**（2026-09-21 写/保存分离后）。写事务成功
+- **落盘只有一个触发：`config` 的 `kind=SYSTEM_COMMAND`（`COMMAND_SAVE`）**（2026-09-21 写/保存分离后）。写事务成功
   只把该台 `record_dirty_slots` 置脏（`device_param_report.record_dirty` 随之置真），
   不再是落盘触发；"设备写事务成功 → 500ms 去抖自动落盘"已删（聚合脏标志与
   `motor_control_take_record_dirty()` 一并移除）。只写不保存 = 未保存，下次上电不

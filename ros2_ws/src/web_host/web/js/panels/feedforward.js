@@ -246,8 +246,8 @@ export function mount(root, ctx) {
 
   function renderHint() {
     if (!agentOnline()) {
-      ui.hint.textContent = '重力补偿要 STM32 在环：叠加节点的输出只有固件订阅，'
-        + '纯 Gazebo / 纯 MuJoCo / 主机驱动闭环三路没有接收者。';
+      ui.hint.textContent = '重力补偿要 STM32 在环：叠加节点的输出由 bridge 转发，'
+        + '纯 Gazebo / 纯 MuJoCo / 主机驱动闭环三路 bridge 之后没有固件消费。';
       return;
     }
     if (brokenRoute()) {

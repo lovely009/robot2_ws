@@ -71,6 +71,26 @@ void test_frame_shape()
   assert(!wire_frame_shape_ok(2, 2, 2, 2, 2, 1));
   assert(!wire_frame_shape_ok(65, 65, 65, 65, 65, 64));
 }
+
+void test_config_groups_exclusive()
+{
+  // PARAM_SET：只带参数组。命令组不适用时，bridge 的编码端写的是
+  // command = COMMAND_SAVE(0)、motor_id = MOTOR_ID_NONE(65535)——
+  // 不是 0（0 是合法电机 id），照着 .msg 字面「0/空」写会拒掉每一条合法参数写。
+  assert(wire_config_groups_exclusive(
+      WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 0, WIRE_MOTOR_ID_NONE));
+  assert(!wire_config_groups_exclusive(
+      WIRE_CONFIG_KIND_PARAM_SET, 2, 1, 0, WIRE_MOTOR_ID_NONE));
+  assert(!wire_config_groups_exclusive(
+      WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 4, WIRE_MOTOR_ID_NONE));
+  assert(!wire_config_groups_exclusive(WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 0, 0));
+  // SYSTEM_COMMAND：只带命令组；目标必须为空。motor_id 可以是 MOTOR_ID_NONE。
+  assert(wire_config_groups_exclusive(
+      WIRE_CONFIG_KIND_SYSTEM_COMMAND, 0, 0, 0, WIRE_MOTOR_ID_NONE));
+  assert(!wire_config_groups_exclusive(WIRE_CONFIG_KIND_SYSTEM_COMMAND, 1, 1, 0, 0));
+  // 未知 kind 整条拒。
+  assert(!wire_config_groups_exclusive(7, 0, 0, 0, 0));
+}
 }  // namespace
 
 int main()
@@ -81,6 +101,7 @@ int main()
   test_sentinel_is_not_a_value();
   test_non_finite_yields_sentinel();
   test_frame_shape();
+  test_config_groups_exclusive();
   std::printf("test_wire_codec: ok\n");
   return 0;
 }

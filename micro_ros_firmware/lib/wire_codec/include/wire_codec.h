@@ -38,6 +38,17 @@ bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
     size_t position_q_len, size_t velocity_q_len, size_t effort_q_len,
     size_t max_slots);
 
+// 配置面两组字段互斥（ConfigRequest.msg）。不适用组的哨兵值按**实际编码端**取：
+// micro_ros_bridge 的 encode_config(ParamSetArray) 写 command = COMMAND_SAVE(0)、
+// motor_id = MOTOR_ID_NONE(65535)。kind/motor_id 哨兵是本库的**受控第二份**，
+// 由 src/wire_contract_check.cpp 的 static_assert 钉到生成常量上。
+#define WIRE_CONFIG_KIND_PARAM_SET 0U
+#define WIRE_CONFIG_KIND_SYSTEM_COMMAND 1U
+#define WIRE_MOTOR_ID_NONE 65535U
+
+bool wire_config_groups_exclusive(uint8_t kind, uint16_t count,
+    size_t targets_len, uint8_t command, uint16_t motor_id);
+
 #ifdef __cplusplus
 }
 #endif

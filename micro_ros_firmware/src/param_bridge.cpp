@@ -14,9 +14,11 @@
 #include <math.h>
 #include <string.h>
 
+#include <can_bridge_msgs/msg/config_request.h>
 #include <can_bridge_msgs/msg/param_set_array.h>
 #include <can_bridge_msgs/msg/system_command.h>
 #include <can_bridge_msgs/msg/system_status.h>
+#include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 #include <rcl/error_handling.h>
 #include <rmw_microros/time_sync.h>
 
@@ -26,10 +28,11 @@
 #include "ros_qos.h"
 #include "save_transaction.h"
 #include "storage_task.h"
+#include "wire_codec.h"
 
-static const char *kParamSetTopic = "micro_ros_do/param_set";
-static const char *kSystemCommandTopic = "micro_ros_do/system_command";
-static const char *kSystemStatusTopic = "micro_ros_up/system_status";
+static const char *kConfigTopic =
+    can_bridge_msgs__msg__WireContract__TOPIC_CONFIG;
+static const char *kSystemStatusTopic = "micro_ros_up/system_status"; // S4 前不变
 
 // 错误码（system_status.last_error）：0=无；1..6 对齐 CONFIG 结果七码；10=本地校验
 // 拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知电机；20=save 失败；
@@ -59,9 +62,9 @@ static const char *kSystemStatusTopic = "micro_ros_up/system_status";
 static_assert(kParamSetMaxTargets <= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY,
     "ParamSetArray 上界超过配置 FIFO 深度：一条消息能自己把队列打满");
 
-// executor 句柄数：两条订阅（发布不占 handle）。少算了会在 add_subscription 上
+// executor 句柄数：一条订阅（发布不占 handle）。少算了会在 add_subscription 上
 // 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
-static_assert(PARAM_BRIDGE_EXECUTOR_HANDLES == 2U,
+static_assert(PARAM_BRIDGE_EXECUTOR_HANDLES == 1U,
     "PARAM_BRIDGE_EXECUTOR_HANDLES 必须等于本文件的订阅数");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == SAVE_TRANSACTION_MAX_TARGETS,
     "SAVE 事务容量必须与电机视图容量一致");
@@ -99,18 +102,14 @@ static_assert(PARAM_DEVICE_SLOT_COUNT == 6U,
 #define PARAM_INTERNAL_ID_TAG 0x40000000U
 
 // ---- 状态 ----
-static rcl_subscription_t g_param_set_sub;
-static rcl_subscription_t g_system_cmd_sub;
+static rcl_subscription_t g_config_sub;
 static rcl_publisher_t g_system_status_pub;
-static can_bridge_msgs__msg__ParamSetArray g_param_set_msg;
-static can_bridge_msgs__msg__ParamSetTarget g_param_set_buf[kParamSetMaxTargets];
-static can_bridge_msgs__msg__SystemCommand g_system_cmd_msg;
+static can_bridge_msgs__msg__ConfigRequest g_config_msg;
+static can_bridge_msgs__msg__ParamSetTarget g_config_targets_buf[kParamSetMaxTargets];
 static can_bridge_msgs__msg__SystemStatus g_system_status_msg;
 static bool g_sub_up = false;
-static bool g_cmd_sub_up = false;
 static bool g_pub_up = false;
 static bool g_sub_added = false;
-static bool g_cmd_sub_added = false;
 static bool g_created = false;
 
 // 最近一次 poll 的参数视图快照。param_bridge_views() 把它交给 device_param_report
@@ -338,15 +337,14 @@ static bool dispatch_target(const motor_control_param_view_t *v, uint8_t field,
 // 任一不成立 → false（last_error 已置），调用方直接返回、一个字节都不下发。
 // **纯函数**：不碰 mailbox、不发布，所以"整条受理或整条拒绝"是能兑现的承诺——
 // 凡能在这里判定的失败，都不会拖到分发阶段才冒出来。
-static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
-  // count 是 targets.size 的冗余声明（口径同 MotorPolicyArray.count）：对不上
-  // 就说明发送方对契约的理解与固件不同，宁可整条拒。
-  if (msg->count != msg->targets.size || msg->count > kParamSetMaxTargets) {
+static bool validate_param_set(
+    const can_bridge_msgs__msg__ParamSetTarget *targets, uint16_t count) {
+  if (count > kParamSetMaxTargets) {
     report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
     return false;
   }
-  for (uint16_t i = 0; i < msg->count; ++i) {
-    const can_bridge_msgs__msg__ParamSetTarget &t = msg->targets.data[i];
+  for (uint16_t i = 0; i < count; ++i) {
+    const can_bridge_msgs__msg__ParamSetTarget &t = targets[i];
     if (t.field >= PARAM_DEVICE_SLOT_COUNT ||
         t.motor_id >= MOTOR_CONTROL_MAX_MOTORS) {
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
@@ -362,8 +360,6 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
       return false;
     }
-    // 力矩列要过一次 A→N·m，系数未知（未绑定型号）时不能拿瞎猜的系数下发。
-    // 放在预校验而不是提交时：提交中途失败会留下部分生效，破坏整条语义。
     if (t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT &&
         !isfinite(param_units_amp_to_nm(t.value, v->torque_per_amp))) {
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
@@ -371,8 +367,7 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
     }
     // 同一 (motor_id, field) 出现两次：静默取一个会掩盖调用方 bug。
     for (uint16_t j = 0; j < i; ++j) {
-      if (msg->targets.data[j].motor_id == t.motor_id &&
-          msg->targets.data[j].field == t.field) {
+      if (targets[j].motor_id == t.motor_id && targets[j].field == t.field) {
         report_error(ERR_LOCAL_VALIDATION, t.motor_id);
         return false;
       }
@@ -381,13 +376,13 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
   // 位置限位成对：同一条消息内该台必须两边都给，且 min < max。
   const uint8_t pos_bits = (uint8_t)((1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN) |
       (1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX));
-  for (uint16_t i = 0; i < msg->count; ++i) {
-    const uint16_t id = msg->targets.data[i].motor_id;
+  for (uint16_t i = 0; i < count; ++i) {
+    const uint16_t id = targets[i].motor_id;
     uint8_t mask = 0U;
     float lo = NAN;
     float hi = NAN;
-    for (uint16_t j = 0; j < msg->count; ++j) {
-      const can_bridge_msgs__msg__ParamSetTarget &p = msg->targets.data[j];
+    for (uint16_t j = 0; j < count; ++j) {
+      const can_bridge_msgs__msg__ParamSetTarget &p = targets[j];
       if (p.motor_id != id) {
         continue;
       }
@@ -402,8 +397,6 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
       continue; // 本台没写位置限位
     }
     if ((mask & pos_bits) != pos_bits) {
-      // 只给一边：不做半边暂存。另一边从 device_param_report 的 rec_pos_* 读回
-      // 一起发——半边状态正是本设计要消掉的东西。
       report_error(ERR_LOCAL_VALIDATION, id);
       return false;
     }
@@ -415,27 +408,25 @@ static bool validate_param_set(const can_bridge_msgs__msg__ParamSetArray *msg) {
   return true;
 }
 
-// 逐目标分发。此刻预校验已全部通过，除提交失败（FIFO 满/断链）外不会再失败。
-static void apply_param_set(const can_bridge_msgs__msg__ParamSetArray *msg,
+static void apply_param_set(
+    const can_bridge_msgs__msg__ParamSetTarget *targets, uint16_t count,
     uint32_t request_id) {
   bool consumed[kParamSetMaxTargets] = {};
-  for (uint16_t i = 0; i < msg->count; ++i) {
+  for (uint16_t i = 0; i < count; ++i) {
     if (consumed[i]) {
       continue;
     }
-    const can_bridge_msgs__msg__ParamSetTarget &t = msg->targets.data[i];
+    const can_bridge_msgs__msg__ParamSetTarget &t = targets[i];
     const motor_control_param_view_t *v = find_view(t.motor_id);
     if (v == nullptr) {
       continue; // 预校验已确认存在；防御
     }
     if (t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN ||
         t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
-      // 成对提交：一趟把所有位置元素找齐并标记消费（**不是静默丢弃**——它们
-      // 就在这次成对提交里一起下发）。预校验已保证恰好两个且 lo < hi。
       float lo = NAN;
       float hi = NAN;
-      for (uint16_t j = 0; j < msg->count; ++j) {
-        const can_bridge_msgs__msg__ParamSetTarget &p = msg->targets.data[j];
+      for (uint16_t j = 0; j < count; ++j) {
+        const can_bridge_msgs__msg__ParamSetTarget &p = targets[j];
         if (p.motor_id != t.motor_id) {
           continue;
         }
@@ -460,62 +451,26 @@ static void apply_param_set(const can_bridge_msgs__msg__ParamSetArray *msg,
   }
 }
 
-static void param_set_array_cb(const void *msgin) {
-  const can_bridge_msgs__msg__ParamSetArray *msg =
-      (const can_bridge_msgs__msg__ParamSetArray *)msgin;
-  if (msg == nullptr) {
-    return;
-  }
-  if (!validate_param_set(msg)) {
-    return;
-  }
-
-  // request_id：0 = 固件代分配（配置 FIFO 拒 0）；落在固件自发命名空间 → 整条
-  // 拒绝；其余**逐字**进内核并随 CONFIG_RESULT 原样回告（先例
-  // motor_bridge.cpp 的 snapshot.request_id 直通）。不做去重——全仓库无去重
-  // 先例，且做它要重新引入本次正要删掉的状态。
-  uint32_t request_id = msg->request_id;
-  if ((request_id & PARAM_INTERNAL_ID_TAG) != 0U) {
-    report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
-    return;
-  }
-  if (request_id == 0U) {
-    request_id = next_internal_id();
-  }
-  apply_param_set(msg, request_id);
-}
-
-// 系统命令：refresh / set_zero / clear_fault 直接提交（与 motor_bridge 的三个
-// 回调同构——校验与提交都在回调里做）；save 只置请求，实际的设备侧分批下发与
-// W25 落盘由 save_transaction 在 poll 中推进；report 只置一次性请求，
-// 由 motor_bridge 下一拍拍快照发帧，全程不碰设备与 mailbox。
-static void system_command_cb(const void *msgin) {
-  const can_bridge_msgs__msg__SystemCommand *msg =
-      (const can_bridge_msgs__msg__SystemCommand *)msgin;
-  if (msg == nullptr) {
-    return;
-  }
-
-  if (msg->command == can_bridge_msgs__msg__SystemCommand__COMMAND_SAVE) {
-    // 只接受整机保存：W25 那一半必须整体落盘，按台保存只能省设备侧一半，语义
-    // 含混（见 .msg）。给了具体 motor_id 就是调用方误解了契约。
-    if (msg->motor_id != can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE) {
-      report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
+static void handle_system_command(uint8_t command, uint16_t motor_id,
+    uint32_t request_id) {
+  if (command == can_bridge_msgs__msg__SystemCommand__COMMAND_SAVE) {
+    // 只接受整机保存：W25 那一半必须整体落盘，按台保存只省设备侧一半。
+    if (motor_id != can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE) {
+      report_error(ERR_LOCAL_VALIDATION, motor_id);
       return;
     }
     save_transaction_request(&g_save_transaction);
     return;
   }
 
-  if (msg->command ==
-      can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT) {
-    // 总是整机一帧，motor_id 忽略（契约见 .msg）。重复 REPORT 合并为一次。
+  if (command == can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT) {
+    // 总是整机一帧，motor_id 忽略；重复 REPORT 合并为一次。
     g_report_pending = true;
     return;
   }
 
   control_mailbox_config_kind_t kind;
-  switch (msg->command) {
+  switch (command) {
   case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
     kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
     break;
@@ -526,23 +481,21 @@ static void system_command_cb(const void *msgin) {
     kind = CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
     break;
   default:
-    report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
+    report_error(ERR_LOCAL_VALIDATION, motor_id);
     return;
   }
 
-  const motor_control_param_view_t *v = (msg->motor_id < MOTOR_CONTROL_MAX_MOTORS)
-                                            ? find_view(msg->motor_id)
+  const motor_control_param_view_t *v = (motor_id < MOTOR_CONTROL_MAX_MOTORS)
+                                            ? find_view(motor_id)
                                             : nullptr;
-  // 未绑定型号的台没有设备事务可做（内核会回 UNSUPPORTED），在本地就拦掉，
-  // 省一次往返并把错误码归到"这台不能用"这一类。
+  // 未绑定型号的台没有设备事务可做（内核会回 UNSUPPORTED），本地就拦掉。
   if (v == nullptr || !v->bound) {
-    report_error(ERR_UNKNOWN_MOTOR, msg->motor_id);
+    report_error(ERR_UNKNOWN_MOTOR, motor_id);
     return;
   }
 
-  uint32_t request_id = msg->request_id;
   if ((request_id & PARAM_INTERNAL_ID_TAG) != 0U) {
-    report_error(ERR_LOCAL_VALIDATION, msg->motor_id);
+    report_error(ERR_LOCAL_VALIDATION, motor_id);
     return;
   }
   if (request_id == 0U) {
@@ -552,15 +505,15 @@ static void system_command_cb(const void *msgin) {
   control_mailbox_config_request_t request = {};
   request.request_id = request_id;
   request.received_tick_ms = millis();
-  request.motor_id = msg->motor_id;
+  request.motor_id = motor_id;
   request.kind = kind;
   if (!motor_rt_submit_config(&request)) {
-    report_error(ERR_SUBMIT_FAILED, msg->motor_id);
+    report_error(ERR_SUBMIT_FAILED, motor_id);
     return;
   }
-  // 同一命令重复下发：**后来的取代先前的**（旧的在飞事件到达时 id 已不匹配，
-  // 自然被忽略）。三条命令各自只有一份在飞状态，这是参数面时期的既有语义。
-  switch (msg->command) {
+
+  // 同一命令重复下发：后来的取代先前的（旧的在飞事件到达时 id 已不匹配）。
+  switch (command) {
   case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
     g_refresh_id = request_id;
     break;
@@ -573,6 +526,35 @@ static void system_command_cb(const void *msgin) {
   default:
     break;
   }
+}
+
+static void config_cb(const void *msgin) {
+  const auto *msg = (const can_bridge_msgs__msg__ConfigRequest *)msgin;
+  if (msg == nullptr) {
+    return;
+  }
+  // kind 决定哪组有效，另一组必须为空——两组混装是发送方误解契约，整条拒。
+  if (!wire_config_groups_exclusive(msg->kind, msg->count,
+          msg->targets.size, msg->command, msg->motor_id)) {
+    report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
+    return;
+  }
+  if (msg->kind == WIRE_CONFIG_KIND_PARAM_SET) {
+    if (!validate_param_set(msg->targets.data, msg->count)) {
+      return;
+    }
+    uint32_t request_id = msg->request_id;
+    if ((request_id & PARAM_INTERNAL_ID_TAG) != 0U) {
+      report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
+      return;
+    }
+    if (request_id == 0U) {
+      request_id = next_internal_id();
+    }
+    apply_param_set(msg->targets.data, msg->count, request_id);
+    return;
+  }
+  handle_system_command(msg->command, msg->motor_id, msg->request_id);
 }
 
 // ---- 内核事件回告 ----
@@ -764,10 +746,10 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 
   // 序列静态存储：rosidl C 序列是 data/size/capacity 三元组，反序列化会写进来，
   // 必须在 init 之前接好（漏了就是往 NULL 写）。rclc/std 都不分配。
-  g_param_set_msg.targets.capacity =
-      sizeof(g_param_set_buf) / sizeof(g_param_set_buf[0]);
-  g_param_set_msg.targets.data = g_param_set_buf;
-  if (g_param_set_msg.targets.capacity < kParamSetMaxTargets) {
+  g_config_msg.targets.capacity =
+      sizeof(g_config_targets_buf) / sizeof(g_config_targets_buf[0]);
+  g_config_msg.targets.data = g_config_targets_buf;
+  if (g_config_msg.targets.capacity < kParamSetMaxTargets) {
     return false;
   }
 
@@ -786,44 +768,23 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   }
   g_pub_up = true;
 
-  // 下行两条：reliable。低频**状态声明**（配置/命令），不允许静默丢——与
-  // MotorPolicyArray 同一判据。两条都 < 512 B MTU（ParamSetArray 最大
-  // 16×8+14 ≈ 142 B），不分片。
   rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
+  // 配置/系统命令面是低频状态声明，reliable；< 512 B MTU，不分片。
   sub_opts.qos = qos_reliable(1);
-  if (rcl_subscription_init(&g_param_set_sub, node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-      ParamSetArray),
-      kParamSetTopic, &sub_opts) != RCL_RET_OK) {
+  if (rcl_subscription_init(&g_config_sub, node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, ConfigRequest),
+      kConfigTopic, &sub_opts) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
   g_sub_up = true;
 
-  if (rcl_subscription_init(&g_system_cmd_sub, node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg,
-      SystemCommand),
-      kSystemCommandTopic, &sub_opts) != RCL_RET_OK) {
-    param_bridge_destroy(node, executor);
-    return false;
-  }
-  g_cmd_sub_up = true;
-
-  if (rclc_executor_add_subscription(executor, &g_param_set_sub,
-      &g_param_set_msg, param_set_array_cb,
-      ON_NEW_DATA) != RCL_RET_OK) {
+  if (rclc_executor_add_subscription(executor, &g_config_sub,
+      &g_config_msg, config_cb, ON_NEW_DATA) != RCL_RET_OK) {
     param_bridge_destroy(node, executor);
     return false;
   }
   g_sub_added = true;
-
-  if (rclc_executor_add_subscription(executor, &g_system_cmd_sub,
-      &g_system_cmd_msg, system_command_cb,
-      ON_NEW_DATA) != RCL_RET_OK) {
-    param_bridge_destroy(node, executor);
-    return false;
-  }
-  g_cmd_sub_added = true;
 
   g_created = true;
   g_status_dirty = true; // 建桥后立刻发第一帧（页面不必等满一个心跳周期）
@@ -831,7 +792,7 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 }
 
 void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
-  if (!g_created && !g_sub_up && !g_cmd_sub_up && !g_pub_up) {
+  if (!g_created && !g_sub_up && !g_pub_up) {
     return;
   }
   g_created = false;
@@ -850,24 +811,16 @@ void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   // 编译期零提示）。发布不占 handle，直接 fini。
   if (executor != nullptr) {
     if (g_sub_added) {
-      (void)rclc_executor_remove_subscription(executor, &g_param_set_sub);
-    }
-    if (g_cmd_sub_added) {
-      (void)rclc_executor_remove_subscription(executor, &g_system_cmd_sub);
+      (void)rclc_executor_remove_subscription(executor, &g_config_sub);
     }
   }
   g_sub_added = false;
-  g_cmd_sub_added = false;
   // rcl_*_fini 带 warn_unused_result，(void) 消不掉——必须真接住返回值；
   // 这里只关心"清干净了"，失败也没有补救动作。
   rcl_ret_t rc = RCL_RET_OK;
   if (g_sub_up) {
-    rc = rcl_subscription_fini(&g_param_set_sub, node);
+    rc = rcl_subscription_fini(&g_config_sub, node);
     g_sub_up = false;
-  }
-  if (g_cmd_sub_up) {
-    rc = rcl_subscription_fini(&g_system_cmd_sub, node);
-    g_cmd_sub_up = false;
   }
   if (g_pub_up) {
     rc = rcl_publisher_fini(&g_system_status_pub, node);

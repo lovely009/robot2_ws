@@ -8,6 +8,7 @@
 #include <can_bridge_msgs/msg/detail/low_command__struct.h>
 #include <can_bridge_msgs/msg/detail/low_state__struct.h>
 #include <can_bridge_msgs/msg/detail/motor_status__struct.h>
+#include <can_bridge_msgs/msg/detail/system_command__struct.h>
 #include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 
 #include "wire_codec.h"
@@ -46,6 +47,16 @@ static_assert(can_bridge_msgs__msg__WireContract__MOTOR_COUNT_MAX == 64,
 // 宏与枚举都是整型常量表达式，所以这条能进 static_assert —— 两份漂移在这里就编不过。
 static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == WIRE_SENTINEL_MISSING,
     "wire_codec 的哨兵与 WireContract 漂移了：两端定点解码会错位");
+
+static_assert(WIRE_CONFIG_KIND_PARAM_SET ==
+    can_bridge_msgs__msg__ConfigRequest__CONFIG_KIND_PARAM_SET,
+    "wire_codec 与 ConfigRequest 的 PARAM_SET 常量漂移了");
+static_assert(WIRE_CONFIG_KIND_SYSTEM_COMMAND ==
+    can_bridge_msgs__msg__ConfigRequest__CONFIG_KIND_SYSTEM_COMMAND,
+    "wire_codec 与 ConfigRequest 的 SYSTEM_COMMAND 常量漂移了");
+static_assert(WIRE_MOTOR_ID_NONE ==
+    can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE,
+    "wire_codec 的 MOTOR_ID_NONE 与 SystemCommand 漂移了");
 
 // 量程与话题名在这里**故意不设断言**：rosidl 给 C 侧生成的是 `static const float` 与
 // `static const char * const`，两者都不是 C++ 常量表达式（[expr.const] 只放行 constexpr

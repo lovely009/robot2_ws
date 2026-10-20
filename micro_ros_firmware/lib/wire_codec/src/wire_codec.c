@@ -41,3 +41,17 @@ bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
          motor_ids_len == count && position_q_len == count &&
          velocity_q_len == count && effort_q_len == count;
 }
+
+bool wire_config_groups_exclusive(uint8_t kind, uint16_t count,
+    size_t targets_len, uint8_t command, uint16_t motor_id) {
+  if (count != targets_len) {
+    return false;
+  }
+  if (kind == WIRE_CONFIG_KIND_PARAM_SET) {
+    return command == 0U && motor_id == WIRE_MOTOR_ID_NONE;
+  }
+  if (kind == WIRE_CONFIG_KIND_SYSTEM_COMMAND) {
+    return count == 0U;
+  }
+  return false;
+}

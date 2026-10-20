@@ -49,7 +49,8 @@ def has_joint_mapping_source(model, root=None):
     """该模型有没有声明 motor_id → 关节映射的来源（`simulation_model_joints` 的 ①② 任一）。
 
     臂视图候选的判据只有主 URDF——几何能渲染就列出来；而**映射**另要 config 里的
-    一份文件。两者不一致的模型（如只有 URDF 的预览件 `robot_leg`）在页面上退化成
+    一份文件。两者不一致的模型（如 `robot_leg`、`zhoubuguanjie_youbi_001`：有 URDF 与
+    控制器、但没配电机映射）在页面上退化成
     前端内置兜底表 + 控制台告警，那不是错误。调用方用它区分「没配」与「配错了」：
     前者可以跳过，后者必须报错——配了文件却解析不出来仍是契约缺项。
     """

@@ -111,7 +111,8 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 权威驱动配置的 (电机名→id)——新模型常常先有拓扑、后补驱动配置。
 
 两个判据**故意不同**：候选只要主 URDF，映射另要上面两份配置之一。于是候选里**可能**
-有没配映射的**预览件**（如 `robot_leg`，只有 URDF 的 SolidWorks 导出件）：切过去
+有没配映射的**预览件**（如 `robot_leg`、`zhoubuguanjie_youbi_001`——有 URDF 与控制器，
+但 `robot_sim/models/<名>/config/` 下没有 `motor_driver.yaml` / `simulation_topology.yaml`）：切过去
 渲染得出几何、但没有电机小球，`/api/model-joints` 返 404、页面退回内置兜底表并在
 控制台告警。重力补偿面板的模型候选同源，选到这类模型会在 `modelJointsFor()` 报错
 （起不了叠加节点）。要让它可映射，补 `config/motor_driver.yaml` 或

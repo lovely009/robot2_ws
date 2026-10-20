@@ -1,477 +1,200 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 派生自 cad/urdf/机器人大腿.urdf（sw2urdf 导出件，2026-10-19）；适配只改四类：
-     robot/link/joint 改名（导出件 link 名与 joint 名完全相同，SDFormat 里两者共用命名
-     空间，必须拆开）、网格路径、关节类型、保留 2.1→2.2 的 mimic。
-     ⚠ 限位未获得（导出件 6 个 revolute 的 <limit> 全是 0/0/0/0），本文件关节全部为
-     continuous，仅为预览时滑杆能拖；**不得用于控制或仿真**。补限位做法见 README。 -->
-<robot
-  name="robot_leg">
-  <link
-    name="base_link">
+<!-- 派生自 cad/urdf/机器人大腿.urdf（sw2urdf 原始导出件，只读不改），适配规则见 tools/adapt_from_cad.py 与 README.md。 -->
+<robot name="robot_leg">
+  <link name="base_link">
     <inertial>
-      <origin
-        xyz="-0.022247 0.0015287 0.6598"
-        rpy="0 0 0" />
-      <mass
-        value="12.848" />
-      <inertia
-        ixx="1.4968"
-        ixy="-0.00015067"
-        ixz="0.017444"
-        iyy="1.4946"
-        iyz="-0.00052318"
-        izz="0.026505" />
+      <origin xyz="-0.023199 0.0016887 0.66288" rpy="0 0 0"/>
+      <mass value="12.926"/>
+      <inertia ixx="1.4969" ixy="-0.00012776" ixz="0.017452" iyy="1.4947" iyz="-0.0005305" izz="0.02659"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/base_link.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/base_link.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+  </link>
+  <link name="Joint_link1">
+    <inertial>
+      <origin xyz="0.00053599 -0.0032986 0.02836" rpy="0 0 0"/>
+      <mass value="0.29343"/>
+      <inertia ixx="0.00013848" ixy="-7.5114E-07" ixz="6.551E-06" iyy="0.00017569" iyz="-4.3057E-06" izz="0.00021268"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/base_link.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link1.STL"/>
       </geometry>
     </collision>
   </link>
-  <link
-    name="Joint_link1">
-    <inertial>
-      <origin
-        xyz="0.00053599 -0.0032986 0.02836"
-        rpy="0 0 0" />
-      <mass
-        value="0.29343" />
-      <inertia
-        ixx="0.00013848"
-        ixy="-7.5114E-07"
-        ixz="6.551E-06"
-        iyy="0.00017569"
-        iyz="-4.3057E-06"
-        izz="0.00021268" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="joint_link1"
-    type="continuous">
-    <origin
-      xyz="-0.33849 0.019369 1.1657"
-      rpy="1.4563 0.015566 -1.628" />
-    <parent
-      link="base_link" />
-    <child
-      link="Joint_link1" />
-    <axis
-      xyz="0 -0.11422 0.99345" />
+  <joint name="joint_link1" type="revolute">
+    <origin xyz="-0.33849 0.019369 1.1657" rpy="1.4563 0.015566 -1.628"/>
+    <parent link="base_link"/>
+    <child link="Joint_link1"/>
+    <axis xyz="0 -0.11422 0.99345"/>
+    <limit lower="-1.5708" upper="1.5708" effort="20" velocity="3.1416"/>
+    <dynamics damping="0.29845" friction="0"/>
   </joint>
-  <link
-    name="Joint_link2">
+  <link name="Joint_link2">
     <inertial>
-      <origin
-        xyz="0.0022797 -0.1222 -0.034836"
-        rpy="0 0 0" />
-      <mass
-        value="0.65039" />
-      <inertia
-        ixx="0.00097375"
-        ixy="1.8664E-05"
-        ixz="1.3678E-06"
-        iyy="0.00024893"
-        iyz="-7.7901E-05"
-        izz="0.0010735" />
+      <origin xyz="0.0087166 -0.10501 -0.044739" rpy="0 0 0"/>
+      <mass value="0.82613"/>
+      <inertia ixx="0.0011483" ixy="0.00012481" ixz="8.5572E-06" iyy="0.0003165" iyz="-5.7323E-05" izz="0.001243"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.89804 0.91765 0.92941 1" />
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link2.STL"/>
       </geometry>
     </collision>
   </link>
-  <joint
-    name="joint_link2"
-    type="continuous">
-    <origin
-      xyz="0.045 -0.0013364 0.011623"
-      rpy="0 1.5708 0" />
-    <parent
-      link="Joint_link1" />
-    <child
-      link="Joint_link2" />
-    <axis
-      xyz="0 0 -1" />
+  <joint name="joint_link2" type="revolute">
+    <origin xyz="0.045 -0.0013364 0.011623" rpy="-1.8248 1.5708 -1.8203"/>
+    <parent link="Joint_link1"/>
+    <child link="Joint_link2"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="20" velocity="3.1416"/>
+    <dynamics damping="0.2969" friction="0"/>
   </joint>
-  <link
-    name="Joint_link3">
+  <link name="Joint_link3">
     <inertial>
-      <origin
-        xyz="8.6895E-05 0.00054805 -0.089747"
-        rpy="0 0 0" />
-      <mass
-        value="0.65983" />
-      <inertia
-        ixx="0.0021211"
-        ixy="-1.7112E-06"
-        ixz="-7.2384E-07"
-        iyy="0.0021053"
-        iyz="1.6649E-06"
-        izz="0.00038243" />
+      <origin xyz="-3.2626E-05 0.00059074 -0.091654" rpy="0 0 0"/>
+      <mass value="0.66354"/>
+      <inertia ixx="0.0021212" ixy="-1.2184E-06" ixz="-7.7475E-07" iyy="0.0021053" iyz="1.6419E-06" izz="0.00038248"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link3.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link3.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.89804 0.91765 0.92941 1" />
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link3.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link3.STL"/>
       </geometry>
     </collision>
   </link>
-  <joint
-    name="joint_link3"
-    type="continuous">
-    <origin
-      xyz="0.0039957 -0.19626 -0.046"
-      rpy="-1.5708 -0.005292 0.020356" />
-    <parent
-      link="Joint_link2" />
-    <child
-      link="Joint_link3" />
-    <axis
-      xyz="0 0 -1" />
+  <joint name="joint_link3" type="revolute">
+    <origin xyz="0.027184 -0.1934 -0.046" rpy="-1.5708 -0.036172 0.13964"/>
+    <parent link="Joint_link2"/>
+    <child link="Joint_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416"/>
+    <dynamics damping="0.0020447" friction="0"/>
   </joint>
-  <link
-    name="Joint_link4">
+  <link name="Joint_link4">
     <inertial>
-      <origin
-        xyz="0.0082245 0.037721 -0.0038033"
-        rpy="0 0 0" />
-      <mass
-        value="0.10179" />
-      <inertia
-        ixx="8.6869E-05"
-        ixy="-1.1828E-05"
-        ixz="2.9875E-06"
-        iyy="4.4225E-05"
-        iyz="1.8414E-05"
-        izz="8.6518E-05" />
+      <origin xyz="0.0082245 0.037721 -0.0038033" rpy="0 0 0"/>
+      <mass value="0.10179"/>
+      <inertia ixx="8.6869E-05" ixy="-1.1828E-05" ixz="2.9875E-06" iyy="4.4225E-05" iyz="1.8414E-05" izz="8.6518E-05"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link4.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link4.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.89804 0.91765 0.92941 1" />
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link4.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link4.STL"/>
       </geometry>
     </collision>
   </link>
-  <joint
-    name="joint_link4"
-    type="continuous">
-    <origin
-      xyz="0.023503 0.0030799 -0.2517"
-      rpy="-1.5708 -0.0089317 -1.6964" />
-    <parent
-      link="Joint_link3" />
-    <child
-      link="Joint_link4" />
-    <axis
-      xyz="0 0 1" />
+  <joint name="joint_link4" type="revolute">
+    <origin xyz="0.023397 0.0038041 -0.2527" rpy="-1.5708 -0.20311 -1.6655"/>
+    <parent link="Joint_link3"/>
+    <child link="Joint_link4"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416"/>
+    <dynamics damping="0.03213" friction="0"/>
   </joint>
-  <link
-    name="Joint_link5">
+  <link name="Joint_link5">
     <inertial>
-      <origin
-        xyz="-2.0602E-05 6.6034E-05 0.14195"
-        rpy="0 0 0" />
-      <mass
-        value="0.33789" />
-      <inertia
-        ixx="0.002018"
-        ixy="2.9546E-06"
-        ixz="4.847E-07"
-        iyy="0.0020113"
-        iyz="1.7278E-07"
-        izz="8.1806E-05" />
+      <origin xyz="8.8964E-05 -2.1583E-05 0.14195" rpy="0 0 0"/>
+      <mass value="0.33789"/>
+      <inertia ixx="0.0020108" ixy="2.3191E-06" ixz="1.4878E-07" iyy="0.0020185" iyz="4.9517E-07" izz="8.1806E-05"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link5.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link5.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.89804 0.91765 0.92941 1" />
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link5.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link5.STL"/>
       </geometry>
     </collision>
   </link>
-  <joint
-    name="joint_link5"
-    type="continuous">
-    <origin
-      xyz="0.012 0.0955 -0.027"
-      rpy="-1.5708 1.4449 0" />
-    <parent
-      link="Joint_link4" />
-    <child
-      link="Joint_link5" />
-    <axis
-      xyz="0 0 1" />
+  <joint name="joint_link5" type="revolute">
+    <origin xyz="0.012 0.0955 -0.027" rpy="-1.5708 1.4687 0"/>
+    <parent link="Joint_link4"/>
+    <child link="Joint_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416"/>
+    <dynamics damping="0.00014033" friction="0"/>
   </joint>
-  <link
-    name="Joint_link6">
+  <link name="Joint_link6">
     <inertial>
-      <origin
-        xyz="-0.01725 -0.00072436 -0.00032576"
-        rpy="0 0 0" />
-      <mass
-        value="0.06977" />
-      <inertia
-        ixx="1.6878E-05"
-        ixy="-3.7569E-07"
-        ixz="-5.414E-06"
-        iyy="2.8951E-05"
-        iyz="-1.701E-07"
-        izz="3.5808E-05" />
+      <origin xyz="0.0048996 -0.016556 -0.00032576" rpy="0 0 0"/>
+      <mass value="0.06977"/>
+      <inertia ixx="2.8059E-05" ixy="3.1804E-06" ixz="1.4822E-06" iyy="1.777E-05" iyz="-5.2099E-06" izz="3.5808E-05"/>
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link6.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/Joint_link6.STL"/>
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.89804 0.91765 0.92941 1" />
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link6.STL" />
+        <mesh filename="package://robot_sim/models/robot_leg/meshes/collision/Joint_link6.STL"/>
       </geometry>
     </collision>
   </link>
-  <joint
-    name="joint_link6"
-    type="continuous">
-    <origin
-      xyz="0.018052 0.0066838 0.285"
-      rpy="-1.5708 1.291 -1.2162" />
-    <parent
-      link="Joint_link5" />
-    <child
-      link="Joint_link6" />
-    <axis
-      xyz="0 0 -1" />
-  </joint>
-  <link
-    name="Joint_link2.1">
-    <inertial>
-      <origin
-        xyz="0.0015824 -0.04229 0.034952"
-        rpy="0 0 0" />
-      <mass
-        value="0.041575" />
-      <inertia
-        ixx="5.1378E-05"
-        ixy="8.5095E-09"
-        ixz="-5.8231E-08"
-        iyy="3.7947E-05"
-        iyz="1.668E-05"
-        izz="1.9812E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="joint_link2.1"
-    type="continuous">
-    <origin
-      xyz="0 0 -0.095"
-      rpy="0 0 0" />
-    <parent
-      link="Joint_link2" />
-    <child
-      link="Joint_link2.1" />
-    <axis
-      xyz="0 0 1" />
-  </joint>
-  <link
-    name="Joint_link2.2">
-    <inertial>
-      <origin
-        xyz="-0.0048918 -0.039142 0.0094942"
-        rpy="0 0 0" />
-      <mass
-        value="0.13757" />
-      <inertia
-        ixx="0.00014134"
-        ixy="2.1639E-06"
-        ixz="3.915E-07"
-        iyy="1.2387E-05"
-        iyz="3.2118E-06"
-        izz="0.00015061" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.64706 0.61961 0.58824 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://robot_sim/models/robot_leg/meshes/Joint_link2.2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="joint_link2.2"
-    type="continuous">
-    <origin
-      xyz="-0.029804 -0.0034267 -0.095"
-      rpy="0 0 0" />
-    <parent
-      link="Joint_link2" />
-    <child
-      link="Joint_link2.2" />
-    <axis
-      xyz="0 0 1" />
-    <mimic
-      joint="joint_link2.1"
-      multiplier="1"
-      offset="0" />
+  <joint name="joint_link6" type="revolute">
+    <origin xyz="0.0052358 0.018524 0.285" rpy="-1.5708 0.50852 -0.27546"/>
+    <parent link="Joint_link5"/>
+    <child link="Joint_link6"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="1.15" velocity="4.189"/>
+    <dynamics damping="5.6606E-05" friction="0"/>
   </joint>
 </robot>

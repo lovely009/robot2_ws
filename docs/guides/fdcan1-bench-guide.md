@@ -99,7 +99,15 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
    ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0
    ```
 
-2. 启动主机模拟器（板子数据段是 5 Mbps，索引走自动探测 `Y5`；自动探测不上再显式加
+2. 启动主机侧 bridge（本指南的 agent-only 流程才需要；`robot.launch.py` 的 L1 已
+   常驻一个，不要再起第二个——重复的发布者/订阅者会把命令与状态各处理两遍）：
+
+   ```bash
+   source "$(git rev-parse --show-toplevel)/ros2_ws/install/setup.bash"
+   ros2 run micro_ros_bridge micro_ros_bridge_node
+   ```
+
+3. 启动主机模拟器（板子数据段是 5 Mbps，索引走自动探测 `Y5`；自动探测不上再显式加
    `--data-bitrate-index 5`）：
 
    ```bash
@@ -114,8 +122,8 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
    会恒报 0（模拟器启动时会就此告警）。要看真实电流刻度走
    `robot_bringup` 的 `robot.launch.py`，那条路从型号库自动带上换算系数。
 
-3. 看到 `S8/Y5/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
-4. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
+4. 看到 `S8/Y5/M0/A1/O opened`（若数据段配错，`V` 查询与 `PSR.DLEC=3` 会暴露）后，再由人工复位键或已授权的 OpenOCD `reset run` 复位控制板。
+5. 模拟器收到首个 `0x080` SYNC 后才开始错峰发送反馈。
 
 ## 只读验收
 
@@ -149,7 +157,9 @@ echo 1-11 > /sys/bus/usb/drivers/usb/bind
 
   **参数面自 2026-09-21 起是话题，没有 ROS 参数服务器**（`ros2 param set/get` 全部
   失效，web 参数页同期报废）。主机入口是 `/motor/param_set` 与 `/motor/system_command`，
-  由 `micro_ros_bridge` 统一编成线上 `/micro_ros_do/config`（`kind` 区分）。`field` 用
+  由 `micro_ros_bridge` 统一编成线上 `/micro_ros_do/config`（`kind` 区分）。下面的示例
+  **要求 bridge 已在跑**（「启动顺序」第 2 步）；只起了 Agent 时这些话题无人订阅，
+  `--once` 不报错、命令静默不生效。`field` 用
   **设备槽序**，与 `device_param_report` 的行序同一套：`0`=位置下限 `1`=位置上限
   `2`=转速上限 `3`=力矩上限 `4`=保护开关 `5`=方向。**力矩列的单位是安培**——设备侧
   权威量是 `0x2538` 的最大电流，折 N·m 要过 Kt×减速比×效率，该系数本身有未决争议

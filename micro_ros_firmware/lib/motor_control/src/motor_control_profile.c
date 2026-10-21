@@ -43,8 +43,8 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .identity_string = "R48LITE_V2",
     .protocol = &motor_protocol_cerb_adapter,
     .gear_ratio = 101.0f,
-    .gear_efficiency = 1.0f,
-    .torque_constant_nm_per_amp = 0.077f,
+    .gear_efficiency = 0.5f,      // 厂家 2026-10-21 修正：减速器效率 50%
+    .torque_constant_nm_per_amp = 0.1f,   // 厂家 2026-10-21 修正：Kt = 0.1 N·m/A
     .rated_torque_nm = 5.0f,
     .peak_torque_nm = 11.0f,
     // docs/CE-RB-R48-101-Lite-CO-I-参数规格.pdf：额定 1.3 A / 峰值 3.2 A
@@ -56,7 +56,7 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .default_kd = 1.0f,
     .mit_position_limit_rad = (float)MOTOR_PROTOCOL_PI,     // π rad（与真机参数页一致）
     .mit_velocity_limit_rad_s = (float)MOTOR_PROTOCOL_PI,
-    .mit_torque_limit_nm = 11.0f,
+    .mit_torque_limit_nm = 300.0f,   // 厂家 2026-10-21：τ_ff 量化满量程（R58/R48 同值）
     .kp_max = 500.0f,     // MIT 量化上限 [0,500]
     .kd_max = 5.0f,       // [0,5]
     .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |
@@ -69,8 +69,8 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .identity_string = "R58LITE_V2",
     .protocol = &motor_protocol_cerb_adapter,
     .gear_ratio = 101.0f,
-    .gear_efficiency = 1.0f,
-    .torque_constant_nm_per_amp = 0.086f,
+    .gear_efficiency = 0.75f,     // 厂家 2026-10-21 修正：减速器效率 75%
+    .torque_constant_nm_per_amp = 0.067f, // 厂家 2026-10-21 修正：Kt = 0.067 N·m/A
     .rated_torque_nm = 20.0f,
     .peak_torque_nm = 45.0f,
     // docs/CE-RB-R58-101-Lite-CO-I-参数规格.pdf：额定 3.5 A / 峰值 10.8 A
@@ -82,7 +82,7 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .default_kd = 1.0f,
     .mit_position_limit_rad = (float)MOTOR_PROTOCOL_PI,
     .mit_velocity_limit_rad_s = (float)MOTOR_PROTOCOL_PI,
-    .mit_torque_limit_nm = 45.0f,
+    .mit_torque_limit_nm = 300.0f,   // 厂家 2026-10-21：τ_ff 量化满量程（R58/R48 同值）
     .kp_max = 500.0f,
     .kd_max = 5.0f,
     .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |

@@ -311,10 +311,13 @@ SLCAN 链路）出现"回读一直超时"：设备按序处理请求，迟到的
 一律不得超过它。规格书（`docs/CE-RB-R58-101-Lite-CO-I-参数规格.pdf`、
 `docs/CE-RB-R48-101-Lite-CO-I-参数规格.pdf`）的电气列原先漏进表里，已补齐：
 
-| 型号 | 减速比 | 额定/峰值转矩 | 额定/峰值电流 | 扭矩常数 | 输出转速 |
-|---|---|---|---|---|---|
-| CE-RB-R58-101 | 101:1 | 20 / 45 N·m | 3.5 / **10.8 A** | 0.086 N·m/A | 30 RPM |
-| CE-RB-R48-101 | 101:1 | 5 / 11 N·m | 1.3 / **3.2 A** | 0.077 N·m/A | 30 RPM |
+| 型号 | 减速比 | 额定/峰值转矩 | 额定/峰值电流 | 扭矩常数 | 减速器效率 | MIT `T_Max` | 输出转速 |
+|---|---|---|---|---|---|---|---|
+| CE-RB-R58-101 | 101:1 | 20 / 45 N·m | 3.5 / **10.8 A** | 0.067 N·m/A | 75% | 300 N·m | 30 RPM |
+| CE-RB-R48-101 | 101:1 | 5 / 11 N·m | 1.3 / **3.2 A** | 0.1 N·m/A | 50% | 300 N·m | 30 RPM |
+
+Kt / 效率 / `T_Max` 取**厂家 2026-10-21 修正值**（规格书自报的 0.086 / 0.077 与
+反电动势折算口径都不再采用）；`T_Max` 是 MIT τ_ff 的 12 位量化满量程，不是机械峰值。
 
 外部写入按维度取更严者钳制：
 
@@ -661,7 +664,7 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 
 | # | 问题 | 影响 |
 |---|---|---|
-| 1 | MIT 帧（`0x110\|id`）的 `Pos Max` / `Vel Max` / `T_Max` 分别取自哪个对象或常量？是否随 `0x607D`/`0x6080`/`0x2538` 的写入而改变？量纲与满量程值？（四份资料中这三个量只出现在 MIT 字节表内，均无定义） | MIT 全量程核验的阻塞项 |
+| 1 | MIT 帧（`0x110\|id`）的 `Pos Max` / `Vel Max` / `T_Max` 分别取自哪个对象或常量？是否随 `0x607D`/`0x6080`/`0x2538` 的写入而改变？量纲与满量程值？（四份资料中这三个量只出现在 MIT 字节表内，均无定义） | **2026-10-21 厂家答复 `T_Max = 300 N·m`（R58/R48 同值）**；`Pos Max` / `Vel Max` 仍无答复 |
 | 2 | `0x2531` 的读回语义：字典范围 0~2 中「2」代表什么？（手册「标定复位指令」与「标定指令」给了同一串 hex，疑为抄漏） | 零点标定语义 |
 | 8 | MIT 模式下驱动器内部如何处理 setpoint：（a）目标是否零阶保持？（b）内部是否还有轨迹发生器/插值？（c）电流环与位置环的内部频率？ | 只决定「命令率再往上」的收益边界；200 Hz 命令率底线已不再等它 |
 
@@ -711,3 +714,5 @@ CAN 帧”，输出为“状态快照/事件”和“待发送 CAN 帧”。
 | 2026-10-12 | **设备参数初始化结论「只报不拦」（台架取舍）**：`dev_init` 结论为「未初始化」（不一致 / 未能核对 / 本机无记录）时**不再冻结该台**——仍如实记录并随 `DEV_INIT` 事件与 `device_param_report` 上报，但不再改 lifecycle、不置 `DEV_PARAM` 故障、不清运动授权，该台保持 `READY_DISABLED`、可直接使能与运动。原语义（维护者 2026-09-21 定）是冻结为 `CONFIG_CONFLICT` 并要求人工核对后显式重新使能。**代价（已知悉）**：设备参数核对不再是一道安全门——`dev_init ≠ OK` 时该台的限位/速度/力矩可能不是核对过的值（影子取设备真值，读不到时回落型号标定），运动许可建立在未核对的参数之上，兜底只剩硬件急停与机械限位。**恢复原语义**：放开 `lib/motor_control/src/motor_control_config.c` 里 `freeze_entry_as_conflict(ctx, entry, MOTOR_CONTROL_FAULT_DEV_PARAM, now_ms)` 一行的注释即可，其余逻辑无需改动（host 用例 `test_motor_control.cpp` 有对应的两态断言）。 |
 | 2026-10-14 | **撤掉固件侧台架 2 Mbps 变体，FDCAN 位时序冻结为仲裁 1 Mbps / 数据 5 Mbps（维护者 裁定：固件不得为台架改通信参数）**：同日早些时候为绕开"板子一发带数据相位的 FD 帧整链静默"（根因是 5 Mbps 下余量被吃光：板子 16 tq → 采样点 81.25%，CANable2 上游固件 17 tq → 88.24%）曾加编译开关 `-DFDCAN_DATA_2M_BENCH`（`lib/fdcan/src/fdcan.c` + `platformio.ini`），把数据段降到 N=2/SJW=2/Seg1=16/Seg2=3 → 20 tq / 采样点 85%，台架实测 100 Hz 快照下 `tx_frame_count` 稳定 4050/s、18/18 ACTIVE、0 次离线事件。**撤回理由**：板子的 81.25% 与真机电机的 80% 是匹配的（ADR-0007「仲裁段 1 Mbps、数据段 5 Mbps」是冻结标定），往真机标定上打台架补丁必须靠人记着"接真实电机前关掉"，漏关就把真机链路做坏 ⇒ 改动面撤到零——`platformio.ini` 回到 98f4688 基线，`lib/fdcan/src/fdcan.c` 数据常量恢复单份、无 `#ifdef`，只留一行 `#pragma message` 在每次编译打印冻结值以便发现漂移。**代价/未决**：适配器改好前 5 Mbps 台架仍会复现间歇静默；正确修法是改**适配器**的数据段采样点（`DataTimeSeg1/2` 14/2 → 13/3 → 82.35%）后重烧适配器，**尚未实施**。**验证**：`pio run -t clean && pio run` 产物字节数与撤回前 5 Mbps 版本一致（217688 B ⇒ 该开关本就不进代码），编译期打印冻结值；host 23/23 通过。**文档同步**：`docs/guides/fdcan1-bench-guide.md`（§数据相位 标题与修法改为"余量不足 / 修法在适配器侧"，保留全部实测判据并记录已删除的错误绕法；SLCAN 配置回到 `Y5`）、`micro_ros_firmware/README.md`（台架开关表只剩 `FDCAN_SELF_ACK_BENCH`）、`ros2_ws/src/robot_sim/README.md`（HIL 结论指向适配器侧修法）。 |
 | 2026-10-14 | **文档收敛（对外开源前）**：删除全部过程性文档——`docs/plans/active/` 8 份、`docs/archive/` 5 份、`docs/superpowers/` 1 份、`docs/architecture/lib-library-audit.md`，以及仓库级 `docs/reports/`、`docs/superpowers/`。**仍有效的结论先落进本节与根 `README.md`**，不随文件一起消失：① 开放项与阶段门槛迁入根 `README.md` 的「开放项与开发计划」一节；② CERB 设备对象事实（`0x2650:00` 读子索引、位置限位手册笔误、`0x2541` 写路径与易失性、「无需保存码」）与三条待厂商项并入 §12；③ 已落地设计稿（上电归一 / 参数权威反转 / W25 blob v3）的决策本就在 §6.3 与本事录 2026-09-19/20/21 行，不重复搬运。本节内指向已删路径的引用同步改为指向根 `README.md` 开放项一节。 |
+| 2026-10-21 | **CERB 型号参数按厂家修正**：R58 Kt = 0.067 N·m/A / 减速器效率 75%，R48 Kt = 0.1 N·m/A / 效率 50%，**MIT `T_Max = 300 N·m`（两型号同值）**——旧值（0.086 / 0.077、效率 1.0、`T_max` 45 / 11）作废。落点：`motor_control_profile.c`、型号库 `motor.yaml`、真机与仿真两份拓扑的 `mit_torque_limit_nm`、`motor_sim` 默认量程与 R58 fixture、`fdcan_motor_sim.py` 兜底、`cerb-series.md`；ROS 侧 `motor_protocol.cpp` 的 CERB 反馈换算补乘 `gear_efficiency`（此前只有 vaxor 乘，同一份型号参数在主机路径上被静默忽略）。**未闭合**：按新常数，台架实测（`0x111` τ 码 2056、`0x301` Iq 12 mA）对应命令 1.245 N·m vs 反馈 0.061 N·m，差约 20 倍，与旧常数的 1.79 倍完全对不上；`T_max = 300` 同时把 τ_ff 的 12 位步长抬到 ~0.147 N·m。定标仍欠一台：建议用砝码法（输出端已知力臂 + 已知质量，找静态平衡码值）一次钉死 `T_max` 与 `Kt × 速比`。 |
+| 2026-10-21 | **CERB 反馈帧 Iq 字段的刻度定为 20 mA/码（手册的 1 mA 作废）**：真机 R58 单轴扫描（6 档 τ_ff、每档 110+ 帧）拟合 `τ = 0.1015 × Iq码 − 0.014`（残差 < 半个码），即 20.0 mA × (Kt 0.067 × 速比 101 × 效率 0.75)；旁证 `0x6078`（峰值电流）÷√2 与 Iq 码 × 0.020 在两点上差 0.3% / 0.15% ⇒ 帧内 Iq 是有效值、`0x6078` 是峰值。落地：`kCerbCurrentCodeA`（`motor_drive/include/motor_drive/protocol.hpp`）、`MOTOR_PROTOCOL_CERB_CURRENT_CODE_A`（`lib/motor_protocol/include/motor_protocol.h`）、`kCerbCurrentCodeA`（`motor_sim`）、`CERB_CURRENT_CODE_A`（`fdcan_motor_sim.py`），四处单测同步；设备侧事实记入 `docs/research/cerb-device-reference.md` §10.5。**影响**：力矩与电流读数变为原值的 20 倍，历史曲线不可比；网页读的是固件的 `motion_states` / `status_array`，前端不需要改，但**必须重烧固件**才生效。 |

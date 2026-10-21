@@ -22,6 +22,11 @@ constexpr double kWristCurrentScaleA = 11.0 / 4096.0;
 constexpr double kWristKpScale = 0.00001;
 constexpr double kWristKdScale = 0.01;
 
+// CERB 反馈帧 [4..5]（Iq）每码对应的电流（A）。2026-10-21 真机扫描反推：
+// 反馈码 × 0.1015 N·m 与下发一致 ⇒ 0.1015 / (Kt 0.067 × 101 × 0.75) = 20.0 mA/码。
+// 手册写的 1 mA 与实测不符。
+constexpr double kCerbCurrentCodeA = 0.020;
+
 enum class WristMode : uint8_t { Mit = 0x00, Velocity = 0x01, Position = 0x02 };
 
 struct JointCommand {

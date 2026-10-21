@@ -183,8 +183,8 @@ MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
       finite_double(node, "gear_ratio", context);
   profile.transmission.efficiency =
       finite_double(node, "efficiency", context);
-  // MIT τ_ff 的量化满量程逐型号（真机侧 mit_torque_limit_nm：R48 11.0 / R58 45.0）；
-  // 缺省退回 R48 值，保证未写该字段的既有配置行为不变。
+  // MIT τ_ff 的量化满量程（真机侧 mit_torque_limit_nm，厂家 2026-10-21：R58/R48
+  // 同 300.0）；缺省退回 kCerbDefaultMitTorqueLimitNm。
   profile.mit_torque_limit_nm = optional_finite_double(
       node, "mit_torque_limit_nm", protocol::kCerbDefaultMitTorqueLimitNm,
       context);

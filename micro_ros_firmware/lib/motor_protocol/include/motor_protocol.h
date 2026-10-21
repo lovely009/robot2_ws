@@ -50,6 +50,9 @@ uint32_t motor_protocol_float_to_uint(double value, double low, double high,
 #define MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES 6U
 #define MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE 0x300U
 #define MOTOR_PROTOCOL_CERB_SYNC_ID 0x080U
+/* 反馈帧 [4..5]（Iq）每码对应的电流（A）。2026-10-21 真机扫描反推 20.0 mA/码；
+   厂家文档写的 1 mA 与实测不符（见 decision-log 2026-10-21）。 */
+#define MOTOR_PROTOCOL_CERB_CURRENT_CODE_A 0.020
 
 // CANopen SDO（《CANopen-V0.9 字典表》§SDO 协议内容详解）：
 //   请求 0x600|node，响应 0x580|node，DLC 恒 8，CANFD 加速标准帧

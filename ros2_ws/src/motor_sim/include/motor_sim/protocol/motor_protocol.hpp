@@ -19,10 +19,14 @@ constexpr double kVaxorCurrentScaleA = 11.0 / 4096.0;
 constexpr double kVaxorKpScale = 0.00001;
 constexpr double kVaxorKdScale = 0.01;
 
-// CERB MIT 帧 τ_ff 的 12 位量化满量程（N·m），**逐型号**：CE-RB-R48-101 = 11.0、
-// CE-RB-R58-101 = 45.0（与真机参数页、motor.yaml 的 peak_torque_nm 同源）。
-// 此默认值取 R48，只服务未传逐台量程的旧调用与无参构造，不是通用真值。
-constexpr double kCerbDefaultMitTorqueLimitNm = 11.0;
+// CERB MIT 帧 τ_ff 的 12 位量化满量程（N·m）：厂家 2026-10-21 修正为 300.0，
+// R58/R48 同值（与真机参数页一致），**不是**型号库的机械峰值 peak_torque_nm。
+// 此默认值只服务未传逐台量程的旧调用与无参构造。
+constexpr double kCerbDefaultMitTorqueLimitNm = 300.0;
+
+// CERB 反馈帧 [4..5]（Iq）每码对应的电流（A）。真机 2026-10-21 扫描反推 20.0 mA/码；
+// 模拟器的编码端必须用同一刻度，否则假电机的电流与真机差 20 倍。
+constexpr double kCerbCurrentCodeA = 0.020;
 
 enum class CommandMode : uint8_t {
   Mit = 0x00,
@@ -54,7 +58,7 @@ struct MotorFeedback {
   unsigned motor_id{0U};
   double position{0.0};
   double velocity{0.0};
-  // CERB 中单位为 Nm，Vaxor 中单位为 A。
+  // 电机侧电流（A）——两种协议同义，各自编码成线上字段。
   double effort{0.0};
   bool enabled{false};
   CommandMode mode{CommandMode::Mit};

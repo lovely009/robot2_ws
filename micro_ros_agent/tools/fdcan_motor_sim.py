@@ -84,9 +84,12 @@ _CANABLE_ERR_RE_B = re.compile(rb"CANable Error Register:\s*([0-9]+)")
 # SLCAN 帧行首字符；不以这些开头的文本是命令应答（V 的版本串、E 的错误码行）。
 # r/R 是远程帧，漏了会把帧行当应答文本吃掉（见 _consume_control_reply）。
 _SLCAN_FRAME_HEADS = b"tTdDrRbB"
-# CERB 的 MIT 力矩量化上限是**逐型号**的（R48 11 N·m / R58 45 N·m），由调用方按
-# 电机传入。这个常量只在拿不到型号时兜底——用错会让 τ_ff 被整体缩放。
-CERB_MIT_TORQUE_FALLBACK = 45.0
+# CERB 的 MIT 力矩量化满量程由调用方按电机传入（厂家 2026-10-21：R58/R48 同为
+# 300 N·m）。这个常量只在拿不到型号时兜底——用错会让 τ_ff 被整体缩放。
+CERB_MIT_TORQUE_FALLBACK = 300.0
+# CERB 反馈帧 [4..5]（Iq）每码对应的电流 A。真机 2026-10-21 扫描反推 20.0 mA/码，
+# 厂家文档写的 1 mA 与实测不符。
+CERB_CURRENT_CODE_A = 0.020
 # SDO 中止码：设备是**分层**的——索引不在字典里回"对象不存在"，索引在而子索引没有
 # 回"子索引不存在"（2026-10-15 真机 node 1 实测：0x9999:00 → 0x06020000、
 # 0x6080:01 → 0x06090011）。一律回后者就复现不出对端的这一层语义。
@@ -418,8 +421,8 @@ def cerb_symmetric(code: int, limit: float, bits: int) -> float:
 def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLBACK):
     """固件下行 CERB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。
 
-    `torque_limit` 是这台电机的 **MIT 力矩量化上限**（规格书：P/V/T Max 必须与
-    电机参数页一致）——**逐型号**：R48 11 N·m、R58 45 N·m。固件编码端用的就是
+    `torque_limit` 是这台电机的 **MIT 力矩量化满量程**（P/V/T Max 必须与电机
+    参数页一致）——厂家 2026-10-21：R58/R48 同为 300 N·m。固件编码端用的就是
     Profile 里的 `mit_torque_limit_nm`，这里必须跟着对应，否则 τ_ff 会被缩放
     （历史 bug：写死 45.0 ⇒ R48 的 τ_ff 被缩成 11/45）。
     """
@@ -553,7 +556,8 @@ class MotorModel:
         """
         data = struct.pack(">hhh", clamp_i16(self.pos_deg * 182.0, "CERB 位置"),
                            clamp_i16(self.report_motor_rpm(), "CERB 转速"),
-                           clamp_i16(self.report_current_a() * 1000.0, "CERB Iq"))
+                           clamp_i16(self.report_current_a() / CERB_CURRENT_CODE_A,
+                                     "CERB Iq"))
         data += struct.pack(">h", 0)                      # data[6..7] 错误代码
         data += struct.pack(">h",
                             clamp_i16(self.temp_c * 10, "CERB 温度"))  # data[8..9]
@@ -885,10 +889,10 @@ class CanMotorSim:
         # {motor_id: 速比}——反馈转速按它换算到电机侧。缺省时 vaxor 退回
         # VAXOR_GEAR_RATIO、cerb 无从可退（报 0 转速）。
         self.gear_ratios = dict(gear_ratios or {})
-        # {motor_id: N·m}——**MIT 力矩量化上限**，逐型号（R48 11 / R58 45）。
-        # 与桥的 tau_limits 同值同源（型号库 peak_torque_nm），但角色不同：
-        # 这个是解码量程，那个是饱和钳位。固件按 Profile 的 mit_torque_limit_nm
-        # 编码，解码端必须跟着对应，否则 τ_ff 被整体缩放（曾是写死 45.0）。
+        # {motor_id: N·m}——**MIT 力矩量化满量程**（厂家 2026-10-21：R58/R48 同 300）。
+        # 与桥的 tau_limits 角色不同：这个是解码量程，那个是饱和钳位。固件按
+        # Profile 的 mit_torque_limit_nm 编码，解码端必须跟着对应，否则 τ_ff 被
+        # 整体缩放（曾是写死 45.0）。
         self.mit_torque_limits = dict(mit_torque_limits or {})
         # 静默期是否向适配器问 V/E 取证。**默认关**：诊断不得改变被测对象——
         # 2026-10-12 记录过周期问 E 会让锁存从"偶发"变"90 秒 5 次"，而 2026-10-14

@@ -48,7 +48,10 @@ TEST(CerbProtocol, DecodesMitCommandFrame) {
   EXPECT_NEAR(command->velocity, 0.0, 60.0 / 4095.0);
   EXPECT_NEAR(command->kp, 10.0, 500.0 / 4095.0);
   EXPECT_NEAR(command->kd, 1.0, 5.0 / 4095.0);
-  EXPECT_NEAR(command->feedforward, 0.0, 20.0 / 4095.0);
+  // 零点的精确码是 2047.5，golden 向量取 2047 ⇒ 恒有半个 LSB 的偏置，
+  // 容差按默认量程的 1 个 LSB 给（厂家 2026-10-21：kCerbDefaultMitTorqueLimitNm = 300）。
+  EXPECT_NEAR(command->feedforward, 0.0,
+              2.0 * protocol::kCerbDefaultMitTorqueLimitNm / 4095.0);
 
   // 下使能帧：bit7=0。
   const auto disabled = cerb.decode_command(
@@ -67,7 +70,7 @@ TEST(CerbProtocol, EncodesFeedbackReportBytes) {
   input.motor_id = 5U;
   input.position = 0.5;    // 负载端 rad -> round(0.5*32768/pi)=5215=0x145F
   input.velocity = -4.0 * protocol::kPi;  // 电机端 rad/s -> -120 RPM = 0xFF88
-  input.effort = 0.8;      // 电机端 A -> 800 mA = 0x0320
+  input.effort = 0.8;      // 电机端 0.8 A ÷ 20 mA/码 = 40 码 = 0x0028
   input.enabled = true;
   input.mode = protocol::CommandMode::Mit;
 
@@ -82,8 +85,8 @@ TEST(CerbProtocol, EncodesFeedbackReportBytes) {
   EXPECT_EQ(frame.data[1], 0x5FU);
   EXPECT_EQ(frame.data[2], 0xFFU);
   EXPECT_EQ(frame.data[3], 0x88U);
-  EXPECT_EQ(frame.data[4], 0x03U);
-  EXPECT_EQ(frame.data[5], 0x20U);
+  EXPECT_EQ(frame.data[4], 0x00U);
+  EXPECT_EQ(frame.data[5], 0x28U);
   EXPECT_EQ(frame.data[6], 0x00U);  // 故障码高字节
   EXPECT_EQ(frame.data[7], 0x00U);  // 故障码低字节
   EXPECT_EQ(frame.data[8], 0x00U);  // 温度 25.0°C -> 250 = 0x00FA
@@ -130,11 +133,11 @@ TEST(CerbProtocol, FactoryCreatesCerbProtocol) {
   EXPECT_NO_THROW(protocol::make_motor_protocol("cerb"));
 }
 
-// τ_ff 的 12 位定点满量程**逐型号**（CE-RB-R48-101 = 11 N·m、R58-101 = 45 N·m）。
+// τ_ff 的 12 位定点满量程随型号（厂家 2026-10-21：R58/R48 同为 300 N·m）。
 // 真机编码端按型号的 mit_torque_limit_nm 写；解码端写死任一侧都会整体缩放 τ_ff
-// （历史 bug：写死 11.0 ⇒ R58 的 5.0 N·m 被读成 1.222）。
+// （历史 bug：写死 11.0 ⇒ R58 的 5.0 N·m 被读成 1.222）。这里用两档量程验证编解码对称。
 TEST(CerbProtocol, DecodesFeedforwardWithPerModelQuantizationLimit) {
-  for (const double limit_nm : {11.0, 45.0}) {
+  for (const double limit_nm : {300.0, 45.0}) {
     const auto torque = protocol::float_to_uint(5.0, -limit_nm, limit_nm, 12U);
     // 复用 golden 帧，只替换 τ_ff 的 12 位（Data7 低半字节 + Data8）。
     std::vector<uint8_t> bytes{0xCC, 0x8A, 0x3C, 0x7F, 0xF0, 0x51,

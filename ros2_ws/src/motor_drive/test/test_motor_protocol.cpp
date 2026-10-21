@@ -255,7 +255,8 @@ TEST(CerbProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
   EXPECT_EQ(motor_index, 0U);
   EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
   EXPECT_NEAR(state.velocity, -2.0 * protocol::kPi / 101.0, 1e-12);
-  EXPECT_NEAR(state.effort, 1.5 * 0.086 * 101.0, 1e-12);
+  // Iq 码 1500 × 20 mA/码 = 30 A
+  EXPECT_NEAR(state.effort, 1500 * 0.020 * 0.086 * 101.0, 1e-12);
 
   frame.bitrate_switch = false;
   EXPECT_FALSE(builtin_protocol(drive::kCerbType)
@@ -264,6 +265,37 @@ TEST(CerbProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
   frame.data[11] = 0xe0;
   EXPECT_FALSE(builtin_protocol(drive::kCerbType)
                    ->decode_feedback(motors, {0U}, frame, motor_index, state));
+}
+
+TEST(CerbProtocolStrategy, FeedbackAppliesGearEfficiencyToEffort) {
+  // 反馈 Iq 是电机侧电流：Kt 得电机轴 N·m，再乘速比与减速器效率（厂家 2026-10-21 修正值）。
+  const std::vector<drive::MotorConfig> motors{
+      make_motor("r58", "j1", drive::kCerbType, 1U,
+                 {{"torque_constant_nm_per_amp", "0.067"},
+                  {"gear_ratio", "101"},
+                  {"gear_efficiency", "0.5"},
+                  {"mit_position_limit_rad", "12.5"},
+                  {"mit_velocity_limit_rad_s", "30"},
+                  {"mit_torque_limit_nm", "300"}})};
+  drive::CanFrame frame;
+  frame.id = 0x301U;
+  frame.size = 12U;
+  frame.is_fd = true;
+  frame.bitrate_switch = true;
+  frame.data = {0x07, 0x1c, 0xff, 0xc4, 0x05, 0xdc,
+                0x00, 0x00, 0x00, 0xf0, 0x06, 0xc0};
+  std::size_t motor_index = 99U;
+  protocol::JointState state;
+  EXPECT_TRUE(builtin_protocol(drive::kCerbType)
+                  ->decode_feedback(motors, {0U}, frame, motor_index, state));
+  EXPECT_NEAR(state.effort, 1500 * 0.020 * 0.067 * 101.0 * 0.5, 1e-12);
+
+  // 效率必须是正数：配置成 0 要在 validate 阶段拒掉，而不是静默把力矩算成 0。
+  auto zero_efficiency = motors;
+  zero_efficiency[0].parameters["gear_efficiency"] = "0";
+  EXPECT_THROW(
+      builtin_protocol(drive::kCerbType)->validate(zero_efficiency, {0U}),
+      std::invalid_argument);
 }
 
 TEST(CerbProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {

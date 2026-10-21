@@ -33,8 +33,8 @@ def _bound_simulation(module):
 def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
     """MIT τ_ff 的 12 位量化满量程必须逐型号落到 motor_sim 的配置里。
 
-    它是型号属性（R48 11.0 / R58 45.0），写成一个常数会让 R58 的前馈被按 11/45
-    缩放、R48 放大 4.09 倍；而 τ_ff 平时恒为 0，接错在整个工作区里都不报错。
+    它是型号属性（厂家 2026-10-21：R58/R48 同为 300.0），写成一个常数会让别的
+    量程的前馈被按比例缩放；而 τ_ff 平时恒为 0，接错在整个工作区里都不报错。
     """
     module = _launch_module()
     simulation, specs = _bound_simulation(module)
@@ -46,8 +46,8 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
         (tmp_path / "motor_sim.yaml").read_text(encoding="utf-8")
     )["motor_simulation"]["profiles"]
 
-    assert profiles["cerb_r48"]["mit_torque_limit_nm"] == pytest.approx(11.0)
-    assert profiles["cerb_r58"]["mit_torque_limit_nm"] == pytest.approx(45.0)
+    assert profiles["cerb_r48"]["mit_torque_limit_nm"] == pytest.approx(300.0)
+    assert profiles["cerb_r58"]["mit_torque_limit_nm"] == pytest.approx(300.0)
 
 
 def test_motor_sim_config_carries_bus_transport_and_endpoint(tmp_path):
@@ -91,8 +91,9 @@ def test_motor_topology_carries_feedback_conversion_factors():
             (round(motor["joint_nm_per_amp"], 4), motor["gear_ratio"])
         )
     # 每个 profile 内逐台同值（型号库是逐型号的事实，不是逐台的）
-    assert by_profile["cerb_r48"] == {(7.777, 101.0)}
-    assert by_profile["cerb_r58"] == {(8.686, 101.0)}
+    # 厂家 2026-10-21：R48 Kt 0.1 × 101 × 50%、R58 Kt 0.067 × 101 × 75%。
+    assert by_profile["cerb_r48"] == {(5.05, 101.0)}
+    assert by_profile["cerb_r58"] == {(5.0753, 101.0)}
     assert by_profile["vaxor_2550"] == {(1.365, 50.0)}
     # 18 台全部带上，一台都不能缺（缺了那台反馈恒 0 A）
     assert len(simulation["motors"]) == 18

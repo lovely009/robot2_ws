@@ -289,10 +289,10 @@ assert _fb.report_motor_rpm() == 0.0
 _fb_zero = _fb.cerb_frame()
 assert _fb_zero[2:4] == (0).to_bytes(2, "big")                   # 转速
 assert _fb_zero[4:6] == (0).to_bytes(2, "big")                   # Iq
-# ② 施加 7.777 N·m（= 1 A × Kt×速比×效率）→ 上报 1000 mA，与真机同刻度。
+# ② 施加 7.777 N·m（= 1 A × Kt×速比×效率）→ 上报 50 码（20 mA/码 = 1 A）。
 _fb.applied_joint_nm = 7.777
 assert abs(_fb.report_current_a() - 1.0) < 1e-9
-assert _fb.cerb_frame()[4:6] == (1000).to_bytes(2, "big")
+assert _fb.cerb_frame()[4:6] == (50).to_bytes(2, "big")
 # ③ 转速按速比换算到电机侧：关节 1 rad/s × 101 → 964.4 RPM。
 _fb.vel_joint_rad_s = 1.0
 assert abs(_fb.report_motor_rpm() - 101.0 * 60.0 / (2 * 3.141592653589793)) < 1e-6

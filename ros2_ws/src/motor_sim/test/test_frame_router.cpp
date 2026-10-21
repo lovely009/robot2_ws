@@ -247,15 +247,15 @@ TEST(FrameRouterDriveState, CerbAxisDisableAfterLatchAllowsFullReset) {
 }
 
 // 整链贯通：YAML(profile) → MotorConfig → 工厂 → CerbProtocol → 关节力矩。
-// 5.0 N·m 按 R58 的 45.0 满量程编码；若这条链上任何一环退回默认的 R48 11.0，
-// 读出来就是 1.222 N·m。
+// 5.0 N·m 按 fixture 的 300.0 满量程编码；若这条链上任何一环退回默认值（或旧值
+// 45.0），读出来就是 5.0 × 300/45 = 33.3 N·m。
 TEST(FrameRouterMitTorque, DecodesR58FeedforwardWithConfiguredLimit) {
   const core::TopologyContract contract{
       {"arm"}, {{"joint_cerb58", "arm", "cerb", 3U}}};
   const auto path =
       std::string(TEST_SOURCE_DIR) + "/test/fixtures/cerb_r58_axis.yaml";
   core::FrameRouter router(core::load_system_config(path, contract), true);
-  ASSERT_EQ(router.handle("arm", cerb_command(true, 0.0, 5.0, 45.0, 3U),
+  ASSERT_EQ(router.handle("arm", cerb_command(true, 0.0, 5.0, 300.0, 3U),
                           TimePoint{})
                 .status,
             core::RouterStatus::Applied);
@@ -265,5 +265,5 @@ TEST(FrameRouterMitTorque, DecodesR58FeedforwardWithConfiguredLimit) {
   const std::vector<core::JointSample> states(1U);
   const auto efforts = router.compute_efforts(states, 0.01, TimePoint{} + 3ms);
   ASSERT_EQ(efforts.size(), 1U);
-  EXPECT_NEAR(efforts[0], 5.0, 2.0 * 45.0 / 4095.0);
+  EXPECT_NEAR(efforts[0], 5.0, 2.0 * 300.0 / 4095.0);
 }

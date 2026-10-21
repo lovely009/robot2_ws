@@ -26,8 +26,9 @@ motor_types:
   cerb_r58_101:
     protocol: cerb                     # 巨蟹 CERB Lite 关节模组
     parameters:
-      torque_constant_nm_per_amp: 0.086 # Iq A -> 电机轴 Nm
+      torque_constant_nm_per_amp: 0.067 # Iq A -> 电机轴 Nm
       gear_ratio: 101                   # 电机↔关节换算
+      gear_efficiency: 0.75             # effort × 效率
   vaxor_2550:
     protocol: vaxor
     parameters:

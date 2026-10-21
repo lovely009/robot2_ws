@@ -220,10 +220,10 @@ JointState unpack_cerb_feedback(const uint8_t *data, const std::size_t size) {
   if (data == nullptr || size != 12U) {
     throw std::invalid_argument("CERB feedback must be 12 bytes");
   }
-  // 新版协议规定反馈为大端：位置码每 182 count 为 1°，速度为 rpm，Iq 为 mA。
+  // 反馈为大端：位置码每 182 count 为 1°，速度为 rpm，Iq 每码 20 mA。
   const double position = read_be_i16(data) / 182.0 * kPi / 180.0;
   const double velocity = read_be_i16(data + 2U) * 2.0 * kPi / 60.0;
-  const double current = read_be_i16(data + 4U) / 1000.0;
+  const double current = read_be_i16(data + 4U) * kCerbCurrentCodeA;
   return {position, velocity, current};
 }
 

@@ -106,8 +106,9 @@ CanFrame CerbProtocol::encode_feedback(const MotorFeedback &feedback,
       kCerbFeedbackCountsPerRad));
   const auto velocity_rpm = static_cast<int32_t>(
       std::llround(feedback.velocity * 60.0 / (2.0 * kPi)));
-  const auto current_ma =
-      static_cast<int32_t>(std::llround(feedback.effort * 1000.0));
+  // Iq 字段每码 20 mA（真机实测），编码端与真机同刻度。
+  const auto current_code = static_cast<int32_t>(
+      std::llround(feedback.effort / kCerbCurrentCodeA));
 
   std::array<uint8_t, 12> payload{};
   const uint16_t position_raw =
@@ -119,7 +120,7 @@ CanFrame CerbProtocol::encode_feedback(const MotorFeedback &feedback,
   payload[2] = static_cast<uint8_t>(velocity_raw >> 8U);
   payload[3] = static_cast<uint8_t>(velocity_raw);
   const uint16_t current_raw =
-      pack_u16(std::clamp<int32_t>(current_ma, -32768, 32767));
+      pack_u16(std::clamp<int32_t>(current_code, -32768, 32767));
   payload[4] = static_cast<uint8_t>(current_raw >> 8U);
   payload[5] = static_cast<uint8_t>(current_raw);
   // 故障码保持 0（无故障），温度为仿名义值。

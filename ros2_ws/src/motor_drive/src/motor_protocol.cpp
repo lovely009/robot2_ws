@@ -209,6 +209,8 @@ public:
       static_cast<void>(required_positive_parameter(
           motor, "torque_constant_nm_per_amp"));
       static_cast<void>(required_positive_parameter(motor, "gear_ratio"));
+      static_cast<void>(
+          optional_positive_parameter(motor, "gear_efficiency", 1.0));
       static_cast<void>(cerb_limits(motor));
     }
   }
@@ -253,11 +255,14 @@ public:
         continue;
       }
       state = protocol::unpack_cerb_feedback(frame.data.data(), frame.size);
+      // 反馈是电机侧 Iq（A）：Kt 得电机轴 N·m，再乘速比与减速器效率折到关节侧。
       const double gear = required_positive_parameter(motor, "gear_ratio");
+      const double efficiency =
+          optional_positive_parameter(motor, "gear_efficiency", 1.0);
       state.velocity /= gear;
       state.effort *= required_positive_parameter(
                           motor, "torque_constant_nm_per_amp") *
-                      gear;
+                      gear * efficiency;
       motor_index = index;
       return true;
     }

@@ -116,7 +116,7 @@ void test_cerb_feedback_decodes_big_endian_units() {
   assert(motor_protocol_unpack_cerb_feedback(bytes, sizeof(bytes), &state));
   assert(std::abs(state.position - 10.0 * MOTOR_PROTOCOL_PI / 180.0) < 1e-12);
   assert(std::abs(state.velocity + 2.0 * MOTOR_PROTOCOL_PI) < 1e-12);
-  assert(state.effort == 1.5);
+  assert(state.effort == 30.0); // Iq 码 1500 × 20 mA/码
   // data[8..9] = 0x00f0 = 240 → 24.0 °C
   assert(motor_protocol_cerb_feedback_temperature_c(bytes, sizeof(bytes)) == 24.0f);
 }

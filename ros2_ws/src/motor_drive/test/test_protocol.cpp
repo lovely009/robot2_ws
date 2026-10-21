@@ -81,14 +81,14 @@ TEST(CerbProtocol, NeutralMitCommandMatchesManualQuantization) {
 }
 
 TEST(CerbProtocol, FeedbackDecodesBigEndianPhysicalValues) {
-  // 位置 1820 / 182 = 10 deg，速度 -60 rpm，Iq = 1500 mA。
+  // 位置 1820 / 182 = 10 deg，速度 -60 rpm，Iq 码 1500 × 20 mA/码 = 30 A。
   const std::array<uint8_t, 12> bytes{
       {0x07, 0x1c, 0xff, 0xc4, 0x05, 0xdc,
        0x00, 0x00, 0x00, 0xf0, 0x06, 0xc0}};
   const auto state = protocol::unpack_cerb_feedback(bytes.data(), bytes.size());
   EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
   EXPECT_NEAR(state.velocity, -2.0 * protocol::kPi, 1e-12);
-  EXPECT_DOUBLE_EQ(state.effort, 1.5);
+  EXPECT_DOUBLE_EQ(state.effort, 30.0);
 }
 
 TEST(CerbProtocol, FeedbackRejectsWrongPayloadSize) {

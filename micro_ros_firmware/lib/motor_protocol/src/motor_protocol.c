@@ -216,7 +216,7 @@ bool motor_protocol_unpack_cerb_feedback(
   }
   state->position = read_be_i16(data) / 182.0 * MOTOR_PROTOCOL_PI / 180.0;
   state->velocity = read_be_i16(data + 2U) * 2.0 * MOTOR_PROTOCOL_PI / 60.0;
-  state->effort = read_be_i16(data + 4U) / 1000.0;
+  state->effort = read_be_i16(data + 4U) * MOTOR_PROTOCOL_CERB_CURRENT_CODE_A;
   return true;
 }
 

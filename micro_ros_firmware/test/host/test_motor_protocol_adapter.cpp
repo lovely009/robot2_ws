@@ -387,7 +387,8 @@ static motor_protocol_raw_frame_t cerb_feedback(uint16_t node, int16_t pos_deg_c
 }
 
 // 解码：位置为关节侧原样（deg→rad）；速度为电机侧 rpm→rad/s 后 /减速比；
-// 扭矩 = Iq(A)×Kt×减速比。故障位（data[11]&0x20）标注 fault_active 且不丢帧。
+// 扭矩 = Iq(A)×Kt×减速比×效率（取 Profile 字段，不在测试里复刻型号常数）。
+// 故障位（data[11]&0x20）标注 fault_active 且不丢帧。
 static void test_cerb_decode_feedback_converts_si() {
   const motor_protocol_model_profile_t *profile = nullptr;
   assert(find_profile("cerb_r58_101", &profile));
@@ -400,8 +401,11 @@ static void test_cerb_decode_feedback_converts_si() {
   assert(!measured.fault_active);
   assert(fabs(measured.position_rad - 10.0 * M_PI / 180.0) < 1e-4); // 关节侧
   assert(fabs(measured.velocity_rad_s - (120.0 * 2.0 * M_PI / 60.0) / 101.0) < 1e-4);
-  assert(fabs(measured.effort_nm - 2.0 * 0.086 * 101.0) < 1e-3);
-  assert(fabs(measured.current_a - 2.0) < 1e-6);
+  // Iq 码 2000 × 20 mA/码 = 40 A → 40 × Kt × 速比 × 效率
+  assert(fabs(measured.effort_nm -
+              40.0 * profile->torque_constant_nm_per_amp * profile->gear_ratio *
+                  profile->gear_efficiency) < 1e-3);
+  assert(fabs(measured.current_a - 40.0) < 1e-6);
   assert(fabs(measured.temperature_c - 24.0) < 1e-6); // data[8..9] 240 → 24.0 °C
   assert(nan_equal(measured.voltage_v, NAN));         // 12B 反馈帧无电压来源
   assert(measured.vendor_fault_code == 0U);
@@ -1039,15 +1043,19 @@ static void test_profile_catalog_only_exposes_supported_models() {
   assert(find_profile("cerb_r58_101", &p));
   assert(p->protocol == &motor_protocol_cerb_adapter);
   assert(p->gear_ratio == 101.0f);
-  assert(fabs(p->torque_constant_nm_per_amp - 0.086) < 1e-6);
+  assert(fabs(p->torque_constant_nm_per_amp - 0.067) < 1e-6);
+  assert(fabs(p->gear_efficiency - 0.75) < 1e-6);
   assert(p->rated_torque_nm == 20.0f);
   assert(p->peak_torque_nm == 45.0f);
+  assert(p->mit_torque_limit_nm == 300.0f);
   assert((p->capability_flags & MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE) != 0U);
 
   assert(find_profile("cerb_r48_101", &p));
-  assert(fabs(p->torque_constant_nm_per_amp - 0.077) < 1e-6);
+  assert(fabs(p->torque_constant_nm_per_amp - 0.1) < 1e-6);
+  assert(fabs(p->gear_efficiency - 0.5) < 1e-6);
   assert(p->rated_torque_nm == 5.0f);
   assert(p->peak_torque_nm == 11.0f);
+  assert(p->mit_torque_limit_nm == 300.0f);
 
   // Vaxor 80 速比刻意缺席：按名字找不到（禁止项 15）。
   assert(!find_profile("vaxor_2580", &p));

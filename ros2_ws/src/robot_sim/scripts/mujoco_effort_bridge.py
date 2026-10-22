@@ -122,8 +122,9 @@ class MujocoEffortBridge(Node):
         ])
         # 峰值力矩：MuJoCo 的 `actuatorfrcrange` 只**标注**关节合力上限，**不夹**
         # actuator 的 ctrl（2026-10-15 实测：给 30 N·m 就是 30 N·m），所以这里自己执行。
-        # MJCF 的值由 build_mujoco_model.py 从拓扑的 `mit_torque_limit_nm` 逐台写入
-        # （r58 45 / r48 11 / vaxor 兜底 10），与假电机侧 `--tau-limits` 同源。
+        # MJCF 的值由 build_mujoco_model.py 从型号库 `peak_torque_nm` 逐台写入
+        # （r58 45 / r48 11；vaxor 无该字段，沿用 URDF 的 1.15），与假电机侧
+        # `--tau-limits` 同源。
         self.command_torque_limits = np.array([
             float(self.model.jnt_actfrcrange[self.model.actuator_trnid[actuator, 0]][1])
             for _, actuator in self.command_pairs

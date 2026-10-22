@@ -1066,7 +1066,8 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
       return reject_invalid(ctx, entry, request, now_ms);
     }
     // 硬件参数表第三条：位置限位不得超过型号表的 MIT 量化范围
-    // （CERB = ±π，与设备 0x607D 字典 ±32768 cnt 同域）。0 = 未确认不钳制。
+    // （CERB = ±3.14 rad，0x2542 线协议满量程；2026-10-22 node1 读回 314）。
+    // 0 = 未确认不钳制。
     motor_protocol_config_request_t bounded = *request;
     const float pos_limit = entry->profile != NULL
                                   ? entry->profile->mit_position_limit_rad

@@ -46,9 +46,8 @@ motor_hardware:
   #   靠 MotorDriver 按 (bus, type) 分组掩盖了重号，但接固件即暴露。
   #   当前取值对齐 docs/guides/fdcan1-bench-guide.md 的九节点台架方案：
   #   CERB 1–6 + vaxor 7–9（本机每侧 4 台 CERB，故用 1–4 + 7–9）。
-  # CERB 的三个 mit_*_limit 必须与电机参数设置页一致（见 cerb-series.md）。
-  # mit_torque_limit_nm 是 τ_ff 的 12 位量化满量程，不是机械峰值：厂家 2026-10-21
-  # 修正为 **300 N·m**（R58/R48 同值），与型号库的 peak_torque_nm（45/11）不是一回事。
+  # CERB 五项 MIT 量化范围继承型号库；自定义档位在单电机 parameters 覆盖。
+  # 量化满量程不替代型号库的物理峰值保护。
   motors:
     left_shoulder_yaw:
       joint: left_shoulder_yaw_joint
@@ -56,28 +55,24 @@ motor_hardware:
       type: cerb_r58_101
       id: 1
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     left_shoulder_roll:
       joint: left_shoulder_roll_joint
       bus: left_arm
       type: cerb_r58_101
       id: 2
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     left_shoulder_pitch:
       joint: left_shoulder_pitch_joint
       bus: left_arm
       type: cerb_r58_101
       id: 3
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     left_elbow_pitch:
       joint: left_elbow_pitch_joint
       bus: left_arm
       type: cerb_r58_101
       id: 4
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     left_wrist_yaw:
       joint: left_wrist_yaw_joint
       bus: left_arm
@@ -103,28 +98,24 @@ motor_hardware:
       type: cerb_r58_101
       id: 1
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     right_shoulder_roll:
       joint: right_shoulder_roll_joint
       bus: right_arm
       type: cerb_r58_101
       id: 2
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     right_shoulder_pitch:
       joint: right_shoulder_pitch_joint
       bus: right_arm
       type: cerb_r58_101
       id: 3
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     right_elbow_pitch:
       joint: right_elbow_pitch_joint
       bus: right_arm
       type: cerb_r58_101
       id: 4
       command: {kp: 30.0, kd: 1.0}
-      parameters: {mit_position_limit_rad: 12.5, mit_velocity_limit_rad_s: 30.0, mit_torque_limit_nm: 300.0}
     right_wrist_yaw:
       joint: right_wrist_yaw_joint
       bus: right_arm

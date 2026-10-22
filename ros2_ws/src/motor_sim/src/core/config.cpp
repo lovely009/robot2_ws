@@ -29,6 +29,10 @@ struct MotorProfile {
   int device_max_current_ma{0};
   // MIT τ_ff 的 12 位量化满量程（N·m）：型号属性，见 profile 的 mit_torque_limit_nm。
   double mit_torque_limit_nm{protocol::kCerbDefaultMitTorqueLimitNm};
+  double mit_position_limit_rad{3.14};
+  double mit_velocity_limit_rad_s{3.14};
+  double mit_kp_limit{2500.0};
+  double mit_kd_limit{500.0};
 };
 
 const YAML::Node required_node(const YAML::Node &parent, const char *key,
@@ -188,6 +192,22 @@ MotorProfile parse_profile(const std::string &name, const YAML::Node &node,
   profile.mit_torque_limit_nm = optional_finite_double(
       node, "mit_torque_limit_nm", protocol::kCerbDefaultMitTorqueLimitNm,
       context);
+  profile.mit_position_limit_rad = optional_finite_double(
+      node, "mit_position_limit_rad", 3.14, context);
+  profile.mit_velocity_limit_rad_s = optional_finite_double(
+      node, "mit_velocity_limit_rad_s", 3.14, context);
+  profile.mit_kp_limit = optional_finite_double(
+      node, "mit_kp_limit", 2500.0, context);
+  profile.mit_kd_limit = optional_finite_double(
+      node, "mit_kd_limit", 500.0, context);
+  for (const double limit : {profile.mit_torque_limit_nm,
+                            profile.mit_position_limit_rad,
+                            profile.mit_velocity_limit_rad_s,
+                            profile.mit_kp_limit, profile.mit_kd_limit}) {
+    if (limit <= 0.0) {
+      throw std::runtime_error(context + " has non-positive MIT scale");
+    }
+  }
   if (profile.transmission.gear_ratio <= 0.0 ||
       profile.transmission.efficiency <= 0.0 ||
       profile.transmission.efficiency > 1.0) {
@@ -368,6 +388,10 @@ SystemConfig parse_config_common(const YAML::Node &root,
     motor.limits = profile->second.limits;
     motor.plant = profile->second.plant;
     motor.mit_torque_limit_nm = profile->second.mit_torque_limit_nm;
+    motor.mit_position_limit_rad = profile->second.mit_position_limit_rad;
+    motor.mit_velocity_limit_rad_s = profile->second.mit_velocity_limit_rad_s;
+    motor.mit_kp_limit = profile->second.mit_kp_limit;
+    motor.mit_kd_limit = profile->second.mit_kd_limit;
     motor.device_identity = profile->second.device_identity;
     motor.device_max_speed_rpm = profile->second.device_max_speed_rpm;
     motor.device_max_current_ma = profile->second.device_max_current_ma;

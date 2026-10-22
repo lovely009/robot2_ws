@@ -448,7 +448,7 @@ static void test_cerb_encode_mit_command() {
   motor_protocol_tx_frame_t out = {};
   assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   assert(out.bus_index == 2);
-  assert(out.can_id == 0x110U + 9U);
+  assert(out.can_id == (0x110U | 9U));
   assert(out.is_fd);
   assert(out.size == 12);
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P1);
@@ -457,13 +457,113 @@ static void test_cerb_encode_mit_command() {
   motor_protocol_joint_command_t wire = {1.0, -2.0, 30.0, 1.0, 5.0};
   motor_protocol_cerb_limits_t limits = {profile->mit_position_limit_rad,
                                          profile->mit_velocity_limit_rad_s,
-                                         profile->mit_torque_limit_nm};
+                                         profile->mit_torque_limit_nm,
+                                         profile->mit_kp_limit,
+                                         profile->mit_kd_limit};
   uint8_t expected[12];
   motor_protocol_pack_cerb_mit_frame(&wire, &limits, true, expected);
   assert(memcmp(out.data, expected, 12) == 0);
 }
 
-// 速度单位契约：命令侧关节 rad/s 直通 π 上限 12 位对称量化
+// 五项线协议量程来自 Profile 的 mit_*_limit，与软件安全 kp_max/kd_max 分离。
+static void test_cerb_profile_separates_wire_limits_from_software_caps() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r48_101", &profile));
+  assert(profile->mit_kp_limit == 2500.0f);
+  assert(profile->mit_kd_limit == 500.0f);
+  assert(profile->kp_max == 500.0f); // 软件安全上限不因线协议量程上移
+  assert(profile->kd_max == 5.0f);
+
+  motor_protocol_control_intent_t intent = {};
+  intent.kp = 30.0f;
+  intent.kd = 1.0f;
+  motor_protocol_tx_frame_t out = {};
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 1, 0, &intent,
+      &out));
+  // kp_raw 在 byte4 低 4 位 + byte5；kd_raw 在 byte6 高 4 位 + byte7 高 4 位。
+  assert(((out.data[4] & 0x0fU) << 8U | out.data[5]) == 49U);
+  assert(((uint32_t)out.data[6] << 4U | (out.data[7] >> 4U)) == 8U);
+}
+
+// NodeID>15 没有无歧义的单轴 ID：只能产出聚合成员帧，且必须可聚合成 0x210。
+static void test_cerb_high_node_uses_multi_axis_only() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r48_101", &profile));
+  motor_protocol_control_intent_t intent = {};
+  intent.position_rad = 1.0f;
+  intent.kp = 30.0f;
+  intent.kd = 1.0f;
+  intent.enable = true;
+
+  motor_protocol_tx_frame_t frame = {};
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 16, 0, &intent,
+      &frame));
+  assert(frame.aggregate_only);
+  assert(frame.node == 16U);
+  assert(frame.can_id == MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID);
+  assert(frame.size == 12U);
+  assert(frame.data[0] == 0xccU);
+
+  motor_protocol_tx_frame_t aggregated = {};
+  assert(motor_protocol_aggregate_p1_frames(&frame, 1U, &aggregated) == 1U);
+  assert(aggregated.can_id == MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID);
+  assert(aggregated.size == 64U);
+  assert(aggregated.data[56] == 16U);
+  assert(memcmp(aggregated.data, frame.data, 9U) == 0);
+  for (size_t i = 9U; i < 56U; ++i) assert(aggregated.data[i] == 0U);
+  for (size_t i = 57U; i < 64U; ++i) assert(aggregated.data[i] == 0U);
+
+  motor_protocol_config_request_t clear = {};
+  clear.kind = MOTOR_PROTOCOL_CONFIG_CLEAR_FAULT;
+  motor_protocol_tx_frame_t cleared = {};
+  assert(motor_protocol_cerb_adapter.config_encode_stage(
+      0U, profile, 16U, 0U, &clear, &cleared));
+  assert(cleared.can_id == 0x210U);
+  assert(cleared.size == 64U);
+  assert(!cleared.aggregate_only);
+  assert(cleared.data[56] == 16U);
+  assert((cleared.data[0] & 0x20U) != 0U);
+  assert((cleared.data[0] & 0x80U) == 0U);
+
+  // 高低节点可同帧聚合，节点表用完整 1..127。
+  motor_protocol_tx_frame_t pair[2] = {};
+  pair[0] = frame;
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 2, 0, &intent,
+      &pair[1]));
+  assert(motor_protocol_aggregate_p1_frames(pair, 2U, &aggregated) == 2U);
+  assert(aggregated.data[56] == 16U && aggregated.data[57] == 2U);
+
+  // 低节点仍走单轴帧，长/ID 不变。
+  motor_protocol_tx_frame_t low = {};
+  assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 15, 0, &intent,
+      &low));
+  assert(!low.aggregate_only);
+  assert(low.can_id == 0x11fU);
+  assert(low.size == 12U);
+
+  // 越界节点 fail-fast。
+  assert(!motor_protocol_cerb_adapter.encode_mit_command(profile, 0, 0, &intent,
+      &frame));
+  assert(!motor_protocol_cerb_adapter.encode_mit_command(profile, 128, 0,
+      &intent, &frame));
+}
+
+// 五个 raw 全零：适配层必须返回 false，不能假装已发送。
+static void test_cerb_encode_rejects_all_zero_raw_payload() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r48_101", &profile));
+  motor_protocol_control_intent_t intent = {};
+  intent.position_rad = -profile->mit_position_limit_rad;
+  intent.velocity_rad_s = -profile->mit_velocity_limit_rad_s;
+  intent.effort_nm = -profile->mit_torque_limit_nm;
+  intent.kp = 0.0f;
+  intent.kd = 0.0f;
+  motor_protocol_tx_frame_t out = {};
+  assert(!motor_protocol_cerb_adapter.encode_mit_command(profile, 1, 0, &intent,
+      &out));
+}
+
+// 速度单位契约：命令侧关节 rad/s 直通 3.14 上限 12 位对称量化
 // （不乘 gear），反馈侧电机侧 rpm ÷gear。两侧口径若混淆——命令误乘 gear=101
 // 会满码饱和失真——由「非饱和」断言当场抓获。
 static void test_cerb_velocity_unit_contract() {
@@ -487,7 +587,7 @@ static void test_cerb_velocity_unit_contract() {
   assert(code_neg > 0U && code_neg < 4095U);
   assert(code_pos + code_neg == 4095U || code_pos + code_neg == 4094U);
 
-  // 上限语义：超出 Profile π 即饱和（钉死「上限=π」而非任何 ×gear 放大限）。
+  // 上限语义：超出 Profile 3.14 即饱和（钉死为线协议量程，而非任何 ×gear 放大限）。
   intent.velocity_rad_s = 10.0f;
   assert(motor_protocol_cerb_adapter.encode_mit_command(profile, 9, 2, &intent, &out));
   assert(((uint32_t)out.data[3] << 4) | (out.data[4] >> 4) == 0xFFFU);
@@ -529,12 +629,14 @@ static void test_cerb_encode_soft_stop() {
   assert(motor_protocol_cerb_adapter.encode_soft_stop(profile, 2, 1, &out));
   assert(out.tx_class == MOTOR_PROTOCOL_TX_CLASS_P0);
   assert(out.data[0] == 0xccU); // 保持使能
-  // kd=1.0 量化到 12bit/[0,5] → 819 = 0x333，位于 kd 字段（byte6 高 4 位 + byte7 低 4 位前段）。
+  // kd=1.0 量化到 12bit/[0,500] → 8 = 0x008，位于 kd 字段（byte6 高 4 位 + byte7 低 4 位前段）。
   // 与 codec 直连一致性校验：
   motor_protocol_joint_command_t wire = {0.0, 0.0, 0.0, profile->default_kd, 0.0};
   motor_protocol_cerb_limits_t limits = {profile->mit_position_limit_rad,
                                          profile->mit_velocity_limit_rad_s,
-                                         profile->mit_torque_limit_nm};
+                                         profile->mit_torque_limit_nm,
+                                         profile->mit_kp_limit,
+                                         profile->mit_kd_limit};
   uint8_t expected[12];
   motor_protocol_pack_cerb_mit_frame(&wire, &limits, true, expected);
   assert(memcmp(out.data, expected, 12) == 0);
@@ -673,7 +775,7 @@ static void test_cerb_identity_read_transaction() {
 // Vaxor 无此事务（stage_count=0 → 内核回 UNSUPPORTED）。
 static void test_cerb_refresh_params_transaction() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("cerb_r58_101", &profile)); // gear=101, Kt=0.086, eff=1
+  assert(find_profile("cerb_r58_101", &profile)); // 型号参数取自固件目录，不在此复述
 
   motor_protocol_config_request_t req = {};
   req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
@@ -799,7 +901,7 @@ static void test_cerb_refresh_params_transaction() {
 // 速度/力矩限值：对象是电机端量（0x6080 RPM、0x2538 mA），必须乘/除减速比与 Kt。
 static void test_cerb_sdo_velocity_torque_frames() {
   const motor_protocol_model_profile_t *profile = nullptr;
-  assert(find_profile("cerb_r58_101", &profile)); // gear=101, Kt=0.086, eff=1.0
+  assert(find_profile("cerb_r58_101", &profile)); // 型号参数取自固件目录，不在此复述
 
   // 关节侧 π rad/s → 电机端 3030 RPM。
   motor_protocol_config_request_t vel = {};
@@ -1349,6 +1451,9 @@ int main() {
   test_vaxor_config_mode_transaction_stages();
   test_cerb_decode_feedback_converts_si();
   test_cerb_encode_mit_command();
+  test_cerb_profile_separates_wire_limits_from_software_caps();
+  test_cerb_high_node_uses_multi_axis_only();
+  test_cerb_encode_rejects_all_zero_raw_payload();
   test_cerb_velocity_unit_contract();
   test_cerb_enable_disable_frames();
   test_cerb_encode_soft_stop();

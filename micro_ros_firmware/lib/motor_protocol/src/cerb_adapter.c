@@ -1,6 +1,8 @@
 // CERB CAN-FD/MIT 协议 adapter。命令侧关节 rad/s 直通 MIT 12 位对称量化、**不乘减速比**（×101 会让
 // 正常关节速度远超 π 满码饱和）；反馈侧速度由电机端 rpm 经 codec 转 rad/s 后 ÷ 减速比，位置为关节侧
-// 原样，Iq × Kt × 减速比 → 关节扭矩。MIT 量化范围（π/π/峰值）来自 Profile，与真机参数页一致。
+// 原样，Iq × Kt × 减速比 → 关节扭矩。MIT 五项量化满量程（3.14/3.14/2500/500/300）来自 Profile：
+// 2026-10-22 node1 只读读回 0x2542/0x2543=314、0x2544=2500、0x2545=500、0x2546=300；这是单台读数，
+// 其它节点仍以逐节点读回为准。
 // 0x080 SYNC 触发设备 20ms 状态上报（上报帧即心跳、承担总线检测），故属**管理性**使用、不得作为运动
 // 控制边界触发；MIT 多轴快控用 0x210（P1 出队后按总线合帧）；设备侧限位须走 request_id 事务 + 读回
 // 核验，厂家管理对象未决、当前一律 UNSUPPORTED。软停 = MIT 阻尼帧保持使能。
@@ -230,11 +232,13 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
       !isfinite(intent->effort_nm) || !isfinite(intent->kp) ||
       !isfinite(intent->kd) || profile->mit_position_limit_rad <= 0.0f ||
       profile->mit_velocity_limit_rad_s <= 0.0f ||
-      profile->mit_torque_limit_nm <= 0.0f) {
+      profile->mit_torque_limit_nm <= 0.0f ||
+      profile->mit_kp_limit <= 0.0f || profile->mit_kd_limit <= 0.0f ||
+      !isfinite(profile->mit_kp_limit) || !isfinite(profile->mit_kd_limit)) {
     return false;
   }
   // 命令线协议即关节侧（速度含内）：位置/速度/扭矩直通 MIT 量化，上限来自
-  // Profile。命令速度不乘减速比（直通 π 上限量化），与反馈侧 rpm ÷gear
+  // Profile。命令速度不乘减速比（直通 3.14 上限量化），与反馈侧 rpm ÷gear
   // 分向相反——两侧行为由 test_cerb_velocity_unit_contract 固定。
   motor_protocol_joint_command_t wire = {0};
   wire.position = intent->position_rad;
@@ -246,12 +250,23 @@ static bool cerb_encode_mit_command(const motor_protocol_model_profile_t *profil
     profile->mit_position_limit_rad,
     profile->mit_velocity_limit_rad_s,
     profile->mit_torque_limit_nm,
+    profile->mit_kp_limit,
+    profile->mit_kd_limit,
   };
   memset(out, 0, sizeof(*out));
   out->bus_index = bus_index;
   out->tx_class = MOTOR_PROTOCOL_TX_CLASS_P1;
-  // 命令 ID 走 motor_protocol.h 的规范推导（唯一来源，勿内联重算）。
-  if (!motor_protocol_cerb_command_id(node, &out->can_id)) {
+  out->node = (uint8_t)node;
+  if (motor_protocol_cerb_single_node_valid(node)) {
+    // 命令 ID 走 motor_protocol.h 的规范推导（唯一来源，勿内联重算）。
+    if (!motor_protocol_cerb_command_id(node, &out->can_id)) {
+      return false;
+    }
+  } else if (motor_protocol_cerb_node_valid(node)) {
+    // NodeID>15 的单轴 ID 有歧义：只产出 0x210 成员帧，聚合前不得上线。
+    out->can_id = MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID;
+    out->aggregate_only = true;
+  } else {
     return false;
   }
   out->size = 12U;
@@ -275,6 +290,20 @@ static bool cerb_encode_neutral(const motor_protocol_model_profile_t *profile,
   neutral.enable = enable;
   if (!cerb_encode_mit_command(profile, node, bus_index, &neutral, out)) {
     return false;
+  }
+  // 使能/软停/失能不依赖 P1 聚合：高节点的成员帧在此直接展开成单槽
+  // 0x210 帧。P0 路径没有聚合器，若把 12B 占位帧带进 FIFO 会发出无节点
+  // 列表的畸形成员帧；也绝不退化成歧义单轴 ID。
+  if (out->aggregate_only) {
+    motor_protocol_cerb_multi_axis_t axis = {0};
+    axis.node = out->node;
+    memcpy(axis.data, out->data, sizeof(axis.data));
+    out->can_id = MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID;
+    out->size = MOTOR_PROTOCOL_MAX_FRAME_BYTES;
+    out->aggregate_only = false;
+    if (!motor_protocol_pack_cerb_multi_mit(&axis, 1U, out->data)) {
+      return false;
+    }
   }
   out->tx_class = tx_class;
   return true;
@@ -778,10 +807,9 @@ static bool cerb_config_encode_stage(
     // 中性目标 + **不请求使能**（bit7=0）：故障态设备上「重新使能」的意图
     // 无意义，而且会把「清错」变成隐式的重新使能。清完仍要显式
     // SET_ENABLE(true) + 新快照才可能回运动（ARD §36）。
-    motor_protocol_control_intent_t neutral = {0};
-    neutral.kd = profile != NULL ? profile->default_kd : 0.0f;
-    neutral.enable = false;
-    if (!cerb_encode_mit_command(profile, node, bus_index, &neutral, out)) {
+    float kd = profile != NULL ? profile->default_kd : 0.0f;
+    if (!cerb_encode_neutral(profile, node, bus_index, false, kd,
+        MOTOR_PROTOCOL_TX_CLASS_P2, out)) {
       return false;
     }
     out->data[0] |= CERB_MIT_CTRL_CLEAR_FAULT;
@@ -954,10 +982,33 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
              : MOTOR_PROTOCOL_STAGE_RETRY;
 }
 
+// P1 逻辑帧 → (node, 9B MIT payload)。低节点按单轴 ID 反推；高节点
+// （aggregate_only）携带显式 node，can_id 只是 0x210 占位、绝不直接上线。
+static bool cerb_p1_member_node(const motor_protocol_tx_frame_t *frame,
+    uint8_t *node) {
+  if (frame == NULL || node == NULL) {
+    return false;
+  }
+  if (frame->aggregate_only) {
+    if (frame->can_id != MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID ||
+        frame->is_extended || !frame->is_fd || !frame->is_brs ||
+        frame->size != 12U || frame->node < 16U ||
+        !motor_protocol_cerb_node_valid(frame->node) ||
+        (frame->data[0] & 0x3fU) != 0x0cU) {
+      return false;
+    }
+    *node = frame->node;
+    return true;
+  }
+  return motor_protocol_cerb_single_mit_node(
+      frame->can_id, frame->is_extended, frame->is_fd, frame->is_brs,
+      frame->data, frame->size, node);
+}
+
 static size_t cerb_aggregate_p1_frames(
     const motor_protocol_tx_frame_t *frames, size_t available,
     motor_protocol_tx_frame_t *out) {
-  if (frames == NULL || out == NULL || available < 2U) {
+  if (frames == NULL || out == NULL || available == 0U) {
     return 0U;
   }
 
@@ -972,9 +1023,7 @@ static size_t cerb_aggregate_p1_frames(
     const motor_protocol_tx_frame_t *frame = &frames[i];
     if (frame->bus_index != frames[0].bus_index ||
         frame->tx_class != MOTOR_PROTOCOL_TX_CLASS_P1 ||
-        !motor_protocol_cerb_single_mit_node(
-        frame->can_id, frame->is_extended, frame->is_fd, frame->is_brs,
-        frame->data, frame->size, &node)) {
+        !cerb_p1_member_node(frame, &node)) {
       break;
     }
     bool duplicate = false;
@@ -991,7 +1040,9 @@ static size_t cerb_aggregate_p1_frames(
     memcpy(axes[count].data, frame->data, sizeof(axes[count].data));
     ++count;
   }
-  if (count < 2U) {
+  // 单个低节点帧直接单轴发送更省总线；单个高节点没有合法单轴入口，
+  // 必须包成一条 0x210 多轴帧（节点列表写明它自己）。
+  if (count == 0U || (count < 2U && !frames[0].aggregate_only)) {
     return 0U;
   }
 

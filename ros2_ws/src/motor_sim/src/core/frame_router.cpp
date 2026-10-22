@@ -43,7 +43,10 @@ FrameRouter::FrameRouter(SystemConfig config,
   plants_.reserve(config_.motors.size());
   for (const auto &motor : config_.motors) {
     protocols_.push_back(protocol::make_motor_protocol(
-        motor.protocol, motor.mit_torque_limit_nm));
+        motor.protocol, motor.mit_torque_limit_nm,
+        motor.mit_position_limit_rad,
+        motor.mit_velocity_limit_rad_s,
+        motor.mit_kp_limit, motor.mit_kd_limit));
     transmissions_.emplace_back(motor.transmission);
     plants_.emplace_back(motor.plant);
   }

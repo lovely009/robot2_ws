@@ -237,9 +237,8 @@ export async function saveParamsToFlash() {
 // 限位教学：把该台**当前关节位置**写进对应的限位槽。厂商手册要求"设置时电机失能、
 // 掰到限位再设置"，内核也只受理未运动状态（device_limit_write_allowed），所以
 // 先本地挡一道，再让固件的拒绝兜底（渲染与点击之间有竞态）。
-// 写事务（写 + 读回核验）收尾后固件即时发一帧 device_param_report，顺带把
-// 内核的钳制（CERB mit_position_limit_rad = ±π）暴露出来——超出 ±180° 的
-// 位置会被钳到 ±180°，帧里就是钳后的真值，无需再单独发 REFRESH。
+// 写事务（写 + 读回核验）收尾后固件即时发一帧 device_param_report，
+// 报告内核按该型号位置边界钳制后的真值，无需再单独发 REFRESH。
 export async function setLimitFromPosition(id, side) {
   if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return; }
   const row = store.motors.get(id) || {};

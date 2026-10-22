@@ -159,7 +159,9 @@ public:
 protocol::CerbMitLimits cerb_limits(const MotorConfig &motor) {
   return {required_positive_parameter(motor, "mit_position_limit_rad"),
           required_positive_parameter(motor, "mit_velocity_limit_rad_s"),
-          required_positive_parameter(motor, "mit_torque_limit_nm")};
+          required_positive_parameter(motor, "mit_torque_limit_nm"),
+          required_positive_parameter(motor, "mit_kp_limit"),
+          required_positive_parameter(motor, "mit_kd_limit")};
 }
 
 void validate_cerb_node(const unsigned node) {
@@ -170,7 +172,10 @@ void validate_cerb_node(const unsigned node) {
 
 uint32_t cerb_command_id(const unsigned node) {
   validate_cerb_node(node);
-  return 0x110U + node;
+  if (node > 15U) {
+    throw std::out_of_range("CERB single-axis node must be in [1, 15]");
+  }
+  return 0x110U | node;
 }
 
 uint32_t cerb_feedback_id(const unsigned node) {
@@ -187,6 +192,13 @@ CanFrame make_cerb_frame(const MotorConfig &motor,
   // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
   payload[0] = static_cast<uint8_t>((enabled ? 0xc0U : 0x00U) | 0x0cU);
   std::copy(mit.begin(), mit.end(), payload.begin() + 1U);
+  validate_cerb_node(motor.id);
+  if (motor.id > 15U) {
+    std::array<uint8_t, 64> multi{};
+    std::copy_n(payload.begin(), 9U, multi.begin());
+    multi[56] = static_cast<uint8_t>(motor.id);
+    return make_frame(0x210U, multi.data(), multi.size(), true);
+  }
   return make_frame(cerb_command_id(motor.id), payload.data(), payload.size(),
                     true);
 }

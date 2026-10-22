@@ -1,48 +1,37 @@
 # CERB Lite CAN FD / MIT 协议摘要
 
-本文记录 `motor_drive` 实际使用的协议子集。来源为《CERB 关节模组使用协议
-简易说明书》V1.0（适用固件 1.16.07 以上）、《CERB 电机上手流程（三）—
-MIT 模式说明》及 R48/R58 产品图纸。电机参数设置页中的 MIT 范围必须与
-软件配置一致。
+本文记录 `motor_drive` 使用的协议子集。设备侧帧格式与缩放依据见
+[设备侧参考 §6](../../../../docs/research/cerb-device-reference.md#6-控制报文入口)，
+以厂家《CANFD MIT 快控档位与缩放使用指南》为准。此控制路径不通过读写寄存器设置 MIT 目标或量程。
 
 ## 通讯和帧格式
 
-- 标准 CAN FD 帧，BRS；默认仲裁段 1 Mbit/s、数据段 5 Mbit/s。
-- 节点 ID 为 1–127。
-- MIT 下行 ID：`0x110 + Dev_ID`，9 个有效 Byte；CAN FD DLC=9，线上按 12 Byte
-  发送，尾部 3 Byte 补零。
-- 状态反馈 ID：`0x300 + Dev_ID`，12 Byte。
-- 驱动按基址加节点号解释手册中的 `0x110|Dev_ID`，避免节点号与基址重叠时
-  产生 CAN ID 碰撞。
+- 标准 CAN FD 帧，BRS；仲裁段 1 Mbit/s、数据段 5 Mbit/s。
+- 通用节点范围为 1–127；单轴快控限 1–15，ID 必须是 `0x110 | Dev_ID`，不能用加法。
+- 单轴发送 12 Byte（DLC=9），前 9 Byte 有效，尾部 3 Byte 补零。
+- 多轴使用 `0x210`、64 Byte（DLC=15），最多六个 9 Byte 槽位；NodeID 表位于 Byte56–61。
+  主机驱动的高节点使用单槽多轴帧；固件 P1 路径可将同总线命令合并为六槽帧。
+- 状态反馈 ID 为 `0x300 + Dev_ID`、12 Byte；其位置/速度/Iq 刻度独立于 MIT 命令量程。
 
-MIT 下行 Byte 0 为控制字：bit 7 使能、bit 6 抱闸释放、bit 5 清错、
-bit 4:1 为模式（MIT=`0x06`）。Byte 1–8 依次打包
-`P(16) + V(12) + Kp(12) + Kd(12) + T(12)`，均为大端位序。旧版 MIT 示例采用
-位置 ±12.5 rad、速度 ±30 rad/s、Kp 0–500、Kd 0–5、转矩 ±10 Nm；新版协议
-只规定 P/V/T Max 必须与电机参数页一致，因此三个限幅均为型号必填参数。
+MIT 控制字 bit7 为使能、bit6 为抱闸释放、bit5 为一次性清错事件，bit4:1 为模式
+（MIT=`0x06`）。普通使能命令使用 `0xCC`，失能命令使用 `0x0C`，不持续置清错位。
+Byte1–8 按大端位序打包 `P(16) + V(12) + Kp(12) + Kd(12) + T(12)`。
+物理量先按配置范围饱和，再四舍五入到对应 raw；五个 raw 全零为无效命令，不得用作中性目标。
 
-反馈 Byte 0–5 分别为大端 `int16`：输出端位置（182 count/deg）、电机端速度
-（rpm）和 Iq（**每码 20 mA**，手册写的 1 mA 与实测不符，见
-`docs/research/cerb-device-reference.md` §10.5）。策略层将电流码乘 0.020 得 A，
-速度除以减速比，再按 `Iq × Kt × gear_ratio × gear_efficiency` 得到输出端转矩；
-由此每码 = 0.1015 N·m（R58）。
+反馈 Byte0–5 分别为大端 `int16`：输出端位置（182 count/deg）、电机端速度（rpm）
+和 Iq（20 mA/码，见设备侧参考 §10.5）。策略层将速度除以减速比，
+电流按 `Iq × Kt × gear_ratio × gear_efficiency` 换算为输出端转矩。
 
-## 型号参数
+## 型号参数与安全边界
 
-厂家 2026-10-21 修正（以此为准，旧图纸的 Kt 作废）：
+型号库唯一来源是
+[`motor_hardware_interface/config/motor.yaml`](../../motor_hardware_interface/config/motor.yaml)。
+CERB 的五项 MIT 线协议满量程分别由 `mit_position_limit_rad`、`mit_velocity_limit_rad_s`、
+`mit_kp_limit`、`mit_kd_limit`、`mit_torque_limit_nm` 提供；必须为有限正数。
+拓扑中单电机的 `parameters` 可覆盖型号默认值，但必须与该台设备的实际设置一致。
 
-| 型号 | 减速比 | Kt（电机侧） | 减速器效率 | MIT `T_Max` | 额定/峰值转矩 | 额定/峰值电流 |
-|---|---:|---:|---:|---:|---:|---:|
-| CE-RB-R58-101-Lite-CO-I | 101:1 | 0.067 Nm/A | 75% | 300 Nm | 20/45 Nm | 3.5/10.8 A |
-| CE-RB-R48-101-Lite-CO-I | 101:1 | 0.1 Nm/A | 50% | 300 Nm | 5/11 Nm | 1.3/3.2 A |
+线协议满量程不是物理保护阈值：`peak_torque_nm`、`peak_current_amp` 等仍独立限制出力；
+固件的软件 Kp/Kd 上限也不会因为量化范围扩大而自动放宽。VAXOR 不使用这些 CERB 缩放参数。
 
-`T_Max` 是 MIT 帧 τ_ff 的 12 位量化满量程（步长 600/4095 ≈ 0.1465 N·m），
-**不是**机械峰值转矩；两型号同值。
-
-对应型号库名称为 `cerb_r58_101` 与 `cerb_r48_101`。每台电机必须在拓扑中用
-`mit_position_limit_rad`、`mit_velocity_limit_rad_s`、
-`mit_torque_limit_nm` 明确配置参数页中的量化范围；三者必须为正数。旧资料的
-示例值不能自动成为具体生产型号的配置。
-
-软件使能帧发送零位置、零速度、零增益、零前馈的 MIT 命令。真机首次接入仍须
-逐关节确认零位、方向、参数页量化范围、机械限位和硬件急停。
+软件使能帧使用零位置、零速度、零增益、零前馈对应的量化中点，不是全零 raw。
+真机首次接入仍须逐关节确认零位、方向、量程、机械限位和硬件急停；协议测试通过不等于运动验收。

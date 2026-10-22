@@ -32,6 +32,8 @@ typedef struct {
   uint32_t physical_attempts;
   uint32_t hardware_rejections;
   uint32_t p0_requeued;
+  // aggregate_only 帧未能聚合而被拦下（不得原样上线）的次数。
+  uint32_t aggregate_dropped;
 } motor_tx_router_stats_t;
 
 void motor_tx_router_init(motor_tx_router_t *router);

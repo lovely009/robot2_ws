@@ -243,6 +243,16 @@ fw_host_test(test_wire_codec
   SOURCES test_wire_codec.cpp
   OBLIBS fw_wire_codec)
 
+# 发布调度纯逻辑（lib/publish_schedule；无 ROS 依赖，host 可直编）
+add_library(fw_publish_schedule OBJECT
+  ../../lib/publish_schedule/src/publish_schedule.c)
+target_include_directories(fw_publish_schedule PUBLIC
+  ../../lib/publish_schedule/include)
+
+fw_host_test(test_publish_schedule
+  SOURCES test_publish_schedule.cpp
+  OBLIBS fw_publish_schedule)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

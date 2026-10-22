@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """CERB MIT 满量程反推探针（真机台架专用；只发 MIT 帧 + SDO 读，不烧板子、不改设备）。
 
-⚠️ **只对台架上的真电机运行**。本仓库自带的 `fdcan_motor_sim.py` 用 `PI/PI/45.0`
-解码 MIT 帧——那是照固件假设写死的，用它回答"MIT 满量程是多少"是**自证循环**
-（循环论证），**不能**作为证据。真电机到场前这个问题无从回答。对应厂商问题清单
-第 1 条（见 `micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md` §12）。
+⚠️ **只对台架上的真电机运行**。本仓库自带的 `fdcan_motor_sim.py` 用 `PI/PI/300.0`
+（按型号库 `mit_torque_limit_nm`）解码 MIT 帧——那是照固件假设写死的，用它回答
+"MIT 满量程是多少"是**自证循环**（循环论证），**不能**作为证据。真电机到场前这个
+问题无从回答。对应厂商问题清单第 1 条（见
+`micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md` §12）。
 
 本脚本只做两件事，**不 flash、不写任何设备对象**：
   1. 发满量程 MIT 单轴帧（`0x110|id`，12B，控制字 0xcc）：

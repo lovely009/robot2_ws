@@ -34,8 +34,9 @@ ADR 0009 决定 2 写的实现是 `robot_sim` 里的 `gravity_feedforward_mixer.
    （`motor_hardware_interface/src/canfd_system.cpp:287-300`）只写 position/kp/kd，
    `JointCommand::feedforward` 恒为默认 0——ADR 0009 点 2 至今成立。
 4. ADR 0009 点 3 记的 τ_ff 编解码量程不一致（5.0 Nm 往返成 1.222 Nm）**已修**：`motor_sim`
-   按型号读 `mit_torque_limit_nm`（`motor_sim/src/protocol/cerb_protocol.cpp:91`），launch 从型号库
-   `peak_torque_nm` 注入（`simulation.launch.py:207`），两侧同源。所以前馈不再被静默打折——
+   按型号读 `mit_torque_limit_nm`（`motor_sim/src/protocol/cerb_protocol.cpp:91`），launch 从拓扑
+   注入同一量程（厂家 2026-10-21 修正为 300 N·m，R58/R48 同值，与机械峰值 `peak_torque_nm`
+   45/11 分开），两侧同源。所以前馈不再被静默打折——
    这一点是 0009 决定 5 当初把真机路径压后的理由之一，现已消失。
 5. `gravity_feedforward_overlay` 有运行期可改参数 `effort_gain`，但 web 前端**没有**任何改
    ROS 参数的通道（只用 rosbridge 的 publish / subscribe / call_service），且

@@ -102,7 +102,7 @@ HIL 启动仿真时默认拉起、停止时联动收起）：经 `simulation.lau
 
 **反馈里的电流与转速是状态导出，不是上电常量**（2026-10-16 修）。曾经两者写死在
 `MotorModel.__init__` 里（`rpm=101`、`iq_ma=1000`），于是**不发任何指令、电机没使能，
-页面上也恒有转速与力矩**——固件把那个假电流乘 Kt×速比，显示成 7.777/8.686 N·m，
+页面上也恒有转速与力矩**——固件把那个假电流乘 Kt×速比×效率，显示成 5.05/5.08 N·m，
 与真机"未使能就是 0"相反。现在：
 
 | 反馈量 | 来源 | 缺参数时 |
@@ -127,6 +127,12 @@ HIL 启动仿真时默认拉起、停止时联动收起）：经 `simulation.lau
 
 取证工具 `tools/cerb_sdo_probe.py` 支持两种传输：`--interface can0`（gs_usb/SocketCAN，
 现场当前配置）与 `--dev <串口>`（SLCAN）。**默认只读**，带 `--write` 才改设备对象。
+五项 CERB MIT 解码量程由 `--mit-position-limits`、`--mit-velocity-limits`、
+`--mit-kp-limits`、`--mit-kd-limits`、`--mit-torque-limits` 逐台传入（`ID:value`）。
+launch 继承型号库并合并单电机覆盖；缺省按厂家档位，见设备侧参考 §6。
+它们与 `--tau-limits` 的物理出力钳位独立。单轴限 ID 1–15；高节点通过 `0x210` 多轴槽位接收，
+无效模式、全零 MIT 载荷、错误长度或重复节点表不更新电机目标。
+
 设备侧对象字典、帧格式与故障码见
 [`docs/research/cerb-device-reference.md`](../docs/research/cerb-device-reference.md)。
 

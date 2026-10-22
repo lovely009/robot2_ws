@@ -42,12 +42,15 @@ uint32_t motor_protocol_float_to_uint(double value, double low, double high,
 // ===========================================================================
 // CERB：自定义 PDO / MIT、CANopen SDO 与设备参数换算
 // ===========================================================================
-// 新版协议中的 ID 基址按“加节点号”解释，避免与 Dev_ID 位重叠时产生碰撞。
+// CAN-ID 基址按“按位或节点号”推导：单轴命令 = 0x110|NodeID（NodeID 1..15，
+// 避免与 bit4 以上的 ID 重叠）；多轴 0x210 的 NodeID 列表仍允许 1..127。
 // 以下常量是 CERB CAN-ID 推导的唯一来源（历史上 cerb_adapter.c 曾自带一份
 // 0x300/0x110 副本并内联重算命令 ID）。
 #define MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE 0x110U
 #define MOTOR_PROTOCOL_CERB_MULTI_COMMAND_ID 0x210U
 #define MOTOR_PROTOCOL_CERB_MULTI_MAX_AXES 6U
+// 单轴入口 0x110|NodeID 的合法节点上限：bit4 起按位或会与基址/相邻 ID 重叠。
+#define MOTOR_PROTOCOL_CERB_SINGLE_NODE_MAX 15U
 #define MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE 0x300U
 #define MOTOR_PROTOCOL_CERB_SYNC_ID 0x080U
 /* 反馈帧 [4..5]（Iq）每码对应的电流（A）。2026-10-21 真机扫描反推 20.0 mA/码；
@@ -62,13 +65,19 @@ uint32_t motor_protocol_float_to_uint(double value, double low, double high,
 #define MOTOR_PROTOCOL_CERB_SDO_REQUEST_ID_BASE 0x600U
 #define MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE 0x580U
 
+// MIT 五项线协议满量程（设备 0x2542~0x2546）。四个字段均为**线协议量化范围**，
+// 不是物理保护限值；软件安全上限仍由 Profile 的 kp_max/kd_max 另行钳制。
 typedef struct {
   double position_rad;
   double velocity_rad_s;
   double torque_nm;
+  double mit_kp_limit;   // Nm/rad
+  double mit_kd_limit;   // Nm·s/rad
 } motor_protocol_cerb_limits_t;
 
+// 节点合法范围：多轴列表/发现/反馈/SDO 用 1..127；单轴 0x110|NodeID 用 1..15。
 bool motor_protocol_cerb_node_valid(unsigned node);
+bool motor_protocol_cerb_single_node_valid(unsigned node);
 bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id);
 bool motor_protocol_cerb_feedback_id(unsigned node, uint32_t *id);
 

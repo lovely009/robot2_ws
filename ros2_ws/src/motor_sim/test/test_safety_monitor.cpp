@@ -52,6 +52,15 @@ TEST(SafetyMonitor, OneStaleEnabledMotorLatchesWholeRobot) {
   EXPECT_TRUE(snapshot.motor_status[1].timed_out);
 }
 
+TEST(SafetyMonitor, MultiAxisGroupsSharingCanIdDoNotConflict) {
+  core::SafetyMonitor safety(3U, 150ms, 2ms);
+  safety.observe_valid_command(0U, "arm", 0x210U, {1U}, at_us(0));
+  safety.observe_valid_command(1U, "arm", 0x210U, {2U}, at_us(100));
+  safety.observe_valid_command(2U, "arm", 0x210U, {3U}, at_us(200));
+  EXPECT_FALSE(safety.latched());
+  EXPECT_EQ(safety.fault(), core::Fault::None);
+}
+
 TEST(SafetyMonitor, DifferentDuplicatePayloadWithinWindowLatches) {
   core::SafetyMonitor safety(30U, 150ms, 2ms);
   safety.observe_valid_command(0U, "legs", 3U, {0x01U}, at_us(0));

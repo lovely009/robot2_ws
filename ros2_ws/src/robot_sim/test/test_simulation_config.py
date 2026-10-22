@@ -17,6 +17,7 @@ MODEL_DIR = HERE.parent / "models" / "half_body_robot"
 
 def _launch_module():
     spec = importlib.util.spec_from_file_location(LAUNCH_FILE.stem, LAUNCH_FILE)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -48,6 +49,123 @@ def test_motor_sim_config_carries_per_model_torque_quantization(tmp_path):
 
     assert profiles["cerb_r48"]["mit_torque_limit_nm"] == pytest.approx(300.0)
     assert profiles["cerb_r58"]["mit_torque_limit_nm"] == pytest.approx(300.0)
+
+
+def test_cerb_mit_torque_limit_defaults_to_manufacturer_value(tmp_path):
+    """CERB 缺 `mit_torque_limit_nm` 时必须回落到 300，不能回落物理峰值 45/11。
+
+    型号库或拓扑漏写这个字段不会报错；若回落 `peak_torque_nm`，固件按 300 编码的
+    τ_ff 会被解码端缩成 45/300（历史上正是这个错误）。vaxor 没有 MIT 量程，仍为 None。
+    """
+    module = _launch_module()
+    motor_driver = MODEL_DIR / "config" / "motor_driver.yaml"
+    specs = module._resolve_motor_specs_path(motor_driver)
+    document = yaml.safe_load(motor_driver.read_text(encoding="utf-8"))
+    for motor in document["motor_hardware"]["motors"].values():
+        parameters = motor.setdefault("parameters", {})
+        if str(motor.get("type", "")).startswith("cerb"):
+            parameters.pop("mit_torque_limit_nm", None)
+    missing = tmp_path / "motor_driver.yaml"
+    missing.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    simulation = module._load_simulation(
+        MODEL_DIR / "config" / "simulation_topology.yaml")
+    bound = module._bind_motor_topology(simulation, missing, specs)
+
+    cerb = [motor for motor in bound["motors"] if motor["protocol"] == "cerb"]
+    vaxor = [motor for motor in bound["motors"] if motor["protocol"] == "vaxor"]
+    assert len(cerb) == 14 and len(vaxor) == 4
+    assert {motor["mit_torque_limit_nm"] for motor in cerb} == {300.0}
+    assert {motor["mit_torque_limit_nm"] for motor in vaxor} == {None}
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [-300.0, 0.0, float("nan"), float("inf"), "not-a-number"],
+    ids=["negative", "zero", "nan", "inf", "non-numeric"],
+)
+def test_cerb_explicit_invalid_mit_torque_limit_fails_fast(tmp_path, invalid):
+    """CERB 显式写坏的 mit_torque_limit_nm 必须 fail-fast，不能静默丢弃。
+
+    旧实现把无效值从 profile 过滤掉，却把原值写进 motors：C++ 模拟器拿到 YAML 里的
+    null/坏值，Python 后端拿到 -300/0/nan/inf 去解码，同一份拓扑两个后端分歧。显式
+    给出该参数即表示配置错误（只有缺省才回落 300），错误须点名参数与电机。
+    """
+    module = _launch_module()
+    motor_driver = MODEL_DIR / "config" / "motor_driver.yaml"
+    specs = module._resolve_motor_specs_path(motor_driver)
+    document = yaml.safe_load(motor_driver.read_text(encoding="utf-8"))
+    document["motor_hardware"]["motors"]["arm_joint1"].setdefault("parameters", {})[
+        "mit_torque_limit_nm"] = invalid
+    broken = tmp_path / "motor_driver.yaml"
+    broken.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    simulation = module._load_simulation(
+        MODEL_DIR / "config" / "simulation_topology.yaml")
+    with pytest.raises(ValueError, match=r"arm_joint1.*mit_torque_limit_nm"):
+        module._bind_motor_topology(simulation, broken, specs)
+
+
+def test_firmware_simulator_gets_mit_quantization_and_peak_clamp_separately():
+    """MIT 解码量程与物理饱和必须走两条 CLI，不能共用一份数值。
+
+    固件按型号库 `mit_torque_limit_nm`（CERB 300 N·m）编码 τ_ff，而物理出力上限是
+    `peak_torque_nm`（R58 45 / R48 11）。把后者传给 `--mit-torque-limits` 会让前馈
+    被缩放 45/300；反过来把 300 当饱和值则会放开真机峰值。vaxor 没有 MIT 量程，
+    也不能出现在 `--mit-torque-limits` 里。
+    """
+    module = _launch_module()
+    simulation, _ = _bound_simulation(module)
+
+    # ID 1..18：CERB 为除 8/9/17/18 外的 14 台，量程统一 300；
+    # 物理峰值按型号逐台 45/11。
+    assert module._mit_torque_limit_cli(simulation) == (
+        "1:300,2:300,3:300,4:300,5:300,6:300,7:300,"
+        "10:300,11:300,12:300,13:300,14:300,15:300,16:300"
+    )
+    assert module._tau_limit_cli(simulation) == (
+        "1:11,2:11,3:45,4:45,5:11,6:11,7:11,"
+        "10:11,11:11,12:45,13:45,14:11,15:11,16:11"
+    )
+
+
+@pytest.mark.parametrize("field,expected", [
+    ("mit_position_limit_rad", 3.14), ("mit_velocity_limit_rad_s", 3.14),
+    ("mit_kp_limit", 2500.0), ("mit_kd_limit", 500.0),
+])
+def test_all_mit_scales_reach_both_simulator_backends(tmp_path, field, expected):
+    module = _launch_module()
+    simulation, specs = _bound_simulation(module)
+    cerb = [m for m in simulation["motors"] if m["protocol"] == "cerb"]
+    assert all(m[field] == expected for m in cerb)
+    module._write_runtime_configs(
+        simulation, tmp_path, "vcan", "unused", "unused", specs)
+    profiles = yaml.safe_load((tmp_path / "motor_sim.yaml").read_text())[
+        "motor_simulation"]["profiles"]
+    assert profiles["cerb_r48"][field] == expected
+    assert profiles["cerb_r58"][field] == expected
+    assert module._mit_limit_cli(simulation, field).startswith(f"1:{expected:g},")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("mit_position_limit_rad", 6.28), ("mit_velocity_limit_rad_s", 8.0),
+    ("mit_torque_limit_nm", 150.0), ("mit_kp_limit", 1200.0),
+    ("mit_kd_limit", 200.0),
+])
+def test_per_node_scale_override_does_not_overwrite_shared_profile(tmp_path, field, value):
+    module = _launch_module()
+    motor_driver = MODEL_DIR / "config" / "motor_driver.yaml"
+    specs = module._resolve_motor_specs_path(motor_driver)
+    document = yaml.safe_load(motor_driver.read_text())
+    document["motor_hardware"]["motors"]["arm_joint1"].setdefault("parameters", {})[field] = value
+    custom = tmp_path / "motor_driver.yaml"
+    custom.write_text(yaml.safe_dump(document))
+    simulation = module._load_simulation(MODEL_DIR / "config" / "simulation_topology.yaml")
+    bound = module._bind_motor_topology(simulation, custom, specs)
+    first, second = bound["motors"][:2]
+    assert first[field] == value
+    assert bound["profiles"][first["profile"]][field] == value
+    assert bound["profiles"][second["profile"]][field] != value
 
 
 def test_motor_sim_config_carries_bus_transport_and_endpoint(tmp_path):

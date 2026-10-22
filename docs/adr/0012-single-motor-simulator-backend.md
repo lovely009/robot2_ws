@@ -22,7 +22,7 @@
 
 两者是**同一个东西的两个宿主**：同一套 CERB/VAXOR 帧语义，差异只在宿主环境与实现进度。当前代价：
 
-1. **同一语义两处实现、两处漂移**：τ_ff 量化满量程（R48 11 / R58 45）、VAXOR 回显帧必须满 12B、
+1. **同一语义两处实现、两处漂移**：τ_ff 量化满量程（当前 CERB 300 N·m）、VAXOR 回显帧必须满 12B、
    SDO `0x2650` 只有子索引 `:00` 存在——这些坑都在一侧踩到后手工补到另一侧。
 2. **HIL 只能单总线**：Python 侧单 `--tty/--interface`；`simulation.launch.py:651` 只好靠
    「ID 跨协议全局唯一」绕开。
@@ -91,7 +91,7 @@
 
 | 现有 CLI | 去处 |
 |---|---|
-| `--cerb` / `--vaxor` / `--cerb-r58` / `--joint-map` / `--tau-limits` | `motors[]`（id / 协议 / 型号与身份串 / 关节名 / MIT 量程与力矩饱和），已在 `motor_sim.yaml` 的 `motors[]` 里 |
+| `--cerb` / `--vaxor` / `--cerb-r58` / `--joint-map` / `--tau-limits` / `--mit-torque-limits` | `motors[]`（id / 协议 / 型号与身份串 / 关节名 / MIT 量程与力矩饱和），已在 `motor_sim.yaml` 的 `motors[]` 里 |
 | `--period-ms` / `--fb-period-ms` / `--stagger-ms` / `--effort-rate-hz` | `timing`（新增逐台反馈周期与相位错开；与现有 `control_hz` / `vaxor_feedback_hz` / `command_timeout_ms` 合并成一套语义） |
 | `--tty` / `--interface` / `--data-bitrate-index` / `--no-brs` / `--probe-adapter` | `buses[]`（传输类型 + 端点 + 位率与数据段 + 探测开关；多总线共用一套字段） |
 | `--safety-off` / `--dir-ccw` | `motors[].sdo_overrides`（保护开关 `0x2650:00`、方向 `0x2541:00` 的初值） |

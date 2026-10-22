@@ -43,6 +43,19 @@ TEST(SystemConfig, ReadsPerModelMitTorqueLimitIntoMotorConfig) {
   EXPECT_DOUBLE_EQ(r58.motors[0].plant.effort_limit_nm, 10.0);
 }
 
+TEST(SystemConfig, ReadsAllFiveCustomMitScales) {
+  const auto config = core::load_system_config(fixture_path("cerb_custom_scales.yaml"));
+  ASSERT_EQ(config.motors.size(), 1U);
+  const auto &motor = config.motors.front();
+  EXPECT_EQ(motor.id, 16U);
+  EXPECT_DOUBLE_EQ(motor.mit_position_limit_rad, 6.28);
+  EXPECT_DOUBLE_EQ(motor.mit_velocity_limit_rad_s, 8.0);
+  EXPECT_DOUBLE_EQ(motor.mit_torque_limit_nm, 150.0);
+  EXPECT_DOUBLE_EQ(motor.mit_kp_limit, 1200.0);
+  EXPECT_DOUBLE_EQ(motor.mit_kd_limit, 200.0);
+  EXPECT_DOUBLE_EQ(motor.plant.effort_limit_nm, 10.0);
+}
+
 TEST(SystemConfig, DefaultsMitTorqueLimitForConfigsWithoutTheField) {
   const auto legacy = core::load_system_config(fixture_path("cerb_axis.yaml"));
   ASSERT_EQ(legacy.motors.size(), 1U);

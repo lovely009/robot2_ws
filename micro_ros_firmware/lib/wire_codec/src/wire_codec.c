@@ -34,6 +34,74 @@ double wire_dequantize(int16_t q, double scale) {
   return (double)q * scale / WIRE_Q_MAX;
 }
 
+uint16_t wire_encode_state_age(uint32_t age_ms) {
+  if (age_ms == 0xFFFFFFFFu) {
+    return WIRE_AGE_MS_NEVER;
+  }
+  if (age_ms >= WIRE_AGE_MS_SATURATED) {
+    return WIRE_AGE_MS_SATURATED;
+  }
+  return (uint16_t)age_ms;
+}
+
+static int16_t encode_i16_scaled(double value, double scale) {
+  if (!isfinite(value)) {
+    return WIRE_SENTINEL_MISSING;
+  }
+  const double scaled = value * scale;
+  if (scaled <= -32767.0) {
+    return (int16_t)-32767;
+  }
+  if (scaled >= 32767.0) {
+    return (int16_t)32767;
+  }
+  return (int16_t)lround(scaled);
+}
+
+int16_t wire_encode_temperature_dc(double temperature_c) {
+  return encode_i16_scaled(temperature_c, 10.0);
+}
+
+int16_t wire_encode_current_ma(double current_a) {
+  return encode_i16_scaled(current_a, 1000.0);
+}
+
+uint16_t wire_encode_voltage_mv(double voltage_v) {
+  if (!isfinite(voltage_v)) {
+    return WIRE_VOLTAGE_MV_MISSING;
+  }
+  const double scaled = voltage_v * 1000.0;
+  if (scaled <= 0.0) {
+    return 0U;
+  }
+  if (scaled >= 65534.0) {
+    return 0xFFFEu;
+  }
+  return (uint16_t)lround(scaled);
+}
+
+uint8_t wire_encode_status_flags(wire_status_flags_input_t in) {
+  uint8_t flags = 0U;
+  if (in.online) {
+    flags |= 0x01u;
+  }
+  if (in.device_protect_known) {
+    flags |= 0x02u;
+  }
+  if (in.device_protect_enabled) {
+    flags |= 0x04u;
+  }
+  if (in.device_direction_known) {
+    flags |= 0x08u;
+  }
+  if (in.device_direction != 0U) {
+    flags |= 0x10u;
+  }
+  return flags;
+}
+
+
+
 bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
     size_t position_q_len, size_t velocity_q_len, size_t effort_q_len,
     size_t max_slots) {

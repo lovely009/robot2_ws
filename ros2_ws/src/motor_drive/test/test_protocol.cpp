@@ -66,7 +66,7 @@ TEST(CerbProtocol, MitCommandUsesConfiguredRangesAndManualBitLayout) {
   command.feedforward = -10.0;
 
   const auto bytes = protocol::pack_cerb_mit_command(
-      command, protocol::CerbMitLimits{12.5, 30.0, 10.0});
+      command, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0});
   const std::array<uint8_t, 8> expected{
       {0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0xf0, 0x00}};
   EXPECT_EQ(bytes, expected);
@@ -74,10 +74,35 @@ TEST(CerbProtocol, MitCommandUsesConfiguredRangesAndManualBitLayout) {
 
 TEST(CerbProtocol, NeutralMitCommandMatchesManualQuantization) {
   const auto bytes = protocol::pack_cerb_mit_command(
-      {}, protocol::CerbMitLimits{12.5, 30.0, 10.0});
+      {}, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0});
   const std::array<uint8_t, 8> expected{
-      {0x7f, 0xff, 0x7f, 0xf0, 0x00, 0x00, 0x07, 0xff}};
+      {0x80, 0x00, 0x80, 0x00, 0x00, 0x00, 0x08, 0x00}};
   EXPECT_EQ(bytes, expected);
+}
+
+TEST(CerbProtocol, GuideDefaultGainsAndZeroMidpoints) {
+  protocol::JointCommand command;
+  command.kp = 30.0;
+  command.kd = 1.0;
+  const auto bytes = protocol::pack_cerb_mit_command(
+      command, protocol::CerbMitLimits{3.14, 3.14, 300.0});
+  const std::array<uint8_t, 8> expected{
+      {0x80, 0x00, 0x80, 0x00, 0x31, 0x00, 0x88, 0x00}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CerbProtocol, RejectsAllZeroPayloadAndInfiniteLimits) {
+  protocol::JointCommand command;
+  command.position = -3.14;
+  command.velocity = -3.14;
+  command.feedforward = -300.0;
+  EXPECT_THROW(protocol::pack_cerb_mit_command(
+                   command, protocol::CerbMitLimits{3.14, 3.14, 300.0}),
+               std::invalid_argument);
+  EXPECT_THROW(protocol::pack_cerb_mit_command(
+                   {}, protocol::CerbMitLimits{
+                       std::numeric_limits<double>::infinity(), 3.14, 300.0}),
+               std::invalid_argument);
 }
 
 TEST(CerbProtocol, FeedbackDecodesBigEndianPhysicalValues) {
@@ -102,6 +127,6 @@ TEST(CerbProtocol, MitCommandRejectsNonFiniteInput) {
   protocol::JointCommand command;
   command.position = std::numeric_limits<double>::quiet_NaN();
   EXPECT_THROW(static_cast<void>(protocol::pack_cerb_mit_command(
-                   command, protocol::CerbMitLimits{12.5, 30.0, 10.0})),
+                   command, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0})),
                std::invalid_argument);
 }

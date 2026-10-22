@@ -78,7 +78,10 @@ public:
 // 必须与真机编码端一致；Vaxor 忽略该参数。缺省值仅为兼容既有调用。
 std::unique_ptr<MotorProtocol>
 make_motor_protocol(std::string_view name,
-                    double mit_torque_limit_nm = kCerbDefaultMitTorqueLimitNm);
+                    double mit_torque_limit_nm = kCerbDefaultMitTorqueLimitNm,
+                    double mit_position_limit_rad = 3.14,
+                    double mit_velocity_limit_rad_s = 3.14,
+                    double mit_kp_limit = 2500.0, double mit_kd_limit = 500.0);
 
 uint32_t float_to_uint(double value, double low, double high, unsigned bits);
 double uint_to_float(uint32_t value, double low, double high, unsigned bits);

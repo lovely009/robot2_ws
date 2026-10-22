@@ -44,7 +44,9 @@ CANable2 的数据位率索引按 V 查询自动选择；
     --effort-topic /arm_effort_controller/commands
 节点清单与节奏可调：--cerb/--vaxor（默认 CERB 1-4 / 无 VAXOR）、--period-ms（板端 SYNC
 周期）、--fb-period-ms/--stagger-ms（台架降载用的反馈周期/错峰，默认 0 = 照真机每个 SYNC
-都回）、--no-brs（数据段不切 5M）。
+都回）、--no-brs（数据段不切 5M）。力矩两套：--tau-limits 是物理饱和（型号库
+peak_torque_nm），--mit-torque-limits 是 τ_ff 的量化满量程（拓扑逐台
+parameters 覆盖型号库默认值，必须与固件编码一致）。
 运行期控制（可选）：--control-socket <path> 开一条 Unix socket JSON 行协议，
 支持 status/add/remove/link（加电机、移除、断开/恢复），供 web 上位机仿真页使用；
 协议与语义见 micro_ros_agent/README.md。
@@ -59,6 +61,7 @@ from collections import deque
 import fcntl
 import glob
 import json
+import math
 import os
 import queue
 import re
@@ -418,22 +421,22 @@ def cerb_symmetric(code: int, limit: float, bits: int) -> float:
     return (code / float((1 << bits) - 1)) * 2.0 * limit - limit
 
 
-def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLBACK):
-    """固件下行 CERB MIT（0x110+id，12B）-> dict（关节侧 rad/rad/s/Nm）。
-
-    `torque_limit` 是这台电机的 **MIT 力矩量化满量程**（P/V/T Max 必须与电机
-    参数页一致）——厂家 2026-10-21：R58/R48 同为 300 N·m。固件编码端用的就是
-    Profile 里的 `mit_torque_limit_nm`，这里必须跟着对应，否则 τ_ff 会被缩放
-    （历史 bug：写死 45.0 ⇒ R48 的 τ_ff 被缩成 11/45）。
-    """
-    enabled = (data[0] & 0x80) != 0
-    pos = cerb_symmetric((data[1] << 8) | data[2], PI, 16)
-    vel = cerb_symmetric(((data[3] & 0xF0) << 4) | data[4], PI, 12)
+def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLBACK,
+                        position_limit: float = 3.14, velocity_limit: float = 3.14,
+                        kp_limit: float = 2500.0, kd_limit: float = 500.0):
+    """解码控制字 + MIT payload；五项线协议满量程不代表物理保护限值。"""
+    for limit in (torque_limit, position_limit, velocity_limit, kp_limit, kd_limit):
+        if not math.isfinite(limit) or limit <= 0:
+            raise ValueError("CERB MIT limits must be positive and finite")
+    if len(data) not in (9, 12) or (data[0] & 0x1F) != 0x0C or not any(data[1:9]):
+        return None
+    pos = cerb_symmetric((data[1] << 8) | data[2], position_limit, 16)
+    vel = cerb_symmetric((data[3] << 4) | (data[4] >> 4), velocity_limit, 12)
     kp_raw = ((data[4] & 0x0F) << 8) | data[5]
-    kd_raw = (data[6] << 4) | ((data[7] & 0xF0) >> 4)
+    kd_raw = (data[6] << 4) | (data[7] >> 4)
     tau = cerb_symmetric(((data[7] & 0x0F) << 8) | data[8], torque_limit, 12)
-    return {"enabled": enabled, "pos_rad": pos, "vel_rad_s": vel,
-            "kp": kp_raw * 500.0 / 4095.0, "kd": kd_raw * 5.0 / 4095.0,
+    return {"enabled": bool(data[0] & 0x80), "pos_rad": pos, "vel_rad_s": vel,
+            "kp": kp_raw * kp_limit / 4095.0, "kd": kd_raw * kd_limit / 4095.0,
             "tau_nm": tau}
 
 
@@ -881,7 +884,9 @@ class CanMotorSim:
                  control_socket_path: str | None = None,
                  probe_adapter: bool = False,
                  mit_torque_limits=None,
-                 joint_nm_per_amp=None, gear_ratios=None):
+                 joint_nm_per_amp=None, gear_ratios=None,
+                 mit_position_limits=None, mit_velocity_limits=None,
+                 mit_kp_limits=None, mit_kd_limits=None):
         # {motor_id: N·m/A}——**关节侧**「力矩 ÷ 电流」= Kt × 速比 × 效率。
         # 反馈电流由它反算（见 MotorModel.report_current_a），因而必须与真机
         # 型号库同源；launch 逐台传入。查不到的电机报 0 电流而不是猜系数。
@@ -894,6 +899,15 @@ class CanMotorSim:
         # Profile 的 mit_torque_limit_nm 编码，解码端必须跟着对应，否则 τ_ff 被
         # 整体缩放（曾是写死 45.0）。
         self.mit_torque_limits = dict(mit_torque_limits or {})
+        self.mit_position_limits = dict(mit_position_limits or {})
+        self.mit_velocity_limits = dict(mit_velocity_limits or {})
+        self.mit_kp_limits = dict(mit_kp_limits or {})
+        self.mit_kd_limits = dict(mit_kd_limits or {})
+        for limits in (self.mit_torque_limits, self.mit_position_limits,
+                       self.mit_velocity_limits, self.mit_kp_limits, self.mit_kd_limits):
+            for node, value in limits.items():
+                if not 1 <= node <= 127 or not math.isfinite(value) or value <= 0:
+                    raise ValueError("CERB MIT scale needs node 1..127 and positive finite value")
         # 静默期是否向适配器问 V/E 取证。**默认关**：诊断不得改变被测对象——
         # 2026-10-12 记录过周期问 E 会让锁存从"偶发"变"90 秒 5 次"，而 2026-10-14
         # 加基线 V 后首次静默由 169s 提前到 0.6s。要取判据时显式开。
@@ -1247,10 +1261,19 @@ class CanMotorSim:
                 "t": round(time.monotonic(), 4), "dir": "rx", "tag": tag,
                 "id": can_id, "data": data.hex()}) + "\n")
 
+    def _decode_cerb_command(self, node: int, data: bytes):
+        return cerb_decode_command(
+            data,
+            getattr(self, "mit_torque_limits", {}).get(node, CERB_MIT_TORQUE_FALLBACK),
+            getattr(self, "mit_position_limits", {}).get(node, 3.14),
+            getattr(self, "mit_velocity_limits", {}).get(node, 3.14),
+            getattr(self, "mit_kp_limits", {}).get(node, 2500.0),
+            getattr(self, "mit_kd_limits", {}).get(node, 500.0))
+
     def _model_for_downlink(self, can_id: int):
-        # CERB MIT 0x110+id(1..127)；VAXOR 命令 0x501+4n / 控制 0x502+4n
+        # CERB MIT 0x110|id(1..15)；VAXOR 命令 0x501+4n / 控制 0x502+4n
         node = can_id - 0x110
-        if 1 <= node <= 127 and node in self.models \
+        if 1 <= node <= 15 and node in self.models \
                 and self.models[node].kind == "cerb" \
                 and self.models[node].linked:
             return self.models[node]
@@ -1349,15 +1372,19 @@ class CanMotorSim:
         if can_id == 0x210:
             if not is_fd or len(data) != 64:
                 return
+            nodes = [node for node in data[56:62] if node]
+            if (any(data[54:56]) or any(data[62:64]) or any(n > 127 for n in nodes)
+                    or len(nodes) != len(set(nodes))):
+                return
             for slot in range(6):
                 node = data[56 + slot]
                 m = self.models.get(node)
                 if m is None or m.kind != "cerb" or not m.linked:
                     continue
                 subframe = data[slot * 9:slot * 9 + 9]
-                cmd = cerb_decode_command(
-                    subframe, self.mit_torque_limits.get(
-                        m.id, CERB_MIT_TORQUE_FALLBACK))
+                cmd = self._decode_cerb_command(m.id, subframe)
+                if cmd is None:
+                    continue
                 m.enabled = cmd["enabled"]
                 m.last_cmd = cmd
                 if cmd["enabled"]:
@@ -1371,9 +1398,11 @@ class CanMotorSim:
         m = self._model_for_downlink(can_id)
         if m is None:
             return
-        if m.kind == "cerb" and can_id == 0x110 + m.id and len(data) >= 9:
-            cmd = cerb_decode_command(
-                data, self.mit_torque_limits.get(m.id, CERB_MIT_TORQUE_FALLBACK))
+        if (m.kind == "cerb" and 1 <= m.id <= 15
+                and can_id == (0x110 | m.id) and is_fd and len(data) == 12):
+            cmd = self._decode_cerb_command(m.id, data)
+            if cmd is None:
+                return
             m.enabled = cmd["enabled"]
             m.last_cmd = cmd
             if cmd["enabled"]:
@@ -1921,11 +1950,19 @@ def main():
                          "10.0 是照抄 URDF 关节 effort 限幅的历史值，只对 Gazebo "
                          "ros2_control 那条路成立")
     ap.add_argument("--tau-limits", default="",
-                    help="逐电机力矩饱和 N·m（关节侧），形如 1:11.0,3:45.0；"
-                         "取值来自型号库 peak_torque_nm（真机峰值），"
-                         "未列出的电机退回 --tau-limit")
+                    help="逐电机**物理饱和** N·m（关节侧），形如 1:11,3:45；"
+                         "取值来自型号库 peak_torque_nm（真机峰值），只管出力钳位，"
+                         "不参与 MIT 解码；未列出的电机退回 --tau-limit")
+    ap.add_argument("--mit-torque-limits", default="",
+                    help="逐电机 MIT τ_ff 的量化满量程 N·m，形如 1:300,3:300；"
+                         "取值继承型号库并允许拓扑逐台覆盖，必须与固件编码一致。"
+                         f"未列出的电机按 {CERB_MIT_TORQUE_FALLBACK:g} 解码")
+    for field, default in (("position", 3.14), ("velocity", 3.14),
+                           ("kp", 2500.0), ("kd", 500.0)):
+        ap.add_argument(f"--mit-{field}-limits", default="",
+                        help=f"逐电机 MIT {field} 量化满量程，ID:value；默认 {default:g}")
     ap.add_argument("--joint-nm-per-amp", default="",
-                    help="逐电机关节侧 Kt×速比×效率（N·m/A），形如 1:8.686,7:1.365；"
+                    help="逐电机关节侧 Kt×速比×效率（N·m/A），形如 1:5.0753,7:1.365；"
                          "反馈电流由「实际施加力矩 ÷ 它」反算。取值来自型号库，"
                          "未列出的电机上报 0 电流")
     ap.add_argument("--gear", default="",
@@ -1938,10 +1975,10 @@ def main():
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
     vaxor_ids = [int(x) for x in args.vaxor.split(",") if x]
     r58_ids = [int(x) for x in args.cerb_r58.split(",") if x]
-    # 必须在构造之前解析：CanMotorSim 的 mit_torque_limits 要用它。放进 --gazebo
-    # 分支里赋值会让这个名字在分支外成为未绑定局部名（构造处 UnboundLocalError，
-    # 任何参数组合都起不来）。
+    # 两条力矩参数先解析：mit_torque_limits 进 CanMotorSim，tau_limits 进下面的
+    # GazeboBridge；不要放进条件分支，避免作用域陷阱。
     tau_limits = parse_tau_limits(args.tau_limits)
+    mit_torque_limits = parse_id_floats(args.mit_torque_limits)
     joint_nm_per_amp = parse_id_floats(args.joint_nm_per_amp)
     gear_ratios = parse_id_floats(args.gear)
     sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
@@ -1956,7 +1993,11 @@ def main():
                    setup_can=not args.no_can_setup,
                    control_socket_path=args.control_socket,
                    probe_adapter=args.probe_adapter,
-                   mit_torque_limits=tau_limits,
+                   mit_torque_limits=mit_torque_limits,
+                   mit_position_limits=parse_id_floats(args.mit_position_limits),
+                   mit_velocity_limits=parse_id_floats(args.mit_velocity_limits),
+                   mit_kp_limits=parse_id_floats(args.mit_kp_limits),
+                   mit_kd_limits=parse_id_floats(args.mit_kd_limits),
                    joint_nm_per_amp=joint_nm_per_amp,
                    gear_ratios=gear_ratios)
 

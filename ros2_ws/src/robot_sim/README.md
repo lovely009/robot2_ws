@@ -285,9 +285,14 @@ HIL 时被控对象由 `fdcan_motor_sim` 驱动，它同时是假电机与被控
 - **力矩饱和值逐台取型号库**：`simulation.launch.py` 从 `motor.yaml` 读每台的
   `peak_torque_nm`（`cerb_r58=45` / `cerb_r48=11` Nm）并逐台传给
   `fdcan_motor_sim --tau-limits`；没有该字段的型号（vaxor）退回 `--tau-limit`
-  （默认 10 Nm）。**这是 HIL 下力矩上限的唯一定义点**——MJCF 的 `actuatorfrcrange`
-  （照抄 URDF 的 `<limit effort>`，±10）只标注关节上的合力上限，MuJoCo **不**用它夹
-  actuator 的 `ctrl`（2026-10-15 实测：给 30 N·m 就是 30 N·m）。
+  （默认 10 Nm）。MJCF 的 `actuatorfrcrange` **同源**：`tools/build_mujoco_model.py`
+  也读 `peak_torque_nm` 逐台写入（vaxor 回退 URDF 的 1.15）。MuJoCo 本身**不**用
+  `actuatorfrcrange` 夹 actuator 的 `ctrl`（2026-10-15 实测：给 30 N·m 就是 30 N·m），
+  `mujoco_effort_bridge` 在写 `data.ctrl` 前按 `jnt_actfrcrange` 自行钳位。
+  MIT 五项**解码量程**继承型号库，允许拓扑逐台 `parameters` 覆盖，分别经
+  `--mit-position-limits`、`--mit-velocity-limits`、`--mit-kp-limits`、`--mit-kd-limits`、
+  `--mit-torque-limits` 传入。逐台覆盖生成独立 profile，不影响同型号其他节点。
+  这些量程必须与固件编码一致；`peak_torque_nm` 仍只作物理饱和，不能用它解码前馈。
 - **关节速度上限必须写进 MJCF，否则 MuJoCo 会自激**：URDF 每条 `<limit velocity>` 在
   MuJoCo 侧没有对应属性，靠执行器的 `user` 字段携带（即 `actuator_user`），由
   `mujoco_effort_bridge` 在**每个物理步**写 `data.ctrl` 前执行（只挡继续加速、不挡反向

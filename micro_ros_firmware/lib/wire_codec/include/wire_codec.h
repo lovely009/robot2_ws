@@ -32,6 +32,31 @@ wire_quantize_result_t wire_quantize(double value, double scale);
 // 反定点。q == WIRE_SENTINEL_MISSING → NAN。
 double wire_dequantize(int16_t q, double scale);
 
+// MotorStatus 健康/电气字段的编码。缺失与饱和分离：年龄 0xFFFF = 从未收到、
+// 0xFFFE = 真实年龄饱和；电压 0xFFFF = 缺失；int16 字段复用 WIRE_SENTINEL_MISSING。
+// 入参沿用内核快照语义：年龄 0xFFFFFFFF = 从未测量，电气量 NaN = 缺失。
+#define WIRE_AGE_MS_NEVER 0xFFFFU
+#define WIRE_AGE_MS_SATURATED 0xFFFEU
+#define WIRE_VOLTAGE_MV_MISSING 0xFFFFU
+
+typedef struct {
+  bool online;
+  bool device_protect_known;
+  bool device_protect_enabled;
+  bool device_direction_known;
+  uint8_t device_direction;  // 0=CW，非零=CCW，原值直通
+} wire_status_flags_input_t;
+
+// 以下函数先钳位后取整，非有限输入给缺失哨兵（不进入浮点转整数 UB）。
+uint16_t wire_encode_state_age(uint32_t age_ms);
+int16_t wire_encode_temperature_dc(double temperature_c);
+int16_t wire_encode_current_ma(double current_a);
+uint16_t wire_encode_voltage_mv(double voltage_v);
+// 位序：bit0 online，bit1 protect_known，bit2 protect_enabled，
+// bit3 direction_known，bit4 direction。
+uint8_t wire_encode_status_flags(wire_status_flags_input_t in);
+
+
 // 循环面槽位形状：count 必须等于四个序列的声明长度，且不超过内核容量。
 // 只校验「同一帧内的自洽性」，不解释内容——值的合法性归 mailbox。
 bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,

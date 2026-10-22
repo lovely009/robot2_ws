@@ -91,6 +91,79 @@ void test_config_groups_exclusive()
   // 未知 kind 整条拒。
   assert(!wire_config_groups_exclusive(7, 0, 0, 0, 0));
 }
+void test_state_age_never_vs_saturated()
+{
+  // 0xFFFF = 从未收到；0xFFFE = 真实年龄饱和。65535 ms 是真实年龄，
+  // 不能被读成"从未收到"。
+  assert(wire_encode_state_age(0xFFFFFFFFu) == WIRE_AGE_MS_NEVER);
+  assert(wire_encode_state_age(0u) == 0);
+  assert(wire_encode_state_age(1000u) == 1000);
+  assert(wire_encode_state_age(0xFFFDu) == 0xFFFDu);
+  assert(wire_encode_state_age(0xFFFEu) == WIRE_AGE_MS_SATURATED);
+  assert(wire_encode_state_age(0xFFFFu) == WIRE_AGE_MS_SATURATED);
+  assert(wire_encode_state_age(0xFFFFFFFEu) == WIRE_AGE_MS_SATURATED);
+}
+
+void test_temperature_dc()
+{
+  // 0.1 ℃ 定点；缺失用 int16 哨兵，非有限输入不得走浮点转整数。
+  assert(wire_encode_temperature_dc(25.3) == 253);
+  assert(wire_encode_temperature_dc(-12.3) == -123);
+  assert(wire_encode_temperature_dc(0.0) == 0);
+  assert(wire_encode_temperature_dc(NAN) == WIRE_SENTINEL_MISSING);
+  assert(wire_encode_temperature_dc(INFINITY) == WIRE_SENTINEL_MISSING);
+  assert(wire_encode_temperature_dc(-INFINITY) == WIRE_SENTINEL_MISSING);
+  // 超量程先钳位再取整：±3276.7 ℃ 之外饱和到 int16 可用边界。
+  assert(wire_encode_temperature_dc(3276.8) == 32767);
+  assert(wire_encode_temperature_dc(-3276.8) == -32767);
+  assert(wire_encode_temperature_dc(1e300) == 32767);
+  assert(wire_encode_temperature_dc(-1e300) == -32767);
+}
+
+void test_current_ma()
+{
+  assert(wire_encode_current_ma(1.5) == 1500);
+  assert(wire_encode_current_ma(-2.25) == -2250);
+  assert(wire_encode_current_ma(0.0) == 0);
+  assert(wire_encode_current_ma(NAN) == WIRE_SENTINEL_MISSING);
+  assert(wire_encode_current_ma(32.768) == 32767);
+  assert(wire_encode_current_ma(-32.768) == -32767);
+  assert(wire_encode_current_ma(1e300) == 32767);
+}
+
+void test_voltage_mv()
+{
+  // 0xFFFF 是缺失哨兵，所以正向量程只到 0xFFFE mV。
+  assert(wire_encode_voltage_mv(24.0) == 24000);
+  assert(wire_encode_voltage_mv(0.0) == 0);
+  assert(wire_encode_voltage_mv(0.0004) == 0);
+  assert(wire_encode_voltage_mv(NAN) == WIRE_VOLTAGE_MV_MISSING);
+  assert(wire_encode_voltage_mv(INFINITY) == WIRE_VOLTAGE_MV_MISSING);
+  assert(wire_encode_voltage_mv(70.0) == 0xFFFEu);
+  assert(wire_encode_voltage_mv(1e300) == 0xFFFEu);
+  assert(wire_encode_voltage_mv(-1.0) == 0);
+}
+
+void test_status_flags()
+{
+  // 位序必须与 MotorStatus.msg 头注释、主机 decode_motor_status 一致。
+  wire_status_flags_input_t f = {};
+  assert(wire_encode_status_flags(f) == 0x00u);
+  f.online = true;
+  assert(wire_encode_status_flags(f) == 0x01u);
+  f.device_protect_known = true;
+  assert(wire_encode_status_flags(f) == 0x03u);
+  f.device_protect_enabled = true;
+  assert(wire_encode_status_flags(f) == 0x07u);
+  f.device_direction_known = true;
+  assert(wire_encode_status_flags(f) == 0x0Fu);
+  f.device_direction = 1;
+  assert(wire_encode_status_flags(f) == 0x1Fu);
+  f.device_direction = 0;
+  assert(wire_encode_status_flags(f) == 0x0Fu);
+  f.device_direction = 2;  // 原值直通：非零即 CCW
+  assert((wire_encode_status_flags(f) & 0x10u) != 0u);
+}
 }  // namespace
 
 int main()
@@ -102,6 +175,11 @@ int main()
   test_non_finite_yields_sentinel();
   test_frame_shape();
   test_config_groups_exclusive();
+  test_state_age_never_vs_saturated();
+  test_temperature_dc();
+  test_current_ma();
+  test_voltage_mv();
+  test_status_flags();
   std::printf("test_wire_codec: ok\n");
   return 0;
 }

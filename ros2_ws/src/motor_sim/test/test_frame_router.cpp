@@ -1,6 +1,7 @@
 #include "motor_sim/core/frame_router.hpp"
 
 #include <gtest/gtest.h>
+#include <cmath>
 
 #include <algorithm>
 #include <array>
@@ -178,24 +179,27 @@ core::FrameRouter make_cerb_router(const bool fault_latching_enabled = true) {
 
 protocol::CanFrame cerb_command(const bool enabled, const double position,
                                 const double feedforward_nm = 0.0,
-                                const double torque_limit_nm = 11.0,
+                                const double torque_limit_nm = 300.0,
                                 const unsigned id = 1U) {
   protocol::CanFrame frame;
-  // CERB MIT 命令帧 ID：0x110 + 电机 ID。
-  frame.id = 0x110U + id;
+  // CERB MIT 命令帧 ID：0x110 | 电机 ID。
+  frame.id = 0x110U | id;
   frame.fd = true;
   frame.brs = true;
   frame.size = 12U;
   // Data0 控制/模式半字节：bit7=使能、bit6=抱闸释放、bit4:1=MIT(0x06)。
   frame.data[0] = (enabled ? 0x80U : 0x00U) | 0x40U | 0x0CU;
-  // 与 cerb_protocol.cpp 的 MIT 解码布局一致：pos 12.5 rad/16bit、vel
-  // 30 rad/s/12bit、kp 500/12bit、kd 5/12bit；τ_ff 的满量程**逐型号**，由调用方给出。
-  const uint32_t pos = protocol::float_to_uint(position, -12.5, 12.5, 16);
-  const uint32_t vel = protocol::float_to_uint(0.0, -30.0, 30.0, 12);
-  const uint32_t kp = protocol::float_to_uint(0.5, 0.0, 500.0, 12);
-  const uint32_t kd = protocol::float_to_uint(0.02, 0.0, 5.0, 12);
+  // 按厂家默认量程生成真实 MIT 位域，保持 VAXOR 的共享量化器不变。
+  const auto quantize = [](double value, double low, double high, unsigned bits) {
+    return static_cast<uint32_t>(std::llround(
+        (std::clamp(value, low, high) - low) / (high - low) * ((1U << bits) - 1U)));
+  };
+  const uint32_t pos = quantize(position, -3.14, 3.14, 16);
+  const uint32_t vel = quantize(0.0, -3.14, 3.14, 12);
+  const uint32_t kp = quantize(0.5, 0.0, 2500.0, 12);
+  const uint32_t kd = quantize(0.02, 0.0, 500.0, 12);
   const uint32_t tq =
-      protocol::float_to_uint(feedforward_nm, -torque_limit_nm,
+      quantize(feedforward_nm, -torque_limit_nm,
                               torque_limit_nm, 12);
   frame.data[1] = static_cast<uint8_t>((pos >> 8U) & 0xffU);
   frame.data[2] = static_cast<uint8_t>(pos & 0xffU);

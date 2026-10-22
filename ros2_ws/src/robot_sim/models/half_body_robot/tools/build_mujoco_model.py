@@ -105,29 +105,17 @@ def armature_by_joint() -> dict[str, float]:
 
 
 def torque_limits_by_joint() -> dict[str, float]:
-    """{关节名: 峰值力矩 N·m}，取自拓扑的 `mit_torque_limit_nm`（输出端）。
+    """{关节名: 输出端峰值力矩 N·m}，取自型号库 peak_torque_nm。
 
-    **不能用 URDF 的 `<limit effort>`**：那是**额定**力矩（r58 20 / r48 5 / vaxor
-    1.15），真机按型号库 peak_torque_nm 出力（r58 45 / r48 11），照 URDF 取会把大关节
-    削掉一半多。读不到时返回空表（MJCF 沿用 URDF 值）。
+    MIT 协议量程不代表机械峰值；无峰值条目的型号沿用 URDF 额定值。
     """
-    config = MODEL_DIR / "config" / "motor_driver.yaml"
-    if not config.is_file():
-        return {}
-    try:
-        import yaml
-        motors = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}) \
-            .get("motor_hardware", {}).get("motors", {}) or {}
-    except Exception as error:
-        print(f"[build_mujoco_model] 读不到 {config}（{error}），峰值力矩沿用 URDF",
-              file=sys.stderr)
-        return {}
+    section, specs = _topology_and_specs()
     out = {}
-    for spec in motors.values():
+    for spec in (section.get("motors") or {}).values():
         joint = spec.get("joint")
-        limit = (spec.get("parameters") or {}).get("mit_torque_limit_nm")
-        if joint and limit:
-            out[str(joint)] = float(limit)
+        peak = (specs.get(spec.get("type")) or {}).get("peak_torque_nm")
+        if joint and peak:
+            out[str(joint)] = float(peak)
     return out
 
 
@@ -312,7 +300,8 @@ def postprocess(mjcf: Path) -> None:
     for joint in root.find("worldbody").iter("joint"):
         armature = armatures.get(joint.get("name"), DEFAULT_ARMATURE)
         joint.set("armature", f"{armature:.6g}")
-        # 峰值力矩：URDF 的 ±10 是全关节占位值，按型号库逐台改写
+        # 峰值力矩：URDF 给的是额定值，按型号库 peak_torque_nm 逐台改写；
+        # 型号库无峰值的型号（vaxor）不写，沿用 URDF 值
         torque = torques.get(joint.get("name"))
         if torque:
             joint.set("actuatorfrcrange", f"{-torque:g} {torque:g}")

@@ -335,6 +335,8 @@ static void route_kernel_tx(void) {
     frame.is_fd = batch[i].is_fd;
     frame.is_brs = batch[i].is_brs;
     frame.size = (uint8_t)bytes;
+    frame.node = batch[i].node;
+    frame.aggregate_only = batch[i].aggregate_only;
     memcpy(frame.data, batch[i].data, bytes);
     switch (batch[i].tx_class) {
     case MOTOR_PROTOCOL_TX_CLASS_P0:

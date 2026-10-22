@@ -47,7 +47,10 @@ uint32_t motor_protocol_float_to_uint(double value, double low, double high,
   }
   value = clamp_double(value, low, high);
   uint32_t maximum = (UINT32_C(1) << bits) - 1U;
-  return (uint32_t)((value - low) * maximum / (high - low));
+  // 指南要求四舍五入；先 round 再按 raw 位宽钳制（不走 double→无符号截断）。
+  const int64_t rounded =
+      (int64_t)llround((value - low) * (double)maximum / (high - low));
+  return (uint32_t)clamp_i64(rounded, 0, (int64_t)maximum);
 }
 
 // ===========================================================================
@@ -62,18 +65,23 @@ static uint32_t cerb_symmetric_float_to_uint(double value, double limit,
     unsigned bits) {
   double normalized = (clamp_double(value / limit, -1.0, 1.0) + 1.0) * 0.5;
   uint32_t maximum = (UINT32_C(1) << bits) - 1U;
-  return (uint32_t)(normalized * maximum);
+  const int64_t rounded = (int64_t)llround(normalized * (double)maximum);
+  return (uint32_t)clamp_i64(rounded, 0, (int64_t)maximum);
 }
 
 bool motor_protocol_cerb_node_valid(unsigned node) {
   return node >= 1U && node <= 127U;
 }
 
+bool motor_protocol_cerb_single_node_valid(unsigned node) {
+  return node >= 1U && node <= MOTOR_PROTOCOL_CERB_SINGLE_NODE_MAX;
+}
+
 bool motor_protocol_cerb_command_id(unsigned node, uint32_t *id) {
-  if (!motor_protocol_cerb_node_valid(node) || id == NULL) {
+  if (!motor_protocol_cerb_single_node_valid(node) || id == NULL) {
     return false;
   }
-  *id = MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE + node;
+  *id = MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE | node;
   return true;
 }
 
@@ -131,12 +139,17 @@ bool motor_protocol_cerb_single_mit_node(uint32_t can_id, bool is_extended,
     const uint8_t *data, size_t size,
     uint8_t *node) {
   if (is_extended || !is_fd || !is_brs || data == NULL || node == NULL ||
-      size != 12U || can_id <= MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE ||
-      can_id > MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE + 127U ||
+      size != 12U ||
+      (can_id & ~(uint32_t)MOTOR_PROTOCOL_CERB_SINGLE_NODE_MAX) !=
+          MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE ||
       (data[0] & 0x3fU) != 0x0cU) {
     return false;
   }
-  *node = (uint8_t)(can_id - MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE);
+  const uint8_t found = (uint8_t)(can_id & MOTOR_PROTOCOL_CERB_SINGLE_NODE_MAX);
+  if (!motor_protocol_cerb_single_node_valid(found)) {
+    return false;
+  }
+  *node = found;
   return true;
 }
 
@@ -173,8 +186,10 @@ bool motor_protocol_pack_cerb_mit_frame(
   if (command == NULL || limits == NULL || out == NULL ||
       !isfinite(limits->position_rad) ||
       !isfinite(limits->velocity_rad_s) || !isfinite(limits->torque_nm) ||
+      !isfinite(limits->mit_kp_limit) || !isfinite(limits->mit_kd_limit) ||
       !(limits->position_rad > 0.0) || !(limits->velocity_rad_s > 0.0) ||
-      !(limits->torque_nm > 0.0) ||
+      !(limits->torque_nm > 0.0) || !(limits->mit_kp_limit > 0.0) ||
+      !(limits->mit_kd_limit > 0.0) ||
       !isfinite(2.0 * limits->position_rad) ||
       !isfinite(2.0 * limits->velocity_rad_s) ||
       !isfinite(2.0 * limits->torque_nm) || !isfinite(command->position) ||
@@ -187,10 +202,18 @@ bool motor_protocol_pack_cerb_mit_frame(
       command->position, limits->position_rad, 16U);
   uint32_t velocity = cerb_symmetric_float_to_uint(
       command->velocity, limits->velocity_rad_s, 12U);
-  uint32_t kp = motor_protocol_float_to_uint(command->kp, 0.0, 500.0, 12U);
-  uint32_t kd = motor_protocol_float_to_uint(command->kd, 0.0, 5.0, 12U);
+  uint32_t kp = motor_protocol_float_to_uint(
+      command->kp, 0.0, limits->mit_kp_limit, 12U);
+  uint32_t kd = motor_protocol_float_to_uint(
+      command->kd, 0.0, limits->mit_kd_limit, 12U);
   uint32_t torque = cerb_symmetric_float_to_uint(
       command->feedforward, limits->torque_nm, 12U);
+
+  // 五个 raw 全零是设备明确丢弃的“无效命令”（指南 §6）。此时必须让上层
+  // 看到编码失败，不能静默改变目标或假装已发送。
+  if ((position | velocity | kp | kd | torque) == 0U) {
+    return false;
+  }
 
   // bit[7]=使能，bit[6]=抱闸释放，bit[4:1]=0x06（MIT）。
   out[0] = (uint8_t)((enabled ? 0xc0U : 0x00U) | 0x0cU);

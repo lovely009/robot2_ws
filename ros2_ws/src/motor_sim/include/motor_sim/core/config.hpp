@@ -81,6 +81,10 @@ struct MotorConfig {
   // kCerbDefaultMitTorqueLimitNm。
   double mit_torque_limit_nm{
       ::motor_sim::protocol::kCerbDefaultMitTorqueLimitNm};
+  double mit_position_limit_rad{3.14};
+  double mit_velocity_limit_rad_s{3.14};
+  double mit_kp_limit{2500.0};
+  double mit_kd_limit{500.0};
   // SDO 从站的对端契约：固件靠 0x1008:00 的身份串绑型号、靠 0x6080:00 /
   // 0x2538:00 回读核验。三者必须同源。device_max_speed_rpm 是**模块侧共用值**
   // （R48/R58 同为 3325），逐型号的是 device_max_current_ma。

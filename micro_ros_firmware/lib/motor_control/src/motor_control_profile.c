@@ -30,6 +30,9 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .mit_position_limit_rad = 0.0f,
     .mit_velocity_limit_rad_s = 0.0f,
     .mit_torque_limit_nm = 0.0f,
+    // VAXOR 增益走自身刻度（kv_scale），不使用 CERB 的 MIT 线协议量程。
+    .mit_kp_limit = 0.0f,
+    .mit_kd_limit = 0.0f,
     .kp_max = 0.65535f,
     .kd_max = 655.35f,
     .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |
@@ -54,11 +57,17 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .supply_voltage_v = 48.0f,
     .default_kp = 30.0f,
     .default_kd = 1.0f,
-    .mit_position_limit_rad = (float)MOTOR_PROTOCOL_PI,     // π rad（与真机参数页一致）
-    .mit_velocity_limit_rad_s = (float)MOTOR_PROTOCOL_PI,
+    // 2026-10-22 node1 只读读回：0x2542=314 → 3.14 rad、0x2543=314 →
+    // 3.14 rad/s；单台读数，其它节点仍以逐节点读回为准。π 会把 0x2542 的
+    // 线协议满量程算大 0.05%。
+    .mit_position_limit_rad = 3.14f,
+    .mit_velocity_limit_rad_s = 3.14f,
     .mit_torque_limit_nm = 300.0f,   // 厂家 2026-10-21：τ_ff 量化满量程（R58/R48 同值）
-    .kp_max = 500.0f,     // MIT 量化上限 [0,500]
-    .kd_max = 5.0f,       // [0,5]
+    // 0x2544/0x2545 读回值（2026-10-22 node1 R48）：2500 / 500。
+    .mit_kp_limit = 2500.0f,   // Nm/rad
+    .mit_kd_limit = 500.0f,    // Nm·s/rad
+    .kp_max = 500.0f,     // 软件安全上限，不随线协议量程上移
+    .kd_max = 5.0f,
     .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |
         MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE,
   },
@@ -80,10 +89,13 @@ static const motor_protocol_model_profile_t kProfiles[] = {
     .supply_voltage_v = 48.0f,
     .default_kp = 30.0f,
     .default_kd = 1.0f,
-    .mit_position_limit_rad = (float)MOTOR_PROTOCOL_PI,
-    .mit_velocity_limit_rad_s = (float)MOTOR_PROTOCOL_PI,
+    // 指南默认 3.14/3.14（本批只读读回的是 R48 node1；R58 未逐台读回，按指南默认）。
+    .mit_position_limit_rad = 3.14f,
+    .mit_velocity_limit_rad_s = 3.14f,
     .mit_torque_limit_nm = 300.0f,   // 厂家 2026-10-21：τ_ff 量化满量程（R58/R48 同值）
-    .kp_max = 500.0f,
+    .mit_kp_limit = 2500.0f,   // Nm/rad（指南默认，以设备读回为准）
+    .mit_kd_limit = 500.0f,    // Nm·s/rad
+    .kp_max = 500.0f,          // 软件安全上限，不随线协议量程上移
     .kd_max = 5.0f,
     .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT |
         MOTOR_PROTOCOL_CAP_LIMIT_DEVICE_SIDE,

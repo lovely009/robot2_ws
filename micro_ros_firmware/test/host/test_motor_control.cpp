@@ -793,25 +793,31 @@ static const motor_protocol_adapter_t g_mock_adapter = {
   mock_on_response};
 
 // mock 协议的测试 Profile（经指针版绑定 API 注入，不进生产型号目录）。
+// 全字段显式初始化：新增字段若靠聚合零填充，旧测试会在不自知的情况下
+// 改用 0 上限（曾把 kp_max/kd_max 挤错位）。
 static const motor_protocol_model_profile_t g_mock_profile = {
-  "mock_model",
-  nullptr,   // identity_string（mock 型号不在目录内，靠显式绑定注入）
-  &g_mock_adapter,
-  1.0f,
-  1.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  1.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  100.0f,
-  10.0f,
-  MOTOR_PROTOCOL_CAP_MODE_MIT};
+  .model_name = "mock_model",
+  .identity_string = nullptr, // mock 型号不在目录内，靠显式绑定注入
+  .protocol = &g_mock_adapter,
+  .gear_ratio = 1.0f,
+  .gear_efficiency = 1.0f,
+  .torque_constant_nm_per_amp = 0.0f,
+  .rated_torque_nm = 0.0f,
+  .peak_torque_nm = 0.0f,
+  .rated_current_amp = 0.0f,
+  .peak_current_amp = 0.0f,
+  .rated_speed_rad_s = 0.0f,
+  .supply_voltage_v = 1.0f,
+  .default_kp = 0.0f,
+  .default_kd = 0.0f,
+  .mit_position_limit_rad = 0.0f,
+  .mit_velocity_limit_rad_s = 0.0f,
+  .mit_torque_limit_nm = 0.0f,
+  .mit_kp_limit = 0.0f,
+  .mit_kd_limit = 0.0f,
+  .kp_max = 100.0f,
+  .kd_max = 10.0f,
+  .capability_flags = MOTOR_PROTOCOL_CAP_MODE_MIT};
 
 // ---------------------------------------------------------------------------
 // 用例
@@ -3164,12 +3170,13 @@ static void test_cerb_refresh_params_transaction() {
   bring_cerb_to_bound(&ctx, 7, "cerb_r58_101", 100);
   while (motor_control_collect_tx(&ctx, nullptr, 0) > 0) {}
 
-  // 绑定后默认影子：±π、额定 π rad/s、峰值 45 N·m。
+  // 绑定后默认影子：±3.14（0x2542 线协议满量程，2026-10-22 node1 读回 314）、
+  // 额定 π rad/s、峰值 45 N·m。
   const motor_control_param_view_t *d0 = view_of(&ctx, 7);
   assert(d0 != nullptr && d0->device_side_limits);
   assert(d0->limits_valid);
-  assert(fabs(d0->pos_min_rad + MOTOR_PROTOCOL_PI) < 1e-4);
-  assert(fabs(d0->pos_max_rad - MOTOR_PROTOCOL_PI) < 1e-4);
+  assert(fabs(d0->pos_min_rad + 3.14f) < 1e-4);
+  assert(fabs(d0->pos_max_rad - 3.14f) < 1e-4);
   assert(fabs(d0->velocity_limit_rad_s - MOTOR_PROTOCOL_PI) < 1e-4);
   assert(fabs(d0->torque_limit_nm - 45.0) < 1e-4);
   assert(d0->bound);
@@ -4989,8 +4996,9 @@ static void test_device_write_clamped_to_hardware_table() {
       ((uint32_t)frames[0].data[5] << 8U) |
       ((uint32_t)frames[0].data[6] << 16U) |
       ((uint32_t)frames[0].data[7] << 24U));
-  // 钳到 ±π，再按字典范围钳 cnt：下限是 -32767（字典下限），不是 -32768。
-  assert(lo_cnt == -32767);
+  // 钳到 ±3.14（0x2542 线协议满量程，2026-10-22 node1 读回 314），
+  // cnt = round(3.14 × 65536 / 2π) = 32751，仍在 0x607D 字典范围内。
+  assert(lo_cnt == -32751);
 }
 
 // 设零点（字典 0x2531 写 1）：失能态受理，单阶段写 + 应答即 OK；不更新记录，

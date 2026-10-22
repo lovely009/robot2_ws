@@ -33,10 +33,10 @@ TEST(CerbProtocol, ValidatesActuatorIdRange) {
 TEST(CerbProtocol, DecodesMitCommandFrame) {
   const protocol::CerbProtocol cerb;
   // golden vector：使能+释放抱闸+MIT 模式，pos=1.0 rad、vel=0、
-  // kp=10、kd=1、前馈=0，DLC=12（9 字节有效载荷 + 3 填充）。
+  // kp=10、kd=1、前馈=0，12 字节 / DLC=9（9 字节有效载荷 + 3 填充）。
   const auto command = cerb.decode_command(
       frame_from_bytes(0x111U,
-                       {0xCC, 0x8A, 0x3C, 0x7F, 0xF0, 0x51, 0x33, 0x37, 0xFF,
+                       {0xCC, 0xA8, 0xC3, 0x80, 0x00, 0x10, 0x00, 0x88, 0x00,
                         0x00, 0x00, 0x00},
                        true),
       1U);
@@ -44,11 +44,11 @@ TEST(CerbProtocol, DecodesMitCommandFrame) {
   EXPECT_EQ(command->motor_id, 1U);
   EXPECT_EQ(command->mode, protocol::CommandMode::Mit);
   EXPECT_TRUE(command->enabled);
-  EXPECT_NEAR(command->position, 1.0, 25.0 / 65535.0);
-  EXPECT_NEAR(command->velocity, 0.0, 60.0 / 4095.0);
-  EXPECT_NEAR(command->kp, 10.0, 500.0 / 4095.0);
-  EXPECT_NEAR(command->kd, 1.0, 5.0 / 4095.0);
-  // 零点的精确码是 2047.5，golden 向量取 2047 ⇒ 恒有半个 LSB 的偏置，
+  EXPECT_NEAR(command->position, 1.0, 6.28 / 65535.0);
+  EXPECT_NEAR(command->velocity, 0.0, 6.28 / 4095.0);
+  EXPECT_NEAR(command->kp, 10.0, 2500.0 / 4095.0);
+  EXPECT_NEAR(command->kd, 1.0, 500.0 / 4095.0);
+  // 零点的精确码是 2047.5，golden 向量取 2048 ⇒ 恒有半个 LSB 的偏置，
   // 容差按默认量程的 1 个 LSB 给（厂家 2026-10-21：kCerbDefaultMitTorqueLimitNm = 300）。
   EXPECT_NEAR(command->feedforward, 0.0,
               2.0 * protocol::kCerbDefaultMitTorqueLimitNm / 4095.0);
@@ -56,7 +56,7 @@ TEST(CerbProtocol, DecodesMitCommandFrame) {
   // 下使能帧：bit7=0。
   const auto disabled = cerb.decode_command(
       frame_from_bytes(0x111U,
-                       {0x4C, 0x8A, 0x3C, 0x7F, 0xF0, 0x51, 0x33, 0x37, 0xFF,
+                       {0x4C, 0xA8, 0xC3, 0x80, 0x00, 0x10, 0x00, 0x88, 0x00,
                         0x00, 0x00, 0x00},
                        true),
       1U);
@@ -129,6 +129,32 @@ TEST(CerbProtocol, RejectsUnsupportedOrForeignFrames) {
                    .has_value());
 }
 
+TEST(CerbProtocol, GuideScalesAndMultiAxisHighNode) {
+  const protocol::CerbProtocol cerb;
+  const std::vector<uint8_t> payload{
+      0xcc, 0xa8, 0xc3, 0xab, 0xc0, 0x31, 0x00, 0x88, 0x00, 0, 0, 0};
+  auto single = frame_from_bytes(0x111U, payload, true);
+  const auto command = cerb.decode_command(single, 1U);
+  ASSERT_TRUE(command.has_value());
+  EXPECT_NEAR(command->position, 1.0, 6.28 / 65535.0);
+  EXPECT_NEAR(command->velocity, 0xabc * 6.28 / 4095.0 - 3.14, 1e-12);
+  EXPECT_NEAR(command->kp, 49 * 2500.0 / 4095.0, 1e-12);
+  EXPECT_NEAR(command->kd, 8 * 500.0 / 4095.0, 1e-12);
+  protocol::CanFrame multi;
+  multi.id = 0x210U;
+  multi.fd = multi.brs = true;
+  multi.size = 64U;
+  std::copy_n(payload.begin(), 9U, multi.data.begin() + 45U);
+  multi.data[61] = 16U;
+  const auto high = cerb.decode_command(multi, 16U);
+  ASSERT_TRUE(high.has_value());
+  EXPECT_DOUBLE_EQ(high->position, command->position);
+  EXPECT_FALSE(cerb.decode_command(multi, 1U).has_value());
+  single.data.fill(0U);
+  single.data[0] = 0xcc;
+  EXPECT_FALSE(cerb.decode_command(single, 1U).has_value());
+}
+
 TEST(CerbProtocol, FactoryCreatesCerbProtocol) {
   EXPECT_NO_THROW(protocol::make_motor_protocol("cerb"));
 }
@@ -153,6 +179,18 @@ TEST(CerbProtocol, DecodesFeedforwardWithPerModelQuantizationLimit) {
     EXPECT_NEAR(command->feedforward, 5.0, 2.0 * limit_nm / 4095.0)
         << "limit=" << limit_nm;
   }
+}
+
+TEST(CerbProtocol, FactoryPassesAllFiveCustomScales) {
+  const auto cerb = protocol::make_motor_protocol("cerb", 150.0, 6.28, 8.0, 1200.0, 200.0);
+  const auto command = cerb->decode_command(frame_from_bytes(
+      0x111U, {0xcc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0}, true), 1U);
+  ASSERT_TRUE(command.has_value());
+  EXPECT_DOUBLE_EQ(command->position, 6.28);
+  EXPECT_DOUBLE_EQ(command->velocity, 8.0);
+  EXPECT_DOUBLE_EQ(command->feedforward, 150.0);
+  EXPECT_DOUBLE_EQ(command->kp, 1200.0);
+  EXPECT_DOUBLE_EQ(command->kd, 200.0);
 }
 
 TEST(CerbProtocol, RejectsNonPositiveQuantizationLimit) {

@@ -76,6 +76,11 @@ typedef struct {
   // P1 = latest-wins 槽位；P0 = 下游（调度器 FIFO 满）回告重入队按此定位
   // 表项；组帧点必须填写。P2 使用 FIFO，忽略此字段。
   uint16_t tx_slot;
+  // 协议节点号（adapter 编码时填写；0 = 未填，聚合时按 can_id 反推）。
+  uint8_t node;
+  // true = 该逻辑帧不得直接上线，只能经 aggregate_p1_frames 变成聚合帧
+  // （CERB NodeID>15 没有无歧义的单轴 ID，只允许走 0x210 多轴）。
+  bool aggregate_only;
   uint32_t can_id;
   bool is_extended;
   bool is_fd;
@@ -114,7 +119,12 @@ typedef struct {
   float mit_position_limit_rad;    // MIT 量化范围（CERB 逐帧量化用）
   float mit_velocity_limit_rad_s;
   float mit_torque_limit_nm;
-  float kp_max;                    // 增益线协议上限（Policy 钳制用）
+  // MIT 增益**线协议满量程**（命令量化用，与设备 0x2544/0x2545 对应）。
+  float mit_kp_limit;              // Nm/rad
+  float mit_kd_limit;              // Nm·s/rad
+  // 软件安全上限（Policy 钳制用）。刻意与上面的线协议满量程分开：
+  // 线协议量程上移不等于允许把增益也放到设备满量程。
+  float kp_max;
   float kd_max;
   uint32_t capability_flags;       // MOTOR_PROTOCOL_CAP_*
 } motor_protocol_model_profile_t;

@@ -30,6 +30,10 @@ typedef struct {
   bool is_fd;
   bool is_brs;
   uint8_t size;
+  // 协议层聚合透传字段（调度器不解释，只随帧搬运）：CERB 高 NodeID 的
+  // 逻辑帧携带显式节点号并标记 aggregate_only，聚合器据此生成 0x210 帧。
+  uint8_t node;
+  bool aggregate_only;
   uint8_t data[CAN_TX_FRAME_BYTES];
 } can_tx_frame_t;
 

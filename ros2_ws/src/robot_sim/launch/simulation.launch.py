@@ -23,6 +23,7 @@ CAN 设备。slcan 的 host 模式需要两只 CANable 接在同一条物理总�
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -59,6 +60,11 @@ from launch_ros.actions import Node, PushRosNamespace
 
 def _bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# CERB τ_ff 的 12 位量化满量程厂家值（R58/R48 同值）。型号库/拓扑缺字段时的
+# 缺省；不能回落 peak_torque_nm（45/11，物理峰值），否则前馈被整体缩放。
+DEFAULT_CERB_MIT_TORQUE_LIMIT_NM = 300.0
 
 
 def _load_simulation(path: Path) -> dict[str, Any]:
@@ -178,6 +184,9 @@ def _bind_motor_topology(
         if peak_torque is not None and peak_torque <= 0.0:
             peak_torque = None
         source_profile = simulation["profiles"][profile_name]
+        # 逐台覆盖不能写回共享型号 profile，否则后续同型号电机会覆盖它。
+        if source.get("parameters"):
+            profile_name = f"{profile_name}__{name}"
         sim_profile = dict(source_profile)
         plant = dict(source_profile.get("plant", {}))
         plant["torque_constant_nm_per_a"] = type_parameters.get(
@@ -200,18 +209,29 @@ def _bind_motor_topology(
         sim_profile["gear_ratio"] = type_parameters.get("gear_ratio", 1.0)
         sim_profile["efficiency"] = type_parameters.get("gear_efficiency", 1.0)
         sim_profile["plant"] = plant
-        # τ_ff 的 MIT 定点量化满量程（逐型号真值）：真机驱动参数优先，回落型号库
-        # peak_torque_nm。motor_sim 的解码端必须用同一量程，否则 R58 的前馈被按
-        # 11/45 缩放。取不到就不写（vaxor 不涉及），由 motor_sim 用自己的默认量程。
-        mit_torque = type_parameters.get(
-            "mit_torque_limit_nm", type_parameters.get("peak_torque_nm")
-        )
-        try:
-            mit_torque = float(mit_torque)
-        except (TypeError, ValueError):
-            mit_torque = None
-        if mit_torque is not None and mit_torque > 0.0:
-            sim_profile["mit_torque_limit_nm"] = mit_torque
+        # 线协议量程与物理保护分离；显式坏值在生成配置前拒绝。
+        mit_limits = {}
+        if protocol == "cerb":
+            for field, default in {
+                "mit_position_limit_rad": 3.14,
+                "mit_velocity_limit_rad_s": 3.14,
+                "mit_torque_limit_nm": DEFAULT_CERB_MIT_TORQUE_LIMIT_NM,
+                "mit_kp_limit": 2500.0,
+                "mit_kd_limit": 500.0,
+            }.items():
+                raw = type_parameters.get(field, default)
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    value = float("nan")
+                if not math.isfinite(value) or value <= 0:
+                    raise ValueError(
+                        f"motor '{name}' parameter {field} must be "
+                        f"a positive finite number, got {raw!r}"
+                    )
+                mit_limits[field] = value
+            sim_profile.update(mit_limits)
+        mit_torque = mit_limits.get("mit_torque_limit_nm")
         # SDO 从站的对端契约：固件靠 0x1008:00 身份串绑型号、靠 0x6080:00 /
         # 0x2538:00 回读核验，三者必须同源。身份串没有合理的缺省，型号库缺字段
         # 就报错——否则节点会起一个固件永远绑不上的从站，而构建期毫无提示。
@@ -241,6 +261,10 @@ def _bind_motor_topology(
                 "command": command,
                 "driver_parameters": source.get("parameters", {}),
                 "peak_torque_nm": peak_torque,
+                # τ_ff 的 12 位量化满量程（vaxor 无此项），与 peak_torque_nm
+                # （物理饱和）是两回事，分别进模拟器的两条 CLI。
+                "mit_torque_limit_nm": mit_torque,
+                **mit_limits,
                 "profile": profile_name,
                 # 反馈换算的两个系数：关节侧 N·m/A 与速比。与 C++ motor_sim 的
                 # transmission + Kt 同式（joint_effort_to_motor_torque 后除 Kt），
@@ -535,6 +559,27 @@ def _required(context, key: str) -> str:
     if not value:
         raise RuntimeError(f"simulation.launch.py requires {key}:=<value>")
     return value
+
+
+def _tau_limit_cli(simulation: dict[str, Any]) -> str:
+    """物理饱和（peak_torque_nm）→ --tau-limits，只夹出力，不参与 MIT 解码。"""
+    return ",".join(
+        f"{motor['id']}:{motor['peak_torque_nm']:g}"
+        for motor in simulation["motors"]
+        if motor.get("peak_torque_nm")
+    )
+
+
+def _mit_limit_cli(simulation: dict[str, Any], field: str) -> str:
+    return ",".join(
+        f"{motor['id']}:{motor[field]:g}"
+        for motor in simulation["motors"]
+        if motor.get(field) is not None
+    )
+
+
+def _mit_torque_limit_cli(simulation: dict[str, Any]) -> str:
+    return _mit_limit_cli(simulation, "mit_torque_limit_nm")
 
 
 def launch_simulation(context):
@@ -895,14 +940,11 @@ def launch_simulation(context):
         joint_map = ",".join(
             f"{motor['id']}:{motor['joint']}" for motor in simulation["motors"]
         )
-        # 逐电机力矩饱和值（关节侧 N·m）＝型号库的 peak_torque_nm：HIL 下它是
-        # **唯一**的执行器权限来源（MJCF 无 forcerange、MuJoCo 桥不夹），
-        # 用一个全局小值会让大关节出不上力（2026-10-14 台架实测的"乱动"主因）。
-        tau_limits = ",".join(
-            f"{motor['id']}:{motor['peak_torque_nm']:g}"
-            for motor in simulation["motors"]
-            if motor.get("peak_torque_nm")
-        )
+        # 物理饱和逐台取型号库 peak_torque_nm，与 MJCF 的峰值限制同源。
+        tau_limits = _tau_limit_cli(simulation)
+        # τ_ff 的解码量程与饱和值分开：固件按 mit_torque_limit_nm（CERB 300 N·m）
+        # 编码，用峰值 45/11 解码会把前馈缩成 45/300。
+        mit_torque_limits = _mit_torque_limit_cli(simulation)
         # 反馈电流/转速的换算系数（逐台，来自型号库）。模拟器没有第二个真相源：
         # 它把**实际施加的关节力矩**除以 joint_nm_per_amp 得到上报电流，把关节速度
         # 乘速比得到上报转速——与 C++ motor_sim 的 frame_router 同式，两个后端在
@@ -958,6 +1000,16 @@ def launch_simulation(context):
                     joint_map,
                     "--tau-limits",
                     tau_limits,
+                    "--mit-torque-limits",
+                    mit_torque_limits,
+                    "--mit-position-limits",
+                    _mit_limit_cli(simulation, "mit_position_limit_rad"),
+                    "--mit-velocity-limits",
+                    _mit_limit_cli(simulation, "mit_velocity_limit_rad_s"),
+                    "--mit-kp-limits",
+                    _mit_limit_cli(simulation, "mit_kp_limit"),
+                    "--mit-kd-limits",
+                    _mit_limit_cli(simulation, "mit_kd_limit"),
                     "--joint-nm-per-amp",
                     joint_nm_per_amp,
                     "--gear",

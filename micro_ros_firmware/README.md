@@ -694,8 +694,11 @@ CERB 发一次 `REFRESH_PARAMS` 回读六个管理对象，与 W25 里的固件�
 - `can_bridge_msgs` 共 **21 个** `.msg`（13 个顶层 + 8 个 Target/Entry 子消息），唯一来源是
   `../micro_ros_agent/src/can_bridge_msgs`；固件侧只用 `extra_packages/can_bridge_msgs`
   符号链接复用，不存在第二份副本。
-- CERB R48/R58 的 MIT 范围配置为位置 `±π rad`、速度 `±π rad/s`、力矩 `±11/±45 Nm`，
-  必须与真机参数设置页一致。`motor_rt_task` 每 20 ms 发 `0x080` SYNC 维持设备状态心跳，
+- CERB R48/R58 的 MIT 五项线协议范围见
+  [`cerb-device-reference.md` §6](../docs/research/cerb-device-reference.md#6-控制报文入口)，
+  Profile 必须与实际设备设置一致；量化范围不放宽软件 Kp/Kd 或物理出力保护。
+  单轴仅用 NodeID 1–15，高节点（16–127）使用 64B `0x210`，含使能、软停、失能和清错帧。
+  `motor_rt_task` 每 20 ms 发 `0x080` SYNC 维持设备状态心跳，
   SYNC 与 SDO/MIT 同为 **FD+BRS**：经典帧不经过数据相位，数据段位率配错时唯独 SYNC 还能通，
   会造成「链路正常」的假阳性。总线仍是混合的——真机 CERB 器件自己按字典发经典帧（SDO 应答）。
 

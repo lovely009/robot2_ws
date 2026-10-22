@@ -27,6 +27,8 @@ static void to_protocol_frame(uint8_t bus_index, uint16_t tx_slot,
   output->is_fd = input->is_fd;
   output->is_brs = input->is_brs;
   output->size = input->size;
+  output->node = input->node;
+  output->aggregate_only = input->aggregate_only;
   const size_t copy_size = input->size <= MOTOR_PROTOCOL_MAX_FRAME_BYTES
                                ? input->size
                                : MOTOR_PROTOCOL_MAX_FRAME_BYTES;
@@ -195,10 +197,20 @@ motor_tx_router_stats_t motor_tx_router_pump(
       consumed = 1U;
     }
     can_tx_frame_t can_frame = {0};
-    if (consumed > 1U && to_can_frame(&physical, &can_frame)) {
+    const bool aggregated = consumed > 1U ||
+        physical.can_id != router->logical_frames[i].can_id ||
+        physical.size != router->logical_frames[i].size;
+    if (aggregated && to_can_frame(&physical, &can_frame)) {
       (void)submit_physical_frame(submit, context, bus_index, &can_frame,
           &stats);
       i += (uint32_t)consumed;
+      continue;
+    }
+
+    // 兜底：只允许聚合上线的帧绝不能被原样发出（其 ID 在线上有歧义）。
+    if (router->logical_frames[i].aggregate_only) {
+      ++stats.aggregate_dropped;
+      ++i;
       continue;
     }
 

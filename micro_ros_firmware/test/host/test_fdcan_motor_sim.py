@@ -9,12 +9,24 @@ import socket
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 SCRIPT_PATH = Path(__file__).parents[3] / "micro_ros_agent" / "tools" / "fdcan_motor_sim.py"
 SPEC = spec_from_file_location("fdcan_motor_sim", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+# 非中点速度必须独立于 Kp 的高半字节，缩放采用厂家指南默认值。
+_guide_frame = bytes.fromhex("cc a8 c3 ab c0 31 00 88 00 00 00 00")
+_guide_cmd = MODULE.cerb_decode_command(_guide_frame)
+assert _guide_cmd is not None
+assert abs(_guide_cmd["pos_rad"] - 1.0) <= 6.28 / 65535
+assert abs(_guide_cmd["vel_rad_s"] - (0xABC / 4095 * 6.28 - 3.14)) < 1e-12
+assert abs(_guide_cmd["kp"] - 49 / 4095 * 2500) < 1e-12
+assert abs(_guide_cmd["kd"] - 8 / 4095 * 500) < 1e-12
+assert MODULE.cerb_decode_command(bytes([0xCC]) + bytes(11)) is None
+assert MODULE.cerb_decode_command(bytes([0xC2]) + _guide_frame[1:]) is None
 
 assert MODULE.DEFAULT_DATA_BITRATE_INDEX == 5
 # 2026-10-12 现场实测：这只 CANable（V=16e7497-dirty）的 5 Mbps 索引是 Y5，
@@ -168,21 +180,37 @@ assert multi.models[1].last_cmd is not None and multi.models[1].enabled
 assert multi.models[2].last_cmd is not None and not multi.models[2].enabled
 assert multi.models[3].last_cmd is None
 
-# MIT 力矩量化上限**逐型号**（规格书：P/V/T Max 必须与电机参数页一致）。固件按 Profile
-# 的 `mit_torque_limit_nm` 编码，解码端必须跟着对应——写死单一常数会让另一个型号的 τ_ff
-# 被整体缩放（R48 真值 11 用 45 解 = +4.09×，R58 真值 45 用 11 解 = +0.24×）。
-# 两个型号都断言，任一侧写死都会红。
+# MIT 力矩量化满量程**逐型号**（厂家 2026-10-21：R58/R48 同为 300 N·m）。固件按
+# Profile 的 `mit_torque_limit_nm` 编码，解码端必须跟着对应——把物理峰值 45/11
+# 当成解码量程会让 τ_ff 整体缩放（R58 被缩成 45/300）。
 def _mit_tau_frame(tau_nm: float, limit: float) -> bytes:
     code = round((tau_nm + limit) / (2.0 * limit) * 4095)
-    frame = bytearray(12)
+    frame = bytearray.fromhex("cc 80 00 80 00 00 00 00 00 00 00 00")
     frame[7] = (code >> 8) & 0x0F
     frame[8] = code & 0xFF
     return bytes(frame)
 
 
-for _limit in (11.0, 45.0):
+for _limit in (300.0, 11.0, 45.0):
     _decoded = MODULE.cerb_decode_command(_mit_tau_frame(5.0, _limit), _limit)
-    assert abs(_decoded["tau_nm"] - 5.0) < 0.02, (_limit, _decoded["tau_nm"])
+    assert abs(_decoded["tau_nm"] - 5.0) < 0.08, (_limit, _decoded["tau_nm"])
+
+# 未逐台指定量程时按厂家真值 300 解码（不能退回物理峰值 45/11）。
+assert abs(MODULE.cerb_decode_command(_mit_tau_frame(5.0, 300.0))["tau_nm"] - 5.0) < 0.08
+_scale = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
+_scale.models = {1: MODULE.MotorModel(1, "cerb")}
+_scale.log_f = None
+_scale.mit_torque_limits = {}
+_scale.handle_downlink(0x111, _mit_tau_frame(5.0, 300.0), True)
+assert abs(_scale.models[1].last_cmd["tau_nm"] - 5.0) < 0.08, \
+    _scale.models[1].last_cmd["tau_nm"]
+_scale.mit_position_limits = {1: 6.28}
+_scale.mit_velocity_limits = {1: 6.28}
+_scale.mit_kp_limits = {1: 5000.0}
+_scale.mit_kd_limits = {1: 1000.0}
+_scale.handle_downlink(0x111, _guide_frame, True)
+assert abs(_scale.models[1].last_cmd["pos_rad"] - 2.0) < 0.0002
+assert abs(_scale.models[1].last_cmd["kp"] - 49 / 4095 * 5000) < 1e-12
 
 
 # 上电初值必须与**真机实测**一致（进程重启 = 掉电复现）：保护开关初值 1（关），
@@ -422,7 +450,7 @@ _multi.models = {1: MODULE.MotorModel(1, "cerb")}
 _multi.models[1].linked = False
 _multi.log_f = None
 _multi.mit_torque_limits = {}
-_multi_payload = bytes(56) + bytes([1, 0, 0, 0, 0, 0]) + bytes(2)
+_multi_payload = _mit_tau_frame(0.0, 300.0)[:9] + bytes(47) + bytes([1, 0, 0, 0, 0, 0]) + bytes(2)
 assert len(_multi_payload) == 64
 _multi.handle_downlink(0x210, _multi_payload, True)
 assert _multi.models[1].last_cmd is None
@@ -551,6 +579,13 @@ _b.publish_commands(_ms)
 assert _ms[1].applied_joint_nm == 10.0, _ms[1].applied_joint_nm
 assert _b.pub.msg.data == [10.0, 0.0]
 
+# 逐台物理峰值（--tau-limits）仍按型号峰值钳位——MIT 解码量程分离后不能顺带
+# 把出力权限改成解码值 300。
+_b.tau_limits = {1: 45.0, 2: 11.0}
+_b.publish_commands(_ms)
+assert _ms[1].applied_joint_nm == 45.0, _ms[1].applied_joint_nm
+assert _b.pub.msg.data == [45.0, 0.0]
+
 
 # ── 启动路径不得因自身缺陷崩溃（2026-10-15 加）────────────────────────────
 # 回归：HEAD 5b7e90e 把 tau_limits 的赋值留在 main() 的 `if args.gazebo:` 分支
@@ -572,6 +607,65 @@ assert "NameError" not in _startup.stderr, _startup.stderr
 # （含 CanMotorSim 构造，正是原 bug 的死点）全部跑通了。
 assert "FileNotFoundError" in _startup.stderr, _startup.stderr
 assert "/nonexistent/robot_ws-probe" in _startup.stderr, _startup.stderr
+
+# ── --tau-limits 只做物理饱和，MIT 解码量程另走 --mit-torque-limits ─────────
+# 回归：main() 曾把 --tau-limits（型号峰值 45/11）同时当作 MIT 解码量程，
+# 固件却按 mit_torque_limit_nm=300 编码 ⇒ R58 的前馈被缩成 45/300。
+class _StopMain(Exception):
+    pass
+
+
+def _capture_main_sim_and_bridge(argv):
+    sim_kwargs = {}
+    bridge_args = []
+
+    class _FakeSim:
+        def __init__(self, *args, **kwargs):
+            sim_kwargs.update(kwargs)
+
+    class _FakeBridge:
+        def __init__(self, *args, **kwargs):
+            bridge_args.append((args, kwargs))
+            raise _StopMain
+
+    old_argv = sys.argv
+    sys.argv = [str(SCRIPT_PATH), *argv]
+    try:
+        with mock.patch.object(MODULE, "CanMotorSim", _FakeSim), \
+                mock.patch.object(MODULE, "GazeboBridge", _FakeBridge):
+            MODULE.main()
+    except _StopMain:
+        pass
+    else:
+        raise AssertionError("main() 未走到 GazeboBridge 构造")
+    finally:
+        sys.argv = old_argv
+    assert len(bridge_args) == 1, bridge_args
+    return sim_kwargs, bridge_args[0]
+
+
+_COMMON_ARGV = [
+    "--tty", "/nonexistent/robot_ws-probe", "--cerb", "1,2",
+    "--joint-map", "1:joint_link1,2:joint_link2",
+    "--joint-nm-per-amp", "1:5.0753,2:5.05",
+    "--gazebo", "--effort-rate-hz", "0",
+]
+_sim_kwargs, (_bridge_pos, _) = _capture_main_sim_and_bridge(
+    _COMMON_ARGV + [
+        "--tau-limits", "1:45,2:11",
+        "--mit-torque-limits", "1:300,2:300",
+    ])
+# 解码量程逐台来自型号库 mit_torque_limit_nm。
+assert _sim_kwargs["mit_torque_limits"] == {1: 300.0, 2: 300.0}, \
+    _sim_kwargs["mit_torque_limits"]
+# 物理饱和仍是 peak_torque_nm（GazeboBridge 第 6 个位置参数）。
+assert _bridge_pos[5] == {1: 45.0, 2: 11.0}, _bridge_pos[5]
+
+# 不传 --mit-torque-limits 时不得把 --tau-limits 又当解码量程（旧 bug）：
+# 空表 + 解码器 300 兜底，才是固件的编码量程。
+_sim_kwargs, _ = _capture_main_sim_and_bridge(
+    _COMMON_ARGV + ["--tau-limits", "1:45,2:11"])
+assert _sim_kwargs["mit_torque_limits"] == {}, _sim_kwargs["mit_torque_limits"]
 
 # SocketCAN 成帧（cerb_sdo_probe.py 的 --interface 路径）：打包要能往返，解析要
 # **拒绝扩展帧**——设备只认标准帧，同 ID 的扩展帧照样被 ACK 却被按 ID 静默忽略，

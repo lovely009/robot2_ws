@@ -493,7 +493,7 @@ typedef struct {
   // 关节侧 N·m/A，来源 motor_protocol_profile_limit_nm_per_amp()：有规格书峰值
   // 对就优先用它，否则退 Kt × 减速比 × 效率。参数面的力矩列按 A 呈现时用它换算，
   // 未绑定/系数未知为 NaN。**反馈估计走的是 Kt 链，与它不是同一个数**——
-  // R48 上分别是 3.44 与 7.78 N·m/A（11/3.2 对 0.077×101），差 2.3 倍。
+  // R48 上分别是 3.44 与 5.05 N·m/A（11/3.2 对 0.1×101×0.5），差 1.47 倍。
   float torque_per_amp;
   uint8_t dev_raw_present;
   uint32_t dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_COUNT]; // cnt/cnt/RPM/mA/保护开关/方向

@@ -76,7 +76,9 @@ void SafetyMonitor::observe_valid_command(
   if (latched()) {
     return;
   }
-  const std::string key = bus + "\n" + std::to_string(can_id);
+  // 多轴广播可连续承载不同节点组，冲突判定须区分实际控制轴。
+  const std::string key = bus + "\n" + std::to_string(can_id) + "\n" +
+                          std::to_string(motor_index);
   const auto existing = recent_frames_.find(key);
   if (existing != recent_frames_.end() &&
       now >= existing->second.received_at &&

@@ -48,6 +48,8 @@ struct CerbMitLimits {
   double position_rad;
   double velocity_rad_s;
   double torque_nm;
+  double mit_kp_limit{2500.0};
+  double mit_kd_limit{500.0};
 };
 
 struct WristControl {

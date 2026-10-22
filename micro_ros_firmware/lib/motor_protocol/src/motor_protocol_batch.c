@@ -35,10 +35,14 @@ size_t motor_protocol_aggregate_p1_frames(
     motor_protocol_tx_frame_t candidate = {0};
     const size_t consumed =
         adapter->aggregate_p1_frames(frames, limit, &candidate);
-    if (consumed > 1U && consumed <= limit &&
+    // consumed==1 且 candidate 与输入不同 = adapter 把单个逻辑帧换成了
+    // 另一种物理帧（如高 NodeID 的 0x210 单槽帧）；相同则是 passthrough。
+    if (consumed >= 1U && consumed <= limit &&
         candidate.bus_index == frames[0].bus_index &&
         candidate.tx_class == MOTOR_PROTOCOL_TX_CLASS_P1 &&
-        candidate.size <= MOTOR_PROTOCOL_MAX_FRAME_BYTES) {
+        candidate.size <= MOTOR_PROTOCOL_MAX_FRAME_BYTES &&
+        (consumed > 1U || candidate.can_id != frames[0].can_id ||
+         candidate.size != frames[0].size)) {
       *out = candidate;
       return consumed;
     }

@@ -19,6 +19,18 @@
 | `VaxorProtocol` | VAXOR 25/30mm 腕部电机协议（反馈电流 A） |
 | `CerbProtocol` | CERB 协议（扩展支持） |
 
+### CERB MIT 配置边界
+
+每个 profile 可配置五项线协议量程：`mit_position_limit_rad`、`mit_velocity_limit_rad_s`、
+`mit_kp_limit`、`mit_kd_limit`、`mit_torque_limit_nm`，均须为有限正数。
+`robot_sim` launch 从权威型号库与逐台覆盖生成这些字段；默认档位见
+[设备侧参考 §6](../../../docs/research/cerb-device-reference.md#6-控制报文入口)。
+`limits.velocity_rad_s`、`limits.effort_nm` 与 plant 的电流/扭矩钳位是独立的软件边界，
+不因量化范围变化自动放宽。
+
+解码支持单轴 12B `0x110 | NodeID`（1–15）及多轴 64B `0x210`（1–127），
+拒绝非 FD/BRS、错误长度、非法节点表、非 MIT 模式与全零 raw；反馈刻度保持独立。
+
 ### 传输层 (`transport/`)
 
 | 模块 | 职责 |

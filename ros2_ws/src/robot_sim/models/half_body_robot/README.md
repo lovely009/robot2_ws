@@ -92,7 +92,7 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 数值都取自型号库 `motor.yaml` 的 `rated_torque_nm` / `rated_speed_rad_s`（CAD 的 20 / 5 / 3.14
 与之吻合，3.14 是 π 的截断）。注意三处口径不同、各有其位：URDF 是**额定**、`motor_sim` 的
 `effort_limit_nm` 是 profile 粗钳位（10 N·m）、MJCF 执行器 ctrlrange 取型号库**峰值**
-（cerb 的 `mit_torque_limit_nm`；vaxor 四台没有这一项，回退到 URDF 的额定值 1.15）。
+（cerb 的 `peak_torque_nm`；vaxor 四台没有这一项，回退到 URDF 的额定值 1.15）。
 
 - **CAD 与本表有一处不同**：CAD 给 `joint_link1/.1`、`2/.2` 也填了 20 N·m（r58 档），而电机拓扑
   （`config/motor_driver.yaml`）把 id 1,2 配成 `cerb_r48_101`。本表**以拓扑为准**取 5 N·m；
@@ -151,17 +151,14 @@ SolidWorks 导出的**上身 + 双臂 18 轴**：`base_link`（躯干，网格 z
 - 仿真 profile 分三档（`cerb_r48` / `cerb_r58` / `vaxor_2550`）：硬/命令限位是**型号级粗兜底**
   （±90°/±85°）——比 URDF 里逐关节的真实限位宽，真实边界由 Gazebo 物理层强制；`effort_nm`
   统一取保守的 10 N·m（`motor_sim` 的力矩钳位，与 URDF 的 `effort` 口径不同，后者是型号库额定值）。
-- ⚠ **`velocity_rad_s: 1.0` 现在比 URDF 窄**：三档 profile 的它是假电机 MIT 速度的量化满量程
-  （`motor_sim` 的 `limits.velocity_rad_s`，沿用 robot_all 的占位口径），2026-10-15 之前与 URDF 的
-  占位 `1.0` 同值所以看不出来，现在 URDF 是 3.1416 / 4.189，**端到端仿真（`simulation.launch.py`）
-  仍被 1 rad/s 卡住**，而裸 `gazebo.launch.py` 不受影响。要不要跟着放宽是独立决定（它改的是假电机
-  的协议量化范围，不是 URDF 参数），未动。
-- MIT 限幅（发给电机的协议参数，见 `motor_driver.yaml` 的 `parameters`）：cerb 取型号库
-  `peak_torque_nm`（r58 45 / r48 11），位置/速度限幅沿用 12.5 rad / 30 rad·s⁻¹（未标定）。
-  ⚠ **vaxor 四台没有 `parameters`**（`mit_torque_limit_nm` 是 CERB 专有的 τ_ff 量化满量程，
-  对 vaxor 协议无意义）。副作用：`tools/build_mujoco_model.py` 的力矩回退会取 URDF 的
-  `<limit effort>`，因此 MJCF 里腕部执行器的 `actuatorfrcrange` 由 ±10 变成 ±1.15（额定值）——
-  该字段**只声明不夹取**（见生成器自检），不影响仿真动力学。
+- `velocity_rad_s: 1.0` 是 `motor_sim` 的软件运行限制，不是 MIT 的线协议量化满量程；
+  本次保持该保守边界，不因协议修正放宽到 URDF 速度上限。
+- CERB 的五项 MIT 量程继承权威 `motor.yaml`，拓扑 `parameters` 仅用于逐台自定义覆盖；
+  默认值与真实设备须分别核验，不能把物理峰值作为线协议满量程。
+  VAXOR 不使用这些 CERB 专用字段。MJCF 的 `actuatorfrcrange` 取型号库
+  `peak_torque_nm`（r58 45 / r48 11）；
+  vaxor 无此字段，回退到 URDF 的 `<limit effort>` 1.15。该字段**只声明不夹取**
+  （执行器钳位由 `mujoco_effort_bridge` 按同一值做）。
 
 ## 目录
 

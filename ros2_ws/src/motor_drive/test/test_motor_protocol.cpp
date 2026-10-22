@@ -187,7 +187,9 @@ TEST(CerbProtocolStrategy, CommandFrameUsesCanFdMitPdo) {
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
                   {"mit_velocity_limit_rad_s", "30"},
-                  {"mit_torque_limit_nm", "10"}})};
+                  {"mit_torque_limit_nm", "10"},
+                  {"mit_kp_limit", "500"},
+                  {"mit_kd_limit", "5"}})};
   protocol::JointCommand command;
   command.position = 12.5;
   command.velocity = -30.0;
@@ -216,20 +218,22 @@ TEST(CerbProtocolStrategy, EnableAndDisableUseSafeNeutralMitFrames) {
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
                   {"mit_velocity_limit_rad_s", "30"},
-                  {"mit_torque_limit_nm", "10"}})};
+                  {"mit_torque_limit_nm", "10"},
+                  {"mit_kp_limit", "500"},
+                  {"mit_kd_limit", "5"}})};
   const auto protocol = builtin_protocol(drive::kCerbType);
 
   const auto enabled = protocol->make_enable_frames(motors, {0U}, true);
   ASSERT_EQ(enabled.size(), 1U);
   expect_frame(enabled[0], 0x112U,
-               {0xcc, 0x7f, 0xff, 0x7f, 0xf0,
-                0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00}, true);
+               {0xcc, 0x80, 0x00, 0x80, 0x00,
+                0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00}, true);
 
   const auto disabled = protocol->make_enable_frames(motors, {0U}, false);
   ASSERT_EQ(disabled.size(), 1U);
   expect_frame(disabled[0], 0x112U,
-               {0x0c, 0x7f, 0xff, 0x7f, 0xf0,
-                0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00}, true);
+               {0x0c, 0x80, 0x00, 0x80, 0x00,
+                0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00}, true);
 }
 
 TEST(CerbProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
@@ -239,7 +243,9 @@ TEST(CerbProtocolStrategy, FeedbackConvertsMotorSpeedAndIqToJointState) {
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "12.5"},
                   {"mit_velocity_limit_rad_s", "30"},
-                  {"mit_torque_limit_nm", "10"}})};
+                  {"mit_torque_limit_nm", "10"},
+                  {"mit_kp_limit", "500"},
+                  {"mit_kd_limit", "5"}})};
   drive::CanFrame frame;
   frame.id = 0x301U;
   frame.size = 12U;
@@ -276,7 +282,9 @@ TEST(CerbProtocolStrategy, FeedbackAppliesGearEfficiencyToEffort) {
                   {"gear_efficiency", "0.5"},
                   {"mit_position_limit_rad", "12.5"},
                   {"mit_velocity_limit_rad_s", "30"},
-                  {"mit_torque_limit_nm", "300"}})};
+                  {"mit_torque_limit_nm", "300"},
+                  {"mit_kp_limit", "500"},
+                  {"mit_kd_limit", "5"}})};
   drive::CanFrame frame;
   frame.id = 0x301U;
   frame.size = 12U;
@@ -314,6 +322,42 @@ TEST(CerbProtocolStrategy, ValidatesNodeIdsAndRequiredParameters) {
   EXPECT_THROW(protocol->validate(motors, {0U}), std::invalid_argument);
 }
 
+TEST(CerbProtocolStrategy, NodeBoundariesUseUnambiguousWireIds) {
+  const auto strategy = builtin_protocol(drive::kCerbType);
+  for (const unsigned node : {1U, 15U, 16U, 127U}) {
+    std::vector<drive::MotorConfig> motors{
+        make_motor("cerb", "joint", drive::kCerbType, node,
+                   {{"torque_constant_nm_per_amp", "0.1"}, {"gear_ratio", "101"},
+                    {"mit_position_limit_rad", "3.14"},
+                    {"mit_velocity_limit_rad_s", "3.14"},
+                    {"mit_torque_limit_nm", "300"},
+                    {"mit_kp_limit", "2500"}, {"mit_kd_limit", "500"}})};
+    EXPECT_NO_THROW(strategy->validate(motors, {0U}));
+    for (const bool enabled : {false, true}) {
+      const auto frames = strategy->make_enable_frames(motors, {0U}, enabled);
+      ASSERT_EQ(frames.size(), 1U);
+      const auto &frame = frames.front();
+      EXPECT_EQ(frame.id, node <= 15U ? (0x110U | node) : 0x210U);
+      EXPECT_EQ(frame.size, node <= 15U ? 12U : 64U);
+      EXPECT_TRUE(frame.is_fd && frame.bitrate_switch);
+      EXPECT_EQ(frame.data[0], enabled ? 0xccU : 0x0cU);
+      EXPECT_EQ(frame.data[1], 0x80U);
+      EXPECT_EQ(frame.data[2], 0x00U);
+      if (node > 15U) {
+        EXPECT_EQ(frame.data[56], node);
+        for (std::size_t i = 9U; i < 64U; ++i) {
+          if (i != 56U) { EXPECT_EQ(frame.data[i], 0U); }
+        }
+      }
+    }
+    for (const unsigned invalid : {0U, 128U}) {
+      motors[0].id = invalid;
+      EXPECT_THROW(strategy->make_enable_frames(motors, {0U}, true),
+                   std::out_of_range);
+    }
+  }
+}
+
 TEST(CerbProtocolStrategy, UsesPerMotorMitRangeOverrides) {
   const std::vector<drive::MotorConfig> motors{
       make_motor("r48", "j1", drive::kCerbType, 1U,
@@ -321,7 +365,9 @@ TEST(CerbProtocolStrategy, UsesPerMotorMitRangeOverrides) {
                   {"gear_ratio", "101"},
                   {"mit_position_limit_rad", "25"},
                   {"mit_velocity_limit_rad_s", "60"},
-                  {"mit_torque_limit_nm", "20"}})};
+                  {"mit_torque_limit_nm", "20"},
+                  {"mit_kp_limit", "500"},
+                  {"mit_kd_limit", "5"}})};
   protocol::JointCommand command;
   command.position = 12.5;
   command.velocity = -30.0;
@@ -330,6 +376,6 @@ TEST(CerbProtocolStrategy, UsesPerMotorMitRangeOverrides) {
                           ->make_command_frames(motors, {0U}, {command}, false);
   ASSERT_EQ(frames.size(), 1U);
   expect_frame(frames[0], 0x111U,
-               {0x0c, 0xbf, 0xff, 0x3f, 0xf0,
-                0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x00}, true);
+               {0x0c, 0xbf, 0xff, 0x40, 0x00,
+                0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}, true);
 }

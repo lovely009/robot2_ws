@@ -189,23 +189,35 @@ JointState unpack_wrist_feedback(const uint8_t *data, const std::size_t size) {
 std::array<uint8_t, 8>
 pack_cerb_mit_command(const JointCommand &command,
                       const CerbMitLimits &limits) {
-  if (!(limits.position_rad > 0.0) || !(limits.velocity_rad_s > 0.0) ||
-      !(limits.torque_nm > 0.0)) {
-    throw std::invalid_argument("CERB MIT limits must be positive");
+  for (const double limit : {limits.position_rad, limits.velocity_rad_s,
+                            limits.torque_nm, limits.mit_kp_limit,
+                            limits.mit_kd_limit}) {
+    if (!std::isfinite(limit) || !(limit > 0.0)) {
+      throw std::invalid_argument("CERB MIT limits must be finite and positive");
+    }
   }
   if (!std::isfinite(command.position) || !std::isfinite(command.velocity) ||
       !std::isfinite(command.kp) || !std::isfinite(command.kd) ||
       !std::isfinite(command.feedforward)) {
     throw std::invalid_argument("CERB MIT command values must be finite");
   }
-  const auto position = float_to_uint(command.position, -limits.position_rad,
-                                      limits.position_rad, 16U);
-  const auto velocity = float_to_uint(command.velocity, -limits.velocity_rad_s,
-                                      limits.velocity_rad_s, 12U);
-  const auto kp = float_to_uint(command.kp, 0.0, 500.0, 12U);
-  const auto kd = float_to_uint(command.kd, 0.0, 5.0, 12U);
-  const auto torque = float_to_uint(command.feedforward, -limits.torque_nm,
-                                    limits.torque_nm, 12U);
+  const auto encode = [](const double value, const double limit,
+                         const unsigned bits, const bool symmetric) {
+    const double normalized = symmetric
+        ? (std::clamp(value / limit, -1.0, 1.0) + 1.0) * 0.5
+        : std::clamp(value / limit, 0.0, 1.0);
+    const auto maximum = (uint32_t{1} << bits) - 1U;
+    return static_cast<uint32_t>(std::clamp<long long>(
+        std::llround(normalized * maximum), 0, maximum));
+  };
+  const auto position = encode(command.position, limits.position_rad, 16U, true);
+  const auto velocity = encode(command.velocity, limits.velocity_rad_s, 12U, true);
+  const auto kp = encode(command.kp, limits.mit_kp_limit, 12U, false);
+  const auto kd = encode(command.kd, limits.mit_kd_limit, 12U, false);
+  const auto torque = encode(command.feedforward, limits.torque_nm, 12U, true);
+  if ((position | velocity | kp | kd | torque) == 0U) {
+    throw std::invalid_argument("CERB all-zero MIT payload is invalid");
+  }
   return {static_cast<uint8_t>(position >> 8U),
           static_cast<uint8_t>(position),
           static_cast<uint8_t>(velocity >> 4U),

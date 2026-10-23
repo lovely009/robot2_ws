@@ -64,3 +64,7 @@
 
 # ROS 2 运行时日志目录（在包源码目录内就地运行 launch 会生成）
 /ros2_ws/src/**/log/
+
+# Web 工作台前端开发产物
+/ros2_ws/src/web_host/prototype/node_modules/
+/ros2_ws/src/web_host/prototype/dist/

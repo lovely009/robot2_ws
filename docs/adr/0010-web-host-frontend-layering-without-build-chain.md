@@ -2,6 +2,9 @@
 
 **Status**: accepted
 
+**当前适用性（2026-10-23）**：无构建链和外壳选择已由 [ADR 0016](0016-web-workbench-vue-shell.md)
+取代；经典面板与模板在迁移适配器下继续复用，历史理由保留如下。
+
 ## Context
 
 `web_host/web/` 是纯静态资产：`index.html` 363 行、`app.js` 2613 行、`style.css` 450 行、

@@ -33,7 +33,7 @@ def enumerate_arm_models(root=None):
     判据只有主 URDF——臂视图不要求模型接进端到端仿真（那要
     simulation_topology.yaml / MJCF，见 bench_manager 的模型枚举）。因此列表里
     **可能**有没配电机映射的预览件（`has_joint_mapping_source` 为假）：它们渲染
-    得出几何、没有电机小球，页面退回内置兜底表。
+    得出几何；页面清空电机映射，不沿用默认或其他模型。
     """
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
@@ -51,7 +51,7 @@ def has_joint_mapping_source(model, root=None):
     臂视图候选的判据只有主 URDF——几何能渲染就列出来；而**映射**另要 config 里的
     一份文件。两者不一致的模型（如 `robot_leg`、`zhoubuguanjie_youbi_001`：有 URDF 与
     控制器、但没配电机映射）在页面上退化成
-    前端内置兜底表 + 控制台告警，那不是错误。调用方用它区分「没配」与「配错了」：
+    空映射 + 来源错误提示。调用方用它区分「没配」与「配错了」：
     前者可以跳过，后者必须报错——配了文件却解析不出来仍是契约缺项。
     """
     models_root = Path(root) if root is not None else _models_root()
@@ -76,7 +76,7 @@ def simulation_model_joints(model, root=None):
          同时带 `joint:` 与 `id:`，一步到位（half_body_robot 走这条）；
       ② 回落：`config/simulation_topology.yaml` 的 (电机名 → 关节) × motor_
          hardware_interface 权威驱动配置的 (电机名 → id)。新模型常常先有拓扑、
-         后补 motor_driver.yaml；没有②时页内切到它就整条退化成前端内置兜底表。
+         后补 motor_driver.yaml；没有②时仅提供几何预览。
 
     Raises:
         ValueError: 目录/模型缺失、非法模型名、解析不出条目、条目缺 id/joint、id 重复。

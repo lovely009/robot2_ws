@@ -17,6 +17,9 @@ def _web_data_files():
     会被整个跳过（构建"成功"但页面 404，踩过）。代价是 web/ 里不能再放目录
     符号链接——臂视图的几何因此走 static_server 的挂载，而不是符号链接。
     """
+    if os.path.isdir('frontend') and not os.path.isfile('web/workbench/index.html'):
+        raise RuntimeError(
+            '工作台尚未构建：先在 ros2_ws/src/web_host/frontend 执行 npm ci && npm run build')
     out = []
     for root, _dirs, files in os.walk('web', followlinks=True):
         if not files:

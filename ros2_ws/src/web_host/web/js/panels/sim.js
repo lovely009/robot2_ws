@@ -538,14 +538,21 @@ export function mount(root, ctx) {
     sendMotorCommand(command, `添加电机 ${id}`);
   }
 
+  let optionsReady = false;
+  let optionsLoading = false;
   async function refreshOptions() {
+    if (optionsLoading) return;
+    optionsLoading = true;
     ui.refresh.disabled = true;
     try {
       loadDeviceOptions(await bench.getBenchOptions());
+      optionsReady = true;
       setResult('设备与模型列表已刷新', 'ok');
     } catch (error) {
+      optionsReady = false;
       setResult(`读取设备失败：${error.message}`, 'err');
     } finally {
+      optionsLoading = false;
       ui.refresh.disabled = false;
     }
   }
@@ -559,6 +566,8 @@ export function mount(root, ctx) {
 
   // 只在有会话在跑时跟日志：跑起来才需要看进展，停着的时候没必要每秒拉一遍。
   async function poll() {
+    if (!store.conn.connected) { optionsReady = false; return; }
+    if (!optionsReady) await refreshOptions();
     await refreshMotorSim();
     if (activeState((store.bench.simulation || {}).state)
         || activeState((store.bench.motor_backend || {}).state)) {
@@ -702,6 +711,8 @@ export function mount(root, ctx) {
 
   return {
     render(dirty) {
+      if (!store.conn.connected) optionsReady = false;
+      else if (!optionsReady) refreshOptions();
       if (dirty.has(DIRTY.BENCH)) renderFromStore();
     },
     unmount() {

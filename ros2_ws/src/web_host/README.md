@@ -1,11 +1,22 @@
 # web_host
 
+默认入口是 **A 均衡工作台**（Vue 3 + TypeScript）：三个同级场景为真机调试、动作、仿真/HIL，
+左侧对象、中间工作区、右侧控制/参数检查器、底部曲线/事件/历史/IMU。根地址跳转到
+`/workbench/`，经典界面保留在 `/index.html`。新工作台复用现有真实控制模块，没有演示数据。
+接口与数据源保持下文契约；前端实现边界见 [ADR 0016](../../../docs/adr/0016-web-workbench-vue-shell.md)。
+
+新界面一次挂载各面板，切换场景保留草稿，不启动/停止会话、不下发目标；全局「软停」是
+显式轨迹取消与空设定值请求，结果仍需核对设备反馈。Agent 进程运行与固件有数据分别表示。
+动作播放不跨连接恢复：断线或更换 WebSocket 后需要重新发起；上一会话的参数基线、
+台架状态和命令去向会清空，等待新会话重新报告。
+面板渲染异常会显示错误并最多自动重试三次；持续失败时保留待刷新数据，切换场景或页签可重试。
+
 rosbridge Web 上位机：一个 launch 起 L1 的三个节点——
 
 | 节点 | 可执行 | 作用 |
 |---|---|---|
 | `rosbridge_websocket` | `rosbridge_shim` | 官方 rosbridge 的**启动垫片**，先给 `rosbridge_library` 补上有界字符串原语（`string<31>` / `string<=31`，见 `web_host/rosbridge_shim.py` 模块注释），再 runpy 运行官方入口；解决 `can_bridge_msgs` 的 `MotorTopology` 等含 `string<=31` 字段时 rosbridge 2.0.7 序列化报 `inst is not a ROS Message, but a str` 的问题 |
-| `web_static_server` | `static_server` | 纯标准库 `ThreadingHTTPServer` 托管 `web/`（`index.html` + `js/` + `css/` + `vendor/` + `roslib.min.js`），无 Node 等构建依赖；文件域 API 只余 `/api/models`、`/api/model-joints` 与 `/api/actions*`，静态几何挂在 `model_dir`（默认 robot_sim 的 share，可指源码目录） |
+| `web_static_server` | `static_server` | 纯标准库 `ThreadingHTTPServer` 托管 `web/`（`index.html` + `js/` + `css/` + `vendor/` + `roslib.min.js`）；Vue 资产预先构建，运行不需要 Node；文件域 API 只余 `/api/models`、`/api/model-joints` 与 `/api/actions*`，静态几何挂在 `model_dir`（默认 robot_sim 的 share，可指源码目录） |
 | `command_streamer` | `command_streamer`（`motor_command` 包） | **命令节拍**：页面只下**设定值**，100 Hz 的完整快照流由它出——浏览器把后台标签页的定时器钳到 1 Hz，而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力（见 [ADR 0014](../../../docs/adr/0014-host-side-command-pacing.md)）。命令从哪条路出去由 `bench_manager` 改它的 `output_topic` |
 
 > 台架会话的编排者 `bench_manager` **不在本 launch**（2026-10-15 迁出，现由
@@ -19,7 +30,7 @@ rosbridge Web 上位机：一个 launch 起 L1 的三个节点——
 前端打开页面后按 `location.hostname:9090` 自动拼 WebSocket 地址（见 `web/js/main.js`），
 所以从别的机器访问时，浏览器地址栏用主机 IP，rosbridge 也会连到同一个 IP。
 
-页面是**外壳 / 屏 / 面板**三层（纯前端，无 Node 构建依赖，分层决策见 ADR 0010）：外壳 =
+经典界面是**外壳 / 屏 / 面板**三层（原生 ES module，分层决策见 ADR 0010）：外壳 =
 顶栏（连接与串口选择）+ 左导航 + 说明浮层；屏只声明挂哪些面板，面板只负责渲染与交互，
 二者都不持有跨屏数据。
 
@@ -113,8 +124,7 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 两个判据**故意不同**：候选只要主 URDF，映射另要上面两份配置之一。于是候选里**可能**
 有没配映射的**预览件**（如 `robot_leg`、`zhoubuguanjie_youbi_001`——有 URDF 与控制器，
 但 `robot_sim/models/<名>/config/` 下没有 `motor_driver.yaml` / `simulation_topology.yaml`）：切过去
-渲染得出几何、但没有电机小球，`/api/model-joints` 返 404、页面退回内置兜底表并在
-控制台告警。重力补偿面板的模型候选同源，选到这类模型会在 `modelJointsFor()` 报错
+渲染得出几何、但没有电机小球，`/api/model-joints` 返 404，页面清空设备映射并显示来源错误。重力补偿面板的模型候选同源，选到这类模型会在 `modelJointsFor()` 报错
 （起不了叠加节点）。要让它可映射，补 `config/motor_driver.yaml` 或
 `config/simulation_topology.yaml` 即可。
 
@@ -140,6 +150,35 @@ ColladaLoader（后者又拉 TGALoader），换版本要整体换，只换一个
 保存流程收尾，设备 flash 与 W25 的跨介质掉电原子性仍需台架验证。
 
 ## 构建
+
+先构建正式前端（Node.js 22.12+，已在 24.19 验证），再执行下面的 colcon 构建。
+Node 只用于开发/构建，Python 静态服务运行时不依赖它。
+
+```bash
+cd ros2_ws/src/web_host/frontend
+npm ci
+npm run build
+```
+
+产物写入 `web/workbench/`，不入 Git；缺少产物时安装包会明确报错。之后的 ROS 命令从
+仓库根目录开始执行。每次修改 `frontend/src/` 后重跑前端构建和 `web_host` 包安装。
+`web/js/` 中的领域模块仍按既有静态资源规则安装。
+
+前端开发可在静态服务已运行时执行 `npm run dev`，默认打开
+`http://127.0.0.1:5174/workbench/`；模型、模板和原生模块代理到
+`http://127.0.0.1:8081`，可用 `WORKBENCH_HTTP_ORIGIN` 覆盖该源。
+WebSocket 地址仍在页面单独设置；开发代理不会启动 Agent 或控制进程。
+
+前端行为验证在 `frontend/` 执行：
+
+```bash
+npm test
+npx playwright install chromium       # 首次安装测试浏览器
+npm run test:browser
+```
+
+浏览器测试启动独立的本机只读素材服务，用假 rosbridge 验证模块组合，不接触 ROS 图或设备。
+已有兼容浏览器时，可通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定可执行文件。
 
 ament_python 包，在 `ros2_ws/` 内构建（改了 `motor_command` 时必须一起构建——本 launch
 默认起它的 `command_streamer`；改了 `bench_manager` / `bench_msgs` 也要，那是

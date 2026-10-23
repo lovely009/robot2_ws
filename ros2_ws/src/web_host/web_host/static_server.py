@@ -161,6 +161,12 @@ def main(args=None):
 
         def do_GET(self):
             path = urlsplit(self.path).path
+            if path == '/' and os.path.isfile(os.path.join(web_root, 'workbench', 'index.html')):
+                query = urlsplit(self.path).query
+                self.send_response(302)
+                self.send_header('Location', '/workbench/' + ('?' + query if query else ''))
+                self.end_headers()
+                return
             if path == '/api/models':
                 # 臂视图可切换的模型（有 urdf/<名>.urdf 的目录）
                 self._send_json(

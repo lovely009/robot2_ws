@@ -6,7 +6,7 @@
 // 由此带来的两处行为变化，都写在界面文案里：
 //   · 「下发」= 改设定值并**持续保持**（旧版单发一条，30 ms 后固件就软停了）；
 //   · 停台架要用「停止」（发空目标列表 = 全部软停），清空表格**不**停台架。
-import { store, markDirty, DIRTY } from '../core/store.js';
+import { store, markDirty, DIRTY, syncWriteButtons } from '../core/store.js';
 import { $, LIFECYCLE } from '../core/format.js';
 import { pub, isConnected } from '../core/ros.js';
 
@@ -50,6 +50,7 @@ function readCmdTargets() {
 
 function setCmdResult(ok, text) {
   const el = $('cmdResult');
+  if (!el) return;
   el.className = 'result tiny ' + (ok ? 'ok' : 'err');
   el.textContent = text;
 }
@@ -111,8 +112,8 @@ function sendSnapshot() {
 
 // 停止台架：空目标列表在完整快照语义下是「全部软停」这条**真消息**，显式停止不靠
 // 断流实现（固件收到后发阻尼帧，100 ms 后失能）。
-function sendStop() {
-  if (!isConnected()) { setCmdResult(false, '未连接 rosbridge'); return; }
+export function sendStop() {
+  if (!isConnected()) { setCmdResult(false, '未连接 rosbridge'); return false; }
   sequence = (sequence + 1) >>> 0;
   pub('setpoint', {
     sync_time_ns: Date.now() * 1e6,
@@ -121,6 +122,7 @@ function sendStop() {
     targets: [],
   });
   setCmdResult(true, `已发全部软停（seq=${sequence}）`);
+  return true;
 }
 
 // 发送完整快照（命令表与动作共用）；记录历史。
@@ -205,6 +207,7 @@ export function mount(root, ctx) {
   addCmdRow(1, 0, 0, 0);      // 等价旧 UI 的初始行
 
   const render = (dirty) => {
+    syncWriteButtons(['btnSendOnce', 'btnStopCmd'], isConnected());
     if (dirty.has(DIRTY.HISTORY)) updateSummary();
     // 断线不再需要页面做任何事：rosbridge 一断，/client_count 归零，主机侧的
     // command_streamer 自己停流，固件 100 ms 内失能——失效方向是安全的。

@@ -68,3 +68,7 @@
 # Web 工作台前端开发产物
 /ros2_ws/src/web_host/prototype/node_modules/
 /ros2_ws/src/web_host/prototype/dist/
+/ros2_ws/src/web_host/frontend/node_modules/
+/ros2_ws/src/web_host/web/workbench/
+/ros2_ws/src/web_host/frontend/test-results/
+/ros2_ws/src/web_host/frontend/playwright-report/

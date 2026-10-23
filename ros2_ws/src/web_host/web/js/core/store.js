@@ -87,15 +87,19 @@ export function onDirty(fn) { dirtyListener = fn; }
 
 // 单一 rAF 循环：没有任何面板标脏时不做任何事，因此未挂载的屏不空转。
 export function runRenderLoop() {
+  let active = true;
+  let frameId = 0;
   const frame = () => {
+    if (!active) return;
     if (dirty.size && dirtyListener) {
       const batch = dirty;
       dirty = new Set();
       dirtyListener(batch);
     }
-    requestAnimationFrame(frame);
+    frameId = requestAnimationFrame(frame);
   };
-  requestAnimationFrame(frame);
+  frameId = requestAnimationFrame(frame);
+  return () => { active = false; cancelAnimationFrame(frameId); };
 }
 
 // 脏标记的键（面板按这些键判断要重绘什么）
@@ -212,10 +216,8 @@ const JOINT_OVERRIDE = (() => {
 // motor_id → 关节名。**权威来源是模型自己的 config/motor_driver.yaml**，
 // 由 static_server 的 /api/model-joints 提供，启动时经 loadModelJoints() 装入。
 //
-// 下面这张内置表**只是默认模型 half_body_robot 的兜底**（接口不可达时用），
-// 不是真相源。它此前是唯一来源、且写死成 18 台，于是换模型就静默失效：关节名
-// 对不上 → 那些关节角恒为 0、臂上小球点不中，表现得像"电机没注册"。
-// 对象**就地更新**（loadModelJoints 先清空再写入）：arm.js 持有本对象的引用。
+// 经典入口在首次加载前保留默认结构；正式读取会先清空，失败时不回退。
+// 对象就地更新，保持臂视图持有的引用有效。
 export const JOINT_OF_MOTOR = JOINT_OVERRIDE || {
   1: 'joint_link1', 2: 'joint_link2', 3: 'joint_link3', 4: 'joint_link4',
   5: 'joint_link5', 6: 'joint_link6', 7: 'joint_link7', 8: 'joint_link8',
@@ -225,18 +227,25 @@ export const JOINT_OF_MOTOR = JOINT_OVERRIDE || {
   16: 'joint_link7.7', 17: 'joint_link8.8', 18: 'joint_link9.9',
 };
 
-// 映射来源：'url'（?joints=）| 'api'（模型配置）| 'builtin'（兜底，可能不对）
+// 映射来源：url 手工覆盖 / api 模型配置 / loading / unavailable；builtin 只在首次加载前存在。
 export const jointMapSource = {kind: JOINT_OVERRIDE ? 'url' : 'builtin', error: ''};
+let modelLoadGeneration = 0;
 
-// 启动时按当前模型取映射。失败**不静默**：退回内置表并在控制台留痕——
-// 内置表只对默认模型正确，换过模型时臂视图就是错的，而它本身不会报任何错。
+// 清空后读取当前模型映射；失败保持空表，旧请求不得覆盖新的模型。
 export async function loadModelJoints() {
   if (JOINT_OVERRIDE) return jointMapSource;
+  const generation = ++modelLoadGeneration;
+  const requestedModel = MODEL;
+  for (const k of Object.keys(JOINT_OF_MOTOR)) delete JOINT_OF_MOTOR[k];
+  jointMapSource.kind = 'loading';
+  jointMapSource.error = '';
+  markDirty(DIRTY.TOPOLOGY);
   try {
     const resp = await fetch(
-      `/api/model-joints?model=${encodeURIComponent(MODEL)}`, {cache: 'no-store'});
+      `/api/model-joints?model=${encodeURIComponent(requestedModel)}`, {cache: 'no-store'});
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
+    if (generation !== modelLoadGeneration) return jointMapSource;
     const joints = data && data.joints;
     if (!joints || typeof joints !== 'object' || !Object.keys(joints).length) {
       throw new Error('接口返回的映射为空');
@@ -249,12 +258,13 @@ export async function loadModelJoints() {
     jointMapSource.error = '';
     markDirty(DIRTY.TOPOLOGY);
   } catch (e) {
-    jointMapSource.kind = 'builtin';
+    if (generation !== modelLoadGeneration) return jointMapSource;
+    jointMapSource.kind = 'unavailable';
     jointMapSource.error = String((e && e.message) || e);
     console.warn(
-      `[web_host] /api/model-joints?model=${MODEL} 取不到（${jointMapSource.error}）：`
-      + '已退回内置默认表，它只对 half_body_robot 正确——'
-      + '若当前用的是别的模型，臂视图的关节映射会是错的。');
+      `[web_host] /api/model-joints?model=${requestedModel} 取不到（${jointMapSource.error}）：`
+      + '该模型仅提供几何预览，不沿用其他模型的设备映射。');
+    markDirty(DIRTY.TOPOLOGY);
   }
   return jointMapSource;
 }

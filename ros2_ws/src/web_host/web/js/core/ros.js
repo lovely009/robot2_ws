@@ -12,6 +12,8 @@ import {
 } from './format.js';
 
 let ros = null;
+let connectionGeneration = 0;
+export function getConnectionGeneration() { return connectionGeneration; }
 let subs = [];
 const publishers = {};
 
@@ -101,9 +103,33 @@ export function setDownlinkRoute(next) {
 // "固件没数据"。第一次踩这个坑花了不少时间，所以默认按 2s 退避自动重连；
 let reconnectTimer = null;
 
+function resetSessionState() {
+  store.motors.clear();
+  store.paramCache.clear();
+  store.tf.clear();
+  store.sysStatus.seen = false;
+  store.conn.autoLoaded = false;
+  store.conn.benchLoaded = false;
+  for (const key of Object.keys(store.bench)) store.bench[key] = null;
+  store.conn.agent = 'stopped';
+  store.conn.agentDevice = '';
+  store.conn.canStop = false;
+  store.commandStatus = {last: 0, data: null};
+  markDirty(DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.PARAMS, DIRTY.TF, DIRTY.BENCH, DIRTY.COMMAND);
+}
+
+export function disconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  closeSocket();
+  resetSessionState();
+  setConn(false, '已断开');
+}
+
 export function connect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   closeSocket();
+  resetSessionState();
+  setConn(false, '正在连接…');
   const url = $('rosUrl').value.trim();
   try {
     ros = new ROSLIB.Ros({url});
@@ -111,7 +137,9 @@ export function connect() {
     setConn(false, 'URL 无效');
     return;
   }
+  const connection = ros;
   ros.on('connection', () => {
+    if (ros !== connection) return;
     setConn(true);
     subscribeAll();
     // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
@@ -120,22 +148,13 @@ export function connect() {
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
-  ros.on('error', () => setConn(false, '连接错误'));
+  ros.on('error', () => {
+    if (ros === connection) { connectionGeneration++; setConn(false, '连接错误'); }
+  });
   ros.on('close', () => {
-    if (!ros) return; // 幂等：closeSocket 里已经收过尾，重复触发不再排重连
+    if (ros !== connection) return;
     closeSocket();
-    // 掉线即清场：陈旧的表比空表更容易误导（曾把"页面掉线"看成"固件没数据"）。
-    store.motors.clear();
-    store.paramCache.clear();
-    store.tf.clear();
-    // 序号是固件侧单调递增的，重连后第一帧就比掉线前的基线大——不清 seen 的话
-    // 一个还在飞的轮询会拿旧基线立刻"成功"。次帧到达前拒绝轮询。
-    store.sysStatus.seen = false;
-    // 自动读取只在本连接内做一次；复位后重连会重新触发（设备参数以新会话为准）。
-    store.conn.autoLoaded = false;
-    // 台架枚举（串口下拉等）同样按连接复位，重连后重取一次。
-    store.conn.benchLoaded = false;
-    markDirty(DIRTY.TOPOLOGY, DIRTY.STATUS, DIRTY.PARAMS, DIRTY.TF);
+    resetSessionState();
     // !reconnectTimer：同一时刻只允许一个待触发的重连（否则会叠出重连风暴，
     // 表现为页面一直连不上、看着"卡"）。
     if (!reconnectTimer) {
@@ -148,6 +167,7 @@ export function connect() {
 // 只关 socket，不动连接意图（自动重连要复用）。
 // 连发/曲线等定时器由各自面板在连接态脏帧里自行停止；本层不反向调用面板。
 export function closeSocket() {
+  connectionGeneration++;
   if (ros) { const r = ros; ros = null; try { r.close(); } catch (e) {} }
   subs = [];
   Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
@@ -155,11 +175,12 @@ export function closeSocket() {
 }
 
 function sub(key, cb) {
+  const connection = ros;
   const t = TOPICS[key];
   const topic = new ROSLIB.Topic({
     ros, name: t.name, messageType: t.type, throttle_rate: 0, queue_length: 1,
   });
-  topic.subscribe(cb);
+  topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);
 }
 
@@ -364,6 +385,7 @@ export function callService(name, type, request, timeoutMs = 8000) {
       reject(new Error('未连接 rosbridge'));
       return;
     }
+    const connection = ros;
     const service = new ROSLIB.Service({ros, name, serviceType: type});
     let settled = false;
     const timer = setTimeout(() => {
@@ -373,6 +395,7 @@ export function callService(name, type, request, timeoutMs = 8000) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (ros !== connection) { reject(new Error('连接已更换')); return; }
       resolve(result);
     }, (error) => {
       if (settled) return;

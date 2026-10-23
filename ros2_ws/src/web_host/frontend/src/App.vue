@@ -1,0 +1,429 @@
+<script setup lang="ts">
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import {
+  Box,
+  SlidersHorizontal,
+  Film,
+  Workflow,
+  Cable,
+  RefreshCw,
+  CircleStop,
+  PanelBottom,
+  ArrowUpRight,
+} from "@lucide/vue";
+import PanelHost from "./components/PanelHost.vue";
+import {
+  runtime,
+  snapshot,
+  initialized,
+  startupError,
+  notice,
+} from "./runtime";
+import type { Screen } from "./contracts";
+
+const normalize = (hash: string): Screen => {
+  const value = hash.replace(/^#\/?/, "");
+  return value === "teach" || value === "sim" ? value : "run";
+};
+const screen = ref<Screen>(normalize(location.hash));
+const inspector = ref("control");
+const observation = ref("curve");
+const observe = ref(true);
+const now = ref(Date.now());
+const rosUrl = ref(
+  localStorage.getItem("robot2.rosbridgeUrl") ||
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:9090`,
+);
+const scenes = [
+  {
+    id: "run" as const,
+    title: "真机调试",
+    icon: SlidersHorizontal,
+    subtitle: "核对设备，调整参数，观察反馈",
+  },
+  {
+    id: "teach" as const,
+    title: "动作工作台",
+    icon: Film,
+    subtitle: "浏览动作，预览轨迹，核对执行反馈",
+  },
+  {
+    id: "sim" as const,
+    title: "仿真与 HIL",
+    icon: Workflow,
+    subtitle: "配置后端、控制端与台架会话",
+  },
+];
+const title = computed(() => scenes.find((item) => item.id === screen.value)!);
+const motionAge = computed(() =>
+  snapshot.value.motionAt === null
+    ? "等待运动数据"
+    : `${Math.max(0, now.value - snapshot.value.motionAt)} ms`,
+);
+const fresh = computed(
+  () =>
+    snapshot.value.connected &&
+    snapshot.value.motionAt !== null &&
+    now.value - snapshot.value.motionAt < 1500,
+);
+const agentLabel = computed(
+  () =>
+    ({
+      running: "进程运行中",
+      starting: "正在启动",
+      stopping: "正在停止",
+      stopped: "未启动",
+      failed: "进程已退出",
+      error: "操作失败",
+    })[snapshot.value.agent] || snapshot.value.agent,
+);
+let clock: ReturnType<typeof setInterval>;
+function go(id: string) {
+  if (id === "device") {
+    inspector.value = "parameters";
+    id = "run";
+  }
+  if (id === "diag") {
+    observe.value = true;
+    observation.value = "imu";
+    id = "run";
+  }
+  screen.value = normalize(id);
+  location.hash = `/${screen.value}`;
+}
+function hashchange() {
+  screen.value = normalize(location.hash);
+}
+function keys(event: KeyboardEvent) {
+  if (
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    (event.target as HTMLElement)?.closest(
+      "input,select,textarea,[contenteditable]",
+    )
+  )
+    return;
+  const index = "123".indexOf(event.key);
+  if (index >= 0) go(scenes[index]!.id);
+}
+watch([screen, inspector, observation, observe], async () => {
+  await nextTick();
+  runtime.wake();
+});
+onMounted(() => {
+  runtime.setNavigation(go);
+  clock = setInterval(() => {
+    now.value = Date.now();
+  }, 250);
+  window.addEventListener("hashchange", hashchange);
+  window.addEventListener("keydown", keys);
+  void runtime.start();
+});
+onBeforeUnmount(() => {
+  clearInterval(clock);
+  window.removeEventListener("hashchange", hashchange);
+  window.removeEventListener("keydown", keys);
+  runtime.dispose();
+});
+</script>
+
+<template>
+  <div class="workbench" :class="{ 'observer-hidden': !observe }">
+    <header class="app-header">
+      <a class="brand" href="#/run" @click="go('run')"
+        ><span class="brand-mark"><Box :size="22" /></span
+        ><span>ROBOT<span class="brand-light"> WORKBENCH</span></span></a
+      >
+      <span class="header-divider" /><span class="workspace-name"
+        >机器人实验室 <span>/ 均衡工作台</span></span
+      >
+      <span class="header-spacer" /><span class="micro">{{
+        snapshot.session
+      }}</span>
+      <a class="classic-link" href="/index.html"
+        >经典界面 <ArrowUpRight :size="12"
+      /></a>
+    </header>
+
+    <div class="session-bar">
+      <label class="session-item"
+        ><Cable :size="14" /><span class="session-label">ROS</span
+        ><input
+          id="rosUrl"
+          v-model="rosUrl"
+          aria-label="rosbridge WebSocket 地址"
+          spellcheck="false"
+      /></label>
+      <button
+        class="secondary compact"
+        :disabled="!initialized"
+        @click="runtime.connect(rosUrl)"
+      >
+        重新连接
+      </button>
+      <span class="session-item connection"
+        ><i class="dot" :class="snapshot.connected ? 'green' : 'amber'" />{{
+          snapshot.connectionText
+        }}</span
+      >
+      <span class="session-separator" />
+      <label class="session-item"
+        ><span class="session-label">控制板</span
+        ><select id="serialPort" aria-label="控制板串口">
+          <option value="">等待串口枚举</option>
+        </select></label
+      >
+      <button
+        id="btnPortRefresh"
+        class="icon-button"
+        aria-label="刷新控制板串口"
+        :disabled="!snapshot.connected"
+        @click="runtime.refreshAgentControls()"
+      >
+        <RefreshCw :size="13" />
+      </button>
+      <button
+        id="btnConnect"
+        class="secondary compact"
+        :disabled="
+          !snapshot.connected ||
+          snapshot.agent === 'starting' ||
+          snapshot.agent === 'stopping'
+        "
+        @click="runtime.startAgent()"
+      >
+        启动 Agent
+      </button>
+      <button
+        id="btnDisconnect"
+        class="secondary compact"
+        :disabled="!snapshot.connected || !snapshot.canStopAgent"
+        @click="runtime.stopAgent()"
+      >
+        停止 Agent
+      </button>
+      <span
+        class="session-item agent-status"
+        :title="snapshot.agentError || snapshot.agentDevice"
+        >Agent：{{ agentLabel }}</span
+      >
+      <span class="header-spacer" /><button
+        class="stop-button"
+        :disabled="!snapshot.connected"
+        @click="runtime.stopMotion()"
+      >
+        <CircleStop :size="14" />全部软停
+      </button>
+    </div>
+
+    <nav class="main-nav" aria-label="工作场景">
+      <div class="nav-section-label">工作场景</div>
+      <button
+        v-for="(item, index) in scenes"
+        :key="item.id"
+        :class="{ active: screen === item.id }"
+        :aria-current="screen === item.id ? 'page' : undefined"
+        @click="go(item.id)"
+      >
+        <component :is="item.icon" :size="18" /><span>{{ item.title }}</span
+        ><small>{{ index + 1 }}</small>
+      </button>
+      <div class="nav-bottom">
+        <button @click="observe = !observe">
+          <PanelBottom :size="17" /><span>{{
+            observe ? "收起观察区" : "展开观察区"
+          }}</span>
+        </button>
+        <div class="branch-label">
+          <i class="dot green" />WORKBENCH / A<span>共享会话 · 独立视图</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="main-workspace">
+      <div class="workspace-heading">
+        <div>
+          <div class="eyebrow">ROBOTICS / {{ screen.toUpperCase() }}</div>
+          <h1>
+            {{ title.title }}<span class="heading-slash">/</span
+            ><span class="heading-description">{{ title.subtitle }}</span>
+          </h1>
+        </div>
+        <div class="workspace-summary">
+          <span
+            ><i class="dot" :class="fresh ? 'green' : 'amber'" />{{
+              snapshot.online
+            }}
+            / {{ snapshot.total }}<small>设备在线</small></span
+          ><span class="micro" :class="{ stale: !fresh }"
+            >运动流：{{ motionAge }}</span
+          >
+        </div>
+      </div>
+      <div v-if="startupError" class="panel-error" role="alert">
+        {{ startupError }}
+      </div>
+      <div v-else-if="!initialized" class="startup-status">
+        正在加载工作区与控制模块…
+      </div>
+      <div v-if="snapshot.mappingError" class="mapping-warning" role="status">
+        {{ snapshot.mappingError }}；几何预览仍可使用。
+      </div>
+
+      <div class="workspace-grid">
+        <section class="objects-area surface">
+          <div class="panel-title">
+            <span>对象浏览器</span><small class="micro">URDF × TF</small>
+          </div>
+          <PanelHost id="jointList" :active="true" />
+          <div class="tree-footer">关节数据与设备测量分别显示</div>
+        </section>
+        <div class="stage-area" :class="`stage-${screen}`">
+          <div class="stage-toolbar">
+            <div class="breadcrumb">
+              <Box :size="14" /><span>{{
+                snapshot.model || "正在读取模型"
+              }}</span
+              ><span>/</span><b>{{ title.title }}</b>
+            </div>
+            <span class="tiny-tag"
+              >{{ snapshot.active }} ACTIVE · {{ snapshot.fault }} FAULT</span
+            >
+          </div>
+          <div class="stage-body">
+            <PanelHost id="arm" :active="true" class="robot-panel" /><PanelHost
+              id="readout"
+              :active="screen === 'run'"
+              class="readout-panel"
+            /><PanelHost
+              id="actionLibrary"
+              :active="screen === 'teach'"
+              class="action-panel-host"
+            /><PanelHost
+              id="sim"
+              :active="screen === 'sim'"
+              class="sim-panel-host"
+            />
+          </div>
+        </div>
+        <aside class="inspector-area inspector surface">
+          <div class="panel-title">
+            <span>对象检查器</span><SlidersHorizontal :size="14" />
+          </div>
+          <div class="object-heading">
+            <div class="eyebrow">
+              {{
+                snapshot.selectedId
+                  ? `ACTUATOR / ${snapshot.selectedId}`
+                  : "NO SELECTION"
+              }}
+            </div>
+            <h2>
+              {{
+                snapshot.selectedName ||
+                (snapshot.selectedId
+                  ? `电机 ${snapshot.selectedId}`
+                  : "未选择设备")
+              }}
+            </h2>
+            <span
+              class="status-chip"
+              :class="snapshot.connected ? 'success' : ''"
+              >{{ snapshot.selectedState
+              }}{{ snapshot.connected ? "" : " · 数据未连接" }}</span
+            >
+          </div>
+          <div class="inspector-tabs">
+            <button
+              :class="{ active: inspector === 'control' }"
+              @click="inspector = 'control'"
+            >
+              控制</button
+            ><button
+              :class="{ active: inspector === 'parameters' }"
+              @click="inspector = 'parameters'"
+            >
+              参数</button
+            ><button
+              :class="{ active: inspector === 'compensation' }"
+              @click="inspector = 'compensation'"
+            >
+              补偿
+            </button>
+          </div>
+          <div class="inspector-scroll">
+            <PanelHost
+              id="policy"
+              :active="inspector === 'control'"
+            /><PanelHost
+              id="command"
+              :active="inspector === 'control'"
+            /><PanelHost
+              id="deviceParams"
+              :active="inspector === 'parameters'"
+            /><PanelHost
+              id="feedforward"
+              :active="inspector === 'compensation'"
+            />
+          </div>
+        </aside>
+        <section v-show="observe" class="observer-area observer surface">
+          <div class="observer-head">
+            <div class="observer-tabs">
+              <button
+                v-for="item in [
+                  { id: 'curve', title: '曲线' },
+                  { id: 'events', title: '事件日志' },
+                  { id: 'history', title: '命令记录' },
+                  { id: 'imu', title: 'IMU' },
+                ]"
+                :key="item.id"
+                :class="{ active: observation === item.id }"
+                @click="observation = item.id"
+              >
+                {{ item.title }}
+              </button>
+            </div>
+            <span class="micro">{{ fresh ? "LIVE" : "等待 / 陈旧" }}</span>
+          </div>
+          <div class="observation-body">
+            <PanelHost
+              id="curve"
+              :active="observe && observation === 'curve'"
+            /><PanelHost
+              id="events"
+              :active="observe && observation === 'events'"
+            /><PanelHost
+              id="history"
+              :active="observe && observation === 'history'"
+            /><PanelHost id="imu" :active="observe && observation === 'imu'" />
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <span
+        ><i class="dot" :class="snapshot.connected ? 'green' : 'amber'" />ROS
+        {{ snapshot.connected ? "已连接" : "未连接"
+        }}<span class="footer-separator">|</span>运动流：{{ motionAge }}</span
+      ><span class="actual-route"
+        >命令节拍输出：{{ snapshot.outputTopic || "尚未收到状态" }}</span
+      >
+    </footer>
+    <div v-if="notice" class="toast" role="status">
+      <span>{{ notice }}</span
+      ><button class="icon-button" aria-label="关闭提示" @click="notice = ''">
+        ×
+      </button>
+    </div>
+  </div>
+</template>

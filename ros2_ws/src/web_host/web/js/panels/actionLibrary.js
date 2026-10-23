@@ -6,7 +6,7 @@
 // 播放调度是模块级的：切屏不打断已下发的动作，UI 只是视图。
 import { store, markDirty, DIRTY } from '../core/store.js';
 import { $, TRAJ_MAX_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
-import { pub, isConnected, nextPolicyGeneration } from '../core/ros.js';
+import { pub, isConnected, nextPolicyGeneration, getConnectionGeneration } from '../core/ros.js';
 import { playbackReadinessError, sendTargets } from './command.js';
 import { isUnprotected } from './policy.js';
 
@@ -33,7 +33,15 @@ const player = {
   windowDurMs: 0,
   tidSeq: 90000,
   cancelRequested: false,
+  connectionGeneration: 0,
 };
+
+function assertPlaybackSession() {
+  if (player.cancelRequested) throw new Error('已停止');
+  if (!isConnected() || player.connectionGeneration !== getConnectionGeneration()) {
+    throw new Error('连接已更换或中断，请重新确认后播放');
+  }
+}
 
 // 预览（列表行点击展开）：存**解析后**的轨迹（loadSeries 产物），不是原文——
 // 预览要回答的是"这条动作是什么样"（时刻×各台位置 + 范围），原文留给需要的人
@@ -185,6 +193,7 @@ export function makeWindows(steps, idCount) {
 }
 
 function sendWindow(index) {
+  assertPlaybackSession();
   const chunk = player.windows[index];
   const t0 = chunk[0].t;
   player.tidSeq = (player.tidSeq + 1) >>> 0;
@@ -224,6 +233,7 @@ async function waitWindow(tid) {
   const deadline = Date.now() + player.windowDurMs + TRAJ_STATE_TIMEOUT_PAD_MS;
   while (Date.now() < deadline) {
     if (player.cancelRequested) return 'stopped';
+    assertPlaybackSession();
     const state = store.traj.state;
     if (state && state.trajectory_id === tid) {
       if (!state.active) return 'canceled';
@@ -235,6 +245,7 @@ async function waitWindow(tid) {
 }
 
 async function armMotors() {
+  assertPlaybackSession();
   const generation = nextPolicyGeneration();
   pub('policy', {
     sync_time_ns: Date.now() * 1e6,
@@ -254,6 +265,7 @@ async function armMotors() {
   }
   markDirty(DIRTY.POLICY);
   await sleep(ARM_SETTLE_MS);
+  assertPlaybackSession();
 }
 
 // 对齐起点：把轨迹首点作为**设定值**压过去并保持。保持由主机侧的 command_streamer
@@ -266,11 +278,13 @@ async function alignToStart() {
     return { motor_id: id, position, velocity: 0, effort: 0 };
   });
   if (player.cancelRequested) throw new Error('已停止');
+  assertPlaybackSession();
   sendTargets(targets);
   const endAt = Date.now() + ALIGN_MS;
   while (Date.now() < endAt) {
     // 仍按 ALIGN_PERIOD_MS 醒一次：只为了尽快响应「停止」，不是为了重发。
     if (player.cancelRequested) throw new Error('已停止');
+    assertPlaybackSession();
     await sleep(ALIGN_PERIOD_MS);
   }
 }
@@ -305,6 +319,7 @@ export async function playAction(name, options) {
   player.phase = 'running';
   player.error = '';
   player.cancelRequested = false;
+  player.connectionGeneration = getConnectionGeneration();
   player.name = name;
   player.kp = options.kp;
   player.kd = options.kd;
@@ -315,8 +330,11 @@ export async function playAction(name, options) {
     announce();
     const response = await fetch(
       `/api/actions/${encodeURIComponent(name)}`, { cache: 'no-store' });
+    assertPlaybackSession();
     if (!response.ok) throw new Error(`读取动作失败：HTTP ${response.status}`);
-    const { ids, steps } = loadSeries(await response.json());
+    const document_ = await response.json();
+    assertPlaybackSession();
+    const { ids, steps } = loadSeries(document_);
     const blocked = playbackReadinessError(ids);
     if (blocked) throw new Error(blocked);
     const unprotected = ids.filter(isUnprotected);
@@ -335,6 +353,7 @@ export async function playAction(name, options) {
     holdCurrentPose();
     cancelTrajectory();
     await sleep(CANCEL_SETTLE_MS);
+    assertPlaybackSession();
     if (player.cancelRequested) throw new Error('已停止');
 
     if (player.enable) {
@@ -350,6 +369,7 @@ export async function playAction(name, options) {
     player.detail = '对齐起点…';
     announce();
     await alignToStart();
+    assertPlaybackSession();
 
     for (player.round = 0; ; player.round++) {
       for (let index = 0; index < player.windows.length; index++) {

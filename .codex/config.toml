@@ -1,0 +1,6 @@
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+CLAUDE_CODE_SUBAGENT_MODEL = "ccs-claude-opencode--deepseek-v4.1-flash"
+CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL = "ccs-claude-opencode--deepseek-v4.1-flash"

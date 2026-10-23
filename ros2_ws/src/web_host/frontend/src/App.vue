@@ -18,6 +18,7 @@ import {
   PanelBottom,
   ArrowUpRight,
 } from "@lucide/vue";
+import HostLimits from "./components/HostLimits.vue";
 import PanelHost from "./components/PanelHost.vue";
 import {
   runtime,
@@ -358,8 +359,10 @@ onBeforeUnmount(() => {
             >
               补偿
             </button>
+            <button :class="{ active: inspector === 'limits' }" @click="inspector = 'limits'">主机限位</button>
           </div>
           <div class="inspector-scroll">
+            <HostLimits :editing="inspector === 'limits'" />
             <PanelHost
               id="policy"
               :active="inspector === 'control'"
@@ -375,7 +378,7 @@ onBeforeUnmount(() => {
             />
           </div>
         </aside>
-        <section v-show="observe" class="observer-area observer surface">
+        <section class="observer-area observer surface">
           <div class="observer-head">
             <div class="observer-tabs">
               <button
@@ -387,14 +390,23 @@ onBeforeUnmount(() => {
                 ]"
                 :key="item.id"
                 :class="{ active: observation === item.id }"
-                @click="observation = item.id"
+                @click="observation = item.id; observe = true"
               >
                 {{ item.title }}
               </button>
             </div>
-            <span class="micro">{{ fresh ? "LIVE" : "等待 / 陈旧" }}</span>
+            <div class="observer-controls">
+              <span class="micro">{{ fresh ? "LIVE" : "等待 / 陈旧" }}</span>
+              <button
+                :aria-expanded="observe"
+                aria-controls="observation-content"
+                @click="observe = !observe"
+              >
+                <PanelBottom :size="14" />{{ observe ? "收起" : "展开" }}
+              </button>
+            </div>
           </div>
-          <div class="observation-body">
+          <div id="observation-content" v-show="observe" class="observation-body">
             <PanelHost
               id="curve"
               :active="observe && observation === 'curve'"

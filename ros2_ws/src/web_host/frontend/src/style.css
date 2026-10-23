@@ -460,6 +460,7 @@ kbd {
   grid-row: 1/3;
 }
 .stage-area {
+  overflow: hidden;
   grid-column: 2;
   grid-row: 1;
   display: flex;
@@ -516,11 +517,10 @@ kbd {
   min-width: 0;
 }
 .observer-hidden .workspace-grid {
-  grid-template-rows: minmax(540px, 1fr);
+  grid-template-rows: minmax(540px, 1fr) 40px;
 }
-.observer-hidden .objects-area,
-.observer-hidden .inspector-area {
-  grid-row: 1;
+.observer-hidden .observer-area {
+  height: 40px;
 }
 .tree-footer {
   margin-top: auto;
@@ -632,6 +632,10 @@ tr:hover {
   background: #85dfb805;
 }
 .observer {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -643,6 +647,14 @@ tr:hover {
   border-bottom: 1px solid var(--border);
   height: 39px;
   flex-shrink: 0;
+}
+.observer-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.observer-controls button {
+  white-space: nowrap;
 }
 .observer-tabs {
   height: 100%;
@@ -1172,4 +1184,10 @@ tr:hover {
 }
 .inspector .cmd input::-webkit-inner-spin-button {
   appearance: none;
+}
+
+@media (max-width: 950px) {
+  .observer-hidden .workspace-grid {
+    grid-template-rows: 600px 40px;
+  }
 }

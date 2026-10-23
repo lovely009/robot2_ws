@@ -6,8 +6,9 @@
 // 由此带来的两处行为变化，都写在界面文案里：
 //   · 「下发」= 改设定值并**持续保持**（旧版单发一条，30 ms 后固件就软停了）；
 //   · 停台架要用「停止」（发空目标列表 = 全部软停），清空表格**不**停台架。
-import { store, markDirty, DIRTY, syncWriteButtons } from '../core/store.js';
+import { store, MODEL, markDirty, DIRTY, syncWriteButtons } from '../core/store.js';
 import { $, LIFECYCLE } from '../core/format.js';
+import { limitsError } from '../core/host_limits.js';
 import { pub, isConnected } from '../core/ros.js';
 
 // sequence 仅作日志关联（固件侧的序号门 2026-09-15 已移除）；用页面启动时间降低
@@ -129,6 +130,8 @@ export function sendStop() {
 export function sendTargets(targets) {
   if (!isConnected()) return {ok: false, msg: '未连接 rosbridge'};
   if (!targets.length) return {ok: false, msg: '快照为空'};
+  const blocked = limitsError(targets, MODEL);
+  if (blocked) return {ok: false, msg: blocked};
   sequence = (sequence + 1) >>> 0;
   pub('setpoint', {
     // uint64：rosbridge 2.x 入站要求 JSON number（float64 会丢失末几位

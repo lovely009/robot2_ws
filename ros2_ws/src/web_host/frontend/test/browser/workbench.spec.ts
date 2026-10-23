@@ -254,3 +254,35 @@ test("静态工作台在没有 ROS 连接时显示离线，不生成模拟设备
   }
   expect(errors).toEqual([]);
 });
+
+test('主机限位阻止超限手动目标及整条动作，刷新后恢复', async ({ page }) => {
+  const fixture = await connectFixture(page);
+  await page.route('**/api/actions**', route => route.fulfill({json:
+    new URL(route.request().url()).pathname.endsWith('/limited.json')
+      ? {target_ids: [1], points: [
+        {time_from_start_ms: 0, motor_id: 1, position: 0},
+        {time_from_start_ms: 1000, motor_id: 1, position: 1}]}
+      : {actions: [{name: 'limited.json', target_ids: [1], target_count: 1, point_count: 2, duration_ms: 1000}]}}));
+  await page.goto('/workbench/#/run');
+  await page.getByRole('button', {name: '主机限位', exact: true}).click();
+  await page.getByRole('button', {name: '添加电机', exact: true}).click();
+  await page.getByLabel('最小位置 rad', {exact: true}).fill('-0.417');
+  await page.getByLabel('最大位置 rad', {exact: true}).fill('0.304');
+  await page.locator('.host-limits input[type="checkbox"]').check();
+  await page.getByRole('button', {name: '保存限位', exact: true}).click();
+  await expect(page.locator('.host-limits [role="status"]')).toContainText('已保存');
+  await page.getByRole('button', {name: '控制', exact: true}).click();
+  await expect(page.getByLabel('当前已保存主机限位')).toContainText('m1：-0.417 ～ 0.304 rad · 已启用');
+  await page.locator('#cmdRows .c-pos').fill('1');
+  await page.locator('#btnSendOnce').click();
+  await expect(page.locator('#cmdResult')).toContainText('主机限位');
+  await page.locator('.main-nav button').filter({hasText: '动作'}).click();
+  await expect(page.getByLabel('当前已保存主机限位')).toContainText('-0.417 ～ 0.304 rad');
+  await page.locator('button[data-action="play"]').click();
+  await expect(page.locator('[data-workbench-panel="actionLibrary"]')).toContainText('主机限位');
+  expect(fixture.publishes.filter(p => ['/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  await page.reload();
+  await page.getByRole('button', {name: '主机限位', exact: true}).click();
+  await expect(page.getByLabel('最小位置 rad', {exact: true})).toHaveValue('-0.417');
+  await expect(page.locator('.host-limits input[type="checkbox"]')).toBeChecked();
+});

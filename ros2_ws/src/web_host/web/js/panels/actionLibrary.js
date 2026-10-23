@@ -4,10 +4,11 @@
 //   切段（窗界复用末点保证位置连续；每窗独立 trajectory_id、首点 t=0），用固件
 //   回带的 elapsed_ms 在窗口边界交棒（固件受理时把 t=0 重设到受理时刻）。
 // 播放调度是模块级的：切屏不打断已下发的动作，UI 只是视图。
-import { store, markDirty, DIRTY } from '../core/store.js';
+import { store, MODEL, markDirty, DIRTY } from '../core/store.js';
 import { $, TRAJ_MAX_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
 import { pub, isConnected, nextPolicyGeneration, getConnectionGeneration } from '../core/ros.js';
 import { playbackReadinessError, sendTargets } from './command.js';
+import { limitsError } from '../core/host_limits.js';
 import { isUnprotected } from './policy.js';
 
 const ALIGN_MS = 2500;        // 起点对齐保持时长（快照 20Hz 重发）
@@ -211,6 +212,8 @@ function sendWindow(index) {
       });
     }
   }
+  const blocked = limitsError(points, MODEL);
+  if (blocked) throw new Error(blocked);
   pub('trajectory', {
     sync_time_ns: Date.now() * 1e6,
     sequence: tid,
@@ -279,7 +282,8 @@ async function alignToStart() {
   });
   if (player.cancelRequested) throw new Error('已停止');
   assertPlaybackSession();
-  sendTargets(targets);
+  const result = sendTargets(targets);
+  if (!result.ok) throw new Error(result.msg);
   const endAt = Date.now() + ALIGN_MS;
   while (Date.now() < endAt) {
     // 仍按 ALIGN_PERIOD_MS 醒一次：只为了尽快响应「停止」，不是为了重发。
@@ -335,6 +339,10 @@ export async function playAction(name, options) {
     const document_ = await response.json();
     assertPlaybackSession();
     const { ids, steps } = loadSeries(document_);
+    const limitError = limitsError(steps.flatMap(step => ids.map(id => ({
+      motor_id: id, position: step.vals[id][0],
+    }))), MODEL);
+    if (limitError) throw new Error(limitError);
     const blocked = playbackReadinessError(ids);
     if (blocked) throw new Error(blocked);
     const unprotected = ids.filter(isUnprotected);

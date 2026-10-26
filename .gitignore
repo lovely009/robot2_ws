@@ -1,0 +1,88 @@
+# ROS 2 / colcon 工作区构建产物
+/build/
+/install/
+/log/
+/ros2_ws/build/
+/ros2_ws/install/
+/ros2_ws/log/
+/micro_ros_agent/build/
+/micro_ros_agent/install/
+/micro_ros_agent/log/
+
+# 测试 fixture 中误生成的独立 colcon 工作区
+/ros2_ws/src/motor_hardware_interface/test/fixtures/build/
+/ros2_ws/src/motor_hardware_interface/test/fixtures/install/
+/ros2_ws/src/motor_hardware_interface/test/fixtures/log/
+
+# STM32 / PlatformIO / host 测试构建产物
+/micro_ros_firmware/.pio/
+/micro_ros_firmware/.host-build/
+/micro_ros_firmware/build/
+/micro_ros_firmware/test/host/build/
+/micro_ros_firmware/libmicroros/
+
+# CMake 本地生成文件
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/compile_commands.json
+
+# Python 缓存、测试与覆盖率产物
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+**/.coverage.*
+/ros2_ws/src/web_host/frontend/coverage/
+/ros2_ws/src/web_host/prototype/coverage/
+
+# Python 本地虚拟环境
+.venv/
+venv/
+
+# 本地环境配置（保留可提交的配置模板）
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# 编辑器与本地开发工具状态
+/.vscode/
+**/.idea/
+/.claude/
+/.agents/
+/.aws/
+/.codex/
+/.superpowers/
+/.worktrees/
+/.brooks-lint-history.json
+/aqtinstall.log
+*.swp
+*.swo
+*~
+
+# robot_sim 的可重生成发布件压缩包（目录内容已入库，见包 README）
+/ros2_ws/src/robot_sim/dist/*.zip
+
+# 操作系统元数据
+**/.DS_Store
+**/Thumbs.db
+**/desktop.ini
+**/*:Zone.Identifier
+
+# MuJoCo 运行时日志（工作目录下自动生成）
+/MUJOCO_LOG.TXT
+
+# ROS 2 运行时日志目录（在包源码目录内就地运行 launch 会生成）
+/ros2_ws/src/**/log/
+
+# Web 工作台前端开发产物
+node_modules/
+/ros2_ws/src/web_host/prototype/dist/
+/ros2_ws/src/web_host/web/workbench/
+/ros2_ws/src/web_host/frontend/test-results/
+/ros2_ws/src/web_host/frontend/playwright-report/

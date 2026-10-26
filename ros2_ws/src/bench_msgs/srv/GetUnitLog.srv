@@ -1,0 +1,7 @@
+# 按需获取会话 unit 尾部日志，不放入周期状态快照。
+string unit_name        # 四个固定 unit 名之一（bench-simulation / bench-motor-backend / bench-agent / bench-gravity-feedforward）
+int32 lines             # 尾部行数
+---
+bool ok
+string error
+string text             # journalctl --user -u <unit> -n <lines> --output=cat

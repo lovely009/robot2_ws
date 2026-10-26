@@ -1,0 +1,6 @@
+# 在枚举到的串口上启动 micro-ROS Agent（只管理本节点启动的 Agent 进程）。
+string device             # /dev/serial/by-id/... 下的枚举串口
+---
+bool ok
+string error
+string status_json

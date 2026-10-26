@@ -1,0 +1,612 @@
+#include "control_mailbox.h"
+#include "motor_config_contract.hpp"
+
+#include <cassert>
+
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <atomic>
+#include <mutex>
+#include <thread>
+
+static control_command_snapshot_t make_snapshot(uint32_t sequence,
+    uint32_t received_tick_ms,
+    uint16_t motor_id,
+    float position) {
+  control_command_snapshot_t snapshot{};
+  snapshot.sequence = sequence;
+  snapshot.received_tick_ms = received_tick_ms;
+  snapshot.target_count = 1U;
+  snapshot.targets[0] = {motor_id, position, 0.0F, 0.0F};
+  return snapshot;
+}
+
+static control_mailbox_config_request_t make_mode_request(uint32_t request_id,
+    uint16_t motor_id,
+    uint8_t mode) {
+  control_mailbox_config_request_t request{};
+  request.request_id = request_id;
+  request.received_tick_ms = request_id * 10U;
+  request.motor_id = motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_MODE;
+  request.value.mode = mode;
+  return request;
+}
+
+static void test_command_snapshot_is_complete_and_latest_wins() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  control_command_snapshot_t first =
+      make_snapshot(7U, 100U, 42U, 1.5F);
+  assert(control_mailbox_submit_command(&mailbox, &first));
+  first.targets[0].position = 99.0F;
+
+  control_command_snapshot_t out{};
+  assert(control_mailbox_take_command(&mailbox, &out));
+  assert(out.sequence == 7U);
+  assert(out.received_tick_ms == 100U);
+  assert(out.target_count == 1U);
+  assert(out.targets[0].motor_id == 42U);
+  assert(out.targets[0].position == 1.5F);
+  assert(!control_mailbox_take_command(&mailbox, &out));
+
+  const control_command_snapshot_t second =
+      make_snapshot(8U, 110U, 43U, 2.5F);
+  const control_command_snapshot_t third =
+      make_snapshot(9U, 120U, 44U, 3.5F);
+  assert(control_mailbox_submit_command(&mailbox, &second));
+  assert(control_mailbox_submit_command(&mailbox, &third));
+  assert(mailbox.command.overwrite_count == 1U);
+  assert(control_mailbox_take_command(&mailbox, &out));
+  assert(out.sequence == 9U);
+  assert(out.targets[0].motor_id == 44U);
+}
+
+static void test_command_snapshot_accepts_64_targets_and_rejects_invalid_data() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  control_command_snapshot_t snapshot{};
+  snapshot.sequence = 10U;
+  snapshot.received_tick_ms = 200U;
+  snapshot.target_count = CONTROL_COMMAND_MAILBOX_MAX_TARGETS;
+  for (uint16_t index = 0U; index < snapshot.target_count; ++index) {
+    snapshot.targets[index] = {static_cast<uint16_t>(index + 1U),
+                               static_cast<float>(index), 0.0F, 0.0F};
+  }
+  assert(control_mailbox_submit_command(&mailbox, &snapshot));
+
+  control_command_snapshot_t invalid = snapshot;
+  invalid.target_count = CONTROL_COMMAND_MAILBOX_MAX_TARGETS + 1U;
+  assert(!control_mailbox_submit_command(&mailbox, &invalid));
+
+  invalid = snapshot;
+  invalid.target_count = 2U;
+  invalid.targets[1].motor_id = invalid.targets[0].motor_id;
+  assert(!control_mailbox_submit_command(&mailbox, &invalid));
+
+  invalid = snapshot;
+  invalid.target_count = 1U;
+  invalid.targets[0].position = std::numeric_limits<float>::quiet_NaN();
+  assert(!control_mailbox_submit_command(&mailbox, &invalid));
+
+  control_command_snapshot_t out{};
+  assert(control_mailbox_take_command(&mailbox, &out));
+  assert(out.target_count == CONTROL_COMMAND_MAILBOX_MAX_TARGETS);
+  assert(out.targets[63].motor_id == 64U);
+  assert(mailbox.command.invalid_snapshot_count == 3U);
+}
+
+static void test_config_is_neutral_bounded_fifo() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  for (uint32_t index = 0U;
+      index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
+    const control_mailbox_config_request_t request =
+        make_mode_request(index + 1U, static_cast<uint16_t>(index + 10U),
+        static_cast<uint8_t>(index));
+    assert(control_mailbox_submit_config(&mailbox, &request));
+  }
+  const control_mailbox_config_request_t full_request =
+      make_mode_request(99U, 99U, 1U);
+  assert(!control_mailbox_submit_config(&mailbox, &full_request));
+  assert(mailbox.config_count == CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY);
+  assert(mailbox.config_overflow_count == 1U); // 满：消费慢于生产
+  assert(mailbox.config_invalid_count == 0U);
+
+  for (uint32_t index = 0U;
+      index < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++index) {
+    control_mailbox_config_request_t out{};
+    assert(control_mailbox_take_config(&mailbox, &out));
+    assert(out.request_id == index + 1U);
+    assert(out.motor_id == index + 10U);
+    assert(out.value.mode == index);
+  }
+  control_mailbox_config_request_t out{};
+  assert(!control_mailbox_take_config(&mailbox, &out));
+
+  const control_mailbox_config_request_t recycled =
+      make_mode_request(100U, 100U, 2U);
+  assert(control_mailbox_submit_config(&mailbox, &recycled));
+  assert(control_mailbox_take_config(&mailbox, &out));
+  assert(out.request_id == 100U);
+}
+
+static void test_config_validation_covers_semantic_shape_only() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_config_request_t invalid = make_mode_request(0U, 1U, 0U);
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(1U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_GAINS;
+  invalid.value.gains = {std::numeric_limits<float>::quiet_NaN(), 1.0F};
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(2U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
+  invalid.value.position_limits = {1.0F, 1.0F};
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  // 速度/力矩限值：NaN、非正一律拒（设备侧管理对象，仅 CERB）
+  invalid = make_mode_request(3U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  invalid.value.max_velocity_rad_s = std::numeric_limits<float>::quiet_NaN();
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(4U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  invalid.value.max_velocity_rad_s = 0.0F;
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(5U, 1U, 0U);
+  invalid.kind = CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
+  invalid.value.max_torque_nm = -1.0F;
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+
+  invalid = make_mode_request(6U, 1U, 0U);
+  invalid.kind = static_cast<control_mailbox_config_kind_t>(99U);
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+  assert(mailbox.config_invalid_count == 7U); // 非法请求单独可辨
+
+  // 合法限值入队（正数、有限）
+  control_mailbox_config_request_t good = make_mode_request(7U, 1U, 0U);
+  good.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
+  good.value.max_velocity_rad_s = 3.0F;
+  assert(control_mailbox_submit_config(&mailbox, &good));
+  good = make_mode_request(8U, 1U, 0U);
+  good.kind = CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
+  good.value.max_torque_nm = 20.0F;
+  assert(control_mailbox_submit_config(&mailbox, &good));
+  assert(mailbox.config_invalid_count == 7U); // 合法请求不计入非法计数
+  assert(mailbox.config_overflow_count == 0U);
+}
+
+static void test_authorization_and_agent_edges_are_idempotent() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  const control_command_snapshot_t command =
+      make_snapshot(1U, 10U, 1U, 0.1F);
+  assert(control_mailbox_submit_command(&mailbox, &command));
+
+  control_mailbox_request_authorization(&mailbox, false);
+  control_mailbox_events_t events{};
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.authorization_disable_edge);
+  assert(events.authorization_pending);
+  assert(!events.authorization_requested);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  control_command_snapshot_t command_out{};
+  assert(!control_mailbox_take_command(&mailbox, nullptr));
+  assert(!control_mailbox_take_command(&mailbox, &command_out));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+
+  // 配置不属于运动授权；可以在禁能状态下进入低频事务队列。
+  const control_mailbox_config_request_t config_while_disabled =
+      make_mode_request(2U, 1U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &config_while_disabled));
+
+  control_mailbox_request_authorization(&mailbox, false);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  control_mailbox_request_authorization(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.authorization_pending);
+  assert(events.authorization_requested);
+  assert(control_mailbox_submit_command(&mailbox, &command));
+
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(!events.agent_disconnect_edge);
+  assert(control_mailbox_submit_command(&mailbox, &command));
+
+  const control_mailbox_config_request_t config =
+      make_mode_request(4U, 1U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &config));
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_disconnect_edge);
+  assert(events.authorization_disable_edge);
+  assert(!events.authorization_requested);
+  assert(!control_mailbox_take_command(&mailbox, &command_out));
+  control_mailbox_config_request_t config_out{};
+  assert(!control_mailbox_take_config(&mailbox, &config_out));
+
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+}
+
+// 授权/会话门拒绝的命令提交须计数。
+static void test_command_gate_rejections_are_counted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  const control_command_snapshot_t command =
+      make_snapshot(1U, 10U, 1U, 0.1F);
+
+  // 引导豁免：Agent 未上报前，授权默认允许 → 可提交。
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 0U);
+
+  control_mailbox_request_authorization(&mailbox, false);
+  control_mailbox_events_t events{};
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 1U); // 授权门拒绝可见
+
+  // 会话在线即授权，首次连接自动重立授权。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(events.authorization_pending); // 撤权后首连重立授权边沿
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 1U); // 放行不计数
+
+  // 显式置 true 已无变化（幂等）。
+  control_mailbox_request_authorization(&mailbox, true);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+
+  // 会话断开后命令门拒绝（授权由断链撤销）。
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(!control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 2U);
+
+  // 重连自动重立授权，命令重新放行。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(mailbox.command_rejected_count == 2U);
+}
+
+// 会话边沿矩阵及 take_events 返回值语义。
+static void test_session_edge_matrix() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  // 引导态无边沿，返回 false 仍携带当前电平。
+  control_mailbox_events_t events{};
+  assert(!control_mailbox_take_events(&mailbox, &events));
+  assert(events.authorization_requested); // 引导豁免电平
+  assert(!events.agent_connected_requested);
+
+  // 首次连接：state_pending 边沿，无断链边沿。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(events.agent_connected_requested);
+  assert(!events.agent_disconnect_edge);
+
+  // 重复同状态：无新边沿。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(!control_mailbox_take_events(&mailbox, &events));
+
+  // 连接后断开，产生断链边沿。
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_disconnect_edge);
+  assert(events.agent_state_pending);
+  assert(!events.agent_connected_requested);
+  // 断链撤销授权：电平随边沿一起可见。
+  assert(events.authorization_disable_edge);
+  assert(!events.authorization_requested);
+
+  // 会话门：断链期（重连前）config 提交被拒且计入会话计数。
+  const control_mailbox_config_request_t config =
+      make_mode_request(7U, 1U, 0U);
+  assert(!control_mailbox_submit_config(&mailbox, &config));
+  assert(mailbox.config_session_count == 1U);
+  assert(mailbox.config_invalid_count == 0U);
+  assert(mailbox.config_overflow_count == 0U);
+
+  // 重连恢复授权，连接/授权边沿同时可见，配置可重新排队。
+  control_mailbox_request_agent_connected(&mailbox, true);
+  assert(control_mailbox_take_events(&mailbox, &events));
+  assert(events.agent_state_pending);
+  assert(events.authorization_pending); // 重连重立授权边沿
+  assert(events.authorization_requested);
+  assert(control_mailbox_submit_config(&mailbox, &config));
+  assert(mailbox.config_session_count == 1U);
+
+  // 引导豁免前只见状态：新 mailbox 上"从未连接就断开"（防御路径）。
+  control_mailbox_t fresh{};
+  control_mailbox_init(&fresh);
+  control_mailbox_request_agent_connected(&fresh, false);
+  assert(control_mailbox_take_events(&fresh, &events));
+  assert(events.agent_state_pending);
+  assert(!events.agent_disconnect_edge);      // 从未连接 → 无断链边沿
+  assert(events.authorization_requested);     // 引导豁免未被撤销
+}
+
+// SET_ENABLE：逐电机 Enable 经 config FIFO 传递（ARD §19）。
+static void test_config_set_enable_queues() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_config_request_t request{};
+  request.request_id = 21U;
+  request.motor_id = 5U;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ENABLE;
+  request.value.enable = true;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+  control_mailbox_config_request_t out{};
+  assert(control_mailbox_take_config(&mailbox, &out));
+  assert(out.kind == CONTROL_MAILBOX_CONFIG_SET_ENABLE);
+  assert(out.value.enable == true);
+}
+
+// 配置提交与命令路径同序：会话门先于数据校验——断链期的非法载荷
+// 归因到 config_session_count，与 config_invalid_count 互斥不重复。
+static void test_config_gate_precedes_validation() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_request_agent_connected(&mailbox, true);
+  control_mailbox_events_t events{};
+  assert(control_mailbox_take_events(&mailbox, &events));
+  control_mailbox_request_agent_connected(&mailbox, false);
+  assert(control_mailbox_take_events(&mailbox, &events));
+
+  control_mailbox_config_request_t invalid = make_mode_request(0U, 1U, 0U);
+  assert(!control_mailbox_submit_config(&mailbox, &invalid));
+  assert(mailbox.config_session_count == 1U); // 会话门优先归因
+  assert(mailbox.config_invalid_count == 0U); // 不重复计数
+  assert(mailbox.config_overflow_count == 0U);
+}
+
+
+// REFRESH_PARAMS：无载荷请求，只凭 request_id/motor_id 即可入队。
+// 保护开关载荷是厂家原值 0/1：越界值必须在 mailbox 就挡掉（写出去的是
+// "关掉看门狗 + 限位保护"，不能靠猜）。
+static void test_safety_protect_request_validation() {
+  control_mailbox_t mailbox;
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_config_request_t req = make_mode_request(7U, 1U, 0U);
+  req.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
+  req.value.safety_protect_raw = 0U;
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.safety_protect_raw = 1U;
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.safety_protect_raw = 2U;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+  req.value.safety_protect_raw = 0xFFFFFFFFU;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+}
+
+// 保存请求：载荷是脏槽位位图，只挡空位图（没有要保存的对象）。
+// **易失槽必须能被受理**——保护开关/方向同样要落 W25 才算持久，归一在空板上
+// 恒写保护 ⇒ bit4 恒脏；若这里按"有保存码的槽位"掩码挡，每台电机的首次保存
+// 都会在 mailbox 被拒，system.save 整条失效。哪个槽真有厂家保存码是内核策略。
+static void test_save_request_validation() {
+  control_mailbox_t mailbox;
+  control_mailbox_init(&mailbox);
+
+  control_mailbox_config_request_t req = make_mode_request(7U, 1U, 0U);
+  req.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+
+  // 位置上下限 | 力矩限值：合法。
+  req.value.save_slots =
+      (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX));
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  req.value.save_slots = 0U;
+  assert(!control_mailbox_submit_config(&mailbox, &req));
+
+  // 含易失槽（保护开关 bit4）的脏位图：必须受理（见上方注释）。
+  req.value.save_slots = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
+  assert(control_mailbox_submit_config(&mailbox, &req));
+
+  // 保护 + 方向（bit4|bit5，全易失）：同样受理。
+  req.value.save_slots = (uint8_t)((1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY) |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION));
+  assert(control_mailbox_submit_config(&mailbox, &req));
+}
+
+// 方向载荷只有 0/1 两态：越界值在 mailbox 就挡掉，别让它进总线。
+static control_mailbox_config_request_t make_direction_request(uint32_t request_id,
+    uint16_t motor_id,
+    uint32_t raw) {
+  control_mailbox_config_request_t request{};
+  request.request_id = request_id;
+  request.received_tick_ms = request_id * 10U;
+  request.motor_id = motor_id;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
+  request.value.direction_raw = raw;
+  return request;
+}
+
+static void test_config_set_direction_value_range() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+
+  const control_mailbox_config_request_t ccw = make_direction_request(1U, 3U, 1U);
+  assert(control_mailbox_submit_config(&mailbox, &ccw));
+
+  const control_mailbox_config_request_t cw = make_direction_request(2U, 3U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &cw));
+
+  const control_mailbox_config_request_t bad = make_direction_request(3U, 3U, 2U);
+  assert(!control_mailbox_submit_config(&mailbox, &bad));
+
+  const control_mailbox_config_request_t neg =
+      make_direction_request(4U, 3U, 0xFFFFFFFFU);
+  assert(!control_mailbox_submit_config(&mailbox, &neg));
+}
+
+static void test_refresh_params_request_is_accepted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_request_agent_connected(&mailbox, true);
+
+  control_mailbox_config_request_t request{};
+  request.request_id = 1U;
+  request.received_tick_ms = 10U;
+  request.motor_id = 3U;
+  request.kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+
+  control_mailbox_config_request_t taken{};
+  assert(control_mailbox_take_config(&mailbox, &taken));
+  assert(taken.kind == CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS);
+  assert(taken.motor_id == 3U);
+}
+
+// SET_ZERO：同为无载荷请求。**注意**：mailbox 的 config_request_is_valid 是
+// 白名单（default: false），新增 kind 必须同时加进去——漏加会让请求在 mailbox
+// 就被拒（last_error=11），内核完全收不到、总线上一条帧都没有。
+static void test_set_zero_request_is_accepted() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  control_mailbox_request_agent_connected(&mailbox, true);
+
+  control_mailbox_config_request_t request{};
+  request.request_id = 7U;
+  request.received_tick_ms = 20U;
+  request.motor_id = 5U;
+  request.kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
+  assert(control_mailbox_submit_config(&mailbox, &request));
+  assert(mailbox.config_invalid_count == 0U);
+
+  control_mailbox_config_request_t taken{};
+  assert(control_mailbox_take_config(&mailbox, &taken));
+  assert(taken.kind == CONTROL_MAILBOX_CONFIG_SET_ZERO);
+  assert(taken.motor_id == 5U);
+}
+
+// clear 只撤销待消费输入，生命周期诊断计数继续保留。
+static void test_clear_discards_pending_but_keeps_diagnostics() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  const auto command = make_snapshot(1U, 10U, 1U, 1.0F);
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(control_mailbox_submit_command(&mailbox, &command));
+  assert(!control_mailbox_submit_command(&mailbox, nullptr));
+  const auto config = make_mode_request(1U, 1U, 0U);
+  assert(control_mailbox_submit_config(&mailbox, &config));
+  assert(!control_mailbox_submit_config(&mailbox, nullptr));
+
+  control_mailbox_clear_command(&mailbox);
+  control_mailbox_clear_config(&mailbox);
+  control_command_snapshot_t command_out{};
+  control_mailbox_config_request_t config_out{};
+  assert(!control_mailbox_take_command(&mailbox, &command_out));
+  assert(!control_mailbox_take_config(&mailbox, &config_out));
+  assert(mailbox.command.overwrite_count == 1U);
+  assert(mailbox.command.invalid_snapshot_count == 1U);
+  assert(mailbox.config_invalid_count == 1U);
+
+  control_policy_snapshot_t policy{};
+  policy.request_id = 1U;
+  assert(control_mailbox_submit_policy(&mailbox, &policy));
+  assert(!control_mailbox_submit_policy(&mailbox, nullptr));
+  control_mailbox_clear_policy(&mailbox);
+  assert(!control_mailbox_take_policy(&mailbox, &policy));
+  assert(mailbox.policy.invalid_policy_count == 1U);
+
+  control_trajectory_t cancel{};
+  cancel.segment_count = 1U;
+  assert(control_mailbox_submit_trajectory(&mailbox, &cancel));
+  assert(!control_mailbox_submit_trajectory(&mailbox, nullptr));
+  control_mailbox_clear_trajectory(&mailbox);
+  assert(!control_mailbox_take_trajectory(&mailbox, &cancel));
+  assert(mailbox.trajectory.invalid_trajectory_count == 1U);
+}
+
+// 库本身不加锁；双任务共用同一互斥域时，消费结果必须始终是一份完整快照。
+static void test_command_concurrent_publish_take_with_shared_lock() {
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  std::mutex critical_section;
+  std::atomic<bool> finished{false};
+  constexpr uint32_t kIterations = 2000U;
+  uint32_t last_seen = 0U;
+
+  std::thread producer([&] {
+      for (uint32_t sequence = 1U; sequence <= kIterations; ++sequence) {
+        auto snapshot = make_snapshot(sequence, sequence * 2U, 1U,
+            static_cast<float>(sequence));
+        snapshot.target_count = 2U;
+        snapshot.targets[1] = {2U, static_cast<float>(sequence) + 1.0F,
+                               0.0F, 0.0F};
+        std::lock_guard<std::mutex> guard(critical_section);
+        assert(control_mailbox_submit_command(&mailbox, &snapshot));
+      }
+      finished = true;
+    });
+  std::thread consumer([&] {
+      for (;;) {
+        control_command_snapshot_t snapshot{};
+        bool taken;
+        {
+          std::lock_guard<std::mutex> guard(critical_section);
+          taken = control_mailbox_take_command(&mailbox, &snapshot);
+          if (!taken && finished) {
+            break;
+          }
+        }
+        if (!taken) {
+          std::this_thread::yield();
+          continue;
+        }
+        assert(snapshot.sequence > last_seen);
+        assert(snapshot.received_tick_ms == snapshot.sequence * 2U);
+        assert(snapshot.target_count == 2U);
+        assert(snapshot.targets[0].position == static_cast<float>(snapshot.sequence));
+        assert(snapshot.targets[1].position ==
+        static_cast<float>(snapshot.sequence) + 1.0F);
+        last_seen = snapshot.sequence;
+      }
+    });
+  producer.join();
+  consumer.join();
+  assert(last_seen == kIterations);
+}
+
+int main() {
+  test_refresh_params_request_is_accepted();
+  test_safety_protect_request_validation();
+  test_save_request_validation();
+  test_config_set_direction_value_range();
+  test_set_zero_request_is_accepted();
+  test_command_snapshot_is_complete_and_latest_wins();
+  test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
+  test_config_is_neutral_bounded_fifo();
+  test_config_validation_covers_semantic_shape_only();
+  test_authorization_and_agent_edges_are_idempotent();
+  test_command_gate_rejections_are_counted();
+  test_session_edge_matrix();
+  test_config_set_enable_queues();
+  test_config_gate_precedes_validation();
+  test_clear_discards_pending_but_keeps_diagnostics();
+  test_command_concurrent_publish_take_with_shared_lock();
+  return 0;
+}

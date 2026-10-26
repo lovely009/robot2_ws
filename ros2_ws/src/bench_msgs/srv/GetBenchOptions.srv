@@ -1,0 +1,7 @@
+# 台架环境枚举：CAN 接口 / 串口 / 可用模型（供 web 仿真面板与顶栏串口下拉）。
+---
+# *_json 字段为 JSON 数组，由 rosbridge 透传。
+string can_interfaces_json
+string serial_ports_json
+string[] simulation_models    # 有 config/simulation_topology.yaml 的模型
+string[] mujoco_models        # 有 mujoco/<名>.xml 且 standalone.urdf 的模型

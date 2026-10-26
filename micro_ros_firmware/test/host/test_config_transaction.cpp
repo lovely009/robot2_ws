@@ -1,0 +1,271 @@
+#include "config_transaction.hpp"
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include "save_transaction.h"
+
+using namespace config_transaction;
+
+static Request request(uint32_t id = 1) {
+  Request r{};
+  r.session_id = 9;
+  r.request_id = id;
+  r.count = r.size = 1;
+  r.targets[0] = {2, 2, 3.0f};
+  return r;
+}
+
+struct SaveFixture {
+  save_transaction_t save{};
+  Coordinator coordinator;
+  int slot;
+  uint32_t next_id = 1000, device_id = 0, storage_id = 0;
+  uint16_t submitted_count = 0, completed = 0, error = 0;
+  save_transaction_storage_result_t storage_result = SAVE_TRANSACTION_STORAGE_IDLE;
+  save_transaction_ports_t ports{};
+
+  SaveFixture() {
+    auto r = request();
+    r.kind = 1; r.count = r.size = 0;
+    slot = coordinator.begin(r, 9, 0);
+    coordinator.external(slot);
+    ports.context = this;
+    ports.next_request_id = [](void *p) {
+          return ++static_cast<SaveFixture *>(p)->next_id;
+        };
+    ports.submit_device_save = [](void *p, uint32_t id, uint16_t, uint8_t) {
+          auto &f = *static_cast<SaveFixture *>(p);
+          f.device_id = id; ++f.submitted_count; return true;
+        };
+    ports.request_storage_save = [](void *p, uint32_t id) {
+          static_cast<SaveFixture *>(p)->storage_id = id; return true;
+        };
+    ports.take_storage_result = [](void *p, uint32_t *id) {
+          auto &f = *static_cast<SaveFixture *>(p);
+          *id = f.storage_id; return f.storage_result;
+        };
+    ports.report_error = [](void *p, save_transaction_error_t, uint16_t, uint16_t code) {
+          static_cast<SaveFixture *>(p)->error = code ? code : 20;
+        };
+    save_transaction_request(&save);
+  }
+  void poll(uint32_t now) {
+    const save_transaction_target_t target{2, 1};
+    auto effect = save_transaction_poll(&save, now, &target, 1, &ports);
+    if (effect.completed) {
+      coordinator.complete(slot, completed, 1 - completed, error);
+    }
+  }
+  void device(bool ok) {
+    if (save_transaction_on_device_result(&save, device_id, ok, 2, ok ? 0 : 5, &ports) && ok) {
+      ++completed;
+    }
+  }
+};
+
+static void test_save_device_and_w25_completion() {
+  SaveFixture f;
+  f.poll(0);
+  assert(f.submitted_count == 1 && f.storage_id == 0);
+  auto retry = request(); retry.kind = 1; retry.count = retry.size = 0;
+  assert(f.coordinator.begin(retry, 9, 1) < 0);
+  f.poll(1);
+  assert(f.submitted_count == 1);
+  f.device(true);
+  f.device(true); // 重复内核结果只计一次。
+  f.poll(2);
+  assert(f.storage_id != 0 && f.completed == 1);
+  assert(f.coordinator.result(f.slot)->status == kPending);
+  f.storage_result = SAVE_TRANSACTION_STORAGE_OK;
+  f.poll(3);
+  assert(f.coordinator.result(f.slot)->status == kSucceeded);
+  assert(f.coordinator.begin(retry, 9, 4) < 0);
+  f.poll(4);
+  assert(f.submitted_count == 1);
+
+  SaveFixture failed;
+  failed.poll(0); failed.device(true); failed.poll(1);
+  failed.storage_result = SAVE_TRANSACTION_STORAGE_FAIL;
+  failed.poll(2);
+  assert(failed.coordinator.result(failed.slot)->status == kFailed);
+  assert(failed.coordinator.result(failed.slot)->completed_targets == 1);
+
+  SaveFixture timeout;
+  timeout.poll(0); timeout.poll(SAVE_TRANSACTION_TIMEOUT_MS);
+  assert(timeout.coordinator.result(timeout.slot)->status == kFailed);
+  assert(timeout.coordinator.result(timeout.slot)->failed_targets == 1);
+  assert(timeout.storage_id == 0);
+}
+
+static void test_exact_content_and_sessions() {
+  Coordinator c;
+  auto r = request();
+  int slot = c.begin(r, 9, UINT32_MAX - 10);
+  assert(slot >= 0 && c.track(slot, 1));
+  c.submitted(slot, 1, 0);
+  auto changed = r;
+  changed.sync_time_ns = 1;
+  assert(c.begin(changed, 9, 0) < 0);
+  Result out{};
+  assert(c.peek(out) && out.status == kPending); c.ack();
+  changed = r;
+  uint32_t bits = 0x7fc00001;
+  std::memcpy(&changed.targets[0].value, &bits, sizeof(bits));
+  assert(c.begin(changed, 9, 0) < 0);
+  assert(c.peek(out) && out.status == kConflict); c.ack();
+  c.poll(kTimeoutMs - 12);
+  assert(c.result(slot)->status == kPending);
+  c.poll(kTimeoutMs - 11);
+  assert(c.result(slot)->status == kFailed);
+  changed = request(0);
+  assert(c.begin(changed, 9, 0) < 0);
+  assert(c.peek(out) && out.status == kFailed); c.ack();
+  changed = request(8); changed.session_id = 10;
+  assert(c.begin(changed, 9, 0) < 0);
+  assert(c.peek(out) && out.status == kFailed); c.ack();
+
+  Coordinator disconnect;
+  slot = disconnect.begin(request(), 9, 0);
+  assert(disconnect.track(slot, 8)); disconnect.submitted(slot, 1, 0);
+  disconnect.disconnect();
+  assert(disconnect.result(slot)->status == kFailed);
+  assert(!disconnect.on_result(8, true, 0));
+}
+
+static void test_evicted_save_cannot_replay() {
+  Coordinator c;
+  Result out{};
+  auto old_save = request();
+  old_save.kind = 1; old_save.count = old_save.size = 0;
+  int slot = c.begin(old_save, 9, 0);
+  assert(slot >= 0);
+  c.complete(slot, 1, 0, 0);
+  assert(c.peek(out)); c.ack();
+  for (uint32_t id = 2; id <= 12; ++id) {
+    auto r = old_save; r.request_id = id;
+    slot = c.begin(r, 9, id);
+    assert(slot >= 0);
+    c.complete(slot, 1, 0, 0);
+    assert(c.peek(out)); c.ack();
+  }
+  old_save.sync_time_ns = 100;
+  assert(c.request_high_water() == 12);
+  assert(c.begin(old_save, 9, 100) < 0);
+  assert(c.peek(out) && out.status == kFailed && out.error_code == 22);
+  c.ack();
+  auto gap = old_save; gap.request_id = 11;
+  assert(c.begin(gap, 9, 100) < 0); // 仍缓存的旧请求返回原成功。
+  assert(c.peek(out) && out.status == kSucceeded); c.ack();
+  auto next_session = old_save; next_session.session_id = 10;
+  assert(c.begin(next_session, 10, 0) >= 0);
+  assert(c.begin(old_save, 10, 0) < 0);
+  assert(c.peek(out) && out.status == kFailed); c.ack();
+}
+
+static void test_new_session_discards_old_results() {
+  Coordinator c;
+  for (uint32_t id = 1; id <= 8; ++id) {
+    int slot = c.begin(request(id), 9, 0);
+    assert(slot >= 0);
+    c.external(slot);
+  }
+  assert(c.begin(request(9), 9, 0) < 0);
+  Result stale{};
+  assert(c.peek(stale) && stale.status == kBusy);
+  c.set_session(10); // 连旧会话尚未 ack 的拒绝也不能阻塞新会话。
+  assert(c.request_high_water() == 0);
+  auto r = request(); r.session_id = 10;
+  int slot = c.begin(r, 10, 1);
+  assert(slot >= 0 && c.request_high_water() == 1);
+  c.complete(slot, 1, 0, 0);
+  Result out{};
+  assert(c.peek(out) && out.session_id == 10 && out.status == kSucceeded);
+  c.ack();
+  c.set_session(10);
+  assert(c.request_high_water() == 1);
+  assert(!c.peek(out));
+}
+
+int main() {
+  {
+    Coordinator reserved;
+    assert(reserved.begin(request(0x40000000U), 9, 0) < 0);
+    assert(reserved.begin(request(0x80000000U), 9, 0) < 0);
+    assert(reserved.request_high_water() == 0U);
+  }
+  test_new_session_discards_old_results();
+  test_evicted_save_cannot_replay();
+  test_save_device_and_w25_completion();
+  test_exact_content_and_sessions();
+  Coordinator c;
+  auto r = request();
+  int slot = c.begin(r, 9, 0);
+  assert(slot >= 0);
+  assert(c.track(slot, 101));
+  c.submitted(slot, 1, 0);
+  assert(c.begin(r, 9, 1) < 0);
+  assert(c.on_result(101, true, 0));
+  assert(!c.on_result(101, true, 0));
+  Result out{};
+  assert(c.peek(out) && out.status == kSucceeded && out.completed_targets == 1);
+  assert(c.peek(out)); // 未 ack 的结果必须保留。
+  c.ack();
+  assert(!c.peek(out));
+  assert(c.begin(r, 9, 2) < 0);
+  assert(c.peek(out) && out.status == kSucceeded);
+  c.ack();
+  r.targets[0].value = 4;
+  assert(c.begin(r, 9, 3) < 0);
+  assert(c.peek(out) && out.status == kConflict);
+  c.ack();
+  assert(c.begin(request(2), 0, 0) < 0);
+  assert(c.peek(out) && out.status == kFailed);
+  c.ack();
+
+  Coordinator full;
+  for (uint32_t i = 1; i <= 8; ++i) {
+    int s = full.begin(request(i), 9, 0);
+    assert(s >= 0);
+    assert(full.track(s, 100 + i));
+    full.submitted(s, 1, 0);
+  }
+  assert(full.begin(request(9), 9, 0) < 0);
+  assert(full.peek(out) && out.status == kBusy);
+  full.ack();
+  full.poll(kTimeoutMs);
+  for (int i = 0; i < 8; ++i) {
+    assert(full.peek(out) && out.status == kFailed && out.failed_targets == 1);
+    full.ack();
+  }
+  assert(!full.on_result(101, true, 0));
+
+  Coordinator partial;
+  slot = partial.begin(request(), 9, 0);
+  assert(partial.track(slot, 77));
+  partial.submitted(slot, 3, 11); // 已提交一项，剩余两项未提交。
+  assert(partial.on_result(77, true, 0));
+  assert(partial.peek(out) && out.status == kFailed);
+  assert(out.completed_targets == 1 && out.failed_targets == 2 && out.error_code == 11);
+
+  Coordinator race;
+  slot = race.begin(request(), 9, 0);
+  assert(race.track(slot, 78));
+  race.submitted(slot, 1, 0);
+  assert(race.peek(out) && out.status == kPending);
+  assert(race.on_result(78, true, 0));
+  race.ack(); // ack 旧 PENDING 不得抹掉新终态。
+  assert(race.peek(out) && out.status == kSucceeded);
+  race.ack();
+
+  Coordinator save;
+  r = request();
+  r.kind = 1; r.command = 0; r.count = r.size = 0;
+  slot = save.begin(r, 9, 0);
+  save.external(slot);
+  save.poll(kTimeoutMs * 3); // SAVE 的超时由现有保存状态机管理。
+  assert(save.peek(out) && out.status == kPending);
+  save.ack();
+  save.complete(slot, 2, 1, 20);
+  assert(save.peek(out) && out.status == kFailed && out.completed_targets == 2);
+  std::printf("config_transaction: all assertions passed; coordinator=%zu bytes\n", sizeof(Coordinator));
+}

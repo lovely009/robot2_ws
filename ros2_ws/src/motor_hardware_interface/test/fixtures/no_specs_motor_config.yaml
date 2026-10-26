@@ -1,0 +1,13 @@
+motor_hardware:
+  timing:
+    feedback_timeout_s: 0.10
+    initial_feedback_wait_s: 0.10
+  buses:
+    test_bus:
+      interface: vcan0
+  motors:
+    shoulder_yaw:
+      joint: shoulder_yaw_joint
+      bus: test_bus
+      type: vaxor_2530
+      id: 1

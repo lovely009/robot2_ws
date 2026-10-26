@@ -1,0 +1,4215 @@
+{
+  "sync_time_ns": 1789973077124634092,
+  "sequence": 20260921,
+  "trajectory_id": 1001,
+  "count": 600,
+  "target_count": 4,
+  "target_ids": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "points": [
+    {
+      "time_from_start_ms": 0,
+      "motor_id": 1,
+      "position": 0.0,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 0,
+      "motor_id": 2,
+      "position": 0.0,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 0,
+      "motor_id": 3,
+      "position": 0.0,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 0,
+      "motor_id": 4,
+      "position": 0.0,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 135,
+      "motor_id": 1,
+      "position": -0.005335,
+      "velocity": -0.074193,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 135,
+      "motor_id": 2,
+      "position": 0.003691,
+      "velocity": 0.052855,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 135,
+      "motor_id": 3,
+      "position": 0.000502,
+      "velocity": 0.00696,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 135,
+      "motor_id": 4,
+      "position": 0.005647,
+      "velocity": 0.078458,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 270,
+      "motor_id": 1,
+      "position": -0.018662,
+      "velocity": -0.118576,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 270,
+      "motor_id": 2,
+      "position": 0.013736,
+      "velocity": 0.094274,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 270,
+      "motor_id": 3,
+      "position": 0.001743,
+      "velocity": 0.01095,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 270,
+      "motor_id": 4,
+      "position": 0.019715,
+      "velocity": 0.124932,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 404,
+      "motor_id": 1,
+      "position": -0.035963,
+      "velocity": -0.13315,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 404,
+      "motor_id": 2,
+      "position": 0.028593,
+      "velocity": 0.124258,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 404,
+      "motor_id": 3,
+      "position": 0.003321,
+      "velocity": 0.01197,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 404,
+      "motor_id": 4,
+      "position": 0.037891,
+      "velocity": 0.139421,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 539,
+      "motor_id": 1,
+      "position": -0.053219,
+      "velocity": -0.117915,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 539,
+      "motor_id": 2,
+      "position": 0.046721,
+      "velocity": 0.142806,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 539,
+      "motor_id": 3,
+      "position": 0.004836,
+      "velocity": 0.01002,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 539,
+      "motor_id": 4,
+      "position": 0.055864,
+      "velocity": 0.121925,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 674,
+      "motor_id": 1,
+      "position": -0.066413,
+      "velocity": -0.07287,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 674,
+      "motor_id": 2,
+      "position": 0.066578,
+      "velocity": 0.149918,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 674,
+      "motor_id": 3,
+      "position": 0.005889,
+      "velocity": 0.005101,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 674,
+      "motor_id": 4,
+      "position": 0.069324,
+      "velocity": 0.072445,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 809,
+      "motor_id": 1,
+      "position": -0.07204,
+      "velocity": -0.022897,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 809,
+      "motor_id": 2,
+      "position": 0.087381,
+      "velocity": 0.181311,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 809,
+      "motor_id": 3,
+      "position": 0.00595,
+      "velocity": -0.008796,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 809,
+      "motor_id": 4,
+      "position": 0.074546,
+      "velocity": 0.019374,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 944,
+      "motor_id": 1,
+      "position": -0.074781,
+      "velocity": -0.017937,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 944,
+      "motor_id": 2,
+      "position": 0.118246,
+      "velocity": 0.273065,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 944,
+      "motor_id": 3,
+      "position": 0.002958,
+      "velocity": -0.035137,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 944,
+      "motor_id": 4,
+      "position": 0.077041,
+      "velocity": 0.017644,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1078,
+      "motor_id": 1,
+      "position": -0.076919,
+      "velocity": -0.013946,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1078,
+      "motor_id": 2,
+      "position": 0.160031,
+      "velocity": 0.34332,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1078,
+      "motor_id": 3,
+      "position": -0.003402,
+      "velocity": -0.05879,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1078,
+      "motor_id": 4,
+      "position": 0.079302,
+      "velocity": 0.015909,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1213,
+      "motor_id": 1,
+      "position": -0.078584,
+      "velocity": -0.010925,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1213,
+      "motor_id": 2,
+      "position": 0.209837,
+      "velocity": 0.392078,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1213,
+      "motor_id": 3,
+      "position": -0.01277,
+      "velocity": -0.079757,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1213,
+      "motor_id": 4,
+      "position": 0.081329,
+      "velocity": 0.014169,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1348,
+      "motor_id": 1,
+      "position": -0.079908,
+      "velocity": -0.008872,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1348,
+      "motor_id": 2,
+      "position": 0.264767,
+      "velocity": 0.419339,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1348,
+      "motor_id": 3,
+      "position": -0.024784,
+      "velocity": -0.098037,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1348,
+      "motor_id": 4,
+      "position": 0.083122,
+      "velocity": 0.012426,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1483,
+      "motor_id": 1,
+      "position": -0.08102,
+      "velocity": -0.007788,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1483,
+      "motor_id": 2,
+      "position": 0.321922,
+      "velocity": 0.425101,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1483,
+      "motor_id": 3,
+      "position": -0.03908,
+      "velocity": -0.11363,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1483,
+      "motor_id": 4,
+      "position": 0.084679,
+      "velocity": 0.010679,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1618,
+      "motor_id": 1,
+      "position": -0.082051,
+      "velocity": -0.007673,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1618,
+      "motor_id": 2,
+      "position": 0.378405,
+      "velocity": 0.409366,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1618,
+      "motor_id": 3,
+      "position": -0.055297,
+      "velocity": -0.126536,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1618,
+      "motor_id": 4,
+      "position": 0.086001,
+      "velocity": 0.008927,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1752,
+      "motor_id": 1,
+      "position": -0.083132,
+      "velocity": -0.008527,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1752,
+      "motor_id": 2,
+      "position": 0.431318,
+      "velocity": 0.372133,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1752,
+      "motor_id": 3,
+      "position": -0.073072,
+      "velocity": -0.136755,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1752,
+      "motor_id": 4,
+      "position": 0.087086,
+      "velocity": 0.007172,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1887,
+      "motor_id": 1,
+      "position": -0.084393,
+      "velocity": -0.01035,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1887,
+      "motor_id": 2,
+      "position": 0.477763,
+      "velocity": 0.313402,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1887,
+      "motor_id": 3,
+      "position": -0.092044,
+      "velocity": -0.144287,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 1887,
+      "motor_id": 4,
+      "position": 0.087934,
+      "velocity": 0.005412,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2022,
+      "motor_id": 1,
+      "position": -0.085965,
+      "velocity": -0.013141,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2022,
+      "motor_id": 2,
+      "position": 0.514843,
+      "velocity": 0.233173,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2022,
+      "motor_id": 3,
+      "position": -0.11185,
+      "velocity": -0.149133,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2022,
+      "motor_id": 4,
+      "position": 0.088545,
+      "velocity": 0.003648,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2157,
+      "motor_id": 1,
+      "position": -0.087979,
+      "velocity": -0.016902,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2157,
+      "motor_id": 2,
+      "position": 0.539659,
+      "velocity": 0.131446,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2157,
+      "motor_id": 3,
+      "position": -0.132128,
+      "velocity": -0.151291,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2157,
+      "motor_id": 4,
+      "position": 0.088917,
+      "velocity": 0.00188,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2292,
+      "motor_id": 1,
+      "position": -0.090566,
+      "velocity": -0.021632,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2292,
+      "motor_id": 2,
+      "position": 0.549314,
+      "velocity": 0.008222,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2292,
+      "motor_id": 3,
+      "position": -0.152516,
+      "velocity": -0.150763,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2292,
+      "motor_id": 4,
+      "position": 0.089052,
+      "velocity": 0.000108,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2426,
+      "motor_id": 1,
+      "position": -0.095861,
+      "velocity": -0.058301,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2426,
+      "motor_id": 2,
+      "position": 0.54826,
+      "velocity": -0.017016,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2426,
+      "motor_id": 3,
+      "position": -0.174842,
+      "velocity": -0.182169,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2426,
+      "motor_id": 4,
+      "position": 0.08831,
+      "velocity": -0.011541,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2561,
+      "motor_id": 1,
+      "position": -0.106109,
+      "velocity": -0.093065,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2561,
+      "motor_id": 2,
+      "position": 0.54481,
+      "velocity": -0.033981,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2561,
+      "motor_id": 3,
+      "position": -0.201521,
+      "velocity": -0.213238,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2561,
+      "motor_id": 4,
+      "position": 0.085994,
+      "velocity": -0.022612,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2696,
+      "motor_id": 1,
+      "position": -0.120768,
+      "velocity": -0.123756,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2696,
+      "motor_id": 2,
+      "position": 0.539153,
+      "velocity": -0.049753,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2696,
+      "motor_id": 3,
+      "position": -0.232213,
+      "velocity": -0.241721,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2696,
+      "motor_id": 4,
+      "position": 0.082271,
+      "velocity": -0.032425,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2831,
+      "motor_id": 1,
+      "position": -0.13929,
+      "velocity": -0.150373,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2831,
+      "motor_id": 2,
+      "position": 0.53145,
+      "velocity": -0.06433,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2831,
+      "motor_id": 3,
+      "position": -0.266571,
+      "velocity": -0.267617,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2831,
+      "motor_id": 4,
+      "position": 0.077309,
+      "velocity": -0.040979,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2966,
+      "motor_id": 1,
+      "position": -0.161125,
+      "velocity": -0.172917,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2966,
+      "motor_id": 2,
+      "position": 0.521863,
+      "velocity": -0.077714,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2966,
+      "motor_id": 3,
+      "position": -0.304245,
+      "velocity": -0.290928,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 2966,
+      "motor_id": 4,
+      "position": 0.071279,
+      "velocity": -0.048275,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3100,
+      "motor_id": 1,
+      "position": -0.185724,
+      "velocity": -0.191387,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3100,
+      "motor_id": 2,
+      "position": 0.510553,
+      "velocity": -0.089904,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3100,
+      "motor_id": 3,
+      "position": -0.344887,
+      "velocity": -0.311652,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3100,
+      "motor_id": 4,
+      "position": 0.064351,
+      "velocity": -0.054313,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3235,
+      "motor_id": 1,
+      "position": -0.212538,
+      "velocity": -0.205784,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3235,
+      "motor_id": 2,
+      "position": 0.497679,
+      "velocity": -0.1009,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3235,
+      "motor_id": 3,
+      "position": -0.388148,
+      "velocity": -0.32979,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3235,
+      "motor_id": 4,
+      "position": 0.056694,
+      "velocity": -0.059092,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3370,
+      "motor_id": 1,
+      "position": -0.241019,
+      "velocity": -0.216108,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3370,
+      "motor_id": 2,
+      "position": 0.483404,
+      "velocity": -0.110702,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3370,
+      "motor_id": 3,
+      "position": -0.43368,
+      "velocity": -0.345343,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3370,
+      "motor_id": 4,
+      "position": 0.048477,
+      "velocity": -0.062612,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3505,
+      "motor_id": 1,
+      "position": -0.270616,
+      "velocity": -0.222359,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3505,
+      "motor_id": 2,
+      "position": 0.467889,
+      "velocity": -0.119311,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3505,
+      "motor_id": 3,
+      "position": -0.481134,
+      "velocity": -0.358309,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3505,
+      "motor_id": 4,
+      "position": 0.03987,
+      "velocity": -0.064875,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3640,
+      "motor_id": 1,
+      "position": -0.300782,
+      "velocity": -0.224536,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3640,
+      "motor_id": 2,
+      "position": 0.451293,
+      "velocity": -0.126725,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3640,
+      "motor_id": 3,
+      "position": -0.530161,
+      "velocity": -0.368688,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3640,
+      "motor_id": 4,
+      "position": 0.031044,
+      "velocity": -0.065878,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3774,
+      "motor_id": 1,
+      "position": -0.330967,
+      "velocity": -0.22264,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3774,
+      "motor_id": 2,
+      "position": 0.433778,
+      "velocity": -0.132946,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3774,
+      "motor_id": 3,
+      "position": -0.580413,
+      "velocity": -0.376482,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3774,
+      "motor_id": 4,
+      "position": 0.022167,
+      "velocity": -0.065624,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3909,
+      "motor_id": 1,
+      "position": -0.360621,
+      "velocity": -0.21667,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3909,
+      "motor_id": 2,
+      "position": 0.415505,
+      "velocity": -0.137973,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3909,
+      "motor_id": 3,
+      "position": -0.631542,
+      "velocity": -0.38169,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 3909,
+      "motor_id": 4,
+      "position": 0.013409,
+      "velocity": -0.064111,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4044,
+      "motor_id": 1,
+      "position": -0.389196,
+      "velocity": -0.206627,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4044,
+      "motor_id": 2,
+      "position": 0.396635,
+      "velocity": -0.141806,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4044,
+      "motor_id": 3,
+      "position": -0.683198,
+      "velocity": -0.384311,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4044,
+      "motor_id": 4,
+      "position": 0.004939,
+      "velocity": -0.06134,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4179,
+      "motor_id": 1,
+      "position": -0.416143,
+      "velocity": -0.192511,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4179,
+      "motor_id": 2,
+      "position": 0.377329,
+      "velocity": -0.144445,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4179,
+      "motor_id": 3,
+      "position": -0.735033,
+      "velocity": -0.384346,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4179,
+      "motor_id": 4,
+      "position": -0.003072,
+      "velocity": -0.05731,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4313,
+      "motor_id": 1,
+      "position": -0.440913,
+      "velocity": -0.174321,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4313,
+      "motor_id": 2,
+      "position": 0.357747,
+      "velocity": -0.14589,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4313,
+      "motor_id": 3,
+      "position": -0.786699,
+      "velocity": -0.381796,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4313,
+      "motor_id": 4,
+      "position": -0.010455,
+      "velocity": -0.052021,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4448,
+      "motor_id": 1,
+      "position": -0.462956,
+      "velocity": -0.152058,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4448,
+      "motor_id": 2,
+      "position": 0.338052,
+      "velocity": -0.146142,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4448,
+      "motor_id": 3,
+      "position": -0.837847,
+      "velocity": -0.376659,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4448,
+      "motor_id": 4,
+      "position": -0.01704,
+      "velocity": -0.045475,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4583,
+      "motor_id": 1,
+      "position": -0.481724,
+      "velocity": -0.125722,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4583,
+      "motor_id": 2,
+      "position": 0.318402,
+      "velocity": -0.145199,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4583,
+      "motor_id": 3,
+      "position": -0.888127,
+      "velocity": -0.368936,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4583,
+      "motor_id": 4,
+      "position": -0.022658,
+      "velocity": -0.03767,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4718,
+      "motor_id": 1,
+      "position": -0.496667,
+      "velocity": -0.095312,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4718,
+      "motor_id": 2,
+      "position": 0.298961,
+      "velocity": -0.143063,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4718,
+      "motor_id": 3,
+      "position": -0.937193,
+      "velocity": -0.358626,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4718,
+      "motor_id": 4,
+      "position": -0.027139,
+      "velocity": -0.028606,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4853,
+      "motor_id": 1,
+      "position": -0.507236,
+      "velocity": -0.060829,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4853,
+      "motor_id": 2,
+      "position": 0.279887,
+      "velocity": -0.139733,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4853,
+      "motor_id": 3,
+      "position": -0.984694,
+      "velocity": -0.345731,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4853,
+      "motor_id": 4,
+      "position": -0.030313,
+      "velocity": -0.018284,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4987,
+      "motor_id": 1,
+      "position": -0.512883,
+      "velocity": -0.022273,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4987,
+      "motor_id": 2,
+      "position": 0.261343,
+      "velocity": -0.135209,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4987,
+      "motor_id": 3,
+      "position": -1.030283,
+      "velocity": -0.33025,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 4987,
+      "motor_id": 4,
+      "position": -0.032011,
+      "velocity": -0.006704,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5122,
+      "motor_id": 1,
+      "position": -0.513535,
+      "velocity": 0.004926,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5122,
+      "motor_id": 2,
+      "position": 0.243386,
+      "velocity": -0.132872,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5122,
+      "motor_id": 3,
+      "position": -1.074642,
+      "velocity": -0.344597,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5122,
+      "motor_id": 4,
+      "position": -0.030367,
+      "velocity": 0.059329,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5257,
+      "motor_id": 1,
+      "position": -0.512232,
+      "velocity": 0.014084,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5257,
+      "motor_id": 2,
+      "position": 0.225348,
+      "velocity": -0.134949,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5257,
+      "motor_id": 3,
+      "position": -1.123967,
+      "velocity": -0.384829,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5257,
+      "motor_id": 4,
+      "position": -0.014673,
+      "velocity": 0.169622,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5392,
+      "motor_id": 1,
+      "position": -0.509826,
+      "velocity": 0.021301,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5392,
+      "motor_id": 2,
+      "position": 0.206953,
+      "velocity": -0.138187,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5392,
+      "motor_id": 3,
+      "position": -1.177738,
+      "velocity": -0.410563,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5392,
+      "motor_id": 4,
+      "position": 0.014313,
+      "velocity": 0.256554,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5527,
+      "motor_id": 1,
+      "position": -0.506577,
+      "velocity": 0.02658,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5527,
+      "motor_id": 2,
+      "position": 0.188042,
+      "velocity": -0.142588,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5527,
+      "motor_id": 3,
+      "position": -1.234,
+      "velocity": -0.4218,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5527,
+      "motor_id": 4,
+      "position": 0.053442,
+      "velocity": 0.320126,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5661,
+      "motor_id": 1,
+      "position": -0.502747,
+      "velocity": 0.029918,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5661,
+      "motor_id": 2,
+      "position": 0.16846,
+      "velocity": -0.148152,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5661,
+      "motor_id": 3,
+      "position": -1.290801,
+      "velocity": -0.41854,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5661,
+      "motor_id": 4,
+      "position": 0.099567,
+      "velocity": 0.360338,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5796,
+      "motor_id": 1,
+      "position": -0.498598,
+      "velocity": 0.031318,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5796,
+      "motor_id": 2,
+      "position": 0.148049,
+      "velocity": -0.154877,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5796,
+      "motor_id": 3,
+      "position": -1.346185,
+      "velocity": -0.400783,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5796,
+      "motor_id": 4,
+      "position": 0.149537,
+      "velocity": 0.377189,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5931,
+      "motor_id": 1,
+      "position": -0.494391,
+      "velocity": 0.030777,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5931,
+      "motor_id": 2,
+      "position": 0.126654,
+      "velocity": -0.162765,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5931,
+      "motor_id": 3,
+      "position": -1.398198,
+      "velocity": -0.368529,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 5931,
+      "motor_id": 4,
+      "position": 0.200205,
+      "velocity": 0.37068,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6066,
+      "motor_id": 1,
+      "position": -0.490388,
+      "velocity": 0.028297,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6066,
+      "motor_id": 2,
+      "position": 0.104116,
+      "velocity": -0.171816,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6066,
+      "motor_id": 3,
+      "position": -1.444886,
+      "velocity": -0.321778,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6066,
+      "motor_id": 4,
+      "position": 0.24842,
+      "velocity": 0.340811,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6201,
+      "motor_id": 1,
+      "position": -0.48685,
+      "velocity": 0.023878,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6201,
+      "motor_id": 2,
+      "position": 0.080281,
+      "velocity": -0.182029,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6201,
+      "motor_id": 3,
+      "position": -1.484295,
+      "velocity": -0.26053,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6201,
+      "motor_id": 4,
+      "position": 0.291035,
+      "velocity": 0.287582,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6335,
+      "motor_id": 1,
+      "position": -0.484038,
+      "velocity": 0.017518,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6335,
+      "motor_id": 2,
+      "position": 0.054991,
+      "velocity": -0.193404,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6335,
+      "motor_id": 3,
+      "position": -1.514472,
+      "velocity": -0.184784,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6335,
+      "motor_id": 4,
+      "position": 0.324901,
+      "velocity": 0.210992,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6470,
+      "motor_id": 1,
+      "position": -0.482214,
+      "velocity": 0.00922,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6470,
+      "motor_id": 2,
+      "position": 0.028088,
+      "velocity": -0.205941,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6470,
+      "motor_id": 3,
+      "position": -1.533461,
+      "velocity": -0.094542,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6470,
+      "motor_id": 4,
+      "position": 0.346868,
+      "velocity": 0.111043,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6605,
+      "motor_id": 1,
+      "position": -0.481718,
+      "velocity": -0.013646,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6605,
+      "motor_id": 2,
+      "position": -0.000653,
+      "velocity": -0.231123,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6605,
+      "motor_id": 3,
+      "position": -1.539216,
+      "velocity": 0.024942,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6605,
+      "motor_id": 4,
+      "position": 0.353726,
+      "velocity": -0.022106,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6740,
+      "motor_id": 1,
+      "position": -0.492467,
+      "velocity": -0.138467,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6740,
+      "motor_id": 2,
+      "position": -0.039913,
+      "velocity": -0.342885,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6740,
+      "motor_id": 3,
+      "position": -1.51957,
+      "velocity": 0.253079,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6740,
+      "motor_id": 4,
+      "position": 0.336313,
+      "velocity": -0.224308,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6875,
+      "motor_id": 1,
+      "position": -0.517059,
+      "velocity": -0.219034,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6875,
+      "motor_id": 2,
+      "position": -0.090803,
+      "velocity": -0.40368,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6875,
+      "motor_id": 3,
+      "position": -1.474622,
+      "velocity": 0.400334,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 6875,
+      "motor_id": 4,
+      "position": 0.296475,
+      "velocity": -0.354823,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7009,
+      "motor_id": 1,
+      "position": -0.549529,
+      "velocity": -0.255348,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7009,
+      "motor_id": 2,
+      "position": -0.146452,
+      "velocity": -0.413509,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7009,
+      "motor_id": 3,
+      "position": -1.415277,
+      "velocity": 0.466707,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7009,
+      "motor_id": 4,
+      "position": 0.243876,
+      "velocity": -0.41365,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7144,
+      "motor_id": 1,
+      "position": -0.583911,
+      "velocity": -0.24741,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7144,
+      "motor_id": 2,
+      "position": -0.199992,
+      "velocity": -0.372373,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7144,
+      "motor_id": 3,
+      "position": -1.352435,
+      "velocity": 0.452198,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7144,
+      "motor_id": 4,
+      "position": 0.188179,
+      "velocity": -0.40079,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7279,
+      "motor_id": 1,
+      "position": -0.61424,
+      "velocity": -0.195218,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7279,
+      "motor_id": 2,
+      "position": -0.244552,
+      "velocity": -0.280271,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7279,
+      "motor_id": 3,
+      "position": -1.297001,
+      "velocity": 0.356806,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7279,
+      "motor_id": 4,
+      "position": 0.139047,
+      "velocity": -0.316243,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7414,
+      "motor_id": 1,
+      "position": -0.634552,
+      "velocity": -0.098774,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7414,
+      "motor_id": 2,
+      "position": -0.273261,
+      "velocity": -0.137203,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7414,
+      "motor_id": 3,
+      "position": -1.259877,
+      "velocity": 0.180532,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7414,
+      "motor_id": 4,
+      "position": 0.106143,
+      "velocity": -0.160009,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7549,
+      "motor_id": 1,
+      "position": -0.639561,
+      "velocity": 0.003569,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7549,
+      "motor_id": 2,
+      "position": -0.279749,
+      "velocity": 0.028367,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7549,
+      "motor_id": 3,
+      "position": -1.25066,
+      "velocity": -0.00314,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7549,
+      "motor_id": 4,
+      "position": 0.098025,
+      "velocity": 0.005654,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7683,
+      "motor_id": 1,
+      "position": -0.63823,
+      "velocity": 0.015921,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7683,
+      "motor_id": 2,
+      "position": -0.269168,
+      "velocity": 0.126531,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7683,
+      "motor_id": 3,
+      "position": -1.251831,
+      "velocity": -0.014004,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7683,
+      "motor_id": 4,
+      "position": 0.100134,
+      "velocity": 0.025218,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7818,
+      "motor_id": 1,
+      "position": -0.635341,
+      "velocity": 0.026682,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7818,
+      "motor_id": 2,
+      "position": -0.246206,
+      "velocity": 0.21205,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7818,
+      "motor_id": 3,
+      "position": -1.254372,
+      "velocity": -0.02347,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7818,
+      "motor_id": 4,
+      "position": 0.104711,
+      "velocity": 0.042262,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7953,
+      "motor_id": 1,
+      "position": -0.631108,
+      "velocity": 0.035852,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7953,
+      "motor_id": 2,
+      "position": -0.212569,
+      "velocity": 0.284924,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7953,
+      "motor_id": 3,
+      "position": -1.258095,
+      "velocity": -0.031535,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 7953,
+      "motor_id": 4,
+      "position": 0.111415,
+      "velocity": 0.056786,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8088,
+      "motor_id": 1,
+      "position": -0.625747,
+      "velocity": 0.043431,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8088,
+      "motor_id": 2,
+      "position": -0.16996,
+      "velocity": 0.345154,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8088,
+      "motor_id": 3,
+      "position": -1.262811,
+      "velocity": -0.038202,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8088,
+      "motor_id": 4,
+      "position": 0.119907,
+      "velocity": 0.06879,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8223,
+      "motor_id": 1,
+      "position": -0.619471,
+      "velocity": 0.049419,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8223,
+      "motor_id": 2,
+      "position": -0.120086,
+      "velocity": 0.39274,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8223,
+      "motor_id": 3,
+      "position": -1.268331,
+      "velocity": -0.043468,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8223,
+      "motor_id": 4,
+      "position": 0.129847,
+      "velocity": 0.078274,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8357,
+      "motor_id": 1,
+      "position": -0.612495,
+      "velocity": 0.053815,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8357,
+      "motor_id": 2,
+      "position": -0.064649,
+      "velocity": 0.427681,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8357,
+      "motor_id": 3,
+      "position": -1.274467,
+      "velocity": -0.047336,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8357,
+      "motor_id": 4,
+      "position": 0.140896,
+      "velocity": 0.085238,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8492,
+      "motor_id": 1,
+      "position": -0.605034,
+      "velocity": 0.056621,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8492,
+      "motor_id": 2,
+      "position": -0.005354,
+      "velocity": 0.449977,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8492,
+      "motor_id": 3,
+      "position": -1.28103,
+      "velocity": -0.049803,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8492,
+      "motor_id": 4,
+      "position": 0.152713,
+      "velocity": 0.089682,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8627,
+      "motor_id": 1,
+      "position": -0.597302,
+      "velocity": 0.057836,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8627,
+      "motor_id": 2,
+      "position": 0.056094,
+      "velocity": 0.45963,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8627,
+      "motor_id": 3,
+      "position": -1.287831,
+      "velocity": -0.050872,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8627,
+      "motor_id": 4,
+      "position": 0.16496,
+      "velocity": 0.091606,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8762,
+      "motor_id": 1,
+      "position": -0.589513,
+      "velocity": 0.057459,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8762,
+      "motor_id": 2,
+      "position": 0.117991,
+      "velocity": 0.456637,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8762,
+      "motor_id": 3,
+      "position": -1.294682,
+      "velocity": -0.050541,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8762,
+      "motor_id": 4,
+      "position": 0.177296,
+      "velocity": 0.091009,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8897,
+      "motor_id": 1,
+      "position": -0.581883,
+      "velocity": 0.055491,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8897,
+      "motor_id": 2,
+      "position": 0.178632,
+      "velocity": 0.441001,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8897,
+      "motor_id": 3,
+      "position": -1.301393,
+      "velocity": -0.04881,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 8897,
+      "motor_id": 4,
+      "position": 0.189382,
+      "velocity": 0.087893,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9031,
+      "motor_id": 1,
+      "position": -0.574625,
+      "velocity": 0.051933,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9031,
+      "motor_id": 2,
+      "position": 0.236313,
+      "velocity": 0.41272,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9031,
+      "motor_id": 3,
+      "position": -1.307778,
+      "velocity": -0.04568,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9031,
+      "motor_id": 4,
+      "position": 0.200878,
+      "velocity": 0.082256,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9166,
+      "motor_id": 1,
+      "position": -0.567954,
+      "velocity": 0.046783,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9166,
+      "motor_id": 2,
+      "position": 0.28933,
+      "velocity": 0.371794,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9166,
+      "motor_id": 3,
+      "position": -1.313645,
+      "velocity": -0.04115,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9166,
+      "motor_id": 4,
+      "position": 0.211445,
+      "velocity": 0.0741,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9301,
+      "motor_id": 1,
+      "position": -0.562084,
+      "velocity": 0.040042,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9301,
+      "motor_id": 2,
+      "position": 0.335978,
+      "velocity": 0.318224,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9301,
+      "motor_id": 3,
+      "position": -1.318808,
+      "velocity": -0.035221,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9301,
+      "motor_id": 4,
+      "position": 0.220742,
+      "velocity": 0.063423,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9436,
+      "motor_id": 1,
+      "position": -0.55723,
+      "velocity": 0.031711,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9436,
+      "motor_id": 2,
+      "position": 0.374553,
+      "velocity": 0.25201,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9436,
+      "motor_id": 3,
+      "position": -1.323078,
+      "velocity": -0.027892,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9436,
+      "motor_id": 4,
+      "position": 0.22843,
+      "velocity": 0.050226,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9571,
+      "motor_id": 1,
+      "position": -0.553606,
+      "velocity": 0.021788,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9571,
+      "motor_id": 2,
+      "position": 0.40335,
+      "velocity": 0.173151,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9571,
+      "motor_id": 3,
+      "position": -1.326265,
+      "velocity": -0.019164,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9571,
+      "motor_id": 4,
+      "position": 0.234169,
+      "velocity": 0.03451,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9705,
+      "motor_id": 1,
+      "position": -0.551428,
+      "velocity": 0.010274,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9705,
+      "motor_id": 2,
+      "position": 0.420665,
+      "velocity": 0.081648,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9705,
+      "motor_id": 3,
+      "position": -1.328182,
+      "velocity": -0.009037,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9705,
+      "motor_id": 4,
+      "position": 0.23762,
+      "velocity": 0.016273,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9840,
+      "motor_id": 1,
+      "position": -0.550956,
+      "velocity": -0.006236,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9840,
+      "motor_id": 2,
+      "position": 0.424663,
+      "velocity": -0.031644,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9840,
+      "motor_id": 3,
+      "position": -1.328468,
+      "velocity": 0.014728,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9840,
+      "motor_id": 4,
+      "position": 0.238434,
+      "velocity": -0.00509,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9975,
+      "motor_id": 1,
+      "position": -0.553691,
+      "velocity": -0.033526,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9975,
+      "motor_id": 2,
+      "position": 0.410784,
+      "velocity": -0.170125,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9975,
+      "motor_id": 3,
+      "position": -1.321935,
+      "velocity": 0.080679,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 9975,
+      "motor_id": 4,
+      "position": 0.23614,
+      "velocity": -0.028619,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10110,
+      "motor_id": 1,
+      "position": -0.559774,
+      "velocity": -0.055899,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10110,
+      "motor_id": 2,
+      "position": 0.37992,
+      "velocity": -0.283654,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10110,
+      "motor_id": 3,
+      "position": -1.307128,
+      "velocity": 0.137493,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10110,
+      "motor_id": 4,
+      "position": 0.230806,
+      "velocity": -0.05021,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10245,
+      "motor_id": 1,
+      "position": -0.56854,
+      "velocity": -0.073354,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10245,
+      "motor_id": 2,
+      "position": 0.335434,
+      "velocity": -0.372229,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10245,
+      "motor_id": 3,
+      "position": -1.285278,
+      "velocity": 0.185172,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10245,
+      "motor_id": 4,
+      "position": 0.222691,
+      "velocity": -0.069862,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10379,
+      "motor_id": 1,
+      "position": -0.579328,
+      "velocity": -0.085892,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10379,
+      "motor_id": 2,
+      "position": 0.28069,
+      "velocity": -0.435851,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10379,
+      "motor_id": 3,
+      "position": -1.257617,
+      "velocity": 0.223714,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10379,
+      "motor_id": 4,
+      "position": 0.212058,
+      "velocity": -0.087576,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10514,
+      "motor_id": 1,
+      "position": -0.591475,
+      "velocity": -0.093512,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10514,
+      "motor_id": 2,
+      "position": 0.219053,
+      "velocity": -0.474519,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10514,
+      "motor_id": 3,
+      "position": -1.225377,
+      "velocity": 0.25312,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10514,
+      "motor_id": 4,
+      "position": 0.199168,
+      "velocity": -0.103351,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10649,
+      "motor_id": 1,
+      "position": -0.604317,
+      "velocity": -0.096215,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10649,
+      "motor_id": 2,
+      "position": 0.153885,
+      "velocity": -0.488234,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10649,
+      "motor_id": 3,
+      "position": -1.189788,
+      "velocity": 0.27339,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10649,
+      "motor_id": 4,
+      "position": 0.184283,
+      "velocity": -0.117188,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10784,
+      "motor_id": 1,
+      "position": -0.617193,
+      "velocity": -0.094,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10784,
+      "motor_id": 2,
+      "position": 0.08855,
+      "velocity": -0.476995,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10784,
+      "motor_id": 3,
+      "position": -1.152083,
+      "velocity": 0.284525,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10784,
+      "motor_id": 4,
+      "position": 0.167662,
+      "velocity": -0.129087,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10919,
+      "motor_id": 1,
+      "position": -0.629438,
+      "velocity": -0.086868,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10919,
+      "motor_id": 2,
+      "position": 0.026411,
+      "velocity": -0.440803,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10919,
+      "motor_id": 3,
+      "position": -1.113493,
+      "velocity": 0.286523,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 10919,
+      "motor_id": 4,
+      "position": 0.149569,
+      "velocity": -0.139047,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11053,
+      "motor_id": 1,
+      "position": -0.640391,
+      "velocity": -0.074818,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11053,
+      "motor_id": 2,
+      "position": -0.029167,
+      "velocity": -0.379658,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11053,
+      "motor_id": 3,
+      "position": -1.075249,
+      "velocity": 0.279385,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11053,
+      "motor_id": 4,
+      "position": 0.130263,
+      "velocity": -0.147069,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11188,
+      "motor_id": 1,
+      "position": -0.649388,
+      "velocity": -0.057851,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11188,
+      "motor_id": 2,
+      "position": -0.074821,
+      "velocity": -0.293559,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11188,
+      "motor_id": 3,
+      "position": -1.038583,
+      "velocity": 0.263111,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11188,
+      "motor_id": 4,
+      "position": 0.110007,
+      "velocity": -0.153153,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11323,
+      "motor_id": 1,
+      "position": -0.655766,
+      "velocity": -0.035966,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11323,
+      "motor_id": 2,
+      "position": -0.107187,
+      "velocity": -0.182507,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11323,
+      "motor_id": 3,
+      "position": -1.004727,
+      "velocity": 0.237701,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11323,
+      "motor_id": 4,
+      "position": 0.089061,
+      "velocity": -0.157298,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11458,
+      "motor_id": 1,
+      "position": -0.658863,
+      "velocity": -0.009164,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11458,
+      "motor_id": 2,
+      "position": -0.122902,
+      "velocity": -0.046501,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11458,
+      "motor_id": 3,
+      "position": -0.974911,
+      "velocity": 0.203155,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11458,
+      "motor_id": 4,
+      "position": 0.067688,
+      "velocity": -0.159505,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11593,
+      "motor_id": 1,
+      "position": -0.658725,
+      "velocity": 0.006894,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11593,
+      "motor_id": 2,
+      "position": -0.121321,
+      "velocity": 0.052595,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11593,
+      "motor_id": 3,
+      "position": -0.949585,
+      "velocity": 0.177541,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11593,
+      "motor_id": 4,
+      "position": 0.041618,
+      "velocity": -0.252541,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11727,
+      "motor_id": 1,
+      "position": -0.657186,
+      "velocity": 0.015734,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11727,
+      "motor_id": 2,
+      "position": -0.110142,
+      "velocity": 0.109588,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11727,
+      "motor_id": 3,
+      "position": -0.926595,
+      "velocity": 0.164805,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11727,
+      "motor_id": 4,
+      "position": 0.000927,
+      "velocity": -0.342673,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11862,
+      "motor_id": 1,
+      "position": -0.654541,
+      "velocity": 0.023295,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11862,
+      "motor_id": 2,
+      "position": -0.09277,
+      "velocity": 0.144486,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11862,
+      "motor_id": 3,
+      "position": -0.904819,
+      "velocity": 0.15954,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11862,
+      "motor_id": 4,
+      "position": -0.048463,
+      "velocity": -0.381601,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11997,
+      "motor_id": 1,
+      "position": -0.650963,
+      "velocity": 0.029576,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11997,
+      "motor_id": 2,
+      "position": -0.072183,
+      "velocity": 0.157291,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11997,
+      "motor_id": 3,
+      "position": -0.883249,
+      "velocity": 0.161746,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 11997,
+      "motor_id": 4,
+      "position": -0.09965,
+      "velocity": -0.369326,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12132,
+      "motor_id": 1,
+      "position": -0.646625,
+      "velocity": 0.034579,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12132,
+      "motor_id": 2,
+      "position": -0.051358,
+      "velocity": 0.148002,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12132,
+      "motor_id": 3,
+      "position": -0.860877,
+      "velocity": 0.171424,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12132,
+      "motor_id": 4,
+      "position": -0.14573,
+      "velocity": -0.305848,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12266,
+      "motor_id": 1,
+      "position": -0.641699,
+      "velocity": 0.038302,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12266,
+      "motor_id": 2,
+      "position": -0.033275,
+      "velocity": 0.116619,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12266,
+      "motor_id": 3,
+      "position": -0.836698,
+      "velocity": 0.188573,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12266,
+      "motor_id": 4,
+      "position": -0.179803,
+      "velocity": -0.191166,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12401,
+      "motor_id": 1,
+      "position": -0.636357,
+      "velocity": 0.040746,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12401,
+      "motor_id": 2,
+      "position": -0.020911,
+      "velocity": 0.063142,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12401,
+      "motor_id": 3,
+      "position": -0.809704,
+      "velocity": 0.213193,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12401,
+      "motor_id": 4,
+      "position": -0.194967,
+      "velocity": -0.025281,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12536,
+      "motor_id": 1,
+      "position": -0.628353,
+      "velocity": 0.082666,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12536,
+      "motor_id": 2,
+      "position": -0.013555,
+      "velocity": 0.053255,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12536,
+      "motor_id": 3,
+      "position": -0.777486,
+      "velocity": 0.267131,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12536,
+      "motor_id": 4,
+      "position": -0.193812,
+      "velocity": 0.023072,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12671,
+      "motor_id": 1,
+      "position": -0.614247,
+      "velocity": 0.125769,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12671,
+      "motor_id": 2,
+      "position": -0.006489,
+      "velocity": 0.051536,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12671,
+      "motor_id": 3,
+      "position": -0.738041,
+      "velocity": 0.316679,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12671,
+      "motor_id": 4,
+      "position": -0.189084,
+      "velocity": 0.046521,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12806,
+      "motor_id": 1,
+      "position": -0.594677,
+      "velocity": 0.163728,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12806,
+      "motor_id": 2,
+      "position": 0.00033,
+      "velocity": 0.049611,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12806,
+      "motor_id": 3,
+      "position": -0.692502,
+      "velocity": 0.357532,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12806,
+      "motor_id": 4,
+      "position": -0.181417,
+      "velocity": 0.066696,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12940,
+      "motor_id": 1,
+      "position": -0.570338,
+      "velocity": 0.196542,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12940,
+      "motor_id": 2,
+      "position": 0.006876,
+      "velocity": 0.047479,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12940,
+      "motor_id": 3,
+      "position": -0.642043,
+      "velocity": 0.38969,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 12940,
+      "motor_id": 4,
+      "position": -0.171251,
+      "velocity": 0.083595,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13075,
+      "motor_id": 1,
+      "position": -0.541922,
+      "velocity": 0.224212,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13075,
+      "motor_id": 2,
+      "position": 0.013121,
+      "velocity": 0.045139,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13075,
+      "motor_id": 3,
+      "position": -0.587836,
+      "velocity": 0.413151,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13075,
+      "motor_id": 4,
+      "position": -0.159027,
+      "velocity": 0.09722,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13210,
+      "motor_id": 1,
+      "position": -0.510123,
+      "velocity": 0.246737,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13210,
+      "motor_id": 2,
+      "position": 0.019036,
+      "velocity": 0.042594,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13210,
+      "motor_id": 3,
+      "position": -0.531051,
+      "velocity": 0.427917,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13210,
+      "motor_id": 4,
+      "position": -0.145188,
+      "velocity": 0.10757,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13345,
+      "motor_id": 1,
+      "position": -0.475634,
+      "velocity": 0.264118,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13345,
+      "motor_id": 2,
+      "position": 0.024594,
+      "velocity": 0.039841,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13345,
+      "motor_id": 3,
+      "position": -0.472863,
+      "velocity": 0.433987,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13345,
+      "motor_id": 4,
+      "position": -0.130174,
+      "velocity": 0.114645,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13480,
+      "motor_id": 1,
+      "position": -0.43915,
+      "velocity": 0.276353,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13480,
+      "motor_id": 2,
+      "position": 0.029768,
+      "velocity": 0.036882,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13480,
+      "motor_id": 3,
+      "position": -0.414442,
+      "velocity": 0.431362,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13480,
+      "motor_id": 4,
+      "position": -0.114428,
+      "velocity": 0.118445,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13614,
+      "motor_id": 1,
+      "position": -0.401363,
+      "velocity": 0.283444,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13614,
+      "motor_id": 2,
+      "position": 0.034528,
+      "velocity": 0.033716,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13614,
+      "motor_id": 3,
+      "position": -0.356961,
+      "velocity": 0.42004,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13614,
+      "motor_id": 4,
+      "position": -0.09839,
+      "velocity": 0.11897,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13749,
+      "motor_id": 1,
+      "position": -0.362966,
+      "velocity": 0.285391,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13749,
+      "motor_id": 2,
+      "position": 0.038848,
+      "velocity": 0.030343,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13749,
+      "motor_id": 3,
+      "position": -0.301593,
+      "velocity": 0.400023,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13749,
+      "motor_id": 4,
+      "position": -0.082501,
+      "velocity": 0.11622,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13884,
+      "motor_id": 1,
+      "position": -0.324654,
+      "velocity": 0.282193,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13884,
+      "motor_id": 2,
+      "position": 0.042699,
+      "velocity": 0.026763,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13884,
+      "motor_id": 3,
+      "position": -0.249509,
+      "velocity": 0.371311,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 13884,
+      "motor_id": 4,
+      "position": -0.067205,
+      "velocity": 0.110195,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14019,
+      "motor_id": 1,
+      "position": -0.28712,
+      "velocity": 0.27385,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14019,
+      "motor_id": 2,
+      "position": 0.046054,
+      "velocity": 0.022977,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14019,
+      "motor_id": 3,
+      "position": -0.201881,
+      "velocity": 0.333902,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14019,
+      "motor_id": 4,
+      "position": -0.052941,
+      "velocity": 0.100895,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14154,
+      "motor_id": 1,
+      "position": -0.251057,
+      "velocity": 0.260363,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14154,
+      "motor_id": 2,
+      "position": 0.048884,
+      "velocity": 0.018984,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14154,
+      "motor_id": 3,
+      "position": -0.159882,
+      "velocity": 0.287798,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14154,
+      "motor_id": 4,
+      "position": -0.040151,
+      "velocity": 0.08832,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14288,
+      "motor_id": 1,
+      "position": -0.217159,
+      "velocity": 0.241731,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14288,
+      "motor_id": 2,
+      "position": 0.051162,
+      "velocity": 0.014784,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14288,
+      "motor_id": 3,
+      "position": -0.124683,
+      "velocity": 0.232998,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14288,
+      "motor_id": 4,
+      "position": -0.029277,
+      "velocity": 0.072471,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14423,
+      "motor_id": 1,
+      "position": -0.18612,
+      "velocity": 0.217954,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14423,
+      "motor_id": 2,
+      "position": 0.05286,
+      "velocity": 0.010377,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14423,
+      "motor_id": 3,
+      "position": -0.097458,
+      "velocity": 0.169503,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14423,
+      "motor_id": 4,
+      "position": -0.020761,
+      "velocity": 0.053346,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14558,
+      "motor_id": 1,
+      "position": -0.158632,
+      "velocity": 0.189033,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14558,
+      "motor_id": 2,
+      "position": 0.05395,
+      "velocity": 0.005764,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14558,
+      "motor_id": 3,
+      "position": -0.079377,
+      "velocity": 0.097311,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14558,
+      "motor_id": 4,
+      "position": -0.015043,
+      "velocity": 0.030946,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14693,
+      "motor_id": 1,
+      "position": -0.135389,
+      "velocity": 0.154967,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14693,
+      "motor_id": 2,
+      "position": 0.054405,
+      "velocity": 0.000943,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14693,
+      "motor_id": 3,
+      "position": -0.071614,
+      "velocity": 0.016425,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14693,
+      "motor_id": 4,
+      "position": -0.012565,
+      "velocity": 0.005272,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14828,
+      "motor_id": 1,
+      "position": -0.11578,
+      "velocity": 0.140357,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14828,
+      "motor_id": 2,
+      "position": 0.04955,
+      "velocity": -0.087597,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14828,
+      "motor_id": 3,
+      "position": -0.072336,
+      "velocity": -0.01685,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14828,
+      "motor_id": 4,
+      "position": -0.012549,
+      "velocity": -0.000953,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14962,
+      "motor_id": 1,
+      "position": -0.097435,
+      "velocity": 0.132003,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14962,
+      "motor_id": 2,
+      "position": 0.031194,
+      "velocity": -0.182246,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14962,
+      "motor_id": 3,
+      "position": -0.075888,
+      "velocity": -0.035442,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 14962,
+      "motor_id": 4,
+      "position": -0.012756,
+      "velocity": -0.002114,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15097,
+      "motor_id": 1,
+      "position": -0.080146,
+      "velocity": 0.124693,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15097,
+      "motor_id": 2,
+      "position": 0.001094,
+      "velocity": -0.261854,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15097,
+      "motor_id": 3,
+      "position": -0.08178,
+      "velocity": -0.051567,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15097,
+      "motor_id": 4,
+      "position": -0.013118,
+      "velocity": -0.003257,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15232,
+      "motor_id": 1,
+      "position": -0.063771,
+      "velocity": 0.118428,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15232,
+      "motor_id": 2,
+      "position": -0.038724,
+      "velocity": -0.326419,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15232,
+      "motor_id": 3,
+      "position": -0.089679,
+      "velocity": -0.065224,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15232,
+      "motor_id": 4,
+      "position": -0.013633,
+      "velocity": -0.00438,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15367,
+      "motor_id": 1,
+      "position": -0.048171,
+      "velocity": 0.113206,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15367,
+      "motor_id": 2,
+      "position": -0.086231,
+      "velocity": -0.375942,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15367,
+      "motor_id": 3,
+      "position": -0.099253,
+      "velocity": -0.076414,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15367,
+      "motor_id": 4,
+      "position": -0.014298,
+      "velocity": -0.005484,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15502,
+      "motor_id": 1,
+      "position": -0.033205,
+      "velocity": 0.109029,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15502,
+      "motor_id": 2,
+      "position": -0.139399,
+      "velocity": -0.410424,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15502,
+      "motor_id": 3,
+      "position": -0.110169,
+      "velocity": -0.085137,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15502,
+      "motor_id": 4,
+      "position": -0.015111,
+      "velocity": -0.006569,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15636,
+      "motor_id": 1,
+      "position": -0.018731,
+      "velocity": 0.105897,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15636,
+      "motor_id": 2,
+      "position": -0.196202,
+      "velocity": -0.429863,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15636,
+      "motor_id": 3,
+      "position": -0.122094,
+      "velocity": -0.091393,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15636,
+      "motor_id": 4,
+      "position": -0.016068,
+      "velocity": -0.007636,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15771,
+      "motor_id": 1,
+      "position": -0.004609,
+      "velocity": 0.103808,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15771,
+      "motor_id": 2,
+      "position": -0.254611,
+      "velocity": -0.43426,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15771,
+      "motor_id": 3,
+      "position": -0.134697,
+      "velocity": -0.095182,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15771,
+      "motor_id": 4,
+      "position": -0.017168,
+      "velocity": -0.008683,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15906,
+      "motor_id": 1,
+      "position": 0.009302,
+      "velocity": 0.102764,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15906,
+      "motor_id": 2,
+      "position": -0.3126,
+      "velocity": -0.423615,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15906,
+      "motor_id": 3,
+      "position": -0.147644,
+      "velocity": -0.096503,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 15906,
+      "motor_id": 4,
+      "position": -0.018408,
+      "velocity": -0.009712,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16041,
+      "motor_id": 1,
+      "position": 0.023142,
+      "velocity": 0.102764,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16041,
+      "motor_id": 2,
+      "position": -0.368139,
+      "velocity": -0.397928,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16041,
+      "motor_id": 3,
+      "position": -0.160603,
+      "velocity": -0.095357,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16041,
+      "motor_id": 4,
+      "position": -0.019786,
+      "velocity": -0.010721,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16176,
+      "motor_id": 1,
+      "position": 0.037053,
+      "velocity": 0.103808,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16176,
+      "motor_id": 2,
+      "position": -0.419203,
+      "velocity": -0.357199,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16176,
+      "motor_id": 3,
+      "position": -0.17324,
+      "velocity": -0.091743,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16176,
+      "motor_id": 4,
+      "position": -0.021298,
+      "velocity": -0.011712,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16310,
+      "motor_id": 1,
+      "position": 0.051175,
+      "velocity": 0.105897,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16310,
+      "motor_id": 2,
+      "position": -0.463762,
+      "velocity": -0.301428,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16310,
+      "motor_id": 3,
+      "position": -0.185225,
+      "velocity": -0.085662,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16310,
+      "motor_id": 4,
+      "position": -0.022942,
+      "velocity": -0.012684,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16445,
+      "motor_id": 1,
+      "position": 0.065816,
+      "velocity": 0.11708,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16445,
+      "motor_id": 2,
+      "position": -0.500523,
+      "velocity": -0.266881,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16445,
+      "motor_id": 3,
+      "position": -0.196483,
+      "velocity": -0.089803,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16445,
+      "motor_id": 4,
+      "position": -0.024949,
+      "velocity": -0.024981,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16580,
+      "motor_id": 1,
+      "position": 0.083059,
+      "velocity": 0.135694,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16580,
+      "motor_id": 2,
+      "position": -0.53849,
+      "velocity": -0.290869,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16580,
+      "motor_id": 3,
+      "position": -0.210256,
+      "velocity": -0.111631,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16580,
+      "motor_id": 4,
+      "position": -0.030449,
+      "velocity": -0.054065,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16715,
+      "motor_id": 1,
+      "position": 0.101573,
+      "velocity": 0.135928,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16715,
+      "motor_id": 2,
+      "position": -0.577434,
+      "velocity": -0.281363,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16715,
+      "motor_id": 3,
+      "position": -0.22579,
+      "velocity": -0.11592,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16715,
+      "motor_id": 4,
+      "position": -0.038834,
+      "velocity": -0.067785,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16850,
+      "motor_id": 1,
+      "position": 0.118879,
+      "velocity": 0.117781,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16850,
+      "motor_id": 2,
+      "position": -0.612839,
+      "velocity": -0.238363,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16850,
+      "motor_id": 3,
+      "position": -0.240719,
+      "velocity": -0.102671,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16850,
+      "motor_id": 4,
+      "position": -0.048033,
+      "velocity": -0.06614,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16984,
+      "motor_id": 1,
+      "position": 0.1325,
+      "velocity": 0.081254,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16984,
+      "motor_id": 2,
+      "position": -0.64019,
+      "velocity": -0.161868,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16984,
+      "motor_id": 3,
+      "position": -0.252681,
+      "velocity": -0.071883,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 16984,
+      "motor_id": 4,
+      "position": -0.055975,
+      "velocity": -0.049131,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17119,
+      "motor_id": 1,
+      "position": 0.139959,
+      "velocity": 0.026347,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17119,
+      "motor_id": 2,
+      "position": -0.654973,
+      "velocity": -0.051878,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17119,
+      "motor_id": 3,
+      "position": -0.25931,
+      "velocity": -0.023557,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17119,
+      "motor_id": 4,
+      "position": -0.060588,
+      "velocity": -0.016758,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17254,
+      "motor_id": 1,
+      "position": 0.138457,
+      "velocity": -0.05179,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17254,
+      "motor_id": 2,
+      "position": -0.652121,
+      "velocity": 0.100089,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17254,
+      "motor_id": 3,
+      "position": -0.258386,
+      "velocity": 0.036764,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17254,
+      "motor_id": 4,
+      "position": -0.060906,
+      "velocity": 0.00314,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17389,
+      "motor_id": 1,
+      "position": 0.126989,
+      "velocity": -0.113605,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17389,
+      "motor_id": 2,
+      "position": -0.629522,
+      "velocity": 0.227708,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17389,
+      "motor_id": 3,
+      "position": -0.250063,
+      "velocity": 0.084043,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17389,
+      "motor_id": 4,
+      "position": -0.060188,
+      "velocity": 0.007312,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17524,
+      "motor_id": 1,
+      "position": 0.109113,
+      "velocity": -0.146872,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17524,
+      "motor_id": 2,
+      "position": -0.592757,
+      "velocity": 0.31028,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17524,
+      "motor_id": 3,
+      "position": -0.236449,
+      "velocity": 0.115277,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17524,
+      "motor_id": 4,
+      "position": -0.058989,
+      "velocity": 0.010279,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17658,
+      "motor_id": 1,
+      "position": 0.088676,
+      "velocity": -0.151591,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17658,
+      "motor_id": 2,
+      "position": -0.547897,
+      "velocity": 0.347805,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17658,
+      "motor_id": 3,
+      "position": -0.219706,
+      "velocity": 0.130467,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17658,
+      "motor_id": 4,
+      "position": -0.057471,
+      "velocity": 0.012042,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17793,
+      "motor_id": 1,
+      "position": 0.069528,
+      "velocity": -0.127763,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17793,
+      "motor_id": 2,
+      "position": -0.501015,
+      "velocity": 0.340285,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17793,
+      "motor_id": 3,
+      "position": -0.201997,
+      "velocity": 0.129612,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17793,
+      "motor_id": 4,
+      "position": -0.055796,
+      "velocity": 0.012601,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17928,
+      "motor_id": 1,
+      "position": 0.055515,
+      "velocity": -0.075386,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17928,
+      "motor_id": 2,
+      "position": -0.458183,
+      "velocity": 0.287717,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17928,
+      "motor_id": 3,
+      "position": -0.185485,
+      "velocity": 0.112712,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 17928,
+      "motor_id": 4,
+      "position": -0.054128,
+      "velocity": 0.011956,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18063,
+      "motor_id": 1,
+      "position": 0.045998,
+      "velocity": -0.070407,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18063,
+      "motor_id": 2,
+      "position": -0.416395,
+      "velocity": 0.339575,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18063,
+      "motor_id": 3,
+      "position": -0.168798,
+      "velocity": 0.137596,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18063,
+      "motor_id": 4,
+      "position": -0.052202,
+      "velocity": 0.016907,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18198,
+      "motor_id": 1,
+      "position": 0.036575,
+      "velocity": -0.069154,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18198,
+      "motor_id": 2,
+      "position": -0.367446,
+      "velocity": 0.38347,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18198,
+      "motor_id": 3,
+      "position": -0.148752,
+      "velocity": 0.158411,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18198,
+      "motor_id": 4,
+      "position": -0.04963,
+      "velocity": 0.021006,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18332,
+      "motor_id": 1,
+      "position": 0.027423,
+      "velocity": -0.066384,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18332,
+      "motor_id": 2,
+      "position": -0.313883,
+      "velocity": 0.408033,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18332,
+      "motor_id": 3,
+      "position": -0.126476,
+      "velocity": 0.170663,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18332,
+      "motor_id": 4,
+      "position": -0.046603,
+      "velocity": 0.023682,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18467,
+      "motor_id": 1,
+      "position": 0.018747,
+      "velocity": -0.062096,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18467,
+      "motor_id": 2,
+      "position": -0.258312,
+      "velocity": 0.413262,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18467,
+      "motor_id": 3,
+      "position": -0.103127,
+      "velocity": 0.174354,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18467,
+      "motor_id": 4,
+      "position": -0.04331,
+      "velocity": 0.024935,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18602,
+      "motor_id": 1,
+      "position": 0.010751,
+      "velocity": -0.056291,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18602,
+      "motor_id": 2,
+      "position": -0.203339,
+      "velocity": 0.399158,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18602,
+      "motor_id": 3,
+      "position": -0.079857,
+      "velocity": 0.169481,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18602,
+      "motor_id": 4,
+      "position": -0.039944,
+      "velocity": 0.024765,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18737,
+      "motor_id": 1,
+      "position": 0.003639,
+      "velocity": -0.048969,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18737,
+      "motor_id": 2,
+      "position": -0.15157,
+      "velocity": 0.365721,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18737,
+      "motor_id": 3,
+      "position": -0.05782,
+      "velocity": 0.156047,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18737,
+      "motor_id": 4,
+      "position": -0.036697,
+      "velocity": 0.023172,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18872,
+      "motor_id": 1,
+      "position": -0.002383,
+      "velocity": -0.040129,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18872,
+      "motor_id": 2,
+      "position": -0.105611,
+      "velocity": 0.312951,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18872,
+      "motor_id": 3,
+      "position": -0.038172,
+      "velocity": 0.13405,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 18872,
+      "motor_id": 4,
+      "position": -0.033761,
+      "velocity": 0.020157,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19006,
+      "motor_id": 1,
+      "position": -0.007111,
+      "velocity": -0.029771,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19006,
+      "motor_id": 2,
+      "position": -0.068069,
+      "velocity": 0.240847,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19006,
+      "motor_id": 3,
+      "position": -0.022066,
+      "velocity": 0.10349,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19006,
+      "motor_id": 4,
+      "position": -0.031327,
+      "velocity": 0.015718,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19141,
+      "motor_id": 1,
+      "position": -0.010341,
+      "velocity": -0.017896,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19141,
+      "motor_id": 2,
+      "position": -0.041549,
+      "velocity": 0.149411,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19141,
+      "motor_id": 3,
+      "position": -0.010657,
+      "velocity": 0.064368,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19141,
+      "motor_id": 4,
+      "position": -0.029587,
+      "velocity": 0.009857,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19276,
+      "motor_id": 1,
+      "position": -0.011867,
+      "velocity": -0.004503,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19276,
+      "motor_id": 2,
+      "position": -0.028658,
+      "velocity": 0.038641,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19276,
+      "motor_id": 3,
+      "position": -0.005098,
+      "velocity": 0.016683,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19276,
+      "motor_id": 4,
+      "position": -0.028734,
+      "velocity": 0.002572,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19411,
+      "motor_id": 1,
+      "position": -0.010584,
+      "velocity": 0.02847,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19411,
+      "motor_id": 2,
+      "position": -0.037693,
+      "velocity": -0.203552,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19411,
+      "motor_id": 3,
+      "position": -0.008943,
+      "velocity": -0.086733,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19411,
+      "motor_id": 4,
+      "position": -0.02905,
+      "velocity": -0.007662,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19545,
+      "motor_id": 1,
+      "position": -0.00471,
+      "velocity": 0.055929,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19545,
+      "motor_id": 2,
+      "position": -0.079694,
+      "velocity": -0.399866,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19545,
+      "motor_id": 3,
+      "position": -0.026839,
+      "velocity": -0.170382,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19545,
+      "motor_id": 4,
+      "position": -0.030631,
+      "velocity": -0.015052,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19680,
+      "motor_id": 1,
+      "position": 0.003749,
+      "velocity": 0.066811,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19680,
+      "motor_id": 2,
+      "position": -0.140169,
+      "velocity": -0.477668,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19680,
+      "motor_id": 3,
+      "position": -0.052608,
+      "velocity": -0.203534,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19680,
+      "motor_id": 4,
+      "position": -0.032907,
+      "velocity": -0.01798,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19815,
+      "motor_id": 1,
+      "position": 0.012557,
+      "velocity": 0.061117,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19815,
+      "motor_id": 2,
+      "position": -0.203145,
+      "velocity": -0.436958,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19815,
+      "motor_id": 3,
+      "position": -0.079442,
+      "velocity": -0.186187,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19815,
+      "motor_id": 4,
+      "position": -0.035278,
+      "velocity": -0.016448,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19950,
+      "motor_id": 1,
+      "position": 0.019481,
+      "velocity": 0.038846,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19950,
+      "motor_id": 2,
+      "position": -0.252645,
+      "velocity": -0.277735,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19950,
+      "motor_id": 3,
+      "position": -0.100534,
+      "velocity": -0.118342,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 19950,
+      "motor_id": 4,
+      "position": -0.037141,
+      "velocity": -0.010455,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 20085,
+      "motor_id": 1,
+      "position": 0.022285,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 20085,
+      "motor_id": 2,
+      "position": -0.272695,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 20085,
+      "motor_id": 3,
+      "position": -0.109077,
+      "velocity": 0.0,
+      "torque": 0.0
+    },
+    {
+      "time_from_start_ms": 20085,
+      "motor_id": 4,
+      "position": -0.037896,
+      "velocity": 0.0,
+      "torque": 0.0
+    }
+  ]
+}

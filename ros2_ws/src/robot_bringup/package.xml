@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_bringup</name>
+  <version>0.1.0</version>
+  <description>台架唯一入口：一个 launch 起 L1（rosbridge + 静态页）与 L2
+    （bench_manager）。L3 会话（仿真 / 电机后端 / Agent）由 bench_manager 按需起停。</description>
+  <maintainer email="ly@todo.todo">ly</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>web_host</exec_depend>
+  <exec_depend>bench_manager</exec_depend>
+  <exec_depend>micro_ros_bridge</exec_depend>
+  <exec_depend>motor_hardware_interface</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>robot_transmission</exec_depend>
+  <!-- 模型枚举根与臂视图几何来自模型包（默认 robot_sim）；缺包时 launch 自己降级，
+       所以是运行期引用而非硬依赖。反向声明会成环：robot_sim 的
+       simulation.launch.py 会 include web_host，bench_manager 又经 ros2 launch
+       调 robot_sim 的 simulation.launch.py。 -->
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

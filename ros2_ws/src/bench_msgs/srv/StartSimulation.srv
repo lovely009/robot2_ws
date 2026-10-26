@@ -1,0 +1,18 @@
+# 启动 robot_sim/simulation.launch.py；空串表示不传参数，使用 launch 默认值。
+string backend            # gazebo | mujoco
+string transport          # vcan | socketcan | slcan
+string controller_mode    # host | external | firmware
+string model
+string vcan_interface
+string sim_interface
+string driver_interface
+string sim_tty
+string driver_tty
+string spawn_z            # "" 或米制数值
+string gravity            # "" | "true" | "false"
+string fixed_base         # "" | "true" | "false"
+bool physical_bus_isolated # 确认物理总线仅连接仿真器与控制端；非 vcan 时必为 true
+---
+bool ok
+string error
+string status_json        # 与 /bench/status 话题同构的快照（失败时也带，供页面回显）

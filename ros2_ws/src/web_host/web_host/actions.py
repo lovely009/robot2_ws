@@ -1,0 +1,97 @@
+"""动作库：`action_library/*.json` 的枚举、读取与保存（动作屏播放的数据源）。
+
+文件是 MotorTrajectory 话题载荷（`{target_ids, points:[{time_from_start_ms,
+motor_id, position, velocity, torque|effort}]}`）。本模块只管文件层；播放语义
+（就绪检查、对齐、切窗交棒）在前端 `js/panels/actionLibrary.js`，与主机侧
+参考实现 `micro_ros_agent/tools/traj_play.py` 同口径。
+
+读写都落在 share 安装树的 `action_library/`：内置文件在 `--symlink-install`
+下是指回源码的符号链接（覆盖即写回源码），导入的新文件写在安装树里。
+"""
+
+import json
+import os
+import re
+from pathlib import Path
+
+# 文件名白名单：单层、非隐藏、.json 结尾。目录穿越由它 + resolve 双重拦截。
+_NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}\.json$")
+_MAX_TEXT_BYTES = 8 * 1024 * 1024
+
+
+def actions_directory(web_root: str) -> Path:
+    """动作库目录 = web_root 的兄弟目录 `action_library/`。"""
+    return Path(web_root).parent / "action_library"
+
+
+def _checked_path(directory: Path, name) -> Path:
+    # 白名单即防穿越：单层、无斜杠/反斜杠、非 ".." 开头，天然出不了目录。
+    # 刻意**不** resolve——symlink-install 下内置文件是指回源码的符号链接，
+    # resolve 后父目录在源码树，会被误判为越界。
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+        raise ValueError("非法动作文件名（单层、字母数字._-、以 .json 结尾）")
+    return directory / name
+
+
+def action_summary(document) -> dict:
+    """MotorTrajectory 载荷 → 列表用摘要；不是该格式就抛 ValueError。"""
+    if not isinstance(document, dict):
+        raise ValueError("不是 JSON 对象")
+    ids = document.get("target_ids")
+    points = document.get("points")
+    if (not isinstance(ids, list) or not ids
+            or not isinstance(points, list) or not points):
+        raise ValueError("不是 MotorTrajectory 载荷（缺 target_ids/points）")
+    times = []
+    for point in points:
+        if not isinstance(point, dict) or "time_from_start_ms" not in point:
+            raise ValueError("路点缺 time_from_start_ms")
+        times.append(int(point["time_from_start_ms"]))
+    return {
+        "target_ids": [int(motor_id) for motor_id in ids],
+        "target_count": len(ids),
+        "point_count": len(points),
+        "duration_ms": max(times) - min(times),
+    }
+
+
+def list_actions(web_root: str) -> list[dict]:
+    """枚举动作库并附摘要；解析失败的文件保留条目并携带 error。"""
+    directory = actions_directory(web_root)
+    if not directory.is_dir():
+        return []
+    actions = []
+    for path in sorted(directory.glob("*.json")):
+        entry = {"name": path.name}
+        try:
+            entry.update(action_summary(json.loads(path.read_text(encoding="utf-8"))))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError,
+                OSError) as exc:
+            entry["error"] = str(exc)
+        actions.append(entry)
+    return actions
+
+
+def read_action(web_root: str, name) -> str:
+    """读取动作文件原文（保留原格式，供前端解析）。"""
+    path = _checked_path(actions_directory(web_root), name)
+    if not path.is_file():
+        raise FileNotFoundError(name)
+    return path.read_text(encoding="utf-8")
+
+
+def save_action(web_root: str, name, text, overwrite: bool = False) -> dict:
+    """导入动作到动作库（校验 JSON 与载荷格式）；同名需显式 overwrite。"""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("动作内容为空")
+    if len(text.encode("utf-8")) > _MAX_TEXT_BYTES:
+        raise ValueError("动作文件超过 8 MB 上限")
+    summary = action_summary(json.loads(text))
+    directory = actions_directory(web_root)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = _checked_path(directory, name)
+    if path.exists() and not overwrite:
+        raise FileExistsError(name)
+    # 内置文件是符号链接（symlink-install），覆盖即写回源码；新文件落在安装树
+    path.write_text(text, encoding="utf-8")
+    return {"name": name, **summary}

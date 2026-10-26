@@ -1,0 +1,10 @@
+{
+  "name": "dma",
+  "version": "0.1.0",
+  "description": "板级 DMA 资源门卫：DMA1 + BDMA 控制器时钟、通道 NVIC 与占用登记；设备 ISR 归各设备库",
+  "keywords": ["stm32", "dma", "spi"],
+  "frameworks": ["arduino"],
+  "platforms": ["ststm32"],
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": { "board": "*" }
+}

@@ -1,0 +1,9 @@
+# 测试用型号库：验证 parameters 默认值 merge 进拓扑 motors 的机制，
+# 以及「型号名 -> protocol 协议类型」的映射（vaxor_2530 -> vaxor）。
+# （真实产品的 torque_constant 取值见 config/motor.yaml，此处 0.35 仅为测试值，
+#   覆盖"型号默认参数合并"路径；kp/kd 是动态参数，已移到拓扑 command。）
+motor_types:
+  vaxor_2530:
+    protocol: vaxor
+    parameters:
+      torque_constant_nm_per_amp: 0.35

@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<!-- half_body_robot 仿真薄壳：引入同目录机械 URDF，注入 ros2_control 与 gz_ros2_control。
+     双臂共 18 轴，电机映射见 config/。
+     仅导出 effort 命令接口及 position/velocity/effort 状态；不支持 control_mode:=position。
+     同时导出 position 与 effort 会使 gz-sim 忽略位置命令。
+     使用 SDF 的 self_collide 开启非相邻连杆自碰撞；相邻对由 dartsim 排除。
+     碰撞体为 3 个 box、14 个凸包，腕端小法兰不参与。
+
+     参数：controllers_file 为控制器配置；fixed_base=true 固定基座；gravity=true 保留重力。
+     摩擦系数与 dynamics 未经实物标定；限位、力矩与速度依据见机械 URDF。 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="half_body_robot">
+  <xacro:arg name="controllers_file"
+             default="$(find robot_sim)/models/half_body_robot/config/controllers.yaml"/>
+  <xacro:arg name="fixed_base" default="true"/>
+  <xacro:arg name="gravity" default="true"/>
+
+  <xacro:include filename="half_body_robot.urdf"/>
+
+  <xacro:if value="$(arg fixed_base)">
+    <link name="world"/>
+    <joint name="world_to_base_link" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="world"/>
+      <child link="base_link"/>
+    </joint>
+  </xacro:if>
+
+  <!-- 力矩控制关节接口：只有 effort 命令接口；状态含 effort，仿真里可直接读关节力矩。 -->
+  <xacro:macro name="torque_control_joint" params="name">
+    <joint name="${name}">
+      <command_interface name="effort"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- 声明顺序必须与 URDF 的物理关节顺序一致（由 test_model_consistency.py 兜底）。 -->
+  <ros2_control name="half_body_robot_system" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <!-- 第一链（x ≈ +0.06 侧） -->
+    <xacro:torque_control_joint name="joint_link1"/>
+    <xacro:torque_control_joint name="joint_link2"/>
+    <xacro:torque_control_joint name="joint_link3"/>
+    <xacro:torque_control_joint name="joint_link4"/>
+    <xacro:torque_control_joint name="joint_link5"/>
+    <xacro:torque_control_joint name="joint_link6"/>
+    <xacro:torque_control_joint name="joint_link7"/>
+    <xacro:torque_control_joint name="joint_link8"/>
+    <xacro:torque_control_joint name="joint_link9"/>
+    <!-- 第二链（x ≈ −0.05 侧，导出器 `.N` 后缀） -->
+    <xacro:torque_control_joint name="joint_link1.1"/>
+    <xacro:torque_control_joint name="joint_link2.2"/>
+    <xacro:torque_control_joint name="joint_link3.3"/>
+    <xacro:torque_control_joint name="joint_link4.4"/>
+    <xacro:torque_control_joint name="joint_link5.5"/>
+    <xacro:torque_control_joint name="joint_link6.6"/>
+    <xacro:torque_control_joint name="joint_link7.7"/>
+    <xacro:torque_control_joint name="joint_link8.8"/>
+    <xacro:torque_control_joint name="joint_link9.9"/>
+  </ros2_control>
+
+  <!-- 全模型自碰撞：非相邻连杆之间会真的碰（相邻对由 dartsim 默认排除）。 -->
+  <gazebo>
+    <self_collide>true</self_collide>
+  </gazebo>
+
+  <!-- 接触摩擦：mu1/mu2 = 0.8（铝/塑料件干摩擦的量级估计，未标定）。
+       ⚠ dartsim 不读 <ode><kp>/<kd>（接触刚度由求解器决定），故不写，免得看起来配了其实无效。 -->
+  <xacro:macro name="link_surface" params="link">
+    <gazebo reference="${link}">
+      <mu1>0.8</mu1>
+      <mu2>0.8</mu2>
+      <gravity>$(arg gravity)</gravity>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:link_surface link="base_link"/>
+  <xacro:link_surface link="Joint_link1"/>
+  <xacro:link_surface link="Joint_link2"/>
+  <xacro:link_surface link="Joint_link3"/>
+  <xacro:link_surface link="Joint_link4"/>
+  <xacro:link_surface link="Joint_link5"/>
+  <xacro:link_surface link="Joint_link6"/>
+  <xacro:link_surface link="Joint_link7"/>
+  <xacro:link_surface link="Joint_link8"/>
+  <xacro:link_surface link="Joint_link9"/>
+  <xacro:link_surface link="Joint_link1.1"/>
+  <xacro:link_surface link="Joint_link2.2"/>
+  <xacro:link_surface link="Joint_link3.3"/>
+  <xacro:link_surface link="Joint_link4.4"/>
+  <xacro:link_surface link="Joint_link5.5"/>
+  <xacro:link_surface link="Joint_link6.6"/>
+  <xacro:link_surface link="Joint_link7.7"/>
+  <xacro:link_surface link="Joint_link8.8"/>
+  <xacro:link_surface link="Joint_link9.9"/>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+    </plugin>
+  </gazebo>
+</robot>

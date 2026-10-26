@@ -1,0 +1,132 @@
+#include "motor_drive/protocol.hpp"
+
+#include <array>
+#include <gtest/gtest.h>
+#include <limits>
+
+namespace protocol = motor_drive::protocol;
+
+TEST(WristProtocol, CommandMatchesManualExample) {
+  protocol::JointCommand command;
+  command.position =
+      65537.0 / protocol::kWristTicksPerRevolution * 2.0 * protocol::kPi;
+  command.kp = 0.008;
+  command.kd = 1.0;
+  const auto bytes = protocol::pack_wrist_command(command);
+  const std::array<uint8_t, 12> expected{
+      {0x01, 0x00, 0x01, 0x80, 0x00, 0x80, 0x20, 0x03,
+       0x64, 0x00, 0x00, 0x80}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(WristProtocol, CurrentCommandMatchesManualExample) {
+  // 规格书 §3.2 电流模式示例：位置码值 65537、速度 0、Kp/Kd 0、电流码值 100。
+  protocol::JointCommand command;
+  command.position =
+      65537.0 / protocol::kWristTicksPerRevolution * 2.0 * protocol::kPi;
+  command.feedforward = 100.0 * protocol::kWristCurrentScaleA;
+  const auto bytes = protocol::pack_wrist_command(command);
+  const std::array<uint8_t, 12> expected{
+      {0x01, 0x00, 0x01, 0x80, 0x00, 0x80, 0x00, 0x00,
+       0x00, 0x00, 0x64, 0x80}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(WristProtocol, FeedbackKnownZero) {
+  const std::array<uint8_t, 12> bytes{
+      {0x05, 0x05, 0x00, 0x00, 0x00, 0x80, 0x00, 0x80,
+       0x00, 0x80, 0x00, 0x00}};
+  const auto state = protocol::unpack_wrist_feedback(bytes.data(), bytes.size());
+  EXPECT_DOUBLE_EQ(state.position, 0.0);
+  EXPECT_DOUBLE_EQ(state.velocity, 0.0);
+  EXPECT_DOUBLE_EQ(state.effort, 0.0);
+}
+
+TEST(WristProtocol, ReplyGeneratedBySimulatorCanBeReadByDriver) {
+  protocol::JointState current_state;
+  current_state.position = 0.5;
+  current_state.velocity = -0.25;
+  current_state.effort = 1.5; // Current in ampere on the wire-side helper.
+  const auto bytes = protocol::pack_wrist_reply(1U, current_state);
+  const auto decoded = protocol::unpack_wrist_feedback(bytes.data(), bytes.size());
+  EXPECT_NEAR(decoded.position, current_state.position,
+              2.0 * protocol::kPi / protocol::kWristTicksPerRevolution);
+  EXPECT_NEAR(decoded.velocity, current_state.velocity,
+              2.0 * protocol::kPi / 600.0);
+  EXPECT_NEAR(decoded.effort, current_state.effort,
+              protocol::kWristCurrentScaleA);
+}
+
+TEST(CerbProtocol, MitCommandUsesConfiguredRangesAndManualBitLayout) {
+  protocol::JointCommand command;
+  command.position = 12.5;
+  command.velocity = -30.0;
+  command.kp = 500.0;
+  command.kd = 5.0;
+  command.feedforward = -10.0;
+
+  const auto bytes = protocol::pack_cerb_mit_command(
+      command, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0});
+  const std::array<uint8_t, 8> expected{
+      {0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0xf0, 0x00}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CerbProtocol, NeutralMitCommandMatchesManualQuantization) {
+  const auto bytes = protocol::pack_cerb_mit_command(
+      {}, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0});
+  const std::array<uint8_t, 8> expected{
+      {0x80, 0x00, 0x80, 0x00, 0x00, 0x00, 0x08, 0x00}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CerbProtocol, GuideDefaultGainsAndZeroMidpoints) {
+  protocol::JointCommand command;
+  command.kp = 30.0;
+  command.kd = 1.0;
+  const auto bytes = protocol::pack_cerb_mit_command(
+      command, protocol::CerbMitLimits{3.14, 3.14, 300.0});
+  const std::array<uint8_t, 8> expected{
+      {0x80, 0x00, 0x80, 0x00, 0x31, 0x00, 0x88, 0x00}};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(CerbProtocol, RejectsAllZeroPayloadAndInfiniteLimits) {
+  protocol::JointCommand command;
+  command.position = -3.14;
+  command.velocity = -3.14;
+  command.feedforward = -300.0;
+  EXPECT_THROW(protocol::pack_cerb_mit_command(
+                   command, protocol::CerbMitLimits{3.14, 3.14, 300.0}),
+               std::invalid_argument);
+  EXPECT_THROW(protocol::pack_cerb_mit_command(
+                   {}, protocol::CerbMitLimits{
+                       std::numeric_limits<double>::infinity(), 3.14, 300.0}),
+               std::invalid_argument);
+}
+
+TEST(CerbProtocol, FeedbackDecodesBigEndianPhysicalValues) {
+  // 位置 1820 / 182 = 10 deg，速度 -60 rpm，Iq 码 1500 × 20 mA/码 = 30 A。
+  const std::array<uint8_t, 12> bytes{
+      {0x07, 0x1c, 0xff, 0xc4, 0x05, 0xdc,
+       0x00, 0x00, 0x00, 0xf0, 0x06, 0xc0}};
+  const auto state = protocol::unpack_cerb_feedback(bytes.data(), bytes.size());
+  EXPECT_NEAR(state.position, 10.0 * protocol::kPi / 180.0, 1e-12);
+  EXPECT_NEAR(state.velocity, -2.0 * protocol::kPi, 1e-12);
+  EXPECT_DOUBLE_EQ(state.effort, 30.0);
+}
+
+TEST(CerbProtocol, FeedbackRejectsWrongPayloadSize) {
+  const std::array<uint8_t, 11> bytes{};
+  EXPECT_THROW(
+      static_cast<void>(protocol::unpack_cerb_feedback(bytes.data(), bytes.size())),
+      std::invalid_argument);
+}
+
+TEST(CerbProtocol, MitCommandRejectsNonFiniteInput) {
+  protocol::JointCommand command;
+  command.position = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(static_cast<void>(protocol::pack_cerb_mit_command(
+                   command, protocol::CerbMitLimits{12.5, 30.0, 10.0, 500.0, 5.0})),
+               std::invalid_argument);
+}

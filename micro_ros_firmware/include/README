@@ -1,0 +1,6 @@
+# src/include 应用层头文件
+
+本目录只放任务层/ROS 桥的头文件（`ros_bridge.h`、`*_bridge.h`、
+`*_task.h`、`micro_ros_link_state.h`）。硬件驱动与协议库头文件在
+`lib/<库名>/include/`，由 PlatformIO 自动加入头文件搜索路径。
+实现文件仍显式包含其直接依赖；本目录不是业务头文件大全。

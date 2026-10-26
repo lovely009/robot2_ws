@@ -1,0 +1,7 @@
+{
+  "name": "session_sync",
+  "version": "0.1.0",
+  "description": "会话/授权电平 → 内核状态变更的纯逻辑（无 RTOS 依赖）",
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": { "control_mailbox": "*", "motor_control": "*" }
+}

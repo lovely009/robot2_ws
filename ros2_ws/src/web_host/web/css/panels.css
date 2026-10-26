@@ -1,0 +1,366 @@
+/* 面板通用样式：随各面板任务逐步补充。骨架样式在 shell.css。 */
+
+/* ---------- 屏栅格：router 把屏模板克隆进 .main，每个屏自排自己的栅格 ---------- */
+.screen { display: grid; gap: var(--gap); align-items: start; }
+.screen.run {
+  grid-template-columns: 300px minmax(0, 1fr) 310px;
+  grid-template-areas:
+    "index stage side"
+    "command command command"
+    "drawer drawer drawer";
+}
+.col-index { grid-area: index; }
+.col-stage { grid-area: stage; }
+.col-side { grid-area: side; }
+.col-command { grid-area: command; }
+.col-drawer { grid-area: drawer; }
+.col-index, .col-stage, .col-side, .col-command, .col-drawer { min-width: 0; }
+@media (max-width: 1360px) {
+  .screen.run { grid-template-columns: 285px minmax(0, 1fr) 270px; }
+}
+@media (max-width: 1080px) {
+  .screen.run { grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-areas: "index stage" "side side" "command command" "drawer drawer"; }
+}
+@media (max-width: 820px) {
+  .screen.run { grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "index" "stage" "side" "command" "drawer"; }
+}
+
+/* ≥1081px（三栏并排）时，左右两栏不得高过中栏的臂视图：封顶到同一高度、各自内部
+   滚动，三栏底部齐平。中栏高度由 --stage-h 定，左右两栏只受它约束。
+   收窄到两栏/一栏堆叠时不封顶——那时高度本来就不需要对齐。 */
+@media (min-width: 1081px) {
+  /* 用确定高度而不是 max-height：只有确定高度才会让 flex 子项收缩，max-height
+     下的 auto 高度是不确定的，卡片会照原样撑出去、内部滚动条永远不出现。
+     面板标记外还有一层 [data-panel] 占位 div（index.html 模板克隆），两层都要
+     收缩，任一层的 min-height: auto 都会把内容顶回来。 */
+  .col-index, .col-side { display: flex; flex-direction: column;
+    height: calc(var(--stage-h) + 2px); }   /* +2px 补 .stage 的上下边框 */
+  /* flex 链三层都要 flex: 1：容器给了确定高度后，[data-panel] 占位与 details 卡片
+     还要能**伸展**才能让可见卡片的底边贴到栏底——只靠 min-height: 0 只有"内容溢出
+     时收缩"的一半，内容短于栏高时卡片会停在内容处、底边不齐。 */
+  .col-index > [data-panel], .col-side > [data-panel] {
+    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+  .col-index > [data-panel] > details, .col-side > [data-panel] > details {
+    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+  /* details 的正文不在 details 盒子下，而是被 UA 包在 ::details-content 里
+     （Chromium 131+）——不补这一层，里面的 ul/table 就不是 flex 子项、不会收缩。 */
+  .col-index > [data-panel] > details::details-content,
+  .col-side > [data-panel] > details::details-content {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  /* 封顶后最后一格不再留底边距，否则卡片底边比中栏高一截 */
+  .col-index > [data-panel]:last-child > details,
+  .col-side > [data-panel]:last-child > details { margin-bottom: 0; }
+  .col-index .joints { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  /* 状态表体自身可滚（行多时），正常 18 行在封顶高度内全部可见 */
+  .col-side > [data-panel] > details.card > .table-wrap {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
+
+/* teach 屏：上部为关节/臂/侧栏，下部整宽为动作库播放。 */
+.screen.teach {
+  grid-template-columns: 250px minmax(0, 1fr) 330px;
+  grid-template-areas:
+    "index stage side"
+    "command command command";
+}
+@media (max-width: 1360px) {
+  .screen.teach { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+}
+@media (max-width: 1080px) {
+  .screen.teach { grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-areas: "index stage" "side side" "command command"; }
+}
+@media (max-width: 820px) {
+  .screen.teach { grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "index" "stage" "side" "command"; }
+}
+
+/* device 屏：参数表全宽，底部为事件日志抽屉。 */
+.screen.device { grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "params" "drawer"; }
+.screen.device > .col-params { grid-area: params; min-width: 0; }
+
+/* diag 屏：观察类面板直接放主区（无抽屉）；曲线占满一行，IMU 与事件/历史并排。 */
+.screen.diag {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-areas: "curve curve" "imu events" "imu history";
+}
+.screen.diag > .col-curve { grid-area: curve; min-width: 0; }
+.screen.diag > .col-imu { grid-area: imu; min-width: 0; }
+.screen.diag > .col-events { grid-area: events; min-width: 0; }
+.screen.diag > .col-history { grid-area: history; min-width: 0; }
+@media (max-width: 1080px) {
+  .screen.diag { grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "curve" "imu" "events" "history"; }
+}
+
+/* sim 屏：仿真启动器整宽一个面板（无抽屉、无副栏）。 */
+.screen.sim { grid-template-columns: minmax(0, 1fr); }
+.screen.sim > .col-full { min-width: 0; }
+
+/* 曲线：canvas 随容器缩放，绘制缓冲为 980×380。 */
+.chart { display: block; width: 100%; height: auto; background: #070a10;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
+/* ---------- IMU：姿态数值 + 3D 姿态 + 人工地平仪 ---------- */
+.imu-wrap { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 14px; align-items: start; }
+@media (max-width: 1080px) { .imu-wrap { grid-template-columns: minmax(0, 1fr); } }
+.imu3d { display: block; width: 130px; height: 130px; background: #070a10;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.horizon { display: block; width: 260px; height: 150px; background: #070a10;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
+/* ---------- 事件日志 ---------- */
+.events { list-style: none; margin: 0; padding: 0; max-height: 220px;
+  overflow-y: auto; font-size: var(--fs-sm); }
+.events li { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); }
+
+/* ---------- 臂视图舞台（canvas 与 hud 由 panels/arm.js 建） ---------- */
+.stage { position: relative; background: #070a10; border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; }
+.stage .arm3d { display: block; width: 100%; height: var(--stage-h); touch-action: none; }
+.stage .hud { position: absolute; top: 6px; left: 8px; font-size: var(--fs-xs);
+  font-family: var(--mono); color: var(--dim); background: rgba(10, 14, 22, .8);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px 7px;
+  pointer-events: none; transition: opacity .4s; max-width: 80%; }
+.stage .hud.err { color: var(--err); border-color: #4a1f1f; }
+.stage .legend { position: absolute; left: 0; right: 0; bottom: 0; display: flex;
+  align-items: center; gap: 14px; padding: 4px 9px; font-size: var(--fs-xs);
+  color: var(--dim); background: rgba(10, 14, 22, .82); border-top: 1px solid var(--line); }
+.stage .legend .sw { display: inline-block; width: 12px; height: 2px; border-radius: 1px;
+  margin-right: 4px; vertical-align: middle; }
+.stage .legend .sw.ghost { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
+.stage .legend .dt { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle; }
+/* 模型选择器：压进图例一行的高度与字号，宽模型名截断显示（完整名看 title） */
+.stage .legend .arm-model { max-width: 200px; padding: 1px 4px; font-size: var(--fs-xs); }
+
+/* ---------- 仿真启动器（sim 屏） ---------- */
+.sim-panel { display: flex; flex-direction: column; gap: var(--gap-sm); }
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--gap) 10px;
+}
+.sim-field { display: flex; flex-direction: column; gap: 2px; color: var(--dim); font-size: var(--fs-xs); }
+.sim-field input, .sim-field select { width: 100%; min-width: 0; }
+.sim-safety { color: var(--warn); margin: var(--gap-sm) 0; }
+.sim-hint { padding: 2px 0; }
+.sim-log {
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #080c13;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: #aab8cc;
+  font: var(--fs-xs)/1.45 var(--mono);
+}
+/* 电机模拟控制台（HIL 模式）：动态行由 JS 生成，只用 class（契约测试禁止 JS 生成 id） */
+.sim-motors { margin-top: var(--gap-sm); padding-top: var(--gap-sm); border-top: 1px solid var(--line); }
+.sim-motors-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--dim); }
+.sim-motor-add { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 4px 0; }
+.sim-motor-add label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--dim); }
+.sim-motor-add input { width: 72px; }
+.sim-motor-list { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow: auto; }
+.sim-motor-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.sim-motor-row .sim-motor-label { min-width: 104px; }
+.sim-motor-row .sim-motor-joint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-motor-row .ok { color: var(--ok); }
+.sim-motor-row .warn { color: var(--warn); }
+.sim-motor-row.offline .sim-motor-label { opacity: 0.55; }
+.sim-motor-row button { padding: 1px 8px; }
+
+/* 动作库（#/teach）：行 = 播放按钮 + 文件名 + 摘要 */
+.act-list { display: flex; flex-direction: column; max-height: 400px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.act-list:empty { display: none; }
+.act-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px;
+  font-size: var(--fs-xs); border-bottom: 1px solid var(--line);
+  flex: 0 0 auto; }   /* 列表限高时行与预览不得被 flex 压缩 */
+.act-row:last-child { border-bottom: none; }
+.act-row .act-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: pointer; }
+.act-row .act-name:hover { text-decoration: underline; color: var(--text); }
+.act-row .act-meta { white-space: nowrap; }
+.act-row.playing { background: rgba(61, 155, 255, 0.12); }
+.act-preview { margin: 0 0 4px; padding: 4px 6px; max-height: 300px; overflow: auto;
+  background: #080c13; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  color: #aab8cc; font-size: var(--fs-xs); flex: 0 0 auto; }
+.act-preview-sum { padding: 1px 0; color: var(--dim); }
+.act-preview-table { border-collapse: collapse; margin-top: 3px;
+  font-family: var(--mono); }
+.act-preview-table th, .act-preview-table td {
+  padding: 1px 10px 1px 0; text-align: right; white-space: nowrap; }
+.act-preview-table th { position: sticky; top: 0; background: #080c13;
+  color: var(--dim); border-bottom: 1px solid var(--line); }
+.act-preview-table .gap td { color: var(--dim-2); text-align: center; }
+.act-gain { width: 68px; }
+.act-gain input { width: 100%; }
+.ctrl-row input[type="file"] { max-width: 260px; }
+/* 字段按 transport/mode 显示隐藏，[hidden] 必须在 flex 列里也生效 */
+.sim-panel [hidden] { display: none !important; }
+
+/* ---------- 卡片 / 可折叠区（含屏内抽屉） ---------- */
+.card, .sec, .sendbar, .drawer { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--pad-panel); margin-bottom: var(--gap); }
+details.card, details.sec, details.sendbar, details.drawer { padding: 0; }
+details.card > summary, details.sec > summary, details.sendbar > summary,
+details.drawer > summary {
+  font-size: var(--fs-sm); font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--dim);
+  margin: 0; padding: 7px 11px; cursor: pointer;
+  display: flex; align-items: center; gap: 7px; user-select: none;
+}
+details.card > summary:hover, details.sec > summary:hover,
+details.sendbar > summary:hover, details.drawer > summary:hover {
+  background: var(--panel-2); color: var(--text); }
+details.card[open] > summary, details.sec[open] > summary,
+details.sendbar[open] > summary, details.drawer[open] > summary {
+  border-bottom: 1px solid var(--line); margin-bottom: 7px; }
+details.card > *:not(summary), details.sec > *:not(summary),
+details.sendbar > *:not(summary), details.drawer > *:not(summary) { margin: 6px 11px; }
+details.card > *:not(summary):last-child,
+details.sec > *:not(summary):last-child,
+details.sendbar > *:not(summary):last-child,
+details.drawer > *:not(summary):last-child { margin-bottom: 10px; }
+/* display:flex 会吃掉 summary 默认的三角标记，自己补一个。 */
+details > summary::before { content: '▸'; color: var(--dim-2); font-size: 9px; flex: none; }
+details[open] > summary::before { content: '▾'; }
+
+/* ---------- 屏内抽屉：tab 行 + 面板区 ---------- */
+.drawer .tabs { display: flex; gap: var(--gap-sm); }
+.drawer .tabs > .tab:only-child { display: none; }   /* 单 tab（设备屏）整行隐藏 */
+.tab { background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--dim); padding: 4px 10px; cursor: pointer; font-size: var(--fs-sm); font-family: inherit; }
+.tab:hover { color: var(--text); border-color: var(--line); }
+.tab.on { background: #14243c; border-color: #24456e; color: var(--text); }
+.drawer-body { padding-bottom: 4px; }
+
+/* ---------- 关节索引（TF 侧） ---------- */
+/* 单行紧凑排布：关节名 / 数值 / TF 年龄同一行，18 根不滚动全部可见（三栏齐平高度内）。
+   每行是独立网格：名字列 1fr 可截断，数值与年龄定宽（不定宽则列随内容参差），
+   完整信息（帧对、类型、对应电机）看行的 title。 */
+.joints { list-style: none; margin: 0; padding: 0; }
+.joints li { display: grid; grid-template-columns: 8px minmax(0, 1fr) 52px 52px;
+  align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid transparent;
+  border-left: 2px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
+.joints li:hover { background: var(--panel-2); }
+.joints li.on { background: #14243c; border-color: #24456e; border-left-color: var(--accent); }
+.joints li.empty { display: block; color: var(--dim-2); cursor: default; padding: 10px 0; text-align: center; }
+.joints .jdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim-2); }
+.joints .jid { font-family: var(--mono); font-weight: 600; font-size: var(--fs-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.joints .jpos { font-family: var(--mono); font-size: var(--fs-sm); text-align: right; }
+.joints .jstate { font-size: var(--fs-xs); color: var(--dim-2); letter-spacing: .02em;
+  text-align: right; white-space: nowrap; }
+.joints .jstate.warn { color: var(--warn); }
+.joints li.joint-row { grid-template-columns: 8px minmax(0, 1fr) 54px 50px; gap: 5px; }
+.joint-row .jid { grid-column: 2; grid-row: 1; }
+.joint-row .jpos { grid-column: 3; grid-row: 1; }
+.joint-row .jstate { grid-column: 4; grid-row: 1; }
+.joint-slider-control { grid-column: 2 / -1; grid-row: 2; display: grid;
+  grid-template-columns: 46px minmax(30px, 1fr) 46px; gap: 3px; align-items: center; min-width: 0; }
+.joint-row .joint-bound { padding: 3px 1px; font: 9px var(--mono); background: transparent;
+  color: var(--dim-2); border: 1px solid transparent; border-bottom-color: var(--line); }
+.joint-row .joint-bound:hover { color: var(--accent); border-color: var(--line); }
+.joint-bound-editor { width: 100%; min-width: 0; padding: 3px 1px; font: 9px var(--mono); }
+.joint-slider-control > [hidden] { display: none !important; }
+.joint-range { display: flex; flex-direction: column; min-width: 0; }
+.joint-range input[type="range"] { width: 100%; min-width: 0; margin: 0; padding: 0;
+  accent-color: #85dfb8; cursor: pointer; }
+.joint-range input:disabled { opacity: .35; cursor: not-allowed; }
+.joint-target-value { font: 8px var(--mono); text-align: center; color: var(--dim-2); }
+.joint-message { grid-column: 2 / -1; font-size: 9px; color: var(--dim-2); overflow-wrap: anywhere; }
+.joint-message:empty { display: none; }
+
+/* ---------- 电机状态表（右栏：全部电机同屏，行点击置顶） ---------- */
+/* 定宽百分比列：auto 布局会被 CONFIG_CONFLICT 这类长状态名撑出横向滚动。 */
+.jstates { table-layout: fixed; }
+.jstates td, .jstates th { padding: 2px 6px; }
+.jstates th:nth-child(1) { width: 16%; }   /* ID */
+.jstates th:nth-child(2) { width: 21%; }   /* 位置 */
+.jstates th:nth-child(3) { width: 21%; }   /* 力矩 */
+.jstates th:nth-child(4) { width: 19%; }   /* 温度 */
+.jstates th:nth-child(5) { width: 23%; }   /* 状态 */
+.jstates tbody tr { cursor: pointer; }
+.jstates tbody tr.on { background: #14243c; }
+.jstates .jid { font-family: var(--mono); font-weight: 600; }
+.jstates .jst { font-size: var(--fs-xs); color: var(--dim-2);
+  overflow: hidden; text-overflow: ellipsis; }
+.jstates .jst.warn { color: var(--warn); }
+
+/* ---------- 读数栅格 ---------- */
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.kv > div { display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
+  padding: 3px 0; border-bottom: 1px solid var(--line); }
+.kv span { color: var(--dim-2); font-size: var(--fs-xs); letter-spacing: .04em; text-transform: uppercase; }
+.kv b { font-family: var(--mono); font-size: var(--fs-base); font-weight: 500; text-align: right; }
+
+/* ---------- 表格 ---------- */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+thead th { color: var(--dim-2); font-weight: 500; font-size: var(--fs-xs);
+  letter-spacing: .04em; text-transform: uppercase; border-bottom-color: var(--line-2); }
+/* 数值列表头跟着数值右对齐：表头左对齐、数字右对齐时，列一多就看着"对不上"。 */
+td.num { font-family: var(--mono); text-align: right; }
+th.num { text-align: right; }
+tbody tr:hover { background: #151d2c; }
+tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size: var(--fs-sm); }
+
+/* 状态胶囊（lifecyclePill 等） */
+.pill { display: inline-block; font-family: var(--mono); font-size: var(--fs-xs);
+  padding: 0 6px; border-radius: var(--radius-sm); background: var(--panel-2);
+  border: 1px solid var(--line); color: var(--dim); }
+.pill.on { background: #0f2e20; border-color: #1d5537; color: var(--ok); }
+.pill.off { background: #331618; border-color: #5e2628; color: var(--err); }
+.pill.warn { background: #33280f; border-color: #5e4a1d; color: var(--warn); }
+.pill.mid { background: #16233a; border-color: #2b4468; color: #9fb2d4; }
+
+/* ---------- 设备参数表 ---------- */
+/* 表头单位小字（pos_min <small>rad</small>…） */
+th small { color: var(--dim-2); opacity: .8; font-weight: 400; font-size: 9px;
+  text-transform: none; }
+/* 核对总览条（paramSummary）：结论放最显眼处 */
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding: 6px 9px; margin-bottom: var(--gap-sm); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--panel-2); }
+/* 保护确知为关的行：该关节此刻没有任何限位在跑。 */
+tr.unprotected td { background: #2a1416; }
+tr.unprotected td.num { color: var(--err); }
+
+/* ---------- 控件 ---------- */
+.ctrl-row { display: flex; gap: 6px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
+input, select { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  color: var(--text); font: var(--fs-sm) var(--mono); padding: 4px 7px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+.check { font-size: var(--fs-sm); display: flex; align-items: center; gap: 4px; color: var(--dim); }
+.params .pnum { width: 86px; text-align: right; }
+/* 设备端原值：压在输入框下的一行小字（cnt / mA / 电机端 RPM） */
+.params .rawval { display: block; text-align: right; line-height: 1.1; }
+
+/* 下发表：输入框吃满单元格宽度（数值列宽窄随内容漂移会难对齐）。 */
+.cmd input { width: 100%; min-width: 80px; padding: 3px 6px; }
+.cmd td { padding: 2px 4px; }
+
+/* ---------- 文本工具 ---------- */
+.muted { color: var(--dim); }
+.tiny { font-size: var(--fs-xs); }
+.spacer { flex: 1; }
+.sum { color: var(--dim-2); font-family: var(--mono); font-size: var(--fs-xs);
+  font-weight: 400; text-transform: none; letter-spacing: 0; }
+/* 重力补偿的摘要栏：断链（开关亮着而叠加节点不在）意味着命令全部落空，别让它看着像常态。 */
+.sum.ok { color: var(--ok); }
+.sum.err { color: var(--err); }
+.result { min-height: 14px; margin-top: 4px; font-size: var(--fs-xs); font-family: var(--mono); }
+.result.ok { color: var(--ok); }
+.result.err { color: var(--err); }

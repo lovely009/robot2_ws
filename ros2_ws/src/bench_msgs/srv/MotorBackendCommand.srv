@@ -1,0 +1,7 @@
+# 转发一条模拟器控制命令（add / remove / link / status ...）。
+# 控制通道本身就是 JSON 行协议，请求/响应原样透传 JSON 字符串。
+string request_json
+---
+bool ok
+string error
+string response_json

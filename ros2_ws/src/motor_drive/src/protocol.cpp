@@ -1,0 +1,250 @@
+#include "motor_drive/protocol.hpp"
+
+#include <limits>
+
+namespace motor_drive::protocol {
+namespace {
+
+template <typename T>
+void write_le(uint8_t *destination, T value, const std::size_t width) {
+  // 25/30 mm 协议使用小端序：低有效字节先放到低地址。
+  const auto raw = static_cast<uint64_t>(value);
+  for (std::size_t index = 0; index < width; ++index) {
+    destination[index] = static_cast<uint8_t>(raw >> (8U * index));
+  }
+}
+
+uint32_t read_le(const uint8_t *data, const std::size_t width) {
+  uint32_t value = 0U;
+  for (std::size_t index = 0; index < width; ++index) {
+    value |= static_cast<uint32_t>(data[index]) << (8U * index);
+  }
+  return value;
+}
+
+int16_t read_be_i16(const uint8_t *data) {
+  const auto raw = static_cast<uint16_t>(
+      (static_cast<uint16_t>(data[0]) << 8U) | data[1]);
+  return static_cast<int16_t>(raw);
+}
+
+uint16_t wrist_velocity_to_code(const double velocity_rad_s) {
+  // rad/s -> rpm -> 0.1 rpm 协议码，并以 0x8000 表示有符号零点偏置。
+  const auto rpm10 = static_cast<int32_t>(
+      std::llround(velocity_rad_s * 60.0 / (2.0 * kPi) * 10.0));
+  return static_cast<uint16_t>(
+      std::clamp(rpm10, -kWristVelocityCodeLimit, kWristVelocityCodeLimit) +
+      0x8000);
+}
+
+double wrist_code_to_velocity(const uint16_t code) {
+  const auto raw = static_cast<int32_t>(code) - 0x8000;
+  return raw / 10.0 * 2.0 * kPi / 60.0;
+}
+
+uint32_t wrist_position_to_code(const double position_rad) {
+  // 一圈 2,097,152 tick。协议用 0x80000000 作为多圈有符号位置的零点偏置。
+  const auto ticks = static_cast<int64_t>(std::llround(
+      position_rad / (2.0 * kPi) * kWristTicksPerRevolution));
+  return static_cast<uint32_t>(
+      std::clamp<int64_t>(ticks, -kWristPositionTickLimit,
+                          kWristPositionTickLimit) +
+      0x80000000LL);
+}
+
+double wrist_code_to_position(const uint32_t code) {
+  return (static_cast<int64_t>(code) - 0x80000000LL) /
+         static_cast<double>(kWristTicksPerRevolution) * 2.0 * kPi;
+}
+
+uint16_t wrist_current_to_code(const double current_a) {
+  const auto raw = static_cast<int32_t>(std::llround(current_a / kWristCurrentScaleA));
+  return static_cast<uint16_t>(std::clamp(raw, -32768, 32767) + 0x8000);
+}
+
+double wrist_code_to_current(const uint16_t code) {
+  return (static_cast<int32_t>(code) - 0x8000) * kWristCurrentScaleA;
+}
+
+} // namespace
+
+uint32_t float_to_uint(double value, const double low, const double high,
+                       const unsigned bits) {
+  if (!(high > low) || bits == 0U || bits > 31U) {
+    throw std::invalid_argument("invalid float_to_uint range or bit width");
+  }
+  // MIT 字段是定点量：先按协议范围限幅，再线性映射到指定 bit 宽度。
+  value = std::clamp(value, low, high);
+  const auto maximum = (uint32_t{1} << bits) - 1U;
+  return static_cast<uint32_t>((value - low) * maximum / (high - low));
+}
+
+double uint_to_float(const uint32_t value, const double low, const double high,
+                     const unsigned bits) {
+  if (!(high > low) || bits == 0U || bits > 31U) {
+    throw std::invalid_argument("invalid uint_to_float range or bit width");
+  }
+  const auto maximum = (uint32_t{1} << bits) - 1U;
+  return value * (high - low) / maximum + low;
+}
+
+std::array<uint8_t, 12> pack_wrist_command(const JointCommand &command) {
+  // 25/30 mm MIT 下行按手册依次写入：位置4B、速度2B、Kp2B、Kd2B、前馈电流2B。
+  std::array<uint8_t, 12> output{};
+  const auto position = wrist_position_to_code(command.position);
+  const auto velocity = wrist_velocity_to_code(command.velocity);
+  const auto kp = static_cast<uint16_t>(std::clamp<int64_t>(
+      std::llround(command.kp / kWristKpScale), 0, 0xffff));
+  const auto kd = static_cast<uint16_t>(std::clamp<int64_t>(
+      std::llround(command.kd / kWristKdScale), 0, 0xffff));
+  const auto current = wrist_current_to_code(command.feedforward);
+  write_le(output.data(), position, 4U);
+  write_le(output.data() + 4U, velocity, 2U);
+  write_le(output.data() + 6U, kp, 2U);
+  write_le(output.data() + 8U, kd, 2U);
+  write_le(output.data() + 10U, current, 2U);
+  return output;
+}
+
+JointCommand unpack_wrist_command(const uint8_t *data, const std::size_t size) {
+  if (data == nullptr || size != 12U) {
+    throw std::invalid_argument("25/30 mm MIT command must be 12 bytes");
+  }
+  const auto position = read_le(data, 4U);
+  const auto velocity = static_cast<uint16_t>(read_le(data + 4U, 2U));
+  const auto kp = static_cast<uint16_t>(read_le(data + 6U, 2U));
+  const auto kd = static_cast<uint16_t>(read_le(data + 8U, 2U));
+  const auto current = static_cast<uint16_t>(read_le(data + 10U, 2U));
+  return {wrist_code_to_position(position), wrist_code_to_velocity(velocity),
+          kp * kWristKpScale, kd * kWristKdScale,
+          wrist_code_to_current(current)};
+}
+
+std::array<uint8_t, 8> pack_wrist_control(const bool run, const bool set_zero,
+                                           const WristMode mode) {
+  return {static_cast<uint8_t>(run), static_cast<uint8_t>(set_zero),
+          static_cast<uint8_t>(mode), 0U, 0U, 0U, 0U, 0U};
+}
+
+WristControl unpack_wrist_control(const uint8_t *data, const std::size_t size) {
+  if (data == nullptr || size != 8U) {
+    throw std::invalid_argument("25/30 mm motor control must be 8 bytes");
+  }
+  if (data[2] > static_cast<uint8_t>(WristMode::Position)) {
+    throw std::invalid_argument("unknown 25/30 mm control mode");
+  }
+  return {data[0] != 0U, data[1] != 0U, static_cast<WristMode>(data[2])};
+}
+
+std::array<uint8_t, 12>
+pack_wrist_reply(const unsigned node, const JointState &state_current_a) {
+  std::array<uint8_t, 12> output{};
+  write_le(output.data(), wrist_command_id(node), 2U);
+  write_le(output.data() + 2U, wrist_position_to_code(state_current_a.position),
+           4U);
+  write_le(output.data() + 6U, wrist_velocity_to_code(state_current_a.velocity),
+           2U);
+  write_le(output.data() + 8U, wrist_current_to_code(state_current_a.effort),
+           2U);
+  return output;
+}
+
+std::array<uint8_t, 20>
+pack_wrist_status(const unsigned node, const JointState &state_current_a,
+                  const double voltage_v, const uint32_t fault,
+                  const uint8_t motor_state, const uint8_t calibration_state,
+                  const WristMode mode, const uint8_t motor_type) {
+  std::array<uint8_t, 20> output{};
+  write_le(output.data(), wrist_command_id(node), 2U);
+  write_le(output.data() + 2U, wrist_position_to_code(state_current_a.position),
+           4U);
+  write_le(output.data() + 6U, wrist_velocity_to_code(state_current_a.velocity),
+           2U);
+  write_le(output.data() + 8U, wrist_current_to_code(state_current_a.effort),
+           2U);
+  const auto voltage_code = static_cast<uint16_t>(
+      std::clamp<int32_t>(static_cast<int32_t>(std::llround(voltage_v * 10.0)),
+                          -32768, 32767) +
+      0x8000);
+  write_le(output.data() + 10U, voltage_code, 2U);
+  write_le(output.data() + 12U, fault, 4U);
+  output[16] = motor_state;
+  output[17] = calibration_state;
+  output[18] = static_cast<uint8_t>(mode);
+  output[19] = motor_type;
+  return output;
+}
+
+JointState unpack_wrist_feedback(const uint8_t *data, const std::size_t size) {
+  if (data == nullptr || (size != 12U && size != 20U)) {
+    throw std::invalid_argument("wrist feedback must be 12 or 20 bytes");
+  }
+  const auto position = read_le(data + 2U, 4U);
+  const auto velocity = static_cast<uint16_t>(read_le(data + 6U, 2U));
+  const auto current = static_cast<uint16_t>(read_le(data + 8U, 2U));
+  return {wrist_code_to_position(position), wrist_code_to_velocity(velocity),
+          wrist_code_to_current(current)};
+}
+
+std::array<uint8_t, 8>
+pack_cerb_mit_command(const JointCommand &command,
+                      const CerbMitLimits &limits) {
+  for (const double limit : {limits.position_rad, limits.velocity_rad_s,
+                            limits.torque_nm, limits.mit_kp_limit,
+                            limits.mit_kd_limit}) {
+    if (!std::isfinite(limit) || !(limit > 0.0)) {
+      throw std::invalid_argument("CERB MIT limits must be finite and positive");
+    }
+  }
+  if (!std::isfinite(command.position) || !std::isfinite(command.velocity) ||
+      !std::isfinite(command.kp) || !std::isfinite(command.kd) ||
+      !std::isfinite(command.feedforward)) {
+    throw std::invalid_argument("CERB MIT command values must be finite");
+  }
+  const auto encode = [](const double value, const double limit,
+                         const unsigned bits, const bool symmetric) {
+    const double normalized = symmetric
+        ? (std::clamp(value / limit, -1.0, 1.0) + 1.0) * 0.5
+        : std::clamp(value / limit, 0.0, 1.0);
+    const auto maximum = (uint32_t{1} << bits) - 1U;
+    return static_cast<uint32_t>(std::clamp<long long>(
+        std::llround(normalized * maximum), 0, maximum));
+  };
+  const auto position = encode(command.position, limits.position_rad, 16U, true);
+  const auto velocity = encode(command.velocity, limits.velocity_rad_s, 12U, true);
+  const auto kp = encode(command.kp, limits.mit_kp_limit, 12U, false);
+  const auto kd = encode(command.kd, limits.mit_kd_limit, 12U, false);
+  const auto torque = encode(command.feedforward, limits.torque_nm, 12U, true);
+  if ((position | velocity | kp | kd | torque) == 0U) {
+    throw std::invalid_argument("CERB all-zero MIT payload is invalid");
+  }
+  return {static_cast<uint8_t>(position >> 8U),
+          static_cast<uint8_t>(position),
+          static_cast<uint8_t>(velocity >> 4U),
+          static_cast<uint8_t>((velocity << 4U) | (kp >> 8U)),
+          static_cast<uint8_t>(kp),
+          static_cast<uint8_t>(kd >> 4U),
+          static_cast<uint8_t>((kd << 4U) | (torque >> 8U)),
+          static_cast<uint8_t>(torque)};
+}
+
+JointState unpack_cerb_feedback(const uint8_t *data, const std::size_t size) {
+  if (data == nullptr || size != 12U) {
+    throw std::invalid_argument("CERB feedback must be 12 bytes");
+  }
+  // 反馈为大端：位置码每 182 count 为 1°，速度为 rpm，Iq 每码 20 mA。
+  const double position = read_be_i16(data) / 182.0 * kPi / 180.0;
+  const double velocity = read_be_i16(data + 2U) * 2.0 * kPi / 60.0;
+  const double current = read_be_i16(data + 4U) * kCerbCurrentCodeA;
+  return {position, velocity, current};
+}
+
+double wrist_kp_to_current_gain(const double protocol_kp) {
+  return protocol_kp / 0.001115;
+}
+
+double wrist_kd_to_current_gain(const double protocol_kd) {
+  return protocol_kd / 85.636;
+}
+
+} // namespace motor_drive::protocol

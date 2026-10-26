@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!-- 重力矩可闭式验算的 3R 平面臂 fixture（不依赖任何模型资产包）。
+
+     三个 revolute 关节都绕 y 轴，q=0 时连杆沿 +x 水平伸出，重力沿 -z。
+     link_i 质量 m_i 的质心在自身 x 轴上 c_i 处，joint_{i+1} 在 d_i 处。
+     记 q123 = q1+q2+q3，G=9.81：
+       z1 = -c1·sin q1
+       z2 = -d1·sin q1 - c2·sin(q1+q2)
+       z3 = -d1·sin q1 - d2·sin(q1+q2) - c3·sin q123
+       τ1 = -G·[m1·c1·cos q1 + m2·(d1·cos q1 + c2·cos(q1+q2))
+                + m3·(d1·cos q1 + d2·cos(q1+q2) + c3·cos q123)]
+       τ2 = -G·[m2·c2·cos(q1+q2) + m3·(d2·cos(q1+q2) + c3·cos q123)]
+       τ3 = -G·m3·c3·cos q123
+     数值：m1=1.0 c1=0.2 d1=0.4；m2=0.5 c2=0.15 d2=0.3；m3=0.25 c3=0.1。
+
+     joint_tool（fixed）与 joint_aux（continuous）挂在 link_3 上、子连杆无质量，
+     只为覆盖关节分类，不改变上面三个关节的闭式解。 -->
+<robot name="planar_arm">
+  <link name="base_link"/>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.0" upper="3.0" effort="10.0" velocity="10.0"/>
+  </joint>
+  <link name="link_1">
+    <inertial>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <origin xyz="0.4 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.0" upper="3.0" effort="10.0" velocity="10.0"/>
+  </joint>
+  <link name="link_2">
+    <inertial>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.0005"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/>
+    <child link="link_3"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.0" upper="3.0" effort="10.0" velocity="10.0"/>
+  </joint>
+  <link name="link_3">
+    <inertial>
+      <origin xyz="0.1 0 0" rpy="0 0 0"/>
+      <mass value="0.25"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.002" iyz="0" izz="0.0002"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_tool" type="fixed">
+    <parent link="link_3"/>
+    <child link="tool_tip"/>
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="tool_tip"/>
+
+  <joint name="joint_aux" type="continuous">
+    <parent link="link_3"/>
+    <child link="aux_link"/>
+    <origin xyz="0 0.1 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="aux_link"/>
+</robot>

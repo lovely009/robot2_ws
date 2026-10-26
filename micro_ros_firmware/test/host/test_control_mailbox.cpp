@@ -64,7 +64,7 @@ static void test_command_snapshot_is_complete_and_latest_wins() {
   assert(out.targets[0].motor_id == 44U);
 }
 
-static void test_command_snapshot_accepts_64_targets_and_rejects_invalid_data() {
+static void test_command_snapshot_accepts_capacity_targets_and_rejects_invalid_data() {
   control_mailbox_t mailbox{};
   control_mailbox_init(&mailbox);
 
@@ -95,7 +95,8 @@ static void test_command_snapshot_accepts_64_targets_and_rejects_invalid_data() 
   control_command_snapshot_t out{};
   assert(control_mailbox_take_command(&mailbox, &out));
   assert(out.target_count == CONTROL_COMMAND_MAILBOX_MAX_TARGETS);
-  assert(out.targets[63].motor_id == 64U);
+  assert(out.targets[CONTROL_COMMAND_MAILBOX_MAX_TARGETS - 1U].motor_id ==
+         CONTROL_COMMAND_MAILBOX_MAX_TARGETS);
   assert(mailbox.command.invalid_snapshot_count == 3U);
 }
 
@@ -598,7 +599,7 @@ int main() {
   test_config_set_direction_value_range();
   test_set_zero_request_is_accepted();
   test_command_snapshot_is_complete_and_latest_wins();
-  test_command_snapshot_accepts_64_targets_and_rejects_invalid_data();
+  test_command_snapshot_accepts_capacity_targets_and_rejects_invalid_data();
   test_config_is_neutral_bounded_fifo();
   test_config_validation_covers_semantic_shape_only();
   test_authorization_and_agent_edges_are_idempotent();

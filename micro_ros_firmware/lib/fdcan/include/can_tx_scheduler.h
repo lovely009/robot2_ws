@@ -1,5 +1,5 @@
 // 每总线 TX 软件调度器：P0 安全 > P1 周期控制 > P2 管理流量，每总线一个实例。
-// P0（停机/失能/使能/急停）最高优先级、pump 先于一切出队，**P2 积压绝不影响它**；P1（500Hz
+// P0（停机/失能/使能/急停）最高优先级、pump 先于一切出队，**P2 积压绝不影响它**；P1（周期
 // MIT）每电机槽位 latest-wins、无 FIFO 历史，只发「脏」槽位；P2（发现/配置/管理）有界 FIFO +
 // 每次 pump 配额上限。pump() 返回本轮该提交硬件 FIFO 的帧，纯 C、无 HAL/FreeRTOS 依赖、
 // 可宿主测试，硬件忙/拒收由调用方经 can_tx_scheduler_note_result() 记账。
@@ -16,7 +16,8 @@ extern "C" {
 #endif
 
 #define CAN_TX_BUS_COUNT 3U
-#define CAN_TX_P1_SLOTS 64U        // 每电机一个 latest-wins 槽（对齐注册表容量）
+#include "firmware_config.h"
+#define CAN_TX_P1_SLOTS FIRMWARE_MAX_MOTORS // 每电机一个 latest-wins 槽
 #define CAN_TX_P0_CAPACITY 32U     // P0 FIFO，预留每总线 16 台同时撤权的余量。
 #define CAN_TX_P2_CAPACITY 16U     // P2 FIFO（ARD §22.3 有界）
 #define CAN_TX_P2_PUMP_QUOTA 2U    // 每次 pump 最多出队 P2 帧数（TBD-CAN-01 占位）

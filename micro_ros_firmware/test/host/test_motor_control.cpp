@@ -865,25 +865,25 @@ static void test_frame_creates_discovered_then_bind_readies() {
   assert(have_bound);
 }
 
-// 容量 64：满表后拒绝并出 REGISTRY_FULL 事件（禁止静默截断）。
-static void test_registry_capacity_64_rejects_overflow() {
+// 容量 48：第 49 台拒绝并出 REGISTRY_FULL 事件（禁止静默截断）。
+static void test_registry_capacity_48_rejects_overflow() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  // vaxor 节点 1..32（motor_id 1..32）+ CERB 节点 33..64（motor_id 33..64）。
+  // vaxor 节点 1..32 + CERB 节点 33..48，恰好注册 48 台。
   for (uint16_t node = 1; node <= 32; ++node) {
     motor_protocol_raw_frame_t f = vaxor_reply(node, 0.0, 0.0, 0.0, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
-  for (uint16_t node = 33; node <= 64; ++node) {
+  for (uint16_t node = 33; node <= 48; ++node) {
     motor_protocol_raw_frame_t f = cerb_feedback(node, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
-  assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
+  assert(ctx.entry_count == 48U);
 
-  // 第 65 台：CERB 节点 65（合法范围 1..127，motor_id 65 未占用）→ 满表拒绝。
-  motor_protocol_raw_frame_t extra = cerb_feedback(65, 1000);
+  // 第 49 台：合法且未占用的 CERB 节点 → 满表拒绝。
+  motor_protocol_raw_frame_t extra = cerb_feedback(49, 1000);
   motor_control_on_raw_frame(&ctx, &extra);
-  assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
+  assert(ctx.entry_count == 48U);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_REGISTRY_FULL, 0));
 }
 
@@ -3063,7 +3063,7 @@ static void test_state_copies_sorted_by_motor_id() {
 static void run_all_tests() {
   test_init_starts_unauthorized_and_empty();
   test_frame_creates_discovered_then_bind_readies();
-  test_registry_capacity_64_rejects_overflow();
+  test_registry_capacity_48_rejects_overflow();
   test_duplicate_motor_id_across_buses_conflicts();
   test_identity_conflict_same_bus_different_protocol();
   test_enter_active_requires_auth_profile_snapshot();

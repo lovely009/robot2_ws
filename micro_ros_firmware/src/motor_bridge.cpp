@@ -134,7 +134,7 @@ bool motor_bridge_begin_session(uint64_t epoch_ns) {
   g_device_param_pending = true;
   const uint32_t now = millis();
   g_status_tick = g_control_tick = g_topology_tick = now - 2000U;
-  g_motion_tick = now - 20U;
+  g_motion_tick = now - PUBLISH_SCHEDULE_MOTION_MS;
   return true;
 }
 

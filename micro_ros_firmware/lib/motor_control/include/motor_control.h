@@ -5,7 +5,7 @@
 //
 // 不依赖 ROS/HAL/FreeRTOS/control_mailbox，也不感知 joint_name（关节语义在 upper 层）；厂家字节只
 // 经 motor_protocol 的 adapter 接口——构造时注入 adapter 列表，新增协议不改内核。
-// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，2ms/500Hz 边界调
+// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，5ms/200Hz 边界调
 // apply_command_snapshot()，TX 调度器消费 collect_tx() 的 P0/P1/P2 帧。
 // 一切 freshness/超时判定用 MCU 单调时基毫秒（now_ms 与帧内 rx_tick_ms），绝不用 ROS 时间。
 
@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "firmware_config.h"
 #include "motor_protocol_adapter.h"
 
 #ifdef __cplusplus
@@ -20,19 +21,18 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-// 静态容量（ARD-0007 §8.1：注册表容量 ≥64 且编译期固定；禁止静默截断——
-// 满表拒绝并计数/出事件）。
+// 静态容量由固件配置统一约束；满表拒绝并计数/出事件，不静默截断。
 // ---------------------------------------------------------------------------
-#define MOTOR_CONTROL_MAX_MOTORS 64U
+#define MOTOR_CONTROL_MAX_MOTORS FIRMWARE_MAX_MOTORS
 #define MOTOR_CONTROL_MAX_BUSES 3U
-#define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS 64U
+#define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS FIRMWARE_MAX_MOTORS
 #define MOTOR_CONTROL_MAX_TX_PENDING 160U
 // 事件环为并发发现预留余量；身份绑定由 config_step 限速为每毫秒一台。
 #define MOTOR_CONTROL_MAX_EVENTS 128U
 // 轨迹点数与电机数决定静态 RAM 上界；拼接、mailbox、任务转换、
 // 内核锁存与切矢表均占内存，评估时须以链接结果为准。
 #define MOTOR_CONTROL_MAX_TRAJECTORY_POINTS 256U
-#define MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS 64U
+#define MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS FIRMWARE_MAX_MOTORS
 
 // 命令源标识（target_source）：最近一次实际生效的命令来自哪条通道。
 #define MOTOR_CONTROL_TARGET_SOURCE_NONE 0U
@@ -347,7 +347,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
 void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
-// 2ms/500Hz 控制边界：校验并消费一份完整快照；
+// 5ms/200Hz 控制边界：校验并消费一份完整快照；
 // 受控集合缺席电机立即软停（P0）。返回 false = 快照被拒（非法载荷）。
 // ---------------------------------------------------------------------------
 bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
@@ -357,7 +357,7 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
 // 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
 // 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
 // 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
-// 2ms/500Hz 控制边界完成。
+// 5ms/200Hz 控制边界完成。
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
     const motor_control_trajectory_t *trajectory,
     uint32_t now_ms);
@@ -368,7 +368,7 @@ bool motor_control_apply_trajectory(motor_control_context_t *ctx,
 // 时间超出末点 → 钳末点保持，绝不外推。
 void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
 
-// 每控制边界重发快照目标，维持 500Hz CAN 命令率，不依赖上行快照到达率。
+// 每控制边界重发快照目标，维持配置的 CAN 命令率，不依赖上行快照到达率。
 // 只在快照新鲜（age ≤ 30ms）时重发；挂起的 P0（软停/失能/使能重试）、整定窗、
 // 轨迹所属电机一律跳过。无新证据时它是幂等的重复投递，不改变任何生命周期状态。
 // 必须与 motor_control_trajectory_step 在同一拍调用（两者覆盖互斥的电机集合）。
@@ -414,7 +414,7 @@ typedef struct {
 void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
     motor_control_diagnostics_t *out);
 
-// 受理并落地一条策略快照（2ms/500Hz 控制边界调用）。逐台走与 SET_POLICY 相同的
+// 受理并落地一条策略快照（5ms/200Hz 控制边界调用）。逐台走与 SET_POLICY 相同的
 // 落地逻辑（含防复权代数门）；**单台被拒不影响其余**，拒绝经 CONFIG_RESULT
 // 事件可见。注意：逐台成功也会各出一条事件，故策略是**低频**接口——高频
 // 发布会把事件环灌满（丢弃计数见 diagnostics 话题）。
@@ -521,7 +521,7 @@ size_t motor_control_copy_param_views(motor_control_context_t *ctx,
     size_t capacity);
 
 // boot 持久化参数（W25 blob 投影）；未保存字段对应 has_* 为 false。
-// 不含 enable（策略位不持久化）。调用方（motor_rt 2ms/500Hz 边界）每边界传入，
+// 不含 enable（策略位不持久化）。调用方（motor_rt 5ms/200Hz 边界）每边界传入，
 // 内核按表项 stored_apply_mask 在 Profile 绑定后分批套用。
 typedef struct {
   uint16_t motor_id;

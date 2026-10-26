@@ -169,7 +169,8 @@ static void sync_config_session() {
 
 // 已上报的设备参数结论（下标 = motor_id；0xFF = 从未上报）。
 // 用电机 id 做 key 而不是视图下标：视图顺序不是契约，内核表项只增不减。
-static uint8_t g_reported_dev_init[MOTOR_CONTROL_MAX_MOTORS];
+// 当前协议节点号为 1..127；ID 范围独立于注册数量上限。
+static uint8_t g_reported_dev_init[128U];
 
 static const motor_control_param_view_t *find_view(uint16_t motor_id) {
   for (size_t i = 0; i < g_view_count; ++i) {
@@ -363,8 +364,7 @@ static bool validate_param_set(
   }
   for (uint16_t i = 0; i < count; ++i) {
     const can_bridge_msgs__msg__ParamSetTarget &t = targets[i];
-    if (t.field >= PARAM_DEVICE_SLOT_COUNT ||
-        t.motor_id >= MOTOR_CONTROL_MAX_MOTORS) {
+    if (t.field >= PARAM_DEVICE_SLOT_COUNT) {
       report_error(ERR_LOCAL_VALIDATION, t.motor_id);
       return false;
     }
@@ -661,7 +661,7 @@ static void poll_save(uint32_t now) {
 static void report_dev_init_changes(void) {
   for (size_t i = 0; i < g_view_count; ++i) {
     const motor_control_param_view_t *v = &g_views[i];
-    if (v->motor_id >= MOTOR_CONTROL_MAX_MOTORS ||
+    if (v->motor_id >= sizeof(g_reported_dev_init) ||
         g_reported_dev_init[v->motor_id] == v->dev_init) {
       continue;
     }

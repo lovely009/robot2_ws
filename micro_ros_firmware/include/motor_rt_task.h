@@ -1,4 +1,4 @@
-// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，2ms/500Hz 控制边界。
+// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，5ms/200Hz 控制边界。
 // ROS 桥仅通过 mailbox 提交输入、通过只读副本取状态；无 raw CAN 调试出口。
 
 #ifndef MOTOR_RT_TASK_H
@@ -25,12 +25,12 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
 
 // 提交一条多点轨迹分段（按 trajectory_id/segment_index 在 mailbox 内拼接；
 // 只有完整轨迹才 latest-wins 发布；非法分段由 mailbox 拒绝并计数；
-// 空单段轨迹 = 取消）。完整轨迹在 2ms/500Hz 控制边界生效，
+// 空单段轨迹 = 取消）。完整轨迹在 5ms/200Hz 控制边界生效，
 // 与快照按电机归属仲裁。
 bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory);
 
 // 提交一条批量策略（latest-wins；非法由 mailbox 整条拒绝并计数）。
-// 不走 config FIFO——那条队列深 16，装不下最多 64 台的策略消息。
+// 不走 config FIFO——那条队列深 16，装不下最多 FIRMWARE_MAX_MOTORS 台的策略消息。
 bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot);
 
 // 低频配置提交，契约见 control_mailbox 配置 FIFO。

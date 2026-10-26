@@ -8,7 +8,11 @@ extern "C" {
 #define PUBLISH_SCHEDULE_TICK_MS 10U
 #define PUBLISH_SCHEDULE_CONTROL_MS 50U
 #define PUBLISH_SCHEDULE_STATUS_MS 100U
-#define PUBLISH_SCHEDULE_MOTION_MS 20U
+#include "firmware_config.h"
+#define PUBLISH_SCHEDULE_MOTION_MS FIRMWARE_MOTOR_REPORT_PERIOD_MS
+#if PUBLISH_SCHEDULE_MOTION_MS % PUBLISH_SCHEDULE_TICK_MS != 0U
+#error "Motor report period must be a multiple of the bridge tick"
+#endif
 
 typedef enum {
   PUBLISH_RELIABLE_NONE = 0,

@@ -1,4 +1,4 @@
-// 电机实时任务：1ms 服务、2ms 控制边界。运行期不动态分配，
+// 电机实时任务：1ms 服务、配置周期的控制边界。运行期不动态分配，
 // 不等待 ROS/Agent/设备响应/W25Q64；RX/TX/配置均有每周期配额。
 
 #include "motor_rt_task.h"
@@ -15,6 +15,7 @@
 #include "motor_tx_router.h"
 #include "session_sync.h"
 #include "storage_task.h"
+#include "param_store_blob.h"
 
 // 各库电机容量须一致；RX ring 深度不是电机容量，不纳入此约束。
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
@@ -36,21 +37,20 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 2ms/500Hz 控制边界：轨迹插值与快照保持覆盖互斥电机集合，每台每边界一条命令。
+// 5ms/200Hz 控制边界：轨迹插值与快照保持覆盖互斥电机集合，每台每边界一条命令。
 // P1 槽 latest-wins；CERB 出队后聚合为每帧最多 6 轴的 0x210。
 // 20ms/50Hz SYNC 与上行状态独立；总线负载和 WCET/jitter 需无负载台架验证。
-static const uint32_t kControlPeriodMs = 2U;
+static const uint32_t kControlPeriodMs = FIRMWARE_MOTOR_COMMAND_PERIOD_MS;
 
 // 每周期配额，需按台架数据验证。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
 static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈上界）
-// 两次服务拍至少搬完 64 台的控制帧，并给 P0/P2/SYNC 留余量。
+// 两次服务拍至少搬完注册容量内的控制帧，并给 P0/P2/SYNC 留余量。
 static const uint32_t kTxCollectBudget =
     MOTOR_TX_ROUTER_LOGICAL_CAPACITY; // 每 1ms 最多取走内核待发帧数
 static const uint32_t kConfigDrainPerBoundary = 4U; // 每个控制边界最多转发配置数
-static const uint32_t kDiscoverySyncPeriodMs = 20U; // SYNC 心跳周期（维持设备
-                                                    // 20ms 状态上报，与 VAXOR
-                                                    // 20ms 自推统一 50Hz）
+static const uint32_t kDiscoverySyncPeriodMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
+// SYNC 心跳维持 CERB 状态上报；VAXOR 自推周期由设备配置决定。
 
 // 不透明内核单例（布局在 motor_control 库内私有；本任务只持指针）。
 static motor_control_context_t *const g_motor_control =
@@ -59,7 +59,7 @@ static control_mailbox_t g_control_mailbox;
 
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
 static motor_control_stored_params_t
-    g_stored_params[MOTOR_CONTROL_MAX_MOTORS];
+    g_stored_params[PARAM_STORE_RECORD_COUNT];
 static size_t g_stored_count = 0U;
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
@@ -356,7 +356,7 @@ static void pump_tx_schedulers(void) {
   }
 }
 
-// 2ms/500Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 5ms/200Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
@@ -607,7 +607,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
     sustain_discovery_sync(now_ms);
     route_kernel_tx();
 
-    // 2ms 控制边界（漂移自校正：按 millis 差触发；500 Hz）。
+    // 配置周期的控制边界：按 millis 差触发，不补发过期边界。
     if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
       last_control_ms = now_ms;
       control_boundary();
@@ -637,8 +637,8 @@ bool motor_rt_task_start(void) {
   size_t stored_count = 0U;
   const motor_control_stored_params_t *stored =
       storage_boot_params(&stored_count);
-  if (stored_count > MOTOR_CONTROL_MAX_MOTORS) {
-    stored_count = MOTOR_CONTROL_MAX_MOTORS;
+  if (stored_count > PARAM_STORE_RECORD_COUNT) {
+    stored_count = PARAM_STORE_RECORD_COUNT;
   }
   memcpy(g_stored_params, stored,
       stored_count * sizeof(motor_control_stored_params_t));

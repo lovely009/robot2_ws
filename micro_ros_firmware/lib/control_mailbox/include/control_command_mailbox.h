@@ -16,7 +16,8 @@ extern "C" {
 #endif
 
 #define CONTROL_COMMAND_MAILBOX_BUFFER_COUNT 2U
-#define CONTROL_COMMAND_MAILBOX_MAX_TARGETS 64U
+#include "firmware_config.h"
+#define CONTROL_COMMAND_MAILBOX_MAX_TARGETS FIRMWARE_MAX_MOTORS
 
 typedef struct {
   uint16_t motor_id;

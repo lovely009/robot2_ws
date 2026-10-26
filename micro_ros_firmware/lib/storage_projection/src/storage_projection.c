@@ -18,8 +18,8 @@ static_assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
 static_assert(PARAM_DEVICE_SLOT_SAFETY == MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
 static_assert(PARAM_DEVICE_SLOT_DIRECTION ==
     MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
-static_assert(PARAM_STORE_RECORD_COUNT == MOTOR_CONTROL_MAX_MOTORS,
-    "blob 记录数必须与注册表容量一致");
+static_assert(PARAM_STORE_RECORD_COUNT >= MOTOR_CONTROL_MAX_MOTORS,
+    "blob 记录数必须覆盖注册表容量");
 
 void storage_projection_views_to_blob(
     param_store_blob_t *blob, const motor_control_param_view_t *views,

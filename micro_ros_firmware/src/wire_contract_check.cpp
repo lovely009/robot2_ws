@@ -7,6 +7,7 @@
 #include <can_bridge_msgs/msg/detail/system_command__struct.h>
 #include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 
+#include "firmware_config.h"
 #include "wire_codec.h"
 
 namespace {
@@ -33,8 +34,8 @@ static_assert(kLowStateWire + kCdrEncapsulation <= kBestEffortPayloadMax,
 
 static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == -32768,
     "哨兵值变了：定点编解码两端都会错");
-static_assert(can_bridge_msgs__msg__WireContract__MOTOR_COUNT_MAX == 64,
-    "电机数上界与内核 MOTOR_CONTROL_MAX_MOTORS 脱钩了");
+static_assert(can_bridge_msgs__msg__WireContract__MOTOR_COUNT_MAX >= FIRMWARE_MAX_MOTORS,
+    "线协议电机数上界必须覆盖固件注册容量");
 
 // wire_codec 不依赖 ROS；在此校验其哨兵与生成常量一致。
 static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == WIRE_SENTINEL_MISSING,

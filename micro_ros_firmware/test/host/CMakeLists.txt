@@ -6,6 +6,8 @@ enable_testing()
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 
+include_directories(../../lib/firmware_config/include)
+
 # 原则：测试直接编译固件真实 .c，无桩无复制。固件源码按库组织成 OBJECT
 # 库单点维护源文件列表，新增内核 .c 只改本文件一处；include 目录随库
 # PUBLIC 传播，测试目标只声明依赖哪个库。

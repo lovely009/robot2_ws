@@ -1,6 +1,6 @@
 // 逐电机策略的最新值 mailbox（enable + MIT 增益）：control_command_mailbox 是「运动目标」，
 // 本条是「控制律参数与武装位」，二者独立、互不覆盖。**不走 config FIFO**：config 队列深 16、
-// 面向低频逐台带设备事务的请求，而一条策略最多 64 台，按台提交会有一半以上被拒、策略变成
+// 面向低频逐台带设备事务的请求，而一条策略最多 FIRMWARE_MAX_MOTORS 台，按台提交会有一半以上被拒、策略变成
 // 部分生效。并发契约与 control_command_mailbox 逐字相同（无锁、调用方临界区、写读同域、
 // 仅任务上下文）；语义为双缓冲 latest-wins，空策略是合法载荷、等价于无操作。
 
@@ -15,7 +15,8 @@ extern "C" {
 #endif
 
 #define CONTROL_POLICY_MAILBOX_BUFFER_COUNT 2U
-#define CONTROL_POLICY_MAILBOX_MAX_TARGETS 64U
+#include "firmware_config.h"
+#define CONTROL_POLICY_MAILBOX_MAX_TARGETS FIRMWARE_MAX_MOTORS
 
 // 策略元素。三项一起送：内核一次落地，不存在「已使能但 Kd 还是旧的」中间态。
 typedef struct {

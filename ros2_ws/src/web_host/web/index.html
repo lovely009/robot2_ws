@@ -235,31 +235,56 @@
 
   <!-- 曲线（canvas 由 js/panels/curve.js 绘制；数据源 = store.chartBuf） -->
   <template data-panel-template="curve">
-    <div class="ctrl-row wrap">
-      <label class="check">通道
-        <select id="chartCh">
-          <option value="position">位置 rad</option>
-          <option value="velocity">速度 rad/s</option>
-          <option value="effort">力矩 N·m</option>
-          <option value="current">电流 A</option>
-        </select>
-      </label>
-      <label class="check">电机
-        <select id="chartMotor"><option value="0">全部</option></select>
-      </label>
-      <label class="check">窗口
-        <select id="chartWindow">
-          <option value="5000">5 s</option>
-          <option value="10000" selected>10 s</option>
-          <option value="30000">30 s</option>
-        </select>
-      </label>
-      <span class="muted tiny" id="chartHint">--</span>
+    <div class="ctrl-row curve-controls">
+      <div class="curve-field">
+        <span class="curve-field-label" id="chartMotorLabel">电机</span>
+        <details id="chartMotor" class="curve-multiselect">
+          <summary aria-labelledby="chartMotorLabel" aria-haspopup="true">
+            <span data-chart-motor-summary>电机 1</span>
+          </summary>
+          <div class="curve-multiselect-menu" data-chart-motor-options role="group"
+            aria-labelledby="chartMotorLabel">
+            <label class="curve-option">
+              <input type="checkbox" name="chart-motor" value="1" data-motor-id="1" checked>
+              <span>电机 1</span>
+            </label>
+          </div>
+        </details>
+      </div>
+      <div class="curve-field">
+        <span class="curve-field-label" id="chartChannelLabel">通道</span>
+        <details id="chartCh" class="curve-multiselect">
+          <summary aria-labelledby="chartChannelLabel" aria-haspopup="true">
+            <span data-chart-channel-summary>位置 rad</span>
+          </summary>
+          <div class="curve-multiselect-menu" role="group" aria-labelledby="chartChannelLabel">
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="position" checked>
+              <span>位置</span><span class="curve-unit">rad</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="velocity">
+              <span>速度</span><span class="curve-unit">rad/s</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="effort">
+              <span>力矩</span><span class="curve-unit">N·m</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="current">
+              <span>电流</span><span class="curve-unit">A</span>
+            </label>
+          </div>
+        </details>
+      </div>
+      <span class="muted tiny" id="chartHint">10 s · 滚轮调整 1–60 s</span>
       <span class="spacer"></span>
       <button id="btnChartPause" class="tiny-btn">暂停</button>
       <button id="btnChartClear" class="tiny-btn secondary">清空</button>
     </div>
-    <canvas id="chart" width="980" height="380" class="chart"></canvas>
+    <canvas id="chart" width="980" height="380" class="chart" tabindex="0"
+      aria-label="电机通道曲线，滚轮调整 1 到 60 秒时间范围"></canvas>
+    <div id="chartLegend" class="chart-legend" aria-label="曲线图例"></div>
   </template>
 
   <!-- IMU（诊断屏；canvas 由 js/panels/imu.js 绘制，数据源 = /imu/{data,temp}） -->
@@ -291,22 +316,6 @@
       <button id="btnClearEvents" class="tiny-btn secondary">清空</button>
     </div>
     <ul class="events" id="eventLog"></ul>
-  </template>
-
-  <!-- 命令历史（页面最后下发的快照记录） -->
-  <template data-panel-template="history">
-    <div class="ctrl-row wrap">
-      <span class="sum" id="sumHist">--</span>
-      <span class="spacer"></span>
-      <button id="btnExportHist" class="tiny-btn">导出 JSON</button>
-      <button id="btnClearHist" class="tiny-btn secondary">清空</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>时间</th><th>seq</th><th>电机</th><th>状态</th></tr></thead>
-        <tbody id="histRows"><tr class="empty"><td colspan="4">暂无记录</td></tr></tbody>
-      </table>
-    </div>
   </template>
 
   <!-- 设备屏：全部参数（驱动板真值 + 固件记录，可回读可写事务） -->
@@ -521,12 +530,10 @@
           <div class="tabs" data-drawer-tabs>
             <button class="tab" data-drawer-tab="curve">曲线</button>
             <button class="tab" data-drawer-tab="events">事件日志</button>
-            <button class="tab" data-drawer-tab="history">命令历史</button>
           </div>
           <div class="drawer-body">
             <div data-drawer-panel="curve"><div data-panel="curve"></div></div>
             <div data-drawer-panel="events" hidden><div data-panel="events"></div></div>
-            <div data-drawer-panel="history" hidden><div data-panel="history"></div></div>
           </div>
         </details>
       </section>
@@ -564,7 +571,6 @@
       <section class="col-curve"><div data-panel="curve"></div></section>
       <section class="col-imu"><div data-panel="imu"></div></section>
       <section class="col-events"><div data-panel="events"></div></section>
-      <section class="col-history"><div data-panel="history"></div></section>
     </div>
   </template>
 

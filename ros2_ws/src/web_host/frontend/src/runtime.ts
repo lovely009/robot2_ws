@@ -5,6 +5,17 @@ import { PanelScheduler } from "./panel_scheduler";
 export const initialized = ref(false);
 export const startupError = ref("");
 export const notice = ref("");
+export interface CommandRecord {
+  t: number;
+  seq: number;
+  targets: { motor_id: number; position: number; velocity: number; effort: number }[];
+}
+export const commandHistory = shallowRef<CommandRecord[]>([]);
+function updateCommandHistory() {
+  commandHistory.value = modules.data.store.history.map((record: CommandRecord) => ({
+    ...record, targets: record.targets.map(target => ({ ...target })),
+  }));
+}
 export const snapshot = shallowRef<WorkbenchSnapshot>({
   connected: false,
   connectionText: "未连接",
@@ -58,7 +69,6 @@ const panelIds: PanelId[] = [
   "sim",
   "curve",
   "events",
-  "history",
   "imu",
 ];
 const mounted = new Set<PanelId>();
@@ -175,6 +185,7 @@ function dirty(batch: Set<string>) {
     s.selectedId = s.motors.keys().next().value;
     batch.add(data.DIRTY.SELECTED);
   }
+  if (batch.has(data.DIRTY.HISTORY)) updateCommandHistory();
   updateSnapshot();
   scheduler.invalidate(batch);
 }
@@ -220,6 +231,7 @@ async function start() {
       await data.loadModelJoints();
       if (disposed) return;
       updateSnapshot();
+      updateCommandHistory();
       resolveReady();
       await panelsReady;
       if (disposed) return;
@@ -307,6 +319,12 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
+  clearCommandHistory() {
+    if (!modules || disposed) return;
+    modules.data.store.history.length = 0;
+    updateCommandHistory();
+    modules.data.markDirty(modules.data.DIRTY.HISTORY);
+  },
   selectedMotorModel(): string {
     return modules?.data.store.motors.get(snapshot.value.selectedId)?.topo?.model_name || '';
   },

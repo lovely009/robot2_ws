@@ -8,6 +8,13 @@ import setuptools
 SETUP = Path(__file__).resolve().parents[1] / 'setup.py'
 
 
+def test_frontend_has_only_one_application_entry() -> None:
+    package = SETUP.parent
+    entries = sorted(path.relative_to(package) for path in package.glob('*/src/main.ts'))
+    assert entries == [Path('frontend/src/main.ts')], (
+        f'仅保留正式 Vue 工作台入口，不再保留独立旧原型：{entries}')
+
+
 def test_install_rejects_missing_workbench_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / 'frontend').mkdir()
     monkeypatch.chdir(tmp_path)

@@ -11,7 +11,6 @@ export type PanelId =
   | "sim"
   | "curve"
   | "events"
-  | "history"
   | "imu";
 export interface WorkbenchSnapshot {
   connected: boolean;

@@ -205,8 +205,8 @@ kbd {
   display: grid;
   grid-template-columns: 174px minmax(0, 1fr);
   grid-template-rows: 58px 48px minmax(0, 1fr) 30px;
-  height: 100vh;
-  min-height: 720px;
+  height: 100dvh;
+  min-height: 0;
   overflow: hidden;
 }
 .app-header {
@@ -327,8 +327,7 @@ kbd {
   letter-spacing: 1px;
   padding: 0 12px 11px;
 }
-.main-nav > button,
-.nav-bottom > button {
+.main-nav > button {
   padding: 11px 11px;
   border-radius: 5px;
   justify-content: flex-start;
@@ -348,29 +347,6 @@ kbd {
 }
 .main-nav > button.active small {
   color: #7bab95;
-}
-.nav-bottom {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-}
-.branch-label {
-  margin: 16px 8px 0;
-  padding-top: 17px;
-  border-top: 1px solid var(--border);
-  font: 8px var(--mono);
-  color: #819691;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  letter-spacing: 0.4px;
-}
-.branch-label span {
-  flex-basis: 100%;
-  font: 9px inherit;
-  color: #52676e;
-  margin: 3px 0 0 12px;
 }
 .app-footer {
   grid-column: 1/-1;
@@ -400,7 +376,7 @@ kbd {
   padding: 23px 20px 38px;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
 }
 .workspace-heading {
   display: flex;
@@ -452,7 +428,7 @@ kbd {
   grid-template-columns: 220px minmax(280px, 1fr) 280px;
   grid-template-rows: minmax(340px, 1fr) 218px;
   gap: 12px;
-  min-height: 620px;
+  min-height: 0;
   position: relative;
 }
 .objects-area {
@@ -469,6 +445,7 @@ kbd {
   min-height: 0;
 }
 .inspector-area {
+  min-height: 0;
   grid-column: 3;
   grid-row: 1/3;
 }
@@ -697,27 +674,6 @@ tr:hover {
   }
 }
 @media (max-width: 1250px) {
-  .workbench {
-    grid-template-columns: 64px minmax(0, 1fr);
-  }
-  .main-nav {
-    padding: 20px 7px;
-  }
-  .main-nav > button {
-    justify-content: center;
-    padding: 13px 0;
-  }
-  .main-nav > button span,
-  .main-nav > button small,
-  .nav-section-label,
-  .nav-bottom > button span,
-  .branch-label {
-    display: none;
-  }
-  .nav-bottom > button {
-    justify-content: center;
-    padding: 13px 0;
-  }
   .workspace-grid {
     grid-template-columns: 190px minmax(250px, 1fr) 250px;
     gap: 10px;
@@ -741,9 +697,9 @@ tr:hover {
 }
 @media (max-width: 950px) {
   .workbench {
-    min-height: 100vh;
-    height: auto;
-    overflow: visible;
+    min-height: 0;
+    height: 100dvh;
+    overflow: hidden;
     grid-template-rows: 58px auto 1fr 30px;
   }
   .session-bar {
@@ -771,7 +727,7 @@ tr:hover {
     min-width: 0;
   }
   .main-workspace {
-    overflow: visible;
+    overflow: hidden;
   }
   .workspace-grid {
     grid-template-columns: minmax(0, 1fr) 250px;
@@ -831,6 +787,7 @@ tr:hover {
   .workspace-grid {
     display: flex;
     flex-direction: column;
+    overflow: auto;
     gap: 12px;
   }
   .stage-area {
@@ -1065,12 +1022,12 @@ tr:hover {
 }
 .robot-panel {
   flex: 1;
-  min-height: 200px;
+  min-height: 80px;
 }
 .robot-panel .panel-content,
 .robot-panel .stage {
   height: 100%;
-  min-height: 200px;
+  min-height: 0;
 }
 .robot-panel .stage {
   border-radius: 7px;
@@ -1134,6 +1091,10 @@ tr:hover {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 7px;
+}
+.action-panel-host:has(.panel-content > details:not([open])) {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 .sim-panel-host {
   flex: 0 0 58%;
@@ -1384,7 +1345,7 @@ tr:hover {
 
 .workspace-grid.device-workspace {
   grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
-  grid-template-rows: minmax(540px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 .device-workspace .objects-area {
   grid-column: 1;
@@ -1406,6 +1367,10 @@ tr:hover {
   }
 }
 
+.main-workspace > div:has(> .device-connection) {
+  min-height: 0;
+  overflow: auto;
+}
 .device-connection { margin-bottom: 12px; padding: 14px; }
 .device-connection-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .device-connection-controls label { display: flex; flex-direction: column; gap: 6px; color: var(--dim); font-size: 11px; }
@@ -1426,3 +1391,130 @@ tr:hover {
 @media (max-width: 650px) {
   .direct-device-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+.workbench.nav-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+.nav-collapsed .main-nav {
+  padding: 20px 7px;
+}
+.nav-collapsed .main-nav > button {
+  justify-content: center;
+  padding: 13px 0;
+}
+.nav-collapsed .main-nav > button span,
+.nav-collapsed .main-nav > button small,
+.nav-collapsed .nav-section-label {
+  display: none;
+}
+@media (max-width: 1250px) {
+  .workbench:not(.nav-collapsed) {
+    grid-template-columns: 174px minmax(0, 1fr);
+  }
+}
+
+/* 可拖动分隔线：尺寸变量只覆盖对应面板，折叠仍释放占位。 */
+.workspace-grid:not(.device-workspace) {
+  --objects-default: 220px;
+  --inspector-default: 280px;
+  --observer-default: 218px;
+  grid-template-columns: var(--objects-width, var(--objects-default)) minmax(280px, 1fr) var(--inspector-width, var(--inspector-default));
+  grid-template-rows: minmax(0, 1fr) var(--observer-height, var(--observer-default));
+}
+.observer-hidden .workspace-grid:not(.device-workspace) {
+  grid-template-rows: minmax(0, 1fr) 40px;
+}
+.resize-handle {
+  z-index: 5;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  border-radius: 4px;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  border-radius: 3px;
+  inset: 0;
+}
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after { opacity: .55; }
+.resize-handle:focus-visible { outline: 1px solid var(--accent); }
+.resize-vertical { cursor: col-resize; width: 10px; }
+.resize-horizontal { cursor: row-resize; height: 8px; }
+.resize-objects, .resize-inspector, .resize-observer { position: absolute; }
+.resize-objects {
+  left: calc(var(--objects-width, var(--objects-default)) + 1px);
+  top: 0; bottom: 0;
+}
+.resize-inspector {
+  right: calc(var(--inspector-width, var(--inspector-default)) + 1px);
+  top: 0; bottom: 0;
+}
+.resize-observer {
+  left: calc(var(--objects-width, var(--objects-default)) + 12px);
+  right: calc(var(--inspector-width, var(--inspector-default)) + 12px);
+  bottom: calc(var(--observer-height, var(--observer-default)) + 2px);
+}
+.stage-body { gap: 0; }
+.stage-body > .resize-horizontal { flex: 0 0 12px; height: 12px; }
+.stage-body > .resize-horizontal::after { inset: 4px 0; }
+.joint-list-panel { flex-basis: var(--joints-height, 180px); }
+.action-panel-host { flex-basis: var(--actions-height, 45%); overflow: hidden; }
+.action-panel-host > .panel-content,
+.action-panel-host > .panel-content > details[open] {
+  height: 100%; display: flex; flex-direction: column; min-height: 0;
+}
+.action-panel-host > .panel-content > details > summary { flex: 0 0 auto; }
+.action-panel-host .sim-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.action-panel-host .sim-panel > :not(.act-list) { flex: 0 0 auto; }
+.action-panel-host .act-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+.action-panel-host:has(details:not([open])) > .panel-content { height: auto; }
+.stage-body:has(#run-joints details:not([open])) > .resize-joints,
+.stage-body:has(.action-panel-host details:not([open])) > .resize-actions { flex-basis: 12px; cursor: default; pointer-events: none; }
+.stage-body:has(#run-joints details:not([open])) > .resize-joints::after,
+.stage-body:has(.action-panel-host details:not([open])) > .resize-actions::after { display: none; }
+.stage-sim .sim-panel-host { margin-top: 12px; }
+@media (min-width: 1600px) {
+  .workspace-grid:not(.device-workspace) { --objects-default: 250px; --inspector-default: 310px; --observer-default: 240px; }
+}
+@media (max-width: 1250px) {
+  .workspace-grid:not(.device-workspace) { --objects-default: 190px; --inspector-default: 250px; }
+}
+@media (max-width: 950px) {
+  .workspace-grid:not(.device-workspace) {
+    grid-template-columns: minmax(0, 1fr) var(--inspector-width, 250px);
+    grid-template-rows: minmax(0, 1fr) var(--observer-height, 220px);
+  }
+  .resize-objects { display: none; }
+  .resize-observer { left: 0; }
+}
+@media (max-width: 650px) {
+  .workspace-grid > .resize-handle { display: none; }
+}
+.action-panel-host details[open]::details-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.observation-body [data-workbench-panel="curve"] > .panel-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.observation-body .curve-controls,
+.observation-body .curve-legend { flex: 0 0 auto; }
+.observation-body .chart {
+  flex: 1 1 0;
+  height: 0;
+  min-height: 80px;
+  max-height: none;
+}
+.observation-body .curve-legend { margin: 4px 10px; }
+.sim-panel-host { flex-basis: var(--sim-height, 58%); }
+.stage-sim .sim-panel-host { margin-top: 0; }

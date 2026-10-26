@@ -15,13 +15,15 @@ import {
   Cable,
   RefreshCw,
   CircleStop,
-  PanelBottom,
-  ArrowUpRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "@lucide/vue";
 import HostLimits from "./components/HostLimits.vue";
 import PanelHost from "./components/PanelHost.vue";
+import CommandHistory from "./components/CommandHistory.vue";
 import DeviceConnection from "./components/DeviceConnection.vue";
 import MotorSpecifications from "./components/MotorSpecifications.vue";
+import ResizeHandle from "./components/ResizeHandle.vue";
 import {
   runtime,
   snapshot,
@@ -42,6 +44,14 @@ watch(screen, (value) => {
 });
 const observation = ref("curve");
 const observe = ref(true);
+const navCollapsed = ref(
+  localStorage.getItem("robot2.navCollapsed") === null
+    ? window.matchMedia("(max-width: 1250px)").matches
+    : localStorage.getItem("robot2.navCollapsed") === "true",
+);
+watch(navCollapsed, (value) => {
+  localStorage.setItem("robot2.navCollapsed", String(value));
+});
 const directDevice = ref(false);
 const now = ref(Date.now());
 const rosUrl = ref(
@@ -143,21 +153,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workbench" :class="{ 'observer-hidden': !observe }">
+  <div class="workbench" :class="{ 'observer-hidden': !observe, 'nav-collapsed': navCollapsed }">
     <header class="app-header">
       <a class="brand" href="#/run" @click="go('run')"
         ><span class="brand-mark"><Box :size="22" /></span
         ><span>ROBOT<span class="brand-light"> WORKBENCH</span></span></a
       >
-      <span class="header-divider" /><span class="workspace-name"
-        >机器人实验室 <span>/ 均衡工作台</span></span
-      >
       <span class="header-spacer" /><span class="micro">{{
         snapshot.session
       }}</span>
-      <a class="classic-link" href="/index.html"
-        >经典界面 <ArrowUpRight :size="12"
-      /></a>
     </header>
 
     <div class="session-bar">
@@ -232,10 +236,22 @@ onBeforeUnmount(() => {
     </div>
 
     <nav class="main-nav" aria-label="工作场景">
+      <button
+        class="nav-toggle"
+        :aria-label="navCollapsed ? '展开侧栏' : '收起侧栏'"
+        :title="navCollapsed ? '展开侧栏' : '收起侧栏'"
+        :aria-expanded="!navCollapsed"
+        @click="navCollapsed = !navCollapsed"
+      >
+        <component :is="navCollapsed ? PanelLeftOpen : PanelLeftClose" :size="18" />
+        <span>收起侧栏</span>
+      </button>
       <div class="nav-section-label">工作场景</div>
       <button
         v-for="(item, index) in scenes"
         :key="item.id"
+        :aria-label="item.title"
+        :title="item.title"
         :class="{ active: screen === item.id }"
         :aria-current="screen === item.id ? 'page' : undefined"
         @click="go(item.id)"
@@ -243,16 +259,6 @@ onBeforeUnmount(() => {
         <component :is="item.icon" :size="18" /><span>{{ item.title }}</span
         ><small>{{ index + 1 }}</small>
       </button>
-      <div class="nav-bottom">
-        <button v-show="screen !== 'teach'" @click="observe = !observe">
-          <PanelBottom :size="17" /><span>{{
-            observe ? "收起观察区" : "展开观察区"
-          }}</span>
-        </button>
-        <div class="branch-label">
-          <i class="dot green" />WORKBENCH / A<span>共享会话 · 独立视图</span>
-        </div>
-      </div>
     </nav>
 
     <main class="main-workspace">
@@ -289,6 +295,9 @@ onBeforeUnmount(() => {
         <DeviceConnection @direct="directDevice = $event" />
       </div>
       <div v-show="screen !== 'teach' || !directDevice" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
+        <ResizeHandle v-show="screen !== 'teach'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
+        <ResizeHandle v-show="screen !== 'teach'" class="resize-inspector" label="调整对象检查器宽度" target=".inspector-area" variable="--inspector-width" axis="width" :min="210" reverse />
+        <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
         <section class="objects-area surface">
           <div class="panel-title">
             <span>对象浏览器</span>
@@ -314,16 +323,20 @@ onBeforeUnmount(() => {
           </div>
           <div class="stage-body">
             <PanelHost id="arm" :active="screen !== 'teach'" class="robot-panel" />
+            <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="75" reverse />
             <div
               id="run-joints"
               v-show="screen === 'run'"
               class="joint-list-panel"
             />
+            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
             <PanelHost
               id="actionLibrary"
               :active="screen === 'run'"
               class="action-panel-host"
-            /><PanelHost
+            />
+            <ResizeHandle v-show="screen === 'sim'" class="resize-simulation" label="调整仿真面板高度" target=".sim-panel-host" variable="--sim-height" axis="height" :min="240" reverse />
+            <PanelHost
               id="sim"
               :active="screen === 'sim'"
               class="sim-panel-host"
@@ -429,9 +442,8 @@ onBeforeUnmount(() => {
             /><PanelHost
               id="events"
               :active="screen !== 'teach' && observe && observation === 'events'"
-            /><PanelHost
-              id="history"
-              :active="screen !== 'teach' && observe && observation === 'history'"
+            /><CommandHistory
+              v-show="screen !== 'teach' && observe && observation === 'history'"
             /><PanelHost id="imu" :active="screen !== 'teach' && observe && observation === 'imu'" />
           </div>
         </section>

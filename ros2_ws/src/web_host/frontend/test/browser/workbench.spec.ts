@@ -210,6 +210,50 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     } };
 }
 
+test("Vue 命令记录展示发送值，导出完整历史，清空不发送控制命令", async ({page}) => {
+  const fixture = await connectFixture(page);
+  const legacyRequests: string[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/js/panels/history.js')) legacyRequests.push(request.url());
+  });
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('.startup-status')).toHaveCount(0);
+  await page.getByRole('button', {name: '命令记录', exact: true}).click();
+  const panel = page.locator('[data-workbench-panel="history"]');
+  await expect(panel).toContainText('不代表设备已接收或执行');
+  await expect(panel).toContainText('暂无记录');
+  await expect(panel.getByRole('button', {name: '导出 JSON'})).toBeDisabled();
+  await page.evaluate(async () => {
+    const {store, markDirty, DIRTY} = await import('/js/core/store.js');
+    store.history = Array.from({length: 21}, (_, i) => ({
+      t: 1700000000000 - i * 1000, seq: 21 - i,
+      targets: [{motor_id: 8, position: 0.123, velocity: -0.456, effort: 1.789, kp: 2, kd: 0.1}],
+    }));
+    markDirty(DIRTY.HISTORY);
+  });
+  await expect(panel).toContainText('21 条');
+  await expect(panel.locator('tbody tr')).toHaveCount(20);
+  await expect(panel.locator('tbody tr').first()).toContainText('0.123');
+  await expect(panel.locator('tbody tr').first()).toContainText('-0.456');
+  await expect(panel.locator('tbody tr').first()).toContainText('1.789');
+  const downloadPromise = page.waitForEvent('download');
+  await panel.getByRole('button', {name: '导出 JSON'}).click();
+  const download = await downloadPromise;
+  const {readFile} = await import('node:fs/promises');
+  const records = JSON.parse(await readFile((await download.path())!, 'utf8'));
+  expect(records).toHaveLength(21);
+  expect(records[0].seq).toBe(1);
+  expect(records[20].seq).toBe(21);
+  expect(records[0].targets[0]).toEqual({motor_id:8, position:0.123, velocity:-0.456, effort:1.789, kp:2, kd:0.1});
+  const beforeClear = fixture.publishes.length;
+  await panel.getByRole('button', {name: '清空', exact: true}).click();
+  await expect(panel).toContainText('暂无记录');
+  await expect(panel.getByRole('button', {name: '导出 JSON'})).toBeDisabled();
+  expect(fixture.publishes).toHaveLength(beforeClear);
+  expect(legacyRequests).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
 test("关节收起后向下让出空间，观察区使用箭头折叠", async ({page}) => {
   await page.setViewportSize({width: 1063, height: 752});
   await connectFixture(page);
@@ -218,11 +262,13 @@ test("关节收起后向下让出空间，观察区使用箭头折叠", async ({
   const summary = joints.locator('summary');
   await expect(summary).toBeVisible();
   await expect(page.locator('.startup-status')).toHaveCount(0);
+  // 小视口先收起动作库，给关节与臂视图的高度变化留出空间。
+  await page.locator('[data-workbench-panel="actionLibrary"] summary').click();
   const robot = page.locator('[data-workbench-panel="arm"]');
   const before = (await robot.boundingBox())!.height;
   await summary.click();
   await expect.poll(async () => (await joints.boundingBox())!.height).toBeLessThan(45);
-  await expect.poll(async () => (await robot.boundingBox())!.height).toBeGreaterThan(before + 100);
+  await expect.poll(async () => (await robot.boundingBox())!.height).toBeGreaterThan(before);
   await summary.click();
   await expect.poll(async () => (await joints.boundingBox())!.height).toBeGreaterThan(150);
   const toggle = page.locator('.observer-head').getByRole('button', {name: '收起观察区', exact: true});
@@ -236,7 +282,8 @@ test("关节收起后向下让出空间，观察区使用箭头折叠", async ({
 test("曲线在持续运动反馈超过缓冲上限后仍自动绘制新数据", async ({page}) => {
   const fixture = await connectFixture(page);
   await page.goto('/workbench/#/run');
-  await expect(page.locator('#chartHint')).toContainText('绘制 1 条');
+  await expect(page.locator('#chartHint')).toContainText('1 个组合');
+  await expect(page.locator('#chartHint')).toContainText('范围');
   for (let i = 1; i <= 900; i++) {
     fixture.sendFeedback('/motor/motion_states', {states: [{
       motor_id: 1, position: i / 10, velocity: 0.2, effort: 0.1,
@@ -244,7 +291,7 @@ test("曲线在持续运动反馈超过缓冲上限后仍自动绘制新数据",
     }]});
   }
   await expect(page.locator('#selRows')).toContainText('90.000');
-  await expect(page.locator('#chartHint')).toContainText('绘制 1 条');
+  await expect(page.locator('#chartHint')).toContainText('1 个组合');
   fixture.sendFeedback('/motor/motion_states', {states: [{
     motor_id: 1, position: 180, velocity: 0.2, effort: 0.1,
     target_source: 1, state_age_ms: 5,
@@ -744,4 +791,162 @@ test("设备工作台直接显示所选电机参数，直连快照不混入 MCU"
   await expect(page.locator('[data-workbench-panel="deviceParams"]')).toBeVisible();
   expect(fixture.publishes.filter(p => ['/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
+});
+
+test("侧栏可切换为图标并记住选择，移除底部说明", async ({page}) => {
+  await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  const nav = page.getByRole('navigation', {name: '工作场景'});
+  const before = (await nav.boundingBox())!.width;
+  await expect(nav).not.toContainText('WORKBENCH / A');
+  await page.getByRole('button', {name: '收起侧栏', exact: true}).click();
+  await expect.poll(async () => (await nav.boundingBox())!.width).toBe(64);
+  expect(before).toBeGreaterThan(64);
+  await expect(nav.getByRole('button', {name: '设备工作台'})).toBeVisible();
+  await expect(nav.getByRole('button', {name: '设备工作台'}).locator('span')).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('button', {name: '展开侧栏', exact: true})).toBeVisible();
+  await page.getByRole('button', {name: '展开侧栏', exact: true}).click();
+  await expect.poll(async () => (await nav.boundingBox())!.width).toBe(before);
+  await expect(nav.getByRole('button', {name: '设备工作台'}).locator('span')).toBeVisible();
+});
+
+test("动作库折叠释放面板占位，展开恢复内容", async ({page}) => {
+  await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  const panel = page.locator('[data-workbench-panel="actionLibrary"]');
+  const summary = panel.locator('summary');
+  await expect(summary).toBeVisible();
+  const before = (await panel.boundingBox())!.height;
+  const robot = page.locator('[data-workbench-panel="arm"]');
+  const robotBefore = (await robot.boundingBox())!.height;
+  await summary.click();
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBeLessThan(45);
+  await expect.poll(async () => (await robot.boundingBox())!.height).toBeGreaterThan(robotBefore);
+  await summary.click();
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBeGreaterThanOrEqual(before - 1);
+});
+
+test('拖动分隔线调整窗口尺寸并在刷新后保留', async ({page}) => {
+  await page.setViewportSize({width: 1806, height: 1448});
+  await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('#run-joints summary')).toBeVisible();
+  const objects = page.locator('.objects-area');
+  const before = (await objects.boundingBox())!.width;
+  const separator = page.getByRole('separator', {name: '调整对象浏览器宽度'});
+  let box = (await separator.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 50);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + 50);
+  await page.mouse.up();
+  await expect.poll(async () => (await objects.boundingBox())!.width).toBe(before + 60);
+  const observer = page.locator('.observer-area');
+  const height = (await observer.boundingBox())!.height;
+  const horizontal = page.getByRole('separator', {name: '调整观察区高度'});
+  box = (await horizontal.boundingBox())!;
+  await page.mouse.move(box.x + 40, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 40, box.y + box.height / 2 - 60);
+  await page.mouse.up();
+  await expect.poll(async () => (await observer.boundingBox())!.height).toBe(height + 60);
+  await page.reload();
+  await expect.poll(async () => (await objects.boundingBox())!.width).toBe(before + 60);
+  await expect.poll(async () => (await observer.boundingBox())!.height).toBe(height + 60);
+  const action = page.locator('.action-panel-host');
+  await expect(page.locator('#actList')).toBeAttached();
+  const actionBefore = (await action.boundingBox())!.height;
+  await page.getByRole('separator', {name: '调整动作库高度'}).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await action.boundingBox())!.height).toBeLessThan(actionBefore);
+});
+
+for (const viewport of [{width:1063, height:752}, {width:1600, height:650}, {width:900, height:752}, {width:640, height:752}]) {
+  test(`外层不滚动，工作区适应窗口 ${viewport.width}×${viewport.height}`, async ({page}) => {
+    await page.setViewportSize(viewport);
+    await connectFixture(page);
+    await page.goto('/workbench/#/run');
+    await expect(page.locator('.startup-status')).toHaveCount(0);
+    const main = page.locator('.main-workspace');
+    expect(await main.evaluate(el => getComputedStyle(el).overflowY)).toBe('hidden');
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
+    const grid = (await page.locator('.workspace-grid').boundingBox())!;
+    const workspace = (await main.boundingBox())!;
+    expect(grid.y + grid.height).toBeLessThanOrEqual(workspace.y + workspace.height);
+    if (viewport.width <= 650)
+      await page.locator('.workspace-grid').evaluate(el => {el.scrollTop = el.scrollHeight;});
+    await expect(page.locator('.observer-head')).toBeInViewport({ratio: 1});
+    await expect(page.locator('.app-footer')).toBeInViewport({ratio: 1});
+    await page.locator('.workspace-heading').hover();
+    await page.mouse.wheel(0, 400);
+    expect(await main.evaluate(el => el.scrollTop)).toBe(0);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+}
+
+test('设备工作台在矮窗口中保持详情位于内部滚动区', async ({page}) => {
+  await page.setViewportSize({width:1063, height:650});
+  await connectFixture(page);
+  await page.goto('/workbench/#/teach');
+  await expect(page.locator('.startup-status')).toHaveCount(0);
+  const main = (await page.locator('.main-workspace').boundingBox())!;
+  const inspector = (await page.locator('.inspector-area').boundingBox())!;
+  expect(inspector.y + inspector.height).toBeLessThanOrEqual(main.y + main.height);
+  const pane = page.locator('.inspector-scroll');
+  expect(await pane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
+  await pane.evaluate(el => {el.scrollTop = el.scrollHeight;});
+  await expect(page.locator('.motor-specifications')).toBeInViewport();
+  await page.getByLabel('设备通信来源').selectOption('socketcan');
+  const connectionPane = page.locator('.main-workspace > div').filter({has: page.locator('.device-connection')});
+  expect(await connectionPane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
+  expect(await connectionPane.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  await connectionPane.evaluate(el => {el.scrollTop = el.scrollHeight;});
+  await expect(page.locator('.direct-device-grid')).toBeInViewport();
+});
+
+test('动作库只有列表内部滚动，标题和操作栏固定', async ({page}) => {
+  await connectFixture(page);
+  await page.route('**/api/actions**', route => route.fulfill({json: {actions:
+    Array.from({length: 50}, (_, i) => ({name: `action-${i}.json`, target_ids:[1], target_count:1, point_count:20, duration_ms:1000}))}}));
+  await page.goto('/workbench/#/run');
+  const panel = page.locator('.action-panel-host');
+  await expect(panel.locator('.act-row')).toHaveCount(50);
+  expect(await panel.evaluate(el => getComputedStyle(el).overflowY)).toBe('hidden');
+  expect(await panel.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  const list = page.locator('#actList');
+  expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  for (const selector of ['.stage-body', '.inspector-scroll', '#actList']) {
+    expect(await page.locator(selector).first().evaluate(el => getComputedStyle(el).scrollbarWidth)).not.toBe('none');
+  }
+  await list.hover();
+  await page.mouse.wheel(0, 200);
+  await expect.poll(() => list.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  await expect(panel.locator('summary')).toBeVisible();
+  await expect(page.locator('#btnActImport')).toBeVisible();
+});
+
+test('工作台曲线支持复选及滚轮缩放，画布随观察区伸缩', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('#chartHint')).toContainText('10 s');
+  await expect(page.locator('#chartWindow')).toHaveCount(0);
+  await expect(page.locator('[data-chart-motor-summary]')).toHaveText('电机 1');
+  await expect(page.locator('[data-chart-channel-summary]')).toHaveText('位置 rad');
+  await expect(page.locator('#chartHint')).toContainText('范围');
+  fixture.sendFeedback('/motor/topology', {entries: [1,2].map(motor_id => ({motor_id,
+    online: true, model_name:'cerb_r48_101', bus_index:0, lifecycle:3}))});
+  await page.locator('#chartMotor summary').click();
+  await page.locator('input[name="chart-motor"][value="2"]').check();
+  await page.locator('#chartCh summary').click();
+  await page.locator('input[name="chart-channel"][value="velocity"]').check();
+  await expect(page.locator('#chartLegend .curve-legend-item')).toHaveCount(4);
+  await page.locator('#chartCh summary').click();
+  const canvas = page.locator('#chart');
+  await canvas.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(page.locator('#chartHint')).toContainText('9 s');
+  const before = (await canvas.boundingBox())!.height;
+  await page.getByRole('separator', {name:'调整观察区高度'}).focus();
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await canvas.boundingBox())!.height).toBeGreaterThan(before);
 });

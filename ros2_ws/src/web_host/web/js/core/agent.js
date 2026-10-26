@@ -180,6 +180,12 @@ export async function refreshAgentControls() {
     const selected = activeDevice || savedPort;
     if (selected && known.has(selected)) select.value = selected;
     else if (activeDevice) select.value = activeDevice;
+    else {
+      // 无有效历史选择时，仅自动选中唯一可访问的 STM32，避免多板时误选。
+      const stm32Ports = ports.filter((port) => port.accessible !== false
+        && /stm32/i.test(`${port.path} ${port.label || ''}`));
+      if (stm32Ports.length === 1) select.value = stm32Ports[0].path;
+    }
     if (select.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, select.value);
   } catch (error) {
     select.replaceChildren();

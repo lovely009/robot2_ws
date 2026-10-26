@@ -364,3 +364,55 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .result { min-height: 14px; margin-top: 4px; font-size: var(--fs-xs); font-family: var(--mono); }
 .result.ok { color: var(--ok); }
 .result.err { color: var(--err); }
+
+/* ---------- 曲线：多选筛选 + 组合图例 ---------- */
+.curve-controls { align-items: flex-start; }
+.curve-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.curve-field-label { color: var(--dim-2); font-size: var(--fs-xs); line-height: 1.2; }
+details.curve-multiselect {
+  position: relative; min-width: 112px; margin: 0; padding: 0;
+  color: var(--text); font: var(--fs-sm) var(--mono);
+}
+details.curve-multiselect > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-width: 112px; padding: 4px 7px; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--bg); cursor: pointer;
+  list-style: none; user-select: none;
+}
+details.curve-multiselect > summary::-webkit-details-marker { display: none; }
+details.curve-multiselect > summary::before { content: none; }
+details.curve-multiselect > summary::after { content: '▾'; color: var(--dim-2); font-size: 9px; }
+details.curve-multiselect[open] { z-index: 20; }
+details.curve-multiselect[open] > summary { border-color: var(--accent); }
+.curve-multiselect-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 21;
+  min-width: 100%; width: max-content; max-width: min(280px, 70vw);
+  max-height: 236px; overflow: auto; padding: 4px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  background: var(--panel-2); box-shadow: 0 8px 22px #0008;
+}
+.curve-option {
+  display: flex; align-items: center; gap: 6px; min-height: 25px; padding: 2px 5px;
+  border-radius: 4px; color: var(--dim); cursor: pointer; white-space: nowrap;
+}
+.curve-option:hover { background: #22304a; color: var(--text); }
+.curve-option input[type="checkbox"] {
+  flex: none; width: 13px; height: 13px; margin: 0; padding: 0; cursor: pointer;
+}
+.curve-unit {
+  color: var(--dim-2); font-size: var(--fs-xs); white-space: nowrap;
+}
+.curve-legend {
+  display: flex; flex-wrap: wrap; gap: 5px 12px; align-items: center;
+  min-height: 18px; margin: 6px 1px 0; color: var(--dim);
+  font: var(--fs-xs) var(--mono);
+}
+.curve-legend-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.curve-legend-swatch {
+  flex: none; width: 16px; height: 2px; border-radius: 2px;
+}
+.curve-legend-empty { color: var(--dim-2); }
+@media (max-width: 720px) {
+  .curve-controls .spacer { display: none; }
+  .curve-multiselect-menu { max-width: calc(100vw - 24px); }
+}

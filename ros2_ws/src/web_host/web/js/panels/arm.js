@@ -383,6 +383,8 @@ export function mount(rootEl, ctx) {
 
   startLoad();
   window.addEventListener('resize', onWindowResize);
+  const sizeObserver = new ResizeObserver(() => resize());
+  sizeObserver.observe(stage);
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   const render = (dirty) => {
@@ -407,6 +409,7 @@ export function mount(rootEl, ctx) {
       setRunning(false);
       disposeScene();
       window.removeEventListener('resize', onWindowResize);
+      sizeObserver.disconnect();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       ready = false;
     },

@@ -85,6 +85,7 @@ typedef struct {
 typedef struct {
   uint32_t request_id;
   uint32_t received_tick_ms;
+  uint32_t valid_until_tick_ms; // 源 TTL 转换后的原始单调截止
   uint16_t motor_id;
   control_mailbox_config_kind_t kind;
   union {

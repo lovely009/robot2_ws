@@ -945,6 +945,26 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
   return true;
 }
 
+void motor_control_disable_mask(motor_control_context_t *ctx, uint64_t motor_mask,
+    uint32_t now_ms) {
+  if (ctx == NULL) return;
+  for (size_t i = 0; i < ctx->entry_count; ++i) {
+    motor_control_entry_t *entry = &ctx->entries[i];
+    if (entry->used && entry->motor_id > 0U && entry->motor_id <= 64U &&
+        (motor_mask & (UINT64_C(1) << (entry->motor_id - 1U))) != 0U) {
+      entry->policy_enable = false;
+      motor_control_soft_stop_entry(ctx, entry, now_ms);
+    }
+  }
+}
+
+void motor_control_report_config_result(motor_control_context_t *ctx,
+    uint32_t request_id, uint16_t motor_id, uint16_t reason, uint32_t now_ms) {
+  if (ctx == NULL || request_id == 0U) return;
+  motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_CONFIG_RESULT,
+      motor_id, 0U, reason, request_id);
+}
+
 bool motor_control_submit_config(motor_control_context_t *ctx,
     const motor_protocol_config_request_t *request,
     uint32_t now_ms) {

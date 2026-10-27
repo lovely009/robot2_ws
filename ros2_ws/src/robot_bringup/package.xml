@@ -4,24 +4,32 @@
   <name>robot_bringup</name>
   <version>0.1.0</version>
   <description>台架唯一入口：一个 launch 起 L1（rosbridge + 静态页）与 L2
-    （bench_manager）。L3 会话（仿真 / 电机后端 / Agent）由 bench_manager 按需起停。</description>
+    （bench_manager，随本包安装）。L3 会话（仿真 / 电机后端 / Agent）由 bench_manager 按需起停。</description>
   <maintainer email="ly@todo.todo">ly</maintainer>
   <license>Apache-2.0</license>
 
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>bench_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>web_host</exec_depend>
-  <exec_depend>bench_manager</exec_depend>
   <exec_depend>micro_ros_bridge</exec_depend>
   <exec_depend>motor_hardware_interface</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
-  <!-- 模型枚举根与臂视图几何来自模型包（默认 robot_sim）；缺包时 launch 自己降级，
-       所以是运行期引用而非硬依赖。反向声明会成环：robot_sim 的
-       simulation.launch.py 会 include web_host，bench_manager 又经 ros2 launch
-       调 robot_sim 的 simulation.launch.py。 -->
+  <!-- 仿真、Agent、电机后端、动力学作为可选会话在运行期查找。 -->
+  <!-- robot_sim 提供默认模型资源；缺包时页面与 launch 降级为空模型列表，
+       使用 model_dir 可指向外部模型目录，因此不强制依赖仿真包。 -->
 
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>

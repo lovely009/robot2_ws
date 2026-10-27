@@ -51,7 +51,7 @@ def generate_launch_description():
     )
 
     bench_manager = LifecycleNode(
-        package='bench_manager',
+        package='robot_bringup',
         executable='bench_manager',
         name='bench_manager',
         namespace='',

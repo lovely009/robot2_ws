@@ -8,6 +8,9 @@
 
 #include <cstring>
 
+#include "agent_control_gate.h"
+#include "trajectory_transaction.hpp"
+#include "time_utils.h"
 #include "can_bsp.h"
 #include "fdcan.h"
 #include "motor_config_contract.hpp"
@@ -56,6 +59,9 @@ static const uint32_t kDiscoverySyncPeriodMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
 static motor_control_context_t *const g_motor_control =
     motor_control_instance();
 static control_mailbox_t g_control_mailbox;
+static agent_control_gate_t g_agent_gate;
+static trajectory_transaction::Coordinator g_trajectory;
+static bool g_clock_requested = false;
 
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
 static motor_control_stored_params_t
@@ -72,22 +78,83 @@ static motor_tx_router_t g_tx_router;
 
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
-  const bool ok = control_mailbox_submit_command(&g_control_mailbox, snapshot);
+  const bool ok = agent_gate_submit_command(&g_agent_gate, &g_control_mailbox,
+      snapshot, millis());
   taskEXIT_CRITICAL();
   return ok;
 }
 
-bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory) {
+// 调用方已持短临界区；租约不能只看上一服务拍缓存的 bool。
+static bool trajectory_gate_allowed(uint32_t now_ms) {
+  const agent_link_t &link = g_agent_gate.link;
+  return link.connected && link.clock_valid && g_clock_requested &&
+      !link.stop_pending && link.lease_valid && link.authorized &&
+      g_agent_gate.kernel_authorized && link.have_command &&
+      now_ms - link.command_tick_ms <= 30U;
+}
+
+bool motor_rt_submit_agent_trajectory(const agent_trajectory_request_t *request) {
+  if (request == nullptr) return false;
+  const uint32_t now_ms = millis();
   taskENTER_CRITICAL();
-  const bool ok =
-      control_mailbox_submit_trajectory(&g_control_mailbox, trajectory);
+  bool ok = false;
+  if (request->operation == AGENT_TRAJECTORY_ACK) {
+    // ACK 不占请求号，也不刷新授权；互斥载荷仍须为空。
+    if (request->request_id == 0U && request->trajectory_id == 0U &&
+        request->segment_index == 0U && request->segment_count == 0U &&
+        request->target_count == 0U && request->point_count == 0U) {
+      ok = g_trajectory.ack(request->session_id, request->ack_request_id,
+          request->ack_terminal_trajectory_id);
+    }
+  } else {
+    using namespace trajectory_transaction;
+    Receipt receipt{};
+    const bool motion = request->operation == AGENT_TRAJECTORY_LOAD ||
+        request->operation == AGENT_TRAJECTORY_COMMIT;
+    // 已受理请求必须先走幂等路径：过期重发只读旧收据，不重新执行。
+    const bool fresh = request->request_id > g_trajectory.status().request_high_water;
+    if (motion && fresh && !trajectory_gate_allowed(now_ms)) {
+      receipt = g_trajectory.reject(*request, REASON_GATE);
+    } else if (motion && fresh && request->operation == AGENT_TRAJECTORY_LOAD &&
+        request->target_count <= 48U &&
+        !motor_control_trajectory_targets_healthy(g_motor_control,
+            request->target_ids, request->target_count, now_ms)) {
+      receipt = g_trajectory.reject(*request, REASON_MEASUREMENT);
+    } else if (request->operation == AGENT_TRAJECTORY_LOAD) {
+      receipt = g_trajectory.load(*request, now_ms);
+    } else if (request->operation == AGENT_TRAJECTORY_COMMIT) {
+      receipt = g_trajectory.commit(*request, now_ms);
+    } else if (request->operation == AGENT_TRAJECTORY_CANCEL) {
+      receipt = g_trajectory.cancel(*request);
+    } else {
+      receipt = g_trajectory.reject(*request, REASON_INVALID);
+    }
+    ok = receipt.state == AGENT_TRAJECTORY_PENDING ||
+        receipt.state == AGENT_TRAJECTORY_ACCEPTED;
+  }
+  if (!ok) ++g_control_mailbox.trajectory_rejected_count;
   taskEXIT_CRITICAL();
   return ok;
+}
+
+void motor_rt_copy_agent_trajectory(agent_trajectory_status_t *out) {
+  if (out == nullptr) return;
+  taskENTER_CRITICAL();
+  *out = g_trajectory.status();
+  taskEXIT_CRITICAL();
+}
+
+bool motor_rt_agent_trajectory_owns(uint16_t motor_id) {
+  taskENTER_CRITICAL();
+  const bool owned = g_trajectory.owns(motor_id);
+  taskEXIT_CRITICAL();
+  return owned;
 }
 
 bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
-  const bool ok = control_mailbox_submit_policy(&g_control_mailbox, snapshot);
+  const bool ok = agent_gate_submit_policy(&g_agent_gate, &g_control_mailbox,
+      snapshot, millis());
   taskEXIT_CRITICAL();
   return ok;
 }
@@ -104,6 +171,44 @@ bool motor_rt_submit_config(
 void motor_rt_set_agent_connected(bool connected) {
   taskENTER_CRITICAL();
   control_mailbox_request_agent_connected(&g_control_mailbox, connected);
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_begin_agent_session(uint64_t session_id) {
+  taskENTER_CRITICAL();
+  agent_gate_begin_session(&g_agent_gate, &g_control_mailbox, session_id);
+  g_trajectory.begin_session(session_id);
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_request_disable(uint64_t motor_mask) {
+  taskENTER_CRITICAL();
+  agent_gate_request_disable(&g_agent_gate, motor_mask);
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_request_stop_all(void) {
+  taskENTER_CRITICAL();
+  agent_gate_request_stop(&g_agent_gate);
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_set_clock_valid(bool valid) {
+  taskENTER_CRITICAL();
+  if (g_clock_requested && !valid) agent_gate_request_stop(&g_agent_gate);
+  g_clock_requested = valid;
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_copy_link_status(motor_rt_link_status_t *out) {
+  if (out == nullptr) return;
+  taskENTER_CRITICAL();
+  const agent_link_t *link = &g_agent_gate.link;
+  out->command_sequence = link->command_sequence;
+  out->stop_generation = link->stop_generation;
+  out->required_policy_generation = link->barrier_generation;
+  out->lease_valid = link->lease_valid;
+  out->authorized = link->authorized && g_agent_gate.kernel_authorized;
   taskEXIT_CRITICAL();
 }
 
@@ -351,6 +456,14 @@ static void pump_tx_schedulers(void) {
     if (scheduler == nullptr) {
       continue;
     }
+    // P0 积压可能令 P1 跨过原始截止；物理出队前取消失效槽，不能停机后补发旧目标。
+    const uint32_t now_ms = millis();
+    for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS; ++slot) {
+      if (scheduler->p1.dirty[slot] &&
+          !motor_control_target_valid(g_motor_control, slot, now_ms)) {
+        scheduler->p1.dirty[slot] = false;
+      }
+    }
     (void)motor_tx_router_pump(&g_tx_router, scheduler, bus,
         submit_routed_tx, nullptr);
   }
@@ -360,57 +473,6 @@ static void pump_tx_schedulers(void) {
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
-
-static void convert_snapshot(const control_command_snapshot_t *in,
-    motor_control_command_snapshot_t *out) {
-  out->sequence = in->sequence;
-  out->received_tick_ms = in->received_tick_ms;
-  out->target_count = in->target_count;
-  for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS;
-      ++i) {
-    out->targets[i].motor_id = in->targets[i].motor_id;
-    out->targets[i].position_rad = in->targets[i].position;
-    out->targets[i].velocity_rad_s = in->targets[i].velocity;
-    out->targets[i].effort_nm = in->targets[i].effort;
-  }
-}
-
-static void convert_policy(const control_policy_snapshot_t *in,
-    motor_control_policy_snapshot_t *out) {
-  out->received_tick_ms = in->received_tick_ms;
-  out->request_id = in->request_id;
-  out->policy_generation = in->policy_generation;
-  out->target_count = in->target_count;
-  for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_MOTORS;
-      ++i) {
-    out->targets[i].motor_id = in->targets[i].motor_id;
-    out->targets[i].enabled = in->targets[i].enabled;
-    out->targets[i].kp = in->targets[i].kp;
-    out->targets[i].kd = in->targets[i].kd;
-    out->targets[i].confirm_unprotected = in->targets[i].confirm_unprotected;
-  }
-}
-
-static void convert_trajectory(const control_trajectory_t *in,
-    motor_control_trajectory_t *out) {
-  out->sequence = in->sequence;
-  out->received_tick_ms = in->received_tick_ms;
-  out->trajectory_id = in->trajectory_id;
-  out->point_count = in->point_count;
-  out->target_count = in->target_count;
-  for (uint16_t i = 0;
-      i < in->target_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS; ++i) {
-    out->target_ids[i] = in->target_ids[i];
-  }
-  for (uint16_t i = 0;
-      i < in->point_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_POINTS; ++i) {
-    out->points[i].time_from_start_ms = in->points[i].time_from_start_ms;
-    out->points[i].motor_id = in->points[i].motor_id;
-    out->points[i].position_rad = in->points[i].position;
-    out->points[i].velocity_rad_s = in->points[i].velocity;
-    out->points[i].effort_nm = in->points[i].effort;
-  }
-}
 
 // 两侧枚举类型独立；motor_config_contract.hpp 锁住完整数值映射。
 static void convert_config(const control_mailbox_config_request_t *in,
@@ -472,60 +534,18 @@ static void convert_config(const control_mailbox_config_request_t *in,
 }
 
 static void control_boundary(void) {
-  // 会话/授权同步（纯逻辑在 session_sync）：临界区内一次取走边沿并读
-  // 会话电平（未知=引导豁免），内核状态变更在临界区外执行。
-  control_mailbox_events_t events = {0};
-  bool session_authorized = false;
-  taskENTER_CRITICAL();
-  (void)control_mailbox_take_events(&g_control_mailbox, &events);
-  session_authorized =
-      control_mailbox_session_authorized(&g_control_mailbox);
-  taskEXIT_CRITICAL();
   const uint32_t now_ms = millis();
-  session_sync_apply(g_motor_control, &events, session_authorized, now_ms);
-
-  // 两个命令快照各约 1KB，静态分配且仅本任务访问；只读写 target_count 条。
-  static control_command_snapshot_t snapshot_in;
-  static motor_control_command_snapshot_t snapshot;
-  bool got_snapshot = false;
+  const bool clock_valid = time_clock_valid();
   taskENTER_CRITICAL();
-  got_snapshot = control_mailbox_take_command(&g_control_mailbox, &snapshot_in);
+  agent_gate_step(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms,
+      clock_valid && g_clock_requested);
+  // 只在控制边界消费 COMMIT/CANCEL；组装区直接借给内核，无全量转换副本。
+  g_trajectory.boundary(g_motor_control, now_ms,
+      clock_valid && trajectory_gate_allowed(now_ms));
   taskEXIT_CRITICAL();
-  if (got_snapshot) {
-    convert_snapshot(&snapshot_in, &snapshot);
-    (void)motor_control_apply_command_snapshot(g_motor_control, &snapshot,
-        now_ms);
-  }
-
-  // 两份轨迹各约 5KB，静态分配；mailbox 与内核各自校验，按时间线插值下发。
-  static control_trajectory_t trajectory_in;
-  static motor_control_trajectory_t trajectory;
-  bool got_trajectory = false;
-  taskENTER_CRITICAL();
-  got_trajectory =
-      control_mailbox_take_trajectory(&g_control_mailbox, &trajectory_in);
-  taskEXIT_CRITICAL();
-  if (got_trajectory) {
-    convert_trajectory(&trajectory_in, &trajectory);
-    (void)motor_control_apply_trajectory(g_motor_control, &trajectory, now_ms);
-  }
-  motor_control_trajectory_step(g_motor_control, now_ms);
   // 快照通道的边界保持重发：与 trajectory_step 同拍、覆盖互斥的电机集合，
   // 两者合计使每个边界每台恰好产生一帧 P1（见 motor_control.h 的说明）。
   motor_control_hold_step(g_motor_control, now_ms);
-
-  // 逐电机策略：批量、latest-wins。稀疏语义——只影响列出的电机，未列出的
-  // 保持原状。约 0.8KB，静态避免压栈。
-  static control_policy_snapshot_t policy_in;
-  static motor_control_policy_snapshot_t policy;
-  bool got_policy = false;
-  taskENTER_CRITICAL();
-  got_policy = control_mailbox_take_policy(&g_control_mailbox, &policy_in);
-  taskEXIT_CRITICAL();
-  if (got_policy) {
-    convert_policy(&policy_in, &policy);
-    (void)motor_control_apply_policy(g_motor_control, &policy, now_ms);
-  }
 
   // 配置 FIFO 有界转发（每边界至多 kConfigDrainPerBoundary 条，不阻塞节拍）。
   for (uint32_t i = 0; i < kConfigDrainPerBoundary; ++i) {
@@ -536,6 +556,12 @@ static void control_boundary(void) {
     taskEXIT_CRITICAL();
     if (!got_config) {
       break;
+    }
+    const uint32_t remaining = request_in.valid_until_tick_ms - now_ms;
+    if (remaining == 0U || remaining > 1000U) {
+      motor_control_report_config_result(g_motor_control, request_in.request_id,
+          request_in.motor_id, MOTOR_PROTOCOL_CONFIG_INVALID, now_ms);
+      continue;
     }
     motor_protocol_config_request_t request = {0};
     convert_config(&request_in, &request);
@@ -603,6 +629,15 @@ static void motor_rt_task_fn(void *pv_parameters) {
 
     // 1ms 服务：有界 RX → 内核运行时服务 → SYNC → 待发帧路由。
     drain_rx_rings();
+    const bool clock_valid = time_clock_valid();
+    taskENTER_CRITICAL();
+    const uint8_t safety_action = agent_gate_service(&g_agent_gate,
+        &g_control_mailbox, g_motor_control, now_ms,
+        clock_valid && g_clock_requested);
+    if (safety_action != 0U)
+      g_trajectory.abort(trajectory_transaction::REASON_STOPPED);
+    g_trajectory.poll(now_ms);
+    taskEXIT_CRITICAL();
     motor_control_service(g_motor_control, now_ms);
     sustain_discovery_sync(now_ms);
     route_kernel_tx();

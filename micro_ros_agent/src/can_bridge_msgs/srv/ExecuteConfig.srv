@@ -1,6 +1,7 @@
 # 主机 facade 的有界配置事务；会话由 bridge 填，0 请求号由 bridge 分配。
 ConfigRequest request
 # 0 使用桥默认值，允许 100..10000 ms；超时不等于设备回滚。
+# 已发送请求的等待超时返回 STATUS_PENDING/error_code=21，真实终态继续经 config_result 发布。
 uint32 timeout_ms
 ---
 ConfigResult result

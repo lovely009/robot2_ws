@@ -1,0 +1,30 @@
+# 有限管理操作，未使用的互斥载荷必须为空/默认。
+uint8 SET_POLICY=0
+uint8 SET_PARAMETERS=1
+uint8 REFRESH_PARAMETERS=2
+uint8 SET_ZERO=3
+uint8 CLEAR_FAULT=4
+uint8 SAVE=5
+uint8 STOP_ALL=6
+uint8 QUERY_INFO=7
+uint8 ACK_RESULTS=8
+uint8 DEVICE_PAGE=0
+uint8 OPERATION_DETAILS=1
+uint64 session_id
+uint64 issued_stamp
+uint32 request_id
+uint32 policy_generation
+uint16 ttl_ms
+uint16 schema_version 3
+uint8 operation
+# 不支持设备保护时需要显式确认，沿用既有策略安全语义。
+bool allow_no_protect
+MotorPolicyTarget[<=48] policies
+ParamSetTarget[<=16] parameters
+uint16 motor_id 65535
+uint32[<=8] ack_request_ids
+uint32 query_id
+uint8 query_kind
+uint32 query_revision
+uint16 cursor
+uint32 detail_request_id

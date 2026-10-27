@@ -86,6 +86,7 @@ static motor_control_command_snapshot_t make_snapshot(uint32_t seq, uint32_t tic
   motor_control_command_snapshot_t s = {};
   s.sequence = seq;
   s.received_tick_ms = tick;
+  s.valid_until_tick_ms = tick + 30U;
   return s;
 }
 
@@ -1338,10 +1339,11 @@ static void test_30ms_stale_snapshot_soft_stops() {
   motor_control_service(&ctx, 130);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 
-  // freshness 以 mailbox 接收 tick 为基准：age=30 仍新鲜（≤30），
-  // age=31（>30）级联软停——精确踩规范边沿。
-  motor_control_service(&ctx, 150);
+  // 通信租约在 age=30 仍有效，但目标执行截止已经到达，先停止快照来源。
+  motor_control_service(&ctx, 149);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
+  motor_control_service(&ctx, 150);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
   motor_control_service(&ctx, 151);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
   // P0 两帧：进入 ACTIVE 时的使能帧 + 本次软停帧。
@@ -5257,8 +5259,8 @@ static void test_trajectory_cancel_and_replacement_release_motors() {
   assert(!entry_of(&ctx, 7)->has_target);
 }
 
-// 快照流断但轨迹在播：30/100ms 级联只停机快照通道的电机，全局授权不动。
-static void test_trajectory_survives_snapshot_timeout() {
+// 命令租约约束全部运动源：轨迹也必须在断流后终止。
+static void test_trajectory_aborts_on_command_lease_timeout() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_two_active(&ctx, 5, 7, 100);
@@ -5277,8 +5279,9 @@ static void test_trajectory_survives_snapshot_timeout() {
   }
 
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-  assert(ctx.authorized); // 授权由会话电平派生，与快照流是否活跃无关
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(!ctx.trajectory_active);
+  assert(!ctx.authorized);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST, 0));
 }
 
@@ -5784,7 +5787,7 @@ static void test_hold_step_emits_held_target_every_boundary() {
 
   // 此后没有新快照：1ms service 本身不发运动帧，hold_step 每个边界恰好一帧，
   // 且目标零阶保持、逐位不变（不重算、不漂移）。
-  for (uint32_t t = 130U; t <= 150U; t += 5U) { // 快照龄 10..30ms，仍在窗口内
+  for (uint32_t t = 130U; t < 150U; t += 5U) { // 原始截止 150ms，不含截止本身
     motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, t);
     motor_control_on_raw_frame(&ctx, &keepalive); // 防 100ms 离线误判
     motor_control_service(&ctx, t);
@@ -5915,8 +5918,29 @@ static void test_control_state_projection_is_authoritative_without_motion() {
   assert(status[0].control_lifecycle != MOTOR_CONTROL_CONTROL_LIFECYCLE_ACTIVE);
 }
 
+static void test_command_execution_deadline_is_not_renewed() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+  auto s = make_snapshot(1U, 120U);
+  s.valid_until_tick_ms = 126U;
+  snapshot_add(&s, 5, 0.4f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s, 125U));
+  assert(motor_control_target_valid(&ctx, 0U, 125U));
+  assert(!motor_control_target_valid(&ctx, 0U, 126U));
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1);
+  motor_control_hold_step(&ctx, 126U);
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
+  motor_control_service(&ctx, 126U);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
+  s.sequence = 2U;
+  assert(!motor_control_apply_command_snapshot(&ctx, &s, 127U));
+  assert(ctx.last_snapshot_sequence == 1U);
+}
+
 int main() {
   bind_real_adapters();
+  test_command_execution_deadline_is_not_renewed();
   test_control_state_projection_is_authoritative_without_motion();
   test_device_param_boot_verify_ok();
   test_boot_normalize_runs_before_refresh();
@@ -5970,7 +5994,7 @@ int main() {
   test_trajectory_hermite_no_overshoot_and_zero_endpoints();
   test_trajectory_position_velocity_same_sign();
   test_trajectory_cancel_and_replacement_release_motors();
-  test_trajectory_survives_snapshot_timeout();
+  test_trajectory_aborts_on_command_lease_timeout();
   test_hold_step_emits_held_target_every_boundary();
   test_hold_step_yields_to_trajectory_and_pending_p0();
   test_snapshot_timeout_without_trajectory_revokes_globally();

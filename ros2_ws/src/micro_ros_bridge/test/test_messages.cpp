@@ -49,7 +49,7 @@ TEST(EncodeLowCommand, RejectsWholeMessage) {
 
   MotorCommandArray bad_id;
   bad_id.count = 1;
-  bad_id.targets.push_back(target(64, 0.0, 0.0, 0.0));
+  bad_id.targets.push_back(target(65, 0.0, 0.0, 0.0));
   EXPECT_FALSE(micro_ros_bridge::encode_low_command(bad_id, out).ok);
 
   MotorCommandArray dup;
@@ -110,7 +110,7 @@ TEST(DecodeLowState, SentinelBecomesNaN) {
 TEST(DecodeLowState, RejectsOutOfRangeMotorIdWithoutPartialOutput) {
   LowState in;
   in.count = 2;
-  in.motor_ids = {5, micro_ros_bridge::contract::kMotorCountMax};
+  in.motor_ids = {5, 65};
   in.position_q = {100, 200};
   in.velocity_q = {0, 0};
   in.effort_q = {0, 0};
@@ -241,7 +241,7 @@ TEST(DecodeMotorStatus, RestoresFacadeFields) {
   EXPECT_EQ(s.motor_id, 9);
   EXPECT_EQ(s.lifecycle, can_bridge_msgs::msg::MotorStatusTarget::LIFECYCLE_ACTIVE);
   // 新鲜度走缓存，不进 MotorStatusTarget（spec §4.7：旧消息字段级沿用现定义）。
-  ASSERT_EQ(fresh.size(), can_bridge_msgs::msg::WireContract::MOTOR_COUNT_MAX);
+  ASSERT_EQ(fresh.size(), 65u);
   EXPECT_EQ(fresh[9].state_age_ms, 0xFFFFFFFFu);  // 哨兵还原成"从未收到"
   EXPECT_EQ(fresh[9].target_source,
     can_bridge_msgs::msg::MotorMotionStateTarget::TARGET_SOURCE_TRAJECTORY);

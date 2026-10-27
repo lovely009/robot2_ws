@@ -183,6 +183,7 @@ struct motor_control_context {
   bool have_snapshot;
   uint32_t last_snapshot_tick_ms;
   uint32_t last_snapshot_sequence;
+  uint32_t snapshot_deadline_tick_ms;
   bool snapshot_soft_stop_active; // 30ms 级联已触发（去重）
   bool snapshot_disable_done;     // 100ms 级联已触发（去重）
 
@@ -193,6 +194,7 @@ struct motor_control_context {
   // 静态放入 RAM_D1 .bss；该表还传递跨消息分段的边界速度，不可逐段重算。
   float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
   bool trajectory_active;
+  bool trajectory_agent_mode; // 新协议要求任一目标失去授权/100ms反馈即整条中止
   uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基
   uint32_t trajectory_accepted_count;
   uint32_t trajectory_rejected_count;

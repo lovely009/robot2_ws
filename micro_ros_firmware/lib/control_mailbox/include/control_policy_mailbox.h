@@ -31,6 +31,7 @@ typedef struct {
 
 typedef struct {
   uint32_t received_tick_ms;
+  uint32_t valid_until_tick_ms;
   // 消息级请求号：逐台结果经 /micro_ros_up/events 的 CONFIG_RESULT 回，用它关联。
   uint32_t request_id;
   // 整条消息共用的代数（见 MotorPolicyArray.msg 的防复权说明）。

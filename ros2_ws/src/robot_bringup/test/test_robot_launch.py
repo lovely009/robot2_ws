@@ -43,3 +43,23 @@ def test_firmware_tf_requires_an_explicit_model() -> None:
     assert not includes[0].condition.evaluate(context)
     context.launch_configurations['firmware_model'] = 'half_body_robot'
     assert includes[0].condition.evaluate(context)
+
+
+def test_manager_is_distributed_by_bringup() -> None:
+    actions = _load_launch_module().generate_launch_description().entities
+    managers = [a for a in actions if isinstance(a, Node)
+                and a.node_executable == 'bench_manager']
+    assert len(managers) == 1
+    assert managers[0].node_package == 'robot_bringup'
+
+
+def test_bringup_installs_manager_module_and_entrypoint(monkeypatch) -> None:
+    import runpy
+    import setuptools
+    root = Path(__file__).parent.parent
+    metadata = {}
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(setuptools, 'setup', lambda **kw: metadata.update(kw))
+    runpy.run_path(str(root / 'setup.py'))
+    assert 'bench_manager' in metadata.get('packages', [])
+    assert 'bench_manager = bench_manager.node:main' in metadata['entry_points']['console_scripts']

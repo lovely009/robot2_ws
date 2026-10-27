@@ -1,25 +1,22 @@
-// 时间戳工具：统一填充 ROS 2 header.stamp。
-// 与 agent 建链后可经 rmw_uros_sync_session() 做 NTP 同步，同步后
-// rmw_uros_epoch_nanos() 返回与主机对齐的 epoch 时间（1970-01-01 起）；各业务桥应
-// 优先用它，未同步（断连/首次建链前）回退 millis()，避免发出 0 时间戳。
-
+// 同步健康与 MCU 单调时基映射；所有跨任务访问在短临界区内。
 #ifndef TIME_UTILS_H
 #define TIME_UTILS_H
-
 #include <stdint.h>
-
+#include <stdbool.h>
 #include <builtin_interfaces/msg/time.h>
-
+#include "clock_health.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// 用「epoch 优先、millis 回退」填充 header.stamp。
-// 同步成功时写入 epoch 秒/纳秒；否则写入 millis() 的秒/纳秒。
+void time_sync_reset(void);
+void time_sync_record(bool success, uint64_t epoch_ns);
+void time_clock_snapshot(clock_health_t *out);
+bool time_clock_valid(void);
+bool time_sample_epoch(uint32_t sample_tick_ms, uint64_t *epoch_ns);
+uint64_t time_epoch_now(void);
+void fill_epoch_stamp(builtin_interfaces__msg__Time *stamp, uint64_t epoch_ns);
 void fill_header_stamp(builtin_interfaces__msg__Time *stamp);
-
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* TIME_UTILS_H */
+#endif

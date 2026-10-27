@@ -390,9 +390,9 @@ def test_motor_backend_interface_mirrors_the_simulation_drawer():
 # ---------------------------------------------------------------------------
 
 SRC = PKG.parent                      # ros2_ws/src
-BENCH_NODE = SRC / 'bench_manager' / 'bench_manager' / 'node.py'
-SYSTEMD_UNITS = SRC / 'bench_manager' / 'bench_manager' / 'systemd_units.py'
-MANAGER_PY = (SRC / 'bench_manager' / 'bench_manager' /
+BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
+SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
+MANAGER_PY = (SRC / 'robot_bringup' / 'bench_manager' /
               'gravity_feedforward_manager.py')
 OVERLAY_NODE = (SRC / 'robot_dynamics' / 'src' / 'ros' /
                 'gravity_feedforward_overlay_node.cpp')

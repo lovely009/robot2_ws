@@ -134,6 +134,20 @@ function(fw_host_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_library(fw_info_page OBJECT ../../lib/info_page/src/info_page.cpp)
+target_include_directories(fw_info_page PUBLIC ../../lib/info_page/include)
+target_link_libraries(fw_info_page PUBLIC fw_motor_control fw_config_transaction)
+fw_host_test(test_info_page SOURCES test_info_page.cpp OBLIBS fw_info_page)
+
+add_library(fw_agent_protocol OBJECT
+  ../../lib/agent_protocol/src/agent_protocol.c
+  ../../lib/agent_protocol/src/agent_control_gate.c)
+target_include_directories(fw_agent_protocol PUBLIC ../../lib/agent_protocol/include)
+target_link_libraries(fw_agent_protocol PUBLIC fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
+fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
+  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_save_transaction
+  INCLUDES ../../lib/motor_control/src)
+
 fw_host_test(test_motor_protocol
   SOURCES test_motor_protocol.cpp
   OBLIBS fw_motor_protocol)
@@ -191,6 +205,10 @@ fw_host_test(test_save_transaction
   SOURCES test_save_transaction.cpp
   OBLIBS fw_save_transaction
   INCLUDES ../../lib/save_transaction/include)
+
+add_library(fw_clock_health OBJECT ../../lib/clock_health/src/clock_health.c)
+target_include_directories(fw_clock_health PUBLIC ../../lib/clock_health/include)
+fw_host_test(test_clock_health SOURCES test_clock_health.cpp OBLIBS fw_clock_health)
 
 fw_host_test(test_imu_snapshot
   SOURCES test_imu_snapshot.cpp
@@ -263,6 +281,14 @@ add_test(
 add_test(
   NAME fdcan_motor_sim
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fdcan_motor_sim.py)
+
+add_library(fw_trajectory_transaction OBJECT
+  ../../lib/trajectory_transaction/src/trajectory_transaction.cpp)
+target_include_directories(fw_trajectory_transaction PUBLIC ../../lib/trajectory_transaction/include)
+target_link_libraries(fw_trajectory_transaction PUBLIC fw_motor_control fw_mailbox)
+fw_host_test(test_trajectory_transaction SOURCES test_trajectory_transaction.cpp
+  OBLIBS fw_trajectory_transaction fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
 
 add_library(fw_config_transaction OBJECT
   ../../lib/config_transaction/src/config_transaction.cpp)

@@ -273,6 +273,13 @@ test("关节收起后向下让出空间，观察区使用箭头折叠", async ({
   await expect.poll(async () => (await joints.boundingBox())!.height).toBeGreaterThan(150);
   const toggle = page.locator('.observer-head').getByRole('button', {name: '收起观察区', exact: true});
   await expect(toggle).toHaveText('▾');
+  const arrowLeft = await toggle.evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    return range.getBoundingClientRect().left;
+  });
+  const upperArrowLeft = await summary.evaluate(element =>
+    element.getBoundingClientRect().left + parseFloat(getComputedStyle(element).paddingLeft));
+  expect(Math.abs(arrowLeft - upperArrowLeft)).toBeLessThanOrEqual(1);
   await toggle.click();
   await expect(page.locator('#observation-content')).toBeHidden();
   await page.locator('.observer-head').getByRole('button', {name: '展开观察区', exact: true}).click();
@@ -949,4 +956,36 @@ test('工作台曲线支持复选及滚轮缩放，画布随观察区伸缩', as
   await page.getByRole('separator', {name:'调整观察区高度'}).focus();
   await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await canvas.boundingBox())!.height).toBeGreaterThan(before);
+});
+
+test('动作库在210px处仍能向下拖小，并能反向拖大和保留尺寸', async ({page}) => {
+  await page.setViewportSize({width:1417, height:965});
+  await page.addInitScript(() => {
+    if (localStorage.getItem('robot2.layout.--actions-height') === null) {
+      localStorage.setItem('robot2.layout.--actions-height', '210');
+      localStorage.setItem('robot2.layout.--joints-height', '75');
+      localStorage.setItem('robot2.navCollapsed', 'true');
+    }
+  });
+  await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  const panel = page.locator('.action-panel-host');
+  await expect(panel.locator('summary')).toBeVisible();
+  await page.getByRole('button', {name:'收起观察区', exact:true}).click();
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBe(210);
+  const handle = page.getByRole('separator', {name:'调整动作库高度', exact:true});
+  const drag = async (dy:number) => {
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + 80, box.y + box.height/2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 80, box.y + box.height/2 + dy, {steps:5});
+    await page.mouse.up();
+  };
+  await drag(40);
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBe(170);
+  await drag(-40);
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBe(210);
+  await drag(40);
+  await page.reload();
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBe(170);
 });

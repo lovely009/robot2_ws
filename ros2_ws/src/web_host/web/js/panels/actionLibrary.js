@@ -235,6 +235,13 @@ function sendWindow(index) {
   return tid;
 }
 
+// V3 完成后 active=false；先判断完成，避免把成功终态当成取消。
+export function trajectoryWindowResult(state, tid, durationMs) {
+  if (!state || state.trajectory_id !== tid) return 'waiting';
+  if (state.completed && state.elapsed_ms >= durationMs) return 'done';
+  return state.active ? 'waiting' : 'canceled';
+}
+
 // 等当前窗口跑完：以固件回带的 elapsed_ms 为准（本地钟不可靠）。
 async function waitWindow(tid) {
   const deadline = Date.now() + player.windowDurMs + TRAJ_STATE_TIMEOUT_PAD_MS;
@@ -242,10 +249,8 @@ async function waitWindow(tid) {
     if (player.cancelRequested) return 'stopped';
     assertPlaybackSession();
     const state = store.traj.state;
-    if (state && state.trajectory_id === tid) {
-      if (!state.active) return 'canceled';
-      if (state.elapsed_ms >= player.windowDurMs) return 'done';
-    }
+    const result = trajectoryWindowResult(state, tid, player.windowDurMs);
+    if (result !== 'waiting') return result;
     await sleep(50);
   }
   return 'timeout';
@@ -412,7 +417,7 @@ export async function playAction(name, options) {
       if (!player.loop) break;
     }
     player.phase = 'done';
-    player.detail = '播放完成（末点保持；点「停止」释放）';
+    player.detail = '播放完成（轨迹已结束）';
     announce();
   } catch (error) {
     player.phase = 'error';

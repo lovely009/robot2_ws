@@ -633,7 +633,8 @@ tr:hover {
 }
 .observer-fold {
   align-self: stretch;
-  padding: 0 3px;
+  padding: 0;
+  border: 0;
   color: var(--dim-2);
   font-size: 9px;
   flex: none;
@@ -1086,7 +1087,7 @@ tr:hover {
 }
 .action-panel-host {
   flex: 0 0 45%;
-  min-height: 210px;
+  min-height: 170px;
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);

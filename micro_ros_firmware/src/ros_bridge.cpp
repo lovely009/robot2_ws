@@ -18,6 +18,7 @@
 #include "motor_bridge.h"
 #include "motor_rt_task.h"
 #include "param_bridge.h"
+#include "firmware_parameters.h"
 #include "time_utils.h"
 
 static const char *kNodeName = "micro_ros_node";
@@ -33,7 +34,7 @@ static rcl_allocator_t g_allocator;
 // 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
 static size_t executor_handle_count() {
   return 1U + motor_bridge_executor_handle_count() +
-         PARAM_BRIDGE_EXECUTOR_HANDLES;
+         PARAM_BRIDGE_EXECUTOR_HANDLES + FIRMWARE_PARAMETER_HANDLES;
 }
 
 // 按初始化阶段跟踪，保证失败/断连时只清理已成功创建的实体
@@ -48,6 +49,7 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   (void)last_call_time;
   imu_bridge_poll();
   motor_bridge_poll();
+  firmware_parameters_poll();
   // motor_bridge_poll 内先转发事件、更新参数快照，再统一发送。
 }
 
@@ -68,6 +70,7 @@ void ros_bridge_destroy() {
   imu_bridge_destroy(&g_node);
   motor_bridge_destroy(&g_node, &g_executor);
   param_bridge_destroy(&g_node, &g_executor);
+  firmware_parameters_destroy(&g_node, &g_executor);
 
   if (g_timer_up) {
     rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);
@@ -125,6 +128,10 @@ bool ros_bridge_create() {
     return false;
   }
   if (!param_bridge_create(&g_node, &g_executor)) {
+    ros_bridge_destroy();
+    return false;
+  }
+  if (!firmware_parameters_create(&g_node, &g_executor)) {
     ros_bridge_destroy();
     return false;
   }

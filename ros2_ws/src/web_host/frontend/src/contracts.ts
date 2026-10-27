@@ -13,6 +13,7 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
+  firmwareConnectionKey: string;
   connected: boolean;
   connectionText: string;
   agent: string;

@@ -1352,6 +1352,48 @@ tr:hover {
   grid-column: 1;
   grid-row: 1;
 }
+.device-parameter-nav {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.device-parameter-nav .eyebrow { margin-bottom: 4px; }
+.device-parameter-nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  padding: 8px;
+  text-align: left;
+}
+.device-parameter-nav button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.firmware-parameters { padding: 14px; }
+.firmware-parameter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.firmware-parameters select { min-width: 96px; }
+.firmware-config-notice {
+  padding: 12px;
+  margin: 0 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--dim);
+}
+.firmware-parameters h3 { font-size: 12px; }
+.firmware-parameters dl { margin: 0 0 24px; }
+.firmware-parameters dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.firmware-parameters dt, .firmware-parameters small { color: var(--dim); }
+.firmware-parameters dd { margin: 0; font-family: var(--mono); }
+.firmware-parameters small { margin-left: 12px; }
 .device-workspace .inspector-area {
   grid-column: 2;
   grid-row: 1;

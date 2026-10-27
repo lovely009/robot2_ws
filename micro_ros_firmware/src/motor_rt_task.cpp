@@ -19,6 +19,7 @@
 #include "session_sync.h"
 #include "storage_task.h"
 #include "param_store_blob.h"
+#include "firmware_parameters.h"
 
 // 各库电机容量须一致；RX ring 深度不是电机容量，不纳入此约束。
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
@@ -40,10 +41,10 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 5ms/200Hz 控制边界：轨迹插值与快照保持覆盖互斥电机集合，每台每边界一条命令。
+static_assert(pdMS_TO_TICKS(1U) > 0U, "1kHz 控制需要至少 1kHz 的 RTOS tick");
+// 默认 5ms/200Hz、可配至 1ms/1kHz：轨迹插值与快照保持每台每边界一条命令。
 // P1 槽 latest-wins；CERB 出队后聚合为每帧最多 6 轴的 0x210。
 // 20ms/50Hz SYNC 与上行状态独立；总线负载和 WCET/jitter 需无负载台架验证。
-static const uint32_t kControlPeriodMs = FIRMWARE_MOTOR_COMMAND_PERIOD_MS;
 
 // 每周期配额，需按台架数据验证。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
@@ -469,7 +470,7 @@ static void pump_tx_schedulers(void) {
   }
 }
 
-// 5ms/200Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
@@ -643,7 +644,8 @@ static void motor_rt_task_fn(void *pv_parameters) {
     route_kernel_tx();
 
     // 配置周期的控制边界：按 millis 差触发，不补发过期边界。
-    if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
+    if ((uint32_t)(now_ms - last_control_ms) >=
+        1000U / firmware_parameters_snapshot().motor_command_hz) {
       last_control_ms = now_ms;
       control_boundary();
     }

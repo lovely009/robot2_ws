@@ -17,6 +17,7 @@ function updateCommandHistory() {
   }));
 }
 export const snapshot = shallowRef<WorkbenchSnapshot>({
+  firmwareConnectionKey: '',
   connected: false,
   connectionText: "未连接",
   agent: "stopped",
@@ -106,6 +107,7 @@ function updateSnapshot() {
   const row = s.motors.get(s.selectedId),
     simulation = s.bench.simulation;
   snapshot.value = {
+    firmwareConnectionKey: `${generation}:${s.configSessionId ?? 0}`,
     connected: s.conn.connected,
     connectionText: s.conn.text,
     agent: s.conn.agent,
@@ -319,6 +321,33 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
+  async readFirmwareParameter(name: string) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    const response = await modules.ros.callService('/micro_ros_node/get_parameters',
+      'rcl_interfaces/srv/GetParameters', {names: [name]}, 3000);
+    const value = response.values?.[0];
+    if (!value || (value.type !== 2 && value.type !== 1))
+      throw new Error(`控制板未提供参数 ${name}，请确认已烧录支持系统参数的新固件`);
+    if (value.type === 1 && typeof value.bool_value === 'boolean') return value.bool_value;
+    const integer = Number(value.integer_value);
+    if (value.type !== 2 || !Number.isSafeInteger(integer)) throw new Error(`固件参数 ${name} 类型或数值无效`);
+    return integer;
+  },
+  async writeFirmwareParameter(name: string, value: number) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    const response = await modules.ros.callService('/micro_ros_node/set_parameters',
+      'rcl_interfaces/srv/SetParameters', {parameters: [{name, value: {type: 2, integer_value: value}}]}, 3000);
+    if (response.results?.[0]?.successful !== true)
+      throw new Error(response.results?.[0]?.reason || '固件拒绝修改，请确认电机失能、无活动轨迹且未在保存');
+  },
+  async saveFirmwareParameters() {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    const response = await modules.ros.callService('/motor/execute_config',
+      'can_bridge_msgs/srv/ExecuteConfig', {request: {sync_time_ns: Date.now() * 1e6,
+        request_id: 0, kind: 1, command: 0, motor_id: 65535, count: 0, targets: []}, timeout_ms: 8000}, 10000);
+    if (response.result?.status !== 1)
+      throw new Error(`保存未确认成功（状态 ${response.result?.status ?? '未知'}，错误 ${response.result?.error_code ?? '未知'}），请回读核对`);
+  },
   clearCommandHistory() {
     if (!modules || disposed) return;
     modules.data.store.history.length = 0;

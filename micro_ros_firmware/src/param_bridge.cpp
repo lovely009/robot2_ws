@@ -377,6 +377,9 @@ static void poll_save(uint32_t now) {
     g_save_slot = -1;
   }
 }
+bool param_bridge_save_in_progress(void) {
+  return save_transaction_in_progress(&g_save_transaction);
+}
 
 static uint32_t hash_bytes(uint32_t hash, const void *data, size_t size) {
   const auto *p = static_cast<const uint8_t *>(data);

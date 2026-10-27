@@ -18,6 +18,7 @@
 #include "motor_rt_task.h"
 #include "imu_bridge.h"
 #include "param_bridge.h"
+#include "firmware_parameters.h"
 #include "ros_qos.h"
 #include "serial_transport.h"
 #include "time_utils.h"
@@ -246,7 +247,7 @@ static void trajectory_cb(const void *msgin) {
 }
 
 static void publish_motion(uint32_t now) {
-  if ((uint32_t)(now - g_motion_tick) < kMotionIntervalMs) return;
+  if ((uint32_t)(now - g_motion_tick) < 1000U / firmware_parameters_snapshot().motion_hz) return;
   g_motion_tick = now;
   const uint32_t capture_tick = millis();
   const size_t count = motor_rt_copy_motion_states(g_motion_snapshot, kMotorCapacity);
@@ -566,7 +567,7 @@ void motor_bridge_poll(void) {
   if (!g_have_sent_status || fingerprint != g_sent_status_fingerprint) g_status_dirty = true;
   const uint32_t send_tick = millis();
   const bool status_due = (uint32_t)(send_tick - g_status_attempt_tick) >= kStatusMinIntervalMs &&
-      (g_status_dirty || (uint32_t)(send_tick - g_status_tick) >= kStatusIntervalMs);
+      (g_status_dirty || (uint32_t)(send_tick - g_status_tick) >= 1000U / firmware_parameters_snapshot().status_hz);
   const auto *info = param_bridge_info();
   if ((uint32_t)(send_tick - g_reliable_tick) < kReliableIntervalMs) return;
   // 每 10ms 最多一次可靠应用发布；连续两轮 status 后必须给待发 info 一轮。

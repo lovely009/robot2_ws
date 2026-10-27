@@ -1,4 +1,4 @@
-// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，5ms/200Hz 控制边界。
+// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，50..1000Hz 控制边界（默认200Hz）。
 // ROS 桥仅通过 mailbox 提交输入、通过只读副本取状态；无 raw CAN 调试出口。
 
 #ifndef MOTOR_RT_TASK_H

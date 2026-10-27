@@ -23,6 +23,7 @@ import PanelHost from "./components/PanelHost.vue";
 import CommandHistory from "./components/CommandHistory.vue";
 import DeviceConnection from "./components/DeviceConnection.vue";
 import MotorSpecifications from "./components/MotorSpecifications.vue";
+import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import {
   runtime,
@@ -53,6 +54,7 @@ watch(navCollapsed, (value) => {
   localStorage.setItem("robot2.navCollapsed", String(value));
 });
 const directDevice = ref(false);
+const deviceParameters = ref<'firmware' | 'motor'>('motor');
 const now = ref(Date.now());
 const rosUrl = ref(
   localStorage.getItem("robot2.rosbridgeUrl") ||
@@ -303,6 +305,15 @@ onBeforeUnmount(() => {
             <span>对象浏览器</span>
             <small class="micro">{{ screen !== 'sim' ? '电机反馈' : 'URDF × TF' }}</small>
           </div>
+          <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="参数设置">
+            <div class="eyebrow">参数设置</div>
+            <button :class="{ active: deviceParameters === 'firmware' }" :aria-pressed="deviceParameters === 'firmware'" @click="deviceParameters = 'firmware'">
+              <Cpu :size="14" />固件参数
+            </button>
+            <button :class="{ active: deviceParameters === 'motor' }" :aria-pressed="deviceParameters === 'motor'" @click="deviceParameters = 'motor'">
+              <SlidersHorizontal :size="14" />电机参数
+            </button>
+          </nav>
           <PanelHost id="readout" :active="screen !== 'sim' && !(screen === 'teach' && directDevice)" />
           <Teleport to="#run-joints" :disabled="screen !== 'run'" defer>
             <PanelHost id="jointList" :active="screen !== 'teach'" />
@@ -345,7 +356,7 @@ onBeforeUnmount(() => {
         </div>
         <aside class="inspector-area inspector surface">
           <div class="panel-title">
-            <span>{{ screen === 'teach' ? '电机详细参数' : '对象检查器' }}</span><SlidersHorizontal :size="14" />
+            <span>{{ screen === 'teach' ? (deviceParameters === 'firmware' ? '固件参数设置' : '电机详细参数') : '对象检查器' }}</span><SlidersHorizontal :size="14" />
           </div>
           <div v-show="screen !== 'teach'" class="object-heading">
             <div class="eyebrow">
@@ -390,6 +401,7 @@ onBeforeUnmount(() => {
             <button :class="{ active: inspector === 'limits' }" @click="inspector = 'limits'">主机限位</button>
           </div>
           <div class="inspector-scroll">
+            <FirmwareParameters :active="screen === 'teach' && deviceParameters === 'firmware'" />
             <HostLimits v-show="screen !== 'teach'" :editing="inspector === 'limits'" />
             <PanelHost
               id="policy"
@@ -399,12 +411,12 @@ onBeforeUnmount(() => {
               :active="screen !== 'teach' && inspector === 'control'"
             /><PanelHost
               id="deviceParams"
-              :active="screen === 'teach' ? !directDevice : inspector === 'parameters'"
+              :active="screen === 'teach' ? !directDevice && deviceParameters === 'motor' : inspector === 'parameters'"
             /><PanelHost
               id="feedforward"
               :active="screen !== 'teach' && inspector === 'compensation'"
             />
-            <MotorSpecifications v-if="screen === 'teach' && !directDevice" />
+            <MotorSpecifications v-if="screen === 'teach' && !directDevice && deviceParameters === 'motor'" />
           </div>
         </aside>
         <section v-show="screen !== 'teach'" class="observer-area observer surface">

@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 
 include_directories(../../lib/firmware_config/include)
+add_library(fw_firmware_settings OBJECT ../../lib/firmware_config/src/firmware_settings.c)
 
 # 原则：测试直接编译固件真实 .c，无桩无复制。固件源码按库组织成 OBJECT
 # 库单点维护源文件列表，新增内核 .c 只改本文件一处；include 目录随库
@@ -230,6 +231,8 @@ fw_host_test(test_param_store
   SOURCES test_param_store.cpp
   OBLIBS fw_param_store
   INCLUDES ../../lib/motor_protocol/include) # 用例直接引 motor_protocol_adapter.h
+fw_host_test(test_firmware_settings SOURCES test_firmware_settings.cpp
+  OBLIBS fw_firmware_settings fw_param_store)
 
 fw_host_test(test_w25q64_geometry
   SOURCES test_w25q64_geometry.cpp

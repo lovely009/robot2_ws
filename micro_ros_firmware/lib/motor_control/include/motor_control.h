@@ -5,7 +5,7 @@
 //
 // 不依赖 ROS/HAL/FreeRTOS/control_mailbox，也不感知 joint_name（关节语义在 upper 层）；厂家字节只
 // 经 motor_protocol 的 adapter 接口——构造时注入 adapter 列表，新增协议不改内核。
-// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，5ms/200Hz 边界调
+// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，可配控制边界调
 // apply_command_snapshot()，TX 调度器消费 collect_tx() 的 P0/P1/P2 帧。
 // 一切 freshness/超时判定用 MCU 单调时基毫秒（now_ms 与帧内 rx_tick_ms），绝不用 ROS 时间。
 

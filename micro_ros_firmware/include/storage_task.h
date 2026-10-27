@@ -5,6 +5,7 @@
 //  - save **只有一个触发源**：param_bridge 收到 system_command 的 COMMAND_SAVE 后经
 //    storage_task_request_save(request_id) 请求。erase 阻塞最长约 1s，只能在本任务执行——
 //    严禁从 micro-ROS/motor_rt 上下文直接调 W25。
+//  - 同一 blob 头部保存系统参数；电机记录布局和双槽 CRC 规则保持不变。
 #ifndef STORAGE_TASK_H
 #define STORAGE_TASK_H
 

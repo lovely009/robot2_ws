@@ -90,7 +90,7 @@ uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
   const uint32_t p0_end = count;
 
   // 2) P1：发全部脏槽位一次（容量不足的脏槽保留到下轮）。脏槽由控制边界
-  // 逐边界置位，所以这里出队的节奏就等于控制边界（500Hz）× 每总线台数。
+  // 逐边界置位，实际出队频率受控制边界和总线容量限制。
   uint32_t p1_sent_this_pump = 0U;
   for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS && count < capacity &&
       p1_sent_this_pump < p1_limit; ++slot) {

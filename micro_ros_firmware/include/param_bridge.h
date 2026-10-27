@@ -19,6 +19,7 @@ extern "C" {
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_poll(void);
+bool param_bridge_save_in_progress(void);
 void param_bridge_on_config_result(const motor_control_event_t *event);
 // 调用方为 results 提供 8 个静态元素；发布不回收结果。
 void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out);

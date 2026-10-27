@@ -9,6 +9,7 @@
 #include "serial_transport.h"
 #include "motor_rt_task.h"
 #include "time_utils.h"
+#include "firmware_parameters.h"
 #include <rmw_microros/time_sync.h>
 
 #if !defined(MICRO_ROS_TRANSPORT_ARDUINO_SERIAL)
@@ -47,6 +48,7 @@ static void micro_ros_task_fn(void *parameters) {
   TickType_t last_wake = xTaskGetTickCount();
   const TickType_t period = pdMS_TO_TICKS(10);
   TickType_t last_sync = xTaskGetTickCount();
+  uint32_t last_ping = 0;
   for (;;) {
     switch (link_state_get()) {
     case MICRO_ROS_LINK_WAIT_AGENT:
@@ -69,8 +71,13 @@ static void micro_ros_task_fn(void *parameters) {
       }
       break;
 
-    case MICRO_ROS_LINK_RUN:
-      if (RMW_RET_OK != rmw_uros_ping_agent(200, 3)) {
+    case MICRO_ROS_LINK_RUN: {
+      bool connected = true;
+      if ((uint32_t)(millis() - last_ping) >= 1000U / firmware_parameters_snapshot().agent_ping_hz) {
+        last_ping = millis();
+        connected = RMW_RET_OK == rmw_uros_ping_agent(200, 3);
+      }
+      if (!connected) {
         link_state_set(MICRO_ROS_LINK_LOST);
       } else {
         ros_bridge_spin();
@@ -86,6 +93,7 @@ static void micro_ros_task_fn(void *parameters) {
         }
       }
       break;
+    }
 
     case MICRO_ROS_LINK_LOST:
     default:

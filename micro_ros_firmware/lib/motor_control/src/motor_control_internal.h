@@ -236,7 +236,9 @@ static inline size_t motor_control_entry_index(
 // dev_init 状态机、上电回读与 device_param_report 仍生效。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {
-  return entry != NULL;
+  return entry != NULL && (entry->adapter != &motor_protocol_cerb_adapter ||
+      ((entry->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX)) &&
+       entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] > 0U));
 }
 
 // 顺序确定化选择器：取下一个「未输出且 motor_id 最小」表项并在 taken

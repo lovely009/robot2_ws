@@ -318,6 +318,7 @@ void motor_control_report_config_result(motor_control_context_t *ctx,
 
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
     uint32_t now_ms);
+bool motor_control_is_authorized(const motor_control_context_t *ctx);
 
 // Profile 绑定（型号目录索引版）。生产路径只有一条：建档/重连读设备自报
 // 身份后由内核内部绑定（见 motor_control_start_identity_read）；本入口保留

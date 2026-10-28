@@ -36,31 +36,36 @@ void firmware_parameters_saved(const firmware_settings_t *settings) {
   taskEXIT_CRITICAL();
 }
 
+bool firmware_parameters_unsaved(void) {
+  taskENTER_CRITICAL();
+  const bool dirty = !firmware_settings_equal(&g_current, &g_saved);
+  taskEXIT_CRITICAL();
+  return dirty;
+}
+bool firmware_parameters_set_value(unsigned field, int64_t value) {
+  if (field >= FIRMWARE_SETTINGS_COUNT || !time_clock_valid() || param_bridge_save_in_progress()) return false;
+  auto candidate = firmware_parameters_snapshot();
+  if (!firmware_settings_set(&candidate, field, value)) return false;
+  taskENTER_CRITICAL();
+  const size_t count = motor_rt_copy_statuses(g_motor_status, MOTOR_CONTROL_MAX_MOTORS);
+  bool enabled = false;
+  for (size_t j = 0; j < count; ++j)
+    enabled |= g_motor_status[j].policy_enabled || g_motor_status[j].motion_enabled;
+  agent_trajectory_status_t trajectory{};
+  motor_rt_copy_agent_trajectory(&trajectory);
+  if (enabled || (trajectory.state >= AGENT_TRAJECTORY_LOADING && trajectory.state <= AGENT_TRAJECTORY_RUNNING)) {
+    taskEXIT_CRITICAL(); return false;
+  }
+  g_current = candidate;
+  taskEXIT_CRITICAL();
+  return true;
+}
 static bool on_parameter(const Parameter *old_value, const Parameter *value, void *) {
   if (g_internal) return true;
-  if (!old_value || !value || value->value.type != RCLC_PARAMETER_INT ||
-      !time_clock_valid() || param_bridge_save_in_progress()) return false;
-  auto candidate = firmware_parameters_snapshot();
-  for (unsigned i = 0; i < FIRMWARE_SETTINGS_COUNT; ++i) {
-    if (strcmp(value->name.data, firmware_setting_names[i])) continue;
-    if (!firmware_settings_set(&candidate, i, value->value.integer_value)) return false;
-    // 核对当前内核状态与应用值同属一个短临界区，不能使用上一帧缓存。
-    taskENTER_CRITICAL();
-    const size_t count = motor_rt_copy_statuses(g_motor_status, MOTOR_CONTROL_MAX_MOTORS);
-    bool enabled = false;
-    for (size_t j = 0; j < count; ++j)
-      enabled |= g_motor_status[j].policy_enabled || g_motor_status[j].motion_enabled;
-    agent_trajectory_status_t trajectory{};
-    motor_rt_copy_agent_trajectory(&trajectory);
-    if (enabled || (trajectory.state >= AGENT_TRAJECTORY_LOADING &&
-        trajectory.state <= AGENT_TRAJECTORY_RUNNING)) {
-      taskEXIT_CRITICAL();
-      return false;
-    }
-    g_current = candidate;
-    taskEXIT_CRITICAL();
-    return true;
-  }
+  if (!old_value || !value || value->value.type != RCLC_PARAMETER_INT) return false;
+  for (unsigned i = 0; i < FIRMWARE_SETTINGS_COUNT; ++i)
+    if (!strcmp(value->name.data, firmware_setting_names[i]))
+      return firmware_parameters_set_value(i, value->value.integer_value);
   return false;
 }
 void firmware_parameters_poll(void) {
@@ -69,6 +74,11 @@ void firmware_parameters_poll(void) {
   const bool dirty = !firmware_settings_equal(&g_current, &g_saved);
   taskEXIT_CRITICAL();
   g_internal = true;
+  const auto settings = firmware_parameters_snapshot();
+  for (unsigned i = 0; i < FIRMWARE_SETTINGS_COUNT; ++i) {
+    const auto rc = rclc_parameter_set_int(&g_server, firmware_setting_names[i], firmware_settings_get(&settings, i));
+    (void)rc;
+  }
   const rcl_ret_t rc = rclc_parameter_set_bool(&g_server, kReadOnly[2], dirty);
   (void)rc;
   g_internal = false;

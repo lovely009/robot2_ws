@@ -51,6 +51,8 @@ BridgeNode::BridgeNode() : rclcpp::Node("micro_ros_bridge")
     [this](MotorPolicyArray::SharedPtr m) {on_policy(*m);}));
   subscriptions_.push_back(create_subscription<MotorTrajectory>("/motor/trajectory", reliable(),
     [this](MotorTrajectory::SharedPtr m) {on_trajectory(*m);}));
+  subscriptions_.push_back(create_subscription<ConfigRequest>("/motor/config_request", reliable(),
+    [this](ConfigRequest::SharedPtr m) {submit_config(*m);}));
   subscriptions_.push_back(create_subscription<ParamSetArray>("/motor/param_set", reliable(),
     [this](ParamSetArray::SharedPtr m) {
       ConfigRequest request;

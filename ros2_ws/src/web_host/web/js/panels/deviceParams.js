@@ -3,15 +3,17 @@
 // 防抹除保护从订阅处理器挪进 render：订阅层已不认识面板，正在编辑的输入框仍不能被
 // device_param_report 的下一帧重建抹掉。
 import { describeMotorState } from '../core/motor_state.js';
-import { store, DIRTY, markDirty, paramRowIds, writesAllowed,
+import { store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
   syncWriteButtons } from '../core/store.js';
 import { $, fmt, fmtParam, lifecyclePill, devSlotNames, devRecoveryText } from '../core/format.js';
-import { loadParams, applyParams, saveParamsToFlash, setLimitFromPosition,
+import { refreshMotorParams, applyParams, saveParamsToFlash, setLimitFromPosition,
   setMotorZero, clearMotorFault, flipDirection, hasDirtyParamInput } from '../core/device.js';
 
 // 型号库（减速比等）——设备端 RPM 的折算系数。取一次缓存；拿到后重绘一次把
 // 设备端原值填上。取不到就只显示 cnt / mA 两项，不报错。
 let motorSpecs = null;
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g,
+  (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
 fetch('/api/motor-specs')
   .then((r) => r.json())
   .then((d) => { motorSpecs = d.motor_types || {}; markDirty(DIRTY.PARAMS); })
@@ -20,30 +22,25 @@ fetch('/api/motor-specs')
 // ---------- 全部参数（以驱动板为准，可回读） ----------
 function renderDevRows() {
   const tbody = $('paramRows');
-  const ids = paramRowIds($('chkAllParams').checked);
+  const ids = paramRowIds(true);
+  const existing = new Map([...tbody.querySelectorAll('.motor-parameter-item')]
+    .map((item) => [Number(item.dataset.motor), item.open]));
   if (ids.length === 0) {
-    tbody.innerHTML = '<tr class="empty"><td colspan="13">'
-      + (store.paramCache.size === 0
-        ? '参数集为空（等待 device_param_report）'
-        : `m${store.selectedId} 暂无参数记录（未发现或未回读）——勾「显示全部」看其余`)
-      + '</td></tr>';
+    tbody.innerHTML = '<p class="muted">暂无电机参数，等待控制板回读。</p>';
     return;
   }
-  tbody.innerHTML = ids.map((id) => {
+  tbody.innerHTML = ids.map((id, index) => {
     const v = store.paramCache.get(id);
     const pick = v.pick; // 逐字段：驱动板回读优先，没回读到才用固件记录
     const row = store.motors.get(id) || {};
     const model = row.topo?.model_name || '';
-    const online = row.status?.online ?? row.topo?.online;
     const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
-    // 来源：只按 online 判会把"型号占位/未核对"也标成驱动板——生命周期
-    // CONFIG_CONFLICT(7) 表示设备参数未核对（未回读完 / 与记录不一致 / 回读
-    // 失败），此时这行的数字不是设备真值，必须如实标出来。
-    const lcVerified = online === true && lc !== 7;
-    const src = online === undefined ? '<span class="muted">--</span>'
-      : (!online ? '<span class="pill off">记录</span>'
-                 : (lcVerified ? '<span class="pill mid">驱动板</span>'
-                               : '<span class="pill off">未核对</span>'));
+    // 在线不代表参数已核对，必须同时有完整回读和设备核对终态。
+    const availability = paramReadState(id);
+    const src = `<span class="pill ${availability.verified ? 'mid' : 'off'}">${
+      availability.verified ? '驱动板 · 已核对' : availability.device === 8 ? '驱动板 · 完整回读'
+        : availability.device ? '部分设备回读 · 未核对'
+        : availability.record ? '固件记录 · 未核对' : '无有效参数'}</span>`;
     // 设备端原值：页面已知"参数单位 → 设备原值"的换算（设备对象就是 cnt / mA /
     // 电机端 RPM），显示在输入框下，省去对着 CAN 日志换算。位置参数本身就是 rad
     // （与状态、URDF 同一套单位），cnt 用设备侧 65536 cnt/360° 折；转速是**电机端**
@@ -67,9 +64,9 @@ function renderDevRows() {
     const rowsHint = (f) => (v.rec[f] === v.dev[f]) ? ''
       : `；记录 ${fmtParam(v.rec[f])} / 驱动板 ${fmtParam(v.dev[f])}`;
     const cell = (f) => {
-      const dev = raw(f, Number(pick[f]));
+      const dev = raw(f, pick[f]);
       const hint = (dev ? `设备端 ${dev}` : '') + rowsHint(f);
-      return `<input data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
+      return `<input id="motor-param-${id}-${f}" type="number" step="any" placeholder="未读取" data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
         (hint ? ` title="${hint}"` : '') + `>` +
         (dev ? `<span class="rawval muted tiny">${dev}</span>` : '');
     };
@@ -87,18 +84,18 @@ function renderDevRows() {
       limBtn('max', '设正', '位置上限 pos_max（正向 / 右）');
     // 保护开关：参数 1 = 保护生效（设备侧原值 0）。设备还没回读到该对象时
     // 固件给 NaN —— 这时勾选框禁用，不能让操作员以为自己看到了真值。
-    const protect = Number(pick['limit_protect']);
+    const protect = pick['limit_protect'];
     const protectCell = Number.isFinite(protect)
-      ? `<input type="checkbox" data-id="${id}" data-field="limit_protect"` +
+      ? `<input id="motor-param-${id}-limit_protect" type="checkbox" data-id="${id}" data-field="limit_protect"` +
         (protect === 1 ? ' checked' : '') +
         ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
         '（该关节将没有任何限位在执行）。仅未运动时受理。' +
         '上电默认开（固件在回读比对之前写回）；取消后该台每次武装都要二次确认，' +
         '且下次上电会自动恢复为开。">'
-      : '<input type="checkbox" disabled title="设备还没回读到该对象">';
+      : `<input id="motor-param-${id}-limit_protect" type="checkbox" disabled title="设备还没回读到该对象">`;
     // 方向：原值直通（0=CW / 1=CCW），点一下切换。翻转只改力矩方向，不改位置
     // 坐标系（实测）；风险是位置环反向，故仅在未运动时可改。
-    const dir = Number(pick['direction']);
+    const dir = pick['direction'];
     const dirCell = Number.isFinite(dir)
       ? `<button class="tiny-btn" data-dir="${id}" data-dir-cur="${dir}"` +
         ' title="点击切换 CW / CCW。翻转只改力矩方向（位置坐标不变），' +
@@ -110,26 +107,65 @@ function renderDevRows() {
     // 当前位置：与限位同单位（rad），取 50 Hz 状态流。初始值渲染一次，
     // 之后由 updateDevCurPos（render 的 200 ms 节流拍）就地改文本——整表 innerHTML
     // 重建会抹掉操作员正在敲的值，不能拿它来刷这个 50 Hz 量。
-    const curPos = Number(row.motion?.position);
-    return `<tr${unprotected ? ' class="unprotected"' : ''}` +
-      `${unprotected ? ' title="保护已关：该关节无任何限位"' : ''}>
-      <td class="num">${id}</td>
-      <td>${model || '<span class="muted">--</span>'}</td>
-      <td>${lifecyclePill(lc, describeMotorState(store,id))}</td>
-      <td>${src}</td>
-      <td>${cell('pos_min')}</td><td>${cell('pos_max')}</td>
-      <td class="num curpos" data-cur="${id}">${fmt(curPos, 4)}</td>
-      <td>${limCell}</td>
-      <td>${cell('vel_limit')}</td><td>${cell('torque_limit')}</td>
-      <td>${protectCell}</td>
-      <td>${dirCell}</td>
-      <td><button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
-        <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button></td>
-    </tr>`;
+    const curPos = row.motion?.position;
+
+    const field = (name, label, unit) => `<div><dt><label for="motor-param-${id}-${name}">${label}${unit ? `（${unit}）` : ''}</label></dt><dd>${cell(name)}</dd></div>`;
+    const savedFields = [
+      ['pos_min', '位置下限（rad）'], ['pos_max', '位置上限（rad）'],
+      ['vel_limit', '速度上限（rad/s）'], ['torque_limit', '电流上限（A）'],
+      ['limit_protect', '限位保护'], ['direction', '电机方向'],
+      ['t_max', 'T_max（N·m）'], ['node_id', '电机 ID'],
+    ];
+    const savedValue = (key) => {
+      const value = v.rec[key];
+      if (!Number.isFinite(value)) return '无记录';
+      if (key === 'limit_protect') return value === 1 ? '开启' : '关闭';
+      if (key === 'direction') return value === 1 ? 'CCW' : 'CW';
+      return fmtParam(value);
+    };
+    return `<details class="motor-parameter-item${unprotected ? ' unprotected' : ''}" data-motor="${id}"` +
+      `${(existing.get(id) ?? index === 0) ? ' open' : ''}>
+      <summary><strong>电机 ${id}</strong><span class="motor-parameter-model">${escapeHtml(model || '型号待识别')}</span>
+        ${lifecyclePill(lc, describeMotorState(store,id))}${src}</summary>
+      <div class="motor-parameter-body">
+        ${!availability.usable ? `<p class="panel-error">电机 ${id} ${!model ? '型号尚未识别，固件尚未绑定型号；' : ''}未返回有效参数，不能视为读取成功。</p>` : ''}
+        ${unprotected ? '<p class="panel-error">保护已关：该关节无任何限位。</p>' : ''}
+        <h3>电机参数</h3>
+        <p class="micro">下发后回读核验；ID 重启电机后生效。保存 W25 记录；ID、T_max 的驱动器掉电保存需单独验证。</p><dl>
+          ${field('node_id', '电机 ID', '')}${field('t_max', 'T_max', 'N·m')}
+          <div><dt>当前通信 ID</dt><dd>${id}${Number.isFinite(pick.node_id) && pick.node_id !== id ? '（新 ID 重启电机后生效）' : ''}</dd></div>
+
+          ${field('pos_min', '位置下限', 'rad')}${field('pos_max', '位置上限', 'rad')}
+          <div><dt>当前位置（rad）</dt><dd class="curpos" data-cur="${id}">${fmt(curPos, 4)}</dd></div>
+          <div><dt>限位教学</dt><dd>${limCell}</dd></div>
+
+          ${field('vel_limit', '速度上限', 'rad/s')}${field('torque_limit', '电流上限', 'A')}
+
+          <div><dt><label for="motor-param-${id}-limit_protect">限位保护</label></dt><dd>${protectCell}</dd></div>
+          <div><dt>电机方向</dt><dd>${dirCell}</dd></div>
+          <div><dt>维护操作</dt><dd>
+            <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
+            <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button>
+          </dd></div>
+        </dl>
+        <section class="motor-saved-record"><h3>固件参数</h3>
+          <p class="micro">${v.dirty
+            ? '存在未保存修改，暂不能确认 W25 已保存值；保存成功后重新读取。'
+            : 'W25 保存记录；缺失项显示“无记录”。'}</p>
+          ${!availability.record ? '<p class="micro">暂无 W25 保存记录</p>' :
+            `<dl>${savedFields.map(([key, label]) => `<div><dt>${label}</dt><dd>${v.dirty ? '未确认' : savedValue(key)}</dd></div>`).join('')}</dl>`}
+        </section>
+      </div>
+    </details>`;
   }).join('');
   tbody.querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('input', () => { inp.dataset.dirty = '1'; });
     inp.addEventListener('change', () => { inp.dataset.dirty = '1'; });
+  });
+  tbody.querySelectorAll('input[data-field="node_id"], input[data-field="t_max"]').forEach((inp) => {
+    inp.step = '1'; inp.min = '1'; inp.max = inp.dataset.field === 'node_id' ? '64' : '16777215';
+    const row = store.controlStates.byId.get(Number(inp.dataset.id));
+    inp.disabled = !!(row?.policy_enabled || row?.motion_enabled);
   });
   tbody.querySelectorAll('[data-dir]').forEach((btn) => {
     btn.onclick = () => flipDirection(parseInt(btn.dataset.dir, 10),
@@ -154,16 +190,14 @@ function renderDevRows() {
 function updateDevCurPos() {
   const tb = $('paramRows');
   if (!tb) return;
-  tb.querySelectorAll('td.curpos').forEach((td) => {
+  tb.querySelectorAll('.curpos').forEach((td) => {
     const row = store.motors.get(parseInt(td.dataset.cur, 10)) || {};
-    const text = fmt(Number(row.motion?.position), 4);
+    const text = fmt(row.motion?.position, 4);
     if (td.textContent !== text) td.textContent = text;
   });
 }
 
-// 设备参数核对总览：把"上电核对"的结论放到最显眼处。判据是内核把未完成核对的台
-// 置 CONFIG_CONFLICT(7)，具体是"与记录不一致(40)"还是"回读不成功(41)"看
-// system.last_error；其余在线台按已核对显示（来源=驱动板）。
+// 设备参数核对总览：在线和收到报告都不是核对成功，只有完整回读与 OK 终态才算。
 function renderParamSummary() {
   const el = $('paramSummary');
   if (!el) return;
@@ -173,17 +207,29 @@ function renderParamSummary() {
     el.textContent = '设备参数核对：暂无电机';
     return;
   }
-  const offline = [], blocked = [], ok = [];
+  const offline = [], blocked = [], ok = [], pending = [], mismatch = [];
   for (const id of ids) {
     const row = store.motors.get(id) || {};
     const online = row.status?.online ?? row.topo?.online;
     const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
     if (online === false) offline.push(id);
     else if (lc === 7) blocked.push(id);
-    else ok.push(id);
+    else if (store.paramCache.get(id)?.state === 3) mismatch.push(id);
+    else if (paramReadState(id).verified) ok.push(id);
+    else pending.push(id);
   }
   const parts = [`<b>设备参数核对：共 ${ids.length} 台</b>`,
     `<span class="pill mid">已核对 ${ok.length}</span>`];
+  if (mismatch.length) {
+    parts.push(`<span class="pill off">记录不一致 ${mismatch.length}</span>` +
+      `<span class="muted">（${mismatch.map(id => `电机 ${id}：${
+        devSlotNames(store.paramCache.get(id).mask || 0).join('、') || '参数差异'}`).join('；')}；显示驱动板回读值）</span>`);
+  }
+  if (pending.length) {
+    parts.push(`<span class="pill off">待回读 ${pending.length}</span>` +
+      `<span class="muted">（${pending.map(id => `电机 ${id}：${
+        !store.motors.get(id)?.topo?.model_name ? '型号未识别' : '尚未完成有效参数核对'}`).join('；')}）</span>`);
+  }
   if (blocked.length) {
     const code = Number(store.lastError || 0);
     const why = (code === 40) ? '与固件记录不一致'
@@ -233,13 +279,12 @@ function updateSumDev() {
     if (t.conflict || st.lifecycle === 7) conflict++;
   }
   el.textContent = store.paramCache.size
-    ? `${store.paramCache.size} 台已读` + (conflict ? ` · 未初始化 ${conflict}` : '')
+    ? `${store.paramCache.size} 台已报告` + (conflict ? ` · 未初始化 ${conflict}` : '')
     : '未读取';
 }
 
 export function mount(root, ctx) {
-  $('chkAllParams').onchange = () => render(new Set([DIRTY.PARAMS, DIRTY.SELECTED]));
-  $('btnParamLoad').onclick = () => loadParams();
+  $('btnParamLoad').onclick = () => refreshMotorParams();
   $('btnParamApply').onclick = () => applyParams();
   $('btnParamSave').onclick = () => saveParamsToFlash();
 
@@ -255,6 +300,16 @@ export function mount(root, ctx) {
         renderDevRows();
         updateDevCurPos();
         updateSumDev();
+      }
+      const ids = [...new Set([...store.motors.keys(), ...store.paramCache.keys()])].sort((a, b) => a - b);
+      const selected = ids.includes(store.selectedId) ? store.selectedId : ids[0];
+      const singleMotor = !!root.closest('.device-workspace');
+      const hint = $('paramSelectionHint');
+      hint.hidden = !singleMotor || selected === undefined || store.paramCache.has(selected);
+      hint.textContent = `电机 ${selected} 暂无参数，请读取电机参数。`;
+      for (const item of $('paramRows').querySelectorAll('.motor-parameter-item')) {
+        item.hidden = singleMotor && Number(item.dataset.motor) !== selected;
+        if (singleMotor && !item.hidden) item.open = true;
       }
       // 断连禁用写操作（Task 2 的统一规则）。三个按钮双向同步；行内控件只做
       // 「断连→禁用」这一层——它们各有独立的禁用理由（运动中的限位、没回读到

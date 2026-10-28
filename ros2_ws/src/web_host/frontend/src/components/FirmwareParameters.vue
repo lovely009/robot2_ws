@@ -73,7 +73,9 @@ watch(() => snapshot.value.connected, connected => {
   epoch++; loaded.value = false; values.value = {}; draft.value = {};
   message.value = '连接已断开，请重新读取控制板参数';
 });
-watch(() => snapshot.value.firmwareConnectionKey, () => {
+watch(() => snapshot.value.firmwareConnectionKey, (key, previous) => {
+  // 首次获知会话号并非换板；断链代数及已知会话变化仍作废草稿与等待。
+  if (previous?.endsWith(':0') && previous.split(':')[0] === key.split(':')[0]) return;
   epoch++; loaded.value = false; values.value = {}; draft.value = {};
   message.value = '控制板会话已更换，请重新读取参数';
 });

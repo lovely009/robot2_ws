@@ -239,6 +239,10 @@ void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connec
   }
 }
 
+bool motor_control_is_authorized(const motor_control_context_t *ctx) {
+  return ctx != NULL && ctx->authorized;
+}
+
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
     uint32_t now_ms) {
   if (ctx == NULL) {
@@ -382,6 +386,11 @@ static bool entry_push_mit(motor_control_context_t *ctx,
     motor_control_entry_t *entry, size_t index,
     uint32_t now_ms, bool supersede_p0) {
   const motor_protocol_model_profile_t *profile = entry->profile;
+  motor_protocol_model_profile_t effective = *profile;
+  const uint8_t t_bit = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
+  if ((entry->dev_raw_present & t_bit) && entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] > 0U)
+    effective.mit_torque_limit_nm = (float)entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX];
+  profile = &effective;
   motor_protocol_control_intent_t intent = {0};
   intent.position_rad = entry->target_position_rad;
   intent.velocity_rad_s = entry->target_velocity_rad_s;

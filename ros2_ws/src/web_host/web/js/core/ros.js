@@ -183,6 +183,7 @@ function resetSessionState() {
   store.paramCache.clear();
   store.tf.clear();
   store.sysStatus.seen = false;
+  store.firmwareReport = {seq: 0, at: 0, values: null, unsaved: false};
   store.conn.autoLoaded = false;
   store.conn.benchLoaded = false;
   for (const key of Object.keys(store.bench)) store.bench[key] = null;
@@ -483,10 +484,10 @@ function subscribeAll() {
       const safety = (v) => (Number.isFinite(v) ? (v === 0 ? 1 : 0) : NaN);
       const rec = {pos_min: e.rec_pos_min, pos_max: e.rec_pos_max,
         vel_limit: e.rec_vel_limit, torque_limit: e.rec_torque_limit,
-        limit_protect: safety(e.rec_safety), direction: e.rec_direction};
+        limit_protect: safety(e.rec_safety), direction: e.rec_direction, t_max: e.rec_t_max, node_id: e.rec_node_id};
       const dev = {pos_min: e.dev_pos_min, pos_max: e.dev_pos_max,
         vel_limit: e.dev_vel_limit, torque_limit: e.dev_torque_limit,
-        limit_protect: safety(e.dev_safety), direction: e.dev_direction};
+        limit_protect: safety(e.dev_safety), direction: e.dev_direction, t_max: e.dev_t_max, node_id: e.dev_node_id};
       const pick = {};
       for (const f of Object.keys(rec)) {
         pick[f] = Number.isFinite(dev[f]) ? dev[f] : rec[f];
@@ -502,6 +503,11 @@ function subscribeAll() {
   // 系统状态（best-effort，5 Hz + 变化即发）。这是**电平**不是事件：last_error
   // 保持到下次错误，*_seq 仅供兼容观察，不关联具体配置请求。
   sub('sysStatus', (m) => {
+    if (m.firmware_values_valid && Array.isArray(m.firmware_values) && m.firmware_values.length === 6 &&
+        m.firmware_values.every(v => Number.isInteger(v) && v > 0 && v <= 1000)) {
+      store.firmwareReport = {seq: store.firmwareReport.seq + 1, at: Date.now(),
+        values: [...m.firmware_values], unsaved: !!m.firmware_unsaved};
+    }
     store.lastError = m.last_error;
     store.lastErrorMotor = m.last_error_motor === MOTOR_ID_NONE ? -1 : m.last_error_motor;
     store.sysStatus = {

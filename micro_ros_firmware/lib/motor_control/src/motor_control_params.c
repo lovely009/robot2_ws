@@ -132,7 +132,9 @@ static const motor_control_stored_params_t *find_stored(
     const motor_control_stored_params_t *records, size_t count,
     uint16_t motor_id) {
   for (size_t i = 0; i < count; ++i) {
-    if (records[i].motor_id == motor_id) {
+    if (records[i].motor_id == motor_id ||
+        ((records[i].device_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID)) &&
+         records[i].device_raw[MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID] == motor_id)) {
       return &records[i];
     }
   }
@@ -183,6 +185,11 @@ static void apply_stored_to_entry(motor_control_entry_t *entry,
         (float)rec->device_raw[MOTOR_PROTOCOL_PARAM_SLOT_SAFETY];
     entry->record_si[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] =
         (float)rec->device_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION];
+  }
+
+  if (rec != NULL && entry->record_valid) {
+    for (uint8_t slot = MOTOR_PROTOCOL_PARAM_SLOT_T_MAX; slot < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++slot)
+      if (entry->record_raw_present & (1U << slot)) entry->record_si[slot] = (float)entry->record_raw[slot];
   }
 
   // 无记录时仅完成 offered，不置 SEEN，允许后续捕获并套用真实记录。

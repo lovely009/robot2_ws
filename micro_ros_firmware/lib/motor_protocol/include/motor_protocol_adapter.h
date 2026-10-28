@@ -193,7 +193,9 @@ typedef enum {
   MOTOR_PROTOCOL_CONFIG_SET_DIRECTION = 13U,
   // 设备 RAM 落 Flash，与写事务分离；save_slots 指定待保存槽位。
   // 警告：设备写 Flash 会阻塞控制循环，时长未经实测。
-  MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH = 14U
+  MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH = 14U,
+  MOTOR_PROTOCOL_CONFIG_SET_T_MAX = 15U,
+  MOTOR_PROTOCOL_CONFIG_SET_NODE_ID = 16U
 } motor_protocol_config_kind_t;
 
 typedef enum {
@@ -226,6 +228,8 @@ typedef struct {
   uint32_t safety_protect_raw;
   // SET_DIRECTION：设备端原值（0 = CW，1 = CCW）。
   uint32_t direction_raw;
+  uint32_t t_max_raw;
+  uint16_t new_node_id;
   // SET_POLICY：代数必须严格前进才受理「从未武装到武装」的迁移（防周期重发
   // 自动复权）。其余 kind 忽略本字段。
   uint32_t policy_generation;
@@ -248,7 +252,9 @@ typedef struct {
 // v3：设备侧安全事实（无 SI 换算，原值透传）。
 #define MOTOR_PROTOCOL_PARAM_SLOT_SAFETY 4U    // 0x2650:00
 #define MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION 5U // 0x2541
-#define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 6U
+#define MOTOR_PROTOCOL_PARAM_SLOT_T_MAX 6U
+#define MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID 7U
+#define MOTOR_PROTOCOL_PARAM_SLOT_COUNT 8U
 
 // 有厂家保存码（0x2539）的槽位：位置上下限（码 4/2）+ 速度、力矩限值（码 1）。
 // 保护开关与方向**不在内**——易失对象，厂家没给保存码，靠上电归一从记录重建

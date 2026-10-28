@@ -24,3 +24,8 @@ AgentConfigResult rejection_receipt
 AgentTrajectoryReceipt trajectory_request_receipt
 AgentTrajectoryState trajectory
 MotorDiagnostics diagnostics
+
+# 固件配置 topic 回读，顺序见 firmware_setting_names；仅有效标记置位才可用。
+bool firmware_values_valid
+uint16[6] firmware_values
+bool firmware_unsaved

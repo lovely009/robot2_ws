@@ -1,4 +1,4 @@
-export type Screen = "run" | "teach" | "sim";
+export type Screen = "run" | "teach" | "sim" | "motion";
 export type PanelId =
   | "jointList"
   | "arm"
@@ -22,6 +22,7 @@ export interface WorkbenchSnapshot {
   canStopAgent: boolean;
   model: string;
   selectedId: number;
+  motors: { id: number; model: string }[];
   selectedName: string;
   selectedState: string;
   total: number;

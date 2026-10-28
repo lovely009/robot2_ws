@@ -238,9 +238,9 @@ Result encode_config(
     return r;
   }
   // 第二维用 FIELD_DIRECTION + 1 而不是字面量 6：将来加槽位时，上面那条
-  // `t.field > Target::FIELD_DIRECTION` 会跟着放宽，而写死的 6 不会——于是
+  // `t.field > Target::FIELD_NODE_ID` 会跟着放宽，而写死的 6 不会——于是
   // `seen[motor_id][field]` 静默越界写。
-  bool seen[kIdLimit][Target::FIELD_DIRECTION + 1] = {};
+  bool seen[kIdLimit][Target::FIELD_NODE_ID + 1] = {};
   bool has_min[kIdLimit] = {};
   bool has_max[kIdLimit] = {};
   for (const auto & t : in.targets) {
@@ -249,10 +249,18 @@ Result encode_config(
       r.error = "motor_id 越界（最大 ID 64）";
       return r;
     }
-    if (t.field > Target::FIELD_DIRECTION) {
+    if (t.field == Target::FIELD_NODE_ID && in.count != 1) {
+      r.ok = false; r.error = "电机ID修改必须独占请求"; return r;
+    }
+    if (t.field > Target::FIELD_NODE_ID) {
       r.ok = false;
       r.error = "未知参数槽位";
       return r;
+    }
+    if ((t.field == Target::FIELD_NODE_ID || t.field == Target::FIELD_T_MAX) &&
+        (!std::isfinite(t.value) || std::floor(t.value) != t.value || t.value < 1 ||
+         t.value > (t.field == Target::FIELD_NODE_ID ? 64.0f : 16777215.0f))) {
+      r.ok = false; r.error = "电机ID/T_max必须为有效范围内整数"; return r;
     }
     if (seen[t.motor_id][t.field]) {
       r.ok = false;

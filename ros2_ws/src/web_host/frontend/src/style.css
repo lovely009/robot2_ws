@@ -1354,6 +1354,8 @@ tr:hover {
 }
 .device-parameter-nav {
   display: grid;
+  min-height: 0;
+  overflow-y: auto;
   gap: 4px;
   padding: 12px;
   border-bottom: 1px solid var(--border);
@@ -1371,7 +1373,14 @@ tr:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
-.firmware-parameters { padding: 14px; }
+.motor-list-chevron { margin-left: auto; }
+.device-motor-list { padding-left: 16px; border-left: 1px solid var(--border); margin-left: 14px; }
+.device-motor-list button { width: 100%; flex-direction: column; align-items: flex-start; gap: 3px; }
+.device-motor-list small { color: var(--dim); overflow-wrap: anywhere; }
+.device-workspace .motor-parameter-item[hidden] { display: none; }
+#paramSelectionHint[hidden] { display: none; }
+.device-workspace .motor-parameter-item > summary { display: none; }
+.firmware-parameters, .motor-parameters { padding: 14px; }
 .firmware-parameter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .firmware-parameters select { min-width: 96px; }
 .firmware-config-notice {
@@ -1381,9 +1390,9 @@ tr:hover {
   border-radius: 4px;
   color: var(--dim);
 }
-.firmware-parameters h3 { font-size: 12px; }
-.firmware-parameters dl { margin: 0 0 24px; }
-.firmware-parameters dl > div {
+:is(.firmware-parameters, .motor-parameters) h3 { font-size: 12px; }
+:is(.firmware-parameters, .motor-parameters) dl { margin: 0 0 24px; }
+:is(.firmware-parameters, .motor-parameters) dl > div {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -1391,9 +1400,19 @@ tr:hover {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
-.firmware-parameters dt, .firmware-parameters small { color: var(--dim); }
-.firmware-parameters dd { margin: 0; font-family: var(--mono); }
+.firmware-parameters dt, .firmware-parameters small, .motor-parameters dt { color: var(--dim); }
+:is(.firmware-parameters, .motor-parameters) dd { margin: 0; font-family: var(--mono); }
 .firmware-parameters small { margin-left: 12px; }
+.motor-parameter-list { margin-top: 18px; }
+.motor-parameter-item { border: 1px solid var(--border); border-radius: 5px; margin-bottom: 10px; }
+.motor-parameter-item > summary { padding: 14px; cursor: pointer; overflow-wrap: anywhere; }
+.motor-parameter-item > summary > * { margin-right: 10px; }
+.motor-parameter-model { color: var(--dim); }
+.motor-parameter-body { padding: 0 14px; }
+.motor-parameters .pnum { width: 140px; max-width: 100%; text-align: right; }
+.motor-parameters .rawval { display: block; text-align: right; }
+.motor-parameters dd { max-width: 100%; overflow-wrap: anywhere; }
+.motor-parameter-item.unprotected { border-color: var(--err); }
 .device-workspace .inspector-area {
   grid-column: 2;
   grid-row: 1;
@@ -1426,8 +1445,8 @@ tr:hover {
 .direct-parameters { min-width: 0; overflow: auto; }
 .device-detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .device-detail-table th, .device-detail-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-.motor-specifications { padding: 14px 0; }
-.motor-specifications h3 { font-size: 14px; font-weight: 500; }
+.motor-specifications, .motor-saved-record { padding: 14px 0; }
+.motor-specifications h3, .motor-saved-record h3 { font-size: 14px; font-weight: 500; }
 .specification-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, 1fr); gap: 10px; font: 11px var(--mono); }
 .specification-grid dt { color: var(--dim); overflow-wrap: anywhere; }
 .specification-grid dd { margin: 0; overflow-wrap: anywhere; }

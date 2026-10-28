@@ -167,6 +167,63 @@ it("本次 SAVE ConfigResult 成功时忽略滞后的 save_in_progress", async (
   ros.disconnect();
 }, 8000);
 
+it("收到全 NaN 参数报告不能判为读取成功或已核对", async () => {
+  const { ros, resultTopic } = await connected();
+  const { store, paramReadState } = await import("../../web/js/core/store.js");
+  const device = await import("../../web/js/core/device.js");
+  const pending = device.loadParams();
+  const sent = Topic.published.find(entry => entry.topic === '/motor/system_command')!;
+  resultTopic.callback?.({...result(sent.message.request_id, 1), command: 4});
+  Topic.instances.find(topic => topic.name === '/motor/device_param_report')!.callback?.({count: 1,
+    entries: [{motor_id: 1, dev_init_state: 0, rec_pos_min: null, rec_pos_max: null,
+      rec_vel_limit: null, rec_torque_limit: null, rec_safety: null, rec_direction: null,
+      dev_pos_min: null, dev_pos_max: null, dev_vel_limit: null, dev_torque_limit: null,
+      dev_safety: null, dev_direction: null}]});
+  await pending;
+  expect(paramReadState(1)).toEqual({device: 0, record: 0, usable: 0, verified: false});
+  expect(store.results.get('paramResult')).toMatchObject({ok: false});
+  expect(store.results.get('paramResult').text).toContain('0/8 项');
+  ros.disconnect();
+});
+
+it("手动读取发只读 REFRESH，未绑定时显示拒绝原因且不伪装成功", async () => {
+  const { ros, resultTopic } = await connected();
+  const { store } = await import("../../web/js/core/store.js");
+  const device = await import("../../web/js/core/device.js");
+  store.motors.set(1, {topo: {model_name: ''}});
+  const pending = device.refreshMotorParams();
+  const sent = Topic.published.find(entry => entry.topic === '/motor/system_command')!;
+  expect(sent.message).toMatchObject({command: 1, motor_id: 1});
+  resultTopic.callback?.({...result(sent.message.request_id, 2), command: 1, error_code: 12});
+  await pending;
+  expect(store.results.get('paramResult')).toMatchObject({ok: false});
+  expect(store.results.get('paramResult').text).toContain('尚未识别型号或未绑定');
+  expect(Topic.published).toHaveLength(1);
+  ros.disconnect();
+});
+
+it("REFRESH 成功后请求参数快照，完整有效回读才显示成功", async () => {
+  const { ros, resultTopic } = await connected();
+  const { store, paramReadState } = await import("../../web/js/core/store.js");
+  const device = await import("../../web/js/core/device.js");
+  store.motors.set(1, {topo: {model_name: 'cerb_r48_101'}});
+  const pending = device.refreshMotorParams();
+  resultTopic.callback?.({...result(Topic.published[0].message.request_id, 1), command: 1});
+  await vi.waitFor(() => expect(Topic.published).toHaveLength(2));
+  expect(Topic.published[1].message.command).toBe(4);
+  resultTopic.callback?.({...result(Topic.published[1].message.request_id, 1), command: 4});
+  Topic.instances.find(topic => topic.name === '/motor/device_param_report')!.callback?.({count: 1,
+    entries: [{motor_id: 1, dev_init_state: 2, rec_pos_min: -1, rec_pos_max: 1,
+      rec_vel_limit: 2, rec_torque_limit: 3, rec_safety: 0, rec_direction: 0,
+      dev_pos_min: -1, dev_pos_max: 1, dev_vel_limit: 2, dev_torque_limit: 3,
+      dev_safety: 0, dev_direction: 0, rec_t_max: 300, dev_t_max: 300, rec_node_id: 1, dev_node_id: 1}]});
+  await pending;
+  expect(paramReadState(1).verified).toBe(true);
+  expect(store.results.get('paramResult')).toMatchObject({ok: true});
+  expect(Topic.published.every(entry => entry.topic === '/motor/system_command')).toBe(true);
+  ros.disconnect();
+});
+
 it("同 session 的迟到 PENDING 不覆盖 request 已缓存的终态", async () => {
   const { ros, resultTopic } = await connected();
   const { store } = await import("../../web/js/core/store.js");

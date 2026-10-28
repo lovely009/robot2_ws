@@ -7,12 +7,13 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   const connections = { count: 0 };
   const feedbackModels: string[] = [];
   const controlRequests: boolean[] = [];
+  const parameterReplies = {enabled: false, refreshError: 12};
   const firmware = {values: {'system.agent_ping_hz': 100, 'system.motion_report_hz': 50,
     'system.status_report_hz': 10, 'system.imu_report_hz': 100, 'system.temperature_report_hz': 2,
     'system.motor_command_hz': 200,
     'system.can_nominal_kbps': 1000, 'system.can_data_kbps': 5000, 'system.unsaved': false} as Record<string, number | boolean>,
     writes: [] as {name: string; value: number}[], reads: [] as string[][],
-    rejectName: '', ignoreWrites: false, saveStatus: 1, saveCalls: 0};
+    rejectName: '', ignoreWrites: false, saveStatus: 1, saveCalls: 0, rpcCalls: [] as string[]};
   let controlSequence = 0;
   let sendFeedback: (topic: string, msg: unknown) => void;
   page.on("pageerror", (error) => errors.push(error.message));
@@ -128,6 +129,15 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => {
     sendFeedback = (topic, msg) => socket.send(JSON.stringify({op: 'publish', topic, msg}));
     const subscribed = new Set<string>();
+    const firmwareNames = Object.keys(firmware.values).filter(n => !n.includes('can_') && n !== 'system.unsaved');
+    const firmwareReport = () => ({...fixtures['/motor/system_status'] as object,
+      firmware_values_valid: true, firmware_values: firmwareNames.map(n => Number(firmware.values[n])),
+      firmware_unsaved: firmware.values['system.unsaved']});
+    const timer = setInterval(() => {
+      if (subscribed.has('/motor/system_status')) socket.send(JSON.stringify({op:'publish',topic:'/motor/system_status',msg:firmwareReport()}));
+    },200);
+    page.once('close',()=>clearInterval(timer));
+
     if (coupled) {
       const heartbeat = setInterval(() => {
         for (const topic of subscribed) {
@@ -152,6 +162,29 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
         );
       if (message.op === "publish") {
         publishes.push(message);
+        if ((message.topic === '/motor/config_request' && message.msg.kind === 2) ||
+            (message.topic === '/motor/system_command' && message.msg.command === 0)) {
+          const setting = message.topic === '/motor/config_request';
+          let status = firmware.saveStatus;
+          if (setting) {
+            const t=message.msg.targets[0], name=firmwareNames[t.field];
+            status=firmware.rejectName===name ? 2 : 1;
+            firmware.writes.push({name,value:t.value});
+            if(status===1 && !firmware.ignoreWrites) {firmware.values[name]=t.value;firmware.values['system.unsaved']=true;}
+          } else {firmware.saveCalls++;if(status===1)firmware.values['system.unsaved']=false;}
+          socket.send(JSON.stringify({op:'publish',topic:'/motor/config_result',msg:{session_id:9,
+            request_id:message.msg.request_id,kind:setting?2:1,command:0,status,error_code:status===1?0:10,
+            completed_targets:status===1?1:0,failed_targets:status===1?0:1}}));
+          socket.send(JSON.stringify({op:'publish',topic:'/motor/system_status',msg:firmwareReport()}));
+        }
+
+        if (parameterReplies.enabled && message.topic === '/motor/system_command') {
+          const error = message.msg.command === 1 ? parameterReplies.refreshError : 0;
+          socket.send(JSON.stringify({op: 'publish', topic: '/motor/config_result', msg: {
+            session_id: 9, request_id: message.msg.request_id, kind: 1, command: message.msg.command,
+            status: error ? 2 : 1, error_code: error, completed_targets: error ? 0 : 1,
+            failed_targets: error ? 1 : 0}}));
+        }
         if (
           message.topic === "/motor/system_command" &&
           message.msg.command === 4
@@ -165,6 +198,8 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
           );
       }
       if (message.op === "call_service") {
+        if (message.service.startsWith('/micro_ros_node/') || message.service === '/motor/execute_config')
+          firmware.rpcCalls.push(message.service);
         if (message.service === '/micro_ros_node/get_parameters') {
           firmware.reads.push(message.args.names);
           socket.send(JSON.stringify({op: 'service_response', id: message.id, service: message.service, result: true,
@@ -236,7 +271,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       }
     });
   });
-  return { publishes, errors, connections, feedbackModels, controlRequests, firmware,
+  return { publishes, errors, connections, feedbackModels, controlRequests, firmware, parameterReplies,
     sendFeedback: (topic: string, msg: unknown) => {fixtures[topic]=msg;sendFeedback(topic, msg);},
     sendControlState: (enabled: boolean, fault = 0) => {
       const message = makeControlStates(enabled, fault);
@@ -369,7 +404,7 @@ test("窄栏电机卡片清楚显示单位、状态并保持选择联动", async
   await card.click();
   await expect(page.locator('.object-heading h2')).toHaveText('joint_link1');
   await expect(page.locator('#jointRows [data-joint="joint_link1"] .jpos')).toHaveText('0.150');
-  expect(fixture.publishes.filter(p => p.topic !== '/motor/system_command')).toEqual([]);
+  expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -379,7 +414,7 @@ test("连接与切换模型自动同步只读反馈模型，不产生运动命�
   await expect.poll(() => fixture.feedbackModels).toEqual(['half_body_robot']);
   await page.locator('.arm-model').selectOption('robot_leg');
   await expect.poll(() => fixture.feedbackModels).toEqual(['half_body_robot', 'robot_leg']);
-  expect(fixture.publishes.filter(p => p.topic !== '/motor/system_command')).toEqual([]);
+  expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -630,7 +665,7 @@ test('关节控制复选框切换主机只读，未使能电机仍不可发送',
   await expect.poll(() => fixture.controlRequests).toEqual([true]);
   await expect(toggle).toBeChecked();
   await expect(slider).toBeEnabled();
-  expect(fixture.publishes.filter(p => p.topic !== '/motor/system_command' || p.msg.command !== 4)).toHaveLength(0);
+  expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic) || p.msg.command !== 4)).toHaveLength(0);
   fixture.sendFeedback('/motor/status_array', {statuses: [8,9].map(motor_id =>
     ({motor_id, online:true, lifecycle:3, unified_fault_code:0}))});
   await expect(slider).toBeDisabled();
@@ -810,13 +845,19 @@ test("设备工作台直接显示所选电机参数，直连快照不混入 MCU"
   await expect(page.locator('.object-heading')).toBeHidden();
   await expect(page.locator('.inspector-tabs')).toBeHidden();
   await expect(page.getByLabel('当前已保存主机限位')).toBeHidden();
-  await expect(page.locator('.motor-card[data-id="1"]')).toBeVisible();
+  await expect(page.locator('[data-workbench-panel="readout"]')).toBeHidden();
+  await page.getByRole('button', {name: '调试工作台', exact: true}).click();
   fixture.sendFeedback('/motor/topology', {entries: [
     {motor_id: 1, online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3},
     {motor_id: 2, online: true, model_name: 'cerb_r58_101', bus_index: 0, lifecycle: 3},
   ]});
   await page.locator('.motor-card[data-id="2"]').click();
-  await expect(page.locator('.motor-specifications h3').first()).toContainText('电机 2 · cerb_r58_101');
+  await page.getByRole('button', {name: '设备工作台', exact: true}).click();
+  fixture.sendFeedback('/motor/device_param_report', {count: 2, entries: [1, 2].map(motor_id => ({motor_id,
+    rec_pos_min: -1, rec_pos_max: 1, rec_vel_limit: 2, rec_torque_limit: 3,
+    rec_safety: 0, rec_direction: 0}))});
+  await expect(page.locator('.motor-parameter-item')).toHaveCount(2);
+  await expect(page.locator('.motor-parameter-item[data-motor="2"] > summary')).toContainText('cerb_r58_101');
   await page.getByLabel('设备通信来源').selectOption('socketcan');
   await expect(page.locator('.workspace-grid')).toBeHidden();
   await page.getByRole('button', {name: '连接 CAN', exact: true}).click();
@@ -841,7 +882,8 @@ test('设备参数分类切换保留电机草稿，进入固件分类不下发�
   const nav = page.getByRole('navigation', {name: '参数设置', exact: true});
   await expect(nav.getByRole('button', {name: '电机参数', exact: true})).toHaveAttribute('aria-pressed', 'true');
   const panel = page.locator('[data-workbench-panel="deviceParams"]');
-  await expect(page.locator('.motor-card[data-id="1"]')).toBeVisible();
+  await expect(panel).toBeVisible();
+  await expect.poll(() => fixture.connections.count).toBe(1);
   fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
     rec_pos_min: -1, rec_pos_max: 1, rec_vel_limit: 2, rec_torque_limit: 3,
     rec_safety: 0, rec_direction: 0}]});
@@ -856,7 +898,7 @@ test('设备参数分类切换保留电机草稿，进入固件分类不下发�
   await expect(firmware.getByRole('heading', {name: '上报频率'})).toBeVisible();
   await expect(firmware.getByLabel('电机运动反馈', {exact: true})).toHaveValue('50');
   await expect(firmware.getByRole('button', {name: '下发固件参数'})).toBeDisabled();
-  await expect(page.locator('.motor-specifications')).toHaveCount(0);
+  await expect(panel.locator('.motor-saved-record')).toBeHidden();
   await page.getByRole('button', {name: '调试工作台', exact: true}).click();
   await expect(nav).toHaveCount(0);
   await page.getByRole('button', {name: '设备工作台', exact: true}).click();
@@ -891,8 +933,9 @@ test('固件参数逐项下发并回读，保存等待终态且不发送运动�
   await firmware.getByRole('button', {name: '保存固件参数 W25'}).click();
   await expect(firmware).toContainText('W25 保存完成并已回读核对');
   expect(fixture.firmware.saveCalls).toBe(1);
-  expect(fixture.firmware.reads.every(names => names.length === 1)).toBe(true);
-  expect(fixture.publishes.filter(p => p.topic !== '/motor/system_command')).toEqual([]);
+  expect(fixture.firmware.rpcCalls).toEqual([]);
+  expect(fixture.publishes.filter(p=>p.topic==='/motor/config_request')).toHaveLength(3);
+  expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -906,7 +949,7 @@ test('固件参数部分拒绝如实报告，回读不一致和保存失败不�
   await firmware.getByLabel('Agent 链路探测').selectOption('20');
   await firmware.getByLabel('电机运动反馈', {exact: true}).selectOption('25');
   await firmware.getByRole('button', {name: '下发固件参数'}).click();
-  await expect(firmware).toContainText('已下发 1 项；电机仍使能');
+  await expect(firmware).toContainText('已下发 1 项；固件参数下发设备拒绝');
   await expect(firmware.getByLabel('电机运动反馈', {exact: true})).toBeDisabled();
   await firmware.getByRole('button', {name: '读取固件参数'}).click();
   await expect(firmware.getByLabel('Agent 链路探测')).toHaveValue('20');
@@ -921,6 +964,169 @@ test('固件参数部分拒绝如实报告，回读不一致和保存失败不�
   await firmware.getByRole('button', {name: '保存固件参数 W25'}).click();
   await expect(firmware).toContainText('保存未确认成功');
   await expect(firmware).not.toContainText('W25 保存完成');
+  expect(fixture.errors).toEqual([]);
+});
+
+test('真实缺失参数不显示已核对，手动读取使用只读回读并显示未绑定原因', async ({page}) => {
+  const fixture = await connectFixture(page);
+  fixture.parameterReplies.enabled = true;
+  await page.goto('/workbench/#/teach');
+  await expect.poll(() => fixture.connections.count).toBe(1);
+  fixture.sendFeedback('/motor/topology', {entries: [{motor_id: 1,
+    online: true, model_name: '', bus_index: 0, lifecycle: 2}]});
+  fixture.sendFeedback('/motor/status_array', {statuses: [{motor_id: 1, online: true, lifecycle: 2}]});
+  fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
+    dev_init_state: 0, rec_pos_min: null, rec_pos_max: null, rec_vel_limit: null,
+    rec_torque_limit: null, rec_safety: null, rec_direction: null, rec_t_max: null, rec_node_id: null,
+    dev_pos_min: null, dev_pos_max: null, dev_vel_limit: null, dev_torque_limit: null,
+    dev_safety: null, dev_direction: null, dev_t_max: null, dev_node_id: null}]});
+  await expect(page.locator('#paramSummary')).toContainText('已核对 0');
+  await expect(page.locator('#paramSummary')).toContainText('型号未识别');
+  await expect(page.locator('.motor-parameter-body')).toContainText('未返回有效参数');
+  await expect(page.locator('.motor-parameter-body').getByRole('button', {name: '--', exact: true})).toBeDisabled();
+  await page.getByRole('button', {name: '读取电机参数', exact: true}).click();
+  const reads = () => fixture.publishes.filter(p => p.topic === '/motor/system_command' && p.msg.command === 1);
+  await expect.poll(() => reads().length).toBe(1);
+  await expect(page.locator('#paramResult')).toContainText('尚未识别型号或未绑定');
+  await expect(page.locator('#paramResult')).toHaveClass(/err/);
+  expect(reads()[0]!.msg.motor_id).toBe(1);
+  expect(fixture.publishes.filter(p => p.topic === '/motor/system_command' && ![1,4].includes(Number(p.msg.command)))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  fixture.sendFeedback('/motor/topology', {entries: [{motor_id: 1,
+    online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}]});
+  fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
+    dev_init_state: 3, mismatch_mask: 3, rec_pos_min: -Math.PI, rec_pos_max: 3,
+    rec_vel_limit: 3.44, rec_torque_limit: 5, rec_safety: 0, rec_direction: 0, rec_t_max: 300, rec_node_id: 1,
+    dev_pos_min: -Math.PI, dev_pos_max: Math.PI, dev_vel_limit: 3.44,
+    dev_torque_limit: 5, dev_safety: 0, dev_direction: 0, dev_t_max: 300, dev_node_id: 1}]});
+  await expect(page.locator('#paramSummary')).toContainText('记录不一致 1');
+  await expect(page.locator('#paramSummary')).not.toContainText('待回读');
+  await expect(page.getByLabel('位置上限（rad）', {exact: true})).toHaveValue('3.141593');
+  expect(fixture.errors).toEqual([]);
+});
+
+test('电机ID与T_max可编辑并逐项下发，两类参数不再细分', async ({page}) => {
+  const f=await connectFixture(page);await page.goto('/workbench/#/teach');
+  await expect.poll(()=>f.connections.count).toBe(1);
+  f.sendFeedback('/motor/device_param_report',{count:1,entries:[{motor_id:1,
+    dev_node_id:1,dev_t_max:300,rec_node_id:1,rec_t_max:300,rec_pos_min:-1,rec_pos_max:1}]});
+  const panel=page.locator('.motor-parameter-body:visible');
+  await expect(panel.getByRole('heading')).toHaveText(['电机参数','固件参数']);
+  await panel.getByLabel('电机 ID',{exact:true}).fill('7');
+  await panel.getByLabel('T_max（N·m）',{exact:true}).fill('150');
+  await page.getByRole('button',{name:'下发修改',exact:true}).click();
+  const writes=()=>f.publishes.filter(p=>p.topic==='/motor/param_set');
+  await expect.poll(()=>writes().length).toBe(1);
+  expect(writes()[0]!.msg.targets).toEqual([{motor_id:1,field:7,value:7}]);
+  f.sendFeedback('/motor/config_result',{session_id:9,request_id:writes()[0]!.msg.request_id,status:1,completed_targets:1});
+  await expect.poll(()=>writes().length).toBe(2);
+  expect(writes()[1]!.msg.targets).toEqual([{motor_id:1,field:6,value:150}]);
+  f.sendFeedback('/motor/config_result',{session_id:9,request_id:writes()[1]!.msg.request_id,status:1,completed_targets:1});
+  await expect(page.locator('#paramResult')).toContainText('重启电机后生效');
+  expect(f.errors).toEqual([]);
+});
+
+test('电机详情显示W25记录，不混用设备值或未保存修改', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/teach');
+  await expect.poll(() => fixture.connections.count).toBe(1);
+  fixture.sendFeedback('/motor/topology', {entries: [{motor_id: 1,
+    online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}]});
+  const entry = {motor_id: 1, record_dirty: false,
+    rec_pos_min: -1, rec_pos_max: 3, rec_vel_limit: 2, rec_torque_limit: 4,
+    rec_safety: 0, rec_direction: 1,
+    dev_pos_min: -Math.PI, dev_pos_max: Math.PI, dev_vel_limit: 3.44,
+    dev_torque_limit: 5, dev_safety: 1, dev_direction: 0};
+  fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [entry]});
+  const saved = page.locator('.motor-saved-record');
+  await expect(saved.getByRole('heading', {name: '固件参数'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: '型号规格'})).toHaveCount(0);
+  await expect(saved.locator('dd')).toHaveText(['-1', '3', '2', '4', '开启', 'CCW', '无记录', '无记录']);
+  await expect(page.getByLabel('位置上限（rad）', {exact: true})).toHaveValue('3.141593');
+  fixture.sendFeedback('/motor/device_param_report', {count: 1,
+    entries: [{...entry, record_dirty: true, rec_pos_max: 2.5}]});
+  await expect(saved).toContainText('存在未保存修改');
+  await expect(saved.locator('dd')).toHaveText(Array(8).fill('未确认'));
+  fixture.sendFeedback('/motor/device_param_report', {count: 1,
+    entries: [{...entry, rec_pos_max: null}]});
+  await expect(saved.locator('dd').nth(1)).toHaveText('无记录');
+  fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
+    rec_pos_min: null, rec_pos_max: null, rec_vel_limit: null, rec_torque_limit: null,
+    rec_safety: null, rec_direction: null, dev_pos_min: -1, dev_pos_max: 1}]});
+  await expect(saved).toContainText('暂无 W25 保存记录');
+  await expect(saved.locator('dd')).toHaveCount(0);
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array',
+    '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => p.topic === '/motor/system_command'
+    && ![1, 4].includes(Number(p.msg.command)))).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('左侧电机参数展开子列表，选择切换右侧详情并保留草稿', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/teach');
+  await expect.poll(() => fixture.connections.count).toBe(1);
+  fixture.sendFeedback('/motor/topology', {entries: [1, 2].map(motor_id => ({motor_id,
+    online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}))});
+  const report = {count: 2, entries: [1, 2].map(motor_id => ({motor_id,
+    rec_pos_min: -1, rec_pos_max: 1, rec_vel_limit: 2, rec_torque_limit: 3,
+    rec_safety: 0, rec_direction: 0}))};
+  fixture.sendFeedback('/motor/device_param_report', report);
+  const first = page.locator('.motor-parameter-item[data-motor="1"]');
+  const second = page.locator('.motor-parameter-item[data-motor="2"]');
+  const list = page.getByRole('group', {name: '电机列表', exact: true});
+  const toggle = page.getByRole('button', {name: '电机参数', exact: true});
+  await expect(list.getByRole('button')).toHaveCount(2);
+  await expect(first).toBeVisible();
+  await expect(second).toBeHidden();
+  await toggle.click();
+  await expect(list).toBeHidden();
+  await toggle.click();
+  await list.getByRole('button', {name: /电机 2/}).click();
+  fixture.sendFeedback('/motor/device_param_report', report);
+  await expect(first).toBeHidden();
+  await expect(second).toBeVisible();
+  await expect(page.locator('.inspector-area > .panel-title')).toContainText('电机 2 详细参数');
+  await expect(page.locator('#paramSelectionHint')).toBeHidden();
+  await expect(second.getByRole('heading', {name: '电机参数', exact: true})).toBeVisible();
+  await expect(second.getByRole('heading', {name: '固件参数', exact: true})).toBeVisible();
+  const input = second.getByLabel('位置下限（rad）', {exact: true});
+  fixture.sendFeedback('/motor/device_param_report', {count: 2, entries: report.entries.map(entry => (
+    entry.motor_id === 2 ? {...entry, rec_pos_min: null} : entry))});
+  await expect(input).toHaveValue('');
+  await expect(input).toHaveAttribute('placeholder', '未读取');
+  await expect(second.locator('dd').filter({has: input}).locator('.rawval')).toHaveCount(0);
+  fixture.sendFeedback('/motor/device_param_report', report);
+  await expect(input).toHaveValue('-1');
+  await input.fill('-0.75');
+  await list.getByRole('button', {name: /电机 1/}).click();
+  await expect(first).toBeVisible();
+  await expect(second).toBeHidden();
+  await list.getByRole('button', {name: /电机 2/}).click();
+  await expect(second).toBeVisible();
+  fixture.sendFeedback('/motor/device_param_report', report);
+  fixture.sendFeedback('/motor/motion_states', {states: [
+    {motor_id: 2, position: 0.42, velocity: 0, effort: 0, state_age_ms: 5}]});
+  await expect(second.locator('.curpos')).toHaveText('0.4200');
+  await expect(input).toHaveValue('-0.75');
+  await expect(first).toBeHidden();
+  fixture.sendFeedback('/motor/topology', {entries: [1, 2, 3].map(motor_id => ({motor_id,
+    online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}))});
+  await list.getByRole('button', {name: /电机 3/}).click();
+  await expect(first).toBeHidden();
+  await expect(second).toBeHidden();
+  await expect(page.locator('#paramSelectionHint')).toContainText('电机 3 暂无参数');
+  await expect(page.locator('#paramSelectionHint')).toBeVisible();
+  await list.getByRole('button', {name: /电机 2/}).click();
+  await expect(input).toHaveValue('-0.75');
+  expect(await second.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+  fixture.sendFeedback('/motor/topology', {entries: Array.from({length: 20}, (_, i) => ({motor_id: i + 1,
+    online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}))});
+  await expect(list.getByRole('button')).toHaveCount(20);
+  await list.getByRole('button', {name: /电机 20/}).click();
+  await expect(page.locator('#paramSelectionHint')).toContainText('电机 20 暂无参数');
+  await expect(page.locator('.tree-footer')).toBeInViewport();
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -1046,16 +1252,21 @@ for (const viewport of [{width:1063, height:752}, {width:1600, height:650}, {wid
 
 test('设备工作台在矮窗口中保持详情位于内部滚动区', async ({page}) => {
   await page.setViewportSize({width:1063, height:650});
-  await connectFixture(page);
+  const fixture = await connectFixture(page);
   await page.goto('/workbench/#/teach');
   await expect(page.locator('.startup-status')).toHaveCount(0);
+  await expect.poll(() => fixture.connections.count).toBe(1);
+  fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
+    rec_pos_min: -1, rec_pos_max: 1, rec_vel_limit: 2, rec_torque_limit: 3,
+    rec_safety: 0, rec_direction: 0}]});
+  await expect(page.locator('.motor-parameter-item')).toHaveCount(1);
   const main = (await page.locator('.main-workspace').boundingBox())!;
   const inspector = (await page.locator('.inspector-area').boundingBox())!;
   expect(inspector.y + inspector.height).toBeLessThanOrEqual(main.y + main.height);
   const pane = page.locator('.inspector-scroll');
   expect(await pane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
   await pane.evaluate(el => {el.scrollTop = el.scrollHeight;});
-  await expect(page.locator('.motor-specifications')).toBeInViewport();
+  await expect(page.locator('.motor-saved-record')).toBeInViewport();
   await page.getByLabel('设备通信来源').selectOption('socketcan');
   const connectionPane = page.locator('.main-workspace > div').filter({has: page.locator('.device-connection')});
   expect(await connectionPane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');

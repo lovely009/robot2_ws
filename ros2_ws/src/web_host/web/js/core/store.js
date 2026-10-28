@@ -38,6 +38,7 @@ export const store = {
   chart: {running: true, windowMs: 10000},
   history: [],
   paramCache: new Map(),
+  firmwareReport: {seq: 0, at: 0, values: null, unsaved: false},
   configResults: new Map(),
   configSessionId: null,
   // 写事务的结果文本（key -> {ok, text, t}）：同一事务的按钮分布在设备屏与使能屏，
@@ -444,6 +445,14 @@ export function devDetailTitle(id) {
 export function paramRowIds(showAll) {
   const all = [...store.paramCache.keys()].sort((a, b) => a - b);
   return (showAll || !store.selectedId) ? all : all.filter((i) => i === store.selectedId);
+}
+
+export function paramReadState(id) {
+  const entry = store.paramCache.get(id);
+  const fields = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit', 'limit_protect', 'direction', 't_max', 'node_id'];
+  const count = (source) => fields.filter(field => Number.isFinite(entry?.[source]?.[field])).length;
+  const device = count('dev'), record = count('rec'), usable = count('pick');
+  return {device, record, usable, verified: entry?.state === 2 && device === fields.length};
 }
 
 export function motorStateOf(id) { return describeMotorState(store,id); }

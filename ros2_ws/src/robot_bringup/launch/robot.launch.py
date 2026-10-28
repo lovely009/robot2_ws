@@ -1,6 +1,6 @@
 """台架入口：rosbridge、静态页、micro_ros_bridge 与 bench_manager。
 
-会话 unit 由 bench_manager 按需起停，本 launch 不启动会话。
+Agent 默认由 bench_manager 自动启动，其余会话按需起停。
 通过 launch 事件串联 configure → activate；配置失败则保持 unconfigured，
 不注册服务，原因见日志。
 干净退出停止 bench.slice；异常死亡保留 unit，供后继管理器认领。
@@ -22,6 +22,7 @@ from launch.conditions import LaunchConfigurationNotEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.events.matchers import matches_node_name
@@ -56,7 +57,12 @@ def generate_launch_description():
         name='bench_manager',
         namespace='',
         output='screen',
-        parameters=[{'model_dir': LaunchConfiguration('model_dir')}],
+        parameters=[{
+            'model_dir': LaunchConfiguration('model_dir'),
+            'auto_start_agent': ParameterValue(
+                LaunchConfiguration('start_micro_ros_agent'), value_type=bool),
+            'agent_device': LaunchConfiguration('agent_tty'),
+        }],
     )
     bench_matcher = matches_node_name('bench_manager')
 
@@ -68,6 +74,10 @@ def generate_launch_description():
                               description='rosbridge WebSocket 端口。'),
         DeclareLaunchArgument('web_port', default_value='8080',
                               description='静态页面 HTTP 端口。'),
+        DeclareLaunchArgument('start_micro_ros_agent', default_value='true',
+                              description='激活台架管理器时自动启动 Agent。'),
+        DeclareLaunchArgument('agent_tty', default_value='',
+                              description='Agent 串口；空值只在唯一串口时自动选择。'),
         DeclareLaunchArgument('firmware_model', default_value='',
                               description='固件实测 TF 的模型；空值不启动，仿真时保持为空。'),
         DeclareLaunchArgument('firmware_joint_control', default_value='false',

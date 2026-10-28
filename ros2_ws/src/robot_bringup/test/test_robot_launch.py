@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 from launch import LaunchContext
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch_ros.actions import Node
 
 
@@ -51,6 +51,28 @@ def test_manager_is_distributed_by_bringup() -> None:
                 and a.node_executable == 'bench_manager']
     assert len(managers) == 1
     assert managers[0].node_package == 'robot_bringup'
+
+
+def test_agent_autostart_defaults_on_and_is_forwarded_to_manager() -> None:
+    from launch_ros.utilities import evaluate_parameters
+    actions = _load_launch_module().generate_launch_description().entities
+    context = LaunchContext()
+    for action in actions:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    manager = next(a for a in actions if isinstance(a, Node)
+                   and a.node_executable == 'bench_manager')
+    parameters = evaluate_parameters(context, manager._Node__parameters)[0]
+    assert parameters['auto_start_agent'] is True
+    assert parameters['agent_device'] == ''
+    context.launch_configurations['start_micro_ros_agent'] = 'false'
+    context.launch_configurations['agent_tty'] = '/dev/ttyACM0'
+    actions = _load_launch_module().generate_launch_description().entities
+    manager = next(a for a in actions if isinstance(a, Node)
+                   and a.node_executable == 'bench_manager')
+    parameters = evaluate_parameters(context, manager._Node__parameters)[0]
+    assert parameters['auto_start_agent'] is False
+    assert parameters['agent_device'] == '/dev/ttyACM0'
 
 
 def test_bringup_installs_manager_module_and_entrypoint(monkeypatch) -> None:

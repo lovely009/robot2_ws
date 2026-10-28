@@ -278,7 +278,23 @@ static void test_null_inputs_are_noop() {
   assert(storage_projection_blob_to_boot(blob, nullptr, 0U) == 0U);
 }
 
+static void test_tmax_and_pending_id_roundtrip_reserved_slots() {
+  auto *blob = reset_blob();
+  auto view = cerb_view(1);
+  view.dev_raw_present = (1U << PARAM_DEVICE_SLOT_T_MAX) | (1U << PARAM_DEVICE_SLOT_NODE_ID);
+  view.dev_raw[PARAM_DEVICE_SLOT_T_MAX] = 150;
+  view.dev_raw[PARAM_DEVICE_SLOT_NODE_ID] = 7;
+  storage_projection_views_to_blob(blob, &view, 1);
+  motor_control_stored_params_t record[1]{};
+  assert(storage_projection_blob_to_boot(blob, record, 1) == 1);
+  assert(record[0].motor_id == 1);
+  assert(record[0].device_raw[PARAM_DEVICE_SLOT_T_MAX] == 150);
+  assert(record[0].device_raw[PARAM_DEVICE_SLOT_NODE_ID] == 7);
+  assert(sizeof(param_store_record_t) == PARAM_STORE_RECORD_SIZE);
+}
+
 int main() {
+  test_tmax_and_pending_id_roundtrip_reserved_slots();
   test_cerb_only_verified_objects_recorded();
   test_cerb_unpaired_position_excluded();
   test_cerb_falls_back_to_record_raw();

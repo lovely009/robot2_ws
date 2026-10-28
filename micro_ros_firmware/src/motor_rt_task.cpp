@@ -519,6 +519,10 @@ static void convert_config(const control_mailbox_config_request_t *in,
   case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
     out->direction_raw = in->value.direction_raw;
     break;
+  case CONTROL_MAILBOX_CONFIG_SET_T_MAX:
+    out->t_max_raw = in->value.t_max_raw; break;
+  case CONTROL_MAILBOX_CONFIG_SET_NODE_ID:
+    out->new_node_id = in->value.new_node_id; break;
   case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
     out->save_slots = in->value.save_slots;
     break;

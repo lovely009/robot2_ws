@@ -8,6 +8,7 @@
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>bvh_broadcaster</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

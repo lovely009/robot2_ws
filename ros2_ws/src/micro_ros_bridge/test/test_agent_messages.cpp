@@ -633,3 +633,35 @@ TEST(AgentStatus, RejectedMalformedRequestEchoCannotPoisonHealthyStatus)
   EXPECT_TRUE(micro_ros_bridge::decode_agent_status(
     in, statuses, controls, trajectory, system, diagnostics).ok);
 }
+
+TEST(AgentMessages, FirmwareTopicRequestValidatesEnvelopeAndIntegerFields) {
+  ConfigRequest in;
+  in.kind = ConfigRequest::CONFIG_KIND_FIRMWARE_PARAMETERS;
+  in.motor_id = UINT16_MAX; in.command = 0; in.count = 1;
+  in.request_id = 1; in.session_id = 9;
+  ParamSetTarget target; target.motor_id = UINT16_MAX; target.field = 0; target.value = 20;
+  in.targets.push_back(target);
+  AgentConfigRequest out;
+  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  EXPECT_EQ(out.operation, AgentConfigRequest::SET_FIRMWARE_PARAMETERS);
+  EXPECT_EQ(out.parameters[0].field, 0);
+  in.targets[0].field = 6;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets[0].field = 0; in.targets[0].value = 10.5;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets[0].value = 20; in.targets[0].motor_id = 1;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets[0].motor_id = UINT16_MAX; in.request_id = 0x40000000U;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+}
+
+TEST(AgentMessages, NodeIdCannotBeMixedWithOtherDeviceParameters) {
+  ConfigRequest in;
+  in.kind = ConfigRequest::CONFIG_KIND_PARAM_SET; in.motor_id = UINT16_MAX;
+  in.count = 2; in.request_id = 1;
+  ParamSetTarget id; id.motor_id = 1; id.field = ParamSetTarget::FIELD_NODE_ID; id.value = 7;
+  ParamSetTarget scale = id; scale.field = ParamSetTarget::FIELD_T_MAX; scale.value = 150;
+  in.targets.push_back(id); in.targets.push_back(scale);
+  AgentConfigRequest out;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+}

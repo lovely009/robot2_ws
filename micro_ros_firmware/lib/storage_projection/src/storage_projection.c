@@ -93,6 +93,9 @@ void storage_projection_views_to_blob(
             blob, v->motor_id, PARAM_DEVICE_SLOT_DIRECTION,
             raw_values[PARAM_DEVICE_SLOT_DIRECTION]);
       }
+      for (uint8_t slot = PARAM_DEVICE_SLOT_T_MAX; slot < PARAM_DEVICE_SLOT_COUNT; ++slot)
+        if (raw_present & (1U << slot))
+          param_store_blob_set_device_raw(blob, v->motor_id, (param_device_slot_t)slot, raw_values[slot]);
       continue; // 设备侧型号的限值到此为止（不落软限位分支）
     }
     if (isfinite(v->pos_min_rad)) {

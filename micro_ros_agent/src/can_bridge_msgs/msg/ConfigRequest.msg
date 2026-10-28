@@ -10,6 +10,8 @@ uint64 session_id
 uint32 request_id
 uint8 CONFIG_KIND_PARAM_SET=0
 uint8 CONFIG_KIND_SYSTEM_COMMAND=1
+# 单项固件配置：motor_id=65535，command=0；targets[0].motor_id=65535，field=0..5。
+uint8 CONFIG_KIND_FIRMWARE_PARAMETERS=2
 uint8 kind
 # kind = CONFIG_KIND_PARAM_SET 时有效
 uint16 count

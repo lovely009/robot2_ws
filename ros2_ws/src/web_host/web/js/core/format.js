@@ -30,6 +30,7 @@ export const TOPICS = {
   sysStatus: {name: '/motor/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   configResult: {name: '/motor/config_result', type: 'can_bridge_msgs/msg/ConfigResult'},
   paramSet: {name: '/motor/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
+  firmwareConfig: {name: '/motor/config_request', type: 'can_bridge_msgs/msg/ConfigRequest'},
   sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
   // 关节侧实测构型：施加前馈时它是 τ_g 的**唯一**输入，而叠加节点在它超时/缺席时
   // 整帧原样转发（见 robot_dynamics/README.md 的安全不变式）——所以「开关亮着但
@@ -68,13 +69,13 @@ export const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离
 // ⚠️ 与固件位图的隐式契约：槽位顺序必须逐位对齐 firmware 的 device_raw 槽索引，
 // 权威定义在 micro_ros_agent/src/can_bridge_msgs/msg/MotorEvent.msg 的 EVENT_DEV_INIT 注释块。
 export const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流',
-  '保护开关(0x2650:00)', '方向(0x2541)'];
+  '保护开关(0x2650:00)', '方向(0x2541)', 'T_max(0x2546)', '电机ID(0x2530)'];
 export const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致',
   '回读不成功', '本机无记录'];
 // ⚠️ param_device_slot_t 的次序（= DEV_SLOT_NAMES 下标 = 行序 = mismatch_mask 位序），
 // **不是** param_field_t。两套里 field=3 都合法 → 互用不会被拒绝，会静默写错槽位。
 export const PARAM_FIELD = {POS_MIN: 0, POS_MAX: 1, VEL_LIMIT: 2,
-  TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5};
+  TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5, T_MAX: 6, NODE_ID: 7};
 export const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
 export const MOTOR_ID_NONE = 65535;
 export const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',

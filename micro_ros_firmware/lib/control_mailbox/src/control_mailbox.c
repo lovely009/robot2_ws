@@ -40,6 +40,10 @@ static bool config_request_is_valid(
   case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
     // 设备对象只有 0/1 两态；越界值在 mailbox 就挡掉，别让它进总线。
     return request->value.direction_raw <= 1U;
+  case CONTROL_MAILBOX_CONFIG_SET_T_MAX:
+    return request->value.t_max_raw > 0U && request->value.t_max_raw <= 16777215U;
+  case CONTROL_MAILBOX_CONFIG_SET_NODE_ID:
+    return request->value.new_node_id >= 1U && request->value.new_node_id <= 64U;
   case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
     // 只挡空位图（没有要保存的对象）。**位图里允许含易失槽**（保护开关
     // bit4 / 方向 bit5）：脏位图记的是"改过但还没落盘"，易失槽也在内 ——

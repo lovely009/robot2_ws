@@ -57,7 +57,9 @@ typedef enum {
   // flash。**与写分开**——写只改设备 RAM + 固件记录，保存才落盘；两次动作
   // 之间该台处于「未保存」（DeviceParamReport.record_dirty）。
   // 载荷 = 待保存槽位位图，非空即可；哪些槽真有厂家保存码由内核按掩码决定。
-  CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH = 14U
+  CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH = 14U,
+  CONTROL_MAILBOX_CONFIG_SET_T_MAX = 15U,
+  CONTROL_MAILBOX_CONFIG_SET_NODE_ID = 16U
 } control_mailbox_config_kind_t;
 
 typedef struct {
@@ -104,6 +106,8 @@ typedef struct {
     // SET_DIRECTION：厂家/设备原值 0/1（0 = CW，1 = CCW），收原值不收布尔，
     // 与 SET_SAFETY_PROTECT 同口径——语义反转只允许发生在参数面一处。
     uint32_t direction_raw;
+    uint32_t t_max_raw;
+    uint16_t new_node_id;
     // SAVE_DEVICE_FLASH：待保存槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）。
     uint8_t save_slots;
     control_mailbox_policy_t policy; // SET_POLICY

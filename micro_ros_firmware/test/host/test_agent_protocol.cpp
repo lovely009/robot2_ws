@@ -4,6 +4,106 @@
 #include "save_transaction.h"
 #include <cassert>
 #include <cstdint>
+#include <cstring>
+
+static void test_unarmed_gate_preserves_segmented_identity_read() {
+  const motor_protocol_adapter_t *adapters[] = {&motor_protocol_cerb_adapter};
+  motor_control_context_t ctx{};
+  control_mailbox_t mailbox{};
+  agent_control_gate_t gate{};
+  control_mailbox_init(&mailbox);
+  motor_control_init(&ctx, adapters, 1);
+  agent_gate_begin_session(&gate, &mailbox, 123);
+  agent_gate_service(&gate, &mailbox, &ctx, 99, false);
+
+  motor_protocol_raw_frame_t frame{};
+  frame.bus_index = 0; frame.can_id = 0x301; frame.dlc = 12;
+  frame.is_fd = true; frame.is_brs = true; frame.rx_tick_ms = 100;
+  motor_control_on_raw_frame(&ctx, &frame);
+  auto step = [&](uint32_t tick, uint8_t expected) {
+    agent_gate_service(&gate, &mailbox, &ctx, tick, false);
+    motor_control_service(&ctx, tick);
+    motor_protocol_tx_frame_t tx[4]{};
+    assert(motor_control_collect_tx(&ctx, tx, 4) == 1);
+    assert(tx[0].can_id == 0x601 && tx[0].data[0] == expected);
+    assert(!ctx.authorized && !ctx.entries[0].motion_enabled);
+  };
+  step(101, 0x40);
+
+  // 显式停止仍中止身份事务；普通未授权电平不应反复执行停止。
+  auto stopped = ctx;
+  auto stopped_gate = gate;
+  auto stopped_mailbox = mailbox;
+  agent_gate_request_stop(&stopped_gate);
+  assert(agent_gate_service(&stopped_gate, &stopped_mailbox, &stopped, 102, false)
+      & AGENT_LINK_REVOKE);
+  assert(!stopped.entries[0].tx_active && !stopped.authorized && !stopped.entries[0].policy_enable);
+
+  frame.can_id = 0x581; frame.dlc = 8; frame.rx_tick_ms = 102;
+  const uint8_t initiate[] = {0x41, 0x08, 0x10, 0, 10, 0, 0, 0};
+  std::memcpy(frame.data, initiate, 8);
+  motor_control_on_raw_frame(&ctx, &frame);
+  step(103, 0x60);
+  frame.rx_tick_ms = 104;
+  const uint8_t first[] = {0, 'R', '4', '8', 'L', 'I', 'T', 'E'};
+  std::memcpy(frame.data, first, 8);
+  motor_control_on_raw_frame(&ctx, &frame);
+  step(105, 0x70);
+  frame.rx_tick_ms = 106;
+  const uint8_t last[] = {0x19, '_', 'V', '2', 0, 0, 0, 0};
+  std::memcpy(frame.data, last, 8);
+  motor_control_on_raw_frame(&ctx, &frame);
+  assert(ctx.entries[0].profile != nullptr);
+  assert(std::strcmp(ctx.entries[0].profile->model_name, "cerb_r48_101") == 0);
+  assert(!ctx.authorized && !gate.kernel_authorized && !gate.link.authorized);
+  assert(!ctx.entries[0].motion_enabled);
+}
+
+static void test_sparse_enable_does_not_authorize_unselected_discovery() {
+  const motor_protocol_adapter_t *adapters[] = {&motor_protocol_cerb_adapter};
+  motor_control_context_t ctx{};
+  control_mailbox_t mailbox{};
+  agent_control_gate_t gate{};
+  control_mailbox_init(&mailbox);
+  motor_control_init(&ctx, adapters, 1);
+  agent_gate_begin_session(&gate, &mailbox, 123);
+  control_mailbox_request_agent_connected(&mailbox, true);
+  agent_gate_service(&gate, &mailbox, &ctx, 100, true);
+  for (uint16_t id = 1; id <= 2; ++id) {
+    motor_protocol_raw_frame_t frame{};
+    frame.can_id = 0x300 + id; frame.dlc = 12;
+    frame.is_fd = true; frame.rx_tick_ms = 100;
+    motor_control_on_raw_frame(&ctx, &frame);
+    auto &entry = ctx.entries[id - 1];
+    entry.profile = motor_control_profile_at(1);
+    entry.dev_raw_present |= (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
+    entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] = 300;
+    entry.lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
+  }
+  control_command_snapshot_t command{};
+  command.session_id = 123; command.sequence = 1;
+  command.received_tick_ms = 100; command.valid_until_tick_ms = 130;
+  assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
+  control_policy_snapshot_t policy{};
+  policy.policy_generation = 1; policy.valid_until_tick_ms = 200;
+  policy.target_count = 1; policy.targets[0].motor_id = 1;
+  policy.targets[0].enabled = true;
+  policy.targets[0].confirm_unprotected = true;
+  assert(agent_gate_submit_policy(&gate, &mailbox, &policy, 100));
+  agent_gate_step(&gate, &mailbox, &ctx, 101, true);
+  assert(ctx.authorized && ctx.entries[0].policy_enable);
+  command.sequence = 2; command.target_count = 1;
+  command.targets[0].motor_id = 2;
+  command.targets[0].position = 0.5f;
+  assert(agent_gate_submit_command(&gate, &mailbox, &command, 102));
+  agent_gate_step(&gate, &mailbox, &ctx, 102, true);
+  assert(!ctx.entries[1].policy_enable);
+  assert(!ctx.entries[1].has_target && !ctx.entries[1].motion_enabled);
+  motor_protocol_tx_frame_t tx[8]{};
+  const size_t count = motor_control_collect_tx(&ctx, tx, 8);
+  for (size_t i = 0; i < count; ++i) assert(tx[i].tx_class != MOTOR_PROTOCOL_TX_CLASS_P1 ||
+      tx[i].can_id != (MOTOR_PROTOCOL_CERB_COMMAND_ID_BASE | 2U));
+}
 
 static void test_deadline_window_and_request_ttl() {
   assert(!agent_deadline_valid(100, 100));
@@ -222,6 +322,8 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
     entry.node = (uint16_t)(i + 1U);
     entry.adapter = profile->protocol;
     entry.profile = profile;
+    entry.dev_raw_present |= (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
+    entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] = 300;
     entry.lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
     entry.online = true;
     entry.policy_enable = true;
@@ -332,6 +434,8 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
 }
 
 int main() {
+  test_unarmed_gate_preserves_segmented_identity_read();
+  test_sparse_enable_does_not_authorize_unselected_discovery();
   test_sparse_disable_full_fifo_discards_pending_enable();
   test_policy_queue_never_overwrites_and_expiry_reports_failure();
   test_disconnect_reconnect_between_service_ticks_still_revokes();

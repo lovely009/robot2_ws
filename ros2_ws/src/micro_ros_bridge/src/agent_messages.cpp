@@ -148,14 +148,27 @@ Result encode_agent_config(
   using OldConfig = can_bridge_msgs::msg::ConfigRequest;
   using OldSystem = can_bridge_msgs::msg::SystemCommand;
   Result result;
+  if (in.kind == OldConfig::CONFIG_KIND_FIRMWARE_PARAMETERS) {
+    if (in.request_id >= 0x40000000U || in.motor_id != UINT16_MAX || in.command != 0 || in.count != 1 || in.targets.size() != 1)
+      return reject(result, "固件 topic 配置必须为单项互斥载荷");
+    const auto &target = in.targets[0];
+    if (target.motor_id != UINT16_MAX || target.field >= 6 || !std::isfinite(target.value) ||
+        std::floor(target.value) != target.value || target.value < 1 || target.value > 1000)
+      return reject(result, "固件参数字段或整数值无效");
+    Config encoded;
+    encoded.schema_version = kAgentSchema; encoded.session_id = in.session_id;
+    encoded.issued_stamp = in.sync_time_ns; encoded.request_id = in.request_id;
+    encoded.operation = Config::SET_FIRMWARE_PARAMETERS; encoded.parameters = in.targets;
+    out = std::move(encoded); return result;
+  }
   if (in.kind == OldConfig::CONFIG_KIND_PARAM_SET) {
     if (in.targets.size() != in.count || in.count > kParamTargetMax) {
       return reject(result, "parameter count 与 targets 长度不一致或超过 16");
     }
-    bool seen[kMotorIdMax + 1][can_bridge_msgs::msg::ParamSetTarget::FIELD_DIRECTION + 1] = {};
+    bool seen[kMotorIdMax + 1][can_bridge_msgs::msg::ParamSetTarget::FIELD_NODE_ID + 1] = {};
     for (const auto & target : in.targets) {
       if (!valid_motor_id(target.motor_id) ||
-        target.field > can_bridge_msgs::msg::ParamSetTarget::FIELD_DIRECTION ||
+        target.field > can_bridge_msgs::msg::ParamSetTarget::FIELD_NODE_ID ||
         !std::isfinite(target.value) || seen[target.motor_id][target.field]) {
         return reject(result, "parameter motor_id/field/value 非法或重复");
       }
@@ -474,6 +487,9 @@ Result decode_agent_status(
   decoded_system.last_error = in.last_error;
   decoded_system.last_error_motor = in.last_error_motor;
   decoded_system.save_in_progress = in.save_in_progress;
+  decoded_system.firmware_values_valid = in.firmware_values_valid;
+  decoded_system.firmware_values = in.firmware_values;
+  decoded_system.firmware_unsaved = in.firmware_unsaved;
 
   statuses = std::move(decoded_statuses);
   controls = std::move(decoded_controls);

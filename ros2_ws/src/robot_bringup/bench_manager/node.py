@@ -16,7 +16,7 @@ transient unit 承载，本节点不持有任何进程句柄——状态权威�
 lifecycle 语义（`robot_bringup` 的 `robot.launch.py` 负责 configure → activate）：
 
 - `on_configure` 只做校验；systemd user manager 不可达时立即失败；
-- `on_activate` 认领已在跑的 unit（只报告，不动它们）；
+- `on_activate` 认领已在跑的 unit，并按参数启动尚未运行的 Agent；
 - `on_deactivate` 停掉整个 `bench.slice`——这是「安全停止」的唯一显式语义；
 - `on_cleanup` 只释放句柄。
 
@@ -130,6 +130,8 @@ class BenchManager(LifecycleNode):
         super().__init__('bench_manager')
         self.declare_parameter('model_dir', '')
         self.declare_parameter('feedback_model', '')
+        self.declare_parameter('auto_start_agent', False)
+        self.declare_parameter('agent_device', '')
         model_dir = self.get_parameter('model_dir').value
         models_dir = ''
         if model_dir and os.path.isdir(os.path.join(model_dir, 'models')):
@@ -209,8 +211,28 @@ class BenchManager(LifecycleNode):
                 self.get_logger().info(
                     '认领已有会话 %s：%s %s'
                     % (label, status['state'], status.get('config') or ''))
+        self._start_default_agent()
         self._publish_status()
         return super().on_activate(state)
+
+    def _start_default_agent(self):
+        if not self.get_parameter('auto_start_agent').value:
+            return
+        try:
+            if self.agent.status()['state'] == 'running':
+                return
+            device = self.get_parameter('agent_device').value.strip()
+            if not device:
+                ports = enumerate_serial_ports()
+                if len(ports) != 1:
+                    raise ValueError(
+                        '检测到 %d 个串口，请在页面选择串口启动，或指定 agent_tty'
+                        % len(ports))
+                device = ports[0]['path']
+            self.agent.start(device, auto=True)
+            self.get_logger().info('自动启动 Agent：%s' % device)
+        except _EXPECTED_ERRORS as exc:
+            self.get_logger().warn('自动启动 Agent 失败：%s' % exc)
 
     def on_deactivate(self, state):
         self.get_logger().info('停掉 bench.slice 下的全部会话')

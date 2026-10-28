@@ -3,10 +3,10 @@
 // 自动读取不能住在面板里：store.paramCache 是使能面板列电机列表的依据，
 // 切到「运行」屏时设备屏并未挂载。
 // 搬迁自旧 app.js 的参数页段；DOM 只剩「读当前表格里哪些输入被改过」这层查询。
-import { store, markDirty, DIRTY } from './store.js';
+import { store, markDirty, DIRTY, paramReadState } from './store.js';
 import { $, PARAM_FIELD, SYS_CMD, MOTOR_ID_NONE, LIFECYCLE, fmtParam,
   devSlotNames, devRecoveryText } from './format.js';
-import { pub, isConnected, waitDevParamSeq, waitConfigResult } from './ros.js';
+import { pub, isConnected, waitDevParamSeq, waitConfigResult, getConnectionGeneration } from './ros.js';
 
 // 写事务的关联 id。两个高位都不能碰：bit31 是内核身份读取的命名空间，bit30 是
 // 固件自发脉冲的命名空间（置位会被本地拒）。0 表示「固件代分配」，所以绕开它。
@@ -143,12 +143,34 @@ export async function loadParams() {
     setParamResult(false, '读取超时：未收到 device_param_report——固件/agent 未就绪？');
     return;
   }
-  let withDev = 0;
-  for (const v of store.paramCache.values()) {
-    if (Number.isFinite(v.dev.pos_min)) withDev++;
+  const states = [...store.paramCache.keys()].map(id => ({id, ...paramReadState(id)}));
+  const missing = states.filter(state => state.usable < 8);
+  if (!states.length || missing.length) {
+    setParamResult(false, `参数读取不完整：${states.length ? missing.map(state => `电机 ${state.id}（${state.usable}/8 项）`).join('、') : '没有电机参数'}。` +
+      '请检查电机型号识别和设备回读；ID/T_max 需要新版固件与桥接支持。收到报告不代表已读到有效参数。');
+    return;
   }
-  setParamResult(true, `已读取参数表：共 ${store.paramCache.size} 台，其中 ${withDev} 台` +
-    '有驱动板回读值（显示驱动板真值），其余显示板内记录');
+  const withDev = states.filter(state => state.device === 8).length;
+  setParamResult(true, `已收到 ${states.length} 台有效参数：${withDev} 台完整驱动板回读，` +
+    `${states.length - withDev} 台含固件记录回落值。`);
+}
+
+export async function refreshMotorParams() {
+  if (!isConnected()) return;
+  const ids = [...new Set([...store.motors.keys(), ...store.paramCache.keys()])].sort((a, b) => a - b);
+  const id = ids.includes(store.selectedId) ? store.selectedId : ids[0];
+  if (id === undefined) { setParamResult(false, '尚未发现电机，无法回读参数'); return; }
+  const requestId = sendSystemCommand(SYS_CMD.REFRESH, id);
+  if (!requestId) return;
+  setParamResult(true, `正在回读电机 ${id} 的驱动板参数…`);
+  const request = await waitRequest(requestId, 6000, '电机参数回读');
+  if (!request.ok) {
+    setParamResult(false, request.result?.error_code === 12
+      ? `电机 ${id} 尚未识别型号或未绑定，固件拒绝回读（error_code=12）。请先检查设备身份读取与型号绑定。`
+      : request.text);
+    return;
+  }
+  await loadParams();
 }
 
 // 下发手改项。三条硬约束（固件 validate_param_set，整条受理或整条拒绝）：
@@ -184,6 +206,22 @@ export async function applyParams() {
       setParamResult(false, `m${id}.${field} 不是数字：${inp.value}`);
       return;
     }
+    if (slot === PARAM_FIELD.NODE_ID || slot === PARAM_FIELD.T_MAX) {
+      const control = store.controlStates.byId.get(id);
+      const motor = store.motors.get(id);
+      if (control?.policy_enabled || control?.motion_enabled || [4, 5].includes(motor?.status?.lifecycle)) {
+        setParamResult(false, `电机 ${id} 必须先失能才能修改 ID 或 T_max`); return;
+      }
+      const max = slot === PARAM_FIELD.NODE_ID ? 64 : 16777215;
+      if (!Number.isInteger(value) || value < 1 || value > max) {
+        setParamResult(false, `电机 ${id} 的 ${field} 必须是 1～${max} 的整数`); return;
+      }
+      if (slot === PARAM_FIELD.NODE_ID && value !== id &&
+          (store.motors.has(value) || store.paramCache.has(value) ||
+           [...store.paramCache.entries()].some(([other, cached]) => other !== id && cached.pick.node_id === value))) {
+        setParamResult(false, `电机 ID ${value} 已占用或待生效`); return;
+      }
+    }
     note(id).set(slot, value);
   }
 
@@ -211,11 +249,22 @@ export async function applyParams() {
     }
   }
 
+  const destinations = [...byMotor.values()].filter(fields => fields.has(PARAM_FIELD.NODE_ID))
+    .map(fields => fields.get(PARAM_FIELD.NODE_ID));
+  if (new Set(destinations).size !== destinations.length) {
+    setParamResult(false, '多台电机的新 ID 重复，未下发'); return;
+  }
   const motorTargets = new Map();
   for (const [id, fields] of byMotor) {
     motorTargets.set(id, [...fields].map(([field, value]) => ({motor_id: id, field, value})));
   }
-  const chunks = chunkedParamSet(motorTargets);
+  // 同一台设备只允许一个在途 SDO 事务；逐项等待，位置上下限保持同请求。
+  const chunks = [];
+  for (const targets of motorTargets.values()) {
+    const positions = targets.filter(t => t.field <= PARAM_FIELD.POS_MAX);
+    if (positions.length) chunks.push(positions);
+    for (const target of targets.filter(t => t.field > PARAM_FIELD.POS_MAX)) chunks.push([target]);
+  }
   let sent = 0;
   for (let i = 0; i < chunks.length; i++) {
     const req = sendParamSet(chunks[i]);
@@ -227,7 +276,8 @@ export async function applyParams() {
   dirty.forEach((inp) => { delete inp.dataset.dirty; });
   markDirty(DIRTY.PARAMS);   // 重绘交给面板（dirty 标志已清，重建不会抹掉输入）
   setParamResult(true, `参数写入成功：${byMotor.size} 台 / ${sent} 项` +
-    (chunks.length > 1 ? `（${chunks.length} 条请求均已完成）` : ''));
+    (chunks.length > 1 ? `（${chunks.length} 条请求均已完成）` : '') +
+    (destinations.length ? '；ID 已写入并回读，重启电机后生效，当前通信地址保持不变。' : ''));
 }
 
 export async function saveParamsToFlash() {
@@ -382,4 +432,50 @@ export async function flipDirection(id, cur) {
   if (!result.ok) { setParamResult(false, result.text); return; }
   markDirty(DIRTY.PARAMS);
   setParamResult(true, `m${id} 方向已切换为 ${name}`);
+}
+
+// 固件频率配置沿用配置 topic / request_id 终态，参数值由系统状态 topic 回读。
+export const FIRMWARE_FIELDS = ['system.agent_ping_hz', 'system.motion_report_hz',
+  'system.status_report_hz', 'system.imu_report_hz', 'system.temperature_report_hz', 'system.motor_command_hz'];
+async function waitFirmwareReport(after = -1) {
+  const started = Date.now();
+  const session = store.configSessionId;
+  const generation = getConnectionGeneration();
+  while (Date.now() - started < 3000) {
+    if (!isConnected() || getConnectionGeneration() !== generation ||
+        (session !== null && store.configSessionId !== session)) throw new Error('固件配置连接或会话已更换');
+    const report = store.firmwareReport;
+    if (report.values && report.seq > after && Date.now() - report.at < 1000) return report;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error('未收到新的固件参数 topic 回读，请确认控制板固件版本');
+}
+export async function readFirmwareParameter(name) {
+  const report = await waitFirmwareReport();
+  if (name === 'system.unsaved') return report.unsaved;
+  if (name === 'system.can_nominal_kbps') return 1000;
+  if (name === 'system.can_data_kbps') return 5000;
+  const field = FIRMWARE_FIELDS.indexOf(name);
+  if (field < 0) throw new Error(`未知固件参数 ${name}`);
+  return report.values[field];
+}
+export async function writeFirmwareParameter(name, value) {
+  const field = FIRMWARE_FIELDS.indexOf(name);
+  if (field < 0 || !Number.isInteger(value) || value < 1 || value > 1000) throw new Error('固件参数字段或数值无效');
+  if (!isConnected()) throw new Error('未连接 rosbridge');
+  const before = store.firmwareReport.seq;
+  const request_id = nextParamReq();
+  pub('firmwareConfig', {sync_time_ns: Date.now() * 1e6, session_id: 0, request_id,
+    kind: 2, command: 0, motor_id: MOTOR_ID_NONE, count: 1,
+    targets: [{motor_id: MOTOR_ID_NONE, field, value}]});
+  const result = await waitRequest(request_id, 6000, '固件参数下发');
+  if (!result.ok) throw new Error(result.text);
+  await waitFirmwareReport(before);
+}
+export async function saveFirmwareParameters() {
+  const before = store.firmwareReport.seq;
+  const id = sendSystemCommand(SYS_CMD.SAVE, MOTOR_ID_NONE);
+  const result = await waitRequest(id, 10000, '保存');
+  if (!result.ok) throw new Error(`保存未确认成功：${result.text}`);
+  await waitFirmwareReport(before);
 }

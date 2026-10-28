@@ -12,6 +12,7 @@
 #include "motor_bridge.h"
 #include "motor_rt_task.h"
 #include "param_field.h"
+#include "firmware_parameters.h"
 #include "param_units.h"
 #include "ros_qos.h"
 #include "save_transaction.h"
@@ -33,7 +34,9 @@ static can_bridge_msgs__msg__MotorPolicyTarget g_policies[48];
 static can_bridge_msgs__msg__ParamSetTarget g_parameters[16];
 static uint32_t g_ack_ids[8];
 static bool g_created, g_sub_up, g_sub_added;
-static motor_control_param_view_t g_views[MOTOR_CONTROL_MAX_MOTORS];
+// CPU 快照放 DTCM，避免扩展参数槽耗尽 D1；create 显式清零此 NOLOAD 段。
+static motor_control_param_view_t g_views[MOTOR_CONTROL_MAX_MOTORS]
+    __attribute__((section(".dtcm_noinit")));
 static size_t g_view_count;
 static config_transaction::Coordinator g_transactions;
 static int g_active_slot = -1, g_save_slot = -1;
@@ -130,13 +133,23 @@ static bool submit_config(control_mailbox_config_request_t &request, uint8_t fie
 static bool validate_parameters(const can_bridge_msgs__msg__ParamSetTarget *targets, size_t count) {
   static const param_field_t fields[] = {
     PARAM_FIELD_POS_MIN, PARAM_FIELD_POS_MAX, PARAM_FIELD_VEL_LIMIT,
-    PARAM_FIELD_TORQUE_LIMIT, PARAM_FIELD_LIMIT_PROTECT, PARAM_FIELD_DIRECTION};
+    PARAM_FIELD_TORQUE_LIMIT, PARAM_FIELD_LIMIT_PROTECT, PARAM_FIELD_DIRECTION, PARAM_FIELD_T_MAX, PARAM_FIELD_NODE_ID};
   if (!count || count > 16) return false;
   for (size_t i = 0; i < count; ++i) {
     const auto &t = targets[i];
     const auto *v = find_view(t.motor_id);
+    if (t.field == PARAM_DEVICE_SLOT_NODE_ID && count != 1) return false;
     if (t.field >= PARAM_DEVICE_SLOT_COUNT || !v || !v->bound ||
         !param_value_ok(fields[t.field], t.value, 0.0f, nullptr)) return false;
+    if (t.field == PARAM_DEVICE_SLOT_NODE_ID) {
+      size_t saved_count = 0; const auto *saved = storage_boot_params(&saved_count);
+      for (size_t j = 0; j < saved_count; ++j) {
+        if (saved[j].motor_id == t.motor_id) continue;
+        if (saved[j].motor_id == (uint16_t)t.value ||
+            ((saved[j].device_raw_present & (1U << PARAM_DEVICE_SLOT_NODE_ID)) &&
+             saved[j].device_raw[PARAM_DEVICE_SLOT_NODE_ID] == (uint32_t)t.value)) return false;
+      }
+    }
     if (t.field == 3 && !isfinite(param_units_amp_to_nm(t.value, v->torque_per_amp))) return false;
     for (size_t j = 0; j < i; ++j)
       if (targets[j].motor_id == t.motor_id && targets[j].field == t.field) return false;
@@ -178,6 +191,12 @@ static void apply_parameters(const Config &msg) {
     case 4:
       request.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
       request.value.safety_protect_raw = t.value == 1.0f ? 0U : 1U; break;
+    case 6:
+      request.kind = CONTROL_MAILBOX_CONFIG_SET_T_MAX;
+      request.value.t_max_raw = (uint32_t)t.value; break;
+    case 7:
+      request.kind = CONTROL_MAILBOX_CONFIG_SET_NODE_ID;
+      request.value.new_node_id = (uint16_t)t.value; break;
     case 5:
       request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
       request.value.direction_raw = t.value == 1.0f ? 1U : 0U; break;
@@ -192,11 +211,12 @@ static void apply_parameters(const Config &msg) {
 
 // 有限操作使用互斥载荷；未用组必须为空/默认，避免含混或拼接请求。
 static bool groups_valid(const Config &m) {
-  if (m.operation > can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS || m.policies.size > 48 ||
+  if (m.operation > can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS || m.policies.size > 48 ||
       m.parameters.size > 16 || m.ack_request_ids.size > 8) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY &&
       (m.policies.size || m.policy_generation || m.allow_no_protect)) return false;
-  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS && m.parameters.size) return false;
+  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS &&
+      m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS && m.parameters.size) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && m.ack_request_ids.size) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
       (m.query_id || m.query_kind || m.query_revision || m.cursor || m.detail_request_id)) return false;
@@ -204,6 +224,7 @@ static bool groups_valid(const Config &m) {
   if (single ? (m.motor_id == 0 || m.motor_id > 64) : m.motor_id != kMotorIdNone) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY && !m.policies.size) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS && !m.parameters.size) return false;
+  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS && m.parameters.size != 1) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && !m.ack_request_ids.size) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
       (!m.query_id || m.query_kind > 1 || (m.query_kind == 0 && m.detail_request_id))) return false;
@@ -303,7 +324,13 @@ static void config_cb(const void *input) {
   if (save_transaction_in_progress(&g_save_transaction) || trajectory_busy(*msg)) {
     g_transactions.busy(g_active_slot); return;
   }
-  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS) {
+    const auto &target = msg->parameters.data[0];
+    const bool valid = target.motor_id == kMotorIdNone && target.field < FIRMWARE_SETTINGS_COUNT &&
+        isfinite(target.value) && floorf(target.value) == target.value && target.value >= 1 && target.value <= 1000;
+    const bool ok = valid && firmware_parameters_set_value(target.field, (int64_t)target.value);
+    g_transactions.complete(g_active_slot, ok ? 1 : 0, ok ? 0 : 1, ok ? 0 : kInvalid);
+  } else if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
     control_policy_snapshot_t policy{};
     policy.request_id = next_internal_id(); policy.received_tick_ms = now;
     policy.valid_until_tick_ms = g_active_deadline;
@@ -443,6 +470,11 @@ void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out) {
   out->config_request_high_water = g_transactions.request_high_water();
   out->save_in_progress = save_transaction_in_progress(&g_save_transaction);
   out->last_error = g_last_error; out->last_error_motor = g_last_error_motor;
+  const auto settings = firmware_parameters_snapshot();
+  out->firmware_values_valid = true;
+  for (unsigned i = 0; i < FIRMWARE_SETTINGS_COUNT; ++i)
+    out->firmware_values[i] = (uint16_t)firmware_settings_get(&settings, i);
+  out->firmware_unsaved = firmware_parameters_unsaved();
   config_transaction::Result results[8]{};
   const size_t count = g_transactions.copy_results(results, 8);
   out->results.size = count <= out->results.capacity ? count : out->results.capacity;
@@ -455,8 +487,8 @@ static void encode_parameters(can_bridge_msgs__msg__DeviceParamEntry &out,
     const motor_control_param_view_t &v) {
   out.motor_id = v.motor_id; out.dev_init_state = v.dev_init;
   out.record_dirty = v.record_dirty_slots != 0; out.mismatch_mask = v.dev_mismatch_mask;
-  float rec[6], dev[6];
-  for (size_t i = 0; i < 6; ++i) {
+  float rec[8], dev[8];
+  for (size_t i = 0; i < 8; ++i) {
     rec[i] = (v.record_raw_present & (1U << i)) ? v.record_si[i] : NAN;
     dev[i] = (v.dev_raw_present & (1U << i)) ? v.dev_si[i] : NAN;
   }
@@ -466,6 +498,8 @@ static void encode_parameters(can_bridge_msgs__msg__DeviceParamEntry &out,
   out.rec_torque_limit = rec[3]; out.rec_safety = rec[4]; out.rec_direction = rec[5];
   out.dev_pos_min = dev[0]; out.dev_pos_max = dev[1]; out.dev_vel_limit = dev[2];
   out.dev_torque_limit = dev[3]; out.dev_safety = dev[4]; out.dev_direction = dev[5];
+  out.rec_t_max = rec[6]; out.dev_t_max = dev[6];
+  out.rec_node_id = rec[7]; out.dev_node_id = dev[7];
 }
 const can_bridge_msgs__msg__AgentInfo *param_bridge_info(void) {
   if (!g_pager.pending() || g_pager.needs_fill()) return nullptr;
@@ -512,6 +546,7 @@ const motor_control_stored_params_t *param_bridge_stored_records(size_t *count) 
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   if (g_created) return true;
   if (!node || !executor) return false;
+  memset(g_views, 0, sizeof(g_views));
   save_transaction_init(&g_save_transaction);
   g_config_msg.motor_id = kMotorIdNone;
   g_config_msg.policies.data = g_policies; g_config_msg.policies.capacity = 48;

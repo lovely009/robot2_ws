@@ -230,6 +230,50 @@ def test_activate_restores_model_from_feedback_unit() -> None:
 
 # --- lifecycle 门槛 ---------------------------------------------------------
 
+@pytest.mark.parametrize('ports,device,enabled,running,expected', [
+    (['/dev/ttyACM0'], '', True, False, '/dev/ttyACM0'),
+    ([], '', True, False, None),
+    (['/dev/ttyACM0', '/dev/ttyUSB0'], '', True, False, None),
+    (['/dev/ttyACM0', '/dev/ttyUSB0'], '/dev/ttyUSB0', True, False, '/dev/ttyUSB0'),
+    (['/dev/ttyACM0'], '', False, False, None),
+    (['/dev/ttyACM0'], '', True, True, None),
+])
+def test_activate_starts_default_agent_only_when_unambiguous(
+        monkeypatch, ports, device, enabled, running, expected):
+    from types import SimpleNamespace
+    node = _shell(_all_absent())
+    values = {'auto_start_agent': enabled, 'agent_device': device, 'feedback_model': ''}
+    node.get_parameter = lambda name: SimpleNamespace(value=values[name])
+    monkeypatch.setattr('bench_manager.node.enumerate_serial_ports',
+                        lambda: [{'path': port} for port in ports])
+    monkeypatch.setattr(node.agent, 'status',
+                        lambda: {'state': 'running' if running else 'stopped'})
+    started = []
+    monkeypatch.setattr(node.agent, 'start',
+                        lambda path, auto=False: started.append((path, auto)))
+    node.on_activate(None)
+    assert started == ([] if expected is None else [(expected, True)])
+
+
+def test_agent_autostart_failure_keeps_manager_active(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.lifecycle import TransitionCallbackReturn
+    node = _shell(_all_absent())
+    values = {'auto_start_agent': True, 'agent_device': '/dev/ttyACM0',
+              'feedback_model': ''}
+    node.get_parameter = lambda name: SimpleNamespace(value=values[name])
+    logger = Mock()
+    node.get_logger = lambda: logger
+
+    def occupied(*args, **kwargs):
+        raise RuntimeError('serial port occupied')
+
+    monkeypatch.setattr(node.agent, 'start', occupied)
+    assert node.on_activate(None) is TransitionCallbackReturn.SUCCESS
+    assert 'serial port occupied' in logger.warn.call_args.args[0]
+
+
 def test_configure_fails_fast_without_a_user_manager() -> None:
     """没有 systemd user manager 就没法承载会话——在 configure 阶段就说清楚。
 

@@ -243,6 +243,10 @@ static void update_record_after_write(motor_control_entry_t *entry) {
     // 保护开关核验成功后，新原值同时成为后续比对基线。
     written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
     break;
+  case MOTOR_PROTOCOL_CONFIG_SET_T_MAX:
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX); break;
+  case MOTOR_PROTOCOL_CONFIG_SET_NODE_ID:
+    written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID); break;
   case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
     written_mask = (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
     break;
@@ -288,6 +292,8 @@ static void update_record_after_write(motor_control_entry_t *entry) {
       break;
     case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
     case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
+    case MOTOR_PROTOCOL_PARAM_SLOT_T_MAX:
+    case MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID:
       si = (float)entry->tx_write_raw[slot];
       break;
     default:
@@ -403,6 +409,12 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
   if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH &&
       result == MOTOR_PROTOCOL_CONFIG_OK) {
     entry->record_dirty_slots = 0U;
+  }
+  if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_T_MAX && result != MOTOR_PROTOCOL_CONFIG_OK) {
+    entry->dev_raw_present &= (uint8_t)~(1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
+    entry->profile = NULL;
+    entry->identity_read_done = false;
+    entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_IDENTIFYING;
   }
   entry->tx_active = false;
   entry->tx_awaiting = false;
@@ -1163,6 +1175,31 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     if (entry->tx_active) {
       return reject_busy(ctx, entry, request, now_ms);
     }
+    return start_tx(ctx, entry, request, now_ms);
+  }
+  case MOTOR_PROTOCOL_CONFIG_SET_T_MAX:
+  case MOTOR_PROTOCOL_CONFIG_SET_NODE_ID: {
+    const bool node_change = request->kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID;
+    if (entry->adapter != &motor_protocol_cerb_adapter || entry->profile == NULL ||
+        !device_limit_write_allowed(entry) || entry->policy_enable || entry->enable_pending || entry->p0_pending ||
+        (node_change ? (request->new_node_id < 1U || request->new_node_id > 64U) :
+         (request->t_max_raw == 0U || request->t_max_raw > 16777215U)))
+      return reject_invalid(ctx, entry, request, now_ms);
+    if (entry->tx_active) return reject_busy(ctx, entry, request, now_ms);
+    if (node_change) {
+      for (size_t i = 0; i < ctx->entry_count; ++i) {
+        const motor_control_entry_t *other = &ctx->entries[i];
+        if (!other->used || other == entry) continue;
+        if (other->motor_id == request->new_node_id ||
+            (other->tx_active && other->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID &&
+             other->tx_request.new_node_id == request->new_node_id) ||
+            ((other->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID)) &&
+             other->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID] == request->new_node_id))
+          return reject_invalid(ctx, entry, request, now_ms);
+      }
+    }
+    entry->has_target = false;
+    entry->motion_authorized = false;
     return start_tx(ctx, entry, request, now_ms);
   }
   case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH: {

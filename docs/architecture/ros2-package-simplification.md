@@ -1,5 +1,7 @@
 # ROS 2 功能包精简（2026-10-27）
 
+后续变更：工作台控制已迁往 ros2_control，删除 motor_command；当前源码共 12 包。下文为 2026-10-27 的历史记录，当前控制接线见 [host-trajectory-usage.md](host-trajectory-usage.md)。
+
 ## 启动链路
 
 `ros2 launch robot_bringup robot.launch.py` 默认启动五个独立节点：

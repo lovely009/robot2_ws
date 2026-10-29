@@ -188,7 +188,7 @@
   <!-- 下发（设定值 → 主机侧命令节拍节点，ADR 0014） -->
   <template data-panel-template="command">
     <details class="sendbar" data-fold="send" open>
-      <summary title="/motor_command/setpoint（主机侧 command_streamer 按 100 Hz 出完整快照流）">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+      <summary title="/control/setpoint（由 ros2_control 控制器执行）">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
       <div class="table-wrap">
         <table class="cmd">
           <thead><tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr></thead>

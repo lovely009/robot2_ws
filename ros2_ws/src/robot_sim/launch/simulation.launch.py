@@ -1081,27 +1081,19 @@ def launch_simulation(context):
                     ),
                 ]
             )
-        # 后端已有 joint_states/TF；此桥只转换 Web 的关节命令并发布健康状态。
-        bridge_urdf = share / "models" / model / "urdf" / f"{model}.urdf"
-        if not bridge_urdf.is_file():
-            raise RuntimeError(f"firmware topic bridge URDF does not exist: {bridge_urdf}")
-        actions.append(
-            Node(
-                package="motor_hardware_interface",
-                executable="firmware_topic_bridge.py",
-                name="firmware_topic_bridge",
-                output="screen",
-                parameters=[{
-                    "driver_file": str(driver_config),
-                    "urdf_file": str(bridge_urdf),
-                    "model_name": model,
-                    "enable_trajectory": True,
-                    "publish_joint_states": False,
-                    "trajectory_in_topic": "/arm_controller/joint_trajectory",
-                    "trajectory_out_topic": "/motor_command/trajectory",
-                }],
-            )
-        )
+        # MCU 仍为设备后端，工作台轨迹与手动调试统一由主机控制器执行。
+        if not simulator_only:
+            control_urdf = share / "models" / model / "urdf" / f"{model}.urdf"
+            if not control_urdf.is_file():
+                raise RuntimeError(f"host control URDF does not exist: {control_urdf}")
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(str(
+                    hardware_share / "launch" / "host_trajectory.launch.py")),
+                launch_arguments={
+                    "motor_config_file": str(driver_config), "urdf_file": str(control_urdf),
+                    "model": model, "start_controllers": "false",
+                    "publish_joint_states": "false", "publish_robot_state": "false",
+                }.items()))
         if start_web_host:
             actions.append(
                 IncludeLaunchDescription(

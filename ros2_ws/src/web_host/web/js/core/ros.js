@@ -5,8 +5,7 @@ import {
   jointFeedbackMatchesModel,
 } from './store.js';
 import {
-  $, TOPICS, DOWNLINK_ROUTE, EVENT_NAMES, MOTOR_ID_NONE,
-  OVERLAY_TRAJECTORY_TOPIC, quatToEuler,
+  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler,
 } from './format.js';
 
 import { applyControlState, createControlStateCache } from './motor_state.js';
@@ -135,44 +134,6 @@ export function ensurePublisher(key) {
   return publishers[key];
 }
 
-// ---- 下行接线：直连固件 ↔ 经重力前馈叠加（ADR 0013）------------------------
-// 切换是「改话题名 + 换发布者」一件事的两半：TOPICS 里那两个 name 是运行期可变的，
-// 而发布者在连接建立时就按旧名字 advertise 好了，只改 name 会让命令继续发到旧话题上
-// （rosbridge 侧一切正常，micro-ROS 侧没人收）。所以唯一改写点在这里，且两半一起做。
-//
-// 直连名以 TOPICS 里声明的为准；叠加名是叠加节点的输入话题（robot_dynamics 契约）。
-// 只列**页面自己发**的下行通道。命令不在其中：页面发的是设定值（固定话题），
-// 命令从哪条路出去由 bench_manager 改 command_streamer 的 output_topic 决定
-// （ADR 0014 决定 3），页面切不了、只能读 TOPICS.commandStatus 核对。
-const DOWNLINK = {
-  trajectory: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.trajectory.name,
-    [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_TRAJECTORY_TOPIC},
-};
-let downlinkRoute = DOWNLINK_ROUTE.DIRECT;
-
-export function getDownlinkRoute() { return downlinkRoute; }
-
-export function setDownlinkRoute(next) {
-  if (next !== DOWNLINK_ROUTE.DIRECT && next !== DOWNLINK_ROUTE.OVERLAY) {
-    throw new Error(`未知的下行接线：${next}`);
-  }
-  if (next === downlinkRoute) return downlinkRoute;
-  downlinkRoute = next;
-  for (const key of Object.keys(DOWNLINK)) TOPICS[key].name = DOWNLINK[key][next];
-  // 未连接时没有发布者要换（closeSocket 已清空），重连时 connect() 会按新名字建。
-  if (store.conn.connected) {
-    for (const key of Object.keys(DOWNLINK)) {
-      const old = publishers[key];
-      if (old) { try { old.unadvertise(); } catch (_e) { /* 连接已断，无需回收 */ } }
-      delete publishers[key];
-      // 立刻在新名字上 advertise，理由同上：等第一次 publish 才建会丢掉开头的命令。
-      ensurePublisher(key);
-    }
-  }
-  markDirty(DIRTY.CONN);
-  return downlinkRoute;
-}
-
 // roslibjs 不自动重连；连接中断后按 2 s 退避重试。
 let reconnectTimer = null;
 
@@ -191,6 +152,8 @@ function resetSessionState() {
   store.conn.agentDevice = '';
   store.conn.canStop = false;
   store.commandStatus = {last: 0, data: null};
+  store.traj.state = null;
+  store.traj.activeTrajectoryId = 0;
   store.jointStates.byName = {};
   store.jointStates.jointNames = [];
   store.transmissionStatus = {last: 0, data: null};
@@ -222,9 +185,7 @@ export function connect() {
     if (ros !== connection) return;
     setConn(true);
     subscribeAll();
-    // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
-    // 断线时那份已被 closeSocket 清掉）。开关的落点不带状态，重连不会悄悄切回直连。
-    ['setpoint', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
+    ['setpoint', 'trajectory', 'stop', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -356,8 +317,7 @@ function subscribeAll() {
     markDirty(DIRTY.STATUS);
   });
 
-  // 轨迹执行状态（低频）：动作屏的窗口交棒（elapsed_ms 到达窗口时长）与
-  // 进度显示都读 store.traj.state；不在条目上做裁决，原样存最近一帧。
+  // 客户端将 JTC 结果映射成轨迹状态；completed 只在 action 成功终态为真。
   sub('trajectoryState', (m) => {
     store.traj.activeTrajectoryId = m.trajectory_id;
     store.traj.state = {
@@ -436,9 +396,7 @@ function subscribeAll() {
     markDirty(DIRTY.IMU);
   });
 
-  // 关节侧实测构型（HIL 下由 firmware_topic_bridge 从 motion_states 转出，
-  // 仿真下由 joint_state_broadcaster / MuJoCo 桥发布）。页面只用它的**新鲜度**：
-  // 叠加节点拿不到它就整帧直通，于是「开关亮着但没有补偿」不留任何痕迹。
+  // 主机控制栈的实测关节反馈，按模型身份与新鲜度接收。
   sub('jointStates', (m) => {
     if (!jointFeedbackMatchesModel()) return;
     const now = Date.now();
@@ -526,11 +484,10 @@ function subscribeAll() {
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 
-  // 命令节拍节点的状态：命令**当前实际发往**哪里（output_topic）。重力补偿开关的
-  // 改道是服务端做的，页面只有读它才知道接线有没有真的切过去。
+  // ros2_control 模型、模式、路由与错误。
   sub('commandStatus', (m) => {
     try { applyCommandStatus(JSON.parse(m.data)); }
-    catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
+    catch (_e) { applyCommandStatus(null); }
   });
 }
 

@@ -9,22 +9,14 @@ export const TOPICS = {
   events: {name: '/motor/events', type: 'can_bridge_msgs/msg/MotorEvent'},
   imu: {name: '/imu/data', type: 'sensor_msgs/msg/Imu'},
   temp: {name: '/imu/temp', type: 'std_msgs/msg/Float32'},
-  // 下·设定值（ADR 0014）：页面只下**设定值**，100 Hz 的完整快照流由主机侧
-  // command_streamer 出。节拍不能留在页面里——浏览器把后台标签页的定时器钳到 1 Hz，
-  // 而固件的快照新鲜度线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力。
-  // 它**不是**运行期可变的：命令从哪条路出去（直连 bridge / 经叠加节点）由 bench_manager
-  // 改 streamer 的 output_topic 决定，页面只读回执核对（见 TOPICS.commandStatus）。
-  setpoint: {name: '/motor_command/setpoint',
+  // 低频输入由客户端映射到 ros2_control；周期命令只由 controller_manager 产生。
+  setpoint: {name: '/control/setpoint',
     type: 'can_bridge_msgs/msg/MotorCommandArray'},
-  // ⚠️ 轨迹的 name 是**运行期可变**的：重力补偿开关在「直连 bridge」与「经叠加节点」
-  // 之间切它。唯一改写点是 core/ros.js 的 setDownlinkRoute（换名必须连带换发布者，
-  // 散着改会让轨迹发到没人订阅的话题上）。
-  trajectory: {name: '/motor/trajectory',
+  trajectory: {name: '/control/trajectory',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
-  // 命令节拍节点的状态（JSON）：`output_topic` 是命令**当前实际发往**哪里。
-  // 改道由服务端做，页面切不了，所以只能读它来核对开关与接线是否一致。
-  commandStatus: {name: '/motor_command/status', type: 'std_msgs/msg/String'},
-  trajectoryState: {name: '/motor/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
+  commandStatus: {name: '/control/status', type: 'std_msgs/msg/String'},
+  trajectoryState: {name: '/control/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
+  stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'},
   policy: {name: '/motor/policy_array', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
   devParams: {name: '/motor/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
   sysStatus: {name: '/motor/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
@@ -32,12 +24,10 @@ export const TOPICS = {
   paramSet: {name: '/motor/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
   firmwareConfig: {name: '/motor/config_request', type: 'can_bridge_msgs/msg/ConfigRequest'},
   sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
-  // 关节侧实测构型：施加前馈时它是 τ_g 的**唯一**输入，而叠加节点在它超时/缺席时
-  // 整帧原样转发（见 robot_dynamics/README.md 的安全不变式）——所以「开关亮着但
-  // 没有补偿」是静默的，页面得自己看得见这条流的死活。
+  // 关节侧实测构型；显示和控制都检查其新鲜度。
   jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
   jointTrajectory: {name: '/arm_controller/joint_trajectory', type: 'trajectory_msgs/msg/JointTrajectory'},
-  convertedTrajectory: {name: '/motor_command/trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  convertedTrajectory: {name: '/control/trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
   robotTransmissionStatus: {name: '/robot_transmission/status', type: 'std_msgs/msg/String'},
   // TF（关节侧）：robot_state_publisher 发；页面只读，用来与电机流对照。
   tf: {name: '/tf', type: 'tf2_msgs/msg/TFMessage'},
@@ -46,16 +36,6 @@ export const TOPICS = {
   // 后端 / 重力前馈四段快照的 JSON 字符串。
   bench: {name: '/bench/status', type: 'std_msgs/msg/String'},
 };
-
-// 下行接线的两个落点（core/ros.js 的 setDownlinkRoute 用，ADR 0013）。
-// 叠加侧的 `/robot_dynamics/*` 是 gravity_feedforward_overlay 的**输入**话题，是节点契约。
-// 页面自己只切**轨迹**那一条（命令那一条归服务端，见 TOPICS.setpoint 的注释）——
-// 命令落点那两个名字的权威在 bench_manager/gravity_feedforward_manager.py。
-export const DOWNLINK_ROUTE = {
-  DIRECT: 'direct',
-  OVERLAY: 'overlay',
-};
-export const OVERLAY_TRAJECTORY_TOPIC = '/robot_dynamics/trajectory';
 
 export const LIFECYCLE = ['ABSENT', 'DISCOVERED', 'IDENTIFYING', 'READY_DISABLED',
   'ACTIVE', 'SAFE_STOP', 'FAULT', 'CONFIG_CONFLICT', 'OFFLINE'];

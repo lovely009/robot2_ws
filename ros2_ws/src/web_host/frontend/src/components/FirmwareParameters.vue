@@ -5,7 +5,7 @@ import { initialized, runtime, snapshot } from '../runtime';
 const props = defineProps<{active: boolean}>();
 const fields = [
   {name: 'system.agent_ping_hz', label: 'Agent 链路探测', options: [10, 20, 50, 100]},
-  {name: 'system.motion_report_hz', label: '电机运动反馈', options: [20, 25, 50]},
+  {name: 'system.motion_report_hz', label: '电机运动反馈', options: [20, 25, 50, 100]},
   {name: 'system.status_report_hz', label: '电机与控制状态', options: [10, 20, 25, 50]},
   {name: 'system.imu_report_hz', label: 'IMU 姿态', options: [10, 20, 25, 50, 100]},
   {name: 'system.temperature_report_hz', label: 'IMU 温度', options: [1, 2]},

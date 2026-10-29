@@ -4,4 +4,9 @@
          base_class_type="hardware_interface::SystemInterface">
     <description>ros2_control SystemInterface backed by the reusable motor_drive C++ library.</description>
   </class>
+  <class name="motor_hardware_interface/MicroRosSystem"
+         type="motor_hardware_interface::MicroRosSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>ros2_control SystemInterface backed by host V3 motor Topics.</description>
+  </class>
 </library>

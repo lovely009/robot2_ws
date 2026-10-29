@@ -26,12 +26,6 @@ const SVC = {
     'bench_msgs/srv/SetGravityFeedforwardGain'],
 };
 
-// 命令流的两个落点（ADR 0014）：改道由 bench_manager 改 command_streamer 的
-// output_topic 执行，页面切不了、只拿这两个名字去核对回执。权威定义在
-// bench_manager/gravity_feedforward_manager.py，静态契约测试从那里对账。
-export const DIRECT_COMMAND_TOPIC = '/motor/command_array';
-export const OVERLAY_COMMAND_TOPIC = '/robot_dynamics/command_array';
-
 // unit 名是契约（bench_manager/systemd_units.py 定义一次，这里与文档各引用一份）。
 export const UNIT_SIMULATION = 'bench-simulation.service';
 export const UNIT_MOTOR_BACKEND = 'bench-motor-backend.service';
@@ -99,9 +93,7 @@ export function startMotorBackend(request) {
 }
 export function stopMotorBackend() { return call(SVC.stopMotorBackend, {}); }
 
-// 重力前馈叠加节点（ADR 0013）。起停的是**节点**，命令源改接到它前面是前端自己的事
-// （core/ros.js 的 setDownlinkRoute）——顺序由 panels/feedforward.js 按「先起节点、
-// 确认 running，再切话题」执行，服务这一层不管接线。
+// 服务名保持兼容；服务端切换 gravity_controller，页面不改写运动话题。
 export function startGravityFeedforward(request) {
   return call(SVC.startGravityFeedforward, {
     model: request.model,

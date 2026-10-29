@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 namespace micro_ros_bridge
 {
@@ -29,9 +30,16 @@ bool valid_control_time(const AgentStatus & m) {
 }
 }  // namespace
 
-BridgeNode::BridgeNode() : rclcpp::Node("micro_ros_bridge")
+BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micro_ros_bridge", options)
 {
   using W = AgentWireContract;
+  rcl_interfaces::msg::ParameterDescriptor descriptor;
+  descriptor.read_only = true;
+  const auto execution = declare_parameter("trajectory_execution", "host", descriptor);
+  if (execution != "firmware" && execution != "host") {
+    throw std::invalid_argument("trajectory_execution must be firmware or host");
+  }
+  host_execution_ = execution == "host";
   command_pub_ = create_publisher<AgentCommand>(W::TOPIC_COMMAND, stream());
   config_pub_ = create_publisher<Config>(W::TOPIC_CONFIG, rclcpp::QoS(4).reliable());
   trajectory_pub_ = create_publisher<Trajectory>(W::TOPIC_TRAJECTORY, reliable());
@@ -45,7 +53,8 @@ BridgeNode::BridgeNode() : rclcpp::Node("micro_ros_bridge")
   diagnostics_pub_ = create_publisher<MotorDiagnostics>("/motor/diagnostics", reliable());
   result_pub_ = create_publisher<Reply>("/motor/config_result", reliable());
   event_pub_ = create_publisher<MotorEvent>("/motor/events", reliable());
-  command_sub_ = create_subscription<MotorCommandArray>("/motor/command_array",
+  command_sub_ = create_subscription<MotorCommandArray>(
+    host_execution_ ? "/motor/host_command_array" : "/motor/command_array",
     rclcpp::QoS(1).reliable(), [this](MotorCommandArray::SharedPtr m) {on_command(*m);});
   subscriptions_.push_back(create_subscription<MotorPolicyArray>("/motor/policy_array", reliable(),
     [this](MotorPolicyArray::SharedPtr m) {on_policy(*m);}));
@@ -127,6 +136,7 @@ void BridgeNode::clear_session(uint64_t session)
   active_wire_trajectory_ = active_caller_trajectory_ = 0;
   std::fill(std::begin(trajectory_targets_), std::end(trajectory_targets_), false);
   for (auto & target : last_targets_) {target.reset();}
+  host_takeover_pending_ = host_execution_; takeover_stop_sent_ = false;
 }
 
 void BridgeNode::on_status(const Status & msg)
@@ -154,6 +164,23 @@ void BridgeNode::on_status(const Status & msg)
   status_ = msg; have_status_ = true; system_ = system;
   const auto age = msg.clock_valid ? std::max<int64_t>(0, clock_ns_ - static_cast<int64_t>(msg.snapshot_stamp)) : 0;
   status_at_ = Clock::now() - std::chrono::nanoseconds(age);
+  if (host_execution_) {
+    const bool trajectory_live = msg.trajectory.state == AgentTrajectoryState::LOADING ||
+      msg.trajectory.state == AgentTrajectoryState::READY ||
+      msg.trajectory.state == AgentTrajectoryState::RUNNING;
+    if (trajectory_live) {host_takeover_pending_ = true;}
+    if (host_takeover_pending_) {
+      const bool disarmed = std::all_of(msg.motors.begin(), msg.motors.end(),
+        [](const auto & motor) {return !motor.policy_enabled;});
+      // 新来源先撤掉旧授权，后续完整状态确认后才允许重新武装。
+      if (takeover_stop_sent_ && disarmed && !trajectory_live) {
+        host_takeover_pending_ = false;
+      } else {
+        Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop);
+        takeover_stop_sent_ = true;
+      }
+    }
+  }
   next_config_id_ = std::max(next_config_id_, msg.config_request_high_water + 1u);
   next_trajectory_request_ = std::max(next_trajectory_request_, msg.trajectory_request_high_water + 1u);
   if (msg.trajectory.trajectory_id >= next_trajectory_id_) {
@@ -236,6 +263,10 @@ void BridgeNode::on_motion(const AgentMotion & msg)
 }
 void BridgeNode::on_command(const MotorCommandArray & msg)
 {
+  if (count_publishers(AgentWireContract::TOPIC_COMMAND) > 1) {
+    Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop); return;
+  }
+  if (host_takeover_pending_ && msg.count) {return;}
   if (!motion_ready() || command_sub_->get_publisher_count() > 1 ||
     !source_time_valid(msg.sync_time_ns, 30ms)) {return;}
   AgentCommand out;
@@ -346,6 +377,7 @@ void BridgeNode::on_policy(const MotorPolicyArray & msg)
     // This bypasses the transaction slots and source-clock gate in the firmware.
     config_pub_->publish(job.wire); return;
   }
+  if (host_takeover_pending_) {return;}
   if (!motion_ready() || !source_time_valid(msg.sync_time_ns, 100ms)) {return;}
   job.wire.ttl_ms = 100;
   enqueue_config(std::move(job));
@@ -478,6 +510,12 @@ void BridgeNode::trajectory_event(uint32_t caller_id, uint16_t error)
 void BridgeNode::on_trajectory(const MotorTrajectory & msg)
 {
   const bool cancel = !msg.count && !msg.target_count && msg.points.empty() && msg.target_ids.empty();
+  if (host_execution_) {
+    if (cancel) {
+      Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop);
+    } else {trajectory_event(msg.trajectory_id, 2);}
+    return;
+  }
   if (cancel) {
     std::fill(std::begin(trajectory_targets_), std::end(trajectory_targets_), false);
     uint32_t id = upload_ ? upload_->wire_id : status_.trajectory.trajectory_id;

@@ -59,7 +59,7 @@ bool valid_agent_lifecycle(uint8_t lifecycle)
 
 bool valid_config_operation(uint8_t operation)
 {
-  return operation <= Config::ACK_RESULTS;
+  return operation <= Config::SET_FIRMWARE_PARAMETERS;
 }
 
 bool valid_config_result(const ConfigResult & result)

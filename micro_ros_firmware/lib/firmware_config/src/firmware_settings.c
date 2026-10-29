@@ -12,7 +12,7 @@ bool firmware_settings_set(firmware_settings_t *s, unsigned field, int64_t value
     if (value != 10 && value != 20 && value != 50 && value != 100) return false;
     s->agent_ping_hz = (uint16_t)value; break;
   case 1:
-    if (value != 20 && value != 25 && value != 50) return false;
+    if (value != 20 && value != 25 && value != 50 && value != 100) return false;
     s->motion_hz = (uint8_t)value; break;
   case 2:
     if (value != 10 && value != 20 && value != 25 && value != 50) return false;

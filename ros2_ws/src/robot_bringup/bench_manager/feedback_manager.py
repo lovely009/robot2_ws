@@ -1,4 +1,4 @@
-"""只读固件关节反馈的模型归属与进程管理；不修改命令通道。"""
+"""管理选定模型的 ros2_control/TF 会话；启动不使能电机、不恢复旧目标。"""
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -8,6 +8,7 @@ from robot_transmission import Model
 from .systemd_units import STATE_NAMES, UNIT_FEEDBACK, SystemdUnits, UnitState
 
 MODEL_ENV = 'BENCH_FEEDBACK_MODEL'
+CONTROL_ENV = 'BENCH_CONTROL_EXECUTION'
 _MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*\Z')
 
 
@@ -56,6 +57,7 @@ class FirmwareFeedbackManager:
         return {'state': 'failed' if self._error else STATE_NAMES[unit.state],
                 'model': env.get(MODEL_ENV, '') if unit.state is UnitState.RUNNING else '',
                 'desired_model': self._desired, 'source': self._source,
+                'execution': env.get(CONTROL_ENV, ''),
                 'reason': self._reason, 'error': self._error,
                 'returncode': unit.returncode}
 
@@ -69,7 +71,7 @@ class FirmwareFeedbackManager:
         self._desired = model
         previous_error = self._error
         self._error = ''
-        source, reason = 'firmware', '固件关节反馈'
+        source, reason = 'firmware', 'MCU 反馈与 ros2_control 控制会话'
         if simulation_running:
             source, reason = 'simulation', '由仿真会话提供关节反馈'
         elif external_publishers:
@@ -85,7 +87,8 @@ class FirmwareFeedbackManager:
             self._attempt = None
             return
         status = self.status()
-        if status['state'] == 'running' and status['model'] == model:
+        if (status['state'] == 'running' and status['model'] == model
+                and status['execution'] == 'ros2_control'):
             return
         # 启动或运行失败后保留诊断；模型/会话归属变化后才重新尝试。
         if self._attempt == model:
@@ -98,10 +101,12 @@ class FirmwareFeedbackManager:
             if status['state'] != 'stopped':
                 self._systemd.stop(UNIT_FEEDBACK)
             self._systemd.start(UNIT_FEEDBACK, [
-                'ros2', 'launch', 'robot_bringup', 'firmware_tf.launch.py',
-                f'model:={model}', f'model_dir:={self.models_root.parent}',
-                'enable_trajectory:=false',
-            ], auto=True, session_env={MODEL_ENV: model})
+                'ros2', 'launch', 'motor_hardware_interface', 'host_trajectory.launch.py',
+                f'model:={model}',
+                f'motor_config_file:={self.models_root / model / "config" / "motor_driver.yaml"}',
+                f'urdf_file:={self.models_root / model / "urdf" / f"{model}.urdf"}',
+                'start_controllers:=false',
+            ], auto=True, session_env={MODEL_ENV: model, CONTROL_ENV: 'ros2_control'})
         except (ValueError, OSError, RuntimeError, ET.ParseError) as exc:
             self._systemd.stop(UNIT_FEEDBACK)
             self._error = str(exc)

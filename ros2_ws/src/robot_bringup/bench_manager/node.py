@@ -1,8 +1,9 @@
 """bench_manager 节点：台架会话在 ROS 侧的**唯一编排者**。
 
-会话进程（仿真 / micro-ROS Agent / 电机后端 / 重力前馈叠加节点）由 systemd user
+会话进程（仿真 / micro-ROS Agent / 电机后端）由 systemd user
 transient unit 承载，本节点不持有任何进程句柄——状态权威是 unit 状态，会话描述存在 unit
-环境里，本节点重启后可认领已有会话。
+环境里，本节点重启后可认领已有会话。重力前馈直接适配 ros2_control 参数，
+状态由 /control/status 的新鲜回读恢复。
 
 - 服务全在 `/bench/` 绝对命名空间下（web 前端按固定名调用，不做 remap）：
   `/bench/options`、`/bench/agent_status`、`/bench/{start,stop}_simulation`、
@@ -53,10 +54,7 @@ from bench_msgs.srv import (
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
 from .feedback_manager import FirmwareFeedbackManager
-from .gravity_feedforward_manager import (
-    DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC,
-    GravityFeedforwardProcessManager,
-)
+from .gravity_feedforward_manager import GravityFeedforwardManager
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
 from .simulation_manager import (
     SimulationProcessManager,
@@ -65,7 +63,7 @@ from .simulation_manager import (
     enumerate_simulation_models,
 )
 from .systemd_units import (
-    UNIT_AGENT, UNIT_GRAVITY_FEEDFORWARD, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, UNIT_FEEDBACK,
+    UNIT_AGENT, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, UNIT_FEEDBACK,
     SystemdUnits,
 )
 
@@ -75,21 +73,12 @@ _EXPECTED_ERRORS = (ValueError, PermissionError, RuntimeError, OSError)
 
 # 日志服务的白名单：`unit_name` 直接进 `journalctl -u`，只认契约 unit 名，
 # 免得页面（或任何服务调用方）拿它去翻别的 unit。
-_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT,
-          UNIT_GRAVITY_FEEDFORWARD, UNIT_FEEDBACK)
+_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT, UNIT_FEEDBACK)
 _LOG_LINES_DEFAULT = 80
 _LOG_LINES_MAX = 2000
 
-# 叠加节点的参数服务。Humble 的 rclpy 没有 parameters client 封装（那是 Iron+ 的
-# rclpy.parameter_client），所以直接调节点的 set_parameters_atomically。
-_GAIN_NODE = 'gravity_feedforward_overlay'
-_GAIN_SERVICE = f'/{_GAIN_NODE}/set_parameters_atomically'
-_GAIN_DISCOVERY_TIMEOUT_S = 0.5
-
-# 命令节拍持有者的参数服务（ADR 0014）。命令流改道 = 改它的 output_topic：页面只下
-# 设定值，命令从哪条路出去由这里决定。同 _GAIN_SERVICE，Humble 没有 parameters client。
-_ROUTE_NODE = 'command_streamer'
-_ROUTE_SERVICE = f'/{_ROUTE_NODE}/set_parameters_atomically'
+_GRAVITY_SERVICE = '/host_control/gravity_controller/set_parameters_atomically'
+_OWN_FEEDBACK_NODES = {'firmware_topic_bridge', 'workbench_control'}
 
 
 def _simulation_request(message):
@@ -156,11 +145,11 @@ class BenchManager(LifecycleNode):
             systemd=self._systemd)
         self.motor_backend = MotorSimProcessManager(
             model_provider=self._model_provider, systemd=self._systemd)
-        self.feedforward = GravityFeedforwardProcessManager(
-            systemd=self._systemd, gain_writer=self._write_effort_gain)
+        self.feedforward = GravityFeedforwardManager(
+            models_root, parameter_writer=self._write_gravity_parameters)
 
-        self._gain_client = None
-        self._route_client = None
+        self._gravity_client = None
+        self._control_status_sub = None
         self._status_pub = None
         self._timer = None
 
@@ -174,6 +163,8 @@ class BenchManager(LifecycleNode):
             return TransitionCallbackReturn.FAILURE
 
         self._status_pub = self.create_publisher(String, '/bench/status', 10)
+        self._control_status_sub = self.create_subscription(
+            String, '/control/status', self._on_control_status, 10)
         for srv_type, name, callback in (
             (GetBenchOptions, '/bench/options', self._on_options),
             (GetAgentStatus, '/bench/agent_status', self._on_agent_status),
@@ -252,12 +243,13 @@ class BenchManager(LifecycleNode):
         # 只释放句柄：会话不回收（见模块 docstring）。
         self.destroy_timer(self._timer)
         self.destroy_publisher(self._status_pub)
-        if self._gain_client is not None:
-            self.destroy_client(self._gain_client)
-            self._gain_client = None
-        if self._route_client is not None:
-            self.destroy_client(self._route_client)
-            self._route_client = None
+        self.feedforward.close()
+        if self._gravity_client is not None:
+            self.destroy_client(self._gravity_client)
+            self._gravity_client = None
+        if self._control_status_sub is not None:
+            self.destroy_subscription(self._control_status_sub)
+            self._control_status_sub = None
         self._timer = None
         self._status_pub = None
         return TransitionCallbackReturn.SUCCESS
@@ -281,12 +273,13 @@ class BenchManager(LifecycleNode):
         return SetParametersResult(successful=True)
 
     def _tick(self):
+        self.feedforward.tick()
         try:
             running = self.feedback.status()['state'] == 'running'
             publishers = self.get_publishers_info_by_topic('/joint_states')
-            own_count = sum(p.node_name == 'firmware_topic_bridge' for p in publishers)
+            own_count = sum(p.node_name in _OWN_FEEDBACK_NODES for p in publishers)
             external = [p.node_name for p in publishers
-                        if p.node_name != 'firmware_topic_bridge' or not running or own_count > 1]
+                        if p.node_name not in _OWN_FEEDBACK_NODES or not running or own_count > 1]
             self.feedback.reconcile(
                 self.get_parameter('feedback_model').value,
                 agent_running=self.agent.status()['state'] == 'running',
@@ -473,114 +466,48 @@ class BenchManager(LifecycleNode):
         response.error = ''
         return response
 
-    # ---------- 重力前馈（ADR 0013）----------
+    # ---------- ros2_control 重力前馈 ----------
 
-    def _on_start_gravity_feedforward(self, request, response):
+    def _on_control_status(self, message):
         try:
-            self.feedforward.start({
-                'model': request.model,
-                'joint_map': request.joint_map,
-                'effort_gain': request.effort_gain,
-            })
-        except _EXPECTED_ERRORS as exc:
-            return self._finish(response, exc)
-        # 顺序（ADR 0013 决定 7）：unit 确认 running **之后**才切接线。切不过去不回滚
-        # unit——命令继续走直连是有命令、只是没补偿（安全方向），回滚反而多一次断流。
-        self._request_command_route(OVERLAY_COMMAND_TOPIC)
-        return self._finish(response)
-
-    def _on_stop_gravity_feedforward(self, _request, response):
-        # 顺序与开启镜像：**先**切回直连、**确认成功**再停 unit。反过来，命令会在
-        # 「接线还指着叠加节点、节点已经没了」的窗口里全部落空 → 固件命令超时软停，
-        # 而机构没有抱闸。所以停 unit 挂在改道的成功回执上（见 _request_command_route）。
-        self._request_command_route(
-            DIRECT_COMMAND_TOPIC, on_success=self._stop_feedforward_unit)
-        return self._finish(response)
-
-    def _stop_feedforward_unit(self):
-        try:
-            self.feedforward.stop()
-        except _EXPECTED_ERRORS as exc:
-            self.get_logger().error(f'停叠加节点失败：{exc}')
+            self.feedforward.observe(json.loads(message.data))
+        except (ValueError, TypeError) as exc:
+            self.feedforward.invalidate_status(str(exc))
         self._publish_status()
 
-    def _on_set_gravity_feedforward_gain(self, request, response):
+    def _finish_gravity(self, response, action, callback):
         try:
-            self.feedforward.set_gain(request.effort_gain)
+            callback()
         except _EXPECTED_ERRORS as exc:
+            self.feedforward.note_failed(str(exc), action)
             return self._finish(response, exc)
-        return self._finish(response)
+        status = self.feedforward.status()
+        # ok 只表示受理；pending 明确区分排队、回执成功和真实回读确认。
+        return self._finish(response, status['error'] or None)
 
-    def _write_effort_gain(self, gain: float) -> None:
-        """把增益写进运行中的叠加节点（异步，结果由回调回报）。
+    def _on_start_gravity_feedforward(self, request, response):
+        return self._finish_gravity(response, 'start', lambda: self.feedforward.start({
+            'model': request.model,
+            'joint_map': request.joint_map,
+            'effort_gain': request.effort_gain,
+        }))
 
-        服务未就绪时**不能**静默发出去：没有对端时请求会被中间件丢掉，future 永不
-        完成，于是「界面显示已改、节点其实没改」。宁可在这里短暂等一下，就绪不了就报错。
-        """
-        if self._gain_client is None:
-            self._gain_client = self.create_client(
-                SetParametersAtomically, _GAIN_SERVICE)
-        if not self._gain_client.wait_for_service(
-                timeout_sec=_GAIN_DISCOVERY_TIMEOUT_S):
-            raise RuntimeError(
-                f'{_GAIN_NODE} 的参数服务不可达——叠加节点可能没在跑')
+    def _on_stop_gravity_feedforward(self, _request, response):
+        return self._finish_gravity(response, 'stop', self.feedforward.stop)
+
+    def _on_set_gravity_feedforward_gain(self, request, response):
+        return self._finish_gravity(response, 'gain',
+                                    lambda: self.feedforward.set_gain(request.effort_gain))
+
+    def _write_gravity_parameters(self, values):
+        if self._gravity_client is None:
+            self._gravity_client = self.create_client(SetParametersAtomically, _GRAVITY_SERVICE)
+        if not self._gravity_client.service_is_ready():
+            raise RuntimeError(f'{_GRAVITY_SERVICE} is unavailable')
         request = SetParametersAtomically.Request()
-        request.parameters = [
-            Parameter('effort_gain', value=float(gain)).to_parameter_msg()]
-        self._gain_client.call_async(request).add_done_callback(
-            partial(self._on_gain_written, gain))
-
-    def _request_command_route(self, topic: str, on_success=None) -> None:
-        """把命令流改道到 topic（异步，结果由回调回报）。
-
-        失败方向按调用点分岔，见两个服务处理的注释：开启时失败就留在直连，停止时
-        失败则**不执行** on_success（即不停 unit）。
-        """
-        if self._route_client is None:
-            self._route_client = self.create_client(
-                SetParametersAtomically, _ROUTE_SERVICE)
-        if not self._route_client.wait_for_service(
-                timeout_sec=_GAIN_DISCOVERY_TIMEOUT_S):
-            self.feedforward.note_route_failed(
-                f'{_ROUTE_NODE} 的参数服务不可达——命令节拍节点没在跑，'
-                '命令流改道未执行')
-            self._publish_status()
-            return
-        request = SetParametersAtomically.Request()
-        request.parameters = [
-            Parameter('output_topic', value=str(topic)).to_parameter_msg()]
-        self._route_client.call_async(request).add_done_callback(
-            partial(self._on_route_written, topic, on_success))
-
-    def _on_route_written(self, topic: str, on_success, future) -> None:
-        try:
-            result = future.result().result
-        except Exception as exc:  # noqa: BLE001 - 回执里的任何失败都要说出来
-            self.feedforward.note_route_failed(f'命令流改道失败：{exc}')
-            self._publish_status()
-            return
-        if not result.successful:
-            self.feedforward.note_route_failed(
-                result.reason or '命令流改道被节点拒绝')
-            self._publish_status()
-            return
-        self.feedforward.note_route_applied(topic)
-        if on_success is not None:
-            on_success()
-        else:
-            self._publish_status()
-
-    def _on_gain_written(self, gain: float, future) -> None:
-        try:
-            result = future.result().result
-        except Exception as exc:  # noqa: BLE001 - 回执里的任何失败都要说出来
-            self.feedforward.note_gain_failed(f'增益写入失败：{exc}')
-            return
-        if not result.successful:
-            self.feedforward.note_gain_failed(
-                result.reason or '增益写入被节点拒绝')
-            return
-        self.feedforward.note_gain_applied(gain)
+        request.parameters = [Parameter(name, value=value).to_parameter_msg()
+                              for name, value in values.items()]
+        return self._gravity_client.call_async(request)
 
 
 def main(args=None):

@@ -379,10 +379,9 @@ export const runtime = {
   },
   stopMotion() {
     if (!initialized.value || !modules.ros.isConnected()) return false;
-    modules.actions.stopPlayback();
     const sent = modules.command.sendStop();
     notice.value = sent
-      ? "已发送轨迹取消与全部软停请求；请核对设备反馈"
+      ? "已请求全部软停（停用运动控制器）；请核对设备反馈"
       : "停止请求未发送";
     return sent;
   },

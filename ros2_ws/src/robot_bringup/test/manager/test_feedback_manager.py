@@ -22,12 +22,12 @@ def setup_feedback(tmp_path: Path) -> FeedbackSetup:
         (model / 'urdf' / f'{name}.urdf').write_text(
             '<robot name="arm"><link name="base"/><link name="tip"/>'
             '<joint name="elbow" type="continuous"><parent link="base"/>'
-            '<child link="tip"/></joint></robot>')
+        '<child link="tip"/><limit velocity="1" effort="10"/></joint></robot>')
     fake = FakeSystemd({UNIT_FEEDBACK: {'LoadState': 'not-found'}})
     return FirmwareFeedbackManager(tmp_path, SystemdUnits(runner=fake)), fake
 
 
-def test_agent_and_model_start_readonly_feedback_once(setup_feedback: FeedbackSetup) -> None:
+def test_agent_and_model_start_control_session_without_enabling_once(setup_feedback: FeedbackSetup) -> None:
     manager, fake = setup_feedback
     manager.reconcile('arm_a', agent_running=False)
     assert manager.status()['state'] == 'stopped'
@@ -36,7 +36,9 @@ def test_agent_and_model_start_readonly_feedback_once(setup_feedback: FeedbackSe
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 1
     assert 'model:=arm_a' in starts[0]
-    assert 'enable_trajectory:=false' in starts[0]
+    assert 'host_trajectory.launch.py' in starts[0]
+    assert 'start_controllers:=false' in starts[0]
+    assert not any('enable' in arg and 'true' in arg for arg in starts[0])
     assert manager.status()['model'] == 'arm_a'
     assert manager.status()['state'] == 'running'
 
@@ -84,6 +86,16 @@ def test_manager_restart_adopts_matching_unit(setup_feedback: FeedbackSetup) -> 
     adopted.reconcile('arm_a', agent_running=True)
     assert adopted.status()['model'] == 'arm_a'
     assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_old_feedback_unit_is_replaced_instead_of_adopted_as_control(setup_feedback: FeedbackSetup):
+    manager, fake = setup_feedback
+    manager.reconcile('arm_a', agent_running=True)
+    fake.properties[UNIT_FEEDBACK]['Environment'] = 'BENCH_FEEDBACK_MODEL=arm_a'
+    restarted = FirmwareFeedbackManager(manager.models_root, SystemdUnits(runner=fake))
+    restarted.reconcile('arm_a', agent_running=True)
+    assert restarted.status()['execution'] == 'ros2_control'
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
 
 
 def test_failed_unit_is_not_restarted_every_tick(setup_feedback: FeedbackSetup) -> None:

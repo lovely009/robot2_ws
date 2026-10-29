@@ -7,7 +7,7 @@
 int main() {
   const firmware_settings_t defaults = FIRMWARE_SETTINGS_DEFAULT;
   auto settings = defaults;
-  const int64_t allowed[][7] = {{10, 20, 50, 100}, {20, 25, 50},
+  const int64_t allowed[][7] = {{10, 20, 50, 100}, {20, 25, 50, 100},
     {10, 20, 25, 50}, {10, 20, 25, 50, 100}, {1, 2}, {50, 100, 125, 200, 250, 500, 1000}};
   for (unsigned field = 0; field < FIRMWARE_SETTINGS_COUNT; ++field) {
     for (auto value : allowed[field]) {
@@ -24,6 +24,7 @@ int main() {
       assert(firmware_settings_equal(&before, &settings));
     }
   }
+  assert(!firmware_settings_set(&settings, 1, 200));
   assert(!firmware_settings_set(&settings, FIRMWARE_SETTINGS_COUNT, 1));
   const int64_t invalid_control[] = {1, 49, 999, 1001, 2000};
   for (const int64_t value : invalid_control)
@@ -59,10 +60,12 @@ int main() {
   alignas(8) static uint8_t bytes[PARAM_STORE_BLOB_SIZE];
   auto *blob = param_store_blob_reset(bytes, sizeof(bytes));
   assert(blob && param_store_blob_set(blob, 1, PARAM_FIELD_KP, 3));
+  assert(firmware_settings_set(&settings, 1, 100));
   firmware_settings_pack(&settings, blob->reserved);
   param_store_blob_finalize(blob, 7);
   assert(param_store_blob_validate(blob));
   assert(firmware_settings_unpack(blob->reserved, &restored));
+  assert(restored.motion_hz == 100);
   float kp;
   assert(param_store_blob_get(blob, 1, PARAM_FIELD_KP, &kp) && kp == 3);
   blob->reserved[2] ^= 1U;

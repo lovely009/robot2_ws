@@ -7,7 +7,7 @@
 | --- | --- | --- |
 | `system.agent_ping_hz` | 10、20、50、100 Hz | 100 Hz |
 | `system.motor_command_hz` | 50、100、125、200、250、500、1000 Hz | 200 Hz |
-| `system.motion_report_hz` | 20、25、50 Hz | 50 Hz |
+| `system.motion_report_hz` | 20、25、50、100 Hz | 50 Hz |
 | `system.status_report_hz` | 10、20、25、50 Hz | 10 Hz |
 | `system.imu_report_hz` | 10、20、25、50、100 Hz | 100 Hz |
 | `system.temperature_report_hz` | 1、2 Hz | 2 Hz |

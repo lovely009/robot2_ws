@@ -1,257 +1,288 @@
-"""`GravityFeedforwardProcessManager` 的测试（`bench-gravity-feedforward.service`）。
-
-同其他 manager 测试：不起真进程、不碰真 systemd（`conftest.FakeSystemd`），
-`urdf_provider` 与增益写入通道都注入假体。
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
+"""重力参数适配的离线测试：真实传动解析、假时钟和假参数 future。"""
+from concurrent.futures import Future
+from types import SimpleNamespace
 
 import pytest
 
-from conftest import FakeSystemd
-
 from bench_manager.gravity_feedforward_manager import (
-    GravityFeedforwardProcessManager,
-    validate_joint_map,
-)
-from bench_manager.systemd_units import (
-    AUTO_STARTED_ENV, UNIT_GRAVITY_FEEDFORWARD, SystemdUnits,
+    CONTROL_STATUS_TIMEOUT_S, PARAMETER_TIMEOUT_S,
+    GravityFeedforwardManager, validate_joint_map,
 )
 
-_MODEL = 'half_body_robot'
-_OTHER_MODEL = 'other_robot'
-_JOINT_MAP = '1:joint_link1,2:joint_link2'
+_MODEL = 'arm'
+_JOINTS = ['yaw', 'wrist_a', 'wrist_b']
+
+
+class Writer:
+    def __init__(self):
+        self.calls = []
+        self.futures = []
+
+    def __call__(self, values):
+        self.calls.append(values)
+        future = Future()
+        self.futures.append(future)
+        return future
+
+    def reply(self, successful=True, reason=''):
+        self.futures[-1].set_result(SimpleNamespace(result=SimpleNamespace(
+            successful=successful, reason=reason)))
 
 
 @pytest.fixture
-def urdfs(tmp_path: Path) -> dict[str, str]:
-    """两个合法模型：`_OTHER_MODEL` 用来验「已在跑另一个模型」那条分支。"""
-    paths: dict[str, str] = {}
-    for model in (_MODEL, _OTHER_MODEL):
-        model_dir = tmp_path / 'models' / model / 'urdf'
-        model_dir.mkdir(parents=True)
-        path = model_dir / f'{model}.urdf'
-        path.write_text('<robot name="x"/>', encoding='utf-8')
-        paths[model] = str(path)
-    return paths
+def models(tmp_path):
+    config = tmp_path / _MODEL / 'config'
+    config.mkdir(parents=True)
+    (config / 'motor_driver.yaml').write_text('''motor_hardware:
+  motors:
+    a: {id: 1, joint: yaw}
+    b: {id: 2}
+    c: {id: 3}
+''')
+    (config / 'transmissions.yaml').write_text('''transmissions:
+  wrist:
+    plugin: transmission_interface/DifferentialTransmission
+    actuators: [b, c]
+    joints: [wrist_a, wrist_b]
+''')
+    return tmp_path
 
 
-def _systemd() -> FakeSystemd:
-    return FakeSystemd({UNIT_GRAVITY_FEEDFORWARD: {'LoadState': 'not-found'}})
+def _control(**overrides):
+    return dict(model=_MODEL, joint_names=_JOINTS, mode='trajectory',
+                gravity_enabled=False, effort_gain=1.0) | overrides
 
 
-def _creations(systemd: FakeSystemd) -> list[list[str]]:
-    return [call for call in systemd.commands() if call[0] == 'systemd-run']
+def _manager(models):
+    writer, now = Writer(), [100.0]
+    manager = GravityFeedforwardManager(models, writer, clock=lambda: now[0])
+    manager.observe(_control())
+    return manager, writer, now
 
 
-def _exec_start(systemd: FakeSystemd) -> list[str]:
-    create = _creations(systemd)[0]
-    return create[create.index('ros2'):]
+def _request(**overrides):
+    return dict(model=_MODEL, effort_gain=0.6) | overrides
 
 
-def _env(systemd: FakeSystemd) -> dict[str, str]:
-    create = _creations(systemd)[0]
-    pairs = [a.split('=', 1)[1] for a in create if a.startswith('--setenv=')]
-    return dict(pair.split('=', 1) for pair in pairs)
+def test_start_writes_only_runtime_parameters_and_waits_for_real_status(models):
+    manager, writer, _ = _manager(models)
+    result = manager.start(_request(joint_map='1:yaw'))
+    assert writer.calls == [{'enabled': True, 'effort_gain': 0.6}]
+    assert result['pending'] == 'start'
+    assert result['state'] == 'stopped'
+    assert result['config']['effort_gain'] == 1.0
+    writer.reply()
+    assert manager.status()['pending'] == 'start'
+    manager.observe(_control(gravity_enabled=True, effort_gain=0.6))
+    assert manager.status()['pending'] is None
+    assert manager.status()['state'] == 'running'
+    assert manager.status()['config'] == {'model': _MODEL, 'effort_gain': 0.6}
 
 
-def _manager(urdfs: dict[str, str], systemd: FakeSystemd,
-             written: list[float] | None = None) -> GravityFeedforwardProcessManager:
-    return GravityFeedforwardProcessManager(
-        urdf_provider=lambda model: urdfs.get(model, ''),
-        gain_writer=(written.append if written is not None else None),
-        systemd=SystemdUnits(runner=systemd),
-    )
+@pytest.mark.parametrize('spec', ['', '1:yaw'])
+def test_joint_map_is_optional_and_validated_when_supplied(models, spec):
+    manager, writer, _ = _manager(models)
+    manager.start(_request(joint_map=spec))
+    assert len(writer.calls) == 1
 
 
-def _request(**overrides: Any) -> dict[str, Any]:
-    request: dict[str, Any] = {
-        'model': _MODEL,
-        'joint_map': _JOINT_MAP,
-        'effort_gain': 1.0,
-    }
-    request.update(overrides)
-    return request
-
-
-# --- 启动前的校验 -----------------------------------------------------------
-
-@pytest.mark.parametrize('model', ['', 'no_such_model', '../etc', 'a/b', None])
-def test_start_rejects_a_model_without_a_urdf(urdfs: dict[str, str], model: Any) -> None:
-    """模型名直接进文件路径，`../` 之类必须在服务这一层就被拒。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-
+@pytest.mark.parametrize('spec', [None, '1:wrong', '2:wrist_a', '1:yaw,2:wrist_a',
+                                   '9:yaw', '1:yaw,1:yaw', '1', '1:', ':yaw',
+                                   'x:j', '70000:yaw', '-1:yaw', '1: yaw', '1:yaw:x'])
+def test_joint_map_rejects_malformed_wrong_or_flattened_coupled_groups(models, spec):
+    manager, writer, _ = _manager(models)
     with pytest.raises(ValueError):
-        manager.start(_request(model=model))
-
-    assert not _creations(systemd)
-
-
-@pytest.mark.parametrize('joint_map', ['', '1', '1:', ':joint_link1', 'x:j',
-                                       '1:a,1:b', '70000:a'])
-def test_start_rejects_a_malformed_joint_map(urdfs: dict[str, str], joint_map: str) -> None:
-    """畸形表在服务里就拒：让 unit 起来再退出，页面只会看到一条 `failed`。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-
-    with pytest.raises(ValueError):
-        manager.start(_request(joint_map=joint_map))
-
-    assert not _creations(systemd)
+        manager.start(_request(joint_map=spec))
+    assert not writer.calls
 
 
-@pytest.mark.parametrize('gain', [-1.0, float('nan'), float('inf'), 'x'])
-def test_start_rejects_a_bad_gain(urdfs: dict[str, str], gain: Any) -> None:
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
+def test_validate_joint_map_returns_numeric_ids():
+    assert validate_joint_map('1:a,10:b') == {1: 'a', 10: 'b'}
 
-    with pytest.raises(ValueError):
+
+@pytest.mark.parametrize('gain', [-0.1, 1.01, float('nan'), float('inf'), 10**400, True, '0.5', None])
+def test_invalid_gain_never_reaches_the_controller(models, gain):
+    manager, writer, _ = _manager(models)
+    with pytest.raises(ValueError, match='0..1'):
         manager.start(_request(effort_gain=gain))
-
-    assert not _creations(systemd)
-
-
-def test_joint_map_accepts_the_contract_shape() -> None:
-    spec = '1:joint_link1,10:joint_link1.1'
-    assert validate_joint_map(spec) == spec
+    assert not writer.calls
 
 
-# --- 启动 -------------------------------------------------------------------
-
-def test_start_runs_the_overlay_with_the_models_urdf(urdfs: dict[str, str]) -> None:
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-
-    status = manager.start(_request(effort_gain=0.8))
-
-    assert _exec_start(systemd) == [
-        'ros2', 'run', 'robot_dynamics', 'gravity_feedforward_overlay',
-        '--ros-args',
-        '-p', f'urdf_path:={urdfs[_MODEL]}',
-        '-p', f'joint_map:={_JOINT_MAP}',
-        '-p', 'effort_gain:=0.8',
-    ]
-    assert status['state'] == 'running'
-    assert status['config'] == {
-        'model': _MODEL, 'urdf_path': urdfs[_MODEL], 'joint_map': _JOINT_MAP,
-        'effort_gain': 0.8}
+@pytest.mark.parametrize('model', ['', None, 'other', '../arm'])
+def test_start_cannot_change_models(models, model):
+    manager, writer, _ = _manager(models)
+    with pytest.raises(ValueError, match='model'):
+        manager.start(_request(model=model))
+    assert not writer.calls
 
 
-def test_start_does_not_mark_the_unit_as_auto_started(urdfs: dict[str, str]) -> None:
-    """不随会话自动起：归属标记必须是 0，否则停仿真会连带把它停了。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-
-    manager.start(_request())
-
-    assert _env(systemd)[AUTO_STARTED_ENV] == '0'
+def test_start_rejects_mismatched_joint_topology(models):
+    manager, writer, _ = _manager(models)
+    manager.observe(_control(joint_names=['other']))
+    with pytest.raises(ValueError, match='joint_names'):
+        manager.start(_request())
+    assert not writer.calls
 
 
-def test_start_is_idempotent_for_the_same_configuration(urdfs: dict[str, str]) -> None:
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-
-    manager.start(_request())
-    manager.start(_request())
-
-    assert len(_creations(systemd)) == 1
+def test_start_requires_fresh_real_status(models):
+    manager, writer, now = _manager(models)
+    now[0] += CONTROL_STATUS_TIMEOUT_S + 0.01
+    with pytest.raises(RuntimeError, match='stale'):
+        manager.start(_request())
+    assert not writer.calls
 
 
-def test_start_refuses_another_model_without_replacing_it(urdfs: dict[str, str]) -> None:
-    """换模型静默拿到旧模型的 τ_g 是这个按钮最危险的失效模式：先停再起。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-    manager.start(_request())
-
-    with pytest.raises(RuntimeError, match='another model'):
-        manager.start(_request(model=_OTHER_MODEL))
-
-    assert len(_creations(systemd)) == 1
-
-
-def test_start_applies_a_new_gain_without_restarting(urdfs: dict[str, str]) -> None:
-    """同模型下改增益走参数通道——重起会断流，撞固件的命令超时软停。"""
-    systemd = _systemd()
-    written: list[float] = []
-    manager = _manager(urdfs, systemd, written)
-    manager.start(_request())
-
-    status = manager.start(_request(effort_gain=0.5))
-
-    assert len(_creations(systemd)) == 1, '不该重建 unit'
-    assert written == [0.5]
-    assert status['config'] is not None, '复用分支也要回状态'
+@pytest.mark.parametrize('mode,enabled,state', [
+    ('trajectory', True, 'running'), ('trajectory', False, 'stopped'),
+    ('manual', True, 'stopped'), ('stopped', True, 'stopped'),
+])
+def test_restart_restores_only_observed_active_enabled_state(models, mode, enabled, state):
+    manager = GravityFeedforwardManager(models)
+    manager.observe(_control(mode=mode, gravity_enabled=enabled, effort_gain=0.25))
+    assert manager.status()['state'] == state
+    assert manager.status()['config'] == {'model': _MODEL, 'effort_gain': 0.25}
 
 
-# --- 状态 -------------------------------------------------------------------
-
-def test_status_reports_the_units_own_description(urdfs: dict[str, str]) -> None:
-    """状态从 unit 环境派生：bench_manager 重启后仍说得清在跑什么。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd)
-    manager.start(_request(effort_gain=0.25))
-
-    status = _manager(urdfs, systemd).status()
-
-    assert status['state'] == 'running'
-    assert status['config']['model'] == _MODEL
-    assert status['config']['effort_gain'] == pytest.approx(0.25)
+def test_running_state_expires_at_2_5_seconds(models):
+    manager, _, now = _manager(models)
+    manager.observe(_control(gravity_enabled=True))
+    now[0] += CONTROL_STATUS_TIMEOUT_S
+    assert manager.status()['state'] == 'running'
+    now[0] += 0.01
+    assert manager.status()['state'] == 'stopped'
+    assert not manager.status()['fresh']
+    assert 'stale' in manager.status()['error']
 
 
-def test_status_before_any_start_has_no_config(urdfs: dict[str, str]) -> None:
-    status = _manager(urdfs, _systemd()).status()
+def test_stop_disables_and_zeros_effort_without_fresh_status(models):
+    writer = Writer()
+    manager = GravityFeedforwardManager(models, writer)
+    result = manager.stop()
+    assert writer.calls == [{'enabled': False, 'effort_gain': 0.0}]
+    assert result['pending'] == 'stop'
 
-    assert status == {'state': 'stopped', 'config': None, 'returncode': None,
-                      'gain_error': '', 'command_topic': None, 'route_error': ''}
 
-
-def test_stop_clears_the_gain_override(urdfs: dict[str, str]) -> None:
-    systemd = _systemd()
-    written: list[float] = []
-    manager = _manager(urdfs, systemd, written)
-    manager.start(_request())
-    manager.set_gain(0.5)
-    manager.note_gain_applied(0.5)
-
+def test_stop_waits_for_controller_readback_not_the_response(models):
+    manager, writer, _ = _manager(models)
+    manager.observe(_control(gravity_enabled=True))
     manager.stop()
-    manager.start(_request(effort_gain=1.0))
+    writer.reply()
+    assert manager.status()['state'] == 'running'
+    assert manager.status()['pending'] == 'stop'
+    manager.observe(_control(gravity_enabled=False, effort_gain=0.0))
+    assert manager.status()['state'] == 'stopped'
+    assert manager.status()['pending'] is None
 
-    assert manager.status()['config']['effort_gain'] == pytest.approx(1.0)
 
-
-# --- 增益通道 ---------------------------------------------------------------
-
-def test_set_gain_requires_a_running_unit(urdfs: dict[str, str]) -> None:
-    written: list[float] = []
-    manager = _manager(urdfs, _systemd(), written)
-
+def test_gain_requires_running_controller(models):
+    manager, writer, _ = _manager(models)
     with pytest.raises(RuntimeError, match='not running'):
-        manager.set_gain(0.5)
+        manager.set_gain(0.4)
+    assert not writer.calls
 
-    assert written == []
+
+def test_gain_is_not_cached_from_intent_or_successful_response(models):
+    manager, writer, _ = _manager(models)
+    manager.observe(_control(gravity_enabled=True))
+    manager.set_gain(0.4)
+    assert writer.calls == [{'effort_gain': 0.4}]
+    writer.reply()
+    assert manager.status()['config']['effort_gain'] == 1.0
+    manager.observe(_control(gravity_enabled=True, effort_gain=0.4))
+    assert manager.status()['config']['effort_gain'] == 0.4
+    assert manager.status()['pending'] is None
 
 
-def test_only_a_confirmed_gain_reaches_the_status(urdfs: dict[str, str]) -> None:
-    """只有确认写进去的值才进状态；失败要说出来，不静默。"""
-    systemd = _systemd()
-    manager = _manager(urdfs, systemd, [])
-    manager.start(_request(effort_gain=1.0))
+def test_rejection_reports_error_and_never_changes_observed_values(models):
+    manager, writer, _ = _manager(models)
+    manager.observe(_control(gravity_enabled=True))
+    manager.set_gain(0.4)
+    writer.reply(False, 'refused')
+    assert manager.status()['error'] == manager.status()['gain_error'] == 'refused'
+    assert manager.status()['config']['effort_gain'] == 1.0
+    assert manager.status()['pending'] is None
+
+
+def test_future_exception_is_reported(models):
+    manager, writer, _ = _manager(models)
+    manager.start(_request())
+    writer.futures[-1].set_exception(RuntimeError('transport gone'))
+    assert manager.status()['error'] == 'transport gone'
+    assert manager.status()['state'] == 'stopped'
+
+
+@pytest.mark.parametrize('acknowledge', [False, True])
+def test_unanswered_or_unconfirmed_requests_time_out(models, acknowledge):
+    manager, writer, now = _manager(models)
+    manager.start(_request())
+    if acknowledge:
+        writer.reply()
+    now[0] += PARAMETER_TIMEOUT_S
+    manager.tick()
+    assert manager.status()['pending'] is None
+    assert 'timed out' in manager.status()['error']
+    assert manager.status()['state'] == 'stopped'
+
+
+def test_timeout_late_reply_cannot_complete_a_new_request(models):
+    manager, writer, now = _manager(models)
+    manager.start(_request())
+    old = manager._pending
+    now[0] += PARAMETER_TIMEOUT_S
+    manager.tick()
+    manager.observe(_control())
+    manager.stop()
+    late = Future()
+    late.set_result(SimpleNamespace(result=SimpleNamespace(successful=True)))
+    manager._written(old, late)
+    assert manager.status()['pending'] == 'stop'
+    assert writer.calls[-1] == {'enabled': False, 'effort_gain': 0.0}
+    assert writer.futures[0].cancelled()
+
+
+def test_busy_request_does_not_send_an_overlapping_write(models):
+    manager, writer, _ = _manager(models)
+    manager.start(_request())
+    with pytest.raises(RuntimeError, match='pending'):
+        manager.stop()
+    assert len(writer.calls) == 1
+
+
+def test_status_before_ack_still_requires_successful_response(models):
+    manager, writer, _ = _manager(models)
+    manager.start(_request())
+    manager.observe(_control(gravity_enabled=True, effort_gain=0.6))
+    assert manager.status()['pending'] == 'start'
+    writer.reply(False, 'refused')
+    assert manager.status()['error'] == 'refused'
+
+
+def test_close_cancels_pending_and_invalidates_running_state(models):
+    manager, writer, _ = _manager(models)
+    manager.observe(_control(gravity_enabled=True))
     manager.set_gain(0.5)
+    manager.close()
+    assert writer.futures[-1].cancelled()
+    assert manager.status()['state'] == 'stopped'
+    assert manager.status()['pending'] is None
 
-    assert manager.status()['config']['effort_gain'] == pytest.approx(1.0)
 
-    manager.note_gain_failed('parameter service is gone')
-    status = manager.status()
+@pytest.mark.parametrize('changed', [dict(model='other'), dict(joint_names=['other'])])
+@pytest.mark.parametrize('acknowledge', [False, True])
+def test_model_or_topology_change_cannot_confirm_a_previous_request(models, changed, acknowledge):
+    manager, writer, _ = _manager(models)
+    manager.start(_request())
+    if acknowledge:
+        writer.reply()
+    manager.observe(_control(gravity_enabled=True, effort_gain=0.6, **changed))
+    assert manager.status()['pending'] is None
+    assert 'changed' in manager.status()['error']
+    assert writer.futures[-1].done()
 
-    assert status['config']['effort_gain'] == pytest.approx(1.0)
-    assert 'parameter service is gone' in status['gain_error']
 
-    manager.note_gain_applied(0.5)
-    status = manager.status()
-
-    assert status['config']['effort_gain'] == pytest.approx(0.5)
-    assert status['gain_error'] == ''
+def test_empty_exception_still_reports_a_failure(models):
+    manager, writer, _ = _manager(models)
+    manager.start(_request())
+    writer.futures[-1].set_exception(RuntimeError())
+    assert manager.status()['error']
+    assert manager.status()['pending'] is None

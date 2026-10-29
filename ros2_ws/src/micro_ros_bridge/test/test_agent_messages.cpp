@@ -522,6 +522,32 @@ TEST(AgentInfo, CompletePageMayHaveFewerThanCapacityOrBeEmpty)
   EXPECT_TRUE(micro_ros_bridge::append_agent_info(empty, empty_topology, empty_report).ok);
 }
 
+TEST(AgentStatus, AcceptsFirmwareParameterResultsAndRejectsUnknownOperations)
+{
+  AgentStatus in = valid_status();
+  in.firmware_values_valid = true;
+  in.firmware_values = {100, 100, 10, 100, 2, 200};
+  can_bridge_msgs::msg::AgentConfigResult receipt;
+  receipt.request_id = 5;
+  receipt.operation = AgentConfigRequest::SET_FIRMWARE_PARAMETERS;
+  MotorStatusArray statuses;
+  MotorControlStateArray controls;
+  MotorTrajectoryState trajectory;
+  SystemStatus system;
+  MotorDiagnostics diagnostics;
+  for (uint8_t state = receipt.PENDING; state <= receipt.RETIRED; ++state) {
+    receipt.state = state;
+    in.results = {receipt};
+    ASSERT_TRUE(micro_ros_bridge::decode_agent_status(
+      in, statuses, controls, trajectory, system, diagnostics).ok);
+    EXPECT_TRUE(system.firmware_values_valid);
+    EXPECT_EQ(system.firmware_values[1], 100);
+  }
+  in.results[0].operation = AgentConfigRequest::SET_FIRMWARE_PARAMETERS + 1;
+  EXPECT_FALSE(micro_ros_bridge::decode_agent_status(
+    in, statuses, controls, trajectory, system, diagnostics).ok);
+}
+
 TEST(AgentStatus, AllowsPartialMasksToOverlap)
 {
   AgentStatus in = valid_status();

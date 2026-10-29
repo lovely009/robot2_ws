@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 from launch import LaunchContext
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch_ros.actions import Node
 
 
@@ -33,16 +33,21 @@ def test_bridge_node_is_started():
         f'micro_ros_bridge 节点名是 {raw_name!r}，应为微固件侧约定的名字')
 
 
-def test_firmware_tf_requires_an_explicit_model() -> None:
+def test_model_selection_is_owned_by_the_manager() -> None:
+    from launch_ros.utilities import evaluate_parameters
     actions = _load_launch_module().generate_launch_description().entities
-    includes = [a for a in actions if isinstance(a, IncludeLaunchDescription)
-                and 'model' in dict(a.launch_arguments)]
-    assert len(includes) == 1
     context = LaunchContext()
+    for action in actions:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
     context.launch_configurations['firmware_model'] = ''
-    assert not includes[0].condition.evaluate(context)
+    manager = next(a for a in actions if isinstance(a, Node)
+                   and a.node_executable == 'bench_manager')
+    assert evaluate_parameters(context, manager._Node__parameters)[0]['feedback_model'] == ''
     context.launch_configurations['firmware_model'] = 'half_body_robot'
-    assert includes[0].condition.evaluate(context)
+    assert evaluate_parameters(context, manager._Node__parameters)[0]['feedback_model'] == 'half_body_robot'
+    assert not [a for a in actions if isinstance(a, IncludeLaunchDescription)
+                and 'enable_trajectory' in dict(a.launch_arguments)]
 
 
 def test_manager_is_distributed_by_bringup() -> None:
@@ -85,3 +90,34 @@ def test_bringup_installs_manager_module_and_entrypoint(monkeypatch) -> None:
     runpy.run_path(str(root / 'setup.py'))
     assert 'bench_manager' in metadata.get('packages', [])
     assert 'bench_manager = bench_manager.node:main' in metadata['entry_points']['console_scripts']
+
+
+def test_only_host_execution_is_accepted_and_config_is_an_optional_pair(tmp_path):
+    from launch_ros.utilities import evaluate_parameters
+    module = _load_launch_module()
+    actions = module.generate_launch_description().entities
+    context = LaunchContext()
+    for action in actions:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    bridge = next(a for a in actions if isinstance(a, Node)
+                  and a.node_package == 'micro_ros_bridge')
+    assert evaluate_parameters(context, bridge._Node__parameters)[0]['trajectory_execution'] == 'host'
+    host = [a for a in actions if isinstance(a, IncludeLaunchDescription)
+            and 'urdf_file' in dict(a.launch_arguments)]
+    assert len(host) == 1
+    assert not host[0].condition.evaluate(context)
+    validate = next(a for a in actions if isinstance(a, OpaqueFunction))
+    import pytest
+    assert validate.execute(context) == []
+    config = tmp_path / 'motors.yaml'; config.write_text('')
+    urdf = tmp_path / 'model.urdf'; urdf.write_text('')
+    context.launch_configurations['host_motor_config_file'] = str(config)
+    with pytest.raises(ValueError, match='host_urdf_file'):
+        validate.execute(context)
+    context.launch_configurations['host_urdf_file'] = str(urdf)
+    assert host[0].condition.evaluate(context)
+    assert validate.execute(context) == []
+    context.launch_configurations['trajectory_execution'] = 'firmware'
+    with pytest.raises(ValueError, match='host'):
+        validate.execute(context)

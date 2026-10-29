@@ -5,7 +5,9 @@ function state() {
   return {conn:{connected:true},modelTransmissions:{model:'arm',groups:[{name:'wrist',motors:[{id:8},{id:9}],joints:['yaw','pitch']}]},
     modelJoints: [{name:'yaw',type:'revolute',lower:-1,upper:1},{name:'pitch',type:'revolute',lower:-1,upper:1}],
     transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['yaw','pitch']}},
-    commandStatus:{last:1000,data:{trajectory_output_topic:'/motor/trajectory'}},
+    commandStatus:{last:1000,data:{model:'arm',joint_names:['yaw','pitch'],mode:'trajectory',
+      output_topic:'/motor/host_command_array',
+      trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',gravity_enabled:true}},
     jointStates:{byName:{yaw:{position:.2,at:1000},pitch:{position:.1,at:1000}}},
     motors:new Map([[8,{status:{online:true,lifecycle:4,unified_fault_code:0}}],[9,{status:{online:true,lifecycle:4,unified_fault_code:0}}]])};
 }
@@ -15,6 +17,24 @@ it('uses a joint name and lets the host preserve and transform the partner', () 
   expect(message.points[0].positions).toEqual([.3]);
   expect(message.points[0].time_from_start).toEqual({sec:1,nanosec:0});
   expect(message).not.toHaveProperty('motor_id');
+});
+it('accepts JTC with gravity and rejects old control sources, identity changes and stale status', () => {
+  const s=state();
+  expect(api.jointControlError(s,'arm','yaw',1100)).toBe('');
+  s.commandStatus.data.model='previous';
+  expect(api.jointControlError(s,'arm','yaw',1100)).toContain('模型');
+  s.commandStatus.data.model='arm';
+  s.commandStatus.data.joint_names=['yaw'];
+  expect(api.jointControlError(s,'arm','yaw',1100)).toContain('关节');
+  s.commandStatus.data.joint_names=['yaw','pitch'];
+  s.commandStatus.data.trajectory_output_topic='/motor/trajectory';
+  expect(api.jointControlError(s,'arm','yaw',1100)).toContain('路由');
+  s.commandStatus.data.trajectory_output_topic='/host_control/trajectory_controller/follow_joint_trajectory';
+  s.commandStatus.last=4000;
+  expect(api.jointControlError(s,'arm','yaw',1100)).toBeTruthy();
+  s.commandStatus.last=1;
+  s.transmissionStatus.last=3000;
+  expect(api.jointControlError(s,'arm','yaw',3000)).toBeTruthy();
 });
 it('rejects wrong model, readonly bridge, stale or partial group', () => {
   const s=state();
@@ -45,13 +65,12 @@ it('accepts a first joint target from a ready motor after an explicit enable pol
   expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toContain('使能');
 });
 
-it('slider trajectories start from feedback and end at the requested joint position', () => {
+it('slider submits only a future target so JTC starts at the receiving-time state', () => {
   const s=state();
   const message=api.buildJointSliderTrajectory(s,'arm',{name:'yaw',velocity:2},.3,1100);
   expect(message.joint_names).toEqual(['yaw']);
-  expect(message.points).toHaveLength(2);
-  expect(message.points[0]).toMatchObject({positions:[.2],time_from_start:{sec:0,nanosec:0}});
-  expect(message.points[1]).toMatchObject({positions:[.3],time_from_start:{sec:0,nanosec:150000000}});
+  expect(message.points).toHaveLength(1);
+  expect(message.points[0]).toMatchObject({positions:[.3],time_from_start:{sec:0,nanosec:150000000}});
 });
 it('continuous slider sends immediately, coalesces rapid input and flushes the final value once', () => {
   vi.useFakeTimers();vi.setSystemTime(1000);

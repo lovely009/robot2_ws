@@ -27,7 +27,7 @@ namespace micro_ros_bridge
 class BridgeNode : public rclcpp::Node
 {
 public:
-  BridgeNode();
+  explicit BridgeNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 private:
   using TimePoint = std::chrono::steady_clock::time_point;
   using Config = can_bridge_msgs::msg::AgentConfigRequest;
@@ -102,6 +102,7 @@ private:
   TimePoint motion_at_{};
   std::optional<can_bridge_msgs::msg::MotorCommandTarget> last_targets_[65];
   bool trajectory_targets_[65] = {};
+  bool host_execution_ = false, host_takeover_pending_ = false, takeover_stop_sent_ = false;
 
   bool clock_stable();
   bool source_time_valid(uint64_t stamp, std::chrono::milliseconds age);

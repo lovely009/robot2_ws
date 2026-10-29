@@ -6,7 +6,6 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   const errors: string[] = [];
   const connections = { count: 0 };
   const feedbackModels: string[] = [];
-  const controlRequests: boolean[] = [];
   const parameterReplies = {enabled: false, refreshError: 12};
   const firmware = {values: {'system.agent_ping_hz': 100, 'system.motion_report_hz': 50,
     'system.status_report_hz': 10, 'system.imu_report_hz': 100, 'system.temperature_report_hz': 2,
@@ -82,13 +81,12 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       ],
     },
     "/joint_states": {name: ["joint_link1"], position: [0.15], velocity: [0.2], effort: [0.1]},
-    "/motor_command/status": {
-      data: JSON.stringify({
-        output_topic: "/motor/command_array",
-        clients: 1,
-        targets: 0,
-      }),
-    },
+    "/control/status": {data: JSON.stringify({model:"half_body_robot",joint_names:["joint_link1"],
+      mode:"idle",reason:"no_setpoint",reject:"",gravity_enabled:false,effort_gain:1,
+      output_topic:"/motor/host_command_array",
+      trajectory_output_topic:"/host_control/trajectory_controller/follow_joint_trajectory"})},
+    "/robot_transmission/status": {data: JSON.stringify({model:"half_body_robot",
+      joint_names:["joint_link1"],trajectory_enabled:true,last_error:""})},
     "/bench/status": {
       data: JSON.stringify({
         agent: { state: "stopped" },
@@ -114,8 +112,10 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       ({motor_id, online: true, lifecycle: 4, unified_fault_code: 0}))};
     fixtures["/robot_transmission/status"] = {data: JSON.stringify({model: "half_body_robot",
       trajectory_enabled: true, joint_names: ["joint_link8", "joint_link9"]})};
-    fixtures["/motor_command/status"] = {data: JSON.stringify({output_topic: "/motor/command_array",
-      trajectory_output_topic: "/motor/trajectory"})};
+    fixtures["/control/status"] = {data: JSON.stringify({model:"half_body_robot",
+      joint_names:["joint_link8","joint_link9"],mode:"trajectory",reason:"ok",reject:"",
+      gravity_enabled:true,effort_gain:.8,output_topic:"/motor/host_command_array",
+      trajectory_output_topic:"/host_control/trajectory_controller/follow_joint_trajectory"})};
   }
   const makeControlStates = (enabled: boolean, fault = 0) => ({schema_version: 1, session_id: 7001,
     sequence: ++controlSequence, tick_ms: controlSequence * 20,
@@ -127,7 +127,10 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   if (coupled && withControlStates)
     fixtures['/motor/control_states'] = makeControlStates(false);
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => {
-    sendFeedback = (topic, msg) => socket.send(JSON.stringify({op: 'publish', topic, msg}));
+    sendFeedback = (topic, msg) => {
+      if (['/control/status', '/robot_transmission/status'].includes(topic)) fixtures[topic] = msg;
+      socket.send(JSON.stringify({op: 'publish', topic, msg}));
+    };
     const subscribed = new Set<string>();
     const firmwareNames = Object.keys(firmware.values).filter(n => !n.includes('can_') && n !== 'system.unsaved');
     const firmwareReport = () => ({...fixtures['/motor/system_status'] as object,
@@ -135,6 +138,9 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       firmware_unsaved: firmware.values['system.unsaved']});
     const timer = setInterval(() => {
       if (subscribed.has('/motor/system_status')) socket.send(JSON.stringify({op:'publish',topic:'/motor/system_status',msg:firmwareReport()}));
+      for (const topic of ['/control/status', '/robot_transmission/status']) {
+        if (subscribed.has(topic)) socket.send(JSON.stringify({op:'publish',topic,msg:fixtures[topic]}));
+      }
     },200);
     page.once('close',()=>clearInterval(timer));
 
@@ -229,16 +235,6 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
             values: {result: {status: firmware.saveStatus, error_code: firmware.saveStatus === 1 ? 0 : 20}}}));
           return;
         }
-        if (message.service === '/firmware_topic_bridge/set_parameters_atomically') {
-          const enabled = message.args.parameters[0].value.bool_value;
-          controlRequests.push(enabled);
-          const current = JSON.parse((fixtures['/robot_transmission/status'] as {data: string}).data);
-          fixtures['/robot_transmission/status'] = {data: JSON.stringify({...current, trajectory_enabled: enabled})};
-          socket.send(JSON.stringify({op: 'service_response', id: message.id,
-            service: message.service, result: true,
-            values: {result: {successful: true, reason: ''}}}));
-          return;
-        }
         if (message.service === '/bench_manager/set_parameters_atomically') {
           feedbackModels.push(message.args.parameters[0].value.string_value);
           socket.send(JSON.stringify({op: 'service_response', id: message.id,
@@ -271,7 +267,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       }
     });
   });
-  return { publishes, errors, connections, feedbackModels, controlRequests, firmware, parameterReplies,
+  return { publishes, errors, connections, feedbackModels, firmware, parameterReplies,
     sendFeedback: (topic: string, msg: unknown) => {fixtures[topic]=msg;sendFeedback(topic, msg);},
     sendControlState: (enabled: boolean, fault = 0) => {
       const message = makeControlStates(enabled, fault);
@@ -464,6 +460,7 @@ test('关节标题固定、选择不重排，滑块拖动发送且软限按关�
   await expect.poll(()=>fixture.publishes.filter(p=>p.topic==='/arm_controller/joint_trajectory').length).toBe(1);
   const sent=fixture.publishes.find(p=>p.topic==='/arm_controller/joint_trajectory')!.msg;
   expect(sent.joint_names).toEqual(['joint_link8']);
+  expect(sent.points).toHaveLength(1);
   expect((sent.points as {positions:number[]}[]).at(-1)!.positions).toEqual([0.35]);
   await row.locator('[data-bound="upper"]').dblclick();
   const editor = row.locator('[data-bound-editor="upper"]');
@@ -555,7 +552,7 @@ test("A 工作台接入真实模块，切屏保留草稿且导航不产生控制
   expect(fixture.errors).toEqual([]);
 });
 
-test("全局软停显式取消轨迹，并清空主机设定值", async ({ page }) => {
+test("全局软停显式停用运动控制器，不重新发布手动目标", async ({ page }) => {
   const fixture = await connectFixture(page);
   await page.goto("/workbench/#/run");
   await expect(page.locator("#selRows")).toContainText("0.150");
@@ -565,15 +562,14 @@ test("全局软停显式取消轨迹，并清空主机设定值", async ({ page 
     .click();
   await expect
     .poll(() =>
-      fixture.publishes.some((p) => p.topic === "/motor_command/setpoint"),
+      fixture.publishes.some((p) => p.topic === "/control/stop"),
     )
     .toBe(true);
   expect(
-    fixture.publishes.find((p) => p.topic === "/motor/trajectory")?.msg,
+    fixture.publishes.find((p) => p.topic === "/control/trajectory")?.msg,
   ).toMatchObject({ count: 0, target_count: 0 });
-  expect(
-    fixture.publishes.find((p) => p.topic === "/motor_command/setpoint")?.msg,
-  ).toMatchObject({ count: 0, targets: [] });
+  expect(fixture.publishes.find(p => p.topic === '/control/stop')?.msg).toEqual({});
+  expect(fixture.publishes.filter(p => p.topic === '/control/setpoint')).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -627,7 +623,7 @@ test('主机限位阻止超限手动目标及整条动作，刷新后恢复', as
   await expect(page.getByLabel('当前已保存主机限位')).toContainText('-0.417 ～ 0.304 rad');
   await page.locator('button[data-action="play"]').click();
   await expect(page.locator('[data-workbench-panel="actionLibrary"]')).toContainText('主机限位');
-  expect(fixture.publishes.filter(p => ['/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/policy_array', '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   await page.reload();
   await page.getByRole('button', {name: '主机限位', exact: true}).click();
   await expect(page.getByLabel('最小位置 rad', {exact: true})).toHaveValue('-0.417');
@@ -646,33 +642,31 @@ test("差动组通过关节目标入口发送标准轨迹", async ({page}) => {
   const command = fixture.publishes.find(p => p.topic === "/arm_controller/joint_trajectory")!.msg;
   expect(command.joint_names).toEqual(["joint_link8"]);
   expect((command.points as {positions: number[]}[])[0].positions).toEqual([0.4]);
-  expect(fixture.publishes.filter(p => p.topic === "/motor_command/setpoint")).toEqual([]);
+  expect(fixture.publishes.filter(p => p.topic === "/control/setpoint")).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
 
-test('关节控制复选框切换主机只读，未使能电机仍不可发送', async ({page}) => {
+test('关节控制许可据实显示只读状态，未使能电机仍不可发送', async ({page}) => {
   const fixture = await connectFixture(page, true);
   await page.goto('/workbench/#/run');
-  await expect(page.locator('[data-joint="joint_link8"]')).toBeVisible();
-  fixture.sendFeedback('/robot_transmission/status', {data: JSON.stringify({model: 'half_body_robot',
-    trajectory_enabled: false, joint_names: ['joint_link8','joint_link9']})});
   const toggle = page.getByRole('checkbox', {name: '使能控制', exact: true});
   const slider = page.locator('[data-joint="joint_link8"] input[type="range"]');
+  await expect(slider).toBeEnabled();
+  await expect(toggle).toBeDisabled();
+  fixture.sendFeedback('/robot_transmission/status', {data: JSON.stringify({model:'half_body_robot',
+    trajectory_enabled:false,joint_names:['joint_link8','joint_link9'],last_error:''})});
   await expect(toggle).not.toBeChecked();
   await expect(slider).toBeDisabled();
-  await toggle.click();
-  await expect.poll(() => fixture.controlRequests).toEqual([true]);
+  fixture.sendFeedback('/robot_transmission/status', {data: JSON.stringify({model:'half_body_robot',
+    trajectory_enabled:true,joint_names:['joint_link8','joint_link9'],last_error:''})});
   await expect(toggle).toBeChecked();
   await expect(slider).toBeEnabled();
-  expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic) || p.msg.command !== 4)).toHaveLength(0);
-  fixture.sendFeedback('/motor/status_array', {statuses: [8,9].map(motor_id =>
-    ({motor_id, online:true, lifecycle:3, unified_fault_code:0}))});
+  fixture.sendFeedback('/motor/status_array', {statuses:[8,9].map(motor_id =>
+    ({motor_id,online:true,lifecycle:3,unified_fault_code:0}))});
   await expect(slider).toBeDisabled();
-  await toggle.click();
-  await expect.poll(() => fixture.controlRequests).toEqual([true,false]);
-  await expect(toggle).not.toBeChecked();
-  await expect(slider).toBeDisabled();
+  expect(fixture.publishes.filter(p=>!['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
+  expect(fixture.errors).toEqual([]);
 });
 
 test('已下发使能的就绪电机可发送首个关节目标，无需先变成 ACTIVE', async ({page}) => {
@@ -818,7 +812,8 @@ test('滑块无需松手连续发送最新目标，松手不重复，关闭控�
   await expect.poll(()=>sent().length).toBe(2);
   expect((sent()[1].msg.points as {positions:number[]}[]).at(-1)!.positions).toEqual([.27]);
   await slider.evaluate(e=>e.dispatchEvent(new Event('change',{bubbles:true})));
-  await page.getByRole('checkbox',{name:'使能控制',exact:true}).click();
+  fixture.sendFeedback('/robot_transmission/status',{data:JSON.stringify({model:'half_body_robot',
+    trajectory_enabled:false,joint_names:['joint_link8','joint_link9'],last_error:''})});
   await expect(page.getByRole('checkbox',{name:'使能控制',exact:true})).not.toBeChecked();
   await expect(slider).toBeDisabled();
   await slider.evaluate(e=>{e.value='0.3';e.dispatchEvent(new Event('input',{bubbles:true}));});
@@ -872,7 +867,7 @@ test("设备工作台直接显示所选电机参数，直连快照不混入 MCU"
   await page.getByRole('button', {name: '断开 CAN', exact: true}).click();
   await page.getByLabel('设备通信来源').selectOption('firmware');
   await expect(page.locator('[data-workbench-panel="deviceParams"]')).toBeVisible();
-  expect(fixture.publishes.filter(p => ['/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/policy_array', '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -906,7 +901,7 @@ test('设备参数分类切换保留电机草稿，进入固件分类不下发�
   await nav.getByRole('button', {name: '电机参数', exact: true}).click();
   await expect(panel).toBeVisible();
   await expect(input).toHaveValue('-0.8');
-  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
   expect(fixture.firmware.writes).toEqual([]);
   expect(fixture.firmware.saveCalls).toBe(0);
@@ -919,16 +914,20 @@ test('固件参数逐项下发并回读，保存等待终态且不发送运动�
   const firmware = page.getByRole('region', {name: '固件系统参数'});
   await expect(firmware).toContainText('已从控制板读取');
   await firmware.getByLabel('Agent 链路探测').selectOption('20');
-  await firmware.getByLabel('电机运动反馈', {exact: true}).selectOption('25');
+  const motionFeedback = firmware.getByLabel('电机运动反馈', {exact: true});
+  await expect(motionFeedback.locator('option')).toHaveText(['20 Hz', '25 Hz', '50 Hz', '100 Hz']);
+  await motionFeedback.selectOption('100');
+  await expect(motionFeedback.locator('..').locator('small')).toHaveText('10 ms');
   await expect(firmware.getByLabel('电机控制频率')).toHaveValue('200');
   await firmware.getByLabel('电机控制频率').selectOption('1000');
   await page.getByRole('button', {name: '电机参数', exact: true}).click();
   await page.getByRole('button', {name: '固件参数', exact: true}).click();
-  await expect(firmware.getByLabel('电机运动反馈', {exact: true})).toHaveValue('25');
+  await expect(motionFeedback).toHaveValue('100');
   await firmware.getByRole('button', {name: '下发固件参数'}).click();
   await expect(firmware).toContainText('已下发并回读 3 项');
+  await expect(motionFeedback).toHaveValue('100');
   await expect(firmware.getByLabel('电机控制频率')).toHaveValue('1000');
-  expect(fixture.firmware.writes).toEqual([{name: 'system.agent_ping_hz', value: 20}, {name: 'system.motion_report_hz', value: 25}, {name: 'system.motor_command_hz', value: 1000}]);
+  expect(fixture.firmware.writes).toEqual([{name: 'system.agent_ping_hz', value: 20}, {name: 'system.motion_report_hz', value: 100}, {name: 'system.motor_command_hz', value: 1000}]);
   await expect(firmware).toContainText('有未保存修改');
   await firmware.getByRole('button', {name: '保存固件参数 W25'}).click();
   await expect(firmware).toContainText('W25 保存完成并已回读核对');
@@ -991,7 +990,7 @@ test('真实缺失参数不显示已核对，手动读取使用只读回读并�
   await expect(page.locator('#paramResult')).toHaveClass(/err/);
   expect(reads()[0]!.msg.motor_id).toBe(1);
   expect(fixture.publishes.filter(p => p.topic === '/motor/system_command' && ![1,4].includes(Number(p.msg.command)))).toEqual([]);
-  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   fixture.sendFeedback('/motor/topology', {entries: [{motor_id: 1,
     online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3}]});
   fixture.sendFeedback('/motor/device_param_report', {count: 1, entries: [{motor_id: 1,
@@ -1056,7 +1055,7 @@ test('电机详情显示W25记录，不混用设备值或未保存修改', async
   await expect(saved).toContainText('暂无 W25 保存记录');
   await expect(saved.locator('dd')).toHaveCount(0);
   expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array',
-    '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+    '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   expect(fixture.publishes.filter(p => p.topic === '/motor/system_command'
     && ![1, 4].includes(Number(p.msg.command)))).toEqual([]);
   expect(fixture.errors).toEqual([]);
@@ -1126,7 +1125,7 @@ test('左侧电机参数展开子列表，选择切换右侧详情并保留草�
   await list.getByRole('button', {name: /电机 20/}).click();
   await expect(page.locator('#paramSelectionHint')).toContainText('电机 20 暂无参数');
   await expect(page.locator('.tree-footer')).toBeInViewport();
-  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
+  expect(fixture.publishes.filter(p => ['/motor/param_set', '/motor/policy_array', '/control/trajectory', '/control/setpoint', '/control/stop', '/arm_controller/joint_trajectory'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
 

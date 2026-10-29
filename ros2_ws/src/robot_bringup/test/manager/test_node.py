@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 import json
 import logging
 from pathlib import Path
@@ -20,19 +21,17 @@ from conftest import FakeSystemd
 from bench_manager.agent_manager import AgentProcessManager
 from bench_manager.feedback_manager import FirmwareFeedbackManager
 from bench_manager.gravity_feedforward_manager import (
-    DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC,
-    GravityFeedforwardProcessManager,
+    GravityFeedforwardManager, PARAMETER_TIMEOUT_S,
 )
 from bench_manager.motor_sim_manager import MotorSimProcessManager
-from bench_manager.node import BenchManager, _simulation_request
+from bench_manager.node import BenchManager, _GRAVITY_SERVICE, _simulation_request
 from bench_manager.simulation_manager import SimulationProcessManager
 from bench_manager.systemd_units import (
-    SLICE, UNIT_AGENT, UNIT_GRAVITY_FEEDFORWARD, UNIT_MOTOR_BACKEND,
+    SLICE, UNIT_AGENT, UNIT_MOTOR_BACKEND,
     UNIT_SIMULATION, UNIT_FEEDBACK, SystemdUnits,
 )
 
-_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT,
-          UNIT_GRAVITY_FEEDFORWARD, UNIT_FEEDBACK)
+_UNITS = (UNIT_SIMULATION, UNIT_MOTOR_BACKEND, UNIT_AGENT, UNIT_FEEDBACK)
 _MODEL = 'half_body_robot'
 
 
@@ -42,73 +41,47 @@ class _Response:
     text = ''
 
 
-class _RouteFuture:
-    def __init__(self, client):
-        self._client = client
-
-    def add_done_callback(self, callback):
-        if self._client.defer:
-            self._client.pending.append((callback, self))
-        else:
-            callback(self)
-
-    def result(self):
-        response = SetParametersAtomically.Response()
-        response.result = SetParametersResult(
-            successful=self._client.successful, reason=self._client.reason)
-        return response
-
-
-class _RouteClient:
-    """假改道通道（command_streamer 的参数服务）。
-
-    默认**同步回执**：`call_async` 当场把 future 交给回调，于是「切接线 → 停 unit」
-    这条链在一个调用栈里走完，断言好写。`defer=True` 把回执扣住、由测试显式
-    `fire()`——验「切成功之前不许停 unit」要的就是这个窗口。
-    """
-
-    def __init__(self, ready=True, successful=True, reason='', defer=False):
+class _ParameterClient:
+    def __init__(self, ready=True, successful=True, reason='', defer=True):
         self.ready = ready
         self.successful = successful
         self.reason = reason
         self.defer = defer
-        self.topics: list[str] = []
-        self.pending: list = []
-        # 请求改道那一刻 unit 的状态，由测试在拿到 node 后挂上。
-        self.probe = None
-        self.seen_states: list[str] = []
+        self.requests = []
+        self.pending = []
 
-    def wait_for_service(self, timeout_sec=None):
+    def service_is_ready(self):
         return self.ready
 
     def call_async(self, request):
-        self.topics.append(request.parameters[0].value.string_value)
-        if self.probe is not None:
-            self.seen_states.append(self.probe())
-        return _RouteFuture(self)
+        self.requests.append(request)
+        future = Future()
+        self.pending.append(future)
+        if not self.defer:
+            self.fire()
+        return future
 
     def fire(self):
         pending, self.pending = self.pending, []
-        for callback, future in pending:
-            callback(future)
+        for future in pending:
+            response = SetParametersAtomically.Response()
+            response.result = SetParametersResult(
+                successful=self.successful, reason=self.reason)
+            future.set_result(response)
 
 
 @pytest.fixture
-def model_urdf(tmp_path: Path) -> str:
-    """前馈管理器按 `is_file()` 判 URDF 存不存在，所以这里得给真文件。"""
-    path = tmp_path / 'models' / _MODEL / 'urdf' / f'{_MODEL}.urdf'
-    path.parent.mkdir(parents=True)
-    path.write_text('<robot name="x"/>', encoding='utf-8')
-    return str(path)
+def models(tmp_path):
+    config = tmp_path / _MODEL / 'config'
+    config.mkdir(parents=True)
+    (config / 'motor_driver.yaml').write_text(
+        'motor_hardware:\n  motors:\n    motor: {id: 1, joint: joint_link1}\n')
+    return tmp_path
 
 
-def _shell(systemd: FakeSystemd, urdf_path: str = '',
-           written: list[float] | None = None,
-           route: _RouteClient | None = None) -> BenchManager:
-    """跳过 `__init__`（那要 rclpy 上下文）造一个节点外壳。
-
-    `urdf_path` 缺省为空串＝解析不出任何模型，前馈相关之外的用例不必关心它。
-    """
+def _shell(systemd: FakeSystemd, models=None,
+           client: _ParameterClient | None = None) -> BenchManager:
+    """不建 rclpy 上下文；所有外部 IO 均由假体承接。"""
     node = BenchManager.__new__(BenchManager)
     node._systemd = SystemdUnits(runner=systemd)
     node.feedback = FirmwareFeedbackManager(Path('/missing-models'), node._systemd)
@@ -124,17 +97,15 @@ def _shell(systemd: FakeSystemd, urdf_path: str = '',
     node.motor_backend = MotorSimProcessManager(
         can_provider=lambda: [], serial_provider=lambda: [],
         model_provider=lambda: [], systemd=node._systemd)
-    node.feedforward = GravityFeedforwardProcessManager(
-        urdf_provider=lambda _model: urdf_path,
-        gain_writer=(written.append if written is not None else None),
-        systemd=node._systemd)
-    node._gain_client = None
-    node._route_client = route if route is not None else _RouteClient()
+    node._now = [100.0]
+    node.feedforward = GravityFeedforwardManager(
+        models or Path('/missing-models'), node._write_gravity_parameters,
+        clock=lambda: node._now[0])
+    node._gravity_client = client if client is not None else _ParameterClient()
+    node._control_status_sub = None
     node._status_pub = None
     node._timer = None
     node.get_logger = lambda: logging.getLogger('bench_manager-test')
-    # `LifecycleNode.__init__` 建的受管实体表；空壳得自己补上，
-    # 否则 `super().on_activate()` 会在遍历它时炸（回调体本身没问题）。
     node._managed_entities = []
     return node
 
@@ -170,7 +141,8 @@ def test_snapshot_has_five_sections_and_no_log_key() -> None:
     # 前馈没起时 config 是 None：页面据此判断按钮该显示「开」还是「关」。
     assert snapshot['gravity_feedforward'] == {
         'state': 'stopped', 'config': None, 'returncode': None,
-        'gain_error': '', 'command_topic': None, 'route_error': ''}
+        'gain_error': '', 'error': '/control/status unavailable or stale',
+        'pending': None, 'fresh': False}
 
 
 def test_snapshot_state_is_derived_from_the_unit() -> None:
@@ -366,12 +338,11 @@ def test_simulation_request_keeps_the_confirmation_bit() -> None:
     assert 'driver_interface' not in request, '空串＝未给该参数，不该进命令行'
 
 
-# --- 重力前馈服务（ADR 0013）------------------------------------------------
+# --- ros2_control 重力参数服务 ----------------------------------------------
 
 def _start_request(model: str = _MODEL, joint_map: str = '1:joint_link1',
                    effort_gain: float = 1.0):
     from bench_msgs.srv import StartGravityFeedforward
-
     message = StartGravityFeedforward.Request()
     message.model = model
     message.joint_map = joint_map
@@ -379,187 +350,244 @@ def _start_request(model: str = _MODEL, joint_map: str = '1:joint_link1',
     return message
 
 
-def _creations(systemd: FakeSystemd) -> list[list[str]]:
-    return [call for call in systemd.commands() if call[0] == 'systemd-run']
+def _observe(node, **overrides):
+    from std_msgs.msg import String
+    value = dict(model=_MODEL, joint_names=['joint_link1'], mode='trajectory',
+                 gravity_enabled=False, effort_gain=1.0) | overrides
+    node._on_control_status(String(data=json.dumps(value)))
 
 
-def test_start_gravity_feedforward_passes_the_three_fields_through(
-        model_urdf: str) -> None:
-    """服务的三个字段都要真进 unit：漏一个页面就会拿到「起来了但不是你要的」。"""
+def _values(client):
+    from rclpy.parameter import Parameter
+    return [{p.name: Parameter.from_parameter_msg(p).value for p in r.parameters}
+            for r in client.requests]
+
+
+def _ff(response):
+    return json.loads(response.status_json)['gravity_feedforward']
+
+
+def test_start_writes_atomic_controller_parameters_and_returns_explicit_pending(models):
     systemd = _all_absent()
-    node = _shell(systemd, urdf_path=model_urdf)
+    node = _shell(systemd, models)
+    _observe(node)
+    response = node._on_start_gravity_feedforward(
+        _start_request(effort_gain=0.6), _Response())
+    assert response.ok  # 受理成功；pending 不代表已经运行。
+    assert _values(node._gravity_client) == [{'enabled': True, 'effort_gain': 0.6}]
+    values = node._gravity_client.requests[0].parameters
+    assert [p.value.type for p in values] == [1, 3]  # BOOL / DOUBLE
+    assert _ff(response)['pending'] == 'start'
+    assert _ff(response)['state'] == 'stopped'
+    assert _ff(response)['config'] == {'model': _MODEL, 'effort_gain': 1.0}
+    assert not [c for c in systemd.commands() if c[0] == 'systemd-run']
+    node._gravity_client.fire()
+    assert node.feedforward.status()['pending'] == 'start'
+    _observe(node, gravity_enabled=True, effort_gain=0.6)
+    assert node.feedforward.status()['state'] == 'running'
+    assert node.feedforward.status()['pending'] is None
 
-    response = BenchManager._on_start_gravity_feedforward(
-        node, _start_request(effort_gain=0.6), _Response())
 
+def test_configure_subscribes_to_real_control_status_without_creating_a_ros_graph():
+    from rclpy.lifecycle import TransitionCallbackReturn
+    from std_msgs.msg import String
+    node = _shell(_all_absent())
+    subscriptions, services = [], []
+    node.create_publisher = lambda *args: object()
+    node.create_subscription = lambda *args: subscriptions.append(args) or object()
+    node.create_service = lambda kind, name, callback: services.append(name)
+    node.create_timer = lambda *args: object()
+    assert node.on_configure(None) is TransitionCallbackReturn.SUCCESS
+    assert subscriptions == [(String, '/control/status', node._on_control_status, 10)]
+    assert '/bench/start_gravity_feedforward' in services
+    assert '/bench/stop_gravity_feedforward' in services
+    assert '/bench/set_gravity_feedforward_gain' in services
+
+
+def test_parameter_client_uses_controller_service_without_waiting_or_spinning():
+    node = _shell(_all_absent())
+    client = node._gravity_client
+    node._gravity_client = None
+    created = []
+    node.create_client = lambda kind, name: created.append((kind, name)) or client
+    node._write_gravity_parameters({'enabled': False, 'effort_gain': 0.0})
+    assert created == [(SetParametersAtomically, _GRAVITY_SERVICE)]
+    assert _GRAVITY_SERVICE == '/host_control/gravity_controller/set_parameters_atomically'
+    assert _values(client) == [{'enabled': False, 'effort_gain': 0.0}]
+
+
+def test_stop_only_disables_controller_and_zeros_effort(models):
+    systemd = _all_absent()
+    node = _shell(systemd, models)
+    _observe(node, gravity_enabled=True)
+    response = node._on_stop_gravity_feedforward(None, _Response())
     assert response.ok
-    assert json.loads(response.status_json)['gravity_feedforward']['config'] == {
-        'model': _MODEL, 'urdf_path': model_urdf,
-        'joint_map': '1:joint_link1', 'effort_gain': 0.6}
+    assert _values(node._gravity_client) == [{'enabled': False, 'effort_gain': 0.0}]
+    assert _ff(response)['pending'] == 'stop'
+    assert _ff(response)['state'] == 'running'
+    node._gravity_client.fire()
+    assert node.feedforward.status()['state'] == 'running'
+    _observe(node, gravity_enabled=False, effort_gain=0.0)
+    assert node.feedforward.status()['state'] == 'stopped'
+    assert node.feedforward.status()['pending'] is None
+    assert not [c for c in systemd.commands() if c[1:3] == ['--user', 'stop']]
 
 
-# --- 命令流改道（ADR 0014 决定 3）------------------------------------------
-# 页面只下设定值，命令从哪条路出去由 bench_manager 改 command_streamer 的 output_topic
-# 决定。两个方向的顺序都是安全边界，失败方向还不同，所以逐条钉住。
-
-def test_start_switches_the_command_route_only_after_the_unit_is_up(
-        model_urdf: str) -> None:
-    """开：unit 确认 running **之后**才切接线。
-
-    切早了，命令会在「接线已指叠加节点、节点还没起」的窗口里落进没人订阅的话题。
-    """
-    systemd = _all_absent()
-    route = _RouteClient()
-    node = _shell(systemd, urdf_path=model_urdf, route=route)
-    route.probe = lambda: node.feedforward.status()['state']
-
-    response = BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
-    assert response.ok
-    assert route.topics == [OVERLAY_COMMAND_TOPIC]
-    assert route.seen_states == ['running'], '改道请求发出时 unit 还不是 running'
-    assert json.loads(response.status_json)['gravity_feedforward'][
-        'command_topic'] == OVERLAY_COMMAND_TOPIC
-
-
-def test_stop_switches_the_route_back_before_stopping_the_unit(
-        model_urdf: str) -> None:
-    """关：**先**切回直连、**确认成功**再停 unit。
-
-    反过来，命令会在「接线还指着叠加节点、节点已经没了」的窗口里全部落空 → 固件
-    命令超时软停，而机构没有抱闸。
-    """
-    systemd = _all_absent()
-    route = _RouteClient(defer=True)
-    node = _shell(systemd, urdf_path=model_urdf, route=route)
-    BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-    route.fire()  # 收尾开启那一步的改道
-
-    BenchManager._on_stop_gravity_feedforward(node, None, _Response())
-
-    assert route.topics[-1] == DIRECT_COMMAND_TOPIC
-    # 回执还没到：unit 必须还活着
-    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         not in systemd.commands(), '改道没确认就把 unit 停了'
-
-    route.fire()
-    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         in systemd.commands()
-
-
-def test_failed_route_switch_keeps_the_unit_running_on_start(
-        model_urdf: str) -> None:
-    """切不过去**不回滚** unit：命令继续走直连是有命令、只是没补偿（安全方向），
-    回滚反而多一次断流。失败要留在状态里，页面才看得见。"""
-    systemd = _all_absent()
-    node = _shell(systemd, urdf_path=model_urdf,
-                  route=_RouteClient(successful=False, reason='参数被拒'))
-
-    response = BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
-    assert response.ok
-    ff = json.loads(response.status_json)['gravity_feedforward']
-    assert ff['state'] == 'running'
-    assert ff['command_topic'] is None
-    assert '参数被拒' in ff['route_error']
-
-
-def test_failed_route_switch_blocks_stopping_the_unit(model_urdf: str) -> None:
-    """切不回来就**不许**停 unit——那正是「命令落进没人订阅的话题」那条路。"""
-    systemd = _all_absent()
-    route = _RouteClient()
-    node = _shell(systemd, urdf_path=model_urdf, route=route)
-    BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
-    route.successful = False
-    route.reason = '参数被拒'
-    response = BenchManager._on_stop_gravity_feedforward(node, None, _Response())
-
-    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD]         not in systemd.commands()
-    ff = json.loads(response.status_json)['gravity_feedforward']
-    assert ff['state'] == 'running'
-    assert '参数被拒' in ff['route_error']
-
-
-def test_unreachable_streamer_is_reported_not_silently_skipped(
-        model_urdf: str) -> None:
-    """命令节拍节点没在跑（页面那条路整个下不了命令）时要说出来，不能静默跳过改道。"""
-    node = _shell(_all_absent(), urdf_path=model_urdf,
-                  route=_RouteClient(ready=False))
-
-    response = BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
-    ff = json.loads(response.status_json)['gravity_feedforward']
-    assert 'command_streamer' in ff['route_error']
-
-
-def test_start_gravity_feedforward_rejects_before_touching_systemd() -> None:
-    """解析不出 URDF 就当场拒：unit 起来再退出，页面只看到一条没头没尾的 failed。"""
-    systemd = _all_absent()
-    node = _shell(systemd)  # 没有模型可解析
-
-    response = BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
+@pytest.mark.parametrize('model,joint_map', [('other', ''), (_MODEL, '1:wrong'),
+                                            (_MODEL, '2:joint_link1')])
+def test_validation_error_is_in_response_and_status(models, model, joint_map):
+    node = _shell(_all_absent(), models)
+    _observe(node)
+    response = node._on_start_gravity_feedforward(
+        _start_request(model=model, joint_map=joint_map), _Response())
     assert not response.ok
-    assert 'urdf' in response.error
-    assert not _creations(systemd)
+    assert response.error == _ff(response)['error']
+    assert not node._gravity_client.requests
 
 
-def test_stop_gravity_feedforward_stops_the_unit(model_urdf: str) -> None:
-    systemd = _all_absent()
-    node = _shell(systemd, urdf_path=model_urdf)
-    BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
-
-    response = BenchManager._on_stop_gravity_feedforward(node, None, _Response())
-
-    assert response.ok
-    assert ['systemctl', '--user', 'stop', UNIT_GRAVITY_FEEDFORWARD] \
-        in systemd.commands()
-    assert json.loads(response.status_json)[
-        'gravity_feedforward']['state'] == 'stopped'
-
-
-def test_set_gain_requires_a_running_overlay() -> None:
-    """没在跑就别写：参数服务根本不存在，静默发出去会让界面显示「已改」。"""
-    systemd = _all_absent()
-    written: list[float] = []
-    node = _shell(systemd, written=written)
-
-    class _Request:
-        effort_gain = 0.5
-
-    response = BenchManager._on_set_gravity_feedforward_gain(
-        node, _Request(), _Response())
-
+def test_missing_real_status_rejects_start_without_any_parameter_request(models):
+    node = _shell(_all_absent(), models)
+    response = node._on_start_gravity_feedforward(_start_request(), _Response())
     assert not response.ok
-    assert 'not running' in response.error
-    assert written == []
+    assert 'stale' in _ff(response)['error']
+    assert not node._gravity_client.requests
 
 
-def test_set_gain_defers_to_the_confirmation_callback(model_urdf: str) -> None:
-    """服务返回 ok 只代表「写请求发出去了」，状态里的增益等回执确认才变。"""
+@pytest.mark.parametrize('ready,successful,error', [
+    (False, True, 'unavailable'), (True, False, 'refused'),
+])
+def test_immediate_parameter_failure_cannot_return_success(models, ready, successful, error):
+    client = _ParameterClient(ready=ready, successful=successful, reason='refused', defer=False)
+    node = _shell(_all_absent(), models, client)
+    _observe(node)
+    response = node._on_start_gravity_feedforward(_start_request(), _Response())
+    assert not response.ok
+    assert error in response.error
+    assert response.error == _ff(response)['error']
+    assert _ff(response)['pending'] is None
+    assert _ff(response)['state'] == 'stopped'
+
+
+def test_deferred_rejection_is_published_as_error_without_fake_running(models):
+    client = _ParameterClient(successful=False, reason='refused')
+    node = _shell(_all_absent(), models, client)
+    _observe(node)
+    response = node._on_start_gravity_feedforward(_start_request(), _Response())
+    assert response.ok and _ff(response)['pending'] == 'start'
+    client.fire()
+    node._tick()
+    assert node.feedforward.status()['error'] == 'refused'
+    assert node.feedforward.status()['state'] == 'stopped'
+
+
+def test_tick_expires_pending_request_even_without_status_subscribers(models):
+    node = _shell(_all_absent(), models)
+    _observe(node)
+    node._on_start_gravity_feedforward(_start_request(), _Response())
+    node._now[0] += PARAMETER_TIMEOUT_S
+    node._tick()
+    assert node.feedforward.status()['pending'] is None
+    assert 'timed out' in node.feedforward.status()['error']
+    assert node._gravity_client.pending[0].cancelled()
+
+
+def test_set_gain_requires_active_enabled_controller(models):
+    node = _shell(_all_absent(), models)
+    _observe(node, mode='manual', gravity_enabled=True)
+    response = node._on_set_gravity_feedforward_gain(
+        type('Request', (), {'effort_gain': 0.5})(), _Response())
+    assert not response.ok
+    assert 'not running' in _ff(response)['error']
+    assert not node._gravity_client.requests
+
+
+def test_gain_changes_only_on_real_readback(models):
+    node = _shell(_all_absent(), models)
+    _observe(node, gravity_enabled=True)
+    response = node._on_set_gravity_feedforward_gain(
+        type('Request', (), {'effort_gain': 0.25})(), _Response())
+    assert response.ok and _ff(response)['pending'] == 'gain'
+    assert _values(node._gravity_client) == [{'effort_gain': 0.25}]
+    node._gravity_client.fire()
+    assert node.feedforward.status()['config']['effort_gain'] == 1.0
+    _observe(node, gravity_enabled=True, effort_gain=0.25)
+    assert node.feedforward.status()['config']['effort_gain'] == 0.25
+    assert node.feedforward.status()['pending'] is None
+
+
+@pytest.mark.parametrize('payload', ['{', '[]', 'null', '{}',
+    '{"model":"arm","joint_names":["a"],"mode":"trajectory",'
+    '"gravity_enabled":"true","effort_gain":1.0}'])
+def test_invalid_control_status_invalidates_previously_running_state(payload):
+    from std_msgs.msg import String
+    node = _shell(_all_absent())
+    _observe(node, gravity_enabled=True)
+    node._on_control_status(String(data=payload))
+    assert node.feedforward.status()['state'] == 'stopped'
+    assert not node.feedforward.status()['fresh']
+    assert node.feedforward.status()['error']
+
+
+def test_cleanup_releases_controller_handles_and_cancels_pending_without_stopping_units(models):
     systemd = _all_absent()
-    written: list[float] = []
-    node = _shell(systemd, urdf_path=model_urdf, written=written)
-    BenchManager._on_start_gravity_feedforward(
-        node, _start_request(), _Response())
+    node = _shell(systemd, models)
+    _observe(node, gravity_enabled=True)
+    node._on_stop_gravity_feedforward(None, _Response())
+    client, subscription = node._gravity_client, object()
+    node._control_status_sub = subscription
+    destroyed = []
+    node.destroy_client = lambda value: destroyed.append(value)
+    node.destroy_subscription = lambda value: destroyed.append(value)
+    node.destroy_publisher = lambda value: None
+    node.destroy_timer = lambda value: None
+    node.on_cleanup(None)
+    assert destroyed == [client, subscription]
+    assert node._gravity_client is None and node._control_status_sub is None
+    assert client.pending[0].cancelled()
+    assert node.feedforward.status()['state'] == 'stopped'
+    assert not [c for c in systemd.commands() if c[1:3] == ['--user', 'stop']]
 
-    class _Request:
-        effort_gain = 0.25
 
-    response = BenchManager._on_set_gravity_feedforward_gain(
-        node, _Request(), _Response())
+# --- 反馈发布者归属 ---------------------------------------------------------
 
-    assert response.ok
-    assert written == [0.25]
-    assert json.loads(response.status_json)['gravity_feedforward'][
-        'config']['effort_gain'] == 1.0
+@pytest.mark.parametrize('publishers,managed,expected_external', [
+    (['workbench_control'], True, False),
+    (['firmware_topic_bridge'], True, False),
+    (['workbench_control'], False, True),
+    (['firmware_topic_bridge'], False, True),
+    (['workbench_control', 'workbench_control'], True, True),
+    (['firmware_topic_bridge', 'workbench_control'], True, True),
+    (['workbench_control', 'external_joint_source'], True, True),
+    (['external_joint_source'], True, True),
+])
+def test_feedback_ownership_excludes_only_one_managed_publisher(
+        publishers, managed, expected_external):
+    from types import SimpleNamespace
+    systemd = _all_absent()
+    if managed:
+        systemd.properties[UNIT_FEEDBACK] = {
+            'LoadState': 'loaded', 'ActiveState': 'active',
+            'Environment': 'BENCH_FEEDBACK_MODEL=arm BENCH_CONTROL_EXECUTION=ros2_control'}
+    node = _shell(systemd)
+    node.agent.status = lambda: {'state': 'running'}
+    node.get_parameter = lambda _name: SimpleNamespace(value='arm')
+    node.get_publishers_info_by_topic = lambda _topic: [
+        SimpleNamespace(node_name=name) for name in publishers]
+    node._tick()
+    assert (node.feedback.status()['source'] == 'external') == expected_external
+    stopped = ['systemctl', '--user', 'stop', UNIT_FEEDBACK] in systemd.commands()
+    assert stopped == (managed and expected_external)
+    assert not [c for c in systemd.commands() if c[0] == 'systemd-run']
 
-    node.feedforward.note_gain_applied(0.25)
-    assert json.loads(node._snapshot_json())['gravity_feedforward'][
-        'config']['effort_gain'] == 0.25
+
+def test_immediate_empty_future_exception_cannot_return_success(models):
+    node = _shell(_all_absent(), models)
+    _observe(node)
+    future = Future()
+    future.set_exception(TimeoutError())
+    node._gravity_client.call_async = lambda request: future
+    response = node._on_start_gravity_feedforward(_start_request(), _Response())
+    assert not response.ok
+    assert response.error == _ff(response)['error']
+    assert response.error
+    assert _ff(response)['pending'] is None

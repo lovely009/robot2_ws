@@ -9,6 +9,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <depend>hardware_interface</depend>
+  <depend>can_bridge_msgs</depend>
   <depend>motor_drive</depend>
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
@@ -17,7 +18,12 @@
   <depend>robot_transmission</depend>
 
   <exec_depend>controller_manager</exec_depend>
+  <exec_depend>robot_dynamics</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -29,8 +35,7 @@
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
-  <exec_depend>can_bridge_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
+  <depend>std_msgs</depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
 

@@ -342,6 +342,22 @@ bool motor_control_bind_profile_ptr(motor_control_context_t *ctx, uint16_t motor
 // 出现「快照走限位、轨迹不走」这类只有一条路径才有的安全缺口。
 // ---------------------------------------------------------------------------
 
+#define MOTOR_CONTROL_MOTION_FEEDBACK_TIMEOUT_MS 100U
+
+// 真实运动反馈门：链路在线或 SDO 应答不能替代位置/速度测量。
+static bool entry_motion_feedback_fresh(const motor_control_entry_t *entry,
+    uint32_t now_ms) {
+  if (!entry->has_measured || entry->last_motion_rx_tick_ms == 0U) {
+    return false;
+  }
+  // ISR 帧戳可比任务采样超前数毫秒；最多容忍 2ms。真正的过期仍按
+  // >100ms 拒绝，且用有符号差避免超前时间戳被无符号下溢成“超老”。
+  const int32_t age_ms =
+      (int32_t)(now_ms - entry->last_motion_rx_tick_ms);
+  return age_ms >= -2 &&
+         age_ms <= (int32_t)MOTOR_CONTROL_MOTION_FEEDBACK_TIMEOUT_MS;
+}
+
 // 生命周期门：目标只作用于受控集合与使能序列窗口（ARD §13.1）。
 static bool entry_target_eligible(const motor_control_entry_t *entry) {
   return entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
@@ -352,7 +368,7 @@ static bool entry_target_eligible(const motor_control_entry_t *entry) {
 // 运动前置门：全局授权、逐电机使能与授权、型号绑定、模式事务互斥。
 // 设备参数核对仅报告，不参与运动授权。
 static bool entry_may_move(const motor_control_context_t *ctx,
-    const motor_control_entry_t *entry) {
+    const motor_control_entry_t *entry, uint32_t now_ms) {
   if (!ctx->authorized || ctx->require_new_snapshot) {
     return false; // 无授权/待新证据：不得产生运动帧
   }
@@ -361,6 +377,9 @@ static bool entry_may_move(const motor_control_context_t *ctx,
   }
   if (!entry->motion_authorized) {
     return false; // 授权位已清（故障/离线/撤权）：不得自动恢复（ARD §36）
+  }
+  if (!entry_motion_feedback_fresh(entry, now_ms)) {
+    return false; // 真实运动量缺失/过期：其它帧刷新 last_rx 也不得续租
   }
   if (entry->profile == NULL) {
     return false; // 未绑定型号：不可控
@@ -650,7 +669,7 @@ bool motor_control_apply_command_snapshot(
       motor_control_soft_stop_entry(ctx, entry, now_ms);
       continue;
     }
-    if (!entry_may_move(ctx, entry)) {
+    if (!entry_may_move(ctx, entry, now_ms)) {
       continue;
     }
     entry_apply_target(ctx, entry, i, target->position_rad, target->velocity_rad_s,
@@ -1011,7 +1030,7 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
     if (entry == NULL || !entry->used || !entry_target_eligible(entry)) {
       continue; // 故障/离线/冲突/未绑定自动脱离轨迹（归属是派生的）
     }
-    if (!entry_may_move(ctx, entry)) {
+    if (!entry_may_move(ctx, entry, now_ms)) {
       continue; // 与快照路径同一套门禁
     }
     const motor_control_trajectory_point_t *left = NULL;
@@ -1087,7 +1106,7 @@ void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
     if (entry->enable_pending || entry->p0_pending) {
       continue;
     }
-    if (!entry_may_move(ctx, entry)) {
+    if (!entry_may_move(ctx, entry, now_ms)) {
       continue;
     }
     (void)entry_push_mit(ctx, entry, i, now_ms, false);
@@ -1294,7 +1313,7 @@ bool motor_control_target_valid(const motor_control_context_t *ctx,
   }
   const motor_control_entry_t *entry = &ctx->entries[slot];
   if (!entry->used || !entry->has_target || !entry_target_eligible(entry) ||
-      !entry_may_move(ctx, entry) || entry->p0_pending) return false;
+      !entry_may_move(ctx, entry, now_ms) || entry->p0_pending) return false;
   if (trajectory_owns(ctx, entry->motor_id)) return true;
   const uint32_t remaining = ctx->snapshot_deadline_tick_ms - now_ms;
   return remaining > 0U && remaining <= MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS;
@@ -1314,6 +1333,25 @@ void motor_control_soft_stop_all(motor_control_context_t *ctx, uint32_t now_ms) 
     motor_control_soft_stop_entry(ctx, &ctx->entries[i], now_ms);
   }
   ctx->trajectory_active = false;
+}
+
+// 运动反馈过期与链路离线分开处置：保留在线链路，但该电机立即安全停机并使
+// 恢复必须经过显式策略授权；SDO/状态帧刷新 last_rx 不得掩盖该事实。
+static void service_motion_feedback_checks(motor_control_context_t *ctx,
+    uint32_t now_ms) {
+  for (size_t i = 0; i < ctx->entry_count; ++i) {
+    motor_control_entry_t *entry = &ctx->entries[i];
+    if (!entry->used || !entry->online ||
+        (!entry->has_target && !entry->motion_enabled &&
+         entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_ACTIVE) ||
+        entry_motion_feedback_fresh(entry, now_ms)) {
+      continue;
+    }
+    motor_control_soft_stop_entry(ctx, entry, now_ms);
+    entry->has_target = false;
+    entry->motion_authorized = false;
+    entry->policy_enable = false;
+  }
 }
 
 static void service_snapshot_freshness(motor_control_context_t *ctx, uint32_t now_ms) {
@@ -1349,6 +1387,7 @@ void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms) {
     return;
   }
   service_offline_checks(ctx, now_ms);
+  service_motion_feedback_checks(ctx, now_ms);
   service_snapshot_freshness(ctx, now_ms);
   if (ctx->trajectory_active && ctx->trajectory_agent_mode &&
       !motor_control_trajectory_targets_healthy(ctx, ctx->trajectory.target_ids,

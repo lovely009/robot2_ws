@@ -17,9 +17,6 @@
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosbridge_library</exec_depend>
   <exec_depend>can_bridge_msgs</exec_depend>
-  <!-- 命令节拍（ADR 0014）：页面只下设定值，快照流由它出。这条是**真声明**——
-       motor_command 只依赖 rclpy/can_bridge_msgs/std_msgs，不成环。 -->
-  <exec_depend>motor_command</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <!-- 台架进程管理（bench_manager）不在本包的依赖里：本 launch 只做 L1（rosbridge +

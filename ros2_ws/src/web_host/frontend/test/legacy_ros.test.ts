@@ -108,10 +108,10 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   vi.useFakeTimers();
   vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => action }));
   const ros = await import("../../web/js/core/ros.js");
-  const { store } = await import("../../web/js/core/store.js");
+  const { store, MODEL } = await import("../../web/js/core/store.js");
   const { playAction } = await import("../../web/js/panels/actionLibrary.js");
   store.modelTransmissions = {
-    model: store.MODEL,
+    model: MODEL,
     driver_file: '',
     groups: [{
       name: 'direct_m1',
@@ -124,6 +124,10 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   };
   ros.connect();
   Socket.instances[0].emit("connection");
+  store.transmissionStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],trajectory_enabled:true}};
+  store.commandStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],
+    output_topic:'/motor/host_command_array',
+    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   store.motors.set(1, {
     status: { online: true, lifecycle: 3 },
     motion: { position: 0.15 },
@@ -134,7 +138,8 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
     enable: true,
     loop: false,
   });
-  await vi.runAllTimersAsync();
+  await vi.advanceTimersByTimeAsync(900);
+  expect(Topic.published.some(p => p.topic === '/motor/policy_array')).toBe(true);
   const before = Topic.published.length;
   ros.connect();
   Socket.instances[1].emit("connection");
@@ -227,7 +232,8 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
     ["/motor/status_array", "can_bridge_msgs/msg/MotorStatusArray"],
     ["/motor/topology", "can_bridge_msgs/msg/MotorTopology"],
     ["/motor/events", "can_bridge_msgs/msg/MotorEvent"],
-    ["/motor/trajectory_state", "can_bridge_msgs/msg/MotorTrajectoryState"],
+    ["/control/trajectory_state", "can_bridge_msgs/msg/MotorTrajectoryState"],
+    ["/control/status", "std_msgs/msg/String"],
     ["/motor/device_param_report", "can_bridge_msgs/msg/DeviceParamReport"],
     ["/motor/system_status", "can_bridge_msgs/msg/SystemStatus"],
     ["/motor/control_states", "can_bridge_msgs/msg/MotorControlStateArray"],
@@ -243,8 +249,9 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
     (name) => name.startsWith("/micro_ros_up/"))).toEqual([]);
 
   const downlinks = [
-    ["/motor_command/setpoint", "can_bridge_msgs/msg/MotorCommandArray"],
-    ["/motor/trajectory", "can_bridge_msgs/msg/MotorTrajectory"],
+    ["/control/setpoint", "can_bridge_msgs/msg/MotorCommandArray"],
+    ["/control/trajectory", "can_bridge_msgs/msg/MotorTrajectory"],
+    ["/control/stop", "std_msgs/msg/Empty"],
     ["/motor/policy_array", "can_bridge_msgs/msg/MotorPolicyArray"],
     ["/motor/param_set", "can_bridge_msgs/msg/ParamSetArray"],
     ["/motor/system_command", "can_bridge_msgs/msg/SystemCommand"],
@@ -294,5 +301,22 @@ it("切换模型清空旧关节值，主机模型同步完成前拒收旧反馈"
     model: 'new_arm', desired_model: 'new_arm'}});
   joints.callback?.({name: ['elbow'], position: [0.4], velocity: [0.5], effort: [0.6]});
   expect(data.store.jointStates.byName.elbow).toMatchObject({position: 0.4, velocity: 0.5, effort: 0.6});
+  ros.disconnect();
+});
+
+it('external 关节反馈必须等当前模型的新鲜主机状态，缺失或过期时拒收', async () => {
+  const ros = await import('../../web/js/core/ros.js');
+  const data = await import('../../web/js/core/store.js');
+  ros.connect();Socket.instances[0].emit('connection');
+  data.store.bench.feedback={source:'external'};
+  const joints=Topic.instances.find(t=>t.name==='/joint_states')!;
+  joints.callback?.({name:['elbow'],position:[9]});
+  expect(data.store.jointStates.byName).toEqual({});
+  data.store.transmissionStatus={last:Date.now()-3000,data:{model:data.MODEL}};
+  joints.callback?.({name:['elbow'],position:[9]});
+  expect(data.store.jointStates.byName).toEqual({});
+  data.store.transmissionStatus={last:Date.now(),data:{model:data.MODEL}};
+  joints.callback?.({name:['elbow'],position:[.4]});
+  expect(data.store.jointStates.byName.elbow.position).toBe(.4);
   ros.disconnect();
 });

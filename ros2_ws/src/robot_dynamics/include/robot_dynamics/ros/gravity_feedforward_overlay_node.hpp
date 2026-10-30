@@ -44,6 +44,8 @@ struct GravityFeedforwardOverlayParameters {
 // 安全不变式：**任何情况下都不丢帧**。τ_g 不可用（无 /joint_states、超时、电机/
 // 关节没映射上、帧不符合契约）时原样转发该帧——快照是完整快照语义，缺席 = 固件立即
 // 软停，丢一帧比少加一点前馈危险得多。只有 urdf_path 缺失或解析失败才 fail-fast。
+// 快照保守要求整个标量模型的构型均有新鲜测量；轨迹允许由本分段路点预测构型，
+// 未被路点覆盖的模型关节仍须有新鲜测量，否则整段直通。
 //
 // 沿用 ArmModel 的约束：非线程安全，必须单线程执行器（`rclcpp::spin` 即可）。
 class GravityFeedforwardOverlayNode final : public rclcpp::Node {
@@ -61,6 +63,7 @@ private:
   void trajectory_callback(const can_bridge_msgs::msg::MotorTrajectory & message);
 
   bool joint_states_fresh() const;
+  bool joint_state_fresh(const std::string & name, int64_t now_ns) const;
   // 未命中时按节流告警并返回 nullptr（该电机没有前馈，帧照发）。
   const std::size_t * torque_index_for(std::uint16_t motor_id,
                                        const char * channel);
@@ -69,8 +72,9 @@ private:
   MotorJointMap joint_map_;
   std::unordered_map<std::uint16_t, std::size_t> torque_index_;  // 落回模型的
   std::unordered_set<std::uint16_t> mentioned_motor_ids_;  // joint_map 里出现过的
-  bool have_joint_states_{false};
-  int64_t last_joint_states_ns_{0};
+  // 构型允许分帧更新，但每个关节只能用自己的测量时刻续期；一个健康关节不能
+  // 替缺席关节刷新授权。快照保守地要求模型所有可控标量关节均有新鲜测量。
+  std::unordered_map<std::string, int64_t> joint_state_stamps_ns_;
   double joint_states_timeout_s_{0.5};
   double effort_gain_{1.0};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr

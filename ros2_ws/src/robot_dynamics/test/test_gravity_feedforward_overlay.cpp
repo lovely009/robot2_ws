@@ -438,6 +438,92 @@ TEST(GravityFeedforwardOverlayNode, SnapshotPassesThroughWhenTimeoutIsZero) {
   rclcpp::shutdown();
 }
 
+TEST(GravityFeedforwardOverlayNode, InitialPartialFeedbackDoesNotAuthorizeNeutralJoints) {
+  ensure_rclcpp_initialized();
+  auto parameters = test_parameters("snap_initial_partial");
+  parameters.joint_states_timeout_s = 2.0;
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  const auto frame = command_array(12, {target(1, 0.4f, 0.0f, 1.5f)});
+
+  harness.joint_states_publisher->publish(joint_state({"joint_1"}, {0.3}));
+  harness.spin_for(100ms);
+  const auto partial = harness.publish_command_until(
+      frame, [](const auto &) { return true; });
+  EXPECT_TRUE(command_frames_identical(partial, frame));
+
+  // 构型可以来自不同帧；只要每个依赖都已测量且仍新鲜即可恢复补偿。
+  harness.joint_states_publisher->publish(
+      joint_state({"joint_2", "joint_3"}, {-0.4, 0.7}));
+  const double expected = 1.5 + closed_form(0.3, -0.4, 0.7)[0];
+  const auto complete = harness.publish_command_until(frame, [expected](const auto & received) {
+    return std::abs(static_cast<double>(effort_or_nan(received, 0)) - expected) < 1e-6;
+  });
+  EXPECT_NEAR(effort_or_nan(complete, 0), expected, 1e-6);
+  rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayNode, PartialFeedbackCannotRenewMissingJointAfterTimeout) {
+  ensure_rclcpp_initialized();
+  auto parameters = test_parameters("snap_partial_timeout");
+  parameters.joint_states_timeout_s = 0.3;
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  const auto frame = command_array(14, {target(1, 0.4f, 0.0f, 1.5f)});
+  harness.joint_states_publisher->publish(
+      joint_state({"joint_1", "joint_2", "joint_3"}, {0.3, -0.4, 0.7}));
+  const double expected = 1.5 + closed_form(0.3, -0.4, 0.7)[0];
+  const auto complete = harness.publish_command_until(frame, [expected](const auto & received) {
+    return std::abs(static_cast<double>(effort_or_nan(received, 0)) - expected) < 1e-6;
+  });
+  EXPECT_NEAR(effort_or_nan(complete, 0), expected, 1e-6);
+
+  harness.spin_for(400ms);
+  harness.joint_states_publisher->publish(
+      joint_state({"joint_1", "joint_2"}, {0.3, -0.4}));
+  harness.spin_for(100ms);
+  harness.commands.clear();
+  const auto partial = harness.publish_command_until(
+      frame, [](const auto &) { return true; });
+  EXPECT_TRUE(command_frames_identical(partial, frame));
+  rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayNode, MeasurementStampControlsAgeInsteadOfArrivalTime) {
+  ensure_rclcpp_initialized();
+  const auto parameters = test_parameters("snap_measured_age");
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  auto old = joint_state({"joint_1", "joint_2", "joint_3"}, {0.3, -0.4, 0.7});
+  old.header.stamp = harness.node->now() - rclcpp::Duration::from_seconds(5.0);
+  harness.joint_states_publisher->publish(old);
+  harness.spin_for(100ms);
+  const auto frame = command_array(15, {target(1, 0.4f, 0.0f, 1.5f)});
+  const auto output = harness.publish_command_until(
+      frame, [](const auto &) { return true; });
+  EXPECT_TRUE(command_frames_identical(output, frame));
+  rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayNode, UnrelatedFeedbackDoesNotRefreshExpiredConfiguration) {
+  ensure_rclcpp_initialized();
+  const auto parameters = test_parameters("snap_unrelated");
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  auto old = joint_state({"joint_1", "joint_2", "joint_3"}, {0.3, -0.4, 0.7});
+  old.header.stamp = harness.node->now() - rclcpp::Duration::from_seconds(5.0);
+  harness.joint_states_publisher->publish(old);
+  harness.spin_for(100ms);
+  harness.joint_states_publisher->publish(
+      joint_state({"gripper_finger", "joint_aux"}, {0.2, 0.4}));
+  harness.spin_for(100ms);
+  const auto frame = command_array(16, {target(1, 0.4f, 0.0f, 1.5f)});
+  const auto output = harness.publish_command_until(
+      frame, [](const auto &) { return true; });
+  EXPECT_TRUE(command_frames_identical(output, frame));
+  rclcpp::shutdown();
+}
+
 // 未知 motor_id：该电机原值不动，其余照加，帧不丢、count/targets 不改。
 TEST(GravityFeedforwardOverlayNode, UnknownMotorIdLeavesOnlyItsEffortUntouched) {
   ensure_rclcpp_initialized();
@@ -475,6 +561,9 @@ TEST(GravityFeedforwardOverlayNode, TrajectoryInterpolatesMissingMotorTick) {
   Harness harness(test_node(parameters), parameters);
   harness.wait_for_links();
 
+  // 本分段只预测 joint_1/2，未覆盖的 joint_3 必须有新鲜测量。
+  harness.joint_states_publisher->publish(joint_state({"joint_3"}, {0.0}));
+
   const can_bridge_msgs::msg::MotorTrajectory frame = trajectory(
       123, {1, 2},
       {trajectory_point(0, 1, 0.2f, 1.0f), trajectory_point(0, 2, -0.4f, 2.0f),
@@ -510,6 +599,55 @@ TEST(GravityFeedforwardOverlayNode, TrajectoryInterpolatesMissingMotorTick) {
     EXPECT_EQ(output.points[i].velocity, frame.points[i].velocity);
     EXPECT_NEAR(output.points[i].effort, expected_effort[i], 1e-6)
         << "points[" << i << "]";
+  }
+  rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayNode, TrajectoryCannotUseStaleUnpredictedJoint) {
+  ensure_rclcpp_initialized();
+  auto parameters = test_parameters("traj_stale_dependency");
+  parameters.joint_states_timeout_s = 2.0;
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  auto old = joint_state({"joint_1", "joint_2", "joint_3"}, {0.3, -0.4, 0.7});
+  old.header.stamp = harness.node->now() - rclcpp::Duration::from_seconds(5.0);
+  harness.joint_states_publisher->publish(old);
+  harness.spin_for(100ms);
+
+  // joint_3 只列在 target_ids 中但没有路点，不算预测到了该关节。
+  const auto frame = trajectory(124, {1, 2, 3},
+      {trajectory_point(0, 1, 0.2f, 1.0f), trajectory_point(0, 2, -0.4f, 2.0f)});
+  const auto stale = harness.publish_trajectory_until(
+      frame, [](const auto &) { return true; });
+  EXPECT_TRUE(trajectory_frames_identical(stale, frame));
+
+  harness.joint_states_publisher->publish(joint_state({"joint_3"}, {0.7}));
+  const double expected = 1.0 + closed_form(0.2, -0.4, 0.7)[0];
+  const auto fresh = harness.publish_trajectory_until(frame, [expected](const auto & received) {
+    return !received.points.empty() &&
+           std::abs(static_cast<double>(received.points[0].effort) - expected) < 1e-6;
+  });
+  ASSERT_FALSE(fresh.points.empty());
+  EXPECT_NEAR(fresh.points[0].effort, expected, 1e-6);
+  rclcpp::shutdown();
+}
+
+TEST(GravityFeedforwardOverlayNode, FullyPredictedTrajectoryNeedsNoMeasuredConfiguration) {
+  ensure_rclcpp_initialized();
+  const auto parameters = test_parameters("traj_fully_predicted");
+  Harness harness(test_node(parameters), parameters);
+  harness.wait_for_links();
+  const auto frame = trajectory(125, {1, 2, 3},
+      {trajectory_point(0, 1, 0.2f, 1.0f), trajectory_point(0, 2, -0.4f, 2.0f),
+       trajectory_point(0, 3, 0.7f, 3.0f)});
+  const auto torque = closed_form(0.2, -0.4, 0.7);
+  const auto output = harness.publish_trajectory_until(frame, [&torque](const auto & received) {
+    return received.points.size() == 3 &&
+           std::abs(static_cast<double>(received.points[0].effort) - (1.0 + torque[0])) < 1e-6;
+  });
+  ASSERT_EQ(output.points.size(), 3U);
+  for (std::size_t i = 0; i < output.points.size(); ++i) {
+    EXPECT_NEAR(output.points[i].effort, frame.points[i].effort + torque[i], 1e-6);
   }
   rclcpp::shutdown();
 }

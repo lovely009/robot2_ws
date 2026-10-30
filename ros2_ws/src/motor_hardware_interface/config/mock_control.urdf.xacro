@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!-- Synthetic kinematics for controller contract tests; no device transport. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mock_control_robot">
+  <xacro:arg name="control_joints" default=""/>
+  <xacro:property name="joint_names" value="${[name for name in '$(arg control_joints)'.split(',') if name]}"/>
+  <link name="base_link"/>
+  <xacro:macro name="emit_physical_joints" params="joints">
+    <xacro:if value="${len(joints) > 0}">
+      <link name="${joints[0]}_link"/>
+      <joint name="${joints[0]}" type="continuous">
+        <parent link="base_link"/>
+        <child link="${joints[0]}_link"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1"/>
+      </joint>
+      <xacro:emit_physical_joints joints="${joints[1:]}"/>
+    </xacro:if>
+  </xacro:macro>
+  <xacro:macro name="emit_interfaces" params="joints">
+    <xacro:if value="${len(joints) > 0}">
+      <joint name="${joints[0]}">
+        <command_interface name="position"/>
+        <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+        <state_interface name="velocity"><param name="initial_value">0.0</param></state_interface>
+        <state_interface name="effort"><param name="initial_value">0.0</param></state_interface>
+      </joint>
+      <xacro:emit_interfaces joints="${joints[1:]}"/>
+    </xacro:if>
+  </xacro:macro>
+  <xacro:emit_physical_joints joints="${joint_names}"/>
+  <ros2_control name="OfflineGenericSystem" type="system">
+    <hardware><plugin>mock_components/GenericSystem</plugin></hardware>
+    <xacro:emit_interfaces joints="${joint_names}"/>
+  </ros2_control>
+</robot>

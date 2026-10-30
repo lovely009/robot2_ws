@@ -3,8 +3,7 @@
 <package format="3">
   <name>robot_bringup</name>
   <version>0.1.0</version>
-  <description>台架唯一入口：一个 launch 起 L1（rosbridge + 静态页）与 L2
-    （bench_manager）。L3 会话（仿真 / 电机后端 / Agent）由 bench_manager 按需起停。</description>
+  <description>MCU 整机入口：标定核验、独占租约、标准运动 Action 与托管网页。</description>
   <maintainer email="ly@todo.todo">ly</maintainer>
   <license>Apache-2.0</license>
 
@@ -18,8 +17,16 @@
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
   <exec_depend>robot_description</exec_depend>
+  <exec_depend>robot_calibration</exec_depend>
+  <exec_depend>robot_supervisor</exec_depend>
+  <exec_depend>micro_ros_agent</exec_depend>
+  <!-- robot_motion 的 Action 适配器由 robot_supervisor 加载并声明依赖。 -->
 
   <test_depend>python3-pytest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>robot_system_msgs</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

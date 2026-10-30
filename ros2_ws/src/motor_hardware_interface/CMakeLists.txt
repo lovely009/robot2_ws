@@ -25,7 +25,11 @@ target_link_libraries(${PROJECT_NAME} motor_drive::motor_drive yaml-cpp)
 ament_target_dependencies(${PROJECT_NAME}
   hardware_interface pluginlib rclcpp rclcpp_lifecycle robot_transmission)
 
-pluginlib_export_plugin_description_file(hardware_interface hardware_plugins.xml)
+# The legacy direct-CAN implementation remains testable as a library, but is
+# deliberately not exported as a loadable ros2_control hardware plugin. Real
+# motors are owned exclusively by the micro-ROS MCU.
+# An empty resource also shadows an older installed plugin in an underlay.
+ament_index_register_resource("hardware_interface__pluginlib__plugin" CONTENT "")
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -38,7 +42,7 @@ install(DIRECTORY config launch urdf DESTINATION share/${PROJECT_NAME}
 # Backward-compatible path, installed from the single model-library source.
 install(FILES "${robot_description_DIR}/../config/motor.yaml"
   DESTINATION share/${PROJECT_NAME}/config)
-install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
+install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 # 固件 ↔ ROS 标准话题适配桥（节点入口；转换/校验在
 # motor_hardware_interface/topic_bridge.py，由单测共用）。
@@ -62,6 +66,10 @@ if(BUILD_TESTING)
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
   target_link_libraries(test_transmission_system ${PROJECT_NAME})
   ament_add_pytest_test(test_hardware_launch test/test_hardware_launch.py)
+  ament_add_pytest_test(test_standard_trajectory_launch test/test_standard_trajectory_launch.py
+    TIMEOUT 90
+    APPEND_ENV ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=194
+      "ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/ros2-ecosystem-tests")
   ament_add_pytest_test(test_xacro_consistency test/test_xacro_consistency.py)
   ament_add_pytest_test(test_topic_bridge test/test_topic_bridge.py)
   ament_add_pytest_test(test_control_state test/test_control_state.py)

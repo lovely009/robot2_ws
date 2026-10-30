@@ -1,8 +1,10 @@
-"""一条入口启动机械臂、CAN 电机模拟器和 ros2_control 驱动端。
+"""MCU HIL 或外部控制器的机械臂被控对象与 CAN 电机模拟器。
 
-软件闭环（默认）：
-  position_controller -> motor_hardware_interface -> CAN transport
-  -> motor_sim -> 被控对象 -> /joint_states -> motor_sim
+实机控制统一经过 micro-ROS MCU；旧 controller_mode:=host 在任何传输或
+进程初始化前拒绝。默认 firmware 模式要求显式指定 SocketCAN/SLCAN 传输。
+离线标准控制器测试使用 motor_hardware_interface/mock_control.launch.py。
+
+HIL 闭环：MCU -> CAN -> 电机模拟器 -> 被控对象 -> 测量反馈 -> MCU
 
 「被控对象」由 backend:= 选：gazebo（gz sim + gz_ros2_control 的 effort 控制器）或
 mujoco（自写力矩直通桥 + MuJoCo 物理）。两者对外契约相同——吃
@@ -14,9 +16,8 @@ launch 文件、以及命令数组的顺序来源（Gazebo 重写 controllers.ya
 backend:=mujoco 要求模型目录自带 mujoco/<模型名>.xml，且不支持 gravity:=false
 （MJCF 的重力在生成期固定）。
 
-transport:=vcan 默认自动创建私有虚拟总线；socketcan 与 slcan 用于接入外部
-CAN 设备。slcan 的 host 模式需要两只 CANable 接在同一条物理总线上，避免两个
-进程争用同一个串口。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
+选择 transport:=vcan 会自动创建私有虚拟总线；socketcan 与 slcan 用于接入外部
+CAN 设备。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
 单个 SocketCAN 接口或单 CANable + STM32 固件的 HIL 路径。
 """
 
@@ -595,8 +596,13 @@ def _mit_torque_limit_cli(simulation: dict[str, Any]) -> str:
 
 
 def launch_simulation(context):
-    transport = _required(context, "transport")
     controller_mode = _required(context, "controller_mode")
+    if controller_mode == "host":
+        raise RuntimeError(
+            "controller_mode:=host has been retired: real motor control goes through "
+            "micro-ROS MCU. Use controller_mode:=firmware for MCU HIL, or "
+            "motor_hardware_interface mock_control.launch.py for offline controllers.")
+    transport = _required(context, "transport")
     backend = LaunchConfiguration("backend").perform(context).strip()
     simulator_only = _bool(
         LaunchConfiguration("simulator_only").perform(context))
@@ -1082,7 +1088,7 @@ def launch_simulation(context):
                     ),
                 ]
             )
-        # 后端已有 joint_states/TF；此桥只转换 Web 的关节命令并发布健康状态。
+        # 后端已有 joint_states/TF；此桥只发布健康状态，运动由 managed MCU 入口授权。
         bridge_urdf = model_share / "models" / model / "urdf" / f"{model}.urdf"
         if not bridge_urdf.is_file():
             raise RuntimeError(f"firmware topic bridge URDF does not exist: {bridge_urdf}")
@@ -1096,10 +1102,8 @@ def launch_simulation(context):
                     "driver_file": str(driver_config),
                     "urdf_file": str(bridge_urdf),
                     "model_name": model,
-                    "enable_trajectory": True,
+                    "enable_trajectory": False,
                     "publish_joint_states": False,
-                    "trajectory_in_topic": "/arm_controller/joint_trajectory",
-                    "trajectory_out_topic": "/motor_command/trajectory",
                 }],
             )
         )
@@ -1242,15 +1246,15 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "transport",
-                default_value="vcan",
+                default_value="",
                 description="CAN backend: vcan | socketcan | slcan",
             ),
             DeclareLaunchArgument(
                 "controller_mode",
-                default_value="host",
+                default_value="firmware",
                 description=(
-                    "host (ROS driver), external (external CAN controller), "
-                    "firmware (STM32 HIL over SocketCAN or SLCAN)"
+                    "firmware (STM32 HIL over SocketCAN or SLCAN), "
+                    "external (simulated motor backend only); host is retired"
                 ),
             ),
             DeclareLaunchArgument(

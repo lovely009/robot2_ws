@@ -28,7 +28,7 @@ from .systemd_units import (
 
 
 _TRANSPORTS = {"vcan", "socketcan", "slcan"}
-_CONTROLLER_MODES = {"host", "external", "firmware"}
+_CONTROLLER_MODES = {"external", "firmware"}
 _BACKENDS = {"gazebo", "mujoco"}
 _INTERFACE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,15}$")
 
@@ -193,8 +193,13 @@ class SimulationProcessManager:
         backend = request.get("backend")
         if not isinstance(transport, str) or transport not in _TRANSPORTS:
             raise ValueError("transport must be vcan, socketcan or slcan")
+        if mode == "host":
+            raise ValueError(
+                "controller_mode=host is retired; use firmware for MCU control "
+                "or external for a simulator without a host motor driver"
+            )
         if not isinstance(mode, str) or mode not in _CONTROLLER_MODES:
-            raise ValueError("controller_mode must be host, external or firmware")
+            raise ValueError("controller_mode must be external or firmware")
         if not isinstance(backend, str) or backend not in _BACKENDS:
             raise ValueError("backend must be gazebo or mujoco")
         if mode == "firmware" and transport == "vcan":
@@ -256,16 +261,6 @@ class SimulationProcessManager:
                 require_can(sim_interface, "simulation endpoint")
                 config["sim_interface"] = sim_interface
                 launch_args.append(f"sim_interface:={sim_interface}")
-                if mode == "host":
-                    driver_interface = request.get("driver_interface")
-                    require_can(driver_interface, "driver endpoint")
-                    if driver_interface == sim_interface:
-                        raise ValueError(
-                            "SocketCAN host mode needs separate driver and "
-                            "simulation interfaces"
-                        )
-                    config["driver_interface"] = driver_interface
-                    launch_args.append(f"driver_interface:={driver_interface}")
             else:
                 serial_ports = {
                     item["path"]: item for item in self._serial_provider()
@@ -281,15 +276,6 @@ class SimulationProcessManager:
                 require_tty(sim_tty, "simulation endpoint")
                 config["sim_tty"] = sim_tty
                 launch_args.append(f"sim_tty:={sim_tty}")
-                if mode == "host":
-                    driver_tty = request.get("driver_tty")
-                    require_tty(driver_tty, "driver endpoint")
-                    if os.path.realpath(driver_tty) == os.path.realpath(sim_tty):
-                        raise ValueError(
-                            "SLCAN host mode needs two separate serial adapters"
-                        )
-                    config["driver_tty"] = driver_tty
-                    launch_args.append(f"driver_tty:={driver_tty}")
 
         if mode == "firmware":
             # 模拟器（FDCAN 电机后端）由 bench_manager 的独立进程管理（可单独起停，

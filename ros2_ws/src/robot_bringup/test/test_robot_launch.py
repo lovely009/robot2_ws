@@ -1,45 +1,68 @@
-"""静态检查台架入口：bridge 必须随 L1 起，否则下行没有编码者。"""
+"""Public bringup selects the managed MCU chain; bench stays read-only."""
 
 import importlib.util
 from pathlib import Path
 
 from launch import LaunchContext
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch_ros.actions import Node
 
 
-def _load_launch_module():
-    path = Path(__file__).parent.parent / 'launch' / 'robot.launch.py'
-    spec = importlib.util.spec_from_file_location('robot_launch', path)
+def _module(filename):
+    path = Path(__file__).parent.parent / 'launch' / filename
+    spec = importlib.util.spec_from_file_location(filename.replace('.', '_'), path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_bridge_node_is_started():
-    actions = _load_launch_module().generate_launch_description().entities
-    found = [
-        action for action in actions
-        if isinstance(action, Node)
-        and action.node_package == 'micro_ros_bridge'
-        and action.node_executable == 'micro_ros_bridge_node'
-    ]
-    assert found, 'robot.launch.py 没有起 micro_ros_bridge：下行没有编码者'
-    assert len(found) == 1, (
-        f'robot.launch.py 起了 {len(found)} 个 micro_ros_bridge：下行只允许一个编码者')
-    # Node.node_name 要 execute 后才可读（launch_ros 的实现），这里取构造参数。
-    raw_name = getattr(found[0], '_Node__node_name')
-    assert raw_name == 'micro_ros_bridge', (
-        f'micro_ros_bridge 节点名是 {raw_name!r}，应为微固件侧约定的名字')
+def _defaults(actions, context):
+    for action in actions:
+        if isinstance(action, DeclareLaunchArgument) and action.default_value is not None:
+            action.execute(context)
 
 
-def test_firmware_tf_requires_an_explicit_model() -> None:
-    actions = _load_launch_module().generate_launch_description().entities
-    includes = [a for a in actions if isinstance(a, IncludeLaunchDescription)
-                and 'model' in dict(a.launch_arguments)]
-    assert len(includes) == 1
+def test_default_robot_entry_includes_managed_with_web_enabled():
+    actions = _module('robot.launch.py').generate_launch_description().entities
     context = LaunchContext()
-    context.launch_configurations['firmware_model'] = ''
-    assert not includes[0].condition.evaluate(context)
+    _defaults(actions, context)
+    assert context.launch_configurations['start_web'] == 'true'
+    includes = [action for action in actions if isinstance(action, IncludeLaunchDescription)]
+    assert len(includes) == 1
+    source = includes[0].launch_description_source
+    source.get_launch_description(LaunchContext())
+    assert 'managed_robot.launch.py' in source.location
+    assert not any(isinstance(action, Node) for action in actions)
+    managed = includes[0].launch_description_source.get_launch_description(context).entities
+    _defaults(managed, context)
+    assert context.launch_configurations['start_web'] == 'true'
+    assert context.launch_configurations['start_agent'] == 'false'
+    assert context.launch_configurations['allow_trajectories'] == 'false'
+    assert {action.name for action in managed
+            if isinstance(action, DeclareLaunchArgument) and action.default_value is None} == {
+                'model', 'robot_id'}
+
+
+def test_public_robot_respects_explicit_headless_selection():
+    actions = _module('robot.launch.py').generate_launch_description().entities
+    context = LaunchContext()
+    context.launch_configurations['start_web'] = 'false'
+    _defaults(actions, context)
+    assert context.launch_configurations['start_web'] == 'false'
+
+
+def test_bench_starts_no_motor_writer_or_agent():
+    actions = _module('bench.launch.py').generate_launch_description().entities
+    nodes = [action for action in actions if isinstance(action, Node)]
+    assert {node.node_package for node in nodes} == {'bench_manager'}
+    includes = [action for action in actions if isinstance(action, IncludeLaunchDescription)]
+    web = next(action for action in includes if 'control_mode' in dict(action.launch_arguments))
+    assert dict(web.launch_arguments)['control_mode'] == 'readonly'
+    tf = next(action for action in includes if 'enable_trajectory' in dict(action.launch_arguments))
+    assert dict(tf.launch_arguments)['enable_trajectory'] == 'false'
+    context = LaunchContext()
+    _defaults(actions, context)
+    assert context.launch_configurations['firmware_model'] == ''
+    assert not tf.condition.evaluate(context)
     context.launch_configurations['firmware_model'] = 'half_body_robot'
-    assert includes[0].condition.evaluate(context)
+    assert tf.condition.evaluate(context)

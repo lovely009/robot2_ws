@@ -55,7 +55,7 @@ def _request(**overrides: Any) -> dict[str, Any]:
     request: dict[str, Any] = {
         'backend': 'gazebo',
         'transport': 'vcan',
-        'controller_mode': 'host',
+        'controller_mode': 'external',
         'model': 'half_body_robot',
         'vcan_interface': 'robot_vcan0',
     }
@@ -71,6 +71,19 @@ def test_options_report_both_model_lists() -> None:
 
     assert options['models'] == ['half_body_robot', 'other']
     assert options['mujoco_models'] == ['half_body_robot']
+
+
+@pytest.mark.parametrize('transport', ['vcan', 'socketcan', 'slcan'])
+def test_retired_host_mode_is_rejected_before_unit_or_device_preparation(transport: str) -> None:
+    systemd = _systemd()
+    manager = _manager(systemd)
+
+    with pytest.raises(ValueError, match='host.*retired.*firmware.*external'):
+        manager.start(_request(controller_mode='host', transport=transport))
+
+    # Validation happens before even probing systemd, selecting a physical
+    # endpoint or asking it to create a unit that would fail in launch later.
+    assert systemd.commands() == []
 
 
 @pytest.mark.parametrize('backend', [None, '', 'gazebo ', 'isaac', 7])
@@ -110,7 +123,7 @@ def test_start_passes_backend_and_endpoint_to_launch() -> None:
         'ros2', 'launch', 'robot_sim', 'simulation.launch.py',
         'backend:=mujoco',
         'transport:=vcan',
-        'controller_mode:=host',
+        'controller_mode:=external',
         'model:=half_body_robot',
         'vcan_interface:=robot_vcan0',
     ]
@@ -236,7 +249,7 @@ def test_failed_unit_reports_the_exit_code_and_keeps_the_config() -> None:
 # --- 模型枚举（root 可配置）--------------------------------------------------
 #
 # 模型列表来自节点参数 models_dir（可指源码目录，改模型不必重构建）；root 缺省
-# 时回落 robot_sim 安装树。臂视图的映射/枚举**不在这里**——那批只读文件的函数
+# 时回落 robot_description 安装树。臂视图的映射/枚举**不在这里**——那批只读文件的函数
 # 归 web_host/models.py（见 web_host/test/test_models.py）。
 
 def test_enumerate_simulation_models_uses_root(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""固件实测关节 → TF；与仿真或主机驱动的 TF 链路择一启动。"""
+"""只读固件实测关节 → TF；运动统一通过受监督的 MCU 入口。"""
 
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -12,6 +12,10 @@ from robot_transmission import Model
 
 
 def firmware_tf_nodes(context: LaunchContext) -> list[Node]:
+    enable_trajectory = context.launch_configurations.get('enable_trajectory', 'false').lower()
+    if enable_trajectory != 'false':
+        raise ValueError('enable_trajectory 必须为 false；运动请使用受监督的 '
+                         '/robot/follow_joint_trajectory Action')
     model = LaunchConfiguration('model').perform(context)
     root = Path(LaunchConfiguration('model_dir').perform(context)) / 'models'
     if not model or Path(model).name != model or model in ('.', '..'):
@@ -39,8 +43,7 @@ def firmware_tf_nodes(context: LaunchContext) -> list[Node]:
             name='firmware_topic_bridge', output='screen',
             parameters=[{'driver_file': str(driver_file), 'urdf_file': str(urdf),
                          'model_name': model,
-                         'enable_trajectory': context.launch_configurations.get(
-                             'enable_trajectory', 'false').lower() == 'true'}],
+                         'enable_trajectory': False}],
         ),
         Node(
             package='robot_state_publisher', executable='robot_state_publisher',
@@ -57,6 +60,6 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('model_dir', default_value=get_package_share_directory('robot_description'),
                               description='模型包根目录（含 models/）'),
         DeclareLaunchArgument('enable_trajectory', default_value='false',
-                              description='显式开启标准关节轨迹入口；默认只读反馈与 TF'),
+                              description='兼容参数，仅允许 false；本入口只读反馈与 TF'),
         OpaqueFunction(function=firmware_tf_nodes),
     ])

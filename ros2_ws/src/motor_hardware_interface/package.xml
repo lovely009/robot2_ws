@@ -2,7 +2,7 @@
 <package format="3">
   <name>motor_hardware_interface</name>
   <version>0.1.0</version>
-  <description>ROS 2 Humble ros2_control SystemInterface for the reusable CAN-FD motor driver.</description>
+  <description>MCU feedback adapters, shared motor configuration and offline ros2_control tests.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
@@ -20,6 +20,8 @@
 
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -35,6 +37,10 @@
   <exec_depend>std_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>controller_manager_msgs</test_depend>
+  <test_depend>action_msgs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

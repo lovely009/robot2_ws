@@ -1,0 +1,15 @@
+# This record cannot authorize motion. Generate an assembly-specific template
+# from its actual driver and URDF, then record measurements and evidence.
+schema_version: 1
+robot_id: ''
+model_name: ''
+calibration_id: ''
+config_hash: ''
+commissioned: false
+acceptance:
+  operator: ''
+  date: ''
+  evidence: ''
+buses: {}
+motors: {}
+joints: {}

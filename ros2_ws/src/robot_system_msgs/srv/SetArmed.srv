@@ -1,0 +1,7 @@
+# armed=false 撤销主机运动授权；成功回执不等于物理驱动器已完成失能。
+string lease_id
+uint64 epoch
+bool armed
+---
+bool success
+string reason

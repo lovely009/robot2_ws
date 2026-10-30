@@ -5,8 +5,9 @@
 #
 # 尺寸：count=64 时消息体 484 B，含 ROS CDR 封装 488 B ≤ best-effort 可用约 490 B。本消息永不跨 MTU 分片，
 # 这是循环面的硬约束 —— 改字段前先重算尺寸。
-# 当前固件会话；复用旧日志时间槽。
-uint64 session_id
+# 当前 MCU 已确认的运动租约；ControlLease 握手将它绑定到固件会话。
+# v3 用 lease_id 替换同宽 session_id，最大帧仍为 488 B，不增加 MTU 占用。
+uint64 lease_id
 # 会话内严格前进，由唯一主机桥分配；重复与乱序不得刷新 freshness。
 uint32 sequence
 # MCU 单调毫秒截止点；到板前已过期的非空意图不得刷新接收 freshness。

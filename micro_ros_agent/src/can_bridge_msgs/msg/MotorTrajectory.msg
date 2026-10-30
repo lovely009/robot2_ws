@@ -38,3 +38,4 @@ uint16 count                      # 当前分段路点数
 uint16 target_count               # 本轨迹受控电机数
 uint16[<=64] target_ids           # 受控电机集合
 MotorTrajectoryPoint[<=256] points
+uint64 lease_id

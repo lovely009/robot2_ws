@@ -100,9 +100,8 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->adapter = adapter;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_DISCOVERED;
     entry->online = true;
-    entry->policy_enable = true;      // 未收到 Policy 前默认使能（全局门仍生效）
-    entry->motion_authorized = true;  // 全新设备的授权链路默认完整；
-                                      // 故障/离线/撤权路径显式清除后不复立
+    entry->policy_enable = false;     // 新发现设备必须收到显式、带租约的 Policy。
+    entry->motion_authorized = false;
     entry->last_rx_tick_ms = frame->rx_tick_ms;
     motor_control_push_event(ctx, frame->rx_tick_ms,
         MOTOR_CONTROL_EVENT_DISCOVERED, node,

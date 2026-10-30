@@ -11,6 +11,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <can_bridge_msgs/msg/config_request.hpp>
+#include <can_bridge_msgs/msg/control_lease.hpp>
 #include <can_bridge_msgs/msg/config_result.hpp>
 #include <can_bridge_msgs/srv/execute_config.hpp>
 #include <can_bridge_msgs/msg/device_param_report.hpp>
@@ -51,9 +52,11 @@ private:
 
   // 主机侧 → 线上（需要编码的两条）
   rclcpp::Subscription<can_bridge_msgs::msg::MotorCommandArray>::SharedPtr sub_command_;
+  rclcpp::Subscription<can_bridge_msgs::msg::ControlLease>::SharedPtr sub_control_lease_;
   rclcpp::Subscription<can_bridge_msgs::msg::ParamSetArray>::SharedPtr sub_param_set_;
   rclcpp::Subscription<can_bridge_msgs::msg::SystemCommand>::SharedPtr sub_system_command_;
   rclcpp::Publisher<can_bridge_msgs::msg::LowCommand>::SharedPtr pub_low_cmd_;
+  rclcpp::Publisher<can_bridge_msgs::msg::ControlLease>::SharedPtr pub_control_lease_;
   rclcpp::Publisher<can_bridge_msgs::msg::ConfigRequest>::SharedPtr pub_config_;
   rclcpp::Service<can_bridge_msgs::srv::ExecuteConfig>::SharedPtr service_config_;
   rclcpp::TimerBase::SharedPtr config_timer_;
@@ -98,11 +101,28 @@ private:
   TimePoint clock_sample_at_{};
   int64_t clock_sample_ns_ = 0;
   bool have_clock_sample_ = false;
+  bool have_control_ = false;
+  bool have_control_sequence_ = false;
+  uint32_t control_sequence_ = 0;
+  uint32_t control_tick_ms_ = 0;
+  TimePoint control_at_{};
+  uint64_t lease_id_ = 0;
+  uint32_t lease_sequence_ = 0;
+  uint32_t lease_deadline_tick_ms_ = 0;
+  bool lease_active_ = false;
+  uint64_t sent_lease_id_ = 0;
+  uint32_t sent_lease_sequence_ = 0;
+  uint64_t revoked_lease_id_ = 0;
   LowStateAssembler assembler_;
   std::vector<MotorFreshness> freshness_ =
     std::vector<MotorFreshness>(can_bridge_msgs::msg::WireContract::MOTOR_COUNT_MAX);
 
   bool motion_ready();
+  bool lease_ready(uint64_t session, uint64_t lease);
+  std::optional<uint32_t> control_tick_now();
+  void on_control_lease(const can_bridge_msgs::msg::ControlLease::SharedPtr msg);
+  void on_control_state(const can_bridge_msgs::msg::MotorControlStateArray::SharedPtr msg,
+    const rclcpp::Publisher<can_bridge_msgs::msg::MotorControlStateArray>::SharedPtr & pub);
   bool clock_stable();
   bool source_time_valid(uint64_t source_ns, std::chrono::milliseconds max_age);
   void clear_cache();

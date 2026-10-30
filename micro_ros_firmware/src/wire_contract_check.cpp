@@ -9,8 +9,11 @@
 
 #include "firmware_config.h"
 #include "wire_codec.h"
+#include "control_lease.h"
 
 namespace {
+static_assert(CONTROL_LEASE_MAX_MS == can_bridge_msgs__msg__WireContract__CONTROL_LEASE_MAX_MS,
+    "control lease maximum lifetime drifted from WireContract");
 
 // CDR：uint64 + uint32 + uint8 + 3 B 对齐填充，然后 4 个有界序列。
 constexpr size_t kLowCommandWire =

@@ -53,12 +53,33 @@ MotorTopology topology(uint64_t session)
   m.session_id = session;
   return m;
 }
-MotorCommandArray command()
+uint64_t lease_id(uint64_t session, uint64_t generation = 1)
+{
+  return session * 1000000ULL + generation;
+}
+MotorControlStateArray control_state(uint64_t session, uint32_t seq = 1,
+  uint64_t grant = 0, uint32_t tick = 0, uint32_t deadline = 0)
+{
+  MotorControlStateArray m;
+  m.schema_version = MotorControlStateArray::SCHEMA_VERSION;
+  m.sync_time_ns = status(session).sync_time_ns;
+  m.session_id = session;
+  m.sequence = seq;
+  m.tick_ms = tick;
+  m.lease_id = grant;
+  m.lease_sequence = grant ? 1 : 0;
+  m.lease_active = grant != 0;
+  m.lease_valid_until_tick_ms = deadline;
+  return m;
+}
+MotorCommandArray command(uint64_t session = 100, uint64_t grant = 0)
 {
   MotorCommandArray m;
   m.sync_time_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::system_clock::now().time_since_epoch()).count());
   m.count = 1;
+  m.session_id = session;
+  m.lease_id = grant ? grant : lease_id(session);
   MotorCommandTarget t;
   t.motor_id = 0;
   t.position = 0.5;
@@ -74,9 +95,9 @@ TEST(BridgeNode, DeclaresContractTopics)
   const auto names = node->get_topic_names_and_types();
   for (const auto * name : {&topic::kLowCmd, &topic::kLowState, &topic::kMotorStatus,
       &topic::kTopology, &topic::kControlStates, &topic::kEvents, &topic::kDeviceParam,
-      &topic::kConfigResult}) {EXPECT_EQ(names.count(*name), 1u) << *name;}
+      &topic::kConfigResult, &topic::kControlLease}) {EXPECT_EQ(names.count(*name), 1u) << *name;}
   for (const char * name : {"/motor/command_array", "/motor/motion_states", "/motor/status_array",
-      "/motor/topology", "/motor/control_states", "/motor/config_result"})
+      "/motor/topology", "/motor/control_states", "/motor/config_result", "/motor/control_lease"})
     {EXPECT_EQ(names.count(name), 1u) << name;}
 }
 
@@ -117,6 +138,8 @@ TEST(BridgeNode, MotionRequiresCurrentStatusAndTopologyAndExpires)
   auto cmd_pub = node->create_publisher<MotorCommandArray>("/motor/command_array", rclcpp::QoS(1).reliable());
   auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
   auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
+  auto control_pub = node->create_publisher<MotorControlStateArray>(
+    topic::kControlStates, rclcpp::QoS(10).reliable());
   int received = 0;
   LowCommand got;
   auto sub = node->create_subscription<LowCommand>(topic::kLowCmd, rclcpp::QoS(1).best_effort(),
@@ -125,6 +148,7 @@ TEST(BridgeNode, MotionRequiresCurrentStatusAndTopologyAndExpires)
   exec.add_node(node);
   ASSERT_TRUE(spin_until(exec, [&] {return cmd_pub->get_subscription_count() > 0 &&
     status_pub->get_subscription_count() > 0 && topo_pub->get_subscription_count() > 0 &&
+    control_pub->get_subscription_count() > 0 &&
     sub->get_publisher_count() > 0;}));
   cmd_pub->publish(command());
   spin_for(exec, 80ms);
@@ -147,10 +171,11 @@ TEST(BridgeNode, MotionRequiresCurrentStatusAndTopologyAndExpires)
   refreshed.command_sequence = 41;
   status_pub->publish(refreshed);
   topo_pub->publish(topology(100));
+  control_pub->publish(control_state(100, 1, lease_id(100), 0, 250));
   spin_for(exec, 15ms);
   cmd_pub->publish(command());
   ASSERT_TRUE(spin_until(exec, [&] {return received == 1;}));
-  EXPECT_EQ(got.session_id, 100u);
+  EXPECT_EQ(got.lease_id, lease_id(100));
   EXPECT_EQ(got.sequence, 42u);
   EXPECT_NE(got.valid_until_tick_ms, 0u);
   EXPECT_EQ(got.position_q[0], 1311);
@@ -282,6 +307,7 @@ TEST(BridgeNode, ConfigResultAndControlSnapshotRequireCurrentSession)
   EXPECT_EQ(controls, 0);
   result.session_id = 50;
   control.session_id = 50;
+  control.sync_time_ns = status(50).sync_time_ns;
   result_pub->publish(result);
   control_pub->publish(control);
   ASSERT_TRUE(spin_until(exec, [&] {return results == 1 && controls == 1;}));

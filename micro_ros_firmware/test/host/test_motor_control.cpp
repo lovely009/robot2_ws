@@ -275,7 +275,20 @@ static void feed_identity(motor_control_context_t *ctx, uint16_t node,
   }
 }
 
-// 完整使能链路（vaxor 路径）：反馈 → 自动绑定（协议内唯一型号）→ 连接 → 授权。
+// Kernel-only motion fixtures explicitly arm their motor. Production reaches
+// this operation only through the leased policy mailbox.
+static void arm_fixture_motor(motor_control_context_t *ctx, uint16_t motor_id,
+    uint32_t tick, bool confirm_unprotected = false) {
+  motor_protocol_config_request_t enable{};
+  enable.request_id = 0x7FFFFFFEU;
+  enable.motor_id = motor_id;
+  enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  enable.enable = true;
+  enable.confirm_unprotected = confirm_unprotected;
+  assert(motor_control_submit_config(ctx, &enable, tick));
+}
+
+// 完整使能链路：反馈 → 自动绑定 → 连接 → 授权 → 显式逐电机武装。
 static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
     const char *profile_name, uint32_t tick) {
   motor_protocol_raw_frame_t f = vaxor_reply(motor_id, 0.0, 0.0, 0.0, tick);
@@ -288,6 +301,7 @@ static void bring_vaxor_to_ready(motor_control_context_t *ctx, uint16_t motor_id
   motor_control_set_agent_connected(ctx, true, tick);
   assert(motor_control_set_authorization(ctx, true, tick));
   assert(entry_of(ctx, motor_id)->dev_init == MOTOR_CONTROL_DEV_INIT_NA);
+  arm_fixture_motor(ctx, motor_id, tick);
 }
 
 // 完整使能链路（CERB 路径）：反馈 → 读设备自报身份 → 命中目录即绑定 →
@@ -642,6 +656,7 @@ static void bring_cerb_to_ready(motor_control_context_t *ctx, uint16_t motor_id,
   bring_cerb_to_bound(ctx, motor_id, profile_name, tick);
   complete_device_param_init(ctx, motor_id, tick + 1U);
   assert(entry_of(ctx, motor_id)->dev_init == MOTOR_CONTROL_DEV_INIT_OK);
+  arm_fixture_motor(ctx, motor_id, tick);
 }
 
 // ---------------------------------------------------------------------------
@@ -935,9 +950,10 @@ static void test_enter_active_requires_auth_profile_snapshot() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0);
 
-  // 授权 + 新快照 → ACTIVE：使能帧走 P0，先于 MIT 帧上总线，
+  // 授权 + 显式使能 + 新快照 → ACTIVE：使能帧走 P0，先于 MIT 帧上总线，
   // MIT 帧走 P1；vaxor 无整定门，两帧同拍生成。一次排空统计两类计数。
   assert(motor_control_set_authorization(&ctx, true, 160));
+  arm_fixture_motor(&ctx, 5, 161);
   motor_control_command_snapshot_t s2 = make_snapshot(2, 165);
   snapshot_add(&s2, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s2, 170));
@@ -1344,8 +1360,8 @@ static void test_30ms_stale_snapshot_soft_stops() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   motor_control_service(&ctx, 151);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  // P0 两帧：进入 ACTIVE 时的使能帧 + 本次软停帧。
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 2);
+  // 停机屏障取代同轴尚未发送的使能帧，只留下本次软停。
+  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) == 1);
 
   // 新鲜快照回来 → 恢复（级联去重标志复位）。
   motor_control_command_snapshot_t s2 = make_snapshot(2, 160);
@@ -1355,7 +1371,7 @@ static void test_30ms_stale_snapshot_soft_stops() {
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
-// 100ms 无新快照 → 协议级停机/失能 + 清授权；恢复需新授权 + 新快照
+// 100ms 无新快照 → 协议级停机/失能 + 清授权；恢复需新授权、显式使能和新快照
 // （ARD §13.2/§13.3 / §43.1 第 4 条）。
 static void test_100ms_stale_disables_and_clears_authorization() {
   motor_control_context_t ctx;
@@ -1388,6 +1404,13 @@ static void test_100ms_stale_disables_and_clears_authorization() {
   snapshot_add(&s2, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s2, 265));
   motor_control_service(&ctx, 270);
+  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
+  assert(!entry_of(&ctx, 5)->policy_enable);
+  arm_fixture_motor(&ctx, 5, 271);
+  s2.sequence = 3;
+  s2.received_tick_ms = 272;
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 272));
+  motor_control_service(&ctx, 273);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
@@ -2227,6 +2250,7 @@ static void test_p0_preempts_full_buffer() {
   motor_control_set_agent_connected(&ctx, true, 110);
   assert(motor_control_set_authorization(&ctx, true, 115));
   assert(motor_control_bind_profile_ptr(&ctx, 3, &g_mock_profile, 118));
+  arm_fixture_motor(&ctx, 3, 119);
 
   // 不 collect，连续边界把 tx_pending 堆满（每边界 1 帧 MIT）；
   // 期间持续喂 mock 自主上报帧，防止 1s 无反馈误判离线。
@@ -2244,11 +2268,12 @@ static void test_p0_preempts_full_buffer() {
   const uint32_t dropped_before = ctx.tx_dropped_count;
   assert(dropped_before > 0); // P1 溢出路径可见
 
-  // 缓冲满时断链 → P0 失能帧必须仍然入队（驱逐一个非 P0 帧）。
+  // 缓冲满时断链 → 同轴旧目标全部取消，P0 失能帧必须仍然入队。
   motor_control_set_agent_connected(&ctx, false, 2200);
-  assert(ctx.tx_dropped_count > dropped_before); // 驱逐计入丢弃
+  assert(ctx.tx_dropped_count == dropped_before); // 主动取消不是溢出丢弃
   motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U); // 禁止旧使能/旧目标随后重新启动电机
   bool found_disable = false;
   for (size_t i = 0; i < n; ++i) {
     if (frames[i].tx_class == MOTOR_PROTOCOL_TX_CLASS_P0 &&
@@ -2287,8 +2312,9 @@ static void test_stale_snapshot_gates() {
   assert(ctx.require_new_snapshot);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
 
-  // 恢复链：新授权 + 序号 2 的新鲜快照（过期快照未消费序号）→ ACTIVE。
+  // 恢复链：新授权 + 显式使能 + 新鲜快照（过期快照未消费序号）→ ACTIVE。
   assert(motor_control_set_authorization(&ctx, true, 270));
+  arm_fixture_motor(&ctx, 5, 271);
   motor_control_command_snapshot_t fresh = make_snapshot(2, 275);
   snapshot_add(&fresh, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &fresh, 280));
@@ -2365,6 +2391,7 @@ static void test_conflict_latch_freezes_motion_and_disables() {
   assert(motor_control_bind_profile(&ctx, 5, idx, 110));
   motor_control_set_agent_connected(&ctx, true, 120);
   motor_control_set_authorization(&ctx, true, 130);
+  arm_fixture_motor(&ctx, 5, 131);
   motor_control_command_snapshot_t s = make_snapshot(1, 140);
   snapshot_add(&s, 5, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 150));
@@ -2453,6 +2480,7 @@ static void test_tx_drop_counted() {
   motor_control_set_agent_connected(&ctx, true, 110);
   assert(motor_control_set_authorization(&ctx, true, 115));
   assert(motor_control_bind_profile_ptr(&ctx, 3, &g_mock_profile, 118));
+  arm_fixture_motor(&ctx, 3, 119);
   uint32_t seq = 1;
   // 迭代次数按容量推：本用例的意图是「灌满再灌一条」，写死数字会在容量
   // 调整后静默失去覆盖（本任务把它从 96 提到 160 时就撞上了）。
@@ -2760,6 +2788,7 @@ static void test_soft_stop_encode_failure_pends_retry() {
   assert(motor_control_bind_profile_ptr(&ctx, 3, &fail_profile, 100));
   motor_control_set_agent_connected(&ctx, true, 100);
   assert(motor_control_set_authorization(&ctx, true, 100));
+  arm_fixture_motor(&ctx, 3, 101);
   motor_control_command_snapshot_t s = make_snapshot(1, 110);
   snapshot_add(&s, 3, 0.1f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 115));
@@ -2913,6 +2942,8 @@ static void test_p0_tx_slot_on_retry_reencode() {
   }
   motor_control_set_agent_connected(&ctx, true, 100);
   assert(motor_control_set_authorization(&ctx, true, 100));
+  arm_fixture_motor(&ctx, 2, 101);
+  arm_fixture_motor(&ctx, 3, 101);
   motor_control_command_snapshot_t s = make_snapshot(1, 110);
   snapshot_add(&s, 2, 0.1f, 0.0f, 0.0f);
   snapshot_add(&s, 3, 0.2f, 0.0f, 0.0f);
@@ -2953,8 +2984,8 @@ static void test_p0_tx_slot_on_retry_reencode() {
 // 失能重试帧，不得在重新使能后被 service 补发（否则刚使能的电机被旧
 // 失能帧再次打回）。CERB 有 100ms 使能整定窗——使能与首帧 MIT 之间隔
 // 多个 service 节拍，正是旧失能帧复发的窗口；无整定门协议使能与 MIT 同
-// 边界出队，由 MIT 成功路径作废，不经过本窗口。填队列用回告重入队假帧；
-// 溢出那次转挂起的类别随后会被撤权路径以 DISABLE 覆盖，不影响断言。
+// 边界出队，由 MIT 成功路径作废，不经过本窗口。填队列用其他槽位的假帧，
+// 避免被本轴新的停机屏障取消，确保实际覆盖满队列的挂起路径。
 static void test_stale_pending_disable_cleared_by_enable() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
@@ -2993,16 +3024,16 @@ static void test_stale_pending_disable_cleared_by_enable() {
   assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
   (void)flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
 
-  // P0 待发队列填满（回告重入队假帧；容量 MAX_TX_PENDING → MAX+1 次
+  // P0 待发队列填满（其他轴的假帧；容量 MAX_TX_PENDING → MAX+1 次
   // 调用才溢出，最后一次失败返回 false）。
   bool last_requeue = true;
   for (uint32_t k = 0; k <= MOTOR_CONTROL_MAX_TX_PENDING; ++k) {
     motor_protocol_tx_frame_t fill = {};
     fill.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
-    fill.tx_slot = 0; // motor 7 = 表项 0
+    fill.tx_slot = 1; // motor 7 = 表项 0；其他轴帧不受本轴停机屏障影响
     fill.can_id = 0x700U;
     fill.size = 1U;
-    last_requeue = motor_control_requeue_p0(&ctx, &fill);
+    last_requeue = motor_control_push_tx(&ctx, &fill);
   }
   assert(!last_requeue);
 
@@ -3016,6 +3047,7 @@ static void test_stale_pending_disable_cleared_by_enable() {
   motor_protocol_raw_frame_t hb5 = cerb_feedback(7, 278);
   motor_control_on_raw_frame(&ctx, &hb5);
   assert(motor_control_set_authorization(&ctx, true, 280));
+  arm_fixture_motor(&ctx, 7, 281);
   motor_control_command_snapshot_t s6 = make_snapshot(6, 285);
   snapshot_add(&s6, 7, 0.15f, 0.0f, 0.0f);
   assert(motor_control_apply_command_snapshot(&ctx, &s6, 290));
@@ -3834,7 +3866,7 @@ static void test_device_param_mismatch_reports_without_gate() {
   assert(e->dev_raw[3] == 13300U);
   assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(e->unified_fault_code == MOTOR_CONTROL_FAULT_NONE);
-  assert(e->policy_enable); // 发现时默认使能，未被 MISMATCH 冻结
+  assert(!e->policy_enable); // 发现时默认禁用，尚未显式武装。
   // 峰值电流槽不一致，事件位图应为 1<<3。
   uint16_t state = 0U;
   uint32_t detail = 0U;
@@ -4140,6 +4172,7 @@ static void test_safety_protect_write_syncs_record_and_gates_motion() {
   // 运动中不得动安全边界：先开到 ACTIVE。CERB 有 100ms 使能整定窗
   // （enable_settle_ms），窗内只发使能帧不发运动目标——所以要持续喂反馈 +
   // 快照把窗走完，不能一跳 100ms 过去（那会先被 100ms 新鲜度级联清权）。
+  arm_fixture_motor(&ctx, 7, 159U, true);
   for (uint32_t t = 160U; t <= 290U; t += 10U) {
     motor_protocol_raw_frame_t fbk = cerb_feedback(7, t);
     motor_control_on_raw_frame(&ctx, &fbk);
@@ -4440,7 +4473,7 @@ static void test_device_param_unverified_reports_without_gate() {
   assert(e->dev_init == MOTOR_CONTROL_DEV_INIT_UNVERIFIED);
   assert(e->dev_read_done);
   assert(e->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(e->policy_enable); // 发现时默认使能，未被 UNVERIFIED 冻结
+  assert(!e->policy_enable); // 发现时默认禁用，尚未显式武装。
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DEV_INIT, 7));
 
   // UNVERIFIED 不拒绝使能。

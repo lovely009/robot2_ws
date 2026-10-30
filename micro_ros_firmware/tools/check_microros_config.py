@@ -24,7 +24,7 @@ SLOT_CONSEQUENCE = {
     ),
     "RMW_UXRCE_MAX_SUBSCRIPTIONS": (
         "入站话题数超过静态槽位：新增 topic 的 rcl_subscription_init 会失败。\n"
-        "  当前固件用 4 个。"
+        "  当前固件用 5 个（电机四通道 + 配置）。"
     ),
     "RMW_UXRCE_MAX_SERVICES": (
         "service 数超过静态槽位（rclc 参数服务器已于 2026-09-21 退役，\n"

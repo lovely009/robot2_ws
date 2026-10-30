@@ -163,7 +163,8 @@ static void publish_complete(control_trajectory_mailbox_t *mailbox,
 static bool append_segment(control_trajectory_mailbox_t *mailbox,
     const control_trajectory_t *segment) {
   control_trajectory_t *assembly = &mailbox->assembly;
-  if (assembly->trajectory_id != segment->trajectory_id ||
+  if (assembly->lease_id != segment->lease_id ||
+      assembly->trajectory_id != segment->trajectory_id ||
       assembly->segment_count != segment->segment_count ||
       !trajectory_target_sets_equal(assembly, segment)) {
     return false;

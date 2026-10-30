@@ -27,6 +27,7 @@ rosidl_generate_interfaces(
   # ID 化有界电机消息（ARD-0007 §15-20）
   "msg/MotorCommandTarget.msg"
   "msg/MotorCommandArray.msg"
+  "msg/ControlLease.msg"
   "msg/MotorMotionStateTarget.msg"
   "msg/MotorMotionStateArray.msg"
   "msg/MotorStatusTarget.msg"

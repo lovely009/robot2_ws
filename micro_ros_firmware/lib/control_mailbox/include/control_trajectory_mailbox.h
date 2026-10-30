@@ -30,6 +30,7 @@ typedef struct {
 } control_trajectory_point_t;
 
 typedef struct {
+  uint64_t lease_id;
   uint32_t sequence;         // 诊断/日志关联，不参与裁决
   uint32_t trajectory_id;    // 上层分配，内核回带在状态与拒绝事件里
   uint32_t received_tick_ms; // 本地接收 tick（唯一执行时基，ARD §12.2）

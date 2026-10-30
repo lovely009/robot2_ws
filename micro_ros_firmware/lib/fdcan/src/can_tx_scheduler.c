@@ -11,6 +11,32 @@ void can_tx_scheduler_init(can_tx_scheduler_t *sched) {
   memset(sched, 0, sizeof(*sched));
 }
 
+void can_tx_scheduler_cancel_slots(can_tx_scheduler_t *sched, uint64_t slots) {
+  if (sched == NULL || slots == 0U) {
+    return;
+  }
+  for (uint16_t slot = 0U; slot < CAN_TX_P1_SLOTS; ++slot) {
+    if ((slots & (UINT64_C(1) << slot)) != 0U) {
+      sched->p1.dirty[slot] = false;
+    }
+  }
+  uint8_t kept = 0U;
+  for (uint8_t i = 0U; i < sched->p0.count; ++i) {
+    const uint8_t source =
+        (uint8_t)((sched->p0.head + i) % CAN_TX_P0_CAPACITY);
+    const can_tx_frame_t *frame = &sched->p0.queue[source];
+    if (frame->tx_slot < CAN_TX_P1_SLOTS &&
+        (slots & (UINT64_C(1) << frame->tx_slot)) != 0U) {
+      continue;
+    }
+    const uint8_t destination =
+        (uint8_t)((sched->p0.head + kept) % CAN_TX_P0_CAPACITY);
+    sched->p0.queue[destination] = *frame;
+    ++kept;
+  }
+  sched->p0.count = kept;
+}
+
 static bool fifo_push(can_tx_frame_t *queue, uint8_t capacity, uint8_t *head,
     uint8_t *count, uint32_t *dropped,
     const can_tx_frame_t *frame) {

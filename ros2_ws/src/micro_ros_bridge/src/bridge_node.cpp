@@ -57,6 +57,7 @@ BridgeNode::BridgeNode()
 
   // ---- 发布者先建齐，再建订阅者（回调里引用它们，虽在构造期不会触发） ----
   pub_low_cmd_ = create_publisher<LowCommand>(T::kLowCmd, stream_qos());
+  pub_control_lease_ = create_publisher<ControlLease>(T::kControlLease, reliable_qos());
   pub_config_ = create_publisher<ConfigRequest>(T::kConfig, reliable_qos());
   service_config_ = create_service<can_bridge_msgs::srv::ExecuteConfig>(
     "/motor/execute_config",
@@ -122,6 +123,9 @@ BridgeNode::BridgeNode()
   sub_command_ = create_subscription<MotorCommandArray>(
     "/motor/command_array", host_intent_qos(),
     [this](MotorCommandArray::SharedPtr m) {on_command(m);});
+  sub_control_lease_ = create_subscription<ControlLease>(
+    "/motor/control_lease", host_intent_qos(),
+    [this](ControlLease::SharedPtr m) {on_control_lease(m);});
   sub_param_set_ = create_subscription<ParamSetArray>(
     "/motor/param_set", reliable_qos(),
     [this](ParamSetArray::SharedPtr m) {
@@ -180,10 +184,11 @@ BridgeNode::BridgeNode()
       if (m->count != m->targets.size()) {return;}
       const bool stopping = std::all_of(m->targets.begin(), m->targets.end(),
         [](const auto & t) {return !t.enabled;});
-      if (!stopping && !motion_ready()) {return;}
-      auto out = *m;
-      out.session_id = session_id_;
-      policy_pub->publish(out);
+      if (!stopping && (!lease_ready(m->session_id, m->lease_id) ||
+        !source_time_valid(m->sync_time_ns, std::chrono::milliseconds(250)))) {return;}
+      // Identity is supplied by the authorized ingress; the bridge must never
+      // upgrade an old facade message into the current session or lease.
+      policy_pub->publish(*m);
     }));
   auto traj_pub = create_publisher<MotorTrajectory>(T::kTrajectory, reliable_qos());
   pass_pubs_.push_back(traj_pub);
@@ -191,18 +196,16 @@ BridgeNode::BridgeNode()
     "/motor/trajectory", reliable_qos(), [this, traj_pub](MotorTrajectory::SharedPtr m) {
       const bool stopping = m->count == 0 && m->target_count == 0 && m->points.empty() &&
         m->target_ids.empty();
-      if (!stopping && !motion_ready()) {return;}
-      auto out = *m;
-      out.session_id = session_id_;
-      traj_pub->publish(out);
+      if (!stopping && (!lease_ready(m->session_id, m->lease_id) ||
+        !source_time_valid(m->sync_time_ns, std::chrono::milliseconds(250)))) {return;}
+      traj_pub->publish(*m);
     }));
   auto control_pub = create_publisher<MotorControlStateArray>(
     "/motor/control_states", reliable_qos());
   pass_pubs_.push_back(control_pub);
   pass_subs_.push_back(create_subscription<MotorControlStateArray>(
     T::kControlStates, reliable_qos(), [this, control_pub](MotorControlStateArray::SharedPtr m) {
-      if (session_id_ != 0 && m->session_id == session_id_ &&
-        m->schema_version == MotorControlStateArray::SCHEMA_VERSION) {control_pub->publish(*m);}
+      on_control_state(m, control_pub);
     }));
   auto topology_pub = create_publisher<MotorTopology>("/motor/topology", reliable_qos());
   pass_pubs_.push_back(topology_pub);
@@ -235,6 +238,8 @@ void BridgeNode::clear_cache()
 {
   have_status_ = false;
   have_topology_ = false;
+  have_control_ = false;
+  lease_active_ = false;
   freshness_.assign(contract::kMotorCountMax, MotorFreshness{});
   assembler_.reset();
 }
@@ -246,6 +251,86 @@ bool BridgeNode::motion_ready()
   if (have_status_ && now - status_at_ > std::chrono::milliseconds(300)) {clear_cache();}
   if (have_topology_ && now - topology_at_ > std::chrono::milliseconds(1500)) {clear_cache();}
   return session_id_ != 0 && have_status_ && have_topology_;
+}
+
+std::optional<uint32_t> BridgeNode::control_tick_now()
+{
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - control_at_).count();
+  if (!have_control_ || elapsed < 0 || elapsed > contract::kLeaseLifetimeMaxMs) {
+    return std::nullopt;
+  }
+  return control_tick_ms_ + static_cast<uint32_t>(elapsed);
+}
+
+bool BridgeNode::lease_ready(uint64_t session, uint64_t lease)
+{
+  if (!motion_ready() || session != session_id_ || !lease_active_ ||
+    lease != lease_id_ || !lease_belongs_to_session(lease, session) ||
+    lease <= revoked_lease_id_) {return false;}
+  const auto tick = control_tick_now();
+  return tick && static_cast<int32_t>(lease_deadline_tick_ms_ - *tick) > 0;
+}
+
+void BridgeNode::on_control_lease(const can_bridge_msgs::msg::ControlLease::SharedPtr msg)
+{
+  if (!msg->active) {
+    // A stop remains available without an active grant. Preserve the original
+    // identity, and immediately close the local gate for the matching lease.
+    if (msg->session_id == session_id_) {
+      revoked_lease_id_ = std::max(revoked_lease_id_, msg->lease_id);
+      if (msg->lease_id >= lease_id_) {lease_active_ = false;}
+    }
+    pub_control_lease_->publish(*msg);
+    return;
+  }
+  if (!motion_ready() || msg->session_id != session_id_ ||
+    !lease_belongs_to_session(msg->lease_id, msg->session_id) || msg->sequence == 0 ||
+    sub_control_lease_->get_publisher_count() != 1 || msg->lease_id <= revoked_lease_id_ ||
+    msg->lease_id < sent_lease_id_ || msg->lease_id < lease_id_ ||
+    (msg->lease_id == sent_lease_id_ && msg->sequence <= sent_lease_sequence_) ||
+    (msg->lease_id == lease_id_ && msg->sequence <= lease_sequence_)) {return;}
+  const auto tick = control_tick_now();
+  if (!tick) {return;}
+  const int32_t remaining = static_cast<int32_t>(msg->valid_until_tick_ms - *tick);
+  if (remaining <= 0 || remaining > static_cast<int32_t>(contract::kLeaseLifetimeMaxMs)) {
+    return;
+  }
+  sent_lease_id_ = msg->lease_id;
+  sent_lease_sequence_ = msg->sequence;
+  // Never recalculate the deadline here: queued heartbeats must expire even
+  // while this bridge and the Agent are still running.
+  pub_control_lease_->publish(*msg);
+}
+
+void BridgeNode::on_control_state(
+  const can_bridge_msgs::msg::MotorControlStateArray::SharedPtr msg,
+  const rclcpp::Publisher<can_bridge_msgs::msg::MotorControlStateArray>::SharedPtr & pub)
+{
+  using Control = can_bridge_msgs::msg::MotorControlStateArray;
+  if (session_id_ == 0 || msg->session_id != session_id_ ||
+    msg->schema_version != Control::SCHEMA_VERSION ||
+    !source_time_valid(msg->sync_time_ns, std::chrono::milliseconds(300)) ||
+    (have_control_sequence_ && static_cast<int32_t>(msg->sequence - control_sequence_) <= 0) ||
+    (msg->lease_id != 0 && !lease_belongs_to_session(msg->lease_id, msg->session_id)) ||
+    msg->lease_id < lease_id_ ||
+    (msg->lease_id == lease_id_ && msg->lease_sequence < lease_sequence_)) {return;}
+  if (msg->lease_active && (msg->lease_id == 0 || msg->lease_sequence == 0 ||
+    static_cast<int32_t>(msg->lease_valid_until_tick_ms - msg->tick_ms) <= 0 ||
+    static_cast<int32_t>(msg->lease_valid_until_tick_ms - msg->tick_ms) >
+    static_cast<int32_t>(contract::kLeaseLifetimeMaxMs))) {return;}
+  const auto age = std::max<int64_t>(0,
+    clock_sample_ns_ - static_cast<int64_t>(msg->sync_time_ns));
+  control_at_ = std::chrono::steady_clock::now() - std::chrono::nanoseconds(age);
+  control_tick_ms_ = msg->tick_ms;
+  control_sequence_ = msg->sequence;
+  have_control_sequence_ = have_control_ = true;
+  lease_id_ = msg->lease_id;
+  lease_sequence_ = msg->lease_sequence;
+  lease_deadline_tick_ms_ = msg->lease_valid_until_tick_ms;
+  lease_active_ = msg->lease_active && lease_id_ > revoked_lease_id_;
+  if (!msg->lease_active) {revoked_lease_id_ = std::max(revoked_lease_id_, msg->lease_id);}
+  pub->publish(*msg);
 }
 
 bool BridgeNode::clock_stable()
@@ -365,7 +450,7 @@ void BridgeNode::on_topology(const can_bridge_msgs::msg::MotorTopology::SharedPt
 void BridgeNode::on_command(const can_bridge_msgs::msg::MotorCommandArray::SharedPtr msg)
 {
   if (msg->count != 0 &&
-    (!motion_ready() || sub_command_->get_publisher_count() > 1 ||
+    (!lease_ready(msg->session_id, msg->lease_id) || sub_command_->get_publisher_count() > 1 ||
     !source_time_valid(msg->sync_time_ns, std::chrono::milliseconds(30))))
   {
     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000,
@@ -399,7 +484,6 @@ void BridgeNode::on_command(const can_bridge_msgs::msg::MotorCommandArray::Share
     }
     out.valid_until_tick_ms = *deadline;
   }
-  out.session_id = session_id_;
   out.sequence = ++command_sequence_;
   pub_low_cmd_->publish(out);
 }
@@ -447,6 +531,9 @@ void BridgeNode::on_motor_status(const can_bridge_msgs::msg::MotorStatus::Shared
     }
     clear_cache();
     session_id_ = msg->session_id;
+    have_control_sequence_ = false;
+    lease_id_ = sent_lease_id_ = revoked_lease_id_ = 0;
+    lease_sequence_ = sent_lease_sequence_ = 0;
     command_sequence_ = 0;
     last_request_id_ = msg->config_request_id;
     next_request_id_ = last_request_id_ + 1;

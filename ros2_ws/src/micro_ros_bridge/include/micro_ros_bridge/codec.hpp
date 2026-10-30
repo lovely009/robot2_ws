@@ -21,6 +21,8 @@ namespace contract
 // 常量别名：值全部来自 WireContract.msg，本文件不写第二份数值。
 inline constexpr uint16_t kSchemaVersion =
   can_bridge_msgs::msg::WireContract::SCHEMA_VERSION;
+inline constexpr uint64_t kLeasePartition = 1000000ULL;
+inline constexpr uint32_t kLeaseLifetimeMaxMs = 300;
 inline constexpr uint8_t kMotorCountMax =
   can_bridge_msgs::msg::WireContract::MOTOR_COUNT_MAX;
 inline constexpr int16_t kSentinelMissing =
@@ -36,6 +38,7 @@ namespace topic
 {
 // 11 个线上话题名，值全部来自 WireContract.msg。缺一个就意味着某处得自己拼字符串。
 inline const std::string & kLowCmd = can_bridge_msgs::msg::WireContract::TOPIC_LOW_CMD;
+inline const std::string & kControlLease = can_bridge_msgs::msg::WireContract::TOPIC_CONTROL_LEASE;
 inline const std::string & kPolicy = can_bridge_msgs::msg::WireContract::TOPIC_POLICY;
 inline const std::string & kTrajectory = can_bridge_msgs::msg::WireContract::TOPIC_TRAJECTORY;
 inline const std::string & kConfig = can_bridge_msgs::msg::WireContract::TOPIC_CONFIG;
@@ -59,6 +62,14 @@ struct Quantized
   int16_t q;
   bool saturated;
 };
+
+// The compact command carries the lease id in its original 64-bit identity
+// slot. Disjoint session partitions fence delayed commands across reconnects.
+inline bool lease_belongs_to_session(uint64_t lease_id, uint64_t session_id)
+{
+  return session_id != 0 && lease_id / contract::kLeasePartition == session_id &&
+    lease_id % contract::kLeasePartition != 0;
+}
 
 // 截止 tick 用 uint32 自然回绕；剩余寿命不足 1 ms 时拒绝非空意图。
 inline std::optional<uint32_t> command_deadline_tick(

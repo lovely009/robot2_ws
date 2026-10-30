@@ -74,6 +74,13 @@ if(BUILD_TESTING)
   target_compile_options(test_bridge_node PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_bridge_node ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
   ament_target_dependencies(test_bridge_node rclcpp)
+
+  ament_add_gtest(test_control_lease test/test_control_lease.cpp
+    APPEND_ENV ROS_LOCALHOST_ONLY=1)
+  target_compile_features(test_control_lease PRIVATE cxx_std_17)
+  target_compile_options(test_control_lease PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_control_lease ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
+  ament_target_dependencies(test_control_lease rclcpp)
 endif()
 
 ament_package()

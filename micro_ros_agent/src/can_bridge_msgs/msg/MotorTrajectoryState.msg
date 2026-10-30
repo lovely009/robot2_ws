@@ -16,3 +16,6 @@ uint32 elapsed_ms
 uint32 total_ms
 uint16 target_count
 uint16[<=64] target_ids
+uint64 session_id
+uint32 sequence
+uint32 tick_ms

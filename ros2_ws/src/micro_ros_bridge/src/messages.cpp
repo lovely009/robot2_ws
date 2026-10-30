@@ -56,6 +56,7 @@ Result encode_low_command(
   }
 
   out.sequence = in.sequence;
+  out.lease_id = in.lease_id;
   out.count = in.count;
   out.motor_ids.clear();
   out.position_q.clear();
@@ -108,6 +109,8 @@ Result decode_low_state(
   }
   can_bridge_msgs::msg::MotorMotionStateArray decoded;
   decoded.sync_time_ns = in.sync_time_ns;
+  decoded.session_id = in.session_id;
+  decoded.tick_ms = in.tick_ms;
   // seq 直通：主机侧唯一的丢帧判据（best-effort 无重传）。facade 的
   // MotorMotionStateArray 末尾为此追加了 seq 字段。
   decoded.seq = in.seq;
@@ -180,6 +183,17 @@ bool LowStateAssembler::accept(const can_bridge_msgs::msg::LowState & in, uint64
   can_bridge_msgs::msg::MotorMotionStateArray merged;
   merged.seq = in.seq;
   merged.sync_time_ns = pending_sync_;
+  merged.session_id = in.session_id;
+  uint64_t reference_delay_ms = 0;
+  for (size_t j = 0; j < chunks_.size(); ++j) {
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now - received_[j]).count();
+    reference_delay_ms = std::max(reference_delay_ms,
+      static_cast<uint64_t>(source_delays_ms_[j]) + static_cast<uint64_t>(waited));
+  }
+  // Every chunk belongs to the same MCU tick. Use one common age reference,
+  // so tick_ms - state_age_ms still denotes each physical measurement time.
+  merged.tick_ms = pending_tick_ + static_cast<uint32_t>(reference_delay_ms);
   bool seen[kIdLimit] = {};
   for (size_t j = 0; j < chunks_.size(); ++j) {
     can_bridge_msgs::msg::MotorMotionStateArray part;
@@ -192,11 +206,8 @@ bool LowStateAssembler::accept(const can_bridge_msgs::msg::LowState & in, uint64
       }
       seen[state.motor_id] = true;
       if (state.state_age_ms != std::numeric_limits<uint32_t>::max()) {
-        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
-          now - received_[j]).count();
         state.state_age_ms = static_cast<uint32_t>(std::min<uint64_t>(
-          static_cast<uint64_t>(state.state_age_ms) + source_delays_ms_[j] +
-          static_cast<uint64_t>(waited),
+          static_cast<uint64_t>(state.state_age_ms) + reference_delay_ms,
           std::numeric_limits<uint32_t>::max() - 1u));
       }
       merged.states.push_back(state);
@@ -421,6 +432,9 @@ Result decode_motor_status(
 
   // ---- MotorTrajectoryState ----
   traj.sync_time_ns = in.sync_time_ns;
+  traj.session_id = in.session_id;
+  traj.sequence = in.sequence;
+  traj.tick_ms = in.tick_ms;
   traj.trajectory_id = in.trajectory_id;
   traj.active = in.traj_active;
   traj.completed = in.traj_completed;

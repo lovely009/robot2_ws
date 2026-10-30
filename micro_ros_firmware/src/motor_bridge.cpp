@@ -10,6 +10,7 @@
 #include <rosidl_runtime_c/string_functions.h>
 #include <can_bridge_msgs/msg/wire_contract.h>
 #include <can_bridge_msgs/msg/low_command.h>
+#include <can_bridge_msgs/msg/control_lease.h>
 #include <can_bridge_msgs/msg/low_state.h>
 #include <can_bridge_msgs/msg/motor_status.h>
 #include <can_bridge_msgs/msg/motor_policy_array.h>
@@ -42,6 +43,9 @@ static uint32_t g_status_tick = 0U, g_control_tick = 0U, g_topology_tick = 0U;
 static uint32_t g_motion_tick = 0U;
 static bool g_device_param_pending = false;
 static rcl_subscription_t g_command_sub, g_trajectory_sub, g_policy_sub;
+static rcl_subscription_t g_lease_sub;
+static can_bridge_msgs__msg__ControlLease g_lease_msg;
+static bool g_lease_up = false, g_lease_added = false;
 static can_bridge_msgs__msg__LowCommand g_command_msg;
 static can_bridge_msgs__msg__MotorTrajectory g_trajectory_msg;
 static can_bridge_msgs__msg__MotorPolicyArray g_policy_msg;
@@ -128,7 +132,8 @@ bool motor_bridge_begin_session(uint64_t epoch_ns) {
   }
   g_session_id = session;
   g_last_session_id = session;
-  wire_command_guard_reset(&g_command_guard, session);
+  motor_rt_set_control_session(session);
+  wire_command_guard_reset(&g_command_guard, 0U);
   g_status_seq = g_motion_seq = 0U;
   g_event_count = 0U;
   g_device_param_pending = true;
@@ -138,7 +143,15 @@ bool motor_bridge_begin_session(uint64_t epoch_ns) {
   return true;
 }
 
-size_t motor_bridge_executor_handle_count(void) { return 3U; }
+size_t motor_bridge_executor_handle_count(void) { return 4U; }
+
+static void control_lease_cb(const void *msgin) {
+  if (msgin == nullptr) return;
+  const auto *msg = (const can_bridge_msgs__msg__ControlLease *)msgin;
+  if (msg->session_id != g_session_id || g_session_id == 0U) return;
+  (void)motor_rt_submit_control_lease(msg->session_id, msg->lease_id, msg->sequence,
+      msg->valid_until_tick_ms, msg->active);
+}
 
 static void low_command_cb(const void *msgin) {
   if (msgin == nullptr) {
@@ -152,10 +165,15 @@ static void low_command_cb(const void *msgin) {
       CONTROL_COMMAND_MAILBOX_MAX_TARGETS)) {
     return;
   }
-  if (msg->count != 0U && (!wire_command_guard_allows(
-      &g_command_guard, msg->session_id, msg->sequence) ||
-      !wire_command_deadline_valid(millis(), msg->valid_until_tick_ms))) return;
+  if (msg->count != 0U) {
+    if (!motor_rt_control_lease_allows(msg->lease_id)) return;
+    if (g_command_guard.session_id != msg->lease_id)
+      wire_command_guard_reset(&g_command_guard, msg->lease_id);
+    if (!wire_command_guard_allows(&g_command_guard, msg->lease_id, msg->sequence) ||
+        !wire_command_deadline_valid(millis(), msg->valid_until_tick_ms)) return;
+  }
   control_command_snapshot_t snapshot = {0};
+  snapshot.lease_id = msg->lease_id;
   snapshot.sequence = msg->sequence;
   snapshot.received_tick_ms = millis();
   snapshot.target_count = msg->count;
@@ -182,12 +200,13 @@ static void trajectory_cb(const void *msgin) {
   }
   const auto *msg = (const can_bridge_msgs__msg__MotorTrajectory *)msgin;
   const bool stop = msg->count == 0U && msg->target_count == 0U;
-  if (!stop && (g_session_id == 0U || msg->session_id != g_session_id)) return;
+  if (!stop && (g_session_id == 0U || msg->session_id != g_session_id ||
+      !motor_rt_control_lease_allows(msg->lease_id))) return;
   // 分段元数据和声明计数必须在有界范围内：超界或分段编号非法一律拒绝，
   // 不做静默截断（截断会把一条轨迹悄悄变成另一条）。
-  if (msg->segment_count == 0U ||
+  if ((!stop && (msg->segment_count == 0U ||
       msg->segment_count > CONTROL_TRAJECTORY_MAILBOX_MAX_SEGMENTS ||
-      msg->segment_index >= msg->segment_count ||
+      msg->segment_index >= msg->segment_count)) ||
       msg->count != msg->points.size ||
       msg->target_count != msg->target_ids.size ||
       msg->count > CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS ||
@@ -197,11 +216,14 @@ static void trajectory_cb(const void *msgin) {
   // 5KB 级别，静态而非栈上（回调在 micro_ros 任务栈上跑）。
   static control_trajectory_t trajectory;
   memset(&trajectory, 0, sizeof(trajectory));
+  trajectory.lease_id = msg->lease_id;
   trajectory.sequence = msg->sequence;
   trajectory.trajectory_id = msg->trajectory_id;
   trajectory.received_tick_ms = millis(); // 本地接收 tick（ARD §12.2）
-  trajectory.segment_index = msg->segment_index;
-  trajectory.segment_count = msg->segment_count;
+  // A default-constructed empty ROS message is a valid unconditional cancel.
+  // Normalize only empty input; motion segments retain strict shape checks.
+  trajectory.segment_index = stop ? 0U : msg->segment_index;
+  trajectory.segment_count = stop ? 1U : msg->segment_count;
   trajectory.point_count = msg->count;
   trajectory.target_count = msg->target_count;
   for (uint16_t i = 0; i < msg->target_count; ++i) {
@@ -227,7 +249,8 @@ static void policy_cb(const void *msgin) {
   for (size_t i = 0; i < msg->targets.size; ++i) {
     if (msg->targets.data[i].enabled) stop = false;
   }
-  if (!stop && (g_session_id == 0U || msg->session_id != g_session_id)) return;
+  if (!stop && (g_session_id == 0U || msg->session_id != g_session_id ||
+      !motor_rt_control_lease_allows(msg->lease_id))) return;
   // 声明计数必须在有界数组之内：超界一律拒绝，不做静默截断。
   if (msg->count != msg->targets.size ||
       msg->count > CONTROL_POLICY_MAILBOX_MAX_TARGETS) {
@@ -235,6 +258,7 @@ static void policy_cb(const void *msgin) {
   }
   // 约 0.8KB，静态而非栈上（回调在 micro_ros 任务栈上跑）。
   static control_policy_snapshot_t snapshot;
+  snapshot.lease_id = msg->lease_id;
   snapshot.received_tick_ms = millis(); // 本地接收 tick
   snapshot.request_id = msg->request_id;
   snapshot.policy_generation = msg->policy_generation;
@@ -254,14 +278,15 @@ static void publish_motion_states(uint32_t now_ms) {
   if ((uint32_t)(now_ms - g_motion_tick) < PUBLISH_SCHEDULE_MOTION_MS) return;
   g_motion_tick = now_ms;
   motor_control_motion_state_t states[kRosArrayCapacity];
-  const size_t count = motor_rt_copy_motion_states(states, kRosArrayCapacity);
+  uint32_t sample_tick = 0U;
+  const size_t count = motor_rt_copy_motion_states(states, kRosArrayCapacity, &sample_tick);
   const size_t chunks = count == 0U ? 1U : (count + kChunkCapacity - 1U) / kChunkCapacity;
   auto &m = g_motion_states_msg;
   m.sync_time_ns = rmw_uros_epoch_nanos();
   m.session_id = g_session_id;
   m.schema_version = can_bridge_msgs__msg__WireContract__SCHEMA_VERSION;
   m.seq = ++g_motion_seq;
-  m.tick_ms = now_ms;
+  m.tick_ms = sample_tick;
   m.total_count = (uint8_t)count;
   m.chunk_count = (uint8_t)chunks;
   for (size_t chunk = 0U; chunk < chunks; ++chunk) {
@@ -290,15 +315,26 @@ static void publish_motion_states(uint32_t now_ms) {
   }
 }
 
+static uint32_t advance_state_age(uint32_t age_ms, uint32_t elapsed_ms) {
+  return age_ms > UINT32_MAX - elapsed_ms ? UINT32_MAX : age_ms + elapsed_ms;
+}
+
 static void publish_control_states(uint32_t now_ms) {
+  (void)now_ms; // Scheduling tick is not the feedback sampling timestamp.
   auto &m = g_control_states_msg;
   motor_control_status_t g_control_status_snapshot[kRosArrayCapacity];
-  const size_t n = motor_rt_copy_statuses(g_control_status_snapshot, kRosArrayCapacity);
+  uint32_t status_tick = 0U;
+  const size_t n = motor_rt_copy_statuses(g_control_status_snapshot, kRosArrayCapacity, &status_tick);
   m.session_id = g_session_id;
   m.schema_version = can_bridge_msgs__msg__MotorControlStateArray__SCHEMA_VERSION;
   m.sync_time_ns = rmw_uros_epoch_nanos();
-  m.tick_ms = now_ms;
   ++m.sequence;
+  control_lease_state_t lease;
+  motor_rt_copy_control_lease(&lease, &m.tick_ms);
+  m.lease_id = lease.lease_id;
+  m.lease_sequence = lease.sequence;
+  m.lease_valid_until_tick_ms = lease.valid_until_tick_ms;
+  m.lease_active = lease.active;
   m.states.size = n;
   for (size_t i = 0U; i < n; ++i) {
     const auto &s = g_control_status_snapshot[i];
@@ -309,7 +345,7 @@ static void publish_control_states(uint32_t now_ms) {
     out.execution_state = s.execution_state;
     out.policy_enabled = s.policy_enabled;
     out.motion_enabled = s.motion_enabled;
-    out.state_age_ms = s.state_age_ms;
+    out.state_age_ms = advance_state_age(s.state_age_ms, m.tick_ms - status_tick);
     out.unified_fault_code = s.unified_fault_code;
     out.vendor_fault_code = s.vendor_fault_code;
     out.last_failure_reason = s.last_failure_reason;
@@ -319,13 +355,22 @@ static void publish_control_states(uint32_t now_ms) {
 }
 
 static void publish_statuses(uint32_t now_ms) {
+  (void)now_ms;
   auto &m = g_status_msg;
   motor_control_status_t g_control_status_snapshot[kRosArrayCapacity];
-  const size_t n = motor_rt_copy_statuses(g_control_status_snapshot, kRosArrayCapacity);
+  uint32_t status_tick = 0U;
+  const size_t n = motor_rt_copy_statuses(g_control_status_snapshot, kRosArrayCapacity, &status_tick);
+  motor_control_motion_state_t motion[kRosArrayCapacity];
+  const size_t motion_count = motor_rt_copy_motion_states(motion, kRosArrayCapacity, nullptr);
+  motor_control_trajectory_state_t trajectory = {};
+  // elapsed and tick must come from the same MCU sampling instant. Otherwise
+  // serial publication delays masquerade as changes to the trajectory origin.
+  uint32_t trajectory_tick = 0U;
+  motor_rt_copy_trajectory_state(&trajectory, &trajectory_tick);
   m.sync_time_ns = rmw_uros_epoch_nanos();
   m.session_id = g_session_id;
   m.schema_version = can_bridge_msgs__msg__WireContract__SCHEMA_VERSION;
-  m.tick_ms = now_ms;
+  m.tick_ms = trajectory_tick;
   m.sequence = ++g_status_seq;
   m.command_sequence = g_command_guard.sequence;
   m.config_request_id = param_bridge_request_high_water();
@@ -344,12 +389,11 @@ static void publish_statuses(uint32_t now_ms) {
   m.drive_mode.size = n;
   m.status_flags.size = n;
   m.bus_index.size = n;
-  motor_control_motion_state_t motion[kRosArrayCapacity];
-  const size_t motion_count = motor_rt_copy_motion_states(motion, kRosArrayCapacity);
   for (size_t i = 0U; i < n; ++i) {
     const auto &s = g_control_status_snapshot[i];
     g_status_motor_ids[i] = s.motor_id;
-    g_status_state_age_ms[i] = wire_encode_state_age(s.state_age_ms);
+    g_status_state_age_ms[i] = wire_encode_state_age(
+        advance_state_age(s.state_age_ms, m.tick_ms - status_tick));
     g_status_target_source[i] = MOTOR_CONTROL_TARGET_SOURCE_NONE;
     for (size_t j = 0U; j < motion_count; ++j) {
       if (motion[j].motor_id == s.motor_id) g_status_target_source[i] = motion[j].target_source;
@@ -366,8 +410,6 @@ static void publish_statuses(uint32_t now_ms) {
     g_status_status_flags[i] = wire_encode_status_flags({s.online, s.device_protect_known, s.device_protect_enabled, s.device_direction_known, s.device_direction});
     g_status_bus_index[i] = s.bus_index;
   }
-  motor_control_trajectory_state_t trajectory = {};
-  motor_rt_copy_trajectory_state(&trajectory);
   m.trajectory_id = trajectory.trajectory_id;
   m.traj_active = trajectory.active;
   m.traj_completed = trajectory.completed;
@@ -675,6 +717,12 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   }
   g_command_up = true;
   sub_opts.qos = qos_reliable(1);
+  if (rcl_subscription_init(&g_lease_sub, node, ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, ControlLease),
+      can_bridge_msgs__msg__WireContract__TOPIC_CONTROL_LEASE, &sub_opts) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor); return false;
+  }
+  g_lease_up = true;
+  sub_opts.qos = qos_reliable(1);
   if (rcl_subscription_init(&g_trajectory_sub, node, ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, MotorTrajectory),
       can_bridge_msgs__msg__WireContract__TOPIC_TRAJECTORY, &sub_opts) != RCL_RET_OK) {
     motor_bridge_destroy(node, executor); return false;
@@ -759,12 +807,23 @@ bool motor_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
     motor_bridge_destroy(node, executor); return false;
   }
   g_policy_added = true;
+  if (rclc_executor_add_subscription(executor, &g_lease_sub, &g_lease_msg, control_lease_cb, ON_NEW_DATA) != RCL_RET_OK) {
+    motor_bridge_destroy(node, executor); return false;
+  }
+  g_lease_added = true;
   return true;
 }
 
 void motor_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   g_session_id = 0U;
+  motor_rt_set_control_session(0U);
   wire_command_guard_reset(&g_command_guard, 0U);
+  if (executor != nullptr && g_lease_added) {
+    rclc_executor_remove_subscription(executor, &g_lease_sub); g_lease_added = false;
+  }
+  if (g_lease_up) {
+    const rcl_ret_t rc = rcl_subscription_fini(&g_lease_sub, node); (void)rc; g_lease_up = false;
+  }
   if (executor != nullptr && g_command_added) {
     rclc_executor_remove_subscription(executor, &g_command_sub); g_command_added = false;
   }

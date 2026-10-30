@@ -202,6 +202,8 @@ struct motor_control_context {
   // 待发送帧缓冲（collect_tx 消费；满则丢弃并计数）。
   motor_protocol_tx_frame_t tx_pending[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t tx_count;
+  // 停机时锁存；任务层先取消下游同槽旧 P0/P1，再路由新的安全帧。
+  uint64_t tx_cancel_pending;
   uint32_t tx_dropped_count;
   uint32_t p0_retry_count; // P0 帧因缓冲全满而挂起重试的次数（诊断可见）
 

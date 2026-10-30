@@ -127,16 +127,32 @@ bool motor_control_requeue_p0(motor_control_context_t *ctx,
 // 编码失败或队列满均挂起重试，并更新诊断计数。
 bool motor_control_send_p0(motor_control_context_t *ctx,
     motor_control_entry_t *entry, uint8_t kind) {
-  if (ctx == NULL || entry == NULL || entry->adapter == NULL) {
+  if (ctx == NULL || entry == NULL) {
     return false;
   }
+  // 停机是同轴发送屏障：先使旧目标/旧使能失效，再尝试编码安全帧。
+  // 只清本轴 P0/P1，P2 配置流与其他电机保持原顺序。下游取消独立锁存，
+  // 不依赖安全帧是否能在本拍入队；否则队满时旧 P1 仍可能重新使能电机。
+  const size_t slot = motor_control_entry_index(ctx, entry);
+  size_t kept = 0U;
+  for (size_t i = 0U; i < ctx->tx_count; ++i) {
+    const motor_protocol_tx_frame_t *queued = &ctx->tx_pending[i];
+    if (queued->tx_slot == slot &&
+        queued->tx_class != MOTOR_PROTOCOL_TX_CLASS_P2) {
+      continue;
+    }
+    ctx->tx_pending[kept++] = *queued;
+  }
+  ctx->tx_count = kept;
+  ctx->tx_cancel_pending |= UINT64_C(1) << slot;
+  entry->last_p0_kind = kind;
   motor_protocol_tx_frame_t frame = {0};
   bool encoded = false;
-  if (kind == MOTOR_CONTROL_P0_DISABLE) {
+  if (entry->adapter != NULL && kind == MOTOR_CONTROL_P0_DISABLE) {
     encoded = entry->adapter->encode_disable != NULL &&
         entry->adapter->encode_disable(entry->profile, entry->node,
         entry->bus_index, &frame);
-  } else if (kind == MOTOR_CONTROL_P0_SOFT_STOP) {
+  } else if (entry->adapter != NULL && kind == MOTOR_CONTROL_P0_SOFT_STOP) {
     // 软停编码需要 Profile 的力矩/限位量，缺失即视为编码失败。
     encoded = entry->profile != NULL &&
         entry->adapter->encode_soft_stop != NULL &&
@@ -151,7 +167,6 @@ bool motor_control_send_p0(motor_control_context_t *ctx,
   }
   frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P0;
   frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
-  entry->last_p0_kind = kind;
   return motor_control_push_tx_p0(ctx, entry, &frame);
 }
 
@@ -199,6 +214,9 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     entry->enable_pending = false;
     entry->has_target = false;
     entry->motion_authorized = false;
+    // Revoking a host lease/session also disarms policy. The stored generation
+    // remains the high-water mark, so a replay cannot arm the next lease.
+    entry->policy_enable = false;
     // 中止进行中的事务（配置请求回 UNCONFIRMED；身份读取待重连重发）。
     motor_control_abort_tx(ctx, entry, now_ms);
     if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE ||
@@ -1321,6 +1339,15 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
     }
   }
   return pushed;
+}
+
+uint64_t motor_control_take_tx_cancellations(motor_control_context_t *ctx) {
+  if (ctx == NULL) {
+    return 0U;
+  }
+  const uint64_t slots = ctx->tx_cancel_pending;
+  ctx->tx_cancel_pending = 0U;
+  return slots;
 }
 
 size_t motor_control_collect_tx(motor_control_context_t *ctx,

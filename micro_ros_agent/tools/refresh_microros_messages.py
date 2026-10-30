@@ -117,7 +117,7 @@ def main() -> None:
     # 新增消息同样要落到库里——只刷新了协议常量而新类型缺失，说明 colcon 用了
     # 旧的 install 目录（增量构建没看到新 .msg），此时 pio run 会在编译期报
     # "no member named 'param_set_array'" 之类的错，指向性远不如这里直接点名。
-    for struct_name in ("param_set_array", "system_command", "system_status",
+    for struct_name in ("control_lease", "param_set_array", "system_command", "system_status",
                         "motor_control_state", "motor_control_state_array"):
         require(detail_dir / f"{struct_name}__struct.h", f"新消息 {struct_name} 的生成头")
 

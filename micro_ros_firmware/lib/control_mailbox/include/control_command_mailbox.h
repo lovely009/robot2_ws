@@ -27,6 +27,7 @@ typedef struct {
 } control_command_target_t;
 
 typedef struct {
+  uint64_t lease_id; // Runtime rechecks this fence before applying pending input.
   uint32_t sequence;
   uint32_t received_tick_ms;
   uint8_t target_count;

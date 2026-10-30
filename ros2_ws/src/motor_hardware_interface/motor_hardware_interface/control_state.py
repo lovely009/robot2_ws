@@ -16,7 +16,7 @@ class ControlStateTracker:
     def update(self, schema: int, session: int, sequence: int,
                states: list, now: float) -> bool:
         self.seen = True
-        if (type(schema) is not int or schema != 1 or type(session) is not int or session <= 0
+        if (type(schema) is not int or schema != 2 or type(session) is not int or session <= 0
                 or type(sequence) is not int or not 0 <= sequence <= 0xFFFFFFFF
                 or not math.isfinite(now) or not isinstance(states, (list, tuple))
                 or len(states) > 64):
@@ -57,9 +57,23 @@ class ControlStateTracker:
         return True
 
     def ready(self, motor_id: int, now: float, timeout: float) -> bool:
+        return self._permission(motor_id, now, timeout, (3,))
+
+    def policy_ready(self, motor_id: int, now: float, timeout: float) -> bool:
+        """Accept the first target after policy ACK, before drive activation.
+
+        MCU activation requires a target. Requiring ACTIVE for that first
+        target would deadlock startup; activation itself stays on the MCU.
+        During its bounded enable/unfreeze transitions fresh targets may
+        continue, while execution feedback still has to prove actual motion.
+        """
+        return self._permission(motor_id, now, timeout, (2, 3, 13, 14))
+
+    def _permission(self, motor_id, now, timeout, lifecycles):
         state = self.states.get(motor_id)
         age = now-self.at
         return bool(self.valid and state and 0 <= age <= timeout
-                    and state.online and state.control_lifecycle == 3
+                    and state.online and state.control_lifecycle in lifecycles
                     and state.policy_enabled and state.unified_fault_code == 0
+                    and state.vendor_fault_code == 0
                     and state.state_age_ms/1000 + age <= timeout)

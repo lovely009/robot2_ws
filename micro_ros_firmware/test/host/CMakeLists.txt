@@ -114,6 +114,9 @@ add_library(fw_wire_codec OBJECT
 target_include_directories(fw_wire_codec PUBLIC
   ../../lib/wire_codec/include)
 
+add_library(fw_control_lease OBJECT ../../lib/control_lease/src/control_lease.c)
+target_include_directories(fw_control_lease PUBLIC ../../lib/control_lease/include)
+
 # 声明一个 host 测试目标：SOURCES 测试自身源文件，OBLIBS 依赖的固件 OBJECT
 # 库，INCLUDES 额外包含目录，DEFINES 编译宏（如 led 的 HOST_TEST）。
 # 注意 CMake 3.16 不传递 OBJECT 库的目标文件（只传播 include），
@@ -137,6 +140,11 @@ endfunction()
 fw_host_test(test_motor_protocol
   SOURCES test_motor_protocol.cpp
   OBLIBS fw_motor_protocol)
+
+fw_host_test(test_control_lease
+  SOURCES test_control_lease.cpp
+  OBLIBS fw_control_lease fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
 
 fw_host_test(test_motor_protocol_adapter
   SOURCES test_motor_protocol_adapter.cpp
@@ -186,6 +194,13 @@ fw_host_test(test_motor_tx_router
   SOURCES test_motor_tx_router.cpp
   OBLIBS fw_motor_tx_router fw_can_tx_scheduler fw_adapters fw_motor_protocol
   INCLUDES ../../lib/motor_tx_router/include)
+
+# 跨层停机回归：真实内核、协议适配器、调度器及 CERB 聚合器共同执行。
+fw_host_test(test_stop_tx
+  SOURCES test_stop_tx.cpp
+  OBLIBS fw_motor_control fw_motor_tx_router fw_can_tx_scheduler
+    fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
 
 fw_host_test(test_save_transaction
   SOURCES test_save_transaction.cpp

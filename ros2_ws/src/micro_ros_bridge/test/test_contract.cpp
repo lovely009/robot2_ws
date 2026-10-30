@@ -15,7 +15,8 @@
 TEST(Contract, TopicNamesCarryDirectionPrefix) {
   namespace topic = micro_ros_bridge::contract::topic;
   EXPECT_EQ(topic::kLowCmd, "/micro_ros_do/low_cmd");
-  for (const std::string & name : {topic::kLowCmd, topic::kPolicy, topic::kTrajectory, topic::kConfig}) {
+  for (const std::string & name : {topic::kLowCmd, topic::kPolicy, topic::kTrajectory,
+      topic::kConfig, topic::kControlLease}) {
     EXPECT_EQ(std::string(name).rfind("/micro_ros_do/", 0), 0u) << name;
   }
   for (const std::string & name : {topic::kLowState, topic::kMotorStatus, topic::kTopology,
@@ -31,6 +32,17 @@ TEST(Contract, ScalesAndSentinel) {
   EXPECT_DOUBLE_EQ(micro_ros_bridge::contract::kScaleEffort, 64.0);
   EXPECT_EQ(micro_ros_bridge::contract::kSentinelMissing, -32768);
   EXPECT_EQ(micro_ros_bridge::contract::kMotorCountMax, 64);
+}
+
+TEST(Contract, CompactLeaseIdentityBelongsToOnlyOneSession) {
+  constexpr uint64_t session = 1800000000000ULL;
+  constexpr uint64_t base = session * 1000000ULL;
+  EXPECT_TRUE(micro_ros_bridge::lease_belongs_to_session(base + 1, session));
+  EXPECT_TRUE(micro_ros_bridge::lease_belongs_to_session(base + 999999, session));
+  EXPECT_FALSE(micro_ros_bridge::lease_belongs_to_session(base, session));
+  EXPECT_FALSE(micro_ros_bridge::lease_belongs_to_session(base + 1, session + 1));
+  EXPECT_FALSE(micro_ros_bridge::lease_belongs_to_session(base + 1000000, session));
+  EXPECT_FALSE(micro_ros_bridge::lease_belongs_to_session(1, 0));
 }
 
 // 旧 facade 消息保留着同一套枚举取值。两处若漂移，页面与固件对同一台电机的

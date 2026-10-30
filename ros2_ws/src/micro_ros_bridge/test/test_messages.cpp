@@ -29,6 +29,7 @@ MotorCommandTarget target(uint16_t id, double pos, double vel, double eff)
 TEST(EncodeLowCommand, RoundTripThroughQuantization) {
   MotorCommandArray in;
   in.count = 2;
+  in.lease_id = 1800000000000000001ULL;
   in.targets.push_back(target(0, 0.5, -1.0, 2.0));
   in.targets.push_back(target(3, -0.25, 0.0, 0.0));
 
@@ -41,6 +42,7 @@ TEST(EncodeLowCommand, RoundTripThroughQuantization) {
   EXPECT_NEAR(micro_ros_bridge::dequantize(out.position_q[0],
     micro_ros_bridge::contract::kScalePosition), 0.5, 1e-3);
   EXPECT_EQ(out.count, 2);
+  EXPECT_EQ(out.lease_id, in.lease_id);
 }
 
 // 整条拒绝：任何一条不合法，一个字节都不出去（沿用旧口径）。
@@ -92,6 +94,7 @@ TEST(DecodeLowState, SentinelBecomesNaN) {
   in.target_source = {1};
   in.schema_version = micro_ros_bridge::contract::kSchemaVersion;
   in.session_id = 1;
+  in.tick_ms = 123;
   in.chunk_count = 1;
   in.total_count = 1;
 
@@ -99,6 +102,8 @@ TEST(DecodeLowState, SentinelBecomesNaN) {
   const auto r = micro_ros_bridge::decode_low_state(in, out);
   ASSERT_TRUE(r.ok) << r.error;
   EXPECT_EQ(out.seq, 7u);  // 丢帧判据必须透到 facade，不能丢
+  EXPECT_EQ(out.session_id, in.session_id);
+  EXPECT_EQ(out.tick_ms, in.tick_ms);
   ASSERT_EQ(out.states.size(), 1u);
   EXPECT_EQ(out.states[0].motor_id, 5);
   EXPECT_TRUE(std::isnan(out.states[0].velocity));
@@ -213,6 +218,9 @@ TEST(EncodeConfig, SaveOnlyAcceptsWholeMachine) {
 TEST(DecodeMotorStatus, RestoresFacadeFields) {
   can_bridge_msgs::msg::MotorStatus in;
   in.sync_time_ns = 42;
+  in.session_id = 1800000000000ULL;
+  in.sequence = 123;
+  in.tick_ms = 456;
   in.count = 1;
   in.motor_ids = {9};
   in.state_age_ms = {0xFFFF};  // 从未收到
@@ -253,6 +261,9 @@ TEST(DecodeMotorStatus, RestoresFacadeFields) {
   EXPECT_TRUE(s.device_protect_enabled);
   EXPECT_EQ(s.device_direction, 1u);
   EXPECT_EQ(statuses.sync_time_ns, 42u);
+  EXPECT_EQ(traj.session_id, in.session_id);
+  EXPECT_EQ(traj.sequence, in.sequence);
+  EXPECT_EQ(traj.tick_ms, in.tick_ms);
   const auto before = fresh;
   in.count = 2;
   EXPECT_FALSE(micro_ros_bridge::decode_motor_status(in, statuses, traj, sys, diag, fresh).ok);

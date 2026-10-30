@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include "control_mailbox.h"
+#include "control_lease.h"
 #include "motor_control.h"
 
 #ifdef __cplusplus
@@ -38,13 +39,20 @@ bool motor_rt_submit_config(const control_mailbox_config_request_t *request);
 
 // 会话状态请求（电平；内核经任务边界沿同步）。
 void motor_rt_set_agent_connected(bool connected);
+// Session and lease inputs never enable a motor; policy remains explicit.
+void motor_rt_set_control_session(uint64_t session_id);
+bool motor_rt_submit_control_lease(uint64_t session_id, uint64_t lease_id,
+    uint32_t sequence, uint32_t valid_until_tick_ms, bool active);
+bool motor_rt_control_lease_allows(uint64_t lease_id);
+void motor_rt_copy_control_lease(control_lease_state_t *out, uint32_t *sample_tick_ms);
 
 // ---- 只读状态副本（ROS 桥轮询发布用；内部短临界区）----
 
 // 返回实际拷贝的条数（= 当前注册表条目数，受 capacity 截断）。
 size_t motor_rt_copy_motion_states(motor_control_motion_state_t *out,
-    size_t capacity);
-size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity);
+    size_t capacity, uint32_t *sample_tick_ms);
+size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity,
+    uint32_t *sample_tick_ms);
 
 // 拓扑条目副本（协议族枚举与 MotorTopologyEntry.msg 对齐）。
 typedef struct {
@@ -84,7 +92,10 @@ typedef struct {
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);
 
 // 轨迹执行状态副本（内核类型直接暴露：无协议指针，无需镜像）。
-void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out);
+// sample_tick_ms is the exact MCU tick used for age/elapsed calculations.
+// A publisher combining snapshots must advance older ages to its chosen tick.
+void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out,
+    uint32_t *sample_tick_ms);
 
 #ifdef __cplusplus
 }

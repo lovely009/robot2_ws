@@ -9,6 +9,7 @@
 # 单位边界：换算只发生在两侧 codec 里，控制逻辑仍用 rad / rad/s / A / N·m。
 
 string TOPIC_LOW_CMD=/micro_ros_do/low_cmd
+string TOPIC_CONTROL_LEASE=/micro_ros_do/control_lease
 string TOPIC_POLICY=/micro_ros_do/policy
 string TOPIC_TRAJECTORY=/micro_ros_do/trajectory
 string TOPIC_CONFIG=/micro_ros_do/config
@@ -23,7 +24,8 @@ string TOPIC_IMU_DATA=/micro_ros_up/imu/data
 string TOPIC_IMU_TEMP=/micro_ros_up/imu/temp
 
 # 消息面契约版本：随字段**语义**变更递增（字段只增不改序）。
-uint16 SCHEMA_VERSION=2
+uint16 SCHEMA_VERSION=3
+uint32 CONTROL_LEASE_MAX_MS=300
 uint8 LOW_STATE_CHUNK_MAX=32
 # 单条消息可携带的最大电机数（= 内核 MOTOR_CONTROL_MAX_MOTORS）。
 uint8 MOTOR_COUNT_MAX=64

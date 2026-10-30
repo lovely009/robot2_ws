@@ -30,6 +30,7 @@ typedef struct {
 } control_policy_target_t;
 
 typedef struct {
+  uint64_t lease_id;
   uint32_t received_tick_ms;
   // 消息级请求号：逐台结果经 /micro_ros_up/events 的 CONFIG_RESULT 回，用它关联。
   uint32_t request_id;

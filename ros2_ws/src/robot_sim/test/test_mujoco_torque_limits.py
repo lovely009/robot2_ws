@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-MODELS_DIR = Path(__file__).parents[1] / "models"
+MODELS_DIR = Path(__file__).parents[2] / "robot_description" / "models"
 MODEL_DIR = MODELS_DIR / "half_body_robot"
 TOOL = MODEL_DIR / "tools" / "build_mujoco_model.py"
 TOPOLOGY = MODEL_DIR / "config" / "motor_driver.yaml"

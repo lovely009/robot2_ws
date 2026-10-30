@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 package = Path(__file__).resolve().parents[2]
-model_root = package.parent / 'robot_sim'
+model_root = package.parent / 'robot_description'
 
 
 class Handler(SimpleHTTPRequestHandler):

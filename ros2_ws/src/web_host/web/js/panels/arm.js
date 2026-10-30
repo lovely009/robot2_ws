@@ -7,7 +7,7 @@
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
 // 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把模型包根
-// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_sim/... 经
+// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_description/... 经
 // loader.packages 映射成 /robot_sim/...。模型可在页内切换（底栏选择器，见 mount）。
 //
 // 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
@@ -348,8 +348,8 @@ export function mount(rootEl, ctx) {
     }
     init(canvas, {
       urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
-      // package://robot_sim/... → static_server 挂在根部的模型包根
-      packages: {'robot_sim': '/robot_sim'},
+      // package://robot_description/... → static_server 挂在根部的模型包根
+      packages: {'robot_description': '/robot_sim'},
       onSelect: pickJoint,
       // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
       onProgress: (url, loaded, total) => {

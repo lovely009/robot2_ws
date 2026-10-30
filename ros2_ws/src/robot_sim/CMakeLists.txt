@@ -3,12 +3,10 @@ project(robot_sim)
 
 find_package(ament_cmake REQUIRED)
 
-# 模型/launch 集成包：models/（每模型一个自包含目录）+ 仿真拓扑配置和
-# 两个启动期辅助节点，无编译目标。dist/ 是 ROS 无关的对外发布件。
+# 仿真启动与辅助节点；公共机械模型由 robot_description 独立安装。
 install(DIRECTORY
   config
   launch
-  models
   DESTINATION share/${PROJECT_NAME}
 )
 install(PROGRAMS

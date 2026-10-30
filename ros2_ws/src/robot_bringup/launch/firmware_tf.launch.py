@@ -54,7 +54,7 @@ def firmware_tf_nodes(context: LaunchContext) -> list[Node]:
 def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument('model', description='已配置电机映射的模型目录名'),
-        DeclareLaunchArgument('model_dir', default_value=get_package_share_directory('robot_sim'),
+        DeclareLaunchArgument('model_dir', default_value=get_package_share_directory('robot_description'),
                               description='模型包根目录（含 models/）'),
         DeclareLaunchArgument('enable_trajectory', default_value='false',
                               description='显式开启标准关节轨迹入口；默认只读反馈与 TF'),

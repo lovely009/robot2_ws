@@ -40,7 +40,7 @@ def _execute(launch_file):
 def _package_share():
     from ament_index_python.packages import get_package_share_directory
 
-    return Path(get_package_share_directory("robot_sim"))
+    return Path(get_package_share_directory("robot_description"))
 
 
 def _robot_description_command(entities, context):

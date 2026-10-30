@@ -3,7 +3,7 @@
 <package format="3">
   <name>robot_sim</name>
   <version>1.0.0</version>
-  <description>机械臂模型、Gazebo 仿真及 CAN 电机端到端组合仿真入口。</description>
+  <description>Gazebo、MuJoCo 与 MCU 电机端到端组合仿真入口。</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
@@ -24,6 +24,7 @@
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>robot_description</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>

@@ -182,9 +182,9 @@ def test_model_joints_cover_source_tree_arm_models() -> None:
     except Exception:
         pytest.skip('motor_hardware_interface 未安装：② 回退路径的前提不成立')
 
-    models_root = PKG.parent / 'robot_sim' / 'models'
+    models_root = PKG.parent / 'robot_description' / 'models'
     if not models_root.is_dir():
-        pytest.skip('源码树没有 robot_sim/models')
+        pytest.skip('源码树没有 robot_description/models')
     models = enumerate_arm_models(models_root)
     if not models:
         pytest.skip('源码树没有可渲染模型')
@@ -239,7 +239,7 @@ def test_motor_library_missing_root_is_empty(tmp_path: Path) -> None:
 
 
 def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
-    root = PKG.parent / "robot_sim" / "models"
+    root = PKG.parent / "robot_description" / "models"
     metadata = model_transmissions("half_body_robot", root)
     groups = {g["name"]: g for g in metadata["groups"]}
     assert groups["wrist_a"]["motors"] == [
@@ -262,7 +262,7 @@ def test_declared_invalid_transmission_metadata_cannot_use_legacy_alias(tmp_path
 
 
 def test_transmission_policy_defaults_come_from_model_yaml() -> None:
-    root = PKG.parent / "robot_sim" / "models"
+    root = PKG.parent / "robot_description" / "models"
     defaults = model_transmissions("half_body_robot", root)["policy_defaults"]
     assert defaults[8] == {"kp": 0.008, "kd": 1.0}
     assert defaults[9] == {"kp": 0.008, "kd": 1.0}

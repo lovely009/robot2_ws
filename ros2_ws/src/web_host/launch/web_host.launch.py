@@ -15,7 +15,7 @@ def generate_launch_description():
     # 本 launch 提供 L1 页面服务；台架编排由 robot_bringup/robot.launch.py 负责，
     # 避免仅浏览页面时引入进程管理权限。
     try:
-        model_dir = get_package_share_directory('robot_sim')
+        model_dir = get_package_share_directory('robot_description')
     except Exception:
         model_dir = ''
 

@@ -29,13 +29,13 @@ _MAX_MOTOR_ID = 65535
 
 
 def default_urdf_provider(model: str) -> str:
-    """`robot_sim` 安装树里该模型的 URDF 路径；找不到返回空串。
+    """`robot_description` 安装树里该模型的 URDF 路径；找不到返回空串。
 
     使用 `<model>.urdf`，与 web 侧模型枚举条件一致。
     """
     from ament_index_python.packages import get_package_share_directory
     try:
-        share = get_package_share_directory("robot_sim")
+        share = get_package_share_directory("robot_description")
     except Exception:
         return ""
     path = Path(share) / "models" / model / "urdf" / f"{model}.urdf"
@@ -128,7 +128,7 @@ class GravityFeedforwardProcessManager:
             raise ValueError("model must be a plain model-directory name")
         urdf_path = self._urdf_provider(model)
         if not urdf_path or not Path(urdf_path).is_file():
-            raise ValueError(f"model {model!r} has no urdf/<model>.urdf under robot_sim")
+            raise ValueError(f"model {model!r} has no urdf/<model>.urdf under robot_description")
         return {
             "model": model,
             "urdf_path": urdf_path,

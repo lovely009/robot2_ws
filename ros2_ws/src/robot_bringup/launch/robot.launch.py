@@ -32,7 +32,7 @@ def generate_launch_description():
     # 模型枚举根与臂视图几何都来自模型包；缺包时降级（模型列表为空、臂视图提示
     # 加载失败），静态页面照常——所以这里吞掉查找异常。
     try:
-        model_dir = get_package_share_directory('robot_sim')
+        model_dir = get_package_share_directory('robot_description')
     except Exception:
         model_dir = ''
 

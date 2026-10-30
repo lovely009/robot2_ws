@@ -277,8 +277,10 @@ def test_data_files_cover_web_tree(monkeypatch):
     # 源侧：declared 里落在 web/ 下的文件，取相对 web/ 的路径
     source = sorted(p.relative_to(WEB) for p in declared if WEB in p.parents)
 
-    install_web = PKG.parents[1] / 'install' / 'web_host' / 'share' / 'web_host' / 'web'
-    if not install_web.is_dir():
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        install_web = Path(get_package_share_directory('web_host')) / 'web'
+    except (ImportError, LookupError):
         pytest.skip('未构建 web_host：先 colcon build --symlink-install --packages-select web_host')
 
     # is_file() 跟符号链接：源文件不在安装树时链接悬空，算缺失
@@ -324,7 +326,7 @@ def test_builtin_joint_map_covers_default_model():
     assert mm, 'store.js 里找不到默认模型名 DEFAULT_MODEL'
     model_name = mm.group(1)
 
-    driver = (PKG.parent / 'robot_sim' / 'models' / model_name /
+    driver = (PKG.parent / 'robot_description' / 'models' / model_name /
               'config' / 'motor_driver.yaml')
     if not driver.is_file():
         pytest.skip(f'默认模型 {model_name} 的 motor_driver.yaml 不在源码树里')

@@ -136,7 +136,7 @@ class BenchManager(LifecycleNode):
             models_dir = os.path.join(model_dir, 'models')
         elif model_dir:
             self.get_logger().warn(
-                'model_dir 下没有 models/，模型枚举回落到 robot_sim 安装树：%s'
+                'model_dir 下没有 models/，模型枚举回落到 robot_description 安装树：%s'
                 % model_dir)
         models_root = models_dir or None
         self._model_provider = partial(enumerate_simulation_models, models_root)

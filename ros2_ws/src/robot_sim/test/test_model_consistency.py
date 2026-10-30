@@ -21,10 +21,10 @@ import pytest
 import yaml
 
 HERE = Path(__file__).parent
-PACKAGE_DIR = HERE.parent
+PACKAGE_DIR = HERE.parent.parent / "robot_description"
 MODELS_DIR = PACKAGE_DIR / "models"
 DIST_DIR = PACKAGE_DIR / "dist"
-MESH_PREFIX = "package://robot_sim/"
+MESH_PREFIX = "package://robot_description/"
 LIMITED_TYPES = {"revolute", "prismatic"}
 
 

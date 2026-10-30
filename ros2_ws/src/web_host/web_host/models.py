@@ -17,13 +17,13 @@ _TOPOLOGY_CONFIG = "config/simulation_topology.yaml"
 
 
 def _models_root():
-    """默认模型根目录（安装树的 robot_sim share）；取不到返回 None。
+    """默认模型根目录（安装树的 robot_description share）；取不到返回 None。
 
     各函数的 `root=` 参数可覆盖它：web_host.launch.py 的 model_dir 指向模型包根
     时，static_server 传 `<model_dir>/models`（可指源码目录）。
     """
     try:
-        return Path(get_package_share_directory("robot_sim")) / "models"
+        return Path(get_package_share_directory("robot_description")) / "models"
     except Exception:
         return None
 

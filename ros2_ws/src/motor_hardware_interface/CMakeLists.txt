@@ -10,6 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
 find_package(robot_transmission REQUIRED)
+find_package(robot_description REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/canfd_system.cpp
@@ -32,7 +33,11 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY config launch urdf DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config launch urdf DESTINATION share/${PROJECT_NAME}
+  PATTERN "motor.yaml" EXCLUDE)
+# Backward-compatible path, installed from the single model-library source.
+install(FILES "${robot_description_DIR}/../config/motor.yaml"
+  DESTINATION share/${PROJECT_NAME}/config)
 install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
 
 # 固件 ↔ ROS 标准话题适配桥（节点入口；转换/校验在

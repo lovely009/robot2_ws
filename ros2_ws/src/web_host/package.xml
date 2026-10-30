@@ -9,6 +9,7 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
+  <exec_depend>robot_description</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-can</exec_depend>
@@ -24,7 +25,7 @@
   <!-- 台架进程管理（bench_manager）不在本包的依赖里：本 launch 只做 L1（rosbridge +
        静态页），编排者是 robot_bringup 的 robot.launch.py。声明它反而会成环
        （bench_manager 依赖 bench_msgs，robot_bringup 依赖两者）。 -->
-  <!-- 臂视图可选使用 robot_sim 的 URDF 与 STL；缺包时静态页面仍可运行。 -->
+  <!-- 臂视图和模型 API 读取公共模型，避免依赖仿真运行包。 -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

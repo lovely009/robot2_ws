@@ -641,6 +641,7 @@ def launch_simulation(context):
         )
 
     share = Path(get_package_share_directory("robot_sim"))
+    model_share = Path(get_package_share_directory("robot_description"))
     model = LaunchConfiguration("model").perform(context)
     # 电机拓扑来源：显式 motor_config_file 优先；留空时优先**模型目录自带**的
     # config/motor_driver.yaml（模型专属仿真拓扑），否则回落权威整机配置。
@@ -649,7 +650,7 @@ def launch_simulation(context):
     if requested_config:
         motor_driver_path = Path(requested_config).resolve()
     else:
-        model_local = share / "models" / model / "config" / "motor_driver.yaml"
+        model_local = model_share / "models" / model / "config" / "motor_driver.yaml"
         motor_driver_path = (
             model_local.resolve()
             if model_local.is_file()
@@ -663,7 +664,7 @@ def launch_simulation(context):
     if not motor_specs_path.is_file():
         raise RuntimeError(f"motor specs file does not exist: {motor_specs_path}")
     hardware_share = Path(get_package_share_directory("motor_hardware_interface"))
-    topology_file = share / "models" / model / "config" / "simulation_topology.yaml"
+    topology_file = model_share / "models" / model / "config" / "simulation_topology.yaml"
     if not topology_file.is_file():
         raise RuntimeError(
             f"full simulation topology does not exist for model '{model}': "
@@ -705,7 +706,7 @@ def launch_simulation(context):
     # （Gazebo 重写 controllers.yaml 的 joints、MuJoCo 传 joint_names），不靠巧合。
     mujoco_model = None
     if backend == "mujoco":
-        mujoco_model = share / "models" / model / "mujoco" / f"{model}.xml"
+        mujoco_model = model_share / "models" / model / "mujoco" / f"{model}.xml"
         if not mujoco_model.is_file():
             raise RuntimeError(
                 f"model '{model}' has no MuJoCo model; expected {mujoco_model} "
@@ -714,7 +715,7 @@ def launch_simulation(context):
         # mujoco.launch.py 的 robot_state_publisher 用 standalone URDF 渲染
         # robot_description；缺它 rsp 会「起来了但模型是空的」，所以一并 fail fast。
         standalone_urdf = (
-            share / "models" / model / "urdf" / f"{model}.standalone.urdf"
+            model_share / "models" / model / "urdf" / f"{model}.standalone.urdf"
         )
         if not standalone_urdf.is_file():
             raise RuntimeError(
@@ -724,7 +725,7 @@ def launch_simulation(context):
         model_joints = _mujoco_joint_names(mujoco_model)
         model_description = f"MuJoCo model {mujoco_model}"
     else:
-        model_joints = _model_joint_names(share, model)
+        model_joints = _model_joint_names(model_share, model)
         model_description = "Gazebo model"
     unknown_joints = set(joint_order) - model_joints
     if unknown_joints:
@@ -852,7 +853,7 @@ def launch_simulation(context):
                 )
     elif controller_mode == "host":
         driver_model = (
-            share / "models" / model / "urdf" / f"{model}.canfd.xacro"
+            model_share / "models" / model / "urdf" / f"{model}.canfd.xacro"
         )
         if not driver_model.is_file():
             raise RuntimeError(f"CAN driver xacro does not exist: {driver_model}")
@@ -889,7 +890,7 @@ def launch_simulation(context):
         # Gazebo 的控制器参数只有 Gazebo 路需要；MuJoCo 桥自己就是被控对象，
         # 不做这件事也就不会凭空多一条对 models/<模型>/config/controllers.yaml 的启动期依赖。
         gazebo_controller_config = (
-            _write_gazebo_controller_config(share, model, joint_order, runtime_dir)
+            _write_gazebo_controller_config(model_share, model, joint_order, runtime_dir)
             if backend == "gazebo"
             else None
         )
@@ -1082,7 +1083,7 @@ def launch_simulation(context):
                 ]
             )
         # 后端已有 joint_states/TF；此桥只转换 Web 的关节命令并发布健康状态。
-        bridge_urdf = share / "models" / model / "urdf" / f"{model}.urdf"
+        bridge_urdf = model_share / "models" / model / "urdf" / f"{model}.urdf"
         if not bridge_urdf.is_file():
             raise RuntimeError(f"firmware topic bridge URDF does not exist: {bridge_urdf}")
         actions.append(

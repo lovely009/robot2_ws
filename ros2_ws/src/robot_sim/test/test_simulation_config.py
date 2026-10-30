@@ -12,7 +12,7 @@ import yaml
 
 HERE = Path(__file__).parent
 LAUNCH_FILE = HERE.parent / "launch" / "simulation.launch.py"
-MODEL_DIR = HERE.parent / "models" / "half_body_robot"
+MODEL_DIR = HERE.parent.parent / "robot_description" / "models" / "half_body_robot"
 
 
 def _launch_module():

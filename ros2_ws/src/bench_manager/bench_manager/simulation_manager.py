@@ -86,13 +86,13 @@ def enumerate_can_interfaces():
 
 
 def _models_root():
-    """默认模型根目录（安装树的 robot_sim share）；取不到返回 None。
+    """默认模型根目录（安装树的 robot_description share）；取不到返回 None。
 
     各枚举函数的 `root=` 参数可覆盖它：bench_manager 节点的 models_dir 参数
     就是把这个根显式传下来（可指源码目录，改模型不必重构建）。
     """
     try:
-        return Path(get_package_share_directory("robot_sim")) / "models"
+        return Path(get_package_share_directory("robot_description")) / "models"
     except Exception:
         return None
 

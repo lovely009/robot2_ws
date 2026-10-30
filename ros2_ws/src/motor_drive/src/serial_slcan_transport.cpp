@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <termios.h>
 
 #include "motor_drive/slcan.hpp"
@@ -16,6 +18,9 @@ namespace {
 
 // 通道命令之间的间隔：CANable2 固件在串口侧有处理时延，过快的连续命令可能丢帧。
 constexpr useconds_t kCommandDelayUs = 150000U;
+// One complete ASCII frame shares a single budget, including short writes and
+// interruptions. Backpressure must not block the 200 Hz control loop forever.
+constexpr auto kWriteTimeout = std::chrono::milliseconds(5);
 
 } // namespace
 
@@ -25,6 +30,9 @@ SerialSlcanTransport::SerialSlcanTransport(const std::string &tty_path,
     : nominal_index_(nominal_index), data_index_(data_index) {
   if (tty_path.empty()) {
     throw std::invalid_argument("serial_slcan transport requires a tty path");
+  }
+  if (nominal_index_ > 8U) {
+    throw std::invalid_argument("slcan nominal bitrate index must be 0..8");
   }
   fd_ = ::open(tty_path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd_ < 0) {
@@ -54,39 +62,54 @@ SerialSlcanTransport::SerialSlcanTransport(const std::string &tty_path,
   }
   ::tcflush(fd_, TCIOFLUSH);
 
-  configure_bus();
+  try {
+    configure_bus();
+  } catch (...) {
+    close_serial();
+    throw;
+  }
 }
 
 SerialSlcanTransport::~SerialSlcanTransport() {
   if (fd_ >= 0) {
-    // 收尾关闭通道，让电机控制回到停止态（尽力而为，析构不抛异常）。
+    // Best effort only: closing an adapter channel is not a motor disable.
+    // write_all has the same bounded budget here as in the control loop.
     static_cast<void>(write_all("C\r"));
+    if (fd_ >= 0) {
+      ::close(fd_);
+      fd_ = -1;
+    }
+  }
+}
+
+void SerialSlcanTransport::close_serial() const noexcept {
+  if (fd_ >= 0) {
+    // Discard locally queued bytes after a failed frame. Never append a close
+    // command or another target to an uncertain, potentially partial line.
+    ::tcflush(fd_, TCOFLUSH);
     ::close(fd_);
     fd_ = -1;
   }
 }
 
 void SerialSlcanTransport::configure_bus() {
-  if (nominal_index_ > 8U) {
-    throw std::invalid_argument("slcan nominal bitrate index must be 0..8");
-  }
-  write_all("C\r");
-  ::usleep(kCommandDelayUs);
-  write_all("S" + std::to_string(nominal_index_) + "\r");
-  ::usleep(kCommandDelayUs);
-  if (data_index_ != 0U) {
-    write_all("Y" + std::to_string(data_index_) + "\r");
+  const auto configure = [this](const std::string &command) {
+    if (!write_all(command)) {
+      throw std::runtime_error("serial slcan bus configuration write failed");
+    }
     ::usleep(kCommandDelayUs);
+  };
+  configure("C\r");
+  configure("S" + std::to_string(nominal_index_) + "\r");
+  if (data_index_ != 0U) {
+    configure("Y" + std::to_string(data_index_) + "\r");
   }
   // CANable2 保留上一次会话的 M/A 状态。若此前被抓包工具设成 silent
   // 或关闭自动重发，仅 C/S/Y/O 不会恢复 ACK，表现为控制板 TEC 上升到
   // bus-off；每次打开都显式恢复正常模式和自动重发。
-  write_all("M0\r");
-  ::usleep(kCommandDelayUs);
-  write_all("A1\r");
-  ::usleep(kCommandDelayUs);
-  write_all("O\r");
-  ::usleep(kCommandDelayUs);
+  configure("M0\r");
+  configure("A1\r");
+  configure("O\r");
   ::tcflush(fd_, TCIOFLUSH);
 }
 
@@ -94,21 +117,46 @@ bool SerialSlcanTransport::write_all(const std::string &data) const {
   if (fd_ < 0) {
     return false;
   }
+  const auto deadline = std::chrono::steady_clock::now() + kWriteTimeout;
   std::size_t written = 0U;
   while (written < data.size()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      break;
+    }
     const auto count =
         ::write(fd_, data.data() + written, data.size() - written);
     if (count > 0) {
       written += static_cast<std::size_t>(count);
       continue;
     }
-    if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      ::usleep(1000U);
+    if (count < 0 && errno == EINTR) {
       continue;
     }
-    return false;
+    if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      const auto remaining = deadline - std::chrono::steady_clock::now();
+      if (remaining <= std::chrono::steady_clock::duration::zero()) {
+        break;
+      }
+      // Round up for poll's millisecond API; the absolute deadline is checked
+      // again before every write, so waking or EINTR cannot renew the budget.
+      const auto wait_ms = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+      pollfd descriptor{fd_, POLLOUT, 0};
+      const auto ready = ::poll(&descriptor, 1, static_cast<int>(wait_ms.count()));
+      if (ready < 0 && errno == EINTR) {
+        continue;
+      }
+      if (ready > 0 && !(descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) &&
+          (descriptor.revents & POLLOUT)) {
+        continue;
+      }
+    }
+    break;
   }
-  return true;
+  if (written == data.size()) {
+    return true;
+  }
+  close_serial();
+  return false;
 }
 
 bool SerialSlcanTransport::send(const uint32_t id, const uint8_t *data,

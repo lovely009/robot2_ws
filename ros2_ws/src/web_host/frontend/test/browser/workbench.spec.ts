@@ -12,6 +12,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/runtime") return route.fulfill({json: {control_mode: "bench"}});
     if (url.pathname === "/api/models")
       return route.fulfill({
         json: { models: ["half_body_robot", "robot_leg"] },
@@ -110,7 +111,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     fixtures["/motor_command/status"] = {data: JSON.stringify({output_topic: "/motor/command_array",
       trajectory_output_topic: "/motor/trajectory"})};
   }
-  const makeControlStates = (enabled: boolean, fault = 0) => ({schema_version: 1, session_id: 7001,
+  const makeControlStates = (enabled: boolean, fault = 0) => ({schema_version: 2, session_id: 7001,
     sequence: ++controlSequence, tick_ms: controlSequence * 20,
     states: [8,9].map(motor_id => ({motor_id, online: true,
       control_lifecycle: enabled && !fault ? 3 : 2, execution_state: 1,
@@ -505,11 +506,9 @@ test("静态工作台在没有 ROS 连接时显示离线，不生成模拟设备
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.route("**/api/**", (route) =>
-    route.fulfill({
-      json: { models: [], actions: [], joints: {}, motor_types: {} },
-    }),
-  );
+  await page.route("**/api/**", (route) => route.fulfill({json:
+    new URL(route.request().url()).pathname === '/api/runtime'
+      ? {control_mode: 'readonly'} : {models: [], actions: [], joints: {}, motor_types: {}}}));
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => socket.close());
   await page.goto("/workbench/#/run");
   await expect(page.locator("#selRows")).toContainText("等待");
@@ -568,7 +567,11 @@ test("差动组通过关节目标入口发送标准轨迹", async ({page}) => {
   await expect.poll(() => fixture.publishes.some(p => p.topic === "/arm_controller/joint_trajectory")).toBe(true);
   const command = fixture.publishes.find(p => p.topic === "/arm_controller/joint_trajectory")!.msg;
   expect(command.joint_names).toEqual(["joint_link8"]);
-  expect((command.points as {positions: number[]}[])[0].positions).toEqual([0.4]);
+  expect(command.points).toHaveLength(2);
+  expect((command.points as {positions: number[]; time_from_start: object}[])[0])
+    .toMatchObject({positions: [0.2], time_from_start: {sec: 0, nanosec: 0}});
+  expect((command.points as {positions: number[]; time_from_start: object}[])[1])
+    .toMatchObject({positions: [0.4], time_from_start: {sec: 1, nanosec: 0}});
   expect(fixture.publishes.filter(p => p.topic === "/motor_command/setpoint")).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
@@ -637,7 +640,7 @@ test('MCU 周期快照独立确认控制状态，本地使能缓存不能冒充�
   const member=(motor_id:number, enabled:boolean)=>({motor_id,online:true,control_lifecycle:enabled?3:2,
     execution_state:1,policy_enabled:enabled,motion_enabled:false,state_age_ms:5,
     unified_fault_code:0,vendor_fault_code:0,last_failure_reason:0,policy_generation:1});
-  fixture.sendFeedback('/motor/control_states',{schema_version:1,session_id:100,sequence:1,
+  fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:100,sequence:1,
     states:[member(8,false),member(9,false)]});
   await expect(slider).toBeDisabled();
   fixture.sendFeedback('/motor/device_param_report',{count:2,entries:[8,9].map(motor_id=>
@@ -649,11 +652,11 @@ test('MCU 周期快照独立确认控制状态，本地使能缓存不能冒充�
   await expect(page.locator('#polResult')).toContainText('请求已发送');
   await expect(slider).toBeDisabled();
   await expect(page.locator('#polActual')).toContainText('未使能');
-  fixture.sendFeedback('/motor/control_states',{schema_version:1,session_id:101,sequence:1,
+  fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:101,sequence:1,
     states:[member(8,true),member(9,true)]});
   await expect(slider).toBeEnabled();
   await expect(page.locator('#polActual')).toContainText('已使能');
-  fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:101,sequence:500,states:[]});
+  fixture.sendFeedback('/motor/control_states',{schema_version:1,session_id:101,sequence:500,states:[]});
   await expect(slider).toBeDisabled();
   await expect(page.locator('#polActual')).toContainText('状态待更新');
   expect(fixture.errors).toEqual([]);
@@ -750,7 +753,7 @@ test('滑块无需松手连续发送最新目标，松手不重复，关闭控�
 });
 
 
-test("设备工作台直接显示所选电机参数，直连快照不混入 MCU", async ({page}) => {
+test("设备工作台只读取 MCU 反馈，退役直连入口不会发起设备会话", async ({page}) => {
   const fixture = await connectFixture(page);
   const requests: {action: string; body: Record<string, unknown>}[] = [];
   await page.route('**/api/device-can/**', async route => {
@@ -775,20 +778,10 @@ test("设备工作台直接显示所选电机参数，直连快照不混入 MCU"
   ]});
   await page.locator('.motor-card[data-id="2"]').click();
   await expect(page.locator('.motor-specifications h3').first()).toContainText('电机 2 · cerb_r58_101');
-  await page.getByLabel('设备通信来源').selectOption('socketcan');
-  await expect(page.locator('.workspace-grid')).toBeHidden();
-  await page.getByRole('button', {name: '连接 CAN', exact: true}).click();
-  await expect(page.getByLabel('直连节点 ID')).toHaveCount(0);
-  await page.getByRole('button', {name: '读取电机参数', exact: true}).click();
-  await expect(page.locator('.device-detail-table')).toContainText('2500');
-  await expect(page.locator('.direct-motor')).toHaveCount(2);
-  await page.locator('.direct-motor').filter({hasText: 'm3'}).click();
-  await expect(page.locator('.device-detail-table')).toContainText('No SDO response');
-  expect(requests.find(r => r.action === 'read')?.body.node_ids).toBeUndefined();
-  expect(requests.some(r => r.action === 'discover')).toBe(true);
-  await page.getByRole('button', {name: '断开 CAN', exact: true}).click();
-  await page.getByLabel('设备通信来源').selectOption('firmware');
-  await expect(page.locator('[data-workbench-panel="deviceParams"]')).toBeVisible();
+  await expect(page.getByText('通信来源：micro-ROS MCU', {exact: true})).toBeVisible();
+  await expect(page.getByLabel('设备通信来源')).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '连接 CAN', exact: true})).toHaveCount(0);
+  expect(requests).toEqual([]);
   expect(fixture.publishes.filter(p => ['/motor/policy_array', '/motor/trajectory', '/motor_command/setpoint'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
@@ -855,8 +848,18 @@ test('拖动分隔线调整窗口尺寸并在刷新后保留', async ({page}) =>
   await expect.poll(async () => (await observer.boundingBox())!.height).toBe(height + 60);
   const action = page.locator('.action-panel-host');
   await expect(page.locator('#actList')).toBeAttached();
-  const actionBefore = (await action.boundingBox())!.height;
   await page.getByRole('separator', {name: '调整动作库高度'}).focus();
+  await page.evaluate(() => document.fonts.ready);
+  // The list being attached does not mean the reloaded flex layout has
+  // settled. Compare the keyboard resize with its stable, focused baseline.
+  let previous = -1, stable = 0;
+  await expect.poll(async () => {
+    const height = (await action.boundingBox())!.height;
+    stable = height === previous ? stable + 1 : 0;
+    previous = height;
+    return stable;
+  }).toBeGreaterThanOrEqual(2);
+  const actionBefore = (await action.boundingBox())!.height;
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await action.boundingBox())!.height).toBeLessThan(actionBefore);
 });
@@ -896,12 +899,9 @@ test('设备工作台在矮窗口中保持详情位于内部滚动区', async ({
   expect(await pane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
   await pane.evaluate(el => {el.scrollTop = el.scrollHeight;});
   await expect(page.locator('.motor-specifications')).toBeInViewport();
-  await page.getByLabel('设备通信来源').selectOption('socketcan');
-  const connectionPane = page.locator('.main-workspace > div').filter({has: page.locator('.device-connection')});
-  expect(await connectionPane.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
-  expect(await connectionPane.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
-  await connectionPane.evaluate(el => {el.scrollTop = el.scrollHeight;});
-  await expect(page.locator('.direct-device-grid')).toBeInViewport();
+  await expect(page.getByText('通信来源：micro-ROS MCU', {exact: true})).toBeVisible();
+  await expect(page.getByLabel('设备通信来源')).toHaveCount(0);
+  await expect(page.locator('.direct-device-grid')).toHaveCount(0);
 });
 
 test('动作库只有列表内部滚动，标题和操作栏固定', async ({page}) => {

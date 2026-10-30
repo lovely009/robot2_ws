@@ -76,11 +76,121 @@ const action = {
   ],
 };
 
+it('托管页面隐藏后使旧动作循环的连接代数失效，回到前台不恢复旧会话', async () => {
+  const callbacks = new Map<string, () => void>();
+  const document = globalThis.document as unknown as {hidden: boolean; addEventListener: unknown};
+  document.hidden = false;
+  document.addEventListener = (name: string, callback: () => void) => callbacks.set(name, callback);
+  const ros = await import('../../web/js/core/ros.js');
+  ros.configureControl({control_mode: 'managed'});
+  const before = ros.getConnectionGeneration();
+  document.hidden = true;
+  callbacks.get('visibilitychange')!();
+  expect(ros.getConnectionGeneration()).toBe(before + 1);
+  document.hidden = false;
+  callbacks.get('visibilitychange')!();
+  expect(ros.getConnectionGeneration()).toBe(before + 1);
+});
+
+function feedforwardDocument() {
+  const elements = new Map<string, any>();
+  const element = (id: string) => {
+    if (!elements.has(id)) elements.set(id, {
+      value: id === 'rosUrl' ? 'ws://example.test:9090' : '',
+      textContent: '', checked: false, disabled: false, hidden: false,
+      replaceChildren() {}, append() {}, addEventListener() {},
+    });
+    return elements.get(id);
+  };
+  vi.stubGlobal('document', {
+    getElementById: element,
+    createElement: () => ({value: '', textContent: ''}),
+    body: {classList: {toggle() {}}},
+  });
+  vi.stubGlobal('window', {setInterval});
+  return element;
+}
+
+it('刷新后即使前馈面板未渲染，动作窗口也恢复主机的补偿路由', async () => {
+  vi.useFakeTimers();
+  const element = feedforwardDocument();
+  vi.stubGlobal('fetch', async (url: string) => ({ok: true,
+    json: async () => url === '/api/models' ? {models: ['half_body_robot']} : action}));
+  const ros = await import('../../web/js/core/ros.js');
+  ros.configureControl({control_mode: 'bench'});
+  const {store} = await import('../../web/js/core/store.js');
+  const {playAction} = await import('../../web/js/panels/actionLibrary.js');
+  const feedforward = await import('../../web/js/panels/feedforward.js');
+  ros.connect();
+  Socket.instances[0].emit('connection');
+  const receive = (name: string, data: object) => Topic.instances.find(t => t.name === name)!
+    .callback?.({data: JSON.stringify(data)});
+  receive('/motor_command/status', {output_topic: '/robot_dynamics/command_array'});
+  receive('/bench/status', {agent: {state: 'running'},
+    gravity_feedforward: {state: 'running', config: {model: 'half_body_robot', effort_gain: 1}}});
+  store.modelTransmissions = {model: 'half_body_robot', groups: [
+    {name: 'direct_m1', motors: [{id: 1}], joints: ['joint_link1']},
+    {name: 'wrist', motors: [{id: 8}, {id: 9}], joints: ['joint_link8','joint_link9']},
+  ]};
+  store.motors.set(1, {status: {online: true, lifecycle: 3}, motion: {position: .15}});
+  const pending = playAction('shoulder.json', {kp: 1, kd: 1, enable: false, loop: false});
+  await vi.advanceTimersByTimeAsync(3400);
+  const windows = Topic.published.filter(p => (p.message as any).points?.length);
+  expect(windows).toHaveLength(1);
+  expect(windows[0].topic).toBe('/robot_dynamics/trajectory');
+  const panel = feedforward.mount({}, {});
+  expect(element('ffRoute').checked).toBe(true);
+  expect(element('ffSummary').textContent).toBe('经前馈');
+  Topic.instances.find(t => t.name === '/motor/trajectory_state')!.callback?.({
+    trajectory_id: (windows[0].message as any).trajectory_id,
+    active: true, elapsed_ms: 100,
+  });
+  await vi.advanceTimersByTimeAsync(50);
+  await pending;
+  panel.unmount();
+  ros.disconnect();
+});
+
+it('换连接后从新主机恢复路由和面板意图，周期状态不覆盖显式切换', async () => {
+  vi.useFakeTimers();
+  const element = feedforwardDocument();
+  vi.stubGlobal('fetch', async () => ({ok: true, json: async () => ({models: ['half_body_robot']})}));
+  const ros = await import('../../web/js/core/ros.js');
+  ros.configureControl({control_mode: 'bench'});
+  const {DIRTY} = await import('../../web/js/core/store.js');
+  const feedforward = await import('../../web/js/panels/feedforward.js');
+  const observe = (output_topic: string) => {
+    Topic.instances.filter(t => t.name === '/motor_command/status').at(-1)!.callback?.({data: JSON.stringify({output_topic})});
+    Topic.instances.filter(t => t.name === '/bench/status').at(-1)!.callback?.({data: JSON.stringify({
+      agent: {state: 'running'}, gravity_feedforward: {state: 'running'},
+    })});
+  };
+  ros.connect();
+  Socket.instances[0].emit('connection');
+  observe('/robot_dynamics/command_array');
+  const panel = feedforward.mount({}, {});
+  expect(element('ffRoute').checked).toBe(true);
+  ros.connect();
+  Socket.instances[1].emit('connection');
+  observe('/motor/command_array');
+  panel.render(new Set([DIRTY.CONN, DIRTY.COMMAND]));
+  expect(element('ffRoute').checked).toBe(false);
+  ros.pub('trajectory', {count: 1});
+  expect(Topic.published.at(-1)?.topic).toBe('/motor/trajectory');
+  ros.setDownlinkRoute('overlay');
+  observe('/motor/command_array');
+  ros.pub('trajectory', {count: 1});
+  expect(Topic.published.at(-1)?.topic).toBe('/robot_dynamics/trajectory');
+  panel.unmount();
+  ros.disconnect();
+});
+
 it("读取动作期间换连接，旧播放不得在新会话下发控制", async () => {
   vi.useFakeTimers();
   let respond!: (value: unknown) => void;
   vi.stubGlobal("fetch", () => new Promise((resolve) => (respond = resolve)));
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   const { store } = await import("../../web/js/core/store.js");
   const { playAction } = await import("../../web/js/panels/actionLibrary.js");
   ros.connect();
@@ -108,6 +218,7 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   vi.useFakeTimers();
   vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => action }));
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   const { store } = await import("../../web/js/core/store.js");
   const { playAction } = await import("../../web/js/panels/actionLibrary.js");
   store.modelTransmissions = {
@@ -155,6 +266,7 @@ afterEach(() => {
 
 it("手动重连后晚到的旧 socket 关闭与错误事件不关闭新连接", async () => {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   const data = await import("../../web/js/core/store.js");
   ros.connect();
   const old = Socket.instances[0];
@@ -172,6 +284,7 @@ it("手动重连后晚到的旧 socket 关闭与错误事件不关闭新连接",
 it("显式销毁连接取消已经排队的自动重连", async () => {
   vi.useFakeTimers();
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   ros.connect();
   Socket.instances[0].emit("connection");
   Socket.instances[0].emit("close");
@@ -182,6 +295,7 @@ it("显式销毁连接取消已经排队的自动重连", async () => {
 
 it("手动切换连接复位参数基线、台架和命令去向", async () => {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   const { store } = await import("../../web/js/core/store.js");
   ros.connect();
   Socket.instances[0].emit("connection");
@@ -204,6 +318,7 @@ it("手动切换连接复位参数基线、台架和命令去向", async () => {
 
 it("换连接后旧订阅排队的运动帧不再写入当前状态", async () => {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   const { store } = await import("../../web/js/core/store.js");
   ros.connect();
   Socket.instances[0].emit("connection");
@@ -219,6 +334,7 @@ it("换连接后旧订阅排队的运动帧不再写入当前状态", async () =
 
 it("连接只消费主机 facade 的固件上行并保持消息契约", async () => {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   ros.connect();
   Socket.instances[0].emit("connection");
 
@@ -259,6 +375,7 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
 
 it("旧连接的服务响应不能被当作当前会话成功回执", async () => {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   ros.connect();
   Socket.instances[0].emit("connection");
   const pending = ros.callService(
@@ -277,6 +394,7 @@ it("切换模型清空旧关节值，主机模型同步完成前拒收旧反馈"
   vi.stubGlobal('fetch', async () => ({ok: false, status: 404}));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const ros = await import('../../web/js/core/ros.js');
+  ros.configureControl({control_mode: 'bench'});
   const data = await import('../../web/js/core/store.js');
   ros.connect(); Socket.instances[0].emit('connection');
   const joints = Topic.instances.find(t => t.name === '/joint_states')!;

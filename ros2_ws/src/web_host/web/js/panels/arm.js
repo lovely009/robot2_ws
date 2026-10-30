@@ -313,6 +313,8 @@ export function mount(rootEl, ctx) {
   // 接口不可用时只留当前项。切换 → ctx.ui.setModel → DIRTY.MODEL → startLoad() 重载。
   modelSelect = $('armModel');
   if (modelSelect) {
+    modelSelect.disabled = !!store.managed?.enabled;
+    if (modelSelect.disabled) modelSelect.title = '托管机器的模型由启动配置确定';
     const fillOptions = (names) => {
       const list = names.includes(MODEL) ? names : [MODEL, ...names];
       modelSelect.replaceChildren(...list.map((name) => {

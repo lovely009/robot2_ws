@@ -55,6 +55,7 @@ afterEach(() => {
 
 async function connected() {
   const ros = await import("../../web/js/core/ros.js");
+  ros.configureControl({control_mode: "bench"});
   ros.connect();
   Socket.instances[0].emit("connection");
   const resultTopic = Topic.instances.find((topic) => topic.name === "/motor/config_result");
@@ -67,7 +68,7 @@ const result = (request_id: number, status: number, session_id = 9) => ({
   error_code: 0, completed_targets: 1, failed_targets: 0,
 });
 const controlSnapshot = (session_id: number, sequence: number, changes = {}) => ({
-  schema_version: 1, session_id, sequence, states: [], ...changes,
+  schema_version: 2, session_id, sequence, states: [], ...changes,
 });
 const realisticSessionId = 1792828800123;
 
@@ -214,7 +215,7 @@ it("坏帧及旧控制序号不清缓存或终止 ConfigResult waiter", async ()
   const pending = ros.waitConfigResult(42, 1000);
   let settled = false;
   void pending.then(() => { settled = true; });
-  controlTopic.callback?.(controlSnapshot(realisticSessionId + 1, 1, { schema_version: 2 }));
+  controlTopic.callback?.(controlSnapshot(realisticSessionId + 1, 1, { schema_version: 1 }));
   controlTopic.callback?.(controlSnapshot(realisticSessionId, 4));
   controlTopic.callback?.(controlSnapshot(realisticSessionId - 1, 10));
   await Promise.resolve();

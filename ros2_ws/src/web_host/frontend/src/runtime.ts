@@ -17,6 +17,7 @@ function updateCommandHistory() {
   }));
 }
 export const snapshot = shallowRef<WorkbenchSnapshot>({
+  managed: {enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
   connected: false,
   connectionText: "未连接",
   agent: "stopped",
@@ -106,6 +107,10 @@ function updateSnapshot() {
   const row = s.motors.get(s.selectedId),
     simulation = s.bench.simulation;
   snapshot.value = {
+    managed: {enabled: !!s.managed?.enabled, ownsControl: !!s.managed?.ownsControl,
+      armed: !!s.managed?.armed, ready: !!s.managed?.state?.ready,
+      mcuAuthorized: !!s.managed?.mcuAuthorized,
+      message: s.managed?.message || '', blockers: s.managed?.state?.blockers || []},
     connected: s.conn.connected,
     connectionText: s.conn.text,
     agent: s.conn.agent,
@@ -123,7 +128,7 @@ function updateSnapshot() {
     ...data.countMotors(),
     motionAt: lastMotionAt,
     outputTopic: s.commandStatus.data?.output_topic || "",
-    session: simulation
+    session: s.managed?.enabled ? `托管 MCU · ${s.managed.state?.owner || '未持有控制权'}` : simulation
       ? `仿真进程：${simulation.state || "未知"}${s.conn.agent === "running" ? " · Agent 运行中" : ""}`
       : s.conn.agent === "running"
         ? "Agent 运行中 · 控制对象待核对"
@@ -146,7 +151,7 @@ function dirty(batch: Set<string>) {
   const feedbackKey = `${generation}:${data.MODEL}`;
   // 只补齐未选模型的主机；其他页面已选模型时不周期性抢回归属。
   const feedbackNeedsModel = s.bench.feedback && !s.bench.feedback.desired_model;
-  if (s.conn.connected && !feedbackSyncPending &&
+  if (!ros.isManagedMode() && s.conn.connected && !feedbackSyncPending &&
       (feedbackKey !== feedbackSyncKey ||
         ((feedbackNeedsModel || feedbackSyncFailed) && Date.now() - feedbackSyncAt > 5000))) {
     const epoch = generation, model = data.MODEL;
@@ -164,11 +169,11 @@ function dirty(batch: Set<string>) {
       }
     }).finally(() => { feedbackSyncPending = false; });
   }
-  if (s.conn.connected && !s.conn.benchLoaded) {
+  if (!ros.isManagedMode() && s.conn.connected && !s.conn.benchLoaded) {
     s.conn.benchLoaded = true;
     void agent.refreshAgentControls();
   }
-  if (s.conn.connected && !s.conn.autoLoaded) {
+  if (!ros.isManagedMode() && s.conn.connected && !s.conn.autoLoaded) {
     s.conn.autoLoaded = true;
     const epoch = generation;
     void ros
@@ -194,9 +199,10 @@ async function start() {
   if (starting) return starting;
   starting = (async () => {
     try {
-      const [response, data, ros, agent, device, format, command, actions] =
+      const [response, configuration, data, ros, agent, device, format, command, actions] =
         await Promise.all([
           fetch("/index.html", { cache: "no-store" }),
+          fetch("/api/runtime", { cache: "no-store" }),
           load("core/store"),
           load("core/ros"),
           load("core/agent"),
@@ -210,6 +216,10 @@ async function start() {
       const html = await response.text();
       if (disposed) return;
       modules = { data, ros, agent, device, format, command, actions };
+      if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
+      const runtimeConfig = await configuration.json();
+      ros.configureControl(runtimeConfig);
+      if (runtimeConfig.robot_model) data.setModel(runtimeConfig.robot_model);
       const documentSource = new DOMParser().parseFromString(html, "text/html");
       const templates = document.createElement("div");
       templates.hidden = true;
@@ -290,6 +300,10 @@ async function mountPanelContent(
         data.markDirty(data.DIRTY.SELECTED);
       },
       setModel(name: string) {
+        if (data.store.managed?.enabled && name !== data.store.managed.model) {
+          notice.value = '托管机器的模型由启动配置确定';
+          return;
+        }
         data.setModel(name);
       },
       gotoScreen(id: string) {
@@ -319,6 +333,11 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
+  async managed(operation: string) {
+    if (!initialized.value || disposed) return false;
+    if (['stop', 'release', 'disarm'].includes(operation)) modules.actions.stopPlayback();
+    return modules.ros.managedOperation(operation);
+  },
   clearCommandHistory() {
     if (!modules || disposed) return;
     modules.data.store.history.length = 0;

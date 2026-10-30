@@ -12,9 +12,20 @@ function state() {
 it('uses a joint name and lets the host preserve and transform the partner', () => {
   const message=api.buildJointTrajectory(state(),'arm','yaw',.3,1.,1100);
   expect(message.joint_names).toEqual(['yaw']);
-  expect(message.points[0].positions).toEqual([.3]);
-  expect(message.points[0].time_from_start).toEqual({sec:1,nanosec:0});
+  expect(message.points).toHaveLength(2);
+  expect(message.points[0]).toMatchObject({positions:[.2],time_from_start:{sec:0,nanosec:0}});
+  expect(message.points[1]).toMatchObject({positions:[.3],time_from_start:{sec:1,nanosec:0}});
   expect(message).not.toHaveProperty('motor_id');
+});
+it('manual arrival times retain a fresh measured start and reject missing or invalid feedback', () => {
+  const s=state();
+  const message=api.buildJointTrajectory(s,'arm','yaw',.8,5,1100);
+  expect(message.points.map((p: any) => p.positions[0])).toEqual([.2,.8]);
+  expect(message.points.map((p: any) => p.time_from_start.sec)).toEqual([0,5]);
+  for (const sample of [undefined,{position:NaN,at:1000},{position:.2,at:500}]) {
+    s.jointStates.byName.yaw=sample as any;
+    expect(() => api.buildJointTrajectory(s,'arm','yaw',.8,5,1100)).toThrow('缺少新鲜反馈');
+  }
 });
 it('rejects wrong model, readonly bridge, stale or partial group', () => {
   const s=state();

@@ -8,6 +8,7 @@ import { $ } from '../core/format.js';
 // 默认模型名与臂视图共用一份（core/store.js 的 MODEL），别在这里再写一个字符串。
 import { store, DIRTY, MODEL } from '../core/store.js';
 import * as bench from '../core/agent.js';
+import { isManagedMode } from '../core/ros.js';
 
 const STORAGE_KEY = 'robot2.simulation.options.v1';
 // 状态由后端 systemd unit 派生，页面只负责翻译。
@@ -20,6 +21,10 @@ const LOG_LINES = 80;
 const backendLabels = { gazebo: 'Gazebo', mujoco: 'MuJoCo' };
 
 export function mount(root, ctx) {
+  if (isManagedMode()) {
+    root.textContent = '整机托管模式由启动配置选择 MCU 与仿真后端；当前页面不切换设备或控制后端。';
+    return {render() {}, unmount() {}};
+  }
   const ui = {
     backend: $('simBackend'),
     mode: $('simMode'),
@@ -649,7 +654,7 @@ export function mount(root, ctx) {
   }
 
   ui.backend.value = saved.backend || 'gazebo';
-  ui.mode.value = saved.controller_mode || 'host';
+  ui.mode.value = ['firmware', 'external'].includes(saved.controller_mode) ? saved.controller_mode : 'firmware';
   ui.transport.value = saved.transport || 'vcan';
   ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
   ui.spawnZ.value = saved.spawn_z !== undefined ? String(saved.spawn_z) : '0';

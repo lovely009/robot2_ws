@@ -10,6 +10,58 @@ import {
 } from './format.js';
 
 import { applyControlState, createControlStateCache } from './motor_state.js';
+import { ManagedControl } from './managed_control.js';
+
+let controlMode = 'managed';
+export function isManagedMode() { return controlMode === 'managed'; }
+const managedPublishers = {};
+const managed = new ManagedControl({
+  service: (...args) => callService(...args),
+  publish: (name, messageType, message) => {
+    if (!managedPublishers[name]) {
+      managedPublishers[name] = new ROSLIB.Topic({ros, name, messageType});
+      managedPublishers[name].advertise();
+    }
+    managedPublishers[name].publish(new ROSLIB.Message(message));
+  },
+  changed: () => {
+    store.managed = {enabled: isManagedMode(), ...managed.view()};
+    markDirty(DIRTY.CONN, DIRTY.STATUS);
+  },
+});
+store.managed = {enabled: true, ...managed.view()};
+let visibilityInstalled = false;
+export function configureControl(configuration) {
+  if (!['managed', 'readonly', 'bench'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
+  controlMode = configuration.control_mode;
+  managed.model = configuration.robot_model || '';
+  store.managed = {enabled: isManagedMode(), ...managed.view(), robotId: configuration.robot_id || ''};
+  document.body.classList.toggle('managed-mode', isManagedMode());
+  if (!visibilityInstalled && document.addEventListener) {
+    visibilityInstalled = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && isManagedMode()) connectionGeneration++;
+      managed.setVisible(!document.hidden);
+    });
+    globalThis.addEventListener?.('pagehide', () => {
+      if (isManagedMode()) connectionGeneration++;
+      managed.suspend('页面已退出', true);
+    });
+  }
+  managed.setVisible(!document.hidden);
+}
+export async function managedOperation(operation) {
+  if (!isManagedMode()) return false;
+  try {
+    if (operation === 'arm') await managed.arm(true);
+    else if (operation === 'disarm') await managed.arm(false);
+    else if (['acquire', 'release', 'stop', 'reset'].includes(operation)) await managed[operation]();
+    else throw new Error('未知整机操作');
+    return true;
+  } catch (error) {
+    managed.message = String(error.message || error); managed.changed(); return false;
+  }
+}
 
 let ros = null;
 let connectionGeneration = 0;
@@ -117,6 +169,24 @@ export function nextPolicyGeneration() {
 
 export function pub(key, message) {
   if (!store.conn.connected) return false;
+  if (controlMode === 'readonly') return false;
+  if (isManagedMode()) {
+    if (key === 'jointTrajectory') {
+      if (!managed.canSubmitMotion()) {
+        managed.message = '请先取得 MCU 授权，并等待当前轨迹结束或停止'; managed.changed();
+        return false;
+      }
+      void managed.sendJointTrajectory(message).catch(error => {
+        managed.message = String(error.message || error); managed.changed();
+      });
+      return true;
+    }
+    const channel = {setpoint: 'command', policy: 'policy', trajectory: 'trajectory'}[key];
+    if (!channel) {
+      managed.message = '托管模式不开放此维护或旁路写入口'; managed.changed(); return false;
+    }
+    return managed.send(channel, message);
+  }
   ensurePublisher(key).publish(new ROSLIB.Message(message));
   return true;
 }
@@ -127,6 +197,18 @@ export function pub(key, message) {
 // “轨迹已完成但没有运动帧”的假成功。连接建立时先把三个下行发布端注册好，
 // 后续按钮/动作只发送已经存在的 publisher。
 export function ensurePublisher(key) {
+  if (controlMode === 'readonly') return null;
+  if (isManagedMode()) {
+    const channel = {setpoint: 'command', policy: 'policy', trajectory: 'trajectory'}[key];
+    if (!channel) return null;
+    const name = '/robot/control/' + channel;
+    if (!managedPublishers[name]) {
+      managedPublishers[name] = new ROSLIB.Topic({ros, name,
+        messageType: 'robot_system_msgs/msg/Leased' + channel[0].toUpperCase() + channel.slice(1)});
+      managedPublishers[name].advertise();
+    }
+    return managedPublishers[name];
+  }
   if (!publishers[key]) {
     const t = TOPICS[key];
     publishers[key] = new ROSLIB.Topic({ros, name: t.name, messageType: t.type});
@@ -149,13 +231,19 @@ const DOWNLINK = {
     [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_TRAJECTORY_TOPIC},
 };
 let downlinkRoute = DOWNLINK_ROUTE.DIRECT;
+let downlinkRouteSynced = false;
 
 export function getDownlinkRoute() { return downlinkRoute; }
 
 export function setDownlinkRoute(next) {
+  if (isManagedMode()) {
+    if (next !== DOWNLINK_ROUTE.DIRECT) throw new Error('托管模式由整机控制后端管理前馈');
+    return DOWNLINK_ROUTE.DIRECT;
+  }
   if (next !== DOWNLINK_ROUTE.DIRECT && next !== DOWNLINK_ROUTE.OVERLAY) {
     throw new Error(`未知的下行接线：${next}`);
   }
+  downlinkRouteSynced = true;
   if (next === downlinkRoute) return downlinkRoute;
   downlinkRoute = next;
   for (const key of Object.keys(DOWNLINK)) TOPICS[key].name = DOWNLINK[key][next];
@@ -177,6 +265,7 @@ export function setDownlinkRoute(next) {
 let reconnectTimer = null;
 
 function resetSessionState() {
+  downlinkRouteSynced = false;
   clearConfigResults();
   store.motors.clear();
   store.controlStates = createControlStateCache();
@@ -198,6 +287,7 @@ function resetSessionState() {
 }
 
 export function disconnect() {
+  if (isManagedMode()) managed.suspend('已断开，控制权已释放', true);
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   closeSocket();
   resetSessionState();
@@ -220,10 +310,12 @@ export function connect() {
   ros.on('connection', () => {
     if (ros !== connection) return;
     setConn(true);
+    managed.setConnected(true);
     subscribeAll();
     // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
     // 断线时那份已被 closeSocket 清掉）。开关的落点不带状态，重连不会悄悄切回直连。
-    ['setpoint', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
+    (isManagedMode() ? ['setpoint', 'trajectory', 'policy']
+      : ['setpoint', 'trajectory', 'policy', 'paramSet', 'sysCmd']).forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -231,6 +323,7 @@ export function connect() {
     if (ros === connection) {
       connectionGeneration++;
       clearConfigResults();
+      managed.setConnected(false);
       setConn(false, '连接错误');
     }
   });
@@ -250,12 +343,15 @@ export function connect() {
 // 只关 socket，不动连接意图（自动重连要复用）。
 // 连发/曲线等定时器由各自面板在连接态脏帧里自行停止；本层不反向调用面板。
 export function closeSocket() {
+  managed.setConnected(false);
   connectionGeneration++;
   clearConfigResults();
   if (ros) { const r = ros; ros = null; try { r.close(); } catch (e) {} }
   subs = [];
   Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
   Object.keys(publishers).forEach((k) => delete publishers[k]);
+  Object.values(managedPublishers).forEach(p => { try { p.unadvertise(); } catch (_e) {} });
+  Object.keys(managedPublishers).forEach(k => delete managedPublishers[k]);
 }
 
 function sub(key, cb) {
@@ -271,6 +367,15 @@ function sub(key, cb) {
 function subscribeAll() {
   subs.forEach((s) => s.unsubscribe());
   subs = [];
+  if (isManagedMode()) {
+    const current = ros;
+    const topic = new ROSLIB.Topic({ros, name: '/robot/state', messageType: 'robot_system_msgs/msg/RobotState',
+      qos: {reliability: 'reliable', durability: 'transient_local', history: 'keep_last', depth: 1}});
+    topic.subscribe(state => {
+      if (ros === current && store.conn.connected) managed.update(state);
+    });
+    subs.push(topic);
+  }
 
   // 桥心跳与普通周期消息不同：late subscriber 必须拿到最后一帧，随后按 1 Hz 检查新鲜度。
   const statusConnection = ros;
@@ -515,15 +620,28 @@ function subscribeAll() {
 
   // 台架状态（bench_manager，JSON 字符串）：仿真 / Agent / 电机后端三段的唯一
   // 数据入口（命令的服务响应也经 applyBenchStatus 写同一份）。
-  sub('bench', (m) => {
+  if (!isManagedMode()) sub('bench', (m) => {
     try { applyBenchStatus(JSON.parse(m.data)); }
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 
   // 命令节拍节点的状态：命令**当前实际发往**哪里（output_topic）。重力补偿开关的
   // 改道是服务端做的，页面只有读它才知道接线有没有真的切过去。
-  sub('commandStatus', (m) => {
-    try { applyCommandStatus(JSON.parse(m.data)); }
+  if (!isManagedMode()) sub('commandStatus', (m) => {
+    try {
+      const status = JSON.parse(m.data);
+      applyCommandStatus(status);
+      // 每次连接只恢复一次页面轨迹路由；不依赖前馈面板是否可见。
+      // 进程停掉时也保留主机的叠加接线，由面板提示断链，不能静默回退。
+      // 后续显式切换仍由操作者控制，周期状态不自动改道。
+      if (!downlinkRouteSynced) {
+        if (status?.output_topic === '/robot_dynamics/command_array') {
+          setDownlinkRoute(DOWNLINK_ROUTE.OVERLAY);
+        } else if (status?.output_topic === '/motor/command_array') {
+          setDownlinkRoute(DOWNLINK_ROUTE.DIRECT);
+        }
+      }
+    }
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 }
@@ -533,6 +651,12 @@ function subscribeAll() {
 // 调用方——bench 服务的 ok/error 字段由 core/bench.js 统一裁决）。
 export function callService(name, type, request, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
+    if (controlMode === 'readonly') {
+      reject(new Error('只读页面不开放控制或维护服务')); return;
+    }
+    if (isManagedMode() && !name.startsWith('/robot/')) {
+      reject(new Error('托管模式不开放台架管理或维护写操作')); return;
+    }
     if (!ros || !store.conn.connected) {
       reject(new Error('未连接 rosbridge'));
       return;

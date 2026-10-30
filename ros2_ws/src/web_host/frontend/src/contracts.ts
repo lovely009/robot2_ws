@@ -13,6 +13,8 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
+  managed: {enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
+    message: string; blockers: string[]};
   connected: boolean;
   connectionText: string;
   agent: string;

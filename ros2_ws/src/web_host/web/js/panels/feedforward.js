@@ -21,7 +21,7 @@ import { $, DOWNLINK_ROUTE } from '../core/format.js';
 import {
   store, DIRTY, MODEL, availableModels, modelJointsFor, jointMapSpec,
 } from '../core/store.js';
-import { getDownlinkRoute, setDownlinkRoute } from '../core/ros.js';
+import { getDownlinkRoute, setDownlinkRoute, getConnectionGeneration, isManagedMode } from '../core/ros.js';
 import * as bench from '../core/agent.js';
 import { DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC } from '../core/agent.js';
 
@@ -38,6 +38,10 @@ const stateLabels = {
 };
 
 export function mount(root, ctx) {
+  if (isManagedMode()) {
+    root.textContent = '托管 MCU 的运动由整机入口统一授权；本模式不开放台架重力前馈旁路。';
+    return {render() {}, unmount() {}};
+  }
   const ui = {
     route: $('ffRoute'),
     model: $('ffModel'),
@@ -57,6 +61,7 @@ export function mount(root, ctx) {
   let wantOverlay = false;
   // 是否已用服务端观测值校准过意图（见 syncIntentFromServer）。
   let intentSynced = false;
+  let intentGeneration = -1;
 
   function readSaved() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}; }
@@ -188,12 +193,18 @@ export function mount(root, ctx) {
 
   // unit 与命令路由跨页面存活；首次拿到两侧状态后校准本地开关，避免刷新后误报改道。
   function syncIntentFromServer() {
-    if (intentSynced) return;
+    const generation = getConnectionGeneration();
+    if (generation !== intentGeneration) {
+      intentGeneration = generation;
+      intentSynced = false;
+    }
+    if (intentSynced || busy || !store.conn.connected) return;
     const ff = unit();
     const topic = commandTopic();
-    if (!ff || topic === null) return;   // 还没观测到，等下一帧
+    if (!ff || ![DIRECT_COMMAND_TOPIC, OVERLAY_COMMAND_TOPIC].includes(topic)) return;
     intentSynced = true;
-    wantOverlay = ff.state === 'running' && topic === OVERLAY_COMMAND_TOPIC;
+    // core/ros 已在本次连接的首帧状态恢复实际页面接线；进程状态仅用于告警。
+    wantOverlay = routeIsOverlay();
   }
 
   function renderStatus() {

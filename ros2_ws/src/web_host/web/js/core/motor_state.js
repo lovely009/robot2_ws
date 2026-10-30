@@ -12,7 +12,7 @@ export function createControlStateCache() {
 export function applyControlState(cache, message, now=Date.now()) {
   cache.seen=true;
   const invalid=()=>{cache.valid=false;return false;};
-  if (!message || message.schema_version!==1 || !uint(message.session_id,Number.MAX_SAFE_INTEGER)
+  if (!message || message.schema_version!==2 || !uint(message.session_id,Number.MAX_SAFE_INTEGER)
       || !message.session_id || !uint(message.sequence) || !Array.isArray(message.states)
       || message.states.length>64 || !Number.isFinite(now)) return invalid();
   if (cache.session && message.session_id<cache.session) return false;

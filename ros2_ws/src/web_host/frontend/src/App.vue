@@ -185,6 +185,7 @@ onBeforeUnmount(() => {
           snapshot.connectionText
         }}</span
       >
+      <template v-if="!snapshot.managed.enabled">
       <span class="session-separator" />
       <label class="session-item"
         ><span class="session-label">控制板</span
@@ -224,15 +225,28 @@ onBeforeUnmount(() => {
       <span
         class="session-item agent-status"
         :title="snapshot.agentError || snapshot.agentDevice"
-        >Agent：{{ agentLabel }}</span
-      >
+        >Agent：{{ agentLabel }}</span>
+      </template>
       <span class="header-spacer" /><button
         class="stop-button"
         :disabled="!snapshot.connected"
         @click="runtime.stopMotion()"
       >
-        <CircleStop :size="14" />全部软停
+        <CircleStop :size="14" />{{ snapshot.managed.enabled ? '整机停止' : '全部软停' }}
       </button>
+    <div v-if="snapshot.managed.enabled" class="managed-controls" aria-label="整机托管控制">
+      <strong>整机托管 · MCU 执行</strong>
+      <button :disabled="!initialized || !snapshot.managed.ready || snapshot.managed.ownsControl"
+        @click="runtime.managed('acquire')">申请控制</button>
+      <button :disabled="!snapshot.managed.ownsControl || snapshot.managed.armed"
+        @click="runtime.managed('arm')">武装</button>
+      <button :disabled="!snapshot.managed.ownsControl" @click="runtime.managed('disarm')">解除武装</button>
+      <button :disabled="!snapshot.managed.ownsControl" @click="runtime.managed('release')">释放控制</button>
+      <button :disabled="!snapshot.connected" @click="runtime.managed('reset')">复位故障</button>
+      <span role="status">{{ snapshot.managed.message }}</span>
+      <span v-if="snapshot.managed.armed && !snapshot.managed.mcuAuthorized">等待 MCU 授权确认</span>
+      <span v-if="snapshot.managed.blockers.length" class="managed-blockers">未就绪：{{ snapshot.managed.blockers.join(' · ') }}</span>
+    </div>
     </div>
 
     <nav class="main-nav" aria-label="工作场景">

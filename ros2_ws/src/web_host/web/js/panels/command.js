@@ -1,11 +1,11 @@
-// 页面只下设定值，command_streamer 以 100 Hz 持续发送完整快照（ADR 0014）。
-// 浏览器后台定时器会降至 1 Hz，不能承载固件 30 ms 软停 / 100 ms 失能的节拍。
-// 「下发」会持续保持；「停止」以空目标列表软停全部电机，清空表格不停车。
+// 托管页面只提交有界时效的操作意图；100 Hz MCU命令由监督器生成。
+// 持续手动控制必须产生新意图；页面隐藏、断连或过期不会恢复旧目标。
+// 关节运动使用标准轨迹 Action；「停止」请求整机停止，清空表格不停车。
 import { store, MODEL, markDirty, DIRTY, syncWriteButtons } from '../core/store.js';
 import { $, LIFECYCLE } from '../core/format.js';
 import { controlTargetsError, describeMotorState } from '../core/motor_state.js';
 import { limitsError } from '../core/host_limits.js';
-import { pub, isConnected } from '../core/ros.js';
+import { pub, isConnected, isManagedMode, managedOperation } from '../core/ros.js';
 import { rawCouplingError } from '../core/joint_control.js';
 import { mount as mountJointControl } from '../components/jointControl.js';
 
@@ -119,6 +119,7 @@ function sendSnapshot() {
 // 断流实现（固件收到后发阻尼帧，100 ms 后失能）。
 export function sendStop() {
   if (!isConnected()) { setCmdResult(false, '未连接 rosbridge'); return false; }
+  if (isManagedMode()) { void managedOperation('stop'); return true; }
   sequence = (sequence + 1) >>> 0;
   const cancel={sync_time_ns:Date.now()*1e6,sequence,trajectory_id:sequence,
     segment_index:0,segment_count:1,count:0,target_count:0,target_ids:[],points:[]};
@@ -145,14 +146,14 @@ export function sendTargets(targets) {
   const blocked = limitsError(targets, MODEL);
   if (blocked) return {ok: false, msg: blocked};
   sequence = (sequence + 1) >>> 0;
-  pub('setpoint', {
+  if (!pub('setpoint', {
     // uint64：rosbridge 2.x 入站要求 JSON number（float64 会丢失末几位
     // 精度；该字段仅用于跨系统日志对齐，freshness 以 MCU 本地 tick 为准）。
     sync_time_ns: Date.now() * 1e6,
     sequence,
     count: targets.length,
     targets,
-  });
+  })) return {ok: false, msg: store.managed?.message || '未发送：当前入口没有写权限'};
   store.history.unshift({
     t: Date.now(),
     seq: sequence,

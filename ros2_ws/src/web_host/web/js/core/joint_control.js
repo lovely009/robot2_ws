@@ -43,7 +43,13 @@ export function jointControlError(state, model, joint, now = Date.now()) {
   if (!state.conn?.connected) return '未连接 rosbridge';
   const meta = state.modelTransmissions;
   if (meta?.model !== model || !Array.isArray(meta.groups)) return '模型传动配置未就绪';
+  const managed = state.managed?.enabled;
+  if (managed) {
+    if (state.managed.model !== model) return '页面模型与托管机器配置不一致';
+    if (!state.managed.ownsControl || !state.managed.armed || !state.managed.state?.mcu_authorized || !state.managed.state?.ready) return '请先申请控制、武装，等待 MCU 授权后下发使能策略';
+  }
   const runtime = state.transmissionStatus;
+  if (!managed) {
   if (!runtime?.last || now-runtime.last < 0 || now-runtime.last > 2500) return '主机传动桥状态已过期';
   if (runtime.data?.model !== model) return '页面模型与主机传动模型不一致';
   if (!runtime.data.trajectory_enabled) return '主机传动桥为只读模式';
@@ -54,6 +60,7 @@ export function jointControlError(state, model, joint, now = Date.now()) {
     return '主机轨迹路由未就绪';
   }
   if (command.data.trajectory_output_topic !== '/motor/trajectory') return '关节目标暂需直连，请先关闭重力补偿';
+  }
   const group = meta.groups.find(g => g.joints.includes(joint));
   if (!group) return '关节未配置传动组';
   for (const name of group.joints) {
@@ -91,20 +98,35 @@ export function buildJointTrajectory(state, model, joint, target, seconds, now =
   }
   const limitError = jointTargetLimitError(state, model, joint, target);
   if (limitError) throw new Error(limitError);
+  const current = state.jointStates.byName[joint].position;
   const ms = Math.round(seconds*1000);
+  if (state.managed?.enabled) {
+    if (ms > 2000) throw new Error('当前 MCU 标准轨迹接口最长支持 2 秒');
+    const names = [...new Set(state.modelTransmissions.groups.flatMap(group => group.joints))];
+    const positions = names.map(name => {
+      const sample = state.jointStates.byName[name];
+      if (!Number.isFinite(sample?.position) || !Number.isFinite(sample?.at)
+          || now - sample.at < 0 || now - sample.at > 500) throw new Error(`关节 ${name} 缺少新鲜反馈`);
+      return sample.position;
+    });
+    const targets = positions.map((position, index) => names[index] === joint ? target : position);
+    return {header: {stamp: {sec: 0, nanosec: 0}, frame_id: ''}, joint_names: names,
+      points: [positions, targets].map((values, index) => ({positions: values,
+        velocities: [], accelerations: [], effort: [], time_from_start: {
+          sec: index ? Math.floor(ms / 1000) : 0, nanosec: index ? (ms % 1000) * 1e6 : 0}}))};
+  }
+  // MCU 在首个路点前保持首点；显式带反馈起点，才能按到达时间插值。
   return {header:{stamp:{sec:Math.floor(now/1000),nanosec:(now%1000)*1e6},frame_id:''},
-    joint_names:[joint], points:[{positions:[target],velocities:[],accelerations:[],effort:[],
+    joint_names:[joint], points:[
+      {positions:[current],velocities:[],accelerations:[],effort:[],time_from_start:{sec:0,nanosec:0}},
+      {positions:[target],velocities:[],accelerations:[],effort:[],
       time_from_start:{sec:Math.floor(ms/1000),nanosec:(ms%1000)*1e6}}]};
 }
 
 export function buildJointSliderTrajectory(state, model, joint, target, now=Date.now()) {
   const current=state.jointStates?.byName?.[joint.name]?.position;
-  const message=buildJointTrajectory(state, model, joint.name, target,
+  return buildJointTrajectory(state, model, joint.name, target,
     jointSliderDuration(joint,current,target),now);
-  // 固件在首个路点前保持首点；必须显式带 t=0，单个未来路点会直接跳到终点。
-  message.points.unshift({positions:[current],velocities:[],accelerations:[],effort:[],
-    time_from_start:{sec:0,nanosec:0}});
-  return message;
 }
 
 export function rawCouplingError(state, model, ids) {

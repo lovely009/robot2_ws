@@ -81,8 +81,13 @@ venv/
 /ros2_ws/src/**/log/
 
 # Web 工作台前端开发产物
-node_modules/
+node_modules
 /ros2_ws/src/web_host/prototype/dist/
 /ros2_ws/src/web_host/web/workbench/
 /ros2_ws/src/web_host/frontend/test-results/
 /ros2_ws/src/web_host/frontend/playwright-report/
+
+# 本机 SIL 构建、原始测量证据与运行状态（报告和复现脚本保留在版本库）
+/build-host/
+/evidence/
+/runtime/

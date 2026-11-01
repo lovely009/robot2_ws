@@ -1,10 +1,14 @@
-"""浏览器测试只读静态素材服务；没有 ROS 节点或设备依赖。"""
+"""浏览器测试素材与临时动作任务服务；没有 ROS 节点或设备依赖。"""
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 from urllib.parse import unquote, urlsplit
 
 package = Path(__file__).resolve().parents[2]
 model_root = package.parent / 'robot_description'
+sys.path.insert(0, str(package))
+from web_host.motion import MotionJobs, handle_motion
+motion_jobs = MotionJobs()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -25,8 +29,19 @@ class Handler(SimpleHTTPRequestHandler):
                 return str(target)
         return super().translate_path(path)
 
+    def do_GET(self):
+        if not handle_motion(self, motion_jobs):
+            super().do_GET()
+
+    def do_POST(self):
+        if not handle_motion(self, motion_jobs):
+            self.send_error(404)
+
     def log_message(self, *args):
         pass
 
 
-ThreadingHTTPServer(('127.0.0.1', 8092), Handler).serve_forever()
+try:
+    ThreadingHTTPServer(('127.0.0.1', 8092), Handler).serve_forever()
+finally:
+    motion_jobs.close()

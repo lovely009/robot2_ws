@@ -18,6 +18,7 @@ function updateCommandHistory() {
 }
 export const snapshot = shallowRef<WorkbenchSnapshot>({
   managed: {enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
+  firmwareConnectionKey: '',
   connected: false,
   connectionText: "未连接",
   agent: "stopped",
@@ -26,6 +27,7 @@ export const snapshot = shallowRef<WorkbenchSnapshot>({
   canStopAgent: false,
   model: "",
   selectedId: 0,
+  motors: [],
   selectedName: "",
   selectedState: "未知",
   total: 0,
@@ -111,6 +113,7 @@ function updateSnapshot() {
       armed: !!s.managed?.armed, ready: !!s.managed?.state?.ready,
       mcuAuthorized: !!s.managed?.mcuAuthorized,
       message: s.managed?.message || '', blockers: s.managed?.state?.blockers || []},
+    firmwareConnectionKey: `${generation}:${s.configSessionId ?? 0}`,
     connected: s.conn.connected,
     connectionText: s.conn.text,
     agent: s.conn.agent,
@@ -119,6 +122,9 @@ function updateSnapshot() {
     canStopAgent: s.conn.canStop,
     model: data.MODEL,
     selectedId: s.selectedId,
+    motors: [...new Set<number>([...s.motors.keys(), ...s.paramCache.keys()])]
+      .sort((a, b) => a - b)
+      .map(id => ({id, model: s.motors.get(id)?.topo?.model_name || ''})),
     selectedName: (s.modelTransmissions?.groups || [])
       .filter((group: any) => group.motors.some((motor: any) => Number(motor.id) === s.selectedId))
       .flatMap((group: any) => group.joints).join(" / ") || "",
@@ -295,10 +301,7 @@ async function mountPanelContent(
     store: data.store,
     markDirty: data.markDirty,
     ui: {
-      selectMotor(id: number) {
-        data.store.selectedId = id;
-        data.markDirty(data.DIRTY.SELECTED);
-      },
+      selectMotor: runtime.selectMotor,
       setModel(name: string) {
         if (data.store.managed?.enabled && name !== data.store.managed.model) {
           notice.value = '托管机器的模型由启动配置确定';
@@ -338,6 +341,18 @@ export const runtime = {
     if (['stop', 'release', 'disarm'].includes(operation)) modules.actions.stopPlayback();
     return modules.ros.managedOperation(operation);
   },
+  async readFirmwareParameter(name: string) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    return modules.device.readFirmwareParameter(name);
+  },
+  async writeFirmwareParameter(name: string, value: number) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    await modules.device.writeFirmwareParameter(name, value);
+  },
+  async saveFirmwareParameters() {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    await modules.device.saveFirmwareParameters();
+  },
   clearCommandHistory() {
     if (!modules || disposed) return;
     modules.data.store.history.length = 0;
@@ -346,6 +361,11 @@ export const runtime = {
   },
   selectedMotorModel(): string {
     return modules?.data.store.motors.get(snapshot.value.selectedId)?.topo?.model_name || '';
+  },
+  selectMotor(id: number) {
+    if (!modules || disposed) return;
+    modules.data.store.selectedId = id;
+    modules.data.markDirty(modules.data.DIRTY.SELECTED);
   },
   setNavigation(callback: (screen: string) => void) {
     navigation = callback;
@@ -378,10 +398,9 @@ export const runtime = {
   },
   stopMotion() {
     if (!initialized.value || !modules.ros.isConnected()) return false;
-    modules.actions.stopPlayback();
     const sent = modules.command.sendStop();
     notice.value = sent
-      ? "已发送轨迹取消与全部软停请求；请核对设备反馈"
+      ? "已请求全部软停（停用运动控制器）；请核对设备反馈"
       : "停止请求未发送";
     return sent;
   },

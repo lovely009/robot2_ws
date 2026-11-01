@@ -38,6 +38,7 @@ export const store = {
   chart: {running: true, windowMs: 10000},
   history: [],
   paramCache: new Map(),
+  firmwareReport: {seq: 0, at: 0, values: null, unsaved: false},
   configResults: new Map(),
   configSessionId: null,
   // 写事务的结果文本（key -> {ok, text, t}）：同一事务的按钮分布在设备屏与使能屏，
@@ -62,8 +63,7 @@ export const store = {
     driverFile: '', directJoints: {}, direct_mapping: {}},
   selectedGroup: '',
   selectedJoint: '',
-  // 命令节拍节点（/motor_command/status）：`data.output_topic` 是命令**当前实际发往**
-  // 哪里——改道由服务端做（ADR 0014），页面只有读它才能核对开关与接线是否一致。
+  // /control/status：ros2_control 的模型、模式、输出路由与拒绝原因。
   commandStatus: {last: 0, data: null},
 };
 
@@ -141,12 +141,18 @@ export function syncWriteButtons(ids, allow) {
 // 台架状态入 store（/bench/status 话题帧与 bench 服务的响应共用这一条路）。
 // agent 段顺带同步进 conn.agent*（顶栏文案由 main.js 的 renderShell 画）；
 // 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
-// 命令节拍节点状态入 store（/motor_command/status）。整段留原样：页面不解释它的
-// 字段，只把 output_topic 与开关的意图对账，其余原样显示给操作者。
+// 无效状态立即撤销身份，不能用旧会话继续控制。
 export function applyCommandStatus(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object') return;
-  store.commandStatus.data = snapshot;
-  store.commandStatus.last = Date.now();
+  const valid = snapshot && typeof snapshot.model === 'string' && snapshot.model
+    && Array.isArray(snapshot.joint_names) && snapshot.joint_names.length
+    && snapshot.joint_names.every(name => typeof name === 'string' && name)
+    && new Set(snapshot.joint_names).size === snapshot.joint_names.length
+    && typeof snapshot.mode === 'string'
+    && snapshot.output_topic === '/motor/host_command_array'
+    && snapshot.trajectory_output_topic === '/host_control/trajectory_controller/follow_joint_trajectory'
+    && (snapshot.gravity_enabled === null || typeof snapshot.gravity_enabled === 'boolean')
+    && (snapshot.effort_gain === null || (Number.isFinite(snapshot.effort_gain) && snapshot.effort_gain >= 0));
+  store.commandStatus = valid ? {data: snapshot, last: Date.now()} : {data: null, last: 0};
   markDirty(DIRTY.COMMAND);
 }
 
@@ -335,8 +341,8 @@ export function jointFeedbackMatchesModel() {
   }
   if (feedback.source === 'simulation') return store.bench.simulation?.config?.model === MODEL;
   if (feedback.source === 'external') {
-    const model = store.transmissionStatus.data?.model;
-    return !model || model === MODEL;
+    const {data,last} = store.transmissionStatus, age = Date.now()-last;
+    return data?.model === MODEL && last>0 && age>=0 && age<=2500;
   }
   return false;
 }
@@ -444,6 +450,14 @@ export function devDetailTitle(id) {
 export function paramRowIds(showAll) {
   const all = [...store.paramCache.keys()].sort((a, b) => a - b);
   return (showAll || !store.selectedId) ? all : all.filter((i) => i === store.selectedId);
+}
+
+export function paramReadState(id) {
+  const entry = store.paramCache.get(id);
+  const fields = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit', 'limit_protect', 'direction', 't_max', 'node_id'];
+  const count = (source) => fields.filter(field => Number.isFinite(entry?.[source]?.[field])).length;
+  const device = count('dev'), record = count('rec'), usable = count('pick');
+  return {device, record, usable, verified: entry?.state === 2 && device === fields.length};
 }
 
 export function motorStateOf(id) { return describeMotorState(store,id); }

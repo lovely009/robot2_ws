@@ -1,5 +1,7 @@
 # Robot2 工程
 
+本地整合阶段检查点：授权/线协议及 50 Hz 相位裕度尚未验收，不能合入 dev 或用于真实执行。状态与本轮证据见 [整合检查点](outputs/integration/checkpoint.md)。
+
 ROS 2 Humble 整机平台。实机只有一条电机执行链：`robot_supervisor → micro_ros_bridge → micro-ROS MCU → 电机`。主机负责模型、控制权、标准运动接口与诊断；MCU 负责轨迹插值、执行与本地授权期限。
 
 ## 功能与职责

@@ -8,6 +8,9 @@
 
 #include <cstring>
 
+#include "agent_control_gate.h"
+#include "trajectory_transaction.hpp"
+#include "time_utils.h"
 #include "can_bsp.h"
 #include "fdcan.h"
 #include "motor_config_contract.hpp"
@@ -16,6 +19,7 @@
 #include "session_sync.h"
 #include "storage_task.h"
 #include "param_store_blob.h"
+#include "firmware_parameters.h"
 
 // 各库电机容量须一致；RX ring 深度不是电机容量，不纳入此约束。
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
@@ -37,10 +41,10 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
 static const uint32_t kMotorRtTaskStack = 1024U;
 static const UBaseType_t kMotorRtTaskPrio = 3U;
 static const TickType_t kServicePeriodTicks = pdMS_TO_TICKS(1U);
-// 5ms/200Hz 控制边界：轨迹插值与快照保持覆盖互斥电机集合，每台每边界一条命令。
+static_assert(pdMS_TO_TICKS(1U) > 0U, "1kHz 控制需要至少 1kHz 的 RTOS tick");
+// 默认 5ms/200Hz、可配至 1ms/1kHz：轨迹插值与快照保持每台每边界一条命令。
 // P1 槽 latest-wins；CERB 出队后聚合为每帧最多 6 轴的 0x210。
 // 20ms/50Hz SYNC 与上行状态独立；总线负载和 WCET/jitter 需无负载台架验证。
-static const uint32_t kControlPeriodMs = FIRMWARE_MOTOR_COMMAND_PERIOD_MS;
 
 // 每周期配额，需按台架数据验证。
 static const uint32_t kRxDrainBudgetPerBus = 16U;   // 每 1ms 每总线最多解码帧数
@@ -56,22 +60,9 @@ static const uint32_t kDiscoverySyncPeriodMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
 static motor_control_context_t *const g_motor_control =
     motor_control_instance();
 static control_mailbox_t g_control_mailbox;
-static control_lease_state_t g_control_lease;
-
-// All lease/mailbox accesses share the same critical section.
-static void clear_pending_motion(void) {
-  control_mailbox_clear_command(&g_control_mailbox);
-  control_mailbox_clear_trajectory(&g_control_mailbox);
-  control_mailbox_clear_policy(&g_control_mailbox);
-}
-
-static bool policy_is_stop(const control_policy_snapshot_t *snapshot) {
-  if (snapshot == nullptr || snapshot->target_count > CONTROL_POLICY_MAILBOX_MAX_TARGETS)
-    return false;
-  for (size_t i = 0; i < snapshot->target_count; ++i)
-    if (snapshot->targets[i].enabled) return false;
-  return true;
-}
+static agent_control_gate_t g_agent_gate;
+static trajectory_transaction::Coordinator g_trajectory;
+static bool g_clock_requested = false;
 
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
 static motor_control_stored_params_t
@@ -88,40 +79,83 @@ static motor_tx_router_t g_tx_router;
 
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
-  const bool stop = snapshot != nullptr && snapshot->target_count == 0U;
-  const bool permitted = snapshot != nullptr &&
-      control_lease_allows(&g_control_lease, snapshot->lease_id, millis());
-  const bool ok = stop
-      ? control_command_mailbox_publish(&g_control_mailbox.command, snapshot)
-      : permitted && control_mailbox_submit_command(&g_control_mailbox, snapshot);
-  if (!stop && !permitted) ++g_control_mailbox.command_rejected_count;
+  const bool ok = agent_gate_submit_command(&g_agent_gate, &g_control_mailbox,
+      snapshot, millis());
   taskEXIT_CRITICAL();
   return ok;
 }
 
-bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory) {
+// 调用方已持短临界区；租约不能只看上一服务拍缓存的 bool。
+static bool trajectory_gate_allowed(uint32_t now_ms) {
+  const agent_link_t &link = g_agent_gate.link;
+  return link.connected && link.clock_valid && g_clock_requested &&
+      !link.stop_pending && link.lease_valid && link.authorized &&
+      g_agent_gate.kernel_authorized && link.have_command &&
+      now_ms - link.command_tick_ms <= 30U;
+}
+
+bool motor_rt_submit_agent_trajectory(const agent_trajectory_request_t *request) {
+  if (request == nullptr) return false;
+  const uint32_t now_ms = millis();
   taskENTER_CRITICAL();
-  const bool stop = trajectory != nullptr && trajectory->point_count == 0U &&
-      trajectory->target_count == 0U;
-  const bool permitted = trajectory != nullptr &&
-      control_lease_allows(&g_control_lease, trajectory->lease_id, millis());
-  const bool ok = stop
-      ? control_trajectory_mailbox_publish(&g_control_mailbox.trajectory, trajectory)
-      : permitted && control_mailbox_submit_trajectory(&g_control_mailbox, trajectory);
-  if (!stop && !permitted) ++g_control_mailbox.trajectory_rejected_count;
+  bool ok = false;
+  if (request->operation == AGENT_TRAJECTORY_ACK) {
+    // ACK 不占请求号，也不刷新授权；互斥载荷仍须为空。
+    if (request->request_id == 0U && request->trajectory_id == 0U &&
+        request->segment_index == 0U && request->segment_count == 0U &&
+        request->target_count == 0U && request->point_count == 0U) {
+      ok = g_trajectory.ack(request->session_id, request->ack_request_id,
+          request->ack_terminal_trajectory_id);
+    }
+  } else {
+    using namespace trajectory_transaction;
+    Receipt receipt{};
+    const bool motion = request->operation == AGENT_TRAJECTORY_LOAD ||
+        request->operation == AGENT_TRAJECTORY_COMMIT;
+    // 已受理请求必须先走幂等路径：过期重发只读旧收据，不重新执行。
+    const bool fresh = request->request_id > g_trajectory.status().request_high_water;
+    if (motion && fresh && !trajectory_gate_allowed(now_ms)) {
+      receipt = g_trajectory.reject(*request, REASON_GATE);
+    } else if (motion && fresh && request->operation == AGENT_TRAJECTORY_LOAD &&
+        request->target_count <= 48U &&
+        !motor_control_trajectory_targets_healthy(g_motor_control,
+            request->target_ids, request->target_count, now_ms)) {
+      receipt = g_trajectory.reject(*request, REASON_MEASUREMENT);
+    } else if (request->operation == AGENT_TRAJECTORY_LOAD) {
+      receipt = g_trajectory.load(*request, now_ms);
+    } else if (request->operation == AGENT_TRAJECTORY_COMMIT) {
+      receipt = g_trajectory.commit(*request, now_ms);
+    } else if (request->operation == AGENT_TRAJECTORY_CANCEL) {
+      receipt = g_trajectory.cancel(*request);
+    } else {
+      receipt = g_trajectory.reject(*request, REASON_INVALID);
+    }
+    ok = receipt.state == AGENT_TRAJECTORY_PENDING ||
+        receipt.state == AGENT_TRAJECTORY_ACCEPTED;
+  }
+  if (!ok) ++g_control_mailbox.trajectory_rejected_count;
   taskEXIT_CRITICAL();
   return ok;
+}
+
+void motor_rt_copy_agent_trajectory(agent_trajectory_status_t *out) {
+  if (out == nullptr) return;
+  taskENTER_CRITICAL();
+  *out = g_trajectory.status();
+  taskEXIT_CRITICAL();
+}
+
+bool motor_rt_agent_trajectory_owns(uint16_t motor_id) {
+  taskENTER_CRITICAL();
+  const bool owned = g_trajectory.owns(motor_id);
+  taskEXIT_CRITICAL();
+  return owned;
 }
 
 bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
-  const bool stop = policy_is_stop(snapshot);
-  const bool permitted = snapshot != nullptr &&
-      control_lease_allows(&g_control_lease, snapshot->lease_id, millis());
-  const bool ok = stop
-      ? control_policy_mailbox_publish(&g_control_mailbox.policy, snapshot)
-      : permitted && control_mailbox_submit_policy(&g_control_mailbox, snapshot);
-  if (!stop && !permitted) ++g_control_mailbox.policy_rejected_count;
+  const bool ok = agent_gate_submit_policy(&g_agent_gate, &g_control_mailbox,
+      snapshot, millis());
   taskEXIT_CRITICAL();
   return ok;
 }
@@ -129,12 +163,6 @@ bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
 // mailbox 无内部锁，配置读写须共用临界区；校验与门禁由 mailbox/内核负责。
 bool motor_rt_submit_config(
     const control_mailbox_config_request_t *request) {
-  // Configuration has no lease fence. Enabling is exclusively a leased policy.
-  if (request == nullptr ||
-      request->kind == CONTROL_MAILBOX_CONFIG_SET_MODE ||
-      (request->kind == CONTROL_MAILBOX_CONFIG_SET_ENABLE && request->value.enable) ||
-      (request->kind == CONTROL_MAILBOX_CONFIG_SET_POLICY && request->value.policy.enable))
-    return false;
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
   taskEXIT_CRITICAL();
@@ -144,62 +172,45 @@ bool motor_rt_submit_config(
 void motor_rt_set_agent_connected(bool connected) {
   taskENTER_CRITICAL();
   control_mailbox_request_agent_connected(&g_control_mailbox, connected);
-  if (!connected) {
-    control_lease_revoke(&g_control_lease);
-    clear_pending_motion();
-  }
   taskEXIT_CRITICAL();
 }
 
-void motor_rt_set_control_session(uint64_t session_id) {
+void motor_rt_begin_agent_session(uint64_t session_id) {
   taskENTER_CRITICAL();
-  if (g_control_lease.session_id != session_id) {
-    control_lease_set_session(&g_control_lease, session_id);
-    clear_pending_motion();
-  }
+  agent_gate_begin_session(&g_agent_gate, &g_control_mailbox, session_id);
+  g_trajectory.begin_session(session_id);
   taskEXIT_CRITICAL();
 }
 
-bool motor_rt_submit_control_lease(uint64_t session_id, uint64_t lease_id,
-    uint32_t sequence, uint32_t valid_until_tick_ms, bool active) {
+void motor_rt_request_disable(uint64_t motor_mask) {
   taskENTER_CRITICAL();
-  const uint64_t previous_id = g_control_lease.lease_id;
-  const bool accepted = control_mailbox_session_authorized(&g_control_mailbox) &&
-      control_lease_submit(&g_control_lease, session_id, lease_id, sequence,
-          valid_until_tick_ms, active, millis());
-  if (g_control_lease.revoke_pending &&
-      (!g_control_lease.active || previous_id != g_control_lease.lease_id))
-    clear_pending_motion();
+  agent_gate_request_disable(&g_agent_gate, motor_mask);
   taskEXIT_CRITICAL();
-  return accepted;
 }
 
-bool motor_rt_control_lease_allows(uint64_t lease_id) {
+void motor_rt_request_stop_all(void) {
   taskENTER_CRITICAL();
-  const bool allowed = control_lease_allows(&g_control_lease, lease_id, millis());
+  agent_gate_request_stop(&g_agent_gate);
   taskEXIT_CRITICAL();
-  return allowed;
 }
 
-void motor_rt_copy_control_lease(control_lease_state_t *out, uint32_t *sample_tick_ms) {
+void motor_rt_set_clock_valid(bool valid) {
+  taskENTER_CRITICAL();
+  if (g_clock_requested && !valid) agent_gate_request_stop(&g_agent_gate);
+  g_clock_requested = valid;
+  taskEXIT_CRITICAL();
+}
+
+void motor_rt_copy_link_status(motor_rt_link_status_t *out) {
   if (out == nullptr) return;
   taskENTER_CRITICAL();
-  const uint32_t now_ms = millis();
-  *out = g_control_lease;
-  out->active = control_lease_allows(&g_control_lease, g_control_lease.lease_id, now_ms);
-  if (sample_tick_ms != nullptr) *sample_tick_ms = now_ms;
+  const agent_link_t *link = &g_agent_gate.link;
+  out->command_sequence = link->command_sequence;
+  out->stop_generation = link->stop_generation;
+  out->required_policy_generation = link->barrier_generation;
+  out->lease_valid = link->lease_valid;
+  out->authorized = link->authorized && g_agent_gate.kernel_authorized;
   taskEXIT_CRITICAL();
-}
-
-// Independent 1 ms motor service continues even when the ROS executor is stuck.
-static void service_control_lease(uint32_t now_ms) {
-  taskENTER_CRITICAL();
-  control_lease_service(&g_control_lease, now_ms);
-  const bool revoke = control_lease_take_revocation(&g_control_lease);
-  const bool active = control_lease_allows(&g_control_lease, g_control_lease.lease_id, now_ms);
-  if (!active && revoke) clear_pending_motion();
-  taskEXIT_CRITICAL();
-  if (revoke) (void)motor_control_set_authorization(g_motor_control, false, now_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,29 +218,26 @@ static void service_control_lease(uint32_t now_ms) {
 // ---------------------------------------------------------------------------
 
 size_t motor_rt_copy_motion_states(motor_control_motion_state_t *out,
-    size_t capacity, uint32_t *sample_tick_ms) {
+    size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
-  taskENTER_CRITICAL();
   const uint32_t now_ms = millis();
+  taskENTER_CRITICAL();
   const size_t count =
       motor_control_copy_motion_states(g_motor_control, out, capacity, now_ms);
-  if (sample_tick_ms != nullptr) *sample_tick_ms = now_ms;
   taskEXIT_CRITICAL();
   return count;
 }
 
-size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity,
-    uint32_t *sample_tick_ms) {
+size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity) {
   if (out == nullptr || capacity == 0U) {
     return 0U;
   }
-  taskENTER_CRITICAL();
   const uint32_t now_ms = millis();
+  taskENTER_CRITICAL();
   const size_t count =
       motor_control_copy_statuses(g_motor_control, out, capacity, now_ms);
-  if (sample_tick_ms != nullptr) *sample_tick_ms = now_ms;
   taskEXIT_CRITICAL();
   return count;
 }
@@ -264,15 +272,13 @@ size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
   return count;
 }
 
-void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out,
-    uint32_t *sample_tick_ms) {
+void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out) {
   if (out == nullptr) {
     return;
   }
-  taskENTER_CRITICAL();
   const uint32_t now_ms = millis();
+  taskENTER_CRITICAL();
   motor_control_copy_trajectory_state(g_motor_control, out, now_ms);
-  if (sample_tick_ms != nullptr) *sample_tick_ms = now_ms;
   taskEXIT_CRITICAL();
 }
 
@@ -369,6 +375,7 @@ static void drain_rx_rings(void) {
         motor_protocol_raw_frame_t frame = {0};
         frame.bus_index = batch[i].bus_index;
         frame.can_id = batch[i].can_id;
+    frame.tx_slot = batch[i].tx_slot;
         frame.is_extended = batch[i].is_extended;
         frame.is_fd = batch[i].is_fd;
         frame.is_brs = batch[i].is_brs;
@@ -399,13 +406,11 @@ static void sustain_discovery_sync(uint32_t now_ms) {
 // P2 FIFO）。tx_slot = 内核表项索引（表项只增不减故稳定，同总线电机槽互异）；
 // motor_protocol_tx_frame_t 与 can_tx_frame_t 显式逐字段拷贝（不假设布局一致）。
 static void route_kernel_tx(void) {
-  // 同一任务串行拥有内核与所有调度器。先应用停机屏障，清除尚未发送的
-  // 同轴旧目标/旧使能，再搬运新帧；CERB 聚合发生在屏障之后。
-  const uint64_t cancelled =
-      motor_control_take_tx_cancellations(g_motor_control);
-  for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
+  // Apply the kernel's stop barrier before moving fresh frames. This removes
+  // unsent enables and motion at both queue stages, including P0 enables.
+  const uint64_t cancelled = motor_control_take_tx_cancellations(g_motor_control);
+  for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus)
     can_tx_scheduler_cancel_slots(can_bsp_tx_scheduler(bus), cancelled);
-  }
   static motor_protocol_tx_frame_t batch[kTxCollectBudget]; // 静态：固定容量
   const size_t count =
       motor_control_collect_tx(g_motor_control, batch, kTxCollectBudget);
@@ -459,66 +464,23 @@ static void pump_tx_schedulers(void) {
     if (scheduler == nullptr) {
       continue;
     }
+    // P0 积压可能令 P1 跨过原始截止；物理出队前取消失效槽，不能停机后补发旧目标。
+    const uint32_t now_ms = millis();
+    for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS; ++slot) {
+      if (scheduler->p1.dirty[slot] &&
+          !motor_control_target_valid(g_motor_control, slot, now_ms)) {
+        scheduler->p1.dirty[slot] = false;
+      }
+    }
     (void)motor_tx_router_pump(&g_tx_router, scheduler, bus,
         submit_routed_tx, nullptr);
   }
 }
 
-// 5ms/200Hz 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
+// 控制边界：会话/授权边沿 → 内核；完整快照 → apply；配置 FIFO 有界转发。
 //
 // mailbox 类型与内核类型刻意互不依赖（同形镜像）；以下转换是任务层的
 // 缝合职责，逐字段拷贝，不假设两侧布局一致。
-
-static void convert_snapshot(const control_command_snapshot_t *in,
-    motor_control_command_snapshot_t *out) {
-  out->sequence = in->sequence;
-  out->received_tick_ms = in->received_tick_ms;
-  out->target_count = in->target_count;
-  for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS;
-      ++i) {
-    out->targets[i].motor_id = in->targets[i].motor_id;
-    out->targets[i].position_rad = in->targets[i].position;
-    out->targets[i].velocity_rad_s = in->targets[i].velocity;
-    out->targets[i].effort_nm = in->targets[i].effort;
-  }
-}
-
-static void convert_policy(const control_policy_snapshot_t *in,
-    motor_control_policy_snapshot_t *out) {
-  out->received_tick_ms = in->received_tick_ms;
-  out->request_id = in->request_id;
-  out->policy_generation = in->policy_generation;
-  out->target_count = in->target_count;
-  for (uint8_t i = 0; i < in->target_count && i < MOTOR_CONTROL_MAX_MOTORS;
-      ++i) {
-    out->targets[i].motor_id = in->targets[i].motor_id;
-    out->targets[i].enabled = in->targets[i].enabled;
-    out->targets[i].kp = in->targets[i].kp;
-    out->targets[i].kd = in->targets[i].kd;
-    out->targets[i].confirm_unprotected = in->targets[i].confirm_unprotected;
-  }
-}
-
-static void convert_trajectory(const control_trajectory_t *in,
-    motor_control_trajectory_t *out) {
-  out->sequence = in->sequence;
-  out->received_tick_ms = in->received_tick_ms;
-  out->trajectory_id = in->trajectory_id;
-  out->point_count = in->point_count;
-  out->target_count = in->target_count;
-  for (uint16_t i = 0;
-      i < in->target_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS; ++i) {
-    out->target_ids[i] = in->target_ids[i];
-  }
-  for (uint16_t i = 0;
-      i < in->point_count && i < MOTOR_CONTROL_MAX_TRAJECTORY_POINTS; ++i) {
-    out->points[i].time_from_start_ms = in->points[i].time_from_start_ms;
-    out->points[i].motor_id = in->points[i].motor_id;
-    out->points[i].position_rad = in->points[i].position;
-    out->points[i].velocity_rad_s = in->points[i].velocity;
-    out->points[i].effort_nm = in->points[i].effort;
-  }
-}
 
 // 两侧枚举类型独立；motor_config_contract.hpp 锁住完整数值映射。
 static void convert_config(const control_mailbox_config_request_t *in,
@@ -564,6 +526,10 @@ static void convert_config(const control_mailbox_config_request_t *in,
   case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
     out->direction_raw = in->value.direction_raw;
     break;
+  case CONTROL_MAILBOX_CONFIG_SET_T_MAX:
+    out->t_max_raw = in->value.t_max_raw; break;
+  case CONTROL_MAILBOX_CONFIG_SET_NODE_ID:
+    out->new_node_id = in->value.new_node_id; break;
   case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
     out->save_slots = in->value.save_slots;
     break;
@@ -580,63 +546,18 @@ static void convert_config(const control_mailbox_config_request_t *in,
 }
 
 static void control_boundary(void) {
-  service_control_lease(millis());
-  // 会话在线和有效主机租约必须同时成立，内核状态变更仅由本任务执行。
-  control_mailbox_events_t events = {0};
-  bool session_authorized = false;
-  taskENTER_CRITICAL();
-  (void)control_mailbox_take_events(&g_control_mailbox, &events);
-  session_authorized = control_mailbox_session_authorized(&g_control_mailbox) &&
-      control_lease_allows(&g_control_lease, g_control_lease.lease_id, millis());
-  taskEXIT_CRITICAL();
   const uint32_t now_ms = millis();
-  session_sync_apply(g_motor_control, &events, session_authorized, now_ms);
-
-  // 两个命令快照各约 1KB，静态分配且仅本任务访问；只读写 target_count 条。
-  static control_command_snapshot_t snapshot_in;
-  static motor_control_command_snapshot_t snapshot;
-  bool got_snapshot = false;
+  const bool clock_valid = time_clock_valid();
   taskENTER_CRITICAL();
-  got_snapshot = control_mailbox_take_command(&g_control_mailbox, &snapshot_in);
+  agent_gate_step(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms,
+      clock_valid && g_clock_requested);
+  // 只在控制边界消费 COMMIT/CANCEL；组装区直接借给内核，无全量转换副本。
+  g_trajectory.boundary(g_motor_control, now_ms,
+      clock_valid && trajectory_gate_allowed(now_ms));
   taskEXIT_CRITICAL();
-  if (got_snapshot && (snapshot_in.target_count == 0U ||
-      motor_rt_control_lease_allows(snapshot_in.lease_id))) {
-    convert_snapshot(&snapshot_in, &snapshot);
-    (void)motor_control_apply_command_snapshot(g_motor_control, &snapshot,
-        now_ms);
-  }
-
-  // 两份轨迹各约 5KB，静态分配；mailbox 与内核各自校验，按时间线插值下发。
-  static control_trajectory_t trajectory_in;
-  static motor_control_trajectory_t trajectory;
-  bool got_trajectory = false;
-  taskENTER_CRITICAL();
-  got_trajectory =
-      control_mailbox_take_trajectory(&g_control_mailbox, &trajectory_in);
-  taskEXIT_CRITICAL();
-  if (got_trajectory && ((trajectory_in.point_count == 0U && trajectory_in.target_count == 0U) ||
-      motor_rt_control_lease_allows(trajectory_in.lease_id))) {
-    convert_trajectory(&trajectory_in, &trajectory);
-    (void)motor_control_apply_trajectory(g_motor_control, &trajectory, now_ms);
-  }
-  motor_control_trajectory_step(g_motor_control, now_ms);
   // 快照通道的边界保持重发：与 trajectory_step 同拍、覆盖互斥的电机集合，
   // 两者合计使每个边界每台恰好产生一帧 P1（见 motor_control.h 的说明）。
   motor_control_hold_step(g_motor_control, now_ms);
-
-  // 逐电机策略：批量、latest-wins。稀疏语义——只影响列出的电机，未列出的
-  // 保持原状。约 0.8KB，静态避免压栈。
-  static control_policy_snapshot_t policy_in;
-  static motor_control_policy_snapshot_t policy;
-  bool got_policy = false;
-  taskENTER_CRITICAL();
-  got_policy = control_mailbox_take_policy(&g_control_mailbox, &policy_in);
-  taskEXIT_CRITICAL();
-  if (got_policy && (policy_is_stop(&policy_in) ||
-      motor_rt_control_lease_allows(policy_in.lease_id))) {
-    convert_policy(&policy_in, &policy);
-    (void)motor_control_apply_policy(g_motor_control, &policy, now_ms);
-  }
 
   // 配置 FIFO 有界转发（每边界至多 kConfigDrainPerBoundary 条，不阻塞节拍）。
   for (uint32_t i = 0; i < kConfigDrainPerBoundary; ++i) {
@@ -647,6 +568,12 @@ static void control_boundary(void) {
     taskEXIT_CRITICAL();
     if (!got_config) {
       break;
+    }
+    const uint32_t remaining = request_in.valid_until_tick_ms - now_ms;
+    if (remaining == 0U || remaining > 1000U) {
+      motor_control_report_config_result(g_motor_control, request_in.request_id,
+          request_in.motor_id, MOTOR_PROTOCOL_CONFIG_INVALID, now_ms);
+      continue;
     }
     motor_protocol_config_request_t request = {0};
     convert_config(&request_in, &request);
@@ -712,19 +639,29 @@ static void motor_rt_task_fn(void *pv_parameters) {
     vTaskDelayUntil(&last_wake, kServicePeriodTicks);
     const uint32_t now_ms = millis();
 
-    // 1ms 服务：有界 RX → 内核运行时服务 → SYNC。
-    service_control_lease(now_ms);
+    // 1ms 服务：有界 RX → 内核运行时服务 → SYNC → 待发帧路由。
     drain_rx_rings();
+    const bool clock_valid = time_clock_valid();
+    taskENTER_CRITICAL();
+    const uint8_t safety_action = agent_gate_service(&g_agent_gate,
+        &g_control_mailbox, g_motor_control, now_ms,
+        clock_valid && g_clock_requested);
+    if (safety_action != 0U)
+      g_trajectory.abort(trajectory_transaction::REASON_STOPPED);
+    g_trajectory.poll(now_ms);
+    taskEXIT_CRITICAL();
     motor_control_service(g_motor_control, now_ms);
     sustain_discovery_sync(now_ms);
 
     // 配置周期的控制边界：按 millis 差触发，不补发过期边界。
-    if ((uint32_t)(now_ms - last_control_ms) >= kControlPeriodMs) {
+    if ((uint32_t)(now_ms - last_control_ms) >=
+        1000U / firmware_parameters_snapshot().motor_command_hz) {
       last_control_ms = now_ms;
       control_boundary();
     }
 
-    // 控制边界也可能失能：必须在它完成后应用停机屏障并路由，再提交硬件。
+    // Collect once after the boundary: a newly applied snapshot and its hold
+    // output share the kernel's latest-wins slot before the bounded TX drain.
     route_kernel_tx();
     // 1ms 服务：每总线 P0/P1/P2 出队并提交硬件。
     pump_tx_schedulers();
@@ -741,12 +678,10 @@ bool motor_rt_task_start(void) {
   // mailbox 与内核先于任务初始化；内核 adapter 列表构造注入。
   motor_tx_router_init(&g_tx_router);
   control_mailbox_init(&g_control_mailbox);
-  control_lease_init(&g_control_lease);
   size_t adapter_count = 0U;
   const motor_protocol_adapter_t *const *adapters =
       motor_protocol_adapter_registry(&adapter_count);
   motor_control_init(g_motor_control, adapters, adapter_count);
-  (void)motor_control_set_authorization(g_motor_control, false, millis());
   // boot 存储参数快照（storage 任务先于本任务启动；无有效 blob 时 count=0）。
   // 保存进静态副本：W25 的新值下次启动才生效，运行期不再引用 storage 任务。
   size_t stored_count = 0U;

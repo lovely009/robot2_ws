@@ -12,6 +12,7 @@
 #include "storage_projection.h"
 #include "param_store_blob.h"
 #include "w25q64.h"
+#include "firmware_parameters.h"
 
 static const UBaseType_t kStorageTaskPrio = 1U; // 与 led 同级最低；Flash 擦除
                                                 // 阻塞期高优先级任务可抢占
@@ -127,6 +128,7 @@ static void load_boot_params() {
     const param_store_blob_t *adopted =
         reinterpret_cast<const param_store_blob_t *>(scratch);
     g_seq = adopted->seq;
+    firmware_parameters_load(adopted->reserved);
     g_boot_count = storage_projection_blob_to_boot(
         adopted, g_boot_records, PARAM_STORE_RECORD_COUNT);
     return;
@@ -142,6 +144,7 @@ static void load_boot_params() {
   const param_store_blob_t *chosen =
       reinterpret_cast<const param_store_blob_t *>(scratch);
   g_seq = chosen->seq;
+  firmware_parameters_load(chosen->reserved);
   g_boot_count = storage_projection_blob_to_boot(chosen, g_boot_records,
       PARAM_STORE_RECORD_COUNT);
 }
@@ -164,6 +167,8 @@ static void perform_save(uint32_t request_id) {
     return;
   }
   storage_projection_views_to_blob(blob, views, n);
+  const auto settings = firmware_parameters_snapshot();
+  firmware_settings_pack(&settings, blob->reserved);
   g_seq++;
   param_store_blob_finalize(blob, g_seq);
 
@@ -195,6 +200,7 @@ static void perform_save(uint32_t request_id) {
     }
   }
   g_active_slot = target;
+  firmware_parameters_saved(&settings);
   publish_result(request_id, STORAGE_SAVE_OK);
 }
 

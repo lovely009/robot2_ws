@@ -25,6 +25,8 @@ typedef enum {
   // 0x2541:00 方向：0=CW、1=CCW，原值直通，持久化在 raw 槽 5。
   // 新字段仅追加于 COUNT 前，不得重排既有位图与槽索引。
   PARAM_FIELD_DIRECTION,
+  PARAM_FIELD_T_MAX,
+  PARAM_FIELD_NODE_ID,
   PARAM_FIELD_COUNT
 } param_field_t;
 
@@ -40,7 +42,9 @@ typedef enum {
   // v3：设备侧安全事实。位图 = 1u << slot，device_raw_present 是 u8（上限 8 槽）。
   PARAM_DEVICE_SLOT_SAFETY = 4,    // 0x2650:00（0=看门狗+限位保护开，1=关）
   PARAM_DEVICE_SLOT_DIRECTION = 5, // 0x2541（0=CW，1=CCW）
-  PARAM_DEVICE_SLOT_COUNT = 6
+  PARAM_DEVICE_SLOT_T_MAX = 6,
+  PARAM_DEVICE_SLOT_NODE_ID = 7,
+  PARAM_DEVICE_SLOT_COUNT = 8
 } param_device_slot_t;
 
 // 标量校验：有限值；kp/kd ≥ 0；vel/torque > 0；limit_protect 只接受 0/1

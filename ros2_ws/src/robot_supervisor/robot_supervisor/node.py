@@ -67,7 +67,7 @@ class SupervisorNode(Node):
         self._start_tolerance = float(parameter('start_tolerance_rad', .02))
         self._control_timeout = float(parameter('control_timeout_s', .5))
         self._calibration_timeout = float(parameter('calibration_timeout_s', 1.5))
-        stream_hz = float(parameter('stream_hz', 100.))
+        stream_hz = float(parameter('stream_hz', 50.))
         max_trajectory_ms = parameter('max_trajectory_ms', 2000)
         for label, value in (
                 ('command_timeout_s', self._command_timeout),

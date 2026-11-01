@@ -27,3 +27,8 @@ uint32 clear_fault_seq
 # 保存完成计数；save_in_progress 覆盖受理至 W25 出终态的整段事务。
 uint32 save_seq
 bool save_in_progress
+
+# 固件配置 topic 回读，顺序见 firmware_setting_names；仅有效标记置位才可用。
+bool firmware_values_valid
+uint16[6] firmware_values
+bool firmware_unsaved

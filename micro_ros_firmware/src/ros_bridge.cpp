@@ -18,6 +18,8 @@
 #include "motor_bridge.h"
 #include "motor_rt_task.h"
 #include "param_bridge.h"
+#include "firmware_parameters.h"
+#include "time_utils.h"
 
 static const char *kNodeName = "micro_ros_node";
 
@@ -32,7 +34,7 @@ static rcl_allocator_t g_allocator;
 // 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
 static size_t executor_handle_count() {
   return 1U + motor_bridge_executor_handle_count() +
-         PARAM_BRIDGE_EXECUTOR_HANDLES;
+         PARAM_BRIDGE_EXECUTOR_HANDLES + FIRMWARE_PARAMETER_HANDLES;
 }
 
 // 按初始化阶段跟踪，保证失败/断连时只清理已成功创建的实体
@@ -47,6 +49,7 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   (void)last_call_time;
   imu_bridge_poll();
   motor_bridge_poll();
+  firmware_parameters_poll();
   // motor_bridge_poll 内先转发事件、更新参数快照，再统一发送。
 }
 
@@ -56,6 +59,8 @@ static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
 void ros_bridge_destroy() {
   // 先通知实时任务失联，使旧命令在 ROS 实体清理期间即失效。
   motor_rt_set_agent_connected(false);
+  motor_rt_set_clock_valid(false);
+  time_sync_reset();
   if (g_support_up) {
     // Agent 已失联，逐实体等待远端删除确认只会延迟下一次建链。
     const rmw_ret_t rc = rmw_uros_set_context_entity_destroy_session_timeout(
@@ -65,6 +70,7 @@ void ros_bridge_destroy() {
   imu_bridge_destroy(&g_node);
   motor_bridge_destroy(&g_node, &g_executor);
   param_bridge_destroy(&g_node, &g_executor);
+  firmware_parameters_destroy(&g_node, &g_executor);
 
   if (g_timer_up) {
     rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);
@@ -125,9 +131,14 @@ bool ros_bridge_create() {
     ros_bridge_destroy();
     return false;
   }
+  if (!firmware_parameters_create(&g_node, &g_executor)) {
+    ros_bridge_destroy();
+    return false;
+  }
 
-  // 10ms 周期（100Hz）：发布各域的最新 motion_states 与 IMU 快照；
-  // USB CDC 带宽余量仍需台架验证。
+  // 10ms 周期：IMU 最多100Hz，motion 每20ms一代，可靠流每轮最多一条；
+  // status 基础10Hz、重要变化最小20ms，温度仅新样本2Hz。
+  // USB CDC 最大负载与可靠分片阻塞仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
       bridge_timer_cb) != RCL_RET_OK) {
     ros_bridge_destroy();
@@ -141,12 +152,15 @@ bool ros_bridge_create() {
   }
   // 会话已建立：发起一次 NTP 时间同步，使 rmw_uros_epoch_nanos() 与主机对齐。
   // 同步成功后分配会话标识；未建立会话时禁止接收运动授权。
-  if (rmw_uros_sync_session(1000) != RMW_RET_OK ||
-      !motor_bridge_begin_session(rmw_uros_epoch_nanos())) {
+  const bool sync_ok = rmw_uros_sync_session(1000) == RMW_RET_OK;
+  const uint64_t epoch_ns = sync_ok ? rmw_uros_epoch_nanos() : 0;
+  time_sync_record(sync_ok, epoch_ns);
+  if (!time_clock_valid() || !motor_bridge_begin_session(epoch_ns)) {
     ros_bridge_destroy();
     return false;
   }
   // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
+  motor_rt_set_clock_valid(true);
   motor_rt_set_agent_connected(true);
   return true;
 }

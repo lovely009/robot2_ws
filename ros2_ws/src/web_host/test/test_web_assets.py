@@ -385,19 +385,12 @@ def test_motor_backend_interface_mirrors_the_simulation_drawer():
 
 
 # ---------------------------------------------------------------------------
-# 重力补偿开关（ADR 0013）：下面四条打的是**跨包契约**——前端这边的名字都是副本，
-# 权威在别的包（bench_manager 的服务注册与 unit 名、robot_dynamics 的话题默认值）。
-# 名字对不上时页面完全正常，只是命令发进没人订阅的话题 / 调不存在的服务，所以必须
-# 从权威那份源码里读出来对账，而不是在前端再抄一遍字面量。
+# 台架服务与 unit 名跨包对账；运动入口固定由 ros2_control 客户端消费。
 # ---------------------------------------------------------------------------
 
 SRC = PKG.parent                      # ros2_ws/src
-BENCH_NODE = SRC / 'bench_manager' / 'bench_manager' / 'node.py'
-SYSTEMD_UNITS = SRC / 'bench_manager' / 'bench_manager' / 'systemd_units.py'
-MANAGER_PY = (SRC / 'bench_manager' / 'bench_manager' /
-              'gravity_feedforward_manager.py')
-OVERLAY_NODE = (SRC / 'robot_dynamics' / 'src' / 'ros' /
-                'gravity_feedforward_overlay_node.cpp')
+BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
+SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
 AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
 FORMAT_JS = WEB / 'js' / 'core' / 'format.js'
 FEEDFORWARD_JS = WEB / 'js' / 'panels' / 'feedforward.js'
@@ -454,123 +447,39 @@ def test_frontend_unit_names_match_bench_manager():
         f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
 
 
-def test_overlay_topics_match_the_overlay_node_defaults():
-    """改道切到的 `/robot_dynamics/*` 是叠加节点的**输入**话题，权威在那份 C++。
-
-    节点里是相对名（默认命名空间下解析成 `/robot_dynamics/...`）；对它 remap 或改名，
-    改道就会把命令发进没人订阅的话题——页面一切正常，机构不动。
-
-    两条通道的副本在两处（ADR 0014 决定 3）：轨迹仍由页面自己切，副本在 format.js；
-    命令改由 bench_manager 切，副本在 gravity_feedforward_manager.py。分别对账。
-    """
-    _skip_without(OVERLAY_NODE)
-    cpp = OVERLAY_NODE.read_text(encoding='utf-8')
-
-    def node_default(parameter):
-        m = re.search(
-            rf'declare_parameter<std::string>\(\s*"{parameter}",\s*"([^"]+)"', cpp)
-        assert m, f'叠加节点里找不到参数 {parameter} 的默认值'
-        return '/' + m.group(1)
-
-    js = FORMAT_JS.read_text(encoding='utf-8')
-    m = re.search(r'export const OVERLAY_TRAJECTORY_TOPIC\s*=\s*\'([^\']+)\'', js)
-    assert m, 'format.js 里找不到 OVERLAY_TRAJECTORY_TOPIC'
-    assert m.group(1) == node_default('trajectory_input_topic'), (
-        f'OVERLAY_TRAJECTORY_TOPIC 与叠加节点不一致：前端 {m.group(1)}')
-
-    _skip_without(MANAGER_PY)
-    m = re.search(r'^OVERLAY_COMMAND_TOPIC\s*=\s*"([^"]+)"',
-                  MANAGER_PY.read_text(encoding='utf-8'), re.M)
-    assert m, 'gravity_feedforward_manager.py 里找不到 OVERLAY_COMMAND_TOPIC'
-    assert m.group(1) == node_default('command_input_topic'), (
-        f'OVERLAY_COMMAND_TOPIC 与叠加节点不一致：后端 {m.group(1)}')
-
-
-def test_command_route_topics_match_bench_manager():
-    """命令流两个落点的副本：agent.js（页面拿它核对回执）对 bench_manager（权威）。
-
-    页面切不了命令那条通道，只能读 /motor_command/status 的 output_topic 与这两个名字
-    比对。副本对不上，页面就会把「切成功了」显示成「接线没切过去」，或反过来——后者
-    更糟：亮着绿灯而命令其实发在另一条路上。
-    """
-    _skip_without(MANAGER_PY)
-    backend = dict(re.findall(
-        r'^(DIRECT_COMMAND_TOPIC|OVERLAY_COMMAND_TOPIC)\s*=\s*"([^"]+)"',
-        MANAGER_PY.read_text(encoding='utf-8'), re.M))
-    assert len(backend) == 2, (
-        f'gravity_feedforward_manager.py 里没解析到两个落点：{backend}')
-
-    js = AGENT_JS.read_text(encoding='utf-8')
-    for name, expected in backend.items():
-        m = re.search(rf'export const {name}\s*=\s*\'([^\']+)\'', js)
-        assert m, f'agent.js 里找不到 {name}'
-        assert m.group(1) == expected, (
-            f'{name} 与 bench_manager 不一致：前端 {m.group(1)}，后端 {expected}')
-
-
-def test_downlink_topics_are_host_facade():
-    """页面的下行只发主机侧 /motor/*：线上编码与文件名是 bridge 的私有实现。
-
-    这五条在 S3 之后不再由固件直接订阅；页面若漏改一条，症状是「按钮点了没反应」
-    而 ROS 侧毫无报错。
-    """
+def test_downlink_topics_use_ros2_control_client():
+    """运动低频入口固定；设备策略与参数继续走 bridge facade。"""
     js = FORMAT_JS.read_text(encoding='utf-8')
     expected = {
-        'trajectory': '/motor/trajectory',
+        'setpoint': '/control/setpoint',
+        'trajectory': '/control/trajectory',
+        'convertedTrajectory': '/control/trajectory',
+        'commandStatus': '/control/status',
+        'trajectoryState': '/control/trajectory_state',
+        'stop': '/control/stop',
+        'jointTrajectory': '/arm_controller/joint_trajectory',
         'policy': '/motor/policy_array',
         'paramSet': '/motor/param_set',
         'sysCmd': '/motor/system_command',
     }
     for key, topic in expected.items():
-        m = re.search(
-            rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
-        assert m, f'format.js 里找不到 TOPICS.{key}'
-        assert m.group(1) == topic, f'{key} 仍发线上话题：{m.group(1)}'
-
-    agent_js = AGENT_JS.read_text(encoding='utf-8')
-    m = re.search(r"DIRECT_COMMAND_TOPIC\s*=\s*'([^']+)'", agent_js)
-    assert m and m.group(1) == '/motor/command_array', '直连落点仍是线上话题'
+        m = re.search(rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
+        assert m and m.group(1) == topic, f'{key} 未迁移到 {topic}'
+    assert "stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'}" in js
 
 
-def test_downlink_switch_rewires_the_publisher():
-    """切接线是「改话题名 + 换发布者」一件事的两半，只做一半就是静默失效。
-
-    发布者在连接建立时就按旧名字 advertise 过了；只改 `TOPICS[key].name`，命令会继续
-    发到旧话题上——rosbridge 侧毫无异常，micro-ROS 侧没人收。所以这一条按源码形状断言
-    （纯运行时行为，浏览器里才看得见）。
-    """
-    src = (WEB / 'js' / 'core' / 'ros.js').read_text(encoding='utf-8')
-    start = src.find('export function setDownlinkRoute(')
-    assert start != -1, 'ros.js 里找不到 setDownlinkRoute'
-    body = src[start:src.find('\n}', start)]
-
-    for needed, why in [
-        ('TOPICS[key].name', '改了路由却没改话题名，publish 还发到旧话题'),
-        ('unadvertise', '没有撤掉旧名字上的发布者'),
-        ('ensurePublisher', '没有在新名字上立即 advertise：开头的命令会丢'),
-    ]:
-        assert needed in body, f'setDownlinkRoute 缺了「{needed}」：{why}'
+def test_frontend_has_no_legacy_motion_route_switch():
+    for path in js_files():
+        text = path.read_text(encoding='utf-8')
+        for obsolete in ('setDownlinkRoute', 'getDownlinkRoute', 'command_streamer',
+                         '/motor_command/', 'OVERLAY_COMMAND_TOPIC', 'DOWNLINK_ROUTE'):
+            assert obsolete not in text, f'{path}: 仍引用 {obsolete}'
 
 
-def test_the_switch_starts_the_node_before_rewiring():
-    """顺序即安全边界（ADR 0013 决定 7），反过来会出现「话题已切、节点没起」的空窗。
-
-    开：先起节点并确认 running，再切到叠加；关：先切回直连，再停节点。两处顺序都无法
-    在浏览器外自动验证，这里按源码形状钉住（与第 14 条同一取舍）。
-    """
+def test_gravity_controls_still_use_bench_services():
     src = FEEDFORWARD_JS.read_text(encoding='utf-8')
-
-    def body(signature):
-        start = src.index(signature)
-        return src[start:src.index('\n  }\n', start)]
-
-    on = body('async function turnOn()')
-    off = body('async function turnOff()')
-    # 起节点：`await bench.startGravityFeedforward` 必须早于 `setDownlinkRoute(…OVERLAY)`
-    assert on.index('startGravityFeedforward') < on.index('setDownlinkRoute'), (
-        'turnOn 先切了话题再起节点：切换那一瞬间命令全部落空')
-    assert 'OVERLAY' in on, 'turnOn 没有切到叠加侧'
-    # 停节点：`setDownlinkRoute(…DIRECT)` 必须早于 `stopGravityFeedforward`
-    assert off.index('setDownlinkRoute') < off.index('stopGravityFeedforward'), (
-        'turnOff 先停了节点再切回直连：停止那一瞬间命令全部落空')
-    assert 'DIRECT' in off, 'turnOff 没有切回直连侧'
+    assert 'bench.startGravityFeedforward' in src
+    assert 'bench.stopGravityFeedforward' in src
+    assert 'bench.setGravityFeedforwardGain' in src
+    assert 'store.commandStatus' in src
+    assert 'gravity_enabled' in src and 'effort_gain' in src and 'data.mode' in src

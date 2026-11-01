@@ -1,10 +1,8 @@
-"""MCU HIL 或外部控制器的机械臂被控对象与 CAN 电机模拟器。
+"""一条入口启动机械臂、CAN 电机模拟器和 ros2_control 驱动端。
 
-实机控制统一经过 micro-ROS MCU；旧 controller_mode:=host 在任何传输或
-进程初始化前拒绝。默认 firmware 模式要求显式指定 SocketCAN/SLCAN 传输。
-离线标准控制器测试使用 motor_hardware_interface/mock_control.launch.py。
-
-HIL 闭环：MCU -> CAN -> 电机模拟器 -> 被控对象 -> 测量反馈 -> MCU
+软件闭环（默认）：
+  position_controller -> motor_hardware_interface -> CAN transport
+  -> motor_sim -> 被控对象 -> /joint_states -> motor_sim
 
 「被控对象」由 backend:= 选：gazebo（gz sim + gz_ros2_control 的 effort 控制器）或
 mujoco（自写力矩直通桥 + MuJoCo 物理）。两者对外契约相同——吃
@@ -16,8 +14,9 @@ launch 文件、以及命令数组的顺序来源（Gazebo 重写 controllers.ya
 backend:=mujoco 要求模型目录自带 mujoco/<模型名>.xml，且不支持 gravity:=false
 （MJCF 的重力在生成期固定）。
 
-选择 transport:=vcan 会自动创建私有虚拟总线；socketcan 与 slcan 用于接入外部
-CAN 设备。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
+transport:=vcan 默认自动创建私有虚拟总线；socketcan 与 slcan 用于接入外部
+CAN 设备。slcan 的 host 模式需要两只 CANable 接在同一条物理总线上，避免两个
+进程争用同一个串口。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
 单个 SocketCAN 接口或单 CANable + STM32 固件的 HIL 路径。
 """
 
@@ -596,13 +595,8 @@ def _mit_torque_limit_cli(simulation: dict[str, Any]) -> str:
 
 
 def launch_simulation(context):
-    controller_mode = _required(context, "controller_mode")
-    if controller_mode == "host":
-        raise RuntimeError(
-            "controller_mode:=host has been retired: real motor control goes through "
-            "micro-ROS MCU. Use controller_mode:=firmware for MCU HIL, or "
-            "motor_hardware_interface mock_control.launch.py for offline controllers.")
     transport = _required(context, "transport")
+    controller_mode = _required(context, "controller_mode")
     backend = LaunchConfiguration("backend").perform(context).strip()
     simulator_only = _bool(
         LaunchConfiguration("simulator_only").perform(context))
@@ -646,8 +640,7 @@ def launch_simulation(context):
             "在生成期固定（models/<模型>/tools/build_mujoco_model.py）"
         )
 
-    share = Path(get_package_share_directory("robot_sim"))
-    model_share = Path(get_package_share_directory("robot_description"))
+    share = Path(get_package_share_directory("robot_description"))
     model = LaunchConfiguration("model").perform(context)
     # 电机拓扑来源：显式 motor_config_file 优先；留空时优先**模型目录自带**的
     # config/motor_driver.yaml（模型专属仿真拓扑），否则回落权威整机配置。
@@ -656,7 +649,7 @@ def launch_simulation(context):
     if requested_config:
         motor_driver_path = Path(requested_config).resolve()
     else:
-        model_local = model_share / "models" / model / "config" / "motor_driver.yaml"
+        model_local = share / "models" / model / "config" / "motor_driver.yaml"
         motor_driver_path = (
             model_local.resolve()
             if model_local.is_file()
@@ -670,7 +663,7 @@ def launch_simulation(context):
     if not motor_specs_path.is_file():
         raise RuntimeError(f"motor specs file does not exist: {motor_specs_path}")
     hardware_share = Path(get_package_share_directory("motor_hardware_interface"))
-    topology_file = model_share / "models" / model / "config" / "simulation_topology.yaml"
+    topology_file = share / "models" / model / "config" / "simulation_topology.yaml"
     if not topology_file.is_file():
         raise RuntimeError(
             f"full simulation topology does not exist for model '{model}': "
@@ -712,7 +705,7 @@ def launch_simulation(context):
     # （Gazebo 重写 controllers.yaml 的 joints、MuJoCo 传 joint_names），不靠巧合。
     mujoco_model = None
     if backend == "mujoco":
-        mujoco_model = model_share / "models" / model / "mujoco" / f"{model}.xml"
+        mujoco_model = share / "models" / model / "mujoco" / f"{model}.xml"
         if not mujoco_model.is_file():
             raise RuntimeError(
                 f"model '{model}' has no MuJoCo model; expected {mujoco_model} "
@@ -721,7 +714,7 @@ def launch_simulation(context):
         # mujoco.launch.py 的 robot_state_publisher 用 standalone URDF 渲染
         # robot_description；缺它 rsp 会「起来了但模型是空的」，所以一并 fail fast。
         standalone_urdf = (
-            model_share / "models" / model / "urdf" / f"{model}.standalone.urdf"
+            share / "models" / model / "urdf" / f"{model}.standalone.urdf"
         )
         if not standalone_urdf.is_file():
             raise RuntimeError(
@@ -731,7 +724,7 @@ def launch_simulation(context):
         model_joints = _mujoco_joint_names(mujoco_model)
         model_description = f"MuJoCo model {mujoco_model}"
     else:
-        model_joints = _model_joint_names(model_share, model)
+        model_joints = _model_joint_names(share, model)
         model_description = "Gazebo model"
     unknown_joints = set(joint_order) - model_joints
     if unknown_joints:
@@ -859,7 +852,7 @@ def launch_simulation(context):
                 )
     elif controller_mode == "host":
         driver_model = (
-            model_share / "models" / model / "urdf" / f"{model}.canfd.xacro"
+            share / "models" / model / "urdf" / f"{model}.canfd.xacro"
         )
         if not driver_model.is_file():
             raise RuntimeError(f"CAN driver xacro does not exist: {driver_model}")
@@ -896,7 +889,7 @@ def launch_simulation(context):
         # Gazebo 的控制器参数只有 Gazebo 路需要；MuJoCo 桥自己就是被控对象，
         # 不做这件事也就不会凭空多一条对 models/<模型>/config/controllers.yaml 的启动期依赖。
         gazebo_controller_config = (
-            _write_gazebo_controller_config(model_share, model, joint_order, runtime_dir)
+            _write_gazebo_controller_config(share, model, joint_order, runtime_dir)
             if backend == "gazebo"
             else None
         )
@@ -1088,25 +1081,19 @@ def launch_simulation(context):
                     ),
                 ]
             )
-        # 后端已有 joint_states/TF；此桥只发布健康状态，运动由 managed MCU 入口授权。
-        bridge_urdf = model_share / "models" / model / "urdf" / f"{model}.urdf"
-        if not bridge_urdf.is_file():
-            raise RuntimeError(f"firmware topic bridge URDF does not exist: {bridge_urdf}")
-        actions.append(
-            Node(
-                package="motor_hardware_interface",
-                executable="firmware_topic_bridge.py",
-                name="firmware_topic_bridge",
-                output="screen",
-                parameters=[{
-                    "driver_file": str(driver_config),
-                    "urdf_file": str(bridge_urdf),
-                    "model_name": model,
-                    "enable_trajectory": False,
-                    "publish_joint_states": False,
-                }],
-            )
-        )
+        # MCU 仍为设备后端，工作台轨迹与手动调试统一由主机控制器执行。
+        if not simulator_only:
+            control_urdf = share / "models" / model / "urdf" / f"{model}.urdf"
+            if not control_urdf.is_file():
+                raise RuntimeError(f"host control URDF does not exist: {control_urdf}")
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(str(
+                    hardware_share / "launch" / "host_trajectory.launch.py")),
+                launch_arguments={
+                    "motor_config_file": str(driver_config), "urdf_file": str(control_urdf),
+                    "model": model, "start_controllers": "false",
+                    "publish_joint_states": "false", "publish_robot_state": "false",
+                }.items()))
         if start_web_host:
             actions.append(
                 IncludeLaunchDescription(
@@ -1246,15 +1233,15 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "transport",
-                default_value="",
+                default_value="vcan",
                 description="CAN backend: vcan | socketcan | slcan",
             ),
             DeclareLaunchArgument(
                 "controller_mode",
-                default_value="firmware",
+                default_value="host",
                 description=(
-                    "firmware (STM32 HIL over SocketCAN or SLCAN), "
-                    "external (simulated motor backend only); host is retired"
+                    "host (ROS driver), external (external CAN controller), "
+                    "firmware (STM32 HIL over SocketCAN or SLCAN)"
                 ),
             ),
             DeclareLaunchArgument(

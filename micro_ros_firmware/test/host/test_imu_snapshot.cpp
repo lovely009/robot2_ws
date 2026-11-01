@@ -63,7 +63,34 @@ static void test_consumer_gets_complete_published_buffer() {
   assert_sample_equals(copied, sample_b);
 }
 
+static void test_sample_metadata_is_immutable_and_temperature_independent() {
+  imu_snapshot_t snapshot{};
+  imu_snapshot_init(&snapshot);
+  *imu_snapshot_begin_write(&snapshot) = make_sample(1);
+  imu_snapshot_publish_timed(&snapshot, 10, 10000000, true, true);
+  imu_data_t copied{};
+  sensor_sample_metadata_t meta{};
+  assert(imu_snapshot_copy_sample(&snapshot, &copied, &meta));
+  assert(meta.sequence == 1 && meta.tick_ms == 10 && meta.epoch_ns == 10000000);
+  assert(meta.clock_valid);
+  float temperature = 0;
+  sensor_sample_metadata_t temperature_meta{};
+  assert(imu_snapshot_copy_temperature(&snapshot, &temperature, &temperature_meta));
+  assert(temperature == 32 && temperature_meta.sequence == 1);
+  // 没有温度新读取时，姿态更新不能刷新温度时间。
+  *imu_snapshot_begin_write(&snapshot) = make_sample(2);
+  imu_snapshot_publish_timed(&snapshot, 20, 200000000, true, false);
+  assert(imu_snapshot_copy_temperature(&snapshot, &temperature, &temperature_meta));
+  assert(temperature == 32 && temperature_meta.epoch_ns == 10000000);
+  assert(temperature_meta.sequence == 1);
+  assert(imu_snapshot_copy_sample(&snapshot, &copied, &meta));
+  assert(meta.sequence == 2 && meta.epoch_ns == 200000000);
+  assert(imu_snapshot_copy_sample(&snapshot, &copied, &meta));
+  assert(meta.sequence == 2 && meta.epoch_ns == 200000000);
+}
+
 int main() {
+  test_sample_metadata_is_immutable_and_temperature_independent();
   test_consumer_gets_complete_published_buffer();
   return 0;
 }

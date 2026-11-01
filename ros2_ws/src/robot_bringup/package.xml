@@ -1,34 +1,43 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robot_bringup</name>
   <version>0.1.0</version>
-  <description>MCU 整机入口：标定核验、独占租约、标准运动 Action 与托管网页。</description>
+  <description>Managed MCU supervision and host ros2_control; embedded bench orchestration.</description>
   <maintainer email="ly@todo.todo">ly</maintainer>
   <license>Apache-2.0</license>
-
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>bench_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>web_host</exec_depend>
-  <exec_depend>bench_manager</exec_depend>
   <exec_depend>micro_ros_bridge</exec_depend>
   <exec_depend>motor_hardware_interface</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_transmission</exec_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>control_msgs</test_depend>
+  <test_depend>action_msgs</test_depend>
+  <test_depend>trajectory_msgs</test_depend>
+  <test_depend>controller_manager_msgs</test_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+  <exec_depend>bench_manager</exec_depend>
   <exec_depend>robot_description</exec_depend>
   <exec_depend>robot_calibration</exec_depend>
   <exec_depend>robot_supervisor</exec_depend>
   <exec_depend>micro_ros_agent</exec_depend>
-  <!-- robot_motion 的 Action 适配器由 robot_supervisor 加载并声明依赖。 -->
-
-  <test_depend>python3-pytest</test_depend>
   <test_depend>launch_testing</test_depend>
   <test_depend>launch_testing_ros</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>robot_system_msgs</test_depend>
-
-  <export>
-    <build_type>ament_python</build_type>
-  </export>
 </package>

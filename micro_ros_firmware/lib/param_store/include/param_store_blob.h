@@ -66,7 +66,7 @@ typedef struct {
   uint32_t seq;
   uint32_t record_count;
   uint32_t crc32;
-  uint32_t reserved[3]; // 头补齐 32B，保证记录 4B 对齐
+  uint32_t reserved[3]; // SYS2 系统配置扩展（magic + 8B），兼容 SYS1；旧零值头按默认配置加载
   param_store_record_t records[PARAM_STORE_RECORD_COUNT];
 } param_store_blob_t;
 

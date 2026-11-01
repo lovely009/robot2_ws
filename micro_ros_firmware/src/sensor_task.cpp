@@ -8,6 +8,7 @@
 #include "imu.h"
 #include "heater.h"
 #include "imu_snapshot.h"
+#include "time_utils.h"
 
 // 栈 512 字（2KB），优先级低于 motor_rt，避免抢占 1ms 控制节拍。
 static const uint32_t kSensorTaskStack = 512;
@@ -47,6 +48,9 @@ static void sensor_task_fn(void *arg) {
 
   while (1) {
     if (xSemaphoreTake(g_imu_sem, portMAX_DELAY) == pdTRUE && imu_ready()) {
+      const uint32_t sample_tick = millis();
+      uint64_t sample_epoch = 0;
+      const bool clock_valid = time_sample_epoch(sample_tick, &sample_epoch);
       if (!imu_update()) {
         heater_set_duty(0U);
         continue;
@@ -55,7 +59,9 @@ static void sensor_task_fn(void *arg) {
       imu_data_t *next = imu_snapshot_begin_write(&g_imu_snapshot);
       imu_get_data(next);
       taskENTER_CRITICAL();
-      imu_snapshot_publish(&g_imu_snapshot);
+      // BMI088_read 每次成功更新都会实际读取温度寄存器，独立记录读取序号。
+      imu_snapshot_publish_timed(&g_imu_snapshot, sample_tick, sample_epoch,
+          clock_valid, true);
       taskEXIT_CRITICAL();
       const float ccr = heater_pid_update(&g_heater_pid, next->temp);
       heater_set_duty(static_cast<uint16_t>(ccr));
@@ -79,6 +85,19 @@ bool sensor_task_start(void) {
   // lib/imu 自持，当前不占用 DMA。
   return xTaskCreate(sensor_task_fn, "sensor", kSensorTaskStack, nullptr,
       kSensorTaskPrio, nullptr) == pdPASS;
+}
+
+bool sensor_task_get_imu_sample(imu_data_t *out, sensor_sample_metadata_t *metadata) {
+  taskENTER_CRITICAL();
+  const bool copied = imu_snapshot_copy_sample(&g_imu_snapshot, out, metadata);
+  taskEXIT_CRITICAL();
+  return copied;
+}
+bool sensor_task_get_temperature(float *out, sensor_sample_metadata_t *metadata) {
+  taskENTER_CRITICAL();
+  const bool copied = imu_snapshot_copy_temperature(&g_imu_snapshot, out, metadata);
+  taskEXIT_CRITICAL();
+  return copied;
 }
 
 bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence) {

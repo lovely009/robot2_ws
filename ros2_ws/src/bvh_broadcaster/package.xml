@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>bvh_broadcaster</name>
+  <version>0.2.0</version>
+  <description>ROS 2 BVH skeleton TF playback with explicit units and coordinate conversion.</description>
+  <maintainer email="ly@todo.todo">ly</maintainer>
+  <license>BSD-3-Clause</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <!-- robot_sim 仅提供工程内默认模型；导入外部 URDF 不需要该包。 -->
+  <exec_depend>pinocchio</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>tf2_msgs</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

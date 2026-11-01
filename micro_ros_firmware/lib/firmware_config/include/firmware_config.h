@@ -1,7 +1,7 @@
 #ifndef FIRMWARE_CONFIG_H
 #define FIRMWARE_CONFIG_H
 
-// 注册容量与周期的唯一配置源；线协议和 Flash 的 64 槽上界不随之改变。
+// 注册容量与周期默认值；运行期周期由 firmware_settings 管理，线协议和 Flash 上界不变。
 #define FIRMWARE_MAX_MOTORS 48U
 #define FIRMWARE_MOTOR_REPORT_HZ 50U
 #define FIRMWARE_MOTOR_COMMAND_HZ 200U

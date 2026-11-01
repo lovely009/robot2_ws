@@ -1,0 +1,13 @@
+uint8 PENDING=0
+uint8 SUCCEEDED=1
+uint8 FAILED=2
+uint8 PARTIAL=3
+uint8 BUSY=4
+uint8 CONFLICT=5
+uint8 RETIRED=6
+uint32 request_id
+uint8 operation
+uint8 state
+uint16 error
+uint64 completed_motor_mask
+uint64 failed_motor_mask

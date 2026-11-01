@@ -3,8 +3,14 @@ project(robot_dynamics)
 
 find_package(ament_cmake REQUIRED)
 find_package(can_bridge_msgs REQUIRED)
+find_package(controller_interface REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(pluginlib REQUIRED)
 find_package(pinocchio REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(rcl_interfaces REQUIRED)
+find_package(realtime_tools REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 # 计算库：只依赖 Pinocchio，不依赖 ROS。轨迹前馈的逐路点算法也在这里（纯函数，
@@ -18,6 +24,15 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(${PROJECT_NAME} PUBLIC pinocchio::pinocchio)
+set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_library(${PROJECT_NAME}_controller SHARED src/gravity_compensation_controller.cpp)
+target_compile_features(${PROJECT_NAME}_controller PUBLIC cxx_std_17)
+target_compile_options(${PROJECT_NAME}_controller PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(${PROJECT_NAME}_controller ${PROJECT_NAME})
+ament_target_dependencies(${PROJECT_NAME}_controller
+  controller_interface hardware_interface pluginlib rclcpp rclcpp_lifecycle rcl_interfaces realtime_tools)
+pluginlib_export_plugin_description_file(controller_interface controller_plugins.xml)
 
 # ROS 层节点库：GravityTorqueNode 与 GravityFeedforwardOverlayNode 供独立可执行与
 # 测试链接；可执行目标名与本库刻意区分，避免 CMake 目标重名。
@@ -47,7 +62,7 @@ target_link_libraries(gravity_feedforward_overlay ${PROJECT_NAME}_ros)
 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
-install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_ros
+install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_ros ${PROJECT_NAME}_controller
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -57,10 +72,17 @@ install(TARGETS gravity_torque_node gravity_feedforward_overlay
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(can_bridge_msgs pinocchio rclcpp sensor_msgs)
+ament_export_dependencies(can_bridge_msgs controller_interface hardware_interface pinocchio pluginlib
+  rclcpp rclcpp_lifecycle rcl_interfaces realtime_tools sensor_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_gravity_compensation_controller test/test_gravity_compensation_controller.cpp)
+  target_compile_features(test_gravity_compensation_controller PRIVATE cxx_std_17)
+  target_compile_definitions(test_gravity_compensation_controller PRIVATE
+    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(test_gravity_compensation_controller ${PROJECT_NAME}_controller)
 
   ament_add_gtest(test_pinocchio_dependency test/test_pinocchio_dependency.cpp)
   target_compile_features(test_pinocchio_dependency PRIVATE cxx_std_17)

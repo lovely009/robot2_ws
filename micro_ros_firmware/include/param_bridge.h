@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
-#include <can_bridge_msgs/msg/config_result.h>
-#include <can_bridge_msgs/msg/system_status.h>
+#include <can_bridge_msgs/msg/agent_status.h>
+#include <can_bridge_msgs/msg/agent_info.h>
 #include "motor_control.h"
 
 #ifdef __cplusplus
@@ -16,24 +16,19 @@ extern "C" {
 #endif
 
 #define PARAM_BRIDGE_EXECUTOR_HANDLES 1U
-
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor);
 void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor);
-// 同一任务内先消费内核事件，再刷新视图并驱动事务。
 void param_bridge_poll(void);
+bool param_bridge_save_in_progress(void);
 void param_bridge_on_config_result(const motor_control_event_t *event);
-const can_bridge_msgs__msg__SystemStatus *param_bridge_system_status(void);
-// 发布成功才 ack；失败后下一轮可再次 peek。
-bool param_bridge_result_peek(can_bridge_msgs__msg__ConfigResult *out);
-void param_bridge_result_ack(void);
+// 调用方为 results 提供 8 个静态元素；发布不回收结果。
+void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out);
+// 单页待发数据，发送失败仍保留；无待发页返回 NULL。
+const can_bridge_msgs__msg__AgentInfo *param_bridge_info(void);
+void param_bridge_info_sent(bool success);
 uint32_t param_bridge_request_high_water(void);
-// 兼容旧诊断入口；本桥不再发布，恒为 0。
-uint32_t param_bridge_publish_fail_count(void);
 const motor_control_param_view_t *param_bridge_views(size_t *out_count);
-// REPORT 被 facade 取走即完成；此入口保持合并报告请求的语义。
-bool param_bridge_take_report_request(void);
 const motor_control_stored_params_t *param_bridge_stored_records(size_t *out_count);
-
 #ifdef __cplusplus
 }
 #endif

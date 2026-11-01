@@ -4,516 +4,530 @@
 #include <thread>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/serialization.hpp>
+#include <sensor_msgs/msg/temperature.hpp>
+#include <std_msgs/msg/float32.hpp>
 #include "micro_ros_bridge/bridge_node.hpp"
-#include "micro_ros_bridge/codec.hpp"
-
+#include <can_bridge_msgs/msg/agent_wire_contract.hpp>
 using namespace std::chrono_literals;
 using namespace can_bridge_msgs::msg;
-using micro_ros_bridge::BridgeNode;
-namespace topic = micro_ros_bridge::contract::topic;
-
 namespace {
-struct Session {
-  Session() {
-    rclcpp::InitOptions options;
-    options.set_domain_id(174);
-    rclcpp::init(0, nullptr, options);
+uint64_t stamp() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count());
+}
+class BridgeTest : public ::testing::Test {
+public:
+  static void SetUpTestSuite() {
+    rclcpp::InitOptions options; options.set_domain_id(176); rclcpp::init(0, nullptr, options);
   }
-  ~Session() {rclcpp::shutdown();}
+  static void TearDownTestSuite() {rclcpp::shutdown();}
+protected:
+  rclcpp::executors::SingleThreadedExecutor exec;
+  std::shared_ptr<micro_ros_bridge::BridgeNode> bridge;
+  rclcpp::Node::SharedPtr peer;
+  std::vector<rclcpp::SubscriptionBase::SharedPtr> subscriptions;
+  rclcpp::Publisher<AgentStatus>::SharedPtr status_pub;
+  rclcpp::Publisher<AgentInfo>::SharedPtr info_pub;
+  rclcpp::Publisher<AgentMotion>::SharedPtr motion_pub;
+  rclcpp::Publisher<MotorCommandArray>::SharedPtr command_pub;
+  rclcpp::Publisher<MotorPolicyArray>::SharedPtr policy_pub;
+  rclcpp::Publisher<MotorTrajectory>::SharedPtr trajectory_pub;
+  rclcpp::Publisher<SystemCommand>::SharedPtr system_command_pub;
+  rclcpp::TimerBase::SharedPtr status_timer;
+  AgentStatus status;
+  std::vector<AgentConfigRequest> configs;
+  std::vector<AgentTrajectoryRequest> trajectories;
+  std::vector<AgentCommand> commands;
+  std::vector<MotorMotionStateArray> motions;
+  std::vector<MotorControlStateArray> controls;
+  std::vector<MotorTrajectoryState> trajectory_states;
+  std::vector<ConfigResult> results;
+  std::vector<MotorTopology> topologies;
+  std::vector<DeviceParamReport> params;
+  bool auto_info = true;
+  bool spin(const std::function<bool()> & done, std::chrono::milliseconds limit = 1500ms) {
+    const auto end = std::chrono::steady_clock::now() + limit;
+    while (std::chrono::steady_clock::now() < end) {
+      exec.spin_some(); if (done()) {return true;} std::this_thread::sleep_for(2ms);
+    }
+    return done();
+  }
+  void run(std::chrono::milliseconds time = 35ms) {spin([] {return false;}, time);}
+  template<class T> void listen(const std::string & name, std::vector<T> & received,
+    rclcpp::QoS qos = rclcpp::QoS(10).reliable()) {
+    subscriptions.push_back(peer->create_subscription<T>(name, qos,
+      [&received](typename T::SharedPtr m) {received.push_back(*m);}));
+  }
+  AgentInfo page(const AgentConfigRequest & q) {
+    AgentInfo out; out.session_id = status.session_id; out.snapshot_stamp = stamp();
+    out.clock_valid = true; out.query_id = q.query_id; out.revision = status.info_revision;
+    out.cursor = q.cursor;
+    const auto end = std::min<size_t>(status.motors.size(), q.cursor + 16);
+    for (size_t i = q.cursor; i < end; ++i) {
+      AgentDeviceInfo device; device.motor_id = status.motors[i].motor_id;
+      device.parameters.motor_id = device.motor_id; device.protocol = 1;
+      device.model_name = "cerb"; device.online = true; out.devices.push_back(device);
+    }
+    out.next_cursor = static_cast<uint16_t>(end); out.complete = end == status.motors.size();
+    return out;
+  }
+  void publish_status() {
+    status.snapshot_stamp = status.clock_valid ? stamp() : 0;
+    status.snapshot_tick_ms += 40; ++status.sequence; status_pub->publish(status);
+  }
+  void start(size_t count = 1) {
+    status.session_id = 100; status.clock_valid = true; status.info_revision = 1;
+    status.command_sequence = 41;
+    for (size_t i = 0; i < count; ++i) {
+      AgentMotorStatus motor; motor.motor_id = static_cast<uint8_t>(65 - count + i);
+      motor.lifecycle = MotorControlState::LIFECYCLE_INACTIVE;
+      motor.execution_state = MotorControlState::EXECUTION_IDLE;
+      motor.online = true; motor.status_flags = 1;
+      status.motors.push_back(motor);
+    }
+    publish_status();
+    status_timer = peer->create_wall_timer(40ms, [this] {publish_status();});
+    ASSERT_TRUE(spin([&] {return !topologies.empty();}));
+  }
+  MotorCommandArray command() {
+    MotorCommandArray m; m.sync_time_ns = stamp(); m.count = 1;
+    MotorCommandTarget t; t.motor_id = 64; t.position = 0.5f; m.targets.push_back(t); return m;
+  }
+  virtual bool host_execution() const {return false;}
+  void SetUp() override {
+    rclcpp::NodeOptions options;
+    options.parameter_overrides({rclcpp::Parameter(
+      "trajectory_execution", host_execution() ? "host" : "firmware")});
+    bridge = std::make_shared<micro_ros_bridge::BridgeNode>(options);
+    peer = std::make_shared<rclcpp::Node>("fake_agent");
+    exec.add_node(bridge); exec.add_node(peer);
+    status_pub = peer->create_publisher<AgentStatus>(AgentWireContract::TOPIC_STATUS, 10);
+    info_pub = peer->create_publisher<AgentInfo>(AgentWireContract::TOPIC_INFO, 10);
+    motion_pub = peer->create_publisher<AgentMotion>(AgentWireContract::TOPIC_MOTION,
+      rclcpp::QoS(2).best_effort());
+    command_pub = peer->create_publisher<MotorCommandArray>(
+      host_execution() ? "/motor/host_command_array" : "/motor/command_array", 1);
+    policy_pub = peer->create_publisher<MotorPolicyArray>("/motor/policy_array", 10);
+    trajectory_pub = peer->create_publisher<MotorTrajectory>("/motor/trajectory", 10);
+    system_command_pub = peer->create_publisher<SystemCommand>("/motor/system_command", 10);
+    listen(AgentWireContract::TOPIC_COMMAND, commands, rclcpp::QoS(10).best_effort());
+    listen(AgentWireContract::TOPIC_TRAJECTORY, trajectories);
+    listen("/motor/motion_states", motions, rclcpp::QoS(10).best_effort());
+    listen("/motor/config_result", results); listen("/motor/control_states", controls);
+    listen("/motor/topology", topologies); listen("/motor/device_param_report", params);
+    listen("/motor/trajectory_state", trajectory_states);
+    subscriptions.push_back(peer->create_subscription<AgentConfigRequest>(
+      AgentWireContract::TOPIC_CONFIG, 10, [this](AgentConfigRequest::SharedPtr m) {
+        configs.push_back(*m);
+        if (auto_info && m->operation == AgentConfigRequest::QUERY_INFO) {info_pub->publish(page(*m));}
+      }));
+    ASSERT_TRUE(spin([&] {return command_pub->get_subscription_count() &&
+      status_pub->get_subscription_count() && info_pub->get_subscription_count() &&
+      trajectory_pub->get_subscription_count();}));
+    run(50ms);
+  }
+  void TearDown() override {
+    status_timer.reset(); exec.remove_node(bridge); exec.remove_node(peer);
+    subscriptions.clear(); bridge.reset(); peer.reset();
+  }
 };
-bool spin_until(rclcpp::executors::SingleThreadedExecutor & exec,
-  const std::function<bool()> & done, std::chrono::milliseconds limit = 2s)
+class HostBridgeTest : public BridgeTest {
+  bool host_execution() const override {return true;}
+};
+}
+TEST_F(BridgeTest, RegistersOnlyEightV3WireTopics)
 {
-  const auto end = std::chrono::steady_clock::now() + limit;
-  while (std::chrono::steady_clock::now() < end) {
-    exec.spin_some();
-    if (done()) {return true;}
-    std::this_thread::sleep_for(2ms);
+  const auto names = bridge->get_topic_names_and_types(); size_t wire = 0;
+  for (const auto & p : names) {
+    if (p.first.rfind("/micro_ros_", 0) == 0) {++wire; EXPECT_EQ(p.second.size(), 1u);}
   }
-  return done();
+  EXPECT_EQ(wire, 8u);
+  EXPECT_EQ(names.count("/micro_ros_do/low_cmd"), 0u);
+  EXPECT_EQ(names.at(AgentWireContract::TOPIC_CONFIG)[0], "can_bridge_msgs/msg/AgentConfigRequest");
 }
-void spin_for(rclcpp::executors::SingleThreadedExecutor & exec, std::chrono::milliseconds ms)
-{spin_until(exec, [] {return false;}, ms);}
-MotorStatus status(uint64_t session, uint32_t seq = 1)
+TEST_F(BridgeTest, ExplicitLegacyExecutionCannotChangeWhileRunning)
 {
-  MotorStatus m;
-  m.sync_time_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-    std::chrono::system_clock::now().time_since_epoch()).count());
-  m.schema_version = WireContract::SCHEMA_VERSION;
-  m.session_id = session;
-  m.sequence = seq;
-  return m;
+  ASSERT_TRUE(bridge->has_parameter("trajectory_execution"));
+  EXPECT_EQ(bridge->get_parameter("trajectory_execution").as_string(), "firmware");
+  EXPECT_FALSE(bridge->set_parameter(rclcpp::Parameter("trajectory_execution", "host")).successful);
 }
-MotorTopology topology(uint64_t session)
+TEST_F(HostBridgeTest, NewBridgeDefaultsToHostControllerExecution)
 {
-  MotorTopology m;
-  m.sync_time_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-    std::chrono::system_clock::now().time_since_epoch()).count());
-  m.schema_version = WireContract::SCHEMA_VERSION;
-  m.session_id = session;
-  return m;
+  auto defaults = std::make_shared<micro_ros_bridge::BridgeNode>();
+  EXPECT_EQ(defaults->get_parameter("trajectory_execution").as_string(), "host");
 }
-uint64_t lease_id(uint64_t session, uint64_t generation = 1)
+TEST_F(HostBridgeTest, OnlyHostControllerOutputCanReachMcu)
 {
-  return session * 1000000ULL + generation;
+  start(); run(100ms);
+  auto legacy = peer->create_publisher<MotorCommandArray>("/motor/command_array", 1);
+  run(50ms); legacy->publish(command()); run();
+  EXPECT_TRUE(commands.empty());
+  command_pub->publish(command());
+  ASSERT_TRUE(spin([&] {return commands.size() == 1;}));
+  EXPECT_EQ(commands.back().motor_ids[0], 64);
+  run(80ms); EXPECT_EQ(commands.size(), 1u);
 }
-MotorControlStateArray control_state(uint64_t session, uint32_t seq = 1,
-  uint64_t grant = 0, uint32_t tick = 0, uint32_t deadline = 0)
+TEST_F(HostBridgeTest, RejectsFirmwareTrajectoryWhileCancelKeepsIndependentStop)
 {
-  MotorControlStateArray m;
-  m.schema_version = MotorControlStateArray::SCHEMA_VERSION;
-  m.sync_time_ns = status(session).sync_time_ns;
-  m.session_id = session;
-  m.sequence = seq;
-  m.tick_ms = tick;
-  m.lease_id = grant;
-  m.lease_sequence = grant ? 1 : 0;
-  m.lease_active = grant != 0;
-  m.lease_valid_until_tick_ms = deadline;
-  return m;
+  start(); run(100ms); configs.clear();
+  std::vector<MotorEvent> events; listen("/motor/events", events); run(50ms);
+  MotorTrajectory trajectory; trajectory.trajectory_id = 7; trajectory.count = 1;
+  trajectory_pub->publish(trajectory);
+  ASSERT_TRUE(spin([&] {return !events.empty();}));
+  EXPECT_EQ(events.back().event_type, MotorEvent::EVENT_TRAJECTORY_REJECTED);
+  EXPECT_EQ(events.back().request_id, 7u); EXPECT_TRUE(trajectories.empty());
+  status.clock_valid = false;
+  trajectory_pub->publish(MotorTrajectory{});
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::STOP_ALL;});}));
 }
-MotorCommandArray command(uint64_t session = 100, uint64_t grant = 0)
+TEST_F(HostBridgeTest, TakeoverRequiresOldTrajectoryAndAuthorizationToBeCleared)
 {
-  MotorCommandArray m;
-  m.sync_time_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-    std::chrono::system_clock::now().time_since_epoch()).count());
-  m.count = 1;
-  m.session_id = session;
-  m.lease_id = grant ? grant : lease_id(session);
-  MotorCommandTarget t;
-  t.motor_id = 0;
-  t.position = 0.5;
-  m.targets.push_back(t);
-  return m;
+  status.trajectory.state = AgentTrajectoryState::RUNNING;
+  status.trajectory.trajectory_id = 1;
+  start(); status.motors[0].policy_enabled = true;
+  run(100ms); command_pub->publish(command()); run();
+  EXPECT_TRUE(commands.empty());
+  EXPECT_TRUE(std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::STOP_ALL;}));
+  status.trajectory.state = AgentTrajectoryState::ABORTED;
+  status.motors[0].policy_enabled = false;
+  run(100ms); command_pub->publish(command());
+  ASSERT_TRUE(spin([&] {return !commands.empty();}));
 }
-}
-
-TEST(BridgeNode, DeclaresContractTopics)
+TEST_F(BridgeTest, MultipleWireCommandWritersStopInsteadOfCompeting)
 {
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  const auto names = node->get_topic_names_and_types();
-  for (const auto * name : {&topic::kLowCmd, &topic::kLowState, &topic::kMotorStatus,
-      &topic::kTopology, &topic::kControlStates, &topic::kEvents, &topic::kDeviceParam,
-      &topic::kConfigResult, &topic::kControlLease}) {EXPECT_EQ(names.count(*name), 1u) << *name;}
-  for (const char * name : {"/motor/command_array", "/motor/motion_states", "/motor/status_array",
-      "/motor/topology", "/motor/control_states", "/motor/config_result", "/motor/control_lease"})
-    {EXPECT_EQ(names.count(name), 1u) << name;}
+  start(); configs.clear();
+  auto duplicate = peer->create_publisher<AgentCommand>(AgentWireContract::TOPIC_COMMAND,
+    rclcpp::QoS(1).best_effort());
+  ASSERT_TRUE(spin([&] {return bridge->count_publishers(AgentWireContract::TOPIC_COMMAND) == 2;}));
+  command_pub->publish(command());
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::STOP_ALL;});}));
+  EXPECT_TRUE(commands.empty());
 }
-
-TEST(BridgeNode, StreamMessagesStayWithinCdrBudget)
+TEST_F(BridgeTest, MotionGateNeedsStatusInfoSingleWriterAndFreshSource)
 {
-  LowCommand command;
-  command.count = 64;
-  command.motor_ids.resize(64);
-  command.position_q.resize(64);
-  command.velocity_q.resize(64);
-  command.effort_q.resize(64);
-  rclcpp::Serialization<LowCommand> command_serializer;
-  rclcpp::SerializedMessage command_bytes;
-  command_serializer.serialize_message(&command, &command_bytes);
-  EXPECT_EQ(command_bytes.size(), 488u);
-  EXPECT_LE(command_bytes.size(), 490u);
-
-  LowState state;
-  state.count = 32;
-  state.total_count = 32;
-  state.chunk_count = 1;
-  state.motor_ids.resize(32);
-  state.position_q.resize(32);
-  state.velocity_q.resize(32);
-  state.effort_q.resize(32);
-  state.state_age_ms.resize(32);
-  state.target_source.resize(32);
-  rclcpp::Serialization<LowState> state_serializer;
-  rclcpp::SerializedMessage state_bytes;
-  state_serializer.serialize_message(&state, &state_bytes);
-  EXPECT_LE(state_bytes.size(), 490u);
+  command_pub->publish(command()); run(); EXPECT_TRUE(commands.empty());
+  start();
+  auto old = command(); old.sync_time_ns -= 1000000000ULL;
+  command_pub->publish(old); run(); EXPECT_TRUE(commands.empty());
+  command_pub->publish(command()); ASSERT_TRUE(spin([&] {return commands.size() == 1;}));
+  EXPECT_EQ(commands.back().sequence, 42u); EXPECT_EQ(commands.back().session_id, 100u);
+  EXPECT_EQ(commands.back().motor_ids[0], 64); EXPECT_EQ(commands.back().position_q[0], 1311);
+  EXPECT_EQ(commands.back().mode, AgentCommand::SNAPSHOT);
+  auto second = peer->create_publisher<MotorCommandArray>("/motor/command_array", 1);
+  run(60ms); command_pub->publish(command()); run(); EXPECT_EQ(commands.size(), 1u);
+  second.reset(); run();
+  status_timer.reset(); run(320ms);
+  command_pub->publish(command()); run(); EXPECT_EQ(commands.size(), 1u);
 }
-
-TEST(BridgeNode, MotionRequiresCurrentStatusAndTopologyAndExpires)
+TEST_F(BridgeTest, EmptySnapshotRenewsLeaseWhileExplicitCancelStopsWithoutSession)
 {
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto cmd_pub = node->create_publisher<MotorCommandArray>("/motor/command_array", rclcpp::QoS(1).reliable());
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto control_pub = node->create_publisher<MotorControlStateArray>(
-    topic::kControlStates, rclcpp::QoS(10).reliable());
-  int received = 0;
-  LowCommand got;
-  auto sub = node->create_subscription<LowCommand>(topic::kLowCmd, rclcpp::QoS(1).best_effort(),
-    [&](LowCommand::SharedPtr m) {got = *m; ++received;});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return cmd_pub->get_subscription_count() > 0 &&
-    status_pub->get_subscription_count() > 0 && topo_pub->get_subscription_count() > 0 &&
-    control_pub->get_subscription_count() > 0 &&
-    sub->get_publisher_count() > 0;}));
-  cmd_pub->publish(command());
-  spin_for(exec, 80ms);
-  EXPECT_EQ(received, 0);
-  auto first_status = status(100);
-  first_status.command_sequence = 41;
-  status_pub->publish(first_status);
-  spin_for(exec, 50ms);
-  cmd_pub->publish(command());
-  spin_for(exec, 80ms);
-  EXPECT_EQ(received, 0);
-  topo_pub->publish(topology(100));
-  spin_for(exec, 30ms);
-  auto old_intent = command();
-  old_intent.sync_time_ns -= 1000000000ULL;
-  cmd_pub->publish(old_intent);
-  spin_for(exec, 30ms);
-  EXPECT_EQ(received, 0);
-  auto refreshed = status(100, 2);
-  refreshed.command_sequence = 41;
-  status_pub->publish(refreshed);
-  topo_pub->publish(topology(100));
-  control_pub->publish(control_state(100, 1, lease_id(100), 0, 250));
-  spin_for(exec, 15ms);
-  cmd_pub->publish(command());
-  ASSERT_TRUE(spin_until(exec, [&] {return received == 1;}));
-  EXPECT_EQ(got.lease_id, lease_id(100));
-  EXPECT_EQ(got.sequence, 42u);
-  EXPECT_NE(got.valid_until_tick_ms, 0u);
-  EXPECT_EQ(got.position_q[0], 1311);
-  auto lagging = status(100, 3);
-  lagging.command_sequence = 1;
-  status_pub->publish(lagging);
-  spin_for(exec, 20ms);
-  cmd_pub->publish(command());
-  ASSERT_TRUE(spin_until(exec, [&] {return received == 2;}));
-  EXPECT_EQ(got.sequence, 43u);
-  std::this_thread::sleep_for(310ms);
-  cmd_pub->publish(command());
-  spin_for(exec, 80ms);
-  EXPECT_EQ(received, 2);
+  MotorTrajectory cancel; trajectory_pub->publish(cancel);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::STOP_ALL;});}));
+  start(); MotorCommandArray heartbeat; heartbeat.sync_time_ns = stamp();
+  command_pub->publish(heartbeat); ASSERT_TRUE(spin([&] {return !commands.empty();}));
+  EXPECT_EQ(commands.back().mode, AgentCommand::SNAPSHOT); EXPECT_EQ(commands.back().count, 0);
+  EXPECT_NE(commands.back().valid_until_tick_ms, 0u);
 }
-
-TEST(BridgeNode, ConfigIdsSeedFromFirmwareAndRejectConflictingReplay)
+TEST_F(BridgeTest, DisableBypassesClockButEnableDoesNot)
 {
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto config_pub = node->create_publisher<SystemCommand>("/motor/system_command",
-    rclcpp::QoS(10).reliable());
-  std::vector<ConfigRequest> received;
-  auto sub = node->create_subscription<ConfigRequest>(topic::kConfig, rclcpp::QoS(10).reliable(),
-    [&](ConfigRequest::SharedPtr m) {received.push_back(*m);});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return status_pub->get_subscription_count() > 0 &&
-    topo_pub->get_subscription_count() > 0 && config_pub->get_subscription_count() > 0 &&
-    sub->get_publisher_count() > 0;}));
-  auto st = status(300);
-  st.config_request_id = 70;
-  status_pub->publish(st);
-  topo_pub->publish(topology(300));
-  spin_for(exec, 40ms);
-  SystemCommand request;
-  request.command = SystemCommand::COMMAND_REPORT;
-  request.motor_id = SystemCommand::MOTOR_ID_NONE;
-  config_pub->publish(request);
-  ASSERT_TRUE(spin_until(exec, [&] {return received.size() == 1;}));
-  EXPECT_EQ(received[0].request_id, 71u);
-  EXPECT_EQ(received[0].session_id, 300u);
-  request.request_id = 71;
-  config_pub->publish(request);
-  ASSERT_TRUE(spin_until(exec, [&] {return received.size() == 2;}));
-  request.command = SystemCommand::COMMAND_SAVE;
-  config_pub->publish(request);
-  spin_for(exec, 60ms);
-  EXPECT_EQ(received.size(), 2u);
-  request.request_id = 70;
-  request.command = SystemCommand::COMMAND_REPORT;
-  config_pub->publish(request);
-  spin_for(exec, 60ms);
-  EXPECT_EQ(received.size(), 2u);
+  MotorPolicyArray policy; policy.count = 1; policy.policy_generation = 9;
+  MotorPolicyTarget p; p.motor_id = 64; p.kp = 20; p.kd = 2; p.confirm_unprotected = true;
+  policy.targets.push_back(p); policy_pub->publish(policy);
+  ASSERT_TRUE(spin([&] {return !configs.empty();}));
+  EXPECT_EQ(configs.back().operation, AgentConfigRequest::SET_POLICY);
+  EXPECT_FLOAT_EQ(configs.back().policies[0].kp, 0);
+  EXPECT_FALSE(configs.back().policies[0].confirm_unprotected);
+  configs.clear(); policy.targets[0].enabled = true; policy.sync_time_ns = stamp();
+  policy_pub->publish(policy); run(); EXPECT_TRUE(configs.empty());
 }
-
-TEST(BridgeNode, StopPathsPassWhenConnectionUnknown)
+TEST_F(BridgeTest, InfoPagesPublishOneCompleteRevision)
 {
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto cmd_pub = node->create_publisher<MotorCommandArray>("/motor/command_array", rclcpp::QoS(1).reliable());
-  auto policy_pub = node->create_publisher<MotorPolicyArray>("/motor/policy_array", rclcpp::QoS(10).reliable());
-  auto traj_pub = node->create_publisher<MotorTrajectory>("/motor/trajectory", rclcpp::QoS(10).reliable());
-  int commands = 0, policies = 0, trajectories = 0;
-  auto cmd_sub = node->create_subscription<LowCommand>(topic::kLowCmd, rclcpp::QoS(1).best_effort(),
-    [&](LowCommand::SharedPtr) {++commands;});
-  auto policy_sub = node->create_subscription<MotorPolicyArray>(topic::kPolicy, rclcpp::QoS(10).reliable(),
-    [&](MotorPolicyArray::SharedPtr) {++policies;});
-  auto traj_sub = node->create_subscription<MotorTrajectory>(topic::kTrajectory, rclcpp::QoS(10).reliable(),
-    [&](MotorTrajectory::SharedPtr) {++trajectories;});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return cmd_pub->get_subscription_count() > 0 &&
-    policy_pub->get_subscription_count() > 0 && traj_pub->get_subscription_count() > 0 &&
-    cmd_sub->get_publisher_count() > 0 && policy_sub->get_publisher_count() > 0 &&
-    traj_sub->get_publisher_count() > 0;}));
-  MotorCommandArray stop;
-  MotorPolicyArray disabled;
-  disabled.count = 1;
-  MotorPolicyTarget target;
-  target.motor_id = 0;
-  target.enabled = false;
-  disabled.targets.push_back(target);
-  MotorTrajectory cancel;
-  cmd_pub->publish(stop);
-  policy_pub->publish(disabled);
-  traj_pub->publish(cancel);
-  ASSERT_TRUE(spin_until(exec, [&] {return commands == 1 && policies == 1 && trajectories == 1;}));
-  disabled.targets[0].enabled = true;
-  policy_pub->publish(disabled);
-  auto motion = command();
-  cmd_pub->publish(motion);
-  spin_for(exec, 100ms);
-  EXPECT_EQ(commands, 1);
-  EXPECT_EQ(policies, 1);
-}
-
-TEST(BridgeNode, ConfigResultAndControlSnapshotRequireCurrentSession)
-{
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto result_pub = node->create_publisher<ConfigResult>(topic::kConfigResult, rclcpp::QoS(10).reliable());
-  auto control_pub = node->create_publisher<MotorControlStateArray>(topic::kControlStates,
-    rclcpp::QoS(10).reliable());
-  int results = 0, controls = 0;
-  auto result_sub = node->create_subscription<ConfigResult>("/motor/config_result", rclcpp::QoS(10).reliable(),
-    [&](ConfigResult::SharedPtr) {++results;});
-  auto control_sub = node->create_subscription<MotorControlStateArray>("/motor/control_states",
-    rclcpp::QoS(10).reliable(), [&](MotorControlStateArray::SharedPtr) {++controls;});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return status_pub->get_subscription_count() > 0 &&
-    result_pub->get_subscription_count() > 0 && control_pub->get_subscription_count() > 0 &&
-    result_sub->get_publisher_count() > 0 && control_sub->get_publisher_count() > 0;}));
-  status_pub->publish(status(50));
-  spin_for(exec, 30ms);
-  ConfigResult result;
-  result.session_id = 49;
-  result_pub->publish(result);
-  MotorControlStateArray control;
-  control.schema_version = MotorControlStateArray::SCHEMA_VERSION;
-  control.session_id = 49;
-  control_pub->publish(control);
-  spin_for(exec, 80ms);
-  EXPECT_EQ(results, 0);
-  EXPECT_EQ(controls, 0);
-  result.session_id = 50;
-  control.session_id = 50;
-  control.sync_time_ns = status(50).sync_time_ns;
-  result_pub->publish(result);
-  control_pub->publish(control);
-  ASSERT_TRUE(spin_until(exec, [&] {return results == 1 && controls == 1;}));
-}
-
-TEST(BridgeNode, OldSourceTimestampCannotOpenMotionGate)
-{
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto cmd_pub = node->create_publisher<MotorCommandArray>("/motor/command_array", rclcpp::QoS(1).reliable());
-  int received = 0;
-  auto sub = node->create_subscription<LowCommand>(topic::kLowCmd, rclcpp::QoS(1).best_effort(),
-    [&](LowCommand::SharedPtr) {++received;});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return status_pub->get_subscription_count() > 0 &&
-    topo_pub->get_subscription_count() > 0 && cmd_pub->get_subscription_count() > 0 &&
-    sub->get_publisher_count() > 0;}));
-  auto stale = status(20);
-  stale.sync_time_ns -= 1000000000ULL;
-  status_pub->publish(stale);
-  topo_pub->publish(topology(20));
-  spin_for(exec, 50ms);
-  cmd_pub->publish(command());
-  spin_for(exec, 80ms);
-  EXPECT_EQ(received, 0);
-}
-
-TEST(BridgeNode, OldLowStateCannotPublishAsFreshMotion)
-{
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto low_pub = node->create_publisher<LowState>(topic::kLowState, rclcpp::QoS(1).best_effort());
-  int received = 0;
-  auto sub = node->create_subscription<MotorMotionStateArray>("/motor/motion_states",
-    rclcpp::QoS(1).best_effort(), [&](MotorMotionStateArray::SharedPtr) {++received;});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return status_pub->get_subscription_count() > 0 &&
-    topo_pub->get_subscription_count() > 0 && low_pub->get_subscription_count() > 0 &&
-    sub->get_publisher_count() > 0;}));
-  status_pub->publish(status(30));
-  topo_pub->publish(topology(30));
-  spin_for(exec, 40ms);
-  LowState low;
-  low.schema_version = WireContract::SCHEMA_VERSION;
-  low.session_id = 30;
-  low.seq = 1;
-  low.chunk_count = 1;
-  low.total_count = 1;
-  low.count = 1;
-  low.motor_ids = {1};
-  low.position_q = {100};
-  low.velocity_q = {0};
-  low.effort_q = {0};
-  low.state_age_ms = {0};
-  low.target_source = {0};
-  low.sync_time_ns = status(30).sync_time_ns - 1000000000ULL;
-  low_pub->publish(low);
-  spin_for(exec, 60ms);
-  EXPECT_EQ(received, 0);
-  low.sync_time_ns = status(30).sync_time_ns;
-  low_pub->publish(low);
-  ASSERT_TRUE(spin_until(exec, [&] {return received == 1;}));
-}
-
-TEST(BridgeNode, BurstTwoLowStateChunksSurviveReaderHistory)
-{
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto low_pub = node->create_publisher<LowState>(topic::kLowState, rclcpp::QoS(10).best_effort());
-  int received = 0;
-  size_t count = 0;
-  auto sub = node->create_subscription<MotorMotionStateArray>("/motor/motion_states",
-    rclcpp::QoS(10).best_effort(), [&](MotorMotionStateArray::SharedPtr m) {
-      ++received;
-      count = m->states.size();
-    });
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return status_pub->get_subscription_count() > 0 &&
-    topo_pub->get_subscription_count() > 0 && low_pub->get_subscription_count() > 0 &&
-    sub->get_publisher_count() > 0;}));
-  status_pub->publish(status(600));
-  topo_pub->publish(topology(600));
-  spin_for(exec, 30ms);
-  const auto stamp = status(600).sync_time_ns;
-  LowState first;
-  first.schema_version = WireContract::SCHEMA_VERSION;
-  first.session_id = 600;
-  first.seq = 1;
-  first.tick_ms = 1;
-  first.sync_time_ns = stamp;
-  first.chunk_count = 2;
-  first.total_count = 33;
-  first.count = 32;
-  for (uint8_t id = 0; id < 32; ++id) {
-    first.motor_ids.push_back(id);
-    first.position_q.push_back(0);
-    first.velocity_q.push_back(0);
-    first.effort_q.push_back(0);
-    first.state_age_ms.push_back(0);
-    first.target_source.push_back(0);
+  start(48); ASSERT_EQ(topologies.size(), 1u); ASSERT_EQ(params.size(), 1u);
+  EXPECT_EQ(topologies.back().entries.size(), 48u); EXPECT_EQ(params.back().count, 48u);
+  std::vector<uint16_t> cursors;
+  for (const auto & c : configs) if (c.operation == AgentConfigRequest::QUERY_INFO) {
+    cursors.push_back(c.cursor);
   }
-  LowState second = first;
-  second.chunk_index = 1;
-  second.count = 1;
-  second.motor_ids = {32};
-  second.position_q = {0};
-  second.velocity_q = {0};
-  second.effort_q = {0};
-  second.state_age_ms = {0};
-  second.target_source = {0};
-  low_pub->publish(first);
-  low_pub->publish(second);
-  std::this_thread::sleep_for(20ms);  // 两片均先交付 DDS，executor 此时尚未取消息。
-  spin_for(exec, 30ms);
-  EXPECT_EQ(received, 1);
-  EXPECT_EQ(count, 33u);
+  EXPECT_EQ(cursors, (std::vector<uint16_t>{0,16,32}));
+  run(300ms); EXPECT_EQ(topologies.size(), 1u); // Info is on demand, not a 1.5-second lease.
+  status.info_revision = 2; ASSERT_TRUE(spin([&] {return topologies.size() == 2;}));
 }
-
-TEST(BridgeNode, ExecuteConfigWaitsForTerminalResultAndTimesOut)
+TEST_F(BridgeTest, InvalidClockStatusIsVisibleButCannotAuthorizeMotion)
 {
-  Session session;
-  auto node = std::make_shared<BridgeNode>();
-  using Service = can_bridge_msgs::srv::ExecuteConfig;
-  auto client = node->create_client<Service>("/motor/execute_config");
-  auto status_pub = node->create_publisher<MotorStatus>(topic::kMotorStatus, rclcpp::QoS(10).reliable());
-  auto topo_pub = node->create_publisher<MotorTopology>(topic::kTopology, rclcpp::QoS(10).reliable());
-  auto result_pub = node->create_publisher<ConfigResult>(topic::kConfigResult, rclcpp::QoS(10).reliable());
-  std::vector<ConfigRequest> sent;
-  auto wire_sub = node->create_subscription<ConfigRequest>(topic::kConfig, rclcpp::QoS(10).reliable(),
-    [&](ConfigRequest::SharedPtr m) {sent.push_back(*m);});
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready() &&
-    status_pub->get_subscription_count() > 0 && topo_pub->get_subscription_count() > 0 &&
-    result_pub->get_subscription_count() > 0 && wire_sub->get_publisher_count() > 0;}));
-  auto st = status(500);
-  st.config_request_id = 9;
-  status_pub->publish(st);
-  topo_pub->publish(topology(500));
-  spin_for(exec, 30ms);
-  auto mixed = std::make_shared<Service::Request>();
-  mixed->request.kind = ConfigRequest::CONFIG_KIND_PARAM_SET;
-  mixed->request.command = SystemCommand::COMMAND_SAVE;
-  mixed->request.motor_id = 0;  // PARAM_SET 不得携带 SYSTEM_COMMAND 目标
-  auto rejected = client->async_send_request(mixed);
-  ASSERT_TRUE(spin_until(exec, [&] {return rejected.wait_for(0ms) == std::future_status::ready;}));
-  EXPECT_EQ(rejected.get()->result.status, ConfigResult::STATUS_FAILED);
-  EXPECT_TRUE(sent.empty());
-  auto request = std::make_shared<Service::Request>();
-  request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
-  request->request.command = SystemCommand::COMMAND_REPORT;
+  start(); const auto before = controls.size();
+  status.clock_valid = false;
+  ASSERT_TRUE(spin([&] {return controls.size() > before;}));
+  command_pub->publish(command()); run(); EXPECT_TRUE(commands.empty());
+}
+TEST_F(BridgeTest, ConfigWaitsForReceiptThenAcknowledgesTerminalAndRejectsConflict)
+{
+  start(); status.config_request_high_water = 50; publish_status(); run();
+  SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.command = SystemCommand::COMMAND_SET_ZERO;
+  cmd.motor_id = 64; cmd.request_id = 7; system_command_pub->publish(cmd);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});}));
+  auto wire = *std::find_if(configs.begin(),configs.end(),[](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});
+  EXPECT_EQ(wire.request_id, 51u);
+  auto next = cmd; next.request_id = 8; next.sync_time_ns = stamp(); system_command_pub->publish(next);
+  run(); EXPECT_EQ(std::count_if(configs.begin(),configs.end(),[](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;}), 1);
+  AgentConfigResult result; result.request_id = 51; result.operation = AgentConfigRequest::SET_ZERO;
+  result.state = AgentConfigResult::PENDING; status.results = {result};
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
+    return c.request_id == 52;});}));
+  status.results[0].state = AgentConfigResult::SUCCEEDED;
+  status.results[0].completed_motor_mask = UINT64_C(1) << 63;
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().request_id, 7u); EXPECT_EQ(results.back().status, ConfigResult::STATUS_SUCCEEDED);
+  EXPECT_EQ(results.back().completed_targets, 1);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
+    return c.operation == AgentConfigRequest::ACK_RESULTS && c.ack_request_ids[0] == 51;});}));
+  cmd.motor_id = 63; cmd.sync_time_ns = stamp(); system_command_pub->publish(cmd);
+  ASSERT_TRUE(spin([&] {return results.back().status == ConfigResult::STATUS_CONFLICT;}));
+}
+TEST_F(BridgeTest, FirmwareParameterTerminalKeepsStatusFlowAndIsAcknowledged)
+{
+  start();
+  std::vector<SystemStatus> systems;
+  listen("/motor/system_status", systems);
+  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
+  ASSERT_TRUE(client->wait_for_service(1s));
+  auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
+  request->request.kind = ConfigRequest::CONFIG_KIND_FIRMWARE_PARAMETERS;
   request->request.motor_id = SystemCommand::MOTOR_ID_NONE;
-  request->timeout_ms = 200;
+  request->request.request_id = 7;
+  request->request.sync_time_ns = stamp();
+  request->request.count = 1;
+  ParamSetTarget target;
+  target.motor_id = SystemCommand::MOTOR_ID_NONE;
+  target.field = 1;
+  target.value = 100;
+  request->request.targets = {target};
   auto future = client->async_send_request(request);
-  ASSERT_TRUE(spin_until(exec, [&] {return sent.size() == 1;}));
-  EXPECT_EQ(sent[0].request_id, 10u);
-  ConfigResult pending;
-  pending.session_id = 500;
-  pending.request_id = sent[0].request_id;
-  pending.kind = sent[0].kind;
-  pending.command = sent[0].command;
-  pending.status = ConfigResult::STATUS_PENDING;
-  result_pub->publish(pending);
-  spin_for(exec, 30ms);
-  EXPECT_NE(future.wait_for(0ms), std::future_status::ready);
-  pending.status = ConfigResult::STATUS_FAILED;
-  pending.error_code = 7;
-  result_pub->publish(pending);
-  ASSERT_TRUE(spin_until(exec, [&] {return future.wait_for(0ms) == std::future_status::ready;}));
-  const auto failed_response = future.get();
-  EXPECT_EQ(failed_response->result.status, ConfigResult::STATUS_FAILED);
-  EXPECT_EQ(failed_response->result.error_code, 7u);
-  EXPECT_EQ(failed_response->result.request_id, 10u);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_FIRMWARE_PARAMETERS;
+  });}));
+  const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_FIRMWARE_PARAMETERS;
+  });
+  AgentConfigResult receipt;
+  receipt.request_id = wire.request_id;
+  receipt.operation = wire.operation;
+  receipt.state = AgentConfigResult::SUCCEEDED;
+  receipt.completed_motor_mask = 1;
+  status.results = {receipt};
+  status.firmware_values_valid = true;
+  status.firmware_values = {100, 100, 10, 100, 2, 200};
+  status.firmware_unsaved = true;
+  ASSERT_TRUE(spin([&] {return future.wait_for(0ms) == std::future_status::ready;}));
+  EXPECT_EQ(future.get()->result.status, ConfigResult::STATUS_SUCCEEDED);
+  ASSERT_TRUE(spin([&] {return !systems.empty() && systems.back().firmware_values_valid;}));
+  EXPECT_EQ(systems.back().firmware_values[1], 100);
+  EXPECT_TRUE(systems.back().firmware_unsaved);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::ACK_RESULTS && c.ack_request_ids[0] == wire.request_id;
+  });}));
+}
 
-  request = std::make_shared<Service::Request>();
+TEST_F(BridgeTest, ExecuteConfigReturnsOnlyAfterTerminalAndExpires)
+{
+  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
+  ASSERT_TRUE(client->wait_for_service(1s));
+  auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
+  request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
+  request->request.command = SystemCommand::COMMAND_CLEAR_FAULT;
+  request->request.motor_id = 64; request->request.sync_time_ns = stamp(); request->timeout_ms = 100;
+  auto future = client->async_send_request(request);
+  run(40ms); EXPECT_NE(future.wait_for(0ms), std::future_status::ready);
+  ASSERT_TRUE(spin([&] {return future.wait_for(0ms) == std::future_status::ready;}));
+  auto timed_out = future.get()->result;
+  EXPECT_EQ(timed_out.error_code, 21);
+  EXPECT_EQ(timed_out.status, ConfigResult::STATUS_PENDING);
+}
+TEST_F(BridgeTest, BurstMotionGroupsAssembleAndRejectWrongSessionAndStaleTime)
+{
+  start(48); AgentMotion motion; motion.session_id = 100; motion.snapshot_stamp = stamp();
+  motion.snapshot_tick_ms = 10; motion.sequence = 1; motion.group_count = 2;
+  for (size_t group = 0; group < 2; ++group) {
+    motion.group_index = static_cast<uint8_t>(group); motion.count = group == 0 ? 32 : 16;
+    motion.motor_ids.clear(); motion.position_q.clear(); motion.velocity_q.clear();
+    motion.effort_q.clear(); motion.state_age_ms.clear(); motion.target_source.clear();
+    for (size_t i = 0; i < motion.count; ++i) {
+      motion.motor_ids.push_back(static_cast<uint8_t>(17 + group*32+i));
+      motion.position_q.push_back(0); motion.velocity_q.push_back(0); motion.effort_q.push_back(0);
+      motion.state_age_ms.push_back(5); motion.target_source.push_back(0);
+    }
+    motion_pub->publish(motion);
+  }
+  ASSERT_TRUE(spin([&] {return !motions.empty();}));
+  EXPECT_EQ(motions.back().states.size(), 48u); EXPECT_EQ(motions.back().states.back().motor_id, 64);
+  motion.sequence = 2; motion.session_id = 99; motion_pub->publish(motion); run();
+  EXPECT_EQ(motions.size(), 1u);
+  motion.session_id = 100; motion.snapshot_stamp -= 1000000000ULL; motion_pub->publish(motion); run();
+  EXPECT_EQ(motions.size(), 1u);
+}
+TEST_F(BridgeTest, TrajectorySplitsLoadsThenCommitsAfterReceipts)
+{
+  start(); MotorTrajectory trajectory; trajectory.sync_time_ns = stamp(); trajectory.trajectory_id = 77;
+  trajectory.segment_count = 1; trajectory.target_count = 1; trajectory.target_ids = {64};
+  for (size_t i = 0; i < 33; ++i) {
+    MotorTrajectoryPoint p; p.motor_id = 64; p.time_from_start_ms = static_cast<uint32_t>(i * 10);
+    p.position = static_cast<float>(i)*0.01f; trajectory.points.push_back(p);
+  }
+  trajectory.count = 33; trajectory_pub->publish(trajectory);
+  ASSERT_TRUE(spin([&] {return !trajectories.empty();}));
+  auto first = trajectories.back(); EXPECT_EQ(first.operation, AgentTrajectoryRequest::LOAD);
+  EXPECT_EQ(first.points.size(), 32u); EXPECT_EQ(first.segment_count, 2);
+  status.trajectory.trajectory_id = first.trajectory_id;
+  status.trajectory.state = AgentTrajectoryState::LOADING;
+  status.trajectory.target_ids = {64};
+  status.trajectory_request_receipt.request_id = first.request_id;
+  status.trajectory_request_receipt.trajectory_id = first.trajectory_id;
+  status.trajectory_request_receipt.operation = AgentTrajectoryRequest::LOAD;
+  status.trajectory_request_receipt.accepted = true; status.trajectory_request_receipt.received_segments = 1;
+  ASSERT_TRUE(spin([&] {return std::any_of(trajectories.begin(),trajectories.end(),[](const auto & r) {
+    return r.operation == AgentTrajectoryRequest::LOAD && r.segment_index == 1;});}));
+  auto second = *std::find_if(trajectories.begin(),trajectories.end(),[](const auto & r) {
+    return r.operation == AgentTrajectoryRequest::LOAD && r.segment_index == 1;});
+  EXPECT_EQ(second.points.size(), 1u);
+  status.trajectory.state = AgentTrajectoryState::READY;
+  status.trajectory_request_receipt.request_id = second.request_id;
+  status.trajectory_request_receipt.received_segments = 2;
+  ASSERT_TRUE(spin([&] {return std::any_of(trajectories.begin(),trajectories.end(),[](const auto & r) {
+    return r.operation == AgentTrajectoryRequest::COMMIT;});}));
+  auto commit = *std::find_if(trajectories.begin(),trajectories.end(),[](const auto & r) {
+    return r.operation == AgentTrajectoryRequest::COMMIT;});
+  status.trajectory_request_receipt.request_id = commit.request_id;
+  status.trajectory_request_receipt.operation = AgentTrajectoryRequest::COMMIT;
+  status.trajectory.state = AgentTrajectoryState::RUNNING;
+  ASSERT_TRUE(spin([&] {return std::any_of(trajectories.begin(),trajectories.end(),[&](const auto & r) {
+    return r.operation == AgentTrajectoryRequest::ACK && r.ack_request_id == commit.request_id;});}));
+  EXPECT_EQ(trajectory_states.back().trajectory_id, 77u);
+}
+TEST_F(BridgeTest, SessionChangeFailsPendingServiceAndRestartsInfo)
+{
+  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
+  ASSERT_TRUE(client->wait_for_service(1s));
+  auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
+  request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
+  request->request.command = SystemCommand::COMMAND_CLEAR_FAULT; request->request.motor_id = 64;
+  request->request.sync_time_ns = stamp(); auto future = client->async_send_request(request);
+  run(); status.session_id = 101;
+  ASSERT_TRUE(spin([&] {return future.wait_for(0ms) == std::future_status::ready;}));
+  EXPECT_EQ(future.get()->result.error_code, 21);
+  ASSERT_TRUE(spin([&] {return topologies.back().session_id == 101;}));
+}
+TEST_F(BridgeTest, RevisionRetryWithZeroCursorRestartsWithoutPublishingMixedPages)
+{
+  start(48); auto_info = false; configs.clear();
+  status.info_revision = 2;
+  ASSERT_TRUE(spin([&] {return !configs.empty();}));
+  auto query = configs.back();
+  auto first = page(query); info_pub->publish(first);
+  ASSERT_TRUE(spin([&] {return configs.back().cursor == 16;}));
+  query = configs.back();
+  AgentInfo retry; retry.session_id = 100; retry.query_id = query.query_id;
+  retry.result = AgentInfo::RETRY; retry.cursor = 0; retry.revision = 3;
+  info_pub->publish(retry);
+  ASSERT_TRUE(spin([&] {return configs.back().query_id != query.query_id;}));
+  EXPECT_EQ(configs.back().cursor, 0); EXPECT_EQ(topologies.size(), 1u);
+  command_pub->publish(command()); ASSERT_TRUE(spin([&] {return !commands.empty();}));
+}
+TEST_F(BridgeTest, LoadingDoesNotLookCanceledAndOldSetpointCannotReplayAfterTrajectory)
+{
+  start(); command_pub->publish(command()); ASSERT_TRUE(spin([&] {return !commands.empty();}));
+  MotorTrajectory trajectory; trajectory.sync_time_ns = stamp(); trajectory.trajectory_id = 77;
+  trajectory.segment_count = 1; trajectory.target_count = 1; trajectory.target_ids = {64};
+  trajectory.count = 1; MotorTrajectoryPoint p; p.motor_id = 64; p.position = 1;
+  trajectory.points.push_back(p); trajectory_pub->publish(trajectory);
+  ASSERT_TRUE(spin([&] {return !trajectories.empty();}));
+  command_pub->publish(command()); ASSERT_TRUE(spin([&] {return commands.size() >= 2;}));
+  EXPECT_EQ(commands.back().count, 0);
+  auto changed = command(); changed.targets[0].position = 0.75;
+  command_pub->publish(changed); ASSERT_TRUE(spin([&] {return commands.size() >= 3;}));
+  EXPECT_EQ(commands.back().count, 1);
+  const auto before = trajectory_states.size();
+  status.trajectory.trajectory_id = trajectories.front().trajectory_id;
+  status.trajectory.state = AgentTrajectoryState::LOADING;
+  status.trajectory.target_ids = {64};
+  run(100ms); EXPECT_EQ(trajectory_states.size(), before);
+}
+TEST_F(BridgeTest, StaleRejectionReceiptDoesNotOverrideAcceptedTransaction)
+{
+  start(); SystemCommand cmd; cmd.command = SystemCommand::COMMAND_SET_ZERO;
+  cmd.motor_id = 64; cmd.sync_time_ns = stamp(); system_command_pub->publish(cmd);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});}));
+  const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});
+  AgentConfigResult pending; pending.request_id = wire.request_id;
+  pending.operation = wire.operation; pending.state = AgentConfigResult::PENDING;
+  status.results = {pending}; status.rejection_receipt = pending;
+  status.rejection_receipt.state = AgentConfigResult::BUSY;
+  run(90ms); EXPECT_TRUE(results.empty());
+  status.results[0].state = AgentConfigResult::SUCCEEDED;
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().status, ConfigResult::STATUS_SUCCEEDED);
+}
+TEST_F(BridgeTest, TrajectoryIdSeedsFromRequestHighWaterAfterBridgeRestart)
+{
+  start(); status.trajectory_request_high_water = 80; publish_status(); run();
+  MotorTrajectory trajectory; trajectory.sync_time_ns = stamp(); trajectory.trajectory_id = 9;
+  trajectory.segment_count = 1; trajectory.target_count = 1; trajectory.target_ids = {64};
+  trajectory.count = 1; MotorTrajectoryPoint p; p.motor_id = 64; trajectory.points.push_back(p);
+  trajectory_pub->publish(trajectory);
+  ASSERT_TRUE(spin([&] {return !trajectories.empty();}));
+  EXPECT_GT(trajectories.back().trajectory_id, 80u);
+  EXPECT_EQ(trajectories.back().request_id, 81u);
+}
+TEST_F(BridgeTest, ReadOnlyReportServiceCompletesWithUnhealthyClock)
+{
+  start(); status.clock_valid = false; publish_status(); run();
+  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
+  ASSERT_TRUE(client->wait_for_service(1s));
+  auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
   request->request.command = SystemCommand::COMMAND_REPORT;
   request->request.motor_id = SystemCommand::MOTOR_ID_NONE;
-  request->timeout_ms = 100;
-  auto timed = client->async_send_request(request);
-  ASSERT_TRUE(spin_until(exec, [&] {return sent.size() == 2;}));
-  ASSERT_TRUE(spin_until(exec, [&] {return timed.wait_for(0ms) == std::future_status::ready;}));
-  const auto timeout_response = timed.get();
-  EXPECT_EQ(timeout_response->result.status, ConfigResult::STATUS_FAILED);
-  EXPECT_EQ(timeout_response->result.error_code, 21u);
-  status_pub->publish(status(500, 2));
-  topo_pub->publish(topology(500));
-  spin_for(exec, 20ms);
-  request->timeout_ms = 200;
-  auto succeeded = client->async_send_request(request);
-  ASSERT_TRUE(spin_until(exec, [&] {return sent.size() == 3;}));
-  pending.request_id = sent[2].request_id;
-  pending.status = ConfigResult::STATUS_SUCCEEDED;
-  pending.error_code = 0;
-  result_pub->publish(pending);
-  ASSERT_TRUE(spin_until(exec, [&] {return succeeded.wait_for(0ms) == std::future_status::ready;}));
-  const auto success_response = succeeded.get();
-  EXPECT_EQ(success_response->result.status, ConfigResult::STATUS_SUCCEEDED);
-  EXPECT_EQ(success_response->result.request_id, sent[2].request_id);
+  auto future = client->async_send_request(request);
+  ASSERT_TRUE(spin([&] {return future.wait_for(0ms) == std::future_status::ready;}));
+  EXPECT_EQ(future.get()->result.status, ConfigResult::STATUS_SUCCEEDED);
+}
+TEST_F(BridgeTest, ServiceTimeoutRetainsCorrelationAndPublishesLateTerminalBeforeAck)
+{
+  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
+  ASSERT_TRUE(client->wait_for_service(1s));
+  auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
+  request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
+  request->request.command = SystemCommand::COMMAND_SAVE;
+  request->request.motor_id = SystemCommand::MOTOR_ID_NONE;
+  request->request.request_id = 7; request->request.sync_time_ns = stamp(); request->timeout_ms = 100;
+  auto future = client->async_send_request(request);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SAVE;});}));
+  auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SAVE;});
+  AgentConfigResult result; result.request_id = wire.request_id; result.operation = wire.operation;
+  result.state = AgentConfigResult::PENDING; status.results = {result};
+  ASSERT_TRUE(spin([&] {return future.wait_for(0ms) == std::future_status::ready;}));
+  auto response = future.get()->result;
+  EXPECT_EQ(response.status, ConfigResult::STATUS_PENDING); EXPECT_EQ(response.error_code, 21);
+  EXPECT_TRUE(std::none_of(results.begin(), results.end(), [](const auto & r) {
+    return r.status == ConfigResult::STATUS_FAILED;
+  }));
+  EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::ACK_RESULTS;
+  }));
+  status.results[0].state = AgentConfigResult::SUCCEEDED;
+  ASSERT_TRUE(spin([&] {return std::any_of(results.begin(), results.end(), [](const auto & r) {
+    return r.request_id == 7 && r.status == ConfigResult::STATUS_SUCCEEDED;
+  });}));
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::ACK_RESULTS && c.ack_request_ids[0] == wire.request_id;
+  });}));
 }

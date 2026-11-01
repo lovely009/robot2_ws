@@ -1,4 +1,4 @@
-// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，5ms/200Hz 控制边界。
+// 电机实时任务是内核唯一写者：1ms 有界 RX/TX 服务，50..1000Hz 控制边界（默认200Hz）。
 // ROS 桥仅通过 mailbox 提交输入、通过只读副本取状态；无 raw CAN 调试出口。
 
 #ifndef MOTOR_RT_TASK_H
@@ -8,8 +8,8 @@
 #include <stddef.h>
 
 #include "control_mailbox.h"
-#include "control_lease.h"
 #include "motor_control.h"
+#include "agent_trajectory.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,11 +24,7 @@ bool motor_rt_task_start(void);
 // 提交一份完整命令快照（latest-wins；非法快照由 mailbox 拒绝并计数）。
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot);
 
-// 提交一条多点轨迹分段（按 trajectory_id/segment_index 在 mailbox 内拼接；
-// 只有完整轨迹才 latest-wins 发布；非法分段由 mailbox 拒绝并计数；
-// 空单段轨迹 = 取消）。完整轨迹在 5ms/200Hz 控制边界生效，
-// 与快照按电机归属仲裁。
-bool motor_rt_submit_trajectory(const control_trajectory_t *trajectory);
+// 轨迹入口见 agent_trajectory.h；旧全量分段邮箱不再用于生产。
 
 // 提交一条批量策略（latest-wins；非法由 mailbox 整条拒绝并计数）。
 // 不走 config FIFO——那条队列深 16，装不下最多 FIRMWARE_MAX_MOTORS 台的策略消息。
@@ -39,20 +35,26 @@ bool motor_rt_submit_config(const control_mailbox_config_request_t *request);
 
 // 会话状态请求（电平；内核经任务边界沿同步）。
 void motor_rt_set_agent_connected(bool connected);
-// Session and lease inputs never enable a motor; policy remains explicit.
-void motor_rt_set_control_session(uint64_t session_id);
-bool motor_rt_submit_control_lease(uint64_t session_id, uint64_t lease_id,
-    uint32_t sequence, uint32_t valid_until_tick_ms, bool active);
-bool motor_rt_control_lease_allows(uint64_t lease_id);
-void motor_rt_copy_control_lease(control_lease_state_t *out, uint32_t *sample_tick_ms);
+void motor_rt_begin_agent_session(uint64_t session_id);
+void motor_rt_request_stop_all(void);
+void motor_rt_request_disable(uint64_t motor_mask);
+void motor_rt_set_clock_valid(bool valid);
+
+typedef struct {
+  uint32_t command_sequence;
+  uint32_t stop_generation;
+  uint32_t required_policy_generation;
+  bool lease_valid;
+  bool authorized;
+} motor_rt_link_status_t;
+void motor_rt_copy_link_status(motor_rt_link_status_t *out);
 
 // ---- 只读状态副本（ROS 桥轮询发布用；内部短临界区）----
 
 // 返回实际拷贝的条数（= 当前注册表条目数，受 capacity 截断）。
 size_t motor_rt_copy_motion_states(motor_control_motion_state_t *out,
-    size_t capacity, uint32_t *sample_tick_ms);
-size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity,
-    uint32_t *sample_tick_ms);
+    size_t capacity);
+size_t motor_rt_copy_statuses(motor_control_status_t *out, size_t capacity);
 
 // 拓扑条目副本（协议族枚举与 MotorTopologyEntry.msg 对齐）。
 typedef struct {
@@ -92,10 +94,7 @@ typedef struct {
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);
 
 // 轨迹执行状态副本（内核类型直接暴露：无协议指针，无需镜像）。
-// sample_tick_ms is the exact MCU tick used for age/elapsed calculations.
-// A publisher combining snapshots must advance older ages to its chosen tick.
-void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out,
-    uint32_t *sample_tick_ms);
+void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out);
 
 #ifdef __cplusplus
 }

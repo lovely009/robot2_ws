@@ -45,7 +45,7 @@ def generate_launch_description():
         get_package_share_directory('robot_bringup'), 'launch', 'firmware_tf.launch.py')
 
     bench_manager = LifecycleNode(
-        package='bench_manager',
+        package='robot_bringup',
         executable='bench_manager',
         name='bench_manager',
         namespace='',

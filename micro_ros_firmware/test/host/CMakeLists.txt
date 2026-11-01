@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 
 include_directories(../../lib/firmware_config/include)
+add_library(fw_firmware_settings OBJECT ../../lib/firmware_config/src/firmware_settings.c)
 
 # 原则：测试直接编译固件真实 .c，无桩无复制。固件源码按库组织成 OBJECT
 # 库单点维护源文件列表，新增内核 .c 只改本文件一处；include 目录随库
@@ -137,6 +138,20 @@ function(fw_host_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_library(fw_info_page OBJECT ../../lib/info_page/src/info_page.cpp)
+target_include_directories(fw_info_page PUBLIC ../../lib/info_page/include)
+target_link_libraries(fw_info_page PUBLIC fw_motor_control fw_config_transaction)
+fw_host_test(test_info_page SOURCES test_info_page.cpp OBLIBS fw_info_page)
+
+add_library(fw_agent_protocol OBJECT
+  ../../lib/agent_protocol/src/agent_protocol.c
+  ../../lib/agent_protocol/src/agent_control_gate.c)
+target_include_directories(fw_agent_protocol PUBLIC ../../lib/agent_protocol/include)
+target_link_libraries(fw_agent_protocol PUBLIC fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
+fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
+  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_save_transaction
+  INCLUDES ../../lib/motor_control/src)
+
 fw_host_test(test_motor_protocol
   SOURCES test_motor_protocol.cpp
   OBLIBS fw_motor_protocol)
@@ -202,10 +217,20 @@ fw_host_test(test_stop_tx
     fw_adapters fw_motor_protocol
   INCLUDES ../../lib/motor_control/src)
 
+fw_host_test(test_37_axis_schedule
+  SOURCES test_37_axis_schedule.cpp
+  OBLIBS fw_motor_control fw_motor_tx_router fw_can_tx_scheduler
+    fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
+
 fw_host_test(test_save_transaction
   SOURCES test_save_transaction.cpp
   OBLIBS fw_save_transaction
   INCLUDES ../../lib/save_transaction/include)
+
+add_library(fw_clock_health OBJECT ../../lib/clock_health/src/clock_health.c)
+target_include_directories(fw_clock_health PUBLIC ../../lib/clock_health/include)
+fw_host_test(test_clock_health SOURCES test_clock_health.cpp OBLIBS fw_clock_health)
 
 fw_host_test(test_imu_snapshot
   SOURCES test_imu_snapshot.cpp
@@ -227,6 +252,8 @@ fw_host_test(test_param_store
   SOURCES test_param_store.cpp
   OBLIBS fw_param_store
   INCLUDES ../../lib/motor_protocol/include) # 用例直接引 motor_protocol_adapter.h
+fw_host_test(test_firmware_settings SOURCES test_firmware_settings.cpp
+  OBLIBS fw_firmware_settings fw_param_store)
 
 fw_host_test(test_w25q64_geometry
   SOURCES test_w25q64_geometry.cpp
@@ -278,6 +305,14 @@ add_test(
 add_test(
   NAME fdcan_motor_sim
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fdcan_motor_sim.py)
+
+add_library(fw_trajectory_transaction OBJECT
+  ../../lib/trajectory_transaction/src/trajectory_transaction.cpp)
+target_include_directories(fw_trajectory_transaction PUBLIC ../../lib/trajectory_transaction/include)
+target_link_libraries(fw_trajectory_transaction PUBLIC fw_motor_control fw_mailbox)
+fw_host_test(test_trajectory_transaction SOURCES test_trajectory_transaction.cpp
+  OBLIBS fw_trajectory_transaction fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
 
 add_library(fw_config_transaction OBJECT
   ../../lib/config_transaction/src/config_transaction.cpp)

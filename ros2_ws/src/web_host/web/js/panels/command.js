@@ -1,12 +1,12 @@
-// 托管页面只提交有界时效的操作意图；100 Hz MCU命令由监督器生成。
-// 持续手动控制必须产生新意图；页面隐藏、断连或过期不会恢复旧目标。
-// 关节运动使用标准轨迹 Action；「停止」请求整机停止，清空表格不停车。
+// 页面只提交低频 P/V/E 目标，由 manual_controller 在 ros2_control 周期执行。
+// 显式停止停用运动控制器；清空表格不会停止。
 import { store, MODEL, markDirty, DIRTY, syncWriteButtons } from '../core/store.js';
 import { $, LIFECYCLE } from '../core/format.js';
 import { controlTargetsError, describeMotorState } from '../core/motor_state.js';
 import { limitsError } from '../core/host_limits.js';
-import { pub, isConnected, isManagedMode, managedOperation } from '../core/ros.js';
-import { rawCouplingError } from '../core/joint_control.js';
+import { pub, isConnected } from '../core/ros.js';
+import { stopPlayback } from './actionLibrary.js';
+import { controlSessionError, rawCouplingError } from '../core/joint_control.js';
 import { mount as mountJointControl } from '../components/jointControl.js';
 
 // sequence 仅作日志关联；以页面启动时间降低跨会话复用的概率。
@@ -69,9 +69,7 @@ function noteBlockedTargets(targets) {
   return blocked;
 }
 
-// 动作不是普通的“发布成功”操作：trajectory_state 的 accepted/completed 只代表
-// MCU 轨迹 mailbox 的状态，不能替代实际电机在线和生命周期检查。播放前必须确认
-// 每个目标都处于 READY_DISABLED 或 ACTIVE；否则页面会出现“播放完成”但机构不动。
+// JTC 成功结果不替代电机就绪检查；武装前允许 READY_DISABLED。
 export function playbackReadinessError(ids) {
   const blocked = [];
   for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
@@ -110,35 +108,26 @@ function sendSnapshot() {
   if (error) { setCmdResult(false, error); return false; }
   const res = sendTargets(targets);
   const blocked = noteBlockedTargets(targets);
-  setCmdResult(res.ok, `已发 ${res.msg}` +
+  setCmdResult(res.ok, `${res.ok ? '已提交' : '未提交'} ${res.msg}` +
     (blocked.length ? ` ｜ ⚠ ${blocked.join('、')} 不会动（未初始化或离线）` : ''));
   return res.ok;
 }
 
-// 停止台架：空目标列表在完整快照语义下是「全部软停」这条**真消息**，显式停止不靠
-// 断流实现（固件收到后发阻尼帧，100 ms 后失能）。
+// JTC cancel 只保持位置；显式全部软停还必须停用运动控制器。
 export function sendStop() {
+  stopPlayback();
   if (!isConnected()) { setCmdResult(false, '未连接 rosbridge'); return false; }
-  if (isManagedMode()) { void managedOperation('stop'); return true; }
-  sequence = (sequence + 1) >>> 0;
-  const cancel={sync_time_ns:Date.now()*1e6,sequence,trajectory_id:sequence,
-    segment_index:0,segment_count:1,count:0,target_count:0,target_ids:[],points:[]};
-  pub('convertedTrajectory', cancel);
-  pub('trajectory', cancel);
-  pub('setpoint', {
-    sync_time_ns: Date.now() * 1e6,
-    sequence,
-    count: 0,
-    targets: [],
-  });
-  setCmdResult(true, `已发全部软停（seq=${sequence}）`);
-  return true;
+  const sent = pub('stop', {});
+  setCmdResult(sent, sent ? '已请求全部软停（停用运动控制器），请核对设备反馈' : '停止请求未发送');
+  return sent;
 }
 
 // 发送完整快照（命令表与动作共用）；记录历史。
 export function sendTargets(targets) {
   if (!isConnected()) return {ok: false, msg: '未连接 rosbridge'};
   if (!targets.length) return {ok: false, msg: '快照为空'};
+  const session=controlSessionError(store,MODEL);
+  if (session) return {ok:false,msg:session};
   const coupled=rawCouplingError(store,MODEL,targets.map(t=>t.motor_id));
   if (coupled) return {ok:false,msg:coupled};
   const authority = controlTargetsError(store,targets.map(t=>t.motor_id));
@@ -146,14 +135,14 @@ export function sendTargets(targets) {
   const blocked = limitsError(targets, MODEL);
   if (blocked) return {ok: false, msg: blocked};
   sequence = (sequence + 1) >>> 0;
-  if (!pub('setpoint', {
+  pub('setpoint', {
     // uint64：rosbridge 2.x 入站要求 JSON number（float64 会丢失末几位
     // 精度；该字段仅用于跨系统日志对齐，freshness 以 MCU 本地 tick 为准）。
     sync_time_ns: Date.now() * 1e6,
     sequence,
     count: targets.length,
     targets,
-  })) return {ok: false, msg: store.managed?.message || '未发送：当前入口没有写权限'};
+  });
   store.history.unshift({
     t: Date.now(),
     seq: sequence,
@@ -172,37 +161,32 @@ function updateSummary() {
   $('sumSend').textContent = `${n} 台目标`;
 }
 
-// 命令节拍节点的状态：**命令当前实际发往哪里**、有没有在发。
-// 改道（直连固件 ↔ 经叠加节点）是服务端做的，页面切不了，所以这一行是操作者核对
-// 「开关亮着但接线没切」的唯一入口。
-const REASON_TEXT = {
-  no_setpoint: '未收到设定值',
-  no_client: '页面未连接（自动停流）',
-  ok: '保持中',
-};
-
 function renderCommandStatus() {
   const el = $('cmdStatus');
   if (!el) return;
   const {data, last} = store.commandStatus;
-  if (!data || !last) {
-    el.textContent = '命令节拍：未上报（command_streamer 没在跑？）';
+  const age = Date.now()-last;
+  if (!data || !last || age < 0 || age > 2500) {
+    el.textContent = 'ros2_control：状态未上报或已过期';
     el.className = 'result tiny err';
     return;
   }
-  const parts = [`发往 ${data.output_topic}`];
-  parts.push(REASON_TEXT[data.reason] || data.reason || '--');
-  if (data.clients === null || data.clients === undefined) {
-    parts.push('无 /client_count');
-  } else {
-    parts.push(`${data.clients} 个客户端`);
-  }
-  if (data.reject) parts.push(`⚠ 设定值被拒：${data.reject}`);
-  el.textContent = `命令节拍：${parts.join(' · ')}`;
+  const parts = [`${data.model} · 模式 ${data.mode}`, `输出 ${data.output_topic}`,
+    `JTC ${data.trajectory_output_topic}`, data.reason || '--'];
+  const state = store.traj.state;
+  if (state) parts.push(`JTC #${state.trajectory_id}：${state.active ? '执行中'
+    : state.completed ? '成功' : '未成功（取消/拒绝/失败）'}`);
+  if (data.reject) parts.push(`错误：${data.reject}`);
+  if (store.transmissionStatus.data?.last_error) parts.push(store.transmissionStatus.data.last_error);
+  el.textContent = `ros2_control：${parts.join(' · ')}`;
   el.className = `result tiny${data.reject ? ' err' : ''}`;
 }
 
 export function mount(root, ctx) {
+  const summary = root.querySelector('.sendbar > summary');
+  if (summary) summary.title = '/control/setpoint → ros2_control manual_controller';
+  $('btnSendOnce').title = '提交 P/V/E 目标，由 manual_controller 持续执行';
+  $('btnStopCmd').title = '全部软停：停用运动控制器，不自动恢复旧目标';
   const jointControl=mountJointControl(root,{onStop:sendStop});
   $('btnAddRow').onclick = () => addCmdRow();
   $('btnFillOnline').onclick = () => {
@@ -227,13 +211,12 @@ export function mount(root, ctx) {
     jointControl.render();
     syncWriteButtons(['btnSendOnce', 'btnStopCmd'], isConnected());
     if (dirty.has(DIRTY.HISTORY)) updateSummary();
-    // 断线不再需要页面做任何事：rosbridge 一断，/client_count 归零，主机侧的
-    // command_streamer 自己停流，固件 100 ms 内失能——失效方向是安全的。
-    if (dirty.has(DIRTY.COMMAND) || dirty.has(DIRTY.CONN)) renderCommandStatus();
+    if ([DIRTY.COMMAND, DIRTY.CONN, DIRTY.TRAJ, DIRTY.STATUS].some(key => dirty.has(key))) renderCommandStatus();
   };
-  render(new Set());
+  render(new Set([DIRTY.COMMAND]));
+  const ageTimer = setInterval(renderCommandStatus, 1000);
   // 切屏只释放界面资源，主机目标由显式停止操作释放。
-  return { render, unmount(){jointControl.unmount();} };
+  return { render, unmount(){clearInterval(ageTimer);jointControl.unmount();} };
 }
 
 // 供 teach 面板「记录当前命令」用（面板依赖面板的唯一一处：动作记录的正是下发

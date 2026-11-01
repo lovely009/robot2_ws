@@ -1,4 +1,4 @@
-export type Screen = "run" | "teach" | "sim";
+export type Screen = "run" | "teach" | "sim" | "motion";
 export type PanelId =
   | "jointList"
   | "arm"
@@ -15,6 +15,7 @@ export type PanelId =
 export interface WorkbenchSnapshot {
   managed: {enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
     message: string; blockers: string[]};
+  firmwareConnectionKey: string;
   connected: boolean;
   connectionText: string;
   agent: string;
@@ -23,6 +24,7 @@ export interface WorkbenchSnapshot {
   canStopAgent: boolean;
   model: string;
   selectedId: number;
+  motors: { id: number; model: string }[];
   selectedName: string;
   selectedState: string;
   total: number;

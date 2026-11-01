@@ -40,7 +40,7 @@ struct Fixture {
 
   motor_control_entry_t &add_motor(uint16_t node) {
     auto &entry = kernel.entries[kernel.entry_count++];
-    entry.used = entry.online = true;
+    entry.used = entry.online = entry.has_measured = true;
     entry.motor_id = entry.node = node;
     entry.adapter = &motor_protocol_cerb_adapter;
     for (size_t i = 0U; i < motor_control_profile_count(); ++i) {
@@ -54,12 +54,15 @@ struct Fixture {
     entry.motion_enabled = entry.motion_authorized = entry.policy_enable = true;
     entry.last_rx_tick_ms = entry.last_motion_rx_tick_ms = 100U;
     entry.identity_read_done = entry.dev_read_done = entry.boot_record_offered = true;
+    entry.dev_raw_present |= 1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX;
+    entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] = 300U;
     return entry;
   }
 
   void command(uint32_t now = 100U) {
     motor_control_command_snapshot_t snapshot = {};
     snapshot.received_tick_ms = now;
+    snapshot.valid_until_tick_ms = now + 30U;
     snapshot.sequence = now;
     snapshot.target_count = (uint8_t)kernel.entry_count;
     for (size_t i = 0U; i < kernel.entry_count; ++i) {

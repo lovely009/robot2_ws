@@ -175,7 +175,7 @@ void test_blob_device_raw_roundtrip() {
 void test_blob_device_raw_safety_slots() {
   static uint8_t storage[PARAM_STORE_BLOB_SIZE];
   param_store_blob_t *blob = param_store_blob_reset(storage, sizeof(storage));
-  assert(PARAM_DEVICE_SLOT_COUNT == 6U);
+  assert(PARAM_DEVICE_SLOT_COUNT == 8U);
   assert(PARAM_DEVICE_SLOT_COUNT == MOTOR_PROTOCOL_PARAM_SLOT_COUNT);
   assert(PARAM_DEVICE_SLOT_SAFETY == MOTOR_PROTOCOL_PARAM_SLOT_SAFETY);
   assert(PARAM_DEVICE_SLOT_DIRECTION == MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
@@ -457,7 +457,7 @@ static void test_param_value_ok_direction() {
 
   // direction 必须落在 param_field_t 的末位——present 位图与 device_raw 槽序是
   // 契约（追加在 COUNT 前，不重排既有字段）。不重排这件事没有类型保护，靠这条钉住。
-  assert(PARAM_FIELD_DIRECTION == PARAM_FIELD_COUNT - 1);
+  assert(PARAM_FIELD_NODE_ID == PARAM_FIELD_COUNT - 1);
 }
 
 int main() {

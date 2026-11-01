@@ -27,9 +27,11 @@ typedef struct {
 } control_command_target_t;
 
 typedef struct {
-  uint64_t lease_id; // Runtime rechecks this fence before applying pending input.
+  uint64_t session_id;
+  uint64_t lease_id;
   uint32_t sequence;
   uint32_t received_tick_ms;
+  uint32_t valid_until_tick_ms;
   uint8_t target_count;
   control_command_target_t targets[CONTROL_COMMAND_MAILBOX_MAX_TARGETS];
 } control_command_snapshot_t;

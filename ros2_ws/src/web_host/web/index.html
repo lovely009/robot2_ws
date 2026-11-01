@@ -188,7 +188,7 @@
   <!-- 下发（设定值 → 主机侧命令节拍节点，ADR 0014） -->
   <template data-panel-template="command">
     <details class="sendbar" data-fold="send" open>
-      <summary title="/motor_command/setpoint（主机侧 command_streamer 按 100 Hz 出完整快照流）">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
+      <summary title="/control/setpoint（由 ros2_control 控制器执行）">下发<span class="spacer"></span><span class="sum" id="sumSend">--</span></summary>
       <div class="table-wrap">
         <table class="cmd">
           <thead><tr><th>ID</th><th>position rad</th><th>velocity rad/s</th><th>effort N·m</th><th></th></tr></thead>
@@ -320,35 +320,21 @@
 
   <!-- 设备屏：全部参数（驱动板真值 + 固件记录，可回读可写事务） -->
   <template data-panel-template="deviceParams">
-    <details class="card" data-fold="dev" open>
-      <summary>全部参数 <span class="spacer"></span><span class="sum" id="sumDev">未读取</span></summary>
+    <section class="motor-parameters">
+      <p class="firmware-config-notice">在左侧选择电机查看和修改参数。下发修改会提交所有电机的未下发项，保存 W25 后持久化。</p>
       <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
-      <div class="ctrl-row wrap">
-        <button id="btnParamLoad" class="tiny-btn">读取</button>
-        <button id="btnParamApply" class="tiny-btn primary">下发修改</button>
-        <button id="btnParamSave" class="tiny-btn">保存 W25</button>
-        <span class="spacer"></span>
-        <label class="check tiny"><input type="checkbox" id="chkAllParams"> 显示全部</label>
+      <div class="firmware-parameter-actions">
+        <button id="btnParamLoad" class="secondary compact">读取电机参数</button>
+        <button id="btnParamApply" class="primary compact">下发修改</button>
+        <button id="btnParamSave" class="secondary compact">保存 W25</button>
+        <span class="micro" id="sumDev">未读取</span>
       </div>
-      <div id="paramResult" class="result tiny"></div>
-      <div class="table-wrap">
-        <table class="params">
-          <thead>
-            <tr>
-              <th class="num">ID</th><th>型号</th><th>状态</th><th>来源</th>
-              <th class="num">pos_min<small>rad</small></th><th class="num">pos_max<small>rad</small></th>
-              <th class="num">当前位置<small>rad</small></th>
-              <th>限位设置</th>
-              <th class="num">vel_max<small>rad/s</small></th><th class="num">torque_max<small>A</small></th>
-              <th>限位保护</th><th>方向</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="paramRows">
-            <tr class="empty"><td colspan="13">连接后点「读取」载入当前参数</td></tr>
-          </tbody>
-        </table>
+      <div id="paramResult" class="result tiny" role="status"></div>
+      <p id="paramSelectionHint" class="micro" hidden></p>
+      <div id="paramRows" class="motor-parameter-list">
+        <p class="muted">连接后点「读取电机参数」载入当前参数</p>
       </div>
-    </details>
+    </section>
   </template>
 
   <!-- 仿真启动器（HTTP /api/simulation/*；与 rosbridge 无关，数据不进 store，

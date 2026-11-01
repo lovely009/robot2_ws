@@ -17,13 +17,15 @@ import {
   CircleStop,
   PanelLeftClose,
   PanelLeftOpen,
+  Film,
 } from "@lucide/vue";
 import HostLimits from "./components/HostLimits.vue";
 import PanelHost from "./components/PanelHost.vue";
 import CommandHistory from "./components/CommandHistory.vue";
 import DeviceConnection from "./components/DeviceConnection.vue";
-import MotorSpecifications from "./components/MotorSpecifications.vue";
+import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
+import MotionWorkbench from "./components/MotionWorkbench.vue";
 import {
   runtime,
   snapshot,
@@ -35,7 +37,7 @@ import type { Screen } from "./contracts";
 
 const normalize = (hash: string): Screen => {
   const value = hash.replace(/^#\/?/, "");
-  return value === "teach" || value === "sim" ? value : "run";
+  return value === "teach" || value === "sim" || value === "motion" ? value : "run";
 };
 const screen = ref<Screen>(normalize(location.hash));
 const inspector = ref(screen.value === "teach" ? "parameters" : "control");
@@ -53,6 +55,14 @@ watch(navCollapsed, (value) => {
   localStorage.setItem("robot2.navCollapsed", String(value));
 });
 const directDevice = ref(false);
+const deviceParameters = ref<'firmware' | 'motor'>('motor');
+const motorListOpen = ref(true);
+const selectedParameterMotor = computed(() => snapshot.value.motors.find(
+  motor => motor.id === snapshot.value.selectedId)?.id ?? snapshot.value.motors[0]?.id ?? 0);
+function toggleMotorList() {
+  motorListOpen.value = deviceParameters.value !== 'motor' || !motorListOpen.value;
+  deviceParameters.value = 'motor';
+}
 const now = ref(Date.now());
 const rosUrl = ref(
   localStorage.getItem("robot2.rosbridgeUrl") ||
@@ -76,6 +86,12 @@ const scenes = [
     title: "仿真工作台",
     icon: Workflow,
     subtitle: "配置后端、控制端与台架会话",
+  },
+  {
+    id: "motion" as const,
+    title: "动作工作台",
+    icon: Film,
+    subtitle: "导入动作与机器人模型，转换并预览",
   },
 ];
 const title = computed(() => scenes.find((item) => item.id === screen.value)!);
@@ -128,7 +144,7 @@ function keys(event: KeyboardEvent) {
     )
   )
     return;
-  const index = "123".indexOf(event.key);
+  const index = "1234".indexOf(event.key);
   if (index >= 0) go(scenes[index]!.id);
 }
 watch([screen, inspector, observation, observe], async () => {
@@ -284,7 +300,7 @@ onBeforeUnmount(() => {
             ><span class="heading-description">{{ title.subtitle }}</span>
           </h1>
         </div>
-        <div v-show="screen !== 'teach'" class="workspace-summary">
+        <div v-show="screen !== 'teach' && screen !== 'motion'" class="workspace-summary">
           <span
             ><i class="dot" :class="fresh ? 'green' : 'amber'" />{{
               snapshot.online
@@ -301,14 +317,15 @@ onBeforeUnmount(() => {
       <div v-else-if="!initialized" class="startup-status">
         正在加载工作区与控制模块…
       </div>
-      <div v-if="snapshot.mappingError && screen !== 'teach'" class="mapping-warning" role="status">
+      <div v-if="snapshot.mappingError && screen !== 'teach' && screen !== 'motion'" class="mapping-warning" role="status">
         {{ snapshot.mappingError }}；几何预览仍可使用。
       </div>
 
       <div v-show="screen === 'teach'">
         <DeviceConnection @direct="directDevice = $event" />
       </div>
-      <div v-show="screen !== 'teach' || !directDevice" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
+      <MotionWorkbench v-if="screen === 'motion'" />
+      <div v-show="screen !== 'motion' && (screen !== 'teach' || !directDevice)" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
         <ResizeHandle v-show="screen !== 'teach'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
         <ResizeHandle v-show="screen !== 'teach'" class="resize-inspector" label="调整对象检查器宽度" target=".inspector-area" variable="--inspector-width" axis="width" :min="210" reverse />
         <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
@@ -317,9 +334,24 @@ onBeforeUnmount(() => {
             <span>对象浏览器</span>
             <small class="micro">{{ screen !== 'sim' ? '电机反馈' : 'URDF × TF' }}</small>
           </div>
-          <PanelHost id="readout" :active="screen !== 'sim' && !(screen === 'teach' && directDevice)" />
+          <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="参数设置">
+            <div class="eyebrow">参数设置</div>
+            <button :class="{ active: deviceParameters === 'firmware' }" :aria-pressed="deviceParameters === 'firmware'" @click="deviceParameters = 'firmware'">
+              <Cpu :size="14" />固件参数
+            </button>
+            <button :class="{ active: deviceParameters === 'motor' }" :aria-pressed="deviceParameters === 'motor'" :aria-expanded="deviceParameters === 'motor' && motorListOpen" aria-controls="device-motor-list" aria-label="电机参数" @click="toggleMotorList">
+              <SlidersHorizontal :size="14" />电机参数<span class="motor-list-chevron">{{ deviceParameters === 'motor' && motorListOpen ? '▾' : '▸' }}</span>
+            </button>
+            <div v-show="deviceParameters === 'motor' && motorListOpen" id="device-motor-list" class="device-motor-list" role="group" aria-label="电机列表">
+              <button v-for="motor in snapshot.motors" :key="motor.id" :class="{ active: selectedParameterMotor === motor.id }" :aria-pressed="selectedParameterMotor === motor.id" @click="runtime.selectMotor(motor.id)">
+                <span>电机 {{ motor.id }}</span><small>{{ motor.model || '型号待识别' }}</small>
+              </button>
+              <p v-if="!snapshot.motors.length" class="micro">等待电机反馈</p>
+            </div>
+          </nav>
+          <PanelHost id="readout" :active="screen === 'run'" />
           <Teleport to="#run-joints" :disabled="screen !== 'run'" defer>
-            <PanelHost id="jointList" :active="screen !== 'teach'" />
+            <PanelHost id="jointList" :active="screen !== 'teach' && screen !== 'motion'" />
           </Teleport>
           <div class="tree-footer">{{ screen === 'teach' ? '选择电机，查看设备反馈与参数' : '关节数据与设备测量分别显示' }}</div>
         </section>
@@ -336,7 +368,7 @@ onBeforeUnmount(() => {
             >
           </div>
           <div class="stage-body">
-            <PanelHost id="arm" :active="screen !== 'teach'" class="robot-panel" />
+            <PanelHost id="arm" :active="screen !== 'teach' && screen !== 'motion'" class="robot-panel" />
             <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="75" reverse />
             <div
               id="run-joints"
@@ -359,7 +391,7 @@ onBeforeUnmount(() => {
         </div>
         <aside class="inspector-area inspector surface">
           <div class="panel-title">
-            <span>{{ screen === 'teach' ? '电机详细参数' : '对象检查器' }}</span><SlidersHorizontal :size="14" />
+            <span>{{ screen === 'teach' ? (deviceParameters === 'firmware' ? '固件参数设置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数') : '对象检查器' }}</span><SlidersHorizontal :size="14" />
           </div>
           <div v-show="screen !== 'teach'" class="object-heading">
             <div class="eyebrow">
@@ -404,21 +436,21 @@ onBeforeUnmount(() => {
             <button :class="{ active: inspector === 'limits' }" @click="inspector = 'limits'">主机限位</button>
           </div>
           <div class="inspector-scroll">
+            <FirmwareParameters :active="screen === 'teach' && deviceParameters === 'firmware'" />
             <HostLimits v-show="screen !== 'teach'" :editing="inspector === 'limits'" />
             <PanelHost
               id="policy"
-              :active="screen !== 'teach' && inspector === 'control'"
+              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'control'"
             /><PanelHost
               id="command"
-              :active="screen !== 'teach' && inspector === 'control'"
+              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'control'"
             /><PanelHost
               id="deviceParams"
-              :active="screen === 'teach' ? !directDevice : inspector === 'parameters'"
+              :active="screen !== 'motion' && (screen === 'teach' ? !directDevice && deviceParameters === 'motor' : inspector === 'parameters')"
             /><PanelHost
               id="feedforward"
-              :active="screen !== 'teach' && inspector === 'compensation'"
+              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'compensation'"
             />
-            <MotorSpecifications v-if="screen === 'teach' && !directDevice" />
           </div>
         </aside>
         <section v-show="screen !== 'teach'" class="observer-area observer surface">
@@ -452,13 +484,13 @@ onBeforeUnmount(() => {
           <div id="observation-content" v-show="observe" class="observation-body">
             <PanelHost
               id="curve"
-              :active="screen !== 'teach' && observe && observation === 'curve'"
+              :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'curve'"
             /><PanelHost
               id="events"
-              :active="screen !== 'teach' && observe && observation === 'events'"
+              :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'events'"
             /><CommandHistory
               v-show="screen !== 'teach' && observe && observation === 'history'"
-            /><PanelHost id="imu" :active="screen !== 'teach' && observe && observation === 'imu'" />
+            /><PanelHost id="imu" :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'imu'" />
           </div>
         </section>
       </div>

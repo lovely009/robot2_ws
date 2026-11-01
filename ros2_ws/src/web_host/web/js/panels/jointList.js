@@ -3,46 +3,23 @@ import { store, MODEL, DIRTY } from '../core/store.js';
 import { $ } from '../core/format.js';
 import { createJointRow, STALE_MS } from '../components/jointRow.js';
 import { buildJointSliderTrajectory, jointControlError } from '../core/joint_control.js';
-import { pub, ensurePublisher, isConnected, getConnectionGeneration, callService } from '../core/ros.js';
+import { pub, ensurePublisher, isConnected, getConnectionGeneration } from '../core/ros.js';
 
 export { STALE_MS };
 
 export function mount(root, ctx) {
   const list = $('jointRows'), summary = $('sumJoints');
-  let entries = [], key = '', generation = -1, advertised = 0, pending = false, disposed = false, requested = null;
+  let entries = [], key = '', generation = -1, advertised = 0;
   const toggle = root.querySelector('#jointControlEnabled');
   const result = root.querySelector('#jointControlResult');
+  result.textContent = '控制许可由 ros2_control 状态确认';
   const bridgeReady = () => store.conn.connected && store.transmissionStatus.data?.model === MODEL
     && Date.now()-store.transmissionStatus.last >= 0
     && Date.now()-store.transmissionStatus.last < 2500;
+  toggle.disabled = true;
+  toggle.closest('label').title = '控制许可由 /robot_transmission/status 上报；只读显示';
   toggle.closest('label').addEventListener('click', event => event.stopPropagation());
-  toggle.addEventListener('change', async () => {
-    const enabled = toggle.checked, model = MODEL, connection = getConnectionGeneration();
-    toggle.checked = Boolean(store.transmissionStatus.data?.trajectory_enabled);
-    if (!bridgeReady() || pending) return;
-    for (const entry of entries) entry.cancel();
-    pending = true; result.textContent = '正在切换控制许可…';
-    render(new Set([DIRTY.STATUS]));
-    try {
-      const service = store.transmissionStatus.data.control_service
-        || '/firmware_topic_bridge/set_parameters_atomically';
-      const reply = await callService(service, 'rcl_interfaces/srv/SetParametersAtomically', {
-        parameters: [{name: 'enable_trajectory', value: {type: 1, bool_value: enabled}}],
-      });
-      if (disposed || model !== MODEL || connection !== getConnectionGeneration()) return;
-      if (!reply.result?.successful) throw new Error(reply.result?.reason || '主机拒绝切换控制许可');
-      requested = enabled;
-      result.textContent = '主机已接受，等待状态确认';
-    } catch (error) {
-      if (!disposed && model === MODEL && connection === getConnectionGeneration()) {
-        result.textContent = String(error.message || error);
-      }
-    } finally {
-      pending = false;
-      if (!disposed) render(new Set([DIRTY.STATUS]));
-    }
-  });
-  const sendError = name => (pending ? '正在切换控制许可' : '') || jointControlError(store, MODEL, name)
+  const sendError = name => jointControlError(store, MODEL, name)
     || (Date.now()-advertised < 300 ? '关节控制入口准备中' : '');
   const send = (joint, value) => {
     const blocked = sendError(joint.name);
@@ -53,16 +30,10 @@ export function mount(root, ctx) {
   };
   const render = dirty => {
     if (![DIRTY.MOTION, DIRTY.MODEL, DIRTY.SELECTED, DIRTY.BENCH, DIRTY.STATUS,
-      DIRTY.CONN, DIRTY.TF].some(k => dirty.has(k))) return;
+      DIRTY.CONN, DIRTY.COMMAND, DIRTY.TF].some(k => dirty.has(k))) return;
     if (isConnected() && generation !== getConnectionGeneration()) {
       ensurePublisher('jointTrajectory');generation = getConnectionGeneration();advertised = Date.now();
     }
-    if (!pending && requested !== null && bridgeReady()
-        && store.transmissionStatus.data.trajectory_enabled === requested) {
-      result.textContent = requested ? '控制许可已开启' : '只读模式';
-      requested = null;
-    }
-    toggle.disabled = pending || !bridgeReady();
     toggle.checked = bridgeReady() && Boolean(store.transmissionStatus.data?.trajectory_enabled);
     const source = $('jointFeedbackSource'), feedback = store.bench.feedback;
     if (source) {
@@ -93,6 +64,6 @@ export function mount(root, ctx) {
   render(new Set([DIRTY.MODEL]));
   const ageTimer = setInterval(() => render(new Set([DIRTY.MOTION])), 1000);
   return {render, intervalMs: 200, unmount() {
-    disposed = true;clearInterval(ageTimer);for (const entry of entries) entry.dispose();
+    clearInterval(ageTimer);for (const entry of entries) entry.dispose();
   }};
 }

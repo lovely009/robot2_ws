@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <can_bridge_msgs/msg/control_lease.hpp>
 
 #include <chrono>
 #include <functional>

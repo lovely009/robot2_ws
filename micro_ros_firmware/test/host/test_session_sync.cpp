@@ -1,4 +1,4 @@
-// session_sync 特征测试：先钉住既有控制边界的会话/授权行为，再替换实现。
+// 在线电平只能维持或撤销授权；复权必须由新策略显式执行。
 #include "motor_control_internal.h"
 #include "session_sync.h"
 
@@ -12,8 +12,8 @@ void reset() {
   motor_control_init(&g_ctx, nullptr, 0);
 }
 
-// 首边界（无边沿、电平=引导豁免 true）：授权建立、从未连接、无 LOST 事件。
-static void test_boot_exempt() {
+// 引导期即使旧邮箱报告豁免，也不得建立内核授权。
+static void test_boot_never_authorizes() {
   reset();
   control_mailbox_t mb{};
   control_mailbox_init(&mb);
@@ -21,14 +21,14 @@ static void test_boot_exempt() {
   assert(!control_mailbox_take_events(&mb, &events)); // 引导期无边沿
   session_sync_apply(&g_ctx, &events,
       control_mailbox_session_authorized(&mb), 10);
-  assert(g_ctx.authorized);
+  assert(!g_ctx.authorized);
   assert(!g_ctx.agent_connected && !g_ctx.agent_ever_connected);
 
   motor_control_event_t out[8] = {};
   assert(motor_control_drain_events(&g_ctx, out, 8) == 0U);
 }
 
-// 连接边沿：ever/connected 置位、授权在、无撤权事件。
+// 连接边沿只更新 ever/connected，不建立授权或产生撤权事件。
 static void test_connect() {
   reset();
   control_mailbox_t mb{};
@@ -40,7 +40,7 @@ static void test_connect() {
   session_sync_apply(&g_ctx, &events,
       control_mailbox_session_authorized(&mb), 20);
   assert(g_ctx.agent_connected && g_ctx.agent_ever_connected);
-  assert(g_ctx.authorized);
+  assert(!g_ctx.authorized);
   motor_control_event_t out[8] = {};
   assert(motor_control_drain_events(&g_ctx, out, 8) == 0U);
 }
@@ -55,6 +55,8 @@ static void test_disconnect_reports_one_lost() {
   control_mailbox_events_t e{};
   (void)control_mailbox_take_events(&mb, &e);
   session_sync_apply(&g_ctx, &e, true, 20);
+  assert(!g_ctx.authorized);
+  assert(motor_control_set_authorization(&g_ctx, true, 21)); // 模拟已执行的新策略
 
   // 再断（mailbox 清命令并撤销授权电平）
   control_mailbox_request_agent_connected(&mb, false);
@@ -83,8 +85,8 @@ static void test_disconnect_reports_one_lost() {
   assert(diagnostics.event_dropped == 0U);
 }
 
-// 重连：授权恢复（无需显式重授权命令），但仍需新快照才能运动。
-static void test_reconnect_reauthorizes() {
+// 重连不恢复授权，必须等待新策略显式武装。
+static void test_reconnect_never_reauthorizes() {
   reset();
   control_mailbox_t mb{};
   control_mailbox_init(&mb);
@@ -102,11 +104,11 @@ static void test_reconnect_reauthorizes() {
   (void)control_mailbox_take_events(&mb, &e3);
   session_sync_apply(&g_ctx, &e3,
       control_mailbox_session_authorized(&mb), 60);
-  assert(g_ctx.agent_connected && g_ctx.authorized);
+  assert(g_ctx.agent_connected && !g_ctx.authorized);
   assert(g_ctx.require_new_snapshot); // 新快照由 apply_command_snapshot 清除
 }
 
-// 无连接边沿的每边界电平维持：在线每边界幂等重立授权。
+// 无连接边沿时，true 仅保留已有授权，false 幂等撤权。
 static void test_steady_level() {
   reset();
   control_mailbox_events_t e{};
@@ -116,6 +118,8 @@ static void test_steady_level() {
   control_mailbox_request_agent_connected(&mb, true);
   (void)control_mailbox_take_events(&mb, &e);
   session_sync_apply(&g_ctx, &e, true, 20);
+  assert(!g_ctx.authorized);
+  assert(motor_control_set_authorization(&g_ctx, true, 21));
   // 连续无边沿边界
   control_mailbox_events_t empty{};
   session_sync_apply(&g_ctx, &empty, true, 40);
@@ -129,10 +133,10 @@ static void test_steady_level() {
 } // namespace
 
 int main() {
-  test_boot_exempt();
+  test_boot_never_authorizes();
   test_connect();
   test_disconnect_reports_one_lost();
-  test_reconnect_reauthorizes();
+  test_reconnect_never_reauthorizes();
   test_steady_level();
   return 0;
 }

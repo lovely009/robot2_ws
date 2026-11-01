@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 // Offline review only. IDs and bus assignments are deliberately fictional.
 const capturePrefix = process.env.UI_EVIDENCE_PHASE || 'integration-after';
+const captureDirectory = process.env.UI_EVIDENCE_DIR || 'test-results/ui-evidence';
 
 test('整合预览仅消费模拟状态，导航与重连不产生运动授权', async ({page}) => {
+  mkdirSync(captureDirectory, {recursive:true});
   test.setTimeout(90000);
   const publishes: unknown[] = [], services: string[] = [], errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -49,7 +53,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
     document.body.append(badge);
   });
-  await page.screenshot({path:`/workspace/robot2-ui-evidence/${capturePrefix}-desktop.png`});
+  await page.screenshot({path:join(captureDirectory, `${capturePrefix}-desktop.png`)});
   for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台'])
     await page.getByRole('button', {name:scene, exact:true}).click();
   await page.getByRole('button', {name:'重新连接', exact:true}).click();
@@ -76,7 +80,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await expect(page.getByLabel('rosbridge WebSocket 地址')).toBeVisible();
   await page.getByRole('button', {name:'连接设置', exact:true}).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({path:`/workspace/robot2-ui-evidence/${capturePrefix}-mobile.png`});
+  await page.screenshot({path:join(captureDirectory, `${capturePrefix}-mobile.png`)});
   expect(publishes).toEqual([]);
   expect(services).toEqual([]);
   expect(errors).toEqual([]);

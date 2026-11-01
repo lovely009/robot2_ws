@@ -4,6 +4,8 @@
 
 后续时延定位与当前验收边界见 [墙钟跟踪记录](outputs/integration/wall-clock-followup.md)。
 
+2026-11-01 扩大范围后的全部远端分支覆盖核查见 [分支整合清单](outputs/integration/all-branch-review.md)：除受保护主线外的六个分支均已被当前整合分支包含，没有新增待合入提交。提交覆盖完成不代表完整闭环验收通过。
+
 ROS 2 Humble 整机平台。实机只有一条电机执行链：`主机 JTC/MicroRosSystem → robot_supervisor → micro_ros_bridge → micro-ROS MCU → 电机`。主机负责模型、控制权、标准运动接口与诊断；主路径完整计划由主机 JTC 插值，MCU 负责周期目标执行与本地授权期限。
 
 ## 功能与职责

@@ -1,0 +1,99 @@
+{
+  "observed_at_utc": "2026-11-01T15:06:02.448563+00:00",
+  "checkpoint": "32840319467982ae843dd955565787c6c00b2b48",
+  "integration_branch": "integration/mcu-agent-web",
+  "is_shallow": "false",
+  "original_head": "525e3a946b30a2fabd0a6b07cf57a7544ddab251",
+  "original_clean": true,
+  "branches": [
+    {
+      "branch": "dev/robot2_ws",
+      "sha": "525e3a946b30a2fabd0a6b07cf57a7544ddab251",
+      "protected": true,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "excluded_protected",
+      "same_sha_refs": [
+        "refs/heads/work",
+        "refs/remotes/origin/dev/robot2_ws"
+      ]
+    },
+    {
+      "branch": "feat/firmware-agent-topics-v3",
+      "sha": "e410243ae2dbe6eca62bc49c3347dfc8fa8d7dbf",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/feat/firmware-agent-topics-v3"
+      ]
+    },
+    {
+      "branch": "feat/managed-motion",
+      "sha": "6265a6259d9732ad7994445365b08cda551b4c21",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/feat/managed-motion"
+      ]
+    },
+    {
+      "branch": "feat/mcu-lease-v3",
+      "sha": "a8b62a261e8bbfebe407bad1eeb60e88b472eca4",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/feat/mcu-lease-v3"
+      ]
+    },
+    {
+      "branch": "feat/mcu-platform-integration",
+      "sha": "412f19d3f83a018dcf6942f0025914f39e18ba25",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/feat/mcu-platform-integration"
+      ]
+    },
+    {
+      "branch": "feat/shared-robot-description",
+      "sha": "9561cef092b91286df54d251e5a059d9dcb50429",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/feat/shared-robot-description"
+      ]
+    },
+    {
+      "branch": "fix/control-reliability",
+      "sha": "f7211b32dc839dbc22ce34a3ce3304045253efc8",
+      "protected": false,
+      "ancestor_of_checkpoint": true,
+      "not_in_checkpoint": 0,
+      "handling": "already_covered",
+      "same_sha_refs": [
+        "refs/remotes/origin/fix/control-reliability"
+      ]
+    },
+    {
+      "branch": "main",
+      "sha": "6d3e92a1f271c339ee4d9afaa7c00b4a0f19c1eb",
+      "protected": true,
+      "ancestor_of_checkpoint": false,
+      "not_in_checkpoint": 1,
+      "handling": "excluded_protected",
+      "same_sha_refs": [
+        "refs/remotes/origin/main"
+      ]
+    }
+  ]
+}

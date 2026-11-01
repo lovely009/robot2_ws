@@ -216,7 +216,11 @@ class SupervisorNode(Node):
             age = (self.get_clock().now().nanoseconds - request.sync_time_ns) / 1e9
             if not request.sync_time_ns or not 0 <= age <= .25:
                 raise ValueError('maintenance source timestamp expired')
-            if request.kind not in (0, 1, 2) or not 0 < request.request_id < 0x40000000:
+            if (request.kind != ConfigRequest.CONFIG_KIND_SYSTEM_COMMAND
+                    or request.command not in (SystemCommand.COMMAND_REPORT,
+                        SystemCommand.COMMAND_REFRESH, SystemCommand.COMMAND_CLEAR_FAULT)
+                    or request.count or request.targets
+                    or not 0 < request.request_id < 0x40000000):
                 raise ValueError('invalid maintenance kind or request ID')
             if not report:
                 if not self.core.lease_matches(envelope.lease_id, envelope.epoch, envelope.session_id):

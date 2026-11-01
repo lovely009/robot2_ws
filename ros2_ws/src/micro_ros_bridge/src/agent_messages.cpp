@@ -148,54 +148,7 @@ Result encode_agent_config(
   using OldConfig = can_bridge_msgs::msg::ConfigRequest;
   using OldSystem = can_bridge_msgs::msg::SystemCommand;
   Result result;
-  if (in.kind == OldConfig::CONFIG_KIND_FIRMWARE_PARAMETERS) {
-    if (in.request_id >= 0x40000000U || in.motor_id != UINT16_MAX || in.command != 0 || in.count != 1 || in.targets.size() != 1)
-      return reject(result, "固件 topic 配置必须为单项互斥载荷");
-    const auto &target = in.targets[0];
-    if (target.motor_id != UINT16_MAX || target.field >= 6 || !std::isfinite(target.value) ||
-        std::floor(target.value) != target.value || target.value < 1 || target.value > 1000)
-      return reject(result, "固件参数字段或整数值无效");
-    Config encoded;
-    encoded.schema_version = kAgentSchema; encoded.session_id = in.session_id;
-    encoded.issued_stamp = in.sync_time_ns; encoded.request_id = in.request_id;
-    encoded.operation = Config::SET_FIRMWARE_PARAMETERS; encoded.parameters = in.targets;
-    out = std::move(encoded); return result;
-  }
-  if (in.kind == OldConfig::CONFIG_KIND_PARAM_SET) {
-    if (in.targets.size() != in.count || in.count > kParamTargetMax) {
-      return reject(result, "parameter count 与 targets 长度不一致或超过 16");
-    }
-    bool seen[kMotorIdMax + 1][can_bridge_msgs::msg::ParamSetTarget::FIELD_NODE_ID + 1] = {};
-    for (const auto & target : in.targets) {
-      if (!valid_motor_id(target.motor_id) ||
-        target.field > can_bridge_msgs::msg::ParamSetTarget::FIELD_NODE_ID ||
-        !std::isfinite(target.value) || seen[target.motor_id][target.field]) {
-        return reject(result, "parameter motor_id/field/value 非法或重复");
-      }
-      seen[target.motor_id][target.field] = true;
-    }
-    can_bridge_msgs::msg::ParamSetArray legacy;
-    legacy.sync_time_ns = in.sync_time_ns;
-    legacy.request_id = in.request_id;
-    legacy.count = in.count;
-    legacy.targets = in.targets;
-    OldConfig checked;
-    result = encode_config(legacy, checked);
-    if (!result.ok) {
-      return result;
-    }
-    Config encoded;
-    encoded.schema_version = kAgentSchema;
-    encoded.session_id = in.session_id;
-    encoded.issued_stamp = in.sync_time_ns;
-    encoded.request_id = in.request_id;
-    encoded.operation = Config::SET_PARAMETERS;
-    encoded.parameters = in.targets;
-    out = std::move(encoded);
-    return result;
-  }
-
-  if (in.kind != OldConfig::CONFIG_KIND_SYSTEM_COMMAND) {
+  if (in.kind != OldConfig::CONFIG_KIND_SYSTEM_COMMAND || in.count || !in.targets.empty()) {
     return reject(result, "未知 ConfigRequest kind");
   }
   OldSystem legacy;
@@ -208,8 +161,7 @@ Result encode_agent_config(
   if (!result.ok) {
     return result;
   }
-  if (legacy.command != OldSystem::COMMAND_SAVE &&
-    legacy.command != OldSystem::COMMAND_REPORT && !valid_motor_id(legacy.motor_id)) {
+  if (legacy.command != OldSystem::COMMAND_REPORT && !valid_motor_id(legacy.motor_id)) {
     return reject(result, "system command motor_id 必须在 1..64");
   }
 
@@ -223,17 +175,9 @@ Result encode_agent_config(
       encoded.operation = Config::REFRESH_PARAMETERS;
       encoded.motor_id = legacy.motor_id;
       break;
-    case OldSystem::COMMAND_SET_ZERO:
-      encoded.operation = Config::SET_ZERO;
-      encoded.motor_id = legacy.motor_id;
-      break;
     case OldSystem::COMMAND_CLEAR_FAULT:
       encoded.operation = Config::CLEAR_FAULT;
       encoded.motor_id = legacy.motor_id;
-      break;
-    case OldSystem::COMMAND_SAVE:
-      encoded.operation = Config::SAVE;
-      encoded.motor_id = OldSystem::MOTOR_ID_NONE;
       break;
     case OldSystem::COMMAND_REPORT:
       encoded.operation = Config::QUERY_INFO;

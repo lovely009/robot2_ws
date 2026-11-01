@@ -21,8 +21,6 @@ export const TOPICS = {
   devParams: {name: '/motor/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
   sysStatus: {name: '/motor/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   configResult: {name: '/motor/config_result', type: 'can_bridge_msgs/msg/ConfigResult'},
-  paramSet: {name: '/motor/param_set', type: 'can_bridge_msgs/msg/ParamSetArray'},
-  firmwareConfig: {name: '/motor/config_request', type: 'can_bridge_msgs/msg/ConfigRequest'},
   sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
   // 关节侧实测构型；显示和控制都检查其新鲜度。
   jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
@@ -54,9 +52,7 @@ export const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与
   '回读不成功', '本机无记录'];
 // ⚠️ param_device_slot_t 的次序（= DEV_SLOT_NAMES 下标 = 行序 = mismatch_mask 位序），
 // **不是** param_field_t。两套里 field=3 都合法 → 互用不会被拒绝，会静默写错槽位。
-export const PARAM_FIELD = {POS_MIN: 0, POS_MAX: 1, VEL_LIMIT: 2,
-  TORQUE_LIMIT: 3, LIMIT_PROTECT: 4, DIRECTION: 5, T_MAX: 6, NODE_ID: 7};
-export const SYS_CMD = {SAVE: 0, REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
+export const SYS_CMD = {REFRESH: 1, CLEAR_FAULT: 3, REPORT: 4};
 export const MOTOR_ID_NONE = 65535;
 export const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];

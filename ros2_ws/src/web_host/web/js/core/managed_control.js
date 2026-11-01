@@ -98,12 +98,13 @@ export class ManagedControl {
   canSubmitMotion() { return !!this._authorized() && !this.actionBusy; }
 
   maintenance(key, payload) {
+    if (key !== 'sysCmd' || ![1, 3, 4].includes(payload.command)) return false;
     const report = key === 'sysCmd' && payload.command === 4;
     if (!this._fresh() || (!report && (!this._authorized(false) || this.state.armed || this.actionBusy))) {
       this.message = '维护写入需要当前控制权、解除武装，并等待 MCU 失能反馈'; this.changed(); return false;
     }
     const request = {sync_time_ns:payload.sync_time_ns, session_id:this.state.session_id,
-      request_id:payload.request_id, kind:key === 'paramSet' ? 0 : key === 'sysCmd' ? 1 : 2,
+      request_id:payload.request_id, kind:1,
       count:payload.count || 0, targets:payload.targets || [], command:payload.command || 0,
       motor_id:payload.motor_id ?? 65535};
     void this._call('execute_maintenance', 'robot_system_msgs/srv/ExecuteMaintenance', {

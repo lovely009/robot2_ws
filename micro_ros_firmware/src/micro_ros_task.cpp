@@ -9,7 +9,7 @@
 #include "serial_transport.h"
 #include "motor_rt_task.h"
 #include "time_utils.h"
-#include "firmware_parameters.h"
+#include "firmware_config.h"
 #include <rmw_microros/time_sync.h>
 
 #if !defined(MICRO_ROS_TRANSPORT_ARDUINO_SERIAL)
@@ -73,7 +73,7 @@ static void micro_ros_task_fn(void *parameters) {
 
     case MICRO_ROS_LINK_RUN: {
       bool connected = true;
-      if ((uint32_t)(millis() - last_ping) >= 1000U / firmware_parameters_snapshot().agent_ping_hz) {
+      if ((uint32_t)(millis() - last_ping) >= 1000U / FIRMWARE_AGENT_PING_HZ) {
         last_ping = millis();
         connected = RMW_RET_OK == rmw_uros_ping_agent(200, 3);
       }

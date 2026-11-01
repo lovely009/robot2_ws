@@ -6,7 +6,6 @@ authorization before the validation result is accepted. No hardware interface.
 """
 import threading
 import time
-from pathlib import Path
 import uuid
 from types import SimpleNamespace
 

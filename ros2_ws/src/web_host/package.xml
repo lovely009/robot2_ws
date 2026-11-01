@@ -10,8 +10,6 @@
   <exec_depend>robot_transmission</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
-  <exec_depend>python3-can</exec_depend>
-  <exec_depend>python3-canopen</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosbridge_library</exec_depend>
   <exec_depend>can_bridge_msgs</exec_depend>

@@ -210,8 +210,8 @@
     </details>
   </template>
 
-  <!-- 动作库播放（#/teach）：action_library/*.json → 分段轨迹（见
-       js/panels/actionLibrary.js 与主机侧参考实现 traj_play.py） -->
+  <!-- 动作库播放（#/teach）：action_library/*.json → 受监督的主机轨迹，
+       见 js/panels/actionLibrary.js。 -->
   <template data-panel-template="actionLibrary">
     <details class="card" data-fold="actionLibrary" open>
       <summary>动作库<span class="spacer"></span><span class="sum" id="actionSummary">--</span></summary>
@@ -321,19 +321,15 @@
   <!-- 设备屏：全部参数（驱动板真值 + 固件记录，可回读可写事务） -->
   <template data-panel-template="deviceParams">
     <section class="motor-parameters">
-      <p class="firmware-config-notice">在左侧选择电机查看和修改参数。下发修改会提交所有电机的未下发项，保存 W25 后持久化。</p>
-      <div id="paramSummary" class="summary tiny">连接后点「读取」</div>
+      <p class="firmware-config-notice">只读查询设备参数与初始化核验状态。</p>
+      <div id="paramSummary" class="summary tiny" hidden></div>
       <div class="firmware-parameter-actions">
         <button id="btnParamLoad" class="secondary compact">读取电机参数</button>
-        <button id="btnParamApply" class="primary compact">下发修改</button>
-        <button id="btnParamSave" class="secondary compact">保存 W25</button>
         <span class="micro" id="sumDev">未读取</span>
       </div>
       <div id="paramResult" class="result tiny" role="status"></div>
       <p id="paramSelectionHint" class="micro" hidden></p>
-      <div id="paramRows" class="motor-parameter-list">
-        <p class="muted">连接后点「读取电机参数」载入当前参数</p>
-      </div>
+      <div id="paramRows" class="motor-parameter-list"></div>
     </section>
   </template>
 

@@ -18,7 +18,7 @@
 
 #include "sensor_task.h"
 #include "time_utils.h"
-#include "firmware_parameters.h"
+#include "firmware_config.h"
 
 static uint32_t g_publish_fail = 0U;
 uint32_t imu_bridge_publish_fail_count(void) { return g_publish_fail; }
@@ -97,10 +97,9 @@ void imu_bridge_destroy(rcl_node_t *node) {
 void imu_bridge_poll(void) {
   if (!g_ready || !time_clock_valid()) return;
   const uint32_t now = millis();
-  const auto settings = firmware_parameters_snapshot();
   imu_data_t snapshot = {};
   sensor_sample_metadata_t metadata = {};
-  if ((uint32_t)(now - g_imu_tick) >= 1000U / settings.imu_hz &&
+  if ((uint32_t)(now - g_imu_tick) >= 1000U / FIRMWARE_IMU_REPORT_HZ &&
       sensor_task_get_imu_sample(&snapshot, &metadata) && metadata.clock_valid &&
       (!g_have_imu_sequence || metadata.sequence != g_imu_sequence)) {
     fill_imu_msg(&snapshot, &metadata);
@@ -112,7 +111,7 @@ void imu_bridge_poll(void) {
     g_have_imu_sequence = true;
     g_imu_tick = now;
   }
-  if ((uint32_t)(now - g_temp_tick) < 1000U / settings.temperature_hz) return;
+  if ((uint32_t)(now - g_temp_tick) < 1000U / FIRMWARE_TEMPERATURE_REPORT_HZ) return;
   g_temp_tick = now;
   float temperature = 0;
   if (sensor_task_get_temperature(&temperature, &metadata) && metadata.clock_valid &&

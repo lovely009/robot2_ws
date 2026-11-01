@@ -2,7 +2,7 @@
 <package format="3">
   <name>robot_motion</name>
   <version>0.1.0</version>
-  <description>Supervised standard trajectory actions executed by the micro-ROS MCU.</description>
+  <description>Supervised standard trajectory actions executed by the host JTC.</description>
   <maintainer email="dev@robot.local">robot dev</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>

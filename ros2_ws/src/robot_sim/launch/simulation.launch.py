@@ -1,7 +1,7 @@
-"""一条入口启动机械臂、CAN 电机模拟器和 ros2_control 驱动端。
+"""启动机械臂和 CAN 电机模拟器，接收外部控制器或 MCU 固件命令。
 
 软件闭环（默认）：
-  position_controller -> motor_hardware_interface -> CAN transport
+  external CAN controller -> CAN transport
   -> motor_sim -> 被控对象 -> /joint_states -> motor_sim
 
 「被控对象」由 backend:= 选：gazebo（gz sim + gz_ros2_control 的 effort 控制器）或
@@ -15,8 +15,7 @@ backend:=mujoco 要求模型目录自带 mujoco/<模型名>.xml，且不支持 g
 （MJCF 的重力在生成期固定）。
 
 transport:=vcan 默认自动创建私有虚拟总线；socketcan 与 slcan 用于接入外部
-CAN 设备。slcan 的 host 模式需要两只 CANable 接在同一条物理总线上，避免两个
-进程争用同一个串口。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
+CAN 设备。controller_mode:=firmware 使用 FDCAN 台架模拟器，支持
 单个 SocketCAN 接口或单 CANable + STM32 固件的 HIL 路径。
 """
 
@@ -44,18 +43,16 @@ from launch.actions import (
     DeclareLaunchArgument,
     EmitEvent,
     ExecuteProcess,
-    GroupAction,
     IncludeLaunchDescription,
     LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
-    TimerAction,
 )
 from launch.event_handlers import OnProcessExit, OnShutdown
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node, PushRosNamespace
+from launch_ros.actions import Node
 
 
 def _bool(value: str) -> bool:
@@ -595,8 +592,10 @@ def _mit_torque_limit_cli(simulation: dict[str, Any]) -> str:
 
 
 def launch_simulation(context):
-    transport = _required(context, "transport")
     controller_mode = _required(context, "controller_mode")
+    if controller_mode == "host":
+        raise RuntimeError("controller_mode:=host has been retired; use firmware or external")
+    transport = _required(context, "transport")
     backend = LaunchConfiguration("backend").perform(context).strip()
     simulator_only = _bool(
         LaunchConfiguration("simulator_only").perform(context))
@@ -604,8 +603,8 @@ def launch_simulation(context):
         LaunchConfiguration("start_fdcan_sim").perform(context))
     if transport not in {"vcan", "socketcan", "slcan"}:
         raise RuntimeError("transport must be vcan, socketcan or slcan")
-    if controller_mode not in {"host", "external", "firmware"}:
-        raise RuntimeError("controller_mode must be host, external or firmware")
+    if controller_mode not in {"external", "firmware"}:
+        raise RuntimeError("controller_mode must be external or firmware")
     if backend not in {"gazebo", "mujoco"}:
         raise RuntimeError("backend must be gazebo or mujoco")
     try:
@@ -742,11 +741,7 @@ def launch_simulation(context):
         driver_endpoint = vcan_interface
     elif transport == "socketcan":
         sim_endpoint = _required(context, "sim_interface")
-        driver_endpoint = (
-            _required(context, "driver_interface")
-            if controller_mode == "host"
-            else sim_endpoint
-        )
+        driver_endpoint = sim_endpoint
         interface_kinds = {
             interface: _validate_socketcan_interface(interface)
             for interface in (sim_endpoint, driver_endpoint)
@@ -759,17 +754,7 @@ def launch_simulation(context):
             )
     else:
         sim_endpoint = _required(context, "sim_tty")
-        driver_endpoint = (
-            _required(context, "driver_tty")
-            if controller_mode == "host"
-            else sim_endpoint
-        )
-        if controller_mode == "host":
-            if Path(sim_endpoint).resolve() == Path(driver_endpoint).resolve():
-                raise RuntimeError(
-                    "SLCAN host loop needs separate driver_tty and sim_tty devices; "
-                    "one serial device cannot be opened by both processes"
-                )
+        driver_endpoint = sim_endpoint
         for tty in {sim_endpoint, driver_endpoint}:
             if not Path(tty).exists():
                 raise RuntimeError(f"SLCAN device does not exist: {tty}")
@@ -780,7 +765,6 @@ def launch_simulation(context):
     web_share = None
     agent_tty = None
     agent_waiter_script = None
-    driver_model = None
     if controller_mode == "firmware":
         motor_ids = [motor["id"] for motor in simulation["motors"]]
         if len(motor_ids) != len(set(motor_ids)):
@@ -850,14 +834,6 @@ def launch_simulation(context):
                     f"installed micro-ROS Agent launcher helper not found or not "
                     f"executable: {agent_waiter_script}"
                 )
-    elif controller_mode == "host":
-        driver_model = (
-            share / "models" / model / "urdf" / f"{model}.canfd.xacro"
-        )
-        if not driver_model.is_file():
-            raise RuntimeError(f"CAN driver xacro does not exist: {driver_model}")
-        if not (hardware_share / "launch" / "hardware.launch.py").is_file():
-            raise RuntimeError(f"hardware launch file not found under {hardware_share}")
 
     plant_launch_file = share / "launch" / (
         "mujoco.launch.py" if backend == "mujoco" else "gazebo.launch.py"
@@ -1175,29 +1151,6 @@ def launch_simulation(context):
                 ),
             ]
         )
-        if controller_mode == "host":
-            driver_launch = IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    str(hardware_share / "launch" / "hardware.launch.py")
-                ),
-                launch_arguments={
-                    "model_xacro": str(driver_model),
-                    "motor_config_file": str(driver_config),
-                    f"interface_{simulation['buses'][0]}": driver_endpoint,
-                    "controller_manager_name": "/driver/controller_manager",
-                    "shutdown_on_manager_exit": "true",
-                }.items(),
-            )
-            actions.append(
-                TimerAction(
-                    period=1.0,
-                    actions=[
-                        GroupAction(
-                            actions=[PushRosNamespace("driver"), driver_launch]
-                        )
-                    ],
-                )
-            )
 
     cleanup_actions = [
         ExecuteProcess(
@@ -1238,9 +1191,9 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "controller_mode",
-                default_value="host",
+                default_value="external",
                 description=(
-                    "host (ROS driver), external (external CAN controller), "
+                    "external (external CAN controller), "
                     "firmware (STM32 HIL over SocketCAN or SLCAN)"
                 ),
             ),
@@ -1283,9 +1236,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("vcan_interface", default_value="robot_vcan0"),
             DeclareLaunchArgument("remove_vcan_on_exit", default_value="true"),
             DeclareLaunchArgument("sim_interface", default_value="can1"),
-            DeclareLaunchArgument("driver_interface", default_value="can0"),
             DeclareLaunchArgument("sim_tty", default_value=""),
-            DeclareLaunchArgument("driver_tty", default_value=""),
             DeclareLaunchArgument("agent_tty", default_value=""),
             DeclareLaunchArgument("start_web_host", default_value="true"),
             DeclareLaunchArgument("start_micro_ros_agent", default_value="false"),

@@ -330,6 +330,7 @@ tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size:
 th small { color: var(--dim-2); opacity: .8; font-weight: 400; font-size: 9px;
   text-transform: none; }
 /* 核对总览条（paramSummary）：结论放最显眼处 */
+.summary[hidden] { display: none; }
 .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
   padding: 6px 9px; margin-bottom: var(--gap-sm); border: 1px solid var(--line);
   border-radius: var(--radius-sm); background: var(--panel-2); }

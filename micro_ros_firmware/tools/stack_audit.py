@@ -44,7 +44,6 @@ TASK_STACKS = {
     "led_task_fn": 256 * 4,
     "sensor_task_fn": 512 * 4,
     "motor_rt_task_fn": 1024 * 4,
-    "storage_task_fn": 1024 * 4,
     "micro_ros_task_fn": 8192 * 4,
 }
 

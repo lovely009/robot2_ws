@@ -459,12 +459,12 @@ def test_downlink_topics_use_ros2_control_client():
         'stop': '/control/stop',
         'jointTrajectory': '/arm_controller/joint_trajectory',
         'policy': '/motor/policy_array',
-        'paramSet': '/motor/param_set',
         'sysCmd': '/motor/system_command',
     }
     for key, topic in expected.items():
         m = re.search(rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
         assert m and m.group(1) == topic, f'{key} 未迁移到 {topic}'
+    assert not re.search(r"^\s*(?:paramSet|firmwareConfig):", js, re.M)
     assert "stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'}" in js
 
 

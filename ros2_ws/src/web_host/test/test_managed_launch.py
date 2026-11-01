@@ -26,7 +26,9 @@ def test_managed_web_exposes_intents_but_no_internal_or_wire_writes():
     assert not any('/managed/' in topic or '/micro_ros_' in topic
                    for topic in literal_eval(params['topics_pub_glob']))
     assert '/robot/state' in literal_eval(params['topics_sub_glob'])
+    assert {'/control/status', '/control/trajectory_state'} <= set(literal_eval(params['topics_sub_glob']))
     assert '/robot/authorize_motion' in literal_eval(params['services_glob'])
+    assert '/robot/execute_maintenance' in literal_eval(params['services_glob'])
     context.launch_configurations['control_mode'] = 'readonly'
     params = evaluate_parameters(context, getattr(module.web_nodes(context)[0], '_Node__parameters'))[0]
     assert literal_eval(params['topics_pub_glob']) == []

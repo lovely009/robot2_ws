@@ -9,6 +9,6 @@ setup(
     ],
     install_requires=['setuptools'], zip_safe=True,
     maintainer='robot dev', maintainer_email='dev@robot.local',
-    description='Supervised standard trajectory actions executed by the MCU',
+    description='Supervised standard trajectory actions executed by the host JTC',
     license='Apache-2.0', tests_require=['pytest'],
 )

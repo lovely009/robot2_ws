@@ -52,7 +52,7 @@ def stop(process):
 
 
 class ManagedNativeFixture:
-    def __init__(self, folder, *, domain=191):
+    def __init__(self, folder, *, domain=191, driver_file=None, urdf_file=None, model_name='sil37'):
         library=os.environ.get('ROBOT2_SIL_LIBRARY')
         if not library: pytest.skip('explicit production native SIL library required')
         self.folder=Path(folder);self.folder.mkdir(parents=True,exist_ok=True)
@@ -68,6 +68,25 @@ class ManagedNativeFixture:
             f'<joint name="j{i}" type="revolute"><parent link="base"/><child link="l{i}"/>'
             '<axis xyz="0 1 0"/><limit lower="-1" upper="1" velocity="1" effort="10"/></joint>'
             for i in range(1,N+1))+'</robot>')
+        self.model_name = model_name
+        self.robot_id = model_name + "-fictional"
+        if (driver_file is None) != (urdf_file is None):
+            raise ValueError('driver_file and urdf_file must be provided together')
+        if driver_file is not None:
+            self.driver.write_text(Path(driver_file).read_text())
+            self.urdf.write_text(Path(urdf_file).read_text())
+        from robot_transmission import Model
+        self.model = Model.load(str(self.driver))
+        doc = yaml.safe_load(self.driver.read_text())['motor_hardware']
+        motors = sorted(doc['motors'].values(), key=lambda m: m['id'])
+        self.motor_ids = [m['id'] for m in motors]
+        if self.motor_ids != list(range(1, len(motors)+1)):
+            raise ValueError('native SIL requires contiguous motor IDs beginning at 1')
+        bus_names = sorted(doc['buses'])
+        self.bus_indices = [bus_names.index(m['bus']) for m in motors]
+        self.model_names = [m['type'] for m in motors]
+        self.joint_names = list(self.model.joint_names)
+        self.gains = [m.get('command', {'kp':30.,'kd':1.}) for m in motors]
         self.environment=dict(os.environ,ROS_DOMAIN_ID=str(domain),ROS_LOCALHOST_ONLY='1')
         self.affinity_before=os.sched_getaffinity(0)
         requested=os.environ.get('ROBOT2_SIL_CPUS','')
@@ -81,7 +100,7 @@ class ManagedNativeFixture:
         # production child processes without changing later test environments.
         with patch.dict(os.environ,ROS_DOMAIN_ID=str(domain),ROS_LOCALHOST_ONLY='1'):
             rclpy.init(args=[],context=self.context,domain_id=domain)
-            self.device=NativeDevice(library,self.context)
+            self.device=NativeDevice(library,self.context, models=self.model_names, buses=self.bus_indices)
         self.executor=SingleThreadedExecutor(context=self.context);self.executor.add_node(self.device)
         self.thread=threading.Thread(target=self.executor.spin,daemon=True)
         self.processes={};self.logs=[];self.latest=None;self.host={};self.controls=[]
@@ -127,10 +146,11 @@ class ManagedNativeFixture:
             tick=message.tick_ms,authorized=message.lease_active)
 
     def _calibrate(self):
-        report=CalibrationState(robot_id='sil37-fictional',model_name='sil37',
+        report=CalibrationState(robot_id=self.robot_id,model_name=self.model_name,
             calibration_id='fictional-software-fixture-only',config_hash=self.fingerprint,
-            valid=True,commissioned=True,motor_ids=list(range(1,N+1)),bus_indices=[i%3 for i in range(N)],
-            protocols=[1]*N,model_names=['cerb_r48_101']*N,joint_names=[f'j{i}' for i in range(1,N+1)])
+            valid=True,commissioned=True,motor_ids=self.motor_ids,bus_indices=self.bus_indices,
+            protocols=[0 if name.startswith('vaxor_') else 1 for name in self.model_names],
+            model_names=self.model_names,joint_names=self.joint_names)
         report.header.stamp=self.device.get_clock().now().to_msg();self.calibration.publish(report)
 
     def _renew(self):
@@ -145,9 +165,9 @@ class ManagedNativeFixture:
         launch=Path(get_package_share_directory('motor_hardware_interface'))/'launch/host_trajectory.launch.py'
         commands={
             'supervisor':[str(supervisor),'--ros-args','-p',f'driver_file:={self.driver}','-p',f'urdf_file:={self.urdf}',
-                '-p','robot_id:=sil37-fictional','-p','model_name:=sil37','-p','allow_trajectories:=true'],
+                '-p',f'robot_id:={self.robot_id}','-p',f'model_name:={self.model_name}','-p','allow_trajectories:=true'],
             'bridge':[str(bridge)],
-            'control':['ros2','launch',str(launch),f'motor_config_file:={self.driver}',f'urdf_file:={self.urdf}','start_controllers:=true'],
+            'control':['ros2','launch',str(launch),f'motor_config_file:={self.driver}',f'urdf_file:={self.urdf}',f'model:={self.model_name}','start_controllers:=true'],
         }
         for index,(name,command) in enumerate(commands.items(),start=1):
             if self.cpus: command=['taskset','-c',str(self.cpus[index]),*command]
@@ -185,10 +205,11 @@ class ManagedNativeFixture:
         return message
 
     def enable(self):
-        self.policy_pub.publish(self.envelope('policy',MotorPolicyArray(count=N,targets=[
-            MotorPolicyTarget(motor_id=i+1,enabled=True,kp=30.,kd=1.) for i in range(N)])))
+        self.policy_pub.publish(self.envelope('policy',MotorPolicyArray(count=len(self.motor_ids),targets=[
+            MotorPolicyTarget(motor_id=mid,enabled=True,kp=float(gain['kp']),kd=float(gain['kd']))
+            for mid,gain in zip(self.motor_ids,self.gains)])))
         wait(lambda:bool(self.controls) and all(s.policy_enabled for s in self.controls[-1].states)
-            and all(self.device.states[i*10+1] for i in range(N)))
+            and all(self.device.states[i*10+1] for i in range(len(self.motor_ids))))
 
     def goal(self,target,seconds,*,bind=True,feedback=None,points=2):
         identifier=UUID(uuid=list(uuid.uuid4().bytes))
@@ -198,11 +219,14 @@ class ManagedNativeFixture:
                 session_id=self.lease.session_id,sequence=self.sequence,goal_id=identifier.uuid)
             request.header.stamp=self.device.get_clock().now().to_msg()
             self.call(AuthorizeMotion,'authorize_motion',request)
-        goal=FollowJointTrajectory.Goal();goal.trajectory.joint_names=[f'j{i}' for i in range(1,N+1)]
-        initial=self.device.positions()
+        goal=FollowJointTrajectory.Goal();goal.trajectory.joint_names=self.joint_names
+        from robot_transmission import Axis
+        measured = self.device.positions()
+        joints = self.model.actuator_to_joint({name:Axis(measured[mid-1]) for name,mid in self.model.actuator_ids.items()})
+        initial=[joints[name].position for name in self.joint_names]
         for index in range(points):
             amount=index/(points-1);time_ns=round(seconds*amount*1e9)
-            point=JointTrajectoryPoint(positions=[p+(target-p)*amount for p in initial],velocities=[0.]*N)
+            point=JointTrajectoryPoint(positions=[p+(target-p)*amount for p in initial],velocities=[0.]*len(self.joint_names))
             point.time_from_start.sec=time_ns//1000000000;point.time_from_start.nanosec=time_ns%1000000000
             goal.trajectory.points.append(point)
         self.device.record('fixture_phase',phase='send_goal',bound=bind)

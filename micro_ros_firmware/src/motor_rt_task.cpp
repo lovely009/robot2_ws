@@ -17,9 +17,8 @@
 #include "motor_protocol_adapter.h"
 #include "motor_tx_router.h"
 #include "session_sync.h"
-#include "storage_task.h"
-#include "param_store_blob.h"
-#include "firmware_parameters.h"
+#include "firmware_config.h"
+#include "storage_boot.h"
 
 // 各库电机容量须一致；RX ring 深度不是电机容量，不纳入此约束。
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_COMMAND_MAILBOX_MAX_TARGETS,
@@ -53,6 +52,9 @@ static const uint32_t kRxPopBatch = 8U;             // 单次批量弹出（栈�
 static const uint32_t kTxCollectBudget =
     MOTOR_TX_ROUTER_LOGICAL_CAPACITY; // 每 1ms 最多取走内核待发帧数
 static const uint32_t kConfigDrainPerBoundary = 4U; // 每个控制边界最多转发配置数
+static const motor_control_stored_params_t *g_stored_params;
+static size_t g_stored_count;
+
 static const uint32_t kDiscoverySyncPeriodMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
 // SYNC 心跳维持 CERB 状态上报；VAXOR 自推周期由设备配置决定。
 
@@ -65,9 +67,6 @@ static trajectory_transaction::Coordinator g_trajectory;
 static bool g_clock_requested = false;
 
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
-static motor_control_stored_params_t
-    g_stored_params[PARAM_STORE_RECORD_COUNT];
-static size_t g_stored_count = 0U;
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
 
@@ -181,6 +180,8 @@ bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
 // mailbox 无内部锁，配置读写须共用临界区；校验与门禁由 mailbox/内核负责。
 bool motor_rt_submit_config(
     const control_mailbox_config_request_t *request) {
+  if (!request || (request->kind != CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS &&
+      request->kind != CONTROL_MAILBOX_CONFIG_CLEAR_FAULT)) return false;
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
   taskEXIT_CRITICAL();
@@ -507,59 +508,7 @@ static void convert_config(const control_mailbox_config_request_t *in,
   // kind 数值契约一致（1..6、8..14；7 是内核专用 READ_IDENTITY 不经
   // mailbox，上方 static_assert 编译期锁），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
-  switch (in->kind) {
-  case CONTROL_MAILBOX_CONFIG_SET_MODE:
-    out->mode = in->value.mode;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_GAINS:
-    out->kp = in->value.gains.kp;
-    out->kd = in->value.gains.kd;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS:
-    out->position_limits.min_position_rad =
-        in->value.position_limits.min_position_rad;
-    out->position_limits.max_position_rad =
-        in->value.position_limits.max_position_rad;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_ENABLE:
-    out->enable = in->value.enable;
-    out->confirm_unprotected = in->value.confirm_unprotected;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT:
-    out->max_velocity_rad_s = in->value.max_velocity_rad_s;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT:
-    out->max_torque_nm = in->value.max_torque_nm;
-    break;
-  case CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS:
-    break;   // 无载荷：只凭 motor_id 发起 4 个 SDO upload
-  case CONTROL_MAILBOX_CONFIG_SET_ZERO:
-    break;   // 无载荷：只凭 motor_id 写 0x2531（设零位，仅失能态）
-  case CONTROL_MAILBOX_CONFIG_CLEAR_FAULT:
-    break;   // 无载荷：只凭 motor_id 发厂家清错帧
-  case CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT:
-    out->safety_protect_raw = in->value.safety_protect_raw;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_DIRECTION:
-    out->direction_raw = in->value.direction_raw;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_T_MAX:
-    out->t_max_raw = in->value.t_max_raw; break;
-  case CONTROL_MAILBOX_CONFIG_SET_NODE_ID:
-    out->new_node_id = in->value.new_node_id; break;
-  case CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH:
-    out->save_slots = in->value.save_slots;
-    break;
-  case CONTROL_MAILBOX_CONFIG_SET_POLICY:
-    out->enable = in->value.policy.enable;
-    out->kp = in->value.policy.kp;
-    out->kd = in->value.policy.kd;
-    out->policy_generation = in->value.policy.generation;
-    out->confirm_unprotected = in->value.policy.confirm_unprotected;
-    break;
-  default:
-    break;
-  }
+
 }
 
 static void control_boundary(uint32_t now_ms) {
@@ -599,8 +548,7 @@ static void control_boundary(uint32_t now_ms) {
   // boot 存储参数：Profile 未绑定的电机保留待套用位，后续边界自动重试。
   // 无记录（count=0）时也必须调用：内核据此把"记录已就位（哪怕是没有记录）"
   // 告知每个表项，上电设备参数回读才会发起（见 motor_control_config_step 0b）。
-  motor_control_apply_stored_params(g_motor_control, g_stored_params,
-      g_stored_count, now_ms);
+  motor_control_apply_stored_params(g_motor_control, g_stored_params, g_stored_count, now_ms);
 
   // 写事务只更新内存记录与脏位；COMMAND_SAVE 显式触发设备 Flash 和 W25 保存。
 }
@@ -669,7 +617,7 @@ static void motor_rt_task_fn(void *pv_parameters) {
     taskEXIT_CRITICAL();
     // 配置周期的控制边界：按 millis 差触发，不补发过期边界。
     if ((uint32_t)(now_ms - last_control_ms) >=
-        1000U / firmware_parameters_snapshot().motor_command_hz) {
+        FIRMWARE_MOTOR_COMMAND_PERIOD_MS) {
       last_control_ms = now_ms;
       control_boundary(now_ms);
     }
@@ -692,9 +640,6 @@ bool motor_rt_task_start(void) {
   if (g_task_started) {
     return true;
   }
-  // 注入参数快照提供者：storage 任务 save 时回调（打破 storage→motor_rt
-  // 任务头反向依赖；临界区仍在 motor_rt_copy_param_views 内部）。
-  storage_task_set_param_snapshot(motor_rt_copy_param_views);
   // mailbox 与内核先于任务初始化；内核 adapter 列表构造注入。
   motor_tx_router_init(&g_tx_router);
   control_mailbox_init(&g_control_mailbox);
@@ -702,17 +647,7 @@ bool motor_rt_task_start(void) {
   const motor_protocol_adapter_t *const *adapters =
       motor_protocol_adapter_registry(&adapter_count);
   motor_control_init(g_motor_control, adapters, adapter_count);
-  // boot 存储参数快照（storage 任务先于本任务启动；无有效 blob 时 count=0）。
-  // 保存进静态副本：W25 的新值下次启动才生效，运行期不再引用 storage 任务。
-  size_t stored_count = 0U;
-  const motor_control_stored_params_t *stored =
-      storage_boot_params(&stored_count);
-  if (stored_count > PARAM_STORE_RECORD_COUNT) {
-    stored_count = PARAM_STORE_RECORD_COUNT;
-  }
-  memcpy(g_stored_params, stored,
-      stored_count * sizeof(motor_control_stored_params_t));
-  g_stored_count = stored_count;
+  g_stored_params = storage_boot_params(&g_stored_count);
   // 型号绑定不需要注入：内核在发现建档/重连时向设备读自报身份并查型号
   // 目录（协议 adapter 的 READ_IDENTITY 事务），无身份读对象的协议回退到
   // "协议内唯一型号"。表外设备保持未绑定不可控。

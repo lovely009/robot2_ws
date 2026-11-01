@@ -97,3 +97,11 @@ it('queued slider targets expire on connection changes and cannot replay after c
   vi.advanceTimersByTime(100);sender.update(.7,2);
   expect(sent).toEqual([.1,.3,.5]);
 });
+
+it('local prototype uses its native route without requiring a JTC service', () => {
+  const s=Object.assign(state(),{runtimeMode:'prototype'});
+  s.commandStatus={last:0,data:{}} as any;
+  expect(api.jointControlError(s,'arm','yaw',1100)).toBe('');
+  s.transmissionStatus.data.model='other';
+  expect(api.jointControlError(s,'arm','yaw',1100)).toContain('模型');
+});

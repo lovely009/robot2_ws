@@ -1,4 +1,4 @@
-import { store, MODEL } from '../core/store.js';
+import { store, MODEL, selectJoint, selectGroups } from '../core/store.js';
 import { buildJointTrajectory, jointControlError } from '../core/joint_control.js';
 import { pub, ensurePublisher, isConnected, getConnectionGeneration } from '../core/ros.js';
 
@@ -25,7 +25,11 @@ export function mount(root, {onStop}) {
     const value=store.jointStates?.byName?.[select.value]?.position;
     target.value=Number.isFinite(value) ? String(value) : '';
   };
-  select.onchange=() => {store.selectedJoint=select.value;selected=select.value;read();};
+  select.onchange=() => {
+    const group=store.modelTransmissions.groups.find(g=>g.joints.includes(select.value));
+    if (group) {store.selectedId=Number(group.motors[0].id);selectGroups([group.name]);}
+    selectJoint(select.value);selected=select.value;read();
+  };
   box.querySelector('[data-joint-read]').onclick=read;
   box.querySelector('[data-joint-stop]').onclick=onStop;
   send.onclick=() => {

@@ -51,7 +51,7 @@ setup(
         *_web_data_files(),
         *_action_library_files(),
     ],
-    install_requires=['setuptools', 'python-can>=4.6,<5', 'canopen>=2.4,<3'],
+    install_requires=['setuptools'],
     zip_safe=True,
     maintainer='ly',
     maintainer_email='ly@todo.todo',

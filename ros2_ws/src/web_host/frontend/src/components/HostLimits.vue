@@ -43,7 +43,7 @@ function save() {
 }
 </script>
 <template>
-  <section class="host-limits">
+  <section v-if="editing || !loaded || saved.length || message" class="host-limits">
     <div class="saved-limits" aria-label="当前已保存主机限位">
       <strong>当前已保存主机限位 · rad</strong>
       <p v-if="!loaded">正在读取…</p>

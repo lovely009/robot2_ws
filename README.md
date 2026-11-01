@@ -23,7 +23,7 @@ ROS 2 Humble 整机平台。实机只有一条电机执行链：`主机 JTC/Micr
 | `robot_sim` / `motor_sim` | 仿真、协议级模拟和 HIL 支撑 |
 | `robot_bringup` / `web_host` | 托管启动和网页控制客户端 |
 
-模型已经从 `robot_sim/models` 迁移到 `robot_description/models`；仿真与真机引用同一份资产。原 `CanFdSystem` 实机插件不再导出，`hardware.launch.py` 拒绝启动；`mock_control.launch.py` 仅允许官方 `mock_components/GenericSystem`，用于验证标准控制器。
+模型已经从 `robot_sim/models` 迁移到 `robot_description/models`；仿真与真机引用同一份资产。旧 `CanFdSystem` 实现及专属配置已移除，`hardware.launch.py` 保留拒绝启动的迁移提示；`mock_control.launch.py` 仅允许官方 `mock_components/GenericSystem`，用于验证标准控制器。
 
 ## 构建与启动
 
@@ -71,6 +71,8 @@ ros2 launch robot_bringup robot.launch.py \
 主路径标准 Action 使用主机 JTC 的完整计划和新鲜关节反馈，支持位置/速度路点；加速度、非零 effort 和预约起点被明确拒绝。MCU 的旧缓冲上传仍为完整组装、最多 256 个单电机路点，不代表执行中流式续段能力；主机长计划不能据此声称 MCU 有流式能力。取消请求转交 JTC，驱动使能保持独立。完整运行回归尚未通过，详见本轮结果。
 
 MCU 授权使用本地单调截止时间，覆盖缓冲轨迹；旧租约、重复心跳和旧命令不能恢复运动。网页隐藏、断线或状态过期会清除意图并停止续租；重新进入页面需要重新取得控制权。
+
+运行期系统/电机参数设置、设零和保存已移除。固件不提供 ROS 参数服务，仅在上电只读加载已有 W25 电机记录，不提供擦写或保存；频率改为编译期固定配置。保留电机上电必要归一化、只读查询和故障清除，见 [固定配置说明](micro_ros_firmware/docs/system_parameters.md)。
 
 ## 验证
 

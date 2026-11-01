@@ -131,17 +131,17 @@ TEST_F(BridgeTest, InvalidClockStatusIsVisibleButCannotAuthorizeMotion)
 TEST_F(BridgeTest, ConfigWaitsForReceiptThenAcknowledgesTerminalAndRejectsConflict)
 {
   start(); status.config_request_high_water = 50; publish_status(); run();
-  SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.command = SystemCommand::COMMAND_SET_ZERO;
+  SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.command = SystemCommand::COMMAND_REFRESH;
   cmd.motor_id = 64; cmd.request_id = 7; system_command_pub->publish(cmd);
   ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_ZERO;});}));
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});}));
   auto wire = *std::find_if(configs.begin(),configs.end(),[](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_ZERO;});
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});
   EXPECT_EQ(wire.request_id, 51u);
   auto next = cmd; next.request_id = 8; next.sync_time_ns = stamp(); system_command_pub->publish(next);
   run(); EXPECT_EQ(std::count_if(configs.begin(),configs.end(),[](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_ZERO;}), 1);
-  AgentConfigResult result; result.request_id = 51; result.operation = AgentConfigRequest::SET_ZERO;
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;}), 1);
+  AgentConfigResult result; result.request_id = 51; result.operation = AgentConfigRequest::REFRESH_PARAMETERS;
   result.state = AgentConfigResult::PENDING; status.results = {result};
   ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
     return c.request_id == 52;});}));
@@ -155,7 +155,7 @@ TEST_F(BridgeTest, ConfigWaitsForReceiptThenAcknowledgesTerminalAndRejectsConfli
   cmd.motor_id = 63; cmd.sync_time_ns = stamp(); system_command_pub->publish(cmd);
   ASSERT_TRUE(spin([&] {return results.back().status == ConfigResult::STATUS_CONFLICT;}));
 }
-TEST_F(BridgeTest, FirmwareParameterTerminalKeepsStatusFlowAndIsAcknowledged)
+TEST_F(BridgeTest, ReadOnlyMaintenanceTerminalKeepsStatusFlowAndIsAcknowledged)
 {
   start();
   std::vector<SystemStatus> systems;
@@ -163,22 +163,19 @@ TEST_F(BridgeTest, FirmwareParameterTerminalKeepsStatusFlowAndIsAcknowledged)
   auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
-  request->request.kind = ConfigRequest::CONFIG_KIND_FIRMWARE_PARAMETERS;
+  request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
   request->request.motor_id = SystemCommand::MOTOR_ID_NONE;
   request->request.request_id = 7;
   request->request.sync_time_ns = stamp();
-  request->request.count = 1;
-  ParamSetTarget target;
-  target.motor_id = SystemCommand::MOTOR_ID_NONE;
-  target.field = 1;
-  target.value = 100;
-  request->request.targets = {target};
+  request->request.count = 0;
+  request->request.command = SystemCommand::COMMAND_REFRESH;
+  request->request.motor_id = 1;
   maintenance_pub->publish(request->request);
   ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_FIRMWARE_PARAMETERS;
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;
   });}));
   const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_FIRMWARE_PARAMETERS;
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;
   });
   AgentConfigResult receipt;
   receipt.request_id = wire.request_id;
@@ -326,12 +323,12 @@ TEST_F(BridgeTest, LoadingDoesNotLookCanceledAndOldSetpointCannotReplayAfterTraj
 }
 TEST_F(BridgeTest, StaleRejectionReceiptDoesNotOverrideAcceptedTransaction)
 {
-  start(); SystemCommand cmd; cmd.command = SystemCommand::COMMAND_SET_ZERO;
+  start(); SystemCommand cmd; cmd.command = SystemCommand::COMMAND_REFRESH;
   cmd.motor_id = 64; cmd.sync_time_ns = stamp(); system_command_pub->publish(cmd);
   ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_ZERO;});}));
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});}));
   const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_ZERO;});
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});
   AgentConfigResult pending; pending.request_id = wire.request_id;
   pending.operation = wire.operation; pending.state = AgentConfigResult::PENDING;
   status.results = {pending}; status.rejection_receipt = pending;
@@ -371,14 +368,14 @@ TEST_F(BridgeTest, TopicTimeoutRetainsCorrelationAndPublishesLateTerminalBeforeA
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
-  request->request.command = SystemCommand::COMMAND_SAVE;
-  request->request.motor_id = SystemCommand::MOTOR_ID_NONE;
+  request->request.command = SystemCommand::COMMAND_REFRESH;
+  request->request.motor_id = 1;
   request->request.request_id = 7; request->request.sync_time_ns = stamp(); request->timeout_ms = 100;
   maintenance_pub->publish(request->request);
   ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SAVE;});}));
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});}));
   auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SAVE;});
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});
   AgentConfigResult result; result.request_id = wire.request_id; result.operation = wire.operation;
   result.state = AgentConfigResult::PENDING; status.results = {result};
   run(5100ms);

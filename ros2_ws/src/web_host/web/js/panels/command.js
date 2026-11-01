@@ -162,6 +162,11 @@ function updateSummary() {
 }
 
 function renderCommandStatus() {
+  if (store.runtimeMode === 'prototype') {
+    const el = $('cmdStatus');
+    if (el) el.textContent = '原型直连固件内核 · 目标保持到下一次操作或停止';
+    return;
+  }
   const el = $('cmdStatus');
   if (!el) return;
   const {data, last} = store.commandStatus;

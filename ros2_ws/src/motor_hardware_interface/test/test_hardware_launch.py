@@ -131,15 +131,18 @@ def test_mock_override_config_only_selects_joint_topology():
     assert data["position_controller"]["ros__parameters"]["joints"] == expected_joints
 
 
-def test_mock_rejects_real_canfd_xacro_before_node_construction(monkeypatch):
+def test_mock_rejects_real_canfd_xacro_before_node_construction(monkeypatch, tmp_path):
     module = _load_launch_module()
     context = LaunchContext()
     description = module.generate_launch_description()
     for action in description.entities:
         if isinstance(action, DeclareLaunchArgument):
             action.execute(context)
-    context.launch_configurations["model_xacro"] = str(
-        HERE.parent / "urdf" / "upper_body.urdf.xacro")
+    model = tmp_path / "real_hardware.urdf.xacro"
+    model.write_text('<robot name="retired"><ros2_control name="real" type="system">'
+                     '<hardware><plugin>motor_hardware_interface/CanFdSystem</plugin>'
+                     '</hardware></ros2_control></robot>')
+    context.launch_configurations["model_xacro"] = str(model)
     monkeypatch.setattr(module, "Node", lambda *args, **kwargs: pytest.fail(
         "Node constructed before hardware plugin validation"))
     with pytest.raises(RuntimeError, match="only accepts.*GenericSystem"):
@@ -266,7 +269,9 @@ def test_simulation_host_mode_fails_before_transport_or_process_setup():
         module.launch_simulation(context)
 
 
-def test_legacy_plugin_export_is_shadowed_in_install():
+def test_install_exports_only_the_mcu_hardware_plugin():
     from ament_index_python.resources import get_resource
-    content, _ = get_resource("hardware_interface__pluginlib__plugin", "motor_hardware_interface")
-    assert content == ""
+    content, prefix = get_resource("hardware_interface__pluginlib__plugin", "motor_hardware_interface")
+    plugins = [item for relative in content.splitlines()
+               for item in ET.parse(Path(prefix) / relative).getroot().iter("class")]
+    assert [item.get("name") for item in plugins] == ["motor_hardware_interface/MicroRosSystem"]

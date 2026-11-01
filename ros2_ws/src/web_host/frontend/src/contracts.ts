@@ -13,6 +13,7 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
+  prototype: boolean;
   managed: {pending: boolean; enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
     message: string; blockers: string[]};
   firmwareConnectionKey: string;

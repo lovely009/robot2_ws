@@ -74,7 +74,7 @@ TEST(SafetyMonitor, DifferentDuplicatePayloadWithinWindowLatches) {
 
 TEST(SafetyMonitor, SingleConflictingPayloadDoesNotLatch) {
   // 驱动器激活序列：零增益轮询帧后 0.1 ms 内发使能帧，payload 变化但只有一个
-  // 控制器，不得锁存（canfd_system.cpp on_activate 的合法节奏）。
+  // 控制器，不得锁存（控制端激活时的合法节奏）。
   core::SafetyMonitor safety(30U, 150ms, 2ms);
   safety.observe_valid_command(0U, "legs", 3U, {0x0CU}, at_us(0));
   safety.observe_valid_command(0U, "legs", 3U, {0xCCU}, at_us(100));

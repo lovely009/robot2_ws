@@ -43,6 +43,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await page.goto('/workbench/#/run');
   await expect(page.locator('.startup-status')).toHaveCount(0);
   await expect(page.locator('.motor-card')).toHaveCount(37);
+  await expect(page.locator('.app-footer, .heading-description, .host-limits')).toHaveCount(0);
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await expect(page.getByRole('button', {name:'武装', exact:true})).toBeDisabled();
   await expect(page.locator('canvas[data-model-rendered="true"]')).toHaveCount(1, {timeout:20000});
@@ -54,8 +55,17 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     document.body.append(badge);
   });
   await page.screenshot({path:join(captureDirectory, `${capturePrefix}-desktop.png`)});
-  for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台'])
+  for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台']) {
     await page.getByRole('button', {name:scene, exact:true}).click();
+    await expect(page.getByRole('heading', {name:scene, exact:true})).toBeVisible();
+    if (scene === '设备工作台') {
+      await expect(page.getByRole('navigation', {name:'设备参数查询'})).toBeVisible();
+      await expect(page.locator('.device-connection')).toHaveCount(0);
+      await expect(page.locator('#paramSummary')).toBeHidden();
+      await expect(page.locator('#paramSelectionHint')).toBeVisible();
+      await page.screenshot({path:join(captureDirectory, `${capturePrefix}-device.png`)});
+    }
+  }
   await page.getByRole('button', {name:'重新连接', exact:true}).click();
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await page.setViewportSize({width:390,height:844});

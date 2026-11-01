@@ -255,7 +255,7 @@ TEST(AgentPolicy, RejectsEmptyDuplicateBadRangeAndNonFiniteGains)
   EXPECT_FALSE(micro_ros_bridge::encode_agent_policy(in, out).ok);
 }
 
-TEST(AgentConfig, MapsParameterAndSystemOperationsWithStrictIds)
+TEST(AgentConfig, RejectsRetiredWritesAndMapsReadOperationsWithStrictIds)
 {
   ConfigRequest in;
   in.sync_time_ns = 88;
@@ -269,10 +269,8 @@ TEST(AgentConfig, MapsParameterAndSystemOperationsWithStrictIds)
   in.targets = {param};
   in.count = 1;
   AgentConfigRequest out;
-  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
-  EXPECT_EQ(out.operation, AgentConfigRequest::SET_PARAMETERS);
-  ASSERT_EQ(out.parameters.size(), 1u);
-  EXPECT_EQ(out.parameters[0].motor_id, 64u);
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  EXPECT_TRUE(out.parameters.empty());
 
   in.targets[0].motor_id = 0;
   EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
@@ -660,7 +658,7 @@ TEST(AgentStatus, RejectedMalformedRequestEchoCannotPoisonHealthyStatus)
     in, statuses, controls, trajectory, system, diagnostics).ok);
 }
 
-TEST(AgentMessages, FirmwareTopicRequestValidatesEnvelopeAndIntegerFields) {
+TEST(AgentMessages, RetiredFirmwareTopicRequestIsRejected) {
   ConfigRequest in;
   in.kind = ConfigRequest::CONFIG_KIND_FIRMWARE_PARAMETERS;
   in.motor_id = UINT16_MAX; in.command = 0; in.count = 1;
@@ -668,9 +666,8 @@ TEST(AgentMessages, FirmwareTopicRequestValidatesEnvelopeAndIntegerFields) {
   ParamSetTarget target; target.motor_id = UINT16_MAX; target.field = 0; target.value = 20;
   in.targets.push_back(target);
   AgentConfigRequest out;
-  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
-  EXPECT_EQ(out.operation, AgentConfigRequest::SET_FIRMWARE_PARAMETERS);
-  EXPECT_EQ(out.parameters[0].field, 0);
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  EXPECT_TRUE(out.parameters.empty());
   in.targets[0].field = 6;
   EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
   in.targets[0].field = 0; in.targets[0].value = 10.5;

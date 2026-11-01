@@ -22,11 +22,11 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 
 from can_bridge_msgs.msg import (
     AgentCommand, AgentConfigRequest, AgentTrajectoryRequest, AgentWireContract,
-    ConfigRequest, ControlLease, DeviceParamEntry, DeviceParamReport, LowCommand,
+    ConfigRequest, ControlLease, DeviceParamEntry, DeviceParamReport,
     MotorCommandArray, MotorCommandTarget,
     MotorControlState, MotorControlStateArray, MotorMotionStateArray,
     MotorMotionStateTarget, MotorPolicyArray, MotorPolicyTarget, MotorTopology,
-    MotorTopologyEntry, MotorTrajectory, MotorTrajectoryPoint, WireContract,
+    MotorTopologyEntry, MotorTrajectory, MotorTrajectoryPoint,
 )
 from robot_calibration.validation import compute_fingerprint
 from robot_system_msgs.msg import (
@@ -292,7 +292,7 @@ def test_maintenance_requires_owner_and_disabled_feedback_and_keeps_stamp(harnes
     assert lease.success
     stamp=h.io.get_clock().now().nanoseconds
     request=ExecuteMaintenance.Request(lease_id='wrong',epoch=lease.epoch,session_id=lease.session_id,
-        request=ConfigRequest(sync_time_ns=stamp,request_id=7,kind=1,command=0,motor_id=65535))
+        request=ConfigRequest(sync_time_ns=stamp,request_id=7,kind=1,command=1,motor_id=1))
     refused=h.call(ExecuteMaintenance,'/robot/execute_maintenance',request)
     assert not refused.success and not writes
     request.lease_id=lease.lease_id
@@ -651,3 +651,19 @@ def test_standard_diagnostics_report_readiness_rejection_and_fault_without_token
         assert lease.lease_id not in repr(received)
     finally:
         h.close()
+
+
+@pytest.mark.parametrize('kind,command', [(0, 0), (2, 0), (1, 0), (1, 2)])
+def test_retired_parameter_write_zero_and_save_never_forward(harness, kind, command):
+    h = harness
+    outgoing = []
+    h.io.create_subscription(ConfigRequest, '/robot/managed/maintenance/config_request', outgoing.append, RELIABLE)
+    lease = h.acquire()
+    request = ExecuteMaintenance.Request(lease_id=lease.lease_id, epoch=lease.epoch,
+        session_id=lease.session_id, request=ConfigRequest(
+            sync_time_ns=h.io.get_clock().now().nanoseconds, request_id=9,
+            kind=kind, command=command, motor_id=65535))
+    response = h.call(ExecuteMaintenance, '/robot/execute_maintenance', request)
+    assert not response.success
+    h.spin(.03)
+    assert not outgoing

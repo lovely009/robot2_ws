@@ -1,4 +1,9 @@
 #include "agent_protocol.h"
+
+bool agent_config_operation_supported(uint8_t operation) {
+  return operation == 0U || operation == 2U || operation == 4U ||
+         operation == 6U || operation == 7U || operation == 8U;
+}
 #include <stddef.h>
 #include <string.h>
 

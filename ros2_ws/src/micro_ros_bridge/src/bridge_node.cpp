@@ -64,11 +64,6 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
     [this](MotorTrajectory::SharedPtr m) {on_trajectory(*m);}));
   subscriptions_.push_back(create_subscription<ConfigRequest>("/robot/managed/maintenance/config_request", reliable(),
     [this](ConfigRequest::SharedPtr m) {submit_config(*m);}));
-  subscriptions_.push_back(create_subscription<ParamSetArray>("/robot/managed/maintenance/param_set", reliable(),
-    [this](ParamSetArray::SharedPtr m) {
-      ConfigRequest request;
-      if (encode_config(*m, request).ok) {submit_config(request);}
-    }));
   subscriptions_.push_back(create_subscription<SystemCommand>("/robot/managed/maintenance/system_command", reliable(),
     [this](SystemCommand::SharedPtr m) {
       ConfigRequest request;

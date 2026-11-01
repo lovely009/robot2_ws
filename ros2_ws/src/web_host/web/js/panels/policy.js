@@ -39,6 +39,9 @@ function rememberPolicy(id, value, generation) {
 function policyReceipt(id) {
   const pol = store.policy.get(id);
   if (!pol || !pol.requestId) return '';
+  const actual = store.controlStates?.byId?.get(id);
+  if (actual?.policy_generation === pol.generation && actual.policy_enabled === pol.enabled)
+    return `m${id}：MCU 已确认${pol.enabled ? '使能' : '失能'}`;
   if (pol.receipt == null) return `m${id}：等待策略回执`;
   const reasons = ['成功','设备忙','参数未核对或策略无效','不支持','设备错误','超时','未确认'];
   return pol.receipt === 0 ? `m${id}：策略已受理（${pol.enabled ? '使能' : '失能'}）`

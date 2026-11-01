@@ -2,7 +2,7 @@
 
 实机电机统一由 micro-ROS MCU 控制。请使用 `robot_bringup/managed_robot.launch.py`；主机不直接打开电机 CAN 或串口设备。
 
-旧 `hardware.launch.py` 在创建任何节点前拒绝启动，并给出迁移提示。原 `CanFdSystem` 源码和单元测试保留用于回归与协议研究，但不再导出为可加载的 ros2_control 硬件插件。空 pluginlib 资源标记会屏蔽下层工作区的旧导出。构建后需重新加载当前工作区；不要用旧安装目录启动设备。
+旧 `hardware.launch.py` 在创建任何节点前拒绝启动，并给出迁移提示。已删除停用的 `CanFdSystem` 实现、专属配置解析与 xacro；pluginlib 只导出 `MicroRosSystem`。构建后需重新加载当前工作区；不要用旧安装目录启动设备。
 
 本包继续提供 `firmware_topic_bridge.py`、控制状态跟踪和传动适配。标准实机轨迹入口属于受监督的 MCU 执行链；下面的 JTC 入口用于离线验证。
 

@@ -31,8 +31,9 @@ const managed = new ManagedControl({
 store.managed = {enabled: true, ...managed.view()};
 let visibilityInstalled = false;
 export function configureControl(configuration) {
-  if (!['managed', 'readonly', 'bench'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
+  if (!['managed', 'readonly', 'bench', 'prototype'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
   controlMode = configuration.control_mode;
+  store.runtimeMode = controlMode;
   managed.model = configuration.robot_model || '';
   store.managed = {enabled: isManagedMode(), ...managed.view(), robotId: configuration.robot_id || ''};
   document.body.classList.toggle('managed-mode', isManagedMode());
@@ -167,10 +168,12 @@ export function nextPolicyGeneration() {
 }
 
 export function pub(key, message) {
+  if (['paramSet', 'firmwareConfig'].includes(key) ||
+      (key === 'sysCmd' && ![1, 3, 4].includes(message.command))) return false;
   if (!store.conn.connected) return false;
   if (controlMode === 'readonly') return false;
   if (isManagedMode()) {
-    if (['paramSet', 'sysCmd', 'firmwareConfig'].includes(key)) return managed.maintenance(key, message);
+    if (key === 'sysCmd') return managed.maintenance(key, message);
     if (key === 'stop') { void managedOperation('stop'); return true; }
     if (key === 'jointTrajectory') {
       if (!managed.canSubmitMotion()) {
@@ -271,8 +274,8 @@ export function connect() {
     setConn(true);
     managed.setConnected(true);
     subscribeAll();
-    (isManagedMode() ? ['setpoint', 'trajectory', 'policy']
-      : ['setpoint', 'trajectory', 'stop', 'policy', 'paramSet', 'sysCmd']).forEach(ensurePublisher);
+    (controlMode === 'prototype' ? ['setpoint', 'policy', 'stop'] : isManagedMode() ? ['setpoint', 'trajectory', 'policy']
+      : ['setpoint', 'trajectory', 'stop', 'policy', 'sysCmd']).forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -315,7 +318,8 @@ function sub(key, cb) {
   const connection = ros;
   const t = TOPICS[key];
   const topic = new ROSLIB.Topic({
-    ros, name: t.name, messageType: t.type, throttle_rate: 0, queue_length: key === 'events' ? 64 : 1,
+    // 浏览器只保留最新观测；事件逐条传递，控制授权独立订阅。
+    ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : 50, queue_length: key === 'events' ? 64 : 1,
   });
   topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);

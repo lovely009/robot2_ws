@@ -10,7 +10,7 @@
 #include "serial_transport.h"
 #include "motor_rt_task.h"
 #include "sensor_task.h"
-#include "storage_task.h"
+#include "storage_boot.h"
 #include "ws2812.h"
 #include "board_irq.h"
 
@@ -98,15 +98,11 @@ static void start_task(void *pv_parameters) {
   if (!sensor_task_start()) {
     Error_Handler();
   }
-  // 存储任务先于 motor_rt：同步加载 W25 blob（无芯片则降级），motor_rt
-  // 启动时快照 boot 参数。Flash 擦除只在 storage(P1) 任务内发生。
-  if (!storage_task_start()) {
-    Error_Handler();
-  }
+  storage_boot_load();
   if (!motor_rt_task_start()) {
     Error_Handler();
   }
-  // 参数服务必须在启动配置加载、实时任务创建后开放。
+  // 通信在实时任务创建后开放。
   if (!micro_ros_task_start()) {
     Error_Handler();
   }

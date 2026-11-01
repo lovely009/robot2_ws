@@ -150,23 +150,15 @@ it("结果缓存最多保留最近 64 个 request", async () => {
   ros.disconnect();
 });
 
-it("本次 SAVE ConfigResult 成功时忽略滞后的 save_in_progress", async () => {
-  const { ros, resultTopic } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
-  store.sysStatus = {
-    refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
-    save_seq: 7, save_in_progress: true, seen: true,
-  };
-  const saving = device.saveParamsToFlash();
-  const sent = Topic.published.filter((entry) => entry.topic === "/motor/system_command");
-  expect(sent).toHaveLength(1);
-  resultTopic.callback?.(result(sent[0].message.request_id, 1));
-  await saving;
-  expect(store.results.get("paramResult")).toMatchObject({ ok: true });
-  expect(Topic.published.filter((entry) => entry.topic === "/motor/system_command")).toHaveLength(1);
+it("已移除的参数写入、设零与保存不创建下行请求", async () => {
+  const { ros } = await connected();
+  const before = Topic.published.length;
+  expect(ros.pub('paramSet', {count:1,targets:[{motor_id:1,field:0,value:1}]})).toBe(false);
+  expect(ros.pub('firmwareConfig', {count:1,targets:[{motor_id:65535,field:0,value:50}]})).toBe(false);
+  for (const command of [0,2]) expect(ros.pub('sysCmd',{command,motor_id:1})).toBe(false);
+  expect(Topic.published).toHaveLength(before);
   ros.disconnect();
-}, 8000);
+});
 
 it("收到全 NaN 参数报告不能判为读取成功或已核对", async () => {
   const { ros, resultTopic } = await connected();

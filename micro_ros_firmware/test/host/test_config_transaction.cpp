@@ -2,7 +2,6 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-#include "save_transaction.h"
 
 using namespace config_transaction;
 
@@ -14,88 +13,6 @@ static Request request(uint32_t id = 1) {
   r.count = r.size = 1;
   r.targets[0] = {2, 2, 3.0f};
   return r;
-}
-
-struct SaveFixture {
-  save_transaction_t save{};
-  Coordinator coordinator;
-  int slot;
-  uint32_t next_id = 1000, device_id = 0, storage_id = 0;
-  uint16_t submitted_count = 0, completed = 0, error = 0;
-  save_transaction_storage_result_t storage_result = SAVE_TRANSACTION_STORAGE_IDLE;
-  save_transaction_ports_t ports{};
-
-  SaveFixture() {
-    auto r = request();
-    r.kind = 1; r.count = r.size = 0;
-    slot = coordinator.begin(r, 9, 0);
-    coordinator.external(slot);
-    ports.context = this;
-    ports.next_request_id = [](void *p) {
-          return ++static_cast<SaveFixture *>(p)->next_id;
-        };
-    ports.submit_device_save = [](void *p, uint32_t id, uint16_t, uint8_t) {
-          auto &f = *static_cast<SaveFixture *>(p);
-          f.device_id = id; ++f.submitted_count; return true;
-        };
-    ports.request_storage_save = [](void *p, uint32_t id) {
-          static_cast<SaveFixture *>(p)->storage_id = id; return true;
-        };
-    ports.take_storage_result = [](void *p, uint32_t *id) {
-          auto &f = *static_cast<SaveFixture *>(p);
-          *id = f.storage_id; return f.storage_result;
-        };
-    ports.report_error = [](void *p, save_transaction_error_t, uint16_t, uint16_t code) {
-          static_cast<SaveFixture *>(p)->error = code ? code : 20;
-        };
-    save_transaction_request(&save);
-  }
-  void poll(uint32_t now) {
-    const save_transaction_target_t target{2, 1};
-    auto effect = save_transaction_poll(&save, now, &target, 1, &ports);
-    if (effect.completed) {
-      coordinator.complete(slot, completed, 1 - completed, error);
-    }
-  }
-  void device(bool ok) {
-    if (save_transaction_on_device_result(&save, device_id, ok, 2, ok ? 0 : 5, &ports) && ok) {
-      ++completed;
-    }
-  }
-};
-
-static void test_save_device_and_w25_completion() {
-  SaveFixture f;
-  f.poll(0);
-  assert(f.submitted_count == 1 && f.storage_id == 0);
-  auto retry = request(); retry.kind = 1; retry.count = retry.size = 0;
-  assert(f.coordinator.begin(retry, 9, 1) < 0);
-  f.poll(1);
-  assert(f.submitted_count == 1);
-  f.device(true);
-  f.device(true); // 重复内核结果只计一次。
-  f.poll(2);
-  assert(f.storage_id != 0 && f.completed == 1);
-  assert(f.coordinator.result(f.slot)->status == kPending);
-  f.storage_result = SAVE_TRANSACTION_STORAGE_OK;
-  f.poll(3);
-  assert(f.coordinator.result(f.slot)->status == kSucceeded);
-  assert(f.coordinator.begin(retry, 9, 4) < 0);
-  f.poll(4);
-  assert(f.submitted_count == 1);
-
-  SaveFixture failed;
-  failed.poll(0); failed.device(true); failed.poll(1);
-  failed.storage_result = SAVE_TRANSACTION_STORAGE_FAIL;
-  failed.poll(2);
-  assert(failed.coordinator.result(failed.slot)->status == kPartial);
-  assert(failed.coordinator.result(failed.slot)->completed_targets == 1);
-
-  SaveFixture timeout;
-  timeout.poll(0); timeout.poll(SAVE_TRANSACTION_TIMEOUT_MS);
-  assert(timeout.coordinator.result(timeout.slot)->status == kFailed);
-  assert(timeout.coordinator.result(timeout.slot)->failed_targets == 1);
-  assert(timeout.storage_id == 0);
 }
 
 static void test_exact_content_and_sessions() {
@@ -134,7 +51,7 @@ static void test_exact_content_and_sessions() {
   assert(!disconnect.on_result(8, true, 0));
 }
 
-static void test_evicted_save_cannot_replay() {
+static void test_evicted_request_cannot_replay() {
   Coordinator c;
   Result out{};
   auto old_save = request();
@@ -275,8 +192,7 @@ int main() {
     assert(reserved.request_high_water() == 0U);
   }
   test_new_session_discards_old_results();
-  test_evicted_save_cannot_replay();
-  test_save_device_and_w25_completion();
+  test_evicted_request_cannot_replay();
   test_exact_content_and_sessions();
   Coordinator c;
   auto r = request();

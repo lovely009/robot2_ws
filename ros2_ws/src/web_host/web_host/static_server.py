@@ -60,12 +60,17 @@ def main(args=None):
     node.declare_parameter('control_mode', 'managed')
     node.declare_parameter('robot_model', '')
     node.declare_parameter('robot_id', '')
+    node.declare_parameter('rosbridge_port', 0)
     control_mode = node.get_parameter('control_mode').value
-    if control_mode not in ('managed', 'readonly'):
-        raise ValueError('control_mode must be managed or readonly')
+    if control_mode not in ('managed', 'readonly', 'prototype'):
+        raise ValueError('control_mode must be managed, readonly or prototype')
+    if control_mode == 'prototype' and node.get_parameter('host').value not in ('127.0.0.1', '::1', 'localhost'):
+        raise ValueError('prototype mode is local-only')
     runtime_config = {'control_mode': control_mode,
                       'robot_model': node.get_parameter('robot_model').value,
                       'robot_id': node.get_parameter('robot_id').value}
+    if node.get_parameter('rosbridge_port').value:
+        runtime_config['rosbridge_port'] = int(node.get_parameter('rosbridge_port').value)
     # 额外挂载：把模型包根（含 models/）挂到一个 URL 前缀下。臂视图要取 URDF 与
     # 约 20 MB 的 STL 网格——那批量既不进 web/、也不该进包，而 setuptools 的
     # symlink-install 又处理不了**目录**符号链接（会把整目录当文件 copy，报
@@ -242,7 +247,6 @@ def main(args=None):
             if handle_motion(self, motion_jobs):
                 return
             path = urlsplit(self.path).path
-            direct_action = path.removeprefix('/api/device-can/')
             is_direct = path.startswith('/api/device-can/')
             if path not in {'/api/actions'} and not is_direct:
                 self._send_json(404, {'error': 'unknown API endpoint'})
@@ -266,8 +270,7 @@ def main(args=None):
             except ValueError:
                 self._send_json(400, {'error': 'invalid Content-Length'})
                 return
-            limit = 4096 if is_direct else _MAX_UPLOAD_BYTES
-            if content_length < 0 or content_length > limit:
+            if content_length < 0 or content_length > _MAX_UPLOAD_BYTES:
                 self._send_json(413, {'error': 'request body too large'})
                 return
             try:

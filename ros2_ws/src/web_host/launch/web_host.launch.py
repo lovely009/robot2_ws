@@ -13,12 +13,13 @@ READ_TOPICS = [
     '/motor/control_states', '/motor/motion_states', '/motor/topology',
     '/motor/trajectory_state', '/motor/status_array', '/motor/events',
     '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
+    '/control/status', '/control/trajectory_state',
 ]
 CONTROL_TOPICS = ['/robot/control/command', '/robot/control/policy', '/robot/control/trajectory']
 CONTROL_SERVICES = [
     '/robot/acquire_control', '/robot/renew_control', '/robot/set_armed',
     '/robot/release_control', '/robot/stop', '/robot/reset_fault',
-    '/robot/authorize_motion',
+    '/robot/authorize_motion', '/robot/execute_maintenance',
     '/robot/follow_joint_trajectory/_action/send_goal',
     '/robot/follow_joint_trajectory/_action/get_result',
     '/robot/follow_joint_trajectory/_action/cancel_goal',
@@ -55,6 +56,7 @@ def web_nodes(context):
                 'web_root': os.path.join(pkg_share, 'web'),
                 'model_url_prefix': '/robot_sim', 'model_dir': LaunchConfiguration('model_dir'),
                 'control_mode': mode, 'robot_model': LaunchConfiguration('robot_model'),
+                'rosbridge_port': LaunchConfiguration('rosbridge_port'),
                 'robot_id': LaunchConfiguration('robot_id'),
             }]),
     ]

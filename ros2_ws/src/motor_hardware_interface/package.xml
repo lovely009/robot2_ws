@@ -2,18 +2,16 @@
 <package format="3">
   <name>motor_hardware_interface</name>
   <version>0.1.0</version>
-  <description>ROS 2 Humble ros2_control SystemInterface for the reusable CAN-FD motor driver.</description>
+  <description>ROS 2 Humble MCU-only ros2_control SystemInterface and feedback adapters.</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <depend>hardware_interface</depend>
   <depend>can_bridge_msgs</depend>
-  <depend>motor_drive</depend>
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
-  <depend>yaml_cpp_vendor</depend>
   <depend>robot_transmission</depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>robot_dynamics</exec_depend>

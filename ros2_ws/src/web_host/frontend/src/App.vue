@@ -22,7 +22,6 @@ import {
 import HostLimits from "./components/HostLimits.vue";
 import PanelHost from "./components/PanelHost.vue";
 import CommandHistory from "./components/CommandHistory.vue";
-import DeviceConnection from "./components/DeviceConnection.vue";
 import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import MotionWorkbench from "./components/MotionWorkbench.vue";
@@ -32,6 +31,7 @@ import {
   initialized,
   startupError,
   notice,
+  configuredRosUrl,
 } from "./runtime";
 import type { Screen } from "./contracts";
 
@@ -61,7 +61,6 @@ const navCollapsed = ref(
 watch(navCollapsed, (value) => {
   localStorage.setItem("robot2.navCollapsed", String(value));
 });
-const directDevice = ref(false);
 const deviceParameters = ref<'firmware' | 'motor'>('motor');
 const motorListOpen = ref(true);
 const selectedParameterMotor = computed(() => snapshot.value.motors.find(
@@ -75,30 +74,27 @@ const rosUrl = ref(
   localStorage.getItem("robot2.rosbridgeUrl") ||
     `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:9090`,
 );
+watch(configuredRosUrl, value => { if (value) rosUrl.value = value; });
 const scenes = [
   {
     id: "run" as const,
     title: "调试工作台",
     icon: SlidersHorizontal,
-    subtitle: "核对设备，调整参数，观察反馈",
   },
   {
     id: "teach" as const,
     title: "设备工作台",
     icon: Cpu,
-    subtitle: "查看设备状态，调整固件与电机参数",
   },
   {
     id: "sim" as const,
     title: "仿真工作台",
     icon: Workflow,
-    subtitle: "配置后端、控制端与台架会话",
   },
   {
     id: "motion" as const,
     title: "动作工作台",
     icon: Film,
-    subtitle: "导入动作与机器人模型，转换并预览",
   },
 ];
 const title = computed(() => scenes.find((item) => item.id === screen.value)!);
@@ -126,6 +122,7 @@ const agentLabel = computed(
 );
 let clock: ReturnType<typeof setInterval>;
 function go(id: string) {
+  if (snapshot.value.prototype && id !== 'run') return;
   if (id === "device") {
     inspector.value = "parameters";
     id = "teach";
@@ -210,7 +207,8 @@ onBeforeUnmount(() => {
           snapshot.connectionText
         }}</span
       >
-      <template v-if="!snapshot.managed.enabled">
+      <span v-if="snapshot.prototype" class="session-item">原型仿真 · 直接使能与控制</span>
+      <template v-if="!snapshot.managed.enabled && !snapshot.prototype">
       <span class="session-separator" />
       <label class="session-item"
         ><span class="session-label">控制板</span
@@ -260,7 +258,7 @@ onBeforeUnmount(() => {
         <CircleStop :size="14" />{{ snapshot.managed.enabled ? '整机停止' : '全部软停' }}
       </button>
     <div v-if="snapshot.managed.enabled" class="managed-controls" aria-label="整机托管控制">
-      <strong>MCU 执行</strong><span class="authority-label">本页控制权：{{ snapshot.managed.ownsControl ? '已取得' : '未取得' }}</span><span class="authority-label" :class="{confirmed: snapshot.managed.mcuAuthorized}">运动授权：{{ snapshot.managed.mcuAuthorized ? 'MCU 已确认' : '未确认' }}</span>
+      <span class="authority-label">本页控制权：{{ snapshot.managed.ownsControl ? '已取得' : '未取得' }}</span><span class="authority-label" :class="{confirmed: snapshot.managed.mcuAuthorized}">运动授权：{{ snapshot.managed.mcuAuthorized ? 'MCU 已确认' : '未确认' }}</span>
       <button :disabled="!initialized || !snapshot.managed.ready || snapshot.managed.pending || snapshot.managed.ownsControl"
         @click="runtime.managed('acquire')">申请控制</button>
       <button :disabled="!snapshot.managed.ownsControl || snapshot.managed.armed"
@@ -285,9 +283,8 @@ onBeforeUnmount(() => {
         <component :is="navCollapsed ? PanelLeftOpen : PanelLeftClose" :size="18" />
         <span>收起侧栏</span>
       </button>
-      <div class="nav-section-label">工作场景</div>
       <button
-        v-for="(item, index) in scenes"
+        v-for="(item, index) in snapshot.prototype ? scenes.filter(scene => scene.id === 'run') : scenes"
         :key="item.id"
         :aria-label="item.title"
         :title="item.title"
@@ -302,13 +299,7 @@ onBeforeUnmount(() => {
 
     <main class="main-workspace">
       <div class="workspace-heading">
-        <div>
-          <div class="eyebrow">工作场景 / {{ screen.toUpperCase() }}</div>
-          <h1>
-            {{ title.title }}<span class="heading-slash">/</span
-            ><span class="heading-description">{{ title.subtitle }}</span>
-          </h1>
-        </div>
+        <h1>{{ title.title }}</h1>
         <div v-show="screen !== 'teach' && screen !== 'motion'" class="workspace-summary">
           <span
             ><i class="dot" :class="fresh ? 'green' : 'amber'" />{{
@@ -337,21 +328,17 @@ onBeforeUnmount(() => {
           {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
         </button>
       </nav>
-      <div v-show="screen === 'teach'">
-        <DeviceConnection mcu-only @direct="directDevice = $event" />
-      </div>
       <MotionWorkbench v-if="screen === 'motion'" />
-      <div v-show="screen !== 'motion' && (screen !== 'teach' || !directDevice)" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
+      <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
         <ResizeHandle v-show="screen !== 'teach'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
         <ResizeHandle v-show="screen !== 'teach'" class="resize-inspector" label="调整对象检查器宽度" target=".inspector-area" variable="--inspector-width" axis="width" :min="210" reverse />
         <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
         <section class="objects-area surface">
           <div class="panel-title">
-            <span>对象浏览器</span>
+            <span>{{ screen === 'teach' ? '设备查询' : '电机与关节' }}</span>
             <small class="micro">{{ screen !== 'sim' ? '电机反馈' : 'URDF × TF' }}</small>
           </div>
-          <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="参数设置">
-            <div class="eyebrow">参数设置</div>
+          <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="设备参数查询">
             <button :class="{ active: deviceParameters === 'firmware' }" :aria-pressed="deviceParameters === 'firmware'" @click="deviceParameters = 'firmware'">
               <Cpu :size="14" />固件参数
             </button>
@@ -376,8 +363,7 @@ onBeforeUnmount(() => {
             <div class="breadcrumb">
               <Box :size="14" /><span>{{
                 snapshot.model || "正在读取模型"
-              }}</span
-              ><span>/</span><b>{{ title.title }}</b>
+              }}</span>
             </div>
             <span class="tiny-tag"
               >{{ snapshot.active }} 控制激活 · {{ snapshot.fault }} 故障</span
@@ -391,10 +377,10 @@ onBeforeUnmount(() => {
               v-show="screen === 'run'"
               class="joint-list-panel"
             />
-            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
+            <ResizeHandle v-show="screen === 'run' && !snapshot.prototype" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
             <PanelHost
               id="actionLibrary"
-              :active="screen === 'run'"
+              :active="screen === 'run' && !snapshot.prototype"
               class="action-panel-host"
             />
             <ResizeHandle v-show="screen === 'sim'" class="resize-simulation" label="调整仿真面板高度" target=".sim-panel-host" variable="--sim-height" axis="height" :min="240" reverse />
@@ -407,16 +393,9 @@ onBeforeUnmount(() => {
         </div>
         <aside class="inspector-area inspector surface">
           <div class="panel-title">
-            <span>{{ screen === 'teach' ? (deviceParameters === 'firmware' ? '固件参数设置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数') : '对象检查器' }}</span><SlidersHorizontal :size="14" />
+            <span>{{ screen === 'teach' ? (deviceParameters === 'firmware' ? '固件固定配置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数') : '电机控制' }}</span><SlidersHorizontal :size="14" />
           </div>
           <div v-show="screen !== 'teach'" class="object-heading">
-            <div class="eyebrow">
-              {{
-                snapshot.selectedId
-                  ? `ACTUATOR / ${snapshot.selectedId}`
-                  : "NO SELECTION"
-              }}
-            </div>
             <h2>
               {{
                 snapshot.selectedName ||
@@ -433,7 +412,7 @@ onBeforeUnmount(() => {
             >
           </div>
           <p v-if="screen !== 'teach' && snapshot.managed.enabled && !snapshot.managed.mcuAuthorized" class="control-lock-note">控制已锁定：申请控制权、武装并等待 MCU 确认后，才能下发使能与目标。</p>
-          <div v-show="screen !== 'teach'" class="inspector-tabs">
+          <div v-show="screen !== 'teach' && !snapshot.prototype" class="inspector-tabs">
             <button
               :class="{ active: inspector === 'control' }"
               @click="inspector = 'control'"
@@ -463,7 +442,7 @@ onBeforeUnmount(() => {
               :active="screen !== 'teach' && screen !== 'motion' && inspector === 'control'"
             /><PanelHost
               id="deviceParams"
-              :active="screen !== 'motion' && (screen === 'teach' ? !directDevice && deviceParameters === 'motor' : inspector === 'parameters')"
+              :active="screen !== 'motion' && (screen === 'teach' ? deviceParameters === 'motor' : inspector === 'parameters')"
             /><PanelHost
               id="feedforward"
               :active="screen !== 'teach' && screen !== 'motion' && inspector === 'compensation'"
@@ -495,7 +474,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <div class="observer-controls">
-              <span class="micro">{{ fresh ? "LIVE" : "等待 / 陈旧" }}</span>
+              <span class="micro">{{ fresh ? "实时" : "等待 / 陈旧" }}</span>
             </div>
           </div>
           <div id="observation-content" v-show="observe" class="observation-body">
@@ -513,15 +492,6 @@ onBeforeUnmount(() => {
       </div>
     </main>
 
-    <footer class="app-footer">
-      <span
-        ><i class="dot" :class="snapshot.connected ? 'green' : 'amber'" />ROS
-        {{ snapshot.connected ? "已连接" : "未连接"
-        }}<span class="footer-separator">|</span>运动流：{{ motionAge }}</span
-      ><span class="actual-route"
-        :title="snapshot.outputTopic || '尚未收到输出状态'">目标 50 / 50 / 200 Hz · 整体验收待确认</span
-      >
-    </footer>
     <div v-if="notice" class="toast" role="status">
       <span>{{ notice }}</span
       ><button class="icon-button" aria-label="关闭提示" @click="notice = ''">

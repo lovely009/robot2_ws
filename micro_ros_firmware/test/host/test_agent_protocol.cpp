@@ -1,7 +1,6 @@
 #include "agent_protocol.h"
 #include "agent_control_gate.h"
 #include "motor_control_internal.h"
-#include "save_transaction.h"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -197,29 +196,16 @@ static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
   for (unsigned i = 0; i < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++i) {
     control_mailbox_config_request_t request{};
     request.request_id = 10 + i;
-    request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+    request.kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
     request.motor_id = 1;
-    request.value.save_slots = 1;
     assert(control_mailbox_submit_config(&mailbox, &request));
   }
   ctx.entry_count = 1;
   ctx.entries[0].used = true;
   ctx.entries[0].motor_id = 1;
   ctx.entries[0].policy_enable = true;
-  // 使用真实 SAVE 状态机进入存储等待；端口仅代替硬件，不在主机执行 Flash。
-  save_transaction_t save{};
-  save_transaction_init(&save);
-  save_transaction_ports_t ports{};
-  ports.next_request_id = [](void *) -> uint32_t { return 1; };
-  ports.submit_device_save = [](void *, uint32_t, uint16_t, uint8_t) { return true; };
-  ports.request_storage_save = [](void *, uint32_t) { return true; };
-  ports.take_storage_result = [](void *, uint32_t *) { return SAVE_TRANSACTION_STORAGE_IDLE; };
-  save_transaction_request(&save);
-  (void)save_transaction_poll(&save, 100, nullptr, 0, &ports);
-  assert(save.phase == SAVE_TRANSACTION_PHASE_STORAGE);
   agent_gate_request_stop(&gate);
   agent_gate_step(&gate, &mailbox, &ctx, 105, true);
-  assert(save_transaction_in_progress(&save)); // 停止不等待保存结束
 
   assert(!ctx.entries[0].policy_enable);
   assert(!ctx.authorized && !mailbox.policy.pending);
@@ -373,9 +359,8 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   for (unsigned i = 0; i < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++i) {
     control_mailbox_config_request_t request{};
     request.request_id = 10 + i;
-    request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
+    request.kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS;
     request.motor_id = 1;
-    request.value.save_slots = 1;
     assert(control_mailbox_submit_config(&mailbox, &request));
   }
   assert(mailbox.config_count == CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY);
@@ -473,6 +458,10 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
 }
 
 int main() {
+  for (unsigned op = 0; op < 256; ++op) {
+    const bool supported = op == 0 || op == 2 || op == 4 || op == 6 || op == 7 || op == 8;
+    assert(agent_config_operation_supported((uint8_t)op) == supported);
+  }
   test_unarmed_gate_preserves_segmented_identity_read();
   test_sparse_enable_does_not_authorize_unselected_discovery();
   test_sparse_disable_full_fifo_discards_pending_enable();

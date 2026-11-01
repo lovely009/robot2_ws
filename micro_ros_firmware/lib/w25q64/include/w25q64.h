@@ -1,6 +1,4 @@
-// W25Q64（OCTOSPI2）原始读写驱动 + geometry 纯逻辑（host 可测）。
-// 唯一所有者是 storage 任务：上电即初始化，其余任务严禁直接访问本驱动。
-
+// W25Q64 boot-only read driver. No program or erase operations.
 #ifndef W25Q64_H
 #define W25Q64_H
 
@@ -27,12 +25,6 @@ w25q64_status_t w25q64_init(void);
 w25q64_status_t w25q64_reset(void);
 uint32_t w25q64_read_id(void);
 w25q64_status_t w25q64_read(uint32_t address, uint8_t *data, uint32_t size);
-w25q64_status_t w25q64_program_page(uint32_t address, const uint8_t *data,
-    uint32_t size);
-w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data,
-    uint32_t size);
-w25q64_status_t w25q64_erase_sector(uint32_t address);
-
 #ifdef __cplusplus
 }
 #endif

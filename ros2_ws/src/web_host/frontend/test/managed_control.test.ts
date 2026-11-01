@@ -55,15 +55,19 @@ async function armedFixture(ack = true) {
 
 it('维护保持原始时间戳，经监督服务提交；需要未武装所有权，读取不使能', async () => {
   const f=fixture();
-  const input={sync_time_ns:SESSION+50,request_id:7,count:1,targets:[{motor_id:1,field:0,value:1}]};
-  expect(f.client.maintenance('paramSet',input)).toBe(false);
+  const input={sync_time_ns:SESSION+50,request_id:7,count:0,targets:[],command:1,motor_id:1};
+  expect(f.client.maintenance('sysCmd',input)).toBe(false);
   await f.client.acquire();
-  expect(f.client.maintenance('paramSet',input)).toBe(true);
+  expect(f.client.maintenance('paramSet',input)).toBe(false);
+  expect(f.client.maintenance('firmwareConfig',input)).toBe(false);
+  expect(f.client.maintenance('sysCmd',{...input,command:0})).toBe(false);
+  expect(f.client.maintenance('sysCmd',{...input,command:2})).toBe(false);
+  expect(f.client.maintenance('sysCmd',input)).toBe(true);
   const call=f.service.mock.calls.find(c=>c[0]==='/robot/execute_maintenance');
   expect(call?.[2]).toMatchObject({lease_id:'private-test-token',session_id:SESSION,
-    request:{sync_time_ns:input.sync_time_ns,request_id:7,kind:0,targets:input.targets}});
+    request:{sync_time_ns:input.sync_time_ns,request_id:7,kind:1,targets:input.targets}});
   f.refresh({armed:true,mcu_authorized:true});
-  expect(f.client.maintenance('paramSet',input)).toBe(false);
+  expect(f.client.maintenance('sysCmd',input)).toBe(false);
   expect(f.publish).not.toHaveBeenCalled();
 });
 

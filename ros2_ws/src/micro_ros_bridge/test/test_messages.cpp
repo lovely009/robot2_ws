@@ -132,7 +132,7 @@ TEST(DecodeLowState, RejectsOutOfRangeMotorIdWithoutPartialOutput) {
   EXPECT_TRUE(out.states.empty());
 }
 
-TEST(EncodeConfig, ParamSetOverloadFillsParamGroup) {
+TEST(EncodeConfig, RetiredParameterWritesAreRejected) {
   can_bridge_msgs::msg::ParamSetArray in;
   in.request_id = 7;
   in.count = 2;
@@ -148,12 +148,8 @@ TEST(EncodeConfig, ParamSetOverloadFillsParamGroup) {
 
   can_bridge_msgs::msg::ConfigRequest out;
   const auto r = micro_ros_bridge::encode_config(in, out);
-  ASSERT_TRUE(r.ok) << r.error;
-  EXPECT_EQ(out.kind, can_bridge_msgs::msg::ConfigRequest::CONFIG_KIND_PARAM_SET);
-  EXPECT_EQ(out.count, 2);
-  EXPECT_EQ(out.targets.size(), 2u);
-  // 系统命令那组必须留成"不适用"，不是默认 0。
-  EXPECT_EQ(out.motor_id, can_bridge_msgs::msg::SystemCommand::MOTOR_ID_NONE);
+  EXPECT_FALSE(r.ok);
+  EXPECT_TRUE(out.targets.empty());
 }
 
 TEST(EncodeConfig, ParamSetRejectsUnpairedLimit) {
@@ -206,12 +202,16 @@ TEST(EncodeConfig, SystemCommandOverloadFillsCommandGroup) {
   EXPECT_EQ(out.count, 0);
 }
 
-// SAVE 只接受整机（W25 那半必须整体落盘）。
-TEST(EncodeConfig, SaveOnlyAcceptsWholeMachine) {
+// 旧 SAVE 和设零命令即使载荷合法也不可执行。
+TEST(EncodeConfig, RetiredSaveAndZeroAreRejected) {
   can_bridge_msgs::msg::SystemCommand in;
   in.command = can_bridge_msgs::msg::SystemCommand::COMMAND_SAVE;
   in.motor_id = 3;
   can_bridge_msgs::msg::ConfigRequest out;
+  in.motor_id = can_bridge_msgs::msg::SystemCommand::MOTOR_ID_NONE;
+  EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
+  in.command = can_bridge_msgs::msg::SystemCommand::COMMAND_SET_ZERO;
+  in.motor_id = 1;
   EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
 }
 

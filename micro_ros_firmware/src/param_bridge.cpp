@@ -11,19 +11,15 @@
 #include "info_page.hpp"
 #include "motor_bridge.h"
 #include "motor_rt_task.h"
-#include "param_field.h"
-#include "firmware_parameters.h"
 #include "param_units.h"
+#include "firmware_config.h"
 #include "ros_qos.h"
-#include "save_transaction.h"
-#include "storage_task.h"
 #include "time_utils.h"
 
 using Config = can_bridge_msgs__msg__AgentConfigRequest;
 static constexpr uint16_t kMotorIdNone = UINT16_MAX;
 static constexpr size_t kParamSetMaxTargets = 16;
 static constexpr uint16_t kInvalid = 10, kSubmitFailed = 11, kUnknownMotor = 12;
-static constexpr uint16_t kSaveFailed = 20;
 static_assert(kParamSetMaxTargets <= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY,
     "参数批次不能超过配置 FIFO");
 static_assert(config_transaction::kCapacity == 8, "线上结果容量必须为8");
@@ -39,14 +35,10 @@ static motor_control_param_view_t g_views[MOTOR_CONTROL_MAX_MOTORS]
     __attribute__((section(".dtcm_noinit")));
 static size_t g_view_count;
 static config_transaction::Coordinator g_transactions;
-static int g_active_slot = -1, g_save_slot = -1;
+static int g_active_slot = -1;
 static uint64_t g_observed_session;
 static uint32_t g_next_operation_id = 1, g_active_deadline;
 static uint16_t g_last_error, g_last_error_motor = kMotorIdNone;
-static save_transaction_t g_save_transaction;
-static uint32_t g_save_deadline;
-static bool g_save_started;
-static uint16_t g_save_total, g_save_completed, g_save_error;
 static info_page::Pager g_pager;
 static uint32_t g_info_revision = 1, g_info_hash;
 static can_bridge_msgs__msg__AgentInfo g_info;
@@ -70,56 +62,10 @@ static uint32_t next_internal_id() {
 static void sync_config_session() {
   const uint64_t session = motor_bridge_session_id();
   if (session == g_observed_session) return;
-  save_transaction_disconnect(&g_save_transaction);
-  g_save_slot = -1;
   g_transactions.set_session(session);
   g_pager.set_source(session, g_info_revision, g_view_count);
   g_observed_session = session;
 }
-static bool deadline_valid(uint32_t deadline, uint32_t now) {
-  const uint32_t remaining = deadline - now;
-  return remaining > 0 && remaining <= 1000;
-}
-
-static uint32_t save_next_request_id(void *) { return next_internal_id(); }
-static bool save_submit_device(void *, uint32_t id, uint16_t motor_id, uint8_t slots) {
-  const uint32_t now = millis();
-  if (!g_save_started && !deadline_valid(g_save_deadline, now)) return false;
-  control_mailbox_config_request_t request{};
-  request.request_id = id; request.received_tick_ms = now;
-  // 后续设备属于已启动的 SAVE 事务；只约束它们在 FIFO 中的停留，不重启源 TTL。
-  request.valid_until_tick_ms = g_save_started ? now + 1000U : g_save_deadline;
-  request.motor_id = motor_id;
-  request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
-  request.value.save_slots = slots;
-  if (!motor_rt_submit_config(&request)) return false;
-  g_save_started = true;
-  return g_transactions.track(g_save_slot, id, motor_id);
-}
-static bool save_request_storage(void *, uint32_t id) {
-  if (!g_save_started && !deadline_valid(g_save_deadline, millis())) return false;
-  g_save_started = true;
-  storage_task_request_save(id);
-  return true;
-}
-static save_transaction_storage_result_t save_take_storage(void *, uint32_t *id) {
-  switch (storage_take_result(id)) {
-  case STORAGE_SAVE_OK: return SAVE_TRANSACTION_STORAGE_OK;
-  case STORAGE_SAVE_FAIL: return SAVE_TRANSACTION_STORAGE_FAIL;
-  default: return SAVE_TRANSACTION_STORAGE_IDLE;
-  }
-}
-static void save_report_error(void *, save_transaction_error_t,
-    uint16_t motor_id, uint16_t code) {
-  g_save_error = code ? code : kSaveFailed;
-  report_error(g_save_error, motor_id);
-}
-static const save_transaction_ports_t kSavePorts = {
-  .context = nullptr, .next_request_id = save_next_request_id,
-  .submit_device_save = save_submit_device, .request_storage_save = save_request_storage,
-  .take_storage_result = save_take_storage, .report_error = save_report_error,
-};
-
 static bool submit_config(control_mailbox_config_request_t &request, uint8_t field) {
   if (!g_transactions.can_start(g_active_slot, millis())) return false;
   request.request_id = next_internal_id();
@@ -130,101 +76,18 @@ static bool submit_config(control_mailbox_config_request_t &request, uint8_t fie
   }
   return g_transactions.track(g_active_slot, request.request_id, request.motor_id, field);
 }
-static bool validate_parameters(const can_bridge_msgs__msg__ParamSetTarget *targets, size_t count) {
-  static const param_field_t fields[] = {
-    PARAM_FIELD_POS_MIN, PARAM_FIELD_POS_MAX, PARAM_FIELD_VEL_LIMIT,
-    PARAM_FIELD_TORQUE_LIMIT, PARAM_FIELD_LIMIT_PROTECT, PARAM_FIELD_DIRECTION, PARAM_FIELD_T_MAX, PARAM_FIELD_NODE_ID};
-  if (!count || count > 16) return false;
-  for (size_t i = 0; i < count; ++i) {
-    const auto &t = targets[i];
-    const auto *v = find_view(t.motor_id);
-    if (t.field == PARAM_DEVICE_SLOT_NODE_ID && count != 1) return false;
-    if (t.field >= PARAM_DEVICE_SLOT_COUNT || !v || !v->bound ||
-        !param_value_ok(fields[t.field], t.value, 0.0f, nullptr)) return false;
-    if (t.field == PARAM_DEVICE_SLOT_NODE_ID) {
-      size_t saved_count = 0; const auto *saved = storage_boot_params(&saved_count);
-      for (size_t j = 0; j < saved_count; ++j) {
-        if (saved[j].motor_id == t.motor_id) continue;
-        if (saved[j].motor_id == (uint16_t)t.value ||
-            ((saved[j].device_raw_present & (1U << PARAM_DEVICE_SLOT_NODE_ID)) &&
-             saved[j].device_raw[PARAM_DEVICE_SLOT_NODE_ID] == (uint32_t)t.value)) return false;
-      }
-    }
-    if (t.field == 3 && !isfinite(param_units_amp_to_nm(t.value, v->torque_per_amp))) return false;
-    for (size_t j = 0; j < i; ++j)
-      if (targets[j].motor_id == t.motor_id && targets[j].field == t.field) return false;
-    if (t.field <= 1) {
-      bool found = false;
-      for (size_t j = 0; j < count; ++j) {
-        if (targets[j].motor_id != t.motor_id || targets[j].field != (t.field ^ 1)) continue;
-        found = t.field == 0 ? param_position_limits_ok(t.value, targets[j].value)
-                             : param_position_limits_ok(targets[j].value, t.value);
-      }
-      if (!found) return false;
-    }
-  }
-  return true;
-}
-static void apply_parameters(const Config &msg) {
-  uint16_t total = 0;
-  for (size_t i = 0; i < msg.parameters.size; ++i) if (msg.parameters.data[i].field != 1) ++total;
-  for (size_t i = 0; i < msg.parameters.size; ++i) {
-    const auto &t = msg.parameters.data[i];
-    if (t.field == 1) continue;
-    const auto *v = find_view(t.motor_id);
-    control_mailbox_config_request_t request{};
-    request.motor_id = t.motor_id;
-    switch (t.field) {
-    case 0:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS;
-      request.value.position_limits.min_position_rad = t.value;
-      for (size_t j = 0; j < msg.parameters.size; ++j)
-        if (msg.parameters.data[j].motor_id == t.motor_id && msg.parameters.data[j].field == 1)
-          request.value.position_limits.max_position_rad = msg.parameters.data[j].value;
-      break;
-    case 2:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT;
-      request.value.max_velocity_rad_s = t.value; break;
-    case 3:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT;
-      request.value.max_torque_nm = param_units_amp_to_nm(t.value, v->torque_per_amp); break;
-    case 4:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT;
-      request.value.safety_protect_raw = t.value == 1.0f ? 0U : 1U; break;
-    case 6:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_T_MAX;
-      request.value.t_max_raw = (uint32_t)t.value; break;
-    case 7:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_NODE_ID;
-      request.value.new_node_id = (uint16_t)t.value; break;
-    case 5:
-      request.kind = CONTROL_MAILBOX_CONFIG_SET_DIRECTION;
-      request.value.direction_raw = t.value == 1.0f ? 1U : 0U; break;
-    default: continue;
-    }
-    if (!submit_config(request, t.field)) {
-      g_transactions.submitted(g_active_slot, total, kSubmitFailed); return;
-    }
-  }
-  g_transactions.submitted(g_active_slot, total, 0);
-}
-
 // 有限操作使用互斥载荷；未用组必须为空/默认，避免含混或拼接请求。
 static bool groups_valid(const Config &m) {
-  if (m.operation > can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS || m.policies.size > 48 ||
-      m.parameters.size > 16 || m.ack_request_ids.size > 8) return false;
+  if (!agent_config_operation_supported(m.operation) || m.policies.size > 48 ||
+      m.parameters.size || m.ack_request_ids.size > 8) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY &&
       (m.policies.size || m.policy_generation || m.allow_no_protect)) return false;
-  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS &&
-      m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS && m.parameters.size) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && m.ack_request_ids.size) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
       (m.query_id || m.query_kind || m.query_revision || m.cursor || m.detail_request_id)) return false;
   const bool single = m.operation >= can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS && m.operation <= can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT;
   if (single ? (m.motor_id == 0 || m.motor_id > 64) : m.motor_id != kMotorIdNone) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY && !m.policies.size) return false;
-  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS && !m.parameters.size) return false;
-  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS && m.parameters.size != 1) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && !m.ack_request_ids.size) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
       (!m.query_id || m.query_kind > 1 || (m.query_kind == 0 && m.detail_request_id))) return false;
@@ -250,16 +113,7 @@ static bool policies_valid(const Config &m, uint64_t &disabled, bool &enables) {
   return true;
 }
 static bool trajectory_busy(const Config &m) {
-  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SAVE) {
-    agent_trajectory_status_t status{};
-    motor_rt_copy_agent_trajectory(&status);
-    return status.state >= AGENT_TRAJECTORY_LOADING && status.state <= AGENT_TRAJECTORY_RUNNING;
-  }
-  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS) {
-    for (size_t i = 0; i < m.parameters.size; ++i)
-      if (motor_rt_agent_trajectory_owns(m.parameters.data[i].motor_id)) return true;
-  }
-  return m.operation >= can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS && m.operation <= can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT &&
+  return (m.operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS || m.operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT) &&
       motor_rt_agent_trajectory_owns(m.motor_id);
 }
 
@@ -321,16 +175,10 @@ static void config_cb(const void *input) {
   if (!time_clock_valid() || !g_transactions.can_start(g_active_slot, millis())) {
     g_transactions.complete(g_active_slot, 0, 0, config_transaction::kExpired); return;
   }
-  if (save_transaction_in_progress(&g_save_transaction) || trajectory_busy(*msg)) {
+  if (trajectory_busy(*msg)) {
     g_transactions.busy(g_active_slot); return;
   }
-  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_FIRMWARE_PARAMETERS) {
-    const auto &target = msg->parameters.data[0];
-    const bool valid = target.motor_id == kMotorIdNone && target.field < FIRMWARE_SETTINGS_COUNT &&
-        isfinite(target.value) && floorf(target.value) == target.value && target.value >= 1 && target.value <= 1000;
-    const bool ok = valid && firmware_parameters_set_value(target.field, (int64_t)target.value);
-    g_transactions.complete(g_active_slot, ok ? 1 : 0, ok ? 0 : 1, ok ? 0 : kInvalid);
-  } else if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
     control_policy_snapshot_t policy{};
     policy.request_id = next_internal_id(); policy.received_tick_ms = now;
     policy.valid_until_tick_ms = g_active_deadline;
@@ -346,17 +194,6 @@ static void config_cb(const void *input) {
     for (size_t i = 0; i < policy.target_count; ++i)
       (void)g_transactions.track(g_active_slot, policy.request_id, policy.targets[i].motor_id);
     g_transactions.submitted(g_active_slot, policy.target_count, 0);
-  } else if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS) {
-    if (!validate_parameters(msg->parameters.data, msg->parameters.size)) {
-      g_transactions.complete(g_active_slot, 0, msg->parameters.size, kInvalid); return;
-    }
-    apply_parameters(*msg);
-  } else if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SAVE) {
-    if (g_transactions.pending_except(g_active_slot)) { g_transactions.busy(g_active_slot); return; }
-    g_save_slot = g_active_slot; g_save_deadline = g_active_deadline;
-    g_save_started = false; g_save_total = g_save_completed = g_save_error = 0;
-    g_transactions.external(g_save_slot);
-    save_transaction_request(&g_save_transaction);
   } else {
     const auto *v = find_view(msg->motor_id);
     if (!v || !v->bound) { g_transactions.complete(g_active_slot, 0, 1, kUnknownMotor); return; }
@@ -367,7 +204,6 @@ static void config_cb(const void *input) {
     control_mailbox_config_request_t item{};
     item.motor_id = msg->motor_id;
     item.kind = msg->operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ? CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS
-        : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ? CONTROL_MAILBOX_CONFIG_SET_ZERO
         : CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
     const bool ok = submit_config(item, UINT8_MAX);
     g_transactions.submitted(g_active_slot, 1, ok ? 0 : kSubmitFailed);
@@ -378,37 +214,8 @@ void param_bridge_on_config_result(const motor_control_event_t *event) {
   if (!g_created || !event || event->type != MOTOR_CONTROL_EVENT_CONFIG_RESULT) return;
   const bool ok = event->reason == MOTOR_PROTOCOL_CONFIG_OK;
   (void)g_transactions.on_result(event->request_id, ok, event->reason, event->motor_id);
-  if (save_transaction_on_device_result(&g_save_transaction, event->request_id, ok,
-      event->motor_id, event->reason, &kSavePorts) && ok) ++g_save_completed;
   if (!ok) report_error(event->reason, event->motor_id);
 }
-static void poll_save(uint32_t now) {
-  if (g_save_slot < 0) return;
-  const auto *result = g_transactions.result(g_save_slot);
-  if (!result || result->status != config_transaction::kPending) {
-    save_transaction_disconnect(&g_save_transaction); g_save_slot = -1; return;
-  }
-  if (!g_save_started && !g_transactions.can_start(g_save_slot, now)) {
-    save_transaction_disconnect(&g_save_transaction); g_save_slot = -1; return;
-  }
-  static save_transaction_target_t targets[SAVE_TRANSACTION_MAX_TARGETS];
-  g_save_total = 0;
-  for (size_t i = 0; i < g_view_count; ++i) {
-    targets[i] = {g_views[i].motor_id, g_views[i].record_dirty_slots};
-    if (targets[i].dirty_slots) ++g_save_total;
-  }
-  const auto effects = save_transaction_poll(&g_save_transaction, now, targets,
-      g_view_count, &kSavePorts);
-  if (effects.completed) {
-    g_transactions.complete(g_save_slot, g_save_completed,
-        g_save_total > g_save_completed ? g_save_total - g_save_completed : 0, g_save_error);
-    g_save_slot = -1;
-  }
-}
-bool param_bridge_save_in_progress(void) {
-  return save_transaction_in_progress(&g_save_transaction);
-}
-
 static uint32_t hash_bytes(uint32_t hash, const void *data, size_t size) {
   const auto *p = static_cast<const uint8_t *>(data);
   while (size--) hash = (hash ^ *p++) * 16777619U;
@@ -456,7 +263,6 @@ void param_bridge_poll(void) {
   }
   g_pager.set_source(g_observed_session, g_info_revision, g_view_count);
   g_transactions.poll(now);
-  poll_save(now);
   fill_info_cache();
 }
 static void encode_result(can_bridge_msgs__msg__AgentConfigResult &out,
@@ -469,13 +275,14 @@ void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out) {
   if (!out) return;
   out->info_revision = g_info_revision;
   out->config_request_high_water = g_transactions.request_high_water();
-  out->save_in_progress = save_transaction_in_progress(&g_save_transaction);
+  out->save_in_progress = false;
   out->last_error = g_last_error; out->last_error_motor = g_last_error_motor;
-  const auto settings = firmware_parameters_snapshot();
+  const uint16_t frequencies[] = {FIRMWARE_AGENT_PING_HZ, FIRMWARE_MOTOR_REPORT_HZ,
+      FIRMWARE_MOTOR_REPORT_HZ, FIRMWARE_IMU_REPORT_HZ, FIRMWARE_TEMPERATURE_REPORT_HZ,
+      FIRMWARE_MOTOR_COMMAND_HZ};
   out->firmware_values_valid = true;
-  for (unsigned i = 0; i < FIRMWARE_SETTINGS_COUNT; ++i)
-    out->firmware_values[i] = (uint16_t)firmware_settings_get(&settings, i);
-  out->firmware_unsaved = firmware_parameters_unsaved();
+  memcpy(out->firmware_values, frequencies, sizeof(frequencies));
+  out->firmware_unsaved = false;
   config_transaction::Result results[8]{};
   const size_t count = g_transactions.copy_results(results, 8);
   out->results.size = count <= out->results.capacity ? count : out->results.capacity;
@@ -540,15 +347,10 @@ const motor_control_param_view_t *param_bridge_views(size_t *count) {
   if (count) *count = g_view_count;
   return g_views;
 }
-const motor_control_stored_params_t *param_bridge_stored_records(size_t *count) {
-  return storage_boot_params(count);
-}
-
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   if (g_created) return true;
   if (!node || !executor) return false;
   memset(g_views, 0, sizeof(g_views));
-  save_transaction_init(&g_save_transaction);
   g_config_msg.motor_id = kMotorIdNone;
   g_config_msg.policies.data = g_policies; g_config_msg.policies.capacity = 48;
   g_config_msg.parameters.data = g_parameters; g_config_msg.parameters.capacity = 16;
@@ -574,8 +376,7 @@ bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
 }
 void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
   g_created = false;
-  save_transaction_disconnect(&g_save_transaction);
-  g_save_slot = -1; g_transactions.disconnect(); g_view_count = 0;
+  g_transactions.disconnect(); g_view_count = 0;
   if (g_sub_added && executor) (void)rclc_executor_remove_subscription(executor, &g_config_sub);
   g_sub_added = false;
   if (g_sub_up) { const rcl_ret_t result = rcl_subscription_fini(&g_config_sub, node); (void)result; }

@@ -1,51 +1,41 @@
-# MCU 标准轨迹执行
+# 受监督的主机标准轨迹执行
 
-本包由 `robot_supervisor` 在同一单线程执行器内加载，在
-`/robot/follow_joint_trajectory` 提供标准
-`control_msgs/action/FollowJointTrajectory`。轨迹只下发一次，由 micro-ROS MCU
-插值执行；本包不打开 CAN/串口、不启动主机直连控制器，也不自动使能或续租。
+`robot_supervisor` 加载 `HostMotionActionAdapter`，在
+`/robot/follow_joint_trajectory` 提供标准 `FollowJointTrajectory` Action，
+将经过授权和模型校验的完整计划交给主机 JTC。执行链为：
 
-## 控制权与调用顺序
+`主机 JTC/MicroRosSystem → supervisor → micro_ros_bridge → MCU → 电机`。
 
-1. 使用整机 SDK 申请 TRAJECTORY 或 TASK 租约，显式武装并提交使能策略。
-2. 等待 MCU 确认当前策略和新鲜实测状态。
-3. 生成随机 UUID，调用 `/robot/authorize_motion`，携带当前租约、epoch、session、
-   全局递增 sequence 和该 UUID。许可最多有效一秒且只能消费一次。
-4. 用同一 UUID 发送标准 Action 目标。SDK 的 `follow_joint_trajectory(goal)`
-   封装第 3、4 步；它不会补做第 1、2 步，也不会后台续租。
-5. 调用者在执行期间显式续租并驱动 ROS executor。取消使用标准 Action cancel。
+主机 JTC 插值，MCU 执行周期目标。本包不打开 CAN/串口、不自动使能或续租。
+已删除未被生产入口调用的旧 MCU Action 适配器与轨迹编译器。
 
-标准 Action 的 transport UUID 与授权服务绑定，避免其他目标借用已武装状态。
-错误 UUID 在 rclpy 接受句柄阶段才可识别，会立即 abort，绝不下发 MCU。
-同一时刻只允许一条目标，运行中不替换；需要先取消并完成停止确认，再重新授权。
-DDS 参与者仍须受网络或 SROS2 权限约束，UUID 授权不替代消息传输的认证。
+## 调用顺序
 
-## 支持的轨迹
+1. 显式申请控制权、武装并提交使能策略，等待 MCU 授权确认与新鲜反馈。
+2. 生成 UUID，调用 `/robot/authorize_motion`，绑定当前租约、epoch、session、
+   sequence 和目标 UUID；许可短期有效且只能消费一次。
+3. 用相同 UUID 发送标准 Action。SDK 的 `follow_joint_trajectory` 封装授权与提交，
+   不会代替调用者申请控制、使能或续租。
+4. 调用者在运行期间续租并驱动 executor；取消使用标准 Action cancel。
 
-- 使用协议 v3 的 MCU、bridge 和主机接口一起部署；旧固件缺少必要的租约和状态元数据。
-- 关节名必须覆盖当前模型全部关节，各点为完整位置数组。传动转换使用共享模型。
-- 至少两个点，首点为新鲜实测位置且 `time_from_start=0`；随后时间严格递增。
-- 时间为精确整数毫秒，默认最长 2000 ms；展开后最多 256 个电机路点。
-- 轨迹 Header 时间必须为零，表示 MCU 受理后立即开始，不支持预约墙钟起点。
-- velocities、accelerations、effort 数组必须为空。MCU 使用自身的单调 Hermite
-  插值，不能将规划器给定导数默默丢弃；未适配的规划结果会明确拒绝。
-- 支持位置和速度误差容差，非零加速度容差不支持。0 使用默认值，负数关闭容差不支持。
-  默认路径位置容差 0.2、终点位置容差 0.02、终点速度容差 0.01（关节 SI 单位）。
-  `goal_time_tolerance=0` 使用一秒，最大接受十秒。
+模型校验在工作线程执行，周期转发继续由 supervisor 执行器处理；校验结束后重新
+核验控制权。同一时刻仅接受一个目标。新的所有权清退旧控制器；同一有效所有权
+在目标结束后可以继续提交，不强制重启 JTC。
 
-期望状态按 MCU 回执的执行起点及每个电机自身的测量 tick 计算；不同轴的测量年龄
-可以不同，不能把较新的样本错误地按最旧轴的时刻比较。期望与实际的完整执行器
-向量都通过同一传动模型换算，再检查关节误差，支持差动和零位偏移。
-标准反馈的时间字段报告最旧轴的测量时刻，各值使用各轴真实采样时间；它不表示
-所有电机同时采样。只有匹配 trajectory_id 的完成回执与
-完成后的新鲜到位测量同时满足，Action 才返回成功；发送完成或路点时间到达都不算成功。
+## 轨迹与停止
 
-成功后 MCU 保持末点，直至调用者显式停止或租约失效；Action 成功不会自动失能，
-也不会延长租约。取消需看到新的 MCU 撤权/失能回执才返回 canceled；停机确认超时
-返回 aborted，结果明确表明停止尚未确认。授权失效、回执/测量过期和路径误差会触发
-整机停止与 aborted。恢复需要显式按 supervisor 状态重新授权，不会恢复旧目标。
+计划通过共享 `WorkbenchModel` 检查关节、限位、反馈新鲜度及起点。支持位置和
+速度路点；加速度、非零 effort 和预约起点被拒绝。轨迹由主机保留，不受旧 MCU
+缓冲上传的 256 点容量限制，也不表示 MCU 支持执行中流式续段。
 
-## 测试
+反馈和结果来自 JTC；取消请求转发给 JTC，保持驱动使能策略独立。显式停止、
+控制权丢失、反馈或目标过期由 supervisor 与 MCU 授权期限处理。恢复需要显式
+重新申请和武装，不会自动恢复旧目标。
 
-测试使用共享传动库和隔离 ROS 域内的假 MCU，覆盖差动转换、输入拒绝、真实 Action
-反馈/成功/取消、无回执、旧 session、重复回执、容差失败和控制权失效。它们不会接硬件。
+## 验证
+
+`test/test_host_validation.py` 覆盖校验期间执行器继续服务、并发目标拒绝、校验后
+重新检查授权、同所有权连续目标及准备阶段取消。完整 ROS/JTC/原生固件运行
+用例位于 `robot_bringup/test/sil`、`robot_supervisor/test/test_wire_runtime.py` 和
+`robot_bringup/test/test_host_trajectory_integration.py`；当前仍有失败，不能视为
+完整运行验收通过。测试中的模型与标定为虚构 fixture，不是硬件验收。

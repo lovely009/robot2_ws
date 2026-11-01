@@ -399,7 +399,7 @@ export function mount(rootEl, ctx) {
         const extra = names.filter((j) => !mapped.has(j));
         hud.textContent = `臂视图就绪 · ${names.length} 个关节`
           + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
-          + ' · STL 约 70 MB（首次慢，之后走浏览器缓存）';
+          + ' · 几何已加载';
         ready = true;
         // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
         // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。

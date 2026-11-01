@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
-from can_bridge_msgs.msg import (AgentWireContract, MotorCommandArray, MotorPolicyArray, MotorPolicyTarget,
+from can_bridge_msgs.msg import (AgentWireContract, MotorCommandArray,
                                  MotorTrajectory, MotorTrajectoryState)
 from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.srv import ListControllers, SwitchController

@@ -5,6 +5,7 @@ import { PanelScheduler } from "./panel_scheduler";
 export const initialized = ref(false);
 export const startupError = ref("");
 export const notice = ref("");
+export const configuredRosUrl = ref("");
 export interface CommandRecord {
   t: number;
   seq: number;
@@ -17,6 +18,7 @@ function updateCommandHistory() {
   }));
 }
 export const snapshot = shallowRef<WorkbenchSnapshot>({
+  prototype: false,
   managed: {pending: false, enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
   firmwareConnectionKey: '',
   connected: false,
@@ -100,16 +102,16 @@ const scheduler = new PanelScheduler((id, error) => {
 });
 
 function updateSnapshot() {
-  const { data, format } = modules,
+  const { data } = modules,
     s = data.store;
   if (s.motionCount !== lastMotionCount) {
     lastMotionCount = s.motionCount;
     lastMotionAt = Date.now();
   }
   if (!s.conn.connected) lastMotionAt = null;
-  const row = s.motors.get(s.selectedId),
-    simulation = s.bench.simulation;
+  const simulation = s.bench.simulation;
   snapshot.value = {
+    prototype: s.runtimeMode === 'prototype',
     managed: {pending: !!s.managed?.pending, enabled: !!s.managed?.enabled, ownsControl: !!s.managed?.ownsControl,
       armed: !!s.managed?.armed, ready: !!s.managed?.state?.ready,
       mcuAuthorized: !!s.managed?.mcuAuthorized,
@@ -136,7 +138,7 @@ function updateSnapshot() {
     ...data.countMotors(),
     motionAt: lastMotionAt,
     outputTopic: s.commandStatus.data?.output_topic || "",
-    session: s.managed?.enabled ? `托管 MCU · ${s.managed.state?.owner || '未持有控制权'}` : simulation
+    session: s.runtimeMode === 'prototype' ? '半身机器人 · 软件原型' : s.managed?.enabled ? `托管 MCU · ${s.managed.state?.owner || '未持有控制权'}` : simulation
       ? `仿真进程：${simulation.state || "未知"}${s.conn.agent === "running" ? " · Agent 运行中" : ""}`
       : s.conn.agent === "running"
         ? "Agent 运行中 · 控制对象待核对"
@@ -159,7 +161,7 @@ function dirty(batch: Set<string>) {
   const feedbackKey = `${generation}:${data.MODEL}`;
   // 只补齐未选模型的主机；其他页面已选模型时不周期性抢回归属。
   const feedbackNeedsModel = s.bench.feedback && !s.bench.feedback.desired_model;
-  if (!ros.isManagedMode() && s.conn.connected && !feedbackSyncPending &&
+  if (!ros.isManagedMode() && s.runtimeMode !== 'prototype' && s.conn.connected && !feedbackSyncPending &&
       (feedbackKey !== feedbackSyncKey ||
         ((feedbackNeedsModel || feedbackSyncFailed) && Date.now() - feedbackSyncAt > 5000))) {
     const epoch = generation, model = data.MODEL;
@@ -179,9 +181,9 @@ function dirty(batch: Set<string>) {
   }
   if (!ros.isManagedMode() && s.conn.connected && !s.conn.benchLoaded) {
     s.conn.benchLoaded = true;
-    void agent.refreshAgentControls();
+    if (s.runtimeMode !== 'prototype') void agent.refreshAgentControls();
   }
-  if (!ros.isManagedMode() && s.conn.connected && !s.conn.autoLoaded) {
+  if (!ros.isManagedMode() && s.runtimeMode !== 'prototype' && s.conn.connected && !s.conn.autoLoaded) {
     s.conn.autoLoaded = true;
     const epoch = generation;
     void ros
@@ -226,6 +228,7 @@ async function start() {
       modules = { data, ros, agent, device, format, command, actions };
       if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
       const runtimeConfig = await configuration.json();
+      if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;
       ros.configureControl(runtimeConfig);
       if (runtimeConfig.robot_model) data.setModel(runtimeConfig.robot_model);
       const documentSource = new DOMParser().parseFromString(html, "text/html");
@@ -346,14 +349,6 @@ export const runtime = {
   async readFirmwareParameter(name: string) {
     if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
     return modules.device.readFirmwareParameter(name);
-  },
-  async writeFirmwareParameter(name: string, value: number) {
-    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
-    await modules.device.writeFirmwareParameter(name, value);
-  },
-  async saveFirmwareParameters() {
-    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
-    await modules.device.saveFirmwareParameters();
   },
   clearCommandHistory() {
     if (!modules || disposed) return;

@@ -32,13 +32,8 @@ def handler(monkeypatch, tmp_path):
     for name in ('enumerate_arm_models', 'model_transmissions', 'motor_library',
                  'transmission_model_joints'):
         setattr(models, name, Mock())
-    direct = Mock()
-    direct.heartbeat.return_value = {'connected': True}
-    direct_module = ModuleType('web_host.direct_can')
-    direct_module.DirectCanSession = lambda: direct
-    direct_module.device_options = Mock()
     for name, module in [('rclpy', rclpy), ('rclpy.node', node_module),
-                         ('web_host.models', models), ('web_host.direct_can', direct_module)]:
+                         ('web_host.models', models)]:
         monkeypatch.setitem(sys.modules, name, module)
     source = Path(__file__).resolve().parents[1] / 'web_host' / 'static_server.py'
     spec = importlib.util.spec_from_file_location('web_host._http_write_test', source)
@@ -68,7 +63,7 @@ def handler(monkeypatch, tmp_path):
         assert len(replies) == 1
         return replies[0]
 
-    return SimpleNamespace(post=post, web_root=web_root, direct=direct)
+    return SimpleNamespace(post=post, web_root=web_root)
 
 
 def _action(position):
@@ -111,7 +106,6 @@ def test_cross_origin_simple_post_cannot_overwrite_action(handler):
 def test_foreign_or_malformed_origin_rejected_before_write(handler, path, origin):
     status, _ = handler.post(path, {}, origin=origin)
     assert status == 403
-    handler.direct.heartbeat.assert_not_called()
     assert not (handler.web_root.parent / 'action_library').exists()
 
 
@@ -120,7 +114,6 @@ def test_foreign_or_malformed_origin_rejected_before_write(handler, path, origin
 def test_json_required_for_all_write_endpoints(handler, path, content_type):
     status, _ = handler.post(path, {}, content_type=content_type)
     assert status == 415
-    handler.direct.heartbeat.assert_not_called()
 
 
 @pytest.mark.parametrize('origin,host', [
@@ -146,4 +139,3 @@ def test_device_session_json_request_cannot_reopen_retired_direct_path(handler, 
     status, result = handler.post('/api/device-can/heartbeat', {'session': 'token'}, origin=origin)
     assert status == 410
     assert 'micro-ROS' in result['error']
-    handler.direct.heartbeat.assert_not_called()

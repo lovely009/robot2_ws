@@ -227,82 +227,9 @@ Result encode_config(
   const can_bridge_msgs::msg::ParamSetArray & in,
   can_bridge_msgs::msg::ConfigRequest & out)
 {
-  using Target = can_bridge_msgs::msg::ParamSetTarget;
-  Result r;
-  if (in.targets.size() != in.count) {
-    r.ok = false;
-    r.error = "count 与 targets 长度不一致";
-    return r;
-  }
-  // 防御性：经 ROS C++ API 不可达——targets 是 BoundedVector<...,16>（size 恒 ≤16），
-  // 上面长度守卫又要求 count == size，count > 16 到不了这里。留着是因为它对应
-  // ConfigRequest.msg 的内核 FIFO 容量约束；将来若放宽 .msg 上界，它是唯一拦截点。
-  if (in.count > kConfigTargetsMax) {
-    r.ok = false;
-    r.error = "目标数超过配置 FIFO 容量 16";
-    return r;
-  }
-  // bit30 是固件自发脉冲的命名空间，主机置位会被本地拒绝；bit31 已被内核身份读取占用。
-  if (in.request_id >= 0x40000000u) {
-    r.ok = false;
-    r.error = "request_id 高两位保留，主机不得置位";
-    return r;
-  }
-  // 第二维用 FIELD_DIRECTION + 1 而不是字面量 6：将来加槽位时，上面那条
-  // `t.field > Target::FIELD_NODE_ID` 会跟着放宽，而写死的 6 不会——于是
-  // `seen[motor_id][field]` 静默越界写。
-  bool seen[kIdLimit][Target::FIELD_NODE_ID + 1] = {};
-  bool has_min[kIdLimit] = {};
-  bool has_max[kIdLimit] = {};
-  for (const auto & t : in.targets) {
-    if (t.motor_id >= kIdLimit) {
-      r.ok = false;
-      r.error = "motor_id 越界（最大 ID 64）";
-      return r;
-    }
-    if (t.field == Target::FIELD_NODE_ID && in.count != 1) {
-      r.ok = false; r.error = "电机ID修改必须独占请求"; return r;
-    }
-    if (t.field > Target::FIELD_NODE_ID) {
-      r.ok = false;
-      r.error = "未知参数槽位";
-      return r;
-    }
-    if ((t.field == Target::FIELD_NODE_ID || t.field == Target::FIELD_T_MAX) &&
-        (!std::isfinite(t.value) || std::floor(t.value) != t.value || t.value < 1 ||
-         t.value > (t.field == Target::FIELD_NODE_ID ? 64.0f : 16777215.0f))) {
-      r.ok = false; r.error = "电机ID/T_max必须为有效范围内整数"; return r;
-    }
-    if (seen[t.motor_id][t.field]) {
-      r.ok = false;
-      r.error = "同一 (motor_id, field) 重复";
-      return r;
-    }
-    seen[t.motor_id][t.field] = true;
-    if (t.field == Target::FIELD_POS_MIN) {
-      has_min[t.motor_id] = true;
-    }
-    if (t.field == Target::FIELD_POS_MAX) {
-      has_max[t.motor_id] = true;
-    }
-  }
-  // 位置限位必须成对出现在同一条消息里（半边状态正是本设计要消掉的东西）。
-  for (size_t id = 0; id < kIdLimit; ++id) {
-    if (has_min[id] != has_max[id]) {
-      r.ok = false;
-      r.error = "位置限位必须成对：只给了一边";
-      return r;
-    }
-  }
-
-  out.sync_time_ns = in.sync_time_ns;
-  out.request_id = in.request_id;
-  out.kind = can_bridge_msgs::msg::ConfigRequest::CONFIG_KIND_PARAM_SET;
-  out.count = in.count;
-  out.targets = in.targets;  // 同类型序列，直接搬
-  out.command = can_bridge_msgs::msg::SystemCommand::COMMAND_SAVE;  // 该组不适用
-  out.motor_id = can_bridge_msgs::msg::SystemCommand::MOTOR_ID_NONE;
-  return r;
+  (void)in;
+  (void)out;
+  return {false, "运行期电机参数设置已移除"};
 }
 
 Result encode_config(
@@ -311,9 +238,10 @@ Result encode_config(
 {
   using Cmd = can_bridge_msgs::msg::SystemCommand;
   Result r;
-  if (in.command > Cmd::COMMAND_REPORT) {
+  if (in.command != Cmd::COMMAND_REFRESH && in.command != Cmd::COMMAND_CLEAR_FAULT &&
+      in.command != Cmd::COMMAND_REPORT) {
     r.ok = false;
-    r.error = "未知系统命令码";
+    r.error = "运行期参数写入、设零与保存已移除";
     return r;
   }
   if (in.request_id >= 0x40000000u) {
@@ -321,14 +249,7 @@ Result encode_config(
     r.error = "request_id 高两位保留，主机不得置位";
     return r;
   }
-  // 规则逐字沿用 SystemCommand.msg 的头注释：SAVE 只接受整机；REPORT 忽略 motor_id；
-  // 其余三条必须给有效 id。
-  if (in.command == Cmd::COMMAND_SAVE && in.motor_id != Cmd::MOTOR_ID_NONE) {
-    r.ok = false;
-    r.error = "SAVE 只接受整机保存（MOTOR_ID_NONE）";
-    return r;
-  }
-  if (in.command != Cmd::COMMAND_SAVE && in.command != Cmd::COMMAND_REPORT &&
+  if (in.command != Cmd::COMMAND_REPORT &&
     in.motor_id >= kIdLimit)
   {
     r.ok = false;

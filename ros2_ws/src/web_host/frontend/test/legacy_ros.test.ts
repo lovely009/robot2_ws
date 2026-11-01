@@ -256,7 +256,6 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
     ["/control/trajectory", "can_bridge_msgs/msg/MotorTrajectory"],
     ["/control/stop", "std_msgs/msg/Empty"],
     ["/motor/policy_array", "can_bridge_msgs/msg/MotorPolicyArray"],
-    ["/motor/param_set", "can_bridge_msgs/msg/ParamSetArray"],
     ["/motor/system_command", "can_bridge_msgs/msg/SystemCommand"],
   ];
   for (const [name, messageType] of downlinks) {
@@ -321,5 +320,15 @@ it('external 关节反馈必须等当前模型的新鲜主机状态，缺失或�
   data.store.transmissionStatus={last:Date.now(),data:{model:data.MODEL}};
   joints.callback?.({name:['elbow'],position:[.4]});
   expect(data.store.jointStates.byName.elbow.position).toBe(.4);
+  ros.disconnect();
+});
+
+it('浏览器观测限流并保留事件队列，避免反馈堵塞控制连接', async () => {
+  const ros = await import('../../web/js/core/ros.js');
+  ros.connect(); Socket.instances[0].emit('connection');
+  expect(Topic.instances.find(t => t.name === '/motor/motion_states')?.options)
+    .toMatchObject({throttle_rate:50, queue_length:1});
+  expect(Topic.instances.find(t => t.name === '/motor/events')?.options)
+    .toMatchObject({throttle_rate:0, queue_length:64});
   ros.disconnect();
 });

@@ -49,6 +49,7 @@ export function controlSessionError(state, model, now = Date.now()) {
   if (!runtime?.last || now-runtime.last < 0 || now-runtime.last > 2500) return '主机传动桥状态已过期';
   if (runtime.data?.model !== model) return '页面模型与主机传动模型不一致';
   if (runtime.data.trajectory_enabled !== true) return '主机传动桥为只读模式';
+  if (state.runtimeMode === 'prototype') return '';
   const command = state.commandStatus;
   if (!command?.last || now-command.last < 0 || now-command.last > 2500
       || command.data?.output_topic !== '/motor/host_command_array'

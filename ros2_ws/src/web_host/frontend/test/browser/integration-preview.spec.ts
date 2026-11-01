@@ -41,10 +41,11 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await expect(page.locator('.motor-card')).toHaveCount(37);
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await expect(page.getByRole('button', {name:'武装', exact:true})).toBeDisabled();
-  await expect(page.locator('canvas[data-model-ready="true"]')).toHaveCount(1, {timeout:20000});
+  await expect(page.locator('canvas[data-model-rendered="true"]')).toHaveCount(1, {timeout:20000});
   await page.evaluate(() => {
     const badge = document.createElement('div');
     badge.textContent = '模拟数据 · 37轴/总线分配为虚构 · 非实测 · 整合未验收';
+    badge.dataset.evidenceBanner = 'true';
     badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
     document.body.append(badge);
   });
@@ -54,6 +55,11 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await page.getByRole('button', {name:'重新连接', exact:true}).click();
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await page.setViewportSize({width:390,height:844});
+  await page.evaluate(() => {
+    const badge=document.querySelector<HTMLElement>('[data-evidence-banner]')!;
+    badge.textContent='模拟 · 37轴/总线为虚构 · 非实测 · 未验收';
+    badge.style.fontSize='10px';badge.style.maxWidth='220px';badge.style.padding='5px 7px';
+  });
   await expect(page.getByRole('navigation', {name:'工作区面板'})).toBeVisible();
   expect((await page.locator('.main-nav').boundingBox())!.width).toBe(52);
   await page.getByRole('button', {name:/^电机\s*37$/}).click();

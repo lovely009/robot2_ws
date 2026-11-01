@@ -51,6 +51,7 @@ function tick(now) {
   const moved = controls.update();
   if (!renderRequested && !moved) return;
   renderer.render(scene, camera);
+  if (renderer.domElement.dataset.modelReady === 'true') renderer.domElement.dataset.modelRendered = 'true';
   renderRequested = false;
   lastRenderAt = now;
 }
@@ -61,6 +62,7 @@ export function init(canvas, opts) {
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   canvas.dataset.modelReady = 'false';
+  canvas.dataset.modelRendered = 'false';
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderRequested = true;
 

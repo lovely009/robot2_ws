@@ -4,12 +4,20 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 #include "agent_control_gate.h"
 #include "motor_control_internal.h"
 #include "motor_tx_router.h"
 
 namespace {
 constexpr unsigned N=37;
+struct OutputEvent {uint64_t wall_ns; uint32_t tick; uint32_t motor_id;};
+// Measurement-only fixed storage: no allocation or Python callbacks in the
+// 200Hz output path. Tick time and actual host pump time remain separate.
+constexpr unsigned OUTPUT_CAPACITY=N*200*60;
+OutputEvent output_events[OUTPUT_CAPACITY];
+unsigned output_count=0;
+unsigned output_overflow=0;
 struct Device {double position=0, velocity=0, target=0; bool enabled=false; unsigned outputs=0;};
 struct Engine {
   motor_control_context_t core{};
@@ -55,6 +63,10 @@ struct Engine {
       auto raw=unsigned(data[1])*256+data[2];
       auto limit=core.entries[id-1].profile->mit_position_limit_rad;
       d.target=(double(raw)/65535*2-1)*limit; ++d.outputs;
+      if(output_count<OUTPUT_CAPACITY) {
+        const auto now=std::chrono::steady_clock::now().time_since_epoch();
+        output_events[output_count++]={uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()),tick,id};
+      } else ++output_overflow;
     } else d.velocity=0;
   }
   static bool tx(void *ctx,uint8_t bus,const can_tx_frame_t *frame) {
@@ -109,7 +121,12 @@ struct Engine {
 Engine *engine=nullptr;
 }
 extern "C" {
-void sil_init(){delete engine;engine=new Engine;}
+void sil_init(){delete engine;engine=new Engine;output_count=output_overflow=0;}
+unsigned sil_output_events(OutputEvent *destination,unsigned capacity) {
+ const auto count=std::min(capacity,output_count);
+ std::memcpy(destination,output_events,count*sizeof(OutputEvent));return count;
+}
+unsigned sil_output_overflow(){return output_overflow;}
 void sil_advance(uint32_t tick){while(engine->tick<tick)engine->step();}
 int sil_lease(uint64_t id,uint32_t seq,uint32_t deadline,int active){return control_lease_submit(&engine->gate.authority,100,id,seq,deadline,active,engine->tick);}
 int sil_command(uint64_t lease,uint32_t seq,uint32_t deadline,unsigned count,const uint8_t*ids,const int16_t*p,const int16_t*v,const int16_t*t){

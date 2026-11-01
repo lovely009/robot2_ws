@@ -29,3 +29,6 @@ uint8 query_kind
 uint32 query_revision
 uint16 cursor
 uint32 detail_request_id
+
+# Required for enabling policy, never synthesized from connection state.
+uint64 lease_id

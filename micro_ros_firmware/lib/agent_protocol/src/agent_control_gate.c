@@ -6,6 +6,7 @@ void agent_gate_begin_session(agent_control_gate_t *gate,
     control_mailbox_t *mailbox, uint64_t session_id) {
   memset(gate, 0, sizeof(*gate));
   wire_command_guard_reset(&gate->command_guard, session_id);
+  control_lease_set_session(&gate->authority, session_id);
   control_mailbox_clear_command(mailbox);
   control_mailbox_clear_policy(mailbox);
   control_mailbox_clear_trajectory(mailbox);
@@ -14,6 +15,7 @@ void agent_gate_begin_session(agent_control_gate_t *gate,
 }
 
 void agent_gate_request_stop(agent_control_gate_t *gate) {
+  control_lease_revoke(&gate->authority);
   agent_link_request_stop(&gate->link);
 }
 
@@ -38,7 +40,8 @@ static void discard_policy(control_mailbox_t *mailbox,
 bool agent_gate_submit_command(agent_control_gate_t *gate,
     control_mailbox_t *mailbox, const control_command_snapshot_t *snapshot,
     uint32_t now_ms) {
-  if (snapshot == NULL || !gate->link.connected || !gate->link.clock_valid ||
+  if (snapshot == NULL || (snapshot->target_count &&
+      !control_lease_allows(&gate->authority, snapshot->lease_id, now_ms)) || !gate->link.connected || !gate->link.clock_valid ||
       gate->link.stop_pending || !agent_deadline_valid(now_ms, snapshot->valid_until_tick_ms) ||
       !wire_command_guard_allows(&gate->command_guard, snapshot->session_id, snapshot->sequence)) {
     ++mailbox->command_rejected_count;
@@ -55,6 +58,11 @@ bool agent_gate_submit_policy(agent_control_gate_t *gate,
     control_mailbox_t *mailbox, const control_policy_snapshot_t *snapshot,
     uint32_t now_ms) {
   if (snapshot == NULL) return false;
+  bool enabling = false;
+  for (uint8_t i = 0; i < snapshot->target_count; ++i) enabling |= snapshot->targets[i].enabled;
+  if (enabling && !control_lease_allows(&gate->authority, snapshot->lease_id, now_ms)) {
+    ++mailbox->policy_rejected_count; return false;
+  }
   const uint32_t remaining = snapshot->valid_until_tick_ms - now_ms;
   agent_link_t candidate = gate->link;
   if (mailbox->policy.pending || gate->disable_pending_mask != 0U ||
@@ -82,8 +90,15 @@ uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbo
     gate->session_pending = false;
   }
   const bool connected = mailbox->agent_state_seen && mailbox->agent_connected_requested;
+  control_lease_service(&gate->authority, now_ms);
+  if (control_lease_take_revocation(&gate->authority)) agent_link_request_stop(&gate->link);
   const uint8_t action = agent_link_poll(&gate->link, now_ms, connected, clock_valid);
   if (action & AGENT_LINK_REVOKE) {
+    if (gate->authority.active && (!connected || !clock_valid ||
+        (gate->link.have_command && now_ms - gate->link.command_tick_ms > 100U))) {
+      control_lease_revoke(&gate->authority);
+      (void)control_lease_take_revocation(&gate->authority); // this barrier already services it
+    }
     motor_control_stop_all(ctx, now_ms);
     gate->kernel_authorized = false;
     control_mailbox_clear_command(mailbox);
@@ -106,6 +121,34 @@ uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbo
     control_mailbox_clear_trajectory(mailbox);
   }
   return action;
+}
+
+static void apply_pending_command(agent_control_gate_t *gate, control_mailbox_t *mailbox,
+    motor_control_context_t *ctx, uint32_t now_ms, bool emit) {
+  static control_command_snapshot_t command_in;
+  static motor_control_command_snapshot_t command;
+  if (control_mailbox_take_command(mailbox, &command_in) &&
+      agent_deadline_valid(now_ms, command_in.valid_until_tick_ms) &&
+      (!command_in.target_count || control_lease_allows(&gate->authority, command_in.lease_id, now_ms))) {
+    memset(&command, 0, sizeof(command));
+    command.sequence = command_in.sequence;
+    command.received_tick_ms = command_in.received_tick_ms;
+    command.valid_until_tick_ms = command_in.valid_until_tick_ms;
+    command.target_count = command_in.target_count;
+    for (uint8_t i = 0; i < command.target_count; ++i) {
+      command.targets[i].motor_id = command_in.targets[i].motor_id;
+      command.targets[i].position_rad = command_in.targets[i].position;
+      command.targets[i].velocity_rad_s = command_in.targets[i].velocity;
+      command.targets[i].effort_nm = command_in.targets[i].effort;
+    }
+    if (emit) (void)motor_control_apply_command_snapshot(ctx, &command, now_ms);
+    else (void)motor_control_admit_command_snapshot(ctx, &command, now_ms);
+  }
+}
+
+void agent_gate_admit_command(agent_control_gate_t *gate, control_mailbox_t *mailbox,
+    motor_control_context_t *ctx, uint32_t now_ms) {
+  apply_pending_command(gate, mailbox, ctx, now_ms, false);
 }
 
 void agent_gate_step(agent_control_gate_t *gate, control_mailbox_t *mailbox,
@@ -132,11 +175,14 @@ void agent_gate_step(agent_control_gate_t *gate, control_mailbox_t *mailbox,
         policy.targets[i].confirm_unprotected = policy_in.targets[i].confirm_unprotected;
         enables |= policy.targets[i].enabled;
       }
-      if (enables && gate->link.authorized) {
+      if (enables && gate->link.authorized &&
+          control_lease_allows(&gate->authority, policy_in.lease_id, now_ms)) {
         gate->kernel_authorized = true;
         (void)motor_control_set_authorization(ctx, true, now_ms);
       }
-      if (!motor_control_apply_policy(ctx, &policy, now_ms) && enables) {
+      if (enables && !control_lease_allows(&gate->authority, policy_in.lease_id, now_ms)) {
+        reject_policy(ctx, &policy_in, now_ms);
+      } else if (!motor_control_apply_policy(ctx, &policy, now_ms) && enables) {
         gate->kernel_authorized = false;
         (void)motor_control_set_authorization(ctx, false, now_ms);
       }
@@ -144,21 +190,5 @@ void agent_gate_step(agent_control_gate_t *gate, control_mailbox_t *mailbox,
       reject_policy(ctx, &policy_in, now_ms);
     }
   }
-  static control_command_snapshot_t command_in;
-  static motor_control_command_snapshot_t command;
-  if (control_mailbox_take_command(mailbox, &command_in) &&
-      agent_deadline_valid(now_ms, command_in.valid_until_tick_ms)) {
-    memset(&command, 0, sizeof(command));
-    command.sequence = command_in.sequence;
-    command.received_tick_ms = command_in.received_tick_ms;
-    command.valid_until_tick_ms = command_in.valid_until_tick_ms;
-    command.target_count = command_in.target_count;
-    for (uint8_t i = 0; i < command.target_count; ++i) {
-      command.targets[i].motor_id = command_in.targets[i].motor_id;
-      command.targets[i].position_rad = command_in.targets[i].position;
-      command.targets[i].velocity_rad_s = command_in.targets[i].velocity;
-      command.targets[i].effort_nm = command_in.targets[i].effort;
-    }
-    (void)motor_control_apply_command_snapshot(ctx, &command, now_ms);
-  }
+  apply_pending_command(gate, mailbox, ctx, now_ms, true);
 }

@@ -29,3 +29,9 @@ MotorDiagnostics diagnostics
 bool firmware_values_valid
 uint16[6] firmware_values
 bool firmware_unsaved
+
+# MCU-local authority acknowledgement, independent of command freshness.
+uint64 lease_id
+uint32 lease_sequence
+uint32 lease_valid_until_tick_ms
+bool lease_active

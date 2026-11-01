@@ -7,6 +7,7 @@
 #include <vector>
 #include <rclcpp/rclcpp.hpp>
 #include <can_bridge_msgs/msg/agent_command.hpp>
+#include <can_bridge_msgs/msg/control_lease.hpp>
 #include <can_bridge_msgs/msg/agent_config_request.hpp>
 #include <can_bridge_msgs/msg/agent_info.hpp>
 #include <can_bridge_msgs/msg/agent_motion.hpp>
@@ -29,6 +30,11 @@ class BridgeNode : public rclcpp::Node
 public:
   explicit BridgeNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 private:
+  void on_authority(const can_bridge_msgs::msg::ControlLease & message);
+  bool authority_ready(uint64_t session, uint64_t lease);
+  uint64_t authority_high_water_ = 0;
+  uint32_t authority_sequence_ = 0;
+  bool authority_revoked_ = false;
   using TimePoint = std::chrono::steady_clock::time_point;
   using Config = can_bridge_msgs::msg::AgentConfigRequest;
   using Status = can_bridge_msgs::msg::AgentStatus;
@@ -51,7 +57,7 @@ private:
   };
   struct Upload {
     uint32_t caller_id = 0, wire_id = 0;
-    uint64_t issued = 0;
+    uint64_t issued = 0, lease_id = 0;
     uint16_t host_segments = 0, next_host_segment = 0;
     std::vector<uint16_t> ids;
     std::vector<can_bridge_msgs::msg::MotorTrajectoryPoint> points;

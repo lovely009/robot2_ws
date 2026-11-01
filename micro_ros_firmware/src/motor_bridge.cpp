@@ -144,7 +144,14 @@ static void command_cb(const void *msgin) {
     if (m.count == 0U) motor_rt_request_stop_all();
     return;
   }
-  if (m.mode != can_bridge_msgs__msg__AgentCommand__SNAPSHOT) return;
+  if (m.mode == can_bridge_msgs__msg__AgentCommand__AUTHORITY) {
+    if (m.count == 0U && m.sequence == 0U && m.valid_until_tick_ms == 0U)
+      (void)motor_rt_submit_control_lease(m.session_id, m.lease_id,
+          m.lease_sequence, m.lease_valid_until_tick_ms, m.lease_active);
+    return;
+  }
+  if (m.mode != can_bridge_msgs__msg__AgentCommand__SNAPSHOT ||
+      m.lease_sequence || m.lease_valid_until_tick_ms || m.lease_active) return;
   const uint32_t now = millis();
   if (g_session_id == 0U || m.session_id != g_session_id ||
       !time_clock_valid() || !agent_deadline_valid(now, m.valid_until_tick_ms)) return;
@@ -160,6 +167,7 @@ static void command_cb(const void *msgin) {
   auto &snapshot = g_command_snapshot;
   memset(&snapshot, 0, sizeof(snapshot));
   snapshot.session_id = m.session_id;
+  snapshot.lease_id = m.lease_id;
   snapshot.sequence = m.sequence;
   snapshot.received_tick_ms = now;
   snapshot.valid_until_tick_ms = m.valid_until_tick_ms;
@@ -214,6 +222,7 @@ static void trajectory_cb(const void *msgin) {
   auto &request = g_trajectory_request;
   memset(&request, 0, sizeof(request));
   request.session_id = m.session_id;
+  request.lease_id = m.lease_id;
   request.request_id = m.request_id;
   request.trajectory_id = m.trajectory_id;
   request.valid_until_tick_ms = deadline;
@@ -308,6 +317,12 @@ static void fill_status(void) {
   m.clock_offset_ns = clock.offset_ns;
   motor_rt_link_status_t link = {};
   motor_rt_copy_link_status(&link);
+  control_lease_state_t authority{};
+  motor_rt_copy_control_lease(&authority);
+  m.lease_id = authority.lease_id;
+  m.lease_sequence = authority.sequence;
+  m.lease_valid_until_tick_ms = authority.valid_until_tick_ms;
+  m.lease_active = authority.active;
   m.command_sequence = link.command_sequence;
   m.stop_generation = link.stop_generation;
   m.required_policy_generation = link.required_policy_generation;

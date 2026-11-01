@@ -22,15 +22,18 @@ from diagnostic_msgs.msg import DiagnosticArray
 from std_srvs.srv import Trigger
 
 from can_bridge_msgs.msg import (
-    ControlLease, DeviceParamReport, MotorCommandArray, MotorControlStateArray,
+    AgentWireContract,
+    ConfigRequest, ControlLease, DeviceParamReport, MotorCommandArray, MotorControlStateArray,
     MotorMotionStateArray, MotorPolicyArray, MotorPolicyTarget, MotorTopology,
     MotorTrajectory, SystemCommand, WireContract,
 )
 from robot_system_msgs.msg import (
     CalibrationState, LeasedCommand, LeasedPolicy, LeasedTrajectory, RobotState,
 )
-from robot_system_msgs.srv import AcquireControl, AuthorizeMotion, ReleaseControl, RenewControl, SetArmed
-from robot_motion.action_server import MotionActionAdapter
+from robot_system_msgs.srv import AcquireControl, AuthorizeMotion, ExecuteMaintenance, ReleaseControl, RenewControl, SetArmed
+from robot_motion.host_action import HostMotionActionAdapter
+from std_msgs.msg import Empty, String
+import json
 from motor_hardware_interface.control_state import ControlStateTracker
 from robot_calibration.validation import compute_fingerprint
 
@@ -94,12 +97,14 @@ class SupervisorNode(Node):
             calibration_timeout_s=self._calibration_timeout)
         self._authority = ControlStateTracker()
         self._command = None
+        self._manual_until = -math.inf
+        self._facade_context = None
         self._command_at = 0.
         self._motion = {}
         self._motion_sequence = None
         self._motion_at = 0.
         self._wire_sequence = 0
-        self._request_id = secrets.randbelow(0x7FFFFFFF) + 1
+        self._request_id = secrets.randbelow(0x3FFFFFFE) + 1
         self._last_report_request = -math.inf
         self._last_state_publish = -math.inf
         self._last_diagnostics_publish = -math.inf
@@ -115,6 +120,11 @@ class SupervisorNode(Node):
 
         self._pub_command = self.create_publisher(
             MotorCommandArray, '/robot/managed/motor/command_array', _reliable())
+        self._pub_manual = self.create_publisher(MotorCommandArray, '/robot/managed/control/setpoint', _reliable())
+        self._pub_host_trajectory = self.create_publisher(MotorTrajectory, '/robot/managed/control/trajectory', _reliable(10))
+        self._pub_host_stop = self.create_publisher(Empty, '/robot/managed/control/stop', _reliable())
+        self.create_subscription(MotorCommandArray, '/motor/host_command_array', self._on_host_command, _reliable())
+        self.create_subscription(String, '/control/status', self._on_host_status, _reliable())
         self._pub_policy = self.create_publisher(
             MotorPolicyArray, '/robot/managed/motor/policy_array', _reliable(10))
         self._pub_trajectory = self.create_publisher(
@@ -123,6 +133,8 @@ class SupervisorNode(Node):
             ControlLease, '/robot/managed/motor/control_lease', _reliable())
         self._pub_report = self.create_publisher(
             SystemCommand, '/robot/managed/maintenance/system_command', _reliable(10))
+        self._pub_maintenance = self.create_publisher(
+            ConfigRequest, '/robot/managed/maintenance/config_request', _reliable(10))
         self._pub_state = self.create_publisher(RobotState, '/robot/state', _reliable(latched=True))
         self._pub_diagnostics = self.create_publisher(
             DiagnosticArray, '/diagnostics', _reliable(10))
@@ -150,15 +162,45 @@ class SupervisorNode(Node):
                 (ReleaseControl, 'release_control', self._release),
                 (SetArmed, 'set_armed', self._set_armed),
                 (AuthorizeMotion, 'authorize_motion', self._authorize_motion),
+                (ExecuteMaintenance, 'execute_maintenance', self._maintenance),
                 (Trigger, 'stop', self._stop),
                 (Trigger, 'reset_fault', self._reset)):
             self.create_service(service_type, '/robot/' + name, method)
-        self._motion_adapter = MotionActionAdapter(
-            self, self._validator.model, self._validator.trajectory,
-            self._submit_motion, self._motion_authorized, self._motion_stop,
-            self._motion_stopped, max_trajectory_ms=max_trajectory_ms,
-            feedback_timeout_s=self._control_timeout)
+        self._motion_adapter = HostMotionActionAdapter(self, self._driver_file, self._urdf_file,
+            self._motion_authorized, self._motion_stop)
         self.create_timer(1. / stream_hz, self._tick)
+
+    def _on_host_status(self, message):
+        try:
+            status = json.loads(message.data)
+            if status.get('mode') == 'error' and self.core.armed:
+                self.core.stop('host_controller_error')
+                self._flush_stop()
+        except (ValueError, TypeError): pass
+
+    def _on_host_command(self, message):
+        # Only newly generated ros2_control output, with its ORIGINAL stamp,
+        # reaches the bridge. Neither lease renewal nor this node retimes it.
+        now_ns = self.get_clock().now().nanoseconds
+        if (not message.sync_time_ns or not 0 <= now_ns - message.sync_time_ns <= 30_000_000
+                or self.count_publishers('/motor/host_command_array') != 1): return
+        if message.count:
+            context = getattr(self._motion_adapter, 'context', None) or self._facade_context
+            if not self.core.armed or not self._mcu_lease.confirmed: return
+            moving = time.monotonic() < self._manual_until or (context and self._motion_authorized(context))
+            if moving:
+                try:
+                    self._validator.command(message)
+                    self._active_targets([t.motor_id for t in message.targets])
+                except ValueError: return
+        else: moving = False
+        outgoing = copy.deepcopy(message)
+        if not moving:
+            outgoing.count = 0
+            outgoing.targets = []
+        outgoing.session_id = self.core.session_id
+        outgoing.lease_id = self._mcu_lease.lease_id
+        self._pub_command.publish(outgoing)
 
     def _fresh_stamp(self, stamp, maximum_age):
         if stamp.sec < 0 or not 0 <= stamp.nanosec < 1000000000:
@@ -166,6 +208,36 @@ class SupervisorNode(Node):
         sent_ns = stamp.sec * 1000000000 + stamp.nanosec
         age = (self.get_clock().now().nanoseconds - sent_ns) / 1e9
         return sent_ns > 0 and 0 <= age <= maximum_age
+
+    def _maintenance(self, envelope, response):
+        request = envelope.request
+        report = request.kind == ConfigRequest.CONFIG_KIND_SYSTEM_COMMAND and request.command == SystemCommand.COMMAND_REPORT
+        try:
+            age = (self.get_clock().now().nanoseconds - request.sync_time_ns) / 1e9
+            if not request.sync_time_ns or not 0 <= age <= .25:
+                raise ValueError('maintenance source timestamp expired')
+            if request.kind not in (0, 1, 2) or not 0 < request.request_id < 0x40000000:
+                raise ValueError('invalid maintenance kind or request ID')
+            if not report:
+                if not self.core.lease_matches(envelope.lease_id, envelope.epoch, envelope.session_id):
+                    raise ValueError('current control ownership required')
+                now = time.monotonic()
+                tracker = self._authority
+                disabled = (tracker.valid and 0 <= now-tracker.at <= self._control_timeout
+                    and sorted(tracker.states) == self._validator.motor_ids
+                    and all(s.online and not s.policy_enabled and not s.motion_enabled
+                        and s.control_lifecycle == 2 and not s.unified_fault_code
+                        and not s.vendor_fault_code and s.state_age_ms/1000+now-tracker.at <= self._control_timeout
+                        for s in tracker.states.values()))
+                if self.core.armed or self._motion_adapter.busy or not disabled:
+                    raise ValueError('maintenance requires unarmed, fresh disabled MCU feedback')
+            outgoing = copy.deepcopy(request)
+            outgoing.session_id = self.core.session_id
+            self._pub_maintenance.publish(outgoing)
+            response.success, response.reason = True, 'accepted; wait for device config_result'
+        except (ValueError, TypeError) as error:
+            response.success, response.reason = False, str(error)
+        return response
 
     def _on_calibration(self, message):
         valid_stamp = self._fresh_stamp(message.header.stamp, self._calibration_timeout)
@@ -321,8 +393,7 @@ class SupervisorNode(Node):
 
     def _motion_authorized(self, context):
         return (self.core.lease_matches(context['lease_id'], context['epoch'], context['session_id'])
-                and self.core.armed and self._mcu_lease.confirmed
-                and self.core.input_sequence == context['sequence'])
+                and self.core.armed and self._mcu_lease.confirmed)
 
     def _submit_motion(self, message, context):
         if not self._allow_trajectories or not self._motion_authorized(context):
@@ -377,6 +448,8 @@ class SupervisorNode(Node):
         now = time.monotonic()
         for mid in trajectory.target_ids:
             sample = self._motion.get(mid)
+            if mid not in first:
+                raise ValueError(f'm{mid}: trajectory start sample missing')
             if not sample or not 0 <= now - sample[1] <= self._control_timeout:
                 raise ValueError(f'm{mid}: fresh measured trajectory start is required')
             if abs(first[mid] - sample[0]) > self._start_tolerance:
@@ -389,9 +462,13 @@ class SupervisorNode(Node):
             message = getattr(envelope, channel)
             disabling = (channel == 'policy' and message.targets
                          and not any(target.enabled for target in message.targets))
-            if self._motion_adapter.busy and not disabling:
+            canceling = channel == 'trajectory' and not message.count and not message.points
+            if self._motion_adapter.busy and not disabling and not canceling:
                 raise ValueError('standard Action owns motion; cancel it before another input')
-            getattr(self._validator, channel)(message)
+            if channel != 'trajectory':
+                getattr(self._validator, channel)(message)
+            # Host JTC facade assembles and validates complete plans in WorkbenchModel;
+            # the MCU's 256-point upload bound is not a host plan length bound.
             if (channel == 'policy' and any(target.enabled for target in message.targets)
                     and any(not target.enabled for target in message.targets)):
                 raise ValueError('managed policies cannot mix enable and disable intents')
@@ -405,7 +482,7 @@ class SupervisorNode(Node):
             if not disabling:
                 self._require_mcu_lease()
             outgoing = copy.deepcopy(message)
-            outgoing.sync_time_ns = self.get_clock().now().nanoseconds
+            outgoing.sync_time_ns = message.sync_time_ns or (envelope.header.stamp.sec * 10**9 + envelope.header.stamp.nanosec)
             if hasattr(outgoing, 'session_id'):
                 outgoing.session_id = self.core.session_id
             outgoing.lease_id = self._mcu_lease.lease_id
@@ -425,22 +502,31 @@ class SupervisorNode(Node):
                     raise ValueError('managed policy requires at least one target')
             elif channel == 'command':
                 self._active_targets([target.motor_id for target in outgoing.targets])
-                self._command = (envelope.lease_id, envelope.epoch,
-                                 envelope.session_id, outgoing)
-                self._command_at = time.monotonic()
+                age = (self.get_clock().now().nanoseconds - outgoing.sync_time_ns) / 1e9
+                if not 0 <= age < self._command_timeout:
+                    raise ValueError('original manual source expired')
+                self._manual_until = time.monotonic() + self._command_timeout - age
+                self._motion_adapter.context = None
+                self._facade_context = None
+                self._pub_manual.publish(outgoing)
             else:
                 self._active_targets(list(outgoing.target_ids))
-                if outgoing.count:
+                if not canceling and outgoing.segment_count == 1:
                     self._trajectory_start(outgoing)
-                self._command = None
-                self._pub_trajectory.publish(outgoing)
+                self._manual_until = -math.inf
+                if canceling:
+                    self._motion_adapter.cancel_current()
+                else:
+                    self._facade_context = dict(lease_id=envelope.lease_id,
+                        epoch=envelope.epoch, session_id=envelope.session_id, sequence=envelope.sequence)
+                self._pub_host_trajectory.publish(outgoing)
             self._record_input_result(channel, envelope.sequence, True, '')
         except (ValueError, TypeError, OverflowError) as error:
             self._record_input_result(channel, envelope.sequence, False, str(error))
         self._flush_stop()
 
     def _next_request_id(self):
-        self._request_id = (self._request_id + 1) & 0xFFFFFFFF
+        self._request_id = (self._request_id + 1) & 0x3FFFFFFF
         if not self._request_id:
             self._request_id = 1
         return self._request_id
@@ -465,6 +551,9 @@ class SupervisorNode(Node):
         self._pub_diagnostics.publish(output)
 
     def _send_stop(self):
+        self._facade_context = None
+        self._manual_until = -math.inf
+        self._pub_host_stop.publish(Empty())
         self._command = None
         try:
             self._publish_mcu_lease(revoke=True)
@@ -513,10 +602,11 @@ class SupervisorNode(Node):
             topics = (
                 '/robot/managed/motor/command_array', '/robot/managed/motor/policy_array',
                 '/robot/managed/motor/trajectory', '/robot/calibration_state',
-                '/robot/managed/motor/control_lease', WireContract.TOPIC_CONTROL_LEASE,
+                '/robot/managed/motor/control_lease', AgentWireContract.TOPIC_COMMAND,
                 '/motor/control_states', '/motor/topology',
-                WireContract.TOPIC_LOW_CMD, WireContract.TOPIC_POLICY,
-                WireContract.TOPIC_TRAJECTORY, WireContract.TOPIC_CONFIG,
+                AgentWireContract.TOPIC_TRAJECTORY, AgentWireContract.TOPIC_CONFIG,
+                '/motor/host_command_array',
+                '/robot/managed/maintenance/config_request',
             )
             for topic in topics:
                 if self.count_publishers(topic) != 1:
@@ -541,31 +631,9 @@ class SupervisorNode(Node):
                 except ValueError as error:
                     self.core.stop(str(error))
                     self._flush_stop()
-        if self._command is not None:
-            token, epoch, session, message = self._command
-            if (not self.core.lease_matches(token, epoch, session)
-                    or not self.core.snapshot()['armed']):
-                self._command = None
-            elif now - self._command_at > self._command_timeout:
-                self.core.stop('command_input_timeout')
-                self._flush_stop()
-            else:
-                try:
-                    self._active_targets([target.motor_id for target in message.targets])
-                    outgoing = copy.deepcopy(message)
-                    self._wire_sequence = (self._wire_sequence + 1) & 0xFFFFFFFF
-                    outgoing.sequence = self._wire_sequence
-                    outgoing.session_id = self.core.session_id
-                    outgoing.lease_id = self._mcu_lease.lease_id
-                    self._require_mcu_lease()
-                    outgoing.sync_time_ns = self.get_clock().now().nanoseconds
-                    self._pub_command.publish(outgoing)
-                except ValueError:
-                    self.core.stop('command_authority_lost')
-                    self._flush_stop()
-        state = self.core.snapshot()
-        if 'awaiting_disabled' not in state['blockers']:
-            self._stop_retry_until = 0.
+        if self._manual_until != -math.inf and now >= self._manual_until:
+            self.core.stop('manual_source_expired')
+            self._flush_stop()
         if now < self._stop_retry_until and now >= self._next_stop_retry:
             self._send_stop()
             self._next_stop_retry = now + .1

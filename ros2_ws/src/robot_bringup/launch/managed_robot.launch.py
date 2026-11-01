@@ -76,7 +76,7 @@ def managed_nodes(context):
     model_root = Path(_argument(context, 'model_dir')) / 'models' / model
     driver = model_root / 'config' / 'motor_driver.yaml'
     urdf = model_root / 'urdf' / f'{model}.urdf'
-    feedback = _feedback_nodes(context)  # 模型/传动错误必须在任何进程启动前拒绝。
+    readonly_feedback = _feedback_nodes(context)  # 模型/传动错误在启动前拒绝。
     calibration = Node(
         package='robot_calibration', executable='calibration_validator',
         name='calibration_validator', output='screen',
@@ -103,7 +103,11 @@ def managed_nodes(context):
         remappings=list(WRITE_REMAPPINGS),
         sigterm_timeout='1', sigkill_timeout='1',
     )
-    critical = [calibration, supervisor, bridge, *feedback]
+    control_stack = IncludeLaunchDescription(PythonLaunchDescriptionSource(str(Path(
+        get_package_share_directory('motor_hardware_interface')) / 'launch' / 'host_trajectory.launch.py')),
+        launch_arguments={'motor_config_file': str(driver), 'urdf_file': str(urdf),
+            'model': model, 'start_controllers': 'true'}.items())
+    critical = [calibration, supervisor, bridge]
     if start_agent:
         critical.append(Node(
             package='micro_ros_agent', executable='micro_ros_agent',
@@ -134,7 +138,11 @@ def managed_nodes(context):
         ))
     # UI and rosbridge are clients. Their exit is handled by lease expiry,
     # without tearing down healthy feedback or MCU state monitoring.
-    return [*handlers, *critical, *optional]
+    # A device-free/read-only launch must remain available while waiting for
+    # feedback; MicroRosSystem activation correctly fails without live MCU
+    # data, so do not start a writable controller stack in that mode.
+    feedback = [control_stack] if start_agent else readonly_feedback
+    return [*handlers, *critical, *feedback, *optional]
 
 
 def generate_launch_description():

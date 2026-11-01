@@ -40,8 +40,6 @@
   </export>
   <build_depend>robot_description</build_depend>
   <exec_depend>robot_description</exec_depend>
-  <exec_depend>can_bridge_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
   <test_depend>launch_testing</test_depend>
   <test_depend>launch_testing_ros</test_depend>
   <test_depend>controller_manager_msgs</test_depend>

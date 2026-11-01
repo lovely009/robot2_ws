@@ -6,6 +6,15 @@
 #include <cstdint>
 #include <cstring>
 
+// Explicit fixture authority; empty command heartbeats never create it.
+static void fixture_lease(agent_control_gate_t &gate, uint32_t now = 100) {
+  const auto session = gate.authority.session_id;
+  const auto id = gate.authority.lease_id ? gate.authority.lease_id + 1 : session * 1000000ULL + 1;
+  assert(control_lease_submit(&gate.authority, session, id, 1, now + 250, true, now));
+  // Fixture starts with no old kernel intent; production services this handoff.
+  (void)control_lease_take_revocation(&gate.authority);
+}
+
 static void test_unarmed_gate_preserves_segmented_identity_read() {
   const motor_protocol_adapter_t *adapters[] = {&motor_protocol_cerb_adapter};
   motor_control_context_t ctx{};
@@ -14,6 +23,7 @@ static void test_unarmed_gate_preserves_segmented_identity_read() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, adapters, 1);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   agent_gate_service(&gate, &mailbox, &ctx, 99, false);
 
   motor_protocol_raw_frame_t frame{};
@@ -67,6 +77,7 @@ static void test_sparse_enable_does_not_authorize_unselected_discovery() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, adapters, 1);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
   for (uint16_t id = 1; id <= 2; ++id) {
@@ -83,18 +94,21 @@ static void test_sparse_enable_does_not_authorize_unselected_discovery() {
   control_command_snapshot_t command{};
   command.session_id = 123; command.sequence = 1;
   command.received_tick_ms = 100; command.valid_until_tick_ms = 130;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
   control_policy_snapshot_t policy{};
   policy.policy_generation = 1; policy.valid_until_tick_ms = 200;
   policy.target_count = 1; policy.targets[0].motor_id = 1;
   policy.targets[0].enabled = true;
   policy.targets[0].confirm_unprotected = true;
+  policy.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &policy, 100));
   agent_gate_step(&gate, &mailbox, &ctx, 101, true);
   assert(ctx.authorized && ctx.entries[0].policy_enable);
   command.sequence = 2; command.target_count = 1;
   command.targets[0].motor_id = 2;
   command.targets[0].position = 0.5f;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 102));
   agent_gate_step(&gate, &mailbox, &ctx, 102, true);
   assert(!ctx.entries[1].policy_enable);
@@ -158,6 +172,7 @@ static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, nullptr, 0);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
   control_command_snapshot_t command{}; // 空帧也过完全相同的会话/序号门
@@ -165,15 +180,19 @@ static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
   command.sequence = 1;
   command.received_tick_ms = 100;
   command.valid_until_tick_ms = 130;
+  command.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_command(&gate, &mailbox, &command, 100));
   command.session_id = 123;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
+  command.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_command(&gate, &mailbox, &command, 100));
   control_policy_snapshot_t policy{};
   policy.request_id = 1;
   policy.received_tick_ms = 100;
   policy.valid_until_tick_ms = 200;
   policy.policy_generation = 900;
+  policy.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &policy, 100));
   for (unsigned i = 0; i < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++i) {
     control_mailbox_config_request_t request{};
@@ -209,11 +228,14 @@ static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
   command.sequence = 2;
   command.received_tick_ms = 106;
   command.valid_until_tick_ms = 136;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 106));
   policy.policy_generation = 900;
+  policy.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_policy(&gate, &mailbox, &policy, 106));
   agent_gate_step(&gate, &mailbox, &ctx, 110, true);
   assert(!ctx.authorized); // 连接电平与合法心跳均不得复权
+  fixture_lease(gate, 110);
   policy.policy_generation = 901;
   ctx.entry_count = 1;
   ctx.entries[0].used = true;
@@ -221,6 +243,7 @@ static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
   policy.target_count = 1;
   policy.targets[0].motor_id = 1;
   policy.targets[0].enabled = true;
+  policy.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &policy, 110));
   agent_gate_step(&gate, &mailbox, &ctx, 115, true);
   assert(ctx.authorized);
@@ -235,6 +258,7 @@ static void test_expired_mailbox_input_does_not_refresh_kernel_lease() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, nullptr, 0);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
   control_command_snapshot_t command{};
@@ -242,10 +266,13 @@ static void test_expired_mailbox_input_does_not_refresh_kernel_lease() {
   command.sequence = 1;
   command.received_tick_ms = 100;
   command.valid_until_tick_ms = 101;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
   agent_gate_step(&gate, &mailbox, &ctx, 105, true);
   assert(!ctx.have_snapshot && ctx.snapshot_accepted_count == 0);
   agent_gate_begin_session(&gate, &mailbox, 124);
+  fixture_lease(gate);
+  command.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_command(&gate, &mailbox, &command, 105));
   assert(mailbox.config_count == 0 && !mailbox.policy.pending);
 }
@@ -257,6 +284,7 @@ static void test_disconnect_reconnect_between_service_ticks_still_revokes() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, nullptr, 0);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
   agent_link_accept_command(&gate.link, 1, 100);
@@ -277,14 +305,17 @@ static void test_policy_queue_never_overwrites_and_expiry_reports_failure() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, nullptr, 0);
   agent_gate_begin_session(&gate, &mailbox, 9);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
   agent_link_accept_command(&gate.link, 1, 100);
   control_policy_snapshot_t p{};
   p.request_id = 1; p.policy_generation = 1;
   p.valid_until_tick_ms = 101; p.target_count = 1; p.targets[0].motor_id = 1;
+  p.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &p, 100));
   p.request_id = 2; p.policy_generation = 2;
+  p.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_policy(&gate, &mailbox, &p, 100));
   agent_gate_step(&gate, &mailbox, &ctx, 105, true);
   motor_control_event_t event[4]{};
@@ -308,6 +339,7 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   control_mailbox_init(&mailbox);
   motor_control_init(&ctx, nullptr, 0);
   agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
   control_mailbox_request_agent_connected(&mailbox, true);
   agent_gate_service(&gate, &mailbox, &ctx, 100, true);
 
@@ -336,6 +368,7 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   command.sequence = 1;
   command.received_tick_ms = 100;
   command.valid_until_tick_ms = 130;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
   for (unsigned i = 0; i < CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY; ++i) {
     control_mailbox_config_request_t request{};
@@ -358,6 +391,7 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   pending_enable.targets[0].enabled = true;
   pending_enable.targets[0].kp = 1.0f;
   pending_enable.targets[0].kd = 0.1f;
+  pending_enable.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &pending_enable, 100));
   assert(mailbox.policy.pending);
   agent_gate_request_disable(&gate, UINT64_C(1)); // motor_id 1 = bit 0
@@ -389,11 +423,13 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   command.sequence = 2;
   command.received_tick_ms = 103;
   command.valid_until_tick_ms = 133;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 103));
   control_policy_snapshot_t old_policy = pending_enable;
   old_policy.request_id = 601;
   old_policy.received_tick_ms = 103;
   old_policy.valid_until_tick_ms = 203;
+  old_policy.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &old_policy, 103));
   assert(mailbox.policy.pending);
   agent_gate_step(&gate, &mailbox, &ctx, 104, true);
@@ -408,6 +444,7 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   fresh_enable.received_tick_ms = 134;
   fresh_enable.valid_until_tick_ms = 234;
   fresh_enable.policy_generation = 501;
+  fresh_enable.lease_id = gate.authority.lease_id;
   assert(!agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 134));
   assert(!mailbox.policy.pending);
   agent_gate_step(&gate, &mailbox, &ctx, 134, true);
@@ -418,9 +455,11 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   command.sequence = 3;
   command.received_tick_ms = 135;
   command.valid_until_tick_ms = 165;
+  command.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 135));
   fresh_enable.received_tick_ms = 136;
   fresh_enable.valid_until_tick_ms = 236;
+  fresh_enable.lease_id = gate.authority.lease_id;
   assert(agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 136));
   assert(mailbox.policy.pending);
   agent_gate_step(&gate, &mailbox, &ctx, 137, true);

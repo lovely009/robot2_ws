@@ -89,7 +89,8 @@ class AgentOnlineContract(unittest.TestCase):
         self.assertIn("g_temp_msg.variance = 0", text)
         self.assertIn("sensor_task_get_temperature(", text)
         self.assertIn("metadata.sequence != g_temp_sequence", text)
-        self.assertIn("500U", text)
+        self.assertIn("1000U / settings.temperature_hz", text)
+        self.assertIn("g_temp_tick = now", text)
 
 
 if __name__ == "__main__":

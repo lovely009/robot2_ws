@@ -170,5 +170,5 @@ void ros_bridge_spin() {
     return;
   }
   // 处理 executor 回调（运行定时器发布，并服务微-ROS 会话）
-  rclc_executor_spin_some(&g_executor, RCL_MS_TO_NS(100));
+  rclc_executor_spin_some(&g_executor, 0U);
 }

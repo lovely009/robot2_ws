@@ -54,7 +54,7 @@ def test_public_robot_respects_explicit_headless_selection():
 def test_bench_starts_no_motor_writer_or_agent():
     actions = _module('bench.launch.py').generate_launch_description().entities
     nodes = [action for action in actions if isinstance(action, Node)]
-    assert {node.node_package for node in nodes} == {'bench_manager'}
+    assert {node.node_package for node in nodes} == {'robot_bringup'}
     includes = [action for action in actions if isinstance(action, IncludeLaunchDescription)]
     web = next(action for action in includes if 'control_mode' in dict(action.launch_arguments))
     assert dict(web.launch_arguments)['control_mode'] == 'readonly'

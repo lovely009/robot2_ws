@@ -10,6 +10,7 @@
 #include "control_mailbox.h"
 #include "motor_control.h"
 #include "agent_trajectory.h"
+#include "control_lease.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +38,9 @@ bool motor_rt_submit_config(const control_mailbox_config_request_t *request);
 void motor_rt_set_agent_connected(bool connected);
 void motor_rt_begin_agent_session(uint64_t session_id);
 void motor_rt_request_stop_all(void);
+bool motor_rt_submit_control_lease(uint64_t session_id, uint64_t lease_id,
+    uint32_t sequence, uint32_t deadline, bool active);
+void motor_rt_copy_control_lease(control_lease_state_t *out);
 void motor_rt_request_disable(uint64_t motor_mask);
 void motor_rt_set_clock_valid(bool valid);
 

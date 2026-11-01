@@ -160,12 +160,13 @@ void test_deadline_is_not_renewed_by_hold() {
 }
 
 void test_receive_and_control_phase_margin() {
+  for (unsigned receive_period : {10U, 1U}) {
   unsigned cases_with_gaps = 0, longest_gap = 0;
   // All millisecond phases: 20ms host source, 10ms receive task, 5ms control.
   // The source deadline remains source+30 throughout. A gap is an acceptance
   // blocker for smooth 50/50/200 operation, even though safe rejection is correct.
   for (unsigned host = 0; host < 20; ++host)
-    for (unsigned receive = 0; receive < 10; ++receive)
+    for (unsigned receive = 0; receive < receive_period; ++receive)
       for (unsigned control = 0; control < 5; ++control) {
         Bench bench;
         unsigned latest = 0, consumed = 0, pending = 0, gap = 0;
@@ -174,7 +175,7 @@ void test_receive_and_control_phase_margin() {
           if (bench.tick % 20 == host) latest = bench.tick;
           if (bench.tick % 20 == 0) bench.feedback();
           motor_control_service(&bench.kernel, bench.tick);
-          if (bench.tick % 10 == receive && latest != consumed) {
+          if (bench.tick % receive_period == receive && latest != consumed) {
             pending = latest;
             consumed = latest;
           }
@@ -194,11 +195,13 @@ void test_receive_and_control_phase_margin() {
         }
         cases_with_gaps += had_gap;
       }
-  assert(cases_with_gaps > 0); // Known timing margin deficiency must stay visible.
+  if (receive_period == 1) { assert(cases_with_gaps == 0); }
+  else assert(cases_with_gaps > 0); // Known timing margin deficiency must stay visible.
   assert(cases_with_gaps < 1000);
   assert(longest_gap <= 4);
-  std::printf("TIMING ACCEPTANCE BLOCKER: %u/1000 phase cases have deadline gaps, maximum %u ms; no timeout widened\n",
-      cases_with_gaps, longest_gap);
+  std::printf("receive=%ums: %u/%u phase cases have deadline gaps, maximum %u ms; no timeout widened\n",
+      receive_period, cases_with_gaps, 100 * receive_period, longest_gap);
+  }
 }
 } // namespace
 

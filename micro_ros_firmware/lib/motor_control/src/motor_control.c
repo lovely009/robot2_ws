@@ -482,7 +482,7 @@ static bool entry_push_mit(motor_control_context_t *ctx,
 static void entry_apply_target(motor_control_context_t *ctx,
     motor_control_entry_t *entry, size_t index,
     float position, float velocity, float effort,
-    uint32_t now_ms) {
+    uint32_t now_ms, bool emit) {
   // Policy 软件限位（Vaxor，打包前钳制——ARD §26.1）；限位标志逐拍重算，
   // 不粘滞（目标回到限内即清除）。
   float target_pos = position;
@@ -541,6 +541,12 @@ static void entry_apply_target(motor_control_context_t *ctx,
   entry->target_effort_nm = target_effort;
   // motion_authorized 不因目标出现而自动复立：撤销后只能由
   // set_authorization(true) 或 SET_ENABLE(true) 显式重立（ARD §36）。
+
+  if (!emit) {
+    entry->fresh_target_pending = true;
+    return; // admit the new values/deadline now; no physical motion until a boundary
+  }
+  entry->fresh_target_pending = false;
 
   // 使能时序：未使能先发使能帧；有整定门的协议在本窗内不发运动目标。
   if (!entry->motion_enabled) {
@@ -607,9 +613,9 @@ static bool snapshot_contains(const motor_control_command_snapshot_t *snapshot,
   return false;
 }
 
-bool motor_control_apply_command_snapshot(
+static bool apply_command_snapshot(
     motor_control_context_t *ctx, const motor_control_command_snapshot_t *snapshot,
-    uint32_t now_ms) {
+    uint32_t now_ms, bool emit) {
   if (ctx == NULL || snapshot == NULL) {
     return false;
   }
@@ -705,9 +711,18 @@ bool motor_control_apply_command_snapshot(
       continue;
     }
     entry_apply_target(ctx, entry, i, target->position_rad, target->velocity_rad_s,
-        target->effort_nm, now_ms);
+        target->effort_nm, now_ms, emit);
   }
   return true;
+}
+
+bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
+    const motor_control_command_snapshot_t *snapshot, uint32_t now_ms) {
+  return apply_command_snapshot(ctx, snapshot, now_ms, true);
+}
+bool motor_control_admit_command_snapshot(motor_control_context_t *ctx,
+    const motor_control_command_snapshot_t *snapshot, uint32_t now_ms) {
+  return apply_command_snapshot(ctx, snapshot, now_ms, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,7 +1117,7 @@ void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms
       }
     }
     entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,
-        velocity, effort, now_ms);
+        velocity, effort, now_ms, true);
   }
 }
 
@@ -1131,6 +1146,11 @@ void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
     }
     // 只在"有已受理目标"时保持；缺席快照已在受理时软停并清 has_target。
     if (!entry->has_target) {
+      continue;
+    }
+    if (entry->fresh_target_pending && entry_may_move(ctx, entry, now_ms)) {
+      entry_apply_target(ctx, entry, i, entry->target_position_rad,
+          entry->target_velocity_rad_s, entry->target_effort_nm, now_ms, true);
       continue;
     }
     // 两个"别的意图优先"的窗口：整定窗内不发运动目标；有挂起的 P0

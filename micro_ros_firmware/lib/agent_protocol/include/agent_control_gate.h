@@ -2,6 +2,7 @@
 #define AGENT_CONTROL_GATE_H
 
 #include "agent_protocol.h"
+#include "control_lease.h"
 #include "control_mailbox.h"
 #include "motor_control.h"
 #include "wire_codec.h"
@@ -13,6 +14,7 @@ extern "C" {
 // 与 mailbox 共用调用方临界区；step/service 只由内核唯一写任务调用。
 typedef struct {
   agent_link_t link;
+  control_lease_state_t authority;
   wire_command_guard_t command_guard;
   bool kernel_authorized;
   bool session_pending;
@@ -31,6 +33,8 @@ bool agent_gate_submit_policy(agent_control_gate_t *gate,
     uint32_t now_ms);
 uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbox,
     motor_control_context_t *ctx, uint32_t now_ms, bool clock_valid);
+void agent_gate_admit_command(agent_control_gate_t *gate, control_mailbox_t *mailbox,
+    motor_control_context_t *ctx, uint32_t now_ms);
 void agent_gate_step(agent_control_gate_t *gate, control_mailbox_t *mailbox,
     motor_control_context_t *ctx, uint32_t now_ms, bool clock_valid);
 

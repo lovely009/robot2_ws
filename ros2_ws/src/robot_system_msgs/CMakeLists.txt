@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ReleaseControl.srv"
   "srv/SetArmed.srv"
   "srv/AuthorizeMotion.srv"
+  "srv/ExecuteMaintenance.srv"
   DEPENDENCIES std_msgs can_bridge_msgs
 )
 

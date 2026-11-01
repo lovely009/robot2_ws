@@ -367,6 +367,11 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
     const motor_control_command_snapshot_t *snapshot,
     uint32_t now_ms);
 
+// 1ms admission preserves the ORIGINAL source deadline and replaces target
+// values, without emitting enable/P1 frames. hold_step emits at 200Hz only.
+bool motor_control_admit_command_snapshot(motor_control_context_t *ctx,
+    const motor_control_command_snapshot_t *snapshot, uint32_t now_ms);
+
 // 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
 // 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
 // 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个

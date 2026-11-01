@@ -325,12 +325,13 @@ class WorkbenchControl(Node):
         self._mode, self._reason, self._reject = 'stopped', '等待新目标', ''
         self._gravity_enabled = self._effort_gain = None
         self._active = []
+        self._controllers_ready = False
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._status_pub = self.create_publisher(String, '/control/status', latched)
         self._transmission_pub = self.create_publisher(String, '/robot_transmission/status', latched)
         self._trajectory_pub = self.create_publisher(MotorTrajectoryState, '/control/trajectory_state', 10)
         self._hardware_stop_pub = self.create_publisher(Empty, '/host_control/stop', 10)
-        self._policy_pub = self.create_publisher(MotorPolicyArray, '/motor/policy_array', 10)
+
         self._joint_pub = self.create_publisher(JointState, '/joint_states', 10) if publish_states else None
         self._manual_pubs = [self.create_publisher(Float64MultiArray,
             f'/host_control/{name}/commands', 10) for name in self.manual_names]
@@ -339,10 +340,10 @@ class WorkbenchControl(Node):
         self._params = self.create_client(GetParameters, '/host_control/gravity_controller/get_parameters')
         self._action = ActionClient(self, FollowJointTrajectory, ACTION)
         for kind, topic, callback, qos in (
-            (MotorCommandArray, '/control/setpoint', self._on_setpoint, 10),
-            (MotorTrajectory, '/control/trajectory', self._on_motor_trajectory, 10),
-            (JointTrajectory, '/arm_controller/joint_trajectory', self._on_joint_trajectory, 10),
-            (Empty, '/control/stop', lambda _: self._stop('显式停止'), 10),
+            (MotorCommandArray, '/robot/managed/control/setpoint', self._on_setpoint, 10),
+            (MotorTrajectory, '/robot/managed/control/trajectory', self._on_motor_trajectory, 10),
+            (JointTrajectory, '/robot/managed/control/joint_trajectory', self._on_joint_trajectory, 10),
+            (Empty, '/robot/managed/control/stop', lambda _: self._stop('显式停止'), 10),
             (Int32, '/client_count', self._on_client_count, latched),
             (JointState, '/host_control/joint_states', self._on_feedback, qos_profile_sensor_data),
         ):
@@ -640,14 +641,6 @@ class WorkbenchControl(Node):
         self._epoch += 1
         self._hardware_stop_pub.publish(Empty())
         self._stop_policy_id = self._epoch % 0xFFFFFFFF or 1
-        self._policy_pub.publish(MotorPolicyArray(
-            sync_time_ns=self.get_clock().now().nanoseconds,
-            request_id=self._stop_policy_id, policy_generation=self._stop_policy_id,
-            count=len(self.mapping.ids),
-            targets=[MotorPolicyTarget(motor_id=i, enabled=False, kp=0., kd=0.)
-                     for i in sorted(self.mapping.ids.values())]))
-        self._input_floor_ns = self.get_clock().now().nanoseconds
-        self._abort_assembly()
         self._busy = self._stopping = True
         self._mode, self._reason, self._reject = 'stopping', reason, reject
         for run in list(self._runs):
@@ -769,13 +762,15 @@ class WorkbenchControl(Node):
                 self._poll_future is None or self._poll_future.done()):
             self._poll_future = self._list.call_async(ListControllers.Request())
             def observed(response):
+                configured = {c.name for c in response.controller if c.state in ('active', 'inactive')}
+                self._controllers_ready = set(self.motion_names).issubset(configured)
                 self._active = [c.name for c in response.controller
                                 if c.name in self.motion_names and c.state == 'active']
                 if not self._active:
                     self._mode = 'stopped'
                 elif set(self._active) == set(self.manual_names):
                     self._mode = 'manual'
-                elif set(self._active) == {'trajectory_controller', 'gravity_controller'}:
+                elif set(self._active) in ({'trajectory_controller'}, {'trajectory_controller', 'gravity_controller'}):
                     self._mode = 'trajectory'
                 else:
                     raise ValueError('检测到非互斥的 active 控制器集合')
@@ -816,6 +811,7 @@ class WorkbenchControl(Node):
             output_topic='/motor/host_command_array', trajectory_output_topic=ACTION,
             gravity_enabled=self._gravity_enabled, effort_gain=self._effort_gain,
             active_controllers=self._active, feedback_fresh=feedback_fresh,
+            controllers_ready=self._controllers_ready,
             pending_goal_ids=[run.state.trajectory_id for run in self._runs if run.submitted],
             stop_policy_request_id=self._stop_policy_id,
             safety_note=('已请求全部电机失能；恢复运动前需显式重新使能'
@@ -823,7 +819,7 @@ class WorkbenchControl(Node):
         self._status_pub.publish(String(data=json.dumps(status, ensure_ascii=False)))
         self._transmission_pub.publish(String(data=json.dumps(dict(status,
             driver_file=self.config_file, trajectory_enabled=True,
-            trajectory_topic='/control/trajectory', control_state_source='ros2_control',
+            trajectory_topic='/robot/managed/control/trajectory', control_state_source='ros2_control',
             last_error=self._reject), ensure_ascii=False)))
 
 

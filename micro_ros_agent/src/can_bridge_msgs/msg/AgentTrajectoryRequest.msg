@@ -16,3 +16,5 @@ uint16 segment_index
 uint16 segment_count
 uint16[<=48] target_ids
 MotorTrajectoryPoint[<=32] points
+
+uint64 lease_id

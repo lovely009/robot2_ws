@@ -77,6 +77,22 @@ static motor_tx_router_t g_tx_router;
 // mailbox 写入口（外部任务上下文；短临界区保护 mailbox）
 // ---------------------------------------------------------------------------
 
+bool motor_rt_submit_control_lease(uint64_t session_id, uint64_t lease_id,
+    uint32_t sequence, uint32_t deadline, bool active) {
+  taskENTER_CRITICAL();
+  const bool ok = control_lease_submit(&g_agent_gate.authority, session_id,
+      lease_id, sequence, deadline, active, millis());
+  taskEXIT_CRITICAL();
+  return ok;
+}
+void motor_rt_copy_control_lease(control_lease_state_t *out) {
+  if (!out) return;
+  taskENTER_CRITICAL();
+  *out = g_agent_gate.authority;
+  out->active = control_lease_allows(out, out->lease_id, millis());
+  taskEXIT_CRITICAL();
+}
+
 bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
   const bool ok = agent_gate_submit_command(&g_agent_gate, &g_control_mailbox,
@@ -88,7 +104,8 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
 // 调用方已持短临界区；租约不能只看上一服务拍缓存的 bool。
 static bool trajectory_gate_allowed(uint32_t now_ms) {
   const agent_link_t &link = g_agent_gate.link;
-  return link.connected && link.clock_valid && g_clock_requested &&
+  return control_lease_allows(&g_agent_gate.authority, g_agent_gate.authority.lease_id, now_ms) &&
+      link.connected && link.clock_valid && g_clock_requested &&
       !link.stop_pending && link.lease_valid && link.authorized &&
       g_agent_gate.kernel_authorized && link.have_command &&
       now_ms - link.command_tick_ms <= 30U;
@@ -114,7 +131,8 @@ bool motor_rt_submit_agent_trajectory(const agent_trajectory_request_t *request)
         request->operation == AGENT_TRAJECTORY_COMMIT;
     // 已受理请求必须先走幂等路径：过期重发只读旧收据，不重新执行。
     const bool fresh = request->request_id > g_trajectory.status().request_high_water;
-    if (motion && fresh && !trajectory_gate_allowed(now_ms)) {
+    if (motion && fresh && (!trajectory_gate_allowed(now_ms) ||
+        !control_lease_allows(&g_agent_gate.authority, request->lease_id, now_ms))) {
       receipt = g_trajectory.reject(*request, REASON_GATE);
     } else if (motion && fresh && request->operation == AGENT_TRAJECTORY_LOAD &&
         request->target_count <= 48U &&
@@ -375,7 +393,6 @@ static void drain_rx_rings(void) {
         motor_protocol_raw_frame_t frame = {0};
         frame.bus_index = batch[i].bus_index;
         frame.can_id = batch[i].can_id;
-    frame.tx_slot = batch[i].tx_slot;
         frame.is_extended = batch[i].is_extended;
         frame.is_fd = batch[i].is_fd;
         frame.is_brs = batch[i].is_brs;
@@ -545,8 +562,7 @@ static void convert_config(const control_mailbox_config_request_t *in,
   }
 }
 
-static void control_boundary(void) {
-  const uint32_t now_ms = millis();
+static void control_boundary(uint32_t now_ms) {
   const bool clock_valid = time_clock_valid();
   taskENTER_CRITICAL();
   agent_gate_step(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms,
@@ -649,16 +665,20 @@ static void motor_rt_task_fn(void *pv_parameters) {
     if (safety_action != 0U)
       g_trajectory.abort(trajectory_transaction::REASON_STOPPED);
     g_trajectory.poll(now_ms);
+    agent_gate_admit_command(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms);
     taskEXIT_CRITICAL();
-    motor_control_service(g_motor_control, now_ms);
-    sustain_discovery_sync(now_ms);
-
     // 配置周期的控制边界：按 millis 差触发，不补发过期边界。
     if ((uint32_t)(now_ms - last_control_ms) >=
         1000U / firmware_parameters_snapshot().motor_command_hz) {
       last_control_ms = now_ms;
-      control_boundary();
+      control_boundary(now_ms);
     }
+
+    // Consume an already queued, fresh replacement at this same boundary
+    // before judging the previous snapshot's absolute deadline. Ownership
+    // revocation above still wins. No cached target or deadline is extended.
+    motor_control_service(g_motor_control, now_ms);
+    sustain_discovery_sync(now_ms);
 
     // Collect once after the boundary: a newly applied snapshot and its hold
     // output share the kernel's latest-wins slot before the bounded TX drain.

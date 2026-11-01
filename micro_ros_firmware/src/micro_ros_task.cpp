@@ -44,9 +44,9 @@ static void link_state_set(micro_ros_link_state_t state) {
 
 static void micro_ros_task_fn(void *parameters) {
   (void)parameters;
-  // 以上次唤醒时刻为基准维持 10ms 节拍，避免工作耗时累加到周期。
+  // 以上次唤醒时刻为基准维持 1ms 非阻塞接收节拍，避免工作耗时累加到周期。
   TickType_t last_wake = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(10);
+  const TickType_t period = pdMS_TO_TICKS(1);
   TickType_t last_sync = xTaskGetTickCount();
   uint32_t last_ping = 0;
   for (;;) {

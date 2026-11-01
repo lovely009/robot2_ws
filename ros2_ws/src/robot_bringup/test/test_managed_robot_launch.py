@@ -127,7 +127,10 @@ def test_every_critical_process_exit_shuts_down_the_whole_managed_session(contex
     actions = module.managed_nodes(context)
     registrations = [action for action in actions if isinstance(action, RegisterEventHandler)]
     nodes = [action for action in actions if isinstance(action, Node)]
-    assert len(registrations) == len(nodes) == 6
+    assert len(registrations) == len(nodes) == 4
+    stacks = [a for a in actions if isinstance(a, IncludeLaunchDescription)]
+    assert len(stacks) == 1
+    assert dict(stacks[0].launch_arguments)['start_controllers'] == 'true'
     assert actions[:len(registrations)] == registrations
     for node in nodes:
         event = ProcessExited(action=node, name='test', cmd=[], cwd=None, env=None,
@@ -154,7 +157,7 @@ def test_web_is_a_managed_client_outside_the_critical_process_set(context):
     }
     handlers = [action.event_handler for action in actions
                 if isinstance(action, RegisterEventHandler)]
-    assert len(handlers) == 5
+    assert len(handlers) == 3
     optional_web_node = Node(package='web_host', executable='static_server')
     event = ProcessExited(action=optional_web_node, name='web', cmd=[], cwd=None,
                           env=None, pid=23456, returncode=1)

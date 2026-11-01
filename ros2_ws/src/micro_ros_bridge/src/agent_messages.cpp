@@ -428,6 +428,10 @@ Result decode_agent_status(
   decoded_statuses.sync_time_ns = in.snapshot_stamp;
   can_bridge_msgs::msg::MotorControlStateArray decoded_controls;
   decoded_controls.schema_version = can_bridge_msgs::msg::MotorControlStateArray::SCHEMA_VERSION;
+  decoded_controls.lease_id = in.lease_id;
+  decoded_controls.lease_sequence = in.lease_sequence;
+  decoded_controls.lease_valid_until_tick_ms = in.lease_valid_until_tick_ms;
+  decoded_controls.lease_active = in.lease_active;
   decoded_controls.sync_time_ns = in.snapshot_stamp;
   decoded_controls.session_id = in.session_id;
   decoded_controls.sequence = in.sequence;

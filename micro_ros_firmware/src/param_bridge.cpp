@@ -335,6 +335,7 @@ static void config_cb(const void *input) {
     policy.request_id = next_internal_id(); policy.received_tick_ms = now;
     policy.valid_until_tick_ms = g_active_deadline;
     policy.policy_generation = msg->policy_generation;
+    policy.lease_id = msg->lease_id;
     policy.target_count = msg->policies.size;
     for (size_t i = 0; i < policy.target_count; ++i) {
       const auto &p = msg->policies.data[i];

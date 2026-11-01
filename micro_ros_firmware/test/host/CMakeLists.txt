@@ -5,6 +5,7 @@ enable_testing()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include_directories(../../lib/firmware_config/include)
 add_library(fw_firmware_settings OBJECT ../../lib/firmware_config/src/firmware_settings.c)
@@ -147,9 +148,9 @@ add_library(fw_agent_protocol OBJECT
   ../../lib/agent_protocol/src/agent_protocol.c
   ../../lib/agent_protocol/src/agent_control_gate.c)
 target_include_directories(fw_agent_protocol PUBLIC ../../lib/agent_protocol/include)
-target_link_libraries(fw_agent_protocol PUBLIC fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
+target_link_libraries(fw_agent_protocol PUBLIC fw_control_lease fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
 fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
-  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_save_transaction
+  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_save_transaction fw_control_lease
   INCLUDES ../../lib/motor_control/src)
 
 fw_host_test(test_motor_protocol
@@ -324,3 +325,13 @@ fw_host_test(test_config_transaction
 add_library(fw_serial_write_budget OBJECT ../../lib/serial_write_budget/src/serial_write_budget.c)
 target_include_directories(fw_serial_write_budget PUBLIC ../../lib/serial_write_budget/include)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
+
+# Native transport shim for the real ROS/JTC + firmware-core SIL test.
+add_library(robot2_sil SHARED sil_engine.cpp)
+target_include_directories(robot2_sil PRIVATE ../../lib/motor_control/src)
+target_link_libraries(robot2_sil PRIVATE fw_agent_protocol fw_control_lease
+  fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
+  fw_wire_codec fw_save_transaction fw_motor_tx_router fw_can_tx_scheduler)
+add_executable(test_native_boundary test_native_boundary.cpp)
+target_link_libraries(test_native_boundary PRIVATE robot2_sil)
+add_test(NAME test_native_boundary COMMAND test_native_boundary)

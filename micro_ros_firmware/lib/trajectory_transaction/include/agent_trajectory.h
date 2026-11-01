@@ -29,6 +29,7 @@ extern "C" {
 
 typedef struct {
   uint64_t session_id;
+  uint64_t lease_id;
   uint32_t request_id;
   uint32_t trajectory_id;
   uint32_t valid_until_tick_ms;

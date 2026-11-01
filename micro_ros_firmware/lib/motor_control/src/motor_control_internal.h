@@ -36,6 +36,7 @@ typedef struct {
                                    // OFFLINE 判定输入）
 
   bool has_target;
+  bool fresh_target_pending; // admitted at 1ms, emitted only at the 200Hz boundary
   float target_position_rad;
   float target_velocity_rad_s;
   float target_effort_nm;

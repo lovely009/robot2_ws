@@ -54,20 +54,22 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
   result_pub_ = create_publisher<Reply>("/motor/config_result", reliable());
   event_pub_ = create_publisher<MotorEvent>("/motor/events", reliable());
   command_sub_ = create_subscription<MotorCommandArray>(
-    host_execution_ ? "/motor/host_command_array" : "/motor/command_array",
+    "/robot/managed/motor/command_array",
     rclcpp::QoS(1).reliable(), [this](MotorCommandArray::SharedPtr m) {on_command(*m);});
-  subscriptions_.push_back(create_subscription<MotorPolicyArray>("/motor/policy_array", reliable(),
+  subscriptions_.push_back(create_subscription<ControlLease>("/robot/managed/motor/control_lease", reliable(),
+    [this](ControlLease::SharedPtr m) {on_authority(*m);}));
+  subscriptions_.push_back(create_subscription<MotorPolicyArray>("/robot/managed/motor/policy_array", reliable(),
     [this](MotorPolicyArray::SharedPtr m) {on_policy(*m);}));
-  subscriptions_.push_back(create_subscription<MotorTrajectory>("/motor/trajectory", reliable(),
+  subscriptions_.push_back(create_subscription<MotorTrajectory>("/robot/managed/motor/trajectory", reliable(),
     [this](MotorTrajectory::SharedPtr m) {on_trajectory(*m);}));
-  subscriptions_.push_back(create_subscription<ConfigRequest>("/motor/config_request", reliable(),
+  subscriptions_.push_back(create_subscription<ConfigRequest>("/robot/managed/maintenance/config_request", reliable(),
     [this](ConfigRequest::SharedPtr m) {submit_config(*m);}));
-  subscriptions_.push_back(create_subscription<ParamSetArray>("/motor/param_set", reliable(),
+  subscriptions_.push_back(create_subscription<ParamSetArray>("/robot/managed/maintenance/param_set", reliable(),
     [this](ParamSetArray::SharedPtr m) {
       ConfigRequest request;
       if (encode_config(*m, request).ok) {submit_config(request);}
     }));
-  subscriptions_.push_back(create_subscription<SystemCommand>("/motor/system_command", reliable(),
+  subscriptions_.push_back(create_subscription<SystemCommand>("/robot/managed/maintenance/system_command", reliable(),
     [this](SystemCommand::SharedPtr m) {
       ConfigRequest request;
       if (encode_config(*m, request).ok) {submit_config(request);}
@@ -88,9 +90,17 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
     W::TOPIC_TEMPERATURE, stream(), [temp](sensor_msgs::msg::Temperature::SharedPtr m) {
       std_msgs::msg::Float32 out; out.data = static_cast<float>(m->temperature); temp->publish(out);
     }));
-  config_service_ = create_service<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config",
+  config_service_ = create_service<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config",
     [this](Header header, std::shared_ptr<can_bridge_msgs::srv::ExecuteConfig::Request> request) {
-      submit_config(request->request, header, request->timeout_ms ? request->timeout_ms : 5000);
+      if (request->request.kind == ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND &&
+          request->request.command == SystemCommand::COMMAND_REPORT) {
+        submit_config(request->request, header, request->timeout_ms ? request->timeout_ms : 5000);
+      } else {
+        ConfigJob job; job.original=request->request; job.header=header;
+        job.caller_id=request->request.request_id; job.kind=request->request.kind;
+        job.command=request->request.command;
+        publish_reply(job, Reply::STATUS_FAILED, 10);
+      }
     });
   timer_ = create_wall_timer(20ms, [this] {tick();});
 }
@@ -129,6 +139,7 @@ void BridgeNode::clear_session(uint64_t session)
   std::fill(std::begin(last_caller_ids_), std::end(last_caller_ids_), 0u);
   if (upload_) {trajectory_event(upload_->caller_id, 21);}
   upload_.reset(); assembler_.reset();
+  authority_high_water_ = 0; authority_sequence_ = 0; authority_revoked_ = false;
   session_id_ = session; have_status_ = have_info_ = querying_ = false; info_revision_ = 0;
   topology_ = MotorTopology{}; info_topology_ = MotorTopology{}; info_params_ = DeviceParamReport{};
   system_ = SystemStatus{}; freshness_.assign(65, MotorFreshness{});
@@ -261,12 +272,42 @@ void BridgeNode::on_motion(const AgentMotion & msg)
   for (const auto & s : out.states) {freshness_[s.motor_id] = {s.state_age_ms, s.target_source};}
   motion_pub_->publish(out);
 }
+bool BridgeNode::authority_ready(uint64_t session, uint64_t lease)
+{
+  if (!motion_ready() || authority_revoked_ || session != session_id_ || !lease ||
+      lease != authority_high_water_ || !status_.lease_active || status_.lease_id != lease) return false;
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - status_at_).count();
+  const auto tick = status_.snapshot_tick_ms + static_cast<uint32_t>(std::max<int64_t>(0, elapsed));
+  const auto remaining = static_cast<int32_t>(status_.lease_valid_until_tick_ms - tick);
+  return status_.lease_sequence > 0 && status_.lease_sequence <= authority_sequence_ && remaining > 0 && remaining <= 300;
+}
+void BridgeNode::on_authority(const ControlLease & msg)
+{
+  if (msg.session_id != session_id_ || !msg.session_id || !msg.sequence ||
+      msg.lease_id / 1000000ULL != msg.session_id || msg.lease_id % 1000000ULL == 0 ||
+      msg.lease_id < authority_high_water_ ||
+      (msg.lease_id == authority_high_water_ && (msg.sequence <= authority_sequence_ || authority_revoked_))) return;
+  if (msg.active) {
+    if (!motion_ready() || count_publishers("/robot/managed/motor/control_lease") != 1) return;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - status_at_).count();
+    const auto tick = status_.snapshot_tick_ms + static_cast<uint32_t>(std::max<int64_t>(0, elapsed));
+    const auto remaining = static_cast<int32_t>(msg.valid_until_tick_ms - tick);
+    if (remaining <= 0 || remaining > 300) return;
+  }
+  authority_high_water_ = msg.lease_id; authority_sequence_ = msg.sequence;
+  authority_revoked_ = !msg.active;
+  AgentCommand out;
+  out.mode = AgentCommand::AUTHORITY; out.session_id = msg.session_id;
+  out.lease_id = msg.lease_id; out.lease_sequence = msg.sequence;
+  out.lease_valid_until_tick_ms = msg.valid_until_tick_ms; out.lease_active = msg.active;
+  command_pub_->publish(out); // Original deadline, never recomputed from receipt time.
+}
 void BridgeNode::on_command(const MotorCommandArray & msg)
 {
   if (count_publishers(AgentWireContract::TOPIC_COMMAND) > 1) {
     Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop); return;
   }
-  if (host_takeover_pending_ && msg.count) {return;}
+  if (msg.count && (!authority_ready(msg.session_id, msg.lease_id) || host_takeover_pending_)) {return;}
   if (!motion_ready() || command_sub_->get_publisher_count() > 1 ||
     !source_time_valid(msg.sync_time_ns, 30ms)) {return;}
   AgentCommand out;
@@ -297,7 +338,7 @@ void BridgeNode::on_command(const MotorCommandArray & msg)
     std::chrono::duration_cast<std::chrono::nanoseconds>(now - clock_at_).count();
   const auto deadline = command_deadline_tick(status_.snapshot_tick_ms, elapsed, age);
   if (!deadline) {return;}
-  out.valid_until_tick_ms = *deadline; out.session_id = session_id_;
+  out.valid_until_tick_ms = *deadline; out.session_id = session_id_; out.lease_id = msg.lease_id;
   out.sequence = ++command_sequence_; command_pub_->publish(out);
 }
 
@@ -348,7 +389,7 @@ void BridgeNode::submit_config(const ConfigRequest & request, Header header, uin
   job.deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
   auto valid = encode_agent_config(request, job.wire);
   job.wire.session_id = session_id_;
-  if (!valid.ok || timeout_ms < 100 || timeout_ms > 10000) {
+  if (!valid.ok || job.wire.operation == Config::SET_POLICY || timeout_ms < 100 || timeout_ms > 10000) {
     publish_reply(job, Reply::STATUS_FAILED, 10); return;
   }
   if (job.wire.operation == Config::QUERY_INFO) {
@@ -377,7 +418,8 @@ void BridgeNode::on_policy(const MotorPolicyArray & msg)
     // This bypasses the transaction slots and source-clock gate in the firmware.
     config_pub_->publish(job.wire); return;
   }
-  if (host_takeover_pending_) {return;}
+  if (host_takeover_pending_ || !authority_ready(msg.session_id, msg.lease_id)) {return;}
+  job.wire.lease_id = msg.lease_id;
   if (!motion_ready() || !source_time_valid(msg.sync_time_ns, 100ms)) {return;}
   job.wire.ttl_ms = 100;
   enqueue_config(std::move(job));
@@ -511,11 +553,12 @@ void BridgeNode::on_trajectory(const MotorTrajectory & msg)
 {
   const bool cancel = !msg.count && !msg.target_count && msg.points.empty() && msg.target_ids.empty();
   if (host_execution_) {
-    if (cancel) {
-      Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop);
-    } else {trajectory_event(msg.trajectory_id, 2);}
+    // Host JTC cancellation belongs to the Action executor, not drive disable.
+    // No firmware-buffered trajectory exists in host execution mode.
+    if (!cancel) {trajectory_event(msg.trajectory_id, 2);}
     return;
   }
+  if (!cancel && !authority_ready(msg.session_id, msg.lease_id)) {trajectory_event(msg.trajectory_id, 3); return;}
   if (cancel) {
     std::fill(std::begin(trajectory_targets_), std::end(trajectory_targets_), false);
     uint32_t id = upload_ ? upload_->wire_id : status_.trajectory.trajectory_id;
@@ -556,7 +599,7 @@ void BridgeNode::on_trajectory(const MotorTrajectory & msg)
     Upload upload; upload.caller_id = msg.trajectory_id;
     upload.wire_id = std::max(next_trajectory_id_, next_trajectory_request_);
     next_trajectory_id_ = upload.wire_id + 1;
-    upload.issued = msg.sync_time_ns; upload.host_segments = msg.segment_count;
+    upload.lease_id = msg.lease_id; upload.issued = msg.sync_time_ns; upload.host_segments = msg.segment_count;
     upload.ids.assign(msg.target_ids.begin(), msg.target_ids.end()); upload_ = std::move(upload);
   }
   auto & upload = *upload_;
@@ -597,7 +640,7 @@ void BridgeNode::dispatch_trajectory()
     }
     return;
   }
-  if (!motion_ready() || !source_time_valid(upload.issued, 1000ms)) {
+  if (!authority_ready(session_id_, upload.lease_id) || !source_time_valid(upload.issued, 1000ms)) {
     trajectory_event(upload.caller_id, 3); upload_.reset(); return;
   }
   if (!upload.complete) {return;}
@@ -606,7 +649,7 @@ void BridgeNode::dispatch_trajectory()
       trajectory_event(upload.caller_id, 5); upload_.reset(); return;
     }
     Trajectory request;
-    request.session_id = session_id_; request.trajectory_id = upload.wire_id;
+    request.session_id = session_id_; request.lease_id = upload.lease_id; request.trajectory_id = upload.wire_id;
     request.request_id = next_trajectory_request_++; request.issued_stamp = upload.issued;
     request.ttl_ms = 1000;
     if (upload.next_point < upload.points.size()) {

@@ -21,6 +21,7 @@ from std_srvs.srv import Trigger
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 
 from can_bridge_msgs.msg import (
+    AgentCommand, AgentConfigRequest, AgentTrajectoryRequest, AgentWireContract,
     ConfigRequest, ControlLease, DeviceParamEntry, DeviceParamReport, LowCommand,
     MotorCommandArray, MotorCommandTarget,
     MotorControlState, MotorControlStateArray, MotorMotionStateArray,
@@ -31,7 +32,7 @@ from robot_calibration.validation import compute_fingerprint
 from robot_system_msgs.msg import (
     CalibrationState, LeasedCommand, LeasedPolicy, LeasedTrajectory, RobotState,
 )
-from robot_system_msgs.srv import AcquireControl, SetArmed
+from robot_system_msgs.srv import AcquireControl, ExecuteMaintenance, SetArmed
 from robot_supervisor.node import SupervisorNode
 
 
@@ -101,6 +102,9 @@ class Harness:
         self.ack_lease = True
         self.latest = None
         self.commands, self.policies, self.trajectories = [], [], []
+        self.host_intent = None
+        self.host_intent_at = 0.
+        self.host_pub = self.io.create_publisher(MotorCommandArray, '/motor/host_command_array', RELIABLE)
         self.cal_pub = self.io.create_publisher(CalibrationState, '/robot/calibration_state', LATCHED)
         self.control_pub = self.io.create_publisher(MotorControlStateArray, '/motor/control_states', RELIABLE)
         self.topology_pub = self.io.create_publisher(MotorTopology, '/motor/topology', RELIABLE)
@@ -111,6 +115,10 @@ class Harness:
         self.trajectory_pub = self.io.create_publisher(LeasedTrajectory, '/robot/control/trajectory', RELIABLE)
         self.raw_pub = self.io.create_publisher(MotorCommandArray, '/motor/command_array', RELIABLE)
         self.subscriptions = [
+            self.io.create_subscription(MotorCommandArray, '/robot/managed/control/setpoint',
+                                        self._manual, RELIABLE),
+            self.io.create_subscription(MotorTrajectory, '/robot/managed/control/trajectory',
+                                        lambda m: self.trajectories.append(copy.deepcopy(m)), RELIABLE),
             self.io.create_subscription(ControlLease, '/robot/managed/motor/control_lease',
                                         self._lease, RELIABLE),
             self.io.create_subscription(RobotState, '/robot/state', self._state, LATCHED),
@@ -125,6 +133,11 @@ class Harness:
 
     def _state(self, message):
         self.latest = message
+
+    def _manual(self, message):
+        # A controller-output fixture, separate from the operator request.
+        # The supervisor must preserve this newly generated sample's stamp.
+        self.host_intent, self.host_intent_at = copy.deepcopy(message), time.monotonic()
 
     def _lease(self, message):
         if self.ack_lease:
@@ -144,6 +157,11 @@ class Harness:
         if not self.health_enabled:
             return
         self.sequence += 1
+        host = (copy.deepcopy(self.host_intent) if self.host_intent is not None
+                and time.monotonic()-self.host_intent_at < .2 else MotorCommandArray())
+        host.sync_time_ns = self.io.get_clock().now().nanoseconds
+        host.sequence = self.sequence
+        self.host_pub.publish(host)
         tick_ms = int(time.monotonic() * 1000) & 0xFFFFFFFF
         wire = self.wire_lease
         lease_id = wire.lease_id if wire and wire.session_id == self.session else 0
@@ -264,6 +282,30 @@ def test_uncommissioned_report_blocks_control(harness):
     assert not reply.success
     assert 'not_ready' in reply.reason
     assert not any(p.targets and p.targets[0].enabled for p in h.policies)
+
+
+def test_maintenance_requires_owner_and_disabled_feedback_and_keeps_stamp(harness):
+    h=harness
+    writes=[]
+    h.io.create_subscription(ConfigRequest,'/robot/managed/maintenance/config_request',writes.append,RELIABLE)
+    lease=h.acquire()
+    assert lease.success
+    stamp=h.io.get_clock().now().nanoseconds
+    request=ExecuteMaintenance.Request(lease_id='wrong',epoch=lease.epoch,session_id=lease.session_id,
+        request=ConfigRequest(sync_time_ns=stamp,request_id=7,kind=1,command=0,motor_id=65535))
+    refused=h.call(ExecuteMaintenance,'/robot/execute_maintenance',request)
+    assert not refused.success and not writes
+    request.lease_id=lease.lease_id
+    accepted=h.call(ExecuteMaintenance,'/robot/execute_maintenance',request)
+    assert accepted.success,accepted.reason
+    h.wait(lambda:len(writes)==1)
+    assert writes[0].sync_time_ns==stamp and writes[0].request_id==7
+    h.arm(lease)
+    request.request.sync_time_ns=h.io.get_clock().now().nanoseconds
+    refused=h.call(ExecuteMaintenance,'/robot/execute_maintenance',request)
+    assert not refused.success
+    h.spin(.03)
+    assert len(writes)==1
 
 
 def test_explicit_arm_policy_generation_and_authoritative_ack(harness):
@@ -527,17 +569,15 @@ def test_an_additional_wire_writer_revokes_existing_control(tmp_path):
     try:
         wire_publishers = [h.io.create_publisher(kind, topic, RELIABLE)
                            for kind, topic in (
-                               (LowCommand, WireContract.TOPIC_LOW_CMD),
-                               (ControlLease, WireContract.TOPIC_CONTROL_LEASE),
-                               (MotorPolicyArray, WireContract.TOPIC_POLICY),
-                               (MotorTrajectory, WireContract.TOPIC_TRAJECTORY),
-                               (ConfigRequest, WireContract.TOPIC_CONFIG),
+                               (AgentCommand, AgentWireContract.TOPIC_COMMAND),
+                               (AgentTrajectoryRequest, AgentWireContract.TOPIC_TRAJECTORY),
+                               (AgentConfigRequest, AgentWireContract.TOPIC_CONFIG),
                            )]
         h.wait(lambda: h.latest is not None and h.latest.ready)
         lease = h.acquire()
         assert lease.success, lease.reason
         h.arm(lease)
-        duplicate = h.io.create_publisher(LowCommand, WireContract.TOPIC_LOW_CMD, RELIABLE)
+        duplicate = h.io.create_publisher(AgentCommand, AgentWireContract.TOPIC_COMMAND, RELIABLE)
         h.wait(lambda: h.latest is not None and h.latest.fault_latched)
         assert not h.latest.owner and not h.latest.armed
         assert any('publisher_count:' in blocker for blocker in h.latest.blockers)

@@ -54,11 +54,11 @@ export function sendParamSet(targets) {
   // 每个目标一次 motor_rt_submit_config 提交。调用方负责分块（见 chunkedParamSet）。
   if (targets.length > 16) { setParamResult(false, '内部错误：单条超过 16 个目标'); return 0; }
   const request_id = nextParamReq();
-  pub('paramSet', {
+  const sent = pub('paramSet', {
     sync_time_ns: Date.now() * 1e6, // uint64：rosbridge 入站要 JSON number
     request_id, count: targets.length, targets,
   });
-  return request_id;
+  return sent ? request_id : 0;
 }
 
 // 按台切块：4 台 × 6 字段 = 24 > 16，必须拆。同一台**不得跨块**——位置限位成对的
@@ -77,11 +77,11 @@ export function chunkedParamSet(byMotor) {
 export function sendSystemCommand(command, motorId) {
   if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return 0; }
   const request_id = nextParamReq();
-  pub('sysCmd', {
+  const sent = pub('sysCmd', {
     sync_time_ns: Date.now() * 1e6, request_id, command,
     motor_id: motorId === undefined ? MOTOR_ID_NONE : motorId,
   });
-  return request_id;
+  return sent ? request_id : 0;
 }
 
 // 兼容旧调用者的 system_status 序号等待。新配置事务必须使用 waitConfigResult，
@@ -465,9 +465,10 @@ export async function writeFirmwareParameter(name, value) {
   if (!isConnected()) throw new Error('未连接 rosbridge');
   const before = store.firmwareReport.seq;
   const request_id = nextParamReq();
-  pub('firmwareConfig', {sync_time_ns: Date.now() * 1e6, session_id: 0, request_id,
+  const sent = pub('firmwareConfig', {sync_time_ns: Date.now() * 1e6, session_id: 0, request_id,
     kind: 2, command: 0, motor_id: MOTOR_ID_NONE, count: 1,
     targets: [{motor_id: MOTOR_ID_NONE, field, value}]});
+  if (!sent) throw new Error('维护写入被拒绝：请核对控制权、武装与 MCU 失能状态');
   const result = await waitRequest(request_id, 6000, '固件参数下发');
   if (!result.ok) throw new Error(result.text);
   await waitFirmwareReport(before);

@@ -17,7 +17,7 @@ function updateCommandHistory() {
   }));
 }
 export const snapshot = shallowRef<WorkbenchSnapshot>({
-  managed: {enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
+  managed: {pending: false, enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
   firmwareConnectionKey: '',
   connected: false,
   connectionText: "未连接",
@@ -30,6 +30,7 @@ export const snapshot = shallowRef<WorkbenchSnapshot>({
   motors: [],
   selectedName: "",
   selectedState: "未知",
+  selectedCanCommand: false,
   total: 0,
   online: 0,
   active: 0,
@@ -109,7 +110,7 @@ function updateSnapshot() {
   const row = s.motors.get(s.selectedId),
     simulation = s.bench.simulation;
   snapshot.value = {
-    managed: {enabled: !!s.managed?.enabled, ownsControl: !!s.managed?.ownsControl,
+    managed: {pending: !!s.managed?.pending, enabled: !!s.managed?.enabled, ownsControl: !!s.managed?.ownsControl,
       armed: !!s.managed?.armed, ready: !!s.managed?.state?.ready,
       mcuAuthorized: !!s.managed?.mcuAuthorized,
       message: s.managed?.message || '', blockers: s.managed?.state?.blockers || []},
@@ -128,6 +129,7 @@ function updateSnapshot() {
     selectedName: (s.modelTransmissions?.groups || [])
       .filter((group: any) => group.motors.some((motor: any) => Number(motor.id) === s.selectedId))
       .flatMap((group: any) => group.joints).join(" / ") || "",
+    selectedCanCommand: data.motorStateOf(s.selectedId).canCommand === true,
     selectedState:
       (() => { const v = data.motorStateOf(s.selectedId);
         return `${v.connection} | ${v.lifecycle} | ${v.execution} | ${v.health} | ${v.protocol}`; })(),

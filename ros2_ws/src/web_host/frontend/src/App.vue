@@ -43,8 +43,15 @@ const screen = ref<Screen>(normalize(location.hash));
 const inspector = ref(screen.value === "teach" ? "parameters" : "control");
 watch(screen, (value) => {
   inspector.value = value === "teach" ? "parameters" : "control";
+  mobilePane.value = value === "teach" ? "objects" : "stage";
 });
 const observation = ref("curve");
+const mobilePane = ref('stage');
+const connectionSettings = ref(false);
+const mobilePanes = [
+  {id:'objects', title:'电机'}, {id:'stage', title:'工作区'},
+  {id:'inspector', title:'检查器'}, {id:'observer', title:'观察'},
+];
 const observe = ref(true);
 const navCollapsed = ref(
   localStorage.getItem("robot2.navCollapsed") === null
@@ -131,6 +138,7 @@ function go(id: string) {
   screen.value = normalize(id);
   location.hash = `/${screen.value}`;
 }
+function reloadWorkspace() { window.location.reload(); }
 function hashchange() {
   screen.value = normalize(location.hash);
 }
@@ -169,19 +177,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workbench" :class="{ 'observer-hidden': !observe, 'nav-collapsed': navCollapsed }">
+  <div class="workbench" :data-mobile-pane="mobilePane" :class="{ 'observer-hidden': !observe, 'nav-collapsed': navCollapsed }">
     <header class="app-header">
       <a class="brand" href="#/run" @click="go('run')"
         ><span class="brand-mark"><Box :size="22" /></span
-        ><span>ROBOT<span class="brand-light"> WORKBENCH</span></span></a
+        ><span>ROBOT2<span class="brand-light"> 工程控制台</span></span></a
       >
       <span class="header-spacer" /><span class="micro">{{
         snapshot.session
       }}</span>
     </header>
 
-    <div class="session-bar">
-      <label class="session-item"
+    <div class="session-bar" :class="{'settings-open': connectionSettings}">
+      <button class="connection-settings secondary compact" :aria-expanded="connectionSettings" aria-controls="rosUrl" @click="connectionSettings = !connectionSettings">连接设置</button>
+      <label class="session-item connection-address"
         ><Cable :size="14" /><span class="session-label">ROS</span
         ><input
           id="rosUrl"
@@ -190,7 +199,7 @@ onBeforeUnmount(() => {
           spellcheck="false"
       /></label>
       <button
-        class="secondary compact"
+        class="secondary compact reconnect-button"
         :disabled="!initialized"
         @click="runtime.connect(rosUrl)"
       >
@@ -251,8 +260,8 @@ onBeforeUnmount(() => {
         <CircleStop :size="14" />{{ snapshot.managed.enabled ? '整机停止' : '全部软停' }}
       </button>
     <div v-if="snapshot.managed.enabled" class="managed-controls" aria-label="整机托管控制">
-      <strong>整机托管 · MCU 执行</strong>
-      <button :disabled="!initialized || !snapshot.managed.ready || snapshot.managed.ownsControl"
+      <strong>MCU 执行</strong><span class="authority-label">本页控制权：{{ snapshot.managed.ownsControl ? '已取得' : '未取得' }}</span><span class="authority-label" :class="{confirmed: snapshot.managed.mcuAuthorized}">运动授权：{{ snapshot.managed.mcuAuthorized ? 'MCU 已确认' : '未确认' }}</span>
+      <button :disabled="!initialized || !snapshot.managed.ready || snapshot.managed.pending || snapshot.managed.ownsControl"
         @click="runtime.managed('acquire')">申请控制</button>
       <button :disabled="!snapshot.managed.ownsControl || snapshot.managed.armed"
         @click="runtime.managed('arm')">武装</button>
@@ -294,7 +303,7 @@ onBeforeUnmount(() => {
     <main class="main-workspace">
       <div class="workspace-heading">
         <div>
-          <div class="eyebrow">ROBOTICS / {{ screen.toUpperCase() }}</div>
+          <div class="eyebrow">工作场景 / {{ screen.toUpperCase() }}</div>
           <h1>
             {{ title.title }}<span class="heading-slash">/</span
             ><span class="heading-description">{{ title.subtitle }}</span>
@@ -312,17 +321,24 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div v-if="startupError" class="panel-error" role="alert">
-        {{ startupError }}
+        <strong>工作区加载失败</strong><span>{{ startupError }}</span>
+        <button class="secondary compact" @click="reloadWorkspace()">重新加载页面</button>
       </div>
-      <div v-else-if="!initialized" class="startup-status">
+      <div v-else-if="!initialized" class="startup-status" role="status" aria-busy="true">
         正在加载工作区与控制模块…
       </div>
       <div v-if="snapshot.mappingError && screen !== 'teach' && screen !== 'motion'" class="mapping-warning" role="status">
         {{ snapshot.mappingError }}；几何预览仍可使用。
       </div>
 
+      <nav v-show="screen !== 'motion'" class="mobile-pane-tabs" aria-label="工作区面板">
+        <button v-for="item in mobilePanes.filter(p => screen !== 'teach' || ['objects', 'inspector'].includes(p.id))" :key="item.id"
+          :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true">
+          {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
+        </button>
+      </nav>
       <div v-show="screen === 'teach'">
-        <DeviceConnection @direct="directDevice = $event" />
+        <DeviceConnection mcu-only @direct="directDevice = $event" />
       </div>
       <MotionWorkbench v-if="screen === 'motion'" />
       <div v-show="screen !== 'motion' && (screen !== 'teach' || !directDevice)" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
@@ -411,11 +427,12 @@ onBeforeUnmount(() => {
             </h2>
             <span
               class="status-chip"
-              :class="snapshot.connected ? 'success' : ''"
+              :class="snapshot.selectedCanCommand && fresh ? 'success' : ''"
               >{{ snapshot.selectedState
               }}{{ snapshot.connected ? "" : " · 数据未连接" }}</span
             >
           </div>
+          <p v-if="screen !== 'teach' && snapshot.managed.enabled && !snapshot.managed.mcuAuthorized" class="control-lock-note">控制已锁定：申请控制权、武装并等待 MCU 确认后，才能下发使能与目标。</p>
           <div v-show="screen !== 'teach'" class="inspector-tabs">
             <button
               :class="{ active: inspector === 'control' }"
@@ -502,7 +519,7 @@ onBeforeUnmount(() => {
         {{ snapshot.connected ? "已连接" : "未连接"
         }}<span class="footer-separator">|</span>运动流：{{ motionAge }}</span
       ><span class="actual-route"
-        >命令节拍输出：{{ snapshot.outputTopic || "尚未收到状态" }}</span
+        :title="snapshot.outputTopic || '尚未收到输出状态'">目标 50 / 50 / 200 Hz · 整体验收待确认</span
       >
     </footer>
     <div v-if="notice" class="toast" role="status">

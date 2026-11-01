@@ -63,10 +63,10 @@ function renderDevRows() {
     // 免得操作员把"记录与设备对不上"看成页面读错。
     const rowsHint = (f) => (v.rec[f] === v.dev[f]) ? ''
       : `；记录 ${fmtParam(v.rec[f])} / 驱动板 ${fmtParam(v.dev[f])}`;
-    const cell = (f) => {
+    const cell = (f, label = f) => {
       const dev = raw(f, pick[f]);
       const hint = (dev ? `设备端 ${dev}` : '') + rowsHint(f);
-      return `<input id="motor-param-${id}-${f}" type="number" step="any" placeholder="未读取" data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
+      return `<input aria-label="${label}" type="number" step="any" placeholder="未读取" data-id="${id}" data-field="${f}" class="pnum" value="${fmtParam(pick[f])}"` +
         (hint ? ` title="${hint}"` : '') + `>` +
         (dev ? `<span class="rawval muted tiny">${dev}</span>` : '');
     };
@@ -86,13 +86,13 @@ function renderDevRows() {
     // 固件给 NaN —— 这时勾选框禁用，不能让操作员以为自己看到了真值。
     const protect = pick['limit_protect'];
     const protectCell = Number.isFinite(protect)
-      ? `<input id="motor-param-${id}-limit_protect" type="checkbox" data-id="${id}" data-field="limit_protect"` +
+      ? `<input aria-label="限位保护" type="checkbox" data-id="${id}" data-field="limit_protect"` +
         (protect === 1 ? ' checked' : '') +
         ' title="限位保护：勾选 = 设备侧看门狗 + 限位保护生效；取消 = 关闭' +
         '（该关节将没有任何限位在执行）。仅未运动时受理。' +
         '上电默认开（固件在回读比对之前写回）；取消后该台每次武装都要二次确认，' +
         '且下次上电会自动恢复为开。">'
-      : `<input id="motor-param-${id}-limit_protect" type="checkbox" disabled title="设备还没回读到该对象">`;
+      : `<input aria-label="限位保护" type="checkbox" disabled title="设备还没回读到该对象">`;
     // 方向：原值直通（0=CW / 1=CCW），点一下切换。翻转只改力矩方向，不改位置
     // 坐标系（实测）；风险是位置环反向，故仅在未运动时可改。
     const dir = pick['direction'];
@@ -109,7 +109,10 @@ function renderDevRows() {
     // 重建会抹掉操作员正在敲的值，不能拿它来刷这个 50 Hz 量。
     const curPos = row.motion?.position;
 
-    const field = (name, label, unit) => `<div><dt><label for="motor-param-${id}-${name}">${label}${unit ? `（${unit}）` : ''}</label></dt><dd>${cell(name)}</dd></div>`;
+    const field = (name, label, unit) => {
+      const title = label + (unit ? `（${unit}）` : '');
+      return `<div><dt>${title}</dt><dd>${cell(name, title)}</dd></div>`;
+    };
     const savedFields = [
       ['pos_min', '位置下限（rad）'], ['pos_max', '位置上限（rad）'],
       ['vel_limit', '速度上限（rad/s）'], ['torque_limit', '电流上限（A）'],
@@ -141,7 +144,7 @@ function renderDevRows() {
 
           ${field('vel_limit', '速度上限', 'rad/s')}${field('torque_limit', '电流上限', 'A')}
 
-          <div><dt><label for="motor-param-${id}-limit_protect">限位保护</label></dt><dd>${protectCell}</dd></div>
+          <div><dt>限位保护</dt><dd>${protectCell}</dd></div>
           <div><dt>电机方向</dt><dd>${dirCell}</dd></div>
           <div><dt>维护操作</dt><dd>
             <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>

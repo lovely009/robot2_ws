@@ -13,7 +13,7 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
-  managed: {enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
+  managed: {pending: boolean; enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
     message: string; blockers: string[]};
   firmwareConnectionKey: string;
   connected: boolean;
@@ -27,6 +27,7 @@ export interface WorkbenchSnapshot {
   motors: { id: number; model: string }[];
   selectedName: string;
   selectedState: string;
+  selectedCanCommand: boolean;
   total: number;
   online: number;
   active: number;

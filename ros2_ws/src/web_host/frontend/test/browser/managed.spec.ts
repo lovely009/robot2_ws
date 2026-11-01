@@ -1,10 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-test('托管页面显式取得控制、等待 MCU ACK、提交标准 Action，隐藏后释放旧会话', async ({ page }) => {
+for (const cancel of [false, true]) test(`托管页面显式控制与标准 Action ${cancel ? '取消保留使能' : '成功'}，隐藏后释放旧会话`, async ({ page }) => {
   const requests: any[] = [], published: any[] = [];
   const state = {epoch: 17, session_id: 1_800_000_000_000, ready: true,
     armed: false, mcu_authorized: false, fault_latched: false, owner: '', blockers: []};
   let publishState = () => {};
+  let finishCanceled = () => {};
+  // Geometry/rendering is covered by integration-preview. Keep control-state
+  // timing independent of the 70MB CAD mesh decoding in this safety fixture.
+  await page.route(/\.stl(?:\?|$)/i, route => route.fulfill({status:404, body:''}));
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/runtime') return route.fulfill({json: {
@@ -38,7 +42,13 @@ test('托管页面显式取得控制、等待 MCU ACK、提交标准 Action，�
       } else if (message.service === '/robot/set_armed') state.armed = message.args.armed;
       else if (message.service === '/robot/renew_control') values.lease_remaining_ms = 1000;
       else if (message.service.endsWith('/send_goal')) values = {accepted: true, stamp: {sec: 1, nanosec: 0}};
-      else if (message.service.endsWith('/get_result')) values = {status: 4, result: {error_code: 0}};
+      else if (message.service.endsWith('/get_result')) {
+        if (cancel) {
+          finishCanceled = () => socket.send(JSON.stringify({op:'service_response',id:message.id,service:message.service,values:{status:5,result:{error_code:0}},result:true}));
+          return;
+        }
+        values = {status:4,result:{error_code:0}};
+      } else if (message.service.endsWith('/cancel_goal')) { values={return_code:0,goals_canceling:[]};finishCanceled(); }
       socket.send(JSON.stringify({op: 'service_response', id: message.id,
         service: message.service, values, result: true}));
       publishState();
@@ -47,7 +57,9 @@ test('托管页面显式取得控制、等待 MCU ACK、提交标准 Action，�
   await page.goto('/workbench/');
   const controls = page.getByLabel('整机托管控制');
   await expect(controls).toBeVisible();
-  await controls.getByRole('button', {name: '申请控制', exact: true}).click();
+  await expect(controls.getByRole('button', {name:'申请控制',exact:true})).toBeEnabled();
+  await controls.getByRole('button', {name:'申请控制',exact:true}).evaluate((button:HTMLButtonElement) => {button.click();button.click();});
+  await expect.poll(() => requests.filter(r => r.service === '/robot/acquire_control').length).toBe(1);
   await expect(controls.getByRole('button', {name: '武装', exact: true})).toBeEnabled();
   await controls.getByRole('button', {name: '武装', exact: true}).click();
   await expect(controls).toContainText('等待 MCU 授权确认');
@@ -69,7 +81,14 @@ test('托管页面显式取得控制、等待 MCU ACK、提交标准 Action，�
       {positions: [.1], time_from_start: {sec: 0, nanosec: 0}},
       {positions: [.2], time_from_start: {sec: 1, nanosec: 0}}]});
   });
-  await expect(controls).toContainText('轨迹执行成功');
+  if (cancel) {
+    await expect(controls).toContainText('轨迹已受理');
+    await page.evaluate(async () => {const ros=await import('/js/core/ros.js');ros.pub('trajectory',{count:0,points:[]});ros.pub('trajectory',{count:0,points:[]});});
+    await expect(controls).toContainText('轨迹已取消');
+    expect(requests.filter(r=>r.service.endsWith('/cancel_goal'))).toHaveLength(1);
+    expect(requests.filter(r=>r.service==='/robot/stop')).toHaveLength(0);
+    expect(state.armed).toBe(true);
+  } else await expect(controls).toContainText('轨迹执行成功');
   const bind = requests.find(r => r.service === '/robot/authorize_motion');
   const goal = requests.find(r => r.service.endsWith('/send_goal'));
   expect(goal.args.goal_id.uuid).toEqual(bind.args.goal_id);

@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 // Offline review only. IDs and bus assignments are deliberately fictional.
+const capturePrefix = process.env.UI_EVIDENCE_PHASE || 'integration-after';
+
 test('整合预览仅消费模拟状态，导航与重连不产生运动授权', async ({page}) => {
+  test.setTimeout(90000);
   const publishes: unknown[] = [], services: string[] = [], errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', route => {
@@ -24,7 +27,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     };
     const subscribed = new Set<string>();
     const send = () => { for (const topic of subscribed) if (fixtures[topic]) socket.send(JSON.stringify({op:'publish', topic, msg:fixtures[topic]})); };
-    const timer = setInterval(send, 100);
+    const timer = setInterval(send, 500);
     page.once('close', () => clearInterval(timer));
     socket.onMessage(raw => {
       const message = JSON.parse(String(raw));
@@ -38,20 +41,49 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await expect(page.locator('.motor-card')).toHaveCount(37);
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await expect(page.getByRole('button', {name:'武装', exact:true})).toBeDisabled();
+  await expect(page.locator('canvas[data-model-ready="true"]')).toHaveCount(1, {timeout:20000});
   await page.evaluate(() => {
     const badge = document.createElement('div');
     badge.textContent = '模拟数据 · 37轴/总线分配为虚构 · 非实测 · 整合未验收';
     badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
     document.body.append(badge);
   });
-  await page.screenshot({path:'/workspace/robot2-ui-evidence/integration-before-desktop.png'});
+  await page.screenshot({path:`/workspace/robot2-ui-evidence/${capturePrefix}-desktop.png`});
   for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台'])
     await page.getByRole('button', {name:scene, exact:true}).click();
   await page.getByRole('button', {name:'重新连接', exact:true}).click();
   await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
   await page.setViewportSize({width:390,height:844});
-  await page.screenshot({path:'/workspace/robot2-ui-evidence/integration-before-mobile.png'});
+  await expect(page.getByRole('navigation', {name:'工作区面板'})).toBeVisible();
+  expect((await page.locator('.main-nav').boundingBox())!.width).toBe(52);
+  await page.getByRole('button', {name:/^电机\s*37$/}).click();
+  await page.locator('.motor-card[data-id="37"]').click();
+  await page.getByRole('button', {name:'检查器', exact:true}).click();
+  await expect(page.locator('.object-heading')).toContainText('电机 37');
+  await expect(page.locator('.status-chip')).not.toHaveClass(/success/);
+  await page.getByRole('button', {name:'观察', exact:true}).click();
+  await expect(page.locator('.observer-head')).toBeInViewport();
+  await page.getByRole('button', {name:'收起观察区', exact:true}).click();
+  await page.getByRole('button', {name:'展开观察区', exact:true}).click();
+  await page.getByRole('button', {name:'工作区', exact:true}).click();
+  await page.getByRole('button', {name:'连接设置', exact:true}).click();
+  await expect(page.getByLabel('rosbridge WebSocket 地址')).toBeVisible();
+  await page.getByRole('button', {name:'连接设置', exact:true}).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({path:`/workspace/robot2-ui-evidence/${capturePrefix}-mobile.png`});
   expect(publishes).toEqual([]);
   expect(services).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+test('运行配置加载失败时展示恢复入口且不建立控制连接', async ({page}) => {
+  let websocketCount = 0;
+  await page.route('**/api/**', route => route.fulfill({json:{models:[], motor_types:{}}}));
+  await page.route('**/api/runtime', route => route.fulfill({status:503, json:{error:'fixture unavailable'}}));
+  await page.routeWebSocket('**', socket => {websocketCount++; socket.close();});
+  await page.goto('/workbench/');
+  await expect(page.getByRole('alert').filter({hasText:'工作区加载失败'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'重新加载页面'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
+  expect(websocketCount).toBe(0);
 });

@@ -44,9 +44,15 @@ let onSelect = null;
 let ghostMat = null;         // 幽灵共用一份半透明材质（几何与实体共享）
 let loadGen = 0;             // URDF 加载代次：切换模型/卸载时作废在途回调
 
-function tick() {
-  controls.update();
+let renderRequested = true;
+let lastRenderAt = -Infinity;
+function tick(now) {
+  if (!renderer || !renderer.domElement.clientWidth || !renderer.domElement.clientHeight || now - lastRenderAt < 33) return;
+  const moved = controls.update();
+  if (!renderRequested && !moved) return;
   renderer.render(scene, camera);
+  renderRequested = false;
+  lastRenderAt = now;
 }
 
 export function init(canvas, opts) {
@@ -54,7 +60,9 @@ export function init(canvas, opts) {
   onSelect = opts.onSelect || null;
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  canvas.dataset.modelReady = 'false';
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderRequested = true;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b1120);
@@ -91,10 +99,25 @@ export function init(canvas, opts) {
 
   canvas.addEventListener('pointerdown', onPointerDown);
 
-  const loader = new URDFLoader();
+  const manager = new THREE.LoadingManager();
+  const loader = new URDFLoader(manager);
   loader.packages = packages;      // { 包名: 路径前缀 } —— package:// 的解析表
   // 代次守卫：切换模型/卸载会作废在途加载，过期回调不得再碰新的场景对象。
   const gen = ++loadGen;
+  manager.onProgress = () => { if (gen === loadGen) renderRequested = true; };
+  manager.onLoad = () => {
+    if (gen !== loadGen || !robot) return;
+    // URDF parsing finishes before asynchronous STL loads. Reframe and rebuild
+    // the target ghost once geometry is complete, then request a fresh render.
+    if (ghost) root.remove(ghost);
+    ghost = robot.clone();
+    ghost.traverse((o) => { if (o.isMesh) o.material = ghostMat; });
+    ghost.visible = false;
+    root.add(ghost);
+    frameCamera(robot);
+    renderRequested = true;
+    canvas.dataset.modelReady = 'true';
+  };
   loader.load(urdfUrl, (r) => {
     if (gen !== loadGen) { return; }
     robot = r;
@@ -148,6 +171,7 @@ function frameCamera(r) {
   camera.near = d / 100;
   camera.far = d * 20;
   camera.updateProjectionMatrix();
+  renderRequested = true;
   controls.update();
 }
 
@@ -166,7 +190,9 @@ function onPointerDown(ev) {
 function applyValues(target, angles) {
   if (!target || !angles) { return; }
   for (const [name, v] of Object.entries(angles)) {
-    if (Number.isFinite(v)) { target.setJointValue(name, v); }
+    if (Number.isFinite(v) && target.joints[name]?.angle !== v) {
+      target.setJointValue(name, v); renderRequested = true;
+    }
   }
 }
 
@@ -175,7 +201,7 @@ export function setJoints(angles) { applyValues(robot, angles); }
 // 目标幽灵：angles 为 null 时隐藏（没有在发的目标就不该凭空画一个出来）。
 export function setTargets(angles) {
   if (!ghost) { return; }
-  if (!angles) { ghost.visible = false; return; }
+  if (!angles) { if (ghost.visible) renderRequested = true; ghost.visible = false; return; }
   applyValues(ghost, angles);
   ghost.visible = true;
 }
@@ -183,11 +209,13 @@ export function setTargets(angles) {
 // colors: { 关节名: '#rrggbb' }；缺省回落灰色。
 export function setJointColors(colors) {
   for (const [name, m] of markers) {
-    m.material.color.set((colors && colors[name]) || '#7e8bab');
+    const next = (colors && colors[name]) || '#7e8bab';
+    if (`#${m.material.color.getHexString()}` !== next) {m.material.color.set(next); renderRequested = true;}
   }
 }
 
 export function setSelected(name) {
+  if (selected !== name) renderRequested = true;
   if (selected && markers.has(selected)) {
     markers.get(selected).scale.setScalar(1);
   }
@@ -205,6 +233,7 @@ export function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  renderRequested = true;
 }
 
 // 页面隐藏时停掉渲染循环（WebGL 在后台标签页仍会跑满帧）。
@@ -293,6 +322,8 @@ export function mount(rootEl, ctx) {
   canvas.className = 'arm3d';
   const hud = document.createElement('div');
   hud.className = 'hud';
+  hud.tabIndex = 0;
+  hud.setAttribute('aria-label', '模型加载与映射诊断');
   hud.textContent = '臂视图加载中…';
   // canvas 与 hud 由 JS 建（canvas 必须真元素、hud 要随加载状态改），
   // 图例在面板模板里（DOM 单一来源），插到 canvas/hud 之后保持旧层级。

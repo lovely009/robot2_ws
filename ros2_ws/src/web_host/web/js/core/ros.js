@@ -170,6 +170,7 @@ export function pub(key, message) {
   if (!store.conn.connected) return false;
   if (controlMode === 'readonly') return false;
   if (isManagedMode()) {
+    if (['paramSet', 'sysCmd', 'firmwareConfig'].includes(key)) return managed.maintenance(key, message);
     if (key === 'stop') { void managedOperation('stop'); return true; }
     if (key === 'jointTrajectory') {
       if (!managed.canSubmitMotion()) {

@@ -21,7 +21,7 @@ def payload():
         hierarchy += '} } }\n'
     hierarchy += '}\nMOTION\nFrames: 3\nFrame Time: 0.02\n'
     rows = (' '.join(['0', '100'] + ['0'] * 22) + '\n') * 3
-    urdf = Path(__file__).resolve().parents[2] / 'robot_sim/models/half_body_robot/urdf/half_body_robot.urdf'
+    urdf = Path(__file__).resolve().parents[2] / 'robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
     return {'bvh_text': hierarchy + rows, 'urdf_text': urdf.read_text(),
             'bvh_name': '测试.bvh', 'urdf_name': 'half_body_robot.urdf'}
 

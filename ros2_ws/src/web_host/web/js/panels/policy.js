@@ -3,7 +3,7 @@ import { describeMotorState } from '../core/motor_state.js';
 // 页面最后一次发出去的值（store.policy）。搬自重构前 app.js 的策略段。
 import { store, DIRTY, paramRowIds, writesAllowed, markDirty, MODEL } from '../core/store.js';
 import { $ } from '../core/format.js';
-import { pub, isConnected, nextPolicyGeneration } from '../core/ros.js';
+import { pub, isConnected, nextPolicyGeneration, isManagedMode } from '../core/ros.js';
 
 // 每个下行消息一条关联 id。与代数同法用启动时间把起点垫高（见 ros.js 的
 // nextPolicyGeneration 说明）；只用于跨系统日志对齐与回执关联。
@@ -234,7 +234,7 @@ export function mount(root, ctx) {
     const actual = $('polActual');
     const groupIds = selectedGroupIds();
     $('polGroupHint').textContent = groupIds.length ? `所选传动组：m${groupIds.join('、m')} · 关节控制需整组使能` : '';
-    for (const name of ['btnPolEnableGroup','btnPolDisableGroup']) $(name).disabled = !writesAllowed() || !groupIds.length;
+    for (const name of ['btnPolEnableGroup','btnPolDisableGroup']) $(name).disabled = !writesAllowed() || (isManagedMode() && !store.managed?.mcuAuthorized) || !groupIds.length;
     if (actual) actual.textContent = policyRowIds().map(id => {
       const view = describeMotorState(store,id);
       return `${policyReceipt(id) ? policyReceipt(id) + ' · ' : ''}m${id}：${view.connection} · ${view.lifecycle}（${view.protocol}）`;
@@ -259,7 +259,7 @@ export function mount(root, ctx) {
       + (store.policy.size ? ` · 已下发 ${store.policy.size}` : '');
     // 断连禁用写操作（Task 2 的统一规则）：策略按钮与 使能/kp/kd 输入框逐个设。
     // 行是每次渲染重建的，所以禁用态必须在重建之后设；「显示全部」只是筛选，不禁用。
-    const allow = writesAllowed();
+    const allow = writesAllowed() && (!isManagedMode() || store.managed?.mcuAuthorized);
     for (const el of $('polRows').querySelectorAll('[data-pol], [data-pol-field]')) {
       el.disabled = !allow;
     }

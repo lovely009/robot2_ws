@@ -26,8 +26,15 @@ int main(){
   // Without a new target, the ORIGINAL deadline still stops every axis.
   sil_advance(1090);sil_snapshot(values,states,head);
   for(unsigned i=0;i<37;++i)assert(states[i*10+4]==5);
+  uint32_t stopped_outputs[37];for(unsigned i=0;i<37;++i)stopped_outputs[i]=states[i*10+9];
+  sil_advance(1091);assert(sil_command(lease,4,1121,37,ids,p,v,t));sil_advance(1095);
+  sil_snapshot(values,states,head);
+  for(unsigned i=0;i<37;++i){
+    assert(states[i*10+4]==6); // fresh intent resumes ENABLING, not a stale stop
+    assert(states[i*10+9]==stopped_outputs[i]); // original settle window emits no MIT
+  }
   // Ownership renewals alone cannot revive the stale target source.
-  assert(sil_lease(lease,2,1290,1));sil_advance(1175);
+  assert(sil_lease(lease,2,1290,1));sil_advance(1195);
   sil_snapshot(values,states,head);assert(!head[3]);assert(sil_enabled_mask()==0);
   for(unsigned i=0;i<37;++i)assert(!states[i*10+1]);
   std::puts("37-axis exact-boundary replacement, original deadline and stale-source stop passed");

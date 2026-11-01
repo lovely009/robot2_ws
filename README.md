@@ -2,6 +2,8 @@
 
 本地整合分支，尚未通过完整闭环验收，不能合入 dev 或用于真实执行。UI 已改版；当前测试与遗留问题见 [本轮结果](outputs/integration/ui-and-runtime-review.md)。历史首次合并状态保留在 [早期检查点](outputs/integration/checkpoint.md)。
 
+后续时延定位与当前验收边界见 [墙钟跟踪记录](outputs/integration/wall-clock-followup.md)。
+
 ROS 2 Humble 整机平台。实机只有一条电机执行链：`主机 JTC/MicroRosSystem → robot_supervisor → micro_ros_bridge → micro-ROS MCU → 电机`。主机负责模型、控制权、标准运动接口与诊断；主路径完整计划由主机 JTC 插值，MCU 负责周期目标执行与本地授权期限。
 
 ## 功能与职责

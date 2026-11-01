@@ -382,7 +382,8 @@ class SupervisorNode(Node):
             if not result['success']:
                 raise ValueError(result['reason'])
             context = dict(lease_id=request.lease_id, epoch=request.epoch,
-                           session_id=request.session_id, sequence=request.sequence)
+                           session_id=request.session_id, sequence=request.sequence,
+                           mcu_lease_id=self._mcu_lease.lease_id)
             self._motion_adapter.authorize_goal(bytes(request.goal_id), context,
                                                  expires_in_s=.5)
             response.success, response.reason = True, ''
@@ -393,6 +394,7 @@ class SupervisorNode(Node):
 
     def _motion_authorized(self, context):
         return (self.core.lease_matches(context['lease_id'], context['epoch'], context['session_id'])
+                and context.get('mcu_lease_id') == self._mcu_lease.lease_id
                 and self.core.armed and self._mcu_lease.confirmed)
 
     def _submit_motion(self, message, context):
@@ -518,7 +520,8 @@ class SupervisorNode(Node):
                     self._motion_adapter.cancel_current()
                 else:
                     self._facade_context = dict(lease_id=envelope.lease_id,
-                        epoch=envelope.epoch, session_id=envelope.session_id, sequence=envelope.sequence)
+                        epoch=envelope.epoch, session_id=envelope.session_id, sequence=envelope.sequence,
+                        mcu_lease_id=self._mcu_lease.lease_id)
                 self._pub_host_trajectory.publish(outgoing)
             self._record_input_result(channel, envelope.sequence, True, '')
         except (ValueError, TypeError, OverflowError) as error:

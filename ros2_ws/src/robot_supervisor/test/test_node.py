@@ -142,7 +142,7 @@ class Harness:
     def _lease(self, message):
         if self.ack_lease:
             self.wire_lease = copy.deepcopy(message)
-            if not message.active:
+            if not message.active and self.ack_disable:
                 self.active = False
 
     def _policy(self, message):
@@ -167,7 +167,7 @@ class Harness:
         lease_id = wire.lease_id if wire and wire.session_id == self.session else 0
         lease_active = bool(lease_id and wire.active and
                             0 < (wire.valid_until_tick_ms - tick_ms) & 0xFFFFFFFF <= 300)
-        if wire and not lease_active:
+        if wire and not lease_active and self.ack_disable:
             self.active = False
         report = CalibrationState()
         report.header.stamp = self.io.get_clock().now().to_msg()
@@ -306,6 +306,24 @@ def test_maintenance_requires_owner_and_disabled_feedback_and_keeps_stamp(harnes
     assert not refused.success
     h.spin(.03)
     assert len(writes)==1
+
+
+def test_rearm_same_public_owner_cannot_restore_old_execution_context(harness):
+    h=harness
+    lease=h.acquire();assert lease.success
+    h.enable(lease)
+    old=dict(lease_id=lease.lease_id,epoch=lease.epoch,session_id=lease.session_id,
+        sequence=1,mcu_lease_id=h.supervisor._mcu_lease.lease_id)
+    assert h.supervisor._motion_authorized(old)
+    reply=h.call(SetArmed,'/robot/set_armed',SetArmed.Request(
+        lease_id=lease.lease_id,epoch=lease.epoch,armed=False))
+    assert reply.success
+    h.wait(lambda:h.latest is not None and not h.latest.armed and 'awaiting_disabled' not in h.latest.blockers)
+    h.enable(lease,sequence=2)
+    assert h.supervisor._mcu_lease.lease_id!=old['mcu_lease_id']
+    assert not h.supervisor._motion_authorized(old)
+    current=dict(old,mcu_lease_id=h.supervisor._mcu_lease.lease_id)
+    assert h.supervisor._motion_authorized(current)
 
 
 def test_explicit_arm_policy_generation_and_authoritative_ack(harness):

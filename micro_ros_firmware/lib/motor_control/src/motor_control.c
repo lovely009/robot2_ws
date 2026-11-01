@@ -582,6 +582,14 @@ static void entry_apply_target(motor_control_context_t *ctx,
     }
   }
   if (entry->enable_pending) {
+    // An explicitly fresh, authorized target can resume a soft stop, including
+    // during the original vendor settle window. Keep that window unchanged;
+    // reporting SOFT_STOP after accepting this new intent would make the host
+    // latch a retired state until the first MIT output. A cached hold cannot
+    // reach this path after soft stop because has_target was cleared.
+    if (entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP) {
+      entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_READY_DISABLED;
+    }
     return; // 整定窗内（service 到期后恢复）
   }
 

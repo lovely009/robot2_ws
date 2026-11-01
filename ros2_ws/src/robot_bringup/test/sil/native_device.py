@@ -6,6 +6,8 @@ This is software-in-the-loop evidence, not physical timing acceptance.
 """
 import ctypes as C
 import time
+import json
+import threading
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from can_bridge_msgs.msg import (AgentCommand, AgentConfigRequest, AgentConfigResult,
@@ -17,6 +19,7 @@ N = 37
 class NativeDevice(Node):
     def __init__(self, library, context):
         super().__init__('native_firmware_sil_only', context=context)
+        self._native_lock=threading.RLock()
         self.lib = C.CDLL(str(library))
         self.lib.sil_advance.argtypes = [C.c_uint32]
         self.lib.sil_lease.argtypes = [C.c_uint64, C.c_uint32, C.c_uint32, C.c_int]
@@ -31,8 +34,15 @@ class NativeDevice(Node):
         self.started = time.monotonic()
         self.sequence = 0
         self.commands, self.results, self.policies = [], [], []
+        self._acknowledged=set()
         self.receipts=[]
+        self.trace=[]
+        self._advance_at=time.monotonic_ns()
         self.drop_commands = False
+        self.drop_authority = False
+        self.suppress_status = False
+        self.grants=[]
+        self.configs=[]
         self.status_pub = self.create_publisher(AgentStatus, AgentWireContract.TOPIC_STATUS, 10)
         self.info_pub = self.create_publisher(AgentInfo, AgentWireContract.TOPIC_INFO, 10)
         stream = QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -43,14 +53,44 @@ class NativeDevice(Node):
         self.create_timer(.02, self.publish_state)
 
     def advance(self):
-        self.lib.sil_advance(1000+int((time.monotonic()-self.started)*1000))
-        self.lib.sil_snapshot(self.values, self.states, self.head)
+        current=time.monotonic_ns()
+        if current-self._advance_at > 3_000_000:
+            self.record('native_service_gap', gap_ms=(current-self._advance_at)/1e6)
+        self._advance_at=current
+        with self._native_lock:
+            self.lib.sil_advance(1000+int((time.monotonic()-self.started)*1000))
+            self.lib.sil_snapshot(self.values, self.states, self.head)
+
+    def enabled_mask(self):
+        with self._native_lock: return self.lib.sil_enabled_mask()
+
+    def positions(self):
+        with self._native_lock: return [float(self.values[i*3]) for i in range(N)]
+
+    def record(self, event, **fields):
+        if len(self.trace)<50000:
+            self.trace.append(dict(event=event,mono_ns=time.monotonic_ns(),wall_ns=time.time_ns(),**fields))
+
+    def save_trace(self, path):
+        path.write_text(''.join(json.dumps(row)+'\n' for row in self.trace))
 
     def command(self, message):
+        if message.schema_version!=AgentWireContract.SCHEMA_VERSION: return
+        if message.mode==AgentCommand.STOP_ALL:
+            if not message.count and not any((message.motor_ids,message.position_q,message.velocity_q,message.effort_q)):
+                self.lib.sil_stop()
+            return
+        if message.session_id!=100: return
+        if message.mode not in (AgentCommand.SNAPSHOT,AgentCommand.AUTHORITY): return
         self.advance()
         if message.mode == AgentCommand.AUTHORITY:
-            self.lib.sil_lease(message.lease_id, message.lease_sequence,
-                message.lease_valid_until_tick_ms, int(message.lease_active))
+            self.grants.append(message)
+            self.record('wire_authority_rx', sequence=message.lease_sequence, active=message.lease_active,
+                tick=int(self.head[7]),deadline=message.lease_valid_until_tick_ms)
+            if not self.drop_authority:
+                with self._native_lock:
+                    self.lib.sil_lease(message.lease_id, message.lease_sequence,
+                        message.lease_valid_until_tick_ms, int(message.lease_active))
             return
         self.commands.append(message)
         if self.drop_commands: return
@@ -58,16 +98,25 @@ class NativeDevice(Node):
             (C.c_uint8*message.count)(*message.motor_ids), (C.c_int16*message.count)(*message.position_q),
             (C.c_int16*message.count)(*message.velocity_q), (C.c_int16*message.count)(*message.effort_q))
         self.receipts.append((int(self.head[7]),message.sequence,message.count,message.valid_until_tick_ms,int(accepted)))
+        self.record('wire_command_rx',sequence=message.sequence,count=message.count,
+            tick=int(self.head[7]),deadline=message.valid_until_tick_ms,accepted=bool(accepted))
 
     def config(self, message):
+        if message.schema_version!=AgentWireContract.SCHEMA_VERSION: return
+        if message.operation!=AgentConfigRequest.STOP_ALL and message.session_id!=100: return
+        self.configs.append(message)
         self.advance()
         if message.operation == AgentConfigRequest.STOP_ALL:
             self.lib.sil_stop()
         elif message.operation == AgentConfigRequest.SET_POLICY:
             self.policies.append(message)
             count = len(message.policies)
-            accepted = self.lib.sil_policy(message.lease_id, message.request_id, message.policy_generation,
-                int(self.head[7])+message.ttl_ms, count,
+            # Match production agent_request_deadline: transport consumes the
+            # original issued time, never a fresh full TTL from receipt.
+            age=max(0,time.time_ns()-message.issued_stamp)
+            remaining=(message.ttl_ms*1000000-age)//1000000
+            accepted = remaining>0 and self.lib.sil_policy(message.lease_id, message.request_id, message.policy_generation,
+                int(self.head[7])+remaining, count,
                 (C.c_uint16*count)(*[p.motor_id for p in message.policies]),
                 (C.c_uint8*count)(*[p.enabled for p in message.policies]),
                 (C.c_float*count)(*[p.kp for p in message.policies]),
@@ -89,6 +138,7 @@ class NativeDevice(Node):
                 page.devices.append(item)
             self.info_pub.publish(page)
         elif message.operation == AgentConfigRequest.ACK_RESULTS:
+            self._acknowledged.update(message.ack_request_ids)
             self.results = [r for r in self.results if r.request_id not in message.ack_request_ids]
 
     def publish_state(self):
@@ -109,13 +159,16 @@ class NativeDevice(Node):
                 kernel_enabled=bool(s[2]), lifecycle=s[3], execution_state=s[4],
                 policy_generation=s[6], unified_fault_code=s[7]))
         for p in self.policies:
-            if (p.request_id not in [r.request_id for r in self.results] and
+            if (p.request_id not in self._acknowledged and p.request_id not in [r.request_id for r in self.results] and
                     all(self.states[(t.motor_id-1)*10+6] == p.policy_generation for t in p.policies)):
                 self.results.append(AgentConfigResult(request_id=p.request_id,
                     operation=p.operation, state=AgentConfigResult.SUCCEEDED,
                     completed_motor_mask=sum(1<<(t.motor_id-1) for t in p.policies)))
         status.results=self.results[-8:]
-        self.status_pub.publish(status)
+        if not self.suppress_status: self.status_pub.publish(status)
+        self.record('native_status_suppressed' if self.suppress_status else 'native_status_tx',source_ns=stamp,tick=tick,sequence=self.sequence,
+            authorized=bool(self.head[3]),command_sequence=int(self.head[4]),
+            policy=bool(self.states[1]),motion=bool(self.states[2]),execution=int(self.states[4]))
         for group, start in enumerate(range(0,N,32)):
             ids=list(range(start,min(start+32,N)))
             frame = AgentMotion(session_id=100, snapshot_stamp=stamp, snapshot_tick_ms=tick,

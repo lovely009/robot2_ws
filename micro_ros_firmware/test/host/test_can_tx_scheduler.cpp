@@ -230,7 +230,40 @@ static void test_cancel_slots_preserves_unrelated_fifo_order() {
   assert(out[4].can_id == management.can_id);
 }
 
+static void test_expiring_zero_cannot_escape_p0_backpressure_or_cancellation() {
+  can_tx_scheduler_t sched;
+  can_tx_scheduler_init(&sched);
+  auto zero = make_frame(0x607, 1);
+  zero.tx_slot = 2; zero.valid_until_tick_ms = 150;
+  auto management = make_frame(0x080, 2);
+  auto stop = make_frame(0x107, 3);
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  assert(can_tx_scheduler_submit_p2(&sched, &management));
+  assert(can_tx_scheduler_submit_p0(&sched, &stop));
+  can_tx_frame_t out[8];
+  assert(can_tx_scheduler_pump(&sched, out, 1, 0, nullptr, nullptr) == 1);
+  can_tx_scheduler_expire_p2(&sched, 149);
+  assert(sched.p2.count == 2);
+  can_tx_scheduler_expire_p2(&sched, 150);
+  assert(can_tx_scheduler_pump(&sched, out, 8, 0, nullptr, nullptr) == 1);
+  assert(out[0].can_id == 0x080);
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  assert(can_tx_scheduler_submit_p2(&sched, &management));
+  stop.tx_slot = 2;
+  assert(can_tx_scheduler_submit_p0(&sched, &stop));
+  can_tx_scheduler_cancel_timed_p2(&sched, UINT64_C(1) << 2);
+  assert(can_tx_scheduler_pump(&sched, out, 8, 0, nullptr, nullptr) == 2);
+  assert(out[0].can_id == stop.can_id && out[1].can_id == 0x080);
+  zero.valid_until_tick_ms = 2;
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  can_tx_scheduler_expire_p2(&sched, UINT32_MAX);
+  assert(sched.p2.count == 1);
+  can_tx_scheduler_expire_p2(&sched, 2);
+  assert(sched.p2.count == 0);
+}
+
 int main() {
+  test_expiring_zero_cannot_escape_p0_backpressure_or_cancellation();
   test_p1_send_once();
   test_p1_latest_wins();
   test_priority_order();

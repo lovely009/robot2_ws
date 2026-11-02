@@ -1,6 +1,0 @@
-cmake_minimum_required(VERSION 3.16)
-project(virtual_firmware_serial LANGUAGES CXX)
-find_package(microxrcedds_client REQUIRED)
-add_executable(xrce_serial_gateway xrce_serial_gateway.cpp)
-target_compile_features(xrce_serial_gateway PRIVATE cxx_std_17)
-target_link_libraries(xrce_serial_gateway PRIVATE microxrcedds_client)

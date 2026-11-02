@@ -1073,7 +1073,7 @@ static void test_cerb_set_zero_frames() {
   const uint8_t kWrong[8] = {0x60, 0x38, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
   memcpy(r.data, kWrong, 8U);
   assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r, nullptr) ==
-      MOTOR_PROTOCOL_STAGE_RETRY);
+      MOTOR_PROTOCOL_STAGE_IGNORE);
 }
 
 // 响应裁决：写等 ack、读回必须一致；设备 abort → FAIL；索引不符 → RETRY。

@@ -3,7 +3,7 @@ uint64 session_id
 uint64 snapshot_stamp
 uint32 snapshot_tick_ms
 uint32 sequence
-uint16 schema_version 3
+uint16 schema_version 4
 uint8 group_index
 uint8 group_count
 uint8 count

@@ -9,6 +9,7 @@
 
 #include "motor_control_internal.h"
 #include "motor_control_profile.h"
+#include "config_transaction.hpp"
 
 // ---------------------------------------------------------------------------
 // 助手
@@ -5285,7 +5286,7 @@ static void test_runtime_device_parameter_writes_are_retired() {
   bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
   const motor_protocol_config_kind_t retired[] = {
     MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS, MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT,
-    MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT, MOTOR_PROTOCOL_CONFIG_SET_ZERO,
+    MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT,
     MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT, MOTOR_PROTOCOL_CONFIG_SET_DIRECTION,
     MOTOR_PROTOCOL_CONFIG_SET_T_MAX, MOTOR_PROTOCOL_CONFIG_SET_NODE_ID,
     MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH};
@@ -5300,8 +5301,147 @@ static void test_runtime_device_parameter_writes_are_retired() {
   }
 }
 
+static void disable_for_zero(motor_control_context_t *ctx, uint16_t motor_id) {
+  motor_protocol_config_request_t off{};
+  off.request_id = 300; off.motor_id = motor_id;
+  off.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE;
+  assert(motor_control_submit_config(ctx, &off, 109));
+}
+
+static void test_set_zero_waits_for_device_ack_and_invalidates_old_feedback() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  disable_for_zero(&ctx, 7);
+  const auto before = ctx.entries[0];
+  assert(before.has_measured);
+  (void)motor_control_take_tx_cancellations(&ctx);
+  motor_protocol_config_request_t zero{};
+  zero.request_id = 301; zero.motor_id = 7; zero.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  config_transaction::Coordinator coordinator;
+  config_transaction::Request wire{};
+  wire.session_id = 9; wire.request_id = 1; wire.command = 3; wire.motor_id = 7;
+  wire.valid_until_tick_ms = 1000;
+  const int slot = coordinator.begin(wire, 9, 110);
+  assert(slot >= 0 && coordinator.track(slot, zero.request_id, 7));
+  coordinator.submitted(slot, 1, 0);
+  assert(motor_control_submit_config(&ctx, &zero, 110));
+  assert(motor_control_take_tx_cancellations(&ctx) == 0); // 不得取消已排队的安全 P0。
+  assert(motor_control_take_zero_tx_cancellations(&ctx) == 1);
+  assert(coordinator.begin(wire, 9, 111) < 0); // 同一请求不再次提交设备。
+  assert(coordinator.pending_device_command(3, 7));
+  assert(!has_result_event(&ctx, 301, MOTOR_PROTOCOL_CONFIG_OK));
+  motor_control_service(&ctx, 111);
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1 && frames[0].can_id == 0x607 && frames[0].data[0] == 0x23);
+  assert(frames[0].data[1] == 0x31 && frames[0].data[2] == 0x25 && frames[0].data[4] == 1);
+  assert(!ctx.entries[0].has_measured);
+  auto enable = zero;
+  enable.request_id = 302; enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE; enable.enable = true;
+  assert(!motor_control_submit_config(&ctx, &enable, 111));
+  assert(has_result_event(&ctx, 302, MOTOR_PROTOCOL_CONFIG_BUSY));
+  enable.request_id = 303; enable.kind = MOTOR_PROTOCOL_CONFIG_SET_POLICY;
+  enable.policy_generation = 1; enable.kp = 30; enable.kd = 1;
+  assert(!motor_control_submit_config(&ctx, &enable, 111));
+  assert(has_result_event(&ctx, 303, MOTOR_PROTOCOL_CONFIG_BUSY));
+  assert(!ctx.entries[0].policy_enable && !ctx.entries[0].motion_enabled);
+  auto old_feedback = cerb_feedback(7, 112);
+  motor_control_on_raw_frame(&ctx, &old_feedback);
+  auto ack = sdo_write_ack(7, 0x2531, 0, 113);
+  motor_control_on_raw_frame(&ctx, &ack);
+  assert(coordinator.pending_device_command(3, 7)); // ACK 尚未回告桥时仍挡住新启用。
+  motor_control_event_t events[64];
+  const size_t count = motor_control_drain_events(&ctx, events, 64);
+  for (size_t i = 0; i < count; ++i) {
+    const auto &event = events[i];
+    if (event.type == MOTOR_CONTROL_EVENT_CONFIG_RESULT)
+      coordinator.on_result(event.request_id, event.reason == MOTOR_PROTOCOL_CONFIG_OK, event.reason, event.motor_id);
+  }
+  assert(coordinator.result(slot)->status == config_transaction::kSucceeded);
+  assert(!coordinator.pending_device_command(3, 7));
+  const auto &entry = ctx.entries[0];
+  assert(!entry.tx_active && !entry.has_measured && !entry.has_target && !entry.fresh_target_pending);
+  assert(!entry.policy_enable && !entry.motion_enabled && !entry.motion_authorized);
+  assert(entry.record_valid == before.record_valid && entry.record_dirty_slots == before.record_dirty_slots);
+  assert(memcmp(entry.record_raw, before.record_raw, sizeof(entry.record_raw)) == 0);
+  motor_control_motion_state_t state{};
+  assert(motor_control_copy_motion_states(&ctx, &state, 1, 114) == 1);
+  assert(!std::isfinite(state.position_rad));
+  auto fresh = cerb_feedback(7, 115);
+  motor_control_on_raw_frame(&ctx, &fresh);
+  assert(motor_control_copy_motion_states(&ctx, &state, 1, 115) == 1);
+  assert(std::isfinite(state.position_rad));
+  motor_control_hold_step(&ctx, 115);
+  assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0);
+}
+
+static void test_set_zero_rejects_active_pending_unbound_offline_and_busy() {
+  for (unsigned mode = 0; mode < 11; ++mode) {
+    motor_control_context_t ctx;
+    motor_control_init(&ctx, g_adapters, 2);
+    bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+    disable_for_zero(&ctx, 7);
+    auto &entry = ctx.entries[0];
+    switch (mode) {
+      case 0: entry.online = false; break;
+      case 1: entry.profile = nullptr; break;
+      case 2: entry.lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE; break;
+      case 3: entry.lifecycle = MOTOR_CONTROL_LIFECYCLE_SAFE_STOP; break;
+      case 4: entry.policy_enable = true; break;
+      case 5: entry.motion_enabled = true; break;
+      case 6: entry.enable_pending = true; break;
+      case 7: entry.motion_authorized = true; break;
+      case 8: entry.has_target = true; break;
+      case 9: entry.p0_pending = true; break;
+      case 10: entry.tx_active = true; break;
+    }
+    motor_protocol_config_request_t zero{};
+    zero.request_id = 301; zero.motor_id = 7; zero.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+    assert(!motor_control_submit_config(&ctx, &zero, 110));
+    assert(!has_result_event(&ctx, 301, MOTOR_PROTOCOL_CONFIG_OK));
+    motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+    assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0);
+  }
+}
+
+static void test_set_zero_timeout_and_unsupported_never_enable_or_save() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  disable_for_zero(&ctx, 7);
+  motor_protocol_config_request_t zero{};
+  zero.request_id = 301; zero.motor_id = 7; zero.kind = MOTOR_PROTOCOL_CONFIG_SET_ZERO;
+  assert(motor_control_submit_config(&ctx, &zero, 110));
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  size_t zero_frames = 0;
+  for (uint32_t tick = 111; tick < 500; ++tick) {
+    auto feedback = cerb_feedback(7, tick);
+    motor_control_on_raw_frame(&ctx, &feedback);
+    motor_control_service(&ctx, tick);
+    assert(ctx.tx_count <= 1); // 模拟下游阻塞：命令一直不出队，不能再追加副本。
+    if (tick == 111) {
+      zero_frames = ctx.tx_count;
+      assert(ctx.tx_pending[0].can_id == 0x607 && ctx.tx_pending[0].data[1] == 0x31);
+    }
+  }
+  assert(has_result_event(&ctx, 301, MOTOR_PROTOCOL_CONFIG_TIMEOUT));
+  assert(zero_frames == 1);
+  assert(flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING) == 0); // 终结后不能晚发。
+  assert(!ctx.entries[0].policy_enable && !ctx.entries[0].motion_enabled);
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 7, "vaxor_2550", 100);
+  disable_for_zero(&ctx, 7);
+  assert(motor_control_submit_config(&ctx, &zero, 110));
+  assert(has_result_event(&ctx, 301, MOTOR_PROTOCOL_CONFIG_UNSUPPORTED));
+  assert(!ctx.entries[0].tx_active && !ctx.entries[0].policy_enable);
+}
+
 int main() {
   bind_real_adapters();
+  test_set_zero_waits_for_device_ack_and_invalidates_old_feedback();
+  test_set_zero_rejects_active_pending_unbound_offline_and_busy();
+  test_set_zero_timeout_and_unsupported_never_enable_or_save();
   test_runtime_device_parameter_writes_are_retired();
   test_missing_motion_feedback_blocks_snapshot_hold_and_target_valid();
   test_aged_motion_feedback_soft_stops_and_requires_explicit_enable();

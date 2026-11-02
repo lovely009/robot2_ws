@@ -11,6 +11,30 @@ void can_tx_scheduler_init(can_tx_scheduler_t *sched) {
   memset(sched, 0, sizeof(*sched));
 }
 
+static void discard_timed_p2(can_tx_scheduler_t *sched, uint64_t slots,
+    uint32_t now_ms, bool expire) {
+  uint8_t kept = 0U;
+  for (uint8_t i = 0U; i < sched->p2.count; ++i) {
+    const can_tx_frame_t *frame = &sched->p2.queue[(sched->p2.head + i) % CAN_TX_P2_CAPACITY];
+    if (frame->valid_until_tick_ms &&
+        ((expire && (int32_t)(now_ms - frame->valid_until_tick_ms) >= 0) ||
+        (frame->tx_slot < CAN_TX_P1_SLOTS && (slots & (UINT64_C(1) << frame->tx_slot))))) {
+      if (expire) ++sched->p2.dropped_count;
+      continue;
+    }
+    sched->p2.queue[(sched->p2.head + kept++) % CAN_TX_P2_CAPACITY] = *frame;
+  }
+  sched->p2.count = kept;
+}
+
+void can_tx_scheduler_expire_p2(can_tx_scheduler_t *sched, uint32_t now_ms) {
+  if (sched != NULL) discard_timed_p2(sched, 0U, now_ms, true);
+}
+
+void can_tx_scheduler_cancel_timed_p2(can_tx_scheduler_t *sched, uint64_t slots) {
+  if (sched != NULL && slots != 0U) discard_timed_p2(sched, slots, 0U, false);
+}
+
 void can_tx_scheduler_cancel_slots(can_tx_scheduler_t *sched, uint64_t slots) {
   if (sched == NULL || slots == 0U) {
     return;

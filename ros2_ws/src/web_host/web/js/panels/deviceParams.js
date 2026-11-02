@@ -1,10 +1,10 @@
-// 设备屏：只读电机参数、初始化核验诊断与故障清除。
+// 设备屏：只读电机参数、初始化核验诊断、失能态设零与故障清除。
 // 事务函数在 core/device.js（连接后自动读取也走它）；本面板只做渲染与按钮接线。
 import { describeMotorState } from '../core/motor_state.js';
 import { store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
   syncWriteButtons } from '../core/store.js';
 import { $, fmt, fmtParam, lifecyclePill, devSlotNames, devRecoveryText } from '../core/format.js';
-import { refreshMotorParams, clearMotorFault } from '../core/device.js';
+import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError } from '../core/device.js';
 
 // 型号库（减速比等）——设备端 RPM 的折算系数。取一次缓存；拿到后重绘一次把
 // 设备端原值填上。取不到就只显示 cnt / mA 两项，不报错。
@@ -85,7 +85,7 @@ function renderDevRows() {
         ${!availability.usable ? `<p class="panel-error">电机 ${id} ${!model ? '型号尚未识别，固件尚未绑定型号；' : ''}未返回有效参数，不能视为读取成功。</p>` : ''}
         ${unprotected ? '<p class="panel-error">保护已关：该关节无任何限位。</p>' : ''}
         <h3>电机参数</h3>
-        <p class="micro">只读设备回读值；不提供参数设置、设零或保存。</p><dl>
+        <p class="micro">参数值只读；设零须先失能，完成后核对实际位置与机械行程。</p><dl>
           ${field('node_id', '电机 ID', '')}${field('t_max', 'T_max', 'N·m')}
           <div><dt>当前通信 ID</dt><dd>${id}${Number.isFinite(pick.node_id) && pick.node_id !== id ? '（新 ID 重启电机后生效）' : ''}</dd></div>
 
@@ -97,6 +97,7 @@ function renderDevRows() {
           <div><dt>限位保护</dt><dd>${protectCell}</dd></div>
           <div><dt>电机方向</dt><dd>${dirCell}</dd></div>
           <div><dt>维护操作</dt><dd>
+            <button class="tiny-btn" data-zero="${id}" title="把该台当前位置设为设备零点（仅失能态受理）">设零</button>
             <button class="tiny-btn" data-clearfault="${id}" title="清除故障锁存（仅非运动态受理；身份冲突锁存不可解除）">清错</button>
           </dd></div>
         </dl>
@@ -104,6 +105,9 @@ function renderDevRows() {
       </div>
     </details>`;
   }).join('');
+  tbody.querySelectorAll('[data-zero]').forEach(btn => {
+    btn.onclick = () => setMotorZero(Number(btn.dataset.zero));
+  });
   tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
     btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
   });
@@ -213,7 +217,7 @@ export function mount(root, ctx) {
   const render = (dirty) => {
     const structural = dirty.has(DIRTY.PARAMS) || dirty.has(DIRTY.SELECTED)
       || dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.CONN);
-    if (!structural && !dirty.has(DIRTY.MOTION)) return;
+    if (!structural && !dirty.has(DIRTY.MOTION) && !dirty.has(DIRTY.STATUS)) return;
     if (structural) {
       renderParamSummary();
       renderDevRows();
@@ -236,7 +240,7 @@ export function mount(root, ctx) {
       syncWriteButtons(['btnParamLoad'], allow);
       if (!allow) {
         for (const el of $('paramRows').querySelectorAll(
-            '[data-clearfault]')) {
+            '[data-clearfault], [data-zero]')) {
           el.disabled = true;
         }
       }
@@ -245,6 +249,11 @@ export function mount(root, ctx) {
       // motion 帧（50 Hz）经 intervalMs:200 节流后 ≈5 Hz，等价旧版的
       // setInterval(updateDevCurPos, 200)。
       updateDevCurPos();
+    }
+    for (const button of $('paramRows').querySelectorAll('[data-zero]')) {
+      const error = motorZeroError(Number(button.dataset.zero));
+      button.disabled = !writesAllowed() || Boolean(error);
+      button.title = error || '把该台当前位置设为设备零点（仅失能态受理）';
     }
   };
   render(new Set([DIRTY.PARAMS, DIRTY.CONN]));

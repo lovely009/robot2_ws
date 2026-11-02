@@ -47,8 +47,19 @@ bool agent_gate_submit_command(agent_control_gate_t *gate,
     ++mailbox->command_rejected_count;
     return false;
   }
+  control_lease_state_t authority = gate->authority;
+  if (snapshot->lease_sequence != 0U || snapshot->lease_valid_until_tick_ms != 0U) {
+    // 合帧只续租已建立的授权；无效目标/重放不得推进授权水位。
+    if (!control_lease_allows(&authority, snapshot->lease_id, now_ms) ||
+        !control_lease_submit(&authority, snapshot->session_id, snapshot->lease_id,
+            snapshot->lease_sequence, snapshot->lease_valid_until_tick_ms, true, now_ms)) {
+      ++mailbox->command_rejected_count;
+      return false;
+    }
+  }
   // 心跳必须在撤权状态仍可受理，但它不改变运动授权。
   if (!control_command_mailbox_publish(&mailbox->command, snapshot)) return false;
+  gate->authority = authority;
   wire_command_guard_commit(&gate->command_guard, snapshot->sequence);
   agent_link_accept_command(&gate->link, snapshot->sequence, now_ms);
   return true;

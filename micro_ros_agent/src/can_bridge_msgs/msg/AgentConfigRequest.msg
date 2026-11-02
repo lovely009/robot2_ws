@@ -16,7 +16,7 @@ uint64 issued_stamp
 uint32 request_id
 uint32 policy_generation
 uint16 ttl_ms
-uint16 schema_version 3
+uint16 schema_version 4
 uint8 operation
 # 不支持设备保护时需要显式确认，沿用既有策略安全语义。
 bool allow_no_protect

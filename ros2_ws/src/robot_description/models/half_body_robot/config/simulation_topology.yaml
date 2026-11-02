@@ -72,7 +72,7 @@ simulation:
       plant:
         # motor_driver.yaml 的 command 是**协议码值**；motor_sim 在 MIT 模式下按
         #   gain_scale = Kt × 减速比² × 效率 = 0.042 × 50² × 0.65 = 68.25
-        # 换算成关节侧量纲（见 motor_sim/src/core/frame_router.cpp 的 gain_scale）。
+        # 换算成关节侧量纲（见 robot_sim/src/core/frame_router.cpp 的 gain_scale）。
         # 因此 plant 取：kp = 0.008 × 68.25，kd = 1.0 × 68.25。
         kp: 0.546
         kd: 68.25

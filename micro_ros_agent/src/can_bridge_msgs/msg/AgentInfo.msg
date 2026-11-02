@@ -7,7 +7,7 @@ uint8 RETIRED=3
 uint64 session_id
 uint64 snapshot_stamp
 uint32 snapshot_tick_ms
-uint16 schema_version 3
+uint16 schema_version 4
 bool clock_valid
 uint32 query_id
 uint8 kind

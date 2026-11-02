@@ -192,7 +192,9 @@ function onPointerDown(ev) {
 function applyValues(target, angles) {
   if (!target || !angles) { return; }
   for (const [name, v] of Object.entries(angles)) {
-    if (Number.isFinite(v) && target.joints[name]?.angle !== v) {
+    const joint = target.joints[name];
+    if (joint && Number.isFinite(v) && joint.angle !== v) {
+      joint.ignoreLimits = true; // 显示实测/预览值，控制限位由主机执行。
       target.setJointValue(name, v); renderRequested = true;
     }
   }
@@ -346,7 +348,7 @@ export function mount(rootEl, ctx) {
   // 接口不可用时只留当前项。切换 → ctx.ui.setModel → DIRTY.MODEL → startLoad() 重载。
   modelSelect = $('armModel');
   if (modelSelect) {
-    modelSelect.disabled = !!store.managed?.enabled;
+    modelSelect.disabled = false;
     if (modelSelect.disabled) modelSelect.title = '托管机器的模型由启动配置确定';
     const fillOptions = (names) => {
       const list = names.includes(MODEL) ? names : [MODEL, ...names];

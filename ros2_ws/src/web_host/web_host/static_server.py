@@ -13,9 +13,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import rclpy
 from rclpy.node import Node
 
-from .actions import list_actions, read_action, save_action
+from .actions import actions_directory, list_actions, read_action, save_action
 from .models import (enumerate_arm_models, model_transmissions,
-                     motor_library, transmission_model_joints)
+                     motor_library)
 from .motion import MotionJobs, handle_motion
 
 
@@ -57,18 +57,14 @@ def main(args=None):
     node.declare_parameter('host', '0.0.0.0')
     node.declare_parameter('port', 8080)
     node.declare_parameter('web_root', '')
-    node.declare_parameter('control_mode', 'managed')
+    node.declare_parameter('control_mode', 'bench')
     node.declare_parameter('robot_model', '')
-    node.declare_parameter('robot_id', '')
     node.declare_parameter('rosbridge_port', 0)
     control_mode = node.get_parameter('control_mode').value
-    if control_mode not in ('managed', 'readonly', 'prototype'):
-        raise ValueError('control_mode must be managed, readonly or prototype')
-    if control_mode == 'prototype' and node.get_parameter('host').value not in ('127.0.0.1', '::1', 'localhost'):
-        raise ValueError('prototype mode is local-only')
+    if control_mode not in ('bench', 'readonly'):
+        raise ValueError('control_mode must be bench or readonly')
     runtime_config = {'control_mode': control_mode,
-                      'robot_model': node.get_parameter('robot_model').value,
-                      'robot_id': node.get_parameter('robot_id').value}
+                      'robot_model': node.get_parameter('robot_model').value}
     if node.get_parameter('rosbridge_port').value:
         runtime_config['rosbridge_port'] = int(node.get_parameter('rosbridge_port').value)
     # 额外挂载：把模型包根（含 models/）挂到一个 URL 前缀下。臂视图要取 URDF 与
@@ -109,7 +105,7 @@ def main(args=None):
     # 本次服务启动的标识：写进 cookie，用来判断"这个浏览器还欠不欠一次缓存清理"
     # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
     build_token = str(int(time.time()))
-    motion_jobs = MotionJobs()
+    motion_jobs = MotionJobs(actions_dir=actions_directory(web_root))
 
     class Handler(SimpleHTTPRequestHandler):
 
@@ -180,10 +176,7 @@ def main(args=None):
             if path == '/api/runtime':
                 self._send_json(200, runtime_config)
                 return
-            if path == '/api/device-can/options':
-                self._send_json(410, {'error': '设备访问统一经 micro-ROS MCU'})
-                return
-            if path == '/' and os.path.isfile(os.path.join(web_root, 'workbench', 'index.html')):
+            if path in ('/', '/index.html') and os.path.isfile(os.path.join(web_root, 'workbench', 'index.html')):
                 query = urlsplit(self.path).query
                 self.send_response(302)
                 self.send_header('Location', '/workbench/' + ('?' + query if query else ''))
@@ -199,19 +192,12 @@ def main(args=None):
                 # （cnt / mA / 电机端 RPM）。取不到返回空表，页面不显示该列。
                 self._send_json(200, {'motor_types': motor_library()})
                 return
-            if path in ('/api/model-joints', '/api/model-transmissions'):
-                # 传动组是关节与电机的权威关联；旧 motor→joint 仅兼容保留下游页面。
+            if path == '/api/model-transmissions':
+                # 传动组是关节与电机的权威关联。
                 requested = (parse_qs(
                     urlsplit(self.path).query).get('model') or [''])[0]
                 try:
-                    if path == '/api/model-transmissions':
-                        payload = model_transmissions(requested, models_dir)
-                    else:
-                        joints = transmission_model_joints(requested, models_dir)
-                        payload = {
-                            'model': requested,
-                            'joints': {str(mid): joint for mid, joint in joints.items()},
-                        }
+                    payload = model_transmissions(requested, models_dir)
                 except ValueError as exc:
                     # 明确 404 + 原因：前端据此告警，而不是悄悄退化成错映射
                     self._send_json(404, {'error': str(exc)})
@@ -247,8 +233,7 @@ def main(args=None):
             if handle_motion(self, motion_jobs):
                 return
             path = urlsplit(self.path).path
-            is_direct = path.startswith('/api/device-can/')
-            if path not in {'/api/actions'} and not is_direct:
+            if path != '/api/actions':
                 self._send_json(404, {'error': 'unknown API endpoint'})
                 return
             # 所有写接口共用门禁：跨源网页不能通过 text/plain 简单 POST 绕过
@@ -260,9 +245,6 @@ def main(args=None):
                 return
             if self.headers.get_content_type() != 'application/json':
                 self._send_json(415, {'error': '请求必须为 application/json'})
-                return
-            if is_direct:
-                self._send_json(410, {'error': '主机直连已停用；设备访问统一经 micro-ROS MCU'})
                 return
 
             try:

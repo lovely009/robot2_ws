@@ -57,6 +57,17 @@ bool within(const std::optional<double> &bound, double value, bool upper) {
   return !bound || (upper ? value <= *bound : value >= *bound);
 }
 
+double normalize_boundary_roundoff(double value, const std::optional<double> &lower,
+                                  const std::optional<double> &upper) {
+  // JTC 插值可能在原边界外产生 double 运算噪声；仅归一该量级，限值本身不变。
+  const auto roundoff = [](double bound) {
+    return 64.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(bound));
+  };
+  if (lower && value < *lower && *lower - value <= roundoff(*lower)) return *lower;
+  if (upper && value > *upper && value - *upper <= roundoff(*upper)) return *upper;
+  return value;
+}
+
 bool healthy_motion_source(uint8_t source) {
   return source == can_bridge_msgs::msg::MotorMotionStateTarget::TARGET_SOURCE_NONE ||
          source == can_bridge_msgs::msg::MotorMotionStateTarget::TARGET_SOURCE_SNAPSHOT;
@@ -262,6 +273,50 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
     rclcpp::NodeOptions options;
     options.use_global_arguments(false);
     node_ = std::make_shared<rclcpp::Node>("micro_ros_system_" + info_.name, options);
+    node_->declare_parameter("position_limit_names", std::vector<std::string>{});
+    node_->declare_parameter("position_limit_bounds", std::vector<double>{});
+    position_limits_callback_ = node_->add_on_set_parameters_callback(
+      [this, defaults = position_limits_](const std::vector<rclcpp::Parameter> &parameters) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        const rclcpp::Parameter *names = nullptr, *bounds = nullptr;
+        for (const auto &parameter : parameters) {
+          if (parameter.get_name() == "position_limit_names") names = &parameter;
+          if (parameter.get_name() == "position_limit_bounds") bounds = &parameter;
+        }
+        if (!names && !bounds) return result;
+        const auto reject = [&](const char *reason) {
+          result.successful = false; result.reason = reason; return result;
+        };
+        if (!names || !bounds || parameters.size() != 2) {
+          return reject("position limit names and bounds must be set atomically together");
+        }
+        if (writer_enabled_ || !claimed_command_interfaces_.empty()) {
+          return reject("stop and release command interfaces before updating position limits");
+        }
+        if (names->get_type() != rclcpp::ParameterType::PARAMETER_STRING_ARRAY ||
+            bounds->get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
+          return reject("position limit names and bounds have invalid types");
+        }
+        const auto &joints = names->as_string_array();
+        const auto &values = bounds->as_double_array();
+        if (joints.empty() || values.size() != 2 * joints.size()) {
+          return reject("position limits need nonempty joints and one lower/upper pair per joint");
+        }
+        auto next = defaults;
+        std::set<std::string> seen;
+        for (std::size_t i = 0; i < joints.size(); ++i) {
+          const auto joint = joint_indices_.find(joints[i]);
+          if (joint == joint_indices_.end() || !seen.insert(joints[i]).second ||
+              !std::isfinite(values[2*i]) || !std::isfinite(values[2*i+1]) ||
+              values[2*i] >= values[2*i+1]) {
+            return reject("position limits contain unknown/duplicate joints or invalid bounds");
+          }
+          next[joint->second] = Limit{values[2*i], values[2*i+1]};
+        }
+        position_limits_ = std::move(next);
+        return result;
+      });
     command_pub_ = node_->create_publisher<Command>("/motor/host_command_array",
       rclcpp::QoS(1).reliable());
     motion_sub_ = node_->create_subscription<Motion>("/motor/motion_states",
@@ -360,6 +415,11 @@ void MicroRosSystem::close_writer() {
 bool MicroRosSystem::fail(std::string error) {
   faulted_ = true;
   armed_ = false;
+  // 广播器可能继续发布，不能把故障前的测量重新标成新反馈。
+  const auto invalid = std::numeric_limits<double>::quiet_NaN();
+  std::fill(position_.begin(), position_.end(), invalid);
+  std::fill(velocity_.begin(), velocity_.end(), invalid);
+  std::fill(effort_.begin(), effort_.end(), invalid);
   std::fill(command_effort_.begin(), command_effort_.end(), 0.0);
   if (node_) {
     RCLCPP_ERROR(node_->get_logger(), "%s", error.c_str());
@@ -370,9 +430,13 @@ bool MicroRosSystem::fail(std::string error) {
 void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
   motion_valid_ = false;
   latest_motion_.reset();
-  if (!message || message->seq == 0U || message->states.size() > kIdMax ||
-      message->sync_time_ns < session_time_floor_ns_) {
+  if (!message || message->seq == 0U || message->states.size() > kIdMax) {
     fail("invalid motion snapshot");
+    return;
+  }
+  // DDS 初次发现可带来旧帧；激活前等待新测量，运行后仍锁存故障。
+  if (message->sync_time_ns < session_time_floor_ns_) {
+    if (active_) fail("invalid motion snapshot");
     return;
   }
   std::set<uint16_t> seen;
@@ -398,7 +462,7 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
   }
   const auto now = Clock::now();
   if (!source_stamp_ok(message->sync_time_ns, now, kMotionFresh, now)) {
-    fail("motion snapshot is stale");
+    if (active_) fail("motion snapshot is stale");
     return;
   }
   const auto received_ns = now_ns();
@@ -409,7 +473,7 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
   for (const auto &state : message->states) {
     if (expected_ids_.count(state.motor_id) &&
         static_cast<uint64_t>(state.state_age_ms) + source_delay_ms > kMotionFresh.count()) {
-      fail("motion snapshot is stale");
+      if (active_) fail("motion snapshot is stale");
       return;
     }
   }
@@ -458,7 +522,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
   }
   const auto now = Clock::now();
   if (!source_stamp_ok(message->sync_time_ns, now, kControlFresh, now)) {
-    fail("control stream snapshot is stale");
+    if (active_) fail("control stream snapshot is stale");
     return;
   }
   if (control_session_ != message->session_id) {
@@ -513,7 +577,10 @@ bool MicroRosSystem::control_current(const TimePoint &now, bool latch, std::stri
     return latch ? fail(error) : false;
   }
   if (!source_stamp_ok(latest_control_->sync_time_ns, control_received_, kControlFresh, now)) {
-    error = "control stream snapshot exceeds 300 ms";
+    error = "control stream freshness rejected: source_age_ms=" + std::to_string(
+      (static_cast<int64_t>(now_ns()) - static_cast<int64_t>(latest_control_->sync_time_ns)) / 1000000.0) +
+      ", receive_age_ms=" + std::to_string(elapsed_ms(control_received_, now)) +
+      ", sequence=" + std::to_string(latest_control_->sequence);
     return latch ? fail(error) : false;
   }
   return true;
@@ -616,7 +683,7 @@ hardware_interface::return_type MicroRosSystem::perform_command_mode_switch(
   return hardware_interface::return_type::OK;
 }
 
-bool MicroRosSystem::command_valid(std::string &error) const {
+bool MicroRosSystem::command_valid(std::string &error) {
   if (command_position_.size() != info_.joints.size() ||
       command_velocity_.size() != info_.joints.size() ||
       command_effort_.size() != info_.joints.size()) {
@@ -624,15 +691,19 @@ bool MicroRosSystem::command_valid(std::string &error) const {
     return false;
   }
   for (std::size_t index = 0; index < info_.joints.size(); ++index) {
-    const double position = command_position_[index];
-    const double velocity = command_velocity_[index];
+    double &position = command_position_[index];
+    double &velocity = command_velocity_[index];
     if (!std::isfinite(position) || !std::isfinite(velocity)) {
       error = "joint command is NaN/Inf: " + info_.joints[index].name;
       return false;
     }
+    position = normalize_boundary_roundoff(position, position_limits_[index].min,
+                                          position_limits_[index].max);
+    velocity = normalize_boundary_roundoff(velocity, velocity_limits_[index].min,
+                                          velocity_limits_[index].max);
     if (!within(position_limits_[index].min, position, false) ||
         !within(position_limits_[index].max, position, true)) {
-      error = "joint position command exceeds URDF limit: " + info_.joints[index].name;
+      error = "joint position command exceeds host position limit: " + info_.joints[index].name;
       return false;
     }
     if (!within(velocity_limits_[index].min, velocity, false) ||
@@ -723,7 +794,8 @@ MicroRosSystem::on_activate(const rclcpp_lifecycle::State &previous_state) {
   session_time_floor_ns_ = 0U;
   motion_seq_ = 0U;
   control_seq_ = 0U;
-  const auto deadline = Clock::now() + std::chrono::seconds(1);
+  // 首次 DDS 发现可能超过 1 秒，运行期各反馈流的保护窗口保持独立。
+  const auto deadline = Clock::now() + std::chrono::seconds(5);
   while (Clock::now() < deadline) {
     rclcpp::spin_some(node_);
     if (faulted_) {

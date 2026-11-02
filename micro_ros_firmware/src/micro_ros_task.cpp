@@ -10,6 +10,7 @@
 #include "motor_rt_task.h"
 #include "time_utils.h"
 #include "firmware_config.h"
+#include "agent_liveness.h"
 #include <rmw_microros/time_sync.h>
 
 #if !defined(MICRO_ROS_TRANSPORT_ARDUINO_SERIAL)
@@ -27,6 +28,11 @@ static StaticTask_t g_micro_ros_task_tcb;
 static TaskHandle_t g_micro_ros_task_handle = nullptr;
 static micro_ros_link_state_t g_link_state = MICRO_ROS_LINK_WAIT_AGENT;
 static bool g_ever_connected = false;
+static agent_liveness_t g_liveness;
+
+void micro_ros_note_agent_rx(void) {
+  agent_liveness_received(&g_liveness, millis());
+}
 
 // 链路状态由本任务写、led 任务与 ROS 桥读：进出都走短临界区。
 static micro_ros_link_state_t link_state_get(void) {
@@ -48,12 +54,14 @@ static void micro_ros_task_fn(void *parameters) {
   TickType_t last_wake = xTaskGetTickCount();
   const TickType_t period = pdMS_TO_TICKS(1);
   TickType_t last_sync = xTaskGetTickCount();
-  uint32_t last_ping = 0;
+  agent_liveness_init(&g_liveness, millis());
   for (;;) {
     switch (link_state_get()) {
     case MICRO_ROS_LINK_WAIT_AGENT:
-      if (RMW_RET_OK == rmw_uros_ping_agent(200, 3)) {
-        link_state_set(MICRO_ROS_LINK_CONNECT);
+      if (agent_liveness_probe_due(&g_liveness, millis())) {
+        const bool found = RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, 1);
+        agent_liveness_probe_result(&g_liveness, millis(), found);
+        if (found) link_state_set(MICRO_ROS_LINK_CONNECT);
       }
       break;
 
@@ -65,6 +73,7 @@ static void micro_ros_task_fn(void *parameters) {
         g_link_state = MICRO_ROS_LINK_RUN;
         taskEXIT_CRITICAL();
         last_sync = xTaskGetTickCount();
+        micro_ros_note_agent_rx();
       } else {
         ros_bridge_destroy();
         link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
@@ -72,19 +81,21 @@ static void micro_ros_task_fn(void *parameters) {
       break;
 
     case MICRO_ROS_LINK_RUN: {
+      ros_bridge_spin();
       bool connected = true;
-      if ((uint32_t)(millis() - last_ping) >= 1000U / FIRMWARE_AGENT_PING_HZ) {
-        last_ping = millis();
-        connected = RMW_RET_OK == rmw_uros_ping_agent(200, 3);
+      if (agent_liveness_probe_due(&g_liveness, millis())) {
+        serial_transport_send_begin();
+        const bool found = RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, 1);
+        serial_transport_send_end();
+        connected = agent_liveness_probe_result(&g_liveness, millis(), found);
       }
       if (!connected) {
         link_state_set(MICRO_ROS_LINK_LOST);
       } else {
-        ros_bridge_spin();
-        if ((TickType_t)(xTaskGetTickCount() - last_sync) >= pdMS_TO_TICKS(10000)) {
+        if ((TickType_t)(xTaskGetTickCount() - last_sync) >= pdMS_TO_TICKS(AGENT_SYNC_PERIOD_MS)) {
           // 校时结果显式进入健康门禁；旧非零 epoch 不代表同步仍健康。
           serial_transport_send_begin();
-          const rmw_ret_t rc = rmw_uros_sync_session(2);
+          const rmw_ret_t rc = rmw_uros_sync_session(AGENT_SYNC_TIMEOUT_MS);
           serial_transport_send_end();
           time_sync_record(rc == RMW_RET_OK,
               rc == RMW_RET_OK ? rmw_uros_epoch_nanos() : 0);
@@ -101,7 +112,7 @@ static void micro_ros_task_fn(void *parameters) {
       link_state_set(MICRO_ROS_LINK_WAIT_AGENT);
       break;
     }
-    // ping 最多等待 200ms × 3；落后一个周期时放弃追帧，避免饿死低优先级任务。
+    // 探测/校时可能跨过 1ms 节拍；放弃追帧，避免饿死低优先级任务。
     if ((xTaskGetTickCount() - last_wake) < period) {
       vTaskDelayUntil(&last_wake, period);
     } else {

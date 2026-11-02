@@ -20,6 +20,7 @@
 #include "param_bridge.h"
 #include "firmware_config.h"
 #include "ros_qos.h"
+#include "micro_ros_task.h"
 #include "serial_transport.h"
 #include "time_utils.h"
 #include "wire_codec.h"
@@ -145,13 +146,15 @@ static void command_cb(const void *msgin) {
     return;
   }
   if (m.mode == can_bridge_msgs__msg__AgentCommand__AUTHORITY) {
-    if (m.count == 0U && m.sequence == 0U && m.valid_until_tick_ms == 0U)
-      (void)motor_rt_submit_control_lease(m.session_id, m.lease_id,
-          m.lease_sequence, m.lease_valid_until_tick_ms, m.lease_active);
+    if (m.count == 0U && m.sequence == 0U && m.valid_until_tick_ms == 0U &&
+        motor_rt_submit_control_lease(m.session_id, m.lease_id,
+          m.lease_sequence, m.lease_valid_until_tick_ms, m.lease_active))
+      micro_ros_note_agent_rx();
     return;
   }
   if (m.mode != can_bridge_msgs__msg__AgentCommand__SNAPSHOT ||
-      m.lease_sequence || m.lease_valid_until_tick_ms || m.lease_active) return;
+      (m.lease_sequence == 0U && (m.lease_valid_until_tick_ms || m.lease_active)) ||
+      (m.lease_sequence != 0U && !m.lease_active)) return;
   const uint32_t now = millis();
   if (g_session_id == 0U || m.session_id != g_session_id ||
       !time_clock_valid() || !agent_deadline_valid(now, m.valid_until_tick_ms)) return;
@@ -168,6 +171,8 @@ static void command_cb(const void *msgin) {
   memset(&snapshot, 0, sizeof(snapshot));
   snapshot.session_id = m.session_id;
   snapshot.lease_id = m.lease_id;
+  snapshot.lease_sequence = m.lease_sequence;
+  snapshot.lease_valid_until_tick_ms = m.lease_valid_until_tick_ms;
   snapshot.sequence = m.sequence;
   snapshot.received_tick_ms = now;
   snapshot.valid_until_tick_ms = m.valid_until_tick_ms;
@@ -180,7 +185,7 @@ static void command_cb(const void *msgin) {
     target.effort = (float)wire_dequantize(m.effort_q.data[i], can_bridge_msgs__msg__AgentWireContract__SCALE_EFFORT);
   }
   // 空 SNAPSHOT 仍走相同 RT 序号门禁；续租不等于取消活动轨迹。
-  (void)motor_rt_submit_command(&snapshot);
+  if (motor_rt_submit_command(&snapshot)) micro_ros_note_agent_rx();
 }
 
 static void trajectory_cb(const void *msgin) {

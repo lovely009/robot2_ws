@@ -29,8 +29,7 @@ def handler(monkeypatch, tmp_path):
     node_module = ModuleType('rclpy.node')
     node_module.Node = lambda _name: node
     models = ModuleType('web_host.models')
-    for name in ('enumerate_arm_models', 'model_transmissions', 'motor_library',
-                 'transmission_model_joints'):
+    for name in ('enumerate_arm_models', 'model_transmissions', 'motor_library'):
         setattr(models, name, Mock())
     for name, module in [('rclpy', rclpy), ('rclpy.node', node_module),
                          ('web_host.models', models)]:
@@ -63,7 +62,7 @@ def handler(monkeypatch, tmp_path):
         assert len(replies) == 1
         return replies[0]
 
-    return SimpleNamespace(post=post, web_root=web_root)
+    return SimpleNamespace(post=post, web_root=web_root, handler_class=captured[0])
 
 
 def _action(position):
@@ -97,22 +96,20 @@ def test_cross_origin_simple_post_cannot_overwrite_action(handler):
     assert read_action(handler.web_root, 'motion.json') == original
 
 
-@pytest.mark.parametrize('path', ['/api/actions', '/api/device-can/heartbeat'])
 @pytest.mark.parametrize('origin', [
     'http://foreign.example:8080', 'http://localhost:8081',
     'https://localhost:8080', 'null', '', 'http://localhost:invalid',
     'http://user@localhost:8080', 'http://localhost:8080/path',
 ])
-def test_foreign_or_malformed_origin_rejected_before_write(handler, path, origin):
-    status, _ = handler.post(path, {}, origin=origin)
+def test_foreign_or_malformed_origin_rejected_before_write(handler, origin):
+    status, _ = handler.post('/api/actions', {}, origin=origin)
     assert status == 403
     assert not (handler.web_root.parent / 'action_library').exists()
 
 
-@pytest.mark.parametrize('path', ['/api/actions', '/api/device-can/heartbeat'])
 @pytest.mark.parametrize('content_type', ['text/plain', 'application/x-www-form-urlencoded'])
-def test_json_required_for_all_write_endpoints(handler, path, content_type):
-    status, _ = handler.post(path, {}, content_type=content_type)
+def test_json_required_for_all_write_endpoints(handler, content_type):
+    status, _ = handler.post('/api/actions', {}, content_type=content_type)
     assert status == 415
 
 
@@ -137,5 +134,21 @@ def test_same_origin_or_cli_json_can_save_and_overwrite(handler, origin, host):
 @pytest.mark.parametrize('origin', ['http://localhost:8080', None])
 def test_device_session_json_request_cannot_reopen_retired_direct_path(handler, origin):
     status, result = handler.post('/api/device-can/heartbeat', {'session': 'token'}, origin=origin)
-    assert status == 410
-    assert 'micro-ROS' in result['error']
+    assert status == 404
+    assert result['error'] == 'unknown API endpoint'
+
+
+@pytest.mark.parametrize('path', ['/', '/index.html?model=arm'])
+def test_old_page_urls_redirect_to_workbench(handler, path):
+    destination = handler.web_root / 'workbench/index.html'
+    destination.parent.mkdir()
+    destination.write_text('<html></html>')
+    request = object.__new__(handler.handler_class)
+    request.path = path
+    request.send_response = Mock()
+    request.send_header = Mock()
+    request.end_headers = Mock()
+    request.do_GET()
+    request.send_response.assert_called_once_with(302)
+    request.send_header.assert_called_once_with(
+        'Location', '/workbench/' + ('?model=arm' if '?' in path else ''))

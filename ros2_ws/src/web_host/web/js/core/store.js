@@ -1,8 +1,21 @@
 // 共享状态：所有跨屏数据都住在这里。面板只读它、只通过 ui 动作改它。
-// 订阅在 main.js 全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
+// 订阅由 Vue 工作台全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
 // 脏标记与 rAF 渲染循环也在本文件内实现，不另开模块。
 import { createControlStateCache, describeMotorState } from './motor_state.js';
-import { devSlotNames, devRecoveryText } from './format.js';
+
+export function applyAgentWireStatus(state, message, now = Date.now()) {
+  const uint32 = value => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+  if (!Number.isSafeInteger(message.session_id) || message.session_id <= 0 ||
+      !Number.isInteger(message.schema_version) ||
+      ![message.sequence, message.snapshot_tick_ms, message.clock_sync_age_ms,
+        message.clock_sync_failures, message.lease_valid_until_tick_ms].every(uint32) ||
+      typeof message.clock_valid !== 'boolean' || typeof message.lease_active !== 'boolean') return false;
+  const previous = state.agentWireStatus?.data;
+  if (previous && (message.session_id < previous.session_id ||
+      (message.session_id === previous.session_id && ((message.sequence - previous.sequence) | 0) <= 0))) return false;
+  state.agentWireStatus = {at: now, data: message};
+  return true;
+}
 
 export const store = {
   // text：顶栏连接文案（setConn 写它，renderShell 画它）
@@ -12,6 +25,7 @@ export const store = {
   // motors: id -> {topo, motion, status}（与重构前的 state.motors 同形状，搬迁期不改字段名）
   motors: new Map(),
   controlStates: createControlStateCache(),
+  agentWireStatus: null,
   lastError: 0,
   lastErrorMotor: -1,
   sysStatus: {refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
@@ -139,7 +153,7 @@ export function syncWriteButtons(ids, allow) {
 }
 
 // 台架状态入 store（/bench/status 话题帧与 bench 服务的响应共用这一条路）。
-// agent 段顺带同步进 conn.agent*（顶栏文案由 main.js 的 renderShell 画）；
+// agent 段顺带同步进 conn.agent*（顶栏文案由 Vue 工作台渲染）；
 // 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
 // 无效状态立即撤销身份，不能用旧会话继续控制。
 export function applyCommandStatus(snapshot) {
@@ -362,13 +376,6 @@ export function setModel(name) {
   loadModelJoints();
 }
 
-export function selectGroup(name) {
-  if (!store.modelTransmissions.groups.some((g) => g.name === name)) return;
-  if (store.selectedGroup === name) return;
-  store.selectedGroup = name;
-  markDirty(DIRTY.SELECTED, DIRTY.STATUS);
-}
-
 // 点击一个或多个传动组：一次选择全部涉及组，臂等宽姿态必须同组下发。
 export function selectGroups(names) {
   const chosen = [...new Set(names)].filter(
@@ -397,30 +404,6 @@ export async function availableModels() {
   return Array.isArray(data && data.models) ? data.models : [];
 }
 
-// 兼容旧请求：只返回单电机组的数字 ID 到关节名映射。
-const modelJointsCache = new Map();
-export async function modelJointsFor(name) {
-  if (!name) throw new Error('未指定模型');
-  if (!modelJointsCache.has(name)) {
-    const resp = await fetch(
-      `/api/model-transmissions?model=${encodeURIComponent(name)}`, {cache: 'no-store'});
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    if (data.model !== name || !data.direct_joints || typeof data.direct_joints !== 'object') {
-      throw new Error(`模型 ${name} 没有可用的传动组 metadata`);
-    }
-    modelJointsCache.set(name, {...data.direct_joints});
-  }
-  return modelJointsCache.get(name);
-}
-
-// `motor_id:关节名,电机:关节…`——服务端（bench_manager）逐条校验的表形状。
-export function jointMapSpec(joints) {
-  return Object.entries(joints)
-    .map(([id, joint]) => `${id}:${joint}`)
-    .join(',');
-}
-
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，
 // 页面无从得知，此时宁可不画（调用方负责判 target_source）。
@@ -429,21 +412,6 @@ export function targetOf(id) {
   if (!h) return NaN;
   const t = h.targets.find((x) => x.id === id);
   return t ? t.pos : NaN;
-}
-
-// 状态列悬停提示：DEV_INIT 事件带来的槽位位图。state=3(MISMATCH) 位图是"对不上"
-// 的槽位，state=4(UNVERIFIED) 位图是"没读到"的槽位（见 MotorEvent.msg）。
-export function devDetailTitle(id) {
-  const info = store.devInit.get(id);
-  if (!info || !info.mask) return '';
-  const slots = devSlotNames(info.mask).join('、');
-  if (info.state === 3) {
-    return `设备参数与固件记录不一致：${slots}（${devRecoveryText(info.mask)}）`;
-  }
-  if (info.state === 4) {
-    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「读取」重试）`;
-  }
-  return '';
 }
 
 // 两张表独立传入 showAll，不共享复选框状态。
@@ -459,5 +427,3 @@ export function paramReadState(id) {
   const device = count('dev'), record = count('rec'), usable = count('pick');
   return {device, record, usable, verified: entry?.state === 2 && device === fields.length};
 }
-
-export function motorStateOf(id) { return describeMotorState(store,id); }

@@ -1,19 +1,49 @@
 // MotorTrajectory 动作文件经低频客户端转换成 JTC action，不再上传 MCU。
-// 任意长度动作按 ≤256 点串行分段，下一窗仅在收到 JTC 成功结果后提交。
+// 文件速度仅作诊断；主机默认单调插值，显式 linear 保留原始位置/时间线性播放。
+// 数据按 ≤256 点分包；主机收齐后将引导段与完整动作提交为同一个 JTC goal。
 // 播放调度在模块级，切屏不打断动作。
 import { store, MODEL, markDirty, DIRTY } from '../core/store.js';
-import { $, TRAJ_MAX_POINTS, TRAJ_MAX_MOTORS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
-import { pub, isConnected, nextPolicyGeneration, getConnectionGeneration } from '../core/ros.js';
-import { playbackReadinessError } from './command.js';
-import { limitsError } from '../core/host_limits.js';
+import { $, LIFECYCLE, TRAJ_MAX_POINTS, TRAJ_MAX_MOTORS, TRAJ_MAX_PLAN_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
+import { pub, isConnected, submitPolicy, getConnectionGeneration } from '../core/ros.js';
 import { controlSessionError, rawCouplingError } from '../core/joint_control.js';
-import { controlTargetsError, describeMotorState } from '../core/motor_state.js';
-import { isUnprotected } from './policy.js';
+import { controlTargetsError, describeMotorState, policyRequestState } from '../core/motor_state.js';
+import { isUnprotected } from '../core/control_policy.js';
 
-const ALIGN_MS = 2500;        // 由 JTC 插值完成起点对齐
-const ARM_SETTLE_MS = 300;    // 武装后等策略被受理
+// JTC 成功结果不替代电机就绪检查；武装前允许 READY_DISABLED。
+function playbackReadinessError(ids) {
+  const blocked = [];
+  for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+    const row = store.motors.get(id);
+    if (!row) {
+      blocked.push(`m${id}(未发现)`);
+      continue;
+    }
+    if (store.controlStates?.seen) {
+      const view=describeMotorState(store,id);
+      const control=store.controlStates.byId.get(id);
+      if (!view.online || view.connection!=='在线' || view.fault
+          || ![2,3].includes(control?.control_lifecycle)) blocked.push(`m${id}(${view.connection} · ${view.lifecycle} · ${view.health})`);
+      continue;
+    }
+    const st = row.status || {}, topo = row.topo || {};
+    const online = st.online !== undefined ? st.online : topo.online;
+    const lc = st.lifecycle !== undefined ? st.lifecycle : topo.lifecycle;
+    const fault = Number(st.unified_fault_code || 0);
+    if (online !== true) blocked.push(`m${id}(离线)`);
+    else if (fault) blocked.push(`m${id}(故障${fault})`);
+    else if (lc !== 3 && lc !== 4) {
+      const name = LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '未就绪';
+      blocked.push(`m${id}(${name})`);
+    }
+  }
+  return blocked.length
+    ? `电机未就绪：${blocked.join('、')}；请先连接/启动仿真，等目标电机到 `
+      + `READY_DISABLED（或 ACTIVE）后重试`
+    : '';
+}
+
+const ALIGN_MS = 2500;        // 整条时间线中的起点引导段
 const CANCEL_SETTLE_MS = 800; // 等待 JTC cancel 完成
-const WINDOW_STEPS_CAP = 60;  // 每窗最多 60 个未来时刻，点数另按电机数收窄
 
 const player = {
   phase: 'idle',  // idle | running | done | error
@@ -23,16 +53,14 @@ const player = {
   ids: [],
   model: '',
   modelMetadata: null,
-  firstStep: null,
-  windows: [],
-  winIndex: 0,
+  points: [],
+  raw: false,
   round: 0,
   loop: false,
   enable: true,
   kp: 30,
   kd: 1,
-  windowTid: 0,
-  windowDurMs: 0,
+  durationMs: 0,
   sessionId: Date.now(),  // 刷新后不复用网关已关闭的 (session_id, trajectory_id)。
   tidSeq: 90000,
   cancelRequested: false,
@@ -79,7 +107,7 @@ function renderPreview(action) {
   const stride = Math.max(1, Math.ceil(steps.length / PREVIEW_MAX_ROWS));
   const head = document.createElement('div');
   head.className = 'act-preview-sum';
-  head.textContent = `目标 m${ids.join(', m')} · ${steps.length} 时刻`
+  head.textContent = `${parsed.interpolation === 'linear' ? '原始线性' : '单调插值'} · 目标 m${ids.join(', m')} · ${steps.length} 时刻`
     + `（${steps.length * ids.length} 点）· ${(duration / 1000).toFixed(1)} s`
     + ` · ${duration > 0 ? ((steps.length - 1) / (duration / 1000)).toFixed(1) : '--'} Hz`
     + (stride > 1 ? ` · 表内每 ${stride} 时刻取 1 行` : '');
@@ -145,7 +173,7 @@ function announce() { markDirty(DIRTY.TRAJ); }
 // 空轨迹只取消 JTC 并保持位置；全部软停另走 /control/stop。
 function cancelTrajectory() {
   pub('trajectory', {
-    sync_time_ns: Date.now() * 1e6,
+    sync_time_ns: store.controlStates.sourceTimeNs || 0,
     sequence: 0,
     trajectory_id: 0,
     segment_index: 0,
@@ -161,6 +189,9 @@ function cancelTrajectory() {
 // 同一时刻缺台用上一时刻补齐（固件要求每台在每个声明时刻都有路点，缺席整条拒收）。
 export function loadSeries(document_) {
   if (!document_ || typeof document_ !== 'object') throw new Error('不是 JSON 对象');
+  if (document_.interpolation !== undefined && !['monotone','linear'].includes(document_.interpolation)) {
+    throw new Error('动作插值模式只能为 monotone 或 linear');
+  }
   const ids = [...new Set((document_.target_ids || []).map(Number))];
   if (!ids.length) throw new Error('动作缺 target_ids');
   const buckets = new Map();
@@ -183,63 +214,49 @@ export function loadSeries(document_) {
     steps.push({ t, vals });
   }
   if (!steps.length) throw new Error('动作没有路点');
-  return { ids, steps };
+  return { ids, steps, interpolation: document_.interpolation ?? 'monotone' };
 }
 
-// 每窗保留一个内部时间基准点；发布时只发送其后的未来路点。
-export function makeWindows(steps, idCount) {
-  if (!Number.isInteger(idCount) || idCount < 1 || idCount > TRAJ_MAX_MOTORS) {
+function makePlan(steps, ids) {
+  if (!Number.isInteger(ids.length) || ids.length < 1 || ids.length > TRAJ_MAX_MOTORS) {
     throw new Error(`动作电机数量须在 1～${TRAJ_MAX_MOTORS}`);
   }
-  const maxSteps = Math.min(WINDOW_STEPS_CAP, Math.floor(TRAJ_MAX_POINTS / idCount));
-  const windows = [];
-  for (let i = 1; i < steps.length; i += maxSteps) {
-    windows.push([steps[i-1], ...steps.slice(i,i+maxSteps)]);
+  if (steps.length * ids.length > TRAJ_MAX_PLAN_POINTS) {
+    throw new Error(`动作最多 ${TRAJ_MAX_PLAN_POINTS} 个电机路点，请缩减采样后重试`);
   }
-  return windows;
+  const points = steps.flatMap((step,index) => ids.map(id => {
+    const [position,velocity,effort] = step.vals[id];
+    return {time_from_start_ms:ALIGN_MS + step.t - steps[0].t,motor_id:id,
+      position,velocity:index===0?0:velocity,effort:index===0?0:effort};
+  }));
+  if (!points.length || points.some(point =>
+      !Number.isInteger(point.time_from_start_ms) || point.time_from_start_ms <= 0
+      || point.time_from_start_ms > 0xFFFFFFFF
+      || ![point.position,point.velocity,point.effort].every(Number.isFinite))) {
+    throw new Error('轨迹路点须为有限值，时间须为正毫秒且不超过 uint32');
+  }
+  return points;
 }
 
-function sendWindow(chunk, t0 = chunk[0].t) {
+function sendPlan() {
   assertPlaybackSession();
   const authority=controlTargetsError(store,player.ids);
   if (authority) throw new Error(authority);
   player.tidSeq = (player.tidSeq + 1) >>> 0;
   const tid = player.tidSeq;
-  const points = [];
-  for (const step of chunk) {
-    if (step.t === t0) continue;
-    for (const id of player.ids) {
-      const [position, velocity, effort] = step.vals[id] || [0, 0, 0];
-      points.push({
-        time_from_start_ms: step.t - t0,
-        motor_id: id,
-        position,
-        velocity,
-        effort,
-      });
-    }
+  const syncTime = store.controlStates.sourceTimeNs;
+  if (!syncTime) throw new Error('尚未收到 MCU 同步源时间，拒绝发送动作');
+  const segmentCount = Math.ceil(player.points.length / TRAJ_MAX_POINTS);
+  for (let index=0; index<segmentCount; index++) {
+    assertPlaybackSession();
+    const points=player.points.slice(index*TRAJ_MAX_POINTS,(index+1)*TRAJ_MAX_POINTS);
+    if (!pub(player.raw ? 'rawTrajectory' : 'trajectory', {
+      sync_time_ns:syncTime, sequence:tid, session_id:player.sessionId, trajectory_id:tid,
+      segment_index:index, segment_count:segmentCount, count:points.length,
+      target_count:player.ids.length, target_ids:player.ids, points,
+    })) throw new Error('轨迹发送失败，请检查连接与控制模式');
   }
-  if (!points.length || points.length > TRAJ_MAX_POINTS
-      || points.some(p => !Number.isFinite(p.time_from_start_ms) || p.time_from_start_ms <= 0)) {
-    throw new Error('轨迹窗口必须包含正时刻路点，且不超过 256 点');
-  }
-  const blocked = limitsError(points, player.model);
-  if (blocked) throw new Error(blocked);
-  pub('trajectory', {
-    sync_time_ns: Date.now() * 1e6,
-    sequence: tid,
-    session_id: player.sessionId,
-    trajectory_id: tid,
-    segment_index: 0,
-    segment_count: 1,
-    count: points.length,
-    target_count: player.ids.length,
-    target_ids: player.ids,
-    points,
-  });
   store.traj.activeTrajectoryId = tid;
-  player.windowTid = tid;
-  player.windowDurMs = chunk[chunk.length - 1].t - t0;
   return tid;
 }
 
@@ -250,14 +267,20 @@ export function trajectoryWindowResult(state, tid, durationMs) {
   return state.active ? 'waiting' : 'canceled';
 }
 
-// 等待当前 action 的成功终态；本地计时只用于回执超时。
-async function waitWindow(tid) {
-  const deadline = Date.now() + player.windowDurMs + TRAJ_STATE_TIMEOUT_PAD_MS;
+// 等待整条 action 的成功终态；本地计时只用于回执超时。
+async function waitPlan(tid) {
+  const deadline = Date.now() + player.durationMs + TRAJ_STATE_TIMEOUT_PAD_MS;
   while (Date.now() < deadline) {
     if (player.cancelRequested) return 'stopped';
-    assertPlaybackSession();
+    try {
+      assertPlaybackSession();
+    } catch (error) {
+      // 整条长轨迹已提交；旧页面会话失效时立即撤销，不能等待下一段。
+      if (isConnected() && player.connectionGeneration === getConnectionGeneration()) cancelTrajectory();
+      throw error;
+    }
     const state = store.traj.state;
-    const result = trajectoryWindowResult(state, tid, player.windowDurMs);
+    const result = trajectoryWindowResult(state, tid, player.durationMs);
     if (result !== 'waiting') return result;
     await sleep(50);
   }
@@ -266,47 +289,27 @@ async function waitWindow(tid) {
 
 async function armMotors() {
   assertPlaybackSession();
-  const generation = nextPolicyGeneration();
-  pub('policy', {
-    sync_time_ns: Date.now() * 1e6,
-    request_id: generation,
-    policy_generation: generation,
-    count: player.ids.length,
-    targets: player.ids.map((id) => ({
-      motor_id: id,
-      enabled: true,
-      kp: player.kp,
-      kd: player.kd,
-      confirm_unprotected: isUnprotected(id),
-    })),
-  });
-  for (const id of player.ids) {
-    store.policy.set(id, { enabled: true, kp: player.kp, kd: player.kd });
-  }
+  const ticket = await submitPolicy(player.ids.map(motor_id => ({
+    motor_id, enabled:true, kp:player.kp, kd:player.kd,
+    confirm_unprotected:isUnprotected(motor_id),
+  })));
+  assertPlaybackSession();
+  if (player.cancelRequested) throw new Error('已停止');
+  for (const id of player.ids) store.policy.set(id, {...store.policy.get(id),enabled:true,kp:player.kp,kd:player.kd});
   markDirty(DIRTY.POLICY);
-  await sleep(ARM_SETTLE_MS);
-  assertPlaybackSession();
-  if (store.controlStates?.seen) {
-    const deadline=Date.now()+3000;
-    while (true) {
-      assertPlaybackSession();
-      if (player.cancelRequested) throw new Error('已停止');
-      if (!controlTargetsError(store,player.ids) && player.ids.every(id =>
-          describeMotorState(store,id).generation===generation)) break;
-      if (Date.now()>=deadline) throw new Error('MCU 未确认本次使能策略，拒绝播放');
-      await sleep(50);
+  const deadline=Date.now()+3000;
+  while (true) {
+    assertPlaybackSession();
+    if (player.cancelRequested) throw new Error('已停止');
+    const outcome=policyRequestState(store,ticket,player.ids,true);
+    if (outcome.error) throw new Error(outcome.error);
+    if (outcome.confirmed) {
+      for (const id of player.ids) {const intent=store.policy.get(id)?.intent;if (intent?.ticket===ticket) intent.confirmed=true;}
+      return;
     }
+    if (Date.now()>=deadline) throw new Error('MCU 未确认本次使能策略，拒绝播放');
+    await sleep(50);
   }
-}
-
-// 对齐也使用 JTC，取消时才能统一保持位置，不留下 manual_controller 的旧目标。
-async function alignToStart() {
-  const first = player.firstStep;
-  assertPlaybackSession();
-  const target = Object.fromEntries(player.ids.map(id => [id, [first.vals[id][0], 0, 0]]));
-  const tid = sendWindow([{t:ALIGN_MS,vals:target}], 0);
-  const result = await waitWindow(tid);
-  if (result !== 'done') throw new Error(result === 'stopped' ? '已停止' : `起点对齐未获 JTC 成功结果（${result}）`);
 }
 
 export async function playAction(name, options) {
@@ -338,13 +341,10 @@ export async function playAction(name, options) {
     if (!response.ok) throw new Error(`读取动作失败：HTTP ${response.status}`);
     const document_ = await response.json();
     assertPlaybackSession();
-    const { ids, steps } = loadSeries(document_);
+    const { ids, steps, interpolation } = loadSeries(document_);
+    player.raw = interpolation === 'linear';
     const coupled=rawCouplingError(store,player.model,ids);
     if (coupled) throw new Error(coupled);
-    const limitError = limitsError(steps.flatMap(step => ids.map(id => ({
-      motor_id: id, position: step.vals[id][0],
-    }))), player.model);
-    if (limitError) throw new Error(limitError);
     const blocked = playbackReadinessError(ids);
     if (blocked) throw new Error(blocked);
     const unprotected = ids.filter(isUnprotected);
@@ -354,8 +354,8 @@ export async function playAction(name, options) {
       throw new Error('已取消（限位保护未确认）');
     }
     player.ids = ids;
-    player.firstStep = steps[0];
-    player.windows = makeWindows(steps, ids.length);
+    player.points = makePlan(steps, ids);
+    player.durationMs = player.points[player.points.length-1].time_from_start_ms;
 
     player.detail = '取消旧轨迹…';
     announce();
@@ -375,23 +375,14 @@ export async function playAction(name, options) {
     }
 
     for (player.round = 0; ; player.round++) {
-      player.detail = '对齐起点…';
+      const tid = sendPlan();
+      player.detail = `${player.loop ? `第${player.round + 1}轮 · ` : ''}`
+        + `JTC ${player.raw ? '原始线性' : '单调插值'}播放（含起点引导）· ${player.durationMs}ms`;
       announce();
-      await alignToStart();
-      assertPlaybackSession();
-      for (let index = 0; index < player.windows.length; index++) {
-        if (player.cancelRequested) throw new Error('已停止');
-        player.winIndex = index;
-        const tid = sendWindow(player.windows[index]);
-        player.detail = `${player.loop ? `第${player.round + 1}轮 ` : ''}`
-          + `窗 ${index + 1}/${player.windows.length} · ${player.windowDurMs}ms`;
-        announce();
-        const verdict = await waitWindow(tid);
-        if (verdict === 'done') continue;
-        if (verdict === 'stopped') throw new Error('已停止');
-        if (verdict === 'canceled') throw new Error(`JTC 未成功（取消/拒绝/执行失败）：${store.commandStatus.data?.reject || store.commandStatus.data?.reason || '请核对控制状态'}`);
-        throw new Error(`窗 ${index + 1} 无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
-      }
+      const verdict = await waitPlan(tid);
+      if (verdict === 'stopped') throw new Error('已停止');
+      if (verdict === 'canceled') throw new Error(`JTC 未成功（取消/拒绝/执行失败）：${store.commandStatus.data?.reject || store.commandStatus.data?.reason || '请核对控制状态'}`);
+      if (verdict !== 'done') throw new Error(`无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
       if (!player.loop) break;
     }
     player.phase = 'done';
@@ -408,6 +399,9 @@ export function stopPlayback() {
   // 运行中先置停止位（各 await 点会退出）；保持态（done）直接取消释放
   const wasRunning = player.phase === 'running';
   player.cancelRequested = true;
+  for (const policy of store.policy.values()) {
+    if (policy.intent && !policy.intent.confirmed) policy.intent.error='已停止，请重新提交人工使能';
+  }
   cancelTrajectory();
   if (!wasRunning) {
     player.phase = 'idle';
@@ -586,7 +580,7 @@ export function mount(root, ctx) {
       : player.phase === 'error' ? '错误' : '--';
     local.hint.textContent = '播放：就绪检查 → '
       + (local.enable.checked ? '武装 kp/kd（已勾选「使能」）' : '跳过武装')
-      + ' → 对齐起点 → JTC 分段播放（≤256 点/窗，成功后交棒）；取消保持位置，全部软停请使用停止控件；点文件名展开内容';
+      + ' → 按文件选择单调或原始线性插值 → JTC 连续播放（含起点引导，末点验收）；取消保持位置，全部软停请使用停止控件；点文件名展开内容';
     if (player.phase === 'error') setResult(player.error, 'err');
     else if (player.detail) setResult(player.detail, running ? '' : 'ok');
     updatePlayingRow();
@@ -605,4 +599,9 @@ export function mount(root, ctx) {
 function readNumber(input, fallback) {
   const value = parseFloat(input.value);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export function stopAll() {
+  stopPlayback();
+  return isConnected() && pub('stop', {});
 }

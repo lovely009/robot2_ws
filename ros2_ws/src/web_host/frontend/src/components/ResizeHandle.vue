@@ -22,8 +22,7 @@ function apply(size: number) {
   const available = container?.getBoundingClientRect()[props.axis] || 600;
   let maximum = available * 0.6;
   if (props.axis === 'width') {
-    const other = root.querySelector(props.target === '.objects-area' ? '.inspector-area' : '.objects-area');
-    maximum = available - (other?.getBoundingClientRect().width || 0) - 280 - 24;
+    maximum = available - 280 - 12;
   } else if (props.target !== '.observer-area') {
     const other = root.querySelector(props.target === '#run-joints' ? '.action-panel-host' : '#run-joints');
     maximum = available - (other?.getBoundingClientRect().height || 0) - 200 - 24;

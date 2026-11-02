@@ -113,7 +113,9 @@ static bool policies_valid(const Config &m, uint64_t &disabled, bool &enables) {
   return true;
 }
 static bool trajectory_busy(const Config &m) {
-  return (m.operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS || m.operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT) &&
+  return (m.operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ||
+      m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ||
+      m.operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT) &&
       motor_rt_agent_trajectory_owns(m.motor_id);
 }
 
@@ -126,7 +128,7 @@ static void config_cb(const void *input) {
   request.command = msg->operation; request.motor_id = msg->motor_id;
   request.policy_generation = msg->policy_generation;
   request.sync_time_ns = msg->issued_stamp;
-  if (msg->schema_version != 3 || !groups_valid(*msg)) {
+  if (msg->schema_version != can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION || !groups_valid(*msg)) {
     g_transactions.reject(request, config_transaction::kFailed, kInvalid); return;
   }
   if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__STOP_ALL) {
@@ -179,6 +181,13 @@ static void config_cb(const void *input) {
     g_transactions.busy(g_active_slot); return;
   }
   if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
+    for (size_t i = 0; i < msg->policies.size; ++i) {
+      const auto &target = msg->policies.data[i];
+      if (target.enabled && g_transactions.pending_device_command(
+          can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO, target.motor_id)) {
+        g_transactions.busy(g_active_slot); return;
+      }
+    }
     control_policy_snapshot_t policy{};
     policy.request_id = next_internal_id(); policy.received_tick_ms = now;
     policy.valid_until_tick_ms = g_active_deadline;
@@ -198,12 +207,14 @@ static void config_cb(const void *input) {
     const auto *v = find_view(msg->motor_id);
     if (!v || !v->bound) { g_transactions.complete(g_active_slot, 0, 1, kUnknownMotor); return; }
     // 首版保守地拒绝仍武装的 CLEAR_FAULT，不把故障清除当作运动命令。
-    if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT && v->enable) {
+    if ((msg->operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT ||
+        msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO) && v->enable) {
       g_transactions.busy(g_active_slot); return;
     }
     control_mailbox_config_request_t item{};
     item.motor_id = msg->motor_id;
     item.kind = msg->operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ? CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS
+        : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ? CONTROL_MAILBOX_CONFIG_SET_ZERO
         : CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
     const bool ok = submit_config(item, UINT8_MAX);
     g_transactions.submitted(g_active_slot, 1, ok ? 0 : kSubmitFailed);
@@ -314,7 +325,8 @@ const can_bridge_msgs__msg__AgentInfo *param_bridge_info(void) {
   const auto &page = g_pager.page();
   g_info.session_id = page.session; g_info.snapshot_stamp = page.epoch_ns;
   g_info.snapshot_tick_ms = page.tick_ms; g_info.clock_valid = page.epoch_ns != 0;
-  g_info.schema_version = 3; g_info.query_id = page.query_id; g_info.kind = page.kind;
+  g_info.schema_version = can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION;
+  g_info.query_id = page.query_id; g_info.kind = page.kind;
   g_info.result = page.result; g_info.revision = page.revision;
   g_info.cursor = page.cursor; g_info.next_cursor = page.next_cursor; g_info.complete = page.complete;
   g_info.motor_capacity = 48; g_info.trajectory_point_capacity = 256;

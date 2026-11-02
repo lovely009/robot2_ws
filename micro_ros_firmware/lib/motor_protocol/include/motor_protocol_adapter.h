@@ -87,6 +87,7 @@ typedef struct {
   bool is_brs;
   uint8_t size;
   uint8_t data[MOTOR_PROTOCOL_MAX_FRAME_BYTES];
+  uint32_t valid_until_tick_ms; // 本地 P2 截止；0=不设截止，不进入 CAN 载荷。
 } motor_protocol_tx_frame_t;
 
 // ---------------------------------------------------------------------------

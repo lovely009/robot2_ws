@@ -63,6 +63,13 @@ struct Quantized
   bool saturated;
 };
 
+inline constexpr int64_t kClockToleranceNs = 20000000;
+inline bool clock_progress_valid(int64_t wall_progress_ns, int64_t steady_elapsed_ns)
+{
+  const auto drift = wall_progress_ns - steady_elapsed_ns;
+  return steady_elapsed_ns >= 0 && drift >= -kClockToleranceNs && drift <= kClockToleranceNs;
+}
+
 // The compact command carries the lease id in its original 64-bit identity
 // slot. Disjoint session partitions fence delayed commands across reconnects.
 inline bool lease_belongs_to_session(uint64_t lease_id, uint64_t session_id)

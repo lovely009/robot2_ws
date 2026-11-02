@@ -238,10 +238,11 @@ Result encode_config(
 {
   using Cmd = can_bridge_msgs::msg::SystemCommand;
   Result r;
-  if (in.command != Cmd::COMMAND_REFRESH && in.command != Cmd::COMMAND_CLEAR_FAULT &&
+  if (in.command != Cmd::COMMAND_REFRESH && in.command != Cmd::COMMAND_SET_ZERO &&
+      in.command != Cmd::COMMAND_CLEAR_FAULT &&
       in.command != Cmd::COMMAND_REPORT) {
     r.ok = false;
-    r.error = "运行期参数写入、设零与保存已移除";
+    r.error = "运行期参数写入与保存已移除";
     return r;
   }
   if (in.request_id >= 0x40000000u) {
@@ -250,10 +251,10 @@ Result encode_config(
     return r;
   }
   if (in.command != Cmd::COMMAND_REPORT &&
-    in.motor_id >= kIdLimit)
+    (in.motor_id == 0 || in.motor_id >= kIdLimit))
   {
     r.ok = false;
-    r.error = "该命令必须给有效 motor_id（0..63）";
+    r.error = "该命令必须给有效 motor_id（1..64）";
     return r;
   }
 

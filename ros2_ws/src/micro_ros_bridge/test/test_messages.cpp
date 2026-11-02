@@ -202,17 +202,31 @@ TEST(EncodeConfig, SystemCommandOverloadFillsCommandGroup) {
   EXPECT_EQ(out.count, 0);
 }
 
-// 旧 SAVE 和设零命令即使载荷合法也不可执行。
-TEST(EncodeConfig, RetiredSaveAndZeroAreRejected) {
+TEST(EncodeConfig, RetiredSaveIsRejected) {
   can_bridge_msgs::msg::SystemCommand in;
   in.command = can_bridge_msgs::msg::SystemCommand::COMMAND_SAVE;
   in.motor_id = 3;
   can_bridge_msgs::msg::ConfigRequest out;
   in.motor_id = can_bridge_msgs::msg::SystemCommand::MOTOR_ID_NONE;
   EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
+}
+
+TEST(EncodeConfig, SetZeroAcceptsOnlySingleMotorIdsOneThrough64) {
+  can_bridge_msgs::msg::SystemCommand in;
   in.command = can_bridge_msgs::msg::SystemCommand::COMMAND_SET_ZERO;
-  in.motor_id = 1;
-  EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
+  in.request_id = 7; in.sync_time_ns = 123;
+  can_bridge_msgs::msg::ConfigRequest out;
+  for (const uint16_t id : {1, 64}) {
+    in.motor_id = id;
+    ASSERT_TRUE(micro_ros_bridge::encode_config(in, out).ok);
+    EXPECT_EQ(out.command, in.command); EXPECT_EQ(out.motor_id, id);
+    EXPECT_EQ(out.sync_time_ns, 123u); EXPECT_EQ(out.request_id, 7u);
+    EXPECT_TRUE(out.targets.empty()); EXPECT_EQ(out.count, 0u);
+  }
+  for (const uint16_t id : {0, 65, 65535}) {
+    in.motor_id = id;
+    EXPECT_FALSE(micro_ros_bridge::encode_config(in, out).ok);
+  }
 }
 
 TEST(DecodeMotorStatus, RestoresFacadeFields) {

@@ -4,10 +4,12 @@
 #include <chrono>
 #include <deque>
 #include <optional>
+#include <string>
 #include <vector>
 #include <rclcpp/rclcpp.hpp>
 #include <can_bridge_msgs/msg/agent_command.hpp>
-#include <can_bridge_msgs/msg/control_lease.hpp>
+#include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <can_bridge_msgs/msg/agent_config_request.hpp>
 #include <can_bridge_msgs/msg/agent_info.hpp>
 #include <can_bridge_msgs/msg/agent_motion.hpp>
@@ -21,6 +23,7 @@
 #include <can_bridge_msgs/msg/motor_topology.hpp>
 #include <can_bridge_msgs/msg/motor_trajectory.hpp>
 #include <can_bridge_msgs/srv/execute_config.hpp>
+#include <can_bridge_msgs/srv/submit_policy.hpp>
 #include "micro_ros_bridge/messages.hpp"
 
 namespace micro_ros_bridge
@@ -30,11 +33,18 @@ class BridgeNode : public rclcpp::Node
 public:
   explicit BridgeNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 private:
-  void on_authority(const can_bridge_msgs::msg::ControlLease & message);
+  bool fill_authority(can_bridge_msgs::msg::AgentCommand & command, bool active);
+  void send_authority(bool active);
+  void stop_control();
+  bool start_control();
   bool authority_ready(uint64_t session, uint64_t lease);
-  uint64_t authority_high_water_ = 0;
+  uint64_t authority_high_water_ = 0, enable_after_ns_ = 0;
   uint32_t authority_sequence_ = 0;
-  bool authority_revoked_ = false;
+  bool authority_revoked_ = true;
+  bool authority_confirmed_ = false;
+  std::chrono::steady_clock::time_point authority_started_{};
+  std::chrono::steady_clock::time_point authority_sent_at_{};
+  std::optional<can_bridge_msgs::msg::MotorPolicyArray> pending_policy_;
   using TimePoint = std::chrono::steady_clock::time_point;
   using Config = can_bridge_msgs::msg::AgentConfigRequest;
   using Status = can_bridge_msgs::msg::AgentStatus;
@@ -49,7 +59,12 @@ private:
     uint8_t kind = 0, command = 0;
     TimePoint deadline{}, sent_at{};
     bool sent = false, accepted = false, wait_expired = false;
+    std::string intent_id;
   };
+  std::optional<ConfigJob> pending_intent_;
+  std::string policy_instance_;
+  uint64_t last_intent_stamp_ = 0;
+  uint32_t policy_generation_ = 0;
   struct FinishedConfig {
     can_bridge_msgs::msg::ConfigRequest original;
     Reply reply;
@@ -84,6 +99,7 @@ private:
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subscriptions_;
   std::vector<rclcpp::PublisherBase::SharedPtr> publishers_;
   rclcpp::Service<can_bridge_msgs::srv::ExecuteConfig>::SharedPtr config_service_;
+  rclcpp::Service<can_bridge_msgs::srv::SubmitPolicy>::SharedPtr policy_service_;
   rclcpp::TimerBase::SharedPtr timer_;
   uint64_t session_id_ = 0;
   uint32_t command_sequence_ = 0, next_config_id_ = 1, next_trajectory_request_ = 1;
@@ -122,6 +138,9 @@ private:
   void on_motion(const can_bridge_msgs::msg::AgentMotion & msg);
   void on_command(const can_bridge_msgs::msg::MotorCommandArray & msg);
   void on_policy(const can_bridge_msgs::msg::MotorPolicyArray & msg);
+  void submit_policy(const can_bridge_msgs::srv::SubmitPolicy::Request & request,
+    can_bridge_msgs::srv::SubmitPolicy::Response & response);
+  void cancel_policy_intents(uint64_t motor_mask = UINT64_MAX);
   void submit_config(const can_bridge_msgs::msg::ConfigRequest & request, Header header = {},
     uint32_t timeout_ms = 5000);
   void enqueue_config(ConfigJob job);

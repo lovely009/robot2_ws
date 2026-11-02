@@ -3,7 +3,7 @@ uint64 session_id
 uint64 snapshot_stamp
 uint32 snapshot_tick_ms
 uint32 sequence
-uint16 schema_version 3
+uint16 schema_version 4
 uint32 info_revision
 uint32 command_sequence
 uint32 config_request_high_water

@@ -465,6 +465,7 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 // 在每次 collect_tx/下游 pump 前清除所有调度器中这些槽位的旧 P0/P1。
 // 与安全帧入队分离，因此内核队满或安全帧编码失败也不会继续发送旧运动。
 uint64_t motor_control_take_tx_cancellations(motor_control_context_t *ctx);
+uint64_t motor_control_take_zero_tx_cancellations(motor_control_context_t *ctx);
 
 // 取走待发送帧（最多 capacity 帧，余量保留待下次）。每总线
 // TX 调度器按 tx_class 分配 P0/P1/P2 队列。

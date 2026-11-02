@@ -7,7 +7,7 @@ export const CONTROL_LIFECYCLE = {
 export const EXECUTION = ['未知','空闲','保持','快照控制','执行轨迹','软停','驱动使能中','驱动失能中'];
 const uint = (v, max=0xFFFFFFFF) => Number.isSafeInteger(v) && v>=0 && v<=max;
 export function createControlStateCache() {
-  return {seen:false,valid:false,at:0,session:0,sequence:0,byId:new Map()};
+  return {seen:false,valid:false,at:0,session:0,sourceTimeNs:0,sequence:0,byId:new Map()};
 }
 export function applyControlState(cache, message, now=Date.now()) {
   cache.seen=true;
@@ -31,7 +31,9 @@ export function applyControlState(cache, message, now=Date.now()) {
         || !uint(s.policy_generation)) return invalid();
     byId.set(s.motor_id,{...s});
   }
-  Object.assign(cache,{valid:true,at:now,session:message.session_id,sequence:message.sequence,byId});
+  Object.assign(cache,{valid:true,at:now,session:message.session_id,
+    sourceTimeNs:Number.isInteger(message.sync_time_ns) && message.sync_time_ns>0 ? message.sync_time_ns : 0,
+    sequence:message.sequence,byId});
   return true;
 }
 export function describeMotorState(state,id,now=Date.now()) {
@@ -65,7 +67,44 @@ export function describeMotorState(state,id,now=Date.now()) {
 }
 
 export function controlTargetsError(state,ids,now=Date.now()) {
+  const intentError=policyControlError(state,ids,now);
+  if (intentError) return intentError;
   if (!state.controlStates?.seen) return '';
   const blocked=ids.filter(id=>!describeMotorState(state,Number(id),now).canCommand);
   return blocked.length ? `MCU 未确认 m${blocked.join('、m')} 控制已使能、在线且反馈新鲜` : '';
+}
+
+
+// 成功回执与当前 MCU 状态必须同时属于这次人工意图。
+export function policyRequestState(state, ticket, ids, enabled, now=Date.now()) {
+  const views=ids.map(id=>describeMotorState(state,id,now));
+  if (!enabled) return {confirmed:views.every(view=>view.policyEnabled===false),error:''};
+  if (String(state.controlStates.session)!==String(ticket.session_id)) return {confirmed:false,error:'MCU 会话已变化，请重新使能'};
+  if (views.some(view=>view.generation>ticket.policy_generation)) return {confirmed:false,error:'使能策略已被更新，请重新确认后播放'};
+  const receipt=state.configResults.get(ticket.request_id);
+  const matching=receipt && String(receipt.session_id)===String(ticket.session_id)
+    && receipt.intent_id===ticket.intent_id && Number(receipt.request_id)===ticket.request_id
+    && Number(receipt.kind)===2 && Number(receipt.command)===0;
+  if (matching && [2,3,4].includes(Number(receipt.status))) {
+    return {confirmed:false,error:`使能${{2:'设备拒绝',3:'设备忙',4:'请求冲突'}[receipt.status]}：error_code=${receipt.error_code}，`
+      +`失败 ${receipt.failed_targets} 项 / 完成 ${receipt.completed_targets} 项`};
+  }
+  return {confirmed:Boolean(matching && Number(receipt.status)===1
+    && views.every(view=>view.canCommand && view.generation===ticket.policy_generation)),error:''};
+}
+
+
+export function policyControlError(state,ids,now=Date.now()) {
+  for (const id of ids) {
+    const intent=state.policy?.get(Number(id))?.intent;
+    if (!intent || intent.confirmed) continue;
+    if (intent.error) return intent.error;
+    if (intent.ticket) {
+      const outcome=policyRequestState(state,intent.ticket,intent.ids,intent.enabled,now);
+      if (outcome.error) {intent.error=outcome.error;return outcome.error;}
+      if (outcome.confirmed) {intent.confirmed=true;continue;}
+    }
+    return '本次使能/失能尚未确认，请等待对应 MCU 回执';
+  }
+  return '';
 }

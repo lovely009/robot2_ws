@@ -54,6 +54,7 @@ public:
   void busy(int slot);
   const Result *result(int slot) const;
   bool pending_except(int slot) const;
+  bool pending_device_command(uint8_t command, uint16_t motor_id) const;
   bool can_start(int slot, uint32_t now);
   void complete(int slot, uint16_t completed, uint16_t failed, uint16_t error);
   bool on_result(uint32_t operation_id, bool success, uint16_t error,

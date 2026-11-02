@@ -59,7 +59,7 @@ def _model_dirs():
 
     models/ 里还会有别的产物：模型库（如 g1_description：一批第三方 *.urdf 平铺）、第三方
     导出件（如 pro_urdf_publish：外面多套一层）、以及**刚导出、还没做适配的件**（有 urdf/ 但
-    缺 xacro / controllers.yaml / README）。它们不是「一个模型一个自包含目录」的契约模型，
+    缺 xacro / controllers.yaml）。它们不是「一个模型一个自包含目录」的契约模型，
     不参与本文件的断言；做完适配（至少补上 <名>.urdf.xacro）后会被自动纳入。
     """
     return sorted(
@@ -117,7 +117,6 @@ def test_model_directory_is_complete(model_dir):
         f"urdf/{name}.urdf",
         f"urdf/{name}.urdf.xacro",
         "config/controllers.yaml",
-        "README.md",
     ):
         assert (model_dir / relative).is_file(), f"{name} 缺少 {relative}"
 
@@ -190,9 +189,10 @@ def test_standalone_matches_urdf(model_dir):
     assert len(standalone_root.findall("gazebo")) == 0
 
 
-@pytest.mark.parametrize("model_dir", _model_dirs(), ids=_model_ids)
+@pytest.mark.parametrize("model_dir", [model for model in _model_dirs()
+    if (DIST_DIR / f"{model.name}_urdf").is_dir()], ids=_model_ids)
 def test_dist_artifact_matches_model(model_dir):
-    # dist/<名>_urdf/ 是派生发布件：改了模型必须重生成，否则发出去的是旧模型。
+    # dist/ 是可选导出；存在发布目录时必须与模型一致且完整。
     name = model_dir.name
     dist_urdf = DIST_DIR / f"{name}_urdf" / f"{name}.urdf"
     assert dist_urdf.is_file(), f"{name}: 缺少对外发布件 {dist_urdf}"

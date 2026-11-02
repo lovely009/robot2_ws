@@ -1106,7 +1106,7 @@ def launch_simulation(context):
             )
     else:
         motor_sim = Node(
-            package="motor_sim",
+            package="robot_sim",
             executable="motor_sim_node",
             name="motor_sim",
             output="screen",

@@ -928,6 +928,15 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
   }
 
   uint32_t expected_id = sdo_response_id;
+  if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+    if (response->can_id != expected_id || response->dlc != 8U ||
+        response->data[1] != (uint8_t)(CERB_OBJ_SET_ZERO & 0xFFU) ||
+        response->data[2] != (uint8_t)(CERB_OBJ_SET_ZERO >> 8U) || response->data[3] != 0U) {
+      return MOTOR_PROTOCOL_STAGE_IGNORE;
+    }
+    return response->data[0] == CERB_SDO_SCS_WRITE_ACK ? MOTOR_PROTOCOL_STAGE_ADVANCE
+        : response->data[0] == CERB_SDO_CMD_ABORT ? MOTOR_PROTOCOL_STAGE_FAIL : MOTOR_PROTOCOL_STAGE_IGNORE;
+  }
   if ((request->kind == MOTOR_PROTOCOL_CONFIG_SET_T_MAX || request->kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID) &&
       response->can_id != expected_id && !(request->kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID &&
       stage == 0 && response->can_id == MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->new_node_id))

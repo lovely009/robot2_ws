@@ -13,7 +13,7 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select bvh_broadcaster --symlink-install
 source install/setup.bash
 ros2 launch bvh_broadcaster play.launch.py \
-  bvh_file:=/home/ly/robot2_ws/ros2_ws/src/robot_sim/models/演示样例_20261027141432.bvh \
+  bvh_file:=/home/ly/robot2_ws/ros2_ws/src/robot_description/models/演示样例_20261027141432.bvh \
   rviz:=true
 ```
 
@@ -42,22 +42,6 @@ Yposition 都是 `102.2`；demo 的 T-pose 腰高为 `1.022 m`，因此 launch �
 有位置通道的节点要求位置通道排在旋转之前；不支持的布局会报错。
 提供 TF 时，位置和旋转一起做坐标基变换，单位统一为米，四元数为 ROS `xyzw`。
 
-## VDMocap SDK 参考
-
-用户提供的 `DataRead_Python_Linux_SDK` 是 VDMocapStudio 的实时广播读取 SDK，
-demo 中的 23 身体 + 20 右手 + 20 左手节点去掉重复手腕后，与样例 61 个活动关节一致。
-SDK 位置为米，四元数为 **wxyz**，与 BVH 的厘米/欧拉角格式不同。
-本包不加载或复制厂商 `.so`，也不连接 demo 中的服务器地址。
-SDK 的 T-pose 长度重定向并不自动提供本工程机器人模型的 IK。
-
-## 第 3 项工具评估
-
-`MOVIN3D/Motion-Player-ROS` 已标记被 `MOVIN-ROS-Plugin` 替代；旧版要求机器人
-`.pkl` 才能进入回放，BVH 人体输出为 MarkerArray；最新 SDK 已移除旧版所用的
-`load_bvh_file`。接替项目提供原始动捕 TF、OSC 录制回放和可选 G1 重定向，
-但明确不支持 BVH 文件作为回放输入。因此本工程当前的 BVH 文件回放采用此独立包。
-这些结论为源码/文档评估，不代表已对 MOVIN 项目进行安装实测。
-
 ## half_body_robot 双臂映射
 
 映射采用 Pinocchio + SciPy IK。`config/half_body_robot.yaml` 指定人体躯干、
@@ -70,8 +54,8 @@ SDK 的 T-pose 长度重定向并不自动提供本工程机器人模型的 IK�
 source /opt/ros/humble/setup.bash
 source /home/ly/robot2_ws/ros2_ws/install/setup.bash
 ros2 run bvh_broadcaster retarget_bvh \
-  /home/ly/robot2_ws/ros2_ws/src/robot_sim/models/演示样例_20261027141432.bvh \
-  --urdf /home/ly/robot2_ws/ros2_ws/src/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf \
+  /home/ly/robot2_ws/ros2_ws/src/robot_description/models/演示样例_20261027141432.bvh \
+  --urdf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/half_body_robot/urdf/half_body_robot.urdf \
   --output /tmp/half_body_robot-preview.npz
 ros2 launch bvh_broadcaster retarget.launch.py \
   motion_file:=/tmp/half_body_robot-preview.npz rviz:=true

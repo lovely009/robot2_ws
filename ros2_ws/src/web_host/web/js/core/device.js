@@ -1,10 +1,11 @@
-// 只读参数查询与故障清除：设备屏和连接后自动读取共用。
-// 这些函数既被设备屏的按钮调用，也被连接建立后的自动读取调用（见 main.js）——
+// 参数查询、失能态设零与故障清除：设备屏和连接后自动读取共用。
+// 这些函数既被设备屏的按钮调用，也被连接建立后的自动读取调用（由 Vue 工作台调度）——
 // 自动读取不能住在面板里：store.paramCache 是使能面板列电机列表的依据，
 // 切到「运行」屏时设备屏并未挂载。
 import { store, markDirty, DIRTY, paramReadState } from './store.js';
 import { SYS_CMD, MOTOR_ID_NONE } from './format.js';
 import { pub, isConnected, waitDevParamSeq, waitConfigResult, getConnectionGeneration } from './ros.js';
+import { describeMotorState } from './motor_state.js';
 
 // 查询/维护事务的关联 id。两个高位都不能碰：bit31 是内核身份读取的命名空间，bit30 是
 // 固件自发脉冲的命名空间（置位会被本地拒）。0 表示「固件代分配」，所以绕开它。
@@ -46,30 +47,54 @@ export function setParamResult(ok, text) { writeResult('paramResult', ok, text);
 
 // 下发一条稀疏写（整条受理或整条拒绝）。返回 request_id，失败返回 0。
 export function sendSystemCommand(command, motorId) {
-  if (![SYS_CMD.REFRESH, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT].includes(command)) return 0;
+  if (![SYS_CMD.REFRESH, SYS_CMD.SET_ZERO, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT].includes(command)) return 0;
   if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return 0; }
+  if (command === SYS_CMD.SET_ZERO) {
+    const error = motorZeroError(motorId);
+    if (error) {setParamResult(false, error);return 0;}
+  }
+  const syncTime=store.controlStates.sourceTimeNs || 0;
+  if (command!==SYS_CMD.REPORT && !syncTime) {setParamResult(false,'尚未收到 MCU 同步源时间，未发送维护请求');return 0;}
   const request_id = nextParamReq();
   const sent = pub('sysCmd', {
-    sync_time_ns: Date.now() * 1e6, request_id, command,
+    sync_time_ns: syncTime, request_id, command,
     motor_id: motorId === undefined ? MOTOR_ID_NONE : motorId,
   });
   return sent ? request_id : 0;
 }
 
-// last_error 的中文说法。码表与固件零迁移（SystemStatus.msg）。
-const SYS_ERR_TEXT = {
-  1: '内核故障', 2: '内核故障', 3: '内核故障', 4: '内核故障', 5: '内核故障', 6: '内核故障',
-  10: '本地校验拒绝（多半是该台正在运动中，或位置限位没成对）',
-  11: '提交失败（配置队列满或链路异常）',
-  12: '未知电机（该台未绑定型号）',
-  30: '回读失败',
-  40: '与该台固件记录不一致', 41: '回读不成功', 42: '本机无该台记录',
-};
-export function lastErrorText() {
-  const e = store.lastError;
-  if (!e) return '无错误';
-  return (SYS_ERR_TEXT[e] || `错误码 ${e}`) +
-    (store.lastErrorMotor >= 0 ? `（m${store.lastErrorMotor}）` : '');
+const zeroRequests = new Set();
+export function motorZeroError(id) {
+  if (!isConnected()) return '未连接 rosbridge';
+  if (store.runtimeMode === 'readonly') return '当前工作台为只读模式';
+  if (!Number.isInteger(id) || id < 1 || id > 64) return '请选择有效电机';
+  if (zeroRequests.has(id)) return `电机 ${id} 设零处理中，请等待设备回执`;
+  const actual = describeMotorState(store,id);
+  const control = store.controlStates.byId.get(id);
+  if (!actual.online) return `电机 ${id} 离线或状态超时`;
+  if (actual.fault || !control || control.vendor_fault_code || control.control_lifecycle !== 2 || control.policy_enabled
+      || control.motion_enabled || control.execution_state !== 1) return `请先失能电机 ${id} 并清除故障，再设零`;
+  const host = store.commandStatus.data;
+  if (host && (['switching','stopping','manual','trajectory','error'].includes(host.mode)
+      || host.active_controllers?.length || host.pending_goal_ids?.length)) return '请先停止主机关节控制，再设零';
+  return '';
+}
+
+export async function setMotorZero(id) {
+  const error = motorZeroError(id);
+  if (error) {setParamResult(false,error);return;}
+  if (!window.confirm(`将电机 ${id} 的当前位置设为设备零点？\n设备位置限位对应的机械位置会随零点改变，请确认当前姿态与机械行程。`)) return;
+  const requestId = sendSystemCommand(SYS_CMD.SET_ZERO,id);
+  if (!requestId) return;
+  zeroRequests.add(id);
+  setParamResult(true,`电机 ${id} 设零已请求，等待设备确认…`);
+  try {
+    const result = await waitRequest(requestId,10000,`电机 ${id} 设零`);
+    setParamResult(result.ok,result.ok
+      ? `电机 ${id} 设零成功（设备已确认），请核对实际位置与机械行程`
+      : result.text + (Number(result.result?.error_code) === 5
+        ? '；设备零位可能已改变，请核对实际反馈，勿直接重试' : ''));
+  } finally {zeroRequests.delete(id);markDirty(DIRTY.PARAMS);}
 }
 
 // 读取 = 发 SystemCommand(REPORT)，固件把**当前手里的参数视图**立刻发一帧

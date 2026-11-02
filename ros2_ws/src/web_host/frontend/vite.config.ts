@@ -25,7 +25,7 @@ export default defineConfig({
         "/css",
         "/vendor",
         "/roslib.min.js",
-        "/index.html",
+        "/panel_templates.html",
       ].map((path) => [path, { target: upstream }]),
     ),
   },

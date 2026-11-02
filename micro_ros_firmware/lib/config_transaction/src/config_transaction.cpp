@@ -107,6 +107,12 @@ bool Coordinator::pending_except(int slot) const {
     if (static_cast<int>(i) != slot && entries_[i].used && entries_[i].result.status == kPending) return true;
   return false;
 }
+bool Coordinator::pending_device_command(uint8_t command, uint16_t motor_id) const {
+  for (const auto &entry : entries_)
+    if (entry.used && entry.result.status == kPending &&
+        entry.request.command == command && entry.request.motor_id == motor_id) return true;
+  return false;
+}
 bool Coordinator::can_start(int slot, uint32_t now) {
   if (!valid_slot(slot) || entries_[slot].result.status != kPending) return false;
   const uint32_t remaining = entries_[slot].request.valid_until_tick_ms - now;

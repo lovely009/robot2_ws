@@ -20,7 +20,6 @@ from web_host.models import (
     has_joint_mapping_source,
     motor_library,
     model_transmissions,
-    transmission_model_joints,
     simulation_model_joints,
 )
 
@@ -246,7 +245,7 @@ def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
         {"name": "arm_joint8", "id": 8}, {"name": "arm_joint9", "id": 9}]
     assert groups["wrist_a"]["joints"] == ["joint_link8", "joint_link9"]
     assert groups["wrist_b"]["joints"] == ["joint_link8.8", "joint_link9.9"]
-    direct = transmission_model_joints("half_body_robot", root)
+    direct = model_transmissions("half_body_robot", root)["direct_joints"]
     assert set(direct) == set(range(1, 19)) - {8, 9, 17, 18}
     assert direct[1] == "joint_link1"
     assert not groups["wrist_a"]["direct_mapping"]

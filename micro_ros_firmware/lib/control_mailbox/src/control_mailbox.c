@@ -219,6 +219,15 @@ bool control_mailbox_submit_config(
     ++mailbox->config_invalid_count;
     return false;
   }
+  if (request->kind == CONTROL_MAILBOX_CONFIG_SET_ZERO && mailbox->policy.pending) {
+    const control_policy_snapshot_t *policy = &mailbox->policy.buffers[mailbox->policy.published_buffer];
+    for (uint8_t i = 0; i < policy->target_count; ++i) {
+      if (policy->targets[i].motor_id == request->motor_id && policy->targets[i].enabled) {
+        ++mailbox->config_invalid_count;
+        return false;
+      }
+    }
+  }
   if (mailbox->config_count >= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY) {
     ++mailbox->config_overflow_count;
     return false;

@@ -5,8 +5,8 @@ import { resolve } from 'node:path';
 async function fixture(page: Page) {
   const errors:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
-  const html=readFileSync(resolve('../web/index.html'),'utf8');
-  const templates=html.match(/<template data-panel-template="(?:command|feedforward|actionLibrary|jointList)"[\s\S]*?<\/template>/g)!.join('');
+  const html=readFileSync(resolve('../web/panel_templates.html'),'utf8');
+  const templates=html.match(/<template data-panel-template="(?:jointList)"[\s\S]*?<\/template>/g)!.join('');
   await page.route('http://control.test/**',route=>{
     const path=new URL(route.request().url()).pathname;
     if(path==='/') return route.fulfill({contentType:'text/html',body:`<meta charset="UTF-8"><input id="rosUrl" value="ws://127.0.0.1:9090">${templates}<main></main>`});
@@ -31,6 +31,7 @@ async function fixture(page: Page) {
     const w=window as any;
     const data=await import('/js/core/store.js');
     w.data=data;w.store=data.store;w.ros=await import('/js/core/ros.js');
+    w.ros.configureControl({control_mode:'bench'});
     w.ros.connect();
     await new Promise(resolve=>setTimeout(resolve,0));
     const now=Date.now(),s=w.store;
@@ -38,7 +39,7 @@ async function fixture(page: Page) {
     s.modelJoints=[{name:'elbow',type:'revolute',lower:-1,upper:1,velocity:1}];
     s.motors.set(1,{status:{online:true,lifecycle:4},motion:{position:.1}});
     s.jointStates={last:now,byName:{elbow:{position:.1,at:now}}};
-    s.transmissionStatus={last:now,data:{model:data.MODEL,joint_names:['elbow'],trajectory_enabled:true,last_error:''}};
+    s.transmissionStatus={last:now,data:{model:data.MODEL,joint_names:['elbow'],joint_limits:{elbow:{lower:-1,upper:1}},trajectory_enabled:true,last_error:''}};
     setInterval(()=>{
       s.jointStates.last=Date.now();s.jointStates.byName.elbow.at=Date.now();
       s.transmissionStatus.last=Date.now();
@@ -48,7 +49,7 @@ async function fixture(page: Page) {
       gravity_enabled:true,effort_gain:.8};
     data.applyCommandStatus(w.controlStatus);
     w.panels=[];
-    for(const id of ['command','feedforward','actionLibrary','jointList']){
+    for(const id of ['jointList']){
       const root=document.createElement('section');root.dataset.panel=id;
       root.append((document.querySelector(`template[data-panel-template="${id}"]`) as HTMLTemplateElement).content.cloneNode(true));
       document.querySelector('main')!.append(root);
@@ -59,37 +60,8 @@ async function fixture(page: Page) {
   return errors;
 }
 
-test('ros2_control 模式与重力回执据实展示，服务成功不冒充状态已改变',async({page})=>{
-  const errors=await fixture(page);
-  await expect(page.locator('#ffModel')).toHaveValue('half_body_robot');
-  await expect(page.locator('#ffRoute')).toBeChecked();
-  await expect(page.locator('#ffState')).toContainText('实际增益 0.8');
-  await expect(page.locator('#cmdStatus')).toContainText('模式 trajectory');
-  await page.locator('#ffRoute').click();
-  await expect(page.locator('#ffResult')).toContainText('等待 /control/status 确认');
-  await expect(page.locator('#ffRoute')).toBeChecked();
-  expect(await page.evaluate(()=>(window as any).services)).toContainEqual({name:'/bench/stop_gravity_feedforward',args:{}});
-  await page.evaluate(()=>{
-    const w=window as any;w.data.applyCommandStatus({...w.controlStatus,gravity_enabled:false,effort_gain:.4,mode:'manual'});
-    for(const panel of w.panels)panel.render(new Set([w.data.DIRTY.COMMAND]));
-  });
-  await expect(page.locator('#ffRoute')).not.toBeChecked();
-  await expect(page.locator('#ffSummary')).toHaveText('补偿已关闭');
-  await expect(page.locator('#ffState')).toContainText('模式 manual');
-  await expect(page.locator('#ffState')).toContainText('实际增益 0.4');
-  await page.evaluate(()=>{
-    const w=window as any;w.data.applyCommandStatus({...w.controlStatus,gravity_enabled:null,effort_gain:null});
-    for(const panel of w.panels)panel.render(new Set([w.data.DIRTY.COMMAND]));
-  });
-  await expect(page.locator('#ffSummary')).toHaveText('补偿状态未知');
-  await expect(page.locator('#ffRoute')).toBeDisabled();
-  await expect(page.locator('#ffState')).toContainText('实际增益 未知');
-  expect(await page.evaluate(()=>(window as any).published)).toEqual([]);
-  expect(errors).toEqual([]);
-});
-
 test('关节门禁拒绝旧模型、缺少同组关节和过期控制状态',async({page})=>{
-  const errors=await fixture(page),send=page.locator('[data-joint-send]');
+  const errors=await fixture(page),send=page.locator('[data-joint="elbow"] input[type="range"]');
   await expect(send).toBeEnabled();
   for(const patch of [{model:'old_arm'},{joint_names:[]},null]){
     await page.evaluate(patch=>{
@@ -102,22 +74,7 @@ test('关节门禁拒绝旧模型、缺少同组关节和过期控制状态',asy
   expect(errors).toEqual([]);
 });
 
-test('显式停止使用 Empty，动作取消只向客户端发空轨迹',async({page})=>{
-  const errors=await fixture(page);
-  await page.evaluate(async()=>{(await import('/js/panels/actionLibrary.js')).stopPlayback();});
-  let published=await page.evaluate(()=>(window as any).published);
-  expect(published).toHaveLength(1);
-  expect(published[0]).toMatchObject({topic:'/control/trajectory',msg:{count:0,target_ids:[],points:[]}});
-  await page.locator('#btnStopCmd').click();
-  published=await page.evaluate(()=>(window as any).published);
-  expect(published.at(-1)).toEqual({topic:'/control/stop',msg:{}});
-  expect(published.filter((p:any)=>p.topic==='/control/setpoint')).toEqual([]);
-  await expect(page.locator('#cmdResult')).toContainText('全部软停');
-  await expect(page.locator('#btnActStop')).toHaveText('取消轨迹');
-  expect(errors).toEqual([]);
-});
-
-test('滑块仅提交未来目标，不将浏览器反馈作为 t=0 路点',async({page})=>{
+test('滑块提交连续位置目标，由主机生成平滑指令',async({page})=>{
   const errors=await fixture(page);
   const slider=page.locator('[data-joint="elbow"] input[type="range"]');
   await expect(slider).toBeEnabled();
@@ -126,9 +83,28 @@ test('滑块仅提交未来目标，不将浏览器反馈作为 t=0 路点',asyn
   });
   await expect.poll(()=>page.evaluate(()=>(window as any).published.length)).toBe(1);
   const [{topic,msg}]=await page.evaluate(()=>(window as any).published);
-  expect(topic).toBe('/arm_controller/joint_trajectory');
-  expect(msg.points).toHaveLength(1);
-  expect(msg.points[0].positions).toEqual([.3]);
-  expect(msg.points[0].time_from_start.sec+msg.points[0].time_from_start.nanosec/1e9).toBeGreaterThan(0);
+  expect(topic).toBe('/control/joint_target');
+  expect(msg.name).toEqual(['elbow']);
+  expect(msg.position).toEqual([.3]);
+  expect(msg.velocity).toEqual([]);
+  expect(msg).not.toHaveProperty('points');
+  expect(errors).toEqual([]);
+});
+
+test('18关节模型仅接入一个完整组时，只开放该关节',async({page})=>{
+  const errors=await fixture(page);
+  await page.evaluate(()=>{
+    const w=window as any,s=w.store;
+    for(let id=2;id<=18;id++){
+      const name=`unplugged_${id}`;
+      s.modelTransmissions.groups.push({name,motors:[{id}],joints:[name]});
+      s.modelJoints.push({name,type:'revolute',lower:-1,upper:1,velocity:1});
+    }
+    for(const panel of w.panels)panel.render(new Set(['model','status','motion']));
+  });
+  await expect(page.locator('#sumJoints')).toHaveText('1/18 关节');
+  await expect(page.getByRole('checkbox',{name:'使能控制',exact:true})).toBeEnabled();
+  await expect(page.locator('[data-joint="elbow"] input[type="range"]')).toBeEnabled();
+  await expect(page.locator('[data-joint="unplugged_2"] input[type="range"]')).toBeDisabled();
   expect(errors).toEqual([]);
 });

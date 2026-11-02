@@ -2,65 +2,17 @@
 // 数据写入 store 后 markDirty，由面板渲染；连接状态同步到 body.offline 以禁用写操作。
 import {
   store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus,
-  jointFeedbackMatchesModel,
-} from './store.js';
+  jointFeedbackMatchesModel, applyAgentWireStatus } from './store.js';
 import {
   $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler,
 } from './format.js';
 
 import { applyControlState, createControlStateCache } from './motor_state.js';
-import { ManagedControl } from './managed_control.js';
-
-let controlMode = 'managed';
-export function isManagedMode() { return controlMode === 'managed'; }
-const managedPublishers = {};
-const managed = new ManagedControl({
-  service: (...args) => callService(...args),
-  publish: (name, messageType, message) => {
-    if (!managedPublishers[name]) {
-      managedPublishers[name] = new ROSLIB.Topic({ros, name, messageType});
-      managedPublishers[name].advertise();
-    }
-    managedPublishers[name].publish(new ROSLIB.Message(message));
-  },
-  changed: () => {
-    store.managed = {enabled: isManagedMode(), ...managed.view()};
-    markDirty(DIRTY.CONN, DIRTY.STATUS);
-  },
-});
-store.managed = {enabled: true, ...managed.view()};
-let visibilityInstalled = false;
+let controlMode = 'bench';
 export function configureControl(configuration) {
-  if (!['managed', 'readonly', 'bench', 'prototype'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
+  if (!['readonly', 'bench'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
   controlMode = configuration.control_mode;
   store.runtimeMode = controlMode;
-  managed.model = configuration.robot_model || '';
-  store.managed = {enabled: isManagedMode(), ...managed.view(), robotId: configuration.robot_id || ''};
-  document.body.classList.toggle('managed-mode', isManagedMode());
-  if (!visibilityInstalled && document.addEventListener) {
-    visibilityInstalled = true;
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && isManagedMode()) connectionGeneration++;
-      managed.setVisible(!document.hidden);
-    });
-    globalThis.addEventListener?.('pagehide', () => {
-      if (isManagedMode()) connectionGeneration++;
-      managed.suspend('页面已退出', true);
-    });
-  }
-  managed.setVisible(!document.hidden);
-}
-export async function managedOperation(operation) {
-  if (!isManagedMode()) return false;
-  try {
-    if (operation === 'arm') await managed.arm(true);
-    else if (operation === 'disarm') await managed.arm(false);
-    else if (['acquire', 'release', 'stop', 'reset'].includes(operation)) await managed[operation]();
-    else throw new Error('未知整机操作');
-    return true;
-  } catch (error) {
-    managed.message = String(error.message || error); managed.changed(); return false;
-  }
 }
 
 let ros = null;
@@ -99,7 +51,9 @@ function ingestConfigResult(message) {
   const requestId = Number(message.request_id);
   if (!Number.isInteger(requestId) || requestId <= 0) return;
   const previous = store.configResults.get(requestId);
-  if (previous && Number(previous.status) !== 0 && Number(message.status) === 0) return;
+  if (previous && String(previous.session_id) === sessionId
+      && (previous.intent_id || '') === (message.intent_id || '')
+      && Number(previous.status) !== 0 && Number(message.status) === 0) return;
   store.configResults.delete(requestId);
   store.configResults.set(requestId, result);
   while (store.configResults.size > CONFIG_RESULT_LIMIT) {
@@ -153,44 +107,47 @@ export function setConn(ok, text) {
 
 export function isConnected() { return store.conn.connected; }
 
-// 策略代数：跨面板共享的单调计数器（使能屏与动作库的「武装」共用同一序列）。
-// 固件的代数门是**跨页面持久**的：表项进 FAULT/OFFLINE/CONFIG_CONFLICT 时把当时
-// 的代数锁存下来，之后「enabled=true 且代数 <= 锁存值」一律拒绝（见
-// MotorPolicyArray.msg）。所以计数器不能从 0 起——刷新页面只把这一侧归零，固件
-// 那边记得的仍是上一轮的值，于是每一条「武装」都被静默拒（只有事件日志的
-// CONFIG_RESULT reason=2 能看出），表现为"播放完成但机构不动"。用启动时间垫高
-// 起点；判"是不是新意图"看的是它是否前进，而不是它等于几。
-let policyGeneration = (Date.now() & 0x7fffffff) >>> 0;
-
-export function nextPolicyGeneration() {
-  policyGeneration = (policyGeneration + 1) >>> 0;
-  return policyGeneration;
+// 浏览器仅转交人工意图；会话时钟、请求号与策略代数由主机分配。
+export async function submitPolicy(targets) {
+  if (!store.conn.connected || controlMode !== 'bench') throw new Error('未连接或当前页面只读，未提交使能');
+  if (!Array.isArray(targets) || !targets.length || targets.length > 48
+      || targets.some(target => !target || typeof target.enabled !== 'boolean')) throw new Error('使能目标无效');
+  const enabled = targets.some(target => target.enabled), cache = store.controlStates;
+  const age = Date.now() - cache.at;
+  if (enabled && (!cache.valid || !cache.seen || !cache.session || !cache.sourceTimeNs
+      || age < 0 || age > 100)) throw new Error('MCU 控制快照已过期，等待新反馈后重新使能');
+  const connection = connectionGeneration, session = cache.session || 0;
+  const intent={ids:targets.map(target=>target.motor_id),enabled,ticket:null,error:'',confirmed:false};
+  for (const id of intent.ids) store.policy.set(id,{...store.policy.get(id),intent});
+  markDirty(DIRTY.POLICY,DIRTY.STATUS);
+  try {
+    const ticket = await callService('/motor/submit_policy', 'can_bridge_msgs/srv/SubmitPolicy', {
+      session_id: session, source_time_ns: cache.sourceTimeNs || 0,
+      targets: targets.map(target => ({...target})),
+    });
+    if (!store.conn.connected || connection !== connectionGeneration
+        || (enabled && session !== store.controlStates.session)) throw new Error('连接或 MCU 会话已变化，使能请求失效');
+    if (intent.error) throw new Error(intent.error);
+    if (ticket?.accepted !== true) throw new Error(ticket?.reason || '主机拒绝使能请求');
+    const uint32 = value => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+    if (typeof ticket.intent_id !== 'string' || !ticket.intent_id
+        || !Number.isSafeInteger(ticket.session_id) || ticket.session_id<0
+        || !uint32(ticket.request_id) || !uint32(ticket.policy_generation)
+        || (enabled && (String(ticket.session_id) !== String(session)
+          || !ticket.request_id || !ticket.policy_generation))) throw new Error('主机使能票据无效');
+    intent.ticket=ticket;
+    return ticket;
+  } catch (error) {
+    intent.error=String(error.message || error);
+    throw error;
+  } finally {markDirty(DIRTY.POLICY,DIRTY.STATUS);}
 }
 
 export function pub(key, message) {
-  if (['paramSet', 'firmwareConfig'].includes(key) ||
-      (key === 'sysCmd' && ![1, 3, 4].includes(message.command))) return false;
+  if (['policy', 'paramSet', 'firmwareConfig'].includes(key) ||
+      (key === 'sysCmd' && ![1, 2, 3, 4].includes(message.command))) return false;
   if (!store.conn.connected) return false;
   if (controlMode === 'readonly') return false;
-  if (isManagedMode()) {
-    if (key === 'sysCmd') return managed.maintenance(key, message);
-    if (key === 'stop') { void managedOperation('stop'); return true; }
-    if (key === 'jointTrajectory') {
-      if (!managed.canSubmitMotion()) {
-        managed.message = '请先取得 MCU 授权，并等待当前轨迹结束或停止'; managed.changed();
-        return false;
-      }
-      void managed.sendJointTrajectory(message).catch(error => {
-        managed.message = String(error.message || error); managed.changed();
-      });
-      return true;
-    }
-    const channel = {setpoint: 'command', policy: 'policy', trajectory: 'trajectory'}[key];
-    if (!channel) {
-      managed.message = '托管模式不开放此维护或旁路写入口'; managed.changed(); return false;
-    }
-    return managed.send(channel, message);
-  }
   ensurePublisher(key).publish(new ROSLIB.Message(message));
   return true;
 }
@@ -201,18 +158,7 @@ export function pub(key, message) {
 // “轨迹已完成但没有运动帧”的假成功。连接建立时先把三个下行发布端注册好，
 // 后续按钮/动作只发送已经存在的 publisher。
 export function ensurePublisher(key) {
-  if (controlMode === 'readonly') return null;
-  if (isManagedMode()) {
-    const channel = {setpoint: 'command', policy: 'policy', trajectory: 'trajectory'}[key];
-    if (!channel) return null;
-    const name = '/robot/control/' + channel;
-    if (!managedPublishers[name]) {
-      managedPublishers[name] = new ROSLIB.Topic({ros, name,
-        messageType: 'robot_system_msgs/msg/Leased' + channel[0].toUpperCase() + channel.slice(1)});
-      managedPublishers[name].advertise();
-    }
-    return managedPublishers[name];
-  }
+  if (controlMode === 'readonly' || key === 'policy') return null;
   if (!publishers[key]) {
     const t = TOPICS[key];
     publishers[key] = new ROSLIB.Topic({ros, name: t.name, messageType: t.type});
@@ -228,6 +174,7 @@ function resetSessionState() {
   clearConfigResults();
   store.motors.clear();
   store.controlStates = createControlStateCache();
+  store.agentWireStatus = null;
   store.paramCache.clear();
   store.tf.clear();
   store.sysStatus.seen = false;
@@ -249,7 +196,6 @@ function resetSessionState() {
 }
 
 export function disconnect() {
-  if (isManagedMode()) managed.suspend('已断开，控制权已释放', true);
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   closeSocket();
   resetSessionState();
@@ -272,10 +218,8 @@ export function connect() {
   ros.on('connection', () => {
     if (ros !== connection) return;
     setConn(true);
-    managed.setConnected(true);
     subscribeAll();
-    (controlMode === 'prototype' ? ['setpoint', 'policy', 'stop'] : isManagedMode() ? ['setpoint', 'trajectory', 'policy']
-      : ['setpoint', 'trajectory', 'stop', 'policy', 'sysCmd']).forEach(ensurePublisher);
+    ['setpoint', 'trajectory', 'rawTrajectory', 'stop', 'sysCmd'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -283,7 +227,6 @@ export function connect() {
     if (ros === connection) {
       connectionGeneration++;
       clearConfigResults();
-      managed.setConnected(false);
       setConn(false, '连接错误');
     }
   });
@@ -303,15 +246,12 @@ export function connect() {
 // 只关 socket，不动连接意图（自动重连要复用）。
 // 连发/曲线等定时器由各自面板在连接态脏帧里自行停止；本层不反向调用面板。
 export function closeSocket() {
-  managed.setConnected(false);
   connectionGeneration++;
   clearConfigResults();
   if (ros) { const r = ros; ros = null; try { r.close(); } catch (e) {} }
   subs = [];
   Object.values(publishers).forEach((p) => { try { p.unadvertise(); } catch (e) {} });
   Object.keys(publishers).forEach((k) => delete publishers[k]);
-  Object.values(managedPublishers).forEach(p => { try { p.unadvertise(); } catch (_e) {} });
-  Object.keys(managedPublishers).forEach(k => delete managedPublishers[k]);
 }
 
 function sub(key, cb) {
@@ -319,7 +259,7 @@ function sub(key, cb) {
   const t = TOPICS[key];
   const topic = new ROSLIB.Topic({
     // 浏览器只保留最新观测；事件逐条传递，控制授权独立订阅。
-    ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : 50, queue_length: key === 'events' ? 64 : 1,
+    ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : key === 'controlStates' ? 20 : 50, queue_length: key === 'events' ? 64 : 1,
   });
   topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);
@@ -328,16 +268,6 @@ function sub(key, cb) {
 function subscribeAll() {
   subs.forEach((s) => s.unsubscribe());
   subs = [];
-  if (isManagedMode()) {
-    const current = ros;
-    const topic = new ROSLIB.Topic({ros, name: '/robot/state', messageType: 'robot_system_msgs/msg/RobotState',
-      qos: {reliability: 'reliable', durability: 'transient_local', history: 'keep_last', depth: 1}});
-    topic.subscribe(state => {
-      if (ros === current && store.conn.connected) managed.update(state);
-    });
-    subs.push(topic);
-  }
-
   // 桥心跳与普通周期消息不同：late subscriber 必须拿到最后一帧，随后按 1 Hz 检查新鲜度。
   const statusConnection = ros;
   const statusTopic = new ROSLIB.Topic({
@@ -507,15 +437,15 @@ function subscribeAll() {
     const names = Array.isArray(m && m.name) ? m.name : [];
     const positions = Array.isArray(m && m.position) ? m.position : [];
     for (let i = 0; i < names.length; i++) {
-      const position = Number(positions[i]);
+      const position = positions[i];
       if (typeof names[i] === 'string' && Number.isFinite(position)) {
         store.jointStates.byName[names[i]] = {
           position,
-          velocity: Number(m.velocity?.[i]),
-          effort: Number(m.effort?.[i]),
+          velocity: Number.isFinite(m.velocity?.[i]) ? m.velocity[i] : NaN,
+          effort: Number.isFinite(m.effort?.[i]) ? m.effort[i] : NaN,
           at: now,
         };
-      }
+      } else if (typeof names[i] === 'string') delete store.jointStates.byName[names[i]];
     }
     if (names.length) store.jointStates.jointNames = [
       ...new Set(names.filter((name) => typeof name === 'string'))];
@@ -579,11 +509,14 @@ function subscribeAll() {
     };
   });
 
+  sub('agentWireStatus', (m) => {
+    if (applyAgentWireStatus(store, m)) markDirty(DIRTY.CONN);
+  });
   sub('configResult', (m) => ingestConfigResult(m));
 
   // 台架状态（bench_manager，JSON 字符串）：仿真 / Agent / 电机后端三段的唯一
   // 数据入口（命令的服务响应也经 applyBenchStatus 写同一份）。
-  if (!isManagedMode()) sub('bench', (m) => {
+  sub('bench', (m) => {
     try { applyBenchStatus(JSON.parse(m.data)); }
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
@@ -602,9 +535,6 @@ export function callService(name, type, request, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     if (controlMode === 'readonly') {
       reject(new Error('只读页面不开放控制或维护服务')); return;
-    }
-    if (isManagedMode() && !name.startsWith('/robot/')) {
-      reject(new Error('托管模式不开放台架管理或维护写操作')); return;
     }
     if (!ros || !store.conn.connected) {
       reject(new Error('未连接 rosbridge'));

@@ -1,10 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
-afterEach(() => vi.useRealTimers());
+afterEach(() => {vi.useRealTimers();vi.unstubAllGlobals();});
 const api = await import(/* @vite-ignore */ new URL('../../web/js/core/joint_control.js', import.meta.url).href);
 function state() {
   return {conn:{connected:true},modelTransmissions:{model:'arm',groups:[{name:'wrist',motors:[{id:8},{id:9}],joints:['yaw','pitch']}]},
     modelJoints: [{name:'yaw',type:'revolute',lower:-1,upper:1},{name:'pitch',type:'revolute',lower:-1,upper:1}],
-    transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['yaw','pitch']}},
+    transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['yaw','pitch'],joint_limits:{yaw:{lower:-1,upper:1},pitch:{lower:-1,upper:1}}}},
     commandStatus:{last:1000,data:{model:'arm',joint_names:['yaw','pitch'],mode:'trajectory',
       output_topic:'/motor/host_command_array',
       trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',gravity_enabled:true}},
@@ -52,10 +52,6 @@ it('raw motor controls cannot bypass the configured coupled group', () => {
   expect(api.rawCouplingError(s,'arm',[8,9])).toContain('关节');
   expect(api.rawCouplingError(s,'arm',[])).toBe('');
 });
-it('slider follow time bounds the cubic peak speed and uses a short horizon', () => {
-  expect(api.jointSliderDuration({velocity:2}, -3, 3)).toBe(4.5);
-  expect(api.jointSliderDuration({velocity:2}, 0, .1)).toBe(.15);
-});
 it('accepts a first joint target from a ready motor after an explicit enable policy', () => {
   const s = {...state(), policy: new Map([[8, {enabled:true}], [9, {enabled:true}]])};
   for (const motor of s.motors.values()) motor.status.lifecycle = 3;
@@ -65,12 +61,40 @@ it('accepts a first joint target from a ready motor after an explicit enable pol
   expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toContain('使能');
 });
 
-it('slider submits only a future target so JTC starts at the receiving-time state', () => {
+it('slider submits a position target without trajectory timing', () => {
   const s=state();
-  const message=api.buildJointSliderTrajectory(s,'arm',{name:'yaw',velocity:2},.3,1100);
-  expect(message.joint_names).toEqual(['yaw']);
-  expect(message.points).toHaveLength(1);
-  expect(message.points[0]).toMatchObject({positions:[.3],time_from_start:{sec:0,nanosec:150000000}});
+  const message=api.buildJointTarget(s,'arm',{name:'yaw',velocity:2},.3,1100);
+  expect(message.name).toEqual(['yaw']);
+  expect(message.position).toEqual([.3]);
+  expect(message.velocity).toEqual([]);
+  expect(message.header.stamp).toEqual({sec:1,nanosec:100000000});
+  expect(message).not.toHaveProperty('points');
+});
+
+it('uses current host limits for both partners and ignores unconfirmed browser drafts', () => {
+  vi.stubGlobal('localStorage', {getItem: () => JSON.stringify({yaw: {lower: -1.5}})});
+  const s = state();
+  expect(() => api.buildJointTarget(s, 'arm', {name:'yaw',velocity:2}, -1.2, 1100))
+    .toThrow(/超出.*限位/);
+  s.transmissionStatus.data.joint_limits.yaw.lower = -1.5;
+  expect(api.buildJointTarget(s, 'arm', {name:'yaw',velocity:2}, -1.2, 1100)
+    .position).toEqual([-1.2]);
+  s.transmissionStatus.data.joint_limits.pitch.upper = 0.5;
+  expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toBe('');
+  expect(()=>api.buildJointTrajectory(s,'arm','pitch',.6,1,1100)).toThrow(/超出.*限位/);
+});
+
+it('requires host limit readback from the updated bridge', () => {
+  const s = state();
+  delete (s.transmissionStatus.data as any).joint_limits;
+  expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toMatch(/主机.*限位.*回读/);
+});
+it('reports host feedback and controller readiness failures',()=>{
+  const s=state();
+  Object.assign(s.commandStatus.data,{feedback_fresh:false});
+  expect(api.controlSessionError(s,'arm',1100)).toContain('反馈未就绪');
+  Object.assign(s.commandStatus.data,{feedback_fresh:true,controllers_ready:false});
+  expect(api.controlSessionError(s,'arm',1100)).toContain('控制器未就绪');
 });
 it('continuous slider sends immediately, coalesces rapid input and flushes the final value once', () => {
   vi.useFakeTimers();vi.setSystemTime(1000);
@@ -98,10 +122,11 @@ it('queued slider targets expire on connection changes and cannot replay after c
   expect(sent).toEqual([.1,.3,.5]);
 });
 
-it('local prototype uses its native route without requiring a JTC service', () => {
-  const s=Object.assign(state(),{runtimeMode:'prototype'});
-  s.commandStatus={last:0,data:{}} as any;
+it('accepts an active complete group subset and rejects unconnected joints',()=>{
+  const s=state();s.modelTransmissions.groups.push({name:'extra',motors:[{id:2}],joints:['elbow']});
+  expect(api.controlSessionError(s,'arm',1100)).toBe('');
   expect(api.jointControlError(s,'arm','yaw',1100)).toBe('');
-  s.transmissionStatus.data.model='other';
-  expect(api.jointControlError(s,'arm','yaw',1100)).toContain('模型');
+  expect(api.jointControlError(s,'arm','elbow',1100)).toContain('未接入');
+  s.transmissionStatus.data.joint_names=['yaw'];s.commandStatus.data.joint_names=['yaw'];
+  expect(api.controlSessionError(s,'arm',1100)).toContain('完整传动组');
 });

@@ -179,6 +179,10 @@ Result encode_agent_config(
       encoded.operation = Config::CLEAR_FAULT;
       encoded.motor_id = legacy.motor_id;
       break;
+    case OldSystem::COMMAND_SET_ZERO:
+      encoded.operation = Config::SET_ZERO;
+      encoded.motor_id = legacy.motor_id;
+      break;
     case OldSystem::COMMAND_REPORT:
       encoded.operation = Config::QUERY_INFO;
       encoded.motor_id = OldSystem::MOTOR_ID_NONE;

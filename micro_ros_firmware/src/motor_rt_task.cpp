@@ -181,6 +181,7 @@ bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
 bool motor_rt_submit_config(
     const control_mailbox_config_request_t *request) {
   if (!request || (request->kind != CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS &&
+      request->kind != CONTROL_MAILBOX_CONFIG_SET_ZERO &&
       request->kind != CONTROL_MAILBOX_CONFIG_CLEAR_FAULT)) return false;
   taskENTER_CRITICAL();
   const bool ok = control_mailbox_submit_config(&g_control_mailbox, request);
@@ -427,8 +428,11 @@ static void route_kernel_tx(void) {
   // Apply the kernel's stop barrier before moving fresh frames. This removes
   // unsent enables and motion at both queue stages, including P0 enables.
   const uint64_t cancelled = motor_control_take_tx_cancellations(g_motor_control);
-  for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus)
+  const uint64_t zero_cancelled = motor_control_take_zero_tx_cancellations(g_motor_control);
+  for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
     can_tx_scheduler_cancel_slots(can_bsp_tx_scheduler(bus), cancelled);
+    can_tx_scheduler_cancel_timed_p2(can_bsp_tx_scheduler(bus), zero_cancelled);
+  }
   static motor_protocol_tx_frame_t batch[kTxCollectBudget]; // 静态：固定容量
   const size_t count =
       motor_control_collect_tx(g_motor_control, batch, kTxCollectBudget);
@@ -449,6 +453,7 @@ static void route_kernel_tx(void) {
     frame.size = (uint8_t)bytes;
     frame.node = batch[i].node;
     frame.aggregate_only = batch[i].aggregate_only;
+    frame.valid_until_tick_ms = batch[i].valid_until_tick_ms;
     memcpy(frame.data, batch[i].data, bytes);
     switch (batch[i].tx_class) {
     case MOTOR_PROTOCOL_TX_CLASS_P0:
@@ -484,6 +489,7 @@ static void pump_tx_schedulers(void) {
     }
     // P0 积压可能令 P1 跨过原始截止；物理出队前取消失效槽，不能停机后补发旧目标。
     const uint32_t now_ms = millis();
+    can_tx_scheduler_expire_p2(scheduler, now_ms);
     for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS; ++slot) {
       if (scheduler->p1.dirty[slot] &&
           !motor_control_target_valid(g_motor_control, slot, now_ms)) {

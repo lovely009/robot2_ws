@@ -1,12 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function openClassicCurve(page: Page) {
-  await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+async function openWorkbenchCurve(page: Page) {
+  await page.route("**/api/**", (route) => route.fulfill({ json: new URL(route.request().url()).pathname === '/api/runtime'
+    ? {control_mode:'readonly',robot_model:''} : {} }));
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => {
     socket.onMessage(() => {});
   });
-  await page.goto("/#/diag");
+  await page.goto("/workbench/#/run");
   await expect(page.locator("#chart")).toBeVisible();
+  await expect.poll(() => page.evaluate(async () =>
+    (await import('/js/core/store.js')).store.conn.connected)).toBe(true);
 }
 
 async function injectCurveData(page: Page, motorIds = [1, 2]) {
@@ -37,8 +40,8 @@ async function chartWindowMs(page: Page) {
   });
 }
 
-test("经典页曲线默认值、多选组合和图例单位", async ({ page }) => {
-  await openClassicCurve(page);
+test("工作台曲线默认值、多选组合和图例单位", async ({ page }) => {
+  await openWorkbenchCurve(page);
   await expect(page.locator("#chartWindow")).toHaveCount(0);
   await expect(page.locator(".curve-controls select")).toHaveCount(0);
   await expect(page.locator("[data-chart-motor-summary]")).toHaveText("电机 1");
@@ -79,8 +82,8 @@ test("经典页曲线默认值、多选组合和图例单位", async ({ page }) 
   await expect(page.locator("#chartLegend .curve-unit")).toContainText(["rad", "rad/s", "rad", "rad/s"]);
 });
 
-test("canvas 滚轮改变窗口，切换屏幕后旧监听已卸载", async ({ page }) => {
-  await openClassicCurve(page);
+test("canvas 滚轮改变窗口，切屏恢复后不重复注册监听", async ({ page }) => {
+  await openWorkbenchCurve(page);
   await page.evaluate(() => {
     const canvas = document.querySelector<HTMLCanvasElement>("#chart");
     canvas?.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, cancelable: true }));
@@ -88,9 +91,9 @@ test("canvas 滚轮改变窗口，切换屏幕后旧监听已卸载", async ({ p
   await expect.poll(() => chartWindowMs(page)).toBe(9_000);
   await expect(page.locator("#chartHint")).toContainText("9 s");
 
+  await page.evaluate(() => { location.hash = "#/teach"; });
+  await expect(page.locator("#chart")).toBeHidden();
   await page.evaluate(() => { location.hash = "#/run"; });
-  await expect(page.locator("#chart")).toHaveCount(0);
-  await page.evaluate(() => { location.hash = "#/diag"; });
   await expect(page.locator("#chart")).toBeVisible();
   expect(await chartWindowMs(page)).toBe(9_000);
 

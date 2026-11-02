@@ -40,6 +40,8 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
     throw std::invalid_argument("trajectory_execution must be firmware or host");
   }
   host_execution_ = execution == "host";
+  policy_instance_ = std::to_string(epoch_ns()) + "-" +
+    std::to_string(Clock::now().time_since_epoch().count());
   command_pub_ = create_publisher<AgentCommand>(W::TOPIC_COMMAND, stream());
   config_pub_ = create_publisher<Config>(W::TOPIC_CONFIG, rclcpp::QoS(4).reliable());
   trajectory_pub_ = create_publisher<Trajectory>(W::TOPIC_TRAJECTORY, reliable());
@@ -54,17 +56,21 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
   result_pub_ = create_publisher<Reply>("/motor/config_result", reliable());
   event_pub_ = create_publisher<MotorEvent>("/motor/events", reliable());
   command_sub_ = create_subscription<MotorCommandArray>(
-    "/robot/managed/motor/command_array",
+    "/motor/host_command_array",
     rclcpp::QoS(1).reliable(), [this](MotorCommandArray::SharedPtr m) {on_command(*m);});
-  subscriptions_.push_back(create_subscription<ControlLease>("/robot/managed/motor/control_lease", reliable(),
-    [this](ControlLease::SharedPtr m) {on_authority(*m);}));
-  subscriptions_.push_back(create_subscription<MotorPolicyArray>("/robot/managed/motor/policy_array", reliable(),
+  subscriptions_.push_back(create_subscription<std_msgs::msg::Empty>("/host_control/stop", reliable(),
+    [this](std_msgs::msg::Empty::SharedPtr) {stop_control();}));
+  subscriptions_.push_back(create_subscription<std_msgs::msg::Empty>("/control/stop", reliable(),
+    [this](std_msgs::msg::Empty::SharedPtr) {stop_control();}));
+  subscriptions_.push_back(create_subscription<std_msgs::msg::Int32>("/client_count", reliable(),
+    [this](std_msgs::msg::Int32::SharedPtr m) {if (m->data == 0) stop_control();}));
+  subscriptions_.push_back(create_subscription<MotorPolicyArray>("/motor/policy_array", reliable(),
     [this](MotorPolicyArray::SharedPtr m) {on_policy(*m);}));
-  subscriptions_.push_back(create_subscription<MotorTrajectory>("/robot/managed/motor/trajectory", reliable(),
+  subscriptions_.push_back(create_subscription<MotorTrajectory>("/motor/trajectory", reliable(),
     [this](MotorTrajectory::SharedPtr m) {on_trajectory(*m);}));
-  subscriptions_.push_back(create_subscription<ConfigRequest>("/robot/managed/maintenance/config_request", reliable(),
+  subscriptions_.push_back(create_subscription<ConfigRequest>("/motor/config_request", reliable(),
     [this](ConfigRequest::SharedPtr m) {submit_config(*m);}));
-  subscriptions_.push_back(create_subscription<SystemCommand>("/robot/managed/maintenance/system_command", reliable(),
+  subscriptions_.push_back(create_subscription<SystemCommand>("/motor/system_command", reliable(),
     [this](SystemCommand::SharedPtr m) {
       ConfigRequest request;
       if (encode_config(*m, request).ok) {submit_config(request);}
@@ -85,7 +91,7 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
     W::TOPIC_TEMPERATURE, stream(), [temp](sensor_msgs::msg::Temperature::SharedPtr m) {
       std_msgs::msg::Float32 out; out.data = static_cast<float>(m->temperature); temp->publish(out);
     }));
-  config_service_ = create_service<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config",
+  config_service_ = create_service<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config",
     [this](Header header, std::shared_ptr<can_bridge_msgs::srv::ExecuteConfig::Request> request) {
       if (request->request.kind == ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND &&
           request->request.command == SystemCommand::COMMAND_REPORT) {
@@ -97,6 +103,11 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions & options) : rclcpp::Node("micr
         publish_reply(job, Reply::STATUS_FAILED, 10);
       }
     });
+  policy_service_ = create_service<can_bridge_msgs::srv::SubmitPolicy>("/motor/submit_policy",
+    [this](std::shared_ptr<can_bridge_msgs::srv::SubmitPolicy::Request> request,
+      std::shared_ptr<can_bridge_msgs::srv::SubmitPolicy::Response> response) {
+      submit_policy(*request, *response);
+    });
   timer_ = create_wall_timer(20ms, [this] {tick();});
 }
 
@@ -106,7 +117,7 @@ bool BridgeNode::clock_stable()
   bool stable = true;
   if (have_clock_) {
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - clock_at_).count();
-    stable = std::llabs(wall - clock_ns_ - elapsed) <= 50000000LL;
+    stable = clock_progress_valid(wall - clock_ns_, elapsed);
   }
   clock_at_ = now; clock_ns_ = wall; have_clock_ = true;
   if (!stable) {have_status_ = false; assembler_.reset();}
@@ -116,7 +127,7 @@ bool BridgeNode::source_time_valid(uint64_t stamp, std::chrono::milliseconds age
 {
   if (!clock_stable() || !stamp || stamp > static_cast<uint64_t>(INT64_MAX)) {return false;}
   const auto delta = clock_ns_ - static_cast<int64_t>(stamp);
-  return delta >= -20000000LL && delta <=
+  return delta >= -kClockToleranceNs && delta <=
     std::chrono::duration_cast<std::chrono::nanoseconds>(age).count();
 }
 bool BridgeNode::connected()
@@ -126,6 +137,7 @@ bool BridgeNode::motion_ready()
 
 void BridgeNode::clear_session(uint64_t session)
 {
+  cancel_policy_intents();
   for (auto & job : configs_) {
     publish_reply(job, job.sent ? Reply::STATUS_PENDING : Reply::STATUS_FAILED, 21);
   }
@@ -134,7 +146,8 @@ void BridgeNode::clear_session(uint64_t session)
   std::fill(std::begin(last_caller_ids_), std::end(last_caller_ids_), 0u);
   if (upload_) {trajectory_event(upload_->caller_id, 21);}
   upload_.reset(); assembler_.reset();
-  authority_high_water_ = 0; authority_sequence_ = 0; authority_revoked_ = false;
+  enable_after_ns_ = epoch_ns() + 20000000ULL;
+  authority_high_water_ = 0; authority_sequence_ = 0; authority_revoked_ = true; authority_confirmed_ = false; pending_policy_.reset();
   session_id_ = session; have_status_ = have_info_ = querying_ = false; info_revision_ = 0;
   topology_ = MotorTopology{}; info_topology_ = MotorTopology{}; info_params_ = DeviceParamReport{};
   system_ = SystemStatus{}; freshness_.assign(65, MotorFreshness{});
@@ -182,6 +195,7 @@ void BridgeNode::on_status(const Status & msg)
       if (takeover_stop_sent_ && disarmed && !trajectory_live) {
         host_takeover_pending_ = false;
       } else {
+        cancel_policy_intents();
         Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop);
         takeover_stop_sent_ = true;
       }
@@ -231,7 +245,7 @@ void BridgeNode::query_info(bool restart)
 void BridgeNode::on_info(const AgentInfo & msg)
 {
   if (!connected() || !querying_ || msg.session_id != session_id_ ||
-    msg.schema_version != 3 || msg.query_id != query_.query_id ||
+    msg.schema_version != AgentWireContract::SCHEMA_VERSION || msg.query_id != query_.query_id ||
     msg.kind != AgentInfo::DEVICE_PAGE) {return;}
   if (msg.result == AgentInfo::RETRY) {query_info(true); return;}
   if (msg.cursor != query_.cursor || msg.result != AgentInfo::OK || (query_.query_revision &&
@@ -276,33 +290,60 @@ bool BridgeNode::authority_ready(uint64_t session, uint64_t lease)
   const auto remaining = static_cast<int32_t>(status_.lease_valid_until_tick_ms - tick);
   return status_.lease_sequence > 0 && status_.lease_sequence <= authority_sequence_ && remaining > 0 && remaining <= 300;
 }
-void BridgeNode::on_authority(const ControlLease & msg)
+bool BridgeNode::fill_authority(AgentCommand & out, bool active)
 {
-  if (msg.session_id != session_id_ || !msg.session_id || !msg.sequence ||
-      msg.lease_id / 1000000ULL != msg.session_id || msg.lease_id % 1000000ULL == 0 ||
-      msg.lease_id < authority_high_water_ ||
-      (msg.lease_id == authority_high_water_ && (msg.sequence <= authority_sequence_ || authority_revoked_))) return;
-  if (msg.active) {
-    if (!motion_ready() || count_publishers("/robot/managed/motor/control_lease") != 1) return;
+  if (!authority_high_water_ || authority_sequence_ == UINT32_MAX) {return false;}
+  out.session_id = session_id_;
+  out.lease_id = authority_high_water_; out.lease_sequence = ++authority_sequence_;
+  out.lease_active = active;
+  if (active) {
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - status_at_).count();
-    const auto tick = status_.snapshot_tick_ms + static_cast<uint32_t>(std::max<int64_t>(0, elapsed));
-    const auto remaining = static_cast<int32_t>(msg.valid_until_tick_ms - tick);
-    if (remaining <= 0 || remaining > 300) return;
+    // Bound the transport heartbeat to the original MCU observation's lifetime.
+    out.lease_valid_until_tick_ms = status_.snapshot_tick_ms +
+      static_cast<uint32_t>(std::max<int64_t>(0, elapsed)) +
+      static_cast<uint32_t>(std::min<int64_t>(200, 300 - elapsed));
   }
-  authority_high_water_ = msg.lease_id; authority_sequence_ = msg.sequence;
-  authority_revoked_ = !msg.active;
+  authority_sent_at_ = Clock::now();
+  return true;
+}
+void BridgeNode::send_authority(bool active)
+{
   AgentCommand out;
-  out.mode = AgentCommand::AUTHORITY; out.session_id = msg.session_id;
-  out.lease_id = msg.lease_id; out.lease_sequence = msg.sequence;
-  out.lease_valid_until_tick_ms = msg.valid_until_tick_ms; out.lease_active = msg.active;
-  command_pub_->publish(out); // Original deadline, never recomputed from receipt time.
+  out.mode = AgentCommand::AUTHORITY;
+  if (fill_authority(out, active)) command_pub_->publish(out);
+}
+void BridgeNode::stop_control()
+{
+  enable_after_ns_ = epoch_ns() + 20000000ULL;
+  cancel_policy_intents();
+  pending_policy_.reset();
+  configs_.erase(std::remove_if(configs_.begin(), configs_.end(), [](const auto & job) {
+    return !job.sent && job.wire.operation == Config::SET_POLICY;
+  }), configs_.end());
+  if (!authority_revoked_) {send_authority(false);}
+  authority_revoked_ = true; authority_confirmed_ = false;
+  Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop);
+}
+bool BridgeNode::start_control()
+{
+  if (!motion_ready() || host_takeover_pending_ ||
+      count_publishers(AgentWireContract::TOPIC_COMMAND) != 1 ||
+      session_id_ > (UINT64_MAX - 999999ULL) / 1000000ULL) {return false;}
+  const auto next = std::max({session_id_ * 1000000ULL + 1ULL,
+    static_cast<unsigned long long>(status_.lease_id + 1),
+    static_cast<unsigned long long>(authority_high_water_ + 1)});
+  if (next / 1000000ULL != session_id_) {return false;}
+  authority_high_water_ = next; authority_sequence_ = 0;
+  authority_revoked_ = false; authority_confirmed_ = false;
+  authority_started_ = Clock::now(); send_authority(true);
+  return true;
 }
 void BridgeNode::on_command(const MotorCommandArray & msg)
 {
   if (count_publishers(AgentWireContract::TOPIC_COMMAND) > 1) {
     Config stop; stop.operation = Config::STOP_ALL; config_pub_->publish(stop); return;
   }
-  if (msg.count && (!authority_ready(msg.session_id, msg.lease_id) || host_takeover_pending_)) {return;}
+  if (msg.count && (msg.sync_time_ns <= enable_after_ns_ || !authority_ready(session_id_, authority_high_water_) || host_takeover_pending_)) {return;}
   if (!motion_ready() || command_sub_->get_publisher_count() > 1 ||
     !source_time_valid(msg.sync_time_ns, 30ms)) {return;}
   AgentCommand out;
@@ -333,7 +374,8 @@ void BridgeNode::on_command(const MotorCommandArray & msg)
     std::chrono::duration_cast<std::chrono::nanoseconds>(now - clock_at_).count();
   const auto deadline = command_deadline_tick(status_.snapshot_tick_ms, elapsed, age);
   if (!deadline) {return;}
-  out.valid_until_tick_ms = *deadline; out.session_id = session_id_; out.lease_id = msg.lease_id;
+  out.valid_until_tick_ms = *deadline; out.session_id = session_id_; out.lease_id = authority_high_water_;
+  if (authority_ready(session_id_, authority_high_water_) && !fill_authority(out, true)) {return;}
   out.sequence = ++command_sequence_; command_pub_->publish(out);
 }
 
@@ -347,6 +389,7 @@ void BridgeNode::publish_reply(ConfigJob & job, uint8_t state, uint16_t error,
   reply.status = state; reply.error_code = error;
   reply.completed_targets = static_cast<uint16_t>(bits(completed));
   reply.failed_targets = static_cast<uint16_t>(bits(failed));
+  reply.intent_id = job.intent_id;
   result_pub_->publish(reply);
   if (state == Reply::STATUS_PENDING) {
     if (job.header && error == 21) {
@@ -398,6 +441,85 @@ void BridgeNode::submit_config(const ConfigRequest & request, Header header, uin
   job.wire.ttl_ms = 1000;
   enqueue_config(std::move(job));
 }
+void BridgeNode::cancel_policy_intents(uint64_t motor_mask)
+{
+  const auto overlaps = [motor_mask](const auto & targets) {
+      return std::any_of(targets.begin(), targets.end(), [motor_mask](const auto & target) {
+        return (motor_mask & (UINT64_C(1) << (target.motor_id - 1))) != 0;
+      });
+    };
+  if (pending_policy_ && overlaps(pending_policy_->targets)) {pending_policy_.reset();}
+  if (pending_intent_ && overlaps(pending_intent_->wire.policies)) {
+    publish_reply(*pending_intent_, Reply::STATUS_FAILED, 21); pending_intent_.reset();
+  }
+  for (auto it = configs_.begin(); it != configs_.end();) {
+    if (it->wire.operation == Config::SET_POLICY && overlaps(it->wire.policies) &&
+      (!it->intent_id.empty() || !it->sent)) {
+      publish_reply(*it, Reply::STATUS_FAILED, 21); it = configs_.erase(it);
+    } else {++it;}
+  }
+}
+
+void BridgeNode::submit_policy(const can_bridge_msgs::srv::SubmitPolicy::Request & request,
+  can_bridge_msgs::srv::SubmitPolicy::Response & response)
+{
+  response.session_id = session_id_;
+  MotorPolicyArray policy;
+  policy.sync_time_ns = request.source_time_ns; policy.session_id = request.session_id;
+  policy.count = static_cast<uint16_t>(request.targets.size());
+  policy.targets.assign(request.targets.begin(), request.targets.end());
+  ConfigJob job; job.kind = 2; job.command = Config::SET_POLICY;
+  auto valid = encode_agent_policy(policy, job.wire);
+  if (!valid.ok) {response.reason = valid.error; return;}
+  job.wire.session_id = session_id_;
+  const bool disable = std::all_of(policy.targets.begin(), policy.targets.end(),
+    [](const auto & target) {return !target.enabled;});
+  if (!disable) {
+    if (!request.session_id || request.session_id != session_id_) {
+      response.reason = "MCU会话已变化，请等待新状态"; return;
+    }
+    if (request.source_time_ns <= enable_after_ns_ || !motion_ready() ||
+      host_takeover_pending_ || !source_time_valid(request.source_time_ns, 100ms)) {
+      response.reason = "使能源状态已过期、停止屏障未通过或主机未就绪"; return;
+    }
+    if (pending_intent_ || pending_policy_ || configs_.size() >= 8 ||
+      std::any_of(configs_.begin(), configs_.end(), [](const auto & config) {
+        return config.wire.operation == Config::SET_POLICY;
+      })) {
+      response.reason = "使能请求忙，请等待当前请求终结"; return;
+    }
+    uint32_t high = std::max(policy_generation_, status_.required_policy_generation);
+    for (const auto & motor : status_.motors) {high = std::max(high, motor.policy_generation);}
+    if (high == UINT32_MAX) {response.reason = "使能策略代数已耗尽"; return;}
+    if (!next_config_id_ || next_config_id_ > AgentWireContract::REQUEST_ID_MAX) {
+      response.reason = "配置请求号已耗尽"; return;
+    }
+    if (!authority_ready(session_id_, authority_high_water_) &&
+      authority_revoked_ && !start_control()) {
+      response.reason = "主机控制授权尚未就绪"; return;
+    }
+    job.wire.policy_generation = policy_generation_ = high + 1;
+    job.wire.request_id = next_config_id_++;
+    job.wire.ttl_ms = 100; job.deadline = Clock::now() + 5s;
+  }
+  last_intent_stamp_ = std::max(epoch_ns(), last_intent_stamp_ + 1);
+  job.intent_id = policy_instance_ + ":" + std::to_string(last_intent_stamp_);
+  response.intent_id = job.intent_id;
+  response.policy_generation = job.wire.policy_generation;
+  response.request_id = job.wire.request_id;
+  response.accepted = true;
+  if (disable) {
+    uint64_t mask = 0;
+    for (const auto & target : policy.targets) {mask |= UINT64_C(1) << (target.motor_id - 1);}
+    cancel_policy_intents(mask);
+    config_pub_->publish(job.wire);
+  } else if (!authority_ready(session_id_, authority_high_water_)) {
+    pending_intent_ = std::move(job);
+  } else {
+    job.wire.lease_id = authority_high_water_; enqueue_config(std::move(job));
+  }
+}
+
 void BridgeNode::on_policy(const MotorPolicyArray & msg)
 {
   ConfigJob job;
@@ -410,12 +532,23 @@ void BridgeNode::on_policy(const MotorPolicyArray & msg)
   const bool disable = std::all_of(msg.targets.begin(), msg.targets.end(),
     [](const auto & p) {return !p.enabled;});
   if (disable) {
+    uint64_t mask = 0;
+    for (const auto & target : msg.targets) {mask |= UINT64_C(1) << (target.motor_id - 1);}
+    cancel_policy_intents(mask);
     // This bypasses the transaction slots and source-clock gate in the firmware.
     config_pub_->publish(job.wire); return;
   }
-  if (host_takeover_pending_ || !authority_ready(msg.session_id, msg.lease_id)) {return;}
-  job.wire.lease_id = msg.lease_id;
-  if (!motion_ready() || !source_time_valid(msg.sync_time_ns, 100ms)) {return;}
+  if (msg.sync_time_ns <= enable_after_ns_ || count_publishers("/motor/policy_array") > 1 || !motion_ready() || host_takeover_pending_ || !source_time_valid(msg.sync_time_ns, 100ms)) {return;}
+  if (pending_intent_ || std::any_of(configs_.begin(), configs_.end(), [](const auto & config) {
+    return !config.intent_id.empty();
+  })) {publish_reply(job, Reply::STATUS_BUSY, 0); return;}
+  policy_generation_ = std::max(policy_generation_, msg.policy_generation);
+  if (!authority_ready(session_id_, authority_high_water_)) {
+    if (authority_revoked_ && !start_control()) {return;}
+    pending_policy_ = msg;
+    return;
+  }
+  job.wire.lease_id = authority_high_water_;
   job.wire.ttl_ms = 100;
   enqueue_config(std::move(job));
 }
@@ -433,6 +566,7 @@ void BridgeNode::enqueue_config(ConfigJob job)
       return;
     }
     for (const auto & previous : finished_configs_) {
+      if (!previous.reply.intent_id.empty()) {continue;}
       if (previous.reply.request_id != job.caller_id || previous.reply.kind != job.kind) {continue;}
       if (!same(previous.wire, job.wire)) {publish_reply(job, Reply::STATUS_CONFLICT, 10); return;}
       result_pub_->publish(previous.reply);
@@ -442,23 +576,50 @@ void BridgeNode::enqueue_config(ConfigJob job)
       }
       return;
     }
-    if (job.caller_id >= 0x40000000u || job.kind > 2 ||
+    if (job.kind > 2 ||
       job.caller_id <= last_caller_ids_[job.kind])
     {publish_reply(job, Reply::STATUS_CONFLICT, 10); return;}
   }
-  if (configs_.size() >= 8) {publish_reply(job, Reply::STATUS_BUSY, 0); return;}
-  if (!next_config_id_ || next_config_id_ > AgentWireContract::REQUEST_ID_MAX) {
+  if (configs_.size() >= 8 || (pending_intent_ && job.intent_id.empty())) {
+    publish_reply(job, Reply::STATUS_BUSY, 0); return;
+  }
+  if (job.intent_id.empty() &&
+    (!next_config_id_ || next_config_id_ > AgentWireContract::REQUEST_ID_MAX)) {
     publish_reply(job, Reply::STATUS_CONFLICT, 10); return;
   }
   if (job.caller_id) {last_caller_ids_[job.kind] = job.caller_id;}
-  job.wire.request_id = next_config_id_++;
+  if (job.intent_id.empty()) {job.wire.request_id = next_config_id_++;}
   configs_.push_back(std::move(job)); dispatch_config();
 }
 void BridgeNode::dispatch_config()
 {
   if (!connected()) {return;}
-  for (auto & job : configs_) {
+  for (auto it = configs_.begin(); it != configs_.end(); ++it) {
+    auto & job = *it;
     if (job.accepted || job.wait_expired) {continue;}
+    if (!job.intent_id.empty() && (job.wire.issued_stamp <= enable_after_ns_ ||
+      host_takeover_pending_ || !authority_ready(job.wire.session_id, job.wire.lease_id))) {
+      publish_reply(job, Reply::STATUS_FAILED, 21); configs_.erase(it); return;
+    }
+    if (!job.sent && job.wire.operation == Config::SET_ZERO) {
+      const auto motor = std::find_if(status_.motors.begin(), status_.motors.end(),
+        [&](const auto & m) {return m.motor_id == job.wire.motor_id;});
+      const bool trajectory_live = status_.trajectory.state == AgentTrajectoryState::LOADING ||
+        status_.trajectory.state == AgentTrajectoryState::READY ||
+        status_.trajectory.state == AgentTrajectoryState::RUNNING;
+      const bool owned = trajectory_live && std::find(status_.trajectory.target_ids.begin(),
+        status_.trajectory.target_ids.end(), job.wire.motor_id) != status_.trajectory.target_ids.end();
+      if (motor == status_.motors.end() || !motor->online || motor->unified_fault_code ||
+          motor->vendor_fault_code) {
+        publish_reply(job, Reply::STATUS_FAILED, 10); configs_.erase(it); return;
+      }
+      // 排队期间仍可能重新使能；只在首次下发时校验，重试复用 MCU 幂等事务。
+      if (motor->policy_enabled || motor->kernel_enabled || owned ||
+          motor->lifecycle != MotorControlState::LIFECYCLE_INACTIVE ||
+          motor->execution_state != MotorControlState::EXECUTION_IDLE) {
+        publish_reply(job, Reply::STATUS_BUSY, 0); configs_.erase(it); return;
+      }
+    }
     if (!job.sent || Clock::now() - job.sent_at >= 200ms) {
       if (!source_time_valid(job.wire.issued_stamp, std::chrono::milliseconds(job.wire.ttl_ms))) {
         return;
@@ -513,10 +674,37 @@ void BridgeNode::config_results(const Status & msg)
 void BridgeNode::tick()
 {
   const auto now = Clock::now();
+  if (pending_intent_ &&
+    !source_time_valid(pending_intent_->wire.issued_stamp, 100ms)) {
+    publish_reply(*pending_intent_, Reply::STATUS_FAILED, 21); pending_intent_.reset();
+  }
+  if (!authority_revoked_) {
+    const bool confirmed = authority_ready(session_id_, authority_high_water_);
+    if (!motion_ready() || count_publishers(AgentWireContract::TOPIC_COMMAND) != 1 ||
+        (!confirmed && (authority_confirmed_ || now - authority_started_ >= 100ms))) {
+      stop_control();
+    } else {
+      authority_confirmed_ = authority_confirmed_ || confirmed;
+      // 连续目标已携带续租；空闲保活不重发目标或延长其截止。
+      if (!confirmed || now - authority_sent_at_ >= 100ms) send_authority(true);
+      if (confirmed && pending_policy_) {
+        const auto policy = *pending_policy_; pending_policy_.reset(); on_policy(policy);
+      }
+      if (confirmed && pending_intent_) {
+        auto job = std::move(*pending_intent_); pending_intent_.reset();
+        if (job.wire.session_id != session_id_ || job.wire.issued_stamp <= enable_after_ns_ ||
+          host_takeover_pending_) {
+          publish_reply(job, Reply::STATUS_FAILED, 21);
+        } else {
+          job.wire.lease_id = authority_high_water_; enqueue_config(std::move(job));
+        }
+      }
+    }
+  }
   for (auto it = configs_.begin(); it != configs_.end();) {
     const bool expired_unsent = !it->sent &&
       !source_time_valid(it->wire.issued_stamp, std::chrono::milliseconds(it->wire.ttl_ms));
-    if (expired_unsent || (now >= it->deadline && !it->sent)) {
+    if (expired_unsent || (now >= it->deadline && (!it->sent || !it->intent_id.empty()))) {
       publish_reply(*it, Reply::STATUS_FAILED, 21); it = configs_.erase(it);
     } else {
       if (now >= it->deadline && !it->wait_expired) {
@@ -553,7 +741,7 @@ void BridgeNode::on_trajectory(const MotorTrajectory & msg)
     if (!cancel) {trajectory_event(msg.trajectory_id, 2);}
     return;
   }
-  if (!cancel && !authority_ready(msg.session_id, msg.lease_id)) {trajectory_event(msg.trajectory_id, 3); return;}
+  if (!cancel && !authority_ready(session_id_, authority_high_water_)) {trajectory_event(msg.trajectory_id, 3); return;}
   if (cancel) {
     std::fill(std::begin(trajectory_targets_), std::end(trajectory_targets_), false);
     uint32_t id = upload_ ? upload_->wire_id : status_.trajectory.trajectory_id;
@@ -571,7 +759,7 @@ void BridgeNode::on_trajectory(const MotorTrajectory & msg)
     upload.pending = request; upload_ = std::move(upload); dispatch_trajectory(); return;
   }
   auto reject = [&](uint16_t reason) {trajectory_event(msg.trajectory_id, reason);};
-  if (!motion_ready() || !source_time_valid(msg.sync_time_ns, 1000ms) ||
+  if (msg.sync_time_ns <= enable_after_ns_ || !motion_ready() || !source_time_valid(msg.sync_time_ns, 1000ms) ||
     msg.count != msg.points.size() || msg.target_count != msg.target_ids.size() ||
     msg.count == 0 || msg.count > 256 || !msg.target_count || msg.target_count > 48 ||
     !msg.segment_count || msg.segment_count > 256 || msg.segment_index >= msg.segment_count)
@@ -594,7 +782,7 @@ void BridgeNode::on_trajectory(const MotorTrajectory & msg)
     Upload upload; upload.caller_id = msg.trajectory_id;
     upload.wire_id = std::max(next_trajectory_id_, next_trajectory_request_);
     next_trajectory_id_ = upload.wire_id + 1;
-    upload.lease_id = msg.lease_id; upload.issued = msg.sync_time_ns; upload.host_segments = msg.segment_count;
+    upload.lease_id = authority_high_water_; upload.issued = msg.sync_time_ns; upload.host_segments = msg.segment_count;
     upload.ids.assign(msg.target_ids.begin(), msg.target_ids.end()); upload_ = std::move(upload);
   }
   auto & upload = *upload_;

@@ -139,3 +139,96 @@ def test_http_missing_task_and_other_routes(jobs):
     assert handle_motion(handler, jobs) and handler.code == 404
     handler.path = '/api/actions'
     assert not handle_motion(handler, jobs)
+
+
+def test_http_lists_library_bvh_sources(tmp_path):
+    for name in ('first.bvh', 'second.BHV', 'third.BvH', 'motion.json', 'notes.txt'):
+        (tmp_path / name).write_text('fixture')
+    (tmp_path / 'directory.bvh').mkdir()
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        handler = Handler()
+        handler.command, handler.path = 'GET', '/api/motion/sources'
+        assert handle_motion(handler, manager) and handler.code == 200
+        assert json.loads(handler.wfile.getvalue()) == {
+            'sources': ['first.bvh', 'second.BHV', 'third.BvH']}
+    finally:
+        manager.close()
+
+
+def test_http_imports_library_source_symlink(tmp_path, payload):
+    original = tmp_path / 'original.txt'
+    original.write_text(payload.pop('bvh_text'))
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / 'stored.BVH').symlink_to(original)
+    manager = MotionJobs(actions_dir=library)
+    try:
+        handler = Handler(json.dumps({**payload, 'bvh_source': 'stored.BVH'}).encode())
+        assert handle_motion(handler, manager) and handler.code == 202
+        job = json.loads(handler.wfile.getvalue())
+        assert job['bvh_name'] == 'stored.BVH'
+        assert job['automatic_mapping']
+        assert finish(manager, job)['state'] == 'done'
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('name,code', [
+    ('', 400), ('../outside.bvh', 400), ('/tmp/outside.bvh', 400),
+    ('..\\outside.bvh', 400), ('motion.json', 400), ('absent.bvh', 404)])
+def test_http_rejects_invalid_library_source(tmp_path, payload, name, code):
+    payload.pop('bvh_text')
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        handler = Handler(json.dumps({**payload, 'bvh_source': name}).encode())
+        assert handle_motion(handler, manager) and handler.code == code
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+def test_rejects_library_bvh_over_20mb(tmp_path, payload):
+    payload.pop('bvh_text')
+    with (tmp_path / 'large.bvh').open('wb') as handle:
+        handle.truncate(20 * 1024 * 1024 + 1)
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        with pytest.raises(ValueError, match='20 MB'):
+            manager.create({**payload, 'bvh_source': 'large.bvh'})
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('library_source', [False, True])
+def test_combined_import_size_is_bounded(tmp_path, payload, library_source):
+    payload['urdf_text'] += ' ' * (20 * 1024 * 1024 - len(payload['urdf_text'].encode('utf-8')))
+    if library_source:
+        (tmp_path / 'stored.bvh').write_text(payload.pop('bvh_text'))
+        payload['bvh_source'] = 'stored.bvh'
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        with pytest.raises(ValueError, match='合计不能超过 20 MB'):
+            manager.create(payload)
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+def test_shoulders_clip_automatically_maps_existing_joints(jobs, payload):
+    path = Path(__file__).resolve().parents[1] / 'action_library/1-4.bvh'
+    hierarchy, motion = path.read_text().split('MOTION\n', 1)
+    rows = motion.splitlines()
+    payload['bvh_text'] = hierarchy + 'MOTION\nFrames: 3\n' + '\n'.join(rows[1:5]) + '\n'
+    job = jobs.create(payload)
+    assert job['automatic_mapping']
+    assert job['mapping'] == {
+        'mode': 'shoulders12', 'source_to_robot': [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+        'source': 'shoulder_r', 'joints': ['joint_link1', 'joint_link2']}
+    done = finish(jobs, job)
+    assert done['state'] == 'done', done
+    preview = json.loads(jobs.result(job['id'], 'preview.json'))
+    assert len(preview['times']) == 3
+    assert preview['duration'] == pytest.approx(2 * .041667)
+    assert len(preview['robot']['joint_positions'][0]) == 18

@@ -14,17 +14,20 @@ export const TOPICS = {
     type: 'can_bridge_msgs/msg/MotorCommandArray'},
   trajectory: {name: '/control/trajectory',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  rawTrajectory: {name: '/control/trajectory_raw',
+    type: 'can_bridge_msgs/msg/MotorTrajectory'},
   commandStatus: {name: '/control/status', type: 'std_msgs/msg/String'},
   trajectoryState: {name: '/control/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'},
   policy: {name: '/motor/policy_array', type: 'can_bridge_msgs/msg/MotorPolicyArray'},
   devParams: {name: '/motor/device_param_report', type: 'can_bridge_msgs/msg/DeviceParamReport'},
   sysStatus: {name: '/motor/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
+  agentWireStatus: {name: '/micro_ros_up/status', type: 'can_bridge_msgs/msg/AgentStatus'},
   configResult: {name: '/motor/config_result', type: 'can_bridge_msgs/msg/ConfigResult'},
   sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
   // 关节侧实测构型；显示和控制都检查其新鲜度。
   jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
-  jointTrajectory: {name: '/arm_controller/joint_trajectory', type: 'trajectory_msgs/msg/JointTrajectory'},
+  jointTarget: {name: '/control/joint_target', type: 'sensor_msgs/msg/JointState'},
   convertedTrajectory: {name: '/control/trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
   robotTransmissionStatus: {name: '/robot_transmission/status', type: 'std_msgs/msg/String'},
   // TF（关节侧）：robot_state_publisher 发；页面只读，用来与电机流对照。
@@ -48,15 +51,14 @@ export const FAULT_NAMES = ['无', '协议', '厂家', 'Profile', '冲突', '离
 // 权威定义在 micro_ros_agent/src/can_bridge_msgs/msg/MotorEvent.msg 的 EVENT_DEV_INIT 注释块。
 export const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '峰值电流',
   '保护开关(0x2650:00)', '方向(0x2541)', 'T_max(0x2546)', '电机ID(0x2530)'];
-export const DEV_INIT_STATE = ['无设备对象', '待回读', '已核对', '与记录不一致',
-  '回读不成功', '本机无记录'];
 // ⚠️ param_device_slot_t 的次序（= DEV_SLOT_NAMES 下标 = 行序 = mismatch_mask 位序），
 // **不是** param_field_t。两套里 field=3 都合法 → 互用不会被拒绝，会静默写错槽位。
-export const SYS_CMD = {REFRESH: 1, CLEAR_FAULT: 3, REPORT: 4};
+export const SYS_CMD = {REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
 export const MOTOR_ID_NONE = 65535;
 export const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
 export const TRAJ_MAX_POINTS = 256;
+export const TRAJ_MAX_PLAN_POINTS = 8192; // 主机完整计划上限，与 TrajectoryAssembly 一致。
 export const TRAJ_MAX_MOTORS = 64;
 export const TRAJ_STATE_TIMEOUT_PAD_MS = 3000;
 
@@ -131,4 +133,3 @@ export function fmtParam(value) {
 
 export const CONTROLLER_PORT_STORAGE_KEY = 'robot2.controllerSerialPort';
 export const ROS_URL_STORAGE_KEY = 'robot2.rosbridgeUrl';
-export const FOLD_KEY = 'web_host.fold';

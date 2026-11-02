@@ -1,5 +1,5 @@
-# V3 固件线上常量；本类型不创建发布实体。
-uint16 SCHEMA_VERSION=3
+# V4 固件线上常量；本类型不创建发布实体。
+uint16 SCHEMA_VERSION=4
 uint16 MOTOR_ID_MAX=64
 uint16 MOTOR_COUNT_MAX=48
 uint16 MOTION_CHUNK_MAX=32

@@ -75,19 +75,22 @@ def test_duplicate_motor_identity_is_rejected_before_any_node_starts(model):
         module().hardware_description(str(driver), str(urdf))
 
 
-def test_jtc_uses_measured_feedback_and_both_target_channels():
-    params = module().controller_parameters(['shoulder', 'elbow'])
+def test_jtc_uses_measured_feedback_and_both_target_channels(model):
+    params = module().controller_parameters(['shoulder', 'elbow'], str(model[1]))
     jtc = params['/host_control/trajectory_controller']['ros__parameters']
     assert jtc['joints'] == ['shoulder', 'elbow']
     assert jtc['command_interfaces'] == ['position', 'velocity']
     assert jtc['state_interfaces'] == ['position', 'velocity']
     assert jtc['open_loop_control'] is False
     assert jtc['allow_partial_joints_goal'] is False
-    assert jtc['constraints']['shoulder']['trajectory'] > 0
+    assert jtc['constraints']['goal_time'] == 1.0
+    assert jtc['constraints']['stopped_velocity_tolerance'] == 0.02
+    for name in ('shoulder', 'elbow'):
+        assert jtc['constraints'][name] == {'trajectory': 0.1, 'goal': 0.05}
 
 
-def test_manual_and_gravity_controllers_claim_distinct_interfaces():
-    params = module().controller_parameters(['shoulder', 'elbow'], '/robot.urdf')
+def test_manual_and_gravity_controllers_claim_distinct_interfaces(model):
+    params = module().controller_parameters(['shoulder', 'elbow'], str(model[1]))
     manager = params['/host_control/controller_manager']['ros__parameters']
     assert manager['manual_controller_0']['type'] == (
         'forward_command_controller/MultiInterfaceForwardCommandController')
@@ -95,5 +98,14 @@ def test_manual_and_gravity_controllers_claim_distinct_interfaces():
         'joint': 'shoulder', 'interface_names': ['position', 'velocity', 'effort']}
     assert params['/host_control/manual_controller_1']['ros__parameters']['joint'] == 'elbow'
     gravity = params['/host_control/gravity_controller']['ros__parameters']
-    assert gravity == {'joints': ['shoulder', 'elbow'], 'urdf_file': '/robot.urdf',
+    assert gravity == {'joints': ['shoulder', 'elbow'], 'urdf_file': str(model[1]),
                        'enabled': False, 'effort_gain': 1.0}
+
+
+def test_follow_uses_urdf_velocity_and_preserves_50hz(model):
+    params = module().controller_parameters(['shoulder', 'elbow'], str(model[1]))
+    manager = params['/host_control/controller_manager']['ros__parameters']
+    assert manager['update_rate'] == 50
+    assert manager['follow_controller']['type'] == 'motor_hardware_interface/JointFollowController'
+    assert params['/host_control/follow_controller']['ros__parameters'] == {
+        'joints': ['shoulder', 'elbow'], 'max_velocity': [2.5, 3.0]}

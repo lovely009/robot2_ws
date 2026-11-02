@@ -1,5 +1,6 @@
 """浏览器测试素材与临时动作任务服务；没有 ROS 节点或设备依赖。"""
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import json
 from pathlib import Path
 import sys
 from urllib.parse import unquote, urlsplit
@@ -8,7 +9,7 @@ package = Path(__file__).resolve().parents[2]
 model_root = package.parent / 'robot_description'
 sys.path.insert(0, str(package))
 from web_host.motion import MotionJobs, handle_motion
-motion_jobs = MotionJobs()
+motion_jobs = MotionJobs(package / 'action_library')
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -30,6 +31,22 @@ class Handler(SimpleHTTPRequestHandler):
         return super().translate_path(path)
 
     def do_GET(self):
+        request = urlsplit(self.path)
+        if request.path == '/api/models':
+            models = sorted(p.name for p in (model_root / 'models').iterdir()
+                            if p.is_dir() and (p / 'urdf' / f'{p.name}.urdf').is_file())
+            body = json.dumps({'models': models}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if request.path in ('/', '/index.html'):
+            self.send_response(302)
+            self.send_header('Location', '/workbench/' + ('?' + request.query if request.query else ''))
+            self.end_headers()
+            return
         if not handle_motion(self, motion_jobs):
             super().do_GET()
 

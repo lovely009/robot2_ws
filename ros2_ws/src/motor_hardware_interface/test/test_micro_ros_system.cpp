@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <limits>
 #include <memory>
 #include <string>
@@ -19,6 +20,7 @@
 #include "can_bridge_msgs/msg/motor_motion_state_array.hpp"
 #include "motor_hardware_interface/micro_ros_system.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/parameter_client.hpp"
 #include "robot_transmission/model.hpp"
 #include "std_msgs/msg/empty.hpp"
 
@@ -370,6 +372,28 @@ TEST_F(MicroRosSystemTest, ActivationUsesMeasuredJointPositionsAndLeaseStaysEmpt
   EXPECT_NE(commands_[0].sync_time_ns, 0U);
 }
 
+TEST_F(MicroRosSystemTest, ControlTimeoutInvalidatesExportedMeasurementsUntilReactivation) {
+  auto system = initialized(info());
+  const auto states = system->export_state_interfaces();
+  ASSERT_EQ(states.size(), 6U);
+  activate(*system, false);
+  for (const auto &state : states) ASSERT_TRUE(std::isfinite(state.get_value()));
+
+  std::this_thread::sleep_for(320ms);
+  EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::ERROR);
+  for (const auto &state : states) EXPECT_TRUE(std::isnan(state.get_value())) << state.get_name();
+  publish_motion();
+  publish_control(1, false);
+  EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::ERROR);
+  for (const auto &state : states) EXPECT_TRUE(std::isnan(state.get_value())) << state.get_name();
+
+  EXPECT_EQ(system->on_deactivate(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
+  activate(*system, false);
+  for (const auto &state : states) EXPECT_TRUE(std::isfinite(state.get_value())) << state.get_name();
+}
+
 TEST_F(MicroRosSystemTest, HistoricalFailureDoesNotOverrideCurrentActivePermission) {
   auto system = initialized(info());
   activate(*system, false);
@@ -414,6 +438,46 @@ TEST_F(MicroRosSystemTest, UnarmedCurrentFaultCannotResumePendingCommand) {
   EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
             hardware_interface::return_type::OK);
   EXPECT_TRUE(spin_until_target_count(2));
+}
+
+TEST_F(MicroRosSystemTest, ActivationDiscardsExpiredDiscoverySamplesAndWaitsForFreshFeedback) {
+  auto system = initialized(info());
+  std::atomic<bool> stop{false};
+  std::thread feedback([&] {
+    auto old_motion = motion_message(); old_motion.sync_time_ns -= 1000000000ULL;
+    auto old_control = control_message(1, false); old_control.sync_time_ns -= 1000000000ULL;
+    motion_pub_->publish(old_motion); control_pub_->publish(old_control);
+    std::this_thread::sleep_for(40ms);
+    while (!stop.load()) {
+      publish_motion(); publish_control(1, false);
+      std::this_thread::sleep_for(2ms);
+    }
+  });
+  const auto result = system->on_activate(rclcpp_lifecycle::State());
+  stop.store(true); feedback.join();
+  ASSERT_EQ(result, CallbackReturn::SUCCESS);
+  spin_until_command(1);
+  ASSERT_FALSE(commands_.empty());
+  for (const auto &command : commands_) EXPECT_TRUE(command.targets.empty());
+  for (const auto &state : system->export_state_interfaces()) EXPECT_TRUE(std::isfinite(state.get_value()));
+}
+
+TEST_F(MicroRosSystemTest, ActivationWaitsForDelayedDiscoveryWithoutSendingTargets) {
+  auto system = initialized(info());
+  std::atomic<bool> stop{false};
+  std::thread feedback([&] {
+    std::this_thread::sleep_for(1200ms);
+    while (!stop.load()) {
+      publish_motion(); publish_control(1, false);
+      std::this_thread::sleep_for(2ms);
+    }
+  });
+  const auto result = system->on_activate(rclcpp_lifecycle::State());
+  stop.store(true); feedback.join();
+  ASSERT_EQ(result, CallbackReturn::SUCCESS);
+  spin_until_command(1);
+  ASSERT_FALSE(commands_.empty());
+  for (const auto &command : commands_) EXPECT_TRUE(command.targets.empty());
 }
 
 TEST_F(MicroRosSystemTest, ActivationRejectsPresentDeviceFault) {
@@ -700,6 +764,80 @@ TEST_F(MicroRosSystemTest, WritesMappedJointPositionAndVelocityOncePerControlCyc
   EXPECT_NE(commands_[1].sync_time_ns, commands_[0].sync_time_ns);
 }
 
+TEST_F(MicroRosSystemTest, AtomicPositionLimitsAllowOverrideAndKeepCommandValidation) {
+  auto system = initialized(info());
+  activate(*system, false);
+  auto client = std::make_shared<rclcpp::AsyncParametersClient>(
+    peer_, "micro_ros_system_micro_ros_system_test");
+  ASSERT_TRUE(client->wait_for_service(500ms));
+  const auto pump = [&](auto &future) {
+    const auto deadline = std::chrono::steady_clock::now() + 500ms;
+    while (future.wait_for(0ms) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline) {
+      publish_motion(); publish_control(1, true);
+      EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+                hardware_interface::return_type::OK);
+      rclcpp::spin_some(peer_);
+      std::this_thread::sleep_for(2ms);
+    }
+    return future.wait_for(0ms) == std::future_status::ready;
+  };
+  const auto set = [&](const std::vector<rclcpp::Parameter> &parameters) {
+    auto future = client->set_parameters_atomically(parameters);
+    if (!pump(future)) {
+      ADD_FAILURE() << "position limit parameter service timed out";
+      return rcl_interfaces::msg::SetParametersResult{};
+    }
+    return future.get();
+  };
+  const auto limits = [](std::vector<std::string> names, std::vector<double> bounds) {
+    return std::vector<rclcpp::Parameter>{
+      rclcpp::Parameter("position_limit_names", names),
+      rclcpp::Parameter("position_limit_bounds", bounds)};
+  };
+  const auto widened = limits({"pitch"}, {-3.0, 3.0});
+  ASSERT_TRUE(set(limits({"yaw", "pitch"}, {-3, 3, -3, 3})).successful);
+  ASSERT_TRUE(set(widened).successful);
+  EXPECT_TRUE(set({rclcpp::Parameter("use_sim_time", false)}).successful);
+  for (const auto &invalid : {
+      limits({"unknown"}, {-3, 3}), limits({"pitch", "pitch"}, {-3, 3, -3, 3}),
+      limits({"pitch"}, {-3}), limits({"pitch"}, {3, 3}), limits({}, {}),
+      limits({"pitch"}, {std::numeric_limits<double>::quiet_NaN(), 3}),
+      limits({"pitch"}, {-3, std::numeric_limits<double>::infinity()}),
+      std::vector<rclcpp::Parameter>{widened[0]},
+      std::vector<rclcpp::Parameter>{rclcpp::Parameter("position_limit_names", 1), widened[1]}}) {
+    EXPECT_FALSE(set(invalid).successful);
+  }
+  auto readback = client->get_parameters({"position_limit_names", "position_limit_bounds"});
+  ASSERT_TRUE(pump(readback));
+  EXPECT_EQ(readback.get(), widened);
+
+  arm(*system);
+  auto handles = system->export_command_interfaces();
+  handles[0].set_value(2.0); handles[2].set_value(0.2);
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  ASSERT_TRUE(spin_until_target_count(2));
+  stop_via_topic(*system);
+  EXPECT_FALSE(set(limits({"pitch"}, {-1, 1})).successful);
+  stop_writer(*system);
+  start_writer(*system);
+  auto updated = system->export_command_interfaces();
+  updated[0].set_value(2.0); updated[2].set_value(0.2);
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  updated[0].set_value(3.1);
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::ERROR);
+  ASSERT_EQ(system->on_deactivate(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
+  activate(*system, true);
+  start_writer(*system);
+  auto reset = system->export_command_interfaces();
+  reset[0].set_value(2.0); reset[2].set_value(2.0);
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::ERROR);
+}
+
 TEST_F(MicroRosSystemTest, JointCommandOutsideUrdfBoundsStopsWholeSnapshot) {
   auto system = initialized(info());
   activate(*system, false);
@@ -713,6 +851,91 @@ TEST_F(MicroRosSystemTest, JointCommandOutsideUrdfBoundsStopsWholeSnapshot) {
   EXPECT_EQ(commands_[0].targets.size(), 0U);
   EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
             hardware_interface::return_type::ERROR);
+}
+
+TEST_F(MicroRosSystemTest, PositionAndVelocityBoundaryRoundoffIsNormalizedBeforeMapping) {
+  constexpr double lower = -0.12, upper = 0.14;
+  auto hardware_info = info();
+  for (auto &joint : hardware_info.joints) {
+    for (auto &interface : joint.command_interfaces) {
+      interface.min = "-0.12";
+      interface.max = "0.14";
+    }
+  }
+  auto system = initialized(hardware_info);
+  activate(*system, false);
+  arm(*system);
+  auto interfaces = system->export_command_interfaces();
+  ASSERT_EQ(interfaces.size(), 4U);
+
+  // 实际动作 4389/4417 ms 的端点经 float32 输入归一后均为 0.14；
+  // 第二点微小负速度使三次 Hermite 在段内产生约 9e-16 的外侧误差。
+  const double dt = 0.028, end_velocity = -2.2402714506741015e-13, s = 2.0 / 3.0;
+  const double a = dt * end_velocity, b = -dt * end_velocity;
+  const double plateau = ((a * s + b) * s) * s + upper;
+  ASSERT_GT(plateau, upper);
+  const auto model = robot_transmission::Model::load((root_ / "driver.yaml").string());
+  for (const auto &values : std::vector<std::vector<double>>{
+      {std::nextafter(upper, INFINITY), std::nextafter(lower, -INFINITY),
+       std::nextafter(lower, -INFINITY), std::nextafter(upper, INFINITY)},
+      {plateau, 0.0, lower - (plateau - upper), 0.0}}) {
+    std::vector<double> expected;
+    for (std::size_t i = 0; i < interfaces.size(); ++i) {
+      interfaces[i].set_value(values[i]);
+      expected.push_back(std::min(std::max(values[i], lower), upper));
+    }
+    publish_motion();
+    publish_control(1, true);
+    ASSERT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+              hardware_interface::return_type::OK);
+    commands_.clear();
+    ASSERT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+              hardware_interface::return_type::OK);
+    for (std::size_t i = 0; i < interfaces.size(); ++i) {
+      EXPECT_EQ(interfaces[i].get_value(), expected[i]);
+    }
+    ASSERT_TRUE(spin_until_target_count(2));
+    const auto mapped = model.joint_to_actuator({
+      {"pitch", robot_transmission::Axis(expected[0], expected[1], 0.0)},
+      {"yaw", robot_transmission::Axis(expected[2], expected[3], 0.0)}});
+    for (const auto &target : commands_.back().targets) {
+      const auto &axis = mapped.at(target.motor_id == 8 ? "a" : "b");
+      EXPECT_EQ(target.position, static_cast<float>(axis.position));
+      EXPECT_EQ(target.velocity, static_cast<float>(axis.velocity));
+      EXPECT_EQ(target.effort, 0.0f);
+    }
+  }
+}
+
+TEST_F(MicroRosSystemTest, PositionAndVelocityOvershootBeyondRoundoffStillLatchesStop) {
+  for (const std::size_t index : {0U, 1U}) {
+    for (const double value : {-0.12 - 1e-10, 0.14 + 1e-10}) {
+      SCOPED_TRACE(::testing::Message() << "interface=" << index << " value=" << value);
+      auto hardware_info = info();
+      for (auto &joint : hardware_info.joints) {
+        for (auto &interface : joint.command_interfaces) {
+          interface.min = "-0.12";
+          interface.max = "0.14";
+        }
+      }
+      auto system = initialized(hardware_info);
+      activate(*system, false);
+      arm(*system);
+      auto interfaces = system->export_command_interfaces();
+      for (auto &interface : interfaces) interface.set_value(0.0);
+      interfaces[index].set_value(value);
+      commands_.clear();
+      EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+                hardware_interface::return_type::ERROR);
+      spin_until_command(1);
+      ASSERT_FALSE(commands_.empty());
+      for (const auto &command : commands_) EXPECT_TRUE(command.targets.empty());
+      publish_motion();
+      publish_control(1, true);
+      EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+                hardware_interface::return_type::ERROR);
+    }
+  }
 }
 
 TEST_F(MicroRosSystemTest, ArmRevocationLatchesUntilExplicitReactivation) {

@@ -10,7 +10,7 @@ uint32 trajectory_id
 uint32 ack_request_id
 uint32 ack_terminal_trajectory_id
 uint16 ttl_ms
-uint16 schema_version 3
+uint16 schema_version 4
 uint8 operation
 uint16 segment_index
 uint16 segment_count

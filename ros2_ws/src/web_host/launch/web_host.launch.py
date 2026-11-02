@@ -8,29 +8,25 @@ from launch_ros.actions import Node
 
 
 READ_TOPICS = [
-    '/robot/state', '/robot/calibration_state', '/diagnostics', '/joint_states',
+    '/diagnostics', '/joint_states',
     '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp',
     '/motor/control_states', '/motor/motion_states', '/motor/topology',
     '/motor/trajectory_state', '/motor/status_array', '/motor/events',
     '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
-    '/control/status', '/control/trajectory_state',
+    '/control/status', '/control/trajectory_state', '/bench/status', '/micro_ros_up/status',
 ]
-CONTROL_TOPICS = ['/robot/control/command', '/robot/control/policy', '/robot/control/trajectory']
-CONTROL_SERVICES = [
-    '/robot/acquire_control', '/robot/renew_control', '/robot/set_armed',
-    '/robot/release_control', '/robot/stop', '/robot/reset_fault',
-    '/robot/authorize_motion', '/robot/execute_maintenance',
-    '/robot/follow_joint_trajectory/_action/send_goal',
-    '/robot/follow_joint_trajectory/_action/get_result',
-    '/robot/follow_joint_trajectory/_action/cancel_goal',
-]
+CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
+                  '/arm_controller/joint_trajectory', '/motor/system_command']
+CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
+                    '/workbench_control/set_parameters_atomically',
+                    '/firmware_topic_bridge/set_parameters_atomically']
 
 
 def web_nodes(context):
     mode = LaunchConfiguration('control_mode').perform(context)
-    if mode not in ('managed', 'readonly'):
-        raise ValueError('control_mode must be managed or readonly')
-    control = mode == 'managed'
+    if mode not in ('bench', 'readonly'):
+        raise ValueError('control_mode must be bench or readonly')
+    control = mode == 'bench'
     pkg_share = get_package_share_directory('web_host')
     return [
         Node(
@@ -57,7 +53,6 @@ def web_nodes(context):
                 'model_url_prefix': '/robot_sim', 'model_dir': LaunchConfiguration('model_dir'),
                 'control_mode': mode, 'robot_model': LaunchConfiguration('robot_model'),
                 'rosbridge_port': LaunchConfiguration('rosbridge_port'),
-                'robot_id': LaunchConfiguration('robot_id'),
             }]),
     ]
 
@@ -72,10 +67,9 @@ def generate_launch_description():
         model_dir = ''
 
     return LaunchDescription([
-        DeclareLaunchArgument('control_mode', default_value='managed',
-                              description='managed or readonly; real control always passes through the MCU supervisor.'),
-        DeclareLaunchArgument('robot_model', default_value='', description='Managed robot model.'),
-        DeclareLaunchArgument('robot_id', default_value='', description='Assembly identity for display.'),
+        DeclareLaunchArgument('control_mode', default_value='bench',
+                              description='bench or readonly.'),
+        DeclareLaunchArgument('robot_model', default_value='', description='Initial model selection.'),
         DeclareLaunchArgument('rosbridge_port', default_value='9090',
                               description='WebSocket port of rosbridge.'),
         DeclareLaunchArgument('web_port', default_value='8080',

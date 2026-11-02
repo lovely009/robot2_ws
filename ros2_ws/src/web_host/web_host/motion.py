@@ -11,12 +11,40 @@ import xml.etree.ElementTree as ET
 
 
 class MotionJobs:
-    def __init__(self):
+    def __init__(self, actions_dir=None):
+        self.actions_dir = Path(actions_dir) if actions_dir is not None else None
         self.directory = tempfile.TemporaryDirectory(prefix='workbench-motion-')
         self.jobs = {}
         self.lock = threading.RLock()
         self.stopping = threading.Event()
         self.thread = None
+
+    @staticmethod
+    def _source_name(name):
+        if (not isinstance(name, str) or not name or name != Path(name).name
+                or '\\' in name or '\0' in name or Path(name).suffix.lower() not in ('.bvh', '.bhv')):
+            raise ValueError('请选择动作库内的单个 BVH 文件')
+        return name
+
+    def sources(self):
+        if self.actions_dir is None or not self.actions_dir.is_dir():
+            return []
+        return sorted(p.name for p in self.actions_dir.iterdir()
+                      if p.is_file() and p.suffix.lower() in ('.bvh', '.bhv')
+                      and '\\' not in p.name)
+
+    def _source_text(self, name):
+        name = self._source_name(name)
+        if self.actions_dir is None:
+            raise FileNotFoundError('动作库不存在')
+        path = self.actions_dir / name
+        if not path.is_file():
+            raise FileNotFoundError('动作库 BVH 不存在')
+        with path.open('rb') as handle:
+            content = handle.read(20 * 1024 * 1024 + 1)
+        if len(content) > 20 * 1024 * 1024:
+            raise ValueError('BVH 文件不能超过 20 MB')
+        return content.decode('utf-8')
 
     def _job(self, key):
         if key not in self.jobs:
@@ -33,11 +61,17 @@ class MotionJobs:
         import numpy as np
         import pinocchio as pin
         import yaml
+        from .shoulder_retarget import ShoulderRetargeter
         if not isinstance(request, dict):
             raise ValueError('请提交 BVH 和 URDF 文件')
+        if 'bvh_text' not in request and 'bvh_source' in request:
+            request = {**request, 'bvh_text': self._source_text(request['bvh_source']),
+                       'bvh_name': request['bvh_source']}
         for field in ('bvh_text', 'urdf_text'):
             if not isinstance(request.get(field), str) or not request[field].strip():
                 raise ValueError('BVH 和 URDF 均不能为空')
+        if sum(len(request[field].encode('utf-8')) for field in ('bvh_text', 'urdf_text')) > 20 * 1024 * 1024:
+            raise ValueError('BVH 和 URDF 合计不能超过 20 MB')
         up_axis = request.get('up_axis', 'y_up')
         scale = request.get('scale', .01)
         if up_axis not in ('y_up', 'z_up') or scale not in (.001, .01, 1.):
@@ -92,6 +126,11 @@ class MotionJobs:
                                  for name in arm['source']) and template['torso'] in sources
                              and all(name in links for arm in template['arms'].values()
                                      for name in arm['robot']))
+                if not automatic and ShoulderRetargeter.supports(model, clip):
+                    automatic = True
+                    template = {'mode': 'shoulders12',
+                                'source_to_robot': [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+                                'source': 'shoulder_r', 'joints': ['joint_link1', 'joint_link2']}
                 status = {'id': key, 'state': 'mapping', 'progress': 0,
                           'bvh_name': str(request.get('bvh_name', 'source.bvh'))[:160],
                           'urdf_name': str(request.get('urdf_name', 'robot.urdf'))[:160],
@@ -111,6 +150,7 @@ class MotionJobs:
 
     def start(self, key, mapping):
         from bvh_broadcaster.retarget import ArmRetargeter
+        from .shoulder_retarget import ShoulderRetargeter
         with self.lock:
             job = self._job(key)
             if job['status']['state'] not in ('mapping', 'failed'):
@@ -119,8 +159,9 @@ class MotionJobs:
                 raise ValueError('已有转换正在进行，请等待完成')
             if not isinstance(mapping, dict):
                 raise ValueError('请先选择人体与机器人关节对应关系')
-            solver = ArmRetargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
-                                   up_axis=job['up_axis'])
+            retargeter = ShoulderRetargeter if mapping.get('mode') == 'shoulders12' else ArmRetargeter
+            solver = retargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
+                                up_axis=job['up_axis'])
             job['status'].update(state='running', progress=0, error='', mapping=copy.deepcopy(mapping))
             self.thread = threading.Thread(target=self._convert, args=(key, solver), daemon=True)
             self.thread.start()
@@ -246,6 +287,8 @@ def handle_motion(handler, jobs):
                 send(202, jobs.start(parts[3], request.get('mapping')))
             else:
                 send(404, {'error': '动作接口不存在'})
+        elif handler.command == 'GET' and parts == ['api', 'motion', 'sources']:
+            send(200, {'sources': jobs.sources()})
         elif handler.command == 'GET' and parts[:3] == ['api', 'motion', 'jobs']:
             if len(parts) == 4:
                 send(200, jobs.status(parts[3]))

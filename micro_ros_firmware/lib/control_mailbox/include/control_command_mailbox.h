@@ -29,6 +29,8 @@ typedef struct {
 typedef struct {
   uint64_t session_id;
   uint64_t lease_id;
+  uint32_t lease_sequence;
+  uint32_t lease_valid_until_tick_ms;
   uint32_t sequence;
   uint32_t received_tick_ms;
   uint32_t valid_until_tick_ms;

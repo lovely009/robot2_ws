@@ -2,7 +2,7 @@
 
 This launch has no device transport arguments. The fully rendered description is
 checked before creating any process; a hardware plugin other than the official
-mock_components/GenericSystem is rejected. Real robots use managed_robot.launch.py
+mock_components/GenericSystem is rejected. Real robots use robot.launch.py
 and communicate through micro-ROS MCU.
 """
 
@@ -164,7 +164,7 @@ def _validate_mock_description(description, joints):
             or (plugins[0].text or "").strip() != "mock_components/GenericSystem"):
         raise RuntimeError(
             "mock_control only accepts mock_components/GenericSystem; "
-            "real robots must use robot_bringup managed_robot.launch.py via micro-ROS MCU")
+            "real robots must use robot_bringup robot.launch.py via micro-ROS MCU")
     control_joints = [joint.get("name") for joint in systems[0].findall("joint")]
     if sorted(control_joints) != sorted(joints) or len(set(control_joints)) != len(joints):
         raise RuntimeError("mock ros2_control joints must match motor_config_file exactly")

@@ -34,7 +34,8 @@ from rcl_interfaces.srv import SetParametersAtomically
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.parameter import Parameter
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
+from can_bridge_msgs.msg import MotorControlStateArray
 
 from bench_msgs.srv import (
     GetAgentStatus,
@@ -53,7 +54,7 @@ from bench_msgs.srv import (
 )
 
 from .agent_manager import AgentProcessManager, enumerate_serial_ports
-from .feedback_manager import FirmwareFeedbackManager
+from .feedback_manager import FirmwareFeedbackManager, FeedbackInventory
 from .gravity_feedforward_manager import GravityFeedforwardManager
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
 from .simulation_manager import (
@@ -117,6 +118,8 @@ class BenchManager(LifecycleNode):
 
     def __init__(self):
         super().__init__('bench_manager')
+        self._change_state_callback = self._service_change_state.callback
+        self._service_change_state.callback = self._on_change_state
         self.declare_parameter('model_dir', '')
         self.declare_parameter('feedback_model', '')
         self.declare_parameter('auto_start_agent', False)
@@ -135,7 +138,11 @@ class BenchManager(LifecycleNode):
 
         # 所有会话共用一个可注入的 systemd 访问层。
         self._systemd = SystemdUnits()
-        self.feedback = FirmwareFeedbackManager(models_root, self._systemd)
+        self.feedback = FirmwareFeedbackManager(models_root, self._systemd,
+            stop_control=lambda: self._feedback_stop_pub.publish(Empty()))
+        self._feedback_inventory = FeedbackInventory()
+        self._feedback_inventory_sub = None
+        self._feedback_stop_pub = None
         self._feedback_error = ''
         self.add_on_set_parameters_callback(self._validate_feedback_parameters)
         self.agent = AgentProcessManager(systemd=self._systemd)
@@ -155,6 +162,14 @@ class BenchManager(LifecycleNode):
 
     # ---------- lifecycle ----------
 
+    def _on_change_state(self, request, response):
+        # Humble 会让非法 transition ID 的异常逃出服务回调，导致整个管理器退出。
+        if not request.transition.label and request.transition.id not in (
+                transition[0] for transition in self._state_machine.available_transitions):
+            response.success = False
+            return response
+        return self._change_state_callback(request, response)
+
     def on_configure(self, _state):
         if not self._systemd.available():
             self.get_logger().error(
@@ -163,6 +178,9 @@ class BenchManager(LifecycleNode):
             return TransitionCallbackReturn.FAILURE
 
         self._status_pub = self.create_publisher(String, '/bench/status', 10)
+        self._feedback_stop_pub = self.create_publisher(Empty, '/control/stop', 10)
+        self._feedback_inventory_sub = self.create_subscription(
+            MotorControlStateArray, '/motor/control_states', self._feedback_inventory.observe, 10)
         self._control_status_sub = self.create_subscription(
             String, '/control/status', self._on_control_status, 10)
         for srv_type, name, callback in (
@@ -244,6 +262,12 @@ class BenchManager(LifecycleNode):
         self.destroy_timer(self._timer)
         self.destroy_publisher(self._status_pub)
         self.feedforward.close()
+        if self._feedback_inventory_sub is not None:
+            self.destroy_subscription(self._feedback_inventory_sub)
+            self._feedback_inventory_sub = None
+        if self._feedback_stop_pub is not None:
+            self.destroy_publisher(self._feedback_stop_pub)
+            self._feedback_stop_pub = None
         if self._gravity_client is not None:
             self.destroy_client(self._gravity_client)
             self._gravity_client = None
@@ -280,11 +304,12 @@ class BenchManager(LifecycleNode):
             own_count = sum(p.node_name in _OWN_FEEDBACK_NODES for p in publishers)
             external = [p.node_name for p in publishers
                         if p.node_name not in _OWN_FEEDBACK_NODES or not running or own_count > 1]
+            motor_ids, session_id = self._feedback_inventory.current()
             self.feedback.reconcile(
                 self.get_parameter('feedback_model').value,
                 agent_running=self.agent.status()['state'] == 'running',
                 simulation_running=self.simulation.status()['state'] == 'running',
-                external_publishers=external)
+                external_publishers=external, motor_ids=motor_ids, session_id=session_id)
             self._feedback_error = ''
         except _EXPECTED_ERRORS as exc:
             self._feedback_error = str(exc)
@@ -470,9 +495,12 @@ class BenchManager(LifecycleNode):
 
     def _on_control_status(self, message):
         try:
-            self.feedforward.observe(json.loads(message.data))
+            status = json.loads(message.data)
+            self.feedforward.observe(status)
+            self.feedback.observe_control_status(status)
         except (ValueError, TypeError) as exc:
             self.feedforward.invalidate_status(str(exc))
+            self.feedback.observe_control_status(None)
         self._publish_status()
 
     def _finish_gravity(self, response, action, callback):

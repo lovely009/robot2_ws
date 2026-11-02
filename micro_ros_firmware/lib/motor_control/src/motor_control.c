@@ -1501,6 +1501,13 @@ uint64_t motor_control_take_tx_cancellations(motor_control_context_t *ctx) {
   return slots;
 }
 
+uint64_t motor_control_take_zero_tx_cancellations(motor_control_context_t *ctx) {
+  if (ctx == NULL) return 0U;
+  const uint64_t slots = ctx->zero_tx_cancel_pending;
+  ctx->zero_tx_cancel_pending = 0U;
+  return slots;
+}
+
 size_t motor_control_collect_tx(motor_control_context_t *ctx,
     motor_protocol_tx_frame_t *out, size_t capacity) {
   if (ctx == NULL || out == NULL || capacity == 0U) {

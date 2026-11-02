@@ -12,6 +12,7 @@ from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from robot_transmission import Model
+from motor_hardware_interface.control_subset import materialize_control_subset
 
 
 def hardware_description(config_file, urdf_file):
@@ -64,13 +65,15 @@ def hardware_description(config_file, urdf_file):
     return ET.tostring(root, encoding='unicode'), joints
 
 
-def controller_parameters(joints, urdf_file=''):
+def controller_parameters(joints, urdf_file):
+    nodes = {joint.get('name'): joint for joint in ET.parse(urdf_file).getroot().findall('joint')}
     parameters = {
         '/host_control/controller_manager': {'ros__parameters': {
             'update_rate': 50,
             'joint_state_broadcaster': {'type': 'joint_state_broadcaster/JointStateBroadcaster'},
             'trajectory_controller': {'type': 'joint_trajectory_controller/JointTrajectoryController'},
             'gravity_controller': {'type': 'robot_dynamics/GravityCompensationController'},
+            'follow_controller': {'type': 'motor_hardware_interface/JointFollowController'},
         }},
         '/host_control/trajectory_controller': {'ros__parameters': {
             'joints': list(joints),
@@ -80,8 +83,12 @@ def controller_parameters(joints, urdf_file=''):
             'allow_partial_joints_goal': False,
             'constraints': {
                 'goal_time': 1.0, 'stopped_velocity_tolerance': 0.02,
-                **{name: {'trajectory': 0.1, 'goal': 0.01} for name in joints},
+                **{name: {'trajectory': 0.1, 'goal': 0.05} for name in joints},
             },
+        }},
+        '/host_control/follow_controller': {'ros__parameters': {
+            'joints': list(joints),
+            'max_velocity': [float(nodes[name].find('limit').get('velocity')) for name in joints],
         }},
         '/host_control/gravity_controller': {'ros__parameters': {
             'joints': list(joints), 'urdf_file': urdf_file,
@@ -100,10 +107,12 @@ def controller_parameters(joints, urdf_file=''):
 def launch_control_stack(context):
     config_file = LaunchConfiguration('motor_config_file').perform(context)
     urdf_file = LaunchConfiguration('urdf_file').perform(context)
-    description, joints = hardware_description(
-        config_file, urdf_file)
-    started = LaunchConfiguration('start_controllers').perform(context).lower() == 'true'
     temporary = tempfile.TemporaryDirectory(prefix='host-trajectory-')
+    motor_ids = LaunchConfiguration('motor_ids').perform(context)
+    if motor_ids:
+        config_file = materialize_control_subset(config_file, motor_ids, temporary.name)
+    description, joints = hardware_description(config_file, urdf_file)
+    started = LaunchConfiguration('start_controllers').perform(context).lower() == 'true'
     parameters_file = str(Path(temporary.name) / 'controllers.yaml')
     with open(parameters_file, 'w', encoding='utf-8') as handle:
         yaml.safe_dump(controller_parameters(joints, str(Path(urdf_file).resolve())), handle,
@@ -122,7 +131,7 @@ def launch_control_stack(context):
                              '--controller-manager', '/host_control/controller_manager',
                              *(['--activate-as-group'] if started else ['--inactive'])])
     manual = Node(package='controller_manager', executable='spawner', output='screen',
-                  arguments=[*[f'manual_controller_{i}' for i in range(len(joints))],
+                  arguments=['follow_controller', *[f'manual_controller_{i}' for i in range(len(joints))],
                              '--controller-manager', '/host_control/controller_manager', '--inactive'])
     client = Node(package='motor_hardware_interface', executable='workbench_control.py',
                   name='workbench_control', output='screen', parameters=[{
@@ -149,6 +158,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('motor_config_file', description='MCU 电机与传动映射，裸 ID 全局唯一'),
         DeclareLaunchArgument('urdf_file', description='对应模型展开后的 URDF，保留真实关节与限位'),
+        DeclareLaunchArgument('motor_ids', default_value='', description='仅控制列出的完整传动组；空值使用完整模型'),
         DeclareLaunchArgument('model', default_value='', description='工作台模型身份'),
         DeclareLaunchArgument('start_controllers', default_value='false', choices=['false', 'true'],
                               description='显式激活 JTC；默认等待新的工作台目标'),

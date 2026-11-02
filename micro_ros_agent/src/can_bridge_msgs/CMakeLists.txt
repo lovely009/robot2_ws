@@ -79,6 +79,7 @@ rosidl_generate_interfaces(
   "msg/ConfigRequest.msg"
   "msg/ConfigResult.msg"
   "srv/ExecuteConfig.srv"
+  "srv/SubmitPolicy.srv"
   DEPENDENCIES std_msgs
 )
 

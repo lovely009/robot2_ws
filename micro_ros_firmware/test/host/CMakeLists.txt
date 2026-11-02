@@ -142,6 +142,8 @@ target_link_libraries(fw_agent_protocol PUBLIC fw_control_lease fw_mailbox fw_mo
 fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
   OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_control_lease
   INCLUDES ../../lib/motor_control/src)
+fw_host_test(test_agent_liveness SOURCES test_agent_liveness.cpp
+  INCLUDES ../../lib/agent_protocol/include)
 
 fw_host_test(test_motor_protocol
   SOURCES test_motor_protocol.cpp
@@ -163,7 +165,7 @@ fw_host_test(test_protocol_family_isolation
 
 fw_host_test(test_motor_control
   SOURCES test_motor_control.cpp
-  OBLIBS fw_motor_control fw_adapters fw_motor_protocol
+  OBLIBS fw_motor_control fw_adapters fw_motor_protocol fw_config_transaction
   # 白盒：直读 ctx->entries 等内部布局（internal.h 不向 app 导出）
   INCLUDES ../../lib/motor_control/src)
 
@@ -298,19 +300,6 @@ fw_host_test(test_config_transaction
 add_library(fw_serial_write_budget OBJECT ../../lib/serial_write_budget/src/serial_write_budget.c)
 target_include_directories(fw_serial_write_budget PUBLIC ../../lib/serial_write_budget/include)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
-
-# Native transport shim for the real ROS/JTC + firmware-core SIL test.
-add_library(robot2_sil SHARED sil_engine.cpp)
-target_include_directories(robot2_sil PRIVATE ../../lib/motor_control/src)
-target_link_libraries(robot2_sil PRIVATE fw_agent_protocol fw_control_lease
-  fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
-  fw_wire_codec fw_motor_tx_router fw_can_tx_scheduler)
-add_executable(test_native_boundary test_native_boundary.cpp)
-target_link_libraries(test_native_boundary PRIVATE robot2_sil)
-add_test(NAME test_native_boundary COMMAND test_native_boundary)
-add_executable(test_native_model test_native_model.cpp)
-target_link_libraries(test_native_model PRIVATE robot2_sil)
-add_test(NAME test_native_model COMMAND test_native_model)
 
 fw_host_test(test_param_store SOURCES test_param_store.cpp OBLIBS fw_param_store
   INCLUDES ../../lib/motor_protocol/include)

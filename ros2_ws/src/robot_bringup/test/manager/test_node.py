@@ -19,7 +19,7 @@ from rcl_interfaces.srv import SetParametersAtomically
 from conftest import FakeSystemd
 
 from bench_manager.agent_manager import AgentProcessManager
-from bench_manager.feedback_manager import FirmwareFeedbackManager
+from bench_manager.feedback_manager import FirmwareFeedbackManager, FeedbackInventory
 from bench_manager.gravity_feedforward_manager import (
     GravityFeedforwardManager, PARAMETER_TIMEOUT_S,
 )
@@ -86,6 +86,9 @@ def _shell(systemd: FakeSystemd, models=None,
     node._systemd = SystemdUnits(runner=systemd)
     node.feedback = FirmwareFeedbackManager(Path('/missing-models'), node._systemd)
     node._feedback_error = ''
+    node._feedback_inventory = FeedbackInventory()
+    node._feedback_inventory_sub = None
+    node._feedback_stop_pub = None
     node.get_parameter = lambda _name: type('Parameter', (), {'value': ''})()
     node.get_publishers_info_by_topic = lambda _topic: []
     node.agent = AgentProcessManager(
@@ -166,7 +169,7 @@ def test_feedback_tick_runs_even_without_status_subscribers() -> None:
     node.feedback.reconcile = lambda *args, **kwargs: reconciled.append((args, kwargs))
     node._tick()
     assert reconciled == [(('',), {'agent_running': False, 'simulation_running': False,
-                                   'external_publishers': []})]
+                                   'external_publishers': [], 'motor_ids': [], 'session_id': 0})]
 
 
 def test_feedback_model_parameter_rejects_paths_without_changing_units() -> None:
@@ -398,7 +401,9 @@ def test_configure_subscribes_to_real_control_status_without_creating_a_ros_grap
     node.create_service = lambda kind, name, callback: services.append(name)
     node.create_timer = lambda *args: object()
     assert node.on_configure(None) is TransitionCallbackReturn.SUCCESS
-    assert subscriptions == [(String, '/control/status', node._on_control_status, 10)]
+    from can_bridge_msgs.msg import MotorControlStateArray
+    assert subscriptions == [(MotorControlStateArray, '/motor/control_states', node._feedback_inventory.observe, 10),
+                             (String, '/control/status', node._on_control_status, 10)]
     assert '/bench/start_gravity_feedforward' in services
     assert '/bench/stop_gravity_feedforward' in services
     assert '/bench/set_gravity_feedforward_gain' in services
@@ -567,8 +572,10 @@ def test_feedback_ownership_excludes_only_one_managed_publisher(
     if managed:
         systemd.properties[UNIT_FEEDBACK] = {
             'LoadState': 'loaded', 'ActiveState': 'active',
-            'Environment': 'BENCH_FEEDBACK_MODEL=arm BENCH_CONTROL_EXECUTION=ros2_control'}
+            'Environment': 'BENCH_FEEDBACK_MODEL=arm BENCH_CONTROL_EXECUTION=ros2_control BENCH_CONTROL_MOTORS=1 BENCH_MCU_SESSION=100'}
     node = _shell(systemd)
+    node._feedback_inventory.current = lambda: ([1], 100)
+    node.feedback._validate = lambda _: SimpleNamespace(actuator_ids={'m1':1}, groups=[SimpleNamespace(actuators=['m1'])])
     node.agent.status = lambda: {'state': 'running'}
     node.get_parameter = lambda _name: SimpleNamespace(value='arm')
     node.get_publishers_info_by_topic = lambda _topic: [

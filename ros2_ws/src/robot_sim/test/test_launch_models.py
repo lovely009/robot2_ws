@@ -24,6 +24,25 @@ LAUNCH_DIR = HERE.parent / "launch"
 MODEL = "half_body_robot"
 
 
+def test_standalone_motor_launch_uses_installed_robot_sim():
+    """独立电机模拟入口与可执行文件由统一仿真包提供。"""
+    from ament_index_python.packages import get_package_share_directory
+
+    launch_file = Path(get_package_share_directory("robot_sim")) / "launch/motor_sim.launch.py"
+    spec = importlib.util.spec_from_file_location("standalone_motor_sim", launch_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    nodes = [action for action in module.generate_launch_description().entities
+             if isinstance(action, Node)]
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node.node_package == "robot_sim"
+    assert node.node_executable == "motor_sim_node"
+    executable = Path(perform_substitutions(LaunchContext(), node.cmd[0]))
+    assert executable.is_file()
+    assert executable.parent.name == "robot_sim"
+
+
 def _execute(launch_file):
     """加载 launch 模块并执行参数声明，返回 (actions, context)。"""
     spec = importlib.util.spec_from_file_location(launch_file.stem, launch_file)

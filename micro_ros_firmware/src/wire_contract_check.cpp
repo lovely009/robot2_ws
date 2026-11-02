@@ -6,12 +6,15 @@
 #include <can_bridge_msgs/msg/detail/motor_status__struct.h>
 #include <can_bridge_msgs/msg/detail/system_command__struct.h>
 #include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
+#include <can_bridge_msgs/msg/detail/agent_wire_contract__struct.h>
 
 #include "firmware_config.h"
 #include "wire_codec.h"
 #include "control_lease.h"
 
 namespace {
+static_assert(can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION == 4U,
+    "Refresh micro-ROS messages before building the combined authority/target protocol");
 static_assert(CONTROL_LEASE_MAX_MS == can_bridge_msgs__msg__WireContract__CONTROL_LEASE_MAX_MS,
     "control lease maximum lifetime drifted from WireContract");
 

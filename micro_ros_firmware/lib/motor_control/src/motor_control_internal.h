@@ -207,6 +207,7 @@ struct motor_control_context {
   size_t tx_count;
   // 停机时锁存；任务层先取消下游同槽旧 P0/P1，再路由新的安全帧。
   uint64_t tx_cancel_pending;
+  uint64_t zero_tx_cancel_pending; // 只取消设零 P2，不能吞掉尚未送达的安全 P0。
   uint32_t tx_dropped_count;
   uint32_t p0_retry_count; // P0 帧因缓冲全满而挂起重试的次数（诊断可见）
 

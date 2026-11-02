@@ -1,6 +1,6 @@
 """web_host 前端静态契约测试。
 
-重构后把全部标记放在 index.html（含面板与屏的 <template>），JS 只做行为。结构一旦漂移
+Vue 工作台复用 panel_templates.html 的面板模板，JS 只做行为。结构一旦漂移
 就会出现两类错误——「改名漏改」与「新增文件忘重跑 colcon」——它们都不让构建失败，只在
 浏览器里静默失效。本文件把这两类错误变成测试失败。
 
@@ -17,10 +17,7 @@ import pytest
 
 PKG = Path(__file__).resolve().parent.parent
 WEB = PKG / 'web'
-INDEX = WEB / 'index.html'
-
-# 不属任何屏的面板：notes 由说明浮层挂载
-SHELL_ONLY_PANELS = {'notes'}
+INDEX = WEB / 'panel_templates.html'
 
 
 class IndexParser(HTMLParser):
@@ -69,6 +66,9 @@ def index():
     assert INDEX.is_file(), f'缺少 {INDEX}'
     parser = IndexParser()
     parser.feed(INDEX.read_text(encoding='utf-8'))
+    parser.feed((PKG / 'frontend/index.html').read_text(encoding='utf-8'))
+    for component in (PKG / 'frontend/src').rglob('*.vue'):
+        parser.feed(component.read_text(encoding='utf-8'))
     return parser
 
 
@@ -78,11 +78,11 @@ def js_files():
     return files
 
 
-def router_screens():
-    src = (WEB / 'js' / 'core' / 'router.js').read_text(encoding='utf-8')
-    m = re.search(r'export\s+const\s+SCREENS\s*=\s*\[([^\]]*)\]', src)
-    assert m, 'router.js 里找不到 SCREENS 常量'
-    return [s.strip().strip('\'"') for s in m.group(1).split(',') if s.strip()]
+def runtime_panels():
+    src = (PKG / 'frontend/src/runtime.ts').read_text(encoding='utf-8')
+    match = re.search(r'const panelIds: PanelId\[\] = \[([^\]]+)\]', src)
+    assert match, 'Vue runtime 缺少面板清单'
+    return re.findall(r'"([^"\n]+)"', match.group(1))
 
 
 # 1. id 唯一：面板模板会被克隆，同屏出现两个同 id 会让 getElementById 取到错的元素
@@ -105,10 +105,10 @@ def test_js_dom_refs_exist(index):
 
 
 def test_js_does_not_use_unimported_core_constants():
-    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被 main.js 吞掉。
+    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被渲染循环捕获。
 
     实锤：`feedforward.js` 用了 `DIRTY.BENCH` 却从没 import 过 `DIRTY`。mount 照常成功
-    （那一行在 render 里，脏帧才走到），而 main.js 的渲染循环把 render 的异常
+    （那一行在 render 里，脏帧才走到），而 工作台的渲染循环把 render 的异常
     `try/catch` 掉只打 console——于是这个面板的脏帧刷新一直是死的，且没人发现
     （2026-10-19 查实并修复）。同一个循环在**挂载**期没有保护时更狠：一个面板抛异常会
     把它之后的占位一起吞掉，表现成"整屏静默缺块"。
@@ -162,25 +162,11 @@ def test_no_ids_generated_in_js():
     assert not bad, f'JS 生成了带 id 的元素（动态行请只用 class）：{bad}'
 
 
-# 4. 屏的三处表达必须一致：router 的 SCREENS、屏模板名、左导航的 data-goto
-def test_screens_consistent(index):
-    screens = router_screens()
-    assert screens, 'SCREENS 为空'
-    assert len(screens) == len(set(screens)), f'SCREENS 有重复：{screens}'
-    assert set(index.screens) == set(screens), (
-        f'屏模板与 SCREENS 不一致：模板 {sorted(index.screens)} vs SCREENS {sorted(screens)}')
-    assert set(index.gotos) == set(screens), (
-        f'左导航 data-goto 与 SCREENS 不一致：{sorted(index.gotos)} vs {sorted(screens)}')
-    src = (WEB / 'js' / 'core' / 'router.js').read_text(encoding='utf-8')
-    m = re.search(r"export\s+const\s+DEFAULT_SCREEN\s*=\s*'([^']+)'", src)
-    assert m, 'router.js 里找不到 DEFAULT_SCREEN'
-    assert m.group(1) in screens, f'DEFAULT_SCREEN {m.group(1)} 不在 SCREENS 里'
-
-
-# 5. 屏模板里声明的每个面板占位都有对应模板
-def test_panel_slots_have_templates(index):
-    slots, templates = set(index.panel_slots), set(index.panel_templates)
-    assert slots <= templates, f'屏模板引用了没有 <template> 的面板：{sorted(slots - templates)}'
+def test_vue_panels_match_templates(index):
+    assert set(runtime_panels()) == set(index.panel_templates)
+    assert not index.screens
+    assert not (WEB / 'js/main.js').exists()
+    assert not (WEB / 'js/core/router.js').exists()
 
 
 # 6. 每个面板模板都有对应模块文件
@@ -192,7 +178,7 @@ def test_panel_templates_have_modules(index):
 
 # 7. 每个面板模块都被某屏引用（notes 由外壳挂载，豁免）
 def test_panel_modules_are_referenced(index):
-    used = set(index.panel_slots) | SHELL_ONLY_PANELS
+    used = set(runtime_panels())
     unused = sorted(f.stem for f in (WEB / 'js' / 'panels').glob('*.js')
                     if f.stem not in used)
     assert not unused, f'面板模块没有被任何屏引用：{unused}'
@@ -212,7 +198,7 @@ def test_relative_imports_exist():
     assert not missing, f'import 目标文件不存在：{missing}'
 
 
-# 9. 从 main.js 出发的 import 图无环
+# 所有共享面板模块的相对 import 图无环
 def test_import_graph_acyclic():
     pat = re.compile(r"""(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]""")
 
@@ -236,7 +222,8 @@ def test_import_graph_acyclic():
         stack.pop()
         seen.add(f)
 
-    walk((WEB / 'js' / 'main.js').resolve())
+    for path in js_files():
+        walk(path.resolve())
 
 
 # 10. index.html 引用的静态资产都在磁盘上
@@ -245,7 +232,8 @@ def test_index_assets_exist(index):
     for ref in index.assets:
         if ref.startswith(('http://', 'https://', '//', 'data:')):
             continue
-        if not (WEB / ref).is_file():
+        target = PKG / 'frontend' / ref.lstrip('/') if ref.startswith('/src/') else WEB / ref.lstrip('/')
+        if not target.is_file():
             missing.append(ref)
     assert not missing, f'index.html 引用了不存在的文件：{missing}'
 
@@ -299,12 +287,12 @@ def test_importmap_targets_exist(index):
     for _key, value in imports.items():
         if value.startswith(('http://', 'https://', '//')):
             continue
-        assert (WEB / value).exists(), f'importmap 目标不存在：{value}'
+        assert (WEB / value.lstrip('/')).exists(), f'importmap 目标不存在：{value}'
 
 
 # 13. 内置兜底表必须覆盖**默认模型**的全部电机
 def test_builtin_joint_map_covers_default_model():
-    """内置表只是 `/api/model-joints` 不可达时的兜底，但兜底也必须是对的。
+    """内置表只是 `/api/model-transmissions` 不可达时的兜底，但兜底也必须是对的。
 
     它曾经是**唯一**来源且只写了第一链 1..9，默认模型又早已是 18 台的
     half_body_robot → 开箱即坏：10-18 关节角恒 0、小球点不中，像"电机没注册"。
@@ -393,7 +381,6 @@ BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
 SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
 AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
 FORMAT_JS = WEB / 'js' / 'core' / 'format.js'
-FEEDFORWARD_JS = WEB / 'js' / 'panels' / 'feedforward.js'
 
 
 def _skip_without(path):
@@ -433,7 +420,7 @@ def test_frontend_service_table_matches_bench_manager():
 
 
 def test_frontend_unit_names_match_bench_manager():
-    """四个 unit 名是同一份契约的三处副本（后端常量、前端常量、文档）。"""
+    """前端实际引用的 unit 名必须与后端一致，无需复制未使用的常量。"""
     _skip_without(SYSTEMD_UNITS)
     backend = dict(re.findall(
         r'^(UNIT_\w+)\s*=\s*"([^"]+)"', SYSTEMD_UNITS.read_text(encoding='utf-8'),
@@ -443,7 +430,7 @@ def test_frontend_unit_names_match_bench_manager():
         r'^export const (UNIT_\w+)\s*=\s*\'([^\']+)\'',
         AGENT_JS.read_text(encoding='utf-8'), re.M))
     assert frontend, 'agent.js 里没解析到 UNIT_* 常量'
-    assert frontend == backend, (
+    assert frontend.items() <= backend.items(), (
         f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
 
 
@@ -453,11 +440,12 @@ def test_downlink_topics_use_ros2_control_client():
     expected = {
         'setpoint': '/control/setpoint',
         'trajectory': '/control/trajectory',
+        'rawTrajectory': '/control/trajectory_raw',
         'convertedTrajectory': '/control/trajectory',
         'commandStatus': '/control/status',
         'trajectoryState': '/control/trajectory_state',
         'stop': '/control/stop',
-        'jointTrajectory': '/arm_controller/joint_trajectory',
+        'jointTarget': '/control/joint_target',
         'policy': '/motor/policy_array',
         'sysCmd': '/motor/system_command',
     }
@@ -474,12 +462,3 @@ def test_frontend_has_no_legacy_motion_route_switch():
         for obsolete in ('setDownlinkRoute', 'getDownlinkRoute', 'command_streamer',
                          '/motor_command/', 'OVERLAY_COMMAND_TOPIC', 'DOWNLINK_ROUTE'):
             assert obsolete not in text, f'{path}: 仍引用 {obsolete}'
-
-
-def test_gravity_controls_still_use_bench_services():
-    src = FEEDFORWARD_JS.read_text(encoding='utf-8')
-    assert 'bench.startGravityFeedforward' in src
-    assert 'bench.stopGravityFeedforward' in src
-    assert 'bench.setGravityFeedforwardGain' in src
-    assert 'store.commandStatus' in src
-    assert 'gravity_enabled' in src and 'effort_gain' in src and 'data.mode' in src

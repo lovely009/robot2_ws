@@ -1,7 +1,0 @@
-string lease_id
-uint64 epoch
-uint32 lease_ms
----
-bool success
-uint32 lease_remaining_ms
-string reason

@@ -6,6 +6,24 @@
 
 #include "micro_ros_bridge/codec.hpp"
 
+TEST(ClockProgress, AcceptsTwentyMillisecondsAndRejectsOneNanosecondBeyond)
+{
+  using micro_ros_bridge::clock_progress_valid;
+  constexpr int64_t elapsed = 1000000000;
+  EXPECT_TRUE(clock_progress_valid(elapsed + 20000000, elapsed));
+  EXPECT_TRUE(clock_progress_valid(elapsed - 20000000, elapsed));
+  EXPECT_FALSE(clock_progress_valid(elapsed + 20000001, elapsed));
+  EXPECT_FALSE(clock_progress_valid(elapsed - 20000001, elapsed));
+}
+
+TEST(ClockProgress, MeasuresClockDriftRatherThanCallbackSchedulingDelay)
+{
+  using micro_ros_bridge::clock_progress_valid;
+  EXPECT_TRUE(clock_progress_valid(120000000, 120000000));
+  EXPECT_TRUE(clock_progress_valid(-5000000, 1000000));
+  EXPECT_FALSE(clock_progress_valid(0, -1));
+}
+
 TEST(CommandDeadline, WrapsTickAndShrinksWithSourceAge)
 {
   using micro_ros_bridge::command_deadline_tick;

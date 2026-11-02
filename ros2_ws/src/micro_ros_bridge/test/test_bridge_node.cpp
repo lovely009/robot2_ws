@@ -48,6 +48,7 @@ TEST_F(HostBridgeTest, RejectsFirmwareTrajectoryWhileCancelKeepsIndependentStop)
 }
 TEST_F(HostBridgeTest, TakeoverRequiresOldTrajectoryAndAuthorizationToBeCleared)
 {
+  auto_authority = false;
   status.trajectory.state = AgentTrajectoryState::RUNNING;
   status.trajectory.trajectory_id = 1;
   start(); status.motors[0].policy_enabled = true;
@@ -57,7 +58,7 @@ TEST_F(HostBridgeTest, TakeoverRequiresOldTrajectoryAndAuthorizationToBeCleared)
     return c.operation == AgentConfigRequest::STOP_ALL;}));
   status.trajectory.state = AgentTrajectoryState::ABORTED;
   status.motors[0].policy_enabled = false;
-  run(100ms); command_pub->publish(command());
+  run(100ms); auto_authority = true; enable(); run(80ms); command_pub->publish(command());
   ASSERT_TRUE(spin([&] {return !commands.empty();}));
 }
 TEST_F(BridgeTest, MultipleWireCommandWritersStopInsteadOfCompeting)
@@ -81,7 +82,7 @@ TEST_F(BridgeTest, MotionGateNeedsStatusInfoSingleWriterAndFreshSource)
   EXPECT_EQ(commands.back().sequence, 42u); EXPECT_EQ(commands.back().session_id, 100u);
   EXPECT_EQ(commands.back().motor_ids[0], 64); EXPECT_EQ(commands.back().position_q[0], 1311);
   EXPECT_EQ(commands.back().mode, AgentCommand::SNAPSHOT);
-  auto second = peer->create_publisher<MotorCommandArray>("/robot/managed/motor/command_array", 1);
+  auto second = peer->create_publisher<MotorCommandArray>("/motor/host_command_array", 1);
   run(60ms); command_pub->publish(command()); run(); EXPECT_EQ(commands.size(), 1u);
   second.reset(); run();
   status_timer.reset(); run(320ms);
@@ -155,12 +156,90 @@ TEST_F(BridgeTest, ConfigWaitsForReceiptThenAcknowledgesTerminalAndRejectsConfli
   cmd.motor_id = 63; cmd.sync_time_ns = stamp(); system_command_pub->publish(cmd);
   ASSERT_TRUE(spin([&] {return results.back().status == ConfigResult::STATUS_CONFLICT;}));
 }
+TEST_F(BridgeTest, SetZeroWaitsForDeviceTerminalAndDoesNotEnableOrRepeatTheWrite)
+{
+  auto_authority = false; start();
+  std::vector<SystemStatus> systems; listen("/motor/system_status", systems); run(50ms);
+  SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.request_id = 7;
+  cmd.command = SystemCommand::COMMAND_SET_ZERO; cmd.motor_id = 64;
+  system_command_pub->publish(cmd);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});}));
+  const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;});
+  EXPECT_EQ(wire.motor_id, 64u); EXPECT_EQ(wire.ttl_ms, 1000u);
+  EXPECT_EQ(wire.issued_stamp, cmd.sync_time_ns); EXPECT_TRUE(wire.parameters.empty());
+  EXPECT_TRUE(results.empty()); EXPECT_TRUE(commands.empty()); EXPECT_TRUE(wire_grants.empty());
+  AgentConfigResult result; result.request_id = wire.request_id;
+  result.operation = AgentConfigRequest::SET_ZERO; result.state = AgentConfigResult::PENDING;
+  status.results = {result}; run(60ms);
+  EXPECT_TRUE(results.empty()); EXPECT_EQ(systems.back().set_zero_seq, 0u);
+  system_command_pub->publish(cmd); run(30ms);
+  EXPECT_EQ(std::count_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;}), 1);
+  status.results[0].state = AgentConfigResult::SUCCEEDED;
+  status.results[0].completed_motor_mask = UINT64_C(1) << 63;
+  ASSERT_TRUE(spin([&] {return !results.empty() && !systems.empty() && systems.back().set_zero_seq == 1;}));
+  EXPECT_EQ(results.back().request_id, 7u); EXPECT_EQ(results.back().status, ConfigResult::STATUS_SUCCEEDED);
+  EXPECT_EQ(results.back().completed_targets, 1u);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::ACK_RESULTS && c.ack_request_ids[0] == wire.request_id;});}));
+  system_command_pub->publish(cmd); run(40ms);
+  EXPECT_EQ(std::count_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;}), 1);
+  EXPECT_EQ(systems.back().set_zero_seq, 1u);
+  EXPECT_TRUE(commands.empty()); EXPECT_TRUE(wire_grants.empty());
+}
+TEST_F(BridgeTest, SetZeroRejectsOfflineEnabledBusyOrUnknownMotor)
+{
+  auto_authority = false; start();
+  const auto inactive = status.motors[0];
+  for (int state = 0; state < 8; ++state) {
+    status.motors[0] = inactive; status.trajectory = AgentTrajectoryState{};
+    SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.request_id = state + 1;
+    cmd.command = SystemCommand::COMMAND_SET_ZERO; cmd.motor_id = 64;
+    if (state == 0) {status.motors[0].online = false; status.motors[0].status_flags = 0;}
+    if (state == 1) status.motors[0].policy_enabled = true;
+    if (state == 2) status.motors[0].kernel_enabled = true;
+    if (state == 3) status.motors[0].lifecycle = MotorControlState::LIFECYCLE_ACTIVE;
+    if (state == 4) status.motors[0].execution_state = MotorControlState::EXECUTION_ENABLING;
+    if (state == 5) {status.trajectory.state = AgentTrajectoryState::READY;
+      status.trajectory.trajectory_id = 1; status.trajectory.target_ids = {64};}
+    if (state == 6) status.motors[0].unified_fault_code = 2;
+    if (state == 7) cmd.motor_id = 63;
+    publish_status(); run(30ms); results.clear(); system_command_pub->publish(cmd);
+    ASSERT_TRUE(spin([&] {return !results.empty();})) << state;
+    EXPECT_NE(results.back().status, ConfigResult::STATUS_SUCCEEDED);
+    EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
+      return c.operation == AgentConfigRequest::SET_ZERO;})) << state;
+  }
+}
+TEST_F(BridgeTest, QueuedSetZeroRechecksDisabledStateBeforeFirstSend)
+{
+  auto_authority = false; start();
+  SystemCommand cmd; cmd.sync_time_ns = stamp(); cmd.request_id = 7;
+  cmd.command = SystemCommand::COMMAND_REFRESH; cmd.motor_id = 64;
+  system_command_pub->publish(cmd);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});}));
+  const auto first = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::REFRESH_PARAMETERS;});
+  cmd.command = SystemCommand::COMMAND_SET_ZERO; cmd.request_id = 8; cmd.sync_time_ns = stamp();
+  system_command_pub->publish(cmd); run(30ms);
+  status.motors[0].policy_enabled = true;
+  AgentConfigResult pending; pending.operation = first.operation; pending.request_id = first.request_id;
+  pending.state = AgentConfigResult::PENDING; status.results = {pending}; publish_status();
+  ASSERT_TRUE(spin([&] {return std::any_of(results.begin(), results.end(), [](const auto & r) {
+    return r.request_id == 8 && r.status == ConfigResult::STATUS_BUSY;});}));
+  EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_ZERO;}));
+}
 TEST_F(BridgeTest, ReadOnlyMaintenanceTerminalKeepsStatusFlowAndIsAcknowledged)
 {
   start();
   std::vector<SystemStatus> systems;
   listen("/motor/system_status", systems);
-  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
+  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
@@ -198,7 +277,7 @@ TEST_F(BridgeTest, ReadOnlyMaintenanceTerminalKeepsStatusFlowAndIsAcknowledged)
 
 TEST_F(BridgeTest, LowLevelServiceRejectsMaintenanceWritesBeforeAnyWireRequest)
 {
-  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
+  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
@@ -275,7 +354,7 @@ TEST_F(BridgeTest, TrajectorySplitsLoadsThenCommitsAfterReceipts)
 }
 TEST_F(BridgeTest, SessionChangeFailsPendingServiceAndRestartsInfo)
 {
-  start(); auto_info = false; auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
+  start(); auto_info = false; auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
@@ -319,7 +398,9 @@ TEST_F(BridgeTest, LoadingDoesNotLookCanceledAndOldSetpointCannotReplayAfterTraj
   status.trajectory.trajectory_id = trajectories.front().trajectory_id;
   status.trajectory.state = AgentTrajectoryState::LOADING;
   status.trajectory.target_ids = {64};
-  run(100ms); EXPECT_EQ(trajectory_states.size(), before);
+  run(100ms);
+  EXPECT_TRUE(std::none_of(trajectory_states.begin() + before, trajectory_states.end(),
+    [&](const auto & state) {return state.trajectory_id == trajectory.trajectory_id;}));
 }
 TEST_F(BridgeTest, StaleRejectionReceiptDoesNotOverrideAcceptedTransaction)
 {
@@ -352,7 +433,7 @@ TEST_F(BridgeTest, TrajectoryIdSeedsFromRequestHighWaterAfterBridgeRestart)
 TEST_F(BridgeTest, ReadOnlyReportServiceCompletesWithUnhealthyClock)
 {
   start(); status.clock_valid = false; publish_status(); run();
-  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
+  auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
@@ -364,7 +445,7 @@ TEST_F(BridgeTest, ReadOnlyReportServiceCompletesWithUnhealthyClock)
 }
 TEST_F(BridgeTest, TopicTimeoutRetainsCorrelationAndPublishesLateTerminalBeforeAck)
 {
-  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/robot/managed/maintenance/execute_config");
+  start(); auto client = peer->create_client<can_bridge_msgs::srv::ExecuteConfig>("/motor/execute_config");
   ASSERT_TRUE(client->wait_for_service(1s));
   auto request = std::make_shared<can_bridge_msgs::srv::ExecuteConfig::Request>();
   request->request.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;

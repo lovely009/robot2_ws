@@ -19,9 +19,7 @@ import {
   PanelLeftOpen,
   Film,
 } from "@lucide/vue";
-import HostLimits from "./components/HostLimits.vue";
 import PanelHost from "./components/PanelHost.vue";
-import CommandHistory from "./components/CommandHistory.vue";
 import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import MotionWorkbench from "./components/MotionWorkbench.vue";
@@ -40,9 +38,7 @@ const normalize = (hash: string): Screen => {
   return value === "teach" || value === "sim" || value === "motion" ? value : "run";
 };
 const screen = ref<Screen>(normalize(location.hash));
-const inspector = ref(screen.value === "teach" ? "parameters" : "control");
 watch(screen, (value) => {
-  inspector.value = value === "teach" ? "parameters" : "control";
   mobilePane.value = value === "teach" ? "objects" : "stage";
 });
 const observation = ref("curve");
@@ -50,7 +46,7 @@ const mobilePane = ref('stage');
 const connectionSettings = ref(false);
 const mobilePanes = [
   {id:'objects', title:'电机'}, {id:'stage', title:'工作区'},
-  {id:'inspector', title:'检查器'}, {id:'observer', title:'观察'},
+  {id:'observer', title:'观察'}, {id:'parameters', title:'参数'},
 ];
 const observe = ref(true);
 const navCollapsed = ref(
@@ -122,9 +118,7 @@ const agentLabel = computed(
 );
 let clock: ReturnType<typeof setInterval>;
 function go(id: string) {
-  if (snapshot.value.prototype && id !== 'run') return;
   if (id === "device") {
-    inspector.value = "parameters";
     id = "teach";
   }
   if (id === "diag") {
@@ -152,7 +146,7 @@ function keys(event: KeyboardEvent) {
   const index = "1234".indexOf(event.key);
   if (index >= 0) go(scenes[index]!.id);
 }
-watch([screen, inspector, observation, observe], async () => {
+watch([screen, observation, observe], async () => {
   await nextTick();
   runtime.wake();
 });
@@ -207,8 +201,6 @@ onBeforeUnmount(() => {
           snapshot.connectionText
         }}</span
       >
-      <span v-if="snapshot.prototype" class="session-item">原型仿真 · 直接使能与控制</span>
-      <template v-if="!snapshot.managed.enabled && !snapshot.prototype">
       <span class="session-separator" />
       <label class="session-item"
         ><span class="session-label">控制板</span
@@ -249,27 +241,13 @@ onBeforeUnmount(() => {
         class="session-item agent-status"
         :title="snapshot.agentError || snapshot.agentDevice"
         >Agent：{{ agentLabel }}</span>
-      </template>
       <span class="header-spacer" /><button
         class="stop-button"
         :disabled="!snapshot.connected"
         @click="runtime.stopMotion()"
       >
-        <CircleStop :size="14" />{{ snapshot.managed.enabled ? '整机停止' : '全部软停' }}
+        <CircleStop :size="14" />全部软停
       </button>
-    <div v-if="snapshot.managed.enabled" class="managed-controls" aria-label="整机托管控制">
-      <span class="authority-label">本页控制权：{{ snapshot.managed.ownsControl ? '已取得' : '未取得' }}</span><span class="authority-label" :class="{confirmed: snapshot.managed.mcuAuthorized}">运动授权：{{ snapshot.managed.mcuAuthorized ? 'MCU 已确认' : '未确认' }}</span>
-      <button :disabled="!initialized || !snapshot.managed.ready || snapshot.managed.pending || snapshot.managed.ownsControl"
-        @click="runtime.managed('acquire')">申请控制</button>
-      <button :disabled="!snapshot.managed.ownsControl || snapshot.managed.armed"
-        @click="runtime.managed('arm')">武装</button>
-      <button :disabled="!snapshot.managed.ownsControl" @click="runtime.managed('disarm')">解除武装</button>
-      <button :disabled="!snapshot.managed.ownsControl" @click="runtime.managed('release')">释放控制</button>
-      <button :disabled="!snapshot.connected" @click="runtime.managed('reset')">复位故障</button>
-      <span role="status">{{ snapshot.managed.message }}</span>
-      <span v-if="snapshot.managed.armed && !snapshot.managed.mcuAuthorized">等待 MCU 授权确认</span>
-      <span v-if="snapshot.managed.blockers.length" class="managed-blockers">未就绪：{{ snapshot.managed.blockers.join(' · ') }}</span>
-    </div>
     </div>
 
     <nav class="main-nav" aria-label="工作场景">
@@ -284,7 +262,7 @@ onBeforeUnmount(() => {
         <span>收起侧栏</span>
       </button>
       <button
-        v-for="(item, index) in snapshot.prototype ? scenes.filter(scene => scene.id === 'run') : scenes"
+        v-for="(item, index) in scenes"
         :key="item.id"
         :aria-label="item.title"
         :title="item.title"
@@ -309,6 +287,9 @@ onBeforeUnmount(() => {
           ><span class="micro" :class="{ stale: !fresh }"
             >运动流：{{ motionAge }}</span
           >
+          <span class="micro" :title="snapshot.communication.detail">
+            MCU：{{ snapshot.communication.link }} · 时钟：{{ snapshot.communication.clock }} · 控制权：{{ snapshot.communication.authority }}
+          </span>
         </div>
       </div>
       <div v-if="startupError" class="panel-error" role="alert">
@@ -323,15 +304,14 @@ onBeforeUnmount(() => {
       </div>
 
       <nav v-show="screen !== 'motion'" class="mobile-pane-tabs" aria-label="工作区面板">
-        <button v-for="item in mobilePanes.filter(p => screen !== 'teach' || ['objects', 'inspector'].includes(p.id))" :key="item.id"
+        <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : p.id !== 'parameters')" :key="item.id"
           :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true">
           {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
         </button>
       </nav>
-      <MotionWorkbench v-if="screen === 'motion'" />
+      <MotionWorkbench v-if="screen === 'motion'" :current-model="snapshot.model" />
       <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
         <ResizeHandle v-show="screen !== 'teach'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
-        <ResizeHandle v-show="screen !== 'teach'" class="resize-inspector" label="调整对象检查器宽度" target=".inspector-area" variable="--inspector-width" axis="width" :min="210" reverse />
         <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
         <section class="objects-area surface">
           <div class="panel-title">
@@ -377,10 +357,10 @@ onBeforeUnmount(() => {
               v-show="screen === 'run'"
               class="joint-list-panel"
             />
-            <ResizeHandle v-show="screen === 'run' && !snapshot.prototype" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
+            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
             <PanelHost
               id="actionLibrary"
-              :active="screen === 'run' && !snapshot.prototype"
+              :active="screen === 'run'"
               class="action-panel-host"
             />
             <ResizeHandle v-show="screen === 'sim'" class="resize-simulation" label="调整仿真面板高度" target=".sim-panel-host" variable="--sim-height" axis="height" :min="240" reverse />
@@ -391,62 +371,11 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
-        <aside class="inspector-area inspector surface">
-          <div class="panel-title">
-            <span>{{ screen === 'teach' ? (deviceParameters === 'firmware' ? '固件固定配置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数') : '电机控制' }}</span><SlidersHorizontal :size="14" />
-          </div>
-          <div v-show="screen !== 'teach'" class="object-heading">
-            <h2>
-              {{
-                snapshot.selectedName ||
-                (snapshot.selectedId
-                  ? `电机 ${snapshot.selectedId}`
-                  : "未选择设备")
-              }}
-            </h2>
-            <span
-              class="status-chip"
-              :class="snapshot.selectedCanCommand && fresh ? 'success' : ''"
-              >{{ snapshot.selectedState
-              }}{{ snapshot.connected ? "" : " · 数据未连接" }}</span
-            >
-          </div>
-          <p v-if="screen !== 'teach' && snapshot.managed.enabled && !snapshot.managed.mcuAuthorized" class="control-lock-note">控制已锁定：申请控制权、武装并等待 MCU 确认后，才能下发使能与目标。</p>
-          <div v-show="screen !== 'teach' && !snapshot.prototype" class="inspector-tabs">
-            <button
-              :class="{ active: inspector === 'control' }"
-              @click="inspector = 'control'"
-            >
-              控制</button
-            ><button
-              :class="{ active: inspector === 'parameters' }"
-              @click="inspector = 'parameters'"
-            >
-              参数</button
-            ><button
-              :class="{ active: inspector === 'compensation' }"
-              @click="inspector = 'compensation'"
-            >
-              补偿
-            </button>
-            <button :class="{ active: inspector === 'limits' }" @click="inspector = 'limits'">主机限位</button>
-          </div>
+        <aside v-show="screen === 'teach'" class="device-details-area inspector surface">
+          <div class="panel-title"><span>{{ deviceParameters === 'firmware' ? '固件固定配置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数' }}</span></div>
           <div class="inspector-scroll">
             <FirmwareParameters :active="screen === 'teach' && deviceParameters === 'firmware'" />
-            <HostLimits v-show="screen !== 'teach'" :editing="inspector === 'limits'" />
-            <PanelHost
-              id="policy"
-              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'control'"
-            /><PanelHost
-              id="command"
-              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'control'"
-            /><PanelHost
-              id="deviceParams"
-              :active="screen !== 'motion' && (screen === 'teach' ? deviceParameters === 'motor' : inspector === 'parameters')"
-            /><PanelHost
-              id="feedforward"
-              :active="screen !== 'teach' && screen !== 'motion' && inspector === 'compensation'"
-            />
+            <PanelHost id="deviceParams" :active="screen === 'teach' && deviceParameters === 'motor'" />
           </div>
         </aside>
         <section v-show="screen !== 'teach'" class="observer-area observer surface">
@@ -463,7 +392,6 @@ onBeforeUnmount(() => {
                 v-for="item in [
                   { id: 'curve', title: '曲线' },
                   { id: 'events', title: '事件日志' },
-                  { id: 'history', title: '命令记录' },
                   { id: 'imu', title: 'IMU' },
                 ]"
                 :key="item.id"
@@ -484,8 +412,6 @@ onBeforeUnmount(() => {
             /><PanelHost
               id="events"
               :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'events'"
-            /><CommandHistory
-              v-show="screen !== 'teach' && observe && observation === 'history'"
             /><PanelHost id="imu" :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'imu'" />
           </div>
         </section>

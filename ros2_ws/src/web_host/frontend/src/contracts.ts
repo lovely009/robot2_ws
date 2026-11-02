@@ -3,9 +3,6 @@ export type PanelId =
   | "jointList"
   | "arm"
   | "readout"
-  | "policy"
-  | "command"
-  | "feedforward"
   | "deviceParams"
   | "actionLibrary"
   | "sim"
@@ -13,9 +10,6 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
-  prototype: boolean;
-  managed: {pending: boolean; enabled: boolean; ownsControl: boolean; armed: boolean; mcuAuthorized: boolean; ready: boolean;
-    message: string; blockers: string[]};
   firmwareConnectionKey: string;
   connected: boolean;
   connectionText: string;
@@ -26,15 +20,12 @@ export interface WorkbenchSnapshot {
   model: string;
   selectedId: number;
   motors: { id: number; model: string }[];
-  selectedName: string;
-  selectedState: string;
-  selectedCanCommand: boolean;
   total: number;
   online: number;
   active: number;
   fault: number;
   motionAt: number | null;
-  outputTopic: string;
+  communication: {link: string; clock: string; authority: string; detail: string};
   session: string;
   mappingError: string;
 }

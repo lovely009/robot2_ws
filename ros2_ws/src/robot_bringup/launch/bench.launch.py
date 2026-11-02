@@ -1,13 +1,4 @@
-"""维护与仿真台架：只读网页、bench_manager 与可选实测 TF。
-
-不启动 micro_ros_bridge、command_streamer 或电机控制器。实机运动使用
-robot.launch.py 的受监督入口；台架仅管理实验进程和查询状态。
-
-会话 unit 由 bench_manager 按需起停，本 launch 不启动会话。
-通过 launch 事件串联 configure → activate；配置失败则保持 unconfigured，
-不注册服务，原因见日志。
-干净退出停止 bench.slice；异常死亡保留 unit，供后继管理器认领。
-"""
+"""工作台会话由 bench_manager 按模型选择起停，启动时不使能电机。"""
 
 import os
 
@@ -71,7 +62,7 @@ def generate_launch_description():
                 'model_dir': LaunchConfiguration('model_dir'),
                 'rosbridge_port': LaunchConfiguration('rosbridge_port'),
                 'web_port': LaunchConfiguration('web_port'),
-                'control_mode': 'readonly',
+                'control_mode': 'bench',
             }.items(),
         ),
 

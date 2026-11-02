@@ -8,8 +8,10 @@ from motor_hardware_interface.topic_bridge import (motion_states_to_joint_state,
                                                   motor_accepts_joint_target,
                                                   parse_joint_map)
 from motor_hardware_interface.transmission_bridge import TransmissionBridge
+from motor_hardware_interface.topic_bridge import BridgeError
 from motor_hardware_interface.control_state import ControlStateTracker
 import json
+import math
 import signal
 import time
 
@@ -23,7 +25,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
     from rclpy.node import Node
     from rclpy.duration import Duration
     from rclpy.parameter import Parameter
-    from rcl_interfaces.msg import ParameterDescriptor
+    from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
     from rclpy.qos import (QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy,
                            QoSDurabilityPolicy)
     from sensor_msgs.msg import JointState
@@ -45,6 +47,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
             immutable = ParameterDescriptor(read_only=True)
             if self.declare_parameter('enable_trajectory', False).value:
                 raise ValueError('只读反馈桥不接受运动请求，请使用 host_trajectory.launch.py')
+            self.declare_parameter('joint_limits_json', '')
             self.declare_parameter('publish_joint_states', True, immutable)
             self.declare_parameter('driver_file', '', immutable)
             self.declare_parameter('transmissions_file', '', immutable)
@@ -72,6 +75,9 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 self.joint_of_motor = parse_joint_map(ids, names)
                 self.motor_of_joint = {j: i for i, j in self.joint_of_motor.items()}
 
+            self.joint_limits_from_parameter(self.get_parameter('joint_limits_json').value)
+            self.add_on_set_parameters_callback(self.validate_parameters)
+
             status_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                                     reliability=QoSReliabilityPolicy.RELIABLE)
             self.status_pub = self.create_publisher(String, '/robot_transmission/status', status_qos)
@@ -89,7 +95,27 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 self.on_motion_states, stream_qos())
             self.get_logger().info('只读关节反馈桥已就绪')
 
+        def joint_limits_from_parameter(self, value):
+            if self.transmission:
+                return self.transmission.joint_limits_from_json(
+                    value, self.get_parameter('model_name').value)
+            if value not in ('', '{}'):
+                raise BridgeError('当前未加载传动模型，不能设置关节限位')
+            return {}
+
+        def validate_parameters(self, parameters):
+            try:
+                for parameter in parameters:
+                    if parameter.name == 'enable_trajectory' and parameter.value:
+                        raise BridgeError('只读反馈桥不接受运动请求')
+                    if parameter.name == 'joint_limits_json':
+                        self.joint_limits_from_parameter(parameter.value)
+            except BridgeError as exc:
+                return SetParametersResult(successful=False, reason=str(exc))
+            return SetParametersResult(successful=True)
+
         def publish_status(self):
+            limits = self.joint_limits_from_parameter(self.get_parameter('joint_limits_json').value)
             msg = String()
             msg.data = json.dumps({
                 'model': self.get_parameter('model_name').value,
@@ -100,6 +126,9 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 'last_error': '',
                 'joint_names': (list(self.transmission.model.joint_names) if self.transmission
                                 else list(self.motor_of_joint)),
+                'joint_limits': {name: {'lower': lower if math.isfinite(lower) else None,
+                                        'upper': upper if math.isfinite(upper) else None}
+                                 for name, (lower, upper) in limits.items()},
             })
             self.status_pub.publish(msg)
 

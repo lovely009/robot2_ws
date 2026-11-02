@@ -3,11 +3,18 @@
 <package format="3">
   <name>robot_sim</name>
   <version>1.0.0</version>
-  <description>Gazebo、MuJoCo 与 MCU 电机端到端组合仿真入口。</description>
+  <description>Gazebo、MuJoCo 与电机协议模拟库、节点及端到端仿真入口。</description>
   <maintainer email="robot@example.com">Robot Developer</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>yaml_cpp_vendor</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>robot_transmission</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>controller_manager</exec_depend>
@@ -19,24 +26,23 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>micro_ros_agent</exec_depend>
   <exec_depend>motor_hardware_interface</exec_depend>
-  <exec_depend>motor_sim</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_description</exec_depend>
-  <exec_depend>robot_transmission</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <!-- MuJoCo 桥按物理时间发布 /clock（mujoco_effort_bridge.py） -->
   <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>rviz2</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
   <exec_depend>web_host</exec_depend>
   <exec_depend>xacro</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>python3-yaml</test_depend>
 

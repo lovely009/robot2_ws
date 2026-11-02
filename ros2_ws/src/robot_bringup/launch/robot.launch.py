@@ -1,28 +1,14 @@
-"""Default robot entry: the managed MCU chain with the web client enabled.
-
-The included launch requires an explicit model and robot_id. Neither this
-entry nor the web client starts an Agent or arms motion by default.
-"""
-
+"""工作台入口：模型由 bench_manager 按选择切换，启动时不使能电机。"""
 from pathlib import Path
-
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('model', description='Commissioned model directory name'),
-        DeclareLaunchArgument('robot_id', description='Identity of this robot assembly'),
-        DeclareLaunchArgument('start_web', default_value='true',
-                              description='Start the managed web client'),
+        Node(package='micro_ros_bridge', executable='micro_ros_bridge_node', output='screen'),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(
-            str(Path(__file__).with_name('managed_robot.launch.py'))),
-            launch_arguments={
-                'model': LaunchConfiguration('model'),
-                'robot_id': LaunchConfiguration('robot_id'),
-                'start_web': LaunchConfiguration('start_web'),
-            }.items()),
+            str(Path(__file__).with_name('bench.launch.py')))),
     ])

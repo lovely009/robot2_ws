@@ -13,18 +13,13 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/api/runtime') return route.fulfill({json: {control_mode: 'managed', robot_model: 'half_body_robot', robot_id: 'offline-review'}});
+    if (path === '/api/runtime') return route.fulfill({json: {control_mode: 'bench', robot_model: 'half_body_robot'}});
     if (path === '/api/models') return route.fulfill({json: {models: ['half_body_robot']}});
     if (path === '/api/model-transmissions') return route.fulfill({json: {model: 'half_body_robot', groups: [], direct_joints: {}}});
-    if (path === '/api/model-joints') return route.fulfill({json: {joints: {}}});
-    if (path === '/api/device-can/options') return route.fulfill({status:410, json:{error:'统一经 MCU；预览不访问设备'}});
     return route.fulfill({json: {actions: [], motor_types: {}}});
   });
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => {
-    const state = {epoch:17, session_id:1_800_000_000_000, ready:false, armed:false,
-      mcu_authorized:false, fault_latched:false, owner:'', blockers:['integration_pending', 'calibration_uncommissioned']};
     const fixtures: Record<string, unknown> = {
-      '/robot/state': state,
       '/motor/topology': {entries: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, model_name:'模拟 CERB · 非实测', bus_index:i%3, lifecycle:3}))},
       '/motor/status_array': {statuses: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, lifecycle:3, temperature:25, unified_fault_code:0}))},
       '/motor/motion_states': {states: Array.from({length:37}, (_, i) => ({motor_id:i+1, position:i*.01, velocity:0, effort:0, state_age_ms:5}))},
@@ -44,8 +39,8 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   await expect(page.locator('.startup-status')).toHaveCount(0);
   await expect(page.locator('.motor-card')).toHaveCount(37);
   await expect(page.locator('.app-footer, .heading-description, .host-limits')).toHaveCount(0);
-  await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
-  await expect(page.getByRole('button', {name:'武装', exact:true})).toBeDisabled();
+  await expect(page.getByLabel('整机托管控制')).toHaveCount(0);
+  await expect(page.getByRole('button', {name:'武装', exact:true})).toHaveCount(0);
   await expect(page.locator('canvas[data-model-rendered="true"]')).toHaveCount(1, {timeout:20000});
   await page.evaluate(() => {
     const badge = document.createElement('div');
@@ -67,7 +62,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     }
   }
   await page.getByRole('button', {name:'重新连接', exact:true}).click();
-  await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
+  await expect(page.getByLabel('整机托管控制')).toHaveCount(0);
   await page.setViewportSize({width:390,height:844});
   await page.evaluate(() => {
     const badge=document.querySelector<HTMLElement>('[data-evidence-banner]')!;
@@ -78,9 +73,8 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   expect((await page.locator('.main-nav').boundingBox())!.width).toBe(52);
   await page.getByRole('button', {name:/^电机\s*37$/}).click();
   await page.locator('.motor-card[data-id="37"]').click();
-  await page.getByRole('button', {name:'检查器', exact:true}).click();
-  await expect(page.locator('.object-heading')).toContainText('电机 37');
-  await expect(page.locator('.status-chip')).not.toHaveClass(/success/);
+  await expect(page.getByRole('button', {name:'检查器', exact:true})).toHaveCount(0);
+  await expect(page.locator('.object-heading')).toHaveCount(0);
   await page.getByRole('button', {name:'观察', exact:true}).click();
   await expect(page.locator('.observer-head')).toBeInViewport();
   await page.getByRole('button', {name:'收起观察区', exact:true}).click();
@@ -92,7 +86,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({path:join(captureDirectory, `${capturePrefix}-mobile.png`)});
   expect(publishes).toEqual([]);
-  expect(services).toEqual([]);
+  expect(services.every(name => name.startsWith('/bench/') || name === '/bench_manager/set_parameters_atomically')).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -104,6 +98,6 @@ test('运行配置加载失败时展示恢复入口且不建立控制连接', as
   await page.goto('/workbench/');
   await expect(page.getByRole('alert').filter({hasText:'工作区加载失败'})).toBeVisible();
   await expect(page.getByRole('button', {name:'重新加载页面'})).toBeVisible();
-  await expect(page.getByRole('button', {name:'申请控制', exact:true})).toBeDisabled();
+  await expect(page.getByLabel('整机托管控制')).toHaveCount(0);
   expect(websocketCount).toBe(0);
 });

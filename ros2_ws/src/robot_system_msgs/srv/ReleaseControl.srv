@@ -1,5 +1,0 @@
-string lease_id
-uint64 epoch
----
-bool success
-string reason

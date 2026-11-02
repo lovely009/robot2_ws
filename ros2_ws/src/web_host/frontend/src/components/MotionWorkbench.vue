@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Upload, Play, Pause, RotateCcw, Download, Check, ArrowRight } from '@lucide/vue';
 
-type Mapping = { torso: string; source_to_robot: number[][];
+type Mapping = { mode?: undefined; torso: string; source_to_robot: number[][];
   arms: Record<string, { source: string[]; robot: string[] }> };
+type ShoulderMapping = { mode: 'shoulders12'; source_to_robot: number[][]; source: string; joints: string[] };
 type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progress: number;
   bvh_name: string; urdf_name: string; robot_name: string; frames: number; frame_time: number;
-  joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | null; error?: string };
+  joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | null; error?: string };
 type Preview = { times: number[]; duration: number };
+const props = defineProps<{ currentModel: string }>();
 const bvh = ref<File>();
 const urdf = ref<File>();
+const sources = ref<string[]>([]);
+const models = ref<string[]>([]);
+const bvhSource = ref('');
+const robotModel = ref(props.currentModel);
+const catalogLoading = ref(true);
+const modelChosen = ref(false);
 const upAxis = ref('y_up');
 const scale = ref(.01);
 const job = ref<Job>();
@@ -17,12 +25,15 @@ const mapping = ref<Mapping>();
 const robotAxes = ref('cad');
 const error = ref('');
 const uploading = ref(false);
+const restoring = ref(false);
 const canvas = ref<HTMLCanvasElement>();
 const preview = ref<Preview>();
 const playing = ref(false);
 const modelStatus = ref('机器人骨架');
 const time = ref(0);
-const busy = computed(() => uploading.value || job.value?.state === 'running');
+const busy = computed(() => uploading.value || restoring.value || job.value?.state === 'running');
+const canSubmit = computed(() => !busy.value && !catalogLoading.value
+  && !!(bvhSource.value || bvh.value) && !!(robotModel.value || urdf.value));
 const ready = computed(() => job.value?.state === 'done' && !!preview.value);
 const seconds = (value: number) => `${value.toFixed(2)} s`;
 let display: { show(index: number): void; dispose(): void } | undefined;
@@ -32,6 +43,33 @@ let disposed = false;
 let lastTick = 0;
 const abort = new AbortController();
 const base = (id: string) => `/api/motion/jobs/${id}`;
+
+watch(bvhSource, name => {
+  bvh.value = undefined;
+  if (name) sessionStorage.setItem('robot2.motionSource', name);
+  else sessionStorage.removeItem('robot2.motionSource');
+});
+watch(robotModel, () => { urdf.value = undefined; });
+watch(() => props.currentModel, name => {
+  if (!modelChosen.value && models.value.includes(name)) robotModel.value = name;
+});
+
+async function loadCatalogs() {
+  const results = await Promise.allSettled([request('/api/motion/sources'), request('/api/models')]);
+  if (disposed) return;
+  const [actions, robots] = results;
+  if (actions.status === 'fulfilled' && Array.isArray(actions.value.sources)) {
+    sources.value = actions.value.sources.filter((name: unknown): name is string => typeof name === 'string');
+    const saved = sessionStorage.getItem('robot2.motionSource');
+    bvhSource.value = sources.value.find(name => name === saved) || sources.value[0] || '';
+  }
+  if (robots.status === 'fulfilled' && Array.isArray(robots.value.models)) {
+    models.value = robots.value.models.filter((name: unknown): name is string => typeof name === 'string');
+    robotModel.value = models.value.includes(props.currentModel) ? props.currentModel : models.value[0] || '';
+  } else robotModel.value = '';
+  if (results.some(result => result.status === 'rejected')) error.value = '库列表加载失败，可重试刷新或导入本地文件';
+  catalogLoading.value = false;
+}
 
 async function request(url: string, body?: unknown) {
   const response = await fetch(url, { signal: abort.signal,
@@ -68,7 +106,7 @@ async function accept(current: Job) {
   job.value = current;
   sessionStorage.setItem('robot2.motionJob', current.id);
   if (current.state === 'mapping') {
-    mapping.value = current.mapping || { torso: current.source_joints.find(n => /spine3|chest|torso/i.test(n)) || '',
+    mapping.value = (current.mapping && 'arms' in current.mapping ? current.mapping : undefined) || { torso: current.source_joints.find(n => /spine3|chest|torso/i.test(n)) || '',
       source_to_robot: [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
       arms: Object.fromEntries(['right', 'left'].map(side => [side, {
         source: ['UpperArm', 'LowerArm', 'Hand'].map(part => current.source_joints.find(n => n.toLowerCase() === `${side}${part}`.toLowerCase()) || ''),
@@ -108,9 +146,13 @@ async function refresh() {
 }
 
 async function submit() {
-  if (!bvh.value || !urdf.value || busy.value) return;
+  if (!canSubmit.value) return;
+  const sourceName = bvhSource.value;
+  const modelName = robotModel.value;
+  const bvhFile = bvh.value;
+  const urdfFile = urdf.value;
   error.value = '';
-  if (bvh.value.size + urdf.value.size > 20 * 1024 * 1024) {
+  if ((bvhFile?.size || 0) + (urdfFile?.size || 0) > 20 * 1024 * 1024) {
     error.value = '两份文件合计请控制在 20 MB 内'; return;
   }
   clearTimeout(poll);
@@ -123,8 +165,19 @@ async function submit() {
   sessionStorage.removeItem('robot2.motionJob');
   uploading.value = true;
   try {
-    await accept(await request('/api/motion/jobs', { bvh_name: bvh.value.name, urdf_name: urdf.value.name,
-      bvh_text: await bvh.value.text(), urdf_text: await urdf.value.text(), up_axis: upAxis.value, scale: scale.value }));
+    let urdfText: string;
+    if (modelName) {
+      const name = encodeURIComponent(modelName);
+      const response = await fetch(`/robot_sim/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
+      if (!response.ok) throw Error(`模型 ${modelName} 的 URDF 加载失败`);
+      urdfText = await response.text();
+    } else urdfText = await urdfFile!.text();
+    if ((new TextEncoder().encode(urdfText).length + (bvhFile?.size || 0)) > 20 * 1024 * 1024)
+      throw Error('两份文件合计请控制在 20 MB 内');
+    await accept(await request('/api/motion/jobs', {
+      ...(sourceName ? { bvh_source: sourceName } : { bvh_name: bvhFile!.name, bvh_text: await bvhFile!.text() }),
+      urdf_name: modelName ? `${modelName}.urdf` : urdfFile!.name,
+      urdf_text: urdfText, up_axis: upAxis.value, scale: scale.value }));
   } catch (e) { if (!disposed) error.value = String(e); }
   finally { uploading.value = false; }
 }
@@ -148,9 +201,12 @@ function reset() { playing.value = false; time.value = 0; showFrame(); }
 onMounted(async () => {
   animation = requestAnimationFrame(tick);
   const id = sessionStorage.getItem('robot2.motionJob');
+  restoring.value = !!id;
+  void loadCatalogs();
   if (!id) return;
   try { await accept(await request(base(id))); }
   catch { if (!disposed) { sessionStorage.removeItem('robot2.motionJob'); error.value = '上次临时任务已过期，请重新导入'; } }
+  finally { restoring.value = false; }
 });
 onBeforeUnmount(() => {
   disposed = true; abort.abort(); clearTimeout(poll); cancelAnimationFrame(animation); display?.dispose();
@@ -162,24 +218,31 @@ onBeforeUnmount(() => {
     <section class="motion-import surface">
       <div class="panel-title"><span>动作来源</span><Upload :size="14" /></div>
       <div class="motion-import-body">
-        <label class="motion-file"><span class="eyebrow">01 / 人体动作</span><strong>导入 BVH</strong>
-          <span>{{ bvh?.name || job?.bvh_name || '选择本地 .bvh 文件' }}</span>
-          <input type="file" accept=".bvh,.BHV,.bhv" aria-label="导入 BVH 文件" :disabled="busy" @change="choose($event, 'bvh')" />
-        </label>
-        <label class="motion-file"><span class="eyebrow">02 / 目标机器人</span><strong>导入 URDF</strong>
-          <span>{{ urdf?.name || job?.urdf_name || '选择本地 .urdf 文件' }}</span>
-          <input type="file" accept=".urdf,.xml" aria-label="导入 URDF 文件" :disabled="busy" @change="choose($event, 'urdf')" />
-        </label>
+        <div class="motion-file"><span class="eyebrow">01 / 人体动作</span><strong>动作库 BVH</strong>
+          <select v-model="bvhSource" aria-label="动作库 BVH" :disabled="busy || catalogLoading">
+            <option v-for="name in sources" :key="name" :value="name">{{ name }}</option>
+            <option value="">导入本地 BVH…</option>
+          </select>
+          <input v-if="!bvhSource" type="file" accept=".bvh,.BHV,.bhv" aria-label="导入 BVH 文件" :disabled="busy || catalogLoading" @change="choose($event, 'bvh')" />
+        </div>
+        <div class="motion-file"><span class="eyebrow">02 / 目标机器人</span><strong>模型库</strong>
+          <select v-model="robotModel" aria-label="目标机器人模型" :disabled="busy || catalogLoading" @change="modelChosen = true">
+            <option v-for="name in models" :key="name" :value="name">{{ name }}</option>
+            <option value="">导入本地 URDF…</option>
+          </select>
+          <input v-if="!robotModel" type="file" accept=".urdf,.xml" aria-label="导入 URDF 文件" :disabled="busy || catalogLoading" @change="choose($event, 'urdf')" />
+        </div>
         <div class="motion-source-options">
           <label>BVH 坐标<select v-model="upAxis" :disabled="busy" aria-label="BVH 坐标"><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
           <label>长度单位<select v-model.number="scale" :disabled="busy" aria-label="BVH 长度单位"><option :value=".01">厘米 cm</option><option :value="1">米 m</option><option :value=".001">毫米 mm</option></select></label>
         </div>
-        <p class="motion-hint">首帧使用参考 T-pose。当前模型自动映射，其他模型可选择肩、肘、腕对应关系。</p>
-        <button class="motion-primary" :disabled="busy || !bvh || !urdf" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : '导入并转换' }}</button>
+        <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '默认使用库内动作和当前模型。标准双臂及已确认的 1、2 号肩关节自动映射；其他骨架需确认对应关系。' }}</p>
+        <button class="motion-primary" :disabled="!canSubmit" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : '导入并转换' }}</button>
         <div v-if="job" class="motion-metadata">
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>
           <span>机器人 <strong>{{ job.joint_count }} 个关节</strong></span>
+          <span v-if="job.mapping?.mode === 'shoulders12'">转换范围 <strong>右肩 → joint_link1、joint_link2；其余关节保持中立位，保留原帧与时间</strong></span>
         </div>
       </div>
     </section>
@@ -192,7 +255,7 @@ onBeforeUnmount(() => {
         <div v-if="!ready" class="motion-placeholder">
           <div class="motion-stage-icon"><Upload v-if="!job" :size="30" /><Check v-else-if="job.state === 'done'" :size="30" /><ArrowRight v-else :size="30" /></div>
           <strong>{{ job?.state === 'running' ? '正在转换动作' : job?.state === 'mapping' ? '确认骨架对应关系' : job?.state === 'failed' ? '转换未完成' : '从一份动作开始' }}</strong>
-          <span>{{ job?.state === 'running' ? '解析人体动作 → IK 求解 → 生成机器人预览' : '导入 BVH 与 URDF，在这里查看转换结果' }}</span>
+          <span>{{ job?.state === 'running' ? '解析人体动作 → IK 求解 → 生成机器人预览' : '选择动作与目标模型，在这里查看转换结果' }}</span>
           <progress v-if="job?.state === 'running'" :value="job.progress" max="100" aria-label="动作转换进度" />
           <span v-if="job?.state === 'running'">{{ job.progress }}%</span>
         </div>
@@ -218,6 +281,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <button class="motion-primary" :disabled="busy || !mapping.torso || Object.values(mapping.arms).some(a => [...a.source, ...a.robot].some(n => !n))" @click="convert">确认映射并转换</button>
+        <p class="motion-hint">请填齐躯干和两臂的肩、肘、腕。缺少这些骨骼的动作无法使用完整双臂映射。</p>
       </div>
     </section>
 
@@ -238,6 +302,7 @@ onBeforeUnmount(() => {
 .motion-file strong { font-size: 14px; font-weight: 500; }
 .motion-file > span:not(.eyebrow) { color: var(--muted); overflow-wrap: anywhere; }
 .motion-file input { width: 100%; font-size: 11px; color: var(--muted); padding: 0; border: 0; background: none; }
+.motion-file select { width: 100%; min-width: 0; }
 .motion-file input::file-selector-button { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; color: var(--text); padding: 6px 9px; cursor: pointer; margin-right: 7px; }
 .motion-source-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .motion-source-options label, .motion-mapping-body > label { display: grid; gap: 7px; color: var(--muted); }

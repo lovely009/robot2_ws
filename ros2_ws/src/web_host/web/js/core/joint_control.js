@@ -1,11 +1,7 @@
 // 关节入口只校验身份与新鲜度；传动数值换算全部在主机共享库执行。
 import { describeMotorState } from './motor_state.js';
-import { jointTargetLimitError } from './joint_limits.js';
+import { jointTargetLimitError, jointLimitSyncError } from './joint_limits.js';
 
-export function jointSliderDuration(joint, current, target) {
-  return Number.isFinite(joint.velocity) && joint.velocity > 0
-    ? Math.max(.15, 1.5*Math.abs(target-current)/joint.velocity) : .15;
-}
 // 连续拖动只保留最新目标；不把鼠标事件排成待执行轨迹队列。
 export function createLatestTargetSender({send, isCurrent, onError=()=>{}, intervalMs=50}) {
   let pending=null, timer=null, last=null, sentAt=-Infinity, disposed=false;
@@ -49,7 +45,6 @@ export function controlSessionError(state, model, now = Date.now()) {
   if (!runtime?.last || now-runtime.last < 0 || now-runtime.last > 2500) return '主机传动桥状态已过期';
   if (runtime.data?.model !== model) return '页面模型与主机传动模型不一致';
   if (runtime.data.trajectory_enabled !== true) return '主机传动桥为只读模式';
-  if (state.runtimeMode === 'prototype') return '';
   const command = state.commandStatus;
   if (!command?.last || now-command.last < 0 || now-command.last > 2500
       || command.data?.output_topic !== '/motor/host_command_array'
@@ -57,12 +52,19 @@ export function controlSessionError(state, model, now = Date.now()) {
     return '主机轨迹路由未就绪';
   }
   if (command.data.model !== model) return '页面模型与 ros2_control 模型不一致';
+  if (command.data.feedback_fresh === false) return '主机关节反馈未就绪，请检查主机控制会话';
+  if (command.data.controllers_ready === false) return '主机控制器未就绪';
   const joints = meta.groups.flatMap(g => g.joints);
+  const controlled = runtime.data.joint_names;
+  const reported = command.data.joint_names;
   if (new Set(joints).size !== joints.length || joints.some(name => typeof name !== 'string' || !name)
-      || [runtime.data.joint_names, command.data.joint_names].some(names =>
-        !Array.isArray(names) || names.length !== joints.length
-        || new Set(names).size !== names.length || joints.some(name => !names.includes(name)))) {
-    return '主机控制关节与模型传动组不一致';
+      || !Array.isArray(controlled) || !controlled.length || new Set(controlled).size !== controlled.length
+      || controlled.some(name => !joints.includes(name))
+      || !Array.isArray(reported) || reported.length !== controlled.length
+      || new Set(reported).size !== reported.length || controlled.some(name => !reported.includes(name))
+      || meta.groups.some(group => group.joints.some(name => controlled.includes(name))
+        && !group.joints.every(name => controlled.includes(name)))) {
+    return '主机控制关节与模型完整传动组不一致';
   }
   return '';
 }
@@ -73,7 +75,10 @@ export function jointControlError(state, model, joint, now = Date.now()) {
   const meta = state.modelTransmissions;
   const group = meta.groups.find(g => g.joints.includes(joint));
   if (!group) return '关节未配置传动组';
+  if (!state.transmissionStatus.data.joint_names.includes(joint)) return '该关节未接入当前控制会话';
   for (const name of group.joints) {
+    const limitError = jointLimitSyncError(state, model, name);
+    if (limitError) return limitError;
     const sample = state.jointStates?.byName?.[name];
     if (!Number.isFinite(sample?.position) || !Number.isFinite(sample?.at)
         || now-sample.at < 0 || now-sample.at > 500) return `同组关节 ${name} 缺少新鲜反馈`;
@@ -114,11 +119,14 @@ export function buildJointTrajectory(state, model, joint, target, seconds, now =
       time_from_start:{sec:Math.floor(ms/1000),nanosec:(ms%1000)*1e6}}]};
 }
 
-export function buildJointSliderTrajectory(state, model, joint, target, now=Date.now()) {
-  const current=state.jointStates?.byName?.[joint.name]?.position;
-  // 不发送浏览器反馈作为 t=0 首点；由 JTC 从接收时的实测 P/V 插值。
-  return buildJointTrajectory(state, model, joint.name, target,
-    jointSliderDuration(joint,current,target),now);
+export function buildJointTarget(state, model, joint, target, now=Date.now()) {
+  const error = jointControlError(state, model, joint.name, now);
+  if (error) throw new Error(error);
+  if (!Number.isFinite(target)) throw new Error('目标必须为有限值');
+  const limitError = jointTargetLimitError(state, model, joint.name, target);
+  if (limitError) throw new Error(limitError);
+  return {header:{stamp:{sec:Math.floor(now/1000),nanosec:(now%1000)*1e6},frame_id:''},
+    name:[joint.name],position:[target],velocity:[],effort:[]};
 }
 
 export function rawCouplingError(state, model, ids) {

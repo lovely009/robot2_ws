@@ -1,7 +1,7 @@
 """模型目录的只读视图（文件域）：臂视图的模型候选与 motor_id → 关节名映射。
 
 只读文件、不起进程——与 bench_manager 的进程管理无关，所以留在 web_host
-（static_server 的 /api/models、/api/model-transmissions 与兼容的 /api/model-joints 直接用）。
+（static_server 的 /api/models 与 /api/model-transmissions 直接用）。
 模型根目录由 model_dir（模型包根，可指源码目录）推导。
 """
 
@@ -118,15 +118,6 @@ def model_transmissions(model, root=None):
         "groups": encoded,
         "direct_joints": dict(sorted(direct.items())),
     }
-
-
-def transmission_model_joints(model, root=None):
-    """兼容旧接口：只返回真正单电机、单关节传动组的 direct 映射。
-
-    耦合组没有可安全压平的一对一关系；兼容字段仍不带耦合组中的任何电机。
-    调用方应以 ``model_transmissions`` 的 groups 为权威。
-    """
-    return dict(model_transmissions(model, root)["direct_joints"])
 
 
 def has_joint_mapping_source(model, root=None):

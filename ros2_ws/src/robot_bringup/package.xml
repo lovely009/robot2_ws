@@ -2,11 +2,12 @@
 <package format="3">
   <name>robot_bringup</name>
   <version>0.1.0</version>
-  <description>Managed MCU supervision and host ros2_control; embedded bench orchestration.</description>
+  <description>Workbench sessions and host ros2_control with MCU transport.</description>
   <maintainer email="ly@todo.todo">ly</maintainer>
   <license>Apache-2.0</license>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>bench_msgs</exec_depend>
+  <exec_depend>can_bridge_msgs</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
@@ -32,11 +33,8 @@
     <build_type>ament_python</build_type>
   </export>
   <exec_depend>robot_description</exec_depend>
-  <exec_depend>robot_calibration</exec_depend>
-  <exec_depend>robot_supervisor</exec_depend>
   <exec_depend>micro_ros_agent</exec_depend>
   <test_depend>launch_testing</test_depend>
   <test_depend>launch_testing_ros</test_depend>
   <test_depend>rclpy</test_depend>
-  <test_depend>robot_system_msgs</test_depend>
 </package>

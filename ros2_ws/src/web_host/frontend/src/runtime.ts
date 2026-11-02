@@ -6,20 +6,7 @@ export const initialized = ref(false);
 export const startupError = ref("");
 export const notice = ref("");
 export const configuredRosUrl = ref("");
-export interface CommandRecord {
-  t: number;
-  seq: number;
-  targets: { motor_id: number; position: number; velocity: number; effort: number }[];
-}
-export const commandHistory = shallowRef<CommandRecord[]>([]);
-function updateCommandHistory() {
-  commandHistory.value = modules.data.store.history.map((record: CommandRecord) => ({
-    ...record, targets: record.targets.map(target => ({ ...target })),
-  }));
-}
 export const snapshot = shallowRef<WorkbenchSnapshot>({
-  prototype: false,
-  managed: {pending: false, enabled: true, ownsControl: false, armed: false, mcuAuthorized: false, ready: false, message: '等待整机状态', blockers: []},
   firmwareConnectionKey: '',
   connected: false,
   connectionText: "未连接",
@@ -30,15 +17,12 @@ export const snapshot = shallowRef<WorkbenchSnapshot>({
   model: "",
   selectedId: 0,
   motors: [],
-  selectedName: "",
-  selectedState: "未知",
-  selectedCanCommand: false,
   total: 0,
   online: 0,
   active: 0,
   fault: 0,
   motionAt: null,
-  outputTopic: "",
+  communication: {link: '未连接', clock: '未知', authority: '未知', detail: ''},
   session: "未获台架状态",
   mappingError: "",
 });
@@ -53,7 +37,6 @@ let modules: {
   agent: LegacyModule;
   device: LegacyModule;
   format: LegacyModule;
-  command: LegacyModule;
   actions: LegacyModule;
 };
 let starting: Promise<void> | undefined;
@@ -67,9 +50,6 @@ const panelIds: PanelId[] = [
   "jointList",
   "arm",
   "readout",
-  "policy",
-  "command",
-  "feedforward",
   "deviceParams",
   "actionLibrary",
   "sim",
@@ -78,7 +58,7 @@ const panelIds: PanelId[] = [
   "imu",
 ];
 const mounted = new Set<PanelId>();
-const requiredPanels = new Set<PanelId>(["command", "policy", "deviceParams"]);
+const requiredPanels = new Set<PanelId>(["jointList", "deviceParams"]);
 let requiredPanelError = "";
 let resolvePanels: () => void;
 const panelsReady = new Promise<void>((resolve) => {
@@ -111,11 +91,6 @@ function updateSnapshot() {
   if (!s.conn.connected) lastMotionAt = null;
   const simulation = s.bench.simulation;
   snapshot.value = {
-    prototype: s.runtimeMode === 'prototype',
-    managed: {pending: !!s.managed?.pending, enabled: !!s.managed?.enabled, ownsControl: !!s.managed?.ownsControl,
-      armed: !!s.managed?.armed, ready: !!s.managed?.state?.ready,
-      mcuAuthorized: !!s.managed?.mcuAuthorized,
-      message: s.managed?.message || '', blockers: s.managed?.state?.blockers || []},
     firmwareConnectionKey: `${generation}:${s.configSessionId ?? 0}`,
     connected: s.conn.connected,
     connectionText: s.conn.text,
@@ -128,17 +103,10 @@ function updateSnapshot() {
     motors: [...new Set<number>([...s.motors.keys(), ...s.paramCache.keys()])]
       .sort((a, b) => a - b)
       .map(id => ({id, model: s.motors.get(id)?.topo?.model_name || ''})),
-    selectedName: (s.modelTransmissions?.groups || [])
-      .filter((group: any) => group.motors.some((motor: any) => Number(motor.id) === s.selectedId))
-      .flatMap((group: any) => group.joints).join(" / ") || "",
-    selectedCanCommand: data.motorStateOf(s.selectedId).canCommand === true,
-    selectedState:
-      (() => { const v = data.motorStateOf(s.selectedId);
-        return `${v.connection} | ${v.lifecycle} | ${v.execution} | ${v.health} | ${v.protocol}`; })(),
     ...data.countMotors(),
     motionAt: lastMotionAt,
-    outputTopic: s.commandStatus.data?.output_topic || "",
-    session: s.runtimeMode === 'prototype' ? '半身机器人 · 软件原型' : s.managed?.enabled ? `托管 MCU · ${s.managed.state?.owner || '未持有控制权'}` : simulation
+    communication: modules.agent.describeAgentStatus(s),
+    session: simulation
       ? `仿真进程：${simulation.state || "未知"}${s.conn.agent === "running" ? " · Agent 运行中" : ""}`
       : s.conn.agent === "running"
         ? "Agent 运行中 · 控制对象待核对"
@@ -161,7 +129,7 @@ function dirty(batch: Set<string>) {
   const feedbackKey = `${generation}:${data.MODEL}`;
   // 只补齐未选模型的主机；其他页面已选模型时不周期性抢回归属。
   const feedbackNeedsModel = s.bench.feedback && !s.bench.feedback.desired_model;
-  if (!ros.isManagedMode() && s.runtimeMode !== 'prototype' && s.conn.connected && !feedbackSyncPending &&
+  if (s.conn.connected && !feedbackSyncPending &&
       (feedbackKey !== feedbackSyncKey ||
         ((feedbackNeedsModel || feedbackSyncFailed) && Date.now() - feedbackSyncAt > 5000))) {
     const epoch = generation, model = data.MODEL;
@@ -179,11 +147,11 @@ function dirty(batch: Set<string>) {
       }
     }).finally(() => { feedbackSyncPending = false; });
   }
-  if (!ros.isManagedMode() && s.conn.connected && !s.conn.benchLoaded) {
+  if (s.conn.connected && !s.conn.benchLoaded) {
     s.conn.benchLoaded = true;
-    if (s.runtimeMode !== 'prototype') void agent.refreshAgentControls();
+    void agent.refreshAgentControls();
   }
-  if (!ros.isManagedMode() && s.runtimeMode !== 'prototype' && s.conn.connected && !s.conn.autoLoaded) {
+  if (s.conn.connected && !s.conn.autoLoaded) {
     s.conn.autoLoaded = true;
     const epoch = generation;
     void ros
@@ -200,7 +168,6 @@ function dirty(batch: Set<string>) {
     s.selectedId = s.motors.keys().next().value;
     batch.add(data.DIRTY.SELECTED);
   }
-  if (batch.has(data.DIRTY.HISTORY)) updateCommandHistory();
   updateSnapshot();
   scheduler.invalidate(batch);
 }
@@ -209,23 +176,22 @@ async function start() {
   if (starting) return starting;
   starting = (async () => {
     try {
-      const [response, configuration, data, ros, agent, device, format, command, actions] =
+      const [response, configuration, data, ros, agent, device, format, actions] =
         await Promise.all([
-          fetch("/index.html", { cache: "no-store" }),
+          fetch("/panel_templates.html", { cache: "no-store" }),
           fetch("/api/runtime", { cache: "no-store" }),
           load("core/store"),
           load("core/ros"),
           load("core/agent"),
           load("core/device"),
           load("core/format"),
-          load("panels/command"),
           load("panels/actionLibrary"),
         ]);
       if (!response.ok)
         throw new Error(`面板模板请求失败：HTTP ${response.status}`);
       const html = await response.text();
       if (disposed) return;
-      modules = { data, ros, agent, device, format, command, actions };
+      modules = { data, ros, agent, device, format, actions };
       if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
       const runtimeConfig = await configuration.json();
       if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;
@@ -252,7 +218,6 @@ async function start() {
       await data.loadModelJoints();
       if (disposed) return;
       updateSnapshot();
-      updateCommandHistory();
       resolveReady();
       await panelsReady;
       if (disposed) return;
@@ -308,10 +273,6 @@ async function mountPanelContent(
     ui: {
       selectMotor: runtime.selectMotor,
       setModel(name: string) {
-        if (data.store.managed?.enabled && name !== data.store.managed.model) {
-          notice.value = '托管机器的模型由启动配置确定';
-          return;
-        }
         data.setModel(name);
       },
       gotoScreen(id: string) {
@@ -341,23 +302,9 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
-  async managed(operation: string) {
-    if (!initialized.value || disposed) return false;
-    if (['stop', 'release', 'disarm'].includes(operation)) modules.actions.stopPlayback();
-    return modules.ros.managedOperation(operation);
-  },
   async readFirmwareParameter(name: string) {
     if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
     return modules.device.readFirmwareParameter(name);
-  },
-  clearCommandHistory() {
-    if (!modules || disposed) return;
-    modules.data.store.history.length = 0;
-    updateCommandHistory();
-    modules.data.markDirty(modules.data.DIRTY.HISTORY);
-  },
-  selectedMotorModel(): string {
-    return modules?.data.store.motors.get(snapshot.value.selectedId)?.topo?.model_name || '';
   },
   selectMotor(id: number) {
     if (!modules || disposed) return;
@@ -395,7 +342,7 @@ export const runtime = {
   },
   stopMotion() {
     if (!initialized.value || !modules.ros.isConnected()) return false;
-    const sent = modules.command.sendStop();
+    const sent = modules.actions.stopAll();
     notice.value = sent
       ? "已请求全部软停（停用运动控制器）；请核对设备反馈"
       : "停止请求未发送";

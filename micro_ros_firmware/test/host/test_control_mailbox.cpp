@@ -494,8 +494,16 @@ static void test_set_zero_request_is_accepted() {
   request.received_tick_ms = 20U;
   request.motor_id = 5U;
   request.kind = CONTROL_MAILBOX_CONFIG_SET_ZERO;
+  control_policy_snapshot_t policy{};
+  policy.request_id = 6; policy.policy_generation = 1; policy.target_count = 1;
+  policy.targets[0].motor_id = 5; policy.targets[0].enabled = true;
+  assert(control_mailbox_submit_policy(&mailbox, &policy));
+  assert(!control_mailbox_submit_config(&mailbox, &request));
+  assert(mailbox.config_count == 0 && mailbox.policy.pending);
+  assert(control_mailbox_take_policy(&mailbox, &policy));
+  const auto invalid_before = mailbox.config_invalid_count;
   assert(control_mailbox_submit_config(&mailbox, &request));
-  assert(mailbox.config_invalid_count == 0U);
+  assert(mailbox.config_invalid_count == invalid_before);
 
   control_mailbox_config_request_t taken{};
   assert(control_mailbox_take_config(&mailbox, &taken));

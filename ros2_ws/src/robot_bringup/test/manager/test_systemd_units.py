@@ -168,7 +168,7 @@ def test_ros_environment_keeps_only_whitelisted_entries() -> None:
     只能靠白名单显式带进去，否则 unit 里的 `ros2 launch` 找不到包。
     """
     kept = ros_environment({
-        'AMENT_PREFIX_PATH': '/opt/ros/humble:/ws/install/motor_sim',
+        'AMENT_PREFIX_PATH': '/opt/ros/humble:/ws/install/robot_sim',
         'ROS_DOMAIN_ID': '0',
         'RMW_IMPLEMENTATION': 'rmw_fastrtps_cpp',
         'LD_LIBRARY_PATH': '/opt/ros/humble/lib',
@@ -178,7 +178,7 @@ def test_ros_environment_keeps_only_whitelisted_entries() -> None:
         'SSH_AUTH_SOCK': '/tmp/agent',
     })
 
-    assert kept['AMENT_PREFIX_PATH'].endswith('install/motor_sim')
+    assert kept['AMENT_PREFIX_PATH'].endswith('install/robot_sim')
     assert kept['ROS_DOMAIN_ID'] == '0'
     assert kept['RMW_IMPLEMENTATION'] == 'rmw_fastrtps_cpp'
     assert kept['LD_LIBRARY_PATH'] == '/opt/ros/humble/lib'

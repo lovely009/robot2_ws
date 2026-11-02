@@ -71,7 +71,7 @@ private:
   bool control_current(const TimePoint &now, bool latch, std::string &error);
   bool controls_armed(const TimePoint &now, std::string &error) const;
   bool update_states(const TimePoint &now, bool latch, std::string &error);
-  bool command_valid(std::string &error) const;
+  bool command_valid(std::string &error);
   bool transitioned_claims(const std::vector<std::string> &start_interfaces,
                            const std::vector<std::string> &stop_interfaces,
                            std::set<std::string> &next,
@@ -98,6 +98,7 @@ private:
   std::vector<double> command_effort_;
 
   std::shared_ptr<rclcpp::Node> node_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr position_limits_callback_;
   rclcpp::Publisher<Command>::SharedPtr command_pub_;
   rclcpp::Subscription<Motion>::SharedPtr motion_sub_;
   rclcpp::Subscription<Control>::SharedPtr control_sub_;

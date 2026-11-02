@@ -457,9 +457,79 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   assert(gate.link.stop_generation == 1 && gate.link.barrier_generation == 500);
 }
 
+static void test_snapshot_renews_only_existing_authority_atomically() {
+  agent_control_gate_t gate{};
+  control_mailbox_t mailbox{};
+  control_mailbox_init(&mailbox);
+  agent_gate_begin_session(&gate, &mailbox, 123);
+  fixture_lease(gate);
+  gate.link.connected = gate.link.clock_valid = true;
+  control_command_snapshot_t command{};
+  command.session_id = 123;
+  command.lease_id = gate.authority.lease_id;
+  command.sequence = 1;
+  command.valid_until_tick_ms = 130;
+  command.lease_sequence = 2;
+  command.lease_valid_until_tick_ms = 300;
+  command.target_count = 1;
+  command.targets[0].motor_id = 2;
+  assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
+  assert(gate.authority.sequence == 2);
+  assert(gate.authority.valid_until_tick_ms == 300);
+  assert(mailbox.command.pending);
+  // A replay with a new lease sequence must not refresh either deadline.
+  command.lease_sequence = 3;
+  command.lease_valid_until_tick_ms = 400;
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 110));
+  assert(gate.authority.valid_until_tick_ms == 300);
+  command.sequence = 2;
+  command.targets[0].position = __builtin_nanf("");
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 110));
+  assert(gate.authority.sequence == 2);
+  command.targets[0].position = 0;
+  command.lease_valid_until_tick_ms = 500;
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 110));
+  command.lease_valid_until_tick_ms = 300;
+  ++command.lease_id;
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 110));
+  --command.lease_id;
+  control_lease_revoke(&gate.authority);
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 110));
+}
+
+static void test_authority_heartbeat_does_not_refresh_motion_deadline() {
+  agent_control_gate_t gate{};
+  control_mailbox_t mailbox{};
+  motor_control_context_t ctx{};
+  control_mailbox_init(&mailbox);
+  motor_control_init(&ctx, nullptr, 0);
+  agent_gate_begin_session(&gate, &mailbox, 123);
+  control_mailbox_request_agent_connected(&mailbox, true);
+  agent_gate_service(&gate, &mailbox, &ctx, 100, true);
+  fixture_lease(gate);
+  control_command_snapshot_t command{};
+  command.session_id = 123; command.sequence = 1;
+  command.valid_until_tick_ms = 130;
+  assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
+  agent_gate_admit_command(&gate, &mailbox, &ctx, 100);
+  const auto deadline = ctx.snapshot_deadline_tick_ms;
+  assert(control_lease_submit(&gate.authority, 123, gate.authority.lease_id,
+      2, 350, true, 120));
+  assert(agent_gate_service(&gate, &mailbox, &ctx, 131, true) & AGENT_LINK_SOFT_STOP);
+  assert(ctx.snapshot_deadline_tick_ms == deadline);
+  assert(gate.link.command_tick_ms == 100);
+  // Losing the link revokes authority; incoming old snapshots cannot restore it.
+  control_mailbox_request_agent_connected(&mailbox, false);
+  agent_gate_service(&gate, &mailbox, &ctx, 132, true);
+  assert(!gate.authority.active);
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 133));
+}
+
 int main() {
+  test_snapshot_renews_only_existing_authority_atomically();
+  test_authority_heartbeat_does_not_refresh_motion_deadline();
   for (unsigned op = 0; op < 256; ++op) {
-    const bool supported = op == 0 || op == 2 || op == 4 || op == 6 || op == 7 || op == 8;
+    const bool supported = op == 0 || op == 2 || op == 3 || op == 4 || op == 6 || op == 7 || op == 8;
     assert(agent_config_operation_supported((uint8_t)op) == supported);
   }
   test_unarmed_gate_preserves_segmented_identity_read();

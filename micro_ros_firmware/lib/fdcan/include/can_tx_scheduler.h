@@ -36,6 +36,7 @@ typedef struct {
   uint8_t node;
   bool aggregate_only;
   uint8_t data[CAN_TX_FRAME_BYTES];
+  uint32_t valid_until_tick_ms; // 本地 P2 截止；0=无，不进入 CAN 载荷。
 } can_tx_frame_t;
 
 typedef struct {
@@ -73,6 +74,8 @@ void can_tx_scheduler_init(can_tx_scheduler_t *sched);
 // 停机意图使同轴旧 P0（含使能）与 P1 失效；保留其他轴及 P2 的顺序。
 // 在路由新帧之前调用，不能等停机帧成功入队/送达才取消旧目标。
 void can_tx_scheduler_cancel_slots(can_tx_scheduler_t *sched, uint64_t slots);
+void can_tx_scheduler_expire_p2(can_tx_scheduler_t *sched, uint32_t now_ms);
+void can_tx_scheduler_cancel_timed_p2(can_tx_scheduler_t *sched, uint64_t slots);
 
 // P0：入队（满 = 丢新帧 + dropped_count，返回 false；任务层将失败回告内核
 // motor_control_requeue_p0 重入队，确保安全帧不静默丢弃）。

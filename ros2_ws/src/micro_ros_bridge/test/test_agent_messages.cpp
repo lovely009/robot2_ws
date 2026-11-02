@@ -138,6 +138,7 @@ AgentStatus valid_status()
 
 TEST(AgentCommand, AcceptsId64LimitAndKeepsEmptyAsSnapshot)
 {
+  EXPECT_EQ(can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION, 4u);
   MotorCommandArray in;
   in.sequence = 12;
   in.count = 2;
@@ -146,7 +147,7 @@ TEST(AgentCommand, AcceptsId64LimitAndKeepsEmptyAsSnapshot)
   AgentCommand out;
   const auto result = micro_ros_bridge::encode_agent_command(in, out);
   ASSERT_TRUE(result.ok) << result.error;
-  EXPECT_EQ(out.schema_version, 3u);
+  EXPECT_EQ(out.schema_version, can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION);
   EXPECT_EQ(out.mode, AgentCommand::SNAPSHOT);
   EXPECT_EQ(out.sequence, 12u);
   ASSERT_EQ(out.motor_ids.size(), 2u);
@@ -293,19 +294,41 @@ TEST(AgentConfig, RejectsRetiredWritesAndMapsReadOperationsWithStrictIds)
   EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
 }
 
+TEST(AgentConfig, SetZeroMapsOnlySingleMotorWithoutParameterPayload)
+{
+  ConfigRequest in;
+  in.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
+  in.command = SystemCommand::COMMAND_SET_ZERO;
+  in.motor_id = 64; in.request_id = 7; in.sync_time_ns = 123; in.session_id = 9;
+  AgentConfigRequest out;
+  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  EXPECT_EQ(out.operation, AgentConfigRequest::SET_ZERO);
+  EXPECT_EQ(out.motor_id, 64u); EXPECT_EQ(out.request_id, 7u);
+  EXPECT_EQ(out.issued_stamp, 123u); EXPECT_EQ(out.session_id, 9u);
+  EXPECT_TRUE(out.policies.empty()); EXPECT_TRUE(out.parameters.empty());
+  in.count = 1;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.count = 0; in.targets.push_back(ParamSetTarget{});
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets.clear(); in.motor_id = 0;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+}
+
 TEST(AgentMotion, ValidatesGroupCardinalityAndMapsId64)
 {
   AgentMotion empty;
-  empty.schema_version = 3;
+  empty.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   empty.session_id = 5;
   empty.group_count = 1;
   LowState out;
   ASSERT_TRUE(micro_ros_bridge::agent_motion_frame(empty, 0, out).ok);
   EXPECT_EQ(out.chunk_count, 1u);
   EXPECT_EQ(out.schema_version, can_bridge_msgs::msg::WireContract::SCHEMA_VERSION);
+  empty.schema_version = 3;
+  EXPECT_FALSE(micro_ros_bridge::agent_motion_frame(empty, 0, out).ok);
 
   AgentMotion in;
-  in.schema_version = 3;
+  in.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   in.session_id = 5;
   in.snapshot_stamp = 10;
   in.sequence = 2;
@@ -334,7 +357,7 @@ TEST(AgentMotion, ValidatesGroupCardinalityAndMapsId64)
 TEST(AgentMotion, RejectsWrongChunkLengthForSecondPage)
 {
   AgentMotion in;
-  in.schema_version = 3;
+  in.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   in.session_id = 5;
   in.group_index = 1;
   in.group_count = 2;
@@ -434,7 +457,7 @@ TEST(AgentStatus, RejectsDuplicateTargetsAndLeavesOutputsUntouched)
 TEST(AgentInfo, AppendsId64DeviceWithMatchingParameterId)
 {
   AgentInfo info;
-  info.schema_version = 3;
+  info.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   info.session_id = 7;
   info.snapshot_stamp = 22;
   info.kind = AgentInfo::DEVICE_PAGE;
@@ -458,7 +481,7 @@ TEST(AgentInfo, AppendsId64DeviceWithMatchingParameterId)
 TEST(AgentInfo, DuplicateAcrossPagesIsAtomicAndParameterIdMustMatch)
 {
   AgentInfo info;
-  info.schema_version = 3;
+  info.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   info.session_id = 7;
   info.kind = AgentInfo::DEVICE_PAGE;
   info.result = AgentInfo::OK;
@@ -493,7 +516,7 @@ TEST(AgentInfo, DuplicateAcrossPagesIsAtomicAndParameterIdMustMatch)
 TEST(AgentInfo, CompletePageMayHaveFewerThanCapacityOrBeEmpty)
 {
   AgentInfo one;
-  one.schema_version = 3;
+  one.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   one.session_id = 7;
   one.kind = AgentInfo::DEVICE_PAGE;
   one.result = AgentInfo::OK;
@@ -507,7 +530,7 @@ TEST(AgentInfo, CompletePageMayHaveFewerThanCapacityOrBeEmpty)
   EXPECT_TRUE(micro_ros_bridge::append_agent_info(one, topology, report).ok);
 
   AgentInfo empty;
-  empty.schema_version = 3;
+  empty.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   empty.session_id = 7;
   empty.kind = AgentInfo::DEVICE_PAGE;
   empty.result = AgentInfo::OK;
@@ -619,7 +642,7 @@ TEST(AgentStatus, MapsEveryAllowedControlLifecycle)
 TEST(AgentInfo, AppendsFullPageAndRejectsCapacityAboveFortyEight)
 {
   AgentInfo info;
-  info.schema_version = 3;
+  info.schema_version = can_bridge_msgs::msg::AgentWireContract::SCHEMA_VERSION;
   info.session_id = 7;
   info.kind = AgentInfo::DEVICE_PAGE;
   info.result = AgentInfo::OK;

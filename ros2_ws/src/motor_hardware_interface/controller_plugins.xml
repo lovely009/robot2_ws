@@ -1,0 +1,5 @@
+<library path="motor_hardware_interface">
+  <class name="motor_hardware_interface/JointFollowController" type="motor_hardware_interface::JointFollowController" base_class_type="controller_interface::ControllerInterface">
+    <description>Continuous position targets with bounded velocity and acceleration.</description>
+  </class>
+</library>

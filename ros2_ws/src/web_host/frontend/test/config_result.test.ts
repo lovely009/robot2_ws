@@ -58,6 +58,8 @@ async function connected() {
   ros.configureControl({control_mode: "bench"});
   ros.connect();
   Socket.instances[0].emit("connection");
+  const {store}=await import("../../web/js/core/store.js");
+  store.controlStates.sourceTimeNs=9000000000;
   const resultTopic = Topic.instances.find((topic) => topic.name === "/motor/config_result");
   expect(resultTopic).toBeDefined();
   return { ros, resultTopic: resultTopic! };
@@ -150,13 +152,79 @@ it("结果缓存最多保留最近 64 个 request", async () => {
   ros.disconnect();
 });
 
-it("已移除的参数写入、设零与保存不创建下行请求", async () => {
+it("已移除的参数写入与保存不创建下行请求", async () => {
   const { ros } = await connected();
   const before = Topic.published.length;
   expect(ros.pub('paramSet', {count:1,targets:[{motor_id:1,field:0,value:1}]})).toBe(false);
   expect(ros.pub('firmwareConfig', {count:1,targets:[{motor_id:65535,field:0,value:50}]})).toBe(false);
-  for (const command of [0,2]) expect(ros.pub('sysCmd',{command,motor_id:1})).toBe(false);
+  expect(ros.pub('sysCmd',{command:0,motor_id:1})).toBe(false);
   expect(Topic.published).toHaveLength(before);
+  ros.disconnect();
+});
+
+function zeroReady(store: any, id = 2) {
+  store.controlStates = {seen:true,valid:true,at:Date.now(),sourceTimeNs:9000000000,session:9,sequence:1,
+    byId:new Map([[id,{motor_id:id,online:true,control_lifecycle:2,execution_state:1,
+      policy_enabled:false,motion_enabled:false,state_age_ms:5,unified_fault_code:0,
+      vendor_fault_code:0,last_failure_reason:0,policy_generation:1}]])};
+}
+
+it('设零只发所选电机一次，并等待对应设备终态，不恢复使能或目标', async () => {
+  const {ros,resultTopic} = await connected();
+  const {store} = await import('../../web/js/core/store.js');
+  const device = await import('../../web/js/core/device.js');
+  vi.stubGlobal('window',{confirm:vi.fn(()=>true)});
+  zeroReady(store,64);
+  const pending=device.setMotorZero(64);
+  const sent=Topic.published.find(entry=>entry.topic==='/motor/system_command')!;
+  expect(sent.message).toMatchObject({command:2,motor_id:64});
+  await device.setMotorZero(64);
+  expect(Topic.published.filter(entry=>entry.message.command===2)).toHaveLength(1);
+  resultTopic.callback?.({...result(sent.message.request_id,0),command:2});
+  await Promise.resolve();
+  expect(store.results.get('paramResult').text).not.toContain('成功');
+  resultTopic.callback?.({...result(sent.message.request_id,1),command:2});
+  await pending;
+  expect(store.results.get('paramResult')).toMatchObject({ok:true});
+  expect(store.results.get('paramResult').text).toContain('设备已确认');
+  expect(Topic.published.every(entry=>entry.topic==='/motor/system_command')).toBe(true);
+  ros.disconnect();
+});
+
+it.each(['enabled','motion','offline','stale','fault','vendor_fault','transition','host_active','host_pending','readonly','invalid','canceled'])('设零拒绝 %s，不下发请求',async change=>{
+  const {ros}=await connected();
+  const {store}=await import('../../web/js/core/store.js');
+  const device=await import('../../web/js/core/device.js');
+  vi.stubGlobal('window',{confirm:vi.fn(()=>change!=='canceled')});
+  zeroReady(store);
+  const state=store.controlStates.byId.get(2)!;
+  if(change==='enabled')state.policy_enabled=true;
+  if(change==='motion')state.motion_enabled=true;
+  if(change==='offline')state.online=false;
+  if(change==='stale')store.controlStates.at=Date.now()-3000;
+  if(change==='fault')state.unified_fault_code=5;
+  if(change==='vendor_fault')state.vendor_fault_code=257;
+  if(change==='transition')state.execution_state=6;
+  if(change==='host_active')store.commandStatus.data={mode:'trajectory',active_controllers:['trajectory_controller']};
+  if(change==='host_pending')store.commandStatus.data={mode:'stopped',pending_goal_ids:[1]};
+  if(change==='readonly')ros.configureControl({control_mode:'readonly'});
+  await device.setMotorZero(change==='invalid'?0:2);
+  expect(Topic.published).toHaveLength(0);
+  ros.disconnect();
+});
+
+it.each([10,5])('设零失败显示设备错误 %s，不误报成功',async error_code=>{
+  const {ros,resultTopic}=await connected();
+  const {store}=await import('../../web/js/core/store.js');
+  const device=await import('../../web/js/core/device.js');
+  vi.stubGlobal('window',{confirm:()=>true});zeroReady(store);
+  const pending=device.setMotorZero(2);
+  const sent=Topic.published.find(entry=>entry.message.command===2)!;
+  resultTopic.callback?.({...result(sent.message.request_id,2),command:2,error_code,failed_targets:1});
+  await pending;
+  expect(store.results.get('paramResult')).toMatchObject({ok:false});
+  expect(store.results.get('paramResult').text).toContain(`error_code=${error_code}`);
+  if(error_code===5)expect(store.results.get('paramResult').text).toContain('设备零位可能已改变');
   ros.disconnect();
 });
 
@@ -273,5 +341,45 @@ it("坏帧及旧控制序号不清缓存或终止 ConfigResult waiter", async ()
   controlTopic.callback?.(controlSnapshot(realisticSessionId + 1, 1));
   await expect(pending).resolves.toEqual({ outcome: "session_changed", request_id: 42 });
   expect(store.configResults.size).toBe(0);
+  ros.disconnect();
+});
+
+
+it('主机实例复用request_id时，新intent的PENDING不会被旧终态挡掉',async()=>{
+  const {ros,resultTopic}=await connected();
+  const {store}=await import('../../web/js/core/store.js');
+  resultTopic.callback?.({...result(7,1),intent_id:'old-host:1',kind:2});
+  resultTopic.callback?.({...result(7,0),intent_id:'new-host:1',kind:2});
+  expect(store.configResults.get(7)).toMatchObject({status:0,intent_id:'new-host:1'});
+  resultTopic.callback?.({...result(7,1),intent_id:'new-host:1',kind:2});
+  resultTopic.callback?.({...result(7,0),intent_id:'new-host:1',kind:2});
+  expect(store.configResults.get(7)).toMatchObject({status:1,intent_id:'new-host:1'});
+  ros.disconnect();
+});
+
+
+it('浏览器时钟偏移时，系统维护写只携带缓存MCU同步源时间',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(777000);
+  const {ros}=await connected();
+  const {store}=await import('../../web/js/core/store.js');
+  const {sendSystemCommand}=await import('../../web/js/core/device.js');
+  zeroReady(store);
+  for(const command of [1,2,3])expect(sendSystemCommand(command,2)).toBeGreaterThan(0);
+  expect(Topic.published).toHaveLength(3);
+  expect(Topic.published.every(entry=>entry.message.sync_time_ns===9000000000)).toBe(true);
+  expect(Topic.published[0].message.sync_time_ns).not.toBe(Date.now()*1e6);
+  ros.disconnect();
+});
+
+it('没有MCU同步源时间不发维护写，但REPORT只读请求仍携带零时间发送',async()=>{
+  const {ros}=await connected();
+  const {store}=await import('../../web/js/core/store.js');
+  const {sendSystemCommand}=await import('../../web/js/core/device.js');
+  zeroReady(store);store.controlStates.sourceTimeNs=0;
+  for(const command of [1,2,3])expect(sendSystemCommand(command,2)).toBe(0);
+  expect(Topic.published).toHaveLength(0);
+  expect(sendSystemCommand(4,65535)).toBeGreaterThan(0);
+  expect(Topic.published).toHaveLength(1);
+  expect(Topic.published[0].message).toMatchObject({command:4,sync_time_ns:0});
   ros.disconnect();
 });

@@ -1,4 +1,5 @@
 """传动组反馈与轨迹适配；时间以主机单调秒表示，报文年龄来自 MCU。"""
+import json
 import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -6,6 +7,38 @@ import xml.etree.ElementTree as ET
 from robot_transmission import Axis, Model
 from can_bridge_msgs.msg import WireContract
 from .topic_bridge import BridgeError, MAX_TRAJECTORY_MOTORS, MAX_TRAJECTORY_POINTS
+
+
+def parse_joint_limits(value: str, model_name: str, defaults: dict) -> dict:
+    if not isinstance(value, str):
+        raise BridgeError('joint_limits_json 必须是 JSON 字符串')
+    try:
+        data = json.loads(value) if value else {}
+    except (ValueError, RecursionError) as exc:
+        raise BridgeError('关节限位 JSON 格式无效') from exc
+    limits = dict(defaults)
+    if not isinstance(data, dict):
+        raise BridgeError('关节限位必须是 JSON 对象')
+    if not data:
+        return limits
+    if set(data) != {'model', 'joint_limits'} or data['model'] != model_name:
+        raise BridgeError('关节限位模型与主机当前模型不一致或字段无效')
+    if not isinstance(data['joint_limits'], dict):
+        raise BridgeError('joint_limits 必须是关节范围对象')
+    for name, bounds in data['joint_limits'].items():
+        if name not in limits:
+            raise BridgeError(f'关节 {name} 不属于当前主机传动模型')
+        if not isinstance(bounds, dict) or set(bounds) != {'lower', 'upper'}:
+            raise BridgeError(f'关节 {name} 限位必须包含 lower 和 upper')
+        lower, upper = bounds['lower'], bounds['upper']
+        try:
+            valid = all(type(v) in (int, float) and math.isfinite(v) for v in (lower, upper))
+        except OverflowError:
+            valid = False
+        if not valid or lower >= upper:
+            raise BridgeError(f'关节 {name} 限位必须是有限数值，且下限小于上限')
+        limits[name] = (lower, upper)
+    return limits
 
 
 class TransmissionBridge:
@@ -36,6 +69,11 @@ class TransmissionBridge:
                 if limit is not None and joint.get('type') != 'continuous':
                     self.joint_limits[name] = (float(limit.get('lower', '-inf')),
                                                float(limit.get('upper', 'inf')))
+
+    def joint_limits_from_json(self, value: str, model_name: str) -> dict:
+        return parse_joint_limits(value, model_name,
+            {name: self.joint_limits.get(name, (-math.inf, math.inf))
+             for name in self.model.joint_names})
 
     def _fresh(self, now: float) -> dict:
         samples = {name: sample for name, (stamp, sample) in self.samples.items()
@@ -76,7 +114,8 @@ class TransmissionBridge:
         self.state_stamp = min((self.samples[a][0] for a in fresh), default=None)
         return self.model.actuator_to_joint(fresh)
 
-    def trajectory(self, joint_names: list[str], samples: list[dict], now: float):
+    def trajectory(self, joint_names: list[str], samples: list[dict], now: float,
+                   limits: dict | None = None):
         if not joint_names or len(set(joint_names)) != len(joint_names) or not samples:
             raise BridgeError('轨迹关节/路点为空或关节名重复')
         if set(joint_names)-set(self.model.joint_names):
@@ -110,9 +149,10 @@ class TransmissionBridge:
                                      channels['velocities'][i] if channels['velocities'] is not None else 0.,
                                      channels['effort'][i] if channels['effort'] is not None else 0.)
             for name, axis in targets.items():
-                lower, upper = self.joint_limits.get(name, (-math.inf, math.inf))
+                lower, upper = (limits or self.joint_limits).get(
+                    name, self.joint_limits.get(name, (-math.inf, math.inf)))
                 if not lower <= axis.position <= upper:
-                    raise BridgeError(f'关节 {name} 目标超出 URDF 限位，整组拒绝')
+                    raise BridgeError(f'关节 {name} 目标超出主机关节限位 [{lower}, {upper}]，整组拒绝')
             try:
                 motor_targets = self.model.joint_to_actuator(targets)
             except (ValueError, RuntimeError) as exc:

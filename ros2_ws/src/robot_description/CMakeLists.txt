@@ -12,6 +12,7 @@ install(FILES README.md DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_installed_models test/test_installed_models.py)
+  ament_add_pytest_test(test_motor_frames test/test_motor_frames.py)
 endif()
 
 ament_package()

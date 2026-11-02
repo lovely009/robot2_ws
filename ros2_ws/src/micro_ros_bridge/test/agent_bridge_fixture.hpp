@@ -37,16 +37,13 @@ protected:
   rclcpp::Publisher<ConfigRequest>::SharedPtr maintenance_pub;
   rclcpp::TimerBase::SharedPtr status_timer;
   AgentStatus status;
-  rclcpp::Publisher<ControlLease>::SharedPtr authority_pub;
   std::vector<AgentCommand> wire_grants;
-  bool auto_authority = true;
-  uint32_t lease_sequence = 0;
+  bool auto_authority = true, initializing_policy = false;
   uint64_t lease_id = 100000001;
-  void grant(uint64_t id, uint32_t sequence, bool active=true, uint32_t duration=250) {
-    ControlLease message; message.session_id = status.session_id;
-    message.lease_id = id; message.sequence = sequence; message.active = active;
-    message.valid_until_tick_ms = active ? status.snapshot_tick_ms + duration : 0;
-    authority_pub->publish(message);
+  void enable() {
+    MotorPolicyArray m; m.count = 1; m.sync_time_ns = stamp(); m.policy_generation = 9;
+    MotorPolicyTarget p; p.motor_id = 64; p.enabled = true; p.kp = 20; p.kd = 2;
+    m.targets.push_back(p); policy_pub->publish(m);
   }
   std::vector<AgentConfigRequest> configs;
   std::vector<AgentTrajectoryRequest> trajectories;
@@ -87,11 +84,6 @@ protected:
   void publish_status() {
     status.snapshot_stamp = status.clock_valid ? stamp() : 0;
     status.snapshot_tick_ms += 40; ++status.sequence;
-    if (auto_authority && status.lease_active) {
-      status.lease_valid_until_tick_ms = status.snapshot_tick_ms + 250;
-      grant(lease_id, ++lease_sequence);
-      status.lease_sequence = lease_sequence;
-    }
     status_pub->publish(status);
   }
   void start(size_t count = 1) {
@@ -108,11 +100,15 @@ protected:
     status_timer = peer->create_wall_timer(40ms, [this] {publish_status();});
     ASSERT_TRUE(spin([&] {return !topologies.empty();}));
     if (auto_authority) {
-      grant(lease_id, ++lease_sequence);
-      ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
-      status.lease_id = lease_id; status.lease_sequence = lease_sequence;
-      status.lease_active = true; status.lease_valid_until_tick_ms = status.snapshot_tick_ms + 250;
-      publish_status(); run(20ms);
+      run(100ms); initializing_policy = true; enable();
+      ASSERT_TRUE(spin([&] {return !wire_grants.empty() && status.lease_active;}));
+      ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(),configs.end(),[](const auto & c) {
+        return c.operation == AgentConfigRequest::ACK_RESULTS;});}));
+      initializing_policy = false; status.results.clear(); results.clear();
+      configs.erase(std::remove_if(configs.begin(),configs.end(),[](const auto & c) {
+        return c.operation == AgentConfigRequest::SET_POLICY || c.operation == AgentConfigRequest::ACK_RESULTS;
+      }),configs.end());
+      run(25ms);
     }
   }
   MotorCommandArray command() {
@@ -133,15 +129,23 @@ protected:
     motion_pub = peer->create_publisher<AgentMotion>(AgentWireContract::TOPIC_MOTION,
       rclcpp::QoS(2).best_effort());
     command_pub = peer->create_publisher<MotorCommandArray>(
-      "/robot/managed/motor/command_array", 1);
-    policy_pub = peer->create_publisher<MotorPolicyArray>("/robot/managed/motor/policy_array", 10);
-    trajectory_pub = peer->create_publisher<MotorTrajectory>("/robot/managed/motor/trajectory", 10);
-    system_command_pub = peer->create_publisher<SystemCommand>("/robot/managed/maintenance/system_command", 10);
-    maintenance_pub = peer->create_publisher<ConfigRequest>("/robot/managed/maintenance/config_request", 10);
-    authority_pub = peer->create_publisher<ControlLease>("/robot/managed/motor/control_lease", 10);
+      "/motor/host_command_array", 1);
+    policy_pub = peer->create_publisher<MotorPolicyArray>("/motor/policy_array", 10);
+    trajectory_pub = peer->create_publisher<MotorTrajectory>("/motor/trajectory", 10);
+    system_command_pub = peer->create_publisher<SystemCommand>("/motor/system_command", 10);
+    maintenance_pub = peer->create_publisher<ConfigRequest>("/motor/config_request", 10);
     subscriptions.push_back(peer->create_subscription<AgentCommand>(AgentWireContract::TOPIC_COMMAND,
       rclcpp::QoS(10).best_effort(), [this](AgentCommand::SharedPtr m) {
-        if (m->mode == AgentCommand::AUTHORITY) wire_grants.push_back(*m); else commands.push_back(*m);
+        if (m->mode == AgentCommand::AUTHORITY) {
+          wire_grants.push_back(*m);
+        } else commands.push_back(*m);
+        if (m->mode == AgentCommand::AUTHORITY || m->lease_sequence != 0U) {
+          if (auto_authority) {
+            status.lease_id = m->lease_id; lease_id = m->lease_id;
+            status.lease_sequence = m->lease_sequence; status.lease_active = m->lease_active;
+            status.lease_valid_until_tick_ms = m->lease_valid_until_tick_ms;
+          }
+        }
       }));
     listen(AgentWireContract::TOPIC_TRAJECTORY, trajectories);
     listen("/motor/motion_states", motions, rclcpp::QoS(10).best_effort());
@@ -151,6 +155,10 @@ protected:
     subscriptions.push_back(peer->create_subscription<AgentConfigRequest>(
       AgentWireContract::TOPIC_CONFIG, 10, [this](AgentConfigRequest::SharedPtr m) {
         configs.push_back(*m);
+        if (initializing_policy && m->operation == AgentConfigRequest::SET_POLICY) {
+          AgentConfigResult result; result.request_id=m->request_id; result.operation=m->operation;
+          result.state=AgentConfigResult::SUCCEEDED; status.results={result};
+        }
         if (auto_info && m->operation == AgentConfigRequest::QUERY_INFO) {info_pub->publish(page(*m));}
       }));
     ASSERT_TRUE(spin([&] {return command_pub->get_subscription_count() &&

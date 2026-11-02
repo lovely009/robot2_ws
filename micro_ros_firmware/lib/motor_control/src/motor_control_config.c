@@ -30,6 +30,24 @@ static bool start_tx(motor_control_context_t *ctx, motor_control_entry_t *entry,
     const motor_protocol_config_request_t *request,
     uint32_t now_ms);
 
+static void invalidate_zero_feedback(motor_control_context_t *ctx, motor_control_entry_t *entry) {
+  const size_t slot = motor_control_entry_index(ctx, entry);
+  size_t kept = 0U;
+  for (size_t i = 0U; i < ctx->tx_count; ++i) {
+    const motor_protocol_tx_frame_t *frame = &ctx->tx_pending[i];
+    if (frame->tx_class == MOTOR_PROTOCOL_TX_CLASS_P2 && frame->valid_until_tick_ms && frame->tx_slot == slot) continue;
+    ctx->tx_pending[kept++] = *frame;
+  }
+  ctx->tx_count = kept;
+  ctx->zero_tx_cancel_pending |= UINT64_C(1) << slot;
+  entry->has_measured = false;
+  entry->measured.has_motion_state = false;
+  entry->last_motion_rx_tick_ms = 0U;
+  entry->has_target = false;
+  entry->fresh_target_pending = false;
+  entry->target_position_rad = entry->target_velocity_rad_s = entry->target_effort_nm = 0.0f;
+}
+
 // 逐电机失能（Policy enable=false 与 SET_ENABLE(false) 共用）：清授权与目标 →
 // 在动则发失能帧 → 仍在 ACTIVE/SAFE_STOP 的退回 READY_DISABLED 并出事件。
 // ARD §36 冻结语义：复运动必须显式重发 enable=true，本函数不留自动恢复路径。
@@ -416,6 +434,10 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
     entry->identity_read_done = false;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_IDENTIFYING;
   }
+  if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+    // ACK 丢失也可能已改零；旧坐标不能复用，更不能伪造位置 0。
+    invalidate_zero_feedback(ctx, entry);
+  }
   entry->tx_active = false;
   entry->tx_awaiting = false;
   // 模式事务可能停在厂家 stop 阶段；无论结果均复位使能序列，后续重新发送。
@@ -606,6 +628,11 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
     if ((int32_t)(now_ms - entry->tx_deadline_tick_ms) < 0) {
       continue;
     }
+    if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+      // 设零是副作用命令；丢 ACK 时不能重复执行另一个当前位置的设零。
+      motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_TIMEOUT, now_ms);
+      continue;
+    }
     entry->tx_retries++;
     if (entry->tx_retries > 2U) {
       motor_control_finish_tx(ctx, entry, MOTOR_PROTOCOL_CONFIG_TIMEOUT, now_ms);
@@ -647,6 +674,11 @@ void motor_control_config_step(motor_control_context_t *ctx, uint32_t now_ms) {
         &frame) &&
         frame.size > 0U) {
       frame.tx_class = MOTOR_PROTOCOL_TX_CLASS_P2;
+      if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+        frame.tx_slot = (uint16_t)motor_control_entry_index(ctx, entry);
+        frame.valid_until_tick_ms = now_ms + info.timeout_ms;
+        if (!frame.valid_until_tick_ms) frame.valid_until_tick_ms = UINT32_MAX;
+      }
       if (!motor_control_push_tx(ctx, &frame)) {
         continue; // 缓冲满：下一节拍重试本阶段
       }
@@ -922,6 +954,9 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
   if (entry->profile == NULL) {
     return reject_invalid(ctx, entry, request, now_ms);
   }
+  if (request->enable && entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+    return reject_busy(ctx, entry, request, now_ms);
+  }
   if (!isfinite(request->kp) || !isfinite(request->kd) ||
       request->kp < 0.0f || request->kd < 0.0f) {
     return reject_invalid(ctx, entry, request, now_ms);
@@ -990,6 +1025,25 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
   }
 
   switch (request->kind) {
+  case MOTOR_PROTOCOL_CONFIG_SET_ZERO: {
+    if (!entry->online || entry->profile == NULL ||
+        entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED ||
+        entry->policy_enable || entry->motion_enabled || entry->enable_pending ||
+        entry->motion_authorized || entry->has_target) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active || entry->p0_pending) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    for (uint16_t i = 0; ctx->trajectory_active && i < ctx->trajectory.target_count; ++i) {
+      if (ctx->trajectory.target_ids[i] == entry->motor_id) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
+    }
+    const bool accepted = start_tx(ctx, entry, request, now_ms);
+    if (entry->tx_active) invalidate_zero_feedback(ctx, entry);
+    return accepted;
+  }
   case MOTOR_PROTOCOL_CONFIG_SET_GAINS: {
     // 增益是低频 Policy（ARD §19.4）：本地生效，上限来自 Profile，
     // 不进入命令快照、不刷新命令 freshness。
@@ -1040,6 +1094,9 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     // true = 重立运动授权（仍需新快照才能运动）；false = 立即退出运动：
     // 软停 + 失能帧 + 清授权位（ARD §36 冻结语义）。
     if (request->enable) {
+      if (entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
       // 参数核对策略统一由 helper 决定；当前仅报告、不拦截。
       if (!motor_control_dev_params_allow_motion(entry)) {
         entry->last_failure_reason = MOTOR_CONTROL_FAULT_DEV_PARAM;

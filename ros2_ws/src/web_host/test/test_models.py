@@ -1,13 +1,4 @@
-"""`web_host/models.py` 的单测（模型目录只读视图：臂视图候选与关节映射）。
-
-臂视图的 motor_id → 关节名 映射原先硬编码在前端 store.js、写死成 half_body_robot
-的 18 台，换模型就**静默失效**（关节名对不上 → 那些关节角恒为 0、臂上小球点不中，
-表现得像"电机没注册"）。现在向模型配置取：① 模型自带 motor_driver.yaml；
-② 回落「拓扑 × motor_hardware_interface 权威驱动配置」。这几条守的就是"换模型
-不再静默失效"。
-
-只读文件、不起进程；不碰 CAN 与串口。
-"""
+"""模型枚举、映射优先级、传动元数据与非法配置的只读回归测试。"""
 
 from __future__ import annotations
 
@@ -249,6 +240,9 @@ def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
     assert set(direct) == set(range(1, 19)) - {8, 9, 17, 18}
     assert direct[1] == "joint_link1"
     assert not groups["wrist_a"]["direct_mapping"]
+    assert groups["wrist_a"]["legacy_mapping_reason"] == "coupled_group_not_flattened"
+    assert all(g["legacy_mapping_reason"] is None
+               for g in groups.values() if g["direct_mapping"])
 
 
 def test_declared_invalid_transmission_metadata_cannot_use_legacy_alias(tmp_path: Path) -> None:

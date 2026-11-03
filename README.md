@@ -19,7 +19,7 @@ ROS 2 Humble 整机平台。实机只有一条电机执行链：`主机 JTC/Micr
 
 ## 构建与启动
 
-线上 IDL 为 **v3 的整合租约扩展草案**（schema_version=3，尚未作为发布协议定稿）。`can_bridge_msgs`、主机 bridge、Agent 与 MCU 固件必须配套生成消息和构建，不能混用旧二进制。
+MCU 线上协议为 **schema 4**（`can_bridge_msgs/msg/AgentWireContract.msg`）。`can_bridge_msgs`、主机 bridge、Agent 与 MCU 固件必须配套生成消息和构建，不能混用旧二进制。
 
 首次检出时先生成网页资产（在仓库根目录执行，需要 Node.js（^20.19.0 或 ≥22.12.0）及 npm）：
 

@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-# 文件名白名单：单层、非隐藏、.json 结尾。目录穿越由它 + resolve 双重拦截。
+# 文件名白名单：仅允许单层、非隐藏的 JSON 文件名。
 _NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}\.json$")
 _MAX_TEXT_BYTES = 8 * 1024 * 1024
 
@@ -23,9 +23,7 @@ def actions_directory(web_root: str) -> Path:
 
 
 def _checked_path(directory: Path, name) -> Path:
-    # 白名单即防穿越：单层、无斜杠/反斜杠、非 ".." 开头，天然出不了目录。
-    # 刻意**不** resolve——symlink-install 下内置文件是指回源码的符号链接，
-    # resolve 后父目录在源码树，会被误判为越界。
+    # 不 resolve：symlink-install 的内置动作允许指向源码目录。
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
         raise ValueError("非法动作文件名（单层、字母数字._-、以 .json 结尾）")
     return directory / name

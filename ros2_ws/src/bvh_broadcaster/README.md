@@ -5,7 +5,7 @@
 及 End Site。另提供 `half_body_robot` 双臂 IK 离线转换与独立机器人预览，
 不连接电机控制链路。
 
-## 构建与样例
+## 构建与回放
 
 ```bash
 cd /home/ly/robot2_ws/ros2_ws
@@ -13,9 +13,12 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select bvh_broadcaster --symlink-install
 source install/setup.bash
 ros2 launch bvh_broadcaster play.launch.py \
-  bvh_file:=/home/ly/robot2_ws/ros2_ws/src/robot_description/models/演示样例_20261027141432.bvh \
+  bvh_file:=/absolute/path/to/full-body.bvh \
   rviz:=true
 ```
+
+将示例路径替换为实际 BVH；双臂 IK 需要含躯干和四肢的完整骨架。
+内置动作位于 `web_host/action_library/`，其中 `1-4.bvh` 是精简骨架，不适用于双臂 IK。
 
 按文件 `Frame Time` 播放；默认一次播放并持续广播末帧，Ctrl-C 停止。
 循环追加 `loop:=true`，半速追加 `speed:=0.5`。RViz 配置默认 Fixed Frame 为 `world`；
@@ -26,19 +29,18 @@ ros2 launch bvh_broadcaster play.launch.py \
 | `bvh_file` | 必填 | BVH 路径，可含中文 |
 | `base_frame` | `world` | 根 TF 的父坐标系 |
 | `frame_prefix` | `mocap` | 隔离骨架名称，例如 `mocap/Hips` |
-| `scale` | `0.01` | 位置/骨长换算为米；本样例原值为厘米 |
+| `scale` | `0.01` | 位置/骨长换算为米；默认按厘米解释 |
 | `up_axis` | `y_up` | `y_up` 将 `(X,Y,Z)` 映射为 ROS `(Z,X,Y)`；`z_up` 保持原坐标 |
 | `apply_root_offset` | `false` | 是否将根 OFFSET 叠加到根平移通道 |
 | `speed` | `1.0` | 播放倍率，必须为正数 |
 | `loop` | `false` | 循环 |
 | `rviz` | `false` | 启动 RViz2 |
 
-**根偏移是导出器约定，不能自动猜测。** 此 VDMocap 样例的根 OFFSET 与首帧
-Yposition 都是 `102.2`；demo 的 T-pose 腰高为 `1.022 m`，因此 launch 默认不叠加
-根 OFFSET。标准加法语义的其他文件应传 `apply_root_offset:=true`。直接 `ros2 run`
-节点时此参数默认 true，需显式为本样例设置 false。
+根偏移须按导出器约定核对：launch 默认不叠加根 OFFSET，标准加法语义的文件
+应传 `apply_root_offset:=true`。直接 `ros2 run` 节点时默认 true；需要忽略 OFFSET
+时显式设置 false。
 
-旋转严格按 CHANNELS 声明的内禀顺序组合（样例是 **Y-X-Z**，不是固定 XYZ）。
+旋转严格按 CHANNELS 声明的内禀顺序组合。
 有位置通道的节点要求位置通道排在旋转之前；不支持的布局会报错。
 提供 TF 时，位置和旋转一起做坐标基变换，单位统一为米，四元数为 ROS `xyzw`。
 
@@ -46,7 +48,7 @@ Yposition 都是 `102.2`；demo 的 T-pose 腰高为 `1.022 m`，因此 launch �
 
 映射采用 Pinocchio + SciPy IK。`config/half_body_robot.yaml` 指定人体躯干、
 左右肩/肘/手与机器人连杆的语义对应及坐标基变换。**首帧必须是参考 T-pose**；
-当前样例符合该约定。用上臂、前臂的单位方向适配骨长差异，手腕朝向相对于
+转换前须核对输入文件。用上臂、前臂的单位方向适配骨长差异，手腕朝向相对于
 参考姿态标定；人体根平移、躯干转向和腿部动作不映射到固定底座双臂。
 本转换器使用现有 `y_up`/厘米 BVH 约定；其他导出器须先核对约定。
 
@@ -54,7 +56,7 @@ Yposition 都是 `102.2`；demo 的 T-pose 腰高为 `1.022 m`，因此 launch �
 source /opt/ros/humble/setup.bash
 source /home/ly/robot2_ws/ros2_ws/install/setup.bash
 ros2 run bvh_broadcaster retarget_bvh \
-  /home/ly/robot2_ws/ros2_ws/src/robot_description/models/演示样例_20261027141432.bvh \
+  /absolute/path/to/full-body.bvh \
   --urdf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/half_body_robot/urdf/half_body_robot.urdf \
   --output /tmp/half_body_robot-preview.npz
 ros2 launch bvh_broadcaster retarget.launch.py \

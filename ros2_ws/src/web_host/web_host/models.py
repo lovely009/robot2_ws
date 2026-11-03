@@ -1,9 +1,4 @@
-"""模型目录的只读视图（文件域）：臂视图的模型候选与 motor_id → 关节名映射。
-
-只读文件、不起进程——与 bench_manager 的进程管理无关，所以留在 web_host
-（static_server 的 /api/models 与 /api/model-transmissions 直接用）。
-模型根目录由 model_dir（模型包根，可指源码目录）推导。
-"""
+"""模型目录、传动元数据与电机型号库的只读文件接口。"""
 
 import importlib
 from pathlib import Path
@@ -17,11 +12,7 @@ _TOPOLOGY_CONFIG = "config/simulation_topology.yaml"
 
 
 def _models_root():
-    """默认模型根目录（安装树的 robot_description share）；取不到返回 None。
-
-    各函数的 `root=` 参数可覆盖它：web_host.launch.py 的 model_dir 指向模型包根
-    时，static_server 传 `<model_dir>/models`（可指源码目录）。
-    """
+    """默认读取 robot_description 安装树；调用方可用 root 覆盖。"""
     try:
         return Path(get_package_share_directory("robot_description")) / "models"
     except Exception:
@@ -29,13 +20,7 @@ def _models_root():
 
 
 def enumerate_arm_models(root=None):
-    """List models the arm view can switch between (have `urdf/<模型名>.urdf`)。
-
-    判据只有主 URDF——臂视图不要求模型接进端到端仿真（那要
-    simulation_topology.yaml / MJCF，见 bench_manager 的模型枚举）。因此列表里
-    **可能**有没配电机映射的预览件（`has_joint_mapping_source` 为假）：它们渲染
-    得出几何；页面清空电机映射，不沿用默认或其他模型。
-    """
+    """列出具有主 URDF 的模型；几何预览不要求电机映射或仿真配置。"""
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         return []
@@ -46,14 +31,8 @@ def enumerate_arm_models(root=None):
     )
 
 
-
 def model_transmissions(model, root=None):
-    """返回模型的传动组目录；组定义由 robot_transmission.Model 解析。
-
-    这里只输出 UI 需要的名字、插件名和关联，不暴露减速比或偏移。关节与电机
-    的关联来自 model 的 ``motor_hardware.transmissions_file``（或 Model 的
-    legacy 映射），不从 raw 电机的 ``joint`` 字段反推。
-    """
+    """由 robot_transmission.Model 解析传动组，返回 UI 元数据与可直连关节。"""
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         raise ValueError("找不到模型根目录（models/ 不存在或安装树不完整？）")
@@ -107,8 +86,6 @@ def model_transmissions(model, root=None):
                                    and direct.get(motor[0]["id"]) == joint[0])
         if group["direct_mapping"]:
             group["legacy_mapping_reason"] = None
-        elif len(motor) == 1:
-            group["legacy_mapping_reason"] = "coupled_group_not_flattened"
         else:
             group["legacy_mapping_reason"] = "coupled_group_not_flattened"
     return {
@@ -121,14 +98,7 @@ def model_transmissions(model, root=None):
 
 
 def has_joint_mapping_source(model, root=None):
-    """该模型有没有声明 motor_id → 关节映射的来源（`simulation_model_joints` 的 ①② 任一）。
-
-    臂视图候选的判据只有主 URDF——几何能渲染就列出来；而**映射**另要 config 里的
-    一份文件。两者不一致的模型（如 `robot_leg`、`zhoubuguanjie_youbi_001`：有 URDF 与
-    控制器、但没配电机映射）在页面上退化成
-    空映射 + 来源错误提示。调用方用它区分「没配」与「配错了」：
-    前者可以跳过，后者必须报错——配了文件却解析不出来仍是契约缺项。
-    """
+    """检查模型是否声明驱动或拓扑文件；已声明但解析失败应由调用方报错。"""
     models_root = Path(root) if root is not None else _models_root()
     if (models_root is None or not model or model != Path(model).name
             or model in (".", "..")):
@@ -138,24 +108,9 @@ def has_joint_mapping_source(model, root=None):
 
 
 def simulation_model_joints(model, root=None):
-    """读出某模型的**电机 id → 关节名**映射，供前端臂视图使用。
+    """读取电机 id → 关节名：优先模型驱动配置，否则用拓扑关联权威驱动配置。
 
-    前端靠这张表把 motor_id 落到关节上（关节角同步、状态选色、臂上小球点选）。
-    它此前硬编码在 `web/js/core/store.js`，写死成 half_body_robot 的 18 台，
-    于是**换模型就静默失效**：关节名对不上 → 那些关节角恒为 0、小球点不中，
-    表现得像"电机没注册"。这里改为向模型配置取同一个真相源，加模型/改关节名
-    不必再动前端。
-
-    解析顺序（与 simulation.launch.py 同序）：
-      ① 模型自带 `config/motor_driver.yaml` 的 `motor_hardware.motors`：每个条目
-         同时带 `joint:` 与 `id:`，一步到位（half_body_robot 走这条）；
-      ② 回落：`config/simulation_topology.yaml` 的 (电机名 → 关节) × motor_
-         hardware_interface 权威驱动配置的 (电机名 → id)。新模型常常先有拓扑、
-         后补 motor_driver.yaml；没有②时仅提供几何预览。
-
-    Raises:
-        ValueError: 目录/模型缺失、非法模型名、解析不出条目、条目缺 id/joint、id 重复。
-    """
+    非法模型名、配置缺失、条目不完整或 id 重复时抛出 ValueError。"""
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         raise ValueError("找不到模型根目录（models/ 不存在或安装树不完整？）")
@@ -250,12 +205,9 @@ def _motor_config_dir():
 
 
 def motor_library(root=None):
-    """型号库 `motor.yaml` → {型号名: parameters}（取不到返回 {}）。
+    """读取 motor.yaml，返回型号参数及协议；缺失时返回空表。
 
-    设备页要用减速比把关节侧 rad/s 折算成**电机端 RPM**（设备对象 0x6080 存的是电机端
-    量），系数只能取权威型号库——页面另抄一份迟早与固件侧的换算漂移。
-    型号名即拓扑里的 `model_name`（固件 Profile 的 .model_name 与库的键同源）。
-    """
+    gear_ratio 用于将关节速度换算为设备对象 0x6080 的电机端 RPM。"""
     config_dir = Path(root) if root is not None else _motor_config_dir()
     if config_dir is None:
         return {}

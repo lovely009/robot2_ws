@@ -44,9 +44,6 @@ export const store = {
   // 模型关节表（collectModelJoints 装入）：关节列表除 TF 之外的另一半来源。
   modelJoints: [],
   selectedId: 0,
-  // 置顶序（点击过的电机，最近在前）。左栏关节列表与右栏状态表共用一个次序：
-  // 点一台 → 两处都排最上，观察与操作对照不用来回找。
-  pinned: [],
   // 曲线：motor_id -> channel -> {t:[], values:[]}；各通道按自身采样时刻对齐。
   chartBuf: new Map(),
   chart: {running: true, windowMs: 10000},
@@ -66,7 +63,7 @@ export const store = {
   // gravity_feedforward 四段；core/ros.js 订阅写入，台架服务（core/agent.js）的命令响应
   // 也经 applyBenchStatus 写同一份。
   bench: {simulation: null, agent: null, motor_backend: null,
-          gravity_feedforward: null, feedback: null},
+          gravity_feedforward: null, gravity_feedforward_last: 0, feedback: null},
   // /joint_states：byName 保存每个关节的实际测量值；count/last 供其他面板判断流是否在。
   jointStates: {count: 0, last: 0, byName: {}, jointNames: []},
   // /robot_transmission/status：桥心跳；页面显示模型由 MODEL 决定，控制模型只能以它为准。
@@ -81,24 +78,8 @@ export const store = {
   commandStatus: {last: 0, data: null},
 };
 
-// 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
-export function pinMotor(id) {
-  const i = store.pinned.indexOf(id);
-  if (i === 0) return;
-  if (i > 0) store.pinned.splice(i, 1);
-  store.pinned.unshift(id);
-}
-
-// 面板行序：置顶优先（最近点击的在前），其余按 id 升序。陈旧 id 无害（motors 里
-// 没有就排不上来）。
 export function orderedMotorIds() {
-  return [...store.motors.keys()].sort((a, b) => {
-    const pa = store.pinned.indexOf(a), pb = store.pinned.indexOf(b);
-    if (pa >= 0 && pb >= 0) return pa - pb;
-    if (pa >= 0) return -1;
-    if (pb >= 0) return 1;
-    return a - b;
-  });
+  return [...store.motors.keys()].sort((a, b) => a - b);
 }
 
 let dirty = new Set();
@@ -178,6 +159,7 @@ export function applyBenchStatus(snapshot) {
   if (snapshot.feedback) bench.feedback = snapshot.feedback;
   if (snapshot.gravity_feedforward) {
     bench.gravity_feedforward = snapshot.gravity_feedforward;
+    bench.gravity_feedforward_last = Date.now();
   }
   if (snapshot.agent) {
     bench.agent = snapshot.agent;

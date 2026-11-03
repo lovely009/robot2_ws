@@ -23,6 +23,7 @@ import PanelHost from "./components/PanelHost.vue";
 import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import MotionWorkbench from "./components/MotionWorkbench.vue";
+import GravityControl from "./components/GravityControl.vue";
 import {
   runtime,
   snapshot,
@@ -94,11 +95,6 @@ const scenes = [
   },
 ];
 const title = computed(() => scenes.find((item) => item.id === screen.value)!);
-const motionAge = computed(() =>
-  snapshot.value.motionAt === null
-    ? "等待运动数据"
-    : `${Math.max(0, now.value - snapshot.value.motionAt)} ms`,
-);
 const fresh = computed(
   () =>
     snapshot.value.connected &&
@@ -284,8 +280,6 @@ onBeforeUnmount(() => {
               snapshot.online
             }}
             / {{ snapshot.total }}<small>设备在线</small></span
-          ><span class="micro" :class="{ stale: !fresh }"
-            >运动流：{{ motionAge }}</span
           >
           <span class="micro" :title="snapshot.communication.detail">
             MCU：{{ snapshot.communication.link }} · 时钟：{{ snapshot.communication.clock }} · 控制权：{{ snapshot.communication.authority }}
@@ -304,19 +298,19 @@ onBeforeUnmount(() => {
       </div>
 
       <nav v-show="screen !== 'motion'" class="mobile-pane-tabs" aria-label="工作区面板">
-        <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : p.id !== 'parameters')" :key="item.id"
+        <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : p.id !== 'parameters' && (screen !== 'sim' || p.id !== 'objects'))" :key="item.id"
           :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true">
           {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
         </button>
       </nav>
       <MotionWorkbench v-if="screen === 'motion'" :current-model="snapshot.model" />
-      <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
-        <ResizeHandle v-show="screen !== 'teach'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
+      <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach', 'sim-workspace': screen === 'sim' }">
+        <ResizeHandle v-show="screen === 'run'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
         <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
-        <section class="objects-area surface">
+        <section v-show="screen !== 'sim'" class="objects-area surface">
           <div class="panel-title">
             <span>{{ screen === 'teach' ? '设备查询' : '电机与关节' }}</span>
-            <small class="micro">{{ screen !== 'sim' ? '电机反馈' : 'URDF × TF' }}</small>
+            <small class="micro">电机反馈</small>
           </div>
           <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="设备参数查询">
             <button :class="{ active: deviceParameters === 'firmware' }" :aria-pressed="deviceParameters === 'firmware'" @click="deviceParameters = 'firmware'">
@@ -334,7 +328,7 @@ onBeforeUnmount(() => {
           </nav>
           <PanelHost id="readout" :active="screen === 'run'" />
           <Teleport to="#run-joints" :disabled="screen !== 'run'" defer>
-            <PanelHost id="jointList" :active="screen !== 'teach' && screen !== 'motion'" />
+            <PanelHost id="jointList" :active="screen === 'run'" />
           </Teleport>
           <div class="tree-footer">{{ screen === 'teach' ? '选择电机，查看设备反馈与参数' : '关节数据与设备测量分别显示' }}</div>
         </section>
@@ -351,6 +345,9 @@ onBeforeUnmount(() => {
           </div>
           <div class="stage-body">
             <PanelHost id="arm" :active="screen !== 'teach' && screen !== 'motion'" class="robot-panel" />
+            <Teleport v-if="initialized" to="#armGravityControl">
+              <GravityControl v-show="screen === 'run'" />
+            </Teleport>
             <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="75" reverse />
             <div
               id="run-joints"

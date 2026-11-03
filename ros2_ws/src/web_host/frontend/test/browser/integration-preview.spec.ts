@@ -56,7 +56,7 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     if (scene === '设备工作台') {
       await expect(page.getByRole('navigation', {name:'设备参数查询'})).toBeVisible();
       await expect(page.locator('.device-connection')).toHaveCount(0);
-      await expect(page.locator('#paramSummary')).toBeHidden();
+      await expect(page.locator('#paramSummary')).toHaveCount(0);
       await expect(page.locator('#paramSelectionHint')).toBeVisible();
       await page.screenshot({path:join(captureDirectory, `${capturePrefix}-device.png`)});
     }

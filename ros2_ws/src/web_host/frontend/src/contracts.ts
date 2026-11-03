@@ -26,6 +26,7 @@ export interface WorkbenchSnapshot {
   fault: number;
   motionAt: number | null;
   communication: {link: string; clock: string; authority: string; detail: string};
+  gravity: {enabled: boolean | null; active: boolean; blocked: string; pending: boolean};
   session: string;
   mappingError: string;
 }

@@ -6,6 +6,8 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   const errors: string[] = [];
   const connections = { count: 0 };
   const feedbackModels: string[] = [];
+  const gravityRequests: {service: string; args: unknown}[] = [];
+  const gravityReply = {error: ''};
   const policyRequests: {session_id:number;source_time_ns:number;targets:any[];ticket:any}[] = [];
   let policyGeneration=1;
   const parameterReplies = {enabled: false, refreshError: 12};
@@ -81,6 +83,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     "/joint_states": {name: ["joint_link1"], position: [0.15], velocity: [0.2], effort: [0.1]},
     "/control/status": {data: JSON.stringify({model:"half_body_robot",joint_names:["joint_link1"],
       mode:"idle",reason:"no_setpoint",reject:"",gravity_enabled:false,effort_gain:1,
+      feedback_fresh:true,controllers_ready:true,active_controllers:[],
       output_topic:"/motor/host_command_array",
       trajectory_output_topic:"/host_control/trajectory_controller/follow_joint_trajectory"})},
     "/robot_transmission/status": {data: JSON.stringify({model:"half_body_robot",
@@ -91,6 +94,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
         agent: { state: "stopped" },
         simulation: { state: "stopped" },
         motor_backend: { state: "stopped" },
+        gravity_feedforward: {fresh:true,pending:null,error:'',config:{model:'half_body_robot',effort_gain:1}},
       }),
     },
     "/motor/system_status": {
@@ -203,6 +207,14 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
           );
       }
       if (message.op === "call_service") {
+        if (['/bench/start_gravity_feedforward', '/bench/stop_gravity_feedforward'].includes(message.service)) {
+          gravityRequests.push({service:message.service,args:message.args});
+          socket.send(JSON.stringify({op:'service_response',id:message.id,service:message.service,result:true,
+            values:{ok:!gravityReply.error,error:gravityReply.error,status_json:JSON.stringify({gravity_feedforward:{
+              fresh:true,pending:gravityReply.error?null:message.service.includes('/start_')?'start':'stop',
+              error:gravityReply.error,config:{model:'half_body_robot',effort_gain:1}}})}}));
+          return;
+        }
         if (message.service === '/motor/submit_policy') {
           const enabled=message.args.targets.some((target:any)=>target.enabled);
           const ticket={accepted:true,session_id:7001,intent_id:`fixture:${policyRequests.length+1}`,
@@ -262,6 +274,16 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     });
   });
   return { publishes, errors, connections, feedbackModels, firmware, parameterReplies, limitRequests,policyRequests,
+    gravityRequests, gravityReply,
+    sendGravity: (enabled: boolean, mode = 'stopped') => {
+      sendFeedback('/control/status', {data:JSON.stringify({
+        ...JSON.parse((fixtures['/control/status'] as {data:string}).data),
+        gravity_enabled:enabled,effort_gain:enabled?1:0,mode,
+        active_controllers:['follow','trajectory'].includes(mode)?[mode+'_controller','gravity_controller']:[]})});
+      const status={data:JSON.stringify({gravity_feedforward:{fresh:true,pending:null,error:'',
+        config:{model:'half_body_robot',effort_gain:enabled?1:0}}})};
+      fixtures['/bench/status']=status;sendFeedback('/bench/status',status);
+    },
     ackPolicy: () => {const ticket=policyRequests.at(-1)!.ticket;sendFeedback('/motor/config_result',{...ticket,kind:2,command:0,status:1,error_code:0,failed_targets:0,completed_targets:2});},
     setLimitReply: (successful: boolean, confirm = true) => {limitReply.successful=successful;limitReply.confirm=confirm;},
     sendFeedback: (topic: string, msg: unknown) => {fixtures[topic]=msg;sendFeedback(topic, msg);},
@@ -271,6 +293,105 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       sendFeedback('/motor/control_states', message);
     } };
 }
+
+test('重力开关等待主机确认，在跟随和动作模式均显示补偿且不使能电机', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.setViewportSize({width:1333,height:965});
+  await page.goto('/workbench/#/run');
+  const toggle = page.getByRole('checkbox', {name:'重力补偿',exact:true});
+  const status = page.locator('#gravityStatus');
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  expect(fixture.gravityRequests).toEqual([]);
+  await toggle.click();
+  await expect(status).toHaveText('等待主机确认');
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).not.toBeChecked();
+  expect(fixture.gravityRequests).toEqual([{service:'/bench/start_gravity_feedforward',
+    args:{model:'half_body_robot',joint_map:'',effort_gain:1}}]);
+  fixture.sendGravity(true);
+  await expect(toggle).toBeChecked();
+  await expect(status).toHaveText('已开启 · 待运动');
+  for (const mode of ['follow','trajectory']) {
+    fixture.sendGravity(true,mode);
+    await expect(status).toHaveText('补偿中');
+  }
+  await toggle.click();
+  await expect(status).toHaveText('等待主机确认');
+  await expect(toggle).toBeChecked();
+  fixture.sendGravity(false);
+  await expect(toggle).not.toBeChecked();
+  await expect(status).toHaveText('已关闭');
+  expect(fixture.gravityRequests[1]).toEqual({service:'/bench/stop_gravity_feedforward',args:{}});
+  expect(fixture.policyRequests).toEqual([]);
+  expect(fixture.publishes.every(p => p.topic==='/motor/system_command' && p.msg.command===4)).toBe(true);
+  await page.getByRole('button', {name:'仿真工作台',exact:true}).click();
+  await expect(toggle).not.toBeVisible();
+  expect(fixture.errors).toEqual([]);
+});
+
+test('重力开关保留服务拒绝原因，断联后不自动重试', async ({page}) => {
+  const fixture = await connectFixture(page);
+  fixture.gravityReply.error='重力模型缺少关节反馈';
+  await page.goto('/workbench/#/run');
+  const toggle = page.getByRole('checkbox', {name:'重力补偿',exact:true});
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(page.locator('#gravityStatus')).toHaveText('重力模型缺少关节反馈');
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole('button', {name:'重新连接',exact:true}).click();
+  await expect.poll(() => fixture.connections.count).toBe(2);
+  await expect(page.locator('#gravityStatus')).not.toHaveText('重力模型缺少关节反馈');
+  expect(fixture.gravityRequests).toHaveLength(1);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('重力请求受理后状态流中断显示超时并清除陈旧等待', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  const toggle = page.getByRole('checkbox', {name:'重力补偿',exact:true});
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(page.locator('#gravityStatus')).toHaveText('等待主机确认');
+  await expect(page.locator('#gravityStatus')).toContainText('超时', {timeout:6000});
+  await expect(page.locator('.gravity-control')).toHaveAttribute('aria-busy','false');
+  await expect(toggle).not.toBeChecked();
+  fixture.sendGravity(false);
+  await expect(toggle).toBeEnabled();
+  expect(fixture.gravityRequests).toHaveLength(1);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('布局和观察页切换保留3D场景，只有模型变化才重建', async ({page}) => {
+  const { errors, publishes } = await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  const canvas = page.locator('canvas.arm3d');
+  await expect(canvas).toHaveAttribute('data-model-rendered', 'true');
+  const original = await canvas.elementHandle();
+  const modelRequests: string[] = [];
+  page.on('request', request => {
+    if (/\.(?:urdf|stl)(?:\?|$)/i.test(request.url())) modelRequests.push(request.url());
+  });
+
+  await page.getByRole('button', {name: '收起侧栏', exact: true}).click();
+  await expect(page.locator('.workbench')).toHaveClass(/nav-collapsed/);
+  await page.getByRole('button', {name: '展开侧栏', exact: true}).click();
+  await expect(page.locator('.workbench')).not.toHaveClass(/nav-collapsed/);
+  await page.getByRole('button', {name: '事件日志', exact: true}).click();
+  await page.getByRole('button', {name: '曲线', exact: true}).click();
+  await page.locator('[data-workbench-panel="actionLibrary"] summary').click();
+  await page.getByRole('separator', {name: '调整关节面板高度'}).press('ArrowDown');
+  await expect(canvas).toHaveAttribute('data-model-rendered', 'true');
+  expect(await original!.evaluate(element => element.isConnected)).toBe(true);
+  expect(modelRequests).toEqual([]);
+
+  await page.locator('#armModel').selectOption('robot_leg');
+  await expect.poll(() => original!.evaluate(element => element.isConnected)).toBe(false);
+  await expect(canvas).toHaveAttribute('data-model-rendered', 'true');
+  expect(modelRequests.some(url => url.endsWith('/robot_leg.urdf'))).toBe(true);
+  expect(publishes.every(p => p.topic === '/motor/system_command' && p.msg.command === 4)).toBe(true);
+  expect(errors).toEqual([]);
+});
 
 test("关节收起后向下让出空间，观察区使用箭头折叠", async ({page}) => {
   await page.setViewportSize({width: 1063, height: 752});
@@ -347,9 +468,60 @@ test("窄栏电机卡片清楚显示单位、状态并保持选择联动", async
   await card.click();
   await expect(page.locator('.object-heading')).toHaveCount(0);
   await expect(page.locator('#jointRows [data-joint="joint_link1"] .jpos')).toHaveText('0.150');
+  fixture.sendFeedback('/motor/topology', {entries: [2, 1].map(motor_id => ({
+    motor_id, online: true, model_name: 'cerb_r48_101', bus_index: 0, lifecycle: 3,
+  }))});
+  const cards = page.locator('.motor-card');
+  await expect(cards).toHaveCount(2);
+  const order = () => cards.evaluateAll(nodes => nodes.map(n => n.getAttribute('data-id')));
+  expect(await order()).toEqual(['1', '2']);
+  await page.locator('.motor-card[data-id="2"]').click();
+  await expect(page.locator('.motor-card[data-id="2"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await order()).toEqual(['1', '2']);
+  await card.click();
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  expect(await order()).toEqual(['1', '2']);
   expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
+
+for (const width of [1333, 640]) {
+  test(`仿真页移除电机与关节侧栏并释放占位 ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 965});
+    const fixture = await connectFixture(page);
+    await page.goto('/workbench/#/sim');
+    await expect(page.locator('canvas.arm3d')).toHaveAttribute('data-model-rendered', 'true');
+    await expect(page.locator('.objects-area')).toBeHidden();
+    await expect(page.locator('#jointRows')).toBeHidden();
+    await expect(page.getByRole('separator', {name: '调整对象浏览器宽度'})).toBeHidden();
+    await expect(page.getByRole('navigation', {name: '工作区面板'}).getByRole('button', {name: /^电机/})).toHaveCount(0);
+    await expect(page.locator('[data-workbench-panel="sim"]')).toBeVisible();
+    const grid = (await page.locator('.workspace-grid').boundingBox())!;
+    const stage = (await page.locator('.stage-area').boundingBox())!;
+    expect(Math.abs(stage.x - grid.x)).toBeLessThan(2);
+    expect(Math.abs(stage.width - grid.width)).toBeLessThan(2);
+    if (width > 950) {
+      const observer = (await page.locator('.observer-area').boundingBox())!;
+      const separator = (await page.getByRole('separator', {name: '调整观察区高度'}).boundingBox())!;
+      expect(Math.abs(observer.x - grid.x)).toBeLessThan(2);
+      expect(Math.abs(observer.width - grid.width)).toBeLessThan(2);
+      expect(Math.abs(separator.x - grid.x)).toBeLessThan(2);
+    }
+    const canvas = await page.locator('canvas.arm3d').elementHandle();
+    await page.getByRole('button', {name: '调试工作台', exact: true}).click();
+    await expect(page.locator('#jointRows')).toBeVisible();
+    if (width <= 950)
+      await page.getByRole('navigation', {name: '工作区面板'}).getByRole('button', {name: /^电机/}).click();
+    await expect(page.locator('.motor-card')).toBeVisible();
+    await page.getByRole('button', {name: '仿真工作台', exact: true}).click();
+    await expect(page.locator('.objects-area')).toBeHidden();
+    await expect(page.locator('#jointRows')).toBeHidden();
+    await expect(page.locator('[data-workbench-panel="sim"]')).toBeVisible();
+    expect(await canvas!.evaluate(el => el.isConnected)).toBe(true);
+    expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
 
 test("连接与切换模型自动同步只读反馈模型，不产生运动命令", async ({page}) => {
   const fixture = await connectFixture(page);
@@ -767,9 +939,8 @@ test('真实缺失参数不显示已核对，手动读取使用只读回读并�
     rec_torque_limit: null, rec_safety: null, rec_direction: null, rec_t_max: null, rec_node_id: null,
     dev_pos_min: null, dev_pos_max: null, dev_vel_limit: null, dev_torque_limit: null,
     dev_safety: null, dev_direction: null, dev_t_max: null, dev_node_id: null}]});
-  await expect(page.locator('#paramSummary')).toContainText('已核对 0');
-  await expect(page.locator('#paramSummary')).toBeVisible();
-  await expect(page.locator('#paramSummary')).toContainText('型号未识别');
+  await expect(page.locator('#paramSummary')).toHaveCount(0);
+  await expect(page.locator('.motor-parameter-body')).toContainText('型号尚未识别');
   await expect(page.locator('.motor-parameter-body')).toContainText('未返回有效参数');
   await expect(page.getByLabel('位置上限（rad）', {exact: true})).toHaveAttribute('readonly', '');
   await page.getByRole('button', {name: '读取电机参数', exact: true}).click();
@@ -788,8 +959,8 @@ test('真实缺失参数不显示已核对，手动读取使用只读回读并�
     rec_vel_limit: 3.44, rec_torque_limit: 5, rec_safety: 0, rec_direction: 0, rec_t_max: 300, rec_node_id: 1,
     dev_pos_min: -Math.PI, dev_pos_max: Math.PI, dev_vel_limit: 3.44,
     dev_torque_limit: 5, dev_safety: 0, dev_direction: 0, dev_t_max: 300, dev_node_id: 1}]});
-  await expect(page.locator('#paramSummary')).toContainText('记录不一致 1');
-  await expect(page.locator('#paramSummary')).not.toContainText('待回读');
+  await expect(page.locator('#paramSummary')).toHaveCount(0);
+  await expect(page.getByLabel('位置上限（rad）', {exact: true})).toHaveAttribute('title', /记录 3.*驱动板 3.141593/);
   await expect(page.getByLabel('位置上限（rad）', {exact: true})).toHaveValue('3.141593');
   expect(fixture.errors).toEqual([]);
 });

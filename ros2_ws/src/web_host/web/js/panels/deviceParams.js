@@ -3,7 +3,7 @@
 import { describeMotorState } from '../core/motor_state.js';
 import { store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
   syncWriteButtons } from '../core/store.js';
-import { $, fmt, fmtParam, lifecyclePill, devSlotNames, devRecoveryText } from '../core/format.js';
+import { $, fmt, fmtParam, lifecyclePill } from '../core/format.js';
 import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError } from '../core/device.js';
 
 // 型号库（减速比等）——设备端 RPM 的折算系数。取一次缓存；拿到后重绘一次把
@@ -111,7 +111,6 @@ function renderDevRows() {
   tbody.querySelectorAll('[data-clearfault]').forEach((btn) => {
     btn.onclick = () => clearMotorFault(parseInt(btn.dataset.clearfault, 10));
   });
-  renderParamSummary();
 }
 
 // 位置更新不重建参数表，保留展开状态与焦点。
@@ -123,67 +122,6 @@ function updateDevCurPos() {
     const text = fmt(row.motion?.position, 4);
     if (td.textContent !== text) td.textContent = text;
   });
-}
-
-// 设备参数核对总览：在线和收到报告都不是核对成功，只有完整回读与 OK 终态才算。
-function renderParamSummary() {
-  const el = $('paramSummary');
-  if (!el) return;
-  const ids = [...store.paramCache.keys()].sort((a, b) => a - b);
-  el.hidden = ids.length === 0;
-  if (ids.length === 0) {
-    el.textContent = '';
-    return;
-  }
-  const offline = [], blocked = [], ok = [], pending = [], mismatch = [];
-  for (const id of ids) {
-    const row = store.motors.get(id) || {};
-    const online = row.status?.online ?? row.topo?.online;
-    const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
-    if (online === false) offline.push(id);
-    else if (lc === 7) blocked.push(id);
-    else if (store.paramCache.get(id)?.state === 3) mismatch.push(id);
-    else if (paramReadState(id).verified) ok.push(id);
-    else pending.push(id);
-  }
-  const parts = [`<b>设备参数核对：共 ${ids.length} 台</b>`,
-    `<span class="pill mid">已核对 ${ok.length}</span>`];
-  if (mismatch.length) {
-    parts.push(`<span class="pill off">记录不一致 ${mismatch.length}</span>` +
-      `<span class="muted">（${mismatch.map(id => `电机 ${id}：${
-        devSlotNames(store.paramCache.get(id).mask || 0).join('、') || '参数差异'}`).join('；')}；显示驱动板回读值）</span>`);
-  }
-  if (pending.length) {
-    parts.push(`<span class="pill off">待回读 ${pending.length}</span>` +
-      `<span class="muted">（${pending.map(id => `电机 ${id}：${
-        !store.motors.get(id)?.topo?.model_name ? '型号未识别' : '尚未完成有效参数核对'}`).join('；')}）</span>`);
-  }
-  if (blocked.length) {
-    const code = Number(store.lastError || 0);
-    const why = (code === 40) ? '与固件记录不一致'
-      : (code === 41 ? '回读不成功' : (code === 42 ? '本机无该台记录' : '未完成'));
-    // 逐台指出"哪几项"：位图来自 DEV_INIT 事件（收到前只显示结论）。code 40 的
-    // 位图是"对不上"的槽位、41 是"没读到"的槽位——两者都只是槽位名，靠 why 区分。
-    let blockedMask = 0;
-    const per = blocked.map((id) => {
-      const info = store.devInit.get(id);
-      const mask = info ? info.mask : 0;
-      blockedMask |= mask;
-      if (!mask) return `${id}`;
-      return `${id}(${devSlotNames(mask).join('、')})`;
-    });
-    const suffix = (code === 41)
-      ? '括号内是未收到的对象——重连或再点该行「回读」重试'
-      : devRecoveryText(blockedMask);
-    parts.push(`<span class="pill off">未初始化 ${blocked.length}</span>` +
-      `<span class="muted">（${per.join(' ')}：${why}——${suffix}）</span>`);
-  }
-  if (offline.length) {
-    parts.push(`<span class="pill off">离线 ${offline.length}</span>` +
-      `<span class="muted">（${offline.join('/')}：显示固件记录回落值）</span>`);
-  }
-  el.className = 'summary tiny';
-  el.innerHTML = parts.join(' ');
 }
 
 // 结果文本住在 store 里（core/device.js 的 writeResult 写它），因为同一批事务
@@ -219,7 +157,6 @@ export function mount(root, ctx) {
       || dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.CONN);
     if (!structural && !dirty.has(DIRTY.MOTION) && !dirty.has(DIRTY.STATUS)) return;
     if (structural) {
-      renderParamSummary();
       renderDevRows();
       updateDevCurPos();
       updateSumDev();

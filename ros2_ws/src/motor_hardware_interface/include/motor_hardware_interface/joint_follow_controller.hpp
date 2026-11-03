@@ -19,7 +19,7 @@ public:
 private:
   std::vector<std::string> joints_;
   std::vector<PositionProfile> profiles_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> positions_, velocities_, efforts_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> positions_, velocities_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> measured_;
   realtime_tools::RealtimeBuffer<sensor_msgs::msg::JointState::SharedPtr> target_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscription_;

@@ -57,7 +57,7 @@ Callback JointFollowController::on_configure(const rclcpp_lifecycle::State &) {
 
 controller_interface::InterfaceConfiguration JointFollowController::command_interface_configuration() const {
   controller_interface::InterfaceConfiguration result{controller_interface::interface_configuration_type::INDIVIDUAL, {}};
-  for (const auto &name : joints_) for (const auto *channel : {"position", "velocity", "effort"}) {
+  for (const auto &name : joints_) for (const auto *channel : {"position", "velocity"}) {
     result.names.push_back(name + "/" + channel);
   }
   return result;
@@ -71,17 +71,16 @@ controller_interface::InterfaceConfiguration JointFollowController::state_interf
 
 Callback JointFollowController::on_activate(const rclcpp_lifecycle::State &) {
   active_ = false;
-  positions_.clear(); velocities_.clear(); efforts_.clear(); measured_.clear();
-  if (command_interfaces_.size() != 3 * joints_.size() || state_interfaces_.size() != joints_.size() ||
+  positions_.clear(); velocities_.clear(); measured_.clear();
+  if (command_interfaces_.size() != 2 * joints_.size() || state_interfaces_.size() != joints_.size() ||
       !controller_interface::get_ordered_interfaces(command_interfaces_, joints_, "position", positions_) ||
       !controller_interface::get_ordered_interfaces(command_interfaces_, joints_, "velocity", velocities_) ||
-      !controller_interface::get_ordered_interfaces(command_interfaces_, joints_, "effort", efforts_) ||
       !controller_interface::get_ordered_interfaces(state_interfaces_, joints_, "position", measured_)) return Callback::ERROR;
   for (const auto &state : measured_) if (!std::isfinite(state.get().get_value())) return Callback::ERROR;
   for (std::size_t i = 0; i < joints_.size(); ++i) {
     profiles_[i].reset(measured_[i].get().get_value());
     positions_[i].get().set_value(profiles_[i].position());
-    velocities_[i].get().set_value(0); efforts_[i].get().set_value(0);
+    velocities_[i].get().set_value(0);
   }
   // DDS may still deliver an inactive-period sample after activation.
   activation_stamp_ = get_node()->now().nanoseconds();
@@ -93,7 +92,6 @@ Callback JointFollowController::on_activate(const rclcpp_lifecycle::State &) {
 Callback JointFollowController::on_deactivate(const rclcpp_lifecycle::State &) {
   active_ = false;
   for (auto &command : velocities_) command.get().set_value(0);
-  for (auto &command : efforts_) command.get().set_value(0);
   return Callback::SUCCESS;
 }
 
@@ -108,7 +106,6 @@ Return JointFollowController::update(const rclcpp::Time &time, const rclcpp::Dur
       faulted_ = true;
       RCLCPP_ERROR(get_node()->get_logger(), "follow feedback/path tolerance or update period invalid: %s", joints_[i].c_str());
       for (auto &command : velocities_) command.get().set_value(0);
-      for (auto &command : efforts_) command.get().set_value(0);
       return Return::ERROR;
     }
   }
@@ -125,7 +122,6 @@ Return JointFollowController::update(const rclcpp::Time &time, const rclcpp::Dur
     profiles_[i].advance(dt);
     positions_[i].get().set_value(profiles_[i].position());
     velocities_[i].get().set_value(profiles_[i].velocity());
-    efforts_[i].get().set_value(0);
   }
   return Return::OK;
 }

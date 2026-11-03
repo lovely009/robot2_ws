@@ -622,8 +622,7 @@ class FakeControl(Node):
                             for x in ('position', 'velocity', 'effort')]
             else:
                 required = [j + '/' + x for j in joints for x in
-                            (('effort',) if name == 'gravity_controller' else
-                             ('position', 'velocity', 'effort') if name == 'follow_controller' else ('position', 'velocity'))]
+                            (('effort',) if name == 'gravity_controller' else ('position', 'velocity'))]
             if self.bad_interfaces:
                 required.reverse()
             response.controller.append(ControllerState(name=name, state=state,
@@ -1255,6 +1254,7 @@ def test_ros_follow_coalesces_switch_and_then_updates_without_jtc(graph):
     assert wait_for(lambda: peer.follow_targets)
     assert peer.follow_targets[-1].position == pytest.approx([-.2, .1, .3])
     assert peer.states['follow_controller'] == 'active'
+    assert peer.states['gravity_controller'] == 'active'
     assert not peer.goals
     send_follow(peer, .5, 'elbow')
     assert wait_for(lambda: len(peer.follow_targets) == 2)
@@ -1286,10 +1286,12 @@ def test_ros_follow_client_disconnect_and_action_handover_do_not_replay(graph):
     send_trajectory(peer)
     assert wait_for(lambda: peer.goals and gateway._mode == 'trajectory')
     assert peer.states['follow_controller'] == 'inactive'
+    assert peer.states['gravity_controller'] == 'active'
     send_follow(peer, -.2)
     assert wait_for(lambda: len(peer.follow_targets) == 2)
-    assert peer.canceled_goals
+    assert wait_for(lambda: peer.canceled_goals)
     assert peer.states['trajectory_controller'] == 'inactive'
+    assert peer.states['gravity_controller'] == 'active'
     peer.count_pub.publish(Int32(data=0))
     assert wait_for(lambda: gateway._mode == 'stopped' and stopped(peer))
     peer.count_pub.publish(Int32(data=1))
@@ -1298,12 +1300,23 @@ def test_ros_follow_client_disconnect_and_action_handover_do_not_replay(graph):
     assert stopped(peer)
 
 
-def test_ros_follow_controller_error_closes_hardware_and_discards_target(graph):
+@pytest.mark.parametrize('failed', ['follow_controller', 'gravity_controller'])
+def test_ros_follow_controller_error_closes_hardware_and_discards_target(graph, failed):
     peer, gateway = graph
     send_follow(peer)
     assert wait_for(lambda: peer.follow_targets)
-    peer.states['follow_controller'] = 'inactive'
+    peer.states[failed] = 'inactive'
     assert wait_for(lambda: peer.hardware_stops and gateway._mode == 'stopped')
     assert '连续跟随控制器意外停止' in gateway._reject
     assert not gateway._follow_targets
     assert len(peer.follow_targets) == 1
+
+
+@pytest.mark.parametrize('failed', ['trajectory_controller', 'gravity_controller'])
+def test_ros_trajectory_controller_error_closes_entire_session(graph, failed):
+    peer, gateway = graph
+    send_trajectory(peer)
+    assert wait_for(lambda: peer.goals and gateway._mode == 'trajectory')
+    peer.states[failed] = 'inactive'
+    assert wait_for(lambda: peer.hardware_stops and gateway._mode == 'stopped' and stopped(peer))
+    assert '轨迹控制器意外停止' in gateway._reject

@@ -87,7 +87,7 @@ class GravityFeedforwardManager:
         self.tick()
         fresh = self._fresh()
         control = self._control
-        running = bool(fresh and control['gravity_enabled'] and control['mode'] == 'trajectory')
+        running = bool(fresh and control['gravity_enabled'] and control['mode'] in ('trajectory', 'follow'))
         return {
             'state': 'running' if running else 'stopped',
             'config': ({'model': control['model'], 'effort_gain': control['effort_gain']}

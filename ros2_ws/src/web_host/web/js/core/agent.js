@@ -115,7 +115,7 @@ export function startMotorBackend(request) {
 }
 export function stopMotorBackend() { return call(SVC.stopMotorBackend, {}); }
 
-// 服务名保持兼容；服务端切换 gravity_controller，页面不改写运动话题。
+// 服务名保持兼容；服务端只写 gravity_controller 参数，页面不改写运动话题。
 export function startGravityFeedforward(request) {
   return call(SVC.startGravityFeedforward, {
     model: request.model,

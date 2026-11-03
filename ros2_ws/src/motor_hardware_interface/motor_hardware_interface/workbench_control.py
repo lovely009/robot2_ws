@@ -649,7 +649,7 @@ class WorkbenchControl(Node):
         controllers = {c.name: c for c in response.controller}
         if not set(self.motion_names).issubset(controllers):
             raise ValueError('controller manager 缺少配置的运动控制器')
-        desired = (self.manual_names if mode == 'manual' else ['follow_controller'] if mode == 'follow'
+        desired = (self.manual_names if mode == 'manual' else ['follow_controller', 'gravity_controller'] if mode == 'follow'
                    else ['trajectory_controller', 'gravity_controller'])
         for name in desired:
             c = controllers[name]
@@ -662,8 +662,7 @@ class WorkbenchControl(Node):
                     raise ValueError(f'{name} P/V/E 接口顺序与模型不一致')
             else:
                 expected = [j + '/' + channel for j in self.mapping.joint_names for channel in
-                            (('effort',) if name == 'gravity_controller' else CHANNELS
-                             if name == 'follow_controller' else ('position', 'velocity'))]
+                            (('effort',) if name == 'gravity_controller' else ('position', 'velocity'))]
                 if set(c.required_command_interfaces) != set(expected):
                     raise ValueError(f'{name} 接口集合与模型不一致')
             if c.state == 'active' and set(c.claimed_interfaces) != set(expected):
@@ -977,18 +976,19 @@ class WorkbenchControl(Node):
                 self._controllers_ready = set(self.motion_names).issubset(configured)
                 self._active = [c.name for c in response.controller
                                 if c.name in self.motion_names and c.state == 'active']
+                if self._mode in ('follow', 'trajectory') and set(self._active) != {
+                        self._mode + '_controller', 'gravity_controller'}:
+                    reason = ('连续跟随' if self._mode == 'follow' else '轨迹') + '控制器意外停止，请检查反馈或控制器日志'
+                    self._stop(reason, reason)
+                    return
                 if not self._active:
-                    if self._mode == 'follow':
-                        self._stop('连续跟随控制器意外停止，请检查反馈或控制器日志',
-                                   '连续跟随控制器意外停止，请检查反馈或控制器日志')
-                        return
                     self._mode = 'stopped'
                     self._clear_follow()
                 elif set(self._active) == set(self.manual_names):
                     self._mode = 'manual'
-                elif self._active == ['follow_controller']:
+                elif set(self._active) == {'follow_controller', 'gravity_controller'}:
                     self._mode = 'follow'
-                elif set(self._active) in ({'trajectory_controller'}, {'trajectory_controller', 'gravity_controller'}):
+                elif set(self._active) == {'trajectory_controller', 'gravity_controller'}:
                     self._mode = 'trajectory'
                 else:
                     raise ValueError('检测到非互斥的 active 控制器集合')

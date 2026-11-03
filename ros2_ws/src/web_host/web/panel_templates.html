@@ -38,6 +38,7 @@
         <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
         <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
         <span class="spacer"></span>
+        <div id="armGravityControl"></div>
         <select id="armModel" class="arm-model"
                 title="臂视图与关节映射使用的模型；选择会记住（刷新后保持），不影响仿真屏的模型选择"></select>
         <span>拖拽旋转 · 点击关节</span>
@@ -153,7 +154,6 @@
   <template data-panel-template="deviceParams">
     <section class="motor-parameters">
       <p class="firmware-config-notice">只读查询设备参数与初始化核验状态。</p>
-      <div id="paramSummary" class="summary tiny" hidden></div>
       <div class="firmware-parameter-actions">
         <button id="btnParamLoad" class="secondary compact">读取电机参数</button>
         <span class="micro" id="sumDev">未读取</span>

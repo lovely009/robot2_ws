@@ -134,6 +134,7 @@ def test_start_requires_fresh_real_status(models):
 
 @pytest.mark.parametrize('mode,enabled,state', [
     ('trajectory', True, 'running'), ('trajectory', False, 'stopped'),
+    ('follow', True, 'running'), ('follow', False, 'stopped'),
     ('manual', True, 'stopped'), ('stopped', True, 'stopped'),
 ])
 def test_restart_restores_only_observed_active_enabled_state(models, mode, enabled, state):

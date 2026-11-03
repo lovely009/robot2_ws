@@ -23,6 +23,7 @@ export const snapshot = shallowRef<WorkbenchSnapshot>({
   fault: 0,
   motionAt: null,
   communication: {link: '未连接', clock: '未知', authority: '未知', detail: ''},
+  gravity: {enabled: null, active: false, blocked: '等待主机状态', pending: false},
   session: "未获台架状态",
   mappingError: "",
 });
@@ -38,6 +39,7 @@ let modules: {
   device: LegacyModule;
   format: LegacyModule;
   actions: LegacyModule;
+  gravity: LegacyModule;
 };
 let starting: Promise<void> | undefined;
 let resolveReady: () => void;
@@ -106,6 +108,7 @@ function updateSnapshot() {
     ...data.countMotors(),
     motionAt: lastMotionAt,
     communication: modules.agent.describeAgentStatus(s),
+    gravity: modules.gravity.describeGravityControl(s, data.MODEL),
     session: simulation
       ? `仿真进程：${simulation.state || "未知"}${s.conn.agent === "running" ? " · Agent 运行中" : ""}`
       : s.conn.agent === "running"
@@ -176,7 +179,7 @@ async function start() {
   if (starting) return starting;
   starting = (async () => {
     try {
-      const [response, configuration, data, ros, agent, device, format, actions] =
+      const [response, configuration, data, ros, agent, device, format, actions, gravity] =
         await Promise.all([
           fetch("/panel_templates.html", { cache: "no-store" }),
           fetch("/api/runtime", { cache: "no-store" }),
@@ -186,12 +189,13 @@ async function start() {
           load("core/device"),
           load("core/format"),
           load("panels/actionLibrary"),
+          load("core/gravity_control"),
         ]);
       if (!response.ok)
         throw new Error(`面板模板请求失败：HTTP ${response.status}`);
       const html = await response.text();
       if (disposed) return;
-      modules = { data, ros, agent, device, format, actions };
+      modules = { data, ros, agent, device, format, actions, gravity };
       if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
       const runtimeConfig = await configuration.json();
       if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;
@@ -285,15 +289,7 @@ async function mountPanelContent(
   });
   const release = scheduler.add(id, instance, visible);
   scheduler.invalidate(new Set(Object.values(data.DIRTY) as string[]));
-  const observer = new ResizeObserver(() => {
-    if (visible()) {
-      window.dispatchEvent(new Event("resize"));
-      scheduler.invalidate(new Set(Object.values(data.DIRTY) as string[]));
-    }
-  });
-  observer.observe(root);
   return () => {
-    observer.disconnect();
     release();
     root.replaceChildren();
   };
@@ -302,6 +298,10 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
+  async setGravityEnabled(enabled: boolean) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    await modules.gravity.setGravityEnabled(enabled);
+  },
   async readFirmwareParameter(name: string) {
     if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
     return modules.device.readFirmwareParameter(name);

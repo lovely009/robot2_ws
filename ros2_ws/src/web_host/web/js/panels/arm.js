@@ -234,6 +234,8 @@ export function resize() {
   const c = renderer.domElement;
   const w = c.clientWidth || 1;
   const h = c.clientHeight || 1;
+  const size = renderer.getSize(new THREE.Vector2());
+  if (size.x === w && size.y === h) return;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -335,6 +337,7 @@ export function mount(rootEl, ctx) {
   stage.prepend(canvas);
 
   let ready = false;
+  let loadedModel = null;
   let hudFadeTimer = 0;
   let modelSelect = null;
   const pickJoint = (jointName) => {
@@ -371,6 +374,7 @@ export function mount(rootEl, ctx) {
   // WebGLRenderer 会复用旧 context，新元素最省心（与切屏同一套释放路径）。
   // window/visibility 监听只随面板开关、不随模型切换（disposeScene 不摘它们）。
   function startLoad() {
+    loadedModel = MODEL;
     ready = false;
     window.clearTimeout(hudFadeTimer);
     hud.className = 'hud';
@@ -425,7 +429,7 @@ export function mount(rootEl, ctx) {
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   const render = (dirty) => {
-    if (dirty.has(DIRTY.MODEL)) { startLoad(); }
+    if (dirty.has(DIRTY.MODEL) && loadedModel !== MODEL) { startLoad(); }
     if (modelSelect && modelSelect.value !== MODEL) { modelSelect.value = MODEL; }
     if (!ready) { return; }
     if (dirty.has(DIRTY.MOTION)) { armSyncJoints(); armSyncGhost(); }

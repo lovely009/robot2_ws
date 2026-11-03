@@ -1607,3 +1607,10 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
   .workspace-grid:not(.device-workspace) .stage-area,
   .workspace-grid:not(.device-workspace) .observer-area { grid-column: 1; }
 }
+.workspace-grid.sim-workspace { grid-template-columns: minmax(0, 1fr); }
+.workspace-grid.sim-workspace .stage-area,
+.workspace-grid.sim-workspace .observer-area { grid-column: 1; }
+.sim-workspace .resize-observer { left: 0; }
+.gravity-control, .gravity-control label { display: flex; align-items: center; gap: 6px; }
+.gravity-control label { white-space: nowrap; }
+.gravity-status { max-width: 190px; line-height: 1.4; }

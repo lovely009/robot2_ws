@@ -301,6 +301,15 @@ add_library(fw_serial_write_budget OBJECT ../../lib/serial_write_budget/src/seri
 target_include_directories(fw_serial_write_budget PUBLIC ../../lib/serial_write_budget/include)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
 
+# 按固件锁定源码构建的宿主 XRCE 库通过 CMAKE_PREFIX_PATH 指定。
+find_package(microxrcedds_client QUIET CONFIG)
+if(microxrcedds_client_FOUND)
+  fw_host_test(test_reliable_publish SOURCES test_reliable_publish.c ../../src/reliable_publish.cpp)
+  target_link_libraries(test_reliable_publish PRIVATE microxrcedds_client)
+  target_link_options(test_reliable_publish PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented)
+  target_compile_options(test_reliable_publish PRIVATE -UNDEBUG)
+endif()
+
 fw_host_test(test_param_store SOURCES test_param_store.cpp OBLIBS fw_param_store
   INCLUDES ../../lib/motor_protocol/include)
 fw_host_test(test_storage_boot_projection SOURCES test_storage_boot_projection.cpp

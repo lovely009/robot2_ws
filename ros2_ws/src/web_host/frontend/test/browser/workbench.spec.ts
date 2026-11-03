@@ -294,6 +294,77 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     } };
 }
 
+test('事件日志脱离旧面板后保留切换记录并导出全部数据', async ({page}) => {
+  const fixture = await connectFixture(page);
+  let legacyRequests = 0;
+  await page.route('**/js/panels/events.js', route => {
+    legacyRequests++;
+    return route.fulfill({status: 404, body: '已退役'});
+  });
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('#selRows')).toContainText('0.150');
+  await page.getByRole('button', {name: '事件日志', exact: true}).click();
+  const panel = page.locator('[data-workbench-panel="events"]');
+  await expect(panel).toContainText('暂无事件');
+  for (let id = 1; id <= 55; id++) {
+    fixture.sendFeedback('/motor/events', {event_type: 3, motor_id: id, reason: 2, request_id: id});
+  }
+  await expect(panel.locator('.sum')).toHaveText('55 条');
+  await expect(panel.locator('li')).toHaveCount(50);
+  await expect(panel.locator('li').first()).toContainText('READY · id=55 · reason=2 · req#55');
+  await expect(panel.locator('li').last()).toContainText('id=6 ');
+  await page.getByRole('button', {name: '曲线', exact: true}).click();
+  await expect(panel).toBeHidden();
+  fixture.sendFeedback('/motor/events', {event_type: 9, motor_id: 56, reason: 0, request_id: 0});
+  await page.getByRole('button', {name: '事件日志', exact: true}).click();
+  await expect(panel.locator('.sum')).toHaveText('56 条');
+  await expect(panel.locator('li').first()).toContainText('OFFLINE · id=56');
+  await expect(panel.locator('li').first()).not.toContainText('reason=');
+  await expect(panel.locator('li').first()).not.toContainText('req#');
+
+  const jsonDownload = page.waitForEvent('download');
+  await panel.getByRole('button', {name: '导出 JSON', exact: true}).click();
+  const json = await jsonDownload;
+  expect(json.suggestedFilename()).toMatch(/^events-\d+\.json$/);
+  const entries = readFileSync((await json.path())!, 'utf8').split('\n').map(line => JSON.parse(line));
+  expect(entries).toHaveLength(56);
+  expect(entries[0]).toEqual({t: expect.any(Number), name: 'OFFLINE', id: 56, reason: 0, request_id: 0});
+  expect(entries[55]).toMatchObject({name: 'READY', id: 1, reason: 2, request_id: 1});
+
+  const csvDownload = page.waitForEvent('download');
+  await panel.getByRole('button', {name: '导出 CSV', exact: true}).click();
+  const csv = await csvDownload;
+  expect(csv.suggestedFilename()).toMatch(/^events-\d+\.csv$/);
+  expect(readFileSync((await csv.path())!, 'utf8')).toBe(entries.map(entry =>
+    [new Date(entry.t).toISOString(), entry.name, entry.id, entry.reason, entry.request_id].join(',')).join('\n'));
+  expect(legacyRequests).toBe(0);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('事件日志按文本呈现并仅清空本地记录', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('#selRows')).toContainText('0.150');
+  await page.getByRole('button', {name: '事件日志', exact: true}).click();
+  const panel = page.locator('[data-workbench-panel="events"]');
+  fixture.sendFeedback('/motor/events', {event_type: '<em>未知</em>', motor_id: 1, reason: 0, request_id: 0});
+  await expect(panel.locator('li')).toContainText('EVENT_<em>未知</em>');
+  await expect(panel.locator('em')).toHaveCount(0);
+  const before = fixture.publishes.length;
+  await panel.getByRole('button', {name: '清空', exact: true}).click();
+  await expect(panel.locator('.sum')).toHaveText('空');
+  await expect(panel.locator('li')).toHaveText('暂无事件');
+  expect(await page.evaluate(async () => {
+    const path = '/js/core/store.js';
+    return (await import(/* @vite-ignore */ path)).store.events.length;
+  })).toBe(0);
+  expect(fixture.publishes.slice(before)).toEqual([]);
+  fixture.sendFeedback('/motor/events', {event_type: 3, motor_id: 2, reason: 0, request_id: 0});
+  await expect(panel.locator('.sum')).toHaveText('1 条');
+  await expect(panel.locator('li')).toContainText('READY · id=2');
+  expect(fixture.errors).toEqual([]);
+});
+
 test('重力开关等待主机确认，在跟随和动作模式均显示补偿且不使能电机', async ({page}) => {
   const fixture = await connectFixture(page);
   await page.setViewportSize({width:1333,height:965});

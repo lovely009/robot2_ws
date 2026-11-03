@@ -6,6 +6,7 @@
 
 - [主机统一时间与 50 Hz 控制流](architecture/host-synchronized-control.md)：当前控制入口、约束和验收记录。
 - [micro-ROS 通信与执行时序](architecture/microros-timing.md)：50/50/200 Hz、探测预算、schema 4 合帧与软件验收。
+- [BVH 离线映射](architecture/generic-bvh-retarget.md)：候选确认、映射复用与几何预览边界。
 - [同步测量报告](outputs/2026-11-02-clock-sync/report.md)：测量条件和结果；原始记录保留在同目录。
 - [半身电机坐标系](../ros2_ws/src/robot_description/models/half_body_robot/cad/frames/README.md)：几何基准与未标定项。
 

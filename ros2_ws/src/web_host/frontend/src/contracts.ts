@@ -7,8 +7,14 @@ export type PanelId =
   | "actionLibrary"
   | "sim"
   | "curve"
-  | "events"
   | "imu";
+export interface EventLogEntry {
+  t: number;
+  name: string;
+  id: number;
+  reason?: number;
+  request_id?: number;
+}
 export interface WorkbenchSnapshot {
   firmwareConnectionKey: string;
   connected: boolean;

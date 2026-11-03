@@ -1,0 +1,104 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mujoco model="right_arm_4dof">
+  <!-- NOTICE: Link masses are kept from the original 4.4 URDF; COM and 6-component inertia are independently estimated from STL with per-link uniform density. Non-watertight mesh estimates are approximate. base_link and Joint_link5 use voxel fill, 3mm and 2mm respectively. These are NOT verified real mass properties; Joint_link5 original COM is outside STL bounding box. URDF joint velocity limits were 0 in the source and remain 0 until measured/assigned. --><!--Full URDF conversion: no Link or fixed-joint body removed or merged.-->
+  <!--Inertial: pos+mass+fullinertia ONLY, without quat/euler/axisangle (avoids XML error).-->
+  <!--Keep MJCF in <model>/urdf/ and the original STL files in <model>/meshes/.-->
+  <compiler angle="radian" meshdir="../meshes" autolimits="true" fusestatic="false" inertiafromgeom="false"/>
+  <option timestep="0.001" gravity="0 0 -9.81" solver="Newton" iterations="100" integrator="implicitfast"/>
+  <statistic center="-0.08 0 0.38" extent="1.15"/>
+  <visual>
+    <headlight ambient="0.30 0.30 0.30" diffuse="0.60 0.60 0.60" specular="0.10 0.10 0.10"/>
+    <global offwidth="1280" offheight="800"/>
+  </visual>
+  <asset>
+    <texture name="skybox_gradient" type="skybox" builtin="gradient" rgb1="0.30 0.45 0.61" rgb2="0.83 0.89 0.94" width="512" height="3072"/>
+    <texture name="floor_checker" type="2d" builtin="checker" rgb1="0.64 0.67 0.70" rgb2="0.32 0.36 0.40" width="512" height="512"/>
+    <material name="floor_material" texture="floor_checker" texrepeat="5 5" reflectance="0.0"/>
+    <mesh name="mesh_base_link" file="base_link.STL"/>
+    <material name="material_base_link" rgba="1 1 1 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link1" file="Joint_link1.STL"/>
+    <material name="material_Joint_link1" rgba="0.69804 0.69804 0.69804 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link1_1" file="Joint_link1.1.STL"/>
+    <material name="material_Joint_link1_1" rgba="0.74902 0.74902 0.74902 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link2" file="Joint_link2.STL"/>
+    <material name="material_Joint_link2" rgba="0.79216 0.81961 0.93333 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link2_2" file="Joint_link2.2.STL"/>
+    <material name="material_Joint_link2_2" rgba="0.74902 0.74902 0.74902 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link3" file="Joint_link3.STL"/>
+    <material name="material_Joint_link3" rgba="0.79216 0.81961 0.93333 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link3_3" file="Joint_link3.3.STL"/>
+    <material name="material_Joint_link3_3" rgba="0.74902 0.74902 0.74902 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link4" file="Joint_link4.STL"/>
+    <material name="material_Joint_link4" rgba="0.79216 0.81961 0.93333 1" specular="0.08" shininess="0.10"/>
+    <mesh name="mesh_Joint_link5" file="Joint_link5.STL"/>
+    <material name="material_Joint_link5" rgba="1 1 1 1" specular="0.08" shininess="0.10"/>
+  </asset>
+  <worldbody>
+    <light name="main_light" pos="0 -1 1.5" dir="0 0 -1" directional="true" diffuse="0.70 0.70 0.70" specular="0.10 0.10 0.10"/>
+    <light name="fill_light" pos="1 1 1.8" dir="-1 -1 -1" directional="true" diffuse="0.25 0.25 0.25" specular="0.03 0.03 0.03"/>
+    <geom name="checker_floor" type="plane" pos="0 0 0" size="3 3 0.1" material="floor_material" friction="0.8 0.005 0.0001" condim="3"/>
+    <camera name="overview" mode="fixed" pos="1.05 -1.25 0.9" quat="0.775584226672 0.541742831163 0.18554057468 0.265628513847" fovy="42"/>
+    <body name="base_link" pos="0 0 0">
+      <inertial pos="-0.009880604312813715 -3.592348298103327e-07 0.3313104287866844" mass="2.29210397108345" fullinertia="0.07943876308720214 0.08135060479415065 0.003376732289164259 -1.042588637017014e-07 0.005430277404636101 1.767761615179193e-07"/>
+      <geom name="base_link_visual" type="mesh" mesh="mesh_base_link" material="material_base_link" group="1" contype="0" conaffinity="0"/>
+      <geom name="base_link_collision" type="mesh" mesh="mesh_base_link" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+      <body name="Joint_link1" pos="-0.133 0 0.571" quat="0.4999981633974483 0.4999999999966269 -0.5000018366025516 -0.4999999999966269">
+        <joint name="Joint_link1" type="hinge" pos="0 0 0" axis="0 0 1" ref="0" limited="true" range="-1.570796326794897 1.570796326794897" damping="2.64" frictionloss="1.27" armature="0" solimpfriction="0.99 0.99 0.001 0.5 2" solreffriction="0.005 1"/>
+        <inertial pos="8.32666601631791e-06 -0.04344232797382862 -0.006365088124595655" mass="0.0165" fullinertia="2.238800565569557e-05 9.919982406311971e-06 2.127245551583167e-05 -8.522780006653656e-09 -2.283089945835966e-09 -5.085688269459402e-06"/>
+        <geom name="Joint_link1_visual" type="mesh" mesh="mesh_Joint_link1" material="material_Joint_link1" group="1" contype="0" conaffinity="0"/>
+        <geom name="Joint_link1_collision" type="mesh" mesh="mesh_Joint_link1" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+        <body name="Joint_link1.1" pos="0 -0.0978 -0.0245" quat="0.7071054825112363 -0.7071080798594735 0 0">
+          <!--Fixed joint Joint_link1.1 preserved as a welded child body.-->
+          <inertial pos="-1.330429054737639e-05 -2.494346172897108e-05 0.02112859777096562" mass="0.244" fullinertia="7.20131538113769e-05 7.202950952008636e-05 6.935776096371634e-05 -1.509960280253242e-08 8.83847900470046e-08 1.570441776431355e-07"/>
+          <geom name="Joint_link1.1_visual" type="mesh" mesh="mesh_Joint_link1_1" material="material_Joint_link1_1" group="1" contype="0" conaffinity="0"/>
+          <geom name="Joint_link1.1_collision" type="mesh" mesh="mesh_Joint_link1_1" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+          <body name="Joint_link2" pos="0 0 0" quat="1 0 0 0">
+            <joint name="Joint_link2" type="hinge" pos="0 0 0" axis="0 0 -1" ref="0" limited="true" range="-3.141592653589793 3.141592653589793" damping="2.5" frictionloss="1" armature="0" solimpfriction="0.99 0.99 0.001 0.5 2" solreffriction="0.005 1"/>
+            <inertial pos="1.379710127197814e-06 -0.0002105614674934974 -0.1040969486504238" mass="0.0886" fullinertia="0.0003492513250668892 0.0003541405985847356 2.38857470326929e-05 1.183503432391437e-08 -3.102721329142259e-08 -1.585049068873203e-06"/>
+            <geom name="Joint_link2_visual" type="mesh" mesh="mesh_Joint_link2" material="material_Joint_link2" group="1" contype="0" conaffinity="0"/>
+            <geom name="Joint_link2_collision" type="mesh" mesh="mesh_Joint_link2" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+            <body name="Joint_link2.2" pos="-5.9092E-05 -0.02755 -0.1933" quat="0.4994728878699584 0.5005247223467512 -0.4994747225396887 0.5005265608800923">
+              <!--Fixed joint Joint_link2.2 preserved as a welded child body.-->
+              <inertial pos="-2.494345681868419e-05 -1.330430866197707e-05 -0.01642863976148485" mass="0.244" fullinertia="7.202912368984172e-05 7.201276790881392e-05 6.935774874833946e-05 -1.509935166544564e-08 -1.56952440443657e-07 -8.808397022857827e-08"/>
+              <geom name="Joint_link2.2_visual" type="mesh" mesh="mesh_Joint_link2_2" material="material_Joint_link2_2" group="1" contype="0" conaffinity="0"/>
+              <geom name="Joint_link2.2_collision" type="mesh" mesh="mesh_Joint_link2_2" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+              <body name="Joint_link3" pos="0 0 0" quat="1 0 0 0">
+                <joint name="Joint_link3" type="hinge" pos="0 0 0" axis="0 0 1" ref="0" limited="true" range="-2.356194490192345 2.356194490192345" damping="2.5" frictionloss="1" armature="0" solimpfriction="0.99 0.99 0.001 0.5 2" solreffriction="0.005 1"/>
+                <inertial pos="-0.02351525312031712 0.005106836176798234 -0.002445195163212324" mass="0.0238" fullinertia="1.169789730237804e-05 2.051485563265066e-05 1.969338137427727e-05 2.300075421328366e-06 -5.081516994106791e-06 8.234683108537535e-07"/>
+                <geom name="Joint_link3_visual" type="mesh" mesh="mesh_Joint_link3" material="material_Joint_link3" group="1" contype="0" conaffinity="0"/>
+                <geom name="Joint_link3_collision" type="mesh" mesh="mesh_Joint_link3" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+                <body name="Joint_link3.3" pos="-0.089 0.009 -0.027" quat="0.6496185010901974 -0.2792749008374031 -0.6496205527581793 0.2792749008374032">
+                  <!--Fixed joint Joint_link3.3 preserved as a welded child body.-->
+                  <inertial pos="-1.397721002103234e-06 -2.823509938964633e-05 -0.01992860855931647" mass="0.244" fullinertia="7.203067014641236e-05 7.201177623644367e-05 6.935775544664387e-05 1.433947386424478e-08 -4.792173710979974e-09 -1.799873889586625e-07"/>
+                  <geom name="Joint_link3.3_visual" type="mesh" mesh="mesh_Joint_link3_3" material="material_Joint_link3_3" group="1" contype="0" conaffinity="0"/>
+                  <geom name="Joint_link3.3_collision" type="mesh" mesh="mesh_Joint_link3_3" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+                  <body name="Joint_link4" pos="0 0 0" quat="1 0 0 0">
+                    <joint name="Joint_link4" type="hinge" pos="0 0 0" axis="0 0 1" ref="0" limited="true" range="-3.141592653589793 3.141592653589793" damping="2.5" frictionloss="1" armature="0" solimpfriction="0.99 0.99 0.001 0.5 2" solreffriction="0.005 1"/>
+                    <inertial pos="2.054204357685988e-06 -8.50069300539466e-06 0.05033389970634532" mass="0.0537" fullinertia="7.946731814866046e-05 7.947037175902928e-05 1.074890048380231e-05 6.092171682673765e-08 -4.070990537788674e-09 -2.072156543523739e-08"/>
+                    <geom name="Joint_link4_visual" type="mesh" mesh="mesh_Joint_link4" material="material_Joint_link4" group="1" contype="0" conaffinity="0"/>
+                    <geom name="Joint_link4_collision" type="mesh" mesh="mesh_Joint_link4" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+                    <body name="Joint_link5" pos="0 0 0" quat="1 0 0 0">
+                      <!--Fixed joint Joint_link5 preserved as a welded child body.-->
+                      <inertial pos="2.150967935570899e-05 0.000124756140263118 0.140120854384473" mass="0.47" fullinertia="0.0002423205411156778 0.0002412422023405436 0.0002088713512534628 -2.486092133486513e-07 -3.254812329997502e-07 -1.865202186364284e-06"/>
+                      <geom name="Joint_link5_visual" type="mesh" mesh="mesh_Joint_link5" material="material_Joint_link5" group="1" contype="0" conaffinity="0"/>
+                      <geom name="Joint_link5_collision" type="mesh" mesh="mesh_Joint_link5" group="3" rgba="0.45 0.56 0.64 0.15" contype="0" conaffinity="0"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="tau_Joint_link1" joint="Joint_link1" gear="1" ctrllimited="true" ctrlrange="-10 10" forcelimited="true" forcerange="-10 10"/>
+    <motor name="tau_Joint_link2" joint="Joint_link2" gear="1" ctrllimited="true" ctrlrange="-5 5" forcelimited="true" forcerange="-5 5"/>
+    <motor name="tau_Joint_link3" joint="Joint_link3" gear="1" ctrllimited="true" ctrlrange="-5 5" forcelimited="true" forcerange="-5 5"/>
+    <motor name="tau_Joint_link4" joint="Joint_link4" gear="1" ctrllimited="true" ctrlrange="-5 5" forcelimited="true" forcerange="-5 5"/>
+  </actuator>
+  <keyframe>
+    <key name="zero_pose" qpos="0 0 0 0" ctrl="0 0 0 0"/>
+  </keyframe>
+</mujoco>

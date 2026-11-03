@@ -73,6 +73,47 @@ def test_unknown_model_requests_mapping_then_converts(jobs, payload):
     assert finish(jobs, job)['state'] == 'done'
 
 
+def test_generic_entry_keeps_known_dual_arm_conversion(jobs, payload):
+    original = jobs.create(payload)
+    assert finish(jobs, original)['state'] == 'done'
+    expected = json.loads(jobs.result(original['id'], 'preview.json'))['robot']['joint_positions']
+    generic = jobs.create({**payload, 'retargeting': 'generic'})
+    assert generic['mapping_origin'] == 'builtin'
+    assert finish(jobs, generic)['state'] == 'done'
+    assert json.loads(jobs.result(generic['id'], 'preview.json'))['robot']['joint_positions'] == expected
+
+
+def test_generic_known_model_obeys_mimic(jobs, payload):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(payload['urdf_text'])
+    ET.SubElement(root.find("joint[@name='joint_link2']"), 'mimic',
+                  joint='joint_link1', multiplier='0', offset='0.05')
+    job = jobs.create({**payload, 'retargeting': 'generic', 'urdf_text': ET.tostring(root, encoding='unicode')})
+    assert job['state'] == 'mapping' and job['mapping']['mode'] == 'generic'
+    jobs.start(job['id'], job['mapping'])
+    assert finish(jobs, job)['state'] == 'done'
+    preview = json.loads(jobs.result(job['id'], 'preview.json'))['robot']
+    index = preview['joint_names'].index('joint_link2')
+    assert all(q[index] == pytest.approx(.05) for q in preview['joint_positions'])
+
+
+def test_saved_mapping_precedes_builtin_and_corrupt_mapping_needs_confirmation(tmp_path, payload):
+    manager = MotionJobs(profiles_dir=tmp_path)
+    try:
+        first = manager.create({**payload, 'retargeting': 'generic', 'review_mapping': True})
+        first['mapping']['source_to_robot'] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        manager.start(first['id'], first['mapping'], remember=True)
+        assert finish(manager, first)['state'] == 'done'
+        second = manager.create({**payload, 'retargeting': 'generic'})
+        assert second['mapping_origin'] == 'saved'
+        assert second['mapping']['source_to_robot'] == first['mapping']['source_to_robot']
+        assert finish(manager, second)['state'] == 'done'
+        next(tmp_path.glob('*.json')).write_text('{broken')
+        assert manager.create({**payload, 'retargeting': 'generic'})['state'] == 'mapping'
+    finally:
+        manager.close()
+
+
 def test_conversion_failure_is_terminal(jobs, payload, monkeypatch):
     def fail(*args):
         raise ValueError('fixture IK failure')

@@ -5,9 +5,15 @@ import { Upload, Play, Pause, RotateCcw, Download, Check, ArrowRight } from '@lu
 type Mapping = { mode?: undefined; torso: string; source_to_robot: number[][];
   arms: Record<string, { source: string[]; robot: string[] }> };
 type ShoulderMapping = { mode: 'shoulders12'; source_to_robot: number[][]; source: string; joints: string[] };
+type GenericMapping = { mode: 'generic'; source_root: string; reference_frame: number;
+  source_to_robot: number[][]; limit_policy: 'urdf' | 'preview';
+  targets: { source: string; target: string; confidence?: string; reason?: string }[] };
 type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progress: number;
   bvh_name: string; urdf_name: string; robot_name: string; frames: number; frame_time: number;
-  joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | null; error?: string };
+  joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | GenericMapping | null;
+  warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
+  summary?: { mechanical_limits_enforced?: boolean; covered_joints?: string[]; unmapped_joints?: string[];
+    orientation_max_deg?: number }; error?: string };
 type Preview = { times: number[]; duration: number };
 const props = defineProps<{ currentModel: string }>();
 const bvh = ref<File>();
@@ -22,6 +28,10 @@ const upAxis = ref('y_up');
 const scale = ref(.01);
 const job = ref<Job>();
 const mapping = ref<Mapping>();
+const genericMapping = ref<GenericMapping>();
+const rememberMapping = ref(true);
+const reviewMapping = ref(false);
+const alignment = ref([0, 0, 0]);
 const robotAxes = ref('cad');
 const error = ref('');
 const uploading = ref(false);
@@ -106,12 +116,21 @@ async function accept(current: Job) {
   job.value = current;
   sessionStorage.setItem('robot2.motionJob', current.id);
   if (current.state === 'mapping') {
-    mapping.value = (current.mapping && 'arms' in current.mapping ? current.mapping : undefined) || { torso: current.source_joints.find(n => /spine3|chest|torso/i.test(n)) || '',
+    if (current.mapping?.mode === 'generic') {
+      genericMapping.value = structuredClone(current.mapping);
+      mapping.value = undefined;
+      const m = current.mapping.source_to_robot;
+      alignment.value = [Math.atan2(m[2][1], m[2][2]), Math.atan2(-m[2][0], Math.hypot(m[0][0], m[1][0])),
+        Math.atan2(m[1][0], m[0][0])].map(value => value * 180 / Math.PI);
+    } else {
+      genericMapping.value = undefined;
+      mapping.value = (current.mapping && 'arms' in current.mapping ? current.mapping : undefined) || { torso: current.source_joints.find(n => /spine3|chest|torso/i.test(n)) || '',
       source_to_robot: [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
       arms: Object.fromEntries(['right', 'left'].map(side => [side, {
         source: ['UpperArm', 'LowerArm', 'Hand'].map(part => current.source_joints.find(n => n.toLowerCase() === `${side}${part}`.toLowerCase()) || ''),
         robot: ['', '', ''],
       }])) };
+    }
   } else if (current.state === 'running') {
     poll = setTimeout(() => void refresh(), 1000);
   } else if (current.state === 'done') {
@@ -162,6 +181,7 @@ async function submit() {
   display?.dispose(); display = undefined;
   job.value = undefined;
   mapping.value = undefined;
+  genericMapping.value = undefined;
   sessionStorage.removeItem('robot2.motionJob');
   uploading.value = true;
   try {
@@ -175,6 +195,7 @@ async function submit() {
     if ((new TextEncoder().encode(urdfText).length + (bvhFile?.size || 0)) > 20 * 1024 * 1024)
       throw Error('两份文件合计请控制在 20 MB 内');
     await accept(await request('/api/motion/jobs', {
+      retargeting: 'generic', review_mapping: reviewMapping.value,
       ...(sourceName ? { bvh_source: sourceName } : { bvh_name: bvhFile!.name, bvh_text: await bvhFile!.text() }),
       urdf_name: modelName ? `${modelName}.urdf` : urdfFile!.name,
       urdf_text: urdfText, up_axis: upAxis.value, scale: scale.value }));
@@ -183,11 +204,19 @@ async function submit() {
 }
 
 async function convert() {
-  if (!job.value || !mapping.value) return;
+  if (!job.value || (!mapping.value && !genericMapping.value)) return;
   error.value = ''; uploading.value = true;
-  mapping.value.source_to_robot = robotAxes.value === 'cad'
+  if (genericMapping.value) {
+    const [r, p, y] = alignment.value.map(value => value * Math.PI / 180);
+    const [sr, sp, sy] = [r, p, y].map(Math.sin), [cr, cp, cy] = [r, p, y].map(Math.cos);
+    genericMapping.value.source_to_robot = [[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
+      [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr], [-sp, cp*sr, cp*cr]];
+  } else if (mapping.value) mapping.value.source_to_robot = robotAxes.value === 'cad'
     ? [[0, -1, 0], [1, 0, 0], [0, 0, 1]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-  try { await accept(await request(`${base(job.value.id)}/convert`, { mapping: mapping.value })); }
+  try { await accept(await request(`${base(job.value.id)}/convert`, {
+    mapping: genericMapping.value || mapping.value,
+    remember_mapping: !!genericMapping.value && rememberMapping.value,
+  })); }
   catch (e) { if (!disposed) error.value = String(e); }
   finally { uploading.value = false; }
 }
@@ -236,12 +265,14 @@ onBeforeUnmount(() => {
           <label>BVH 坐标<select v-model="upAxis" :disabled="busy" aria-label="BVH 坐标"><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
           <label>长度单位<select v-model.number="scale" :disabled="busy" aria-label="BVH 长度单位"><option :value=".01">厘米 cm</option><option :value="1">米 m</option><option :value=".001">毫米 mm</option></select></label>
         </div>
-        <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '默认使用库内动作和当前模型。标准双臂及已确认的 1、2 号肩关节自动映射；其他骨架需确认对应关系。' }}</p>
+        <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '自动识别人体与机器人对应关系；疑点首次确认，已记住的相同组合自动转换。输出仅用于预览。' }}</p>
+        <label class="motion-hint"><input v-model="reviewMapping" type="checkbox" :disabled="busy" />重新确认已记住的映射</label>
         <button class="motion-primary" :disabled="!canSubmit" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : '导入并转换' }}</button>
         <div v-if="job" class="motion-metadata">
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>
           <span>机器人 <strong>{{ job.joint_count }} 个关节</strong></span>
+          <span v-if="job.mapping_origin">映射来源 <strong>{{ job.mapping_origin === 'saved' ? '复用已确认映射' : job.mapping_origin === 'builtin' ? '已支持的双臂或肩关节映射' : job.mapping_saved ? '已确认并记住' : job.state === 'mapping' ? '候选待确认' : '本次已确认' }}</strong></span>
           <span v-if="job.mapping?.mode === 'shoulders12'">转换范围 <strong>右肩 → joint_link1、joint_link2；其余关节保持中立位，保留原帧与时间</strong></span>
         </div>
       </div>
@@ -268,6 +299,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <section v-if="job?.state === 'mapping' && genericMapping" class="motion-mapping surface" aria-label="通用映射确认">
+      <div class="panel-title">确认人体与机器人对应关系</div>
+      <div class="motion-mapping-body">
+        <label>人体根参考<select v-model="genericMapping.source_root" aria-label="人体根参考"><option v-for="name in job.source_joints" :key="name">{{ name }}</option></select></label>
+        <label>参考帧<input v-model.number="genericMapping.reference_frame" type="number" min="0" :max="job.frames - 1" step="1" aria-label="参考帧" /></label>
+        <div class="motion-alignment"><label v-for="(axis, i) in ['X', 'Y', 'Z']" :key="axis">对齐 {{ axis }}（°）<input v-model.number="alignment[i]" type="number" step="1" :aria-label="`对齐 ${axis} 角度`" /></label></div>
+        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">按 URDF 位置和速度限位</option><option value="preview">仅几何预览：忽略缺失限位</option></select></label>
+        <details v-if="job.warnings?.length" class="motion-mapping-notes"><summary>模型有 {{ job.warnings.length }} 项需核对</summary><ul><li v-for="warning in job.warnings" :key="warning">{{ warning }}</li></ul></details>
+        <div class="motion-targets"><div v-for="target in genericMapping.targets" :key="target.target" class="motion-target-row">
+          <label :for="`mapping-${target.target}`">{{ target.target }}<small>{{ target.reason || '已确认的对应关系' }}</small></label>
+          <select :id="`mapping-${target.target}`" v-model="target.source" :aria-label="`${target.target} 人体对应`"><option value="">不设置目标</option><option v-for="name in job.source_joints" :key="name">{{ name }}</option></select>
+        </div></div>
+        <label class="motion-remember"><input v-model="rememberMapping" type="checkbox" aria-label="记住映射" />记住本次映射；模型、骨架或参考姿势改变后重新确认</label>
+        <button class="motion-primary" :disabled="busy || !genericMapping.targets.some(t => t.source) || !genericMapping.source_root || !alignment.every(Number.isFinite)" @click="convert">确认映射并转换</button>
+        <p class="motion-hint motion-mapping-notes">参考帧对应机器人的中立姿势。没有设置目标的分支保持参考位；父关节可能随其他目标运动。人体根位移固定，转换结果不包含平衡、碰撞或实机验收。</p>
+      </div>
+    </section>
+
     <section v-if="job?.state === 'mapping' && mapping" class="motion-mapping surface">
       <div class="panel-title">骨架对应关系</div>
       <div class="motion-mapping-body">
@@ -290,13 +339,15 @@ onBeforeUnmount(() => {
       <div><Check :size="16" /><strong>转换完成</strong><span>{{ job.frames.toLocaleString() }} 帧 · {{ job.joint_count }} 个关节 · 可拖动进度查看动作</span></div>
       <a :href="`${base(job.id)}/motion.npz`" download><Download :size="14" />导出关节动作</a>
       <a :href="`${base(job.id)}/report.json`" download>转换报告</a>
+      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
+      <span v-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>
     <p class="motion-footnote">机器人按 URDF 显示实体模型，自动加载工程内 STL / DAE 网格；缺失网格时保留骨架。临时保留最近 3 次导入，服务重启后需重新导入。</p>
   </div>
 </template>
 
 <style scoped>
-.motion-workbench { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 14px; min-height: 0; flex: 1; overflow: auto; align-content: start; padding-right: 3px; }
+.motion-workbench { display: grid; grid-template-columns: 290px minmax(0, 1fr); grid-auto-rows: max-content; gap: 14px; min-height: 0; flex: 1; overflow: auto; align-content: start; padding-right: 3px; }
 .motion-import-body { display: grid; gap: 18px; padding: 18px; }
 .motion-file { display: flex; flex-direction: column; gap: 9px; padding: 17px 14px; border: 1px dashed var(--line-2); border-radius: 6px; background: #141c20; min-width: 0; }
 .motion-file strong { font-size: 14px; font-weight: 500; }
@@ -324,6 +375,7 @@ onBeforeUnmount(() => {
 .motion-transport button { padding: 7px; }.motion-transport input[type=range] { flex: 1; min-width: 30px; padding: 0; accent-color: var(--accent); }.motion-time { white-space: nowrap; }
 .motion-mapping, .motion-error, .motion-result, .motion-footnote { grid-column: 1 / -1; }
 .motion-mapping-body { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px; }.motion-mapping-row { display: grid; grid-template-columns: 20px 1fr 14px 1fr; align-items: center; gap: 9px; margin-top: 12px; }.motion-mapping-row select { min-width: 0; width: 100%; }
+.motion-targets, .motion-mapping-notes { grid-column: 1 / -1; }.motion-targets { max-height: 380px; overflow: auto; }.motion-target-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }.motion-target-row label { overflow-wrap: anywhere; }.motion-target-row small { display: block; color: var(--muted); margin-top: 4px; }.motion-target-row select { min-width: 0; width: 100%; }.motion-alignment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }.motion-alignment input { min-width: 0; width: 100%; }.motion-remember { display: flex !important; align-items: center; }.motion-mapping-notes ul { max-height: 180px; overflow: auto; color: var(--warn); }
 .motion-error { color: var(--err); padding: 12px; border: 1px solid #69463d; border-radius: 5px; overflow-wrap: anywhere; }.motion-error button { margin-left: 15px; text-decoration: underline; }
 .motion-result { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; padding: 15px 18px; }.motion-result > div { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-right: auto; color: var(--accent); }.motion-result span { color: var(--muted); }.motion-result a { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); }
 @media(max-width: 1000px) { .motion-workbench { grid-template-columns: 1fr; }.motion-import-body { grid-template-columns: 1fr 1fr; }.motion-mapping-body { grid-template-columns: 1fr; }.motion-preview { min-height: 460px; } }

@@ -835,7 +835,7 @@ def launch_simulation(context):
                     f"executable: {agent_waiter_script}"
                 )
 
-    plant_launch_file = share / "launch" / (
+    plant_launch_file = Path(get_package_share_directory("robot_sim")) / "launch" / (
         "mujoco.launch.py" if backend == "mujoco" else "gazebo.launch.py"
     )
     if not plant_launch_file.is_file():
@@ -1058,7 +1058,7 @@ def launch_simulation(context):
                 ]
             )
         # MCU 仍为设备后端，工作台轨迹与手动调试统一由主机控制器执行。
-        if not simulator_only:
+        if not simulator_only and _bool(LaunchConfiguration("start_host_control").perform(context)):
             control_urdf = share / "models" / model / "urdf" / f"{model}.urdf"
             if not control_urdf.is_file():
                 raise RuntimeError(f"host control URDF does not exist: {control_urdf}")
@@ -1152,32 +1152,23 @@ def launch_simulation(context):
             ]
         )
 
-    cleanup_actions = [
-        ExecuteProcess(
-            cmd=[
-                "python3",
-                "-c",
-                "import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)",
-                str(runtime_dir),
-            ],
-            output="log",
-        )
-    ]
-    if cleanup_vcan:
-        cleanup_actions.append(
-            ExecuteProcess(
-                cmd=[
-                    "ip",
-                    "link",
-                    "delete" if vcan_created else "set",
-                    "dev",
-                    LaunchConfiguration("vcan_interface"),
-                    *([] if vcan_created else ["down"]),
-                ],
-                output="screen",
-            )
-        )
-    actions.append(RegisterEventHandler(OnShutdown(on_shutdown=cleanup_actions)))
+    cleaned = False
+
+    def cleanup(_context):
+        nonlocal cleaned
+        if cleaned:
+            return []
+        cleaned = True
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+        if cleanup_vcan:
+            subprocess.run([
+                "ip", "link", "delete" if vcan_created else "set", "dev", vcan_interface,
+                *([] if vcan_created else ["down"]),
+            ], capture_output=True, text=True, timeout=5)
+        return []
+
+    actions.append(RegisterEventHandler(OnShutdown(
+        on_shutdown=[OpaqueFunction(function=cleanup)])))
     return actions
 
 
@@ -1240,6 +1231,10 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("agent_tty", default_value=""),
             DeclareLaunchArgument("start_web_host", default_value="true"),
             DeclareLaunchArgument("start_micro_ros_agent", default_value="false"),
+            DeclareLaunchArgument(
+                "start_host_control", default_value="true",
+                description="内嵌主机控制；Workbench 由反馈管理器等待有效 MCU 反馈后独立启动",
+            ),
             DeclareLaunchArgument("firmware_sim_script", default_value=""),
             DeclareLaunchArgument(
                 "simulator_only",

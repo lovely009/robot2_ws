@@ -1,6 +1,10 @@
 """Small articulated fixture: verify IK math and model/export compatibility."""
 
 import copy
+import json
+from pathlib import Path
+import runpy
+import sys
 import os
 import signal
 import subprocess
@@ -198,3 +202,71 @@ def test_preview_launch_isolates_joint_topic_and_tf(arm, tmp_path):
                 node.destroy_subscription(subscription)
             node.destroy_node()
             rclpy.shutdown()
+
+
+@pytest.fixture
+def retarget_packages(arm, tmp_path, monkeypatch):
+    import yaml
+
+    # 使用隔离的 ament 索引，不让工作区中的旧安装产物掩盖包归属错误。
+    prefix = tmp_path / 'install'
+    index = prefix / 'share/ament_index/resource_index/packages'
+    index.mkdir(parents=True)
+    for package in ('bvh_broadcaster', 'robot_description'):
+        (index / package).touch()
+    mapping = prefix / 'share/bvh_broadcaster/config/half_body_robot.yaml'
+    mapping.parent.mkdir(parents=True)
+    mapping.write_text(yaml.safe_dump(arm[1]))
+    urdf = prefix / 'share/robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
+    urdf.parent.mkdir(parents=True)
+    urdf.write_text(arm[0].read_text())
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(prefix))
+    return prefix, urdf
+
+
+@pytest.mark.parametrize('external_urdf', [False, True], ids=['default-model', 'external-model'])
+def test_retarget_cli_resolves_model_without_robot_sim(
+        arm, retarget_packages, tmp_path, monkeypatch, external_urdf):
+    from bvh_broadcaster.retarget import main
+
+    prefix, default_urdf = retarget_packages
+    urdf = arm[0] if external_urdf else default_urdf
+    output = tmp_path / 'converted.npz'
+    argv = ['retarget_bvh', str(tmp_path / 'arm.bvh'), '--output', str(output)]
+    if external_urdf:
+        # 外部模型不应要求安装默认模型包。
+        (prefix / 'share/ament_index/resource_index/packages/robot_description').unlink()
+        argv.extend(['--urdf', str(urdf)])
+    monkeypatch.setattr(sys, 'argv', argv)
+
+    main()
+
+    report = json.loads(output.with_suffix('.json').read_text())
+    assert report['urdf'] == str(urdf.resolve())
+    names, positions, frame_time = load_motion(output, urdf)
+    assert names == ['q0', 'q1', 'q2']
+    assert positions.shape == (6, 3)
+    assert frame_time == pytest.approx(.1)
+
+
+@pytest.mark.parametrize('external_urdf', [False, True], ids=['default-model', 'external-model'])
+def test_retarget_launch_resolves_model_without_robot_sim(
+        arm, retarget_packages, external_urdf):
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+
+    prefix, default_urdf = retarget_packages
+    context = LaunchContext()
+    if external_urdf:
+        (prefix / 'share/ament_index/resource_index/packages/robot_description').unlink()
+        context.launch_configurations['urdf'] = str(arm[0])
+    entry = Path(__file__).resolve().parents[1] / 'launch/retarget.launch.py'
+    description = runpy.run_path(str(entry))['generate_launch_description']()
+    argument = next(action for action in description.entities
+                    if isinstance(action, DeclareLaunchArgument) and action.name == 'urdf')
+
+    argument.execute(context)
+
+    selected = Path(context.launch_configurations['urdf'])
+    assert selected == (arm[0] if external_urdf else default_urdf)
+    assert selected.is_file()

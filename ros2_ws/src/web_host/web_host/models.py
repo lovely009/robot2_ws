@@ -196,9 +196,9 @@ def _register_joint(joints, motor_id, joint):
 
 
 def _motor_config_dir():
-    """权威型号库所在目录（安装树的 motor_hardware_interface/config）。"""
+    """权威型号库所在目录（安装树的 robot_description/config）。"""
     try:
-        return (Path(get_package_share_directory("motor_hardware_interface"))
+        return (Path(get_package_share_directory("robot_description"))
                 / "config")
     except Exception:
         return None

@@ -376,7 +376,7 @@ enum {
   CERB_STAGE_MIT_CLEAR, // MIT 控制字置 bit5 清错，无应答，发完即推进
 };
 
-// MIT 下行控制字 bit5 = 清错（ros2_ws/src/motor_drive/docs/cerb-series.md）。
+// MIT 下行控制字 bit5 = 清错（巨蟹 CERB 通信协议；硬件资料入口见仓库 docs/README.md）。
 // 固件的常规 MIT 组帧只置 bit7(使能)/bit6(抱闸释放)/bit4:1(模式)，从不置
 // 这一位——它是唯一的主动清错手段。
 #define CERB_MIT_CTRL_CLEAR_FAULT 0x20U

@@ -78,7 +78,7 @@ simulation:
         kd: 68.25
         # vaxor 型号库（motor.yaml）只有 Kt/减速比/效率，**没有额定/峰值电流**，
         # 而 simulation.launch.py 要求 plant.current_limit_a 为正。
-        # 这里取 motor_drive/docs/motor-2530-series.md 的「最大堵转电流 3.2 A」。
+        # 这里沿用 VAXOR 25/30 mm 厂商规格的「最大堵转电流 3.2 A」（资料入口：docs/README.md）。
         current_limit_a: 3.2
 
   motors:

@@ -16,11 +16,9 @@ import math
 import os
 import re
 import subprocess
-from pathlib import Path
-
-from ament_index_python.packages import get_package_share_directory
 
 from .agent_manager import enumerate_serial_ports
+from .model_catalog import enumerate_mujoco_models, enumerate_simulation_models
 from .systemd_units import (
     STATE_NAMES, UNIT_SIMULATION, SystemdUnits, UnitState, config_env,
     config_from_env,
@@ -83,48 +81,6 @@ def enumerate_can_interfaces():
             "label": f"{name} ({detail})",
         })
     return interfaces
-
-
-def _models_root():
-    """默认模型根目录（安装树的 robot_description share）；取不到返回 None。
-
-    各枚举函数的 `root=` 参数可覆盖它：bench_manager 节点的 models_dir 参数
-    就是把这个根显式传下来（可指源码目录，改模型不必重构建）。
-    """
-    try:
-        return Path(get_package_share_directory("robot_description")) / "models"
-    except Exception:
-        return None
-
-
-def enumerate_simulation_models(root=None):
-    """列出具有完整仿真拓扑的已安装模型。"""
-    models_root = Path(root) if root is not None else _models_root()
-    if models_root is None or not models_root.is_dir():
-        return []
-    return sorted(
-        entry.name
-        for entry in models_root.iterdir()
-        if entry.is_dir()
-        and (entry / "config" / "simulation_topology.yaml").is_file()
-    )
-
-
-def enumerate_mujoco_models(root=None):
-    """列出同时具备 MJCF 与 standalone URDF 的 MuJoCo 模型。
-
-    MJCF 用于物理仿真，standalone URDF 用于渲染 robot_description；缺一不可。
-    """
-    models_root = Path(root) if root is not None else _models_root()
-    if models_root is None or not models_root.is_dir():
-        return []
-    return sorted(
-        entry.name
-        for entry in models_root.iterdir()
-        if entry.is_dir()
-        and (entry / "mujoco" / f"{entry.name}.xml").is_file()
-        and (entry / "urdf" / f"{entry.name}.standalone.urdf").is_file()
-    )
 
 
 def _model_parameters(request, backend):
@@ -279,11 +235,12 @@ class SimulationProcessManager:
 
         if mode == "firmware":
             # 模拟器（FDCAN 电机后端）由 bench_manager 的独立进程管理（可单独起停，
-            # 见 motor_sim_manager.py）：本 launch 只编排被控对象/驱动端/Agent。
+            # 见 motor_sim_manager.py）；主机控制由反馈管理器等待有效 MCU 子集后启动。
             launch_args.extend([
                 "start_web_host:=false",
                 "start_micro_ros_agent:=false",
                 "start_fdcan_sim:=false",
+                "start_host_control:=false",
             ])
         return config, launch_args
 

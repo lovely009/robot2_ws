@@ -1,0 +1,2193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="full_body_robot">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.000167101154908974 -0.00481402516135016 -0.0150204846668905"
+        rpy="0 0 0" />
+      <mass
+        value="0.774243897727538" />
+      <inertia
+        ixx="0.000225776192994999"
+        ixy="-9.03085278002389E-07"
+        ixz="2.19203842765159E-08"
+        iyy="0.000780562086821349"
+        iyz="1.94008948582538E-06"
+        izz="0.000807520119010561" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Joint_Link1">
+    <inertial>
+      <origin
+        xyz="1.39075803990644E-06 0.00142152604526409 0.0421510376754144"
+        rpy="0 0 0" />
+      <mass
+        value="0.678061308724817" />
+      <inertia
+        ixx="0.000351162916696758"
+        ixy="2.50330523493608E-08"
+        ixz="2.96574336523998E-10"
+        iyy="0.000355254346740659"
+        iyz="-3.94396592231366E-06"
+        izz="0.000458947403058217" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link1"
+    type="revolute">
+    <origin
+      xyz="0 0 0.0109999999999903"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link2">
+    <inertial>
+      <origin
+        xyz="-3.31227397019869E-06 0.089012638348119 -0.00683001127444149"
+        rpy="0 0 0" />
+      <mass
+        value="1.84852983165456" />
+      <inertia
+        ixx="0.00207731742541096"
+        ixy="2.81888988807095E-08"
+        ixz="-6.00435829143367E-08"
+        iyy="0.00201063059576777"
+        iyz="-8.94948913220556E-06"
+        izz="0.0025544504817565" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.529411764705882 0.549019607843137 0.549019607843137 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link2"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="-2.3284258169925987 -1.5707920050311459 2.5126594902116768" />
+    <parent
+      link="Joint_Link3" />
+    <child
+      link="Joint_Link2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.1">
+    <inertial>
+      <origin
+        xyz="0.0034444220463857 9.34482452908253E-05 0.00993255692201883"
+        rpy="0 0 0" />
+      <mass
+        value="0.0499208365404591" />
+      <inertia
+        ixx="1.01213532306874E-05"
+        ixy="7.26869383568324E-08"
+        ixz="6.53644722665653E-09"
+        iyy="8.06496045845496E-06"
+        iyz="-1.29152833067898E-10"
+        izz="1.39339637781022E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.1"
+    type="revolute">
+    <origin
+      xyz="0.059 0.2107 -0.06"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="Joint_Link2" />
+    <child
+      link="Joint_link3.1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.2">
+    <inertial>
+      <origin
+        xyz="-0.00214237615936556 0.0103644971384175 -0.0290000487899442"
+        rpy="0 0 0" />
+      <mass
+        value="0.241731705278653" />
+      <inertia
+        ixx="9.63817957606934E-05"
+        ixy="-1.32288321467373E-06"
+        ixz="1.32460230860119E-10"
+        iyy="0.000126451987654666"
+        iyz="-3.64207587157626E-11"
+        izz="5.57579009035104E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.650980392156863 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.2"
+    type="revolute">
+    <origin
+      xyz="0.0060466 -0.028296 0.0203"
+      rpy="1.5708 0.0068638 0.036849" />
+    <parent
+      link="Joint_link3.1" />
+    <child
+      link="Joint_link3.2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.3">
+    <inertial>
+      <origin
+        xyz="0.00800319886376293 0.00126288856145396 0.040861019817255"
+        rpy="0 0 0" />
+      <mass
+        value="0.144166281009787" />
+      <inertia
+        ixx="7.43116526809119E-05"
+        ixy="4.3912737522013E-06"
+        ixz="-4.66925097935774E-06"
+        iyy="3.99738445547236E-05"
+        iyz="-3.03274114563764E-07"
+        izz="8.46431773135844E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.3"
+    type="revolute">
+    <origin
+      xyz="0.033492 0.034508 -0.029"
+      rpy="-1.5708 1.3866 -1.5412" />
+    <parent
+      link="Joint_link3.2" />
+    <child
+      link="Joint_link3.3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.4">
+    <inertial>
+      <origin
+        xyz="0.0102675753745947 -0.0408529233378966 -0.00218418179660924"
+        rpy="0 0 0" />
+      <mass
+        value="0.137558383990885" />
+      <inertia
+        ixx="0.000142470710819701"
+        ixy="2.38225638841949E-05"
+        ixz="4.3631638140175E-06"
+        iyy="5.33258881749413E-05"
+        iyz="-1.74014864983965E-05"
+        izz="0.000173632765674942" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.4"
+    type="revolute">
+    <origin
+      xyz="-0.022307 -0.002941 0.0535"
+      rpy="1.5708 -1.5414 -1.4397" />
+    <parent
+      link="Joint_link3.3" />
+    <child
+      link="Joint_link3.4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.5">
+    <inertial>
+      <origin
+        xyz="0.00192714127030499 0.000717206516861968 0.130881880980691"
+        rpy="0 0 0" />
+      <mass
+        value="0.196346393783135" />
+      <inertia
+        ixx="0.000189546461554593"
+        ixy="-8.9164579896891E-06"
+        ixz="-1.77511109202534E-06"
+        iyy="0.000201879514069324"
+        iyz="9.59202872311055E-08"
+        izz="6.12390469627023E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.5"
+    type="revolute">
+    <origin
+      xyz="0.024058 -0.095826 -0.0235"
+      rpy="-1.5708 1.0747 -2.8956" />
+    <parent
+      link="Joint_link3.4" />
+    <child
+      link="Joint_link3.5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.6">
+    <inertial>
+      <origin
+        xyz="0.000281177299494992 -0.039120481903435 -0.0092390938818252"
+        rpy="0 0 0" />
+      <mass
+        value="0.0379481666476553" />
+      <inertia
+        ixx="2.68646498550971E-05"
+        ixy="-1.16942235863319E-06"
+        ixz="2.35916650900562E-08"
+        iyy="1.72441562524589E-05"
+        iyz="-6.02094594021902E-06"
+        izz="2.52143700599847E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.6"
+    type="revolute">
+    <origin
+      xyz="-0.0056381 0.023024 0.1933"
+      rpy="-1.5708 -0.13505 0.49607" />
+    <parent
+      link="Joint_link3.5" />
+    <child
+      link="Joint_link3.6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.7">
+    <inertial>
+      <origin
+        xyz="-0.000990888150857322 0.00250041968477394 0.0520050492197102"
+        rpy="0 0 0" />
+      <mass
+        value="0.171806355935959" />
+      <inertia
+        ixx="0.000123897164093823"
+        ixy="-4.73203947042862E-07"
+        ixz="1.14701845537159E-06"
+        iyy="0.000124422172879496"
+        iyz="-1.72901400214636E-06"
+        izz="1.7949487489326E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.7"
+    type="revolute">
+    <origin
+      xyz="0.0059558 -0.090751 -0.027"
+      rpy="1.5708 0.58259 0.16466" />
+    <parent
+      link="Joint_link3.6" />
+    <child
+      link="Joint_link3.7" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.8">
+    <inertial>
+      <origin
+        xyz="0.00479358732560307 -0.0288075765152667 -0.00281577046732251"
+        rpy="0 0 0" />
+      <mass
+        value="0.0235821995844855" />
+      <inertia
+        ixx="3.5956019735084E-06"
+        ixy="1.72384340395892E-07"
+        ixz="9.12546412392967E-09"
+        iyy="2.5785136968503E-06"
+        iyz="-5.29490197296323E-08"
+        izz="5.6058400366327E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.8.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.8.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.8"
+    type="revolute">
+    <origin
+      xyz="0.0043195050690049159 0.0010891409682978728 -4.0006381632973653e-09"
+      rpy="-1.570801804299282 1.4060964382699457 -1.3238054033822315" />
+    <parent
+      link="Joint_link3.9" />
+    <child
+      link="Joint_link3.8" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.9">
+    <inertial>
+      <origin
+        xyz="0.00218292682225479 0.000550506342021098 -1.05320696608402E-09"
+        rpy="0 0 0" />
+      <mass
+        value="0.00304488908772714" />
+      <inertia
+        ixx="1.38950639168385E-07"
+        ixy="-1.07565796124048E-08"
+        ixz="2.24101499739961E-15"
+        iyy="1.78890908741448E-07"
+        iyz="2.55374482901204E-14"
+        izz="6.25524698865198E-08" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.9.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.9.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.9"
+    type="revolute">
+    <origin
+      xyz="0.0024509226250472331 -0.003719856230524377 0.13850001614170285"
+      rpy="-1.5707551898484788 -0.24699270310666624 2.1533765650886654" />
+    <parent
+      link="Joint_link3.7" />
+    <child
+      link="Joint_link3.9" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.1r">
+    <inertial>
+      <origin
+        xyz="-0.00343168522326716 -0.000763417324832052 0.00977930757472867"
+        rpy="0 0 0" />
+      <mass
+        value="0.0485377372910907" />
+      <inertia
+        ixx="1.00651345315974E-05"
+        ixy="-7.44484081617101E-08"
+        ixz="6.53646369407938E-09"
+        iyy="7.96101265858154E-06"
+        iyz="1.29397369005481E-10"
+        izz="1.38778099842352E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.1r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.1r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.1r"
+    type="revolute">
+    <origin
+      xyz="-0.059 0.2107 -0.06"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="Joint_Link2" />
+    <child
+      link="Joint_link3.1r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.2r">
+    <inertial>
+      <origin
+        xyz="0.00214237619500154 0.0103644983559002 -0.0332999546376027"
+        rpy="0 0 0" />
+      <mass
+        value="0.241731707850948" />
+      <inertia
+        ixx="9.63818052208113E-05"
+        ixy="1.32288421047168E-06"
+        ixz="1.33062272422398E-10"
+        iyy="0.000126451993555071"
+        iyz="4.00907592281897E-11"
+        izz="5.57579041385851E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.2r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.650980392156863 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.2r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.2r"
+    type="revolute">
+    <origin
+      xyz="-0.006205 -0.032594 0.0203"
+      rpy="1.5708 -0.0068638 -0.036849" />
+    <parent
+      link="Joint_link3.1r" />
+    <child
+      link="Joint_link3.2r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.3r">
+    <inertial>
+      <origin
+        xyz="-0.00805701346216977 0.000854593365087974 0.0408609457365033"
+        rpy="0 0 0" />
+      <mass
+        value="0.144167040918539" />
+      <inertia
+        ixx="7.42035282688264E-05"
+        ixy="-4.79454472047355E-06"
+        ixz="4.58818230654513E-06"
+        iyy="4.00822018833519E-05"
+        iyz="-9.17329466589722E-07"
+        izz="8.46434153717371E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.3r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.3r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.3r"
+    type="revolute">
+    <origin
+      xyz="-0.033492 0.034508 -0.0333"
+      rpy="-1.5708 -1.3866 1.5412" />
+    <parent
+      link="Joint_link3.2r" />
+    <child
+      link="Joint_link3.3r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.4r">
+    <inertial>
+      <origin
+        xyz="-0.00945478326853597 -0.0410486663985589 -0.00218419030177391"
+        rpy="0 0 0" />
+      <mass
+        value="0.13755844651897" />
+      <inertia
+        ixx="0.000143309382038955"
+        ixy="-2.21821831260746E-05"
+        ixz="-4.03652601679698E-06"
+        iyy="5.24872439595429E-05"
+        iyz="-1.74801434497347E-05"
+        izz="0.000173632771734953" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.4r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.4r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.4r"
+    type="revolute">
+    <origin
+      xyz="0.022307 -0.002941 0.0535"
+      rpy="1.5708 1.5414 1.4397" />
+    <parent
+      link="Joint_link3.3r" />
+    <child
+      link="Joint_link3.4r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.5r">
+    <inertial>
+      <origin
+        xyz="-0.00161146017718227 0.00127728068119315 0.130381913021921"
+        rpy="0 0 0" />
+      <mass
+        value="0.196346354761147" />
+      <inertia
+        ixx="0.0001906727282893"
+        ixy="9.59826527654501E-06"
+        ixz="8.37160911237627E-07"
+        iyy="0.000200752868348757"
+        iyz="-1.56826731420347E-06"
+        izz="6.12390279080472E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.5r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.5r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.5r"
+    type="revolute">
+    <origin
+      xyz="-0.022313 -0.096761 -0.0235"
+      rpy="-1.5708 -1.0404 2.915" />
+    <parent
+      link="Joint_link3.4r" />
+    <child
+      link="Joint_link3.5r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.6r">
+    <inertial>
+      <origin
+        xyz="-0.000256912734111228 -0.0391206375522476 0.0092390661897627"
+        rpy="0 0 0" />
+      <mass
+        value="0.037948176334673" />
+      <inertia
+        ixx="2.686319716551E-05"
+        ixy="1.17538821917003E-06"
+        ixz="1.98587139934356E-08"
+        iyy="1.72455991048712E-05"
+        iyz="6.0209621097364E-06"
+        izz="2.52143609679585E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.6r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.6r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.6r"
+    type="revolute">
+    <origin
+      xyz="-0.016777 -0.016745 0.1928"
+      rpy="-1.5708 0.13443 -0.53044" />
+    <parent
+      link="Joint_link3.5r" />
+    <child
+      link="Joint_link3.6r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.7r">
+    <inertial>
+      <origin
+        xyz="-0.00197616293732661 -0.00182529179703095 0.0523084367101615"
+        rpy="0 0 0" />
+      <mass
+        value="0.171785771717246" />
+      <inertia
+        ixx="0.00012403669291578"
+        ixy="5.27096391925295E-07"
+        ixz="1.20105728959715E-06"
+        iyy="0.000124282437466323"
+        iyz="1.69192658816535E-06"
+        izz="1.79493054383394E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.7r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.7r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.7r"
+    type="revolute">
+    <origin
+      xyz="-0.0058506 -0.090459 0.027"
+      rpy="1.5708 -0.62047 -0.16404" />
+    <parent
+      link="Joint_link3.6r" />
+    <child
+      link="Joint_link3.7r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.8r">
+    <inertial>
+      <origin
+        xyz="2.10846094750305E-09 -2.71742461865898E-09 -0.00220344295728048"
+        rpy="0 0 0" />
+      <mass
+        value="0.00304488839961943" />
+      <inertia
+        ixx="6.57272286700508E-08"
+        ixy="-1.91802049302098E-08"
+        ixz="-2.35228801616029E-15"
+        iyy="1.78428826440008E-07"
+        iyz="-6.27222860076955E-14"
+        izz="1.36237936072881E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.8r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.8r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.8r"
+    type="revolute">
+    <origin
+      xyz="0 0 0.1388"
+      rpy="-1.5708 -0.16404 2.5211" />
+    <parent
+      link="Joint_link3.7r" />
+    <child
+      link="Joint_link3.8r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3.9r">
+    <inertial>
+      <origin
+        xyz="-0.00499314669638273 -0.0288202979051386 -6.82644781725694E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.0235822009313697" />
+      <inertia
+        ixx="5.4266250952883E-06"
+        ixy="-7.20003370997463E-07"
+        ixz="-1.28816674056215E-11"
+        iyy="2.72930781067116E-06"
+        iyz="1.3759098521434E-09"
+        izz="3.62402308154793E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.9r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link3.9r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3.9r"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.0044547"
+      rpy="-1.5708 -1.3432 1.7348" />
+    <parent
+      link="Joint_link3.8r" />
+    <child
+      link="Joint_link3.9r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link3">
+    <inertial>
+      <origin
+        xyz="-8.30363796385652E-09 -1.82982179408597E-09 -2.71930536500201E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0728567496906132" />
+      <inertia
+        ixx="9.35169234494398E-06"
+        ixy="-8.61716024198604E-07"
+        ixz="-3.04869093934158E-13"
+        iyy="1.38162184183962E-05"
+        iyz="-1.69746360187536E-12"
+        izz="6.9980054873213E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link3"
+    type="revolute">
+    <origin
+      xyz="0 0 0.099"
+      rpy="1.5708 0.31293 -1.5708" />
+    <parent
+      link="Joint_Link1" />
+    <child
+      link="Joint_Link3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link4">
+    <inertial>
+      <origin
+        xyz="-8.40260684826179E-09 -2.74558247664869E-10 -2.68882434872886E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0934780291598877" />
+      <inertia
+        ixx="1.00263355264677E-05"
+        ixy="5.83808442657968E-19"
+        ixz="-6.10623159189751E-13"
+        iyy="1.4811960990916E-05"
+        iyz="-1.61290742589117E-12"
+        izz="8.55560733118958E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link4"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.0735"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link4" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link5">
+    <inertial>
+      <origin
+        xyz="-0.0352416209237895 -0.00758766513344294 -3.50994503637022E-06"
+        rpy="0 0 0" />
+      <mass
+        value="1.10918804844225" />
+      <inertia
+        ixx="0.00356998225984358"
+        ixy="0.000591565583569619"
+        ixz="2.39345686276744E-09"
+        iyy="0.00336375863098191"
+        iyz="-8.16870490123462E-09"
+        izz="0.00180464247063674" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link5"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.2579 -1.5708" />
+    <parent
+      link="Joint_Link4" />
+    <child
+      link="Joint_Link5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.1">
+    <inertial>
+      <origin
+        xyz="0.000534776642640011 5.21380828555178E-05 0.0285511070150257"
+        rpy="0 0 0" />
+      <mass
+        value="0.293426003416425" />
+      <inertia
+        ixx="0.000139497148523108"
+        ixy="-6.02455048950443E-06"
+        ixz="6.50116027970901E-06"
+        iyy="0.000174182854286245"
+        iyz="1.10098103539402E-06"
+        izz="0.00021317243121433" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.1"
+    type="revolute">
+    <origin
+      xyz="-0.035991 -0.024514 0.09202"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link5" />
+    <child
+      link="Joint_link5.1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.2">
+    <inertial>
+      <origin
+        xyz="-0.0125780082474723 -0.104980341133352 -0.0447681677189114"
+        rpy="0 0 0" />
+      <mass
+        value="0.822950083145611" />
+      <inertia
+        ixx="0.00116356196339063"
+        ixy="-4.9948737139066E-05"
+        ixz="-3.08061364791989E-06"
+        iyy="0.000301023180964361"
+        iyz="-5.79318404754607E-05"
+        izz="0.00124283375117732" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.2"
+    type="revolute">
+    <origin
+      xyz="0.044372 0.0074903 0.0117"
+      rpy="3.0735 1.5708 -3.0424" />
+    <parent
+      link="Joint_link5.1" />
+    <child
+      link="Joint_link5.2" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.3">
+    <inertial>
+      <origin
+        xyz="0.000185399272111003 0.00031165796198751 0.0854745428539768"
+        rpy="0 0 0" />
+      <mass
+        value="0.662763718849488" />
+      <inertia
+        ixx="0.00211956990310046"
+        ixy="-4.85442826190998E-06"
+        ixz="-1.34604980897817E-06"
+        iyy="0.00210673335818728"
+        iyz="-1.18666584146482E-06"
+        izz="0.000382462463945707" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.3"
+    type="revolute">
+    <origin
+      xyz="-0.012465 -0.20091 -0.046"
+      rpy="1.5708 -0.35158 -0.061961" />
+    <parent
+      link="Joint_link5.2" />
+    <child
+      link="Joint_link5.3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.4">
+    <inertial>
+      <origin
+        xyz="0.00186330861118458 -0.0385623667021924 0.00380320141715279"
+        rpy="0 0 0" />
+      <mass
+        value="0.101794305752762" />
+      <inertia
+        ixx="8.95627288361608E-05"
+        ixy="4.21346196657716E-06"
+        ixz="1.03507152626094E-07"
+        iyy="4.15305541607457E-05"
+        iyz="1.8654061693165E-05"
+        izz="8.65180205819233E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.4"
+    type="revolute">
+    <origin
+      xyz="-0.020094 0.012573 0.2467"
+      rpy="-1.5708 0.17027 -1.874" />
+    <parent
+      link="Joint_link5.3" />
+    <child
+      link="Joint_link5.4" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.5">
+    <inertial>
+      <origin
+        xyz="-2.59210757561079E-06 -6.83450112856435E-05 0.141951694233333"
+        rpy="0 0 0" />
+      <mass
+        value="0.33789326488138" />
+      <inertia
+        ixx="0.00201836915946244"
+        ixy="-2.48973214928152E-06"
+        ixz="-4.90241746125811E-07"
+        iyy="0.00201094693800198"
+        iyz="1.61126773754153E-07"
+        izz="8.18054900508511E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.5"
+    type="revolute">
+    <origin
+      xyz="-0.003983 -0.096169 0.027"
+      rpy="-1.5708 -1.261 2.9752" />
+    <parent
+      link="Joint_link5.4" />
+    <child
+      link="Joint_link5.5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.6">
+    <inertial>
+      <origin
+        xyz="0.00370803842173623 -0.0168625100850045 -0.000325758221582984"
+        rpy="0 0 0" />
+      <mass
+        value="0.0697698796004313" />
+      <inertia
+        ixx="2.84588607100441E-05"
+        ixy="2.41718904360264E-06"
+        ixz="1.10739986567753E-06"
+        iyy="1.73701470953232E-05"
+        iyz="-5.30224275390748E-06"
+        izz="3.58081490421401E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.6"
+    type="revolute">
+    <origin
+      xyz="-0.018334 0.0058681 0.285"
+      rpy="-1.5708 -0.16639 1.261" />
+    <parent
+      link="Joint_link5.5" />
+    <child
+      link="Joint_link5.6" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.7">
+    <inertial>
+      <origin
+        xyz="0.0015602059890269 -0.0171780901558468 0.0270403385037771"
+        rpy="0 0 0" />
+      <mass
+        value="0.0310065052583184" />
+      <inertia
+        ixx="5.48672675189661E-05"
+        ixy="-1.83715487069908E-07"
+        ixz="-4.62047325191602E-07"
+        iyy="5.82517836055616E-05"
+        iyz="-1.79320977575851E-08"
+        izz="4.15539992404128E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0.811764705882353 0.56078431372549 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.7"
+    type="revolute">
+    <origin
+      xyz="-0.0057817 -0.057016 -0.02"
+      rpy="1.5708 -1.5167 -1.3652" />
+    <parent
+      link="Joint_link5.6" />
+    <child
+      link="Joint_link5.7" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.1r">
+    <inertial>
+      <origin
+        xyz="0.000520030218761142 -0.000135169643363464 0.0285511070260704"
+        rpy="0 0 0" />
+      <mass
+        value="0.293426027660154" />
+      <inertia
+        ixx="0.000139713934685916"
+        ixy="6.61572516731424E-06"
+        ixz="6.48276190052437E-06"
+        iyy="0.000173966084313579"
+        iyz="-1.2046581870726E-06"
+        izz="0.000213172447607565" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.1r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.1r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.1r"
+    type="revolute">
+    <origin
+      xyz="-0.035991 -0.024514 -0.09202"
+      rpy="3.1416 0 3.1416" />
+    <parent
+      link="Joint_Link5" />
+    <child
+      link="Joint_link5.1r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.2r">
+    <inertial>
+      <origin
+        xyz="-0.0140835002940052 -0.0888648996187537 -0.0433807108677924"
+        rpy="0 0 0" />
+      <mass
+        value="0.976661892534909" />
+      <inertia
+        ixx="0.00131831946898266"
+        ixy="-4.99425763431163E-05"
+        ixz="-9.6643201342071E-06"
+        iyy="0.000435770822228184"
+        iyz="-5.79313128481373E-05"
+        izz="0.00134142013311553" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.2r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.2r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.2r"
+    type="revolute">
+    <origin
+      xyz="0.043255 -0.0080616 0.0117"
+      rpy="0.18426 1.5708 0" />
+    <parent
+      link="Joint_link5.1r" />
+    <child
+      link="Joint_link5.2r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.3r">
+    <inertial>
+      <origin
+        xyz="0.000136510264114154 -0.000291382389993378 0.0845655737465828"
+        rpy="0 0 0" />
+      <mass
+        value="0.659048557831036" />
+      <inertia
+        ixx="0.00211930683192686"
+        ixy="5.17751551756471E-06"
+        ixz="3.13709671895976E-07"
+        iyy="0.00210694346052287"
+        iyz="1.76756457871906E-06"
+        izz="0.000382419728586128" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.3r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.3r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.3r"
+    type="revolute">
+    <origin
+      xyz="-0.012465 -0.20091 -0.045"
+      rpy="-1.5708 -0.32077 3.0796" />
+    <parent
+      link="Joint_link5.2r" />
+    <child
+      link="Joint_link5.3r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.4r">
+    <inertial>
+      <origin
+        xyz="0.015035937839937 -0.0355590380955776 0.00380317865853672"
+        rpy="0 0 0" />
+      <mass
+        value="0.101794184689906" />
+      <inertia
+        ixx="8.11347992717734E-05"
+        ixy="1.87492589989836E-05"
+        ixz="-6.33012009908777E-06"
+        iyy="4.99584407891047E-05"
+        iyz="1.75474851730565E-05"
+        izz="8.65180035917637E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.4r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.4r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.4r"
+    type="revolute">
+    <origin
+      xyz="0.023552 0.0026785 0.2467"
+      rpy="-1.5708 -0.18149 1.9399" />
+    <parent
+      link="Joint_link5.3r" />
+    <child
+      link="Joint_link5.4r" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.5r">
+    <inertial>
+      <origin
+        xyz="-4.08169272173575E-05 5.50627700376394E-05 0.141951647785019"
+        rpy="0 0 0" />
+      <mass
+        value="0.337892551511855" />
+      <inertia
+        ixx="0.00201791692932732"
+        ixy="3.05569205849478E-06"
+        ixz="4.88408477765645E-07"
+        iyy="0.0020113951823793"
+        iyz="1.79199937129649E-07"
+        izz="8.1805770118403E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.5r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.5r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.5r"
+    type="revolute">
+    <origin
+      xyz="0.029396 -0.091652 0.027"
+      rpy="-1.5708 1.2086 -2.9562" />
+    <parent
+      link="Joint_link5.4r" />
+    <child
+      link="Joint_link5.5r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.6r">
+    <inertial>
+      <origin
+        xyz="0.00232901979293743 -0.0171075846880692 0.000325758222140107"
+        rpy="0 0 0" />
+      <mass
+        value="0.0697698790530006" />
+      <inertia
+        ixx="2.87061529782821E-05"
+        ixy="1.74341378708866E-06"
+        ixz="-7.87306095595244E-07"
+        iyy="1.71228546558163E-05"
+        iyz="5.3591288324633E-06"
+        izz="3.58081488375958E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.6r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.6r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.6r"
+    type="revolute">
+    <origin
+      xyz="0.018001 0.0068204 0.285"
+      rpy="-1.5708 -0.18537 1.933" />
+    <parent
+      link="Joint_link5.5r" />
+    <child
+      link="Joint_link5.6r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link5.7r">
+    <inertial>
+      <origin
+        xyz="-0.000586169671311365 -0.0172388349726484 0.0268403394830576"
+        rpy="0 0 0" />
+      <mass
+        value="0.031006506362092" />
+      <inertia
+        ixx="5.48742164250036E-05"
+        ixy="2.39206306229504E-07"
+        ixz="-4.60694822772303E-07"
+        iyy="5.82448363103792E-05"
+        iyz="3.96137329071083E-08"
+        izz="4.15540026912914E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.7r.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0.811764705882353 0.56078431372549 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/full_body_robot/meshes/Joint_link5.7r.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link5.7r"
+    type="revolute">
+    <origin
+      xyz="-0.0093562 -0.056601 0.02"
+      rpy="-1.5708 -1.5003 1.717" />
+    <parent
+      link="Joint_link5.6r" />
+    <child
+      link="Joint_link5.7r" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

@@ -1,0 +1,257 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="right_arm_4dof">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-0.009880604312813715 -3.592348298103327e-07 0.3313104287866844" rpy="0 0 0" />
+      <mass value="2.29210397108345" />
+      <inertia ixx="0.07943876308720214" ixy="-1.042588637017014e-07" ixz="0.005430277404636101" iyy="0.08135060479415065" iyz="1.767761615179193e-07" izz="0.003376732289164259" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Joint_link1">
+    <inertial>
+      <origin xyz="8.32666601631791e-06 -0.04344232797382862 -0.006365088124595655" rpy="0 0 0" />
+      <mass value="0.0165" />
+      <inertia ixx="2.238800565569557e-05" ixy="-8.522780006653656e-09" ixz="-2.283089945835966e-09" iyy="9.919982406311971e-06" iyz="-5.085688269459402e-06" izz="2.127245551583167e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.69804 0.69804 0.69804 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link1" type="revolute">
+    <origin xyz="-0.133 0 0.571" rpy="1.5708 0 -1.5708" />
+    <parent link="base_link" />
+    <child link="Joint_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.570796326794897" upper="1.570796326794897" effort="10" velocity="0" />
+    <dynamics damping="2.64" friction="1.27" />
+  </joint>
+  <link name="Joint_link1.1">
+    <inertial>
+      <origin xyz="-1.330429054737639e-05 -2.494346172897108e-05 0.02112859777096562" rpy="0 0 0" />
+      <mass value="0.244" />
+      <inertia ixx="7.20131538113769e-05" ixy="-1.509960280253242e-08" ixz="8.83847900470046e-08" iyy="7.202950952008636e-05" iyz="1.570441776431355e-07" izz="6.935776096371634e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link1.1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link1.1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link1.1" type="fixed">
+    <origin xyz="0 -0.0978 -0.0245" rpy="-1.5708 0 0" />
+    <parent link="Joint_link1" />
+    <child link="Joint_link1.1" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_link2">
+    <inertial>
+      <origin xyz="1.379710127197814e-06 -0.0002105614674934974 -0.1040969486504238" rpy="0 0 0" />
+      <mass value="0.0886" />
+      <inertia ixx="0.0003492513250668892" ixy="1.183503432391437e-08" ixz="-3.102721329142259e-08" iyy="0.0003541405985847356" iyz="-1.585049068873203e-06" izz="2.38857470326929e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link2" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_link1.1" />
+    <child link="Joint_link2" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="5" velocity="0" />
+    <dynamics damping="2.5" friction="1" />
+  </joint>
+  <link name="Joint_link2.2">
+    <inertial>
+      <origin xyz="-2.494345681868419e-05 -1.330430866197707e-05 -0.01642863976148485" rpy="0 0 0" />
+      <mass value="0.244" />
+      <inertia ixx="7.202912368984172e-05" ixy="-1.509935166544564e-08" ixz="-1.56952440443657e-07" iyy="7.201276790881392e-05" iyz="-8.808397022857827e-08" izz="6.935774874833946e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link2.2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link2.2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link2.2" type="fixed">
+    <origin xyz="-5.9092E-05 -0.02755 -0.1933" rpy="1.5729 -1.5708 0" />
+    <parent link="Joint_link2" />
+    <child link="Joint_link2.2" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_link3">
+    <inertial>
+      <origin xyz="-0.02351525312031712 0.005106836176798234 -0.002445195163212324" rpy="0 0 0" />
+      <mass value="0.0238" />
+      <inertia ixx="1.169789730237804e-05" ixy="2.300075421328366e-06" ixz="-5.081516994106791e-06" iyy="2.051485563265066e-05" iyz="8.234683108537535e-07" izz="1.969338137427727e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link3" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_link2.2" />
+    <child link="Joint_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.356194490192345" upper="2.356194490192345" effort="5" velocity="0" />
+    <dynamics damping="2.5" friction="1" />
+  </joint>
+  <link name="Joint_link3.3">
+    <inertial>
+      <origin xyz="-1.397721002103234e-06 -2.823509938964633e-05 -0.01992860855931647" rpy="0 0 0" />
+      <mass value="0.244" />
+      <inertia ixx="7.203067014641236e-05" ixy="1.433947386424478e-08" ixz="-4.792173710979974e-09" iyy="7.201177623644367e-05" iyz="-1.799873889586625e-07" izz="6.935775544664387e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link3.3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link3.3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link3.3" type="fixed">
+    <origin xyz="-0.089 0.009 -0.027" rpy="-1.5708 -0.75876 1.5708" />
+    <parent link="Joint_link3" />
+    <child link="Joint_link3.3" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_link4">
+    <inertial>
+      <origin xyz="2.054204357685988e-06 -8.50069300539466e-06 0.05033389970634532" rpy="0 0 0" />
+      <mass value="0.0537" />
+      <inertia ixx="7.946731814866046e-05" ixy="6.092171682673765e-08" ixz="-4.070990537788674e-09" iyy="7.947037175902928e-05" iyz="-2.072156543523739e-08" izz="1.074890048380231e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link4.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link4" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_link3.3" />
+    <child link="Joint_link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="5" velocity="0" />
+    <dynamics damping="2.5" friction="1" />
+  </joint>
+  <link name="Joint_link5">
+    <inertial>
+      <origin xyz="2.150967935570899e-05 0.000124756140263118 0.140120854384473" rpy="0 0 0" />
+      <mass value="0.47" />
+      <inertia ixx="0.0002423205411156778" ixy="-2.486092133486513e-07" ixz="-3.254812329997502e-07" iyy="0.0002412422023405436" iyz="-1.865202186364284e-06" izz="0.0002088713512534628" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link5.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/right_arm_4dof/meshes/Joint_link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Joint_link5" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_link4" />
+    <child link="Joint_link5" />
+    <axis xyz="0 0 0" />
+  </joint>
+</robot>

@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from bench_msgs.srv import GetBenchOptions
 from rcl_interfaces.msg import SetParametersResult
 from rcl_interfaces.srv import SetParametersAtomically
 
@@ -117,6 +118,37 @@ def _all_absent() -> FakeSystemd:
     return FakeSystemd({unit: {'LoadState': 'not-found'} for unit in _UNITS})
 
 
+@pytest.mark.parametrize('catalog', ['empty', 'accessible', 'inaccessible'])
+def test_options_uses_simulation_catalog_without_starting_units(tmp_path, catalog):
+    systemd = _all_absent()
+    node = _shell(systemd)
+    populated = catalog != 'empty'
+    port = tmp_path / '测试串口'
+    if catalog == 'accessible':
+        port.touch()
+    can_interfaces = ([{'name': 'test_can', 'up': True, 'label': '测试 CAN'}]
+                      if populated else [])
+    serial_ports = ([{'path': str(port), 'label': '测试串口'}] if populated else [])
+    models = ['gazebo_arm', 'mujoco_arm'] if populated else []
+    mujoco_models = ['mujoco_arm'] if populated else []
+    node.simulation = SimulationProcessManager(
+        can_provider=lambda: can_interfaces,
+        serial_provider=lambda: serial_ports,
+        model_provider=lambda: models,
+        mujoco_model_provider=lambda: mujoco_models,
+        systemd=node._systemd)
+
+    response = node._on_options(None, GetBenchOptions.Response())
+
+    assert json.loads(response.can_interfaces_json) == can_interfaces
+    expected_ports = [{**entry, 'accessible': catalog == 'accessible'}
+                      for entry in serial_ports]
+    assert json.loads(response.serial_ports_json) == expected_ports
+    assert list(response.simulation_models) == models
+    assert list(response.mujoco_models) == mujoco_models
+    assert systemd.commands() == []
+
+
 # --- 快照形状（前端与 srv 的共同契约）---------------------------------------
 
 def test_snapshot_has_five_sections_and_no_log_key() -> None:
@@ -169,6 +201,7 @@ def test_feedback_tick_runs_even_without_status_subscribers() -> None:
     node.feedback.reconcile = lambda *args, **kwargs: reconciled.append((args, kwargs))
     node._tick()
     assert reconciled == [(('',), {'agent_running': False, 'simulation_running': False,
+                                   'firmware_simulation': False,
                                    'external_publishers': [], 'motor_ids': [], 'session_id': 0})]
 
 
@@ -554,6 +587,96 @@ def test_cleanup_releases_controller_handles_and_cancels_pending_without_stoppin
 
 
 # --- 反馈发布者归属 ---------------------------------------------------------
+
+@pytest.mark.parametrize('backend,publishers,starts_control', [
+    ('mujoco', ['mujoco_effort_bridge'], True),
+    ('gazebo', ['joint_state_broadcaster'], True),
+    ('mujoco', ['mujoco_effort_bridge', 'mujoco_effort_bridge'], False),
+    ('mujoco', ['mujoco_effort_bridge', 'external_joint_source'], False),
+    ('mujoco', ['joint_state_broadcaster'], False),
+])
+def test_hil_uses_session_model_and_only_excludes_its_single_publisher(backend, publishers, starts_control):
+    from types import SimpleNamespace
+    systemd = _all_absent()
+    node = _shell(systemd)
+    node.simulation.status = lambda: {'state': 'running', 'config': {
+        'controller_mode': 'firmware', 'backend': backend, 'model': 'sim_arm'}}
+    node._feedback_inventory.current = lambda: ([1], 100)
+    node.feedback._validate = lambda _: SimpleNamespace(
+        actuator_ids={'m1': 1}, groups=[SimpleNamespace(actuators=['m1'])])
+    node.agent.status = lambda: {'state': 'running'}
+    node.get_parameter = lambda _name: SimpleNamespace(value='different_view_model')
+    node.get_publishers_info_by_topic = lambda _topic: [
+        SimpleNamespace(node_name=name, node_namespace='/') for name in publishers]
+    node._tick()
+    starts = [c for c in systemd.commands() if c[0] == 'systemd-run']
+    assert bool(starts) == starts_control
+    assert node.feedback.status()['source'] == 'simulation'
+    assert node.feedback.status()['desired_model'] == 'sim_arm'
+    if starts:
+        assert 'model:=sim_arm' in starts[0]
+        assert 'publish_joint_states:=false' in starts[0]
+        assert 'start_controllers:=false' in starts[0]
+
+
+def test_stop_hil_closes_host_control_before_physics_and_motor_backend():
+    node = _shell(_all_absent())
+    order = []
+    node.feedback.stop = lambda: order.append('host')
+    node.simulation.status = lambda: {'state': 'running', 'config': {'controller_mode': 'firmware'}}
+    node.simulation.stop = lambda: order.append('physics')
+    node.motor_backend.status = lambda: {'state': 'running', 'auto_started': True}
+    node.motor_backend.stop = lambda: order.append('backend')
+    node._on_stop_simulation(None, _Response())
+    assert order == ['host', 'physics', 'backend']
+
+
+@pytest.mark.parametrize('publisher', ['workbench_control', 'firmware_topic_bridge'])
+def test_private_hil_session_rejects_global_host_feedback(publisher):
+    from types import SimpleNamespace
+    systemd = _all_absent()
+    systemd.properties[UNIT_FEEDBACK] = {
+        'LoadState': 'loaded', 'ActiveState': 'active',
+        'Environment': 'BENCH_FEEDBACK_MODEL=arm BENCH_CONTROL_EXECUTION=ros2_control '
+                       'BENCH_CONTROL_MOTORS=1 BENCH_MCU_SESSION=100 BENCH_FEEDBACK_PUBLISH=false'}
+    node = _shell(systemd)
+    node.feedback._validate = lambda _: SimpleNamespace(
+        actuator_ids={'m1': 1}, groups=[SimpleNamespace(actuators=['m1'])])
+    node.simulation.status = lambda: {'state': 'running', 'config': {
+        'controller_mode': 'firmware', 'backend': 'mujoco', 'model': 'arm'}}
+    node.agent.status = lambda: {'state': 'running'}
+    node._feedback_inventory.current = lambda: ([1], 100)
+    node.get_publishers_info_by_topic = lambda _topic: [
+        SimpleNamespace(node_name=name, node_namespace='/')
+        for name in ['mujoco_effort_bridge', publisher]]
+    node._tick()
+    assert node.feedback.status()['state'] == 'stopped'
+    assert ['systemctl', '--user', 'stop', UNIT_FEEDBACK] in systemd.commands()
+    assert not [c for c in systemd.commands() if c[0] == 'systemd-run']
+
+
+def test_failed_hil_start_keeps_stop_barrier_and_rolls_back_new_backend():
+    from bench_msgs.srv import StartSimulation
+    node = _shell(_all_absent())
+    order = []
+    backend_running = [False]
+    node.feedback.stop = lambda: order.append('host_stop')
+    node.motor_backend.status = lambda: {'state': 'running' if backend_running[0] else 'stopped'}
+    def start_backend(*args, **kwargs):
+        backend_running[0] = True
+        order.append('backend_start')
+    node.motor_backend.start = start_backend
+    node.motor_backend.stop = lambda: order.append('backend_stop')
+    def start_physics(_request):
+        order.append('physics_start')
+        raise RuntimeError('startup failed')
+    node.simulation.start = start_physics
+    request = StartSimulation.Request(backend='mujoco', controller_mode='firmware',
+        transport='socketcan', sim_interface='can0', model=_MODEL, physical_bus_isolated=True)
+    response = node._on_start_simulation(request, _Response())
+    assert not response.ok
+    assert order == ['backend_start', 'host_stop', 'physics_start', 'backend_stop']
+
 
 @pytest.mark.parametrize('publishers,managed,expected_external', [
     (['workbench_control'], True, False),

@@ -318,8 +318,6 @@ export async function loadModelJoints() {
 }
 
 // 默认模型与 robot_sim 的 launch 默认值保持一致（half_body_robot，四个 launch 都是它）。
-// 旧默认值（zhoubuguanjie_youbi_001 / chest_upper_00 / robot_all）对应的模型都已删除，
-// 留着会让臂视图默认 404。
 const DEFAULT_MODEL = 'half_body_robot';
 const MODEL_STORAGE_KEY = 'web_host.model';
 function readSavedModel() {

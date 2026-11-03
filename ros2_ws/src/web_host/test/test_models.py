@@ -223,6 +223,68 @@ def test_motor_library_exposes_gear_ratio_keyed_by_topology_model() -> None:
     assert lib['cerb_r58_101']['protocol'] == 'cerb'
 
 
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['without-hardware', 'stale-hardware-copy'])
+def test_motor_library_reads_robot_description(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    # 隔离 ament 索引，避免已有安装树或硬件包的旧副本掩盖型号库归属错误。
+    prefix = tmp_path / 'install'
+    index = prefix / 'share/ament_index/resource_index/packages'
+    index.mkdir(parents=True)
+    (index / 'robot_description').touch()
+    config = prefix / 'share/robot_description/config'
+    config.mkdir(parents=True)
+    (config / 'motor.yaml').write_text(
+        'motor_types:\n  demo:\n    protocol: cerb\n'
+        '    parameters: {gear_ratio: 101, rated_torque_nm: 20.0}\n', encoding='utf-8')
+    if hardware_installed:
+        (index / 'motor_hardware_interface').touch()
+        old_config = prefix / 'share/motor_hardware_interface/config'
+        old_config.mkdir(parents=True)
+        (old_config / 'motor.yaml').write_text(
+            'motor_types:\n  demo:\n    protocol: legacy\n'
+            '    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(prefix))
+
+    assert motor_library() == {
+        'demo': {'protocol': 'cerb', 'gear_ratio': 101, 'rated_torque_nm': 20.0}}
+
+
+@pytest.mark.parametrize('default_installed', [False, True],
+                         ids=['without-default', 'with-default'])
+def test_motor_library_explicit_root_wins(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_installed: bool) -> None:
+    if default_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'robot_description').touch()
+        config = tmp_path / 'share/robot_description/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  default:\n    parameters: {gear_ratio: 101}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    (tmp_path / 'motor.yaml').write_text(
+        'motor_types:\n  custom:\n    parameters: {gear_ratio: 30}\n', encoding='utf-8')
+
+    assert motor_library(tmp_path) == {'custom': {'protocol': 'custom', 'gear_ratio': 30}}
+
+
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['no-packages', 'hardware-only'])
+def test_motor_library_missing_package_is_empty(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    if hardware_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'motor_hardware_interface').touch()
+        config = tmp_path / 'share/motor_hardware_interface/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  legacy:\n    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    assert motor_library() == {}
+
+
 def test_motor_library_missing_root_is_empty(tmp_path: Path) -> None:
     """取不到型号库要退化成空表（页面不显示该列），不能抛。"""
     assert motor_library(tmp_path) == {}

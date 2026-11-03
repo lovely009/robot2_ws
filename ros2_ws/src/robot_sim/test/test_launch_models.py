@@ -62,6 +62,71 @@ def _package_share():
     return Path(get_package_share_directory("robot_description"))
 
 
+@pytest.mark.parametrize('backend', ['mujoco', 'gazebo'])
+@pytest.mark.parametrize('managed_control', [False, True])
+def test_simulation_includes_backend_from_sim_package(backend, managed_control, tmp_path, monkeypatch):
+    """模型包分离后，总启动入口仍须从 robot_sim 加载被控对象 launch。"""
+    from ament_index_python.packages import get_package_share_directory
+    from launch.actions import IncludeLaunchDescription
+
+    spec = importlib.util.spec_from_file_location('simulation_launch', LAUNCH_DIR / 'simulation.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    context = LaunchContext()
+    context.launch_configurations.update({
+        'backend': backend, 'model': 'half_body_robot',
+        'controller_mode': 'firmware', 'transport': 'socketcan',
+        'sim_interface': 'test_can', 'start_fdcan_sim': 'false',
+        'start_web_host': 'false', 'start_micro_ros_agent': 'false',
+        'start_host_control': 'false' if managed_control else 'true',
+    })
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    monkeypatch.setattr(module, '_validate_socketcan_interface', lambda interface: 'can')
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+
+    actions = module.launch_simulation(context)
+    includes = [action for action in actions if isinstance(action, IncludeLaunchDescription)]
+    assert includes
+    source = includes[0].launch_description_source
+    source.get_launch_description(context)
+    expected = Path(get_package_share_directory('robot_sim')) / 'launch' / f'{backend}.launch.py'
+    assert source.location == str(expected)
+    assert len(includes) == (1 if managed_control else 2)
+
+    from launch.actions import OpaqueFunction
+    from launch.events import Shutdown
+    for _ in range(2):
+        cleanup = actions[-1].event_handler.handle(Shutdown(reason='test'), context)
+        assert all(isinstance(action, OpaqueFunction) for action in cleanup)
+        for action in cleanup:
+            action.execute(context)
+    assert not runtime.exists()
+
+
+def test_mujoco_cleanup_accepts_repeated_shutdown(tmp_path, monkeypatch):
+    from launch.actions import OpaqueFunction
+    from launch.events import Shutdown
+    spec = importlib.util.spec_from_file_location('mujoco_launch', LAUNCH_DIR / 'mujoco.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _entities, context = _execute(LAUNCH_DIR / 'mujoco.launch.py')
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+    actions = module._launch_setup(context)
+    assert (runtime / 'bridge.yaml').is_file()
+    for _ in range(2):
+        cleanup = actions[-1].event_handler.handle(Shutdown(reason='test'), context)
+        assert all(isinstance(action, OpaqueFunction) for action in cleanup)
+        for action in cleanup:
+            action.execute(context)
+    assert not runtime.exists()
+
+
 def _robot_description_command(entities, context):
     """取出 robot_state_publisher 的 robot_description 命令串（运行期求值）。"""
     for action in entities:

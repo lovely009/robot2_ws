@@ -205,7 +205,7 @@ def main():
     parser.add_argument('--output', required=True, help='New .npz output path; existing files are refused')
     args = parser.parse_args()
     if args.urdf is None:
-        args.urdf = str(Path(get_package_share_directory('robot_sim')) /
+        args.urdf = str(Path(get_package_share_directory('robot_description')) /
                         'models/half_body_robot/urdf/half_body_robot.urdf')
     output = Path(args.output)
     report_path = output.with_suffix('.json')

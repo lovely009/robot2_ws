@@ -1156,7 +1156,7 @@ class CanMotorSim:
             else:
                 print(f"[sim] 未读到 CANable V 响应；回退 Y{self.data_bitrate_index}，"
                       "如仍 ACK error 请显式指定 --data-bitrate-index")
-        # 默认与 motor_drive SerialSlcanTransport 同一序列（150ms 间隔）；
+        # CANable SLCAN 配置命令按 150 ms 间隔发送；
         # 非上游 CANable2 固件可用 CLI 覆盖其 Y 索引。
         for cmd in slcan_config_commands(self.data_bitrate_index):
             self._write(cmd, drop_ok=False)

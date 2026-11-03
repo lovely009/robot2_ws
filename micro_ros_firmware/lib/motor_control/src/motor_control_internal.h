@@ -36,6 +36,7 @@ typedef struct {
                                    // OFFLINE 判定输入）
 
   bool has_target;
+  bool fresh_target_pending; // admitted at 1ms, emitted only at the 200Hz boundary
   float target_position_rad;
   float target_velocity_rad_s;
   float target_effort_nm;
@@ -183,6 +184,7 @@ struct motor_control_context {
   bool have_snapshot;
   uint32_t last_snapshot_tick_ms;
   uint32_t last_snapshot_sequence;
+  uint32_t snapshot_deadline_tick_ms;
   bool snapshot_soft_stop_active; // 30ms 级联已触发（去重）
   bool snapshot_disable_done;     // 100ms 级联已触发（去重）
 
@@ -193,6 +195,7 @@ struct motor_control_context {
   // 静态放入 RAM_D1 .bss；该表还传递跨消息分段的边界速度，不可逐段重算。
   float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
   bool trajectory_active;
+  bool trajectory_agent_mode; // 新协议要求任一目标失去授权/100ms反馈即整条中止
   uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基
   uint32_t trajectory_accepted_count;
   uint32_t trajectory_rejected_count;
@@ -202,6 +205,9 @@ struct motor_control_context {
   // 待发送帧缓冲（collect_tx 消费；满则丢弃并计数）。
   motor_protocol_tx_frame_t tx_pending[MOTOR_CONTROL_MAX_TX_PENDING];
   size_t tx_count;
+  // 停机时锁存；任务层先取消下游同槽旧 P0/P1，再路由新的安全帧。
+  uint64_t tx_cancel_pending;
+  uint64_t zero_tx_cancel_pending; // 只取消设零 P2，不能吞掉尚未送达的安全 P0。
   uint32_t tx_dropped_count;
   uint32_t p0_retry_count; // P0 帧因缓冲全满而挂起重试的次数（诊断可见）
 
@@ -234,7 +240,9 @@ static inline size_t motor_control_entry_index(
 // dev_init 状态机、上电回读与 device_param_report 仍生效。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {
-  return entry != NULL;
+  return entry != NULL && (entry->adapter != &motor_protocol_cerb_adapter ||
+      ((entry->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX)) &&
+       entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] > 0U));
 }
 
 // 顺序确定化选择器：取下一个「未输出且 motor_id 最小」表项并在 taken

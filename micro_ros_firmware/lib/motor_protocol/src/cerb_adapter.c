@@ -47,6 +47,8 @@
 // 0x2541：0=CW、1=CCW，仅改驱动力矩方向，不改位置坐标系、零点或限位。
 // 警告：翻向可能使位置环正反馈，使能后向远离目标的方向运动。
 #define CERB_OBJ_MOTION_DIR 0x2541U
+#define CERB_OBJ_T_MAX 0x2546U
+#define CERB_OBJ_NODE_ID 0x2530U
 
 // 位置限位字典范围（0x607D:01/:02 均为 -32767~32768 cnt，默认 -32767/32768）：
 // -π rad 折算是 -32768，比字典下限低 1 cnt，写下去可能被设备拒绝，故按字典钳。
@@ -389,6 +391,8 @@ enum {
   CERB_VALUE_CURRENT,    // 关节侧 N·m → 峰值电流 mA
   CERB_VALUE_PASSTHROUGH, // 读：原值即 SI（安全开关/方向，无单位换算）
   CERB_VALUE_SAFETY_RAW,  // 写/读：0x2650:00 原值（0=保护开，1=关），不换算
+  CERB_VALUE_T_MAX_RAW,
+  CERB_VALUE_NODE_ID_RAW,
   CERB_VALUE_DIRECTION_RAW, // 写/读：0x2541:00 原值（0=CW，1=CCW），不换算
 };
 
@@ -446,7 +450,7 @@ static const cerb_stage_desc_t kStagesClearFault[1] = {
     0U, 0U },
 };
 
-static const cerb_stage_desc_t kStagesRefresh[6] = {
+static const cerb_stage_desc_t kStagesRefresh[8] = {
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_LOWER,
       MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, CERB_VALUE_POS_LOWER),
   CERB_DESC_READ(CERB_OBJ_POS_LIMIT, CERB_SUB_POS_UPPER,
@@ -460,6 +464,10 @@ static const cerb_stage_desc_t kStagesRefresh[6] = {
       MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, CERB_VALUE_PASSTHROUGH),
   CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_PASSTHROUGH),
+  CERB_DESC_READ(CERB_OBJ_T_MAX, CERB_SUB_DEFAULT,
+      MOTOR_PROTOCOL_PARAM_SLOT_T_MAX, CERB_VALUE_PASSTHROUGH),
+  CERB_DESC_READ(CERB_OBJ_NODE_ID, CERB_SUB_DEFAULT,
+      MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID, CERB_VALUE_PASSTHROUGH),
 };
 
 // 保护易失：写后读回核验，不发保存码。
@@ -477,6 +485,15 @@ static const cerb_stage_desc_t kStagesDirection[2] = {
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
   CERB_DESC_READ(CERB_OBJ_MOTION_DIR, CERB_SUB_DEFAULT,
       MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, CERB_VALUE_DIRECTION_RAW),
+};
+
+static const cerb_stage_desc_t kStagesTMax[2] = {
+  CERB_DESC_WRITE(CERB_OBJ_T_MAX, 0, MOTOR_PROTOCOL_PARAM_SLOT_T_MAX, CERB_VALUE_T_MAX_RAW),
+  CERB_DESC_READ(CERB_OBJ_T_MAX, 0, MOTOR_PROTOCOL_PARAM_SLOT_T_MAX, CERB_VALUE_T_MAX_RAW),
+};
+static const cerb_stage_desc_t kStagesNodeId[2] = {
+  CERB_DESC_WRITE(CERB_OBJ_NODE_ID, 0, MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID, CERB_VALUE_NODE_ID_RAW),
+  CERB_DESC_READ(CERB_OBJ_NODE_ID, 0, MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID, CERB_VALUE_NODE_ID_RAW),
 };
 
 // 保存按参数组（码 1）与限位组（码 4/2）执行；任一位置槽脏时保存上下限两项。
@@ -557,6 +574,10 @@ static const cerb_stage_desc_t *cerb_stage_table(
   case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
     *count = (uint8_t)(sizeof(kStagesDirection) / sizeof(kStagesDirection[0]));
     return kStagesDirection;
+  case MOTOR_PROTOCOL_CONFIG_SET_T_MAX:
+    *count = 2; return kStagesTMax;
+  case MOTOR_PROTOCOL_CONFIG_SET_NODE_ID:
+    *count = 2; return kStagesNodeId;
   case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH:
     return cerb_save_table(request, count);
   default:
@@ -598,6 +619,10 @@ static uint32_t cerb_stage_write_value(
     return request->safety_protect_raw;
   case CERB_VALUE_DIRECTION_RAW:
     return request->direction_raw;
+  case CERB_VALUE_T_MAX_RAW:
+    return request->t_max_raw;
+  case CERB_VALUE_NODE_ID_RAW:
+    return request->new_node_id;
   default:
     return 0U;
   }
@@ -622,6 +647,12 @@ static bool cerb_refresh_raw_to_si(uint8_t slot, uint32_t raw,
     *out = (float)motor_protocol_limit_ma_to_joint_nm(
         (double)motor_protocol_profile_limit_nm_per_amp(profile), raw);
     return true;
+  case MOTOR_PROTOCOL_PARAM_SLOT_T_MAX:
+    if (raw == 0 || raw > 16777215U) return false;
+    *out = (float)raw; return true;
+  case MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID:
+    if (raw < 1 || raw > 127U) return false;
+    *out = (float)raw; return true;
   case MOTOR_PROTOCOL_PARAM_SLOT_SAFETY:
   case MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION:
     // 原值透传：这两个是枚举/标志位，没有工程单位可换算。
@@ -896,8 +927,20 @@ static motor_protocol_stage_outcome_t cerb_config_on_response(
     return MOTOR_PROTOCOL_STAGE_ADVANCE;
   }
 
-  // 写事务依赖调用方预过滤 CAN-ID，此处仅检查长度与对象。
-  (void)sdo_response_id;
+  uint32_t expected_id = sdo_response_id;
+  if (request->kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
+    if (response->can_id != expected_id || response->dlc != 8U ||
+        response->data[1] != (uint8_t)(CERB_OBJ_SET_ZERO & 0xFFU) ||
+        response->data[2] != (uint8_t)(CERB_OBJ_SET_ZERO >> 8U) || response->data[3] != 0U) {
+      return MOTOR_PROTOCOL_STAGE_IGNORE;
+    }
+    return response->data[0] == CERB_SDO_SCS_WRITE_ACK ? MOTOR_PROTOCOL_STAGE_ADVANCE
+        : response->data[0] == CERB_SDO_CMD_ABORT ? MOTOR_PROTOCOL_STAGE_FAIL : MOTOR_PROTOCOL_STAGE_IGNORE;
+  }
+  if ((request->kind == MOTOR_PROTOCOL_CONFIG_SET_T_MAX || request->kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID) &&
+      response->can_id != expected_id && !(request->kind == MOTOR_PROTOCOL_CONFIG_SET_NODE_ID &&
+      stage == 0 && response->can_id == MOTOR_PROTOCOL_CERB_SDO_RESPONSE_ID_BASE + request->new_node_id))
+    return MOTOR_PROTOCOL_STAGE_IGNORE;
   if (response->dlc != 8U) {
     return MOTOR_PROTOCOL_STAGE_RETRY;
   }

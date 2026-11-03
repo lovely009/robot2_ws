@@ -806,7 +806,7 @@ static void test_cerb_refresh_params_transaction() {
   }
   motor_protocol_tx_frame_t frame = {};
   assert(!motor_protocol_cerb_adapter.config_encode_stage(
-      6U, profile, 4U, 0U, &req, &frame));
+      8U, profile, 4U, 0U, &req, &frame));
 
   uint8_t storage[64] = {0};
   motor_protocol_read_buffer_t read = {storage, sizeof(storage), 0U, false};
@@ -884,7 +884,8 @@ static void test_cerb_refresh_params_transaction() {
     const uint8_t expect_slots[MOTOR_PROTOCOL_PARAM_SLOT_COUNT] = {
       MOTOR_PROTOCOL_PARAM_SLOT_POS_MIN, MOTOR_PROTOCOL_PARAM_SLOT_POS_MAX,
       MOTOR_PROTOCOL_PARAM_SLOT_VEL_MAX, MOTOR_PROTOCOL_PARAM_SLOT_TORQUE_MAX,
-      MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION};
+      MOTOR_PROTOCOL_PARAM_SLOT_SAFETY, MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION,
+      MOTOR_PROTOCOL_PARAM_SLOT_T_MAX, MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID};
     for (uint8_t stage = 0U; stage < MOTOR_PROTOCOL_PARAM_SLOT_COUNT; ++stage) {
       motor_protocol_config_stage_info_t info = {};
       assert(motor_protocol_cerb_adapter.config_stage_info(stage, profile, &req, &info));
@@ -989,7 +990,7 @@ static void test_cerb_descriptor_table_bounds() {
   kinds[2].kind = MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT;
   kinds[3].kind = MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT;
   kinds[4].kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
-  const uint8_t counts[] = {1U, 4U, 2U, 2U, 6U};
+  const uint8_t counts[] = {1U, 4U, 2U, 2U, 8U};
 
   motor_protocol_tx_frame_t frame = {};
   motor_protocol_config_stage_info_t info = {};
@@ -1072,7 +1073,7 @@ static void test_cerb_set_zero_frames() {
   const uint8_t kWrong[8] = {0x60, 0x38, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
   memcpy(r.data, kWrong, 8U);
   assert(motor_protocol_cerb_adapter.config_on_response(0U, profile, &req, &r, nullptr) ==
-      MOTOR_PROTOCOL_STAGE_RETRY);
+      MOTOR_PROTOCOL_STAGE_IGNORE);
 }
 
 // 响应裁决：写等 ack、读回必须一致；设备 abort → FAIL；索引不符 → RETRY。
@@ -1177,7 +1178,7 @@ static void test_cerb_refresh_covers_safety_slots() {
   motor_protocol_config_request_t req = {};
   req.kind = MOTOR_PROTOCOL_CONFIG_REFRESH_PARAMS;
   req.motor_id = 1U;
-  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 6U);
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 8U);
 
   const uint8_t kReadSafety[8] = {0x40, 0x50, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t kReadDirection[8] = {0x40, 0x41, 0x25, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -1434,7 +1435,30 @@ static void test_adapter_registry_is_shared_by_runtime_and_batching() {
   assert(motor_protocol_adapter_registry(nullptr) == nullptr);
 }
 
+static void test_cerb_tmax_and_node_write_readback() {
+  const motor_protocol_model_profile_t *profile = nullptr;
+  assert(find_profile("cerb_r48_101", &profile));
+  motor_protocol_config_request_t req{};
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_T_MAX;
+  req.motor_id = 1; req.t_max_raw = 150;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 2);
+  motor_protocol_tx_frame_t frame{};
+  assert(motor_protocol_cerb_adapter.config_encode_stage(0, profile, 1, 0, &req, &frame));
+  const uint8_t expected[] = {0x23, 0x46, 0x25, 0, 150, 0, 0, 0};
+  assert(frame.can_id == 0x601 && memcmp(frame.data, expected, 8) == 0);
+  assert(motor_protocol_cerb_adapter.config_encode_stage(1, profile, 1, 0, &req, &frame));
+  assert(frame.data[0] == 0x40 && frame.data[1] == 0x46);
+  req.kind = MOTOR_PROTOCOL_CONFIG_SET_NODE_ID;
+  req.new_node_id = 7;
+  assert(motor_protocol_cerb_adapter.config_stage_count(profile, &req) == 2);
+  assert(motor_protocol_cerb_adapter.config_encode_stage(0, profile, 1, 0, &req, &frame));
+  assert(frame.can_id == 0x601 && frame.data[1] == 0x30 && frame.data[2] == 0x25 && frame.data[4] == 7);
+  assert(motor_protocol_cerb_adapter.config_encode_stage(1, profile, 1, 0, &req, &frame));
+  assert(frame.can_id == 0x601 && frame.data[0] == 0x40);
+}
+
 int main() {
+  test_cerb_tmax_and_node_write_readback();
   test_vaxor_match_rx_frame();
   test_vaxor_decode_reply_converts_si();
   test_vaxor_decode_status_frame();

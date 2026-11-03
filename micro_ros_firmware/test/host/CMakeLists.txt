@@ -5,6 +5,7 @@ enable_testing()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include_directories(../../lib/firmware_config/include)
 
@@ -70,11 +71,6 @@ target_include_directories(fw_motor_tx_router PUBLIC
 target_link_libraries(fw_motor_tx_router PUBLIC
   fw_can_tx_scheduler fw_adapters fw_motor_protocol)
 
-add_library(fw_save_transaction OBJECT
-  ../../lib/save_transaction/src/save_transaction.c)
-target_include_directories(fw_save_transaction PUBLIC
-  ../../lib/save_transaction/include)
-
 add_library(fw_imu_snapshot OBJECT
   ../../lib/imu/src/imu_snapshot.c)
 target_include_directories(fw_imu_snapshot PUBLIC ../../lib/imu/include)
@@ -94,25 +90,24 @@ add_library(fw_param_store OBJECT
   ../../lib/param_store/src/param_store_blob.c
   ../../lib/param_store/src/param_field.c)
 
-# storage 投影纯 C（lib/storage_projection；无 Arduino/RTOS 依赖）
-add_library(fw_storage_projection OBJECT
-  ../../lib/storage_projection/src/storage_projection.c)
+target_include_directories(fw_param_store PUBLIC
+  ../../lib/param_store/include)
+
+
+add_library(fw_storage_projection OBJECT ../../lib/storage_projection/src/storage_projection.c)
 target_include_directories(fw_storage_projection PUBLIC
   ../../lib/storage_projection/include ../../include ../../lib/param_store/include
   ../../lib/motor_control/include ../../lib/motor_protocol/include)
 target_link_libraries(fw_storage_projection PUBLIC fw_param_store)
-target_include_directories(fw_param_store PUBLIC
-  ../../lib/param_store/include)
-
-add_library(fw_w25_geometry OBJECT
-  ../../lib/w25q64/src/w25q64_geometry.c)
-target_include_directories(fw_w25_geometry PUBLIC ../../lib/w25q64/include)
 
 # 定点编解码纯逻辑（lib/wire_codec；无 ROS 依赖，host 可直编）
 add_library(fw_wire_codec OBJECT
   ../../lib/wire_codec/src/wire_codec.c)
 target_include_directories(fw_wire_codec PUBLIC
   ../../lib/wire_codec/include)
+
+add_library(fw_control_lease OBJECT ../../lib/control_lease/src/control_lease.c)
+target_include_directories(fw_control_lease PUBLIC ../../lib/control_lease/include)
 
 # 声明一个 host 测试目标：SOURCES 测试自身源文件，OBLIBS 依赖的固件 OBJECT
 # 库，INCLUDES 额外包含目录，DEFINES 编译宏（如 led 的 HOST_TEST）。
@@ -134,9 +129,30 @@ function(fw_host_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_library(fw_info_page OBJECT ../../lib/info_page/src/info_page.cpp)
+target_include_directories(fw_info_page PUBLIC ../../lib/info_page/include)
+target_link_libraries(fw_info_page PUBLIC fw_motor_control fw_config_transaction)
+fw_host_test(test_info_page SOURCES test_info_page.cpp OBLIBS fw_info_page)
+
+add_library(fw_agent_protocol OBJECT
+  ../../lib/agent_protocol/src/agent_protocol.c
+  ../../lib/agent_protocol/src/agent_control_gate.c)
+target_include_directories(fw_agent_protocol PUBLIC ../../lib/agent_protocol/include)
+target_link_libraries(fw_agent_protocol PUBLIC fw_control_lease fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
+fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
+  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_control_lease
+  INCLUDES ../../lib/motor_control/src)
+fw_host_test(test_agent_liveness SOURCES test_agent_liveness.cpp
+  INCLUDES ../../lib/agent_protocol/include)
+
 fw_host_test(test_motor_protocol
   SOURCES test_motor_protocol.cpp
   OBLIBS fw_motor_protocol)
+
+fw_host_test(test_control_lease
+  SOURCES test_control_lease.cpp
+  OBLIBS fw_control_lease fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
 
 fw_host_test(test_motor_protocol_adapter
   SOURCES test_motor_protocol_adapter.cpp
@@ -149,7 +165,7 @@ fw_host_test(test_protocol_family_isolation
 
 fw_host_test(test_motor_control
   SOURCES test_motor_control.cpp
-  OBLIBS fw_motor_control fw_adapters fw_motor_protocol
+  OBLIBS fw_motor_control fw_adapters fw_motor_protocol fw_config_transaction
   # 白盒：直读 ctx->entries 等内部布局（internal.h 不向 app 导出）
   INCLUDES ../../lib/motor_control/src)
 
@@ -187,10 +203,23 @@ fw_host_test(test_motor_tx_router
   OBLIBS fw_motor_tx_router fw_can_tx_scheduler fw_adapters fw_motor_protocol
   INCLUDES ../../lib/motor_tx_router/include)
 
-fw_host_test(test_save_transaction
-  SOURCES test_save_transaction.cpp
-  OBLIBS fw_save_transaction
-  INCLUDES ../../lib/save_transaction/include)
+# 跨层停机回归：真实内核、协议适配器、调度器及 CERB 聚合器共同执行。
+fw_host_test(test_stop_tx
+  SOURCES test_stop_tx.cpp
+  OBLIBS fw_motor_control fw_motor_tx_router fw_can_tx_scheduler
+    fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
+
+fw_host_test(test_37_axis_schedule
+  SOURCES test_37_axis_schedule.cpp
+  OBLIBS fw_motor_control fw_motor_tx_router fw_can_tx_scheduler
+    fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
+
+
+add_library(fw_clock_health OBJECT ../../lib/clock_health/src/clock_health.c)
+target_include_directories(fw_clock_health PUBLIC ../../lib/clock_health/include)
+fw_host_test(test_clock_health SOURCES test_clock_health.cpp OBLIBS fw_clock_health)
 
 fw_host_test(test_imu_snapshot
   SOURCES test_imu_snapshot.cpp
@@ -208,14 +237,7 @@ fw_host_test(test_bmi088_register_config
   SOURCES test_bmi088_register_config.cpp
   INCLUDES ../../lib/imu/include)
 
-fw_host_test(test_param_store
-  SOURCES test_param_store.cpp
-  OBLIBS fw_param_store
-  INCLUDES ../../lib/motor_protocol/include) # 用例直接引 motor_protocol_adapter.h
 
-fw_host_test(test_w25q64_geometry
-  SOURCES test_w25q64_geometry.cpp
-  OBLIBS fw_w25_geometry)
 
 # led_task.cpp 用 HOST_TEST 跳过 Arduino/FreeRTOS 段，host 只测颜色策略
 fw_host_test(test_led_status
@@ -223,10 +245,6 @@ fw_host_test(test_led_status
   INCLUDES ../../include
   DEFINES HOST_TEST=1)
 
-fw_host_test(test_storage_projection
-  SOURCES test_storage_projection.cpp
-  OBLIBS fw_storage_projection fw_param_store
-  INCLUDES ../../lib/motor_protocol/include)
 
 # heater.cpp 用 HOST_TEST 跳过 Arduino/HardwareTimer 段，host 只测纯 PID
 fw_host_test(test_heater_pid
@@ -264,13 +282,31 @@ add_test(
   NAME fdcan_motor_sim
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fdcan_motor_sim.py)
 
+add_library(fw_trajectory_transaction OBJECT
+  ../../lib/trajectory_transaction/src/trajectory_transaction.cpp)
+target_include_directories(fw_trajectory_transaction PUBLIC ../../lib/trajectory_transaction/include)
+target_link_libraries(fw_trajectory_transaction PUBLIC fw_motor_control fw_mailbox)
+fw_host_test(test_trajectory_transaction SOURCES test_trajectory_transaction.cpp
+  OBLIBS fw_trajectory_transaction fw_motor_control fw_adapters fw_motor_protocol
+  INCLUDES ../../lib/motor_control/src)
+
 add_library(fw_config_transaction OBJECT
   ../../lib/config_transaction/src/config_transaction.cpp)
 target_include_directories(fw_config_transaction PUBLIC ../../lib/config_transaction/include)
 fw_host_test(test_config_transaction
   SOURCES test_config_transaction.cpp
-  OBLIBS fw_config_transaction fw_save_transaction)
+  OBLIBS fw_config_transaction)
 
 add_library(fw_serial_write_budget OBJECT ../../lib/serial_write_budget/src/serial_write_budget.c)
 target_include_directories(fw_serial_write_budget PUBLIC ../../lib/serial_write_budget/include)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
+
+fw_host_test(test_param_store SOURCES test_param_store.cpp OBLIBS fw_param_store
+  INCLUDES ../../lib/motor_protocol/include)
+fw_host_test(test_storage_boot_projection SOURCES test_storage_boot_projection.cpp
+  OBLIBS fw_storage_projection fw_param_store)
+
+fw_host_test(test_storage_boot_loader
+  SOURCES test_storage_boot_loader.cpp ../../src/storage_boot.cpp
+  OBLIBS fw_storage_projection fw_param_store
+  INCLUDES ../../lib/w25q64/include ../../include)

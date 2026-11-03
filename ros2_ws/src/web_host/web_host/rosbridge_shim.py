@@ -21,6 +21,7 @@ import runpy
 from ament_index_python.packages import get_package_prefix
 
 import rosbridge_library.internal.message_conversion as message_conversion
+from rosbridge_library.internal import ros_loader
 
 
 def _patch_bounded_strings() -> None:
@@ -33,8 +34,35 @@ def _patch_bounded_strings() -> None:
     message_conversion.type_map['str'] = ('string', *extra)
 
 
+def _patch_standard_trajectory_action() -> None:
+    """Resolve generated Action services through rosbridge's service protocol.
+
+    ROS 2 places SendGoal/GetResult classes in ``package.action``. rosbridge's
+    service loader otherwise looks in ``package.srv`` even when discovery
+    reports an ``/action/`` type. Register only the standard trajectory action;
+    the payload and ROS services remain the official generated interfaces.
+    """
+    from control_msgs.action import FollowJointTrajectory
+
+    services = (FollowJointTrajectory.Impl.SendGoalService,
+                FollowJointTrajectory.Impl.GetResultService)
+    messages = [FollowJointTrajectory.Goal, FollowJointTrajectory.Result,
+                FollowJointTrajectory.Feedback,
+                FollowJointTrajectory.Impl.FeedbackMessage]
+    with ros_loader._srvs_lock:
+        for service in services:
+            for middle in ('/', '/action/'):
+                ros_loader._loaded_srvs['control_msgs' + middle + service.__name__] = service
+            messages.extend((service.Request, service.Response))
+    with ros_loader._msgs_lock:
+        for message in messages:
+            for middle in ('/', '/action/'):
+                ros_loader._loaded_msgs['control_msgs' + middle + message.__name__] = message
+
+
 def main(args=None) -> None:
     _patch_bounded_strings()
+    _patch_standard_trajectory_action()
     script = os.path.join(
         get_package_prefix('rosbridge_server'),
         'lib', 'rosbridge_server', 'rosbridge_websocket')

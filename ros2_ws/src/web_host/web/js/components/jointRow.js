@@ -1,12 +1,12 @@
 import { store, MODEL, selectGroups, selectJoint } from '../core/store.js';
 import { fmt, ageText } from '../core/format.js';
-import { getJointLimits, saveJointLimit } from '../core/joint_limits.js';
+import { getJointLimits, saveJointLimits } from '../core/joint_limits.js';
 import { createLatestTargetSender } from '../core/joint_control.js';
 import { getConnectionGeneration } from '../core/ros.js';
 
 export const STALE_MS = 1500;
 
-export function createJointRow(joint, {send, sendError}) {
+export function createJointRow(joint, {send, sendError, syncLimits}) {
   const model = MODEL;
   const unit = joint.type === 'prismatic' ? 'm' : 'rad';
   const element = document.createElement('li');
@@ -25,7 +25,7 @@ export function createJointRow(joint, {send, sendError}) {
   slider.setAttribute('aria-label', `${joint.name} 目标 ${unit}`);
   const target = element.querySelector('.joint-target-value');
   const message = element.querySelector('.joint-message');
-  let draft = null, editing = null, result = '', editError = '', disposed = false;
+  let draft = null, editing = null, saving = false, result = '', editError = '', disposed = false, boundsKey = '';
   const groups = () => store.modelTransmissions.groups.filter(g => g.joints.includes(joint.name));
   const select = () => {selectJoint(joint.name);selectGroups(groups().map(g => g.name));};
   element.addEventListener('click', event => {
@@ -52,25 +52,35 @@ export function createJointRow(joint, {send, sendError}) {
     const label = `${joint.name} ${side === 'lower' ? '下限' : '上限'} ${unit}`;
     button.setAttribute('aria-label', label);
     editor.setAttribute('aria-label', `编辑 ${label}`);
-    button.title = '双击编辑软限位；Enter 或离开输入框保存，Esc 取消';
+    button.title = '单击编辑软限位；Enter 或离开输入框保存，Esc 取消；仅约束后续目标';
     const begin = () => {
-      if (editing) return;
-      editing = side; editError = '';
-      const bounds = getJointLimits(model, joint);
+      if (editing || saving) return;
+      editing = side; editError = '';draft = null;result = '';sender.cancel();select();
+      const bounds = getJointLimits(store, model, joint);
       editor.value = bounds[side] === null ? '' : String(bounds[side]);
       button.hidden = true; editor.hidden = false;editor.focus();editor.select();
     };
     const close = () => {editing = null;button.hidden = false;editor.hidden = true;};
-    const commit = () => {
-      if (disposed || model !== MODEL || editing !== side) return;
+    const commit = async () => {
+      if (disposed || model !== MODEL || editing !== side || saving) return;
       try {
         if (!editor.value.trim()) throw new Error('软限位不能为空');
-        saveJointLimit(model, joint, side, Number(editor.value));
-        close(); editError = ''; result = '软限位已保存';
-      } catch (error) {editError = String(error.message || error);}
-      render();
+        saving = true; editor.disabled = true; sender.cancel();
+        const confirmation = await syncLimits(joint, side, Number(editor.value));
+        if (disposed || model !== MODEL) return;
+        const bounds = getJointLimits(store, model, joint);
+        close(); editError = ''; result = confirmation;
+        try {saveJointLimits(model, joint, bounds);} catch (error) {
+          editError = `主机限位已生效，本地记录未保存：${error.message}`;
+        }
+      } catch (error) {
+        if (!disposed && model === MODEL) editError = String(error.message || error);
+      } finally {
+        saving = false; editor.disabled = false;
+        if (!disposed) render();
+      }
     };
-    button.addEventListener('dblclick', begin);
+    button.addEventListener('click', begin);
     button.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === 'F2') {event.preventDefault();begin();}
     });
@@ -93,12 +103,15 @@ export function createJointRow(joint, {send, sendError}) {
     element.querySelector('.jpos').title = `实际位置 ${unit}`;
     element.querySelector('.jstate').textContent = reading ? ageText(age) : '无反馈';
     element.querySelector('.jstate').classList.toggle('warn', age >= STALE_MS);
-    const bounds = getJointLimits(model, joint);
+    const bounds = getJointLimits(store, model, joint);
+    const nextBounds = JSON.stringify([bounds.lower,bounds.upper]);
+    if (boundsKey !== nextBounds) {boundsKey=nextBounds;sender.cancel();draft=null;result='';}
     const available = bounds.lower !== null && bounds.upper !== null && !bounds.error;
     for (const side of ['lower', 'upper']) {
       element.querySelector(`[data-bound="${side}"]`).textContent = bounds[side] === null ? '设置' : fmt(bounds[side], 3);
     }
-    const blocked = bounds.error || (!available ? '双击左右端设置软限位' : sendError(joint.name));
+    const blocked = (saving ? '正在同步关节限位…' : '') || bounds.error
+      || (!available ? '单击左右端设置软限位' : sendError(joint.name));
     slider.disabled = Boolean(blocked);
     if (blocked) sender.cancel();
     slider.title = blocked || `拖动连续发送目标 ${unit}（最高 20 Hz），松手提交最终位置`;
@@ -107,10 +120,13 @@ export function createJointRow(joint, {send, sendError}) {
     const value = draft ?? reading?.position;
     if (Number.isFinite(value) && available) {
       slider.value = String(Math.min(bounds.upper, Math.max(bounds.lower, value)));
+      if (draft !== null) draft = Number(slider.value);
     }
-    target.textContent = `目标 ${Number.isFinite(value) ? fmt(value, 3) : '--'} ${unit}`;
-    message.textContent = editError || result || (selected ? blocked : '');
-    message.classList.toggle('warn', Boolean(editError || (!result && blocked)));
+    target.textContent = `目标 ${Number.isFinite(draft) ? fmt(draft, 3) : '--'} ${unit}`;
+    const rejection = selected && store.commandStatus.data?.model === model
+      ? store.commandStatus.data.reject : '';
+    message.textContent = editError || (rejection ? `主机拒绝：${rejection}` : '') || result || (selected ? blocked : '');
+    message.classList.toggle('warn', Boolean(editError || rejection || (!result && blocked)));
   }
   return {element, render, cancel:()=>sender.cancel(), dispose() {
     disposed=true;editing=null;sender.dispose();

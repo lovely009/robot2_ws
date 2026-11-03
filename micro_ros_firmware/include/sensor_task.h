@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "imu.h"
+#include "imu_snapshot.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,8 @@ bool sensor_task_start(void);
 
 // 原子复制最新的完整 IMU 快照；尚无有效样本时返回 false。
 bool sensor_task_get_imu_snapshot(imu_data_t *out, uint32_t *sequence);
+bool sensor_task_get_imu_sample(imu_data_t *out, sensor_sample_metadata_t *metadata);
+bool sensor_task_get_temperature(float *out, sensor_sample_metadata_t *metadata);
 
 
 #ifdef __cplusplus

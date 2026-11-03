@@ -24,9 +24,24 @@ endif()
 
 rosidl_generate_interfaces(
   ${PROJECT_NAME}
+  # V3 固件与 Agent 纯 Topic 契约；旧类型仅供既有主机接口继续生成。
+  "msg/AgentWireContract.msg"
+  "msg/AgentCommand.msg"
+  "msg/AgentMotion.msg"
+  "msg/AgentTrajectoryRequest.msg"
+  "msg/AgentConfigRequest.msg"
+  "msg/AgentConfigResult.msg"
+  "msg/AgentTrajectoryReceipt.msg"
+  "msg/AgentTrajectoryState.msg"
+  "msg/AgentMotorStatus.msg"
+  "msg/AgentStatus.msg"
+  "msg/AgentDeviceInfo.msg"
+  "msg/AgentOperationDetail.msg"
+  "msg/AgentInfo.msg"
   # ID 化有界电机消息（ARD-0007 §15-20）
   "msg/MotorCommandTarget.msg"
   "msg/MotorCommandArray.msg"
+  "msg/ControlLease.msg"
   "msg/MotorMotionStateTarget.msg"
   "msg/MotorMotionStateArray.msg"
   "msg/MotorStatusTarget.msg"
@@ -64,6 +79,7 @@ rosidl_generate_interfaces(
   "msg/ConfigRequest.msg"
   "msg/ConfigResult.msg"
   "srv/ExecuteConfig.srv"
+  "srv/SubmitPolicy.srv"
   DEPENDENCIES std_msgs
 )
 

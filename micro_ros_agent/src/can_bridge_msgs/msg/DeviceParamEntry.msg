@@ -32,3 +32,7 @@ float32 dev_vel_limit
 float32 dev_torque_limit
 float32 dev_safety
 float32 dev_direction
+float32 rec_t_max
+float32 dev_t_max
+float32 rec_node_id
+float32 dev_node_id

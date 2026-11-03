@@ -5,18 +5,9 @@ import { PanelScheduler } from "./panel_scheduler";
 export const initialized = ref(false);
 export const startupError = ref("");
 export const notice = ref("");
-export interface CommandRecord {
-  t: number;
-  seq: number;
-  targets: { motor_id: number; position: number; velocity: number; effort: number }[];
-}
-export const commandHistory = shallowRef<CommandRecord[]>([]);
-function updateCommandHistory() {
-  commandHistory.value = modules.data.store.history.map((record: CommandRecord) => ({
-    ...record, targets: record.targets.map(target => ({ ...target })),
-  }));
-}
+export const configuredRosUrl = ref("");
 export const snapshot = shallowRef<WorkbenchSnapshot>({
+  firmwareConnectionKey: '',
   connected: false,
   connectionText: "未连接",
   agent: "stopped",
@@ -25,14 +16,14 @@ export const snapshot = shallowRef<WorkbenchSnapshot>({
   canStopAgent: false,
   model: "",
   selectedId: 0,
-  selectedName: "",
-  selectedState: "未知",
+  motors: [],
   total: 0,
   online: 0,
   active: 0,
   fault: 0,
   motionAt: null,
-  outputTopic: "",
+  communication: {link: '未连接', clock: '未知', authority: '未知', detail: ''},
+  gravity: {enabled: null, active: false, blocked: '等待主机状态', pending: false},
   session: "未获台架状态",
   mappingError: "",
 });
@@ -47,8 +38,8 @@ let modules: {
   agent: LegacyModule;
   device: LegacyModule;
   format: LegacyModule;
-  command: LegacyModule;
   actions: LegacyModule;
+  gravity: LegacyModule;
 };
 let starting: Promise<void> | undefined;
 let resolveReady: () => void;
@@ -61,9 +52,6 @@ const panelIds: PanelId[] = [
   "jointList",
   "arm",
   "readout",
-  "policy",
-  "command",
-  "feedforward",
   "deviceParams",
   "actionLibrary",
   "sim",
@@ -72,7 +60,7 @@ const panelIds: PanelId[] = [
   "imu",
 ];
 const mounted = new Set<PanelId>();
-const requiredPanels = new Set<PanelId>(["command", "policy", "deviceParams"]);
+const requiredPanels = new Set<PanelId>(["jointList", "deviceParams"]);
 let requiredPanelError = "";
 let resolvePanels: () => void;
 const panelsReady = new Promise<void>((resolve) => {
@@ -96,16 +84,16 @@ const scheduler = new PanelScheduler((id, error) => {
 });
 
 function updateSnapshot() {
-  const { data, format } = modules,
+  const { data } = modules,
     s = data.store;
   if (s.motionCount !== lastMotionCount) {
     lastMotionCount = s.motionCount;
     lastMotionAt = Date.now();
   }
   if (!s.conn.connected) lastMotionAt = null;
-  const row = s.motors.get(s.selectedId),
-    simulation = s.bench.simulation;
+  const simulation = s.bench.simulation;
   snapshot.value = {
+    firmwareConnectionKey: `${generation}:${s.configSessionId ?? 0}`,
     connected: s.conn.connected,
     connectionText: s.conn.text,
     agent: s.conn.agent,
@@ -114,15 +102,13 @@ function updateSnapshot() {
     canStopAgent: s.conn.canStop,
     model: data.MODEL,
     selectedId: s.selectedId,
-    selectedName: (s.modelTransmissions?.groups || [])
-      .filter((group: any) => group.motors.some((motor: any) => Number(motor.id) === s.selectedId))
-      .flatMap((group: any) => group.joints).join(" / ") || "",
-    selectedState:
-      (() => { const v = data.motorStateOf(s.selectedId);
-        return `${v.connection} | ${v.lifecycle} | ${v.execution} | ${v.health} | ${v.protocol}`; })(),
+    motors: [...new Set<number>([...s.motors.keys(), ...s.paramCache.keys()])]
+      .sort((a, b) => a - b)
+      .map(id => ({id, model: s.motors.get(id)?.topo?.model_name || ''})),
     ...data.countMotors(),
     motionAt: lastMotionAt,
-    outputTopic: s.commandStatus.data?.output_topic || "",
+    communication: modules.agent.describeAgentStatus(s),
+    gravity: modules.gravity.describeGravityControl(s, data.MODEL),
     session: simulation
       ? `仿真进程：${simulation.state || "未知"}${s.conn.agent === "running" ? " · Agent 运行中" : ""}`
       : s.conn.agent === "running"
@@ -185,7 +171,6 @@ function dirty(batch: Set<string>) {
     s.selectedId = s.motors.keys().next().value;
     batch.add(data.DIRTY.SELECTED);
   }
-  if (batch.has(data.DIRTY.HISTORY)) updateCommandHistory();
   updateSnapshot();
   scheduler.invalidate(batch);
 }
@@ -194,22 +179,28 @@ async function start() {
   if (starting) return starting;
   starting = (async () => {
     try {
-      const [response, data, ros, agent, device, format, command, actions] =
+      const [response, configuration, data, ros, agent, device, format, actions, gravity] =
         await Promise.all([
-          fetch("/index.html", { cache: "no-store" }),
+          fetch("/panel_templates.html", { cache: "no-store" }),
+          fetch("/api/runtime", { cache: "no-store" }),
           load("core/store"),
           load("core/ros"),
           load("core/agent"),
           load("core/device"),
           load("core/format"),
-          load("panels/command"),
           load("panels/actionLibrary"),
+          load("core/gravity_control"),
         ]);
       if (!response.ok)
         throw new Error(`面板模板请求失败：HTTP ${response.status}`);
       const html = await response.text();
       if (disposed) return;
-      modules = { data, ros, agent, device, format, command, actions };
+      modules = { data, ros, agent, device, format, actions, gravity };
+      if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
+      const runtimeConfig = await configuration.json();
+      if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;
+      ros.configureControl(runtimeConfig);
+      if (runtimeConfig.robot_model) data.setModel(runtimeConfig.robot_model);
       const documentSource = new DOMParser().parseFromString(html, "text/html");
       const templates = document.createElement("div");
       templates.hidden = true;
@@ -231,7 +222,6 @@ async function start() {
       await data.loadModelJoints();
       if (disposed) return;
       updateSnapshot();
-      updateCommandHistory();
       resolveReady();
       await panelsReady;
       if (disposed) return;
@@ -285,10 +275,7 @@ async function mountPanelContent(
     store: data.store,
     markDirty: data.markDirty,
     ui: {
-      selectMotor(id: number) {
-        data.store.selectedId = id;
-        data.markDirty(data.DIRTY.SELECTED);
-      },
+      selectMotor: runtime.selectMotor,
       setModel(name: string) {
         data.setModel(name);
       },
@@ -302,15 +289,7 @@ async function mountPanelContent(
   });
   const release = scheduler.add(id, instance, visible);
   scheduler.invalidate(new Set(Object.values(data.DIRTY) as string[]));
-  const observer = new ResizeObserver(() => {
-    if (visible()) {
-      window.dispatchEvent(new Event("resize"));
-      scheduler.invalidate(new Set(Object.values(data.DIRTY) as string[]));
-    }
-  });
-  observer.observe(root);
   return () => {
-    observer.disconnect();
     release();
     root.replaceChildren();
   };
@@ -319,14 +298,18 @@ async function mountPanelContent(
 export const runtime = {
   start,
   mountPanel,
-  clearCommandHistory() {
-    if (!modules || disposed) return;
-    modules.data.store.history.length = 0;
-    updateCommandHistory();
-    modules.data.markDirty(modules.data.DIRTY.HISTORY);
+  async setGravityEnabled(enabled: boolean) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    await modules.gravity.setGravityEnabled(enabled);
   },
-  selectedMotorModel(): string {
-    return modules?.data.store.motors.get(snapshot.value.selectedId)?.topo?.model_name || '';
+  async readFirmwareParameter(name: string) {
+    if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
+    return modules.device.readFirmwareParameter(name);
+  },
+  selectMotor(id: number) {
+    if (!modules || disposed) return;
+    modules.data.store.selectedId = id;
+    modules.data.markDirty(modules.data.DIRTY.SELECTED);
   },
   setNavigation(callback: (screen: string) => void) {
     navigation = callback;
@@ -359,10 +342,9 @@ export const runtime = {
   },
   stopMotion() {
     if (!initialized.value || !modules.ros.isConnected()) return false;
-    modules.actions.stopPlayback();
-    const sent = modules.command.sendStop();
+    const sent = modules.actions.stopAll();
     notice.value = sent
-      ? "已发送轨迹取消与全部软停请求；请核对设备反馈"
+      ? "已请求全部软停（停用运动控制器）；请核对设备反馈"
       : "停止请求未发送";
     return sent;
   },

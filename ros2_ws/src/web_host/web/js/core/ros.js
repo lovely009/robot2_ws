@@ -2,14 +2,18 @@
 // 数据写入 store 后 markDirty，由面板渲染；连接状态同步到 body.offline 以禁用写操作。
 import {
   store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus,
-  jointFeedbackMatchesModel,
-} from './store.js';
+  jointFeedbackMatchesModel, applyAgentWireStatus } from './store.js';
 import {
-  $, TOPICS, DOWNLINK_ROUTE, EVENT_NAMES, MOTOR_ID_NONE,
-  OVERLAY_TRAJECTORY_TOPIC, quatToEuler,
+  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler,
 } from './format.js';
 
 import { applyControlState, createControlStateCache } from './motor_state.js';
+let controlMode = 'bench';
+export function configureControl(configuration) {
+  if (!['readonly', 'bench'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
+  controlMode = configuration.control_mode;
+  store.runtimeMode = controlMode;
+}
 
 let ros = null;
 let connectionGeneration = 0;
@@ -47,7 +51,9 @@ function ingestConfigResult(message) {
   const requestId = Number(message.request_id);
   if (!Number.isInteger(requestId) || requestId <= 0) return;
   const previous = store.configResults.get(requestId);
-  if (previous && Number(previous.status) !== 0 && Number(message.status) === 0) return;
+  if (previous && String(previous.session_id) === sessionId
+      && (previous.intent_id || '') === (message.intent_id || '')
+      && Number(previous.status) !== 0 && Number(message.status) === 0) return;
   store.configResults.delete(requestId);
   store.configResults.set(requestId, result);
   while (store.configResults.size > CONFIG_RESULT_LIMIT) {
@@ -101,22 +107,47 @@ export function setConn(ok, text) {
 
 export function isConnected() { return store.conn.connected; }
 
-// 策略代数：跨面板共享的单调计数器（使能屏与动作库的「武装」共用同一序列）。
-// 固件的代数门是**跨页面持久**的：表项进 FAULT/OFFLINE/CONFIG_CONFLICT 时把当时
-// 的代数锁存下来，之后「enabled=true 且代数 <= 锁存值」一律拒绝（见
-// MotorPolicyArray.msg）。所以计数器不能从 0 起——刷新页面只把这一侧归零，固件
-// 那边记得的仍是上一轮的值，于是每一条「武装」都被静默拒（只有事件日志的
-// CONFIG_RESULT reason=2 能看出），表现为"播放完成但机构不动"。用启动时间垫高
-// 起点；判"是不是新意图"看的是它是否前进，而不是它等于几。
-let policyGeneration = (Date.now() & 0x7fffffff) >>> 0;
-
-export function nextPolicyGeneration() {
-  policyGeneration = (policyGeneration + 1) >>> 0;
-  return policyGeneration;
+// 浏览器仅转交人工意图；会话时钟、请求号与策略代数由主机分配。
+export async function submitPolicy(targets) {
+  if (!store.conn.connected || controlMode !== 'bench') throw new Error('未连接或当前页面只读，未提交使能');
+  if (!Array.isArray(targets) || !targets.length || targets.length > 48
+      || targets.some(target => !target || typeof target.enabled !== 'boolean')) throw new Error('使能目标无效');
+  const enabled = targets.some(target => target.enabled), cache = store.controlStates;
+  const age = Date.now() - cache.at;
+  if (enabled && (!cache.valid || !cache.seen || !cache.session || !cache.sourceTimeNs
+      || age < 0 || age > 100)) throw new Error('MCU 控制快照已过期，等待新反馈后重新使能');
+  const connection = connectionGeneration, session = cache.session || 0;
+  const intent={ids:targets.map(target=>target.motor_id),enabled,ticket:null,error:'',confirmed:false};
+  for (const id of intent.ids) store.policy.set(id,{...store.policy.get(id),intent});
+  markDirty(DIRTY.POLICY,DIRTY.STATUS);
+  try {
+    const ticket = await callService('/motor/submit_policy', 'can_bridge_msgs/srv/SubmitPolicy', {
+      session_id: session, source_time_ns: cache.sourceTimeNs || 0,
+      targets: targets.map(target => ({...target})),
+    });
+    if (!store.conn.connected || connection !== connectionGeneration
+        || (enabled && session !== store.controlStates.session)) throw new Error('连接或 MCU 会话已变化，使能请求失效');
+    if (intent.error) throw new Error(intent.error);
+    if (ticket?.accepted !== true) throw new Error(ticket?.reason || '主机拒绝使能请求');
+    const uint32 = value => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+    if (typeof ticket.intent_id !== 'string' || !ticket.intent_id
+        || !Number.isSafeInteger(ticket.session_id) || ticket.session_id<0
+        || !uint32(ticket.request_id) || !uint32(ticket.policy_generation)
+        || (enabled && (String(ticket.session_id) !== String(session)
+          || !ticket.request_id || !ticket.policy_generation))) throw new Error('主机使能票据无效');
+    intent.ticket=ticket;
+    return ticket;
+  } catch (error) {
+    intent.error=String(error.message || error);
+    throw error;
+  } finally {markDirty(DIRTY.POLICY,DIRTY.STATUS);}
 }
 
 export function pub(key, message) {
+  if (['policy', 'paramSet', 'firmwareConfig'].includes(key) ||
+      (key === 'sysCmd' && ![1, 2, 3, 4].includes(message.command))) return false;
   if (!store.conn.connected) return false;
+  if (controlMode === 'readonly') return false;
   ensurePublisher(key).publish(new ROSLIB.Message(message));
   return true;
 }
@@ -127,50 +158,13 @@ export function pub(key, message) {
 // “轨迹已完成但没有运动帧”的假成功。连接建立时先把三个下行发布端注册好，
 // 后续按钮/动作只发送已经存在的 publisher。
 export function ensurePublisher(key) {
+  if (controlMode === 'readonly' || key === 'policy') return null;
   if (!publishers[key]) {
     const t = TOPICS[key];
     publishers[key] = new ROSLIB.Topic({ros, name: t.name, messageType: t.type});
     publishers[key].advertise();
   }
   return publishers[key];
-}
-
-// ---- 下行接线：直连固件 ↔ 经重力前馈叠加（ADR 0013）------------------------
-// 切换是「改话题名 + 换发布者」一件事的两半：TOPICS 里那两个 name 是运行期可变的，
-// 而发布者在连接建立时就按旧名字 advertise 好了，只改 name 会让命令继续发到旧话题上
-// （rosbridge 侧一切正常，micro-ROS 侧没人收）。所以唯一改写点在这里，且两半一起做。
-//
-// 直连名以 TOPICS 里声明的为准；叠加名是叠加节点的输入话题（robot_dynamics 契约）。
-// 只列**页面自己发**的下行通道。命令不在其中：页面发的是设定值（固定话题），
-// 命令从哪条路出去由 bench_manager 改 command_streamer 的 output_topic 决定
-// （ADR 0014 决定 3），页面切不了、只能读 TOPICS.commandStatus 核对。
-const DOWNLINK = {
-  trajectory: {[DOWNLINK_ROUTE.DIRECT]: TOPICS.trajectory.name,
-    [DOWNLINK_ROUTE.OVERLAY]: OVERLAY_TRAJECTORY_TOPIC},
-};
-let downlinkRoute = DOWNLINK_ROUTE.DIRECT;
-
-export function getDownlinkRoute() { return downlinkRoute; }
-
-export function setDownlinkRoute(next) {
-  if (next !== DOWNLINK_ROUTE.DIRECT && next !== DOWNLINK_ROUTE.OVERLAY) {
-    throw new Error(`未知的下行接线：${next}`);
-  }
-  if (next === downlinkRoute) return downlinkRoute;
-  downlinkRoute = next;
-  for (const key of Object.keys(DOWNLINK)) TOPICS[key].name = DOWNLINK[key][next];
-  // 未连接时没有发布者要换（closeSocket 已清空），重连时 connect() 会按新名字建。
-  if (store.conn.connected) {
-    for (const key of Object.keys(DOWNLINK)) {
-      const old = publishers[key];
-      if (old) { try { old.unadvertise(); } catch (_e) { /* 连接已断，无需回收 */ } }
-      delete publishers[key];
-      // 立刻在新名字上 advertise，理由同上：等第一次 publish 才建会丢掉开头的命令。
-      ensurePublisher(key);
-    }
-  }
-  markDirty(DIRTY.CONN);
-  return downlinkRoute;
 }
 
 // roslibjs 不自动重连；连接中断后按 2 s 退避重试。
@@ -180,9 +174,11 @@ function resetSessionState() {
   clearConfigResults();
   store.motors.clear();
   store.controlStates = createControlStateCache();
+  store.agentWireStatus = null;
   store.paramCache.clear();
   store.tf.clear();
   store.sysStatus.seen = false;
+  store.firmwareReport = {seq: 0, at: 0, values: null, unsaved: false};
   store.conn.autoLoaded = false;
   store.conn.benchLoaded = false;
   for (const key of Object.keys(store.bench)) store.bench[key] = null;
@@ -190,6 +186,8 @@ function resetSessionState() {
   store.conn.agentDevice = '';
   store.conn.canStop = false;
   store.commandStatus = {last: 0, data: null};
+  store.traj.state = null;
+  store.traj.activeTrajectoryId = 0;
   store.jointStates.byName = {};
   store.jointStates.jointNames = [];
   store.transmissionStatus = {last: 0, data: null};
@@ -221,9 +219,7 @@ export function connect() {
     if (ros !== connection) return;
     setConn(true);
     subscribeAll();
-    // 重连后按**当前**接线重建发布者（setDownlinkRoute 只改了 TOPICS 与内存里的发布者，
-    // 断线时那份已被 closeSocket 清掉）。开关的落点不带状态，重连不会悄悄切回直连。
-    ['setpoint', 'trajectory', 'policy', 'paramSet', 'sysCmd'].forEach(ensurePublisher);
+    ['setpoint', 'trajectory', 'rawTrajectory', 'stop', 'sysCmd'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -262,7 +258,8 @@ function sub(key, cb) {
   const connection = ros;
   const t = TOPICS[key];
   const topic = new ROSLIB.Topic({
-    ros, name: t.name, messageType: t.type, throttle_rate: 0, queue_length: key === 'events' ? 64 : 1,
+    // 浏览器只保留最新观测；事件逐条传递，控制授权独立订阅。
+    ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : key === 'controlStates' ? 20 : 50, queue_length: key === 'events' ? 64 : 1,
   });
   topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);
@@ -271,7 +268,6 @@ function sub(key, cb) {
 function subscribeAll() {
   subs.forEach((s) => s.unsubscribe());
   subs = [];
-
   // 桥心跳与普通周期消息不同：late subscriber 必须拿到最后一帧，随后按 1 Hz 检查新鲜度。
   const statusConnection = ros;
   const statusTopic = new ROSLIB.Topic({
@@ -355,8 +351,7 @@ function subscribeAll() {
     markDirty(DIRTY.STATUS);
   });
 
-  // 轨迹执行状态（低频）：动作屏的窗口交棒（elapsed_ms 到达窗口时长）与
-  // 进度显示都读 store.traj.state；不在条目上做裁决，原样存最近一帧。
+  // 客户端将 JTC 结果映射成轨迹状态；completed 只在 action 成功终态为真。
   sub('trajectoryState', (m) => {
     store.traj.activeTrajectoryId = m.trajectory_id;
     store.traj.state = {
@@ -435,24 +430,22 @@ function subscribeAll() {
     markDirty(DIRTY.IMU);
   });
 
-  // 关节侧实测构型（HIL 下由 firmware_topic_bridge 从 motion_states 转出，
-  // 仿真下由 joint_state_broadcaster / MuJoCo 桥发布）。页面只用它的**新鲜度**：
-  // 叠加节点拿不到它就整帧直通，于是「开关亮着但没有补偿」不留任何痕迹。
+  // 主机控制栈的实测关节反馈，按模型身份与新鲜度接收。
   sub('jointStates', (m) => {
     if (!jointFeedbackMatchesModel()) return;
     const now = Date.now();
     const names = Array.isArray(m && m.name) ? m.name : [];
     const positions = Array.isArray(m && m.position) ? m.position : [];
     for (let i = 0; i < names.length; i++) {
-      const position = Number(positions[i]);
+      const position = positions[i];
       if (typeof names[i] === 'string' && Number.isFinite(position)) {
         store.jointStates.byName[names[i]] = {
           position,
-          velocity: Number(m.velocity?.[i]),
-          effort: Number(m.effort?.[i]),
+          velocity: Number.isFinite(m.velocity?.[i]) ? m.velocity[i] : NaN,
+          effort: Number.isFinite(m.effort?.[i]) ? m.effort[i] : NaN,
           at: now,
         };
-      }
+      } else if (typeof names[i] === 'string') delete store.jointStates.byName[names[i]];
     }
     if (names.length) store.jointStates.jointNames = [
       ...new Set(names.filter((name) => typeof name === 'string'))];
@@ -483,10 +476,10 @@ function subscribeAll() {
       const safety = (v) => (Number.isFinite(v) ? (v === 0 ? 1 : 0) : NaN);
       const rec = {pos_min: e.rec_pos_min, pos_max: e.rec_pos_max,
         vel_limit: e.rec_vel_limit, torque_limit: e.rec_torque_limit,
-        limit_protect: safety(e.rec_safety), direction: e.rec_direction};
+        limit_protect: safety(e.rec_safety), direction: e.rec_direction, t_max: e.rec_t_max, node_id: e.rec_node_id};
       const dev = {pos_min: e.dev_pos_min, pos_max: e.dev_pos_max,
         vel_limit: e.dev_vel_limit, torque_limit: e.dev_torque_limit,
-        limit_protect: safety(e.dev_safety), direction: e.dev_direction};
+        limit_protect: safety(e.dev_safety), direction: e.dev_direction, t_max: e.dev_t_max, node_id: e.dev_node_id};
       const pick = {};
       for (const f of Object.keys(rec)) {
         pick[f] = Number.isFinite(dev[f]) ? dev[f] : rec[f];
@@ -502,6 +495,11 @@ function subscribeAll() {
   // 系统状态（best-effort，5 Hz + 变化即发）。这是**电平**不是事件：last_error
   // 保持到下次错误，*_seq 仅供兼容观察，不关联具体配置请求。
   sub('sysStatus', (m) => {
+    if (m.firmware_values_valid && Array.isArray(m.firmware_values) && m.firmware_values.length === 6 &&
+        m.firmware_values.every(v => Number.isInteger(v) && v > 0 && v <= 1000)) {
+      store.firmwareReport = {seq: store.firmwareReport.seq + 1, at: Date.now(),
+        values: [...m.firmware_values], unsaved: !!m.firmware_unsaved};
+    }
     store.lastError = m.last_error;
     store.lastErrorMotor = m.last_error_motor === MOTOR_ID_NONE ? -1 : m.last_error_motor;
     store.sysStatus = {
@@ -511,6 +509,9 @@ function subscribeAll() {
     };
   });
 
+  sub('agentWireStatus', (m) => {
+    if (applyAgentWireStatus(store, m)) markDirty(DIRTY.CONN);
+  });
   sub('configResult', (m) => ingestConfigResult(m));
 
   // 台架状态（bench_manager，JSON 字符串）：仿真 / Agent / 电机后端三段的唯一
@@ -520,11 +521,10 @@ function subscribeAll() {
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 
-  // 命令节拍节点的状态：命令**当前实际发往**哪里（output_topic）。重力补偿开关的
-  // 改道是服务端做的，页面只有读它才知道接线有没有真的切过去。
+  // ros2_control 模型、模式、路由与错误。
   sub('commandStatus', (m) => {
     try { applyCommandStatus(JSON.parse(m.data)); }
-    catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
+    catch (_e) { applyCommandStatus(null); }
   });
 }
 
@@ -533,6 +533,9 @@ function subscribeAll() {
 // 调用方——bench 服务的 ok/error 字段由 core/bench.js 统一裁决）。
 export function callService(name, type, request, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
+    if (controlMode === 'readonly') {
+      reject(new Error('只读页面不开放控制或维护服务')); return;
+    }
     if (!ros || !store.conn.connected) {
       reject(new Error('未连接 rosbridge'));
       return;

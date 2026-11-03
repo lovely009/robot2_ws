@@ -37,7 +37,6 @@
 **/htmlcov/
 **/.coverage.*
 /ros2_ws/src/web_host/frontend/coverage/
-/ros2_ws/src/web_host/prototype/coverage/
 
 # Python 本地虚拟环境
 .venv/
@@ -81,8 +80,7 @@ venv/
 /ros2_ws/src/**/log/
 
 # Web 工作台前端开发产物
-node_modules/
-/ros2_ws/src/web_host/prototype/dist/
+node_modules
 /ros2_ws/src/web_host/web/workbench/
 /ros2_ws/src/web_host/frontend/test-results/
 /ros2_ws/src/web_host/frontend/playwright-report/

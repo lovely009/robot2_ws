@@ -16,7 +16,7 @@ target_include_directories(${PROJECT_NAME}_codec INTERFACE
 ament_target_dependencies(${PROJECT_NAME}_codec INTERFACE can_bridge_msgs)
 
 # 消息级编解码：依赖 codec 的标量换算，不依赖 rclcpp。
-add_library(${PROJECT_NAME}_messages src/messages.cpp)
+add_library(${PROJECT_NAME}_messages src/messages.cpp src/agent_messages.cpp)
 target_compile_features(${PROJECT_NAME}_messages PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME}_messages PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(${PROJECT_NAME}_messages PUBLIC
@@ -68,12 +68,30 @@ if(BUILD_TESTING)
   target_compile_options(test_low_state_assembler PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_low_state_assembler ${PROJECT_NAME}_messages)
 
+  ament_add_gtest(test_agent_messages test/test_agent_messages.cpp)
+  target_compile_features(test_agent_messages PRIVATE cxx_std_17)
+  target_link_libraries(test_agent_messages ${PROJECT_NAME}_messages)
+
   ament_add_gtest(test_bridge_node test/test_bridge_node.cpp
     APPEND_ENV ROS_LOCALHOST_ONLY=1)
   target_compile_features(test_bridge_node PRIVATE cxx_std_17)
   target_compile_options(test_bridge_node PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_bridge_node ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
   ament_target_dependencies(test_bridge_node rclcpp)
+
+  ament_add_gtest(test_control_lease test/test_control_lease.cpp
+    APPEND_ENV ROS_LOCALHOST_ONLY=1)
+  target_compile_features(test_control_lease PRIVATE cxx_std_17)
+  target_compile_options(test_control_lease PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_control_lease ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
+  ament_target_dependencies(test_control_lease rclcpp)
+
+  ament_add_gtest(test_submit_policy test/test_submit_policy.cpp
+    APPEND_ENV ROS_LOCALHOST_ONLY=1)
+  target_compile_features(test_submit_policy PRIVATE cxx_std_17)
+  target_compile_options(test_submit_policy PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(test_submit_policy ${PROJECT_NAME}_node ${PROJECT_NAME}_messages)
+  ament_target_dependencies(test_submit_policy rclcpp)
 endif()
 
 ament_package()

@@ -1,5 +1,6 @@
 """差动组的反馈新鲜度与成对轨迹；不启动 ROS 或硬件。"""
 from pathlib import Path
+import json
 
 import pytest
 from motor_hardware_interface.transmission_bridge import TransmissionBridge
@@ -71,3 +72,74 @@ def test_recovered_group_does_not_reuse_target_from_previous_feedback_epoch(tmp_
     _,flat,_=bridge.trajectory(['pitch'],[dict(t_ms=100,positions=[.1])],2.1)
     assert flat[0][2] == pytest.approx(.8)
     assert flat[1][2] == pytest.approx(.6)
+
+
+def _limited_bridge(tmp_path: Path) -> TransmissionBridge:
+    driver = tmp_path/'motor_driver.yaml'
+    driver.write_text('motor_hardware:\n  motors:\n    m2: {id: 2, joint: joint_link2}\n', encoding='utf-8')
+    urdf = tmp_path/'robot.urdf'
+    urdf.write_text('<robot name="arm"><joint name="joint_link2" type="revolute">'
+                    '<limit lower="-0.12" upper="0.14"/></joint></robot>', encoding='utf-8')
+    bridge = TransmissionBridge(str(driver), urdf_file=str(urdf))
+    bridge.update([dict(motor_id=2, position=0., velocity=0., effort=0., state_age_ms=0)], 1.)
+    return bridge
+
+
+def test_explicit_joint_limits_override_urdf_without_disabling_range_checks(tmp_path: Path) -> None:
+    bridge = _limited_bridge(tmp_path)
+    sample = [dict(t_ms=100, positions=[-.249])]
+    with pytest.raises(BridgeError, match='限位'):
+        bridge.trajectory(['joint_link2'], sample, 1.1)
+    limits = bridge.joint_limits_from_json(json.dumps({
+        'model': 'arm', 'joint_limits': {'joint_link2': {'lower': -.5, 'upper': .14}},
+    }), 'arm')
+    assert limits == {'joint_link2': (-.5, .14)}
+    _, flat, _ = bridge.trajectory(['joint_link2'], sample, 1.1, limits=limits)
+    assert flat == [(100, 2, -.249, 0., 0.)]
+    assert bridge.joint_limits == {'joint_link2': (-.12, .14)}
+    assert bridge.joint_limits_from_json('', 'arm') == bridge.joint_limits
+    assert bridge.joint_limits_from_json('{}', 'arm') == bridge.joint_limits
+    with pytest.raises(BridgeError, match='限位'):
+        bridge.trajectory(['joint_link2'], [dict(t_ms=100, positions=[-.501])], 1.1, limits=limits)
+    for boundary in (-.5, .14):
+        bridge.trajectory(['joint_link2'], [dict(t_ms=100, positions=[boundary])], 1.1, limits=limits)
+    with pytest.raises(BridgeError, match='限位'):
+        bridge.trajectory(['joint_link2'], sample, 1.1)
+
+
+@pytest.mark.parametrize('payload', [
+    '{bad', 'null', '[]', 'false', '{"joint_limits":{}}',
+    '{"model":"other","joint_limits":{}}',
+    '{"model":"arm","joint_limits":[],"extra":1}',
+    '{"model":"arm","joint_limits":{"unknown":{"lower":-1,"upper":1}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":null}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":false,"upper":1}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":0,"upper":0}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":1,"upper":0}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":"-.5","upper":1}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":NaN,"upper":1}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":-1,"upper":Infinity}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":-1}}}',
+    '{"model":"arm","joint_limits":{"joint_link2":{"lower":-1,"upper":1,"extra":0}}}',
+    json.dumps({'model': 'arm', 'joint_limits': {'joint_link2': {'lower': -1, 'upper': 10**1000}}}),
+])
+def test_invalid_joint_limit_overrides_do_not_change_defaults(tmp_path: Path, payload: str) -> None:
+    bridge = _limited_bridge(tmp_path)
+    with pytest.raises(BridgeError):
+        bridge.joint_limits_from_json(payload, 'arm')
+    assert bridge.joint_limits == {'joint_link2': (-.12, .14)}
+
+
+def test_override_keeps_unmodified_group_limits_and_actuator_wire_range(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.joint_limits = {'yaw': (-1., 1.), 'pitch': (-.1, .1)}
+    limits = bridge.joint_limits_from_json(json.dumps({
+        'model': 'arm', 'joint_limits': {'yaw': {'lower': -20., 'upper': 20.}},
+    }), 'arm')
+    assert limits['pitch'] == (-.1, .1)
+    bridge.update(_states(.3, .1), 1.)
+    with pytest.raises(BridgeError, match='限位'):
+        bridge.trajectory(['yaw', 'pitch'], [dict(t_ms=100, positions=[0., .2])], 1.1, limits=limits)
+    with pytest.raises(BridgeError, match='线上量程'):
+        bridge.trajectory(['yaw'], [dict(t_ms=100, positions=[13.])], 1.1, limits=limits)
+    assert not bridge.held

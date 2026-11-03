@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -216,14 +217,31 @@ void GravityFeedforwardOverlayNode::initialize(
 }
 
 bool GravityFeedforwardOverlayNode::joint_states_fresh() const {
-  if (joint_states_timeout_s_ <= 0.0) {
-    return false;  // 0 = 永远视为过期（A/B 对照用，输出等于输入）
-  }
-  if (!have_joint_states_) {
+  const auto & names = model_->joint_names();
+  if (names.empty()) {
     return false;
   }
-  return static_cast<double>(now().nanoseconds() - last_joint_states_ns_) * 1e-9 <=
-         joint_states_timeout_s_;
+  const int64_t now_ns = now().nanoseconds();
+  for (const std::string & name : names) {
+    if (!joint_state_fresh(name, now_ns)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool GravityFeedforwardOverlayNode::joint_state_fresh(
+    const std::string & name, int64_t now_ns) const {
+  if (joint_states_timeout_s_ <= 0.0) {
+    return false;  // 0 = 测量永远视为过期（快照 A/B 直通用）。
+  }
+  const auto measured = joint_state_stamps_ns_.find(name);
+  if (measured == joint_state_stamps_ns_.end()) {
+    return false;
+  }
+  const double age_s =
+      static_cast<double>(now_ns - measured->second) * 1e-9;
+  return age_s >= 0.0 && age_s <= joint_states_timeout_s_;
 }
 
 const std::size_t * GravityFeedforwardOverlayNode::torque_index_for(
@@ -255,17 +273,49 @@ void GravityFeedforwardOverlayNode::joint_state_callback(
                          message.name.size(), message.position.size());
     return;
   }
-  const std::vector<std::string> ignored =
-      model_->update_configuration(message.name, message.position);
-  if (!ignored.empty()) {
+  const int64_t now_ns = now().nanoseconds();
+  if (message.header.stamp.sec < 0 ||
+      message.header.stamp.nanosec >= 1000000000U) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleMs,
+                         "joint_states 的测量时间无效，本帧不参与构型更新");
+    return;
+  }
+  const int64_t stamped_ns =
+      static_cast<int64_t>(message.header.stamp.sec) * 1000000000LL +
+      message.header.stamp.nanosec;
+  // 零时间戳表示发布者未提供测量时刻，兼容此类消息时以接收时刻计龄。
+  const int64_t measured_ns = stamped_ns == 0 ? now_ns : stamped_ns;
+  if (measured_ns > now_ns) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleMs,
+                         "joint_states 的测量时间在未来，本帧不参与构型更新");
+    return;
+  }
+
+  std::vector<std::string> names;
+  std::vector<double> positions;
+  std::size_t ignored = 0;
+  for (std::size_t i = 0; i < message.name.size(); ++i) {
+    if (!model_->has_joint(message.name[i])) {
+      ++ignored;
+      continue;
+    }
+    if (!std::isfinite(message.position[i])) {
+      continue;  // 坏测量不污染模型，也不能续期该关节。
+    }
+    const auto previous = joint_state_stamps_ns_.find(message.name[i]);
+    if (previous != joint_state_stamps_ns_.end() &&
+        previous->second <= now_ns && measured_ns < previous->second) {
+      continue;  // 延迟到达的旧帧不能覆盖更新的构型。
+    }
+    names.push_back(message.name[i]);
+    positions.push_back(message.position[i]);
+    joint_state_stamps_ns_[message.name[i]] = measured_ns;
+  }
+  model_->update_configuration(names, positions);
+  if (ignored != 0) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleMs,
                          "joint_states 含模型外或非单自由度关节，已忽略 %zu 个",
-                         ignored.size());
-  }
-  // 整帧名字都没进模型时不刷新时间戳：否则会拿一份冻住的构型无限期喂 τ_g。
-  if (ignored.size() < message.name.size()) {
-    have_joint_states_ = true;
-    last_joint_states_ns_ = now().nanoseconds();
+                         ignored);
   }
 }
 
@@ -316,6 +366,25 @@ void GravityFeedforwardOverlayNode::trajectory_callback(
     points.push_back({message.points[i].time_from_start_ms,
                       message.points[i].motor_id,
                       message.points[i].position});
+  }
+  // 轨迹覆盖的关节由路点构型（含插值）预测，不要求实测反馈；其余关节仍要有
+  // 新鲜实测值，不能从 q_ 的旧值或初始 neutral 猜测。只有 target_id 而没有
+  // 有效路点的关节不会进入预测集合。
+  std::unordered_set<std::string> predicted_joints;
+  for (const TrajectoryPoint & point : points) {
+    const auto mapped = joint_map_.find(point.motor_id);
+    if (mapped != joint_map_.end() && model_->has_joint(mapped->second) &&
+        std::isfinite(point.position_rad)) {
+      predicted_joints.insert(mapped->second);
+    }
+  }
+  const int64_t now_ns = now().nanoseconds();
+  for (const std::string & name : model_->joint_names()) {
+    if (predicted_joints.count(name) == 0 &&
+        !joint_state_fresh(name, now_ns)) {
+      trajectory_publisher_->publish(output);
+      return;
+    }
   }
   const TrajectoryFeedforward feedforward =
       trajectory_gravity_feedforward(*model_, joint_map_, target_ids, points);

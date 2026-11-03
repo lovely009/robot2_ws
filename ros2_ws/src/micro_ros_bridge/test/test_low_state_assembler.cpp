@@ -40,8 +40,12 @@ TEST(LowStateAssembler, MissingChunkTimesOutWithoutReusingOldData)
   EXPECT_FALSE(assembler.accept(chunk(5, 2, 0, 1), 5, t + 62ms, out));
   EXPECT_TRUE(assembler.accept(chunk(5, 2, 1, 2), 5, t + 72ms, out));
   ASSERT_EQ(out.states.size(), 2u);
+  EXPECT_EQ(out.session_id, 5u);
+  EXPECT_EQ(out.tick_ms, 110u);
   EXPECT_EQ(out.states[0].state_age_ms, 17u);
-  EXPECT_EQ(out.states[1].state_age_ms, 7u);
+  EXPECT_EQ(out.states[1].state_age_ms, 17u);
+  EXPECT_EQ(out.tick_ms - out.states[0].state_age_ms, 93u);
+  EXPECT_EQ(out.tick_ms - out.states[1].state_age_ms, 93u);
 }
 
 TEST(LowStateAssembler, RejectsCrossSessionDuplicatesAndReplay)
@@ -90,4 +94,6 @@ TEST(LowStateAssembler, AddsSourceDelayAndHostWaitToMeasurementAge)
   ASSERT_EQ(out.states.size(), 2u);
   EXPECT_EQ(out.states[0].state_age_ms, 47u);
   EXPECT_EQ(out.states[1].state_age_ms, 47u);
+  EXPECT_EQ(out.tick_ms, 140u);
+  EXPECT_EQ(out.tick_ms - out.states[0].state_age_ms, 93u);
 }

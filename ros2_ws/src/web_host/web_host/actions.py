@@ -1,16 +1,14 @@
 """动作库：`action_library/*.json` 的枚举、读取与保存（动作屏播放的数据源）。
 
 文件是 MotorTrajectory 话题载荷（`{target_ids, points:[{time_from_start_ms,
-motor_id, position, velocity, torque|effort}]}`）。本模块只管文件层；播放语义
-（就绪检查、对齐、切窗交棒）在前端 `js/panels/actionLibrary.js`，与主机侧
-参考实现 `micro_ros_agent/tools/traj_play.py` 同口径。
+motor_id, position, velocity, torque|effort}]}`）。本模块只管文件层；播放入口
+位于前端 `js/panels/actionLibrary.js`，通过受监督的主机控制路径执行。
 
 读写都落在 share 安装树的 `action_library/`：内置文件在 `--symlink-install`
 下是指回源码的符号链接（覆盖即写回源码），导入的新文件写在安装树里。
 """
 
 import json
-import os
 import re
 from pathlib import Path
 

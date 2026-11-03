@@ -1,0 +1,23 @@
+# V4 固件线上常量；本类型不创建发布实体。
+uint16 SCHEMA_VERSION=4
+uint16 MOTOR_ID_MAX=64
+uint16 MOTOR_COUNT_MAX=48
+uint16 MOTION_CHUNK_MAX=32
+uint16 INFO_PAGE_MAX=16
+uint16 CONFIG_RESULTS_MAX=8
+uint16 PARAM_TARGETS_MAX=16
+uint16 TRAJECTORY_POINTS_MAX=256
+uint16 TRAJECTORY_CHUNK_MAX=32
+uint32 REQUEST_ID_MAX=1073741823
+float64 SCALE_POSITION=12.5
+float64 SCALE_VELOCITY=64.0
+float64 SCALE_EFFORT=64.0
+int16 SENTINEL_MISSING=-32768
+string TOPIC_COMMAND=/micro_ros_do/command
+string TOPIC_TRAJECTORY=/micro_ros_do/trajectory
+string TOPIC_CONFIG=/micro_ros_do/config
+string TOPIC_MOTION=/micro_ros_up/motion
+string TOPIC_STATUS=/micro_ros_up/status
+string TOPIC_INFO=/micro_ros_up/info
+string TOPIC_IMU=/micro_ros_up/imu/data
+string TOPIC_TEMPERATURE=/micro_ros_up/imu/temperature

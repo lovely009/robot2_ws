@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- robot_leg（单腿：骨盆 base_link → 髋 → 膝 → 踝，6 个主动关节，纯串联无闭环）纯模型 URDF，可直接加载。
+     由 urdf/robot_leg.urdf.xacro 以 fixed_base:=false 渲染后剥掉 <ros2_control> 与
+     <gazebo> 两块得到，因此不含 world 固定连杆（那是 Gazebo 侧的仿真脚手架）。
+     网格走 package://robot_description/models/robot_leg/meshes/，加载前须 source 本工作空间；
+     要脱离 ROS 使用，改用 ../../dist/robot_leg_urdf/ 那份相对路径版本。
+     ⚠ 本文件由 tools/regen_derived.py 生成，改主 URDF 后重跑，勿手改。
+     ⚠ link 名是 Joint_linkN（大写 L，导出器原样），joint 名是 joint_linkN（小写）——不可同名（SDFormat 里 link 与 joint 共用命名空间）。
+     ⚠ 关节限位是**占位值**（导出件 <limit> 全是 0/0/0/0，CAD 未配角度配合），接真机前必须按机械限位替换；力矩/速度取自型号库 motor.yaml。 -->
+<robot name="robot_leg">
+  <link name="base_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.023199 0.0016887 0.66288"/>
+      <mass value="12.926"/>
+      <inertia ixx="1.4969" ixy="-0.00012776" ixz="0.017452" iyy="1.4947" iyz="-0.0005305" izz="0.02659"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/base_link.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+  </link>
+  <link name="Joint_link1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00053599 -0.0032986 0.02836"/>
+      <mass value="0.29343"/>
+      <inertia ixx="0.00013848" ixy="-7.5114E-07" ixz="6.551E-06" iyy="0.00017569" iyz="-4.3057E-06" izz="0.00021268"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link1.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link1" type="revolute">
+    <origin rpy="1.4563 0.015566 -1.628" xyz="-0.33849 0.019369 1.1657"/>
+    <parent link="base_link"/>
+    <child link="Joint_link1"/>
+    <axis xyz="0 -0.11422 0.99345"/>
+    <limit effort="20" lower="-1.5708" upper="1.5708" velocity="3.1416"/>
+    <dynamics damping="0.29845" friction="0"/>
+  </joint>
+  <link name="Joint_link2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0087166 -0.10501 -0.044739"/>
+      <mass value="0.82613"/>
+      <inertia ixx="0.0011483" ixy="0.00012481" ixz="8.5572E-06" iyy="0.0003165" iyz="-5.7323E-05" izz="0.001243"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link2.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link2.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link2" type="revolute">
+    <origin rpy="-1.8248 1.5708 -1.8203" xyz="0.045 -0.0013364 0.011623"/>
+    <parent link="Joint_link1"/>
+    <child link="Joint_link2"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="20" lower="-1.5708" upper="1.5708" velocity="3.1416"/>
+    <dynamics damping="0.2969" friction="0"/>
+  </joint>
+  <link name="Joint_link3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-3.2626E-05 0.00059074 -0.091654"/>
+      <mass value="0.66354"/>
+      <inertia ixx="0.0021212" ixy="-1.2184E-06" ixz="-7.7475E-07" iyy="0.0021053" iyz="1.6419E-06" izz="0.00038248"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link3.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link3" type="revolute">
+    <origin rpy="-1.5708 -0.036172 0.13964" xyz="0.027184 -0.1934 -0.046"/>
+    <parent link="Joint_link2"/>
+    <child link="Joint_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="5" lower="-1.5708" upper="1.5708" velocity="3.1416"/>
+    <dynamics damping="0.0020447" friction="0"/>
+  </joint>
+  <link name="Joint_link4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0082245 0.037721 -0.0038033"/>
+      <mass value="0.10179"/>
+      <inertia ixx="8.6869E-05" ixy="-1.1828E-05" ixz="2.9875E-06" iyy="4.4225E-05" iyz="1.8414E-05" izz="8.6518E-05"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link4.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link4.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link4" type="revolute">
+    <origin rpy="-1.5708 -0.20311 -1.6655" xyz="0.023397 0.0038041 -0.2527"/>
+    <parent link="Joint_link3"/>
+    <child link="Joint_link4"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="5" lower="-1.5708" upper="1.5708" velocity="3.1416"/>
+    <dynamics damping="0.03213" friction="0"/>
+  </joint>
+  <link name="Joint_link5">
+    <inertial>
+      <origin rpy="0 0 0" xyz="8.8964E-05 -2.1583E-05 0.14195"/>
+      <mass value="0.33789"/>
+      <inertia ixx="0.0020108" ixy="2.3191E-06" ixz="1.4878E-07" iyy="0.0020185" iyz="4.9517E-07" izz="8.1806E-05"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link5.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link5.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link5" type="revolute">
+    <origin rpy="-1.5708 1.4687 0" xyz="0.012 0.0955 -0.027"/>
+    <parent link="Joint_link4"/>
+    <child link="Joint_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="5" lower="-1.5708" upper="1.5708" velocity="3.1416"/>
+    <dynamics damping="0.00014033" friction="0"/>
+  </joint>
+  <link name="Joint_link6">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0048996 -0.016556 -0.00032576"/>
+      <mass value="0.06977"/>
+      <inertia ixx="2.8059E-05" ixy="3.1804E-06" ixz="1.4822E-06" iyy="1.777E-05" iyz="-5.2099E-06" izz="3.5808E-05"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/Joint_link6.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.89804 0.91765 0.92941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://robot_description/models/robot_leg/meshes/collision/Joint_link6.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_link6" type="revolute">
+    <origin rpy="-1.5708 0.50852 -0.27546" xyz="0.0052358 0.018524 0.285"/>
+    <parent link="Joint_link5"/>
+    <child link="Joint_link6"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1.15" lower="-1.5708" upper="1.5708" velocity="4.189"/>
+    <dynamics damping="5.6606E-05" friction="0"/>
+  </joint>
+</robot>

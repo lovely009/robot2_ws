@@ -10,7 +10,7 @@
 #include "serial_transport.h"
 #include "motor_rt_task.h"
 #include "sensor_task.h"
-#include "storage_task.h"
+#include "storage_boot.h"
 #include "ws2812.h"
 #include "board_irq.h"
 
@@ -91,22 +91,19 @@ static void start_task(void *pv_parameters);
 static void start_task(void *pv_parameters) {
   (void)pv_parameters;
 
-  // 先创建状态指示与通信任务，再启动传感器和控制任务。各 start 函数只负责创建长期运行的业务任务；任一创建失败都进入统一故障处理，避免部分系统运行。
+  // 依次创建状态指示、传感器、存储、控制与通信任务；失败进入统一故障处理。
   if (!led_task_start()) {
-    Error_Handler();
-  }
-  if (!micro_ros_task_start()) {
     Error_Handler();
   }
   if (!sensor_task_start()) {
     Error_Handler();
   }
-  // 存储任务先于 motor_rt：同步加载 W25 blob（无芯片则降级），motor_rt
-  // 启动时快照 boot 参数。Flash 擦除只在 storage(P1) 任务内发生。
-  if (!storage_task_start()) {
+  storage_boot_load();
+  if (!motor_rt_task_start()) {
     Error_Handler();
   }
-  if (!motor_rt_task_start()) {
+  // 通信在实时任务创建后开放。
+  if (!micro_ros_task_start()) {
     Error_Handler();
   }
 

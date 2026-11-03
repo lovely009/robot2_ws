@@ -14,6 +14,9 @@ extern "C" {
 
 bool micro_ros_task_start(void);
 
+// 仅通信任务内、通过会话/序号/载荷校验并受理的入站帧可调用。
+void micro_ros_note_agent_rx(void);
+
 // 当前连接状态（LED/其他只读消费者用）。
 micro_ros_link_state_t micro_ros_task_get_link_state(void);
 

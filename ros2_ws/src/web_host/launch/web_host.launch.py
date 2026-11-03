@@ -2,27 +2,74 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
-    pkg_share = get_package_share_directory('web_host')
-    web_root = os.path.join(pkg_share, 'web')
+READ_TOPICS = [
+    '/diagnostics', '/joint_states',
+    '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp',
+    '/motor/control_states', '/motor/motion_states', '/motor/topology',
+    '/motor/trajectory_state', '/motor/status_array', '/motor/events',
+    '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
+    '/control/status', '/control/trajectory_state', '/bench/status', '/micro_ros_up/status',
+]
+CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
+                  '/arm_controller/joint_trajectory', '/motor/system_command']
+CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
+                    '/workbench_control/set_parameters_atomically',
+                    '/firmware_topic_bridge/set_parameters_atomically']
 
+
+def web_nodes(context):
+    mode = LaunchConfiguration('control_mode').perform(context)
+    if mode not in ('bench', 'readonly'):
+        raise ValueError('control_mode must be bench or readonly')
+    control = mode == 'bench'
+    pkg_share = get_package_share_directory('web_host')
+    return [
+        Node(
+            package='web_host', executable='rosbridge_shim',
+            name='rosbridge_websocket', output='screen',
+            parameters=[{
+                'port': LaunchConfiguration('rosbridge_port'), 'address': '0.0.0.0',
+                # Expose public intents and observations. Internal authorized
+                # outputs and wire topics must never be writable through the UI.
+                'topics_glob': '[]',
+                'topics_pub_glob': repr(CONTROL_TOPICS if control else []),
+                'topics_sub_glob': repr(READ_TOPICS),
+                'services_glob': repr(['/rosapi/*'] + (CONTROL_SERVICES if control else [])),
+                # GetResult may wait for an executing goal; it must not block
+                # lease renewal or stop requests on the same WebSocket.
+                'call_services_in_new_thread': True,
+            }]),
+        Node(
+            package='web_host', executable='static_server',
+            name='web_static_server', output='screen',
+            parameters=[{
+                'host': '0.0.0.0', 'port': LaunchConfiguration('web_port'),
+                'web_root': os.path.join(pkg_share, 'web'),
+                'model_url_prefix': '/robot_sim', 'model_dir': LaunchConfiguration('model_dir'),
+                'control_mode': mode, 'robot_model': LaunchConfiguration('robot_model'),
+                'rosbridge_port': LaunchConfiguration('rosbridge_port'),
+            }]),
+    ]
+
+
+def generate_launch_description():
     # 模型包几何由 static_server 挂载到 /robot_sim；缺包时仅降级臂视图与模型列表。
     # 本 launch 提供 L1 页面服务；台架编排由 robot_bringup/robot.launch.py 负责，
     # 避免仅浏览页面时引入进程管理权限。
     try:
-        model_dir = get_package_share_directory('robot_sim')
+        model_dir = get_package_share_directory('robot_description')
     except Exception:
         model_dir = ''
 
-    rosbridge_port = LaunchConfiguration('rosbridge_port')
-    web_port = LaunchConfiguration('web_port')
-
     return LaunchDescription([
+        DeclareLaunchArgument('control_mode', default_value='bench',
+                              description='bench or readonly.'),
+        DeclareLaunchArgument('robot_model', default_value='', description='Initial model selection.'),
         DeclareLaunchArgument('rosbridge_port', default_value='9090',
                               description='WebSocket port of rosbridge.'),
         DeclareLaunchArgument('web_port', default_value='8080',
@@ -32,42 +79,5 @@ def generate_launch_description():
                                           '（URDF/STL）的挂载源与 /api/models 的枚举根；'
                                           '可指向源码目录，空 = 不挂载不枚举。'),
 
-        # 经 web_host 的垫片启动 rosbridge：兼容有界字符串 string<31>
-        # （MotorTopology.model_name），见 web_host/rosbridge_shim.py。
-        Node(
-            package='web_host',
-            executable='rosbridge_shim',
-            name='rosbridge_websocket',
-            output='screen',
-            parameters=[{
-                'port': rosbridge_port,
-                'address': '0.0.0.0',
-            }],
-        ),
-
-        Node(
-            package='web_host',
-            executable='static_server',
-            name='web_static_server',
-            output='screen',
-            parameters=[{
-                'host': '0.0.0.0',
-                'port': web_port,
-                'web_root': web_root,
-                'model_url_prefix': '/robot_sim',
-                'model_dir': LaunchConfiguration('model_dir'),
-            }],
-        ),
-
-        # 命令节拍持有者（ADR 0014）：页面只下**设定值**，100 Hz 的完整快照流由它出。
-        # 节拍不能留在页面里——浏览器把后台标签页的定时器钳到 1 Hz，而固件的快照新鲜度
-        # 线是 30 ms 软停 / 100 ms 失能，页面一失焦台架就整臂掉力。
-        # 它只服务页面（页面在，它就该在），所以随 L1 常驻，不做成台架 unit；依赖单向
-        # 无环，package.xml 里是真声明。
-        Node(
-            package='motor_command',
-            executable='command_streamer',
-            name='command_streamer',
-            output='screen',
-        ),
+        OpaqueFunction(function=web_nodes),
     ])

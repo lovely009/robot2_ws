@@ -11,6 +11,56 @@ void can_tx_scheduler_init(can_tx_scheduler_t *sched) {
   memset(sched, 0, sizeof(*sched));
 }
 
+static void discard_timed_p2(can_tx_scheduler_t *sched, uint64_t slots,
+    uint32_t now_ms, bool expire) {
+  uint8_t kept = 0U;
+  for (uint8_t i = 0U; i < sched->p2.count; ++i) {
+    const can_tx_frame_t *frame = &sched->p2.queue[(sched->p2.head + i) % CAN_TX_P2_CAPACITY];
+    if (frame->valid_until_tick_ms &&
+        ((expire && (int32_t)(now_ms - frame->valid_until_tick_ms) >= 0) ||
+        (frame->tx_slot < CAN_TX_P1_SLOTS && (slots & (UINT64_C(1) << frame->tx_slot))))) {
+      if (expire) ++sched->p2.dropped_count;
+      continue;
+    }
+    sched->p2.queue[(sched->p2.head + kept++) % CAN_TX_P2_CAPACITY] = *frame;
+  }
+  sched->p2.count = kept;
+}
+
+void can_tx_scheduler_expire_p2(can_tx_scheduler_t *sched, uint32_t now_ms) {
+  if (sched != NULL) discard_timed_p2(sched, 0U, now_ms, true);
+}
+
+void can_tx_scheduler_cancel_timed_p2(can_tx_scheduler_t *sched, uint64_t slots) {
+  if (sched != NULL && slots != 0U) discard_timed_p2(sched, slots, 0U, false);
+}
+
+void can_tx_scheduler_cancel_slots(can_tx_scheduler_t *sched, uint64_t slots) {
+  if (sched == NULL || slots == 0U) {
+    return;
+  }
+  for (uint16_t slot = 0U; slot < CAN_TX_P1_SLOTS; ++slot) {
+    if ((slots & (UINT64_C(1) << slot)) != 0U) {
+      sched->p1.dirty[slot] = false;
+    }
+  }
+  uint8_t kept = 0U;
+  for (uint8_t i = 0U; i < sched->p0.count; ++i) {
+    const uint8_t source =
+        (uint8_t)((sched->p0.head + i) % CAN_TX_P0_CAPACITY);
+    const can_tx_frame_t *frame = &sched->p0.queue[source];
+    if (frame->tx_slot < CAN_TX_P1_SLOTS &&
+        (slots & (UINT64_C(1) << frame->tx_slot)) != 0U) {
+      continue;
+    }
+    const uint8_t destination =
+        (uint8_t)((sched->p0.head + kept) % CAN_TX_P0_CAPACITY);
+    sched->p0.queue[destination] = *frame;
+    ++kept;
+  }
+  sched->p0.count = kept;
+}
+
 static bool fifo_push(can_tx_frame_t *queue, uint8_t capacity, uint8_t *head,
     uint8_t *count, uint32_t *dropped,
     const can_tx_frame_t *frame) {
@@ -90,7 +140,7 @@ uint32_t can_tx_scheduler_pump(can_tx_scheduler_t *sched, can_tx_frame_t *out,
   const uint32_t p0_end = count;
 
   // 2) P1：发全部脏槽位一次（容量不足的脏槽保留到下轮）。脏槽由控制边界
-  // 逐边界置位，所以这里出队的节奏就等于控制边界（500Hz）× 每总线台数。
+  // 逐边界置位，实际出队频率受控制边界和总线容量限制。
   uint32_t p1_sent_this_pump = 0U;
   for (uint16_t slot = 0; slot < CAN_TX_P1_SLOTS && count < capacity &&
       p1_sent_this_pump < p1_limit; ++slot) {

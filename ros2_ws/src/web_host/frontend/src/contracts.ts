@@ -1,11 +1,8 @@
-export type Screen = "run" | "teach" | "sim";
+export type Screen = "run" | "teach" | "sim" | "motion";
 export type PanelId =
   | "jointList"
   | "arm"
   | "readout"
-  | "policy"
-  | "command"
-  | "feedforward"
   | "deviceParams"
   | "actionLibrary"
   | "sim"
@@ -13,6 +10,7 @@ export type PanelId =
   | "events"
   | "imu";
 export interface WorkbenchSnapshot {
+  firmwareConnectionKey: string;
   connected: boolean;
   connectionText: string;
   agent: string;
@@ -21,14 +19,14 @@ export interface WorkbenchSnapshot {
   canStopAgent: boolean;
   model: string;
   selectedId: number;
-  selectedName: string;
-  selectedState: string;
+  motors: { id: number; model: string }[];
   total: number;
   online: number;
   active: number;
   fault: number;
   motionAt: number | null;
-  outputTopic: string;
+  communication: {link: string; clock: string; authority: string; detail: string};
+  gravity: {enabled: boolean | null; active: boolean; blocked: string; pending: boolean};
   session: string;
   mappingError: string;
 }

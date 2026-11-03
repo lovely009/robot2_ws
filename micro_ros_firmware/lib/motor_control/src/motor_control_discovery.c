@@ -70,6 +70,22 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
   const bool presence = adapter->is_discovery_frame == NULL ||
       adapter->is_discovery_frame(frame);
   motor_control_entry_t *entry = motor_control_find_entry(ctx, node);
+  if (entry == NULL && presence) {
+    for (size_t i = 0; i < ctx->entry_count; ++i) {
+      motor_control_entry_t *old = &ctx->entries[i];
+      if (old->used && !old->online && !old->tx_active && old->adapter == adapter &&
+          old->bus_index == frame->bus_index &&
+          (old->record_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID)) &&
+          old->record_raw[MOTOR_PROTOCOL_PARAM_SLOT_NODE_ID] == node) {
+        old->motor_id = old->node = node;
+        old->profile = NULL; old->identity_read_done = false;
+        old->identity_read_attempts = 0; old->identity_size = 0;
+        old->policy_enable = old->motion_authorized = false;
+        old->has_target = old->motion_enabled = old->enable_pending = false;
+        entry = old; break;
+      }
+    }
+  }
   const bool created = entry == NULL;
   if (!presence) {
     if (created) {
@@ -100,9 +116,9 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->adapter = adapter;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_DISCOVERED;
     entry->online = true;
-    entry->policy_enable = true;      // 未收到 Policy 前默认使能（全局门仍生效）
-    entry->motion_authorized = true;  // 全新设备的授权链路默认完整；
-                                      // 故障/离线/撤权路径显式清除后不复立
+    // 新发现设备必须等待显式逐电机使能，不继承其他电机打开的全局授权。
+    entry->policy_enable = false;
+    entry->motion_authorized = false;
     entry->last_rx_tick_ms = frame->rx_tick_ms;
     motor_control_push_event(ctx, frame->rx_tick_ms,
         MOTOR_CONTROL_EVENT_DISCOVERED, node,

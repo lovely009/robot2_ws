@@ -48,3 +48,14 @@ def test_installed_web_contains_all_runtime_modules() -> None:
     assert not missing, (
         f'运行时模块未安装：{missing}；新增静态文件后必须重新构建 web_host，'
         '源码浏览器测试通过不能替代安装目录验证')
+
+
+def test_retired_shell_assets_are_absent_from_install() -> None:
+    from ament_index_python.packages import get_package_share_directory
+
+    installed = Path(get_package_share_directory('web_host')) / 'web'
+    assert (installed / 'panel_templates.html').is_file()
+    for relative in ('index.html', 'js/main.js', 'js/core/router.js', 'css/shell.css',
+                     'js/panels/policy.js', 'js/panels/command.js', 'js/panels/feedforward.js',
+                     'js/components/jointControl.js', 'js/core/host_limits.js'):
+        assert not (installed / relative).exists(), f'旧外壳残留在安装目录：{relative}'

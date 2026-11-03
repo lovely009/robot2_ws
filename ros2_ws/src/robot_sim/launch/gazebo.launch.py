@@ -34,7 +34,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    pkg_share = FindPackageShare("robot_sim")
+    pkg_share = FindPackageShare("robot_description")
     model = LaunchConfiguration("model")
     control_mode = LaunchConfiguration("control_mode")
     gravity = LaunchConfiguration("gravity")
@@ -46,9 +46,9 @@ def generate_launch_description():
     verbosity = LaunchConfiguration("verbosity")
 
     # Ignition 用 model:// 解析 mesh（URDF 的 package:// 会被转换），须把
-    # install/robot_sim/share 加入资源搜索路径（其下有 robot_sim/models）。
+    # install/robot_description/share 加入资源搜索路径（其下有 robot_description/models）。
     # 模型挪进 models/ 后仍是同一个前缀，这条逻辑与模型无关。
-    pkg_install_share = os.path.dirname(get_package_share_directory("robot_sim"))
+    pkg_install_share = os.path.dirname(get_package_share_directory("robot_description"))
     resource_path = os.environ.get("IGN_GAZEBO_RESOURCE_PATH", "")
     ign_resource_path = (
         f"{pkg_install_share}{os.pathsep}{resource_path}" if resource_path

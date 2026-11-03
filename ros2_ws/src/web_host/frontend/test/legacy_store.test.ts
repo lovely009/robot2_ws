@@ -11,6 +11,28 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("电机出现后汇总持续使用 MCU 状态更新，不停留在空列表", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(1000);
+  const { countMotors, store } = await import("../../web/js/core/store.js");
+  const { applyControlState } = await import("../../web/js/core/motor_state.js");
+  expect(countMotors()).toMatchObject({ total: 0, online: 0 });
+  const states = [1, 2].map(motor_id => ({
+    motor_id, online: true, control_lifecycle: 2, execution_state: 1,
+    policy_enabled: false, motion_enabled: false, state_age_ms: 5,
+    unified_fault_code: 0, vendor_fault_code: 0, last_failure_reason: 0,
+    policy_generation: 1,
+  }));
+  store.conn.connected = true;
+  for (const { motor_id } of states) store.motors.set(motor_id, {});
+  expect(applyControlState(store.controlStates,
+    { schema_version: 2, session_id: 100, sequence: 1, states })).toBe(true);
+  expect(countMotors()).toEqual({ total: 2, online: 2, active: 0, fault: 0, conflict: 0 });
+  states[1]!.online = false;
+  expect(applyControlState(store.controlStates,
+    { schema_version: 2, session_id: 100, sequence: 2, states })).toBe(true);
+  expect(countMotors()).toMatchObject({ total: 2, online: 1, active: 0 });
+});
+
 it("曲线持续接收不同频率的通道时保留各自最新的有界样本", async () => {
   const { chartPush, store } = await import("../../web/js/core/store.js");
   for (let i = 0; i < 2000; i++) {

@@ -1,10 +1,13 @@
 #ifndef FIRMWARE_CONFIG_H
 #define FIRMWARE_CONFIG_H
 
-// 注册容量与周期的唯一配置源；线协议和 Flash 的 64 槽上界不随之改变。
+// 编译期固定容量与频率；不接受运行期设置或 Flash 覆盖。
 #define FIRMWARE_MAX_MOTORS 48U
 #define FIRMWARE_MOTOR_REPORT_HZ 50U
 #define FIRMWARE_MOTOR_COMMAND_HZ 200U
+#define FIRMWARE_AGENT_PING_HZ 1U
+#define FIRMWARE_IMU_REPORT_HZ 100U
+#define FIRMWARE_TEMPERATURE_REPORT_HZ 2U
 
 #if FIRMWARE_MAX_MOTORS == 0U || FIRMWARE_MAX_MOTORS > 64U
 #error "FIRMWARE_MAX_MOTORS must be in [1, 64]"

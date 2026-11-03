@@ -7,7 +7,7 @@
 // 由 index.html 的原生 import map 解析，无构建步骤。
 //
 // 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把模型包根
-// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_sim/... 经
+// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_description/... 经
 // loader.packages 映射成 /robot_sim/...。模型可在页内切换（底栏选择器，见 mount）。
 //
 // 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
@@ -44,9 +44,16 @@ let onSelect = null;
 let ghostMat = null;         // 幽灵共用一份半透明材质（几何与实体共享）
 let loadGen = 0;             // URDF 加载代次：切换模型/卸载时作废在途回调
 
-function tick() {
-  controls.update();
+let renderRequested = true;
+let lastRenderAt = -Infinity;
+function tick(now) {
+  if (!renderer || !renderer.domElement.clientWidth || !renderer.domElement.clientHeight || now - lastRenderAt < 33) return;
+  const moved = controls.update();
+  if (!renderRequested && !moved) return;
   renderer.render(scene, camera);
+  if (renderer.domElement.dataset.modelReady === 'true') renderer.domElement.dataset.modelRendered = 'true';
+  renderRequested = false;
+  lastRenderAt = now;
 }
 
 export function init(canvas, opts) {
@@ -54,7 +61,10 @@ export function init(canvas, opts) {
   onSelect = opts.onSelect || null;
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  canvas.dataset.modelReady = 'false';
+  canvas.dataset.modelRendered = 'false';
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderRequested = true;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b1120);
@@ -91,10 +101,25 @@ export function init(canvas, opts) {
 
   canvas.addEventListener('pointerdown', onPointerDown);
 
-  const loader = new URDFLoader();
+  const manager = new THREE.LoadingManager();
+  const loader = new URDFLoader(manager);
   loader.packages = packages;      // { 包名: 路径前缀 } —— package:// 的解析表
   // 代次守卫：切换模型/卸载会作废在途加载，过期回调不得再碰新的场景对象。
   const gen = ++loadGen;
+  manager.onProgress = () => { if (gen === loadGen) renderRequested = true; };
+  manager.onLoad = () => {
+    if (gen !== loadGen || !robot) return;
+    // URDF parsing finishes before asynchronous STL loads. Reframe and rebuild
+    // the target ghost once geometry is complete, then request a fresh render.
+    if (ghost) root.remove(ghost);
+    ghost = robot.clone();
+    ghost.traverse((o) => { if (o.isMesh) o.material = ghostMat; });
+    ghost.visible = false;
+    root.add(ghost);
+    frameCamera(robot);
+    renderRequested = true;
+    canvas.dataset.modelReady = 'true';
+  };
   loader.load(urdfUrl, (r) => {
     if (gen !== loadGen) { return; }
     robot = r;
@@ -148,6 +173,7 @@ function frameCamera(r) {
   camera.near = d / 100;
   camera.far = d * 20;
   camera.updateProjectionMatrix();
+  renderRequested = true;
   controls.update();
 }
 
@@ -166,7 +192,11 @@ function onPointerDown(ev) {
 function applyValues(target, angles) {
   if (!target || !angles) { return; }
   for (const [name, v] of Object.entries(angles)) {
-    if (Number.isFinite(v)) { target.setJointValue(name, v); }
+    const joint = target.joints[name];
+    if (joint && Number.isFinite(v) && joint.angle !== v) {
+      joint.ignoreLimits = true; // 显示实测/预览值，控制限位由主机执行。
+      target.setJointValue(name, v); renderRequested = true;
+    }
   }
 }
 
@@ -175,7 +205,7 @@ export function setJoints(angles) { applyValues(robot, angles); }
 // 目标幽灵：angles 为 null 时隐藏（没有在发的目标就不该凭空画一个出来）。
 export function setTargets(angles) {
   if (!ghost) { return; }
-  if (!angles) { ghost.visible = false; return; }
+  if (!angles) { if (ghost.visible) renderRequested = true; ghost.visible = false; return; }
   applyValues(ghost, angles);
   ghost.visible = true;
 }
@@ -183,11 +213,13 @@ export function setTargets(angles) {
 // colors: { 关节名: '#rrggbb' }；缺省回落灰色。
 export function setJointColors(colors) {
   for (const [name, m] of markers) {
-    m.material.color.set((colors && colors[name]) || '#7e8bab');
+    const next = (colors && colors[name]) || '#7e8bab';
+    if (`#${m.material.color.getHexString()}` !== next) {m.material.color.set(next); renderRequested = true;}
   }
 }
 
 export function setSelected(name) {
+  if (selected !== name) renderRequested = true;
   if (selected && markers.has(selected)) {
     markers.get(selected).scale.setScalar(1);
   }
@@ -202,9 +234,12 @@ export function resize() {
   const c = renderer.domElement;
   const w = c.clientWidth || 1;
   const h = c.clientHeight || 1;
+  const size = renderer.getSize(new THREE.Vector2());
+  if (size.x === w && size.y === h) return;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  renderRequested = true;
 }
 
 // 页面隐藏时停掉渲染循环（WebGL 在后台标签页仍会跑满帧）。
@@ -293,6 +328,8 @@ export function mount(rootEl, ctx) {
   canvas.className = 'arm3d';
   const hud = document.createElement('div');
   hud.className = 'hud';
+  hud.tabIndex = 0;
+  hud.setAttribute('aria-label', '模型加载与映射诊断');
   hud.textContent = '臂视图加载中…';
   // canvas 与 hud 由 JS 建（canvas 必须真元素、hud 要随加载状态改），
   // 图例在面板模板里（DOM 单一来源），插到 canvas/hud 之后保持旧层级。
@@ -300,6 +337,7 @@ export function mount(rootEl, ctx) {
   stage.prepend(canvas);
 
   let ready = false;
+  let loadedModel = null;
   let hudFadeTimer = 0;
   let modelSelect = null;
   const pickJoint = (jointName) => {
@@ -313,6 +351,8 @@ export function mount(rootEl, ctx) {
   // 接口不可用时只留当前项。切换 → ctx.ui.setModel → DIRTY.MODEL → startLoad() 重载。
   modelSelect = $('armModel');
   if (modelSelect) {
+    modelSelect.disabled = false;
+    if (modelSelect.disabled) modelSelect.title = '托管机器的模型由启动配置确定';
     const fillOptions = (names) => {
       const list = names.includes(MODEL) ? names : [MODEL, ...names];
       modelSelect.replaceChildren(...list.map((name) => {
@@ -334,6 +374,7 @@ export function mount(rootEl, ctx) {
   // WebGLRenderer 会复用旧 context，新元素最省心（与切屏同一套释放路径）。
   // window/visibility 监听只随面板开关、不随模型切换（disposeScene 不摘它们）。
   function startLoad() {
+    loadedModel = MODEL;
     ready = false;
     window.clearTimeout(hudFadeTimer);
     hud.className = 'hud';
@@ -348,8 +389,8 @@ export function mount(rootEl, ctx) {
     }
     init(canvas, {
       urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
-      // package://robot_sim/... → static_server 挂在根部的模型包根
-      packages: {'robot_sim': '/robot_sim'},
+      // package://robot_description/... → static_server 挂在根部的模型包根
+      packages: {'robot_description': '/robot_sim'},
       onSelect: pickJoint,
       // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
       onProgress: (url, loaded, total) => {
@@ -364,7 +405,7 @@ export function mount(rootEl, ctx) {
         const extra = names.filter((j) => !mapped.has(j));
         hud.textContent = `臂视图就绪 · ${names.length} 个关节`
           + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
-          + ' · STL 约 70 MB（首次慢，之后走浏览器缓存）';
+          + ' · 几何已加载';
         ready = true;
         // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
         // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。
@@ -388,7 +429,7 @@ export function mount(rootEl, ctx) {
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   const render = (dirty) => {
-    if (dirty.has(DIRTY.MODEL)) { startLoad(); }
+    if (dirty.has(DIRTY.MODEL) && loadedModel !== MODEL) { startLoad(); }
     if (modelSelect && modelSelect.value !== MODEL) { modelSelect.value = MODEL; }
     if (!ready) { return; }
     if (dirty.has(DIRTY.MOTION)) { armSyncJoints(); armSyncGhost(); }

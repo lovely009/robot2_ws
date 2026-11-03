@@ -10,6 +10,12 @@ bool param_value_ok(param_field_t field, float value, float upper_limit,
     return false;
   }
   switch (field) {
+  case PARAM_FIELD_T_MAX:
+  case PARAM_FIELD_NODE_ID:
+    if (value < 1.0f || floorf(value) != value ||
+        value > (field == PARAM_FIELD_NODE_ID ? 64.0f : 16777215.0f)) return false;
+    if (clamped != NULL) *clamped = value;
+    return true;
   case PARAM_FIELD_KP:
   case PARAM_FIELD_KD:
     if (value < 0.0f) {

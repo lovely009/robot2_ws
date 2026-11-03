@@ -127,7 +127,7 @@ CERB_OBJECT_INDICES = frozenset({
 # 0x2538 电机端最大电流 mA。2026-10-15 真机 node 1 实测 R58 = 3325/13300、
 # R48 = 3325/5000。**0x6080 两台相同**——它是模块侧共用值，不是逐型号额定；
 # 真正逐型号的是 0x2538。这两个量在固件侧会换算成关节侧 rad/s 与 N·m，用错会把
-# 台架的速度/力矩天花板整体缩放（见 docs/research/cerb-device-reference.md）。
+# 台架的速度/力矩天花板整体缩放。
 CERB_DEVICE_DEFAULTS = {
     "r48": {"max_speed_rpm": 3325, "max_current_ma": 5000},
     "r58": {"max_speed_rpm": 3325, "max_current_ma": 13300},

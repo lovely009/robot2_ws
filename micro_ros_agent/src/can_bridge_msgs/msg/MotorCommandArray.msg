@@ -8,3 +8,6 @@ uint64 sync_time_ns
 uint32 sequence
 uint8 count
 MotorCommandTarget[<=64] targets
+# 非空命令必须显式绑定当前 MCU 会话和运动租约；bridge 不代填授权。
+uint64 session_id
+uint64 lease_id

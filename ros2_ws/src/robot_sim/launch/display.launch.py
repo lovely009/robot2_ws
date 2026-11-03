@@ -25,10 +25,11 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     pkg_share = FindPackageShare("robot_sim")
+    model_share = FindPackageShare("robot_description")
     model = LaunchConfiguration("model")
     # 文件名带模型名：models/<model>/urdf/<model>.urdf
     urdf_file = PathJoinSubstitution(
-        [pkg_share, "models", model, "urdf", [model, ".urdf"]]
+        [model_share, "models", model, "urdf", [model, ".urdf"]]
     )
 
     # LaunchConfiguration 在运行期求值，因此延迟读取 URDF。

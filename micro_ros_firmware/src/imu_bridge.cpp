@@ -13,26 +13,32 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <sensor_msgs/msg/imu.h>
-#include <std_msgs/msg/float32.h>
+#include <sensor_msgs/msg/temperature.h>
+#include <can_bridge_msgs/msg/agent_wire_contract.h>
 
 #include "sensor_task.h"
 #include "time_utils.h"
+#include "firmware_config.h"
 
 static uint32_t g_publish_fail = 0U;
 uint32_t imu_bridge_publish_fail_count(void) { return g_publish_fail; }
-static const char *kImuTopic = "micro_ros_up/imu/data";
-static const char *kTempTopic = "micro_ros_up/imu/temp";
-
 static rcl_publisher_t g_imu_pub;
 static rcl_publisher_t g_temp_pub;
 static sensor_msgs__msg__Imu g_imu_msg;
-static std_msgs__msg__Float32 g_temp_msg;
+static sensor_msgs__msg__Temperature g_temp_msg;
 static bool g_ready = false;
-static constexpr char kImuFrameId[] = "imu_link";
+static char kImuFrameId[] = "imu_link";
 
-static void fill_imu_msg(const imu_data_t *data) {
-  // 时间戳（sensor_msgs 惯例，sec + nanosec）：epoch 优先，未同步回退 millis
-  fill_header_stamp(&g_imu_msg.header.stamp);
+static uint32_t g_imu_sequence = 0U;
+static uint32_t g_temp_sequence = 0U;
+static bool g_have_imu_sequence = false;
+static bool g_have_temp_sequence = false;
+static uint32_t g_temp_tick = 0U;
+static uint32_t g_imu_tick = 0U;
+
+static void fill_imu_msg(const imu_data_t *data,
+    const sensor_sample_metadata_t *metadata) {
+  fill_epoch_stamp(&g_imu_msg.header.stamp, metadata->epoch_ns);
   g_imu_msg.header.frame_id.data = (char *)kImuFrameId;
   g_imu_msg.header.frame_id.size = sizeof(kImuFrameId) - 1U;
   g_imu_msg.header.frame_id.capacity = sizeof(kImuFrameId);
@@ -56,20 +62,24 @@ static void fill_imu_msg(const imu_data_t *data) {
       sizeof(g_imu_msg.angular_velocity_covariance));
   memset(g_imu_msg.linear_acceleration_covariance, 0,
       sizeof(g_imu_msg.linear_acceleration_covariance));
-
-  g_temp_msg.data = data->temp;
 }
 
 bool imu_bridge_create(rcl_node_t *node) {
   rcl_publisher_options_t opts = rcl_publisher_get_default_options();
   opts.qos = qos_stream();
   if (rcl_publisher_init(&g_imu_pub, node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu), kImuTopic, &opts) != RCL_RET_OK) return false;
+      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
+      can_bridge_msgs__msg__AgentWireContract__TOPIC_IMU, &opts) != RCL_RET_OK) return false;
   if (rcl_publisher_init(&g_temp_pub, node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), kTempTopic, &opts) != RCL_RET_OK) {
+      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Temperature),
+      can_bridge_msgs__msg__AgentWireContract__TOPIC_TEMPERATURE, &opts) != RCL_RET_OK) {
     const rcl_ret_t rc = rcl_publisher_fini(&g_imu_pub, node); (void)rc;
     return false;
   }
+  g_have_imu_sequence = false;
+  g_have_temp_sequence = false;
+  g_temp_tick = millis();
+  g_imu_tick = millis();
   g_ready = true;
   return true;
 }
@@ -85,26 +95,39 @@ void imu_bridge_destroy(rcl_node_t *node) {
 }
 
 void imu_bridge_poll(void) {
-  if (!g_ready) {
-    return;
-  }
+  if (!g_ready || !time_clock_valid()) return;
+  const uint32_t now = millis();
   imu_data_t snapshot = {};
-  if (!sensor_task_get_imu_snapshot(&snapshot, nullptr)) {
-    return;
-  }
-  fill_imu_msg(&snapshot);
-  serial_transport_send_begin();
-  rcl_ret_t rc = rcl_publish(&g_imu_pub, &g_imu_msg, nullptr);
-  serial_transport_send_end();
-  if (rc != RCL_RET_OK) ++g_publish_fail;
-  // 温度是慢变量（BMI088 温度档 ~1.25Hz 更新），2Hz 发布已覆盖全部
-  // 传感器更新；imu/data 才是 100Hz 的观测流。
-  static uint8_t s_temp_phase = 0U;
-  if (++s_temp_phase >= 50U) { // 10ms tick ×50 = 2Hz
-    s_temp_phase = 0U;
+  sensor_sample_metadata_t metadata = {};
+  if ((uint32_t)(now - g_imu_tick) >= 1000U / FIRMWARE_IMU_REPORT_HZ &&
+      sensor_task_get_imu_sample(&snapshot, &metadata) && metadata.clock_valid &&
+      (!g_have_imu_sequence || metadata.sequence != g_imu_sequence)) {
+    fill_imu_msg(&snapshot, &metadata);
     serial_transport_send_begin();
-    rc = rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
+    const rcl_ret_t rc = rcl_publish(&g_imu_pub, &g_imu_msg, nullptr);
     serial_transport_send_end();
     if (rc != RCL_RET_OK) ++g_publish_fail;
+    g_imu_sequence = metadata.sequence;
+    g_have_imu_sequence = true;
+    g_imu_tick = now;
+  }
+  if ((uint32_t)(now - g_temp_tick) < 1000U / FIRMWARE_TEMPERATURE_REPORT_HZ) return;
+  g_temp_tick = now;
+  float temperature = 0;
+  if (sensor_task_get_temperature(&temperature, &metadata) && metadata.clock_valid &&
+      (!g_have_temp_sequence || metadata.sequence != g_temp_sequence)) {
+    // 温度来自独立读取快照，绝不借姿态发布时间刷新旧温度。
+    fill_epoch_stamp(&g_temp_msg.header.stamp, metadata.epoch_ns);
+    g_temp_msg.header.frame_id.data = kImuFrameId;
+    g_temp_msg.header.frame_id.size = sizeof(kImuFrameId) - 1U;
+    g_temp_msg.header.frame_id.capacity = sizeof(kImuFrameId);
+    g_temp_msg.temperature = temperature;
+    g_temp_msg.variance = 0.0;
+    serial_transport_send_begin();
+    const rcl_ret_t rc = rcl_publish(&g_temp_pub, &g_temp_msg, nullptr);
+    serial_transport_send_end();
+    if (rc != RCL_RET_OK) ++g_publish_fail;
+    g_temp_sequence = metadata.sequence;
+    g_have_temp_sequence = true;
   }
 }

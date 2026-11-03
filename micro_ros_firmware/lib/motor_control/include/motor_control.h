@@ -5,7 +5,7 @@
 //
 // 不依赖 ROS/HAL/FreeRTOS/control_mailbox，也不感知 joint_name（关节语义在 upper 层）；厂家字节只
 // 经 motor_protocol 的 adapter 接口——构造时注入 adapter 列表，新增协议不改内核。
-// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，5ms/200Hz 边界调
+// motor_rt_task 是唯一调用者：1ms 服务调 on_raw_frame()/service()，可配控制边界调
 // apply_command_snapshot()，TX 调度器消费 collect_tx() 的 P0/P1/P2 帧。
 // 一切 freshness/超时判定用 MCU 单调时基毫秒（now_ms 与帧内 rx_tick_ms），绝不用 ROS 时间。
 
@@ -177,7 +177,8 @@ typedef struct {
 
 typedef struct {
   uint32_t sequence;
-  uint32_t received_tick_ms; // mailbox 记录的本地接收 tick（freshness 基准）
+  uint32_t received_tick_ms; // mailbox 记录的本地接收 tick（租约基准）
+  uint32_t valid_until_tick_ms; // 原始执行截止，不从出队时重新续期
   uint8_t target_count;
   motor_control_snapshot_target_t targets[MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS];
 } motor_control_command_snapshot_t;
@@ -304,8 +305,20 @@ void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connec
 // 授权门：全局授权与逐电机 MotorPolicy Enable 共同控制运动。撤销授权执行
 // 与断链相同的安全路径；
 // 恢复授权后必须等新的完整快照才可能回 ACTIVE（require_new_snapshot）。
+// 在 P1 离开软件调度器前再次检查安全门，阻止拥塞滞留的过期目标。
+bool motor_control_target_valid(const motor_control_context_t *ctx,
+    uint16_t slot, uint32_t now_ms);
+void motor_control_stop_all(motor_control_context_t *ctx, uint32_t now_ms);
+void motor_control_soft_stop_all(motor_control_context_t *ctx, uint32_t now_ms);
+void motor_control_disable_mask(motor_control_context_t *ctx, uint64_t motor_mask,
+    uint32_t now_ms);
+// 邮箱执行前过期/安全取消也必须向配置事务回告终态。
+void motor_control_report_config_result(motor_control_context_t *ctx,
+    uint32_t request_id, uint16_t motor_id, uint16_t reason, uint32_t now_ms);
+
 bool motor_control_set_authorization(motor_control_context_t *ctx, bool authorized,
     uint32_t now_ms);
+bool motor_control_is_authorized(const motor_control_context_t *ctx);
 
 // Profile 绑定（型号目录索引版）。生产路径只有一条：建档/重连读设备自报
 // 身份后由内核内部绑定（见 motor_control_start_identity_read）；本入口保留
@@ -354,6 +367,11 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
     const motor_control_command_snapshot_t *snapshot,
     uint32_t now_ms);
 
+// 1ms admission preserves the ORIGINAL source deadline and replaces target
+// values, without emitting enable/P1 frames. hold_step emits at 200Hz only.
+bool motor_control_admit_command_snapshot(motor_control_context_t *ctx,
+    const motor_control_command_snapshot_t *snapshot, uint32_t now_ms);
+
 // 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
 // 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
 // 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
@@ -361,6 +379,17 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
 bool motor_control_apply_trajectory(motor_control_context_t *ctx,
     const motor_control_trajectory_t *trajectory,
     uint32_t now_ms);
+
+// Agent 事务入口：不抢占旧执行；逐目标授权/反馈健康均满足才原子接手。
+bool motor_control_trajectory_targets_healthy(const motor_control_context_t *ctx,
+    const uint16_t *target_ids, uint16_t target_count, uint32_t now_ms);
+bool motor_control_apply_agent_trajectory(motor_control_context_t *ctx,
+    const motor_control_trajectory_t *trajectory, uint32_t now_ms);
+// 按 ID 取消，绝不影响另一条轨迹；安全帧提交后才能对外结算取消。
+bool motor_control_cancel_trajectory_id(motor_control_context_t *ctx,
+    uint32_t trajectory_id, uint32_t now_ms);
+bool motor_control_trajectory_safety_pending(const motor_control_context_t *ctx,
+    const uint16_t *target_ids, uint16_t target_count);
 
 // 轨迹步进：按 elapsed = now_ms - 受理时刻，在完整非均匀时间线上进行单调三次
 // Hermite 插值并下发。内部路点切矢由相邻不等时间间隔共同计算，保证段边界
@@ -431,6 +460,12 @@ bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_ind
 // ---------------------------------------------------------------------------
 // 输出（固定容量副本；只读消费）
 // ---------------------------------------------------------------------------
+
+// 取走停机取消集合（bit = 稳定表项槽位，最多 64 台）。唯一 TX 所有者必须
+// 在每次 collect_tx/下游 pump 前清除所有调度器中这些槽位的旧 P0/P1。
+// 与安全帧入队分离，因此内核队满或安全帧编码失败也不会继续发送旧运动。
+uint64_t motor_control_take_tx_cancellations(motor_control_context_t *ctx);
+uint64_t motor_control_take_zero_tx_cancellations(motor_control_context_t *ctx);
 
 // 取走待发送帧（最多 capacity 帧，余量保留待下次）。每总线
 // TX 调度器按 tx_class 分配 P0/P1/P2 队列。

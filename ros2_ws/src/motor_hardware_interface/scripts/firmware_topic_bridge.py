@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
-"""标准 ROS 话题桥：消费 micro_ros_bridge 解码后的 /motor/* 状态并发布 /joint_states。
+"""只读反馈桥：将解码后的 /motor/* 状态转换为 /joint_states 与 TF 输入。
 
-轨迹下行仍从 /arm_controller/joint_trajectory 转发到 /motor_command/trajectory；
-MCU 私有上行协议由 micro_ros_bridge 负责解码，关节映射留在本节点。
-
-QoS：运动状态是 best-effort depth 1；轨迹是一条可分片的大消息，本节点发布到
-/motor_command/trajectory，由 command_streamer 按当前接线转发到直连或重力补偿入口。
-轨迹发布者必须 reliable，不能复用状态流 QoS。
-单位：固件发模组输出轴 SI（rad / rad·s⁻¹ / N·m）；传动模型换算为 URDF 关节坐标。
+运动请求由 workbench_control 提交给 ros2_control；本节点没有下行发布者。
 """
 
-from motor_hardware_interface.topic_bridge import (BridgeError,
-                                                  motion_states_to_joint_state,
+from motor_hardware_interface.topic_bridge import (motion_states_to_joint_state,
                                                   motor_accepts_joint_target,
-                                                  parse_joint_map,
-                                                  split_trajectory)
+                                                  parse_joint_map)
 from motor_hardware_interface.transmission_bridge import TransmissionBridge
+from motor_hardware_interface.topic_bridge import BridgeError
 from motor_hardware_interface.control_state import ControlStateTracker
 import json
+import math
 import signal
 import time
 
@@ -31,26 +25,17 @@ def main():  # pragma: no cover - 需要 ROS 环境
     from rclpy.node import Node
     from rclpy.duration import Duration
     from rclpy.parameter import Parameter
-    from rcl_interfaces.msg import ParameterDescriptor
+    from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
     from rclpy.qos import (QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy,
                            QoSDurabilityPolicy)
     from sensor_msgs.msg import JointState
     from std_msgs.msg import String
-    from trajectory_msgs.msg import JointTrajectory
-    from can_bridge_msgs.msg import (MotorMotionStateArray, MotorStatusArray, MotorControlStateArray, MotorTrajectory,
-                                     MotorTrajectoryPoint)
+    from can_bridge_msgs.msg import (MotorMotionStateArray, MotorStatusArray, MotorControlStateArray)
 
     def stream_qos():
         """best-effort depth 1：与固件运动状态流 QoS 对齐。"""
         return QoSProfile(depth=1,
                           reliability=QoSReliabilityPolicy.BEST_EFFORT,
-                          durability=QoSDurabilityPolicy.VOLATILE,
-                          history=QoSHistoryPolicy.KEEP_LAST)
-
-    def trajectory_qos():
-        """reliable depth 1：MotorTrajectory 允许 XRCE 分片传输。"""
-        return QoSProfile(depth=1,
-                          reliability=QoSReliabilityPolicy.RELIABLE,
                           durability=QoSDurabilityPolicy.VOLATILE,
                           history=QoSHistoryPolicy.KEEP_LAST)
 
@@ -60,7 +45,9 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.declare_parameter('motor_ids', Parameter.Type.INTEGER_ARRAY)
             self.declare_parameter('joint_names', Parameter.Type.STRING_ARRAY)
             immutable = ParameterDescriptor(read_only=True)
-            self.declare_parameter('enable_trajectory', False)
+            if self.declare_parameter('enable_trajectory', False).value:
+                raise ValueError('只读反馈桥不接受运动请求，请使用 host_trajectory.launch.py')
+            self.declare_parameter('joint_limits_json', '')
             self.declare_parameter('publish_joint_states', True, immutable)
             self.declare_parameter('driver_file', '', immutable)
             self.declare_parameter('transmissions_file', '', immutable)
@@ -69,11 +56,6 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.declare_parameter('feedback_timeout_s', .5, immutable)
             self.declare_parameter('feedback_max_skew_s', .05, immutable)
             self.declare_parameter('joint_state_topic', '/joint_states', immutable)
-            self.declare_parameter('trajectory_in_topic',
-                                   '/arm_controller/joint_trajectory', immutable)
-            self.declare_parameter('trajectory_out_topic',
-                                   '/motor_command/trajectory', immutable)
-
             driver_file = self.get_parameter('driver_file').value
             self.transmission = None
             self.motor_health = {}
@@ -93,6 +75,9 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 self.joint_of_motor = parse_joint_map(ids, names)
                 self.motor_of_joint = {j: i for i, j in self.joint_of_motor.items()}
 
+            self.joint_limits_from_parameter(self.get_parameter('joint_limits_json').value)
+            self.add_on_set_parameters_callback(self.validate_parameters)
+
             status_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                                     reliability=QoSReliabilityPolicy.RELIABLE)
             self.status_pub = self.create_publisher(String, '/robot_transmission/status', status_qos)
@@ -108,38 +93,42 @@ def main():  # pragma: no cover - 需要 ROS 环境
                 MotorMotionStateArray,
                 '/motor/motion_states',
                 self.on_motion_states, stream_qos())
-            self.traj_pub = self.create_publisher(
-                MotorTrajectory,
-                self.get_parameter('trajectory_out_topic').value, trajectory_qos())
-            self.create_subscription(
-                JointTrajectory,
-                self.get_parameter('trajectory_in_topic').value,
-                self.on_trajectory, 10)
-            self.create_subscription(MotorTrajectory,
-                self.get_parameter('trajectory_out_topic').value,
-                self.on_motor_trajectory, trajectory_qos())
+            self.get_logger().info('只读关节反馈桥已就绪')
 
-            self.sequence = 0
-            self.last_trajectory_error = ''
-            self.get_logger().info(
-                '桥已就绪：%s → %s（映射 %s，轨迹转发 %s）'
-                % ('/motor/motion_states',
-                   self.get_parameter('joint_state_topic').value,
-                   self.joint_of_motor,
-                   self.get_parameter('enable_trajectory').value))
+        def joint_limits_from_parameter(self, value):
+            if self.transmission:
+                return self.transmission.joint_limits_from_json(
+                    value, self.get_parameter('model_name').value)
+            if value not in ('', '{}'):
+                raise BridgeError('当前未加载传动模型，不能设置关节限位')
+            return {}
+
+        def validate_parameters(self, parameters):
+            try:
+                for parameter in parameters:
+                    if parameter.name == 'enable_trajectory' and parameter.value:
+                        raise BridgeError('只读反馈桥不接受运动请求')
+                    if parameter.name == 'joint_limits_json':
+                        self.joint_limits_from_parameter(parameter.value)
+            except BridgeError as exc:
+                return SetParametersResult(successful=False, reason=str(exc))
+            return SetParametersResult(successful=True)
 
         def publish_status(self):
+            limits = self.joint_limits_from_parameter(self.get_parameter('joint_limits_json').value)
             msg = String()
             msg.data = json.dumps({
                 'model': self.get_parameter('model_name').value,
                 'driver_file': self.get_parameter('driver_file').value,
-                'trajectory_enabled': self.get_parameter('enable_trajectory').value,
+                'trajectory_enabled': False,
                 'control_state_source': 'mcu' if self.control_states.seen else 'legacy',
                 'control_service': self.get_fully_qualified_name() + '/set_parameters_atomically',
-                'last_error': self.last_trajectory_error,
-                'trajectory_topic': self.get_parameter('trajectory_out_topic').value,
+                'last_error': '',
                 'joint_names': (list(self.transmission.model.joint_names) if self.transmission
                                 else list(self.motor_of_joint)),
+                'joint_limits': {name: {'lower': lower if math.isfinite(lower) else None,
+                                        'upper': upper if math.isfinite(upper) else None}
+                                 for name, (lower, upper) in limits.items()},
             })
             self.status_pub.publish(msg)
 
@@ -194,99 +183,6 @@ def main():  # pragma: no cover - 需要 ROS 环境
             out.header.stamp = stamp.to_msg()
             out.name, out.position, out.velocity, out.effort = names, pos, vel, eff
             self.js_pub.publish(out)
-
-        def on_motor_trajectory(self, msg):
-            if self.transmission and msg.count == 0:
-                self.transmission.held.clear()
-
-        # ---- 下行 ----
-        def on_trajectory(self, msg):
-            if not self.get_parameter('enable_trajectory').value:
-                if self.transmission:
-                    self.transmission.held.clear()
-                self.last_trajectory_error = '主机传动桥为只读模式'
-                self.publish_status()
-                return
-            self.last_trajectory_error = ''
-            if not msg.joint_names and not msg.points:
-                if self.transmission:
-                    self.transmission.held.clear()
-                self.sequence += 1
-                out = MotorTrajectory()
-                out.sequence = self.sequence
-                out.trajectory_id = self.sequence
-                out.segment_count = 1
-                self.traj_pub.publish(out)
-                self.publish_status()
-                return
-            samples = []
-            for p in msg.points:
-                samples.append({
-                    't_ms': p.time_from_start.sec * 1000
-                            + p.time_from_start.nanosec // 1000000,
-                    'positions': list(p.positions),
-                    'velocities': list(p.velocities) or None,
-                    'effort': list(p.effort) or None,
-                })
-            try:
-                # 本节点另有一个取消观察订阅，不能把它当作主机路由已连接。
-                if self.traj_pub.get_subscription_count() <= 1:
-                    raise BridgeError('主机轨迹路由未连接，拒绝轨迹')
-                if self.transmission:
-                    required = {self.transmission.ids[a] for j in msg.joint_names
-                                for a in self.transmission.model.actuators_for_joint(j)}
-                    now = time.monotonic()
-                    timeout = self.get_parameter('feedback_timeout_s').value
-                    if self.control_states.seen:
-                        if not all(self.control_states.ready(i, now, timeout) for i in required):
-                            raise BridgeError('MCU 控制状态未激活、无效或反馈过期')
-                    elif (now-self.last_health > timeout
-                            or not all(self.motor_health.get(i, False) for i in required)):
-                        raise BridgeError('传动组未全部就绪/健康，或健康反馈过期')
-                    target_ids, flat, warnings = self.transmission.trajectory(
-                        list(msg.joint_names), samples, time.monotonic())
-                    segments = [flat]
-                else:
-                    target_ids, segments, warnings = split_trajectory(
-                        list(msg.joint_names), samples, self.motor_of_joint)
-            except (BridgeError, ValueError, RuntimeError) as exc:
-                self.last_trajectory_error = str(exc)
-                self.publish_status()
-                # 关键：把固件会**静默丢弃**的失败在这里讲清楚。
-                self.get_logger().error('轨迹被本地校验拒绝：%s' % exc)
-                return
-            for w in warnings:
-                self.get_logger().warn(w)
-
-            self.sequence += 1
-            trajectory_id = self.sequence
-            sync_time_ns = self.get_clock().now().nanoseconds
-            segment_count = len(segments)
-            for segment_index, flat in enumerate(segments):
-                out = MotorTrajectory()
-                out.sync_time_ns = sync_time_ns
-                out.sequence = self.sequence
-                out.trajectory_id = trajectory_id
-                out.segment_index = segment_index
-                out.segment_count = segment_count
-                out.count = len(flat)
-                out.target_count = len(target_ids)
-                out.target_ids = target_ids
-                out.points = []
-                for (t_ms, motor_id, p, v, e) in flat:
-                    pt = MotorTrajectoryPoint()
-                    pt.time_from_start_ms = t_ms
-                    pt.motor_id = motor_id
-                    pt.position, pt.velocity, pt.effort = p, v, e
-                    out.points.append(pt)
-                self.traj_pub.publish(out)
-            self.publish_status()
-            flat = segments[-1]
-            self.get_logger().info('轨迹已转发：%d 台 / %d 点 / %d 段 / 共 %d ms'
-                                   % (len(target_ids),
-                                      sum(len(segment) for segment in segments),
-                                      segment_count,
-                                      flat[-1][0] if flat else 0))
 
     rclpy.init()
     node = FirmwareTopicBridge()

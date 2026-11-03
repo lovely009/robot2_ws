@@ -5,8 +5,7 @@
 ⚠️ **只对台架上的真电机运行**。本仓库自带的 `fdcan_motor_sim.py` 用 `PI/PI/300.0`
 （按型号库 `mit_torque_limit_nm`）解码 MIT 帧——那是照固件假设写死的，用它回答
 "MIT 满量程是多少"是**自证循环**（循环论证），**不能**作为证据。真电机到场前这个
-问题无从回答。对应厂商问题清单第 1 条（见
-`micro_ros_firmware/docs/architecture/motor-runtime-decision-log.md` §12）。
+问题无从回答。厂商协议手册位于根 `docs/巨蟹电机/`。
 
 本脚本只做两件事，**不 flash、不写任何设备对象**：
   1. 发满量程 MIT 单轴帧（`0x110|id`，12B，控制字 0xcc）：
@@ -22,7 +21,7 @@
   python3 tools/cerb_fullscale_probe.py --dev /dev/serial/by-id/<CANable> --node 1
   python3 tools/cerb_fullscale_probe.py --dev /dev/ttyACM1 --node 3 --hold-ms 300
 
-台架前提（见 `micro_ros_firmware/docs/guides/fdcan1-bench-guide.md`）：CANable 先
+台架前提：CANable 先
 成为 ACK 节点（本脚本自动 C→S8→Y5→M0→A1→O）。**本脚本会发使能 + 满量程出力帧，电机会
 真的出力**——务必保证机构已支撑/空载且急停可用。
 """

@@ -17,7 +17,7 @@ SPEC.loader.exec_module(SIM)
 
 
 def test_hil_shared_transmission_preserves_joint_order_and_group_zeroing() -> None:
-    driver = Path(__file__).resolve().parents[1] / "models/half_body_robot/config/motor_driver.yaml"
+    driver = Path(__file__).resolve().parents[2] / "robot_description/models/half_body_robot/config/motor_driver.yaml"
     motors = yaml.safe_load(driver.read_text())["motor_hardware"]["motors"]
     joint_map = {m["id"]: m["joint"] for m in motors.values()}
     bridge = SIM.GazeboBridge.__new__(SIM.GazeboBridge)

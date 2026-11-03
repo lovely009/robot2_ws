@@ -17,7 +17,6 @@ Gazebo 的关节会因力矩真实运动，于是 C¹ 插补**消除速度台阶
 """
 import argparse
 import csv
-import math
 import sys
 import time
 

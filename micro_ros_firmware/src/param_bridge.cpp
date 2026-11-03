@@ -1,840 +1,396 @@
-// 配置回调只提交 mailbox；结果与保存终态在本任务中关联，设备不做原子回滚。
+// 配置回调只提交 mailbox；终态保留到显式 ACK，查询只读内存快照。
 #include "param_bridge.h"
-
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
-
-#include <can_bridge_msgs/msg/config_request.h>
-#include <can_bridge_msgs/msg/system_command.h>
-#include <can_bridge_msgs/msg/system_status.h>
-#include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
+#include <can_bridge_msgs/msg/agent_config_request.h>
+#include <can_bridge_msgs/msg/detail/agent_wire_contract__struct.h>
 #include <rcl/error_handling.h>
-#include <rmw_microros/time_sync.h>
-
-#include "motor_rt_task.h"
-#include "motor_bridge.h"
+#include "agent_protocol.h"
 #include "config_transaction.hpp"
-#include "param_field.h"
+#include "info_page.hpp"
+#include "motor_bridge.h"
+#include "motor_rt_task.h"
 #include "param_units.h"
+#include "firmware_config.h"
 #include "ros_qos.h"
-#include "save_transaction.h"
-#include "storage_task.h"
-#include "wire_codec.h"
+#include "time_utils.h"
 
-static const char *kConfigTopic =
-    can_bridge_msgs__msg__WireContract__TOPIC_CONFIG;
-
-// 错误码（system_status.last_error）：0=无；1..6 对齐 CONFIG 结果七码；10=本地校验
-// 拒绝；11=mailbox 提交失败（FIFO 满/断链）；12=未绑定/未知电机；20=save 失败；
-// 30=refresh 失败；40=设备参数与固件记录不一致；41=回读失败；42=本机无该电机记录。
-// 40/41/42 由 dev_init 上报，不参与运动授权；须人工核对设备参数。
-#define ERR_NONE 0
-#define ERR_LOCAL_VALIDATION 10
-#define ERR_SUBMIT_FAILED 11
-#define ERR_UNKNOWN_MOTOR 12
-#define ERR_SAVE_FAIL 20
-#define ERR_REFRESH_FAIL 30
-#define ERR_DEV_INIT_MISMATCH 40
-#define ERR_DEV_INIT_UNVERIFIED 41
-#define ERR_DEV_INIT_NO_RECORD 42
-
-#define kMotorIdNone 0xFFFFU
-
-// 线协议目标上界取自生成常量。
-#define kParamSetMaxTargets \
-  can_bridge_msgs__msg__ConfigRequest__targets__MAX_SIZE
-
-// 每目标（位置限位对算一次）提交一次；消息上界不得超过 FIFO 深度，避免部分入队。
+using Config = can_bridge_msgs__msg__AgentConfigRequest;
+static constexpr uint16_t kMotorIdNone = UINT16_MAX;
+static constexpr size_t kParamSetMaxTargets = 16;
+static constexpr uint16_t kInvalid = 10, kSubmitFailed = 11, kUnknownMotor = 12;
 static_assert(kParamSetMaxTargets <= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY,
-    "ConfigRequest 上界超过配置 FIFO 深度");
+    "参数批次不能超过配置 FIFO");
+static_assert(config_transaction::kCapacity == 8, "线上结果容量必须为8");
 
-// executor 占一条订阅句柄，发布不占句柄。
-static_assert(PARAM_BRIDGE_EXECUTOR_HANDLES == 1U,
-    "PARAM_BRIDGE_EXECUTOR_HANDLES 必须等于本文件的订阅数");
-static_assert(MOTOR_CONTROL_MAX_MOTORS == SAVE_TRANSACTION_MAX_TARGETS,
-    "SAVE 事务容量必须与电机视图容量一致");
-
-static_assert(kParamSetMaxTargets <= config_transaction::kMaxTargets,
-    "配置内容缓存必须容纳全部 wire targets");
-static_assert(can_bridge_msgs__msg__ConfigResult__STATUS_PENDING == config_transaction::kPending &&
-    can_bridge_msgs__msg__ConfigResult__STATUS_SUCCEEDED == config_transaction::kSucceeded &&
-    can_bridge_msgs__msg__ConfigResult__STATUS_FAILED == config_transaction::kFailed &&
-    can_bridge_msgs__msg__ConfigResult__STATUS_BUSY == config_transaction::kBusy &&
-    can_bridge_msgs__msg__ConfigResult__STATUS_CONFLICT == config_transaction::kConflict,
-    "配置结果状态必须与 wire 契约一致");
-
-// ---- 线协议 field 表 ----
-// 下标 = ParamSetTarget.field = param_device_slot_t
-// （0=pos_min 1=pos_max 2=vel_limit 3=torque_limit 4=limit_protect 5=direction）。
-//
-// wire field 与 param_field_t 序号不同，混用会写错槽位。
-// 可操作集合由本表显式定义；新增枚举不会自动开放操作。
-typedef struct {
-  param_field_t param_field;            // Flash blob / 视图槽位序
-  control_mailbox_config_kind_t kind;   // 内核动作
-} param_field_desc_t;
-
-static const param_field_desc_t kFields[PARAM_DEVICE_SLOT_COUNT] = {
-  {PARAM_FIELD_POS_MIN, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
-  {PARAM_FIELD_POS_MAX, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS},
-  {PARAM_FIELD_VEL_LIMIT, CONTROL_MAILBOX_CONFIG_SET_VELOCITY_LIMIT},
-  {PARAM_FIELD_TORQUE_LIMIT, CONTROL_MAILBOX_CONFIG_SET_TORQUE_LIMIT},
-  {PARAM_FIELD_LIMIT_PROTECT, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT},
-  {PARAM_FIELD_DIRECTION, CONTROL_MAILBOX_CONFIG_SET_DIRECTION},
-};
-
-static_assert(sizeof(kFields) / sizeof(kFields[0]) == PARAM_DEVICE_SLOT_COUNT,
-    "线协议 field 表长度必须等于设备槽位数：加槽位要同时改 .msg");
-// 线协议 field 的取值范围就是设备槽序，两端同序由这条断言与 host 测试共同保证。
-static_assert(PARAM_DEVICE_SLOT_COUNT == 6U,
-    "设备槽位数变了：同步改 .msg 的 ParamSetTarget 常量与线协议表");
-
-// 内核操作使用 bit30 命名空间；外部 request_id 只在事务表内关联。
-#define PARAM_INTERNAL_ID_TAG 0x40000000U
-
-// ---- 状态 ----
 static rcl_subscription_t g_config_sub;
-static can_bridge_msgs__msg__ConfigRequest g_config_msg;
-static can_bridge_msgs__msg__ParamSetTarget g_config_targets_buf[kParamSetMaxTargets];
-static can_bridge_msgs__msg__SystemStatus g_system_status_msg;
-static bool g_sub_up = false;
-static bool g_sub_added = false;
-static bool g_created = false;
-
-// 最近一次 poll 的参数视图，供 motor_bridge 发布 device_param_report。
-static motor_control_param_view_t g_views[MOTOR_CONTROL_MAX_MOTORS];
-static size_t g_view_count = 0;
-
-static uint16_t g_last_error = ERR_NONE;
-static uint16_t g_last_error_motor = kMotorIdNone;
-
-static uint32_t g_next_request_id = 1U; // 跨会话不复位（防重连后旧事件串台）
-
-// 完成序号保留给旧 facade；新调用方消费带原请求 ID 的 ConfigResult。
-static int64_t g_refresh_seq = 0;
-
-static int64_t g_set_zero_seq = 0;
-
-static int64_t g_clear_fault_seq = 0;
-
-
-// COMMAND_REPORT 的一次性请求：回调置位，motor_bridge 下一拍 poll 取走并发一帧
-// device_param_report。不进 mailbox、不触发 SDO——没在线电机时帧里就是板内表。
-static bool g_report_pending = false;
-
-static save_transaction_t g_save_transaction;
-static int64_t g_save_seq = 0;
-
+static Config g_config_msg;
+static can_bridge_msgs__msg__MotorPolicyTarget g_policies[48];
+static can_bridge_msgs__msg__ParamSetTarget g_parameters[16];
+static uint32_t g_ack_ids[8];
+static bool g_created, g_sub_up, g_sub_added;
+// CPU 快照放 DTCM，避免扩展参数槽耗尽 D1；create 显式清零此 NOLOAD 段。
+static motor_control_param_view_t g_views[MOTOR_CONTROL_MAX_MOTORS]
+    __attribute__((section(".dtcm_noinit")));
+static size_t g_view_count;
 static config_transaction::Coordinator g_transactions;
 static int g_active_slot = -1;
-static uint64_t g_observed_session = 0;
-static int g_save_slot = -1;
-static uint16_t g_save_total = 0, g_save_completed = 0, g_save_error = 0;
-static bool g_sequence_pending[config_transaction::kCapacity] = {};
-
-static void update_completion_sequences() {
-  for (size_t i = 0; i < config_transaction::kCapacity; ++i) {
-    const auto *r = g_transactions.result(static_cast<int>(i));
-    if (!g_sequence_pending[i] || r == nullptr ||
-        r->status == config_transaction::kPending) {
-      continue;
-    }
-    g_sequence_pending[i] = false;
-    switch (r->command) {
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH: ++g_refresh_seq; break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO: ++g_set_zero_seq; break;
-    case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT: ++g_clear_fault_seq; break;
-    default: break;
-    }
-  }
-}
-
-static void sync_config_session() {
-  const uint64_t session = motor_bridge_session_id();
-  if (session == g_observed_session) {
-    return;
-  }
-  // 新会话不继承旧 SAVE 的游标，也不让旧结果占住当前结果槽。
-  save_transaction_disconnect(&g_save_transaction);
-  if (g_save_slot >= 0) { ++g_save_seq; }
-  g_save_slot = -1;
-  g_report_pending = false;
-  g_transactions.disconnect();
-  update_completion_sequences();
-  g_transactions.set_session(session);
-  memset(g_sequence_pending, 0, sizeof(g_sequence_pending));
-  g_observed_session = session;
-}
-
-// 已上报的设备参数结论（下标 = motor_id；0xFF = 从未上报）。
-// 用电机 id 做 key 而不是视图下标：视图顺序不是契约，内核表项只增不减。
-// 当前协议节点号为 1..127；ID 范围独立于注册数量上限。
-static uint8_t g_reported_dev_init[128U];
+static uint64_t g_observed_session;
+static uint32_t g_next_operation_id = 1, g_active_deadline;
+static uint16_t g_last_error, g_last_error_motor = kMotorIdNone;
+static info_page::Pager g_pager;
+static uint32_t g_info_revision = 1, g_info_hash;
+static can_bridge_msgs__msg__AgentInfo g_info;
+static can_bridge_msgs__msg__AgentDeviceInfo g_info_devices[16];
+static can_bridge_msgs__msg__AgentOperationDetail g_info_details[16];
+static char g_model_names[16][32];
 
 static const motor_control_param_view_t *find_view(uint16_t motor_id) {
-  for (size_t i = 0; i < g_view_count; ++i) {
-    if (g_views[i].motor_id == motor_id) {
-      return &g_views[i];
-    }
-  }
+  for (size_t i = 0; i < g_view_count; ++i)
+    if (g_views[i].motor_id == motor_id) return &g_views[i];
   return nullptr;
 }
-
-static void report_error(uint16_t code, uint16_t motor_id) {
-  g_last_error = code;
-  g_last_error_motor = motor_id;
+static void report_error(uint16_t error, uint16_t motor_id) {
+  g_last_error = error; g_last_error_motor = motor_id;
 }
-
-// 内部操作 ID 跨重连递增，避免迟到事件关联到新请求。
 static uint32_t next_internal_id() {
-  g_next_request_id++;
-  if (g_next_request_id == 0U) {
-    g_next_request_id = 1U;
-  }
-  return PARAM_INTERNAL_ID_TAG | (g_next_request_id & 0x3FFFFFFFU);
+  g_next_operation_id = (g_next_operation_id + 1U) & 0x3FFFFFFFU;
+  if (!g_next_operation_id) g_next_operation_id = 1;
+  return 0x40000000U | g_next_operation_id;
 }
-
-static uint32_t save_next_request_id(void *context) {
-  (void)context;
-  return next_internal_id();
+static void sync_config_session() {
+  const uint64_t session = motor_bridge_session_id();
+  if (session == g_observed_session) return;
+  g_transactions.set_session(session);
+  g_pager.set_source(session, g_info_revision, g_view_count);
+  g_observed_session = session;
 }
-
-static bool save_submit_device(void *context, uint32_t request_id,
-    uint16_t motor_id, uint8_t dirty_slots) {
-  (void)context;
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
+static bool submit_config(control_mailbox_config_request_t &request, uint8_t field) {
+  if (!g_transactions.can_start(g_active_slot, millis())) return false;
+  request.request_id = next_internal_id();
   request.received_tick_ms = millis();
-  request.motor_id = motor_id;
-  request.kind = CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH;
-  request.value.save_slots = dirty_slots;
-  return motor_rt_submit_config(&request);
+  request.valid_until_tick_ms = g_active_deadline;
+  if (!motor_rt_submit_config(&request)) {
+    report_error(kSubmitFailed, request.motor_id); return false;
+  }
+  return g_transactions.track(g_active_slot, request.request_id, request.motor_id, field);
 }
-
-static bool save_request_storage(void *context, uint32_t request_id) {
-  (void)context;
-  storage_task_request_save(request_id);
+// 有限操作使用互斥载荷；未用组必须为空/默认，避免含混或拼接请求。
+static bool groups_valid(const Config &m) {
+  if (!agent_config_operation_supported(m.operation) || m.policies.size > 48 ||
+      m.parameters.size || m.ack_request_ids.size > 8) return false;
+  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY &&
+      (m.policies.size || m.policy_generation || m.allow_no_protect)) return false;
+  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && m.ack_request_ids.size) return false;
+  if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
+      (m.query_id || m.query_kind || m.query_revision || m.cursor || m.detail_request_id)) return false;
+  const bool single = m.operation >= can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS && m.operation <= can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT;
+  if (single ? (m.motor_id == 0 || m.motor_id > 64) : m.motor_id != kMotorIdNone) return false;
+  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY && !m.policies.size) return false;
+  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && !m.ack_request_ids.size) return false;
+  if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
+      (!m.query_id || m.query_kind > 1 || (m.query_kind == 0 && m.detail_request_id))) return false;
   return true;
 }
-
-static save_transaction_storage_result_t save_take_storage_result(
-    void *context, uint32_t *request_id) {
-  (void)context;
-  switch (storage_take_result(request_id)) {
-  case STORAGE_SAVE_OK:
-    return SAVE_TRANSACTION_STORAGE_OK;
-  case STORAGE_SAVE_FAIL:
-    return SAVE_TRANSACTION_STORAGE_FAIL;
-  case STORAGE_SAVE_IDLE:
-  default:
-    return SAVE_TRANSACTION_STORAGE_IDLE;
+static bool policies_valid(const Config &m, uint64_t &disabled, bool &enables) {
+  disabled = 0; enables = false;
+  for (size_t i = 0; i < m.policies.size; ++i) {
+    const auto &p = m.policies.data[i];
+    if (!p.motor_id || p.motor_id > 64 || !isfinite(p.kp) || !isfinite(p.kd) || p.kp < 0 || p.kd < 0)
+      return false;
+    const uint64_t bit = UINT64_C(1) << (p.motor_id - 1);
+    if (disabled & bit) return false;
+    disabled |= bit;
+    enables |= p.enabled;
   }
-}
-
-static void save_report_error(void *context,
-    save_transaction_error_t reason,
-    uint16_t motor_id,
-    uint16_t device_error_code) {
-  (void)context;
-  g_save_error = device_error_code ? device_error_code : ERR_SAVE_FAIL;
-  switch (reason) {
-  case SAVE_TRANSACTION_ERROR_SUBMIT:
-    report_error(ERR_SUBMIT_FAILED, motor_id);
-    break;
-  case SAVE_TRANSACTION_ERROR_DEVICE:
-    report_error(device_error_code, motor_id);
-    break;
-  case SAVE_TRANSACTION_ERROR_TIMEOUT:
-  case SAVE_TRANSACTION_ERROR_STORAGE:
-  default:
-    report_error(ERR_SAVE_FAIL, kMotorIdNone);
-    break;
-  }
-}
-
-static const save_transaction_ports_t kSaveTransactionPorts = {
-  .context = nullptr,
-  .next_request_id = save_next_request_id,
-  .submit_device_save = save_submit_device,
-  .request_storage_save = save_request_storage,
-  .take_storage_result = save_take_storage_result,
-  .report_error = save_report_error,
-};
-
-// ---- 提交 ----
-
-// 公共头的请求 ID 在提交点换成独立操作 ID。
-static control_mailbox_config_request_t make_config_request(
-    const motor_control_param_view_t *v, control_mailbox_config_kind_t kind,
-    uint32_t request_id) {
-  control_mailbox_config_request_t request = {};
-  request.request_id = request_id;
-  request.received_tick_ms = millis();
-  request.motor_id = v->motor_id;
-  request.kind = kind;
-  return request;
-}
-
-// 提交并记账：此处失败只可能是 FIFO 满/断链（值域已在整条预校验阶段过完）。
-static bool submit_config_request(const control_mailbox_config_request_t *request,
-    uint16_t motor_id) {
-  control_mailbox_config_request_t correlated = *request;
-  correlated.request_id = next_internal_id();
-  if (!motor_rt_submit_config(&correlated)) {
-    report_error(ERR_SUBMIT_FAILED, motor_id);
-    return false;
-  }
-  // 一条消息至多 16 次提交；事件由本任务稍后消费，不会先于记账到达。
-  if (!g_transactions.track(g_active_slot, correlated.request_id)) {
-    report_error(ERR_SUBMIT_FAILED, motor_id);
-    return false;
+  if (!enables) {
+    if (m.allow_no_protect) return false;
+    for (size_t i = 0; i < m.policies.size; ++i)
+      if (m.policies.data[i].kp != 0 || m.policies.data[i].kd != 0 ||
+          m.policies.data[i].confirm_unprotected) return false;
   }
   return true;
 }
-
-// 速度/力矩限值提交；值域须提前整条校验，避免部分生效。失败表示 FIFO 满或断链。
-static bool submit_single_limit(const motor_control_param_view_t *v,
-    const param_field_desc_t *desc, float value,
-    uint32_t request_id) {
-  control_mailbox_config_request_t request =
-      make_config_request(v, desc->kind, request_id);
-  // 单位口径见 param_units.h：速度对外就是 rad/s（内核同单位，直通），力矩对外
-  // 是 A（设备对象 0x2538 存的就是电流）。换算只在这一处做。
-  if (desc->param_field == PARAM_FIELD_VEL_LIMIT) {
-    request.value.max_velocity_rad_s = value;
-  } else {
-    request.value.max_torque_nm = param_units_amp_to_nm(value, v->torque_per_amp);
-  }
-  return submit_config_request(&request, v->motor_id);
+static bool trajectory_busy(const Config &m) {
+  return (m.operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ||
+      m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ||
+      m.operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT) &&
+      motor_rt_agent_trajectory_owns(m.motor_id);
 }
 
-// 位置限位须预校验成对；本层不暂存或补齐。
-static bool submit_position_limits(const motor_control_param_view_t *v, float lo,
-    float hi, uint32_t request_id) {
-  control_mailbox_config_request_t request = make_config_request(
-      v, CONTROL_MAILBOX_CONFIG_SET_POSITION_LIMITS, request_id);
-  // 位置对外就是 rad（内核同单位，直通、不折算角度）。
-  request.value.position_limits.min_position_rad = lo;
-  request.value.position_limits.max_position_rad = hi;
-  return submit_config_request(&request, v->motor_id);
-}
-
-// 保护开关唯一反转点：对外 1=保护生效，厂家原值 0=保护开；下层只接收原值。
-static bool submit_safety_protect(const motor_control_param_view_t *v,
-    float value, uint32_t request_id) {
-  control_mailbox_config_request_t request = make_config_request(
-      v, CONTROL_MAILBOX_CONFIG_SET_SAFETY_PROTECT, request_id);
-  request.value.safety_protect_raw = (value == 1.0f) ? 0U : 1U;
-  return submit_config_request(&request, v->motor_id);
-}
-
-// 方向按厂家原值直通，不做语义反转。
-static bool submit_direction(const motor_control_param_view_t *v, float value,
-    uint32_t request_id) {
-  control_mailbox_config_request_t request =
-      make_config_request(v, CONTROL_MAILBOX_CONFIG_SET_DIRECTION, request_id);
-  request.value.direction_raw = (value == 1.0f) ? 1U : 0U;
-  return submit_config_request(&request, v->motor_id);
-}
-
-// 单目标分发（位置两项走成对路径，不到这里）。返回 false 时 last_error 已置。
-static bool dispatch_target(const motor_control_param_view_t *v, uint8_t field,
-    float value, uint32_t request_id) {
-  switch (field) {
-  case can_bridge_msgs__msg__ParamSetTarget__FIELD_VEL_LIMIT:
-  case can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT:
-    return submit_single_limit(v, &kFields[field], value, request_id);
-  case can_bridge_msgs__msg__ParamSetTarget__FIELD_LIMIT_PROTECT:
-    return submit_safety_protect(v, value, request_id);
-  case can_bridge_msgs__msg__ParamSetTarget__FIELD_DIRECTION:
-    return submit_direction(v, value, request_id);
-  default:
-    return false;   // POS_MIN/POS_MAX 走成对路径；越界 field 已被预校验拒掉
-  }
-}
-
-// ---- 整条校验 ----
-// 整条预校验，不提交 mailbox、不发布；失败设置 last_error 并整条拒绝。
-static bool validate_param_set(
-    const can_bridge_msgs__msg__ParamSetTarget *targets, uint16_t count) {
-  if (count > kParamSetMaxTargets) {
-    report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
-    return false;
-  }
-  for (uint16_t i = 0; i < count; ++i) {
-    const can_bridge_msgs__msg__ParamSetTarget &t = targets[i];
-    if (t.field >= PARAM_DEVICE_SLOT_COUNT) {
-      report_error(ERR_LOCAL_VALIDATION, t.motor_id);
-      return false;
-    }
-    const motor_control_param_view_t *v = find_view(t.motor_id);
-    if (v == nullptr) {
-      report_error(ERR_UNKNOWN_MOTOR, t.motor_id);
-      return false;
-    }
-    // 上界参数传 0：内核侧还会按型号额定再钳一次，本层只做纯值域判定。
-    if (!param_value_ok(kFields[t.field].param_field, t.value, 0.0f, nullptr)) {
-      report_error(ERR_LOCAL_VALIDATION, t.motor_id);
-      return false;
-    }
-    // 力矩 A→N·m 的系数未知时换算非有限，不能下发；放进整条预校验避免部分生效。
-    if (t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_TORQUE_LIMIT &&
-        !isfinite(param_units_amp_to_nm(t.value, v->torque_per_amp))) {
-      report_error(ERR_LOCAL_VALIDATION, t.motor_id);
-      return false;
-    }
-    // 同一 (motor_id, field) 出现两次：静默取一个会掩盖调用方 bug。
-    for (uint16_t j = 0; j < i; ++j) {
-      if (targets[j].motor_id == t.motor_id && targets[j].field == t.field) {
-        report_error(ERR_LOCAL_VALIDATION, t.motor_id);
-        return false;
-      }
-    }
-  }
-  // 位置限位成对：同一条消息内该台必须两边都给，且 min < max。
-  const uint8_t pos_bits = (uint8_t)((1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN) |
-      (1U << can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX));
-  for (uint16_t i = 0; i < count; ++i) {
-    const uint16_t id = targets[i].motor_id;
-    uint8_t mask = 0U;
-    float lo = NAN;
-    float hi = NAN;
-    for (uint16_t j = 0; j < count; ++j) {
-      const can_bridge_msgs__msg__ParamSetTarget &p = targets[j];
-      if (p.motor_id != id) {
-        continue;
-      }
-      mask |= (uint8_t)(1U << p.field);
-      if (p.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN) {
-        lo = p.value;
-      } else if (p.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
-        hi = p.value;
-      }
-    }
-    if ((mask & pos_bits) == 0U) {
-      continue; // 本台没写位置限位
-    }
-    if ((mask & pos_bits) != pos_bits) {
-      report_error(ERR_LOCAL_VALIDATION, id);
-      return false;
-    }
-    if (!param_position_limits_ok(lo, hi)) {
-      report_error(ERR_LOCAL_VALIDATION, id);
-      return false;
-    }
-  }
-  return true;
-}
-
-static void apply_param_set(
-    const can_bridge_msgs__msg__ParamSetTarget *targets, uint16_t count,
-    uint32_t request_id) {
-  uint16_t total = count;
-  for (uint16_t i = 0; i < count; ++i) {
-    if (targets[i].field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
-      --total;
-    }
-  }
-  bool consumed[kParamSetMaxTargets] = {};
-  for (uint16_t i = 0; i < count; ++i) {
-    if (consumed[i]) {
-      continue;
-    }
-    const can_bridge_msgs__msg__ParamSetTarget &t = targets[i];
-    const motor_control_param_view_t *v = find_view(t.motor_id);
-    if (v == nullptr) {
-      continue; // 预校验已确认存在；防御
-    }
-    if (t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN ||
-        t.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
-      float lo = NAN;
-      float hi = NAN;
-      for (uint16_t j = 0; j < count; ++j) {
-        const can_bridge_msgs__msg__ParamSetTarget &p = targets[j];
-        if (p.motor_id != t.motor_id) {
-          continue;
-        }
-        if (p.field == can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MIN) {
-          lo = p.value;
-          consumed[j] = true;
-        } else if (p.field ==
-            can_bridge_msgs__msg__ParamSetTarget__FIELD_POS_MAX) {
-          hi = p.value;
-          consumed[j] = true;
-        }
-      }
-      if (!submit_position_limits(v, lo, hi, request_id)) {
-        g_transactions.submitted(g_active_slot, total, ERR_SUBMIT_FAILED);
-        return;
-      }
-      continue;
-    }
-    consumed[i] = true;
-    if (!dispatch_target(v, t.field, t.value, request_id)) {
-      g_transactions.submitted(g_active_slot, total, ERR_SUBMIT_FAILED);
-      return;
-    }
-  }
-  g_transactions.submitted(g_active_slot, total, 0);
-}
-
-static void handle_system_command(uint8_t command, uint16_t motor_id,
-    uint32_t request_id) {
-  if (command == can_bridge_msgs__msg__SystemCommand__COMMAND_SAVE) {
-    if (motor_id != can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE) {
-      report_error(ERR_LOCAL_VALIDATION, motor_id);
-      g_transactions.complete(g_active_slot, 0, 0, ERR_LOCAL_VALIDATION);
-      return;
-    }
-    // 保存快照与参数写互斥；不能把在飞写入的一半投影到 W25。
-    if (g_transactions.pending_except(g_active_slot) ||
-        save_transaction_in_progress(&g_save_transaction)) {
-      g_transactions.busy(g_active_slot);
-      return;
-    }
-    g_save_slot = g_active_slot;
-    g_save_total = g_save_completed = g_save_error = 0;
-    g_transactions.external(g_save_slot);
-    save_transaction_request(&g_save_transaction);
-    return;
-  }
-  if (command == can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT) {
-    g_report_pending = true;
-    return;
-  }
-  control_mailbox_config_kind_t kind;
-  switch (command) {
-  case can_bridge_msgs__msg__SystemCommand__COMMAND_REFRESH:
-    kind = CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS; break;
-  case can_bridge_msgs__msg__SystemCommand__COMMAND_SET_ZERO:
-    kind = CONTROL_MAILBOX_CONFIG_SET_ZERO; break;
-  case can_bridge_msgs__msg__SystemCommand__COMMAND_CLEAR_FAULT:
-    kind = CONTROL_MAILBOX_CONFIG_CLEAR_FAULT; break;
-  default:
-    report_error(ERR_LOCAL_VALIDATION, motor_id);
-    g_transactions.complete(g_active_slot, 0, 0, ERR_LOCAL_VALIDATION);
-    return;
-  }
-  g_sequence_pending[g_active_slot] = true;
-  const motor_control_param_view_t *v = find_view(motor_id);
-  if (v == nullptr || !v->bound) {
-    report_error(ERR_UNKNOWN_MOTOR, motor_id);
-    g_transactions.complete(g_active_slot, 0, 1, ERR_UNKNOWN_MOTOR);
-    return;
-  }
-  auto request = make_config_request(v, kind, request_id);
-  const bool ok = submit_config_request(&request, motor_id);
-  g_transactions.submitted(g_active_slot, 1, ok ? 0 : ERR_SUBMIT_FAILED);
-}
-
-static void config_cb(const void *msgin) {
-  const auto *msg = static_cast<const can_bridge_msgs__msg__ConfigRequest *>(msgin);
-  if (msg == nullptr) {
-    return;
-  }
+static void config_cb(const void *input) {
+  const auto *msg = static_cast<const Config *>(input);
+  if (!msg) return;
   sync_config_session();
-  update_completion_sequences();
   config_transaction::Request request{};
-  request.session_id = msg->session_id;
-  request.sync_time_ns = msg->sync_time_ns;
-  request.request_id = msg->request_id;
-  request.kind = msg->kind;
-  request.command = msg->command;
-  request.motor_id = msg->motor_id;
-  request.count = msg->count;
-  request.size = msg->targets.size;
-  if (request.size <= config_transaction::kMaxTargets) {
-    for (size_t i = 0; i < request.size; ++i) {
-      request.targets[i] = {msg->targets.data[i].motor_id,
-                            msg->targets.data[i].field, msg->targets.data[i].value};
+  request.session_id = msg->session_id; request.request_id = msg->request_id;
+  request.command = msg->operation; request.motor_id = msg->motor_id;
+  request.policy_generation = msg->policy_generation;
+  request.sync_time_ns = msg->issued_stamp;
+  if (msg->schema_version != can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION || !groups_valid(*msg)) {
+    g_transactions.reject(request, config_transaction::kFailed, kInvalid); return;
+  }
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__STOP_ALL) {
+    motor_rt_request_stop_all(); return;
+  }
+  if (!g_observed_session || msg->session_id != g_observed_session) {
+    g_transactions.reject(request, config_transaction::kRetired, kInvalid); return;
+  }
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS) {
+    for (size_t i = 0; i < msg->ack_request_ids.size; ++i)
+      (void)g_transactions.ack_result(msg->session_id, msg->ack_request_ids.data[i]);
+    return;
+  }
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO) {
+    g_pager.set_source(g_observed_session, g_info_revision, g_view_count);
+    (void)g_pager.request(msg->session_id, msg->query_id, msg->query_revision,
+        msg->cursor, msg->query_kind, msg->detail_request_id);
+    return;
+  }
+  uint64_t disabled = 0;
+  bool enables = false;
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
+    if (!policies_valid(*msg, disabled, enables)) {
+      g_transactions.reject(request, config_transaction::kFailed, kInvalid); return;
     }
+    if (!enables) { motor_rt_request_disable(disabled); return; }
   }
-  g_active_slot = g_transactions.begin(request, motor_bridge_session_id(), millis());
-  if (g_active_slot < 0) {
-    return;
+  request.size = msg->parameters.size; request.count = request.size;
+  for (size_t i = 0; i < request.size; ++i)
+    request.targets[i] = {msg->parameters.data[i].motor_id,
+        msg->parameters.data[i].field, msg->parameters.data[i].value};
+  request.policy_count = msg->policies.size;
+  for (size_t i = 0; i < request.policy_count; ++i) {
+    const auto &p = msg->policies.data[i];
+    request.policies[i] = {p.motor_id, p.enabled,
+        p.confirm_unprotected || msg->allow_no_protect, p.kp, p.kd};
   }
-  if (!wire_config_groups_exclusive(msg->kind, msg->count,
-      msg->targets.size, msg->command, msg->motor_id)) {
-    report_error(ERR_LOCAL_VALIDATION, kMotorIdNone);
-    g_transactions.complete(g_active_slot, 0, 0, ERR_LOCAL_VALIDATION);
-    return;
+  const uint32_t now = millis();
+  const uint16_t ttl_limit = msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY ? 100 : 1000;
+  // begin 先检查相同 ID 的缓存，重试更改时间或 TTL 也绝不会续命/重执行。
+  if (!agent_request_deadline(msg->issued_stamp, msg->ttl_ms, ttl_limit,
+      time_epoch_now(), now, &request.valid_until_tick_ms)) request.valid_until_tick_ms = now;
+  g_active_slot = g_transactions.begin(request, g_observed_session, now);
+  if (g_active_slot < 0) return;
+  g_active_deadline = request.valid_until_tick_ms;
+  if (!time_clock_valid() || !g_transactions.can_start(g_active_slot, millis())) {
+    g_transactions.complete(g_active_slot, 0, 0, config_transaction::kExpired); return;
   }
-  if (save_transaction_in_progress(&g_save_transaction) &&
-      !(msg->kind == WIRE_CONFIG_KIND_SYSTEM_COMMAND &&
-      msg->command == can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT)) {
-    g_transactions.busy(g_active_slot);
-    return;
+  if (trajectory_busy(*msg)) {
+    g_transactions.busy(g_active_slot); return;
   }
-  if (msg->kind == WIRE_CONFIG_KIND_PARAM_SET) {
-    if (!validate_param_set(msg->targets.data, msg->count)) {
-      g_transactions.complete(g_active_slot, 0, 0, g_last_error);
-      return;
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
+    for (size_t i = 0; i < msg->policies.size; ++i) {
+      const auto &target = msg->policies.data[i];
+      if (target.enabled && g_transactions.pending_device_command(
+          can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO, target.motor_id)) {
+        g_transactions.busy(g_active_slot); return;
+      }
     }
-    apply_param_set(msg->targets.data, msg->count, msg->request_id);
+    control_policy_snapshot_t policy{};
+    policy.request_id = next_internal_id(); policy.received_tick_ms = now;
+    policy.valid_until_tick_ms = g_active_deadline;
+    policy.policy_generation = msg->policy_generation;
+    policy.lease_id = msg->lease_id;
+    policy.target_count = msg->policies.size;
+    for (size_t i = 0; i < policy.target_count; ++i) {
+      const auto &p = msg->policies.data[i];
+      policy.targets[i] = {p.motor_id, p.enabled, p.kp, p.kd,
+          p.confirm_unprotected || msg->allow_no_protect};
+    }
+    if (!motor_rt_submit_policy(&policy)) { g_transactions.busy(g_active_slot); return; }
+    for (size_t i = 0; i < policy.target_count; ++i)
+      (void)g_transactions.track(g_active_slot, policy.request_id, policy.targets[i].motor_id);
+    g_transactions.submitted(g_active_slot, policy.target_count, 0);
   } else {
-    handle_system_command(msg->command, msg->motor_id, msg->request_id);
+    const auto *v = find_view(msg->motor_id);
+    if (!v || !v->bound) { g_transactions.complete(g_active_slot, 0, 1, kUnknownMotor); return; }
+    // 首版保守地拒绝仍武装的 CLEAR_FAULT，不把故障清除当作运动命令。
+    if ((msg->operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT ||
+        msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO) && v->enable) {
+      g_transactions.busy(g_active_slot); return;
+    }
+    control_mailbox_config_request_t item{};
+    item.motor_id = msg->motor_id;
+    item.kind = msg->operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ? CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS
+        : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ? CONTROL_MAILBOX_CONFIG_SET_ZERO
+        : CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
+    const bool ok = submit_config(item, UINT8_MAX);
+    g_transactions.submitted(g_active_slot, 1, ok ? 0 : kSubmitFailed);
   }
-  update_completion_sequences();
 }
-
-// ---- 内核事件回告 ----
 
 void param_bridge_on_config_result(const motor_control_event_t *event) {
-  if (!g_created || event == nullptr ||
-      event->type != MOTOR_CONTROL_EVENT_CONFIG_RESULT) {
-    return;
-  }
-  const uint32_t id = event->request_id;
+  if (!g_created || !event || event->type != MOTOR_CONTROL_EVENT_CONFIG_RESULT) return;
   const bool ok = event->reason == MOTOR_PROTOCOL_CONFIG_OK;
-
-  if (save_transaction_on_device_result(
-      &g_save_transaction, id, ok, event->motor_id,
-      (uint16_t)event->reason, &kSaveTransactionPorts)) {
-    if (ok) {
-      ++g_save_completed;
-    }
+  (void)g_transactions.on_result(event->request_id, ok, event->reason, event->motor_id);
+  if (!ok) report_error(event->reason, event->motor_id);
+}
+static uint32_t hash_bytes(uint32_t hash, const void *data, size_t size) {
+  const auto *p = static_cast<const uint8_t *>(data);
+  while (size--) hash = (hash ^ *p++) * 16777619U;
+  return hash;
+}
+static void fill_info_cache() {
+  if (!g_pager.needs_fill()) return;
+  const auto &page = g_pager.page();
+  const uint32_t tick = millis();
+  const uint64_t epoch = time_epoch_now();
+  if (page.kind == 1) {
+    static config_transaction::Detail details[config_transaction::kMaxOperations];
+    const size_t total = g_transactions.copy_details(g_observed_session,
+        page.detail_request_id, details, config_transaction::kMaxOperations);
+    const size_t begin = page.cursor < total ? page.cursor : total;
+    const size_t count = total - begin < 16 ? total - begin : 16;
+    g_pager.fill_details(details + begin, count, total, tick, epoch);
     return;
   }
-
-  const bool matched = g_transactions.on_result(id, ok, (uint16_t)event->reason);
-  if (!ok) {
-    report_error((uint16_t)event->reason, event->motor_id);
-  }
-  if (matched) {
-    update_completion_sequences();
-  }
-}
-
-// ---- 状态快照 ----
-
-const can_bridge_msgs__msg__SystemStatus *param_bridge_system_status(void) {
-  g_system_status_msg.sync_time_ns = rmw_uros_epoch_nanos();
-  g_system_status_msg.last_error = g_last_error;
-  g_system_status_msg.last_error_motor = g_last_error_motor;
-  g_system_status_msg.refresh_seq = (uint32_t)g_refresh_seq;
-  g_system_status_msg.set_zero_seq = (uint32_t)g_set_zero_seq;
-  g_system_status_msg.clear_fault_seq = (uint32_t)g_clear_fault_seq;
-  g_system_status_msg.save_seq = (uint32_t)g_save_seq;
-  g_system_status_msg.save_in_progress =
-      save_transaction_in_progress(&g_save_transaction);
-  return &g_system_status_msg;
-}
-
-// SAVE 状态机独立于 ROS 消息、motor_control 视图和 storage_task 实现；本桥只
-// 转换视图快照、提供设备/存储端口，维护状态序号。
-static void poll_save(uint32_t now) {
-  save_transaction_target_t targets[SAVE_TRANSACTION_MAX_TARGETS] = {};
-  size_t target_count = g_view_count;
-  if (target_count > SAVE_TRANSACTION_MAX_TARGETS) {
-    target_count = SAVE_TRANSACTION_MAX_TARGETS;
-  }
-  for (size_t i = 0U; i < target_count; ++i) {
-    targets[i].motor_id = g_views[i].motor_id;
-    targets[i].dirty_slots = g_views[i].record_dirty_slots;
-  }
-
-  if (g_save_transaction.request_pending &&
-      g_save_transaction.phase == SAVE_TRANSACTION_PHASE_IDLE) {
-    g_save_total = 0;
-    for (size_t i = 0; i < target_count; ++i) {
-      if (targets[i].dirty_slots != 0) { ++g_save_total; }
-    }
-  }
-  const save_transaction_effects_t effects = save_transaction_poll(
-      &g_save_transaction, now, targets, target_count,
-      &kSaveTransactionPorts);
-  if (effects.completed) {
-    // 完成序号是动作结束序号，不是成功计数；失败也必须推进，避免上层永久等待。
-    ++g_save_seq;
-    if (g_save_slot >= 0) {
-      g_transactions.complete(g_save_slot, g_save_completed,
-          g_save_total - g_save_completed, g_save_error);
-      g_save_slot = -1;
-    }
-  }
-  if (effects.status_changed) {
-  }
-}
-
-// 内核上电回读与固件记录比对的结论，仅在变化时更新 last_error，与请求回告无关。
-static void report_dev_init_changes(void) {
+  // 首版复用有界临时转换区；缓存仍只有16台，不触发设备回读。
+  static info_page::Device devices[MOTOR_CONTROL_MAX_MOTORS];
+  static motor_rt_topology_entry_t topology[MOTOR_CONTROL_MAX_MOTORS];
+  const size_t count = motor_rt_copy_topology(topology, MOTOR_CONTROL_MAX_MOTORS);
   for (size_t i = 0; i < g_view_count; ++i) {
-    const motor_control_param_view_t *v = &g_views[i];
-    if (v->motor_id >= sizeof(g_reported_dev_init) ||
-        g_reported_dev_init[v->motor_id] == v->dev_init) {
-      continue;
-    }
-    g_reported_dev_init[v->motor_id] = v->dev_init;
-    switch (v->dev_init) {
-    case MOTOR_CONTROL_DEV_INIT_MISMATCH:
-      report_error(ERR_DEV_INIT_MISMATCH, v->motor_id);
-      break;
-    case MOTOR_CONTROL_DEV_INIT_UNVERIFIED:
-      report_error(ERR_DEV_INIT_UNVERIFIED, v->motor_id);
-      break;
-    case MOTOR_CONTROL_DEV_INIT_NO_RECORD:
-      report_error(ERR_DEV_INIT_NO_RECORD, v->motor_id);
-      break;
-    case MOTOR_CONTROL_DEV_INIT_OK:
-    case MOTOR_CONTROL_DEV_INIT_NA:
-      // 恢复正常也上报，清除上一轮错误。
-      report_error(ERR_NONE, v->motor_id);
-      break;
-    default:
-      break;   // PENDING 不是结论，不报
+    auto &d = devices[i]; d = info_page::Device{};
+    d.motor_id = g_views[i].motor_id; d.params = g_views[i]; d.online = g_views[i].online;
+    for (size_t j = 0; j < count; ++j) if (topology[j].motor_id == d.motor_id) {
+      d.bus = topology[j].bus_index; d.protocol = topology[j].protocol;
+      memcpy(d.model, topology[j].model_name, sizeof(d.model)); d.model[31] = '\0';
+      d.capabilities = topology[j].capability_flags; d.conflict = topology[j].conflict;
+      d.lifecycle = topology[j].lifecycle;
     }
   }
+  g_pager.fill(devices, g_view_count, tick, epoch);
 }
-
 void param_bridge_poll(void) {
-  if (!g_created) {
-    return;
-  }
+  if (!g_created) return;
   sync_config_session();
   const uint32_t now = millis();
   g_view_count = motor_rt_copy_param_views(g_views, MOTOR_CONTROL_MAX_MOTORS);
-
-  poll_save(now);
-  report_dev_init_changes();
-
-  g_transactions.poll(now);
-  update_completion_sequences();
-}
-
-uint32_t param_bridge_publish_fail_count(void) {
-  return 0U;
-}
-
-const motor_control_param_view_t *param_bridge_views(size_t *out_count) {
-  if (out_count != nullptr) {
-    *out_count = g_view_count;
+  const uint32_t hash = hash_bytes(2166136261U, g_views, g_view_count * sizeof(g_views[0]));
+  if (hash != g_info_hash) {
+    g_info_hash = hash;
+    if (++g_info_revision == 0) ++g_info_revision;
   }
+  g_pager.set_source(g_observed_session, g_info_revision, g_view_count);
+  g_transactions.poll(now);
+  fill_info_cache();
+}
+static void encode_result(can_bridge_msgs__msg__AgentConfigResult &out,
+    const config_transaction::Result &in) {
+  out.request_id = in.request_id; out.operation = in.command;
+  out.state = in.status; out.error = in.error_code;
+  out.completed_motor_mask = in.completed_motor_mask; out.failed_motor_mask = in.failed_motor_mask;
+}
+void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out) {
+  if (!out) return;
+  out->info_revision = g_info_revision;
+  out->config_request_high_water = g_transactions.request_high_water();
+  out->save_in_progress = false;
+  out->last_error = g_last_error; out->last_error_motor = g_last_error_motor;
+  const uint16_t frequencies[] = {FIRMWARE_AGENT_PING_HZ, FIRMWARE_MOTOR_REPORT_HZ,
+      FIRMWARE_MOTOR_REPORT_HZ, FIRMWARE_IMU_REPORT_HZ, FIRMWARE_TEMPERATURE_REPORT_HZ,
+      FIRMWARE_MOTOR_COMMAND_HZ};
+  out->firmware_values_valid = true;
+  memcpy(out->firmware_values, frequencies, sizeof(frequencies));
+  out->firmware_unsaved = false;
+  config_transaction::Result results[8]{};
+  const size_t count = g_transactions.copy_results(results, 8);
+  out->results.size = count <= out->results.capacity ? count : out->results.capacity;
+  for (size_t i = 0; i < out->results.size; ++i) encode_result(out->results.data[i], results[i]);
+  config_transaction::Result rejection{};
+  if (g_transactions.copy_rejection(rejection)) encode_result(out->rejection_receipt, rejection);
+  else out->rejection_receipt = can_bridge_msgs__msg__AgentConfigResult{};
+}
+static void encode_parameters(can_bridge_msgs__msg__DeviceParamEntry &out,
+    const motor_control_param_view_t &v) {
+  out.motor_id = v.motor_id; out.dev_init_state = v.dev_init;
+  out.record_dirty = v.record_dirty_slots != 0; out.mismatch_mask = v.dev_mismatch_mask;
+  float rec[8], dev[8];
+  for (size_t i = 0; i < 8; ++i) {
+    rec[i] = (v.record_raw_present & (1U << i)) ? v.record_si[i] : NAN;
+    dev[i] = (v.dev_raw_present & (1U << i)) ? v.dev_si[i] : NAN;
+  }
+  rec[3] = param_units_nm_to_amp(rec[3], v.torque_per_amp);
+  dev[3] = param_units_nm_to_amp(dev[3], v.torque_per_amp);
+  out.rec_pos_min = rec[0]; out.rec_pos_max = rec[1]; out.rec_vel_limit = rec[2];
+  out.rec_torque_limit = rec[3]; out.rec_safety = rec[4]; out.rec_direction = rec[5];
+  out.dev_pos_min = dev[0]; out.dev_pos_max = dev[1]; out.dev_vel_limit = dev[2];
+  out.dev_torque_limit = dev[3]; out.dev_safety = dev[4]; out.dev_direction = dev[5];
+  out.rec_t_max = rec[6]; out.dev_t_max = dev[6];
+  out.rec_node_id = rec[7]; out.dev_node_id = dev[7];
+}
+const can_bridge_msgs__msg__AgentInfo *param_bridge_info(void) {
+  if (!g_pager.pending() || g_pager.needs_fill()) return nullptr;
+  const auto &page = g_pager.page();
+  g_info.session_id = page.session; g_info.snapshot_stamp = page.epoch_ns;
+  g_info.snapshot_tick_ms = page.tick_ms; g_info.clock_valid = page.epoch_ns != 0;
+  g_info.schema_version = can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION;
+  g_info.query_id = page.query_id; g_info.kind = page.kind;
+  g_info.result = page.result; g_info.revision = page.revision;
+  g_info.cursor = page.cursor; g_info.next_cursor = page.next_cursor; g_info.complete = page.complete;
+  g_info.motor_capacity = 48; g_info.trajectory_point_capacity = 256;
+  g_info.detail_request_id = page.detail_request_id;
+  g_info.devices.size = page.kind == 0 ? page.count : 0;
+  g_info.details.size = page.kind == 1 ? page.count : 0;
+  for (size_t i = 0; i < g_info.devices.size; ++i) {
+    auto &out = g_info_devices[i]; const auto &in = page.devices[i];
+    out.motor_id = in.motor_id; out.bus_index = in.bus; out.node_id = in.motor_id;
+    out.protocol = in.protocol; out.capability_flags = in.capabilities;
+    memcpy(g_model_names[i], in.model, 32); g_model_names[i][31] = '\0';
+    out.model_name.size = strlen(g_model_names[i]);
+    out.online = in.online; out.conflict = in.conflict; out.lifecycle = in.lifecycle;
+    out.record_valid = in.params.record_raw_present != 0;
+    out.device_valid = in.params.dev_raw_present == MOTOR_CONTROL_DEV_RAW_ALL;
+    // 内核尚无参数采集 tick；显式未知，绝不把当前查询时间冒充回读时间。
+    out.device_read_age_ms = UINT32_MAX;
+    encode_parameters(out.parameters, in.params);
+  }
+  for (size_t i = 0; i < g_info.details.size; ++i) {
+    const auto &in = page.details[i]; auto &out = g_info_details[i];
+    out.motor_id = in.motor_id; out.field = in.field; out.error = in.error;
+    out.completed = in.complete;
+  }
+  return &g_info;
+}
+void param_bridge_info_sent(bool success) { g_pager.sent(success); }
+uint32_t param_bridge_request_high_water(void) { return g_transactions.request_high_water(); }
+const motor_control_param_view_t *param_bridge_views(size_t *count) {
+  if (count) *count = g_view_count;
   return g_views;
 }
-
-bool param_bridge_take_report_request(void) {
-  bool pending = false;
-  const bool requested = g_report_pending;
-  g_report_pending = false;
-  if (requested) {
-    for (size_t i = 0; i < config_transaction::kCapacity; ++i) {
-      const auto *r = g_transactions.result(static_cast<int>(i));
-      if (r != nullptr && r->status == config_transaction::kPending &&
-          r->kind == WIRE_CONFIG_KIND_SYSTEM_COMMAND &&
-          r->command == can_bridge_msgs__msg__SystemCommand__COMMAND_REPORT) {
-        g_transactions.complete(static_cast<int>(i), 0, 0, 0);
-        pending = true;
-      }
-    }
-  }
-  return pending;
-}
-
-const motor_control_stored_params_t *param_bridge_stored_records(
-    size_t *out_count) {
-  return storage_boot_params(out_count);
-}
-
-// ---- 生命周期 ----
-
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
-  if (g_created) {
-    return true; // 幂等
+  if (g_created) return true;
+  if (!node || !executor) return false;
+  memset(g_views, 0, sizeof(g_views));
+  g_config_msg.motor_id = kMotorIdNone;
+  g_config_msg.policies.data = g_policies; g_config_msg.policies.capacity = 48;
+  g_config_msg.parameters.data = g_parameters; g_config_msg.parameters.capacity = 16;
+  g_config_msg.ack_request_ids.data = g_ack_ids; g_config_msg.ack_request_ids.capacity = 8;
+  g_info.devices.data = g_info_devices; g_info.devices.capacity = 16;
+  g_info.details.data = g_info_details; g_info.details.capacity = 16;
+  for (size_t i = 0; i < 16; ++i) {
+    g_info_devices[i].model_name.data = g_model_names[i];
+    g_info_devices[i].model_name.capacity = 32;
   }
-  if (node == nullptr || executor == nullptr) {
-    return false;
-  }
-
-  save_transaction_init(&g_save_transaction);
-
-  // 反序列化写入静态序列缓冲；初始化前必须设置 data/capacity，rclc 不代为分配。
-  g_config_msg.targets.capacity =
-      sizeof(g_config_targets_buf) / sizeof(g_config_targets_buf[0]);
-  g_config_msg.targets.data = g_config_targets_buf;
-  if (g_config_msg.targets.capacity < kParamSetMaxTargets) {
-    return false;
-  }
-
-  memset(g_reported_dev_init, 0xFF, sizeof(g_reported_dev_init));
-  g_view_count = 0;
-
-  rcl_subscription_options_t sub_opts = rcl_subscription_get_default_options();
-  // 配置/系统命令面是低频状态声明，reliable；< 512 B MTU，不分片。
-  sub_opts.qos = qos_reliable(1);
+  rcl_subscription_options_t options = rcl_subscription_get_default_options();
+  options.qos = qos_reliable(4);
   if (rcl_subscription_init(&g_config_sub, node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, ConfigRequest),
-      kConfigTopic, &sub_opts) != RCL_RET_OK) {
-    param_bridge_destroy(node, executor);
-    return false;
-  }
+      ROSIDL_GET_MSG_TYPE_SUPPORT(can_bridge_msgs, msg, AgentConfigRequest),
+      can_bridge_msgs__msg__AgentWireContract__TOPIC_CONFIG, &options) != RCL_RET_OK) return false;
   g_sub_up = true;
-
-  if (rclc_executor_add_subscription(executor, &g_config_sub,
-      &g_config_msg, config_cb, ON_NEW_DATA) != RCL_RET_OK) {
-    param_bridge_destroy(node, executor);
-    return false;
+  if (rclc_executor_add_subscription(executor, &g_config_sub, &g_config_msg,
+      config_cb, ON_NEW_DATA) != RCL_RET_OK) {
+    param_bridge_destroy(node, executor); return false;
   }
-  g_sub_added = true;
-
-  g_created = true;
+  g_sub_added = true; g_created = true;
   return true;
 }
-
 void param_bridge_destroy(rcl_node_t *node, rclc_executor_t *executor) {
-  if (!g_created && !g_sub_up) {
-    return;
-  }
   g_created = false;
-  g_view_count = 0;
-  memset(g_reported_dev_init, 0xFF, sizeof(g_reported_dev_init));
-  // 重建后视图会重填，保存事务不得沿用旧游标。
-  save_transaction_disconnect(&g_save_transaction);
-  if (g_save_slot >= 0) {
-    g_transactions.complete(g_save_slot, g_save_completed,
-        g_save_total - g_save_completed, ERR_SAVE_FAIL);
-    ++g_save_seq;
-    g_save_slot = -1;
-  }
-  g_transactions.disconnect();
-  update_completion_sequences();
-  g_report_pending = false;
-
-  // fini 不会移除 executor 句柄；订阅须先移除，避免重连后句柄残留。
-  if (executor != nullptr) {
-    if (g_sub_added) {
-      (void)rclc_executor_remove_subscription(executor, &g_config_sub);
-    }
-  }
+  g_transactions.disconnect(); g_view_count = 0;
+  if (g_sub_added && executor) (void)rclc_executor_remove_subscription(executor, &g_config_sub);
   g_sub_added = false;
-  // fini 的 warn_unused_result 要求接收返回值；清理失败无补救动作。
-  rcl_ret_t rc = RCL_RET_OK;
-  if (g_sub_up) {
-    rc = rcl_subscription_fini(&g_config_sub, node);
-    g_sub_up = false;
-  }
-  (void)rc;
-}
-
-bool param_bridge_result_peek(can_bridge_msgs__msg__ConfigResult *out) {
-  if (out == nullptr) { return false; }
-  config_transaction::Result result{};
-  if (!g_transactions.peek(result)) { return false; }
-  out->session_id = result.session_id;
-  out->request_id = result.request_id;
-  out->kind = result.kind;
-  out->command = result.command;
-  out->status = result.status;
-  out->error_code = result.error_code;
-  out->completed_targets = result.completed_targets;
-  out->failed_targets = result.failed_targets;
-  return true;
-}
-
-void param_bridge_result_ack(void) {
-  g_transactions.ack();
-}
-
-uint32_t param_bridge_request_high_water(void) {
-  return g_transactions.request_high_water();
+  if (g_sub_up) { const rcl_ret_t result = rcl_subscription_fini(&g_config_sub, node); (void)result; }
+  g_sub_up = false;
 }

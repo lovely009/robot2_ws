@@ -1,104 +1,4 @@
-/* 面板通用样式：随各面板任务逐步补充。骨架样式在 shell.css。 */
-
-/* ---------- 屏栅格：router 把屏模板克隆进 .main，每个屏自排自己的栅格 ---------- */
-.screen { display: grid; gap: var(--gap); align-items: start; }
-.screen.run {
-  grid-template-columns: 300px minmax(0, 1fr) 310px;
-  grid-template-areas:
-    "index stage side"
-    "command command command"
-    "drawer drawer drawer";
-}
-.col-index { grid-area: index; }
-.col-stage { grid-area: stage; }
-.col-side { grid-area: side; }
-.col-command { grid-area: command; }
-.col-drawer { grid-area: drawer; }
-.col-index, .col-stage, .col-side, .col-command, .col-drawer { min-width: 0; }
-@media (max-width: 1360px) {
-  .screen.run { grid-template-columns: 285px minmax(0, 1fr) 270px; }
-}
-@media (max-width: 1080px) {
-  .screen.run { grid-template-columns: 200px minmax(0, 1fr);
-    grid-template-areas: "index stage" "side side" "command command" "drawer drawer"; }
-}
-@media (max-width: 820px) {
-  .screen.run { grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "index" "stage" "side" "command" "drawer"; }
-}
-
-/* ≥1081px（三栏并排）时，左右两栏不得高过中栏的臂视图：封顶到同一高度、各自内部
-   滚动，三栏底部齐平。中栏高度由 --stage-h 定，左右两栏只受它约束。
-   收窄到两栏/一栏堆叠时不封顶——那时高度本来就不需要对齐。 */
-@media (min-width: 1081px) {
-  /* 用确定高度而不是 max-height：只有确定高度才会让 flex 子项收缩，max-height
-     下的 auto 高度是不确定的，卡片会照原样撑出去、内部滚动条永远不出现。
-     面板标记外还有一层 [data-panel] 占位 div（index.html 模板克隆），两层都要
-     收缩，任一层的 min-height: auto 都会把内容顶回来。 */
-  .col-index, .col-side { display: flex; flex-direction: column;
-    height: calc(var(--stage-h) + 2px); }   /* +2px 补 .stage 的上下边框 */
-  /* flex 链三层都要 flex: 1：容器给了确定高度后，[data-panel] 占位与 details 卡片
-     还要能**伸展**才能让可见卡片的底边贴到栏底——只靠 min-height: 0 只有"内容溢出
-     时收缩"的一半，内容短于栏高时卡片会停在内容处、底边不齐。 */
-  .col-index > [data-panel], .col-side > [data-panel] {
-    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
-  .col-index > [data-panel] > details, .col-side > [data-panel] > details {
-    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
-  /* details 的正文不在 details 盒子下，而是被 UA 包在 ::details-content 里
-     （Chromium 131+）——不补这一层，里面的 ul/table 就不是 flex 子项、不会收缩。 */
-  .col-index > [data-panel] > details::details-content,
-  .col-side > [data-panel] > details::details-content {
-    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-  /* 封顶后最后一格不再留底边距，否则卡片底边比中栏高一截 */
-  .col-index > [data-panel]:last-child > details,
-  .col-side > [data-panel]:last-child > details { margin-bottom: 0; }
-  .col-index .joints { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-  /* 状态表体自身可滚（行多时），正常 18 行在封顶高度内全部可见 */
-  .col-side > [data-panel] > details.card > .table-wrap {
-    flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-}
-
-/* teach 屏：上部为关节/臂/侧栏，下部整宽为动作库播放。 */
-.screen.teach {
-  grid-template-columns: 250px minmax(0, 1fr) 330px;
-  grid-template-areas:
-    "index stage side"
-    "command command command";
-}
-@media (max-width: 1360px) {
-  .screen.teach { grid-template-columns: 220px minmax(0, 1fr) 300px; }
-}
-@media (max-width: 1080px) {
-  .screen.teach { grid-template-columns: 200px minmax(0, 1fr);
-    grid-template-areas: "index stage" "side side" "command command"; }
-}
-@media (max-width: 820px) {
-  .screen.teach { grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "index" "stage" "side" "command"; }
-}
-
-/* device 屏：参数表全宽，底部为事件日志抽屉。 */
-.screen.device { grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "params" "drawer"; }
-.screen.device > .col-params { grid-area: params; min-width: 0; }
-
-/* diag 屏：观察类面板直接放主区（无抽屉）；曲线占满一行，IMU 与事件/历史并排。 */
-.screen.diag {
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  grid-template-areas: "curve curve" "imu events" "imu history";
-}
-.screen.diag > .col-curve { grid-area: curve; min-width: 0; }
-.screen.diag > .col-imu { grid-area: imu; min-width: 0; }
-.screen.diag > .col-events { grid-area: events; min-width: 0; }
-.screen.diag > .col-history { grid-area: history; min-width: 0; }
-@media (max-width: 1080px) {
-  .screen.diag { grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "curve" "imu" "events" "history"; }
-}
-
-/* sim 屏：仿真启动器整宽一个面板（无抽屉、无副栏）。 */
-.screen.sim { grid-template-columns: minmax(0, 1fr); }
-.screen.sim > .col-full { min-width: 0; }
+/* Vue 工作台复用的面板通用样式。 */
 
 /* 曲线：canvas 随容器缩放，绘制缓冲为 980×380。 */
 .chart { display: block; width: 100%; height: auto; background: #070a10;
@@ -330,6 +230,7 @@ tr.empty td { text-align: center; color: var(--dim-2); padding: 12px; font-size:
 th small { color: var(--dim-2); opacity: .8; font-weight: 400; font-size: 9px;
   text-transform: none; }
 /* 核对总览条（paramSummary）：结论放最显眼处 */
+.summary[hidden] { display: none; }
 .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
   padding: 6px 9px; margin-bottom: var(--gap-sm); border: 1px solid var(--line);
   border-radius: var(--radius-sm); background: var(--panel-2); }

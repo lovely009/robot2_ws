@@ -20,3 +20,4 @@ uint32 request_id
 uint32 policy_generation
 uint16 count
 MotorPolicyTarget[<=64] targets
+uint64 lease_id

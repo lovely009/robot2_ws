@@ -1,0 +1,276 @@
+# Units: m. Seeds select measured mesh features; they are not calibrated transforms.
+datums:
+- motor_id: 1
+  joint_index: 1
+  parent: base_link
+  model: r48
+  seed_xyz:
+  - 0.0640000547708415
+  - 0.06550000952581725
+  - 0.6790000000000002
+  outward_z:
+  - 1.315540594347513e-27
+  - 0.0
+  - 1.0
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 2
+  joint_index: 2
+  parent: base_link
+  model: r48
+  seed_xyz:
+  - 0.08820000000000001
+  - 0.043001116458079844
+  - 0.5964998316783156
+  outward_z:
+  - 1.0
+  - -4.4765962909730975e-29
+  - 3.9179682431504967e-28
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 3
+  joint_index: 3
+  parent: Joint_link2
+  model: r58
+  seed_xyz:
+  - 0.03187491612819372
+  - 0.03486103230691437
+  - -0.034497699297087916
+  outward_z:
+  - 0.9985117453001283
+  - 0.04024056630625524
+  - -0.036810206750894164
+  bore_radius: 0.00175
+  pcd: 0.0495
+  status: bolt_circle_verified
+- motor_id: 4
+  joint_index: 4
+  parent: Joint_link3
+  model: r58
+  seed_xyz:
+  - -0.028477939184370287
+  - 0.0011155227429997978
+  - 0.03830000804315489
+  outward_z:
+  - -0.9992332967319684
+  - 0.03915122826230193
+  - 5.264516133429785e-06
+  bore_radius: 0.00175
+  pcd: 0.0495
+  status: bolt_circle_verified
+- motor_id: 5
+  joint_index: 5
+  parent: Joint_link4
+  model: r48
+  seed_xyz:
+  - -0.002101923549787242
+  - -0.09907762782924776
+  - -0.023500181666050106
+  outward_z:
+  - -0.021213204818700326
+  - -0.9997749745766554
+  - -1.231131918271256e-05
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 6
+  joint_index: 6
+  parent: Joint_link5
+  model: r48
+  seed_xyz:
+  - 0.027739536204742163
+  - 0.006835062739017243
+  - 0.17050003571944267
+  outward_z:
+  - 0.8990555960355165
+  - 0.43783448376975603
+  - 7.700219378592575e-06
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 7
+  joint_index: 7
+  parent: Joint_link6
+  model: r48
+  seed_xyz:
+  - -0.00986132412560244
+  - -0.09041025664584995
+  - -0.026999991971356052
+  outward_z:
+  - -0.009524979241006374
+  - -0.999954636356299
+  - -5.05628674516086e-19
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 10
+  joint_index: 10
+  parent: base_link
+  model: r48
+  seed_xyz:
+  - -0.05399989734058488
+  - 0.0655000000002592
+  - 0.6790000000000002
+  outward_z:
+  - 1.315540594347513e-27
+  - 0.0
+  - 1.0
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 11
+  joint_index: 11
+  parent: base_link
+  model: r48
+  seed_xyz:
+  - -0.07820000000000002
+  - 0.0429998374404105
+  - 0.5964999472450075
+  outward_z:
+  - -1.0
+  - 5.318728266502687e-29
+  - 3.9269298095031035e-28
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 12
+  joint_index: 12
+  parent: Joint_link2.2
+  model: r58
+  seed_xyz:
+  - -0.03312412584453558
+  - 0.034861203984251625
+  - -0.033300000323900264
+  outward_z:
+  - -0.9991901938577357
+  - 0.04023625772008709
+  - 7.95129953736802e-06
+  bore_radius: 0.00175
+  pcd: 0.0495
+  status: bolt_circle_verified
+- motor_id: 13
+  joint_index: 13
+  parent: Joint_link3.3
+  model: r58
+  seed_xyz:
+  - 0.028478155892121115
+  - 0.0011155857951015286
+  - 0.03830000781257347
+  outward_z:
+  - 0.9992336284305435
+  - 0.03914276163247542
+  - -5.031262049312462e-06
+  bore_radius: 0.00175
+  pcd: 0.0495
+  status: bolt_circle_verified
+- motor_id: 14
+  joint_index: 14
+  parent: Joint_link4.4
+  model: r48
+  seed_xyz:
+  - -0.0028454931058907174
+  - -0.09987981844541727
+  - -0.019721199920272367
+  outward_z:
+  - -0.03705300911798171
+  - -0.998597942379884
+  - 0.03780507889112149
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 15
+  joint_index: 15
+  parent: Joint_link5.5
+  model: r48
+  seed_xyz:
+  - 0.016589544650519983
+  - -0.023258865132341475
+  - 0.17050003516971307
+  outward_z:
+  - 0.7387113770139322
+  - -0.6740218849427523
+  - -9.402090660027722e-06
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: 16
+  joint_index: 16
+  parent: Joint_link6.6
+  model: r48
+  seed_xyz:
+  - 0.009862957165368811
+  - -0.09040968323094381
+  - 0.026999991904948617
+  outward_z:
+  - 0.009557386800353115
+  - -0.9999543271357689
+  - 2.770777134759232e-19
+  bore_radius: 0.0014
+  pcd: 0.0405
+  status: bolt_circle_verified
+- motor_id: null
+  joint_index: null
+  parent: Joint_link7
+  model: vaxor
+  seed_xyz:
+  - -0.0178889
+  - 0.003352
+  - 0.031
+  outward_z:
+  - -0.89448
+  - 0.44711
+  - 0
+  bore_radius: 0.001225
+  pcd: 0.0198
+  status: wrist_assembly_unresolved
+  frame: joint_link7_end_1_candidate
+- motor_id: null
+  joint_index: null
+  parent: Joint_link7
+  model: vaxor
+  seed_xyz:
+  - 0.0134179
+  - -0.0122968
+  - 0.031
+  outward_z:
+  - 0.89448
+  - -0.44711
+  - 0
+  bore_radius: 0.001225
+  pcd: 0.0198
+  status: wrist_assembly_unresolved
+  frame: joint_link7_end_2_candidate
+- motor_id: null
+  joint_index: null
+  parent: Joint_link7.7
+  model: vaxor
+  seed_xyz:
+  - -0.0181976
+  - 0.0003136
+  - 0.037
+  outward_z:
+  - -0.96612
+  - -0.25811
+  - 0
+  bore_radius: 0.001225
+  pcd: 0.0198
+  status: wrist_assembly_unresolved
+  frame: joint_link7.7_end_1_candidate
+- motor_id: null
+  joint_index: null
+  parent: Joint_link7.7
+  model: vaxor
+  seed_xyz:
+  - 0.0156165
+  - 0.0093475
+  - 0.037
+  outward_z:
+  - 0.96612
+  - 0.25811
+  - 0
+  bore_radius: 0.001225
+  pcd: 0.0198
+  status: wrist_assembly_unresolved
+  frame: joint_link7.7_end_2_candidate

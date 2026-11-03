@@ -1,45 +1,32 @@
-"""静态检查台架入口：bridge 必须随 L1 起，否则下行没有编码者。"""
-
+"""工作台入口不引入独立托管节点，模型由会话管理器选择。"""
 import importlib.util
 from pathlib import Path
-
 from launch import LaunchContext
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch_ros.actions import Node
 
 
-def _load_launch_module():
-    path = Path(__file__).parent.parent / 'launch' / 'robot.launch.py'
-    spec = importlib.util.spec_from_file_location('robot_launch', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def load(name):
+    path=Path(__file__).parents[1]/'launch'/name
+    spec=importlib.util.spec_from_file_location(name,path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module.generate_launch_description().entities
 
 
-def test_bridge_node_is_started():
-    actions = _load_launch_module().generate_launch_description().entities
-    found = [
-        action for action in actions
-        if isinstance(action, Node)
-        and action.node_package == 'micro_ros_bridge'
-        and action.node_executable == 'micro_ros_bridge_node'
-    ]
-    assert found, 'robot.launch.py 没有起 micro_ros_bridge：下行没有编码者'
-    assert len(found) == 1, (
-        f'robot.launch.py 起了 {len(found)} 个 micro_ros_bridge：下行只允许一个编码者')
-    # Node.node_name 要 execute 后才可读（launch_ros 的实现），这里取构造参数。
-    raw_name = getattr(found[0], '_Node__node_name')
-    assert raw_name == 'micro_ros_bridge', (
-        f'micro_ros_bridge 节点名是 {raw_name!r}，应为微固件侧约定的名字')
+def test_default_robot_starts_bridge_and_workbench_without_required_model():
+    actions=load('robot.launch.py')
+    nodes=[a for a in actions if isinstance(a,Node)]
+    assert [n.node_executable for n in nodes]==['micro_ros_bridge_node']
+    includes=[a for a in actions if isinstance(a,IncludeLaunchDescription)]
+    assert len(includes)==1
+    includes[0].launch_description_source.get_launch_description(LaunchContext())
+    assert 'bench.launch.py' in includes[0].launch_description_source.location
+    assert not any(isinstance(a,DeclareLaunchArgument) and a.default_value is None for a in actions)
 
 
-def test_firmware_tf_requires_an_explicit_model() -> None:
-    actions = _load_launch_module().generate_launch_description().entities
-    includes = [a for a in actions if isinstance(a, IncludeLaunchDescription)
-                and 'model' in dict(a.launch_arguments)]
-    assert len(includes) == 1
-    context = LaunchContext()
-    context.launch_configurations['firmware_model'] = ''
-    assert not includes[0].condition.evaluate(context)
-    context.launch_configurations['firmware_model'] = 'half_body_robot'
-    assert includes[0].condition.evaluate(context)
+def test_bench_owns_sessions_and_exposes_normal_workbench():
+    actions=load('bench.launch.py')
+    assert {n.node_package for n in actions if isinstance(n,Node)}=={'robot_bringup'}
+    includes=[a for a in actions if isinstance(a,IncludeLaunchDescription)]
+    web=next(a for a in includes if 'control_mode' in dict(a.launch_arguments))
+    assert dict(web.launch_arguments)['control_mode']=='bench'

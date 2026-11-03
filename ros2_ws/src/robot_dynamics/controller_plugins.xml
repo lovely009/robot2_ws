@@ -1,0 +1,7 @@
+<library path="robot_dynamics_controller">
+  <class name="robot_dynamics/GravityCompensationController"
+         type="robot_dynamics::GravityCompensationController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Measured-position gravity compensation using joint effort command interfaces.</description>
+  </class>
+</library>

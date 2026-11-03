@@ -1,6 +1,6 @@
 """web_host 前端静态契约测试。
 
-重构后把全部标记放在 index.html（含面板与屏的 <template>），JS 只做行为。结构一旦漂移
+Vue 工作台复用 panel_templates.html 的面板模板，JS 只做行为。结构一旦漂移
 就会出现两类错误——「改名漏改」与「新增文件忘重跑 colcon」——它们都不让构建失败，只在
 浏览器里静默失效。本文件把这两类错误变成测试失败。
 
@@ -17,10 +17,7 @@ import pytest
 
 PKG = Path(__file__).resolve().parent.parent
 WEB = PKG / 'web'
-INDEX = WEB / 'index.html'
-
-# 不属任何屏的面板：notes 由说明浮层挂载
-SHELL_ONLY_PANELS = {'notes'}
+INDEX = WEB / 'panel_templates.html'
 
 
 class IndexParser(HTMLParser):
@@ -69,6 +66,9 @@ def index():
     assert INDEX.is_file(), f'缺少 {INDEX}'
     parser = IndexParser()
     parser.feed(INDEX.read_text(encoding='utf-8'))
+    parser.feed((PKG / 'frontend/index.html').read_text(encoding='utf-8'))
+    for component in (PKG / 'frontend/src').rglob('*.vue'):
+        parser.feed(component.read_text(encoding='utf-8'))
     return parser
 
 
@@ -78,11 +78,11 @@ def js_files():
     return files
 
 
-def router_screens():
-    src = (WEB / 'js' / 'core' / 'router.js').read_text(encoding='utf-8')
-    m = re.search(r'export\s+const\s+SCREENS\s*=\s*\[([^\]]*)\]', src)
-    assert m, 'router.js 里找不到 SCREENS 常量'
-    return [s.strip().strip('\'"') for s in m.group(1).split(',') if s.strip()]
+def runtime_panels():
+    src = (PKG / 'frontend/src/runtime.ts').read_text(encoding='utf-8')
+    match = re.search(r'const panelIds: PanelId\[\] = \[([^\]]+)\]', src)
+    assert match, 'Vue runtime 缺少面板清单'
+    return re.findall(r'"([^"\n]+)"', match.group(1))
 
 
 # 1. id 唯一：面板模板会被克隆，同屏出现两个同 id 会让 getElementById 取到错的元素
@@ -105,10 +105,10 @@ def test_js_dom_refs_exist(index):
 
 
 def test_js_does_not_use_unimported_core_constants():
-    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被 main.js 吞掉。
+    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被渲染循环捕获。
 
     实锤：`feedforward.js` 用了 `DIRTY.BENCH` 却从没 import 过 `DIRTY`。mount 照常成功
-    （那一行在 render 里，脏帧才走到），而 main.js 的渲染循环把 render 的异常
+    （那一行在 render 里，脏帧才走到），而 工作台的渲染循环把 render 的异常
     `try/catch` 掉只打 console——于是这个面板的脏帧刷新一直是死的，且没人发现
     （2026-10-19 查实并修复）。同一个循环在**挂载**期没有保护时更狠：一个面板抛异常会
     把它之后的占位一起吞掉，表现成"整屏静默缺块"。
@@ -162,25 +162,11 @@ def test_no_ids_generated_in_js():
     assert not bad, f'JS 生成了带 id 的元素（动态行请只用 class）：{bad}'
 
 
-# 4. 屏的三处表达必须一致：router 的 SCREENS、屏模板名、左导航的 data-goto
-def test_screens_consistent(index):
-    screens = router_screens()
-    assert screens, 'SCREENS 为空'
-    assert len(screens) == len(set(screens)), f'SCREENS 有重复：{screens}'
-    assert set(index.screens) == set(screens), (
-        f'屏模板与 SCREENS 不一致：模板 {sorted(index.screens)} vs SCREENS {sorted(screens)}')
-    assert set(index.gotos) == set(screens), (
-        f'左导航 data-goto 与 SCREENS 不一致：{sorted(index.gotos)} vs {sorted(screens)}')
-    src = (WEB / 'js' / 'core' / 'router.js').read_text(encoding='utf-8')
-    m = re.search(r"export\s+const\s+DEFAULT_SCREEN\s*=\s*'([^']+)'", src)
-    assert m, 'router.js 里找不到 DEFAULT_SCREEN'
-    assert m.group(1) in screens, f'DEFAULT_SCREEN {m.group(1)} 不在 SCREENS 里'
-
-
-# 5. 屏模板里声明的每个面板占位都有对应模板
-def test_panel_slots_have_templates(index):
-    slots, templates = set(index.panel_slots), set(index.panel_templates)
-    assert slots <= templates, f'屏模板引用了没有 <template> 的面板：{sorted(slots - templates)}'
+def test_vue_panels_match_templates(index):
+    assert set(runtime_panels()) == set(index.panel_templates)
+    assert not index.screens
+    assert not (WEB / 'js/main.js').exists()
+    assert not (WEB / 'js/core/router.js').exists()
 
 
 # 6. 每个面板模板都有对应模块文件
@@ -192,7 +178,7 @@ def test_panel_templates_have_modules(index):
 
 # 7. 每个面板模块都被某屏引用（notes 由外壳挂载，豁免）
 def test_panel_modules_are_referenced(index):
-    used = set(index.panel_slots) | SHELL_ONLY_PANELS
+    used = set(runtime_panels())
     unused = sorted(f.stem for f in (WEB / 'js' / 'panels').glob('*.js')
                     if f.stem not in used)
     assert not unused, f'面板模块没有被任何屏引用：{unused}'
@@ -212,7 +198,7 @@ def test_relative_imports_exist():
     assert not missing, f'import 目标文件不存在：{missing}'
 
 
-# 9. 从 main.js 出发的 import 图无环
+# 所有共享面板模块的相对 import 图无环
 def test_import_graph_acyclic():
     pat = re.compile(r"""(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]""")
 
@@ -236,7 +222,8 @@ def test_import_graph_acyclic():
         stack.pop()
         seen.add(f)
 
-    walk((WEB / 'js' / 'main.js').resolve())
+    for path in js_files():
+        walk(path.resolve())
 
 
 # 10. index.html 引用的静态资产都在磁盘上
@@ -245,7 +232,8 @@ def test_index_assets_exist(index):
     for ref in index.assets:
         if ref.startswith(('http://', 'https://', '//', 'data:')):
             continue
-        if not (WEB / ref).is_file():
+        target = PKG / 'frontend' / ref.lstrip('/') if ref.startswith('/src/') else WEB / ref.lstrip('/')
+        if not target.is_file():
             missing.append(ref)
     assert not missing, f'index.html 引用了不存在的文件：{missing}'
 
@@ -277,8 +265,10 @@ def test_data_files_cover_web_tree(monkeypatch):
     # 源侧：declared 里落在 web/ 下的文件，取相对 web/ 的路径
     source = sorted(p.relative_to(WEB) for p in declared if WEB in p.parents)
 
-    install_web = PKG.parents[1] / 'install' / 'web_host' / 'share' / 'web_host' / 'web'
-    if not install_web.is_dir():
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        install_web = Path(get_package_share_directory('web_host')) / 'web'
+    except (ImportError, LookupError):
         pytest.skip('未构建 web_host：先 colcon build --symlink-install --packages-select web_host')
 
     # is_file() 跟符号链接：源文件不在安装树时链接悬空，算缺失
@@ -297,12 +287,12 @@ def test_importmap_targets_exist(index):
     for _key, value in imports.items():
         if value.startswith(('http://', 'https://', '//')):
             continue
-        assert (WEB / value).exists(), f'importmap 目标不存在：{value}'
+        assert (WEB / value.lstrip('/')).exists(), f'importmap 目标不存在：{value}'
 
 
 # 13. 内置兜底表必须覆盖**默认模型**的全部电机
 def test_builtin_joint_map_covers_default_model():
-    """内置表只是 `/api/model-joints` 不可达时的兜底，但兜底也必须是对的。
+    """内置表只是 `/api/model-transmissions` 不可达时的兜底，但兜底也必须是对的。
 
     它曾经是**唯一**来源且只写了第一链 1..9，默认模型又早已是 18 台的
     half_body_robot → 开箱即坏：10-18 关节角恒 0、小球点不中，像"电机没注册"。
@@ -324,7 +314,7 @@ def test_builtin_joint_map_covers_default_model():
     assert mm, 'store.js 里找不到默认模型名 DEFAULT_MODEL'
     model_name = mm.group(1)
 
-    driver = (PKG.parent / 'robot_sim' / 'models' / model_name /
+    driver = (PKG.parent / 'robot_description' / 'models' / model_name /
               'config' / 'motor_driver.yaml')
     if not driver.is_file():
         pytest.skip(f'默认模型 {model_name} 的 motor_driver.yaml 不在源码树里')
@@ -383,22 +373,14 @@ def test_motor_backend_interface_mirrors_the_simulation_drawer():
 
 
 # ---------------------------------------------------------------------------
-# 重力补偿开关（ADR 0013）：下面四条打的是**跨包契约**——前端这边的名字都是副本，
-# 权威在别的包（bench_manager 的服务注册与 unit 名、robot_dynamics 的话题默认值）。
-# 名字对不上时页面完全正常，只是命令发进没人订阅的话题 / 调不存在的服务，所以必须
-# 从权威那份源码里读出来对账，而不是在前端再抄一遍字面量。
+# 台架服务与 unit 名跨包对账；运动入口固定由 ros2_control 客户端消费。
 # ---------------------------------------------------------------------------
 
 SRC = PKG.parent                      # ros2_ws/src
-BENCH_NODE = SRC / 'bench_manager' / 'bench_manager' / 'node.py'
-SYSTEMD_UNITS = SRC / 'bench_manager' / 'bench_manager' / 'systemd_units.py'
-MANAGER_PY = (SRC / 'bench_manager' / 'bench_manager' /
-              'gravity_feedforward_manager.py')
-OVERLAY_NODE = (SRC / 'robot_dynamics' / 'src' / 'ros' /
-                'gravity_feedforward_overlay_node.cpp')
+BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
+SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
 AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
 FORMAT_JS = WEB / 'js' / 'core' / 'format.js'
-FEEDFORWARD_JS = WEB / 'js' / 'panels' / 'feedforward.js'
 
 
 def _skip_without(path):
@@ -438,7 +420,7 @@ def test_frontend_service_table_matches_bench_manager():
 
 
 def test_frontend_unit_names_match_bench_manager():
-    """四个 unit 名是同一份契约的三处副本（后端常量、前端常量、文档）。"""
+    """前端实际引用的 unit 名必须与后端一致，无需复制未使用的常量。"""
     _skip_without(SYSTEMD_UNITS)
     backend = dict(re.findall(
         r'^(UNIT_\w+)\s*=\s*"([^"]+)"', SYSTEMD_UNITS.read_text(encoding='utf-8'),
@@ -448,127 +430,35 @@ def test_frontend_unit_names_match_bench_manager():
         r'^export const (UNIT_\w+)\s*=\s*\'([^\']+)\'',
         AGENT_JS.read_text(encoding='utf-8'), re.M))
     assert frontend, 'agent.js 里没解析到 UNIT_* 常量'
-    assert frontend == backend, (
+    assert frontend.items() <= backend.items(), (
         f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
 
 
-def test_overlay_topics_match_the_overlay_node_defaults():
-    """改道切到的 `/robot_dynamics/*` 是叠加节点的**输入**话题，权威在那份 C++。
-
-    节点里是相对名（默认命名空间下解析成 `/robot_dynamics/...`）；对它 remap 或改名，
-    改道就会把命令发进没人订阅的话题——页面一切正常，机构不动。
-
-    两条通道的副本在两处（ADR 0014 决定 3）：轨迹仍由页面自己切，副本在 format.js；
-    命令改由 bench_manager 切，副本在 gravity_feedforward_manager.py。分别对账。
-    """
-    _skip_without(OVERLAY_NODE)
-    cpp = OVERLAY_NODE.read_text(encoding='utf-8')
-
-    def node_default(parameter):
-        m = re.search(
-            rf'declare_parameter<std::string>\(\s*"{parameter}",\s*"([^"]+)"', cpp)
-        assert m, f'叠加节点里找不到参数 {parameter} 的默认值'
-        return '/' + m.group(1)
-
-    js = FORMAT_JS.read_text(encoding='utf-8')
-    m = re.search(r'export const OVERLAY_TRAJECTORY_TOPIC\s*=\s*\'([^\']+)\'', js)
-    assert m, 'format.js 里找不到 OVERLAY_TRAJECTORY_TOPIC'
-    assert m.group(1) == node_default('trajectory_input_topic'), (
-        f'OVERLAY_TRAJECTORY_TOPIC 与叠加节点不一致：前端 {m.group(1)}')
-
-    _skip_without(MANAGER_PY)
-    m = re.search(r'^OVERLAY_COMMAND_TOPIC\s*=\s*"([^"]+)"',
-                  MANAGER_PY.read_text(encoding='utf-8'), re.M)
-    assert m, 'gravity_feedforward_manager.py 里找不到 OVERLAY_COMMAND_TOPIC'
-    assert m.group(1) == node_default('command_input_topic'), (
-        f'OVERLAY_COMMAND_TOPIC 与叠加节点不一致：后端 {m.group(1)}')
-
-
-def test_command_route_topics_match_bench_manager():
-    """命令流两个落点的副本：agent.js（页面拿它核对回执）对 bench_manager（权威）。
-
-    页面切不了命令那条通道，只能读 /motor_command/status 的 output_topic 与这两个名字
-    比对。副本对不上，页面就会把「切成功了」显示成「接线没切过去」，或反过来——后者
-    更糟：亮着绿灯而命令其实发在另一条路上。
-    """
-    _skip_without(MANAGER_PY)
-    backend = dict(re.findall(
-        r'^(DIRECT_COMMAND_TOPIC|OVERLAY_COMMAND_TOPIC)\s*=\s*"([^"]+)"',
-        MANAGER_PY.read_text(encoding='utf-8'), re.M))
-    assert len(backend) == 2, (
-        f'gravity_feedforward_manager.py 里没解析到两个落点：{backend}')
-
-    js = AGENT_JS.read_text(encoding='utf-8')
-    for name, expected in backend.items():
-        m = re.search(rf'export const {name}\s*=\s*\'([^\']+)\'', js)
-        assert m, f'agent.js 里找不到 {name}'
-        assert m.group(1) == expected, (
-            f'{name} 与 bench_manager 不一致：前端 {m.group(1)}，后端 {expected}')
-
-
-def test_downlink_topics_are_host_facade():
-    """页面的下行只发主机侧 /motor/*：线上编码与文件名是 bridge 的私有实现。
-
-    这五条在 S3 之后不再由固件直接订阅；页面若漏改一条，症状是「按钮点了没反应」
-    而 ROS 侧毫无报错。
-    """
+def test_downlink_topics_use_ros2_control_client():
+    """运动低频入口固定；设备策略与参数继续走 bridge facade。"""
     js = FORMAT_JS.read_text(encoding='utf-8')
     expected = {
-        'trajectory': '/motor/trajectory',
+        'setpoint': '/control/setpoint',
+        'trajectory': '/control/trajectory',
+        'rawTrajectory': '/control/trajectory_raw',
+        'convertedTrajectory': '/control/trajectory',
+        'commandStatus': '/control/status',
+        'trajectoryState': '/control/trajectory_state',
+        'stop': '/control/stop',
+        'jointTarget': '/control/joint_target',
         'policy': '/motor/policy_array',
-        'paramSet': '/motor/param_set',
         'sysCmd': '/motor/system_command',
     }
     for key, topic in expected.items():
-        m = re.search(
-            rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
-        assert m, f'format.js 里找不到 TOPICS.{key}'
-        assert m.group(1) == topic, f'{key} 仍发线上话题：{m.group(1)}'
-
-    agent_js = AGENT_JS.read_text(encoding='utf-8')
-    m = re.search(r"DIRECT_COMMAND_TOPIC\s*=\s*'([^']+)'", agent_js)
-    assert m and m.group(1) == '/motor/command_array', '直连落点仍是线上话题'
+        m = re.search(rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
+        assert m and m.group(1) == topic, f'{key} 未迁移到 {topic}'
+    assert not re.search(r"^\s*(?:paramSet|firmwareConfig):", js, re.M)
+    assert "stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'}" in js
 
 
-def test_downlink_switch_rewires_the_publisher():
-    """切接线是「改话题名 + 换发布者」一件事的两半，只做一半就是静默失效。
-
-    发布者在连接建立时就按旧名字 advertise 过了；只改 `TOPICS[key].name`，命令会继续
-    发到旧话题上——rosbridge 侧毫无异常，micro-ROS 侧没人收。所以这一条按源码形状断言
-    （纯运行时行为，浏览器里才看得见）。
-    """
-    src = (WEB / 'js' / 'core' / 'ros.js').read_text(encoding='utf-8')
-    start = src.find('export function setDownlinkRoute(')
-    assert start != -1, 'ros.js 里找不到 setDownlinkRoute'
-    body = src[start:src.find('\n}', start)]
-
-    for needed, why in [
-        ('TOPICS[key].name', '改了路由却没改话题名，publish 还发到旧话题'),
-        ('unadvertise', '没有撤掉旧名字上的发布者'),
-        ('ensurePublisher', '没有在新名字上立即 advertise：开头的命令会丢'),
-    ]:
-        assert needed in body, f'setDownlinkRoute 缺了「{needed}」：{why}'
-
-
-def test_the_switch_starts_the_node_before_rewiring():
-    """顺序即安全边界（ADR 0013 决定 7），反过来会出现「话题已切、节点没起」的空窗。
-
-    开：先起节点并确认 running，再切到叠加；关：先切回直连，再停节点。两处顺序都无法
-    在浏览器外自动验证，这里按源码形状钉住（与第 14 条同一取舍）。
-    """
-    src = FEEDFORWARD_JS.read_text(encoding='utf-8')
-
-    def body(signature):
-        start = src.index(signature)
-        return src[start:src.index('\n  }\n', start)]
-
-    on = body('async function turnOn()')
-    off = body('async function turnOff()')
-    # 起节点：`await bench.startGravityFeedforward` 必须早于 `setDownlinkRoute(…OVERLAY)`
-    assert on.index('startGravityFeedforward') < on.index('setDownlinkRoute'), (
-        'turnOn 先切了话题再起节点：切换那一瞬间命令全部落空')
-    assert 'OVERLAY' in on, 'turnOn 没有切到叠加侧'
-    # 停节点：`setDownlinkRoute(…DIRECT)` 必须早于 `stopGravityFeedforward`
-    assert off.index('setDownlinkRoute') < off.index('stopGravityFeedforward'), (
-        'turnOff 先停了节点再切回直连：停止那一瞬间命令全部落空')
-    assert 'DIRECT' in off, 'turnOff 没有切回直连侧'
+def test_frontend_has_no_legacy_motion_route_switch():
+    for path in js_files():
+        text = path.read_text(encoding='utf-8')
+        for obsolete in ('setDownlinkRoute', 'getDownlinkRoute', 'command_streamer',
+                         '/motor_command/', 'OVERLAY_COMMAND_TOPIC', 'DOWNLINK_ROUTE'):
+            assert obsolete not in text, f'{path}: 仍引用 {obsolete}'

@@ -19,7 +19,7 @@ uint8 COMMAND_CLEAR_FAULT=3
 # 没有在线电机时，帧里 dev_* 为 NaN，页面呈现的就是驱动板 W25 参数表。
 uint8 COMMAND_REPORT=4
 uint8 command
-# 目标电机（0..63）；MOTOR_ID_NONE = 不适用。
+# 目标电机（1..64）；MOTOR_ID_NONE = 不适用。
 # SAVE 只接受 MOTOR_ID_NONE（W25 必须整机落盘）；REFRESH/SET_ZERO/CLEAR_FAULT 必须给有效 id。
 # REPORT 忽略 motor_id（请传 MOTOR_ID_NONE）。
 uint16 MOTOR_ID_NONE=65535

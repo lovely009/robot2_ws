@@ -1,8 +1,21 @@
 // 共享状态：所有跨屏数据都住在这里。面板只读它、只通过 ui 动作改它。
-// 订阅在 main.js 全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
+// 订阅由 Vue 工作台全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
 // 脏标记与 rAF 渲染循环也在本文件内实现，不另开模块。
 import { createControlStateCache, describeMotorState } from './motor_state.js';
-import { devSlotNames, devRecoveryText } from './format.js';
+
+export function applyAgentWireStatus(state, message, now = Date.now()) {
+  const uint32 = value => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+  if (!Number.isSafeInteger(message.session_id) || message.session_id <= 0 ||
+      !Number.isInteger(message.schema_version) ||
+      ![message.sequence, message.snapshot_tick_ms, message.clock_sync_age_ms,
+        message.clock_sync_failures, message.lease_valid_until_tick_ms].every(uint32) ||
+      typeof message.clock_valid !== 'boolean' || typeof message.lease_active !== 'boolean') return false;
+  const previous = state.agentWireStatus?.data;
+  if (previous && (message.session_id < previous.session_id ||
+      (message.session_id === previous.session_id && ((message.sequence - previous.sequence) | 0) <= 0))) return false;
+  state.agentWireStatus = {at: now, data: message};
+  return true;
+}
 
 export const store = {
   // text：顶栏连接文案（setConn 写它，renderShell 画它）
@@ -12,6 +25,7 @@ export const store = {
   // motors: id -> {topo, motion, status}（与重构前的 state.motors 同形状，搬迁期不改字段名）
   motors: new Map(),
   controlStates: createControlStateCache(),
+  agentWireStatus: null,
   lastError: 0,
   lastErrorMotor: -1,
   sysStatus: {refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
@@ -30,14 +44,12 @@ export const store = {
   // 模型关节表（collectModelJoints 装入）：关节列表除 TF 之外的另一半来源。
   modelJoints: [],
   selectedId: 0,
-  // 置顶序（点击过的电机，最近在前）。左栏关节列表与右栏状态表共用一个次序：
-  // 点一台 → 两处都排最上，观察与操作对照不用来回找。
-  pinned: [],
   // 曲线：motor_id -> channel -> {t:[], values:[]}；各通道按自身采样时刻对齐。
   chartBuf: new Map(),
   chart: {running: true, windowMs: 10000},
   history: [],
   paramCache: new Map(),
+  firmwareReport: {seq: 0, at: 0, values: null, unsaved: false},
   configResults: new Map(),
   configSessionId: null,
   // 写事务的结果文本（key -> {ok, text, t}）：同一事务的按钮分布在设备屏与使能屏，
@@ -51,7 +63,7 @@ export const store = {
   // gravity_feedforward 四段；core/ros.js 订阅写入，台架服务（core/agent.js）的命令响应
   // 也经 applyBenchStatus 写同一份。
   bench: {simulation: null, agent: null, motor_backend: null,
-          gravity_feedforward: null, feedback: null},
+          gravity_feedforward: null, gravity_feedforward_last: 0, feedback: null},
   // /joint_states：byName 保存每个关节的实际测量值；count/last 供其他面板判断流是否在。
   jointStates: {count: 0, last: 0, byName: {}, jointNames: []},
   // /robot_transmission/status：桥心跳；页面显示模型由 MODEL 决定，控制模型只能以它为准。
@@ -62,29 +74,12 @@ export const store = {
     driverFile: '', directJoints: {}, direct_mapping: {}},
   selectedGroup: '',
   selectedJoint: '',
-  // 命令节拍节点（/motor_command/status）：`data.output_topic` 是命令**当前实际发往**
-  // 哪里——改道由服务端做（ADR 0014），页面只有读它才能核对开关与接线是否一致。
+  // /control/status：ros2_control 的模型、模式、输出路由与拒绝原因。
   commandStatus: {last: 0, data: null},
 };
 
-// 置顶：把 id 提到 pinned 最前（LIFO）。已在最前时不动。
-export function pinMotor(id) {
-  const i = store.pinned.indexOf(id);
-  if (i === 0) return;
-  if (i > 0) store.pinned.splice(i, 1);
-  store.pinned.unshift(id);
-}
-
-// 面板行序：置顶优先（最近点击的在前），其余按 id 升序。陈旧 id 无害（motors 里
-// 没有就排不上来）。
 export function orderedMotorIds() {
-  return [...store.motors.keys()].sort((a, b) => {
-    const pa = store.pinned.indexOf(a), pb = store.pinned.indexOf(b);
-    if (pa >= 0 && pb >= 0) return pa - pb;
-    if (pa >= 0) return -1;
-    if (pb >= 0) return 1;
-    return a - b;
-  });
+  return [...store.motors.keys()].sort((a, b) => a - b);
 }
 
 let dirty = new Set();
@@ -139,14 +134,20 @@ export function syncWriteButtons(ids, allow) {
 }
 
 // 台架状态入 store（/bench/status 话题帧与 bench 服务的响应共用这一条路）。
-// agent 段顺带同步进 conn.agent*（顶栏文案由 main.js 的 renderShell 画）；
+// agent 段顺带同步进 conn.agent*（顶栏文案由 Vue 工作台渲染）；
 // 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
-// 命令节拍节点状态入 store（/motor_command/status）。整段留原样：页面不解释它的
-// 字段，只把 output_topic 与开关的意图对账，其余原样显示给操作者。
+// 无效状态立即撤销身份，不能用旧会话继续控制。
 export function applyCommandStatus(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object') return;
-  store.commandStatus.data = snapshot;
-  store.commandStatus.last = Date.now();
+  const valid = snapshot && typeof snapshot.model === 'string' && snapshot.model
+    && Array.isArray(snapshot.joint_names) && snapshot.joint_names.length
+    && snapshot.joint_names.every(name => typeof name === 'string' && name)
+    && new Set(snapshot.joint_names).size === snapshot.joint_names.length
+    && typeof snapshot.mode === 'string'
+    && snapshot.output_topic === '/motor/host_command_array'
+    && snapshot.trajectory_output_topic === '/host_control/trajectory_controller/follow_joint_trajectory'
+    && (snapshot.gravity_enabled === null || typeof snapshot.gravity_enabled === 'boolean')
+    && (snapshot.effort_gain === null || (Number.isFinite(snapshot.effort_gain) && snapshot.effort_gain >= 0));
+  store.commandStatus = valid ? {data: snapshot, last: Date.now()} : {data: null, last: 0};
   markDirty(DIRTY.COMMAND);
 }
 
@@ -158,6 +159,7 @@ export function applyBenchStatus(snapshot) {
   if (snapshot.feedback) bench.feedback = snapshot.feedback;
   if (snapshot.gravity_feedforward) {
     bench.gravity_feedforward = snapshot.gravity_feedforward;
+    bench.gravity_feedforward_last = Date.now();
   }
   if (snapshot.agent) {
     bench.agent = snapshot.agent;
@@ -335,8 +337,8 @@ export function jointFeedbackMatchesModel() {
   }
   if (feedback.source === 'simulation') return store.bench.simulation?.config?.model === MODEL;
   if (feedback.source === 'external') {
-    const model = store.transmissionStatus.data?.model;
-    return !model || model === MODEL;
+    const {data,last} = store.transmissionStatus, age = Date.now()-last;
+    return data?.model === MODEL && last>0 && age>=0 && age<=2500;
   }
   return false;
 }
@@ -354,13 +356,6 @@ export function setModel(name) {
   try { localStorage.setItem(MODEL_STORAGE_KEY, name); } catch (_e) { /* 存储禁用时仅本次会话生效 */ }
   markDirty(DIRTY.MODEL);
   loadModelJoints();
-}
-
-export function selectGroup(name) {
-  if (!store.modelTransmissions.groups.some((g) => g.name === name)) return;
-  if (store.selectedGroup === name) return;
-  store.selectedGroup = name;
-  markDirty(DIRTY.SELECTED, DIRTY.STATUS);
 }
 
 // 点击一个或多个传动组：一次选择全部涉及组，臂等宽姿态必须同组下发。
@@ -391,30 +386,6 @@ export async function availableModels() {
   return Array.isArray(data && data.models) ? data.models : [];
 }
 
-// 兼容旧请求：只返回单电机组的数字 ID 到关节名映射。
-const modelJointsCache = new Map();
-export async function modelJointsFor(name) {
-  if (!name) throw new Error('未指定模型');
-  if (!modelJointsCache.has(name)) {
-    const resp = await fetch(
-      `/api/model-transmissions?model=${encodeURIComponent(name)}`, {cache: 'no-store'});
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    if (data.model !== name || !data.direct_joints || typeof data.direct_joints !== 'object') {
-      throw new Error(`模型 ${name} 没有可用的传动组 metadata`);
-    }
-    modelJointsCache.set(name, {...data.direct_joints});
-  }
-  return modelJointsCache.get(name);
-}
-
-// `motor_id:关节名,电机:关节…`——服务端（bench_manager）逐条校验的表形状。
-export function jointMapSpec(joints) {
-  return Object.entries(joints)
-    .map(([id, joint]) => `${id}:${joint}`)
-    .join(',');
-}
-
 // 页面上最后发出的目标值（history[0]）。⚠️ 这不是固件的设定点：固件侧的钳位、
 // 软停、整包拒收页面都看不到；轨迹在播期间（target_source == 2）目标由固件插值，
 // 页面无从得知，此时宁可不画（调用方负责判 target_source）。
@@ -425,25 +396,16 @@ export function targetOf(id) {
   return t ? t.pos : NaN;
 }
 
-// 状态列悬停提示：DEV_INIT 事件带来的槽位位图。state=3(MISMATCH) 位图是"对不上"
-// 的槽位，state=4(UNVERIFIED) 位图是"没读到"的槽位（见 MotorEvent.msg）。
-export function devDetailTitle(id) {
-  const info = store.devInit.get(id);
-  if (!info || !info.mask) return '';
-  const slots = devSlotNames(info.mask).join('、');
-  if (info.state === 3) {
-    return `设备参数与固件记录不一致：${slots}（${devRecoveryText(info.mask)}）`;
-  }
-  if (info.state === 4) {
-    return `设备参数回读未完成，未收到的对象：${slots}（重连或再点「读取」重试）`;
-  }
-  return '';
-}
-
 // 两张表独立传入 showAll，不共享复选框状态。
 export function paramRowIds(showAll) {
   const all = [...store.paramCache.keys()].sort((a, b) => a - b);
   return (showAll || !store.selectedId) ? all : all.filter((i) => i === store.selectedId);
 }
 
-export function motorStateOf(id) { return describeMotorState(store,id); }
+export function paramReadState(id) {
+  const entry = store.paramCache.get(id);
+  const fields = ['pos_min', 'pos_max', 'vel_limit', 'torque_limit', 'limit_protect', 'direction', 't_max', 'node_id'];
+  const count = (source) => fields.filter(field => Number.isFinite(entry?.[source]?.[field])).length;
+  const device = count('dev'), record = count('rec'), usable = count('pick');
+  return {device, record, usable, verified: entry?.state === 2 && device === fields.length};
+}

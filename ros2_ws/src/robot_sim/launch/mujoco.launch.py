@@ -109,7 +109,7 @@ def _launch_setup(context):
 
 
 def generate_launch_description():
-    pkg_share = FindPackageShare("robot_sim")
+    pkg_share = FindPackageShare("robot_description")
     model = LaunchConfiguration("model")
     # MuJoCo 侧基座固定（MJCF 无 free joint），与 Gazebo 的 fixed_base:=true 等价，
     # 因此用不带 world 的 standalone 模型

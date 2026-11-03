@@ -200,7 +200,70 @@ static void test_hw_reject_accounting() {
   assert(sched.tx_hw_reject_count == 2);
 }
 
+// 取消必须跨过环形 FIFO 的回绕点，并覆盖 32 位以上的槽位；其他轴和
+// P2 不得被误删。同轴旧使能也是 P0，必须随旧 P1 一起失效。
+static void test_cancel_slots_preserves_unrelated_fifo_order() {
+  can_tx_scheduler_t sched;
+  can_tx_scheduler_init(&sched);
+  sched.p0.head = CAN_TX_P0_CAPACITY - 2U;
+  const uint16_t high_slot = CAN_TX_P1_SLOTS - 1U;
+  assert(high_slot >= 32U);
+  const uint16_t slots[] = {1U, 2U, high_slot, 3U};
+  for (const uint16_t slot : slots) {
+    auto frame = make_frame(0x500U + slot, (uint8_t)slot);
+    frame.tx_slot = slot;
+    assert(can_tx_scheduler_submit_p0(&sched, &frame));
+    assert(can_tx_scheduler_submit_p1(&sched, slot, &frame));
+  }
+  const auto management = make_frame(0x080U, 0xAAU);
+  assert(can_tx_scheduler_submit_p2(&sched, &management));
+  can_tx_scheduler_cancel_slots(&sched,
+      (UINT64_C(1) << 1U) | (UINT64_C(1) << high_slot));
+  assert(!sched.p1.dirty[1U] && !sched.p1.dirty[high_slot]);
+  can_tx_frame_t out[8];
+  uint32_t p0_count = 0U, p1_count = 0U;
+  assert(can_tx_scheduler_pump(&sched, out, 8U, 8U,
+      &p0_count, &p1_count) == 5U);
+  assert(p0_count == 2U && p1_count == 2U);
+  assert(out[0].data[0] == 2U && out[1].data[0] == 3U);
+  assert(out[2].data[0] == 2U && out[3].data[0] == 3U);
+  assert(out[4].can_id == management.can_id);
+}
+
+static void test_expiring_zero_cannot_escape_p0_backpressure_or_cancellation() {
+  can_tx_scheduler_t sched;
+  can_tx_scheduler_init(&sched);
+  auto zero = make_frame(0x607, 1);
+  zero.tx_slot = 2; zero.valid_until_tick_ms = 150;
+  auto management = make_frame(0x080, 2);
+  auto stop = make_frame(0x107, 3);
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  assert(can_tx_scheduler_submit_p2(&sched, &management));
+  assert(can_tx_scheduler_submit_p0(&sched, &stop));
+  can_tx_frame_t out[8];
+  assert(can_tx_scheduler_pump(&sched, out, 1, 0, nullptr, nullptr) == 1);
+  can_tx_scheduler_expire_p2(&sched, 149);
+  assert(sched.p2.count == 2);
+  can_tx_scheduler_expire_p2(&sched, 150);
+  assert(can_tx_scheduler_pump(&sched, out, 8, 0, nullptr, nullptr) == 1);
+  assert(out[0].can_id == 0x080);
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  assert(can_tx_scheduler_submit_p2(&sched, &management));
+  stop.tx_slot = 2;
+  assert(can_tx_scheduler_submit_p0(&sched, &stop));
+  can_tx_scheduler_cancel_timed_p2(&sched, UINT64_C(1) << 2);
+  assert(can_tx_scheduler_pump(&sched, out, 8, 0, nullptr, nullptr) == 2);
+  assert(out[0].can_id == stop.can_id && out[1].can_id == 0x080);
+  zero.valid_until_tick_ms = 2;
+  assert(can_tx_scheduler_submit_p2(&sched, &zero));
+  can_tx_scheduler_expire_p2(&sched, UINT32_MAX);
+  assert(sched.p2.count == 1);
+  can_tx_scheduler_expire_p2(&sched, 2);
+  assert(sched.p2.count == 0);
+}
+
 int main() {
+  test_expiring_zero_cannot_escape_p0_backpressure_or_cancellation();
   test_p1_send_once();
   test_p1_latest_wins();
   test_priority_order();
@@ -211,6 +274,7 @@ int main() {
   test_pump_small_capacity_keeps_priority();
   test_multi_bus_independence();
   test_hw_reject_accounting();
+  test_cancel_slots_preserves_unrelated_fifo_order();
   printf("test_can_tx_scheduler: all passed\n");
   return 0;
 }

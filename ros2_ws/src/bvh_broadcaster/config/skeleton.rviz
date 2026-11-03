@@ -1,0 +1,31 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Global Options:
+    Fixed Frame: world
+    Background Color: 35; 35; 35
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+    - Class: rviz_default_plugins/TF
+      Name: BVH skeleton
+      Enabled: true
+      Show Arrows: true
+      Show Axes: false
+      Show Names: false
+      Marker Scale: 0.05
+      Frames:
+        All Enabled: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 4
+      Pitch: 0.3
+      Yaw: 0.8
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1

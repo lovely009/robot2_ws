@@ -19,7 +19,9 @@
   X(SET_POLICY, 11U)                  \
   X(SET_SAFETY_PROTECT, 12U)          \
   X(SET_DIRECTION, 13U)               \
-  X(SAVE_DEVICE_FLASH, 14U)
+  X(SAVE_DEVICE_FLASH, 14U)             \
+  X(SET_T_MAX, 15U)                    \
+  X(SET_NODE_ID, 16U)
 
 #define MOTOR_CONFIG_KIND_ASSERT(name, value)                                \
   static_assert(static_cast<int>(CONTROL_MAILBOX_CONFIG_ ## name) == value,    \

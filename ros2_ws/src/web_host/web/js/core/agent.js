@@ -1,10 +1,35 @@
 // 台架控制通道（bench_manager 的 /bench/* ROS 服务）+ 顶栏 Agent 控件。
 //
 // 进程管理归 bench_manager，页面经 rosbridge 调用。话题与响应状态统一写入
-// store.bench；main.js 渲染顶栏，本模块维护串口选择控件。
+// store.bench；Vue 工作台渲染顶栏，本模块维护串口选择控件。
 import { store, markDirty, DIRTY, applyBenchStatus } from './store.js';
 import { $, CONTROLLER_PORT_STORAGE_KEY } from './format.js';
 import { callService } from './ros.js';
+
+export function describeAgentStatus(state, now = Date.now()) {
+  const unknown = {link: '未连接', clock: '未知', authority: '未知', detail: ''};
+  if (!state.conn.connected) return unknown;
+  const report = state.agentWireStatus;
+  if (!report?.data) return {...unknown, link: '等待状态'};
+  let age = now - report.at;
+  if (!Number.isFinite(age) || age < 0 || age > 300) return {...unknown, link: '状态陈旧'};
+  const m = report.data;
+  if (m.schema_version !== 4) return {...unknown, link: '版本不匹配'};
+  if (m.clock_valid === true) {
+    const sourceMs = Number(m.snapshot_stamp) / 1e6;
+    if (!Number.isFinite(sourceMs) || sourceMs <= 0 || sourceMs - now > 20)
+      return {...unknown, link: '在线', clock: '时间基准异常'};
+    // 接收时间不能让排队的旧状态重新变新；时钟不一致时保守显示未知。
+    age = Math.max(age, now - sourceMs);
+    if (age > 300) return {...unknown, link: '状态陈旧'};
+  }
+  const syncAge = Number(m.clock_sync_age_ms) + age;
+  const clockOk = m.clock_valid === true && Number.isFinite(syncAge) && syncAge >= 0 && syncAge <= 30000;
+  const remaining = (m.lease_valid_until_tick_ms - m.snapshot_tick_ms) >>> 0;
+  const authorized = clockOk && m.lease_active === true && remaining > age && remaining <= 300;
+  return {link: '在线', clock: clockOk ? '正常' : '异常', authority: authorized ? '有效' : '未授权',
+    detail: `状态年龄 ${age} ms；校时年龄 ${syncAge} ms；校时失败 ${m.clock_sync_failures ?? 0} 次`};
+}
 
 // 服务名/类型与 bench_manager/node.py 的注册一一对应（不做 remap）。
 const SVC = {
@@ -26,18 +51,9 @@ const SVC = {
     'bench_msgs/srv/SetGravityFeedforwardGain'],
 };
 
-// 命令流的两个落点（ADR 0014）：改道由 bench_manager 改 command_streamer 的
-// output_topic 执行，页面切不了、只拿这两个名字去核对回执。权威定义在
-// bench_manager/gravity_feedforward_manager.py，静态契约测试从那里对账。
-export const DIRECT_COMMAND_TOPIC = '/motor/command_array';
-export const OVERLAY_COMMAND_TOPIC = '/robot_dynamics/command_array';
-
 // unit 名是契约（bench_manager/systemd_units.py 定义一次，这里与文档各引用一份）。
 export const UNIT_SIMULATION = 'bench-simulation.service';
 export const UNIT_MOTOR_BACKEND = 'bench-motor-backend.service';
-export const UNIT_AGENT = 'bench-agent.service';
-export const UNIT_GRAVITY_FEEDFORWARD = 'bench-gravity-feedforward.service';
-export const UNIT_FEEDBACK = 'bench-firmware-feedback.service';
 
 function parseJson(text, fallback) {
   try { return JSON.parse(text); } catch (_e) { return fallback; }
@@ -99,9 +115,7 @@ export function startMotorBackend(request) {
 }
 export function stopMotorBackend() { return call(SVC.stopMotorBackend, {}); }
 
-// 重力前馈叠加节点（ADR 0013）。起停的是**节点**，命令源改接到它前面是前端自己的事
-// （core/ros.js 的 setDownlinkRoute）——顺序由 panels/feedforward.js 按「先起节点、
-// 确认 running，再切话题」执行，服务这一层不管接线。
+// 服务名保持兼容；服务端只写 gravity_controller 参数，页面不改写运动话题。
 export function startGravityFeedforward(request) {
   return call(SVC.startGravityFeedforward, {
     model: request.model,

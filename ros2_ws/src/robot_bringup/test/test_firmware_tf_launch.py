@@ -68,3 +68,11 @@ def test_invalid_mapping_is_rejected_before_nodes_start(tmp_path: Path, motors: 
 def test_model_path_cannot_escape_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         _load_launch_module().firmware_tf_nodes(_context(tmp_path, '../outside'))
+
+
+@pytest.mark.parametrize('value', ['true', '1', 'yes'])
+def test_legacy_trajectory_entry_is_rejected_before_reading_model(tmp_path, value):
+    context = _context(tmp_path)
+    context.launch_configurations['enable_trajectory'] = value
+    with pytest.raises(ValueError, match='follow_joint_trajectory'):
+        _load_launch_module().firmware_tf_nodes(context)

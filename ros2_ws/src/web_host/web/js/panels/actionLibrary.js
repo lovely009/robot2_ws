@@ -1,23 +1,49 @@
-// 动作库播放（#/teach）：把 action_library/*.json（MotorTrajectory 载荷）播到臂上。
-// 与主机侧参考实现 micro_ros_agent/tools/traj_play.py 同口径：
-//   取消旧轨迹 → 武装 kp/kd → 把轨迹首点作为快照目标对齐起点 → 按 ≤256 点/窗
-//   切段（窗界复用末点保证位置连续；每窗独立 trajectory_id、首点 t=0），用固件
-//   回带的 elapsed_ms 在窗口边界交棒（固件受理时把 t=0 重设到受理时刻）。
-// 播放调度是模块级的：切屏不打断已下发的动作，UI 只是视图。
+// MotorTrajectory 动作文件经低频客户端转换成 JTC action，不再上传 MCU。
+// 文件速度仅作诊断；主机默认单调插值，显式 linear 保留原始位置/时间线性播放。
+// 数据按 ≤256 点分包；主机收齐后将引导段与完整动作提交为同一个 JTC goal。
+// 播放调度在模块级，切屏不打断动作。
 import { store, MODEL, markDirty, DIRTY } from '../core/store.js';
-import { $, TRAJ_MAX_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
-import { pub, isConnected, nextPolicyGeneration, getConnectionGeneration } from '../core/ros.js';
-import { playbackReadinessError, sendTargets } from './command.js';
-import { limitsError } from '../core/host_limits.js';
-import { rawCouplingError } from '../core/joint_control.js';
-import { controlTargetsError, describeMotorState } from '../core/motor_state.js';
-import { isUnprotected } from './policy.js';
+import { $, LIFECYCLE, TRAJ_MAX_POINTS, TRAJ_MAX_MOTORS, TRAJ_MAX_PLAN_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from '../core/format.js';
+import { pub, isConnected, submitPolicy, getConnectionGeneration } from '../core/ros.js';
+import { controlSessionError, rawCouplingError } from '../core/joint_control.js';
+import { controlTargetsError, describeMotorState, policyRequestState } from '../core/motor_state.js';
+import { isUnprotected } from '../core/control_policy.js';
 
-const ALIGN_MS = 2500;        // 起点对齐保持时长（快照 20Hz 重发）
-const ALIGN_PERIOD_MS = 200;
-const ARM_SETTLE_MS = 300;    // 武装后等策略被受理
-const CANCEL_SETTLE_MS = 800; // 取消轨迹后等归属释放（traj_play 同法）
-const WINDOW_STEPS_CAP = 60;  // 4 台时 61 时刻/窗 = 244 点 < 256
+// JTC 成功结果不替代电机就绪检查；武装前允许 READY_DISABLED。
+function playbackReadinessError(ids) {
+  const blocked = [];
+  for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+    const row = store.motors.get(id);
+    if (!row) {
+      blocked.push(`m${id}(未发现)`);
+      continue;
+    }
+    if (store.controlStates?.seen) {
+      const view=describeMotorState(store,id);
+      const control=store.controlStates.byId.get(id);
+      if (!view.online || view.connection!=='在线' || view.fault
+          || ![2,3].includes(control?.control_lifecycle)) blocked.push(`m${id}(${view.connection} · ${view.lifecycle} · ${view.health})`);
+      continue;
+    }
+    const st = row.status || {}, topo = row.topo || {};
+    const online = st.online !== undefined ? st.online : topo.online;
+    const lc = st.lifecycle !== undefined ? st.lifecycle : topo.lifecycle;
+    const fault = Number(st.unified_fault_code || 0);
+    if (online !== true) blocked.push(`m${id}(离线)`);
+    else if (fault) blocked.push(`m${id}(故障${fault})`);
+    else if (lc !== 3 && lc !== 4) {
+      const name = LIFECYCLE[lc] !== undefined ? LIFECYCLE[lc] : '未就绪';
+      blocked.push(`m${id}(${name})`);
+    }
+  }
+  return blocked.length
+    ? `电机未就绪：${blocked.join('、')}；请先连接/启动仿真，等目标电机到 `
+      + `READY_DISABLED（或 ACTIVE）后重试`
+    : '';
+}
+
+const ALIGN_MS = 2500;        // 整条时间线中的起点引导段
+const CANCEL_SETTLE_MS = 800; // 等待 JTC cancel 完成
 
 const player = {
   phase: 'idle',  // idle | running | done | error
@@ -25,15 +51,17 @@ const player = {
   error: '',
   name: '',
   ids: [],
-  windows: [],
-  winIndex: 0,
+  model: '',
+  modelMetadata: null,
+  points: [],
+  raw: false,
   round: 0,
   loop: false,
   enable: true,
   kp: 30,
   kd: 1,
-  windowTid: 0,
-  windowDurMs: 0,
+  durationMs: 0,
+  sessionId: Date.now(),  // 刷新后不复用网关已关闭的 (session_id, trajectory_id)。
   tidSeq: 90000,
   cancelRequested: false,
   connectionGeneration: 0,
@@ -44,6 +72,11 @@ function assertPlaybackSession() {
   if (!isConnected() || player.connectionGeneration !== getConnectionGeneration()) {
     throw new Error('连接已更换或中断，请重新确认后播放');
   }
+  if (MODEL !== player.model || store.modelTransmissions !== player.modelMetadata) {
+    throw new Error('播放期间模型或传动配置已更换，请重新确认');
+  }
+  const error = controlSessionError(store,player.model) || rawCouplingError(store,player.model,player.ids);
+  if (error) throw new Error(error);
 }
 
 // 预览（列表行点击展开）：存**解析后**的轨迹（loadSeries 产物），不是原文——
@@ -74,7 +107,7 @@ function renderPreview(action) {
   const stride = Math.max(1, Math.ceil(steps.length / PREVIEW_MAX_ROWS));
   const head = document.createElement('div');
   head.className = 'act-preview-sum';
-  head.textContent = `目标 m${ids.join(', m')} · ${steps.length} 时刻`
+  head.textContent = `${parsed.interpolation === 'linear' ? '原始线性' : '单调插值'} · 目标 m${ids.join(', m')} · ${steps.length} 时刻`
     + `（${steps.length * ids.length} 点）· ${(duration / 1000).toFixed(1)} s`
     + ` · ${duration > 0 ? ((steps.length - 1) / (duration / 1000)).toFixed(1) : '--'} Hz`
     + (stride > 1 ? ` · 表内每 ${stride} 时刻取 1 行` : '');
@@ -137,10 +170,10 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 function announce() { markDirty(DIRTY.TRAJ); }
 
-// 空轨迹 = 取消：释放全部所属电机并软停（MotorTrajectory.msg 的归属语义）。
+// 空轨迹只取消 JTC 并保持位置；全部软停另走 /control/stop。
 function cancelTrajectory() {
   pub('trajectory', {
-    sync_time_ns: Date.now() * 1e6,
+    sync_time_ns: store.controlStates.sourceTimeNs || 0,
     sequence: 0,
     trajectory_id: 0,
     segment_index: 0,
@@ -156,6 +189,9 @@ function cancelTrajectory() {
 // 同一时刻缺台用上一时刻补齐（固件要求每台在每个声明时刻都有路点，缺席整条拒收）。
 export function loadSeries(document_) {
   if (!document_ || typeof document_ !== 'object') throw new Error('不是 JSON 对象');
+  if (document_.interpolation !== undefined && !['monotone','linear'].includes(document_.interpolation)) {
+    throw new Error('动作插值模式只能为 monotone 或 linear');
+  }
   const ids = [...new Set((document_.target_ids || []).map(Number))];
   if (!ids.length) throw new Error('动作缺 target_ids');
   const buckets = new Map();
@@ -178,74 +214,74 @@ export function loadSeries(document_) {
     steps.push({ t, vals });
   }
   if (!steps.length) throw new Error('动作没有路点');
-  return { ids, steps };
+  return { ids, steps, interpolation: document_.interpolation ?? 'monotone' };
 }
 
-// 切窗：每窗 ≤ maxSteps 个时刻；下一窗首点复用上一窗末点（位置连续）。
-// 上限含重叠点：(steps+1)×n ≤ 256。
-export function makeWindows(steps, idCount) {
-  const maxSteps = Math.max(
-    1, Math.min(WINDOW_STEPS_CAP, Math.floor(TRAJ_MAX_POINTS / idCount) - 1));
-  const windows = [];
-  for (let i = 0; i < steps.length; i += maxSteps) {
-    let chunk = steps.slice(i, i + maxSteps);
-    if (windows.length && i > 0) chunk = [steps[i - 1], ...chunk];
-    windows.push(chunk);
+function makePlan(steps, ids) {
+  if (!Number.isInteger(ids.length) || ids.length < 1 || ids.length > TRAJ_MAX_MOTORS) {
+    throw new Error(`动作电机数量须在 1～${TRAJ_MAX_MOTORS}`);
   }
-  return windows;
+  if (steps.length * ids.length > TRAJ_MAX_PLAN_POINTS) {
+    throw new Error(`动作最多 ${TRAJ_MAX_PLAN_POINTS} 个电机路点，请缩减采样后重试`);
+  }
+  const points = steps.flatMap((step,index) => ids.map(id => {
+    const [position,velocity,effort] = step.vals[id];
+    return {time_from_start_ms:ALIGN_MS + step.t - steps[0].t,motor_id:id,
+      position,velocity:index===0?0:velocity,effort:index===0?0:effort};
+  }));
+  if (!points.length || points.some(point =>
+      !Number.isInteger(point.time_from_start_ms) || point.time_from_start_ms <= 0
+      || point.time_from_start_ms > 0xFFFFFFFF
+      || ![point.position,point.velocity,point.effort].every(Number.isFinite))) {
+    throw new Error('轨迹路点须为有限值，时间须为正毫秒且不超过 uint32');
+  }
+  return points;
 }
 
-function sendWindow(index) {
+function sendPlan() {
   assertPlaybackSession();
   const authority=controlTargetsError(store,player.ids);
   if (authority) throw new Error(authority);
-  const chunk = player.windows[index];
-  const t0 = chunk[0].t;
   player.tidSeq = (player.tidSeq + 1) >>> 0;
   const tid = player.tidSeq;
-  const points = [];
-  for (const step of chunk) {
-    for (const id of player.ids) {
-      const [position, velocity, effort] = step.vals[id] || [0, 0, 0];
-      points.push({
-        time_from_start_ms: step.t - t0,
-        motor_id: id,
-        position,
-        velocity,
-        effort,
-      });
-    }
+  const syncTime = store.controlStates.sourceTimeNs;
+  if (!syncTime) throw new Error('尚未收到 MCU 同步源时间，拒绝发送动作');
+  const segmentCount = Math.ceil(player.points.length / TRAJ_MAX_POINTS);
+  for (let index=0; index<segmentCount; index++) {
+    assertPlaybackSession();
+    const points=player.points.slice(index*TRAJ_MAX_POINTS,(index+1)*TRAJ_MAX_POINTS);
+    if (!pub(player.raw ? 'rawTrajectory' : 'trajectory', {
+      sync_time_ns:syncTime, sequence:tid, session_id:player.sessionId, trajectory_id:tid,
+      segment_index:index, segment_count:segmentCount, count:points.length,
+      target_count:player.ids.length, target_ids:player.ids, points,
+    })) throw new Error('轨迹发送失败，请检查连接与控制模式');
   }
-  const blocked = limitsError(points, MODEL);
-  if (blocked) throw new Error(blocked);
-  pub('trajectory', {
-    sync_time_ns: Date.now() * 1e6,
-    sequence: tid,
-    trajectory_id: tid,
-    segment_index: 0,
-    segment_count: 1,
-    count: points.length,
-    target_count: player.ids.length,
-    target_ids: player.ids,
-    points,
-  });
   store.traj.activeTrajectoryId = tid;
-  player.windowTid = tid;
-  player.windowDurMs = chunk[chunk.length - 1].t - t0;
   return tid;
 }
 
-// 等当前窗口跑完：以固件回带的 elapsed_ms 为准（本地钟不可靠）。
-async function waitWindow(tid) {
-  const deadline = Date.now() + player.windowDurMs + TRAJ_STATE_TIMEOUT_PAD_MS;
+// completed 由客户端根据 JTC 成功结果映射，发布成功和时间到达都不算完成。
+export function trajectoryWindowResult(state, tid, durationMs) {
+  if (!state || state.trajectory_id !== tid) return 'waiting';
+  if (!state.active && state.completed && state.elapsed_ms >= durationMs) return 'done';
+  return state.active ? 'waiting' : 'canceled';
+}
+
+// 等待整条 action 的成功终态；本地计时只用于回执超时。
+async function waitPlan(tid) {
+  const deadline = Date.now() + player.durationMs + TRAJ_STATE_TIMEOUT_PAD_MS;
   while (Date.now() < deadline) {
     if (player.cancelRequested) return 'stopped';
-    assertPlaybackSession();
-    const state = store.traj.state;
-    if (state && state.trajectory_id === tid) {
-      if (!state.active) return 'canceled';
-      if (state.elapsed_ms >= player.windowDurMs) return 'done';
+    try {
+      assertPlaybackSession();
+    } catch (error) {
+      // 整条长轨迹已提交；旧页面会话失效时立即撤销，不能等待下一段。
+      if (isConnected() && player.connectionGeneration === getConnectionGeneration()) cancelTrajectory();
+      throw error;
     }
+    const state = store.traj.state;
+    const result = trajectoryWindowResult(state, tid, player.durationMs);
+    if (result !== 'waiting') return result;
     await sleep(50);
   }
   return 'timeout';
@@ -253,76 +289,27 @@ async function waitWindow(tid) {
 
 async function armMotors() {
   assertPlaybackSession();
-  const generation = nextPolicyGeneration();
-  pub('policy', {
-    sync_time_ns: Date.now() * 1e6,
-    request_id: generation,
-    policy_generation: generation,
-    count: player.ids.length,
-    targets: player.ids.map((id) => ({
-      motor_id: id,
-      enabled: true,
-      kp: player.kp,
-      kd: player.kd,
-      confirm_unprotected: isUnprotected(id),
-    })),
-  });
-  for (const id of player.ids) {
-    store.policy.set(id, { enabled: true, kp: player.kp, kd: player.kd });
-  }
-  markDirty(DIRTY.POLICY);
-  await sleep(ARM_SETTLE_MS);
+  const ticket = await submitPolicy(player.ids.map(motor_id => ({
+    motor_id, enabled:true, kp:player.kp, kd:player.kd,
+    confirm_unprotected:isUnprotected(motor_id),
+  })));
   assertPlaybackSession();
-  if (store.controlStates?.seen) {
-    const deadline=Date.now()+3000;
-    while (true) {
-      assertPlaybackSession();
-      if (player.cancelRequested) throw new Error('已停止');
-      if (!controlTargetsError(store,player.ids) && player.ids.every(id =>
-          describeMotorState(store,id).generation===generation)) break;
-      if (Date.now()>=deadline) throw new Error('MCU 未确认本次使能策略，拒绝播放');
-      await sleep(50);
-    }
-  }
-}
-
-// 对齐起点：轨迹首点作为设定值发送一次，由 command_streamer 以 100 Hz 保持。
-async function alignToStart() {
-  const first = player.windows[0][0];
-  const targets = player.ids.map((id) => {
-    const [position] = first.vals[id] || [0, 0, 0];
-    return { motor_id: id, position, velocity: 0, effort: 0 };
-  });
   if (player.cancelRequested) throw new Error('已停止');
-  assertPlaybackSession();
-  const result = sendTargets(targets);
-  if (!result.ok) throw new Error(result.msg);
-  const endAt = Date.now() + ALIGN_MS;
-  while (Date.now() < endAt) {
-    // 仍按 ALIGN_PERIOD_MS 醒一次：只为了尽快响应「停止」，不是为了重发。
-    if (player.cancelRequested) throw new Error('已停止');
+  for (const id of player.ids) store.policy.set(id, {...store.policy.get(id),enabled:true,kp:player.kp,kd:player.kd});
+  markDirty(DIRTY.POLICY);
+  const deadline=Date.now()+3000;
+  while (true) {
     assertPlaybackSession();
-    await sleep(ALIGN_PERIOD_MS);
+    if (player.cancelRequested) throw new Error('已停止');
+    const outcome=policyRequestState(store,ticket,player.ids,true);
+    if (outcome.error) throw new Error(outcome.error);
+    if (outcome.confirmed) {
+      for (const id of player.ids) {const intent=store.policy.get(id)?.intent;if (intent?.ticket===ticket) intent.confirmed=true;}
+      return;
+    }
+    if (Date.now()>=deadline) throw new Error('MCU 未确认本次使能策略，拒绝播放');
+    await sleep(50);
   }
-}
-
-// 取消轨迹**之前**先把当前实测位姿写成设定值（ADR 0014 决定 5）。
-//
-// 轨迹一取消，固件立刻把电机归属交还快照通道，而主机侧的 command_streamer 一直在
-// 发它手里那份设定值——那是**对齐起点时**压进去的轨迹首点（或更早的目标）。不先压
-// 一帧实测位姿，机构会在取消的瞬间朝那个旧目标弹回去。
-// 拿不到实测位置（电机离线/未上报）时返回 false，由调用方说明——**不**因此拦住取消：
-// 操作者按的就是「停止」。
-function holdCurrentPose() {
-  const targets = [];
-  for (const id of player.ids) {
-    const row = store.motors.get(id);
-    const position = row && row.motion ? row.motion.position : null;
-    if (!Number.isFinite(position)) return false;
-    targets.push({ motor_id: id, position, velocity: 0, effort: 0 });
-  }
-  if (!targets.length) return false;
-  return sendTargets(targets).ok;
 }
 
 export async function playAction(name, options) {
@@ -337,6 +324,9 @@ export async function playAction(name, options) {
   player.error = '';
   player.cancelRequested = false;
   player.connectionGeneration = getConnectionGeneration();
+  player.model = MODEL;
+  player.modelMetadata = store.modelTransmissions;
+  player.ids = [];
   player.name = name;
   player.kp = options.kp;
   player.kd = options.kd;
@@ -351,13 +341,10 @@ export async function playAction(name, options) {
     if (!response.ok) throw new Error(`读取动作失败：HTTP ${response.status}`);
     const document_ = await response.json();
     assertPlaybackSession();
-    const { ids, steps } = loadSeries(document_);
-    const coupled=rawCouplingError(store,MODEL,ids);
+    const { ids, steps, interpolation } = loadSeries(document_);
+    player.raw = interpolation === 'linear';
+    const coupled=rawCouplingError(store,player.model,ids);
     if (coupled) throw new Error(coupled);
-    const limitError = limitsError(steps.flatMap(step => ids.map(id => ({
-      motor_id: id, position: step.vals[id][0],
-    }))), MODEL);
-    if (limitError) throw new Error(limitError);
     const blocked = playbackReadinessError(ids);
     if (blocked) throw new Error(blocked);
     const unprotected = ids.filter(isUnprotected);
@@ -367,13 +354,11 @@ export async function playAction(name, options) {
       throw new Error('已取消（限位保护未确认）');
     }
     player.ids = ids;
-    player.windows = makeWindows(steps, ids.length);
+    player.points = makePlan(steps, ids);
+    player.durationMs = player.points[player.points.length-1].time_from_start_ms;
 
     player.detail = '取消旧轨迹…';
     announce();
-    // 同 stopPlayback：取消会把归属交还快照通道，而设定值此刻还停在**上一条**轨迹
-    // 留下的目标上。先压实测位姿，别让机构在重播的间隙朝旧目标动一下。
-    holdCurrentPose();
     cancelTrajectory();
     await sleep(CANCEL_SETTLE_MS);
     assertPlaybackSession();
@@ -389,30 +374,19 @@ export async function playAction(name, options) {
       announce();
     }
 
-    player.detail = '对齐起点…';
-    announce();
-    await alignToStart();
-    assertPlaybackSession();
-
     for (player.round = 0; ; player.round++) {
-      for (let index = 0; index < player.windows.length; index++) {
-        if (player.cancelRequested) throw new Error('已停止');
-        player.winIndex = index;
-        const tid = sendWindow(index);
-        player.detail = `${player.loop ? `第${player.round + 1}轮 ` : ''}`
-          + `窗 ${index + 1}/${player.windows.length} · ${player.windowDurMs}ms`;
-        announce();
-        const verdict = await waitWindow(tid);
-        if (verdict === 'done') continue;
-        if (verdict === 'stopped') throw new Error('已停止');
-        if (verdict === 'canceled') throw new Error('轨迹被取消（固件侧不再有活动轨迹）');
-        throw new Error(`窗 ${index + 1} 无执行回执（可能被拒收：看事件日志 `
-          + `TRAJECTORY_REJECTED；或固件不在线）`);
-      }
+      const tid = sendPlan();
+      player.detail = `${player.loop ? `第${player.round + 1}轮 · ` : ''}`
+        + `JTC ${player.raw ? '原始线性' : '单调插值'}播放（含起点引导）· ${player.durationMs}ms`;
+      announce();
+      const verdict = await waitPlan(tid);
+      if (verdict === 'stopped') throw new Error('已停止');
+      if (verdict === 'canceled') throw new Error(`JTC 未成功（取消/拒绝/执行失败）：${store.commandStatus.data?.reject || store.commandStatus.data?.reason || '请核对控制状态'}`);
+      if (verdict !== 'done') throw new Error(`无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
       if (!player.loop) break;
     }
     player.phase = 'done';
-    player.detail = '播放完成（末点保持；点「停止」释放）';
+    player.detail = '播放完成（JTC 成功）';
     announce();
   } catch (error) {
     player.phase = 'error';
@@ -425,14 +399,13 @@ export function stopPlayback() {
   // 运行中先置停止位（各 await 点会退出）；保持态（done）直接取消释放
   const wasRunning = player.phase === 'running';
   player.cancelRequested = true;
-  // **顺序是安全边界**：先压实测位姿、再取消轨迹。取消会立刻把归属交还快照通道，
-  // 而设定值还停在「对齐起点」那一刻的目标上（见 holdCurrentPose）。
-  const held = holdCurrentPose();
+  for (const policy of store.policy.values()) {
+    if (policy.intent && !policy.intent.confirmed) policy.intent.error='已停止，请重新提交人工使能';
+  }
   cancelTrajectory();
   if (!wasRunning) {
     player.phase = 'idle';
-    player.detail = held ? '已取消（释放归属）'
-      : '已取消（释放归属）；取不到实测位姿，设定值仍是旧目标——确认台上位姿';
+    player.detail = '已请求 JTC 取消并保持位置；全部软停请使用停止控件';
     announce();
   }
 }
@@ -452,6 +425,8 @@ export function mount(root, ctx) {
     importButton: $('btnActImport'),
   };
   let actions = [];
+  local.stop.textContent = '取消轨迹';
+  local.stop.title = 'JTC cancel 并保持位置；全部软停请使用停止控件';
 
   function setResult(text, kind = '') {
     local.result.textContent = text;
@@ -605,7 +580,7 @@ export function mount(root, ctx) {
       : player.phase === 'error' ? '错误' : '--';
     local.hint.textContent = '播放：就绪检查 → '
       + (local.enable.checked ? '武装 kp/kd（已勾选「使能」）' : '跳过武装')
-      + ' → 对齐起点 → 分段播放（≤256 点/窗，窗口边界交棒）；点文件名展开内容';
+      + ' → 按文件选择单调或原始线性插值 → JTC 连续播放（含起点引导，末点验收）；取消保持位置，全部软停请使用停止控件；点文件名展开内容';
     if (player.phase === 'error') setResult(player.error, 'err');
     else if (player.detail) setResult(player.detail, running ? '' : 'ok');
     updatePlayingRow();
@@ -624,4 +599,9 @@ export function mount(root, ctx) {
 function readNumber(input, fallback) {
   const value = parseFloat(input.value);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export function stopAll() {
+  stopPlayback();
+  return isConnected() && pub('stop', {});
 }

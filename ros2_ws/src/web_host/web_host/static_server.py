@@ -1,8 +1,6 @@
-"""web_host 的 HTTP 服务：页面资产、模型文件域与只读设备参数会话。
+"""页面资产、运行模式、模型与动作文件域；设备访问统一经 MCU。
 
-进程管理（仿真 / Agent / 电机后端）不在这里——那是 bench_manager 的 /bench/*
-服务；本进程的直连参数会话由 direct_can 模块负责，前端经 rosbridge + 本 HTTP 服务两个通用面
-使用。
+HTTP 服务不打开 CAN 或串口。运动意图通过受限 rosbridge 入口进入整机监督器。
 """
 
 import json
@@ -15,14 +13,34 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import rclpy
 from rclpy.node import Node
 
-from .actions import list_actions, read_action, save_action
+from .actions import actions_directory, list_actions, read_action, save_action
 from .models import (enumerate_arm_models, model_transmissions,
-                     motor_library, transmission_model_joints)
-from .direct_can import DirectCanSession, device_options
+                     motor_library)
+from .motion import MotionJobs, handle_motion
 
 
 # 动作库导入：单个 JSON 载荷可达数百 KB（motion.json 2868 点）
 _MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+
+def _same_origin(origin, host):
+    """比较本 HTTP 服务的源；默认端口等价，空或畸形 Origin 不被信任。"""
+    try:
+        source = urlsplit(origin)
+        target = urlsplit('http://' + host)
+        return (
+            source.scheme == target.scheme == 'http'
+            and source.hostname is not None
+            and source.hostname == target.hostname
+            and (source.port if source.port is not None else 80)
+            == (target.port if target.port is not None else 80)
+            and source.username is None and source.password is None
+            and target.username is None and target.password is None
+            and not source.path and not source.query and not source.fragment
+            and not target.path and not target.query and not target.fragment
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def main(args=None):
@@ -39,6 +57,16 @@ def main(args=None):
     node.declare_parameter('host', '0.0.0.0')
     node.declare_parameter('port', 8080)
     node.declare_parameter('web_root', '')
+    node.declare_parameter('control_mode', 'bench')
+    node.declare_parameter('robot_model', '')
+    node.declare_parameter('rosbridge_port', 0)
+    control_mode = node.get_parameter('control_mode').value
+    if control_mode not in ('bench', 'readonly'):
+        raise ValueError('control_mode must be bench or readonly')
+    runtime_config = {'control_mode': control_mode,
+                      'robot_model': node.get_parameter('robot_model').value}
+    if node.get_parameter('rosbridge_port').value:
+        runtime_config['rosbridge_port'] = int(node.get_parameter('rosbridge_port').value)
     # 额外挂载：把模型包根（含 models/）挂到一个 URL 前缀下。臂视图要取 URDF 与
     # 约 20 MB 的 STL 网格——那批量既不进 web/、也不该进包，而 setuptools 的
     # symlink-install 又处理不了**目录**符号链接（会把整目录当文件 copy，报
@@ -66,18 +94,18 @@ def main(args=None):
     if not model_dir:
         prefix = ''
     # 模型枚举根 = 挂载源的 models/ 子目录（model_dir 语义：模型包根，可指源码
-    # 目录）。取不到 → None，models.py 的枚举/映射回落到 robot_sim 安装树。
+    # 目录）。取不到 → None，models.py 的枚举/映射回落到 robot_description 安装树。
     models_dir = None
     if model_dir and os.path.isdir(os.path.join(model_dir, 'models')):
         models_dir = os.path.join(model_dir, 'models')
     node.get_logger().info(
         '模型挂载：%s -> %s；模型枚举根：%s'
-        % (prefix or '(无)', model_dir or '(无)', models_dir or '(robot_sim 安装树)'))
+        % (prefix or '(无)', model_dir or '(无)', models_dir or '(robot_description 安装树)'))
 
     # 本次服务启动的标识：写进 cookie，用来判断"这个浏览器还欠不欠一次缓存清理"
     # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
     build_token = str(int(time.time()))
-    direct_can = DirectCanSession()
+    motion_jobs = MotionJobs(actions_dir=actions_directory(web_root))
 
     class Handler(SimpleHTTPRequestHandler):
 
@@ -142,11 +170,13 @@ def main(args=None):
             self.wfile.write(body)
 
         def do_GET(self):
-            path = urlsplit(self.path).path
-            if path == '/api/device-can/options':
-                self._send_json(200, device_options())
+            if handle_motion(self, motion_jobs):
                 return
-            if path == '/' and os.path.isfile(os.path.join(web_root, 'workbench', 'index.html')):
+            path = urlsplit(self.path).path
+            if path == '/api/runtime':
+                self._send_json(200, runtime_config)
+                return
+            if path in ('/', '/index.html') and os.path.isfile(os.path.join(web_root, 'workbench', 'index.html')):
                 query = urlsplit(self.path).query
                 self.send_response(302)
                 self.send_header('Location', '/workbench/' + ('?' + query if query else ''))
@@ -162,19 +192,12 @@ def main(args=None):
                 # （cnt / mA / 电机端 RPM）。取不到返回空表，页面不显示该列。
                 self._send_json(200, {'motor_types': motor_library()})
                 return
-            if path in ('/api/model-joints', '/api/model-transmissions'):
-                # 传动组是关节与电机的权威关联；旧 motor→joint 仅兼容保留下游页面。
+            if path == '/api/model-transmissions':
+                # 传动组是关节与电机的权威关联。
                 requested = (parse_qs(
                     urlsplit(self.path).query).get('model') or [''])[0]
                 try:
-                    if path == '/api/model-transmissions':
-                        payload = model_transmissions(requested, models_dir)
-                    else:
-                        joints = transmission_model_joints(requested, models_dir)
-                        payload = {
-                            'model': requested,
-                            'joints': {str(mid): joint for mid, joint in joints.items()},
-                        }
+                    payload = model_transmissions(requested, models_dir)
                 except ValueError as exc:
                     # 明确 404 + 原因：前端据此告警，而不是悄悄退化成错映射
                     self._send_json(404, {'error': str(exc)})
@@ -207,19 +230,21 @@ def main(args=None):
             super().do_GET()
 
         def do_POST(self):
+            if handle_motion(self, motion_jobs):
+                return
             path = urlsplit(self.path).path
-            direct_action = path.removeprefix('/api/device-can/')
-            is_direct = path.startswith('/api/device-can/')
-            if is_direct:
-                origin = self.headers.get('Origin')
-                if (origin and urlsplit(origin).netloc != self.headers.get('Host')):
-                    self._send_json(403, {'error': '只接受同源设备请求'})
-                    return
-                if self.headers.get_content_type() != 'application/json':
-                    self._send_json(415, {'error': '设备请求必须为 application/json'})
-                    return
-            if path not in {'/api/actions'} and not is_direct:
+            if path != '/api/actions':
                 self._send_json(404, {'error': 'unknown API endpoint'})
+                return
+            # 所有写接口共用门禁：跨源网页不能通过 text/plain 简单 POST 绕过
+            # 浏览器预检，悄悄覆盖动作库。无 Origin 的 JSON 命令行客户端仍可使用。
+            origin = self.headers.get('Origin')
+            if origin is not None and not _same_origin(
+                    origin, self.headers.get('Host', '')):
+                self._send_json(403, {'error': '只接受同源请求'})
+                return
+            if self.headers.get_content_type() != 'application/json':
+                self._send_json(415, {'error': '请求必须为 application/json'})
                 return
 
             try:
@@ -227,36 +252,13 @@ def main(args=None):
             except ValueError:
                 self._send_json(400, {'error': 'invalid Content-Length'})
                 return
-            limit = 4096 if is_direct else _MAX_UPLOAD_BYTES
-            if content_length < 0 or content_length > limit:
+            if content_length < 0 or content_length > _MAX_UPLOAD_BYTES:
                 self._send_json(413, {'error': 'request body too large'})
                 return
             try:
                 request = json.loads(self.rfile.read(content_length))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self._send_json(400, {'error': 'invalid JSON request'})
-                return
-
-            if is_direct:
-                try:
-                    if not isinstance(request, dict):
-                        raise ValueError('设备请求必须为 JSON 对象')
-                    token = request.get('session', '')
-                    if direct_action == 'connect':
-                        payload = direct_can.connect(request.get('transport'), request.get('endpoint'))
-                    elif direct_action == 'read':
-                        payload = direct_can.read(token, device_key=request.get('device'))
-                    elif direct_action == 'discover':
-                        payload = direct_can.discover(token)
-                    elif direct_action == 'heartbeat':
-                        payload = direct_can.heartbeat(token)
-                    elif direct_action == 'disconnect':
-                        payload = direct_can.disconnect(token)
-                    else:
-                        raise ValueError('不支持的直连操作')
-                    self._send_json(200, payload)
-                except Exception as exc:
-                    self._send_json(400, {'error': str(exc)})
                 return
 
             if path == '/api/actions':
@@ -295,7 +297,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        direct_can.close()
+        motion_jobs.close()
         server.server_close()
         node.destroy_node()
         if rclpy.ok():

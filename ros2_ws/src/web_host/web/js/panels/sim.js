@@ -649,7 +649,7 @@ export function mount(root, ctx) {
   }
 
   ui.backend.value = saved.backend || 'gazebo';
-  ui.mode.value = saved.controller_mode || 'host';
+  ui.mode.value = ['firmware', 'external'].includes(saved.controller_mode) ? saved.controller_mode : 'firmware';
   ui.transport.value = saved.transport || 'vcan';
   ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
   ui.spawnZ.value = saved.spawn_z !== undefined ? String(saved.spawn_z) : '0';

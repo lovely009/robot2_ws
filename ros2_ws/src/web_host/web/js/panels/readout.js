@@ -1,7 +1,6 @@
-// 电机状态：全部电机同屏表（行点击 = 置顶 + 选中，行序与左栏关节列表共用 store 的
-// 置顶序）。电机是固件的执行器，与左栏的关节（TF 侧）不是一类东西。
+// 电机状态：按电机编号显示，点击只选中。电机是固件执行器，与关节（TF 侧）分开显示。
 // 卡片等字号展示五项读数；跟随误差、命令源与测量年龄在 title 中。
-import { store, DIRTY, pinMotor, orderedMotorIds, targetOf } from '../core/store.js';
+import { store, DIRTY, orderedMotorIds, targetOf } from '../core/store.js';
 import { describeMotorState } from '../core/motor_state.js';
 import { $, fmt, ageText, busLabel, LIFECYCLE, FAULT_NAMES } from '../core/format.js';
 
@@ -131,12 +130,10 @@ export function mount(root, ctx) {
     root.classList.add('readout-cards');
     root.querySelector('.table-wrap').hidden = true;
   }
-  // 点击行 = 置顶 + 选中（与左栏列表同行为）。
   const select = (e) => {
     const tr = e.target.closest('[data-id]');
     if (!tr) return;
     const id = parseInt(tr.dataset.id, 10);
-    pinMotor(id);
     ctx.ui.selectMotor(id);
   };
   $('selRows').addEventListener('click', select);

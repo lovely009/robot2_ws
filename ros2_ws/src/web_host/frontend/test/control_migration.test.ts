@@ -235,6 +235,57 @@ it('stops uploading after a rejected publish instead of submitting the remaining
   const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1});
   await vi.advanceTimersByTimeAsync(1000);await running;
   expect(pub.mock.calls.filter(([key,msg])=>key==='trajectory' && msg.count>0)).toHaveLength(2);
+  expect(pub.mock.calls.at(-1)).toEqual(['trajectory',expect.objectContaining({count:0,points:[],target_ids:[]})]);
+});
+
+it('首段发布前校验失败不追加取消，避免撤销其他客户端轨迹',async()=>{
+  const {store,actions}=await fixture();
+  const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1});
+  await vi.advanceTimersByTimeAsync(700);
+  store.controlStates.sourceTimeNs=0;
+  await vi.advanceTimersByTimeAsync(300);await running;
+  expect(pub.mock.calls).toHaveLength(1);
+  expect(pub.mock.calls[0]).toEqual(['trajectory',expect.objectContaining({count:0})]);
+});
+
+it.each(['monotone','linear'])('结果回执超时后撤销已提交的 %s 轨迹，不发送全部软停',async interpolation=>{
+  const {store,actions}=await fixture();
+  vi.stubGlobal('fetch',async()=>({ok:true,json:async()=>({interpolation,target_ids:[1],
+    points:[{motor_id:1,time_from_start_ms:0,position:.1}]})}));
+  const running=actions.playAction('short.json',{enable:false,loop:true,kp:30,kd:1});
+  await vi.advanceTimersByTimeAsync(1000);
+  const channel=interpolation==='linear'?'rawTrajectory':'trajectory';
+  const sent=pub.mock.calls.find(([key,msg])=>key===channel && msg.count>0)![1];
+  store.traj.state={trajectory_id:sent.trajectory_id,active:true,completed:false,elapsed_ms:2500};
+  const heartbeat=setInterval(()=>{
+    store.commandStatus.last=store.transmissionStatus.last=Date.now();
+  },100);
+  try {await vi.advanceTimersByTimeAsync(6000);await running;}
+  finally {clearInterval(heartbeat);}
+  expect(pub.mock.calls.filter(([,msg])=>msg.count>0)).toHaveLength(1);
+  expect(pub.mock.calls.at(-1)).toEqual(['trajectory',expect.objectContaining({count:0,points:[],target_ids:[]})]);
+  expect(pub.mock.calls.filter(([key,msg])=>key==='trajectory' && msg.count===0)).toHaveLength(2);
+  expect(pub.mock.calls.some(([key])=>key==='stop')).toBe(false);
+});
+
+it.each(['rejected','throws'])('异常撤销发送失败（%s）仍结束播放并显示原始错误',async failure=>{
+  const {actions,text,confirm}=await policyFixture();
+  confirm();
+  pub.mockImplementation((key:any,msg:any)=>{
+    if(key==='trajectory' && msg.count>0) throw new Error('轨迹传输异常');
+    if(pub.mock.calls.some(([,message])=>message.count>0)) {
+      if(failure==='throws') throw new Error('取消传输异常');
+      return false;
+    }
+    return true;
+  });
+  const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1});
+  await vi.advanceTimersByTimeAsync(700);confirm();
+  await vi.advanceTimersByTimeAsync(300);
+  await expect(running).resolves.toBeUndefined();
+  expect(pub.mock.calls.at(-1)).toEqual(['trajectory',expect.objectContaining({count:0})]);
+  expect(text()).toContain('轨迹传输异常');
+  expect(text()).toContain('取消未发送');
 });
 
 it('JTC cancel holds through the adapter without a manual target or global stop', async () => {

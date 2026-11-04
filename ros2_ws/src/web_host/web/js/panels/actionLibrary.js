@@ -64,6 +64,7 @@ const player = {
   sessionId: Date.now(),  // 刷新后不复用网关已关闭的 (session_id, trajectory_id)。
   tidSeq: 90000,
   cancelRequested: false,
+  planStarted: false,
   connectionGeneration: 0,
 };
 
@@ -172,7 +173,7 @@ function announce() { markDirty(DIRTY.TRAJ); }
 
 // 空轨迹只取消 JTC 并保持位置；全部软停另走 /control/stop。
 function cancelTrajectory() {
-  pub('trajectory', {
+  return pub('trajectory', {
     sync_time_ns: store.controlStates.sourceTimeNs || 0,
     sequence: 0,
     trajectory_id: 0,
@@ -250,6 +251,7 @@ function sendPlan() {
   for (let index=0; index<segmentCount; index++) {
     assertPlaybackSession();
     const points=player.points.slice(index*TRAJ_MAX_POINTS,(index+1)*TRAJ_MAX_POINTS);
+    player.planStarted = true; // 发布也可能抛错，异常收尾须覆盖部分上传。
     if (!pub(player.raw ? 'rawTrajectory' : 'trajectory', {
       sync_time_ns:syncTime, sequence:tid, session_id:player.sessionId, trajectory_id:tid,
       segment_index:index, segment_count:segmentCount, count:points.length,
@@ -272,13 +274,7 @@ async function waitPlan(tid) {
   const deadline = Date.now() + player.durationMs + TRAJ_STATE_TIMEOUT_PAD_MS;
   while (Date.now() < deadline) {
     if (player.cancelRequested) return 'stopped';
-    try {
-      assertPlaybackSession();
-    } catch (error) {
-      // 整条长轨迹已提交；旧页面会话失效时立即撤销，不能等待下一段。
-      if (isConnected() && player.connectionGeneration === getConnectionGeneration()) cancelTrajectory();
-      throw error;
-    }
+    assertPlaybackSession();
     const state = store.traj.state;
     const result = trajectoryWindowResult(state, tid, player.durationMs);
     if (result !== 'waiting') return result;
@@ -332,6 +328,7 @@ export async function playAction(name, options) {
   player.kd = options.kd;
   player.loop = options.loop;
   player.enable = options.enable;
+  player.planStarted = false;
   try {
     player.detail = `读取 ${name}…`;
     announce();
@@ -391,6 +388,13 @@ export async function playAction(name, options) {
   } catch (error) {
     player.phase = 'error';
     player.error = error.message;
+    // 只撤销原连接中的本次播放；显式停止后不补发，重连后不干扰新会话。
+    if (player.planStarted && !player.cancelRequested && isConnected()
+        && player.connectionGeneration === getConnectionGeneration()) {
+      let sent = false;
+      try { sent = cancelTrajectory(); } catch { /* 原始播放错误仍须保留并显示。 */ }
+      if (!sent) player.error += '；取消未发送，运动停止未确认，请使用全部软停';
+    }
     announce();
   }
 }

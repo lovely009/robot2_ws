@@ -105,7 +105,10 @@ def main(args=None):
     # 本次服务启动的标识：写进 cookie，用来判断"这个浏览器还欠不欠一次缓存清理"
     # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
     build_token = str(int(time.time()))
-    motion_jobs = MotionJobs(actions_dir=actions_directory(web_root))
+    from pathlib import Path
+    motion_jobs = MotionJobs(actions_dir=actions_directory(web_root),
+                            profiles_dir=Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
+                            / 'robot2/motion_mappings')
 
     class Handler(SimpleHTTPRequestHandler):
 

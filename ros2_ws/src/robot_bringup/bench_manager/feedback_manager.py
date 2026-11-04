@@ -12,6 +12,7 @@ MODEL_ENV = 'BENCH_FEEDBACK_MODEL'
 CONTROL_ENV = 'BENCH_CONTROL_EXECUTION'
 MOTORS_ENV = 'BENCH_CONTROL_MOTORS'
 SESSION_ENV = 'BENCH_MCU_SESSION'
+PUBLISH_ENV = 'BENCH_FEEDBACK_PUBLISH'
 _MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*\Z')
 
 
@@ -56,8 +57,8 @@ class FirmwareFeedbackManager:
     def __init__(self, models_root: Path | None = None,
                  systemd: SystemdUnits | None = None, stop_control=lambda: None):
         if models_root is None:
-            from .simulation_manager import _models_root
-            models_root = _models_root()
+            from .model_catalog import default_models_root
+            models_root = default_models_root()
         self.models_root = Path(models_root) if models_root else None
         self._systemd = systemd or SystemdUnits()
         self._stop_control = stop_control
@@ -108,6 +109,7 @@ class FirmwareFeedbackManager:
                 'execution': env.get(CONTROL_ENV, ''),
                 'motor_ids': env.get(MOTORS_ENV, ''),
                 'session_id': env.get(SESSION_ENV, '0'),
+                'publishes_joint_states': env.get(PUBLISH_ENV, 'true') == 'true',
                 'reason': self._reason, 'error': self._error,
                 'returncode': unit.returncode}
 
@@ -139,12 +141,15 @@ class FirmwareFeedbackManager:
 
     def reconcile(self, model: str, agent_running: bool = False,
                   simulation_running: bool = False,
+                  firmware_simulation: bool = False,
                   external_publishers: list[str] | None = None,
                   motor_ids: list[int] | None = None, session_id: int = 0) -> None:
         self._desired = model
         self._error = ''
+        hil = simulation_running and firmware_simulation
+        publish_states = not hil
         source, reason = 'firmware', 'MCU 反馈与 ros2_control 控制会话'
-        if simulation_running:
+        if simulation_running and not hil:
             source, reason = 'simulation', '由仿真会话提供关节反馈'
         elif external_publishers:
             source, reason = 'external', '由外部关节源提供反馈'
@@ -154,7 +159,8 @@ class FirmwareFeedbackManager:
             source, reason = 'waiting', '等待 Agent'
         elif motor_ids == []:
             source, reason = 'waiting', '等待新鲜电机反馈'
-        self._source, self._reason = source, reason
+        self._source = 'simulation' if hil else source
+        self._reason = f'仿真关节反馈；{reason}' if hil else reason
         if source != 'firmware':
             if self.status()['state'] != 'stopped':
                 self.stop()
@@ -171,17 +177,19 @@ class FirmwareFeedbackManager:
                 for name in group.actuators})
             if not selected:
                 self.stop()
-                self._source, self._reason = 'waiting', '等待完整传动组的电机反馈'
+                self._source = 'simulation' if hil else 'waiting'
+                self._reason = '等待完整传动组的电机反馈'
                 return
             ids = ','.join(map(str, selected)) if motor_ids is not None else ''
             session = str(session_id)
-            key = (model, ids, session)
+            key = (model, ids, session, publish_states)
             now = time.monotonic()
             if self._attempt != key:
                 self._attempt_count = 0
             if (status['state'] == 'running' and status['model'] == model
                     and status['execution'] == 'ros2_control'
-                    and status['motor_ids'] == ids and status['session_id'] == session):
+                    and status['motor_ids'] == ids and status['session_id'] == session
+                    and status['publishes_joint_states'] == publish_states):
                 if self._attempt != key:
                     self._attempt, self._attempt_at = key, now
                     return
@@ -216,8 +224,11 @@ class FirmwareFeedbackManager:
                 f'motor_config_file:={self.models_root / model / "config" / "motor_driver.yaml"}',
                 f'urdf_file:={self.models_root / model / "urdf" / f"{model}.urdf"}',
                 'start_controllers:=false',
+                f'publish_joint_states:={str(publish_states).lower()}',
+                f'publish_robot_state:={str(publish_states).lower()}',
             ], auto=True, session_env={MODEL_ENV: model, CONTROL_ENV: 'ros2_control',
-                                      MOTORS_ENV: ids, SESSION_ENV: session})
+                                      MOTORS_ENV: ids, SESSION_ENV: session,
+                                      PUBLISH_ENV: str(publish_states).lower()})
         except (ValueError, OSError, RuntimeError, ET.ParseError) as exc:
             self.stop(reset_retry=False)
             self._error = str(exc)

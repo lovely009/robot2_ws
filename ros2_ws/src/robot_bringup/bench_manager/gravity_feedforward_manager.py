@@ -42,8 +42,8 @@ def validate_joint_map(spec: str) -> dict[int, str]:
 class GravityFeedforwardManager:
     def __init__(self, models_root=None, parameter_writer=None, clock=time.monotonic):
         if models_root is None:
-            from .simulation_manager import _models_root
-            models_root = _models_root()
+            from .model_catalog import default_models_root
+            models_root = default_models_root()
         self._models_root = Path(models_root) if models_root else None
         self._parameter_writer = parameter_writer
         self._clock = clock

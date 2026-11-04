@@ -17,6 +17,7 @@ class Joint:
     offset: np.ndarray
     channels: tuple
     start: int
+    is_end: bool = False
 
 
 @dataclass
@@ -26,7 +27,7 @@ class BvhClip:
     frame_time: float
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, *, preserve_names=False):
         text = Path(path).read_text(encoding='utf-8-sig')
         parts = re.split(r'^\s*MOTION\s*$', text, maxsplit=1, flags=re.MULTILINE)
         if len(parts) != 2:
@@ -46,13 +47,14 @@ class BvhClip:
                 expect('Site')
                 name = joints[parent].name + '__end'
             else:
-                name = re.sub(r'[^A-Za-z0-9_]', '_', next(tokens))
+                raw_name = next(tokens)
+                name = raw_name if preserve_names else re.sub(r'[^A-Za-z0-9_]', '_', raw_name)
             if not name or name in names:
                 raise ValueError(f'Duplicate or empty TF joint name: {name!r}')
             names.add(name)
             expect('{')
             index = len(joints)
-            joint = Joint(name, parent, None, (), channel_count)
+            joint = Joint(name, parent, None, (), channel_count, is_end=end)
             joints.append(joint)
             has_channels = False
             while True:

@@ -102,12 +102,12 @@ class MujocoEffortBridge(Node):
             self.model.jnt_dofadr[self.model.actuator_trnid[actuator, 0]]
             for _, actuator in self.command_pairs
         ])
-        # actuatorfrcrange 不截断写入的 ctrl，本桥显式执行峰值力矩限幅。
-        # MJCF 的值由 build_mujoco_model.py 从型号库 `peak_torque_nm` 逐台写入
-        # （r58 45 / r48 11；vaxor 无该字段，沿用 URDF 的 1.15），与假电机侧
-        # `--tau-limits` 同源。
+        # 只使用已启用的关节限幅；未启用的 [0, 0] 不能当作零力矩上限。
+        # MuJoCo 仍执行模型自身的 actuator ctrlrange / forcerange 限幅。
         self.command_torque_limits = np.array([
             float(self.model.jnt_actfrcrange[self.model.actuator_trnid[actuator, 0]][1])
+            if self.model.jnt_actfrclimited[self.model.actuator_trnid[actuator, 0]]
+            else float('inf')
             for _, actuator in self.command_pairs
         ])
 

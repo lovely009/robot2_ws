@@ -13,11 +13,11 @@ import pytest
 
 from conftest import FakeSystemd
 
-from bench_manager.simulation_manager import (
-    SimulationProcessManager,
+from bench_manager.model_catalog import (
     enumerate_mujoco_models,
     enumerate_simulation_models,
 )
+from bench_manager.simulation_manager import SimulationProcessManager
 from bench_manager.systemd_units import UNIT_SIMULATION, SystemdUnits
 
 
@@ -301,6 +301,7 @@ def test_firmware_start_defers_motor_backend_to_bench_manager() -> None:
 
     command = _exec_start(systemd)
     assert 'start_fdcan_sim:=false' in command
+    assert 'start_host_control:=false' in command
     assert not any(arg.startswith('sim_control_socket:=') for arg in command)
     assert status['config']['controller_mode'] == 'firmware'
 

@@ -1,7 +1,9 @@
 """Temporary BVH/URDF conversion jobs; browser preview only, no ROS publishers."""
 
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -11,8 +13,9 @@ import xml.etree.ElementTree as ET
 
 
 class MotionJobs:
-    def __init__(self, actions_dir=None):
+    def __init__(self, actions_dir=None, profiles_dir=None):
         self.actions_dir = Path(actions_dir) if actions_dir is not None else None
+        self.profiles_dir = Path(profiles_dir) if profiles_dir is not None else None
         self.directory = tempfile.TemporaryDirectory(prefix='workbench-motion-')
         self.jobs = {}
         self.lock = threading.RLock()
@@ -55,6 +58,88 @@ class MotionJobs:
         with self.lock:
             return copy.deepcopy(self._job(key)['status'])
 
+    def _generic_mapping(self, job, request, known=None):
+        from bvh_broadcaster.generic_retarget import GenericRetargeter, analyze
+        clip, directory = job['clip'], job['directory']
+        analysis = analyze(directory / 'robot.urdf', clip, up_axis=job['up_axis'], scale=job['scale'])
+        if known and 'arms' in known:
+            pairs = {r: s for arm in known['arms'].values() for r, s in zip(arm['robot'], arm['source'])}
+            analysis['mapping'].update(source_root=known['torso'], source_to_robot=known['source_to_robot'])
+            for target in analysis['mapping']['targets']:
+                target.update(source=pairs.get(target['target'], ''), reason='已有双臂部位对应，请核对')
+        elif known and known.get('mode') == 'shoulders12':
+            analysis['mapping'].update(source_to_robot=known['source_to_robot'])
+            for target in analysis['mapping']['targets']:
+                target.update(source=known['source'] if target['target'] == 'Joint_link2' else '',
+                              reason='已有肩关节部位对应，请核对')
+        else:
+            from ament_index_python.packages import get_package_share_directory
+            import yaml
+            presets = Path(get_package_share_directory('bvh_broadcaster')) / 'config/generic_profiles.yaml'
+            if presets.is_file():
+                digest = hashlib.sha256(request['urdf_text'].replace('\r\n', '\n').encode()).hexdigest()
+                for preset in yaml.safe_load(presets.read_text()).get('profiles', []):
+                    if preset['urdf_sha256'] != digest:
+                        continue
+                    source_names = {j.name for j in clip.joints}
+                    if preset['source_root'] not in source_names:
+                        break
+                    analysis['mapping'].update(source_root=preset['source_root'], source_to_robot=preset['source_to_robot'])
+                    pairs = preset['targets']
+                    for target in analysis['mapping']['targets']:
+                        source = pairs.get(target['target'], '')
+                        target.update(source=source if source in source_names else '', confidence='preset',
+                                      reason='已知模型部位候选，请核对动作骨架')
+                    break
+        identity = {'version': 1, 'urdf': request['urdf_text'], 'up_axis': job['up_axis'],
+                    'scale': job['scale'], 'reference': clip.frames[0].tolist(),
+                    'skeleton': [(j.name, j.parent, j.offset.tolist(), j.channels) for j in clip.joints]}
+        job['profile_key'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        job['generic'] = True
+        job['status'].update(analysis, mapping_origin='suggested')
+        if self.profiles_dir is None:
+            return False
+        path = self.profiles_dir / (job['profile_key'] + '.json')
+        if not path.is_file():
+            return False
+        try:
+            if path.stat().st_size > 1024 * 1024:
+                raise ValueError('映射记录过大')
+            saved = json.loads(path.read_text())
+            if not isinstance(saved, dict) or saved.get('version') != 1:
+                raise ValueError('映射版本不兼容')
+            mapping = saved['mapping']
+            reference = mapping.get('reference_frame', 0)
+            if (type(reference) is not int or not 0 <= reference < len(clip.frames)
+                    or saved.get('reference') != clip.frames[reference].tolist()):
+                raise ValueError('参考姿势已改变')
+            GenericRetargeter(directory / 'robot.urdf', mapping, clip,
+                              up_axis=job['up_axis'], scale=job['scale'])
+            job['status'].update(mapping=mapping, mapping_origin='saved')
+            return not request.get('review_mapping', False)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            job['status']['mapping_origin'] = 'invalid'
+            job['status']['warnings'].append(f'已保存映射需重新确认：{exc}')
+            return False
+
+    def _remember_mapping(self, job, mapping):
+        if self.profiles_dir is None:
+            return False
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        record = {'version': 1, 'mapping': mapping,
+                  'reference': job['clip'].frames[mapping.get('reference_frame', 0)].tolist()}
+        path = self.profiles_dir / (job['profile_key'] + '.json')
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', dir=self.profiles_dir, delete=False) as handle:
+                temporary = Path(handle.name)
+                json.dump(record, handle, allow_nan=False)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return True
+
     def create(self, request):
         from bvh_broadcaster.bvh import BvhClip
         from ament_index_python.packages import get_package_share_directory
@@ -64,6 +149,8 @@ class MotionJobs:
         from .shoulder_retarget import ShoulderRetargeter
         if not isinstance(request, dict):
             raise ValueError('请提交 BVH 和 URDF 文件')
+        if type(request.get('review_mapping', False)) is not bool:
+            raise ValueError('重新确认映射选项必须为布尔值')
         if 'bvh_text' not in request and 'bvh_source' in request:
             request = {**request, 'bvh_text': self._source_text(request['bvh_source']),
                        'bvh_name': request['bvh_source']}
@@ -111,15 +198,21 @@ class MotionJobs:
             try:
                 (directory / 'source.bvh').write_text(request['bvh_text'], encoding='utf-8')
                 (directory / 'robot.urdf').write_text(request['urdf_text'], encoding='utf-8')
-                clip = BvhClip.load(directory / 'source.bvh')
-                model = pin.buildModelFromUrdf(str(directory / 'robot.urdf'))
-                if (model.nq < 1 or any(j.nq != 1 or j.nv != 1 for j in list(model.joints)[1:])
+                generic = request.get('retargeting') == 'generic'
+                clip = BvhClip.load(directory / 'source.bvh', preserve_names=generic)
+                if generic:
+                    from bvh_broadcaster.generic_retarget import _Robot
+                    parsed_robot = _Robot(directory / 'robot.urdf')
+                    model = parsed_robot.model
+                else:
+                    model = pin.buildModelFromUrdf(str(directory / 'robot.urdf'))
+                if not generic and (model.nq < 1 or any(j.nq != 1 or j.nv != 1 for j in list(model.joints)[1:])
                         or not np.isfinite([model.lowerPositionLimit, model.upperPositionLimit,
                                            model.velocityLimit]).all()
                         or np.any(model.lowerPositionLimit >= model.upperPositionLimit)
                         or np.any(model.velocityLimit <= 0)):
                     raise ValueError('当前流程支持有位置、速度限位的独立双臂单自由度关节')
-                sources = [j.name for j in clip.joints if not j.name.endswith('__end')]
+                sources = [j.name for j in clip.joints if not j.is_end]
                 template = yaml.safe_load((Path(get_package_share_directory('bvh_broadcaster')) /
                                            'config/half_body_robot.yaml').read_text())
                 automatic = (all(name in sources for arm in template['arms'].values()
@@ -140,15 +233,29 @@ class MotionJobs:
                           'automatic_mapping': automatic, 'mapping': template if automatic else None}
                 self.jobs[key] = {'directory': directory, 'clip': clip, 'scale': scale,
                                   'up_axis': up_axis, 'status': status}
+                if generic:
+                    builtin = (automatic and not any(parsed_robot.missing)
+                               and all(j.get('type') == 'revolute' and j.find('mimic') is None
+                                       for j in parsed_robot.spec.values()))
+                    automatic = self._generic_mapping(self.jobs[key], request, template if automatic else None)
+                    status['joint_count'] = len(status['robot_joints'])
+                    if (not automatic and builtin and status['mapping_origin'] == 'suggested'
+                            and not request.get('review_mapping', False)):
+                        self.jobs[key]['generic'] = False
+                        automatic = True
+                        status.update(mapping_origin='builtin', mapping=template, confirmation_required=False)
+                    status['automatic_mapping'] = automatic
+                    template = status['mapping']
             except Exception:
                 import shutil
+                self.jobs.pop(key, None)
                 shutil.rmtree(directory)
                 raise
         if automatic:
             return self.start(key, template)
         return self.status(key)
 
-    def start(self, key, mapping):
+    def start(self, key, mapping, remember=False):
         from bvh_broadcaster.retarget import ArmRetargeter
         from .shoulder_retarget import ShoulderRetargeter
         with self.lock:
@@ -159,9 +266,16 @@ class MotionJobs:
                 raise ValueError('已有转换正在进行，请等待完成')
             if not isinstance(mapping, dict):
                 raise ValueError('请先选择人体与机器人关节对应关系')
-            retargeter = ShoulderRetargeter if mapping.get('mode') == 'shoulders12' else ArmRetargeter
-            solver = retargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
-                                up_axis=job['up_axis'])
+            if job.get('generic'):
+                from bvh_broadcaster.generic_retarget import GenericRetargeter
+                solver = GenericRetargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
+                                          up_axis=job['up_axis'], scale=job['scale'])
+                job['status']['confirmation_required'] = False
+                job['status']['mapping_saved'] = self._remember_mapping(job, mapping) if remember else False
+            else:
+                retargeter = ShoulderRetargeter if mapping.get('mode') == 'shoulders12' else ArmRetargeter
+                solver = retargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
+                                    up_axis=job['up_axis'])
             job['status'].update(state='running', progress=0, error='', mapping=copy.deepcopy(mapping))
             self.thread = threading.Thread(target=self._convert, args=(key, solver), daemon=True)
             self.thread.start()
@@ -184,9 +298,14 @@ class MotionJobs:
             positions, directions, orientations = solver.convert(progress)
             np.savez_compressed(directory / 'motion.npz', positions=positions,
                                 joint_names=solver.names, frame_time=clip.frame_time,
+                                preview_only=True,
+                                mechanical_limits_enforced=getattr(solver, 'mechanical_limits_enforced', True),
                                 urdf_sha256=digest(directory / 'robot.urdf'),
                                 direction_error_deg=directions, orientation_error_deg=orientations)
-            load_motion(directory / 'motion.npz', directory / 'robot.urdf')
+            if job.get('generic'):
+                solver.validate_result(positions)
+            else:
+                load_motion(directory / 'motion.npz', directory / 'robot.urdf')
             links = job['status']['robot_links']
             link_ids = [solver.model.getFrameId(n, pin.FrameType.BODY) for n in links]
             children = {j.find('child').attrib['link']: j.find('parent').attrib['link']
@@ -208,14 +327,16 @@ class MotionJobs:
                     ps.append(p)
                     rs.append(r)
                 source_frames.append(np.round(ps, 5).tolist())
-                pin.framesForwardKinematics(solver.model, solver.data, positions[index])
+                q = solver.configuration(positions[index]) if job.get('generic') else positions[index]
+                pin.framesForwardKinematics(solver.model, solver.data, q)
                 robot_frames.append(np.round([solver.data.oMf[f].translation for f in link_ids], 5).tolist())
             preview = {'times': (np.array(indices) * clip.frame_time).tolist(),
                        'duration': (len(positions) - 1) * clip.frame_time,
                        'source': {'names': [j.name for j in clip.joints],
                                   'parents': [j.parent for j in clip.joints], 'frames': source_frames},
                        'robot': {'names': links, 'parents': robot_parents, 'frames': robot_frames,
-                                 'urdf': (directory / 'robot.urdf').read_text(),
+                                 'urdf': (directory / 'robot.urdf').read_bytes().decode('utf-8'),
+                                 'ignore_limits': job.get('generic', False) and not solver.mechanical_limits_enforced,
                                  'joint_names': solver.names,
                                  'joint_positions': np.round(positions[indices], 8).tolist()},
                        'source_to_robot': job['status']['mapping']['source_to_robot']}
@@ -225,6 +346,8 @@ class MotionJobs:
                        'direction_mean_deg': np.mean(directions, axis=0).tolist(),
                        'hand_orientation_mean_deg': np.mean(orientations, axis=0).tolist(),
                        'nonconverged_solves': solver.nonconverged}
+            if job.get('generic'):
+                summary.update(solver.report)
             (directory / 'report.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
             with self.lock:
                 job['status'].update(state='done', progress=100, summary=summary)
@@ -284,7 +407,10 @@ def handle_motion(handler, jobs):
             if parts == ['api', 'motion', 'jobs']:
                 send(202, jobs.create(request))
             elif len(parts) == 5 and parts[:3] == ['api', 'motion', 'jobs'] and parts[4] == 'convert':
-                send(202, jobs.start(parts[3], request.get('mapping')))
+                if type(request.get('remember_mapping', False)) is not bool:
+                    raise ValueError('记住映射选项必须为布尔值')
+                send(202, jobs.start(parts[3], request.get('mapping'),
+                                     remember=request.get('remember_mapping', False)))
             else:
                 send(404, {'error': '动作接口不存在'})
         elif handler.command == 'GET' and parts == ['api', 'motion', 'sources']:

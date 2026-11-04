@@ -1,0 +1,51 @@
+# 已确认全身部位候选；匹配完整 URDF 的 LF 换行摘要后仍须确认，不是电机映射。
+profiles:
+- urdf_sha256: a893aa7440db9fd8271747c2b4c95cc19af12eb369db39f59329df1aee800388
+  source_root: Spine
+  source_to_robot: &id001
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    Joint_Link2: Spine3
+    Joint_Link5: Hips
+    Joint_link3.2r: RightShoulder
+    Joint_link3.5r: RightUpperArm
+    Joint_link3.7r: RightLowerArm
+    Joint_link3.9r: RightHand
+    Joint_link3.2: LeftShoulder
+    Joint_link3.5: LeftUpperArm
+    Joint_link3.7: LeftLowerArm
+    Joint_link3.8: LeftHand
+    Joint_link5.3r: RightUpperLeg
+    Joint_link5.5r: RightLowerLeg
+    Joint_link5.7r: RightFoot
+    Joint_link5.3: LeftUpperLeg
+    Joint_link5.5: LeftLowerLeg
+    Joint_link5.7: LeftFoot
+- urdf_sha256: 83b1d74849de6e6b784adcf9cfa42e649e6921a963c1f459c55eada32b58883a
+  source_root: Spine
+  source_to_robot: *id001
+  targets:
+    Joint_Link2: Spine3
+    Joint_Link5: Hips
+    Joint_link3.2r: RightShoulder
+    Joint_link3.5r: RightUpperArm
+    Joint_link3.7r: RightLowerArm
+    Joint_link3.9r: RightHand
+    Joint_link3.2: LeftShoulder
+    Joint_link3.5: LeftUpperArm
+    Joint_link3.7: LeftLowerArm
+    Joint_link3.8: LeftHand
+    Joint_link5.3r: RightUpperLeg
+    Joint_link5.5r: RightLowerLeg
+    Joint_link5.7r: RightFoot
+    Joint_link5.3: LeftUpperLeg
+    Joint_link5.5: LeftLowerLeg
+    Joint_link5.7: LeftFoot

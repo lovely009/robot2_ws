@@ -7,6 +7,7 @@ from lifecycle_msgs.srv import ChangeState, GetState
 
 from conftest import FakeSystemd
 from bench_manager import node as manager_module
+from bench_manager import simulation_manager as simulation_module
 from bench_manager.systemd_units import SystemdUnits
 
 
@@ -16,11 +17,13 @@ def test_repeated_lifecycle_request_keeps_bench_services_alive(monkeypatch):
     systemd = SystemdUnits(runner=FakeSystemd())
     monkeypatch.setattr(manager_module, 'SystemdUnits', lambda: systemd)
     monkeypatch.setattr(manager_module, 'enumerate_serial_ports', lambda: [])
-    monkeypatch.setattr(manager_module, 'enumerate_can_interfaces', lambda: [])
+    monkeypatch.setattr(simulation_module, 'enumerate_can_interfaces', lambda: [])
+    monkeypatch.setattr(simulation_module, 'enumerate_serial_ports', lambda: [])
+    monkeypatch.setattr(manager_module, 'enumerate_simulation_models', lambda _root: [])
+    monkeypatch.setattr(manager_module, 'enumerate_mujoco_models', lambda _root: [])
     rclpy.init(args=[])
     node = manager_module.BenchManager()
     try:
-        node._model_provider = node._mujoco_model_provider = lambda: []
         for transition in (Transition.TRANSITION_CONFIGURE, Transition.TRANSITION_ACTIVATE):
             response = node._service_change_state.callback(
                 ChangeState.Request(transition=Transition(id=transition)),

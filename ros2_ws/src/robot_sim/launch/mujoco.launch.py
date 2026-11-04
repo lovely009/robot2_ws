@@ -25,6 +25,7 @@ Wayland 下通过进程环境强制 pyGLFW 使用 X11，避免 viewer 自旋阻�
 """
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -99,13 +100,12 @@ def _launch_setup(context):
         emulate_tty=True,
         env=_bridge_environment(),
     )
-    cleanup = ExecuteProcess(
-        cmd=["python3", "-c",
-             "import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)",
-             str(directory)],
-        output="log",
-    )
-    return [bridge, RegisterEventHandler(OnShutdown(on_shutdown=[cleanup]))]
+    def cleanup(_context):
+        shutil.rmtree(directory, ignore_errors=True)
+        return []
+
+    return [bridge, RegisterEventHandler(OnShutdown(
+        on_shutdown=[OpaqueFunction(function=cleanup)]))]
 
 
 def generate_launch_description():

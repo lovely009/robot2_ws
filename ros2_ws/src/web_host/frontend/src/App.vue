@@ -20,6 +20,7 @@ import {
   Film,
 } from "@lucide/vue";
 import PanelHost from "./components/PanelHost.vue";
+import EventLog from "./components/EventLog.vue";
 import FirmwareParameters from "./components/FirmwareParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import MotionWorkbench from "./components/MotionWorkbench.vue";
@@ -406,10 +407,9 @@ onBeforeUnmount(() => {
             <PanelHost
               id="curve"
               :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'curve'"
-            /><PanelHost
-              id="events"
-              :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'events'"
-            /><PanelHost id="imu" :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'imu'" />
+            />
+            <EventLog v-show="screen !== 'teach' && screen !== 'motion' && observe && observation === 'events'" />
+            <PanelHost id="imu" :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'imu'" />
           </div>
         </section>
       </div>

@@ -6,7 +6,7 @@
 #   - 安全阈值：软件侧在 MIT 反馈帧里能实际监控到的量，供保护逻辑消费
 #     （扭矩/电流/电压超限）。反馈帧里没有的量（如 vaxor/cerb 无温度）
 #     不在此列——写了软件侧也监控不到。
-# 其余规格声明（尺寸、重量、外观、轴承等）见 src/motor_drive/docs/ 下规格书。
+# 其余规格声明（尺寸、重量、外观、轴承等）见仓库 docs/README.md 的硬件参考。
 #
 # 结构：
 #   motor_types.<型号>.protocol   —— 所属协议类型（决定用哪个 MotorProtocol）；
@@ -18,7 +18,7 @@
 #   - 本文件（motor.yaml）       —— 型号库：静态参数 + 安全阈值
 #   - motor_driver.yaml（拓扑）  —— 拓扑与动态参数：buses / motors / timing / command
 #
-# 来源：src/motor_drive/docs/cerb-series.md、motor-2530-series.md 及对应规格书。
+# 来源：巨蟹 CERB、VAXOR 25/30 mm 厂商协议及规格书，资料入口见仓库 docs/README.md。
 
 motor_types:
   # ── VAXOR 25mm 微型关节模组（反馈为电流 A + 电压 + fault，无温度）──

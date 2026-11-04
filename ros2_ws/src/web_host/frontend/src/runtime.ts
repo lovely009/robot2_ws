@@ -1,11 +1,12 @@
 import { ref, shallowRef } from "vue";
-import type { WorkbenchSnapshot, PanelId, MountedPanel } from "./contracts";
+import type { WorkbenchSnapshot, PanelId, MountedPanel, EventLogEntry } from "./contracts";
 import { PanelScheduler } from "./panel_scheduler";
 
 export const initialized = ref(false);
 export const startupError = ref("");
 export const notice = ref("");
 export const configuredRosUrl = ref("");
+export const eventLog = shallowRef<readonly EventLogEntry[]>([]);
 export const snapshot = shallowRef<WorkbenchSnapshot>({
   firmwareConnectionKey: '',
   connected: false,
@@ -56,7 +57,6 @@ const panelIds: PanelId[] = [
   "actionLibrary",
   "sim",
   "curve",
-  "events",
   "imu",
 ];
 const mounted = new Set<PanelId>();
@@ -171,6 +171,8 @@ function dirty(batch: Set<string>) {
     s.selectedId = s.motors.keys().next().value;
     batch.add(data.DIRTY.SELECTED);
   }
+  // 事件独立刷新，避免运动反馈每帧复制完整日志。
+  if (batch.has(data.DIRTY.EVENTS)) eventLog.value = s.events.slice();
   updateSnapshot();
   scheduler.invalidate(batch);
 }
@@ -221,6 +223,7 @@ async function start() {
       frame = requestAnimationFrame(render);
       await data.loadModelJoints();
       if (disposed) return;
+      eventLog.value = data.store.events.slice();
       updateSnapshot();
       resolveReady();
       await panelsReady;
@@ -305,6 +308,11 @@ export const runtime = {
   async readFirmwareParameter(name: string) {
     if (!initialized.value || disposed) throw new Error('工作区尚未就绪');
     return modules.device.readFirmwareParameter(name);
+  },
+  clearEvents() {
+    if (!modules || disposed) return;
+    modules.data.store.events.length = 0;
+    modules.data.markDirty(modules.data.DIRTY.EVENTS);
   },
   selectMotor(id: number) {
     if (!modules || disposed) return;

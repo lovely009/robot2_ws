@@ -57,12 +57,8 @@ from .agent_manager import AgentProcessManager, enumerate_serial_ports
 from .feedback_manager import FirmwareFeedbackManager, FeedbackInventory
 from .gravity_feedforward_manager import GravityFeedforwardManager
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
-from .simulation_manager import (
-    SimulationProcessManager,
-    enumerate_can_interfaces,
-    enumerate_mujoco_models,
-    enumerate_simulation_models,
-)
+from .model_catalog import enumerate_mujoco_models, enumerate_simulation_models
+from .simulation_manager import SimulationProcessManager
 from .systemd_units import (
     UNIT_AGENT, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, UNIT_FEEDBACK,
     SystemdUnits,
@@ -133,8 +129,7 @@ class BenchManager(LifecycleNode):
                 'model_dir 下没有 models/，模型枚举回落到 robot_description 安装树：%s'
                 % model_dir)
         models_root = models_dir or None
-        self._model_provider = partial(enumerate_simulation_models, models_root)
-        self._mujoco_model_provider = partial(enumerate_mujoco_models, models_root)
+        model_provider = partial(enumerate_simulation_models, models_root)
 
         # 所有会话共用一个可注入的 systemd 访问层。
         self._systemd = SystemdUnits()
@@ -147,11 +142,11 @@ class BenchManager(LifecycleNode):
         self.add_on_set_parameters_callback(self._validate_feedback_parameters)
         self.agent = AgentProcessManager(systemd=self._systemd)
         self.simulation = SimulationProcessManager(
-            model_provider=self._model_provider,
-            mujoco_model_provider=self._mujoco_model_provider,
+            model_provider=model_provider,
+            mujoco_model_provider=partial(enumerate_mujoco_models, models_root),
             systemd=self._systemd)
         self.motor_backend = MotorSimProcessManager(
-            model_provider=self._model_provider, systemd=self._systemd)
+            model_provider=model_provider, systemd=self._systemd)
         self.feedforward = GravityFeedforwardManager(
             models_root, parameter_writer=self._write_gravity_parameters)
 
@@ -299,16 +294,27 @@ class BenchManager(LifecycleNode):
     def _tick(self):
         self.feedforward.tick()
         try:
-            running = self.feedback.status()['state'] == 'running'
+            simulation = self.simulation.status()
+            simulation_running = simulation['state'] == 'running'
+            config = simulation.get('config') or {}
+            hil = simulation_running and config.get('controller_mode') == 'firmware'
+            feedback = self.feedback.status()
+            publishes_feedback = feedback['state'] == 'running' and feedback['publishes_joint_states']
             publishers = self.get_publishers_info_by_topic('/joint_states')
+            expected = {'mujoco': 'mujoco_effort_bridge',
+                        'gazebo': 'joint_state_broadcaster'}.get(config.get('backend'))
+            sim_publishers = [p for p in publishers if hil and expected
+                              and p.node_name == expected and p.node_namespace == '/']
+            if len(sim_publishers) == 1:
+                publishers = [p for p in publishers if p is not sim_publishers[0]]
             own_count = sum(p.node_name in _OWN_FEEDBACK_NODES for p in publishers)
             external = [p.node_name for p in publishers
-                        if p.node_name not in _OWN_FEEDBACK_NODES or not running or own_count > 1]
+                        if p.node_name not in _OWN_FEEDBACK_NODES or not publishes_feedback or own_count > 1]
             motor_ids, session_id = self._feedback_inventory.current()
             self.feedback.reconcile(
-                self.get_parameter('feedback_model').value,
+                config.get('model', '') if hil else self.get_parameter('feedback_model').value,
                 agent_running=self.agent.status()['state'] == 'running',
-                simulation_running=self.simulation.status()['state'] == 'running',
+                simulation_running=simulation_running, firmware_simulation=hil,
                 external_publishers=external, motor_ids=motor_ids, session_id=session_id)
             self._feedback_error = ''
         except _EXPECTED_ERRORS as exc:
@@ -344,24 +350,16 @@ class BenchManager(LifecycleNode):
         self._publish_status()
         return response
 
-    def _serial_ports_payload(self):
-        ports = []
-        for port in enumerate_serial_ports():
-            ports.append({
-                **port,
-                'accessible': os.access(port['path'], os.R_OK | os.W_OK),
-            })
-        return ports
-
     # ---------- 服务回调 ----------
 
     def _on_options(self, _request, response):
+        options = self.simulation.options()
         response.can_interfaces_json = json.dumps(
-            enumerate_can_interfaces(), ensure_ascii=False)
+            options['can_interfaces'], ensure_ascii=False)
         response.serial_ports_json = json.dumps(
-            self._serial_ports_payload(), ensure_ascii=False)
-        response.simulation_models = self._model_provider()
-        response.mujoco_models = self._mujoco_model_provider()
+            options['serial_ports'], ensure_ascii=False)
+        response.simulation_models = options['models']
+        response.mujoco_models = options['mujoco_models']
         return response
 
     def _on_agent_status(self, _request, response):
@@ -401,6 +399,8 @@ class BenchManager(LifecycleNode):
 
     def _on_stop_simulation(self, _request, response):
         try:
+            if self.simulation.status().get('config', {}).get('controller_mode') == 'firmware':
+                self.feedback.stop()
             self.simulation.stop()
         except _EXPECTED_ERRORS as exc:
             return self._finish(response, exc)

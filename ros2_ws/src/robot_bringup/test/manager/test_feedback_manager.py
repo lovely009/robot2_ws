@@ -212,6 +212,38 @@ def test_no_complete_group_never_starts_a_control_session(setup_feedback):
     assert manager.status()['source']=='waiting'
 
 
+@pytest.mark.parametrize('agent_running,motor_ids', [(False, [1]), (True, []), (True, [2])])
+def test_hil_keeps_simulation_feedback_while_waiting_for_mcu(setup_feedback, agent_running, motor_ids):
+    manager, fake = setup_feedback
+    manager.reconcile('arm_a', agent_running=agent_running, motor_ids=motor_ids,
+                      simulation_running=True, firmware_simulation=True, session_id=100)
+    assert manager.status()['source'] == 'simulation'
+    assert manager.status()['state'] == 'stopped'
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+
+
+def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_feedback):
+    manager, fake = setup_feedback
+    kwargs = dict(agent_running=True, motor_ids=[1], session_id=100)
+    manager.reconcile('arm_a', **kwargs)
+    manager.reconcile('arm_a', **kwargs, simulation_running=True, firmware_simulation=True)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 2
+    assert 'motor_ids:=1' in starts[-1]
+    assert 'publish_joint_states:=false' in starts[-1]
+    assert 'publish_robot_state:=false' in starts[-1]
+    assert manager.status()['source'] == 'simulation'
+    adopted = FirmwareFeedbackManager(manager.models_root, SystemdUnits(runner=fake))
+    adopted.reconcile('arm_a', **kwargs, simulation_running=True, firmware_simulation=True)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
+    adopted.reconcile('arm_a', **kwargs)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 3
+    assert 'publish_joint_states:=true' in starts[-1]
+    assert 'publish_robot_state:=true' in starts[-1]
+    assert all('start_controllers:=false' in command for command in starts)
+
+
 def test_feedback_inventory_uses_source_and_reception_age_and_rejects_replay():
     from bench_manager.feedback_manager import FeedbackInventory
     from can_bridge_msgs.msg import MotorControlStateArray,MotorControlState

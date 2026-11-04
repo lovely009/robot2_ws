@@ -14,10 +14,8 @@ import os
 import socket
 
 from .agent_manager import enumerate_serial_ports
-from .simulation_manager import (
-    enumerate_can_interfaces,
-    enumerate_simulation_models,
-)
+from .model_catalog import enumerate_simulation_models
+from .simulation_manager import enumerate_can_interfaces
 from .systemd_units import (
     AUTO_STARTED_ENV, STATE_NAMES, UNIT_MOTOR_BACKEND, SystemdUnits, UnitState,
     config_env, config_from_env,

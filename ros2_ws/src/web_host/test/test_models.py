@@ -1,13 +1,4 @@
-"""`web_host/models.py` 的单测（模型目录只读视图：臂视图候选与关节映射）。
-
-臂视图的 motor_id → 关节名 映射原先硬编码在前端 store.js、写死成 half_body_robot
-的 18 台，换模型就**静默失效**（关节名对不上 → 那些关节角恒为 0、臂上小球点不中，
-表现得像"电机没注册"）。现在向模型配置取：① 模型自带 motor_driver.yaml；
-② 回落「拓扑 × motor_hardware_interface 权威驱动配置」。这几条守的就是"换模型
-不再静默失效"。
-
-只读文件、不起进程；不碰 CAN 与串口。
-"""
+"""模型枚举、映射优先级、传动元数据与非法配置的只读回归测试。"""
 
 from __future__ import annotations
 
@@ -232,6 +223,68 @@ def test_motor_library_exposes_gear_ratio_keyed_by_topology_model() -> None:
     assert lib['cerb_r58_101']['protocol'] == 'cerb'
 
 
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['without-hardware', 'stale-hardware-copy'])
+def test_motor_library_reads_robot_description(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    # 隔离 ament 索引，避免已有安装树或硬件包的旧副本掩盖型号库归属错误。
+    prefix = tmp_path / 'install'
+    index = prefix / 'share/ament_index/resource_index/packages'
+    index.mkdir(parents=True)
+    (index / 'robot_description').touch()
+    config = prefix / 'share/robot_description/config'
+    config.mkdir(parents=True)
+    (config / 'motor.yaml').write_text(
+        'motor_types:\n  demo:\n    protocol: cerb\n'
+        '    parameters: {gear_ratio: 101, rated_torque_nm: 20.0}\n', encoding='utf-8')
+    if hardware_installed:
+        (index / 'motor_hardware_interface').touch()
+        old_config = prefix / 'share/motor_hardware_interface/config'
+        old_config.mkdir(parents=True)
+        (old_config / 'motor.yaml').write_text(
+            'motor_types:\n  demo:\n    protocol: legacy\n'
+            '    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(prefix))
+
+    assert motor_library() == {
+        'demo': {'protocol': 'cerb', 'gear_ratio': 101, 'rated_torque_nm': 20.0}}
+
+
+@pytest.mark.parametrize('default_installed', [False, True],
+                         ids=['without-default', 'with-default'])
+def test_motor_library_explicit_root_wins(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_installed: bool) -> None:
+    if default_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'robot_description').touch()
+        config = tmp_path / 'share/robot_description/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  default:\n    parameters: {gear_ratio: 101}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    (tmp_path / 'motor.yaml').write_text(
+        'motor_types:\n  custom:\n    parameters: {gear_ratio: 30}\n', encoding='utf-8')
+
+    assert motor_library(tmp_path) == {'custom': {'protocol': 'custom', 'gear_ratio': 30}}
+
+
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['no-packages', 'hardware-only'])
+def test_motor_library_missing_package_is_empty(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    if hardware_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'motor_hardware_interface').touch()
+        config = tmp_path / 'share/motor_hardware_interface/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  legacy:\n    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    assert motor_library() == {}
+
+
 def test_motor_library_missing_root_is_empty(tmp_path: Path) -> None:
     """取不到型号库要退化成空表（页面不显示该列），不能抛。"""
     assert motor_library(tmp_path) == {}
@@ -249,6 +302,9 @@ def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
     assert set(direct) == set(range(1, 19)) - {8, 9, 17, 18}
     assert direct[1] == "joint_link1"
     assert not groups["wrist_a"]["direct_mapping"]
+    assert groups["wrist_a"]["legacy_mapping_reason"] == "coupled_group_not_flattened"
+    assert all(g["legacy_mapping_reason"] is None
+               for g in groups.values() if g["direct_mapping"])
 
 
 def test_declared_invalid_transmission_metadata_cannot_use_legacy_alias(tmp_path: Path) -> None:

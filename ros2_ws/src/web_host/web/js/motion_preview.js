@@ -88,7 +88,7 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
       return url.href;
     });
     const loader = new URDFLoader(manager);
-    loader.packages = { robot_sim: '/robot_sim' };
+    loader.packages = { robot_sim: '/robot_sim', robot_description: '/robot_sim' };
     loader.parseCollision = false;
     let pending = 0, loaded = 0;
     function finish() {
@@ -118,6 +118,9 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
     try {
       const name = document.documentElement.getAttribute('name') || '';
       model = loader.parse(document, `/robot_sim/models/${encodeURIComponent(name)}/urdf/`);
+      if (data.robot.ignore_limits === true) {
+        Object.values(model.joints).forEach(joint => { joint.ignoreLimits = true; });
+      }
       const placement = new THREE.Group();
       placement.quaternion.setFromRotationMatrix(new THREE.Matrix4().setFromMatrix3(basis));
       placement.position.set(0, 1.5, 0);

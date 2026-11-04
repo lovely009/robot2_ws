@@ -11,11 +11,25 @@ cmake --build .host-build --clean-first -j2
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口验证不依赖目标板的纯逻辑模块。当前 CTest 应发现 **23 个用例**（22 个 C++ 目标 + 1 个 python 线协议用例）。目标清单的唯一来源是 `test/host/CMakeLists.txt` 的 `fw_host_test()` 注册处——不要在别处复刻清单，
-历史上正是复刻导致了漂移。
+该入口验证不依赖目标板的纯逻辑模块。目标清单以 `test/host/CMakeLists.txt`
+注册项和 `ctest -N` 为准。
 
 host 测试不模拟 HAL、FreeRTOS 或 rclc；目标板编译也只证明静态集成和链接，
 二者均不能替代真机时序与失效测试。
+
+可靠发送回归还需用固件缓存中的 `micro-CDR`、`Micro-XRCE-DDS-Client`
+源码构建宿主库（先安装 Micro-CDR，再以 `UCLIENT_SUPERBUILD=OFF` 构建 XRCE）。
+将安装前缀通过 `CMAKE_PREFIX_PATH` 传给上述 CMake 后，会增加
+`test_reliable_publish`。只运行本项可使用：
+
+```bash
+cmake --build .host-build --target test_reliable_publish
+ctest --test-dir .host-build -R '^test_reliable_publish$' --output-on-failure
+```
+
+该测试链接真实 XRCE 库及固件的连续分片禁用策略，覆盖历史槽不足时不遗留半条报文、
+ACK 后恢复、最大 Status/Info 载荷。更新出站消息时还需运行
+`micro_ros_agent/tools/test_agent_wire_contract.py` 核对最大合法消息容量。
 
 ## 固件 clean 构建
 

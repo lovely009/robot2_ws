@@ -221,11 +221,11 @@ const visualUrdf = `<robot name="fixture">
     <origin xyz="0 0 .7"/><axis xyz="0 0 1"/><limit lower="-3" upper="3" velocity="1" effort="1"/></joint>
 </robot>`;
 
-async function modelPreview(page: import('@playwright/test').Page, urdf: string) {
+async function modelPreview(page: import('@playwright/test').Page, urdf: string, ignoreLimits = false) {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
   const data = { ...preview, source: { ...preview.source, frames: preview.source.frames.map(() => preview.source.frames[0]) },
     robot: { ...preview.robot, frames: preview.robot.frames.map(() => preview.robot.frames[0]),
-      urdf, joint_names: ['swivel'], joint_positions: [[0], [1], [1.5]] } };
+      urdf, ignore_limits: ignoreLimits, joint_names: ['swivel'], joint_positions: [[0], [1], [1.5]] } };
   await page.route('**/api/motion/**', route => new URL(route.request().url()).pathname.endsWith('/sources')
     ? route.fallback() : route.fulfill({ json:
       route.request().url().endsWith('preview.json') ? data : { ...job, state: 'done', progress: 100 } }));
@@ -253,4 +253,15 @@ test('URDF网格缺失时显示提示并保留骨架播放', async ({ page }) =>
   await expect(page.getByLabel('人体与机器人动作三维预览')).toBeVisible();
   await page.getByLabel('动作播放进度', { exact: true }).fill('1.2');
   await expect(page.getByText('1.20 s / 2.00 s')).toBeVisible();
+});
+
+test('明确选择几何预览后，零限位 CAD 实体也能播放', async ({page}) => {
+  await modelPreview(page, visualUrdf.replace('lower="-3" upper="3"', 'lower="0" upper="0"'), true);
+  await expect(page.getByLabel('机器人模型状态', {exact:true})).toHaveText('机器人实体模型');
+  await page.getByRole('button', {name:'暂停预览',exact:true}).click();
+  await page.getByLabel('动作播放进度', {exact:true}).fill('0');
+  const canvas=page.getByLabel('人体与机器人动作三维预览');
+  const before=await canvas.screenshot();
+  await page.getByLabel('动作播放进度', {exact:true}).fill('1.2');
+  expect(before.equals(await canvas.screenshot())).toBe(false);
 });

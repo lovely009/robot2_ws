@@ -41,11 +41,10 @@ wire_quantize_result_t wire_quantize(double value, double scale);
 double wire_dequantize(int16_t q, double scale);
 
 // MotorStatus 健康/电气字段的编码。缺失与饱和分离：年龄 0xFFFF = 从未收到、
-// 0xFFFE = 真实年龄饱和；电压 0xFFFF = 缺失；int16 字段复用 WIRE_SENTINEL_MISSING。
+// 0xFFFE = 真实年龄饱和；温度复用 WIRE_SENTINEL_MISSING，电流/电压缺失为 INT32_MIN/UINT32_MAX。
 // 入参沿用内核快照语义：年龄 0xFFFFFFFF = 从未测量，电气量 NaN = 缺失。
 #define WIRE_AGE_MS_NEVER 0xFFFFU
 #define WIRE_AGE_MS_SATURATED 0xFFFEU
-#define WIRE_VOLTAGE_MV_MISSING 0xFFFFU
 
 typedef struct {
   bool online;
@@ -58,8 +57,6 @@ typedef struct {
 // 以下函数先钳位后取整，非有限输入给缺失哨兵（不进入浮点转整数 UB）。
 uint16_t wire_encode_state_age(uint32_t age_ms);
 int16_t wire_encode_temperature_dc(double temperature_c);
-int16_t wire_encode_current_ma(double current_a);
-uint16_t wire_encode_voltage_mv(double voltage_v);
 int32_t wire_encode_current_ma_i32(double current_a);
 uint32_t wire_encode_voltage_mv_u32(double voltage_v);
 // 位序：bit0 online，bit1 protect_known，bit2 protect_enabled，
@@ -72,16 +69,6 @@ uint8_t wire_encode_status_flags(wire_status_flags_input_t in);
 bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
     size_t position_q_len, size_t velocity_q_len, size_t effort_q_len,
     size_t max_slots);
-
-// 配置面两组字段互斥；不适用组使用编码端哨兵 COMMAND_SAVE(0)、MOTOR_ID_NONE(65535)。
-// 以下常量与生成消息的一致性由 wire_contract_check.cpp 静态断言校验。
-#define WIRE_CONFIG_KIND_PARAM_SET 0U
-#define WIRE_CONFIG_KIND_SYSTEM_COMMAND 1U
-#define WIRE_CONFIG_COMMAND_SAVE 0U
-#define WIRE_MOTOR_ID_NONE 65535U
-
-bool wire_config_groups_exclusive(uint8_t kind, uint16_t count,
-    size_t targets_len, uint8_t command, uint16_t motor_id);
 
 #ifdef __cplusplus
 }

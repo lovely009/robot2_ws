@@ -21,6 +21,9 @@ def test_workbench_exposes_controls_but_no_wire_writes():
     bridge = nodes[0]
     params = evaluate_parameters(context, getattr(bridge, '_Node__parameters'))[0]
     assert literal_eval(params['topics_pub_glob']) == module.CONTROL_TOPICS
+    assert params['address'] == '127.0.0.1'
+    web_params = evaluate_parameters(context, getattr(nodes[1], '_Node__parameters'))[0]
+    assert web_params['host'] == '127.0.0.1'
     assert params['topics_glob'] == '[]'
     assert params['call_services_in_new_thread'] is True
     assert not any('/managed/' in topic or '/micro_ros_' in topic

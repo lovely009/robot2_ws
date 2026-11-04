@@ -1,10 +1,8 @@
 // 线协议编译期校验；尺寸按 CDR 布局计算，不使用含 data/size/capacity 的 sizeof。
 
-#include <can_bridge_msgs/msg/detail/config_request__struct.h>
 #include <can_bridge_msgs/msg/detail/low_command__struct.h>
 #include <can_bridge_msgs/msg/detail/low_state__struct.h>
 #include <can_bridge_msgs/msg/detail/motor_status__struct.h>
-#include <can_bridge_msgs/msg/detail/system_command__struct.h>
 #include <can_bridge_msgs/msg/detail/wire_contract__struct.h>
 #include <can_bridge_msgs/msg/detail/agent_wire_contract__struct.h>
 
@@ -46,19 +44,6 @@ static_assert(can_bridge_msgs__msg__WireContract__MOTOR_COUNT_MAX >= FIRMWARE_MA
 // wire_codec 不依赖 ROS；在此校验其哨兵与生成常量一致。
 static_assert(can_bridge_msgs__msg__WireContract__SENTINEL_MISSING == WIRE_SENTINEL_MISSING,
     "wire_codec 的哨兵与 WireContract 漂移了：两端定点解码会错位");
-
-static_assert(WIRE_CONFIG_KIND_PARAM_SET ==
-    can_bridge_msgs__msg__ConfigRequest__CONFIG_KIND_PARAM_SET,
-    "wire_codec 与 ConfigRequest 的 PARAM_SET 常量漂移了");
-static_assert(WIRE_CONFIG_KIND_SYSTEM_COMMAND ==
-    can_bridge_msgs__msg__ConfigRequest__CONFIG_KIND_SYSTEM_COMMAND,
-    "wire_codec 与 ConfigRequest 的 SYSTEM_COMMAND 常量漂移了");
-static_assert(WIRE_CONFIG_COMMAND_SAVE ==
-    can_bridge_msgs__msg__SystemCommand__COMMAND_SAVE,
-    "wire_codec 的 COMMAND_SAVE 与 SystemCommand 漂移了");
-static_assert(WIRE_MOTOR_ID_NONE ==
-    can_bridge_msgs__msg__SystemCommand__MOTOR_ID_NONE,
-    "wire_codec 的 MOTOR_ID_NONE 与 SystemCommand 漂移了");
 
 // rosidl 生成的浮点与字符串常量不支持 static_assert；由主机侧契约测试校验。
 

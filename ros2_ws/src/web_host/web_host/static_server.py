@@ -54,7 +54,7 @@ def main(args=None):
 
     signal.signal(signal.SIGTERM, _sigterm)
     node = Node('web_static_server')
-    node.declare_parameter('host', '0.0.0.0')
+    node.declare_parameter('host', '127.0.0.1')
     node.declare_parameter('port', 8080)
     node.declare_parameter('web_root', '')
     node.declare_parameter('control_mode', 'bench')

@@ -72,25 +72,6 @@ void test_frame_shape()
   assert(!wire_frame_shape_ok(65, 65, 65, 65, 65, 64));
 }
 
-void test_config_groups_exclusive()
-{
-  // PARAM_SET：只带参数组。命令组不适用时，bridge 的编码端写的是
-  // command = COMMAND_SAVE(0)、motor_id = MOTOR_ID_NONE(65535)——
-  // 不是 0（0 是合法电机 id），照着 .msg 字面「0/空」写会拒掉每一条合法参数写。
-  assert(wire_config_groups_exclusive(
-      WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 0, WIRE_MOTOR_ID_NONE));
-  assert(!wire_config_groups_exclusive(
-      WIRE_CONFIG_KIND_PARAM_SET, 2, 1, 0, WIRE_MOTOR_ID_NONE));
-  assert(!wire_config_groups_exclusive(
-      WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 4, WIRE_MOTOR_ID_NONE));
-  assert(!wire_config_groups_exclusive(WIRE_CONFIG_KIND_PARAM_SET, 2, 2, 0, 0));
-  // SYSTEM_COMMAND：只带命令组；目标必须为空。motor_id 可以是 MOTOR_ID_NONE。
-  assert(wire_config_groups_exclusive(
-      WIRE_CONFIG_KIND_SYSTEM_COMMAND, 0, 0, 0, WIRE_MOTOR_ID_NONE));
-  assert(!wire_config_groups_exclusive(WIRE_CONFIG_KIND_SYSTEM_COMMAND, 1, 1, 0, 0));
-  // 未知 kind 整条拒。
-  assert(!wire_config_groups_exclusive(7, 0, 0, 0, 0));
-}
 void test_state_age_never_vs_saturated()
 {
   // 0xFFFF = 从未收到；0xFFFE = 真实年龄饱和。65535 ms 是真实年龄，
@@ -120,30 +101,6 @@ void test_temperature_dc()
   assert(wire_encode_temperature_dc(-1e300) == -32767);
 }
 
-void test_current_ma()
-{
-  assert(wire_encode_current_ma(1.5) == 1500);
-  assert(wire_encode_current_ma(-2.25) == -2250);
-  assert(wire_encode_current_ma(0.0) == 0);
-  assert(wire_encode_current_ma(NAN) == WIRE_SENTINEL_MISSING);
-  assert(wire_encode_current_ma(32.768) == 32767);
-  assert(wire_encode_current_ma(-32.768) == -32767);
-  assert(wire_encode_current_ma(1e300) == 32767);
-}
-
-void test_voltage_mv()
-{
-  // 0xFFFF 是缺失哨兵，所以正向量程只到 0xFFFE mV。
-  assert(wire_encode_voltage_mv(24.0) == 24000);
-  assert(wire_encode_voltage_mv(0.0) == 0);
-  assert(wire_encode_voltage_mv(0.0004) == 0);
-  assert(wire_encode_voltage_mv(NAN) == WIRE_VOLTAGE_MV_MISSING);
-  assert(wire_encode_voltage_mv(INFINITY) == WIRE_VOLTAGE_MV_MISSING);
-  assert(wire_encode_voltage_mv(70.0) == 0xFFFEu);
-  assert(wire_encode_voltage_mv(1e300) == 0xFFFEu);
-  assert(wire_encode_voltage_mv(-1.0) == 0);
-}
-
 void test_status_flags()
 {
   // 位序必须与 MotorStatus.msg 头注释、主机 decode_motor_status 一致。
@@ -168,9 +125,22 @@ void test_status_flags()
 
 void test_wide_electrical_telemetry()
 {
+  assert(wire_encode_current_ma_i32(1.5) == 1500);
+  assert(wire_encode_current_ma_i32(-2.25) == -2250);
+  assert(wire_encode_current_ma_i32(0.0) == 0);
+  assert(wire_encode_current_ma_i32(1e300) == INT32_MAX);
+  assert(wire_encode_current_ma_i32(-1e300) == -INT32_MAX);
+  assert(wire_encode_current_ma_i32(INFINITY) == INT32_MIN);
+  assert(wire_encode_current_ma_i32(-INFINITY) == INT32_MIN);
   assert(wire_encode_current_ma_i32(100.0) == 100000);
   assert(wire_encode_current_ma_i32(-100.0) == -100000);
   assert(wire_encode_current_ma_i32(NAN) == (-2147483647 - 1));
+  assert(wire_encode_voltage_mv_u32(0.0) == 0U);
+  assert(wire_encode_voltage_mv_u32(-1.0) == 0U);
+  assert(wire_encode_voltage_mv_u32(0.0004) == 0U);
+  assert(wire_encode_voltage_mv_u32(1e300) == UINT32_MAX - 1U);
+  assert(wire_encode_voltage_mv_u32(INFINITY) == UINT32_MAX);
+  assert(wire_encode_voltage_mv_u32(-INFINITY) == UINT32_MAX);
   assert(wire_encode_voltage_mv_u32(72.0) == 72000U);
   assert(wire_encode_voltage_mv_u32(NAN) == 0xFFFFFFFFu);
 }
@@ -212,11 +182,8 @@ int main()
   test_sentinel_is_not_a_value();
   test_non_finite_yields_sentinel();
   test_frame_shape();
-  test_config_groups_exclusive();
   test_state_age_never_vs_saturated();
   test_temperature_dc();
-  test_current_ma();
-  test_voltage_mv();
   test_status_flags();
   std::printf("test_wire_codec: ok\n");
   return 0;

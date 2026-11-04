@@ -60,7 +60,31 @@ def _patch_standard_trajectory_action() -> None:
                 ros_loader._loaded_msgs['control_msgs' + middle + message.__name__] = message
 
 
+def _patch_workbench_origin(port: int) -> None:
+    from rosbridge_server.websocket_handler import RosbridgeWebSocket
+    from tornado.websocket import WebSocketHandler
+    from .static_server import _same_origin
+
+    def check_origin(self, origin):
+        return any(_same_origin(origin, f'{host}:{port}')
+                   for host in ('localhost', '127.0.0.1', '[::1]'))
+
+    async def get(self, *args, **kwargs):
+        # Tornado 会跳过无 Origin 的检查，须在真正升级前封住这个旁路。
+        headers = self.request.headers
+        origin = headers.get('Origin', headers.get('Sec-Websocket-Origin'))
+        if not check_origin(self, origin):
+            self.set_status(403)
+            self.finish('只接受本机工作台来源')
+            return
+        await WebSocketHandler.get(self, *args, **kwargs)
+
+    RosbridgeWebSocket.check_origin = check_origin
+    RosbridgeWebSocket.get = get
+
+
 def main(args=None) -> None:
+    _patch_workbench_origin(int(os.environ.get('WORKBENCH_WEB_PORT', '8080')))
     _patch_bounded_strings()
     _patch_standard_trajectory_action()
     script = os.path.join(

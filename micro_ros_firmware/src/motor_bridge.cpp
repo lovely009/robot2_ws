@@ -24,15 +24,13 @@
 #include "serial_transport.h"
 #include "time_utils.h"
 #include "wire_codec.h"
+#include "reliable_schedule.hpp"
 
 static constexpr size_t kMotorCapacity = can_bridge_msgs__msg__AgentWireContract__MOTOR_COUNT_MAX;
 static constexpr size_t kChunkCapacity = can_bridge_msgs__msg__AgentWireContract__MOTION_CHUNK_MAX;
 static constexpr size_t kTrajectoryPointCapacity = can_bridge_msgs__msg__AgentWireContract__TRAJECTORY_CHUNK_MAX;
 static constexpr size_t kResultCapacity = can_bridge_msgs__msg__AgentWireContract__CONFIG_RESULTS_MAX;
-static constexpr uint32_t kMotionIntervalMs = 20U;
-static constexpr uint32_t kReliableIntervalMs = 10U;
-static constexpr uint32_t kStatusMinIntervalMs = 20U;
-static constexpr uint32_t kStatusIntervalMs = 100U;
+static constexpr uint32_t kMotionIntervalMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
 static_assert(kMotorCapacity == MOTOR_CONTROL_MAX_MOTORS, "V3 电机容量不一致");
 static_assert(kChunkCapacity == 32U && kMotorCapacity <= 2U * kChunkCapacity, "motion 每代最多两组");
 static_assert(kTrajectoryPointCapacity == AGENT_TRAJECTORY_SEGMENT_POINTS, "轨迹接收容量不一致");
@@ -41,10 +39,9 @@ static_assert(MOTOR_CONTROL_MAX_BUSES <= 3U, "诊断总线数组容量不足");
 static uint64_t g_session_id = 0U, g_last_session_id = 0U;
 static uint32_t g_publish_fail = 0U;
 static uint32_t g_motion_sequence = 0U, g_status_sequence = 0U;
-static uint32_t g_motion_tick = 0U, g_status_tick = 0U;
-static uint32_t g_status_attempt_tick = 0U, g_reliable_tick = 0U;
+static uint32_t g_motion_tick = 0U;
+static ReliableSchedule g_schedule;
 static uint32_t g_sent_status_fingerprint = 0U;
-static uint8_t g_consecutive_status = 0U;
 static bool g_status_dirty = true;
 static bool g_have_sent_status = false;
 static rcl_subscription_t g_command_sub, g_trajectory_sub;
@@ -119,14 +116,11 @@ bool motor_bridge_begin_session(uint64_t epoch_ns) {
   g_session_id = g_last_session_id = session;
   motor_rt_begin_agent_session(session);
   g_motion_sequence = g_status_sequence = 0U;
-  g_consecutive_status = 0U;
   g_status_dirty = true;
   g_have_sent_status = false;
   const uint32_t now = millis();
   g_motion_tick = now - kMotionIntervalMs;
-  g_status_tick = now - kStatusIntervalMs;
-  g_status_attempt_tick = now - kStatusMinIntervalMs;
-  g_reliable_tick = now - kReliableIntervalMs;
+  g_schedule = {now - 10U, now - 20U, now - FIRMWARE_MOTOR_REPORT_PERIOD_MS, 0};
   return true;
 }
 
@@ -586,26 +580,22 @@ void motor_bridge_poll(void) {
   const uint32_t fingerprint = status_fingerprint();
   if (!g_have_sent_status || fingerprint != g_sent_status_fingerprint) g_status_dirty = true;
   const uint32_t send_tick = millis();
-  const bool status_due = (uint32_t)(send_tick - g_status_attempt_tick) >= kStatusMinIntervalMs &&
-      (g_status_dirty || (uint32_t)(send_tick - g_status_tick) >= 1000U / FIRMWARE_MOTOR_REPORT_HZ);
   const auto *info = param_bridge_info();
-  if ((uint32_t)(send_tick - g_reliable_tick) < kReliableIntervalMs) return;
-  // 每 10ms 最多一次可靠应用发布；连续两轮 status 后必须给待发 info 一轮。
-  if (status_due && (info == nullptr || g_consecutive_status < 2U)) {
-    g_reliable_tick = g_status_attempt_tick = send_tick;
-    if (g_consecutive_status < 2U) ++g_consecutive_status;
+  const auto publication = g_schedule.next(send_tick, g_status_dirty, info != nullptr);
+  if (publication == ReliablePublication::Status) {
     g_status_msg.sequence = ++g_status_sequence;
-    if (send_reliable(&g_status_pub, &g_status_msg)) {
+    const bool success = send_reliable(&g_status_pub, &g_status_msg);
+    g_schedule.record(send_tick, publication, success);
+    if (success) {
       g_sent_status_fingerprint = fingerprint;
       g_have_sent_status = true;
       g_status_dirty = false;
-      g_status_tick = send_tick;
     } else {
       g_status_dirty = true;
     }
-  } else if (info != nullptr) {
-    g_reliable_tick = send_tick;
-    g_consecutive_status = 0U;
-    param_bridge_info_sent(send_reliable(&g_info_pub, info));
+  } else if (publication == ReliablePublication::Info) {
+    const bool success = send_reliable(&g_info_pub, info);
+    g_schedule.record(send_tick, publication, success);
+    param_bridge_info_sent(success);
   }
 }

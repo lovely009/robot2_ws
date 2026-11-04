@@ -48,7 +48,7 @@ source install/setup.bash
 ros2 launch robot_bringup robot.launch.py
 ```
 
-模型默认选择 `half_body_robot`，可在网页切换。启动不使能电机；Agent 与控制会话由工作台管理。打开 `http://localhost:8080/workbench/`，根路径和旧 `/index.html` 自动跳转。启动用法见 [robot_bringup](ros2_ws/src/robot_bringup/README.md)。
+模型默认选择 `half_body_robot`，可在网页切换。启动不使能电机；Agent 与控制会话由工作台管理。打开 `http://localhost:8080/workbench/`，根路径和旧 `/index.html` 自动跳转。HTTP 与 rosbridge 仅监听本机；WebSocket 只接受当前工作台端口的本机 HTTP 来源，不接受任意网页或无 Origin 的连接。启动用法见 [robot_bringup](ros2_ws/src/robot_bringup/README.md)。
 
 `robot.launch.py` 启动桥接与工作台，`bench.launch.py` 管理模型和仿真会话，`firmware_tf.launch.py` 发布实测关节与 TF。
 
@@ -64,7 +64,7 @@ ros2 launch robot_bringup robot.launch.py
 
 主机初次发现反馈最多等待 5 秒，运行期新鲜度保护不变。反馈进程退出或接口持续失效时，管理器先停控，再按冷却间隔最多尝试三次重建；连续新鲜反馈且控制器就绪后才重置重试预算。重建只恢复反馈与控制入口，不恢复使能或旧目标。
 
-运行期系统/电机参数设置和保存已移除。固件不提供 ROS 参数服务，仅在上电只读加载已有 W25 电机记录，不提供擦写或保存；频率改为编译期固定配置。保留电机上电必要归一化、只读查询、故障清除和失能态单电机设零；配置来源为 `micro_ros_firmware/include/` 与 `micro_ros_firmware/lib/firmware_config/`。
+运行期系统/电机参数设置和保存已移除。固件不提供 ROS 参数服务，仅在上电只读加载已有 W25 电机记录，不提供擦写或保存；频率改为编译期固定配置。保留电机上电必要归一化、只读查询、故障清除和失能态单电机设零；配置来源为 `micro_ros_firmware/include/`（固定容量与频率见 `firmware_config.h`）。
 
 设零入口为“电机参数 → 选择电机 → 维护操作 → 设零”。先停止主机关节控制并失能该电机，确认当前姿态后提交；收到设备写应答才显示成功，不自动使能或恢复旧目标。设零会改变设备位置限位对应的机械位置，完成后须核对实际反馈与机械行程；不写 W25，也不隐式执行 SAVE，掉电后零位是否保留仍需设备实测。
 

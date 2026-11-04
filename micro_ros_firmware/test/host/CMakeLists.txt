@@ -7,7 +7,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include_directories(../../lib/firmware_config/include)
+include_directories(../../include)
 
 # 原则：测试直接编译固件真实 .c，无桩无复制。固件源码按库组织成 OBJECT
 # 库单点维护源文件列表，新增内核 .c 只改本文件一处；include 目录随库
@@ -39,11 +39,11 @@ target_include_directories(fw_motor_control PUBLIC
   ../../lib/motor_control/include)
 target_link_libraries(fw_motor_control PUBLIC fw_adapters)
 
-# 会话同步纯逻辑（lib/session_sync；host 可直编）
+# 会话同步纯逻辑（应用源码；host 可直编）
 add_library(fw_session_sync OBJECT
-  ../../lib/session_sync/src/session_sync.c)
+  ../../src/session_sync.c)
 target_include_directories(fw_session_sync PUBLIC
-  ../../lib/session_sync/include ../../include ../../lib/control_mailbox/include
+  ../../lib/control_mailbox/include
   ../../lib/motor_control/include ../../lib/motor_protocol/include)
 target_link_libraries(fw_session_sync PUBLIC fw_mailbox fw_motor_control)
 
@@ -217,8 +217,7 @@ fw_host_test(test_37_axis_schedule
   INCLUDES ../../lib/motor_control/src)
 
 
-add_library(fw_clock_health OBJECT ../../lib/clock_health/src/clock_health.c)
-target_include_directories(fw_clock_health PUBLIC ../../lib/clock_health/include)
+add_library(fw_clock_health OBJECT ../../src/clock_health.c)
 fw_host_test(test_clock_health SOURCES test_clock_health.cpp OBLIBS fw_clock_health)
 
 fw_host_test(test_imu_snapshot
@@ -256,21 +255,27 @@ fw_host_test(test_heater_pid
 fw_host_test(test_session_sync
   SOURCES test_session_sync.cpp
   OBLIBS fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
-  INCLUDES ../../lib/session_sync/include ../../lib/motor_control/src)
+  INCLUDES ../../lib/motor_control/src)
 
 fw_host_test(test_wire_codec
   SOURCES test_wire_codec.cpp
   OBLIBS fw_wire_codec)
 
-# 发布调度纯逻辑（lib/publish_schedule；无 ROS 依赖，host 可直编）
-add_library(fw_publish_schedule OBJECT
-  ../../lib/publish_schedule/src/publish_schedule.c)
-target_include_directories(fw_publish_schedule PUBLIC
-  ../../lib/publish_schedule/include)
+fw_host_test(test_reliable_schedule SOURCES test_reliable_schedule.cpp)
 
-fw_host_test(test_publish_schedule
-  SOURCES test_publish_schedule.cpp
-  OBLIBS fw_publish_schedule)
+# 直接编译线上 poll，ROS 端口由测试替身提供；源码改动时自动重新提取。
+# shortcut: poll 目前位于文件末尾；布局改变时须更新提取边界。
+set(_bridge_source "${CMAKE_CURRENT_SOURCE_DIR}/../../src/motor_bridge.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_bridge_source}")
+file(READ "${_bridge_source}" _bridge_text)
+string(FIND "${_bridge_text}" "void motor_bridge_poll(void)" _poll_start)
+if(_poll_start LESS 0)
+  message(FATAL_ERROR "motor_bridge_poll entry point not found")
+endif()
+string(SUBSTRING "${_bridge_text}" ${_poll_start} -1 _poll_text)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/motor_bridge_poll.inc" "${_poll_text}")
+fw_host_test(test_motor_bridge_schedule SOURCES test_motor_bridge_schedule.cpp
+  INCLUDES "${CMAKE_CURRENT_BINARY_DIR}")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -297,8 +302,7 @@ fw_host_test(test_config_transaction
   SOURCES test_config_transaction.cpp
   OBLIBS fw_config_transaction)
 
-add_library(fw_serial_write_budget OBJECT ../../lib/serial_write_budget/src/serial_write_budget.c)
-target_include_directories(fw_serial_write_budget PUBLIC ../../lib/serial_write_budget/include)
+add_library(fw_serial_write_budget OBJECT ../../src/serial_write_budget.c)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
 
 # 按固件锁定源码构建的宿主 XRCE 库通过 CMAKE_PREFIX_PATH 指定。

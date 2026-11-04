@@ -32,8 +32,9 @@ def web_nodes(context):
         Node(
             package='web_host', executable='rosbridge_shim',
             name='rosbridge_websocket', output='screen',
+            additional_env={'WORKBENCH_WEB_PORT': LaunchConfiguration('web_port')},
             parameters=[{
-                'port': LaunchConfiguration('rosbridge_port'), 'address': '0.0.0.0',
+                'port': LaunchConfiguration('rosbridge_port'), 'address': '127.0.0.1',
                 # Expose public intents and observations. Internal authorized
                 # outputs and wire topics must never be writable through the UI.
                 'topics_glob': '[]',
@@ -48,7 +49,7 @@ def web_nodes(context):
             package='web_host', executable='static_server',
             name='web_static_server', output='screen',
             parameters=[{
-                'host': '0.0.0.0', 'port': LaunchConfiguration('web_port'),
+                'host': '127.0.0.1', 'port': LaunchConfiguration('web_port'),
                 'web_root': os.path.join(pkg_share, 'web'),
                 'model_url_prefix': '/robot_sim', 'model_dir': LaunchConfiguration('model_dir'),
                 'control_mode': mode, 'robot_model': LaunchConfiguration('robot_model'),

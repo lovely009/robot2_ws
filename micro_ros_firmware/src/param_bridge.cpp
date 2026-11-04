@@ -18,10 +18,7 @@
 
 using Config = can_bridge_msgs__msg__AgentConfigRequest;
 static constexpr uint16_t kMotorIdNone = UINT16_MAX;
-static constexpr size_t kParamSetMaxTargets = 16;
 static constexpr uint16_t kInvalid = 10, kSubmitFailed = 11, kUnknownMotor = 12;
-static_assert(kParamSetMaxTargets <= CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY,
-    "参数批次不能超过配置 FIFO");
 static_assert(config_transaction::kCapacity == 8, "线上结果容量必须为8");
 
 static rcl_subscription_t g_config_sub;
@@ -156,10 +153,6 @@ static void config_cb(const void *input) {
     }
     if (!enables) { motor_rt_request_disable(disabled); return; }
   }
-  request.size = msg->parameters.size; request.count = request.size;
-  for (size_t i = 0; i < request.size; ++i)
-    request.targets[i] = {msg->parameters.data[i].motor_id,
-        msg->parameters.data[i].field, msg->parameters.data[i].value};
   request.policy_count = msg->policies.size;
   for (size_t i = 0; i < request.policy_count; ++i) {
     const auto &p = msg->policies.data[i];
@@ -354,11 +347,6 @@ const can_bridge_msgs__msg__AgentInfo *param_bridge_info(void) {
   return &g_info;
 }
 void param_bridge_info_sent(bool success) { g_pager.sent(success); }
-uint32_t param_bridge_request_high_water(void) { return g_transactions.request_high_water(); }
-const motor_control_param_view_t *param_bridge_views(size_t *count) {
-  if (count) *count = g_view_count;
-  return g_views;
-}
 bool param_bridge_create(rcl_node_t *node, rclc_executor_t *executor) {
   if (g_created) return true;
   if (!node || !executor) return false;

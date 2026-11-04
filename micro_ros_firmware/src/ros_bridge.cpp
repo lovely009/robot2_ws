@@ -131,7 +131,7 @@ bool ros_bridge_create() {
 
 
   // 10ms 周期：IMU 最多100Hz，motion 每20ms一代，可靠流每轮最多一条；
-  // status 基础10Hz、重要变化最小20ms，温度仅新样本2Hz。
+  // status 按编译期频率发送、重要变化最小20ms，温度仅新样本2Hz。
   // USB CDC 最大负载与可靠分片阻塞仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
       bridge_timer_cb) != RCL_RET_OK) {

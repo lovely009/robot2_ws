@@ -76,11 +76,6 @@ class AgentOnlineContract(unittest.TestCase):
         self.assertIn("serial_transport_send_end()", text)
         self.assertIn("param_bridge_fill_status(", text)
         self.assertIn("param_bridge_info_sent(", text)
-        self.assertIn("kReliableIntervalMs = 10U", text)
-        self.assertIn("kStatusMinIntervalMs = 20U", text)
-        self.assertIn("kStatusIntervalMs = 100U", text)
-        self.assertIn("kMotionIntervalMs = 20U", text)
-        self.assertRegex(text, r"g_consecutive_status\s*<\s*2U")
 
     def test_temperature_uses_actual_sample_stamp(self):
         text = source("imu_bridge.cpp")

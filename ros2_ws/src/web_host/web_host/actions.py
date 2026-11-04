@@ -9,7 +9,10 @@ motor_id, position, velocity, torque|effort}]}`）。本模块只管文件层；
 """
 
 import json
+import os
 import re
+import stat
+import uuid
 from pathlib import Path
 
 # 文件名白名单：仅允许单层、非隐藏的 JSON 文件名。
@@ -42,9 +45,14 @@ def action_summary(document) -> dict:
     for point in points:
         if not isinstance(point, dict) or "time_from_start_ms" not in point:
             raise ValueError("路点缺 time_from_start_ms")
-        times.append(int(point["time_from_start_ms"]))
+        value = point["time_from_start_ms"]
+        if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError("路点时间必须为 uint32 整数")
+        times.append(value)
+    if any(type(motor_id) is not int or not 0 <= motor_id <= 0xFFFF for motor_id in ids):
+        raise ValueError("电机编号必须为 uint16 整数")
     return {
-        "target_ids": [int(motor_id) for motor_id in ids],
+        "target_ids": ids,
         "target_count": len(ids),
         "point_count": len(points),
         "duration_ms": max(times) - min(times),
@@ -86,8 +94,28 @@ def save_action(web_root: str, name, text, overwrite: bool = False) -> dict:
     directory = actions_directory(web_root)
     directory.mkdir(parents=True, exist_ok=True)
     path = _checked_path(directory, name)
-    if path.exists() and not overwrite:
-        raise FileExistsError(name)
-    # 内置文件是符号链接（symlink-install），覆盖即写回源码；新文件落在安装树
-    path.write_text(text, encoding="utf-8")
+    # 覆盖仍写回 symlink-install 的源文件；暂存完成前不改动旧内容。
+    destination = path.resolve() if overwrite else path
+    try:
+        mode = stat.S_IMODE(destination.stat().st_mode) if overwrite else None
+    except FileNotFoundError:
+        mode = None
+    temporary = None
+    try:
+        candidate = destination.with_name(f".action-{uuid.uuid4().hex}")
+        with candidate.open("x", encoding="utf-8") as handle:
+            temporary = candidate
+            if mode is not None:
+                os.fchmod(handle.fileno(), mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if overwrite:
+            os.replace(temporary, destination)
+        else:
+            # 完整文件以硬链接发布，目标已存在时原子拒绝，不能先检查再覆盖。
+            os.link(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return {"name": name, **summary}

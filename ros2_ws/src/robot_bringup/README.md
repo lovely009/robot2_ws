@@ -7,7 +7,7 @@ source ros2_ws/install/setup.bash
 ros2 launch robot_bringup robot.launch.py
 ```
 
-打开 http://localhost:8080 。在工作台选择模型，使用 Agent、仿真、使能和目标操作。
+打开 http://localhost:8080 。HTTP 与 rosbridge 仅监听 `127.0.0.1`，WebSocket 只接受本机工作台 HTTP 来源（端口随 `web_port` 配置）；局域网浏览器不能直接连接，无 Origin 的 WebSocket 客户端也会拒绝。ROS CLI 不受此浏览器门禁影响。在工作台选择模型，使用 Agent、仿真、使能和目标操作。
 启动不会自动使能电机；Agent 串口遵循工作台原有选择逻辑。`bench_manager` 按模型选择管理主机控制会话。
 `bench.launch.py` 单独启动工作台管理；`firmware_tf.launch.py` 发布实测关节与 TF。
 

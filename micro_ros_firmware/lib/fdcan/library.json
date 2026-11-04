@@ -5,6 +5,5 @@
   "keywords": ["stm32", "canfd", "fdcan"],
   "frameworks": ["arduino"],
   "platforms": ["ststm32"],
-  "build": { "includeDir": "include", "srcDir": "src" },
-  "dependencies": { "board": "*" }
+  "build": { "includeDir": "include", "srcDir": "src" }
 }

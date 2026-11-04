@@ -94,24 +94,6 @@ int16_t wire_encode_temperature_dc(double temperature_c) {
   return encode_i16_scaled(temperature_c, 10.0);
 }
 
-int16_t wire_encode_current_ma(double current_a) {
-  return encode_i16_scaled(current_a, 1000.0);
-}
-
-uint16_t wire_encode_voltage_mv(double voltage_v) {
-  if (!isfinite(voltage_v)) {
-    return WIRE_VOLTAGE_MV_MISSING;
-  }
-  const double scaled = voltage_v * 1000.0;
-  if (scaled <= 0.0) {
-    return 0U;
-  }
-  if (scaled >= 65534.0) {
-    return 0xFFFEu;
-  }
-  return (uint16_t)lround(scaled);
-}
-
 int32_t wire_encode_current_ma_i32(double current_a) {
   if (!isfinite(current_a)) return INT32_MIN;
   const double value = current_a * 1000.0;
@@ -156,19 +138,4 @@ bool wire_frame_shape_ok(uint8_t count, size_t motor_ids_len,
   return count <= max_slots &&
          motor_ids_len == count && position_q_len == count &&
          velocity_q_len == count && effort_q_len == count;
-}
-
-bool wire_config_groups_exclusive(uint8_t kind, uint16_t count,
-    size_t targets_len, uint8_t command, uint16_t motor_id) {
-  if (count != targets_len) {
-    return false;
-  }
-  if (kind == WIRE_CONFIG_KIND_PARAM_SET) {
-    return command == WIRE_CONFIG_COMMAND_SAVE &&
-           motor_id == WIRE_MOTOR_ID_NONE;
-  }
-  if (kind == WIRE_CONFIG_KIND_SYSTEM_COMMAND) {
-    return count == 0U;
-  }
-  return false;
 }

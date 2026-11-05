@@ -17,3 +17,5 @@
 `right_arm_4dof` 是导入的实测 4.4 右臂模型，以其原始 MJCF 为准同步运行 URDF。原件和适配范围见该模型的 [README](models/right_arm_4dof/README.md)；它不使用其他模型的自动生成工具覆盖测试参数。
 
 `full_body_robot` 是无头部全身 CAD 预览模型，包含 38 个连杆和 37 个关节条目。原始参数和网格完整保留；其机械限位和电机映射尚未标定，仅提供几何预览。来源和使用边界见该模型的 [README](models/full_body_robot/README.md)。
+
+`trial_arm_7dof` 已由 `手臂_mass` 新版替换，包含 14 个连杆、7 个转动关节和 6 个固定关节；三处电机质量属性使用经用户批准的均匀密度凸包近似，尚未完成动力学或实机验收。新旧来源、检查结果和使用边界见其 [README](models/trial_arm_7dof/README.md)。

@@ -1,0 +1,365 @@
+{
+  "total_mass_kg": 2.784365668141994,
+  "links": [
+    {
+      "link": "base_link",
+      "mass_kg": 0.558014668141994,
+      "com_m": [
+        0.00514667816049885,
+        0.022443450121018,
+        0.35571336165115
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00176713601930009",
+        "ixy": "-5.82775364506147E-06",
+        "ixz": "-6.67673199445782E-05",
+        "iyy": "0.00154692540986021",
+        "iyz": "6.24845406511325E-06",
+        "izz": "0.000317066947170713"
+      },
+      "principal_inertia_kg_m2": [
+        0.0003139702372416164,
+        0.001546787353758828,
+        0.0017703707853305682
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.03350000083446503,
+          -0.04325000196695328,
+          0.0
+        ],
+        [
+          0.041698556393384933,
+          0.09624999761581421,
+          0.5057864189147949
+        ]
+      ],
+      "mesh_sha256": "4c88d202a18fa62cb935d10002db988d519e7388c1218d98c84139f5ff503fc8",
+      "components": "支撑-1;侧板-改-1;肩关节电机法兰-1;鱼眼-2-1;鱼眼-1-1;连杆-1;鱼眼-2-2;鱼眼-1-2;轴套-1;48电机外壳-插入式圆凸台-1;48电机外壳-底部固定版-1;48电机外壳-8;48电机外壳-圆凸台-1;CE-RB-R48-101-Lite-CO-I-2;CE-RB-R48-101-Lite-CO-I-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link1",
+      "mass_kg": 0.049921,
+      "com_m": [
+        0.0034455,
+        -3.3508e-05,
+        0.0096326
+      ],
+      "inertia_kg_m2": {
+        "ixx": "1.0124E-05",
+        "ixy": "-3.2171E-09",
+        "ixz": "6.5273E-09",
+        "iyy": "8.0624E-06",
+        "iyz": "-3.7008E-10",
+        "izz": "1.3934E-05"
+      },
+      "principal_inertia_kg_m2": [
+        8.062394957710107e-06,
+        1.0123993835713105e-05,
+        1.3934011206576788e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.02390761487185955,
+          -0.03500000014901161,
+          0.0
+        ],
+        [
+          0.02391604147851467,
+          0.03500000014901161,
+          0.03500000014901161
+        ]
+      ],
+      "mesh_sha256": "36a6b2e1d7beba87ada6d8674c0caa1504dc25ac65b0c8aeeab6a85d445347ba",
+      "components": "肩部前后转动法兰-轴承外壳-1;肩部前后转动法兰-1-1;61900-2Z-HRB.stp-1;卡环-2;肩部前后转动法兰-轴承外壳-2;卡环-1;61900-2Z-HRB.stp-2",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link2",
+      "mass_kg": 0.24173,
+      "com_m": [
+        -0.0021829,
+        0.015378,
+        -4.1771e-08
+      ],
+      "inertia_kg_m2": {
+        "ixx": "9.6365E-05",
+        "ixy": "-1.112E-06",
+        "ixz": "1.278E-10",
+        "iyy": "0.00012647",
+        "iyz": "-4.8868E-11",
+        "izz": "5.5758E-05"
+      },
+      "principal_inertia_kg_m2": [
+        5.5757999999568654e-05,
+        9.63239815156239e-05,
+        0.00012651101848480748
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.02999497391283512,
+          -0.0071472167037427425,
+          -0.035999998450279236
+        ],
+        [
+          0.03426418453454971,
+          0.0708056315779686,
+          0.035999998450279236
+        ]
+      ],
+      "mesh_sha256": "48f38b976db352d8708a3396277b64720891ad37a3b597ebd49fad1891c5e147",
+      "components": "耸肩托台-2-1;58-肩关节电机外壳-带凸台-1;CE-RB-R58-101-Lite-CO-I-6;58-肩关节电机外壳-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link3",
+      "mass_kg": 0.88,
+      "com_m": [
+        -0.0046534,
+        0.00012376,
+        -0.026646
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00019959",
+        "ixy": "2.4008E-07",
+        "ixz": "-2.5826E-05",
+        "iyy": "0.00017311",
+        "iyz": "-2.6283E-07",
+        "izz": "0.00011785"
+      },
+      "principal_inertia_kg_m2": [
+        0.0001103734144896535,
+        0.00017310783373939803,
+        0.00020706875177094847
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.0345836766064167,
+          -0.035999998450279236,
+          -0.08550000190734863
+        ],
+        [
+          0.02896277979016304,
+          0.035999998450279236,
+          3.8743036556709853e-10
+        ]
+      ],
+      "mesh_sha256": "1c7c75d1cc211f6b3f8cef5dc1790871b33fafdbc48c09395a38c813db664f75",
+      "components": "装配体5-1/58肩关节电机外壳-长版带法兰-1;CE-RB-R58-101-Lite-CO-I-11",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link4",
+      "mass_kg": 0.404,
+      "com_m": [
+        1.3263e-05,
+        -0.044801,
+        -0.0060089
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00020785",
+        "ixy": "-5.61E-08",
+        "ixz": "-4.9029E-09",
+        "iyy": "8.996E-05",
+        "iyz": "-4.5359E-05",
+        "izz": "0.00020129"
+      },
+      "principal_inertia_kg_m2": [
+        7.381946895791533e-05,
+        0.00020785000114684289,
+        0.00021743052989524185
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.03194674849510193,
+          -0.09911392629146576,
+          -0.05049999803304672
+        ],
+        [
+          0.03188475966453552,
+          0.03198187053203583,
+          0.010999999940395355
+        ]
+      ],
+      "mesh_sha256": "484ed03e3a3c2642c69bc4afff4d9830fdf8976543b5b2f6dd85693a9560f5df",
+      "components": "装配体6-1/jianbuguanjiexuanzhuanzhou-1;CE-RB-R48-101-Lite-CO-I-7",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link5",
+      "mass_kg": 0.34,
+      "com_m": [
+        1.7524e-05,
+        -0.0073435,
+        0.10983
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00052128",
+        "ixy": "-1.2288E-09",
+        "ixz": "2.9583E-08",
+        "iyy": "0.00052963",
+        "iyz": "1.8865E-05",
+        "izz": "3.889E-05"
+      },
+      "principal_inertia_kg_m2": [
+        3.816585943968316e-05,
+        0.0005212800018136354,
+        0.0005303541387466815
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.03100000135600567,
+          -0.030331194400787354,
+          -0.0012602071510627866
+        ],
+        [
+          0.03100000135600567,
+          0.020935552194714546,
+          0.2221817970275879
+        ]
+      ],
+      "mesh_sha256": "931844761a00a68e58f5cea50e32e2c3a2a824634bdb6393a4ebb11d61fae5e2",
+      "components": "装配体4-1/dabizhijia-1;CE-RB-R48-101-Lite-CO-I-8",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link6",
+      "mass_kg": 0.272,
+      "com_m": [
+        -0.006117,
+        -0.038637,
+        -0.0092935
+      ],
+      "inertia_kg_m2": {
+        "ixx": "2.6229E-05",
+        "ixy": "-2.6621E-06",
+        "ixz": "-9.6293E-07",
+        "iyy": "1.7881E-05",
+        "iyz": "-5.9436E-06",
+        "izz": "2.5214E-05"
+      },
+      "principal_inertia_kg_m2": [
+        1.39286518534052e-05,
+        2.67522798393373e-05,
+        2.8643068307257498e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.035971201956272125,
+          -0.09049999713897705,
+          -0.05400000140070915
+        ],
+        [
+          0.026957862079143524,
+          0.026998842135071754,
+          0.009999999776482582
+        ]
+      ],
+      "mesh_sha256": "3d3bdf837377d443c210eec2a5971a66e22339565d87faeaf97ccf45833cc612",
+      "components": "zhoubuguanjie-1/zhoubuguanjiexuanzhuanzhou(wuerban)-1;zhoubuguanjie-1/CE-RB-R48-101-Lite-CO-I(2)-2",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    },
+    {
+      "link": "Joint_Link7",
+      "mass_kg": 0.0387,
+      "com_m": [
+        -8.351e-06,
+        4.3513e-06,
+        0.039837
+      ],
+      "inertia_kg_m2": {
+        "ixx": "5.2312E-05",
+        "ixy": "-1.7235E-08",
+        "ixz": "-1.6258E-08",
+        "iyy": "5.2344E-05",
+        "iyz": "8.4606E-09",
+        "izz": "9.1256E-06"
+      },
+      "principal_inertia_kg_m2": [
+        9.125592225756262e-06,
+        5.230448615958825e-05,
+        5.235152161465548e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.024995211511850357,
+          -0.02493206411600113,
+          -1.303851471234907e-11
+        ],
+        [
+          0.02490158937871456,
+          0.024985043331980705,
+          0.10850000381469727
+        ]
+      ],
+      "mesh_sha256": "a24590b33e71a71b88af7e09b52082e86e4bc8465df5f482657869da5ac3ee3c",
+      "components": "zhoubuguanjie-1/xiaobigujia-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      }
+    }
+  ]
+}

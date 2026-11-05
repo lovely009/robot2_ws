@@ -1,0 +1,772 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 三处电机惯性采用均匀密度凸包近似，非实测；原件与说明见 cad/mass_export/cad/original 和 cad/mass_export/cad/inertial_audit。 -->
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="trial_arm_7dof">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.00520599442168701 0.0211428784928405 0.35261570365446"
+        rpy="0 0 0" />
+      <mass
+        value="0.53710154073207" />
+      <inertia
+        ixx="0.00176056227011452"
+        ixy="-5.82801278740844E-06"
+        ixz="-6.67670238762456E-05"
+        iyy="0.00154220076487578"
+        iyz="6.24824521133602E-06"
+        izz="0.000310494478177091" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Joint_Link1.1">
+    <inertial>
+      <origin
+        xyz="0.00015891 -0.00015031 -0.012112"
+        rpy="0 0 0" />
+      <mass
+        value="0.244" />
+      <inertia
+        ixx="2.363E-06"
+        ixy="8.5963E-11"
+        ixz="-1.7318E-10"
+        iyy="2.3617E-06"
+        iyz="1.2289E-10"
+        izz="4.2108E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link1.1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link1.1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link1.1"
+    type="fixed">
+    <origin
+      xyz="-0.0025 0.06725 0.4825"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link1.1" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link1">
+    <inertial>
+      <origin
+        xyz="0.0034455 -3.3508E-05 0.0096326"
+        rpy="0 0 0" />
+      <mass
+        value="0.049921" />
+      <inertia
+        ixx="1.0124E-05"
+        ixy="-3.2171E-09"
+        ixz="6.5273E-09"
+        iyy="8.0624E-06"
+        iyz="-3.7008E-10"
+        izz="1.3934E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link1"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link1.1" />
+    <child
+      link="Joint_Link1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link2">
+    <inertial>
+      <origin
+        xyz="-0.0021829 0.015378 -4.1771E-08"
+        rpy="0 0 0" />
+      <mass
+        value="0.24173" />
+      <inertia
+        ixx="9.6365E-05"
+        ixy="-1.112E-06"
+        ixz="1.278E-10"
+        iyy="0.00012647"
+        iyz="-4.8868E-11"
+        izz="5.5758E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.65098 0.61961 0.58824 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link2"
+    type="revolute">
+    <origin
+      xyz="0.0051132 0.0005 0.015001"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Joint_Link1" />
+    <child
+      link="Joint_Link2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link3.3">
+    <inertial>
+      <origin
+        xyz="-8.65696730690297e-05 0.000226331830781502 -0.0294784175950044"
+        rpy="0 0 0" />
+      <mass
+        value="0.46" />
+      <inertia
+        ixx="0.000234019163098705"
+        ixy="3.7917547988509e-07"
+        ixz="-1.24140812698933e-06"
+        iyy="0.000233285420097925"
+        iyz="3.09427753676524e-06"
+        izz="0.000191131135919025" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link3.3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link3.3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link3.3"
+    type="fixed">
+    <origin
+      xyz="0.03312 0.03926 0"
+      rpy="0.022638 1.5708 0" />
+    <parent
+      link="Joint_Link2" />
+    <child
+      link="Joint_Link3.3" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link3">
+    <inertial>
+      <origin
+        xyz="0.0046534 0.00012376 0.027146"
+        rpy="0 0 0" />
+      <mass
+        value="0.22" />
+      <inertia
+        ixx="0.00019959"
+        ixy="-2.4008E-07"
+        ixz="-2.5826E-05"
+        iyy="0.00017311"
+        iyz="2.6283E-07"
+        izz="0.00011785" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.69804 0.69804 0.69804 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link3"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link3.3" />
+    <child
+      link="Joint_Link3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link4.4">
+    <inertial>
+      <origin
+        xyz="-0.000111757636678117 0.000215013152134611 -0.0239784178606533"
+        rpy="0 0 0" />
+      <mass
+        value="0.46" />
+      <inertia
+        ixx="0.00023392394574025"
+        ixy="4.52296063654958e-07"
+        ixz="-1.58538677247347e-06"
+        iyy="0.000233380635409627"
+        iyz="2.9329501363016e-06"
+        izz="0.00019113113513149" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link4.4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link4.4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link4.4"
+    type="fixed">
+    <origin
+      xyz="-0.0225 0 0.054"
+      rpy="1.5708 -1.5482 -1.5708" />
+    <parent
+      link="Joint_Link3" />
+    <child
+      link="Joint_Link4.4" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link4">
+    <inertial>
+      <origin
+        xyz="-1.8114E-06 -0.041703 -0.004743"
+        rpy="0 0 0" />
+      <mass
+        value="0.144" />
+      <inertia
+        ixx="0.00020548"
+        ixy="-5.6207E-08"
+        ixz="-4.7102E-09"
+        iyy="8.5749E-05"
+        iyz="-4.5359E-05"
+        izz="0.00019892" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link4"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link4.4" />
+    <child
+      link="Joint_Link4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link5.5">
+    <inertial>
+      <origin
+        xyz="-7.41974071622017e-05 5.9528716387964e-05 -0.0232023984871461"
+        rpy="0 0 0" />
+      <mass
+        value="0.244" />
+      <inertia
+        ixx="7.87602746821012e-05"
+        ixy="4.20287963486335e-08"
+        ixz="-4.31728538011006e-07"
+        iyy="7.91258050140736e-05"
+        iyz="3.37695306003486e-07"
+        izz="7.02965948512772e-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link5.5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link5.5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link5.5"
+    type="fixed">
+    <origin
+      xyz="0 -0.0991 -0.0235"
+      rpy="-1.5708 0 -3.1416" />
+    <parent
+      link="Joint_Link4" />
+    <child
+      link="Joint_Link5.5" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link5">
+    <inertial>
+      <origin
+        xyz="-0.00020544 2.253E-06 0.1036"
+        rpy="0 0 0" />
+      <mass
+        value="0.0926" />
+      <inertia
+        ixx="0.00052613"
+        ixy="-2.2875E-10"
+        ixz="2.3734E-06"
+        iyy="0.00051892"
+        iyz="3.0123E-08"
+        izz="3.5815E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link5"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link5.5" />
+    <child
+      link="Joint_Link5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link6.6">
+    <inertial>
+      <origin
+        xyz="0.00021081 5.92E-05 -0.0071123"
+        rpy="0 0 0" />
+      <mass
+        value="0.244" />
+      <inertia
+        ixx="2.3619E-06"
+        ixy="5.1516E-10"
+        ixz="-1.7915E-10"
+        iyy="2.3627E-06"
+        iyz="-7.7796E-11"
+        izz="4.2108E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link6.6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link6.6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link6.6"
+    type="fixed">
+    <origin
+      xyz="-0.02755 0 0.193"
+      rpy="-1.5708 0 1.5708" />
+    <parent
+      link="Joint_Link5" />
+    <child
+      link="Joint_Link6.6" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link6">
+    <inertial>
+      <origin
+        xyz="-0.0051024 -0.023518 -0.002544"
+        rpy="0 0 0" />
+      <mass
+        value="0.0278" />
+      <inertia
+        ixx="2.3866E-05"
+        ixy="-2.6623E-06"
+        ixz="-9.6355E-07"
+        iyy="1.367E-05"
+        iyz="-5.9436E-06"
+        izz="2.2851E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link6"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link6.6" />
+    <child
+      link="Joint_Link6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link7.7">
+    <inertial>
+      <origin
+        xyz="3.8515E-05 0.00021544 -0.010612"
+        rpy="0 0 0" />
+      <mass
+        value="0.244" />
+      <inertia
+        ixx="2.3622E-06"
+        ixy="-6.2529E-10"
+        ixz="-1.5046E-11"
+        iyy="2.3625E-06"
+        iyz="-2.027E-10"
+        izz="4.2108E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link7.7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.74902 0.74902 0.74902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link7.7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link7.7"
+    type="fixed">
+    <origin
+      xyz="-0.009 -0.089 -0.027"
+      rpy="1.5708 1.5708 0" />
+    <parent
+      link="Joint_Link6" />
+    <child
+      link="Joint_Link7.7" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Joint_Link7">
+    <inertial>
+      <origin
+        xyz="-8.351E-06 4.3513E-06 0.039837"
+        rpy="0 0 0" />
+      <mass
+        value="0.0387" />
+      <inertia
+        ixx="5.2312E-05"
+        ixy="-1.7235E-08"
+        ixz="-1.6258E-08"
+        iyy="5.2344E-05"
+        iyz="8.4606E-09"
+        izz="9.1256E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_description/models/trial_arm_7dof/meshes/Joint_Link7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link7"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Joint_Link7.7" />
+    <child
+      link="Joint_Link7" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

@@ -1,0 +1,521 @@
+{
+  "scope": "Joint_Link3..7 and their fixed motor links; Joint_Link1/2 excluded by user",
+  "total_mass_kg": 2.1751,
+  "spec_sha256": {
+    "CE-RB-R58-101-Lite-CO-I-参数规格.pdf": "b71b5dbd0950ef477eb6f4f2da997aa843365636cbd788fb22ab1980648fb43e",
+    "CE-RB-R48-101-Lite-CO-I-参数规格.pdf": "4266cbaf2db1c871a80cd2f8c35baea67e5c48c2c6757f0c9d1ced105a9c5863"
+  },
+  "links": [
+    {
+      "link": "Joint_Link3.3",
+      "mass_kg": 0.46,
+      "com_m": [
+        -8.65696730690297e-05,
+        0.000226331830781502,
+        -0.0294784175950044
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.000234019163098705",
+        "ixy": "3.7917547988509e-07",
+        "ixz": "-1.24140812698933e-06",
+        "iyy": "0.000233285420097925",
+        "iyz": "3.09427753676524e-06",
+        "izz": "0.000191131135919025"
+      },
+      "principal_inertia_kg_m2": [
+        0.0001908680871601056,
+        0.0002333876050008928,
+        0.00023418002695465643
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.028988579288125038,
+          -0.028999997302889824,
+          -0.06258367747068405
+        ],
+        [
+          0.02898530103266239,
+          0.02899380587041378,
+          0.0005000006640329957
+        ]
+      ],
+      "mesh_sha256": "735ae963a031d6423fa1e024eb0ea41af7f8e7c33b1f52f5d3428a9ba17ceed5",
+      "components": "CE-RB-R58-101-Lite-CO-I-6",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 6605,
+      "com_convex_hull_margin_m": 0.028729796821514084
+    },
+    {
+      "link": "Joint_Link3",
+      "mass_kg": 0.22,
+      "com_m": [
+        0.0046534,
+        0.00012376,
+        0.027146
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00019959",
+        "ixy": "-2.4008E-07",
+        "ixz": "-2.5826E-05",
+        "iyy": "0.00017311",
+        "iyz": "2.6283E-07",
+        "izz": "0.00011785"
+      },
+      "principal_inertia_kg_m2": [
+        0.0001103734144896535,
+        0.00017310783373939803,
+        0.00020706875177094847
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.02896277979016304,
+          -0.035999998450279236,
+          0.0004999996162950993
+        ],
+        [
+          0.03449999913573265,
+          0.035999998450279236,
+          0.0860000029206276
+        ]
+      ],
+      "mesh_sha256": "e694d38f900f0fac4f42bff928c37f11d89116fbd4e0d81e6ec58c02c5cfd7ea",
+      "components": "装配体5-1/58肩关节电机外壳-长版带法兰-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": true,
+      "nonmanifold_or_boundary_edges": 0,
+      "com_convex_hull_margin_m": 0.0266460003837049
+    },
+    {
+      "link": "Joint_Link4.4",
+      "mass_kg": 0.46,
+      "com_m": [
+        -0.000111757636678117,
+        0.000215013152134611,
+        -0.0239784178606533
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00023392394574025",
+        "ixy": "4.52296063654958e-07",
+        "ixz": "-1.58538677247347e-06",
+        "iyy": "0.000233380635409627",
+        "iyz": "2.9329501363016e-06",
+        "izz": "0.00019113113513149"
+      },
+      "principal_inertia_kg_m2": [
+        0.0001908680863715408,
+        0.00023338760443030165,
+        0.00023418002547952464
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.028999892994761467,
+          -0.02899586781859398,
+          -0.057083677500486374
+        ],
+        [
+          0.028998346999287605,
+          0.02899586781859398,
+          0.0060000005178153515
+        ]
+      ],
+      "mesh_sha256": "1bdf7ae2bb66325d859223e8aa44821162303821df08eb200d68efa193a7cdd7",
+      "components": "CE-RB-R58-101-Lite-CO-I-11",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 6605,
+      "com_convex_hull_margin_m": 0.02872979693354282
+    },
+    {
+      "link": "Joint_Link4",
+      "mass_kg": 0.144,
+      "com_m": [
+        -1.8114e-06,
+        -0.041703,
+        -0.004743
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00020548",
+        "ixy": "-5.6207E-08",
+        "ixz": "-4.7102E-09",
+        "iyy": "8.5749E-05",
+        "iyz": "-4.5359E-05",
+        "izz": "0.00019892"
+      },
+      "principal_inertia_kg_m2": [
+        6.981304884688599e-05,
+        0.00020548000050028717,
+        0.00021485595065282682
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.03195241466164589,
+          -0.0820000022649765,
+          -0.05049999803304672
+        ],
+        [
+          0.03187909349799156,
+          0.03199579566717148,
+          0.010999999940395355
+        ]
+      ],
+      "mesh_sha256": "f65a5152227ca7f996f85f79a1354fc143f3f91112cd38894031f4472eeb3a01",
+      "components": "装配体6-1/jianbuguanjiexuanzhuanzhou-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 16,
+      "com_convex_hull_margin_m": 0.015742999940395356
+    },
+    {
+      "link": "Joint_Link5.5",
+      "mass_kg": 0.244,
+      "com_m": [
+        -7.41974071622017e-05,
+        5.9528716387964e-05,
+        -0.0232023984871461
+      ],
+      "inertia_kg_m2": {
+        "ixx": "7.87602746821012e-05",
+        "ixy": "4.20287963486335e-08",
+        "ixz": "-4.31728538011006e-07",
+        "iyy": "7.91258050140736e-05",
+        "iyz": "3.37695306003486e-07",
+        "izz": "7.02965948512772e-05"
+      },
+      "principal_inertia_kg_m2": [
+        7.026163460195705e-05,
+        7.878052375402413e-05,
+        7.914051619147078e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.02424994669854641,
+          -0.024171367287635803,
+          -0.04793311282992363
+        ],
+        [
+          0.02424994669854641,
+          0.024171367287635803,
+          -5.010127868132486e-10
+        ]
+      ],
+      "mesh_sha256": "fd3e235f01c7d97001f457c457ad325e6654a2001d9f0541b2dd119c085b5a65",
+      "components": "CE-RB-R48-101-Lite-CO-I-7",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 259,
+      "com_convex_hull_margin_m": 0.0232023979861333
+    },
+    {
+      "link": "Joint_Link5",
+      "mass_kg": 0.0926,
+      "com_m": [
+        -0.00020544,
+        2.253e-06,
+        0.1036
+      ],
+      "inertia_kg_m2": {
+        "ixx": "0.00052613",
+        "ixy": "-2.2875E-10",
+        "ixz": "2.3734E-06",
+        "iyy": "0.00051892",
+        "iyz": "3.0123E-08",
+        "izz": "3.5815E-05"
+      },
+      "principal_inertia_kg_m2": [
+        3.5803509801780315e-05,
+        0.0005189200018773532,
+        0.0005261414883208663
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.022927893325686455,
+          -0.03100000135600567,
+          -3.219001065701832e-09
+        ],
+        [
+          0.022943034768104553,
+          0.03100000135600567,
+          0.22200000286102295
+        ]
+      ],
+      "mesh_sha256": "35e066a4e6d535179f8937e5c95d59949fb13226c594e5d888435e1dd55606bf",
+      "components": "装配体4-1/dabizhijia-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": true,
+      "nonmanifold_or_boundary_edges": 0,
+      "com_convex_hull_margin_m": 0.020247150423958287
+    },
+    {
+      "link": "Joint_Link6.6",
+      "mass_kg": 0.244,
+      "com_m": [
+        0.00021081,
+        5.92e-05,
+        -0.0071123
+      ],
+      "inertia_kg_m2": {
+        "ixx": "2.3619E-06",
+        "ixy": "5.1516E-10",
+        "ixz": "-1.7915E-10",
+        "iyy": "2.3627E-06",
+        "iyz": "-7.7796E-11",
+        "izz": "4.2108E-06"
+      },
+      "principal_inertia_kg_m2": [
+        2.361647772165189e-06,
+        2.362952207196954e-06,
+        4.2108000206378565e-06
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.024231523275375366,
+          -0.024226918816566467,
+          -0.04293311387300491
+        ],
+        [
+          0.024231523275375366,
+          0.024226918816566467,
+          0.004999999422580004
+        ]
+      ],
+      "mesh_sha256": "058c198b5ad38a64cbf2f2dd3fead7b6c267ea1ef5131a7fdd16e5f32debc91c",
+      "components": "CE-RB-R48-101-Lite-CO-I-8",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 255,
+      "com_convex_hull_margin_m": 0.012112299422580004
+    },
+    {
+      "link": "Joint_Link6",
+      "mass_kg": 0.0278,
+      "com_m": [
+        -0.0051024,
+        -0.023518,
+        -0.002544
+      ],
+      "inertia_kg_m2": {
+        "ixx": "2.3866E-05",
+        "ixy": "-2.6623E-06",
+        "ixz": "-9.6355E-07",
+        "iyy": "1.367E-05",
+        "iyz": "-5.9436E-06",
+        "izz": "2.2851E-05"
+      },
+      "principal_inertia_kg_m2": [
+        1.017189640472908e-05,
+        2.4378659592105567e-05,
+        2.583644400316535e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.035971201956272125,
+          -0.054999999701976776,
+          -0.05400000140070915
+        ],
+        [
+          0.026957862079143524,
+          0.026998842135071754,
+          0.009999999776482582
+        ]
+      ],
+      "mesh_sha256": "95123926d97ccb09068b2f43fb1913947dd76620798e80042472a11c7f3dd209",
+      "components": "zhoubuguanjie-1/zhoubuguanjiexuanzhuanzhou(wuerban)-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 16,
+      "com_convex_hull_margin_m": 0.012543999776482581
+    },
+    {
+      "link": "Joint_Link7.7",
+      "mass_kg": 0.244,
+      "com_m": [
+        3.8515e-05,
+        0.00021544,
+        -0.010612
+      ],
+      "inertia_kg_m2": {
+        "ixx": "2.3622E-06",
+        "ixy": "-6.2529E-10",
+        "ixz": "-1.5046E-11",
+        "iyy": "2.3625E-06",
+        "iyz": "-2.027E-10",
+        "izz": "4.2108E-06"
+      },
+      "principal_inertia_kg_m2": [
+        2.361706959799607e-06,
+        2.362993017849272e-06,
+        4.210800022351121e-06
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.024249976500868797,
+          -0.02417001500725746,
+          -0.046433113515377045
+        ],
+        [
+          0.024249976500868797,
+          0.02417001500725746,
+          0.0014999995473772287
+        ]
+      ],
+      "mesh_sha256": "3ac3f920abec70bb2cb9c860c38723c1e5017fd9ee0ffc5eafb45bfd406f58d3",
+      "components": "zhoubuguanjie-1/CE-RB-R48-101-Lite-CO-I(2)-2",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": false,
+      "nonmanifold_or_boundary_edges": 259,
+      "com_convex_hull_margin_m": 0.012111999547377229
+    },
+    {
+      "link": "Joint_Link7",
+      "mass_kg": 0.0387,
+      "com_m": [
+        -8.351e-06,
+        4.3513e-06,
+        0.039837
+      ],
+      "inertia_kg_m2": {
+        "ixx": "5.2312E-05",
+        "ixy": "-1.7235E-08",
+        "ixz": "-1.6258E-08",
+        "iyy": "5.2344E-05",
+        "iyz": "8.4606E-09",
+        "izz": "9.1256E-06"
+      },
+      "principal_inertia_kg_m2": [
+        9.125592225756262e-06,
+        5.230448615958825e-05,
+        5.235152161465548e-05
+      ],
+      "mesh_bounds_m": [
+        [
+          -0.024995211511850357,
+          -0.02493206411600113,
+          -1.303851471234907e-11
+        ],
+        [
+          0.02490158937871456,
+          0.024985043331980705,
+          0.10850000381469727
+        ]
+      ],
+      "mesh_sha256": "a24590b33e71a71b88af7e09b52082e86e4bc8465df5f482657869da5ac3ee3c",
+      "components": "zhoubuguanjie-1/xiaobigujia-1",
+      "checks": {
+        "finite": true,
+        "positive_mass": true,
+        "positive_definite": true,
+        "triangle_inequality": true,
+        "com_in_mesh_bounds": true,
+        "variance_within_bounds": true,
+        "csv_matches": true
+      },
+      "mesh_closed_oriented_edges": true,
+      "nonmanifold_or_boundary_edges": 0,
+      "com_convex_hull_margin_m": 0.020012628914423458,
+      "uniform_density_hypothesis": {
+        "volume_m3": 5.2939312468669357e-05,
+        "density_kg_m3": 731.0257386305027,
+        "com_m": [
+          -8.781288264547335e-06,
+          4.434643540053424e-06,
+          0.03986383519237043
+        ],
+        "inertia_kg_m2": [
+          [
+            3.81594230709054e-05,
+            -1.4120077946354738e-08,
+            -1.349820343713363e-08
+          ],
+          [
+            -1.4120077946354738e-08,
+            3.8184873956432206e-05,
+            4.272593041405363e-09
+          ],
+          [
+            -1.349820343713363e-08,
+            4.272593041405363e-09,
+            6.592156047361181e-06
+          ]
+        ]
+      },
+      "declared_to_uniform_diagonal_ratio": [
+        1.370880264693656,
+        1.3708045772187942,
+        1.384311890440298
+      ]
+    }
+  ]
+}

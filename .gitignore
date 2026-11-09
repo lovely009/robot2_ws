@@ -1,3 +1,6 @@
+# 规则语义：https://git-scm.com/docs/gitignore
+# / 开头限定当前位置，/ 结尾仅匹配目录；无路径分隔符的名称匹配任意层级。
+
 # ROS 2 / colcon 工作区构建产物
 /build/
 /install/
@@ -22,20 +25,20 @@
 /micro_ros_firmware/libmicroros/
 
 # CMake 本地生成文件
-**/CMakeCache.txt
-**/CMakeFiles/
-**/cmake_install.cmake
-**/compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
 
 # Python 缓存、测试与覆盖率产物
-**/__pycache__/
-**/*.py[cod]
-**/.pytest_cache/
-**/.mypy_cache/
-**/.ruff_cache/
-**/.coverage
-**/htmlcov/
-**/.coverage.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.coverage.*
 /ros2_ws/src/web_host/frontend/coverage/
 
 # Python 本地虚拟环境
@@ -51,7 +54,7 @@ venv/
 
 # 编辑器与本地开发工具状态
 /.vscode/
-**/.idea/
+.idea/
 /.claude/
 /.agents/
 /.aws/
@@ -68,10 +71,10 @@ venv/
 /ros2_ws/src/robot_sim/dist/*.zip
 
 # 操作系统元数据
-**/.DS_Store
-**/Thumbs.db
-**/desktop.ini
-**/*:Zone.Identifier
+.DS_Store
+Thumbs.db
+desktop.ini
+*:Zone.Identifier
 
 # MuJoCo 运行时日志（工作目录下自动生成）
 /MUJOCO_LOG.TXT
@@ -80,7 +83,7 @@ venv/
 /ros2_ws/src/**/log/
 
 # Web 工作台前端开发产物
-node_modules
+node_modules/
 /ros2_ws/src/web_host/web/workbench/
 /ros2_ws/src/web_host/frontend/test-results/
 /ros2_ws/src/web_host/frontend/playwright-report/

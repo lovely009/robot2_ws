@@ -15,6 +15,9 @@ test/host/build/
 .aws/
 .codex/
 
+# clangd 本地索引缓存
+/.cache/clangd/
+
 # Generated compilation database
 compile_commands.json
 

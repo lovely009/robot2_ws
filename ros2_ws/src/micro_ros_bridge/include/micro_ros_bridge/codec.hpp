@@ -1,6 +1,6 @@
 // 主机侧 codec：线上定点消息 ↔ 主机 facade 消息。
 //
-// 与固件 lib/wire_codec 是**同一条算术的两侧实现**：golden 向量在
+// 与固件 lib/control（wire_codec）是**同一条算术的两侧实现**：golden 向量在
 // micro_ros_firmware/test/host/test_wire_codec.cpp 与 test/test_codec.cpp 里同值互钉。
 // 仅依赖消息类型，不依赖 rclcpp。
 #ifndef MICRO_ROS_BRIDGE__CODEC_HPP_

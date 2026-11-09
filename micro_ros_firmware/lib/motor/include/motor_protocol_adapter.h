@@ -2,7 +2,7 @@
 #define MOTOR_PROTOCOL_ADAPTER_H
 
 // 协议适配层（ARD-0007 §24）：厂家字节布局、CAN-ID 推导、帧长与 FD/BRS 属性
-// 全部封闭在 lib/motor_protocol 内。motor_control 内核只通过本头文件的
+// 全部封闭在 lib/motor 内。motor_control 内核只通过本头文件的
 // adapter 接口访问厂家协议，新增协议家族只新增一个 adapter 实例，
 // 不改内核收发循环（§24.3）。
 //

@@ -36,7 +36,7 @@ void ws2812_init(void) {
   HAL_GPIO_Init(GPIOA, &gpio);
 
   // SPI6_TX DMA：BDMA1 Channel0（DMAMUX2 请求 12）。控制器级资源（时钟/NVIC）
-  // 已由 src/dma.c 的 MX_DMA_Init 使能——前置契约见文件头。
+  // 已由 src/board/dma.c 的 MX_DMA_Init 使能——前置契约见文件头。
   hdma_spi6_tx.Instance = BDMA_Channel0;
   hdma_spi6_tx.Init.Request = BDMA_REQUEST_SPI6_TX;
   hdma_spi6_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;

@@ -13,7 +13,7 @@
  * 注意：
  * - 板级定义会开启 D-cache，因此 DMA/BDMA 缓冲区需要相应地
  *   做缓存维护，或放入 MPU 非缓存区域。
- * - MPU 非缓存区域在 src/system_clock.cpp 的 ConfigureMpuNonCacheRegions()
+ * - MPU 非缓存区域在 src/board/system_clock.cpp 的 ConfigureMpuNonCacheRegions()
  *   中按本文件的 RAM_D2（SRAM1+2）/ RAM_D3（SRAM4）划分设置；
  *   改动下方 ORIGIN/LENGTH 必须同步改该函数的基址与大小。
  * - ITCM 代码放置需要启动侧的拷贝逻辑；本脚本不会静默把代码放进 ITCM。

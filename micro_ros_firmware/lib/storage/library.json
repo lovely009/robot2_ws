@@ -1,0 +1,9 @@
+{
+  "name": "storage",
+  "version": "1.0.0",
+  "description": "参数存储格式、校验与内核参数视图投影",
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": {
+    "motor": "*"
+  }
+}

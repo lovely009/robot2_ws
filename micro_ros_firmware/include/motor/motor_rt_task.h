@@ -83,7 +83,7 @@ size_t motor_rt_copy_param_views(motor_control_param_view_t *out,
 size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity);
 
 // 诊断快照：内核计数器 + 任务层补齐的每总线 RX ring 溢出与堆余量。
-// 堆余量由本任务采集（内核不感知堆），ring 溢出由 lib/fdcan 持有。
+// 堆余量由本任务采集（内核不感知堆），ring 溢出由 lib/board 持有。
 typedef struct {
   motor_control_diagnostics_t kernel;
   // mailbox 拒绝计数：授权/会话不满足或载荷非法，未进入内核。

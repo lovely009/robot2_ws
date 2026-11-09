@@ -1,0 +1,9 @@
+{
+  "name": "control",
+  "version": "1.0.0",
+  "description": "命令交接、控制授权、会话门禁、线编解码与配置/轨迹事务",
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": {
+    "motor": "*"
+  }
+}

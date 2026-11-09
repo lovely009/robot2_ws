@@ -1,0 +1,21 @@
+# 固件构建所需的 PlatformIO penv Python 依赖（精确版本，对应当前已验证构建组合）。
+# 仅安装到 PlatformIO 自带 penv，不要装到系统 Python；penv 重建后必须先执行：
+#   ~/.platformio/penv/bin/pip install -r micro_ros_firmware/requirements.txt
+# 注意：micro_ros_platformio 的 extra_script.py 每次构建都做缺包检查，但其名称
+# 比较区分大小写且不规范化连字符/下划线，markupsafe/empy 还带着版本号，因此
+# pyyaml、importlib-resources、markupsafe、empy 这四项每次 pio run 仍会触发
+# pip install（前两个上游用裸名浮动安装，后两个上游自带 == 版本）。本清单不能
+# 抑制该检查，作用是保证 penv 内已有满足版本，使触发的安装成为 no-op；若 penv
+# 缺包且联网，裸名两项会被装成最新版而绕过本文件，故 penv 重建后务必先执行
+# 上面的安装命令。
+# colcon-common-extensions 的传递子包不在此冻结，跟随 0.3.0 元包依赖解析，
+# 避免做成整套环境 freeze。
+platformio==6.2.0
+catkin-pkg==1.1.0
+lark-parser==0.12.0
+colcon-common-extensions==0.3.0
+importlib-resources==7.1.0
+PyYAML==6.0.3
+pytz==2026.3.post1
+MarkupSafe==2.0.1
+empy==3.3.4

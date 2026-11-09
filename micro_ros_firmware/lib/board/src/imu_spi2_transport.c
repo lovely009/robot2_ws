@@ -1,6 +1,6 @@
 // BMI088 的 SPI2 板级资源层：配置时钟源与引脚。
 // 当前收发使用阻塞 HAL_SPI_TransmitReceive，不占用 DMA 也不使能 SPI2_IRQn；
-// 若后续改用 DMA，设备句柄和回调仍归本库，控制器资源向 src/dma.c 登记。
+// 若后续改用 DMA，设备句柄和回调仍归本库，控制器资源向 src/board/dma.c 登记。
 // 设备层必须显式调用 imu_spi2_board_init；HAL_SPI_MspInit 仅作幂等兜底。
 
 #include "imu_spi2_transport.h"

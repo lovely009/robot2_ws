@@ -1,5 +1,5 @@
 # 诊断状态元素（ARD-0007 §17.3/§17.4）。
-# 公共位标志唯一定义点：firmware lib/motor_protocol/include/motor_protocol_adapter.h
+# 公共位标志唯一定义点：firmware lib/motor/include/motor_protocol_adapter.h
 # （TBD-STATUS-01 关闭前为临时占位分配，跨协议语义稳定）：
 #   protection_flags: bit0=厂家故障 bit1=过温(预留) bit2=过流(预留)
 #                     bit3=欠压(预留) bit4=帧解码错误

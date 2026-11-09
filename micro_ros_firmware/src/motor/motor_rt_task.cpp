@@ -309,7 +309,7 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   taskENTER_CRITICAL();
   motor_control_copy_diagnostics(g_motor_control, &out->kernel);
   taskEXIT_CRITICAL();
-  // ring 溢出在 lib/fdcan 侧，堆余量只有本任务能问（内核不感知堆）。
+  // ring 溢出在 lib/board 侧，堆余量只有本任务能问（内核不感知堆）。
   static_assert(MOTOR_CONTROL_MAX_BUSES == CAN_RX_BUS_COUNT,
       "总线数契约：内核与 fdcan 必须一致");
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
@@ -594,7 +594,7 @@ static void watchdog_feed(void) {
 static void motor_rt_task_fn(void *pv_parameters) {
   (void)pv_parameters;
 
-  // FDCAN 三路硬件初始化归 lib/fdcan 门卫（bsp_can_init 建 ring/调度器/
+  // FDCAN 三路硬件初始化归 lib/board 门卫（bsp_can_init 建 ring/调度器/
   // 过滤器并启动硬件）；任务层不直接触碰 HAL 句柄。
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();

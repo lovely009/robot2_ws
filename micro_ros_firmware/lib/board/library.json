@@ -1,0 +1,6 @@
+{
+  "name": "board",
+  "version": "1.0.0",
+  "description": "CtrBoard H7 板级硬件驱动：FDCAN、BMI088 IMU、W25Q64 Flash、WS2812 彩灯",
+  "build": { "includeDir": "include", "srcDir": "src" }
+}

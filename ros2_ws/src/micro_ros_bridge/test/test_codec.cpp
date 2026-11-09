@@ -1,4 +1,4 @@
-// 与固件 lib/wire_codec 同一组 golden 向量（micro_ros_firmware/test/host/test_wire_codec.cpp）。
+// 与固件 lib/control（wire_codec）同一组 golden 向量（micro_ros_firmware/test/host/test_wire_codec.cpp）。
 // 两边取值必须一致：不一致意味着固件与主机对同一个物理量的解释不同。
 #include <gtest/gtest.h>
 

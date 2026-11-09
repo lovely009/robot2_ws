@@ -20,8 +20,17 @@ EXPECTED = {
 }
 
 
+# 桥接源文件按域归组后的相对路径（仓库根 = ROOT）。
+FW_SOURCES = {
+    "motor_bridge.cpp": "src/motor/motor_bridge.cpp",
+    "param_bridge.cpp": "src/motor/param_bridge.cpp",
+    "imu_bridge.cpp": "src/sensor/imu_bridge.cpp",
+    "ros_bridge.cpp": "src/micro_ros/ros_bridge.cpp",
+}
+
+
 def source(name):
-    return (FW / "src" / name).read_text(encoding="utf-8")
+    return (FW / FW_SOURCES[name]).read_text(encoding="utf-8")
 
 
 class AgentOnlineContract(unittest.TestCase):
@@ -58,7 +67,7 @@ class AgentOnlineContract(unittest.TestCase):
         motor = source("motor_bridge.cpp")
         self.assertRegex(motor, r"motor_bridge_executor_handle_count\(void\)\s*\{\s*return 2U;")
         self.assertEqual(motor.count("rclc_executor_add_subscription("), 2)
-        self.assertIn("#define PARAM_BRIDGE_EXECUTOR_HANDLES 1U", (FW / "include/param_bridge.h").read_text())
+        self.assertIn("#define PARAM_BRIDGE_EXECUTOR_HANDLES 1U", (FW / "include/motor/param_bridge.h").read_text())
         self.assertIn("1U + motor_bridge_executor_handle_count()", source("ros_bridge.cpp"))
 
     def test_stop_and_deadlines_are_explicit(self):

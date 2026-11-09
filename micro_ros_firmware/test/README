@@ -51,9 +51,9 @@ RAM/Flash 用量，并检查相对基线没有新增 warning。常规验证不�
 
 ```bash
 test "$(readlink extra_packages/can_bridge_msgs)" = "../../micro_ros_agent/src/can_bridge_msgs"
-! rg -n "fdcanx_send|HAL_FDCAN" src/*_bridge.cpp
-rg -n "vTaskDelayUntil" src/motor_rt_task.cpp
-! rg -n "xQueueCreateStatic|xQueueSendFromISR" lib/fdcan/src/can_bsp.c
+! rg -n "fdcanx_send|HAL_FDCAN" -g '*_bridge.cpp' src
+rg -n "vTaskDelayUntil" src/motor/motor_rt_task.cpp
+! rg -n "xQueueCreateStatic|xQueueSendFromISR" lib/board/src/can_bsp.c
 git -C .. diff --check
 ```
 

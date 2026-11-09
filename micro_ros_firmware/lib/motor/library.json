@@ -1,0 +1,9 @@
+{
+  "name": "motor",
+  "version": "1.0.0",
+  "description": "电机运行时内核、厂家协议适配与 CAN 发送路由",
+  "build": { "includeDir": "include", "srcDir": "src" },
+  "dependencies": {
+    "board": "*"
+  }
+}

@@ -70,8 +70,8 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t pxTask,
   }
 }
 void initialize_system(void) {
-  // 板级 DMA/BDMA 控制器资源（时钟+NVIC，src/dma.c）先于一切设备传输初始化；
-  // 设备配置归各设备库自持（lib/ws2812 SPI6+BDMA、lib/imu SPI2），
+  // 板级 DMA/BDMA 控制器资源（时钟+NVIC，src/board/dma.c）先于一切设备传输初始化；
+  // 设备配置归各设备库自持（lib/board（WS2812 驱动） SPI6+BDMA、lib/board（IMU 驱动）SPI2），
   // 「DMA 先于设备初始化」的官方时序由本函数保证。
   MX_DMA_Init();
 

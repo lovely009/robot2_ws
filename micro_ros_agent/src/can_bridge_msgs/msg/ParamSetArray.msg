@@ -3,7 +3,7 @@
 #
 # 上界 16 是**内核约束不是带宽约束**：每个目标（每对位置限位算一次）一次
 # motor_rt_submit_config 提交，而 CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY = 16
-# （firmware lib/control_mailbox/include/control_mailbox.h）。参数面是**唯一**
+# （firmware lib/control/include/control_mailbox.h）。参数面是**唯一**
 # 逐目标进配置 FIFO 的下行路径（motor_command_array / motor_trajectory /
 # motor_policy 都是整条快照一次提交），所以只有本消息暴露这个问题。取 16 保证
 # "一条消息不可能自己把队列打满"——有 static_assert 守着（param_bridge.cpp）。

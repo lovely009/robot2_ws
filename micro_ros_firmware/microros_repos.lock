@@ -1,0 +1,113 @@
+# micro-ROS 内源仓库提交锁（humble，26 个，对应当前已验证构建组合）。
+# 来源：micro_ros_platformio@cfee17f 的 microros_utils/repositories.py。
+# 注意：上游库只支持 extra_packages.repos 追加仓库，没有内置仓库的提交覆盖
+# 接口，因此本文件不被 pio 构建强制消费，仅用于审计与漂移守门；
+# 干净重建（clean_microros 后）仍按分支浮动拉取，随后应运行：
+#   python3 tools/verify_microros_repo_lock.py
+# 校验失败说明上游分支已漂移，需要评估后用 --write 更新本文件并重新验证。
+distro: humble
+repositories:
+  Micro-XRCE-DDS-Client:
+    branch: ros2
+    sha: 83f129a80770a09aac9e823896ecbf6a0eddf0fc
+    url: https://github.com/eProsima/Micro-XRCE-DDS-Client
+  ament_cmake:
+    branch: humble
+    sha: 6c7684fa5a0bf244a80334ae08de1748579c2728
+    url: https://github.com/ament/ament_cmake
+  ament_cmake_ros:
+    branch: humble
+    sha: 8ca65783d089348f9138574fb1eff4e20026eea5
+    url: https://github.com/ros2/ament_cmake_ros
+  ament_index:
+    branch: humble
+    sha: ae673e815cae9413cfbf4cab6e91a9c1c73c84ef
+    url: https://github.com/ament/ament_index
+  ament_lint:
+    branch: humble
+    sha: a8b535a6d073233fc95b87c3ac4bcb1913a3b046
+    url: https://github.com/ament/ament_lint
+  ament_package:
+    branch: humble
+    sha: 3c8a92b4dda05be83f6e8e879c70f219180e1384
+    url: https://github.com/ament/ament_package
+  common_interfaces:
+    branch: humble
+    sha: 08434490d3e4abd37ccc5462cdde69b88853b5b8
+    url: https://github.com/ros2/common_interfaces
+  googletest:
+    branch: humble
+    sha: 083afd688a0d14239a831e1734e66a15664389c1
+    url: https://github.com/ament/googletest
+  micro-CDR:
+    branch: ros2
+    sha: ed4fd513a24a53b93d548d342cb7aa0a18716f04
+    url: https://github.com/eProsima/micro-CDR
+  micro_ros_msgs:
+    branch: humble
+    sha: c9062eb3860d16c1bff1423923de3b0956fd4734
+    url: https://github.com/micro-ROS/micro_ros_msgs
+  micro_ros_utilities:
+    branch: humble
+    sha: 74fbd3ed2e451e50aea49e45d143905e496c8f10
+    url: https://github.com/micro-ROS/micro_ros_utilities
+  rcl:
+    branch: humble
+    sha: aa45efa10cdcc8b8adfb61dd008543466e25ebf0
+    url: https://github.com/micro-ROS/rcl
+  rcl_interfaces:
+    branch: humble
+    sha: 82776fc9068d1e0cd4af11c2e2700195994b2eb1
+    url: https://github.com/ros2/rcl_interfaces
+  rcl_logging:
+    branch: humble
+    sha: 5bab8cf7a19c466de77aee35fa55778298563c57
+    url: https://github.com/ros2/rcl_logging
+  rclc:
+    branch: humble
+    sha: 10eadcc6444a3af3b21e7fb80a626f8c391450e0
+    url: https://github.com/ros2/rclc
+  rcutils:
+    branch: humble
+    sha: 99316ef43d7eda04cec129b73435f8e4487f1615
+    url: https://github.com/micro-ROS/rcutils
+  rmw:
+    branch: humble
+    sha: 566d17a97e87bc5336ce33fb025ce8e952a3326a
+    url: https://github.com/ros2/rmw
+  rmw-microxrcedds:
+    branch: humble
+    sha: b5ad1740ecfc611496a6ba2f12c7540b85cbec8f
+    url: https://github.com/micro-ROS/rmw-microxrcedds
+  rmw_implementation:
+    branch: humble
+    sha: 0fd2967b217afef2d45fbab550b598c70444a0aa
+    url: https://github.com/ros2/rmw_implementation
+  ros2_tracing:
+    branch: humble
+    sha: 3c159b382d2d565e26eaa91e39c9ec06a5c6fe88
+    url: https://github.com/ros2/ros2_tracing
+  rosidl:
+    branch: humble
+    sha: 5621b26eff54596a356ad8abd72c06e7650d21f7
+    url: https://github.com/ros2/rosidl
+  rosidl_defaults:
+    branch: humble
+    sha: 8266f1c0f062d405595570209cfb0ed3f71684ae
+    url: https://github.com/ros2/rosidl_defaults
+  rosidl_typesupport:
+    branch: humble
+    sha: 520d9243f17e0cfe53c658b8051ebe2f89ad7c68
+    url: https://github.com/micro-ROS/rosidl_typesupport
+  rosidl_typesupport_microxrcedds:
+    branch: humble
+    sha: 68b96291bca436243c9f3f9b054e5e117e58f8f7
+    url: https://github.com/micro-ROS/rosidl_typesupport_microxrcedds
+  test_interface_files:
+    branch: humble
+    sha: a0c8f5e338490ddf8b98238dce35c06810115e8b
+    url: https://github.com/ros2/test_interface_files
+  unique_identifier_msgs:
+    branch: humble
+    sha: 27767cefcf8a80da44641dc208c57722c28aa11c
+    url: https://github.com/ros2/unique_identifier_msgs

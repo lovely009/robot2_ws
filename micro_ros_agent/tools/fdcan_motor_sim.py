@@ -11,8 +11,8 @@ CANable2 的数据位率索引按 V 查询自动选择；
 也可通过 --data-bitrate-index 显式覆盖。
 
 线协议字节布局严格对齐固件：
-  micro_ros_firmware/lib/motor_protocol/src/motor_protocol.c
-  micro_ros_firmware/lib/motor_protocol/src/{cerb,vaxor}_adapter.c
+  micro_ros_firmware/lib/motor/src/motor_protocol.c
+  micro_ros_firmware/lib/motor/src/{cerb,vaxor}_adapter.c
 
 上行（本脚本 → 固件）：
   CERB  feedback  0x300+id        FD/BRS 12B 大端：deg(182count/°) / rpm / mA，

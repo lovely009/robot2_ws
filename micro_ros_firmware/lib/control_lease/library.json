@@ -1,6 +1,0 @@
-{
-  "name": "control_lease",
-  "version": "1.0.0",
-  "description": "Bounded MCU-local control authority with session and replay fences",
-  "build": { "includeDir": "include", "srcDir": "src" }
-}

@@ -1,6 +1,16 @@
-# src/include 应用层头文件
+# include 应用层头文件归组
 
-本目录只放任务层/ROS 桥的头文件（`ros_bridge.h`、`*_bridge.h`、
-`*_task.h`、`micro_ros_link_state.h`）。硬件驱动与协议库头文件在
-`lib/<库名>/include/`，由 PlatformIO 自动加入头文件搜索路径。
+本目录只放任务层/ROS 桥等应用头，按域归组；硬件驱动与协议库头文件在
+`lib/<库名>/include/`，由 PlatformIO LDF 与 host CMake 显式 -I 加入搜索路径。
 实现文件仍显式包含其直接依赖；本目录不是业务头文件大全。
+
+- `board/`：板级中断与 DMA 声明（board_irq.h、dma.h）
+- `micro_ros/`：micro-ROS 任务、串口传输、可靠发布、会话同步、时钟与 info_page
+- `motor/`：电机实时任务、电机/参数桥接与电机配置契约
+- `sensor/`：传感器任务、IMU 桥接、加热与状态灯
+- `storage/`：存储启动与恢复
+
+根目录保留两个真正全局的配置头：
+
+- `firmware_config.h`：全工程固定容量/频率等编译期配置，被四个库与各任务共同引用
+- `STM32FreeRTOSConfig.h`：第三方 STM32FreeRTOS 库要求在全局 -I 根可发现的配置

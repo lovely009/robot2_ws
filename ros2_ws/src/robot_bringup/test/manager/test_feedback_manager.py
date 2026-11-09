@@ -27,6 +27,16 @@ def setup_feedback(tmp_path: Path) -> FeedbackSetup:
     return FirmwareFeedbackManager(tmp_path, SystemdUnits(runner=fake)), fake
 
 
+def _add_simulation_files(model: Path, *, standalone: bool = True) -> None:
+    (model / 'config' / 'motor_driver.simulation.yaml').write_text(
+        'motor_hardware:\n  motors:\n    m2: {id: 2, joint: sim_elbow}\n')
+    if standalone:
+        (model / 'urdf' / f'{model.name}.standalone.urdf').write_text(
+            '<robot name="arm"><link name="base"/><link name="tip"/>'
+            '<joint name="sim_elbow" type="continuous"><parent link="base"/>'
+            '<child link="tip"/><limit velocity="2" effort="20"/></joint></robot>')
+
+
 def test_agent_and_model_start_control_session_without_enabling_once(setup_feedback: FeedbackSetup) -> None:
     manager, fake = setup_feedback
     manager.reconcile('arm_a', agent_running=False)
@@ -37,6 +47,8 @@ def test_agent_and_model_start_control_session_without_enabling_once(setup_feedb
     assert len(starts) == 1
     assert 'model:=arm_a' in starts[0]
     assert 'host_trajectory.launch.py' in starts[0]
+    assert f'motor_config_file:={manager.models_root / "arm_a/config/motor_driver.yaml"}' in starts[0]
+    assert f'urdf_file:={manager.models_root / "arm_a/urdf/arm_a.urdf"}' in starts[0]
     assert 'start_controllers:=false' in starts[0]
     assert not any('enable' in arg and 'true' in arg for arg in starts[0])
     assert manager.status()['model'] == 'arm_a'
@@ -244,6 +256,41 @@ def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_
     assert all('start_controllers:=false' in command for command in starts)
 
 
+def test_hil_uses_simulation_mapping_and_standalone_urdf(setup_feedback):
+    manager, fake = setup_feedback
+    _add_simulation_files(manager.models_root / 'arm_a')
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[2], session_id=100,
+                      simulation_running=True, firmware_simulation=True)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1
+    assert f'motor_config_file:={manager.models_root / "arm_a/config/motor_driver.simulation.yaml"}' in starts[0]
+    assert f'urdf_file:={manager.models_root / "arm_a/urdf/arm_a.standalone.urdf"}' in starts[0]
+    assert 'motor_ids:=2' in starts[0]
+
+
+@pytest.mark.parametrize('context', [{}, {'firmware_simulation': True}])
+def test_non_hil_never_uses_simulation_sources(setup_feedback, context):
+    manager, fake = setup_feedback
+    _add_simulation_files(manager.models_root / 'arm_a')
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100, **context)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1
+    assert f'motor_config_file:={manager.models_root / "arm_a/config/motor_driver.yaml"}' in starts[0]
+    assert f'urdf_file:={manager.models_root / "arm_a/urdf/arm_a.urdf"}' in starts[0]
+    assert not any('simulation' in arg for arg in starts[0]
+                   if arg.startswith(('motor_config_file:=', 'urdf_file:=')))
+
+
+def test_hil_simulation_mapping_requires_standalone_urdf(setup_feedback):
+    manager, fake = setup_feedback
+    _add_simulation_files(manager.models_root / 'arm_a', standalone=False)
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[2], session_id=100,
+                      simulation_running=True, firmware_simulation=True)
+    assert manager.status()['state'] == 'failed'
+    assert 'standalone URDF' in manager.status()['error']
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+
+
 def test_feedback_inventory_uses_source_and_reception_age_and_rejects_replay():
     from bench_manager.feedback_manager import FeedbackInventory
     from can_bridge_msgs.msg import MotorControlStateArray,MotorControlState
@@ -281,3 +328,21 @@ def test_inventory_rejects_old_session_duplicate_ids_and_future_source():
     empty=MotorControlStateArray(schema_version=2,session_id=100,sequence=2,sync_time_ns=now)
     assert inventory.observe(empty,now,1.)
     assert inventory.current(now,1.)==([],100)
+
+
+def test_hil_uses_model_dds_profile_and_profile_change_replaces_session(setup_feedback):
+    manager, fake = setup_feedback
+    kwargs = dict(agent_running=True, motor_ids=[1], session_id=100,
+                  simulation_running=True, firmware_simulation=True)
+    manager.reconcile('arm_a', **kwargs)
+    profile = manager.models_root / 'arm_a/config/fastdds_udp.xml'
+    profile.write_text('<profiles/>')
+    manager.reconcile('arm_a', **kwargs)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 2
+    assert f'--setenv=FASTRTPS_DEFAULT_PROFILES_FILE={profile}' in starts[-1]
+    manager.reconcile('arm_a', **kwargs)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert not any('FASTRTPS_DEFAULT_PROFILES_FILE' in arg for arg in starts[-1])

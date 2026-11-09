@@ -15,10 +15,16 @@ def audit():
     root = ET.parse(MODEL / 'urdf/trial_arm_7dof.urdf').getroot()
     with (MODEL / 'cad/mass_export/urdf/手臂_mass.csv').open(newline='') as stream:
         rows = {row['Link Name']: row for row in csv.DictReader(stream)}
+    physical_names = {link.get('name') for link in root.findall('link')} - {'Joint_Link2_axis'}
+    assert physical_names == set(rows), 'physical links must match the original CSV'
     results = []
     for link in root.findall('link'):
         name = link.get('name')
+        if name == 'Joint_Link2_axis':
+            assert len(link) == 0, 'Joint_Link2_axis must remain an empty frame'
+            continue
         inertial = link.find('inertial')
+        assert inertial is not None, f'{name}: missing physical inertial'
         mass = float(inertial.find('mass').get('value'))
         com = np.fromstring(inertial.find('origin').get('xyz'), sep=' ')
         a = inertial.find('inertia').attrib

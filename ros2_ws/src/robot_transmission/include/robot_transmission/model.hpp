@@ -23,6 +23,7 @@ struct Group {
   std::vector<double> joint_reduction;
   std::vector<double> joint_offset;
   std::map<std::string, std::string> parameters;
+  bool position_dependent{false};
 };
 // 单线程使用；调用方过滤过期反馈，命令必须完整覆盖被触及的传动组。
 class Model {
@@ -39,8 +40,10 @@ public:
   const std::vector<Group> &groups() const;
   AxisMap actuator_to_joint(const AxisMap &state) const;
   AxisMap joint_to_actuator(const AxisMap &state) const;
-  std::map<std::string, double> joint_effort_to_actuator(const std::map<std::string, double> &effort) const;
-  std::map<std::string, double> actuator_effort_to_joint(const std::map<std::string, double> &effort) const;
+  std::map<std::string, double> joint_effort_to_actuator(
+    const std::map<std::string, double> &effort, const std::map<std::string, double> &joint_positions = {}) const;
+  std::map<std::string, double> actuator_effort_to_joint(
+    const std::map<std::string, double> &effort, const std::map<std::string, double> &actuator_positions = {}) const;
   std::vector<std::string> actuators_for_joint(const std::string &joint) const;
 private:
   struct Impl;

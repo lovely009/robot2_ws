@@ -666,7 +666,8 @@
     }
   ],
   "source_of_truth": "current STEP, explicitly selected by user",
-  "software_implementation_status": "design approved by user on 2026-11-05; six-task plan written, execution method pending handoff; no control code or URDF frame changes yet",
+  "software_implementation_status": "implemented and offline-verified on 2026-11-06: shared spatial plugin, explicit input-side pose effort API, measured-pose host/sim callers, seven offline motor IDs and massless pitch-axis frame; clean RelWithDebInfo install tested, independent review findings fixed; hardware uncalibrated and zero limits unchanged",
+  "software_implementation_report": "2026-11-05-implementation.md",
   "closure_model_check": {
     "assumptions": "upper ball fixed to corrected Joint_Link2 body, Joint_Link1 roll parent retained; positive motor axes are stated design conventions, not hardware-calibrated",
     "joint1_axis_point_mm": [

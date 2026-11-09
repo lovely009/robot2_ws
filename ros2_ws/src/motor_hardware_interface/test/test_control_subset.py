@@ -5,6 +5,22 @@ from robot_transmission import Model
 from motor_hardware_interface.control_subset import materialize_control_subset
 
 
+def test_spatial_subset_preserves_parameters_and_rejects_split_group(tmp_path):
+    from ament_index_python.packages import get_package_share_directory
+    driver = Path(get_package_share_directory('robot_description')) / 'models/trial_arm_7dof/config/motor_driver.yaml'
+    original = Model.load(str(driver)).groups[0]
+    for ids in ('1', '2'):
+        with pytest.raises(ValueError):
+            materialize_control_subset(str(driver), ids, tmp_path)
+    subset = Model.load(materialize_control_subset(str(driver), '1,2', tmp_path))
+    assert subset.actuator_ids == {'arm_joint1': 1, 'arm_joint2': 2}
+    group = subset.groups[0]
+    assert group.position_dependent
+    assert group.parameters == original.parameters
+    assert group.actuator_reduction == original.actuator_reduction
+    assert group.actuators == original.actuators and group.joints == original.joints
+
+
 def source(tmp_path):
     driver=tmp_path/'original'/'motor_driver.yaml';driver.parent.mkdir()
     driver.write_text('motor_hardware:\n  motor_specs_file: specs.yaml\n  motors:\n'

@@ -1138,6 +1138,76 @@ TEST_F(MicroRosSystemTest, MapsEffortAndClearsItAcrossControllerSwitches) {
   EXPECT_DOUBLE_EQ(interfaces[2].get_value(), 0.0);
 }
 
+TEST_F(MicroRosSystemTest, NonlinearEffortUsesMeasuredRatherThanTargetPose) {
+  std::filesystem::copy_file(std::filesystem::path(__FILE__).parent_path()/"fixtures/spatial_transmissions.yaml",
+    root_/"transmissions.yaml",std::filesystem::copy_options::overwrite_existing);
+  auto hardware=effort_info();
+  for(auto &joint:hardware.joints) { joint.command_interfaces.back().min="-5"; joint.command_interfaces.back().max="5"; }
+  auto system=initialized(hardware);
+  activate(*system); arm(*system);
+  ASSERT_EQ(system->perform_command_mode_switch(effort_interfaces(), {}),hardware_interface::return_type::OK);
+  auto interfaces=system->export_command_interfaces();
+  interfaces[0].set_value(.08); interfaces[1].set_value(.1); interfaces[2].set_value(4);
+  interfaces[3].set_value(.17); interfaces[4].set_value(.2); interfaces[5].set_value(2);
+  auto model=robot_transmission::Model::load((root_/"driver.yaml").string());
+  auto measured=model.actuator_to_joint({{"a",robot_transmission::Axis(double(.2f))},{"b",robot_transmission::Axis(double(-.2f))}});
+  auto torque=model.joint_effort_to_actuator({{"yaw",2},{"pitch",4}},
+    {{"yaw",measured.at("yaw").position},{"pitch",measured.at("pitch").position}});
+  auto target=model.joint_to_actuator({{"yaw",robot_transmission::Axis(.17,.2,2)},{"pitch",robot_transmission::Axis(.08,.1,4)}});
+  ASSERT_GT(std::abs(torque.at("b")-target.at("b").effort),.01);
+  ASSERT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::OK);
+  spin_until_command(1);
+  ASSERT_EQ(commands_.size(),1U); ASSERT_EQ(commands_.back().targets.size(),2U);
+  for(const auto &v:commands_.back().targets) {
+    const auto name=v.motor_id==8?"a":"b";
+    EXPECT_NEAR(v.position,target.at(name).position,1e-6);
+    EXPECT_NEAR(v.velocity,target.at(name).velocity,1e-6);
+    EXPECT_NEAR(v.effort,torque.at(name),1e-6);
+  }
+  // 新目标几何不可达必须清空整快照并锁存，不能发布半组。
+  interfaces[0].set_value(1.5);
+  EXPECT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+  ASSERT_TRUE(spin_until_target_count(0));
+  interfaces[0].set_value(0);
+  EXPECT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+}
+
+TEST_F(MicroRosSystemTest, NonlinearMotionExpiryBetweenFreshReadAndWriteRejectsResidualPose) {
+  std::filesystem::copy_file(std::filesystem::path(__FILE__).parent_path()/"fixtures/spatial_transmissions.yaml",
+    root_/"transmissions.yaml",std::filesystem::copy_options::overwrite_existing);
+  auto system=initialized(effort_info()); activate(*system); arm(*system);
+  ASSERT_EQ(system->perform_command_mode_switch(effort_interfaces(),{}),hardware_interface::return_type::OK);
+  auto interfaces=system->export_command_interfaces();
+  interfaces[2].set_value(.8); interfaces[5].set_value(-.6);
+  publish_motion(); publish_control(1,true);
+  ASSERT_EQ(system->read(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::OK);
+  ASSERT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::OK);
+  ASSERT_TRUE(spin_until_target_count(2));
+  commands_.clear();
+  // 运动反馈 100 ms 到期，控制授权 300 ms 仍新鲜；刻意不再调用 read。
+  std::this_thread::sleep_for(120ms);
+  EXPECT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+  ASSERT_TRUE(spin_until_target_count(0));
+  for(const auto &command:commands_) EXPECT_TRUE(command.targets.empty());
+  EXPECT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+}
+
+TEST_F(MicroRosSystemTest, NonlinearMissingOrStaleFeedbackStopsWholeSnapshot) {
+  std::filesystem::copy_file(std::filesystem::path(__FILE__).parent_path()/"fixtures/spatial_transmissions.yaml",
+    root_/"transmissions.yaml",std::filesystem::copy_options::overwrite_existing);
+  for(bool missing:{false,true}) {
+    auto system=initialized(effort_info()); activate(*system); arm(*system);
+    auto motion=motion_message(missing?0:700);
+    if(missing) motion.states.pop_back();
+    motion_pub_->publish(motion);
+    std::this_thread::sleep_for(10ms);
+    EXPECT_EQ(system->read(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+    EXPECT_EQ(system->write(rclcpp::Time(0),rclcpp::Duration(10ms)),hardware_interface::return_type::ERROR);
+    ASSERT_TRUE(spin_until_target_count(0));
+    system->on_deactivate(rclcpp_lifecycle::State()); commands_.clear();
+  }
+}
+
 TEST_F(MicroRosSystemTest, EffortOnlyNeverDrivesAndManualSwitchDropsOldTorque) {
   auto system = initialized(effort_info());
   activate(*system, true);

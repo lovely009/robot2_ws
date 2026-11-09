@@ -196,16 +196,17 @@
       </geometry>
     </collision>
   </link>
+  <link name="Joint_Link2_axis" />
   <joint
     name="Joint_Link2"
     type="revolute">
     <origin
-      xyz="0.0051132 0.0005 0.015001"
-      rpy="1.5708 0 0" />
+      xyz="0.005 0.0005 0.020"
+      rpy="1.5707963267948966 0 0" />
     <parent
       link="Joint_Link1" />
     <child
-      link="Joint_Link2" />
+      link="Joint_Link2_axis" />
     <axis
       xyz="0 0 1" />
     <limit
@@ -213,6 +214,13 @@
       upper="0"
       effort="0"
       velocity="0" />
+  </joint>
+  <joint name="Joint_Link2_body_fixed" type="fixed">
+    <!-- 补偿新旧轴框架差，保留实体及下游零位装配。 -->
+    <origin xyz="0.00011319999999999993 -0.004999 -3.0610046744688095e-19"
+            rpy="3.673205103416066e-06 0 0" />
+    <parent link="Joint_Link2_axis" />
+    <child link="Joint_Link2" />
   </joint>
   <link
     name="Joint_Link3.3">

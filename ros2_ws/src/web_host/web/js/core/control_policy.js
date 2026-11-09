@@ -30,7 +30,9 @@ export function jointPolicyTargets(state, model, enabled, now = Date.now()) {
     if (!enabled) return {motor_id:id,enabled:false,kp:0,kd:0,confirm_unprotected:false};
     const actual = describeMotorState(state,id,now);
     if (!actual.online || actual.fault) throw new Error(`m${id} 离线或存在故障`);
-    const gains = metadata.policy_defaults?.[id];
+    const runtime = state.transmissionStatus.data;
+    const defaults = Object.hasOwn(runtime, 'policy_defaults') ? runtime.policy_defaults : metadata.policy_defaults;
+    const gains = defaults?.[id];
     if (![gains?.kp,gains?.kd].every(value => Number.isFinite(value) && value >= 0)) {
       throw new Error(`模型缺少 m${id} 的有效增益`);
     }

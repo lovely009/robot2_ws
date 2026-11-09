@@ -10,7 +10,7 @@
 // （含 models/）挂到 /robot_sim，URDF 里的 package://robot_description/... 经
 // loader.packages 映射成 /robot_sim/...。模型可在页内切换（底栏选择器，见 mount）。
 //
-// 关节小球直接挂在 URDFJoint 下（随臂运动），点击选中与状态着色都在这里。
+// 关节轴标直接挂在 URDFJoint 下（随臂运动），透明球拾取与状态着色都在这里。
 // 与重构前的 arm3d.js 相比：去掉 window.Arm3D 全局桥（改由 mount 直接调用），
 // 新增 unmount 的资源释放（切屏会反复挂载，不释放会一路涨显存）。
 
@@ -29,6 +29,8 @@ import { $ } from '../core/format.js';
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
 const MARKER_R = 0.022;
+const AXIS_LENGTH = MARKER_R * 3;
+const AXIS_RING_R = MARKER_R * 0.65;
 
 let renderer = null;
 let scene = null;
@@ -113,7 +115,7 @@ export function init(canvas, opts) {
     // the target ghost once geometry is complete, then request a fresh render.
     if (ghost) root.remove(ghost);
     ghost = robot.clone();
-    ghost.traverse((o) => { if (o.isMesh) o.material = ghostMat; });
+    ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) o.material = ghostMat; });
     ghost.visible = false;
     root.add(ghost);
     frameCamera(robot);
@@ -130,7 +132,7 @@ export function init(canvas, opts) {
     addMarkers(robot);
 
     ghost = robot.clone();
-    ghost.traverse((o) => { if (o.isMesh) { o.material = ghostMat; } });
+    ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) { o.material = ghostMat; } });
     ghost.visible = false;
     root.add(ghost);
 
@@ -148,13 +150,36 @@ export function init(canvas, opts) {
   renderer.setAnimationLoop(tick);
 }
 
-// 每个关节挂一颗小球：随臂运动，兼作点击靶与状态色标。
+// 透明球只负责拾取；细轴箭头与圆环沿真实关节轴显示方向和健康状态。
 function addMarkers(r) {
   for (const [name, joint] of Object.entries(r.joints || {})) {
     const m = new THREE.Mesh(
       new THREE.SphereGeometry(MARKER_R, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0x7e8bab }));
+      new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0, depthWrite: false, colorWrite: false,
+      }));
     m.userData.jointName = name;
+    m.userData.hitOnly = true;
+    const axis = joint.axis && joint.axis.lengthSq() > 0
+      ? joint.axis.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    const color = 0x7e8bab;
+    const arrow = new THREE.ArrowHelper(
+      axis, axis.clone().multiplyScalar(-AXIS_LENGTH / 2), AXIS_LENGTH,
+      color, MARKER_R * 0.55, MARKER_R * 0.3);
+    const points = Array.from({ length: 32 }, (_, i) => {
+      const angle = i / 32 * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(angle) * AXIS_RING_R, Math.sin(angle) * AXIS_RING_R, 0);
+    });
+    const ring = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color }));
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
+    // 轴线叠加显示，避免细线被电机外壳完全遮住。
+    for (const part of [arrow.line, arrow.cone, ring]) {
+      part.material.depthTest = false; part.material.depthWrite = false;
+      part.renderOrder = 20;
+    }
+    m.add(arrow, ring);
     joint.add(m);
     markers.set(name, m);
     picked.push(m);
@@ -214,7 +239,10 @@ export function setTargets(angles) {
 export function setJointColors(colors) {
   for (const [name, m] of markers) {
     const next = (colors && colors[name]) || '#7e8bab';
-    if (`#${m.material.color.getHexString()}` !== next) {m.material.color.set(next); renderRequested = true;}
+    const [arrow, ring] = m.children;
+    if (`#${ring.material.color.getHexString()}` !== next) {
+      arrow.setColor(next); ring.material.color.set(next); renderRequested = true;
+    }
   }
 }
 
@@ -225,7 +253,7 @@ export function setSelected(name) {
   }
   selected = name;
   if (selected && markers.has(selected)) {
-    markers.get(selected).scale.setScalar(1.9);
+    markers.get(selected).scale.setScalar(1.35);
   }
 }
 
@@ -408,7 +436,7 @@ export function mount(rootEl, ctx) {
           + ' · 几何已加载';
         ready = true;
         // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
-        // 否则切屏返回后小球高亮要等到下一次用户点击才会恢复。
+        // 否则切屏返回后轴标高亮要等到下一次用户点击才会恢复。
         setSelected(null);
         markDirty(DIRTY.MOTION);
         hudFadeTimer = setTimeout(() => { hud.style.opacity = '0.3'; }, 5000);

@@ -78,6 +78,17 @@ sim.handle_sdo(1, bytes([0x70, 0, 0, 0, 0, 0, 0, 0]))  # 切换位 1，取续段
 # 末段 head = t(1)<<4 | 未用字节(4)<<1 | c(1) = 0x19，数据 "_V2" + 4 字节填充
 assert sim.sent[-1][1] == bytes([0x19]) + b"_V2" + b"\x00" * 4
 
+# 固件使能前必须读到有效 T_max；节点 ID 来自当前模拟节点。
+for index, value in ((0x2546, 300), (0x2530, 1)):
+    sim.handle_sdo(1, bytes([0x40, index & 255, index >> 8, 0, 0, 0, 0, 0]))
+    assert sim.sent[-1][1] == bytes([0x43, index & 255, index >> 8, 0]) + value.to_bytes(4, 'little')
+sim.handle_sdo(1, bytes([0x23, 0x46, 0x25, 0, 100, 0, 0, 0]))
+sim.handle_sdo(1, bytes([0x40, 0x46, 0x25, 0, 0, 0, 0, 0]))
+assert sim.sent[-1][1] == bytes([0x43, 0x46, 0x25, 0, 100, 0, 0, 0])
+sim.handle_sdo(1, bytes([0x40, 0x46, 0x25, 1, 0, 0, 0, 0]))
+assert sim.sent[-1][1][-4:] == bytes.fromhex('11 00 09 06')
+sim.models[1].sdo_params[(0x2546, 0)] = 300
+
 # 非 0x1008 的对象请求 → SDO abort（固件据此判读失败，不拿别的对象绑型号）。
 sim.handle_sdo(1, bytes([0x40, 0x00, 0x10, 0x00, 0, 0, 0, 0]))
 assert sim.sent[-1][1][0] == 0x80

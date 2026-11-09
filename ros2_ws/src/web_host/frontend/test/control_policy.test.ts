@@ -36,3 +36,16 @@ it('allows disable with stale readiness and does not require gains',()=>{
     {motor_id:2,enabled:false,kp:0,kd:0,confirm_unprotected:false}]);
   expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow(/增益/);
 });
+
+it('uses runtime driver gains when the offline model has none',()=>{
+  const s=state();s.modelTransmissions.policy_defaults={};
+  Object.assign(s.transmissionStatus.data,{policy_defaults:{2:{kp:12,kd:.5}}});
+  expect(api.jointPolicyTargets(s,'arm',true,1100)[0]).toMatchObject({kp:12,kd:.5});
+});
+it('rejects missing or invalid runtime gains rather than falling back',()=>{
+  const s=state();
+  for (const policy_defaults of [{},{2:{kp:NaN,kd:1}},{2:{kp:30,kd:-1}}]) {
+    Object.assign(s.transmissionStatus.data,{policy_defaults});
+    expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow(/增益/);
+  }
+});

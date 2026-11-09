@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include "robot_transmission/model.hpp"
 
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -469,4 +471,120 @@ TEST(MotorSimNodeTransmission, MapsFeedbackAndEffortByNameAndBlocksIncompleteGro
   std::remove(driver.c_str());
   std::remove(mapping.c_str());
   rclcpp::shutdown();
+}
+
+class SpatialMotorSimTest : public ::testing::Test {
+protected:
+  std::filesystem::path root;
+  std::shared_ptr<ros::MotorSimNode> node;
+  std::shared_ptr<rclcpp::Node> peer;
+  ScriptedTransport *wire{};
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr states;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr gate;
+  rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr drive;
+  std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor;
+  std::vector<double> output;
+  std::string drive_state;
+  void spin_for(std::chrono::milliseconds duration) {
+    const auto end=std::chrono::steady_clock::now()+duration;
+    while(std::chrono::steady_clock::now()<end) executor->spin_some();
+  }
+  void command(double target=0) {
+    for(unsigned id:{1U,2U,3U}) {
+      motor_sim::protocol::CanFrame control;
+      control.id=motor_sim::protocol::vaxor_control_id(id); control.size=8U;
+      const auto bytes=motor_sim::protocol::pack_vaxor_control(true,false,motor_sim::protocol::CommandMode::Mit);
+      std::copy(bytes.begin(),bytes.end(),control.data.begin()); wire->push(control);
+      motor_sim::protocol::MotorCommand cmd;
+      cmd.position=target; cmd.kp=0; cmd.kd=0; cmd.feedforward=2;
+      motor_sim::protocol::CanFrame frame;
+      frame.id=motor_sim::protocol::vaxor_command_id(id); frame.fd=true; frame.size=12U;
+      const auto data=motor_sim::protocol::pack_vaxor_command(cmd);
+      std::copy(data.begin(),data.end(),frame.data.begin()); wire->push(frame);
+    }
+  }
+  void feedback(std::vector<std::string> names, std::vector<double> positions) {
+    sensor_msgs::msg::JointState msg;
+    msg.name=std::move(names); msg.position=std::move(positions); msg.velocity.assign(msg.name.size(),0.);
+    states->publish(msg); spin_for(25ms);
+  }
+  void SetUp() override {
+    ensure_rclcpp_initialized();
+    executor=std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    char directory[]="/tmp/spatial_motor_sim_XXXXXX"; root=mkdtemp(directory);
+    std::filesystem::copy_file(std::filesystem::path(__FILE__).parent_path()/"fixtures/spatial_transmissions.yaml",root/"transmissions.yaml");
+    std::ofstream(root/"driver.yaml") << "motor_hardware:\n  transmissions_file: transmissions.yaml\n  motors:\n"
+      "    a: {id: 1, joint: yaw}\n    b: {id: 2, joint: pitch}\n    c: {id: 3, joint: elbow}\n";
+    auto config=one_axis_config(); config.timing.command_timeout_ms=3000;
+    config.motors[0].joint="yaw";
+    config.motors[0].plant.torque_constant_nm_per_a=1;
+    config.motors[0].plant.current_limit_a=10;
+    auto second=config.motors[0]; second.id=2; second.joint="pitch";
+    auto third=config.motors[0]; third.id=3; third.joint="elbow";
+    config.motors.insert(config.motors.begin(),second); config.motors.push_back(third);
+    auto scripted=std::make_unique<ScriptedTransport>(); wire=scripted.get();
+    ros::TransportMap transports; transports.emplace("arm",std::move(scripted));
+    ros::NodeDefaults defaults;
+    defaults.driver_file=(root/"driver.yaml").string(); defaults.joint_names={"pitch","elbow","yaw"};
+    defaults.joint_states_topic="spatial/states"; defaults.effort_topic="spatial/efforts";
+    defaults.control_gate_topic="spatial/gate"; defaults.drive_state_topic="spatial/drive";
+    node=std::make_shared<ros::MotorSimNode>(rclcpp::NodeOptions{},config,std::move(transports),defaults);
+    peer=std::make_shared<rclcpp::Node>("spatial_motor_sim_peer");
+    states=peer->create_publisher<sensor_msgs::msg::JointState>(defaults.joint_states_topic,10);
+    gate=peer->create_publisher<std_msgs::msg::Bool>(defaults.control_gate_topic,10);
+    sub=peer->create_subscription<std_msgs::msg::Float64MultiArray>(defaults.effort_topic,10,
+      [this](const std_msgs::msg::Float64MultiArray &msg){output=msg.data;});
+    drive=peer->create_subscription<std_msgs::msg::String>(defaults.drive_state_topic,10,
+      [this](const std_msgs::msg::String &msg){drive_state=msg.data;});
+    executor->add_node(node); executor->add_node(peer);
+    const auto end=std::chrono::steady_clock::now()+2s;
+    while((!states->get_subscription_count() || !gate->get_subscription_count()) && std::chrono::steady_clock::now()<end) spin_for(10ms);
+    ASSERT_GT(states->get_subscription_count(),0U);
+    command();
+    while(drive_state!="ready_for_control" && std::chrono::steady_clock::now()<end) spin_for(10ms);
+    ASSERT_EQ(drive_state,"ready_for_control");
+    std_msgs::msg::Bool open; open.data=true; gate->publish(open); spin_for(20ms);
+  }
+  void TearDown() override {
+    if(peer) executor->remove_node(peer);
+    if(node) executor->remove_node(node);
+    sub.reset(); drive.reset(); states.reset(); gate.reset(); peer.reset(); node.reset();
+    executor.reset();
+    std::filesystem::remove_all(root);
+    rclcpp::shutdown();
+  }
+  void expect_pose_torque(double yaw, double pitch) {
+    auto model=robot_transmission::Model::load((root/"driver.yaml").string());
+    auto a=model.joint_to_actuator({{"yaw",robot_transmission::Axis(yaw)},{"pitch",robot_transmission::Axis(pitch)},
+                                  {"elbow",robot_transmission::Axis(.1)}});
+    const auto efforts=node->last_efforts();
+    ASSERT_EQ(efforts.size(),3U); ASSERT_GT(efforts[0],1.5);
+    auto expected=model.actuator_effort_to_joint({{"a",efforts[1]},{"b",efforts[0]},{"c",efforts[2]}},
+      {{"a",a.at("a").position},{"b",a.at("b").position},{"c",a.at("c").position}});
+    ASSERT_EQ(output.size(),3U);
+    EXPECT_NEAR(output[0],expected.at("pitch"),1e-9);
+    EXPECT_NEAR(output[1],expected.at("elbow"),1e-9);
+    EXPECT_NEAR(output[2],expected.at("yaw"),1e-9);
+  }
+};
+TEST_F(SpatialMotorSimTest, NonlinearEffortFollowsMeasuredPoseNotCommand) {
+  feedback({"elbow","pitch","yaw"},{.1,.08,.17});
+  expect_pose_torque(.17,.08); const auto first=output;
+  command(.5); feedback({"yaw","elbow","pitch"},{.17,.1,.08});
+  expect_pose_torque(.17,.08); EXPECT_NEAR(output[0],first[0],1e-9);
+  feedback({"pitch","yaw","elbow"},{-.05,.1,.1});
+  expect_pose_torque(.1,-.05); EXPECT_GT(std::abs(output[0]-first[0]),.01);
+}
+TEST_F(SpatialMotorSimTest, InvalidNonlinearGroupDoesNotReuseCachedPose) {
+  feedback({"yaw","elbow"},{.17,.1});
+  ASSERT_EQ(output.size(),3U); EXPECT_EQ(output[0],0); EXPECT_EQ(output[2],0); EXPECT_GT(output[1],1.5);
+  feedback({"pitch","yaw","elbow"},{.08,.17,.1}); expect_pose_torque(.17,.08);
+  spin_for(70ms); feedback({"pitch","elbow"},{.08,.1});
+  EXPECT_EQ(output[0],0); EXPECT_EQ(output[2],0); EXPECT_GT(output[1],1.5);
+  feedback({"pitch","yaw","elbow"},{.08,.17,.1}); expect_pose_torque(.17,.08);
+  spin_for(510ms); feedback({"elbow"},{.1});
+  EXPECT_EQ(output[0],0); EXPECT_EQ(output[2],0); EXPECT_GT(output[1],1.5);
+  feedback({"pitch","yaw","elbow"},{1.57,0,.1});
+  EXPECT_EQ(output[0],0); EXPECT_EQ(output[2],0); EXPECT_GT(output[1],1.5);
 }

@@ -65,12 +65,12 @@ def _request(**overrides: Any) -> dict[str, Any]:
 
 def test_options_report_both_model_lists() -> None:
     manager = _manager(_systemd(), models=('half_body_robot', 'other'),
-                       mujoco_models=('half_body_robot',))
+                       mujoco_models=('half_body_robot', 'standalone'))
 
     options = manager.options()
 
     assert options['models'] == ['half_body_robot', 'other']
-    assert options['mujoco_models'] == ['half_body_robot']
+    assert options['mujoco_models'] == ['half_body_robot', 'standalone']
 
 
 @pytest.mark.parametrize('transport', ['vcan', 'socketcan', 'slcan'])
@@ -109,6 +109,57 @@ def test_start_rejects_mujoco_backend_for_model_without_mjcf() -> None:
 
     with pytest.raises(ValueError, match='MuJoCo'):
         manager.start(_request(backend='mujoco', model='gazebo_only'))
+
+    assert _creations(systemd) == []
+
+
+def test_standalone_mujoco_bypasses_can_and_reuses_running_unit() -> None:
+    systemd = _systemd()
+
+    def unexpected_device_access():
+        raise AssertionError('standalone MuJoCo must not enumerate CAN or serial devices')
+
+    manager = SimulationProcessManager(
+        can_provider=unexpected_device_access,
+        serial_provider=unexpected_device_access,
+        model_provider=lambda: [],
+        mujoco_model_provider=lambda: ['trial_arm_7dof'],
+        systemd=SystemdUnits(runner=systemd),
+    )
+    request = _request(
+        backend='mujoco', model='trial_arm_7dof', transport='socketcan')
+
+    first = manager.start(request)
+    again = manager.start(request)
+
+    assert _exec_start(systemd) == [
+        'ros2', 'launch', 'robot_sim', 'mujoco.launch.py',
+        'model:=trial_arm_7dof',
+    ]
+    assert first['config'] == {
+        'backend': 'mujoco',
+        'transport': 'socketcan',
+        'controller_mode': 'external',
+        'model': 'trial_arm_7dof',
+    }
+    assert again == first
+    assert len(_creations(systemd)) == 1
+
+
+@pytest.mark.parametrize('backend, mode', [
+    ('gazebo', 'external'),
+    ('mujoco', 'firmware'),
+])
+def test_standalone_mujoco_model_requires_mujoco_external(
+        backend: str, mode: str) -> None:
+    systemd = _systemd()
+    manager = _manager(
+        systemd, models=(), mujoco_models=('trial_arm_7dof',))
+
+    with pytest.raises(ValueError, match='topology'):
+        manager.start(_request(
+            backend=backend, controller_mode=mode, model='trial_arm_7dof',
+            transport='socketcan', physical_bus_isolated=True))
 
     assert _creations(systemd) == []
 

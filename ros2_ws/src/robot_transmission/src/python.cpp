@@ -12,7 +12,8 @@ PYBIND11_MODULE(_core, m) {
     .def_readonly("actuators",&rt::Group::actuators).def_readonly("joints",&rt::Group::joints)
     .def_readonly("actuator_reduction",&rt::Group::actuator_reduction)
     .def_readonly("joint_reduction",&rt::Group::joint_reduction).def_readonly("joint_offset",&rt::Group::joint_offset)
-    .def_readonly("parameters",&rt::Group::parameters);
+    .def_readonly("parameters",&rt::Group::parameters)
+    .def_readonly("position_dependent",&rt::Group::position_dependent);
   py::class_<rt::Model>(m,"Model")
     .def_static("load",&rt::Model::load,py::arg("driver_file"),py::arg("transmissions_file")="")
     .def_property_readonly("actuator_names",&rt::Model::actuator_names)
@@ -21,7 +22,9 @@ PYBIND11_MODULE(_core, m) {
     .def_property_readonly("groups",&rt::Model::groups)
     .def("actuator_to_joint",&rt::Model::actuator_to_joint)
     .def("joint_to_actuator",&rt::Model::joint_to_actuator)
-    .def("joint_effort_to_actuator",&rt::Model::joint_effort_to_actuator)
-    .def("actuator_effort_to_joint",&rt::Model::actuator_effort_to_joint)
+    .def("joint_effort_to_actuator",&rt::Model::joint_effort_to_actuator,
+         py::arg("effort"),py::arg("joint_positions")=std::map<std::string,double>{})
+    .def("actuator_effort_to_joint",&rt::Model::actuator_effort_to_joint,
+         py::arg("effort"),py::arg("actuator_positions")=std::map<std::string,double>{})
     .def("actuators_for_joint",&rt::Model::actuators_for_joint);
 }

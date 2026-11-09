@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <unistd.h>
 #include "robot_transmission/model.hpp"
+#include "spatial_fixture.hpp"
 
 namespace rt = robot_transmission;
 class ModelTest : public ::testing::Test {
@@ -100,4 +101,43 @@ TEST_F(ModelTest, ExplicitRelativeTransmissionPathUsesDriverDirectory) {
   auto m=rt::Model::load((root/"driver.yaml").string(),"custom.yaml");
   auto j=m.actuator_to_joint({{"a",rt::Axis(.4)}});
   EXPECT_NEAR(j.at("yaw").position,.2,1e-12);
+}
+TEST_F(ModelTest, NonlinearEffortNeedsCompleteInputSidePose) {
+  auto m=rt::Model::load(write_spatial_driver(root,{1,1}).string());
+  EXPECT_TRUE(m.groups().front().position_dependent);
+  const std::map<std::string,double> effort{{"Joint_Link1",2},{"Joint_Link2",4}};
+  const std::map<std::string,double> pose{{"Joint_Link1",.17},{"Joint_Link2",.08}};
+  auto expected=m.joint_to_actuator({{"Joint_Link1",rt::Axis(.17,0,2)},{"Joint_Link2",rt::Axis(.08,0,4)}});
+  auto a=m.joint_effort_to_actuator(effort,pose);
+  for(const auto &[name,axis]:expected) EXPECT_NEAR(a.at(name),axis.effort,1e-12);
+  auto zero=m.joint_effort_to_actuator(effort,{{"Joint_Link1",0},{"Joint_Link2",0}});
+  EXPECT_GT(std::abs(a.at("arm_joint2")-zero.at("arm_joint2")),1e-3);
+  std::map<std::string,double> actuator_pose;
+  for(const auto &[name,axis]:expected) actuator_pose[name]=axis.position;
+  auto back=m.actuator_effort_to_joint(a,actuator_pose);
+  EXPECT_NEAR(back.at("Joint_Link1"),2,1e-10);
+  EXPECT_NEAR(back.at("Joint_Link2"),4,1e-10);
+  EXPECT_THROW(m.joint_effort_to_actuator(effort),std::invalid_argument);
+  EXPECT_THROW(m.joint_effort_to_actuator({{"Joint_Link1",0},{"Joint_Link2",0}}),std::invalid_argument);
+  EXPECT_THROW(m.actuator_effort_to_joint(a),std::invalid_argument);
+  EXPECT_THROW(m.joint_effort_to_actuator({{"Joint_Link1",2}},pose),std::invalid_argument);
+  EXPECT_THROW(m.actuator_effort_to_joint({{"arm_joint2",0}},actuator_pose),std::invalid_argument);
+  EXPECT_THROW(m.joint_effort_to_actuator(effort,{{"Joint_Link1",0}}),std::invalid_argument);
+  EXPECT_THROW(m.actuator_effort_to_joint(a,{{"arm_joint2",0}}),std::invalid_argument);
+  for (auto invalid: {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()}) {
+    EXPECT_THROW(m.joint_effort_to_actuator(effort,{{"Joint_Link1",invalid},{"Joint_Link2",0}}),std::invalid_argument);
+    EXPECT_THROW(m.actuator_effort_to_joint(a,{{"arm_joint1",invalid},{"arm_joint2",0}}),std::invalid_argument);
+  }
+  EXPECT_THROW(m.joint_effort_to_actuator(effort,{{"unknown",0}}),std::invalid_argument);
+  EXPECT_THROW(m.actuator_effort_to_joint(a,{{"unknown",0}}),std::invalid_argument);
+}
+TEST_F(ModelTest, LinearEffortRemainsBackwardCompatible) {
+  auto m=model();
+  EXPECT_FALSE(m.groups().front().position_dependent);
+  auto a=m.joint_effort_to_actuator({{"yaw",2},{"pitch",4}});
+  EXPECT_NEAR(a.at("a"),3,1e-12); EXPECT_NEAR(a.at("b"),-1,1e-12);
+  EXPECT_EQ(a,m.joint_effort_to_actuator({{"yaw",2},{"pitch",4}},{{"yaw",.2},{"pitch",.1},{"shoulder",.8}}));
+  EXPECT_EQ(a.size(),2U);
+  auto j=m.actuator_effort_to_joint(a);
+  EXPECT_NEAR(j.at("yaw"),2,1e-12); EXPECT_NEAR(j.at("pitch"),4,1e-12);
 }

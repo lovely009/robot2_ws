@@ -1,0 +1,45 @@
+{
+  "seconds": 30,
+  "control_samples": 91,
+  "all_fresh_ready": true,
+  "all_seven_online_disabled": true,
+  "control": {
+    "model": "trial_arm_7dof",
+    "joint_names": [
+      "Joint_Link3",
+      "Joint_Link4",
+      "Joint_Link5",
+      "Joint_Link6",
+      "Joint_Link7",
+      "Joint_Link1",
+      "Joint_Link2"
+    ],
+    "mode": "stopped",
+    "reason": "等待新目标",
+    "reject": "",
+    "output_topic": "/motor/host_command_array",
+    "trajectory_output_topic": "/host_control/trajectory_controller/follow_joint_trajectory",
+    "gravity_enabled": false,
+    "effort_gain": 1.0,
+    "active_controllers": [],
+    "feedback_fresh": true,
+    "controllers_ready": true,
+    "pending_goal_ids": [],
+    "stop_policy_request_id": 0,
+    "safety_note": ""
+  },
+  "feedback": {
+    "state": "running",
+    "model": "trial_arm_7dof",
+    "desired_model": "trial_arm_7dof",
+    "source": "simulation",
+    "execution": "ros2_control",
+    "motor_ids": "1,2,3,4,5,6,7",
+    "session_id": "1793957361979",
+    "publishes_joint_states": false,
+    "dds_profile": "/home/ly/robot2_ws/ros2_ws/install/robot_description/share/robot_description/models/trial_arm_7dof/config/fastdds_udp.xml",
+    "reason": "仿真关节反馈；MCU 反馈与 ros2_control 控制会话",
+    "error": "",
+    "returncode": null
+  }
+}

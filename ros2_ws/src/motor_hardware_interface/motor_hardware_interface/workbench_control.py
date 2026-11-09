@@ -7,6 +7,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
+import yaml
+
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from can_bridge_msgs.msg import (AgentWireContract, MotorCommandArray, MotorCommandTarget,
@@ -60,6 +62,15 @@ class WorkbenchModel:
                 or len(self.names_by_id) != len(self.ids)
                 or any(not 1 <= value <= 64 for value in self.ids.values())):
             raise ValueError('模型 motor_id 必须唯一、位于 1..64 且最多 48 台')
+        with open(config_file, encoding='utf-8') as handle:
+            motors = yaml.safe_load(handle)['motor_hardware']['motors']
+        self.policy_defaults = {}
+        for name, motor_id in self.ids.items():
+            command = motors[name].get('command') or {}
+            gains = {key: command.get(key) for key in ('kp', 'kd')}
+            if all(type(value) in (int, float) and math.isfinite(value) and value >= 0
+                   for value in gains.values()):
+                self.policy_defaults[motor_id] = gains
         root = ET.parse(urdf_file).getroot()
         joints = root.findall('joint')
         nodes = {joint.get('name'): joint for joint in joints}
@@ -1037,6 +1048,7 @@ class WorkbenchControl(Node):
         self._status_pub.publish(String(data=json.dumps(status, ensure_ascii=False)))
         self._transmission_pub.publish(String(data=json.dumps(dict(status,
             driver_file=self.config_file, trajectory_enabled=True,
+            policy_defaults=self.mapping.policy_defaults,
             control_service=self.get_fully_qualified_name() + '/set_parameters_atomically',
             joint_limits={name: {'lower': lower if math.isfinite(lower) else None,
                                  'upper': upper if math.isfinite(upper) else None}

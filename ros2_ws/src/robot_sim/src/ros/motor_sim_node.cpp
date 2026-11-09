@@ -370,7 +370,7 @@ void MotorSimNode::joint_state_callback(
 void MotorSimNode::update_actuator_states() {
   if (!transmission_) return;
   const auto now = FrameRouter::Clock::now();
-  robot_transmission::AxisMap complete;
+  robot_transmission::AxisMap states;
   for (const auto &group : transmission_->groups()) {
     bool valid = true;
     auto oldest = now;
@@ -385,10 +385,16 @@ void MotorSimNode::update_actuator_states() {
       newest = std::max(newest, found->second);
     }
     if (valid && newest - oldest <= std::chrono::milliseconds(50)) {
+      robot_transmission::AxisMap complete;
       for (const auto &name : group.joints) complete.emplace(name, measured_joints_.at(name));
+      try {
+        const auto converted=transmission_->joint_to_actuator(complete);
+        states.insert(converted.begin(),converted.end());
+      } catch(const std::exception &error) {
+        RCLCPP_ERROR_THROTTLE(get_logger(),*get_clock(),1000,"Transmission feedback rejected: %s",error.what());
+      }
     }
   }
-  const auto states = transmission_->joint_to_actuator(complete);
   for (std::size_t i = 0; i < actuator_names_.size(); ++i) {
     const auto found = states.find(actuator_names_[i]);
     actuator_state_valid_[i] = found != states.end();
@@ -527,12 +533,28 @@ void MotorSimNode::send_feedback(const std::size_t tick) {
 void MotorSimNode::publish_efforts(const std::vector<double> &efforts) {
   std_msgs::msg::Float64MultiArray message;
   if (transmission_) {
-    std::map<std::string, double> actuator_efforts;
-    for (std::size_t i = 0; i < actuator_names_.size(); ++i) {
-      actuator_efforts.emplace(actuator_names_[i], efforts.at(i));
+    std::map<std::string,double> joints;
+    for(const auto &group:transmission_->groups()) {
+      std::map<std::string,double> actuator_efforts, positions;
+      bool valid=true;
+      for(const auto &name:group.actuators) {
+        const auto index=std::distance(actuator_names_.begin(),std::find(actuator_names_.begin(),actuator_names_.end(),name));
+        if(!actuator_state_valid_.at(index)) { valid=false; break; }
+        actuator_efforts.emplace(name,efforts.at(index));
+        positions.emplace(name,joint_states_.at(index).position_rad);
+      }
+      if(!valid) continue;  // 失效组不复用旧位置，也不伪造零姿态。
+      try {
+        const auto converted=transmission_->actuator_effort_to_joint(actuator_efforts,positions);
+        joints.insert(converted.begin(),converted.end());
+      } catch(const std::exception &error) {
+        RCLCPP_ERROR_THROTTLE(get_logger(),*get_clock(),1000,"Transmission effort rejected: %s",error.what());
+      }
     }
-    const auto joints = transmission_->actuator_effort_to_joint(actuator_efforts);
-    for (const auto &name : output_joint_names_) message.data.push_back(joints.at(name));
+    for(const auto &name:output_joint_names_) {
+      const auto found=joints.find(name);
+      message.data.push_back(found==joints.end()?0.:found->second);
+    }
   } else {
     message.data = efforts;
   }

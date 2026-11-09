@@ -366,3 +366,55 @@ def test_motor_sim_config_carries_cerb_device_identity_and_sdo_defaults(tmp_path
     assert profiles["cerb_r58"]["device_max_current_ma"] == 13300
     assert profiles["cerb_r48"]["device_identity"] == "R48LITE_V2"
     assert profiles["cerb_r48"]["device_max_current_ma"] == 5000
+
+
+def test_trial_hil_runtime_uses_separate_simulation_mapping(tmp_path):
+    """HIL配置须保留7轴耦合与型号，并隔离原始离线映射。"""
+    from robot_transmission import Model
+    module = _launch_module()
+    model = MODEL_DIR.parent / 'trial_arm_7dof'
+    driver = model / 'config/motor_driver.simulation.yaml'
+    assert driver.is_file()
+    simulation = module._load_simulation(model / 'config/simulation_topology.yaml')
+    specs = module._resolve_motor_specs_path(driver)
+    bound = module._bind_motor_topology(simulation, driver, specs)
+    assert [m['id'] for m in bound['motors']] == list(range(1, 8))
+    assert [m['joint'] for m in bound['motors']] == [f'Joint_Link{i}' for i in range(1, 8)]
+    _, runtime = module._write_runtime_configs(bound, tmp_path, 'socketcan', 'can0', 'can0', specs, driver)
+    hardware = yaml.safe_load(runtime.read_text())['motor_hardware']
+    assert hardware['buses'] == {'arm': {'transport': 'socketcan', 'interface': 'can0'}}
+    transmission = Model.load(str(runtime))
+    assert transmission.groups[0].position_dependent
+    assert len(transmission.actuator_ids) == 7
+    source = yaml.safe_load((model / 'config/motor_driver.yaml').read_text())['motor_hardware']
+    assert 'buses' not in source
+    assert all('command' not in m for m in source['motors'].values())
+
+
+@pytest.mark.parametrize('simulator_only', [False, True])
+def test_trial_hil_default_launch_selects_simulation_config(tmp_path, monkeypatch, simulator_only):
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    module = _launch_module()
+    real_share = module.get_package_share_directory
+    description = MODEL_DIR.parents[1]
+    monkeypatch.setattr(module, 'get_package_share_directory',
+                        lambda name: str(description) if name == 'robot_description' else real_share(name))
+    monkeypatch.setattr(module, '_validate_socketcan_interface', lambda interface: 'can')
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+    context = LaunchContext()
+    context.launch_configurations.update(dict(
+        backend='gazebo' if simulator_only else 'mujoco', model='trial_arm_7dof', controller_mode='firmware',
+        simulator_only='true' if simulator_only else 'false', transport='socketcan', sim_interface='can0', start_fdcan_sim='false',
+        start_web_host='false', start_micro_ros_agent='false', start_host_control='false'))
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    module.launch_simulation(context)
+    hardware = yaml.safe_load((runtime / 'motor_driver.yaml').read_text())['motor_hardware']
+    assert len(hardware['motors']) == 7
+    assert hardware['buses']['arm']['interface'] == 'can0'
+    assert Path(hardware['transmissions_file']).resolve() == (
+        description / 'models/trial_arm_7dof/config/transmissions.yaml').resolve()

@@ -1,0 +1,7 @@
+<library path="robot_transmission_plugins">
+  <class name="robot_transmission/SpatialLinkageTransmission"
+         type="robot_transmission::SpatialLinkageTransmissionLoader"
+         base_class_type="transmission_interface::TransmissionLoader">
+    <description>Two-axis spatial ball-joint linkage on the calibrated zero assembly branch.</description>
+  </class>
+</library>

@@ -7,6 +7,69 @@ from motor_hardware_interface.transmission_bridge import TransmissionBridge
 from motor_hardware_interface.topic_bridge import BridgeError
 
 
+def _spatial_bridge(tmp_path):
+    _bridge(tmp_path)
+    (tmp_path / 'transmissions.yaml').write_text(
+        (Path(__file__).parent / 'fixtures/spatial_transmissions.yaml').read_text())
+    return TransmissionBridge(str(tmp_path / 'motor_driver.yaml'))
+
+
+def test_nonlinear_trajectory_rejects_nonzero_effort_atomically(tmp_path):
+    bridge = _spatial_bridge(tmp_path)
+    bridge.update(_states(), 1.)
+    bridge.trajectory(['yaw', 'pitch'], [dict(t_ms=100, positions=[.1, .05])], 1.1)
+    held = dict(bridge.held)
+    with pytest.raises(BridgeError, match='实时姿态'):
+        bridge.trajectory(['yaw', 'pitch'], [
+            dict(t_ms=100, positions=[.2, .08], effort=[0., 0.]),
+            dict(t_ms=200, positions=[.2, .08], effort=[0., 1.]),
+        ], 1.1)
+    assert bridge.held == held
+    ids, flat, _ = bridge.trajectory(['yaw', 'pitch'], [
+        dict(t_ms=100, positions=[.2, .08], effort=[0., 0.])], 1.1)
+    assert ids == [8, 9] and all(v[4] == 0 for v in flat)
+
+
+def test_nonlinear_feedback_requires_complete_synchronised_group(tmp_path):
+    bridge = _spatial_bridge(tmp_path)
+    assert not bridge.update(_states()[:1], 1.)
+    assert len(bridge.update(_states(), 1.)) == 2
+    bridge.trajectory(['yaw'], [dict(t_ms=100, positions=[.3])], 1.1)
+    assert not bridge.update(_states(age_b=51), 2.)
+    assert not bridge.held
+    with pytest.raises(BridgeError):
+        bridge.trajectory(['yaw'], [dict(t_ms=100, positions=[.3])], 2.1)
+    assert not bridge.update(_states(age_b=700), 3.)
+    observed = bridge.update(_states(.1, .1), 4.)
+    _, flat, _ = bridge.trajectory(['pitch'], [dict(t_ms=100, positions=[.05])], 4.1)
+    assert flat[0][2] == pytest.approx(observed['yaw'].position)
+    with pytest.raises(BridgeError):
+        bridge.trajectory(['pitch'], [dict(t_ms=100, positions=[.05])], 5.)
+
+
+def test_nonlinear_geometric_feedback_failure_invalidates_held_and_recovers(tmp_path):
+    bridge = _spatial_bridge(tmp_path)
+    bridge.update(_states(), 1.)
+    bridge.trajectory(['yaw'], [dict(t_ms=100, positions=[.3])], 1.1)
+    assert bridge.held['yaw'] == .3
+    assert not bridge.update(_states(.2, 4.), 1.2)
+    assert not bridge.held and bridge.state_stamp is None
+    with pytest.raises(BridgeError):
+        bridge.trajectory(['pitch'], [dict(t_ms=100, positions=[.05])], 1.25)
+    observed = bridge.update(_states(.1, .1), 1.3)
+    _, flat, _ = bridge.trajectory(['pitch'], [dict(t_ms=100, positions=[.05])], 1.4)
+    assert flat[0][2] == pytest.approx(observed['yaw'].position)
+    assert flat[0][2] == pytest.approx(.1)
+
+
+def test_linear_effort_trajectory_remains_supported(tmp_path):
+    bridge = _bridge(tmp_path)
+    bridge.update(_states(), 1.)
+    _, flat, _ = bridge.trajectory(['yaw', 'pitch'], [
+        dict(t_ms=100, positions=[.2, .1], effort=[2., 4.])], 1.1)
+    assert [v[4] for v in flat] == pytest.approx([3., -1.])
+
+
 def _bridge(tmp_path: Path) -> TransmissionBridge:
     (tmp_path/'motor_driver.yaml').write_text('motor_hardware:\n  motors:\n    a: {id: 8, joint: yaw}\n    b: {id: 9, joint: pitch}\n', encoding='utf-8')
     (tmp_path/'transmissions.yaml').write_text('transmissions:\n  wrist:\n    plugin: transmission_interface/DifferentialTransmission\n    actuators: [a,b]\n    joints: [yaw,pitch]\n', encoding='utf-8')

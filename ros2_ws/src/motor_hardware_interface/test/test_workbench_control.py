@@ -1320,3 +1320,19 @@ def test_ros_trajectory_controller_error_closes_entire_session(graph, failed):
     peer.states[failed] = 'inactive'
     assert wait_for(lambda: peer.hardware_stops and gateway._mode == 'stopped' and stopped(peer))
     assert '轨迹控制器意外停止' in gateway._reject
+
+
+def test_policy_defaults_follow_runtime_driver(files):
+    import yaml
+    driver, urdf = files
+    path = Path(driver)
+    doc = yaml.safe_load(path.read_text())
+    motors = doc['motor_hardware']['motors']
+    motors['a']['command'] = {'kp': 30., 'kd': 1.}
+    motors['b']['command'] = {'kp': float('nan'), 'kd': 1.}
+    motors['c']['command'] = {'kp': 10., 'kd': -1.}
+    path.write_text(yaml.safe_dump(doc))
+    assert wc.WorkbenchModel(driver, urdf).policy_defaults == {8: {'kp': 30., 'kd': 1.}}
+    del motors['a']['command']
+    path.write_text(yaml.safe_dump(doc))
+    assert wc.WorkbenchModel(driver, urdf).policy_defaults == {}

@@ -78,13 +78,26 @@ class FirmwareFeedbackManager:
         if not isinstance(model, str) or (model and not _MODEL.fullmatch(model)):
             raise ValueError('模型必须是单层目录名')
 
-    def _validate(self, model: str) -> None:
+    def _model_files(self, model: str, simulation: bool = False):
         self.validate_name(model)
         if not self.models_root:
             raise ValueError('找不到模型根目录')
         base = self.models_root / model
         driver = base / 'config' / 'motor_driver.yaml'
         urdf = base / 'urdf' / f'{model}.urdf'
+        simulation_driver = base / 'config' / 'motor_driver.simulation.yaml'
+        if simulation and simulation_driver.is_file():
+            driver = simulation_driver
+            urdf = base / 'urdf' / f'{model}.standalone.urdf'
+            if not urdf.is_file():
+                raise ValueError(f'模型 {model} 的仿真 mapping 缺少 standalone URDF：{urdf}')
+        return driver, urdf
+
+    def _validate(self, model: str) -> None:
+        driver, urdf = self._model_files(model)
+        return self._validate_files(model, driver, urdf)
+
+    def _validate_files(self, model: str, driver: Path, urdf: Path) -> None:
         if not driver.is_file() or not urdf.is_file():
             raise ValueError(f'模型 {model} 缺少电机配置或 URDF')
         transmission = Model.load(str(driver))
@@ -110,6 +123,7 @@ class FirmwareFeedbackManager:
                 'motor_ids': env.get(MOTORS_ENV, ''),
                 'session_id': env.get(SESSION_ENV, '0'),
                 'publishes_joint_states': env.get(PUBLISH_ENV, 'true') == 'true',
+                'dds_profile': env.get('FASTRTPS_DEFAULT_PROFILES_FILE', ''),
                 'reason': self._reason, 'error': self._error,
                 'returncode': unit.returncode}
 
@@ -169,7 +183,11 @@ class FirmwareFeedbackManager:
             return
         status = self.status()
         try:
-            transmission = self._validate(model)
+            driver, urdf = self._model_files(model, simulation=hil)
+            # 保留既有 _validate(model) 扩展点；仅实际仿真 mapping 需要新路径。
+            transmission = (self._validate_files(model, driver, urdf)
+                            if driver.name == 'motor_driver.simulation.yaml'
+                            else self._validate(model))
             available = set(transmission.actuator_ids.values() if motor_ids is None else motor_ids)
             selected = sorted({transmission.actuator_ids[name]
                 for group in transmission.groups
@@ -182,14 +200,17 @@ class FirmwareFeedbackManager:
                 return
             ids = ','.join(map(str, selected)) if motor_ids is not None else ''
             session = str(session_id)
-            key = (model, ids, session, publish_states)
+            profile = self.models_root / model / 'config' / 'fastdds_udp.xml'
+            dds_profile = str(profile) if hil and profile.is_file() else ''
+            key = (model, ids, session, publish_states, dds_profile)
             now = time.monotonic()
             if self._attempt != key:
                 self._attempt_count = 0
             if (status['state'] == 'running' and status['model'] == model
                     and status['execution'] == 'ros2_control'
                     and status['motor_ids'] == ids and status['session_id'] == session
-                    and status['publishes_joint_states'] == publish_states):
+                    and status['publishes_joint_states'] == publish_states
+                    and status['dds_profile'] == dds_profile):
                 if self._attempt != key:
                     self._attempt, self._attempt_at = key, now
                     return
@@ -221,14 +242,15 @@ class FirmwareFeedbackManager:
             self._systemd.start(UNIT_FEEDBACK, [
                 'ros2', 'launch', 'motor_hardware_interface', 'host_trajectory.launch.py',
                 f'model:={model}', f'motor_ids:={ids}',
-                f'motor_config_file:={self.models_root / model / "config" / "motor_driver.yaml"}',
-                f'urdf_file:={self.models_root / model / "urdf" / f"{model}.urdf"}',
+                f'motor_config_file:={driver}', f'urdf_file:={urdf}',
                 'start_controllers:=false',
                 f'publish_joint_states:={str(publish_states).lower()}',
                 f'publish_robot_state:={str(publish_states).lower()}',
             ], auto=True, session_env={MODEL_ENV: model, CONTROL_ENV: 'ros2_control',
                                       MOTORS_ENV: ids, SESSION_ENV: session,
-                                      PUBLISH_ENV: str(publish_states).lower()})
+                                      PUBLISH_ENV: str(publish_states).lower(),
+                                      **({'FASTRTPS_DEFAULT_PROFILES_FILE': dds_profile}
+                                         if dds_profile else {})})
         except (ValueError, OSError, RuntimeError, ET.ParseError) as exc:
             self.stop(reset_retry=False)
             self._error = str(exc)

@@ -1,0 +1,102 @@
+# 仅供隔离STM32/CAN FD仿真；速度/峰值力矩逐型号取自config/motor.yaml。
+simulation:
+  model: trial_arm_7dof
+  timing:
+    control_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+  driver_timing:
+    feedback_timeout_s: 0.5
+  profiles:
+    axis1:
+      hard_lower_deg: -29.8539194080078
+      hard_upper_deg: 77.62019046082028
+      command_lower_deg: -29.8539194080078
+      command_upper_deg: 77.62019046082028
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis2:
+      hard_lower_deg: -0.636129613983522
+      hard_upper_deg: 77.6997895995397
+      command_lower_deg: -0.636129613983522
+      command_upper_deg: 77.6997895995397
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis3:
+      hard_lower_deg: -178.0
+      hard_upper_deg: 178.0
+      command_lower_deg: -178.0
+      command_upper_deg: 178.0
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis4:
+      hard_lower_deg: -5.000000000000001
+      hard_upper_deg: 178.0
+      command_lower_deg: -5.000000000000001
+      command_upper_deg: 178.0
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis5:
+      hard_lower_deg: -178.0
+      hard_upper_deg: 178.0
+      command_lower_deg: -178.0
+      command_upper_deg: 178.0
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis6:
+      hard_lower_deg: -144.0
+      hard_upper_deg: 154.0
+      command_lower_deg: -144.0
+      command_upper_deg: 154.0
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    axis7:
+      hard_lower_deg: -178.0
+      hard_upper_deg: 178.0
+      command_lower_deg: -178.0
+      command_upper_deg: 178.0
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+  motors:
+  - motor: arm_joint1
+    joint: Joint_Link1
+    profile: axis1
+  - motor: arm_joint2
+    joint: Joint_Link2
+    profile: axis2
+  - motor: arm_joint3
+    joint: Joint_Link3
+    profile: axis3
+  - motor: arm_joint4
+    joint: Joint_Link4
+    profile: axis4
+  - motor: arm_joint5
+    joint: Joint_Link5
+    profile: axis5
+  - motor: arm_joint6
+    joint: Joint_Link6
+    profile: axis6
+  - motor: arm_joint7
+    joint: Joint_Link7
+    profile: axis7

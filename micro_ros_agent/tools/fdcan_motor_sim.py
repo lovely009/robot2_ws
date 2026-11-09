@@ -111,6 +111,7 @@ CERB_OBJECT_INDICES = frozenset({
     0x2538,          # 电机最大电流
     0x2539,          # Flash 保存码
     0x2540,          # CAN 通信速率
+    0x2546,          # MIT 力矩编码量程 T_max
     0x2541,          # 方向
     0x2650,          # 看门狗 / 限位保护开关
     0x2654,          # 故障项控制
@@ -477,6 +478,7 @@ class MotorModel:
                 (0x2650, 0x00): 1,
                 (0x2541, 0x00): 0,
                 (0x6064, 0x00): 0,
+                (0x2546, 0x00): int(CERB_MIT_TORQUE_FALLBACK),
             }
         else:
             # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad。速度与电流同 CERB：
@@ -884,7 +886,12 @@ class GazeboBridge:
                                   + cmd["tau_nm"])
                         limit = self.tau_limits.get(motor.id, self.tau_limit)
                         torques[a] = max(-limit, min(limit, torque))
-                    converted = self.transmission.actuator_effort_to_joint(torques)
+                    if group.position_dependent:
+                        actuator_positions = {a: axes[a].position for a, _ in members}
+                        converted = self.transmission.actuator_effort_to_joint(
+                            torques, actuator_positions=actuator_positions)
+                    else:
+                        converted = self.transmission.actuator_effort_to_joint(torques)
                     efforts.update(converted)
                     for a, motor in members:
                         motor.applied_joint_nm = torques[a]
@@ -1017,6 +1024,12 @@ class CanMotorSim:
         for mid in r58_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
                 apply_cerb_device_model(self.models[mid], "r58")
+        for mid, model in self.models.items():
+            if model.kind == 'cerb' and mid in self.mit_torque_limits:
+                limit = self.mit_torque_limits[mid]
+                if not float(limit).is_integer() or not 0 < limit <= 16777215:
+                    raise ValueError('CERB T_max must be an integer in 1..16777215')
+                model.sdo_params[(0x2546, 0)] = int(limit)
         # 故意制造与固件记录不一致的场景：保护关 / 方向 CCW。
         for mid in safety_off_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
@@ -1325,7 +1338,7 @@ class CanMotorSim:
     def _decode_cerb_command(self, node: int, data: bytes):
         return cerb_decode_command(
             data,
-            getattr(self, "mit_torque_limits", {}).get(node, CERB_MIT_TORQUE_FALLBACK),
+            self.models[node].sdo_params[(0x2546, 0)],
             getattr(self, "mit_position_limits", {}).get(node, 3.14),
             getattr(self, "mit_velocity_limits", {}).get(node, 3.14),
             getattr(self, "mit_kp_limits", {}).get(node, 2500.0),
@@ -1384,6 +1397,10 @@ class CanMotorSim:
                 self.send_sdo_abort(node, data, index, m)
             return
         if command == 0x40:
+            if key == (0x2530, 0):
+                self.send(0x580 + node, bytes([0x43, data[1], data[2], 0]) +
+                          node.to_bytes(4, 'little'), True, self.use_brs, m, 'sdo_read')
+                return
             if key in m.sdo_params:
                 # 快速上传（0x43）+ 当前值（小端有符号 32 位）。
                 raw = int(m.sdo_params[key]).to_bytes(4, "little", signed=True)

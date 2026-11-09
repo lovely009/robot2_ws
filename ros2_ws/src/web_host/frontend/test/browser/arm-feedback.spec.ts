@@ -27,3 +27,48 @@ test('3D 显示真实关节角，不按 URDF 默认范围截断或改写模型�
   expect(result.limits).toEqual(result.originalLimits);
   expect(result.sameNode && result.sameXml).toBe(true);
 });
+
+test('关节轴标不遮挡电机，保留真实轴向、状态色和透明点击球',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {addMarkers,markers};'}));
+  await page.goto('/arm-fixture');
+  const result=await page.evaluate(async()=>{
+    const {URDFJoint,URDFRobot}=await import('/vendor/URDFClasses.js');
+    const {BoxGeometry,Mesh,MeshStandardMaterial,Raycaster,Vector3}=await import('/vendor/three.module.min.js');
+    const {addMarkers,markers,setJointColors,setSelected}=await import('/js/panels/arm.js');
+    const joint=new URDFJoint(),robot=new URDFRobot();
+    joint.name='joint_link3';joint.axis.set(1,2,3).normalize();
+    const motor=new Mesh(new BoxGeometry(.1,.1,.1),new MeshStandardMaterial({color:0x123456}));
+    joint.add(motor);robot.joints={joint_link3:joint};robot.add(joint);
+    addMarkers(robot);
+    const marker=markers.get('joint_link3'),[arrow,ring]=marker.children;
+    marker.updateMatrixWorld(true);
+    const arrowDirection=new Vector3(0,1,0).applyQuaternion(arrow.quaternion);
+    const ringNormal=new Vector3(0,0,1).applyQuaternion(ring.quaternion);
+    const originalMotorMaterial=motor.material;
+    setJointColors({joint_link3:'#37d67a'});
+    setSelected('joint_link3');
+    const selectedScale=marker.scale.x;
+    setSelected(null);
+    return {
+      invisible:marker.material.transparent && marker.material.opacity===0
+        && !marker.material.depthWrite && !marker.material.colorWrite,
+      pickable:new Raycaster(joint.axis.clone().multiplyScalar(-1),joint.axis).intersectObject(marker,false).length>0,
+      onlyHitSphere:marker.geometry.type==='SphereGeometry'
+        && marker.children.every(part=>part.geometry?.type!=='SphereGeometry'),
+      axis:arrow.type==='ArrowHelper' && ring.isLineLoop
+        && arrowDirection.distanceTo(joint.axis)<1e-9 && ringNormal.distanceTo(joint.axis)<1e-9,
+      colored:arrow.line.material.color.getHexString()==='37d67a'
+        && arrow.cone.material.color.getHexString()==='37d67a'
+        && ring.material.color.getHexString()==='37d67a',
+      axisVisible:[arrow.line,arrow.cone,ring].every(part=>!part.material.depthTest && !part.material.depthWrite && part.renderOrder===20),
+      motorUntouched:motor.material===originalMotorMaterial && motor.material.color.getHexString()==='123456',
+      selectedScale,resetScale:marker.scale.x,
+    };
+  });
+  expect(result.invisible && result.pickable && result.onlyHitSphere && result.axis && result.colored && result.axisVisible && result.motorUntouched).toBe(true);
+  expect(result.selectedScale).toBe(1.35);
+  expect(result.resetScale).toBe(1);
+});

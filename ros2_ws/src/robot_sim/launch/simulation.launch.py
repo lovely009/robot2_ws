@@ -642,13 +642,16 @@ def launch_simulation(context):
     share = Path(get_package_share_directory("robot_description"))
     model = LaunchConfiguration("model").perform(context)
     # 电机拓扑来源：显式 motor_config_file 优先；留空时优先**模型目录自带**的
-    # config/motor_driver.yaml（模型专属仿真拓扑），否则回落权威整机配置。
+    # config/motor_driver.simulation.yaml，其次 motor_driver.yaml，否则回落权威整机配置。
     # 默认模型 half_body_robot 自带这份（第二条链也有电机，18 个关节全在拓扑里）。
     requested_config = LaunchConfiguration("motor_config_file").perform(context)
     if requested_config:
         motor_driver_path = Path(requested_config).resolve()
     else:
         model_local = share / "models" / model / "config" / "motor_driver.yaml"
+        simulation_local = model_local.with_name("motor_driver.simulation.yaml")
+        if simulation_local.is_file():
+            model_local = simulation_local
         motor_driver_path = (
             model_local.resolve()
             if model_local.is_file()
@@ -703,7 +706,11 @@ def launch_simulation(context):
     # 两者都只做「拓扑关节 ⊆ 模型关节」的子集校验；顺序由 launch 显式交给下游
     # （Gazebo 重写 controllers.yaml 的 joints、MuJoCo 传 joint_names），不靠巧合。
     mujoco_model = None
-    if backend == "mujoco":
+    if simulator_only:
+        # 独立电机后端不启动被控对象，不依赖Gazebo控制器或MJCF资源。
+        model_joints = set(joint_order)
+        model_description = "motor backend"
+    elif backend == "mujoco":
         mujoco_model = share / "models" / model / "mujoco" / f"{model}.xml"
         if not mujoco_model.is_file():
             raise RuntimeError(
@@ -866,7 +873,7 @@ def launch_simulation(context):
         # 不做这件事也就不会凭空多一条对 models/<模型>/config/controllers.yaml 的启动期依赖。
         gazebo_controller_config = (
             _write_gazebo_controller_config(share, model, joint_order, runtime_dir)
-            if backend == "gazebo"
+            if backend == "gazebo" and not simulator_only
             else None
         )
     except Exception:

@@ -107,12 +107,22 @@ class TransmissionBridge:
                 continue
             self.samples[name] = (now-age/1000, Axis(*values))
         fresh = self._fresh(now)
+        result = {}
         for group in self.model.groups:
-            if not all(a in fresh for a in group.actuators):
+            valid = all(a in fresh for a in group.actuators)
+            if valid:
+                try:
+                    result.update(self.model.actuator_to_joint({a: fresh[a] for a in group.actuators}))
+                except (ValueError, RuntimeError):
+                    valid = False
+                    for actuator in group.actuators:
+                        self.samples.pop(actuator, None)
+                        fresh.pop(actuator, None)
+            if not valid:
                 for joint in group.joints:
                     self.held.pop(joint, None)
         self.state_stamp = min((self.samples[a][0] for a in fresh), default=None)
-        return self.model.actuator_to_joint(fresh)
+        return result
 
     def trajectory(self, joint_names: list[str], samples: list[dict], now: float,
                    limits: dict | None = None):
@@ -148,6 +158,10 @@ class TransmissionBridge:
                 targets[name] = Axis(channels['positions'][i],
                                      channels['velocities'][i] if channels['velocities'] is not None else 0.,
                                      channels['effort'][i] if channels['effort'] is not None else 0.)
+            # shortcut: 未来实际姿态未知，明确设计轨迹前馈或实时固件转换后再扩展。
+            for group in touched:
+                if group.position_dependent and any(targets[j].effort != 0 for j in group.joints):
+                    raise BridgeError('非线性传动的非零轨迹力矩需要实时姿态，整条轨迹拒绝')
             for name, axis in targets.items():
                 lower, upper = (limits or self.joint_limits).get(
                     name, self.joint_limits.get(name, (-math.inf, math.inf)))

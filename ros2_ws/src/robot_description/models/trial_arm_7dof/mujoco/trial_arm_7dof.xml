@@ -1,0 +1,1021 @@
+<mujoco model="trial_arm_7dof">
+  <compiler angle="radian" meshdir="../meshes" fusestatic="false" />
+  <asset>
+    <mesh name="base_link" content_type="model/stl" file="base_link.STL" />
+    <mesh name="Joint_Link1.1" content_type="model/stl" file="Joint_Link1.1.STL" />
+    <mesh name="Joint_Link1" content_type="model/stl" file="Joint_Link1.STL" />
+    <mesh name="Joint_Link2" content_type="model/stl" file="Joint_Link2.STL" />
+    <mesh name="Joint_Link3.3" content_type="model/stl" file="Joint_Link3.3.STL" />
+    <mesh name="Joint_Link3" content_type="model/stl" file="Joint_Link3.STL" />
+    <mesh name="Joint_Link4.4" content_type="model/stl" file="Joint_Link4.4.STL" />
+    <mesh name="Joint_Link4" content_type="model/stl" file="Joint_Link4.STL" />
+    <mesh name="Joint_Link5.5" content_type="model/stl" file="Joint_Link5.5.STL" />
+    <mesh name="Joint_Link5" content_type="model/stl" file="Joint_Link5.STL" />
+    <mesh name="Joint_Link6.6" content_type="model/stl" file="Joint_Link6.6.STL" />
+    <mesh name="Joint_Link6" content_type="model/stl" file="Joint_Link6.STL" />
+    <mesh name="Joint_Link7.7" content_type="model/stl" file="Joint_Link7.7.STL" />
+    <mesh name="Joint_Link7" content_type="model/stl" file="Joint_Link7.STL" />
+    <mesh name="collision_base_link_0" file="collision/base_link_00.obj" />
+    <mesh name="collision_base_link_1" file="collision/base_link_01.obj" />
+    <mesh name="collision_base_link_2" file="collision/base_link_02.obj" />
+    <mesh name="collision_base_link_3" file="collision/base_link_03.obj" />
+    <mesh name="collision_base_link_4" file="collision/base_link_04.obj" />
+    <mesh name="collision_base_link_5" file="collision/base_link_05.obj" />
+    <mesh name="collision_base_link_6" file="collision/base_link_06.obj" />
+    <mesh name="collision_base_link_7" file="collision/base_link_07.obj" />
+    <mesh name="collision_base_link_8" file="collision/base_link_08.obj" />
+    <mesh name="collision_base_link_9" file="collision/base_link_09.obj" />
+    <mesh name="collision_base_link_10" file="collision/base_link_10.obj" />
+    <mesh name="collision_base_link_11" file="collision/base_link_11.obj" />
+    <mesh name="collision_base_link_12" file="collision/base_link_12.obj" />
+    <mesh name="collision_base_link_13" file="collision/base_link_13.obj" />
+    <mesh name="collision_base_link_14" file="collision/base_link_14.obj" />
+    <mesh name="collision_base_link_15" file="collision/base_link_15.obj" />
+    <mesh name="collision_base_link_16" file="collision/base_link_16.obj" />
+    <mesh name="collision_base_link_17" file="collision/base_link_17.obj" />
+    <mesh name="collision_base_link_18" file="collision/base_link_18.obj" />
+    <mesh name="collision_base_link_19" file="collision/base_link_19.obj" />
+    <mesh name="collision_base_link_20" file="collision/base_link_20.obj" />
+    <mesh name="collision_base_link_21" file="collision/base_link_21.obj" />
+    <mesh name="collision_base_link_22" file="collision/base_link_22.obj" />
+    <mesh name="collision_base_link_23" file="collision/base_link_23.obj" />
+    <mesh name="collision_base_link_24" file="collision/base_link_24.obj" />
+    <mesh name="collision_base_link_25" file="collision/base_link_25.obj" />
+    <mesh name="collision_base_link_26" file="collision/base_link_26.obj" />
+    <mesh name="collision_base_link_27" file="collision/base_link_27.obj" />
+    <mesh name="collision_base_link_28" file="collision/base_link_28.obj" />
+    <mesh name="collision_base_link_29" file="collision/base_link_29.obj" />
+    <mesh name="collision_base_link_30" file="collision/base_link_30.obj" />
+    <mesh name="collision_base_link_31" file="collision/base_link_31.obj" />
+    <mesh name="collision_Joint_Link1.1_0" file="collision/Joint_Link1.1_00.obj" />
+    <mesh name="collision_Joint_Link1.1_1" file="collision/Joint_Link1.1_01.obj" />
+    <mesh name="collision_Joint_Link1.1_2" file="collision/Joint_Link1.1_02.obj" />
+    <mesh name="collision_Joint_Link1.1_3" file="collision/Joint_Link1.1_03.obj" />
+    <mesh name="collision_Joint_Link1.1_4" file="collision/Joint_Link1.1_04.obj" />
+    <mesh name="collision_Joint_Link1.1_5" file="collision/Joint_Link1.1_05.obj" />
+    <mesh name="collision_Joint_Link1.1_6" file="collision/Joint_Link1.1_06.obj" />
+    <mesh name="collision_Joint_Link1.1_7" file="collision/Joint_Link1.1_07.obj" />
+    <mesh name="collision_Joint_Link1.1_8" file="collision/Joint_Link1.1_08.obj" />
+    <mesh name="collision_Joint_Link1.1_9" file="collision/Joint_Link1.1_09.obj" />
+    <mesh name="collision_Joint_Link1.1_10" file="collision/Joint_Link1.1_10.obj" />
+    <mesh name="collision_Joint_Link1.1_11" file="collision/Joint_Link1.1_11.obj" />
+    <mesh name="collision_Joint_Link1.1_12" file="collision/Joint_Link1.1_12.obj" />
+    <mesh name="collision_Joint_Link1.1_13" file="collision/Joint_Link1.1_13.obj" />
+    <mesh name="collision_Joint_Link1.1_14" file="collision/Joint_Link1.1_14.obj" />
+    <mesh name="collision_Joint_Link1.1_15" file="collision/Joint_Link1.1_15.obj" />
+    <mesh name="collision_Joint_Link1.1_16" file="collision/Joint_Link1.1_16.obj" />
+    <mesh name="collision_Joint_Link1.1_17" file="collision/Joint_Link1.1_17.obj" />
+    <mesh name="collision_Joint_Link1.1_18" file="collision/Joint_Link1.1_18.obj" />
+    <mesh name="collision_Joint_Link1.1_19" file="collision/Joint_Link1.1_19.obj" />
+    <mesh name="collision_Joint_Link1.1_20" file="collision/Joint_Link1.1_20.obj" />
+    <mesh name="collision_Joint_Link1.1_21" file="collision/Joint_Link1.1_21.obj" />
+    <mesh name="collision_Joint_Link1.1_22" file="collision/Joint_Link1.1_22.obj" />
+    <mesh name="collision_Joint_Link1.1_23" file="collision/Joint_Link1.1_23.obj" />
+    <mesh name="collision_Joint_Link1.1_24" file="collision/Joint_Link1.1_24.obj" />
+    <mesh name="collision_Joint_Link1.1_25" file="collision/Joint_Link1.1_25.obj" />
+    <mesh name="collision_Joint_Link1.1_26" file="collision/Joint_Link1.1_26.obj" />
+    <mesh name="collision_Joint_Link1.1_27" file="collision/Joint_Link1.1_27.obj" />
+    <mesh name="collision_Joint_Link1.1_28" file="collision/Joint_Link1.1_28.obj" />
+    <mesh name="collision_Joint_Link1.1_29" file="collision/Joint_Link1.1_29.obj" />
+    <mesh name="collision_Joint_Link1.1_30" file="collision/Joint_Link1.1_30.obj" />
+    <mesh name="collision_Joint_Link1.1_31" file="collision/Joint_Link1.1_31.obj" />
+    <mesh name="collision_Joint_Link1_0" file="collision/Joint_Link1_00.obj" />
+    <mesh name="collision_Joint_Link1_1" file="collision/Joint_Link1_01.obj" />
+    <mesh name="collision_Joint_Link1_2" file="collision/Joint_Link1_02.obj" />
+    <mesh name="collision_Joint_Link1_3" file="collision/Joint_Link1_03.obj" />
+    <mesh name="collision_Joint_Link1_4" file="collision/Joint_Link1_04.obj" />
+    <mesh name="collision_Joint_Link1_5" file="collision/Joint_Link1_05.obj" />
+    <mesh name="collision_Joint_Link1_6" file="collision/Joint_Link1_06.obj" />
+    <mesh name="collision_Joint_Link1_7" file="collision/Joint_Link1_07.obj" />
+    <mesh name="collision_Joint_Link1_8" file="collision/Joint_Link1_08.obj" />
+    <mesh name="collision_Joint_Link1_9" file="collision/Joint_Link1_09.obj" />
+    <mesh name="collision_Joint_Link1_10" file="collision/Joint_Link1_10.obj" />
+    <mesh name="collision_Joint_Link1_11" file="collision/Joint_Link1_11.obj" />
+    <mesh name="collision_Joint_Link1_12" file="collision/Joint_Link1_12.obj" />
+    <mesh name="collision_Joint_Link1_13" file="collision/Joint_Link1_13.obj" />
+    <mesh name="collision_Joint_Link1_14" file="collision/Joint_Link1_14.obj" />
+    <mesh name="collision_Joint_Link1_15" file="collision/Joint_Link1_15.obj" />
+    <mesh name="collision_Joint_Link1_16" file="collision/Joint_Link1_16.obj" />
+    <mesh name="collision_Joint_Link1_17" file="collision/Joint_Link1_17.obj" />
+    <mesh name="collision_Joint_Link1_18" file="collision/Joint_Link1_18.obj" />
+    <mesh name="collision_Joint_Link1_19" file="collision/Joint_Link1_19.obj" />
+    <mesh name="collision_Joint_Link1_20" file="collision/Joint_Link1_20.obj" />
+    <mesh name="collision_Joint_Link1_21" file="collision/Joint_Link1_21.obj" />
+    <mesh name="collision_Joint_Link1_22" file="collision/Joint_Link1_22.obj" />
+    <mesh name="collision_Joint_Link1_23" file="collision/Joint_Link1_23.obj" />
+    <mesh name="collision_Joint_Link1_24" file="collision/Joint_Link1_24.obj" />
+    <mesh name="collision_Joint_Link1_25" file="collision/Joint_Link1_25.obj" />
+    <mesh name="collision_Joint_Link1_26" file="collision/Joint_Link1_26.obj" />
+    <mesh name="collision_Joint_Link1_27" file="collision/Joint_Link1_27.obj" />
+    <mesh name="collision_Joint_Link1_28" file="collision/Joint_Link1_28.obj" />
+    <mesh name="collision_Joint_Link1_29" file="collision/Joint_Link1_29.obj" />
+    <mesh name="collision_Joint_Link1_30" file="collision/Joint_Link1_30.obj" />
+    <mesh name="collision_Joint_Link1_31" file="collision/Joint_Link1_31.obj" />
+    <mesh name="collision_Joint_Link2_0" file="collision/Joint_Link2_00.obj" />
+    <mesh name="collision_Joint_Link2_1" file="collision/Joint_Link2_01.obj" />
+    <mesh name="collision_Joint_Link2_2" file="collision/Joint_Link2_02.obj" />
+    <mesh name="collision_Joint_Link2_3" file="collision/Joint_Link2_03.obj" />
+    <mesh name="collision_Joint_Link2_4" file="collision/Joint_Link2_04.obj" />
+    <mesh name="collision_Joint_Link2_5" file="collision/Joint_Link2_05.obj" />
+    <mesh name="collision_Joint_Link2_6" file="collision/Joint_Link2_06.obj" />
+    <mesh name="collision_Joint_Link2_7" file="collision/Joint_Link2_07.obj" />
+    <mesh name="collision_Joint_Link2_8" file="collision/Joint_Link2_08.obj" />
+    <mesh name="collision_Joint_Link2_9" file="collision/Joint_Link2_09.obj" />
+    <mesh name="collision_Joint_Link2_10" file="collision/Joint_Link2_10.obj" />
+    <mesh name="collision_Joint_Link2_11" file="collision/Joint_Link2_11.obj" />
+    <mesh name="collision_Joint_Link2_12" file="collision/Joint_Link2_12.obj" />
+    <mesh name="collision_Joint_Link2_13" file="collision/Joint_Link2_13.obj" />
+    <mesh name="collision_Joint_Link2_14" file="collision/Joint_Link2_14.obj" />
+    <mesh name="collision_Joint_Link2_15" file="collision/Joint_Link2_15.obj" />
+    <mesh name="collision_Joint_Link2_16" file="collision/Joint_Link2_16.obj" />
+    <mesh name="collision_Joint_Link2_17" file="collision/Joint_Link2_17.obj" />
+    <mesh name="collision_Joint_Link2_18" file="collision/Joint_Link2_18.obj" />
+    <mesh name="collision_Joint_Link2_19" file="collision/Joint_Link2_19.obj" />
+    <mesh name="collision_Joint_Link2_20" file="collision/Joint_Link2_20.obj" />
+    <mesh name="collision_Joint_Link2_21" file="collision/Joint_Link2_21.obj" />
+    <mesh name="collision_Joint_Link2_22" file="collision/Joint_Link2_22.obj" />
+    <mesh name="collision_Joint_Link2_23" file="collision/Joint_Link2_23.obj" />
+    <mesh name="collision_Joint_Link2_24" file="collision/Joint_Link2_24.obj" />
+    <mesh name="collision_Joint_Link2_25" file="collision/Joint_Link2_25.obj" />
+    <mesh name="collision_Joint_Link2_26" file="collision/Joint_Link2_26.obj" />
+    <mesh name="collision_Joint_Link2_27" file="collision/Joint_Link2_27.obj" />
+    <mesh name="collision_Joint_Link2_28" file="collision/Joint_Link2_28.obj" />
+    <mesh name="collision_Joint_Link2_29" file="collision/Joint_Link2_29.obj" />
+    <mesh name="collision_Joint_Link2_30" file="collision/Joint_Link2_30.obj" />
+    <mesh name="collision_Joint_Link2_31" file="collision/Joint_Link2_31.obj" />
+    <mesh name="collision_Joint_Link3.3_0" file="collision/Joint_Link3.3_00.obj" />
+    <mesh name="collision_Joint_Link3.3_1" file="collision/Joint_Link3.3_01.obj" />
+    <mesh name="collision_Joint_Link3.3_2" file="collision/Joint_Link3.3_02.obj" />
+    <mesh name="collision_Joint_Link3.3_3" file="collision/Joint_Link3.3_03.obj" />
+    <mesh name="collision_Joint_Link3.3_4" file="collision/Joint_Link3.3_04.obj" />
+    <mesh name="collision_Joint_Link3.3_5" file="collision/Joint_Link3.3_05.obj" />
+    <mesh name="collision_Joint_Link3.3_6" file="collision/Joint_Link3.3_06.obj" />
+    <mesh name="collision_Joint_Link3.3_7" file="collision/Joint_Link3.3_07.obj" />
+    <mesh name="collision_Joint_Link3.3_8" file="collision/Joint_Link3.3_08.obj" />
+    <mesh name="collision_Joint_Link3.3_9" file="collision/Joint_Link3.3_09.obj" />
+    <mesh name="collision_Joint_Link3.3_10" file="collision/Joint_Link3.3_10.obj" />
+    <mesh name="collision_Joint_Link3.3_11" file="collision/Joint_Link3.3_11.obj" />
+    <mesh name="collision_Joint_Link3.3_12" file="collision/Joint_Link3.3_12.obj" />
+    <mesh name="collision_Joint_Link3.3_13" file="collision/Joint_Link3.3_13.obj" />
+    <mesh name="collision_Joint_Link3.3_14" file="collision/Joint_Link3.3_14.obj" />
+    <mesh name="collision_Joint_Link3.3_15" file="collision/Joint_Link3.3_15.obj" />
+    <mesh name="collision_Joint_Link3.3_16" file="collision/Joint_Link3.3_16.obj" />
+    <mesh name="collision_Joint_Link3.3_17" file="collision/Joint_Link3.3_17.obj" />
+    <mesh name="collision_Joint_Link3.3_18" file="collision/Joint_Link3.3_18.obj" />
+    <mesh name="collision_Joint_Link3.3_19" file="collision/Joint_Link3.3_19.obj" />
+    <mesh name="collision_Joint_Link3.3_21" file="collision/Joint_Link3.3_21.obj" />
+    <mesh name="collision_Joint_Link3.3_22" file="collision/Joint_Link3.3_22.obj" />
+    <mesh name="collision_Joint_Link3.3_23" file="collision/Joint_Link3.3_23.obj" />
+    <mesh name="collision_Joint_Link3.3_24" file="collision/Joint_Link3.3_24.obj" />
+    <mesh name="collision_Joint_Link3.3_25" file="collision/Joint_Link3.3_25.obj" />
+    <mesh name="collision_Joint_Link3.3_26" file="collision/Joint_Link3.3_26.obj" />
+    <mesh name="collision_Joint_Link3.3_27" file="collision/Joint_Link3.3_27.obj" />
+    <mesh name="collision_Joint_Link3.3_28" file="collision/Joint_Link3.3_28.obj" />
+    <mesh name="collision_Joint_Link3.3_29" file="collision/Joint_Link3.3_29.obj" />
+    <mesh name="collision_Joint_Link3.3_30" file="collision/Joint_Link3.3_30.obj" />
+    <mesh name="collision_Joint_Link3.3_31" file="collision/Joint_Link3.3_31.obj" />
+    <mesh name="collision_Joint_Link3_0" file="collision/Joint_Link3_00.obj" />
+    <mesh name="collision_Joint_Link3_1" file="collision/Joint_Link3_01.obj" />
+    <mesh name="collision_Joint_Link3_2" file="collision/Joint_Link3_02.obj" />
+    <mesh name="collision_Joint_Link3_3" file="collision/Joint_Link3_03.obj" />
+    <mesh name="collision_Joint_Link3_4" file="collision/Joint_Link3_04.obj" />
+    <mesh name="collision_Joint_Link3_5" file="collision/Joint_Link3_05.obj" />
+    <mesh name="collision_Joint_Link3_6" file="collision/Joint_Link3_06.obj" />
+    <mesh name="collision_Joint_Link3_7" file="collision/Joint_Link3_07.obj" />
+    <mesh name="collision_Joint_Link3_8" file="collision/Joint_Link3_08.obj" />
+    <mesh name="collision_Joint_Link3_9" file="collision/Joint_Link3_09.obj" />
+    <mesh name="collision_Joint_Link3_10" file="collision/Joint_Link3_10.obj" />
+    <mesh name="collision_Joint_Link3_11" file="collision/Joint_Link3_11.obj" />
+    <mesh name="collision_Joint_Link3_12" file="collision/Joint_Link3_12.obj" />
+    <mesh name="collision_Joint_Link3_13" file="collision/Joint_Link3_13.obj" />
+    <mesh name="collision_Joint_Link3_14" file="collision/Joint_Link3_14.obj" />
+    <mesh name="collision_Joint_Link3_15" file="collision/Joint_Link3_15.obj" />
+    <mesh name="collision_Joint_Link3_16" file="collision/Joint_Link3_16.obj" />
+    <mesh name="collision_Joint_Link3_17" file="collision/Joint_Link3_17.obj" />
+    <mesh name="collision_Joint_Link3_18" file="collision/Joint_Link3_18.obj" />
+    <mesh name="collision_Joint_Link3_19" file="collision/Joint_Link3_19.obj" />
+    <mesh name="collision_Joint_Link3_20" file="collision/Joint_Link3_20.obj" />
+    <mesh name="collision_Joint_Link3_21" file="collision/Joint_Link3_21.obj" />
+    <mesh name="collision_Joint_Link3_22" file="collision/Joint_Link3_22.obj" />
+    <mesh name="collision_Joint_Link3_23" file="collision/Joint_Link3_23.obj" />
+    <mesh name="collision_Joint_Link3_24" file="collision/Joint_Link3_24.obj" />
+    <mesh name="collision_Joint_Link3_25" file="collision/Joint_Link3_25.obj" />
+    <mesh name="collision_Joint_Link3_26" file="collision/Joint_Link3_26.obj" />
+    <mesh name="collision_Joint_Link3_27" file="collision/Joint_Link3_27.obj" />
+    <mesh name="collision_Joint_Link3_28" file="collision/Joint_Link3_28.obj" />
+    <mesh name="collision_Joint_Link3_29" file="collision/Joint_Link3_29.obj" />
+    <mesh name="collision_Joint_Link3_30" file="collision/Joint_Link3_30.obj" />
+    <mesh name="collision_Joint_Link3_31" file="collision/Joint_Link3_31.obj" />
+    <mesh name="collision_Joint_Link4.4_0" file="collision/Joint_Link4.4_00.obj" />
+    <mesh name="collision_Joint_Link4.4_1" file="collision/Joint_Link4.4_01.obj" />
+    <mesh name="collision_Joint_Link4.4_2" file="collision/Joint_Link4.4_02.obj" />
+    <mesh name="collision_Joint_Link4.4_3" file="collision/Joint_Link4.4_03.obj" />
+    <mesh name="collision_Joint_Link4.4_4" file="collision/Joint_Link4.4_04.obj" />
+    <mesh name="collision_Joint_Link4.4_5" file="collision/Joint_Link4.4_05.obj" />
+    <mesh name="collision_Joint_Link4.4_6" file="collision/Joint_Link4.4_06.obj" />
+    <mesh name="collision_Joint_Link4.4_7" file="collision/Joint_Link4.4_07.obj" />
+    <mesh name="collision_Joint_Link4.4_8" file="collision/Joint_Link4.4_08.obj" />
+    <mesh name="collision_Joint_Link4.4_9" file="collision/Joint_Link4.4_09.obj" />
+    <mesh name="collision_Joint_Link4.4_10" file="collision/Joint_Link4.4_10.obj" />
+    <mesh name="collision_Joint_Link4.4_11" file="collision/Joint_Link4.4_11.obj" />
+    <mesh name="collision_Joint_Link4.4_12" file="collision/Joint_Link4.4_12.obj" />
+    <mesh name="collision_Joint_Link4.4_13" file="collision/Joint_Link4.4_13.obj" />
+    <mesh name="collision_Joint_Link4.4_14" file="collision/Joint_Link4.4_14.obj" />
+    <mesh name="collision_Joint_Link4.4_15" file="collision/Joint_Link4.4_15.obj" />
+    <mesh name="collision_Joint_Link4.4_16" file="collision/Joint_Link4.4_16.obj" />
+    <mesh name="collision_Joint_Link4.4_17" file="collision/Joint_Link4.4_17.obj" />
+    <mesh name="collision_Joint_Link4.4_19" file="collision/Joint_Link4.4_19.obj" />
+    <mesh name="collision_Joint_Link4.4_20" file="collision/Joint_Link4.4_20.obj" />
+    <mesh name="collision_Joint_Link4.4_21" file="collision/Joint_Link4.4_21.obj" />
+    <mesh name="collision_Joint_Link4.4_22" file="collision/Joint_Link4.4_22.obj" />
+    <mesh name="collision_Joint_Link4.4_23" file="collision/Joint_Link4.4_23.obj" />
+    <mesh name="collision_Joint_Link4.4_24" file="collision/Joint_Link4.4_24.obj" />
+    <mesh name="collision_Joint_Link4.4_25" file="collision/Joint_Link4.4_25.obj" />
+    <mesh name="collision_Joint_Link4.4_26" file="collision/Joint_Link4.4_26.obj" />
+    <mesh name="collision_Joint_Link4.4_27" file="collision/Joint_Link4.4_27.obj" />
+    <mesh name="collision_Joint_Link4.4_28" file="collision/Joint_Link4.4_28.obj" />
+    <mesh name="collision_Joint_Link4.4_29" file="collision/Joint_Link4.4_29.obj" />
+    <mesh name="collision_Joint_Link4.4_30" file="collision/Joint_Link4.4_30.obj" />
+    <mesh name="collision_Joint_Link4.4_31" file="collision/Joint_Link4.4_31.obj" />
+    <mesh name="collision_Joint_Link4_0" file="collision/Joint_Link4_00.obj" />
+    <mesh name="collision_Joint_Link4_1" file="collision/Joint_Link4_01.obj" />
+    <mesh name="collision_Joint_Link4_2" file="collision/Joint_Link4_02.obj" />
+    <mesh name="collision_Joint_Link4_3" file="collision/Joint_Link4_03.obj" />
+    <mesh name="collision_Joint_Link4_4" file="collision/Joint_Link4_04.obj" />
+    <mesh name="collision_Joint_Link4_5" file="collision/Joint_Link4_05.obj" />
+    <mesh name="collision_Joint_Link4_6" file="collision/Joint_Link4_06.obj" />
+    <mesh name="collision_Joint_Link4_7" file="collision/Joint_Link4_07.obj" />
+    <mesh name="collision_Joint_Link4_8" file="collision/Joint_Link4_08.obj" />
+    <mesh name="collision_Joint_Link4_9" file="collision/Joint_Link4_09.obj" />
+    <mesh name="collision_Joint_Link4_10" file="collision/Joint_Link4_10.obj" />
+    <mesh name="collision_Joint_Link4_11" file="collision/Joint_Link4_11.obj" />
+    <mesh name="collision_Joint_Link4_12" file="collision/Joint_Link4_12.obj" />
+    <mesh name="collision_Joint_Link4_13" file="collision/Joint_Link4_13.obj" />
+    <mesh name="collision_Joint_Link4_14" file="collision/Joint_Link4_14.obj" />
+    <mesh name="collision_Joint_Link4_15" file="collision/Joint_Link4_15.obj" />
+    <mesh name="collision_Joint_Link4_16" file="collision/Joint_Link4_16.obj" />
+    <mesh name="collision_Joint_Link4_17" file="collision/Joint_Link4_17.obj" />
+    <mesh name="collision_Joint_Link4_18" file="collision/Joint_Link4_18.obj" />
+    <mesh name="collision_Joint_Link4_19" file="collision/Joint_Link4_19.obj" />
+    <mesh name="collision_Joint_Link4_20" file="collision/Joint_Link4_20.obj" />
+    <mesh name="collision_Joint_Link4_21" file="collision/Joint_Link4_21.obj" />
+    <mesh name="collision_Joint_Link4_22" file="collision/Joint_Link4_22.obj" />
+    <mesh name="collision_Joint_Link4_23" file="collision/Joint_Link4_23.obj" />
+    <mesh name="collision_Joint_Link4_24" file="collision/Joint_Link4_24.obj" />
+    <mesh name="collision_Joint_Link4_25" file="collision/Joint_Link4_25.obj" />
+    <mesh name="collision_Joint_Link4_26" file="collision/Joint_Link4_26.obj" />
+    <mesh name="collision_Joint_Link4_27" file="collision/Joint_Link4_27.obj" />
+    <mesh name="collision_Joint_Link4_28" file="collision/Joint_Link4_28.obj" />
+    <mesh name="collision_Joint_Link4_29" file="collision/Joint_Link4_29.obj" />
+    <mesh name="collision_Joint_Link4_30" file="collision/Joint_Link4_30.obj" />
+    <mesh name="collision_Joint_Link4_31" file="collision/Joint_Link4_31.obj" />
+    <mesh name="collision_Joint_Link5.5_0" file="collision/Joint_Link5.5_00.obj" />
+    <mesh name="collision_Joint_Link5.5_1" file="collision/Joint_Link5.5_01.obj" />
+    <mesh name="collision_Joint_Link5.5_2" file="collision/Joint_Link5.5_02.obj" />
+    <mesh name="collision_Joint_Link5.5_3" file="collision/Joint_Link5.5_03.obj" />
+    <mesh name="collision_Joint_Link5.5_4" file="collision/Joint_Link5.5_04.obj" />
+    <mesh name="collision_Joint_Link5.5_5" file="collision/Joint_Link5.5_05.obj" />
+    <mesh name="collision_Joint_Link5.5_6" file="collision/Joint_Link5.5_06.obj" />
+    <mesh name="collision_Joint_Link5.5_7" file="collision/Joint_Link5.5_07.obj" />
+    <mesh name="collision_Joint_Link5.5_8" file="collision/Joint_Link5.5_08.obj" />
+    <mesh name="collision_Joint_Link5.5_9" file="collision/Joint_Link5.5_09.obj" />
+    <mesh name="collision_Joint_Link5.5_10" file="collision/Joint_Link5.5_10.obj" />
+    <mesh name="collision_Joint_Link5.5_11" file="collision/Joint_Link5.5_11.obj" />
+    <mesh name="collision_Joint_Link5.5_12" file="collision/Joint_Link5.5_12.obj" />
+    <mesh name="collision_Joint_Link5.5_13" file="collision/Joint_Link5.5_13.obj" />
+    <mesh name="collision_Joint_Link5.5_14" file="collision/Joint_Link5.5_14.obj" />
+    <mesh name="collision_Joint_Link5.5_15" file="collision/Joint_Link5.5_15.obj" />
+    <mesh name="collision_Joint_Link5.5_16" file="collision/Joint_Link5.5_16.obj" />
+    <mesh name="collision_Joint_Link5.5_17" file="collision/Joint_Link5.5_17.obj" />
+    <mesh name="collision_Joint_Link5.5_18" file="collision/Joint_Link5.5_18.obj" />
+    <mesh name="collision_Joint_Link5.5_19" file="collision/Joint_Link5.5_19.obj" />
+    <mesh name="collision_Joint_Link5.5_20" file="collision/Joint_Link5.5_20.obj" />
+    <mesh name="collision_Joint_Link5.5_21" file="collision/Joint_Link5.5_21.obj" />
+    <mesh name="collision_Joint_Link5.5_22" file="collision/Joint_Link5.5_22.obj" />
+    <mesh name="collision_Joint_Link5.5_23" file="collision/Joint_Link5.5_23.obj" />
+    <mesh name="collision_Joint_Link5.5_24" file="collision/Joint_Link5.5_24.obj" />
+    <mesh name="collision_Joint_Link5.5_25" file="collision/Joint_Link5.5_25.obj" />
+    <mesh name="collision_Joint_Link5.5_26" file="collision/Joint_Link5.5_26.obj" />
+    <mesh name="collision_Joint_Link5.5_27" file="collision/Joint_Link5.5_27.obj" />
+    <mesh name="collision_Joint_Link5.5_28" file="collision/Joint_Link5.5_28.obj" />
+    <mesh name="collision_Joint_Link5.5_29" file="collision/Joint_Link5.5_29.obj" />
+    <mesh name="collision_Joint_Link5.5_30" file="collision/Joint_Link5.5_30.obj" />
+    <mesh name="collision_Joint_Link5.5_31" file="collision/Joint_Link5.5_31.obj" />
+    <mesh name="collision_Joint_Link5_0" file="collision/Joint_Link5_00.obj" />
+    <mesh name="collision_Joint_Link5_1" file="collision/Joint_Link5_01.obj" />
+    <mesh name="collision_Joint_Link5_2" file="collision/Joint_Link5_02.obj" />
+    <mesh name="collision_Joint_Link5_3" file="collision/Joint_Link5_03.obj" />
+    <mesh name="collision_Joint_Link5_4" file="collision/Joint_Link5_04.obj" />
+    <mesh name="collision_Joint_Link5_5" file="collision/Joint_Link5_05.obj" />
+    <mesh name="collision_Joint_Link5_6" file="collision/Joint_Link5_06.obj" />
+    <mesh name="collision_Joint_Link5_7" file="collision/Joint_Link5_07.obj" />
+    <mesh name="collision_Joint_Link5_8" file="collision/Joint_Link5_08.obj" />
+    <mesh name="collision_Joint_Link5_9" file="collision/Joint_Link5_09.obj" />
+    <mesh name="collision_Joint_Link5_10" file="collision/Joint_Link5_10.obj" />
+    <mesh name="collision_Joint_Link5_11" file="collision/Joint_Link5_11.obj" />
+    <mesh name="collision_Joint_Link5_12" file="collision/Joint_Link5_12.obj" />
+    <mesh name="collision_Joint_Link5_13" file="collision/Joint_Link5_13.obj" />
+    <mesh name="collision_Joint_Link5_14" file="collision/Joint_Link5_14.obj" />
+    <mesh name="collision_Joint_Link5_15" file="collision/Joint_Link5_15.obj" />
+    <mesh name="collision_Joint_Link5_16" file="collision/Joint_Link5_16.obj" />
+    <mesh name="collision_Joint_Link5_17" file="collision/Joint_Link5_17.obj" />
+    <mesh name="collision_Joint_Link5_18" file="collision/Joint_Link5_18.obj" />
+    <mesh name="collision_Joint_Link5_19" file="collision/Joint_Link5_19.obj" />
+    <mesh name="collision_Joint_Link5_20" file="collision/Joint_Link5_20.obj" />
+    <mesh name="collision_Joint_Link5_21" file="collision/Joint_Link5_21.obj" />
+    <mesh name="collision_Joint_Link5_22" file="collision/Joint_Link5_22.obj" />
+    <mesh name="collision_Joint_Link5_23" file="collision/Joint_Link5_23.obj" />
+    <mesh name="collision_Joint_Link5_24" file="collision/Joint_Link5_24.obj" />
+    <mesh name="collision_Joint_Link5_25" file="collision/Joint_Link5_25.obj" />
+    <mesh name="collision_Joint_Link5_26" file="collision/Joint_Link5_26.obj" />
+    <mesh name="collision_Joint_Link5_27" file="collision/Joint_Link5_27.obj" />
+    <mesh name="collision_Joint_Link5_28" file="collision/Joint_Link5_28.obj" />
+    <mesh name="collision_Joint_Link5_29" file="collision/Joint_Link5_29.obj" />
+    <mesh name="collision_Joint_Link5_30" file="collision/Joint_Link5_30.obj" />
+    <mesh name="collision_Joint_Link5_31" file="collision/Joint_Link5_31.obj" />
+    <mesh name="collision_Joint_Link6.6_0" file="collision/Joint_Link6.6_00.obj" />
+    <mesh name="collision_Joint_Link6.6_1" file="collision/Joint_Link6.6_01.obj" />
+    <mesh name="collision_Joint_Link6.6_2" file="collision/Joint_Link6.6_02.obj" />
+    <mesh name="collision_Joint_Link6.6_3" file="collision/Joint_Link6.6_03.obj" />
+    <mesh name="collision_Joint_Link6.6_4" file="collision/Joint_Link6.6_04.obj" />
+    <mesh name="collision_Joint_Link6.6_5" file="collision/Joint_Link6.6_05.obj" />
+    <mesh name="collision_Joint_Link6.6_6" file="collision/Joint_Link6.6_06.obj" />
+    <mesh name="collision_Joint_Link6.6_7" file="collision/Joint_Link6.6_07.obj" />
+    <mesh name="collision_Joint_Link6.6_8" file="collision/Joint_Link6.6_08.obj" />
+    <mesh name="collision_Joint_Link6.6_9" file="collision/Joint_Link6.6_09.obj" />
+    <mesh name="collision_Joint_Link6.6_10" file="collision/Joint_Link6.6_10.obj" />
+    <mesh name="collision_Joint_Link6.6_11" file="collision/Joint_Link6.6_11.obj" />
+    <mesh name="collision_Joint_Link6.6_12" file="collision/Joint_Link6.6_12.obj" />
+    <mesh name="collision_Joint_Link6.6_13" file="collision/Joint_Link6.6_13.obj" />
+    <mesh name="collision_Joint_Link6.6_14" file="collision/Joint_Link6.6_14.obj" />
+    <mesh name="collision_Joint_Link6.6_15" file="collision/Joint_Link6.6_15.obj" />
+    <mesh name="collision_Joint_Link6.6_16" file="collision/Joint_Link6.6_16.obj" />
+    <mesh name="collision_Joint_Link6.6_17" file="collision/Joint_Link6.6_17.obj" />
+    <mesh name="collision_Joint_Link6.6_18" file="collision/Joint_Link6.6_18.obj" />
+    <mesh name="collision_Joint_Link6.6_19" file="collision/Joint_Link6.6_19.obj" />
+    <mesh name="collision_Joint_Link6.6_20" file="collision/Joint_Link6.6_20.obj" />
+    <mesh name="collision_Joint_Link6.6_21" file="collision/Joint_Link6.6_21.obj" />
+    <mesh name="collision_Joint_Link6.6_22" file="collision/Joint_Link6.6_22.obj" />
+    <mesh name="collision_Joint_Link6.6_23" file="collision/Joint_Link6.6_23.obj" />
+    <mesh name="collision_Joint_Link6.6_24" file="collision/Joint_Link6.6_24.obj" />
+    <mesh name="collision_Joint_Link6.6_25" file="collision/Joint_Link6.6_25.obj" />
+    <mesh name="collision_Joint_Link6.6_26" file="collision/Joint_Link6.6_26.obj" />
+    <mesh name="collision_Joint_Link6.6_27" file="collision/Joint_Link6.6_27.obj" />
+    <mesh name="collision_Joint_Link6.6_28" file="collision/Joint_Link6.6_28.obj" />
+    <mesh name="collision_Joint_Link6.6_29" file="collision/Joint_Link6.6_29.obj" />
+    <mesh name="collision_Joint_Link6.6_30" file="collision/Joint_Link6.6_30.obj" />
+    <mesh name="collision_Joint_Link6.6_31" file="collision/Joint_Link6.6_31.obj" />
+    <mesh name="collision_Joint_Link6_0" file="collision/Joint_Link6_00.obj" />
+    <mesh name="collision_Joint_Link6_1" file="collision/Joint_Link6_01.obj" />
+    <mesh name="collision_Joint_Link6_2" file="collision/Joint_Link6_02.obj" />
+    <mesh name="collision_Joint_Link6_3" file="collision/Joint_Link6_03.obj" />
+    <mesh name="collision_Joint_Link6_4" file="collision/Joint_Link6_04.obj" />
+    <mesh name="collision_Joint_Link6_5" file="collision/Joint_Link6_05.obj" />
+    <mesh name="collision_Joint_Link6_6" file="collision/Joint_Link6_06.obj" />
+    <mesh name="collision_Joint_Link6_7" file="collision/Joint_Link6_07.obj" />
+    <mesh name="collision_Joint_Link6_8" file="collision/Joint_Link6_08.obj" />
+    <mesh name="collision_Joint_Link6_9" file="collision/Joint_Link6_09.obj" />
+    <mesh name="collision_Joint_Link6_10" file="collision/Joint_Link6_10.obj" />
+    <mesh name="collision_Joint_Link6_11" file="collision/Joint_Link6_11.obj" />
+    <mesh name="collision_Joint_Link6_12" file="collision/Joint_Link6_12.obj" />
+    <mesh name="collision_Joint_Link6_13" file="collision/Joint_Link6_13.obj" />
+    <mesh name="collision_Joint_Link6_14" file="collision/Joint_Link6_14.obj" />
+    <mesh name="collision_Joint_Link6_15" file="collision/Joint_Link6_15.obj" />
+    <mesh name="collision_Joint_Link6_16" file="collision/Joint_Link6_16.obj" />
+    <mesh name="collision_Joint_Link6_17" file="collision/Joint_Link6_17.obj" />
+    <mesh name="collision_Joint_Link6_18" file="collision/Joint_Link6_18.obj" />
+    <mesh name="collision_Joint_Link6_19" file="collision/Joint_Link6_19.obj" />
+    <mesh name="collision_Joint_Link6_20" file="collision/Joint_Link6_20.obj" />
+    <mesh name="collision_Joint_Link6_21" file="collision/Joint_Link6_21.obj" />
+    <mesh name="collision_Joint_Link6_22" file="collision/Joint_Link6_22.obj" />
+    <mesh name="collision_Joint_Link6_23" file="collision/Joint_Link6_23.obj" />
+    <mesh name="collision_Joint_Link6_24" file="collision/Joint_Link6_24.obj" />
+    <mesh name="collision_Joint_Link6_25" file="collision/Joint_Link6_25.obj" />
+    <mesh name="collision_Joint_Link6_26" file="collision/Joint_Link6_26.obj" />
+    <mesh name="collision_Joint_Link6_27" file="collision/Joint_Link6_27.obj" />
+    <mesh name="collision_Joint_Link6_28" file="collision/Joint_Link6_28.obj" />
+    <mesh name="collision_Joint_Link6_29" file="collision/Joint_Link6_29.obj" />
+    <mesh name="collision_Joint_Link6_30" file="collision/Joint_Link6_30.obj" />
+    <mesh name="collision_Joint_Link6_31" file="collision/Joint_Link6_31.obj" />
+    <mesh name="collision_Joint_Link7.7_0" file="collision/Joint_Link7.7_00.obj" />
+    <mesh name="collision_Joint_Link7.7_1" file="collision/Joint_Link7.7_01.obj" />
+    <mesh name="collision_Joint_Link7.7_2" file="collision/Joint_Link7.7_02.obj" />
+    <mesh name="collision_Joint_Link7.7_3" file="collision/Joint_Link7.7_03.obj" />
+    <mesh name="collision_Joint_Link7.7_4" file="collision/Joint_Link7.7_04.obj" />
+    <mesh name="collision_Joint_Link7.7_5" file="collision/Joint_Link7.7_05.obj" />
+    <mesh name="collision_Joint_Link7.7_6" file="collision/Joint_Link7.7_06.obj" />
+    <mesh name="collision_Joint_Link7.7_7" file="collision/Joint_Link7.7_07.obj" />
+    <mesh name="collision_Joint_Link7.7_8" file="collision/Joint_Link7.7_08.obj" />
+    <mesh name="collision_Joint_Link7.7_9" file="collision/Joint_Link7.7_09.obj" />
+    <mesh name="collision_Joint_Link7.7_10" file="collision/Joint_Link7.7_10.obj" />
+    <mesh name="collision_Joint_Link7.7_11" file="collision/Joint_Link7.7_11.obj" />
+    <mesh name="collision_Joint_Link7.7_12" file="collision/Joint_Link7.7_12.obj" />
+    <mesh name="collision_Joint_Link7.7_13" file="collision/Joint_Link7.7_13.obj" />
+    <mesh name="collision_Joint_Link7.7_14" file="collision/Joint_Link7.7_14.obj" />
+    <mesh name="collision_Joint_Link7.7_15" file="collision/Joint_Link7.7_15.obj" />
+    <mesh name="collision_Joint_Link7.7_16" file="collision/Joint_Link7.7_16.obj" />
+    <mesh name="collision_Joint_Link7.7_17" file="collision/Joint_Link7.7_17.obj" />
+    <mesh name="collision_Joint_Link7.7_18" file="collision/Joint_Link7.7_18.obj" />
+    <mesh name="collision_Joint_Link7.7_19" file="collision/Joint_Link7.7_19.obj" />
+    <mesh name="collision_Joint_Link7.7_20" file="collision/Joint_Link7.7_20.obj" />
+    <mesh name="collision_Joint_Link7.7_21" file="collision/Joint_Link7.7_21.obj" />
+    <mesh name="collision_Joint_Link7.7_22" file="collision/Joint_Link7.7_22.obj" />
+    <mesh name="collision_Joint_Link7.7_23" file="collision/Joint_Link7.7_23.obj" />
+    <mesh name="collision_Joint_Link7.7_24" file="collision/Joint_Link7.7_24.obj" />
+    <mesh name="collision_Joint_Link7.7_25" file="collision/Joint_Link7.7_25.obj" />
+    <mesh name="collision_Joint_Link7.7_26" file="collision/Joint_Link7.7_26.obj" />
+    <mesh name="collision_Joint_Link7.7_27" file="collision/Joint_Link7.7_27.obj" />
+    <mesh name="collision_Joint_Link7.7_28" file="collision/Joint_Link7.7_28.obj" />
+    <mesh name="collision_Joint_Link7.7_29" file="collision/Joint_Link7.7_29.obj" />
+    <mesh name="collision_Joint_Link7.7_30" file="collision/Joint_Link7.7_30.obj" />
+    <mesh name="collision_Joint_Link7.7_31" file="collision/Joint_Link7.7_31.obj" />
+    <mesh name="collision_Joint_Link7_0" file="collision/Joint_Link7_00.obj" />
+    <mesh name="collision_Joint_Link7_1" file="collision/Joint_Link7_01.obj" />
+    <mesh name="collision_Joint_Link7_2" file="collision/Joint_Link7_02.obj" />
+    <mesh name="collision_Joint_Link7_3" file="collision/Joint_Link7_03.obj" />
+    <mesh name="collision_Joint_Link7_4" file="collision/Joint_Link7_04.obj" />
+    <mesh name="collision_Joint_Link7_5" file="collision/Joint_Link7_05.obj" />
+    <mesh name="collision_Joint_Link7_6" file="collision/Joint_Link7_06.obj" />
+    <mesh name="collision_Joint_Link7_7" file="collision/Joint_Link7_07.obj" />
+    <mesh name="collision_Joint_Link7_8" file="collision/Joint_Link7_08.obj" />
+    <mesh name="collision_Joint_Link7_9" file="collision/Joint_Link7_09.obj" />
+    <mesh name="collision_Joint_Link7_10" file="collision/Joint_Link7_10.obj" />
+    <mesh name="collision_Joint_Link7_11" file="collision/Joint_Link7_11.obj" />
+    <mesh name="collision_Joint_Link7_12" file="collision/Joint_Link7_12.obj" />
+    <mesh name="collision_Joint_Link7_13" file="collision/Joint_Link7_13.obj" />
+    <mesh name="collision_Joint_Link7_14" file="collision/Joint_Link7_14.obj" />
+    <mesh name="collision_Joint_Link7_15" file="collision/Joint_Link7_15.obj" />
+    <mesh name="collision_Joint_Link7_16" file="collision/Joint_Link7_16.obj" />
+    <mesh name="collision_Joint_Link7_17" file="collision/Joint_Link7_17.obj" />
+    <mesh name="collision_Joint_Link7_18" file="collision/Joint_Link7_18.obj" />
+    <mesh name="collision_Joint_Link7_19" file="collision/Joint_Link7_19.obj" />
+    <mesh name="collision_Joint_Link7_20" file="collision/Joint_Link7_20.obj" />
+    <mesh name="collision_Joint_Link7_21" file="collision/Joint_Link7_21.obj" />
+    <mesh name="collision_Joint_Link7_22" file="collision/Joint_Link7_22.obj" />
+    <mesh name="collision_Joint_Link7_23" file="collision/Joint_Link7_23.obj" />
+    <mesh name="collision_Joint_Link7_24" file="collision/Joint_Link7_24.obj" />
+    <mesh name="collision_Joint_Link7_25" file="collision/Joint_Link7_25.obj" />
+    <mesh name="collision_Joint_Link7_26" file="collision/Joint_Link7_26.obj" />
+    <mesh name="collision_Joint_Link7_27" file="collision/Joint_Link7_27.obj" />
+    <mesh name="collision_Joint_Link7_28" file="collision/Joint_Link7_28.obj" />
+    <mesh name="collision_Joint_Link7_29" file="collision/Joint_Link7_29.obj" />
+    <mesh name="collision_Joint_Link7_30" file="collision/Joint_Link7_30.obj" />
+    <mesh name="collision_Joint_Link7_31" file="collision/Joint_Link7_31.obj" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0" quat="1 0 0 0">
+      <inertial pos="0.0052059944216870102 0.021142878492840501 0.35261570365445999" quat="0.99963809892649502 0.0021020329621872129 0.022976208227335392 -0.013832804760531881" mass="0.53710154073206995" diaginertia="0.0017637984180639895 0.0015420612569569615 0.00030739783814643973" />
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="base_link" />
+      <body name="Joint_Link1.1" pos="-0.0025000000000000001 0.067250000000000004 0.48249999999999998" quat="1 0 0 0">
+        <inertial pos="0.00015891000000000001 -0.00015030999999999999 -0.012112" quat="0.48328902931227957 0.51612484247050061 -0.48330002301818076 0.51620533596798857" mass="0.24399999999999999" diaginertia="4.2108000243969379e-06 2.3630056450103856e-06 2.36169433059267e-06" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.74902 0.74902 0.74902 1" mesh="Joint_Link1.1" />
+        <body name="Joint_Link1" pos="0 0 0" quat="1 0 0 0">
+          <inertial pos="0.0034455000000000002 -3.3507999999999998e-05 0.0096325999999999998" quat="0.50080235136619833 0.50005354937534241 -0.49997709431096965 0.49916566166711762" mass="0.049921" diaginertia="1.3934011206576695e-05 1.0123993835713193e-05 8.0623949577101019e-06" />
+          <joint name="Joint_Link1" pos="0 0 0" axis="0 0 1" range="-0.521049188295 1.35472788957" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-11.0 11.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.89804 0.91765 0.92941 1" mesh="Joint_Link1" />
+          <body name="Joint_Link2_axis" pos="0.0050000000000000001 0.00050000000000000001 0.02" quat="0.70710678118654757 0.70710678118654746 0 0">
+            <joint name="Joint_Link2" pos="0 0 0" axis="0 0 1" range="-0 0.289471771275" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-11.0 11.0" />
+            <body name="Joint_Link2" pos="0.00011319999999999993 -0.004999 -3.0610046744688095e-19" quat="0.99999999999831346 1.8366025517070006e-06 0 0">
+              <inertial pos="-0.0021829000000000002 0.015377999999999999 -4.1770999999999997e-08" quat="0.69395170698285058 -1.076971426897126e-06 -1.1174302552146092e-06 0.72002154715895894" mass="0.24173" diaginertia="0.00012651101848476699 9.6323981515623964e-05 5.5757999999609203e-05" />
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.65098 0.61961 0.58824 1" mesh="Joint_Link2" />
+              <body name="Joint_Link3.3" pos="0.033119999999999997 0.039260000000000003 0" quat="0.7070601859021447 0.0080035560517087035 0.70706278308399795 -0.0080035854504656324">
+                <inertial pos="-8.6569673069029701e-05 0.00022633183078150199 -0.0294784175950044" quat="0.97857545834042148 0.038733207836214659 0.0069824764587839098 0.20209170187578906" mass="0.46000000000000002" diaginertia="0.00023418002695465578 0.00023338760500089318 0.00019086808716010557" />
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Joint_Link3.3" />
+                <body name="Joint_Link3" pos="0 0 0" quat="1 0 0 0">
+                  <inertial pos="0.0046534000000000002 0.00012375999999999999 0.027146" quat="0.9900805012873225 0.00083754094837088704 0.14042228147540278 -0.004634906800216782" mass="0.22" diaginertia="0.00020706875177094769 0.00017310783373939871 0.00011037341448965348" />
+                  <joint name="Joint_Link3" pos="0 0 0" axis="0 0 1" range="-3.10668606855 3.10668606855" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-45.0 45.0" />
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.69804 0.69804 0.69804 1" mesh="Joint_Link3" />
+                  <body name="Joint_Link4.4" pos="-0.022499999999999999 0 0.053999999999999999" quat="0.70706162176335563 0.0079888379901784101 -0.70706168045263662 -0.0079888379901783546">
+                    <inertial pos="-0.000111757636678117 0.00021501315213461099 -0.0239784178606533" quat="0.96547070601702056 0.038272441666641933 0.0091780484277955935 0.25752145436628437" mass="0.46000000000000002" diaginertia="0.00023418002547952462 0.00023338760443030154 0.00019086808637154074" />
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Joint_Link4.4" />
+                    <body name="Joint_Link4" pos="0 0 0" quat="1 0 0 0">
+                      <inertial pos="-1.8113999999999999e-06 -0.041702999999999997 -0.0047429999999999998" quat="0.4092444444442635 0.57730021755782457 -0.57659173641739581 0.4083936985243159" mass="0.14399999999999999" diaginertia="0.00021485595065282671 0.0002054800005002873 6.9813048846886229e-05" />
+                      <joint name="Joint_Link4" pos="0 0 0" axis="0 0 1" range="-0.0872664625997 3.10668606855" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-45.0 45.0" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.89804 0.91765 0.92941 1" mesh="Joint_Link4" />
+                      <body name="Joint_Link5.5" pos="0 -0.099099999999999994 -0.0235" quat="-2.5973434669646147e-06 2.5973530075574148e-06 0.70710807985470325 -0.70710548250646599">
+                        <inertial pos="-7.4197407162201695e-05 5.9528716387964002e-05 -0.0232023984871461" quat="0.73107152925644026 0.031358258154099081 0.0055678473333622604 0.68155709799859343" mass="0.24399999999999999" diaginertia="7.9140516191470784e-05 7.8780523754024107e-05 7.026163460195704e-05" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.74902 0.74902 0.74902 1" mesh="Joint_Link5.5" />
+                        <body name="Joint_Link5" pos="0 0 0" quat="1 0 0 0">
+                          <inertial pos="-0.00020544000000000001 2.2529999999999999e-06 0.1036" quat="0.99999707080270828 3.1190298285147854e-05 -0.0024202026882538634 -5.6671248544372817e-06" mass="0.092600000000000002" diaginertia="0.00052614148832086643 0.00051892000187735339 3.5803509801780322e-05" />
+                          <joint name="Joint_Link5" pos="0 0 0" axis="0 0 -1" range="-3.10668606855 3.10668606855" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-11.0 11.0" />
+                          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.79216 0.81961 0.93333 1" mesh="Joint_Link5" />
+                          <body name="Joint_Link6.6" pos="-0.027550000000000002 0 0.193" quat="0.49999816339744829 -0.49999999999662686 -0.5000018366025516 0.49999999999662686">
+                            <inertial pos="0.00021081 5.9200000000000002e-05 -0.0071123000000000002" quat="0.15955971663338187 0.68883397363604071 -0.1596041976960812 0.68889400757333596" mass="0.24399999999999999" diaginertia="4.2108000206378574e-06 2.3629522071968751e-06 2.361647772165268e-06" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.74902 0.74902 0.74902 1" mesh="Joint_Link6.6" />
+                            <body name="Joint_Link6" pos="0 0 0" quat="1 0 0 0">
+                              <inertial pos="-0.0051024 -0.023518000000000001 -0.0025439999999999998" quat="0.46484398708209368 0.62316533778582062 -0.57078400529338369 0.26417919819159003" mass="0.027799999999999998" diaginertia="2.5836444003165334e-05 2.4378659592105546e-05 1.0171896404729075e-05" />
+                              <joint name="Joint_Link6" pos="0 0 0" axis="0 0 1" range="-2.51327412287 2.68780704807" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-11.0 11.0" />
+                              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.79216 0.81961 0.93333 1" mesh="Joint_Link6" />
+                              <body name="Joint_Link7.7" pos="-0.0089999999999999993 -0.088999999999999996 -0.027" quat="0.49999816339744829 0.49999999999662686 0.49999999999662686 -0.5000018366025516">
+                                <inertial pos="3.8515e-05 0.00021544000000000001 -0.010612" quat="-0.23173522983806844 0.66805294119035674 0.23166384295977746 0.66808376337396713" mass="0.24399999999999999" diaginertia="4.2108000223511179e-06 2.3629930178491743e-06 2.3617069597997021e-06" />
+                                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.74902 0.74902 0.74902 1" mesh="Joint_Link7.7" />
+                                <body name="Joint_Link7" pos="0 0 0" quat="1 0 0 0">
+                                  <inertial pos="-8.3510000000000002e-06 4.3513000000000002e-06 0.039836999999999997" quat="0.54779185516166207 0.00021102154991041439 2.1263111314224022e-05 0.83661462958540933" mass="0.038699999999999998" diaginertia="5.2351521614655488e-05 5.2304486159588253e-05 9.1255922257562602e-06" />
+                                  <joint name="Joint_Link7" pos="0 0 0" axis="0 0 1" range="-3.10668606855 3.10668606855" limited="true" armature="0.03" damping="0.1" actuatorfrcrange="-11.0 11.0" />
+                                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.79216 0.81961 0.93333 1" mesh="Joint_Link7" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_0" name="collision_Joint_Link7_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_1" name="collision_Joint_Link7_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_2" name="collision_Joint_Link7_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_3" name="collision_Joint_Link7_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_4" name="collision_Joint_Link7_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_5" name="collision_Joint_Link7_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_6" name="collision_Joint_Link7_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_7" name="collision_Joint_Link7_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_8" name="collision_Joint_Link7_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_9" name="collision_Joint_Link7_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_10" name="collision_Joint_Link7_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_11" name="collision_Joint_Link7_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_12" name="collision_Joint_Link7_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_13" name="collision_Joint_Link7_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_14" name="collision_Joint_Link7_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_15" name="collision_Joint_Link7_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_16" name="collision_Joint_Link7_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_17" name="collision_Joint_Link7_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_18" name="collision_Joint_Link7_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_19" name="collision_Joint_Link7_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_20" name="collision_Joint_Link7_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_21" name="collision_Joint_Link7_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_22" name="collision_Joint_Link7_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_23" name="collision_Joint_Link7_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_24" name="collision_Joint_Link7_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_25" name="collision_Joint_Link7_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_26" name="collision_Joint_Link7_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_27" name="collision_Joint_Link7_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_28" name="collision_Joint_Link7_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_29" name="collision_Joint_Link7_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_30" name="collision_Joint_Link7_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link7_31" name="collision_Joint_Link7_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                </body>
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_0" name="collision_Joint_Link7.7_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_1" name="collision_Joint_Link7.7_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_2" name="collision_Joint_Link7.7_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_3" name="collision_Joint_Link7.7_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_4" name="collision_Joint_Link7.7_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_5" name="collision_Joint_Link7.7_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_6" name="collision_Joint_Link7.7_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_7" name="collision_Joint_Link7.7_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_8" name="collision_Joint_Link7.7_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_9" name="collision_Joint_Link7.7_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_10" name="collision_Joint_Link7.7_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_11" name="collision_Joint_Link7.7_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_12" name="collision_Joint_Link7.7_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_13" name="collision_Joint_Link7.7_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_14" name="collision_Joint_Link7.7_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_15" name="collision_Joint_Link7.7_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_16" name="collision_Joint_Link7.7_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_17" name="collision_Joint_Link7.7_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_18" name="collision_Joint_Link7.7_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_19" name="collision_Joint_Link7.7_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_20" name="collision_Joint_Link7.7_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_21" name="collision_Joint_Link7.7_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_22" name="collision_Joint_Link7.7_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_23" name="collision_Joint_Link7.7_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_24" name="collision_Joint_Link7.7_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_25" name="collision_Joint_Link7.7_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_26" name="collision_Joint_Link7.7_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_27" name="collision_Joint_Link7.7_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_28" name="collision_Joint_Link7.7_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_29" name="collision_Joint_Link7.7_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_30" name="collision_Joint_Link7.7_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                                <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link7.7_31" name="collision_Joint_Link7.7_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              </body>
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_0" name="collision_Joint_Link6_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_1" name="collision_Joint_Link6_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_2" name="collision_Joint_Link6_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_3" name="collision_Joint_Link6_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_4" name="collision_Joint_Link6_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_5" name="collision_Joint_Link6_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_6" name="collision_Joint_Link6_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_7" name="collision_Joint_Link6_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_8" name="collision_Joint_Link6_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_9" name="collision_Joint_Link6_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_10" name="collision_Joint_Link6_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_11" name="collision_Joint_Link6_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_12" name="collision_Joint_Link6_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_13" name="collision_Joint_Link6_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_14" name="collision_Joint_Link6_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_15" name="collision_Joint_Link6_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_16" name="collision_Joint_Link6_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_17" name="collision_Joint_Link6_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_18" name="collision_Joint_Link6_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_19" name="collision_Joint_Link6_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_20" name="collision_Joint_Link6_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_21" name="collision_Joint_Link6_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_22" name="collision_Joint_Link6_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_23" name="collision_Joint_Link6_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_24" name="collision_Joint_Link6_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_25" name="collision_Joint_Link6_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_26" name="collision_Joint_Link6_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_27" name="collision_Joint_Link6_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_28" name="collision_Joint_Link6_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_29" name="collision_Joint_Link6_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_30" name="collision_Joint_Link6_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                              <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link6_31" name="collision_Joint_Link6_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            </body>
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_0" name="collision_Joint_Link6.6_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_1" name="collision_Joint_Link6.6_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_2" name="collision_Joint_Link6.6_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_3" name="collision_Joint_Link6.6_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_4" name="collision_Joint_Link6.6_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_5" name="collision_Joint_Link6.6_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_6" name="collision_Joint_Link6.6_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_7" name="collision_Joint_Link6.6_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_8" name="collision_Joint_Link6.6_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_9" name="collision_Joint_Link6.6_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_10" name="collision_Joint_Link6.6_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_11" name="collision_Joint_Link6.6_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_12" name="collision_Joint_Link6.6_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_13" name="collision_Joint_Link6.6_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_14" name="collision_Joint_Link6.6_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_15" name="collision_Joint_Link6.6_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_16" name="collision_Joint_Link6.6_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_17" name="collision_Joint_Link6.6_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_18" name="collision_Joint_Link6.6_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_19" name="collision_Joint_Link6.6_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_20" name="collision_Joint_Link6.6_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_21" name="collision_Joint_Link6.6_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_22" name="collision_Joint_Link6.6_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_23" name="collision_Joint_Link6.6_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_24" name="collision_Joint_Link6.6_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_25" name="collision_Joint_Link6.6_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_26" name="collision_Joint_Link6.6_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_27" name="collision_Joint_Link6.6_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_28" name="collision_Joint_Link6.6_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_29" name="collision_Joint_Link6.6_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_30" name="collision_Joint_Link6.6_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                            <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link6.6_31" name="collision_Joint_Link6.6_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          </body>
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_0" name="collision_Joint_Link5_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_1" name="collision_Joint_Link5_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_2" name="collision_Joint_Link5_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_3" name="collision_Joint_Link5_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_4" name="collision_Joint_Link5_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_5" name="collision_Joint_Link5_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_6" name="collision_Joint_Link5_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_7" name="collision_Joint_Link5_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_8" name="collision_Joint_Link5_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_9" name="collision_Joint_Link5_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_10" name="collision_Joint_Link5_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_11" name="collision_Joint_Link5_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_12" name="collision_Joint_Link5_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_13" name="collision_Joint_Link5_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_14" name="collision_Joint_Link5_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_15" name="collision_Joint_Link5_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_16" name="collision_Joint_Link5_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_17" name="collision_Joint_Link5_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_18" name="collision_Joint_Link5_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_19" name="collision_Joint_Link5_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_20" name="collision_Joint_Link5_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_21" name="collision_Joint_Link5_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_22" name="collision_Joint_Link5_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_23" name="collision_Joint_Link5_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_24" name="collision_Joint_Link5_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_25" name="collision_Joint_Link5_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_26" name="collision_Joint_Link5_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_27" name="collision_Joint_Link5_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_28" name="collision_Joint_Link5_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_29" name="collision_Joint_Link5_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_30" name="collision_Joint_Link5_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                          <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="collision_Joint_Link5_31" name="collision_Joint_Link5_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        </body>
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_0" name="collision_Joint_Link5.5_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_1" name="collision_Joint_Link5.5_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_2" name="collision_Joint_Link5.5_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_3" name="collision_Joint_Link5.5_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_4" name="collision_Joint_Link5.5_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_5" name="collision_Joint_Link5.5_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_6" name="collision_Joint_Link5.5_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_7" name="collision_Joint_Link5.5_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_8" name="collision_Joint_Link5.5_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_9" name="collision_Joint_Link5.5_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_10" name="collision_Joint_Link5.5_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_11" name="collision_Joint_Link5.5_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_12" name="collision_Joint_Link5.5_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_13" name="collision_Joint_Link5.5_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_14" name="collision_Joint_Link5.5_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_15" name="collision_Joint_Link5.5_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_16" name="collision_Joint_Link5.5_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_17" name="collision_Joint_Link5.5_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_18" name="collision_Joint_Link5.5_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_19" name="collision_Joint_Link5.5_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_20" name="collision_Joint_Link5.5_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_21" name="collision_Joint_Link5.5_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_22" name="collision_Joint_Link5.5_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_23" name="collision_Joint_Link5.5_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_24" name="collision_Joint_Link5.5_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_25" name="collision_Joint_Link5.5_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_26" name="collision_Joint_Link5.5_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_27" name="collision_Joint_Link5.5_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_28" name="collision_Joint_Link5.5_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_29" name="collision_Joint_Link5.5_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_30" name="collision_Joint_Link5.5_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link5.5_31" name="collision_Joint_Link5.5_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      </body>
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_0" name="collision_Joint_Link4_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_1" name="collision_Joint_Link4_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_2" name="collision_Joint_Link4_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_3" name="collision_Joint_Link4_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_4" name="collision_Joint_Link4_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_5" name="collision_Joint_Link4_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_6" name="collision_Joint_Link4_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_7" name="collision_Joint_Link4_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_8" name="collision_Joint_Link4_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_9" name="collision_Joint_Link4_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_10" name="collision_Joint_Link4_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_11" name="collision_Joint_Link4_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_12" name="collision_Joint_Link4_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_13" name="collision_Joint_Link4_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_14" name="collision_Joint_Link4_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_15" name="collision_Joint_Link4_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_16" name="collision_Joint_Link4_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_17" name="collision_Joint_Link4_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_18" name="collision_Joint_Link4_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_19" name="collision_Joint_Link4_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_20" name="collision_Joint_Link4_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_21" name="collision_Joint_Link4_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_22" name="collision_Joint_Link4_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_23" name="collision_Joint_Link4_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_24" name="collision_Joint_Link4_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_25" name="collision_Joint_Link4_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_26" name="collision_Joint_Link4_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_27" name="collision_Joint_Link4_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_28" name="collision_Joint_Link4_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_29" name="collision_Joint_Link4_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_30" name="collision_Joint_Link4_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                      <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link4_31" name="collision_Joint_Link4_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    </body>
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_0" name="collision_Joint_Link4.4_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_1" name="collision_Joint_Link4.4_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_2" name="collision_Joint_Link4.4_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_3" name="collision_Joint_Link4.4_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_4" name="collision_Joint_Link4.4_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_5" name="collision_Joint_Link4.4_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_6" name="collision_Joint_Link4.4_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_7" name="collision_Joint_Link4.4_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_8" name="collision_Joint_Link4.4_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_9" name="collision_Joint_Link4.4_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_10" name="collision_Joint_Link4.4_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_11" name="collision_Joint_Link4.4_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_12" name="collision_Joint_Link4.4_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_13" name="collision_Joint_Link4.4_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_14" name="collision_Joint_Link4.4_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_15" name="collision_Joint_Link4.4_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_16" name="collision_Joint_Link4.4_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_17" name="collision_Joint_Link4.4_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_19" name="collision_Joint_Link4.4_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_20" name="collision_Joint_Link4.4_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_21" name="collision_Joint_Link4.4_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_22" name="collision_Joint_Link4.4_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_23" name="collision_Joint_Link4.4_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_24" name="collision_Joint_Link4.4_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_25" name="collision_Joint_Link4.4_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_26" name="collision_Joint_Link4.4_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_27" name="collision_Joint_Link4.4_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_28" name="collision_Joint_Link4.4_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_29" name="collision_Joint_Link4.4_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_30" name="collision_Joint_Link4.4_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link4.4_31" name="collision_Joint_Link4.4_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  </body>
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_0" name="collision_Joint_Link3_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_1" name="collision_Joint_Link3_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_2" name="collision_Joint_Link3_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_3" name="collision_Joint_Link3_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_4" name="collision_Joint_Link3_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_5" name="collision_Joint_Link3_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_6" name="collision_Joint_Link3_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_7" name="collision_Joint_Link3_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_8" name="collision_Joint_Link3_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_9" name="collision_Joint_Link3_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_10" name="collision_Joint_Link3_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_11" name="collision_Joint_Link3_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_12" name="collision_Joint_Link3_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_13" name="collision_Joint_Link3_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_14" name="collision_Joint_Link3_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_15" name="collision_Joint_Link3_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_16" name="collision_Joint_Link3_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_17" name="collision_Joint_Link3_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_18" name="collision_Joint_Link3_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_19" name="collision_Joint_Link3_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_20" name="collision_Joint_Link3_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_21" name="collision_Joint_Link3_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_22" name="collision_Joint_Link3_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_23" name="collision_Joint_Link3_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_24" name="collision_Joint_Link3_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_25" name="collision_Joint_Link3_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_26" name="collision_Joint_Link3_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_27" name="collision_Joint_Link3_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_28" name="collision_Joint_Link3_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_29" name="collision_Joint_Link3_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_30" name="collision_Joint_Link3_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                  <geom type="mesh" rgba="0.69804 0.69804 0.69804 1" mesh="collision_Joint_Link3_31" name="collision_Joint_Link3_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+                </body>
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_0" name="collision_Joint_Link3.3_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_1" name="collision_Joint_Link3.3_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_2" name="collision_Joint_Link3.3_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_3" name="collision_Joint_Link3.3_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_4" name="collision_Joint_Link3.3_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_5" name="collision_Joint_Link3.3_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_6" name="collision_Joint_Link3.3_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_7" name="collision_Joint_Link3.3_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_8" name="collision_Joint_Link3.3_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_9" name="collision_Joint_Link3.3_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_10" name="collision_Joint_Link3.3_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_11" name="collision_Joint_Link3.3_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_12" name="collision_Joint_Link3.3_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_13" name="collision_Joint_Link3.3_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_14" name="collision_Joint_Link3.3_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_15" name="collision_Joint_Link3.3_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_16" name="collision_Joint_Link3.3_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_17" name="collision_Joint_Link3.3_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_18" name="collision_Joint_Link3.3_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_19" name="collision_Joint_Link3.3_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_21" name="collision_Joint_Link3.3_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_22" name="collision_Joint_Link3.3_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_23" name="collision_Joint_Link3.3_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_24" name="collision_Joint_Link3.3_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_25" name="collision_Joint_Link3.3_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_26" name="collision_Joint_Link3.3_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_27" name="collision_Joint_Link3.3_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_28" name="collision_Joint_Link3.3_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_29" name="collision_Joint_Link3.3_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_30" name="collision_Joint_Link3.3_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="collision_Joint_Link3.3_31" name="collision_Joint_Link3.3_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+              </body>
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_0" name="collision_Joint_Link2_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_1" name="collision_Joint_Link2_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_2" name="collision_Joint_Link2_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_3" name="collision_Joint_Link2_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_4" name="collision_Joint_Link2_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_5" name="collision_Joint_Link2_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_6" name="collision_Joint_Link2_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_7" name="collision_Joint_Link2_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_8" name="collision_Joint_Link2_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_9" name="collision_Joint_Link2_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_10" name="collision_Joint_Link2_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_11" name="collision_Joint_Link2_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_12" name="collision_Joint_Link2_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_13" name="collision_Joint_Link2_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_14" name="collision_Joint_Link2_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_15" name="collision_Joint_Link2_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_16" name="collision_Joint_Link2_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_17" name="collision_Joint_Link2_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_18" name="collision_Joint_Link2_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_19" name="collision_Joint_Link2_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_20" name="collision_Joint_Link2_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_21" name="collision_Joint_Link2_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_22" name="collision_Joint_Link2_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_23" name="collision_Joint_Link2_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_24" name="collision_Joint_Link2_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_25" name="collision_Joint_Link2_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_26" name="collision_Joint_Link2_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_27" name="collision_Joint_Link2_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_28" name="collision_Joint_Link2_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_29" name="collision_Joint_Link2_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_30" name="collision_Joint_Link2_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+              <geom type="mesh" rgba="0.65098 0.61961 0.58824 1" mesh="collision_Joint_Link2_31" name="collision_Joint_Link2_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+            </body>
+          </body>
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_0" name="collision_Joint_Link1_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_1" name="collision_Joint_Link1_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_2" name="collision_Joint_Link1_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_3" name="collision_Joint_Link1_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_4" name="collision_Joint_Link1_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_5" name="collision_Joint_Link1_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_6" name="collision_Joint_Link1_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_7" name="collision_Joint_Link1_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_8" name="collision_Joint_Link1_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_9" name="collision_Joint_Link1_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_10" name="collision_Joint_Link1_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_11" name="collision_Joint_Link1_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_12" name="collision_Joint_Link1_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_13" name="collision_Joint_Link1_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_14" name="collision_Joint_Link1_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_15" name="collision_Joint_Link1_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_16" name="collision_Joint_Link1_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_17" name="collision_Joint_Link1_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_18" name="collision_Joint_Link1_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_19" name="collision_Joint_Link1_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_20" name="collision_Joint_Link1_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_21" name="collision_Joint_Link1_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_22" name="collision_Joint_Link1_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_23" name="collision_Joint_Link1_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_24" name="collision_Joint_Link1_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_25" name="collision_Joint_Link1_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_26" name="collision_Joint_Link1_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_27" name="collision_Joint_Link1_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_28" name="collision_Joint_Link1_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_29" name="collision_Joint_Link1_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_30" name="collision_Joint_Link1_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="collision_Joint_Link1_31" name="collision_Joint_Link1_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+        </body>
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_0" name="collision_Joint_Link1.1_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_1" name="collision_Joint_Link1.1_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_2" name="collision_Joint_Link1.1_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_3" name="collision_Joint_Link1.1_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_4" name="collision_Joint_Link1.1_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_5" name="collision_Joint_Link1.1_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_6" name="collision_Joint_Link1.1_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_7" name="collision_Joint_Link1.1_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_8" name="collision_Joint_Link1.1_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_9" name="collision_Joint_Link1.1_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_10" name="collision_Joint_Link1.1_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_11" name="collision_Joint_Link1.1_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_12" name="collision_Joint_Link1.1_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_13" name="collision_Joint_Link1.1_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_14" name="collision_Joint_Link1.1_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_15" name="collision_Joint_Link1.1_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_16" name="collision_Joint_Link1.1_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_17" name="collision_Joint_Link1.1_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_18" name="collision_Joint_Link1.1_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_19" name="collision_Joint_Link1.1_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_20" name="collision_Joint_Link1.1_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_21" name="collision_Joint_Link1.1_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_22" name="collision_Joint_Link1.1_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_23" name="collision_Joint_Link1.1_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_24" name="collision_Joint_Link1.1_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_25" name="collision_Joint_Link1.1_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_26" name="collision_Joint_Link1.1_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_27" name="collision_Joint_Link1.1_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_28" name="collision_Joint_Link1.1_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_29" name="collision_Joint_Link1.1_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_30" name="collision_Joint_Link1.1_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+        <geom type="mesh" rgba="0.74902 0.74902 0.74902 1" mesh="collision_Joint_Link1.1_31" name="collision_Joint_Link1.1_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+      </body>
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_0" name="collision_base_link_0" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_1" name="collision_base_link_1" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_2" name="collision_base_link_2" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_3" name="collision_base_link_3" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_4" name="collision_base_link_4" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_5" name="collision_base_link_5" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_6" name="collision_base_link_6" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_7" name="collision_base_link_7" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_8" name="collision_base_link_8" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_9" name="collision_base_link_9" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_10" name="collision_base_link_10" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_11" name="collision_base_link_11" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_12" name="collision_base_link_12" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_13" name="collision_base_link_13" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_14" name="collision_base_link_14" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_15" name="collision_base_link_15" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_16" name="collision_base_link_16" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_17" name="collision_base_link_17" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_18" name="collision_base_link_18" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_19" name="collision_base_link_19" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_20" name="collision_base_link_20" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_21" name="collision_base_link_21" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_22" name="collision_base_link_22" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_23" name="collision_base_link_23" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_24" name="collision_base_link_24" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_25" name="collision_base_link_25" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_26" name="collision_base_link_26" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_27" name="collision_base_link_27" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_28" name="collision_base_link_28" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_29" name="collision_base_link_29" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_30" name="collision_base_link_30" group="3" density="0" friction="0.8 0.005 0.0001" />
+      <geom type="mesh" rgba="1 1 1 1" mesh="collision_base_link_31" name="collision_base_link_31" group="3" density="0" friction="0.8 0.005 0.0001" />
+    </body>
+  </worldbody>
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81" />
+  <contact>
+    <exclude body1="base_link" body2="Joint_Link1.1" />
+    <exclude body1="base_link" body2="Joint_Link1" />
+    <exclude body1="Joint_Link1.1" body2="Joint_Link1" />
+    <exclude body1="Joint_Link1" body2="Joint_Link2" />
+    <exclude body1="Joint_Link1" body2="Joint_Link3.3" />
+    <exclude body1="Joint_Link2" body2="Joint_Link3.3" />
+    <exclude body1="Joint_Link2" body2="Joint_Link3" />
+    <exclude body1="Joint_Link2" body2="Joint_Link4.4" />
+    <exclude body1="Joint_Link3.3" body2="Joint_Link3" />
+    <exclude body1="Joint_Link3.3" body2="Joint_Link4.4" />
+    <exclude body1="Joint_Link3" body2="Joint_Link4.4" />
+    <exclude body1="Joint_Link3" body2="Joint_Link4" />
+    <exclude body1="Joint_Link3" body2="Joint_Link5.5" />
+    <exclude body1="Joint_Link4.4" body2="Joint_Link4" />
+    <exclude body1="Joint_Link4.4" body2="Joint_Link5.5" />
+    <exclude body1="Joint_Link4" body2="Joint_Link5.5" />
+    <exclude body1="Joint_Link4" body2="Joint_Link5" />
+    <exclude body1="Joint_Link4" body2="Joint_Link6.6" />
+    <exclude body1="Joint_Link5.5" body2="Joint_Link5" />
+    <exclude body1="Joint_Link5.5" body2="Joint_Link6.6" />
+    <exclude body1="Joint_Link5" body2="Joint_Link6.6" />
+    <exclude body1="Joint_Link5" body2="Joint_Link6" />
+    <exclude body1="Joint_Link5" body2="Joint_Link7.7" />
+    <exclude body1="Joint_Link6.6" body2="Joint_Link6" />
+    <exclude body1="Joint_Link6.6" body2="Joint_Link7.7" />
+    <exclude body1="Joint_Link6" body2="Joint_Link7.7" />
+    <exclude body1="Joint_Link6" body2="Joint_Link7" />
+    <exclude body1="Joint_Link7.7" body2="Joint_Link7" />
+    <exclude body1="base_link" body2="Joint_Link2" />
+    <exclude body1="base_link" body2="Joint_Link3" />
+  </contact>
+  <actuator>
+    <motor name="actuator_Joint_Link1" joint="Joint_Link1" gear="1" ctrllimited="true" ctrlrange="-11.0 11.0" user="3.1416" />
+    <motor name="actuator_Joint_Link2" joint="Joint_Link2" gear="1" ctrllimited="true" ctrlrange="-11.0 11.0" user="3.1416" />
+    <motor name="actuator_Joint_Link3" joint="Joint_Link3" gear="1" ctrllimited="true" ctrlrange="-45.0 45.0" user="3.1416" />
+    <motor name="actuator_Joint_Link4" joint="Joint_Link4" gear="1" ctrllimited="true" ctrlrange="-45.0 45.0" user="3.1416" />
+    <motor name="actuator_Joint_Link5" joint="Joint_Link5" gear="1" ctrllimited="true" ctrlrange="-11.0 11.0" user="3.1416" />
+    <motor name="actuator_Joint_Link6" joint="Joint_Link6" gear="1" ctrllimited="true" ctrlrange="-11.0 11.0" user="3.1416" />
+    <motor name="actuator_Joint_Link7" joint="Joint_Link7" gear="1" ctrllimited="true" ctrlrange="-11.0 11.0" user="3.1416" />
+  </actuator>
+  <statistic center="0 0.08 0.35" extent="0.8" />
+</mujoco>

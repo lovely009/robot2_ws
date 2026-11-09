@@ -1,0 +1,12 @@
+# 仅供离线传动换算；方向、编码器和行程未验收，URDF 零限位禁止激活运动。
+motor_hardware:
+  transmissions_file: transmissions.yaml
+  motor_specs_file: ../../../config/motor.yaml
+  motors:
+    arm_joint1: {id: 1, joint: Joint_Link1, type: cerb_r48_101}
+    arm_joint2: {id: 2, joint: Joint_Link2, type: cerb_r48_101}
+    arm_joint3: {id: 3, joint: Joint_Link3, type: cerb_r58_101}
+    arm_joint4: {id: 4, joint: Joint_Link4, type: cerb_r58_101}
+    arm_joint5: {id: 5, joint: Joint_Link5, type: cerb_r48_101}
+    arm_joint6: {id: 6, joint: Joint_Link6, type: cerb_r48_101}
+    arm_joint7: {id: 7, joint: Joint_Link7, type: cerb_r48_101}

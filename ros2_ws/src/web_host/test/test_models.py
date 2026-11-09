@@ -17,6 +17,35 @@ from web_host.models import (
 PKG = Path(__file__).resolve().parent.parent
 
 
+def test_trial_arm_spatial_metadata_keeps_coupled_ids():
+    root = PKG.parent / 'robot_description/models'
+    metadata = model_transmissions('trial_arm_7dof', root)
+    assert metadata['policy_defaults'] == {}
+    assert metadata['direct_joints'] == {i: f'Joint_Link{i}' for i in range(3, 8)}
+    groups = metadata['groups']
+    assert len(groups) == 6
+    shoulder = next(g for g in groups if g['name'] == 'shoulder_linkage')
+    assert shoulder['motors'] == [
+        {'name': 'arm_joint1', 'id': 1}, {'name': 'arm_joint2', 'id': 2}]
+    assert shoulder['joints'] == ['Joint_Link1', 'Joint_Link2']
+    assert not shoulder['direct_mapping']
+    assert shoulder['legacy_mapping_reason'] == 'coupled_group_not_flattened'
+
+
+def test_trial_arm_uncalibrated_limits_block_workbench():
+    import xml.etree.ElementTree as ET
+    from motor_hardware_interface.workbench_control import WorkbenchModel
+    model = PKG.parent / 'robot_description/models/trial_arm_7dof'
+    urdf = model / 'urdf/trial_arm_7dof.urdf'
+    joints = [j for j in ET.parse(urdf).getroot().findall('joint') if j.get('type') == 'revolute']
+    assert len(joints) == 7
+    for joint in joints:
+        assert all(float(joint.find('limit').get(key)) == 0 for key in ('lower', 'upper', 'effort', 'velocity'))
+    with pytest.raises(ValueError, match='P/V/E 限位'):
+        WorkbenchModel(str(model / 'config/motor_driver.yaml'), str(urdf))
+
+
+
 # --- 枚举：臂视图候选 --------------------------------------------------------
 
 def test_enumerate_arm_models_uses_root(tmp_path: Path) -> None:

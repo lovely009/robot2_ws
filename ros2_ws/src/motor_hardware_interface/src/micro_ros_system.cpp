@@ -732,15 +732,19 @@ bool MicroRosSystem::publish(bool commanded, std::string &error) {
   message.sequence = command_seq_;
   if (commanded) {
     robot_transmission::AxisMap joints;
+    std::map<std::string,double> efforts, measured_positions;
     for (std::size_t index = 0; index < info_.joints.size(); ++index) {
-      joints.emplace(info_.joints[index].name,
-        robot_transmission::Axis(command_position_[index], command_velocity_[index],
-          claimed_command_interfaces_.count(info_.joints[index].name + "/effort") ?
-          command_effort_[index] : 0.0));
+      const auto &name=info_.joints[index].name;
+      joints.emplace(name, robot_transmission::Axis(command_position_[index], command_velocity_[index]));
+      efforts.emplace(name,claimed_command_interfaces_.count(name + "/effort") ? command_effort_[index] : 0.0);
+      measured_positions.emplace(name,position_[index]);
     }
     robot_transmission::AxisMap actuators;
     try {
       actuators = model_->joint_to_actuator(joints);
+      // 位置/速度取目标，力矩雅可比只取本次已校验的实测姿态。
+      const auto motor_efforts=model_->joint_effort_to_actuator(efforts,measured_positions);
+      for(auto &[name,axis]:actuators) axis.effort=motor_efforts.at(name);
     } catch (const std::exception &exception) {
       error = "transmission command mapping failed: " + std::string(exception.what());
       return false;

@@ -5,7 +5,8 @@ systemd 默认的 `KillMode=control-group`。本模块校验请求并生成 unit
 
 本模块归 bench_manager（web 前端经 /bench/* 服务间接使用）；`backend` 选择被控对象
 （gazebo | mujoco），只影响传给 simulation.launch.py 的参数与「模型是否有 MJCF」这条
-校验；传输与控制端的校验对两个后端一致。
+校验；传输与控制端的校验对两个后端一致。没有仿真拓扑的 MuJoCo 模型仅以
+external 模式直接启动 mujoco.launch.py，不经过 CAN 传输或控制端。
 
 只读模型目录的**文件域**函数（simulation_model_joints / enumerate_arm_models）不在
 这里——它们服务臂视图与前端静态域，归 web_host/models.py。
@@ -160,6 +161,24 @@ class SimulationProcessManager:
             raise ValueError("backend must be gazebo or mujoco")
         if mode == "firmware" and transport == "vcan":
             raise ValueError("vcan is software-only and cannot connect to an MCU")
+
+        standalone_mujoco = (
+            backend == "mujoco"
+            and mode == "external"
+            and isinstance(model, str)
+            and model not in self._model_provider()
+            and model in self._mujoco_model_provider()
+        )
+        if standalone_mujoco:
+            config = {
+                "backend": backend,
+                "transport": transport,
+                "controller_mode": mode,
+                "model": model,
+            }
+            _model_parameters(request, backend)
+            return config, [f"model:={model}"], "mujoco.launch.py"
+
         if not isinstance(model, str) or model not in self._model_provider():
             raise ValueError("model has no installed full-simulation topology")
         if backend == "mujoco" and model not in self._mujoco_model_provider():
@@ -242,7 +261,7 @@ class SimulationProcessManager:
                 "start_fdcan_sim:=false",
                 "start_host_control:=false",
             ])
-        return config, launch_args
+        return config, launch_args, "simulation.launch.py"
 
     def _status(self):
         """从 unit 派生状态，并恢复其环境中的会话配置。
@@ -265,7 +284,7 @@ class SimulationProcessManager:
         重启会打断正在跑的仿真，所以 RUNNING 且配置相同直接返回。配置不同则拒绝：
         换后端/模型/端点不是「重启一下」，那是另一次会话，该先显式停掉。
         """
-        config, launch_args = self._validate_and_build(request)
+        config, launch_args, launch_file = self._validate_and_build(request)
         status = self._status()
         if status["state"] == "running":
             if status["config"] == config:
@@ -275,7 +294,7 @@ class SimulationProcessManager:
                 "configuration; stop it first")
         self._systemd.start(
             UNIT_SIMULATION,
-            ["ros2", "launch", "robot_sim", "simulation.launch.py",
+            ["ros2", "launch", "robot_sim", launch_file,
              *launch_args],
             session_env=config_env(_CONFIG_ENV_PREFIX, config))
         return self._status()

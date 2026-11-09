@@ -1,4 +1,5 @@
 #include "robot_transmission/model.hpp"
+#include "robot_transmission/spatial_linkage.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -88,6 +89,8 @@ struct Model::Impl {
     runtime_group->factory=loader.createSharedInstance(g.plugin);
     runtime_group->transmission=runtime_group->factory->load(info);
     if (!runtime_group->transmission) throw std::invalid_argument("transmission plugin rejected group "+g.name);
+    g.position_dependent=bool(std::dynamic_pointer_cast<SpatialLinkageTransmission>(runtime_group->transmission));
+    runtime_group->config=g;
     runtime_group->configure();
     groups.push_back(g);
     joint_names.insert(joint_names.end(),g.joints.begin(),g.joints.end());
@@ -122,6 +125,33 @@ struct Model::Impl {
         output.emplace(dst_names[i],dst[i]);
       }
     }
+    return output;
+  }
+  std::map<std::string,double> effort_transform(
+    const std::map<std::string,double> &effort, const std::map<std::string,double> &positions, bool to_joint)
+  {
+    const auto &known=to_joint?actuator_names:joint_names;
+    for(const auto &[name,value]:positions) {
+      if(std::find(known.begin(),known.end(),name)==known.end() || !std::isfinite(value))
+        throw std::invalid_argument("unknown or nonfinite pose axis "+name);
+    }
+    for(const auto &g:groups) {
+      if(!g.position_dependent) continue;
+      const auto &names=to_joint?g.actuators:g.joints;
+      const bool touched=std::any_of(names.begin(),names.end(),[&](const auto &n){ return effort.count(n); });
+      if(!touched) continue;
+      for(const auto &name:names) {
+        if(!effort.count(name) || !positions.count(name))
+          throw std::invalid_argument("nonlinear effort needs complete effort and input-side pose for "+g.name);
+      }
+    }
+    AxisMap input;
+    for(const auto &[name,value]:effort) {
+      auto p=positions.find(name);
+      input.emplace(name,Axis(p==positions.end()?0:p->second,0,value));
+    }
+    std::map<std::string,double> output;
+    for(const auto &[name,axis]:transform(input,to_joint)) output.emplace(name,axis.effort);
     return output;
   }
 };
@@ -195,19 +225,13 @@ const std::map<std::string,int> &Model::actuator_ids() const { return impl_->act
 const std::vector<Group> &Model::groups() const { return impl_->groups; }
 AxisMap Model::actuator_to_joint(const AxisMap &state) const { return impl_->transform(state,true); }
 AxisMap Model::joint_to_actuator(const AxisMap &state) const { return impl_->transform(state,false); }
-std::map<std::string,double> Model::joint_effort_to_actuator(const std::map<std::string,double> &effort) const {
-  AxisMap input;
-  for (const auto &[name,value]:effort) input.emplace(name,Axis(0,0,value));
-  std::map<std::string,double> output;
-  for (const auto &[name,axis]:joint_to_actuator(input)) output.emplace(name,axis.effort);
-  return output;
+std::map<std::string,double> Model::joint_effort_to_actuator(
+  const std::map<std::string,double> &effort, const std::map<std::string,double> &joint_positions) const {
+  return impl_->effort_transform(effort,joint_positions,false);
 }
-std::map<std::string,double> Model::actuator_effort_to_joint(const std::map<std::string,double> &effort) const {
-  AxisMap input;
-  for (const auto &[name,value]:effort) input.emplace(name,Axis(0,0,value));
-  std::map<std::string,double> output;
-  for (const auto &[name,axis]:actuator_to_joint(input)) output.emplace(name,axis.effort);
-  return output;
+std::map<std::string,double> Model::actuator_effort_to_joint(
+  const std::map<std::string,double> &effort, const std::map<std::string,double> &actuator_positions) const {
+  return impl_->effort_transform(effort,actuator_positions,true);
 }
 std::vector<std::string> Model::actuators_for_joint(const std::string &joint) const {
   for (const auto &g:impl_->groups) if (std::find(g.joints.begin(),g.joints.end(),joint)!=g.joints.end()) return g.actuators;

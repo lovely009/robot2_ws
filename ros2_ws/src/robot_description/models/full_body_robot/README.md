@@ -73,9 +73,10 @@
 25 路一对一输入及六组差动的 12 路输入。整机保留了 10 根定长连杆的闭环，可在同一窗口调试全身。
 
 在 **仿真工作台**选择 **MuJoCo → 外部控制器 → vcan（纯软件）→ full_body_robot** 后启动。
-切到 **调试 → 关节**，等到面板显示 **MuJoCo 位置控制** 后即可拖动 37 个关节滑块。
+切到 **调试 → 关节**，等到面板显示 **MuJoCo 位置控制** 后即可使用关节滑块。
 直驱关节发送位置目标，差动关节按球头与定长连杆几何求解电机角，并保留同组另一轴的目标。
-直驱范围约 ±10°，差动输出范围为腰 ±0.075 rad、胯 ±0.035 rad、肩 ±0.070 rad、腕 ±0.045 rad。
+37 轴各自使用 [`config/simulation_limits.yaml`](config/simulation_limits.yaml) 的几何扫描范围。
+零位时 37 个滑块均可用。六组差动的范围随同组另一轴的目标角度更新，界面显示当前姿态下连续可用的区间。
 仿真发布 `/joint_states`、`/tf` 和 `/clock`。工作台的整机视图和仿真 TF 都使用从 MJCF 生成的
 `full_body_robot.standalone.urdf`。仿真发布 67 个关节状态，其中 37 个对应工作台滑块，30 个用于显示差动法兰和连杆。
 
@@ -84,7 +85,7 @@
   --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/full_body_robot/mujoco/full_body_robot.xml
 ```
 
-在 **Control** 面板拖动滑块，输入单位 rad，调试范围 ±10°。`motor_01` 等沿用一对一电机编号；
+在 **Control** 面板拖动滑块，输入单位 rad，每个输入使用 YAML 中各自的 `actuator_limits`。`motor_01` 等沿用一对一电机编号；
 差动滑块以 `waist_`、`hips_`、`left_shoulder_`、`right_shoulder_`、`left_wrist_`、`right_wrist_` 分组。
 在 **Simulation** 面板可加载零位及六组同时同向或反向的关键帧。
 
@@ -95,6 +96,52 @@
 MJCF、显示副本和仿真 URDF 可用 MuJoCo 环境执行 `tools/build_mujoco_model.py` 重建，需 VTK、NumPy、SciPy 和 PyYAML。
 原始 STL 及六份单组 MJCF 是生成器输入，`mujoco/visual/`、整机 MJCF 和 standalone URDF 一并纳入版本管理。
 工作台按上次提交的整组关节目标保持位置。在同一仿真会话中交替操作 Viewer 和工作台时，工作台会恢复其保存的其他关节目标。
+
+### CAD 几何仿真限位
+
+原始 CAD URDF 的关节上下限全部为零。扫描器使用装配后的三角网格和定长连杆逆解，
+电机输出轴按用户确认的 ±180° 搜索，逐轴以 1° 步长搜索到首次干涉或连杆切向奇异边界，并向内收 2°。
+六组差动另外在单轴扫描范围内检查两轴的 1° 网格，在边界内收两格，保留零位连通的二维区域。
+差动目标的四个相邻网格点均需有效，工作台根据同组另一轴目标角度更新滑块范围。
+其他输出关节保持零位。
+完整边界原因、零位配合面排除清单和几何指纹记录在 [`mujoco/geometry_limits.json`](mujoco/geometry_limits.json)。
+
+网格按 CAD 连通零件分开检查。零位距离小于 0.5 mm 的零件对作为配合面排除，
+用于容纳导出与降面误差，运动时对其余零件对检查 0.1 mm 间隙。
+按用户允许部分干涉的要求，两侧大腿的 6 个转动连接、两侧手腕的 4 个输出连接、4 个电机法兰连接和
+4 个连杆球头连接，共 18 对直接相邻装配体，允许内部 CAD 重叠。
+报告的 `adjacent_assembly_exclusions` 列出这些装配体对。此项按装配关系过滤接触，未设置实体穿透深度上限。
+
+当前范围如下，角度单位为度。手腕表值为整个二维可动区域的投影包络，实际滑块范围随另一腕轴当前目标变化。
+
+| 部位 | axis_1 | axis_2 | axis_3 |
+|---|---|---|---|
+| 左大腿 | −100～32 | −15～64 | −178～178 |
+| 右大腿 | −40～88 | −15～64 | −178～178 |
+| 左腕 | −36～36 | −13～13 | |
+| 右腕 | −13～13 | −32～36 | |
+
+这些范围仅供仿真使用。三角面检测与离散采样仍可能漏掉实体包容或采样点之间的干涉，
+跨组组合姿态、线缆约束和实机编码器方向需要另行检查。达到 ±178° 的轴来自 ±180° 搜索上限内收余量。
+
+在工程根目录重算，使用系统 Python 的 Coal/NumPy 环境和已有 MuJoCo 环境。
+
+```bash
+source ros2_ws/install/setup.bash
+/usr/bin/python3 ros2_ws/src/robot_description/models/full_body_robot/tools/derive_simulation_limits.py
+~/.ros/ros2_control/.venv/bin/python ros2_ws/src/robot_description/models/full_body_robot/tools/build_mujoco_model.py
+```
+
+仅重算两侧大腿和手腕时，为扫描命令添加 `--refine-thigh-wrist`，再运行整机生成器。
+只重算六组差动时，使用 `--refine-coupled`，再运行整机生成器。
+扫描报告中各组的 `envelope_deg` 为整个二维可动区域的投影范围，工作台显示由当前另一轴目标决定的范围。
+
+整机生成器将扫描限位写入 MJCF 和 standalone URDF。下列单组模型保留各自的 ±10° 法兰探索输入。
+
+动作工作台从模型库选择本模型时，使用同一份仿真位置范围和六组耦合区域转换 37 轴动作。
+软件预览速度上限为 π rad/s，报告以 `simulation_limits_enforced` 标记。此速度上限用于离线预览。
+预览中的 30 个辅助轴由 MuJoCo 几何逆解重建，显示完整 CAD 法兰与连杆。
+导出的关节动作保留 37 轴，并提供对应的预览 URDF。
 
 ### 单组闭环调试
 
@@ -131,7 +178,8 @@ MJCF、显示副本和仿真 URDF 可用 MuJoCo 环境执行 `tools/build_mujoco
 ros2 launch robot_sim display.launch.py model:=full_body_robot
 ```
 
-当前 37 个关节的 `lower/upper/effort/velocity` 均为 0，按限位工作的预览器不能拖动关节。
+主 URDF 和映射版中 37 个关节的 `lower/upper/effort/velocity` 均为 0，按限位工作的原始预览器不能拖动关节。
+工作台 MuJoCo 入口使用上述 standalone URDF 的仿真范围。
 电机拓扑目前用于记录编号和分组。上面的 MuJoCo 模型为独立几何调试入口，整机驱动和 HIL 配置待实机标定。
 原始网格约 330 万个三角面，加载可能较慢，其中 3 个 STL 超过本机 MuJoCo 的面数上限。
 

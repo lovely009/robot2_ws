@@ -11,8 +11,10 @@ type GenericMapping = { mode: 'generic'; source_root: string; reference_frame: n
 type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progress: number;
   bvh_name: string; urdf_name: string; robot_name: string; frames: number; frame_time: number;
   joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | GenericMapping | null;
+  constraint_source?: string; velocity_limit_rad_s?: number;
   warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
-  summary?: { mechanical_limits_enforced?: boolean; covered_joints?: string[]; unmapped_joints?: string[];
+  summary?: { mechanical_limits_enforced?: boolean; simulation_limits_enforced?: boolean;
+    covered_joints?: string[]; unmapped_joints?: string[];
     orientation_max_deg?: number }; error?: string };
 type Preview = { times: number[]; duration: number };
 const props = defineProps<{ currentModel: string }>();
@@ -196,6 +198,7 @@ async function submit() {
       throw Error('两份文件合计请控制在 20 MB 内');
     await accept(await request('/api/motion/jobs', {
       retargeting: 'generic', review_mapping: reviewMapping.value,
+      ...(modelName ? {model: modelName} : {}),
       ...(sourceName ? { bvh_source: sourceName } : { bvh_name: bvhFile!.name, bvh_text: await bvhFile!.text() }),
       urdf_name: modelName ? `${modelName}.urdf` : urdfFile!.name,
       urdf_text: urdfText, up_axis: upAxis.value, scale: scale.value }));
@@ -272,6 +275,7 @@ onBeforeUnmount(() => {
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>
           <span>机器人 <strong>{{ job.joint_count }} 个关节</strong></span>
+          <span v-if="job.constraint_source === 'simulation'">预览范围 <strong>仿真几何与耦合限位 · {{ job.velocity_limit_rad_s?.toFixed(2) }} rad/s</strong></span>
           <span v-if="job.mapping_origin">映射来源 <strong>{{ job.mapping_origin === 'saved' ? '复用已确认映射' : job.mapping_origin === 'builtin' ? '已支持的双臂或肩关节映射' : job.mapping_saved ? '已确认并记住' : job.state === 'mapping' ? '候选待确认' : '本次已确认' }}</strong></span>
           <span v-if="job.mapping?.mode === 'shoulders12'">转换范围 <strong>右肩 → joint_link1、joint_link2；其余关节保持中立位，保留原帧与时间</strong></span>
         </div>
@@ -305,7 +309,7 @@ onBeforeUnmount(() => {
         <label>人体根参考<select v-model="genericMapping.source_root" aria-label="人体根参考"><option v-for="name in job.source_joints" :key="name">{{ name }}</option></select></label>
         <label>参考帧<input v-model.number="genericMapping.reference_frame" type="number" min="0" :max="job.frames - 1" step="1" aria-label="参考帧" /></label>
         <div class="motion-alignment"><label v-for="(axis, i) in ['X', 'Y', 'Z']" :key="axis">对齐 {{ axis }}（°）<input v-model.number="alignment[i]" type="number" step="1" :aria-label="`对齐 ${axis} 角度`" /></label></div>
-        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">按 URDF 位置和速度限位</option><option value="preview">仅几何预览：忽略缺失限位</option></select></label>
+        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">{{ job.constraint_source === 'simulation' ? '按仿真位置、速度和耦合范围' : '按 URDF 位置和速度限位' }}</option><option v-if="job.constraint_source !== 'simulation'" value="preview">仅几何预览：忽略缺失限位</option></select></label>
         <details v-if="job.warnings?.length" class="motion-mapping-notes"><summary>模型有 {{ job.warnings.length }} 项需核对</summary><ul><li v-for="warning in job.warnings" :key="warning">{{ warning }}</li></ul></details>
         <div class="motion-targets"><div v-for="target in genericMapping.targets" :key="target.target" class="motion-target-row">
           <label :for="`mapping-${target.target}`">{{ target.target }}<small>{{ target.reason || '已确认的对应关系' }}</small></label>
@@ -338,8 +342,9 @@ onBeforeUnmount(() => {
     <section v-if="job?.state === 'done'" class="motion-result surface" aria-label="动作转换结果">
       <div><Check :size="16" /><strong>转换完成</strong><span>{{ job.frames.toLocaleString() }} 帧 · {{ job.joint_count }} 个关节 · 可拖动进度查看动作</span></div>
       <a :href="`${base(job.id)}/motion.npz`" download><Download :size="14" />导出关节动作</a>
+      <a :href="`${base(job.id)}/robot.urdf`" download>导出预览 URDF</a>
       <a :href="`${base(job.id)}/report.json`" download>转换报告</a>
-      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
+      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.simulation_limits_enforced ? '已检查仿真位置、速度和耦合范围' : job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
       <span v-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>
     <p class="motion-footnote">机器人按 URDF 显示实体模型，自动加载工程内 STL / DAE 网格；缺失网格时保留骨架。临时保留最近 3 次导入，服务重启后需重新导入。</p>

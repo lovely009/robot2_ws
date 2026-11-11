@@ -163,8 +163,21 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
     assert len(standalone.findall("joint")) == 67
     assert len(standalone.findall(".//geometry")) == len(standalone.findall(".//geometry/mesh"))
     topology = yaml.safe_load((MODEL / "config/motor_topology.yaml").read_text())
+    limits = yaml.safe_load((MODEL / "config/simulation_limits.yaml").read_text())
+    assert set(limits["joint_limits"]) == {joint.get("name") for joint in controlled}
+    for joint in controlled:
+        name = joint.get("name")
+        bound = limits["joint_limits"][name]
+        exported = standalone.find(f"joint[@name='{name}']")
+        assert exported.get("type") == "revolute"
+        assert float(exported.find("limit").get("lower")) == bound["lower"]
+        assert float(exported.find("limit").get("upper")) == bound["upper"]
+        np.testing.assert_allclose(model.joint(name).range, [bound["lower"], bound["upper"]], atol=1e-9)
     addresses = model.jnt_qposadr[model.actuator_trnid[:, 0]]
-    direct = [(model.actuator(f"motor_{number:02d}").id, motor["joint"], np.deg2rad(3 * (-1)**number))
+    direct = [(model.actuator(f"motor_{number:02d}").id, motor["joint"],
+               float(np.clip(np.deg2rad(3 * (-1)**number),
+                             limits["joint_limits"][motor["joint"]]["lower"],
+                             limits["joint_limits"][motor["joint"]]["upper"])))
               for number, motor in topology["motors"].items() if "joint" in motor]
     for index, joint, _ in direct:
         assert addresses[index] == model.jnt_qposadr[model.joint(joint).id]
@@ -224,7 +237,11 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
                                        data.site(f"{name}_motor_ball").xpos, atol=1e-10)
             np.testing.assert_allclose(data.site(f"{name}_rod_tip").xpos,
                                        data.site(f"{name}_platform_ball").xpos, atol=1e-6)
-            assert np.linalg.norm(flange_rotation(name) - flange_rotations[name]) > 0.05
+            geom = data.geom(f"{name}_flange_visual")
+            joint = model.body_jntadr[model.geom_bodyid[geom.id]]
+            angle = key.qpos[model.jnt_qposadr[joint]]
+            assert np.linalg.norm(flange_rotation(name) - flange_rotations[name]) == pytest.approx(
+                2 * np.sqrt(2) * abs(np.sin(angle / 2)), abs=1e-8)
         target, expected = key.ctrl.copy(), key.qpos.copy()
         for index, _, angle in direct:
             target[index] = expected[addresses[index]] = angle
@@ -233,7 +250,8 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
             data.ctrl[:] = target * fraction
             mujoco.mj_step(model, data)
             np.testing.assert_allclose(data.ten_length, lengths, atol=3e-5)
-            assert np.max(np.abs(data.efc_pos[:data.nefc])) < 3e-5
+            equality = data.efc_type[:data.nefc] == mujoco.mjtConstraint.mjCNSTR_EQUALITY
+            assert np.max(np.abs(data.efc_pos[:data.nefc][equality])) < 3e-5
         mujoco.mj_step(model, data, nstep=2200)
         np.testing.assert_allclose(data.qpos, expected, atol=np.deg2rad(0.02))
         assert not any(warning.number for warning in data.warning)

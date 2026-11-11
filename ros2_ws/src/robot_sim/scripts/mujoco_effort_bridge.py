@@ -151,7 +151,7 @@ class MujocoEffortBridge(Node):
         self.position_status = {
             "model": config["model"],
             "session": uuid4().hex,
-            "limits": self.position_targets.limits,
+            "limits": self.position_targets.active_limits(),
             "reject": "",
         }
         self.position_publisher = self.create_publisher(String, "/robot_sim/position_status", 1)
@@ -159,6 +159,7 @@ class MujocoEffortBridge(Node):
         self.create_timer(0.5, self._publish_position_status)
 
     def _publish_position_status(self):
+        self.position_status["limits"] = self.position_targets.active_limits()
         self.position_publisher.publish(String(data=json.dumps(self.position_status, ensure_ascii=False)))
 
     def _on_position(self, message):

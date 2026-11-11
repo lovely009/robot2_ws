@@ -1,10 +1,12 @@
 """Generic jobs persist only confirmed mappings for the exact input identity."""
 
 import json
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from web_host.motion import MotionJobs
 
@@ -33,6 +35,62 @@ Frame Time: 0.02
 def finish(jobs, job):
     jobs.thread.join(10)
     return jobs.status(job['id'])
+
+
+def test_registered_full_body_uses_simulation_limits_and_moving_cad_preview():
+    model = Path(__file__).resolve().parents[2] / 'robot_description/models/full_body_robot'
+    source = (model / 'urdf/full_body_robot.urdf').read_text()
+    data = payload() | {'model': 'full_body_robot', 'urdf_text': source,
+                        'urdf_name': 'full_body_robot.urdf'}
+    jobs = MotionJobs()
+    try:
+        first = jobs.create(data)
+        assert first['constraint_source'] == 'simulation'
+        assert first['joint_count'] == 37 and not first['warnings']
+        jobs.start(first['id'], first['mapping'])
+        done = finish(jobs, first)
+        assert done['state'] == 'done', done.get('error', done)
+        assert done['summary']['simulation_limits_enforced']
+        assert not done['summary']['mechanical_limits_enforced']
+        preview = json.loads(jobs.result(first['id'], 'preview.json'))
+        assert len(preview['robot']['joint_names']) == 67
+        assert 'left_wrist_flange_proximal' in preview['robot']['joint_names']
+        assert len(preview['robot']['joint_positions'][0]) == 67
+        with np.load(BytesIO(jobs.result(first['id'], 'motion.npz'))) as motion:
+            assert motion['positions'].shape == (3, 37)
+            assert bool(motion['simulation_limits_enforced'])
+            columns = [preview['robot']['joint_names'].index(name) for name in motion['joint_names']]
+            np.testing.assert_allclose(np.asarray(preview['robot']['joint_positions'])[:, columns],
+                                       motion['positions'], atol=1e-8)
+        assert (model / 'urdf/full_body_robot.urdf').read_text() == source
+        assert 'velocity="3.141592653589793"' in jobs.result(first['id'], 'robot.urdf').decode()
+    finally:
+        jobs.close()
+
+
+def test_registered_model_rejects_changed_urdf_and_invalidates_changed_constraints(tmp_path):
+    model = Path(__file__).resolve().parents[2] / 'robot_description/models/full_body_robot'
+    directory = tmp_path / 'full_body_robot'
+    (directory / 'urdf').mkdir(parents=True)
+    (directory / 'config').mkdir()
+    source = (model / 'urdf/full_body_robot.urdf').read_text()
+    (directory / 'urdf/full_body_robot.urdf').write_text(source)
+    config = yaml.safe_load((model / 'config/simulation_limits.yaml').read_text())
+    path = directory / 'config/simulation_limits.yaml'
+    path.write_text(yaml.safe_dump(config))
+    jobs = MotionJobs(models_root=tmp_path)
+    try:
+        data = payload() | {'model':'full_body_robot', 'urdf_text':source}
+        first = jobs.create(data)
+        key = jobs.jobs[first['id']]['profile_key']
+        with pytest.raises(ValueError, match='不一致'):
+            jobs.create(data | {'urdf_text':source.replace('name="full_body_robot"', 'name="changed"')})
+        config['joint_limits']['BN_LeftUpperArm_axis_1']['upper'] = 3.
+        path.write_text(yaml.safe_dump(config))
+        second = jobs.create(data)
+        assert jobs.jobs[second['id']]['profile_key'] != key
+    finally:
+        jobs.close()
 
 
 def test_confirm_then_reuse_across_service_restart(tmp_path):

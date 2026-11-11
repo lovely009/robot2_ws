@@ -72,3 +72,31 @@ test('已保存映射自动转换，仍可请求重新确认', async ({page}) =>
   await expect(page.getByRole('region',{name:'通用映射确认'})).toBeVisible();
   await expect(page.getByLabel('unknown_link 人体对应')).toHaveValue('LeftArm');
 });
+
+test('整机模型提交注册名称并显示仿真范围，不再提示37项缺失限位', async ({page}) => {
+  await page.route('**/api/runtime', route => route.fulfill({json:{control_mode:'readonly',robot_model:'full_body_robot'}}));
+  await page.route('**/api/models', route => route.fulfill({json:{models:['full_body_robot']}}));
+  await page.route('**/robot_sim/models/full_body_robot/urdf/full_body_robot.urdf', route => route.fulfill({body:'<robot name="full_body_robot"/>'}));
+  const configured = {...job, robot_name:'full_body_robot', joint_count:37, warnings:[],
+    constraint_source:'simulation',velocity_limit_rad_s:Math.PI,
+    mapping:{...mapping,targets:[{target:'unknown_link',source:'LeftArm'}]}};
+  await page.route('**/api/motion/jobs', route => {
+    expect(route.request().postDataJSON().model).toBe('full_body_robot');
+    return route.fulfill({json:configured});
+  });
+  await page.route('**/api/motion/jobs/generic-fixture/convert', route => {
+    expect(route.request().postDataJSON().mapping.limit_policy).toBe('urdf');
+    return route.fulfill({json:{...configured,state:'done',summary:{simulation_limits_enforced:true,
+      mechanical_limits_enforced:false,covered_joints:Array.from({length:37},(_,i)=>`axis_${i}`)}}});
+  });
+  await page.route('**/api/motion/jobs/generic-fixture/preview.json', route => route.fulfill({json:preview}));
+  await page.goto('/workbench/#/motion');
+  await page.getByRole('button',{name:'导入并转换',exact:true}).click();
+  await expect(page.locator('details.motion-mapping-notes')).toHaveCount(0);
+  await expect(page.getByText('仿真几何与耦合限位 · 3.14 rad/s')).toBeVisible();
+  await expect(page.getByLabel('限位策略')).toHaveValue('urdf');
+  await expect(page.getByLabel('限位策略').locator('option')).toHaveCount(1);
+  await page.getByRole('button',{name:'确认映射并转换'}).click();
+  await expect(page.getByText('覆盖 37/37 个关节 · 已检查仿真位置、速度和耦合范围')).toBeVisible();
+  await expect(page.getByRole('link',{name:'导出预览 URDF'})).toHaveAttribute('href','/api/motion/jobs/generic-fixture/robot.urdf');
+});

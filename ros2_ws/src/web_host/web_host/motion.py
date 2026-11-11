@@ -13,9 +13,10 @@ import xml.etree.ElementTree as ET
 
 
 class MotionJobs:
-    def __init__(self, actions_dir=None, profiles_dir=None):
+    def __init__(self, actions_dir=None, profiles_dir=None, models_root=None):
         self.actions_dir = Path(actions_dir) if actions_dir is not None else None
         self.profiles_dir = Path(profiles_dir) if profiles_dir is not None else None
+        self.models_root = models_root
         self.directory = tempfile.TemporaryDirectory(prefix='workbench-motion-')
         self.jobs = {}
         self.lock = threading.RLock()
@@ -94,6 +95,9 @@ class MotionJobs:
         identity = {'version': 1, 'urdf': request['urdf_text'], 'up_axis': job['up_axis'],
                     'scale': job['scale'], 'reference': clip.frames[0].tolist(),
                     'skeleton': [(j.name, j.parent, j.offset.tolist(), j.channels) for j in clip.joints]}
+        if job.get('simulation'):
+            identity['urdf'] = (directory / 'robot.urdf').read_text()
+            identity['simulation_limits'] = job['simulation']['limits']
         job['profile_key'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         job['generic'] = True
         job['status'].update(analysis, mapping_origin='suggested')
@@ -165,7 +169,10 @@ class MotionJobs:
             raise ValueError('不支持的 BVH 坐标或单位')
         if '<!DOCTYPE' in request['urdf_text'].upper() or '<!ENTITY' in request['urdf_text'].upper():
             raise ValueError('URDF 不支持 DTD 或实体声明')
-        robot = ET.fromstring(request['urdf_text'])
+        from .motion_simulation import registered_simulation
+        simulation = registered_simulation(request, self.models_root)
+        urdf_text = simulation['urdf_text'] if simulation else request['urdf_text']
+        robot = ET.fromstring(urdf_text)
         if robot.tag != 'robot':
             raise ValueError('请选择有效的 URDF robot 文件')
         links = [link.attrib['name'] for link in robot.findall('link')]
@@ -197,7 +204,7 @@ class MotionJobs:
             directory.mkdir()
             try:
                 (directory / 'source.bvh').write_text(request['bvh_text'], encoding='utf-8')
-                (directory / 'robot.urdf').write_text(request['urdf_text'], encoding='utf-8')
+                (directory / 'robot.urdf').write_text(urdf_text, encoding='utf-8')
                 generic = request.get('retargeting') == 'generic'
                 clip = BvhClip.load(directory / 'source.bvh', preserve_names=generic)
                 if generic:
@@ -231,10 +238,13 @@ class MotionJobs:
                           'frames': len(clip.frames), 'frame_time': clip.frame_time,
                           'joint_count': model.nq, 'source_joints': sources, 'robot_links': links,
                           'automatic_mapping': automatic, 'mapping': template if automatic else None}
+                if simulation:
+                    status.update(constraint_source='simulation',
+                                  velocity_limit_rad_s=simulation['velocity_limit_rad_s'])
                 self.jobs[key] = {'directory': directory, 'clip': clip, 'scale': scale,
-                                  'up_axis': up_axis, 'status': status}
+                                  'up_axis': up_axis, 'status': status, 'simulation': simulation}
                 if generic:
-                    builtin = (automatic and not any(parsed_robot.missing)
+                    builtin = (automatic and not simulation and not any(parsed_robot.missing)
                                and all(j.get('type') == 'revolute' and j.find('mimic') is None
                                        for j in parsed_robot.spec.values()))
                     automatic = self._generic_mapping(self.jobs[key], request, template if automatic else None)
@@ -270,6 +280,12 @@ class MotionJobs:
                 from bvh_broadcaster.generic_retarget import GenericRetargeter
                 solver = GenericRetargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
                                           up_axis=job['up_axis'], scale=job['scale'])
+                if job.get('simulation'):
+                    from .motion_simulation import position_filter
+                    solver.position_filter = position_filter(job['simulation'], solver.robot.independent)
+                    solver.mechanical_limits_enforced = False
+                    solver.report.update(mechanical_limits_enforced=False, simulation_limits_enforced=True,
+                                         velocity_limit_rad_s=job['simulation']['velocity_limit_rad_s'])
                 job['status']['confirmation_required'] = False
                 job['status']['mapping_saved'] = self._remember_mapping(job, mapping) if remember else False
             else:
@@ -296,9 +312,13 @@ class MotionJobs:
                 job['status']['progress'] = round(frame / total * 90)
         try:
             positions, directions, orientations = solver.convert(progress)
+            if job.get('simulation'):
+                from .motion_simulation import validate_positions
+                validate_positions(job['simulation'], solver.names, positions)
             np.savez_compressed(directory / 'motion.npz', positions=positions,
                                 joint_names=solver.names, frame_time=clip.frame_time,
                                 preview_only=True,
+                                simulation_limits_enforced=bool(job.get('simulation')),
                                 mechanical_limits_enforced=getattr(solver, 'mechanical_limits_enforced', True),
                                 urdf_sha256=digest(directory / 'robot.urdf'),
                                 direction_error_deg=directions, orientation_error_deg=orientations)
@@ -340,6 +360,9 @@ class MotionJobs:
                                  'joint_names': solver.names,
                                  'joint_positions': np.round(positions[indices], 8).tolist()},
                        'source_to_robot': job['status']['mapping']['source_to_robot']}
+            if job.get('simulation'):
+                from .motion_simulation import cad_preview
+                preview['robot'].update(cad_preview(job['simulation'], solver.names, positions[indices]))
             (directory / 'preview.json').write_text(json.dumps(preview, allow_nan=False))
             summary = {'preview_only': True, 'frames': len(positions), 'joint_names': solver.names,
                        'frame_time': clip.frame_time, 'mapping': job['status']['mapping'],
@@ -356,7 +379,7 @@ class MotionJobs:
                 job['status'].update(state='failed', error=str(exc))
 
     def result(self, key, name):
-        if name not in ('preview.json', 'motion.npz', 'report.json'):
+        if name not in ('preview.json', 'motion.npz', 'report.json', 'robot.urdf'):
             raise FileNotFoundError('结果不存在')
         with self.lock:
             job = self._job(key)
@@ -421,8 +444,8 @@ def handle_motion(handler, jobs):
             elif len(parts) == 5:
                 body = jobs.result(parts[3], parts[4])
                 handler.send_response(200)
-                handler.send_header('Content-Type', 'application/octet-stream' if parts[4].endswith('.npz')
-                                    else 'application/json; charset=utf-8')
+                content_types = {'motion.npz': 'application/octet-stream', 'robot.urdf': 'application/xml; charset=utf-8'}
+                handler.send_header('Content-Type', content_types.get(parts[4], 'application/json; charset=utf-8'))
                 handler.send_header('Content-Length', str(len(body)))
                 handler.send_header('Cache-Control', 'no-store')
                 if parts[4] != 'preview.json':

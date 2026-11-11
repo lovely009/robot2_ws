@@ -108,7 +108,7 @@ def main(args=None):
     from pathlib import Path
     motion_jobs = MotionJobs(actions_dir=actions_directory(web_root),
                             profiles_dir=Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
-                            / 'robot2/motion_mappings')
+                            / 'robot2/motion_mappings', models_root=models_dir)
 
     class Handler(SimpleHTTPRequestHandler):
 

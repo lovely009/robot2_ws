@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
 import xml.etree.ElementTree as ET
 
 import mujoco
@@ -21,13 +22,8 @@ OUTPUT = MODEL / "mujoco/full_body_robot.xml"
 STANDALONE = MODEL / "urdf/full_body_robot.standalone.urdf"
 STL_FACE_LIMIT = 200_000
 DISPLAY_FACE_TARGET = 120_000
-DEBUG_CTRL_RANGE = "-0.174533 0.174533"
-# Symmetric output ranges that keep both flange angles within the servo range.
-DIFFERENTIAL_TARGET_LIMIT = {
-    "waist": 0.075, "hips": 0.035,
-    "left_shoulder": 0.070, "right_shoulder": 0.070,
-    "left_wrist": 0.045, "right_wrist": 0.045,
-}
+LIMITS = MODEL / "config/simulation_limits.yaml"
+LOCKED_SOLVER_RANGE = 1e-9
 
 # Region numbers refer to the original CAD STL exports, before display decimation.
 CAD_CUTS = {
@@ -386,7 +382,7 @@ def add_keyframes(root, world, actuators, modules):
         ET.SubElement(keys, "key", name=label, qpos=numbers(positions.values()), ctrl=numbers(inputs.values()))
 
 
-def write_standalone_urdf(mjcf, controlled_joints):
+def write_standalone_urdf(mjcf, controlled_joints, limits):
     """发布与仿真一致的 TF 和 CAD 外观，包括六组差动运动件。"""
     robot = ET.Element("robot", name=MODEL.name)
     robot.append(ET.Comment(" Generated from the whole-body MJCF for simulation visualization. "))
@@ -416,6 +412,11 @@ def write_standalone_urdf(mjcf, controlled_joints):
             joint = ET.SubElement(robot, "joint", name=source.get("name"), type="continuous")
             if source.get("name") not in controlled_joints:
                 joint.set("simulation_auxiliary", "true")
+            else:
+                joint.set("type", "revolute")
+                bound = limits["joint_limits"][source.get("name")]
+                ET.SubElement(joint, "limit", lower=str(bound["lower"]), upper=str(bound["upper"]),
+                              effort="0", velocity="0")
             ET.SubElement(joint, "parent", link=parent)
             ET.SubElement(joint, "child", link=child)
             add_origin(joint, body if index == 0 else ET.Element("origin"))
@@ -442,6 +443,9 @@ def build():
         children[joint.find("parent").get("link")].append(joint)
 
     topology = yaml.safe_load((MODEL / "config/motor_topology.yaml").read_text())
+    limits = yaml.safe_load(LIMITS.read_text())
+    if set(limits["joint_limits"]) != set(joints):
+        raise ValueError("Simulation limits must cover every physical joint")
     motors, groups = topology["motors"], topology["differential_groups"]
     controls = {number: [{"name": f"motor_{number:02d}", "joint": motor["joint"]}]
                 for number, motor in motors.items() if "joint" in motor}
@@ -464,7 +468,7 @@ def build():
     ET.SubElement(defaults, "geom", contype="0", conaffinity="0", density="850")
     ET.SubElement(defaults, "site", size="0.003", group="2")
     ET.SubElement(defaults, "equality", solref="0.01 1", solimp="0.99 0.999 0.001")
-    ET.SubElement(defaults, "position", kp="12", kv="1.2", ctrlrange=DEBUG_CTRL_RANGE)
+    ET.SubElement(defaults, "position", kp="12", kv="1.2", ctrlrange=numbers((-np.pi, np.pi)))
 
     assets = ET.SubElement(root, "asset")
     world = ET.SubElement(root, "worldbody")
@@ -481,7 +485,12 @@ def build():
             position, rotation = pose(joint.find("origin"))
             frames[child] = (parent_position + parent_rotation.apply(position), parent_rotation * rotation)
             body = ET.SubElement(bodies[parent], "body", name=child, **pose_attributes(position, rotation))
-            ET.SubElement(body, "joint", name=joint.get("name"), axis=joint.find("axis").get("xyz"))
+            bound = limits["joint_limits"][joint.get("name")]
+            lower, upper = bound["lower"], bound["upper"]
+            if lower == upper:
+                lower, upper = -LOCKED_SOLVER_RANGE, LOCKED_SOLVER_RANGE
+            ET.SubElement(body, "joint", name=joint.get("name"), axis=joint.find("axis").get("xyz"),
+                          limited="true", range=numbers((lower, upper)))
             bodies[child] = body
             add_children(child)
 
@@ -502,16 +511,54 @@ def build():
         "model": MODEL.name,
         "joints": list(joints),
         "flanges": flanges,
-        "differential_limits": {
-            joint: DIFFERENTIAL_TARGET_LIMIT[name]
-            for name, group in groups.items() for joint in group["joints"]
-        },
+        "joint_limits": {name: [bound["lower"], bound["upper"]]
+                         for name, bound in limits["joint_limits"].items()},
+        "coupled_limits": limits.get("coupled_limits", {}),
     }, separators=(",", ":")))
     actuators = ET.SubElement(root, "actuator")
     for number in sorted(controls):
         for control in controls[number]:
-            ET.SubElement(actuators, "position", control)
+            bound = limits["actuator_limits"][control["name"]]
+            lower, upper = bound["lower"], bound["upper"]
+            if lower == upper:
+                lower, upper = -LOCKED_SOLVER_RANGE, LOCKED_SOLVER_RANGE
+            ET.SubElement(actuators, "position", **control, ctrlrange=numbers((lower, upper)))
     add_keyframes(root, world, actuators, modules)
+    ET.indent(root, space="  ")
+    OUTPUT.write_text(ET.tostring(root, encoding="unicode") + "\n")
+    model = mujoco.MjModel.from_xml_path(str(OUTPUT))
+    data = mujoco.MjData(model)
+    sys.path.insert(0, str(MODEL.parents[2] / "robot_sim/scripts"))
+    from mujoco_joint_position import JointPositionTargets
+    position_config = json.loads(custom.find("text[@name='robot_sim_joint_position']").get("data"))
+    controller = JointPositionTargets(model, position_config)
+    names = list(controller.joints)
+    for key in root.findall("keyframe/key")[1:]:
+        original = model.key(key.get("name")).qpos
+        target = np.array([original[controller.joints[name]] for name in names])
+        for group in groups.values():
+            indices = [names.index(name) for name in group["joints"]]
+            scale = 1.0
+            for index in indices:
+                lower, upper = controller.limits[names[index]]
+                if target[index] < lower:
+                    scale = min(scale, lower / target[index])
+                if target[index] > upper:
+                    scale = min(scale, upper / target[index])
+            target[indices] *= scale * 0.9
+            # Imported examples must also fit the group's sampled two-axis region.
+            for fraction in (1., .5, .25, 0.):
+                trial = dict.fromkeys(names, 0.)
+                trial.update({names[index]: float(target[index] * fraction) for index in indices})
+                try:
+                    controller._validate_coupled(trial)
+                except ValueError:
+                    continue
+                target[indices] *= fraction
+                break
+        controller.set_configuration(data, target)
+        key.set("qpos", numbers(data.qpos))
+        key.set("ctrl", numbers(data.ctrl))
     ET.indent(root, space="  ")
     OUTPUT.write_text(ET.tostring(root, encoding="unicode") + "\n")
     model = mujoco.MjModel.from_xml_path(str(OUTPUT))
@@ -519,7 +566,7 @@ def build():
     mujoco.mj_forward(model, data)
     if model.nu != len(motors) or model.nv - data.nefc != len(joints):
         raise ValueError("Incorrect number of actuators or independent joint coordinates")
-    write_standalone_urdf(root, joints)
+    write_standalone_urdf(root, joints, limits)
     print(f"{OUTPUT}: {len(links)} URDF links, {model.nu} inputs, {model.neq} closed-loop constraints")
 
 

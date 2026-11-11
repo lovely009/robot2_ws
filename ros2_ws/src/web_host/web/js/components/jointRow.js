@@ -133,7 +133,8 @@ export function createJointRow(joint, {send, sendError, syncLimits, simulationBo
     target.textContent = `目标 ${Number.isFinite(draft) ? fmt(draft, 3) : '--'} ${unit}`;
     const rejection = !sim && selected && store.commandStatus.data?.model === model
       ? store.commandStatus.data.reject : '';
-    message.textContent = editError || (rejection ? `主机拒绝：${rejection}` : '') || result || (selected ? blocked : '');
+    message.textContent = editError || (rejection ? `主机拒绝：${rejection}` : '') || result
+      || bounds.error || (selected ? blocked : '');
     message.classList.toggle('warn', Boolean(editError || rejection || (!result && blocked)));
   }
   return {element, render, cancel:()=>sender.cancel(), dispose() {

@@ -36,8 +36,9 @@ export function mount(root, ctx) {
     const session = simulationSession();
     const bounds = session?.limits?.[name];
     if (!Array.isArray(bounds) || bounds.length !== 2 || !bounds.every(Number.isFinite)
-        || bounds[0] >= bounds[1]) return {lower:null,upper:null};
-    return {lower:bounds[0],upper:bounds[1],session:session.session};
+        || bounds[0] > bounds[1]) return {lower:null,upper:null};
+    return {lower:bounds[0],upper:bounds[1],session:session.session,
+      error:bounds[0] === bounds[1] ? '当前姿态下该轴的可动范围为 0，已锁定' : ''};
   };
   const commandContext = () => `${getConnectionGeneration()}:${simulationSession()?.session || ''}`;
   const bridgeReady = () => store.conn.connected && store.transmissionStatus.data?.model === MODEL
@@ -117,7 +118,9 @@ export function mount(root, ctx) {
   const sendError = name => {
     if (simulationSelected()) {
       if (!store.conn.connected || store.runtimeMode === 'readonly') return '工作台未连接或只读';
-      if (!simulationBounds(name)?.session) return '仿真位置控制未就绪';
+      const bounds = simulationBounds(name);
+      if (!bounds?.session) return '仿真位置控制未就绪';
+      if (bounds.error) return bounds.error;
       if (Date.now() - (store.jointStates.byName[name]?.at || 0) > 500) return '等待仿真关节反馈';
       return Date.now()-advertised < 300 ? '关节控制入口准备中' : '';
     }

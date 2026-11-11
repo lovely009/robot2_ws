@@ -171,10 +171,11 @@ def analyze(urdf, clip, *, up_axis='y_up', scale=.01):
 
 
 class GenericRetargeter:
-    def __init__(self, urdf, mapping, clip, *, up_axis='y_up', scale=.01):
+    def __init__(self, urdf, mapping, clip, *, up_axis='y_up', scale=.01, position_filter=None):
         self.robot = _Robot(urdf)
         self.model, self.data, self.names = self.robot.model, self.robot.data, self.robot.names
         self.clip, self.up_axis, self.scale = clip, up_axis, scale
+        self.position_filter = position_filter
         if (up_axis not in ('y_up', 'z_up') or not np.isfinite(scale) or scale <= 0
                 or not np.isfinite(clip.frames).all() or not len(clip.frames)
                 or not np.isfinite(clip.frame_time) or clip.frame_time <= 0):
@@ -311,6 +312,8 @@ class GenericRetargeter:
             self.nonconverged += int(not fit.success)
             step = self.velocity[active] * self.clip.frame_time
             current[active] += np.clip(fit.x - current[active], -step, step)
+            if self.position_filter is not None:
+                current = self.position_filter(previous, current, self.velocity * self.clip.frame_time)
             full = self.robot.affine @ current + self.robot.offsets
             positions.append(full)
             pin.framesForwardKinematics(self.model, self.data, self.configuration(full))

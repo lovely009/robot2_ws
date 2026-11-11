@@ -18,6 +18,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_trial_arm_7dof test/test_trial_arm_7dof.py)
   ament_add_pytest_test(test_arm_mass_inertia test/test_arm_mass_inertia.py)
   ament_add_pytest_test(test_full_body_robot test/test_full_body_robot.py)
+  ament_add_pytest_test(test_full_body_geometry_limits test/test_full_body_geometry_limits.py)
 endif()
 
 ament_package()

@@ -118,6 +118,7 @@ export function init(canvas, opts) {
     ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) o.material = ghostMat; });
     ghost.visible = false;
     root.add(ghost);
+    placeGround(robot, grid);
     frameCamera(robot);
     renderRequested = true;
     canvas.dataset.modelReady = 'true';
@@ -149,6 +150,24 @@ export function init(canvas, opts) {
   });
 
   renderer.setAnimationLoop(tick);
+}
+
+function placeGround(model, grid) {
+  const bounds = new THREE.Box3();
+  const part = new THREE.Box3();
+  model.updateMatrixWorld(true);
+  for (const visual of Object.values(model.visual)) {
+    visual.traverse(object => {
+      if (!object.isMesh) return;
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+      part.copy(object.geometry.boundingBox).applyMatrix4(object.matrixWorld);
+      bounds.union(part);
+    });
+  }
+  if (!bounds.isEmpty()) {
+    const centre = bounds.getCenter(new THREE.Vector3());
+    grid.position.set(centre.x, centre.y, bounds.min.z);
+  }
 }
 
 // 透明球只负责拾取；细轴箭头与圆环沿真实关节轴显示方向和健康状态。

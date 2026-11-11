@@ -10,6 +10,41 @@ import numpy as np
 import pytest
 
 
+def test_coupled_position_workspace_updates_bounds_and_rejects_invalid_pairs(monkeypatch):
+    mujoco = pytest.importorskip('mujoco')
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / 'scripts'))
+    from mujoco_joint_position import JointPositionTargets
+    model = mujoco.MjModel.from_xml_string('''<mujoco>
+      <worldbody><body><joint name="a"/><geom type="sphere" size=".1"/>
+        <body pos="0 0 .2"><joint name="b"/><geom type="sphere" size=".1"/></body>
+      </body></worldbody>
+      <actuator><position joint="a" ctrlrange="-.2 .2"/>
+        <position joint="b" ctrlrange="-.2 .2"/></actuator></mujoco>''')
+    controller = JointPositionTargets(model, {
+        'joints': ['a', 'b'], 'flanges': {},
+        'joint_limits': {'a': [-.1, float(np.nextafter(.1, 0.))], 'b': [-.1, .1]},
+        'coupled_limits': {'wrist': {'joints': ['a', 'b'], 'lower': [-.1, -.1],
+                                   'step': .1, 'valid_rows': ['010', '111', '010']}},
+    })
+    data = mujoco.MjData(model)
+    assert controller.active_limits()['a'][1] == controller.limits['a'][1]
+    controller.apply(data, ['a'], [.1])
+    assert controller.targets['a'] == controller.limits['a'][1]
+    with pytest.raises(ValueError, match='超出仿真范围'):
+        controller.apply(data, ['a'], [.100001])
+    controller.apply(data, ['a'], [0])
+    np.testing.assert_allclose(controller.active_limits()['b'], [-.1, .1])
+    controller.apply(data, ['a'], [.05])
+    np.testing.assert_allclose(controller.active_limits()['b'], [0, 0], atol=1e-10)
+    previous = data.ctrl.copy()
+    with pytest.raises(ValueError, match='组合'):
+        controller.apply(data, ['b'], [.05])
+    np.testing.assert_array_equal(data.ctrl, previous)
+    assert controller.targets == {'a': .05, 'b': 0}
+    controller.apply(data, ['a'], [0])
+    np.testing.assert_allclose(controller.active_limits()['b'], [-.1, .1])
+
+
 def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     mujoco = pytest.importorskip('mujoco')
     pytest.importorskip('rclpy')
@@ -25,14 +60,17 @@ def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     controller = JointPositionTargets(model, config)
     assert len(controller.joints) == 37
     assert len(controller.rods) == 10
-    names = list(config['differential_limits'])
+    import yaml
+    topology = yaml.safe_load((path.parents[1] / 'config/motor_topology.yaml').read_text())
+    names = [name for group in topology['differential_groups'].values() for name in group['joints']]
     pairs = list(zip(names[::2], names[1::2]))
     # All six groups at their corners, with the waist yaw also displaced.
-    controller.apply(data, ['BN_Spine_yaw'], [0.15])
+    controller.apply(data, ['BN_Spine_yaw'], [0.1])
     for first, second in product((0, 1), repeat=2):
         for a, b in pairs:
-            controller.apply(data, [a], [controller.limits[a][first]])
-            controller.apply(data, [b], [controller.limits[b][second]])
+            controller.apply(data, [a, b], [0., 0.])
+            controller.apply(data, [a], [controller.active_limits()[a][first]])
+            controller.apply(data, [b], [controller.active_limits()[b][second]])
         assert np.all(data.ctrl >= model.actuator_ctrlrange[:, 0])
         assert np.all(data.ctrl <= model.actuator_ctrlrange[:, 1])
         mujoco.mj_step(model, data, nstep=1800)
@@ -42,7 +80,55 @@ def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     with pytest.raises(ValueError, match='超出仿真范围'):
         controller.apply(data, ['BN_Spine_yaw', names[0]], [0., 1.])
     np.testing.assert_array_equal(data.ctrl, previous)
-    assert controller.targets['BN_Spine_yaw'] == 0.15
+    assert controller.targets['BN_Spine_yaw'] == 0.1
+    previous = data.ctrl.copy()
+    with pytest.raises(ValueError, match='超出仿真范围'):
+        controller.apply(data, ['BN_RightUpperLeg_axis_2'], [controller.limits['BN_RightUpperLeg_axis_2'][1] + .01])
+    np.testing.assert_array_equal(data.ctrl, previous)
+
+
+@pytest.mark.parametrize('group_name', [
+    'waist', 'hips', 'left_shoulder', 'right_shoulder', 'left_wrist', 'right_wrist',
+])
+def test_all_six_groups_accept_dynamic_endpoints_and_reject_invalid_combinations(monkeypatch, group_name):
+    mujoco = pytest.importorskip('mujoco')
+    pytest.importorskip('rclpy')
+    scripts = Path(__file__).resolve().parents[1] / 'scripts'
+    monkeypatch.syspath_prepend(str(scripts))
+    from mujoco_effort_bridge import model_text
+    from mujoco_joint_position import JointPositionTargets
+    path = scripts.parents[1] / 'robot_description/models/full_body_robot/mujoco/full_body_robot.xml'
+    model = mujoco.MjModel.from_xml_path(str(path))
+    config = json.loads(model_text(model, 'robot_sim_joint_position'))
+    assert len(config['coupled_limits']) == 6
+    controller = JointPositionTargets(model, config)
+    data = mujoco.MjData(model)
+    joints, lower, step, mask = controller.coupled[group_name]
+    points = np.argwhere(mask)
+    for index in np.unique(np.linspace(0, len(points) - 1, 11).astype(int)):
+        pair = lower + points[index] * step
+        positions = dict.fromkeys(controller.joints, 0.) | dict(zip(joints, pair))
+        for joint in joints:
+            other = joints[1 - joints.index(joint)]
+            for side in (0, 1):
+                controller.set_configuration(data, list(positions.values()))
+                held_target = controller.targets[other]
+                target = controller.active_limits()[joint][side]
+                controller.apply(data, [joint], [target])
+                assert controller.targets[other] == held_target
+                assert np.all(data.ctrl >= model.actuator_ctrlrange[:, 0])
+                assert np.all(data.ctrl <= model.actuator_ctrlrange[:, 1])
+    controller.set_configuration(data, np.zeros(len(controller.joints)))
+    for point in np.argwhere(~mask):
+        pair = lower + point * step
+        if all(controller.limits[joint][0] <= value <= controller.limits[joint][1]
+               for joint, value in zip(joints, pair)):
+            previous = data.ctrl.copy()
+            with pytest.raises(ValueError, match='组合'):
+                controller.apply(data, joints, pair)
+            np.testing.assert_array_equal(data.ctrl, previous)
+            assert all(value == 0 for value in controller.targets.values())
+            break
 
 
 def test_viewer_position_model_preserves_control_and_publishes_sim_time(tmp_path, monkeypatch):

@@ -1,6 +1,34 @@
 import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 
+test('地面落在模型最低外观表面，忽略关节拾取球',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {placeGround};'}));
+  await page.goto('/arm-fixture');
+  const result=await page.evaluate(async()=>{
+    const {Mesh,BoxGeometry,GridHelper}=await import('/vendor/three.module.min.js');
+    const {URDFRobot}=await import('/vendor/URDFClasses.js');
+    const {placeGround}=await import('/js/panels/arm.js');
+    const model=new URDFRobot();
+    model.position.set(1,2,.5);
+    const foot=new Mesh(new BoxGeometry(.2,.1,.04));
+    foot.position.z=-1.2;
+    const marker=new Mesh(new BoxGeometry(.1,.1,1));
+    marker.userData.hitOnly=true;
+    marker.position.z=-1.5;
+    model.add(foot,marker);
+    model.visual={sole:foot};
+    const grid=new GridHelper();
+    placeGround(model,grid);
+    return grid.position.toArray();
+  });
+  expect(result[0]).toBeCloseTo(1,9);
+  expect(result[1]).toBeCloseTo(2,9);
+  expect(result[2]).toBeCloseTo(-.72,7);
+});
+
 test('3D 显示真实关节角，不按 URDF 默认范围截断或改写模型限位',async({page})=>{
   await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
     '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));

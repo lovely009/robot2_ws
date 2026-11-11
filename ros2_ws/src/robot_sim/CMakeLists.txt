@@ -84,6 +84,7 @@ install(PROGRAMS
   scripts/agent_after_sim_ready.py
   scripts/mujoco_effort_bridge.py
   scripts/mujoco_command_mapping.py
+  scripts/mujoco_joint_position.py
   DESTINATION lib/${PROJECT_NAME})
 ament_export_targets(export_robot_sim HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)

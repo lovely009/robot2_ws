@@ -622,6 +622,9 @@ export function mount(root, ctx) {
     setResult('正在启动仿真 launch…');
     try {
       await bench.startSimulation(request);
+      if (request.backend === 'mujoco' && request.model === 'full_body_robot') {
+        ctx.ui.setModel(request.model);
+      }
       setResult('仿真 launch 进程已启动；就绪情况见下方日志。', 'ok');
       saveOptions();
     } catch (error) {

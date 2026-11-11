@@ -15,12 +15,12 @@ function childTag(node, name) {
 }
 
 // 从臂视图加载出的 URDF 机器人对象取关节元数据（含类型、轴、原点及限位）。
-// 固定关节不是可动「关节」，不列。
+// 固定关节和仿真辅助轴不进入控制列表。
 export function collectModelJoints(robot) {
   const out = [];
   for (const j of Object.values((robot && robot.joints) || {})) {
     const node = j.urdfNode;
-    if (!node || j.jointType === 'fixed') continue;
+    if (!node || j.jointType === 'fixed' || node.getAttribute('simulation_auxiliary') === 'true') continue;
     const parent = childTag(node, 'parent');
     const child = childTag(node, 'child');
     const origin = childTag(node, 'origin');

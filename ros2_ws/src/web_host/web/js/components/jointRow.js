@@ -2,11 +2,10 @@ import { store, MODEL, selectGroups, selectJoint } from '../core/store.js';
 import { fmt, ageText } from '../core/format.js';
 import { getJointLimits, saveJointLimits } from '../core/joint_limits.js';
 import { createLatestTargetSender } from '../core/joint_control.js';
-import { getConnectionGeneration } from '../core/ros.js';
 
 export const STALE_MS = 1500;
 
-export function createJointRow(joint, {send, sendError, syncLimits}) {
+export function createJointRow(joint, {send, sendError, syncLimits, simulationBounds, commandContext}) {
   const model = MODEL;
   const unit = joint.type === 'prismatic' ? 'm' : 'rad';
   const element = document.createElement('li');
@@ -32,7 +31,7 @@ export function createJointRow(joint, {send, sendError, syncLimits}) {
     if (!event.target.closest('input,button')) select();
   });
   const sender = createLatestTargetSender({
-    isCurrent: connection => !disposed && model===MODEL && connection===getConnectionGeneration()
+    isCurrent: context => !disposed && model===MODEL && context===commandContext()
       && !document.hidden && !sendError(joint.name),
     send: value => {result=send(joint,value);editError='';render();},
     onError: error => {editError=String(error.message || error);render();},
@@ -40,7 +39,7 @@ export function createJointRow(joint, {send, sendError, syncLimits}) {
   const submit = final => {
     if (disposed || model!==MODEL || slider.disabled) {sender.cancel();return;}
     draft=Number(slider.value);select();
-    sender.update(draft,getConnectionGeneration(),final);render();
+    sender.update(draft,commandContext(),final);render();
   };
   slider.addEventListener('input', () => submit(false));
   slider.addEventListener('change', () => submit(true));
@@ -103,15 +102,24 @@ export function createJointRow(joint, {send, sendError, syncLimits}) {
     element.querySelector('.jpos').title = `实际位置 ${unit}`;
     element.querySelector('.jstate').textContent = reading ? ageText(age) : '无反馈';
     element.querySelector('.jstate').classList.toggle('warn', age >= STALE_MS);
-    const bounds = getJointLimits(store, model, joint);
-    const nextBounds = JSON.stringify([bounds.lower,bounds.upper]);
+    const sim = simulationBounds(joint.name);
+    const bounds = sim ?? getJointLimits(store, model, joint);
+    const nextBounds = JSON.stringify([sim?.session,bounds.lower,bounds.upper]);
     if (boundsKey !== nextBounds) {boundsKey=nextBounds;sender.cancel();draft=null;result='';}
     const available = bounds.lower !== null && bounds.upper !== null && !bounds.error;
     for (const side of ['lower', 'upper']) {
-      element.querySelector(`[data-bound="${side}"]`).textContent = bounds[side] === null ? '设置' : fmt(bounds[side], 3);
+      const button = element.querySelector(`[data-bound="${side}"]`);
+      button.textContent = bounds[side] === null ? (sim ? '—' : '设置') : fmt(bounds[side], 3);
+      button.disabled = Boolean(sim);
+      button.title = sim ? '当前 MuJoCo 模型的仿真范围' : '单击编辑软限位';
+      if (sim && editing === side) {
+        editing = null;
+        button.hidden = false;
+        element.querySelector(`[data-bound-editor="${side}"]`).hidden = true;
+      }
     }
     const blocked = (saving ? '正在同步关节限位…' : '') || bounds.error
-      || (!available ? '单击左右端设置软限位' : sendError(joint.name));
+      || (sim || available ? sendError(joint.name) : '单击左右端设置软限位');
     slider.disabled = Boolean(blocked);
     if (blocked) sender.cancel();
     slider.title = blocked || `拖动连续发送目标 ${unit}（最高 20 Hz），松手提交最终位置`;
@@ -123,7 +131,7 @@ export function createJointRow(joint, {send, sendError, syncLimits}) {
       if (draft !== null) draft = Number(slider.value);
     }
     target.textContent = `目标 ${Number.isFinite(draft) ? fmt(draft, 3) : '--'} ${unit}`;
-    const rejection = selected && store.commandStatus.data?.model === model
+    const rejection = !sim && selected && store.commandStatus.data?.model === model
       ? store.commandStatus.data.reject : '';
     message.textContent = editError || (rejection ? `主机拒绝：${rejection}` : '') || result || (selected ? blocked : '');
     message.classList.toggle('warn', Boolean(editError || rejection || (!result && blocked)));

@@ -188,9 +188,10 @@ def test_non_ascii_joint_names_survive_generic_import(tmp_path):
         jobs.close()
 
 
-def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urdf(tmp_path):
+@pytest.mark.parametrize('filename', ['full_body_robot.urdf', 'full_body_robot.mapping.urdf'])
+def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urdf(tmp_path, filename):
     root = Path(__file__).resolve().parents[2]
-    path = root / 'robot_description/models/full_body_robot/urdf/full_body_robot.urdf'
+    path = root / 'robot_description/models/full_body_robot/urdf' / filename
     import yaml
     presets = yaml.safe_load((root / 'bvh_broadcaster/config/generic_profiles.yaml').read_text())
     names = sorted(set(presets['profiles'][0]['targets'].values()) - {'Spine'})
@@ -205,6 +206,7 @@ def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urd
         job = jobs.create(data)
         assert job['state'] == 'mapping' and job['joint_count'] == 37
         assert sum(bool(t['source']) for t in job['mapping']['targets']) == 16
+        assert next(t['target'] for t in job['mapping']['targets'] if t['source'] == 'LeftHand') == 'BN_LeftHand_axis_2_link'
         job['mapping']['limit_policy'] = 'preview'
         jobs.start(job['id'], job['mapping'])
         done = finish(jobs, job)
@@ -212,8 +214,9 @@ def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urd
         preview = json.loads(jobs.result(job['id'], 'preview.json'))
         assert preview['robot']['urdf'] == path.read_text() == data['urdf_text']
         assert len(preview['robot']['joint_names']) == 37
+        assert all(name.startswith('BN_') for name in preview['robot']['joint_names'])
         assert np.isfinite(preview['robot']['joint_positions']).all()
         assert not done['summary']['mechanical_limits_enforced']
-        assert done['summary']['unmapped_joints']
+        assert not done['summary']['unmapped_joints']
     finally:
         jobs.close()

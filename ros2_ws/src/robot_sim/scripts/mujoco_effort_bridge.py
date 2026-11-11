@@ -8,6 +8,9 @@
 * JointState.effort 取 qfrc_actuator，是执行器广义力，不是 Gazebo 的关节传递力矩。
 * /clock 取物理时间 data.time；节点自身不用仿真时间，状态时间戳和超时取系统时钟。
 
+声明 robot_sim_control_mode=viewer_position 的 MJCF 使用本地 Viewer 的位置滑块，
+关节状态与 /clock 使用同一仿真时间。
+
 需可导入 mujoco 的 Python；launch 自动选择 ~/.ros/ros2_control/.venv。
 PYGLFW_LIBRARY_VARIANT 必须由 launch 在导入 mujoco/glfw 前注入，
 否则 Wayland viewer 可能自旋并阻塞状态发布。
@@ -15,19 +18,40 @@ PYGLFW_LIBRARY_VARIANT 必须由 launch 在导入 mujoco/glfw 前注入，
 
 from __future__ import annotations
 
+import json
+from uuid import uuid4
+
 import mujoco
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, String
 
 from mujoco_command_mapping import (
     mapping_error,
     parse_joint_names,
     resolve_command_indices,
 )
+from mujoco_joint_position import JointPositionTargets
+
+
+def model_text(model, name):
+    index = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_TEXT, name)
+    if index < 0:
+        return None
+    start = model.text_adr[index]
+    return model.text_data[start:start + model.text_size[index]].rstrip(b"\0").decode()
+
+
+def viewer_position_mode(model) -> bool:
+    mode = model_text(model, "robot_sim_control_mode")
+    if mode is None:
+        return False
+    if mode != "viewer_position":
+        raise RuntimeError(f"未知的 robot_sim_control_mode：{mode!r}")
+    return True
 
 
 class MujocoEffortBridge(Node):
@@ -53,6 +77,8 @@ class MujocoEffortBridge(Node):
 
         self.model = mujoco.MjModel.from_xml_path(model_path)
         self.data = mujoco.MjData(self.model)
+        self.viewer_position = viewer_position_mode(self.model)
+        self.position_targets = None
         # MJCF 关节顺序：用于 /joint_states 的名字与 qpos/qvel/qfrc 的取址
         self.joint_names = [
             mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, index)
@@ -64,6 +90,88 @@ class MujocoEffortBridge(Node):
         self.dof_address = np.array(
             [self.model.jnt_dofadr[i] for i in range(self.model.njnt)]
         )
+        self.steps_per_tick = max(
+            1, int(round(speed / (control_hz * self.model.opt.timestep)))
+        )
+        if self.viewer_position:
+            if requested_names:
+                raise RuntimeError("viewer_position 模型不接受力矩关节映射")
+            position_config = model_text(self.model, "robot_sim_joint_position")
+            if position_config is not None:
+                self._configure_joint_position(json.loads(position_config))
+        else:
+            self._configure_effort(requested_names, effort_topic, command_timeout_s)
+
+        self.publisher = self.create_publisher(JointState, joint_states_topic, 50)
+        self.clock_publisher = self.create_publisher(Clock, "/clock", 10)
+        self.viewer = None
+        if not headless:
+            try:
+                # mujoco 3.6 的 __init__ 不自动导入 viewer 子模块，必须显式导入
+                # （用别名以免把 `mujoco` 变成局部名，影响本函数其它引用）
+                from mujoco import viewer as mujoco_viewer
+                self.viewer = mujoco_viewer.launch_passive(self.model, self.data)
+                # 打印实际选中的 pyGLFW 平台：Wayland 后端会自旋（窗口黑、sync() 不返回、
+                # /joint_states 一帧不发），只打窗口是否成功是不够的失败信号。
+                try:
+                    import glfw
+                    self.get_logger().info(
+                        "MuJoCo viewer 平台：%s / platform=%s"
+                        % (glfw.get_version_string().decode(errors="replace"),
+                           hex(glfw.get_platform()))
+                    )
+                except Exception:       # pyGLFW 没有该 API 时不该因此起不来
+                    pass
+                # 默认自由相机经常没框住模型（开窗只见局部或近乎全黑），按包围盒对准
+                self.viewer.cam.lookat[:] = self.model.stat.center
+                self.viewer.cam.distance = self.model.stat.extent * 1.8
+                self.viewer.cam.elevation = -20.0
+                self.viewer.cam.azimuth = 135.0
+            except Exception as error:      # 无显示环境时降级为无头
+                self.get_logger().warning(f"打不开 MuJoCo viewer（{error}），改为无头运行")
+        self.create_timer(1.0 / control_hz, self._tick)
+        if self.viewer_position:
+            control_info = f"  Viewer 位置滑块 {self.model.nu} 路\n"
+        else:
+            control_info = (
+                f"  命令关节 {len(self.command_joint_names)} 个，"
+                f"{'按 joint_names 映射' if requested_names else '按 MJCF 顺序'}："
+                f"{', '.join(self.command_joint_names[:3])} …\n"
+                f"  订阅 {effort_topic}（超时 {command_timeout_s}s 清零）\n"
+            )
+        self.get_logger().info(
+            f"MuJoCo 桥就绪：{model_path}\n"
+            f"{control_info}"
+            f"  发布 {joint_states_topic} 与 /clock；控制 {control_hz} Hz × "
+            f"{self.steps_per_tick} 步 = {self.model.opt.timestep * self.steps_per_tick * control_hz:.3f}× 实时"
+        )
+
+    def _configure_joint_position(self, config):
+        self.position_targets = JointPositionTargets(self.model, config)
+        self.position_status = {
+            "model": config["model"],
+            "session": uuid4().hex,
+            "limits": self.position_targets.limits,
+            "reject": "",
+        }
+        self.position_publisher = self.create_publisher(String, "/robot_sim/position_status", 1)
+        self.create_subscription(JointState, "/robot_sim/joint_position_target", self._on_position, 1)
+        self.create_timer(0.5, self._publish_position_status)
+
+    def _publish_position_status(self):
+        self.position_publisher.publish(String(data=json.dumps(self.position_status, ensure_ascii=False)))
+
+    def _on_position(self, message):
+        if message.header.frame_id != self.position_status["session"]:
+            return
+        try:
+            self.position_targets.apply(self.data, message.name, message.position)
+        except ValueError as error:
+            self.position_status["reject"] = str(error)
+        else:
+            self.position_status["reject"] = ""
+
+    def _configure_effort(self, requested_names, effort_topic, command_timeout_s) -> None:
         # actuator 驱动的关节名，顺序 = MJCF 声明顺序（生成器按 URDF 顺序写 <motor>）
         self.actuator_joint_names = [
             mujoco.mj_id2name(
@@ -93,9 +201,6 @@ class MujocoEffortBridge(Node):
         self.command = np.zeros(len(self.command_joint_names))
         self.command_stamp = None
         self.command_timeout_ns = int(command_timeout_s * 1e9)
-        self.steps_per_tick = max(
-            1, int(round(speed / (control_hz * self.model.opt.timestep)))
-        )
         # 关节速度上限（URDF 的 `<limit velocity>` 落在执行器的 `user` 字段）**本节点
         # 不使用**：被控对象不做速度约束，见 _apply_effort。
         self.command_dofs = np.array([
@@ -112,43 +217,6 @@ class MujocoEffortBridge(Node):
         ])
 
         self.create_subscription(Float64MultiArray, effort_topic, self._on_command, 10)
-        self.publisher = self.create_publisher(JointState, joint_states_topic, 50)
-        self.clock_publisher = self.create_publisher(Clock, "/clock", 10)
-        self.viewer = None
-        if not headless:
-            try:
-                # mujoco 3.6 的 __init__ 不自动导入 viewer 子模块，必须显式导入
-                # （用别名以免把 `mujoco` 变成局部名，影响本函数其它引用）
-                from mujoco import viewer as mujoco_viewer
-                self.viewer = mujoco_viewer.launch_passive(self.model, self.data)
-                # 打印实际选中的 pyGLFW 平台：Wayland 后端会自旋（窗口黑、sync() 不返回、
-                # /joint_states 一帧不发），只打窗口是否成功是不够的失败信号。
-                try:
-                    import glfw
-                    self.get_logger().info(
-                        "MuJoCo viewer 平台：%s / platform=%s"
-                        % (glfw.get_version_string().decode(errors="replace"),
-                           hex(glfw.get_platform()))
-                    )
-                except Exception:       # pyGLFW 没有该 API 时不该因此起不来
-                    pass
-                # 默认自由相机经常没框住模型（开窗只见局部或近乎全黑），按包围盒对准
-                self.viewer.cam.lookat[:] = self.model.stat.center
-                self.viewer.cam.distance = self.model.stat.extent * 1.8
-                self.viewer.cam.elevation = -20.0
-                self.viewer.cam.azimuth = 135.0
-            except Exception as error:      # 无显示环境时降级为无头
-                self.get_logger().warning(f"打不开 MuJoCo viewer（{error}），改为无头运行")
-        self.create_timer(1.0 / control_hz, self._tick)
-        self.get_logger().info(
-            f"MuJoCo 桥就绪：{model_path}\n"
-            f"  命令关节 {len(self.command_joint_names)} 个，"
-            f"{'按 joint_names 映射' if requested_names else '按 MJCF 顺序'}："
-            f"{', '.join(self.command_joint_names[:3])} …\n"
-            f"  订阅 {effort_topic}（超时 {command_timeout_s}s 清零）\n"
-            f"  发布 {joint_states_topic} 与 /clock；控制 {control_hz} Hz × "
-            f"{self.steps_per_tick} 步 = {self.model.opt.timestep * self.steps_per_tick * control_hz:.3f}× 实时"
-        )
 
     def _on_command(self, message: Float64MultiArray) -> None:
         if len(message.data) != len(self.command_joint_names):
@@ -174,30 +242,33 @@ class MujocoEffortBridge(Node):
             self.data.ctrl[actuator] = torque
 
     def _tick(self) -> None:
-        now = self.get_clock().now()
-        timed_out = (
-            self.command_stamp is None
-            or (now - self.command_stamp).nanoseconds > self.command_timeout_ns
-        )
-        applied = (
-            np.zeros(len(self.command_joint_names)) if timed_out else self.command
-        )
-        for _ in range(self.steps_per_tick):
-            self._apply_effort(applied)
-            mujoco.mj_step(self.model, self.data)
+        if self.viewer_position:
+            mujoco.mj_step(self.model, self.data, nstep=self.steps_per_tick)
+        else:
+            now = self.get_clock().now()
+            timed_out = (
+                self.command_stamp is None
+                or (now - self.command_stamp).nanoseconds > self.command_timeout_ns
+            )
+            applied = (
+                np.zeros(len(self.command_joint_names)) if timed_out else self.command
+            )
+            for _ in range(self.steps_per_tick):
+                self._apply_effort(applied)
+                mujoco.mj_step(self.model, self.data)
 
+        seconds = int(self.data.time)
+        clock = Clock()
+        clock.clock.sec = seconds
+        clock.clock.nanosec = int((self.data.time - seconds) * 1e9)
         message = JointState()
-        message.header.stamp = now.to_msg()
+        message.header.stamp = clock.clock if self.viewer_position else now.to_msg()
         message.name = list(self.joint_names)
         message.position = self.data.qpos[self.qpos_address].tolist()
         message.velocity = self.data.qvel[self.dof_address].tolist()
         message.effort = self.data.qfrc_actuator[self.dof_address].tolist()
         self.publisher.publish(message)
 
-        seconds = int(self.data.time)
-        clock = Clock()
-        clock.clock.sec = seconds
-        clock.clock.nanosec = int((self.data.time - seconds) * 1e9)
         self.clock_publisher.publish(clock)
 
         if self.viewer is not None:

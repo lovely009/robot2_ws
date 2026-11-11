@@ -186,6 +186,7 @@ function resetSessionState() {
   store.conn.agentDevice = '';
   store.conn.canStop = false;
   store.commandStatus = {last: 0, data: null};
+  store.simPositionStatus = {last: 0, data: null};
   store.traj.state = null;
   store.traj.activeTrajectoryId = 0;
   store.jointStates.byName = {};
@@ -525,6 +526,12 @@ function subscribeAll() {
   sub('commandStatus', (m) => {
     try { applyCommandStatus(JSON.parse(m.data)); }
     catch (_e) { applyCommandStatus(null); }
+  });
+  sub('simPositionStatus', (m) => {
+    let data;
+    try { data = JSON.parse(m.data); } catch (_e) { data = null; }
+    store.simPositionStatus = {last: Date.now(), data};
+    markDirty(DIRTY.STATUS);
   });
 }
 

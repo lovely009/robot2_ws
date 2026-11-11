@@ -1,0 +1,56 @@
+<mujoco model="Right shoulder differential">
+  <!-- Zero geometry from the full-body torso STL and URDF; axis_1 uses its URDF positive direction. -->
+  <compiler angle="degree" />
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast" />
+  <statistic center="-0.07710012909 0.1696 -0.04875" extent="0.13" />
+  <visual>
+    <global azimuth="135" elevation="-22" />
+  </visual>
+  <default>
+    <joint type="hinge" damping="0.035" armature="0.001" />
+    <geom contype="0" conaffinity="0" density="850" />
+    <site size="0.0035" />
+    <equality solref="0.01 1" solimp="0.99 0.999 0.001" />
+  </default>
+  <worldbody>
+    <light pos="0 -0.25 0.6" dir="0 0.3 -0.5" />
+    <geom type="cylinder" fromto="-0.059 0.1817 -0.06 -0.059 0.2067 -0.06" size="0.02" rgba="0.28 0.34 0.40 1" />
+    <geom type="cylinder" fromto="-0.058 0.1285 -0.0375 -0.09320025818 0.1285 -0.0375" size="0.021" rgba="0.28 0.34 0.40 1" />
+    <geom type="capsule" fromto="-0.058 0.1285 -0.0375 -0.059 0.1817 -0.06" size="0.008" rgba="0.28 0.34 0.40 1" />
+    <body name="flange_linkage_body" pos="-0.09520025818 0.1285 -0.0375">
+      <joint name="flange_linkage" axis="1 0 0" />
+      <geom type="capsule" fromto="0 0 0 0 -0.0108416439 -0.0168065015" size="0.0035" rgba="0.91 0.53 0.20 1" />
+      <site name="flange_linkage_motor_ball" pos="0 -0.0108416439 -0.0168065015" rgba="0.91 0.53 0.20 1" />
+    </body>
+    <body name="gimbal" pos="-0.059 0.2107 -0.06">
+      <joint name="BN_RightShoulder_axis_1" axis="0 -1 3.673205103e-06" />
+      <geom type="capsule" fromto="0 0 0 -0.006205 0.0203001197 0.03259392543" size="0.006" rgba="0.53 0.62 0.70 1" />
+      <body name="output_platform" pos="-0.006205 0.0203001197 0.03259392543">
+        <joint name="BN_RightShoulder_axis_2" axis="-0.03684063614 -2.407017649e-09 0.9993211533" />
+        <geom type="capsule" fromto="0 0 0 -0.03241275179 -0.006735031 -0.03451790557" size="0.005" rgba="0.29 0.69 0.51 1" />
+        <site name="flange_linkage_platform_ball" pos="-0.03241275179 -0.006735031 -0.03451790557" rgba="0.91 0.53 0.20 1" />
+        <geom type="capsule" fromto="0 0 0 -0.039 0.012 0.025" size="0.009" rgba="0.29 0.69 0.51 1" />
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <spatial name="flange_linkage_rod" width="0.0018" rgba="0.91 0.53 0.20 1">
+      <site site="flange_linkage_motor_ball" />
+      <site site="flange_linkage_platform_ball" />
+    </spatial>
+  </tendon>
+  <equality>
+    <tendon name="flange_linkage_rod_length" tendon1="flange_linkage_rod" />
+  </equality>
+  <actuator>
+    <position name="axis_1_direct" joint="BN_RightShoulder_axis_1" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533" />
+    <position name="flange_linkage" joint="flange_linkage" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533" />
+  </actuator>
+  <keyframe>
+    <key name="Neutral" />
+    <key name="Direct +5 deg" qpos="0 0.0872664626 0.008464953433" ctrl="0.0872664626 0" />
+    <key name="Linkage +5 deg" qpos="0.0872664626 0 -0.04609046893" ctrl="0 0.0872664626" />
+    <key name="Same direction +5 deg" qpos="0.0872664626 0.0872664626 -0.03845434366" ctrl="0.0872664626 0.0872664626" />
+    <key name="Opposite direction +5 / -5 deg" qpos="-0.0872664626 0.0872664626 0.0539689505" ctrl="0.0872664626 -0.0872664626" />
+  </keyframe>
+</mujoco>

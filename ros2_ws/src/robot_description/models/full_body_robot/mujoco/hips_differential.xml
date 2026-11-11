@@ -1,0 +1,71 @@
+<mujoco model="Hips differential">
+  <!-- Front crossbeam hole centers plus 4 mm ball height. Both cranks use the outward assembly branch. -->
+  <compiler angle="degree"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+  <statistic center="0.005 0.038 -0.022" extent="0.24"/>
+  <visual>
+    <global azimuth="135" elevation="-22"/>
+  </visual>
+  <default>
+    <joint type="hinge" damping="0.035" armature="0.001"/>
+    <geom contype="0" conaffinity="0" density="850"/>
+    <site size="0.004"/>
+    <equality solref="0.01 1" solimp="0.99 0.999 0.001"/>
+  </default>
+  <worldbody>
+    <light pos="0 -0.3 0.5" dir="0 0.3 -0.5"/>
+    <geom name="base" type="box" pos="0 -0.01 -0.032" size="0.105 0.032 0.01" rgba="0.22 0.26 0.31 1"/>
+    <geom name="gimbal_support" type="capsule" fromto="0 0 -0.032 0 0 -0.0735" size="0.008" rgba="0.28 0.34 0.40 1"/>
+    <geom name="motor_plus_housing" type="cylinder" fromto="0.072 -0.0101189 -0.03 0.072 -0.0101189 0.021" size="0.028" rgba="0.26 0.32 0.38 1"/>
+    <geom name="motor_minus_housing" type="cylinder" fromto="-0.072 -0.0101189 -0.03 -0.072 -0.0101189 0.021" size="0.028" rgba="0.26 0.32 0.38 1"/>
+
+    <body name="plus_flange" pos="0.072 -0.0101189 0.028">
+      <joint name="flange_plus_x" axis="0 0 1"/>
+      <geom type="capsule" fromto="0 0 0 0.0295604522505 0.016798124334 0" size="0.004" rgba="0.91 0.53 0.20 1"/>
+      <site name="plus_motor_ball" pos="0.0295604522505 0.016798124334 0" rgba="1 0.68 0.30 1"/>
+    </body>
+    <body name="minus_flange" pos="-0.072 -0.0101189 0.028">
+      <joint name="flange_minus_x" axis="0 0 1"/>
+      <geom type="capsule" fromto="0 0 0 -0.0295603444764 0.0167983157242 0" size="0.004" rgba="0.24 0.63 0.90 1"/>
+      <site name="minus_motor_ball" pos="-0.0295603444764 0.0167983157242 0" rgba="0.37 0.78 1 1"/>
+    </body>
+    <body name="gimbal" pos="0 0 -0.0735">
+      <joint name="BN_Hips_axis_1" axis="0 1 0.000003673"/>
+      <geom type="capsule" fromto="0 -0.018 0 0 0.018 0" size="0.0055" rgba="0.52 0.61 0.68 1"/>
+      <body name="hips_platform">
+        <joint name="BN_Hips_axis_2" axis="-1 0.000001131 0.000000178"/>
+        <geom type="capsule" fromto="0 0 0 0.0715200836264 0.0642767775808 0.099242104494" size="0.005" rgba="0.29 0.69 0.51 1"/>
+        <geom type="capsule" fromto="0 0 0 -0.0715199177736 0.0642769393108 0.099242130004" size="0.005" rgba="0.29 0.69 0.51 1"/>
+        <geom type="capsule" fromto="-0.0715199177736 0.0642769393108 0.099242130004 0.0715200836264 0.0642767775808 0.099242104494" size="0.005" rgba="0.29 0.69 0.51 1"/>
+        <site name="plus_platform_ball" pos="0.0715200836264 0.0642767775808 0.099242104494" rgba="1 0.68 0.30 1"/>
+        <site name="minus_platform_ball" pos="-0.0715199177736 0.0642769393108 0.099242130004" rgba="0.37 0.78 1 1"/>
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <spatial name="plus_rod" width="0.002" rgba="0.91 0.53 0.20 1">
+      <site site="plus_motor_ball"/>
+      <site site="plus_platform_ball"/>
+    </spatial>
+    <spatial name="minus_rod" width="0.002" rgba="0.24 0.63 0.90 1">
+      <site site="minus_motor_ball"/>
+      <site site="minus_platform_ball"/>
+    </spatial>
+  </tendon>
+  <equality>
+    <tendon name="plus_rod_length" tendon1="plus_rod"/>
+    <tendon name="minus_rod_length" tendon1="minus_rod"/>
+  </equality>
+  <actuator>
+    <!-- Position targets in radians. ±10° is the debug input range. -->
+    <position name="flange_plus_x" joint="flange_plus_x" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533"/>
+    <position name="flange_minus_x" joint="flange_minus_x" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533"/>
+  </actuator>
+  <keyframe>
+    <key name="Neutral"/>
+    <key name="Same direction +5 deg" qpos="0.0872664626 0.0872664626 -0.0671896043128 -0.00584128697365"
+         ctrl="0.0872664626 0.0872664626"/>
+    <key name="Opposite direction +5 / -5 deg" qpos="0.0872664626 -0.0872664626 -2.93773943286e-08 0.0324472033677"
+         ctrl="0.0872664626 -0.0872664626"/>
+  </keyframe>
+</mujoco>

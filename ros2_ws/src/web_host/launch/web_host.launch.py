@@ -14,9 +14,11 @@ READ_TOPICS = [
     '/motor/trajectory_state', '/motor/status_array', '/motor/events',
     '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
     '/control/status', '/control/trajectory_state', '/bench/status', '/micro_ros_up/status',
+    '/robot_sim/position_status',
 ]
 CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
-                  '/arm_controller/joint_trajectory', '/motor/system_command']
+                  '/arm_controller/joint_trajectory', '/motor/system_command',
+                  '/robot_sim/joint_position_target']
 CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
                     '/workbench_control/set_parameters_atomically',
                     '/firmware_topic_bridge/set_parameters_atomically']

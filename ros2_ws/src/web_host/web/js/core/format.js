@@ -28,6 +28,8 @@ export const TOPICS = {
   // 关节侧实测构型；显示和控制都检查其新鲜度。
   jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
   jointTarget: {name: '/control/joint_target', type: 'sensor_msgs/msg/JointState'},
+  simJointTarget: {name: '/robot_sim/joint_position_target', type: 'sensor_msgs/msg/JointState'},
+  simPositionStatus: {name: '/robot_sim/position_status', type: 'std_msgs/msg/String'},
   convertedTrajectory: {name: '/control/trajectory', type: 'can_bridge_msgs/msg/MotorTrajectory'},
   robotTransmissionStatus: {name: '/robot_transmission/status', type: 'std_msgs/msg/String'},
   // TF（关节侧）：robot_state_publisher 发；页面只读，用来与电机流对照。

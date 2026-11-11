@@ -36,6 +36,8 @@ def test_workbench_exposes_controls_but_no_wire_writes():
     assert '/motor/policy_array' not in literal_eval(params['topics_pub_glob'])
     assert '/control/setpoint' in literal_eval(params['topics_pub_glob'])
     assert '/control/joint_target' in literal_eval(params['topics_pub_glob'])
+    assert '/robot_sim/joint_position_target' in literal_eval(params['topics_pub_glob'])
+    assert '/robot_sim/position_status' in literal_eval(params['topics_sub_glob'])
     assert not any('/host_control/' in topic for topic in literal_eval(params['topics_pub_glob']))
     assert '/control/trajectory_raw' in literal_eval(params['topics_pub_glob'])
     context.launch_configurations['control_mode'] = 'readonly'

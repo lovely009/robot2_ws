@@ -1,0 +1,71 @@
+<mujoco model="Waist differential">
+  <!-- CAD zero in BN_Spine_yaw_link, with both sides at the nominal 100 mm spacing. -->
+  <compiler angle="degree"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+  <statistic center="0 0.012 0.065" extent="0.16"/>
+  <visual>
+    <global azimuth="135" elevation="-22"/>
+  </visual>
+  <default>
+    <!-- Numerical damping and inertia for the unloaded preview. -->
+    <joint type="hinge" damping="0.035" armature="0.001"/>
+    <geom contype="0" conaffinity="0" density="850"/>
+    <site size="0.0035"/>
+    <equality solref="0.01 1" solimp="0.99 0.999 0.001"/>
+  </default>
+  <worldbody>
+    <light pos="0 -0.3 0.5" dir="0 0.3 -0.5"/>
+    <geom name="base" type="box" pos="0 0 0.013" size="0.075 0.032 0.013" rgba="0.22 0.26 0.31 1"/>
+    <geom name="gimbal_support" type="capsule" fromto="0 0 0.022 0 0 0.099" size="0.009" rgba="0.28 0.34 0.40 1"/>
+    <geom name="motor_plus_housing" type="cylinder" fromto="0.024 0 0.049 0.048 0 0.049" size="0.027" rgba="0.26 0.32 0.38 1"/>
+    <geom name="motor_minus_housing" type="cylinder" fromto="-0.024 0 0.049 -0.048 0 0.049" size="0.027" rgba="0.26 0.32 0.38 1"/>
+
+    <!-- Both simulated input angles use the same +X right-hand convention. -->
+    <body name="plus_flange" pos="0.05 0 0.049">
+      <joint name="flange_plus_x" axis="1 0 0"/>
+      <geom type="capsule" fromto="0 0 0 0 0.048014 0.013952" size="0.004" rgba="0.91 0.53 0.20 1"/>
+      <site name="plus_motor_ball" pos="0 0.048014 0.013952" rgba="1 0.68 0.30 1"/>
+    </body>
+    <body name="minus_flange" pos="-0.05 0 0.049">
+      <joint name="flange_minus_x" axis="1 0 0"/>
+      <geom type="capsule" fromto="0 0 0 0 0.048014 0.013952" size="0.004" rgba="0.24 0.63 0.90 1"/>
+      <site name="minus_motor_ball" pos="0 0.048014 0.013952" rgba="0.37 0.78 1 1"/>
+    </body>
+    <body name="gimbal" pos="0 0 0.099">
+      <joint name="BN_Spine_axis_1" axis="-1 0.000004804 -0.000003495"/>
+      <geom type="capsule" fromto="-0.019 0 0 0.019 0 0" size="0.0055" rgba="0.52 0.61 0.68 1"/>
+      <body name="waist_platform">
+        <joint name="BN_Spine_axis_2" axis="0.000007286 0.991730052 0.12834136"/>
+        <geom type="box" pos="0 0.018 0.003" size="0.056 0.024 0.004" rgba="0.29 0.69 0.51 1"/>
+        <site name="plus_platform_ball" pos="0.05 0.0399591 0.0051724" rgba="1 0.68 0.30 1"/>
+        <site name="minus_platform_ball" pos="-0.05 0.0399591 0.0051724" rgba="0.37 0.78 1 1"/>
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <spatial name="plus_rod" width="0.002" rgba="0.91 0.53 0.20 1">
+      <site site="plus_motor_ball"/>
+      <site site="plus_platform_ball"/>
+    </spatial>
+    <spatial name="minus_rod" width="0.002" rgba="0.24 0.63 0.90 1">
+      <site site="minus_motor_ball"/>
+      <site site="minus_platform_ball"/>
+    </spatial>
+  </tendon>
+  <equality>
+    <tendon name="plus_rod_length" tendon1="plus_rod"/>
+    <tendon name="minus_rod_length" tendon1="minus_rod"/>
+  </equality>
+  <actuator>
+    <!-- Position targets in radians. ±10° is the debug input range. -->
+    <position name="flange_plus_x" joint="flange_plus_x" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533"/>
+    <position name="flange_minus_x" joint="flange_minus_x" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533"/>
+  </actuator>
+  <keyframe>
+    <key name="Neutral"/>
+    <key name="Same direction +5 deg" qpos="0.0872664626 0.0872664626 -0.107235984 0.0000004652"
+         ctrl="0.0872664626 0.0872664626"/>
+    <key name="Opposite direction +5 / -5 deg" qpos="0.0872664626 -0.0872664626 0.000578702 -0.087036900"
+         ctrl="0.0872664626 -0.0872664626"/>
+  </keyframe>
+</mujoco>

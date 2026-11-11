@@ -1229,6 +1229,7 @@ tr:hover {
   font-size: 10px;
 }
 .joint-control-toggle input { margin: 0; }
+.joint-control-toggle[hidden] { display: none; }
 #jointControlResult:empty { display: none; }
 
 .motor-card-control-detail {

@@ -8,6 +8,9 @@
   订阅 /arm_effort_controller/commands（Float64MultiArray，18 个数 = 物理关节顺序）
   发布 /joint_states 与 /clock
 
+MJCF 声明 robot_sim_control_mode=viewer_position 时，关节状态和 /clock 使用同一仿真时间。
+带 robot_sim_joint_position 配置的模型同时接收工作台专用的位置目标。
+
 `joint_names` 参数（逗号分隔的有序关节名，默认空）会交给桥做**按名字**的命令映射：
 `simulation.launch.py` 的 `backend:=mujoco` 会传拓扑顺序的关节名，避免依赖
 「MJCF 关节顺序恰好等于拓扑顺序」这个巧合。留空则按 MJCF 顺序（手工操作时用）。

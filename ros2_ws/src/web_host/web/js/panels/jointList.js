@@ -16,9 +16,30 @@ export function mount(root, ctx) {
   const list = $('jointRows'), summary = $('sumJoints');
   let entries = [], key = '', generation = -1, advertised = 0, pending = false, disposed = false;
   const toggle = root.querySelector('#jointControlEnabled');
+  const toggleLabel = toggle.closest('label');
   const result = root.querySelector('#jointControlResult');
   let pendingPolicy = null, policyResult = '', submittingPolicy = false;
   result.textContent = '';
+  const simulationSelected = () => {
+    const config = store.bench.simulation?.config;
+    return MODEL === 'full_body_robot' && config?.model === MODEL
+      && config.backend === 'mujoco' && config.controller_mode === 'external';
+  };
+  const simulationSession = () => {
+    const {data, last} = store.simPositionStatus;
+    return simulationSelected() && store.bench.simulation.state === 'running'
+      && Date.now()-last < 2000 && data?.model === MODEL
+      && typeof data.session === 'string' && data.session ? data : null;
+  };
+  const simulationBounds = name => {
+    if (!simulationSelected()) return null;
+    const session = simulationSession();
+    const bounds = session?.limits?.[name];
+    if (!Array.isArray(bounds) || bounds.length !== 2 || !bounds.every(Number.isFinite)
+        || bounds[0] >= bounds[1]) return {lower:null,upper:null};
+    return {lower:bounds[0],upper:bounds[1],session:session.session};
+  };
+  const commandContext = () => `${getConnectionGeneration()}:${simulationSession()?.session || ''}`;
   const bridgeReady = () => store.conn.connected && store.transmissionStatus.data?.model === MODEL
     && Date.now()-store.transmissionStatus.last >= 0
     && Date.now()-store.transmissionStatus.last < 2500;
@@ -26,7 +47,7 @@ export function mount(root, ctx) {
   toggle.closest('label').title = '仅对当前主机控制会话中的完整传动组下发使能；使用模型默认增益，勾选状态以 MCU 确认为准';
   toggle.closest('label').addEventListener('click', event => event.stopPropagation());
   toggle.onchange = async () => {
-    if (submittingPolicy || pendingPolicy || disposed) return;
+    if (simulationSelected() || submittingPolicy || pendingPolicy || disposed) return;
     const enabled = toggle.checked, model=MODEL, connection=getConnectionGeneration();
     try {
       const targets = jointPolicyTargets(store, MODEL, enabled);
@@ -93,13 +114,29 @@ export function mount(root, ctx) {
     const parameter=jointLimitsParameter(store,MODEL,{name:joint.name,side,value});
     return applyParameters([parameter],JSON.parse(parameter.value.string_value).joint_limits);
   };
-  const sendError = name => policyControlError(store,store.modelTransmissions.groups
-    .filter(group=>group.joints.includes(name)).flatMap(group=>group.motors.map(motor=>motor.id)))
-    || (pending ? '正在更新关节控制设置' : '') || jointControlError(store, MODEL, name)
-    || (Date.now()-advertised < 300 ? '关节控制入口准备中' : '');
+  const sendError = name => {
+    if (simulationSelected()) {
+      if (!store.conn.connected || store.runtimeMode === 'readonly') return '工作台未连接或只读';
+      if (!simulationBounds(name)?.session) return '仿真位置控制未就绪';
+      if (Date.now() - (store.jointStates.byName[name]?.at || 0) > 500) return '等待仿真关节反馈';
+      return Date.now()-advertised < 300 ? '关节控制入口准备中' : '';
+    }
+    return policyControlError(store,store.modelTransmissions.groups
+      .filter(group=>group.joints.includes(name)).flatMap(group=>group.motors.map(motor=>motor.id)))
+      || (pending ? '正在更新关节控制设置' : '') || jointControlError(store, MODEL, name)
+      || (Date.now()-advertised < 300 ? '关节控制入口准备中' : '');
+  };
   const send = (joint, value) => {
     const blocked = sendError(joint.name);
     if (blocked) throw new Error(blocked);
+    if (simulationSelected()) {
+      const {lower, upper, session} = simulationBounds(joint.name);
+      if (!Number.isFinite(value) || value < lower || value > upper) throw new Error('目标超出仿真范围');
+      if (!pub('simJointTarget', {header:{frame_id:session},name:[joint.name],position:[value]})) {
+        throw new Error('连接已断开，未提交目标');
+      }
+      return `已提交 ${value.toFixed(3)} rad`;
+    }
     const message = buildJointTarget(store, MODEL, joint, value);
     if (!pub('jointTarget', message)) throw new Error('连接已断开，未提交目标');
     return `已提交 ${value.toFixed(3)} ${joint.type === 'prismatic' ? 'm' : 'rad'}，请核对实际反馈`;
@@ -108,7 +145,9 @@ export function mount(root, ctx) {
     if (![DIRTY.MOTION, DIRTY.MODEL, DIRTY.SELECTED, DIRTY.BENCH, DIRTY.STATUS,
       DIRTY.CONN, DIRTY.COMMAND, DIRTY.TF].some(k => dirty.has(k))) return;
     if (isConnected() && generation !== getConnectionGeneration()) {
-      ensurePublisher('jointTarget');generation = getConnectionGeneration();advertised = Date.now();
+      ensurePublisher('jointTarget');
+      ensurePublisher('simJointTarget');
+      generation = getConnectionGeneration();advertised = Date.now();
     }
     let controlled = [], controlError = '';
     try { controlled = jointPolicyTargets(store, MODEL, false).map(target=>target.motor_id); }
@@ -124,11 +163,14 @@ export function mount(root, ctx) {
       else if (Date.now()>request.deadline) {policyResult='MCU 尚未确认请求，请检查设备状态';pendingPolicy=null;}
     }
     const sessionError = controlSessionError(store, MODEL);
+    const simSelected = simulationSelected(), sim = simulationSession();
+    toggleLabel.hidden = simSelected;
     toggle.checked = allEnabled;
     toggle.indeterminate = submittingPolicy || Boolean(pendingPolicy);
-    toggle.disabled = !store.conn.connected || !controlled.length || submittingPolicy || Boolean(pendingPolicy) || (Boolean(sessionError) && !allEnabled);
-    const reason = controlError || sessionError;
-    result.textContent = submittingPolicy ? '正在提交使能请求…' : pendingPolicy ? policyResult : reason || policyResult;
+    toggle.disabled = simSelected || !store.conn.connected || !controlled.length || submittingPolicy || Boolean(pendingPolicy) || (Boolean(sessionError) && !allEnabled);
+    const reason = simSelected ? sim?.reject || (sim ? '' : '等待 MuJoCo 位置控制') : controlError || sessionError;
+    result.textContent = simSelected ? reason || 'MuJoCo 位置控制'
+      : submittingPolicy ? '正在提交使能请求…' : pendingPolicy ? policyResult : reason || policyResult;
     result.classList.toggle('warn',Boolean(reason));
     toggle.closest('label').title = reason || '使能当前控制会话中的完整传动组，状态以 MCU 确认为准';
     const source = $('jointFeedbackSource'), feedback = store.bench.feedback;
@@ -142,7 +184,7 @@ export function mount(root, ctx) {
     if (next !== key) {
       key = next;
       for (const entry of entries) entry.dispose();
-      entries = joints.map(joint => createJointRow(joint, {send, sendError, syncLimits}));
+      entries = joints.map(joint => createJointRow(joint, {send, sendError, syncLimits, simulationBounds, commandContext}));
       list.replaceChildren(...entries.map(entry => entry.element));
       if (!joints.length) {
         const empty = document.createElement('li');empty.className = 'empty';

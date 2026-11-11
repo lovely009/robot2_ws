@@ -666,6 +666,46 @@ test('关节标题固定、选择不重排，滑块拖动发送且软限按关�
   expect(fixture.errors).toEqual([]);
 });
 
+test('整机仿真关节滑块只发送当前 MuJoCo 会话的位置目标', async ({page}) => {
+  const fixture = await connectFixture(page, true);
+  await page.route('**/api/runtime', route => route.fulfill({
+    json:{control_mode:'bench',robot_model:'full_body_robot'},
+  }));
+  await page.route('**/robot_sim/models/full_body_robot/urdf/full_body_robot.standalone.urdf', route => route.fulfill({
+    contentType:'application/xml',
+    body:'<robot name="full_body_robot"><link name="base_link"/><link name="spine"/><link name="rod"/>'
+      + '<joint name="BN_Spine_axis_1" type="revolute"><parent link="base_link"/><child link="spine"/>'
+      + '<axis xyz="1 0 0"/><limit lower="0" upper="0"/></joint>'
+      + '<joint name="rod_hinge" type="continuous" simulation_auxiliary="true">'
+      + '<parent link="spine"/><child link="rod"/></joint></robot>',
+  }));
+  await page.goto('/workbench/#/run');
+  const row = page.locator('#jointRows [data-joint="BN_Spine_axis_1"]');
+  const slider = row.locator('input[type="range"]');
+  await expect(slider).toBeDisabled();
+  await expect(page.locator('#jointRows input[type="range"]')).toHaveCount(1);
+  await expect(page.locator('[aria-label="模型加载与映射诊断"]')).toContainText('整机仿真模型就绪');
+  const config = {model:'full_body_robot',backend:'mujoco',controller_mode:'external',transport:'vcan'};
+  const benchStatus = (state: string) => fixture.sendFeedback('/bench/status', {
+    data:JSON.stringify({simulation:{state,config},feedback:{source:'simulation'}}),
+  });
+  benchStatus('running');
+  fixture.sendFeedback('/robot_sim/position_status', {
+    data:JSON.stringify({model:config.model,session:'preview-1',limits:{BN_Spine_axis_1:[-.075,.075]}}),
+  });
+  fixture.sendFeedback('/joint_states',{name:['BN_Spine_axis_1'],position:[0]});
+  await expect(slider).toBeEnabled();
+  await expect(page.locator('#jointControlEnabled')).toBeHidden();
+  await expect(slider).toHaveAttribute('max','0.075');
+  await slider.evaluate(e => {e.value='0.025';e.dispatchEvent(new Event('change',{bubbles:true}));});
+  await expect.poll(()=>fixture.publishes.find(p=>p.topic==='/robot_sim/joint_position_target')?.msg)
+    .toEqual({header:{frame_id:'preview-1'},name:['BN_Spine_axis_1'],position:[0.025]});
+  expect(fixture.publishes.filter(p=>p.topic==='/control/joint_target')).toHaveLength(0);
+  benchStatus('stopped');
+  await expect(slider).toBeDisabled();
+  expect(fixture.errors).toEqual([]);
+});
+
 test('手动放宽关节限位须经主机确认，刷新不自动改写主机限位', async ({page}) => {
   const fixture = await connectFixture(page, true);
   fixture.setLimitReply(true, false);

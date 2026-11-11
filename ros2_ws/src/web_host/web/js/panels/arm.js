@@ -1,4 +1,4 @@
-// 臂视图面板：URDF → three.js，关节角由 /joint_states 写入的传动组反馈驱动。
+// 臂视图面板：URDF → three.js，关节角由 /joint_states 反馈驱动。
 //
 // 本模块**只做显示**：不订阅、不发布任何话题（core/ros.js 写入 store，这里读），
 // 因此它坏掉也只是看不见臂，不影响任何控制链路。
@@ -129,7 +129,8 @@ export function init(canvas, opts) {
     robot.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; } });
     root.add(robot);
 
-    addMarkers(robot);
+    const modelJoints = collectModelJoints(robot);
+    addMarkers(robot, modelJoints.map(joint => joint.name));
 
     ghost = robot.clone();
     ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) { o.material = ghostMat; } });
@@ -139,7 +140,7 @@ export function init(canvas, opts) {
     frameCamera(robot);
     resize();
     // 「关节」列表（TF 侧）的元数据（父子 link / 轴 / 原点）取自这次解析结果。
-    if (onReady) { onReady(collectModelJoints(robot)); }
+    if (onReady) { onReady(modelJoints); }
   }, (url, loaded, total) => {
     if (gen === loadGen && onProgress) { onProgress(url, loaded, total); }
   }, (err) => {
@@ -151,8 +152,9 @@ export function init(canvas, opts) {
 }
 
 // 透明球只负责拾取；细轴箭头与圆环沿真实关节轴显示方向和健康状态。
-function addMarkers(r) {
-  for (const [name, joint] of Object.entries(r.joints || {})) {
+function addMarkers(r, names) {
+  for (const name of names) {
+    const joint = r.joints[name];
     const m = new THREE.Mesh(
       new THREE.SphereGeometry(MARKER_R, 16, 12),
       new THREE.MeshBasicMaterial({
@@ -215,12 +217,13 @@ function onPointerDown(ev) {
 }
 
 function applyValues(target, angles) {
-  if (!target || !angles) { return; }
+  if (!target || !angles) return;
   for (const [name, v] of Object.entries(angles)) {
     const joint = target.joints[name];
     if (joint && Number.isFinite(v) && joint.angle !== v) {
       joint.ignoreLimits = true; // 显示实测/预览值，控制限位由主机执行。
-      target.setJointValue(name, v); renderRequested = true;
+      target.setJointValue(name, v);
+      renderRequested = true;
     }
   }
 }
@@ -415,8 +418,10 @@ export function mount(rootEl, ctx) {
       canvas.className = 'arm3d';
       stage.prepend(canvas);
     }
+    const simulationVisual = MODEL === 'full_body_robot';
+    const urdfName = simulationVisual ? `${MODEL}.standalone.urdf` : `${MODEL}.urdf`;
     init(canvas, {
-      urdfUrl: `/robot_sim/models/${MODEL}/urdf/${MODEL}.urdf`,
+      urdfUrl: `/robot_sim/models/${MODEL}/urdf/${urdfName}`,
       // package://robot_description/... → static_server 挂在根部的模型包根
       packages: {'robot_description': '/robot_sim'},
       onSelect: pickJoint,
@@ -430,8 +435,8 @@ export function mount(rootEl, ctx) {
         // 没进映射表的 URDF 关节要点名——否则「这根不动」会被当成故障去排查。
         const names = joints.map((j) => j.name);
         const mapped = new Set(groupJointNames());
-        const extra = names.filter((j) => !mapped.has(j));
-        hud.textContent = `臂视图就绪 · ${names.length} 个关节`
+        const extra = simulationVisual ? [] : names.filter((j) => !mapped.has(j));
+        hud.textContent = `${simulationVisual ? '整机仿真模型' : '臂视图'}就绪 · ${names.length} 个关节`
           + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
           + ' · 几何已加载';
         ready = true;

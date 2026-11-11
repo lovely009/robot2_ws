@@ -1,0 +1,67 @@
+<mujoco model="Right wrist differential">
+  <!-- Zero geometry in the forearm frame. Motor shaft axes estimated from the CAD motor faces and fasteners. -->
+  <compiler angle="degree" />
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast" />
+  <statistic center="0 0 0.083" extent="0.15" />
+  <visual>
+    <global azimuth="135" elevation="-22" />
+  </visual>
+  <default>
+    <joint type="hinge" damping="0.035" armature="0.001" />
+    <geom contype="0" conaffinity="0" density="850" />
+    <site size="0.0025" />
+    <equality solref="0.01 1" solimp="0.99 0.999 0.001" />
+  </default>
+  <worldbody>
+    <light pos="0 -0.25 0.6" dir="0 0.3 -0.5" />
+    <geom type="capsule" fromto="0 0 0.015 0 0 0.131" size="0.008" rgba="0.28 0.34 0.40 1" />
+    <geom type="cylinder" fromto="-0.0109536688 0.01397054229 0.0373 0.003727832823 0.00355644079 0.0373" size="0.009" rgba="0.28 0.34 0.40 1" />
+    <geom type="cylinder" fromto="0.0167112455 -0.005794341798 0.0723 0.00202974331 0.004619758905 0.0723" size="0.009" rgba="0.28 0.34 0.40 1" />
+    <body name="flange_proximal_body" pos="-0.01340058574 0.01570622587 0.0373">
+      <joint name="flange_proximal" axis="0.8156389792 -0.5785611943 0" />
+      <geom type="capsule" fromto="0 0 0 -0.00572005923 -0.00806397546 -0.00011847793" size="0.0024" rgba="0.91 0.53 0.20 1" />
+      <site name="flange_proximal_motor_ball" pos="-0.00572005923 -0.00806397546 -0.00011847793" rgba="0.91 0.53 0.20 1" />
+    </body>
+    <body name="flange_distal_body" pos="0.01915816253 -0.007530025249 0.0723">
+      <joint name="flange_distal" axis="0.8156390105 -0.5785611502 0" />
+      <geom type="capsule" fromto="0 0 0 -0.00573065479 -0.008078913701 0.0003842746" size="0.0024" rgba="0.24 0.63 0.90 1" />
+      <site name="flange_distal_motor_ball" pos="-0.00573065479 -0.008078913701 0.0003842746" rgba="0.24 0.63 0.90 1" />
+    </body>
+    <body name="gimbal" pos="0 0 0.1388">
+      <joint name="BN_RightHand_axis_1" axis="-0.5814365382 -0.8135917601 -3.623894466e-06" />
+      <geom type="capsule" fromto="0 0 0 -0.006977238458 -0.009763101121 -4.348673359e-08" size="0.0035" rgba="0.53 0.62 0.70 1" />
+      <body name="output_platform" pos="0.002590125347 0.003624307214 1.61e-08">
+        <joint name="BN_RightHand_axis_2" axis="0.8135922414 -0.5814358633 -3.990527186e-05" />
+        <geom type="capsule" fromto="0 0 0 -0.02229215253 0.003204386234 -0.0001234198" size="0.003" rgba="0.29 0.69 0.51 1" />
+        <site name="flange_proximal_platform_ball" pos="-0.02229215253 0.003204386234 -0.0001234198" rgba="0.91 0.53 0.20 1" />
+        <geom type="capsule" fromto="0 0 0 0.01097332609 -0.02056771552 -0.0001234196" size="0.003" rgba="0.29 0.69 0.51 1" />
+        <site name="flange_distal_platform_ball" pos="0.01097332609 -0.02056771552 -0.0001234196" rgba="0.24 0.63 0.90 1" />
+        <geom type="capsule" fromto="-0.02229215253 0.003204386234 -0.0001234198 0.01097332609 -0.02056771552 -0.0001234196" size="0.004" rgba="0.29 0.69 0.51 1" />
+        <geom type="capsule" fromto="0 0 0 0 0 0.036" size="0.004" rgba="0.29 0.69 0.51 1" />
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <spatial name="flange_proximal_rod" width="0.0018" rgba="0.91 0.53 0.20 1">
+      <site site="flange_proximal_motor_ball" />
+      <site site="flange_proximal_platform_ball" />
+    </spatial>
+    <spatial name="flange_distal_rod" width="0.0018" rgba="0.24 0.63 0.90 1">
+      <site site="flange_distal_motor_ball" />
+      <site site="flange_distal_platform_ball" />
+    </spatial>
+  </tendon>
+  <equality>
+    <tendon name="flange_proximal_rod_length" tendon1="flange_proximal_rod" />
+    <tendon name="flange_distal_rod_length" tendon1="flange_distal_rod" />
+  </equality>
+  <actuator>
+    <position name="flange_proximal" joint="flange_proximal" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533" />
+    <position name="flange_distal" joint="flange_distal" kp="4" kv="0.2" ctrlrange="-0.174533 0.174533" />
+  </actuator>
+  <keyframe>
+    <key name="Neutral" />
+    <key name="Same direction +5 deg" qpos="0.0872664626 0.0872664626 -7.185170669e-05 0.083454332" ctrl="0.0872664626 0.0872664626" />
+    <key name="Opposite direction +5 / -5 deg" qpos="0.0872664626 -0.0872664626 0.04214310928 0.001857720839" ctrl="0.0872664626 -0.0872664626" />
+  </keyframe>
+</mujoco>

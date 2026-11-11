@@ -76,6 +76,7 @@ export const store = {
   selectedJoint: '',
   // /control/status：ros2_control 的模型、模式、输出路由与拒绝原因。
   commandStatus: {last: 0, data: null},
+  simPositionStatus: {last: 0, data: null},
 };
 
 export function orderedMotorIds() {

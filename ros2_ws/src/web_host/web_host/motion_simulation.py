@@ -73,11 +73,7 @@ def validate_positions(simulation, names, positions):
         workspace.validate(dict(zip(names, row)))
 
 
-def cad_preview(simulation, names, positions):
-    directory = simulation['directory']
-    current = (directory / 'config/simulation_limits.yaml').read_bytes()
-    if hashlib.sha256(current).hexdigest() != simulation['config_sha256']:
-        raise ValueError('仿真限位已更新，请重新导入动作')
+def load_mujoco():
     os.environ.setdefault('MUJOCO_GL', 'disable')
     try:
         import mujoco
@@ -86,6 +82,15 @@ def cad_preview(simulation, names, positions):
         sys.path.append(str(Path.home() / '.ros/ros2_control/.venv/lib' /
                             f'python{sys.version_info.major}.{sys.version_info.minor}/site-packages'))
         import mujoco
+    return mujoco
+
+
+def cad_preview(simulation, names, positions):
+    directory = simulation['directory']
+    current = (directory / 'config/simulation_limits.yaml').read_bytes()
+    if hashlib.sha256(current).hexdigest() != simulation['config_sha256']:
+        raise ValueError('仿真限位已更新，请重新导入动作')
+    mujoco = load_mujoco()
     from robot_transmission.mujoco_positions import JointPositionTargets
     model_path = directory / 'mujoco' / f'{directory.name}.xml'
     root = ET.parse(model_path).getroot()

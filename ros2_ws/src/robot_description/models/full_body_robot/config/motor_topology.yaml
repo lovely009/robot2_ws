@@ -1,77 +1,155 @@
-# 本表记录电机编号和关节分组，供后续标定。null 表示待确认。
-# motors 的键是模型电机编号。一对一关节在 joint 中声明，差动关节在对应组中声明。
 motors:
-  1: {joint: BN_Spine_yaw, can_node_id: null}
-  2: {can_node_id: null}
-  3: {can_node_id: null}
-  4: {can_node_id: null}
-  5: {can_node_id: null}
-  6: {can_node_id: null}
-  7: {can_node_id: null}
-  8: {joint: BN_LeftUpperArm_axis_1, can_node_id: null}
-  9: {joint: BN_LeftUpperArm_axis_2, can_node_id: null}
-  10: {joint: BN_LeftUpperArm_axis_3, can_node_id: null}
-  11: {joint: BN_LeftLowerArm_axis_1, can_node_id: null}
-  12: {joint: BN_LeftLowerArm_axis_2, can_node_id: null}
-  13: {can_node_id: null}
-  14: {can_node_id: null}
-  15: {can_node_id: null}
-  16: {can_node_id: null}
-  17: {joint: BN_RightUpperArm_axis_1, can_node_id: null}
-  18: {joint: BN_RightUpperArm_axis_2, can_node_id: null}
-  19: {joint: BN_RightUpperArm_axis_3, can_node_id: null}
-  20: {joint: BN_RightLowerArm_axis_1, can_node_id: null}
-  21: {joint: BN_RightLowerArm_axis_2, can_node_id: null}
-  22: {can_node_id: null}
-  23: {can_node_id: null}
-  24: {joint: BN_LeftUpperLeg_axis_1, can_node_id: null}
-  25: {joint: BN_LeftUpperLeg_axis_2, can_node_id: null}
-  26: {joint: BN_LeftUpperLeg_axis_3, can_node_id: null}
-  27: {joint: BN_LeftLowerLeg_axis_1, can_node_id: null}
-  28: {joint: BN_LeftLowerLeg_axis_2, can_node_id: null}
-  29: {joint: BN_LeftFoot_pitch, can_node_id: null}
-  30: {joint: BN_LeftFoot_roll, can_node_id: null}
-  31: {joint: BN_RightUpperLeg_axis_1, can_node_id: null}
-  32: {joint: BN_RightUpperLeg_axis_2, can_node_id: null}
-  33: {joint: BN_RightUpperLeg_axis_3, can_node_id: null}
-  34: {joint: BN_RightLowerLeg_axis_1, can_node_id: null}
-  35: {joint: BN_RightLowerLeg_axis_2, can_node_id: null}
-  36: {joint: BN_RightFoot_pitch, can_node_id: null}
-  37: {joint: BN_RightFoot_roll, can_node_id: null}
-
-# 每组的两台电机共同控制两个关节，列表顺序只用于标识矩阵的输入和输出。
+  1:
+    joint: BN_Spine_yaw
+    can_node_id: null
+  2:
+    can_node_id: null
+  3:
+    can_node_id: null
+  4:
+    can_node_id: null
+  5:
+    can_node_id: null
+  6:
+    can_node_id: null
+  7:
+    can_node_id: null
+  8:
+    joint: BN_LeftUpperArm_1
+    can_node_id: null
+  9:
+    joint: BN_LeftUpperArm_2
+    can_node_id: null
+  10:
+    joint: BN_LeftUpperArm_3
+    can_node_id: null
+  11:
+    joint: BN_LeftLowerArm_1
+    can_node_id: null
+  12:
+    joint: BN_LeftLowerArm_2
+    can_node_id: null
+  13:
+    can_node_id: null
+  14:
+    can_node_id: null
+  15:
+    can_node_id: null
+  16:
+    can_node_id: null
+  17:
+    joint: BN_RightUpperArm_1
+    can_node_id: null
+  18:
+    joint: BN_RightUpperArm_2
+    can_node_id: null
+  19:
+    joint: BN_RightUpperArm_3
+    can_node_id: null
+  20:
+    joint: BN_RightLowerArm_1
+    can_node_id: null
+  21:
+    joint: BN_RightLowerArm_2
+    can_node_id: null
+  22:
+    can_node_id: null
+  23:
+    can_node_id: null
+  24:
+    joint: BN_LeftUpperLeg_1
+    can_node_id: null
+  25:
+    joint: BN_LeftUpperLeg_2
+    can_node_id: null
+  26:
+    joint: BN_LeftUpperLeg_3
+    can_node_id: null
+  27:
+    joint: BN_LeftLowerLeg_1
+    can_node_id: null
+  28:
+    joint: BN_LeftLowerLeg_2
+    can_node_id: null
+  29:
+    joint: BN_LeftFoot_pitch
+    can_node_id: null
+  30:
+    joint: BN_LeftFoot_roll
+    can_node_id: null
+  31:
+    joint: BN_RightUpperLeg_1
+    can_node_id: null
+  32:
+    joint: BN_RightUpperLeg_2
+    can_node_id: null
+  33:
+    joint: BN_RightUpperLeg_3
+    can_node_id: null
+  34:
+    joint: BN_RightLowerLeg_1
+    can_node_id: null
+  35:
+    joint: BN_RightLowerLeg_2
+    can_node_id: null
+  36:
+    joint: BN_RightFoot_pitch
+    can_node_id: null
+  37:
+    joint: BN_RightFoot_roll
+    can_node_id: null
 differential_groups:
   waist:
-    motor_numbers: [2, 3]
-    joints: [BN_Spine_axis_1, BN_Spine_axis_2]
-    # CAD 零位几何参考。两台法兰都按 BN_Spine_yaw_link 的 +X 右手定则计角。
-    # 同向主要驱动 axis_1，关节角约为两台同向法兰角的 -1.24 倍。
-    # 反向主要驱动 axis_2，+X 侧正转、-X 侧等量负转时，关节角约为 +X 侧角度的 -1.00 倍（中心距 100 mm）。
-    # 2、3 号的安装侧和编码器正方向确认后，再填写控制用比例和方向。
+    motor_numbers:
+    - 2
+    - 3
+    joints:
+    - BN_Spine_pitch
+    - BN_Spine_roll
     ratio: null
     direction: null
   hips:
-    motor_numbers: [4, 5]
-    joints: [BN_Hips_axis_1, BN_Hips_axis_2]
+    motor_numbers:
+    - 4
+    - 5
+    joints:
+    - BN_hips_roll
+    - BN_hips_pitch
     ratio: null
     direction: null
   left_shoulder:
-    motor_numbers: [6, 7]
-    joints: [BN_LeftShoulder_axis_1, BN_LeftShoulder_axis_2]
+    motor_numbers:
+    - 6
+    - 7
+    joints:
+    - BN_LeftShoulder_1
+    - BN_LeftShoulder_2
     ratio: null
     direction: null
   left_wrist:
-    motor_numbers: [13, 14]
-    joints: [BN_LeftHand_axis_1, BN_LeftHand_axis_2]
+    motor_numbers:
+    - 13
+    - 14
+    joints:
+    - BN_LeftHand_roll
+    - BN_LeftHand_pitch
     ratio: null
     direction: null
   right_shoulder:
-    motor_numbers: [15, 16]
-    joints: [BN_RightShoulder_axis_1, BN_RightShoulder_axis_2]
+    motor_numbers:
+    - 15
+    - 16
+    joints:
+    - BN_RightShoulder_1
+    - BN_RightShoulder_2
     ratio: null
     direction: null
   right_wrist:
-    motor_numbers: [22, 23]
-    joints: [BN_RightHand_axis_1, BN_RightHand_axis_2]
+    motor_numbers:
+    - 22
+    - 23
+    joints:
+    - BN_RightHand_roll
+    - BN_RightHand_pitch
     ratio: null
     direction: null

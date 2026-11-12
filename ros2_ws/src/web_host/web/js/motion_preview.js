@@ -16,6 +16,20 @@ function disposeModel(model) {
   for (const resource of [...geometries, ...materials, ...textures]) resource.dispose();
 }
 
+function footBranches({ names, parents }) {
+  const named = new Set(names.flatMap((name, i) => /foot|toe|ankle/i.test(name) ? [i] : []));
+  const belowFoot = index => {
+    for (let parent = parents[index]; parent >= 0; parent = parents[parent]) {
+      if (named.has(parent)) return true;
+    }
+    return false;
+  };
+  return {
+    roots: [...named].filter(index => !belowFoot(index)),
+    indices: names.flatMap((_, i) => named.has(i) || belowFoot(i) ? [i] : []),
+  };
+}
+
 export function createMotionPreview(canvas, data, { onModelStatus = () => {} } = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -34,7 +48,13 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
   const grid = new THREE.GridHelper(8, 40, 0x3a4b50, 0x202d30);
   grid.rotation.x = Math.PI / 2;
   scene.add(grid);
-  const basis = new THREE.Matrix3().set(...data.source_to_robot.flat()).transpose();
+  const robotToSource = new THREE.Matrix3().set(...data.source_to_robot.flat()).transpose();
+  const robotToSourceRotation = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().setFromMatrix3(robotToSource));
+  // Root rotations, including older cached results, are expressed in robot coordinates.
+  const rootRotation = index => new THREE.Quaternion().fromArray(
+    data.robot.root_quaternions?.[index] || [0, 0, 0, 1]);
+  const displayRotation = index => robotToSourceRotation.clone().multiply(rootRotation(index));
   const groups = [data.source, data.robot].map((skeleton, index) => {
     const geometry = new THREE.BufferGeometry();
     const edges = skeleton.parents.flatMap((parent, child) => parent < 0 ? [] : [parent, child]);
@@ -49,16 +69,61 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
     scene.add(points);
     return { skeleton, edges, geometry, material, pointGeometry, pointMaterial, lines, points };
   });
+  const floorOffsets = groups.map(({ skeleton }, side) => -Math.min(...skeleton.frames[0].map(
+    point => side
+      ? new THREE.Vector3(...point).applyQuaternion(displayRotation(0)).z
+      : point[2])));
+  const sourceFeet = footBranches(data.source), robotFeet = footBranches(data.robot);
+  const supportHeight = sourceFeet.roots.length >= 2 && robotFeet.roots.length >= 2;
+  const sourceFootHeights = supportHeight ? data.source.frames.map(points =>
+    Math.min(...sourceFeet.indices.map(index => points[index][2]))) : [];
+  // shortcut: estimate a flat floor from the lower 5% of foot heights; use contact data for uneven ground.
+  const sourceFloor = supportHeight ? [...sourceFootHeights].sort((a, b) => a - b)[
+    Math.floor((sourceFootHeights.length - 1) * .05)] : 0;
+  if (supportHeight) floorOffsets[0] = -sourceFloor;
+  const sourceRoot = Math.max(0, data.source.names.indexOf(data.robot.root_rotation_source));
+  const sourceReferenceHeight = data.source.frames[0][sourceRoot][2] - sourceFloor;
+  const robotFootHeight = index => Math.min(...robotFeet.indices.map(id =>
+    new THREE.Vector3(...data.robot.frames[index][id]).applyQuaternion(displayRotation(index)).z));
+  const scaleHeight = height => height > 1e-6 && sourceReferenceHeight > 1e-6
+    ? height / sourceReferenceHeight : 1;
+  let heightScale = supportHeight ? scaleHeight(-robotFootHeight(0)) : 1;
+  const airborneHeight = index => Math.max(0, sourceFootHeights[index] - sourceFloor) * heightScale;
+  const supportHeights = [];
+  let footLinks = [];
+  const soleHeight = () => Math.min(...footLinks.map(link => new THREE.Box3().setFromObject(link, true).min.z));
   let frame = 0;
-  let model = null, disposed = false;
+  let model = null, placement = null, disposed = false, grounded = false;
   function show(index) {
     frame = Math.max(0, Math.min(index, data.times.length - 1));
+    if (model && data.robot.joint_positions) {
+      placement.quaternion.copy(displayRotation(frame));
+      model.setJointValues(Object.fromEntries(data.robot.joint_names.map(
+        (name, i) => [name, data.robot.joint_positions[frame][i]])));
+    }
+    if (supportHeight) {
+      if (grounded && footLinks.length >= 2) {
+        if (supportHeights[frame] === undefined) {
+          placement.position.z = 0;
+          placement.updateMatrixWorld(true);
+          supportHeights[frame] = -soleHeight() + airborneHeight(frame);
+        }
+        floorOffsets[1] = supportHeights[frame];
+      } else floorOffsets[1] = -robotFootHeight(frame) + airborneHeight(frame);
+      if (placement) placement.position.z = floorOffsets[1];
+    }
     groups.forEach(({ skeleton, edges, geometry, pointGeometry }, side) => {
       const raw = skeleton.frames[frame];
       const points = raw.map(([x, y, z]) => {
         const p = new THREE.Vector3(x, y, z);
-        if (side) p.applyMatrix3(basis).add(new THREE.Vector3(0, 1.5, 0));
-        else { p.x -= raw[0][0]; p.y -= raw[0][1]; }
+        // Source frames already contain the world-space BVH root orientation.
+        if (side) p.applyQuaternion(displayRotation(frame))
+          .add(new THREE.Vector3(0, 1.5, 0));
+        else {
+          p.x -= raw[0][0];
+          p.y -= raw[0][1];
+        }
+        p.z += floorOffsets[side];
         return p;
       });
       const positions = geometry.attributes.position;
@@ -70,10 +135,6 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
       geometry.computeBoundingSphere();
       pointGeometry.computeBoundingSphere();
     });
-    if (model && data.robot.joint_positions) {
-      model.setJointValues(Object.fromEntries(data.robot.joint_names.map(
-        (name, i) => [name, data.robot.joint_positions[frame][i]])));
-    }
   }
   if (data.robot.urdf && data.robot.joint_positions) {
     onModelStatus('正在加载机器人模型…');
@@ -96,6 +157,20 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
       let meshes = 0;
       model.traverse(o => { if (o.isMesh) meshes++; });
       const complete = meshes > 0 && loaded === expected;
+      if (complete && !grounded) {
+        model.setJointValues(Object.fromEntries(data.robot.joint_names.map(
+          (name, i) => [name, data.robot.joint_positions[0][i]])));
+        placement.position.z = 0;
+        placement.quaternion.copy(displayRotation(0));
+        placement.updateMatrixWorld(true);
+        footLinks = robotFeet.roots.map(index => model.links[data.robot.names[index]]).filter(Boolean);
+        floorOffsets[1] = -(supportHeight && footLinks.length >= 2 ? soleHeight()
+          : new THREE.Box3().setFromObject(model).min.z);
+        if (supportHeight) heightScale = scaleHeight(floorOffsets[1]);
+        placement.position.z = floorOffsets[1];
+        grounded = true;
+        show(frame);
+      }
       groups[1].lines.visible = groups[1].points.visible = !complete;
       onModelStatus(complete ? '机器人实体模型' : meshes
         ? '部分网格缺失，保留骨架' : '未找到模型网格，显示骨架');
@@ -121,9 +196,9 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
       if (data.robot.ignore_limits === true) {
         Object.values(model.joints).forEach(joint => { joint.ignoreLimits = true; });
       }
-      const placement = new THREE.Group();
-      placement.quaternion.setFromRotationMatrix(new THREE.Matrix4().setFromMatrix3(basis));
-      placement.position.set(0, 1.5, 0);
+      placement = new THREE.Group();
+      placement.quaternion.copy(displayRotation(0));
+      placement.position.set(0, 1.5, floorOffsets[1]);
       placement.add(model);
       scene.add(placement);
       finish();

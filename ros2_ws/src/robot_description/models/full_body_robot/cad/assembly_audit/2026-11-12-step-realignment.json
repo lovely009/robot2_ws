@@ -1,0 +1,174 @@
+{
+  "mode": "static STEP assembly validation, not motion/closure validation",
+  "method": "Generated decimated STL vertices in compiled MJCF world coordinates vs supplied STEP world tessellation nodes. Approximate one-way distances, not collision clearances.",
+  "step_sha256": "3cceefaccdbb681998beed7c7761a3dff4183e69a172936c8743e5bed1136a68",
+  "links": {
+    "Base_link": {
+      "median_mm": 0.04144867985230051,
+      "p95_mm": 0.5848191699703152
+    },
+    "BN_Spine_yaw_link": {
+      "median_mm": 0.03808030237450506,
+      "p95_mm": 0.6560557709150286
+    },
+    "BN_Spine_pitch_link": {
+      "median_mm": 0.26370519017831673,
+      "p95_mm": 0.72216316941589
+    },
+    "BN_Spine_roll_link": {
+      "median_mm": 0.08899090724624441,
+      "p95_mm": 0.9861590961210782
+    },
+    "BN_LeftShoulder_1_link": {
+      "median_mm": 0.12764834625128624,
+      "p95_mm": 0.5622423559669195
+    },
+    "BN_LeftShoulder_2_link": {
+      "median_mm": 0.02828657875871414,
+      "p95_mm": 1.0972795520005274
+    },
+    "BN_LeftUpperArm_1_link": {
+      "median_mm": 0.02633918869031816,
+      "p95_mm": 1.072867142328455
+    },
+    "BN_LeftUpperArm_2_link": {
+      "median_mm": 0.005197110653516361,
+      "p95_mm": 0.433839856831894
+    },
+    "BN_LeftUpperArm_3_link": {
+      "median_mm": 0.0046213752100021845,
+      "p95_mm": 0.47177838128100935
+    },
+    "BN_LeftLowerArm_1_link": {
+      "median_mm": 0.006213951125039436,
+      "p95_mm": 0.4349285178488264
+    },
+    "BN_LeftLowerArm_2_link": {
+      "median_mm": 0.05464708952323406,
+      "p95_mm": 0.529226085305006
+    },
+    "BN_LeftHand_roll_link": {
+      "median_mm": 0.06455945481885568,
+      "p95_mm": 0.25091262920105656
+    },
+    "BN_LeftHand_pitch_link": {
+      "median_mm": 0.06442976207428835,
+      "p95_mm": 0.24683732835775796
+    },
+    "BN_RightShoulder_1_link": {
+      "median_mm": 0.11983812380490819,
+      "p95_mm": 0.5694749004236546
+    },
+    "BN_RightShoulder_2_link": {
+      "median_mm": 0.027402205645881212,
+      "p95_mm": 1.0661986942955213
+    },
+    "BN_RightUpperArm_1_link": {
+      "median_mm": 0.026702778274515167,
+      "p95_mm": 1.0807275169819763
+    },
+    "BN_RightUpperArm_2_link": {
+      "median_mm": 0.0076464981787327,
+      "p95_mm": 0.43343973532542085
+    },
+    "BN_RightUpperArm_3_link": {
+      "median_mm": 0.003950228856350098,
+      "p95_mm": 0.49817499218657574
+    },
+    "BN_RightLowerArm_1_link": {
+      "median_mm": 0.005432636488111812,
+      "p95_mm": 0.44104729847616836
+    },
+    "BN_RightLowerArm_2_link": {
+      "median_mm": 0.05163181398266011,
+      "p95_mm": 0.523852363090722
+    },
+    "BN_RightHand_roll_link": {
+      "median_mm": 0.06534859357809794,
+      "p95_mm": 0.2565960332075587
+    },
+    "BN_RightHand_pitch_link": {
+      "median_mm": 0.06620718006286508,
+      "p95_mm": 0.2503671950113064
+    },
+    "BN_hips_roll_link": {
+      "median_mm": 0.11778339189395981,
+      "p95_mm": 0.5251415336758278
+    },
+    "BN_hips_pitch_link": {
+      "median_mm": 0.1271132594140807,
+      "p95_mm": 0.8915581511556993
+    },
+    "BN_LeftUpperLeg_1_link": {
+      "median_mm": 0.009366385620106568,
+      "p95_mm": 0.6480257222027178
+    },
+    "BN_LeftUpperLeg_2_link": {
+      "median_mm": 0.009914285830676084,
+      "p95_mm": 0.712435841496841
+    },
+    "BN_LeftUpperLeg_3_link": {
+      "median_mm": 0.01458637296923549,
+      "p95_mm": 0.5475207225481847
+    },
+    "BN_LeftLowerLeg_1_link": {
+      "median_mm": 0.01633136035143341,
+      "p95_mm": 0.4666697116974492
+    },
+    "BN_LeftLowerLeg_2_link": {
+      "median_mm": 0.02520299246107797,
+      "p95_mm": 0.5320121724787468
+    },
+    "BN_LeftFoot_pitch_link": {
+      "median_mm": 0.07603308503594433,
+      "p95_mm": 0.6068539663665545
+    },
+    "BN_LeftFoot_roll_link": {
+      "median_mm": 0.07083835533528178,
+      "p95_mm": 1.416330632896014
+    },
+    "BN_RightUpperLeg_1_link": {
+      "median_mm": 0.009481874116790611,
+      "p95_mm": 0.6151263130103136
+    },
+    "BN_RightUpperLeg_2_link": {
+      "median_mm": 0.011132949745657936,
+      "p95_mm": 0.747321165222978
+    },
+    "BN_RightUpperLeg_3_link": {
+      "median_mm": 0.014924676721343929,
+      "p95_mm": 0.5527846304449179
+    },
+    "BN_RightLowerLeg_1_link": {
+      "median_mm": 0.016597739275446804,
+      "p95_mm": 0.4683384110981867
+    },
+    "BN_RightLowerLeg_2_link": {
+      "median_mm": 0.02569909831473995,
+      "p95_mm": 0.5262074097608263
+    },
+    "BN_RightFoot_pitch_link": {
+      "median_mm": 0.07607789587864887,
+      "p95_mm": 0.6085809462270535
+    },
+    "BN_RightFoot_roll_link": {
+      "median_mm": 0.0721759171132107,
+      "p95_mm": 1.4577839844048115
+    }
+  },
+  "max_median_mm": 0.26370519017831673,
+  "max_p95_mm": 1.4577839844048115,
+  "rejected_previous_display_max_landmark_error_mm": {
+    "BN_LeftUpperArm_axis_1_link": 9.59937234800002,
+    "BN_LeftUpperArm_axis_2_link": 46.68327157769394,
+    "BN_LeftUpperArm_axis_3_link": 70.2444323977555,
+    "BN_LeftHand_axis_2_link": 128.37905667790653,
+    "BN_LeftHand_axis_1_link": 124.450939099234,
+    "BN_RightUpperArm_axis_1_link": 5.847471748835393,
+    "BN_RightUpperArm_axis_2_link": 8.401599891596733,
+    "BN_RightUpperArm_axis_3_link": 59.06618980994905,
+    "BN_RightHand_axis_1_link": 114.445523369624,
+    "BN_RightHand_axis_2_link": 130.5939582718487
+  },
+  "tests": "21 passed including STEP landmark regression"
+}

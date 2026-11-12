@@ -36,6 +36,17 @@ def _role(name):
     return None
 
 
+def _swing_rotation(start, end):
+    cross = np.cross(start, end)
+    sine, cosine = np.linalg.norm(cross), np.clip(np.dot(start, end), -1., 1.)
+    if sine > 1e-8:
+        return Rotation.from_rotvec(cross / sine * np.arctan2(sine, cosine)).as_matrix()
+    if cosine >= 0:
+        return np.eye(3)
+    axis = np.cross(start, np.eye(3)[np.argmin(np.abs(start))])
+    return Rotation.from_rotvec(axis / np.linalg.norm(axis) * np.pi).as_matrix()
+
+
 class _Robot:
     def __init__(self, urdf):
         text = urdf.read_text()
@@ -164,6 +175,15 @@ def analyze(urdf, clip, *, up_axis='y_up', scale=.01):
                         'reason': '名称对应，需核对参考姿势' if len(exact) == 1 else
                                   '人体语义候选，需确认' if len(matches) == 1 else
                                   '存在多个候选' if matches else '无法从名称确定人体部位'})
+    for entry in targets:
+        if not entry['source']:
+            continue
+        joint = robot.model.frames[robot.model.getFrameId(entry['target'], pin.FrameType.BODY)].parentJoint
+        if any(other is not entry and other['source'] == entry['source'] and
+               joint in robot.model.supports[robot.model.frames[robot.model.getFrameId(
+                   other['target'], pin.FrameType.BODY)].parentJoint]
+               for other in targets):
+            entry.update(source='', reason='同一部位由末端连杆代表，本轴仍参与求解')
     return {'confirmation_required': True, 'warnings': robot.warnings,
             'robot_joints': robot.names,
             'mapping': {'mode': 'generic', 'source_root': sources[0], 'reference_frame': 0,
@@ -171,7 +191,8 @@ def analyze(urdf, clip, *, up_axis='y_up', scale=.01):
 
 
 class GenericRetargeter:
-    def __init__(self, urdf, mapping, clip, *, up_axis='y_up', scale=.01, position_filter=None):
+    def __init__(self, urdf, mapping, clip, *, up_axis='y_up', scale=.01, position_filter=None,
+                 match_directions=False):
         self.robot = _Robot(urdf)
         self.model, self.data, self.names = self.robot.model, self.robot.data, self.robot.names
         self.clip, self.up_axis, self.scale = clip, up_axis, scale
@@ -226,6 +247,14 @@ class GenericRetargeter:
             covered.update(indices)
             translation = any(self.robot.spec[self.model.names[j]].get('type') == 'prismatic' for j in chain)
             self.targets.append((source_names.index(source), frame, translation))
+        for i, (source, frame, _) in enumerate(self.targets):
+            joint = self.model.frames[frame].parentJoint
+            for other_source, other_frame, _ in self.targets[:i]:
+                other_joint = self.model.frames[other_frame].parentJoint
+                if source == other_source and (joint in self.model.supports[other_joint] or
+                                               other_joint in self.model.supports[joint]):
+                    raise ValueError(f'人体部位 {source_names[source]} 重复映射到串联目标；'
+                                     '只选择该部位最后一个连杆，中间轴留空仍参与求解')
         if not self.targets:
             raise ValueError('请至少指定一个人体与机器人目标对应')
         affected = [bool(set(np.flatnonzero(row)) & covered) for row in self.robot.affine]
@@ -244,6 +273,33 @@ class GenericRetargeter:
         pin.framesForwardKinematics(self.model, self.data, self.configuration(neutral))
         self.robot_reference = [(self.data.oMf[f].translation.copy(), self.data.oMf[f].rotation.copy())
                                 for _, f, _ in self.targets]
+        self.direction_targets = []
+        if match_directions:
+            mapped = {s: f for s, f, _ in self.targets}
+            for end, end_frame, _ in self.targets:
+                parent = clip.joints[end].parent
+                while parent >= 0 and parent not in mapped:
+                    parent = clip.joints[parent].parent
+                if parent < 0:
+                    continue
+                # Shoulder/hip mounting offsets are not homologous anatomical bones.
+                role = _role(clip.joints[parent].name)
+                if role is None or role[1] not in ('upperarm', 'forearm', 'upperleg', 'lowerleg'):
+                    continue
+                start_frame = mapped[parent]
+                start_joint = self.model.frames[start_frame].parentJoint
+                end_joint = self.model.frames[end_frame].parentJoint
+                length = np.linalg.norm(self.data.oMf[end_frame].translation -
+                                        self.data.oMf[start_frame].translation)
+                if (start_joint in self.model.supports[end_joint] and length > 1e-6
+                        and np.linalg.norm(self.source_reference[0][end] -
+                                           self.source_reference[0][parent]) > 1e-6):
+                    self.direction_targets.append((parent, end, start_frame, end_frame))
+        self.report['pose_fit'] = 'bone_directions' if self.direction_targets else 'relative_rotation'
+        self.bone_axes = {}
+        for _, _, start, end in self.direction_targets:
+            delta = self.data.oMf[end].translation - self.data.oMf[start].translation
+            self.bone_axes[start] = self.data.oMf[start].rotation.T @ delta / np.linalg.norm(delta)
         self.nonconverged = 0
 
     def configuration(self, positions):
@@ -265,7 +321,7 @@ class GenericRetargeter:
 
     def convert(self, progress=None):
         current = self.reference.copy()
-        positions, errors, translation_errors = [], [], []
+        positions, errors, translation_errors, direction_errors = [], [], [], []
         active = self.active
         derivative = self.robot.derivative[:, active]
         for frame in range(len(self.clip.frames)):
@@ -275,6 +331,19 @@ class GenericRetargeter:
             desired = [(p0 + self.basis @ (ps[s] - self.source_reference[0][s]),
                         self.basis @ rs[s] @ self.source_reference[1][s].T @ self.basis.T @ r0)
                        for (s, _, _), (p0, r0) in zip(self.targets, self.robot_reference)]
+            desired_directions = [self.basis @ (ps[end] - ps[start]) /
+                                  np.linalg.norm(ps[end] - ps[start])
+                                  for start, end, _, _ in self.direction_targets]
+            rotations = {target: rotation for (_, target, _), (_, rotation) in zip(self.targets, desired)}
+            corrections = {}
+            for (_, _, start, end), direction in zip(self.direction_targets, desired_directions):
+                # Calibrate swing before fitting rotation, rather than pulling toward robot zero.
+                correction = _swing_rotation(rotations[start] @ self.bone_axes[start], direction)
+                corrections[start] = correction
+                if end not in self.bone_axes:
+                    corrections[end] = correction
+            desired = [(position, corrections.get(target, np.eye(3)) @ rotation)
+                       for (_, target, _), (position, rotation) in zip(self.targets, desired)]
             previous = current.copy()
             cached_x, cached = None, None
 
@@ -288,7 +357,7 @@ class GenericRetargeter:
                 pin.computeJointJacobians(self.model, self.data, self.configuration(full))
                 pin.updateFramePlacements(self.model, self.data)
                 residuals, jacobians = [], []
-                for (_, target, translation), (position, rotation) in zip(self.targets, desired):
+                for (source, target, translation), (position, rotation) in zip(self.targets, desired):
                     pose = self.data.oMf[target]
                     jac = pin.getFrameJacobian(self.model, self.data, target,
                                               pin.ReferenceFrame.LOCAL_WORLD_ALIGNED).reshape(6, self.model.nv) @ derivative
@@ -298,6 +367,16 @@ class GenericRetargeter:
                     if translation:
                         residuals.append(pose.translation - position)
                         jacobians.append(jac[:3])
+                for (_, _, start, end), direction in zip(self.direction_targets, desired_directions):
+                    delta = self.data.oMf[end].translation - self.data.oMf[start].translation
+                    length = max(float(np.linalg.norm(delta)), 1e-9)
+                    unit = delta / length
+                    endpoint_jac = [pin.getFrameJacobian(self.model, self.data, f,
+                                    pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:3] @ derivative
+                                    for f in (start, end)]
+                    residuals.append(unit - direction)
+                    jacobians.append((np.eye(3) - np.outer(unit, unit)) @
+                                     (endpoint_jac[1] - endpoint_jac[0]) / length)
                 residuals.append(.01 * (values - previous[active]))
                 jacobians.append(.01 * np.eye(len(active)))
                 cached_x, cached = values.copy(), (np.concatenate(residuals), np.vstack(jacobians))
@@ -310,10 +389,14 @@ class GenericRetargeter:
             if not np.isfinite(fit.x).all():
                 raise ValueError(f'第 {frame} 帧求解产生非有限值')
             self.nonconverged += int(not fit.success)
-            step = self.velocity[active] * self.clip.frame_time
+            # The first pose is an initial condition, not a timed move from robot zero.
+            step = (self.upper[active] - self.lower[active] if frame == 0 and self.direction_targets
+                    else self.velocity[active] * self.clip.frame_time)
             current[active] += np.clip(fit.x - current[active], -step, step)
             if self.position_filter is not None:
-                current = self.position_filter(previous, current, self.velocity * self.clip.frame_time)
+                max_step = (self.upper - self.lower if frame == 0 and self.direction_targets
+                            else self.velocity * self.clip.frame_time)
+                current = self.position_filter(previous, current, max_step)
             full = self.robot.affine @ current + self.robot.offsets
             positions.append(full)
             pin.framesForwardKinematics(self.model, self.data, self.configuration(full))
@@ -321,6 +404,11 @@ class GenericRetargeter:
                            for (_, f, _), (_, r) in zip(self.targets, desired)])
             translation_errors.append([float(np.linalg.norm(p - self.data.oMf[f].translation))
                                        for (_, f, translation), (p, _) in zip(self.targets, desired) if translation])
+            direction_errors.append([float(np.degrees(np.arccos(np.clip(np.dot(
+                (self.data.oMf[end].translation - self.data.oMf[start].translation) /
+                max(np.linalg.norm(self.data.oMf[end].translation - self.data.oMf[start].translation), 1e-9),
+                direction), -1, 1))))
+                for (_, _, start, end), direction in zip(self.direction_targets, desired_directions)])
         positions = np.asarray(positions)
         self.validate_result(positions)
         self.report.update(
@@ -329,6 +417,11 @@ class GenericRetargeter:
             orientation_max_deg=float(np.max(errors)),
             translation_targets=[self.model.frames[f].name for _, f, translation in self.targets if translation],
             translation_mean_m=np.mean(translation_errors, axis=0).tolist())
+        if self.direction_targets:
+            self.report.update(direction_targets=[self.model.frames[end].name
+                               for _, _, _, end in self.direction_targets],
+                               direction_mean_deg=np.mean(direction_errors, axis=0).tolist(),
+                               direction_max_deg=float(np.max(direction_errors)))
         return positions, np.empty((len(positions), 0)), np.asarray(errors)
 
     def validate_result(self, positions):

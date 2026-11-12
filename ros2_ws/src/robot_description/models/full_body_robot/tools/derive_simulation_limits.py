@@ -7,7 +7,6 @@ MuJoCo can also be loaded from the existing ros2_control environment.
 
 import argparse
 from collections import Counter, defaultdict
-import hashlib
 import itertools
 import json
 import math
@@ -30,8 +29,10 @@ except ModuleNotFoundError:
     import mujoco
 
 import yaml
+from assembly_fingerprint import geometry_fingerprint
 
 MODEL = Path(__file__).resolve().parents[1]
+PHYSICS_MODEL = MODEL / "mujoco/full_body_robot.physics.xml"
 sys.path.insert(0, str(MODEL.parents[2] / "robot_sim/scripts"))
 from mujoco_joint_position import JointPositionTargets
 
@@ -42,17 +43,15 @@ CLEARANCE = 0.0001
 MATING_CLEARANCE = 0.0005
 TANGENT_COS_MAX = 0.995
 REFINED_JOINTS = tuple(
-    f"BN_{side}{part}_axis_{axis}"
-    for part, axes in (("UpperLeg", (1, 2, 3)), ("Hand", (1, 2)))
-    for side in ("Left", "Right") for axis in axes
-)
+    f"BN_{side}UpperLeg_{axis}" for side in ("Left", "Right") for axis in (1, 2, 3)
+) + tuple(f"BN_{side}Hand_{axis}" for side in ("Left", "Right") for axis in ("roll", "pitch"))
 WRIST_FLANGES = tuple(f"{side}_wrist_flange_{part}"
                      for side in ("left", "right") for part in ("proximal", "distal"))
 ASSEMBLY_JOINTS = REFINED_JOINTS + WRIST_FLANGES + tuple(name + "_rod_x" for name in WRIST_FLANGES)
 
 
 def load_model():
-    root = ET.parse(MODEL / "mujoco/full_body_robot.xml").getroot()
+    root = ET.parse(PHYSICS_MODEL if PHYSICS_MODEL.is_file() else MODEL / "mujoco/full_body_robot.xml").getroot()
     root.find("compiler").set("meshdir", str(MODEL))
     for joint in root.findall(".//joint"):
         joint.set("limited", "false")
@@ -285,19 +284,8 @@ def coupled_ranges(workspace, bounds, group_names=None):
 
 
 def source_fingerprint():
-    root = ET.parse(MODEL / "mujoco/full_body_robot.xml").getroot()
-    files = sorted({asset.get("file") for asset in root.findall("asset/mesh")})
-    hashes = {name: hashlib.sha256((MODEL / name).read_bytes()).hexdigest() for name in files}
-    for tag in ("custom", "actuator", "keyframe"):
-        element = root.find(tag)
-        if element is not None:
-            root.remove(element)
-    for joint in root.findall(".//joint"):
-        joint.attrib.pop("limited", None)
-        joint.attrib.pop("range", None)
-    root.find("default").remove(root.find("default/position"))
-    hashes["kinematics"] = hashlib.sha256(ET.tostring(root)).hexdigest()
-    return hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+    root = ET.parse(PHYSICS_MODEL if PHYSICS_MODEL.is_file() else MODEL / "mujoco/full_body_robot.xml").getroot()
+    return geometry_fingerprint(MODEL, root)
 
 
 def save_result(workspace, report, group_names=None):

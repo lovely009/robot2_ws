@@ -1,5 +1,130 @@
 # full_body_robot
 
+2026-11-12 主模型已迁移到 STEP／`Robot_body1` 原生装配坐标，胯部采用已核验的安装孔／座面重建。
+当前入口为 [`mujoco/full_body_robot.xml`](mujoco/full_body_robot.xml)，保留 37 个输出关节、30 个辅助关节、10 根闭环连杆和 37 个电机编号。
+38 个主体和 30 份活动件的零位显示直接采用原生装配坐标，不再应用旧的逐件 ICP 显示矩阵。
+
+关节按 `Robot_body1/meshes` 文件名去掉 `.STL`、末尾 `_link` 与首尾空格命名；连杆保留 `_link`，根连杆为 `Base_link`。
+例如 `BN_Spine_pitch`、`BN_hips_roll`、`BN_LeftUpperArm_1`、`BN_LeftHand_roll`／`BN_LeftHand_pitch`。
+完整旧名／新名对应见 [`config/joint_names.json`](config/joint_names.json)；电机编号、差动组和关节对应见 [`config/motor_topology.yaml`](config/motor_topology.yaml)。
+仿真位置接口可解析旧名称别名，但旧动作的坐标定义已经变化，应按新版 URDF 重新转换；别名兼容不代表旧轨迹姿态等价。
+
+四处源关节轴心已依据 STEP 和父子件圆柱支持修正：腰 yaw、右肩第 1 轴、左右腕 pitch。
+通过重表达 visual／collision／inertial 与子关节坐标，保持零位网格和质心的世界位姿。
+轴线记录见 [`config/kinematic_axes.json`](config/kinematic_axes.json)、`cad/assembly_audit/2026-11-12-joint-axes.json`。
+其余 29 根轴有父子双侧圆柱支持，4 根脚部轴目前仅有单侧支持，保留源定义并记录待机械核实。
+
+六组两轴可达域已按新闭环几何重算。串联关节使用历史最大绝对值构成正负对称的临时预览域，避免把旧坐标的单侧边界直接套入新关节；差动输出与辅助电机搜索边界保留。**当前可达域仅验证运动学，不证明新装配的碰撞安全范围**。
+`simulation_limits.yaml` 明确记录 `collision_validation: pending`；主体惯量保留 `Robot_body1` 导出值，辅助件惯量为数值预览参数，尚未完成实物质量分配。
+当前配置分别记录 URDF 摘要和含实际网格、装配关系的几何指纹；`mujoco/geometry_limits.json` 保留为迁移前的扫描证据，其旧指纹不匹配当前装配，不能作为新版碰撞验收。
+
+```bash
+source ros2_ws/install/setup.bash
+~/.ros/ros2_control/.venv/bin/python ros2_ws/src/robot_description/models/full_body_robot/tools/build_mujoco_model.py
+tools/mujoco_zh/run.sh --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/full_body_robot/mujoco/full_body_robot.xml
+```
+
+`full_body_robot.urdf` 和 `.mapping.urdf` 为 37 轴骨架；`.standalone.urdf` 额外包含活动法兰、连杆和辅助关节，用于完整 CAD 运动显示。
+显示网格在 `mujoco/visual/native/`，分件归属与零位变换记录在 [`config/native_assembly.json`](config/native_assembly.json)。
+肩臂、双腕及胯部细节见 [新版主模型实体渲染](cad/assembly_audit/2026-11-12-native-main-preview.png)。
+主模型与 standalone 的新版摘要已注册到 BVH 通用映射配置。
+
+另提供 ±180° 仿真副本：[`mujoco/full_body_robot.180deg.xml`](mujoco/full_body_robot.180deg.xml)，以及 `urdf/full_body_robot.180deg.urdf`、`urdf/full_body_robot.180deg.standalone.urdf`。
+该副本的 67 个转动关节和 37 个驱动范围均为 ±π，位置接口的 37 个输出范围同步为 ±π，移除旧采样域限制；10 处实际闭环与几何逆解保留，因此部分角度组合仍不可达。当前主模型与其配置保持原范围。
+主模型重建后，用 `python3 tools/build_180deg_preview.py` 在本模型目录重新生成副本；用中文 MuJoCo 启动器的 `--mjcf` 参数打开上述 XML。
+
+以下为迁移前的静态装配核对记录；其中“旧运动模型未更新”等状态描述属于当时记录，当前主模型以上方说明为准。
+
+2026-11-12 装配复查更正：旧 `full_body_robot.xml` 的显示配准未通过用户截图复核，肩臂/隔板及两侧手腕存在错位。
+之前的单连杆表面与约束测试不能替代整机装配验收。
+
+胯部安装复查进一步更正：原 STEP／`Robot_body1` 中两侧胯部球铰组件本身没有装入平台安装孔。
+“20 个杆端球心同心”只证明杆与球铰匹配，不能证明球铰已安装到接收件；之前的通过结论没有覆盖这一段连接。
+
+当前查看胯部安装修正，请打开 [`mujoco/full_body_robot.hips-mounted.xml`](mujoco/full_body_robot.hips-mounted.xml)。
+它保留整机 STEP 配准，并按实际孔口和座面重装胯部两根连杆：
+
+- 两侧平台孔轴线位于 X = ±71.52 mm；测量孔口外侧最高完整圆周及有限凸台，不采用下方约 2 mm 的肩面。
+- GE8 内圈轴孔为 Ø8 mm，轴向宽度约 8 mm，球心从实际座面沿孔轴外移 4 mm；平台端轴孔同轴、内圈底面贴合座面。
+- 保留两根杆的 65 mm 球心距，法兰绕实际电机轴分别转动约 −53.77°／+74.88°，选择外摆装配分支。
+- Ø16 mm、宽 5 mm 的轴承外圈归连杆；内圈与紧固组件留在平台或法兰。杆的滚转方向按实测杆孔法向重建。
+- 法兰平板侧另测实际 Ø5 mm 孔的最高完整孔口圆周；验收同时检查该侧座面和法兰／固定电机轴同轴。
+
+这是**静态安装重建**；原 STEP、原始导出网格保持原样，运动模型的关节、闭环及碰撞限位尚未完成这一轮装配迁移。
+参数和独立验收结果分别见 `config/hips_mount_alignment.json`、`cad/assembly_audit/2026-11-12-hips-mounting.json`。
+MuJoCo 实体渲染对比见 [胯部安装前后](cad/assembly_audit/2026-11-12-hips-before-after.png)（左为原 STEP，右为修正后）。
+验收从源几何重新测孔口、座高和球心，不以求解参数作为通过依据；还核实实际 MJCF 的网格绑定与源连通域内容。
+固定底座也按剔除活动件后的源区域核验，防止原始连杆或紧固组件残留造成重影。
+回归覆盖整体移位、求解参数与组件一起装到错误肩面、连杆／平台网格互换、底座重复残留活动件，以及球心仍闭合但连杆绕长轴扭转 20°／180°。
+
+```bash
+source ros2_ws/install/setup.bash
+~/.ros/ros2_control/.venv/bin/python ros2_ws/src/robot_description/models/full_body_robot/tools/hips_mounting.py
+~/.ros/ros2_control/.venv/bin/python ros2_ws/src/robot_description/models/full_body_robot/tools/audit_step_linkages.py
+tools/mujoco_zh/run.sh --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/full_body_robot/mujoco/full_body_robot.linkage-audit.xml
+```
+
+当前通过 STEP 零位比对的模型为 [`mujoco/full_body_robot.step-aligned.xml`](mujoco/full_body_robot.step-aligned.xml)。
+它按照 `Robot_body1` 的整机坐标组装全部 38 份网格，修正已核实的腰部 pitch 导出姿态，不使用旧的逐连杆 ICP 显示矩阵。
+这是**静态装配校验模型**，无关节、驱动器与运动闭环。旧运动模型保留，其关节安装轴、活动件归属和限位尚未按新版装配重新标定。
+
+重建入口为 `tools/build_step_alignment.py`。打开方式：
+
+```bash
+tools/mujoco_zh/run.sh --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/full_body_robot/mujoco/full_body_robot.step-aligned.xml
+```
+
+`config/step_alignment.json` 记录整机坐标，`cad/assembly_audit/2026-11-12-step-realignment.json` 记录与实际 STEP 节点的逐连杆距离。
+逐连杆距离中位数最大 0.264 mm，95% 分位最大 1.458 mm；这是离散节点比对，不是接触间隙。
+实际 STEP 地标点用于肩臂、隔板和腕部的自动回归检查。
+
+STEP 耦合连杆复核：六组、10 根杆、20 个端点都找到实际 STEP 球面与杆端圆柱的同心对应。
+检查同时要求杆端圆周覆盖和轴向截面中心一致，避免“无限圆柱轴碰巧经过球心”误判。
+几何中心检查容差 0.025 mm，最大轴向截面中心偏差约 0.013 mm；这是几何匹配检查，不是间隙或加工精度验收。
+10 个法兰取得大圆柱几何轴候选；轴线正负号没有编码器方向含义，静态几何也不证明转子/壳体的动态归属。
+
+| 连接几何（mm） | STEP | 旧运动模型 |
+|---|---:|---:|
+| 腰部左右球心跨度 | 102 | 100 |
+| 胯部平台左右球心跨度（锚点定义不同） | 178.767043 | 143.040001 |
+| 单根肩部连杆球心距（左右相同） | 106.047644 | 106.905873 |
+| 胯部单根连杆球心距 | 65 | 65 |
+| 手腕长／短连杆球心距 | 101.5／66 | 101.5／66.005954 |
+
+旧模型的腰部球心被向内移 1 mm/侧，双肩用了不同的杆长；不能直接用于这份 STEP 装配。
+胯部原 STEP 的球铰并未装入孔位，两列跨度差异不能直接判定旧锚点错误。上方安装重建保留实际杆长，并按真实安装孔和座面确定平台位置及曲柄分支。
+原运动模型的锚点、杆长和活动件归属仍需重新标定，本轮没有改动运动控制、限位或保护参数。
+
+带标记的静态校验模型为 `mujoco/full_body_robot.linkage-audit.xml`：透明外形、橙色球心连线、绿色球心标记、蓝色法兰几何轴；胯部采用修正后的安装模型与标记位置。
+胯部之外的组目前仍仅通过杆端几何检查，未以此声称安装座面或运动验收通过。
+完整坐标、源分件、圆柱轴与检查结果见 `cad/assembly_audit/2026-11-12-step-linkages.json`。
+复核命令（STEP 特征缓存已提供；重提取需安装 `cadquery-ocp`）：
+
+```bash
+~/.ros/ros2_control/.venv/bin/python ros2_ws/src/robot_description/models/full_body_robot/tools/audit_step_linkages.py
+```
+
+以下为前次更新记录，其中“测试通过”仅指当时的单连杆/物理参数检查。
+
+2026-11-12：standalone 显示模型与整机 MJCF 外观已更新为 `../Robot_body1` 的 38 份 STL。
+与上一版 `Robot_body` 相比，14 份双臂网格变化，其余 24 份一致。
+配准、源文件哈希和活动件的连通域归属记录在 `config/display_meshes.json`；显示网格位于 `mujoco/visual/Robot_body1/`。
+
+本次重点修正了耦合件的显示连接：六组差动共 10 根连杆，30 份法兰/连杆/平台网格分别绑定到原有活动 body，
+不再把整件 STL 中的活动件固定在主连杆上。腕部转子与端盖继续分开，防止静止端盖随电机转动。
+同时修正旧显示配准中左前臂沿局部 Z 首尾翻转的问题，重新配准两侧前臂。
+连通域归属已固化；重建前核对源/参考哈希、区域数量与重复归属，全部拆分成功后才替换显示网格。
+
+全身 STEP 已通过 OpenCascade 解析，包含 528 个实体实例。新版原始 URDF 存在腰部 pitch 导出姿态差异，
+导致上身与 STEP 的点云距离达到数十毫米；仅恢复上一版该关节 RPY 后，上身各连杆的距离中位数降至约 0.004～0.13 mm。
+这些数值是离散点云比对，不代表装配间隙。新版还有 5 处右臂/右手网格 URI 的文件名前导空格错误。
+原导出包保持原样，本次未将其运动学、惯量或零限位直接覆盖到 full。
+来源、逐连杆比对和分件证据见 [`cad/assembly_audit/2026-11-12.json`](cad/assembly_audit/2026-11-12.json)。
+
+`full_body_robot.urdf`、映射版、质量/惯量、传动、闭环与限位沿用现有模型。
+显示更新不会重新定义碰撞范围；`mujoco/full_body_robot.physics.xml` 继续供原几何扫描使用。
+`tools/build_mujoco_model.py` 会重建两份 MJCF 与显示 URDF，生成的 68 个可见网格包含 38 个主体和 30 个耦合活动件。
+
 无头部全身模型，原导出名为 `全身装配（不含头部）`，现纳入 `robot_description` 的公共模型目录。
 包含腰胯/躯干、双臂和双腿/脚板；38 个连杆、37 个转动关节条目，总声明质量约 11.37637 kg。
 用户已确认每个相应 joint 只负责 1 个转动自由度；每侧腕部的 `3.8` 与 `3.9` 两个关节合起来负责 2 个自由度。
@@ -14,7 +139,7 @@
 上身旋转用 `BN_Spine_yaw`，两侧踝关节用 `BN_*Foot_pitch` 和 `BN_*Foot_roll`，
 其余机械轴在节点内用 `axis_1`、`axis_2`、`axis_3` 编号。两侧腕部都按从前臂到手板的顺序编号，左腕 `axis_1`、`axis_2` 分别对应原 CAD 的 3.9、3.8。
 每个子连杆使用对应关节名加 `_link`，例如 `Joint_Link1` 对应 `BN_Spine_yaw_link`。
-`base_link` 是 RViz 的固定参考帧。下文中的 CAD 编号用于追溯原始装配关系。
+`Base_link` 是 RViz 的固定参考帧。下文中的 CAD 编号用于追溯原始装配关系。
 两份 URDF 均将 joint2 的 parent 改为 Link3，并用 `inverse(T_1_3) · T_1_2` 重表达 origin；
 左腕依据 CSV 零件归属和相交的正交轴交换 3.8/3.9 的串联顺序，并重表达固定 origin，
 使两个腕轴都能带动实际手板（右手板原本已在末端 3.9r，无需交换）。
@@ -32,34 +157,34 @@
 | 电机编号 | 传动分组 | URDF 关节 |
 |---|---|---|
 | 1 | 一对一 | `BN_Spine_yaw` |
-| 2、3 | 腰部差动 | `BN_Spine_axis_1`、`BN_Spine_axis_2` |
-| 4、5 | 胯部差动 | `BN_Hips_axis_1`、`BN_Hips_axis_2` |
-| 6、7 | 左肩差动 | `BN_LeftShoulder_axis_1`、`BN_LeftShoulder_axis_2` |
-| 8 | 一对一 | `BN_LeftUpperArm_axis_1` |
-| 9 | 一对一 | `BN_LeftUpperArm_axis_2` |
-| 10 | 一对一 | `BN_LeftUpperArm_axis_3` |
-| 11 | 一对一 | `BN_LeftLowerArm_axis_1` |
-| 12 | 一对一 | `BN_LeftLowerArm_axis_2` |
-| 13、14 | 左腕差动 | `BN_LeftHand_axis_1`、`BN_LeftHand_axis_2` |
-| 15、16 | 右肩差动 | `BN_RightShoulder_axis_1`、`BN_RightShoulder_axis_2` |
-| 17 | 一对一 | `BN_RightUpperArm_axis_1` |
-| 18 | 一对一 | `BN_RightUpperArm_axis_2` |
-| 19 | 一对一 | `BN_RightUpperArm_axis_3` |
-| 20 | 一对一 | `BN_RightLowerArm_axis_1` |
-| 21 | 一对一 | `BN_RightLowerArm_axis_2` |
-| 22、23 | 右腕差动 | `BN_RightHand_axis_1`、`BN_RightHand_axis_2` |
-| 24 | 一对一 | `BN_LeftUpperLeg_axis_1` |
-| 25 | 一对一 | `BN_LeftUpperLeg_axis_2` |
-| 26 | 一对一 | `BN_LeftUpperLeg_axis_3` |
-| 27 | 一对一 | `BN_LeftLowerLeg_axis_1` |
-| 28 | 一对一 | `BN_LeftLowerLeg_axis_2` |
+| 2、3 | 腰部差动 | `BN_Spine_pitch`、`BN_Spine_roll` |
+| 4、5 | 胯部差动 | `BN_hips_roll`、`BN_hips_pitch` |
+| 6、7 | 左肩差动 | `BN_LeftShoulder_1`、`BN_LeftShoulder_2` |
+| 8 | 一对一 | `BN_LeftUpperArm_1` |
+| 9 | 一对一 | `BN_LeftUpperArm_2` |
+| 10 | 一对一 | `BN_LeftUpperArm_3` |
+| 11 | 一对一 | `BN_LeftLowerArm_1` |
+| 12 | 一对一 | `BN_LeftLowerArm_2` |
+| 13、14 | 左腕差动 | `BN_LeftHand_roll`、`BN_LeftHand_pitch` |
+| 15、16 | 右肩差动 | `BN_RightShoulder_1`、`BN_RightShoulder_2` |
+| 17 | 一对一 | `BN_RightUpperArm_1` |
+| 18 | 一对一 | `BN_RightUpperArm_2` |
+| 19 | 一对一 | `BN_RightUpperArm_3` |
+| 20 | 一对一 | `BN_RightLowerArm_1` |
+| 21 | 一对一 | `BN_RightLowerArm_2` |
+| 22、23 | 右腕差动 | `BN_RightHand_roll`、`BN_RightHand_pitch` |
+| 24 | 一对一 | `BN_LeftUpperLeg_1` |
+| 25 | 一对一 | `BN_LeftUpperLeg_2` |
+| 26 | 一对一 | `BN_LeftUpperLeg_3` |
+| 27 | 一对一 | `BN_LeftLowerLeg_1` |
+| 28 | 一对一 | `BN_LeftLowerLeg_2` |
 | 29 | 一对一 | `BN_LeftFoot_pitch` |
 | 30 | 一对一 | `BN_LeftFoot_roll` |
-| 31 | 一对一 | `BN_RightUpperLeg_axis_1` |
-| 32 | 一对一 | `BN_RightUpperLeg_axis_2` |
-| 33 | 一对一 | `BN_RightUpperLeg_axis_3` |
-| 34 | 一对一 | `BN_RightLowerLeg_axis_1` |
-| 35 | 一对一 | `BN_RightLowerLeg_axis_2` |
+| 31 | 一对一 | `BN_RightUpperLeg_1` |
+| 32 | 一对一 | `BN_RightUpperLeg_2` |
+| 33 | 一对一 | `BN_RightUpperLeg_3` |
+| 34 | 一对一 | `BN_RightLowerLeg_1` |
+| 35 | 一对一 | `BN_RightLowerLeg_2` |
 | 36 | 一对一 | `BN_RightFoot_pitch` |
 | 37 | 一对一 | `BN_RightFoot_roll` |
 
@@ -158,10 +283,10 @@ source ros2_ws/install/setup.bash
 模型采用简化几何、零重力和仿真伺服参数，用于验证闭环运动方向。物理电机编号对应、编码器正向、机械限位和负载能力待实机标定。
 
 胯部可用同一命令加载 [`mujoco/hips_differential.xml`](mujoco/hips_differential.xml)。两侧法兰按
-`base_link` 的 +Z 右手方向计角，滑块名中的 +X、−X 表示安装侧。两根 65 mm 连杆前端接入
+`Base_link` 的 +Z 右手方向计角，滑块名中的 +X、−X 表示安装侧。两根 65 mm 连杆前端接入
 前横梁的安装孔，球心沿孔轴高于安装面 4 mm。34 mm 摆臂在仿真零位选取向外的装配分支，
-相对 CAD 导出姿态，+X 侧转约 −53.77°，−X 侧转约 +74.88°。等量同向主要驱动 `BN_Hips_axis_1`，
-等量反向主要驱动 `BN_Hips_axis_2`。4、5 号对应安装侧及编码器正向仍待确认。
+相对 CAD 导出姿态，+X 侧转约 −53.77°，−X 侧转约 +74.88°。等量同向主要驱动 `BN_hips_roll`，
+等量反向主要驱动 `BN_hips_pitch`。4、5 号对应安装侧及编码器正向仍待确认。
 
 | 上肢模型 | 几何和滑块 |
 |---|---|

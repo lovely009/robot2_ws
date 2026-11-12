@@ -127,6 +127,42 @@ def test_mujoco_cleanup_accepts_repeated_shutdown(tmp_path, monkeypatch):
     assert not runtime.exists()
 
 
+@pytest.mark.parametrize("available", ["ready", "missing_runtime", "missing_font"])
+@pytest.mark.parametrize("pythonpath", ["", "/ros/python:/custom/python"])
+def test_mujoco_bridge_loads_available_chinese_runtime(available, pythonpath, tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("mujoco_launch", LAUNCH_DIR / "mujoco.launch.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    runtime = tmp_path / ".cache/robot2-mujoco-zh/runtime"
+    font = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+    present = set()
+    if available != "missing_runtime":
+        present.update({runtime / "build.json", runtime / "mujoco/libmujoco.so.3.6.0"})
+    if available != "missing_font":
+        present.add(font)
+    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(module.Path, "is_file", lambda path: path in present)
+    monkeypatch.setattr(module.os, "environ", {
+        "PYTHONPATH": pythonpath, "XDG_SESSION_TYPE": "wayland",
+        "DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0", "ROS_DOMAIN_ID": "93",
+    })
+
+    environment = module._bridge_environment()
+
+    assert environment["PYGLFW_LIBRARY_VARIANT"] == "x11"
+    assert "WAYLAND_DISPLAY" not in environment
+    assert environment["ROS_DOMAIN_ID"] == "93"
+    assert module.os.environ["WAYLAND_DISPLAY"] == "wayland-0"
+    if available == "ready":
+        assert environment["MUJOCO_LANGUAGE"] == "zh_CN"
+        assert environment["MUJOCO_ZH_FONT"] == str(font)
+        assert environment["PYTHONPATH"].split(":") == [str(runtime)] + (
+            pythonpath.split(":") if pythonpath else [])
+    else:
+        assert "MUJOCO_LANGUAGE" not in environment
+        assert environment["PYTHONPATH"] == pythonpath
+
+
 def _robot_description_command(entities, context):
     """取出 robot_state_publisher 的 robot_description 命令串（运行期求值）。"""
     for action in entities:

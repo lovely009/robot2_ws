@@ -106,9 +106,10 @@ def main(args=None):
     # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
     build_token = str(int(time.time()))
     from pathlib import Path
+    motion_data = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'robot2'
     motion_jobs = MotionJobs(actions_dir=actions_directory(web_root),
-                            profiles_dir=Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
-                            / 'robot2/motion_mappings', models_root=models_dir)
+                            profiles_dir=motion_data / 'motion_mappings', models_root=models_dir,
+                            cache_dir=motion_data / 'motion_results')
 
     class Handler(SimpleHTTPRequestHandler):
 

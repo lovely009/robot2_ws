@@ -1,0 +1,1571 @@
+{
+  "source": "Robot_body1",
+  "registration": "Display-only rigid registration into existing full_body_robot CAD frames, no scaling. Previous common-surface registrations retained except both forearms, re-fitted with 24 rotation seeds and 95% surface score to reject end-for-end ambiguity. Coupled moving components are split and attached to existing mechanism bodies. Forearms refined against exact CAD triangle surfaces (65% trimmed ICP); local +Z and rod endpoint bounds checked separately.",
+  "links": {
+    "base_link": {
+      "source": "Base_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999824633,
+          -2.2391321660263964e-06,
+          5.471901266286512e-06,
+          3.9597653627092355e-07
+        ],
+        [
+          2.239172130676122e-06,
+          0.999999999970742,
+          -7.304593445443503e-06,
+          3.102749177977291e-07
+        ],
+        [
+          -5.471884914387017e-06,
+          7.3046057648440426e-06,
+          0.9999999999582827,
+          -3.840196471543105e-07
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.048276709629367e-05,
+      "old_vertices": 858450,
+      "new_vertices": 871158,
+      "source_sha256": "0352374f18ff3f8640a7bc21a969d2c6a4f3193da54b8694cbfc17c0963ae574",
+      "reference": "base_link.STL",
+      "reference_sha256": "db4c7dee5e2d7c9c817446a6d2766f488c9e7ec0459b50c8ef49746a49b5004f",
+      "source_region_count": 282,
+      "components": {
+        "hips_plus_flange": [
+          3,
+          4,
+          16,
+          18,
+          36,
+          38,
+          39,
+          40,
+          41,
+          42,
+          44,
+          46
+        ],
+        "hips_plus_rod": [
+          17
+        ],
+        "hips_plus_platform": [
+          2,
+          8,
+          19
+        ],
+        "hips_minus_flange": [
+          0,
+          5,
+          7,
+          9,
+          23,
+          24,
+          25,
+          28,
+          32,
+          33,
+          34,
+          37
+        ],
+        "hips_minus_rod": [
+          12
+        ],
+        "hips_minus_platform": [
+          1,
+          6,
+          13
+        ]
+      },
+      "ownership_method": "Reviewed connected components; initial candidates from exact reference triangle surfaces, not nearest vertices. Source hash and region count guard the mapping."
+    },
+    "BN_Spine_yaw_link": {
+      "source": "BN_Spine_yaw_link .STL",
+      "new_to_old": [
+        [
+          0.9999999999936761,
+          -3.2979281110639796e-06,
+          1.3339594794619192e-06,
+          1.5904428604165254e-07
+        ],
+        [
+          3.297922617804461e-06,
+          0.9999999999860606,
+          4.1183966390792565e-06,
+          -0.027852558936742003
+        ],
+        [
+          -1.3339730636673468e-06,
+          -4.118392222171777e-06,
+          0.9999999999906142,
+          -0.0047220337963492795
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 6.313252132452191e-06,
+      "old_vertices": 639048,
+      "new_vertices": 664608,
+      "source_sha256": "ad7cbd11be41f1868904d05d70421669d879230e6237acc0e3c1261678dc758e",
+      "reference": "Joint_Link1.STL",
+      "reference_sha256": "d7080437a8c4732a4b025528b3cef5cc112d06b117f2645affc4678dbc1895a6",
+      "source_region_count": 182,
+      "components": {
+        "waist_plus_flange": [
+          3,
+          42,
+          43,
+          44,
+          45,
+          156,
+          159,
+          167
+        ],
+        "waist_plus_rod": [
+          1
+        ],
+        "waist_plus_platform": [
+          157,
+          158,
+          168
+        ],
+        "waist_minus_flange": [
+          118,
+          119,
+          120,
+          121,
+          160,
+          161,
+          162,
+          166
+        ],
+        "waist_minus_rod": [
+          163
+        ],
+        "waist_minus_platform": [
+          2,
+          155,
+          165
+        ]
+      },
+      "ownership_method": "Reviewed connected components; initial candidates from exact reference triangle surfaces, not nearest vertices. Source hash and region count guard the mapping."
+    },
+    "BN_Spine_axis_2_link": {
+      "source": "BN_Spine_roll_link .STL",
+      "new_to_old": [
+        [
+          0.9999999999968431,
+          -2.3295521108343624e-06,
+          9.377602947343324e-07,
+          2.0843421762847115e-07
+        ],
+        [
+          2.329550508686281e-06,
+          0.9999999999958422,
+          1.7063546622271723e-06,
+          3.210792415167223e-07
+        ],
+        [
+          -9.37764270851063e-07,
+          -1.7063524685891352e-06,
+          0.9999999999981206,
+          1.0115271430885386e-07
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 5.587188910711718e-06,
+      "old_vertices": 1554888,
+      "new_vertices": 1622682,
+      "source_sha256": "bcc9d5928139592471c8bc2baab69bdd394e7303557e904c276b76307fe61f4f",
+      "reference": "Joint_Link2.STL",
+      "reference_sha256": "64aaebe00ccfa39178f0155d0130fb5f92207c6b10ae417424b57a421d67a7ef",
+      "source_region_count": 62,
+      "components": {
+        "left_shoulder_flange_linkage_flange": [
+          10,
+          11,
+          23
+        ],
+        "left_shoulder_flange_linkage_rod": [
+          13,
+          24,
+          25
+        ],
+        "left_shoulder_flange_linkage_platform": [
+          9,
+          12
+        ],
+        "right_shoulder_flange_linkage_flange": [
+          45,
+          46,
+          47
+        ],
+        "right_shoulder_flange_linkage_rod": [
+          41,
+          43,
+          44
+        ],
+        "right_shoulder_flange_linkage_platform": [
+          31,
+          42
+        ]
+      },
+      "ownership_method": "Reviewed connected components; initial candidates from exact reference triangle surfaces, not nearest vertices. Source hash and region count guard the mapping."
+    },
+    "BN_LeftShoulder_axis_1_link": {
+      "source": "BN_LeftShoulder_1_link.STL",
+      "new_to_old": [
+        [
+          0.9993211639619265,
+          -0.03684034823126213,
+          -1.244022942125202e-09,
+          2.3808465908281832e-11
+        ],
+        [
+          0.03684034823126109,
+          0.9993211639619136,
+          2.339520888830313e-10,
+          8.61012053065011e-12
+        ],
+        [
+          1.2345519891254114e-09,
+          -2.7962084407390756e-10,
+          0.9999999999999989,
+          -5.167708401658927e-12
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 5.054261408562394e-10,
+      "old_vertices": 72642,
+      "new_vertices": 72642,
+      "source_sha256": "aef054568a2432bb81d99b4531601dabb110e72ed13ca8f73bd543592e49760f",
+      "reference": "Joint_link3.1.STL",
+      "reference_sha256": "1c2eb48f09d0e034654722007ae5362731f61464e2053e41263f5d684b7ef3df"
+    },
+    "BN_LeftShoulder_axis_2_link": {
+      "source": "BN_LeftShoulder_2_link.STL",
+      "new_to_old": [
+        [
+          0.9995605862089268,
+          -0.029641769476533436,
+          2.6358413719438293e-10,
+          -1.2167637555890117e-10
+        ],
+        [
+          0.02964176947656003,
+          0.9995605862089266,
+          7.094631538097088e-10,
+          4.390519524598226e-11
+        ],
+        [
+          -2.845119208903468e-10,
+          -7.013489959735127e-10,
+          1.0000000000000062,
+          1.6207156962430954e-11
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 8.016964623065221e-10,
+      "old_vertices": 101625,
+      "new_vertices": 101625,
+      "source_sha256": "f56bfa66a6152b9411a90c762bba7cf2ff5950f1f7d1aea3a58d5262e66c4eb3",
+      "reference": "Joint_link3.2.STL",
+      "reference_sha256": "6a7d12e889b362c7b96a77a285a088efb8e4d1fac132b4ba1b3771970ca80467"
+    },
+    "BN_LeftUpperArm_axis_1_link": {
+      "source": "BN_LeftUpperArm_1_link.STL",
+      "new_to_old": [
+        [
+          -0.9939410172348414,
+          0.07804047742422895,
+          -0.07740115077663257,
+          -0.0041409615608133344
+        ],
+        [
+          0.017829741346828167,
+          0.8093416440486734,
+          0.5870674608015969,
+          0.03140810921234933
+        ],
+        [
+          0.10845899954199295,
+          0.5821303866763258,
+          -0.8058292985033267,
+          0.010388132544852425
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 1.9272566621283815e-09,
+      "old_vertices": 86553,
+      "new_vertices": 83301,
+      "source_sha256": "32e4637fb3a2bd0757caa7e015de6cc65f9b83acc6c00eae61e4c221cd067a75",
+      "reference": "Joint_link3.3.STL",
+      "reference_sha256": "636347ba4431c6d18f26e5cd3ba8cb7e72328938f8de89489fa6bc232fe9b3e8"
+    },
+    "BN_LeftUpperArm_axis_2_link": {
+      "source": "BN_LeftUpperArm_2_link.STL",
+      "new_to_old": [
+        [
+          -0.9354747209682849,
+          0.2555921173825564,
+          0.24404859344240984,
+          0.033719162189870346
+        ],
+        [
+          -0.24527476899331407,
+          -0.9667533899019207,
+          0.07230609108756528,
+          -0.10623210690220125
+        ],
+        [
+          0.2544156719319792,
+          0.007781558004705443,
+          0.9670636552111787,
+          -0.002112996715757082
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0006744932658443786,
+      "old_vertices": 349833,
+      "new_vertices": 350919,
+      "source_sha256": "3c7b95dba19582bca743ec96d4499bedefb56467776af9d83f38b3a69c42bec7",
+      "reference": "Joint_link3.4.STL",
+      "reference_sha256": "8b2c468cf7da6aaa5bde03f2423f9a8fc4e4c5da32f7af66fe54da37d727b783"
+    },
+    "BN_LeftUpperArm_axis_3_link": {
+      "source": "BN_LeftUpperArm_3_link.STL",
+      "new_to_old": [
+        [
+          -0.36043068406955053,
+          -0.9324045464111667,
+          0.026673653910429158,
+          -0.004383381417863519
+        ],
+        [
+          0.9327772590558379,
+          -0.36015611772789163,
+          0.014634064761248154,
+          0.0005750588461382291
+        ],
+        [
+          -0.004038188877864755,
+          0.030155143756179333,
+          0.9995370730171039,
+          0.010504088869111998
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0008194574261885416,
+      "old_vertices": 374721,
+      "new_vertices": 388587,
+      "source_sha256": "1aba683f12e4d0bc1c57f2f1c8380021287b758247aec8ad389e8763cdafc8b8",
+      "reference": "Joint_link3.5.STL",
+      "reference_sha256": "bc90b5367d381f40aa45014976c5fa373d3036dd60bc5371d23ca925ed23194e"
+    },
+    "BN_LeftLowerArm_axis_1_link": {
+      "source": "BN_LeftLowerArm_1_link.STL",
+      "new_to_old": [
+        [
+          0.9998089783997083,
+          0.019544991975561293,
+          -1.967747976254832e-09,
+          -0.003945899442595706
+        ],
+        [
+          -0.019544991975562337,
+          0.9998089783997153,
+          -1.45546091520888e-09,
+          -0.0006556507602699529
+        ],
+        [
+          1.9389260080440585e-09,
+          1.4936410578496534e-09,
+          0.9999999999999996,
+          -0.004000000125766636
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 1.269466167866041e-09,
+      "old_vertices": 346857,
+      "new_vertices": 363165,
+      "source_sha256": "fe288a7bbbc37465df1f6ed337cf0f2133d5ebb3b987491ecc4a38193899b289",
+      "reference": "Joint_link3.6.STL",
+      "reference_sha256": "ebfb061e8cfc46a0e551844976d5a507add4b57d5a6ae8d185bbfa0e31ed9945"
+    },
+    "BN_LeftLowerArm_axis_2_link": {
+      "source": "BN_LeftLowerArm_2_link.STL",
+      "new_to_old": [
+        [
+          -0.5501864922166952,
+          -0.8350418096013424,
+          7.297822395633559e-09,
+          0.001650559011416338
+        ],
+        [
+          0.8350418096013436,
+          -0.5501864922166915,
+          -1.387660374038461e-08,
+          -0.0025051246043795725
+        ],
+        [
+          1.5602712192610036e-08,
+          -1.5407370304248915e-09,
+          0.9999999999999989,
+          4.664177694155825e-10
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.156119427042973e-10,
+      "old_vertices": 151422,
+      "new_vertices": 169254,
+      "source_sha256": "fce40e4ee8c530a7c3506c3e433d6a623ee5704eead06a8daa6717863f65f534",
+      "reference": "Joint_link3.7.STL",
+      "reference_sha256": "a60250a2d6bb339de1e71a58c8a9f77c434a8e5c1418c02bc7eb4f1ec3d324a9",
+      "registration_rms95_m": 0.0007709095375534533,
+      "source_region_count": 68,
+      "components": {
+        "left_wrist_flange_proximal_flange": [
+          18,
+          24
+        ],
+        "left_wrist_flange_proximal_rod": [
+          23
+        ],
+        "left_wrist_flange_proximal_platform": [
+          20,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67
+        ],
+        "left_wrist_flange_distal_flange": [
+          21,
+          42
+        ],
+        "left_wrist_flange_distal_rod": [
+          43
+        ],
+        "left_wrist_flange_distal_platform": [
+          19,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55
+        ]
+      },
+      "rotor_regions": {
+        "proximal": [
+          0,
+          2,
+          5,
+          16
+        ],
+        "distal": [
+          27,
+          41
+        ]
+      },
+      "ownership_method": "Reviewed connected components; initial candidates from exact reference triangle surfaces, not nearest vertices. Source hash and region count guard the mapping."
+    },
+    "BN_LeftHand_axis_2_link": {
+      "source": "BN_LeftHand_pitch_link.STL",
+      "new_to_old": [
+        [
+          -0.08688009222763014,
+          -0.12634462281887868,
+          -0.9881745219642443,
+          9.180495597965516e-05
+        ],
+        [
+          0.5792116787915561,
+          0.8006346414912004,
+          -0.15329058025759154,
+          -0.0003562288899073264
+        ],
+        [
+          0.8105341946679194,
+          -0.5856801235563615,
+          0.003621069595818768,
+          -0.002073598787457267
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.00026123286018444285,
+      "old_vertices": 19530,
+      "new_vertices": 74562,
+      "source_sha256": "e8a67923e82048f8675212ccfe4d58e9925a316a08bd1d8dc5fc160a426b1560",
+      "reference": "Joint_link3.8.STL",
+      "reference_sha256": "5e905a68c7f9938d68a15e4897478549132cb3ce82e3bc8c5d72d9749ef7ae05"
+    },
+    "BN_LeftHand_axis_1_link": {
+      "source": "BN_LeftHand_roll_link.STL",
+      "new_to_old": [
+        [
+          0.03998047474857195,
+          -0.25043764637515514,
+          -0.9673068525121419,
+          -0.002317713371279
+        ],
+        [
+          0.011462660145568968,
+          0.9681321224651684,
+          -0.2501775387069565,
+          -0.0005805029910660138
+        ],
+        [
+          0.9991347101673754,
+          -0.0010856929378935082,
+          0.04157706350355461,
+          0.00014908063469441663
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0004466461876740507,
+      "old_vertices": 3408,
+      "new_vertices": 31026,
+      "source_sha256": "1bfaf46aa8288e30c1c6efceb3f7e22c486b6fcda81097d0190166494fbd981b",
+      "reference": "Joint_link3.9.STL",
+      "reference_sha256": "5bb347a96893942b84d74680fc59725133e8315b4296446dd0367f54408f4b54"
+    },
+    "BN_RightShoulder_axis_1_link": {
+      "source": "BN_RightShoulder_1_link.STL",
+      "new_to_old": [
+        [
+          -0.036217115347149505,
+          0.006747747111421787,
+          -0.9993211638231521,
+          0.15741150019513483
+        ],
+        [
+          -0.9824153911947008,
+          0.1830376671852519,
+          0.03684035199544633,
+          -0.005302694797690714
+        ],
+        [
+          0.18316200397380122,
+          0.9830827433641112,
+          -5.687176393330392e-09,
+          0.053800000968784935
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 3.085134298913346e-09,
+      "old_vertices": 45372,
+      "new_vertices": 45372,
+      "source_sha256": "1e4cc5e1493ed63e499dd7c5be836a06a2b2f489f6ba2c90ac597b9cb73230d5",
+      "reference": "Joint_link3.1r.STL",
+      "reference_sha256": "c7fc8ed32a811c7ddc9f72c0918a07506ecde0bd2bcbfa6bc07a76432d327860"
+    },
+    "BN_RightShoulder_axis_2_link": {
+      "source": "BN_RightShoulder_2_link.STL",
+      "new_to_old": [
+        [
+          0.9995605862298611,
+          0.029641768770075672,
+          -2.7261826171312754e-10,
+          1.9065241118305185e-10
+        ],
+        [
+          -0.029641768770075974,
+          0.9995605862298594,
+          -8.351124153757652e-10,
+          -5.467640400133474e-11
+        ],
+        [
+          2.4774160154701697e-10,
+          8.428266023764189e-10,
+          0.999999999999998,
+          -1.795044681008334e-11
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 6.303015254459516e-10,
+      "old_vertices": 101625,
+      "new_vertices": 101625,
+      "source_sha256": "78be53a6cec7c2111a178cdf5439fe97b40b962d7a3e81d440b49f3d16c2d41a",
+      "reference": "Joint_link3.2r.STL",
+      "reference_sha256": "81013d9eae5f4a8a8806c9478dda2d13c71a36e56e4fee68688a97dec8a5e940"
+    },
+    "BN_RightUpperArm_axis_1_link": {
+      "source": "BN_RightUpperArm_1_link .STL",
+      "new_to_old": [
+        [
+          0.9774594610135863,
+          -0.16771245543396016,
+          0.12824014335354228,
+          -0.006781013137709469
+        ],
+        [
+          -0.10567024855042462,
+          0.1372216021968763,
+          0.9848878263344438,
+          -0.05198659111108901
+        ],
+        [
+          -0.18277527361849524,
+          -0.9762390917100258,
+          0.11640633647207707,
+          0.04693802474211551
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.00021558161151501306,
+      "old_vertices": 86553,
+      "new_vertices": 83301,
+      "source_sha256": "6ef5243ff856d881b7a59f87ab46e2d8691ce247c08b3228173bdbc90817c1f1",
+      "reference": "Joint_link3.3r.STL",
+      "reference_sha256": "d6312c8679cbae11751f6274fb5efda2fd855d3bec77acf5c23bc9ea07ac29ee"
+    },
+    "BN_RightUpperArm_axis_2_link": {
+      "source": "BN_RightUpperArm_2_link .STL",
+      "new_to_old": [
+        [
+          0.9748151865355725,
+          0.22207879112212706,
+          0.020404965899072657,
+          0.0018101420170762812
+        ],
+        [
+          -0.22233128778084524,
+          0.9749086040348327,
+          0.011045915649619858,
+          -0.004077395796997013
+        ],
+        [
+          -0.017439913225735543,
+          -0.015304388669903687,
+          0.9997307763163579,
+          -0.0028840903058358846
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0006107988635791989,
+      "old_vertices": 349833,
+      "new_vertices": 350919,
+      "source_sha256": "e77826e3cb94ca9ddf360b5193089964a3e12a1f9df10b912f9fbbcd3e8889d3",
+      "reference": "Joint_link3.4r.STL",
+      "reference_sha256": "9deca5d152def44021fe0a470de43a96e974e0d1ead020c27de4a70fed1879cf"
+    },
+    "BN_RightUpperArm_axis_3_link": {
+      "source": "BN_RightUpperArm_3_link .STL",
+      "new_to_old": [
+        [
+          0.6083509723996171,
+          -0.7936192178293625,
+          -0.00881087239219779,
+          -0.001346264881429653
+        ],
+        [
+          0.7935630368003466,
+          0.608413588384961,
+          -0.00951903843334535,
+          0.00033768229425097266
+        ],
+        [
+          0.01291514632490045,
+          -0.0012010663651777678,
+          0.9999158746789548,
+          0.011421195240661984
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0008912510675084294,
+      "old_vertices": 374721,
+      "new_vertices": 375543,
+      "source_sha256": "08ac7cda4e5ef2e49613f08a959548648f2938602c043f53665b8575dc418b21",
+      "reference": "Joint_link3.5r.STL",
+      "reference_sha256": "07b85ab6c5cc35cf6c23c0f3ba7ddc5c1cde2fe412db2f55f035908bb8dc0b76"
+    },
+    "BN_RightLowerArm_axis_1_link": {
+      "source": "BN_RightLowerArm_1_link.STL",
+      "new_to_old": [
+        [
+          0.9865765544293348,
+          0.16329942513711834,
+          -4.913503987233383e-07,
+          0.003946203829504201
+        ],
+        [
+          -0.16329942513756895,
+          0.9865765544287566,
+          -1.1122942044108043e-06,
+          -0.0006531559605762521
+        ],
+        [
+          3.031177812423006e-07,
+          1.1776006251632294e-06,
+          0.9999999999992593,
+          0.004000038587058255
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 9.162988163068335e-07,
+      "old_vertices": 346857,
+      "new_vertices": 347229,
+      "source_sha256": "0d5c700a646fabed87574356d3506ebfc249b7a01566aae9c2425ba14f4105ca",
+      "reference": "Joint_link3.6r.STL",
+      "reference_sha256": "bd9635aa015d7c979c696575b735b09390ad460f8c27ff8019369795cf5179c3"
+    },
+    "BN_RightLowerArm_axis_2_link": {
+      "source": "BN_RightLowerArm_2_link.STL",
+      "new_to_old": [
+        [
+          -0.5814170066780491,
+          0.8136057179896014,
+          -4.000018518670485e-07,
+          0.0017442665421271441
+        ],
+        [
+          -0.8136057179894121,
+          -0.5814170066781928,
+          -5.545789842063773e-07,
+          0.0024408381461493225
+        ],
+        [
+          -6.837765132505336e-07,
+          3.002139490638471e-09,
+          0.9999999999997697,
+          0.0002999984959618612
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 6.454171355541004e-09,
+      "old_vertices": 151086,
+      "new_vertices": 153678,
+      "source_sha256": "e786e53aa53392aa2ff6c3989db65f11d56f587c96fb74ba420aad7398d2fa32",
+      "reference": "Joint_link3.7r.STL",
+      "reference_sha256": "7a5b6e0b7d5baa2e030599df8aebd1236a17c7341b778b136e281149368c87c9",
+      "registration_rms95_m": 0.0007585353696901197,
+      "source_region_count": 50,
+      "components": {
+        "right_wrist_flange_proximal_flange": [
+          14,
+          20
+        ],
+        "right_wrist_flange_proximal_rod": [
+          19
+        ],
+        "right_wrist_flange_proximal_platform": [
+          16
+        ],
+        "right_wrist_flange_distal_flange": [
+          17,
+          36
+        ],
+        "right_wrist_flange_distal_rod": [
+          37
+        ],
+        "right_wrist_flange_distal_platform": [
+          15,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49
+        ]
+      },
+      "rotor_regions": {
+        "proximal": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "distal": [
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "ownership_method": "Reviewed connected components; initial candidates from exact reference triangle surfaces, not nearest vertices. Source hash and region count guard the mapping."
+    },
+    "BN_RightHand_axis_1_link": {
+      "source": "BN_RightHand_roll_link.STL",
+      "new_to_old": [
+        [
+          0.966757074797072,
+          0.04803369586992745,
+          -0.2511444253629712,
+          -0.001061647809107034
+        ],
+        [
+          -0.14562263097740877,
+          -0.7039192873057013,
+          -0.6951918341769087,
+          -0.005067942398054018
+        ],
+        [
+          -0.21017803804641766,
+          0.7086539360083419,
+          -0.6735241579207547,
+          -0.007549195813921977
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0006930403000738058,
+      "old_vertices": 3408,
+      "new_vertices": 63738,
+      "source_sha256": "90fa4aaea09b70e17043915b7f717adfe032444d4bc7f08cb0863594531fef42",
+      "reference": "Joint_link3.8r.STL",
+      "reference_sha256": "579e0fb4fc3557a839aca7379f2cd8332dcb9cd3bb67c164f0c4be06a4026030"
+    },
+    "BN_RightHand_axis_2_link": {
+      "source": "BN_RightHand_pitch_link.STL",
+      "new_to_old": [
+        [
+          -0.8070999733787136,
+          0.5903697487714051,
+          0.007293333095690397,
+          0.002485340794225799
+        ],
+        [
+          0.5904057252625495,
+          0.8070944700994547,
+          0.00442672701477601,
+          -0.0017724431013296427
+        ],
+        [
+          -0.003273003094533679,
+          0.00787883687172942,
+          -0.9999636050278431,
+          1.0373998947753376e-05
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 0.0003030142608271081,
+      "old_vertices": 19530,
+      "new_vertices": 73656,
+      "source_sha256": "38179afd248259bef433922f6eb3e39133d59c61b2129afd209f2af2cc459d93",
+      "reference": "Joint_link3.9r.STL",
+      "reference_sha256": "0d6e243324ce62d449d4cbab935d9e4966ab0cefca6ac8aa5ced2583e16007c8"
+    },
+    "BN_Spine_axis_1_link": {
+      "source": "BN_Spine_pitch_link .STL",
+      "new_to_old": [
+        [
+          -0.18316200586319234,
+          -0.9830827430120814,
+          2.626842331823519e-10,
+          -3.489561733174019e-11
+        ],
+        [
+          0.9830827430120906,
+          -0.18316200586319184,
+          1.3799092637493444e-10,
+          -3.158191896551036e-11
+        ],
+        [
+          -8.754517709149058e-11,
+          2.835041974428841e-10,
+          1.000000000000001,
+          7.417557871943988e-14
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 1.8922856591837145e-10,
+      "old_vertices": 4920,
+      "new_vertices": 65760,
+      "source_sha256": "630d45337890be4998c61e1c6df4ef25cb919162c591bd6c2e8c86fe15d1130f",
+      "reference": "Joint_Link3.STL",
+      "reference_sha256": "4bc81311b1556efcb3048d5ec0d1eb1f2a92c4a7e63036b5eed869ed4c1eb734"
+    },
+    "BN_Hips_axis_1_link": {
+      "source": "BN_hips_roll_link .STL",
+      "new_to_old": [
+        [
+          0.9999999999999967,
+          -1.0728512833098795e-15,
+          -1.9880879711595043e-16,
+          -2.241249178434876e-18
+        ],
+        [
+          -2.3801885760387184e-15,
+          0.9999999999999918,
+          1.2143064331837541e-15,
+          -1.1380099404598205e-17
+        ],
+        [
+          1.171795543626959e-15,
+          7.360309735825196e-16,
+          0.9999999999999973,
+          7.010574067068625e-18
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 6.753611109529667e-17,
+      "old_vertices": 65760,
+      "new_vertices": 65760,
+      "source_sha256": "3a335292f0ce25099aa220ffa6f4d514c4fafa1ad8cda017d2855084f0c1ea23",
+      "reference": "Joint_Link4.STL",
+      "reference_sha256": "08ec18fea85f34409f76f30ab43215caf1c5cc2cbaccbc123f10f05ec6f8231f"
+    },
+    "BN_Hips_axis_2_link": {
+      "source": "BN_hips_pitch_link .STL",
+      "new_to_old": [
+        [
+          1.0,
+          3.425468104291034e-16,
+          -3.3260866256289694e-17,
+          -1.5944073035556783e-19
+        ],
+        [
+          9.98275687876501e-16,
+          1.0000000000000049,
+          2.177496714263685e-17,
+          5.7403500383606546e-18
+        ],
+        [
+          1.7649693284573812e-15,
+          -2.4632174445155367e-15,
+          0.9999999999999978,
+          -2.5280962157567998e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 5.687543289323767e-17,
+      "old_vertices": 100272,
+      "new_vertices": 100272,
+      "source_sha256": "60af19294c6ca6ea6e8ff9edc3147e2737110720ac4100c0bfc5351a4cb0d3a7",
+      "reference": "Joint_Link5.STL",
+      "reference_sha256": "6d789da16a833734ade374ca2837d6aa57a5a7f33ac5b40bcb134443c5ab04a4"
+    },
+    "BN_LeftUpperLeg_axis_1_link": {
+      "source": "BN_LeftUpperLeg_1_link.STL",
+      "new_to_old": [
+        [
+          1.000000000000001,
+          7.155011524558996e-16,
+          3.025313696390513e-16,
+          -2.963270981458528e-17
+        ],
+        [
+          1.1720284993952601e-15,
+          1.0000000000000016,
+          1.2184628238558704e-15,
+          -6.24828544269782e-17
+        ],
+        [
+          6.870157180237549e-16,
+          6.670674568411247e-16,
+          1.0000000000000007,
+          -3.16589350471422e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.5155971581021828e-17,
+      "old_vertices": 200382,
+      "new_vertices": 200382,
+      "source_sha256": "a452584c535237374f7ad1a5a91ea13b3a140f483e757bf97e93da1b27e22e27",
+      "reference": "Joint_link5.1.STL",
+      "reference_sha256": "a452584c535237374f7ad1a5a91ea13b3a140f483e757bf97e93da1b27e22e27"
+    },
+    "BN_LeftUpperLeg_axis_2_link": {
+      "source": "BN_LeftUpperLeg_2_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999955252,
+          2.915404477037624e-06,
+          6.716162470149461e-07,
+          9.003086665547402e-07
+        ],
+        [
+          -2.9154025983787436e-06,
+          0.9999999999918338,
+          -2.7955663944417804e-06,
+          3.2385129915517816e-07
+        ],
+        [
+          -6.71624397107685e-07,
+          2.7955644402726533e-06,
+          0.9999999999958671,
+          3.02166729675429e-07
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 6.477732571511207e-06,
+      "old_vertices": 456570,
+      "new_vertices": 457710,
+      "source_sha256": "728e564cd8dc33724c0b30d5acd1e0ff703b0fc21eb0644d27fc24ff39888414",
+      "reference": "Joint_link5.2.STL",
+      "reference_sha256": "18f23f3ed453aba92d2e8f36a518fc2013c5acecc7ef2760f5ead6aca4a16f84"
+    },
+    "BN_LeftUpperLeg_axis_3_link": {
+      "source": "BN_LeftUpperLeg_3_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999996869,
+          -7.22035284297332e-07,
+          -2.827611894274218e-07,
+          2.4897259397198807e-08
+        ],
+        [
+          7.22035386318043e-07,
+          0.999999999999679,
+          3.3736239255364444e-07,
+          -5.881735054733733e-08
+        ],
+        [
+          2.8276094693259335e-07,
+          -3.373626043233213e-07,
+          0.999999999999907,
+          2.02397072024022e-08
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 9.690899911534546e-07,
+      "old_vertices": 390621,
+      "new_vertices": 391845,
+      "source_sha256": "99f82b3f4d6e829c48e5fb059c9d959b172939c91340884cb1408807593ba061",
+      "reference": "Joint_link5.3.STL",
+      "reference_sha256": "6cbf2bd9d5369b76c0adc6cfdb7c7010018ccbc4ceb6103da389546cdbe7b4f6"
+    },
+    "BN_LeftLowerLeg_axis_1_link": {
+      "source": "BN_LeftLowerLeg_1_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999990976,
+          -2.270980691616981e-07,
+          -1.3233850716713372e-06,
+          2.7323676157286388e-08
+        ],
+        [
+          2.2709682638670986e-07,
+          0.9999999999995315,
+          -9.370833184405418e-07,
+          4.579214535687268e-08
+        ],
+        [
+          1.3233852861938673e-06,
+          9.370830189285387e-07,
+          0.9999999999986844,
+          8.659308892622754e-08
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.797592214246293e-07,
+      "old_vertices": 348633,
+      "new_vertices": 348633,
+      "source_sha256": "257131a1d2e84da420d80b76e5358ab3f5aa5fd4054ddff76b218d195b9ef112",
+      "reference": "Joint_link5.4.STL",
+      "reference_sha256": "7ca154f48fefbac0b86622d63e455ba795cdf0dac071a4f0cd6d95b5d74b6da2"
+    },
+    "BN_LeftLowerLeg_axis_2_link": {
+      "source": "BN_LeftLowerLeg_2_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999999466,
+          -3.730417787699807e-07,
+          -7.045207630700283e-09,
+          9.093217322964389e-09
+        ],
+        [
+          3.730417765227348e-07,
+          0.9999999999999387,
+          4.753074456348783e-08,
+          -1.0937230470045552e-09
+        ],
+        [
+          7.045190186189003e-09,
+          -4.753075593449613e-08,
+          1.0000000000000024,
+          3.491517805340122e-08
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.1418083468251085e-07,
+      "old_vertices": 367545,
+      "new_vertices": 367545,
+      "source_sha256": "498dfd1aaa178db6e73044e943ffda41f9841f752be17e79348c6e0a784fa86e",
+      "reference": "Joint_link5.5.STL",
+      "reference_sha256": "107207beeeff83ad7221176e4789343eac3d95a2599bb8206ef8a629cf4d2ea1"
+    },
+    "BN_LeftFoot_pitch_link": {
+      "source": "BN_LeftFoot_pitch_link.STL",
+      "new_to_old": [
+        [
+          1.000000000000001,
+          7.760073869950316e-17,
+          -8.959863342527364e-16,
+          -2.5789276464819018e-17
+        ],
+        [
+          -2.317913477048194e-16,
+          0.9999999999999989,
+          1.877550532607162e-15,
+          -4.751930805467773e-18
+        ],
+        [
+          -3.2242538576456965e-16,
+          -5.353667148029131e-15,
+          1.000000000000003,
+          -1.8091109112141263e-16
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.068427620516265e-17,
+      "old_vertices": 64284,
+      "new_vertices": 64284,
+      "source_sha256": "181464931f67f4e1ed600e79cbbddeb53a4f22ae91e86bea803402b7ba0b4d78",
+      "reference": "Joint_link5.6.STL",
+      "reference_sha256": "8da38c4338d3f27b99e6fcf530552481b60a194e24ba5c0a47004aeddc168694"
+    },
+    "BN_LeftFoot_roll_link": {
+      "source": "BN_LeftFoot_roll_link.STL",
+      "new_to_old": [
+        [
+          1.000000000000007,
+          2.659567947394787e-15,
+          -8.611817856052346e-16,
+          -3.2480325395413e-17
+        ],
+        [
+          4.200015927460805e-15,
+          1.000000000000008,
+          -1.8245902835486867e-15,
+          3.1855215080339487e-17
+        ],
+        [
+          -2.3716702294554155e-15,
+          -1.4667900141013191e-15,
+          1.0000000000000013,
+          2.7606497816912157e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 8.888899142135426e-17,
+      "old_vertices": 7716,
+      "new_vertices": 7716,
+      "source_sha256": "2469ace0c52d2c53503adbf68dff06a4d24c072b10cb3af3701d388d3f55568d",
+      "reference": "Joint_link5.7.STL",
+      "reference_sha256": "dc2a14d596138fde6a4f70dba00226722908f04d9e78d50b5ed7033bdd1a4e13"
+    },
+    "BN_RightUpperLeg_axis_1_link": {
+      "source": "BN_RightUpperLeg_1_link.STL",
+      "new_to_old": [
+        [
+          1.0000000000000004,
+          -2.0048536695789794e-16,
+          -1.546086657819755e-15,
+          7.474469134822852e-17
+        ],
+        [
+          -4.256787414054241e-16,
+          1.0000000000000013,
+          -7.230037656724195e-17,
+          2.690447025142388e-17
+        ],
+        [
+          -1.9187921395703166e-16,
+          -3.7630471003180044e-17,
+          1.0000000000000018,
+          -9.041919299469038e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.764689899332576e-17,
+      "old_vertices": 200382,
+      "new_vertices": 200382,
+      "source_sha256": "91509323097cae2fe2b5c0f51f8f7dbe41d9e9a8e7ccacfbd0d4fab663444d32",
+      "reference": "Joint_link5.1r.STL",
+      "reference_sha256": "91509323097cae2fe2b5c0f51f8f7dbe41d9e9a8e7ccacfbd0d4fab663444d32"
+    },
+    "BN_RightUpperLeg_axis_2_link": {
+      "source": "BN_RightUpperLeg_2_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999108314,
+          7.801706205579335e-06,
+          1.0838598883398854e-05,
+          3.751977221956009e-06
+        ],
+        [
+          -7.801719088421956e-06,
+          0.9999999999688587,
+          1.1882077400157174e-06,
+          -4.235919198704099e-07
+        ],
+        [
+          -1.0838589613296589e-05,
+          -1.1882923019152731e-06,
+          0.9999999999405558,
+          4.179513241229173e-07
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.222756190239433e-05,
+      "old_vertices": 500124,
+      "new_vertices": 488952,
+      "source_sha256": "a62d1407834ed505c06b382aea35f15bfd2cad758c0f29d0f79e4289fbf35cb7",
+      "reference": "Joint_link5.2r.STL",
+      "reference_sha256": "a906da233d358c2861defd127e807766151bd90033f77a725e8a6753313aded8"
+    },
+    "BN_RightUpperLeg_axis_3_link": {
+      "source": "BN_RightUpperLeg_3_link.STL",
+      "new_to_old": [
+        [
+          1.0000000000000024,
+          4.015005224147764e-16,
+          1.2520463831953763e-15,
+          -2.956529724164024e-16
+        ],
+        [
+          2.2341958069020686e-16,
+          1.0,
+          -2.866130794612798e-16,
+          7.936558425940914e-17
+        ],
+        [
+          9.372190068379687e-16,
+          -7.498727624900729e-16,
+          1.0000000000000004,
+          -9.065979088356145e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.8087419996463007e-17,
+      "old_vertices": 381837,
+      "new_vertices": 391845,
+      "source_sha256": "924d5fa7a1c3b2bc6483c2a3b2d8e5505c9cf9e975037d67d4bdc102051575a9",
+      "reference": "Joint_link5.3r.STL",
+      "reference_sha256": "359cb7acb06da634657ef853a6cb7c4d27252877985c223f0671ed69aab95699"
+    },
+    "BN_RightLowerLeg_axis_1_link": {
+      "source": "BN_RightLowerLeg_1_link.STL",
+      "new_to_old": [
+        [
+          0.999999999999596,
+          -3.9964866284597995e-07,
+          -8.11639258315842e-07,
+          -9.627276611965485e-09
+        ],
+        [
+          3.9964764596212174e-07,
+          0.999999999999131,
+          -1.2569761577377443e-06,
+          5.184590419599202e-08
+        ],
+        [
+          8.116397578455209e-07,
+          1.2569758444009179e-06,
+          0.9999999999988902,
+          8.122417308140519e-08
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.798974538238219e-07,
+      "old_vertices": 348633,
+      "new_vertices": 348633,
+      "source_sha256": "3e2ed91c82bdcf6e4766a8150432fcef3036219790dfbed8dd5b54dfe65fd427",
+      "reference": "Joint_link5.4r.STL",
+      "reference_sha256": "7d79428d2748fbc82933297673aad1b13c59d7846f8e42208f6520ab71a9395c"
+    },
+    "BN_RightLowerLeg_axis_2_link": {
+      "source": "BN_RightLowerLeg_2_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999997891,
+          -6.758223393599129e-07,
+          -2.902678195780385e-08,
+          5.1585479482437565e-09
+        ],
+        [
+          6.758223339037943e-07,
+          0.9999999999997696,
+          -1.8833891712046025e-07,
+          1.9680821173007563e-08
+        ],
+        [
+          2.9026919833146312e-08,
+          1.8833889450165816e-07,
+          0.9999999999999845,
+          1.328019933032309e-08
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 4.1403657391263483e-07,
+      "old_vertices": 367545,
+      "new_vertices": 367545,
+      "source_sha256": "f93797ad5b64bb62612beeaf5ab1c3f3bf8384facbc076bc3711a89aed3dca65",
+      "reference": "Joint_link5.5r.STL",
+      "reference_sha256": "28bae6bc9d71a7b0787e2129986773bd4ad3577e9fed163e52f1f11e3ccce945"
+    },
+    "BN_RightFoot_pitch_link": {
+      "source": "BN_RightFoot_pitch_link.STL",
+      "new_to_old": [
+        [
+          0.9999999999999993,
+          -1.2282463308855854e-16,
+          6.563089826329639e-16,
+          -1.34193879661488e-17
+        ],
+        [
+          -6.847975440162476e-16,
+          1.000000000000001,
+          -2.9937781941130484e-15,
+          1.0567332471087553e-16
+        ],
+        [
+          4.661551678618657e-16,
+          -1.3859657410858387e-15,
+          1.000000000000001,
+          -8.61222022276164e-17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.396647907710874e-17,
+      "old_vertices": 64284,
+      "new_vertices": 64284,
+      "source_sha256": "eea2a7e18363fed0c630620b71f78fe752736ec59203ff2d7ca510ab00c9becf",
+      "reference": "Joint_link5.6r.STL",
+      "reference_sha256": "dc81257d35da5ce293364b8e764819d321aabce6886851fded157a96e5cbfca7"
+    },
+    "BN_RightFoot_roll_link": {
+      "source": "BN_RightFoot_roll_link.STL",
+      "new_to_old": [
+        [
+          1.000000000000001,
+          4.688562414695461e-16,
+          -3.274290560906437e-17,
+          2.4733362059829013e-19
+        ],
+        [
+          3.309878650185145e-16,
+          0.9999999999999982,
+          4.1232208619623827e-16,
+          4.865357249028606e-18
+        ],
+        [
+          2.314283747278936e-15,
+          6.053100728986597e-16,
+          0.9999999999999996,
+          1.8973538018495865e-18
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "rms_m": 2.5377145587190684e-17,
+      "old_vertices": 7716,
+      "new_vertices": 7716,
+      "source_sha256": "69158e3a2ba3809311170adf17941e8d53efb8ea07cd55b46788f0aef27d9220",
+      "reference": "Joint_link5.7r.STL",
+      "reference_sha256": "69158e3a2ba3809311170adf17941e8d53efb8ea07cd55b46788f0aef27d9220"
+    }
+  },
+  "previous_source": "Robot_body"
+}

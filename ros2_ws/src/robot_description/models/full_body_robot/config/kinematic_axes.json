@@ -1,0 +1,67 @@
+{
+  "step_sha256": "3cceefaccdbb681998beed7c7761a3dff4183e69a172936c8743e5bed1136a68",
+  "joints": {
+    "BN_Spine_yaw": {
+      "point_on_axis_m": [
+        3.432290562876972e-14,
+        2.5888692231634814e-14,
+        -5.684341886080802e-17
+      ],
+      "axis": [
+        1.6653345369377346e-16,
+        1.7000290064572705e-16,
+        -1.0
+      ],
+      "step_cylinder_index": 661,
+      "evidence": "Independent parent and child circular support; source positive direction preserved."
+    },
+    "BN_LeftHand_pitch": {
+      "point_on_axis_m": [
+        -0.15309999995240403,
+        -0.013823358856964361,
+        -0.12985907263945418
+      ],
+      "axis": [
+        -3.658626318384381e-15,
+        -0.9917261808313501,
+        -0.1283712672433529
+      ],
+      "step_cylinder_index": 3807,
+      "evidence": "Independent parent and child circular support; source positive direction preserved."
+    },
+    "BN_RightShoulder_1": {
+      "point_on_axis_m": [
+        0.0589999999998889,
+        -0.08042808741093088,
+        0.2639490914407288
+      ],
+      "axis": [
+        8.917532937826077e-16,
+        0.12837126724560832,
+        -0.9917261808310581
+      ],
+      "step_cylinder_index": 3117,
+      "evidence": "Independent parent and child circular support; source positive direction preserved."
+    },
+    "BN_RightHand_pitch": {
+      "point_on_axis_m": [
+        0.15090000004758455,
+        -0.013823358856964361,
+        -0.12985907263945384
+      ],
+      "axis": [
+        -3.658626318384381e-15,
+        -0.9917261808313501,
+        -0.1283712672433529
+      ],
+      "step_cylinder_index": 4286,
+      "evidence": "Independent parent and child circular support; source positive direction preserved."
+    }
+  },
+  "unverified_bilateral_axes": [
+    "BN_LeftFoot_pitch",
+    "BN_LeftFoot_roll",
+    "BN_RightFoot_pitch",
+    "BN_RightFoot_roll"
+  ]
+}

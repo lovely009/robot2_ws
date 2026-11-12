@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""用主 URDF 和六组局部闭环 MJCF 生成固定底座的整机调试模型。"""
+"""生成 STEP 原生装配整机；保留旧 CAD 工具供分件与源几何审计。"""
 
 from collections import defaultdict
 from copy import deepcopy
 import hashlib
 import json
+import os
+from tempfile import TemporaryDirectory
 from pathlib import Path
 import struct
 import sys
@@ -107,6 +109,18 @@ def pose(origin):
 
 def pose_attributes(position, rotation):
     return {"pos": numbers(position), "quat": numbers(rotation.as_quat()[[3, 0, 1, 2]])}
+
+
+def urdf_rpy(rotation):
+    """Keep near-gimbal rotations exact when expressing MJCF frames in URDF."""
+    matrix = rotation.as_matrix()
+    cosine = np.hypot(matrix[0, 0], matrix[1, 0])
+    pitch = np.arctan2(-matrix[2, 0], cosine)
+    yaw = np.arctan2(matrix[1, 0], matrix[0, 0]) if cosine > 1e-12 else 0.
+    sine_yaw, cosine_yaw = np.sin(yaw), np.cos(yaw)
+    roll = np.arctan2(sine_yaw * matrix[0, 2] - cosine_yaw * matrix[1, 2],
+                      -sine_yaw * matrix[0, 1] + cosine_yaw * matrix[1, 1])
+    return np.array([roll, pitch, yaw])
 
 
 def write_display_mesh(polydata, output):
@@ -393,7 +407,7 @@ def write_standalone_urdf(mjcf, controlled_joints, limits):
         quaternion = np.fromstring(source.get("quat", "1 0 0 0"), sep=" ")
         rotation = Rotation.from_quat(quaternion[[1, 2, 3, 0]])
         ET.SubElement(element, "origin", xyz=source.get("pos", "0 0 0"),
-                      rpy=numbers(rotation.as_euler("xyz")))
+                      rpy=numbers(urdf_rpy(rotation)))
 
     def add_visual(link, name, origin, rgba, shape, **dimensions):
         visual = ET.SubElement(link, "visual", name=name)
@@ -424,6 +438,8 @@ def write_standalone_urdf(mjcf, controlled_joints, limits):
             parent = child
         link = ET.SubElement(robot, "link", name=name)
         for geom in body.findall("geom[@type='mesh']"):
+            if float(geom.get("rgba", "1 1 1 1").split()[-1]) == 0:
+                continue
             add_visual(link, geom.get("name"), geom, geom.get("rgba"), "mesh",
                        filename=uri + files[geom.get("mesh")])
         for child in body.findall("body"):
@@ -434,7 +450,124 @@ def write_standalone_urdf(mjcf, controlled_joints, limits):
     STANDALONE.write_text(ET.tostring(robot, encoding="unicode") + "\n")
 
 
-def build():
+def split_registered_display(mesh, reference, output, root, entry, final_directory):
+    """Split hash-guarded, reviewed source regions onto the existing mechanism bodies."""
+    regions = vtk.vtkPolyDataConnectivityFilter()
+    regions.SetInputData(mesh)
+    regions.SetExtractionModeToAllRegions()
+    regions.Update()
+    count = regions.GetNumberOfExtractedRegions()
+    if count != entry["source_region_count"]:
+        raise ValueError(f"{reference.name}: review CAD component ownership after changing regions")
+    parts = entry["components"]
+    if set(parts) != set(CAD_CUTS[reference.name][2]):
+        raise ValueError(f"{reference.name}: incomplete moving component map")
+    moving = [index for indices in parts.values() for index in indices]
+    moving += [index for indices in entry.get("rotor_regions", {}).values() for index in indices]
+    if len(moving) != len(set(moving)) or any(i < 0 or i >= count for i in moving):
+        raise ValueError(f"{reference.name}: duplicate or invalid moving region")
+    if any(not indices for indices in parts.values()):
+        raise ValueError(f"{reference.name}: missing moving component")
+    regions.SetExtractionModeToSpecifiedRegions()
+
+    def extract(indices):
+        regions.InitializeSpecifiedRegionList()
+        for index in indices:
+            regions.AddSpecifiedRegion(index)
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(regions.GetOutputPort())
+        clean.Update()
+        result = vtk.vtkPolyData()
+        result.DeepCopy(clean.GetOutput())
+        return result
+
+    extra = defaultdict(list)
+    if reference.name in WRIST_ROTORS:
+        group, _ = WRIST_ROTORS[reference.name]
+        module = ET.parse(OUTPUT.parent / f"{group}_differential.xml").getroot()
+        if set(entry["rotor_regions"]) != {"proximal", "distal"}:
+            raise ValueError(f"{reference.name}: incomplete wrist rotor map")
+        for side, indices in entry["rotor_regions"].items():
+            body = module.find(f"worldbody/body[@name='flange_{side}_body']")
+            rotor, cover = split_wrist_rotor(extract(indices), body)
+            extra[f"{group}_flange_{side}_flange"].append(rotor)
+            extra[reference.stem].append(cover)
+    fixed = sorted(set(range(count)) - set(moving))
+    static = None
+    for name, indices in [(reference.stem, fixed), *parts.items()]:
+        append = vtk.vtkAppendPolyData()
+        for piece in (extract(indices), *extra[name]):
+            append.AddInputData(piece)
+        append.Update()
+        if name == reference.stem:
+            static = vtk.vtkPolyData()
+            static.DeepCopy(append.GetOutput())
+        else:
+            path = output.with_name(f"{name}.STL")
+            write_display_mesh(append.GetOutput(), path)
+            final_path = final_directory / path.name
+            root.find(f"asset/mesh[@name='{name}']").set("file", final_path.relative_to(MODEL).as_posix())
+            root.find(f".//geom[@name='{name}_visual']").set("rgba", "0.76 0.78 0.81 1")
+    return static
+
+
+def apply_display_meshes(root):
+    """Attach reviewed CAD visuals without importing its physics or joint definitions."""
+    manifest = MODEL / "config/display_meshes.json"
+    if not manifest.is_file():
+        return
+    metadata = json.loads(manifest.read_text())
+    entries = metadata["links"]
+    source_package = metadata["source"]
+    for entry in entries.values():
+        for path, expected in (
+            (MODEL.parent / source_package / "meshes" / entry["source"], entry["source_sha256"]),
+            (MODEL / "meshes" / entry["reference"], entry["reference_sha256"]),
+        ):
+            if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                raise ValueError(f"{path.name}: review display registration and component ownership")
+    bodies = {body.get("name"): body for body in root.findall(".//body")}
+    assets = root.find("asset")
+    originals = {name: deepcopy(bodies[name].find(f"geom[@name='{name}_visual']")) for name in entries}
+    for geom in root.findall(".//geom[@type='mesh']"):
+        rgba = geom.get("rgba", "1 1 1 1").split()
+        geom.set("rgba", " ".join([*rgba[:3], "0"]))
+    final_directory = MODEL / "mujoco/visual" / source_package
+    final_directory.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".display-", dir=final_directory.parent) as staging:
+        for name, entry in entries.items():
+            source = MODEL.parent / source_package / "meshes" / entry["source"]
+            reference = MODEL / "meshes" / entry["reference"]
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(str(source))
+            reader.Update()
+            matrix = vtk.vtkMatrix4x4()
+            for row in range(4):
+                for column in range(4):
+                    matrix.SetElement(row, column, entry["new_to_old"][row][column])
+            transform = vtk.vtkTransform()
+            transform.SetMatrix(matrix)
+            mapped = vtk.vtkTransformPolyDataFilter()
+            mapped.SetInputConnection(reader.GetOutputPort())
+            mapped.SetTransform(transform)
+            mapped.Update()
+            output = Path(staging) / f"{name}.STL"
+            mesh = mapped.GetOutput()
+            if reference.name in CAD_CUTS:
+                mesh = split_registered_display(mesh, reference, output, root, entry, final_directory)
+            write_display_mesh(mesh, output)
+            asset = f"{name}_robot_body"
+            ET.SubElement(assets, "mesh", name=asset, file=(final_directory / output.name).relative_to(MODEL).as_posix())
+            visual = originals[name]
+            visual.attrib.update(name=asset, mesh=asset, mass="0", contype="0", conaffinity="0", rgba="1 1 1 1")
+            bodies[name].append(visual)
+        # No generated files are replaced unless every split succeeds.
+        final_directory.mkdir(parents=True, exist_ok=True)
+        for path in Path(staging).iterdir():
+            os.replace(path, final_directory / path.name)
+
+
+def build_legacy():
     source = ET.parse(MODEL / "urdf/full_body_robot.urdf").getroot()
     joints = {joint.get("name"): joint for joint in source.findall("joint")}
     links = {link.get("name"): link for link in source.findall("link")}
@@ -525,8 +658,9 @@ def build():
             ET.SubElement(actuators, "position", **control, ctrlrange=numbers((lower, upper)))
     add_keyframes(root, world, actuators, modules)
     ET.indent(root, space="  ")
-    OUTPUT.write_text(ET.tostring(root, encoding="unicode") + "\n")
-    model = mujoco.MjModel.from_xml_path(str(OUTPUT))
+    compiled = deepcopy(root)
+    compiled.find("compiler").set("meshdir", str(MODEL))
+    model = mujoco.MjModel.from_xml_string(ET.tostring(compiled, encoding="unicode"))
     data = mujoco.MjData(model)
     sys.path.insert(0, str(MODEL.parents[2] / "robot_sim/scripts"))
     from mujoco_joint_position import JointPositionTargets
@@ -560,14 +694,28 @@ def build():
         key.set("qpos", numbers(data.qpos))
         key.set("ctrl", numbers(data.ctrl))
     ET.indent(root, space="  ")
-    OUTPUT.write_text(ET.tostring(root, encoding="unicode") + "\n")
-    model = mujoco.MjModel.from_xml_path(str(OUTPUT))
+    compiled = deepcopy(root)
+    compiled.find("compiler").set("meshdir", str(MODEL))
+    model = mujoco.MjModel.from_xml_string(ET.tostring(compiled, encoding="unicode"))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     if model.nu != len(motors) or model.nv - data.nefc != len(joints):
         raise ValueError("Incorrect number of actuators or independent joint coordinates")
+    # Keep the original geometry-scanner input independent of display-only additions.
+    (MODEL / "mujoco/full_body_robot.physics.xml").write_text(ET.tostring(root, encoding="unicode") + "\n")
+    apply_display_meshes(root)
+    ET.indent(root, space="  ")
+    pending = OUTPUT.with_suffix(".xml.tmp")
+    pending.write_text(ET.tostring(root, encoding="unicode") + "\n")
+    pending.replace(OUTPUT)
     write_standalone_urdf(root, joints, limits)
     print(f"{OUTPUT}: {len(links)} URDF links, {model.nu} inputs, {model.neq} closed-loop constraints")
+
+
+def build():
+    """Use native assembly coordinates; the legacy builder is reference only."""
+    from build_native_model import build as native_build
+    return native_build()
 
 
 if __name__ == "__main__":

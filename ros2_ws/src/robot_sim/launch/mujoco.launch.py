@@ -63,6 +63,16 @@ def _bridge_environment() -> dict:
     if environment.get("XDG_SESSION_TYPE") == "wayland" and environment.get("DISPLAY"):
         environment["PYGLFW_LIBRARY_VARIANT"] = "x11"
         environment.pop("WAYLAND_DISPLAY", None)
+    chinese_runtime = Path.home() / ".cache/robot2-mujoco-zh/runtime"
+    chinese_font = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+    if ((chinese_runtime / "build.json").is_file()
+            and (chinese_runtime / "mujoco/libmujoco.so.3.6.0").is_file()
+            and chinese_font.is_file()):
+        environment["MUJOCO_LANGUAGE"] = "zh_CN"
+        environment["MUJOCO_ZH_FONT"] = str(chinese_font)
+        pythonpath = environment.get("PYTHONPATH", "")
+        environment["PYTHONPATH"] = str(chinese_runtime) + (
+            os.pathsep + pythonpath if pythonpath else "")
     return environment
 
 

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from bvh_broadcaster.bvh import BvhClip
-from bvh_broadcaster.generic_retarget import GenericRetargeter, analyze
+from bvh_broadcaster.generic_retarget import GenericRetargeter, _swing_rotation, analyze
 
 
 def robot(tmp_path, kind='revolute', mimic=''):
@@ -71,6 +71,37 @@ def test_unknown_names_require_mapping_and_do_not_claim_coverage(tmp_path):
         GenericRetargeter(path, result['mapping'], source)
 
 
+def test_bone_directions_match_first_pose_instead_of_robot_zero(tmp_path):
+    path, source = robot(tmp_path), clip(tmp_path, (0, -1, -2))
+    path.write_text(path.read_text().replace('<axis xyz="0 0 1"/>',
+                    '<origin rpy="0 0 -1.5707963267948966"/><axis xyz="0 0 1"/>', 1)
+                    .replace('velocity="100"', 'velocity="1"'))
+    solver = GenericRetargeter(path, mapping(), source, up_axis='z_up', match_directions=True)
+    positions, _, _ = solver.convert()
+    # The source's horizontal arm must not become the robot's downward zero pose.
+    np.testing.assert_allclose(positions[:, 0], np.deg2rad([90, 89, 88]), atol=.01)
+    assert np.max(np.abs(np.diff(positions, axis=0))) <= .020001
+    assert solver.report['direction_max_deg'] < 1
+    assert solver.report['orientation_max_deg'] < 1
+
+
+def test_direction_fit_without_segment_keeps_relative_orientation(tmp_path):
+    path, source = robot(tmp_path), clip(tmp_path)
+    selected = mapping()
+    selected['targets'] = selected['targets'][:1]
+    solver = GenericRetargeter(path, selected, source, up_axis='z_up', match_directions=True)
+    positions, _, _ = solver.convert()
+    np.testing.assert_allclose(positions[:, 0], np.deg2rad([0, 30, 60]), atol=.005)
+
+
+@pytest.mark.parametrize('end', [(1., 0., 0.), (-1., 0., 0.), (0., 1., 0.)])
+def test_swing_calibration_is_a_proper_rotation_including_opposite_vectors(end):
+    rotation = _swing_rotation(np.array([1., 0., 0.]), np.array(end))
+    np.testing.assert_allclose(rotation @ [1., 0., 0.], end, atol=1e-8)
+    np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-8)
+    assert np.linalg.det(rotation) == pytest.approx(1.)
+
+
 def test_zero_limits_require_explicit_geometry_preview_and_keep_source(tmp_path):
     path, source = robot(tmp_path), clip(tmp_path)
     path.write_text(path.read_text().replace('lower="-2" upper="2" velocity="100"',
@@ -130,6 +161,13 @@ def test_invalid_mapping_is_rejected_before_conversion(tmp_path, change, match):
     selected = mapping()
     change(selected)
     with pytest.raises(ValueError, match=match):
+        GenericRetargeter(robot(tmp_path), selected, clip(tmp_path))
+
+
+def test_same_anatomical_pose_cannot_constrain_intermediate_serial_axes(tmp_path):
+    selected = mapping()
+    selected['targets'][1]['source'] = 'LeftArm'
+    with pytest.raises(ValueError, match='重复.*LeftArm|LeftArm.*重复'):
         GenericRetargeter(robot(tmp_path), selected, clip(tmp_path))
 
 

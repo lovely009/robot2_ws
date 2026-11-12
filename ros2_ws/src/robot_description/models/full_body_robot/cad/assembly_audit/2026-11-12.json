@@ -1,0 +1,496 @@
+{
+  "date": "2026-11-12",
+  "scope": "full_body_robot display geometry and linkage attachment; existing physical definitions retained",
+  "step": {
+    "path": "../全身装配体（不含头部）.STEP",
+    "sha256": "3cceefaccdbb681998beed7c7761a3dff4183e69a172936c8743e5bed1136a68",
+    "transfer_roots": 1,
+    "solid_occurrences": 528,
+    "bounds_mm": [
+      -185.12253772393828,
+      -132.29860073782461,
+      -987.6098663184894,
+      184.15037007750732,
+      315.7834517974997,
+      400.5648097999416
+    ]
+  },
+  "new_export": {
+    "package": "Robot_body1",
+    "urdf_sha256": "3185acd7425916211ab77072f69d499d94edeba124bf8b219ba0531252aec1d0",
+    "links": 38,
+    "joints": 37,
+    "changed_meshes_from_Robot_body": [
+      "BN_LeftUpperArm_axis_1_link",
+      "BN_LeftUpperArm_axis_2_link",
+      "BN_LeftUpperArm_axis_3_link",
+      "BN_LeftLowerArm_axis_1_link",
+      "BN_LeftLowerArm_axis_2_link",
+      "BN_LeftHand_axis_2_link",
+      "BN_LeftHand_axis_1_link",
+      "BN_RightUpperArm_axis_1_link",
+      "BN_RightUpperArm_axis_2_link",
+      "BN_RightUpperArm_axis_3_link",
+      "BN_RightLowerArm_axis_1_link",
+      "BN_RightLowerArm_axis_2_link",
+      "BN_RightHand_axis_1_link",
+      "BN_RightHand_axis_2_link"
+    ],
+    "unchanged_mesh_count": 24,
+    "broken_visual_mesh_uris_in_raw_export": [
+      "package://Robot_body1/meshes/ BN_RightUpperArm_1_link .STL",
+      "package://Robot_body1/meshes/ BN_RightUpperArm_2_link .STL",
+      "package://Robot_body1/meshes/ BN_RightUpperArm_3_link .STL",
+      "package://Robot_body1/meshes/ BN_RightHand_roll_link.STL",
+      "package://Robot_body1/meshes/ BN_RightHand_pitch_link.STL"
+    ]
+  },
+  "step_comparison": {
+    "method": "OpenCascade STEP assembly triangulation, linear deflection 0.25 mm and angular deflection 0.3 rad; 5,315,377 world vertices. At most roughly 6,000 STL vertices per link. One-way nearest tessellation-node distances, not exact BRep distances or collision clearance. URDF coordinates in metres, STEP converted from millimetres. Leading whitespace in five basenames resolved for this diagnostic only.",
+    "raw_urdf": {
+      "Base_link": {
+        "median_mm": 0.011395353981826159,
+        "p95_mm": 0.4636357387814646
+      },
+      "BN_Spine_yaw_link": {
+        "median_mm": 0.011693903626318572,
+        "p95_mm": 0.6093773457635087
+      },
+      "BN_Spine_pitch_link": {
+        "median_mm": 0.11844812140855257,
+        "p95_mm": 0.47652301760211213
+      },
+      "BN_Spine_roll_link": {
+        "median_mm": 12.886966839637582,
+        "p95_mm": 29.95836147679841
+      },
+      "BN_LeftShoulder_1_link": {
+        "median_mm": 16.240053652840764,
+        "p95_mm": 42.8646915983232
+      },
+      "BN_LeftShoulder_2_link": {
+        "median_mm": 39.59343708207878,
+        "p95_mm": 56.02197899760094
+      },
+      "BN_LeftUpperArm_1_link": {
+        "median_mm": 29.980496549614546,
+        "p95_mm": 36.74412044860821
+      },
+      "BN_LeftUpperArm_2_link": {
+        "median_mm": 4.856444029323476,
+        "p95_mm": 21.496822322950393
+      },
+      "BN_LeftUpperArm_3_link": {
+        "median_mm": 78.18050047649335,
+        "p95_mm": 104.12419827883576
+      },
+      "BN_LeftLowerArm_1_link": {
+        "median_mm": 90.6055936285597,
+        "p95_mm": 108.8335854493488
+      },
+      "BN_LeftLowerArm_2_link": {
+        "median_mm": 74.71033755987256,
+        "p95_mm": 88.36928782204157
+      },
+      "BN_LeftHand_roll_link": {
+        "median_mm": 71.05192286798804,
+        "p95_mm": 74.98754952223538
+      },
+      "BN_LeftHand_pitch_link": {
+        "median_mm": 76.95438217993728,
+        "p95_mm": 83.67884186989572
+      },
+      "BN_RightShoulder_1_link": {
+        "median_mm": 6.83505260189544,
+        "p95_mm": 38.442274578447496
+      },
+      "BN_RightShoulder_2_link": {
+        "median_mm": 35.045750594869865,
+        "p95_mm": 43.685067596703995
+      },
+      "BN_RightUpperArm_1_link": {
+        "median_mm": 30.516302625889107,
+        "p95_mm": 46.927410601801775
+      },
+      "BN_RightUpperArm_2_link": {
+        "median_mm": 15.274139538114355,
+        "p95_mm": 30.76931584569202
+      },
+      "BN_RightUpperArm_3_link": {
+        "median_mm": 99.16142324985746,
+        "p95_mm": 108.09928276148374
+      },
+      "BN_RightLowerArm_1_link": {
+        "median_mm": 87.91916320442932,
+        "p95_mm": 101.38123561741608
+      },
+      "BN_RightLowerArm_2_link": {
+        "median_mm": 76.46633963074488,
+        "p95_mm": 89.93914080147066
+      },
+      "BN_RightHand_roll_link": {
+        "median_mm": 84.97455543347886,
+        "p95_mm": 90.38919519236575
+      },
+      "BN_RightHand_pitch_link": {
+        "median_mm": 75.71124391681303,
+        "p95_mm": 82.28463892486526
+      },
+      "BN_hips_roll_link": {
+        "median_mm": 0.11778339189403664,
+        "p95_mm": 0.525141533675803
+      },
+      "BN_hips_pitch_link": {
+        "median_mm": 0.12711325941487778,
+        "p95_mm": 0.891558151155699
+      },
+      "BN_LeftUpperLeg_1_link": {
+        "median_mm": 0.009366385619620993,
+        "p95_mm": 0.6480257222025319
+      },
+      "BN_LeftUpperLeg_2_link": {
+        "median_mm": 0.009914285830984543,
+        "p95_mm": 0.7124358414963956
+      },
+      "BN_LeftUpperLeg_3_link": {
+        "median_mm": 0.0145863729697004,
+        "p95_mm": 0.5475207225473596
+      },
+      "BN_LeftLowerLeg_1_link": {
+        "median_mm": 0.01633136035101903,
+        "p95_mm": 0.4666697116987725
+      },
+      "BN_LeftLowerLeg_2_link": {
+        "median_mm": 0.025202992459619405,
+        "p95_mm": 0.5320121724776354
+      },
+      "BN_LeftFoot_pitch_link": {
+        "median_mm": 0.07603308503285819,
+        "p95_mm": 0.6068539663632175
+      },
+      "BN_LeftFoot_roll_link": {
+        "median_mm": 0.0708383553390925,
+        "p95_mm": 1.4163306328976029
+      },
+      "BN_RightUpperLeg_1_link": {
+        "median_mm": 0.00948187411682249,
+        "p95_mm": 0.6151263130102833
+      },
+      "BN_RightUpperLeg_2_link": {
+        "median_mm": 0.011132949745553776,
+        "p95_mm": 0.7473211652234242
+      },
+      "BN_RightUpperLeg_3_link": {
+        "median_mm": 0.014924676720073162,
+        "p95_mm": 0.5527846304439172
+      },
+      "BN_RightLowerLeg_1_link": {
+        "median_mm": 0.016597739270696295,
+        "p95_mm": 0.46833841109436886
+      },
+      "BN_RightLowerLeg_2_link": {
+        "median_mm": 0.025699098312938942,
+        "p95_mm": 0.5262074097604159
+      },
+      "BN_RightFoot_pitch_link": {
+        "median_mm": 0.0760778958763397,
+        "p95_mm": 0.6085809462255298
+      },
+      "BN_RightFoot_roll_link": {
+        "median_mm": 0.07217591711321322,
+        "p95_mm": 1.4577839844048548
+      }
+    },
+    "diagnostic_spine_pitch_rpy_correction": "-1.5708 1.4421 1.5708",
+    "corrected_diagnostic": {
+      "Base_link": {
+        "median_mm": 0.011395353981826159,
+        "p95_mm": 0.4636357387814646
+      },
+      "BN_Spine_yaw_link": {
+        "median_mm": 0.011693903626318572,
+        "p95_mm": 0.6093773457635087
+      },
+      "BN_Spine_pitch_link": {
+        "median_mm": 0.2637051901770883,
+        "p95_mm": 0.7221631694157511
+      },
+      "BN_Spine_roll_link": {
+        "median_mm": 0.005742727816593736,
+        "p95_mm": 0.5124004776221549
+      },
+      "BN_LeftShoulder_1_link": {
+        "median_mm": 0.12764834625103208,
+        "p95_mm": 0.5622423559669052
+      },
+      "BN_LeftShoulder_2_link": {
+        "median_mm": 0.028286578760778912,
+        "p95_mm": 1.0972795520001954
+      },
+      "BN_LeftUpperArm_1_link": {
+        "median_mm": 0.026339188689335637,
+        "p95_mm": 1.0728671423274043
+      },
+      "BN_LeftUpperArm_2_link": {
+        "median_mm": 0.005197110652509737,
+        "p95_mm": 0.4338398568320641
+      },
+      "BN_LeftUpperArm_3_link": {
+        "median_mm": 0.004621375210653493,
+        "p95_mm": 0.471778381282269
+      },
+      "BN_LeftLowerArm_1_link": {
+        "median_mm": 0.006213951125278203,
+        "p95_mm": 0.4349285178485879
+      },
+      "BN_LeftLowerArm_2_link": {
+        "median_mm": 0.054647089524285694,
+        "p95_mm": 0.5292260853067795
+      },
+      "BN_LeftHand_roll_link": {
+        "median_mm": 0.06455945481951958,
+        "p95_mm": 0.25091262920153057
+      },
+      "BN_LeftHand_pitch_link": {
+        "median_mm": 0.06442976207524757,
+        "p95_mm": 0.24683732835507022
+      },
+      "BN_RightShoulder_1_link": {
+        "median_mm": 0.1198381238005411,
+        "p95_mm": 0.5694749004217837
+      },
+      "BN_RightShoulder_2_link": {
+        "median_mm": 0.027402205643479796,
+        "p95_mm": 1.0661986942939865
+      },
+      "BN_RightUpperArm_1_link": {
+        "median_mm": 0.026702778275753587,
+        "p95_mm": 1.0807275169812156
+      },
+      "BN_RightUpperArm_2_link": {
+        "median_mm": 0.007646498179640433,
+        "p95_mm": 0.43343973532413876
+      },
+      "BN_RightUpperArm_3_link": {
+        "median_mm": 0.003950228859247576,
+        "p95_mm": 0.49817499218894307
+      },
+      "BN_RightLowerArm_1_link": {
+        "median_mm": 0.005432636491057219,
+        "p95_mm": 0.44104729847739654
+      },
+      "BN_RightLowerArm_2_link": {
+        "median_mm": 0.05163181398369937,
+        "p95_mm": 0.5238523630919897
+      },
+      "BN_RightHand_roll_link": {
+        "median_mm": 0.06534859357591255,
+        "p95_mm": 0.2565960332077888
+      },
+      "BN_RightHand_pitch_link": {
+        "median_mm": 0.06620718006162532,
+        "p95_mm": 0.2503671950118711
+      },
+      "BN_hips_roll_link": {
+        "median_mm": 0.11778339189403664,
+        "p95_mm": 0.525141533675803
+      },
+      "BN_hips_pitch_link": {
+        "median_mm": 0.12711325941487778,
+        "p95_mm": 0.891558151155699
+      },
+      "BN_LeftUpperLeg_1_link": {
+        "median_mm": 0.009366385619620993,
+        "p95_mm": 0.6480257222025319
+      },
+      "BN_LeftUpperLeg_2_link": {
+        "median_mm": 0.009914285830984543,
+        "p95_mm": 0.7124358414963956
+      },
+      "BN_LeftUpperLeg_3_link": {
+        "median_mm": 0.0145863729697004,
+        "p95_mm": 0.5475207225473596
+      },
+      "BN_LeftLowerLeg_1_link": {
+        "median_mm": 0.01633136035101903,
+        "p95_mm": 0.4666697116987725
+      },
+      "BN_LeftLowerLeg_2_link": {
+        "median_mm": 0.025202992459619405,
+        "p95_mm": 0.5320121724776354
+      },
+      "BN_LeftFoot_pitch_link": {
+        "median_mm": 0.07603308503285819,
+        "p95_mm": 0.6068539663632175
+      },
+      "BN_LeftFoot_roll_link": {
+        "median_mm": 0.0708383553390925,
+        "p95_mm": 1.4163306328976029
+      },
+      "BN_RightUpperLeg_1_link": {
+        "median_mm": 0.00948187411682249,
+        "p95_mm": 0.6151263130102833
+      },
+      "BN_RightUpperLeg_2_link": {
+        "median_mm": 0.011132949745553776,
+        "p95_mm": 0.7473211652234242
+      },
+      "BN_RightUpperLeg_3_link": {
+        "median_mm": 0.014924676720073162,
+        "p95_mm": 0.5527846304439172
+      },
+      "BN_RightLowerLeg_1_link": {
+        "median_mm": 0.016597739270696295,
+        "p95_mm": 0.46833841109436886
+      },
+      "BN_RightLowerLeg_2_link": {
+        "median_mm": 0.025699098312938942,
+        "p95_mm": 0.5262074097604159
+      },
+      "BN_RightFoot_pitch_link": {
+        "median_mm": 0.0760778958763397,
+        "p95_mm": 0.6085809462255298
+      },
+      "BN_RightFoot_roll_link": {
+        "median_mm": 0.07217591711321322,
+        "p95_mm": 1.4577839844048548
+      }
+    },
+    "conclusion": "Restoring the preceding export Spine_pitch RPY removes the large upper-body mismatch; raw export is preserved, not copied into full motion/physics definitions."
+  },
+  "display_changes": {
+    "source": "Robot_body1",
+    "visible_geoms": 68,
+    "physical_joints": 37,
+    "simulation_joints": 67,
+    "closed_rods": 10,
+    "moving_visual_parts": 30,
+    "left_forearm_flip_fixed": true,
+    "forearm_registration": "24 rigid rotation seeds, 95% score to reject end-for-end fit, then exact-triangle-surface 65% trimmed ICP; +Z and two rod bounds independently checked.",
+    "region_maps": "config/display_meshes.json; derivation evidence in 2026-11-12-components/",
+    "main_urdf_sha256": "066495b478295910934e8952aec752ea4beb2bd60dd37a4bf2d83e422efa053d",
+    "mapping_urdf_sha256": "066495b478295910934e8952aec752ea4beb2bd60dd37a4bf2d83e422efa053d"
+  },
+  "limits": "Existing collision geometry, mass, inertia, joint definitions, motor topology and limits retained. The overlay is not a new collision scan, dynamics validation or real-robot acceptance.",
+  "verification": {
+    "full_body_tests": "20 passed",
+    "geometry_limit_tests": "Skipped: coal unavailable. No limit recomputation performed.",
+    "closed_rods_keyframes": [
+      {
+        "key": "Neutral",
+        "endpoint_error_m": {
+          "waist_plus_rod_end": 5.655092105929845e-16,
+          "waist_minus_rod_end": 3.2679170034790084e-16,
+          "hips_plus_rod_end": 1.0025260986830376e-15,
+          "hips_minus_rod_end": 5.106573356665228e-16,
+          "left_shoulder_flange_linkage_rod_end": 1.0362907589042387e-15,
+          "left_wrist_flange_proximal_rod_end": 4.1191555942998253e-16,
+          "left_wrist_flange_distal_rod_end": 3.462155185493887e-15,
+          "right_shoulder_flange_linkage_rod_end": 4.614547044956577e-15,
+          "right_wrist_flange_proximal_rod_end": 1.1955051700974646e-15,
+          "right_wrist_flange_distal_rod_end": 3.423618626914751e-16
+        },
+        "max_endpoint_error_m": 4.614547044956577e-15
+      },
+      {
+        "key": "Six groups same direction",
+        "endpoint_error_m": {
+          "waist_plus_rod_end": 4.0394852956559767e-16,
+          "waist_minus_rod_end": 2.8609792490763984e-17,
+          "hips_plus_rod_end": 8.960581419835649e-16,
+          "hips_minus_rod_end": 7.110250420355456e-17,
+          "left_shoulder_flange_linkage_rod_end": 4.548020184950691e-16,
+          "left_wrist_flange_proximal_rod_end": 3.7910753368918623e-16,
+          "left_wrist_flange_distal_rod_end": 3.4541772733221896e-15,
+          "right_shoulder_flange_linkage_rod_end": 4.5037003003422695e-15,
+          "right_wrist_flange_proximal_rod_end": 1.1500994243130258e-15,
+          "right_wrist_flange_distal_rod_end": 1.3878871967638603e-16
+        },
+        "max_endpoint_error_m": 4.5037003003422695e-15
+      },
+      {
+        "key": "Six groups opposite direction",
+        "endpoint_error_m": {
+          "waist_plus_rod_end": 4.712321323804737e-16,
+          "waist_minus_rod_end": 8.777083671441753e-17,
+          "hips_plus_rod_end": 8.849266367614903e-16,
+          "hips_minus_rod_end": 1.0031442548020353e-16,
+          "left_shoulder_flange_linkage_rod_end": 5.214799211354908e-16,
+          "left_wrist_flange_proximal_rod_end": 3.2256528834566253e-16,
+          "left_wrist_flange_distal_rod_end": 3.4399579650580337e-15,
+          "right_shoulder_flange_linkage_rod_end": 4.502438606869745e-15,
+          "right_wrist_flange_proximal_rod_end": 1.088964285460194e-15,
+          "right_wrist_flange_distal_rod_end": 1.4304896245381993e-16
+        },
+        "max_endpoint_error_m": 4.502438606869745e-15
+      }
+    ],
+    "physics_comparison": "Exact equality for masses, inertias, joint positions/axes/ranges, actuator parameters, equalities and qpos0 between display and physics models; passed.",
+    "render": "MuJoCo EGL whole-body front and side images inspected.",
+    "dynamic_acceptance": "Existing regression ramps both six-group same-direction/opposite-direction keyframes, checks tendon lengths and equality residuals <30 micrometres, then settles <0.02 degrees.",
+    "visual_rod_acceptance": "All 10 rods: source bounds within 2 mm of the reviewed original and principal axis within 2 degrees; 30 moving geom names and flange/rod/platform body ownership checked.",
+    "installed_model": "robot_description symlink-install rebuilt; installed MJCF loads with 37 inputs and 10 constraints.",
+    "moving_visual_owners": {
+      "waist_plus_platform_visual": "BN_Spine_axis_2_link",
+      "waist_minus_platform_visual": "BN_Spine_axis_2_link",
+      "left_shoulder_flange_linkage_platform_visual": "BN_LeftShoulder_axis_2_link",
+      "left_wrist_flange_proximal_platform_visual": "BN_LeftHand_axis_2_link",
+      "left_wrist_flange_distal_platform_visual": "BN_LeftHand_axis_2_link",
+      "left_wrist_flange_proximal_flange_visual": "left_wrist_flange_proximal_body",
+      "left_wrist_flange_proximal_rod_visual": "left_wrist_flange_proximal_rod",
+      "left_wrist_flange_distal_flange_visual": "left_wrist_flange_distal_body",
+      "left_wrist_flange_distal_rod_visual": "left_wrist_flange_distal_rod",
+      "right_shoulder_flange_linkage_platform_visual": "BN_RightShoulder_axis_2_link",
+      "right_wrist_flange_proximal_platform_visual": "BN_RightHand_axis_2_link",
+      "right_wrist_flange_distal_platform_visual": "BN_RightHand_axis_2_link",
+      "right_wrist_flange_proximal_flange_visual": "right_wrist_flange_proximal_body",
+      "right_wrist_flange_proximal_rod_visual": "right_wrist_flange_proximal_rod",
+      "right_wrist_flange_distal_flange_visual": "right_wrist_flange_distal_body",
+      "right_wrist_flange_distal_rod_visual": "right_wrist_flange_distal_rod",
+      "left_shoulder_flange_linkage_flange_visual": "left_shoulder_flange_linkage_body",
+      "left_shoulder_flange_linkage_rod_visual": "left_shoulder_flange_linkage_rod",
+      "right_shoulder_flange_linkage_flange_visual": "right_shoulder_flange_linkage_body",
+      "right_shoulder_flange_linkage_rod_visual": "right_shoulder_flange_linkage_rod",
+      "waist_plus_flange_visual": "waist_plus_flange",
+      "waist_plus_rod_visual": "waist_plus_rod",
+      "waist_minus_flange_visual": "waist_minus_flange",
+      "waist_minus_rod_visual": "waist_minus_rod",
+      "hips_plus_platform_visual": "BN_Hips_axis_2_link",
+      "hips_minus_platform_visual": "BN_Hips_axis_2_link",
+      "hips_plus_flange_visual": "hips_plus_flange",
+      "hips_plus_rod_visual": "hips_plus_rod",
+      "hips_minus_flange_visual": "hips_minus_flange",
+      "hips_minus_rod_visual": "hips_minus_rod"
+    },
+    "invalid_component_maps": "Region count change, duplicate ownership and missing moving part each fail before writing outputs (3 regressions)."
+  },
+  "independent_review": {
+    "result": "No blocking findings after forearm registration and shoulder socket ownership corrections.",
+    "wrist_socket_ownership": {
+      "left_source_regions": [
+        44,
+        56
+      ],
+      "owner": "platform",
+      "evidence": "266-vertex socket layers belong with the 644-vertex platform balls. The 128/144-vertex rod components already contain their outer rod-end cages; local renders and surface distances independently checked.",
+      "region_44_median_surface_distance_mm": {
+        "platform_20": 1.376,
+        "rod_18": 4.705
+      },
+      "region_56_median_surface_distance_mm": {
+        "platform_19": 1.834,
+        "rod_17": 4.67
+      }
+    },
+    "publication_limit": "All meshes are staged before publication. Per-file os.replace does not provide whole-directory atomicity against forced process termination during the final publish loop."
+  },
+  "assembly_review_correction": {
+    "status": "Original display registration rejected by user assembly screenshots",
+    "problems": [
+      "Shoulder/upper-arm mounting plate alignment",
+      "Both wrist assemblies"
+    ],
+    "cause": "Per-link symmetric common-surface matches and preserved legacy joint frames do not establish coherence of the new full assembly. Prior closure tests exercised legacy physical frames, not STEP alignment.",
+    "replacement_reference": "mujoco/full_body_robot.step-aligned.xml, static; runtime joint/closure calibration remains unresolved"
+  }
+}

@@ -1,0 +1,1646 @@
+{
+  "source_sha256": "ad7cbd11be41f1868904d05d70421669d879230e6237acc0e3c1261678dc758e",
+  "reference_sha256": "d7080437a8c4732a4b025528b3cef5cc112d06b117f2645affc4678dbc1895a6",
+  "source_region_count": 182,
+  "algorithm": "exact-triangle-surface-majority, reviewed component ownership v1",
+  "regions": [
+    {
+      "region": 0,
+      "reference_region": 0,
+      "vote_fraction": 0.782761037140855,
+      "median_distance_m": 1.204803629885347e-07,
+      "p95_distance_m": 2.8285326343973467e-07,
+      "max_distance_m": 4.094423781618295e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 1,
+      "reference_region": 78,
+      "vote_fraction": 0.9972972972972973,
+      "median_distance_m": 1.761082272162349e-07,
+      "p95_distance_m": 3.53784924378162e-07,
+      "max_distance_m": 4.504047347618332e-07,
+      "owner": "waist_plus_rod"
+    },
+    {
+      "region": 2,
+      "reference_region": 157,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.399599010351855e-08,
+      "p95_distance_m": 1.094389530188834e-07,
+      "max_distance_m": 1.2811238443139774e-07,
+      "owner": "waist_minus_platform"
+    },
+    {
+      "region": 3,
+      "reference_region": 156,
+      "vote_fraction": 0.9688888888888889,
+      "median_distance_m": 1.3775305876970157e-07,
+      "p95_distance_m": 2.9300433646090434e-07,
+      "max_distance_m": 3.904887650941296e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 4,
+      "reference_region": 2,
+      "vote_fraction": 0.9895138226882746,
+      "median_distance_m": 1.3830805962107235e-07,
+      "p95_distance_m": 2.9891588698313636e-07,
+      "max_distance_m": 3.3889188031025973e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 5,
+      "reference_region": 3,
+      "vote_fraction": 0.9900426742532006,
+      "median_distance_m": 8.940696716308594e-08,
+      "p95_distance_m": 2.0850421921357716e-07,
+      "max_distance_m": 2.675398503824272e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 6,
+      "reference_region": 4,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.713124036302312e-08,
+      "p95_distance_m": 2.197893309494486e-07,
+      "max_distance_m": 2.2444680826950176e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 7,
+      "reference_region": 5,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.4325071510511765e-08,
+      "p95_distance_m": 2.233646064980412e-07,
+      "max_distance_m": 2.240213163071966e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 8,
+      "reference_region": 6,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.216193854625114e-08,
+      "p95_distance_m": 2.142999821236083e-07,
+      "max_distance_m": 2.2526650545745045e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 9,
+      "reference_region": 7,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.21540641784668e-08,
+      "p95_distance_m": 2.13667013380916e-07,
+      "max_distance_m": 2.2444680826950176e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 10,
+      "reference_region": 8,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.6562466826695776e-08,
+      "p95_distance_m": 2.193935028342019e-07,
+      "max_distance_m": 2.2371234093711628e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 11,
+      "reference_region": 9,
+      "vote_fraction": 0.5658914728682171,
+      "median_distance_m": 5.465031980917358e-08,
+      "p95_distance_m": 1.6587276959551202e-07,
+      "max_distance_m": 2.2615802954447178e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 12,
+      "reference_region": 10,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.870130578473121e-08,
+      "p95_distance_m": 2.4741209445618996e-07,
+      "max_distance_m": 2.5143345683650466e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 13,
+      "reference_region": 11,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.820010062917633e-08,
+      "p95_distance_m": 2.5222168683723743e-07,
+      "max_distance_m": 2.5222168683723743e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 14,
+      "reference_region": 12,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.403710649993495e-08,
+      "p95_distance_m": 2.3723214981978385e-07,
+      "max_distance_m": 2.534104595225845e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 15,
+      "reference_region": 13,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.3091621147685976e-08,
+      "p95_distance_m": 2.3582320036160344e-07,
+      "max_distance_m": 2.508769362763156e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 16,
+      "reference_region": 14,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.882085793116665e-08,
+      "p95_distance_m": 2.4812068562211433e-07,
+      "max_distance_m": 2.518159143698249e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 17,
+      "reference_region": 15,
+      "vote_fraction": 0.5813953488372093,
+      "median_distance_m": 5.4809439821482975e-08,
+      "p95_distance_m": 1.832146692349881e-07,
+      "max_distance_m": 2.534104595225845e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 18,
+      "reference_region": 16,
+      "vote_fraction": 0.9988932806324111,
+      "median_distance_m": 5.470621007992361e-08,
+      "p95_distance_m": 1.0762434471553077e-07,
+      "max_distance_m": 1.2320293719246333e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 19,
+      "reference_region": 17,
+      "vote_fraction": 0.9982608695652174,
+      "median_distance_m": 5.3085386753082275e-08,
+      "p95_distance_m": 9.021555300337859e-08,
+      "max_distance_m": 1.0545782416375875e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 20,
+      "reference_region": 18,
+      "vote_fraction": 0.9696969696969697,
+      "median_distance_m": 8.197088883771409e-08,
+      "p95_distance_m": 2.1377471861230397e-07,
+      "max_distance_m": 2.3900901954874893e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 21,
+      "reference_region": 19,
+      "vote_fraction": 0.9776951672862454,
+      "median_distance_m": 6.943006708163255e-08,
+      "p95_distance_m": 1.8451957278868505e-07,
+      "max_distance_m": 1.9678969413600078e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 22,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.4218676269948233e-07,
+      "p95_distance_m": 2.461030258719427e-07,
+      "max_distance_m": 2.673804242155625e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 23,
+      "reference_region": 21,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7420557051262457e-07,
+      "p95_distance_m": 2.4962163073561584e-07,
+      "max_distance_m": 2.504621316237952e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 24,
+      "reference_region": 22,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7647821252491476e-07,
+      "p95_distance_m": 2.5276271902718823e-07,
+      "max_distance_m": 2.532238507052736e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 25,
+      "reference_region": 23,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.827787780465782e-07,
+      "p95_distance_m": 2.5850365363200665e-07,
+      "max_distance_m": 2.596119100703758e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 26,
+      "reference_region": 24,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7413110384387226e-07,
+      "p95_distance_m": 2.5173940710908527e-07,
+      "max_distance_m": 2.520032229363286e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 27,
+      "reference_region": 25,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9932814514964448e-07,
+      "p95_distance_m": 2.46182463755973e-07,
+      "max_distance_m": 2.464156251863004e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 28,
+      "reference_region": 26,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9746494028486011e-07,
+      "p95_distance_m": 2.4484471989587486e-07,
+      "max_distance_m": 2.4496017980585376e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 29,
+      "reference_region": 27,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6680262535312044e-07,
+      "p95_distance_m": 2.391242528687729e-07,
+      "max_distance_m": 2.402722177627561e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 30,
+      "reference_region": 28,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6668294173730333e-07,
+      "p95_distance_m": 2.3934301622703745e-07,
+      "max_distance_m": 2.3979549822098935e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 31,
+      "reference_region": 29,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.383052601964157e-07,
+      "p95_distance_m": 2.2914745739970058e-07,
+      "max_distance_m": 2.5157606932948895e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 32,
+      "reference_region": 30,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6069336868245908e-07,
+      "p95_distance_m": 2.2874900899296366e-07,
+      "max_distance_m": 2.2982885318700532e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 33,
+      "reference_region": 31,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.645251496919285e-07,
+      "p95_distance_m": 2.3466402232618552e-07,
+      "max_distance_m": 2.3532072326960844e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 34,
+      "reference_region": 32,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7157612245800206e-07,
+      "p95_distance_m": 2.435626824507156e-07,
+      "max_distance_m": 2.4487630190470613e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 35,
+      "reference_region": 33,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6650840936030217e-07,
+      "p95_distance_m": 2.35305453344137e-07,
+      "max_distance_m": 2.3681245856453206e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 36,
+      "reference_region": 34,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.8109994297518702e-07,
+      "p95_distance_m": 2.2813252825242427e-07,
+      "max_distance_m": 2.281541917971565e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 37,
+      "reference_region": 35,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7645299663352377e-07,
+      "p95_distance_m": 2.256697781777943e-07,
+      "max_distance_m": 2.2573924531780173e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 38,
+      "reference_region": 36,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5466545702438495e-07,
+      "p95_distance_m": 2.2054366886379108e-07,
+      "max_distance_m": 2.2121475390595213e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 39,
+      "reference_region": 37,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5506531940360576e-07,
+      "p95_distance_m": 2.1999314679819896e-07,
+      "max_distance_m": 2.2094996994661294e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 40,
+      "reference_region": 38,
+      "vote_fraction": 0.833011583011583,
+      "median_distance_m": 1.2116706148907058e-07,
+      "p95_distance_m": 2.384327696687055e-07,
+      "max_distance_m": 3.545396257590395e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 41,
+      "reference_region": 39,
+      "vote_fraction": 0.9361147327249022,
+      "median_distance_m": 9.313225746154785e-08,
+      "p95_distance_m": 2.334182305502004e-07,
+      "max_distance_m": 2.757940383978918e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 42,
+      "reference_region": 40,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.783179286072061e-07,
+      "p95_distance_m": 3.373641182108156e-07,
+      "max_distance_m": 3.675833938094786e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 43,
+      "reference_region": 41,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.800189214163876e-08,
+      "p95_distance_m": 2.482957984662882e-07,
+      "max_distance_m": 2.7251332445692836e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 44,
+      "reference_region": 42,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.043081283569336e-07,
+      "p95_distance_m": 1.471278807800658e-07,
+      "max_distance_m": 1.6414032991204875e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 45,
+      "reference_region": 43,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.1591797983933285e-07,
+      "p95_distance_m": 2.9826185086987664e-07,
+      "max_distance_m": 3.1841971943316016e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 46,
+      "reference_region": 44,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.126900315284729e-07,
+      "p95_distance_m": 2.219422661983302e-07,
+      "max_distance_m": 2.755377362597246e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 47,
+      "reference_region": 45,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.728243330285605e-08,
+      "p95_distance_m": 1.237603178869278e-07,
+      "max_distance_m": 1.7011670246167533e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 48,
+      "reference_region": 46,
+      "vote_fraction": 0.9663865546218487,
+      "median_distance_m": 1.4809658937816072e-07,
+      "p95_distance_m": 2.688891159389253e-07,
+      "max_distance_m": 2.7233502802965397e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 49,
+      "reference_region": 47,
+      "vote_fraction": 0.957983193277311,
+      "median_distance_m": 8.195638656616211e-08,
+      "p95_distance_m": 1.4918000674668526e-07,
+      "max_distance_m": 1.5556132007133986e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 50,
+      "reference_region": 48,
+      "vote_fraction": 0.957983193277311,
+      "median_distance_m": 7.373872714439295e-08,
+      "p95_distance_m": 1.1852489510891856e-07,
+      "max_distance_m": 1.2509175890422936e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 51,
+      "reference_region": 49,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.04657706436387e-08,
+      "p95_distance_m": 1.2958898852665734e-07,
+      "max_distance_m": 1.3821760801667293e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 52,
+      "reference_region": 50,
+      "vote_fraction": 1.0,
+      "median_distance_m": 7.073597970995417e-08,
+      "p95_distance_m": 1.2714102401224838e-07,
+      "max_distance_m": 1.3569405521040615e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 53,
+      "reference_region": 51,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.4402973573857582e-07,
+      "p95_distance_m": 2.633393165742784e-07,
+      "max_distance_m": 2.701497755912317e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 54,
+      "reference_region": 52,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.440935542980721e-07,
+      "p95_distance_m": 3.1898705959006337e-07,
+      "max_distance_m": 3.2340925732961706e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 55,
+      "reference_region": 61,
+      "vote_fraction": 0.6428571428571429,
+      "median_distance_m": 5.774199962615967e-08,
+      "p95_distance_m": 6.021359577214036e-08,
+      "max_distance_m": 6.119604187441484e-08,
+      "owner": "fixed"
+    },
+    {
+      "region": 56,
+      "reference_region": 54,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.141252662637208e-07,
+      "p95_distance_m": 2.3270552976283094e-07,
+      "max_distance_m": 2.3473024313874714e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 57,
+      "reference_region": 55,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0489096641540527e-07,
+      "p95_distance_m": 2.2980925181958392e-07,
+      "max_distance_m": 2.336933128497729e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 58,
+      "reference_region": 56,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0302832126617432e-07,
+      "p95_distance_m": 2.296526805877079e-07,
+      "max_distance_m": 2.3005680042451719e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 59,
+      "reference_region": 57,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0489165716559868e-07,
+      "p95_distance_m": 2.3249341210963743e-07,
+      "max_distance_m": 2.3419824488382147e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 60,
+      "reference_region": 58,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0302832126617432e-07,
+      "p95_distance_m": 2.3141317418968432e-07,
+      "max_distance_m": 2.331954363295323e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 61,
+      "reference_region": 59,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2868925494034145e-07,
+      "p95_distance_m": 2.31146204982478e-07,
+      "max_distance_m": 2.3181449435095805e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 62,
+      "reference_region": 60,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0302832126617432e-07,
+      "p95_distance_m": 2.1212903376680518e-07,
+      "max_distance_m": 2.316729253640192e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 63,
+      "reference_region": 61,
+      "vote_fraction": 0.9806138933764136,
+      "median_distance_m": 1.1506263324231283e-07,
+      "p95_distance_m": 2.2825514642366354e-07,
+      "max_distance_m": 2.465174087370292e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 64,
+      "reference_region": 70,
+      "vote_fraction": 0.5590551181102362,
+      "median_distance_m": 5.774199962615967e-08,
+      "p95_distance_m": 6.043724972826517e-08,
+      "max_distance_m": 6.150751311905244e-08,
+      "owner": "fixed"
+    },
+    {
+      "region": 65,
+      "reference_region": 63,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.3193641585817113e-07,
+      "p95_distance_m": 2.5705292485824847e-07,
+      "max_distance_m": 2.5829724134428536e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 66,
+      "reference_region": 64,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2351741790771484e-07,
+      "p95_distance_m": 2.5535101879020446e-07,
+      "max_distance_m": 2.5783342111988353e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 67,
+      "reference_region": 65,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2165477275848389e-07,
+      "p95_distance_m": 2.572923963933322e-07,
+      "max_distance_m": 2.5828185959117275e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 68,
+      "reference_region": 66,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2352017929797607e-07,
+      "p95_distance_m": 2.584050194730634e-07,
+      "max_distance_m": 2.6046918992662654e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 69,
+      "reference_region": 67,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2165477275848389e-07,
+      "p95_distance_m": 2.57273611573026e-07,
+      "max_distance_m": 2.5907512565372734e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 70,
+      "reference_region": 68,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.5518786638995506e-07,
+      "p95_distance_m": 2.574767258180923e-07,
+      "max_distance_m": 2.58170537160321e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 71,
+      "reference_region": 69,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2165477275848389e-07,
+      "p95_distance_m": 2.3001890325791042e-07,
+      "max_distance_m": 2.573822451153193e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 72,
+      "reference_region": 70,
+      "vote_fraction": 0.9806138933764136,
+      "median_distance_m": 1.3427850091992735e-07,
+      "p95_distance_m": 2.549837653788342e-07,
+      "max_distance_m": 2.7092364185417753e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 73,
+      "reference_region": 71,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.692240063547193e-08,
+      "p95_distance_m": 1.6890863482909532e-07,
+      "max_distance_m": 1.711186075458459e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 74,
+      "reference_region": 72,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.039585230887658e-07,
+      "p95_distance_m": 1.7010074334876866e-07,
+      "max_distance_m": 1.708723139206587e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 75,
+      "reference_region": 73,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.090016663285906e-07,
+      "p95_distance_m": 1.687976615804861e-07,
+      "max_distance_m": 1.7072329768547097e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 76,
+      "reference_region": 74,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.752243535927136e-08,
+      "p95_distance_m": 1.6624756596175427e-07,
+      "max_distance_m": 1.70812064491505e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 77,
+      "reference_region": 75,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.542314679596806e-08,
+      "p95_distance_m": 1.686918091638469e-07,
+      "max_distance_m": 1.6917638937379446e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 78,
+      "reference_region": 76,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.648896655278755e-08,
+      "p95_distance_m": 1.6777459965274355e-07,
+      "max_distance_m": 1.6946153710115114e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 79,
+      "reference_region": 155,
+      "vote_fraction": 0.985063752276867,
+      "median_distance_m": 1.3622249330243973e-07,
+      "p95_distance_m": 2.5516906461889264e-07,
+      "max_distance_m": 3.867669515101207e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 80,
+      "reference_region": 80,
+      "vote_fraction": 0.9790276453765491,
+      "median_distance_m": 1.410443894646558e-07,
+      "p95_distance_m": 3.2547795919968826e-07,
+      "max_distance_m": 4.030292388854242e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 81,
+      "reference_region": 81,
+      "vote_fraction": 0.9587482219061166,
+      "median_distance_m": 9.227101784164636e-08,
+      "p95_distance_m": 2.0766989345012508e-07,
+      "max_distance_m": 2.87052863412272e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 82,
+      "reference_region": 82,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.907919843712155e-08,
+      "p95_distance_m": 2.403514945437467e-07,
+      "max_distance_m": 2.4371485760504193e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 83,
+      "reference_region": 83,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.195638656616211e-08,
+      "p95_distance_m": 2.2011767645404796e-07,
+      "max_distance_m": 2.4371485760504193e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 84,
+      "reference_region": 84,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5497065804096976e-07,
+      "p95_distance_m": 2.4371485760504193e-07,
+      "max_distance_m": 2.4371485760504193e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 85,
+      "reference_region": 85,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.560527708268739e-07,
+      "p95_distance_m": 2.425984013978836e-07,
+      "max_distance_m": 2.4371485760504193e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 86,
+      "reference_region": 86,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.984498258989411e-08,
+      "p95_distance_m": 2.4083255493730206e-07,
+      "max_distance_m": 2.4370662138861885e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 87,
+      "reference_region": 139,
+      "vote_fraction": 0.8294573643410853,
+      "median_distance_m": 8.483756274447896e-08,
+      "p95_distance_m": 1.2352940817619e-07,
+      "max_distance_m": 2.310394901702906e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 88,
+      "reference_region": 88,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.309698158484682e-08,
+      "p95_distance_m": 2.6611081039797495e-07,
+      "max_distance_m": 2.712196188277288e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 89,
+      "reference_region": 89,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.197088814136538e-08,
+      "p95_distance_m": 2.446085615926442e-07,
+      "max_distance_m": 2.678131379110014e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 90,
+      "reference_region": 90,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7621445478287838e-07,
+      "p95_distance_m": 2.705135396068109e-07,
+      "max_distance_m": 2.705135396068109e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 91,
+      "reference_region": 91,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7621718195993467e-07,
+      "p95_distance_m": 2.707700980751338e-07,
+      "max_distance_m": 2.710836695364173e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 92,
+      "reference_region": 92,
+      "vote_fraction": 1.0,
+      "median_distance_m": 9.231852036212625e-08,
+      "p95_distance_m": 2.6802570053561103e-07,
+      "max_distance_m": 2.7046770163063205e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 93,
+      "reference_region": 148,
+      "vote_fraction": 0.8294573643410853,
+      "median_distance_m": 8.459216766868511e-08,
+      "p95_distance_m": 1.3412550473260448e-07,
+      "max_distance_m": 2.619599741936757e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 94,
+      "reference_region": 94,
+      "vote_fraction": 0.9982608695652174,
+      "median_distance_m": 2.980345868023094e-08,
+      "p95_distance_m": 1.5552710540521476e-07,
+      "max_distance_m": 1.7390986551072912e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 95,
+      "reference_region": 95,
+      "vote_fraction": 0.9984189723320158,
+      "median_distance_m": 2.7939677238464355e-08,
+      "p95_distance_m": 1.3359220134481526e-07,
+      "max_distance_m": 1.4950555838483452e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 96,
+      "reference_region": 96,
+      "vote_fraction": 0.9862258953168044,
+      "median_distance_m": 1.2386476401629876e-07,
+      "p95_distance_m": 2.3008159755876246e-07,
+      "max_distance_m": 2.472762282978906e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 97,
+      "reference_region": 97,
+      "vote_fraction": 0.9944237918215614,
+      "median_distance_m": 1.0058377504901901e-07,
+      "p95_distance_m": 1.9661176715494677e-07,
+      "max_distance_m": 2.141414199208292e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 98,
+      "reference_region": 98,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.434236764907837e-07,
+      "p95_distance_m": 2.375505804362821e-07,
+      "max_distance_m": 2.530527130102235e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 99,
+      "reference_region": 99,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6577541828155518e-07,
+      "p95_distance_m": 2.3805754474093705e-07,
+      "max_distance_m": 2.385102338432267e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 100,
+      "reference_region": 100,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.735193576997888e-07,
+      "p95_distance_m": 2.459685974141383e-07,
+      "max_distance_m": 2.4706743418429283e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 101,
+      "reference_region": 101,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.7874619813735506e-07,
+      "p95_distance_m": 2.5165704529188273e-07,
+      "max_distance_m": 2.523196760660706e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 102,
+      "reference_region": 102,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.738297831702125e-07,
+      "p95_distance_m": 2.4383217337890486e-07,
+      "max_distance_m": 2.444681844215172e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 103,
+      "reference_region": 103,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.714830581640134e-07,
+      "p95_distance_m": 2.344732750068367e-07,
+      "max_distance_m": 2.4318756699922243e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 104,
+      "reference_region": 104,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6738286907408112e-07,
+      "p95_distance_m": 2.3070837050146756e-07,
+      "max_distance_m": 2.382165857111786e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 105,
+      "reference_region": 105,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6118933914286464e-07,
+      "p95_distance_m": 2.3180407720930726e-07,
+      "max_distance_m": 2.3186752676360957e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 106,
+      "reference_region": 106,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.599864306547241e-07,
+      "p95_distance_m": 2.2955114113220747e-07,
+      "max_distance_m": 2.30323112948365e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 107,
+      "reference_region": 107,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.210719347000122e-07,
+      "p95_distance_m": 2.1499428784032525e-07,
+      "max_distance_m": 2.252612111221816e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 108,
+      "reference_region": 108,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.4871677295713504e-07,
+      "p95_distance_m": 2.1403238278841753e-07,
+      "max_distance_m": 2.1515549119450317e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 109,
+      "reference_region": 109,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.603640825677514e-07,
+      "p95_distance_m": 2.2338994727676927e-07,
+      "max_distance_m": 2.2683010888652347e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 110,
+      "reference_region": 110,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6340410745773657e-07,
+      "p95_distance_m": 2.2891279681471084e-07,
+      "max_distance_m": 2.3228284722239206e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 111,
+      "reference_region": 111,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5894817965074044e-07,
+      "p95_distance_m": 2.210895870254174e-07,
+      "max_distance_m": 2.242090191062659e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 112,
+      "reference_region": 112,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5671554803393943e-07,
+      "p95_distance_m": 2.1258078219200944e-07,
+      "max_distance_m": 2.209621689845229e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 113,
+      "reference_region": 113,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5387074012831702e-07,
+      "p95_distance_m": 2.1000986576812378e-07,
+      "max_distance_m": 2.1797229446695039e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 114,
+      "reference_region": 114,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.461097443615396e-07,
+      "p95_distance_m": 2.0891465713637658e-07,
+      "max_distance_m": 2.103901193730798e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 115,
+      "reference_region": 115,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.4464151927895345e-07,
+      "p95_distance_m": 2.0630648114859284e-07,
+      "max_distance_m": 2.0742665649837213e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 116,
+      "reference_region": 116,
+      "vote_fraction": 0.9092664092664092,
+      "median_distance_m": 1.3974517304172657e-07,
+      "p95_distance_m": 3.2489523628682646e-07,
+      "max_distance_m": 4.194089612805537e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 117,
+      "reference_region": 117,
+      "vote_fraction": 0.9217731421121251,
+      "median_distance_m": 1.0337680578231812e-07,
+      "p95_distance_m": 2.3441389203071588e-07,
+      "max_distance_m": 3.08726527483471e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 118,
+      "reference_region": 118,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.1175870895385742e-07,
+      "p95_distance_m": 3.6891796328357585e-07,
+      "max_distance_m": 3.9710061672480523e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 119,
+      "reference_region": 119,
+      "vote_fraction": 1.0,
+      "median_distance_m": 6.606712483315191e-08,
+      "p95_distance_m": 2.4497021413848315e-07,
+      "max_distance_m": 2.657955906272596e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 120,
+      "reference_region": 120,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6402741409201548e-07,
+      "p95_distance_m": 2.4465339776340766e-07,
+      "max_distance_m": 2.6922897573223486e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 121,
+      "reference_region": 121,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.163516978434355e-07,
+      "p95_distance_m": 3.783666410800716e-07,
+      "max_distance_m": 4.1448353974541273e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 122,
+      "reference_region": 122,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.2386590242385864e-07,
+      "p95_distance_m": 2.2444874048233032e-07,
+      "max_distance_m": 2.8797150624208166e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 123,
+      "reference_region": 123,
+      "vote_fraction": 1.0,
+      "median_distance_m": 8.568167686462402e-08,
+      "p95_distance_m": 1.632208078391618e-07,
+      "max_distance_m": 1.7932010961530243e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 124,
+      "reference_region": 124,
+      "vote_fraction": 0.9831932773109243,
+      "median_distance_m": 1.9185245037078857e-07,
+      "p95_distance_m": 2.602600748140693e-07,
+      "max_distance_m": 2.809901399528384e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 125,
+      "reference_region": 125,
+      "vote_fraction": 0.9663865546218487,
+      "median_distance_m": 5.4016709327697754e-08,
+      "p95_distance_m": 1.3049662481305308e-07,
+      "max_distance_m": 1.384368268061556e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 126,
+      "reference_region": 126,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.0934009626117439e-07,
+      "p95_distance_m": 1.8513251609116342e-07,
+      "max_distance_m": 1.925176840037335e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 127,
+      "reference_region": 127,
+      "vote_fraction": 1.0,
+      "median_distance_m": 6.350102552006863e-08,
+      "p95_distance_m": 1.2055402648893674e-07,
+      "max_distance_m": 1.3172207182822483e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 128,
+      "reference_region": 128,
+      "vote_fraction": 1.0,
+      "median_distance_m": 7.613053082963415e-08,
+      "p95_distance_m": 1.7957941009635688e-07,
+      "max_distance_m": 1.9096378965643856e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 129,
+      "reference_region": 129,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.5892429231886238e-07,
+      "p95_distance_m": 2.6318741617272904e-07,
+      "max_distance_m": 2.761555964504294e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 130,
+      "reference_region": 130,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.4593044815895907e-07,
+      "p95_distance_m": 3.421462381507112e-07,
+      "max_distance_m": 3.481912234460109e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 131,
+      "reference_region": 139,
+      "vote_fraction": 0.8893280632411067,
+      "median_distance_m": 8.741373651885056e-08,
+      "p95_distance_m": 8.944245722730617e-08,
+      "max_distance_m": 9.031450723977434e-08,
+      "owner": "fixed"
+    },
+    {
+      "region": 132,
+      "reference_region": 132,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2704488632225288e-07,
+      "p95_distance_m": 2.5472637830796053e-07,
+      "max_distance_m": 2.5941638831624394e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 133,
+      "reference_region": 133,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2584405826771876e-07,
+      "p95_distance_m": 2.576747041759624e-07,
+      "max_distance_m": 2.580486298139281e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 134,
+      "reference_region": 134,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.125783303848156e-07,
+      "p95_distance_m": 2.5645993146621686e-07,
+      "max_distance_m": 2.5812256636202345e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 135,
+      "reference_region": 135,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9213633375680288e-07,
+      "p95_distance_m": 2.546937394105865e-07,
+      "max_distance_m": 2.587267081130068e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 136,
+      "reference_region": 136,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9371509552001953e-07,
+      "p95_distance_m": 2.560383317723539e-07,
+      "max_distance_m": 2.5872194490813445e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 137,
+      "reference_region": 137,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.1335215960854819e-07,
+      "p95_distance_m": 2.3560561963734056e-07,
+      "max_distance_m": 2.5812256636202345e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 138,
+      "reference_region": 138,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.2607810512362086e-07,
+      "p95_distance_m": 2.567006154228209e-07,
+      "max_distance_m": 2.584651757704013e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 139,
+      "reference_region": 139,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6962347588866148e-07,
+      "p95_distance_m": 2.414382614223716e-07,
+      "max_distance_m": 2.6775483527878535e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 140,
+      "reference_region": 148,
+      "vote_fraction": 0.9448818897637795,
+      "median_distance_m": 8.665391876150767e-08,
+      "p95_distance_m": 8.917219799203129e-08,
+      "max_distance_m": 9.031434607702453e-08,
+      "owner": "fixed"
+    },
+    {
+      "region": 141,
+      "reference_region": 141,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.4966030142500784e-07,
+      "p95_distance_m": 2.835241149735867e-07,
+      "max_distance_m": 2.875600783364451e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 142,
+      "reference_region": 142,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.4884846699534185e-07,
+      "p95_distance_m": 2.8601917004826957e-07,
+      "max_distance_m": 2.883191789819203e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 143,
+      "reference_region": 143,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.303948248518353e-07,
+      "p95_distance_m": 2.853714328301993e-07,
+      "max_distance_m": 2.871374886116853e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 144,
+      "reference_region": 144,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.106383292296095e-07,
+      "p95_distance_m": 2.8267292516546624e-07,
+      "max_distance_m": 2.875600783364451e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 145,
+      "reference_region": 145,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.123415470123291e-07,
+      "p95_distance_m": 2.838087162794503e-07,
+      "max_distance_m": 2.877149418372033e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 146,
+      "reference_region": 146,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.3737186333454127e-07,
+      "p95_distance_m": 2.633551049923149e-07,
+      "max_distance_m": 2.871374886116853e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 147,
+      "reference_region": 147,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.5086686340036026e-07,
+      "p95_distance_m": 2.872261727368004e-07,
+      "max_distance_m": 2.8772291135841994e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 148,
+      "reference_region": 148,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.8932229533313125e-07,
+      "p95_distance_m": 2.683944863108143e-07,
+      "max_distance_m": 2.9671650755017814e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 149,
+      "reference_region": 149,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6666888310943932e-07,
+      "p95_distance_m": 2.1665484827338675e-07,
+      "max_distance_m": 2.1833162113933094e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 150,
+      "reference_region": 150,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6671674829803636e-07,
+      "p95_distance_m": 2.172780054057187e-07,
+      "max_distance_m": 2.1833162113933094e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 151,
+      "reference_region": 151,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9214787492503965e-07,
+      "p95_distance_m": 2.1847985684852813e-07,
+      "max_distance_m": 2.1855394700498064e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 152,
+      "reference_region": 152,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.9294005861580429e-07,
+      "p95_distance_m": 2.1928258920346288e-07,
+      "max_distance_m": 2.194465562610955e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 153,
+      "reference_region": 153,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6473192977378204e-07,
+      "p95_distance_m": 2.158956499687275e-07,
+      "max_distance_m": 2.1701997839139025e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 154,
+      "reference_region": 154,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.6574954126610044e-07,
+      "p95_distance_m": 2.161704028465506e-07,
+      "max_distance_m": 2.1839311449649035e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 155,
+      "reference_region": 1,
+      "vote_fraction": 0.9907692307692307,
+      "median_distance_m": 4.1616674283037704e-08,
+      "p95_distance_m": 9.685754776000977e-08,
+      "max_distance_m": 1.2232385317744853e-07,
+      "owner": "waist_minus_platform"
+    },
+    {
+      "region": 156,
+      "reference_region": 77,
+      "vote_fraction": 0.9276923076923077,
+      "median_distance_m": 2.0116510648786454e-07,
+      "p95_distance_m": 3.0109369456953353e-07,
+      "max_distance_m": 3.1017819128674897e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 157,
+      "reference_region": 79,
+      "vote_fraction": 0.9576923076923077,
+      "median_distance_m": 2.84666544385903e-07,
+      "p95_distance_m": 4.241493794028885e-07,
+      "max_distance_m": 4.370378140191819e-07,
+      "owner": "waist_plus_platform"
+    },
+    {
+      "region": 158,
+      "reference_region": 158,
+      "vote_fraction": 0.9979838709677419,
+      "median_distance_m": 2.143719206577887e-07,
+      "p95_distance_m": 4.0629401683507954e-07,
+      "max_distance_m": 4.514345865546051e-07,
+      "owner": "waist_plus_platform"
+    },
+    {
+      "region": 159,
+      "reference_region": 164,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.3281899764109526e-07,
+      "p95_distance_m": 2.9289640391731303e-07,
+      "max_distance_m": 3.2089310858025887e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 160,
+      "reference_region": 161,
+      "vote_fraction": 0.9215384615384615,
+      "median_distance_m": 5.1468933250879953e-08,
+      "p95_distance_m": 1.3969240927362301e-07,
+      "max_distance_m": 1.5381717118166826e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 161,
+      "reference_region": 163,
+      "vote_fraction": 0.9979838709677419,
+      "median_distance_m": 6.604894380368213e-08,
+      "p95_distance_m": 1.4605996823026028e-07,
+      "max_distance_m": 1.5955181679485478e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 162,
+      "reference_region": 162,
+      "vote_fraction": 0.9516666666666667,
+      "median_distance_m": 1.2817386679200954e-07,
+      "p95_distance_m": 3.136340377888375e-07,
+      "max_distance_m": 4.3682900814557725e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 163,
+      "reference_region": 159,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.634454017203437e-08,
+      "p95_distance_m": 1.357846914642302e-07,
+      "max_distance_m": 1.91004244727785e-07,
+      "owner": "waist_minus_rod"
+    },
+    {
+      "region": 164,
+      "reference_region": 170,
+      "vote_fraction": 1.0,
+      "median_distance_m": 1.541301337701065e-07,
+      "p95_distance_m": 2.3666277437605394e-07,
+      "max_distance_m": 2.5268235636113364e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 165,
+      "reference_region": 165,
+      "vote_fraction": 1.0,
+      "median_distance_m": 7.450580596923828e-08,
+      "p95_distance_m": 9.00588597761527e-08,
+      "max_distance_m": 1.3031832595395657e-07,
+      "owner": "waist_minus_platform"
+    },
+    {
+      "region": 166,
+      "reference_region": 169,
+      "vote_fraction": 0.9916970433373835,
+      "median_distance_m": 1.4901161193847656e-08,
+      "p95_distance_m": 1.4498614131699843e-07,
+      "max_distance_m": 1.8143349382111313e-07,
+      "owner": "waist_minus_flange"
+    },
+    {
+      "region": 167,
+      "reference_region": 167,
+      "vote_fraction": 0.9892669096800324,
+      "median_distance_m": 1.1175870895385742e-08,
+      "p95_distance_m": 2.723541368012762e-07,
+      "max_distance_m": 3.4248366756919634e-07,
+      "owner": "waist_plus_flange"
+    },
+    {
+      "region": 168,
+      "reference_region": 168,
+      "vote_fraction": 0.9957472660996355,
+      "median_distance_m": 7.758968338387894e-08,
+      "p95_distance_m": 4.4989724957702716e-07,
+      "max_distance_m": 4.759499543368296e-07,
+      "owner": "waist_plus_platform"
+    },
+    {
+      "region": 169,
+      "reference_region": 166,
+      "vote_fraction": 1.0,
+      "median_distance_m": 2.0302832126617432e-07,
+      "p95_distance_m": 3.360294187311068e-07,
+      "max_distance_m": 3.4693556020672437e-07,
+      "owner": "fixed"
+    },
+    {
+      "region": 170,
+      "reference_region": 0,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0004485324025154114,
+      "p95_distance_m": 0.0030275113531865014,
+      "max_distance_m": 0.0038437136171873038,
+      "owner": "fixed"
+    },
+    {
+      "region": 171,
+      "reference_region": 0,
+      "vote_fraction": 0.8991596638655462,
+      "median_distance_m": 0.0035015592513578243,
+      "p95_distance_m": 0.004000180959701538,
+      "max_distance_m": 0.0040119469608549925,
+      "owner": "fixed"
+    },
+    {
+      "region": 172,
+      "reference_region": 0,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.00044853053987026215,
+      "p95_distance_m": 0.0030275098089759763,
+      "max_distance_m": 0.0038437136105823034,
+      "owner": "fixed"
+    },
+    {
+      "region": 173,
+      "reference_region": 155,
+      "vote_fraction": 0.8739495798319328,
+      "median_distance_m": 0.0004485324025154114,
+      "p95_distance_m": 0.0030275064668010936,
+      "max_distance_m": 0.0038437114076130545,
+      "owner": "fixed"
+    },
+    {
+      "region": 174,
+      "reference_region": 0,
+      "vote_fraction": 0.927170868347339,
+      "median_distance_m": 0.003501459999106939,
+      "p95_distance_m": 0.004000062216073274,
+      "max_distance_m": 0.004011826005898936,
+      "owner": "fixed"
+    },
+    {
+      "region": 175,
+      "reference_region": 155,
+      "vote_fraction": 0.8739495798319328,
+      "median_distance_m": 0.0004485286772251129,
+      "p95_distance_m": 0.003027507118612266,
+      "max_distance_m": 0.0038437104569691597,
+      "owner": "fixed"
+    },
+    {
+      "region": 176,
+      "reference_region": 155,
+      "vote_fraction": 0.7002801120448179,
+      "median_distance_m": 0.0031261194311910287,
+      "p95_distance_m": 0.004000098071992397,
+      "max_distance_m": 0.004011877218412791,
+      "owner": "fixed"
+    },
+    {
+      "region": 177,
+      "reference_region": 155,
+      "vote_fraction": 0.9299719887955182,
+      "median_distance_m": 0.003501610760486731,
+      "p95_distance_m": 0.004000228364020586,
+      "max_distance_m": 0.004011996657404402,
+      "owner": "fixed"
+    },
+    {
+      "region": 178,
+      "reference_region": 0,
+      "vote_fraction": 0.9215686274509803,
+      "median_distance_m": 0.0035012050666396012,
+      "p95_distance_m": 0.0039998316206038,
+      "max_distance_m": 0.004011433241111058,
+      "owner": "fixed"
+    },
+    {
+      "region": 179,
+      "reference_region": 0,
+      "vote_fraction": 0.927170868347339,
+      "median_distance_m": 0.003501294518114916,
+      "p95_distance_m": 0.003999902494251728,
+      "max_distance_m": 0.004011488917189703,
+      "owner": "fixed"
+    },
+    {
+      "region": 180,
+      "reference_region": 0,
+      "vote_fraction": 0.9159663865546218,
+      "median_distance_m": 0.0035011740785163585,
+      "p95_distance_m": 0.003999783657491207,
+      "max_distance_m": 0.004011380613204493,
+      "owner": "fixed"
+    },
+    {
+      "region": 181,
+      "reference_region": 0,
+      "vote_fraction": 0.6890756302521008,
+      "median_distance_m": 0.0031313875977526545,
+      "p95_distance_m": 0.003999949619174004,
+      "max_distance_m": 0.004011546637943286,
+      "owner": "fixed"
+    }
+  ]
+}

@@ -1,5 +1,4 @@
 <mujoco model="Right wrist differential">
-  <!-- Zero geometry in the forearm frame. Motor shaft axes estimated from the CAD motor faces and fasteners. -->
   <compiler angle="degree" />
   <option timestep="0.002" gravity="0 0 0" integrator="implicitfast" />
   <statistic center="0 0 0.083" extent="0.15" />
@@ -28,10 +27,10 @@
       <site name="flange_distal_motor_ball" pos="-0.00573065479 -0.008078913701 0.0003842746" rgba="0.24 0.63 0.90 1" />
     </body>
     <body name="gimbal" pos="0 0 0.1388">
-      <joint name="BN_RightHand_axis_1" axis="-0.5814365382 -0.8135917601 -3.623894466e-06" />
+      <joint name="BN_RightHand_roll" axis="-0.5814365382 -0.8135917601 -3.623894466e-06" />
       <geom type="capsule" fromto="0 0 0 -0.006977238458 -0.009763101121 -4.348673359e-08" size="0.0035" rgba="0.53 0.62 0.70 1" />
       <body name="output_platform" pos="0.002590125347 0.003624307214 1.61e-08">
-        <joint name="BN_RightHand_axis_2" axis="0.8135922414 -0.5814358633 -3.990527186e-05" />
+        <joint name="BN_RightHand_pitch" axis="0.8135922414 -0.5814358633 -3.990527186e-05" />
         <geom type="capsule" fromto="0 0 0 -0.02229215253 0.003204386234 -0.0001234198" size="0.003" rgba="0.29 0.69 0.51 1" />
         <site name="flange_proximal_platform_ball" pos="-0.02229215253 0.003204386234 -0.0001234198" rgba="0.91 0.53 0.20 1" />
         <geom type="capsule" fromto="0 0 0 0.01097332609 -0.02056771552 -0.0001234196" size="0.003" rgba="0.29 0.69 0.51 1" />

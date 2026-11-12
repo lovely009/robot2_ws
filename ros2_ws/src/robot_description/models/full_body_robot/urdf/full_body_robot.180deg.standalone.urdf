@@ -1,0 +1,1209 @@
+<robot name="full_body_robot_180deg">
+  <link name="Base_link">
+    <visual name="Base_link_robot_body">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/Base_link.STL" />
+      </geometry>
+      <material name="Base_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_Spine_yaw" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="Base_link" />
+    <child link="BN_Spine_yaw_link" />
+    <origin xyz="3.432186016426e-14 2.5887624986614e-14 0.0062778047691217" rpy="0 -0 0" />
+    <axis xyz="1.6653345369377e-16 1.7000290064573e-16 -1" />
+  </joint>
+  <link name="BN_Spine_yaw_link">
+    <visual name="BN_Spine_yaw_link_robot_body">
+      <origin xyz="-3.432186016426e-14 -0.02785232245648 -4.336808689942e-18" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_yaw_link.STL" />
+      </geometry>
+      <material name="BN_Spine_yaw_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_Spine_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_Spine_yaw_link" />
+    <child link="BN_Spine_pitch_link" />
+    <origin xyz="-3.432186016426e-14 -3.2245647958937e-07 0.10372" rpy="-1.5708 1.4421 1.5708" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_Spine_pitch_link">
+    <visual name="BN_Spine_pitch_link_robot_body">
+      <origin xyz="0 0 -6.6174449004242e-24" rpy="4.8460905029274e-22 2.6899769873208e-23 -7.1243766526352e-18" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_pitch_link.STL" />
+      </geometry>
+      <material name="BN_Spine_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_Spine_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_Spine_pitch_link" />
+    <child link="BN_Spine_roll_link" />
+    <origin xyz="0 0 -6.6174449004242e-24" rpy="-1.5707926552522 -1.5707926535898 -3.1415926519274" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_Spine_roll_link">
+    <visual name="BN_Spine_roll_link_robot_body">
+      <origin xyz="0 0 0" rpy="5.8977292016342e-18 -2.6801655219332e-22 -2.509286137582e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_roll_link.STL" />
+      </geometry>
+      <material name="BN_Spine_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="waist_plus_platform_visual">
+      <origin xyz="-1.1204174074129e-07 -0.099287827746174 -0.04093286656751" rpy="1.4421036732025 7.3160482140462e-06 3.1415885089874" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_plus_platform.STL" />
+      </geometry>
+      <material name="waist_plus_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="waist_minus_platform_visual">
+      <origin xyz="-1.1204174074129e-07 -0.099287827746174 -0.04093286656751" rpy="1.4421036732025 7.3160482140462e-06 3.1415885089874" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_minus_platform.STL" />
+      </geometry>
+      <material name="waist_minus_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftShoulder_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_Spine_roll_link" />
+    <child link="BN_LeftShoulder_1_link" />
+    <origin xyz="0.059 0.2107 -0.06" rpy="-1.5708 1.0358789931303e-22 -1.0493124690356e-21" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftShoulder_1_link">
+    <visual name="BN_LeftShoulder_1_link_robot_body">
+      <origin xyz="6.9388939039072e-18 0 5.5511151231258e-17" rpy="-1.5220221478089e-17 -1.2721725662154e-22 9.239839014078e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_1_link.STL" />
+      </geometry>
+      <material name="BN_LeftShoulder_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftShoulder_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftShoulder_1_link" />
+    <child link="BN_LeftShoulder_2_link" />
+    <origin xyz="0.005 -0.0285 0.0203" rpy="1.5708 3.1614895754978e-22 -6.9101915807704e-22" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftShoulder_2_link">
+    <visual name="BN_LeftShoulder_2_link_robot_body">
+      <origin xyz="0 0 3.4694469519536e-18" rpy="-1.5104233041198e-17 7.4136901834884e-22 -4.8964116502246e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_2_link.STL" />
+      </geometry>
+      <material name="BN_LeftShoulder_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="left_shoulder_flange_linkage_platform_visual">
+      <origin xyz="-0.064 -0.23100010468621 0.031500074566256" rpy="-2.1743084367272e-17 1.5515911167888e-21 -6.6919169779542e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_shoulder_flange_linkage_platform.STL" />
+      </geometry>
+      <material name="left_shoulder_flange_linkage_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperArm_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftShoulder_2_link" />
+    <child link="BN_LeftUpperArm_1_link" />
+    <origin xyz="0.0345 0.0335 -0.029" rpy="-1.5708 -1.3866 1.5708" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftUpperArm_1_link">
+    <visual name="BN_LeftUpperArm_1_link_robot_body">
+      <origin xyz="1.7347234759768e-17 5.5511151231258e-17 -1.3877787807814e-17" rpy="1.9636228650784e-22 2.7950543223748e-22 -2.3101057770916e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_1_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperArm_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperArm_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperArm_1_link" />
+    <child link="BN_LeftUpperArm_2_link" />
+    <origin xyz="0.022119 -0.0041210999999999 -0.0535" rpy="-2.9573926535293 1.5707926535898 -3.1415926535293" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftUpperArm_2_link">
+    <visual name="BN_LeftUpperArm_2_link_robot_body">
+      <origin xyz="0 -5.5511151231258e-17 0" rpy="4.5587659386036e-18 7.9134466819498e-22 1.923333817468e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_2_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperArm_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperArm_3" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperArm_2_link" />
+    <child link="BN_LeftUpperArm_3_link" />
+    <origin xyz="-2.7755575615629e-17 -0.0951 -0.0235" rpy="1.5708 1.0592017354555e-22 -9.6587274946658e-22" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftUpperArm_3_link">
+    <visual name="BN_LeftUpperArm_3_link_robot_body">
+      <origin xyz="0 1.3877787807814e-17 0" rpy="1.0830526613362e-17 -2.7336932296462e-22 1.8473308832697e-21" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_3_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperArm_3_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftLowerArm_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperArm_3_link" />
+    <child link="BN_LeftLowerArm_1_link" />
+    <origin xyz="0.0231 -0.006 0.1765" rpy="-1.5708 -0.18420000000001 -1.5708" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftLowerArm_1_link">
+    <visual name="BN_LeftLowerArm_1_link_robot_body">
+      <origin xyz="0 1.3877787807814e-17 -2.7755575615629e-17" rpy="-2.1896638410746e-22 2.2176644282038e-22 1.0684748984536e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_1_link.STL" />
+      </geometry>
+      <material name="BN_LeftLowerArm_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftLowerArm_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftLowerArm_1_link" />
+    <child link="BN_LeftLowerArm_2_link" />
+    <origin xyz="0.011661 -0.089885 -0.023" rpy="-1.7549926520181 1.5707926535898 -3.1415926520181" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftLowerArm_2_link">
+    <visual name="BN_LeftLowerArm_2_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 -6.9388939039072e-18 0" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_2_link.STL" />
+      </geometry>
+      <material name="BN_LeftLowerArm_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftHand_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftLowerArm_2_link" />
+    <child link="BN_LeftHand_roll_link" />
+    <origin xyz="-0.0014711928292834 0 0.13849999772404" rpy="-1.5707963267949 -0 1.5707963267949" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftHand_roll_link">
+    <visual name="BN_LeftHand_roll_link_robot_body">
+      <origin xyz="0 2.7755575615629e-17 0" rpy="6.5633817052486e-22 2.8791601184814e-21 -4.249453712179e-18" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_roll_link.STL" />
+      </geometry>
+      <material name="BN_LeftHand_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftHand_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftHand_roll_link" />
+    <child link="BN_LeftHand_pitch_link" />
+    <origin xyz="8.5845022340658e-09 -3.3501553584059e-07 -0.0004720768050839" rpy="0.18420185599998 -1.5707963118937 -0.18420185599998" />
+    <axis xyz="1.8225809351964e-05 -3.7503016006893e-05 -0.99999999913067" />
+  </joint>
+  <link name="BN_LeftHand_pitch_link">
+    <visual name="BN_LeftHand_pitch_link_robot_body">
+      <origin xyz="0.00047207680508288 3.3501682433767e-07 8.5914177161417e-09" rpy="1.61526386747e-17 -1.8935831341796e-21 -1.4588350210591e-23" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_pitch_link.STL" />
+      </geometry>
+      <material name="BN_LeftHand_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="left_wrist_flange_proximal_platform_visual">
+      <origin xyz="-0.00099911640221162 0.13850033273685 8.5698661014821e-09" rpy="-1.5707963267949 1.4649076618414e-08 -3.1415926508605" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_platform.STL" />
+      </geometry>
+      <material name="left_wrist_flange_proximal_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="left_wrist_flange_distal_platform_visual">
+      <origin xyz="-0.00099911640221162 0.13850033273685 8.5698661014821e-09" rpy="-1.5707963267949 1.4649076618414e-08 -3.1415926508605" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_platform.STL" />
+      </geometry>
+      <material name="left_wrist_flange_distal_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_wrist_flange_proximal" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_LeftLowerArm_2_link" />
+    <child link="left_wrist_flange_proximal_flange" />
+    <origin xyz="-0.0019994085615135 -0.020009437766822 0.036999588728656" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+    <axis xyz="-1.8211160177655e-05 0.99999999913094 3.7503016057365e-05" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_wrist_flange_proximal_flange">
+    <visual name="left_wrist_flange_proximal_flange_visual">
+      <origin xyz="0.0019994085615135 0.020009437766822 -0.036999588728656" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_flange.STL" />
+      </geometry>
+      <material name="left_wrist_flange_proximal_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_wrist_flange_proximal_rod_axis_frame_1" />
+  <joint name="left_wrist_flange_proximal_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="left_wrist_flange_proximal_flange" />
+    <child link="left_wrist_flange_proximal_rod_axis_frame_1" />
+    <origin xyz="0.0098806184706503 2.031584831301e-07 -0.00061917572963845" rpy="0.0098557968742843 -3.7503013878921e-05 1.5708145379551" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="left_wrist_flange_proximal_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="left_wrist_flange_proximal_rod_axis_frame_1" />
+    <child link="left_wrist_flange_proximal_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_wrist_flange_proximal_rod">
+    <visual name="left_wrist_flange_proximal_rod_visual">
+      <origin xyz="0.020008013741792 0.0075219032083343 -0.036457067181209" rpy="-3.7323522565085e-05 -0.0098557975556233 -1.5708145388396" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_rod.STL" />
+      </geometry>
+      <material name="left_wrist_flange_proximal_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_wrist_flange_distal" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_LeftLowerArm_2_link" />
+    <child link="left_wrist_flange_distal_flange" />
+    <origin xyz="-0.0019999104556024 0.01998924959698 0.072001088823952" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+    <axis xyz="1.8211160177655e-05 -0.99999999913094 -3.7503016055851e-05" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_wrist_flange_distal_flange">
+    <visual name="left_wrist_flange_distal_flange_visual">
+      <origin xyz="0.0019999104556024 -0.01998924959698 -0.072001088823952" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_flange.STL" />
+      </geometry>
+      <material name="left_wrist_flange_distal_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_wrist_flange_distal_rod_axis_frame_1" />
+  <joint name="left_wrist_flange_distal_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="left_wrist_flange_distal_flange" />
+    <child link="left_wrist_flange_distal_rod_axis_frame_1" />
+    <origin xyz="0.0098993108773437 1.8465858829531e-07 -0.00011680799466033" rpy="-0.014870673110836 3.7503015949943e-05 -1.5707781156347" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="left_wrist_flange_distal_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="left_wrist_flange_distal_rod_axis_frame_1" />
+    <child link="left_wrist_flange_distal_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_wrist_flange_distal_rod">
+    <visual name="left_wrist_flange_distal_rod_visual">
+      <origin xyz="0.019991986258279 -0.0068299739063815 -0.071993053700423" rpy="-3.723218376986e-05 -0.014870673791343 1.570778113621" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_rod.STL" />
+      </geometry>
+      <material name="left_wrist_flange_distal_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightShoulder_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_Spine_roll_link" />
+    <child link="BN_RightShoulder_1_link" />
+    <origin xyz="-0.05899846472476 0.2645006694254 -0.060008778068843" rpy="-1.5708 -1.3866 1.5708" />
+    <axis xyz="-0.1831232570965 -0.9830899616478 4.2069639047014e-06" />
+  </joint>
+  <link name="BN_RightShoulder_1_link">
+    <visual name="BN_RightShoulder_1_link_robot_body">
+      <origin xyz="-0.00048314087615589 8.9322182047491e-05 -0.1574984643942" rpy="2.2744494631154e-22 -3.7778512018224e-22 7.5576537170712e-18" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_1_link.STL" />
+      </geometry>
+      <material name="BN_RightShoulder_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightShoulder_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightShoulder_1_link" />
+    <child link="BN_RightShoulder_2_link" />
+    <origin xyz="0.026117859123844 -0.038943677817952 0.0050015356057979" rpy="-2.9573926531478 1.5707926535898 -3.1415926531478" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightShoulder_2_link">
+    <visual name="BN_RightShoulder_2_link_robot_body">
+      <origin xyz="0 0 6.9388939039072e-18" rpy="-1.7101375193752e-18 -8.4940688237012e-22 3.084063201999e-23" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_2_link.STL" />
+      </geometry>
+      <material name="BN_RightShoulder_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="right_shoulder_flange_linkage_platform_visual">
+      <origin xyz="0.06400008145618 -0.23099928871445 0.027200986385767" rpy="-3.6732073503679e-06 -2.9382946191309e-06 6.1064544061977e-07" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_shoulder_flange_linkage_platform.STL" />
+      </geometry>
+      <material name="right_shoulder_flange_linkage_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperArm_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightShoulder_2_link" />
+    <child link="BN_RightUpperArm_1_link" />
+    <origin xyz="-0.0345 0.0335 -0.0333" rpy="-1.5708 -1.3866 1.5708" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightUpperArm_1_link">
+    <visual name="BN_RightUpperArm_1_link_robot_body">
+      <origin xyz="1.0408340855861e-17 0 0" rpy="5.6191566173228e-22 -9.1661565424788e-22 3.2408384523418e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_1_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperArm_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperArm_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperArm_1_link" />
+    <child link="BN_RightUpperArm_2_link" />
+    <origin xyz="0.022119 -0.0041211 0.0535" rpy="-2.9573926531478 1.5707926535898 -3.1415926531478" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightUpperArm_2_link">
+    <visual name="BN_RightUpperArm_2_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 0 6.9388939039072e-18" rpy="4.4462609951418e-18 -1.0331017656752e-21 -1.1846846677668e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_2_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperArm_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperArm_3" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperArm_2_link" />
+    <child link="BN_RightUpperArm_3_link" />
+    <origin xyz="0 -0.0951 -0.0235" rpy="-1.5708 3.6845933205562e-20 3.1415853071796" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightUpperArm_3_link">
+    <visual name="BN_RightUpperArm_3_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 -1.3877787807814e-17 0" rpy="-4.1939062226702e-18 -1.6026378549094e-21 4.43414900428e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_3_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperArm_3_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightLowerArm_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperArm_3_link" />
+    <child link="BN_RightLowerArm_1_link" />
+    <origin xyz="-0.0231 0.006 0.1765" rpy="-1.5708 -6.1062266354384e-15 -1.5708" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightLowerArm_1_link">
+    <visual name="BN_RightLowerArm_1_link_robot_body">
+      <origin xyz="1.3877787807814e-17 0 0" rpy="-3.0833191884278e-22 3.3351892316876e-23 1.0652061921066e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_1_link.STL" />
+      </geometry>
+      <material name="BN_RightLowerArm_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightLowerArm_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightLowerArm_1_link" />
+    <child link="BN_RightLowerArm_2_link" />
+    <origin xyz="0.005 -0.0905 0.023" rpy="-1.5707926552522 -1.5707926535898 -3.1415926519274" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightLowerArm_2_link">
+    <visual name="BN_RightLowerArm_2_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 6.9388939039072e-18 0" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_2_link.STL" />
+      </geometry>
+      <material name="BN_RightLowerArm_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightHand_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightLowerArm_2_link" />
+    <child link="BN_RightHand_roll_link" />
+    <origin xyz="-0.0014712 -6.9388939039072e-18 0.1385" rpy="-1.5708 6.1062266354384e-15 1.5708" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightHand_roll_link">
+    <visual name="BN_RightHand_roll_link_robot_body">
+      <origin xyz="0 0 -2.7755575615629e-17" rpy="1.255049909975e-21 1.8868921976169e-21 -1.1509785757737e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_roll_link.STL" />
+      </geometry>
+      <material name="BN_RightHand_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightHand_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightHand_roll_link" />
+    <child link="BN_RightHand_pitch_link" />
+    <origin xyz="4.488919493062e-09 1.0229736464307e-06 -0.00046711744500968" rpy="-3.1415926535804 1.5707926535898 -3.1415926535804" />
+    <axis xyz="-1.3192861270204e-05 -4.1176050974352e-05 0.99999999906524" />
+  </joint>
+  <link name="BN_RightHand_pitch_link">
+    <visual name="BN_RightHand_pitch_link_robot_body">
+      <origin xyz="-0.00046711744499001 -1.0229736464307e-06 -6.2047376819807e-09" rpy="1.8518806771187e-17 -1.0727246682984e-21 3.1465980514518e-23" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_pitch_link.STL" />
+      </geometry>
+      <material name="BN_RightHand_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="right_wrist_flange_proximal_platform_visual">
+      <origin xyz="0.0010035738160932 0.13849898242944 -6.2066063677424e-09" rpy="1.5707963267814 -5.8834908516284e-18 3.6732051032577e-06" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_proximal_platform.STL" />
+      </geometry>
+      <material name="right_wrist_flange_proximal_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="right_wrist_flange_distal_platform_visual">
+      <origin xyz="0.0010035738160932 0.13849898242944 -6.2066063677424e-09" rpy="1.5707963267814 -5.8834908516284e-18 3.6732051032577e-06" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_distal_platform.STL" />
+      </geometry>
+      <material name="right_wrist_flange_distal_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_wrist_flange_proximal" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_RightLowerArm_2_link" />
+    <child link="right_wrist_flange_proximal_flange" />
+    <origin xyz="-0.0020029968057989 -0.020007866957569 0.036998146719121" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+    <axis xyz="-1.3193012522844e-05 0.99999999906524 4.1176016007102e-05" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_wrist_flange_proximal_flange">
+    <visual name="right_wrist_flange_proximal_flange_visual">
+      <origin xyz="0.0020029968057989 0.020007866957569 -0.036998146719121" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_proximal_flange.STL" />
+      </geometry>
+      <material name="right_wrist_flange_proximal_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_wrist_flange_proximal_rod_axis_frame_1" />
+  <joint name="right_wrist_flange_proximal_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="right_wrist_flange_proximal_flange" />
+    <child link="right_wrist_flange_proximal_rod_axis_frame_1" />
+    <origin xyz="0.0098806274909958 1.558445049607e-07 -0.00061903178261835" rpy="0.009841228265503 -4.1176013831382e-05 1.5708095198074" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="right_wrist_flange_proximal_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="right_wrist_flange_proximal_rod_axis_frame_1" />
+    <child link="right_wrist_flange_proximal_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_wrist_flange_proximal_rod">
+    <visual name="right_wrist_flange_proximal_rod_visual">
+      <origin xyz="0.020006317077103 0.0075189677625632 -0.036455698780237" rpy="-4.1046174188194e-05 -0.0098412288078822 -1.5708095204463" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_proximal_rod.STL" />
+      </geometry>
+      <material name="right_wrist_flange_proximal_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_wrist_flange_distal" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_RightLowerArm_2_link" />
+    <child link="right_wrist_flange_distal_flange" />
+    <origin xyz="-0.0020038078801797 0.019990691840742 0.071999793728943" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+    <axis xyz="1.3193012522844e-05 -0.99999999906524 -4.1176016005587e-05" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_wrist_flange_distal_flange">
+    <visual name="right_wrist_flange_distal_flange_visual">
+      <origin xyz="0.0020038078801797 -0.019990691840742 -0.071999793728943" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_distal_flange.STL" />
+      </geometry>
+      <material name="right_wrist_flange_distal_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_wrist_flange_distal_rod_axis_frame_1" />
+  <joint name="right_wrist_flange_distal_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="right_wrist_flange_distal_flange" />
+    <child link="right_wrist_flange_distal_rod_axis_frame_1" />
+    <origin xyz="0.0098993125788196 1.3540550443392e-07 -0.00011666377544377" rpy="-0.014856104502054 4.1176015902405e-05 -1.5707831337824" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="right_wrist_flange_distal_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="right_wrist_flange_distal_rod_axis_frame_1" />
+    <child link="right_wrist_flange_distal_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_wrist_flange_distal_rod">
+    <visual name="right_wrist_flange_distal_rod_visual">
+      <origin xyz="0.019993682922969 -0.0068270453598548 -0.071991670595823" rpy="-4.0980004705823e-05 -0.014856105043997 1.5707831323264" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_wrist_flange_distal_rod.STL" />
+      </geometry>
+      <material name="right_wrist_flange_distal_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_shoulder_flange_linkage" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_Spine_roll_link" />
+    <child link="left_shoulder_flange_linkage_flange" />
+    <origin xyz="0.095200806913258 0.12850047243673 -0.03750304909137" rpy="5.8977292016342e-18 -2.6801655219332e-22 -2.509286137582e-22" />
+    <axis xyz="0.99999999996465 -4.1446023698115e-06 7.3160482155158e-06" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_shoulder_flange_linkage_flange">
+    <visual name="left_shoulder_flange_linkage_flange_visual">
+      <origin xyz="-0.095200806913258 -0.12850047243673 0.03750304909137" rpy="5.8977292016342e-18 -2.6801655219332e-22 -2.509286137582e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_shoulder_flange_linkage_flange.STL" />
+      </geometry>
+      <material name="left_shoulder_flange_linkage_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_shoulder_flange_linkage_rod_axis_frame_1" />
+  <joint name="left_shoulder_flange_linkage_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="left_shoulder_flange_linkage_flange" />
+    <child link="left_shoulder_flange_linkage_rod_axis_frame_1" />
+    <origin xyz="7.8017892868321e-08 -0.010842212148078 -0.016806142797501" rpy="-1.6365831372372 -0.47583189835132 0.0084381154747677" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="left_shoulder_flange_linkage_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="left_shoulder_flange_linkage_rod_axis_frame_1" />
+    <child link="left_shoulder_flange_linkage_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="left_shoulder_flange_linkage_rod">
+    <visual name="left_shoulder_flange_linkage_rod_visual">
+      <origin xyz="-0.060626854871681 -0.084457317879919 -0.12266828829957" rpy="1.6292799241555 -0.0216946311342 0.47544410229301" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_shoulder_flange_linkage_rod.STL" />
+      </geometry>
+      <material name="left_shoulder_flange_linkage_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_shoulder_flange_linkage" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_Spine_roll_link" />
+    <child link="right_shoulder_flange_linkage_flange" />
+    <origin xyz="-0.095199192984611 0.12850126156902 -0.03750444206695" rpy="5.8977292016342e-18 -2.6801655219332e-22 -2.509286137582e-22" />
+    <axis xyz="0.99999999996465 -4.1446023698115e-06 7.3160482155158e-06" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_shoulder_flange_linkage_flange">
+    <visual name="right_shoulder_flange_linkage_flange_visual">
+      <origin xyz="0.095199192984611 -0.12850126156902 0.037504442066949" rpy="5.8977292016342e-18 -2.6801655219332e-22 -2.509286137582e-22" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_shoulder_flange_linkage_flange.STL" />
+      </geometry>
+      <material name="right_shoulder_flange_linkage_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_shoulder_flange_linkage_rod_axis_frame_1" />
+  <joint name="right_shoulder_flange_linkage_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="right_shoulder_flange_linkage_flange" />
+    <child link="right_shoulder_flange_linkage_rod_axis_frame_1" />
+    <origin xyz="7.8017892840565e-08 -0.010842212148078 -0.016806142797501" rpy="-1.6365829982746 0.47581726677633 -0.0084463410246588" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="right_shoulder_flange_linkage_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="right_shoulder_flange_linkage_rod_axis_frame_1" />
+    <child link="right_shoulder_flange_linkage_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="right_shoulder_flange_linkage_rod">
+    <visual name="right_shoulder_flange_linkage_rod_visual">
+      <origin xyz="0.060626854871478 -0.084457317879814 -0.12266828829956" rpy="1.6292802305231 0.021685500849276 -0.47542997639768" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/right_shoulder_flange_linkage_rod.STL" />
+      </geometry>
+      <material name="right_shoulder_flange_linkage_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_flange_plus_x" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_Spine_yaw_link" />
+    <child link="waist_plus_flange" />
+    <origin xyz="0.050999999999824 -5.9965462760486e-14 0.053722195230866" rpy="0 -0 0" />
+    <axis xyz="-1 -1.4710455076283e-15 -5.5511151231258e-17" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="waist_plus_flange">
+    <visual name="waist_plus_flange_visual">
+      <origin xyz="-0.050999999999859 -0.02785232245642 -0.053722195230866" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_plus_flange.STL" />
+      </geometry>
+      <material name="waist_plus_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="waist_plus_rod_axis_frame_1" />
+  <joint name="waist_plus_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="waist_plus_flange" />
+    <child link="waist_plus_rod_axis_frame_1" />
+    <origin xyz="-6.9388939039072e-17 0.048013967262364 0.013952023069346" rpy="0.18286853911126 -0.061988388923654 0.32322842792386" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="waist_plus_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="waist_plus_rod_axis_frame_1" />
+    <child link="waist_plus_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="waist_plus_rod">
+    <visual name="waist_plus_rod_visual">
+      <origin xyz="-0.076509494325552 -0.066275804988426 -0.05186818571542" rpy="-0.19297803854316 -2.2263094145991e-13 -0.32891394424056" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_plus_rod.STL" />
+      </geometry>
+      <material name="waist_plus_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_flange_minus_x" type="revolute" simulation_auxiliary="true">
+    <parent link="BN_Spine_yaw_link" />
+    <child link="waist_minus_flange" />
+    <origin xyz="-0.05100000000015 -6.0115509402264e-14 0.053722195230866" rpy="0 -0 0" />
+    <axis xyz="-1 -1.4710455076283e-15 -5.5511151231258e-17" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="waist_minus_flange">
+    <visual name="waist_minus_flange_visual">
+      <origin xyz="0.051000000000116 -0.027852322456419 -0.053722195230866" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_minus_flange.STL" />
+      </geometry>
+      <material name="waist_minus_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="waist_minus_rod_axis_frame_1" />
+  <joint name="waist_minus_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="waist_minus_flange" />
+    <child link="waist_minus_rod_axis_frame_1" />
+    <origin xyz="-6.9388939039072e-17 0.048013967262368 0.013952023069343" rpy="-0.19136407387936 0.025059918432279 -3.0129685389863" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="waist_minus_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="waist_minus_rod_axis_frame_1" />
+    <child link="waist_minus_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="waist_minus_rod">
+    <visual name="waist_minus_rod_visual">
+      <origin xyz="-0.039138797256923 0.093350627197272 -0.051868185715414" rpy="-0.19297803854319 2.3124731296509e-13 3.0105632860535" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_minus_rod.STL" />
+      </geometry>
+      <material name="waist_minus_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_hips_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="Base_link" />
+    <child link="BN_hips_roll_link" />
+    <origin xyz="0 0 -0.0734999997374" rpy="1.5707963267949 -0 0" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_hips_roll_link">
+    <visual name="BN_hips_roll_link_robot_body">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_hips_roll_link.STL" />
+      </geometry>
+      <material name="BN_hips_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_hips_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_hips_roll_link" />
+    <child link="BN_hips_pitch_link" />
+    <origin xyz="0 0 0" rpy="1.5708 -1.2579 -1.5708" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_hips_pitch_link">
+    <visual name="BN_hips_pitch_link_robot_body">
+      <origin xyz="3.4694469519536e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799582e-23 3.2211750323082e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_hips_pitch_link.STL" />
+      </geometry>
+      <material name="BN_hips_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="hips_plus_platform_visual">
+      <origin xyz="-0.0060634793643145 0.073000158930532 0.034146158141322" rpy="-3.0946493721453 1.5595150701092 -1.2328085509746" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_plus_platform.STL" />
+      </geometry>
+      <material name="hips_plus_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+    <visual name="hips_minus_platform_visual">
+      <origin xyz="-0.0063574668112444 0.084627485267395 -0.0052546701105214" rpy="0.086987400969021 1.4078152897997 1.8689534468381" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_minus_platform.STL" />
+      </geometry>
+      <material name="hips_minus_platform_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperLeg_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_hips_pitch_link" />
+    <child link="BN_LeftUpperLeg_1_link" />
+    <origin xyz="-0.035990589835706 -0.024514057203627 0.092020008064428" rpy="-1.6962695786299e-23 6.2602352799582e-23 3.2211750323082e-17" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftUpperLeg_1_link">
+    <visual name="BN_LeftUpperLeg_1_link_robot_body">
+      <origin xyz="5.2041704279304e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799582e-23 3.2211750323082e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_1_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperLeg_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperLeg_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperLeg_1_link" />
+    <child link="BN_LeftUpperLeg_2_link" />
+    <origin xyz="0.044372234920298 0.0074903116208913 0.01170000000053" rpy="3.0735323145023 1.5707963118937 -3.0424232607633" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftUpperLeg_2_link">
+    <visual name="BN_LeftUpperLeg_2_link_robot_body">
+      <origin xyz="0 -1.3877787807814e-17 0" rpy="-1.4024762349754e-17 1.7933768797658e-22 -2.1376814939694e-23" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_2_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperLeg_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftUpperLeg_3" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperLeg_2_link" />
+    <child link="BN_LeftUpperLeg_3_link" />
+    <origin xyz="-0.012464803440567 -0.20091370952522 -0.046" rpy="1.5707963267949 -0.35158000141577 -0.061961166407587" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftUpperLeg_3_link">
+    <visual name="BN_LeftUpperLeg_3_link_robot_body">
+      <origin xyz="2.7755575615629e-17 3.4694469519536e-18 5.5511151231258e-17" rpy="-6.480112243402e-18 -7.9779163754004e-19 2.0801710251288e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_3_link.STL" />
+      </geometry>
+      <material name="BN_LeftUpperLeg_3_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftLowerLeg_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftUpperLeg_3_link" />
+    <child link="BN_LeftLowerLeg_1_link" />
+    <origin xyz="-0.020094365404342 0.012573293753929 0.24670000000022" rpy="-1.5707963267949 0.17026834780782 -1.8739999979586" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftLowerLeg_1_link">
+    <visual name="BN_LeftLowerLeg_1_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 -1.1102230246252e-16 0" rpy="2.469127927953e-18 8.8971136119808e-19 -2.6344645371084e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_1_link.STL" />
+      </geometry>
+      <material name="BN_LeftLowerLeg_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftLowerLeg_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftLowerLeg_1_link" />
+    <child link="BN_LeftLowerLeg_2_link" />
+    <origin xyz="-0.0039830014636028 -0.096168527545273 0.027000000000086" rpy="-1.5707963267921 -1.2610321950548 2.9752000950158" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftLowerLeg_2_link">
+    <visual name="BN_LeftLowerLeg_2_link_robot_body">
+      <origin xyz="1.3877787807814e-17 1.2576745200832e-17 1.1102230246252e-16" rpy="-8.0549256914208e-19 -4.2954785265578e-18 1.3443478748548e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_2_link.STL" />
+      </geometry>
+      <material name="BN_LeftLowerLeg_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftFoot_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftLowerLeg_2_link" />
+    <child link="BN_LeftFoot_pitch_link" />
+    <origin xyz="-0.018333805772659 0.0058680545373879 0.28500000000001" rpy="-1.5707963267949 -0.16639255857135 1.2610321950548" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_LeftFoot_pitch_link">
+    <visual name="BN_LeftFoot_pitch_link_robot_body">
+      <origin xyz="1.3877787807814e-17 0 -1.3877787807814e-17" rpy="1.1070409688554e-18 -4.0896145103754e-18 -2.765234126244e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_pitch_link.STL" />
+      </geometry>
+      <material name="BN_LeftFoot_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_LeftFoot_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_LeftFoot_pitch_link" />
+    <child link="BN_LeftFoot_roll_link" />
+    <origin xyz="-0.0057816733192712 -0.057016463739262 -0.019999999999999" rpy="1.570796326795 -1.5166972359993 -1.3651976928547" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_LeftFoot_roll_link">
+    <visual name="BN_LeftFoot_roll_link_robot_body">
+      <origin xyz="0 0 0" rpy="7.9345314987712e-19 -1.9319583373547e-19 8.4431209439204e-19" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_roll_link.STL" />
+      </geometry>
+      <material name="BN_LeftFoot_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperLeg_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_hips_pitch_link" />
+    <child link="BN_RightUpperLeg_1_link" />
+    <origin xyz="-0.035990589835706 -0.024514057203627 -0.092019991935572" rpy="3.1415926535898 -7.7560333645602e-23 3.1415926535898" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightUpperLeg_1_link">
+    <visual name="BN_RightUpperLeg_1_link_robot_body">
+      <origin xyz="-1.7347234759768e-18 1.3877787807814e-17 0" rpy="-2.2741974635534e-23 6.5911075519916e-23 -4.4561747074522e-18" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_1_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperLeg_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperLeg_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperLeg_1_link" />
+    <child link="BN_RightUpperLeg_2_link" />
+    <origin xyz="0.043255183553702 -0.0080615814661712 0.01169999999999" rpy="0.18425862694768 1.5707963267949 0" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightUpperLeg_2_link">
+    <visual name="BN_RightUpperLeg_2_link_robot_body">
+      <origin xyz="0 0 0" rpy="5.9129537055672e-18 2.212407265925e-22 8.7320938793862e-24" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_2_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperLeg_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightUpperLeg_3" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperLeg_2_link" />
+    <child link="BN_RightUpperLeg_3_link" />
+    <origin xyz="-0.012464803441107 -0.20091370952501 -0.045" rpy="-1.5707963267949 -0.32077150495152 3.0796314871822" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightUpperLeg_3_link">
+    <visual name="BN_RightUpperLeg_3_link_robot_body">
+      <origin xyz="-1.3877787807814e-17 -3.9031278209478e-18 0" rpy="1.5511303050426e-17 -5.6931661794808e-18 1.0232470655083e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_3_link.STL" />
+      </geometry>
+      <material name="BN_RightUpperLeg_3_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightLowerLeg_1" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightUpperLeg_3_link" />
+    <child link="BN_RightLowerLeg_1_link" />
+    <origin xyz="0.023552004835586 0.0026784893224273 0.24670000000022" rpy="-1.5707963267949 -0.18149297405521 1.9399441619985" />
+    <axis xyz="0 0 -1" />
+  </joint>
+  <link name="BN_RightLowerLeg_1_link">
+    <visual name="BN_RightLowerLeg_1_link_robot_body">
+      <origin xyz="-3.4694469519536e-17 1.1102230246252e-16 1.3877787807814e-17" rpy="-6.1415359804452e-18 -1.2680958228056e-18 -1.4182807036412e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_1_link.STL" />
+      </geometry>
+      <material name="BN_RightLowerLeg_1_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightLowerLeg_2" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightLowerLeg_1_link" />
+    <child link="BN_RightLowerLeg_2_link" />
+    <origin xyz="0.029395928922845 -0.091652219578404 0.027000000000086" rpy="-1.5707963267925 1.2086249116418 -2.9562238902959" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightLowerLeg_2_link">
+    <visual name="BN_RightLowerLeg_2_link_robot_body">
+      <origin xyz="1.3877787807814e-17 2.6020852139652e-18 0" rpy="4.0935398716308e-18 1.0604744330421e-17 -1.3007615102271e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_2_link.STL" />
+      </geometry>
+      <material name="BN_RightLowerLeg_2_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightFoot_pitch" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightLowerLeg_2_link" />
+    <child link="BN_RightFoot_pitch_link" />
+    <origin xyz="0.018001246377673 0.0068203832013802 0.285" rpy="-1.5707963267949 -0.18536876329166 1.932967741948" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightFoot_pitch_link">
+    <visual name="BN_RightFoot_pitch_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 0 -1.3877787807814e-17" rpy="-1.1066650745501e-17 -8.6810633302996e-18 -3.1146005423138e-17" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_pitch_link.STL" />
+      </geometry>
+      <material name="BN_RightFoot_pitch_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="BN_RightFoot_roll" type="revolute">
+    <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
+    <parent link="BN_RightFoot_pitch_link" />
+    <child link="BN_RightFoot_roll_link" />
+    <origin xyz="-0.009356164078364 -0.056601475929875 0.020000000000002" rpy="-1.5707963267949 -1.5003288566355 1.7169590147176" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <link name="BN_RightFoot_roll_link">
+    <visual name="BN_RightFoot_roll_link_robot_body">
+      <origin xyz="-2.7755575615629e-17 1.1102230246252e-16 -1.2143064331838e-17" rpy="8.116599382302e-18 6.0538825235702e-18 -1.8566261154664e-19" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_roll_link.STL" />
+      </geometry>
+      <material name="BN_RightFoot_roll_link_robot_body_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="hips_flange_plus_x" type="revolute" simulation_auxiliary="true">
+    <parent link="Base_link" />
+    <child link="hips_plus_flange" />
+    <origin xyz="0.072000000000034 -0.010118940098545 0.02799999999999" rpy="0 -0 0" />
+    <axis xyz="-1.6653345369377e-16 -1.7000290064573e-16 1" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="hips_plus_flange">
+    <visual name="hips_plus_flange_visual">
+      <origin xyz="-0.034390579210197 0.064059979786994 -0.02799999999999" rpy="6.4807363510072e-17 2.0524414051565e-16 -0.93847902370745" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_plus_flange.STL" />
+      </geometry>
+      <material name="hips_plus_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="hips_plus_rod_axis_frame_1" />
+  <joint name="hips_plus_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="hips_plus_flange" />
+    <child link="hips_plus_rod_axis_frame_1" />
+    <origin xyz="0.029561793244867 0.016795844133169 6.9388939039072e-18" rpy="2.9057731519883 1.53506129721 -1.3259926011234" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="hips_plus_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="hips_plus_rod_axis_frame_1" />
+    <child link="hips_plus_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="hips_plus_rod">
+    <visual name="hips_plus_rod_visual">
+      <origin xyz="0.046377762735358 0.043769646596629 -0.055146401715822" rpy="1.5823077252066 -0.46932727976053 -1.9258244866481" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_plus_rod.STL" />
+      </geometry>
+      <material name="hips_plus_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="hips_flange_minus_x" type="revolute" simulation_auxiliary="true">
+    <parent link="Base_link" />
+    <child link="hips_minus_flange" />
+    <origin xyz="-0.071999999999966 -0.010118940098547 0.02799999999999" rpy="0 -0 0" />
+    <axis xyz="-1.6653345369377e-16 -1.7000290064573e-16 1" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="hips_minus_flange">
+    <visual name="hips_minus_flange_visual">
+      <origin xyz="0.0090080566454071 0.072147403724501 -0.02799999999999" rpy="-2.8643862533662e-16 -4.1016779847026e-17 1.3069565007203" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_minus_flange.STL" />
+      </geometry>
+      <material name="hips_minus_flange_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="hips_minus_rod_axis_frame_1" />
+  <joint name="hips_minus_rod_x" type="revolute" simulation_auxiliary="true">
+    <parent link="hips_minus_flange" />
+    <child link="hips_minus_rod_axis_frame_1" />
+    <origin xyz="-0.029561793288029 0.016795844057195 -3.4694469519536e-18" rpy="-2.9057699279172 1.535061777158 -1.8155968222605" />
+    <axis xyz="1 0 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <joint name="hips_minus_rod_y" type="revolute" simulation_auxiliary="true">
+    <parent link="hips_minus_rod_axis_frame_1" />
+    <child link="hips_minus_rod" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
+  </joint>
+  <link name="hips_minus_rod">
+    <visual name="hips_minus_rod_visual">
+      <origin xyz="0.017923904522795 -0.064780657944222 -0.028594203686447" rpy="1.6904737517834 0.15047263980726 -1.7722204774442" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/hips_minus_rod.STL" />
+      </geometry>
+      <material name="hips_minus_rod_visual_color">
+        <color rgba=".84 .85 .86 1" />
+      </material>
+    </visual>
+  </link>
+</robot>

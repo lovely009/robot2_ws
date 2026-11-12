@@ -13,10 +13,12 @@ import xml.etree.ElementTree as ET
 
 
 class MotionJobs:
-    def __init__(self, actions_dir=None, profiles_dir=None, models_root=None):
+    def __init__(self, actions_dir=None, profiles_dir=None, models_root=None, cache_dir=None):
         self.actions_dir = Path(actions_dir) if actions_dir is not None else None
         self.profiles_dir = Path(profiles_dir) if profiles_dir is not None else None
         self.models_root = models_root
+        from .motion_cache import ResultCache
+        self.cache = ResultCache(cache_dir) if cache_dir is not None else None
         self.directory = tempfile.TemporaryDirectory(prefix='workbench-motion-')
         self.jobs = {}
         self.lock = threading.RLock()
@@ -98,6 +100,7 @@ class MotionJobs:
         if job.get('simulation'):
             identity['urdf'] = (directory / 'robot.urdf').read_text()
             identity['simulation_limits'] = job['simulation']['limits']
+            identity['pose_fit_version'] = 2
         job['profile_key'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         job['generic'] = True
         job['status'].update(analysis, mapping_origin='suggested')
@@ -279,7 +282,8 @@ class MotionJobs:
             if job.get('generic'):
                 from bvh_broadcaster.generic_retarget import GenericRetargeter
                 solver = GenericRetargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
-                                          up_axis=job['up_axis'], scale=job['scale'])
+                                          up_axis=job['up_axis'], scale=job['scale'],
+                                          match_directions=bool(job.get('simulation')))
                 if job.get('simulation'):
                     from .motion_simulation import position_filter
                     solver.position_filter = position_filter(job['simulation'], solver.robot.independent)
@@ -293,6 +297,28 @@ class MotionJobs:
                 solver = retargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
                                     up_axis=job['up_axis'])
             job['status'].update(state='running', progress=0, error='', mapping=copy.deepcopy(mapping))
+            if self.cache is not None:
+                from .motion_cache import result_key
+                job['cache_key'] = result_key(job, mapping)
+                if self.cache.load(job['cache_key'], job['directory']):
+                    try:
+                        import numpy as np
+                        from bvh_broadcaster.retarget import load_motion
+                        with np.load(job['directory'] / 'motion.npz', allow_pickle=False) as motion:
+                            if job.get('generic'):
+                                solver.validate_result(motion['positions'])
+                            else:
+                                load_motion(job['directory'] / 'motion.npz', job['directory'] / 'robot.urdf')
+                            if job.get('simulation'):
+                                from .motion_simulation import validate_positions
+                                validate_positions(job['simulation'], solver.names, motion['positions'])
+                        summary = json.loads((job['directory'] / 'report.json').read_text())
+                        json.loads((job['directory'] / 'preview.json').read_text())
+                        job['status'].update(state='done', progress=100, summary=summary,
+                                             result_cached=True, result_saved=True)
+                        return copy.deepcopy(job['status'])
+                    except (OSError, ValueError, KeyError, TypeError):
+                        pass
             self.thread = threading.Thread(target=self._convert, args=(key, solver), daemon=True)
             self.thread.start()
             return copy.deepcopy(job['status'])
@@ -334,7 +360,7 @@ class MotionJobs:
             # Downsample display geometry only; the downloaded joint motion keeps every source frame.
             indices = sorted(set(range(0, len(positions), max(1, (len(positions) + 899) // 900)))
                              | {len(positions) - 1})
-            source_frames, robot_frames = [], []
+            source_frames, robot_frames, root_quaternions = [], [], []
             for index in indices:
                 if self.stopping.is_set():
                     raise RuntimeError('服务已停止')
@@ -347,6 +373,10 @@ class MotionJobs:
                     ps.append(p)
                     rs.append(r)
                 source_frames.append(np.round(ps, 5).tolist())
+                if job.get('generic'):
+                    # Conjugate the source world rotation into the robot coordinate basis.
+                    root_rotation = solver.basis @ rs[solver.source_root] @ solver.basis.T
+                    root_quaternions.append(Rotation.from_matrix(root_rotation).as_quat().tolist())
                 q = solver.configuration(positions[index]) if job.get('generic') else positions[index]
                 pin.framesForwardKinematics(solver.model, solver.data, q)
                 robot_frames.append(np.round([solver.data.oMf[f].translation for f in link_ids], 5).tolist())
@@ -360,6 +390,10 @@ class MotionJobs:
                                  'joint_names': solver.names,
                                  'joint_positions': np.round(positions[indices], 8).tolist()},
                        'source_to_robot': job['status']['mapping']['source_to_robot']}
+            if job.get('generic'):
+                preview['robot'].update(root_quaternions=root_quaternions,
+                    root_rotation_source=clip.joints[solver.source_root].name,
+                    root_rotation_frame='robot')
             if job.get('simulation'):
                 from .motion_simulation import cad_preview
                 preview['robot'].update(cad_preview(job['simulation'], solver.names, positions[indices]))
@@ -372,6 +406,12 @@ class MotionJobs:
             if job.get('generic'):
                 summary.update(solver.report)
             (directory / 'report.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+            if self.cache is not None:
+                try:
+                    self.cache.save(job['cache_key'], directory)
+                    job['status']['result_saved'] = True
+                except OSError as exc:
+                    job['status']['cache_warning'] = f'结果未能保存，下次将重新转换：{exc}'
             with self.lock:
                 job['status'].update(state='done', progress=100, summary=summary)
         except Exception as exc:

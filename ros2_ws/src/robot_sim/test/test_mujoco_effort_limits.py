@@ -83,7 +83,7 @@ def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     assert controller.targets['BN_Spine_yaw'] == 0.1
     previous = data.ctrl.copy()
     with pytest.raises(ValueError, match='超出仿真范围'):
-        controller.apply(data, ['BN_RightUpperLeg_axis_2'], [controller.limits['BN_RightUpperLeg_axis_2'][1] + .01])
+        controller.apply(data, ['BN_RightUpperLeg_2'], [controller.limits['BN_RightUpperLeg_2'][1] + .01])
     np.testing.assert_array_equal(data.ctrl, previous)
 
 

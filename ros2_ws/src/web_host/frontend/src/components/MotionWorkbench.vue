@@ -13,9 +13,10 @@ type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progr
   joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | GenericMapping | null;
   constraint_source?: string; velocity_limit_rad_s?: number;
   warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
+  result_cached?: boolean; result_saved?: boolean; cache_warning?: string;
   summary?: { mechanical_limits_enforced?: boolean; simulation_limits_enforced?: boolean;
     covered_joints?: string[]; unmapped_joints?: string[];
-    orientation_max_deg?: number }; error?: string };
+    orientation_max_deg?: number; direction_max_deg?: number }; error?: string };
 type Preview = { times: number[]; duration: number };
 const props = defineProps<{ currentModel: string }>();
 const bvh = ref<File>();
@@ -116,6 +117,10 @@ function tick(now: number) {
 async function accept(current: Job) {
   if (disposed) return;
   job.value = current;
+  if (restoring.value && models.value.includes(current.robot_name)) {
+    robotModel.value = current.robot_name;
+    modelChosen.value = true;
+  }
   sessionStorage.setItem('robot2.motionJob', current.id);
   if (current.state === 'mapping') {
     if (current.mapping?.mode === 'generic') {
@@ -234,7 +239,7 @@ onMounted(async () => {
   animation = requestAnimationFrame(tick);
   const id = sessionStorage.getItem('robot2.motionJob');
   restoring.value = !!id;
-  void loadCatalogs();
+  await loadCatalogs();
   if (!id) return;
   try { await accept(await request(base(id))); }
   catch { if (!disposed) { sessionStorage.removeItem('robot2.motionJob'); error.value = '上次临时任务已过期，请重新导入'; } }
@@ -317,7 +322,7 @@ onBeforeUnmount(() => {
         </div></div>
         <label class="motion-remember"><input v-model="rememberMapping" type="checkbox" aria-label="记住映射" />记住本次映射；模型、骨架或参考姿势改变后重新确认</label>
         <button class="motion-primary" :disabled="busy || !genericMapping.targets.some(t => t.source) || !genericMapping.source_root || !alignment.every(Number.isFinite)" @click="convert">确认映射并转换</button>
-        <p class="motion-hint motion-mapping-notes">参考帧对应机器人的中立姿势。没有设置目标的分支保持参考位；父关节可能随其他目标运动。人体根位移固定，转换结果不包含平衡、碰撞或实机验收。</p>
+        <p class="motion-hint motion-mapping-notes">同一部位只映射到该组最后一个连杆，中间轴留空仍参与求解。{{ job.constraint_source === 'simulation' ? '按人体骨段方向拟合姿态，第一帧作为初始姿态，不要求从机器人零位起步。' : '参考帧对应机器人的中立姿势。' }}预览恢复人体根朝向；导出仍为固定基座关节动作，不包含平衡、碰撞或实机验收。</p>
       </div>
     </section>
 
@@ -344,10 +349,14 @@ onBeforeUnmount(() => {
       <a :href="`${base(job.id)}/motion.npz`" download><Download :size="14" />导出关节动作</a>
       <a :href="`${base(job.id)}/robot.urdf`" download>导出预览 URDF</a>
       <a :href="`${base(job.id)}/report.json`" download>转换报告</a>
+      <span v-if="job.result_cached">已加载保存结果，无需重新转换</span>
+      <span v-else-if="job.result_saved">结果已保存，相同输入下次直接复用</span>
+      <span v-if="job.cache_warning">{{ job.cache_warning }}</span>
       <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.simulation_limits_enforced ? '已检查仿真位置、速度和耦合范围' : job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
-      <span v-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
+      <span v-if="job.summary?.direction_max_deg !== undefined">最大骨段方向误差 {{ job.summary.direction_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
+      <span v-else-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>
-    <p class="motion-footnote">机器人按 URDF 显示实体模型，自动加载工程内 STL / DAE 网格；缺失网格时保留骨架。临时保留最近 3 次导入，服务重启后需重新导入。</p>
+    <p class="motion-footnote">机器人按 URDF 显示实体模型，缺失网格时保留骨架。双足预览按足底估计支撑高度，并保留源动作的腾空；这不是接触或平衡仿真。转换结果保存在本机；动作、映射、模型、约束和算法未变化时直接复用。页面临时保留最近 3 次导入，服务重启后再次导入也可复用已保存结果。</p>
   </div>
 </template>
 

@@ -1,0 +1,530 @@
+<mujoco model="Full body +/-180 degree preview">
+  <compiler angle="radian" meshdir=".." fusestatic="false" />
+  <option timestep=".002" gravity="0 0 0" integrator="implicitfast" />
+  <statistic center="0 .08 -.28" extent="1.6" />
+  <visual>
+    <global azimuth="90" elevation="-8" offwidth="1280" offheight="960" />
+  </visual>
+  <default>
+    <joint type="hinge" damping=".1" armature=".01" />
+    <geom contype="0" conaffinity="0" />
+    <site size=".003" group="2" rgba="0 0 0 0" />
+    <position kp="12" kv="1.2" />
+  </default>
+  <asset>
+    <mesh name="Base_link_robot_body" file="mujoco/visual/native/Base_link.STL" />
+    <mesh name="BN_Spine_yaw_link_robot_body" file="mujoco/visual/native/BN_Spine_yaw_link.STL" />
+    <mesh name="BN_Spine_pitch_link_robot_body" file="mujoco/visual/native/BN_Spine_pitch_link.STL" />
+    <mesh name="BN_Spine_roll_link_robot_body" file="mujoco/visual/native/BN_Spine_roll_link.STL" />
+    <mesh name="BN_LeftShoulder_1_link_robot_body" file="mujoco/visual/native/BN_LeftShoulder_1_link.STL" />
+    <mesh name="BN_LeftShoulder_2_link_robot_body" file="mujoco/visual/native/BN_LeftShoulder_2_link.STL" />
+    <mesh name="BN_LeftUpperArm_1_link_robot_body" file="mujoco/visual/native/BN_LeftUpperArm_1_link.STL" />
+    <mesh name="BN_LeftUpperArm_2_link_robot_body" file="mujoco/visual/native/BN_LeftUpperArm_2_link.STL" />
+    <mesh name="BN_LeftUpperArm_3_link_robot_body" file="mujoco/visual/native/BN_LeftUpperArm_3_link.STL" />
+    <mesh name="BN_LeftLowerArm_1_link_robot_body" file="mujoco/visual/native/BN_LeftLowerArm_1_link.STL" />
+    <mesh name="BN_LeftLowerArm_2_link_robot_body" file="mujoco/visual/native/BN_LeftLowerArm_2_link.STL" />
+    <mesh name="BN_LeftHand_roll_link_robot_body" file="mujoco/visual/native/BN_LeftHand_roll_link.STL" />
+    <mesh name="BN_LeftHand_pitch_link_robot_body" file="mujoco/visual/native/BN_LeftHand_pitch_link.STL" />
+    <mesh name="BN_RightShoulder_1_link_robot_body" file="mujoco/visual/native/BN_RightShoulder_1_link.STL" />
+    <mesh name="BN_RightShoulder_2_link_robot_body" file="mujoco/visual/native/BN_RightShoulder_2_link.STL" />
+    <mesh name="BN_RightUpperArm_1_link_robot_body" file="mujoco/visual/native/BN_RightUpperArm_1_link.STL" />
+    <mesh name="BN_RightUpperArm_2_link_robot_body" file="mujoco/visual/native/BN_RightUpperArm_2_link.STL" />
+    <mesh name="BN_RightUpperArm_3_link_robot_body" file="mujoco/visual/native/BN_RightUpperArm_3_link.STL" />
+    <mesh name="BN_RightLowerArm_1_link_robot_body" file="mujoco/visual/native/BN_RightLowerArm_1_link.STL" />
+    <mesh name="BN_RightLowerArm_2_link_robot_body" file="mujoco/visual/native/BN_RightLowerArm_2_link.STL" />
+    <mesh name="BN_RightHand_roll_link_robot_body" file="mujoco/visual/native/BN_RightHand_roll_link.STL" />
+    <mesh name="BN_RightHand_pitch_link_robot_body" file="mujoco/visual/native/BN_RightHand_pitch_link.STL" />
+    <mesh name="BN_hips_roll_link_robot_body" file="mujoco/visual/native/BN_hips_roll_link.STL" />
+    <mesh name="BN_hips_pitch_link_robot_body" file="mujoco/visual/native/BN_hips_pitch_link.STL" />
+    <mesh name="BN_LeftUpperLeg_1_link_robot_body" file="mujoco/visual/native/BN_LeftUpperLeg_1_link.STL" />
+    <mesh name="BN_LeftUpperLeg_2_link_robot_body" file="mujoco/visual/native/BN_LeftUpperLeg_2_link.STL" />
+    <mesh name="BN_LeftUpperLeg_3_link_robot_body" file="mujoco/visual/native/BN_LeftUpperLeg_3_link.STL" />
+    <mesh name="BN_LeftLowerLeg_1_link_robot_body" file="mujoco/visual/native/BN_LeftLowerLeg_1_link.STL" />
+    <mesh name="BN_LeftLowerLeg_2_link_robot_body" file="mujoco/visual/native/BN_LeftLowerLeg_2_link.STL" />
+    <mesh name="BN_LeftFoot_pitch_link_robot_body" file="mujoco/visual/native/BN_LeftFoot_pitch_link.STL" />
+    <mesh name="BN_LeftFoot_roll_link_robot_body" file="mujoco/visual/native/BN_LeftFoot_roll_link.STL" />
+    <mesh name="BN_RightUpperLeg_1_link_robot_body" file="mujoco/visual/native/BN_RightUpperLeg_1_link.STL" />
+    <mesh name="BN_RightUpperLeg_2_link_robot_body" file="mujoco/visual/native/BN_RightUpperLeg_2_link.STL" />
+    <mesh name="BN_RightUpperLeg_3_link_robot_body" file="mujoco/visual/native/BN_RightUpperLeg_3_link.STL" />
+    <mesh name="BN_RightLowerLeg_1_link_robot_body" file="mujoco/visual/native/BN_RightLowerLeg_1_link.STL" />
+    <mesh name="BN_RightLowerLeg_2_link_robot_body" file="mujoco/visual/native/BN_RightLowerLeg_2_link.STL" />
+    <mesh name="BN_RightFoot_pitch_link_robot_body" file="mujoco/visual/native/BN_RightFoot_pitch_link.STL" />
+    <mesh name="BN_RightFoot_roll_link_robot_body" file="mujoco/visual/native/BN_RightFoot_roll_link.STL" />
+    <mesh name="waist_plus_flange_visual" file="mujoco/visual/native/waist_plus_flange.STL" />
+    <mesh name="waist_plus_platform_visual" file="mujoco/visual/native/waist_plus_platform.STL" />
+    <mesh name="waist_plus_rod_visual" file="mujoco/visual/native/waist_plus_rod.STL" />
+    <mesh name="waist_minus_flange_visual" file="mujoco/visual/native/waist_minus_flange.STL" />
+    <mesh name="waist_minus_platform_visual" file="mujoco/visual/native/waist_minus_platform.STL" />
+    <mesh name="waist_minus_rod_visual" file="mujoco/visual/native/waist_minus_rod.STL" />
+    <mesh name="hips_plus_flange_visual" file="mujoco/visual/native/hips_plus_flange.STL" />
+    <mesh name="hips_plus_platform_visual" file="mujoco/visual/native/hips_plus_platform.STL" />
+    <mesh name="hips_plus_rod_visual" file="mujoco/visual/native/hips_plus_rod.STL" />
+    <mesh name="hips_minus_flange_visual" file="mujoco/visual/native/hips_minus_flange.STL" />
+    <mesh name="hips_minus_platform_visual" file="mujoco/visual/native/hips_minus_platform.STL" />
+    <mesh name="hips_minus_rod_visual" file="mujoco/visual/native/hips_minus_rod.STL" />
+    <mesh name="left_shoulder_flange_linkage_flange_visual" file="mujoco/visual/native/left_shoulder_flange_linkage_flange.STL" />
+    <mesh name="left_shoulder_flange_linkage_platform_visual" file="mujoco/visual/native/left_shoulder_flange_linkage_platform.STL" />
+    <mesh name="left_shoulder_flange_linkage_rod_visual" file="mujoco/visual/native/left_shoulder_flange_linkage_rod.STL" />
+    <mesh name="left_wrist_flange_proximal_flange_visual" file="mujoco/visual/native/left_wrist_flange_proximal_flange.STL" />
+    <mesh name="left_wrist_flange_proximal_platform_visual" file="mujoco/visual/native/left_wrist_flange_proximal_platform.STL" />
+    <mesh name="left_wrist_flange_proximal_rod_visual" file="mujoco/visual/native/left_wrist_flange_proximal_rod.STL" />
+    <mesh name="left_wrist_flange_distal_flange_visual" file="mujoco/visual/native/left_wrist_flange_distal_flange.STL" />
+    <mesh name="left_wrist_flange_distal_platform_visual" file="mujoco/visual/native/left_wrist_flange_distal_platform.STL" />
+    <mesh name="left_wrist_flange_distal_rod_visual" file="mujoco/visual/native/left_wrist_flange_distal_rod.STL" />
+    <mesh name="right_shoulder_flange_linkage_flange_visual" file="mujoco/visual/native/right_shoulder_flange_linkage_flange.STL" />
+    <mesh name="right_shoulder_flange_linkage_platform_visual" file="mujoco/visual/native/right_shoulder_flange_linkage_platform.STL" />
+    <mesh name="right_shoulder_flange_linkage_rod_visual" file="mujoco/visual/native/right_shoulder_flange_linkage_rod.STL" />
+    <mesh name="right_wrist_flange_proximal_flange_visual" file="mujoco/visual/native/right_wrist_flange_proximal_flange.STL" />
+    <mesh name="right_wrist_flange_proximal_platform_visual" file="mujoco/visual/native/right_wrist_flange_proximal_platform.STL" />
+    <mesh name="right_wrist_flange_proximal_rod_visual" file="mujoco/visual/native/right_wrist_flange_proximal_rod.STL" />
+    <mesh name="right_wrist_flange_distal_flange_visual" file="mujoco/visual/native/right_wrist_flange_distal_flange.STL" />
+    <mesh name="right_wrist_flange_distal_platform_visual" file="mujoco/visual/native/right_wrist_flange_distal_platform.STL" />
+    <mesh name="right_wrist_flange_distal_rod_visual" file="mujoco/visual/native/right_wrist_flange_distal_rod.STL" />
+  </asset>
+  <worldbody>
+    <light pos="0 1 1.8" dir="0 -.45 -1" />
+    <light pos="0 -1 .8" dir="0 .55 -1" />
+    <body name="Base_link">
+      <body name="BN_Spine_yaw_link" pos="3.432186016426e-14 2.5887624986614e-14 0.0062778047691217" quat="1 0 0 0">
+        <joint name="BN_Spine_yaw" axis="1.6653345369377e-16 1.7000290064573e-16 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+        <body name="BN_Spine_pitch_link" pos="-3.432186016426e-14 -3.2245647958937e-07 0.10372" quat="-0.045467036314021 0.7056433326382 0.045472220259402 -0.7056433326382">
+          <joint name="BN_Spine_pitch" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <body name="BN_Spine_roll_link" pos="0 0 -6.6174449004242e-24" quat="0.49999816339745 0.49999999999663 -0.49999999999663 0.50000183660255">
+            <joint name="BN_Spine_roll" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <body name="BN_LeftShoulder_1_link" pos="0.059 0.2107 -0.06" quat="-0.70710548251124 0.70710807985947 -4.0761244833923e-22 3.343633795713e-22">
+              <joint name="BN_LeftShoulder_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <body name="BN_LeftShoulder_2_link" pos="0.005 -0.0285 0.0203" quat="0.70710548251124 0.70710807985947 -1.3253728442015e-22 -3.5608745875959e-22">
+                <joint name="BN_LeftShoulder_2" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <body name="BN_LeftUpperArm_1_link" pos="0.0345 0.0335 -0.029" quat="-0.70410979622094 0.065031211583211 0.7041102739669 -0.065031211583211">
+                  <joint name="BN_LeftUpperArm_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                  <body name="BN_LeftUpperArm_2_link" pos="0.022119 -0.0041210999999999 -0.0535" quat="0.70410862248499 0.065032385314854 0.70411120882512 -0.065032624192582">
+                    <joint name="BN_LeftUpperArm_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                    <body name="BN_LeftUpperArm_3_link" pos="-2.7755575615629e-17 -0.0951 -0.0235" quat="0.70710548251124 0.70710807985947 -3.0403984492065e-22 -3.789354635451e-22">
+                      <joint name="BN_LeftUpperArm_3" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                      <body name="BN_LeftLowerArm_1_link" pos="0.0231 -0.006 0.1765" quat="-0.45189397322153 0.54386582116653 -0.45189796868295 0.54386582116653">
+                        <joint name="BN_LeftLowerArm_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                        <body name="BN_LeftLowerArm_2_link" pos="0.011661 -0.089885 -0.023" quat="0.54386399235124 0.45189613986094 0.5438659900789 -0.4518977997712">
+                          <joint name="BN_LeftLowerArm_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                          <body name="BN_LeftHand_roll_link" pos="-0.0014711928292834 0 0.13849999772404" quat="-0.5 0.5 0.5 -0.5">
+                            <joint name="BN_LeftHand_roll" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <body name="BN_LeftHand_pitch_link" pos="8.5845022340658e-09 -3.3501553584059e-07 -0.0004720768050839" quat="0.70710678636578 9.6496237025818e-10 -0.70710677600732 -9.6496237200144e-10">
+                              <joint name="BN_LeftHand_pitch" axis="1.8225809351964e-05 -3.7503016006893e-05 -0.99999999913067" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial mass="0.0264042158511134" fullinertia="5.7282644054078e-06 2.6098451083844e-06 3.7315255105419e-06 -8.6225564442171e-08 -3.5960766584139e-10 -1.4922739639206e-09" pos="-0.0024305640349263 -0.026882921017314 6.1053264121397e-06" />
+                              <geom name="BN_LeftHand_pitch_link_robot_body" type="mesh" mesh="BN_LeftHand_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.00047207680508288 3.3501682433767e-07 8.5914177161417e-09" quat="1 8.0763193373502e-18 -9.4679156708982e-22 -7.2941751052956e-24" />
+                              <geom name="left_wrist_flange_proximal_platform_visual" type="mesh" mesh="left_wrist_flange_proximal_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.00099911640221162 0.13850033273685 8.5698661014821e-09" quat="6.1441917987572e-09 4.2142696162447e-09 0.70710678118655 -0.70710678118655" />
+                              <site name="left_wrist_flange_proximal_platform_ball" pos="-0.0098806734848468 0.00062484943420849 0.020013031201646" />
+                              <geom name="left_wrist_flange_distal_platform_visual" type="mesh" mesh="left_wrist_flange_distal_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.00099911640221162 0.13850033273685 8.5698661014821e-09" quat="6.1441917987572e-09 4.2142696162447e-09 0.70710678118655 -0.70710678118655" />
+                              <site name="left_wrist_flange_distal_platform_ball" pos="-0.0098799444524719 0.0006233493135685 -0.019986968763367" />
+                            </body>
+                            <inertial mass="0.00331041158345139" fullinertia="6.5283933577677e-08 1.8305351403372e-07 1.4009587017964e-07 2.2628189707558e-14 -1.0718959712642e-14 3.2833693439647e-14" pos="-1.2634428503411e-09 -3.6415218600955e-09 -0.0026571918720739" />
+                            <geom name="BN_LeftHand_roll_link_robot_body" type="mesh" mesh="BN_LeftHand_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 2.7755575615629e-17 0" quat="1 3.2816908526243e-22 1.4395800592407e-21 -2.1247268560895e-18" />
+                          </body>
+                          <inertial mass="0.162145852621543" fullinertia="0.00012778242520089 0.00012567978086402 1.6537581412809e-05 -3.3937200232889e-08 -1.6164386535182e-06 -9.655794521278e-08" pos="0.0047372772392656 -0.0002694585807298 0.053301492955905" />
+                          <geom name="BN_LeftLowerArm_2_link_robot_body" type="mesh" mesh="BN_LeftLowerArm_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 -6.9388939039072e-18 0" quat="1 -1.5015213241288e-17 2.1663357319063e-22 6.5594225941691e-22" />
+                          <body name="left_wrist_flange_proximal_flange" pos="-0.0019994085615135 -0.020009437766822 0.036999588728656" quat="1 -1.5015213241288e-17 2.1663357319063e-22 6.5594225941691e-22">
+                            <joint name="left_wrist_flange_proximal" axis="-1.8211160177655e-05 0.99999999913094 3.7503016057365e-05" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+                            <geom name="left_wrist_flange_proximal_flange_visual" type="mesh" mesh="left_wrist_flange_proximal_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0019994085615135 0.020009437766822 -0.036999588728656" quat="1 -1.5015213241288e-17 2.1663357319063e-22 6.5594225941691e-22" />
+                            <site name="left_wrist_flange_proximal_motor_ball" pos="0.0098806184706502 2.031584831311e-07 -0.00061917572963845" />
+                            <body name="left_wrist_flange_proximal_rod" pos="0.0098806184706503 2.031584831301e-07 -0.00061917572963845" quat="0.70709169141489 0.003497763846644 0.0034713089906578 0.70710469917403">
+                              <joint name="left_wrist_flange_proximal_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <joint name="left_wrist_flange_proximal_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial pos="0 0 0.050750000000001" mass=".01" diaginertia="8.5852083333336e-06 8.5852083333336e-06 1e-07" />
+                              <geom name="left_wrist_flange_proximal_rod_visual" type="mesh" mesh="left_wrist_flange_proximal_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.020008013741792 0.0075219032083343 -0.036457067181209" quat="-0.70709169141489 0.003497763846644 0.0034713089906578 0.70710469917403" />
+                              <site name="left_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" />
+                            </body>
+                          </body>
+                          <body name="left_wrist_flange_distal_flange" pos="-0.0019999104556024 0.01998924959698 0.072001088823952" quat="1 -1.5015213241288e-17 2.1663357319063e-22 6.5594225941691e-22">
+                            <joint name="left_wrist_flange_distal" axis="1.8211160177655e-05 -0.99999999913094 -3.7503016055851e-05" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+                            <geom name="left_wrist_flange_distal_flange_visual" type="mesh" mesh="left_wrist_flange_distal_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0019999104556024 -0.01998924959698 -0.072001088823952" quat="1 -1.5015213241288e-17 2.1663357319063e-22 6.5594225941691e-22" />
+                            <site name="left_wrist_flange_distal_motor_ball" pos="0.0098993108773437 1.8465858829323e-07 -0.00011680799466032" />
+                            <body name="left_wrist_flange_distal_rod" pos="0.0098993108773437 1.8465858829531e-07 -0.00011680799466033" quat="0.70709377222126 -0.0052443174958625 0.0052707396540323 -0.70708069816918">
+                              <joint name="left_wrist_flange_distal_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <joint name="left_wrist_flange_distal_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial pos="0 0 0.032999999999999" mass=".01" diaginertia="3.6299999999998e-06 3.6299999999998e-06 1e-07" />
+                              <geom name="left_wrist_flange_distal_rod_visual" type="mesh" mesh="left_wrist_flange_distal_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.019991986258279 -0.0068299739063815 -0.071993053700423" quat="0.70709377222126 0.0052443174958625 -0.0052707396540323 0.70708069816918" />
+                              <site name="left_wrist_flange_distal_rod_tip" pos="0 0 0.065999999999998" />
+                            </body>
+                          </body>
+                        </body>
+                        <inertial mass="0.0705271805029533" fullinertia="5.373189823014e-05 3.322860709356e-05 4.8534633848126e-05 1.5448596982566e-06 9.3337859664067e-07 -1.5065356188673e-05" pos="0.0032034563899878 -0.027743764972672 -0.0058420761294155" />
+                        <geom name="BN_LeftLowerArm_1_link_robot_body" type="mesh" mesh="BN_LeftLowerArm_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 1.3877787807814e-17 -2.7755575615629e-17" quat="1 -1.0948319205373e-22 1.1088322141019e-22 5.3423744922681e-18" />
+                      </body>
+                      <inertial mass="0.356453646327502" fullinertia="0.000355469238403 0.00031460702700635 7.7287698917218e-05 3.937110680895e-07 5.9238282701162e-07 1.474520486823e-06" pos="-0.00017707861784155 -0.00089590047763275 0.097191767165654" />
+                      <geom name="BN_LeftUpperArm_3_link_robot_body" type="mesh" mesh="BN_LeftUpperArm_3_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 1.3877787807814e-17 0" quat="1 5.4152633066812e-18 -1.3668466148231e-22 9.2366544163487e-22" />
+                    </body>
+                    <inertial mass="0.125542167060884" fullinertia="0.00010791925653191 4.6532000021786e-05 0.00013347510896537 4.4766145992703e-07 -4.7638162953298e-09 -1.691931363296e-05" pos="-6.5623992700214e-06 -0.038830331965929 -0.0085771697371467" />
+                    <geom name="BN_LeftUpperArm_2_link_robot_body" type="mesh" mesh="BN_LeftUpperArm_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 -5.5511151231258e-17 0" quat="1 2.2793829693018e-18 3.9567233409749e-22 9.6166690873401e-23" />
+                  </body>
+                  <inertial mass="0.219560453355752" fullinertia="0.00019878542553206 0.00017391525775926 0.00011785393349619 -4.5429711491e-06 -2.5437131803178e-05 4.4718538538064e-06" pos="-0.0045520147747983 0.00097397973272306 -0.026646194923469" />
+                  <geom name="BN_LeftUpperArm_1_link_robot_body" type="mesh" mesh="BN_LeftUpperArm_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.7347234759768e-17 5.5511151231258e-17 -1.3877787807814e-17" quat="1 9.8181143253922e-23 1.3975271611874e-22 -1.1550528885458e-17" />
+                </body>
+                <inertial mass="0.241731715958594" fullinertia="9.6329830510689e-05 0.00012650396261619 5.575790328568e-05 -4.2961715562554e-07 1.305149443227e-10 -4.1715790859446e-11" pos="-0.0018342124297162 0.01042344583368 -0.029000048134295" />
+                <geom name="BN_LeftShoulder_2_link_robot_body" type="mesh" mesh="BN_LeftShoulder_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 3.4694469519536e-18" quat="1 -7.5521165205988e-18 3.7068450917442e-22 -2.4482058251123e-22" />
+                <geom name="left_shoulder_flange_linkage_platform_visual" type="mesh" mesh="left_shoulder_flange_linkage_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.064 -0.23100010468621 0.031500074566256" quat="1 -1.0871542183636e-17 7.7579555839441e-22 -3.3459584889771e-22" />
+                <site name="left_shoulder_flange_linkage_platform_ball" pos="0.033501368987501 -0.0075004199697979 -0.02900617151034" />
+              </body>
+              <inertial mass="0.0499208361937874" fullinertia="1.0123914192458e-05 8.0623993994352e-06 1.3933963746373e-05 -3.217194038363e-09 6.5272284551729e-09 -3.6986895858921e-10" pos="0.0034455264287141 -3.3508740369323e-05 0.0099325570051028" />
+              <geom name="BN_LeftShoulder_1_link_robot_body" type="mesh" mesh="BN_LeftShoulder_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="6.9388939039072e-18 0 5.5511151231258e-17" quat="1 -7.6101107390444e-18 -6.3608628310772e-23 4.619919507039e-22" />
+            </body>
+            <body name="BN_RightShoulder_1_link" pos="-0.05899846472476 0.2645006694254 -0.060008778068843" quat="-0.70410979622094 0.065031211583211 0.7041102739669 -0.065031211583211">
+              <joint name="BN_RightShoulder_1" axis="-0.1831232570965 -0.9830899616478 4.2069639047014e-06" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <body name="BN_RightShoulder_2_link" pos="0.026117859123844 -0.038943677817952 0.0050015356057979" quat="0.70410862248499 0.065032385314853 0.70411120882512 -0.065032624192582">
+                <joint name="BN_RightShoulder_2" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <body name="BN_RightUpperArm_1_link" pos="-0.0345 0.0335 -0.0333" quat="-0.70410979622094 0.065031211583211 0.7041102739669 -0.065031211583211">
+                  <joint name="BN_RightUpperArm_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                  <body name="BN_RightUpperArm_2_link" pos="0.022119 -0.0041211 0.0535" quat="0.70410862248499 0.065032385314853 0.70411120882512 -0.065032624192582">
+                    <joint name="BN_RightUpperArm_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                    <body name="BN_RightUpperArm_3_link" pos="0 -0.0951 -0.0235" quat="-2.5973434669646e-06 2.5973530075574e-06 0.7071080798547 -0.70710548250647">
+                      <joint name="BN_RightUpperArm_3" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                      <body name="BN_RightLowerArm_1_link" pos="-0.0231 0.006 0.1765" quat="0.49999816339745 -0.49999999999663 0.50000183660255 -0.49999999999663">
+                        <joint name="BN_RightLowerArm_1" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                        <body name="BN_RightLowerArm_2_link" pos="0.005 -0.0905 0.023" quat="0.49999816339745 0.49999999999663 -0.49999999999663 0.50000183660255">
+                          <joint name="BN_RightLowerArm_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                          <body name="BN_RightHand_roll_link" pos="-0.0014712 -6.9388939039072e-18 0.1385" quat="-0.49999816339745 0.49999999999663 0.50000183660255 -0.49999999999663">
+                            <joint name="BN_RightHand_roll" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <body name="BN_RightHand_pitch_link" pos="4.488919493062e-09 1.0229736464307e-06 -0.00046711744500968" quat="0.70710548251124 -6.5440382559501e-18 0.70710807985947 -1.7856178768201e-17">
+                              <joint name="BN_RightHand_pitch" axis="-1.3192861270204e-05 -4.1176050974352e-05 0.99999999906524" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial mass="0.0262391012420251" fullinertia="5.7278215837731e-06 2.6094022867498e-06 3.7313359988335e-06 8.6225564442171e-08 -3.5960766584104e-10 1.4922739639211e-09" pos="0.0024177751192706 -0.027024325099334 8.1601005924705e-05" />
+                              <geom name="BN_RightHand_pitch_link_robot_body" type="mesh" mesh="BN_RightHand_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.00046711744499001 -1.0229736464307e-06 -6.2047376819807e-09" quat="1 9.2594033855936e-18 -5.3636233414922e-22 1.5732990257259e-23" />
+                              <geom name="right_wrist_flange_proximal_platform_visual" type="mesh" mesh="right_wrist_flange_proximal_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0010035738160932 0.13849898242944 -6.2066063677424e-09" quat="0.70710678119013 0.70710678118058 1.2986741185897e-06 1.2986741186114e-06" />
+                              <site name="right_wrist_flange_proximal_platform_ball" pos="0.0098805795418942 0.00062481527118749 -0.020011883302744" />
+                              <geom name="right_wrist_flange_distal_platform_visual" type="mesh" mesh="right_wrist_flange_distal_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0010035738160932 0.13849898242944 -6.2066063677424e-09" quat="0.70710678119013 0.70710678118058 1.2986741185897e-06 1.2986741186114e-06" />
+                              <site name="right_wrist_flange_distal_platform_ball" pos="0.0098800518274426 0.00062316822914882 0.019988116659652" />
+                            </body>
+                            <inertial mass="0.00405446903786276" fullinertia="7.0774079570967e-08 1.8854366001324e-07 1.4662139506993e-07 2.2593421939111e-14 -1.0695098134483e-14 3.2879706547067e-14" pos="-1.0249834453413e-09 -3.3790866493799e-09 -0.0048722058993257" />
+                            <geom name="BN_RightHand_roll_link_robot_body" type="mesh" mesh="BN_RightHand_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 -2.7755575615629e-17" quat="1 6.2752495498749e-22 9.4344609880843e-22 -5.7548928788685e-18" />
+                          </body>
+                          <inertial mass="0.154519815706459" fullinertia="0.000127384340197 0.0001251316676118 1.6139658896196e-05 -3.3937200871413e-08 -1.6164386446601e-06 -9.6557936523481e-08" pos="0.0050556006221786 -0.00011559092824998 0.053869795951908" />
+                          <geom name="BN_RightLowerArm_2_link_robot_body" type="mesh" mesh="BN_RightLowerArm_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 6.9388939039072e-18 0" quat="1 1.8360083172242e-18 7.6281597338571e-22 3.0165477744463e-22" />
+                          <body name="right_wrist_flange_proximal_flange" pos="-0.0020029968057989 -0.020007866957569 0.036998146719121" quat="1 1.8360083172242e-18 7.6281597338571e-22 3.0165477744463e-22">
+                            <joint name="right_wrist_flange_proximal" axis="-1.3193012522844e-05 0.99999999906524 4.1176016007102e-05" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+                            <geom name="right_wrist_flange_proximal_flange_visual" type="mesh" mesh="right_wrist_flange_proximal_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0020029968057989 0.020007866957569 -0.036998146719121" quat="1 1.8360083172242e-18 7.6281597338571e-22 3.0165477744463e-22" />
+                            <site name="right_wrist_flange_proximal_motor_ball" pos="0.0098806274909958 1.5584450495898e-07 -0.00061903178261835" />
+                            <body name="right_wrist_flange_proximal_rod" pos="0.0098806274909958 1.558445049607e-07 -0.00061903178261835" quat="0.70709348463517 0.0034939204665807 0.0034648508840407 0.7071029566581">
+                              <joint name="right_wrist_flange_proximal_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <joint name="right_wrist_flange_proximal_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial pos="0 0 0.050750000000001" mass=".01" diaginertia="8.5852083333336e-06 8.5852083333336e-06 1e-07" />
+                              <geom name="right_wrist_flange_proximal_rod_visual" type="mesh" mesh="right_wrist_flange_proximal_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.020006317077103 0.0075189677625632 -0.036455698780237" quat="-0.70709348463517 0.0034939204665807 0.0034648508840407 0.7071029566581" />
+                              <site name="right_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" />
+                            </body>
+                          </body>
+                          <body name="right_wrist_flange_distal_flange" pos="-0.0020038078801797 0.019990691840742 0.071999793728943" quat="1 1.8360083172242e-18 7.6281597338571e-22 3.0165477744463e-22">
+                            <joint name="right_wrist_flange_distal" axis="1.3193012522844e-05 -0.99999999906524 -4.1176016005587e-05" limited="true" range="-3.141592653589793 3.141592653589793" />
+                            <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+                            <geom name="right_wrist_flange_distal_flange_visual" type="mesh" mesh="right_wrist_flange_distal_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0020038078801797 -0.019990691840742 -0.071999793728943" quat="1 1.8360083172242e-18 7.6281597338571e-22 3.0165477744463e-22" />
+                            <site name="right_wrist_flange_distal_motor_ball" pos="0.0098993125788196 1.354055044297e-07 -0.00011666377544377" />
+                            <body name="right_wrist_flange_distal_rod" pos="0.0098993125788196 1.3540550443392e-07 -0.00011666377544377" quat="0.70709204590409 -0.005237855040301 0.0052669007824353 -0.70708250102084">
+                              <joint name="right_wrist_flange_distal_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <joint name="right_wrist_flange_distal_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                              <inertial pos="0 0 0.032999999999999" mass=".01" diaginertia="3.6299999999998e-06 3.6299999999998e-06 1e-07" />
+                              <geom name="right_wrist_flange_distal_rod_visual" type="mesh" mesh="right_wrist_flange_distal_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.019993682922969 -0.0068270453598548 -0.071991670595823" quat="0.70709204590409 0.0052378550403011 -0.0052669007824354 0.70708250102084" />
+                              <site name="right_wrist_flange_distal_rod_tip" pos="0 0 0.065999999999998" />
+                            </body>
+                          </body>
+                        </body>
+                        <inertial mass="0.0652788569519393" fullinertia="5.3521180744151e-05 3.328090075539e-05 4.8526192899014e-05 2.2506876449406e-06 -1.8418124601961e-06 1.4981451183389e-05" pos="0.0020876982905651 -0.030101164749061 0.0066793252263015" />
+                        <geom name="BN_RightLowerArm_1_link_robot_body" type="mesh" mesh="BN_RightLowerArm_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.3877787807814e-17 0 0" quat="1 -1.5416595942139e-22 1.6675946158438e-23 5.3260309605331e-18" />
+                      </body>
+                      <inertial mass="0.348281905127082" fullinertia="0.00035535017681142 0.00031445528777678 7.7226082119107e-05 3.9371106801719e-07 -5.9238282450171e-07 -1.4745204869817e-06" pos="-8.3633115089576e-05 0.0011344809941718 0.095308829026553" />
+                      <geom name="BN_RightUpperArm_3_link_robot_body" type="mesh" mesh="BN_RightUpperArm_3_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 -1.3877787807814e-17 0" quat="1 -2.0969531113351e-18 -8.0131892745469e-22 2.21707450214e-22" />
+                    </body>
+                    <inertial mass="0.125542167041229" fullinertia="0.00010791925652409 4.653200001703e-05 0.00013347510896691 4.4766145977648e-07 -4.7638187711422e-09 -1.6919313631503e-05" pos="-6.5623990779251e-06 -0.038830331959875 -0.0085771697366347" />
+                    <geom name="BN_RightUpperArm_2_link_robot_body" type="mesh" mesh="BN_RightUpperArm_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 0 6.9388939039072e-18" quat="1 2.2231304975709e-18 -5.165508828376e-22 -5.9234233388342e-23" />
+                  </body>
+                  <inertial mass="0.219560359858319" fullinertia="0.00019861232120511 0.00017408822995496 0.0001178538684114 -4.9909799988852e-06 2.5340787780819e-05 -4.9888298771186e-06" pos="-0.0045973560584499 0.00073064572483505 0.026646179944616" />
+                  <geom name="BN_RightUpperArm_1_link_robot_body" type="mesh" mesh="BN_RightUpperArm_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.0408340855861e-17 0 0" quat="1 2.8095783086614e-22 -4.5830782712394e-22 1.6204192261709e-17" />
+                </body>
+                <inertial mass="0.241731740323525" fullinertia="9.6329849702488e-05 0.00012650397770093 5.5757908709602e-05 4.2962007904364e-07 1.2650779049814e-10 4.8903349773712e-11" pos="0.0018342113299748 0.010423446611298 -0.033299957255422" />
+                <geom name="BN_RightShoulder_2_link_robot_body" type="mesh" mesh="BN_RightShoulder_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 6.9388939039072e-18" quat="1 -8.5506875968761e-19 -4.2470344118506e-22 1.5420316009995e-23" />
+                <geom name="right_shoulder_flange_linkage_platform_visual" type="mesh" mesh="right_shoulder_flange_linkage_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.06400008145618 -0.23099928871445 0.027200986385767" quat="0.99999999999719 -1.8366032266168e-06 -1.4691478703192e-06 3.0532002206769e-07" />
+                <site name="right_shoulder_flange_linkage_platform_ball" pos="-0.033498508236633 -0.0074990775963373 -0.033307793762918" />
+              </body>
+              <inertial mass="0.0485377375351548" fullinertia="8.156840174923e-06 1.3679356576152e-05 1.0067760483958e-05 1.0655262703305e-06 1.9676572071169e-09 -7.0061787718113e-09" pos="-0.0071802392545218 -0.043441132078263 0.0034027667536848" />
+              <geom name="BN_RightShoulder_1_link_robot_body" type="mesh" mesh="BN_RightShoulder_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.00048314087615589 8.9322182047491e-05 -0.1574984643942" quat="1 1.1372247315577e-22 -1.8889256009112e-22 3.7788268585356e-18" />
+            </body>
+            <inertial mass="1.87024048691937" fullinertia="0.0020782396790852 0.0020115417831158 0.0025561939596546 2.8188905212376e-08 -6.004358185534e-08 -9.0374564459068e-06" pos="-3.2768121684716e-06 0.087972501239104 -0.0067203100603524" />
+            <geom name="BN_Spine_roll_link_robot_body" type="mesh" mesh="BN_Spine_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 0" quat="1 2.9488646008171e-18 -1.3400827609666e-22 -1.254643068791e-22" />
+            <geom name="waist_plus_platform_visual" type="mesh" mesh="waist_plus_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-1.1204174074129e-07 -0.099287827746174 -0.04093286656751" quat="3.9714661375935e-06 -1.3795032746432e-06 0.66017508385001 0.75111174844091" />
+            <site name="waist_plus_platform_ball" pos="-0.051000294769654 3.7101542907508e-06 0.040292703306758" />
+            <geom name="waist_minus_platform_visual" type="mesh" mesh="waist_minus_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-1.1204174074129e-07 -0.099287827746174 -0.04093286656751" quat="3.9714661375935e-06 -1.3795032746432e-06 0.66017508385001 0.75111174844091" />
+            <site name="waist_minus_platform_ball" pos="0.050999705226734 3.2874048458975e-06 0.040293449543677" />
+            <body name="left_shoulder_flange_linkage_flange" pos="0.095200806913258 0.12850047243673 -0.03750304909137" quat="1 2.9488646008171e-18 -1.3400827609666e-22 -1.254643068791e-22">
+              <joint name="left_shoulder_flange_linkage" axis="0.99999999996465 -4.1446023698115e-06 7.3160482155158e-06" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+              <geom name="left_shoulder_flange_linkage_flange_visual" type="mesh" mesh="left_shoulder_flange_linkage_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.095200806913258 -0.12850047243673 0.03750304909137" quat="1 2.9488646008171e-18 -1.3400827609666e-22 -1.254643068791e-22" />
+              <site name="left_shoulder_flange_linkage_motor_ball" pos="7.8017892860005e-08 -0.010842212148078 -0.016806142797501" />
+              <body name="left_shoulder_flange_linkage_rod" pos="7.8017892868321e-08 -0.010842212148078 -0.016806142797501" quat="-0.66493677909982 0.70873072057492 0.16407016964676 0.16923600369249">
+                <joint name="left_shoulder_flange_linkage_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <joint name="left_shoulder_flange_linkage_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <inertial pos="0 0 0.053023822081205" mass=".01" diaginertia="9.3717523603308e-06 9.3717523603308e-06 1e-07" />
+                <geom name="left_shoulder_flange_linkage_rod_visual" type="mesh" mesh="left_shoulder_flange_linkage_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.060626854871681 -0.084457317879919 -0.12266828829957" quat="0.66493677909982 0.70873072057492 0.16407016964676 0.16923600369249" />
+                <site name="left_shoulder_flange_linkage_rod_tip" pos="0 0 0.10604764416241" />
+              </body>
+            </body>
+            <body name="right_shoulder_flange_linkage_flange" pos="-0.095199192984611 0.12850126156902 -0.03750444206695" quat="1 2.9488646008171e-18 -1.3400827609666e-22 -1.254643068791e-22">
+              <joint name="right_shoulder_flange_linkage" axis="0.99999999996465 -4.1446023698115e-06 7.3160482155158e-06" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+              <geom name="right_shoulder_flange_linkage_flange_visual" type="mesh" mesh="right_shoulder_flange_linkage_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.095199192984611 -0.12850126156902 0.037504442066949" quat="1 2.9488646008171e-18 -1.3400827609666e-22 -1.254643068791e-22" />
+              <site name="right_shoulder_flange_linkage_motor_ball" pos="7.8017892860005e-08 -0.010842212148078 -0.016806142797501" />
+              <body name="right_shoulder_flange_linkage_rod" pos="7.8017892840565e-08 -0.010842212148078 -0.016806142797501" quat="-0.66493868083752 0.70873127868301 -0.16406824233845 -0.16922806267984">
+                <joint name="right_shoulder_flange_linkage_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <joint name="right_shoulder_flange_linkage_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <inertial pos="0 0 0.053023822081205" mass=".01" diaginertia="9.3717523603308e-06 9.3717523603308e-06 1e-07" />
+                <geom name="right_shoulder_flange_linkage_rod_visual" type="mesh" mesh="right_shoulder_flange_linkage_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.060626854871478 -0.084457317879814 -0.12266828829956" quat="0.66493868083752 0.70873127868301 -0.16406824233845 -0.16922806267984" />
+                <site name="right_shoulder_flange_linkage_rod_tip" pos="0 0 0.10604764416241" />
+              </body>
+            </body>
+          </body>
+          <inertial mass="0.0934780291598876" fullinertia="1.4811960990916e-05 1.0026335526468e-05 8.5556073311896e-06 -5.3662946668393e-19 -1.6129068910789e-12 6.1062240517033e-13" pos="-2.7456747986321e-10 8.4025963270617e-09 -2.6888243347914e-07" />
+          <geom name="BN_Spine_pitch_link_robot_body" type="mesh" mesh="BN_Spine_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 -6.6174449004242e-24" quat="1 2.4230452514637e-22 1.3449884936604e-23 -3.5621883263176e-18" />
+        </body>
+        <inertial mass="0.704804735283712" fullinertia="0.0003514563752259 0.00035590829497358 0.00045942110643927 2.5033052424168e-08 2.965744042794e-10 -3.9439659223216e-06" pos="1.3379873689924e-06 0.0017976241003218 0.04715498268333" />
+        <geom name="BN_Spine_yaw_link_robot_body" type="mesh" mesh="BN_Spine_yaw_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-3.432186016426e-14 -0.02785232245648 -4.336808689942e-18" quat="1 0 0 0" />
+        <body name="waist_plus_flange" pos="0.050999999999824 -5.9965462760486e-14 0.053722195230866" quat="1 0 0 0">
+          <joint name="waist_flange_plus_x" axis="-1 -1.4710455076283e-15 -5.5511151231258e-17" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+          <geom name="waist_plus_flange_visual" type="mesh" mesh="waist_plus_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.050999999999859 -0.02785232245642 -0.053722195230866" quat="1 0 0 0" />
+          <site name="waist_plus_motor_ball" pos="-6.9388939039072e-17 0.048013967262364 0.013952023069346" />
+          <body name="waist_plus_rod" pos="-6.9388939039072e-17 0.048013967262364 0.013952023069346" quat="0.98191870876946 0.095039499832977 -0.015772358998699 0.1629551334927">
+            <joint name="waist_plus_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <joint name="waist_plus_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <inertial pos="0 0 0.020999999999998" mass=".01" diaginertia="1.4699999999997e-06 1.4699999999997e-06 1e-07" />
+            <geom name="waist_plus_rod_visual" type="mesh" mesh="waist_plus_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.076509494325552 -0.066275804988426 -0.05186818571542" quat="0.98191870876946 -0.095039499832977 0.015772358998699 -0.1629551334927" />
+            <site name="waist_plus_rod_tip" pos="0 0 0.041999999999996" />
+          </body>
+        </body>
+        <body name="waist_minus_flange" pos="-0.05100000000015 -6.0115509402264e-14 0.053722195230866" quat="1 0 0 0">
+          <joint name="waist_flange_minus_x" axis="-1 -1.4710455076283e-15 -5.5511151231258e-17" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+          <geom name="waist_minus_flange_visual" type="mesh" mesh="waist_minus_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.051000000000116 -0.027852322456419 -0.053722195230866" quat="1 0 0 0" />
+          <site name="waist_minus_motor_ball" pos="-6.9388939039072e-17 0.048013967262368 0.013952023069343" />
+          <body name="waist_minus_rod" pos="-6.9388939039072e-17 0.048013967262368 0.013952023069343" quat="-0.065163306442969 -0.0063071290898181 -0.096132689338923 0.9932132045319">
+            <joint name="waist_minus_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <joint name="waist_minus_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <inertial pos="0 0 0.020999999999998" mass=".01" diaginertia="1.4699999999998e-06 1.4699999999998e-06 1e-07" />
+            <geom name="waist_minus_rod_visual" type="mesh" mesh="waist_minus_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.039138797256923 0.093350627197272 -0.051868185715414" quat="0.065163306442969 -0.0063071290898181 -0.096132689338923 0.9932132045319" />
+            <site name="waist_minus_rod_tip" pos="0 0 0.041999999999997" />
+          </body>
+        </body>
+      </body>
+      <body name="BN_hips_roll_link" pos="0 0 -0.0734999997374" quat="0.70710678118655 0.70710678118655 0 0">
+        <joint name="BN_hips_roll" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+        <body name="BN_hips_pitch_link" pos="0 0 0" quat="-0.69847042991406 -0.11017483015965 0.69847123930356 0.11017483015965">
+          <joint name="BN_hips_pitch" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <body name="BN_LeftUpperLeg_1_link" pos="-0.035990589835706 -0.024514057203627 0.092020008064428" quat="1 -8.4813478931494e-24 3.1301176399791e-23 1.6105875161541e-17">
+            <joint name="BN_LeftUpperLeg_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <body name="BN_LeftUpperLeg_2_link" pos="0.044372234920298 0.0074903116208913 0.01170000000053" quat="0.7046363663624 -0.059055768436434 0.70463637689784 0.059055768272547">
+              <joint name="BN_LeftUpperLeg_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <body name="BN_LeftUpperLeg_3_link" pos="-0.012464803440567 -0.20091370952522 -0.046" quat="0.69970579547363 0.69204471187898 -0.14516926933875 0.10203822705544">
+                <joint name="BN_LeftUpperLeg_3" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <body name="BN_LeftLowerLeg_1_link" pos="-0.020094365404342 0.012573293753929 0.24670000000022" quat="0.46568655371558 -0.36878886526697 0.60331979319023 -0.53210528440197">
+                  <joint name="BN_LeftLowerLeg_1" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                  <body name="BN_LeftLowerLeg_2_link" pos="-0.0039830014636028 -0.096168527545273 0.027000000000086" quat="-0.4629036344439 -0.36797867557739 0.6038142879395 -0.53452803969394">
+                    <joint name="BN_LeftLowerLeg_2" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                    <body name="BN_LeftFoot_pitch_link" pos="-0.018333805772659 0.0058680545373879 0.28500000000001" quat="0.60381428793975 -0.53452803969373 -0.4629036344437 0.36797867557755">
+                      <joint name="BN_LeftFoot_pitch" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                      <body name="BN_LeftFoot_roll_link" pos="-0.0057816733192712 -0.057016463739262 -0.019999999999999" quat="0.7050790518451 0.091559211612809 -0.70115398506237 0.053511967345739">
+                        <joint name="BN_LeftFoot_roll" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                        <inertial mass="0.0310065052583184" fullinertia="5.4867267518966e-05 5.8251783605562e-05 4.1553999240413e-06 -1.8371548706991e-07 -4.620473251916e-07 -1.7932097757588e-08" pos="0.0015602059890233 -0.017178090155849 0.027040338503777" />
+                        <geom name="BN_LeftFoot_roll_link_robot_body" type="mesh" mesh="BN_LeftFoot_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 0" quat="1 3.9672657493856e-19 -9.6597916867734e-20 4.2215604719602e-19" />
+                      </body>
+                      <inertial mass="0.0697698796004311" fullinertia="2.8458860710044e-05 1.7370147095323e-05 3.580814904214e-05 2.4171890436027e-06 1.1073998656775e-06 -5.3022427539075e-06" pos="0.003708038421736 -0.016862510085004 -0.00032575822158073" />
+                      <geom name="BN_LeftFoot_pitch_link_robot_body" type="mesh" mesh="BN_LeftFoot_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.3877787807814e-17 0 -1.3877787807814e-17" quat="1 5.535204844277e-19 -2.0448072551877e-18 -1.382617063122e-17" />
+                    </body>
+                    <inertial mass="0.33789326488138" fullinertia="0.0020183691594624 0.002010946938002 8.1805490050851e-05 -2.4897321492814e-06 -4.9024174612572e-07 1.6112677375155e-07" pos="-2.5921075772485e-06 -6.8345011286887e-05 0.14195169423333" />
+                    <geom name="BN_LeftLowerLeg_2_link_robot_body" type="mesh" mesh="BN_LeftLowerLeg_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.3877787807814e-17 1.2576745200832e-17 1.1102230246252e-16" quat="1 -4.0274628457104e-19 -2.1477392632789e-18 6.7217393742742e-18" />
+                  </body>
+                  <inertial mass="0.101794305752762" fullinertia="8.9562728836161e-05 4.1530554160746e-05 8.6518020581923e-05 4.2134619665772e-06 1.0350715262611e-07 1.8654061693165e-05" pos="0.0018633086111863 -0.038562366702193 0.0038032014171519" />
+                  <geom name="BN_LeftLowerLeg_1_link_robot_body" type="mesh" mesh="BN_LeftLowerLeg_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 -1.1102230246252e-16 0" quat="1 1.2345639639765e-18 4.4485568059904e-19 -1.3172322685542e-17" />
+                </body>
+                <inertial mass="0.663542292455939" fullinertia="0.0021196247264318 0.0021067870524419 0.00038247770184469 -4.8548668168264e-06 -1.3504547066421e-06 -1.2030370263306e-06" pos="0.00017834324221383 0.00035039805675402 0.085653900617913" />
+                <geom name="BN_LeftUpperLeg_3_link_robot_body" type="mesh" mesh="BN_LeftUpperLeg_3_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="2.7755575615629e-17 3.4694469519536e-18 5.5511151231258e-17" quat="1 -3.240056121701e-18 -3.9889581877002e-19 1.0400855125644e-17" />
+              </body>
+              <inertial mass="0.825082115908653" fullinertia="0.0011636094034435 0.00030117930987329 0.0012430154400364 -4.9941967964448e-05 -3.0806233124708e-06 -5.7931996252558e-05" pos="-0.012575388704376 -0.10519072734121 -0.044681789197475" />
+              <geom name="BN_LeftUpperLeg_2_link_robot_body" type="mesh" mesh="BN_LeftUpperLeg_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 -1.3877787807814e-17 0" quat="1 -7.012381174877e-18 8.9668843988289e-23 -1.0688407469847e-23" />
+            </body>
+            <inertial mass="0.293426003416425" fullinertia="0.00013949714852311 0.00017418285428625 0.00021317243121433 -6.0245504895044e-06 6.501160279709e-06 1.100981035394e-06" pos="0.00053477664264002 5.2138082855504e-05 0.028551107015026" />
+            <geom name="BN_LeftUpperLeg_1_link_robot_body" type="mesh" mesh="BN_LeftUpperLeg_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="5.2041704279304e-18 -1.3877787807814e-17 0" quat="1 -8.4813478931494e-24 3.1301176399791e-23 1.6105875161541e-17" />
+          </body>
+          <body name="BN_RightUpperLeg_1_link" pos="-0.035990589835706 -0.024514057203627 -0.092019991935572" quat="-3.8780164250989e-23 1.5919163498966e-15 1 1.6155445655363e-15">
+            <joint name="BN_RightUpperLeg_1" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+            <body name="BN_RightUpperLeg_2_link" pos="0.043255183553702 -0.0080615814661712 0.01169999999999" quat="0.7041080090251 0.065053144633475 0.70410800902511 -0.065053144633476">
+              <joint name="BN_RightUpperLeg_2" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+              <body name="BN_RightUpperLeg_3_link" pos="-0.012464803441107 -0.20091370952501 -0.045" quat="-0.13449203907789 -0.091248105428285 0.70119454023527 -0.69419874058131">
+                <joint name="BN_RightUpperLeg_3" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                <body name="BN_RightLowerLeg_1_link" pos="0.023552004835586 0.0026784893224273 0.24670000000022" quat="-0.45095580673941 0.34524142741597 0.6170967159172 -0.54464562824648">
+                  <joint name="BN_RightLowerLeg_1" axis="0 0 -1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                  <body name="BN_RightLowerLeg_2_link" pos="0.029395928922845 -0.091652219578404 0.027000000000086" quat="0.45390445776807 0.34619770668891 0.61656074143828 -0.54219068898192">
+                    <joint name="BN_RightLowerLeg_2" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                    <body name="BN_RightFoot_pitch_link" pos="0.018001246377673 0.0068203832013802 0.285" quat="-0.45390445776788 0.34619770668906 0.61656074143854 -0.5421906889817">
+                      <joint name="BN_RightFoot_pitch" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                      <body name="BN_RightFoot_roll_link" pos="-0.009356164078364 -0.056601475929875 0.020000000000002" quat="-0.70296289130554 -0.026755912111135 0.70660039708954 -0.076440653106509">
+                        <joint name="BN_RightFoot_roll" axis="0 0 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+                        <inertial mass="0.0310065063620919" fullinertia="5.4874216425004e-05 5.8244836310379e-05 4.1554002691291e-06 2.392063062295e-07 -4.606948227723e-07 3.9613732907109e-08" pos="-0.00058616967131139 -0.017238834972648 0.026840339483058" />
+                        <geom name="BN_RightFoot_roll_link_robot_body" type="mesh" mesh="BN_RightFoot_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 1.1102230246252e-16 -1.2143064331838e-17" quat="1 4.058299691151e-18 3.0269412617851e-18 -9.283130577332e-20" />
+                      </body>
+                      <inertial mass="0.0697698790530004" fullinertia="2.8706152978282e-05 1.7122854655816e-05 3.5808148837596e-05 1.7434137870887e-06 -7.8730609559519e-07 5.3591288324632e-06" pos="0.0023290197929373 -0.017107584688069 0.0003257582221378" />
+                      <geom name="BN_RightFoot_pitch_link_robot_body" type="mesh" mesh="BN_RightFoot_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-2.7755575615629e-17 0 -1.3877787807814e-17" quat="1 -5.5333253727505e-18 -4.3405316651498e-18 -1.5573002711569e-17" />
+                    </body>
+                    <inertial mass="0.337892551511855" fullinertia="0.0020179169293273 0.0020113951823793 8.1805770118403e-05 3.0556920584947e-06 4.8840847776408e-07 1.7919993713178e-07" pos="-4.0816927216897e-05 5.5062770039626e-05 0.14195164778502" />
+                    <geom name="BN_RightLowerLeg_2_link_robot_body" type="mesh" mesh="BN_RightLowerLeg_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="1.3877787807814e-17 2.6020852139652e-18 0" quat="1 2.0467699358154e-18 5.3023721652106e-18 -6.5038075511354e-18" />
+                  </body>
+                  <inertial mass="0.101794184666573" fullinertia="8.1134799265052e-05 4.9958440783391e-05 8.651800359062e-05 1.8749258998713e-05 -6.330120098468e-06 1.7547485170595e-05" pos="0.015035937837303 -0.035559038085716 0.0038031786566712" />
+                  <geom name="BN_RightLowerLeg_1_link_robot_body" type="mesh" mesh="BN_RightLowerLeg_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-3.4694469519536e-17 1.1102230246252e-16 1.3877787807814e-17" quat="1 -3.0707679902226e-18 -6.340479114028e-19 -7.0914035182061e-18" />
+                </body>
+                <inertial mass="0.663541634834977" fullinertia="0.0021193759692316 0.0021070356588573 0.00038247771433385 5.1669708880345e-06 3.0695945840025e-07 1.783116218754e-06" pos="7.8721326768005e-05 -0.0003852518163687 0.085653626101025" />
+                <geom name="BN_RightUpperLeg_3_link_robot_body" type="mesh" mesh="BN_RightUpperLeg_3_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-1.3877787807814e-17 -3.9031278209478e-18 0" quat="1 7.7556515252131e-18 -2.8465830897404e-18 5.1162353275416e-18" />
+              </body>
+              <inertial mass="0.829890226725832" fullinertia="0.0011641531543628 0.00030172311473901 0.0012440511524649 -4.9941957074919e-05 -3.0806229587301e-06 -5.7931970846718e-05" pos="-0.012502531799958 -0.10458129557118 -0.043451887464699" />
+              <geom name="BN_RightUpperLeg_2_link_robot_body" type="mesh" mesh="BN_RightUpperLeg_2_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 0" quat="1 2.9564768527836e-18 1.1062036329625e-22 4.3660469396931e-24" />
+            </body>
+            <inertial mass="0.293426027660154" fullinertia="0.00013971393468592 0.00017396608431358 0.00021317244760756 6.6157251673142e-06 6.4827619005244e-06 -1.2046581870726e-06" pos="0.00052003021876115 -0.00013516964336346 0.02855110702607" />
+            <geom name="BN_RightUpperLeg_1_link_robot_body" type="mesh" mesh="BN_RightUpperLeg_1_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-1.7347234759768e-18 1.3877787807814e-17 0" quat="1 -1.1370987317767e-23 3.2955537759958e-23 -2.2280873537261e-18" />
+          </body>
+          <inertial mass="1.10918804844225" fullinertia="0.0035699822598436 0.0033637586309819 0.0018046424706367 0.00059156558356962 2.3934568627166e-09 -8.1687049011838e-09" pos="-0.03524162092379 -0.0075876651334427 -3.5099450363697e-06" />
+          <geom name="BN_hips_pitch_link_robot_body" type="mesh" mesh="BN_hips_pitch_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="3.4694469519536e-18 -1.3877787807814e-17 0" quat="1 -8.4813478931494e-24 3.1301176399791e-23 1.6105875161541e-17" />
+          <geom name="hips_plus_platform_visual" type="mesh" mesh="hips_plus_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.0060634793643145 0.073000158930532 0.034146158141322" quat="-0.41997509134244 0.57051840939628 -0.42443260886281 -0.56390303042789" />
+          <site name="hips_plus_platform_ball" pos="-0.091701281923508 0.074638932804097 -0.071519909627923" />
+          <geom name="hips_minus_platform_visual" type="mesh" mesh="hips_minus_platform_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.0063574668112444 0.084627485267395 -0.0052546701105214" quat="0.4752044732093 -0.50034784210456 0.41088753219941 0.59582227335528" />
+          <site name="hips_minus_platform_ball" pos="-0.091701131164297 0.074638988464818 0.071520090371991" />
+        </body>
+        <inertial mass="0.0934780291598877" fullinertia="1.0026335526468e-05 1.4811960990916e-05 8.5556073311896e-06 5.8380896556546e-19 -6.1062315918582e-13 -1.6129074265264e-12" pos="-8.4026068483706e-09 -2.7455825460376e-10 -2.6888243487289e-07" />
+        <geom name="BN_hips_roll_link_robot_body" type="mesh" mesh="BN_hips_roll_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 0" quat="1 0 0 0" />
+      </body>
+      <inertial mass="0.800261691319731" fullinertia="0.00022685251411089 0.00078074037259645 0.00080861453528528 -9.0308527801466e-07 2.1920384324337e-08 1.9400894857852e-06" pos="0.00016166842917164 -0.0048729650183504 -0.01539370215688" />
+      <geom name="Base_link_robot_body" type="mesh" mesh="Base_link_robot_body" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0 0 0" quat="1 0 0 0" />
+      <body name="hips_plus_flange" pos="0.072000000000034 -0.010118940098545 0.02799999999999" quat="1 0 0 0">
+        <joint name="hips_flange_plus_x" axis="-1.6653345369377e-16 -1.7000290064573e-16 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+        <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+        <geom name="hips_plus_flange_visual" type="mesh" mesh="hips_plus_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="-0.034390579210197 0.064059979786994 -0.02799999999999" quat="0.89191244499799 7.5307781238992e-17 7.6876693348137e-17 -0.45220812736803" />
+        <site name="hips_plus_motor_ball" pos="0.029561793244867 0.016795844133169 6.9388939039072e-18" />
+        <body name="hips_plus_rod" pos="0.029561793244867 0.016795844133169 6.9388939039072e-18" quat="-0.35767769559102 0.61351138612174 -0.37546382110089 -0.59556474393637">
+          <joint name="hips_plus_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <joint name="hips_plus_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <inertial pos="0 0 0.0325" mass=".01" diaginertia="3.5208333333333e-06 3.5208333333333e-06 1e-07" />
+          <geom name="hips_plus_rod_visual" type="mesh" mesh="hips_plus_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.046377762735358 0.043769646596629 -0.055146401715822" quat="-0.52625025010151 -0.26085573022307 0.66112595315121 0.46682698759582" />
+          <site name="hips_plus_rod_tip" pos="0 0 0.065" />
+        </body>
+      </body>
+      <body name="hips_minus_flange" pos="-0.071999999999966 -0.010118940098547 0.02799999999999" quat="1 0 0 0">
+        <joint name="hips_flange_minus_x" axis="-1.6653345369377e-16 -1.7000290064573e-16 1" limited="true" range="-3.141592653589793 3.141592653589793" />
+        <inertial pos="0 0 0" mass=".03" diaginertia=".00001 .00001 .00001" />
+        <geom name="hips_minus_flange_visual" type="mesh" mesh="hips_minus_flange_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.0090080566454071 0.072147403724501 -0.02799999999999" quat="0.79397399736394 -1.0124429929003e-16 -1.0335355552524e-16 0.60795171807465" />
+        <site name="hips_minus_motor_ball" pos="-0.029561793288029 0.016795844057195 -3.4694469519536e-18" />
+        <body name="hips_minus_rod" pos="-0.029561793288029 0.016795844057195 -3.4694469519536e-18" quat="0.59556489460865 -0.37546373405717 0.61351123838533 0.35767778948732">
+          <joint name="hips_minus_rod_x" axis="1 0 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <joint name="hips_minus_rod_y" axis="0 1 0" damping=".001" armature=".00005" limited="true" range="-3.141592653589793 3.141592653589793" />
+          <inertial pos="0 0 0.0325" mass=".01" diaginertia="3.5208333333333e-06 3.5208333333333e-06 1e-07" />
+          <geom name="hips_minus_rod_visual" type="mesh" mesh="hips_minus_rod_visual" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" pos="0.017923904522795 -0.064780657944222 -0.028594203686447" quat="-0.37490494213904 -0.51043527662486 0.5463307211849 0.54811025882227" />
+          <site name="hips_minus_rod_tip" pos="0 0 0.065" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <tendon>
+    <spatial name="waist_plus_rod" rgba="0 0 0 0">
+      <site site="waist_plus_motor_ball" />
+      <site site="waist_plus_platform_ball" />
+    </spatial>
+    <spatial name="waist_minus_rod" rgba="0 0 0 0">
+      <site site="waist_minus_motor_ball" />
+      <site site="waist_minus_platform_ball" />
+    </spatial>
+    <spatial name="hips_plus_rod" rgba="0 0 0 0">
+      <site site="hips_plus_motor_ball" />
+      <site site="hips_plus_platform_ball" />
+    </spatial>
+    <spatial name="hips_minus_rod" rgba="0 0 0 0">
+      <site site="hips_minus_motor_ball" />
+      <site site="hips_minus_platform_ball" />
+    </spatial>
+    <spatial name="left_shoulder_flange_linkage_rod" rgba="0 0 0 0">
+      <site site="left_shoulder_flange_linkage_motor_ball" />
+      <site site="left_shoulder_flange_linkage_platform_ball" />
+    </spatial>
+    <spatial name="left_wrist_flange_proximal_rod" rgba="0 0 0 0">
+      <site site="left_wrist_flange_proximal_motor_ball" />
+      <site site="left_wrist_flange_proximal_platform_ball" />
+    </spatial>
+    <spatial name="left_wrist_flange_distal_rod" rgba="0 0 0 0">
+      <site site="left_wrist_flange_distal_motor_ball" />
+      <site site="left_wrist_flange_distal_platform_ball" />
+    </spatial>
+    <spatial name="right_shoulder_flange_linkage_rod" rgba="0 0 0 0">
+      <site site="right_shoulder_flange_linkage_motor_ball" />
+      <site site="right_shoulder_flange_linkage_platform_ball" />
+    </spatial>
+    <spatial name="right_wrist_flange_proximal_rod" rgba="0 0 0 0">
+      <site site="right_wrist_flange_proximal_motor_ball" />
+      <site site="right_wrist_flange_proximal_platform_ball" />
+    </spatial>
+    <spatial name="right_wrist_flange_distal_rod" rgba="0 0 0 0">
+      <site site="right_wrist_flange_distal_motor_ball" />
+      <site site="right_wrist_flange_distal_platform_ball" />
+    </spatial>
+  </tendon>
+  <equality>
+    <connect name="waist_plus_rod_end" site1="waist_plus_rod_tip" site2="waist_plus_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="waist_minus_rod_end" site1="waist_minus_rod_tip" site2="waist_minus_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="hips_plus_rod_end" site1="hips_plus_rod_tip" site2="hips_plus_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="hips_minus_rod_end" site1="hips_minus_rod_tip" site2="hips_minus_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="left_shoulder_flange_linkage_rod_end" site1="left_shoulder_flange_linkage_rod_tip" site2="left_shoulder_flange_linkage_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="left_wrist_flange_proximal_rod_end" site1="left_wrist_flange_proximal_rod_tip" site2="left_wrist_flange_proximal_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="left_wrist_flange_distal_rod_end" site1="left_wrist_flange_distal_rod_tip" site2="left_wrist_flange_distal_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="right_shoulder_flange_linkage_rod_end" site1="right_shoulder_flange_linkage_rod_tip" site2="right_shoulder_flange_linkage_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="right_wrist_flange_proximal_rod_end" site1="right_wrist_flange_proximal_rod_tip" site2="right_wrist_flange_proximal_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+    <connect name="right_wrist_flange_distal_rod_end" site1="right_wrist_flange_distal_rod_tip" site2="right_wrist_flange_distal_platform_ball" solref=".006 1" solimp=".999 .9999 .001" />
+  </equality>
+  <actuator>
+    <position name="motor_01" joint="BN_Spine_yaw" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="waist_flange_plus_x" joint="waist_flange_plus_x" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="waist_flange_minus_x" joint="waist_flange_minus_x" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="hips_flange_plus_x" joint="hips_flange_plus_x" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="hips_flange_minus_x" joint="hips_flange_minus_x" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="left_shoulder_axis_1_direct" joint="BN_LeftShoulder_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="left_shoulder_flange_linkage" joint="left_shoulder_flange_linkage" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_08" joint="BN_LeftUpperArm_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_09" joint="BN_LeftUpperArm_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_10" joint="BN_LeftUpperArm_3" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_11" joint="BN_LeftLowerArm_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_12" joint="BN_LeftLowerArm_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="left_wrist_flange_proximal" joint="left_wrist_flange_proximal" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="left_wrist_flange_distal" joint="left_wrist_flange_distal" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="right_shoulder_axis_1_direct" joint="BN_RightShoulder_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="right_shoulder_flange_linkage" joint="right_shoulder_flange_linkage" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_17" joint="BN_RightUpperArm_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_18" joint="BN_RightUpperArm_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_19" joint="BN_RightUpperArm_3" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_20" joint="BN_RightLowerArm_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_21" joint="BN_RightLowerArm_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="right_wrist_flange_proximal" joint="right_wrist_flange_proximal" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="right_wrist_flange_distal" joint="right_wrist_flange_distal" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_24" joint="BN_LeftUpperLeg_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_25" joint="BN_LeftUpperLeg_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_26" joint="BN_LeftUpperLeg_3" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_27" joint="BN_LeftLowerLeg_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_28" joint="BN_LeftLowerLeg_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_29" joint="BN_LeftFoot_pitch" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_30" joint="BN_LeftFoot_roll" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_31" joint="BN_RightUpperLeg_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_32" joint="BN_RightUpperLeg_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_33" joint="BN_RightUpperLeg_3" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_34" joint="BN_RightLowerLeg_1" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_35" joint="BN_RightLowerLeg_2" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_36" joint="BN_RightFoot_pitch" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+    <position name="motor_37" joint="BN_RightFoot_roll" ctrlrange="-3.141592653589793 3.141592653589793" ctrllimited="true" />
+  </actuator>
+  <custom>
+    <text name="robot_sim_control_mode" data="viewer_position" />
+    <text name="robot_sim_joint_position" data="{&quot;model&quot;:&quot;full_body_robot_180deg&quot;,&quot;joints&quot;:[&quot;BN_Spine_yaw&quot;,&quot;BN_Spine_pitch&quot;,&quot;BN_Spine_roll&quot;,&quot;BN_LeftShoulder_1&quot;,&quot;BN_LeftShoulder_2&quot;,&quot;BN_LeftUpperArm_1&quot;,&quot;BN_LeftUpperArm_2&quot;,&quot;BN_LeftUpperArm_3&quot;,&quot;BN_LeftLowerArm_1&quot;,&quot;BN_LeftLowerArm_2&quot;,&quot;BN_LeftHand_roll&quot;,&quot;BN_LeftHand_pitch&quot;,&quot;BN_RightShoulder_1&quot;,&quot;BN_RightShoulder_2&quot;,&quot;BN_RightUpperArm_1&quot;,&quot;BN_RightUpperArm_2&quot;,&quot;BN_RightUpperArm_3&quot;,&quot;BN_RightLowerArm_1&quot;,&quot;BN_RightLowerArm_2&quot;,&quot;BN_RightHand_roll&quot;,&quot;BN_RightHand_pitch&quot;,&quot;BN_hips_roll&quot;,&quot;BN_hips_pitch&quot;,&quot;BN_LeftUpperLeg_1&quot;,&quot;BN_LeftUpperLeg_2&quot;,&quot;BN_LeftUpperLeg_3&quot;,&quot;BN_LeftLowerLeg_1&quot;,&quot;BN_LeftLowerLeg_2&quot;,&quot;BN_LeftFoot_pitch&quot;,&quot;BN_LeftFoot_roll&quot;,&quot;BN_RightUpperLeg_1&quot;,&quot;BN_RightUpperLeg_2&quot;,&quot;BN_RightUpperLeg_3&quot;,&quot;BN_RightLowerLeg_1&quot;,&quot;BN_RightLowerLeg_2&quot;,&quot;BN_RightFoot_pitch&quot;,&quot;BN_RightFoot_roll&quot;],&quot;joint_aliases&quot;:{&quot;BN_Spine_yaw&quot;:&quot;BN_Spine_yaw&quot;,&quot;BN_Spine_axis_2&quot;:&quot;BN_Spine_roll&quot;,&quot;BN_LeftShoulder_axis_1&quot;:&quot;BN_LeftShoulder_1&quot;,&quot;BN_LeftShoulder_axis_2&quot;:&quot;BN_LeftShoulder_2&quot;,&quot;BN_LeftUpperArm_axis_1&quot;:&quot;BN_LeftUpperArm_1&quot;,&quot;BN_LeftUpperArm_axis_2&quot;:&quot;BN_LeftUpperArm_2&quot;,&quot;BN_LeftUpperArm_axis_3&quot;:&quot;BN_LeftUpperArm_3&quot;,&quot;BN_LeftLowerArm_axis_1&quot;:&quot;BN_LeftLowerArm_1&quot;,&quot;BN_LeftLowerArm_axis_2&quot;:&quot;BN_LeftLowerArm_2&quot;,&quot;BN_LeftHand_axis_2&quot;:&quot;BN_LeftHand_pitch&quot;,&quot;BN_LeftHand_axis_1&quot;:&quot;BN_LeftHand_roll&quot;,&quot;BN_RightShoulder_axis_1&quot;:&quot;BN_RightShoulder_1&quot;,&quot;BN_RightShoulder_axis_2&quot;:&quot;BN_RightShoulder_2&quot;,&quot;BN_RightUpperArm_axis_1&quot;:&quot;BN_RightUpperArm_1&quot;,&quot;BN_RightUpperArm_axis_2&quot;:&quot;BN_RightUpperArm_2&quot;,&quot;BN_RightUpperArm_axis_3&quot;:&quot;BN_RightUpperArm_3&quot;,&quot;BN_RightLowerArm_axis_1&quot;:&quot;BN_RightLowerArm_1&quot;,&quot;BN_RightLowerArm_axis_2&quot;:&quot;BN_RightLowerArm_2&quot;,&quot;BN_RightHand_axis_1&quot;:&quot;BN_RightHand_roll&quot;,&quot;BN_RightHand_axis_2&quot;:&quot;BN_RightHand_pitch&quot;,&quot;BN_Spine_axis_1&quot;:&quot;BN_Spine_pitch&quot;,&quot;BN_Hips_axis_1&quot;:&quot;BN_hips_roll&quot;,&quot;BN_Hips_axis_2&quot;:&quot;BN_hips_pitch&quot;,&quot;BN_LeftUpperLeg_axis_1&quot;:&quot;BN_LeftUpperLeg_1&quot;,&quot;BN_LeftUpperLeg_axis_2&quot;:&quot;BN_LeftUpperLeg_2&quot;,&quot;BN_LeftUpperLeg_axis_3&quot;:&quot;BN_LeftUpperLeg_3&quot;,&quot;BN_LeftLowerLeg_axis_1&quot;:&quot;BN_LeftLowerLeg_1&quot;,&quot;BN_LeftLowerLeg_axis_2&quot;:&quot;BN_LeftLowerLeg_2&quot;,&quot;BN_LeftFoot_pitch&quot;:&quot;BN_LeftFoot_pitch&quot;,&quot;BN_LeftFoot_roll&quot;:&quot;BN_LeftFoot_roll&quot;,&quot;BN_RightUpperLeg_axis_1&quot;:&quot;BN_RightUpperLeg_1&quot;,&quot;BN_RightUpperLeg_axis_2&quot;:&quot;BN_RightUpperLeg_2&quot;,&quot;BN_RightUpperLeg_axis_3&quot;:&quot;BN_RightUpperLeg_3&quot;,&quot;BN_RightLowerLeg_axis_1&quot;:&quot;BN_RightLowerLeg_1&quot;,&quot;BN_RightLowerLeg_axis_2&quot;:&quot;BN_RightLowerLeg_2&quot;,&quot;BN_RightFoot_pitch&quot;:&quot;BN_RightFoot_pitch&quot;,&quot;BN_RightFoot_roll&quot;:&quot;BN_RightFoot_roll&quot;},&quot;flanges&quot;:{&quot;waist_flange_plus_x&quot;:&quot;waist_plus_rod&quot;,&quot;waist_flange_minus_x&quot;:&quot;waist_minus_rod&quot;,&quot;hips_flange_plus_x&quot;:&quot;hips_plus_rod&quot;,&quot;hips_flange_minus_x&quot;:&quot;hips_minus_rod&quot;,&quot;left_shoulder_flange_linkage&quot;:&quot;left_shoulder_flange_linkage_rod&quot;,&quot;left_wrist_flange_proximal&quot;:&quot;left_wrist_flange_proximal_rod&quot;,&quot;left_wrist_flange_distal&quot;:&quot;left_wrist_flange_distal_rod&quot;,&quot;right_shoulder_flange_linkage&quot;:&quot;right_shoulder_flange_linkage_rod&quot;,&quot;right_wrist_flange_proximal&quot;:&quot;right_wrist_flange_proximal_rod&quot;,&quot;right_wrist_flange_distal&quot;:&quot;right_wrist_flange_distal_rod&quot;},&quot;joint_limits&quot;:{&quot;BN_Spine_yaw&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_Spine_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_Spine_roll&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftShoulder_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftShoulder_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperArm_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperArm_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperArm_3&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftLowerArm_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftLowerArm_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftHand_roll&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftHand_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightShoulder_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightShoulder_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperArm_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperArm_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperArm_3&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightLowerArm_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightLowerArm_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightHand_roll&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightHand_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_hips_roll&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_hips_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperLeg_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperLeg_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftUpperLeg_3&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftLowerLeg_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftLowerLeg_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftFoot_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_LeftFoot_roll&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperLeg_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperLeg_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightUpperLeg_3&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightLowerLeg_1&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightLowerLeg_2&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightFoot_pitch&quot;:[-3.141592653589793,3.141592653589793],&quot;BN_RightFoot_roll&quot;:[-3.141592653589793,3.141592653589793]},&quot;coupled_limits&quot;:{}}" />
+    <text name="preview_limit_policy" data="All hinge and servo bounds are +/-pi. Linkage closure remains enforced; collision and hardware travel are uncalibrated." />
+  </custom>
+  <keyframe>
+    <key name="Neutral" />
+    <key name="Six groups same direction" qpos="0 0.0087266462599716 0.0087266462599716 0.0087266462599716 0.0087266462599716 0 0 0 0 0 0.0087266462599716 0.0087266462599716 0.0264074486782 -0.026269790784887 6.8547146115999e-05 0.0089044226739474 -0.008806381971569 -8.2340271186362e-05 0.0087266462599716 0.0087266462599716 0 0 0 0 0 0.0087266462599716 0.0087266462599716 0.026406468426144 -0.026268838369743 6.8654235459549e-05 0.0089054046448445 -0.0088073916051903 -8.2504961629162e-05 0.017898074082511 -0.017382888471379 -0.0083256030383092 -0.015708560832662 0.01001185172347 -0.0043860996457075 0.015943273873559 0.017816981020765 -0.0061288396106012 -0.0018690696133614 0.0022445494326023 -0.00034316100955177 0.0087266462599716 0.0087266462599716 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.012712825835437 0.030987684002538 0.018123213899054 -0.034284830922213 -0.029569028269481 -0.0010891926685292" ctrl="0 0.015943273873559 -0.0018690696133614 0.012712825835437 -0.034284830922213 0.0087266462599716 0.017898074082511 0 0 0 0 0 0.0264074486782 0.0089044226739474 0.0087266462599716 -0.015708560832662 0 0 0 0 0 0.026406468426144 0.0089054046448445 0 0 0 0 0 0 0 0 0 0 0 0 0 0" />
+    <key name="Six groups opposite direction" qpos="0 0.0087266462599716 -0.0087266462599716 0.0087266462599716 -0.0087266462599716 0 0 0 0 0 0.0087266462599716 -0.0087266462599716 0.0089363052076359 -0.0088279481797536 5.3721344286091e-05 0.02634048496024 -0.026422731015995 -5.9539985025094e-05 0.0087266462599716 -0.0087266462599716 0 0 0 0 0 0.0087266462599716 -0.0087266462599716 0.0089353262395577 -0.0088269952463707 5.382842346083e-05 0.026341467230927 -0.026423743715655 -5.9704659828524e-05 -0.015709491570611 0.010012799972694 0.0043858868926951 0.017896065267663 -0.017381367692417 0.0083243189506025 -0.0018693026319424 -0.002163894109907 0.00068893373796139 0.015943300685949 -0.018685993505743 0.0024164751949083 0.0087266462599716 -0.0087266462599716 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.034363861635629 -0.029004793920435 0.0013470156820156 0.011340840666259 0.029770487035992 -0.017857284828935" ctrl="0 -0.0018693026319424 0.015943300685949 -0.034363861635629 0.011340840666259 0.0087266462599716 -0.015709491570611 0 0 0 0 0 0.0089363052076359 0.02634048496024 0.0087266462599716 0.017896065267663 0 0 0 0 0 0.0089353262395577 0.026341467230927 0 0 0 0 0 0 0 0 0 0 0 0 0 0" />
+  </keyframe>
+</mujoco>

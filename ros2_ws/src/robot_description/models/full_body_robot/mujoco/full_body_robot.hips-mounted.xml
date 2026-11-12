@@ -1,0 +1,190 @@
+<mujoco model="STEP assembly with hips mounted (static)">
+  <compiler meshdir=".." angle="radian" fusestatic="false" />
+  <option gravity="0 0 0" />
+  <visual>
+    <global azimuth="65" elevation="-30" offwidth="1280" offheight="960" />
+  </visual>
+  <statistic center="0 .055 .035" extent=".23" />
+  <asset>
+    <mesh name="assembly_00" file="mujoco/visual/hips_mounted/Base_link_fixed.STL" />
+    <mesh name="assembly_01" file="mujoco/visual/step_aligned/BN_Spine_yaw_link .STL" />
+    <mesh name="assembly_02" file="mujoco/visual/step_aligned/BN_Spine_pitch_link .STL" />
+    <mesh name="assembly_03" file="mujoco/visual/step_aligned/BN_Spine_roll_link .STL" />
+    <mesh name="assembly_04" file="mujoco/visual/step_aligned/BN_LeftShoulder_1_link.STL" />
+    <mesh name="assembly_05" file="mujoco/visual/step_aligned/BN_LeftShoulder_2_link.STL" />
+    <mesh name="assembly_06" file="mujoco/visual/step_aligned/BN_LeftUpperArm_1_link.STL" />
+    <mesh name="assembly_07" file="mujoco/visual/step_aligned/BN_LeftUpperArm_2_link.STL" />
+    <mesh name="assembly_08" file="mujoco/visual/step_aligned/BN_LeftUpperArm_3_link.STL" />
+    <mesh name="assembly_09" file="mujoco/visual/step_aligned/BN_LeftLowerArm_1_link.STL" />
+    <mesh name="assembly_10" file="mujoco/visual/step_aligned/BN_LeftLowerArm_2_link.STL" />
+    <mesh name="assembly_11" file="mujoco/visual/step_aligned/BN_LeftHand_roll_link.STL" />
+    <mesh name="assembly_12" file="mujoco/visual/step_aligned/BN_LeftHand_pitch_link.STL" />
+    <mesh name="assembly_13" file="mujoco/visual/step_aligned/BN_RightShoulder_1_link.STL" />
+    <mesh name="assembly_14" file="mujoco/visual/step_aligned/BN_RightShoulder_2_link.STL" />
+    <mesh name="assembly_15" file="mujoco/visual/step_aligned/BN_RightUpperArm_1_link .STL" />
+    <mesh name="assembly_16" file="mujoco/visual/step_aligned/BN_RightUpperArm_2_link .STL" />
+    <mesh name="assembly_17" file="mujoco/visual/step_aligned/BN_RightUpperArm_3_link .STL" />
+    <mesh name="assembly_18" file="mujoco/visual/step_aligned/BN_RightLowerArm_1_link.STL" />
+    <mesh name="assembly_19" file="mujoco/visual/step_aligned/BN_RightLowerArm_2_link.STL" />
+    <mesh name="assembly_20" file="mujoco/visual/step_aligned/BN_RightHand_roll_link.STL" />
+    <mesh name="assembly_21" file="mujoco/visual/step_aligned/BN_RightHand_pitch_link.STL" />
+    <mesh name="assembly_22" file="mujoco/visual/step_aligned/BN_hips_roll_link .STL" />
+    <mesh name="assembly_23" file="mujoco/visual/step_aligned/BN_hips_pitch_link .STL" />
+    <mesh name="assembly_24" file="mujoco/visual/step_aligned/BN_LeftUpperLeg_1_link.STL" />
+    <mesh name="assembly_25" file="mujoco/visual/step_aligned/BN_LeftUpperLeg_2_link.STL" />
+    <mesh name="assembly_26" file="mujoco/visual/step_aligned/BN_LeftUpperLeg_3_link.STL" />
+    <mesh name="assembly_27" file="mujoco/visual/step_aligned/BN_LeftLowerLeg_1_link.STL" />
+    <mesh name="assembly_28" file="mujoco/visual/step_aligned/BN_LeftLowerLeg_2_link.STL" />
+    <mesh name="assembly_29" file="mujoco/visual/step_aligned/BN_LeftFoot_pitch_link.STL" />
+    <mesh name="assembly_30" file="mujoco/visual/step_aligned/BN_LeftFoot_roll_link.STL" />
+    <mesh name="assembly_31" file="mujoco/visual/step_aligned/BN_RightUpperLeg_1_link.STL" />
+    <mesh name="assembly_32" file="mujoco/visual/step_aligned/BN_RightUpperLeg_2_link.STL" />
+    <mesh name="assembly_33" file="mujoco/visual/step_aligned/BN_RightUpperLeg_3_link.STL" />
+    <mesh name="assembly_34" file="mujoco/visual/step_aligned/BN_RightLowerLeg_1_link.STL" />
+    <mesh name="assembly_35" file="mujoco/visual/step_aligned/BN_RightLowerLeg_2_link.STL" />
+    <mesh name="assembly_36" file="mujoco/visual/step_aligned/BN_RightFoot_pitch_link.STL" />
+    <mesh name="assembly_37" file="mujoco/visual/step_aligned/BN_RightFoot_roll_link.STL" />
+    <mesh name="hips_plus_flange_mounted" file="mujoco/visual/hips_mounted/hips_plus_flange_mounted.STL" />
+    <mesh name="hips_plus_platform_mounted" file="mujoco/visual/hips_mounted/hips_plus_platform_mounted.STL" />
+    <mesh name="hips_plus_rod_mounted" file="mujoco/visual/hips_mounted/hips_plus_rod_mounted.STL" />
+    <mesh name="hips_minus_flange_mounted" file="mujoco/visual/hips_mounted/hips_minus_flange_mounted.STL" />
+    <mesh name="hips_minus_platform_mounted" file="mujoco/visual/hips_mounted/hips_minus_platform_mounted.STL" />
+    <mesh name="hips_minus_rod_mounted" file="mujoco/visual/hips_mounted/hips_minus_rod_mounted.STL" />
+  </asset>
+  <worldbody>
+    <light pos="0 1 1.8" dir="0 -.45 -1" />
+    <light pos="0 -1 .8" dir="0 .55 -1" />
+    <body name="Base_link" pos="0 0 0" quat="1 0 0 0">
+      <geom name="Base_link_assembly" type="mesh" mesh="assembly_00" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+      <body name="hips_plus_flange_mounted" pos="0.037609420789838 0.053941039688449 1.0408340855861e-17" quat="0.89191244499799 7.5307781238992e-17 7.6876693348137e-17 -0.45220812736803">
+        <geom name="hips_plus_flange_mounted" type="mesh" mesh="hips_plus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+      <body name="hips_plus_rod_mounted" pos="0.088638593928577 -0.064025906849506 -0.016067084249451" quat="0.87452050931668 -0.011091579476347 -0.16992927372444 0.45410890497842">
+        <geom name="hips_plus_rod_mounted" type="mesh" mesh="hips_plus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+      <body name="hips_minus_flange_mounted" pos="-0.062991943354558 0.062028463625954 0" quat="0.79397399736394 -1.0124429929003e-16 -1.0335355552524e-16 0.60795171807465">
+        <geom name="hips_minus_flange_mounted" type="mesh" mesh="hips_minus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+      <body name="hips_minus_rod_mounted" pos="-0.057488902198699 -0.049222618071141 0.011621593808824" quat="0.94615706040234 0.022372683256282 -0.11859116608837 -0.30037046362868">
+        <geom name="hips_minus_rod_mounted" type="mesh" mesh="hips_minus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+    </body>
+    <body name="BN_Spine_yaw_link" pos="0 -0.027852322456454 0.0062778047691217" quat="1 0 0 0">
+      <geom name="BN_Spine_yaw_link_assembly" type="mesh" mesh="assembly_01" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_Spine_pitch_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-0.045467036314021 0.7056433326382 0.045472220259402 -0.7056433326382">
+      <geom name="BN_Spine_pitch_link_assembly" type="mesh" mesh="assembly_02" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_Spine_roll_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+      <geom name="BN_Spine_roll_link_assembly" type="mesh" mesh="assembly_03" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftShoulder_1_link" pos="-0.058998687767302 -0.086545370330901 0.31125535004419" quat="-3.7837033911832e-06 1.8328014661354e-06 -0.06430376499229 0.99793037121341">
+      <geom name="BN_LeftShoulder_1_link_assembly" type="mesh" mesh="assembly_04" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftShoulder_2_link" pos="-0.063998812138092 -0.060886432408485 0.33504521471321" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+      <geom name="BN_LeftShoulder_2_link_assembly" type="mesh" mesh="assembly_05" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftUpperArm_1_link" pos="-0.098498461127295 -0.093946199772291 0.36454650284564" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+      <geom name="BN_LeftUpperArm_1_link_assembly" type="mesh" mesh="assembly_06" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftUpperArm_2_link" pos="-0.15199861059757 -0.071632986283456 0.367434086034" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+      <geom name="BN_LeftUpperArm_2_link_assembly" type="mesh" mesh="assembly_07" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftUpperArm_3_link" pos="-0.15199870569691 -0.082734094169373 0.27010461771275" quat="-1.4336207562714e-06 -5.2301875421549e-06 0.99793072549356 0.064298266590017">
+      <geom name="BN_LeftUpperArm_3_link_assembly" type="mesh" mesh="assembly_08" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftLowerArm_1_link" pos="-0.17509926790133 -0.066034407173362 0.094294081964537" quat="0.4159967305431 0.57179825334263 -0.41598575861402 -0.57179482883469">
+      <geom name="BN_LeftLowerArm_1_link_assembly" type="mesh" mesh="assembly_09" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftLowerArm_2_link" pos="-0.1520999875211 -0.049461839933676 0.0051836153341931" quat="-0.06430009939014 0.99793060736959 9.2949410353262e-06 -2.6439258929823e-06">
+      <geom name="BN_LeftLowerArm_2_link_assembly" type="mesh" mesh="assembly_10" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftHand_roll_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="0.46682122342319 0.53111867888744 -0.46680928455626 -0.53111202787229">
+      <geom name="BN_LeftHand_roll_link_assembly" type="mesh" mesh="assembly_11" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftHand_pitch_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="-8.445864241184e-06 -4.7093803639283e-06 0.66017646331484 0.75111053593436">
+      <geom name="BN_LeftHand_pitch_link_assembly" type="mesh" mesh="assembly_12" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightShoulder_1_link" pos="-0.098498461128274 -0.09394611238747 0.36454640859479" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+      <geom name="BN_RightShoulder_1_link_assembly" type="mesh" mesh="assembly_13" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightShoulder_2_link" pos="0.064001176716399 -0.056620783774739 0.33559600558721" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+      <geom name="BN_RightShoulder_2_link_assembly" type="mesh" mesh="assembly_14" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperArm_1_link" pos="0.09850163657115 -0.093944250885829 0.36454539370886" quat="0.41598790991327 0.57179513671978 0.41599457925201 0.57179794548646">
+      <geom name="BN_RightUpperArm_1_link_assembly" type="mesh" mesh="assembly_15" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperArm_2_link" pos="0.1520014209856 -0.071630112365501 0.36743259233598" quat="-5.4525917960734e-06 -3.9896356561343e-06 0.66017784281859 0.75110932347145">
+      <geom name="BN_RightUpperArm_2_link_assembly" type="mesh" mesh="assembly_16" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperArm_3_link" pos="0.15200145301246 -0.082731577761043 0.27010316479184" quat="-0.06429643381484 0.99793084357098 6.4404775075786e-06 2.6311498551391e-06">
+      <geom name="BN_RightUpperArm_3_link_assembly" type="mesh" mesh="assembly_17" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightLowerArm_1_link" pos="0.12890231286746 -0.066032580260599 0.094292376706914" quat="0.46681541828604 0.53110727007185 0.46681899143971 0.53112000730388">
+      <geom name="BN_RightLowerArm_1_link_assembly" type="mesh" mesh="assembly_18" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightLowerArm_2_link" pos="0.15190296125989 -0.049459985363468 0.0051825047964254" quat="-0.064298266635517 0.99793072547535 6.3223987116759e-06 4.4639405770061e-06">
+      <geom name="BN_RightLowerArm_2_link_assembly" type="mesh" mesh="assembly_19" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightHand_roll_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.46681727674759 0.53111805643095 -0.46681518210874 -0.53111093569589">
+      <geom name="BN_RightHand_roll_link_assembly" type="mesh" mesh="assembly_20" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightHand_pitch_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.66017784278935 0.75110932349532 2.6936176497104e-06 6.4146093445769e-06">
+      <geom name="BN_RightHand_pitch_link_assembly" type="mesh" mesh="assembly_21" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_hips_roll_link" pos="0 0 -0.0734999997374" quat="0.70710678118655 0.70710678118655 0 0">
+      <geom name="BN_hips_roll_link_assembly" type="mesh" mesh="assembly_22" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_hips_pitch_link" pos="0 0 -0.0734999997374" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+      <geom name="BN_hips_pitch_link_assembly" type="mesh" mesh="assembly_23" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+      <body name="hips_plus_platform_mounted" pos="-0.0060634793643145 0.073000158930532 0.034146158141322" quat="-0.41997509134244 0.57051840939628 -0.42443260886281 -0.56390303042789">
+        <geom name="hips_plus_platform_mounted" type="mesh" mesh="hips_plus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+      <body name="hips_minus_platform_mounted" pos="-0.0063574668112444 0.084627485267395 -0.0052546701105214" quat="0.4752044732093 -0.50034784210456 0.41088753219941 0.59582227335528">
+        <geom name="hips_minus_platform_mounted" type="mesh" mesh="hips_minus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
+      </body>
+    </body>
+    <body name="BN_LeftUpperLeg_1_link" pos="-0.09201996299884 0.041789017533078 -0.085745319855477" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+      <geom name="BN_LeftUpperLeg_1_link_assembly" type="mesh" mesh="assembly_24" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftUpperLeg_2_link" pos="-0.1037200145056 -0.0027343908036222 -0.092277157639375" quat="0.65377672139313 0.75668751711928 -3.6500546550063e-07 -4.3112397851233e-07">
+      <geom name="BN_LeftUpperLeg_2_link_assembly" type="mesh" mesh="assembly_25" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftUpperLeg_3_link" pos="-0.11618476825505 0.071941480230181 -0.28438606997637" quat="-0.066210242859161 0.98190126405013 -0.17211989539066 -0.043137605496731">
+      <geom name="BN_LeftUpperLeg_3_link_assembly" type="mesh" mesh="assembly_26" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftLowerLeg_1_link" pos="-0.15461150538714 0.10264099719014 -0.52729281498099" quat="0.41217062500526 0.59928749319266 0.41828364900429 0.54406678391654">
+      <geom name="BN_LeftLowerLeg_1_link_assembly" type="mesh" mesh="assembly_27" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftLowerLeg_2_link" pos="-0.13300837861601 0.12765021331322 -0.62163842438339" quat="-0.067983045498418 0.98118199603739 -0.1753804854727 -0.043610566290795">
+      <geom name="BN_LeftLowerLeg_2_link_assembly" type="mesh" mesh="assembly_28" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftFoot_pitch_link" pos="-0.16979315136051 0.17077918412088 -0.90160687773014" quat="-0.4182836490041 -0.54406678391676 0.41217062500548 0.59928749319245">
+      <geom name="BN_LeftFoot_pitch_link_assembly" type="mesh" mesh="assembly_29" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_LeftFoot_roll_link" pos="-0.15253238465515 0.19318615974686 -0.95531254093005" quat="0.011817310639827 0.020341061798303 0.66787849524389 0.74389845272383">
+      <geom name="BN_LeftFoot_roll_link_assembly" type="mesh" mesh="assembly_30" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperLeg_1_link" pos="0.092020037001039 0.041788809444587 -0.085745352678772" quat="0.41598838025336 0.57179911929728 0.41598780792855 0.57179854697248">
+      <geom name="BN_RightUpperLeg_1_link_assembly" type="mesh" mesh="assembly_31" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperLeg_2_link" pos="0.10372008734613 0.085425249479291 -0.080100893181171" quat="3.65746949124e-07 4.4021000246626e-07 0.66019572180341 0.75109360862155">
+      <geom name="BN_RightUpperLeg_2_link_assembly" type="mesh" mesh="assembly_32" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightUpperLeg_3_link" pos="0.116184832903 0.066570901710962 -0.28512731510859" quat="-0.058482592526791 0.98496986876259 0.15732637554885 0.04077444736368">
+      <geom name="BN_RightUpperLeg_3_link_assembly" type="mesh" mesh="assembly_33" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightLowerLeg_1_link" pos="0.15461155954154 0.10281704513614 -0.52726852391779" quat="0.38855730393774 0.57521739571679 -0.44349990299237 -0.56697090336911">
+      <geom name="BN_RightLowerLeg_1_link_assembly" type="mesh" mesh="assembly_34" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightLowerLeg_2_link" pos="0.13300842842512 0.10429891132837 -0.62486134532103" quat="-0.056732766602661 0.9856449061641 0.15385608601152 0.040172340529058">
+      <geom name="BN_RightLowerLeg_2_link_assembly" type="mesh" mesh="assembly_35" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightFoot_pitch_link" pos="0.16979318891544 0.13861946570559 -0.90604552595905" quat="0.38855730393795 0.57521739571659 -0.44349990299216 -0.56697090336934">
+      <geom name="BN_RightFoot_pitch_link_assembly" type="mesh" mesh="assembly_36" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+    <body name="BN_RightFoot_roll_link" pos="0.15413490528746 0.16587767530513 -0.95803661218501" quat="0.012286681687979 0.019770598999907 0.64545853642262 0.7634405272367">
+      <geom name="BN_RightFoot_roll_link_assembly" type="mesh" mesh="assembly_37" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
+    </body>
+  </worldbody>
+</mujoco>

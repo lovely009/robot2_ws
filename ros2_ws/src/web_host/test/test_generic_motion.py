@@ -85,10 +85,39 @@ def test_registered_model_rejects_changed_urdf_and_invalidates_changed_constrain
         key = jobs.jobs[first['id']]['profile_key']
         with pytest.raises(ValueError, match='不一致'):
             jobs.create(data | {'urdf_text':source.replace('name="full_body_robot"', 'name="changed"')})
-        config['joint_limits']['BN_LeftUpperArm_axis_1']['upper'] = 3.
+        config['joint_limits']['BN_LeftUpperArm_1']['upper'] = 3.
         path.write_text(yaml.safe_dump(config))
         second = jobs.create(data)
         assert jobs.jobs[second['id']]['profile_key'] != key
+    finally:
+        jobs.close()
+
+
+def test_registered_full_body_t_pose_matches_actual_bvh_arm_directions():
+    package = Path(__file__).resolve().parents[1]
+    model = package.parent / 'robot_description/models/full_body_robot'
+    jobs = MotionJobs()
+    try:
+        first = jobs.create(payload() | {
+            'model': 'full_body_robot', 'up_axis': 'y_up',
+            'urdf_text': (model / 'urdf/full_body_robot.urdf').read_text(),
+            'bvh_text': (package / 'action_library/演示样例_20261027141432.bvh').read_text()})
+        clip = jobs.jobs[first['id']]['clip']
+        clip.frames = clip.frames[:1]
+        jobs.start(first['id'], first['mapping'])
+        done = finish(jobs, first)
+        assert done['state'] == 'done', done.get('error', done)
+        assert done['summary']['pose_fit'] == 'bone_directions'
+        preview = json.loads(jobs.result(first['id'], 'preview.json'))
+        source, robot = preview['source'], preview['robot']
+        basis = np.asarray(preview['source_to_robot'])
+        for side in ('Left', 'Right'):
+            direction = basis @ (np.asarray(source['frames'][0][source['names'].index(side + 'LowerArm')]) -
+                                 source['frames'][0][source['names'].index(side + 'UpperArm')])
+            actual = (np.asarray(robot['frames'][0][robot['names'].index(f'BN_{side}LowerArm_2_link')]) -
+                      robot['frames'][0][robot['names'].index(f'BN_{side}UpperArm_3_link')])
+            cosine = np.dot(actual, direction) / np.linalg.norm(actual) / np.linalg.norm(direction)
+            assert cosine > np.cos(np.deg2rad(15)), (side, actual, direction)
     finally:
         jobs.close()
 
@@ -117,6 +146,157 @@ def test_confirm_then_reuse_across_service_restart(tmp_path):
         assert finish(restored, second)['state'] == 'done'
     finally:
         restored.close()
+
+
+def test_preview_exposes_source_root_rotation_in_robot_coordinates():
+    data = payload()
+    data['bvh_text'] = data['bvh_text'].replace('0 0 0 0 0 0', '0 0 0 0 90 0')
+    jobs = MotionJobs()
+    try:
+        job = jobs.create(data)
+        job['mapping']['source_to_robot'] = [[0,-1,0],[1,0,0],[0,0,1]]
+        jobs.start(job['id'], job['mapping'])
+        assert finish(jobs, job)['state'] == 'done'
+        preview = json.loads(jobs.result(job['id'], 'preview.json'))
+        from scipy.spatial.transform import Rotation
+        rotations = Rotation.from_quat(preview['robot']['root_quaternions']).as_matrix()
+        # A source X rotation is represented about Y after the +90-degree Z mapping.
+        expected = Rotation.from_euler('y', 90, degrees=True).as_matrix()
+        np.testing.assert_allclose(rotations, np.tile(expected, (3, 1, 1)), atol=1e-8)
+        assert preview['robot']['root_rotation_source'] == 'Hips'
+        assert preview['robot']['root_rotation_frame'] == 'robot'
+    finally:
+        jobs.close()
+
+
+def test_completed_results_reused_after_restart_without_solving(tmp_path, monkeypatch):
+    from bvh_broadcaster.generic_retarget import GenericRetargeter
+    options = dict(profiles_dir=tmp_path / 'profiles', cache_dir=tmp_path / 'results')
+    jobs = MotionJobs(**options)
+    try:
+        first = jobs.create(payload())
+        jobs.start(first['id'], first['mapping'], remember=True)
+        assert finish(jobs, first)['result_saved']
+        expected = jobs.result(first['id'], 'motion.npz')
+    finally:
+        jobs.close()
+    def forbidden(*args, **kwargs):
+        pytest.fail('unchanged cached motion must not run the solver')
+    monkeypatch.setattr(GenericRetargeter, 'convert', forbidden)
+    jobs = MotionJobs(**options)
+    try:
+        restored = jobs.create(payload())
+        assert restored['state'] == 'done' and restored['result_cached']
+        assert jobs.thread is None
+        assert jobs.result(restored['id'], 'motion.npz') == expected
+        # Reviewing the mapping still pauses, then reuses the same completed result.
+        review = jobs.create(payload() | {'review_mapping': True})
+        assert review['state'] == 'mapping'
+        assert jobs.start(review['id'], review['mapping'])['result_cached']
+    finally:
+        jobs.close()
+
+
+@pytest.mark.parametrize('change', ['motion', 'model', 'units', 'axes', 'mapping'])
+def test_result_cache_invalidates_changed_inputs(tmp_path, change):
+    jobs = MotionJobs(cache_dir=tmp_path)
+    try:
+        first = jobs.create(payload())
+        jobs.start(first['id'], first['mapping'])
+        assert finish(jobs, first)['state'] == 'done'
+        first_key = jobs.jobs[first['id']]['cache_key']
+        data = payload()
+        if change == 'motion':
+            data['bvh_text'] = data['bvh_text'].replace('30 0 0', '20 0 0')
+        elif change == 'model':
+            data['urdf_text'] = data['urdf_text'].replace('velocity="100"', 'velocity="50"')
+        elif change == 'units':
+            data['scale'] = 1.
+        elif change == 'axes':
+            data['up_axis'] = 'y_up'
+        second = jobs.create(data)
+        if change == 'mapping':
+            second['mapping']['reference_frame'] = 1
+        jobs.start(second['id'], second['mapping'])
+        done = finish(jobs, second)
+        assert done['state'] == 'done', done.get('error')
+        assert not done.get('result_cached')
+        assert jobs.jobs[second['id']]['cache_key'] != first_key
+    finally:
+        jobs.close()
+
+
+@pytest.mark.parametrize('damage', ['missing', 'truncated', 'manifest'])
+def test_damaged_result_cache_recomputes(tmp_path, damage):
+    jobs = MotionJobs(cache_dir=tmp_path)
+    try:
+        first = jobs.create(payload())
+        jobs.start(first['id'], first['mapping'])
+        assert finish(jobs, first)['state'] == 'done'
+        directory = tmp_path / jobs.jobs[first['id']]['cache_key']
+        if damage == 'missing':
+            (directory / 'motion.npz').unlink()
+        elif damage == 'truncated':
+            (directory / 'preview.json').write_text('{')
+        else:
+            (directory / 'manifest.json').write_text('null')
+        second = jobs.create(payload())
+        jobs.start(second['id'], second['mapping'])
+        done = finish(jobs, second)
+        assert done['state'] == 'done' and not done.get('result_cached')
+    finally:
+        jobs.close()
+
+
+def test_result_identity_tracks_algorithm_and_simulation_assets(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from web_host import motion_cache
+    jobs = MotionJobs()
+    try:
+        first = jobs.create(payload())
+        job = jobs.jobs[first['id']]
+        model = tmp_path / 'model'
+        (model / 'mujoco').mkdir(parents=True)
+        (model / 'urdf').mkdir()
+        xml = model / 'mujoco/model.xml'
+        xml.write_text('<mujoco/>')
+        urdf = model / 'urdf/model.standalone.urdf'
+        urdf.write_text('<robot/>')
+        job['simulation'] = {'directory':model, 'config_sha256':'original'}
+        implementation = tmp_path / 'implementation.py'
+        implementation.write_text('original')
+        find_spec = motion_cache.importlib.util.find_spec
+        monkeypatch.setattr(motion_cache.importlib.util, 'find_spec', lambda name:
+            SimpleNamespace(origin=str(implementation)) if name == 'bvh_broadcaster.generic_retarget'
+            else find_spec(name))
+        def key():
+            return motion_cache.result_key(job, first['mapping'])
+        previous = key()
+        for change in (lambda: xml.write_text('<mujoco changed="1"/>'),
+                       lambda: urdf.write_text('<robot changed="1"/>'),
+                       lambda: job['simulation'].update(config_sha256='changed'),
+                       lambda: implementation.write_text('changed')):
+            change()
+            current = key()
+            assert current != previous
+            previous = current
+    finally:
+        jobs.close()
+
+
+def test_cache_write_failure_keeps_completed_downloads(tmp_path):
+    unavailable = tmp_path / 'not-a-directory'
+    unavailable.write_text('preserve this file')
+    jobs = MotionJobs(cache_dir=unavailable)
+    try:
+        first = jobs.create(payload())
+        jobs.start(first['id'], first['mapping'])
+        done = finish(jobs, first)
+        assert done['state'] == 'done' and done['cache_warning']
+        assert jobs.result(first['id'], 'motion.npz').startswith(b'PK')
+        assert unavailable.read_text() == 'preserve this file'
+    finally:
+        jobs.close()
 
 
 @pytest.mark.parametrize('change', [
@@ -264,7 +444,7 @@ def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urd
         job = jobs.create(data)
         assert job['state'] == 'mapping' and job['joint_count'] == 37
         assert sum(bool(t['source']) for t in job['mapping']['targets']) == 16
-        assert next(t['target'] for t in job['mapping']['targets'] if t['source'] == 'LeftHand') == 'BN_LeftHand_axis_2_link'
+        assert next(t['target'] for t in job['mapping']['targets'] if t['source'] == 'LeftHand') == 'BN_LeftHand_pitch_link'
         job['mapping']['limit_policy'] = 'preview'
         jobs.start(job['id'], job['mapping'])
         done = finish(jobs, job)

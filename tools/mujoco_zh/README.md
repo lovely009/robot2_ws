@@ -22,7 +22,7 @@
 /home/ly/robot2_ws/tools/mujoco_zh/python_zh.sh /absolute/path/viewer_script.py
 ```
 
-这是独立入口，运行包放在 `~/.cache/robot2-mujoco-zh/runtime`。工作台的自动启动入口仍使用原来的环境，已打开的窗口需要通过上述入口重新打开才能显示中文。
+运行包放在 `~/.cache/robot2-mujoco-zh/runtime`。工作台通过 `robot_sim/launch/mujoco.launch.py` 自动检测此运行包和 Noto CJK 字体，并给 MuJoCo 桥进程加载中文环境。缺少运行包或字体时继续使用原环境。已经运行的仿真需要重新启动才能切换界面语言。上面的脚本也可独立启动 Viewer。
 
 ## 构建和检查
 

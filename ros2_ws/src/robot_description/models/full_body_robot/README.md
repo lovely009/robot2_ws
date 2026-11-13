@@ -1,5 +1,7 @@
 # full_body_robot
 
+> 交接状态（2026-11-13）：左臂整体朝外的模型已重建并安装，46 项装配相关回归通过。最新有限电机内部豁免规则下的完整限位扫描仍在运行，当前主模型尚未启用本轮最终扫描结果。下文限位计算方法描述的是最终流程；必须完成扫描、重建、验证和安装后，才能将生成的范围视为本轮正式仿真软件限位。
+
 2026-11-13 主模型使用新 `../robot_body/urdf/cnm.urdf` 和 `../全身不带头.STEP` 的原生装配坐标，胯部采用已核验的安装孔／座面重建，左手板保留新版导出中已向外伸出的姿态。
 当前入口为 [`mujoco/full_body_robot.xml`](mujoco/full_body_robot.xml)，保留 37 个输出关节、30 个辅助关节、10 根闭环连杆和 37 个电机编号。
 38 个主体和耦合活动件分别绑定到对应运动 body。源 STL 的连通域重新分类，避免区域编号重排、合并或拆分造成错误归属。
@@ -42,7 +44,7 @@ tools/mujoco_zh/run.sh --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/m
 显示网格在 `mujoco/visual/native/`，分件归属与零位变换记录在 [`config/native_assembly.json`](config/native_assembly.json)。
 肩臂、双腕及胯部细节见 [新版主模型实体渲染](cad/assembly_audit/2026-11-13-native-main-preview.png)。
 主模型与 standalone 的新版摘要已注册到 BVH 通用映射配置。
-本轮 75 项针对性测试通过，验证分组、源摘要和六组可达采样数见 `cad/assembly_audit/2026-11-13-validation.json`。
+前一轮 75 项针对性测试记录（不含本轮尚在运行的限位重扫），验证分组、源摘要和六组可达采样数见 `cad/assembly_audit/2026-11-13-validation.json`。
 新版输入、base／左腕差异和独立审查见 `cad/assembly_audit/2026-11-13-new-body-check.md`；此前 Robot_body2 阶段报告仅保留为历史证据。
 
 另提供 ±180° 仿真副本：[`mujoco/full_body_robot.180deg.xml`](mujoco/full_body_robot.180deg.xml)，以及 `urdf/full_body_robot.180deg.urdf`、`urdf/full_body_robot.180deg.standalone.urdf`。

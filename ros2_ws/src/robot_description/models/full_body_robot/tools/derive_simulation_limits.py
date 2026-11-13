@@ -374,6 +374,12 @@ class Workspace:
         if self.collisions.unclassified_collisions:
             raise ValueError(f"Unclassified neutral CAD contacts: {len(self.collisions.unclassified_collisions)}; see /tmp/full-body-neutral-mates.json")
 
+    def validate_snapshot(self):
+        if (scan_artifacts.policy_hashes(MODEL)!=self.policy_evidence
+                or source_fingerprint()!=self.geometry_evidence
+                or validate_sources()!=self.source_evidence):
+            raise ValueError('Scan inputs changed during execution; discard this generation')
+
     def pose(self, positions):
         self.controller.set_configuration(self.data, positions)
 
@@ -470,22 +476,19 @@ def source_fingerprint():
 
 
 def save_result(workspace, report, group_names=None):
-    if (scan_artifacts.policy_hashes(MODEL)!=workspace.policy_evidence
-            or source_fingerprint()!=workspace.geometry_evidence
-            or validate_sources()!=workspace.source_evidence):
-        raise ValueError('Scan inputs changed during execution; discard this generation')
+    workspace.validate_snapshot()
     bounds = {name: list(limits) for name, limits in report["joint_limits"].items()}
     groups, actuators = coupled_ranges(workspace, bounds, group_names)
-    alignment=validate_sources()
+    alignment=workspace.source_evidence
     for filename, expected in workspace.collisions.collision_mesh_hashes.items():
         if hashlib.sha256((MODEL/'mujoco/collision/native'/filename).read_bytes()).hexdigest()!=expected:
             raise ValueError('Collider changed during scanning: '+filename)
     report.update(
-        geometry_fingerprint=source_fingerprint(), source_urdf_sha256=alignment['urdf_sha256'],
+        geometry_fingerprint=workspace.geometry_evidence, source_urdf_sha256=alignment['urdf_sha256'],
         source_step_sha256=alignment['step_sha256'],
-        scan_script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        mating_script_sha256=hashlib.sha256(Path(cad_mating.__file__).read_bytes()).hexdigest(),
-        policy_inputs_sha256=scan_artifacts.policy_hashes(MODEL),
+        scan_script_sha256=workspace.policy_evidence['tools/derive_simulation_limits.py'],
+        mating_script_sha256=workspace.policy_evidence['tools/cad_mating.py'],
+        policy_inputs_sha256=workspace.policy_evidence,
         scope='simulation_only', scan_mode='all_37_single_axis + 6_group_2d',
         hardware_validation='not_calibrated',
         collision_mesh_sha256=workspace.collisions.collision_mesh_hashes,
@@ -515,9 +518,12 @@ def save_result(workspace, report, group_names=None):
         raise ValueError('Incomplete or unclassified geometry limits cannot be installed')
     from robot_transmission.coupled_limits import CoupledLimits
     CoupledLimits({name:g['coupled_workspace'] for name,g in report['differential_groups'].items()}, bounds).validate(dict.fromkeys(bounds,0.))
+    scan_artifacts.validate_groups(MODEL,report)
+    workspace.validate_snapshot()
     output = MODEL / "mujoco/geometry_limits.json"
     temporary=output.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    workspace.validate_snapshot()
     temporary.replace(output)
     config = {
         "source": "mujoco/geometry_limits.json",

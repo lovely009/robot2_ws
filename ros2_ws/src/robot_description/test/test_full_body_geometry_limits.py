@@ -81,7 +81,14 @@ def test_adjacent_body_and_external_obstacles_both_remain_checked():
     assert 'obstacle' in strict.check(data)
 
 
-def test_scanned_limits_are_bound_to_current_exact_cad():
+@pytest.fixture
+def completed_scan():
+    config=yaml.safe_load((MODEL/'config/simulation_limits.yaml').read_text())
+    if config.get('source')!='mujoco/geometry_limits.json':
+        pytest.skip('Full CAD scan is still pending; final scan artifact checks run after activation')
+
+
+def test_scanned_limits_are_bound_to_current_exact_cad(completed_scan):
     report = json.loads((MODEL / 'mujoco/geometry_limits.json').read_text())
     config = yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text())
     assert config['collision_validation'].startswith('sampled:')
@@ -95,7 +102,7 @@ def test_scanned_limits_are_bound_to_current_exact_cad():
     assert config['source_sha256'] == hashlib.sha256((MODEL / 'urdf/full_body_robot.urdf').read_bytes()).hexdigest()
 
 
-def test_new_scanned_asymmetric_bounds_are_used_without_legacy_symmetrizing():
+def test_new_scanned_asymmetric_bounds_are_used_without_legacy_symmetrizing(completed_scan):
     report = json.loads((MODEL / 'mujoco/geometry_limits.json').read_text())
     config = yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text())
     assert len(report['joint_limits']) == len(config['joint_limits']) == 37
@@ -107,7 +114,7 @@ def test_new_scanned_asymmetric_bounds_are_used_without_legacy_symmetrizing():
     assert any(abs(a+b) > 1e-4 for a,b in report['joint_limits'].values())
 
 
-def test_native_coupled_domains_match_the_display_model():
+def test_native_coupled_domains_match_the_display_model(completed_scan):
     from robot_transmission.coupled_limits import CoupledLimits
     config = yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text())
     topology = yaml.safe_load((MODEL / 'config/motor_topology.yaml').read_text())
@@ -237,22 +244,41 @@ def test_scan_generation_ranges_masks_and_policy_are_bound(tmp_path):
     artifacts=scanner.scan_artifacts
     for filename in artifacts.POLICY_PATHS:
         path=tmp_path/filename;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'policy')
-    (tmp_path/'mujoco').mkdir()
+    (tmp_path/'mujoco').mkdir(exist_ok=True)
+    groups={f'g{i}':{'joints':[f'j{2*i}',f'j{2*i+1}'],
+                        'coupled_workspace':{'joints':[f'j{2*i}',f'j{2*i+1}'],'valid_rows':['1']}} for i in range(6)}
+    (tmp_path/'config/motor_topology.yaml').write_text(yaml.safe_dump({'differential_groups':{name:{'joints':g['joints']} for name,g in groups.items()}}))
+    (tmp_path/'config/native_assembly.json').write_text(json.dumps({'coupled_visual_world_transforms':{},'collision_validation':'pending'}))
+    (tmp_path/'mujoco/full_body_robot.physics.xml').write_text('<mujoco/>')
     hashes=artifacts.policy_hashes(tmp_path)
     report={'policy_inputs_sha256':hashes,'scan_script_sha256':hashes['tools/derive_simulation_limits.py'],
-            'mating_script_sha256':hashes['tools/cad_mating.py'],'joint_limits':{'j':[-.2,.3]},
-            'actuator_limits':{'m':[-.1,.4]},'differential_groups':{'g':{'coupled_workspace':{'valid_rows':['1']}}}}
+            'mating_script_sha256':hashes['tools/cad_mating.py'],'joint_limits':{f'j{i}':[-.2,.3] for i in range(37)},
+            'actuator_limits':{f'm{i}':[-.1,.4] for i in range(37)},'differential_groups':groups}
     raw=json.dumps(report).encode();(tmp_path/'mujoco/geometry_limits.json').write_bytes(raw)
-    config={'scan_report_sha256':hashlib.sha256(raw).hexdigest(),'joint_limits':{'j':{'lower':-.2,'upper':.3}},
-            'actuator_limits':{'m':{'lower':-.1,'upper':.4}},'coupled_limits':{'g':{'valid_rows':['1']}}}
+    config={'scan_report_sha256':hashlib.sha256(raw).hexdigest(),
+            'joint_limits':{n:dict(zip(('lower','upper'),v)) for n,v in report['joint_limits'].items()},
+            'actuator_limits':{n:dict(zip(('lower','upper'),v)) for n,v in report['actuator_limits'].items()},
+            'coupled_limits':{name:g['coupled_workspace'] for name,g in groups.items()}}
     assert artifacts.validate(tmp_path,config)==report
     for key in ('joint_limits','actuator_limits','coupled_limits'):
         broken=copy.deepcopy(config);broken[key]={}
         with pytest.raises(ValueError,match='mismatch'):artifacts.validate(tmp_path,broken)
     broken=copy.deepcopy(config);broken['scan_report_sha256']='older-generation'
     with pytest.raises(ValueError,match='generation mismatch'):artifacts.validate(tmp_path,broken)
-    (tmp_path/'tools/cad_mating.py').write_bytes(b'new policy')
-    with pytest.raises(ValueError,match='policy'):artifacts.validate(tmp_path,config)
+    for filename in ['tools/cad_mating.py','config/motor_topology.yaml','config/native_assembly.json','config/arm_mount_alignment.json']:
+        path=tmp_path/filename;original=path.read_bytes()
+        if filename=='config/native_assembly.json':
+            path.write_text(json.dumps({'coupled_visual_world_transforms':{'new':'pose'}}))
+        else:path.write_bytes(original+b'\n# changed policy')
+        with pytest.raises(ValueError,match='policy'):artifacts.validate(tmp_path,config)
+        path.write_bytes(original)
+    broken_report=copy.deepcopy(report);broken_report['differential_groups'].pop('g0')
+    broken_config=copy.deepcopy(config);broken_config['coupled_limits'].pop('g0')
+    raw=json.dumps(broken_report).encode();(tmp_path/'mujoco/geometry_limits.json').write_bytes(raw)
+    broken_config['scan_report_sha256']=hashlib.sha256(raw).hexdigest()
+    with pytest.raises(ValueError,match='all six'):artifacts.validate(tmp_path,broken_config)
+    broken_report=copy.deepcopy(report);broken_report['differential_groups']['g0']['joints'].reverse()
+    with pytest.raises(ValueError,match='pairing'):artifacts.validate_groups(tmp_path,broken_report)
 
 
 def test_verified_finite_interior_also_applies_to_contacts_absent_at_neutral():
@@ -280,3 +306,45 @@ def test_axial_interface_fit_accepts_only_the_documented_tolerance():
     assert len(tiny)==1 and tiny[0][0]==tiny[0][1]
     assert tiny[0][2]==pytest.approx(3e-9)
     assert not list(intersections([[0.,.01]],[[.0101,.02]]))
+
+
+def test_save_rechecks_snapshot_after_computation_before_publishing(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    topology=yaml.safe_load((MODEL/'config/motor_topology.yaml').read_text())
+    names=[j.get('name') for j in ET.parse(MODEL/'urdf/full_body_robot.urdf').findall('joint')]
+    groups={name:{'joints':group['joints'],'coupled_workspace':{'joints':group['joints'],'lower':[0.,0.],
+             'step':float(np.deg2rad(1.)),'valid_rows':['1']}} for name,group in topology['differential_groups'].items()}
+    (tmp_path/'config').mkdir();(tmp_path/'config/motor_topology.yaml').write_text(yaml.safe_dump(topology))
+    calls=[]
+    def snapshot():
+        calls.append(True)
+        if len(calls)>1:raise ValueError('inputs changed during computation')
+    collisions=SimpleNamespace(collision_mesh_hashes={},candidate_neutral_collisions=[],
+        exemption_records=lambda:[],interior_catalog=lambda:[],unclassified_collisions=[],assembly_exclusions=[])
+    workspace=SimpleNamespace(validate_snapshot=snapshot,source_evidence={'urdf_sha256':'u','step_sha256':'s'},
+        geometry_evidence='g',policy_evidence={'tools/derive_simulation_limits.py':'scanner','tools/cad_mating.py':'mating'},collisions=collisions)
+    actuators={f'motor{i}':[-1.,1.] for i in range(37)}
+    monkeypatch.setattr(scanner,'MODEL',tmp_path)
+    monkeypatch.setattr(scanner,'coupled_ranges',lambda *args:(groups,actuators))
+    with pytest.raises(ValueError,match='during computation'):
+        scanner.save_result(workspace,{'joint_limits':dict.fromkeys(names,[-1.,1.])})
+    assert len(calls)==2 and not (tmp_path/'mujoco/geometry_limits.json').exists()
+
+
+def test_policy_binding_ignores_only_derived_status_and_limit_outputs(tmp_path):
+    artifacts=scanner.scan_artifacts
+    for filename in artifacts.POLICY_PATHS:
+        path=tmp_path/filename;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('input')
+    assembly=tmp_path/'config/native_assembly.json'
+    assembly.write_text(json.dumps({'poses':[1.,2.],'collision_validation':'pending'}))
+    physics=tmp_path/'mujoco/full_body_robot.physics.xml'
+    root=ET.fromstring('<mujoco><worldbody><body><joint name="j" axis="0 0 1" limited="true" range="-1 1"/></body></worldbody><actuator><position joint="j" ctrlrange="-1 1"/></actuator><custom/></mujoco>')
+    text=ET.SubElement(root.find('custom'),'text',name='robot_sim_joint_position',data=json.dumps({'flanges':{'a':'rod'},'joint_limits':{'j':[-1,1]},'coupled_limits':{}}))
+    physics.write_bytes(ET.tostring(root));before=artifacts.policy_hashes(tmp_path)
+    assembly.write_text(json.dumps({'poses':[1.,2.],'collision_validation':'sampled'}))
+    root.find('.//joint').set('range','0 0');root.find('actuator/position').set('ctrlrange','-.1 .2')
+    text.set('data',json.dumps({'flanges':{'a':'rod'},'joint_limits':{'j':[0,0]},'coupled_limits':{'derived':'mask'}}))
+    ET.SubElement(root,'keyframe');physics.write_bytes(ET.tostring(root))
+    assert artifacts.policy_hashes(tmp_path)==before
+    root.find('actuator/position').set('joint','other');physics.write_bytes(ET.tostring(root))
+    assert artifacts.policy_hashes(tmp_path)!=before

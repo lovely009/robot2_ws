@@ -1,4 +1,4 @@
-"""Names from Robot_body1 meshes; retain export whitespace only in file paths."""
+"""Names from CAD meshes; retain export whitespace only in file paths."""
 from pathlib import Path
 import json
 

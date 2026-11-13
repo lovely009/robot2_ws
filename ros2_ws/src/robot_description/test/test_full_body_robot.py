@@ -64,7 +64,7 @@ def test_native_visuals_cover_sources_and_unique_component_ownership():
         assert geom.get('mass') == '0'
         assert geom.get('contype') == geom.get('conaffinity') == '0'
     for name, entry in metadata['ownership'].items():
-        source = MODEL.parent / 'Robot_body1/meshes' / entry['source']
+        source = MODEL.parent / 'robot_body/meshes' / entry['source']
         assert hashlib.sha256(source.read_bytes()).hexdigest() == entry['source_sha256']
         assigned = entry['fixed_regions'] + [i for part in entry['parts'].values() for i in part]
         assigned += [i for rotor in entry['rotor_regions'].values() for i in rotor]
@@ -88,7 +88,7 @@ def test_runtime_inertias_preserve_native_export_world_com_and_tensor():
     import json
     import numpy as np
     from scipy.spatial.transform import Rotation
-    source = ET.parse(MODEL.parent / 'Robot_body1/urdf/Robot_body1.urdf').getroot()
+    source = ET.parse(MODEL.parent / 'robot_body/urdf/cnm.urdf').getroot()
     original = {link.get('name').strip(): link for link in source.findall('link')}
     native = json.loads((MODEL / 'config/step_alignment.json').read_text())['links']
     runtime = ET.parse(RUNTIME_URDF).getroot()
@@ -107,7 +107,11 @@ def test_runtime_inertias_preserve_native_export_world_com_and_tensor():
         return center,tensor,float(item.find('mass').get('value'))
     for link in runtime.findall('link'):
         name=link.get('name');actual=inertia(link,frames[name])
-        expected=inertia(original[name],np.asarray(native[name]['world_transform']))
+        expected_frame=np.asarray(native[name]['world_transform'])
+        mounting=json.loads((MODEL/'config/arm_mount_alignment.json').read_text())
+        if name in mounting['affected_links']:
+            expected_frame=np.asarray(mounting['world_transform'])@expected_frame
+        expected=inertia(original[name],expected_frame)
         np.testing.assert_allclose(actual[0],expected[0],atol=1e-10)
         np.testing.assert_allclose(actual[1],expected[1],atol=1e-10)
         assert actual[2]==expected[2]
@@ -229,7 +233,7 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
     flange_rotations = {name: flange_rotation(name).copy() for name in moving_links}
     for side, sign in (("plus", 1), ("minus", -1)):
         mount = data.site(f"hips_{side}_platform_ball").xpos
-        np.testing.assert_allclose(mount, [sign * 0.07152, 0.06427371, 0.02574199], atol=1e-6)
+        np.testing.assert_allclose(mount, [sign * 0.07152, 0.05493050, 0.03120560], atol=1e-6)
         crank = data.site(f"hips_{side}_motor_ball").xpos - data.body(f"hips_{side}_flange").xpos
         assert sign * crank[0] > 0.029
     for joint in ET.parse(RUNTIME_URDF).getroot().findall("joint"):
@@ -309,7 +313,7 @@ def test_native_rods_retain_exact_source_component_geometry():
     count=0
     for source in metadata['ownership'].values():
         if not source['parts']:continue
-        reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL.parent/'Robot_body1/meshes'/source['source']));reader.Update()
+        reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL.parent/'robot_body/meshes'/source['source']));reader.Update()
         regions=vtk.vtkPolyDataConnectivityFilter();regions.SetInputConnection(reader.GetOutputPort())
         regions.SetExtractionModeToAllRegions();regions.ColorRegionsOn();regions.Update()
         points=vtk_to_numpy(regions.GetOutput().GetPoints().GetData()).astype(float)
@@ -414,5 +418,7 @@ def test_preview_is_enumerable_without_invented_motor_mapping(monkeypatch):
 
     assert MODEL.name in enumerate_arm_models(MODEL.parent)
     assert not has_joint_mapping_source(MODEL.name, MODEL.parent)
-    with pytest.raises(ValueError, match="motor_driver.yaml"):
-        model_transmissions(MODEL.name, MODEL.parent)
+    metadata = model_transmissions(MODEL.name, MODEL.parent)
+    assert metadata['mapping_kind'] == 'topology'
+    assert metadata['hardware_ready'] is False
+    assert metadata['direct_joints'] == {}

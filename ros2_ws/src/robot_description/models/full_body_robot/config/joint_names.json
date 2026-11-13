@@ -1,5 +1,5 @@
 {
-  "source": "Robot_body1/meshes",
+  "source": "robot_body/meshes",
   "rule": "strip whitespace and remove _link for joints",
   "joints": {
     "BN_Spine_yaw": "BN_Spine_yaw",

@@ -18,6 +18,9 @@ import yaml
 import audit_step_linkages as audit
 import hips_mounting as hips
 import native_names
+import left_hand_mounting
+import arm_mounting
+import scan_artifacts
 import build_mujoco_model as shared
 from assembly_fingerprint import geometry_fingerprint
 
@@ -64,13 +67,15 @@ def append(pieces):
     result.Update();return result.GetOutput()
 
 
-def source_tree(alignment):
-    source=MODEL.parent/'Robot_body1/urdf/Robot_body1.urdf'
+def source_tree(alignment, hand_mounting=None):
+    source=MODEL.parent/alignment['source_urdf']
     if hashlib.sha256(source.read_bytes()).hexdigest()!=alignment['urdf_sha256']:
         raise ValueError('Repeat STEP calibration after changing the source URDF')
     root=ET.parse(source).getroot()
     root.set('name',MODEL.name)
     frames={name:np.asarray(entry['world_transform']) for name,entry in alignment['links'].items()}
+    if hand_mounting is not None:
+        frames[hand_mounting['hand_link']]=np.asarray(hand_mounting['hand_world_transform'])
     physical={name:value.copy() for name,value in frames.items()}
     axis_file=MODEL/'config/kinematic_axes.json'
     axis_calibration=json.loads(axis_file.read_text()) if axis_file.exists() else {}
@@ -91,6 +96,11 @@ def source_tree(alignment):
             if np.dot(axis,source_axis) < 0:axis=-axis
             physical[child][:3,3]=point+axis*np.dot(frames[child][:3,3]-point,axis)
             joint.find('axis').set('xyz',shared.numbers(physical[child][:3,:3].T@axis))
+    arm_mount=arm_mounting.solve(root,physical)
+    arm_delta=np.asarray(arm_mount['world_transform'])
+    for name in arm_mount['affected_links']:
+        frames[name]=arm_delta@frames[name]
+        physical[name]=arm_delta@physical[name]
     for joint in root.findall('joint'):
         parent,child=(joint.find(tag).get('link') for tag in ('parent','child'))
         urdf_origin(joint.find('origin'),np.linalg.inv(physical[parent])@physical[child])
@@ -104,9 +114,9 @@ def source_tree(alignment):
             urdf_origin(origin,offset@transform(position,rotation.as_matrix()))
         for mesh in link.findall('.//mesh'):
             filename=Path(mesh.get('filename')).name.lstrip()
-            if not (MODEL.parent/'Robot_body1/meshes'/filename).is_file():raise ValueError(filename)
-            mesh.set('filename','package://robot_description/models/Robot_body1/meshes/'+filename)
-    return root,frames,physical
+            if not (source.parents[1]/'meshes'/filename).is_file():raise ValueError(filename)
+            mesh.set('filename','package://robot_description/models/'+alignment['source']+'/meshes/'+filename)
+    return root,frames,physical,arm_mount
 
 
 def split_geometry(alignment, metadata, rods, mounting):
@@ -114,6 +124,8 @@ def split_geometry(alignment, metadata, rods, mounting):
     for old_name,entry in metadata['links'].items():
         name=Path(entry['source']).stem.strip();source=MODEL.parent/metadata['source']/'meshes'/entry['source']
         if hashlib.sha256(source.read_bytes()).hexdigest()!=entry['source_sha256']:raise ValueError('Source mesh changed')
+        if alignment['links'][name]['source_sha256']!=entry['source_sha256']:
+            raise ValueError(f'{name}: mesh ownership and STEP calibration use different sources')
         regions,vertices,ids=read_regions(source)
         if entry.get('source_region_count',regions.GetNumberOfExtractedRegions())!=regions.GetNumberOfExtractedRegions():raise ValueError('Region count changed')
         parts=deepcopy(entry.get('components',{}));rotors=entry.get('rotor_regions',{})
@@ -168,7 +180,12 @@ def split_geometry(alignment, metadata, rods, mounting):
             if not indices and not extras[part]:
                 continue
             output=DIRECTORY/(part+'.STL')
-            shared.write_display_mesh(append([extract(regions,indices),*extras[part]]),output)
+            piece=append([extract(regions,indices),*extras[part]])
+            collision=MODEL/'mujoco/collision/native'/output.name
+            collision.parent.mkdir(parents=True,exist_ok=True)
+            writer=vtk.vtkSTLWriter();writer.SetInputData(piece);writer.SetFileTypeToBinary();writer.SetFileName(str(collision))
+            if not writer.Write():raise OSError(collision)
+            shared.write_display_mesh(piece,output)
             files[part]=output.relative_to(MODEL).as_posix()
         ownership[name]={'source':entry['source'],'source_sha256':entry['source_sha256'],'parts':parts,'rotor_regions':rotors,'fixed_regions':fixed}
     return files,ownership
@@ -180,20 +197,24 @@ def build():
     alignment=json.loads((MODEL/'config/step_alignment.json').read_text())
     metadata=json.loads((MODEL/'config/display_meshes.json').read_text())
     report=audit.audit();rods=report['rods']
-    source,native,frames=source_tree(alignment)
+    hand_mounting=left_hand_mounting.solve(report,alignment,json.loads((MODEL/'config/kinematic_axes.json').read_text()))
+    source,native,frames,arm_mount=source_tree(alignment,hand_mounting)
     aliases,link_aliases=native_names.names()
     topology=native_names.rename_tree(yaml.safe_load((MODEL/'config/motor_topology.yaml').read_text()),aliases)
     limits=native_names.rename_tree(yaml.safe_load((MODEL/'config/simulation_limits.yaml').read_text()),aliases)
-    limits.setdefault('legacy_scalar_caps',deepcopy(limits['joint_limits']))
-    # Old asymmetric intervals use different joint frames and zero poses.
-    # Their magnitude remains a provisional search cap, not collision evidence.
-    for number,motor in topology['motors'].items():
-        if 'joint' not in motor:continue
-        bound=limits['legacy_scalar_caps'][motor['joint']]
-        magnitude=max(abs(bound['lower']),abs(bound['upper']))
-        limits['joint_limits'][motor['joint']].update(lower=-magnitude,upper=magnitude)
-        limits['actuator_limits'][f'motor_{number:02d}'].update(lower=-magnitude,upper=magnitude)
-    limits['preview_limit_policy']='Series-joint search caps use the legacy maximum magnitude symmetrically in native coordinates; coupled output and auxiliary actuator caps retained. Collision/hardware travel remains uncalibrated.'
+    scanned_limits=limits.get('source')=='mujoco/geometry_limits.json'
+    if scanned_limits:scan_artifacts.validate(MODEL,limits)
+    if not scanned_limits:
+        limits.setdefault('legacy_scalar_caps',deepcopy(limits['joint_limits']))
+        # Old asymmetric intervals use different joint frames and zero poses.
+        # Their magnitude remains a provisional search cap, not collision evidence.
+        for number,motor in topology['motors'].items():
+            if 'joint' not in motor:continue
+            bound=limits['legacy_scalar_caps'][motor['joint']]
+            magnitude=max(abs(bound['lower']),abs(bound['upper']))
+            limits['joint_limits'][motor['joint']].update(lower=-magnitude,upper=magnitude)
+            limits['actuator_limits'][f'motor_{number:02d}'].update(lower=-magnitude,upper=magnitude)
+        limits['preview_limit_policy']='Series-joint search caps use the legacy maximum magnitude symmetrically in native coordinates; coupled output and auxiliary actuator caps retained. Collision/hardware travel remains uncalibrated.'
     joints={j.get('name'):j for j in source.findall('joint')}
     for name,joint in joints.items():
         bound=limits['joint_limits'][name]
@@ -249,6 +270,13 @@ def build():
             delta={part:np.eye(4) for part in ('flange','platform','rod')}
             if group_name=='hips':
                 side=prefix.removeprefix('hips_');delta={part:np.asarray(mounting['sides'][side][part+'_transform']) for part in delta}
+            elif group_name=='left_wrist':
+                delta={part:np.asarray(hand_mounting['rods'][rod_name][part+'_transform']) for part in delta}
+            if record['source_body'] in arm_mount['affected_links']:
+                arm_delta=np.asarray(arm_mount['world_transform'])
+                delta={part:arm_delta@value for part,value in delta.items()}
+                origin=hips.point(arm_delta,origin)
+                axis=arm_delta[:3,:3]@axis
             centers={part:hips.point(delta[part],record['endpoints'][tag]['center_m']) for part,tag in (('flange','flange'),('platform','platform'))}
             start,end=centers['flange'],centers['platform'];origin=origin+axis*np.dot(start-origin,axis)
             flange_world=transform(origin,frames[reference][:3,:3]);flange_body=ET.SubElement(bodies[reference],'body',name=prefix+'_flange',**attrs(np.linalg.inv(frames[reference])@flange_world))
@@ -263,7 +291,7 @@ def build():
             joint_name=group_name+'_'+matching[0].get('joint')
             ET.SubElement(flange_body,'joint',name=joint_name,axis=shared.numbers(flange_world[:3,:3].T@axis))
             ET.SubElement(flange_body,'inertial',pos='0 0 0',mass='.03',diaginertia='.00001 .00001 .00001')
-            source_frame=native[record['source_body']]
+            source_frame=np.asarray(alignment['links'][record['source_body']]['world_transform'])
             for part,body,body_frame in (('flange',flange_body,flange_world),('platform',bodies[output],frames[output])):
                 target=delta[part]@source_frame
                 if prefix+'_'+part not in files:
@@ -271,7 +299,7 @@ def build():
                     # Some export groups contain only the outer race: the stud
                     # is already part of the physical output mesh.
                     output_entry=alignment['links'][output]
-                    _,output_points,_=read_regions(MODEL.parent/'Robot_body1/meshes'/output_entry['source'])
+                    _,output_points,_=read_regions(MODEL.parent/metadata['source']/'meshes'/output_entry['source'])
                     output_points=output_points@native[output][:3,:3].T+native[output][:3,3]
                     sphere=record['endpoints']['platform']
                     if np.count_nonzero(abs(np.linalg.norm(output_points-end,axis=1)-sphere['ball_radius_m'])<audit.SURFACE_TOL)<30:
@@ -321,25 +349,36 @@ def build():
     # Scalar caps remain a provisional search domain; old collision grids are discarded.
     from robot_transmission.mujoco_positions import JointPositionTargets
     controller=JointPositionTargets(model,config)
-    workspaces={};step=np.deg2rad(1.)
-    for name,group in topology['differential_groups'].items():
-        pair=group['joints'];bounds=np.asarray([config['joint_limits'][j] for j in pair])
-        first=np.ceil(bounds[:,0]/step).astype(int);last=np.floor(bounds[:,1]/step).astype(int)
-        mask=np.zeros(tuple(last-first+1),dtype=bool)
-        for index in np.ndindex(mask.shape):
-            targets=dict.fromkeys(joints,0.);targets.update({j:float((first[k]+index[k])*step) for k,j in enumerate(pair)})
-            try:controller.apply(data,list(targets),list(targets.values()))
-            except ValueError:continue
-            mask[index]=True
-        mask=binary_erosion(mask,structure=np.ones((3,3)),border_value=1)
-        labels,_=label(mask);zero=tuple(-first)
-        component=labels[zero]
-        if not component:raise ValueError(f'{name}: neutral is outside the interior of the reachable preview domain')
-        mask=labels==component
-        workspaces[name]={'joints':pair,'lower':(first*step).tolist(),'step':float(step),'valid_rows':[''.join('1' if v else '0' for v in row) for row in mask]}
-    limits['coupled_limits']=workspaces
-    limits['source']='Native STEP assembly: recomputed kinematic reachability; provisional serial search magnitudes from legacy scan, symmetric in native coordinates'
-    limits['collision_validation']='pending: legacy collision results do not certify this assembly'
+    if scanned_limits:
+        scan=scan_artifacts.validate(MODEL,limits)
+        if not (scan['geometry_fingerprint']==limits['geometry_sha256']==geometry_fingerprint(MODEL,root)
+                and scan['source_urdf_sha256']==alignment['urdf_sha256']
+                and scan['source_step_sha256']==alignment['step_sha256']):
+            raise ValueError('Assembly changed since the CAD limit scan; regenerate the scan before using its limits')
+        for filename,expected in scan['collision_mesh_sha256'].items():
+            if hashlib.sha256((MODEL/'mujoco/collision/native'/filename).read_bytes()).hexdigest()!=expected:
+                raise ValueError('Exact collision mesh changed since the CAD limit scan: '+filename)
+        workspaces=deepcopy(limits['coupled_limits'])
+    else:
+        workspaces={};step=np.deg2rad(1.)
+        for name,group in topology['differential_groups'].items():
+            pair=group['joints'];bounds=np.asarray([config['joint_limits'][j] for j in pair])
+            first=np.ceil(bounds[:,0]/step).astype(int);last=np.floor(bounds[:,1]/step).astype(int)
+            mask=np.zeros(tuple(last-first+1),dtype=bool)
+            for index in np.ndindex(mask.shape):
+                targets=dict.fromkeys(joints,0.);targets.update({j:float((first[k]+index[k])*step) for k,j in enumerate(pair)})
+                try:controller.apply(data,list(targets),list(targets.values()))
+                except ValueError:continue
+                mask[index]=True
+            mask=binary_erosion(mask,structure=np.ones((3,3)),border_value=1)
+            labels,_=label(mask);zero=tuple(-first)
+            component=labels[zero]
+            if not component:raise ValueError(f'{name}: neutral is outside the interior of the reachable preview domain')
+            mask=labels==component
+            workspaces[name]={'joints':pair,'lower':(first*step).tolist(),'step':float(step),'valid_rows':[''.join('1' if v else '0' for v in row) for row in mask]}
+        limits['coupled_limits']=workspaces
+        limits['source']='Native STEP assembly: recomputed kinematic reachability; provisional serial search magnitudes from legacy scan, symmetric in native coordinates'
+        limits['collision_validation']='pending: legacy collision results do not certify this assembly'
     config['coupled_limits']=workspaces;control_text.set('data',json.dumps(config,separators=(',',':')))
     compiled=deepcopy(root);compiled.find('compiler').set('meshdir',str(MODEL))
     model=mujoco.MjModel.from_xml_string(ET.tostring(compiled,encoding='unicode'))
@@ -350,7 +389,9 @@ def build():
         targets=dict.fromkeys(joints,0.)
         for group in topology['differential_groups'].values():
             trial=targets|{j:float(np.deg2rad(.5)*sign) for j,sign in zip(group['joints'],signs)}
-            controller.workspace.validate(trial);targets=trial
+            try:controller.workspace.validate(trial)
+            except ValueError:continue
+            targets=trial
         controller.set_configuration(data,list(targets.values()))
         ET.SubElement(keys,'key',name=name,qpos=shared.numbers(data.qpos),ctrl=shared.numbers(data.ctrl))
     # Main/mapping URDF is the 37-output skeleton; standalone additionally exposes auxiliary bodies.
@@ -364,9 +405,12 @@ def build():
     ET.indent(root,space='  ')
     limits['geometry_sha256']=geometry_fingerprint(MODEL,root)
     (MODEL/'config/simulation_limits.yaml').write_text(yaml.safe_dump(limits,allow_unicode=True,sort_keys=False))
-    (MODEL/'config/motor_topology.yaml').write_text(yaml.safe_dump(topology,allow_unicode=True,sort_keys=False))
-    (MODEL/'config/joint_names.json').write_text(json.dumps({'source':'Robot_body1/meshes','rule':'strip whitespace and remove _link for joints','joints':aliases,'links':link_aliases},indent=2)+'\n')
-    (MODEL/'config/native_assembly.json').write_text(json.dumps({'source_step_sha256':alignment['step_sha256'],'basis':'native STEP frames plus independently checked hips installation; no ICP matrices','ownership':ownership,'coupled_visual_world_transforms':geometry_poses,'collision_validation':'pending','auxiliary_inertia':'numerical preview surrogates; source physical-link inertias retained from Robot_body1'},indent=2)+'\n')
+    (MODEL/'config/joint_names.json').write_text(json.dumps({'source':metadata['source']+'/meshes','rule':'strip whitespace and remove _link for joints','joints':aliases,'links':link_aliases},indent=2)+'\n')
+    (MODEL/'config/left_hand_mount_alignment.json').write_text(json.dumps(hand_mounting,indent=2)+'\n')
+    (MODEL/'config/arm_mount_alignment.json').write_text(json.dumps(arm_mount,indent=2)+'\n')
+    remounted={hand_mounting['hand_link']:hand_mounting['hand_world_transform']} if hand_mounting['rotation_rad'] else {}
+    remounted.update({name:native[name].tolist() for name in arm_mount['affected_links']})
+    (MODEL/'config/native_assembly.json').write_text(json.dumps({'source_step_sha256':alignment['step_sha256'],'source_urdf_sha256':alignment['urdf_sha256'],'basis':'native '+alignment['source']+' frames with hips installation, outward arm roll zero, and conditional hand mounting; no ICP matrices','remounted_source_link_world_transforms':remounted,'ownership':ownership,'coupled_visual_world_transforms':geometry_poses,'collision_validation':limits['collision_validation'],'auxiliary_inertia':'numerical preview surrogates; source physical-link inertias retained from '+alignment['source']+' and rigidly re-expressed with mounted assemblies'},indent=2)+'\n')
     for filename in ('full_body_robot.xml','full_body_robot.physics.xml'):(MODEL/'mujoco'/filename).write_text(ET.tostring(root,encoding='unicode')+'\n')
     shared.write_standalone_urdf(root,joints,limits)
     print('Native full model: 37 outputs, 30 auxiliary hinges, 10 closed rods; kinematic workspaces regenerated')

@@ -20,6 +20,12 @@ it('enables only the actual complete control subset using model gains',()=>{
   expect(api.jointPolicyTargets(state(),'arm',true,1100)).toEqual([
     {motor_id:2,enabled:true,kp:30,kd:1,confirm_unprotected:false}]);
 });
+it('topology metadata blocks enable but preserves disable even with fresh host status',()=>{
+  const s=state();
+  Object.assign(s.modelTransmissions,{hardware_ready:false,hardware_block_reason:'传动参数待标定'});
+  expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow('待标定');
+  expect(api.jointPolicyTargets(s,'arm',false,1100)[0].enabled).toBe(false);
+});
 it('does not enable disconnected, stale, faulted or incomplete group sessions',()=>{
   const s=state();s.conn.connected=false;expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow();
   s.conn.connected=true;expect(()=>api.jointPolicyTargets(s,'arm',true,4000)).toThrow();

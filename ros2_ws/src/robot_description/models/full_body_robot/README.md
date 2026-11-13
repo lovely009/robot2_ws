@@ -1,22 +1,35 @@
 # full_body_robot
 
-2026-11-12 主模型已迁移到 STEP／`Robot_body1` 原生装配坐标，胯部采用已核验的安装孔／座面重建。
+2026-11-13 主模型使用新 `../robot_body/urdf/cnm.urdf` 和 `../全身不带头.STEP` 的原生装配坐标，胯部采用已核验的安装孔／座面重建，左手板保留新版导出中已向外伸出的姿态。
 当前入口为 [`mujoco/full_body_robot.xml`](mujoco/full_body_robot.xml)，保留 37 个输出关节、30 个辅助关节、10 根闭环连杆和 37 个电机编号。
-38 个主体和 30 份活动件的零位显示直接采用原生装配坐标，不再应用旧的逐件 ICP 显示矩阵。
+38 个主体和耦合活动件分别绑定到对应运动 body。源 STL 的连通域重新分类，避免区域编号重排、合并或拆分造成错误归属。
+原始 robot_body 和 STEP 保留原样；校准矩阵、源文件摘要及 RPY 修正记录在 `config/step_alignment.json`。
+新旧 `Base_link.STL` 逐字节相同。基座上方偏航件局部帧转动 19.25°，网格与轴定义同步重表达，世界轴仍为 −Z；实体世界位置不变。偏航网格连通域由 183 变为 182，合并的旧 0／161 均属固定件，活动件编号已按世界几何重新映射。
+修正前的 38 件原生参考装配与 STEP 节点的距离中位数最大 0.218 mm、p95 最大 1.224 mm；这是离散点云比对，不是装配间隙。
+新版左手板自由端与真实 STEP 节点的最大差约 0.003 mm。板端独立回归避免仅用密集轴承顶点的整件中位数／p95 掩盖板片反折。
+新版双肩连杆球心距为 100.684850 mm，腰杆 42 mm、胯杆 65 mm、腕杆 101.5／66 mm。
+胯部按实际安装孔和座面重建；两侧外摆分支的曲柄补偿为 −67.575°／+88.687°，轴承外圈随连杆，内圈留在安装侧。
 
-关节按 `Robot_body1/meshes` 文件名去掉 `.STL`、末尾 `_link` 与首尾空格命名；连杆保留 `_link`，根连杆为 `Base_link`。
+按用户确认，画面左侧整条手臂在 `BN_LeftUpperArm_3` 长轴处重装 +180°，下游肘、前臂、手板、惯量及腕部闭环同步旋转。安装矩阵记录于 `config/arm_mount_alignment.json`。
+新版 robot_body 已修复左手板姿态及左腕坐标表达，手板自身额外重装角为 0；旧版的 180° 翻转及 −17.167°／+22.308° 曲柄补偿不再套用。
+两根腕杆和平台球头保留新版零位，杆长仍为 101.5／66 mm。左 pitch 正方向采用新导出定义，六组可达域已重算，旧轨迹需按新版 URDF 重新转换。
+安装判断与零位记录见 `config/left_hand_mount_alignment.json`；这不代表真机方向／编码器零位标定。
+工作台 URDFLoader 实际网格近景：[左腕](cad/assembly_audit/2026-11-13-web-left-wrist-corrected.png)、[右腕](cad/assembly_audit/2026-11-13-web-right-wrist-corrected.png)。
+
+关节按 `robot_body/meshes` 文件名去掉 `.STL`、末尾 `_link` 与首尾空格命名；连杆保留 `_link`，根连杆为 `Base_link`。
 例如 `BN_Spine_pitch`、`BN_hips_roll`、`BN_LeftUpperArm_1`、`BN_LeftHand_roll`／`BN_LeftHand_pitch`。
 完整旧名／新名对应见 [`config/joint_names.json`](config/joint_names.json)；电机编号、差动组和关节对应见 [`config/motor_topology.yaml`](config/motor_topology.yaml)。
 仿真位置接口可解析旧名称别名，但旧动作的坐标定义已经变化，应按新版 URDF 重新转换；别名兼容不代表旧轨迹姿态等价。
 
-四处源关节轴心已依据 STEP 和父子件圆柱支持修正：腰 yaw、右肩第 1 轴、左右腕 pitch。
+左大腿第 2 关节的源 RPY 符号错误已修正为 `-0.0740617322384423 1.5707963267949 0`；仅修改该处便使后续六件同时对齐 STEP。
+四处源关节轴心已依据 STEP 和父子件圆柱支持修正：左右肩第 1 轴、左右腕 pitch。
 通过重表达 visual／collision／inertial 与子关节坐标，保持零位网格和质心的世界位姿。
-轴线记录见 [`config/kinematic_axes.json`](config/kinematic_axes.json)、`cad/assembly_audit/2026-11-12-joint-axes.json`。
-其余 29 根轴有父子双侧圆柱支持，4 根脚部轴目前仅有单侧支持，保留源定义并记录待机械核实。
+轴线记录见 [`config/kinematic_axes.json`](config/kinematic_axes.json)、`cad/assembly_audit/2026-11-13-joint-axes.json`。
+其余 31 根轴有父子双侧圆柱支持，两根脚部 roll 轴目前仅有单侧支持，保留源定义并记录待机械核实。
 
-六组两轴可达域已按新闭环几何重算。串联关节使用历史最大绝对值构成正负对称的临时预览域，避免把旧坐标的单侧边界直接套入新关节；差动输出与辅助电机搜索边界保留。**当前可达域仅验证运动学，不证明新装配的碰撞安全范围**。
-`simulation_limits.yaml` 明确记录 `collision_validation: pending`；主体惯量保留 `Robot_body1` 导出值，辅助件惯量为数值预览参数，尚未完成实物质量分配。
-当前配置分别记录 URDF 摘要和含实际网格、装配关系的几何指纹；`mujoco/geometry_limits.json` 保留为迁移前的扫描证据，其旧指纹不匹配当前装配，不能作为新版碰撞验收。
+仿真限位按当前整臂朝向重新进行 37 轴扫描与六组二维耦合检查，结果见 `config/simulation_limits.yaml` 和 `mujoco/geometry_limits.json`。使用未降面的 CAD 三角网格，步长 1°、内收余量 2°；其他组保持零位。
+按用户授权，只有轴线与实际几何支持的有限电机内部区域允许重叠。有限配合面、球头和轴承区域在每个姿态检查配准；零位接触本身不授予豁免，不再排除整对相邻装配体。平面接触必须同时落在双方当前真实三角面片内，断开的轴向材料段分别处理。
+JSON/YAML 以扫描报告 SHA256、逐轴范围、六组掩码和计算规则／CAD 证据摘要绑定，重建时拒绝混用旧结果。主体惯量保留新版 robot_body 值并随装配变换；辅助件惯量仅用于数值预览。这些是仿真软件范围，硬件行程、线缆约束、实体包容及跨组组合姿态尚未标定。
 
 ```bash
 source ros2_ws/install/setup.bash
@@ -25,9 +38,12 @@ tools/mujoco_zh/run.sh --mjcf /home/ly/robot2_ws/ros2_ws/src/robot_description/m
 ```
 
 `full_body_robot.urdf` 和 `.mapping.urdf` 为 37 轴骨架；`.standalone.urdf` 额外包含活动法兰、连杆和辅助关节，用于完整 CAD 运动显示。
+新版分件证据见 `cad/assembly_audit/2026-11-13-components.json`，杆端与安装检查见 `2026-11-13-step-linkages.json` 和 `2026-11-13-hips-mounting.json`。
 显示网格在 `mujoco/visual/native/`，分件归属与零位变换记录在 [`config/native_assembly.json`](config/native_assembly.json)。
-肩臂、双腕及胯部细节见 [新版主模型实体渲染](cad/assembly_audit/2026-11-12-native-main-preview.png)。
+肩臂、双腕及胯部细节见 [新版主模型实体渲染](cad/assembly_audit/2026-11-13-native-main-preview.png)。
 主模型与 standalone 的新版摘要已注册到 BVH 通用映射配置。
+本轮 75 项针对性测试通过，验证分组、源摘要和六组可达采样数见 `cad/assembly_audit/2026-11-13-validation.json`。
+新版输入、base／左腕差异和独立审查见 `cad/assembly_audit/2026-11-13-new-body-check.md`；此前 Robot_body2 阶段报告仅保留为历史证据。
 
 另提供 ±180° 仿真副本：[`mujoco/full_body_robot.180deg.xml`](mujoco/full_body_robot.180deg.xml)，以及 `urdf/full_body_robot.180deg.urdf`、`urdf/full_body_robot.180deg.standalone.urdf`。
 该副本的 67 个转动关节和 37 个驱动范围均为 ±π，位置接口的 37 个输出范围同步为 ±π，移除旧采样域限制；10 处实际闭环与几何逆解保留，因此部分角度组合仍不可达。当前主模型与其配置保持原范围。
@@ -152,7 +168,9 @@ STEP 耦合连杆复核：六组、10 根杆、20 个端点都找到实际 STEP 
 
 拓扑配置见 [config/motor_topology.yaml](config/motor_topology.yaml)，待确认参数用 `null` 表示。
 表中的名称是 URDF 关节名。单电机条目为一对一分配，双电机条目为两台电机共同控制两个关节。
-编号采用本模型的电机编号，CAN 总线和节点 ID 另行确认。
+用户已确认机械电机编号 1～37 即实际 CAN 节点 ID 1～37，已写入拓扑。
+工作台可读取 25 个一对一组和 6 个双电机差动组；方向、零位、差动参数及驱动配置尚未标定，
+该拓扑仅描述编号对应关系，不作为可执行传动配置，真机控制保持禁用。
 
 | 电机编号 | 传动分组 | URDF 关节 |
 |---|---|---|
@@ -231,23 +249,8 @@ MJCF、显示副本和仿真 URDF 可用 MuJoCo 环境执行 `tools/build_mujoco
 其他输出关节保持零位。
 完整边界原因、零位配合面排除清单和几何指纹记录在 [`mujoco/geometry_limits.json`](mujoco/geometry_limits.json)。
 
-网格按 CAD 连通零件分开检查。零位距离小于 0.5 mm 的零件对作为配合面排除，
-用于容纳导出与降面误差，运动时对其余零件对检查 0.1 mm 间隙。
-按用户允许部分干涉的要求，两侧大腿的 6 个转动连接、两侧手腕的 4 个输出连接、4 个电机法兰连接和
-4 个连杆球头连接，共 18 对直接相邻装配体，允许内部 CAD 重叠。
-报告的 `adjacent_assembly_exclusions` 列出这些装配体对。此项按装配关系过滤接触，未设置实体穿透深度上限。
-
-当前范围如下，角度单位为度。手腕表值为整个二维可动区域的投影包络，实际滑块范围随另一腕轴当前目标变化。
-
-| 部位 | axis_1 | axis_2 | axis_3 |
-|---|---|---|---|
-| 左大腿 | −100～32 | −15～64 | −178～178 |
-| 右大腿 | −40～88 | −15～64 | −178～178 |
-| 左腕 | −36～36 | −13～13 | |
-| 右腕 | −13～13 | −32～36 | |
-
-这些范围仅供仿真使用。三角面检测与离散采样仍可能漏掉实体包容或采样点之间的干涉，
-跨组组合姿态、线缆约束和实机编码器方向需要另行检查。达到 ±178° 的轴来自 ±180° 搜索上限内收余量。
+网格按 CAD 连通零件分开检查，保留全部非退化原始三角面；`mujoco/collision/native/` 为未降面的扫描输入。扫描报告列出每一有限豁免的 STEP 证据、参与组件摘要、材料区间或真实平面片索引；`adjacent_assembly_exclusions` 必须为空。
+完整 37 轴范围、各侧首次阻挡原因和六组二维掩码见上述 JSON；便于查看的角度表另见 `cad/assembly_audit/2026-11-13-outward-arm-limits.md`。±178° 表示到达 ±180° 搜索上限后内收余量，不能解释为实测硬限位。二维包络内仍需通过掩码判断组合目标。
 
 在工程根目录重算，使用系统 Python 的 Coal/NumPy 环境和已有 MuJoCo 环境。
 

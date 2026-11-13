@@ -1,1 +1,2 @@
 ros2_ws/src/robot_description/models/full_body_robot/cad/*.STEP filter=lfs diff=lfs merge=lfs -text
+ros2_ws/src/robot_description/models/*.STEP filter=lfs diff=lfs merge=lfs -text

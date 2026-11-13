@@ -1,67 +1,65 @@
 {
-  "step_sha256": "3cceefaccdbb681998beed7c7761a3dff4183e69a172936c8743e5bed1136a68",
+  "step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4",
   "joints": {
-    "BN_Spine_yaw": {
+    "BN_LeftShoulder_1": {
       "point_on_axis_m": [
-        3.432290562876972e-14,
-        2.5888692231634814e-14,
-        -5.684341886080802e-17
+        -0.05899999999792858,
+        -0.11996242963079222,
+        0.2715308576062834
       ],
       "axis": [
-        1.6653345369377346e-16,
-        1.7000290064572705e-16,
-        -1.0
+        -1.1367677455360315e-11,
+        0.32969064526278113,
+        -0.9440890203927864
       ],
-      "step_cylinder_index": 661,
-      "evidence": "Independent parent and child circular support; source positive direction preserved."
+      "step_cylinder_index": 2529,
+      "evidence": "STEP shoulder bearing cylinder (radius 20.35 mm); independent circular support in parent and child; source positive direction preserved."
     },
     "BN_LeftHand_pitch": {
       "point_on_axis_m": [
-        -0.15309999995240403,
-        -0.013823358856964361,
-        -0.12985907263945418
+        -0.24001156620807612,
+        -0.019139292006660313,
+        -0.13850812644274105
       ],
       "axis": [
-        -3.658626318384381e-15,
-        -0.9917261808313501,
-        -0.1283712672433529
+        1.3706014103229678e-11,
+        0.9440890203957636,
+        0.32969064525425557
       ],
-      "step_cylinder_index": 3807,
-      "evidence": "Independent parent and child circular support; source positive direction preserved."
+      "step_cylinder_index": 3777,
+      "evidence": "Circular support independently present in parent and child mesh; source axis sign preserved."
     },
     "BN_RightShoulder_1": {
       "point_on_axis_m": [
-        0.0589999999998889,
-        -0.08042808741093088,
-        0.2639490914407288
+        0.059000000002046624,
+        -0.11996242963035024,
+        0.2715308576050169
       ],
       "axis": [
-        8.917532937826077e-16,
-        0.12837126724560832,
-        -0.9917261808310581
+        -1.1367152148806463e-11,
+        0.3296906452627805,
+        -0.9440890203927866
       ],
-      "step_cylinder_index": 3117,
-      "evidence": "Independent parent and child circular support; source positive direction preserved."
+      "step_cylinder_index": 3058,
+      "evidence": "STEP shoulder bearing cylinder (radius 20.35 mm); independent circular support in parent and child; source positive direction preserved."
     },
     "BN_RightHand_pitch": {
       "point_on_axis_m": [
-        0.15090000004758455,
-        -0.013823358856964361,
-        -0.12985907263945384
+        0.23784498923881572,
+        -0.01901334161482914,
+        -0.138868792975903
       ],
       "axis": [
-        -3.658626318384381e-15,
-        -0.9917261808313501,
-        -0.1283712672433529
+        1.5966413697026352e-11,
+        0.944089020394039,
+        0.32969064525919445
       ],
-      "step_cylinder_index": 4286,
-      "evidence": "Independent parent and child circular support; source positive direction preserved."
+      "step_cylinder_index": 4255,
+      "evidence": "Circular support independently present in parent and child mesh; source axis sign preserved."
     }
   },
   "unverified_bilateral_axes": [
-    "BN_LeftFoot_pitch",
     "BN_LeftFoot_roll",
-    "BN_RightFoot_pitch",
     "BN_RightFoot_roll"
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "urdf/full_body_robot.urdf": "f49e3bd3ab596d73f626db4e4d47bdc7e2f7d4d67b03e537583bf4b55e358d67",
+  "urdf/full_body_robot.standalone.urdf": "3f7e54999f1f8bdaae2cef919ba36c416f27464dd1f95cf8de0ac9f1df6199ab",
+  "mujoco/full_body_robot.xml": "b98a9e6dc3766c02564fd529b95dc88925ade655a369a1f568684d280a3fd46b",
+  "mujoco/full_body_robot.physics.xml": "b98a9e6dc3766c02564fd529b95dc88925ade655a369a1f568684d280a3fd46b",
+  "config/simulation_limits.yaml": "b1888264c372be6bdf73dc0b0435828db660bceb387f3a0fbbec6e7cacf7bdb8",
+  "config/motor_topology.yaml": "2a1588a90dd711677afde526dcba31299e7233108ca0f08be07e992e719035d9",
+  "config/step_alignment.json": "c58bfbd1f340b9feb0ba688e8b9f04b91d1c1e8f19985931b353b990cd12d139",
+  "mujoco/visual/native/BN_Spine_yaw_link.STL": "1dde53a215ff72903b9dbc1944959ffac511831d99d4e87c002d1be38c17e052",
+  "served_standalone_sha256": "3f7e54999f1f8bdaae2cef919ba36c416f27464dd1f95cf8de0ac9f1df6199ab"
+}

@@ -35,6 +35,7 @@ import {
 } from "./runtime";
 import type { Screen } from "./contracts";
 
+const resizablePanelMinHeight = 64;
 const normalize = (hash: string): Screen => {
   const value = hash.replace(/^#\/?/, "");
   return value === "teach" || value === "sim" || value === "motion" ? value : "run";
@@ -307,7 +308,7 @@ onBeforeUnmount(() => {
       <MotionWorkbench v-if="screen === 'motion'" :current-model="snapshot.model" />
       <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach', 'sim-workspace': screen === 'sim' }">
         <ResizeHandle v-show="screen === 'run'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
-        <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="120" reverse />
+        <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="resizablePanelMinHeight" reverse />
         <section v-show="screen !== 'sim'" class="objects-area surface">
           <div class="panel-title">
             <span>{{ screen === 'teach' ? '设备查询' : '电机与关节' }}</span>
@@ -349,13 +350,13 @@ onBeforeUnmount(() => {
             <Teleport v-if="initialized" to="#armGravityControl">
               <GravityControl v-show="screen === 'run'" />
             </Teleport>
-            <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="75" reverse />
+            <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="resizablePanelMinHeight" reverse />
             <div
               id="run-joints"
               v-show="screen === 'run'"
               class="joint-list-panel"
             />
-            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="170" reverse />
+            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="resizablePanelMinHeight" reverse />
             <PanelHost
               id="actionLibrary"
               :active="screen === 'run'"

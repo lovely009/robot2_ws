@@ -985,7 +985,7 @@ tr:hover {
 }
 .action-panel-host {
   flex: 0 0 45%;
-  min-height: 170px;
+  min-height: 64px;
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1511,7 +1511,7 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
 .robot-panel .stage { min-height: 180px; background: #101b26; border: 1px solid var(--border); }
 .robot-panel .stage .legend { font-size: 10px; background: #101b26e8; padding: 8px 10px; }
 .joint-list-panel { flex-basis: var(--joints-height, 140px); }
-.action-panel-host { flex-basis: var(--actions-height, 190px); min-height: 170px; }
+.action-panel-host { flex-basis: var(--actions-height, 190px); }
 .legacy-panel summary { min-height: 34px; padding: 8px 10px; font-size: 12px; color: #c8dce9; }
 .legacy-panel table { font-size: 12px; }
 .legacy-panel input:not([type="checkbox"]):not([type="range"]), .legacy-panel select { min-height: 30px; font-size: 12px; padding: 5px 6px; }
@@ -1535,7 +1535,10 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
 .inspector .cmd input { font-size: 11px; min-height: 30px; }
 .observer-tabs { gap: 14px; }
 .observer-tabs button { font-size: 12px; min-height: 38px; }
-.observer-fold { min-width: 30px; min-height: 36px; }
+.observer-fold { width: 8px; min-width: 8px; min-height: 36px; flex: 0 0 8px; }
+.observer-head { gap: 7px; }
+.joint-list-panel summary::before,
+.action-panel-host summary::before { width: 8px; text-align: center; }
 .observation-body .ctrl-row, .observation-body .chart-controls, .observation-body .curve-legend { font-size: 11px; }
 .panel-error, .mapping-warning, .startup-status { font-size: 12px; line-height: 1.6; padding: 10px 12px; }
 .panel-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -1601,6 +1604,10 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
 .robot-panel .stage .hud:focus { outline: 1px solid var(--accent); opacity: 1 !important; }
 
 @media (min-width: 951px) {
+  .stage-run .stage-body { overflow: hidden; }
+  .stage-run .robot-panel { flex: 1 1 180px; min-height: 180px; }
+  .stage-run .joint-list-panel { flex-shrink: 1; min-height: 35px; }
+  .stage-run .action-panel-host { flex-shrink: 1; }
   .workspace-grid:not(.device-workspace) .stage-area,
   .workspace-grid:not(.device-workspace) .observer-area { grid-column: 2; }
 }

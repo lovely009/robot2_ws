@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-async function connectFixture(page: Page, coupled = false, withControlStates = false) {
+async function connectFixture(page: Page, coupled = false, withControlStates = false, topologyOnly = false) {
   const publishes: { topic: string; msg: Record<string, unknown> }[] = [];
   const errors: string[] = [];
   const connections = { count: 0 };
@@ -33,12 +33,14 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
         url.searchParams.get("model") === "robot_leg"
           ? { status: 404, json: { error: "没有设备映射" } }
           : { json: { model: "half_body_robot", driver_file: "/fixture/driver.yaml",
+              ...(topologyOnly ? {mapping_kind:'topology',hardware_ready:false,
+                hardware_block_reason:'传动参数待标定',driver_file:''} : {}),
               groups: coupled ? [{ name: "wrist", plugin: "transmission_interface/DifferentialTransmission",
                 motors: [{ name: "m8", id: 8 }, { name: "m9", id: 9 }],
                 joints: ["joint_link8", "joint_link9"], direct_mapping: false }]
                 : [{ name: "direct_1", plugin: "transmission_interface/SimpleTransmission",
                 motors: [{ name: "m1", id: 1 }], joints: ["joint_link1"], direct_mapping: true }],
-              policy_defaults:{1:{kp:30,kd:1},8:{kp:30,kd:1},9:{kp:30,kd:1}}, direct_joints: { 1: "joint_link1" } } },
+              policy_defaults:{1:{kp:30,kd:1},8:{kp:30,kd:1},9:{kp:30,kd:1}}, direct_joints: topologyOnly ? {} : { 1: "joint_link1" } } },
       );
     if (url.pathname === "/api/motor-specs")
       return route.fulfill({ json: { motor_types: {} } });
@@ -293,6 +295,17 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       sendFeedback('/motor/control_states', message);
     } };
 }
+
+test('只读电机拓扑显示已映射与待标定，不能开放关节控制', async ({page}) => {
+  const fixture = await connectFixture(page, true, true, true);
+  await page.goto('/workbench/#/run');
+  await expect(page.locator('.mapping-warning')).toContainText('2 台电机映射已加载');
+  await expect(page.locator('.mapping-warning')).toContainText('传动参数待标定');
+  await expect(page.locator('[data-joint="joint_link8"] input[type="range"]')).toBeDisabled();
+  expect(fixture.publishes.filter(p => p.topic === '/control/joint_target')).toHaveLength(0);
+  expect(fixture.policyRequests).toHaveLength(0);
+  expect(fixture.errors).toEqual([]);
+});
 
 test('事件日志脱离旧面板后保留切换记录并导出全部数据', async ({page}) => {
   const fixture = await connectFixture(page);
@@ -1401,6 +1414,11 @@ test('设备工作台在矮窗口中保持详情位于内部滚动区', async ({
 });
 
 test('动作库只有列表内部滚动，标题和操作栏固定', async ({page}) => {
+  await page.setViewportSize({width:1417, height:964});
+  await page.addInitScript(() => {
+    localStorage.setItem('robot2.layout.--joints-height', '242');
+    localStorage.setItem('robot2.layout.--actions-height', '256');
+  });
   await connectFixture(page);
   await page.route('**/api/actions**', route => route.fulfill({json: {actions:
     Array.from({length: 50}, (_, i) => ({name: `action-${i}.json`, target_ids:[1], target_count:1, point_count:20, duration_ms:1000}))}}));
@@ -1411,8 +1429,15 @@ test('动作库只有列表内部滚动，标题和操作栏固定', async ({pag
   expect(await panel.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   const list = page.locator('#actList');
   expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
-  for (const selector of ['.stage-body', '#actList']) {
-    expect(await page.locator(selector).first().evaluate(el => getComputedStyle(el).scrollbarWidth)).not.toBe('none');
+  const stage = page.locator('.stage-run .stage-body');
+  expect(await stage.evaluate(el => getComputedStyle(el).overflowY)).toBe('hidden');
+  expect(await stage.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  expect(await list.evaluate(el => getComputedStyle(el).scrollbarWidth)).not.toBe('none');
+  const fold = await page.locator('.observer-fold').boundingBox();
+  for (const selector of ['#run-joints summary', '.action-panel-host summary']) {
+    const arrowX = await page.locator(selector).evaluate(el =>
+      el.getBoundingClientRect().x + parseFloat(getComputedStyle(el).paddingLeft));
+    expect(Math.abs(arrowX - fold!.x)).toBeLessThan(1);
   }
   await list.hover();
   await page.mouse.wheel(0, 200);
@@ -1447,7 +1472,7 @@ test('工作台曲线支持复选及滚轮缩放，画布随观察区伸缩', as
   await expect.poll(async () => (await canvas.boundingBox())!.height).toBeGreaterThan(before);
 });
 
-test('动作库在210px处仍能向下拖小，并能反向拖大和保留尺寸', async ({page}) => {
+test('三个面板最小高度统一64px，可反向拖大并在刷新后保留', async ({page}) => {
   await page.setViewportSize({width:1417, height:965});
   await page.addInitScript(() => {
     if (localStorage.getItem('robot2.layout.--actions-height') === null) {
@@ -1477,4 +1502,20 @@ test('动作库在210px处仍能向下拖小，并能反向拖大和保留尺寸
   await drag(40);
   await page.reload();
   await expect.poll(async () => (await panel.boundingBox())!.height).toBe(170);
+  const panels = [
+    ['调整关节面板高度', '#run-joints'],
+    ['调整动作库高度', '.action-panel-host'],
+    ['调整观察区高度', '.observer-area'],
+  ];
+  for (const [label, selector] of panels) {
+    const separator = page.getByRole('separator', {name:label, exact:true});
+    for (let step=0; step<25; step++) await separator.press('ArrowDown');
+    await expect.poll(async () => (await page.locator(selector!).boundingBox())!.height).toBe(64);
+    await separator.press('ArrowUp');
+    await expect.poll(async () => (await page.locator(selector!).boundingBox())!.height).toBe(80);
+    await separator.press('ArrowDown');
+  }
+  await page.reload();
+  for (const [, selector] of panels)
+    await expect.poll(async () => (await page.locator(selector!).boundingBox())!.height).toBe(64);
 });

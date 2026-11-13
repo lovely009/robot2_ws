@@ -44,6 +44,7 @@ test('默认选动作库和当前模型，不上传文件也能转换独立肩�
   await page.getByRole('button', { name: '导入并转换' }).click();
   await expect(page.getByText('转换完成', { exact: true })).toBeVisible();
   expect(submitted?.bvh_source).toBe('1-4.bvh');
+  expect(submitted?.up_axis).toBe('auto');
   expect(submitted?.bvh_text).toBeUndefined();
   expect(submitted?.urdf_name).toBe('half_body_robot.urdf');
   expect(submitted?.urdf_text).toContain('half_body_robot');

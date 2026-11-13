@@ -68,6 +68,27 @@ def test_registered_full_body_uses_simulation_limits_and_moving_cad_preview():
         jobs.close()
 
 
+@pytest.mark.parametrize('up_axis,expected', [
+    ('y_up', [[0, -1, 0], [1, 0, 0], [0, 0, 1]]),
+    ('z_up', [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]),
+])
+def test_full_body_preset_accounts_for_source_anatomical_heading(up_axis, expected):
+    model = Path(__file__).resolve().parents[2] / 'robot_description/models/full_body_robot'
+    vector = lambda x, h: f'{x} {h} 0' if up_axis == 'y_up' else f'{x} 0 {h}'
+    names = [('Spine', 0, 10), ('Head', 0, 50), ('LeftUpperLeg', 10, 0), ('RightUpperLeg', -10, 0)]
+    children = ''.join(f'JOINT {name} {{ OFFSET {vector(x, h)} CHANNELS 3 Zrotation Xrotation Yrotation }}\n'
+                       for name, x, h in names)
+    source = ('HIERARCHY\nROOT Hips { OFFSET 0 0 0 CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation\n'
+              + children + '}\nMOTION\nFrames: 1\nFrame Time: .02\n' + ' '.join(['0'] * 18) + '\n')
+    jobs = MotionJobs()
+    try:
+        job = jobs.create(payload() | {'model': 'full_body_robot', 'up_axis': up_axis,
+            'urdf_text': (model / 'urdf/full_body_robot.urdf').read_text(), 'bvh_text': source})
+        np.testing.assert_allclose(job['mapping']['source_to_robot'], expected)
+    finally:
+        jobs.close()
+
+
 def test_registered_model_rejects_changed_urdf_and_invalidates_changed_constraints(tmp_path):
     model = Path(__file__).resolve().parents[2] / 'robot_description/models/full_body_robot'
     directory = tmp_path / 'full_body_robot'
@@ -248,7 +269,8 @@ def test_damaged_result_cache_recomputes(tmp_path, damage):
         jobs.close()
 
 
-def test_result_identity_tracks_algorithm_and_simulation_assets(tmp_path, monkeypatch):
+@pytest.mark.parametrize('implementation_module', ['bvh_broadcaster.generic_retarget', 'web_host.motion_source'])
+def test_result_identity_tracks_algorithm_and_simulation_assets(tmp_path, monkeypatch, implementation_module):
     from types import SimpleNamespace
     from web_host import motion_cache
     jobs = MotionJobs()
@@ -267,7 +289,7 @@ def test_result_identity_tracks_algorithm_and_simulation_assets(tmp_path, monkey
         implementation.write_text('original')
         find_spec = motion_cache.importlib.util.find_spec
         monkeypatch.setattr(motion_cache.importlib.util, 'find_spec', lambda name:
-            SimpleNamespace(origin=str(implementation)) if name == 'bvh_broadcaster.generic_retarget'
+            SimpleNamespace(origin=str(implementation)) if name == implementation_module
             else find_spec(name))
         def key():
             return motion_cache.result_key(job, first['mapping'])
@@ -280,6 +302,29 @@ def test_result_identity_tracks_algorithm_and_simulation_assets(tmp_path, monkey
             current = key()
             assert current != previous
             previous = current
+    finally:
+        jobs.close()
+
+
+def test_pre_heading_fix_mapping_requires_new_confirmation(tmp_path, monkeypatch):
+    # Reproduce the old profile namespace, without the anatomical-basis version.
+    dumps = json.dumps
+    def legacy_dumps(document, *args, **kwargs):
+        if isinstance(document, dict) and 'source_basis_version' in document:
+            document = {key: value for key, value in document.items() if key != 'source_basis_version'}
+        return dumps(document, *args, **kwargs)
+    jobs = MotionJobs(profiles_dir=tmp_path)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(json, 'dumps', legacy_dumps)
+            old = jobs.create(payload())
+        old_job = jobs.jobs[old['id']]
+        old['mapping']['source_to_robot'] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+        jobs._remember_mapping(old_job, old['mapping'])
+        assert (tmp_path / (old_job['profile_key'] + '.json')).is_file()
+        current = jobs.create(payload())
+        assert jobs.jobs[current['id']]['profile_key'] != old_job['profile_key']
+        assert current['state'] == 'mapping' and current['mapping_origin'] == 'suggested'
     finally:
         jobs.close()
 

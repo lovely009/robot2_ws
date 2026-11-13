@@ -117,7 +117,9 @@ function updateSnapshot() {
     mappingError:
       data.jointMapSource.kind === "unavailable"
         ? `模型无设备映射：${data.jointMapSource.error}`
-        : "",
+        : data.jointMapSource.kind === "topology"
+          ? `${data.store.modelTransmissions.groups.reduce((count: number, group: any) => count + group.motors.length, 0)} 台电机映射已加载；传动参数待标定，真机控制未开放`
+          : "",
   };
 }
 

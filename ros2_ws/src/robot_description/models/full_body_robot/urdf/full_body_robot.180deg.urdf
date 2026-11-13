@@ -1,9 +1,9 @@
 <robot name="full_body_robot_180deg">
   <link name="Base_link">
     <inertial>
-      <origin xyz="0.00016166842917164 -0.0048729650183504 -0.01539370215688" rpy="0 -0 0" />
-      <mass value="0.800261691319731" />
-      <inertia ixx="0.000226852514110888" ixy="-9.03085278014659E-07" ixz="2.19203843243374E-08" iyy="0.000780740372596447" iyz="1.94008948578524E-06" izz="0.000808614535285278" />
+      <origin xyz="0.00016166727589382 -0.0048729664810845 -0.01539370460301" rpy="0 -0 0" />
+      <mass value="0.80026152101195" />
+      <inertia ixx="0.000226852507646013" ixy="-9.03080414540903E-07" ixz="2.19192032450092E-08" iyy="0.000780740357658796" iyz="1.94008401782105E-06" izz="0.000808614530298647" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 -0 0" />
@@ -23,12 +23,12 @@
   </link>
   <link name="BN_Spine_yaw_link">
     <inertial>
-      <origin xyz="1.3379873689924e-06 0.0017976241003218 0.04715498268333" rpy="0 -0 0" />
-      <mass value="0.704804735283712" />
-      <inertia ixx="0.000351456375225902" ixy="2.50330524241675E-08" ixz="2.96574404279397E-10" iyy="0.000355908294973576" iyz="-3.94396592232155E-06" izz="0.00045942110643927" />
+      <origin xyz="1.3361793744625e-06 0.015688385272618 0.039716952454886" rpy="-1.8301507268713e-17 0 0" />
+      <mass value="0.704804675426319" />
+      <inertia ixx="0.000351456352084691" ixy="2.35998221894703E-08" ixz="-8.8654229248879E-09" iyy="0.000364860730334933" iyz="2.65051945866163E-05" izz="0.00045046850548724" />
     </inertial>
     <visual>
-      <origin xyz="-3.432186016426e-14 -0.02785232245648 -4.336808689942e-18" rpy="0 -0 0" />
+      <origin xyz="0 4.336808689942e-19 0" rpy="-1.8301507268713e-17 0 0" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_yaw_link.STL" />
       </geometry>
@@ -37,27 +37,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-3.432186016426e-14 -0.02785232245648 -4.336808689942e-18" rpy="0 -0 0" />
+      <origin xyz="0 4.336808689942e-19 0" rpy="-1.8301507268713e-17 0 0" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_yaw_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_Spine_yaw" type="revolute">
-    <origin xyz="3.432186016426e-14 2.5887624986614e-14 0.0062778047691217" rpy="0 -0 0" />
+    <origin xyz="0 0 0.010999999999991" rpy="0.3359758810089 -0 0" />
     <parent link="Base_link" />
     <child link="BN_Spine_yaw_link" />
-    <axis xyz="1.6653345369377e-16 1.7000290064573e-16 -1" />
+    <axis xyz="0 -0.329690645262781 -0.944089020392786" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_Spine_pitch_link">
     <inertial>
-      <origin xyz="-2.7456747986321e-10 8.4025963270617e-09 -2.6888243347914e-07" rpy="4.8460905029274e-22 2.6899769873207e-23 -7.1243766526353e-18" />
+      <origin xyz="-2.7456796558578e-10 8.4026009952026e-09 -2.6888243347866e-07" rpy="8.9961049061274e-22 1.6412621091462e-22 -3.5051173116858e-17" />
       <mass value="0.0934780291598876" />
-      <inertia ixx="1.48119609909158E-05" ixy="-5.36595372085599E-19" ixz="-1.61290689107894E-12" iyy="1.00263355264677E-05" iyz="6.10622405170326E-13" izz="8.55560733118957E-06" />
+      <inertia ixx="1.48119609909161E-05" ixy="-5.58035893562974E-19" ixz="-1.61290689119755E-12" iyy="1.00263355264675E-05" iyz="6.10622373338048E-13" izz="8.55560733118957E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 -6.6174449004242e-24" rpy="4.8460905029274e-22 2.6899769873207e-23 -7.1243766526353e-18" />
+      <origin xyz="-1.3877787807814e-17 6.9388939039072e-18 5.2939559203394e-23" rpy="8.9961049061274e-22 1.6412621091462e-22 -3.5051173116858e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_pitch_link.STL" />
       </geometry>
@@ -66,14 +66,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 -6.6174449004242e-24" rpy="4.8460905029274e-22 2.6899769873207e-23 -7.1243766526353e-18" />
+      <origin xyz="-1.3877787807814e-17 6.9388939039072e-18 5.2939559203394e-23" rpy="8.9961049061274e-22 1.6412621091462e-22 -3.5051173116858e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_Spine_pitch" type="revolute">
-    <origin xyz="-3.432186016426e-14 -3.2245647958937e-07 0.10372" rpy="-1.5708 1.4421 1.5708" />
+    <origin xyz="0 0.032639 0.093465" rpy="-7.3464073492598e-06 1.5707926535898 -3.1415926535869" />
     <parent link="BN_Spine_yaw_link" />
     <child link="BN_Spine_pitch_link" />
     <axis xyz="0 0 1" />
@@ -81,12 +81,12 @@
   </joint>
   <link name="BN_Spine_roll_link">
     <inertial>
-      <origin xyz="-3.2768121684716e-06 0.087972501239104 -0.0067203100603524" rpy="5.8977292016343e-18 -2.6801655219332e-22 -2.5092861375819e-22" />
-      <mass value="1.87024048691937" />
-      <inertia ixx="0.00207823967908516" ixy="2.81889052123763E-08" ixz="-6.004358185534E-08" iyy="0.00201154178311578" iyz="-9.03745644590678E-06" izz="0.0025561939596546" />
+      <origin xyz="-3.2379632054981e-06 0.088102403748252 -0.0064066293485871" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
+      <mass value="1.87023989534733" />
+      <inertia ixx="0.00207823778975313" ixy="2.7642905227694E-08" ixz="-6.0066142452721E-08" iyy="0.00201290294591782" iyz="-6.61701116910231E-06" izz="0.00255482435746527" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="5.8977292016343e-18 -2.6801655219332e-22 -2.5092861375819e-22" />
+      <origin xyz="-6.6174449004242e-23 0 6.9388939039072e-18" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_roll_link.STL" />
       </geometry>
@@ -95,14 +95,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="5.8977292016343e-18 -2.6801655219332e-22 -2.5092861375819e-22" />
+      <origin xyz="-6.6174449004242e-23 0 6.9388939039072e-18" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_Spine_roll_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_Spine_roll" type="revolute">
-    <origin xyz="0 0 -6.6174449004242e-24" rpy="-1.5707926535747 -1.5707926535898 3.1415926535747" />
+    <origin xyz="-1.3877787807814e-17 6.9388939039072e-18 5.2939559203394e-23" rpy="1.5707963267949 -1.5707963267949 0" />
     <parent link="BN_Spine_pitch_link" />
     <child link="BN_Spine_roll_link" />
     <axis xyz="0 0 1" />
@@ -110,12 +110,12 @@
   </joint>
   <link name="BN_LeftShoulder_1_link">
     <inertial>
-      <origin xyz="0.0034455264287141 -3.3508740369323e-05 0.0099325570051028" rpy="-1.5220221478089e-17 -1.2721725662154e-22 9.239839014078e-22" />
-      <mass value="0.0499208361937874" />
-      <inertia ixx="1.01239141924584E-05" ixy="-3.21719403836298E-09" ixz="6.52722845517292E-09" iyy="8.06239939943518E-06" iyz="-3.69868958589298E-10" izz="1.39339637463727E-05" />
+      <origin xyz="0.00344406040791 -3.2709368101576e-05 0.011769367388152" rpy="3.7209643961624e-17 -3.0721638077673e-22 -1.6101338242988e-22" />
+      <mass value="0.0499208383439976" />
+      <inertia ixx="1.01239144801611E-05" ixy="-3.21713818379797E-09" ixz="6.52723112582392E-09" iyy="8.06239973476916E-06" iyz="-3.69919975890025E-10" izz="1.39339639476986E-05" />
     </inertial>
     <visual>
-      <origin xyz="6.9388939039072e-18 0 5.5511151231258e-17" rpy="-1.5220221478089e-17 -1.2721725662154e-22 9.239839014078e-22" />
+      <origin xyz="0.010677790061456 -0.0052591288535677 -3.9221733527661e-08" rpy="3.7209643961624e-17 -3.0721638077673e-22 -1.6101338242988e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_1_link.STL" />
       </geometry>
@@ -124,27 +124,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="6.9388939039072e-18 0 5.5511151231258e-17" rpy="-1.5220221478089e-17 -1.2721725662154e-22 9.239839014078e-22" />
+      <origin xyz="0.010677790061456 -0.0052591288535677 -3.9221733527661e-08" rpy="3.7209643961624e-17 -3.0721638077673e-22 -1.6101338242988e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftShoulder_1" type="revolute">
-    <origin xyz="0.059 0.2107 -0.06" rpy="-1.5708 1.0358789931303e-22 -1.0493124690357e-21" />
+    <origin xyz="0.059001207975744 0.20886318978335 -0.059999192673532" rpy="-1.5707963267949 -8.1790832522623e-23 4.3017502253747e-22" />
     <parent link="BN_Spine_roll_link" />
     <child link="BN_LeftShoulder_1_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="3.6731937392142e-06 -2.6984895655918e-11 0.99999999999325" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_LeftShoulder_2_link">
     <inertial>
-      <origin xyz="-0.0018342124297162 0.01042344583368 -0.029000048134295" rpy="-1.5104233041198e-17 7.4136901834883e-22 -4.8964116502246e-22" />
-      <mass value="0.241731715958594" />
-      <inertia ixx="9.63298305106888E-05" ixy="-4.29617155625544E-07" ixz="1.30514944322695E-10" iyy="0.000126503962616192" iyz="-4.17157908583771E-11" izz="5.57579032856797E-05" />
+      <origin xyz="-0.0018342121852484 0.010423449020194 -0.029000044956228" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
+      <mass value="0.241731808970012" />
+      <inertia ixx="9.63298439303765E-05" ixy="-4.29622115767342E-07" ixz="1.30827432109166E-10" iyy="0.000126503981245269" iyz="-4.77563816866149E-11" izz="5.57579213171031E-05" />
     </inertial>
     <visual>
-      <origin xyz="0 0 3.4694469519536e-18" rpy="-1.5104233041198e-17 7.4136901834883e-22 -4.8964116502246e-22" />
+      <origin xyz="0 0 1.7347234759768e-17" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_2_link.STL" />
       </geometry>
@@ -153,14 +153,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 3.4694469519536e-18" rpy="-1.5104233041198e-17 7.4136901834883e-22 -4.8964116502246e-22" />
+      <origin xyz="0 0 1.7347234759768e-17" rpy="5.3959309808849e-17 -7.0868379204718e-22 2.1956435386841e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftShoulder_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftShoulder_2" type="revolute">
-    <origin xyz="0.005 -0.0285 0.0203" rpy="1.5708 3.1614895754978e-22 -6.9101915807704e-22" />
+    <origin xyz="0.0049985339125177 -0.028499200738899 0.022136809907153" rpy="1.5707963267949 -1.3803165088768e-21 -2.3005677531963e-22" />
     <parent link="BN_LeftShoulder_1_link" />
     <child link="BN_LeftShoulder_2_link" />
     <axis xyz="0 0 1" />
@@ -168,12 +168,12 @@
   </joint>
   <link name="BN_LeftUpperArm_1_link">
     <inertial>
-      <origin xyz="-0.0045520147747983 0.00097397973272306 -0.026646194923469" rpy="1.9636228650784e-22 2.7950543223747e-22 -2.3101057770916e-17" />
-      <mass value="0.219560453355752" />
-      <inertia ixx="0.00019878542553206" ixy="-4.54297114910005E-06" ixz="-2.54371318031783E-05" iyy="0.000173915257759257" iyz="4.47185385380644E-06" izz="0.000117853933496186" />
+      <origin xyz="-0.0046339992397234 0.00044202683204569 -0.026646193864469" rpy="-3.6946587847525e-22 -3.2449725701966e-22 -5.9092757292544e-18" />
+      <mass value="0.21956044694958" />
+      <inertia ixx="0.000199495885667392" ixy="-1.57020829685458E-06" ixz="-2.57832671175914E-05" iyy="0.000173204764625777" iyz="1.50566975250818E-06" izz="0.000117853917081691" />
     </inertial>
     <visual>
-      <origin xyz="1.7347234759768e-17 5.5511151231258e-17 -1.3877787807814e-17" rpy="1.9636228650784e-22 2.7950543223747e-22 -2.3101057770916e-17" />
+      <origin xyz="3.3610267347051e-17 0 1.3877787807814e-17" rpy="-3.6946587847525e-22 -3.2449725701966e-22 -5.9092757292544e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_1_link.STL" />
       </geometry>
@@ -182,27 +182,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.7347234759768e-17 5.5511151231258e-17 -1.3877787807814e-17" rpy="1.9636228650784e-22 2.7950543223747e-22 -2.3101057770916e-17" />
+      <origin xyz="3.3610267347051e-17 0 1.3877787807814e-17" rpy="-3.6946587847525e-22 -3.2449725701966e-22 -5.9092757292544e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperArm_1" type="revolute">
-    <origin xyz="0.0345 0.0335 -0.029" rpy="-1.5708 -1.3866 1.5708" />
+    <origin xyz="0.03449999999961 0.033500000000392 -0.029" rpy="-1.5707963267949 -1.5022843994971 1.5707963268063" />
     <parent link="BN_LeftShoulder_2_link" />
     <child link="BN_LeftUpperArm_1_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_LeftUpperArm_2_link">
     <inertial>
-      <origin xyz="-6.5623992700214e-06 -0.038830331965929 -0.0085771697371467" rpy="4.5587659386035e-18 7.9134466819498e-22 1.923333817468e-22" />
-      <mass value="0.125542167060884" />
-      <inertia ixx="0.000107919256531907" ixy="4.47661459927025E-07" ixz="-4.76381629532981E-09" iyy="4.65320000217864E-05" iyz="-1.69193136329605E-05" izz="0.000133475108965373" />
+      <origin xyz="0.0067363687180503 -0.038241628851923 -0.0085771955456985" rpy="-9.4540683459952e-18 1.7326007598717e-22 2.7809222241228e-22" />
+      <mass value="0.125542415060852" />
+      <inertia ixx="0.000105915139200296" ixy="1.09185035999066E-05" ixz="2.93331435125026E-06" iyy="4.85362185548033E-05" iyz="-1.66631007476231E-05" izz="0.000133475142839932" />
     </inertial>
     <visual>
-      <origin xyz="0 -5.5511151231258e-17 0" rpy="4.5587659386035e-18 7.9134466819498e-22 1.923333817468e-22" />
+      <origin xyz="0 0 1.0842021724855e-18" rpy="-9.4540683459952e-18 1.7326007598717e-22 2.7809222241228e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_2_link.STL" />
       </geometry>
@@ -211,14 +211,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 -5.5511151231258e-17 0" rpy="4.5587659386035e-18 7.9134466819498e-22 1.923333817468e-22" />
+      <origin xyz="0 0 1.0842021724855e-18" rpy="-9.4540683459952e-18 1.7326007598717e-22 2.7809222241228e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperArm_2" type="revolute">
-    <origin xyz="0.022119 -0.0041210999999999 -0.0535" rpy="-2.9573926536162 1.5707926535898 3.1415926535633" />
+    <origin xyz="0.022447214455225 -0.0015403126957526 -0.0535" rpy="0.068511927297751 1.5707963267949 0" />
     <parent link="BN_LeftUpperArm_1_link" />
     <child link="BN_LeftUpperArm_2_link" />
     <axis xyz="0 0 -1" />
@@ -226,12 +226,12 @@
   </joint>
   <link name="BN_LeftUpperArm_3_link">
     <inertial>
-      <origin xyz="-0.00017707861784155 -0.00089590047763275 0.097191767165654" rpy="1.0830526613362e-17 -2.7336932296462e-22 1.8473308832697e-21" />
-      <mass value="0.356453646327502" />
-      <inertia ixx="0.000355469238403003" ixy="3.93711068089502E-07" ixz="5.92382827011619E-07" iyy="0.000314607027006347" iyz="1.47452048682304E-06" izz="7.7287698917218E-05" />
+      <origin xyz="8.3623747625772e-05 -0.0011344815230993 0.095308726910852" rpy="-3.5259703896847e-17 5.7522392865419e-18 -5.6561891422853e-18" />
+      <mass value="0.348281404386607" />
+      <inertia ixx="0.000355350207774246" ixy="3.9379791780727E-07" ixz="5.92376090019111E-07" iyy="0.00031445510493234" iyz="1.47449358596599E-06" izz="7.72260511301797E-05" />
     </inertial>
     <visual>
-      <origin xyz="0 1.3877787807814e-17 0" rpy="1.0830526613362e-17 -2.7336932296462e-22 1.8473308832697e-21" />
+      <origin xyz="0 0 0" rpy="-3.5259703896847e-17 5.7522392865419e-18 -5.6561891422853e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_3_link.STL" />
       </geometry>
@@ -240,14 +240,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 1.3877787807814e-17 0" rpy="1.0830526613362e-17 -2.7336932296462e-22 1.8473308832697e-21" />
+      <origin xyz="0 0 0" rpy="-3.5259703896847e-17 5.7522392865419e-18 -5.6561891422853e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_3_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperArm_3" type="revolute">
-    <origin xyz="-2.7755575615629e-17 -0.0951 -0.0235" rpy="1.5708 1.0592017354555e-22 -9.6587274946657e-22" />
+    <origin xyz="0.016513941688906 -0.093655217264268 -0.023500000000005" rpy="1.5707963267949 -1.3877787807814e-17 0.17453292521079" />
     <parent link="BN_LeftUpperArm_2_link" />
     <child link="BN_LeftUpperArm_3_link" />
     <axis xyz="0 0 -1" />
@@ -255,12 +255,12 @@
   </joint>
   <link name="BN_LeftLowerArm_1_link">
     <inertial>
-      <origin xyz="0.0032034563899878 -0.027743764972672 -0.0058420761294155" rpy="-2.1896638410746e-22 2.2176644282037e-22 1.0684748984536e-17" />
-      <mass value="0.0705271805029533" />
-      <inertia ixx="5.37318982301396E-05" ixy="1.54485969825658E-06" ixz="9.33378596640666E-07" iyy="3.322860709356E-05" iyz="-1.5065356188673E-05" izz="4.85346338481262E-05" />
+      <origin xyz="8.9458297123103e-06 -0.027928251016218 -0.0058421396248763" rpy="1.335821869689e-17 1.0128544586169e-17 -1.6547869379151e-17" />
+      <mass value="0.0705274100887171" />
+      <inertia ixx="5.38147624265383E-05" ixy="-8.25457722091537E-07" ixz="-7.96008084416517E-07" iyy="3.31458302835383E-05" iyz="-1.50732377327969E-05" izz="4.85346748844011E-05" />
     </inertial>
     <visual>
-      <origin xyz="0 1.3877787807814e-17 -2.7755575615629e-17" rpy="-2.1896638410746e-22 2.2176644282037e-22 1.0684748984536e-17" />
+      <origin xyz="1.7347234759768e-17 -1.3877787807814e-17 0" rpy="1.335821869689e-17 1.0128544586169e-17 -1.6547869379151e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_1_link.STL" />
       </geometry>
@@ -269,14 +269,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 1.3877787807814e-17 -2.7755575615629e-17" rpy="-2.1896638410746e-22 2.2176644282037e-22 1.0684748984536e-17" />
+      <origin xyz="1.7347234759768e-17 -1.3877787807814e-17 0" rpy="1.335821869689e-17 1.0128544586169e-17 -1.6547869379151e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftLowerArm_1" type="revolute">
-    <origin xyz="0.0231 -0.006 0.1765" rpy="-1.5708 -0.1842 -1.5708" />
+    <origin xyz="0.02309999995239 -0.0059999999996523 0.1765" rpy="-1.5707963267949 -0.069565453426422 -1.5707963267798" />
     <parent link="BN_LeftUpperArm_3_link" />
     <child link="BN_LeftLowerArm_1_link" />
     <axis xyz="0 0 1" />
@@ -284,12 +284,12 @@
   </joint>
   <link name="BN_LeftLowerArm_2_link">
     <inertial>
-      <origin xyz="0.0047372772392656 -0.0002694585807298 0.053301492955905" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
-      <mass value="0.162145852621543" />
-      <inertia ixx="0.000127782425200885" ixy="-3.39372002328894E-08" ixz="-1.61643865351823E-06" iyy="0.00012567978086402" iyz="-9.65579452127769E-08" izz="1.65375814128095E-05" />
+      <origin xyz="0.0015001117587017 -0.0044085174035502 0.053456982742295" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
+      <mass value="0.158524191944944" />
+      <inertia ixx="0.000125548591183196" ixy="-6.99537635561526E-07" ixz="-6.77414466616247E-07" iyy="0.000127151834901545" iyz="1.4867765367645E-06" izz="1.63998725142362E-05" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 -6.9388939039072e-18 0" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+      <origin xyz="-6.9388939039072e-18 0 -1.0408340855861e-17" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_2_link.STL" />
       </geometry>
@@ -298,14 +298,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 -6.9388939039072e-18 0" rpy="-3.0030426482576e-17 4.3326714638126e-22 1.3118845188338e-21" />
+      <origin xyz="-6.9388939039072e-18 0 -1.0408340855861e-17" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftLowerArm_2" type="revolute">
-    <origin xyz="0.011661 -0.089885 -0.023" rpy="-1.7549926536049 1.5707926535898 3.1415926535747" />
+    <origin xyz="0.001302690433072 -0.090628654348751 -0.023000000000005" rpy="1.5707963267949 0.37632955642455 0.069565453432936" />
     <parent link="BN_LeftLowerArm_1_link" />
     <child link="BN_LeftLowerArm_2_link" />
     <axis xyz="0 0 -1" />
@@ -313,12 +313,12 @@
   </joint>
   <link name="BN_LeftHand_roll_link">
     <inertial>
-      <origin xyz="-1.2634428503411e-09 -3.6415218600955e-09 -0.0026571918720739" rpy="6.5633817052486e-22 2.8791601184814e-21 -4.249453712179e-18" />
-      <mass value="0.00331041158345139" />
-      <inertia ixx="6.52839335776773E-08" ixy="2.26281897070577E-14" ixz="-1.07189597126418E-14" iyy="1.83053514033717E-07" iyz="3.28336934396466E-14" izz="1.40095870179639E-07" />
+      <origin xyz="4.5821553981434e-09 -1.3639082224837e-09 -0.0026571917794315" rpy="3.6462195987367e-18 -1.0596480442675e-17 1.201066161694e-17" />
+      <mass value="0.00331041140862858" />
+      <inertia ixx="1.83053514174094E-07" ixy="-2.29255326040888E-14" ixz="-5.21618781187463E-14" iyy="6.52839310999971E-08" iyz="-1.28602401926786E-14" izz="1.40095863430381E-07" />
     </inertial>
     <visual>
-      <origin xyz="0 2.7755575615629e-17 0" rpy="6.5633817052486e-22 2.8791601184814e-21 -4.249453712179e-18" />
+      <origin xyz="0 0 2.7755575615629e-17" rpy="3.6462195987367e-18 -1.0596480442675e-17 1.201066161694e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_roll_link.STL" />
       </geometry>
@@ -327,14 +327,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 2.7755575615629e-17 0" rpy="6.5633817052486e-22 2.8791601184814e-21 -4.249453712179e-18" />
+      <origin xyz="0 0 2.7755575615629e-17" rpy="3.6462195987367e-18 -1.0596480442675e-17 1.201066161694e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_roll_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftHand_roll" type="revolute">
-    <origin xyz="-0.0014711928292834 0 0.13849999772404" rpy="-1.5707963267949 1.1102230246252e-16 1.5707963267949" />
+    <origin xyz="-0.00054067714597583 0.0013682384897214 0.13849999772404" rpy="-1.5707975845791 -1.5707963118937 0.37633138675992" />
     <parent link="BN_LeftLowerArm_2_link" />
     <child link="BN_LeftHand_roll_link" />
     <axis xyz="0 0 -1" />
@@ -342,12 +342,12 @@
   </joint>
   <link name="BN_LeftHand_pitch_link">
     <inertial>
-      <origin xyz="-0.0024305640349263 -0.026882921017314 6.1053264121397e-06" rpy="1.61526386747e-17 -1.8935831341796e-21 -1.4588350210591e-23" />
-      <mass value="0.0264042158511134" />
-      <inertia ixx="5.72826440540778E-06" ixy="-8.6225564442171E-08" ixz="-3.59607665841391E-10" iyy="2.60984510838439E-06" iyz="-1.49227396392062E-09" izz="3.73152551054191E-06" />
+      <origin xyz="0.0022738376858437 -0.026895968672583 6.1046740269165e-06" rpy="1.2132947250552e-18 2.0912667133602e-22 -4.0579311478392e-22" />
+      <mass value="0.0264042403632555" />
+      <inertia ixx="5.66372444610469E-06" ixy="4.52255562147004E-07" ixz="-9.49820862114737E-11" iyy="2.67438689521845E-06" iyz="-1.5316688793958E-09" izz="3.73152567776777E-06" />
     </inertial>
     <visual>
-      <origin xyz="0.00047207680508288 3.3501682433767e-07 8.5914177161417e-09" rpy="1.61526386747e-17 -1.8935831341796e-21 -1.4588350210591e-23" />
+      <origin xyz="0.00046415530437111 8.2892346918523e-05 3.1399032193735e-09" rpy="1.2132947250552e-18 2.0912667133602e-22 -4.0579311478392e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_pitch_link.STL" />
       </geometry>
@@ -356,27 +356,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.00047207680508288 3.3501682433767e-07 8.5914177161417e-09" rpy="1.61526386747e-17 -1.8935831341796e-21 -1.4588350210591e-23" />
+      <origin xyz="0.00046415530437111 8.2892346918523e-05 3.1399032193735e-09" rpy="1.2132947250552e-18 2.0912667133602e-22 -4.0579311478392e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftHand_pitch" type="revolute">
-    <origin xyz="8.5845022340658e-09 -3.3501553584059e-07 -0.0004720768050839" rpy="0.18420191126884 -1.5707963118937 -0.18420191126884" />
+    <origin xyz="1.0333031473242e-06 3.1399032159041e-09 -0.00047149784733133" rpy="1.5707963267949 -1.396263401585 -3.1967597917699e-16" />
     <parent link="BN_LeftHand_roll_link" />
     <child link="BN_LeftHand_pitch_link" />
-    <axis xyz="1.8225809351964e-05 -3.7503016006893e-05 -0.99999999913067" />
+    <axis xyz="6.7851449246243e-06 -1.1409724915396e-07 -0.99999999997697" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_RightShoulder_1_link">
     <inertial>
-      <origin xyz="-0.0071802392545218 -0.043441132078263 0.0034027667536848" rpy="2.2744494631155e-22 -3.7778512018225e-22 7.5576537170712e-18" />
-      <mass value="0.0485377375351548" />
-      <inertia ixx="8.15684017492298E-06" ixy="1.06552627033045E-06" ixz="1.9676572071169E-09" iyy="1.36793565761515E-05" iyz="-7.00617877181133E-09" izz="1.00677604839579E-05" />
+      <origin xyz="-0.0021263186144593 -0.043978881593948 0.0034029016196196" rpy="-3.5009959809497e-22 -4.7927646357001e-22 -9.5787900190483e-18" />
+      <mass value="0.0485377391940265" />
+      <inertia ixx="7.98607811885495E-06" ixy="4.03916641313797E-07" ixz="2.76323215129394E-09" iyy="1.38501190550796E-05" iyz="-6.73221712947163E-09" izz="1.00677606477306E-05" />
     </inertial>
     <visual>
-      <origin xyz="-0.00048314087615589 8.9322182047491e-05 -0.1574984643942" rpy="2.2744494631155e-22 -3.7778512018225e-22 7.5576537170712e-18" />
+      <origin xyz="-0.00049879913842383 3.3647375927481e-05 -0.15749832953871" rpy="-3.5009959809497e-22 -4.7927646357001e-22 -9.5787900190483e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_1_link.STL" />
       </geometry>
@@ -385,27 +385,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.00048314087615589 8.9322182047491e-05 -0.1574984643942" rpy="2.2744494631155e-22 -3.7778512018225e-22 7.5576537170712e-18" />
+      <origin xyz="-0.00049879913842383 3.3647375927481e-05 -0.15749832953871" rpy="-3.5009959809497e-22 -4.7927646357001e-22 -9.5787900190483e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightShoulder_1" type="revolute">
-    <origin xyz="-0.05899846472476 0.2645006694254 -0.060008778068843" rpy="-1.5708 -1.3866 1.5708" />
+    <origin xyz="-0.058998587654936 0.2645005782127 -0.060000059548436" rpy="-1.5707963267949 -1.5022843994971 1.5707963268063" />
     <parent link="BN_Spine_roll_link" />
     <child link="BN_RightShoulder_1_link" />
-    <axis xyz="-0.1831232570965 -0.9830899616478 4.2069639047014e-06" />
+    <axis xyz="-0.06845834205993 -0.99765397577964 3.6732051097764e-06" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_RightShoulder_2_link">
     <inertial>
-      <origin xyz="0.0018342113299748 0.010423446611298 -0.033299957255422" rpy="-1.7101375193752e-18 -8.4940688237013e-22 3.0840632019989e-23" />
-      <mass value="0.241731740323525" />
-      <inertia ixx="9.63298497024879E-05" ixy="4.29620079043645E-07" ixz="1.2650779049814E-10" iyy="0.00012650397770093" iyz="4.8903349773833E-11" izz="5.57579087096024E-05" />
+      <origin xyz="0.0018342115915192 0.010423450580475 -0.033299957684944" rpy="-1.8301507269633e-17 5.5946140366473e-22 -1.3584856839646e-22" />
+      <mass value="0.241731806748015" />
+      <inertia ixx="9.63298522093594E-05" ixy="4.29624622867475E-07" ixz="1.2584526573713E-10" iyy="0.000126503986334048" iyz="5.14244577577618E-11" izz="5.57579231652956E-05" />
     </inertial>
     <visual>
-      <origin xyz="0 0 6.9388939039072e-18" rpy="-1.7101375193752e-18 -8.4940688237013e-22 3.0840632019989e-23" />
+      <origin xyz="-1.3877787807814e-17 0 -2.4286128663675e-17" rpy="-1.8301507269633e-17 5.5946140366473e-22 -1.3584856839646e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_2_link.STL" />
       </geometry>
@@ -414,14 +414,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 6.9388939039072e-18" rpy="-1.7101375193752e-18 -8.4940688237013e-22 3.0840632019989e-23" />
+      <origin xyz="-1.3877787807814e-17 0 -2.4286128663675e-17" rpy="-1.8301507269633e-17 5.5946140366473e-22 -1.3584856839646e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightShoulder_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightShoulder_2" type="revolute">
-    <origin xyz="0.026117859123844 -0.038943677817952 0.0050015356057979" rpy="-2.9573926535973 1.5707926535898 3.1415926535822" />
+    <origin xyz="0.030429723797202 -0.035667423602693 0.0050016704612926" rpy="0.068511927297751 1.5707963267949 0" />
     <parent link="BN_RightShoulder_1_link" />
     <child link="BN_RightShoulder_2_link" />
     <axis xyz="0 0 1" />
@@ -429,12 +429,12 @@
   </joint>
   <link name="BN_RightUpperArm_1_link">
     <inertial>
-      <origin xyz="-0.0045973560584499 0.00073064572483505 0.026646179944616" rpy="5.6191566173227e-22 -9.1661565424788e-22 3.2408384523417e-17" />
-      <mass value="0.219560359858319" />
-      <inertia ixx="0.000198612321205106" ixy="-4.99097999888523E-06" ixz="2.53407877808194E-05" iyy="0.000174088229954963" iyz="-4.98882987711856E-06" izz="0.000117853868411399" />
+      <origin xyz="-0.0046509464453697 0.00019508650832439 0.026646187039875" rpy="7.6975789047366e-22 -5.1366707605019e-22 -1.5297801420373e-17" />
+      <mass value="0.21956040397248" />
+      <inertia ixx="0.000199430204448374" ixy="-2.04603920558903E-06" ixz="2.57472544273159E-05" iyy="0.000173270387422417" iyz="-2.03034422388811E-06" izz="0.000117853887657389" />
     </inertial>
     <visual>
-      <origin xyz="1.0408340855861e-17 0 0" rpy="5.6191566173227e-22 -9.1661565424788e-22 3.2408384523417e-17" />
+      <origin xyz="2.3418766925687e-17 5.5511151231258e-17 1.3877787807814e-17" rpy="7.6975789047366e-22 -5.1366707605019e-22 -1.5297801420373e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_1_link.STL" />
       </geometry>
@@ -443,14 +443,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.0408340855861e-17 0 0" rpy="5.6191566173227e-22 -9.1661565424788e-22 3.2408384523417e-17" />
+      <origin xyz="2.3418766925687e-17 5.5511151231258e-17 1.3877787807814e-17" rpy="7.6975789047366e-22 -5.1366707605019e-22 -1.5297801420373e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperArm_1" type="revolute">
-    <origin xyz="-0.0345 0.0335 -0.0333" rpy="-1.5708 -1.3866 1.5708" />
+    <origin xyz="-0.034500000000369 0.033499999999606 -0.0333" rpy="-1.5707963267949 -1.5022843994971 1.5707963268062" />
     <parent link="BN_RightShoulder_2_link" />
     <child link="BN_RightUpperArm_1_link" />
     <axis xyz="0 0 1" />
@@ -458,12 +458,12 @@
   </joint>
   <link name="BN_RightUpperArm_2_link">
     <inertial>
-      <origin xyz="-6.5623990779251e-06 -0.038830331959875 -0.0085771697366347" rpy="4.4462609951418e-18 -1.0331017656752e-21 -1.1846846677668e-22" />
-      <mass value="0.125542167041229" />
-      <inertia ixx="0.000107919256524093" ixy="4.47661459776484E-07" ixz="-4.76381877114217E-09" iyy="4.65320000170302E-05" iyz="-1.69193136315027E-05" izz="0.000133475108966909" />
+      <origin xyz="-0.006749289027787 -0.038239354080061 -0.008577201285661" rpy="-3.9902260150236e-17 7.6016630764228e-22 -4.2686307100228e-22" />
+      <mass value="0.125542433610334" />
+      <inertia ixx="0.000106221358516322" ixy="-1.00771718266551E-05" ixz="-2.94270275991902E-06" iyy="4.82300001507563E-05" iyz="-1.6661443883284E-05" izz="0.000133475149232507" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 0 6.9388939039072e-18" rpy="4.4462609951418e-18 -1.0331017656752e-21 -1.1846846677668e-22" />
+      <origin xyz="0 0 -1.3227266504323e-17" rpy="-3.9902260150236e-17 7.6016630764228e-22 -4.2686307100228e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_2_link.STL" />
       </geometry>
@@ -472,14 +472,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 0 6.9388939039072e-18" rpy="4.4462609951418e-18 -1.0331017656752e-21 -1.1846846677668e-22" />
+      <origin xyz="0 0 -1.3227266504323e-17" rpy="-3.9902260150236e-17 7.6016630764228e-22 -4.2686307100228e-22" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperArm_2" type="revolute">
-    <origin xyz="0.022119 -0.0041211 0.0535" rpy="-2.9573926535936 1.5707926535898 3.141592653586" />
+    <origin xyz="0.022447214455225 -0.0015403126957522 0.053500000000002" rpy="0.068511927297749 1.5707963267949 0" />
     <parent link="BN_RightUpperArm_1_link" />
     <child link="BN_RightUpperArm_2_link" />
     <axis xyz="0 0 -1" />
@@ -487,12 +487,12 @@
   </joint>
   <link name="BN_RightUpperArm_3_link">
     <inertial>
-      <origin xyz="-8.3633115089576e-05 0.0011344809941718 0.095308829026553" rpy="-4.1939062226701e-18 -1.6026378549094e-21 4.43414900428e-22" />
-      <mass value="0.348281905127082" />
-      <inertia ixx="0.000355350176811422" ixy="3.93711068017195E-07" ixz="-5.92382824501708E-07" iyy="0.000314455287776775" iyz="-1.47452048698165E-06" izz="7.72260821191068E-05" />
+      <origin xyz="-0.0010858093460835 0.00033915758357828 0.095308716667989" rpy="-1.3177995970258e-17 2.3422356012208e-17 -1.4242540862149e-17" />
+      <mass value="0.348281379337571" />
+      <inertia ixx="0.000319709425382385" ixy="1.36901184098336E-05" ixz="1.15361801011415E-06" iyy="0.000350095882344708" iyz="-1.09283341357076E-06" izz="7.7226058437065E-05" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 -1.3877787807814e-17 0" rpy="-4.1939062226701e-18 -1.6026378549094e-21 4.43414900428e-22" />
+      <origin xyz="0 0 0" rpy="-1.3177995970258e-17 2.3422356012208e-17 -1.4242540862149e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_3_link.STL" />
       </geometry>
@@ -501,14 +501,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 -1.3877787807814e-17 0" rpy="-4.1939062226701e-18 -1.6026378549094e-21 4.43414900428e-22" />
+      <origin xyz="0 0 0" rpy="-1.3177995970258e-17 2.3422356012208e-17 -1.4242540862149e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperArm_3_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperArm_3" type="revolute">
-    <origin xyz="0 -0.0951 -0.0235" rpy="-1.5708 -4.2351647362715e-22 3.1415853071796" />
+    <origin xyz="-0.016513941686767 -0.093655217264645 -0.023500000000005" rpy="-1.5707963267949 -1.1944667703733 2.9670597284017" />
     <parent link="BN_RightUpperArm_2_link" />
     <child link="BN_RightUpperArm_3_link" />
     <axis xyz="0 0 -1" />
@@ -516,12 +516,12 @@
   </joint>
   <link name="BN_RightLowerArm_1_link">
     <inertial>
-      <origin xyz="0.0020876982905651 -0.030101164749061 0.0066793252263015" rpy="-3.0833191884279e-22 3.3351892316877e-23 1.0652061921066e-17" />
-      <mass value="0.0652788569519393" />
-      <inertia ixx="5.35211807441507E-05" ixy="2.25068764494065E-06" ixz="-1.84181246019614E-06" iyy="3.32809007553896E-05" iyz="1.49814511833893E-05" izz="4.85261928990143E-05" />
+      <origin xyz="0.0020877092073719 -0.030101393965825 0.0066794117438611" rpy="1.6020959051608e-17 1.7077563898273e-18 -4.8940156416726e-17" />
+      <mass value="0.0652791953989844" />
+      <inertia ixx="5.35212234127579E-05" ixy="2.25069072237656E-06" ixz="-1.84181506993246E-06" iyy="3.32809734558217E-05" iyz="1.49814503924718E-05" izz="4.85262535168914E-05" />
     </inertial>
     <visual>
-      <origin xyz="1.3877787807814e-17 0 0" rpy="-3.0833191884279e-22 3.3351892316877e-23 1.0652061921066e-17" />
+      <origin xyz="0 0 -2.7755575615629e-17" rpy="1.6020959051608e-17 1.7077563898273e-18 -4.8940156416726e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_1_link.STL" />
       </geometry>
@@ -530,14 +530,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.3877787807814e-17 0 0" rpy="-3.0833191884279e-22 3.3351892316877e-23 1.0652061921066e-17" />
+      <origin xyz="0 0 -2.7755575615629e-17" rpy="1.6020959051608e-17 1.7077563898273e-18 -4.8940156416726e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightLowerArm_1" type="revolute">
-    <origin xyz="-0.0231 0.006 0.1765" rpy="-1.5708 2.2204460492503e-16 -1.5708" />
+    <origin xyz="-0.014069585286218 -0.019278401584937 0.1765" rpy="-1.5707963267949 2.7755575615629e-17 -0.37632955640654" />
     <parent link="BN_RightUpperArm_3_link" />
     <child link="BN_RightLowerArm_1_link" />
     <axis xyz="0 0 -1" />
@@ -545,12 +545,12 @@
   </joint>
   <link name="BN_RightLowerArm_2_link">
     <inertial>
-      <origin xyz="0.0050556006221786 -0.00011559092824998 0.053869795951908" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
-      <mass value="0.154519815706459" />
-      <inertia ixx="0.000127384340196997" ixy="-3.39372008714128E-08" ixz="-1.61643864466007E-06" iyy="0.000125131667611803" iyz="-9.65579365234815E-08" izz="1.61396588961955E-05" />
+      <origin xyz="0.0019654825667677 0.0046593280073201 0.05386979640598" rpy="2.6967242677712e-17 3.4712543312533e-17 6.16581712804e-18" />
+      <mass value="0.154519816493855" />
+      <inertia ixx="0.00012545911884023" ixy="7.94713045250614E-07" ixz="-5.04255373163187E-07" iyy="0.000127056887768287" iyz="-1.53880641240993E-06" izz="1.61396588516248E-05" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 6.9388939039072e-18 0" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+      <origin xyz="-1.3877787807814e-17 0 0" rpy="2.6967242677712e-17 3.4712543312533e-17 6.16581712804e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_2_link.STL" />
       </geometry>
@@ -559,14 +559,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 6.9388939039072e-18 0" rpy="3.6720166344484e-18 1.5256319467714e-21 6.0330955488926e-22" />
+      <origin xyz="-1.3877787807814e-17 0 0" rpy="2.6967242677712e-17 3.4712543312533e-17 6.16581712804e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerArm_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightLowerArm_2" type="revolute">
-    <origin xyz="0.005 -0.0905 0.023" rpy="-1.5707926536049 -1.5707926535898 -3.1415926535747" />
+    <origin xyz="0.0049999999994155 -0.090499999952683 0.023000000000005" rpy="1.5707963267949 -0.3763295564385 -5.9688137887275e-17" />
     <parent link="BN_RightLowerArm_1_link" />
     <child link="BN_RightLowerArm_2_link" />
     <axis xyz="0 0 -1" />
@@ -574,12 +574,12 @@
   </joint>
   <link name="BN_RightHand_roll_link">
     <inertial>
-      <origin xyz="-1.0249834453413e-09 -3.3790866493799e-09 -0.0048722058993257" rpy="1.255049909975e-21 1.8868921976169e-21 -1.1509785757737e-17" />
-      <mass value="0.00405446903786276" />
-      <inertia ixx="7.07740795709671E-08" ixy="2.25934219377553E-14" ixz="-1.06950981344827E-14" iyy="1.88543660013236E-07" iyz="3.28797065470674E-14" izz="1.4662139506993E-07" />
+      <origin xyz="-9.4375441491287e-10 0.00084604630126617 -0.0047981786556544" rpy="-7.4179157473901e-23 6.0833992662116e-22 2.8309662081559e-17" />
+      <mass value="0.00405446609750203" />
+      <inertia ixx="7.07740789048964E-08" ixy="2.55364748585989E-14" ixz="-5.11264175106854E-15" iyy="1.87279541795313E-07" iyz="7.16914434017192E-09" izz="1.47885515369079E-07" />
     </inertial>
     <visual>
-      <origin xyz="0 0 -2.7755575615629e-17" rpy="1.255049909975e-21 1.8868921976169e-21 -1.1509785757737e-17" />
+      <origin xyz="-6.9388939039072e-18 1.3877787807814e-17 -2.7755575615629e-17" rpy="-7.4179157473901e-23 6.0833992662116e-22 2.8309662081559e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_roll_link.STL" />
       </geometry>
@@ -588,27 +588,27 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 -2.7755575615629e-17" rpy="1.255049909975e-21 1.8868921976169e-21 -1.1509785757737e-17" />
+      <origin xyz="-6.9388939039072e-18 1.3877787807814e-17 -2.7755575615629e-17" rpy="-7.4179157473901e-23 6.0833992662116e-22 2.8309662081559e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_roll_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightHand_roll" type="revolute">
-    <origin xyz="-0.0014712 -6.9388939039072e-18 0.1385" rpy="-1.5708 -5.5511151231258e-17 1.5708" />
+    <origin xyz="-0.00054067714599549 -0.0013682384897136 0.13849999772404" rpy="-1.745329251984 -2.7755575615629e-17 2.7652630971513" />
     <parent link="BN_RightLowerArm_2_link" />
     <child link="BN_RightHand_roll_link" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0.173648177656807 -0.984807753013993" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_RightHand_pitch_link">
     <inertial>
-      <origin xyz="0.0024177751192706 -0.027024325099334 8.1601005924705e-05" rpy="1.8518806771187e-17 -1.0727246682984e-21 3.1465980514518e-23" />
-      <mass value="0.0262391012420251" />
-      <inertia ixx="5.72782158377314E-06" ixy="8.6225564442171E-08" ixz="-3.59607665841037E-10" iyy="2.60940228674976E-06" iyz="1.49227396392112E-09" izz="3.73133599883355E-06" />
+      <origin xyz="0.0070694516166573 -0.02619430012169 8.1602705530942e-05" rpy="1.7747420803841e-17 -8.9468971660005e-23 6.7684948868934e-23" />
+      <mass value="0.0262391119671493" />
+      <inertia ixx="5.60429918550279E-06" ixy="6.14306510274445E-07" ixz="-6.13368289105023E-10" iyy="2.73292519022412E-06" iyz="1.40690467738823E-09" izz="3.7313362522708E-06" />
     </inertial>
     <visual>
-      <origin xyz="-0.00046711744499001 -1.0229736464307e-06 -6.2047376819807e-09" rpy="1.8518806771187e-17 -1.0727246682984e-21 3.1465980514518e-23" />
+      <origin xyz="-0.00046415750873718 -8.2506474511468e-05 -3.4098914490632e-09" rpy="1.7747420803841e-17 -8.9468971660005e-23 6.7684948868934e-23" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_pitch_link.STL" />
       </geometry>
@@ -617,24 +617,24 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.00046711744499001 -1.0229736464307e-06 -6.2047376819807e-09" rpy="1.8518806771187e-17 -1.0727246682984e-21 3.1465980514518e-23" />
+      <origin xyz="-0.00046415750873718 -8.2506474511468e-05 -3.4098914490632e-09" rpy="1.7747420803841e-17 -8.9468971660005e-23 6.7684948868934e-23" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightHand_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightHand_pitch" type="revolute">
-    <origin xyz="4.488919493062e-09 1.0229736464307e-06 -0.00046711744500968" rpy="-3.1415926535804 1.5707926535898 -3.1415926535804" />
+    <origin xyz="3.4098914351854e-09 8.2506474511482e-05 -0.00046415750873721" rpy="-2.830955782445e-17 1.5707963267949 0" />
     <parent link="BN_RightHand_roll_link" />
     <child link="BN_RightHand_pitch_link" />
-    <axis xyz="-1.3192861270204e-05 -4.1176050974352e-05 0.99999999906524" />
+    <axis xyz="-7.3464113465569e-06 6.4154183588344e-12 0.99999999997301" />
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
   </joint>
   <link name="BN_hips_roll_link">
     <inertial>
-      <origin xyz="-8.4026068483706e-09 -2.7455825460376e-10 -2.6888243487289e-07" rpy="0 -0 0" />
-      <mass value="0.0934780291598877" />
-      <inertia ixx="1.00263355264677E-05" ixy="5.83808965565463E-19" ixz="-6.10623159185817E-13" iyy="1.4811960990916E-05" iyz="-1.61290742652644E-12" izz="8.55560733118958E-06" />
+      <origin xyz="-8.4026068473921e-09 -2.74558271951e-10 -2.6888243490064e-07" rpy="0 -0 0" />
+      <mass value="0.0934780291598876" />
+      <inertia ixx="1.00263355264677E-05" ixy="5.84827580414413E-19" ixz="-6.10623159488794E-13" iyy="1.4811960990916E-05" iyz="-1.61290742800875E-12" izz="8.55560733118959E-06" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 -0 0" />
@@ -661,12 +661,12 @@
   </joint>
   <link name="BN_hips_pitch_link">
     <inertial>
-      <origin xyz="-0.03524162092379 -0.0075876651334427 -3.5099450363697e-06" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+      <origin xyz="-0.035241613969449 -0.007587684013016 -3.5099450365782e-06" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <mass value="1.10918804844225" />
-      <inertia ixx="0.00356998225984358" ixy="0.000591565583569619" ixz="2.39345686271661E-09" iyy="0.00336375863098191" iyz="-8.16870490118379E-09" izz="0.00180464247063674" />
+      <inertia ixx="0.00356998225984358" ixy="0.000591565583569619" ixz="2.39345686264613E-09" iyy="0.00336375863098191" iyz="-8.16870490105893E-09" izz="0.00180464247063674" />
     </inertial>
     <visual>
-      <origin xyz="3.4694469519536e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+      <origin xyz="-3.4694469519536e-18 0 0" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_hips_pitch_link.STL" />
       </geometry>
@@ -675,14 +675,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="3.4694469519536e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+      <origin xyz="-3.4694469519536e-18 0 0" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_hips_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_hips_pitch" type="revolute">
-    <origin xyz="0 0 0" rpy="1.5708 -1.2579 -1.5708" />
+    <origin xyz="0 0 0" rpy="1.5707963267949 -1.1663085184882 -1.5707963267949" />
     <parent link="BN_hips_roll_link" />
     <child link="BN_hips_pitch_link" />
     <axis xyz="0 0 1" />
@@ -690,12 +690,12 @@
   </joint>
   <link name="BN_LeftUpperLeg_1_link">
     <inertial>
-      <origin xyz="0.00053477664264002 5.2138082855504e-05 0.028551107015026" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
-      <mass value="0.293426003416425" />
-      <inertia ixx="0.000139497148523108" ixy="-6.02455048950443E-06" ixz="6.50116027970901E-06" iyy="0.000174182854286245" iyz="1.10098103539402E-06" izz="0.00021317243121433" />
+      <origin xyz="0.00053730903966526 2.1589590366231e-06 0.028551105149342" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
+      <mass value="0.293425994953086" />
+      <inertia ixx="0.000138681268844946" ixy="-2.70734023697297E-06" ixz="6.57540902660023E-06" iyy="0.000174998726767964" iyz="4.91388679642908E-07" izz="0.00021317243017034" />
     </inertial>
     <visual>
-      <origin xyz="5.2041704279304e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+      <origin xyz="5.2041704279304e-18 0 0" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_1_link.STL" />
       </geometry>
@@ -704,14 +704,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="5.2041704279304e-18 -1.3877787807814e-17 0" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+      <origin xyz="5.2041704279304e-18 0 0" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperLeg_1" type="revolute">
-    <origin xyz="-0.035990589835706 -0.024514057203627 0.092020008064428" rpy="-1.6962695786299e-23 6.2602352799581e-23 3.2211750323082e-17" />
+    <origin xyz="-0.035990582881365 -0.0245140760832 0.092020008064428" rpy="2.5782816153755e-31 9.5939413708386e-31 3.8764118488312e-17" />
     <parent link="BN_hips_pitch_link" />
     <child link="BN_LeftUpperLeg_1_link" />
     <axis xyz="0 0 1" />
@@ -719,12 +719,12 @@
   </joint>
   <link name="BN_LeftUpperLeg_2_link">
     <inertial>
-      <origin xyz="-0.012575388704376 -0.10519072734121 -0.044681789197475" rpy="-1.4024762349754e-17 1.7933768797658e-22 -2.1376814939694e-23" />
-      <mass value="0.825082115908653" />
-      <inertia ixx="0.00116360940344346" ixy="-4.99419679644476E-05" ixz="-3.08062331247078E-06" iyy="0.000301179309873292" iyz="-5.79319962525578E-05" izz="0.00124301544003642" />
+      <origin xyz="-0.012575388917403 -0.10519073032002 -0.044681786156506" rpy="1.9511836015286e-17 1.7154310163861e-31 -2.8777841995258e-31" />
+      <mass value="0.825082274309062" />
+      <inertia ixx="0.0011636094015676" ixy="-4.99420027965905E-05" ixz="-3.08064241970866E-06" iyy="0.000301179337679485" iyz="-5.793199633557E-05" izz="0.00124301542938281" />
     </inertial>
     <visual>
-      <origin xyz="0 -1.3877787807814e-17 0" rpy="-1.4024762349754e-17 1.7933768797658e-22 -2.1376814939694e-23" />
+      <origin xyz="0 0 0" rpy="1.9511836015286e-17 1.7154310163861e-31 -2.8777841995258e-31" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_2_link.STL" />
       </geometry>
@@ -733,14 +733,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 -1.3877787807814e-17 0" rpy="-1.4024762349754e-17 1.7933768797658e-22 -2.1376814939694e-23" />
+      <origin xyz="0 0 0" rpy="1.9511836015286e-17 1.7154310163861e-31 -2.8777841995258e-31" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperLeg_2" type="revolute">
-    <origin xyz="0.044372234920298 0.0074903116208913 0.01170000000053" rpy="3.0735322812466 1.5707963118937 -3.0424232940191" />
+    <origin xyz="0.044876640748256 0.0033297319940586 0.011700000000525" rpy="-0.074061732238442 1.5707963267949 0" />
     <parent link="BN_LeftUpperLeg_1_link" />
     <child link="BN_LeftUpperLeg_2_link" />
     <axis xyz="0 0 -1" />
@@ -748,12 +748,12 @@
   </joint>
   <link name="BN_LeftUpperLeg_3_link">
     <inertial>
-      <origin xyz="0.00017834324221383 0.00035039805675402 0.085653900617913" rpy="-6.480112243402e-18 -7.9779163754004e-19 2.0801710251288e-17" />
-      <mass value="0.663542292455939" />
-      <inertia ixx="0.00211962472643184" ixy="-4.85486681682642E-06" ixz="-1.35045470664209E-06" iyy="0.00210678705244186" iyz="-1.20303702633062E-06" izz="0.000382477701844687" />
+      <origin xyz="0.00028603674242965 0.00026976012262227 0.085653862626847" rpy="-8.0591501994021e-18 -1.3560994194221e-17 5.5590349634656e-17" />
+      <mass value="0.663542442925151" />
+      <inertia ixx="0.00211508346849747" ixy="-7.82589811371473E-06" ixz="-1.67705683446512E-06" iyy="0.00211132792849622" iyz="-6.77356040971725E-07" izz="0.00038247776049927" />
     </inertial>
     <visual>
-      <origin xyz="2.7755575615629e-17 3.4694469519536e-18 5.5511151231258e-17" rpy="-6.480112243402e-18 -7.9779163754004e-19 2.0801710251288e-17" />
+      <origin xyz="-4.1633363423443e-17 0 0" rpy="-8.0591501994021e-18 -1.3560994194221e-17 5.5590349634656e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_3_link.STL" />
       </geometry>
@@ -762,14 +762,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="2.7755575615629e-17 3.4694469519536e-18 5.5511151231258e-17" rpy="-6.480112243402e-18 -7.9779163754004e-19 2.0801710251288e-17" />
+      <origin xyz="-4.1633363423443e-17 0 0" rpy="-8.0591501994021e-18 -1.3560994194221e-17 5.5590349634656e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperLeg_3_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftUpperLeg_3" type="revolute">
-    <origin xyz="-0.012464803440567 -0.20091370952522 -0.046" rpy="1.5707963267949 -0.35158000141577 -0.061961166407591" />
+    <origin xyz="-0.012464803440568 -0.20091370952522 -0.045999999999999" rpy="1.5707963267949 -0.69545628640374 -0.061961166407592" />
     <parent link="BN_LeftUpperLeg_2_link" />
     <child link="BN_LeftUpperLeg_3_link" />
     <axis xyz="0 0 1" />
@@ -777,12 +777,12 @@
   </joint>
   <link name="BN_LeftLowerLeg_1_link">
     <inertial>
-      <origin xyz="0.0018633086111863 -0.038562366702193 0.0038032014171519" rpy="2.469127927953e-18 8.8971136119808e-19 -2.6344645371084e-17" />
-      <mass value="0.101794305752762" />
-      <inertia ixx="8.9562728836161E-05" ixy="4.21346196657718E-06" ixz="1.03507152626105E-07" iyy="4.15305541607457E-05" iyz="1.86540616931648E-05" izz="8.65180205819235E-05" />
+      <origin xyz="0.0054428192983542 -0.038221773853985 0.0038032028618605" rpy="1.7277267789528e-17 -4.5364662549763e-18 3.6011862158849e-17" />
+      <mass value="0.101794297625754" />
+      <inertia ixx="8.83664149557212E-05" ixy="8.58974915136681E-06" ixz="-1.63239361913565E-06" iyy="4.27268749750949E-05" iyz="1.85827890771029E-05" izz="8.65180257404632E-05" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 -1.1102230246252e-16 0" rpy="2.469127927953e-18 8.8971136119808e-19 -2.6344645371084e-17" />
+      <origin xyz="-4.1633363423443e-17 -1.1102230246252e-16 -1.3877787807814e-17" rpy="1.7277267789528e-17 -4.5364662549763e-18 3.6011862158849e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_1_link.STL" />
       </geometry>
@@ -791,14 +791,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 -1.1102230246252e-16 0" rpy="2.469127927953e-18 8.8971136119808e-19 -2.6344645371084e-17" />
+      <origin xyz="-4.1633363423443e-17 -1.1102230246252e-16 -1.3877787807814e-17" rpy="1.7277267789528e-17 -4.5364662549763e-18 3.6011862158849e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftLowerLeg_1" type="revolute">
-    <origin xyz="-0.020094365404342 0.012573293753929 0.24670000000022" rpy="-1.5707963267949 0.17026834780783 -1.8739999979586" />
+    <origin xyz="-0.014678991450898 0.018611782472677 0.24670000000022" rpy="-1.5707963267949 0.077100118125878 -2.2178762829465" />
     <parent link="BN_LeftUpperLeg_3_link" />
     <child link="BN_LeftLowerLeg_1_link" />
     <axis xyz="0 0 -1" />
@@ -806,12 +806,12 @@
   </joint>
   <link name="BN_LeftLowerLeg_2_link">
     <inertial>
-      <origin xyz="-2.5921075772485e-06 -6.8345011286887e-05 0.14195169423333" rpy="-8.0549256914209e-19 -4.2954785265578e-18 1.3443478748548e-17" />
-      <mass value="0.33789326488138" />
-      <inertia ixx="0.00201836915946243" ixy="-2.48973214928136E-06" ixz="-4.90241746125725E-07" iyy="0.00201094693800198" iyz="1.61126773751554E-07" izz="8.1805490050851E-05" />
+      <origin xyz="-2.6648011672656e-05 -6.2984083566959e-05 0.14195167321478" rpy="-7.9329741648505e-19 -1.5865948329701e-18 -5.9181612918665e-18" />
+      <mass value="0.337893238616535" />
+      <inertia ixx="0.00201578698907585" ixy="-4.32395788977106E-06" ixz="-4.01305339896701E-07" iyy="0.00201352905751985" iyz="3.24295365037794E-07" izz="8.18054921761558E-05" />
     </inertial>
     <visual>
-      <origin xyz="1.3877787807814e-17 1.2576745200832e-17 1.1102230246252e-16" rpy="-8.0549256914209e-19 -4.2954785265578e-18 1.3443478748548e-17" />
+      <origin xyz="0 6.9388939039072e-18 0" rpy="-7.9329741648505e-19 -1.5865948329701e-18 -5.9181612918665e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_2_link.STL" />
       </geometry>
@@ -820,14 +820,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.3877787807814e-17 1.2576745200832e-17 1.1102230246252e-16" rpy="-8.0549256914209e-19 -4.2954785265578e-18 1.3443478748548e-17" />
+      <origin xyz="0 6.9388939039072e-18 0" rpy="-7.9329741648505e-19 -1.5865948329701e-18 -5.9181612918665e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerLeg_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftLowerLeg_2" type="revolute">
-    <origin xyz="-0.0039830014636028 -0.096168527545273 0.027000000000086" rpy="-1.5707963267921 -1.2610321950548 2.9752000950158" />
+    <origin xyz="0.0049811675894658 -0.096121995195328 0.027000000000085" rpy="-1.5707963267936 -0.89879044418073 3.0683683246993" />
     <parent link="BN_LeftLowerLeg_1_link" />
     <child link="BN_LeftLowerLeg_2_link" />
     <axis xyz="0 0 1" />
@@ -835,12 +835,12 @@
   </joint>
   <link name="BN_LeftFoot_pitch_link">
     <inertial>
-      <origin xyz="0.003708038421736 -0.016862510085004 -0.00032575822158073" rpy="1.1070409688554e-18 -4.0896145103754e-18 -2.7652341262439e-17" />
-      <mass value="0.0697698796004311" />
-      <inertia ixx="2.84588607100441E-05" ixy="2.41718904360269E-06" ixz="1.10739986567751E-06" iyy="1.73701470953232E-05" iyz="-5.30224275390748E-06" izz="3.580814904214E-05" />
+      <origin xyz="0.0021231791407274 -0.01713434867942 -0.00032575821877531" rpy="-5.7806775576344e-18 -8.9233773931926e-18 -2.7755575615629e-17" />
+      <mass value="0.0697698796573367" />
+      <inertia ixx="2.88106935728285E-05" ixy="1.34819962878566E-06" ixz="6.09310974792945E-07" iyy="1.70183141172811E-05" iyz="-5.38227209432328E-06" izz="3.58081489150173E-05" />
     </inertial>
     <visual>
-      <origin xyz="1.3877787807814e-17 0 -1.3877787807814e-17" rpy="1.1070409688554e-18 -4.0896145103754e-18 -2.7652341262439e-17" />
+      <origin xyz="-4.8572257327351e-17 0 1.3877787807814e-17" rpy="-5.7806775576344e-18 -8.9233773931926e-18 -2.7755575615629e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_pitch_link.STL" />
       </geometry>
@@ -849,14 +849,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.3877787807814e-17 0 -1.3877787807814e-17" rpy="1.1070409688554e-18 -4.0896145103754e-18 -2.7652341262439e-17" />
+      <origin xyz="-4.8572257327351e-17 0 1.3877787807814e-17" rpy="-5.7806775576344e-18 -8.9233773931926e-18 -2.7755575615629e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftFoot_pitch" type="revolute">
-    <origin xyz="-0.018333805772659 0.0058680545373879 0.28500000000001" rpy="-1.5707963267949 -0.16639255857136 1.2610321950548" />
+    <origin xyz="-0.015064558410894 0.011984222046013 0.28500000000001" rpy="-1.5707963267949 -0.073224328889412 0.89879044418073" />
     <parent link="BN_LeftLowerLeg_2_link" />
     <child link="BN_LeftFoot_pitch_link" />
     <axis xyz="0 0 -1" />
@@ -864,12 +864,12 @@
   </joint>
   <link name="BN_LeftFoot_roll_link">
     <inertial>
-      <origin xyz="0.0015602059890233 -0.017178090155849 0.027040338503777" rpy="7.9345314987711e-19 -1.9319583373547e-19 8.4431209439205e-19" />
-      <mass value="0.0310065052583184" />
-      <inertia ixx="5.48672675189661E-05" ixy="-1.83715487069908E-07" ixz="-4.62047325191602E-07" iyy="5.82517836055616E-05" iyz="-1.79320977575885E-08" izz="4.15539992404128E-06" />
+      <origin xyz="0.0016358351283701 -0.01717105315268 0.027040338581133" rpy="2.1215246956518e-17 2.4156784157834e-18 -1.0029599940182e-18" />
+      <mass value="0.0310065054848685" />
+      <inertia ixx="5.48689512265959E-05" ixy="-1.98612053524422E-07" ixz="-4.61963832271184E-07" iyy="5.82501001448053E-05" iyz="-1.99665648591199E-08" izz="4.15539998241262E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="7.9345314987711e-19 -1.9319583373547e-19 8.4431209439205e-19" />
+      <origin xyz="2.7755575615629e-17 0 -1.3877787807814e-17" rpy="2.1215246956518e-17 2.4156784157834e-18 -1.0029599940182e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_roll_link.STL" />
       </geometry>
@@ -878,14 +878,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="7.9345314987711e-19 -1.9319583373547e-19 8.4431209439205e-19" />
+      <origin xyz="2.7755575615629e-17 0 -1.3877787807814e-17" rpy="2.1215246956518e-17 2.4156784157834e-18 -1.0029599940182e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftFoot_roll_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_LeftFoot_roll" type="revolute">
-    <origin xyz="-0.0057816733192712 -0.057016463739262 -0.019999999999999" rpy="1.5707963267949 -1.5166972359993 -1.3651976928547" />
+    <origin xyz="-0.011061039251519 -0.056231292839287 -0.019999999999999" rpy="1.5707963267949 -1.5122936843799 -1.4583659225366" />
     <parent link="BN_LeftFoot_pitch_link" />
     <child link="BN_LeftFoot_roll_link" />
     <axis xyz="0 0 1" />
@@ -893,12 +893,12 @@
   </joint>
   <link name="BN_RightUpperLeg_1_link">
     <inertial>
-      <origin xyz="0.00052003021876115 -0.00013516964336346 0.02855110702607" rpy="-2.2741974635535e-23 6.5911075519915e-23 -4.4561747074522e-18" />
-      <mass value="0.293426027660154" />
-      <inertia ixx="0.000139713934685916" ixy="6.61572516731424E-06" ixz="6.48276190052437E-06" iyy="0.00017396608431358" iyz="-1.2046581870726E-06" izz="0.000213172447607565" />
+      <origin xyz="0.00053174315105062 -7.7161660292681e-05 0.028551105001942" rpy="3.4107763867931e-31 -4.9187709640874e-32 -6.0610418373792e-17" />
+      <mass value="0.293426005391581" />
+      <inertia ixx="0.000138681918429788" ixy="2.711705336079E-06" ixz="6.57593419496135E-06" iyy="0.000174998083928173" iyz="-4.84408605359229E-07" izz="0.000213172437746489" />
     </inertial>
     <visual>
-      <origin xyz="-1.7347234759768e-18 1.3877787807814e-17 0" rpy="-2.2741974635535e-23 6.5911075519915e-23 -4.4561747074522e-18" />
+      <origin xyz="5.2041704279304e-18 1.3877787807814e-17 -1.3877787807814e-17" rpy="3.4107763867931e-31 -4.9187709640874e-32 -6.0610418373792e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_1_link.STL" />
       </geometry>
@@ -907,14 +907,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-1.7347234759768e-18 1.3877787807814e-17 0" rpy="-2.2741974635535e-23 6.5911075519915e-23 -4.4561747074522e-18" />
+      <origin xyz="5.2041704279304e-18 1.3877787807814e-17 -1.3877787807814e-17" rpy="3.4107763867931e-31 -4.9187709640874e-32 -6.0610418373792e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperLeg_1" type="revolute">
-    <origin xyz="-0.035990589835706 -0.024514057203627 -0.092019991935572" rpy="3.1415926535898 -7.7560333645602e-23 3.1415926535898" />
+    <origin xyz="-0.035990582881365 -0.0245140760832 -0.092019991935572" rpy="3.1415926535898 -1.7878152194328e-30 3.1415926535898" />
     <parent link="BN_hips_pitch_link" />
     <child link="BN_RightUpperLeg_1_link" />
     <axis xyz="0 0 1" />
@@ -922,12 +922,12 @@
   </joint>
   <link name="BN_RightUpperLeg_2_link">
     <inertial>
-      <origin xyz="-0.012502531799958 -0.10458129557118 -0.043451887464699" rpy="5.9129537055673e-18 2.2124072659251e-22 8.7320938793863e-24" />
-      <mass value="0.829890226725832" />
-      <inertia ixx="0.00116415315436281" ixy="-4.99419570749191E-05" ixz="-3.08062295873012E-06" iyy="0.000301723114739008" iyz="-5.79319708467183E-05" izz="0.00124405115246494" />
+      <origin xyz="-0.012502531715745 -0.10458129846819 -0.04345188730377" rpy="4.5765951304858e-17 -1.7925271518643e-24 3.2821007164273e-25" />
+      <mass value="0.829890295603427" />
+      <inertia ixx="0.00116415316514483" ixy="-4.99419570232045E-05" ixz="-3.08062620792964E-06" iyy="0.000301723131755073" iyz="-5.79319721482007E-05" izz="0.00124405116737463" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="5.9129537055673e-18 2.2124072659251e-22 8.7320938793863e-24" />
+      <origin xyz="0 -1.3877787807814e-17 6.9388939039072e-18" rpy="4.5765951304858e-17 -1.7925271518643e-24 3.2821007164273e-25" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_2_link.STL" />
       </geometry>
@@ -936,14 +936,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="5.9129537055673e-18 2.2124072659251e-22 8.7320938793863e-24" />
+      <origin xyz="0 -1.3877787807814e-17 6.9388939039072e-18" rpy="4.5765951304858e-17 -1.7925271518643e-24 3.2821007164273e-25" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperLeg_2" type="revolute">
-    <origin xyz="0.043255183553702 -0.0080615814661712 0.01169999999999" rpy="0.18425862694768 1.5707963267949 0" />
+    <origin xyz="0.043879382064976 -0.003255737949539 0.011699999999991" rpy="-3.0675309213513 1.5707963118937 3.1415926535898" />
     <parent link="BN_RightUpperLeg_1_link" />
     <child link="BN_RightUpperLeg_2_link" />
     <axis xyz="0 0 -1" />
@@ -951,12 +951,12 @@
   </joint>
   <link name="BN_RightUpperLeg_3_link">
     <inertial>
-      <origin xyz="7.8721326768005e-05 -0.0003852518163687 0.085653626101025" rpy="1.5511303050426e-17 -5.6931661794808e-18 1.0232470655083e-17" />
-      <mass value="0.663541634834977" />
-      <inertia ixx="0.00211937596923156" ixy="5.16697088803454E-06" ixz="3.06959458400245E-07" iyy="0.00210703565885732" iyz="1.78311621875394E-06" izz="0.000382477714333846" />
+      <origin xyz="0.00021423949750084 -0.00032970960076756 0.085653822848192" rpy="-9.2237981835022e-18 -3.1492846705254e-17 -1.1546393186229e-17" />
+      <mass value="0.663542736340918" />
+      <inertia ixx="0.00211420344110283" ixy="7.98587346408888E-06" ixz="-3.66744492246395E-07" iyy="0.00211220818815153" iyz="1.77157014007353E-06" izz="0.000382477895166645" />
     </inertial>
     <visual>
-      <origin xyz="-1.3877787807814e-17 -3.9031278209478e-18 0" rpy="1.5511303050426e-17 -5.6931661794808e-18 1.0232470655083e-17" />
+      <origin xyz="0 0 0" rpy="-9.2237981835022e-18 -3.1492846705254e-17 -1.1546393186229e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_3_link.STL" />
       </geometry>
@@ -965,14 +965,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-1.3877787807814e-17 -3.9031278209478e-18 0" rpy="1.5511303050426e-17 -5.6931661794808e-18 1.0232470655083e-17" />
+      <origin xyz="0 0 0" rpy="-9.2237981835022e-18 -3.1492846705254e-17 -1.1546393186229e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightUpperLeg_3_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightUpperLeg_3" type="revolute">
-    <origin xyz="-0.012464803441107 -0.20091370952501 -0.045" rpy="-1.5707963267949 -0.32077150495151 3.0796314871822" />
+    <origin xyz="-0.012464803441103 -0.20091370952501 -0.044999999999999" rpy="-1.5707963267949 -0.69545628640377 3.0796314871822" />
     <parent link="BN_RightUpperLeg_2_link" />
     <child link="BN_RightUpperLeg_3_link" />
     <axis xyz="0 0 1" />
@@ -980,12 +980,12 @@
   </joint>
   <link name="BN_RightLowerLeg_1_link">
     <inertial>
-      <origin xyz="0.015035937837303 -0.035559038085716 0.0038031786566712" rpy="-6.1415359804451e-18 -1.2680958228056e-18 -1.4182807036412e-17" />
-      <mass value="0.101794184666573" />
-      <inertia ixx="8.11347992650523E-05" ixy="1.8749258998713E-05" ixz="-6.33012009846802E-06" iyy="4.99584407833913E-05" iyz="1.75474851705952E-05" izz="8.65180035906198E-05" />
+      <origin xyz="0.011028120914074 -0.036998697858382 0.0038031681810151" rpy="4.8208645447599e-18 5.9645198125897e-18 2.5314703229462e-17" />
+      <mass value="0.101794133085919" />
+      <inertia ixx="8.48614454482896E-05" ixy="1.48816393714445E-05" ixz="-4.35899548743826E-06" iyy="4.62317814516901E-05" iyz="1.81379131056921E-05" izz="8.65180040882876E-05" />
     </inertial>
     <visual>
-      <origin xyz="-3.4694469519536e-17 1.1102230246252e-16 1.3877787807814e-17" rpy="-6.1415359804451e-18 -1.2680958228056e-18 -1.4182807036412e-17" />
+      <origin xyz="1.9081958235745e-17 -1.1102230246252e-16 -2.7755575615629e-17" rpy="4.8208645447599e-18 5.9645198125897e-18 2.5314703229462e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_1_link.STL" />
       </geometry>
@@ -994,14 +994,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-3.4694469519536e-17 1.1102230246252e-16 1.3877787807814e-17" rpy="-6.1415359804451e-18 -1.2680958228056e-18 -1.4182807036412e-17" />
+      <origin xyz="1.9081958235745e-17 -1.1102230246252e-16 -2.7755575615629e-17" rpy="4.8208645447599e-18 5.9645198125897e-18 2.5314703229462e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_1_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightLowerLeg_1" type="revolute">
-    <origin xyz="0.023552004835586 0.0026784893224273 0.24670000000022" rpy="-1.5707963267949 -0.18149297405521 1.9399441619985" />
+    <origin xyz="0.020937766766699 0.011112207685653 0.24670000000022" rpy="-1.5707963267949 -0.071132786335611 2.3146289434507" />
     <parent link="BN_RightUpperLeg_3_link" />
     <child link="BN_RightLowerLeg_1_link" />
     <axis xyz="0 0 -1" />
@@ -1009,12 +1009,12 @@
   </joint>
   <link name="BN_RightLowerLeg_2_link">
     <inertial>
-      <origin xyz="-4.0816927216897e-05 5.5062770039626e-05 0.14195164778502" rpy="4.0935398716307e-18 1.0604744330421e-17 -1.3007615102271e-17" />
-      <mass value="0.337892551511855" />
-      <inertia ixx="0.00201791692932731" ixy="3.05569205849468E-06" ixz="4.88408477764105E-07" iyy="0.0020113951823793" iyz="1.7919993713177E-07" izz="8.18057701184029E-05" />
+      <origin xyz="-5.7431068434402e-05 3.7416810563766e-05 0.14195164760495" rpy="-6.9512568868396e-18 -1.1186532737678e-18 6.3818685512458e-17" />
+      <mass value="0.337892561929772" />
+      <inertia ixx="0.00201513399529325" ixy="4.44319689124769E-06" ixz="3.95662307446498E-07" iyy="0.00201417782553848" iyz="3.38014408915755E-07" izz="8.18057937188927E-05" />
     </inertial>
     <visual>
-      <origin xyz="1.3877787807814e-17 2.6020852139652e-18 0" rpy="4.0935398716307e-18 1.0604744330421e-17 -1.3007615102271e-17" />
+      <origin xyz="0 1.3877787807814e-17 0" rpy="-6.9512568868396e-18 -1.1186532737678e-18 6.3818685512458e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_2_link.STL" />
       </geometry>
@@ -1023,14 +1023,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="1.3877787807814e-17 2.6020852139652e-18 0" rpy="4.0935398716307e-18 1.0604744330421e-17 -1.3007615102271e-17" />
+      <origin xyz="0 1.3877787807814e-17 0" rpy="-6.9512568868396e-18 -1.1186532737678e-18 6.3818685512458e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightLowerLeg_2_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightLowerLeg_2" type="revolute">
-    <origin xyz="0.029395928922845 -0.091652219578404 0.027000000000086" rpy="-1.5707963267925 1.2086249116418 -2.9562238902959" />
+    <origin xyz="0.019122861811695 -0.094332211608844 0.027000000000085" rpy="-1.5707963267936 0.8532819790237 -3.0665840780168" />
     <parent link="BN_RightLowerLeg_1_link" />
     <child link="BN_RightLowerLeg_2_link" />
     <axis xyz="0 0 1" />
@@ -1038,12 +1038,12 @@
   </joint>
   <link name="BN_RightFoot_pitch_link">
     <inertial>
-      <origin xyz="0.0023290197929373 -0.017107584688069 0.0003257582221378" rpy="-1.1066650745501e-17 -8.6810633302996e-18 -3.1146005423139e-17" />
-      <mass value="0.0697698790530004" />
-      <inertia ixx="2.87061529782819E-05" ixy="1.74341378708866E-06" ixz="-7.87306095595187E-07" iyy="1.71228546558163E-05" iyz="5.35912883246323E-06" izz="3.58081488375957E-05" />
+      <origin xyz="0.00043068592117258 -0.01726002044333 0.00032575819726326" rpy="-4.5115019001258e-18 -6.2435196238561e-18 3.6761872861776e-19" />
+      <mass value="0.069769880404824" />
+      <inertia ixx="2.89473380243844E-05" ixy="4.33138809665561E-07" ixz="-1.92281991800739E-07" iyy="1.68816694698968E-05" iyz="5.41323755156275E-06" izz="3.58081486918638E-05" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 0 -1.3877787807814e-17" rpy="-1.1066650745501e-17 -8.6810633302996e-18 -3.1146005423139e-17" />
+      <origin xyz="0 1.1102230246252e-16 0" rpy="-4.5115019001258e-18 -6.2435196238561e-18 3.6761872861776e-19" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_pitch_link.STL" />
       </geometry>
@@ -1052,14 +1052,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 0 -1.3877787807814e-17" rpy="-1.1066650745501e-17 -8.6810633302996e-18 -3.1146005423139e-17" />
+      <origin xyz="0 1.1102230246252e-16 0" rpy="-4.5115019001258e-18 -6.2435196238561e-18 3.6761872861776e-19" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_pitch_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightFoot_pitch" type="revolute">
-    <origin xyz="0.018001246377673 0.0068203832013802 0.285" rpy="-1.5707963267949 -0.18536876329166 1.932967741948" />
+    <origin xyz="0.014503766278217 0.012657142722993 0.28500000000001" rpy="-1.5707963267949 -0.075008575572069 2.2883106745661" />
     <parent link="BN_RightLowerLeg_2_link" />
     <child link="BN_RightFoot_pitch_link" />
     <axis xyz="0 0 1" />
@@ -1067,12 +1067,12 @@
   </joint>
   <link name="BN_RightFoot_roll_link">
     <inertial>
-      <origin xyz="-0.00058616967131139 -0.017238834972648 0.026840339483058" rpy="8.116599382302e-18 6.0538825235703e-18 -1.8566261154664e-19" />
-      <mass value="0.0310065063620919" />
-      <inertia ixx="5.48742164250036E-05" ixy="2.39206306229504E-07" ixz="-4.60694822772303E-07" iyy="5.82448363103792E-05" iyz="3.96137329071083E-08" izz="4.15540026912914E-06" />
+      <origin xyz="-0.00049787177275434 -0.01724161099514 0.026840339308381" rpy="1.2628668148232e-17 -1.1836086061767e-19 -2.2237859496778e-19" />
+      <mass value="0.031006506158388" />
+      <inertia ixx="5.48718545268932E-05" ixy="2.21931066079375E-07" ixz="-4.60891727799431E-07" iyy="5.82471979209086E-05" iyz="3.72537312007261E-08" izz="4.15540020702249E-06" />
     </inertial>
     <visual>
-      <origin xyz="-2.7755575615629e-17 1.1102230246252e-16 -1.2143064331838e-17" rpy="8.116599382302e-18 6.0538825235703e-18 -1.8566261154664e-19" />
+      <origin xyz="-2.7755575615629e-17 0 3.3827107781548e-17" rpy="1.2628668148232e-17 -1.1836086061767e-19 -2.2237859496778e-19" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_roll_link.STL" />
       </geometry>
@@ -1081,14 +1081,14 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-2.7755575615629e-17 1.1102230246252e-16 -1.2143064331838e-17" rpy="8.116599382302e-18 6.0538825235703e-18 -1.8566261154664e-19" />
+      <origin xyz="-2.7755575615629e-17 0 3.3827107781548e-17" rpy="1.2628668148232e-17 -1.1836086061767e-19 -2.2237859496778e-19" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_RightFoot_roll_link.STL" />
       </geometry>
     </collision>
   </link>
   <joint name="BN_RightFoot_roll" type="revolute">
-    <origin xyz="-0.009356164078364 -0.056601475929875 0.020000000000002" rpy="-1.5707963267949 -1.5003288566355 1.7169590147177" />
+    <origin xyz="-0.015533123173284 -0.055226687101304 0.02" rpy="-1.5707963267949 -1.5054504618543 1.6065988269981" />
     <parent link="BN_RightFoot_pitch_link" />
     <child link="BN_RightFoot_roll_link" />
     <axis xyz="0 0 1" />

@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import rclpy
 from rclpy.node import Node
 
-from .actions import actions_directory, list_actions, read_action, save_action
+from .actions import bvh_directory, list_actions, read_action, save_action
 from .models import (enumerate_arm_models, model_transmissions,
                      motor_library)
 from .motion import MotionJobs, handle_motion
@@ -107,7 +107,7 @@ def main(args=None):
     build_token = str(int(time.time()))
     from pathlib import Path
     motion_data = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'robot2'
-    motion_jobs = MotionJobs(actions_dir=actions_directory(web_root),
+    motion_jobs = MotionJobs(actions_dir=bvh_directory(web_root),
                             profiles_dir=motion_data / 'motion_mappings', models_root=models_dir,
                             cache_dir=motion_data / 'motion_results')
 

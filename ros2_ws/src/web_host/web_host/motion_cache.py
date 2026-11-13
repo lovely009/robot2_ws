@@ -19,7 +19,7 @@ def digest(path):
 def result_key(job, mapping):
     directory = job['directory']
     inputs = {name: digest(directory / name) for name in ('source.bvh', 'robot.urdf')}
-    for name in ('web_host.motion', 'web_host.motion_cache', 'web_host.motion_simulation',
+    for name in ('web_host.motion', 'web_host.motion_cache', 'web_host.motion_simulation', 'web_host.motion_source',
                  'web_host.shoulder_retarget', 'bvh_broadcaster.bvh',
                  'bvh_broadcaster.generic_retarget', 'bvh_broadcaster.retarget',
                  'robot_transmission.coupled_limits', 'robot_transmission.mujoco_positions'):

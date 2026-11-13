@@ -31,8 +31,8 @@ def test_twenty_step_rod_ends_share_ball_centers(audit_module):
             assert hole['max_angular_gap_deg'] <= 45
             assert hole['rod_support'] >= 8
         assert rod['motor_axis_candidates']
-    assert report['rods']['left_shoulder_flange_linkage_rod']['center_distance_m'] == pytest.approx(.106047644, abs=1e-8)
-    assert report['rods']['right_shoulder_flange_linkage_rod']['center_distance_m'] == pytest.approx(.106047644, abs=1e-8)
+    assert report['rods']['left_shoulder_flange_linkage_rod']['center_distance_m'] == pytest.approx(.100684850, abs=1e-8)
+    assert report['rods']['right_shoulder_flange_linkage_rod']['center_distance_m'] == pytest.approx(.100684850, abs=1e-8)
     plus = report['rods']['waist_plus_rod']['endpoints']['flange']['center_m']
     minus = report['rods']['waist_minus_rod']['endpoints']['flange']['center_m']
     assert np.linalg.norm(np.asarray(plus) - minus) == pytest.approx(.102, abs=1e-8)

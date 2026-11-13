@@ -17,6 +17,70 @@ from web_host.models import (
 PKG = Path(__file__).resolve().parent.parent
 
 
+def test_full_body_topology_covers_all_confirmed_ids_without_enabling_hardware():
+    import xml.etree.ElementTree as ET
+    root = PKG.parent / 'robot_description/models'
+    metadata = model_transmissions('full_body_robot', root)
+    groups = metadata['groups']
+    assert metadata['mapping_kind'] == 'topology'
+    assert metadata['hardware_ready'] is False
+    assert metadata['driver_file'] == '' and metadata['policy_defaults'] == {}
+    assert metadata['direct_joints'] == {}
+    ids = [m['id'] for g in groups for m in g['motors']]
+    assert len(ids) == 37 and set(ids) == set(range(1, 38))
+    joints = [j for g in groups for j in g['joints']]
+    urdf = ET.parse(root / 'full_body_robot/urdf/full_body_robot.urdf').getroot()
+    assert len(joints) == len(set(joints)) == 37
+    assert set(joints) == {j.get('name') for j in urdf.findall('joint') if j.get('type') != 'fixed'}
+    coupled = [g for g in groups if len(g['motors']) == 2]
+    assert len(coupled) == 6 and len(groups) == 31
+    waist = next(g for g in coupled if g['name'] == 'waist')
+    assert [m['id'] for m in waist['motors']] == [2, 3]
+    assert waist['joints'] == ['BN_Spine_pitch', 'BN_Spine_roll']
+    assert all(not g['direct_mapping'] for g in groups)
+
+
+@pytest.mark.parametrize('fault', ['unconfirmed_id', 'duplicate_id', 'boolean_id',
+                                  'missing_motor', 'duplicate_joint', 'unknown_joint',
+                                  'overlapping_group', 'missing_group'])
+def test_topology_rejects_invalid_ids_and_incomplete_or_ambiguous_groups(tmp_path, fault):
+    import shutil
+    import yaml
+    source = PKG.parent / 'robot_description/models/full_body_robot'
+    directory = tmp_path / 'full_body_robot'
+    (directory / 'config').mkdir(parents=True)
+    (directory / 'urdf').mkdir()
+    shutil.copy(source / 'urdf/full_body_robot.urdf', directory / 'urdf')
+    document = yaml.safe_load((source / 'config/motor_topology.yaml').read_text())
+    motors, groups = document['motors'], document['differential_groups']
+    if fault == 'unconfirmed_id': motors[1]['can_node_id'] = None
+    elif fault == 'duplicate_id': motors[2]['can_node_id'] = 1
+    elif fault == 'boolean_id': motors[1]['can_node_id'] = True
+    elif fault == 'missing_motor': del motors[37]
+    elif fault == 'duplicate_joint': motors[8]['joint'] = motors[1]['joint']
+    elif fault == 'unknown_joint': motors[8]['joint'] = 'missing_joint'
+    elif fault == 'overlapping_group': groups['waist']['motor_numbers'] = [1, 3]
+    elif fault == 'missing_group': del groups['waist']
+    (directory / 'config/motor_topology.yaml').write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError):
+        model_transmissions('full_body_robot', tmp_path)
+
+
+def test_invalid_driver_does_not_fall_back_to_topology(tmp_path, monkeypatch):
+    import robot_transmission
+    config = tmp_path / 'robot/config'
+    config.mkdir(parents=True)
+    (config / 'motor_driver.yaml').write_text('invalid driver')
+    (config / 'motor_topology.yaml').write_text('motors: {}')
+    class BadModel:
+        @staticmethod
+        def load(path):
+            raise ValueError('bad driver')
+    monkeypatch.setattr(robot_transmission, 'Model', BadModel)
+    with pytest.raises(ValueError, match='bad driver'):
+        model_transmissions('robot', tmp_path)
+
+
 def test_trial_arm_spatial_metadata_keeps_coupled_ids():
     root = PKG.parent / 'robot_description/models'
     metadata = model_transmissions('trial_arm_7dof', root)

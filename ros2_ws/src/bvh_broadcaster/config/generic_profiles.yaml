@@ -230,3 +230,363 @@ profiles:
     BN_LeftFoot_roll_link: LeftFoot
     BN_LeftHand_pitch_link: LeftHand
   assembly: Robot_body1 native STEP calibration
+- urdf_sha256: 03eb0a91c18bd6924d76d08e57d08f00116673bf88dbaba05772f7f21b399c37
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP calibration
+- urdf_sha256: 06cf65b7ac32c35ee00f725243aa8fad98680cf4dd49f9133a63969b19b55810
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP calibration
+- urdf_sha256: fe749cc8f78f5be157daad5406a5266ced37eb195d62e56b5b86971a41f5a316
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP calibration
+- urdf_sha256: 4b0e86f0b0b5db2156f33d3f01717a3f19fc96f95fe84d348db47d191c5d7d28
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP calibration
+- urdf_sha256: cc22221d3367d62226b8bba420cd7da0177c550d149d096282076d8272e1d637
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 8506efeb7ab46e91ec6700f414d85d67927d12663acf78360776b1981c3509e7
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 50a32996561dcadf9d968d36abbbbf671e95604a6c03605abd57da37feacfaac
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 1a71d7d71e5c9a5cfed5273fc5175554655a21ade72beff393bbd6ef1c9b089b
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: f49e3bd3ab596d73f626db4e4d47bdc7e2f7d4d67b03e537583bf4b55e358d67
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 3f7e54999f1f8bdaae2cef919ba36c416f27464dd1f95cf8de0ac9f1df6199ab
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 437f2ab4e3730f3525a10a4c0c4b2c5ace50c2e02f19203547d60a18f9294f09
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 1c9aa63866d491ee72123a3f62c02758cefac4b157c68f6a37ce7be6bb6ace2e
+  source_root: Spine
+  source_to_robot:
+  - - 0
+    - -1
+    - 0
+  - - 1
+    - 0
+    - 0
+  - - 0
+    - 0
+    - 1
+  targets:
+    BN_Spine_roll_link: Spine3
+    BN_hips_pitch_link: Hips
+    BN_RightShoulder_2_link: RightShoulder
+    BN_RightUpperArm_3_link: RightUpperArm
+    BN_RightLowerArm_2_link: RightLowerArm
+    BN_RightHand_pitch_link: RightHand
+    BN_LeftShoulder_2_link: LeftShoulder
+    BN_LeftUpperArm_3_link: LeftUpperArm
+    BN_LeftLowerArm_2_link: LeftLowerArm
+    BN_RightUpperLeg_3_link: RightUpperLeg
+    BN_RightLowerLeg_2_link: RightLowerLeg
+    BN_RightFoot_roll_link: RightFoot
+    BN_LeftUpperLeg_3_link: LeftUpperLeg
+    BN_LeftLowerLeg_2_link: LeftLowerLeg
+    BN_LeftFoot_roll_link: LeftFoot
+    BN_LeftHand_pitch_link: LeftHand
+  assembly: Robot_body2 native STEP with outward left hand

@@ -1,0 +1,48 @@
+{
+  "joint": "BN_LeftUpperArm_3",
+  "rotation_rad": 3.141592653589793,
+  "affected_links": [
+    "BN_LeftUpperArm_3_link",
+    "BN_LeftLowerArm_1_link",
+    "BN_LeftLowerArm_2_link",
+    "BN_LeftHand_roll_link",
+    "BN_LeftHand_pitch_link"
+  ],
+  "world_transform": [
+    [
+      -0.9396901081279817,
+      -0.11276269944907652,
+      0.322904125553359,
+      -0.42081547010508785
+    ],
+    [
+      -0.1127626994490763,
+      -0.7891651602688045,
+      -0.6037407750275525,
+      -0.07211391141110363
+    ],
+    [
+      0.3229041255533591,
+      -0.6037407750275525,
+      0.728855268396786,
+      0.053413923256650064
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "axis_world": [
+    0.17365179508432727,
+    -0.3246804888896126,
+    0.9297460052070098
+  ],
+  "point_on_axis_m": [
+    -0.1685126042200622,
+    -0.11438918114657821,
+    0.25101694074607295
+  ],
+  "reason": "User requested the complete screen-left arm to face outward, symmetric to the other arm."
+}

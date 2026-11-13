@@ -18,6 +18,13 @@ it('uses a joint name and lets the host preserve and transform the partner', () 
   expect(message.points[0].time_from_start).toEqual({sec:1,nanosec:0});
   expect(message).not.toHaveProperty('motor_id');
 });
+it('topology-only mappings cannot enable calibrated joint or raw motor commands', () => {
+  const s = state();
+  Object.assign(s.modelTransmissions, {hardware_ready:false, hardware_block_reason:'传动参数待标定'});
+  expect(api.controlSessionError(s, 'arm', 1100)).toBe('传动参数待标定');
+  expect(() => api.buildJointTarget(s, 'arm', {name:'yaw'}, .3, 1100)).toThrow('待标定');
+  expect(api.rawCouplingError(s, 'arm', [8])).toContain('待标定');
+});
 it('accepts JTC with gravity and rejects old control sources, identity changes and stale status', () => {
   const s=state();
   expect(api.jointControlError(s,'arm','yaw',1100)).toBe('');

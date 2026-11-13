@@ -25,6 +25,21 @@ def actions_directory(web_root: str) -> Path:
     return Path(web_root).parent / "action_library"
 
 
+def bvh_directory(web_root: str) -> Path:
+    """工作区安装优先读取源码 BVH；独立部署仍使用安装动作库。"""
+    package = Path(web_root).absolute().parent
+    # colcon 支持 isolated install 与 merge install 两种布局。
+    if package.name == 'web_host' and package.parent.name == 'share':
+        prefix = package.parent.parent
+        if prefix.name == 'web_host':
+            prefix = prefix.parent
+        if prefix.name == 'install':
+            source = prefix.parent / 'src' / 'web_host' / 'action_library'
+            if (source.parent / 'package.xml').is_file() and source.is_dir():
+                return source
+    return actions_directory(web_root)
+
+
 def _checked_path(directory: Path, name) -> Path:
     # 不 resolve：symlink-install 的内置动作允许指向源码目录。
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):

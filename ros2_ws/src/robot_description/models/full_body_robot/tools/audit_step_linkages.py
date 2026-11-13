@@ -23,7 +23,7 @@ def load_parts():
     for entry in manifest['links'].values():
         if 'components' not in entry:
             continue
-        source = MODEL.parent / 'Robot_body1/meshes' / entry['source']
+        source = MODEL.parent / manifest['source'] / 'meshes' / entry['source']
         if hashlib.sha256(source.read_bytes()).hexdigest() != entry['source_sha256']:
             raise ValueError(f'{source.name}: repeat component review after source changes')
         body, frame = frames[entry['source']]
@@ -141,9 +141,7 @@ def audit():
     alignment = json.loads((MODEL / 'config/step_alignment.json').read_text())
     if features['step_sha256'] != alignment['step_sha256']:
         raise ValueError('STEP feature cache is stale')
-    step = MODEL / 'cad/全身装配体（不含头部）.STEP'
-    if not step.exists():
-        step = MODEL.parent / '全身装配体（不含头部）.STEP'
+    step = MODEL.parent / '全身不带头.STEP'
     if hashlib.sha256(step.read_bytes()).hexdigest() != features['step_sha256']:
         raise ValueError('STEP source changed; repeat analytic feature extraction and assembly calibration')
     parts = load_parts()
@@ -250,7 +248,7 @@ if __name__ == '__main__':
         report['fixture_mounting'] = {
             'after': after,
             'scope': 'Hips receiver holes and seat faces checked; other groups still have rod-end checks only.'}
-    destination = MODEL / 'cad/assembly_audit/2026-11-12-step-linkages.json'
+    destination = MODEL / 'cad/assembly_audit/2026-11-13-step-linkages.json'
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(destination)
     print(write_overlay(report))

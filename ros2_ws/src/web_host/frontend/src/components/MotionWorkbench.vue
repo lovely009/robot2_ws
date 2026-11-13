@@ -12,6 +12,7 @@ type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progr
   bvh_name: string; urdf_name: string; robot_name: string; frames: number; frame_time: number;
   joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | GenericMapping | null;
   constraint_source?: string; velocity_limit_rad_s?: number;
+  up_axis?: 'y_up' | 'z_up'; position_mode?: string;
   warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
   result_cached?: boolean; result_saved?: boolean; cache_warning?: string;
   summary?: { mechanical_limits_enforced?: boolean; simulation_limits_enforced?: boolean;
@@ -27,7 +28,7 @@ const bvhSource = ref('');
 const robotModel = ref(props.currentModel);
 const catalogLoading = ref(true);
 const modelChosen = ref(false);
-const upAxis = ref('y_up');
+const upAxis = ref('auto');
 const scale = ref(.01);
 const job = ref<Job>();
 const mapping = ref<Mapping>();
@@ -270,7 +271,7 @@ onBeforeUnmount(() => {
           <input v-if="!robotModel" type="file" accept=".urdf,.xml" aria-label="导入 URDF 文件" :disabled="busy || catalogLoading" @change="choose($event, 'urdf')" />
         </div>
         <div class="motion-source-options">
-          <label>BVH 坐标<select v-model="upAxis" :disabled="busy" aria-label="BVH 坐标"><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
+          <label>BVH 坐标<select v-model="upAxis" :disabled="busy" aria-label="BVH 坐标"><option value="auto">自动识别</option><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
           <label>长度单位<select v-model.number="scale" :disabled="busy" aria-label="BVH 长度单位"><option :value=".01">厘米 cm</option><option :value="1">米 m</option><option :value=".001">毫米 mm</option></select></label>
         </div>
         <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '自动识别人体与机器人对应关系；疑点首次确认，已记住的相同组合自动转换。输出仅用于预览。' }}</p>
@@ -279,6 +280,7 @@ onBeforeUnmount(() => {
         <div v-if="job" class="motion-metadata">
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>
+          <span v-if="job.up_axis">BVH 格式 <strong>{{ job.up_axis === 'z_up' ? 'Z 向上' : 'Y 向上' }}{{ job.position_mode === 'local_translation' ? ' · 已识别骨段位置通道' : '' }}</strong></span>
           <span>机器人 <strong>{{ job.joint_count }} 个关节</strong></span>
           <span v-if="job.constraint_source === 'simulation'">预览范围 <strong>仿真几何与耦合限位 · {{ job.velocity_limit_rad_s?.toFixed(2) }} rad/s</strong></span>
           <span v-if="job.mapping_origin">映射来源 <strong>{{ job.mapping_origin === 'saved' ? '复用已确认映射' : job.mapping_origin === 'builtin' ? '已支持的双臂或肩关节映射' : job.mapping_saved ? '已确认并记住' : job.state === 'mapping' ? '候选待确认' : '本次已确认' }}</strong></span>

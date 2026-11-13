@@ -38,6 +38,8 @@ export function createLatestTargetSender({send, isCurrent, onError=()=>{}, inter
 export function controlSessionError(state, model, now = Date.now()) {
   if (!state.conn?.connected) return '未连接 rosbridge';
   const meta = state.modelTransmissions;
+  if (meta?.model === model && meta.hardware_ready === false)
+    return meta.hardware_block_reason || '传动参数待标定';
   if (meta?.model !== model || meta.error || !Array.isArray(meta.groups) || !meta.groups.length
       || meta.groups.some(g => !Array.isArray(g?.joints) || !g.joints.length
         || !Array.isArray(g?.motors) || !g.motors.length)) return '模型传动配置未就绪';
@@ -132,6 +134,8 @@ export function buildJointTarget(state, model, joint, target, now=Date.now()) {
 export function rawCouplingError(state, model, ids) {
   if (!ids.length) return '';
   const meta = state.modelTransmissions;
+  if (meta?.model === model && meta.hardware_ready === false)
+    return meta.hardware_block_reason || '传动参数待标定';
   if (meta?.model !== model || !Array.isArray(meta.groups)) return '当前模型传动配置未就绪，拒绝原始运动下发';
   const unknown = ids.find(id => !meta.groups.some(g => g.motors.some(m => Number(m.id) === Number(id))));
   if (unknown !== undefined) return `m${unknown} 不属于当前模型传动组`;

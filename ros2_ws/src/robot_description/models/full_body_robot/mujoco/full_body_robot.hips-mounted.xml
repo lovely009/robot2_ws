@@ -56,134 +56,134 @@
     <light pos="0 -1 .8" dir="0 .55 -1" />
     <body name="Base_link" pos="0 0 0" quat="1 0 0 0">
       <geom name="Base_link_assembly" type="mesh" mesh="assembly_00" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
-      <body name="hips_plus_flange_mounted" pos="0.037609420789838 0.053941039688449 1.0408340855861e-17" quat="0.89191244499799 7.5307781238992e-17 7.6876693348137e-17 -0.45220812736803">
+      <body name="hips_plus_flange_mounted" pos="0.053887773644653 0.060296542610688 1.3877787807814e-17" quat="0.83110525732606 -6.1741183507424e-17 1.9101178647609e-16 -0.5561151420749">
         <geom name="hips_plus_flange_mounted" type="mesh" mesh="hips_plus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
-      <body name="hips_plus_rod_mounted" pos="0.088638593928577 -0.064025906849506 -0.016067084249451" quat="0.87452050931668 -0.011091579476347 -0.16992927372444 0.45410890497842">
+      <body name="hips_plus_rod_mounted" pos="0.094647728350635 -0.068247071975489 -0.02165551839483" quat="0.86297309570105 0.03537762427683 -0.17987259344131 0.47082025224642">
         <geom name="hips_plus_rod_mounted" type="mesh" mesh="hips_plus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
-      <body name="hips_minus_flange_mounted" pos="-0.062991943354558 0.062028463625954 0" quat="0.79397399736394 -1.0124429929003e-16 -1.0335355552524e-16 0.60795171807465">
+      <body name="hips_minus_flange_mounted" pos="-0.080466865120043 0.062093975254258 3.1225022567583e-17" quat="0.71516033264247 7.7600197532271e-17 -2.4007561111546e-16 0.69896044138042">
         <geom name="hips_minus_flange_mounted" type="mesh" mesh="hips_minus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
-      <body name="hips_minus_rod_mounted" pos="-0.057488902198699 -0.049222618071141 0.011621593808824" quat="0.94615706040234 0.022372683256282 -0.11859116608837 -0.30037046362868">
+      <body name="hips_minus_rod_mounted" pos="-0.063395791655439 -0.057597672311404 0.0077725395825268" quat="0.93431936464676 0.06214522553913 -0.11644202321645 -0.33109900485811">
         <geom name="hips_minus_rod_mounted" type="mesh" mesh="hips_minus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
     </body>
-    <body name="BN_Spine_yaw_link" pos="0 -0.027852322456454 0.0062778047691217" quat="1 0 0 0">
+    <body name="BN_Spine_yaw_link" pos="0 0 0.010999999999991" quat="0.98592317661996 0.1671989527587 0 0">
       <geom name="BN_Spine_yaw_link_assembly" type="mesh" mesh="assembly_01" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_Spine_pitch_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-0.045467036314021 0.7056433326382 0.045472220259402 -0.7056433326382">
+    <body name="BN_Spine_pitch_link" pos="0 -4.1462288569469e-07 0.11000005326174" quat="0.1182247353839 -0.69715211779127 -0.11823029122945 0.69715381002929">
       <geom name="BN_Spine_pitch_link_assembly" type="mesh" mesh="assembly_02" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_Spine_roll_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+    <body name="BN_Spine_roll_link" pos="0 -4.1462288569469e-07 0.11000005326174" quat="-3.6240417861746e-06 -1.93180376919e-06 0.57892545060361 0.81538047721695">
       <geom name="BN_Spine_roll_link_assembly" type="mesh" mesh="assembly_03" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftShoulder_1_link" pos="-0.058998687767302 -0.086545370330901 0.31125535004419" quat="-3.7837033911832e-06 1.8328014661354e-06 -0.06430376499229 0.99793037121341">
+    <body name="BN_LeftShoulder_1_link" pos="-0.069677828694696 -0.1205407023818 0.28913824637643" quat="-3.9285760674115e-06 1.1965929771935e-06 -0.16719895276394 0.98592317661052">
       <geom name="BN_LeftShoulder_1_link_assembly" type="mesh" mesh="assembly_04" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftShoulder_2_link" pos="-0.063998812138092 -0.060886432408485 0.33504521471321" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+    <body name="BN_LeftShoulder_2_link" pos="-0.063998661963863 -0.10589827148874 0.31769943094187" quat="-3.6240417861746e-06 -1.93180376919e-06 0.57892545060361 0.81538047721695">
       <geom name="BN_LeftShoulder_2_link_assembly" type="mesh" mesh="assembly_05" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_1_link" pos="-0.098498461127295 -0.093946199772291 0.36454650284564" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+    <body name="BN_LeftUpperArm_1_link" pos="-0.098498325864041 -0.14432177075618 0.33976542049183" quat="0.38937254795254 0.59024188265865 0.38937776368956 0.5902444375008">
       <geom name="BN_LeftUpperArm_1_link_assembly" type="mesh" mesh="assembly_06" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_2_link" pos="-0.15199861059757 -0.071632986283456 0.367434086034" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+    <body name="BN_LeftUpperArm_2_link" pos="-0.15199849115647 -0.12308020364606 0.34718351596095" quat="-3.6240464227161e-06 -1.9318004797308e-06 0.5789254506036 0.81538047721695">
       <geom name="BN_LeftUpperArm_2_link_assembly" type="mesh" mesh="assembly_07" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_3_link" pos="-0.15199870569691 -0.082734094169373 0.27010461771275" quat="-1.4336207562714e-06 -5.2301875421549e-06 0.99793072549356 0.064298266590017">
+    <body name="BN_LeftUpperArm_3_link" pos="-0.16851260422006 -0.11438918114658 0.25101694074607" quat="-0.085930058800363 -0.014576262543317 0.98217133697424 0.1665623678718">
       <geom name="BN_LeftUpperArm_3_link_assembly" type="mesh" mesh="assembly_08" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerArm_1_link" pos="-0.17509926790133 -0.066034407173362 0.094294081964537" quat="0.4159967305431 0.57179825334263 -0.41598575861402 -0.57179482883469">
+    <body name="BN_LeftLowerArm_1_link" pos="-0.22191114628659 -0.064070273458354 0.088725649445433" quat="-0.43656587863658 -0.55079822575496 0.33860172853725 0.62560404214411">
       <geom name="BN_LeftLowerArm_1_link_assembly" type="mesh" mesh="assembly_09" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerArm_2_link" pos="-0.1520999875211 -0.049461839933676 0.0051836153341931" quat="-0.06430009939014 0.99793060736959 9.2949410353262e-06 -2.6439258929823e-06">
+    <body name="BN_LeftLowerArm_2_link" pos="-0.2149761068175 -0.02864930546686 0.0024614607832913" quat="-0.089406158942714 0.82034923954618 -0.54027782462413 -0.16472260360537">
       <geom name="BN_LeftLowerArm_2_link_assembly" type="mesh" mesh="assembly_10" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftHand_roll_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="0.46682122342319 0.53111867888744 -0.46680928455626 -0.53111202787229">
+    <body name="BN_LeftHand_roll_link" pos="-0.24047572120746 0.016234703647373 -0.12606717092846" quat="0.10747058152288 -0.63373825556377 -0.1280841329589 0.75526177741647">
       <geom name="BN_LeftHand_roll_link_assembly" type="mesh" mesh="assembly_11" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftHand_pitch_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="-8.445864241184e-06 -4.7093803639283e-06 0.66017646331484 0.75111053593436">
+    <body name="BN_LeftHand_pitch_link" pos="-0.24047572120746 0.016234703647373 -0.12606717092846" quat="-3.4615773577645e-06 -1.7029724419171e-06 0.57892549712462 0.81538044418795">
       <geom name="BN_LeftHand_pitch_link_assembly" type="mesh" mesh="assembly_12" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightShoulder_1_link" pos="-0.098498461128274 -0.09394611238747 0.36454640859479" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+    <body name="BN_RightShoulder_1_link" pos="-0.098498325859939 -0.14432177075705 0.33976542049146" quat="0.38937254795254 0.59024188265865 0.38937776368957 0.5902444375008">
       <geom name="BN_RightShoulder_1_link_assembly" type="mesh" mesh="assembly_13" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightShoulder_2_link" pos="0.064001176716399 -0.056620783774739 0.33559600558721" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+    <body name="BN_RightShoulder_2_link" pos="0.064001306446366 -0.1018376459257 0.31911696685372" quat="-3.6240464220714e-06 -1.9318004788429e-06 0.57892545060361 0.81538047721695">
       <geom name="BN_RightShoulder_2_link_assembly" type="mesh" mesh="assembly_14" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_1_link" pos="0.09850163657115 -0.093944250885829 0.36454539370886" quat="0.41598790991327 0.57179513671978 0.41599457925201 0.57179794548646">
+    <body name="BN_RightUpperArm_1_link" pos="0.098501674133783 -0.14432016585892 0.33976521446837" quat="0.38937254794935 0.59024188266108 0.38937776369276 0.59024443749836">
       <geom name="BN_RightUpperArm_1_link_assembly" type="mesh" mesh="assembly_15" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_2_link" pos="0.1520014209856 -0.071630112365501 0.36743259233598" quat="-5.4525917960734e-06 -3.9896356561343e-06 0.66017784281859 0.75110932347145">
+    <body name="BN_RightUpperArm_2_link" pos="0.15200150883775 -0.12307772705273 0.34718319803624" quat="-3.6240510550608e-06 -1.9317971931739e-06 0.57892545060361 0.81538047721695">
       <geom name="BN_RightUpperArm_2_link_assembly" type="mesh" mesh="assembly_16" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_3_link" pos="0.15200145301246 -0.082731577761043 0.27010316479184" quat="-0.06429643381484 0.99793084357098 6.4404775075786e-06 2.6311498551391e-06">
+    <body name="BN_RightUpperArm_3_link" pos="0.16851527914765 -0.11438643548513 0.25101658828025" quat="-0.089408065919864 0.82034501031167 0.54028441423423 0.16472101730137">
       <geom name="BN_RightUpperArm_3_link_assembly" type="mesh" mesh="assembly_17" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerArm_1_link" pos="0.12890231286746 -0.066032580260599 0.094292376706914" quat="0.46681541828604 0.53110727007185 0.46681899143971 0.53112000730388">
+    <body name="BN_RightLowerArm_1_link" pos="0.17641451432481 -0.061422070123709 0.081151235476116" quat="0.4580523014362 0.53868767941295 0.35755619145148 0.61004691881232">
       <geom name="BN_RightLowerArm_1_link_assembly" type="mesh" mesh="assembly_18" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerArm_2_link" pos="0.15190296125989 -0.049459985363468 0.0051825047964254" quat="-0.064298266635517 0.99793072547535 6.3223987116759e-06 4.4639405770061e-06">
+    <body name="BN_RightLowerArm_2_link" pos="0.21477990327423 -0.028634354347071 0.0024282234888945" quat="-0.089408065922496 0.8203450103203 0.54028441422112 0.16472101729994">
       <geom name="BN_RightLowerArm_2_link_assembly" type="mesh" mesh="assembly_19" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightHand_roll_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.46681727674759 0.53111805643095 -0.46681518210874 -0.53111093569589">
+    <body name="BN_RightHand_roll_link" pos="0.2373808314276 0.016418498736346 -0.12658283128375" quat="0.40936467451089 0.57656243067016 -0.40935954933418 -0.57655969870537">
       <geom name="BN_RightHand_roll_link_assembly" type="mesh" mesh="assembly_20" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightHand_pitch_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.66017784278935 0.75110932349532 2.6936176497104e-06 6.4146093445769e-06">
+    <body name="BN_RightHand_pitch_link" pos="0.2373808314276 0.016418498736346 -0.12658283128375" quat="0.57892545060254 0.81538047721771 3.6240472081284e-06 1.9317908278326e-06">
       <geom name="BN_RightHand_pitch_link_assembly" type="mesh" mesh="assembly_21" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
     <body name="BN_hips_roll_link" pos="0 0 -0.0734999997374" quat="0.70710678118655 0.70710678118655 0 0">
       <geom name="BN_hips_roll_link_assembly" type="mesh" mesh="assembly_22" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_hips_pitch_link" pos="0 0 -0.0734999997374" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+    <body name="BN_hips_pitch_link" pos="0 0 -0.0734999997374" quat="-0.38937515582831 -0.59024316008207 0.38937515582832 0.59024316008208">
       <geom name="BN_hips_pitch_link_assembly" type="mesh" mesh="assembly_23" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
-      <body name="hips_plus_platform_mounted" pos="-0.0060634793643145 0.073000158930532 0.034146158141322" quat="-0.41997509134244 0.57051840939628 -0.42443260886281 -0.56390303042789">
+      <body name="hips_plus_platform_mounted" pos="-0.0060151850088239 0.073020463976512 0.034104825072744" quat="-0.41981275493497 0.57042560170711 -0.42457506253524 -0.56401054953271">
         <geom name="hips_plus_platform_mounted" type="mesh" mesh="hips_plus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
-      <body name="hips_minus_platform_mounted" pos="-0.0063574668112444 0.084627485267395 -0.0052546701105214" quat="0.4752044732093 -0.50034784210456 0.41088753219941 0.59582227335528">
+      <body name="hips_minus_platform_mounted" pos="-0.0058212255202174 0.084825461000463 -0.0046245457316149" quat="0.47728426916966 -0.50184340363681 0.40843430666934 0.59458753919414">
         <geom name="hips_minus_platform_mounted" type="mesh" mesh="hips_minus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 1" />
       </body>
     </body>
-    <body name="BN_LeftUpperLeg_1_link" pos="-0.09201996299884 0.041789017533078 -0.085745319855477" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+    <body name="BN_LeftUpperLeg_1_link" pos="-0.092020008064427 0.042733754474795 -0.081871869949086" quat="-0.38937515582831 -0.59024316008207 0.38937515582832 0.59024316008208">
       <geom name="BN_LeftUpperLeg_1_link_assembly" type="mesh" mesh="assembly_24" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperLeg_2_link" pos="-0.1037200145056 -0.0027343908036222 -0.092277157639375" quat="0.65377672139313 0.75668751711928 -3.6500546550063e-07 -4.3112397851233e-07">
+    <body name="BN_LeftUpperLeg_2_link" pos="-0.10372000806495 0.00016806589410383 -0.096471943772595" quat="0.581185820125 0.81377087837156 -2.1887096682188e-15 -1.8580213947676e-15">
       <geom name="BN_LeftUpperLeg_2_link_assembly" type="mesh" mesh="assembly_25" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperLeg_3_link" pos="-0.11618476825505 0.071941480230181 -0.28438606997637" quat="-0.066210242859161 0.98190126405013 -0.17211989539066 -0.043137605496731">
+    <body name="BN_LeftUpperLeg_3_link" pos="-0.11618481150552 0.10886532513791 -0.27159254366898" quat="-0.14413346944475 0.92863857086497 -0.33117203218005 -0.084740974678293">
       <geom name="BN_LeftUpperLeg_3_link_assembly" type="mesh" mesh="assembly_26" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerLeg_1_link" pos="-0.15461150538714 0.10264099719014 -0.52729281498099" quat="0.41217062500526 0.59928749319266 0.41828364900429 0.54406678391654">
+    <body name="BN_LeftLowerLeg_1_link" pos="-0.15461154034718 0.18366673537393 -0.50472533152638" quat="0.38176885851257 0.61700720845118 0.39547244387817 0.56316621837812">
       <geom name="BN_LeftLowerLeg_1_link_assembly" type="mesh" mesh="assembly_27" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerLeg_2_link" pos="-0.13300837861601 0.12765021331322 -0.62163842438339" quat="-0.067983045498418 0.98118199603739 -0.1753804854727 -0.043610566290795">
+    <body name="BN_LeftLowerLeg_2_link" pos="-0.13300842496082 0.22558257188508 -0.59287076842508" quat="-0.14488133902574 0.92411607606327 -0.34267758369526 -0.087126053487561">
       <geom name="BN_LeftLowerLeg_2_link_assembly" type="mesh" mesh="assembly_28" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftFoot_pitch_link" pos="-0.16979315136051 0.17077918412088 -0.90160687773014" quat="-0.4182836490041 -0.54406678391676 0.41217062500548 0.59928749319245">
+    <body name="BN_LeftFoot_pitch_link" pos="-0.16979319679473 0.31941050483805 -0.86015107457776" quat="-0.39547244387795 -0.5631662183783 0.38176885851281 0.617007208451">
       <geom name="BN_LeftFoot_pitch_link_assembly" type="mesh" mesh="assembly_29" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftFoot_roll_link" pos="-0.15253238465515 0.19318615974686 -0.95531254093005" quat="0.011817310639827 0.020341061798303 0.66787849524389 0.74389845272383">
+    <body name="BN_LeftFoot_roll_link" pos="-0.15253244568939 0.35130241601994 -0.90882629780423" quat="0.011656718056229 0.020030781422751 0.59645279361977 0.80231350088536">
       <geom name="BN_LeftFoot_roll_link_assembly" type="mesh" mesh="assembly_30" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_1_link" pos="0.092020037001039 0.041788809444587 -0.085745352678772" quat="0.41598838025336 0.57179911929728 0.41598780792855 0.57179854697248">
+    <body name="BN_RightUpperLeg_1_link" pos="0.092019991935573 0.042733754474793 -0.081871869949086" quat="0.38937515582832 0.59024316008208 0.38937515582831 0.59024316008208">
       <geom name="BN_RightUpperLeg_1_link_assembly" type="mesh" mesh="assembly_31" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_2_link" pos="0.10372008734613 0.085425249479291 -0.080100893181171" quat="3.65746949124e-07 4.4021000246626e-07 0.66019572180341 0.75109360862155">
+    <body name="BN_RightUpperLeg_2_link" pos="0.10371999193556 0.084353538864734 -0.067596242210348" quat="-3.8696649772459e-09 -6.3668471335915e-09 0.581185820125 0.81377087837156">
       <geom name="BN_RightUpperLeg_2_link_assembly" type="mesh" mesh="assembly_32" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_3_link" pos="0.116184832903 0.066570901710962 -0.28512731510859" quat="-0.058482592526791 0.98496986876259 0.15732637554885 0.04077444736368">
+    <body name="BN_RightUpperLeg_3_link" pos="0.11618479626691 0.10697351692731 -0.27224143576582" quat="-0.14413346905412 0.92863856834818 0.33117203896325 0.084740976413993">
       <geom name="BN_RightUpperLeg_3_link_assembly" type="mesh" mesh="assembly_33" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerLeg_1_link" pos="0.15461155954154 0.10281704513614 -0.52726852391779" quat="0.38855730393774 0.57521739571679 -0.44349990299237 -0.56697090336911">
+    <body name="BN_RightLowerLeg_1_link" pos="0.15461152530589 0.1910146198777 -0.50220499972145" quat="-0.36171793859208 -0.58931256834114 0.4172740815674 0.58970600348645">
       <geom name="BN_RightLowerLeg_1_link_assembly" type="mesh" mesh="assembly_34" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerLeg_2_link" pos="0.13300842842512 0.10429891132837 -0.62486134532103" quat="-0.056732766602661 0.9856449061641 0.15385608601152 0.040172340529058">
+    <body name="BN_RightLowerLeg_2_link" pos="0.13300841019067 0.21202611819861 -0.5975206455857" quat="-0.14346729076583 0.93323183469064 0.31898714912146 0.082113810626607">
       <geom name="BN_RightLowerLeg_2_link_assembly" type="mesh" mesh="assembly_35" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightFoot_pitch_link" pos="0.16979318891544 0.13861946570559 -0.90604552595905" quat="0.38855730393795 0.57521739571659 -0.44349990299216 -0.56697090336934">
+    <body name="BN_RightFoot_pitch_link" pos="0.16979318236714 0.30200576141425 -0.86612091893046" quat="-0.36171793859231 -0.58931256834097 0.41727408156716 0.58970600348664">
       <geom name="BN_RightFoot_pitch_link_assembly" type="mesh" mesh="assembly_36" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightFoot_roll_link" pos="0.15413490528746 0.16587767530513 -0.95803661218501" quat="0.012286681687979 0.019770598999907 0.64545853642262 0.7634405272367">
+    <body name="BN_RightFoot_roll_link" pos="0.15413487694977 0.33913102114143 -0.91159395979367" quat="0.012344036041885 0.01945949607628 0.56533165562677 0.82454173450041">
       <geom name="BN_RightFoot_roll_link_assembly" type="mesh" mesh="assembly_37" rgba=".84 .85 .86 1" contype="0" conaffinity="0" mass="0" />
     </body>
   </worldbody>

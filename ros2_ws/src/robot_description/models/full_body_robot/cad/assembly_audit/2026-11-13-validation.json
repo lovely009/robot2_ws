@@ -1,0 +1,117 @@
+{
+  "date": "2026-11-13",
+  "sources": {
+    "source_urdf": "robot_body/urdf/cnm.urdf",
+    "urdf_sha256": "d127a6994613c80193d93ac194c4fa8d5590139c9972b2ac668b002045651be7",
+    "step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4"
+  },
+  "generated_sha256": {
+    "urdf": "f49e3bd3ab596d73f626db4e4d47bdc7e2f7d4d67b03e537583bf4b55e358d67",
+    "standalone": "3f7e54999f1f8bdaae2cef919ba36c416f27464dd1f95cf8de0ac9f1df6199ab",
+    "mjcf": "b98a9e6dc3766c02564fd529b95dc88925ade655a369a1f568684d280a3fd46b"
+  },
+  "structure": {
+    "physical_links": 38,
+    "main_joints": 37,
+    "auxiliary_joints": 30,
+    "closed_rods": 10,
+    "actuators": 37,
+    "visible_meshes": 68
+  },
+  "targeted_pytest": {
+    "model_alignment_linkages_and_hips": 45,
+    "geometry_and_workbench": 7,
+    "position_limits_and_joint_aliases": 20,
+    "source_and_installed_model_metadata": 3,
+    "total_unique": 75
+  },
+  "checks": [
+    "Native, physics and 180-degree MJCF compile; neutral equality residual below 25 micrometres.",
+    "Actual moving rod mesh endpoints follow both bearing sites.",
+    "Whole source-link mass, world COM and inertia preserved after frame changes.",
+    "Installed URDF/MJCF/limits/topology and BVH profiles equal source.",
+    "Raw robot_body cnm URDF and supplied STEP hashes unchanged.",
+    "New yaw local frame and mesh reexpression preserve the world vertical axis.",
+    "New source hand mounting retained with zero extra flip and zero crank compensation.",
+    "Hand plate free ends independently match actual STEP nodes within 25 micrometres."
+  ],
+  "coupled_domains": {
+    "waist": {
+      "shape": [
+        46,
+        28
+      ],
+      "reachable_samples": 1168
+    },
+    "hips": {
+      "shape": [
+        10,
+        13
+      ],
+      "reachable_samples": 92
+    },
+    "left_shoulder": {
+      "shape": [
+        68,
+        18
+      ],
+      "reachable_samples": 880
+    },
+    "left_wrist": {
+      "shape": [
+        73,
+        27
+      ],
+      "reachable_samples": 793
+    },
+    "right_shoulder": {
+      "shape": [
+        68,
+        18
+      ],
+      "reachable_samples": 880
+    },
+    "right_wrist": {
+      "shape": [
+        27,
+        69
+      ],
+      "reachable_samples": 1156
+    }
+  },
+  "limitations": [
+    "Collision and hardware travel remain uncalibrated.",
+    "Hardware direction, zero and differential ratio retain pending status.",
+    "Two foot roll axes lack bilateral cylindrical support; original definitions retained.",
+    "STEP node distances are tessellation comparisons, not surface-clearance acceptance."
+  ],
+  "independent_review": {
+    "verdict": "pass_for_simulation_assembly",
+    "true_blockers": [],
+    "report": "2026-11-13-new-body-independent-review.md",
+    "known_limits": [
+      "Both foot roll joints lack bilateral STEP support.",
+      "Collision/hardware direction/zero/travel remain uncalibrated."
+    ]
+  },
+  "left_hand_mounting": {
+    "calibration": "config/left_hand_mount_alignment.json",
+    "confirmed_intent": "Left hand plate extends outward from forearm like right hand",
+    "source_files_preserved": true,
+    "fixed_motor_axis_mesh_check": "passed",
+    "extra_rotation_rad": 0.0,
+    "motor_zero_shifts_rad": {
+      "left_wrist_flange_proximal_rod": 8.881784197001252e-16,
+      "left_wrist_flange_distal_rod": 0.0
+    }
+  },
+  "web_browser_check": {
+    "joint_count": 67,
+    "hand_outward_extension_mm": {
+      "Left": 69.82610251849445,
+      "Right": 69.8277820003481
+    },
+    "page_errors": [],
+    "result": "passed"
+  }
+}

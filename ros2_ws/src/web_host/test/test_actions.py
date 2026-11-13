@@ -14,6 +14,7 @@ import pytest
 from web_host.actions import (
     action_summary,
     actions_directory,
+    bvh_directory,
     list_actions,
     read_action,
     save_action,
@@ -39,6 +40,38 @@ def web_root(tmp_path: Path) -> Path:
     web = tmp_path / 'web'
     web.mkdir()
     return web
+
+
+@pytest.mark.parametrize('layout', ['install/web_host/share/web_host', 'install/share/web_host'])
+def test_bvh_workspace_reads_source_additions_and_deletions(tmp_path, layout):
+    from web_host.motion import MotionJobs
+
+    web = tmp_path / layout / 'web'
+    source = tmp_path / 'src/web_host/action_library'
+    source.mkdir(parents=True)
+    (source.parent / 'package.xml').write_text('<package/>')
+    manager = MotionJobs(actions_dir=bvh_directory(str(web)))
+    try:
+        assert manager.sources() == []
+        clip = source / '新增动作.bvh'
+        clip.write_text('HIERARCHY')
+        assert manager.sources() == ['新增动作.bvh']
+        assert manager._source_text(clip.name) == 'HIERARCHY'
+        clip.unlink()
+        assert manager.sources() == []
+        # JSON 动作库读写仍位于安装树。
+        assert actions_directory(str(web)) == web.parent / 'action_library'
+    finally:
+        manager.close()
+
+
+def test_bvh_standalone_install_uses_installed_library(tmp_path):
+    web = tmp_path / 'install/web_host/share/web_host/web'
+    assert bvh_directory(str(web)) == actions_directory(str(web))
+
+
+def test_bvh_custom_web_root_keeps_its_own_library(web_root):
+    assert bvh_directory(str(web_root)) == actions_directory(str(web_root))
 
 
 def test_summary_reports_ids_and_duration() -> None:

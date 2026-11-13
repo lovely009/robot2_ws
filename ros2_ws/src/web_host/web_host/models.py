@@ -2,6 +2,7 @@
 
 import importlib
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 import yaml
@@ -32,7 +33,7 @@ def enumerate_arm_models(root=None):
 
 
 def model_transmissions(model, root=None):
-    """由 robot_transmission.Model 解析传动组，返回 UI 元数据与可直连关节。"""
+    """返回驱动传动元数据；无驱动时可展示不可执行的电机拓扑。"""
     models_root = Path(root) if root is not None else _models_root()
     if models_root is None or not models_root.is_dir():
         raise ValueError("找不到模型根目录（models/ 不存在或安装树不完整？）")
@@ -40,6 +41,9 @@ def model_transmissions(model, root=None):
         raise ValueError(f"非法模型名：{model!r}")
     driver_file = models_root / model / _DRIVER_CONFIG
     if not driver_file.is_file():
+        topology = models_root / model / 'config/motor_topology.yaml'
+        if topology.is_file():
+            return _topology_metadata(model, models_root / model, topology)
         raise ValueError(f"模型 {model!r} 没有 {_DRIVER_CONFIG}")
     try:
         model_class = importlib.import_module("robot_transmission").Model
@@ -95,6 +99,58 @@ def model_transmissions(model, root=None):
         "groups": encoded,
         "direct_joints": dict(sorted(direct.items())),
     }
+
+
+def _topology_metadata(model, directory, topology):
+    """Expose confirmed wiring without treating an uncalibrated topology as a driver."""
+    try:
+        document = yaml.safe_load(topology.read_text(encoding='utf-8'))
+        motors = document['motors']
+        differentials = document.get('differential_groups', {})
+        if not isinstance(motors, dict) or not motors or not isinstance(differentials, dict):
+            raise ValueError('电机与差动组必须为非空电机表和分组表')
+        ids = {}
+        for number, entry in motors.items():
+            if type(number) is not int or number < 1 or not isinstance(entry, dict):
+                raise ValueError('电机编号无效')
+            node_id = entry.get('can_node_id')
+            if type(node_id) is not int or not 1 <= node_id <= 64 or node_id in ids.values():
+                raise ValueError('CAN 节点 ID 未确认、重复或超出 1～64')
+            ids[number] = node_id
+        groups, used = [], set()
+        def group(name, numbers, joints, kind):
+            if (not isinstance(numbers, list) or not numbers
+                    or any(type(n) is not int or n not in ids or n in used for n in numbers)
+                    or len(set(numbers)) != len(numbers)
+                    or not isinstance(joints, list) or not joints
+                    or any(not isinstance(j, str) or not j for j in joints)):
+                raise ValueError('传动组电机或关节无效、重复分配')
+            used.update(numbers)
+            groups.append({'name': name, 'plugin': '', 'kind': kind,
+                           'motors': [{'name': f'motor_{n}', 'id': ids[n], 'number': n} for n in numbers],
+                           'joints': joints, 'direct_mapping': False,
+                           'legacy_mapping_reason': 'uncalibrated_transmission'})
+        for number, entry in motors.items():
+            if entry.get('joint'):
+                group(f'direct_{number}', [number], [entry['joint']], 'direct')
+        for name, entry in differentials.items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise ValueError('差动组格式无效')
+            numbers, joints = entry.get('motor_numbers'), entry.get('joints')
+            if not isinstance(numbers, list) or len(numbers) != 2 or not isinstance(joints, list) or len(joints) != 2:
+                raise ValueError('差动组须包含两台电机和两个关节')
+            group(name, numbers, joints, 'differential')
+        robot = ET.parse(directory / 'urdf' / f'{model}.urdf').getroot()
+        expected = {j.get('name') for j in robot.findall('joint') if j.get('type') != 'fixed'}
+        actual = [j for g in groups for j in g['joints']]
+        if used != set(motors) or len(actual) != len(set(actual)) or set(actual) != expected:
+            raise ValueError('电机须完整分组，且拓扑须唯一覆盖 URDF 全部活动关节')
+    except (OSError, KeyError, TypeError, yaml.YAMLError, ET.ParseError) as exc:
+        raise ValueError(f'无法读取电机拓扑：{exc}') from exc
+    return {'model': model, 'driver_file': '', 'topology_file': str(topology),
+            'mapping_kind': 'topology', 'hardware_ready': False,
+            'hardware_block_reason': '电机映射已加载；传动方向、零位及差动参数待标定，真机控制未开放',
+            'groups': groups, 'direct_joints': {}, 'policy_defaults': {}}
 
 
 def has_joint_mapping_source(model, root=None):

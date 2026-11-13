@@ -56,12 +56,12 @@ def test_hips_mounts_meet_hole_axis_and_receiver_face(hips, mounted):
         assert side['rod_length_m'] == pytest.approx(.065, abs=1e-8)
         assert side['flange_mount_axis_error_m'] < .000025
         assert side['flange_seat_gap_m'] < .000025
-    assert solution['sides']['plus']['regions']['rod'] == [17, 18, 2]
-    assert solution['sides']['minus']['regions']['rod'] == [12, 7, 6]
-    assert set(solution['sides']['plus']['regions']['platform']) == {8, 19}
-    assert set(solution['sides']['minus']['regions']['platform']) == {1, 13}
-    assert 16 in solution['sides']['plus']['regions']['flange']
-    assert 9 in solution['sides']['minus']['regions']['flange']
+    assert solution['sides']['plus']['regions']['rod'] == [240, 238, 236]
+    assert solution['sides']['minus']['regions']['rod'] == [233, 232, 230]
+    assert set(solution['sides']['plus']['regions']['platform']) == {227, 231}
+    assert set(solution['sides']['minus']['regions']['platform']) == {229, 234}
+    assert 241 in solution['sides']['plus']['regions']['flange']
+    assert 242 in solution['sides']['minus']['regions']['flange']
     for entry in solution['sides'].values():
         for check in entry['outer_race_checks'].values():
             assert check['owner'] == 'rod'

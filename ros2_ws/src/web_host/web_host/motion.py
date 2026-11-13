@@ -87,14 +87,16 @@ class MotionJobs:
                     source_names = {j.name for j in clip.joints}
                     if preset['source_root'] not in source_names:
                         break
-                    analysis['mapping'].update(source_root=preset['source_root'], source_to_robot=preset['source_to_robot'])
+                    import numpy as np
+                    basis = np.asarray(preset['source_to_robot']) @ job['source_basis']
+                    analysis['mapping'].update(source_root=preset['source_root'], source_to_robot=basis.tolist())
                     pairs = preset['targets']
                     for target in analysis['mapping']['targets']:
                         source = pairs.get(target['target'], '')
                         target.update(source=source if source in source_names else '', confidence='preset',
                                       reason='已知模型部位候选，请核对动作骨架')
                     break
-        identity = {'version': 1, 'urdf': request['urdf_text'], 'up_axis': job['up_axis'],
+        identity = {'version': 1, 'source_basis_version': 1, 'urdf': request['urdf_text'], 'up_axis': job['up_axis'],
                     'scale': job['scale'], 'reference': clip.frames[0].tolist(),
                     'skeleton': [(j.name, j.parent, j.offset.tolist(), j.channels) for j in clip.joints]}
         if job.get('simulation'):
@@ -168,7 +170,7 @@ class MotionJobs:
             raise ValueError('BVH 和 URDF 合计不能超过 20 MB')
         up_axis = request.get('up_axis', 'y_up')
         scale = request.get('scale', .01)
-        if up_axis not in ('y_up', 'z_up') or scale not in (.001, .01, 1.):
+        if up_axis not in ('auto', 'y_up', 'z_up') or scale not in (.001, .01, 1.):
             raise ValueError('不支持的 BVH 坐标或单位')
         if '<!DOCTYPE' in request['urdf_text'].upper() or '<!ENTITY' in request['urdf_text'].upper():
             raise ValueError('URDF 不支持 DTD 或实体声明')
@@ -210,6 +212,8 @@ class MotionJobs:
                 (directory / 'robot.urdf').write_text(urdf_text, encoding='utf-8')
                 generic = request.get('retargeting') == 'generic'
                 clip = BvhClip.load(directory / 'source.bvh', preserve_names=generic)
+                from .motion_source import prepare_source
+                up_axis, position_mode, source_basis = prepare_source(clip, up_axis)
                 if generic:
                     from bvh_broadcaster.generic_retarget import _Robot
                     parsed_robot = _Robot(directory / 'robot.urdf')
@@ -241,11 +245,13 @@ class MotionJobs:
                           'frames': len(clip.frames), 'frame_time': clip.frame_time,
                           'joint_count': model.nq, 'source_joints': sources, 'robot_links': links,
                           'automatic_mapping': automatic, 'mapping': template if automatic else None}
+                status.update(up_axis=up_axis, position_mode=position_mode)
                 if simulation:
                     status.update(constraint_source='simulation',
                                   velocity_limit_rad_s=simulation['velocity_limit_rad_s'])
                 self.jobs[key] = {'directory': directory, 'clip': clip, 'scale': scale,
-                                  'up_axis': up_axis, 'status': status, 'simulation': simulation}
+                                  'up_axis': up_axis, 'source_basis': source_basis,
+                                  'status': status, 'simulation': simulation}
                 if generic:
                     builtin = (automatic and not simulation and not any(parsed_robot.missing)
                                and all(j.get('type') == 'revolute' and j.find('mimic') is None

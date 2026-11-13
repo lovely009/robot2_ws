@@ -1,103 +1,104 @@
+# CAN 节点 ID 1～37 由用户于 2026-11-13 确认；方向、零位及差动参数仍待标定。
 motors:
   1:
     joint: BN_Spine_yaw
-    can_node_id: null
+    can_node_id: 1
   2:
-    can_node_id: null
+    can_node_id: 2
   3:
-    can_node_id: null
+    can_node_id: 3
   4:
-    can_node_id: null
+    can_node_id: 4
   5:
-    can_node_id: null
+    can_node_id: 5
   6:
-    can_node_id: null
+    can_node_id: 6
   7:
-    can_node_id: null
+    can_node_id: 7
   8:
     joint: BN_LeftUpperArm_1
-    can_node_id: null
+    can_node_id: 8
   9:
     joint: BN_LeftUpperArm_2
-    can_node_id: null
+    can_node_id: 9
   10:
     joint: BN_LeftUpperArm_3
-    can_node_id: null
+    can_node_id: 10
   11:
     joint: BN_LeftLowerArm_1
-    can_node_id: null
+    can_node_id: 11
   12:
     joint: BN_LeftLowerArm_2
-    can_node_id: null
+    can_node_id: 12
   13:
-    can_node_id: null
+    can_node_id: 13
   14:
-    can_node_id: null
+    can_node_id: 14
   15:
-    can_node_id: null
+    can_node_id: 15
   16:
-    can_node_id: null
+    can_node_id: 16
   17:
     joint: BN_RightUpperArm_1
-    can_node_id: null
+    can_node_id: 17
   18:
     joint: BN_RightUpperArm_2
-    can_node_id: null
+    can_node_id: 18
   19:
     joint: BN_RightUpperArm_3
-    can_node_id: null
+    can_node_id: 19
   20:
     joint: BN_RightLowerArm_1
-    can_node_id: null
+    can_node_id: 20
   21:
     joint: BN_RightLowerArm_2
-    can_node_id: null
+    can_node_id: 21
   22:
-    can_node_id: null
+    can_node_id: 22
   23:
-    can_node_id: null
+    can_node_id: 23
   24:
     joint: BN_LeftUpperLeg_1
-    can_node_id: null
+    can_node_id: 24
   25:
     joint: BN_LeftUpperLeg_2
-    can_node_id: null
+    can_node_id: 25
   26:
     joint: BN_LeftUpperLeg_3
-    can_node_id: null
+    can_node_id: 26
   27:
     joint: BN_LeftLowerLeg_1
-    can_node_id: null
+    can_node_id: 27
   28:
     joint: BN_LeftLowerLeg_2
-    can_node_id: null
+    can_node_id: 28
   29:
     joint: BN_LeftFoot_pitch
-    can_node_id: null
+    can_node_id: 29
   30:
     joint: BN_LeftFoot_roll
-    can_node_id: null
+    can_node_id: 30
   31:
     joint: BN_RightUpperLeg_1
-    can_node_id: null
+    can_node_id: 31
   32:
     joint: BN_RightUpperLeg_2
-    can_node_id: null
+    can_node_id: 32
   33:
     joint: BN_RightUpperLeg_3
-    can_node_id: null
+    can_node_id: 33
   34:
     joint: BN_RightLowerLeg_1
-    can_node_id: null
+    can_node_id: 34
   35:
     joint: BN_RightLowerLeg_2
-    can_node_id: null
+    can_node_id: 35
   36:
     joint: BN_RightFoot_pitch
-    can_node_id: null
+    can_node_id: 36
   37:
     joint: BN_RightFoot_roll
-    can_node_id: null
+    can_node_id: 37
 differential_groups:
   waist:
     motor_numbers:

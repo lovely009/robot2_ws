@@ -20,8 +20,8 @@ MODEL = Path(__file__).resolve().parents[1]
 OUTPUT = MODEL / 'mujoco/full_body_robot.hips-mounted.xml'
 CONFIG = MODEL / 'config/hips_mount_alignment.json'
 ROLES = {
-    'plus': {'flange_outer': 18, 'platform_outer': 2, 'platform_inner': 8, 'flange_inner': 4, 'crank': 3},
-    'minus': {'flange_outer': 7, 'platform_outer': 6, 'platform_inner': 1, 'flange_inner': 5, 'crank': 0},
+    'plus': {'flange_outer': 238, 'platform_outer': 236, 'platform_inner': 227, 'flange_inner': 239, 'crank': 226},
+    'minus': {'flange_outer': 232, 'platform_outer': 230, 'platform_inner': 229, 'flange_inner': 237, 'crank': 228},
 }
 
 
@@ -47,13 +47,11 @@ def load_geometry():
     alignment = json.loads((MODEL / 'config/step_alignment.json').read_text())
     manifest = json.loads((MODEL / 'config/display_meshes.json').read_text())
     features = json.loads((MODEL / 'cad/assembly_audit/step-analytic-features.json').read_text())
-    step = MODEL / 'cad/全身装配体（不含头部）.STEP'
-    if not step.exists():
-        step = MODEL.parent / '全身装配体（不含头部）.STEP'
+    step = MODEL.parent / '全身不带头.STEP'
     if hashlib.sha256(step.read_bytes()).hexdigest() != features['step_sha256'] or features['step_sha256'] != alignment['step_sha256']:
         raise ValueError('Repeat STEP feature extraction after changing the source')
     base = manifest['links']['base_link']
-    source = MODEL.parent / 'Robot_body1/meshes' / base['source']
+    source = MODEL.parent / manifest['source'] / 'meshes' / base['source']
     if hashlib.sha256(source.read_bytes()).hexdigest() != base['source_sha256']:
         raise ValueError('Review hips source regions after changing the mesh')
     reader = vtk.vtkSTLReader()
@@ -71,7 +69,7 @@ def load_geometry():
     base_frame = np.asarray(alignment['links']['Base_link']['world_transform'])
     world = vertices @ base_frame[:3, :3].T + base_frame[:3, 3]
     receiver = alignment['links']['BN_hips_pitch_link']
-    plate_path = MODEL.parent / 'Robot_body1/meshes' / receiver['source']
+    plate_path = MODEL.parent / manifest['source'] / 'meshes' / receiver['source']
     if hashlib.sha256(plate_path.read_bytes()).hexdigest() != receiver['source_sha256']:
         raise ValueError('Receiver mesh changed')
     plate_reader = vtk.vtkSTLReader()
@@ -108,8 +106,8 @@ def receiver_hole(plate, source_center, features, side, require_rim=True):
             continue
         origin, axis = np.asarray(cylinder['origin_m']), np.asarray(cylinder['axis'])
         axis = axis if axis[2] > 0 else -axis
-        if axis[2] < .95:
-            continue
+        # The new STEP receiver is tilted; select the finite supported seat
+        # nearest its bearing instead of assuming world-Z mounting holes.
         # A finite neighbourhood is essential: other surfaces can lie on the
         # same infinite cylinder axis elsewhere in this link.
         local = plate[np.linalg.norm(plate - origin, axis=1) < .012]
@@ -474,6 +472,6 @@ if __name__ == '__main__':
         raise ValueError(f'Mounted hips validation failed: {after}')
     report = {'scope': 'Static fixture/ball/race/rod reconstruction only; motion and contact acceptance remain pending',
               'before': before, 'after': after, 'calibration': solution}
-    (MODEL / 'cad/assembly_audit/2026-11-12-hips-mounting.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    (MODEL / 'cad/assembly_audit/2026-11-13-hips-mounting.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(path)
     print(json.dumps(after, indent=2))

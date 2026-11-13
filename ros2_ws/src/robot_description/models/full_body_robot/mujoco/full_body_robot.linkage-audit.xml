@@ -58,175 +58,175 @@
     <light pos="0 -1 .8" dir="0 .55 -1" />
     <body name="Base_link" pos="0 0 0" quat="1 0 0 0">
       <geom name="Base_link_assembly" type="mesh" mesh="assembly_00" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
-      <body name="hips_plus_flange_mounted" pos="0.037609420789838 0.053941039688449 1.0408340855861e-17" quat="0.89191244499799 7.5307781238992e-17 7.6876693348137e-17 -0.45220812736803">
+      <body name="hips_plus_flange_mounted" pos="0.053887771053749 0.060296541944257 1.3877787807814e-17" quat="0.83110526755706 -6.1741181809886e-17 1.9101178122434e-16 -0.55611512678484">
         <geom name="hips_plus_flange_mounted" type="mesh" mesh="hips_plus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
-      <body name="hips_plus_rod_mounted" pos="0.088638593928577 -0.064025906849506 -0.016067084249451" quat="0.87452050931668 -0.011091579476347 -0.16992927372444 0.45410890497842">
+      <body name="hips_plus_rod_mounted" pos="0.094647468029369 -0.068246599709297 -0.021656104934202" quat="0.86297336138058 0.035383108924378 -0.17987239001721 0.47081943084354">
         <geom name="hips_plus_rod_mounted" type="mesh" mesh="hips_plus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
-      <body name="hips_minus_flange_mounted" pos="-0.062991943354558 0.062028463625954 0" quat="0.79397399736394 -1.0124429929003e-16 -1.0335355552524e-16 0.60795171807465">
+      <body name="hips_minus_flange_mounted" pos="-0.080466862348987 0.062093975579161 3.1225022567583e-17" quat="0.71516034605321 7.7600196008871e-17 -2.4007560640244e-16 0.69896042765885">
         <geom name="hips_minus_flange_mounted" type="mesh" mesh="hips_minus_flange_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
-      <body name="hips_minus_rod_mounted" pos="-0.057488902198699 -0.049222618071141 0.011621593808824" quat="0.94615706040234 0.022372683256282 -0.11859116608837 -0.30037046362868">
+      <body name="hips_minus_rod_mounted" pos="-0.063395690627358 -0.057597483364854 0.0077722187825349" quat="0.93431865579672 0.062150837603719 -0.11644314647668 -0.33109955671064">
         <geom name="hips_minus_rod_mounted" type="mesh" mesh="hips_minus_rod_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
     </body>
-    <body name="BN_Spine_yaw_link" pos="0 -0.027852322456454 0.0062778047691217" quat="1 0 0 0">
+    <body name="BN_Spine_yaw_link" pos="0 0 0.010999999999991" quat="1 0 0 0">
       <geom name="BN_Spine_yaw_link_assembly" type="mesh" mesh="assembly_01" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_Spine_pitch_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-0.045467036314021 0.7056433326382 0.045472220259402 -0.7056433326382">
+    <body name="BN_Spine_pitch_link" pos="0 0 0.10999999999999" quat="-0.11823207943556 0.69715175524861 0.11823720099833 -0.69715175524861">
       <geom name="BN_Spine_pitch_link_assembly" type="mesh" mesh="assembly_02" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_Spine_roll_link" pos="0 -3.2245645370174e-07 0.10999780476912" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+    <body name="BN_Spine_roll_link" pos="0 0 0.10999999999999" quat="-4.0583193692649e-06 -1.4975481880182e-06 0.57891861257515 0.81538533221744">
       <geom name="BN_Spine_roll_link_assembly" type="mesh" mesh="assembly_03" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftShoulder_1_link" pos="-0.058998687767302 -0.086545370330901 0.31125535004419" quat="-3.7837033911832e-06 1.8328014661354e-06 -0.06430376499229 0.99793037121341">
+    <body name="BN_LeftShoulder_1_link" pos="-0.069677588968492 -0.1205422076465 0.28913330235398" quat="-3.9285882995398e-06 1.8107458825875e-06 -0.16720903173017 0.98592146730312">
       <geom name="BN_LeftShoulder_1_link_assembly" type="mesh" mesh="assembly_04" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftShoulder_2_link" pos="-0.063998812138092 -0.060886432408485 0.33504521471321" quat="-3.9714661375743e-06 -1.3795032746328e-06 0.66017508385001 0.75111174844091">
+    <body name="BN_LeftShoulder_2_link" pos="-0.063998346802155 -0.10590047715405 0.31769489814435" quat="-4.0583193692649e-06 -1.4975481880182e-06 0.57891861257515 0.81538533221744">
       <geom name="BN_LeftShoulder_2_link_assembly" type="mesh" mesh="assembly_05" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_1_link" pos="-0.098498461127295 -0.093946199772291 0.36454650284564" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+    <body name="BN_LeftUpperArm_1_link" pos="-0.098497976087885 -0.14432435360517 0.33976028501194" quat="0.38937195716855 0.59024250073738 0.38937766267704 0.59024427578943">
       <geom name="BN_LeftUpperArm_1_link_assembly" type="mesh" mesh="assembly_06" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_2_link" pos="-0.15199861059757 -0.071632986283456 0.367434086034" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+    <body name="BN_LeftUpperArm_2_link" pos="-0.15199813110282 -0.1230829957788 0.34717840230409" quat="-4.9472909358268e-06 -2.9593964350054e-06 0.57892500240039 0.81538079543394">
       <geom name="BN_LeftUpperArm_2_link_assembly" type="mesh" mesh="assembly_07" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperArm_3_link" pos="-0.15199870569691 -0.082734094169373 0.27010461771275" quat="-1.4336207562714e-06 -5.2301875421549e-06 0.99793072549356 0.064298266590017">
+    <body name="BN_LeftUpperArm_3_link" pos="-0.16851231775823 -0.11439199447258 0.25101203938854" quat="-0.085928795746443 -0.01457787994774 0.98217165877849 0.16656098033484">
       <geom name="BN_LeftUpperArm_3_link_assembly" type="mesh" mesh="assembly_08" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerArm_1_link" pos="-0.17509926790133 -0.066034407173362 0.094294081964537" quat="0.4159967305431 0.57179825334263 -0.41598575861402 -0.57179482883469">
+    <body name="BN_LeftLowerArm_1_link" pos="-0.22191050445699 -0.06407365485779 0.088720455023564" quat="-0.43656882259797 -0.55079936803572 0.33860047023135 0.62560166309401">
       <geom name="BN_LeftLowerArm_1_link_assembly" type="mesh" mesh="assembly_09" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerArm_2_link" pos="-0.1520999875211 -0.049461839933676 0.0051836153341931" quat="-0.06430009939014 0.99793060736959 9.2949410353262e-06 -2.6439258929823e-06">
+    <body name="BN_LeftLowerArm_2_link" pos="-0.21497572291935 -0.028652702985548 0.0024558757237168" quat="-0.089406554587227 0.82035147350283 -0.54027483648687 -0.16472106415897">
       <geom name="BN_LeftLowerArm_2_link_assembly" type="mesh" mesh="assembly_10" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftHand_roll_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="0.46682122342319 0.53111867888744 -0.46680928455626 -0.53111202787229">
+    <body name="BN_LeftHand_roll_link" pos="-0.24047507082554 0.016231093307992 -0.12607288523173" quat="-0.40937640949139 -0.57655734201735 0.40934810632123 0.57656457970383">
       <geom name="BN_LeftHand_roll_link_assembly" type="mesh" mesh="assembly_11" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftHand_pitch_link" pos="-0.15357207675539 -0.031687598710474 -0.13217111913144" quat="-8.445864241184e-06 -4.7093803639283e-06 0.66017646331484 0.75111053593436">
+    <body name="BN_LeftHand_pitch_link" pos="-0.24047507082554 0.016231093307992 -0.12607288523173" quat="-6.6152771767303e-06 -1.8950131511381e-05 0.81537820385495 -0.57892865214584">
       <geom name="BN_LeftHand_pitch_link_assembly" type="mesh" mesh="assembly_12" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightShoulder_1_link" pos="-0.098498461128274 -0.09394611238747 0.36454640859479" quat="0.41598746606127 0.57179677148179 0.41599292278515 0.57179783874687">
+    <body name="BN_RightShoulder_1_link" pos="-0.098498276074229 -0.14432523781457 0.33976306348099" quat="0.38937195716855 0.59024250073738 0.38937766267704 0.59024427578943">
       <geom name="BN_RightShoulder_1_link_assembly" type="mesh" mesh="assembly_13" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightShoulder_2_link" pos="0.064001176716399 -0.056620783774739 0.33559600558721" quat="-4.7120289668371e-06 -2.6845694653911e-06 0.66017646333615 0.75111053595829">
+    <body name="BN_RightShoulder_2_link" pos="0.064001330582089 -0.10184068287647 0.31911470107005" quat="-4.9472909358268e-06 -2.9593964350054e-06 0.57892500240039 0.81538079543394">
       <geom name="BN_RightShoulder_2_link_assembly" type="mesh" mesh="assembly_14" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_1_link" pos="0.09850163657115 -0.093944250885829 0.36454539370886" quat="0.41598790991327 0.57179513671978 0.41599457925201 0.57179794548646">
+    <body name="BN_RightUpperArm_1_link" pos="0.09850183752173 -0.14432311001267 0.33976290693704" quat="0.38937591903066 0.59023843778823 0.38938295178606 0.59024223594615">
       <geom name="BN_RightUpperArm_1_link_assembly" type="mesh" mesh="assembly_15" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_2_link" pos="0.1520014209856 -0.071630112365501 0.36743259233598" quat="-5.4525917960734e-06 -3.9896356561343e-06 0.66017784281859 0.75110932347145">
+    <body name="BN_RightUpperArm_2_link" pos="0.15200160570394 -0.12308059923079 0.34718051256299" quat="-5.8362625020703e-06 -4.4212446818021e-06 0.57893139218838 0.81537625859797">
       <geom name="BN_RightUpperArm_2_link_assembly" type="mesh" mesh="assembly_16" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperArm_3_link" pos="0.15200145301246 -0.082731577761043 0.27010316479184" quat="-0.06429643381484 0.99793084357098 6.4404775075786e-06 2.6311498551391e-06">
+    <body name="BN_RightUpperArm_3_link" pos="0.16851552201626 -0.11439067363099 0.25101400601263" quat="-0.089409338890523 0.82033451696139 0.54030541689802 0.16470369416482">
       <geom name="BN_RightUpperArm_3_link_assembly" type="mesh" mesh="assembly_17" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerArm_1_link" pos="0.12890231286746 -0.066032580260599 0.094292376706914" quat="0.46681541828604 0.53110727007185 0.46681899143971 0.53112000730388">
+    <body name="BN_RightLowerArm_1_link" pos="0.17640852669186 -0.061430116507596 0.081147187444758" quat="0.45803996896861 0.53867981146972 0.35758023839688 0.61004903134929">
       <geom name="BN_RightLowerArm_1_link_assembly" type="mesh" mesh="assembly_18" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerArm_2_link" pos="0.15190296125989 -0.049459985363468 0.0051825047964254" quat="-0.064298266635517 0.99793072547535 6.3223987116759e-06 4.4639405770061e-06">
+    <body name="BN_RightLowerArm_2_link" pos="0.21477083128818 -0.028642251690412 0.0024227344025862" quat="-0.089409809014298 0.82033439429914 0.54030537771906 0.16470417842225">
       <geom name="BN_RightLowerArm_2_link_assembly" type="mesh" mesh="assembly_19" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightHand_roll_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.46681727674759 0.53111805643095 -0.46681518210874 -0.53111093569589">
+    <body name="BN_RightHand_roll_link" pos="0.23736669373589 0.016409077234238 -0.12658974200365" quat="0.40937163365363 0.5765587920004 -0.40936062513773 -0.57655763243031">
       <geom name="BN_RightHand_roll_link_assembly" type="mesh" mesh="assembly_20" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightHand_pitch_link" pos="0.15043288260708 -0.031686238279545 -0.13217231751714" quat="0.66017784278935 0.75110932349532 2.6936176497104e-06 6.4146093445769e-06">
+    <body name="BN_RightHand_pitch_link" pos="0.23736669373589 0.016409077234238 -0.12658974200365" quat="0.57893113215228 0.81537644320966 8.8474626335193e-06 2.3174623248902e-06">
       <geom name="BN_RightHand_pitch_link_assembly" type="mesh" mesh="assembly_21" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_hips_roll_link" pos="0 0 -0.0734999997374" quat="0.70710678118655 0.70710678118655 0 0">
+    <body name="BN_hips_roll_link" pos="0 0 -0.0735" quat="0.70710548251124 0.70710807985947 0 0">
       <geom name="BN_hips_roll_link_assembly" type="mesh" mesh="assembly_22" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_hips_pitch_link" pos="0 0 -0.0734999997374" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+    <body name="BN_hips_pitch_link" pos="0 0 -0.0735" quat="-0.38937118886828 -0.59024516471865 0.38937192671163 0.59024590256471">
       <geom name="BN_hips_pitch_link_assembly" type="mesh" mesh="assembly_23" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
-      <body name="hips_plus_platform_mounted" pos="-0.0060634793643145 0.073000158930532 0.034146158141322" quat="-0.41997509134244 0.57051840939628 -0.42443260886281 -0.56390303042789">
+      <body name="hips_plus_platform_mounted" pos="-0.0060162730535081 0.073021079634004 0.034104812124703" quat="-0.4198089253787 0.57042784438944 -0.42457197233527 -0.56401345801756">
         <geom name="hips_plus_platform_mounted" type="mesh" mesh="hips_plus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
-      <body name="hips_minus_platform_mounted" pos="-0.0063574668112444 0.084627485267395 -0.0052546701105214" quat="0.4752044732093 -0.50034784210456 0.41088753219941 0.59582227335528">
+      <body name="hips_minus_platform_mounted" pos="-0.0058225240359777 0.084826096557101 -0.0046245624590852" quat="0.47728027505079 -0.50184553434538 0.40843168060868 0.59459075083641">
         <geom name="hips_minus_platform_mounted" type="mesh" mesh="hips_minus_platform_mounted" mass="0" contype="0" conaffinity="0" rgba=".84 .85 .86 .12" />
       </body>
     </body>
-    <body name="BN_LeftUpperLeg_1_link" pos="-0.09201996299884 0.041789017533078 -0.085745319855477" quat="-0.41598780792855 -0.57179854697248 0.41598838025336 0.57179911929728">
+    <body name="BN_LeftUpperLeg_1_link" pos="-0.092019940704349 0.042734343077487 -0.081871087832753" quat="-0.38937118886828 -0.59024516471865 0.38937192671163 0.59024590256471">
       <geom name="BN_LeftUpperLeg_1_link_assembly" type="mesh" mesh="assembly_24" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperLeg_2_link" pos="-0.1037200145056 -0.0027343908036222 -0.092277157639375" quat="0.65377672139313 0.75668751711928 -3.6500546550063e-07 -4.3112397851233e-07">
+    <body name="BN_LeftUpperLeg_2_link" pos="-0.10372000656603 0.00016853174490956 -0.096471847933572" quat="0.58118096844139 0.81377434336569 4.5182156849968e-07 1.0287701180205e-06">
       <geom name="BN_LeftUpperLeg_2_link_assembly" type="mesh" mesh="assembly_25" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftUpperLeg_3_link" pos="-0.11618476825505 0.071941480230181 -0.28438606997637" quat="-0.066210242859161 0.98190126405013 -0.17211989539066 -0.043137605496731">
+    <body name="BN_LeftUpperLeg_3_link" pos="-0.11618501523814 0.10886665145177 -0.27158765720275" quat="-0.14414069095544 0.92863719807873 -0.33117244110978 -0.084742137126422">
       <geom name="BN_LeftUpperLeg_3_link_assembly" type="mesh" mesh="assembly_26" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerLeg_1_link" pos="-0.15461150538714 0.10264099719014 -0.52729281498099" quat="0.41217062500526 0.59928749319266 0.41828364900429 0.54406678391654">
+    <body name="BN_LeftLowerLeg_1_link" pos="-0.15461116837879 0.18367138669056 -0.50471949099141" quat="0.38176147938387 0.61700280907777 0.39547116564837 0.56317693808385">
       <geom name="BN_LeftLowerLeg_1_link_assembly" type="mesh" mesh="assembly_27" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftLowerLeg_2_link" pos="-0.13300837861601 0.12765021331322 -0.62163842438339" quat="-0.067983045498418 0.98118199603739 -0.1753804854727 -0.043610566290795">
+    <body name="BN_LeftLowerLeg_2_link" pos="-0.13300764841674 0.22558903314103 -0.59286397509985" quat="-0.1449031742127 0.92411620904285 -0.34266713131827 -0.087129440497825">
       <geom name="BN_LeftLowerLeg_2_link_assembly" type="mesh" mesh="assembly_28" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftFoot_pitch_link" pos="-0.16979315136051 0.17077918412088 -0.90160687773014" quat="-0.4182836490041 -0.54406678391676 0.41217062500548 0.59928749319245">
+    <body name="BN_LeftFoot_pitch_link" pos="-0.16979101920746 0.3194286684493 -0.86014038064191" quat="-0.3954640266207 -0.56318114387852 0.38175165828634 0.61700962247298">
       <geom name="BN_LeftFoot_pitch_link_assembly" type="mesh" mesh="assembly_29" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_LeftFoot_roll_link" pos="-0.15253238465515 0.19318615974686 -0.95531254093005" quat="0.011817310639827 0.020341061798303 0.66787849524389 0.74389845272383">
+    <body name="BN_LeftFoot_roll_link" pos="-0.15253042755689 0.35132290548947 -0.90881378920858" quat="0.011649769031899 0.020024618146198 0.59642288712332 0.8023359877664">
       <geom name="BN_LeftFoot_roll_link_assembly" type="mesh" mesh="assembly_30" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_1_link" pos="0.092020037001039 0.041788809444587 -0.085745352678772" quat="0.41598838025336 0.57179911929728 0.41598780792855 0.57179854697248">
+    <body name="BN_RightUpperLeg_1_link" pos="0.09202005929545 0.042734077027419 -0.081871142387777" quat="0.38937192670892 0.59024590256742 0.38937552504359 0.59024230421954">
       <geom name="BN_RightUpperLeg_1_link_assembly" type="mesh" mesh="assembly_31" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_2_link" pos="0.10372008734613 0.085425249479291 -0.080100893181171" quat="3.65746949124e-07 4.4021000246626e-07 0.66019572180341 0.75109360862155">
+    <body name="BN_RightUpperLeg_2_link" pos="0.10372009977454 0.084353442992478 -0.067595510950109" quat="-1.6830338774154e-06 4.0179196120976e-06 0.58119344092332 0.81376543561934">
       <geom name="BN_RightUpperLeg_2_link_assembly" type="mesh" mesh="assembly_32" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightUpperLeg_3_link" pos="0.116184832903 0.066570901710962 -0.28512731510859" quat="-0.058482592526791 0.98496986876259 0.15732637554885 0.04077444736368">
+    <body name="BN_RightUpperLeg_3_link" pos="0.11618340488521 0.10696836039797 -0.27223772522043" quat="-0.1441188702339 0.92864067965255 0.3311702885984 0.084749509064107">
       <geom name="BN_RightUpperLeg_3_link_assembly" type="mesh" mesh="assembly_33" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerLeg_1_link" pos="0.15461155954154 0.10281704513614 -0.52726852391779" quat="0.38855730393774 0.57521739571679 -0.44349990299237 -0.56697090336911">
+    <body name="BN_RightLowerLeg_1_link" pos="0.15461665484862 0.19100437898249 -0.50220206868635" quat="-0.36172403407975 -0.58932142066181 0.41728081055263 0.58968865637958">
       <geom name="BN_RightLowerLeg_1_link_assembly" type="mesh" mesh="assembly_34" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightLowerLeg_2_link" pos="0.13300842842512 0.10429891132837 -0.62486134532103" quat="-0.056732766602661 0.9856449061641 0.15385608601152 0.040172340529058">
+    <body name="BN_RightLowerLeg_2_link" pos="0.13301603968421 0.21201304247816 -0.59751872429095" quat="-0.14345783736556 0.93322783506246 0.31899977231598 0.082126743667238">
       <geom name="BN_RightLowerLeg_2_link_assembly" type="mesh" mesh="assembly_35" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightFoot_pitch_link" pos="0.16979318891544 0.13861946570559 -0.90604552595905" quat="0.38855730393795 0.57521739571659 -0.44349990299216 -0.56697090336934">
+    <body name="BN_RightFoot_pitch_link" pos="0.16980828355555 0.3019909224815 -0.86611857083971" quat="-0.36172335288801 -0.5893276272031 0.41727384205223 0.58968780259522">
       <geom name="BN_RightFoot_pitch_link_assembly" type="mesh" mesh="assembly_36" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <body name="BN_RightFoot_roll_link" pos="0.15413490528746 0.16587767530513 -0.95803661218501" quat="0.012286681687979 0.019770598999907 0.64545853642262 0.7634405272367">
+    <body name="BN_RightFoot_roll_link" pos="0.15415036001035 0.33911521110806 -0.91159287393744" quat="0.012361005441921 0.019422054118188 0.56533549192583 0.82453973277658">
       <geom name="BN_RightFoot_roll_link_assembly" type="mesh" mesh="assembly_37" rgba=".84 .85 .86 .12" contype="0" conaffinity="0" mass="0" />
     </body>
-    <site name="hips_plus_rod_flange_ball" pos="0.10156179324490112 0.006676904034623392 0.027999999999989998" size=".003" rgba="0.1 1 .3 1" />
-    <site name="hips_plus_rod_platform_ball" pos="0.0715199999999998 0.06427370996078965 0.02574199075861813" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="hips_plus_rod_centerline" type="capsule" fromto="0.10156179324490112 0.006676904034623392 0.027999999999989998 0.0715199999999998 0.06427370996078965 0.02574199075861813" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="hips_plus_rod_motor_axis" type="capsule" fromto="0.07200000000003441 -0.010118940098545175 0.0074740084486553116 0.07200000000003441 -0.010118940098545182 0.04747400844865532" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="hips_minus_rod_flange_ball" pos="-0.1015617932879945 0.0066769039586480755 0.027999999999990328" size=".003" rgba="0.1 1 .3 1" />
-    <site name="hips_minus_rod_platform_ball" pos="-0.07152000000000015 0.06427371111932262 0.02574202282174705" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="hips_minus_rod_centerline" type="capsule" fromto="-0.1015617932879945 0.0066769039586480755 0.027999999999990328 -0.07152000000000015 0.06427371111932262 0.02574202282174705" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="hips_minus_rod_motor_axis" type="capsule" fromto="-0.07199999999996559 -0.010118940098546938 0.007513953766766893 -0.07199999999996559 -0.010118940098546945 0.0475139537667669" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="waist_plus_rod_flange_ball" pos="0.05099999999985855 0.04801396726233037 0.07395202306933431" size=".003" rgba="0.1 1 .3 1" />
-    <site name="waist_plus_rod_platform_ball" pos="0.05099999999986784 0.039959102277096634 0.11517239606703208" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="waist_plus_rod_centerline" type="capsule" fromto="0.05099999999985855 0.04801396726233037 0.07395202306933431 0.05099999999986784 0.039959102277096634 0.11517239606703208" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="waist_plus_rod_motor_axis" type="capsule" fromto="0.07594636619802542 -3.4041140533944084e-14 0.059999999999988174 0.03594636619802541 -3.4099982354249215e-14 0.059999999999988174" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="waist_minus_rod_flange_ball" pos="-0.05100000000011609 0.04801396726233365 0.07395202306933123" size=".003" rgba="0.1 1 .3 1" />
-    <site name="waist_minus_rod_platform_ball" pos="-0.051000000000125806 0.039959102277098424 0.11517239606702907" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="waist_minus_rod_centerline" type="capsule" fromto="-0.05100000000011609 0.04801396726233365 0.07395202306933123 -0.051000000000125806 0.039959102277098424 0.11517239606702907" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="waist_minus_rod_motor_axis" type="capsule" fromto="-0.035946366197413024 -3.4205739835270656e-14 0.05999999999998817 -0.07594636619741303 -3.4264581655575786e-14 0.05999999999998817" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="left_shoulder_flange_linkage_rod_flange_ball" pos="-0.09519999995241457 -0.06896113965159413 0.21971347698729773" size=".003" rgba="0.1 1 .3 1" />
-    <site name="left_shoulder_flange_linkage_rod_platform_ball" pos="-0.09750000000011838 -0.08869041216358192 0.3238843397000795" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="left_shoulder_flange_linkage_rod_centerline" type="capsule" fromto="-0.09519999995241457 -0.06896113965159413 0.21971347698729773 -0.09750000000011838 -0.08869041216358192 0.3238843397000795" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="left_shoulder_flange_linkage_rod_motor_axis" type="capsule" fromto="-0.07030169685911519 -0.053685439622254215 0.23262289171506995 -0.1103016968591152 -0.053685439622254146 0.23262289171506995" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="right_shoulder_flange_linkage_rod_flange_ball" pos="0.09519999995218528 -0.06896113965159446 0.2197134769872978" size=".003" rgba="0.1 1 .3 1" />
-    <site name="right_shoulder_flange_linkage_rod_platform_ball" pos="0.09749999999988888 -0.08869041216358224 0.3238843397000796" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="right_shoulder_flange_linkage_rod_centerline" type="capsule" fromto="0.09519999995218528 -0.06896113965159446 0.2197134769872978 0.09749999999988888 -0.08869041216358224 0.3238843397000796" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="right_shoulder_flange_linkage_rod_motor_axis" type="capsule" fromto="0.11029825043323505 -0.05368543962225451 0.23262289171507006 0.07029825043323504 -0.053685439622254444 0.23262289171507006" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="left_wrist_flange_proximal_rod_flange_ball" pos="-0.14421937747244507 -0.02494906628430681 -0.028328133389177536" size=".003" rgba="0.1 1 .3 1" />
-    <site name="left_wrist_flange_proximal_rod_platform_ball" pos="-0.14321968718548192 -0.011920014653781891 -0.1289834583001807" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="left_wrist_flange_proximal_rod_centerline" type="capsule" fromto="-0.14421937747244507 -0.02494906628430681 -0.028328133389177536 -0.14321968718548192 -0.011920014653781891 -0.1289834583001807" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="left_wrist_flange_proximal_rod_motor_axis" type="capsule" fromto="-0.15409999995240373 -0.00801511494335709 -0.026760441577866292 -0.15409999995240406 -0.04768416217661109 -0.031895292267600434" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="left_wrist_flange_distal_rod_flange_ball" pos="-0.14420068831753738 -0.06006062956570781 -0.06867161176351237" size=".003" rgba="0.1 1 .3 1" />
-    <site name="left_wrist_flange_distal_rod_platform_ball" pos="-0.1432196871854829 -0.05158906188682363 -0.13411830898988705" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="left_wrist_flange_distal_rod_centerline" type="capsule" fromto="-0.14420068831753738 -0.06006062956570781 -0.06867161176351237 -0.1432196871854829 -0.05158906188682363 -0.13411830898988705" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="left_wrist_flange_distal_rod_motor_axis" type="capsule" fromto="-0.15409999995240464 -0.07697316729983228 -0.0709785265848321 -0.1540999999524043 -0.03730412006657827 -0.06584367589509803" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="right_wrist_flange_proximal_rod_flange_ball" pos="0.1597806225275435 -0.02494906628430681 -0.028328133389177196" size=".003" rgba="0.1 1 .3 1" />
-    <site name="right_wrist_flange_proximal_rod_platform_ball" pos="0.16078031281450667 -0.011920014653781891 -0.12898345830018035" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="right_wrist_flange_proximal_rod_centerline" type="capsule" fromto="0.1597806225275435 -0.02494906628430681 -0.028328133389177196 0.16078031281450667 -0.011920014653781891 -0.12898345830018035" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="right_wrist_flange_proximal_rod_motor_axis" type="capsule" fromto="0.14990000004758486 -0.007973960432310925 -0.026755114445399457 0.14990000004758453 -0.047643007665564924 -0.0318899651351336" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
-    <site name="right_wrist_flange_distal_rod_flange_ball" pos="0.15979931168245118 -0.06006062956570781 -0.06867161176351204" size=".003" rgba="0.1 1 .3 1" />
-    <site name="right_wrist_flange_distal_rod_platform_ball" pos="0.1607803128145057 -0.05158906188682363 -0.13411830898988672" size=".003" rgba="0.1 1 .3 1" />
-    <geom name="right_wrist_flange_distal_rod_centerline" type="capsule" fromto="0.15979931168245118 -0.06006062956570781 -0.06867161176351204 0.1607803128145057 -0.05158906188682363 -0.13411830898988672" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
-    <geom name="right_wrist_flange_distal_rod_motor_axis" type="capsule" fromto="0.14990000004758391 -0.07695900073125814 -0.07097669283233485 0.14990000004758425 -0.03728995349800412 -0.06584184214260078" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="hips_plus_rod_flange_ball" pos="0.10471552435463893 -0.000861809538743194 0.02799999999998998" size=".003" rgba="0.1 1 .3 1" />
+    <site name="hips_plus_rod_platform_ball" pos="0.07152000000000008 0.05493049522345105 0.031205603241660496" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="hips_plus_rod_centerline" type="capsule" fromto="0.10471552435463893 -0.000861809538743194 0.02799999999998998 0.07152000000000008 0.05493049522345105 0.031205603241660496" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="hips_plus_rod_motor_axis" type="capsule" fromto="0.07200000000003447 -0.01011894009854538 0.007474008448655315 0.07200000000003447 -0.010118940098545394 0.04747400844865532" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="hips_minus_rod_flange_ball" pos="-0.10471552433960896 -0.0008618094858806949 0.027999999999990446" size=".003" rgba="0.1 1 .3 1" />
+    <site name="hips_minus_rod_platform_ball" pos="-0.07151999999999989 0.054930493470852194 0.03120563482051299" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="hips_minus_rod_centerline" type="capsule" fromto="-0.10471552433960896 -0.0008618094858806949 0.027999999999990446 -0.07151999999999989 0.054930493470852194 0.03120563482051299" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="hips_minus_rod_motor_axis" type="capsule" fromto="-0.07199999999996556 -0.010118940098546983 0.007513953766766893 -0.07199999999996556 -0.010118940098546997 0.0475139537667669" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="waist_plus_rod_flange_ball" pos="0.050999999999865236 0.04496845068200332 0.08185951608009435" size=".003" rgba="0.1 1 .3 1" />
+    <site name="waist_plus_rod_platform_ball" pos="0.05099999999990065 0.038039683184204705 0.12328405205771827" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="waist_plus_rod_centerline" type="capsule" fromto="0.050999999999865236 0.04496845068200332 0.08185951608009435 0.05099999999990065 0.038039683184204705 0.12328405205771827" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="waist_plus_rod_motor_axis" type="capsule" fromto="0.07594636619588231 -3.552109625295357e-14 0.05999999999999232 0.035946366195882304 -3.553386381773676e-14 0.05999999999999232" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="waist_minus_rod_flange_ball" pos="-0.051000000000116716 0.04496845068143749 0.08185951608125873" size=".003" rgba="0.1 1 .3 1" />
+    <site name="waist_minus_rod_platform_ball" pos="-0.05100000000010105 0.038039683184376887 0.12328405205900617" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="waist_minus_rod_centerline" type="capsule" fromto="-0.051000000000116716 0.04496845068143749 0.08185951608125873 -0.05100000000010105 0.038039683184376887 0.12328405205900617" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="waist_minus_rod_motor_axis" type="capsule" fromto="-0.03594636620322998 -3.5556811195695415e-14 0.059999999999992316 -0.07594636620322999 -3.5569578760478605e-14 0.059999999999992316" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="left_shoulder_flange_linkage_rod_flange_ball" pos="-0.0951999999509199 -0.0604915503529254 0.2290269609154679" size=".003" rgba="0.1 1 .3 1" />
+    <site name="left_shoulder_flange_linkage_rod_platform_ball" pos="-0.09749999999758723 -0.1308032449346835 0.30105761197540537" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="left_shoulder_flange_linkage_rod_centerline" type="capsule" fromto="-0.0951999999509199 -0.0604915503529254 0.2290269609154679 -0.09749999999758723 -0.1308032449346835 0.30105761197540537" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="left_shoulder_flange_linkage_rod_motor_axis" type="capsule" fromto="-0.07030172226724885 -0.0777685861812956 0.2189520399238481 -0.11030172226724885 -0.07776858618144543 0.21895203992427742" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="right_shoulder_flange_linkage_rod_flange_ball" pos="0.09519999995368006 -0.06049155035221242 0.22902696091342442" size=".003" rgba="0.1 1 .3 1" />
+    <site name="right_shoulder_flange_linkage_rod_platform_ball" pos="0.09750000000242012 -0.13080324493395318 0.3010576119733126" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="right_shoulder_flange_linkage_rod_centerline" type="capsule" fromto="0.09519999995368006 -0.06049155035221242 0.22902696091342442 0.09750000000242012 -0.13080324493395318 0.3010576119733126" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="right_shoulder_flange_linkage_rod_motor_axis" type="capsule" fromto="0.1102982255565962 -0.0777685861806192 0.21895203992190976 0.07029822555659619 -0.07776858618076903 0.21895203992233908" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="left_wrist_flange_proximal_rod_flange_ball" pos="-0.21353306267070607 0.0024980162982014917 -0.026061942931802435" size=".003" rgba="0.1 1 .3 1" />
+    <site name="left_wrist_flange_proximal_rod_platform_ball" pos="-0.2301729950591308 0.03550886348982999 -0.1205904921526594" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="left_wrist_flange_proximal_rod_centerline" type="capsule" fromto="-0.21353306267070607 0.0024980162982014917 -0.026061942931802435 -0.2301729950591308 0.03550886348982999 -0.1205904921526594" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="left_wrist_flange_proximal_rod_motor_axis" type="capsule" fromto="-0.22337108392573668 0.018178628419916486 -0.019414479610507164 -0.2233710839262848 -0.01958493239591405 -0.03260210542067742" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="left_wrist_flange_distal_rod_flange_ball" pos="-0.21967957892810902 -0.023737498184262677 -0.07226082376702005" size=".003" rgba="0.1 1 .3 1" />
+    <site name="left_wrist_flange_distal_rod_platform_ball" pos="-0.23017299505967972 -0.002254697325798588 -0.13377811796275865" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="left_wrist_flange_distal_rod_centerline" type="capsule" fromto="-0.21967957892810902 -0.023737498184262677 -0.07226082376702005 -0.23017299505967972 -0.002254697325798588 -0.13377811796275865" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="left_wrist_flange_distal_rod_motor_axis" type="capsule" fromto="-0.22944877014548476 -0.040375530902513605 -0.0763720638668618 -0.22944877014493664 -0.002611970086683048 -0.0631844380566916" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="right_wrist_flange_proximal_rod_flange_ball" pos="0.22885789744511464 0.0016071322233729005 -0.023510842724464142" size=".003" rgba="0.1 1 .3 1" />
+    <site name="right_wrist_flange_proximal_rod_platform_ball" pos="0.24746683532169145 0.03450351451789993 -0.11771161481810677" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="right_wrist_flange_proximal_rod_centerline" type="capsule" fromto="0.22885789744511464 0.0016071322233729005 -0.023510842724464142 0.24746683532169145 0.03450351451789993 -0.11771161481810677" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="right_wrist_flange_proximal_rod_motor_axis" type="capsule" fromto="0.21923489145493444 0.0184555854865401 -0.020090276242702168 0.2192348914542959 -0.019307975329221457 -0.033277902053069935" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
+    <site name="right_wrist_flange_distal_rod_flange_ball" pos="0.23504122414983677 -0.02463052217393147 -0.06970359578464692" size=".003" rgba="0.1 1 .3 1" />
+    <site name="right_wrist_flange_distal_rod_platform_ball" pos="0.24746683532105201 -0.003260046297659301 -0.13089924062840388" size=".003" rgba="0.1 1 .3 1" />
+    <geom name="right_wrist_flange_distal_rod_centerline" type="capsule" fromto="0.23504122414983677 -0.02463052217393147 -0.06970359578464692 0.24746683532105201 -0.003260046297659301 -0.13089924062840388" size=".0014" material="audit_orange" contype="0" conaffinity="0" mass="0" />
+    <geom name="right_wrist_flange_distal_rod_motor_axis" type="capsule" fromto="0.2253125776717032 -0.04012503353319898 -0.07705710063956908 0.22531257767234175 -0.0023614727174373976 -0.06386947482920138" size=".0009" material="audit_blue" contype="0" conaffinity="0" mass="0" />
   </worldbody>
 </mujoco>

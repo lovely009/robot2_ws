@@ -266,7 +266,7 @@ function selectedForModel(groups, current='') {
   return groups[0]?.name || '';
 }
 
-// 从模型驱动 YAML 经 Python robot_transmission.Model 取到的传动组。响应代次与当前
+// 从驱动或只读电机拓扑读取分组，保留硬件可用状态。响应代次与当前
 // MODEL 同时校验，晚到的旧模型响应不能覆盖页面当前显示的模型。
 export async function loadModelTransmissions(name=MODEL) {
   const generation = ++modelLoadGeneration;
@@ -292,9 +292,11 @@ export async function loadModelTransmissions(name=MODEL) {
       ? {...data.direct_joints} : {};
     store.modelTransmissions = {model: data.model, driver_file: driverFile, groups,
       error: '', driverFile, directJoints: direct, direct_mapping: {...direct},
+      mapping_kind: data.mapping_kind, hardware_ready: data.hardware_ready,
+      hardware_block_reason: data.hardware_block_reason,
       policy_defaults: data.policy_defaults || {}};
     store.selectedGroup = selectedForModel(groups);
-    jointMapSource.kind = 'api';
+    jointMapSource.kind = data.hardware_ready === false ? 'topology' : 'api';
     markDirty(DIRTY.MODEL, DIRTY.TOPOLOGY);
   } catch (e) {
     if (generation !== modelLoadGeneration || name !== MODEL) return store.modelTransmissions;

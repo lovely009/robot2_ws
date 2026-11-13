@@ -11,6 +11,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("保留拓扑只读状态及差动组，不生成旧版一对一映射", async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({
+    model:'half_body_robot', mapping_kind:'topology', hardware_ready:false,
+    hardware_block_reason:'传动参数待标定', driver_file:'', direct_joints:{},
+    groups:[{name:'waist',motors:[{id:2},{id:3}],joints:['pitch','roll'],direct_mapping:false}],
+  })}));
+  const {store, loadModelJoints, jointMapSource, JOINT_OF_MOTOR} = await import('../../web/js/core/store.js');
+  await loadModelJoints();
+  expect(jointMapSource.kind).toBe('topology');
+  expect(store.modelTransmissions.hardware_ready).toBe(false);
+  expect(store.modelTransmissions.groups[0].motors.map((m:any)=>m.id)).toEqual([2,3]);
+  expect(JOINT_OF_MOTOR).toEqual({});
+});
+
 it("电机出现后汇总持续使用 MCU 状态更新，不停留在空列表", async () => {
   vi.spyOn(Date, "now").mockReturnValue(1000);
   const { countMotors, store } = await import("../../web/js/core/store.js");

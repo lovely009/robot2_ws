@@ -56,6 +56,13 @@ it('distinguishes configured, active, unknown and incomplete model feedback', as
   s.conn.connected=false;
   expect(api.describeGravityControl(s,model).enabled).toBeNull();
 });
+it('topology-only mappings cannot start gravity compensation', async () => {
+  const {s,model,api} = await fixture();
+  Object.assign(s.modelTransmissions,{hardware_ready:false,hardware_block_reason:'传动参数待标定'});
+  expect(api.describeGravityControl(s,model).blocked).toContain('待标定');
+  await expect(api.setGravityEnabled(true)).rejects.toThrow('待标定');
+  expect(mocks.start).not.toHaveBeenCalled();
+});
 
 it('only explicit changes write parameters and acceptance alone is not success', async () => {
   const {s,model,api,confirm} = await fixture();

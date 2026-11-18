@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 import json
 import math
+from pathlib import Path
 import signal
 import threading
 import time
@@ -16,6 +17,7 @@ from can_bridge_msgs.msg import (AgentWireContract, MotorCommandArray, MotorComm
 from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from controller_manager_msgs.srv import ListControllers, SwitchController
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType, SetParametersResult
 from rcl_interfaces.srv import GetParameters, SetParametersAtomically
 import rclpy
@@ -25,6 +27,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from robot_transmission import Axis, Model
+from robot_transmission.coupled_limits import CoupledLimits
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty, Float64MultiArray, Int32, String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -63,7 +66,8 @@ class WorkbenchModel:
                 or any(not 1 <= value <= 64 for value in self.ids.values())):
             raise ValueError('模型 motor_id 必须唯一、位于 1..64 且最多 48 台')
         with open(config_file, encoding='utf-8') as handle:
-            motors = yaml.safe_load(handle)['motor_hardware']['motors']
+            hardware = yaml.safe_load(handle)['motor_hardware']
+        motors = hardware['motors']
         self.policy_defaults = {}
         for name, motor_id in self.ids.items():
             command = motors[name].get('command') or {}
@@ -96,6 +100,26 @@ class WorkbenchModel:
             except (AttributeError, TypeError, ValueError) as error:
                 raise ValueError(f'{name} 缺少有效的 URDF P/V/E 限位') from error
             self.limits[name] = lower, upper, velocity, effort
+        workspace_config = {}
+        if hardware.get('coupled_limits_file'):
+            path = Path(config_file).resolve().parent / hardware['coupled_limits_file']
+            workspace_config = yaml.safe_load(path.read_text(encoding='utf-8'))
+            for name, bounds in workspace_config['joint_limits'].items():
+                if name not in self.limits:
+                    continue
+                lower, upper, velocity, effort = self.limits[name]
+                if len(bounds) != 2 or not all(math.isfinite(v) for v in bounds):
+                    raise ValueError(f'{name} 的耦合模型位置限位无效')
+                lower, upper = max(lower, bounds[0]), min(upper, bounds[1])
+                if lower >= upper:
+                    raise ValueError(f'{name} 的耦合模型与 URDF 位置范围无交集')
+                self.limits[name] = lower, upper, velocity, effort
+        # 部分注册组使用输入轴回退，只为会话中完整的输出关节对加载耦合区域。
+        groups = {name: group for name, group in workspace_config.get('coupled_limits', {}).items()
+                  if set(group['joints']).issubset(self.joint_names)}
+        self.workspace = CoupledLimits(groups, self.joint_names)
+        coupled_names = {joint for group in groups.values() for joint in group['joints']}
+        self.dynamic_joint_names = [name for name in self.joint_names if name in coupled_names]
         zero = self.model.actuator_to_joint({a: Axis() for a in self.ids})
         self.position_tolerance = dict.fromkeys(self.joint_names, 1e-7)
         for actuator in self.ids:
@@ -104,6 +128,15 @@ class WorkbenchModel:
             for name in self.joint_names:
                 # 两次量化测量的差最多一格，再由同一传动 Model 换算到关节。
                 self.position_tolerance[name] += abs(delta[name].position - zero[name].position)
+
+    def active_limits(self, positions, *, groups=None):
+        selected = self.workspace.groups if groups is None else groups
+        if not all(name in positions and math.isfinite(positions[name])
+                   for group in selected for name in self.workspace.groups[group][0]):
+            raise ValueError('动态限位缺少有效关节位置')
+        self.workspace.validate(positions, groups=selected)
+        return self.workspace.active_limits(
+            {name: bounds[:2] for name, bounds in self.limits.items()}, positions, groups=selected)
 
     def feedback(self, message, now_ns):
         fresh(stamp_ns(message.header.stamp), now_ns)
@@ -117,6 +150,18 @@ class WorkbenchModel:
         if not all(math.isfinite(v) for axis in result.values()
                    for v in (axis.position, axis.velocity, axis.effort)):
             raise ValueError('反馈包含非有限值')
+        # MCU 量化可能把边界回读推到相邻无效网格。仅在一格量化误差内
+        # 归一实测保持位置；显式目标仍使用原值执行严格的耦合区域校验。
+        for joints, lower, step, _ in self.workspace.groups.values():
+            for name, origin in zip(joints, lower):
+                axis = result[name]
+                tolerance = self.position_tolerance[name]
+                minimum, maximum = self.limits[name][:2]
+                if not minimum - tolerance <= axis.position <= maximum + tolerance:
+                    continue
+                grid_position = float(origin + round((axis.position - origin) / step) * step)
+                if abs(axis.position - grid_position) <= tolerance:
+                    result[name] = Axis(grid_position, axis.velocity, axis.effort)
         return result
 
     def _complete(self, targets, measured):
@@ -137,16 +182,26 @@ class WorkbenchModel:
                     raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
                 values.append(bounded)
             result[name] = Axis(*values)
+        # 其他组可原位保持；只校验本次会运动或施力的耦合组。
+        moving_groups = [name for name, (joints, _, _, _) in self.workspace.groups.items()
+                         if any(result[joint].position != measured[joint].position
+                                or result[joint].velocity != 0. or result[joint].effort != 0.
+                                for joint in joints)]
+        self.workspace.validate({name: axis.position for name, axis in result.items()}, groups=moving_groups)
         # 同一 Model 验证完整传动组，禁止在客户端再实现混控。
         self.model.joint_to_actuator(result)
         return result
 
-    def _motors(self, targets):
+    def _motors(self, targets, measured=None):
         ids = [target.motor_id for target in targets]
         if len(ids) != len(set(ids)) or not set(ids).issubset(self.names_by_id):
             raise ValueError('motor_id 重复或不属于模型')
         values = {self.names_by_id[p.motor_id]: Axis(p.position, p.velocity, p.effort)
                   for p in targets}
+        if measured is not None:
+            holds = self.model.joint_to_actuator(
+                {name: Axis(axis.position) for name, axis in measured.items()})
+            values = {name: values.get(name, axis) for name, axis in holds.items()}
         for group in self.model.groups:
             present = set(group.actuators).intersection(values)
             if present and present != set(group.actuators):
@@ -160,7 +215,7 @@ class WorkbenchModel:
         fresh(message.sync_time_ns, now_ns)
         if not 0 < message.count == len(message.targets) <= 64:
             raise ValueError('手动快照数量无效')
-        values = self._complete(self._motors(message.targets), measured)
+        values = self._complete(self._motors(message.targets, measured), measured)
         return [getattr(values[name], channel) for name in self.joint_names for channel in CHANNELS]
 
     def joint_target(self, message, measured, now_ns, previous=None):
@@ -252,6 +307,42 @@ class WorkbenchModel:
             if any(abs((3*a*s*s + 2*b*s + c)/dt) > velocity+1e-7
                    for s in velocity_times if 0 <= s <= 1):
                 raise ValueError(f'{name} JTC 插值越过速度限位')
+        if dt > 0:
+            self._workspace_interval(before, after, dt, linear=linear)
+
+    def _workspace_interval(self, before, after, dt, *, linear):
+        for group, (joints, lower, step, mask) in self.workspace.groups.items():
+            start = tuple(before[name].position for name in joints)
+            end = tuple(after[name].position for name in joints)
+            control_start = start if linear else tuple(
+                before[name].position + dt * before[name].velocity / 3 for name in joints)
+            control_end = end if linear else tuple(
+                after[name].position - dt * after[name].velocity / 3 for name in joints)
+            if start == end == control_start == control_end:
+                continue
+            # Hermite 转 Bezier 后，控制点的包围框包含整段曲线。
+            # 仅当框内全部网格有效才放行，二分收紧框，无法证明合法则拒绝。
+            pending = [((start, control_start, control_end, end), 0)]
+            while pending:
+                controls, depth = pending.pop()
+                indices = [
+                    (math.floor((min(point[axis] for point in controls) - origin) / step + 1e-8),
+                     math.ceil((max(point[axis] for point in controls) - origin) / step - 1e-8))
+                    for axis, origin in enumerate(lower)]
+                if (all(0 <= low <= high < mask.shape[axis]
+                        for axis, (low, high) in enumerate(indices))
+                        and mask[indices[0][0]:indices[0][1] + 1,
+                                 indices[1][0]:indices[1][1] + 1].all()):
+                    continue
+                if depth == 12:
+                    raise ValueError(f'{group} JTC 插值两轴组合超出 CAD 可动区域')
+                levels = [controls]
+                for _ in range(3):
+                    levels.append(tuple(
+                        tuple((a + b) / 2 for a, b in zip(left, right))
+                        for left, right in zip(levels[-1], levels[-1][1:])))
+                pending.append((tuple(level[-1] for level in reversed(levels)), depth + 1))
+                pending.append((tuple(level[0] for level in levels), depth + 1))
 
     def motor_trajectory(self, plan, measured, now_ns, *, linear=False):
         fresh(plan.sync_time_ns, now_ns)
@@ -434,6 +525,8 @@ class WorkbenchControl(Node):
             (Empty, '/control/stop', lambda _: self._stop('显式停止'), 10),
             (Int32, '/client_count', self._on_client_count, latched),
             (JointState, '/host_control/joint_states', self._on_feedback, qos_profile_sensor_data),
+            (DiagnosticArray, '/host_control/follow_controller/diagnostics',
+             self._on_follow_diagnostics, 10),
         ):
             self.create_subscription(kind, topic, self._locked(callback), qos)
         self.create_timer(.05, self._locked(self._tick))
@@ -441,8 +534,12 @@ class WorkbenchControl(Node):
         self._publish_status()
 
     def _joint_limits(self, value):
-        return parse_joint_limits(value, self.model_name,
+        limits = parse_joint_limits(value, self.model_name,
             {name: bounds[:2] for name, bounds in self._urdf_limits.items()})
+        if any(limits[name] != self._urdf_limits[name][:2]
+               for name in self.mapping.dynamic_joint_names):
+            raise ValueError('耦合关节的动态限位由模型和姿态计算，不能覆盖为静态限位')
+        return limits
 
     def _sync_hardware_limits(self, limits):
         finite = {name: bounds for name, bounds in limits.items()
@@ -614,12 +711,28 @@ class WorkbenchControl(Node):
         if not message.joint_names and not message.points:
             self._cancel()
             return
-        self._id = self._id % 0xFFFFFFFF + 1
-        state = self._state(self._id, sorted(self.mapping.ids.values()))
+        identity = message.header.frame_id
+        trajectory_id = self._id % 0xFFFFFFFF + 1
+        # 调试页保留自己的播放编号，以现有 trajectory_state 跟踪 JTC 终态。
+        if identity.startswith('workbench-trajectory/'):
+            value = identity.removeprefix('workbench-trajectory/')
+            if (not 1 <= len(value) <= 10 or not value.isascii() or not value.isdigit()
+                    or not 0 < int(value) <= 0xFFFFFFFF):
+                self._reject_input('关节轨迹播放编号必须为非零 uint32')
+                return
+            trajectory_id = int(value)
+            if any(run.state.trajectory_id == trajectory_id for run in self._runs):
+                self._reject_input('关节轨迹播放编号正在使用')
+                return
+        self._id = trajectory_id
+        state = self._state(trajectory_id, sorted(self.mapping.ids.values()))
         if not stamp_ns(message.header.stamp) or stamp_ns(message.header.stamp) < self._input_floor_ns:
             self._reject_input('轨迹早于最近一次停止', state)
             return
-        self._submit('trajectory', lambda measured, now: self.mapping.joint_trajectory(message, measured, now), state)
+        received_at_ns = self.get_clock().now().nanoseconds
+        # 输入新鲜度以接收时刻验收；控制器切换后仍由 _measured 校验最新反馈。
+        self._submit('trajectory', lambda measured, now: self.mapping.joint_trajectory(
+            message, measured, received_at_ns), state)
 
     def _submit(self, mode, build, state=None, *, raw_linear=False):
         try:
@@ -958,6 +1071,19 @@ class WorkbenchControl(Node):
     def _fail(self, reason):
         self._stop(reason, reason)
 
+    def _on_follow_diagnostics(self, message):
+        stamp = stamp_ns(message.header.stamp)
+        reason = next((status.message for status in message.status
+                       if status.level == DiagnosticStatus.ERROR and status.message), '')
+        if self._mode != 'follow' and self._pending_follow is None:
+            return
+        if self._stopping or not reason:
+            return
+        if stamp <= 0 or stamp < self._input_floor_ns or stamp > (
+                self.get_clock().now().nanoseconds + 50_000_000):
+            return
+        self._fail('跟随控制器故障：' + reason)
+
     def _tick(self):
         now = time.monotonic()
         if self._stopping and self._runs and now >= self._stop_deadline and self._mode != 'error':
@@ -976,6 +1102,8 @@ class WorkbenchControl(Node):
             pending = self._assembly.pending
             self._assembly.abort()
             self._reject_input('轨迹分段收集超时', self._state(pending.trajectory_id, pending.target_ids))
+        if self.mapping.dynamic_joint_names:
+            self._publish_status()
 
     def _poll(self):
         epoch = self._epoch
@@ -1030,17 +1158,33 @@ class WorkbenchControl(Node):
         self._trajectory_pub.publish(state)
 
     def _publish_status(self):
+        feedback_error = ''
         try:
-            self._measured()
+            measured = self._measured()
             feedback_fresh = True
-        except ValueError:
+        except ValueError as error:
             feedback_fresh = False
+            feedback_error = str(error)
+        limits = {name: bounds[:2] for name, bounds in self.mapping.limits.items()}
+        limit_errors = {}
+        positions = {name: axis.position for name, axis in
+                     (self._follow_targets or measured).items()} if feedback_fresh else {}
+        for group, (joints, _, _, _) in self.mapping.workspace.groups.items():
+            try:
+                if not feedback_fresh:
+                    raise ValueError(feedback_error)
+                active = self.mapping.active_limits(positions, groups=[group])
+                limits.update({name: active[name] for name in joints})
+            except ValueError as error:
+                limits.update(dict.fromkeys(joints, (math.nan, math.nan)))
+                limit_errors.update(dict.fromkeys(joints, str(error)))
         status = dict(model=self.model_name, joint_names=self.mapping.joint_names,
             mode=self._mode, reason=self._reason, reject=self._reject,
             output_topic='/motor/host_command_array', trajectory_output_topic=ACTION,
             gravity_enabled=self._gravity_enabled, effort_gain=self._effort_gain,
             active_controllers=self._active, feedback_fresh=feedback_fresh,
             controllers_ready=self._controllers_ready,
+            joint_trajectory_ids=True,
             pending_goal_ids=[run.state.trajectory_id for run in self._runs if run.submitted],
             stop_policy_request_id=self._stop_policy_id,
             safety_note=('已请求主机停止；MCU 撤权由桥接层确认，恢复运动前需显式重新使能'
@@ -1048,11 +1192,21 @@ class WorkbenchControl(Node):
         self._status_pub.publish(String(data=json.dumps(status, ensure_ascii=False)))
         self._transmission_pub.publish(String(data=json.dumps(dict(status,
             driver_file=self.config_file, trajectory_enabled=True,
+            control_groups=[{
+                'name': group.name,
+                'joints': list(group.joints),
+                'motors': [{'id': self.mapping.model.actuator_ids[name]}
+                           for name in group.actuators],
+            } for group in self.mapping.model.groups],
             policy_defaults=self.mapping.policy_defaults,
             control_service=self.get_fully_qualified_name() + '/set_parameters_atomically',
+            dynamic_joint_names=self.mapping.dynamic_joint_names,
+            joint_limit_error='；'.join(dict.fromkeys(limit_errors.values())),
+            joint_limit_errors=limit_errors,
+            joint_velocity_limits={name: bounds[2] for name, bounds in self.mapping.limits.items()},
             joint_limits={name: {'lower': lower if math.isfinite(lower) else None,
                                  'upper': upper if math.isfinite(upper) else None}
-                          for name, (lower, upper, _, _) in self.mapping.limits.items()},
+                          for name, (lower, upper) in limits.items()},
             trajectory_topic='/control/trajectory', control_state_source='ros2_control',
             last_error=self._reject), ensure_ascii=False)))
 

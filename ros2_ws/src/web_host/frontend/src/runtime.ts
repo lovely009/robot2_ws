@@ -41,6 +41,7 @@ let modules: {
   format: LegacyModule;
   actions: LegacyModule;
   gravity: LegacyModule;
+  jointControl: LegacyModule;
 };
 let starting: Promise<void> | undefined;
 let resolveReady: () => void;
@@ -118,7 +119,9 @@ function updateSnapshot() {
       data.jointMapSource.kind === "unavailable"
         ? `模型无设备映射：${data.jointMapSource.error}`
         : data.jointMapSource.kind === "topology"
-          ? `${data.store.modelTransmissions.groups.reduce((count: number, group: any) => count + group.motors.length, 0)} 台电机映射已加载；传动参数待标定，真机控制未开放`
+          ? modules.jointControl.controlSessionError(s, data.MODEL)
+            ? `${data.store.modelTransmissions.groups.reduce((count: number, group: any) => count + group.motors.length, 0)} 台电机映射已加载；传动参数待标定，真机控制未开放`
+            : `主机控制会话已接入 ${s.transmissionStatus.data.joint_names.length} 个关节；各关节按 MCU 使能与反馈状态开放`
           : "",
   };
 }
@@ -183,7 +186,7 @@ async function start() {
   if (starting) return starting;
   starting = (async () => {
     try {
-      const [response, configuration, data, ros, agent, device, format, actions, gravity] =
+      const [response, configuration, data, ros, agent, device, format, actions, gravity, jointControl] =
         await Promise.all([
           fetch("/panel_templates.html", { cache: "no-store" }),
           fetch("/api/runtime", { cache: "no-store" }),
@@ -192,14 +195,15 @@ async function start() {
           load("core/agent"),
           load("core/device"),
           load("core/format"),
-          load("panels/actionLibrary"),
+          load("core/playback"),
           load("core/gravity_control"),
+          load("core/joint_control"),
         ]);
       if (!response.ok)
         throw new Error(`面板模板请求失败：HTTP ${response.status}`);
       const html = await response.text();
       if (disposed) return;
-      modules = { data, ros, agent, device, format, actions, gravity };
+      modules = { data, ros, agent, device, format, actions, gravity, jointControl };
       if (!configuration.ok) throw new Error('无法读取工作台运行配置，控制保持关闭');
       const runtimeConfig = await configuration.json();
       if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;

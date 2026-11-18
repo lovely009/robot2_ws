@@ -1,5 +1,19 @@
 # full_body_robot
 
+2026-11-18 主模型采用 `docs/机器人37自由度_关节命名与正方向.xlsx` 的 37 个英文关节名。基座局部坐标约定为 +X 向前、+Y 向左、+Z 向上。
+MuJoCo 主模型和 ±180° 预览带有 `Standing` 关键帧。使用 `tools/mujoco_zh/run.sh` 打开时默认加载站姿，双脚掌贴合 Z = 0 的显示地面，骨盆至双肩中点的躯干轴沿世界 +Z。关节零位仍可通过 `Neutral` 关键帧查看。基座固定，场景保持零重力，地面用于显示。
+同一站姿生成 [站姿 URDF](urdf/full_body_robot.standing.urdf) 和[初始关节角](config/standing.json)。工作台和 `ros2 launch robot_sim display.launch.py model:=full_body_robot` 用这两份文件预览，MuJoCo 桥直接从关键帧初始化并发布实际关节状态。RViz 预览默认精确发布站姿角，可加 `joint_state_gui:=true` 使用滑杆，角度会按滑杆分辨率取整。站姿 URDF 保留活动关节的原始零位，单独加载它时需同时设置初始关节角。
+[`config/joint_convention.yaml`](config/joint_convention.yaml) 记录 CAD 到模型的基变换和关节角符号，连杆名继续与 CAD 网格对应。
+肢体长轴自转沿零位下由远端指向近端的轴取正。腕部按手板运动命名，旧 CAD `Hand_roll` 轴对应 `wrist_pitch`，`Hand_pitch` 轴对应 `wrist_roll`。
+URDF、MuJoCo、位置限位、耦合采样域及 HIL 仿真配置同步使用新关节坐标。位置接口收到旧名称时按旧角度符号转换，BVH 动作可用新模型重新生成。
+CAD 扫描使用原坐标的 `full_body_robot.physics.xml` 及 `motor_topology.yaml`。扫描把结果写到 `simulation_limits.pending.yaml`，主模型重建时将它转换为模型坐标并发布。`model_motor_topology.yaml` 将原电机编号关联到模型关节，实机电机正方向仍待标定。
+
+2026-11-17 双臂惯性参数取自 `../全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf`。
+18 个肩、上臂、前臂和手部连杆使用该导出的质量、质心和惯性张量，并经过当前轴心校准与左臂重装变换。
+左臂声明质量为 2.180312647 kg，右臂为 2.178929950 kg；其余主体连杆继续使用 `robot_body` 的惯性参数。
+生成器在读取装配源后应用双臂惯性覆盖，来源、SHA256 和连杆清单记录在 `config/native_assembly.json` 的 `arm_inertia` 中。
+主 URDF、mapping、standalone、HIL、±180° 副本及对应 MuJoCo 模型同步使用这些参数。辅助件仍使用数值预览惯量。
+
 > 交接状态（2026-11-13）：左臂整体朝外的模型已重建并安装，46 项装配相关回归通过。最新有限电机内部豁免规则下的完整限位扫描仍在运行，当前主模型尚未启用本轮最终扫描结果。下文限位计算方法描述的是最终流程；必须完成扫描、重建、验证和安装后，才能将生成的范围视为本轮正式仿真软件限位。
 
 2026-11-13 主模型使用新 `../robot_body/urdf/cnm.urdf` 和 `../全身不带头.STEP` 的原生装配坐标，胯部采用已核验的安装孔／座面重建，左手板保留新版导出中已向外伸出的姿态。
@@ -18,10 +32,8 @@
 安装判断与零位记录见 `config/left_hand_mount_alignment.json`；这不代表真机方向／编码器零位标定。
 工作台 URDFLoader 实际网格近景：[左腕](cad/assembly_audit/2026-11-13-web-left-wrist-corrected.png)、[右腕](cad/assembly_audit/2026-11-13-web-right-wrist-corrected.png)。
 
-关节按 `robot_body/meshes` 文件名去掉 `.STL`、末尾 `_link` 与首尾空格命名；连杆保留 `_link`，根连杆为 `Base_link`。
-例如 `BN_Spine_pitch`、`BN_hips_roll`、`BN_LeftUpperArm_1`、`BN_LeftHand_roll`／`BN_LeftHand_pitch`。
-完整旧名／新名对应见 [`config/joint_names.json`](config/joint_names.json)；电机编号、差动组和关节对应见 [`config/motor_topology.yaml`](config/motor_topology.yaml)。
-仿真位置接口可解析旧名称别名，但旧动作的坐标定义已经变化，应按新版 URDF 重新转换；别名兼容不代表旧轨迹姿态等价。
+连杆按 `robot_body/meshes` 文件名命名，根连杆为 `Base_link`。
+完整旧名／新名对应见 [`config/joint_names.json`](config/joint_names.json)。模型的电机编号、差动组和关节对应见 [`config/model_motor_topology.yaml`](config/model_motor_topology.yaml)。
 
 左大腿第 2 关节的源 RPY 符号错误已修正为 `-0.0740617322384423 1.5707963267949 0`；仅修改该处便使后续六件同时对齐 STEP。
 四处源关节轴心已依据 STEP 和父子件圆柱支持修正：左右肩第 1 轴、左右腕 pitch。
@@ -31,7 +43,7 @@
 
 仿真限位按当前整臂朝向重新进行 37 轴扫描与六组二维耦合检查，结果见 `config/simulation_limits.yaml` 和 `mujoco/geometry_limits.json`。使用未降面的 CAD 三角网格，步长 1°、内收余量 2°；其他组保持零位。
 按用户授权，只有轴线与实际几何支持的有限电机内部区域允许重叠。有限配合面、球头和轴承区域在每个姿态检查配准；零位接触本身不授予豁免，不再排除整对相邻装配体。平面接触必须同时落在双方当前真实三角面片内，断开的轴向材料段分别处理。
-JSON/YAML 以扫描报告 SHA256、逐轴范围、六组掩码和计算规则／CAD 证据摘要绑定，重建时拒绝混用旧结果。主体惯量保留新版 robot_body 值并随装配变换；辅助件惯量仅用于数值预览。这些是仿真软件范围，硬件行程、线缆约束、实体包容及跨组组合姿态尚未标定。
+JSON/YAML 以扫描报告 SHA256、逐轴范围、六组掩码和计算规则／CAD 证据摘要绑定，重建时拒绝混用旧结果。主体惯量使用新版 robot_body 值及上方记录的双臂覆盖，并随装配变换；辅助件惯量仅用于数值预览。这些是仿真软件范围，硬件行程、线缆约束、实体包容及跨组组合姿态尚未标定。
 
 ```bash
 source ros2_ws/install/setup.bash
@@ -213,6 +225,11 @@ STEP 耦合连杆复核：六组、10 根杆、20 个端点都找到实际 STEP 
 ## 预览和离线映射
 
 ### 整机 MuJoCo
+
+本模型支持 **STM32 固件 HIL + MuJoCo 位置电机**：选择 `full_body_robot`，
+为物理 CAN 各路分配覆盖 1–37 的模拟节点后启动。型号从 CAD 装配表读取：R58 15 台、
+R48 16 台、X25S 6 台。位置命令接入实际电机输入轴，保留原差动连杆闭环。
+力矩电机尚未添加。配置及验证说明见 [位置 HIL](../../../../../docs/architecture/full-body-position-hil.md)。
 
 [`mujoco/full_body_robot.xml`](mujoco/full_body_robot.xml) 包含主 URDF 的 38 个连杆、
 25 路一对一输入及六组差动的 12 路输入。整机保留了 10 根定长连杆的闭环，可在同一窗口调试全身。

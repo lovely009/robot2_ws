@@ -17,6 +17,16 @@ export function getJointLimits(state, model, joint) {
     upper: Number.isFinite(joint.upper) ? joint.upper : null, error: ''};
   if (runtime?.model !== model || !Array.isArray(runtime.joint_names) || !runtime.joint_names.includes(joint.name)) return fallback;
   const bounds = runtime.joint_limits?.[joint.name];
+  const dynamic = runtime.dynamic_joint_names?.includes(joint.name) === true;
+  if (dynamic) {
+    const valid = bounds && Number.isFinite(bounds.lower) && Number.isFinite(bounds.upper)
+      && bounds.lower <= bounds.upper;
+    const error = runtime.joint_limit_errors
+      ? runtime.joint_limit_errors[joint.name] : runtime.joint_limit_error;
+    return {lower: valid ? bounds.lower : null, upper: valid ? bounds.upper : null, dynamic: true,
+      error: error || (!valid ? '等待主机动态限位回读'
+        : bounds.lower === bounds.upper ? '当前姿态下该轴的可动范围为 0，已锁定' : '')};
+  }
   if (!bounds || !['lower', 'upper'].every(side => bounds[side] === null || Number.isFinite(bounds[side]))
       || (bounds.lower !== null && bounds.upper !== null && bounds.lower >= bounds.upper)) {
     return {lower: null, upper: null, error: '主机未提供有效关节限位回读'};
@@ -39,11 +49,15 @@ export function jointLimitsParameter(state, model, change) {
     throw new Error('主机关节模型未就绪');
   }
   if (!change || !runtime.joint_names.includes(change.name)) throw new Error('该关节未接入当前控制会话，不能提交限位');
+  if (runtime.dynamic_joint_names?.includes(change.name)) {
+    throw new Error('动态限位由模型和姿态计算，不能手动覆盖');
+  }
   if (!['lower', 'upper'].includes(change.side) || !Number.isFinite(change.value)) {
     throw new Error('关节软限位必须是有限数值');
   }
   const joint_limits = {};
   for (const name of runtime.joint_names) {
+    if (runtime.dynamic_joint_names?.includes(name)) continue;
     const joint = state.modelJoints?.find(j => j.name === name);
     if (!joint) throw new Error(`关节 ${name} 的模型限位尚未加载`);
     const bounds = getJointLimits(state, model, joint);

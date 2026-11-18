@@ -94,6 +94,53 @@ def test_direction_fit_without_segment_keeps_relative_orientation(tmp_path):
     np.testing.assert_allclose(positions[:, 0], np.deg2rad([0, 30, 60]), atol=.005)
 
 
+@pytest.mark.parametrize('source_axis,channel', [([1, 0, 0], 7), ([0, 1, 0], 8)])
+@pytest.mark.parametrize('heading', [0, 90])
+def test_trunk_direction_removes_cad_zero_lean_and_preserves_bending_sign(tmp_path, source_axis, channel, heading):
+    from scipy.spatial.transform import Rotation
+    basis = Rotation.from_euler('z', heading, degrees=True).as_matrix()
+    axis = basis @ source_axis
+    origin = Rotation.from_rotvec(axis * np.deg2rad(20)).as_euler('xyz')
+    path = tmp_path / 'trunk.urdf'
+    path.write_text(f'''<robot name="leaning_trunk"><link name="base"/><link name="chest"/>
+      <link name="left_mount"/><link name="right_mount"/>
+      <joint name="waist" type="revolute"><parent link="base"/><child link="chest"/>
+       <origin rpy="{' '.join(map(str, origin))}"/><axis xyz="{' '.join(map(str, axis))}"/>
+       <limit lower="-2" upper="2" velocity="100" effort="1"/></joint>
+      <joint name="left_fixed" type="fixed"><parent link="chest"/><child link="left_mount"/>
+       <origin xyz="0 0.3 1"/></joint>
+      <joint name="right_fixed" type="fixed"><parent link="chest"/><child link="right_mount"/>
+       <origin xyz="0 -0.3 1"/></joint></robot>''')
+    source_path = tmp_path / 'trunk.bvh'
+    source_path.write_text('''HIERARCHY
+ROOT Spine { OFFSET 0 0 0 CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+ JOINT Spine3 { OFFSET 0 0 0 CHANNELS 3 Zrotation Xrotation Yrotation
+  JOINT LeftShoulder { OFFSET 0 30 100 CHANNELS 3 Zrotation Xrotation Yrotation }
+  JOINT RightShoulder { OFFSET 0 -30 100 CHANNELS 3 Zrotation Xrotation Yrotation }
+ }
+}
+MOTION
+Frames: 3
+Frame Time: 0.02
+0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 10 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 -10 0 0 0 0 0 0
+''')
+    selected = {'mode': 'generic', 'source_root': 'Spine', 'source_to_robot': basis.tolist(),
+        'reference_frame': 0, 'limit_policy': 'urdf', 'targets': [
+            {'source': 'Spine3', 'target': 'chest'},
+            {'source': 'LeftShoulder', 'target': 'left_mount'},
+            {'source': 'RightShoulder', 'target': 'right_mount'}]}
+    source = BvhClip.load(source_path)
+    source.frames[:, 7:9] = 0
+    source.frames[:, channel] = [0, 10, -10]
+    solver = GenericRetargeter(path, selected, source, up_axis='z_up',
+                              match_directions=True)
+    positions, _, _ = solver.convert()
+    # Compare physical chest inclination, including the CAD joint-origin rotation.
+    np.testing.assert_allclose(positions[:, 0] + np.deg2rad(20), np.deg2rad([0, 10, -10]), atol=.005)
+
+
 @pytest.mark.parametrize('end', [(1., 0., 0.), (-1., 0., 0.), (0., 1., 0.)])
 def test_swing_calibration_is_a_proper_rotation_including_opposite_vectors(end):
     rotation = _swing_rotation(np.array([1., 0., 0.]), np.array(end))

@@ -529,7 +529,7 @@ int main() {
   test_snapshot_renews_only_existing_authority_atomically();
   test_authority_heartbeat_does_not_refresh_motion_deadline();
   for (unsigned op = 0; op < 256; ++op) {
-    const bool supported = op == 0 || op == 2 || op == 3 || op == 4 || op == 6 || op == 7 || op == 8;
+    const bool supported = op == 0 || op == 1 || op == 2 || op == 3 || op == 4 || op == 5 || op == 6 || op == 7 || op == 8;
     assert(agent_config_operation_supported((uint8_t)op) == supported);
   }
   test_unarmed_gate_preserves_segmented_identity_read();

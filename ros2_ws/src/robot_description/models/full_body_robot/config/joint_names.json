@@ -1,44 +1,225 @@
 {
-  "source": "robot_body/meshes",
-  "rule": "strip whitespace and remove _link for joints",
+  "source": "config/joint_convention.yaml",
   "joints": {
-    "BN_Spine_yaw": "BN_Spine_yaw",
-    "BN_Spine_axis_2": "BN_Spine_roll",
-    "BN_LeftShoulder_axis_1": "BN_LeftShoulder_1",
-    "BN_LeftShoulder_axis_2": "BN_LeftShoulder_2",
-    "BN_LeftUpperArm_axis_1": "BN_LeftUpperArm_1",
-    "BN_LeftUpperArm_axis_2": "BN_LeftUpperArm_2",
-    "BN_LeftUpperArm_axis_3": "BN_LeftUpperArm_3",
-    "BN_LeftLowerArm_axis_1": "BN_LeftLowerArm_1",
-    "BN_LeftLowerArm_axis_2": "BN_LeftLowerArm_2",
-    "BN_LeftHand_axis_2": "BN_LeftHand_pitch",
-    "BN_LeftHand_axis_1": "BN_LeftHand_roll",
-    "BN_RightShoulder_axis_1": "BN_RightShoulder_1",
-    "BN_RightShoulder_axis_2": "BN_RightShoulder_2",
-    "BN_RightUpperArm_axis_1": "BN_RightUpperArm_1",
-    "BN_RightUpperArm_axis_2": "BN_RightUpperArm_2",
-    "BN_RightUpperArm_axis_3": "BN_RightUpperArm_3",
-    "BN_RightLowerArm_axis_1": "BN_RightLowerArm_1",
-    "BN_RightLowerArm_axis_2": "BN_RightLowerArm_2",
-    "BN_RightHand_axis_1": "BN_RightHand_roll",
-    "BN_RightHand_axis_2": "BN_RightHand_pitch",
-    "BN_Spine_axis_1": "BN_Spine_pitch",
-    "BN_Hips_axis_1": "BN_hips_roll",
-    "BN_Hips_axis_2": "BN_hips_pitch",
-    "BN_LeftUpperLeg_axis_1": "BN_LeftUpperLeg_1",
-    "BN_LeftUpperLeg_axis_2": "BN_LeftUpperLeg_2",
-    "BN_LeftUpperLeg_axis_3": "BN_LeftUpperLeg_3",
-    "BN_LeftLowerLeg_axis_1": "BN_LeftLowerLeg_1",
-    "BN_LeftLowerLeg_axis_2": "BN_LeftLowerLeg_2",
-    "BN_LeftFoot_pitch": "BN_LeftFoot_pitch",
-    "BN_LeftFoot_roll": "BN_LeftFoot_roll",
-    "BN_RightUpperLeg_axis_1": "BN_RightUpperLeg_1",
-    "BN_RightUpperLeg_axis_2": "BN_RightUpperLeg_2",
-    "BN_RightUpperLeg_axis_3": "BN_RightUpperLeg_3",
-    "BN_RightLowerLeg_axis_1": "BN_RightLowerLeg_1",
-    "BN_RightLowerLeg_axis_2": "BN_RightLowerLeg_2",
-    "BN_RightFoot_pitch": "BN_RightFoot_pitch",
-    "BN_RightFoot_roll": "BN_RightFoot_roll"
+    "BN_Spine_roll": "waist_roll",
+    "BN_Spine_pitch": "waist_pitch",
+    "BN_Spine_yaw": "waist_yaw",
+    "BN_hips_roll": "pelvis_roll",
+    "BN_hips_pitch": "pelvis_pitch",
+    "BN_LeftShoulder_2": "left_scapula_roll",
+    "BN_LeftShoulder_1": "left_scapula_yaw",
+    "BN_LeftUpperArm_2": "left_shoulder_roll",
+    "BN_LeftUpperArm_1": "left_shoulder_pitch",
+    "BN_LeftUpperArm_3": "left_shoulder_yaw",
+    "BN_LeftLowerArm_1": "left_elbow_pitch",
+    "BN_LeftLowerArm_2": "left_forearm_yaw",
+    "BN_LeftHand_roll": "left_wrist_pitch",
+    "BN_LeftHand_pitch": "left_wrist_roll",
+    "BN_RightShoulder_2": "right_scapula_roll",
+    "BN_RightShoulder_1": "right_scapula_yaw",
+    "BN_RightUpperArm_2": "right_shoulder_roll",
+    "BN_RightUpperArm_1": "right_shoulder_pitch",
+    "BN_RightUpperArm_3": "right_shoulder_yaw",
+    "BN_RightLowerArm_1": "right_elbow_pitch",
+    "BN_RightLowerArm_2": "right_forearm_yaw",
+    "BN_RightHand_roll": "right_wrist_pitch",
+    "BN_RightHand_pitch": "right_wrist_roll",
+    "BN_LeftUpperLeg_2": "left_hip_roll",
+    "BN_LeftUpperLeg_1": "left_hip_pitch",
+    "BN_LeftUpperLeg_3": "left_hip_yaw",
+    "BN_LeftLowerLeg_1": "left_knee_pitch",
+    "BN_LeftLowerLeg_2": "left_shank_yaw",
+    "BN_LeftFoot_pitch": "left_ankle_pitch",
+    "BN_LeftFoot_roll": "left_ankle_roll",
+    "BN_RightUpperLeg_2": "right_hip_roll",
+    "BN_RightUpperLeg_1": "right_hip_pitch",
+    "BN_RightUpperLeg_3": "right_hip_yaw",
+    "BN_RightLowerLeg_1": "right_knee_pitch",
+    "BN_RightLowerLeg_2": "right_shank_yaw",
+    "BN_RightFoot_pitch": "right_ankle_pitch",
+    "BN_RightFoot_roll": "right_ankle_roll",
+    "BN_Spine_axis_2": "waist_roll",
+    "BN_LeftShoulder_axis_1": "left_scapula_yaw",
+    "BN_LeftShoulder_axis_2": "left_scapula_roll",
+    "BN_LeftUpperArm_axis_1": "left_shoulder_pitch",
+    "BN_LeftUpperArm_axis_2": "left_shoulder_roll",
+    "BN_LeftUpperArm_axis_3": "left_shoulder_yaw",
+    "BN_LeftLowerArm_axis_1": "left_elbow_pitch",
+    "BN_LeftLowerArm_axis_2": "left_forearm_yaw",
+    "BN_LeftHand_axis_2": "left_wrist_roll",
+    "BN_LeftHand_axis_1": "left_wrist_pitch",
+    "BN_RightShoulder_axis_1": "right_scapula_yaw",
+    "BN_RightShoulder_axis_2": "right_scapula_roll",
+    "BN_RightUpperArm_axis_1": "right_shoulder_pitch",
+    "BN_RightUpperArm_axis_2": "right_shoulder_roll",
+    "BN_RightUpperArm_axis_3": "right_shoulder_yaw",
+    "BN_RightLowerArm_axis_1": "right_elbow_pitch",
+    "BN_RightLowerArm_axis_2": "right_forearm_yaw",
+    "BN_RightHand_axis_1": "right_wrist_pitch",
+    "BN_RightHand_axis_2": "right_wrist_roll",
+    "BN_Spine_axis_1": "waist_pitch",
+    "BN_Hips_axis_1": "pelvis_roll",
+    "BN_Hips_axis_2": "pelvis_pitch",
+    "BN_LeftUpperLeg_axis_1": "left_hip_pitch",
+    "BN_LeftUpperLeg_axis_2": "left_hip_roll",
+    "BN_LeftUpperLeg_axis_3": "left_hip_yaw",
+    "BN_LeftLowerLeg_axis_1": "left_knee_pitch",
+    "BN_LeftLowerLeg_axis_2": "left_shank_yaw",
+    "BN_RightUpperLeg_axis_1": "right_hip_pitch",
+    "BN_RightUpperLeg_axis_2": "right_hip_roll",
+    "BN_RightUpperLeg_axis_3": "right_hip_yaw",
+    "BN_RightLowerLeg_axis_1": "right_knee_pitch",
+    "BN_RightLowerLeg_axis_2": "right_shank_yaw"
+  },
+  "native_joint_coordinates": {
+    "BN_Spine_roll": [
+      "waist_roll",
+      1
+    ],
+    "BN_Spine_pitch": [
+      "waist_pitch",
+      1
+    ],
+    "BN_Spine_yaw": [
+      "waist_yaw",
+      -1
+    ],
+    "BN_hips_roll": [
+      "pelvis_roll",
+      1
+    ],
+    "BN_hips_pitch": [
+      "pelvis_pitch",
+      1
+    ],
+    "BN_LeftShoulder_2": [
+      "left_scapula_roll",
+      1
+    ],
+    "BN_LeftShoulder_1": [
+      "left_scapula_yaw",
+      1
+    ],
+    "BN_LeftUpperArm_2": [
+      "left_shoulder_roll",
+      -1
+    ],
+    "BN_LeftUpperArm_1": [
+      "left_shoulder_pitch",
+      1
+    ],
+    "BN_LeftUpperArm_3": [
+      "left_shoulder_yaw",
+      1
+    ],
+    "BN_LeftLowerArm_1": [
+      "left_elbow_pitch",
+      -1
+    ],
+    "BN_LeftLowerArm_2": [
+      "left_forearm_yaw",
+      1
+    ],
+    "BN_LeftHand_roll": [
+      "left_wrist_pitch",
+      1
+    ],
+    "BN_LeftHand_pitch": [
+      "left_wrist_roll",
+      1
+    ],
+    "BN_RightShoulder_2": [
+      "right_scapula_roll",
+      1
+    ],
+    "BN_RightShoulder_1": [
+      "right_scapula_yaw",
+      -1
+    ],
+    "BN_RightUpperArm_2": [
+      "right_shoulder_roll",
+      -1
+    ],
+    "BN_RightUpperArm_1": [
+      "right_shoulder_pitch",
+      -1
+    ],
+    "BN_RightUpperArm_3": [
+      "right_shoulder_yaw",
+      1
+    ],
+    "BN_RightLowerArm_1": [
+      "right_elbow_pitch",
+      1
+    ],
+    "BN_RightLowerArm_2": [
+      "right_forearm_yaw",
+      1
+    ],
+    "BN_RightHand_roll": [
+      "right_wrist_pitch",
+      -1
+    ],
+    "BN_RightHand_pitch": [
+      "right_wrist_roll",
+      -1
+    ],
+    "BN_LeftUpperLeg_2": [
+      "left_hip_roll",
+      1
+    ],
+    "BN_LeftUpperLeg_1": [
+      "left_hip_pitch",
+      1
+    ],
+    "BN_LeftUpperLeg_3": [
+      "left_hip_yaw",
+      -1
+    ],
+    "BN_LeftLowerLeg_1": [
+      "left_knee_pitch",
+      1
+    ],
+    "BN_LeftLowerLeg_2": [
+      "left_shank_yaw",
+      -1
+    ],
+    "BN_LeftFoot_pitch": [
+      "left_ankle_pitch",
+      -1
+    ],
+    "BN_LeftFoot_roll": [
+      "left_ankle_roll",
+      1
+    ],
+    "BN_RightUpperLeg_2": [
+      "right_hip_roll",
+      -1
+    ],
+    "BN_RightUpperLeg_1": [
+      "right_hip_pitch",
+      -1
+    ],
+    "BN_RightUpperLeg_3": [
+      "right_hip_yaw",
+      -1
+    ],
+    "BN_RightLowerLeg_1": [
+      "right_knee_pitch",
+      -1
+    ],
+    "BN_RightLowerLeg_2": [
+      "right_shank_yaw",
+      -1
+    ],
+    "BN_RightFoot_pitch": [
+      "right_ankle_pitch",
+      1
+    ],
+    "BN_RightFoot_roll": [
+      "right_ankle_roll",
+      1
+    ]
   },
   "links": {
     "base_link": "Base_link",

@@ -13,7 +13,7 @@ static uint64_t motor_bit(uint16_t id) {
 }
 static bool equal(const Request &a, const Request &b) {
   if (a.session_id != b.session_id || a.request_id != b.request_id ||
-      a.command != b.command || a.motor_id != b.motor_id ||
+      a.command != b.command || a.motor_id != b.motor_id || a.direction_raw != b.direction_raw ||
       a.policy_count != b.policy_count ||
       a.policy_generation != b.policy_generation) return false;
   for (size_t i = 0; i < a.policy_count; ++i) {

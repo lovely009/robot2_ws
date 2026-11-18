@@ -85,6 +85,7 @@ install(PROGRAMS
   scripts/mujoco_effort_bridge.py
   scripts/mujoco_command_mapping.py
   scripts/mujoco_joint_position.py
+  scripts/mujoco_unregistered_hold.py
   DESTINATION lib/${PROJECT_NAME})
 ament_export_targets(export_robot_sim HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
@@ -97,6 +98,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_launch_models test/test_launch_models.py)
   ament_add_pytest_test(test_mujoco_command_mapping test/test_mujoco_command_mapping.py)
   ament_add_pytest_test(test_mujoco_effort_limits test/test_mujoco_effort_limits.py)
+  ament_add_pytest_test(test_mujoco_position_input test/test_mujoco_position_input.py)
+  ament_add_pytest_test(test_mujoco_unregistered_hold test/test_mujoco_unregistered_hold.py)
   ament_add_pytest_test(test_simulation_config test/test_simulation_config.py)
   ament_add_pytest_test(test_transmission_hil test/test_transmission_hil.py)
   ament_add_gtest(test_package_surface test/test_package_surface.cpp)

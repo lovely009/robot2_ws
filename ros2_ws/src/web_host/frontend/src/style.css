@@ -1615,7 +1615,7 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
   .workspace-grid:not(.device-workspace) .stage-area,
   .workspace-grid:not(.device-workspace) .observer-area { grid-column: 1; }
 }
-.workspace-grid.sim-workspace { grid-template-columns: minmax(0, 1fr); }
+.workspace-grid.sim-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .workspace-grid.sim-workspace .stage-area,
 .workspace-grid.sim-workspace .observer-area { grid-column: 1; }
 .sim-workspace .resize-observer { left: 0; }

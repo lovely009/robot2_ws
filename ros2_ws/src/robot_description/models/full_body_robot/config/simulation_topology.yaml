@@ -1,0 +1,615 @@
+# 仅供隔离总线 HIL；型号取自 CAD，输入轴取自 MJCF，不用于真机。
+simulation:
+  model: full_body_robot
+  mujoco_model: full_body_robot.xml
+  control_mode: position
+  cad_motor_evidence:
+    file: cad/urdf/全身装配（不含头部）.csv
+    sha256: e0563d843971d6d5a34d848dec9d42ed793d98b2a73f42de0027f2bda504f739
+    motors:
+      1:
+        cad_link: base_link
+        type: cerb_r58_101
+      4:
+        cad_link: base_link
+        type: cerb_r58_101
+      5:
+        cad_link: base_link
+        type: cerb_r58_101
+      2:
+        cad_link: Joint_Link1
+        type: cerb_r58_101
+      3:
+        cad_link: Joint_Link1
+        type: cerb_r58_101
+      6:
+        cad_link: Joint_Link2
+        type: cerb_r48_101
+      7:
+        cad_link: Joint_Link2
+        type: cerb_r48_101
+      15:
+        cad_link: Joint_Link2
+        type: cerb_r48_101
+      16:
+        cad_link: Joint_Link2
+        type: cerb_r48_101
+      8:
+        cad_link: Joint_link3.2
+        type: cerb_r58_101
+      9:
+        cad_link: Joint_link3.3
+        type: cerb_r58_101
+      10:
+        cad_link: Joint_link3.4
+        type: cerb_r48_101
+      11:
+        cad_link: Joint_link3.5
+        type: cerb_r48_101
+      12:
+        cad_link: Joint_link3.6
+        type: cerb_r48_101
+      13:
+        cad_link: Joint_link3.7
+        type: vaxor_2550
+      14:
+        cad_link: Joint_link3.7
+        type: vaxor_2550
+      17:
+        cad_link: Joint_link3.2r
+        type: cerb_r58_101
+      18:
+        cad_link: Joint_link3.3r
+        type: cerb_r58_101
+      19:
+        cad_link: Joint_link3.4r
+        type: cerb_r48_101
+      20:
+        cad_link: Joint_link3.5r
+        type: cerb_r48_101
+      21:
+        cad_link: Joint_link3.6r
+        type: cerb_r48_101
+      22:
+        cad_link: Joint_link3.7r
+        type: vaxor_2550
+      23:
+        cad_link: Joint_link3.7r
+        type: vaxor_2550
+      24:
+        cad_link: Joint_link5.1
+        type: cerb_r58_101
+      25:
+        cad_link: Joint_link5.2
+        type: cerb_r58_101
+      26:
+        cad_link: Joint_link5.2
+        type: cerb_r58_101
+      27:
+        cad_link: Joint_link5.3
+        type: cerb_r48_101
+      28:
+        cad_link: Joint_link5.4
+        type: cerb_r48_101
+      29:
+        cad_link: Joint_link5.5
+        type: cerb_r48_101
+      30:
+        cad_link: Joint_link5.6
+        type: vaxor_2550
+      31:
+        cad_link: Joint_link5.1r
+        type: cerb_r58_101
+      32:
+        cad_link: Joint_link5.2r
+        type: cerb_r58_101
+      33:
+        cad_link: Joint_link5.2r
+        type: cerb_r58_101
+      34:
+        cad_link: Joint_link5.3r
+        type: cerb_r48_101
+      35:
+        cad_link: Joint_link5.4r
+        type: cerb_r48_101
+      36:
+        cad_link: Joint_link5.5r
+        type: cerb_r48_101
+      37:
+        cad_link: Joint_link5.6r
+        type: vaxor_2550
+  timing:
+    control_hz: 100
+    vaxor_feedback_hz: 50
+    command_timeout_ms: 150
+  driver_timing:
+    feedback_timeout_s: 0.5
+  profiles:
+    cerb_r58_101_01:
+      hard_lower_deg: -8.999999999971944
+      hard_upper_deg: 8.999999999971944
+      command_lower_deg: -8.999999999971944
+      command_upper_deg: 8.999999999971944
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_02:
+      hard_lower_deg: -29.58895871722305
+      hard_upper_deg: 30.846051682701024
+      command_lower_deg: -29.58895871722305
+      command_upper_deg: 30.846051682701024
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_03:
+      hard_lower_deg: -31.931646502588425
+      hard_upper_deg: 28.413685029369528
+      command_lower_deg: -31.931646502588425
+      command_upper_deg: 28.413685029369528
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_04:
+      hard_lower_deg: -25.99086461661125
+      hard_upper_deg: 11.997459510831616
+      command_lower_deg: -25.99086461661125
+      command_upper_deg: 11.997459510831616
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_05:
+      hard_lower_deg: -19.68505298204423
+      hard_upper_deg: 27.615145837044384
+      command_lower_deg: -19.68505298204423
+      command_upper_deg: 27.615145837044384
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_06:
+      hard_lower_deg: -48.999999999999915
+      hard_upper_deg: 20.000000000000234
+      command_lower_deg: -48.00000000000001
+      command_upper_deg: 19.0
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_07:
+      hard_lower_deg: -10.318500646010207
+      hard_upper_deg: 32.523666682728255
+      command_lower_deg: -10.318500646010207
+      command_upper_deg: 32.523666682728255
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_08:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_09:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_10:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_11:
+      hard_lower_deg: -135.9999999999835
+      hard_upper_deg: 135.9999999999835
+      command_lower_deg: -135.9999999999835
+      command_upper_deg: 135.9999999999835
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_12:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    vaxor_2550_13:
+      hard_lower_deg: -47.407401296216754
+      hard_upper_deg: 47.34958990185967
+      command_lower_deg: -47.407401296216754
+      command_upper_deg: 47.34958990185967
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+    vaxor_2550_14:
+      hard_lower_deg: -39.53500410455057
+      hard_upper_deg: 37.679852825621275
+      command_lower_deg: -39.53500410455057
+      command_upper_deg: 37.679852825621275
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+    cerb_r48_101_15:
+      hard_lower_deg: -20.000000000000234
+      hard_upper_deg: 48.999999999999915
+      command_lower_deg: -19.0
+      command_upper_deg: 48.00000000000001
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_16:
+      hard_lower_deg: -10.318658797386908
+      hard_upper_deg: 32.52430142751737
+      command_lower_deg: -10.318658797386908
+      command_upper_deg: 32.52430142751737
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_17:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_18:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_19:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_20:
+      hard_lower_deg: -135.9999999999835
+      hard_upper_deg: 135.9999999999835
+      command_lower_deg: -135.9999999999835
+      command_upper_deg: 135.9999999999835
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_21:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    vaxor_2550_22:
+      hard_lower_deg: -36.52491118566499
+      hard_upper_deg: 36.46077292606206
+      command_lower_deg: -36.52491118566499
+      command_upper_deg: 36.46077292606206
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+    vaxor_2550_23:
+      hard_lower_deg: -43.126240685072496
+      hard_upper_deg: 46.175038528134884
+      command_lower_deg: -43.126240685072496
+      command_upper_deg: 46.175038528134884
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+    cerb_r58_101_24:
+      hard_lower_deg: -99.99999999998113
+      hard_upper_deg: 99.99999999998113
+      command_lower_deg: -99.99999999998113
+      command_upper_deg: 99.99999999998113
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_25:
+      hard_lower_deg: -63.999999999978755
+      hard_upper_deg: 63.999999999978755
+      command_lower_deg: -63.999999999978755
+      command_upper_deg: 63.999999999978755
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_26:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_27:
+      hard_lower_deg: -148.00000000002248
+      hard_upper_deg: 148.00000000002248
+      command_lower_deg: -148.00000000002248
+      command_upper_deg: 148.00000000002248
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_28:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_29:
+      hard_lower_deg: -40.00000000001537
+      hard_upper_deg: 40.00000000001537
+      command_lower_deg: -40.00000000001537
+      command_upper_deg: 40.00000000001537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    vaxor_2550_30:
+      hard_lower_deg: -106.00000000000063
+      hard_upper_deg: 106.00000000000063
+      command_lower_deg: -106.00000000000063
+      command_upper_deg: 106.00000000000063
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+    cerb_r58_101_31:
+      hard_lower_deg: -87.99999999999942
+      hard_upper_deg: 87.99999999999942
+      command_lower_deg: -87.99999999999942
+      command_upper_deg: 87.99999999999942
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_32:
+      hard_lower_deg: -63.999999999978755
+      hard_upper_deg: 63.999999999978755
+      command_lower_deg: -63.999999999978755
+      command_upper_deg: 63.999999999978755
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r58_101_33:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 45.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_34:
+      hard_lower_deg: -148.00000000002248
+      hard_upper_deg: 148.00000000002248
+      command_lower_deg: -148.00000000002248
+      command_upper_deg: 148.00000000002248
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_35:
+      hard_lower_deg: -178.00000000000537
+      hard_upper_deg: 178.00000000000537
+      command_lower_deg: -178.00000000000537
+      command_upper_deg: 178.00000000000537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    cerb_r48_101_36:
+      hard_lower_deg: -40.00000000001537
+      hard_upper_deg: 40.00000000001537
+      command_lower_deg: -40.00000000001537
+      command_upper_deg: 40.00000000001537
+      velocity_rad_s: 3.1416
+      effort_nm: 11.0
+      plant:
+        kp: 30.0
+        kd: 1.0
+    vaxor_2550_37:
+      hard_lower_deg: -106.00000000000063
+      hard_upper_deg: 106.00000000000063
+      command_lower_deg: -106.00000000000063
+      command_upper_deg: 106.00000000000063
+      velocity_rad_s: 4.189
+      effort_nm: 1.15
+      plant:
+        kp: 0.546
+        kd: 68.25
+        current_limit_a: 0.8424908424908423
+  motors:
+  - motor: motor_01
+    joint: waist_yaw
+    profile: cerb_r58_101_01
+  - motor: motor_02
+    joint: waist_flange_plus_x
+    profile: cerb_r58_101_02
+  - motor: motor_03
+    joint: waist_flange_minus_x
+    profile: cerb_r58_101_03
+  - motor: motor_04
+    joint: hips_flange_plus_x
+    profile: cerb_r58_101_04
+  - motor: motor_05
+    joint: hips_flange_minus_x
+    profile: cerb_r58_101_05
+  - motor: motor_06
+    joint: left_scapula_yaw
+    profile: cerb_r48_101_06
+  - motor: motor_07
+    joint: left_shoulder_flange_linkage
+    profile: cerb_r48_101_07
+  - motor: motor_08
+    joint: left_shoulder_pitch
+    profile: cerb_r58_101_08
+  - motor: motor_09
+    joint: left_shoulder_roll
+    profile: cerb_r58_101_09
+  - motor: motor_10
+    joint: left_shoulder_yaw
+    profile: cerb_r48_101_10
+  - motor: motor_11
+    joint: left_elbow_pitch
+    profile: cerb_r48_101_11
+  - motor: motor_12
+    joint: left_forearm_yaw
+    profile: cerb_r48_101_12
+  - motor: motor_13
+    joint: left_wrist_flange_proximal
+    profile: vaxor_2550_13
+  - motor: motor_14
+    joint: left_wrist_flange_distal
+    profile: vaxor_2550_14
+  - motor: motor_15
+    joint: right_scapula_yaw
+    profile: cerb_r48_101_15
+  - motor: motor_16
+    joint: right_shoulder_flange_linkage
+    profile: cerb_r48_101_16
+  - motor: motor_17
+    joint: right_shoulder_pitch
+    profile: cerb_r58_101_17
+  - motor: motor_18
+    joint: right_shoulder_roll
+    profile: cerb_r58_101_18
+  - motor: motor_19
+    joint: right_shoulder_yaw
+    profile: cerb_r48_101_19
+  - motor: motor_20
+    joint: right_elbow_pitch
+    profile: cerb_r48_101_20
+  - motor: motor_21
+    joint: right_forearm_yaw
+    profile: cerb_r48_101_21
+  - motor: motor_22
+    joint: right_wrist_flange_proximal
+    profile: vaxor_2550_22
+  - motor: motor_23
+    joint: right_wrist_flange_distal
+    profile: vaxor_2550_23
+  - motor: motor_24
+    joint: left_hip_pitch
+    profile: cerb_r58_101_24
+  - motor: motor_25
+    joint: left_hip_roll
+    profile: cerb_r58_101_25
+  - motor: motor_26
+    joint: left_hip_yaw
+    profile: cerb_r58_101_26
+  - motor: motor_27
+    joint: left_knee_pitch
+    profile: cerb_r48_101_27
+  - motor: motor_28
+    joint: left_shank_yaw
+    profile: cerb_r48_101_28
+  - motor: motor_29
+    joint: left_ankle_pitch
+    profile: cerb_r48_101_29
+  - motor: motor_30
+    joint: left_ankle_roll
+    profile: vaxor_2550_30
+  - motor: motor_31
+    joint: right_hip_pitch
+    profile: cerb_r58_101_31
+  - motor: motor_32
+    joint: right_hip_roll
+    profile: cerb_r58_101_32
+  - motor: motor_33
+    joint: right_hip_yaw
+    profile: cerb_r58_101_33
+  - motor: motor_34
+    joint: right_knee_pitch
+    profile: cerb_r48_101_34
+  - motor: motor_35
+    joint: right_shank_yaw
+    profile: cerb_r48_101_35
+  - motor: motor_36
+    joint: right_ankle_pitch
+    profile: cerb_r48_101_36
+  - motor: motor_37
+    joint: right_ankle_roll
+    profile: vaxor_2550_37

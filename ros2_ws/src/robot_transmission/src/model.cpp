@@ -1,5 +1,6 @@
 #include "robot_transmission/model.hpp"
 #include "robot_transmission/spatial_linkage.hpp"
+#include "robot_transmission/parallel_linkage.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -89,7 +90,8 @@ struct Model::Impl {
     runtime_group->factory=loader.createSharedInstance(g.plugin);
     runtime_group->transmission=runtime_group->factory->load(info);
     if (!runtime_group->transmission) throw std::invalid_argument("transmission plugin rejected group "+g.name);
-    g.position_dependent=bool(std::dynamic_pointer_cast<SpatialLinkageTransmission>(runtime_group->transmission));
+    g.position_dependent=bool(std::dynamic_pointer_cast<SpatialLinkageTransmission>(runtime_group->transmission)) ||
+      bool(std::dynamic_pointer_cast<ParallelLinkageTransmission>(runtime_group->transmission));
     runtime_group->config=g;
     runtime_group->configure();
     groups.push_back(g);

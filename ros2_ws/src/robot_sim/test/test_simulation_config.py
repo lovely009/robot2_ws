@@ -418,3 +418,119 @@ def test_trial_hil_default_launch_selects_simulation_config(tmp_path, monkeypatc
     assert hardware['buses']['arm']['interface'] == 'can0'
     assert Path(hardware['transmissions_file']).resolve() == (
         description / 'models/trial_arm_7dof/config/transmissions.yaml').resolve()
+
+
+def test_multichannel_backend_launch_passes_routes_without_plant_dependency(tmp_path, monkeypatch):
+    import json
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument, ExecuteProcess
+    from launch.utilities import perform_substitutions
+    module = _launch_module()
+    real_share = module.get_package_share_directory
+    monkeypatch.setattr(module, 'get_package_share_directory', lambda name:
+        str(MODEL_DIR.parents[1]) if name == 'robot_description' else real_share(name))
+    runtime = tmp_path / 'runtime'; runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+    rows = [{'bus': 0, 'transport': 'usbcanfd', 'device': 0, 'channel': 0, 'ids': '*'}]
+    context = LaunchContext()
+    context.launch_configurations.update(dict(model='half_body_robot', backend='gazebo',
+        controller_mode='firmware', simulator_only='true', transport='multi',
+        sim_channels_json=json.dumps(rows), start_web_host='false',
+        start_micro_ros_agent='false', start_host_control='false'))
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument): action.execute(context)
+    actions = module.launch_simulation(context)
+    commands = [[perform_substitutions(context, part) for part in a.cmd]
+                for a in actions if isinstance(a, ExecuteProcess)]
+    command = next(c for c in commands if any('fdcan_motor_sim.py' in part for part in c))
+    assert json.loads(command[command.index('--channels') + 1]) == rows
+    assert '--gazebo' not in command
+    assert '--interface' not in command and '--tty' not in command
+
+
+@pytest.mark.parametrize('bridge_plant', [False, True])
+def test_motor_backend_can_attach_to_a_separate_plant(tmp_path, monkeypatch, bridge_plant):
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument, ExecuteProcess
+    from launch.utilities import perform_substitutions
+    module = _launch_module()
+    real_share = module.get_package_share_directory
+    monkeypatch.setattr(module, 'get_package_share_directory', lambda name:
+        str(MODEL_DIR.parents[1]) if name == 'robot_description' else real_share(name))
+    runtime = tmp_path / 'runtime'; runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+    context = LaunchContext()
+    context.launch_configurations.update(dict(model='half_body_robot', backend='gazebo',
+        controller_mode='firmware', simulator_only='true', transport='multi',
+        bridge_plant=str(bridge_plant).lower(),
+        sim_channels_json='[{"bus":0,"transport":"usbcanfd","device":0,"channel":0,"ids":"*"}]',
+        start_web_host='false', start_micro_ros_agent='false', start_host_control='false'))
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument): action.execute(context)
+    actions = module.launch_simulation(context)
+    commands = [[perform_substitutions(context, part) for part in a.cmd]
+                for a in actions if isinstance(a, ExecuteProcess)]
+    command = next(c for c in commands if any('fdcan_motor_sim.py' in part for part in c))
+    assert ('--gazebo' in command) == bridge_plant
+
+
+def test_full_body_hil_launch_uses_position_inputs_and_cad_types(tmp_path, monkeypatch):
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+    from launch.utilities import perform_substitutions
+    module = _launch_module()
+    real_share = module.get_package_share_directory
+    description = MODEL_DIR.parents[1]
+    monkeypatch.setattr(module, 'get_package_share_directory', lambda name:
+        str(description) if name == 'robot_description' else real_share(name))
+    runtime = tmp_path / 'runtime'; runtime.mkdir()
+    monkeypatch.setattr(module.tempfile, 'mkdtemp', lambda **kwargs: str(runtime))
+    context = LaunchContext()
+    context.launch_configurations.update(dict(model='full_body_robot', backend='mujoco',
+        controller_mode='firmware', transport='multi',
+        sim_channels_json='[{"bus":0,"transport":"usbcanfd","device":0,"channel":0,"ids":"*"}]',
+        start_web_host='false', start_micro_ros_agent='false', start_host_control='false'))
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument): action.execute(context)
+    actions = module.launch_simulation(context)
+    plant = next(a for a in actions if isinstance(a, IncludeLaunchDescription))
+    arguments = dict(plant.launch_arguments)
+    assert arguments['mujoco_model'] == str(description / 'models/full_body_robot/mujoco/full_body_robot.xml')
+    assert arguments['position_input'] == 'true'
+    assert len(arguments['joint_names'].split(',')) == 37
+    commands = [[perform_substitutions(context, part) for part in a.cmd]
+                for a in actions if isinstance(a, ExecuteProcess)]
+    command = next(c for c in commands if any('fdcan_motor_sim.py' in part for part in c))
+    assert command[command.index('--vaxor') + 1] == '13,14,22,23,30,37'
+    assert command[command.index('--cerb-r58') + 1] == '1,2,3,4,5,8,9,17,18,24,25,26,31,32,33'
+    joint_map = command[command.index('--joint-map') + 1]
+    assert '2:waist_flange_plus_x' in joint_map and '13:left_wrist_flange_proximal' in joint_map
+    assert '--gazebo' in command
+    assert command[command.index('--gazebo-control-mode') + 1] == 'position'
+    assert command[command.index('--fb-period-ms') + 1] == '25'
+    assert command[command.index('--stagger-ms') + 1] == '0.4'
+    driver = yaml.safe_load(Path(command[command.index('--driver-file') + 1]).read_text())['motor_hardware']
+    assert len(driver['motors']) == 37
+    assert driver['motors']['motor_13']['type'] == 'vaxor_2550'
+
+
+def test_multibus_firmware_keeps_all_logical_buses_for_transmission(tmp_path):
+    module = _launch_module()
+    original = MODEL_DIR / 'config/motor_driver.yaml'
+    simulation, specs = _bound_simulation(module)
+    source = yaml.safe_load(original.read_text())
+    hardware = source['motor_hardware']
+    hardware['motor_specs_file'] = str(specs)
+    transmissions = module._absolute_transmissions_file(original)
+    if transmissions is not None:hardware['transmissions_file'] = str(transmissions)
+    hardware['buses']['second'] = dict(hardware['buses']['arm'])
+    last_name = simulation['motors'][-1]['name']
+    hardware['motors'][last_name]['bus'] = 'second'
+    config = tmp_path/'source.yaml';config.write_text(yaml.safe_dump(source))
+    raw = module._load_simulation(MODEL_DIR/'config/simulation_topology.yaml')
+    bound = module._bind_motor_topology(raw, config, specs)
+    assert bound['buses'] == ['arm','second']
+    _, driver = module._write_runtime_configs(bound,tmp_path,'multi','mcu','mcu',specs,config)
+    output = yaml.safe_load(driver.read_text())['motor_hardware']
+    assert set(output['buses']) == {'arm','second'}
+    assert output['motors'][last_name]['bus'] == 'second'

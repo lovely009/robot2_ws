@@ -1,14 +1,15 @@
-// 设备屏：只读电机参数、初始化核验诊断、失能态设零与故障清除。
+// 设备屏：参数查询、CERB 方向设置与驱动板保存、失能态设零与故障清除。
 // 事务函数在 core/device.js（连接后自动读取也走它）；本面板只做渲染与按钮接线。
 import { describeMotorState } from '../core/motor_state.js';
 import { store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
   syncWriteButtons } from '../core/store.js';
 import { $, fmt, fmtParam, lifecyclePill } from '../core/format.js';
-import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError } from '../core/device.js';
+import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError, setMotorDirection, saveMotorDeviceParameters, motorDeviceParameterError } from '../core/device.js';
 
 // 型号库（减速比等）——设备端 RPM 的折算系数。取一次缓存；拿到后重绘一次把
 // 设备端原值填上。取不到就只显示 cnt / mA 两项，不报错。
 let motorSpecs = null;
+const directionDrafts = new Map();
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g,
   (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
 fetch('/api/motor-specs')
@@ -68,7 +69,13 @@ function renderDevRows() {
     };
     const protectCell = Number.isFinite(pick.limit_protect)
       ? (pick.limit_protect === 1 ? '开启' : '关闭') : '未读取';
-    const dirCell = Number.isFinite(pick.direction) ? (pick.direction === 1 ? 'CCW' : 'CW') : '未读取';
+    const direction = directionDrafts.get(id) ?? pick.direction;
+    const dirCell = `<select aria-label="电机 ${id} 方向" data-direction="${id}">
+      <option value="" ${![0,1].includes(direction) ? 'selected' : ''}>未读取</option>
+      <option value="0" ${direction === 0 ? 'selected' : ''}>CW</option>
+      <option value="1" ${direction === 1 ? 'selected' : ''}>CCW</option></select>
+      <button class="tiny-btn" data-setdirection="${id}">设置方向</button>
+      <span class="micro">仅改变驱动力矩方向；易失，驱动板保存不固化方向。</span>`;
     const unprotected = pick.limit_protect === 0;
     // 位置按状态流就地更新，参数只在新报告到达时重建。
     const curPos = row.motion?.position;
@@ -85,7 +92,7 @@ function renderDevRows() {
         ${!availability.usable ? `<p class="panel-error">电机 ${id} ${!model ? '型号尚未识别，固件尚未绑定型号；' : ''}未返回有效参数，不能视为读取成功。</p>` : ''}
         ${unprotected ? '<p class="panel-error">保护已关：该关节无任何限位。</p>' : ''}
         <h3>电机参数</h3>
-        <p class="micro">参数值只读；设零须先失能，完成后核对实际位置与机械行程。</p><dl>
+        <p class="micro">除方向外参数值只读；设置和设零须先失能，完成后核对实际位置与机械行程。</p><dl>
           ${field('node_id', '电机 ID', '')}${field('t_max', 'T_max', 'N·m')}
           <div><dt>当前通信 ID</dt><dd>${id}${Number.isFinite(pick.node_id) && pick.node_id !== id ? '（新 ID 重启电机后生效）' : ''}</dd></div>
 
@@ -105,6 +112,18 @@ function renderDevRows() {
       </div>
     </details>`;
   }).join('');
+  tbody.querySelectorAll('[data-direction]').forEach(select => {
+    select.onchange = () => {
+      if (select.value !== '') directionDrafts.set(Number(select.dataset.direction),Number(select.value));
+    };
+  });
+  tbody.querySelectorAll('[data-setdirection]').forEach(button => {
+    button.onclick = () => {
+      const id = Number(button.dataset.setdirection);
+      const select = tbody.querySelector(`[data-direction="${id}"]`);
+      if (select.value !== '') setMotorDirection(id,Number(select.value));
+    };
+  });
   tbody.querySelectorAll('[data-zero]').forEach(btn => {
     btn.onclick = () => setMotorZero(Number(btn.dataset.zero));
   });
@@ -151,11 +170,13 @@ function updateSumDev() {
 
 export function mount(root, ctx) {
   $('btnParamLoad').onclick = () => refreshMotorParams();
+  $('btnParamSaveDevice').onclick = () => saveMotorDeviceParameters(store.selectedId);
 
   const render = (dirty) => {
     const structural = dirty.has(DIRTY.PARAMS) || dirty.has(DIRTY.SELECTED)
       || dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.CONN);
-    if (!structural && !dirty.has(DIRTY.MOTION) && !dirty.has(DIRTY.STATUS)) return;
+    if (!structural && !dirty.has(DIRTY.MOTION) && !dirty.has(DIRTY.STATUS)
+        && !dirty.has(DIRTY.COMMAND) && !dirty.has(DIRTY.POLICY)) return;
     if (structural) {
       renderDevRows();
       updateDevCurPos();
@@ -186,6 +207,18 @@ export function mount(root, ctx) {
       // motion 帧（50 Hz）经 intervalMs:200 节流后 ≈5 Hz，等价旧版的
       // setInterval(updateDevCurPos, 200)。
       updateDevCurPos();
+    }
+    const save = $('btnParamSaveDevice');
+    const saveError = motorDeviceParameterError(store.selectedId);
+    save.disabled = !writesAllowed() || Boolean(saveError);
+    save.title = saveError || `保存电机 ${store.selectedId} 驱动板的位置、速度与电流上限（不保存方向）`;
+    for (const button of $('paramRows').querySelectorAll('[data-setdirection]')) {
+      const id = Number(button.dataset.setdirection);
+      const select = $('paramRows').querySelector(`[data-direction="${id}"]`);
+      const error = motorDeviceParameterError(id);
+      select.disabled = !writesAllowed() || Boolean(error);
+      button.disabled = select.disabled || select.value === '';
+      button.title = error || '设置驱动力矩方向并回读核验';
     }
     for (const button of $('paramRows').querySelectorAll('[data-zero]')) {
       const error = motorZeroError(Number(button.dataset.zero));

@@ -198,6 +198,19 @@ def test_start_passes_the_ros_environment_into_the_unit() -> None:
     assert not any('EDITOR' in arg for arg in create)
 
 
+def test_start_passes_custom_usbcanfd_sdk_path_into_the_unit() -> None:
+    sdk_path = '/opt/创芯 SDK/libcontrolcanfd.so'
+    systemd = FakeSystemd({UNIT_MOTOR_BACKEND: {'LoadState': 'not-found'}})
+    SystemdUnits(runner=systemd, environ={
+        'ROBOT2_CONTROLCANFD_LIB': sdk_path,
+        'ROBOT2_UNRELATED_SECRET': 'private',
+    }).start(UNIT_MOTOR_BACKEND, ['true'], auto=False)
+
+    create = next(c for c in systemd.commands() if c[0] == 'systemd-run')
+    assert f'--setenv=ROBOT2_CONTROLCANFD_LIB={sdk_path}' in create
+    assert not any('ROBOT2_UNRELATED_SECRET' in arg for arg in create)
+
+
 def test_auto_ownership_is_persisted_into_the_unit() -> None:
     """auto 归属要落进 unit 的环境，否则 bench_manager 一重启就把「随仿真起的」
     误判成「手动起的」，停仿真时不敢停它。

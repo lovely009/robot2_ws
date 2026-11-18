@@ -167,12 +167,24 @@ it('同页面任一入口发起使能后，MCU先ACTIVE也不能越过本intent�
 
 it.each(['stale','session','time','readonly'])('使能拒绝缺失或陈旧源授权：%s',async change=>{
   const {ros,store}=await policyConnection();
-  if(change==='stale')store.controlStates.at=Date.now()-101;
+  if(change==='stale')store.controlStates.at=Date.now()-251;
   if(change==='session')store.controlStates.session=0;
   if(change==='time')store.controlStates.sourceTimeNs=0;
   if(change==='readonly')ros.configureControl({control_mode:'readonly'});
   await expect(ros.submitPolicy([policyTarget])).rejects.toThrow();
   expect(Service.calls).toHaveLength(0);expect(Topic.published).toEqual([]);
+  ros.disconnect();
+});
+
+it('使能允许状态周期和传输延迟，并保留原始MCU源时间供主机复核',async()=>{
+  const {ros,store}=await policyConnection();
+  store.controlStates.at=Date.now()-250;
+  const source=store.controlStates.sourceTimeNs;
+  const pending=ros.submitPolicy([policyTarget]);
+  expect(Service.calls).toHaveLength(1);
+  expect(Service.calls[0].request.source_time_ns).toBe(source);
+  Service.calls[0].complete(policyTicket());
+  await expect(pending).resolves.toMatchObject(policyTicket());
   ros.disconnect();
 });
 
@@ -212,7 +224,7 @@ it("读取动作期间换连接，旧播放不得在新会话下发控制", asyn
   vi.stubGlobal("fetch", () => new Promise((resolve) => (respond = resolve)));
   const ros = await import("../../web/js/core/ros.js");
   const { store } = await import("../../web/js/core/store.js");
-  const { playAction } = await import("../../web/js/panels/actionLibrary.js");
+  const { playAction } = await import("../../web/js/core/playback.js");
   ros.connect();
   Socket.instances[0].emit("connection");
   const pending = playAction("old.json", {
@@ -239,7 +251,7 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => action }));
   const ros = await import("../../web/js/core/ros.js");
   const { store, MODEL } = await import("../../web/js/core/store.js");
-  const { playAction } = await import("../../web/js/panels/actionLibrary.js");
+  const { playAction } = await import("../../web/js/core/playback.js");
   store.modelTransmissions = {
     model: MODEL,
     driver_file: '',
@@ -257,7 +269,7 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   store.transmissionStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],trajectory_enabled:true}};
   store.commandStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],
     output_topic:'/motor/host_command_array',
-    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
+    feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   store.motors.set(1, {
     status: { online: true, lifecycle: 3 },
     motion: { position: 0.15 },
@@ -296,7 +308,7 @@ it('原始动作按300原帧时序分包发布到主机raw话题，取消仍走�
   vi.useFakeTimers();
   const ros=await import('../../web/js/core/ros.js');
   const {store,MODEL}=await import('../../web/js/core/store.js');
-  const actions=await import('../../web/js/panels/actionLibrary.js');
+  const actions=await import('../../web/js/core/playback.js');
   ros.connect();Socket.instances[0].emit('connection');
   store.controlStates.sourceTimeNs=9000000000;
   expect(Topic.instances.filter(t=>t.name==='/control/trajectory_raw')).toHaveLength(1);
@@ -305,7 +317,7 @@ it('原始动作按300原帧时序分包发布到主机raw话题，取消仍走�
     motors:[{id}],joints:[`joint${id}`],direct_mapping:true})),error:''};
   store.transmissionStatus={last:now,data:{model:MODEL,joint_names:['joint1','joint2'],trajectory_enabled:true}};
   store.commandStatus={last:now,data:{model:MODEL,joint_names:['joint1','joint2'],
-    output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
+    output_topic:'/motor/host_command_array',feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   for(const id of [1,2])store.motors.set(id,{status:{online:true,lifecycle:4},motion:{position:.1}});
   const points=Array.from({length:300},(_,frame)=>[1,2].map(motor_id=>({motor_id,
     time_from_start_ms:Math.round(frame*1000/30),position:motor_id*.1+frame*.0001,

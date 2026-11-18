@@ -1,6 +1,65 @@
 import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 
+test('整机预览默认使用 Standing，双脚贴地且反馈保留世界基座位姿',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<canvas style="width:800px;height:600px"></canvas><script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {robot,ghost,scene};'}));
+  await page.goto('/arm-fixture');
+  await page.evaluate(async()=>{
+    const {init}=await import('/js/panels/arm.js');
+    init(document.querySelector('canvas'),{
+      urdfUrl:'/robot_sim/models/full_body_robot/urdf/full_body_robot.standing.urdf',
+      initialPositionsUrl:'/robot_sim/models/full_body_robot/config/standing.json',
+      packages:{robot_description:'/robot_sim'},
+    });
+  });
+  await expect(page.locator('canvas')).toHaveAttribute('data-model-rendered','true');
+  const result=await page.evaluate(async()=>{
+    const {Vector3,Quaternion}=await import('/vendor/three.module.min.js');
+    const {robot,ghost,scene,setJoints,setTargets}=await import('/js/panels/arm.js');
+    robot.updateMatrixWorld(true);
+    const position=name=>robot.links[name].getWorldPosition(new Vector3());
+    const shoulders=position('BN_LeftShoulder_1_link').add(position('BN_RightShoulder_1_link')).multiplyScalar(.5);
+    const torso=shoulders.sub(position('BN_hips_pitch_link')).normalize();
+    const floorHeights=['Left','Right'].map(side=>{
+      let minZ=Infinity;
+      robot.links[`BN_${side}Foot_roll_link`].traverse(object=>{
+        if (!object.isMesh || object.userData.hitOnly) return;
+        const vertices=object.geometry.getAttribute('position');
+        const vertex=new Vector3();
+        for(let i=0;i<vertices.count;i++){
+          vertex.fromBufferAttribute(vertices,i).applyMatrix4(object.matrixWorld);
+          minZ=Math.min(minZ,vertex.z);
+        }
+      });
+      return minZ;
+    });
+    const grid=scene.children.find(object=>object.type==='GridHelper');
+    const basePose=target=>target.links.Base_link.getWorldQuaternion(new Quaternion()).toArray();
+    const base=basePose(robot);
+    const initial=robot.joints.left_ankle_pitch.angle;
+    setJoints({left_ankle_pitch:.1});
+    setTargets({left_ankle_pitch:-.1});
+    return {torso:torso.toArray(),floorHeights,floor:grid.position.z,base,
+      afterFeedback:basePose(robot),ghostBase:basePose(ghost),initial,
+      actual:robot.joints.left_ankle_pitch.angle,
+      target:ghost.joints.left_ankle_pitch.angle,ghostVisible:ghost.visible};
+  });
+  expect(result.torso[0]).toBeCloseTo(0,7);
+  expect(result.torso[1]).toBeCloseTo(0,7);
+  expect(result.torso[2]).toBeCloseTo(1,7);
+  expect(result.floor).toBe(0);
+  for(const height of result.floorHeights) expect(height).toBeCloseTo(0,6);
+  expect(result.initial).toBeLessThan(-.1);
+  expect(result.afterFeedback).toEqual(result.base);
+  expect(result.ghostBase).toEqual(result.base);
+  expect(result.actual).toBeCloseTo(.1,8);
+  expect(result.target).toBeCloseTo(-.1,8);
+  expect(result.ghostVisible).toBe(true);
+});
+
 test('地面落在模型最低外观表面，忽略关节拾取球',async({page})=>{
   await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
     '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));

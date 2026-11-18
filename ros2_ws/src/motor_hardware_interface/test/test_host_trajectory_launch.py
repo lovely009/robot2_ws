@@ -109,3 +109,23 @@ def test_follow_uses_urdf_velocity_and_preserves_50hz(model):
     assert manager['follow_controller']['type'] == 'motor_hardware_interface/JointFollowController'
     assert params['/host_control/follow_controller']['ros__parameters'] == {
         'joints': ['shoulder', 'elbow'], 'max_velocity': [2.5, 3.0]}
+
+
+
+def test_existing_hil_sessions_resolve_dedicated_urdf_without_changing_physical_models(tmp_path):
+    standalone = tmp_path / 'arm.standalone.urdf'
+    dedicated = tmp_path / 'arm.hil.urdf'
+    standalone.write_text('<robot name="visual"/>')
+    resolver = module().control_urdf_file
+    assert resolver('motor_driver.simulation.yaml', str(standalone)) == str(standalone)
+    dedicated.write_text('<robot name="control"/>')
+    assert resolver('motor_driver.simulation.yaml', str(standalone)) == str(dedicated)
+    assert resolver('motor_driver.yaml', str(standalone)) == str(standalone)
+    assert resolver('motor_driver.simulation.yaml', str(tmp_path / 'custom.urdf')) == str(tmp_path / 'custom.urdf')
+
+
+
+def test_full_body_hil_missing_control_urdf_is_explicit_error(tmp_path):
+    with pytest.raises(ValueError, match='HIL 控制 URDF'):
+        module().control_urdf_file('motor_driver.simulation.yaml',
+                                   str(tmp_path / 'full_body_robot.standalone.urdf'))

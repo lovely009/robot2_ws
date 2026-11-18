@@ -197,6 +197,48 @@ def test_http_lists_library_bvh_sources(tmp_path):
         manager.close()
 
 
+@pytest.mark.parametrize('origin,content_type,body,code', [
+    ('http://localhost', 'application/json', b'{}', 200),
+    ('http://elsewhere', 'application/json', b'{}', 403),
+    ('http://localhost', 'text/plain', b'{}', 415),
+    ('http://localhost', 'application/json', b'[]', 400),
+])
+def test_http_saved_source_status(jobs, origin, content_type, body, code):
+    from web_host.motion_catalog import handle_motion_catalog
+    handler = Handler(body, origin=origin, content_type=content_type)
+    handler.path = '/api/motion/sources/status'
+    assert handle_motion_catalog(handler, jobs) and handler.code == code
+    if code == 200:
+        assert json.loads(handler.wfile.getvalue()) == {'sources': []}
+
+
+@pytest.mark.parametrize('failure', ['syntax', 'runtime', 'index'])
+def test_http_saved_status_reports_model_errors(tmp_path, payload, monkeypatch, failure):
+    from web_host.motion_catalog import _CatalogJobs, handle_motion_catalog
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / 'clip.bvh').write_text(payload['bvh_text'])
+    manager = MotionJobs(actions_dir=library, cache_dir=tmp_path / 'results')
+    try:
+        if failure == 'syntax':
+            payload['urdf_text'] = '<robot'
+        else:
+            def invalid_model(*args, **kwargs):
+                exception = RuntimeError if failure == 'runtime' else IndexError
+                raise exception('invalid model')
+            monkeypatch.setattr(_CatalogJobs, 'create', invalid_model)
+        handler = Handler(json.dumps(payload).encode())
+        handler.path = '/api/motion/sources/status'
+        assert handle_motion_catalog(handler, manager) and handler.code == 200
+        entries = json.loads(handler.wfile.getvalue())['sources']
+        assert len(entries) == 1
+        assert entries[0]['name'] == 'clip.bvh' and entries[0]['saved'] is False
+        assert entries[0]['error']
+        assert manager.jobs == {} and manager.thread is None
+    finally:
+        manager.close()
+
+
 def test_http_imports_library_source_symlink(tmp_path, payload):
     original = tmp_path / 'original.txt'
     original.write_text(payload.pop('bvh_text'))

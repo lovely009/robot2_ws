@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "motor_control_internal.h"
 #include "motor_control_profile.h"
@@ -5287,9 +5288,8 @@ static void test_runtime_device_parameter_writes_are_retired() {
   const motor_protocol_config_kind_t retired[] = {
     MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS, MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT,
     MOTOR_PROTOCOL_CONFIG_SET_TORQUE_LIMIT,
-    MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT, MOTOR_PROTOCOL_CONFIG_SET_DIRECTION,
-    MOTOR_PROTOCOL_CONFIG_SET_T_MAX, MOTOR_PROTOCOL_CONFIG_SET_NODE_ID,
-    MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH};
+    MOTOR_PROTOCOL_CONFIG_SET_SAFETY_PROTECT,
+    MOTOR_PROTOCOL_CONFIG_SET_T_MAX, MOTOR_PROTOCOL_CONFIG_SET_NODE_ID};
   for (const auto kind : retired) {
     motor_protocol_config_request_t request{};
     request.request_id = 100 + kind; request.motor_id = 7; request.kind = kind;
@@ -5437,8 +5437,208 @@ static void test_set_zero_timeout_and_unsupported_never_enable_or_save() {
   assert(!ctx.entries[0].tx_active && !ctx.entries[0].policy_enable);
 }
 
+static void test_driver_direction_and_save_require_idle_and_block_enable() {
+  for (auto kind : {MOTOR_PROTOCOL_CONFIG_SET_DIRECTION, MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH}) {
+    for (unsigned mode = 0; mode < 13; ++mode) {
+      motor_control_context_t ctx;
+      motor_control_init(&ctx, g_adapters, 2);
+      bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+      disable_for_zero(&ctx, 7);
+      auto &e = ctx.entries[0];
+      switch (mode) {
+        case 1: e.online = false; break;
+        case 2: e.policy_enable = true; break;
+        case 3: e.motion_enabled = true; break;
+        case 4: e.enable_pending = true; break;
+        case 5: e.motion_authorized = true; break;
+        case 6: e.has_target = true; break;
+        case 7: e.tx_active = true; break;
+        case 8: e.p0_pending = true; break;
+        case 9: e.profile = nullptr; break;
+        case 10: ctx.trajectory_active = true; ctx.trajectory.target_count = 1; ctx.trajectory.target_ids[0] = 7; break;
+        case 11: e.lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE; break;
+        case 12: e.fresh_target_pending = true; break;
+      }
+      motor_protocol_config_request_t r{};
+      r.request_id = 901; r.motor_id = 7; r.kind = kind;
+      r.direction_raw = 1; r.save_slots = MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK;
+      assert(motor_control_submit_config(&ctx, &r, 110) == (mode == 0));
+      if (mode) continue;
+      assert(e.tx_active);
+      motor_protocol_config_request_t enable{};
+      enable.request_id = 902; enable.motor_id = 7;
+      enable.kind = MOTOR_PROTOCOL_CONFIG_SET_ENABLE; enable.enable = true;
+      assert(!motor_control_submit_config(&ctx, &enable, 111));
+      enable.kind = MOTOR_PROTOCOL_CONFIG_SET_POLICY;
+      enable.policy_generation = e.policy_generation + 1;
+      assert(!motor_control_submit_config(&ctx, &enable, 111));
+      // Coordinator 可先超时；只要 RT 设备事务仍在，使能仍须被拒。
+      assert(e.tx_active && !e.policy_enable);
+      if (kind == MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH) {
+        e.record_dirty_slots = 0x3f;
+        motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+        unsigned saves = 0U;
+        uint8_t save_codes = 0U;
+        for (unsigned tick = 112; tick < 120; ++tick) {
+          motor_control_config_step(&ctx, tick);
+          const size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+          for (size_t i = 0; i < n; ++i) {
+            assert(frames[i].can_id == 0x607U && frames[i].data[0] == 0x23U &&
+                frames[i].data[1] == 0x39U && frames[i].data[2] == 0x25U);
+            save_codes |= (uint8_t)(1U << frames[i].data[4]);
+            ++saves;
+          }
+        }
+        assert(!e.tx_active && e.record_dirty_slots == 0x3f);
+        assert(saves == 3U && save_codes == (uint8_t)0x16U);
+        assert(has_result_event(&ctx, 901, MOTOR_PROTOCOL_CONFIG_OK));
+      }
+    }
+  }
+}
+
+// 厂家准入按内置实例地址判断；副本不能继承 CERB 的额外门禁。
+static void test_vendor_admission_preserves_pointer_identity() {
+  const motor_protocol_adapter_t cerb_copy = motor_protocol_cerb_adapter;
+  const motor_protocol_adapter_t *adapters[] = {
+      &motor_protocol_cerb_adapter, &motor_protocol_vaxor_adapter,
+      &g_mock_adapter, &cerb_copy, nullptr};
+  assert(!motor_control_dev_params_allow_motion(nullptr));
+  for (const auto *adapter : adapters) {
+    for (unsigned state = 0; state < 3; ++state) {
+      motor_control_entry_t entry{};
+      entry.adapter = adapter;
+      entry.dev_raw_present = state == 0 ? 0U :
+          (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
+      entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] = state == 1 ? 0U : 300U;
+      const bool allowed = adapter != &motor_protocol_cerb_adapter || state == 2;
+      assert(motor_control_dev_params_allow_motion(&entry) == allowed);
+      motor_control_context_t ctx;
+      motor_control_init(&ctx, g_adapters, 2);
+      bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+      disable_for_zero(&ctx, 7);
+      auto &bound = ctx.entries[0];
+      bound.adapter = adapter;
+      // 夹具会补 T_MAX，必须在夹具之后覆盖，才真正验证缺位和零值。
+      bound.dev_raw_present = entry.dev_raw_present;
+      bound.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] =
+          entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX];
+      motor_protocol_config_request_t policy{};
+      policy.request_id = 919; policy.motor_id = 7;
+      policy.kind = MOTOR_PROTOCOL_CONFIG_SET_POLICY; policy.enable = true;
+      policy.policy_generation = bound.policy_generation + 1;
+      const auto rejected = ctx.config_rejected_count;
+      assert(motor_control_submit_config(&ctx, &policy, 110) == allowed);
+      assert(ctx.config_rejected_count == rejected + (allowed ? 0U : 1U));
+      assert(has_result_event(&ctx, 919, allowed ? MOTOR_PROTOCOL_CONFIG_OK :
+          MOTOR_PROTOCOL_CONFIG_INVALID));
+      if (!allowed) assert(bound.last_failure_reason == MOTOR_CONTROL_FAULT_DEV_PARAM);
+    }
+    for (auto kind : {MOTOR_PROTOCOL_CONFIG_SET_DIRECTION,
+        MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH}) {
+      // 非法值优先于忙，忙优先于厂家门禁。
+      for (unsigned mode = 0; mode < 3; ++mode) {
+        motor_control_context_t ctx;
+        motor_control_init(&ctx, g_adapters, 2);
+        bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+        disable_for_zero(&ctx, 7);
+        ctx.entries[0].adapter = adapter;
+        ctx.entries[0].tx_active = mode != 0;
+        motor_protocol_config_request_t request{};
+        request.request_id = 920; request.motor_id = 7; request.kind = kind;
+        request.direction_raw = mode == 2 ? 2U : 1U;
+        request.save_slots = mode == 2 ? 0U : MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK;
+        const auto rejected = ctx.config_rejected_count;
+        const bool accepted = mode == 0 && adapter == &motor_protocol_cerb_adapter;
+        assert(motor_control_submit_config(&ctx, &request, 110) == accepted);
+        assert(ctx.config_rejected_count == rejected + (accepted ? 0U : 1U));
+        if (!accepted) {
+          assert(has_result_event(&ctx, 920, mode == 1 ?
+              MOTOR_PROTOCOL_CONFIG_BUSY : MOTOR_PROTOCOL_CONFIG_INVALID));
+        }
+      }
+    }
+  }
+}
+
+static void test_driver_direction_value_whitelist_and_cerb_only() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  disable_for_zero(&ctx, 7);
+  motor_protocol_config_request_t r{};
+  r.request_id = 910; r.motor_id = 7;
+  r.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION;
+  for (uint32_t raw : {2U, 0xFFFFFFFFU}) {
+    r.direction_raw = raw;
+    assert(!motor_control_submit_config(&ctx, &r, 110));
+    assert(!ctx.entries[0].tx_active);
+  }
+  r.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  for (uint8_t mask : {(uint8_t)0U, (uint8_t)1U,
+      (uint8_t)(MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK |
+      (1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION))}) {
+    r.save_slots = mask;
+    assert(!motor_control_submit_config(&ctx, &r, 110));
+    assert(!ctx.entries[0].tx_active);
+  }
+
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 7, "vaxor_2550", 100);
+  disable_for_zero(&ctx, 7);
+  r.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION; r.direction_raw = 1;
+  assert(!motor_control_submit_config(&ctx, &r, 110));
+  r.kind = MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH;
+  r.save_slots = MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK;
+  assert(!motor_control_submit_config(&ctx, &r, 111));
+  assert(!ctx.entries[0].tx_active);
+}
+
+static void test_driver_direction_write_verifies_and_marks_record_dirty() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_cerb_to_ready(&ctx, 7, "cerb_r58_101", 100);
+  disable_for_zero(&ctx, 7);
+  auto &entry = ctx.entries[0];
+  const uint8_t direction_bit =
+      (uint8_t)(1U << MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION);
+  entry.record_dirty_slots = 0U;
+
+  motor_protocol_config_request_t r{};
+  r.request_id = 920; r.motor_id = 7;
+  r.kind = MOTOR_PROTOCOL_CONFIG_SET_DIRECTION; r.direction_raw = 1;
+  assert(motor_control_submit_config(&ctx, &r, 110));
+  assert(entry.tx_active && entry.tx_kind == MOTOR_PROTOCOL_CONFIG_SET_DIRECTION);
+
+  motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+  motor_control_service(&ctx, 111);
+  size_t n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U && frames[0].can_id == 0x607U &&
+      frames[0].data[0] == 0x23U && frames[0].data[1] == 0x41U &&
+      frames[0].data[2] == 0x25U && frames[0].data[4] == 1U);
+  auto write_ack = sdo_write_ack(7, 0x2541U, 0U, 112);
+  motor_control_on_raw_frame(&ctx, &write_ack);
+  motor_control_service(&ctx, 113);
+  n = flush_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+  assert(n == 1U && frames[0].can_id == 0x607U &&
+      frames[0].data[0] == 0x40U && frames[0].data[1] == 0x41U &&
+      frames[0].data[2] == 0x25U);
+  auto read_ack = sdo_read_ack(7, MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION, 1U, 114);
+  motor_control_on_raw_frame(&ctx, &read_ack);
+  motor_control_service(&ctx, 115);
+  assert(!entry.tx_active);
+  assert(entry.dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] == 1U);
+  assert(entry.record_raw[MOTOR_PROTOCOL_PARAM_SLOT_DIRECTION] == 1U);
+  assert((entry.record_dirty_slots & direction_bit) != 0U);
+  assert(has_result_event(&ctx, 920, MOTOR_PROTOCOL_CONFIG_OK));
+}
+
 int main() {
   bind_real_adapters();
+  test_driver_direction_and_save_require_idle_and_block_enable();
+  test_vendor_admission_preserves_pointer_identity();
+  test_driver_direction_value_whitelist_and_cerb_only();
+  test_driver_direction_write_verifies_and_marks_record_dirty();
   test_set_zero_waits_for_device_ack_and_invalidates_old_feedback();
   test_set_zero_rejects_active_pending_unbound_offline_and_busy();
   test_set_zero_timeout_and_unsupported_never_enable_or_save();

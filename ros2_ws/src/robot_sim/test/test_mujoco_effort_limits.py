@@ -61,7 +61,7 @@ def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     assert len(controller.joints) == 37
     assert len(controller.rods) == 10
     import yaml
-    topology = yaml.safe_load((path.parents[1] / 'config/motor_topology.yaml').read_text())
+    topology = yaml.safe_load((path.parents[1] / 'config/model_motor_topology.yaml').read_text())
     names = [name for group in topology['differential_groups'].values() for name in group['joints']]
     pairs = list(zip(names[::2], names[1::2]))
     # All six groups at their corners, with the waist yaw also displaced.
@@ -80,10 +80,10 @@ def test_full_body_position_targets_reach_closed_loop_corners(monkeypatch):
     with pytest.raises(ValueError, match='超出仿真范围'):
         controller.apply(data, ['BN_Spine_yaw', names[0]], [0., 1.])
     np.testing.assert_array_equal(data.ctrl, previous)
-    assert controller.targets['BN_Spine_yaw'] == 0.1
+    assert controller.targets['waist_yaw'] == -0.1
     previous = data.ctrl.copy()
     with pytest.raises(ValueError, match='超出仿真范围'):
-        controller.apply(data, ['BN_RightUpperLeg_2'], [controller.limits['BN_RightUpperLeg_2'][1] + .01])
+        controller.apply(data, ['right_hip_roll'], [controller.limits['right_hip_roll'][1] + .01])
     np.testing.assert_array_equal(data.ctrl, previous)
 
 

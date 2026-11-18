@@ -13,7 +13,7 @@ struct ReliableSchedule {
   ReliablePublication next(uint32_t now, bool dirty, bool info_pending) const {
     if (static_cast<uint32_t>(now - last_publish) < 10U) return ReliablePublication::None;
     const bool status_due = static_cast<uint32_t>(now - status_attempt) >= 20U &&
-        (dirty || static_cast<uint32_t>(now - status_success) >= FIRMWARE_MOTOR_REPORT_PERIOD_MS);
+        (dirty || static_cast<uint32_t>(now - status_success) >= FIRMWARE_STATUS_REPORT_PERIOD_MS);
     if (status_due && (!info_pending || status_streak < 2U)) return ReliablePublication::Status;
     return info_pending ? ReliablePublication::Info : ReliablePublication::None;
   }

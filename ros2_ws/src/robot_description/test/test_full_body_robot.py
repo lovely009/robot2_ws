@@ -36,10 +36,15 @@ for side, suffix in (("Left", ""), ("Right", "r")):
         for index, axis in enumerate(axes, start):
             JOINT_NAMES[f"Joint_link{branch}.{index}{suffix}"] = f"BN_{side}{node}_{axis}"
 
-NAME_ALIASES = __import__('json').loads((MODEL / 'config/joint_names.json').read_text())['joints']
-JOINT_NAMES = {old: NAME_ALIASES.get(name, name) for old, name in JOINT_NAMES.items()}
+JOINT_METADATA = __import__('json').loads((MODEL / 'config/joint_names.json').read_text())
+NAME_ALIASES = JOINT_METADATA['joints']
+COORDINATES = JOINT_METADATA['native_joint_coordinates']
+NATIVE_NAMES = {name: native for native, (name, _) in COORDINATES.items()}
+JOINT_NAMES = {old: NAME_ALIASES.get(name, COORDINATES.get(name, (name, 1))[0])
+               for old, name in JOINT_NAMES.items()}
 LINK_NAMES = {"base_link": "Base_link"}
-LINK_NAMES.update({original: f"{name}_link" for original, name in JOINT_NAMES.items()})
+LINK_NAMES.update({original: f"{NATIVE_NAMES[name]}_link" for original, name in JOINT_NAMES.items()})
+CAD_TO_MODEL = [[0, 1, 0], [-1, 0, 0], [0, 0, 1]]
 
 
 def _xml_shape(element):
@@ -73,25 +78,133 @@ def test_native_visuals_cover_sources_and_unique_component_ownership():
     assert len(display.findall('.//visual')) == 68
     assert all('/visual/native/' in mesh.get('filename') for mesh in display.findall('.//mesh'))
 
-def test_display_and_collision_models_have_identical_physics():
+def test_functional_coordinates_preserve_poses_and_linkage_closure():
+    import json
     import numpy as np
+    from robot_transmission.mujoco_positions import JointPositionTargets
+
     mujoco = pytest.importorskip('mujoco')
-    display = mujoco.MjModel.from_xml_path(str(MODEL / 'mujoco/full_body_robot.xml'))
-    physics = mujoco.MjModel.from_xml_path(str(MODEL / 'mujoco/full_body_robot.physics.xml'))
-    for field in ('body_mass', 'body_inertia', 'body_ipos', 'body_iquat', 'jnt_pos', 'jnt_axis',
-                  'jnt_range', 'dof_damping', 'actuator_gainprm', 'actuator_biasprm',
-                  'actuator_ctrlrange', 'eq_data', 'qpos0'):
+    def load(filename):
+        path = MODEL / 'mujoco' / filename
+        config = json.loads(ET.parse(path).find("custom/text[@name='robot_sim_joint_position']").get('data'))
+        model = mujoco.MjModel.from_xml_path(str(path))
+        return model, mujoco.MjData(model), JointPositionTargets(model, config)
+
+    display, shown, functional = load('full_body_robot.xml')
+    physics, actual, native = load('full_body_robot.physics.xml')
+    mujoco.mj_forward(display, shown)
+    base = shown.body('Base_link')
+    world_rotation = base.xmat.reshape(3, 3).copy()
+    world_offset = base.xpos.copy()
+    ground_id = display.geom('ground').id
+    robot_geoms = np.arange(display.ngeom) != ground_id
+    convention_axes = {'roll': 0, 'pitch': 1, 'yaw': 2}
+    for name in functional.joints:
+        component = convention_axes[name.rsplit('_', 1)[-1]]
+        local_axis = shown.xaxis[display.joint(name).id] @ world_rotation
+        assert local_axis[component] > .85, name
+    for field in ('body_mass', 'dof_damping', 'actuator_gainprm', 'actuator_biasprm', 'eq_data'):
         np.testing.assert_array_equal(getattr(display, field), getattr(physics, field), err_msg=field)
+    for sign in (0, -1, 1):
+        native_pose = np.full(len(native.joints), sign * np.deg2rad(.5))
+        model_pose = [position * COORDINATES[name][1] for name, position in zip(native.joints, native_pose)]
+        native.set_configuration(actual, native_pose)
+        functional.set_configuration(shown, model_pose)
+        mujoco.mj_forward(physics, actual)
+        mujoco.mj_forward(display, shown)
+        cad_to_world = world_rotation @ np.array(CAD_TO_MODEL)
+        np.testing.assert_allclose(shown.geom_xpos[robot_geoms],
+                                   actual.geom_xpos @ cad_to_world.T + world_offset, atol=1e-10)
+        np.testing.assert_allclose(shown.site_xpos,
+                                   actual.site_xpos @ cad_to_world.T + world_offset, atol=1e-10)
+        assert max(abs(shown.efc_pos)) < 25e-6
+    functional.apply(shown, ['BN_Spine_yaw'], [.05])
+    assert functional.targets['waist_yaw'] == -.05
 
 
-def test_runtime_inertias_preserve_native_export_world_com_and_tensor():
+@pytest.mark.parametrize('filename', ['full_body_robot.xml', 'full_body_robot.180deg.xml'])
+def test_standing_pose_is_upright_and_grounded(filename):
+    import json
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    mujoco = pytest.importorskip('mujoco')
+    model = mujoco.MjModel.from_xml_path(str(MODEL / 'mujoco' / filename))
+    data = mujoco.MjData(model)
+    np.testing.assert_array_equal(data.qpos, 0)
+    mujoco.mj_resetDataKeyframe(model, data, model.key('Standing').id)
+    mujoco.mj_forward(model, data)
+    positions = data.qpos.copy()
+    angles = json.loads((MODEL / 'config/standing.json').read_text())
+    np.testing.assert_array_equal([angles[model.joint(i).name] for i in range(model.njnt)],
+                                  positions[model.jnt_qposadr])
+    robot = ET.parse(MODEL / 'urdf/full_body_robot.standing.urdf').getroot()
+    frames = {'world': (np.zeros(3), Rotation.identity())}
+    for joint in robot.findall('joint'):
+        parent = joint.find('parent').get('link')
+        child = joint.find('child').get('link')
+        origin = joint.find('origin')
+        position, rotation = frames[parent]
+        position = position + rotation.apply(np.fromstring(origin.get('xyz'), sep=' '))
+        rotation = rotation * Rotation.from_euler('xyz', np.fromstring(origin.get('rpy'), sep=' '))
+        if joint.get('type') != 'fixed':
+            axis = np.fromstring(joint.find('axis').get('xyz'), sep=' ')
+            rotation = rotation * Rotation.from_rotvec(axis * angles[joint.get('name')])
+        frames[child] = position, rotation
+    for index in range(model.nbody):
+        body = data.body(index)
+        position, rotation = frames[body.name]
+        np.testing.assert_allclose(position, body.xpos, atol=1e-8)
+        np.testing.assert_allclose(rotation.as_matrix(), body.xmat.reshape(3, 3), atol=1e-8)
+    ground = data.geom('ground')
+    assert model.geom_type[ground.id] == mujoco.mjtGeom.mjGEOM_PLANE
+    np.testing.assert_array_equal(ground.xpos, 0)
+    np.testing.assert_array_equal(ground.xmat, np.eye(3).ravel())
+    shoulders, ankles = [], []
+    for side in ('Left', 'Right'):
+        shoulders.append(data.body(f'BN_{side}Shoulder_1_link').xpos)
+        ankles.append(data.body(f'BN_{side}Foot_roll_link').xpos)
+        geom = data.geom(f'BN_{side}Foot_roll_link_robot_body')
+        mesh = model.geom_dataid[geom.id]
+        start, count = model.mesh_vertadr[mesh], model.mesh_vertnum[mesh]
+        vertices = model.mesh_vert[start:start + count] @ geom.xmat.reshape(3, 3).T + geom.xpos
+        world_z = vertices[:, 2]
+        assert world_z.min() == pytest.approx(0, abs=1e-8)
+        start, count = model.mesh_faceadr[mesh], model.mesh_facenum[mesh]
+        triangles = vertices[model.mesh_face[start:start + count]]
+        flat = triangles[np.max(np.abs(triangles[:, :, 2]), axis=1) < 1e-7]
+        support = np.cross(flat[:, 1] - flat[:, 0], flat[:, 2] - flat[:, 0])
+        assert -support[:, 2].sum() / 2 > .006
+    shoulder_center = np.mean(shoulders, axis=0)
+    for lower_center in (data.body('BN_hips_pitch_link').xpos, np.mean(ankles, axis=0)):
+        np.testing.assert_allclose(shoulder_center[:2], lower_center[:2], atol=1e-7)
+        assert shoulder_center[2] > lower_center[2]
+    mujoco.mj_step(model, data, nstep=1500)
+    np.testing.assert_allclose(data.qpos, positions, atol=1e-7)
+
+
+@pytest.mark.parametrize('runtime_name', [
+    'full_body_robot.urdf', 'full_body_robot.mapping.urdf',
+    'full_body_robot.standalone.urdf', 'full_body_robot.hil.urdf',
+    'full_body_robot.180deg.urdf', 'full_body_robot.180deg.standalone.urdf',
+])
+def test_runtime_inertias_preserve_native_export_world_com_and_tensor(runtime_name):
     import json
     import numpy as np
     from scipy.spatial.transform import Rotation
     source = ET.parse(MODEL.parent / 'robot_body/urdf/cnm.urdf').getroot()
     original = {link.get('name').strip(): link for link in source.findall('link')}
+    arm_source = ET.parse(
+        MODEL.parent / '全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf'
+    ).getroot()
+    arm_links = {
+        link.get('name').strip(): link for link in arm_source.findall('link')
+        if any(part in link.get('name') for part in ('Shoulder', 'Arm', 'Hand'))
+    }
+    assert len(arm_links) == 18
+    original.update(arm_links)
     native = json.loads((MODEL / 'config/step_alignment.json').read_text())['links']
-    runtime = ET.parse(RUNTIME_URDF).getroot()
+    runtime = ET.parse(MODEL / 'urdf' / runtime_name).getroot()
     frames = {'Base_link': np.eye(4)}
     for joint in runtime.findall('joint'):
         origin = joint.find('origin');local = np.eye(4)
@@ -106,19 +219,58 @@ def test_runtime_inertias_preserve_native_export_world_com_and_tensor():
         tensor=rotation@np.array([[xx,xy,xz],[xy,yy,yz],[xz,yz,zz]])@rotation.T
         return center,tensor,float(item.find('mass').get('value'))
     for link in runtime.findall('link'):
-        name=link.get('name');actual=inertia(link,frames[name])
+        name=link.get('name')
+        if name not in original:
+            continue
+        actual=inertia(link,frames[name])
         expected_frame=np.asarray(native[name]['world_transform'])
         mounting=json.loads((MODEL/'config/arm_mount_alignment.json').read_text())
         if name in mounting['affected_links']:
             expected_frame=np.asarray(mounting['world_transform'])@expected_frame
+        expected_frame = expected_frame.copy()
+        expected_frame[:3] = np.asarray(CAD_TO_MODEL) @ expected_frame[:3]
         expected=inertia(original[name],expected_frame)
         np.testing.assert_allclose(actual[0],expected[0],atol=1e-10)
         np.testing.assert_allclose(actual[1],expected[1],atol=1e-10)
         assert actual[2]==expected[2]
-    assert _xml_shape(runtime)==_xml_shape(ET.parse(MAPPING_URDF).getroot())
+    if runtime_name == RUNTIME_URDF.name:
+        assert _xml_shape(runtime)==_xml_shape(ET.parse(MAPPING_URDF).getroot())
+
+
+@pytest.mark.parametrize('filename', [
+    'full_body_robot.xml', 'full_body_robot.180deg.xml',
+])
+def test_mujoco_inertias_match_runtime_urdf(filename):
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    mujoco = pytest.importorskip('mujoco')
+    path = MODEL / 'mujoco' / filename
+    root = ET.parse(path).getroot()
+    model = mujoco.MjModel.from_xml_path(str(path))
+    for link in ET.parse(RUNTIME_URDF).getroot().findall('link'):
+        item = link.find('inertial')
+        origin = item.find('origin')
+        rotation = Rotation.from_euler('xyz', np.fromstring(origin.get('rpy'), sep=' ')).as_matrix()
+        xx, yy, zz, xy, xz, yz = [
+            float(item.find('inertia').get(key))
+            for key in ('ixx', 'iyy', 'izz', 'ixy', 'ixz', 'iyz')
+        ]
+        expected = rotation @ np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]) @ rotation.T
+        exported = root.find(f".//body[@name='{link.get('name')}']/inertial")
+        np.testing.assert_allclose(
+            np.fromstring(exported.get('fullinertia'), sep=' '),
+            expected[(0, 1, 2, 0, 0, 1), (0, 1, 2, 1, 2, 2)], atol=1e-14,
+        )
+        body = model.body(link.get('name'))
+        actual_rotation = Rotation.from_quat(body.iquat[[1, 2, 3, 0]]).as_matrix()
+        actual = actual_rotation @ np.diag(body.inertia) @ actual_rotation.T
+        assert body.mass[0] == float(item.find('mass').get('value'))
+        np.testing.assert_allclose(body.ipos, np.fromstring(origin.get('xyz'), sep=' '), atol=1e-10)
+        # MuJoCo's iterative inertia diagonalization has finite precision.
+        np.testing.assert_allclose(actual, expected, atol=1e-8)
 
 def test_mapping_urdf_uses_same_joint_names_by_child_link():
-    expected = {f"{name}_link": name for name in JOINT_NAMES.values()}
+    expected = {LINK_NAMES[old]: name for old, name in JOINT_NAMES.items()}
     actual = {joint.find("child").get("link"): joint.get("name")
               for joint in ET.parse(MAPPING_URDF).getroot().findall("joint")}
     assert actual == expected
@@ -197,7 +349,7 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
     assert (model.tendon_rgba[:, 3] == 0).all()
     assert len(standalone.findall("joint")) == 67
     assert len(standalone.findall(".//geometry")) == len(standalone.findall(".//geometry/mesh"))
-    topology = yaml.safe_load((MODEL / "config/motor_topology.yaml").read_text())
+    topology = yaml.safe_load((MODEL / "config/model_motor_topology.yaml").read_text())
     limits = yaml.safe_load((MODEL / "config/simulation_limits.yaml").read_text())
     assert set(limits["joint_limits"]) == {joint.get("name") for joint in controlled}
     for joint in controlled:
@@ -231,11 +383,15 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
         return data.xmat[parent].reshape(3, 3).T @ geom.xmat.reshape(3, 3)
 
     flange_rotations = {name: flange_rotation(name).copy() for name in moving_links}
+    base = data.body("Base_link")
+    base_position = base.xpos.copy()
+    base_rotation = Rotation.from_matrix(base.xmat.reshape(3, 3))
     for side, sign in (("plus", 1), ("minus", -1)):
-        mount = data.site(f"hips_{side}_platform_ball").xpos
-        np.testing.assert_allclose(mount, [sign * 0.07152, 0.05493050, 0.03120560], atol=1e-6)
-        crank = data.site(f"hips_{side}_motor_ball").xpos - data.body(f"hips_{side}_flange").xpos
-        assert sign * crank[0] > 0.029
+        mount = base_rotation.inv().apply(data.site(f"hips_{side}_platform_ball").xpos - base_position)
+        np.testing.assert_allclose(mount, [0.05493050, -sign * 0.07152, 0.03120560], atol=1e-6)
+        crank = base_rotation.inv().apply(
+            data.site(f"hips_{side}_motor_ball").xpos - data.body(f"hips_{side}_flange").xpos)
+        assert -sign * crank[1] > 0.029
     for joint in ET.parse(RUNTIME_URDF).getroot().findall("joint"):
         parent = data.body(joint.find("parent").get("link"))
         child = data.body(joint.find("child").get("link"))
@@ -251,7 +407,7 @@ def test_full_body_mujoco_combines_direct_drives_and_closed_loops():
         mujoco.mj_resetDataKeyframe(model, data, key.id)
         mujoco.mj_forward(model, data)
         np.testing.assert_allclose(data.ten_length, lengths, atol=1e-6)
-        frames = {"Base_link": (np.zeros(3), Rotation.identity())}
+        frames = {"Base_link": (base_position, base_rotation)}
         for joint in standalone.findall("joint"):
             parent = joint.find("parent").get("link")
             child = joint.find("child").get("link")
@@ -370,9 +526,9 @@ def test_joint_tree_contains_all_38_links_and_37_joints(path):
     assert len(joints) == len({joint.get("name") for joint in joints}) == 37
     assert all(joint.get("type") == "revolute" for joint in joints)
     joint_names = [joint.get("name") for joint in joints]
-    assert joint_names[:3] == ["BN_Spine_yaw", "BN_Spine_pitch", "BN_Spine_roll"]
-    left_wrist = joint_names.index("BN_LeftHand_roll")
-    assert joint_names[left_wrist:left_wrist + 2] == ["BN_LeftHand_roll", "BN_LeftHand_pitch"]
+    assert joint_names[:3] == ["waist_yaw", "waist_pitch", "waist_roll"]
+    left_wrist = joint_names.index("left_wrist_pitch")
+    assert joint_names[left_wrist:left_wrist + 2] == ["left_wrist_pitch", "left_wrist_roll"]
     children = {name: [] for name in names}
     child_links = set()
     for joint in joints:
@@ -408,7 +564,7 @@ def test_mesh_copies_match_source_and_all_references_resolve():
         assert (MODEL / filename[len(prefix):]).is_file()
 
 
-def test_preview_is_enumerable_without_invented_motor_mapping(monkeypatch):
+def test_preview_exposes_model_topology_without_enabling_hardware(monkeypatch):
     monkeypatch.syspath_prepend(str(PACKAGE.parent / "web_host"))
     from web_host.models import (
         enumerate_arm_models,
@@ -417,8 +573,9 @@ def test_preview_is_enumerable_without_invented_motor_mapping(monkeypatch):
     )
 
     assert MODEL.name in enumerate_arm_models(MODEL.parent)
-    assert not has_joint_mapping_source(MODEL.name, MODEL.parent)
+    assert has_joint_mapping_source(MODEL.name, MODEL.parent)
     metadata = model_transmissions(MODEL.name, MODEL.parent)
     assert metadata['mapping_kind'] == 'topology'
     assert metadata['hardware_ready'] is False
     assert metadata['direct_joints'] == {}
+    assert {joint for group in metadata['groups'] for joint in group['joints']} == set(NATIVE_NAMES)

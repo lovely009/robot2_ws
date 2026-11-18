@@ -19,14 +19,17 @@ import re
 import subprocess
 
 from .agent_manager import enumerate_serial_ports
-from .model_catalog import enumerate_mujoco_models, enumerate_simulation_models
+from .model_catalog import (enumerate_mujoco_models, enumerate_simulation_models,
+                            enumerate_viewer_mujoco_models)
+from .motor_sim_routes import (enumerate_usbcanfd_devices, validate_endpoints,
+                               encode_route_config, decode_route_config)
 from .systemd_units import (
     STATE_NAMES, UNIT_SIMULATION, SystemdUnits, UnitState, config_env,
     config_from_env,
 )
 
 
-_TRANSPORTS = {"vcan", "socketcan", "slcan"}
+_TRANSPORTS = {"vcan", "socketcan", "slcan", "multi"}
 _CONTROLLER_MODES = {"external", "firmware"}
 _BACKENDS = {"gazebo", "mujoco"}
 _INTERFACE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,15}$")
@@ -117,7 +120,7 @@ class SimulationProcessManager:
 
     def __init__(self, can_provider=None, serial_provider=None,
                  model_provider=None, mujoco_model_provider=None,
-                 systemd=None):
+                 systemd=None, usbcanfd_provider=None, viewer_model_provider=None):
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
@@ -125,6 +128,8 @@ class SimulationProcessManager:
             mujoco_model_provider or enumerate_mujoco_models
         )
         self._systemd = systemd or SystemdUnits()
+        self._usbcanfd_provider = usbcanfd_provider or enumerate_usbcanfd_devices
+        self._viewer_model_provider = viewer_model_provider or enumerate_viewer_mujoco_models
 
     def options(self):
         serial_ports = []
@@ -137,6 +142,7 @@ class SimulationProcessManager:
             "can_interfaces": self._can_provider(),
             "serial_ports": serial_ports,
             "models": self._model_provider(),
+            "usbcanfd_devices": self._usbcanfd_provider(),
             # 后端能力：MuJoCo 需要模型自带 MJCF，前端据此过滤模型下拉
             "mujoco_models": self._mujoco_model_provider(),
         }
@@ -149,7 +155,7 @@ class SimulationProcessManager:
         model = request.get("model")
         backend = request.get("backend")
         if not isinstance(transport, str) or transport not in _TRANSPORTS:
-            raise ValueError("transport must be vcan, socketcan or slcan")
+            raise ValueError("transport must be vcan, socketcan, slcan or multi")
         if mode == "host":
             raise ValueError(
                 "controller_mode=host is retired; use firmware for MCU control "
@@ -159,6 +165,8 @@ class SimulationProcessManager:
             raise ValueError("controller_mode must be external or firmware")
         if not isinstance(backend, str) or backend not in _BACKENDS:
             raise ValueError("backend must be gazebo or mujoco")
+        if transport == "multi" and mode != "firmware":
+            raise ValueError("multi-channel transport requires firmware mode")
         if mode == "firmware" and transport == "vcan":
             raise ValueError("vcan is software-only and cannot connect to an MCU")
 
@@ -166,7 +174,7 @@ class SimulationProcessManager:
             backend == "mujoco"
             and mode == "external"
             and isinstance(model, str)
-            and model not in self._model_provider()
+            and (model not in self._model_provider() or model in self._viewer_model_provider())
             and model in self._mujoco_model_provider()
         )
         if standalone_mujoco:
@@ -220,7 +228,17 @@ class SimulationProcessManager:
                     "confirm that the physical CAN bus has no real motor load"
                 )
 
-            if transport == "socketcan":
+            if transport == "multi":
+                try:
+                    rows = json.loads(request.get('sim_channels_json', ''))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError('sim_channels_json must be a JSON channel list') from exc
+                rows = validate_endpoints(rows, self._can_provider(), self._serial_provider(),
+                                          self._usbcanfd_provider())
+                value = json.dumps(rows, separators=(',', ':'))
+                config['sim_channels_json'] = value
+                launch_args.append('sim_channels_json:=' + value)
+            elif transport == "socketcan":
                 available = {
                     item["name"]: item for item in self._can_provider()
                     if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -271,7 +289,7 @@ class SimulationProcessManager:
                else self._systemd.environment(UNIT_SIMULATION))
         return {
             "state": STATE_NAMES[unit.state],
-            "config": config_from_env(_CONFIG_ENV_PREFIX, env, _CONFIG_DECODERS),
+            "config": decode_route_config(config_from_env(_CONFIG_ENV_PREFIX, env, _CONFIG_DECODERS)),
             "returncode": unit.returncode,
         }
 
@@ -296,7 +314,7 @@ class SimulationProcessManager:
             UNIT_SIMULATION,
             ["ros2", "launch", "robot_sim", launch_file,
              *launch_args],
-            session_env=config_env(_CONFIG_ENV_PREFIX, config))
+            session_env=config_env(_CONFIG_ENV_PREFIX, encode_route_config(config)))
         return self._status()
 
     def stop(self):

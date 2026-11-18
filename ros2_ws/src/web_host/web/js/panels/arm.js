@@ -1,18 +1,5 @@
-// 臂视图面板：URDF → three.js，关节角由 /joint_states 反馈驱动。
-//
-// 本模块**只做显示**：不订阅、不发布任何话题（core/ros.js 写入 store，这里读），
-// 因此它坏掉也只是看不见臂，不影响任何控制链路。
-//
-// 依赖全部 vendor 在 web/vendor/（three 0.160.1 + urdf-loader 0.13.1），
-// 由 index.html 的原生 import map 解析，无构建步骤。
-//
-// 几何来源：几何体不在 web/ 里（约 70 MB STL）——static_server 把模型包根
-// （含 models/）挂到 /robot_sim，URDF 里的 package://robot_description/... 经
-// loader.packages 映射成 /robot_sim/...。模型可在页内切换（底栏选择器，见 mount）。
-//
-// 关节轴标直接挂在 URDFJoint 下（随臂运动），透明球拾取与状态着色都在这里。
-// 与重构前的 arm3d.js 相比：去掉 window.Arm3D 全局桥（改由 mount 直接调用），
-// 新增 unmount 的资源释放（切屏会反复挂载，不释放会一路涨显存）。
+// URDF 三维视图，从 store 读取关节反馈，并提供轴标、拾取和状态着色。
+// package://robot_description/ 资源由 loader 映射到 /robot_sim/。
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -59,7 +46,7 @@ function tick(now) {
 }
 
 export function init(canvas, opts) {
-  const { urdfUrl, packages = {}, onProgress, onReady, onError } = opts;
+  const { urdfUrl, initialPositionsUrl, packages = {}, onProgress, onReady, onError } = opts;
   onSelect = opts.onSelect || null;
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -118,14 +105,19 @@ export function init(canvas, opts) {
     ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) o.material = ghostMat; });
     ghost.visible = false;
     root.add(ghost);
-    placeGround(robot, grid);
+    if (!initialPositionsUrl) placeGround(robot, grid);
     frameCamera(robot);
     renderRequested = true;
     canvas.dataset.modelReady = 'true';
   };
-  loader.load(urdfUrl, (r) => {
+  const load = (initialPositions) => loader.load(urdfUrl, (r) => {
     if (gen !== loadGen) { return; }
     robot = r;
+    // CAD 根坐标带有整体倾角，按零位脊柱坐标摆正整机，反馈仍使用原关节角。
+    if (!initialPositions && robot.robotName === 'full_body_robot' && robot.joints.BN_Spine_yaw) {
+      robot.quaternion.copy(robot.joints.BN_Spine_yaw.quaternion).invert();
+    }
+    applyValues(robot, initialPositions);
     // 这臂没有关节限位动画，包围盒按几何算；关掉剔除免得绕到背后就整段消失。
     robot.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; } });
     root.add(robot);
@@ -148,6 +140,18 @@ export function init(canvas, opts) {
     if (gen !== loadGen) { return; }
     if (onError) { onError(err); }
   });
+  if (initialPositionsUrl) {
+    fetch(initialPositionsUrl).then(response => {
+      if (!response.ok) throw new Error(`站姿配置读取失败（HTTP ${response.status}）`);
+      return response.json();
+    }).then(positions => {
+      if (gen === loadGen) load(positions);
+    }).catch(error => {
+      if (gen === loadGen && onError) onError(error);
+    });
+  } else {
+    load(null);
+  }
 
   renderer.setAnimationLoop(tick);
 }
@@ -438,9 +442,11 @@ export function mount(rootEl, ctx) {
       stage.prepend(canvas);
     }
     const simulationVisual = MODEL === 'full_body_robot';
-    const urdfName = simulationVisual ? `${MODEL}.standalone.urdf` : `${MODEL}.urdf`;
+    const modelUrl = `/robot_sim/models/${MODEL}`;
+    const urdfName = simulationVisual ? `${MODEL}.standing.urdf` : `${MODEL}.urdf`;
     init(canvas, {
-      urdfUrl: `/robot_sim/models/${MODEL}/urdf/${urdfName}`,
+      urdfUrl: `${modelUrl}/urdf/${urdfName}`,
+      initialPositionsUrl: simulationVisual ? `${modelUrl}/config/standing.json` : undefined,
       // package://robot_description/... → static_server 挂在根部的模型包根
       packages: {'robot_description': '/robot_sim'},
       onSelect: pickJoint,

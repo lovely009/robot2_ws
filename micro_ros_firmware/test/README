@@ -1,72 +1,38 @@
 # 固件测试
 
-## Host 回归测试
+## 宿主测试
 
-在 `micro_ros_firmware` 目录使用全新的 `.host-build/`：
+在 `micro_ros_firmware` 目录执行以下命令。
 
 ```bash
-cmake -E remove_directory .host-build
 cmake -S test/host -B .host-build
-cmake --build .host-build --clean-first -j2
+cmake --build .host-build -j2
 ctest --test-dir .host-build --output-on-failure
 ```
 
-该入口验证不依赖目标板的纯逻辑模块。目标清单以 `test/host/CMakeLists.txt`
-注册项和 `ctest -N` 为准。
+测试目标由 `test/host/CMakeLists.txt` 注册，可用 `ctest --test-dir .host-build -N` 查看。测试涵盖协议、控制状态机、邮箱、时钟、发送调度和设备事务。
 
-host 测试不模拟 HAL、FreeRTOS 或 rclc；目标板编译也只证明静态集成和链接，
-二者均不能替代真机时序与失效测试。
-
-可靠发送回归还需用固件缓存中的 `micro-CDR`、`Micro-XRCE-DDS-Client`
-源码构建宿主库（先安装 Micro-CDR，再以 `UCLIENT_SUPERBUILD=OFF` 构建 XRCE）。
-将安装前缀通过 `CMAKE_PREFIX_PATH` 传给上述 CMake 后，会增加
-`test_reliable_publish`。只运行本项可使用：
+`test_reliable_publish` 需要 Micro-CDR 和 Micro-XRCE-DDS-Client 宿主库。先安装 Micro-CDR，再以 `UCLIENT_SUPERBUILD=OFF` 构建 XRCE，将安装前缀传给 `CMAKE_PREFIX_PATH`。
 
 ```bash
 cmake --build .host-build --target test_reliable_publish
 ctest --test-dir .host-build -R '^test_reliable_publish$' --output-on-failure
 ```
 
-该测试链接真实 XRCE 库及固件的连续分片禁用策略，覆盖历史槽不足时不遗留半条报文、
-ACK 后恢复、最大 Status/Info 载荷。更新出站消息时还需运行
-`micro_ros_agent/tools/test_agent_wire_contract.py` 核对最大合法消息容量。
+该测试链接真实 XRCE 库，检查历史槽不足、ACK 后恢复以及最大 Status/Info 载荷。消息容量校验位于 `micro_ros_agent/tools/test_agent_wire_contract.py`。
 
-## 固件 clean 构建
-
-已缓存依赖时，清理固件对象并重新链接：
+## 固件构建
 
 ```bash
-~/.platformio/penv/bin/pio run -t clean
 ~/.platformio/penv/bin/pio run
 ```
 
-修改 `platformio.ini` 编译宏后必须 clean，避免 HAL SrcWrapper 沿用旧对象。记录最终
-RAM/Flash 用量，并检查相对基线没有新增 warning。常规验证不得运行
-`clean_microros`；全新机器或删除 micro-ROS 构建环境后，bootstrap 需要联网下载
-依赖和 ROS 2 源。
+修改 `platformio.ini` 编译宏后，先运行 `pio run -t clean`，避免 HAL SrcWrapper 使用旧对象。构建输出包含 RAM 和 Flash 用量。
 
-## 结构检查
+`clean_microros` 会删除 micro-ROS 构建环境，后续构建需要重新下载依赖。`.host-build/` 和 `.pio/` 为本地产物。
 
-从 `micro_ros_firmware` 执行：
+## 台架验证
 
-```bash
-test "$(readlink extra_packages/can_bridge_msgs)" = "../../micro_ros_agent/src/can_bridge_msgs"
-! rg -n "fdcanx_send|HAL_FDCAN" -g '*_bridge.cpp' src
-rg -n "vTaskDelayUntil" src/motor/motor_rt_task.cpp
-! rg -n "xQueueCreateStatic|xQueueSendFromISR" lib/board/src/can_bsp.c
-git -C .. diff --check
-```
+宿主测试覆盖独立逻辑模块。HAL、FreeRTOS、rclc 和实际总线时序在目标板上验证。
 
-这些检查分别确认：消息定义复用同仓库权威包；ROS bridge 不绕过
-`motor_rt_task` 直接发送；实时任务使用绝对周期延时；FDCAN ISR 不恢复
-FreeRTOS 队列；Git diff 没有空白错误。
-
-## 真机边界
-
-无负载真机清单只供人工在 `dev-real` 执行，且必须先确认硬件急停与供电隔离可用。
-重点记录 RX burst 下的 WCET/jitter、30/100ms 快照超时、Agent 重连、授权恢复、
-vaxor/CERB 混挂、CERB SYNC、CAN 无 ACK 与 BMI088 异常。自动验证不得烧录或
-驱动电机；当前机构无抱闸，host 测试和固件 build 不能表述为硬件安全验证。
-
-`.host-build/` 是本地构建目录，不得提交。PlatformIO Test Runner 用法见
-<https://docs.platformio.org/en/latest/advanced/unit-testing/index.html>。
+台架项目包括 RX burst 下的执行时间与抖动、命令断流、Agent 重连、授权恢复、VAXOR/CERB 混挂、CERB SYNC、CAN 无 ACK 和 BMI088 异常。烧录、驱动电机及持久化写入按现场授权执行。

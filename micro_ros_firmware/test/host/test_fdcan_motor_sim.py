@@ -48,15 +48,16 @@ else:
 
 pending = {}
 MODULE.schedule_feedback_window(pending, [7, 8, 9], 1.0, 0.0022)
-assert pending == {7: [1.0], 8: [1.0022], 9: [1.0044]}
+assert {mid: [d.due for d in deadlines] for mid, deadlines in pending.items()} == {
+    7: [1.0], 8: [1.0022], 9: [1.0044]}
 
 # 下一 SYNC 窗口既不能覆盖旧 deadline，也不能丢掉当前窗口的新 deadline。
 pending[7].pop(0)
 pending[8].pop(0)
 MODULE.schedule_feedback_window(pending, [7, 8, 9], 1.02, 0.0022)
-assert pending[9] == [1.0044, 1.0244]
-assert pending[7] == [1.02]
-assert pending[8] == [1.0222]
+assert [d.due for d in pending[9]] == [1.0044, 1.0244]
+assert [d.due for d in pending[7]] == [1.02]
+assert [d.due for d in pending[8]] == [1.0222]
 
 # 身份分段上传字节格式须与固件 cerb_adapter 匹配。
 sim = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
@@ -234,6 +235,7 @@ def _bare_sim(fb_period_ms=60, stagger_ms=2.2):
     s.models = {1: MODULE.MotorModel(1, "cerb"),
                 2: MODULE.MotorModel(2, "vaxor")}
     s.next_send = {}
+    s.clock = MODULE.HostEpochClock()
     s.fb_period = fb_period_ms / 1000.0
     s.stagger = stagger_ms / 1000.0
     s.last_window_at = 100.0
@@ -263,9 +265,9 @@ assert _w.window_count == 0 and _w.next_send == {}
 # 到周期：补一轮，两台各一条 deadline，按 stagger 错峰
 assert _w.maybe_fallback_window(100.0 + 0.060)
 assert _w.window_count == 1
-assert len(_w.next_send[1]) == 1 and abs(_w.next_send[1][0] - 100.06) < 1e-9
+assert len(_w.next_send[1]) == 1 and abs(_w.next_send[1][0].due - 100.06) < 1e-9
 assert len(_w.next_send[2]) == 1
-assert abs(_w.next_send[2][0] - _w.next_send[1][0] - 0.0022) < 1e-9
+assert abs(_w.next_send[2][0].due - _w.next_send[1][0].due - 0.0022) < 1e-9
 # "到点才补"，不是每拍都补：紧接着的下一拍不补
 assert not _w.maybe_fallback_window(100.0 + 0.061)
 assert _w.window_count == 1
@@ -397,6 +399,7 @@ assert _r["ok"] and _cnt[1].linked and not _cnt[1].enabled \
 _purge = MODULE.CanMotorSim.__new__(MODULE.CanMotorSim)
 _purge.models = {1: MODULE.MotorModel(1, "cerb")}
 _purge.next_send = {1: [0.0]}
+_purge.last_feedback = {}
 assert _purge.apply_control({"cmd": "link", "id": 1, "up": False})["ok"]
 assert _purge.next_send == {}
 assert _purge.apply_control({"cmd": "remove", "id": 1})["ok"]
@@ -411,6 +414,7 @@ _win.next_send = {}
 _win.stagger = 0.0022
 _win.last_window_at = 0.0
 _win.window_count = 0
+_win.clock = MODULE.HostEpochClock()
 _win.register_feedback_window(10.0)
 assert sorted(_win.next_send) == [2]
 
@@ -521,6 +525,21 @@ def _model(mid, kind="cerb"):
     return m
 
 
+_direct = _bridge()
+_direct.control_mode = "position"
+_direct.position_holding_groups = set()
+_direct.pos["joint_link1"] = 0.4
+_neutral = _model(1)
+_neutral.last_cmd = MODULE.cerb_decode_command(bytes.fromhex("cc 80 00 80 00 00 00 08 00"))
+_direct.publish_commands({1: _neutral})
+assert _direct.pub.msg.data[0] == 0.4
+_direct.pos["joint_link1"] = 0.45
+_direct.publish_commands({1: _neutral})
+assert _direct.pub.msg.data[0] == 0.4
+_neutral.last_cmd = MODULE.cerb_decode_command(bytes.fromhex("cc 80 00 80 00 31 00 08 00"))
+_direct.publish_commands({1: _neutral})
+assert _direct.pub.msg.data[0] == _neutral.last_cmd["pos_rad"]
+
 _b = _bridge()
 _ms = {1: _model(1), 2: _model(2)}
 _ms[2].enabled = False                      # 未使能
@@ -580,6 +599,9 @@ def _capture_main_sim_and_bridge(argv):
     class _FakeSim:
         def __init__(self, *args, **kwargs):
             sim_kwargs.update(kwargs)
+
+        def close(self):
+            pass
 
     class _FakeBridge:
         def __init__(self, *args, **kwargs):

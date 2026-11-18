@@ -25,6 +25,7 @@
 #include "time_utils.h"
 #include "wire_codec.h"
 #include "reliable_schedule.hpp"
+#include "reliable_publish.hpp"
 
 static constexpr size_t kMotorCapacity = can_bridge_msgs__msg__AgentWireContract__MOTOR_COUNT_MAX;
 static constexpr size_t kChunkCapacity = can_bridge_msgs__msg__AgentWireContract__MOTION_CHUNK_MAX;
@@ -95,6 +96,7 @@ static void note_publish(rcl_ret_t rc) {
 }
 
 static bool send_reliable(rcl_publisher_t *publisher, const void *message) {
+  ReliableTelemetryQueueScope queue_scope;
   serial_transport_send_begin();
   const rcl_ret_t rc = rcl_publish(publisher, message, nullptr);
   serial_transport_send_end();
@@ -120,7 +122,7 @@ bool motor_bridge_begin_session(uint64_t epoch_ns) {
   g_have_sent_status = false;
   const uint32_t now = millis();
   g_motion_tick = now - kMotionIntervalMs;
-  g_schedule = {now - 10U, now - 20U, now - FIRMWARE_MOTOR_REPORT_PERIOD_MS, 0};
+  g_schedule = {now - 10U, now - 20U, now - FIRMWARE_STATUS_REPORT_PERIOD_MS, 0};
   return true;
 }
 
@@ -426,6 +428,8 @@ static uint32_t status_fingerprint(void) {
   fingerprint_add(hash, m.stop_generation);
   fingerprint_add(hash, m.required_policy_generation);
   fingerprint_add(hash, m.lease_valid);
+  fingerprint_add(hash, m.lease_id);
+  fingerprint_add(hash, m.lease_active);
   fingerprint_add(hash, m.clock_valid);
   fingerprint_add(hash, m.clock_sync_failures);
   fingerprint_add(hash, m.save_in_progress);

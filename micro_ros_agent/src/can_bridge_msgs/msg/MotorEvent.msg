@@ -1,4 +1,4 @@
-# 拓扑/安全事件（ARD-0007 §18.2）：即时通知；MCU 单调时戳仅用于事件排序。
+# 拓扑和控制事件，MCU 单调时间戳用于事件排序。
 # event_type 与 firmware motor_control_event_type_t 对齐：
 #   0=DISCOVERED 1=PROFILE_BOUND 2=PROFILE_REJECTED 3=READY 4=ACTIVE
 #   5=SOFT_STOP 6=DISABLE 7=FAULT 8=CONFIG_CONFLICT 9=OFFLINE

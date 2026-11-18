@@ -4,6 +4,7 @@ project(motor_hardware_interface)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(can_bridge_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(realtime_tools REQUIRED)
@@ -24,7 +25,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(${PROJECT_NAME}
-  can_bridge_msgs hardware_interface controller_interface realtime_tools sensor_msgs pluginlib rclcpp rclcpp_lifecycle robot_transmission std_msgs)
+  can_bridge_msgs diagnostic_msgs hardware_interface controller_interface realtime_tools sensor_msgs pluginlib rclcpp rclcpp_lifecycle robot_transmission std_msgs)
 
 pluginlib_export_plugin_description_file(hardware_interface hardware_plugins.xml)
 pluginlib_export_plugin_description_file(controller_interface controller_plugins.xml)
@@ -47,7 +48,7 @@ install(PROGRAMS scripts/firmware_topic_bridge.py scripts/workbench_control.py
         DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(can_bridge_msgs controller_interface realtime_tools sensor_msgs hardware_interface pluginlib rclcpp rclcpp_lifecycle std_msgs robot_transmission)
+ament_export_dependencies(can_bridge_msgs diagnostic_msgs controller_interface realtime_tools sensor_msgs hardware_interface pluginlib rclcpp rclcpp_lifecycle std_msgs robot_transmission)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

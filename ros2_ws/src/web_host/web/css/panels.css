@@ -145,6 +145,7 @@ details[open] > summary::before { content: '▾'; }
 .drawer-body { padding-bottom: 4px; }
 
 /* ---------- 关节索引（TF 侧） ---------- */
+#jointControlDisable[hidden] { display: none; }
 /* 单行紧凑排布：关节名 / 数值 / TF 年龄同一行，18 根不滚动全部可见（三栏齐平高度内）。
    每行是独立网格：名字列 1fr 可截断，数值与年龄定宽（不定宽则列随内容参差），
    完整信息（帧对、类型、对应电机）看行的 title。 */
@@ -317,3 +318,5 @@ details.curve-multiselect[open] > summary { border-color: var(--accent); }
   .curve-controls .spacer { display: none; }
   .curve-multiselect-menu { max-width: calc(100vw - 24px); }
 }
+
+.sim-channel-route { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px; align-items: end; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }

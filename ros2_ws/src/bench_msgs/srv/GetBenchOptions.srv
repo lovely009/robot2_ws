@@ -5,3 +5,4 @@ string can_interfaces_json
 string serial_ports_json
 string[] simulation_models    # 有 config/simulation_topology.yaml 的模型
 string[] mujoco_models        # 有 mujoco/<名>.xml 且 standalone.urdf 的模型
+string usbcanfd_devices_json  # 创芯 USB-CAN FD 枚举，含 index/path/accessible

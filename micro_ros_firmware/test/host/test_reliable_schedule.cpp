@@ -3,13 +3,21 @@
 #include <cstdint>
 
 int main() {
+  ReliableSchedule quiet{};
+  assert(quiet.next(20, false, false) == ReliablePublication::None);
+  assert(quiet.next(99, false, false) == ReliablePublication::None);
+  assert(quiet.next(100, false, false) == ReliablePublication::Status);
+  quiet.record(100, ReliablePublication::Status, true);
+  assert(quiet.next(119, true, false) == ReliablePublication::None);
+  assert(quiet.next(120, true, false) == ReliablePublication::Status);
+
   ReliableSchedule schedule{};
   assert(schedule.next(19, false, false) == ReliablePublication::None);
-  assert(schedule.next(20, false, true) == ReliablePublication::Status);
+  assert(schedule.next(20, true, true) == ReliablePublication::Status);
   schedule.record(20, ReliablePublication::Status, true);
   assert(schedule.next(29, true, true) == ReliablePublication::None);
   assert(schedule.next(30, true, false) == ReliablePublication::None);
-  assert(schedule.next(40, false, true) == ReliablePublication::Status);
+  assert(schedule.next(40, true, true) == ReliablePublication::Status);
   schedule.record(40, ReliablePublication::Status, true);
   assert(schedule.next(60, false, true) == ReliablePublication::Info);
   schedule.record(60, ReliablePublication::Info, false);
@@ -26,10 +34,12 @@ int main() {
   assert(failed.next(50, false, true) == ReliablePublication::Info);
   failed.record(50, ReliablePublication::Info, true);
   assert(failed.next(59, false, true) == ReliablePublication::None);
-  assert(failed.next(60, false, false) == ReliablePublication::Status);
+  assert(failed.next(60, false, false) == ReliablePublication::None);
+  assert(failed.next(140, false, false) == ReliablePublication::Status);
 
   ReliableSchedule wrapping{UINT32_MAX - 5, UINT32_MAX - 5, UINT32_MAX - 5, 0};
   assert(wrapping.next(3, true, true) == ReliablePublication::None);
   assert(wrapping.next(4, true, true) == ReliablePublication::Info);
-  assert(wrapping.next(14, false, false) == ReliablePublication::Status);
+  assert(wrapping.next(14, false, false) == ReliablePublication::None);
+  assert(wrapping.next(94, false, false) == ReliablePublication::Status);
 }

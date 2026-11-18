@@ -53,7 +53,7 @@ export function createJointRow(joint, {send, sendError, syncLimits, simulationBo
     editor.setAttribute('aria-label', `编辑 ${label}`);
     button.title = '单击编辑软限位；Enter 或离开输入框保存，Esc 取消；仅约束后续目标';
     const begin = () => {
-      if (editing || saving) return;
+      if (button.disabled || editing || saving) return;
       editing = side; editError = '';draft = null;result = '';sender.cancel();select();
       const bounds = getJointLimits(store, model, joint);
       editor.value = bounds[side] === null ? '' : String(bounds[side]);
@@ -104,15 +104,21 @@ export function createJointRow(joint, {send, sendError, syncLimits, simulationBo
     element.querySelector('.jstate').classList.toggle('warn', age >= STALE_MS);
     const sim = simulationBounds(joint.name);
     const bounds = sim ?? getJointLimits(store, model, joint);
+    const dynamic = bounds.dynamic === true;
     const nextBounds = JSON.stringify([sim?.session,bounds.lower,bounds.upper]);
-    if (boundsKey !== nextBounds) {boundsKey=nextBounds;sender.cancel();draft=null;result='';}
+    if (boundsKey !== nextBounds) {
+      boundsKey = nextBounds;
+      const keepDraft = dynamic && !bounds.error && Number.isFinite(draft)
+        && bounds.lower <= draft && draft <= bounds.upper;
+      if (!keepDraft) {sender.cancel();draft=null;result='';}
+    }
     const available = bounds.lower !== null && bounds.upper !== null && !bounds.error;
     for (const side of ['lower', 'upper']) {
       const button = element.querySelector(`[data-bound="${side}"]`);
-      button.textContent = bounds[side] === null ? (sim ? '—' : '设置') : fmt(bounds[side], 3);
-      button.disabled = Boolean(sim);
-      button.title = sim ? '当前 MuJoCo 模型的仿真范围' : '单击编辑软限位';
-      if (sim && editing === side) {
+      button.textContent = bounds[side] === null ? (sim || dynamic ? '—' : '设置') : fmt(bounds[side], 3);
+      button.disabled = Boolean(sim) || dynamic;
+      button.title = dynamic ? '当前姿态下的耦合动态限位' : sim ? '当前 MuJoCo 模型的仿真范围' : '单击编辑软限位';
+      if ((sim || dynamic) && editing === side) {
         editing = null;
         button.hidden = false;
         element.querySelector(`[data-bound-editor="${side}"]`).hidden = true;

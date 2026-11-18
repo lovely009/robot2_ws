@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 
 import yaml
-from ament_index_python.packages import get_package_prefix
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -42,7 +42,7 @@ from launch.actions import (
     RegisterEventHandler,
 )
 from launch.event_handlers import OnShutdown
-from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -78,10 +78,26 @@ def _bridge_environment() -> dict:
 
 def _launch_setup(context):
     """把启动参数写成临时 params 文件交给桥节点（避免在命令行里拼长参数串）。"""
+    model = LaunchConfiguration("model").perform(context)
+    model_path = Path(LaunchConfiguration("mujoco_model").perform(context))
+    model_dir = Path(get_package_share_directory("robot_description")) / "models" / model
+    variant = "standalone"
+    if model == "full_body_robot" and model_path.resolve() in {
+        (model_dir / "mujoco" / filename).resolve()
+        for filename in ("full_body_robot.xml", "full_body_robot.180deg.xml")
+    }:
+        variant = "standing"
+    urdf = (model_dir / "urdf" / f"{model}.{variant}.urdf").read_text()
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        output="both",
+        parameters=[{"robot_description": ParameterValue(urdf, value_type=str), "use_sim_time": True}],
+    )
     parameters = {
         "mujoco_effort_bridge": {
             "ros__parameters": {
-                "mujoco_model": LaunchConfiguration("mujoco_model").perform(context),
+                "mujoco_model": str(model_path),
                 "effort_topic": "/arm_effort_controller/commands",
                 "joint_states_topic": "/joint_states",
                 "joint_names": LaunchConfiguration("joint_names").perform(context),
@@ -93,6 +109,10 @@ def _launch_setup(context):
                     LaunchConfiguration("sim_speed_factor").perform(context)
                 ),
                 "headless": LaunchConfiguration("headless").perform(context).lower() in TRUTHY,
+                "position_input": LaunchConfiguration('position_input').perform(context).lower() in TRUTHY,
+                "registered_input_topic": "/robot_sim/registered_input_joints",
+                "registry_timeout_s": 0.5,
+                "hold_groups": LaunchConfiguration("hold_groups").perform(context),
             }
         }
     }
@@ -117,27 +137,13 @@ def _launch_setup(context):
         shutil.rmtree(directory, ignore_errors=True)
         return []
 
-    return [bridge, RegisterEventHandler(OnShutdown(
+    return [robot_state_publisher, bridge, RegisterEventHandler(OnShutdown(
         on_shutdown=[OpaqueFunction(function=cleanup)]))]
 
 
 def generate_launch_description():
     pkg_share = FindPackageShare("robot_description")
     model = LaunchConfiguration("model")
-    # MuJoCo 侧基座固定（MJCF 无 free joint），与 Gazebo 的 fixed_base:=true 等价，
-    # 因此用不带 world 的 standalone 模型
-    urdf_file = PathJoinSubstitution(
-        [pkg_share, "models", model, "urdf", [model, ".standalone.urdf"]]
-    )
-    robot_description = ParameterValue(Command(["cat ", urdf_file]), value_type=str)
-
-    robot_state_publisher = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        output="both",
-        parameters=[{"robot_description": robot_description, "use_sim_time": True}],
-    )
-
     return LaunchDescription(
         [
             DeclareLaunchArgument("model", default_value="half_body_robot",
@@ -157,6 +163,14 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("headless", default_value="false",
                                   description="true = 不开 MuJoCo viewer 窗口"),
+            DeclareLaunchArgument('position_input', default_value='false',
+                                  description='接收外部位置数组驱动现有位置执行器（HIL）'),
+            DeclareLaunchArgument(
+                'hold_groups',
+                default_value='',
+                description='JSON：耦合组 [{inputs:[...],outputs:[...]}]，由上层从'
+                            'motor_topology.yaml + driver 构造；空=直连 fallback',
+            ),
             DeclareLaunchArgument("control_hz", default_value="100.0",
                                   description="控制/发布频率。HIL 闭环里它决定"
                                               "被控对象状态帧的节拍，是 PD 回路的"
@@ -168,7 +182,6 @@ def generate_launch_description():
                                   description="仿真速度倍率（1.0 = 实时）"),
             DeclareLaunchArgument("command_timeout_s", default_value="0.5",
                                   description="命令超时（秒）后力矩清零"),
-            robot_state_publisher,
             OpaqueFunction(function=_launch_setup),
         ]
     )

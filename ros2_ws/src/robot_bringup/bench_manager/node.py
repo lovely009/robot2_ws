@@ -57,7 +57,8 @@ from .agent_manager import AgentProcessManager, enumerate_serial_ports
 from .feedback_manager import FirmwareFeedbackManager, FeedbackInventory
 from .gravity_feedforward_manager import GravityFeedforwardManager
 from .motor_sim_manager import MotorSimProcessManager, hil_motor_backend_request
-from .model_catalog import enumerate_mujoco_models, enumerate_simulation_models
+from .model_catalog import (enumerate_mujoco_models, enumerate_simulation_models,
+                            enumerate_viewer_mujoco_models)
 from .simulation_manager import SimulationProcessManager
 from .systemd_units import (
     UNIT_AGENT, UNIT_MOTOR_BACKEND, UNIT_SIMULATION, UNIT_FEEDBACK,
@@ -92,8 +93,8 @@ def _simulation_request(message):
         'physical_bus_isolated': bool(message.physical_bus_isolated),
     }
     for key in ('vcan_interface', 'sim_interface', 'driver_interface',
-                'sim_tty', 'driver_tty'):
-        value = getattr(message, key)
+                'sim_tty', 'driver_tty', 'sim_channels_json'):
+        value = getattr(message, key, '')
         if value:
             request[key] = value
     if message.spawn_z:
@@ -102,7 +103,7 @@ def _simulation_request(message):
         except ValueError:
             raise ValueError('spawn_z must be a number (metres)') from None
     for key in ('gravity', 'fixed_base'):
-        value = getattr(message, key)
+        value = getattr(message, key, '')
         if value:
             if value not in ('true', 'false'):
                 raise ValueError(f'{key} must be "true" or "false"')
@@ -144,6 +145,7 @@ class BenchManager(LifecycleNode):
         self.simulation = SimulationProcessManager(
             model_provider=model_provider,
             mujoco_model_provider=partial(enumerate_mujoco_models, models_root),
+            viewer_model_provider=partial(enumerate_viewer_mujoco_models, models_root),
             systemd=self._systemd)
         self.motor_backend = MotorSimProcessManager(
             model_provider=model_provider, systemd=self._systemd)
@@ -358,6 +360,8 @@ class BenchManager(LifecycleNode):
             options['can_interfaces'], ensure_ascii=False)
         response.serial_ports_json = json.dumps(
             options['serial_ports'], ensure_ascii=False)
+        response.usbcanfd_devices_json = json.dumps(
+            options['usbcanfd_devices'], ensure_ascii=False)
         response.simulation_models = options['models']
         response.mujoco_models = options['mujoco_models']
         return response
@@ -439,7 +443,9 @@ class BenchManager(LifecycleNode):
                 'transport': request.transport,
                 'physical_bus_isolated': bool(request.physical_bus_isolated),
             }
-            if request.transport == 'socketcan':
+            if request.transport == 'multi':
+                motor_request['sim_channels_json'] = request.sim_channels_json
+            elif request.transport == 'socketcan':
                 motor_request['sim_interface'] = request.sim_interface
             else:
                 motor_request['sim_tty'] = request.sim_tty

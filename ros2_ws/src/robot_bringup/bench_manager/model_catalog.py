@@ -1,5 +1,6 @@
 """模型目录的只读查询；不依赖进程管理、仿真器或设备访问。"""
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -44,3 +45,15 @@ def enumerate_mujoco_models(root=None):
         and (entry / "mujoco" / f"{entry.name}.xml").is_file()
         and (entry / "urdf" / f"{entry.name}.standalone.urdf").is_file()
     )
+
+
+def enumerate_viewer_mujoco_models(root=None):
+    """位置预览模型提供 HIL 拓扑后，external 入口仍使用独立 Viewer。"""
+    models_root = Path(root) if root is not None else default_models_root()
+    result = []
+    for name in enumerate_mujoco_models(models_root):
+        marker = ET.parse(models_root / name / 'mujoco' / f'{name}.xml').find(
+            "custom/text[@name='robot_sim_control_mode']")
+        if marker is not None and marker.get('data') == 'viewer_position':
+            result.append(name)
+    return result

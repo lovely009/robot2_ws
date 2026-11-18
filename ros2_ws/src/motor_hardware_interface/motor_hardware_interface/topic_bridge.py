@@ -2,29 +2,11 @@
 
 import math
 
-MAX_TRAJECTORY_POINTS = 256
-MAX_TRAJECTORY_MOTORS = 64
-
-
 class BridgeError(ValueError):
-    """本地校验失败。消息面向操作者：说清是哪一条、为什么。"""
-
-
-# ---------------------------------------------------------------------------
-# 纯函数（无 ROS 依赖，可单测）
-# ---------------------------------------------------------------------------
+    """反馈映射或关节参数无效。"""
 
 def motion_states_to_joint_state(states, joint_of_motor):
-    """`MotorMotionStateArray.states` → JointState 的四条并行数组。
-
-    states: [{'motor_id', 'position', 'velocity', 'effort'}, ...]
-    joint_of_motor: {motor_id: joint_name}
-
-    约定与理由：
-      · 未映射的电机**忽略**（桥只管映射表里声明过的关节）；
-      · 任一量是 NaN/Inf 的关节**整条跳过**——不发 0。发 0 会让 rviz /
-        robot_state_publisher 把"没有数据"当成"关节真的在 0 位"，那是在骗人。
-    """
+    """生成 JointState 数组，跳过未映射或含无效测量值的电机。"""
     names, pos, vel, eff = [], [], [], []
     for st in states:
         joint = joint_of_motor.get(st.get('motor_id'))
@@ -51,8 +33,3 @@ def parse_joint_map(motor_ids, joint_names):
     if len(set(motor_ids)) != len(motor_ids):
         raise BridgeError('motor_ids 里有重复：%s' % list(motor_ids))
     return dict(zip(motor_ids, joint_names))
-
-
-def motor_accepts_joint_target(online: bool, lifecycle: int, fault: int) -> bool:
-    """就绪态允许首目标；逐电机策略授权由固件在执行前裁决。"""
-    return bool(online) and lifecycle in (3, 4) and fault == 0

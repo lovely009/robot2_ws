@@ -4,8 +4,8 @@
 motor_id, position, velocity, torque|effort}]}`）。本模块只管文件层；播放入口
 位于前端 `js/panels/actionLibrary.js`，通过受监督的主机控制路径执行。
 
-读写都落在 share 安装树的 `action_library/`：内置文件在 `--symlink-install`
-下是指回源码的符号链接（覆盖即写回源码），导入的新文件写在安装树里。
+工作区读写统一使用源码 `action_library/`，与 BVH 目录同步；
+独立部署或自定义 web_root 使用其兄弟目录 `action_library/`。
 """
 
 import json
@@ -21,12 +21,7 @@ _MAX_TEXT_BYTES = 8 * 1024 * 1024
 
 
 def actions_directory(web_root: str) -> Path:
-    """动作库目录 = web_root 的兄弟目录 `action_library/`。"""
-    return Path(web_root).parent / "action_library"
-
-
-def bvh_directory(web_root: str) -> Path:
-    """工作区安装优先读取源码 BVH；独立部署仍使用安装动作库。"""
+    """工作区安装优先使用源码动作库；独立部署使用安装动作库。"""
     package = Path(web_root).absolute().parent
     # colcon 支持 isolated install 与 merge install 两种布局。
     if package.name == 'web_host' and package.parent.name == 'share':
@@ -37,6 +32,11 @@ def bvh_directory(web_root: str) -> Path:
             source = prefix.parent / 'src' / 'web_host' / 'action_library'
             if (source.parent / 'package.xml').is_file() and source.is_dir():
                 return source
+    return Path(web_root).parent / "action_library"
+
+
+def bvh_directory(web_root: str) -> Path:
+    """BVH 与 JSON 共用同一个动作库目录。"""
     return actions_directory(web_root)
 
 

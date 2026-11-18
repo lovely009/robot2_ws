@@ -35,7 +35,8 @@ async function fixture(page: Page) {
     w.ros.connect();
     await new Promise(resolve=>setTimeout(resolve,0));
     const now=Date.now(),s=w.store;
-    s.modelTransmissions={model:data.MODEL,groups:[{name:'elbow',motors:[{id:1}],joints:['elbow']}]};
+    s.modelTransmissions={model:data.MODEL,policy_defaults:{1:{kp:30,kd:1}},
+      groups:[{name:'elbow',motors:[{id:1}],joints:['elbow']}]};
     s.modelJoints=[{name:'elbow',type:'revolute',lower:-1,upper:1,velocity:1}];
     s.motors.set(1,{status:{online:true,lifecycle:4},motion:{position:.1}});
     s.jointStates={last:now,byName:{elbow:{position:.1,at:now}}};
@@ -46,7 +47,7 @@ async function fixture(page: Page) {
     },100);
     w.controlStatus={model:data.MODEL,joint_names:['elbow'],mode:'trajectory',reason:'ok',reject:'',
       output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
-      gravity_enabled:true,effort_gain:.8};
+      feedback_fresh:true,controllers_ready:true,active_controllers:[],gravity_enabled:true,effort_gain:.8};
     data.applyCommandStatus(w.controlStatus);
     w.panels=[];
     for(const id of ['jointList']){
@@ -88,6 +89,46 @@ test('滑块提交连续位置目标，由主机生成平滑指令',async({page}
   expect(msg.position).toEqual([.3]);
   expect(msg.velocity).toEqual([]);
   expect(msg).not.toHaveProperty('points');
+  expect(errors).toEqual([]);
+});
+
+test('HIL 动态限位更新保留合法拖动目标，端点只读且零范围锁定', async ({page}) => {
+  const errors = await fixture(page);
+  const row = page.locator('[data-joint="elbow"]');
+  const slider = row.locator('input[type="range"]');
+  const lower = row.locator('[data-bound="lower"]');
+  await expect(lower).toBeEnabled();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.store.transmissionStatus.data.dynamic_joint_names = ['elbow'];
+    w.store.transmissionStatus.data.joint_limits.elbow = {lower: -.2, upper: .3};
+    w.data.markDirty(w.data.DIRTY.STATUS);
+  });
+  await expect(lower).toBeDisabled();
+  await expect(row.locator('[data-bound="upper"]')).toBeDisabled();
+  await expect(lower).toHaveAttribute('title', /动态限位/);
+  await expect(slider).toBeEnabled();
+  await expect(slider).toHaveAttribute('min', '-0.2');
+  await expect(slider).toHaveAttribute('max', '0.3');
+  await slider.evaluate((element: HTMLInputElement) => {
+    element.value = '0.2';
+    element.dispatchEvent(new Event('input', {bubbles: true}));
+  });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.store.transmissionStatus.data.joint_limits.elbow = {lower: -.1, upper: .25};
+    w.data.markDirty(w.data.DIRTY.STATUS);
+  });
+  await expect(slider).toHaveAttribute('max', '0.25');
+  await expect(slider).toHaveValue('0.2');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.store.transmissionStatus.data.joint_limits.elbow = {lower: 0, upper: 0};
+    w.data.markDirty(w.data.DIRTY.STATUS);
+  });
+  await expect(slider).toBeDisabled();
+  await expect(slider).toHaveAttribute('title', /锁定/);
+  expect(await page.evaluate(() => (window as any).services)).toEqual([]);
   expect(errors).toEqual([]);
 });
 

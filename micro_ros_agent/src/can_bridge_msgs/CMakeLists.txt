@@ -38,7 +38,7 @@ rosidl_generate_interfaces(
   "msg/AgentDeviceInfo.msg"
   "msg/AgentOperationDetail.msg"
   "msg/AgentInfo.msg"
-  # ID 化有界电机消息（ARD-0007 §15-20）
+  # 按电机 ID 编码的有界消息
   "msg/MotorCommandTarget.msg"
   "msg/MotorCommandArray.msg"
   "msg/ControlLease.msg"

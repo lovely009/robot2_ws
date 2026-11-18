@@ -35,10 +35,17 @@ export function createLatestTargetSender({send, isCurrent, onError=()=>{}, inter
   };
 }
 
+function controlGroups(state) {
+  return state.modelTransmissions?.hardware_ready === false
+    ? state.transmissionStatus?.data?.control_groups
+    : state.modelTransmissions?.groups;
+}
+
 export function controlSessionError(state, model, now = Date.now()) {
   if (!state.conn?.connected) return '未连接 rosbridge';
   const meta = state.modelTransmissions;
-  if (meta?.model === model && meta.hardware_ready === false)
+  if (meta?.model === model && meta.hardware_ready === false
+      && !Array.isArray(controlGroups(state)))
     return meta.hardware_block_reason || '传动参数待标定';
   if (meta?.model !== model || meta.error || !Array.isArray(meta.groups) || !meta.groups.length
       || meta.groups.some(g => !Array.isArray(g?.joints) || !g.joints.length
@@ -54,9 +61,17 @@ export function controlSessionError(state, model, now = Date.now()) {
     return '主机轨迹路由未就绪';
   }
   if (command.data.model !== model) return '页面模型与 ros2_control 模型不一致';
-  if (command.data.feedback_fresh === false) return '主机关节反馈未就绪，请检查主机控制会话';
-  if (command.data.controllers_ready === false) return '主机控制器未就绪';
-  const joints = meta.groups.flatMap(g => g.joints);
+  if (command.data.feedback_fresh !== true) return '主机关节反馈未就绪，请检查主机控制会话';
+  if (command.data.controllers_ready !== true) return '主机控制器未就绪';
+  const groups = controlGroups(state);
+  if (!Array.isArray(groups) || !groups.length || groups.some(group =>
+    !Array.isArray(group?.joints) || !group.joints.length
+    || !Array.isArray(group?.motors) || !group.motors.length)) return '主机控制传动组无效';
+  const motors = groups.flatMap(group => group.motors.map(member => member?.id));
+  const knownMotors = new Set(meta.groups.flatMap(group => group.motors.map(member => Number(member.id))));
+  if (new Set(motors).size !== motors.length
+      || motors.some(id => !Number.isInteger(id) || !knownMotors.has(id))) return '主机控制电机与模型不一致';
+  const joints = groups.flatMap(g => g.joints);
   const controlled = runtime.data.joint_names;
   const reported = command.data.joint_names;
   if (new Set(joints).size !== joints.length || joints.some(name => typeof name !== 'string' || !name)
@@ -64,7 +79,9 @@ export function controlSessionError(state, model, now = Date.now()) {
       || controlled.some(name => !joints.includes(name))
       || !Array.isArray(reported) || reported.length !== controlled.length
       || new Set(reported).size !== reported.length || controlled.some(name => !reported.includes(name))
-      || meta.groups.some(group => group.joints.some(name => controlled.includes(name))
+      || (meta.hardware_ready === false && (joints.length !== controlled.length
+        || command.data.feedback_fresh !== true || command.data.controllers_ready !== true))
+      || groups.some(group => group.joints.some(name => controlled.includes(name))
         && !group.joints.every(name => controlled.includes(name)))) {
     return '主机控制关节与模型完整传动组不一致';
   }
@@ -74,10 +91,11 @@ export function controlSessionError(state, model, now = Date.now()) {
 export function jointControlError(state, model, joint, now = Date.now()) {
   const session = controlSessionError(state, model, now);
   if (session) return session;
-  const meta = state.modelTransmissions;
-  const group = meta.groups.find(g => g.joints.includes(joint));
-  if (!group) return '关节未配置传动组';
+  if (!state.modelTransmissions.groups.some(group => group.joints.includes(joint)))
+    return '关节未配置模型传动组';
   if (!state.transmissionStatus.data.joint_names.includes(joint)) return '该关节未接入当前控制会话';
+  const group = controlGroups(state).find(g => g.joints.includes(joint));
+  if (!group) return '关节未配置传动组';
   for (const name of group.joints) {
     const limitError = jointLimitSyncError(state, model, name);
     if (limitError) return limitError;
@@ -105,20 +123,6 @@ export function jointControlError(state, model, joint, now = Date.now()) {
     }
   }
   return '';
-}
-
-export function buildJointTrajectory(state, model, joint, target, seconds, now = Date.now()) {
-  const error = jointControlError(state, model, joint, now);
-  if (error) throw new Error(error);
-  if (!Number.isFinite(target) || !Number.isFinite(seconds) || seconds < .01 || seconds > 60) {
-    throw new Error('目标必须为有限值，到达时间须在 0.01～60 秒');
-  }
-  const limitError = jointTargetLimitError(state, model, joint, target);
-  if (limitError) throw new Error(limitError);
-  const ms = Math.round(seconds*1000);
-  return {header:{stamp:{sec:Math.floor(now/1000),nanosec:(now%1000)*1e6},frame_id:''},
-    joint_names:[joint], points:[{positions:[target],velocities:[],accelerations:[],effort:[],
-      time_from_start:{sec:Math.floor(ms/1000),nanosec:(ms%1000)*1e6}}]};
 }
 
 export function buildJointTarget(state, model, joint, target, now=Date.now()) {

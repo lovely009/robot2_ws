@@ -1,0 +1,155 @@
+motors:
+  1:
+    joint: waist_yaw
+    can_node_id: 1
+  2:
+    can_node_id: 2
+  3:
+    can_node_id: 3
+  4:
+    can_node_id: 4
+  5:
+    can_node_id: 5
+  6:
+    can_node_id: 6
+  7:
+    can_node_id: 7
+  8:
+    joint: left_shoulder_pitch
+    can_node_id: 8
+  9:
+    joint: left_shoulder_roll
+    can_node_id: 9
+  10:
+    joint: left_shoulder_yaw
+    can_node_id: 10
+  11:
+    joint: left_elbow_pitch
+    can_node_id: 11
+  12:
+    joint: left_forearm_yaw
+    can_node_id: 12
+  13:
+    can_node_id: 13
+  14:
+    can_node_id: 14
+  15:
+    can_node_id: 15
+  16:
+    can_node_id: 16
+  17:
+    joint: right_shoulder_pitch
+    can_node_id: 17
+  18:
+    joint: right_shoulder_roll
+    can_node_id: 18
+  19:
+    joint: right_shoulder_yaw
+    can_node_id: 19
+  20:
+    joint: right_elbow_pitch
+    can_node_id: 20
+  21:
+    joint: right_forearm_yaw
+    can_node_id: 21
+  22:
+    can_node_id: 22
+  23:
+    can_node_id: 23
+  24:
+    joint: left_hip_pitch
+    can_node_id: 24
+  25:
+    joint: left_hip_roll
+    can_node_id: 25
+  26:
+    joint: left_hip_yaw
+    can_node_id: 26
+  27:
+    joint: left_knee_pitch
+    can_node_id: 27
+  28:
+    joint: left_shank_yaw
+    can_node_id: 28
+  29:
+    joint: left_ankle_pitch
+    can_node_id: 29
+  30:
+    joint: left_ankle_roll
+    can_node_id: 30
+  31:
+    joint: right_hip_pitch
+    can_node_id: 31
+  32:
+    joint: right_hip_roll
+    can_node_id: 32
+  33:
+    joint: right_hip_yaw
+    can_node_id: 33
+  34:
+    joint: right_knee_pitch
+    can_node_id: 34
+  35:
+    joint: right_shank_yaw
+    can_node_id: 35
+  36:
+    joint: right_ankle_pitch
+    can_node_id: 36
+  37:
+    joint: right_ankle_roll
+    can_node_id: 37
+differential_groups:
+  waist:
+    motor_numbers:
+    - 2
+    - 3
+    joints:
+    - waist_pitch
+    - waist_roll
+    ratio: null
+    direction: null
+  hips:
+    motor_numbers:
+    - 4
+    - 5
+    joints:
+    - pelvis_roll
+    - pelvis_pitch
+    ratio: null
+    direction: null
+  left_shoulder:
+    motor_numbers:
+    - 6
+    - 7
+    joints:
+    - left_scapula_yaw
+    - left_scapula_roll
+    ratio: null
+    direction: null
+  left_wrist:
+    motor_numbers:
+    - 13
+    - 14
+    joints:
+    - left_wrist_pitch
+    - left_wrist_roll
+    ratio: null
+    direction: null
+  right_shoulder:
+    motor_numbers:
+    - 15
+    - 16
+    joints:
+    - right_scapula_yaw
+    - right_scapula_roll
+    ratio: null
+    direction: null
+  right_wrist:
+    motor_numbers:
+    - 22
+    - 23
+    joints:
+    - right_wrist_pitch
+    - right_wrist_roll
+    ratio: null
+    direction: null

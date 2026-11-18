@@ -13,9 +13,13 @@ class JointPositionTargets:
         self.pose = mujoco.MjData(model)
         self.joints = {name: model.joint(name).qposadr[0] for name in config["joints"]}
         self.aliases = dict(config.get("joint_aliases", {}))
+        self.alias_signs = dict(config.get("joint_alias_signs", {}))
         if any(target not in self.joints or (name in self.joints and name != target)
                for name, target in self.aliases.items()):
             raise ValueError("仿真关节别名必须指向实际关节且不能覆盖其他关节")
+        if any(name not in self.aliases or sign not in (-1, 1)
+               for name, sign in self.alias_signs.items()):
+            raise ValueError("仿真关节别名方向无效")
         self.targets = {name: float(model.qpos0[address]) for name, address in self.joints.items()}
         if "joint_limits" in config:
             self.limits = {name: tuple(bounds) for name, bounds in config["joint_limits"].items()}
@@ -87,11 +91,12 @@ class JointPositionTargets:
     def apply(self, data, names, positions):
         if not names:
             raise ValueError("关节名称和位置须成对，且名称不可重复")
-        names = [self.aliases.get(name, name) for name in names]
-        if not names or len(names) != len(positions) or len(set(names)) != len(names):
+        canonical = [self.aliases.get(name, name) for name in names]
+        if len(canonical) != len(positions) or len(set(canonical)) != len(canonical):
             raise ValueError("关节名称和位置须成对，且名称不可重复")
         bounded = {}
-        for name, position in zip(names, positions):
+        for alias, name, position in zip(names, canonical, positions):
+            position *= self.alias_signs.get(alias, 1)
             if name not in self.limits:
                 raise ValueError(f"未知的仿真关节 {name}")
             lower, upper = self.limits[name]

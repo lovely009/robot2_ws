@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <limits>
 #include <thread>
 #include "motor_hardware_interface/joint_follow_controller.hpp"
 
@@ -7,7 +8,7 @@ using motor_hardware_interface::JointFollowController;
 using Callback = controller_interface::CallbackReturn;
 using Return = controller_interface::return_type;
 
-TEST(JointFollowController, ContinuousRetargetStopBarrierAndFeedbackProtection) {
+TEST(JointFollowController, ContinuousRetargetDelayedFeedbackAndStopBarrier) {
   JointFollowController controller;
   rclcpp::NodeOptions options;
   options.automatically_declare_parameters_from_overrides(true);
@@ -32,6 +33,11 @@ TEST(JointFollowController, ContinuousRetargetStopBarrierAndFeedbackProtection) 
   controller.assign_interfaces(std::move(commands), std::move(states));
   ASSERT_EQ(controller.on_activate(rclcpp_lifecycle::State()), Callback::SUCCESS);
   auto node = std::make_shared<rclcpp::Node>("follow_test_peer");
+  std::vector<diagnostic_msgs::msg::DiagnosticArray> diagnostics;
+  auto diagnostic_sub = node->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+    "/follow_test/diagnostics", 1, [&](const diagnostic_msgs::msg::DiagnosticArray &message) {
+      diagnostics.push_back(message);
+    });
   auto publisher = node->create_publisher<sensor_msgs::msg::JointState>("/follow_test/target", 1);
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(controller.get_node()->get_node_base_interface());
@@ -68,12 +74,38 @@ TEST(JointFollowController, ContinuousRetargetStopBarrierAndFeedbackProtection) 
   ASSERT_EQ(tick(), Return::OK);
   EXPECT_DOUBLE_EQ(p, .1); EXPECT_DOUBLE_EQ(v, 0);
   target(.5);
+  // A delayed plant can be more than 0.1 rad behind the smooth command.
+  // Its response must not permanently freeze the controller's target stream.
+  for (int i = 0; i < 60; ++i) {
+    ASSERT_EQ(tick(), Return::OK);
+  }
+  EXPECT_DOUBLE_EQ(p, .5);
+  measured = p;
   ASSERT_EQ(tick(), Return::OK);
-  measured = p - .11;
+  measured = std::numeric_limits<double>::quiet_NaN();
   EXPECT_EQ(tick(), Return::ERROR);
   measured = p;
   EXPECT_EQ(tick(), Return::ERROR);  // A fresh sample alone must not restart a faulted controller.
   EXPECT_DOUBLE_EQ(e, 4);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+  while (diagnostics.size() < 2 && std::chrono::steady_clock::now() < deadline) {
+    executor.spin_some();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_GE(diagnostics.size(), 2U);
+  ASSERT_EQ(diagnostics.front().status.size(), 1U);
+  EXPECT_EQ(diagnostics.front().status.front().level,
+            diagnostic_msgs::msg::DiagnosticStatus::ERROR);
+  EXPECT_EQ(diagnostics.front().status.front().name, "/follow_test");
+  EXPECT_NE(diagnostics.front().status.front().message.find("joint"), std::string::npos);
+  EXPECT_GT(rclcpp::Time(diagnostics.front().header.stamp).nanoseconds(), 0);
+  EXPECT_EQ(diagnostics.front().header.stamp, diagnostics.back().header.stamp);
+  ASSERT_EQ(controller.on_deactivate(rclcpp_lifecycle::State()), Callback::SUCCESS);
+  ASSERT_EQ(controller.on_activate(rclcpp_lifecycle::State()), Callback::SUCCESS);
+  const auto count = diagnostics.size();
+  target(.2);
+  ASSERT_EQ(tick(), Return::OK);
+  EXPECT_EQ(diagnostics.size(), count);
 }
 
 int main(int argc, char **argv) {

@@ -462,7 +462,7 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
   }
   const auto now = Clock::now();
   if (!source_stamp_ok(message->sync_time_ns, now, kMotionFresh, now)) {
-    if (active_) fail("motion snapshot is stale");
+    if (active_ && writer_enabled_) fail("motion snapshot is stale");
     return;
   }
   const auto received_ns = now_ns();
@@ -473,7 +473,7 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
   for (const auto &state : message->states) {
     if (expected_ids_.count(state.motor_id) &&
         static_cast<uint64_t>(state.state_age_ms) + source_delay_ms > kMotionFresh.count()) {
-      if (active_) fail("motion snapshot is stale");
+      if (active_ && writer_enabled_) fail("motion snapshot is stale");
       return;
     }
   }
@@ -522,7 +522,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
   }
   const auto now = Clock::now();
   if (!source_stamp_ok(message->sync_time_ns, now, kControlFresh, now)) {
-    if (active_) fail("control stream snapshot is stale");
+    if (active_ && writer_enabled_) fail("control stream snapshot is stale");
     return;
   }
   if (control_session_ != message->session_id) {
@@ -591,16 +591,24 @@ bool MicroRosSystem::controls_armed(const TimePoint &now, std::string &error) co
   if (!latest_control_) {
     return false;
   }
+  bool enabled = false;
   for (const auto &state : latest_control_->states) {
+    if (!state.policy_enabled) {
+      continue;
+    }
+    enabled = true;
     if (!state.online ||
         state.control_lifecycle != can_bridge_msgs::msg::MotorControlState::LIFECYCLE_ACTIVE ||
-        !state.policy_enabled || !healthy_execution(state.execution_state) ||
+        !healthy_execution(state.execution_state) ||
         state.unified_fault_code != 0U || state.vendor_fault_code != 0U) {
-      error = "not all configured motors have ACTIVE, healthy policy";
+      error = "enabled motor lacks ACTIVE, healthy policy";
       return false;
     }
   }
-  return true;
+  if (!enabled) {
+    error = "no configured motor has an enabled policy";
+  }
+  return enabled;
 }
 
 bool MicroRosSystem::update_states(const TimePoint &now, bool latch, std::string &error) {
@@ -751,6 +759,13 @@ bool MicroRosSystem::publish(bool commanded, std::string &error) {
     }
     std::set<uint16_t> seen;
     for (const auto &name : model_->actuator_names()) {
+      const auto motor_id = static_cast<uint16_t>(model_->actuator_ids().at(name));
+      const auto control = std::find_if(
+        latest_control_->states.begin(), latest_control_->states.end(),
+        [motor_id](const auto &state) { return state.motor_id == motor_id; });
+      if (control == latest_control_->states.end() || !control->policy_enabled) {
+        continue;
+      }
       const auto axis = actuators.find(name);
       if (axis == actuators.end() || !std::isfinite(axis->second.position) ||
           !std::isfinite(axis->second.velocity) || !std::isfinite(axis->second.effort)) {
@@ -758,7 +773,7 @@ bool MicroRosSystem::publish(bool commanded, std::string &error) {
         return false;
       }
       can_bridge_msgs::msg::MotorCommandTarget target;
-      target.motor_id = static_cast<uint16_t>(model_->actuator_ids().at(name));
+      target.motor_id = motor_id;
       target.position = static_cast<float>(axis->second.position);
       target.velocity = static_cast<float>(axis->second.velocity);
       target.effort = static_cast<float>(axis->second.effort);
@@ -861,8 +876,17 @@ MicroRosSystem::read(const rclcpp::Time &time, const rclcpp::Duration &period) {
   }
   const auto now = Clock::now();
   std::string error;
-  if (!control_current(now, true, error) || !update_states(now, true, error)) {
-    return hardware_interface::return_type::ERROR;
+  if (!control_current(now, writer_enabled_, error) ||
+      !update_states(now, writer_enabled_, error)) {
+    if (writer_enabled_) {
+      return hardware_interface::return_type::ERROR;
+    }
+    const auto invalid = std::numeric_limits<double>::quiet_NaN();
+    std::fill(position_.begin(), position_.end(), invalid);
+    std::fill(velocity_.begin(), velocity_.end(), invalid);
+    std::fill(effort_.begin(), effort_.end(), invalid);
+    armed_ = false;
+    return hardware_interface::return_type::OK;
   }
   if (!writer_enabled_) {
     armed_ = false;

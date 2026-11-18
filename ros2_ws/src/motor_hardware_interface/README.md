@@ -1,18 +1,16 @@
 # MCU 反馈适配与离线控制器测试
 
-实机电机统一由 micro-ROS MCU 控制。请使用 `robot_bringup/robot.launch.py`；主机不直接打开电机 CAN 或串口设备。
+`MicroRosSystem` 通过 micro-ROS MCU 控制电机，由 `robot_bringup/robot.launch.py` 启动。
 
-pluginlib 只导出 `MicroRosSystem`；实机通过 `robot_bringup/robot.launch.py` 启动。构建后需重新加载当前工作区；不要用旧安装目录启动设备。
-
-本包继续提供 `firmware_topic_bridge.py`、控制状态跟踪和传动适配。实机动作播放由主机 JTC 插值，滑块由连续跟随控制器生成目标，MCU 执行周期目标；下面的模拟入口用于离线验证。
+`firmware_topic_bridge.py` 将电机反馈换算为关节反馈。动作播放由主机 JTC 插值，滑块由连续跟随控制器生成目标，MCU 执行周期目标。
 
 实机 `host_trajectory.launch.py` 的路径位置误差为 `0.1`，到位误差为 `0.05`（转动关节单位 rad，移动关节单位 m），终点额外等待 `1 s`。位置限位以关节面板提交并经主机回读确认的范围为准，URDF 仅提供默认范围；速度和力矩仍按模型校验。取消回复为空时会等待旧目标终态，确认超时仍停止。
 
-滑块通过 `/control/joint_target` (`sensor_msgs/JointState`) 提交关节名和位置，不提交到达时间或 JTC goal。`follow_controller` 从上一周期指令位置、速度连续接续，沿用 URDF 速度上限，加速度上限为速度上限 / 0.5 s；松手后到达并保持最后目标。主机以 50 Hz 更新，下行/上行仍为 50/50 Hz、MCU 电机执行仍为 200 Hz。停止、客户端断连或切换控制器会丢弃旧目标，重新激活从实测位置开始。
+滑块通过 `/control/joint_target` (`sensor_msgs/JointState`) 提交关节名和位置。连续跟随、停止和重新激活的行为见[关节目标跟随](../../../docs/architecture/joint-target-following.md)。
 
 工作台整条轨迹最多 8192 个展开后的电机路点，每个传输分段最多 256 点；全部分段在 2 秒内收齐并通过时间戳、限位校验后才提交一个 JTC goal。缺段、总点数超限或停止会丢弃未提交轨迹，不执行部分内容。
 
-动作库 `MotorTrajectory` 沿用消息约定：位置与时间决定执行曲线，文件中的速度仅用于诊断，仍须为有限值。主机完成传动映射后，在关节空间按位置和不等时间间隔生成单调 Hermite 切矢，首末速度为零，随后仍检查整段位置、速度限位；原 JSON 不变。该关节空间插值不保证与旧固件在任意耦合电机空间的插值等价。原生 `JointTrajectory` 和手动 P/V/E 继续使用显式速度；轨迹非零 effort 仍拒绝。
+动作库 `MotorTrajectory` 按位置与时间生成执行曲线，文件中的速度用于诊断，要求为有限值。主机完成传动映射后，在关节空间生成单调 Hermite 切矢，首末速度为零，并校验整段位置和速度限位。原生 `JointTrajectory` 和手动 P/V/E 使用显式速度。主机轨迹入口拒绝非零 effort。
 
 原始采样对比动作可显式设置 `interpolation: "linear"`，经 `/control/trajectory_raw` 使用 JTC 原生位置线性插值，保留位置和时刻，不生成平滑切矢。该模式仍校验每段两端位置和割线速度限值，保留共用的组包、取消、停止与 MCU 保护；路点处速度可以不连续。未指定该字段的现有动作保持默认单调插值。
 

@@ -22,7 +22,7 @@ export const store = {
   conn: {connected: false, text: '未连接', url: '', agent: 'stopped', agentDevice: '',
          agentError: '', agentReturncode: null, canStop: false, lastMsgAt: 0,
          autoLoaded: false, benchLoaded: false},
-  // motors: id -> {topo, motion, status}（与重构前的 state.motors 同形状，搬迁期不改字段名）
+  // 按电机 ID 保存拓扑、运动反馈和诊断状态。
   motors: new Map(),
   controlStates: createControlStateCache(),
   agentWireStatus: null,
@@ -138,18 +138,74 @@ export function syncWriteButtons(ids, allow) {
 // agent 段顺带同步进 conn.agent*（顶栏文案由 Vue 工作台渲染）；
 // 页面本地的「starting/stopping」瞬时态会被下一帧服务端真实状态覆盖，属预期。
 // 无效状态立即撤销身份，不能用旧会话继续控制。
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const names = value => Array.isArray(value) && value.every(name => typeof name === 'string' && name.trim())
+  && new Set(value).size === value.length;
+const joints = value => names(value) && value.length > 0;
+const optional = (snapshot, key, valid) => snapshot[key] === undefined || valid(snapshot[key]);
+
 export function applyCommandStatus(snapshot) {
-  const valid = snapshot && typeof snapshot.model === 'string' && snapshot.model
-    && Array.isArray(snapshot.joint_names) && snapshot.joint_names.length
-    && snapshot.joint_names.every(name => typeof name === 'string' && name)
-    && new Set(snapshot.joint_names).size === snapshot.joint_names.length
-    && typeof snapshot.mode === 'string'
+  const valid = object(snapshot) && typeof snapshot.model === 'string' && snapshot.model.trim()
+    && joints(snapshot.joint_names) && typeof snapshot.mode === 'string'
     && snapshot.output_topic === '/motor/host_command_array'
     && snapshot.trajectory_output_topic === '/host_control/trajectory_controller/follow_joint_trajectory'
+    && typeof snapshot.feedback_fresh === 'boolean' && typeof snapshot.controllers_ready === 'boolean'
+    && Array.isArray(snapshot.active_controllers) && snapshot.active_controllers.every(name => typeof name === 'string')
     && (snapshot.gravity_enabled === null || typeof snapshot.gravity_enabled === 'boolean')
-    && (snapshot.effort_gain === null || (Number.isFinite(snapshot.effort_gain) && snapshot.effort_gain >= 0));
+    && (snapshot.effort_gain === null || (Number.isFinite(snapshot.effort_gain) && snapshot.effort_gain >= 0))
+    && optional(snapshot, 'joint_trajectory_ids', value => typeof value === 'boolean')
+    && ['reason','reject'].every(key => optional(snapshot,key,value => typeof value === 'string'));
   store.commandStatus = valid ? {data: snapshot, last: Date.now()} : {data: null, last: 0};
   markDirty(DIRTY.COMMAND);
+}
+
+export function applyTransmissionStatus(snapshot) {
+  const valid = object(snapshot) && typeof snapshot.model === 'string' && snapshot.model.trim()
+    && joints(snapshot.joint_names) && typeof snapshot.trajectory_enabled === 'boolean'
+    && ['feedback_fresh','controllers_ready','joint_trajectory_ids'].every(key => optional(snapshot,key,value => typeof value === 'boolean'))
+    && optional(snapshot,'active_controllers',value => Array.isArray(value) && value.every(name => typeof name === 'string'))
+    && optional(snapshot,'gravity_enabled',value => value === null || typeof value === 'boolean')
+    && optional(snapshot,'effort_gain',value => value === null || (Number.isFinite(value) && value >= 0))
+    && optional(snapshot,'control_groups',groups => {
+      if (!Array.isArray(groups)) return false;
+      const motorIds = [], jointNames = [], groupNames = [];
+      for (const group of groups) {
+        if (!object(group) || typeof group.name !== 'string' || !group.name.trim()
+            || !joints(group.joints) || !Array.isArray(group.motors) || !group.motors.length
+            || group.motors.some(motor => !object(motor) || !Number.isInteger(motor.id) || motor.id < 1 || motor.id > 65535)) return false;
+        groupNames.push(group.name); jointNames.push(...group.joints);
+        motorIds.push(...group.motors.map(motor => motor.id));
+      }
+      return names(groupNames) && names(jointNames) && new Set(motorIds).size === motorIds.length
+        && snapshot.joint_names.every(name => jointNames.includes(name));
+    })
+    && optional(snapshot,'dynamic_joint_names',value => names(value) && value.every(name => snapshot.joint_names.includes(name)))
+    && optional(snapshot,'joint_limits',value => object(value) && Object.entries(value).every(([name,bounds]) =>
+      name.trim() && object(bounds) && [bounds.lower,bounds.upper].every(bound => bound === null || Number.isFinite(bound))
+      && (bounds.lower === null || bounds.upper === null || bounds.lower <= bounds.upper)))
+    && optional(snapshot,'joint_limit_errors',value => object(value) && Object.entries(value).every(([name,error]) => name.trim() && typeof error === 'string'))
+    && ['joint_limit_error','last_error','control_service','trajectory_topic','control_state_source','driver_file']
+      .every(key => optional(snapshot,key,value => typeof value === 'string'));
+  store.transmissionStatus = valid ? {data:snapshot,last:Date.now()} : {data:null,last:0};
+  markDirty(DIRTY.STATUS);
+}
+
+export function observeTrajectory(message) {
+  store.traj.activeTrajectoryId = message.trajectory_id;
+  store.traj.state = {trajectory_id:message.trajectory_id,active:!!message.active,
+    completed:!!message.completed,elapsed_ms:message.elapsed_ms,total_ms:message.total_ms,
+    target_ids:message.target_ids || []};
+  markDirty(DIRTY.TRAJ);
+}
+
+export function beginTrajectory(id, clearState=false) {
+  store.traj.activeTrajectoryId = id;
+  if (clearState) store.traj.state = null;
+}
+
+export function resetTrajectory() {
+  store.traj.state = null;
+  store.traj.activeTrajectoryId = 0;
 }
 
 export function applyBenchStatus(snapshot) {
@@ -158,9 +214,16 @@ export function applyBenchStatus(snapshot) {
   if (snapshot.simulation) bench.simulation = snapshot.simulation;
   if (snapshot.motor_backend) bench.motor_backend = snapshot.motor_backend;
   if (snapshot.feedback) bench.feedback = snapshot.feedback;
-  if (snapshot.gravity_feedforward) {
-    bench.gravity_feedforward = snapshot.gravity_feedforward;
-    bench.gravity_feedforward_last = Date.now();
+  if ('gravity_feedforward' in snapshot) {
+    const gravity = snapshot.gravity_feedforward;
+    const valid = object(gravity)
+      && optional(gravity,'pending',value => value === null || value === 'start' || value === 'stop' || value === 'gain')
+      && optional(gravity,'fresh',value => typeof value === 'boolean')
+      && optional(gravity,'error',value => typeof value === 'string')
+      && optional(gravity,'config',value => value === null || (object(value)
+        && optional(value,'model',model => typeof model === 'string')));
+    bench.gravity_feedforward = valid ? gravity : null;
+    bench.gravity_feedforward_last = valid ? Date.now() : 0;
   }
   if (snapshot.agent) {
     bench.agent = snapshot.agent;

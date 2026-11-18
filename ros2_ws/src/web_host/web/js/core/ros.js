@@ -1,13 +1,13 @@
 // rosbridge 层：连接、订阅、发布与「等一帧/等序号」工具。
 // 数据写入 store 后 markDirty，由面板渲染；连接状态同步到 body.offline 以禁用写操作。
 import {
-  store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus,
+  store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus, applyTransmissionStatus, observeTrajectory, resetTrajectory,
   jointFeedbackMatchesModel, applyAgentWireStatus } from './store.js';
 import {
   $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler,
 } from './format.js';
 
-import { applyControlState, createControlStateCache } from './motor_state.js';
+import { applyControlState, createControlStateCache, beginPolicyIntent, acceptPolicyTicket, failPolicyIntent, applyPolicyReceipt } from './motor_state.js';
 let controlMode = 'bench';
 export function configureControl(configuration) {
   if (!['readonly', 'bench'].includes(configuration?.control_mode)) throw new Error('工作台运行模式无效');
@@ -115,10 +115,9 @@ export async function submitPolicy(targets) {
   const enabled = targets.some(target => target.enabled), cache = store.controlStates;
   const age = Date.now() - cache.at;
   if (enabled && (!cache.valid || !cache.seen || !cache.session || !cache.sourceTimeNs
-      || age < 0 || age > 100)) throw new Error('MCU 控制快照已过期，等待新反馈后重新使能');
+      || age < 0 || age > 250)) throw new Error('MCU 控制快照已过期，等待新反馈后重新使能');
   const connection = connectionGeneration, session = cache.session || 0;
-  const intent={ids:targets.map(target=>target.motor_id),enabled,ticket:null,error:'',confirmed:false};
-  for (const id of intent.ids) store.policy.set(id,{...store.policy.get(id),intent});
+  const intent=beginPolicyIntent(store,targets);
   markDirty(DIRTY.POLICY,DIRTY.STATUS);
   try {
     const ticket = await callService('/motor/submit_policy', 'can_bridge_msgs/srv/SubmitPolicy', {
@@ -135,17 +134,24 @@ export async function submitPolicy(targets) {
         || !uint32(ticket.request_id) || !uint32(ticket.policy_generation)
         || (enabled && (String(ticket.session_id) !== String(session)
           || !ticket.request_id || !ticket.policy_generation))) throw new Error('主机使能票据无效');
-    intent.ticket=ticket;
+    acceptPolicyTicket(store,intent,ticket);
     return ticket;
   } catch (error) {
-    intent.error=String(error.message || error);
+    failPolicyIntent(store,intent,error);
     throw error;
   } finally {markDirty(DIRTY.POLICY,DIRTY.STATUS);}
 }
 
 export function pub(key, message) {
   if (['policy', 'paramSet', 'firmwareConfig'].includes(key) ||
-      (key === 'sysCmd' && ![1, 2, 3, 4].includes(message.command))) return false;
+      (key === 'sysCmd' && ![1, 2, 3, 4, 5].includes(message.command))) return false;
+  if (key === 'deviceConfig' && !(message.kind === 0 && message.command === 0 &&
+      message.motor_id === 65535 && message.count === 1 && message.targets?.length === 1 &&
+      Number.isInteger(message.targets[0].motor_id) && message.targets[0].motor_id >= 1 &&
+      message.targets[0].motor_id <= 64 && message.targets[0].field === 5 &&
+      [0,1].includes(message.targets[0].value))) return false;
+  if (key === 'sysCmd' && message.command === 5 &&
+      (!Number.isInteger(message.motor_id) || message.motor_id < 1 || message.motor_id > 64)) return false;
   if (!store.conn.connected) return false;
   if (controlMode === 'readonly') return false;
   ensurePublisher(key).publish(new ROSLIB.Message(message));
@@ -187,8 +193,7 @@ function resetSessionState() {
   store.conn.canStop = false;
   store.commandStatus = {last: 0, data: null};
   store.simPositionStatus = {last: 0, data: null};
-  store.traj.state = null;
-  store.traj.activeTrajectoryId = 0;
+  resetTrajectory();
   store.jointStates.byName = {};
   store.jointStates.jointNames = [];
   store.transmissionStatus = {last: 0, data: null};
@@ -220,7 +225,7 @@ export function connect() {
     if (ros !== connection) return;
     setConn(true);
     subscribeAll();
-    ['setpoint', 'trajectory', 'rawTrajectory', 'stop', 'sysCmd'].forEach(ensurePublisher);
+    ['setpoint', 'trajectory', 'rawTrajectory', 'jointTrajectory', 'stop', 'sysCmd', 'deviceConfig'].forEach(ensurePublisher);
     // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
@@ -280,14 +285,9 @@ function subscribeAll() {
   statusTopic.subscribe((message) => {
     if (ros !== statusConnection || !store.conn.connected) return;
     try {
-      const data = JSON.parse(String(message && message.data));
-      if (!data || typeof data.model !== 'string' || !Array.isArray(data.joint_names)
-          || typeof data.trajectory_enabled !== 'boolean') throw new Error('字段无效');
-      store.transmissionStatus = {last: Date.now(), data};
+      applyTransmissionStatus(JSON.parse(String(message && message.data)));
     } catch (_e) {
-      // 坏帧不覆盖最近一次有效的桥状态，也不刷新其新鲜度。
-      store.transmissionStatus.last = 0;
-      store.transmissionStatus.data = null;
+      applyTransmissionStatus(null);
     }
     markDirty(DIRTY.STATUS);
   });
@@ -353,26 +353,11 @@ function subscribeAll() {
   });
 
   // 客户端将 JTC 结果映射成轨迹状态；completed 只在 action 成功终态为真。
-  sub('trajectoryState', (m) => {
-    store.traj.activeTrajectoryId = m.trajectory_id;
-    store.traj.state = {
-      trajectory_id: m.trajectory_id,
-      active: !!m.active,
-      completed: !!m.completed,
-      elapsed_ms: m.elapsed_ms,
-      total_ms: m.total_ms,
-      target_ids: m.target_ids || [],
-    };
-    markDirty(DIRTY.TRAJ);
-  });
+  sub('trajectoryState', observeTrajectory);
 
   sub('events', (m) => {
     if (m.event_type === 13) {
-      const policy = store.policy.get(m.motor_id);
-      if (policy && policy.requestId === m.request_id) {
-        policy.receipt = m.reason;
-        markDirty(DIRTY.POLICY, DIRTY.STATUS);
-      }
+      if (applyPolicyReceipt(store,m)) markDirty(DIRTY.POLICY, DIRTY.STATUS);
     }
     store.events.unshift({
       t: Date.now(),

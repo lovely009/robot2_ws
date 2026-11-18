@@ -46,9 +46,9 @@ target_include_directories(fw_motor_control PUBLIC
   ../../lib/motor/include)
 target_link_libraries(fw_motor_control PUBLIC fw_adapters)
 
-# 会话同步纯逻辑（应用源码；host 可直编）
+# 会话同步纯逻辑（control 库；host 可直编）
 add_library(fw_session_sync OBJECT
-  ../../src/micro_ros/session_sync.c)
+  ../../lib/control/src/session_sync.c)
 target_include_directories(fw_session_sync PUBLIC
   ../../lib/control/include
   ../../lib/motor/include ../../lib/motor/include)
@@ -321,8 +321,20 @@ find_package(microxrcedds_client QUIET CONFIG)
 if(microxrcedds_client_FOUND)
   fw_host_test(test_reliable_publish SOURCES test_reliable_publish.c ../../src/micro_ros/reliable_publish.cpp)
   target_link_libraries(test_reliable_publish PRIVATE microxrcedds_client)
-  target_link_options(test_reliable_publish PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented)
+  target_link_options(test_reliable_publish PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery)
   target_compile_options(test_reliable_publish PRIVATE -UNDEBUG)
+  fw_host_test(test_reliable_heartbeat SOURCES test_reliable_heartbeat.c ../../src/micro_ros/reliable_publish.cpp)
+  target_link_libraries(test_reliable_heartbeat PRIVATE microxrcedds_client)
+  target_link_options(test_reliable_heartbeat PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery -Wl,--wrap=uxr_millis)
+  target_compile_options(test_reliable_heartbeat PRIVATE -UNDEBUG)
+  fw_host_test(test_reliable_ack SOURCES test_reliable_ack.c ../../src/micro_ros/reliable_publish.cpp)
+  target_link_libraries(test_reliable_ack PRIVATE microxrcedds_client)
+  target_link_options(test_reliable_ack PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery)
+  target_compile_options(test_reliable_ack PRIVATE -UNDEBUG)
+  fw_host_test(test_reliable_telemetry_queue SOURCES test_reliable_telemetry_queue.cpp ../../src/micro_ros/reliable_publish.cpp)
+  target_link_libraries(test_reliable_telemetry_queue PRIVATE microxrcedds_client)
+  target_link_options(test_reliable_telemetry_queue PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery -Wl,--wrap=uxr_millis)
+  target_compile_options(test_reliable_telemetry_queue PRIVATE -UNDEBUG)
 endif()
 
 fw_host_test(test_param_store SOURCES test_param_store.cpp OBLIBS fw_param_store

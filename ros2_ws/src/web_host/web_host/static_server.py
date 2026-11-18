@@ -17,6 +17,8 @@ from .actions import bvh_directory, list_actions, read_action, save_action
 from .models import (enumerate_arm_models, model_transmissions,
                      motor_library)
 from .motion import MotionJobs, handle_motion
+from .motion_catalog import handle_motion_catalog
+from .motion_playback import handle_motion_playback
 
 
 # 动作库导入：单个 JSON 载荷可达数百 KB（motion.json 2868 点）
@@ -174,7 +176,8 @@ def main(args=None):
             self.wfile.write(body)
 
         def do_GET(self):
-            if handle_motion(self, motion_jobs):
+            if handle_motion_playback(self, motion_jobs) \
+                    or handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs):
                 return
             path = urlsplit(self.path).path
             if path == '/api/runtime':
@@ -234,7 +237,7 @@ def main(args=None):
             super().do_GET()
 
         def do_POST(self):
-            if handle_motion(self, motion_jobs):
+            if handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs):
                 return
             path = urlsplit(self.path).path
             if path != '/api/actions':

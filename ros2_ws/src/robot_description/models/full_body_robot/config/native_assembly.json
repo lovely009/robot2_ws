@@ -1,7 +1,7 @@
 {
   "source_step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4",
   "source_urdf_sha256": "d127a6994613c80193d93ac194c4fa8d5590139c9972b2ac668b002045651be7",
-  "basis": "native robot_body frames with hips installation and conditional outward hand mounting; no ICP matrices",
+  "basis": "native robot_body frames with hips installation, outward arm roll zero, and conditional hand mounting; no ICP matrices",
   "remounted_source_link_world_transforms": {
     "BN_LeftUpperArm_3_link": [
       [
@@ -2823,6 +2823,30 @@
       ]
     ]
   },
-  "collision_validation": "pending",
-  "auxiliary_inertia": "numerical preview surrogates; source physical-link inertias retained from robot_body and rigidly re-expressed with mounted assemblies"
+  "collision_validation": "pending: legacy collision results do not certify this assembly",
+  "arm_inertia": {
+    "source_urdf": "\u5168\u8eab\u5b9e\u9a8c\u7248_\u4ec5\u53cc\u81c2\u8d28\u91cf/urdf/\u5168\u8eab\u5b9e\u9a8c\u7248_\u4ec5\u53cc\u81c2\u8d28\u91cf.urdf",
+    "sha256": "112045851a76a8ef6520842d00664d7c285fe3f0dd6daa7df9cbc448dae68f0c",
+    "links": [
+      "BN_LeftHand_pitch_link",
+      "BN_LeftHand_roll_link",
+      "BN_LeftLowerArm_1_link",
+      "BN_LeftLowerArm_2_link",
+      "BN_LeftShoulder_1_link",
+      "BN_LeftShoulder_2_link",
+      "BN_LeftUpperArm_1_link",
+      "BN_LeftUpperArm_2_link",
+      "BN_LeftUpperArm_3_link",
+      "BN_RightHand_pitch_link",
+      "BN_RightHand_roll_link",
+      "BN_RightLowerArm_1_link",
+      "BN_RightLowerArm_2_link",
+      "BN_RightShoulder_1_link",
+      "BN_RightShoulder_2_link",
+      "BN_RightUpperArm_1_link",
+      "BN_RightUpperArm_2_link",
+      "BN_RightUpperArm_3_link"
+    ]
+  },
+  "auxiliary_inertia": "numerical preview surrogates; physical-link inertias from robot_body with arm overrides recorded in arm_inertia, rigidly re-expressed with mounted assemblies"
 }

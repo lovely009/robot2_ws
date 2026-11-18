@@ -1,65 +1,63 @@
 # micro-ROS 通信与执行时序
 
-软件实施阶段仅做隔离验证；后续获授权的部署记录见文末。目标下发 50 Hz、运动反馈
-50 Hz、电机执行 200 Hz；30 ms 命令软停和 100 ms 禁用阈值保持原值。
+## 频率
 
-## 方案与约束
+| 数据或任务 | 频率 | 配置 |
+| --- | --- | --- |
+| 主机周期目标 | 50 Hz | ros2_control 控制器 |
+| MCU 运动反馈 | 50 Hz | `FIRMWARE_MOTOR_REPORT_HZ` |
+| MCU 状态反馈 | 10 Hz | `FIRMWARE_STATUS_REPORT_HZ` |
+| MCU 电机执行 | 200 Hz | `FIRMWARE_MOTOR_COMMAND_HZ` |
+| IMU | 100 Hz | `FIRMWARE_IMU_REPORT_HZ` |
+| 温度 | 2 Hz | `FIRMWARE_TEMPERATURE_REPORT_HZ` |
 
-- micro-ROS 任务是会话和 USB 的唯一调用者，实时任务仍独立负责 CAN 与保护。
-- Agent 探测间隔 1 秒，单次 5 ms、一次尝试。新鲜且被接收的命令/授权帧
-  证明入站链路活跃，推迟探测。连续三次探测失败重建会话；运动保护不等待探测。
-- 正常运行每 10 秒校时，单次 2 ms。一次失败保留上次有效映射，成功同步
-  超过 30 秒或跳变超过 20 ms 时判为不健康。命令截止使用 MCU 单调时钟，
-  后续校时、授权保活、重复/延迟帧不延长已接收目标。
-- Agent 协议 schema 4 复用现有租约字段，在 SNAPSHOT 中续租已建立的授权；
-  新授权仍需显式 AUTHORITY 握手。无效目标不可续租，合帧不能新建或复活授权。
-  主机在连续目标期间省略独立保活，空闲时保持有界续租，授权和目标期限仍独立。
-- 序号、会话、截止、载荷均通过校验后才更新接收活性；重连清除旧授权和目标，
-  必须显式重新授权。控制对象复用现有单电机/完整传动组子集。
-- 可靠配置维持回执、去重和有限等待；固定容量邮箱保留最新目标。
-- 页面分别显示 MCU 链路、时钟和控制权，使用源时间和接收时间中的较大年龄
-  计算新鲜度/授权期限。重复或旧会话状态不刷新接收时间；浏览器与主机时钟
-  明显不一致时，显示时间基准异常、授权未知。这些显示不参与电机授权。
+固件频率定义在 `micro_ros_firmware/include/firmware_config.h`。micro-ROS 任务管理会话与 USB，电机实时任务管理 CAN、周期执行和本地保护。
 
-schema 4 与旧 schema 3 不混用。部署须配套更新 Agent 消息、主机桥和 MCU；
-旧固件仍在线时不得部署新主机桥。Legacy WireContract 的版本不随 Agent 版本改变。
+## 会话与时钟
 
-## 实施与最小验收
+Agent 探测按 1 秒间隔调度，有效入站命令和授权帧可推迟探测。连续探测失败后重建会话，电机保护独立处理命令超时。
 
-1. 先补探测调度、目标与续租原子校验、旧目标到期和重连隔离的回归测试。
-2. 修改探测调度和合帧收发，复用已存在的校时健康、单调截止和传动组选择实现。
-3. 运行相关固件宿主测试、主机桥协议/授权测试和子集/launch 测试，编译候选固件。
-4. 做一次独立审查，修复实质问题；保留本轮之前的未提交工作。
+运行期间定期校时。有效映射超过 30 秒未更新或跳变超过 20 ms 时，时钟状态失效。执行截止时间使用 MCU 单调时钟，校时更新不会延长已接收目标。
 
-软件测试不能证明 USB/CAN 实际最坏延迟、同步精度或机械停止效果。后续台架需
-验证控制器退出但 Agent 存活、USB 阻塞、单向断流、延迟旧帧、时钟跳变和重连。
-5 ms 是 API 等待预算，实际调用耗时还受调度和传输实现影响；不据此放宽保护。
+会话重建清除旧授权和目标。序号、会话、截止时间与载荷均通过校验后，才更新接收活性。
 
-## 2026-11-02 软件验收
+`fdcan_motor_sim.py` 每秒以主机系统时间重校单调时钟到 epoch 的映射。Agent 与模拟器同机运行时，两端使用同一 epoch 基准。反馈调度和耗时统计使用单调时钟，已入队帧保留采集时的 epoch 与时钟代次。系统时间校正超过 5 ms 会增加 `step_count` 和代次，控制 socket 的 `status` 在单通道 `timing` 或多通道 `channels[].timing` 中返回校时年龄、校正量和读时钟不确定度。
 
-- 固件：agent_protocol、agent_liveness、control_lease、clock_health、motor_control、
-  control_mailbox、wire_codec、serial_write_budget 共 8 组宿主测试通过。
-- 主机：codec、Agent 消息、桥节点、授权、策略服务 5 组定向测试通过，覆盖
-  schema 3 拒收/schema 4 拓扑握手、连续目标合帧、源退出不重发目标、时钟恢复不自动授权。
-- 子集与 host launch 共 18 例通过；页面诊断与子集策略共 8 例通过；vue-tsc、Vite 构建通过。
-- Agent 消息独立构建通过；候选 ARM 固件编译通过，RAM 302716 B、Flash 251884 B。
-- 一次独立审查发现配置/Info 路径旧版本硬编码及页面源数据年龄漏判，修复并定向复核后无阻塞。
+CAN SYNC 的接收线程时间戳随反馈窗口保存，降载兜底窗口标记 `source=fallback`，VAXOR 命令应答标记 `source=command`。每台电机的 `last_feedback` 包含 `trigger`、`encoded` 和 `sent`，用于关联触发、反馈编码和传输接口返回。`encoded` 标记当前模型状态被编码的时刻，模型状态自身的新鲜度仍由被控对象反馈判断。CERB 12 字节、VAXOR 12/20 字节反馈使用原有协议布局。
 
-本轮之前的文件快照、精确补丁、构建和日志保存在
-`/tmp/robot2-microros-timing-20261102/`；候选固件为该目录下
-`pio-build/stm32h723vgt6/firmware.bin`。软件验收阶段未部署、烧录或驱动电机。
+| 时序字段 | 测量区间 |
+| --- | --- |
+| `sync_period_ms` / `sync_jitter_ms` | 同通道相邻 SYNC 到达间隔 / 相对配置周期的绝对偏差 |
+| `rx_queue_ms` | 接收线程交付到主循环处理 |
+| `feedback_lateness_ms` | 编码时刻超过窗口 deadline 的时间 |
+| `feedback_queue_ms` | 编码完成到传输接口发送返回 |
+| `trigger_to_tx_ms` | 窗口触发到传输接口发送返回 |
+| `feedback_gap_ms` | 同一电机相邻反馈发送间隔，包含主循环停顿后兜底补发前的空窗 |
+| `transport_send_ms` / `transport_receive_ms` | 一次传输接口调用的耗时，包含锁等待、SDK 执行和背压返回 |
+| `loop_work_ms` | 一轮主循环工作耗时，覆盖接收处理、反馈生成和发送 |
+| `bridge_spin_ms` / `bridge_publish_ms` | 主循环中的 ROS 回调处理 / 仿真命令发布耗时 |
+| `control_service_ms` | 一次控制 socket 请求读取、状态生成或响应发送耗时 |
 
-## 2026-11-02 授权部署
+各项保留累计 `count` / `max` 和最近 512 个样本的 `mean` / `p95` / `window_max`。`feedback_over_period` 统计超过配置反馈周期的响应，`out_of_order_sync` 统计被拒绝的旧 SYNC。观测脚本可同时读取 `/micro_ros_up/status` 的 `clock_valid` / `clock_sync_age_ms` / `clock_sync_failures`，以及 `/motor/control_states` 的 `sync_time_ns` / `state_age_ms`，核对 MCU 校时和端到端新鲜度。
 
-- 用户随后授权烧录、重启。已备份旧 MCU Flash 与主机安装，配套构建安装
-  schema 4 消息、主机桥和网页；OpenOCD 烧录校验 `Verified OK` 后复位 MCU。
-- 工作台 `robot2-workbench-20261102-sync-control.service` 和 `bench-agent.service`
-  已重启，桥与 Agent 均为单实例，网页和 WebSocket 端口可用。
-- 15 秒只读采样：状态 49.996 Hz、运动快照 49.998 Hz，MCU 快照间隔均为
-  20 ms，schema 4、单一会话；校时有效、失败计数 0，并观察到周期校时更新。
-- 固件频率回读 `[1, 50, 50, 100, 2, 200]`，主机目标周期配置仍为 50 Hz。
-  控制授权关闭，电机列表为空；未使能或发送运动，未实测目标下发和 CAN 200 Hz。
+多总线共同执行的主循环、ROS 桥和控制口耗时位于顶层 `loop_timing`，每条总线的收发调用及本轮工作耗时位于 `channels[].timing`。这些耗时使用主机单调时钟，时钟校正期间仍可比较阻塞时长。
 
-备份、固件、烧录与构建日志、只读采样结果保存在
-`/home/ly/robot2_ws-checkpoints/20261102-schema4-deploy/`。
-部署固件 SHA256：`bbd37b25411a7e3e7fc8ac1aa438810a0bd6524aaf9990e0699b46c8db0bfc56`。
+`response_by_source_ms` 按 `sync`、`fallback`、`command` 分别统计触发到发送的耗时。排查周期反馈时读取 `sync`，检查兜底空窗时同时读取 `feedback_gap_ms`。RX 日志保留接收线程的 `received` 和主循环处理时的 `time`。
+
+这里的 CAN 时间戳边界为 `host_receive` 和 `transport_send_return`，适配器内部缓存和线上的实际收发时刻需要硬件时间戳另行测量。启动期与稳定期可以分别使用累计最大值和滚动最大值核查。
+
+## 消息与发送
+
+当前 Agent 协议为 schema 4，主机消息、Agent 和 MCU 必须配套构建。
+
+SNAPSHOT 可携带已有授权的续租信息，新授权由 AUTHORITY 握手建立。连续发送有效目标时，主机省略独立保活。空闲时继续按授权期限保活。
+
+配置事务使用可靠消息、去重和有限等待。运动目标使用固定容量邮箱保留最新值。可靠消息发送处理、队列与载荷容量由固件宿主测试覆盖。
+
+页面显示 MCU 链路、时钟和控制授权。状态年龄同时考虑源时间和本地接收时间，重复状态及旧会话消息不会刷新新鲜度。
+
+## 验证
+
+相关测试位于 `micro_ros_firmware/test/host`、`ros2_ws/src/micro_ros_bridge/test` 和 `ros2_ws/src/web_host/frontend/test`。
+
+台架测量需记录 USB/CAN 延迟、调度抖动、断流停止和重连后的实际状态。已有时钟测量见[2026-11-02 报告](../outputs/2026-11-02-clock-sync/report.md)，报告中的频率对应当时固件。

@@ -1,4 +1,4 @@
-# 拓扑条目（ARD-0007 §18.2）：一台设备在拓扑中的身份与状态。
+# 单台设备的拓扑身份与状态。
 uint16 motor_id
 uint8 bus_index           # 0..2（FDCAN1/2/3）
 # 协议族（与 firmware adapter 注册顺序对齐）

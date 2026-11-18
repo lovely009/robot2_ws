@@ -5,7 +5,6 @@
 """
 
 from motor_hardware_interface.topic_bridge import (motion_states_to_joint_state,
-                                                  motor_accepts_joint_target,
                                                   parse_joint_map)
 from motor_hardware_interface.transmission_bridge import TransmissionBridge
 from motor_hardware_interface.topic_bridge import BridgeError
@@ -15,10 +14,6 @@ import math
 import signal
 import time
 
-
-# ---------------------------------------------------------------------------
-# 节点
-# ---------------------------------------------------------------------------
 
 def main():  # pragma: no cover - 需要 ROS 环境
     import rclpy
@@ -30,7 +25,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
                            QoSDurabilityPolicy)
     from sensor_msgs.msg import JointState
     from std_msgs.msg import String
-    from can_bridge_msgs.msg import (MotorMotionStateArray, MotorStatusArray, MotorControlStateArray)
+    from can_bridge_msgs.msg import MotorMotionStateArray, MotorControlStateArray
 
     def stream_qos():
         """best-effort depth 1：与固件运动状态流 QoS 对齐。"""
@@ -58,9 +53,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.declare_parameter('joint_state_topic', '/joint_states', immutable)
             driver_file = self.get_parameter('driver_file').value
             self.transmission = None
-            self.motor_health = {}
             self.control_states = ControlStateTracker()
-            self.last_health = 0.
             if driver_file:
                 self.transmission = TransmissionBridge(
                     driver_file, self.get_parameter('transmissions_file').value,
@@ -84,8 +77,6 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.create_timer(1., self.publish_status)
             self.create_subscription(MotorControlStateArray, '/motor/control_states',
                                      self.on_control_states, 10)
-            self.create_subscription(MotorStatusArray, '/motor/status_array',
-                                     self.on_health, 10)
 
             self.js_pub = self.create_publisher(
                 JointState, self.get_parameter('joint_state_topic').value, 10)
@@ -133,33 +124,8 @@ def main():  # pragma: no cover - 需要 ROS 环境
             self.status_pub.publish(msg)
 
         def on_control_states(self, msg):
-            previous_session = self.control_states.session
             self.control_states.update(msg.schema_version, msg.session_id,
                                        msg.sequence, msg.states, time.monotonic())
-            if self.transmission:
-                if previous_session != self.control_states.session:
-                    self.transmission.held.clear()
-                for group in self.transmission.model.groups:
-                    if not all(self.control_states.ready(self.transmission.ids[a],
-                               time.monotonic(), self.get_parameter('feedback_timeout_s').value)
-                               and self.control_states.states[self.transmission.ids[a]].execution_state not in (5, 7)
-                               for a in group.actuators):
-                        for joint in group.joints:
-                            self.transmission.held.pop(joint, None)
-
-        def on_health(self, msg):
-            self.last_health = time.monotonic()
-            self.motor_health = {s.motor_id: motor_accepts_joint_target(
-                s.online, s.lifecycle, s.unified_fault_code) for s in msg.statuses}
-            active = {s.motor_id for s in msg.statuses if s.online
-                      and s.lifecycle == s.LIFECYCLE_ACTIVE and s.unified_fault_code == 0}
-            if self.transmission and not self.control_states.seen:
-                for group in self.transmission.model.groups:
-                    if not all(self.transmission.ids[a] in active for a in group.actuators):
-                        for joint in group.joints:
-                            self.transmission.held.pop(joint, None)
-
-        # ---- 上行 ----
         def on_motion_states(self, msg):
             monotonic_now = time.monotonic()
             states = [{'motor_id': s.motor_id, 'position': s.position,
@@ -175,7 +141,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
             else:
                 names, pos, vel, eff = motion_states_to_joint_state(states, self.joint_of_motor)
             if not names or not self.get_parameter('publish_joint_states').value:
-                return   # 一个可用的都没有：不发空消息（发空会让 rviz 把关节清零）
+                return
             out = JointState()
             stamp = self.get_clock().now()
             if self.transmission and self.transmission.state_stamp is not None:

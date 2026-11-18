@@ -1,4 +1,4 @@
-"""为单电机/完整传动组会话生成共用配置，不修改模型源文件。"""
+"""生成控制子集；HIL 缺组员时保留已注册输入轴，不伪造输出自由度。"""
 from pathlib import Path
 import yaml
 from robot_transmission import Model
@@ -20,19 +20,25 @@ def materialize_control_subset(config_file, motor_ids, directory):
     wanted = set(ids)
     if not wanted <= set(model.actuator_ids.values()):
         raise ValueError('motor_ids 包含模型以外的电机')
-    groups = []
+    document = yaml.safe_load(source.read_text())
+    hardware = document['motor_hardware']
+    input_fallback = hardware.get('hil_input_fallback') is True
+    groups, partial = [], []
     for group in model.groups:
         members = {model.actuator_ids[name] for name in group.actuators}
         if members & wanted:
             if not members <= wanted:
-                raise ValueError(f'传动组 {group.name} 必须完整接入')
+                if not input_fallback:
+                    raise ValueError(f'传动组 {group.name} 必须完整接入')
+                partial.extend(name for name in group.actuators if model.actuator_ids[name] in wanted)
+                continue
             groups.append(group)
-    document = yaml.safe_load(source.read_text())
-    hardware = document['motor_hardware']
     hardware['motors'] = {name: value for name, value in hardware['motors'].items()
                           if model.actuator_ids[name] in wanted}
     if hardware.get('motor_specs_file'):
         hardware['motor_specs_file'] = str((source.parent / hardware['motor_specs_file']).resolve())
+    if hardware.get('coupled_limits_file'):
+        hardware['coupled_limits_file'] = str((source.parent / hardware['coupled_limits_file']).resolve())
     target = Path(directory)
     hardware['transmissions_file'] = str(target / 'transmissions.yaml')
     transmissions = {group.name: {
@@ -41,6 +47,14 @@ def materialize_control_subset(config_file, motor_ids, directory):
         'joint_reduction': list(group.joint_reduction), 'joint_offset': list(group.joint_offset),
         'parameters': dict(group.parameters),
     } for group in groups}
+    for name in partial:
+        joint = hardware['motors'][name].get('joint')
+        if not isinstance(joint, str) or not joint:
+            raise ValueError(f'HIL 部分传动组缺少 {name} 的输入轴映射')
+        transmissions[f'hil_input_{name}'] = {
+            'plugin': 'transmission_interface/SimpleTransmission',
+            'actuators': [name], 'joints': [joint],
+        }
     (target / 'transmissions.yaml').write_text(yaml.safe_dump({'transmissions': transmissions}))
     result = target / 'motor_driver.yaml'
     result.write_text(yaml.safe_dump(document))

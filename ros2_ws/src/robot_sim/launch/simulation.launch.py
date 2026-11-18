@@ -276,11 +276,6 @@ def _bind_motor_topology(
         )
 
     simulation["buses"] = buses
-    if len(buses) != 1:
-        raise RuntimeError(
-            "the complete robot arm launcher currently supports one CAN bus; "
-            "map every simulated motor to one bus in simulation_topology.yaml"
-        )
     simulation["motors"] = selected_motors
     simulation["profiles"] = sim_profiles
     hardware_timing = hardware.get("timing", {})
@@ -371,6 +366,54 @@ def _absolute_transmissions_file(driver_path: Path) -> Path | None:
             return path.resolve()
     sibling = driver_path.parent / "transmissions.yaml"
     return sibling.resolve() if sibling.is_file() else None
+
+
+def _hil_hold_groups(share: Path, model: str, simulation: dict[str, Any],
+                     motor_driver_path: Path) -> list[dict[str, Any]]:
+    """从 motor_topology.yaml + driver 构造耦合组 {inputs, outputs}。
+
+    输入轴名取 driver 里电机对应的 MJCF 输入轴（motor_hardware.motors[*].joint），
+    输出关节取 motor_topology.yaml 的 differential_groups[*].joints。只有模型自带
+    这两份显式元数据时才产出组；否则返回空表，由桥对每个输入轴做直连 fallback
+    （单轴固定等价于输入=输出），绝不猜测 roll→电机之类的隐式映射。
+    """
+    topology_path = share / "models" / model / "config" / "model_motor_topology.yaml"
+    if not topology_path.is_file():
+        topology_path = topology_path.with_name("motor_topology.yaml")
+    if not topology_path.is_file():
+        return []
+    topology = yaml.safe_load(topology_path.read_text(encoding="utf-8")) or {}
+    groups = topology.get("differential_groups")
+    if not isinstance(groups, dict) or not groups:
+        return []
+    driver = yaml.safe_load(motor_driver_path.read_text(encoding="utf-8")) or {}
+    source_motors = driver.get("motor_hardware", {}).get("motors", {})
+    if not isinstance(source_motors, dict):
+        return []
+    # CAN 节点 id → 输入轴名（driver 里 motor 的 joint）。
+    input_by_id: dict[int, str] = {}
+    for motor in source_motors.values():
+        if not isinstance(motor, dict):
+            continue
+        try:
+            motor_id = int(motor.get("id"))
+        except (TypeError, ValueError):
+            continue
+        joint = motor.get("joint")
+        if isinstance(joint, str) and joint:
+            input_by_id[motor_id] = joint
+    result: list[dict[str, Any]] = []
+    for name, group in groups.items():
+        if not isinstance(group, dict):
+            continue
+        motor_numbers = group.get("motor_numbers") or []
+        outputs = group.get("joints") or []
+        inputs = [input_by_id[m] for m in motor_numbers if m in input_by_id]
+        if not inputs or not outputs:
+            continue
+        result.append({"name": str(name), "inputs": inputs,
+                       "outputs": [str(j) for j in outputs]})
+    return result
 
 
 def _write_runtime_configs(
@@ -466,7 +509,9 @@ def _write_runtime_configs(
             **({"transmissions_file": str(transmissions_file)}
                if transmissions_file is not None else {}),
             "timing": driver_timing,
-            "buses": {bus_name: driver_bus},
+            "buses": (source_driver['motor_hardware']['buses']
+                      if transport == 'multi' or len(simulation['buses']) > 1
+                      else {bus_name: driver_bus}),
             "motors": driver_motors,
         }
     }
@@ -599,10 +644,11 @@ def launch_simulation(context):
     backend = LaunchConfiguration("backend").perform(context).strip()
     simulator_only = _bool(
         LaunchConfiguration("simulator_only").perform(context))
+    bridge_plant = _bool(LaunchConfiguration('bridge_plant').perform(context))
     start_fdcan_sim = _bool(
         LaunchConfiguration("start_fdcan_sim").perform(context))
-    if transport not in {"vcan", "socketcan", "slcan"}:
-        raise RuntimeError("transport must be vcan, socketcan or slcan")
+    if transport not in {"vcan", "socketcan", "slcan", "multi"}:
+        raise RuntimeError("transport must be vcan, socketcan, slcan or multi")
     if controller_mode not in {"external", "firmware"}:
         raise RuntimeError("controller_mode must be external or firmware")
     if backend not in {"gazebo", "mujoco"}:
@@ -616,10 +662,12 @@ def launch_simulation(context):
             "simulator_only:=true 是 FDCAN 模拟器单起路径（web 上位机的"
             "「电机后端」），要求 controller_mode:=firmware"
         )
-    if controller_mode == "firmware" and transport not in {"socketcan", "slcan"}:
+    if controller_mode == "firmware" and transport not in {"socketcan", "slcan", "multi"}:
         raise RuntimeError(
-            "controller_mode:=firmware requires transport:=socketcan or slcan"
+            "controller_mode:=firmware requires transport:=socketcan, slcan or multi"
         )
+    if transport == "multi" and controller_mode != "firmware":
+        raise RuntimeError("multi-channel transport requires firmware mode")
     if backend == "mujoco" and not _bool(
         LaunchConfiguration("gravity").perform(context)
     ):
@@ -677,6 +725,11 @@ def launch_simulation(context):
         motor_driver_path,
         motor_specs_path,
     )
+    control_mode = simulation.get('control_mode', 'effort')
+    if control_mode not in {'position', 'effort'}:
+        raise RuntimeError('simulation.control_mode must be position or effort')
+    if controller_mode != "firmware" and len(simulation['buses']) != 1:
+        raise RuntimeError('external controller launch currently requires one logical CAN bus')
     if model != simulation["model"]:
         raise RuntimeError(
             f"model '{model}' does not match simulation topology model "
@@ -711,7 +764,10 @@ def launch_simulation(context):
         model_joints = set(joint_order)
         model_description = "motor backend"
     elif backend == "mujoco":
-        mujoco_model = share / "models" / model / "mujoco" / f"{model}.xml"
+        model_file = simulation.get('mujoco_model', f'{model}.xml')
+        if not isinstance(model_file, str) or Path(model_file).name != model_file:
+            raise RuntimeError('simulation.mujoco_model must be an MJCF filename')
+        mujoco_model = share / "models" / model / "mujoco" / model_file
         if not mujoco_model.is_file():
             raise RuntimeError(
                 f"model '{model}' has no MuJoCo model; expected {mujoco_model} "
@@ -739,8 +795,18 @@ def launch_simulation(context):
             f"{model_description}: {sorted(unknown_joints)}"
         )
 
+    channels_json = ''
     vcan_interface = None
-    if transport == "vcan":
+    if transport == "multi":
+        channels_json = _required(context, 'sim_channels_json')
+        try:
+            routes = json.loads(channels_json)
+        except ValueError as error:
+            raise RuntimeError('sim_channels_json must be a JSON channel list') from error
+        if not isinstance(routes, list) or not routes:
+            raise RuntimeError('sim_channels_json must contain channels')
+        sim_endpoint = driver_endpoint = 'mcu'
+    elif transport == "vcan":
         vcan_interface = LaunchConfiguration("vcan_interface").perform(context)
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", vcan_interface):
             raise RuntimeError(f"invalid Linux CAN interface name: {vcan_interface!r}")
@@ -777,7 +843,7 @@ def launch_simulation(context):
         if len(motor_ids) != len(set(motor_ids)):
             raise RuntimeError(
                 "firmware simulator maps joints by motor ID; IDs must be unique "
-                "across protocols on its single CAN bus"
+                "across all protocols and MCU buses"
             )
         start_web_host = _bool(
             LaunchConfiguration("start_web_host").perform(context)
@@ -826,7 +892,11 @@ def launch_simulation(context):
             agent_tty = _required(context, "agent_tty")
             if not Path(agent_tty).exists():
                 raise RuntimeError(f"micro-ROS Agent tty does not exist: {agent_tty}")
-            if Path(agent_tty).resolve() == Path(sim_endpoint).resolve():
+            serial_endpoints = ([route.get('endpoint', '') for route in routes
+                                 if route.get('transport') == 'slcan']
+                                if transport == 'multi' else [sim_endpoint])
+            if any(Path(agent_tty).resolve() == Path(endpoint).resolve()
+                   for endpoint in serial_endpoints):
                 raise RuntimeError("agent_tty and sim_tty must refer to different devices")
             agent_waiter_script = (
                 Path(get_package_prefix("robot_sim"))
@@ -896,11 +966,20 @@ def launch_simulation(context):
     if backend == "mujoco":
         # joint_names 用**拓扑顺序**，桥据此按名字映射命令数组：不再依赖
         # 「MJCF 关节顺序恰好等于拓扑顺序」（那是巧合，Gazebo 侧同类错位踩过一次）。
+        # 位置输入 HIL 时把耦合组显式传给桥，用于未注册输入固定与整组缺失固定
+        # 输出；非位置/无元数据的模型传空，桥对单轴做直连 fallback。
+        hold_groups = (
+            _hil_hold_groups(share, model, simulation, motor_driver_path)
+            if control_mode == "position" else []
+        )
         plant_launch = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(str(plant_launch_file)),
             launch_arguments={
                 "model": model,
                 "joint_names": ",".join(joint_order),
+                "mujoco_model": str(mujoco_model),
+                "position_input": str(control_mode == 'position').lower(),
+                "hold_groups": json.dumps(hold_groups, ensure_ascii=False),
             }.items(),
         )
     else:
@@ -983,17 +1062,24 @@ def launch_simulation(context):
         # --no-brs（FD 数据段也走 1M，隔离 BRS 数据相位）、--fb-period-ms 100
         # （降反馈负载）。不设默认：正常路径行为不变。
         extra_sim_args = LaunchConfiguration("sim_args").perform(context).split()
+        # Reply to every 20 ms CERB SYNC on the USB-CAN FD position HIL path.
+        # Allow 5 ms of SYNC jitter before the wall-clock fallback, and fit
+        # even all 37 full-body IDs in one window.
+        position_usb_hil = (model == "full_body_robot" and control_mode == "position"
+                            and (bridge_plant or not simulator_only) and transport == "multi"
+                            and all(isinstance(route, dict) and route.get("transport") == "usbcanfd"
+                                    for route in routes))
+        feedback_args = (["--fb-period-ms", "25", "--stagger-ms", "0.4"]
+                         if position_usb_hil else ["--fb-period-ms", "40"])
         # 控制通道默认路径须与 bench_manager/motor_sim_manager.py 的 _CONTROL_SOCKET 一致；
         # 残留 socket 由模拟器清理复用。
         control_socket = (
             LaunchConfiguration("sim_control_socket").perform(context).strip()
             or "/tmp/robot_sim_motor_backend.sock"
         )
-        firmware_bus_args = (
-            ["--interface", sim_endpoint]
-            if transport == "socketcan"
-            else ["--tty", sim_endpoint]
-        )
+        firmware_bus_args = (["--channels", channels_json] if transport == "multi" else
+                             ["--interface", sim_endpoint] if transport == "socketcan" else
+                             ["--tty", sim_endpoint])
         # start_fdcan_sim:=false 时不构造模拟器动作（web 上位机「电机后端」
         # 以独立的 simulator_only launch 管它，避免两个实例争同一条总线）。
         if start_fdcan_sim:
@@ -1031,18 +1117,12 @@ def launch_simulation(context):
                     joint_nm_per_amp,
                     "--gear",
                     gear_ratios,
-                    "--gazebo",
-                    "--gazebo-control-mode",
-                    "effort",
-                    "--effort-topic",
-                    "/arm_effort_controller/commands",
+                    *([] if simulator_only and not bridge_plant else ["--gazebo", "--gazebo-control-mode",
+                        control_mode, "--effort-topic", "/arm_effort_controller/commands",
+                        "--position-topic", "/arm_position_controller/commands"]),
                     "--ready-file",
                     str(ready_file),
-                    # 40 ms 周期、18 台约 450 帧/s，低于 100 ms 离线阈值，保留 2.5 倍余量。
-                    # 37.4 ms 错峰窗口降低突发负载；位时序错误导致的 bus-off 不能靠改周期修复。
-                    # 排在 extra_sim_args 之前：命令行后出现者胜，故 sim_args 仍可覆盖。
-                    "--fb-period-ms",
-                    "40",
+                    *feedback_args,
                     *(["--control-socket", control_socket] if control_socket else []),
                     *extra_sim_args,
                 ],
@@ -1185,7 +1265,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "transport",
                 default_value="vcan",
-                description="CAN backend: vcan | socketcan | slcan",
+                description="CAN backend: vcan | socketcan | slcan | multi",
             ),
             DeclareLaunchArgument(
                 "controller_mode",
@@ -1235,6 +1315,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("remove_vcan_on_exit", default_value="true"),
             DeclareLaunchArgument("sim_interface", default_value="can1"),
             DeclareLaunchArgument("sim_tty", default_value=""),
+            DeclareLaunchArgument("sim_channels_json", default_value=""),
             DeclareLaunchArgument("agent_tty", default_value=""),
             DeclareLaunchArgument("start_web_host", default_value="true"),
             DeclareLaunchArgument("start_micro_ros_agent", default_value="false"),
@@ -1249,6 +1330,10 @@ def generate_launch_description() -> LaunchDescription:
                 description="只起 FDCAN 模拟器（跳过被控对象/控制器/驱动端），"
                             "要求 controller_mode:=firmware + 非 vcan 传输；"
                             "供 web 上位机把「电机后端」作为独立进程管理",
+            ),
+            DeclareLaunchArgument(
+                'bridge_plant', default_value='false',
+                description='独立电机后端连接外部物理模型的 ROS 力矩与反馈话题',
             ),
             DeclareLaunchArgument(
                 "start_fdcan_sim",

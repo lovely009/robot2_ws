@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-async function connectFixture(page: Page, coupled = false, withControlStates = false, topologyOnly = false) {
+async function connectFixture(page: Page, coupled = false, withControlStates = false, topologyOnly = false, onlineMotorIds = [8,9]) {
   const publishes: { topic: string; msg: Record<string, unknown> }[] = [];
   const errors: string[] = [];
   const connections = { count: 0 };
@@ -18,6 +18,9 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
   const limitRequests: {model: string; joint_limits: Record<string, {lower: number; upper: number}>}[] = [];
   const limitReply = {successful: true, confirm: true};
   let controlSequence = 0;
+  let controlStateHeartbeat = true;
+  let closeConnection = () => {};
+  let connectionClosed = false;
   let sendFeedback: (topic: string, msg: unknown) => void;
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => {
@@ -84,6 +87,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     },
     "/joint_states": {name: ["joint_link1"], position: [0.15], velocity: [0.2], effort: [0.1]},
     "/control/status": {data: JSON.stringify({model:"half_body_robot",joint_names:["joint_link1"],
+      joint_trajectory_ids:true,
       mode:"idle",reason:"no_setpoint",reject:"",gravity_enabled:false,effort_gain:1,
       feedback_fresh:true,controllers_ready:true,active_controllers:[],
       output_topic:"/motor/host_command_array",
@@ -118,22 +122,26 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     fixtures["/robot_transmission/status"] = {data: JSON.stringify({model: "half_body_robot",
       trajectory_enabled: true, joint_names: ["joint_link8", "joint_link9"],
       joint_limits: {joint_link8:{lower:-1.047,upper:1.047},joint_link9:{lower:-1.22,upper:1.22}},
+      joint_velocity_limits: {joint_link8: 3.14, joint_link9: 3.14},
       control_service:'/workbench_control/set_parameters_atomically'})};
     fixtures["/control/status"] = {data: JSON.stringify({model:"half_body_robot",
+      joint_trajectory_ids:true,
       joint_names:["joint_link8","joint_link9"],mode:"trajectory",reason:"ok",reject:"",
-      gravity_enabled:true,effort_gain:.8,output_topic:"/motor/host_command_array",
+      feedback_fresh:true,controllers_ready:true,active_controllers:[],gravity_enabled:true,effort_gain:.8,output_topic:"/motor/host_command_array",
       trajectory_output_topic:"/host_control/trajectory_controller/follow_joint_trajectory"})};
   }
   const makeControlStates = (enabled: boolean, fault = 0) => ({schema_version: 2, session_id: 7001, sync_time_ns:Date.now()*1e6,
     sequence: ++controlSequence, tick_ms: controlSequence * 20,
-    states: [8,9].map(motor_id => ({motor_id, online: true,
+    states: [8,9].map(motor_id => ({motor_id, online: onlineMotorIds.includes(motor_id),
       control_lifecycle: enabled && !fault ? 3 : 2, execution_state: 1,
-      policy_enabled: enabled, motion_enabled: false, state_age_ms: 5,
+      policy_enabled: enabled && onlineMotorIds.includes(motor_id), motion_enabled: false, state_age_ms: 5,
       unified_fault_code: fault, vendor_fault_code: 0, last_failure_reason: 0,
       policy_generation:policyGeneration}))});
   if (coupled && withControlStates)
     fixtures['/motor/control_states'] = makeControlStates(false);
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => {
+    if (connectionClosed) {socket.close();return;}
+    closeConnection = () => {connectionClosed = true;socket.close();};
     sendFeedback = (topic, msg) => {
       if (['/control/status', '/robot_transmission/status'].includes(topic)) fixtures[topic] = msg;
       socket.send(JSON.stringify({op: 'publish', topic, msg}));
@@ -154,6 +162,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     if (coupled) {
       const heartbeat = setInterval(() => {
         for (const topic of subscribed) {
+          if (topic === '/motor/control_states' && !controlStateHeartbeat) continue;
           if (topic === '/motor/control_states' && fixtures[topic])
             Object.assign(fixtures[topic] as object,{sequence:++controlSequence,sync_time_ns:Date.now()*1e6});
           if (fixtures[topic]) socket.send(JSON.stringify({op: "publish", topic, msg: fixtures[topic]}));
@@ -276,6 +285,8 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
     });
   });
   return { publishes, errors, connections, feedbackModels, firmware, parameterReplies, limitRequests,policyRequests,
+    closeConnection: () => closeConnection(),
+    pauseControlStates: () => {controlStateHeartbeat=false;},
     gravityRequests, gravityReply,
     sendGravity: (enabled: boolean, mode = 'stopped') => {
       sendFeedback('/control/status', {data:JSON.stringify({
@@ -286,7 +297,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
         config:{model:'half_body_robot',effort_gain:enabled?1:0}}})};
       fixtures['/bench/status']=status;sendFeedback('/bench/status',status);
     },
-    ackPolicy: () => {const ticket=policyRequests.at(-1)!.ticket;sendFeedback('/motor/config_result',{...ticket,kind:2,command:0,status:1,error_code:0,failed_targets:0,completed_targets:2});},
+    ackPolicy: () => {const request=policyRequests.at(-1)!;sendFeedback('/motor/config_result',{...request.ticket,kind:2,command:0,status:1,error_code:0,failed_targets:0,completed_targets:request.targets.length});},
     setLimitReply: (successful: boolean, confirm = true) => {limitReply.successful=successful;limitReply.confirm=confirm;},
     sendFeedback: (topic: string, msg: unknown) => {fixtures[topic]=msg;sendFeedback(topic, msg);},
     sendControlState: (enabled: boolean, fault = 0) => {
@@ -303,6 +314,153 @@ test('只读电机拓扑显示已映射与待标定，不能开放关节控制',
   await expect(page.locator('.mapping-warning')).toContainText('传动参数待标定');
   await expect(page.locator('[data-joint="joint_link8"] input[type="range"]')).toBeDisabled();
   expect(fixture.publishes.filter(p => p.topic === '/control/joint_target')).toHaveLength(0);
+  expect(fixture.policyRequests).toHaveLength(0);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('主机明确报告独立传动后可控制部分在线电机关节', async ({page}) => {
+  const fixture=await connectFixture(page,true,true,true,[8]);
+  await page.goto('/workbench/#/run');
+  await expect(page.getByRole('checkbox',{name:'使能控制',exact:true})).toBeEnabled();
+  fixture.sendFeedback('/robot_transmission/status',{data:JSON.stringify({
+    model:'half_body_robot',joint_names:['joint_link8'],trajectory_enabled:true,
+    control_groups:[{name:'input_8',motors:[{id:8}],joints:['joint_link8']}],
+    joint_limits:{joint_link8:{lower:-1,upper:1}}})});
+  fixture.sendFeedback('/control/status',{data:JSON.stringify({
+    model:'half_body_robot',joint_names:['joint_link8'],feedback_fresh:true,controllers_ready:true,
+    mode:'stopped',active_controllers:[],gravity_enabled:false,effort_gain:1,
+    output_topic:'/motor/host_command_array',
+    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'})});
+  const slider=page.locator('[data-joint="joint_link8"] input[type="range"]');
+  await expect(slider).toBeDisabled();
+  fixture.sendControlState(true);
+  await expect(slider).toBeEnabled();
+  await expect(page.locator('[data-joint="joint_link9"] input[type="range"]')).toBeDisabled();
+  await slider.fill('0.3');
+  await slider.dispatchEvent('input');
+  await expect.poll(()=>fixture.publishes.filter(p=>p.topic==='/control/joint_target').length).toBeGreaterThan(0);
+  const target=fixture.publishes.filter(p=>p.topic==='/control/joint_target').at(-1)!;
+  expect(target.msg.name).toEqual(['joint_link8']);
+  expect(target.msg.position).toEqual([.3]);
+  fixture.sendControlState(true,5);
+  await expect(slider).toBeDisabled();
+  expect(fixture.errors).toEqual([]);
+});
+
+test('部分传动组可独立使能在线电机，混合状态仍可失能', async ({page}) => {
+  const fixture=await connectFixture(page,true,true,true,[8]);
+  await page.goto('/workbench/#/run');
+  const toggle=page.getByRole('checkbox',{name:'使能控制',exact:true});
+  await expect(toggle).toBeEnabled();
+  await expect(page.getByRole('button',{name:'失能电机',exact:true})).toBeHidden();
+  fixture.sendFeedback('/robot_transmission/status',{data:JSON.stringify({
+    model:'half_body_robot',joint_names:['joint_link8'],trajectory_enabled:true,
+    policy_defaults:{8:{kp:12,kd:.5}}})});
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect.poll(()=>fixture.policyRequests.length).toBe(1);
+  expect(fixture.policyRequests[0].targets).toEqual([
+    {motor_id:8,enabled:true,kp:12,kd:.5,confirm_unprotected:false}]);
+  fixture.sendControlState(true);
+  fixture.ackPolicy();
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toHaveJSProperty('indeterminate',true);
+  await expect(page.locator('#jointControlResult')).toHaveText('MCU 已确认部分使能');
+  await toggle.click();
+  await expect.poll(()=>fixture.policyRequests.length).toBe(2);
+  expect(fixture.policyRequests[1].targets.map(t=>[t.motor_id,t.enabled])).toEqual([[8,false],[9,false]]);
+  fixture.sendControlState(false);
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveJSProperty('indeterminate',false);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('主机跟随故障拒绝原因显示在使能区域并在恢复后清除', async ({page}) => {
+  const fixture=await connectFixture(page,true,true,true,[8],false);
+  await page.goto('/workbench/#/run');
+  const result=page.locator('#jointControlResult');
+  await expect(page.getByRole('checkbox',{name:'使能控制',exact:true})).toBeEnabled();
+  fixture.sendFeedback('/robot_transmission/status',{data:JSON.stringify({
+    model:'half_body_robot',joint_names:['joint_link8'],trajectory_enabled:true,
+    control_groups:[{name:'input_8',motors:[{id:8}],joints:['joint_link8']}],
+    joint_limits:{joint_link8:{lower:-1,upper:1}}})});
+  fixture.sendControlState(true);
+  const status=(reject: string)=>({data:JSON.stringify({
+    model:'half_body_robot',joint_names:['joint_link8','joint_link9'],mode:'stopped',
+    reason:'跟随控制器故障',reject,gravity_enabled:false,effort_gain:1,
+    feedback_fresh:true,controllers_ready:true,active_controllers:[],
+    output_topic:'/motor/host_command_array',
+    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'})});
+  fixture.sendFeedback('/control/status',status('跟随控制器故障：连续跟随关节反馈无效：joint_link8'));
+  await expect(result).toContainText('主机拒绝：跟随控制器故障：连续跟随关节反馈无效：joint_link8');
+  await expect(result).toHaveClass(/warn/);
+  fixture.sendFeedback('/control/status',status(''));
+  await expect(result).not.toContainText('主机拒绝');
+  expect(fixture.errors).toEqual([]);
+});
+
+test('外部撤销授权后使能确认文案随MCU状态同步为失能', async ({page}) => {
+  const fixture=await connectFixture(page,true,true,true);
+  await page.goto('/workbench/#/run');
+  const toggle=page.getByRole('checkbox',{name:'使能控制',exact:true});
+  const result=page.locator('#jointControlResult');
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect.poll(()=>fixture.policyRequests.length).toBe(1);
+  fixture.sendControlState(true);
+  fixture.ackPolicy();
+  await expect(toggle).toBeChecked();
+  await expect(result).toHaveText('MCU 已确认使能');
+  // 外部软停/授权撤销：不提交新请求，MCU 状态全部失能。
+  fixture.sendControlState(false);
+  await expect(toggle).not.toBeChecked();
+  await expect(result).toHaveText('MCU 已确认失能');
+  fixture.sendControlState(true);
+  await expect(toggle).toBeChecked();
+  await expect(result).toHaveText('MCU 已确认使能');
+  expect(fixture.errors).toEqual([]);
+});
+
+for (const condition of ['离线','状态超时']) {
+test(`全部电机${condition}后仍可通过关节面板提交失能`, async ({page}) => {
+  const fixture=await connectFixture(page,true,true);
+  await page.goto('/workbench/#/run');
+  const toggle=page.getByRole('checkbox',{name:'使能控制',exact:true});
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect.poll(()=>fixture.policyRequests.length).toBe(1);
+  fixture.sendControlState(true);
+  fixture.ackPolicy();
+  await expect(toggle).toBeChecked();
+  fixture.pauseControlStates();
+  if (condition==='离线') {
+    fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:7001,sequence:100000,
+      sync_time_ns:Date.now()*1e6,states:[8,9].map(motor_id=>({
+        motor_id,online:false,control_lifecycle:2,execution_state:1,
+        policy_enabled:false,motion_enabled:false,state_age_ms:5,
+        unified_fault_code:0,vendor_fault_code:0,last_failure_reason:0,policy_generation:2}))});
+  }
+  await expect(toggle).toBeDisabled();
+  const disable=page.getByRole('button',{name:'失能电机',exact:true});
+  await expect(disable).toBeVisible();
+  await expect(disable).toBeEnabled();
+  await disable.click();
+  await expect.poll(()=>fixture.policyRequests.length).toBe(2);
+  expect(fixture.policyRequests[1].targets.map(t=>[t.motor_id,t.enabled])).toEqual([[8,false],[9,false]]);
+  expect(fixture.errors).toEqual([]);
+});
+}
+
+test('主机仍报告旧模型时拒绝使能当前模型电机', async ({page}) => {
+  const fixture=await connectFixture(page,true,true);
+  await page.goto('/workbench/#/run');
+  const toggle=page.getByRole('checkbox',{name:'使能控制',exact:true});
+  await expect(toggle).toBeEnabled();
+  fixture.sendFeedback('/robot_transmission/status',{data:JSON.stringify({
+    model:'previous_model',joint_names:['joint_link8'],trajectory_enabled:true,
+    policy_defaults:{8:{kp:12,kd:.5}}})});
+  await expect(toggle).toBeDisabled();
+  await expect(page.locator('#jointControlResult')).toContainText('模型');
   expect(fixture.policyRequests).toHaveLength(0);
   expect(fixture.errors).toEqual([]);
 });
@@ -684,7 +842,8 @@ test('整机仿真关节滑块只发送当前 MuJoCo 会话的位置目标', asy
   await page.route('**/api/runtime', route => route.fulfill({
     json:{control_mode:'bench',robot_model:'full_body_robot'},
   }));
-  await page.route('**/robot_sim/models/full_body_robot/urdf/full_body_robot.standalone.urdf', route => route.fulfill({
+  await page.route('**/robot_sim/models/full_body_robot/config/standing.json', route => route.fulfill({json:{}}));
+  await page.route('**/robot_sim/models/full_body_robot/urdf/full_body_robot.standing.urdf', route => route.fulfill({
     contentType:'application/xml',
     body:'<robot name="full_body_robot"><link name="base_link"/><link name="spine"/><link name="rod"/><link name="leg"/>'
       + '<joint name="BN_Spine_axis_1" type="revolute"><parent link="base_link"/><child link="spine"/>'
@@ -834,19 +993,22 @@ test('限位服务已受理但无真实回读时不能保存或显示生效',asy
   expect(fixture.limitRequests).toHaveLength(1);
 });
 
-test('使能因主机反馈或控制器未就绪而禁用时显示原因',async({page})=>{
+test('主机未就绪时仍可使能在线电机，关节目标显示阻塞原因',async({page})=>{
   const fixture=await connectFixture(page,true);
   await page.goto('/workbench/#/run');
   await expect(page.locator('#jointControlEnabled')).toBeEnabled();
   const status={model:'half_body_robot',joint_names:['joint_link8','joint_link9'],
     mode:'stopped',gravity_enabled:false,effort_gain:1,
     output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
-    feedback_fresh:false,controllers_ready:true};
+    feedback_fresh:false,controllers_ready:true,active_controllers:[]};
   fixture.sendFeedback('/control/status',{data:JSON.stringify(status)});
-  await expect(page.locator('#jointControlEnabled')).toBeDisabled();
-  await expect(page.locator('#jointControlResult')).toContainText('反馈未就绪');
+  await expect(page.locator('#jointControlEnabled')).toBeEnabled();
+  const slider=page.locator('[data-joint="joint_link8"] input[type="range"]');
+  await expect(slider).toBeDisabled();
+  await expect(slider).toHaveAttribute('title',/反馈未就绪/);
   fixture.sendFeedback('/control/status',{data:JSON.stringify({...status,feedback_fresh:true,controllers_ready:false})});
-  await expect(page.locator('#jointControlResult')).toContainText('控制器未就绪');
+  await expect(page.locator('#jointControlEnabled')).toBeEnabled();
+  await expect(slider).toHaveAttribute('title',/控制器未就绪/);
   expect(fixture.publishes.filter(p=>p.topic==='/motor/policy_array')).toHaveLength(0);
 });
 
@@ -1007,7 +1169,7 @@ test('已下发使能的就绪电机可发送首个关节目标，无需先变�
   await expect(page.getByRole('checkbox',{name:'使能控制',exact:true})).not.toBeChecked();
   const stoppedStatus = {model:'half_body_robot',
     joint_names:['joint_link8','joint_link9'],mode:'stopped',reject:'JTC 到位误差超限',
-    gravity_enabled:false,effort_gain:1,
+    feedback_fresh:true,controllers_ready:true,active_controllers:[],gravity_enabled:false,effort_gain:1,
     output_topic:'/motor/host_command_array',
     trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'};
   fixture.sendFeedback('/control/status', {data:JSON.stringify(stoppedStatus)});
@@ -1046,6 +1208,18 @@ test('滑块无需松手连续发送最新目标，松手不重复，关闭控�
   expect(fixture.errors).toEqual([]);
 });
 
+
+test('仿真页不显示观察窗及观察入口，调试页保留', async ({page}) => {
+  const fixture = await connectFixture(page);
+  await page.goto('/workbench/#/sim');
+  await expect(page.locator('.observer-area')).toBeHidden();
+  await expect(page.getByRole('separator', {name: '调整观察区高度'})).toBeHidden();
+  await page.setViewportSize({width: 600, height: 850});
+  await expect(page.getByRole('navigation', {name: '工作区面板'}).getByRole('button', {name: '观察', exact: true})).toHaveCount(0);
+  await page.goto('/workbench/#/run');
+  await expect(page.getByRole('navigation', {name: '工作区面板'}).getByRole('button', {name: '观察', exact: true})).toBeVisible();
+  expect(fixture.errors).toEqual([]);
+});
 
 test('设备工作台只读显示电机参数，不提供主机直连', async ({page}) => {
   const fixture = await connectFixture(page);
@@ -1129,7 +1303,7 @@ test('旧状态夹具清错请求使用同步MCU时间，失败回执不显示�
   expect(requests()).toHaveLength(1);expect(fixture.errors).toEqual([]);
 });
 
-test('电机参数只读，ID与T_max没有设置和保存入口', async ({page}) => {
+test('ID与T_max保持只读，驱动板保存需有效失能状态', async ({page}) => {
   const fixture = await connectFixture(page);
   await page.goto('/workbench/#/teach');
   await expect.poll(()=>fixture.connections.count).toBe(1);
@@ -1140,7 +1314,7 @@ test('电机参数只读，ID与T_max没有设置和保存入口', async ({page}
   await expect(panel.getByLabel('T_max（N·m）',{exact:true})).toHaveAttribute('readonly','');
   await expect(panel.locator('[data-dir],[data-setlim]')).toHaveCount(0);
   await expect(panel.getByRole('button',{name:'设零',exact:true})).toBeDisabled();
-  await expect(panel.getByRole('button',{name:/下发|保存/})).toHaveCount(0);
+  await expect(panel.getByRole('button',{name:'保存电机参数',exact:true})).toBeDisabled();
   expect(fixture.publishes.filter(p=>p.topic==='/motor/param_set')).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
@@ -1154,7 +1328,7 @@ test('所选电机失能后可设零，取消不发送，设备终态才显示�
     rec_torque_limit:3,rec_safety:1,rec_direction:0}))});
   fixture.sendFeedback('/control/status',{data:JSON.stringify({model:'half_body_robot',
     joint_names:['joint_link8','joint_link9'],mode:'stopped',active_controllers:[],pending_goal_ids:[],
-    gravity_enabled:false,effort_gain:1,output_topic:'/motor/host_command_array',
+    feedback_fresh:true,controllers_ready:true,gravity_enabled:false,effort_gain:1,output_topic:'/motor/host_command_array',
     trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'})});
   await page.getByRole('group',{name:'电机列表',exact:true}).getByRole('button',{name:/电机 8/}).click();
   const zero=page.locator('.motor-parameter-item[data-motor="8"]').getByRole('button',{name:'设零',exact:true});
@@ -1292,6 +1466,39 @@ test("侧栏可切换为图标并记住选择，移除底部说明", async ({pag
   await page.getByRole('button', {name: '展开侧栏', exact: true}).click();
   await expect.poll(async () => (await nav.boundingBox())!.width).toBe(before);
   await expect(nav.getByRole('button', {name: '设备工作台'}).locator('span')).toBeVisible();
+});
+
+test('BVH 动作库播放下发关节指令并留在调试页', async ({page}) => {
+  const fixture = await connectFixture(page, true);
+  await page.route('**/api/motion/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/motion/sources/status')
+      return route.fulfill({json: {sources: [
+        {name: 'wrist.bvh', saved: true}, {name: 'unsaved.bvh', saved: false},
+      ]}});
+    if (path === '/api/motion/jobs')
+      return route.fulfill({json: {id: 'wrist', state: 'done'}});
+    if (path === '/api/motion/jobs/wrist/trajectory')
+      return route.fulfill({json: {joint_names: ['joint_link9', 'joint_link8'],
+        frame_time: .1, positions: [[.1, .2], [.11, .21], [.12, .22]]}});
+    return route.fulfill({status: 404, json: {error: '未知接口'}});
+  });
+  await page.goto('/workbench/#/run');
+  await page.locator('#actEnable').uncheck();
+  await expect(page.locator('#actList')).toContainText('wrist.bvh');
+  await expect(page.locator('#actList')).not.toContainText('unsaved.bvh');
+  await page.locator('#actList').getByRole('button', {name: '播放', exact: true}).click();
+  const sent = () => fixture.publishes.filter(p => p.topic === '/arm_controller/joint_trajectory');
+  await expect.poll(() => sent().length).toBe(1);
+  expect(sent()[0].msg.joint_names).toEqual(['joint_link8', 'joint_link9']);
+  expect((sent()[0].msg.points as any[]).map(point => point.positions))
+    .toEqual([[.2, .1], [.21, .11], [.22, .12]]);
+  expect((sent()[0].msg.header as any).frame_id).toMatch(/^workbench-trajectory\/\d+$/);
+  expect(page.url()).toContain('#/run');
+  await page.locator('#btnActStop').click();
+  await expect(page.locator('#actResult')).toContainText('已停止');
+  expect(fixture.policyRequests).toHaveLength(0);
+  expect(fixture.errors).toEqual([]);
 });
 
 test('旧状态夹具动作库下发使用同步MCU时间，取消不伪造完成',async({page})=>{
@@ -1518,4 +1725,74 @@ test('三个面板最小高度统一64px，可反向拖大并在刷新后保留'
   await page.reload();
   for (const [, selector] of panels)
     await expect.poll(async () => (await page.locator(selector!).boundingBox())!.height).toBe(64);
+});
+
+
+test('方向设置与驱动板保存仅针对失能单电机', async ({page}) => {
+  const fixture=await connectFixture(page,true,true);
+  await page.goto('/workbench/#/teach');
+  await expect.poll(()=>fixture.connections.count).toBe(1);
+  fixture.sendFeedback('/motor/topology',{entries:[8,9].map(motor_id=>({motor_id,protocol:1,
+    online:true,model_name:'cerb_r48_101',bus_index:0,lifecycle:3}))});
+  fixture.sendFeedback('/motor/device_param_report',{count:2,entries:[8,9].map(motor_id=>({motor_id,
+    rec_node_id:motor_id,rec_t_max:300,rec_pos_min:-1,rec_pos_max:1,rec_vel_limit:2,
+    rec_torque_limit:3,rec_safety:1,rec_direction:0}))});
+  fixture.sendFeedback('/control/status',{data:JSON.stringify({model:'half_body_robot',joint_names:['joint_link8','joint_link9'],
+    mode:'stopped',feedback_fresh:true,controllers_ready:true,gravity_enabled:false,effort_gain:1,active_controllers:[],pending_goal_ids:[],
+    output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'})});
+  await page.getByRole('group',{name:'电机列表',exact:true}).getByRole('button',{name:/电机 8/}).click();
+  const direction=page.getByLabel('电机 8 方向',{exact:true});
+  const set=page.locator('[data-setdirection="8"]');
+  const save=page.getByRole('button',{name:'保存电机参数',exact:true});
+  await expect(set).toBeEnabled();await expect(save).toBeEnabled();
+  fixture.sendControlState(true);await expect(set).toBeDisabled();await expect(save).toBeDisabled();
+  fixture.sendControlState(false);await expect(set).toBeEnabled();
+  const writes=()=>fixture.publishes.filter(p=>p.topic==='/motor/config_request');
+  const saves=()=>fixture.publishes.filter(p=>p.topic==='/motor/system_command' && p.msg.command===5);
+  await direction.selectOption('1');
+  page.once('dialog',d=>d.dismiss());await set.click();expect(writes()).toHaveLength(0);
+  page.once('dialog',d=>d.accept());await set.click();
+  await expect.poll(()=>writes().length).toBe(1);
+  expect(writes()[0].msg).toMatchObject({kind:0,count:1,command:0,motor_id:65535,
+    session_id:'7001',targets:[{motor_id:8,field:5,value:1}]});
+  await expect(set).toBeDisabled();await expect(save).toBeDisabled();expect(saves()).toHaveLength(0);
+  fixture.sendFeedback('/motor/config_result',{session_id:7001,request_id:writes()[0].msg.request_id,
+    kind:0,command:0,status:2,error_code:5,completed_targets:0,failed_targets:1});
+  await expect(page.locator('#paramResult')).toContainText('设备拒绝');
+  await expect(set).toBeEnabled();
+  await direction.selectOption('0');page.once('dialog',d=>d.accept());await set.click();
+  await expect.poll(()=>writes().length).toBe(2);expect(writes()[1].msg.targets[0].value).toBe(0);
+  fixture.sendFeedback('/motor/config_result',{session_id:7001,request_id:writes()[1].msg.request_id,
+    kind:0,command:0,status:1,error_code:0,completed_targets:1,failed_targets:0});
+  await expect(page.locator('#paramResult')).toContainText('方向已回读核验');expect(saves()).toHaveLength(0);
+  page.once('dialog',d=>d.dismiss());await save.click();expect(saves()).toHaveLength(0);
+  page.once('dialog',d=>d.accept());await save.click();
+  await expect.poll(()=>saves().length).toBe(1);expect(saves()[0].msg.motor_id).toBe(8);
+  fixture.sendFeedback('/motor/config_result',{session_id:7001,request_id:saves()[0].msg.request_id,
+    kind:1,command:5,status:1,error_code:0,completed_targets:1,failed_targets:0});
+  await expect(page.locator('#paramResult')).toContainText('已完成发送驱动板保存指令');
+  await expect(page.locator('#paramResult')).not.toContainText('保存成功');
+  fixture.sendFeedback('/motor/topology',{entries:[{motor_id:8,protocol:2,online:true,model_name:'vaxor_z550',lifecycle:3}]});
+  await expect(set).toBeDisabled();await expect(save).toBeDisabled();
+  fixture.sendFeedback('/motor/topology',{entries:[{motor_id:8,protocol:1,online:true,model_name:'cerb_r48_101',lifecycle:3}]});
+  await expect(set).toBeEnabled();
+  fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:7001,sequence:1000000,
+    sync_time_ns:Date.now()*1e6,states:[{motor_id:8,online:false,control_lifecycle:2,execution_state:1,
+    policy_enabled:false,motion_enabled:false,state_age_ms:5,unified_fault_code:0,vendor_fault_code:0,
+    last_failure_reason:0,policy_generation:1}]});
+  await expect(set).toBeDisabled();await expect(save).toBeDisabled();
+  fixture.sendControlState(false);
+  // 下一帧有效序号高于离线帧，由测试明确恢复状态。
+  fixture.sendFeedback('/motor/control_states',{schema_version:2,session_id:7001,sequence:1000001,
+    sync_time_ns:Date.now()*1e6,states:[{motor_id:8,online:true,control_lifecycle:2,execution_state:1,
+    policy_enabled:false,motion_enabled:false,state_age_ms:5,unified_fault_code:0,vendor_fault_code:0,
+    last_failure_reason:0,policy_generation:1}]});
+  await expect(set).toBeEnabled();page.once('dialog',d=>d.accept());await set.click();
+  await expect.poll(()=>writes().length).toBe(3);fixture.closeConnection();
+  await expect(page.locator('#paramResult')).toContainText('连接中断');
+  await expect(page.locator('#paramResult')).not.toContainText('方向已回读核验');
+  await expect(save).toBeDisabled();
+  await expect(set).toHaveCount(0);
+  expect(fixture.publishes.filter(p=>p.topic==='/motor/system_command' && p.msg.command===0)).toEqual([]);
+  expect(fixture.errors).toEqual([]);
 });

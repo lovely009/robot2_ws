@@ -131,11 +131,14 @@ def test_options_uses_simulation_catalog_without_starting_units(tmp_path, catalo
     serial_ports = ([{'path': str(port), 'label': '测试串口'}] if populated else [])
     models = ['gazebo_arm', 'mujoco_arm'] if populated else []
     mujoco_models = ['mujoco_arm'] if populated else []
+    usb_devices = ([{'index': 0, 'label': '创芯双通道',
+                     'accessible': catalog == 'accessible'}] if populated else [])
     node.simulation = SimulationProcessManager(
         can_provider=lambda: can_interfaces,
         serial_provider=lambda: serial_ports,
         model_provider=lambda: models,
         mujoco_model_provider=lambda: mujoco_models,
+        usbcanfd_provider=lambda: usb_devices,
         systemd=node._systemd)
 
     response = node._on_options(None, GetBenchOptions.Response())
@@ -144,6 +147,7 @@ def test_options_uses_simulation_catalog_without_starting_units(tmp_path, catalo
     expected_ports = [{**entry, 'accessible': catalog == 'accessible'}
                       for entry in serial_ports]
     assert json.loads(response.serial_ports_json) == expected_ports
+    assert json.loads(response.usbcanfd_devices_json) == usb_devices
     assert list(response.simulation_models) == models
     assert list(response.mujoco_models) == mujoco_models
     assert systemd.commands() == []
@@ -374,6 +378,38 @@ def test_simulation_request_keeps_the_confirmation_bit() -> None:
     assert 'driver_interface' not in request, '空串＝未给该参数，不该进命令行'
 
 
+@pytest.mark.parametrize('hil', [False, True])
+def test_multibus_service_callbacks_forward_routes_to_backend_and_simulation(hil):
+    from bench_msgs.srv import StartMotorBackend, StartSimulation
+
+    node = _shell(_all_absent())
+    routes = json.dumps([
+        {'bus': 0, 'transport': 'usbcanfd', 'device': 0, 'channel': 0, 'ids': '*'},
+        {'bus': 1, 'transport': 'usbcanfd', 'device': 0, 'channel': 1, 'ids': '10-18'},
+    ])
+    backend_calls, simulation_calls = [], []
+    node.motor_backend.start = lambda request, auto: backend_calls.append((request, auto))
+    node.simulation.start = simulation_calls.append
+    node.feedback.stop = lambda: None
+    fields = dict(model=_MODEL, transport='multi', sim_channels_json=routes,
+                  physical_bus_isolated=True)
+    if hil:
+        request = StartSimulation.Request(backend='mujoco', controller_mode='firmware', **fields)
+        response = node._on_start_simulation(request, StartSimulation.Response())
+    else:
+        request = StartMotorBackend.Request(**fields)
+        response = node._on_start_motor_backend(request, StartMotorBackend.Response())
+
+    assert response.ok, response.error
+    assert len(backend_calls) == 1
+    backend_request, auto = backend_calls[0]
+    assert auto is hil
+    assert backend_request['transport'] == 'multi'
+    assert backend_request['sim_channels_json'] == routes
+    assert backend_request['physical_bus_isolated'] is True
+    assert [call['sim_channels_json'] for call in simulation_calls] == ([routes] if hil else [])
+
+
 # --- ros2_control 重力参数服务 ----------------------------------------------
 
 def _start_request(model: str = _MODEL, joint_map: str = '1:joint_link1',
@@ -595,8 +631,11 @@ def test_cleanup_releases_controller_handles_and_cancels_pending_without_stoppin
     ('mujoco', ['mujoco_effort_bridge', 'external_joint_source'], False),
     ('mujoco', ['joint_state_broadcaster'], False),
 ])
-def test_hil_uses_session_model_and_only_excludes_its_single_publisher(backend, publishers, starts_control):
+def test_hil_uses_session_model_and_only_excludes_its_single_publisher(
+        backend, publishers, starts_control, monkeypatch):
     from types import SimpleNamespace
+    clock = [100.]
+    monkeypatch.setattr('bench_manager.feedback_manager.time.monotonic', lambda: clock[0])
     systemd = _all_absent()
     node = _shell(systemd)
     node.simulation.status = lambda: {'state': 'running', 'config': {
@@ -608,6 +647,8 @@ def test_hil_uses_session_model_and_only_excludes_its_single_publisher(backend, 
     node.get_parameter = lambda _name: SimpleNamespace(value='different_view_model')
     node.get_publishers_info_by_topic = lambda _topic: [
         SimpleNamespace(node_name=name, node_namespace='/') for name in publishers]
+    node._tick()
+    clock[0] += 1.5
     node._tick()
     starts = [c for c in systemd.commands() if c[0] == 'systemd-run']
     assert bool(starts) == starts_control

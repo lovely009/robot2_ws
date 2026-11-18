@@ -476,3 +476,57 @@ TEST_F(BridgeTest, TopicTimeoutRetainsCorrelationAndPublishesLateTerminalBeforeA
     return c.operation == AgentConfigRequest::ACK_RESULTS && c.ack_request_ids[0] == wire.request_id;
   });}));
 }
+
+TEST_F(BridgeTest, DriverDirectionAndSaveRejectEnabledAndWaitForDeviceTerminal)
+{
+  auto_authority = false; start();
+  std::vector<SystemStatus> systems; listen("/motor/system_status", systems); run(50ms);
+  ConfigRequest direction; direction.kind = ConfigRequest::CONFIG_KIND_PARAM_SET;
+  direction.motor_id = SystemCommand::MOTOR_ID_NONE; direction.count = 1;
+  ParamSetTarget target; target.motor_id = 64; target.field = ParamSetTarget::FIELD_DIRECTION;
+  target.value = 1; direction.targets = {target}; direction.request_id = 10;
+  direction.sync_time_ns = stamp(); direction.session_id = 99;
+  maintenance_pub->publish(direction);
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().status, ConfigResult::STATUS_FAILED);
+  EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_PARAMETERS;}));
+  EXPECT_EQ(results.back().session_id, 100u);
+  results.clear(); direction.session_id = 100;
+  status.motors[0].policy_enabled = true; publish_status(); run(30ms);
+  maintenance_pub->publish(direction);
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().status, ConfigResult::STATUS_BUSY);
+  EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_PARAMETERS;}));
+  status.motors[0].policy_enabled = false; publish_status(); run(30ms);
+  direction.request_id = 11; direction.sync_time_ns = stamp(); results.clear();
+  maintenance_pub->publish(direction);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_PARAMETERS;});}));
+  const auto write = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_PARAMETERS;});
+  ASSERT_EQ(write.parameters.size(), 1u); EXPECT_EQ(write.parameters[0].motor_id, 64u);
+  EXPECT_EQ(write.parameters[0].value, 1); EXPECT_TRUE(results.empty());
+  direction.targets[0].value = 0; direction.sync_time_ns = stamp(); maintenance_pub->publish(direction);
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().status, ConfigResult::STATUS_CONFLICT);
+  AgentConfigResult result; result.request_id = write.request_id;
+  result.operation = AgentConfigRequest::SET_PARAMETERS; result.state = AgentConfigResult::SUCCEEDED;
+  result.completed_motor_mask = UINT64_C(1) << 63; status.results = {result};
+  ASSERT_TRUE(spin([&] {return results.back().status == ConfigResult::STATUS_SUCCEEDED;}));
+  status.results.clear(); configs.clear(); results.clear();
+  SystemCommand save; save.command = 5; save.motor_id = 64; save.request_id = 12; save.sync_time_ns = stamp();
+  system_command_pub->publish(save);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SAVE;});}));
+  const auto saved = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
+    return c.operation == AgentConfigRequest::SAVE;});
+  EXPECT_EQ(saved.motor_id, 64u); EXPECT_TRUE(results.empty());
+  result.request_id = saved.request_id; result.operation = AgentConfigRequest::SAVE;
+  status.results = {result};
+  ASSERT_TRUE(spin([&] {return !results.empty();}));
+  EXPECT_EQ(results.back().command, 5u); EXPECT_EQ(results.back().status, ConfigResult::STATUS_SUCCEEDED);
+  run(60ms); ASSERT_FALSE(systems.empty()); EXPECT_EQ(systems.back().save_seq, 0u);
+  EXPECT_TRUE(commands.empty()); EXPECT_TRUE(wire_grants.empty());
+}

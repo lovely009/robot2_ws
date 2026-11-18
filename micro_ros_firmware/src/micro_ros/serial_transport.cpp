@@ -1,7 +1,10 @@
 #include "serial_transport.h"
 #include <micro_ros_platformio.h>
+#include <cdc_queue.h>
 #include "serial_write_budget.h"
 
+static_assert(CDC_TRANSMIT_QUEUE_BUFFER_SIZE >= 4096,
+    "USB CDC TX queue must hold a complete reliable telemetry publication");
 static bool g_budget_active = false;
 static uint32_t g_write_deadline = 0U;
 static constexpr uint32_t kWriteBudgetMs = 2U;

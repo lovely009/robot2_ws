@@ -9,6 +9,8 @@ package = Path(__file__).resolve().parents[2]
 model_root = package.parent / 'robot_description'
 sys.path.insert(0, str(package))
 from web_host.motion import MotionJobs, handle_motion
+from web_host.motion_catalog import handle_motion_catalog
+from web_host.motion_playback import handle_motion_playback
 motion_jobs = MotionJobs(package / 'action_library')
 
 
@@ -47,11 +49,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header('Location', '/workbench/' + ('?' + request.query if request.query else ''))
             self.end_headers()
             return
-        if not handle_motion(self, motion_jobs):
+        if not (handle_motion_playback(self, motion_jobs)
+                or handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs)):
             super().do_GET()
 
     def do_POST(self):
-        if not handle_motion(self, motion_jobs):
+        if not (handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs)):
             self.send_error(404)
 
     def log_message(self, *args):

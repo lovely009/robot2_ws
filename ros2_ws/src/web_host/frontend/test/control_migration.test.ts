@@ -28,15 +28,189 @@ async function fixture() {
   store.transmissionStatus={last:Date.now(),data:{model:MODEL,joint_names:['elbow'],trajectory_enabled:true}};
   data.applyCommandStatus({model:MODEL,joint_names:['elbow'],mode:'trajectory',
     output_topic:'/motor/host_command_array',
-    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
+    feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
     gravity_enabled:false,effort_gain:1});
   store.motors.set(1,{status:{online:true,lifecycle:4},motion:{position:.1}});
   const action = {target_ids:[1],points:Array.from({length:700},(_,i) =>
     ({motor_id:1,time_from_start_ms:i*10,position:.1+i*.0001}))};
   vi.stubGlobal('fetch', async () => ({ok:true,json:async () => action}));
-  return {data, store, actions:await import('../../web/js/panels/actionLibrary.js'),
-    command:await import('../../web/js/panels/actionLibrary.js')};
+  return {data, store, actions:await import('../../web/js/core/playback.js'),
+    command:await import('../../web/js/core/playback.js')};
 }
+
+async function bvhFixture() {
+  const context = await fixture();
+  const { store, data } = context;
+  store.modelTransmissions.groups = [{
+    name: 'wrist', motors: [{id: 1}, {id: 2}], joints: ['yaw', 'pitch'],
+  }];
+  store.transmissionStatus.data.joint_names = ['yaw', 'pitch'];
+  store.modelJoints = ['yaw', 'pitch'].map(name => ({name, lower: -1, upper: 1}));
+  store.transmissionStatus.data.joint_limits = {
+    yaw: {lower: -1, upper: 1}, pitch: {lower: -1, upper: 1},
+  };
+  store.transmissionStatus.data.joint_velocity_limits = {yaw: 2, pitch: 2};
+  store.commandStatus.data.joint_names = ['yaw', 'pitch'];
+  store.commandStatus.data.joint_trajectory_ids = true;
+  store.motors.set(2, {status: {online: true, lifecycle: 4}});
+  vi.stubGlobal('sessionStorage', {getItem: () => null});
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', async (path: string) => {
+    requests.push(path);
+    if (path.endsWith('.urdf')) return {ok: true, text: async () => '<robot/>'};
+    if (path === '/api/motion/jobs') return {ok: true, json: async () => ({id: 'converted', state: 'done'})};
+    return {ok: true, json: async () => ({joint_names: ['pitch', 'yaw'],
+      positions: [[.1, .2], [.11, .21], [.12, .22]], frame_time: .1})};
+  });
+  return {...context, requests, model: data.MODEL};
+}
+
+it('BVH 按三次曲线段内峰值延长时间，保留全部位置帧和连续切矢', async () => {
+  const {store, model} = await bvhFixture();
+  const {buildBvhPlan} = await import('../../web/js/core/bvh_playback.js');
+  store.transmissionStatus.data.joint_velocity_limits = {yaw: 3.14, pitch: 2};
+  const motion = {joint_names: ['yaw', 'pitch'], positions: [
+    [0, 0], [.12, .01], [.24, .02], [.12, .02],
+  ], frame_time: .042};
+  const plan = buildBvhPlan(motion, store, model, 2500);
+  expect(plan.points.map(point => point.positions)).toEqual(motion.positions);
+  expect(plan.points[0].time_from_start).toEqual({sec: 2, nanosec: 500000000});
+  expect(plan.timeScale).toBeGreaterThan(1);
+  expect(plan.points[1].velocities[0]).toBeGreaterThan(0);
+  expect(plan.points[2].velocities[0]).toBe(0);
+  const seconds = (point: any) => point.time_from_start.sec + point.time_from_start.nanosec / 1e9;
+  for (let i = 1; i < plan.points.length; i++) {
+    const before = plan.points[i - 1], after = plan.points[i];
+    const dt = seconds(after) - seconds(before);
+    expect(dt).toBeCloseTo(.042 * plan.timeScale, 8);
+    for (let joint = 0; joint < 2; joint++) {
+      const p = before.positions[joint], q = after.positions[joint];
+      const a = 2*p - 2*q + dt*(before.velocities[joint] + after.velocities[joint]);
+      const b = -3*p + 3*q - dt*(2*before.velocities[joint] + after.velocities[joint]);
+      const c = dt*before.velocities[joint];
+      const limit = joint === 0 ? 3.14 : 2;
+      for (let sample = 0; sample <= 500; sample++) {
+        const s = sample / 500;
+        expect(Math.abs((3*a*s*s + 2*b*s + c) / dt)).toBeLessThanOrEqual(limit + 1e-7);
+        expect(((a*s+b)*s+c)*s+p).toBeGreaterThanOrEqual(Math.min(p,q) - 1e-9);
+        expect(((a*s+b)*s+c)*s+p).toBeLessThanOrEqual(Math.max(p,q) + 1e-9);
+      }
+    }
+  }
+  expect(plan.durationMs).toBe(Math.floor(seconds(plan.points.at(-1)) * 1000));
+});
+
+it.each([undefined, {yaw: 0, pitch: 2}, {yaw: NaN, pitch: 2}])(
+  'BVH 缺少有效主机速度回读时在使能前提示更新主机', async limits => {
+    const {store, actions} = await bvhFixture();
+    store.transmissionStatus.data.joint_velocity_limits = limits;
+    await actions.playAction('wrist.bvh', {enable: true, loop: false, kp: 30, kd: 1});
+    expect(actions.playbackSnapshot().error).toContain('速度限位');
+    expect(submitPolicy).not.toHaveBeenCalled();
+    expect(pub).not.toHaveBeenCalled();
+  });
+
+it('BVH 播放向主机提交全帧关节轨迹并等待相同编号的 JTC 结果', async () => {
+  const {store, actions, requests} = await bvhFixture();
+  const running = actions.playAction('wrist.bvh', {enable: false, loop: false, kp: 30, kd: 1});
+  await vi.advanceTimersByTimeAsync(900);
+  const sent = pub.mock.calls.find(([key]) => key === 'jointTrajectory')?.[1];
+  expect(sent).toBeDefined();
+  expect(sent.joint_names).toEqual(['yaw', 'pitch']);
+  expect(sent.points.map((point: any) => point.positions)).toEqual([[.2, .1], [.21, .11], [.22, .12]]);
+  expect(sent.points[2].time_from_start).toEqual({sec: 2, nanosec: 700000000});
+  expect(requests.at(-1)).toBe('/api/motion/jobs/converted/trajectory');
+  expect(requests.some(path => path.endsWith('preview.json'))).toBe(false);
+  expect(pub.mock.calls.some(([, msg]) => msg.count > 0)).toBe(false);
+  const id = Number(sent.header.frame_id.split('/')[1]);
+  store.traj.state = {trajectory_id: id + 1, active: false, completed: true, elapsed_ms: 2700};
+  await vi.advanceTimersByTimeAsync(50);
+  store.traj.state = {trajectory_id: id, active: false, completed: true, elapsed_ms: 2700};
+  await vi.advanceTimersByTimeAsync(50);
+  await running;
+});
+
+it('BVH 转换中取消后即使转换完成也不再使能或发送动作', async () => {
+  const {actions} = await bvhFixture();
+  let complete: (value: any) => void = () => {};
+  vi.stubGlobal('fetch', (path: string) => path.endsWith('.urdf')
+    ? Promise.resolve({ok: true, text: async () => '<robot/>'})
+    : new Promise(resolve => {complete = resolve;}));
+  const running = actions.playAction('wrist.bvh', {enable: true, loop: false, kp: 30, kd: 1});
+  await vi.advanceTimersByTimeAsync(1);
+  actions.stopPlayback();
+  complete({ok: true, json: async () => ({id: 'converted', state: 'done'})});
+  await running;
+  expect(submitPolicy).not.toHaveBeenCalled();
+  expect(pub.mock.calls.some(([key]) => key === 'jointTrajectory')).toBe(false);
+});
+
+it('BVH 只在 JTC 成功后循环，失败终态取消并结束', async () => {
+  const {store, actions} = await bvhFixture();
+  const running = actions.playAction('wrist.bvh', {enable: false, loop: true, kp: 30, kd: 1});
+  await vi.advanceTimersByTimeAsync(900);
+  const sent = () => pub.mock.calls.filter(([key]) => key === 'jointTrajectory').map(([, msg]) => msg);
+  const firstId = Number(sent()[0].header.frame_id.split('/')[1]);
+  store.traj.state = {trajectory_id: firstId, active: false, completed: true, elapsed_ms: 2700};
+  await vi.advanceTimersByTimeAsync(50);
+  expect(sent()).toHaveLength(2);
+  const secondId = Number(sent()[1].header.frame_id.split('/')[1]);
+  expect(secondId).not.toBe(firstId);
+  store.traj.state = {trajectory_id: secondId, active: false, completed: false, elapsed_ms: 100};
+  await vi.advanceTimersByTimeAsync(50);
+  await running;
+  expect(sent()).toHaveLength(2);
+  expect(pub.mock.calls.at(-1)).toEqual(['trajectory', expect.objectContaining({count: 0})]);
+});
+
+it('BVH 使能覆盖完整差动组，并等待 MCU 确认后才发送关节轨迹', async () => {
+  const {store, actions} = await bvhFixture();
+  store.controlStates = {seen: true, valid: true, at: Date.now(), sourceTimeNs: 9000000000,
+    session: 12, sequence: 1, byId: new Map([1, 2].map(motor_id => [motor_id, {
+      motor_id, online: true, control_lifecycle: 2, policy_enabled: false,
+      state_age_ms: 0, unified_fault_code: 0, policy_generation: 0,
+    }]))};
+  const running = actions.playAction('wrist.bvh', {enable: true, loop: false, kp: 30, kd: 1});
+  await vi.advanceTimersByTimeAsync(900);
+  expect(submitPolicy).toHaveBeenCalledWith([1, 2].map(motor_id => ({
+    motor_id, enabled: true, kp: 30, kd: 1, confirm_unprotected: false,
+  })));
+  expect(pub.mock.calls.some(([key]) => key === 'jointTrajectory')).toBe(false);
+  store.configResults.set(7, {session_id: 12, request_id: 7, intent_id: 'host:1', kind: 2,
+    command: 0, status: 1, error_code: 0, failed_targets: 0, completed_targets: 2});
+  store.controlStates.at = Date.now();
+  for (const state of store.controlStates.byId.values()) {
+    Object.assign(state, {control_lifecycle: 3, policy_enabled: true, policy_generation: 1});
+  }
+  await vi.advanceTimersByTimeAsync(50);
+  const sent = pub.mock.calls.find(([key]) => key === 'jointTrajectory')![1];
+  expect(sent).toBeDefined();
+  store.traj.state = {trajectory_id: Number(sent.header.frame_id.split('/')[1]),
+    active: false, completed: true, elapsed_ms: 2700};
+  await vi.advanceTimersByTimeAsync(50);
+  await running;
+});
+
+it.each(['missing', 'nonfinite', 'mapping', 'uncalibrated'])(
+  'BVH 在 %s 情况下拒绝使能和轨迹下发', async reason => {
+    const {store, actions} = await bvhFixture();
+    if (reason === 'uncalibrated') {
+      store.modelTransmissions.hardware_ready = false;
+    } else {
+      vi.stubGlobal('fetch', async (path: string) => {
+        if (path.endsWith('.urdf')) return {ok: true, text: async () => '<robot/>'};
+        if (path === '/api/motion/jobs') return {ok: true, json: async () =>
+          ({id: 'converted', state: reason === 'mapping' ? 'mapping' : 'done'})};
+        return {ok: true, json: async () => ({
+          joint_names: reason === 'missing' ? ['yaw'] : ['yaw', 'pitch'],
+          positions: reason === 'missing' ? [[0]] : [[NaN, 0]], frame_time: .1,
+        })};
+      });
+    }
+    await actions.playAction('wrist.bvh', {enable: true, loop: false, kp: 30, kd: 1});
+    expect(submitPolicy).not.toHaveBeenCalled();
+    expect(pub).not.toHaveBeenCalled();
+  });
 
 async function policyFixture() {
   const context = await fixture();
@@ -47,7 +221,7 @@ async function policyFixture() {
   vi.stubGlobal('document',{getElementById(id:string) {
     if(!elements.has(id))elements.set(id,element());return elements.get(id);
   },createElement:element});
-  const panel=actions.mount(null,{});
+  const panel=(await import('../../web/js/panels/actionLibrary.js')).mount(null,{});
   store.controlStates={seen:true,valid:true,at:Date.now(),sourceTimeNs:9000000000,session:12,sequence:1,
     byId:new Map([[1,{motor_id:1,online:true,control_lifecycle:2,execution_state:1,
       policy_enabled:false,motion_enabled:false,state_age_ms:0,unified_fault_code:0,
@@ -330,7 +504,7 @@ it.each(['reject','reason'])('shows the host %s when the complete trajectory fai
     },
     createElement:element,
   });
-  const panel=actions.mount(null,{});
+  const panel=(await import('../../web/js/panels/actionLibrary.js')).mount(null,{});
   const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1});
   await vi.advanceTimersByTimeAsync(1000);
   const alignment=pub.mock.calls.find(([key,msg])=>key==='trajectory' && msg.count>0)![1];
@@ -401,7 +575,7 @@ it('invalid status clears the identity and cannot refresh an old controller sess
   const {data,store}=await fixture();
   data.applyCommandStatus({model:data.MODEL,joint_names:['elbow'],mode:'trajectory',
     output_topic:'/motor/host_command_array',
-    trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
+    feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
     gravity_enabled:true,effort_gain:.8});
   expect(store.commandStatus.last).toBe(10000);
   data.applyCommandStatus({...store.commandStatus.data,gravity_enabled:null,effort_gain:null});

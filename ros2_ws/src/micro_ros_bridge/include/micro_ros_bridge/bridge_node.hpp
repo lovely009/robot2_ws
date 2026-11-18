@@ -44,6 +44,7 @@ private:
   bool authority_confirmed_ = false;
   std::chrono::steady_clock::time_point authority_started_{};
   std::chrono::steady_clock::time_point authority_sent_at_{};
+  std::chrono::steady_clock::time_point authority_deadline_{};
   std::optional<can_bridge_msgs::msg::MotorPolicyArray> pending_policy_;
   using TimePoint = std::chrono::steady_clock::time_point;
   using Config = can_bridge_msgs::msg::AgentConfigRequest;
@@ -122,6 +123,8 @@ private:
   LowStateAssembler assembler_;
   std::vector<MotorFreshness> freshness_ = std::vector<MotorFreshness>(65);
   TimePoint motion_at_{};
+  TimePoint motion_source_at_{};
+  uint32_t motion_tick_ms_ = 0;
   std::optional<can_bridge_msgs::msg::MotorCommandTarget> last_targets_[65];
   bool trajectory_targets_[65] = {};
   bool host_execution_ = false, host_takeover_pending_ = false, takeover_stop_sent_ = false;

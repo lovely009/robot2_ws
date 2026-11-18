@@ -42,7 +42,7 @@ _NOT_LOADED_RC = 5
 # 环境白名单：transient service 不继承调用者环境，ROS 的发现路径全靠这里带进去。
 _ENV_PREFIXES = ("AMENT_", "ROS_", "RMW_", "RCUTILS_", "COLCON_",
                  "CYCLONEDDS_", "FASTDDS_")
-_ENV_EXACT = ("PATH", "LD_LIBRARY_PATH", "PYTHONPATH")
+_ENV_EXACT = ("PATH", "LD_LIBRARY_PATH", "PYTHONPATH", "ROBOT2_CONTROLCANFD_LIB")
 
 
 class UnitState(Enum):

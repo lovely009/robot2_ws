@@ -18,6 +18,7 @@ import yaml
 import audit_step_linkages as audit
 import hips_mounting as hips
 import native_names
+import joint_convention
 import left_hand_mounting
 import arm_mounting
 import scan_artifacts
@@ -26,6 +27,13 @@ from assembly_fingerprint import geometry_fingerprint
 
 MODEL = Path(__file__).resolve().parents[1]
 DIRECTORY = MODEL / 'mujoco/visual/native'
+ARM_INERTIA_SOURCE = MODEL.parent / '全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf'
+ARM_LINK_NAMES = {
+    f'BN_{side}{part}_link'
+    for side in ('Left', 'Right')
+    for part in ('Shoulder_1', 'Shoulder_2', 'UpperArm_1', 'UpperArm_2',
+                 'UpperArm_3', 'LowerArm_1', 'LowerArm_2', 'Hand_roll', 'Hand_pitch')
+}
 
 
 def transform(position=(0.,0.,0.), rotation=None):
@@ -73,6 +81,17 @@ def source_tree(alignment, hand_mounting=None):
         raise ValueError('Repeat STEP calibration after changing the source URDF')
     root=ET.parse(source).getroot()
     root.set('name',MODEL.name)
+    # Both exports use the same local arm link frames. Import before the
+    # calibrated axis offsets and mounting transforms re-express the inertias.
+    arm_links = {
+        link.get('name').strip(): link
+        for link in ET.parse(ARM_INERTIA_SOURCE).getroot().findall('link')
+    }
+    for link in root.findall('link'):
+        name = link.get('name').strip()
+        if name in ARM_LINK_NAMES:
+            link.remove(link.find('inertial'))
+            link.insert(0, deepcopy(arm_links[name].find('inertial')))
     frames={name:np.asarray(entry['world_transform']) for name,entry in alignment['links'].items()}
     if hand_mounting is not None:
         frames[hand_mounting['hand_link']]=np.asarray(hand_mounting['hand_world_transform'])
@@ -201,7 +220,10 @@ def build():
     source,native,frames,arm_mount=source_tree(alignment,hand_mounting)
     aliases,link_aliases=native_names.names()
     topology=native_names.rename_tree(yaml.safe_load((MODEL/'config/motor_topology.yaml').read_text()),aliases)
-    limits=native_names.rename_tree(yaml.safe_load((MODEL/'config/simulation_limits.yaml').read_text()),aliases)
+    pending_limits=MODEL/'config/simulation_limits.pending.yaml'
+    limits_path=pending_limits if pending_limits.is_file() else MODEL/'config/simulation_limits.yaml'
+    limits=joint_convention.native_limits(MODEL,yaml.safe_load(limits_path.read_text()))
+    limits=native_names.rename_tree(limits,aliases)
     scanned_limits=limits.get('source')=='mujoco/geometry_limits.json'
     if scanned_limits:scan_artifacts.validate(MODEL,limits)
     if not scanned_limits:
@@ -399,20 +421,31 @@ def build():
         name=link.get('name')
         for mesh in link.findall('visual/geometry/mesh')+link.findall('collision/geometry/mesh'):
             mesh.set('filename','package://robot_description/models/full_body_robot/'+files[name])
-    ET.indent(source,space='  ');urdf_text=ET.tostring(source,encoding='unicode')+'\n'
-    for suffix in ('','.mapping'):(MODEL/f'urdf/full_body_robot{suffix}.urdf').write_text(urdf_text)
-    limits['source_sha256']=hashlib.sha256(urdf_text.encode()).hexdigest()
     ET.indent(root,space='  ')
     limits['geometry_sha256']=geometry_fingerprint(MODEL,root)
-    (MODEL/'config/simulation_limits.yaml').write_text(yaml.safe_dump(limits,allow_unicode=True,sort_keys=False))
-    (MODEL/'config/joint_names.json').write_text(json.dumps({'source':metadata['source']+'/meshes','rule':'strip whitespace and remove _link for joints','joints':aliases,'links':link_aliases},indent=2)+'\n')
     (MODEL/'config/left_hand_mount_alignment.json').write_text(json.dumps(hand_mounting,indent=2)+'\n')
     (MODEL/'config/arm_mount_alignment.json').write_text(json.dumps(arm_mount,indent=2)+'\n')
     remounted={hand_mounting['hand_link']:hand_mounting['hand_world_transform']} if hand_mounting['rotation_rad'] else {}
     remounted.update({name:native[name].tolist() for name in arm_mount['affected_links']})
-    (MODEL/'config/native_assembly.json').write_text(json.dumps({'source_step_sha256':alignment['step_sha256'],'source_urdf_sha256':alignment['urdf_sha256'],'basis':'native '+alignment['source']+' frames with hips installation, outward arm roll zero, and conditional hand mounting; no ICP matrices','remounted_source_link_world_transforms':remounted,'ownership':ownership,'coupled_visual_world_transforms':geometry_poses,'collision_validation':limits['collision_validation'],'auxiliary_inertia':'numerical preview surrogates; source physical-link inertias retained from '+alignment['source']+' and rigidly re-expressed with mounted assemblies'},indent=2)+'\n')
-    for filename in ('full_body_robot.xml','full_body_robot.physics.xml'):(MODEL/'mujoco'/filename).write_text(ET.tostring(root,encoding='unicode')+'\n')
-    shared.write_standalone_urdf(root,joints,limits)
+    assembly = {
+        'source_step_sha256': alignment['step_sha256'],
+        'source_urdf_sha256': alignment['urdf_sha256'],
+        'basis': 'native '+alignment['source']+' frames with hips installation, outward arm roll zero, and conditional hand mounting; no ICP matrices',
+        'remounted_source_link_world_transforms': remounted,
+        'ownership': ownership,
+        'coupled_visual_world_transforms': geometry_poses,
+        'collision_validation': limits['collision_validation'],
+        'arm_inertia': {
+            'source_urdf': str(ARM_INERTIA_SOURCE.relative_to(MODEL.parent)),
+            'sha256': hashlib.sha256(ARM_INERTIA_SOURCE.read_bytes()).hexdigest(),
+            'links': sorted(ARM_LINK_NAMES),
+        },
+        'auxiliary_inertia': 'numerical preview surrogates; physical-link inertias from '+alignment['source']+' with arm overrides recorded in arm_inertia, rigidly re-expressed with mounted assemblies',
+    }
+    (MODEL/'config/native_assembly.json').write_text(json.dumps(assembly, indent=2)+'\n')
+    (MODEL/'mujoco/full_body_robot.physics.xml').write_text(ET.tostring(root,encoding='unicode')+'\n')
+    joint_convention.publish(MODEL,source,root,limits,aliases,link_aliases)
+    if limits_path==pending_limits:pending_limits.unlink()
     print('Native full model: 37 outputs, 30 auxiliary hinges, 10 closed rods; kinematic workspaces regenerated')
 
 

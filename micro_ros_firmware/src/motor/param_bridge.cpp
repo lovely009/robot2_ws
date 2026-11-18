@@ -19,6 +19,10 @@
 using Config = can_bridge_msgs__msg__AgentConfigRequest;
 static constexpr uint16_t kMotorIdNone = UINT16_MAX;
 static constexpr uint16_t kInvalid = 10, kSubmitFailed = 11, kUnknownMotor = 12;
+static constexpr uint8_t kDirectionField =
+    can_bridge_msgs__msg__ParamSetTarget__FIELD_DIRECTION;
+static constexpr uint8_t kDeviceSaveMask =
+    MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK;
 static_assert(config_transaction::kCapacity == 8, "线上结果容量必须为8");
 
 static rcl_subscription_t g_config_sub;
@@ -75,15 +79,28 @@ static bool submit_config(control_mailbox_config_request_t &request, uint8_t fie
 }
 // 有限操作使用互斥载荷；未用组必须为空/默认，避免含混或拼接请求。
 static bool groups_valid(const Config &m) {
+  const bool direction_set =
+      m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS;
   if (!agent_config_operation_supported(m.operation) || m.policies.size > 48 ||
-      m.parameters.size || m.ack_request_ids.size > 8) return false;
+      (direction_set ? m.parameters.size != 1U : m.parameters.size != 0U) ||
+      m.ack_request_ids.size > 8) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY &&
       (m.policies.size || m.policy_generation || m.allow_no_protect)) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && m.ack_request_ids.size) return false;
   if (m.operation != can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
       (m.query_id || m.query_kind || m.query_revision || m.cursor || m.detail_request_id)) return false;
-  const bool single = m.operation >= can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS && m.operation <= can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT;
-  if (single ? (m.motor_id == 0 || m.motor_id > 64) : m.motor_id != kMotorIdNone) return false;
+  const bool single =
+      m.operation >= can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS &&
+      m.operation <= can_bridge_msgs__msg__AgentConfigRequest__SAVE;
+  if (direction_set) {
+    if (m.motor_id != kMotorIdNone) return false;
+    const auto &p = m.parameters.data[0];
+    if (p.motor_id == 0 || p.motor_id > 64 || p.field != kDirectionField ||
+        !isfinite(p.value) || (p.value != 0.0f && p.value != 1.0f)) return false;
+  } else if (single ? (m.motor_id == 0 || m.motor_id > 64)
+                    : m.motor_id != kMotorIdNone) {
+    return false;
+  }
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY && !m.policies.size) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__ACK_RESULTS && !m.ack_request_ids.size) return false;
   if (m.operation == can_bridge_msgs__msg__AgentConfigRequest__QUERY_INFO &&
@@ -109,11 +126,13 @@ static bool policies_valid(const Config &m, uint64_t &disabled, bool &enables) {
   }
   return true;
 }
-static bool trajectory_busy(const Config &m) {
-  return (m.operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ||
-      m.operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ||
-      m.operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT) &&
-      motor_rt_agent_trajectory_owns(m.motor_id);
+static bool trajectory_busy(uint8_t operation, uint16_t motor_id) {
+  return (operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS ||
+      operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ||
+      operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ||
+      operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT ||
+      operation == can_bridge_msgs__msg__AgentConfigRequest__SAVE) &&
+      motor_rt_agent_trajectory_owns(motor_id);
 }
 
 static void config_cb(const void *input) {
@@ -127,6 +146,10 @@ static void config_cb(const void *input) {
   request.sync_time_ns = msg->issued_stamp;
   if (msg->schema_version != can_bridge_msgs__msg__AgentWireContract__SCHEMA_VERSION || !groups_valid(*msg)) {
     g_transactions.reject(request, config_transaction::kFailed, kInvalid); return;
+  }
+  if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS) {
+    request.motor_id = msg->parameters.data[0].motor_id;
+    request.direction_raw = static_cast<uint8_t>(msg->parameters.data[0].value);
   }
   if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__STOP_ALL) {
     motor_rt_request_stop_all(); return;
@@ -170,14 +193,19 @@ static void config_cb(const void *input) {
   if (!time_clock_valid() || !g_transactions.can_start(g_active_slot, millis())) {
     g_transactions.complete(g_active_slot, 0, 0, config_transaction::kExpired); return;
   }
-  if (trajectory_busy(*msg)) {
+  if (trajectory_busy(msg->operation, request.motor_id)) {
     g_transactions.busy(g_active_slot); return;
   }
   if (msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_POLICY) {
     for (size_t i = 0; i < msg->policies.size; ++i) {
       const auto &target = msg->policies.data[i];
-      if (target.enabled && g_transactions.pending_device_command(
-          can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO, target.motor_id)) {
+      if (target.enabled &&
+          (g_transactions.pending_device_command(
+              can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO, target.motor_id) ||
+          g_transactions.pending_device_command(
+              can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS, target.motor_id) ||
+          g_transactions.pending_device_command(
+              can_bridge_msgs__msg__AgentConfigRequest__SAVE, target.motor_id))) {
         g_transactions.busy(g_active_slot); return;
       }
     }
@@ -197,19 +225,32 @@ static void config_cb(const void *input) {
       (void)g_transactions.track(g_active_slot, policy.request_id, policy.targets[i].motor_id);
     g_transactions.submitted(g_active_slot, policy.target_count, 0);
   } else {
-    const auto *v = find_view(msg->motor_id);
+    const auto *v = find_view(request.motor_id);
     if (!v || !v->bound) { g_transactions.complete(g_active_slot, 0, 1, kUnknownMotor); return; }
+    const bool driver_operation =
+        msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS ||
+        msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SAVE;
+    if (driver_operation && (!v->device_side_limits || v->enable)) {
+      g_transactions.complete(g_active_slot, 0, 1, kInvalid); return;
+    }
     // 首版保守地拒绝仍武装的 CLEAR_FAULT，不把故障清除当作运动命令。
     if ((msg->operation == can_bridge_msgs__msg__AgentConfigRequest__CLEAR_FAULT ||
         msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO) && v->enable) {
       g_transactions.busy(g_active_slot); return;
     }
     control_mailbox_config_request_t item{};
-    item.motor_id = msg->motor_id;
+    item.motor_id = request.motor_id;
     item.kind = msg->operation == can_bridge_msgs__msg__AgentConfigRequest__REFRESH_PARAMETERS ? CONTROL_MAILBOX_CONFIG_REFRESH_PARAMS
         : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_ZERO ? CONTROL_MAILBOX_CONFIG_SET_ZERO
+        : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SET_PARAMETERS ? CONTROL_MAILBOX_CONFIG_SET_DIRECTION
+        : msg->operation == can_bridge_msgs__msg__AgentConfigRequest__SAVE ? CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH
         : CONTROL_MAILBOX_CONFIG_CLEAR_FAULT;
-    const bool ok = submit_config(item, UINT8_MAX);
+    if (item.kind == CONTROL_MAILBOX_CONFIG_SET_DIRECTION)
+      item.value.direction_raw = request.direction_raw;
+    if (item.kind == CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH)
+      item.value.save_slots = kDeviceSaveMask;
+    const bool ok = submit_config(item,
+        item.kind == CONTROL_MAILBOX_CONFIG_SET_DIRECTION ? kDirectionField : UINT8_MAX);
     g_transactions.submitted(g_active_slot, 1, ok ? 0 : kSubmitFailed);
   }
 }
@@ -282,7 +323,7 @@ void param_bridge_fill_status(can_bridge_msgs__msg__AgentStatus *out) {
   out->save_in_progress = false;
   out->last_error = g_last_error; out->last_error_motor = g_last_error_motor;
   const uint16_t frequencies[] = {FIRMWARE_AGENT_PING_HZ, FIRMWARE_MOTOR_REPORT_HZ,
-      FIRMWARE_MOTOR_REPORT_HZ, FIRMWARE_IMU_REPORT_HZ, FIRMWARE_TEMPERATURE_REPORT_HZ,
+      FIRMWARE_STATUS_REPORT_HZ, FIRMWARE_IMU_REPORT_HZ, FIRMWARE_TEMPERATURE_REPORT_HZ,
       FIRMWARE_MOTOR_COMMAND_HZ};
   out->firmware_values_valid = true;
   memcpy(out->firmware_values, frequencies, sizeof(frequencies));

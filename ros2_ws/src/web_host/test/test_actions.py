@@ -59,8 +59,7 @@ def test_bvh_workspace_reads_source_additions_and_deletions(tmp_path, layout):
         assert manager._source_text(clip.name) == 'HIERARCHY'
         clip.unlink()
         assert manager.sources() == []
-        # JSON 动作库读写仍位于安装树。
-        assert actions_directory(str(web)) == web.parent / 'action_library'
+        assert actions_directory(str(web)) == source
     finally:
         manager.close()
 
@@ -72,6 +71,33 @@ def test_bvh_standalone_install_uses_installed_library(tmp_path):
 
 def test_bvh_custom_web_root_keeps_its_own_library(web_root):
     assert bvh_directory(str(web_root)) == actions_directory(str(web_root))
+
+
+@pytest.mark.parametrize('layout', ['install/web_host/share/web_host', 'install/share/web_host'])
+def test_workspace_json_library_tracks_source_and_imports(tmp_path, layout):
+    web = tmp_path / layout / 'web'
+    installed = web.parent / 'action_library'
+    installed.mkdir(parents=True)
+    source = tmp_path / 'src/web_host/action_library'
+    source.mkdir(parents=True)
+    (source.parent / 'package.xml').write_text('<package/>')
+    text = json.dumps(_payload())
+    (installed / 'stale.json').write_text(text)
+
+    assert list_actions(str(web)) == []
+    with pytest.raises(FileNotFoundError):
+        read_action(str(web), 'stale.json')
+    (source / 'current.json').write_text(text)
+    assert [entry['name'] for entry in list_actions(str(web))] == ['current.json']
+    assert read_action(str(web), 'current.json') == text
+    (source / 'current.json').unlink()
+    assert list_actions(str(web)) == []
+
+    save_action(str(web), 'imported.json', text)
+    assert (source / 'imported.json').read_text() == text
+    assert not (installed / 'imported.json').exists()
+    assert [entry['name'] for entry in list_actions(str(web))] == ['imported.json']
+    assert (installed / 'stale.json').read_text() == text
 
 
 def test_summary_reports_ids_and_duration() -> None:

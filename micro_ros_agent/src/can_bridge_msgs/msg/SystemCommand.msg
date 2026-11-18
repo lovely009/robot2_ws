@@ -1,7 +1,7 @@
 # 系统命令（上层 → MCU，reliable）。
 #
 # facade 的兼容完成序号；逐请求终态以 /motor/config_result 为准：
-#   SAVE        → system_status.save_seq 前进（且 save_in_progress 已转 false）
+#   SAVE_DEVICE → /motor/config_result 逐请求终态（不推进 MCU save_seq）
 #   REFRESH     → system_status.refresh_seq 前进
 #   SET_ZERO    → system_status.set_zero_seq 前进
 #   CLEAR_FAULT → system_status.clear_fault_seq 前进
@@ -18,9 +18,11 @@ uint8 COMMAND_CLEAR_FAULT=3
 # 上报当前参数视图：不触发 SDO、不访问设备，motor_id 被忽略（总是整机一帧）。
 # 没有在线电机时，帧里 dev_* 为 NaN，页面呈现的就是驱动板 W25 参数表。
 uint8 COMMAND_REPORT=4
+# 仅保存所选电机驱动板支持的对象；不写 MCU W25，不固化易失的方向/保护开关。
+uint8 COMMAND_SAVE_DEVICE=5
 uint8 command
 # 目标电机（1..64）；MOTOR_ID_NONE = 不适用。
-# SAVE 只接受 MOTOR_ID_NONE（W25 必须整机落盘）；REFRESH/SET_ZERO/CLEAR_FAULT 必须给有效 id。
+# 旧 SAVE 已禁用；SAVE_DEVICE/REFRESH/SET_ZERO/CLEAR_FAULT 必须给有效 id。
 # REPORT 忽略 motor_id（请传 MOTOR_ID_NONE）。
 uint16 MOTOR_ID_NONE=65535
 uint16 motor_id

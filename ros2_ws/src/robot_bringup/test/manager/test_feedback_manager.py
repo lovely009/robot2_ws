@@ -12,6 +12,13 @@ FeedbackSetup = tuple[FirmwareFeedbackManager, FakeSystemd]
 
 
 @pytest.fixture
+def clock(monkeypatch):
+    now = [100.]
+    monkeypatch.setattr('bench_manager.feedback_manager.time.monotonic', lambda: now[0])
+    return now
+
+
+@pytest.fixture
 def setup_feedback(tmp_path: Path) -> FeedbackSetup:
     for name in ('arm_a', 'arm_b'):
         model = tmp_path / name
@@ -25,6 +32,180 @@ def setup_feedback(tmp_path: Path) -> FeedbackSetup:
         '<child link="tip"/><limit velocity="1" effort="10"/></joint></robot>')
     fake = FakeSystemd({UNIT_FEEDBACK: {'LoadState': 'not-found'}})
     return FirmwareFeedbackManager(tmp_path, SystemdUnits(runner=fake)), fake
+
+
+def _settle(manager, clock, model='arm_a', **context):
+    manager.reconcile(model, **context)
+    clock[0] += 1.5
+    manager.reconcile(model, **context)
+
+
+@pytest.fixture
+def inventory_feedback(setup_feedback):
+    manager, fake = setup_feedback
+    model = manager.models_root / 'arm_a'
+    (model / 'config/motor_driver.yaml').write_text(
+        'motor_hardware:\n  motors:\n'
+        '    m1: {id: 1, joint: elbow}\n'
+        '    m2: {id: 2, joint: wrist}\n')
+    (model / 'urdf/arm_a.urdf').write_text(
+        '<robot name="arm"><joint name="elbow" type="continuous"/>'
+        '<joint name="wrist" type="continuous"/></robot>')
+    return manager, fake
+
+
+def test_inventory_start_waits_for_motors_to_finish_arriving(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[2], session_id=100)
+    assert manager.status()['state'] == 'stopped'
+    clock[0] = 100.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    clock[0] = 101.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+    clock[0] = 102.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1
+    assert 'motor_ids:=1,2' in starts[0]
+    assert 'start_controllers:=false' in starts[0]
+
+
+@pytest.mark.parametrize('missing', [[2], []])
+def test_brief_inventory_dropout_keeps_existing_session(inventory_feedback, clock, missing):
+    manager, fake = inventory_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(clock[0])
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    before = len(stops)
+    clock[0] = 102.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=missing, session_id=100)
+    assert manager.status()['state'] == 'running'
+    clock[0] = 102.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert len(stops) == before
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+    assert manager.status()['motor_ids'] == '1,2'
+
+
+@pytest.mark.parametrize('initial,changed', [([1, 2], [2]), ([2], [1, 2])])
+def test_persistent_inventory_change_replaces_session_once(inventory_feedback, clock, initial, changed):
+    manager, fake = inventory_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(len(fake.commands()))
+    _settle(manager, clock, agent_running=True, motor_ids=initial, session_id=100)
+    before = len(stops)
+    clock[0] = 102.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=changed, session_id=100)
+    clock[0] = 103.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=changed, session_id=100)
+    assert len(stops) == before
+    clock[0] = 103.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=changed, session_id=100)
+    manager.reconcile('arm_a', agent_running=True, motor_ids=changed, session_id=100)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 2
+    assert len(stops) == before + 1
+    assert stops[-1] < fake.commands().index(starts[-1])
+    assert manager.status()['motor_ids'] == ','.join(map(str, changed))
+    assert all('start_controllers:=false' in c for c in starts)
+
+
+def test_persistent_empty_inventory_stops_session_once(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(clock[0])
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    before = len(stops)
+    clock[0] = 102.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=100)
+    assert manager.status()['state'] == 'running'
+    clock[0] = 103.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=100)
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=100)
+    assert manager.status()['state'] == 'stopped'
+    assert len(stops) == before + 1
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_new_mcu_session_stops_old_control_before_settling(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(clock[0])
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    before = len(stops)
+    clock[0] = 102.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[2], session_id=101)
+    assert manager.status()['state'] == 'stopped'
+    assert len(stops) == before + 1
+    clock[0] = 102.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=101)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+    clock[0] = 104.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=101)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 2
+    assert 'motor_ids:=1,2' in starts[-1]
+    assert manager.status()['session_id'] == '101'
+    assert all('start_controllers:=false' in c for c in starts)
+
+
+@pytest.mark.parametrize('session', [0, 100])
+def test_restart_adopts_live_inventory_without_stopping(inventory_feedback, clock, session):
+    manager, fake = inventory_feedback
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    stops = []
+    adopted = FirmwareFeedbackManager(manager.models_root, SystemdUnits(runner=fake),
+                                      stop_control=lambda: stops.append(True))
+    adopted.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=session)
+    assert adopted.status()['state'] == 'running'
+    clock[0] += .5
+    adopted.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert adopted.status()['motor_ids'] == '1,2'
+    assert not stops
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_restart_waits_for_first_inventory_without_treating_unknown_as_empty(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    stops = []
+    adopted = FirmwareFeedbackManager(manager.models_root, SystemdUnits(runner=fake),
+                                      stop_control=lambda: stops.append(True))
+    for now in (102., 104., 106.):
+        clock[0] = now
+        adopted.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=0)
+        assert adopted.status()['state'] == 'running'
+    adopted.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert not stops
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_exited_session_still_sends_stop_once_when_inventory_stays_empty(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(clock[0])
+    _settle(manager, clock, agent_running=True, motor_ids=[1, 2], session_id=100)
+    before = len(stops)
+    fake.properties[UNIT_FEEDBACK] = {'LoadState': 'not-found'}
+    _settle(manager, clock, agent_running=True, motor_ids=[], session_id=100)
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[], session_id=100)
+    assert len(stops) == before + 1
+    assert manager.status()['state'] == 'stopped'
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_agent_exit_cancels_pending_inventory_start(inventory_feedback, clock):
+    manager, fake = inventory_feedback
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    clock[0] += 1.
+    manager.reconcile('arm_a', agent_running=False, motor_ids=[1, 2], session_id=100)
+    clock[0] += 1.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+    clock[0] += 1.5
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1, 2], session_id=100)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
 
 
 def _add_simulation_files(model: Path, *, standalone: bool = True) -> None:
@@ -201,20 +382,22 @@ def test_running_but_unhealthy_session_is_stopped_before_retry(setup_feedback, m
     assert all('start_controllers:=false' in command for command in starts)
 
 
-def test_online_subset_session_changes_stop_before_restart_and_never_enable(setup_feedback):
-    manager,fake=setup_feedback
-    stops=[];manager._stop_control=lambda:stops.append(len(fake.commands()))
-    manager.reconcile('arm_a',agent_running=True,motor_ids=[1],session_id=100)
-    manager.reconcile('arm_a',agent_running=True,motor_ids=[1],session_id=100)
-    starts=[c for c in fake.commands() if c[0]=='systemd-run']
-    assert len(starts)==1 and 'motor_ids:=1' in starts[0]
-    assert manager.status()['session_id']=='100'
-    manager.reconcile('arm_a',agent_running=True,motor_ids=[1],session_id=101)
-    assert len(stops)==2
-    assert len([c for c in fake.commands() if c[0]=='systemd-run'])==2
-    manager.reconcile('arm_a',agent_running=True,motor_ids=[],session_id=101)
-    assert manager.status()['state']=='stopped'
-    assert len(stops)==3
+def test_online_subset_session_changes_stop_before_restart_and_never_enable(setup_feedback, clock):
+    manager, fake = setup_feedback
+    stops = []
+    manager._stop_control = lambda: stops.append(len(fake.commands()))
+    _settle(manager, clock, agent_running=True, motor_ids=[1], session_id=100)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1 and 'motor_ids:=1' in starts[0]
+    assert manager.status()['session_id'] == '100'
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=101)
+    assert len(stops) == 2
+    assert manager.status()['state'] == 'stopped'
+    _settle(manager, clock, agent_running=True, motor_ids=[1], session_id=101)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
+    _settle(manager, clock, agent_running=True, motor_ids=[], session_id=101)
+    assert manager.status()['state'] == 'stopped'
+    assert all('start_controllers:=false' in c for c in fake.commands() if c[0] == 'systemd-run')
 
 
 def test_no_complete_group_never_starts_a_control_session(setup_feedback):
@@ -234,11 +417,13 @@ def test_hil_keeps_simulation_feedback_while_waiting_for_mcu(setup_feedback, age
     assert not [c for c in fake.commands() if c[0] == 'systemd-run']
 
 
-def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_feedback):
+def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_feedback, clock):
     manager, fake = setup_feedback
     kwargs = dict(agent_running=True, motor_ids=[1], session_id=100)
-    manager.reconcile('arm_a', **kwargs)
+    _settle(manager, clock, **kwargs)
     manager.reconcile('arm_a', **kwargs, simulation_running=True, firmware_simulation=True)
+    assert manager.status()['state'] == 'stopped'
+    _settle(manager, clock, **kwargs, simulation_running=True, firmware_simulation=True)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 2
     assert 'motor_ids:=1' in starts[-1]
@@ -248,7 +433,7 @@ def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_
     adopted = FirmwareFeedbackManager(manager.models_root, SystemdUnits(runner=fake))
     adopted.reconcile('arm_a', **kwargs, simulation_running=True, firmware_simulation=True)
     assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
-    adopted.reconcile('arm_a', **kwargs)
+    _settle(adopted, clock, **kwargs)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 3
     assert 'publish_joint_states:=true' in starts[-1]
@@ -256,11 +441,11 @@ def test_hil_subset_has_private_feedback_and_mode_changes_replace_session(setup_
     assert all('start_controllers:=false' in command for command in starts)
 
 
-def test_hil_uses_simulation_mapping_and_standalone_urdf(setup_feedback):
+def test_hil_uses_simulation_mapping_and_standalone_urdf(setup_feedback, clock):
     manager, fake = setup_feedback
     _add_simulation_files(manager.models_root / 'arm_a')
-    manager.reconcile('arm_a', agent_running=True, motor_ids=[2], session_id=100,
-                      simulation_running=True, firmware_simulation=True)
+    _settle(manager, clock, agent_running=True, motor_ids=[2], session_id=100,
+            simulation_running=True, firmware_simulation=True)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 1
     assert f'motor_config_file:={manager.models_root / "arm_a/config/motor_driver.simulation.yaml"}' in starts[0]
@@ -268,11 +453,36 @@ def test_hil_uses_simulation_mapping_and_standalone_urdf(setup_feedback):
     assert 'motor_ids:=2' in starts[0]
 
 
+def test_hil_prefers_output_mapping_and_keeps_partial_motor_inventory(setup_feedback, clock):
+    manager, fake = setup_feedback
+    model = manager.models_root / 'arm_a'
+    _add_simulation_files(model)
+    driver = model / 'config/motor_driver.hil.yaml'
+    driver.write_text('motor_hardware:\n  hil_input_fallback: true\n'
+                      '  transmissions_file: transmissions.hil.yaml\n  motors:\n'
+                      '    a: {id: 2, joint: input_a}\n    b: {id: 3, joint: input_b}\n')
+    (model / 'config/transmissions.hil.yaml').write_text(
+        'transmissions:\n  pair:\n    plugin: transmission_interface/DifferentialTransmission\n'
+        '    actuators: [a, b]\n    joints: [roll, pitch]\n')
+    control = model / 'urdf/arm_a.hil.urdf'
+    control.write_text('<robot name="arm"><joint name="roll" type="continuous"/>'
+                       '<joint name="pitch" type="continuous"/></robot>')
+    _settle(manager, clock, agent_running=True, motor_ids=[2], session_id=100,
+            simulation_running=True, firmware_simulation=True)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1
+    assert f'motor_config_file:={driver}' in starts[0]
+    assert f'urdf_file:={control}' in starts[0]
+    assert 'motor_ids:=2' in starts[0]
+    # The dedicated HIL driver must never leak into the physical model path.
+    assert manager._model_files('arm_a')[0].name == 'motor_driver.yaml'
+
+
 @pytest.mark.parametrize('context', [{}, {'firmware_simulation': True}])
-def test_non_hil_never_uses_simulation_sources(setup_feedback, context):
+def test_non_hil_never_uses_simulation_sources(setup_feedback, clock, context):
     manager, fake = setup_feedback
     _add_simulation_files(manager.models_root / 'arm_a')
-    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100, **context)
+    _settle(manager, clock, agent_running=True, motor_ids=[1], session_id=100, **context)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 1
     assert f'motor_config_file:={manager.models_root / "arm_a/config/motor_driver.yaml"}' in starts[0]
@@ -330,19 +540,47 @@ def test_inventory_rejects_old_session_duplicate_ids_and_future_source():
     assert inventory.current(now,1.)==([],100)
 
 
-def test_hil_uses_model_dds_profile_and_profile_change_replaces_session(setup_feedback):
+def test_hil_uses_model_dds_profile_and_profile_change_replaces_session(setup_feedback, clock):
     manager, fake = setup_feedback
     kwargs = dict(agent_running=True, motor_ids=[1], session_id=100,
                   simulation_running=True, firmware_simulation=True)
-    manager.reconcile('arm_a', **kwargs)
+    _settle(manager, clock, **kwargs)
     profile = manager.models_root / 'arm_a/config/fastdds_udp.xml'
     profile.write_text('<profiles/>')
     manager.reconcile('arm_a', **kwargs)
+    assert manager.status()['state'] == 'stopped'
+    _settle(manager, clock, **kwargs)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert len(starts) == 2
     assert f'--setenv=FASTRTPS_DEFAULT_PROFILES_FILE={profile}' in starts[-1]
     manager.reconcile('arm_a', **kwargs)
     assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 2
-    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100)
+    _settle(manager, clock, agent_running=True, motor_ids=[1], session_id=100)
     starts = [c for c in fake.commands() if c[0] == 'systemd-run']
     assert not any('FASTRTPS_DEFAULT_PROFILES_FILE' in arg for arg in starts[-1])
+
+
+def test_hil_prefers_dedicated_control_urdf_with_motor_limits(setup_feedback, clock):
+    manager, fake = setup_feedback
+    model = manager.models_root / 'arm_a'
+    _add_simulation_files(model)
+    source = model / 'urdf/arm_a.standalone.urdf'
+    control = model / 'urdf/arm_a.hil.urdf'
+    control.write_text(source.read_text())
+    _settle(manager, clock, agent_running=True, motor_ids=[2], session_id=100,
+            simulation_running=True, firmware_simulation=True)
+    starts = [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert len(starts) == 1
+    assert f'urdf_file:={control}' in starts[0]
+    assert 'start_controllers:=false' in starts[0]
+
+
+
+def test_full_body_simulation_requires_dedicated_hil_control_file(setup_feedback):
+    import shutil
+    manager, _ = setup_feedback
+    full = manager.models_root / 'full_body_robot'
+    shutil.copytree(manager.models_root / 'arm_a', full)
+    _add_simulation_files(full)
+    with pytest.raises(ValueError, match='HIL 控制 URDF'):
+        manager._model_files('full_body_robot', simulation=True)

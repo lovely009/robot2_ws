@@ -41,7 +41,9 @@ def model_transmissions(model, root=None):
         raise ValueError(f"非法模型名：{model!r}")
     driver_file = models_root / model / _DRIVER_CONFIG
     if not driver_file.is_file():
-        topology = models_root / model / 'config/motor_topology.yaml'
+        topology = models_root / model / 'config/model_motor_topology.yaml'
+        if not topology.is_file():
+            topology = topology.with_name('motor_topology.yaml')
         if topology.is_file():
             return _topology_metadata(model, models_root / model, topology)
         raise ValueError(f"模型 {model!r} 没有 {_DRIVER_CONFIG}")
@@ -175,6 +177,9 @@ def simulation_model_joints(model, root=None):
         raise ValueError(f"非法模型名：{model!r}")
 
     driver_config = models_root / model / _DRIVER_CONFIG
+    simulation_driver = driver_config.with_name('motor_driver.simulation.yaml')
+    if simulation_driver.is_file():
+        return _joints_from_driver_config(simulation_driver)
     if driver_config.is_file():
         return _joints_from_driver_config(driver_config)
     return _joints_from_topology(model, models_root / model)

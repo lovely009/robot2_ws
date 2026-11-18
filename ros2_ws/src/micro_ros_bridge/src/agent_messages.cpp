@@ -148,6 +148,23 @@ Result encode_agent_config(
   using OldConfig = can_bridge_msgs::msg::ConfigRequest;
   using OldSystem = can_bridge_msgs::msg::SystemCommand;
   Result result;
+  if (in.kind == OldConfig::CONFIG_KIND_PARAM_SET) {
+    if (in.command || in.motor_id != OldSystem::MOTOR_ID_NONE) {
+      return reject(result, "参数写互斥载荷非法");
+    }
+    can_bridge_msgs::msg::ParamSetArray parameters;
+    parameters.sync_time_ns = in.sync_time_ns; parameters.request_id = in.request_id;
+    parameters.count = in.count; parameters.targets = in.targets;
+    OldConfig checked;
+    result = encode_config(parameters, checked);
+    if (!result.ok) return result;
+    Config encoded;
+    encoded.schema_version = kAgentSchema; encoded.session_id = in.session_id;
+    encoded.issued_stamp = in.sync_time_ns; encoded.request_id = in.request_id;
+    encoded.operation = Config::SET_PARAMETERS; encoded.parameters = in.targets;
+    out = std::move(encoded);
+    return result;
+  }
   if (in.kind != OldConfig::CONFIG_KIND_SYSTEM_COMMAND || in.count || !in.targets.empty()) {
     return reject(result, "未知 ConfigRequest kind");
   }
@@ -171,6 +188,10 @@ Result encode_agent_config(
   encoded.issued_stamp = in.sync_time_ns;
   encoded.request_id = in.request_id;
   switch (legacy.command) {
+    case OldSystem::COMMAND_SAVE_DEVICE:  // SystemCommand.COMMAND_SAVE_DEVICE：单电机驱动板，旧全局 SAVE 仍拒绝。
+      encoded.operation = Config::SAVE;
+      encoded.motor_id = legacy.motor_id;
+      break;
     case OldSystem::COMMAND_REFRESH:
       encoded.operation = Config::REFRESH_PARAMETERS;
       encoded.motor_id = legacy.motor_id;

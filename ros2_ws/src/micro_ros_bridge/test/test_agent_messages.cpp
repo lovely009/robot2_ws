@@ -314,6 +314,40 @@ TEST(AgentConfig, SetZeroMapsOnlySingleMotorWithoutParameterPayload)
   EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
 }
 
+TEST(AgentConfig, OnlySingleDirectionWriteAndSingleDriverSaveAreAllowed)
+{
+  ConfigRequest in;
+  in.kind = ConfigRequest::CONFIG_KIND_PARAM_SET;
+  in.motor_id = SystemCommand::MOTOR_ID_NONE;
+  in.session_id = 9; in.sync_time_ns = 123; in.request_id = 7;
+  ParamSetTarget p; p.motor_id = 17; p.field = ParamSetTarget::FIELD_DIRECTION; p.value = 1;
+  in.targets = {p}; in.count = 1;
+  AgentConfigRequest out;
+  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  ASSERT_EQ(out.parameters.size(), 1u);
+  EXPECT_EQ(out.operation, AgentConfigRequest::SET_PARAMETERS);
+  EXPECT_EQ(out.parameters[0].motor_id, 17u);
+  EXPECT_EQ(out.parameters[0].value, 1);
+  for (float value : {-1.0f, 0.5f, 2.0f, std::numeric_limits<float>::quiet_NaN()}) {
+    in.targets[0].value = value;
+    EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  }
+  in.targets[0] = p; in.targets.push_back(p); in.count = 2;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets = {p}; in.count = 1; in.targets[0].field = ParamSetTarget::FIELD_LIMIT_PROTECT;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.targets.clear(); in.count = 0;
+  in.kind = ConfigRequest::CONFIG_KIND_SYSTEM_COMMAND;
+  in.command = 5; in.motor_id = 17;
+  ASSERT_TRUE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  EXPECT_EQ(out.operation, AgentConfigRequest::SAVE);
+  EXPECT_EQ(out.motor_id, 17u);
+  in.motor_id = SystemCommand::MOTOR_ID_NONE;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+  in.command = SystemCommand::COMMAND_SAVE;
+  EXPECT_FALSE(micro_ros_bridge::encode_agent_config(in, out).ok);
+}
+
 TEST(AgentMotion, ValidatesGroupCardinalityAndMapsId64)
 {
   AgentMotion empty;

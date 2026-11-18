@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """FDCAN 台架电机模拟器（默认 4 节点：CERB 1=R58、2-4=R48）。
 
-主机可经 CANable2（SLCAN 串口）或 Linux CAN-FD SocketCAN 接口，在控制板物理
+主机可经创芯 USB-CAN FD、CANable2（SLCAN 串口）或 Linux CAN-FD SocketCAN 接口，在控制板物理
 电机总线上模拟电机，用于验证「固件 motor runtime ⇄ micro-ROS 话题」全通路。
 总线上无真机。SLCAN 仲裁段 1M（S8）、数据段 5M；SocketCAN 位率由系统预先配置。
 CANable2 的数据位率索引按 V 查询自动选择；
@@ -31,6 +31,8 @@ CANable2 的数据位率索引按 V 查询自动选择；
   VAXOR 控制 0x502+4*id（经典 8B）；MIT 0x501+4*id（FD 12B）
 
 用法：
+  # 多路：bus=MCU 索引，device/channel=创芯设备及通道索引，ids=* 接收其余节点
+  python3 fdcan_motor_sim.py --cerb 1,2 --channels '[{"bus":0,"transport":"usbcanfd","device":0,"channel":0,"ids":"1"},{"bus":1,"transport":"usbcanfd","device":0,"channel":1,"ids":"2"}]'
   python3 fdcan_motor_sim.py                 # 默认 /dev/ttyACM1，自动 V/S8/Y*/M0/A1/O 开通道
   python3 fdcan_motor_sim.py --tty /dev/ttyACM1 --log /tmp/sim.jsonl
   python3 fdcan_motor_sim.py --interface can0 --gazebo --joint-map 1:joint_link1
@@ -57,6 +59,7 @@ parameters 覆盖型号库默认值，必须与固件编码一致）。
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from collections import deque
 import fcntl
 import glob
@@ -75,6 +78,7 @@ import termios
 import threading
 import time
 import tty
+from typing import NamedTuple
 
 PI = 3.141592653589793
 DEFAULT_DATA_BITRATE_INDEX = 5
@@ -207,12 +211,104 @@ def slcan_config_commands(
             b"M0\r", b"A1\r", b"O\r")
 
 
-def schedule_feedback_window(pending: dict[int, list[float]], motor_ids,
-                             window_start: float, stagger: float) -> None:
+class HostEpochClock:
+    """将收发单调时钟映射到同机 micro-ROS Agent 使用的系统 epoch。"""
+
+    def __init__(self, monotonic_ns=time.monotonic_ns, realtime_ns=time.time_ns):
+        self.monotonic_ns = monotonic_ns
+        self.realtime_ns = realtime_ns
+        self.mapping = (0, 0)
+        self.calibrations = 0
+        self.step_count = 0
+        self.last_correction_ns = 0
+        self.calibrated_at_ns = None
+        self.read_uncertainty_ns = 0
+        self.refresh()
+
+    def refresh(self):
+        before = self.monotonic_ns()
+        if (self.calibrated_at_ns is not None
+                and before - self.calibrated_at_ns < 1_000_000_000):
+            return
+        epoch = self.realtime_ns()
+        after = self.monotonic_ns()
+        midpoint = (before + after) // 2
+        offset = epoch - midpoint
+        old_offset, generation = self.mapping
+        correction = offset - old_offset if self.calibrations else 0
+        # 大步进单独标记。历史帧保留原映射，耗时始终用单调时钟相减。
+        if abs(correction) > 5_000_000:
+            self.step_count += 1
+            generation += 1
+        self.mapping = (offset, generation)
+        self.last_correction_ns = correction
+        self.calibrated_at_ns = midpoint
+        self.read_uncertainty_ns = (after - before + 1) // 2
+        self.calibrations += 1
+
+    def stamp(self, monotonic_ns=None):
+        now = self.monotonic_ns() if monotonic_ns is None else monotonic_ns
+        offset, generation = self.mapping
+        return {'monotonic_ns': now, 'epoch_ns': now + offset,
+                'clock_generation': generation}
+
+    def status(self):
+        return {
+            'source': 'host_realtime',
+            'epoch_ns': self.stamp()['epoch_ns'],
+            'calibrations': self.calibrations,
+            'age_ms': (self.monotonic_ns() - self.calibrated_at_ns) / 1e6,
+            'read_uncertainty_ns': self.read_uncertainty_ns,
+            'last_correction_ns': self.last_correction_ns,
+            'step_count': self.step_count,
+            'generation': self.mapping[1],
+        }
+
+
+class TimingMetric:
+    """累计计数/最大值以及最近 512 个样本的延迟分布。"""
+
+    def __init__(self):
+        self.samples = deque(maxlen=512)
+        self.count = 0
+        self.maximum = 0
+
+    def add(self, nanoseconds):
+        self.samples.append(nanoseconds / 1e6)
+        self.count += 1
+        self.maximum = max(self.maximum, nanoseconds / 1e6)
+
+    def measure(self, operation, *args, monotonic_ns=time.monotonic_ns, **kwargs):
+        started = monotonic_ns()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            self.add(monotonic_ns() - started)
+
+    def status(self):
+        values = sorted(self.samples)
+        return {
+            'count': self.count, 'window_count': len(values),
+            'last': self.samples[-1] if values else None,
+            'mean': sum(values) / len(values) if values else None,
+            'p95': values[math.ceil(len(values) * .95) - 1] if values else None,
+            'window_max': values[-1] if values else None,
+            'max': self.maximum if values else None,
+        }
+
+
+class FeedbackDeadline(NamedTuple):
+    due: float
+    trigger: dict | None = None
+
+
+def schedule_feedback_window(pending: dict[int, list[FeedbackDeadline]], motor_ids,
+                             window_start: float, stagger: float,
+                             trigger=None) -> None:
     """登记本轮反馈 deadline，保留尚未消费的上一轮 deadline。"""
     for slot, motor_id in enumerate(motor_ids):
-        pending.setdefault(motor_id, []).append(
-            window_start + slot * stagger)
+        pending.setdefault(motor_id, []).append(FeedbackDeadline(
+            window_start + slot * stagger, trigger))
 
 
 def parse_joint_map(spec: str) -> dict[int, str]:
@@ -661,7 +757,7 @@ def apply_sim_control(models: dict[int, MotorModel], command,
         return {"ok": False, "error": "id 必须是正整数"}
     if action == "add":
         kind = command.get("kind")
-        if kind not in SIM_CONTROL_ID_LIMITS:
+        if not isinstance(kind, str) or kind not in SIM_CONTROL_ID_LIMITS:
             return {"ok": False, "error": "kind 必须是 cerb 或 vaxor"}
         if motor_id in models:
             return {"ok": False, "error": f"id {motor_id} 已在模拟集合中"}
@@ -750,8 +846,10 @@ class GazeboBridge:
         # 不宜随 50 Hz CAN 主循环发布，否则约 30 ms 死区可能使 PD 振荡。
         self.publish_interval = publish_interval_s
         self.last_pub = 0.0
+        # JointState is a complete snapshot. The CAN loop may service ROS more
+        # slowly than the simulator publishes, so retain only the newest sample.
         self.node.create_subscription(JointState, "/joint_states",
-                                      self._on_state, 10)
+                                      self._on_state, 1)
         # HIL 授权以固件为准：OFFLINE/FAULT/冻结时主机不得继续出力（ARD §36）。
         # 收到固件状态话题后才启用镜像；纯台架无此话题。
         self.fw_lifecycle = {}
@@ -761,16 +859,56 @@ class GazeboBridge:
                                           self._on_fw_status, 10)
         topic = position_topic if control_mode == "position" else effort_topic
         self.pub = self.node.create_publisher(Float64MultiArray, topic, 10)
+        # 注册表：把当前动态注册集合（models.keys()）映射成 MJCF 输入轴名字，定期
+        # 发布给被控对象。MuJoCo 只据此释放已注册输入，其余输入保持固定。后端继续
+        # 使用原输入轴 driver（joint_map 的值就是 MJCF 输入轴），与后续 host 换用
+        # 另一份输出驱动无关。header.stamp 用宿主时间，供下游做过期判定。
+        self._joint_state_type = JointState
+        self.registry_topic = "/robot_sim/registered_input_joints"
+        self.registry_pub = self.node.create_publisher(
+            JointState, self.registry_topic, 10)
+        self.registry_interval = 0.02
+        self._last_registry = 0.0
         if driver_file:
             self.enable_transmission(driver_file, joint_names=joint_names)
+        elif control_mode == "position":
+            self.position_holding_groups = set()
 
     def _on_fw_status(self, msg):
         with self.transmission_lock:
             self.fw_lifecycle = {s.motor_id: s.lifecycle for s in msg.statuses}
             self.fw_status_at = time.monotonic()
 
+    def registered_input_names(self, models):
+        """当前注册电机对应的 MJCF 输入轴名（joint_map 的值），按 id 排序去重。"""
+        names = []
+        seen = set()
+        for motor_id in sorted(models):
+            name = self.joint_map.get(motor_id)
+            if name is None or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        return names
+
+    def publish_registry(self, models):
+        """定期发布注册输入轴集合；晚订阅者每拍都能拿到最新表。"""
+        pub = getattr(self, "registry_pub", None)
+        if pub is None:
+            return
+        now = time.monotonic()
+        if now - getattr(self, "_last_registry", 0.0) < getattr(
+                self, "registry_interval", 0.02):
+            return
+        self._last_registry = now
+        message = self._joint_state_type()
+        message.header.stamp = self.node.get_clock().now().to_msg()
+        message.name = self.registered_input_names(models)
+        pub.publish(message)
+
     def _on_state(self, msg):
         with self.transmission_lock:
+            self._feedback_snapshot = None
             for i, name in enumerate(msg.name):
                 if name not in self.pos:
                     continue
@@ -794,24 +932,34 @@ class GazeboBridge:
     def joint_position(self, motor_id) -> float:
         if not hasattr(self, "transmission"):
             return self.pos[self.joint_map[motor_id]]
-        with self.transmission_lock:
-            axes = self._actuator_feedback(time.monotonic())
-            sample = axes.get(self.motor_actuators[motor_id])
-            return sample.position if sample is not None else 0.0
+        sample = self._feedback_axis(motor_id)
+        return sample.position if sample is not None else 0.0
 
     def joint_velocity(self, motor_id) -> float:
         if not hasattr(self, "transmission"):
             return self.vel[self.joint_map[motor_id]]
-        with self.transmission_lock:
-            axes = self._actuator_feedback(time.monotonic())
-            sample = axes.get(self.motor_actuators[motor_id])
-            return sample.velocity if sample is not None else 0.0
+        sample = self._feedback_axis(motor_id)
+        return sample.velocity if sample is not None else 0.0
 
     def feedback_available(self, motor_id):
         if not hasattr(self, "transmission") or not self.mapped(motor_id):
             return True
+        return self._feedback_axis(motor_id) is not None
+
+    def _feedback_axis(self, motor_id):
         with self.transmission_lock:
-            return self.motor_actuators[motor_id] in self._actuator_feedback(time.monotonic())
+            now = time.monotonic()
+            if self._feedback_snapshot is None or now > self._feedback_snapshot_until:
+                # The CAN loop reads position, velocity and availability for
+                # every axis. Convert each ROS snapshot once, with the same
+                # 500 ms freshness cutoff as the uncached transform.
+                self._feedback_snapshot = self._actuator_feedback(now)
+                self._feedback_snapshot_until = min(
+                    (stamp + 0.5 for stamp in self.state_at.values()
+                     if 0 <= now - stamp <= 0.5),
+                    default=math.inf,
+                )
+            return self._feedback_snapshot.get(self.motor_actuators[motor_id])
 
     def spin(self):
         self._rclpy.spin_once(self.node, timeout_sec=0.0)
@@ -839,7 +987,9 @@ class GazeboBridge:
         self.pos = {j: 0.0 for j in order}
         self.vel = {j: 0.0 for j in order}
         self.hold_pos = {j: 0.0 for j in order}
+        self.position_holding_groups = set()
         self.state_at = {}
+        self._feedback_snapshot = None
 
     def _actuator_feedback(self, now):
         complete = {}
@@ -851,6 +1001,12 @@ class GazeboBridge:
             for joint in group.joints:
                 complete[joint] = self.axis_type(self.pos[joint], self.vel[joint], 0.0)
         return self.transmission.joint_to_actuator(complete)
+
+    @staticmethod
+    def _has_position_target(motor):
+        # CERB zero-Kp enable and damping frames cannot drive position,
+        # even though their payload contains a position field.
+        return motor.kind != "cerb" or motor.last_cmd.get("kp", 0.0) > 0.0
 
     def publish_transmission_commands(self, models, now):
         with self.transmission_lock:
@@ -865,14 +1021,22 @@ class GazeboBridge:
                     motor is not None and motor.linked and motor.enabled and motor.last_cmd
                     and all(k in motor.last_cmd and math.isfinite(motor.last_cmd[k])
                             for k in ("pos_rad", "vel_rad_s", "kp", "kd", "tau_nm"))
+                    and (self.control_mode != "position" or self._has_position_target(motor))
                     and a in axes and 0 <= now-getattr(motor, "last_cmd_at", 0) <= 0.5
                     and (not self.fw_lifecycle or
                          (self.fw_lifecycle.get(motor.id) == LIFECYCLE_ACTIVE and
                           now-getattr(self, "fw_status_at", 0) <= 0.5))
                     for a, motor in members)
                 if not healthy:
+                    if self.control_mode == 'position':
+                        key = tuple(group.joints)
+                        if key not in self.position_holding_groups:
+                            for joint in group.joints:
+                                self.hold_pos[joint] = self.pos[joint]
+                            self.position_holding_groups.add(key)
                     continue
                 if self.control_mode == "position":
+                    self.position_holding_groups.discard(tuple(group.joints))
                     targets = {a: self.axis_type(motor.last_cmd["pos_rad"])
                                for a, motor in members}
                     positions.update({j: axis.position for j, axis in
@@ -925,20 +1089,27 @@ class GazeboBridge:
         for mid, joint in self.joint_map.items():
             m = models.get(mid)
             cmd = m.last_cmd if m is not None else None
+            authorized = not self.fw_lifecycle or self.fw_lifecycle.get(mid) == LIFECYCLE_ACTIVE
+            if self.control_mode == "position":
+                index = self.joints.index(joint)
+                if m is not None and m.enabled and cmd and authorized and self._has_position_target(m):
+                    target = cmd.get("pos_rad")
+                    if target is not None and math.isfinite(target):
+                        self.position_holding_groups.discard(joint)
+                        out.data[index] = target
+                        continue
+                if joint not in self.position_holding_groups:
+                    self.hold_pos[joint] = self.pos[joint]
+                    self.position_holding_groups.add(joint)
+                out.data[index] = self.hold_pos[joint]
+                continue
             if m is None or not m.enabled or not cmd:
                 continue
             # 固件没把这台放在运行态 ⇒ 真机上它就是没力矩（无抱闸，关节会塌）。
             # 主机侧照做：不发这一路，让它保持 0，别用幽灵力矩把机构顶住。
-            if self.fw_lifecycle and self.fw_lifecycle.get(mid) != LIFECYCLE_ACTIVE:
+            if not authorized:
                 continue
             index = self.joints.index(joint)
-            if self.control_mode == "position":
-                # 位置模式下发的是目标点，实际力矩由被控对象的位置环决定，本处
-                # 读不到 ⇒ 电流按 0 上报。台架固定用 effort 模式，这条只在把
-                # sim 当独立位置环时走到。
-                if "pos_rad" in cmd:
-                    out.data[index] = cmd["pos_rad"]
-                continue
             if "kp" not in cmd:
                 continue
             driver = cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
@@ -968,7 +1139,22 @@ class CanMotorSim:
                  mit_torque_limits=None,
                  joint_nm_per_amp=None, gear_ratios=None,
                  mit_position_limits=None, mit_velocity_limits=None,
-                 mit_kp_limits=None, mit_kd_limits=None):
+                 mit_kp_limits=None, mit_kd_limits=None, bus_transport=None,
+                 clock=None):
+        self.clock = clock or HostEpochClock()
+        self.sync_period_ns = round(period_ms * 1_000_000)
+        self.timing_metrics = {name: TimingMetric() for name in (
+            'sync_period_ms', 'sync_jitter_ms', 'rx_queue_ms',
+            'feedback_lateness_ms', 'feedback_queue_ms', 'trigger_to_tx_ms',
+            'feedback_gap_ms', 'transport_send_ms', 'transport_receive_ms',
+            'loop_work_ms', 'bridge_spin_ms', 'bridge_publish_ms',
+            'control_service_ms')}
+        self.response_metrics = {source: TimingMetric()
+                                 for source in ('sync', 'fallback', 'command')}
+        self.last_sync_stamp = None
+        self.last_feedback = {}
+        self.out_of_order_sync = 0
+        self.feedback_over_period = 0
         # {motor_id: N·m/A}——**关节侧**「力矩 ÷ 电流」= Kt × 速比 × 效率。
         # 反馈电流由它反算（见 MotorModel.report_current_a），因而必须与真机
         # 型号库同源；launch 逐台传入。查不到的电机报 0 电流而不是猜系数。
@@ -993,7 +1179,8 @@ class CanMotorSim:
         self.tty_path = tty
         self.can_interface = can_interface
         self.setup_can = setup_can
-        self.bus_socket = None
+        self.bus_socket = bus_transport
+        self._external_transport = bus_transport is not None
         self.use_brs = use_brs
         self.data_bitrate_index = data_bitrate_index
         (self.device_sync_feedback, self.feedback_sync_interval,
@@ -1066,6 +1253,7 @@ class CanMotorSim:
         # "V 无应答"分不清是适配器死了还是探针路径本身不工作。
         self._adapter_baseline = False
         self.last_rx_at = None       # 最近一次收到**有效 CAN 帧**的时刻
+        self._recovery = None
         self.stall_recoveries = 0    # 自动重开通道次数
         self._reader_restarts = 0
         self.last_cerb_emit = 0.0
@@ -1074,7 +1262,7 @@ class CanMotorSim:
         self.stop = False
         self.log_f = open(log_path, "w") if log_path else None
         self.fd = None
-        if can_interface is None:
+        if can_interface is None and bus_transport is None:
             if tty is None:
                 raise ValueError("SLCAN transport requires a tty")
             self.fd = os.open(tty, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
@@ -1084,6 +1272,10 @@ class CanMotorSim:
             try:
                 fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
+                os.close(self.fd)
+                self.fd = None
+                if self.log_f:
+                    self.log_f.close()
                 raise SystemExit(
                     f"{tty} 已被另一个进程占用（很可能是残留的模拟器实例）；"
                     "先停掉它再启动，否则两条 SLCAN 流会互相打断。")
@@ -1123,6 +1315,10 @@ class CanMotorSim:
               f"这次 down/up 会打断链路，需要复位控制板")
 
     def configure(self):
+        if self._external_transport:
+            self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+            self._reader.start()
+            return
         if self.can_interface is not None:
             if self.setup_can:
                 self._ensure_socketcan_config()
@@ -1249,7 +1445,9 @@ class CanMotorSim:
                         return
                 item = self._tx_active
                 try:
-                    written = self.bus_socket.send(item["line"])
+                    written = self.timing_metrics['transport_send_ms'].measure(
+                        self.bus_socket.send, item["line"],
+                        monotonic_ns=self.clock.monotonic_ns)
                 except BlockingIOError:
                     return
                 except OSError:
@@ -1283,7 +1481,9 @@ class CanMotorSim:
                     return
             item = self._tx_active
             try:
-                written = os.write(self.fd, item["line"][item["offset"]:])
+                written = self.timing_metrics['transport_send_ms'].measure(
+                    os.write, self.fd, item["line"][item["offset"]:],
+                    monotonic_ns=self.clock.monotonic_ns)
             except BlockingIOError:
                 return
             except OSError:
@@ -1300,18 +1500,42 @@ class CanMotorSim:
             self._tx_active = None
 
     def _record_tx(self, item) -> None:
+        sent = self.clock.stamp()
         model = item["model"]
         if model:
             model.tx_count += 1
+        timing = item.get('timing')
+        if timing is not None:
+            timing = {**timing, 'sent': sent}
+            previous = self.last_feedback.get(model.id)
+            if previous is not None:
+                gap = sent['monotonic_ns'] - previous['sent']['monotonic_ns']
+                timing['gap_ms'] = gap / 1e6
+                self.timing_metrics['feedback_gap_ms'].add(gap)
+            self.last_feedback[model.id] = timing
+            self.timing_metrics['feedback_queue_ms'].add(
+                sent['monotonic_ns'] - timing['encoded']['monotonic_ns'])
+            trigger = timing['trigger']
+            if trigger is not None:
+                delay = sent['monotonic_ns'] - trigger['monotonic_ns']
+                self.timing_metrics['trigger_to_tx_ms'].add(delay)
+                self.response_metrics[trigger['source']].add(delay)
+                period_ns = (round(self.fb_period * 1e9)
+                             if math.isfinite(self.fb_period) else self.sync_period_ns)
+                if delay > period_ns:
+                    self.feedback_over_period += 1
         if self.log_f:
             self.log_f.write(json.dumps({
-                "t": round(time.monotonic(), 4), "dir": "tx",
+                "t": round(sent['monotonic_ns'] / 1e9, 4), "dir": "tx",
+                "time": sent, "timing": timing,
+                "bus": getattr(self, "bus_index", 0),
                 "tag": item["tag"], "id": item["can_id"],
                 "data": item["payload"].hex()}) + "\n")
 
     def send(self, can_id: int, payload: bytes, is_fd: bool = True,
              brs: bool = True, model: "MotorModel | None" = None,
-             tag: str = ""):
+             tag: str = "", *, trigger=None, deadline=None):
+        encoded = self.clock.stamp()
         frame = (
             pack_socketcan_frame(can_id, payload, is_fd, brs)
             if self.bus_socket is not None
@@ -1323,16 +1547,26 @@ class CanMotorSim:
         if len(queue) >= TX_QUEUE_MAX:
             self.tx_dropped += 1
             return
+        timing = None
+        if tag in ("cerb_fb", "vaxor_status", "vaxor_reply"):
+            timing = {'encoded': encoded, 'trigger': trigger, 'tag': tag}
+            if deadline is not None:
+                self.timing_metrics['feedback_lateness_ms'].add(max(
+                    0, encoded['monotonic_ns'] - round(deadline * 1e9)))
         queue.append({"line": frame, "offset": 0, "model": model,
-                      "tag": tag, "can_id": can_id, "payload": payload})
+                      "tag": tag, "can_id": can_id, "payload": payload,
+                      "timing": timing})
 
-    def log_rx(self, can_id: int, data: bytes, tag: str):
+    def log_rx(self, can_id: int, data: bytes, tag: str, received=None):
         m = self._model_for_downlink(can_id)
         if m:
             m.rx_count += 1
         if self.log_f:
+            handled = self.clock.stamp()
             self.log_f.write(json.dumps({
-                "t": round(time.monotonic(), 4), "dir": "rx", "tag": tag,
+                "t": round(handled['monotonic_ns'] / 1e9, 4),
+                "time": handled, "received": received, "dir": "rx", "tag": tag,
+                "bus": getattr(self, "bus_index", 0),
                 "id": can_id, "data": data.hex()}) + "\n")
 
     def _decode_cerb_command(self, node: int, data: bytes):
@@ -1428,9 +1662,18 @@ class CanMotorSim:
             self.send(0x580 + node, bytes([head]) + chunk.ljust(7, b"\x00"),
                       True, self.use_brs, m, "sdo_segment")
 
-    def handle_downlink(self, can_id: int, data: bytes, is_fd: bool):
+    def handle_downlink(self, can_id: int, data: bytes, is_fd: bool, *, received=None):
         if can_id == 0x080:  # CERB SYNC（经典 0B），链路存活探针与调度基准
-            now = time.monotonic()
+            received = received or self.clock.stamp()
+            if (self.last_sync_stamp is not None
+                    and received['monotonic_ns'] < self.last_sync_stamp['monotonic_ns']):
+                self.out_of_order_sync += 1
+                return
+            now = received['monotonic_ns'] / 1e9
+            if self.last_sync_stamp is not None:
+                period = received['monotonic_ns'] - self.last_sync_stamp['monotonic_ns']
+                self.timing_metrics['sync_period_ms'].add(period)
+                self.timing_metrics['sync_jitter_ms'].add(abs(period - self.sync_period_ns))
             if self.last_sync_at is not None:
                 gap = now - self.last_sync_at
                 self.max_sync_gap = max(self.max_sync_gap, gap)
@@ -1441,10 +1684,12 @@ class CanMotorSim:
                 self.sync_seen = True
                 print("[sim] 收到首个 SYNC，链路已通，开始 SYNC 对齐错峰上报")
             self.sync_count += 1
+            self.last_sync_stamp = {**received, 'source': 'sync',
+                                    'sequence': self.sync_count}
             # 真实设备在 SYNC 后窗口上报：按反馈周期折算 SYNC 间隔，9 帧从
             # 窗口起点按 stagger 错峰，跨窗口的末槽 deadline 进入队列而不覆盖。
             if (self.sync_count - 1) % self.feedback_sync_interval == 0:
-                self.register_feedback_window(now)
+                self.register_feedback_window(now, self.last_sync_stamp)
                 self.sync_window_count += 1
             return
         if can_id == 0x210:
@@ -1469,7 +1714,7 @@ class CanMotorSim:
                 if cmd["enabled"]:
                     m.tgt_deg = cmd["pos_rad"] * 180.0 / PI
                 m.rx_count += 1
-            self.log_rx(can_id, data, "cerb_multi_mit")
+            self.log_rx(can_id, data, "cerb_multi_mit", received)
             return
         if 0x601 <= can_id <= 0x67F and len(data) >= 8:  # SDO 请求 0x600+node
             self.handle_sdo(can_id - 0x600, data)
@@ -1487,13 +1732,13 @@ class CanMotorSim:
             m.last_cmd = cmd
             if cmd["enabled"]:
                 m.tgt_deg = cmd["pos_rad"] * 180.0 / PI
-            self.log_rx(can_id, data, "cerb_mit")
+            self.log_rx(can_id, data, "cerb_mit", received)
         elif m.kind == "vaxor" and can_id == 0x502 + 4 * m.id:
             m.enabled = bool(data[0])
             m.last_cmd_at = time.monotonic()
             m.last_cmd = {"run": bool(data[0]), "set_zero": bool(data[1]),
                           "mode": data[2]}
-            self.log_rx(can_id, data, "vaxor_ctrl")
+            self.log_rx(can_id, data, "vaxor_ctrl", received)
         elif m.kind == "vaxor" and can_id == 0x501 + 4 * m.id:
             cmd = vaxor_decode_command(data)
             if cmd is None:
@@ -1501,20 +1746,22 @@ class CanMotorSim:
             m.tgt_motor_rad = cmd["position_motor_rad"]
             m.last_cmd_at = time.monotonic()
             m.last_cmd = cmd
-            self.log_rx(can_id, data, "vaxor_mit")
+            self.log_rx(can_id, data, "vaxor_mit", received)
             # 没有完整被控对象反馈时不伪造上电零位。
             if self.bridge is not None and not self.bridge.feedback_available(m.id):
                 return
             # 手册：MIT 命令逐帧应答。
             self.send(0x701 + 4 * m.id, m.vaxor_reply_frame(), True,
-                      self.use_brs, m, "vaxor_reply")
+                      self.use_brs, m, "vaxor_reply",
+                      trigger={**(received or self.clock.stamp()), 'source': 'command'})
 
-    def register_feedback_window(self, now: float) -> None:
+    def register_feedback_window(self, now: float, trigger=None) -> None:
         """登记一轮反馈窗口（按 stagger 错峰），并记账。"""
         schedule_feedback_window(
             self.next_send,
             sorted(mid for mid, m in self.models.items() if m.linked),
-            now, self.stagger)
+            now, self.stagger,
+            trigger or {**self.clock.stamp(round(now * 1e9)), 'source': 'fallback'})
         self.last_window_at = now
         self.window_count += 1
 
@@ -1532,7 +1779,7 @@ class CanMotorSim:
         self.register_feedback_window(now)
         return True
 
-    def emit_one(self, mid: int):
+    def emit_one(self, mid: int, deadline: FeedbackDeadline):
         m = self.models[mid]
         if not m.linked:
             return
@@ -1541,10 +1788,11 @@ class CanMotorSim:
         # --no-brs：FD 帧数据段也走仲裁 1M，用于隔离 BRS 数据相位问题。
         if m.kind == "cerb":
             self.send(0x300 + mid, m.cerb_frame(), True, self.use_brs, m,
-                      "cerb_fb")
+                      "cerb_fb", trigger=deadline.trigger, deadline=deadline.due)
         else:
             self.send(0x702 + 4 * mid, m.vaxor_status_frame(), True,
-                      self.use_brs, m, "vaxor_status")
+                      self.use_brs, m, "vaxor_status",
+                      trigger=deadline.trigger, deadline=deadline.due)
 
     def emit_cerb(self):
         for mid, m in self.models.items():
@@ -1563,21 +1811,26 @@ class CanMotorSim:
         """独立读取线程：尽快读取物理总线，并把帧交给主循环处理。"""
         if self.bus_socket is not None:
             while not self.stop:
+                if getattr(self.bus_socket, 'polling', False) is not True:
+                    try:
+                        readable, _, _ = select.select([self.bus_socket], [], [], 0.05)
+                    except (OSError, ValueError):
+                        return
+                    if not readable:
+                        continue
                 try:
-                    readable, _, _ = select.select([self.bus_socket], [], [], 0.05)
-                except (OSError, ValueError):
-                    return
-                if not readable:
-                    continue
-                try:
-                    frame = self.bus_socket.recv(CANFD_MTU)
+                    frame = self.timing_metrics['transport_receive_ms'].measure(
+                        self.bus_socket.recv, CANFD_MTU,
+                        monotonic_ns=self.clock.monotonic_ns)
                 except BlockingIOError:
+                    if getattr(self.bus_socket, 'polling', False) is True:
+                        time.sleep(0.002)
                     continue
                 except OSError:
                     return
                 parsed = parse_socketcan_frame(frame)
                 if parsed:
-                    self._rxq.put(parsed)
+                    self._enqueue_rx(parsed)
             return
 
         # SLCAN 串口接收与 rclpy/Gazebo 桥隔离，避免串口压力令 CANable 停发 ACK。
@@ -1589,7 +1842,9 @@ class CanMotorSim:
             if not r:
                 continue
             try:
-                chunk = os.read(self.fd, 4096)
+                chunk = self.timing_metrics['transport_receive_ms'].measure(
+                    os.read, self.fd, 4096,
+                    monotonic_ns=self.clock.monotonic_ns)
             except BlockingIOError:
                 continue
             except OSError:
@@ -1617,7 +1872,7 @@ class CanMotorSim:
             return
         parsed = parse_slcan(text)
         if parsed:
-            self._rxq.put(parsed)
+            self._enqueue_rx(parsed)
         elif text:
             self._reply_lines.append(text)
 
@@ -1642,15 +1897,37 @@ class CanMotorSim:
                 self._reply_lines.append(text)
             self.rx_buf = b""
 
+    def _enqueue_rx(self, parsed):
+        # 在接收线程打点，保留主循环排队时间。此处是主机收到帧的时刻。
+        self._rxq.put((*parsed, self.clock.stamp()))
+
     def _drain_rx(self):
         """主循环侧：把读线程已入队的帧全部处理掉。"""
         while True:
             try:
-                can_id, data, is_fd = self._rxq.get_nowait()
-                self.last_rx_at = time.monotonic()
+                can_id, data, is_fd, received = self._rxq.get_nowait()
+                self.last_rx_at = received['monotonic_ns'] / 1e9
             except queue.Empty:
                 return
-            self.handle_downlink(can_id, data, is_fd)
+            self.timing_metrics['rx_queue_ms'].add(
+                self.clock.monotonic_ns() - received['monotonic_ns'])
+            self.handle_downlink(can_id, data, is_fd, received=received)
+
+    def timing_status(self):
+        return {
+            'clock': self.clock.status(),
+            'rx_timestamp_source': 'host_receive',
+            'tx_timestamp_source': 'transport_send_return',
+            'last_sync': self.last_sync_stamp,
+            'sync_age_ms': ((self.clock.monotonic_ns() - self.last_sync_stamp['monotonic_ns']) / 1e6
+                            if self.last_sync_stamp is not None else None),
+            'out_of_order_sync': self.out_of_order_sync,
+            'feedback_over_period': self.feedback_over_period,
+            'response_by_source_ms': {name: metric.status()
+                                      for name, metric in self.response_metrics.items()},
+            'last_feedback': {str(mid): frame for mid, frame in self.last_feedback.items()},
+            **{name: metric.status() for name, metric in self.timing_metrics.items()},
+        }
 
     def report(self):
         print("\n=== 模拟器节点状态 ===")
@@ -1723,6 +2000,20 @@ class CanMotorSim:
         默认**不问**——诊断不应改变被测对象，理由见 __init__ 的 probe_adapter。
         """
         self.stall_recoveries += 1
+        if getattr(self, 'nonblocking_recovery', False):
+            commands = []
+            if self.probe_adapter:
+                self._reply_lines.clear()
+                self.canable_error = ''
+                commands.extend([('V', b'V\r', 0.6), ('E', b'E\r', 0.5)])
+            commands.extend(('config', cmd, 0.15)
+                            for cmd in slcan_config_commands(self.data_bitrate_index))
+            self._recovery = {'commands': deque(commands), 'pending': None,
+                              'offset': 0, 'ready_at': time.monotonic(), 'version': None}
+            self._tx_control.clear(); self._tx_feedback.clear(); self.next_send.clear()
+            self._tx_active = None
+            print(f'[sim] bus {self.bus_index} 静默，逐步重开通道（其他通道继续服务）')
+            return
         if not self.probe_adapter:
             print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：重开通道…"
                   "（加 --probe-adapter 可在重开前取适配器 V/E 判据）")
@@ -1741,6 +2032,42 @@ class CanMotorSim:
         print(f"[sim] ⚠ 总线静默 >3s（第 {self.stall_recoveries} 次）：V={verdict}"
               f"{error_text}；重开通道…")
         self._reopen_channel()
+
+    def _service_recovery(self, now):
+        now = time.monotonic()
+        state = self._recovery
+        if now < state['ready_at']:
+            return
+        if state.get('last_phase') == 'V':
+            state['version'] = self._reply_lines[-1] if self._reply_lines else None
+            state['last_phase'] = None
+        if state['pending'] is None:
+            if state['commands'] and state['commands'][0][0] == 'E' and state['version'] is None:
+                state['commands'].popleft()
+            if not state['commands']:
+                self._recovery = None
+                self.rx_buf = b''; self.last_rx_at = None; self.sync_seen = False
+                self._last_step = self._gate_start = now; self._warned = False
+                while not self._rxq.empty():
+                    try: self._rxq.get_nowait()
+                    except queue.Empty: break
+                print(f'[sim] bus {self.bus_index} 通道已重开，等待新 SYNC')
+                return
+            state['pending'] = state['commands'].popleft()
+            state['offset'] = 0
+            state['write_by'] = now + 0.5
+        if now > state['write_by']:
+            raise TimeoutError(f'SLCAN recovery write timed out on bus {self.bus_index}')
+        phase, command, pause = state['pending']
+        try:
+            count = os.write(self.fd, command[state['offset']:])
+        except BlockingIOError:
+            return
+        state['offset'] += count
+        if state['offset'] == len(command):
+            state['pending'] = None
+            state['last_phase'] = phase
+            state['ready_at'] = time.monotonic() + pause
 
     def _reopen_channel(self):
         """关通道再整条重配；成功后重新走 SYNC 门控。"""
@@ -1789,10 +2116,15 @@ class CanMotorSim:
         print(f"[sim] 控制通道就绪: {path}")
 
     def _teardown_control_socket(self):
-        if self._control_srv is not None:
+        connection = getattr(self, '_control_conn', None)
+        if connection is not None:
+            connection.close()
+            self._control_conn = None
+        owned = self._control_srv is not None
+        if owned:
             self._control_srv.close()
             self._control_srv = None
-        if self.control_socket_path:
+        if owned and self.control_socket_path:
             try:
                 os.unlink(self.control_socket_path)
             except OSError:
@@ -1803,158 +2135,372 @@ class CanMotorSim:
         joint_map = self.bridge.joint_map if self.bridge is not None else None
         response = apply_sim_control(self.models, command, joint_map,
                                      self.joint_nm_per_amp, self.gear_ratios)
+        if response.get("ok") and command.get("cmd") == "status":
+            response['timing'] = self.timing_status()
         if response.get("ok") and command.get("cmd") in ("remove", "link"):
             motor_id = response.get("id")
             if isinstance(motor_id, int):
                 # 未链接/已移除电机的残留 deadline 一并清掉，避免恢复后
                 # 补发一串旧窗口的反馈。
                 self.next_send.pop(motor_id, None)
+                self.last_feedback.pop(motor_id, None)
         return response
 
     def _service_control_socket(self):
-        """每轮主循环至多处理一条命令（非阻塞 accept + 短超时读写）。"""
+        """Advance one bounded nonblocking control read/write per CAN tick."""
         if self._control_srv is None:
             return
-        try:
-            conn, _ = self._control_srv.accept()
-        except (BlockingIOError, OSError):
-            return
-        with conn:
-            conn.settimeout(0.2)
-            data = b""
+        conn = getattr(self, '_control_conn', None)
+        if conn is None:
             try:
-                while b"\n" not in data and len(data) < CONTROL_MAX_REQUEST_BYTES:
-                    chunk = conn.recv(4096)
-                    if not chunk:
-                        break
-                    data += chunk
-            except OSError:
+                conn, _ = self._control_srv.accept()
+            except (BlockingIOError, OSError):
                 return
-            line = data.split(b"\n", 1)[0]
+            conn.setblocking(False)
+            self._control_conn = conn
+            self._control_rx = bytearray()
+            self._control_tx = None
+            self._control_offset = 0
+            self._control_deadline = time.monotonic() + 0.2
+        if time.monotonic() > self._control_deadline:
+            conn.close(); self._control_conn = None
+            return
+        try:
+            if self._control_tx is None:
+                try:
+                    chunk = conn.recv(4096)
+                except BlockingIOError:
+                    return
+                if not chunk:
+                    conn.close(); self._control_conn = None
+                    return
+                self._control_rx.extend(chunk)
+                if len(self._control_rx) >= CONTROL_MAX_REQUEST_BYTES:
+                    response = {'ok': False, 'error': '控制请求过长'}
+                elif b'\n' not in self._control_rx:
+                    return
+                else:
+                    line = bytes(self._control_rx).split(b'\n', 1)[0]
+                    try:
+                        response = self.apply_control(json.loads(line.decode('utf-8')))
+                    except (ValueError, UnicodeDecodeError):
+                        response = {'ok': False, 'error': '请求不是合法 JSON'}
+                self._control_tx = json.dumps(
+                    response, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
             try:
-                response = self.apply_control(json.loads(line.decode("utf-8")))
-            except (ValueError, UnicodeDecodeError):
-                response = {"ok": False, "error": "请求不是合法 JSON"}
-            try:
-                conn.sendall(json.dumps(response, ensure_ascii=False)
-                             .encode("utf-8") + b"\n")
-            except OSError:
-                pass
+                count = conn.send(self._control_tx[self._control_offset:self._control_offset + 4096])
+            except BlockingIOError:
+                return
+            self._control_offset += count
+            if self._control_offset == len(self._control_tx):
+                conn.close(); self._control_conn = None
+        except OSError:
+            conn.close(); self._control_conn = None
 
-    def run(self):
+    def start_loop(self):
         self._setup_control_socket()
         cerb_ids = sorted(i for i, m in self.models.items() if m.kind == "cerb")
         vaxor_ids = sorted(i for i, m in self.models.items() if m.kind == "vaxor")
         if self.bus_socket is not None:
-            print(f"[sim] {self.can_interface} SocketCAN CAN-FD opened; "
+            print(f"[sim] bus {getattr(self, 'bus_index', 0)} {getattr(self.bus_socket, 'label', self.can_interface)} CAN-FD opened; "
                   f"CERB {cerb_ids} VAXOR {vaxor_ids}")
         else:
             print(f"[sim] {self.tty_path} S8/Y{self.data_bitrate_index}/M0/A1/O opened; "
                   f"CERB {cerb_ids} VAXOR {vaxor_ids}")
         print("[sim] 总线已开、静默监听中（电机响应暂不发送）。请复位控制板；"
               "收到首个 0x080 SYNC 后开始错峰上报。Ctrl-C 结束。")
-        gate_start = time.monotonic()
-        last_step = gate_start
-        last_bridge = 0.0
-        warned = False
-        self.last_stats_at = gate_start   # 体检从门控起点开始计
-        while not self.stop:
-            now = time.monotonic()
-            self._pump_tx()
-            # 总线由 _reader_loop 独占读取；这里只消费队列。
-            self._drain_rx()
-            self._service_control_socket()
-            self._pump_tx()
-            # ── 健康巡检：只跑 SLCAN、且没有半条 TX 行在飞时（避免把帧行截断）──
-            if self.bus_socket is None and self._tx_active is None:
-                # ⚠ 2026-10-12 起**停用**周期性 E 轮询：E 是非标准命令，现场
-                # 这只 -dirty CANable 疑似处理它有副作用（加轮询后锁存频率从
-                # "偶发"变成"90 秒 5 次"）。E 只在需要时手工查，不自动发。
-                if (self.last_rx_at is not None
-                        and now - self.last_rx_at > 3.0):
-                    self._recover_latched_bus()
-            # 读线程遇 OSError 会直接 return（旧代码无人发现，模拟器"看着活、
-            # 其实聋了"）——这里发现即重启。
-            if (self.bus_socket is None and self._reader is not None
-                    and not self._reader.is_alive() and not self.stop):
-                self._reader_restarts += 1
-                print(f"[sim] ⚠ 串口读线程已退出，重启（第 {self._reader_restarts} 次）")
-                self._reader = threading.Thread(
-                    target=self._reader_loop, daemon=True)
-                self._reader.start()
-            time.sleep(0.002)          # 保持原有节拍，别忙等
-            if not self.sync_seen:
-                # 门控：板子上线前不发电机反馈帧，避免启动次序错误时总线没有
-                # ACK 节点而进入 bus-off；收到 SYNC 代表控制板已进入总线。
-                if not warned and now - gate_start > 3.0:
-                    print("[sim] 警告：3s 未收到 SYNC，请确认板子已复位且接线正确")
-                    warned = True
-                continue
-            dt = now - last_step
-            # 桥的 spin 限到 100Hz（Gazebo 控制器 update_rate 就是 100），让 CAN
-            # 收发在每轮主循环里优先完成。
-            if self.bridge is not None and now - last_bridge >= 0.01:
-                self.bridge.spin()
-                last_bridge = now
-                self.bridge.publish_commands(self.models)
-            for m in self.models.values():
-                if self.bridge is not None and self.bridge.mapped(m.id):
-                    # Gazebo 模式：该台的反馈取自真实关节角，假 plant 不参与
-                    if m.kind == "cerb":
-                        m.pos_deg = self.bridge.joint_deg(m.id)
-                    else:
-                        # VAXOR 反馈为电机轴量，按本台自己的速比换算
-                        m.pos_motor_rad = (self.bridge.joint_position(m.id)
-                                           * (m.gear_ratio or VAXOR_GEAR_RATIO))
-                    # 速度同样取自被控对象。两个 kind 都要设：CERB 反馈里的转速
-                    # 是电机侧量（report_motor_rpm 里再乘速比），缺了它这一路恒 0。
-                    m.vel_joint_rad_s = self.bridge.joint_velocity(m.id)
+        self._gate_start = time.monotonic()
+        self._last_step = self._gate_start
+        self._last_bridge = 0.0
+        self._warned = False
+        self.last_stats_at = self._gate_start   # 体检从门控起点开始计
+
+    def tick(self, now, service_bridge=True):
+        self.clock.refresh()
+        if self._recovery is not None:
+            self._service_recovery(now)
+            return
+        if (self.bus_socket is not None and self._reader is not None
+                and not self._reader.is_alive() and not self.stop):
+            raise RuntimeError(f'CAN reader stopped on bus {getattr(self, "bus_index", 0)}')
+        self._pump_tx()
+        # 总线由 _reader_loop 独占读取；这里只消费队列。
+        self._drain_rx()
+        self.timing_metrics['control_service_ms'].measure(
+            self._service_control_socket, monotonic_ns=self.clock.monotonic_ns)
+        self._pump_tx()
+        # ── 健康巡检：只跑 SLCAN、且没有半条 TX 行在飞时（避免把帧行截断）──
+        if self.bus_socket is None and self._tx_active is None:
+            # ⚠ 2026-10-12 起**停用**周期性 E 轮询：E 是非标准命令，现场
+            # 这只 -dirty CANable 疑似处理它有副作用（加轮询后锁存频率从
+            # "偶发"变成"90 秒 5 次"）。E 只在需要时手工查，不自动发。
+            if (self.last_rx_at is not None
+                    and now - self.last_rx_at > 3.0):
+                self._recover_latched_bus()
+                if self._recovery is not None:
+                    return
+        # 读线程遇 OSError 会直接 return（旧代码无人发现，模拟器"看着活、
+        # 其实聋了"）——这里发现即重启。
+        if (self.bus_socket is None and self._reader is not None
+                and not self._reader.is_alive() and not self.stop):
+            self._reader_restarts += 1
+            print(f"[sim] ⚠ 串口读线程已退出，重启（第 {self._reader_restarts} 次）")
+            self._reader = threading.Thread(
+                target=self._reader_loop, daemon=True)
+            self._reader.start()
+        if not self.sync_seen:
+            # 门控：板子上线前不发电机反馈帧，避免启动次序错误时总线没有
+            # ACK 节点而进入 bus-off；收到 SYNC 代表控制板已进入总线。
+            if not self._warned and now - self._gate_start > 3.0:
+                print("[sim] 警告：3s 未收到 SYNC，请确认板子已复位且接线正确")
+                self._warned = True
+            return
+        dt = now - self._last_step
+        # 桥的 spin 限到 100Hz（Gazebo 控制器 update_rate 就是 100），让 CAN
+        # 收发在每轮主循环里优先完成。
+        if service_bridge and self.bridge is not None and now - self._last_bridge >= 0.01:
+            self.timing_metrics['bridge_spin_ms'].measure(
+                self.bridge.spin, monotonic_ns=self.clock.monotonic_ns)
+            self._last_bridge = now
+            self.timing_metrics['bridge_publish_ms'].measure(
+                self.bridge.publish_commands, self.models,
+                monotonic_ns=self.clock.monotonic_ns)
+            self.bridge.publish_registry(self.models)
+        for m in self.models.values():
+            if self.bridge is not None and self.bridge.mapped(m.id):
+                # Gazebo 模式：该台的反馈取自真实关节角，假 plant 不参与
+                if m.kind == "cerb":
+                    m.pos_deg = self.bridge.joint_deg(m.id)
                 else:
-                    m.approach(dt)
-            last_step = now
-            # 墙钟兜底（理由见 maybe_fallback_window）：SYNC 驱动的窗口若迟迟
-            # 不来，这里按 fb_period 补一轮，保证反馈周期不超过 --fb-period-ms。
-            self.maybe_fallback_window(now)
-            # 错峰：周期由 --fb-period-ms 决定（默认每节点约 16.7Hz）。
-            for mid in sorted(self.models):
-                deadlines = self.next_send.get(mid)
-                if deadlines and now >= deadlines[0]:
-                    self.emit_one(mid)
-                    deadlines.pop(0)
-                    if not deadlines:
-                        del self.next_send[mid]
-            # 周期体检（每 5s 一行）：把链路健康从"退出时才打印"变成在线可见。
-            # SYNC 实际节拍 = sync_count 差分，窗口里 SYNC 驱动占比 = sync_window，
-            # 两者一起就能分辨「窗口被 SYNC 拉长」与「发送队列丢帧」。
-            if now - self.last_stats_at >= 5.0:
-                sync_hz = (self.sync_count - self._stats_sync_mark) / (now - self.last_stats_at)
-                win_hz = (self.window_count - self._stats_window_mark) / (now - self.last_stats_at)
-                print(f"[sim] 体检 SYNC={sync_hz:.1f}Hz 窗口={win_hz:.2f}/s "
-                      f"(SYNC驱动 {self.sync_window_count}/{self.window_count}) "
-                      f"错峰跨度={(len(self.models) - 1) * self.stagger * 1000:.1f}ms "
-                      f"tx_dropped={self.tx_dropped} "
-                      f"queue=ctrl{len(self._tx_control)}/fb{len(self._tx_feedback)} "
-                      f"SYNC最大间隔={self.max_sync_gap * 1000:.0f}ms")
-                self.last_stats_at = now
-                self._stats_sync_mark = self.sync_count
-                self._stats_window_mark = self.window_count
-            self._pump_tx()
-        self._teardown_control_socket()
-        self.report()
+                    # VAXOR 反馈为电机轴量，按本台自己的速比换算
+                    m.pos_motor_rad = (self.bridge.joint_position(m.id)
+                                       * (m.gear_ratio or VAXOR_GEAR_RATIO))
+                # 速度同样取自被控对象。两个 kind 都要设：CERB 反馈里的转速
+                # 是电机侧量（report_motor_rpm 里再乘速比），缺了它这一路恒 0。
+                m.vel_joint_rad_s = self.bridge.joint_velocity(m.id)
+            else:
+                m.approach(dt)
+        self._last_step = now
+        # 墙钟兜底（理由见 maybe_fallback_window）：SYNC 驱动的窗口若迟迟
+        # 不来，这里按 fb_period 补一轮，保证反馈周期不超过 --fb-period-ms。
+        self.maybe_fallback_window(now)
+        # 错峰：周期由 --fb-period-ms 决定（默认每节点约 16.7Hz）。
+        for mid in sorted(self.models):
+            deadlines = self.next_send.get(mid)
+            if deadlines and now >= deadlines[0].due:
+                self.emit_one(mid, deadlines[0])
+                deadlines.pop(0)
+                if not deadlines:
+                    del self.next_send[mid]
+        # 周期体检（每 5s 一行）：把链路健康从"退出时才打印"变成在线可见。
+        # SYNC 实际节拍 = sync_count 差分，窗口里 SYNC 驱动占比 = sync_window，
+        # 两者一起就能分辨「窗口被 SYNC 拉长」与「发送队列丢帧」。
+        if now - self.last_stats_at >= 5.0:
+            sync_hz = (self.sync_count - self._stats_sync_mark) / (now - self.last_stats_at)
+            win_hz = (self.window_count - self._stats_window_mark) / (now - self.last_stats_at)
+            print(f"[sim] 体检 SYNC={sync_hz:.1f}Hz 窗口={win_hz:.2f}/s "
+                  f"(SYNC驱动 {self.sync_window_count}/{self.window_count}) "
+                  f"错峰跨度={(len(self.models) - 1) * self.stagger * 1000:.1f}ms "
+                  f"tx_dropped={self.tx_dropped} "
+                  f"queue=ctrl{len(self._tx_control)}/fb{len(self._tx_feedback)} "
+                  f"SYNC最大间隔={self.max_sync_gap * 1000:.0f}ms")
+            self.last_stats_at = now
+            self._stats_sync_mark = self.sync_count
+            self._stats_window_mark = self.window_count
+        self._pump_tx()
+
+    def run(self):
+        try:
+            self.start_loop()
+            while not self.stop:
+                self.timing_metrics['loop_work_ms'].measure(
+                    self.tick, time.monotonic(), monotonic_ns=self.clock.monotonic_ns)
+                time.sleep(0.002)
+        finally:
+            self.close()
+
+    def close(self):
         self.stop = True
+        self._teardown_control_socket()
         if self._reader is not None:
             self._reader.join(timeout=0.5)
         if self.bus_socket is not None:
             self.bus_socket.close()
             self.bus_socket = None
-        else:
+        if self.fd is not None:
             try:
-                os.write(self.fd, b"C\r")  # 收尾关通道
+                os.write(self.fd, b"C\r")
             except OSError:
                 pass
             os.close(self.fd)
+            self.fd = None
         if self.log_f:
             self.log_f.close()
+            self.log_f = None
+
+
+class CanMotorSimGroup:
+    _setup_control_socket = CanMotorSim._setup_control_socket
+    _teardown_control_socket = CanMotorSim._teardown_control_socket
+    _service_control_socket = CanMotorSim._service_control_socket
+
+    def __init__(self, buses, control_socket_path=None, pool=None):
+        self.buses = dict(sorted(buses.items()))
+        self.models = {}
+        for bus, sim in self.buses.items():
+            if set(self.models) & set(sim.models):
+                raise ValueError('duplicate motor IDs across buses')
+            sim.bus_index = bus
+            sim.nonblocking_recovery = True
+            self.models.update(sim.models)
+        self.control_socket_path = control_socket_path
+        self._control_srv = None
+        self.bridge = None
+        self.pool = pool
+        self.failed_buses = {}
+        self._last_bridge = 0.0
+        self.timing_metrics = {name: TimingMetric() for name in (
+            'loop_work_ms', 'bridge_spin_ms', 'bridge_publish_ms',
+            'control_service_ms')}
+        self.stop = False
+        self._closed = False
+
+    def configure(self):
+        try:
+            for sim in self.buses.values():
+                sim.bridge = self.bridge
+                sim.configure()
+        except BaseException:
+            self.close()
+            raise
+
+    def apply_control(self, command):
+        if not isinstance(command, dict):
+            return {'ok': False, 'error': '命令必须是 JSON 对象'}
+        if command.get('cmd') == 'status':
+            joint_map = self.bridge.joint_map if self.bridge else None
+            result = apply_sim_control(self.models, command, joint_map)
+            result['loop_timing'] = {name: metric.status()
+                                     for name, metric in self.timing_metrics.items()}
+            for motor in result['motors']:
+                motor['bus'] = next(bus for bus, sim in self.buses.items() if motor['id'] in sim.models)
+            result['channels'] = [{'bus': bus, 'sync_seen': sim.sync_seen,
+                'sync_count': sim.sync_count, 'tx_dropped': sim.tx_dropped,
+                'timing': sim.timing_status(),
+                'nodes': sorted(sim.models), 'error': self.failed_buses.get(bus, ''),
+                'state': ('failed' if bus in self.failed_buses else 'recovering'
+                          if sim._recovery is not None else 'online' if sim.sync_seen else 'waiting_sync')
+                } for bus, sim in self.buses.items()]
+            return result
+        mid = command.get('id')
+        if type(mid) is not int or mid <= 0:
+            return {'ok': False, 'error': 'id 必须是正整数'}
+        if command.get('cmd') == 'add':
+            if mid in self.models:
+                return {'ok': False, 'error': f'id {mid} 已在模拟集合中'}
+            bus = command.get('bus', next(iter(self.buses)) if len(self.buses) == 1 else None)
+        else:
+            bus = next((bus for bus, sim in self.buses.items() if mid in sim.models), None)
+            if 'bus' in command and command['bus'] != bus:
+                return {'ok': False, 'error': '节点不属于所选通道'}
+        if type(bus) is not int or bus not in self.buses:
+            return {'ok': False, 'error': '请选择有效 CAN 通道（bus）'}
+        if bus in self.failed_buses and (command.get('cmd') == 'add' or
+                command.get('cmd') == 'link' and command.get('up') is True):
+            return {'ok': False, 'error': f'CAN{bus + 1} 故障：请停止并重新启动后端'}
+        response = self.buses[bus].apply_control(command)
+        if response.get('ok'):
+            response['bus'] = bus
+            if command.get('cmd') == 'add':
+                self.models[mid] = self.buses[bus].models[mid]
+            elif command.get('cmd') == 'remove':
+                self.models.pop(mid, None)
+            if 'motor' in response:
+                response['motor']['bus'] = bus
+        return response
+
+    def tick(self, now):
+        self.timing_metrics['control_service_ms'].measure(self._service_control_socket)
+        now = time.monotonic()
+        if self.bridge is not None and now - self._last_bridge >= 0.01:
+            self.timing_metrics['bridge_spin_ms'].measure(self.bridge.spin)
+            self.timing_metrics['bridge_publish_ms'].measure(
+                self.bridge.publish_commands, self.models)
+            self.bridge.publish_registry(self.models)
+            self._last_bridge = now
+        for bus, sim in self.buses.items():
+            if bus in self.failed_buses:
+                continue
+            try:
+                sim.timing_metrics['loop_work_ms'].measure(
+                    sim.tick, time.monotonic(), service_bridge=False,
+                    monotonic_ns=sim.clock.monotonic_ns)
+            except (OSError, RuntimeError) as error:
+                self.failed_buses[bus] = str(error)
+                sim.stop = True
+                for model in sim.models.values():
+                    model.enabled = False
+                # Keep the failed endpoint owned until group shutdown; closing a
+                # broken driver synchronously could stall the healthy buses.
+                print(f'[sim] CAN{bus + 1} 故障，其他通道继续运行：{error}', file=sys.stderr)
+
+    def run(self):
+        try:
+            self._setup_control_socket()
+            for sim in self.buses.values():
+                sim.start_loop()
+            while not self.stop:
+                self.timing_metrics['loop_work_ms'].measure(self.tick, time.monotonic())
+                time.sleep(0.002)
+        finally:
+            self.close()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self.stop = True
+        self._teardown_control_socket()
+        for sim in self.buses.values():
+            sim.stop = True
+        with ExitStack() as cleanup:
+            if self.pool is not None:
+                cleanup.callback(self.pool.close)
+            for sim in self.buses.values():
+                cleanup.callback(sim.close)
+
+
+def build_multibus_sim(rows, cerb_ids, vaxor_ids, **options):
+    from motor_sim_routes import assign_nodes
+    from canfd_transports import CxPool
+    routes = assign_nodes(rows, [*cerb_ids, *vaxor_ids])
+    pool = CxPool(options.pop('usbcanfd_library', None))
+    control = options.pop('control_socket_path', None)
+    log_path = options.pop('log_path', None)
+    buses = {}
+    try:
+        for route in routes:
+            nodes = set(route['node_ids'])
+            settings = dict(options)
+            for name in ('r58_ids', 'safety_off_ids', 'dir_ccw_ids'):
+                settings[name] = [mid for mid in settings.get(name, ()) if mid in nodes]
+            settings['control_socket_path'] = None
+            settings['can_interface'] = route.get('endpoint') if route['transport'] == 'socketcan' else None
+            settings['bus_transport'] = (pool.channel(route['device'], route['channel'])
+                                         if route['transport'] == 'usbcanfd' else None)
+            buses[route['bus']] = CanMotorSim(
+                route.get('endpoint') if route['transport'] == 'slcan' else None,
+                [mid for mid in cerb_ids if mid in nodes],
+                [mid for mid in vaxor_ids if mid in nodes],
+                log_path=f'{log_path}.bus{route["bus"]}.jsonl' if log_path else None,
+                **settings)
+        return CanMotorSimGroup(buses, control, pool)
+    except BaseException:
+        with ExitStack() as cleanup:
+            cleanup.callback(pool.close)
+            for sim in buses.values():
+                cleanup.callback(sim.close)
+        raise
 
 
 def default_canable_tty():
@@ -1975,6 +2521,10 @@ def default_canable_tty():
 def main():
     ap = argparse.ArgumentParser()
     endpoint = ap.add_mutually_exclusive_group()
+    endpoint.add_argument("--channels", default=None,
+                          help='JSON 通道列表：bus/transport/ids + endpoint 或 device/channel')
+    ap.add_argument("--usbcanfd-library", default=None,
+                    help="创芯 Linux libcontrolcanfd.so 路径；默认从用户安装目录查找")
     endpoint.add_argument("--tty", default=None,
                           help="SLCAN 设备；默认按 /dev/serial/by-id/ 解析 CANable")
     endpoint.add_argument("--interface", default=None,
@@ -2059,7 +2609,7 @@ def main():
                     help="逐电机速比，形如 1:101,7:50；反馈转速按它换算到电机侧。"
                          "未列出的 vaxor 退回内置 50，cerb 上报 0 转速")
     args = ap.parse_args()
-    if args.interface is None and args.tty is None:
+    if args.channels is None and args.interface is None and args.tty is None:
         args.tty = default_canable_tty()
         print(f"[sim] 设备: {args.tty}")
     cerb_ids = [int(x) for x in args.cerb.split(",") if x]
@@ -2071,7 +2621,7 @@ def main():
     mit_torque_limits = parse_id_floats(args.mit_torque_limits)
     joint_nm_per_amp = parse_id_floats(args.joint_nm_per_amp)
     gear_ratios = parse_id_floats(args.gear)
-    sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
+    sim_options = dict(
                    use_brs=not args.no_brs,
                    data_bitrate_index=args.data_bitrate_index,
                    fb_period_ms=args.fb_period_ms,
@@ -2079,7 +2629,6 @@ def main():
                    r58_ids=r58_ids,
                    safety_off_ids=args.safety_off,
                    dir_ccw_ids=args.dir_ccw,
-                   can_interface=args.interface,
                    setup_can=not args.no_can_setup,
                    control_socket_path=args.control_socket,
                    probe_adapter=args.probe_adapter,
@@ -2091,63 +2640,75 @@ def main():
                    joint_nm_per_amp=joint_nm_per_amp,
                    gear_ratios=gear_ratios)
 
-    if args.gazebo:
-        jm = parse_joint_map(args.joint_map)
-        effort_rate = args.effort_rate_hz if args.effort_rate_hz > 0 else 0.0
-        sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
-                                  args.position_topic, args.effort_topic,
-                                  args.tau_limit, tau_limits,
-                                  publish_interval_s=(1.0 / effort_rate
-                                                      if effort_rate else 0.015),
-                                  driver_file=(args.driver_file or None),
-                                  joint_names=([j for j in args.joint_names.split(",") if j]
-                                               or None))
-        topic = (args.position_topic if args.gazebo_control_mode == "position"
-                 else args.effort_topic)
-        print("[sim] Gazebo 桥已接：%s → %s (%s)；力矩饱和：%s（兜底 %.1f N·m）；"
-              "发力矩 %s" %
-              (jm, topic, args.gazebo_control_mode,
-               ", ".join(f"{k}:{v:g}" for k, v in sorted(tau_limits.items())) or "无",
-               args.tau_limit,
-               f"{effort_rate:g} Hz（独立线程）" if effort_rate else "随 CAN 主循环"))
-        print("[sim] 反馈换算：Kt×速比×效率 %s；速比 %s" %
-              (", ".join(f"{k}:{v:g}" for k, v in sorted(joint_nm_per_amp.items()))
-               or "无（反馈电流恒 0）",
-               ", ".join(f"{k}:{v:g}" for k, v in sorted(gear_ratios.items()))
-               or "无（vaxor 用内置 50，cerb 转速恒 0）"))
-        # 缺 --joint-nm-per-amp 的后果是"页面显示 0 A，胳膊照样动"——比不模拟更误导，
-        # 且与本次修复的初衷（不发指令才该是 0）恰好反向。宁可吵一句。
-        missing = sorted(set(jm) - set(joint_nm_per_amp))
-        if missing:
-            print("[sim] 警告：电机 %s 没给 --joint-nm-per-amp，其反馈电流将恒报 0，"
-                  "即使正在出力。取值 = 型号库的 Kt×速比×效率（motor.yaml）；"
-                  "simulation.launch.py 已按拓扑自动生成。"
-                  % ",".join(str(i) for i in missing))
-        # MIT 律跑在独立线程里，与 CAN 主循环（SYNC 20ms）解耦：主循环里那份
-        # 调用留着做兜底，但会被 publish_interval 节流掉，实际生效的是本线程。
-        if effort_rate:
-            def _effort_loop():
-                while not sim.stop:
-                    sim.bridge.publish_commands(sim.models)
-                    time.sleep(1.0 / effort_rate * 0.5)
-            threading.Thread(target=_effort_loop, name="effort-publish",
-                             daemon=True).start()
+    if args.channels is not None:
+        sim = build_multibus_sim(json.loads(args.channels), cerb_ids, vaxor_ids,
+                                 period_ms=args.period_ms, log_path=args.log,
+                                 usbcanfd_library=args.usbcanfd_library, **sim_options)
+    else:
+        sim = CanMotorSim(args.tty, cerb_ids, vaxor_ids, args.period_ms, args.log,
+                          can_interface=args.interface, **sim_options)
 
-    def _sig(_a, _b):
-        sim.stop = True
-    signal.signal(signal.SIGTERM, _sig)
-    signal.signal(signal.SIGINT, _sig)
+    try:
+        if args.gazebo:
+            jm = parse_joint_map(args.joint_map)
+            effort_rate = args.effort_rate_hz if args.effort_rate_hz > 0 else 0.0
+            sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
+                                      args.position_topic, args.effort_topic,
+                                      args.tau_limit, tau_limits,
+                                      publish_interval_s=(1.0 / effort_rate
+                                                          if effort_rate else 0.015),
+                                      driver_file=(args.driver_file or None),
+                                      joint_names=([j for j in args.joint_names.split(",") if j]
+                                                   or None))
+            topic = (args.position_topic if args.gazebo_control_mode == "position"
+                     else args.effort_topic)
+            print("[sim] Gazebo 桥已接：%s → %s (%s)；力矩饱和：%s（兜底 %.1f N·m）；"
+                  "发力矩 %s" %
+                  (jm, topic, args.gazebo_control_mode,
+                   ", ".join(f"{k}:{v:g}" for k, v in sorted(tau_limits.items())) or "无",
+                   args.tau_limit,
+                   f"{effort_rate:g} Hz（独立线程）" if effort_rate else "随 CAN 主循环"))
+            print("[sim] 反馈换算：Kt×速比×效率 %s；速比 %s" %
+                  (", ".join(f"{k}:{v:g}" for k, v in sorted(joint_nm_per_amp.items()))
+                   or "无（反馈电流恒 0）",
+                   ", ".join(f"{k}:{v:g}" for k, v in sorted(gear_ratios.items()))
+                   or "无（vaxor 用内置 50，cerb 转速恒 0）"))
+            # 缺 --joint-nm-per-amp 的后果是"页面显示 0 A，胳膊照样动"——比不模拟更误导，
+            # 且与本次修复的初衷（不发指令才该是 0）恰好反向。宁可吵一句。
+            missing = sorted(set(jm) - set(joint_nm_per_amp))
+            if missing:
+                print("[sim] 警告：电机 %s 没给 --joint-nm-per-amp，其反馈电流将恒报 0，"
+                      "即使正在出力。取值 = 型号库的 Kt×速比×效率（motor.yaml）；"
+                      "simulation.launch.py 已按拓扑自动生成。"
+                      % ",".join(str(i) for i in missing))
+            # MIT 律跑在独立线程里，与 CAN 主循环（SYNC 20ms）解耦：主循环里那份
+            # 调用留着做兜底，但会被 publish_interval 节流掉，实际生效的是本线程。
+            if effort_rate:
+                def _effort_loop():
+                    while not sim.stop:
+                        sim.bridge.publish_commands(sim.models)
+                        time.sleep(1.0 / effort_rate * 0.5)
+                threading.Thread(target=_effort_loop, name="effort-publish",
+                                 daemon=True).start()
 
-    sim.configure()
-    if args.ready_file:
-        ready_parent = os.path.dirname(os.path.abspath(args.ready_file))
-        os.makedirs(ready_parent, exist_ok=True)
-        with open(args.ready_file, "w", encoding="utf-8") as ready_handle:
-            ready_handle.write(f"{os.getpid()}\n")
-            ready_handle.flush()
-            os.fsync(ready_handle.fileno())
-        print(f"[sim] CAN 接口已就绪: {args.ready_file}")
-    sim.run()
+        def _sig(_a, _b):
+            sim.stop = True
+        signal.signal(signal.SIGTERM, _sig)
+        signal.signal(signal.SIGINT, _sig)
+
+        sim.configure()
+        if args.ready_file:
+            ready_parent = os.path.dirname(os.path.abspath(args.ready_file))
+            os.makedirs(ready_parent, exist_ok=True)
+            with open(args.ready_file, "w", encoding="utf-8") as ready_handle:
+                ready_handle.write(f"{os.getpid()}\n")
+                ready_handle.flush()
+                os.fsync(ready_handle.fileno())
+            print(f"[sim] CAN 接口已就绪: {args.ready_file}")
+        sim.run()
+    finally:
+        sim.close()
+
 
 
 if __name__ == "__main__":

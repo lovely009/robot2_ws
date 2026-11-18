@@ -313,6 +313,24 @@ protected:
   }
 };
 
+TEST_F(MicroRosSystemTest, PartialPolicyCommandsOnlyEnabledMotorInCoupledGroup) {
+  auto system = initialized(info());
+  activate(*system, false);
+  start_writer(*system);
+  auto control = control_message();
+  control.states[1].policy_enabled = false;
+  control.states[1].control_lifecycle =
+    can_bridge_msgs::msg::MotorControlState::LIFECYCLE_INACTIVE;
+  control_pub_->publish(control);
+  publish_motion();
+  std::this_thread::sleep_for(5ms);
+  ASSERT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  expect_snapshot(*system, 1U);
+  ASSERT_EQ(commands_.back().targets.size(), 1U);
+  EXPECT_EQ(commands_.back().targets.front().motor_id, 8U);
+}
+
 TEST_F(MicroRosSystemTest, ValidatesIdsJointsAndFiniteInterfaceBoundsBeforeActivation) {
   auto valid = initialized(info());
   auto commands = valid->export_command_interfaces();
@@ -372,7 +390,7 @@ TEST_F(MicroRosSystemTest, ActivationUsesMeasuredJointPositionsAndLeaseStaysEmpt
   EXPECT_NE(commands_[0].sync_time_ns, 0U);
 }
 
-TEST_F(MicroRosSystemTest, ControlTimeoutInvalidatesExportedMeasurementsUntilReactivation) {
+TEST_F(MicroRosSystemTest, IdleFeedbackTimeoutRecoversWithoutHardwareReactivation) {
   auto system = initialized(info());
   const auto states = system->export_state_interfaces();
   ASSERT_EQ(states.size(), 6U);
@@ -381,16 +399,16 @@ TEST_F(MicroRosSystemTest, ControlTimeoutInvalidatesExportedMeasurementsUntilRea
 
   std::this_thread::sleep_for(320ms);
   EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
-            hardware_interface::return_type::ERROR);
+            hardware_interface::return_type::OK);
   for (const auto &state : states) EXPECT_TRUE(std::isnan(state.get_value())) << state.get_name();
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  EXPECT_TRUE(spin_until_target_count(0));
   publish_motion();
   publish_control(1, false);
+  std::this_thread::sleep_for(10ms);
   EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
-            hardware_interface::return_type::ERROR);
-  for (const auto &state : states) EXPECT_TRUE(std::isnan(state.get_value())) << state.get_name();
-
-  EXPECT_EQ(system->on_deactivate(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
-  activate(*system, false);
+            hardware_interface::return_type::OK);
   for (const auto &state : states) EXPECT_TRUE(std::isfinite(state.get_value())) << state.get_name();
 }
 
@@ -579,6 +597,7 @@ TEST_F(MicroRosSystemTest, ActivationCannotSucceedAfterRejectedStartupFrame) {
 TEST_F(MicroRosSystemTest, MeasuredAgeIncludesQueuedSourceDelay) {
   auto system = initialized(info());
   activate(*system, false);
+  start_writer(*system);
   std::this_thread::sleep_for(60ms);
   auto motion = motion_message(70);
   motion.sync_time_ns -= 50000000U;
@@ -592,6 +611,7 @@ TEST_F(MicroRosSystemTest, MeasuredAgeIncludesQueuedSourceDelay) {
 TEST_F(MicroRosSystemTest, QueuedMeasuredAgeContinuesAgingAfterReception) {
   auto system = initialized(info());
   activate(*system, false);
+  start_writer(*system);
   std::this_thread::sleep_for(60ms);
   auto motion = motion_message(40);
   motion.sync_time_ns -= 40000000U;
@@ -1006,6 +1026,7 @@ TEST_F(MicroRosSystemTest, SessionChangeWhileActiveButUnarmedLatchesUntilReactiv
 TEST_F(MicroRosSystemTest, ExpiredMeasuredMotionLatchesAndDoesNotRecoverOnFreshInput) {
   auto system = initialized(info());
   ASSERT_EQ(run_activation(*system, true, 90), CallbackReturn::SUCCESS);
+  start_writer(*system);
   ASSERT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
             hardware_interface::return_type::OK);
   std::this_thread::sleep_for(20ms);
@@ -1306,7 +1327,7 @@ TEST_F(MicroRosSystemTest, StopTopicParksClaimedControllersUntilFullRestartAndNe
   EXPECT_DOUBLE_EQ(interfaces[2].get_value(), 0.0);
 }
 
-TEST_F(MicroRosSystemTest, StopTopicDoesNotBypassFeedbackOrSessionFaultLatch) {
+TEST_F(MicroRosSystemTest, StopTopicAllowsIdleFeedbackRecoveryAndPreservesSessionFaultLatch) {
   for (const bool changed_session : {false, true}) {
     auto system = initialized(info());
     activate(*system);
@@ -1316,14 +1337,21 @@ TEST_F(MicroRosSystemTest, StopTopicDoesNotBypassFeedbackOrSessionFaultLatch) {
     publish_motion(changed_session ? 0 : 1000);
     publish_control(changed_session ? 2 : 1, true);
     ASSERT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
-              hardware_interface::return_type::ERROR);
+              changed_session ? hardware_interface::return_type::ERROR :
+                hardware_interface::return_type::OK);
+    for (const auto &state : system->export_state_interfaces()) {
+      EXPECT_TRUE(std::isnan(state.get_value()));
+    }
     stop_writer(*system);
     publish_motion();
     publish_control(1, true);
+    std::this_thread::sleep_for(10ms);
     EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
-              hardware_interface::return_type::ERROR);
+              changed_session ? hardware_interface::return_type::ERROR :
+                hardware_interface::return_type::OK);
     EXPECT_EQ(system->perform_command_mode_switch(all_command_interfaces(), {}),
-              hardware_interface::return_type::ERROR);
+              changed_session ? hardware_interface::return_type::ERROR :
+                hardware_interface::return_type::OK);
     system->on_deactivate(rclcpp_lifecycle::State());
   }
 }

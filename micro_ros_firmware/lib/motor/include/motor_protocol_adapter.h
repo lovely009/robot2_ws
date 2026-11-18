@@ -1,10 +1,10 @@
 #ifndef MOTOR_PROTOCOL_ADAPTER_H
 #define MOTOR_PROTOCOL_ADAPTER_H
 
-// 协议适配层（ARD-0007 §24）：厂家字节布局、CAN-ID 推导、帧长与 FD/BRS 属性
+// 协议适配层封装厂家字节布局、CAN-ID 推导、帧长与 FD/BRS 属性
 // 全部封闭在 lib/motor 内。motor_control 内核只通过本头文件的
 // adapter 接口访问厂家协议，新增协议家族只新增一个 adapter 实例，
-// 不改内核收发循环（§24.3）。
+// 不改内核收发循环。
 //
 // 依赖边界：本层只依赖 motor_protocol.h 的纯编解码函数，
 // 不依赖 HAL / FreeRTOS / ROS / control_mailbox / motor_control。
@@ -44,8 +44,7 @@ extern "C" {
 #define MOTOR_PROTOCOL_CAP_AUTONOMOUS_FEEDBACK (1UL << 5) // vaxor ~20ms 自主上报
 
 // ---------------------------------------------------------------------------
-// 固定容量帧类型（ARD-0007 §21.2 原始帧逻辑字段：can_id/is_fd/is_brs/dlc/
-// data[64]/rx_tick/bus_index）。ISR 盖 MCU 单调时基戳；内核不发原始帧。
+// 固定容量 CAN 帧，接收时间由 ISR 使用 MCU 单调时钟记录。
 // ---------------------------------------------------------------------------
 #define MOTOR_PROTOCOL_MAX_FRAME_BYTES 64U
 #define MOTOR_PROTOCOL_P1_BATCH_MAX 6U
@@ -62,7 +61,7 @@ typedef struct {
 } motor_protocol_raw_frame_t;
 
 // 待发送帧输出（固定容量）。tx_class 供每总线 TX 调度器
-// 分配 P0/P1/P2 队列（ARD-0007 §22）。
+// 分配 P0/P1/P2 队列。
 typedef enum {
   MOTOR_PROTOCOL_TX_CLASS_P0 = 0U, // 安全帧：软停/停机/失能（可抢占）
   MOTOR_PROTOCOL_TX_CLASS_P1 = 1U, // 500 Hz MIT 控制（latest-wins 槽）
@@ -91,7 +90,7 @@ typedef struct {
 } motor_protocol_tx_frame_t;
 
 // ---------------------------------------------------------------------------
-// 型号 Profile（ARD-0007 §8.2）：编译期"型号目录"的行类型。
+// 型号 Profile：编译期"型号目录"的行类型。
 // 数值来源：ros2_ws/src/motor_hardware_interface/config/motor.yaml 型号库
 // （仓库唯一权威），Vaxor-80 速比无完整规格，刻意不入目录（禁止项 15）。
 // ---------------------------------------------------------------------------
@@ -136,13 +135,13 @@ typedef struct {
 typedef struct {
   float position_rad;   // 关节侧目标位置
   float velocity_rad_s; // 关节侧目标速度
-  float effort_nm;      // 关节侧目标扭矩（前馈，REV-02/TBD-ROS-03：唯一动态目标）
+  float effort_nm;      // 关节侧前馈力矩
   float kp;
   float kd;
   bool enable; // 设备侧使能位（使能时序由内核状态机编排）
 } motor_protocol_control_intent_t;
 
-// 测量状态：缺失量一律 NaN（ARD-0007 §38.3）。profile 未绑定时运动量为 NaN，
+// 测量状态：缺失量一律 NaN。profile 未绑定时运动量为 NaN，
 // 但身份/状态字段照常填充（发现与识别依赖它）。
 typedef struct {
   float position_rad;    // 关节侧（已按 Profile 换算；未绑定为 NaN）
@@ -164,13 +163,13 @@ typedef struct {
 
 // ---------------------------------------------------------------------------
 // 低频配置请求（形状与 control_mailbox 契约一致但类型独立，内核不依赖 mailbox）。
-// 事务结果码为 ARD-0007 §20.5 统一七码。
+// 设备事务结果。
 // ---------------------------------------------------------------------------
 typedef enum {
   MOTOR_PROTOCOL_CONFIG_SET_MODE = 1U,
   MOTOR_PROTOCOL_CONFIG_SET_GAINS = 2U,
   MOTOR_PROTOCOL_CONFIG_SET_POSITION_LIMITS = 3U,
-  MOTOR_PROTOCOL_CONFIG_SET_ENABLE = 4U, // 逐电机 Enable（ARD §19 MotorPolicy）
+  MOTOR_PROTOCOL_CONFIG_SET_ENABLE = 4U, // 逐电机 Enable
   // 设备侧管理对象（仅 CERB；走 CANopen 快速 SDO，写后读回核验）：
   //   0x6080 电机最大转速（电机端 RPM）
   MOTOR_PROTOCOL_CONFIG_SET_VELOCITY_LIMIT = 5U,
@@ -274,7 +273,7 @@ typedef struct {
   float value_si;
 } motor_protocol_param_stage_t;
 
-// 配置事务阶段（ARD-0007 §20.4：分阶段、跨 1ms 节拍步进、每阶段可重试 ≤2 次）。
+// 配置事务分阶段步进，每阶段最多重试两次。
 //
 // param_* 字段：本阶段与之对应的**设备端参数槽位**与原值（CERB 的
 // 0x607D:01/:02、0x6080、0x2538）。内核据此在事务成功后写固件记录、并把
@@ -405,6 +404,13 @@ typedef struct motor_protocol_adapter {
 // out_count 为 NULL 时返回 NULL；否则返回静态数组并写入元素数量。
 const motor_protocol_adapter_t *const *motor_protocol_adapter_registry(
   size_t *out_count);
+
+// 仅内置 CERB 实例要求已知且非零的 T_MAX；结构副本保持非 CERB 语义。
+bool motor_protocol_adapter_allows_motion(
+    const motor_protocol_adapter_t *adapter, uint8_t raw_present, uint32_t t_max_raw);
+// 设备方向/保存仅允许内置 CERB 实例；运行状态门禁仍由内核检查。
+bool motor_protocol_adapter_allows_driver_config(
+    const motor_protocol_adapter_t *adapter);
 
 // 按已注册 adapter 探测一段 P1 逻辑帧。返回 1 表示原样输出 frames[0]，
 // 返回 2..N 表示 adapter 已编码出一个聚合物理帧；参数无效返回 0。

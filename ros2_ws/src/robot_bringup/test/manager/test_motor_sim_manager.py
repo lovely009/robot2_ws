@@ -129,6 +129,7 @@ def test_start_builds_simulator_only_launch(canable: str) -> None:
     assert command[:3] == ['ros2', 'launch', 'robot_sim']
     assert 'simulation.launch.py' in command
     assert 'simulator_only:=true' in command
+    assert 'bridge_plant:=true' in command
     assert 'controller_mode:=firmware' in command
     assert 'transport:=slcan' in command
     assert f'sim_tty:={canable}' in command
@@ -332,3 +333,37 @@ def test_query_motor_sim_unreachable_and_silent(tmp_path: Path) -> None:
     finally:
         thread.join(timeout=2)
         server.close()
+
+
+def test_multichannel_backend_validates_and_forwards_routes():
+    systemd = _systemd()
+    manager = MotorSimProcessManager(
+        can_provider=lambda: [], serial_provider=lambda: [],
+        model_provider=lambda: ['half_body_robot'],
+        usbcanfd_provider=lambda: [{'index': 0, 'accessible': True}],
+        systemd=SystemdUnits(runner=systemd))
+    channels = [
+        {'bus': 0, 'transport': 'usbcanfd', 'device': 0, 'channel': 0, 'ids': '*'},
+        {'bus': 1, 'transport': 'usbcanfd', 'device': 0, 'channel': 1, 'ids': '10-18'},
+    ]
+    status = manager.start(_request(transport='multi', sim_channels_json=json.dumps(channels)))
+    assert status['config']['channels'] == channels
+    assert 'transport:=multi' in _exec_start(systemd)
+    encoded = next(x for x in _exec_start(systemd) if x.startswith('sim_channels_json:='))
+    assert json.loads(encoded.split(':=', 1)[1]) == channels
+    assert hil_motor_backend_request({'controller_mode': 'firmware', 'transport': 'multi',
+        'model': 'half_body_robot', 'sim_channels_json': json.dumps(channels),
+        'physical_bus_isolated': True})['sim_channels_json'] == json.dumps(channels)
+
+
+def test_multichannel_rejects_inaccessible_usb_before_start():
+    systemd = _systemd()
+    manager = MotorSimProcessManager(
+        can_provider=lambda: [], serial_provider=lambda: [],
+        model_provider=lambda: ['half_body_robot'],
+        usbcanfd_provider=lambda: [{'index': 0, 'accessible': False}],
+        systemd=SystemdUnits(runner=systemd))
+    with pytest.raises(PermissionError, match='USB'):
+        manager.start(_request(transport='multi', sim_channels_json=json.dumps([
+            {'bus': 0, 'transport': 'usbcanfd', 'device': 0, 'channel': 0, 'ids': '*'}])))
+    assert not _creations(systemd)

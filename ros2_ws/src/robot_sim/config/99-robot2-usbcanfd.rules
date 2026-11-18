@@ -1,0 +1,2 @@
+# Chuangxin Linux USB-CAN FD: local plugdev access and no USB autosuspend.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04d8", ATTR{idProduct}=="0053", MODE="0660", GROUP="plugdev", TAG+="uaccess", TEST=="power/control", ATTR{power/control}="on"

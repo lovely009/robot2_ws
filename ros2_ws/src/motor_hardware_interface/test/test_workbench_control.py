@@ -9,6 +9,7 @@ import time
 from types import MethodType, SimpleNamespace
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -19,6 +20,7 @@ from action_msgs.srv import CancelGoal
 from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.msg import ControllerState
 from controller_manager_msgs.srv import ListControllers, SwitchController
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from rcl_interfaces.msg import ParameterType, ParameterValue, SetParametersResult
 from rcl_interfaces.srv import GetParameters, SetParametersAtomically
 import rclpy
@@ -56,6 +58,231 @@ def files(tmp_path):
         '<limit lower="-1" upper="1" velocity="2" effort="10"/></joint>'
         for name in ('yaw', 'pitch', 'elbow')) + '</robot>')
     return str(driver), str(urdf)
+
+
+def configure_coupled_limits(files):
+    driver = Path(files[0])
+    limits = {
+        'joint_limits': {'yaw': [-1., 1.], 'pitch': [-1., 1.]},
+        'coupled_limits': {'wrist': {
+            'joints': ['yaw', 'pitch'], 'lower': [-1., -1.], 'step': .5,
+            'valid_rows': ['00100', '01110', '11111', '01110', '00100'],
+        }},
+    }
+    (driver.parent / 'coupled.yaml').write_text(yaml.safe_dump(limits))
+    config = yaml.safe_load(driver.read_text())
+    config['motor_hardware']['coupled_limits_file'] = 'coupled.yaml'
+    driver.write_text(yaml.safe_dump(config))
+
+
+def add_second_coupled_group(files):
+    driver = Path(files[0])
+    config = yaml.safe_load(driver.read_text())
+    config['motor_hardware']['motors']['d'] = {'id': 11, 'joint': 'other'}
+    driver.write_text(yaml.safe_dump(config))
+    urdf = Path(files[1])
+    urdf.write_text(urdf.read_text().replace('</robot>',
+        '<link name="other_link"/><joint name="other" type="revolute">'
+        '<parent link="base"/><child link="other_link"/>'
+        '<limit lower="-1" upper="1" velocity="2" effort="10"/></joint></robot>'))
+    path = driver.parent / 'coupled.yaml'
+    config = yaml.safe_load(path.read_text())
+    config['joint_limits'].update(elbow=[-1., 1.], other=[-1., 1.])
+    config['coupled_limits']['second'] = {
+        **config['coupled_limits']['wrist'], 'joints': ['elbow', 'other']}
+    path.write_text(yaml.safe_dump(config))
+
+
+@pytest.fixture
+def coupled_files(files):
+    configure_coupled_limits(files)
+    return files
+
+
+def test_coupled_limits_follow_pose_and_reject_invalid_combined_target(coupled_files):
+    model = wc.WorkbenchModel(*coupled_files)
+    positions = {'yaw': 0., 'pitch': 0., 'elbow': .3}
+    assert model.active_limits(positions)['pitch'] == (-1., 1.)
+    assert model.active_limits(positions | {'yaw': .5})['pitch'] == (-.5, .5)
+    assert model.active_limits(positions | {'yaw': 1.})['pitch'] == (0., 0.)
+    measured = model.feedback(feedback(), NOW)
+    target = JointState(name=['yaw', 'pitch'], position=[.5, 0.])
+    target.header.stamp = feedback().header.stamp
+    result = model.joint_target(target, measured, NOW)
+    assert list(result.position) == [.5, 0., .3]
+    target.position = [.5, .6]
+    with pytest.raises(ValueError, match='组合超出'):
+        model.joint_target(target, measured, NOW)
+    with pytest.raises(ValueError, match='组合超出'):
+        model.joint_trajectory(JointTrajectory(joint_names=['yaw', 'pitch'], points=[
+            JointTrajectoryPoint(positions=[.5, .6], time_from_start=wc.Duration(sec=1)),
+        ]), measured, NOW)
+
+
+def test_coupled_limits_invalid_feedback_does_not_return_static_bounds(coupled_files):
+    model = wc.WorkbenchModel(*coupled_files)
+    for yaw in (1.1, float('nan'), float('inf')):
+        with pytest.raises(ValueError):
+            model.active_limits({'yaw': yaw, 'pitch': 0., 'elbow': .3})
+
+
+def test_joint_trajectory_rejects_coupled_interpolation_outside_valid_endpoints(coupled_files):
+    model = wc.WorkbenchModel(*coupled_files)
+    state = feedback()
+    state.position = [.5, .5, .3]
+    state.velocity = [.4, .4, 0.]
+    measured = model.feedback(state, NOW)
+    message = JointTrajectory(joint_names=['yaw', 'pitch'], points=[
+        JointTrajectoryPoint(positions=[.5, .5], velocities=[-.4, -.4],
+                             time_from_start=wc.Duration(sec=1)),
+    ])
+    with pytest.raises(ValueError, match='插值.*组合超出'):
+        model.joint_trajectory(message, measured, NOW)
+
+
+@pytest.mark.parametrize('linear', [False, True])
+def test_joint_trajectory_accepts_valid_coupled_path_with_invalid_bounding_corner(coupled_files, linear):
+    model = wc.WorkbenchModel(*coupled_files)
+    model.workspace.groups['wrist'][3][1, 3] = False
+    state = feedback()
+    state.position = [-.5, -.5, .3]
+    state.velocity = [0., 0., 0.]
+    message = JointTrajectory(joint_names=['yaw', 'pitch'], points=[
+        JointTrajectoryPoint(positions=[.5, .5], velocities=[0., 0.],
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    result = model.joint_trajectory(message, model.feedback(state, NOW), NOW, linear=linear)
+    assert list(result.points[-1].positions) == [.5, .5, .3]
+
+
+@pytest.mark.parametrize('linear', [False, True])
+def test_joint_trajectory_rejects_coupled_path_crossing_invalid_grid(coupled_files, linear):
+    model = wc.WorkbenchModel(*coupled_files)
+    model.workspace.groups['wrist'][3][2, 2] = False
+    state = feedback()
+    state.position = [-.5, -.5, .3]
+    state.velocity = [0., 0., 0.]
+    message = JointTrajectory(joint_names=['yaw', 'pitch'], points=[
+        JointTrajectoryPoint(positions=[.5, .5], velocities=[0., 0.],
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    with pytest.raises(ValueError, match='插值.*组合超出'):
+        model.joint_trajectory(message, model.feedback(state, NOW), NOW, linear=linear)
+
+
+def test_joint_trajectory_holds_invalid_coupled_group_while_other_joint_moves(coupled_files):
+    model = wc.WorkbenchModel(*coupled_files)
+    state = feedback()
+    state.position = [.7, .7, .3]
+    state.velocity = [0., 0., 0.]
+    message = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[.4], velocities=[0.],
+                             time_from_start=wc.Duration(sec=1)),
+    ])
+    result = model.joint_trajectory(message, model.feedback(state, NOW), NOW)
+    assert list(result.points[-1].positions) == [.7, .7, .4]
+
+
+def test_coupled_feedback_normalizes_wire_rounding_without_relaxing_targets(coupled_files):
+    model = wc.WorkbenchModel(*coupled_files)
+    message = feedback()
+    message.position = [.5 + model.position_tolerance['yaw'] / 2, .5, .3]
+    measured = model.feedback(message, NOW)
+    assert measured['yaw'].position == .5
+    assert model.active_limits({name: axis.position for name, axis in measured.items()})['pitch'] == (-.5, .5)
+    target = JointState(name=['elbow'], position=[.4], header=message.header)
+    assert list(model.joint_target(target, measured, NOW).position) == [.5, .5, .4]
+    target = JointState(name=['yaw'], position=[message.position[0]], header=message.header)
+    with pytest.raises(ValueError, match='组合超出'):
+        model.joint_target(target, measured, NOW)
+    message.position[0] = .5 + 10 * model.position_tolerance['yaw']
+    measured = model.feedback(message, NOW)
+    with pytest.raises(ValueError, match='组合超出'):
+        model.active_limits({name: axis.position for name, axis in measured.items()})
+
+
+def test_invalid_coupled_group_can_hold_while_another_group_moves(coupled_files):
+    add_second_coupled_group(coupled_files)
+    model = wc.WorkbenchModel(*coupled_files)
+    message = JointState(name=['yaw', 'pitch', 'elbow', 'other'],
+                         position=[.7, .7, 0., 0.], velocity=[0.] * 4, effort=[0.] * 4)
+    message.header.stamp.sec = 10
+    measured = model.feedback(message, NOW)
+    target = JointState(name=['elbow'], position=[.3], header=message.header)
+    result = model.joint_target(target, measured, NOW)
+    output = dict(zip(result.name, result.position))
+    assert output == {'yaw': .7, 'pitch': .7, 'elbow': .3, 'other': 0.}
+    target = JointState(name=['yaw'], position=[.8], header=message.header)
+    with pytest.raises(ValueError, match='组合超出'):
+        model.joint_target(target, measured, NOW)
+
+
+def test_invalid_coupled_group_does_not_clear_other_dynamic_ranges(coupled_files):
+    add_second_coupled_group(coupled_files)
+    model = wc.WorkbenchModel(*coupled_files)
+    measured = {name: wc.Axis(position) for name, position in
+                {'yaw': .7, 'pitch': .7, 'elbow': 0., 'other': 0.}.items()}
+    messages = []
+    gateway = SimpleNamespace(
+        mapping=model, _measured=lambda: measured, _follow_targets={},
+        model_name='test', _mode='stopped', _reason='', _reject='', _gravity_enabled=False,
+        _effort_gain=0., _active=[], _controllers_ready=True, _runs=[], _stop_policy_id=0,
+        config_file=coupled_files[0], get_fully_qualified_name=lambda: '/workbench_control',
+        _status_pub=SimpleNamespace(publish=lambda _: None),
+        _transmission_pub=SimpleNamespace(publish=lambda message: messages.append(json.loads(message.data))),
+    )
+    wc.WorkbenchControl._publish_status(gateway)
+    status = messages[-1]
+    assert status['joint_limits']['yaw'] == {'lower': None, 'upper': None}
+    assert status['joint_limits']['elbow'] == {'lower': -1., 'upper': 1.}
+    assert set(status['joint_limit_errors']) == {'yaw', 'pitch'}
+
+
+@pytest.mark.parametrize('fresh', [True, False])
+def test_published_status_json_contract_including_unknown_gravity_and_null_limits(coupled_files, fresh):
+    model = wc.WorkbenchModel(*coupled_files)
+    model.limits['elbow'] = (math.nan, math.nan, *model.limits['elbow'][2:])
+    messages = [[], []]
+
+    def measured():
+        if not fresh:
+            raise ValueError('反馈过期')
+        return {name: wc.Axis(position) for name, position in
+                {'yaw': 0., 'pitch': 0., 'elbow': .3}.items()}
+
+    gateway = SimpleNamespace(
+        mapping=model, _measured=measured, _follow_targets={}, model_name='test',
+        _mode='stopped', _reason='', _reject='', _gravity_enabled=None, _effort_gain=None,
+        _active=[], _controllers_ready=False, _runs=[], _stop_policy_id=0,
+        config_file=coupled_files[0], get_fully_qualified_name=lambda: '/workbench_control',
+        _status_pub=SimpleNamespace(publish=lambda message: messages[0].append(message.data)),
+        _transmission_pub=SimpleNamespace(publish=lambda message: messages[1].append(message.data)),
+    )
+    wc.WorkbenchControl._publish_status(gateway)
+    command, transmission = [json.loads(values[-1], parse_constant=lambda value:
+        pytest.fail(f'JSON 不应包含非有限常量 {value}')) for values in messages]
+    for snapshot in (command, transmission):
+        assert snapshot['model'] == 'test'
+        assert snapshot['joint_names'] and len(set(snapshot['joint_names'])) == len(snapshot['joint_names'])
+        assert all(isinstance(name, str) and name for name in snapshot['joint_names'])
+        assert snapshot['feedback_fresh'] is fresh
+        assert snapshot['controllers_ready'] is False
+        assert snapshot['active_controllers'] == []
+        assert snapshot['gravity_enabled'] is None and snapshot['effort_gain'] is None
+        assert snapshot['output_topic'] == '/motor/host_command_array'
+        assert snapshot['trajectory_output_topic'] == wc.ACTION
+    assert transmission['trajectory_enabled'] is True
+    assert transmission['joint_velocity_limits'] == {'yaw': 2., 'pitch': 2., 'elbow': 2.}
+    assert set(transmission['dynamic_joint_names']) <= set(transmission['joint_names'])
+    for group in transmission['control_groups']:
+        assert isinstance(group['name'], str) and group['name']
+        assert group['joints'] and all(name in transmission['joint_names'] for name in group['joints'])
+        assert group['motors'] and all(type(motor['id']) is int for motor in group['motors'])
+    assert transmission['joint_limits']['elbow'] == {'lower': None, 'upper': None}
+    if not fresh:
+        assert transmission['joint_limits']['yaw'] == {'lower': None, 'upper': None}
+        assert transmission['joint_limit_errors']['yaw'] == '反馈过期'
+    assert all(isinstance(error, str) for error in transmission['joint_limit_errors'].values())
 
 
 def feedback(stamp=NOW):
@@ -104,14 +331,21 @@ def test_manual_uses_model_and_fresh_measured_holds(files):
     assert model.joint_names == ['yaw', 'pitch', 'elbow']
 
 
-@pytest.mark.parametrize('change', ['partial', 'duplicate', 'unknown', 'count',
+def test_manual_partial_motor_holds_other_actuator_at_measured_position(files):
+    model = wc.WorkbenchModel(*files)
+    msg = setpoint()
+    msg.targets.pop()
+    msg.count = 1
+    values = model.manual(msg, model.feedback(feedback(), NOW), NOW)
+    assert values == pytest.approx([.25, .1, 1., .15, .1, 1., .3, 0., 0.])
+
+
+@pytest.mark.parametrize('change', ['duplicate', 'unknown', 'count',
                                   'nan', 'position', 'velocity', 'effort', 'stale', 'future'])
 def test_manual_rejects_whole_invalid_input(files, change):
     model = wc.WorkbenchModel(*files)
     msg = setpoint()
-    if change == 'partial':
-        msg.targets.pop(); msg.count = 1
-    elif change == 'duplicate':
+    if change == 'duplicate':
         msg.targets[1].motor_id = 8
     elif change == 'unknown':
         msg.targets[1].motor_id = 42
@@ -314,6 +548,38 @@ def test_joint_trajectory_fills_every_joint_from_measurement(files):
     assert not result.points[0].effort
 
 
+@pytest.mark.parametrize('frame_id,expected', [
+    ('', 8), ('world', 8), ('workbench-trajectory/90123', 90123),
+])
+def test_joint_trajectory_preserves_client_playback_identity(frame_id, expected):
+    submitted, rejected = [], []
+    node = SimpleNamespace(
+        _id=7, _input_floor_ns=0, _runs=[],
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=NOW)),
+        mapping=SimpleNamespace(ids={'a': 8, 'b': 9}),
+        _state=wc.WorkbenchControl._state,
+        _submit=lambda *args: submitted.append(args),
+        _reject_input=lambda *args: rejected.append(args))
+    node._state = MethodType(wc.WorkbenchControl._state, node)
+    message = JointTrajectory(joint_names=['yaw'], points=[JointTrajectoryPoint(positions=[.1])])
+    message.header.stamp.sec = 10
+    message.header.frame_id = frame_id
+    wc.WorkbenchControl._on_joint_trajectory(node, message)
+    assert not rejected
+    assert submitted[0][2].trajectory_id == expected
+
+
+@pytest.mark.parametrize('value', ['', '0', '-1', '1.5', '4294967296', 'bad'])
+def test_joint_trajectory_rejects_invalid_client_identity(value):
+    rejected = []
+    node = SimpleNamespace(_id=7, _runs=[],
+        _reject_input=lambda *args: rejected.append(args))
+    message = JointTrajectory(joint_names=['yaw'], points=[JointTrajectoryPoint(positions=[.1])])
+    message.header.frame_id = 'workbench-trajectory/' + value
+    wc.WorkbenchControl._on_joint_trajectory(node, message)
+    assert rejected
+
+
 def test_zero_time_point_normalizes_quantization_error_to_measured_state(files):
     model = wc.WorkbenchModel(*files)
     state = feedback()
@@ -469,6 +735,7 @@ def cancel_race():
     errors, continued = [], []
     gateway = SimpleNamespace(_epoch=2, _runs=[run], _waits=[], _stopping=False,
                               _assembly=wc.TrajectoryAssembly(), _locked=lambda fn: fn,
+                              mapping=SimpleNamespace(dynamic_joint_names=[]),
                               _fail=errors.append, _stop_error=errors.append)
     for method in ('_watch', '_cancel_one', '_cancel_handles', '_tick', '_goal_error'):
         setattr(gateway, method, MethodType(getattr(wc.WorkbenchControl, method), gateway))
@@ -547,6 +814,8 @@ class FakeControl(Node):
         self.follow_targets = []
         self.target_pub = self.create_publisher(JointState, '/control/joint_target', 1)
         self.create_subscription(JointState, '/host_control/follow_controller/target', self.follow_targets.append, 1)
+        self.diagnostics_pub = self.create_publisher(
+            DiagnosticArray, '/host_control/follow_controller/diagnostics', 10)
         self.canceled_goals = []
         self.canceling_goals = []
         self.goal_gate = threading.Event()
@@ -684,6 +953,8 @@ def graph(files, monkeypatch, request):
     rclpy.init(context=context)
     peer = FakeControl(context)
     settings = getattr(request, 'param', {})
+    if settings.get('coupled_limits'):
+        configure_coupled_limits(files)
     if 'client_count' in settings:
         peer.count_pub.publish(Int32(data=settings['client_count']))
     gateway = wc.WorkbenchControl(context=context, parameter_overrides=[
@@ -744,6 +1015,39 @@ def test_ros_manual_switch_is_atomic_and_commands_are_one_shot(graph):
     assert all(p.topic_name != '/motor/host_command_array' for p in gateway.publishers)
 
 
+@pytest.mark.parametrize('graph', [{'coupled_limits': True}], indirect=True)
+def test_ros_dynamic_limits_update_from_follow_target_and_expire_with_feedback(graph):
+    peer, gateway = graph
+    assert wait_for(lambda: peer.transmissions and peer.transmissions[-1].get(
+        'dynamic_joint_names') == ['yaw', 'pitch'] and peer.transmissions[-1]['feedback_fresh'])
+    assert peer.transmissions[-1]['joint_limits']['pitch'] == {'lower': -.5, 'upper': .5}
+    message = JointState(name=['yaw', 'pitch'], position=[0., 0.])
+    message.header.stamp = peer.get_clock().now().to_msg()
+    peer.target_pub.publish(message)
+    assert wait_for(lambda: peer.follow_targets)
+    assert wait_for(lambda: peer.transmissions[-1]['joint_limits']['pitch']
+                    == {'lower': -1., 'upper': 1.}, seconds=.7)
+    peer.stop_pub.publish(Empty())
+    assert wait_for(lambda: peer.transmissions[-1]['mode'] == 'stopped'
+                    and peer.transmissions[-1]['joint_limits']['pitch']['upper'] == .5)
+    peer.publish_feedback = False
+    assert wait_for(lambda: not peer.transmissions[-1]['feedback_fresh'])
+    assert peer.transmissions[-1]['joint_limits']['pitch'] == {'lower': None, 'upper': None}
+    assert peer.transmissions[-1]['joint_limit_error']
+    assert peer.transmissions[-1]['joint_limits']['elbow'] == {'lower': -1., 'upper': 1.}
+
+
+@pytest.mark.parametrize('graph', [{'coupled_limits': True}], indirect=True)
+def test_ros_dynamic_limits_cannot_be_overwritten_with_static_parameters(graph):
+    peer, gateway = graph
+    reply = gateway.set_parameters_atomically([Parameter('joint_limits_json', value=json.dumps({
+        'model': 'test', 'joint_limits': {'yaw': {'lower': -2., 'upper': 2.}},
+    }))])
+    assert not reply.successful
+    assert '动态' in reply.reason
+    assert not peer.limit_requests
+
+
 def test_ros_manual_updates_same_active_mode_without_switching(graph):
     peer, _ = graph
     send_manual(peer)
@@ -780,6 +1084,59 @@ def test_ros_action_receipts_come_from_jtc(graph, outcome):
     if outcome in ('aborted', 'rejected'):
         assert wait_for(lambda: stopped(peer))
         assert peer.status[-1]['reject']
+
+
+@pytest.mark.parametrize('outcome', ['succeeded', 'aborted'])
+def test_ros_bvh_joint_trajectory_receipts_keep_playback_id(graph, outcome):
+    peer, _ = graph
+    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    message = JointTrajectory(joint_names=['yaw', 'pitch'], points=[
+        JointTrajectoryPoint(positions=[.21, .11], velocities=[0., 0.],
+                             time_from_start=wc.Duration(sec=2))])
+    message.header.stamp = peer.get_clock().now().to_msg()
+    message.header.frame_id = 'workbench-trajectory/90123'
+    peer.joint_pub.publish(message)
+    assert wait_for(lambda: peer.goals and any(
+        state.trajectory_id == 90123 and state.active for state in peer.receipts))
+    assert list(peer.goals[0].trajectory.joint_names) == ['yaw', 'pitch', 'elbow']
+    assert list(peer.goals[0].trajectory.points[-1].positions) == pytest.approx([.21, .11, .3])
+    peer.outcome = outcome
+    assert wait_for(lambda: any(state.trajectory_id == 90123 and not state.active
+                               for state in peer.receipts))
+    receipt = [state for state in peer.receipts if state.trajectory_id == 90123][-1]
+    assert receipt.completed == (outcome == 'succeeded')
+    if outcome == 'succeeded':
+        assert receipt.elapsed_ms == 2000
+
+
+def test_ros_joint_trajectory_survives_switch_delay_with_fresh_feedback(graph, monkeypatch):
+    peer, _ = graph
+    monkeypatch.setattr(wc, 'RPC_TIMEOUT', 1.)
+    peer.switch_delay = .65
+    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    message = JointTrajectory(joint_names=['yaw'], points=[
+        JointTrajectoryPoint(positions=[.21], velocities=[0.],
+                             time_from_start=wc.Duration(sec=2))])
+    message.header.stamp = peer.get_clock().now().to_msg()
+    peer.joint_pub.publish(message)
+    assert wait_for(lambda: peer.goals)
+    assert wc.stamp_ns(peer.goals[0].trajectory.header.stamp) == 0
+    assert wc.stamp_ns(peer.goals[0].trajectory.points[-1].time_from_start) == 2_000_000_000
+
+
+@pytest.mark.parametrize('offset_ns', [-1_000_000_000, 1_000_000_000])
+def test_ros_joint_trajectory_rejects_stale_or_future_input_at_receipt(graph, offset_ns):
+    peer, _ = graph
+    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    message = JointTrajectory(joint_names=['yaw'], points=[
+        JointTrajectoryPoint(positions=[.21], velocities=[0.],
+                             time_from_start=wc.Duration(sec=2))])
+    stamp = peer.get_clock().now().nanoseconds + offset_ns
+    message.header.stamp.sec, message.header.stamp.nanosec = divmod(stamp, 10**9)
+    peer.joint_pub.publish(message)
+    assert wait_for(lambda: peer.status[-1]['reject'])
+    assert not peer.goals
+    assert not any(request.activate_controllers for request in peer.switches)
 
 
 def test_ros_stop_during_switch_cannot_publish_or_restore_target(graph):
@@ -914,6 +1271,9 @@ def test_ros_feedback_forwarding_qos_and_truthful_gravity_status(graph):
     assert peer.joints[-1].name == ['yaw', 'pitch', 'elbow']
     assert wait_for(lambda: peer.transmissions)
     assert peer.transmissions[-1]['model'] == 'test'
+    groups = peer.transmissions[-1]['control_groups']
+    assert {tuple(g['joints']): [m['id'] for m in g['motors']] for g in groups} == {
+        ('yaw', 'pitch'): [8, 9], ('elbow',): [10]}
     count_sub = next(sub for sub in gateway.subscriptions if sub.topic_name == '/client_count')
     assert count_sub.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL
 
@@ -1244,6 +1604,14 @@ def send_follow(peer, value=.4, name='yaw'):
     return message
 
 
+def follow_diagnostics(stamp, message='连续跟随关节反馈无效：yaw'):
+    array = DiagnosticArray()
+    array.header.stamp.sec, array.header.stamp.nanosec = divmod(stamp, 10**9)
+    array.status.append(DiagnosticStatus(level=DiagnosticStatus.ERROR,
+        name='/host_control/follow_controller', message=message))
+    return array
+
+
 def test_ros_follow_coalesces_switch_and_then_updates_without_jtc(graph):
     peer, gateway = graph
     peer.switch_delay = .18
@@ -1310,6 +1678,54 @@ def test_ros_follow_controller_error_closes_hardware_and_discards_target(graph, 
     assert '连续跟随控制器意外停止' in gateway._reject
     assert not gateway._follow_targets
     assert len(peer.follow_targets) == 1
+
+
+def test_ros_follow_diagnostic_fault_stops_active_session(graph):
+    peer, gateway = graph
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets and gateway._mode == 'follow')
+    stamp = peer.get_clock().now().nanoseconds
+    peer.diagnostics_pub.publish(follow_diagnostics(stamp))
+    assert wait_for(lambda: gateway._mode == 'stopped' and stopped(peer))
+    assert '跟随控制器故障' in gateway._reject and '反馈无效' in gateway._reject
+    assert not gateway._follow_targets and gateway._pending_follow is None
+    assert gateway._follow_stamp == 0
+
+
+def test_ros_follow_diagnostic_fault_during_switch_discards_pending(graph):
+    peer, gateway = graph
+    peer.switch_delay = .18
+    send_follow(peer)
+    assert wait_for(lambda: any(r.activate_controllers for r in peer.switches))
+    peer.diagnostics_pub.publish(
+        follow_diagnostics(peer.get_clock().now().nanoseconds))
+    assert wait_for(lambda: gateway._mode == 'stopped' and stopped(peer))
+    assert not peer.follow_targets
+    time.sleep(.06)  # 新目标必须晚于停止时设置的 50ms 输入屏障。
+    send_follow(peer, .5, 'elbow')
+    assert wait_for(lambda: peer.follow_targets and gateway._mode == 'follow')
+
+
+def test_ros_follow_stale_or_future_diagnostic_keeps_new_session(graph):
+    peer, gateway = graph
+    send_follow(peer)
+    assert wait_for(lambda: gateway._mode == 'follow')
+    fault_stamp = peer.get_clock().now().nanoseconds
+    peer.diagnostics_pub.publish(follow_diagnostics(fault_stamp))
+    assert wait_for(lambda: gateway._mode == 'stopped' and stopped(peer))
+    time.sleep(.06)
+    send_follow(peer, .5, 'elbow')
+    assert wait_for(lambda: peer.follow_targets and gateway._mode == 'follow')
+    assert gateway._reject == ''
+    stops = len(peer.hardware_stops)
+    # 同一故障帧若因 DDS 延迟在停止并重建会话后到达，不得停止新会话。
+    peer.diagnostics_pub.publish(follow_diagnostics(fault_stamp))
+    peer.diagnostics_pub.publish(follow_diagnostics(fault_stamp - 10**9, '旧会话故障'))
+    peer.diagnostics_pub.publish(follow_diagnostics(fault_stamp + 10**9, '未来时间戳'))
+    peer.diagnostics_pub.publish(follow_diagnostics(0, '零时间戳'))
+    time.sleep(.15)
+    assert len(peer.hardware_stops) == stops
+    assert gateway._mode == 'follow' and not gateway._stopping
 
 
 @pytest.mark.parametrize('failed', ['trajectory_controller', 'gravity_controller'])

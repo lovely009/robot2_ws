@@ -62,6 +62,9 @@ export function mount(root, ctx) {
     backendTtyField: $('motorBackendTtyField'),
     backendStart: $('btnMotorBackendStart'),
     backendStop: $('btnMotorBackendStop'),
+    multiFields: $('simMultiFields'),
+    motorAddBus: $('simMotorAddBus'),
+    motorAddBusField: $('simMotorAddBusField'),
     motorPanel: $('simMotorPanel'),
     motorHint: $('simMotorHint'),
     motorList: $('simMotorList'),
@@ -72,12 +75,15 @@ export function mount(root, ctx) {
     motorAdd: $('btnSimMotorAdd'),
   };
 
-  let deviceOptions = { can_interfaces: [], serial_ports: [], models: [], mujoco_models: [] };
+  let deviceOptions = { can_interfaces: [], serial_ports: [], usbcanfd_devices: [], models: [], mujoco_models: [] };
   let optionsLoaded = false;
   let latestStatus = { state: 'stopped' };
   let motorBackend = { state: 'stopped' };
   let motorSim = { motors: [] };
   let pollTimer = null;
+  const routeRows = [...root.querySelectorAll('[data-sim-route]')];
+  let restoredBackendRoutes = '';
+  const field = (row, name) => row.querySelector(`[data-route-${name}]`);
 
   // 日志不进状态快照，按需拉（见 core/agent.js 的 getUnitLog）。文本活在挂载作用域里，
   // 切屏重挂会重新拉一次。
@@ -122,6 +128,7 @@ export function mount(root, ctx) {
         driver_interface: ui.driverInterface.value,
         sim_tty: ui.simTty.value,
         driver_tty: ui.driverTty.value,
+        sim_channels: readRoutes(),
         spawn_z: ui.spawnZ.value,
         gravity: ui.gravity.checked,
         fixed_base: ui.fixedBase.checked,
@@ -129,6 +136,58 @@ export function mount(root, ctx) {
     } catch (_error) {
       // The simulation controls remain usable when browser storage is disabled.
     }
+  }
+
+  function readRoutes() {
+    return routeRows.filter(row => field(row, 'enabled').checked).map(row => {
+      const transport = field(row, 'transport').value;
+      const route = {bus: Number(row.dataset.simRoute), transport, ids: field(row, 'ids').value.trim()};
+      if (transport === 'usbcanfd') {
+        route.device = field(row, 'device').value === '' ? null : Number(field(row, 'device').value);
+        route.channel = Number(field(row, 'channel').value);
+      } else route.endpoint = field(row, 'endpoint').value;
+      return route;
+    });
+  }
+
+  function fillRouteOptions(row) {
+    const kind = field(row, 'transport').value;
+    replaceOptions(field(row, 'device'), (deviceOptions.usbcanfd_devices || []).map(d => ({
+      value: String(d.index), label: d.label + (d.accessible ? '' : '（无读写权限）'), disabled: !d.accessible,
+    })), '选择分析仪', field(row, 'device').value || row.dataset.device || '0');
+    const entries = kind === 'socketcan'
+      ? (deviceOptions.can_interfaces || []).map(d => ({value:d.name,label:d.label || d.name,disabled:!d.up}))
+      : (deviceOptions.serial_ports || []).map(d => ({value:d.path,label:d.label || d.path,disabled:!d.accessible}));
+    replaceOptions(field(row, 'endpoint'), entries, '选择端点', field(row, 'endpoint').value || row.dataset.endpoint || '');
+  }
+
+  function syncRouteRows() {
+    const active = activeState(motorBackend.state) || activeState(latestStatus.state);
+    for (const row of routeRows) {
+      const enabled = field(row, 'enabled').checked;
+      const native = field(row, 'transport').value === 'usbcanfd';
+      field(row, 'device-field').hidden = !native;
+      field(row, 'channel-field').hidden = !native;
+      field(row, 'endpoint-field').hidden = native;
+      for (const input of row.querySelectorAll('input,select')) {
+        input.disabled = active || (!enabled && input !== field(row, 'enabled'));
+      }
+    }
+  }
+
+  function restoreRoutes(routes) {
+    for (const row of routeRows) {
+      const bus = Number(row.dataset.simRoute);
+      const route = routes.find(r => r.bus === bus);
+      field(row, 'enabled').checked = Boolean(route);
+      field(row, 'transport').value = route?.transport || (bus < 2 ? 'usbcanfd' : 'socketcan');
+      field(row, 'ids').value = route?.ids ?? '';
+      row.dataset.device = String(route?.device ?? 0);
+      row.dataset.endpoint = route?.endpoint || '';
+      field(row, 'channel').value = String(route?.channel ?? (bus % 2));
+      fillRouteOptions(row);
+    }
+    syncRouteRows();
   }
 
   function setResult(message, kind = '') {
@@ -229,6 +288,7 @@ export function mount(root, ctx) {
     if (!ui.vcanName.value || ui.vcanName.value === 'robot_vcan0') {
       ui.vcanName.value = saved.vcan_interface || 'robot_vcan0';
     }
+    for (const row of routeRows) fillRouteOptions(row);
     syncFields();
   }
 
@@ -248,6 +308,8 @@ export function mount(root, ctx) {
     const transport = ui.transport.value;
     ui.backendCanField.hidden = transport !== 'socketcan';
     ui.backendTtyField.hidden = transport !== 'slcan';
+    ui.multiFields.hidden = transport !== 'multi';
+    syncRouteRows();
     syncVcanOption(ui.backendTransport, ui.mode.value === 'firmware');
   }
 
@@ -265,6 +327,13 @@ export function mount(root, ctx) {
     ui.firmwareHint.hidden = mode !== 'firmware';
 
     syncVcanOption(ui.transport, mode === 'firmware');
+    for (const select of [ui.transport, ui.backendTransport]) {
+      const multi = [...select.options].find(o => o.value === 'multi');
+      if (multi) multi.disabled = mode !== 'firmware';
+    }
+    if (mode !== 'firmware' && transport === 'multi') {
+      ui.transport.value = 'vcan'; syncFields(); return;
+    }
     if (mode === 'firmware' && transport === 'vcan') {
       ui.transport.value = deviceOptions.can_interfaces.some((item) => item.up)
         ? 'socketcan'
@@ -342,7 +411,7 @@ export function mount(root, ctx) {
   // 也可脱离仿真单独起停（只连板子验证固件行为）。参数取仿真抽屉的选择。
   function describeBackendConfig(config) {
     if (!config) return '';
-    const endpoint = config.sim_tty || config.sim_interface
+    const endpoint = config.channels?.map(r => `CAN${r.bus + 1}`).join(' / ') || config.sim_tty || config.sim_interface
       || config.motor_sim_control_socket || '';
     return [config.transport, config.model, endpoint].filter(Boolean).join(' · ');
   }
@@ -357,6 +426,13 @@ export function mount(root, ctx) {
     const label = stateLabels[state] || state;
     const active = activeState(state);
     ui.backendSummary.textContent = label;
+    if (active && motorBackend.config?.channels) {
+      const signature = JSON.stringify(motorBackend.config.channels);
+      if (signature !== restoredBackendRoutes) {
+        restoreRoutes(motorBackend.config.channels); restoredBackendRoutes = signature;
+      }
+    }
+    syncRouteRows();
     ui.backendState.textContent = motorBackend.config
       ? `${label} · ${describeBackendConfig(motorBackend.config)}`
         + (motorBackend.auto_started ? ' · 随仿真' : '')
@@ -379,7 +455,8 @@ export function mount(root, ctx) {
       transport,
       physical_bus_isolated: ui.busIsolated.checked,
     };
-    if (transport === 'socketcan') request.sim_interface = ui.simInterface.value;
+    if (transport === 'multi') request.sim_channels_json = JSON.stringify(readRoutes());
+    else if (transport === 'socketcan') request.sim_interface = ui.simInterface.value;
     else request.sim_tty = ui.simTty.value;
     return request;
   }
@@ -405,6 +482,10 @@ export function mount(root, ctx) {
     if (request.transport === 'slcan' && !request.sim_tty) {
       setBackendResult('先选择模拟器串口。', 'err');
       return;
+    }
+    if (request.transport === 'multi' && (!readRoutes().length || readRoutes().some(r =>
+      r.transport === 'usbcanfd' ? r.device === null : !r.endpoint))) {
+      setBackendResult('请启用通道，并为每路选择可访问的端点。', 'err'); return;
     }
     ui.backendStart.disabled = true;
     setBackendResult('正在启动电机后端…');
@@ -443,6 +524,11 @@ export function mount(root, ctx) {
     ui.motorPanel.hidden = !active;
     if (!active) return;
     ui.motorHint.textContent = note || `${motorSim.motors.length} 台在模拟`;
+    const channels = motorSim.channels || [];
+    const failed = channels.filter(c => c.error);
+    if (!note && failed.length) ui.motorHint.textContent += ` · ${failed.map(c => `CAN${c.bus + 1} 故障：${c.error}`).join('；')}`;
+    ui.motorAddBusField.hidden = !channels.length;
+    replaceOptions(ui.motorAddBus, channels.map(c => ({value:String(c.bus),label:`MCU CAN${c.bus + 1}`,disabled:Boolean(c.error)})), '选择通道', ui.motorAddBus.value);
     ui.motorList.replaceChildren();
     for (const motor of motorSim.motors) {
       const row = document.createElement('div');
@@ -451,7 +537,7 @@ export function mount(root, ctx) {
       label.className = 'sim-motor-label';
       const kindText = motor.kind.toUpperCase()
         + (motor.model ? ` ${motor.model.toUpperCase()}` : '');
-      label.textContent = `#${motor.id} ${kindText}`;
+      label.textContent = `#${motor.id} ${kindText}${Number.isInteger(motor.bus) ? ` · CAN${motor.bus + 1}` : ''}`;
       const where = document.createElement('span');
       where.className = 'sim-motor-joint tiny muted';
       where.textContent = motor.joint || '裸节点';
@@ -490,7 +576,7 @@ export function mount(root, ctx) {
     }
     try {
       const payload = await bench.motorBackendCommand({cmd: 'status'});
-      motorSim = { motors: payload.motors || [] };
+      motorSim = { motors: payload.motors || [], channels: payload.channels || [] };
       renderMotorSim();
     } catch (error) {
       motorSim = { motors: [] };
@@ -530,6 +616,7 @@ export function mount(root, ctx) {
       return;
     }
     const command = { cmd: 'add', id, kind: ui.motorAddKind.value };
+    if (motorSim.channels?.length) command.bus = Number(ui.motorAddBus.value);
     if (command.kind === 'cerb') command.model = ui.motorAddModel.value;
     ui.motorAddId.value = '';
     sendMotorCommand(command, `添加电机 ${id}`);
@@ -577,6 +664,7 @@ export function mount(root, ctx) {
       backend: ui.backend.value,
       controller_mode: ui.mode.value,
       transport: ui.transport.value,
+      sim_channels_json: ui.transport.value === 'multi' ? JSON.stringify(readRoutes()) : '',
       model: ui.model.value,
       vcan_interface: ui.vcanName.value.trim(),
       sim_interface: ui.simInterface.value,
@@ -651,6 +739,13 @@ export function mount(root, ctx) {
     }
   }
 
+  restoreRoutes(saved.sim_channels || [
+    {bus:0,transport:'usbcanfd',device:0,channel:0,ids:'*'},
+    {bus:1,transport:'usbcanfd',device:0,channel:1,ids:''},
+  ]);
+  for (const row of routeRows) row.addEventListener('change', () => {
+    fillRouteOptions(row); syncRouteRows(); ui.busIsolated.checked = false; saveOptions();
+  });
   ui.backend.value = saved.backend || 'gazebo';
   ui.mode.value = ['firmware', 'external'].includes(saved.controller_mode) ? saved.controller_mode : 'firmware';
   ui.transport.value = saved.transport || 'vcan';

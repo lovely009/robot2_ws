@@ -7,17 +7,10 @@ function state() {
     transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['yaw','pitch'],joint_limits:{yaw:{lower:-1,upper:1},pitch:{lower:-1,upper:1}}}},
     commandStatus:{last:1000,data:{model:'arm',joint_names:['yaw','pitch'],mode:'trajectory',
       output_topic:'/motor/host_command_array',
-      trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',gravity_enabled:true}},
+      feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',gravity_enabled:true}},
     jointStates:{byName:{yaw:{position:.2,at:1000},pitch:{position:.1,at:1000}}},
     motors:new Map([[8,{status:{online:true,lifecycle:4,unified_fault_code:0}}],[9,{status:{online:true,lifecycle:4,unified_fault_code:0}}]])};
 }
-it('uses a joint name and lets the host preserve and transform the partner', () => {
-  const message=api.buildJointTrajectory(state(),'arm','yaw',.3,1.,1100);
-  expect(message.joint_names).toEqual(['yaw']);
-  expect(message.points[0].positions).toEqual([.3]);
-  expect(message.points[0].time_from_start).toEqual({sec:1,nanosec:0});
-  expect(message).not.toHaveProperty('motor_id');
-});
 it('topology-only mappings cannot enable calibrated joint or raw motor commands', () => {
   const s = state();
   Object.assign(s.modelTransmissions, {hardware_ready:false, hardware_block_reason:'传动参数待标定'});
@@ -63,7 +56,7 @@ it('accepts a first joint target from a ready motor after an explicit enable pol
   const s = {...state(), policy: new Map([[8, {enabled:true}], [9, {enabled:true}]])};
   for (const motor of s.motors.values()) motor.status.lifecycle = 3;
   expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toBe('');
-  expect(api.buildJointTrajectory(s, 'arm', 'yaw', .3, 1, 1100).joint_names).toEqual(['yaw']);
+  expect(api.buildJointTarget(s, 'arm', {name: 'yaw'}, .3, 1100).name).toEqual(['yaw']);
   s.policy.set(9, {enabled:false});
   expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toContain('使能');
 });
@@ -88,7 +81,7 @@ it('uses current host limits for both partners and ignores unconfirmed browser d
     .position).toEqual([-1.2]);
   s.transmissionStatus.data.joint_limits.pitch.upper = 0.5;
   expect(api.jointControlError(s, 'arm', 'yaw', 1100)).toBe('');
-  expect(()=>api.buildJointTrajectory(s,'arm','pitch',.6,1,1100)).toThrow(/超出.*限位/);
+  expect(()=>api.buildJointTarget(s,'arm',{name:'pitch'},.6,1100)).toThrow(/超出.*限位/);
 });
 
 it('requires host limit readback from the updated bridge', () => {
@@ -136,4 +129,47 @@ it('accepts an active complete group subset and rejects unconnected joints',()=>
   expect(api.jointControlError(s,'arm','elbow',1100)).toContain('未接入');
   s.transmissionStatus.data.joint_names=['yaw'];s.commandStatus.data.joint_names=['yaw'];
   expect(api.controlSessionError(s,'arm',1100)).toContain('完整传动组');
+});
+
+it('opens topology joints using explicit host groups for a partial motor session', () => {
+  const s=state();
+  Object.assign(s.modelTransmissions,{hardware_ready:false});
+  Object.assign(s.transmissionStatus.data,{control_groups:[
+    {name:'input_8',motors:[{id:8}],joints:['yaw']}
+  ],joint_names:['yaw']});
+  s.commandStatus.data.joint_names=['yaw'];
+  Object.assign(s.commandStatus.data,{feedback_fresh:true,controllers_ready:true});
+  s.motors.delete(9);
+  delete s.jointStates.byName.pitch;
+  expect(api.controlSessionError(s,'arm',1100)).toBe('');
+  expect(api.buildJointTarget(s,'arm',{name:'yaw'},.3,1100).position).toEqual([.3]);
+  expect(api.jointControlError(s,'arm','pitch',1100)).toContain('未接入');
+  expect(api.rawCouplingError(s,'arm',[8])).toContain('待标定');
+  s.transmissionStatus.last=1;
+  expect(api.jointControlError(s,'arm','yaw',3000)).toContain('过期');
+});
+
+it.each([
+  [{name:'bad',motors:[{id:99}],joints:['yaw']}],
+  [{name:'bad',motors:[{id:8},{id:8}],joints:['yaw']}],
+  [{name:'bad',motors:[{id:8}],joints:[]}],
+])('rejects invalid host control groups %j', groups => {
+  const s=state();
+  Object.assign(s.modelTransmissions,{hardware_ready:false});
+  Object.assign(s.transmissionStatus.data,{control_groups:groups});
+  expect(api.controlSessionError(s,'arm',1100)).not.toBe('');
+});
+
+it('does not expose host internal input axes as page joint targets', () => {
+  const s=state();
+  Object.assign(s.modelTransmissions,{hardware_ready:false});
+  Object.assign(s.transmissionStatus.data,{control_groups:[
+    {name:'input_8',motors:[{id:8}],joints:['internal']},
+    {name:'input_9',motors:[{id:9}],joints:['yaw']}
+  ],joint_names:['internal','yaw'],joint_limits:{internal:{lower:-1,upper:1},yaw:{lower:-1,upper:1}}});
+  Object.assign(s.commandStatus.data,{joint_names:['internal','yaw'],feedback_fresh:true,controllers_ready:true});
+  s.modelJoints.push({name:'internal',type:'revolute',lower:-1,upper:1});
+  Object.assign(s.jointStates.byName,{internal:{position:0,at:1000}});
+  expect(()=>api.buildJointTarget(s,'arm',{name:'internal'},.3,1100)).toThrow('未配置');
+  expect(api.buildJointTarget(s,'arm',{name:'yaw'},.3,1100).position).toEqual([.3]);
 });

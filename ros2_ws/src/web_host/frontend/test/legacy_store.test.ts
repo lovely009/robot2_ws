@@ -145,6 +145,73 @@ it("传动组 metadata 保留耦合关系，选择不被压平成 motor 对 join
   expect(store.store.selectedJoint).toBe("");
 });
 
+const commandFrame = () => ({model:'half_body_robot',joint_names:['elbow'],mode:'stopped',
+  output_topic:'/motor/host_command_array',
+  trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
+  gravity_enabled:null,effort_gain:null,feedback_fresh:false,controllers_ready:false,active_controllers:[]});
+
+it.each([
+  {feedback_fresh:1}, {controllers_ready:'true'}, {active_controllers:[1]},
+  {joint_names:['elbow','elbow']}, {joint_names:['']}, {gravity_enabled:0}, {effort_gain:NaN},
+])('坏控制帧撤销身份且不刷新时间 %j', async patch => {
+  const {store,applyCommandStatus} = await import('../../web/js/core/store.js');
+  applyCommandStatus(commandFrame());
+  expect(store.commandStatus.last).toBeGreaterThan(0);
+  applyCommandStatus({...commandFrame(),...patch});
+  expect(store.commandStatus).toEqual({data:null,last:0});
+});
+
+it('传动状态接受未知扩展、null限位和未知重力，拒绝坏业务字段', async () => {
+  const data = await import('../../web/js/core/store.js');
+  const frame = {...commandFrame(),trajectory_enabled:true,
+    control_groups:[{name:'direct',joints:['elbow'],motors:[{id:1}]}],
+    dynamic_joint_names:['elbow'],joint_limits:{elbow:{lower:null,upper:null}},
+    joint_limit_errors:{elbow:'反馈未知'},joint_limit_error:'反馈未知',future_extension:{v:1}};
+  const legacy={model:'arm',joint_names:['elbow'],trajectory_enabled:false,
+    joint_limits:{elbow:{lower:null,upper:null}}};
+  data.applyTransmissionStatus(legacy);
+  expect(data.store.transmissionStatus.data).toEqual(legacy);
+  data.applyTransmissionStatus(frame);
+  expect(data.store.transmissionStatus.data).toEqual(frame);
+  for (const patch of [{joint_names:['']},{control_groups:[{name:'bad',joints:['elbow'],motors:[{id:'1'}]}]},
+    {dynamic_joint_names:['other']},{joint_limits:{elbow:{lower:'0',upper:1}}},
+    {joint_limit_errors:{elbow:false}},{trajectory_enabled:1},{feedback_fresh:1},
+    {controllers_ready:'true'},{active_controllers:[1]}]) {
+    data.applyTransmissionStatus({...frame,...patch});
+    expect(data.store.transmissionStatus).toEqual({data:null,last:0});
+  }
+});
+
+it.each([null,'start','stop','gain'])('台架重力合法 pending=%j 保留状态和接收时间', async pending => {
+  vi.spyOn(Date, 'now').mockReturnValue(1000);
+  const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+  const gravity = {pending,fresh:true,error:'',config:{model:'arm'},extra:42};
+  applyBenchStatus({gravity_feedforward:gravity});
+  expect(store.bench.gravity_feedforward).toEqual(gravity);
+  expect(store.bench.gravity_feedforward_last).toBe(1000);
+});
+
+it.each([{pending:false},{pending:true},{pending:'false'},{pending:'unknown'},{fresh:1},{fresh:'true'}])(
+  '坏台架重力帧 %j 撤销确认资格且清空时间', async patch => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+    const gravity = {pending:null,fresh:true,error:'',config:{model:'arm'}};
+    applyBenchStatus({gravity_feedforward:gravity});
+    expect(store.bench.gravity_feedforward_last).toBe(1000);
+    applyBenchStatus({gravity_feedforward:{...gravity,...patch}});
+    expect(store.bench.gravity_feedforward).toBeNull();
+    expect(store.bench.gravity_feedforward_last).toBe(0);
+  },
+);
+
+it.each([{}, {fresh:false}, {pending:null}, {config:null}])('台架重力可选字段兼容 %j', async gravity => {
+  vi.spyOn(Date, 'now').mockReturnValue(1000);
+  const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+  applyBenchStatus({gravity_feedforward:gravity});
+  expect(store.bench.gravity_feedforward).toEqual(gravity);
+  expect(store.bench.gravity_feedforward_last).toBe(1000);
+});
+
 it("停止渲染循环会取消待执行帧，卸载后不再重新排队", async () => {
   let next = 0;
   const frames = new Map<number, () => void>();

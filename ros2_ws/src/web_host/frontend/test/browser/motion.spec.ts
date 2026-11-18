@@ -7,6 +7,9 @@ test.beforeEach(async ({page}) => {
   await page.route('**/api/motion/sources', route => route.fulfill({json: {
     sources: ['1-4.bvh', 'walk.bvh'],
   }}));
+  await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
+    sources: [{name: '1-4.bvh', saved: false}, {name: 'walk.bvh', saved: false}],
+  }}));
   await page.route('**/api/models', route => route.fulfill({json: {
     models: ['half_body_robot', 'robot_leg'],
   }}));
@@ -19,6 +22,113 @@ const preview = { times: [0, 1, 2], duration: 2,
   source: { names: ['Hips', 'Head'], parents: [-1, 0], frames: [[[0, 0, 1], [0, 0, 1.8]], [[0, 0, 1], [.2, 0, 1.8]], [[0, 0, 1], [.3, 0, 1.8]]] },
   robot: { names: ['base', 'wrist'], parents: [-1, 0], frames: [[[0, 0, 0], [.5, 0, 1]], [[0, 0, 0], [.7, 0, 1]], [[0, 0, 0], [.8, 0, 1]]] },
   source_to_robot: [[0, -1, 0], [1, 0, 0], [0, 0, 1]] };
+
+test('动作库标识已保存结果，改变单位后重新核对', async ({ page }) => {
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+    route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
+  await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
+    sources: [{name: '1-4.bvh', saved: route.request().postDataJSON().scale === .01}],
+  }}));
+  await page.route('**/api/motion/jobs', route => route.fulfill({json: {
+    ...job, state: 'done', result_cached: true, result_saved: true,
+  }}));
+  await page.route('**/api/motion/jobs/fixture/preview.json', route => route.fulfill({json: preview}));
+  await page.goto('/workbench/#/motion');
+  await expect(page.getByLabel('动作库 BVH', {exact: true}).locator('option:checked')).toHaveText('1-4.bvh · 已保存');
+  await page.getByRole('button', {name: '加载并播放', exact: true}).click();
+  await expect(page.getByText('已加载保存结果，无需重新转换')).toBeVisible();
+  await expect(page.getByRole('button', {name: '暂停预览', exact: true})).toBeEnabled();
+  await page.getByLabel('BVH 长度单位', {exact: true}).selectOption('1');
+  await expect(page.getByRole('button', {name: '导入并转换', exact: true})).toBeEnabled();
+  await expect(page.getByLabel('动作库 BVH', {exact: true}).locator('option:checked')).toHaveText('1-4.bvh');
+  await page.getByLabel('BVH 长度单位', {exact: true}).selectOption('0.01');
+  await expect(page.getByRole('button', {name: '加载并播放', exact: true})).toBeEnabled();
+  await page.reload();
+  await expect(page.getByLabel('动作库 BVH', {exact: true}).locator('option:checked')).toHaveText('1-4.bvh · 已保存');
+});
+
+test('保存状态的旧响应不会覆盖新转换选项', async ({ page }) => {
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+    route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
+  let release!: () => void;
+  let started!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/motion/sources/status', async route => {
+    const scale = route.request().postDataJSON().scale;
+    if (scale === .01) {
+      started();
+      await pending;
+    }
+    return route.fulfill({json: {sources: [{name: '1-4.bvh', saved: scale === .01}]}});
+  });
+  try {
+    await page.goto('/workbench/#/motion');
+    await requested;
+    await page.getByLabel('BVH 长度单位', {exact: true}).selectOption('1');
+    await expect(page.getByText('当前模型与转换选项尚无保存结果')).toBeVisible();
+    const stale = page.waitForResponse(response =>
+      response.url().endsWith('/sources/status') && response.request().postDataJSON().scale === .01);
+    release();
+    await stale;
+    await expect(page.getByLabel('动作库 BVH', {exact: true}).locator('option:checked')).toHaveText('1-4.bvh');
+    await expect(page.getByRole('button', {name: '导入并转换', exact: true})).toBeEnabled();
+  } finally { release(); }
+});
+
+test('调试页BVH播放在控制未就绪时显示原因并保留页面', async ({ page }) => {
+  const messages: unknown[] = [];
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => {
+    socket.onMessage(message => messages.push(message));
+  });
+  await page.route('**/api/actions', route => route.fulfill({json: {actions: []}}));
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+    route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
+  let submitted: Record<string, unknown> | undefined;
+  await page.route('**/api/motion/jobs', route => {
+    submitted = route.request().postDataJSON();
+    return route.fulfill({json: {...job, state: 'done', result_cached: true}});
+  });
+  await page.goto('/workbench/#/run');
+  await page.locator('#actList .act-row').filter({hasText: 'walk.bvh'})
+    .getByRole('button', {name: '播放', exact: true}).click();
+  await expect(page).toHaveURL(/#\/run$/);
+  await expect(page.locator('#actResult')).toContainText(/未就绪|待标定|未连接/);
+  expect(submitted).toBeUndefined();
+  expect(messages.map(message => JSON.parse(String(message))).filter(message => message.op === 'publish')).toEqual([]);
+});
+
+test('服务重启使临时任务过期时自动恢复已保存的动作', async ({ page }) => {
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
+  await page.addInitScript(() => {
+    sessionStorage.setItem('robot2.motionJob', 'expired');
+    sessionStorage.setItem('robot2.motionSelection', JSON.stringify({
+      model: 'robot_leg', up_axis: 'z_up', scale: 1,
+    }));
+  });
+  await page.route('**/api/motion/jobs/expired', route =>
+    route.fulfill({status: 404, json: {error: '动作任务已过期'}}));
+  await page.route('**/robot_sim/models/robot_leg/urdf/robot_leg.urdf', route =>
+    route.fulfill({body: '<robot name="robot_leg"/>', contentType: 'text/xml'}));
+  await page.route('**/api/motion/sources/status', route => {
+    const request = route.request().postDataJSON();
+    expect(request.model).toBe('robot_leg');
+    expect(request.scale).toBe(1);
+    expect(request.up_axis).toBe('z_up');
+    return route.fulfill({json: {sources: [{name: '1-4.bvh', saved: true}]}});
+  });
+  await page.route('**/api/motion/jobs', route => {
+    expect(route.request().postDataJSON().model).toBe('robot_leg');
+    return route.fulfill({json: {...job, robot_name: 'robot_leg', state: 'done', result_cached: true}});
+  });
+  await page.route('**/api/motion/jobs/fixture/preview.json', route => route.fulfill({json: preview}));
+  await page.goto('/workbench/#/motion');
+  await expect(page.getByText('已加载保存结果，无需重新转换')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('robot2.motionJob'))).toBe('fixture');
+});
 
 async function localSources(page: import('@playwright/test').Page) {
   await page.getByLabel('动作库 BVH', { exact: true }).selectOption('');
@@ -121,7 +231,7 @@ test('动作工作台导入、进度、播放、导出与切页恢复', async ({
   let polls = 0;
   await page.route('**/api/motion/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/sources')) return route.fallback();
+    if (path.includes('/sources')) return route.fallback();
     if (path.endsWith('preview.json')) return route.fulfill({ json: preview });
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON();
@@ -174,7 +284,7 @@ test('陌生模型先确认肩肘腕映射再转换', async ({ page }) => {
   let submitted = false;
   await page.route('**/api/motion/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/sources')) return route.fallback();
+    if (path.includes('/sources')) return route.fallback();
     if (path.endsWith('preview.json')) return route.fulfill({ json: preview });
     if (path.endsWith('convert')) {
       const { mapping } = route.request().postDataJSON();
@@ -202,7 +312,7 @@ test('陌生模型先确认肩肘腕映射再转换', async ({ page }) => {
 
 test('转换期间服务丢失任务后可重新导入', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
-  await page.route('**/api/motion/**', route => new URL(route.request().url()).pathname.endsWith('/sources')
+  await page.route('**/api/motion/**', route => new URL(route.request().url()).pathname.includes('/sources')
     ? route.fallback() : route.request().method() === 'POST'
       ? route.fulfill({ json: job })
       : route.fulfill({ status: 404, json: { error: '动作任务已过期，请重新导入' } }));
@@ -227,7 +337,7 @@ async function modelPreview(page: import('@playwright/test').Page, urdf: string,
   const data = { ...preview, source: { ...preview.source, frames: preview.source.frames.map(() => preview.source.frames[0]) },
     robot: { ...preview.robot, frames: preview.robot.frames.map(() => preview.robot.frames[0]),
       urdf, ignore_limits: ignoreLimits, joint_names: ['swivel'], joint_positions: [[0], [1], [1.5]] } };
-  await page.route('**/api/motion/**', route => new URL(route.request().url()).pathname.endsWith('/sources')
+  await page.route('**/api/motion/**', route => new URL(route.request().url()).pathname.includes('/sources')
     ? route.fallback() : route.fulfill({ json:
       route.request().url().endsWith('preview.json') ? data : { ...job, state: 'done', progress: 100 } }));
   await page.addInitScript(() => sessionStorage.setItem('robot2.motionJob', 'fixture'));

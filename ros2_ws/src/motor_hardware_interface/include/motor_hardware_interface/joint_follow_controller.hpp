@@ -1,7 +1,9 @@
 #pragma once
+#include <atomic>
 #include <functional>
 #include <vector>
 #include "controller_interface/controller_interface.hpp"
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "realtime_tools/realtime_buffer.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "motor_hardware_interface/position_profile.hpp"
@@ -23,8 +25,12 @@ private:
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> measured_;
   realtime_tools::RealtimeBuffer<sensor_msgs::msg::JointState::SharedPtr> target_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscription_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_pub_;
+  rclcpp::TimerBase::SharedPtr diagnostics_timer_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_;
   int64_t activation_stamp_{0}, target_stamp_{0};
-  bool active_{false}, faulted_{false};
+  std::atomic<int64_t> fault_stamp_{0};
+  std::atomic<int> fault_joint_{-1};
+  bool active_{false};
 };
 }  // namespace motor_hardware_interface

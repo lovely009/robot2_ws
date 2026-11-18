@@ -57,6 +57,33 @@ def test_complete_differential_group_keeps_transform_parameters(tmp_path):
     assert list(group.joint_offset)==[.1,.2]
 
 
+def test_hil_partial_group_preserves_only_registered_input_and_restores_outputs(tmp_path):
+    driver = source(tmp_path)
+    document = yaml.safe_load(driver.read_text())
+    hardware = document['motor_hardware']
+    hardware['hil_input_fallback'] = True
+    hardware['motors']['a']['joint'] = 'wrist_motor_a'
+    hardware['motors']['b']['joint'] = 'wrist_motor_b'
+    driver.write_text(yaml.safe_dump(document))
+    destination = tmp_path / 'partial'; destination.mkdir()
+    subset = Model.load(materialize_control_subset(str(driver), '2,8', destination))
+    assert set(subset.actuator_ids.values()) == {2, 8}
+    assert set(subset.joint_names) == {'elbow', 'wrist_motor_a'}
+    assert all(len(group.actuators) == 1 for group in subset.groups)
+    restored = Model.load(materialize_control_subset(str(driver), '8,9', destination))
+    assert set(restored.joint_names) == {'yaw', 'pitch'}
+    assert restored.groups[0].actuator_reduction == [2., 3.]
+
+
+def test_hil_partial_group_requires_explicit_input_mapping(tmp_path):
+    driver = source(tmp_path)
+    document = yaml.safe_load(driver.read_text())
+    document['motor_hardware']['hil_input_fallback'] = True
+    driver.write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError, match='输入轴映射'):
+        materialize_control_subset(str(driver), '8', tmp_path)
+
+
 def test_half_body_motor_2_requires_only_its_own_joint_feedback(tmp_path):
     from ament_index_python.packages import get_package_share_directory
     from motor_hardware_interface.workbench_control import WorkbenchModel

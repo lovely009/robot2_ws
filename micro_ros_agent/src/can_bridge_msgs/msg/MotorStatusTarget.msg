@@ -1,4 +1,4 @@
-# 诊断状态元素（ARD-0007 §17.3/§17.4）。
+# 单台电机的诊断状态。
 # 公共位标志唯一定义点：firmware lib/motor/include/motor_protocol_adapter.h
 # （TBD-STATUS-01 关闭前为临时占位分配，跨协议语义稳定）：
 #   protection_flags: bit0=厂家故障 bit1=过温(预留) bit2=过流(预留)

@@ -1,5 +1,4 @@
-// 常量与格式化：从重构前的 app.js 常量区与工具区原样搬移。
-// 与固件的隐式契约（DEV_SLOT_NAMES 位序、PARAM_FIELD 次序）在下方注释里保留原样。
+// 话题、协议枚举与显示格式。
 
 export const TOPICS = {
   controlStates: {name:'/motor/control_states', type:'can_bridge_msgs/msg/MotorControlStateArray'},
@@ -16,6 +15,8 @@ export const TOPICS = {
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
   rawTrajectory: {name: '/control/trajectory_raw',
     type: 'can_bridge_msgs/msg/MotorTrajectory'},
+  jointTrajectory: {name: '/arm_controller/joint_trajectory',
+    type: 'trajectory_msgs/msg/JointTrajectory'},
   commandStatus: {name: '/control/status', type: 'std_msgs/msg/String'},
   trajectoryState: {name: '/control/trajectory_state', type: 'can_bridge_msgs/msg/MotorTrajectoryState'},
   stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'},
@@ -24,6 +25,7 @@ export const TOPICS = {
   sysStatus: {name: '/motor/system_status', type: 'can_bridge_msgs/msg/SystemStatus'},
   agentWireStatus: {name: '/micro_ros_up/status', type: 'can_bridge_msgs/msg/AgentStatus'},
   configResult: {name: '/motor/config_result', type: 'can_bridge_msgs/msg/ConfigResult'},
+  deviceConfig: {name: '/motor/config_request', type: 'can_bridge_msgs/msg/ConfigRequest'},
   sysCmd: {name: '/motor/system_command', type: 'can_bridge_msgs/msg/SystemCommand'},
   // 关节侧实测构型；显示和控制都检查其新鲜度。
   jointStates: {name: '/joint_states', type: 'sensor_msgs/msg/JointState'},
@@ -55,7 +57,7 @@ export const DEV_SLOT_NAMES = ['位置下限', '位置上限', '最大转速', '
   '保护开关(0x2650:00)', '方向(0x2541)', 'T_max(0x2546)', '电机ID(0x2530)'];
 // ⚠️ param_device_slot_t 的次序（= DEV_SLOT_NAMES 下标 = 行序 = mismatch_mask 位序），
 // **不是** param_field_t。两套里 field=3 都合法 → 互用不会被拒绝，会静默写错槽位。
-export const SYS_CMD = {REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4};
+export const SYS_CMD = {REFRESH: 1, SET_ZERO: 2, CLEAR_FAULT: 3, REPORT: 4, SAVE_DEVICE: 5};
 export const MOTOR_ID_NONE = 65535;
 export const CHART_COLORS = ['#4da3ff', '#37d67a', '#f5b94a', '#ff6b6b', '#c792ea',
   '#f78c6c', '#82aaff', '#ff9e64', '#7e8bab'];
@@ -104,20 +106,6 @@ export function download(name, text, mime) {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
-}
-
-// 位图 → 槽位名列表（槽位顺序即 DEV_SLOT_NAMES 顺序）。
-export function devSlotNames(mask) {
-  return DEV_SLOT_NAMES.filter((_, i) => (mask & (1 << i)) !== 0);
-}
-
-// 恢复口径（MISMATCH 用）：六个槽位都在参数面里了——槽 5（0x2541 方向）也能
-// 通过参数表点一次方向建立基线并恢复。
-export function devRecoveryText(mask) {
-  if ((mask & (1 << 5)) !== 0) {
-    return '方向(0x2541)无基线：在参数表点一次方向（CW/CCW）即建立基线并恢复';
-  }
-  return '写回对应项即可恢复';
 }
 
 // 参数值显示：内核把这些量存成 float32，拓宽成 double 后会出现

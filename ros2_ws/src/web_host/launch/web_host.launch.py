@@ -17,7 +17,7 @@ READ_TOPICS = [
     '/robot_sim/position_status',
 ]
 CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
-                  '/arm_controller/joint_trajectory', '/motor/system_command',
+                  '/arm_controller/joint_trajectory', '/motor/system_command', '/motor/config_request',
                   '/robot_sim/joint_position_target']
 CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
                     '/workbench_control/set_parameters_atomically',

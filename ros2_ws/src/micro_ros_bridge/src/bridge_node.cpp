@@ -146,6 +146,7 @@ void BridgeNode::clear_session(uint64_t session)
   std::fill(std::begin(last_caller_ids_), std::end(last_caller_ids_), 0u);
   if (upload_) {trajectory_event(upload_->caller_id, 21);}
   upload_.reset(); assembler_.reset();
+  motion_source_at_ = TimePoint{};
   enable_after_ns_ = epoch_ns() + 20000000ULL;
   authority_high_water_ = 0; authority_sequence_ = 0; authority_revoked_ = true; authority_confirmed_ = false; pending_policy_.reset();
   session_id_ = session; have_status_ = have_info_ = querying_ = false; info_revision_ = 0;
@@ -278,6 +279,9 @@ void BridgeNode::on_motion(const AgentMotion & msg)
     clock_ns_ - static_cast<int64_t>(msg.snapshot_stamp)) / 1000000);
   if (!assembler_.accept(frame, session_id_, Clock::now(), out, delay)) {return;}
   freshness_.assign(65, MotorFreshness{}); motion_at_ = Clock::now();
+  motion_source_at_ = motion_at_ - std::chrono::nanoseconds(
+    std::max<int64_t>(0, clock_ns_ - static_cast<int64_t>(msg.snapshot_stamp)));
+  motion_tick_ms_ = msg.snapshot_tick_ms;
   for (const auto & s : out.states) {freshness_[s.motor_id] = {s.state_age_ms, s.target_source};}
   motion_pub_->publish(out);
 }
@@ -297,11 +301,16 @@ bool BridgeNode::fill_authority(AgentCommand & out, bool active)
   out.lease_id = authority_high_water_; out.lease_sequence = ++authority_sequence_;
   out.lease_active = active;
   if (active) {
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - status_at_).count();
-    // Bound the transport heartbeat to the original MCU observation's lifetime.
-    out.lease_valid_until_tick_ms = status_.snapshot_tick_ms +
+    // 完整 Motion 也携带同一会话的 MCU 时刻，可靠 Status 积压时仍可推进续租。
+    const bool use_motion = motion_source_at_ > status_at_;
+    const auto observed_at = use_motion ? motion_source_at_ : status_at_;
+    const auto observed_tick = use_motion ? motion_tick_ms_ : status_.snapshot_tick_ms;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - observed_at).count();
+    out.lease_valid_until_tick_ms = observed_tick +
       static_cast<uint32_t>(std::max<int64_t>(0, elapsed)) +
       static_cast<uint32_t>(std::min<int64_t>(200, 300 - elapsed));
+    authority_deadline_ = observed_at + std::chrono::milliseconds(
+      static_cast<uint32_t>(out.lease_valid_until_tick_ms - observed_tick));
   }
   authority_sent_at_ = Clock::now();
   return true;
@@ -427,6 +436,10 @@ void BridgeNode::submit_config(const ConfigRequest & request, Header header, uin
   job.deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
   auto valid = encode_agent_config(request, job.wire);
   job.wire.session_id = session_id_;
+  if (valid.ok && job.wire.operation == Config::SET_PARAMETERS &&
+      (!request.session_id || request.session_id != session_id_)) {
+    publish_reply(job, Reply::STATUS_FAILED, 21); return;
+  }
   if (!valid.ok || job.wire.operation == Config::SET_POLICY || timeout_ms < 100 || timeout_ms > 10000) {
     publish_reply(job, Reply::STATUS_FAILED, 10); return;
   }
@@ -479,7 +492,7 @@ void BridgeNode::submit_policy(const can_bridge_msgs::srv::SubmitPolicy::Request
       response.reason = "MCU会话已变化，请等待新状态"; return;
     }
     if (request.source_time_ns <= enable_after_ns_ || !motion_ready() ||
-      host_takeover_pending_ || !source_time_valid(request.source_time_ns, 100ms)) {
+      host_takeover_pending_ || !source_time_valid(request.source_time_ns, 300ms)) {
       response.reason = "使能源状态已过期、停止屏障未通过或主机未就绪"; return;
     }
     if (pending_intent_ || pending_policy_ || configs_.size() >= 8 ||
@@ -498,6 +511,9 @@ void BridgeNode::submit_policy(const can_bridge_msgs::srv::SubmitPolicy::Request
       authority_revoked_ && !start_control()) {
       response.reason = "主机控制授权尚未就绪"; return;
     }
+    // The source stamp validates the caller's observation. An intent waiting
+    // for authority starts its wire execution budget after that handshake.
+    job.wire.issued_stamp = epoch_ns();
     job.wire.policy_generation = policy_generation_ = high + 1;
     job.wire.request_id = next_config_id_++;
     job.wire.ttl_ms = 100; job.deadline = Clock::now() + 5s;
@@ -601,14 +617,17 @@ void BridgeNode::dispatch_config()
       host_takeover_pending_ || !authority_ready(job.wire.session_id, job.wire.lease_id))) {
       publish_reply(job, Reply::STATUS_FAILED, 21); configs_.erase(it); return;
     }
-    if (!job.sent && job.wire.operation == Config::SET_ZERO) {
+    if (!job.sent && (job.wire.operation == Config::SET_ZERO ||
+        job.wire.operation == Config::SET_PARAMETERS || job.wire.operation == Config::SAVE)) {
+      const auto target_id = job.wire.operation == Config::SET_PARAMETERS ?
+        job.wire.parameters.front().motor_id : job.wire.motor_id;
       const auto motor = std::find_if(status_.motors.begin(), status_.motors.end(),
-        [&](const auto & m) {return m.motor_id == job.wire.motor_id;});
+        [&](const auto & m) {return m.motor_id == target_id;});
       const bool trajectory_live = status_.trajectory.state == AgentTrajectoryState::LOADING ||
         status_.trajectory.state == AgentTrajectoryState::READY ||
         status_.trajectory.state == AgentTrajectoryState::RUNNING;
       const bool owned = trajectory_live && std::find(status_.trajectory.target_ids.begin(),
-        status_.trajectory.target_ids.end(), job.wire.motor_id) != status_.trajectory.target_ids.end();
+        status_.trajectory.target_ids.end(), target_id) != status_.trajectory.target_ids.end();
       if (motor == status_.motors.end() || !motor->online || motor->unified_fault_code ||
           motor->vendor_fault_code) {
         publish_reply(job, Reply::STATUS_FAILED, 10); configs_.erase(it); return;
@@ -650,7 +669,8 @@ void BridgeNode::config_results(const Status & msg)
         }
         if (mapped == Reply::STATUS_SUCCEEDED) {
           switch (found->wire.operation) {
-            case Config::SAVE: ++system_.save_seq; break;
+            // 单驱动板保存不代表 MCU W25 保存完成，不增加 save_seq。
+            case Config::SAVE: break;
             case Config::REFRESH_PARAMETERS: ++system_.refresh_seq; break;
             case Config::SET_ZERO: ++system_.set_zero_seq; break;
             case Config::CLEAR_FAULT: ++system_.clear_fault_seq; break;
@@ -675,13 +695,19 @@ void BridgeNode::tick()
 {
   const auto now = Clock::now();
   if (pending_intent_ &&
-    !source_time_valid(pending_intent_->wire.issued_stamp, 100ms)) {
+    !source_time_valid(pending_intent_->wire.issued_stamp, 300ms)) {
     publish_reply(*pending_intent_, Reply::STATUS_FAILED, 21); pending_intent_.reset();
   }
   if (!authority_revoked_) {
     const bool confirmed = authority_ready(session_id_, authority_high_water_);
+    // Reliable status can lag a renewal already sent to the MCU. Wait only
+    // within that sent lease, bounded by the original status observation.
+    const bool renewal_pending = authority_confirmed_ && status_.lease_active &&
+      status_.lease_id == authority_high_water_ && status_.lease_sequence > 0 &&
+      status_.lease_sequence <= authority_sequence_ && now < authority_deadline_;
     if (!motion_ready() || count_publishers(AgentWireContract::TOPIC_COMMAND) != 1 ||
-        (!confirmed && (authority_confirmed_ || now - authority_started_ >= 100ms))) {
+        (!confirmed && !renewal_pending &&
+        (authority_confirmed_ || now - authority_started_ >= 200ms))) {
       stop_control();
     } else {
       authority_confirmed_ = authority_confirmed_ || confirmed;
@@ -696,6 +722,7 @@ void BridgeNode::tick()
           host_takeover_pending_) {
           publish_reply(job, Reply::STATUS_FAILED, 21);
         } else {
+          job.wire.issued_stamp = epoch_ns();
           job.wire.lease_id = authority_high_water_; enqueue_config(std::move(job));
         }
       }

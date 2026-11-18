@@ -94,6 +94,51 @@ export function policyRequestState(state, ticket, ids, enabled, now=Date.now()) 
 }
 
 
+// 同一请求的全部电机共享 intent；停止后迟到票据不能恢复该意图。
+export function beginPolicyIntent(state,targets) {
+  const intent={ids:targets.map(target=>target.motor_id),enabled:targets.some(target=>target.enabled),
+    ticket:null,error:'',confirmed:false};
+  for (const id of intent.ids) state.policy.set(id,{...state.policy.get(id),intent});
+  return intent;
+}
+export function acceptPolicyTicket(state,intent,ticket) {
+  if (intent.error) throw new Error(intent.error);
+  if (intent.ids.some(id => state.policy.get(id)?.intent !== intent)) throw new Error('使能意图已被替换');
+  intent.ticket=ticket;
+}
+export function failPolicyIntent(state,intent,error) {
+  intent.error=String(error.message || error);
+}
+export function applyPolicySubmission(state,targets,ticket) {
+  for (const target of targets) {
+    const intent=state.policy.get(target.motor_id)?.intent;
+    if (intent?.error) throw new Error(intent.error);
+    if (intent && intent.ticket !== ticket) throw new Error('使能意图已被替换');
+  }
+  for (const target of targets) {
+    const previous=state.policy.get(target.motor_id) || {};
+    state.policy.set(target.motor_id,{...previous,...(target.enabled ? target : {}),enabled:target.enabled,
+      requestId:ticket.request_id,generation:ticket.policy_generation,receipt:null});
+  }
+}
+export function confirmPolicyIntent(state,ids,ticket) {
+  for (const id of ids) {
+    const intent=state.policy.get(id)?.intent;
+    if (intent?.ticket===ticket && !intent.error) intent.confirmed=true;
+  }
+}
+export function stopPolicyIntents(state) {
+  for (const policy of state.policy.values()) {
+    if (policy.intent && !policy.intent.confirmed) policy.intent.error='已停止，请重新提交人工使能';
+  }
+}
+export function applyPolicyReceipt(state,message) {
+  const policy=state.policy.get(message.motor_id);
+  if (!policy || policy.requestId!==message.request_id) return false;
+  policy.receipt=message.reason;
+  return true;
+}
+
 export function policyControlError(state,ids,now=Date.now()) {
   for (const id of ids) {
     const intent=state.policy?.get(Number(id))?.intent;

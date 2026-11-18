@@ -227,9 +227,22 @@ Result encode_config(
   const can_bridge_msgs::msg::ParamSetArray & in,
   can_bridge_msgs::msg::ConfigRequest & out)
 {
-  (void)in;
-  (void)out;
-  return {false, "运行期电机参数设置已移除"};
+  using Target = can_bridge_msgs::msg::ParamSetTarget;
+  if (in.request_id >= 0x40000000u || in.count != 1 || in.targets.size() != 1) {
+    return {false, "只支持单电机方向设置"};
+  }
+  const auto & target = in.targets.front();
+  if (!target.motor_id || target.motor_id >= kIdLimit || target.field != Target::FIELD_DIRECTION ||
+      (target.value != 0.0f && target.value != 1.0f)) {
+    return {false, "方向必须为有效电机的 CW(0) 或 CCW(1)"};
+  }
+  can_bridge_msgs::msg::ConfigRequest encoded;
+  encoded.sync_time_ns = in.sync_time_ns; encoded.request_id = in.request_id;
+  encoded.kind = can_bridge_msgs::msg::ConfigRequest::CONFIG_KIND_PARAM_SET;
+  encoded.count = 1; encoded.targets = in.targets;
+  encoded.motor_id = can_bridge_msgs::msg::SystemCommand::MOTOR_ID_NONE;
+  out = std::move(encoded);
+  return {};
 }
 
 Result encode_config(
@@ -240,9 +253,9 @@ Result encode_config(
   Result r;
   if (in.command != Cmd::COMMAND_REFRESH && in.command != Cmd::COMMAND_SET_ZERO &&
       in.command != Cmd::COMMAND_CLEAR_FAULT &&
-      in.command != Cmd::COMMAND_REPORT) {
+      in.command != Cmd::COMMAND_REPORT && in.command != Cmd::COMMAND_SAVE_DEVICE) {
     r.ok = false;
-    r.error = "运行期参数写入与保存已移除";
+    r.error = "不支持的系统命令（旧全局 SAVE 已禁用）";
     return r;
   }
   if (in.request_id >= 0x40000000u) {

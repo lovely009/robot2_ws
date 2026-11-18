@@ -11,7 +11,8 @@ extern "C" {
 #define AGENT_LINK_SOFT_STOP 1U
 #define AGENT_LINK_REVOKE 2U
 
-// Stable wire opcode numbers; parameter writes, zeroing and SAVE are retired.
+// Stable wire opcode numbers; runtime parameter writes remain allow-listed in
+// param_bridge (currently direction only) and SAVE targets one driver board.
 bool agent_config_operation_supported(uint8_t operation);
 
 typedef struct {

@@ -69,8 +69,8 @@ def test_registered_full_body_uses_simulation_limits_and_moving_cad_preview():
 
 
 @pytest.mark.parametrize('up_axis,expected', [
-    ('y_up', [[0, -1, 0], [1, 0, 0], [0, 0, 1]]),
-    ('z_up', [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]),
+    ('y_up', [[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+    ('z_up', [[0, -1, 0], [1, 0, 0], [0, 0, 1]]),
 ])
 def test_full_body_preset_accounts_for_source_anatomical_heading(up_axis, expected):
     model = Path(__file__).resolve().parents[2] / 'robot_description/models/full_body_robot'
@@ -106,10 +106,44 @@ def test_registered_model_rejects_changed_urdf_and_invalidates_changed_constrain
         key = jobs.jobs[first['id']]['profile_key']
         with pytest.raises(ValueError, match='不一致'):
             jobs.create(data | {'urdf_text':source.replace('name="full_body_robot"', 'name="changed"')})
-        config['joint_limits']['BN_LeftUpperArm_1']['upper'] = 3.
+        config['joint_limits']['left_shoulder_pitch']['upper'] = 3.
         path.write_text(yaml.safe_dump(config))
         second = jobs.create(data)
         assert jobs.jobs[second['id']]['profile_key'] != key
+    finally:
+        jobs.close()
+
+
+def test_restored_full_body_preset_does_not_reuse_saved_incomplete_mapping(tmp_path, monkeypatch):
+    package = Path(__file__).resolve().parents[2]
+    model = package / 'robot_description/models/full_body_robot'
+    source = (model / 'urdf/full_body_robot.urdf').read_text()
+    data = payload() | {'model': 'full_body_robot', 'up_axis': 'auto', 'urdf_text': source,
+        'bvh_text': (package / 'web_host/action_library/仰头转身.bvh').read_text()}
+    import hashlib
+    digest = hashlib.sha256(source.encode()).hexdigest()
+    load = yaml.safe_load
+
+    def without_current_preset(text):
+        result = load(text)
+        if isinstance(result, dict) and 'profiles' in result:
+            result['profiles'] = [p for p in result['profiles'] if p['urdf_sha256'] != digest]
+        return result
+
+    jobs = MotionJobs(profiles_dir=tmp_path)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(yaml, 'safe_load', without_current_preset)
+            old = jobs.create(data)
+        jobs._remember_mapping(jobs.jobs[old['id']], old['mapping'])
+        restored = jobs.create(data)
+        assert restored['state'] == 'mapping'
+        assert restored['mapping_origin'] == 'suggested'
+        assert restored['mapping']['source_root'] == 'Spine'
+        pairs = {t['target']: t['source'] for t in restored['mapping']['targets']}
+        assert pairs['BN_Spine_roll_link'] == 'Spine3'
+        assert pairs['BN_hips_pitch_link'] == 'Hips'
+        assert jobs.jobs[old['id']]['profile_key'] != jobs.jobs[restored['id']]['profile_key']
     finally:
         jobs.close()
 
@@ -139,6 +173,41 @@ def test_registered_full_body_t_pose_matches_actual_bvh_arm_directions():
                       robot['frames'][0][robot['names'].index(f'BN_{side}UpperArm_3_link')])
             cosine = np.dot(actual, direction) / np.linalg.norm(actual) / np.linalg.norm(direction)
             assert cosine > np.cos(np.deg2rad(15)), (side, actual, direction)
+    finally:
+        jobs.close()
+
+
+@pytest.mark.parametrize('filename,up_axis', [
+    ('仰头转身搭手.bvh', 'auto'), ('演示样例_20261027141432.bvh', 'y_up'),
+])
+def test_full_body_displayed_trunk_matches_source_geometry(filename, up_axis):
+    from scipy.spatial.transform import Rotation
+    package = Path(__file__).resolve().parents[1]
+    model = package.parent / 'robot_description/models/full_body_robot'
+    jobs = MotionJobs()
+    try:
+        first = jobs.create(payload() | {'model': 'full_body_robot', 'up_axis': up_axis,
+            'urdf_text': (model / 'urdf/full_body_robot.urdf').read_text(),
+            'bvh_text': (package / 'action_library' / filename).read_text()})
+        jobs.jobs[first['id']]['clip'].frames = jobs.jobs[first['id']]['clip'].frames[:3]
+        jobs.start(first['id'], first['mapping'])
+        done = finish(jobs, first)
+        assert done['state'] == 'done', done.get('error', done)
+        preview = json.loads(jobs.result(first['id'], 'preview.json'))
+        source, robot = preview['source'], preview['robot']
+        basis = np.asarray(preview['source_to_robot'])
+        roots = Rotation.from_quat(robot['root_quaternions']).as_matrix()
+        for index, (ps, pr) in enumerate(zip(source['frames'], robot['frames'])):
+            ps, pr = np.asarray(ps), np.asarray(pr)
+            expected = basis @ ((ps[source['names'].index('LeftShoulder')] +
+                ps[source['names'].index('RightShoulder')]) / 2 - ps[source['names'].index('Spine')])
+            actual = roots[index] @ ((pr[robot['names'].index('BN_LeftShoulder_1_link')] +
+                pr[robot['names'].index('BN_RightShoulder_1_link')]) / 2 -
+                pr[robot['names'].index('BN_Spine_roll_link')])
+            cosine = np.dot(actual, expected) / np.linalg.norm(actual) / np.linalg.norm(expected)
+            assert cosine > np.cos(np.deg2rad(8)), (index, actual, expected)
+        assert 'BN_Spine_roll_link' in done['summary']['direction_targets']
+        assert done['summary']['simulation_limits_enforced']
     finally:
         jobs.close()
 
@@ -214,6 +283,48 @@ def test_completed_results_reused_after_restart_without_solving(tmp_path, monkey
         review = jobs.create(payload() | {'review_mapping': True})
         assert review['state'] == 'mapping'
         assert jobs.start(review['id'], review['mapping'])['result_cached']
+    finally:
+        jobs.close()
+
+
+def test_library_saved_status_survives_restart_and_preserves_live_jobs(tmp_path, monkeypatch):
+    from bvh_broadcaster.generic_retarget import GenericRetargeter
+    from web_host.motion_catalog import source_statuses
+    library = tmp_path / 'library'
+    library.mkdir()
+    data = payload()
+    (library / 'saved.bvh').write_text(data['bvh_text'])
+    (library / 'broken.bvh').write_text('invalid BVH')
+    options = dict(actions_dir=library, profiles_dir=tmp_path / 'profiles',
+                   cache_dir=tmp_path / 'results')
+    jobs = MotionJobs(**options)
+    try:
+        first = jobs.create({**data, 'bvh_source': 'saved.bvh'})
+        jobs.start(first['id'], first['mapping'], remember=True)
+        assert finish(jobs, first)['result_saved']
+    finally:
+        jobs.close()
+    monkeypatch.setattr(GenericRetargeter, 'convert',
+                        lambda *args, **kwargs: pytest.fail('catalog must not convert'))
+    jobs = MotionJobs(**options)
+    try:
+        for _ in range(3):
+            jobs.create({**data, 'review_mapping': True})
+        active = list(jobs.jobs)
+        request = {key: value for key, value in data.items() if key != 'bvh_text'}
+        entries = source_statuses(jobs, request)
+        assert entries[0]['name'] == 'broken.bvh' and entries[0]['error']
+        assert entries[1] == {'name': 'saved.bvh', 'saved': True}
+        assert list(jobs.jobs) == active
+        assert jobs.thread is None
+        assert source_statuses(jobs, request | {'scale': 1.})[1]['saved'] is False
+        (library / 'saved.bvh').write_text(data['bvh_text'].replace('30 0 0', '20 0 0'))
+        assert source_statuses(jobs, request)[1]['saved'] is False
+        (library / 'saved.bvh').write_text(data['bvh_text'])
+        assert source_statuses(jobs, request)[1]['saved'] is True
+        profile = next((tmp_path / 'profiles').glob('*.json'))
+        profile.write_text('{broken')
+        assert source_statuses(jobs, request)[1]['saved'] is False
     finally:
         jobs.close()
 
@@ -497,7 +608,7 @@ def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urd
         preview = json.loads(jobs.result(job['id'], 'preview.json'))
         assert preview['robot']['urdf'] == path.read_text() == data['urdf_text']
         assert len(preview['robot']['joint_names']) == 37
-        assert all(name.startswith('BN_') for name in preview['robot']['joint_names'])
+        assert {'waist_yaw', 'left_shoulder_roll', 'right_ankle_pitch'} <= set(preview['robot']['joint_names'])
         assert np.isfinite(preview['robot']['joint_positions']).all()
         assert not done['summary']['mechanical_limits_enforced']
         assert not done['summary']['unmapped_joints']

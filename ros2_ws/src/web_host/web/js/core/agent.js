@@ -78,6 +78,7 @@ export async function getBenchOptions() {
   return {
     can_interfaces: parseJson(response.can_interfaces_json, []),
     serial_ports: parseJson(response.serial_ports_json, []),
+    usbcanfd_devices: parseJson(response.usbcanfd_devices_json, []),
     models: response.simulation_models || [],
     mujoco_models: response.mujoco_models || [],
   };
@@ -110,6 +111,7 @@ export function startMotorBackend(request) {
     transport: request.transport,
     sim_interface: request.sim_interface || '',
     sim_tty: request.sim_tty || '',
+    sim_channels_json: request.sim_channels_json || '',
     physical_bus_isolated: Boolean(request.physical_bus_isolated),
   });
 }

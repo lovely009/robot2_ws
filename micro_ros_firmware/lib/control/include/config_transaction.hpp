@@ -22,6 +22,7 @@ struct Request {
   uint32_t request_id = 0, valid_until_tick_ms = 0, policy_generation = 0;
   uint8_t command = 0;
   uint16_t motor_id = 0;
+  uint8_t direction_raw = 0;
   size_t policy_count = 0;
   Policy policies[kMaxOperations]{};
 };

@@ -1,7 +1,12 @@
 <robot name="full_body_robot_180deg">
   <link name="Base_link">
+    <inertial>
+      <origin xyz="-0.0048729664810844989 -0.00016166727589381997 -0.015393704603009997" rpy="0 -0 0" />
+      <mass value="0.80026152101195" />
+      <inertia ixx="0.0007807403576587995" iyy="0.00022685250764600988" izz="0.0008086145302986495" ixy="9.030804145408995e-07" ixz="1.940084017821099e-06" iyz="-2.1919203245008993e-08" />
+    </inertial>
     <visual name="Base_link_robot_body">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="-0 -0 -1.5707963267949" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/Base_link.STL" />
       </geometry>
@@ -10,14 +15,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_Spine_yaw" type="revolute">
+  <joint name="waist_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="Base_link" />
     <child link="BN_Spine_yaw_link" />
-    <origin xyz="0 0 0.010999999999991" rpy="0.3359758810089 -0 0" />
-    <axis xyz="0 -0.329690645262781 -0.944089020392786" />
+    <origin xyz="0 0 0.010999999999990998" rpy="0.3359758810089 -0 -1.5707963267949" />
+    <axis xyz="0 0.32969064526278102 0.94408902039278597" />
   </joint>
   <link name="BN_Spine_yaw_link">
+    <inertial>
+      <origin xyz="1.3361793744625e-06 0.015688385272618 0.039716952454886" rpy="0 -0 0" />
+      <mass value="0.704804675426319" />
+      <inertia ixx="0.00035145635208469" iyy="0.00036486073033493" izz="0.00045046850548724" ixy="2.359982218947e-08" ixz="-8.8654229248879e-09" iyz="2.6505194586616e-05" />
+    </inertial>
     <visual name="BN_Spine_yaw_link_robot_body">
       <origin xyz="0 4.336808689942e-19 0" rpy="-1.8301507268713e-17 0 0" />
       <geometry>
@@ -28,7 +38,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_Spine_pitch" type="revolute">
+  <joint name="waist_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_Spine_yaw_link" />
     <child link="BN_Spine_pitch_link" />
@@ -36,6 +46,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_Spine_pitch_link">
+    <inertial>
+      <origin xyz="-2.7456796558578e-10 8.4026009952026e-09 -2.6888243347866e-07" rpy="0 -0 0" />
+      <mass value="0.0934780291598876" />
+      <inertia ixx="1.4811960990916e-05" iyy="1.0026335526468e-05" izz="8.5556073311896e-06" ixy="-5.582036353496e-19" ixz="-1.6129068911976e-12" iyz="6.1062237333805e-13" />
+    </inertial>
     <visual name="BN_Spine_pitch_link_robot_body">
       <origin xyz="-1.3877787807814e-17 6.9388939039072e-18 5.2939559203394e-23" rpy="8.9961049061274e-22 1.6412621091462e-22 -3.5051173116858e-17" />
       <geometry>
@@ -46,7 +61,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_Spine_roll" type="revolute">
+  <joint name="waist_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_Spine_pitch_link" />
     <child link="BN_Spine_roll_link" />
@@ -54,6 +69,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_Spine_roll_link">
+    <inertial>
+      <origin xyz="-3.2379632054981e-06 0.088102403748252 -0.0064066293485871" rpy="0 -0 0" />
+      <mass value="1.87023989534733" />
+      <inertia ixx="0.0020782377897531" iyy="0.0020129029459178" izz="0.0025548243574653" ixy="2.7642905227694e-08" ixz="-6.0066142452721e-08" iyz="-6.6170111691023e-06" />
+    </inertial>
     <visual name="BN_Spine_roll_link_robot_body">
       <origin xyz="-6.6174449004242e-23 0 6.9388939039072e-18" rpy="5.395930980885e-17 -7.0868379204718e-22 2.1956435386842e-22" />
       <geometry>
@@ -82,14 +102,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftShoulder_1" type="revolute">
+  <joint name="left_scapula_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_Spine_roll_link" />
     <child link="BN_LeftShoulder_1_link" />
     <origin xyz="0.059001207975744 0.20886318978335 -0.059999192673532" rpy="-1.5707963267949 -8.1790832522623e-23 4.3017502253747e-22" />
-    <axis xyz="3.6731937392142e-06 -2.6984895655918e-11 0.99999999999325" />
+    <axis xyz="3.6731937392141999e-06 -2.6984895655918e-11 0.99999999999324996" />
   </joint>
   <link name="BN_LeftShoulder_1_link">
+    <inertial>
+      <origin xyz="0.0034440604079099 -3.2709368101605e-05 0.011769367388152" rpy="0 -0 0" />
+      <mass value="0.0499208383439976" />
+      <inertia ixx="1.0123914480161e-05" iyy="8.0623997347692e-06" izz="1.3933963947699e-05" ixy="-3.217138183798e-09" ixz="6.5272311258239e-09" iyz="-3.6991997589003e-10" />
+    </inertial>
     <visual name="BN_LeftShoulder_1_link_robot_body">
       <origin xyz="0.010677790061456 -0.0052591288535677 -3.9221733527661e-08" rpy="3.7209643961624e-17 -3.0721638077674e-22 -1.6101338242988e-22" />
       <geometry>
@@ -100,7 +125,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftShoulder_2" type="revolute">
+  <joint name="left_scapula_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftShoulder_1_link" />
     <child link="BN_LeftShoulder_2_link" />
@@ -108,6 +133,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_LeftShoulder_2_link">
+    <inertial>
+      <origin xyz="-0.0018342121852484 0.010423449020194 -0.029000044956228" rpy="0 -0 0" />
+      <mass value="0.241731808970012" />
+      <inertia ixx="9.6329843930377e-05" iyy="0.00012650398124527" izz="5.5757921317103e-05" ixy="-4.2962211576734e-07" ixz="1.308274321089e-10" iyz="-4.7756381682797e-11" />
+    </inertial>
     <visual name="BN_LeftShoulder_2_link_robot_body">
       <origin xyz="0 0 1.7347234759768e-17" rpy="5.395930980885e-17 -7.0868379204718e-22 2.1956435386842e-22" />
       <geometry>
@@ -127,7 +157,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperArm_1" type="revolute">
+  <joint name="left_shoulder_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftShoulder_2_link" />
     <child link="BN_LeftUpperArm_1_link" />
@@ -135,6 +165,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftUpperArm_1_link">
+    <inertial>
+      <origin xyz="-0.004634 0.00044203 -0.026646" rpy="0 -0 0" />
+      <mass value="0.21956" />
+      <inertia ixx="0.0001995" iyy="0.0001732" izz="0.00011785" ixy="-1.5702e-06" ixz="-2.5783e-05" iyz="1.5057e-06" />
+    </inertial>
     <visual name="BN_LeftUpperArm_1_link_robot_body">
       <origin xyz="3.3610267347051e-17 0 1.3877787807814e-17" rpy="-3.6946587847524e-22 -3.2449725701966e-22 -5.9092757292544e-18" />
       <geometry>
@@ -145,14 +180,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperArm_2" type="revolute">
+  <joint name="left_shoulder_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperArm_1_link" />
     <child link="BN_LeftUpperArm_2_link" />
     <origin xyz="0.022447214455225 -0.0015403126957526 -0.0535" rpy="0.06851192729775 1.5707963267949 0" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
   </joint>
   <link name="BN_LeftUpperArm_2_link">
+    <inertial>
+      <origin xyz="0.0066377 -0.038325 -0.0085751" rpy="0 -0 0" />
+      <mass value="0.371" />
+      <inertia ixx="0.00010593" iyy="4.8539e-05" izz="0.00013349" ixy="1.092e-05" ixz="2.9333e-06" iyz="-1.6663e-05" />
+    </inertial>
     <visual name="BN_LeftUpperArm_2_link_robot_body">
       <origin xyz="0 0 1.0842021724855e-18" rpy="-9.4540683459952e-18 1.7326007598717e-22 2.7809222241228e-22" />
       <geometry>
@@ -163,16 +203,21 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperArm_3" type="revolute">
+  <joint name="left_shoulder_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperArm_2_link" />
     <child link="BN_LeftUpperArm_3_link" />
-    <origin xyz="0.016513941688906 -0.093655217264268 -0.023500000000005" rpy="1.5707963267949 -0 0.17453292521079" />
+    <origin xyz="0.016513941688906 -0.093655217264268 -0.023500000000005" rpy="-1.5707963267949 -0 -2.967059728379" />
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftUpperArm_3_link">
+    <inertial>
+      <origin xyz="-0.00023665000000002 -0.0013047 0.098192" rpy="0 -0 0" />
+      <mass value="0.6198" />
+      <inertia ixx="0.00035558" iyy="0.00031472" izz="7.7307e-05" ixy="3.938e-07" ixz="5.9238e-07" iyz="1.4745e-06" />
+    </inertial>
     <visual name="BN_LeftUpperArm_3_link_robot_body">
-      <origin xyz="0 0 0" rpy="-3.5259703896848e-17 5.7522392865418e-18 -5.6561891422852e-18" />
+      <origin xyz="-2.7755575615629e-17 3.4694469519536e-18 0" rpy="-3.1048826322826e-17 1.4398737885557e-17 -4.5251417362526e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftUpperArm_3_link.STL" />
       </geometry>
@@ -181,16 +226,21 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftLowerArm_1" type="revolute">
+  <joint name="left_elbow_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperArm_3_link" />
     <child link="BN_LeftLowerArm_1_link" />
-    <origin xyz="0.02309999995239 -0.0059999999996523 0.1765" rpy="-1.5707963267949 -0.069565453426415 -1.5707963267798" />
-    <axis xyz="0 0 1" />
+    <origin xyz="0.023099999952391 -0.0059999999996523 0.1765" rpy="-1.5707963267949 -0.069565453426415 -1.5707963267798" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftLowerArm_1_link">
+    <inertial>
+      <origin xyz="-9.0942000000001e-05 -0.028703 -0.0067006" rpy="0 -0 0" />
+      <mass value="0.3061" />
+      <inertia ixx="5.3857e-05" iyy="3.3156e-05" izz="4.8577e-05" ixy="-8.2319e-07" ixz="-7.9601e-07" iyz="-1.5073e-05" />
+    </inertial>
     <visual name="BN_LeftLowerArm_1_link_robot_body">
-      <origin xyz="1.7347234759768e-17 -1.3877787807814e-17 0" rpy="1.335821869689e-17 1.0128544586169e-17 -1.6547869379151e-17" />
+      <origin xyz="0 0 0" rpy="4.777269253878e-18 -1.5348322788339e-18 6.2043347767116e-18" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_1_link.STL" />
       </geometry>
@@ -199,7 +249,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftLowerArm_2" type="revolute">
+  <joint name="left_forearm_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftLowerArm_1_link" />
     <child link="BN_LeftLowerArm_2_link" />
@@ -207,8 +257,13 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftLowerArm_2_link">
+    <inertial>
+      <origin xyz="0.0014964 -0.0042619 0.052056" rpy="0 -0 0" />
+      <mass value="0.31" />
+      <inertia ixx="0.00012577" iyy="0.00012722" izz="1.6627e-05" ixy="-6.2905e-07" ixz="-6.7741e-07" iyz="1.4868e-06" />
+    </inertial>
     <visual name="BN_LeftLowerArm_2_link_robot_body">
-      <origin xyz="-6.9388939039072e-18 0 -1.0408340855861e-17" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
+      <origin xyz="0 0 0" rpy="-1.5827727872651e-17 -3.8998801296728e-18 5.78845769533e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftLowerArm_2_link.STL" />
       </geometry>
@@ -217,7 +272,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftHand_roll" type="revolute">
+  <joint name="left_wrist_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftLowerArm_2_link" />
     <child link="BN_LeftHand_roll_link" />
@@ -225,8 +280,13 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftHand_roll_link">
+    <inertial>
+      <origin xyz="4.681599999914e-09 -1.1076999930488e-09 -0.0048722" rpy="0 -0 0" />
+      <mass value="0.0122" />
+      <inertia ixx="1.8854e-07" iyy="7.0774e-08" izz="1.4662e-07" ixy="-2.2892999995724e-14" ixz="-4.9915000000382e-14" iyz="-1.2842999999853e-14" />
+    </inertial>
     <visual name="BN_LeftHand_roll_link_robot_body">
-      <origin xyz="0 0 2.7755575615629e-17" rpy="3.6462195987366e-18 -1.0596480442675e-17 1.201066161694e-17" />
+      <origin xyz="0 6.9388939039072e-18 0" rpy="-1.9346408694881e-18 9.100529032484e-18 3.6307377438048e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_roll_link.STL" />
       </geometry>
@@ -235,16 +295,21 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftHand_pitch" type="revolute">
+  <joint name="left_wrist_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftHand_roll_link" />
     <child link="BN_LeftHand_pitch_link" />
-    <origin xyz="1.0333031473242e-06 3.1399032159041e-09 -0.00047149784733133" rpy="1.5707963267949 -1.396263401585 0" />
-    <axis xyz="6.7851449246243e-06 -1.1409724915396e-07 -0.99999999997697" />
+    <origin xyz="1.0333031473242e-06 3.1399032263124e-09 -0.00047149784733133" rpy="1.5707963267949 -1.396263401585 0" />
+    <axis xyz="6.7851449246243001e-06 -1.1409724915396e-07 -0.99999999997696998" />
   </joint>
   <link name="BN_LeftHand_pitch_link">
+    <inertial>
+      <origin xyz="0.002273855304371 -0.026896107653082 6.1046399032211e-06" rpy="0 -0 0" />
+      <mass value="0.05" />
+      <inertia ixx="5.6637e-06" iyy="2.6744e-06" izz="3.7315e-06" ixy="4.5226e-07" ixz="-9.4981999999968e-11" iyz="-1.5317e-09" />
+    </inertial>
     <visual name="BN_LeftHand_pitch_link_robot_body">
-      <origin xyz="0.00046415530437111 8.2892346918523e-05 3.1399032193735e-09" rpy="1.2132947250552e-18 2.0912667133602e-22 -4.0579311478392e-22" />
+      <origin xyz="0.00046415530437105 8.2892346918495e-05 3.139903222843e-09" rpy="5.7729791110746e-18 -1.5238486861239e-17 -2.418873653338e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/BN_LeftHand_pitch_link.STL" />
       </geometry>
@@ -253,7 +318,7 @@
       </material>
     </visual>
     <visual name="left_wrist_flange_proximal_platform_visual">
-      <origin xyz="-0.025034959013153 0.13622329394366 1.9184262095573e-09" rpy="-1.5707962862486 1.1944661978192 -2.9670596906711" />
+      <origin xyz="-0.025034959013153 0.13622329394366 1.9184262199656e-09" rpy="-1.5707962862486 1.1944661978192 -2.9670596906711" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_platform.STL" />
       </geometry>
@@ -262,7 +327,7 @@
       </material>
     </visual>
     <visual name="left_wrist_flange_distal_platform_visual">
-      <origin xyz="-0.025034959013153 0.13622329394366 1.9184262095573e-09" rpy="-1.5707962862486 1.1944661978192 -2.9670596906711" />
+      <origin xyz="-0.025034959013153 0.13622329394366 1.9184262199656e-09" rpy="-1.5707962862486 1.1944661978192 -2.9670596906711" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_platform.STL" />
       </geometry>
@@ -274,13 +339,18 @@
   <joint name="left_wrist_flange_proximal" type="revolute" simulation_auxiliary="true">
     <parent link="BN_LeftLowerArm_2_link" />
     <child link="left_wrist_flange_proximal_flange" />
-    <origin xyz="-0.019337253220078 -0.0054909567382603 0.037001009184629" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
-    <axis xyz="0.93001716074063 0.3675160958738 1.2756907469088e-06" />
+    <origin xyz="-0.019337253220078 -0.0054909567382603 0.037001009184629" rpy="-1.5827727872651e-17 -3.8998801296728e-18 5.78845769533e-17" />
+    <axis xyz="0.93001716074063 0.3675160958738 1.2756907468158e-06" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_wrist_flange_proximal_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_wrist_flange_proximal_flange_visual">
-      <origin xyz="0.019337253220078 0.0054909567382604 -0.037001009184629" rpy="8.2355474594518e-16 2.84536566517e-16 7.0224139448098e-17" />
+      <origin xyz="0.019337253220078 0.0054909567382604 -0.037001009184629" rpy="7.6550095732222e-16 3.1202704162452e-16 7.6863363924772e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_flange.STL" />
       </geometry>
@@ -293,7 +363,7 @@
   <joint name="left_wrist_flange_proximal_rod_x" type="revolute" simulation_auxiliary="true">
     <parent link="left_wrist_flange_proximal_flange" />
     <child link="left_wrist_flange_proximal_rod_axis_frame_1" />
-    <origin xyz="0.0036312876974033 -0.0091891460598492 -0.00061914807393791" rpy="0.0098529978457333 -1.2756885568408e-06 0.3763367912263" />
+    <origin xyz="0.0036312876974032 -0.0091891460598492 -0.00061914807393791" rpy="0.0098529978457335 -1.2756885568584e-06 0.3763367912263" />
     <axis xyz="1 0 0" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
@@ -305,8 +375,13 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_wrist_flange_proximal_rod">
+    <inertial>
+      <origin xyz="0 0 0.050750000000001" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="8.5852083333336e-06" iyy="8.5852083333336e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_wrist_flange_proximal_rod_visual">
-      <origin xyz="0.020001945117551 0.0075217050173327 -0.036457766445393" rpy="-0.0091639659298465 -0.0036198982612787 -0.37632021106467" />
+      <origin xyz="0.020001945117551 0.0075217050173326 -0.036457766445393" rpy="-0.0091639659298469 -0.0036198982612787 -0.37632021106467" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_proximal_rod.STL" />
       </geometry>
@@ -318,13 +393,18 @@
   <joint name="left_wrist_flange_distal" type="revolute" simulation_auxiliary="true">
     <parent link="BN_LeftLowerArm_2_link" />
     <child link="left_wrist_flange_distal_flange" />
-    <origin xyz="0.017863438933805 0.0092095511221474 0.072001060211994" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
-    <axis xyz="-0.93001716074063 -0.3675160958738 -1.2756907452455e-06" />
+    <origin xyz="0.017863438933805 0.0092095511221474 0.072001060211994" rpy="-1.5827727872651e-17 -3.8998801296728e-18 5.78845769533e-17" />
+    <axis xyz="-0.93001716074063 -0.3675160958738 -1.2756907452003e-06" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_wrist_flange_distal_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_wrist_flange_distal_flange_visual">
-      <origin xyz="-0.017863438933805 -0.0092095511221474 -0.072001060211994" rpy="4.0621442769112e-18 -3.6347796215298e-18 3.8895945611286e-17" />
+      <origin xyz="-0.017863438933805 -0.0092095511221474 -0.072001060211994" rpy="-1.5827727872651e-17 -3.8998801296728e-18 5.78845769533e-17" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_flange.STL" />
       </geometry>
@@ -337,7 +417,7 @@
   <joint name="left_wrist_flange_distal_rod_x" type="revolute" simulation_auxiliary="true">
     <parent link="left_wrist_flange_distal_flange" />
     <child link="left_wrist_flange_distal_rod_axis_frame_1" />
-    <origin xyz="0.0036381563448122 -0.0092065292463247 -0.0001167802862885" rpy="-0.014867874082285 1.2756906234154e-06 -2.7652558623635" />
+    <origin xyz="0.0036381563448122 -0.0092065292463247 -0.00011678028628848" rpy="-0.014867874082286 1.2756906234527e-06 -2.7652558623635" />
     <axis xyz="1 0 0" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
@@ -349,8 +429,13 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_wrist_flange_distal_rod">
+    <inertial>
+      <origin xyz="0 0 0.032999999999999" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="3.6299999999998e-06" iyy="3.6299999999998e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_wrist_flange_distal_rod_visual">
-      <origin xyz="0.01999805488252 -0.0068297722111634 -0.071993751961915" rpy="-0.013827984399899 -0.0054628226135002 2.7652936234887" />
+      <origin xyz="0.01999805488252 -0.0068297722111633 -0.071993751961915" rpy="-0.013827984399899 -0.0054628226135001 2.7652936234887" />
       <geometry>
         <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/left_wrist_flange_distal_rod.STL" />
       </geometry>
@@ -359,14 +444,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightShoulder_1" type="revolute">
+  <joint name="right_scapula_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_Spine_roll_link" />
     <child link="BN_RightShoulder_1_link" />
     <origin xyz="-0.058998587654936 0.2645005782127 -0.060000059548436" rpy="-1.570796326795 -1.5022843994972 1.5707963268064" />
-    <axis xyz="-0.06845834205993 -0.99765397577964 3.6732051097764e-06" />
+    <axis xyz="0.068458342059929997 0.99765397577963999 -3.6732051097764002e-06" />
   </joint>
   <link name="BN_RightShoulder_1_link">
+    <inertial>
+      <origin xyz="-0.0021263186144593 -0.043978881593948 0.0034029016196196" rpy="0 -0 0" />
+      <mass value="0.0485377391940265" />
+      <inertia ixx="7.9860781188549e-06" iyy="1.385011905508e-05" izz="1.0067760647731e-05" ixy="4.039166413138e-07" ixz="2.7632321512939e-09" iyz="-6.7322171294716e-09" />
+    </inertial>
     <visual name="BN_RightShoulder_1_link_robot_body">
       <origin xyz="-0.00049879913842383 3.3647375927481e-05 -0.15749832953871" rpy="-3.5009959809496e-22 -4.7927646357e-22 -9.5787900190484e-18" />
       <geometry>
@@ -377,7 +467,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightShoulder_2" type="revolute">
+  <joint name="right_scapula_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightShoulder_1_link" />
     <child link="BN_RightShoulder_2_link" />
@@ -385,6 +475,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightShoulder_2_link">
+    <inertial>
+      <origin xyz="0.0018342115915192 0.010423450580475 -0.033299957684944" rpy="0 -0 0" />
+      <mass value="0.241731806748015" />
+      <inertia ixx="9.6329852209359e-05" iyy="0.00012650398633405" izz="5.5757923165295e-05" ixy="4.2962462286748e-07" ixz="1.2584526573685e-10" iyz="5.1424457754561e-11" />
+    </inertial>
     <visual name="BN_RightShoulder_2_link_robot_body">
       <origin xyz="-1.3877787807814e-17 0 -2.4286128663675e-17" rpy="-1.8301507269633e-17 5.5946140366472e-22 -1.3584856839646e-22" />
       <geometry>
@@ -404,14 +499,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperArm_1" type="revolute">
+  <joint name="right_shoulder_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightShoulder_2_link" />
     <child link="BN_RightUpperArm_1_link" />
     <origin xyz="-0.034500000000369 0.033499999999606 -0.0333" rpy="-1.570796326795 -1.5022843994971 1.5707963268064" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightUpperArm_1_link">
+    <inertial>
+      <origin xyz="-0.0046509464453697 0.00019508650832439 0.026646187039875" rpy="0 -0 0" />
+      <mass value="0.21956040397248" />
+      <inertia ixx="0.00019943020444837" iyy="0.00017327038742242" izz="0.00011785388765739" ixy="-2.046039205589e-06" ixz="2.5747254427316e-05" iyz="-2.0303442238881e-06" />
+    </inertial>
     <visual name="BN_RightUpperArm_1_link_robot_body">
       <origin xyz="2.3418766925687e-17 5.5511151231258e-17 1.3877787807814e-17" rpy="7.6975789047366e-22 -5.136670760502e-22 -1.5297801420373e-17" />
       <geometry>
@@ -422,14 +522,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperArm_2" type="revolute">
+  <joint name="right_shoulder_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperArm_1_link" />
     <child link="BN_RightUpperArm_2_link" />
     <origin xyz="0.022447214455225 -0.0015403126957522 0.053500000000002" rpy="0.068511927297749 1.5707963267949 0" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightUpperArm_2_link">
+    <inertial>
+      <origin xyz="-0.0068704 -0.038284 -0.0085751" rpy="0 -0 0" />
+      <mass value="0.371" />
+      <inertia ixx="0.00010623" iyy="4.8233e-05" izz="0.00013349" ixy="-1.0079e-05" ixz="-2.9427e-06" iyz="-1.6661e-05" />
+    </inertial>
     <visual name="BN_RightUpperArm_2_link_robot_body">
       <origin xyz="0 0 -1.3227266504323e-17" rpy="-3.9902260150236e-17 7.6016630764228e-22 -4.2686307100228e-22" />
       <geometry>
@@ -440,7 +545,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperArm_3" type="revolute">
+  <joint name="right_shoulder_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperArm_2_link" />
     <child link="BN_RightUpperArm_3_link" />
@@ -448,6 +553,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightUpperArm_3_link">
+    <inertial>
+      <origin xyz="-0.0011264 0.00069959 0.098192" rpy="0 -0 0" />
+      <mass value="0.6198" />
+      <inertia ixx="0.00031997" iyy="0.00035033" izz="7.7307e-05" ixy="1.3679e-05" ixz="1.1536e-06" iyz="-1.0928e-06" />
+    </inertial>
     <visual name="BN_RightUpperArm_3_link_robot_body">
       <origin xyz="0 0 0" rpy="-1.3177995970258e-17 2.3422356012208e-17 -1.4242540862149e-17" />
       <geometry>
@@ -458,7 +568,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightLowerArm_1" type="revolute">
+  <joint name="right_elbow_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperArm_3_link" />
     <child link="BN_RightLowerArm_1_link" />
@@ -466,6 +576,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightLowerArm_1_link">
+    <inertial>
+      <origin xyz="0.0022445 -0.030805 0.0075581" rpy="0 -0 0" />
+      <mass value="0.3061" />
+      <inertia ixx="5.3564e-05" iyy="3.3291e-05" izz="4.8569e-05" ixy="2.2507e-06" ixz="-1.8418e-06" iyz="1.4981e-05" />
+    </inertial>
     <visual name="BN_RightLowerArm_1_link_robot_body">
       <origin xyz="0 0 -2.7755575615629e-17" rpy="1.6020959051608e-17 1.7077563898273e-18 -4.8940156416726e-17" />
       <geometry>
@@ -476,7 +591,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightLowerArm_2" type="revolute">
+  <joint name="right_forearm_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightLowerArm_1_link" />
     <child link="BN_RightLowerArm_2_link" />
@@ -484,6 +599,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightLowerArm_2_link">
+    <inertial>
+      <origin xyz="0.0019128 0.0042028 0.051874" rpy="0 -0 0" />
+      <mass value="0.31" />
+      <inertia ixx="0.00012616" iyy="0.00012752" izz="1.6738e-05" ixy="6.8087e-07" ixz="-5.0426e-07" iyz="-1.5388e-06" />
+    </inertial>
     <visual name="BN_RightLowerArm_2_link_robot_body">
       <origin xyz="-1.3877787807814e-17 0 0" rpy="2.6967242677712e-17 3.4712543312532e-17 6.16581712804e-18" />
       <geometry>
@@ -494,14 +614,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightHand_roll" type="revolute">
+  <joint name="right_wrist_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightLowerArm_2_link" />
     <child link="BN_RightHand_roll_link" />
     <origin xyz="-0.00054067714599549 -0.0013682384897136 0.13849999772404" rpy="-1.745329251984 3.4139358007224e-15 2.7652630971513" />
-    <axis xyz="0 0.173648177656807 -0.984807753013993" />
+    <axis xyz="0 -0.17364817765680701 0.98480775301399304" />
   </joint>
   <link name="BN_RightHand_roll_link">
+    <inertial>
+      <origin xyz="-9.4349000695685e-10 0.00084605000000001 -0.0047982" rpy="0 -0 0" />
+      <mass value="0.0122" />
+      <inertia ixx="7.0774e-08" iyy="1.8728e-07" izz="1.4789e-07" ixy="2.5535999996702e-14" ixz="-5.1129000002029e-15" iyz="7.1691e-09" />
+    </inertial>
     <visual name="BN_RightHand_roll_link_robot_body">
       <origin xyz="-6.9388939039072e-18 1.3877787807814e-17 -2.7755575615629e-17" rpy="-7.41791574739e-23 6.0833992662116e-22 2.8309662081558e-17" />
       <geometry>
@@ -512,14 +637,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightHand_pitch" type="revolute">
+  <joint name="right_wrist_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightHand_roll_link" />
     <child link="BN_RightHand_pitch_link" />
     <origin xyz="3.4098914351854e-09 8.2506474511482e-05 -0.00046415750873721" rpy="-2.830955782445e-17 1.5707963267949 0" />
-    <axis xyz="-7.3464113465569e-06 6.4154183588344e-12 0.99999999997301" />
+    <axis xyz="7.3464113465569004e-06 -6.4154183588344e-12 -0.99999999997301003" />
   </joint>
   <link name="BN_RightHand_pitch_link">
+    <inertial>
+      <origin xyz="0.0070694424912628 -0.026194506474511 8.160259010855e-05" rpy="0 -0 0" />
+      <mass value="0.05" />
+      <inertia ixx="5.6043e-06" iyy="2.7329e-06" izz="3.7313e-06" ixy="6.1431e-07" ixz="-6.1336999999999e-10" iyz="1.4069e-09" />
+    </inertial>
     <visual name="BN_RightHand_pitch_link_robot_body">
       <origin xyz="-0.00046415750873718 -8.2506474511468e-05 -3.4098914490632e-09" rpy="1.7747420803841e-17 -8.9468971660004e-23 6.7684948868934e-23" />
       <geometry>
@@ -556,6 +686,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_wrist_flange_proximal_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_wrist_flange_proximal_flange_visual">
       <origin xyz="-0.01786422441537 0.0092097583258585 -0.036999373999989" rpy="2.6967242677712e-17 3.4712543312532e-17 6.16581712804e-18" />
       <geometry>
@@ -582,6 +717,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_wrist_flange_proximal_rod">
+    <inertial>
+      <origin xyz="0 0 0.050750000000001" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="8.5852083333336e-06" iyy="8.5852083333336e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_wrist_flange_proximal_rod_visual">
       <origin xyz="0.019998787954551 0.0075216567964545 -0.036456079675028" rpy="0.0091640183285116 -0.0036197656613651 -2.7652869116019" />
       <geometry>
@@ -600,6 +740,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_wrist_flange_distal_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_wrist_flange_distal_flange_visual">
       <origin xyz="0.0193366690003 -0.0054904832042732 -0.071999322971835" rpy="2.6967242677712e-17 3.4712543312532e-17 6.16581712804e-18" />
       <geometry>
@@ -626,6 +771,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_wrist_flange_distal_rod">
+    <inertial>
+      <origin xyz="0 0 0.032999999999999" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="3.6299999999998e-06" iyy="3.6299999999998e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_wrist_flange_distal_rod_visual">
       <origin xyz="0.02000121204552 -0.0068297324498007 -0.07199206497094" rpy="0.013828063458115 -0.0054626225353273 0.3762845616791" />
       <geometry>
@@ -644,6 +794,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_shoulder_flange_linkage_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_shoulder_flange_linkage_flange_visual">
       <origin xyz="-0.095200747441558 -0.12849946332997 0.037498926736293" rpy="5.395930980885e-17 -7.0868379204718e-22 2.1956435386842e-22" />
       <geometry>
@@ -670,6 +825,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="left_shoulder_flange_linkage_rod">
+    <inertial>
+      <origin xyz="0 0 0.05034242516827" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="8.4478659060763e-06" iyy="8.4478659060763e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="left_shoulder_flange_linkage_rod_visual">
       <origin xyz="-0.1000826329679 0.0091973384346481 -0.12957043560206" rpy="2.0081428666792 -0.022851982452857 0.31612287548527" />
       <geometry>
@@ -688,6 +848,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_shoulder_flange_linkage_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_shoulder_flange_linkage_flange_visual">
       <origin xyz="0.09519925245662 -0.12850016270606 0.037500325492796" rpy="5.395930980885e-17 -7.0868379204718e-22 2.1956435386842e-22" />
       <geometry>
@@ -714,6 +879,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="right_shoulder_flange_linkage_rod">
+    <inertial>
+      <origin xyz="0 0 0.05034242516827" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="8.4478659060763e-06" iyy="8.4478659060763e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="right_shoulder_flange_linkage_rod_visual">
       <origin xyz="0.10008263296766 0.0091973384347249 -0.12957043560205" rpy="2.0081430997087 0.022839104559101 -0.31611267438062" />
       <geometry>
@@ -732,6 +902,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="waist_plus_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="waist_plus_flange_visual">
       <origin xyz="-0.050999999999865 -0.016154841617843 -0.046260361999259" rpy="-1.8301507268713e-17 0 0" />
       <geometry>
@@ -758,6 +933,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="waist_plus_rod">
+    <inertial>
+      <origin xyz="0 0 0.021" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="1.47e-06" iyy="1.47e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="waist_plus_rod_visual">
       <origin xyz="-0.066368525315197 -0.036564064183212 -0.06247015794541" rpy="0.17024762272472 -8.423990671691e-13 -0.32891394424056" />
       <geometry>
@@ -776,6 +956,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="waist_minus_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="waist_minus_flange_visual">
       <origin xyz="0.051000000000117 -0.016154841617843 -0.046260361999259" rpy="-1.8301507268713e-17 0 0" />
       <geometry>
@@ -802,6 +987,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="waist_minus_rod">
+    <inertial>
+      <origin xyz="0 0 0.021" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="1.47e-06" iyy="1.47e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="waist_minus_rod_visual">
       <origin xyz="-0.043240663286241 0.062225051069015 -0.062470157947588" rpy="0.17024762274254 -3.7307136546705e-13 3.0105632860535" />
       <geometry>
@@ -812,14 +1002,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_hips_roll" type="revolute">
+  <joint name="pelvis_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="Base_link" />
     <child link="BN_hips_roll_link" />
-    <origin xyz="0 0 -0.0734999997374" rpy="1.5707963267949 -0 0" />
+    <origin xyz="0 0 -0.073499999737399985" rpy="1.5707963267949 -0 -1.5707963267949" />
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_hips_roll_link">
+    <inertial>
+      <origin xyz="-8.4026068473921e-09 -2.74558271951e-10 -2.6888243490064e-07" rpy="0 -0 0" />
+      <mass value="0.0934780291598876" />
+      <inertia ixx="1.0026335526468e-05" iyy="1.4811960990916e-05" izz="8.5556073311896e-06" ixy="5.8482758041441e-19" ixz="-6.1062315948879e-13" iyz="-1.6129074280088e-12" />
+    </inertial>
     <visual name="BN_hips_roll_link_robot_body">
       <origin xyz="0 0 0" rpy="0 -0 0" />
       <geometry>
@@ -830,7 +1025,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_hips_pitch" type="revolute">
+  <joint name="pelvis_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_hips_roll_link" />
     <child link="BN_hips_pitch_link" />
@@ -838,6 +1033,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_hips_pitch_link">
+    <inertial>
+      <origin xyz="-0.035241613969449 -0.007587684013016 -3.5099450365782e-06" rpy="0 -0 0" />
+      <mass value="1.10918804844225" />
+      <inertia ixx="0.0035699822598436" iyy="0.0033637586309819" izz="0.0018046424706367" ixy="0.00059156558356962" ixz="2.3934568626461e-09" iyz="-8.1687049010589e-09" />
+    </inertial>
     <visual name="BN_hips_pitch_link_robot_body">
       <origin xyz="-3.4694469519536e-18 0 0" rpy="2.5782816153754e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
@@ -866,7 +1066,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperLeg_1" type="revolute">
+  <joint name="left_hip_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_hips_pitch_link" />
     <child link="BN_LeftUpperLeg_1_link" />
@@ -874,6 +1074,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_LeftUpperLeg_1_link">
+    <inertial>
+      <origin xyz="0.00053730903966526 2.1589590366231e-06 0.028551105149342" rpy="0 -0 0" />
+      <mass value="0.293425994953086" />
+      <inertia ixx="0.00013868126884495" iyy="0.00017499872676796" izz="0.00021317243017034" ixy="-2.707340236973e-06" ixz="6.5754090266002e-06" iyz="4.9138867964291e-07" />
+    </inertial>
     <visual name="BN_LeftUpperLeg_1_link_robot_body">
       <origin xyz="5.2041704279304e-18 0 0" rpy="2.5782816153754e-31 9.5939413708386e-31 3.8764118488312e-17" />
       <geometry>
@@ -884,7 +1089,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperLeg_2" type="revolute">
+  <joint name="left_hip_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperLeg_1_link" />
     <child link="BN_LeftUpperLeg_2_link" />
@@ -892,6 +1097,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftUpperLeg_2_link">
+    <inertial>
+      <origin xyz="-0.012575388917403 -0.10519073032002 -0.044681786156506" rpy="0 -0 0" />
+      <mass value="0.825082274309062" />
+      <inertia ixx="0.0011636094015676" iyy="0.00030117933767949" izz="0.0012430154293828" ixy="-4.994200279659e-05" ixz="-3.0806424197087e-06" iyz="-5.793199633557e-05" />
+    </inertial>
     <visual name="BN_LeftUpperLeg_2_link_robot_body">
       <origin xyz="0 0 0" rpy="1.9511836015286e-17 1.7154310163861e-31 -2.8777841995258e-31" />
       <geometry>
@@ -902,14 +1112,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftUpperLeg_3" type="revolute">
+  <joint name="left_hip_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperLeg_2_link" />
     <child link="BN_LeftUpperLeg_3_link" />
     <origin xyz="-0.012464803440568 -0.20091370952522 -0.045999999999999" rpy="1.5707963267949 -0.69545628640374 -0.061961166407582" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftUpperLeg_3_link">
+    <inertial>
+      <origin xyz="0.00028603674242965 0.00026976012262227 0.085653862626847" rpy="0 -0 0" />
+      <mass value="0.663542442925151" />
+      <inertia ixx="0.0021150834684975" iyy="0.0021113279284962" izz="0.00038247776049927" ixy="-7.8258981137147e-06" ixz="-1.6770568344651e-06" iyz="-6.7735604097174e-07" />
+    </inertial>
     <visual name="BN_LeftUpperLeg_3_link_robot_body">
       <origin xyz="-4.1633363423443e-17 0 0" rpy="-8.059150199402e-18 -1.3560994194221e-17 5.5590349634656e-17" />
       <geometry>
@@ -920,7 +1135,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftLowerLeg_1" type="revolute">
+  <joint name="left_knee_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftUpperLeg_3_link" />
     <child link="BN_LeftLowerLeg_1_link" />
@@ -928,6 +1143,11 @@
     <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftLowerLeg_1_link">
+    <inertial>
+      <origin xyz="0.0054428192983542 -0.038221773853985 0.0038032028618605" rpy="0 -0 0" />
+      <mass value="0.101794297625754" />
+      <inertia ixx="8.8366414955721e-05" iyy="4.2726874975095e-05" izz="8.6518025740463e-05" ixy="8.5897491513668e-06" ixz="-1.6323936191357e-06" iyz="1.8582789077103e-05" />
+    </inertial>
     <visual name="BN_LeftLowerLeg_1_link_robot_body">
       <origin xyz="-4.1633363423443e-17 -1.1102230246252e-16 -1.3877787807814e-17" rpy="1.7277267789528e-17 -4.5364662549764e-18 3.601186215885e-17" />
       <geometry>
@@ -938,14 +1158,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftLowerLeg_2" type="revolute">
+  <joint name="left_shank_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftLowerLeg_1_link" />
     <child link="BN_LeftLowerLeg_2_link" />
     <origin xyz="0.0049811675894658 -0.096121995195328 0.027000000000085" rpy="-1.5707963267935 -0.89879044418073 3.0683683246993" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_LeftLowerLeg_2_link">
+    <inertial>
+      <origin xyz="-2.6648011672656e-05 -6.2984083566959e-05 0.14195167321478" rpy="0 -0 0" />
+      <mass value="0.337893238616535" />
+      <inertia ixx="0.0020157869890759" iyy="0.0020135290575199" izz="8.1805492176156e-05" ixy="-4.3239578897711e-06" ixz="-4.013053398967e-07" iyz="3.2429536503779e-07" />
+    </inertial>
     <visual name="BN_LeftLowerLeg_2_link_robot_body">
       <origin xyz="0 6.9388939039072e-18 0" rpy="-7.9329741648504e-19 -1.5865948329701e-18 -5.9181612918666e-18" />
       <geometry>
@@ -956,14 +1181,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftFoot_pitch" type="revolute">
+  <joint name="left_ankle_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftLowerLeg_2_link" />
     <child link="BN_LeftFoot_pitch_link" />
     <origin xyz="-0.015064558410894 0.011984222046013 0.28500000000001" rpy="-1.5707963267949 -0.073224328889418 0.89879044418073" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
   </joint>
   <link name="BN_LeftFoot_pitch_link">
+    <inertial>
+      <origin xyz="0.0021231791407274 -0.01713434867942 -0.00032575821877531" rpy="0 -0 0" />
+      <mass value="0.0697698796573367" />
+      <inertia ixx="2.8810693572828e-05" iyy="1.7018314117281e-05" izz="3.5808148915017e-05" ixy="1.3481996287857e-06" ixz="6.0931097479294e-07" iyz="-5.3822720943233e-06" />
+    </inertial>
     <visual name="BN_LeftFoot_pitch_link_robot_body">
       <origin xyz="-4.8572257327351e-17 0 1.3877787807814e-17" rpy="-5.7806775576344e-18 -8.9233773931926e-18 -2.7755575615628e-17" />
       <geometry>
@@ -974,7 +1204,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_LeftFoot_roll" type="revolute">
+  <joint name="left_ankle_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_LeftFoot_pitch_link" />
     <child link="BN_LeftFoot_roll_link" />
@@ -982,6 +1212,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_LeftFoot_roll_link">
+    <inertial>
+      <origin xyz="0.0016358351283701 -0.01717105315268 0.027040338581133" rpy="0 -0 0" />
+      <mass value="0.0310065054848685" />
+      <inertia ixx="5.4868951226596e-05" iyy="5.8250100144805e-05" izz="4.1553999824126e-06" ixy="-1.9861205352442e-07" ixz="-4.6196383227118e-07" iyz="-1.9966564859119e-08" />
+    </inertial>
     <visual name="BN_LeftFoot_roll_link_robot_body">
       <origin xyz="2.7755575615629e-17 0 -1.3877787807814e-17" rpy="2.1215246956518e-17 2.4156784157834e-18 -1.0029599940182e-18" />
       <geometry>
@@ -992,14 +1227,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperLeg_1" type="revolute">
+  <joint name="right_hip_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_hips_pitch_link" />
     <child link="BN_RightUpperLeg_1_link" />
     <origin xyz="-0.035990582881365 -0.0245140760832 -0.092019991935572" rpy="3.1415926535898 -1.7878152194329e-30 3.1415926535898" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightUpperLeg_1_link">
+    <inertial>
+      <origin xyz="0.00053174315105062 -7.7161660292681e-05 0.028551105001942" rpy="0 -0 0" />
+      <mass value="0.293426005391581" />
+      <inertia ixx="0.00013868191842979" iyy="0.00017499808392817" izz="0.00021317243774649" ixy="2.711705336079e-06" ixz="6.5759341949614e-06" iyz="-4.8440860535923e-07" />
+    </inertial>
     <visual name="BN_RightUpperLeg_1_link_robot_body">
       <origin xyz="5.2041704279304e-18 1.3877787807814e-17 -1.3877787807814e-17" rpy="3.410776386793e-31 -4.9187709640874e-32 -6.0610418373792e-17" />
       <geometry>
@@ -1010,14 +1250,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperLeg_2" type="revolute">
+  <joint name="right_hip_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperLeg_1_link" />
     <child link="BN_RightUpperLeg_2_link" />
     <origin xyz="0.043879382064976 -0.003255737949539 0.011699999999991" rpy="-3.0675308352039 1.5707963118937 -3.1415925674424" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightUpperLeg_2_link">
+    <inertial>
+      <origin xyz="-0.012502531715745 -0.10458129846819 -0.04345188730377" rpy="0 -0 0" />
+      <mass value="0.829890295603427" />
+      <inertia ixx="0.0011641531651448" iyy="0.00030172313175507" izz="0.0012440511673746" ixy="-4.9941957023205e-05" ixz="-3.0806262079296e-06" iyz="-5.7931972148201e-05" />
+    </inertial>
     <visual name="BN_RightUpperLeg_2_link_robot_body">
       <origin xyz="0 -1.3877787807814e-17 6.9388939039072e-18" rpy="4.5765951304858e-17 -1.7925271518643e-24 3.2821007164272e-25" />
       <geometry>
@@ -1028,14 +1273,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightUpperLeg_3" type="revolute">
+  <joint name="right_hip_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperLeg_2_link" />
     <child link="BN_RightUpperLeg_3_link" />
     <origin xyz="-0.012464803441103 -0.20091370952501 -0.044999999999999" rpy="-1.5707963267949 -0.69545628640377 3.0796314871822" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightUpperLeg_3_link">
+    <inertial>
+      <origin xyz="0.00021423949750084 -0.00032970960076756 0.085653822848192" rpy="0 -0 0" />
+      <mass value="0.663542736340918" />
+      <inertia ixx="0.0021142034411028" iyy="0.0021122081881515" izz="0.00038247789516665" ixy="7.9858734640889e-06" ixz="-3.6674449224634e-07" iyz="1.7715701400735e-06" />
+    </inertial>
     <visual name="BN_RightUpperLeg_3_link_robot_body">
       <origin xyz="0 0 0" rpy="-9.2237981835022e-18 -3.1492846705254e-17 -1.1546393186229e-17" />
       <geometry>
@@ -1046,14 +1296,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightLowerLeg_1" type="revolute">
+  <joint name="right_knee_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightUpperLeg_3_link" />
     <child link="BN_RightLowerLeg_1_link" />
     <origin xyz="0.020937766766699 0.011112207685653 0.24670000000022" rpy="-1.5707963267949 -0.071132786335611 2.3146289434508" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightLowerLeg_1_link">
+    <inertial>
+      <origin xyz="0.011028120914074 -0.036998697858382 0.0038031681810151" rpy="0 -0 0" />
+      <mass value="0.101794133085919" />
+      <inertia ixx="8.486144544829e-05" iyy="4.623178145169e-05" izz="8.6518004088288e-05" ixy="1.4881639371444e-05" ixz="-4.3589954874383e-06" iyz="1.8137913105692e-05" />
+    </inertial>
     <visual name="BN_RightLowerLeg_1_link_robot_body">
       <origin xyz="1.9081958235745e-17 -1.1102230246252e-16 -2.7755575615629e-17" rpy="4.8208645447598e-18 5.9645198125896e-18 2.5314703229462e-17" />
       <geometry>
@@ -1064,14 +1319,19 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightLowerLeg_2" type="revolute">
+  <joint name="right_shank_yaw" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightLowerLeg_1_link" />
     <child link="BN_RightLowerLeg_2_link" />
     <origin xyz="0.019122861811695 -0.094332211608844 0.027000000000085" rpy="-1.5707963267936 0.8532819790237 -3.0665840780168" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
   </joint>
   <link name="BN_RightLowerLeg_2_link">
+    <inertial>
+      <origin xyz="-5.7431068434402e-05 3.7416810563766e-05 0.14195164760495" rpy="0 -0 0" />
+      <mass value="0.337892561929772" />
+      <inertia ixx="0.0020151339952932" iyy="0.0020141778255385" izz="8.1805793718893e-05" ixy="4.4431968912477e-06" ixz="3.956623074465e-07" iyz="3.3801440891574e-07" />
+    </inertial>
     <visual name="BN_RightLowerLeg_2_link_robot_body">
       <origin xyz="0 1.3877787807814e-17 0" rpy="-6.9512568868396e-18 -1.1186532737678e-18 6.3818685512458e-17" />
       <geometry>
@@ -1082,7 +1342,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightFoot_pitch" type="revolute">
+  <joint name="right_ankle_pitch" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightLowerLeg_2_link" />
     <child link="BN_RightFoot_pitch_link" />
@@ -1090,6 +1350,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightFoot_pitch_link">
+    <inertial>
+      <origin xyz="0.00043068592117258 -0.01726002044333 0.00032575819726326" rpy="0 -0 0" />
+      <mass value="0.069769880404824" />
+      <inertia ixx="2.8947338024384e-05" iyy="1.6881669469897e-05" izz="3.5808148691864e-05" ixy="4.3313880966556e-07" ixz="-1.9228199180074e-07" iyz="5.4132375515627e-06" />
+    </inertial>
     <visual name="BN_RightFoot_pitch_link_robot_body">
       <origin xyz="0 1.1102230246252e-16 0" rpy="-4.5115019001258e-18 -6.2435196238562e-18 3.6761872861776e-19" />
       <geometry>
@@ -1100,7 +1365,7 @@
       </material>
     </visual>
   </link>
-  <joint name="BN_RightFoot_roll" type="revolute">
+  <joint name="right_ankle_roll" type="revolute">
     <limit lower="-3.141592653589793" upper="3.141592653589793" effort="0" velocity="0" />
     <parent link="BN_RightFoot_pitch_link" />
     <child link="BN_RightFoot_roll_link" />
@@ -1108,6 +1373,11 @@
     <axis xyz="0 0 1" />
   </joint>
   <link name="BN_RightFoot_roll_link">
+    <inertial>
+      <origin xyz="-0.00049787177275434 -0.01724161099514 0.026840339308381" rpy="0 -0 0" />
+      <mass value="0.031006506158388" />
+      <inertia ixx="5.4871854526893e-05" iyy="5.8247197920909e-05" izz="4.1554002070225e-06" ixy="2.2193106607938e-07" ixz="-4.6089172779943e-07" iyz="3.7253731200727e-08" />
+    </inertial>
     <visual name="BN_RightFoot_roll_link_robot_body">
       <origin xyz="-2.7755575615629e-17 0 3.3827107781548e-17" rpy="1.2628668148232e-17 -1.1836086061767e-19 -2.2237859496778e-19" />
       <geometry>
@@ -1121,11 +1391,16 @@
   <joint name="hips_flange_plus_x" type="revolute" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_plus_flange" />
-    <origin xyz="0.072000000000034 -0.010118940098545 0.02799999999999" rpy="0 -0 0" />
+    <origin xyz="-0.010118940098544998 -0.072000000000033981 0.027999999999989995" rpy="-0 -0 -1.5707963267949" />
     <axis xyz="1.1102230246252e-16 -3.4347524824341e-16 1" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="hips_plus_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="hips_plus_flange_visual">
       <origin xyz="-0.018112226355381 0.070415482709233 -0.02799999999999" rpy="-3.1507593796137e-16 2.4883138582683e-16 -1.1794082453903" />
       <geometry>
@@ -1152,6 +1427,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="hips_plus_rod">
+    <inertial>
+      <origin xyz="0 0 0.0325" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="3.5208333333333e-06" iyy="3.5208333333333e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="hips_plus_rod_visual">
       <origin xyz="0.046377762735358 0.043769646596629 -0.055146401715822" rpy="1.5823077252066 -0.46932727976053 -1.9258244866481" />
       <geometry>
@@ -1165,11 +1445,16 @@
   <joint name="hips_flange_minus_x" type="revolute" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_minus_flange" />
-    <origin xyz="-0.071999999999966 -0.010118940098547 0.02799999999999" rpy="0 -0 0" />
+    <origin xyz="-0.010118940098546999 0.07199999999996598 0.027999999999989995" rpy="-0 -0 -1.5707963267949" />
     <axis xyz="1.1102230246252e-16 -3.4347524824341e-16 1" />
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="hips_minus_flange">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value=".03" />
+      <inertia ixx="1e-05" iyy="1e-05" izz="1e-05" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="hips_minus_flange_visual">
       <origin xyz="-0.008466865120077 0.072212915352805 -0.02799999999999" rpy="-2.2461354405927e-16 -4.5186404444608e-16 1.5478857197963" />
       <geometry>
@@ -1196,6 +1481,11 @@
     <limit effort="0" velocity="0" lower="-3.141592653589793" upper="3.141592653589793" />
   </joint>
   <link name="hips_minus_rod">
+    <inertial>
+      <origin xyz="0 0 0.0325" rpy="0 -0 0" />
+      <mass value=".01" />
+      <inertia ixx="3.5208333333333e-06" iyy="3.5208333333333e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+    </inertial>
     <visual name="hips_minus_rod_visual">
       <origin xyz="0.017923904522795 -0.064780657944222 -0.028594203686447" rpy="1.6904737517834 0.15047263980726 -1.7722204774442" />
       <geometry>

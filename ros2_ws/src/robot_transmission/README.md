@@ -6,8 +6,8 @@
 
 `Model.load(driver_file)` 从 `motor_hardware.transmissions_file` 加载传动；未在传动文件中使用的执行器可由 driver 的 `joint` 字段生成直连组。几何、方向和轴序保存在 YAML，不按电机名字字典序重新排序。
 
-- Simple/Differential 等原插件行为保持不变。
 - `robot_transmission/SpatialLinkageTransmission` 是两输入／两输出球头空间定长连杆插件；当前配置见 `robot_description/models/trial_arm_7dof/config/transmissions.yaml`。
+- `robot_transmission/ParallelLinkageTransmission` 用于完整模型的双杆机构，也支持第一轴直连加一根杆。`direct_first` 选择结构；两组 `jointN_origin/axis`、`motorN_bounds` 及每根杆的 `motorN_origin/axis/ball/platform/length` 均由 MJCF 零位生成。参见 `full_body_robot/config/transmissions.hil.yaml`。正解使用从零位出发的确定性连续求解，逆解使用圆球相交及零位导数同号分支，反馈与命令共用解析雅可比。
 - 空间插件要求9个几何参数：电机轴原点／单位方向／零位球心、关节1轴原点／单位方向、关节2轴原点／单位方向／零位球心、杆长，单位 m；向量为三个空格分隔数，角度 rad。
 - 两个 `actuator_reduction` 只允许 ±1；`joint_reduction` 必须为1，`joint_offset` 为0。安装相位由球心坐标表达，不加到命令上。
 - 只允许完整组换算。一般反馈缺组时不生成该组输出；目标缺组时拒绝。纯力矩请求触及非线性组时，无论方向，都必须完整提供该组 effort 与输入侧位置。
@@ -29,8 +29,8 @@ joint_effort = model.actuator_effort_to_joint(
 - 位置 map 的键和值属于**输入侧空间**。线性插件允许省略第二参数以兼容旧调用；非线性插件缺姿态、部分 effort、NaN/Inf 或未知键时明确抛错。
 - `Model` 不缓存姿态、不判断时钟；调用方负责新鲜度、组内同步和来源完整性。实时输出必须用实际测量，不能用目标角或零位替代。
 - 主机将目标 P/V 换算与实测姿态力矩分开；仿真桥仅给有效组传入当次实际电机姿态，失效组输出零，不复用旧缓存。
-- 非线性组的未来非零 effort 轨迹当前拒绝；未来实际姿态未知，只有明确设计轨迹前馈或实时固件转换后才能扩展。零 effort P/V 轨迹及旧线性 effort 轨迹保持支持。
-- `Model` 单线程使用；不能并发调用同一个实例。`Group` 布局和 C++ 力矩接口已变，升级时须重建全部下游包，不承诺旧二进制 ABI。
+- 非线性力矩换算使用当前实测姿态。轨迹插值和可用命令通道由控制入口决定，见 [motor_hardware_interface](../motor_hardware_interface/README.md)。
+- 同一 `Model` 实例按单线程使用。
 
 ## 数学分支与拒绝条件
 

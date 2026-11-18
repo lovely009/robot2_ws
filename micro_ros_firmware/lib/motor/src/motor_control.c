@@ -639,7 +639,7 @@ static bool apply_command_snapshot(
     const motor_control_snapshot_target_t *t = &snapshot->targets[i];
     if (!isfinite(t->position_rad) || !isfinite(t->velocity_rad_s) ||
         !isfinite(t->effort_nm)) {
-      rejected = true; // 命令侧禁 NaN/Inf（TBD-ROS-01 当前取向：拒绝）
+      rejected = true;
       reject_reason = MOTOR_CONTROL_FAULT_PROTOCOL_ERROR;
       break;
     }
@@ -782,7 +782,7 @@ static bool trajectory_validate(const motor_control_context_t *ctx,
     if (!isfinite(point->position_rad) || !isfinite(point->velocity_rad_s) ||
         !isfinite(point->effort_nm)) {
       *bad_index = i;
-      return false; // 命令侧禁 NaN/Inf（TBD-ROS-01=A）
+      return false;
     }
     int slot = -1;
     for (uint16_t j = 0; j < trajectory->target_count && slot < 0; ++j) {

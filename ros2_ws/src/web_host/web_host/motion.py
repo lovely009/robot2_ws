@@ -65,6 +65,7 @@ class MotionJobs:
         from bvh_broadcaster.generic_retarget import GenericRetargeter, analyze
         clip, directory = job['clip'], job['directory']
         analysis = analyze(directory / 'robot.urdf', clip, up_axis=job['up_axis'], scale=job['scale'])
+        matched_preset = None
         if known and 'arms' in known:
             pairs = {r: s for arm in known['arms'].values() for r, s in zip(arm['robot'], arm['source'])}
             analysis['mapping'].update(source_root=known['torso'], source_to_robot=known['source_to_robot'])
@@ -87,6 +88,7 @@ class MotionJobs:
                     source_names = {j.name for j in clip.joints}
                     if preset['source_root'] not in source_names:
                         break
+                    matched_preset = preset
                     import numpy as np
                     basis = np.asarray(preset['source_to_robot']) @ job['source_basis']
                     analysis['mapping'].update(source_root=preset['source_root'], source_to_robot=basis.tolist())
@@ -99,10 +101,13 @@ class MotionJobs:
         identity = {'version': 1, 'source_basis_version': 1, 'urdf': request['urdf_text'], 'up_axis': job['up_axis'],
                     'scale': job['scale'], 'reference': clip.frames[0].tolist(),
                     'skeleton': [(j.name, j.parent, j.offset.tolist(), j.channels) for j in clip.joints]}
+        if matched_preset is not None:
+            # A restored/updated preset must supersede saved fallback mappings.
+            identity['preset'] = matched_preset
         if job.get('simulation'):
             identity['urdf'] = (directory / 'robot.urdf').read_text()
             identity['simulation_limits'] = job['simulation']['limits']
-            identity['pose_fit_version'] = 2
+            identity['pose_fit_version'] = 3
         job['profile_key'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         job['generic'] = True
         job['status'].update(analysis, mapping_origin='suggested')

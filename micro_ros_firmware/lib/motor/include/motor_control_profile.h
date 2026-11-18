@@ -1,15 +1,8 @@
 #ifndef MOTOR_CONTROL_PROFILE_H
 #define MOTOR_CONTROL_PROFILE_H
 
-// 编译期型号目录（ARD-0007 §8.2/§8.3）：这是"型号目录"而不是设备安装表——
-// 行值来自仓库权威型号库
-// ros2_ws/src/motor_hardware_interface/config/motor.yaml 与 ARD §8.3 基线。
-//
-// Vaxor 80 速比无完整规格，刻意不在目录中（ARD §8.3、禁止项 15）：
-// 绑定必然失败，电机停留在不可控状态并出 PROFILE_REJECTED 事件。
-//
-// TBD-PROFILE-01：固件/上层 Profile 一致性检测机制未冻结；model_name 与
-// ROS 型号库同名是当前一致性锚点。
+// 编译期型号目录，model_name 与 robot_description/config/motor.yaml 对应。
+// VAXOR 80 速比缺少完整规格，绑定时报告 PROFILE_REJECTED。
 
 #include <stddef.h>
 

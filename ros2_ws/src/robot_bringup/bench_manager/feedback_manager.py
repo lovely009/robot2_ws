@@ -13,6 +13,7 @@ CONTROL_ENV = 'BENCH_CONTROL_EXECUTION'
 MOTORS_ENV = 'BENCH_CONTROL_MOTORS'
 SESSION_ENV = 'BENCH_MCU_SESSION'
 PUBLISH_ENV = 'BENCH_FEEDBACK_PUBLISH'
+INVENTORY_SETTLE_S = 1.5
 _MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*\Z')
 
 
@@ -72,6 +73,8 @@ class FirmwareFeedbackManager:
         self._healthy_since = None
         self._unhealthy_since = None
         self._health_at = 0.
+        self._pending_inventory = None
+        self._inventory_since = 0.
 
     @staticmethod
     def validate_name(model: str) -> None:
@@ -86,9 +89,15 @@ class FirmwareFeedbackManager:
         driver = base / 'config' / 'motor_driver.yaml'
         urdf = base / 'urdf' / f'{model}.urdf'
         simulation_driver = base / 'config' / 'motor_driver.simulation.yaml'
+        host_hil_driver = base / 'config' / 'motor_driver.hil.yaml'
+        if host_hil_driver.is_file():
+            simulation_driver = host_hil_driver
         if simulation and simulation_driver.is_file():
             driver = simulation_driver
-            urdf = base / 'urdf' / f'{model}.standalone.urdf'
+            control_urdf = base / 'urdf' / f'{model}.hil.urdf'
+            if model == 'full_body_robot' and not control_urdf.is_file():
+                raise ValueError(f'模型 {model} 缺少 HIL 控制 URDF，请运行 build_hil_config.py')
+            urdf = control_urdf if control_urdf.is_file() else base / 'urdf' / f'{model}.standalone.urdf'
             if not urdf.is_file():
                 raise ValueError(f'模型 {model} 的仿真 mapping 缺少 standalone URDF：{urdf}')
         return driver, urdf
@@ -135,6 +144,7 @@ class FirmwareFeedbackManager:
         if reset_retry:
             self._attempt = None
             self._attempt_count = 0
+            self._pending_inventory = None
 
     def observe_control_status(self, status):
         now = time.monotonic()
@@ -171,8 +181,6 @@ class FirmwareFeedbackManager:
             source, reason = 'waiting', '等待选择模型'
         elif not agent_running:
             source, reason = 'waiting', '等待 Agent'
-        elif motor_ids == []:
-            source, reason = 'waiting', '等待新鲜电机反馈'
         self._source = 'simulation' if hil else source
         self._reason = f'仿真关节反馈；{reason}' if hil else reason
         if source != 'firmware':
@@ -180,37 +188,68 @@ class FirmwareFeedbackManager:
                 self.stop()
             self._attempt = None
             self._attempt_count = 0
+            self._pending_inventory = None
             return
         status = self.status()
         try:
             driver, urdf = self._model_files(model, simulation=hil)
             # 保留既有 _validate(model) 扩展点；仅实际仿真 mapping 需要新路径。
             transmission = (self._validate_files(model, driver, urdf)
-                            if driver.name == 'motor_driver.simulation.yaml'
+                            if driver.name in ('motor_driver.simulation.yaml', 'motor_driver.hil.yaml')
                             else self._validate(model))
             available = set(transmission.actuator_ids.values() if motor_ids is None else motor_ids)
             selected = sorted({transmission.actuator_ids[name]
                 for group in transmission.groups
-                if all(transmission.actuator_ids[name] in available for name in group.actuators)
-                for name in group.actuators})
-            if not selected:
-                self.stop()
-                self._source = 'simulation' if hil else 'waiting'
-                self._reason = '等待完整传动组的电机反馈'
-                return
+                if driver.name == 'motor_driver.hil.yaml' or all(
+                    transmission.actuator_ids[name] in available for name in group.actuators)
+                for name in group.actuators if transmission.actuator_ids[name] in available})
             ids = ','.join(map(str, selected)) if motor_ids is not None else ''
             session = str(session_id)
             profile = self.models_root / model / 'config' / 'fastdds_udp.xml'
             dds_profile = str(profile) if hil and profile.is_file() else ''
             key = (model, ids, session, publish_states, dds_profile)
             now = time.monotonic()
+            same_context = (
+                status['model'] == model and status['execution'] == 'ros2_control'
+                and (status['session_id'] == session or (session_id == 0 and motor_ids == []))
+                and status['publishes_joint_states'] == publish_states
+                and status['dds_profile'] == dds_profile)
+            matching = (status['state'] == 'running' and same_context
+                        and status['motor_ids'] == ids and bool(selected))
+            # MCU 重启或控制来源切换立即释放旧控制权；在线集合抖动只延迟重建。
+            if status['state'] == 'running' and not same_context:
+                self.stop(reset_retry=False)
+                status = self.status()
+            # 管理器刚重启时 session=0 表示尚未收到首帧，不能据此撤销已运行的会话。
+            if status['state'] == 'running' and session_id == 0 and motor_ids == []:
+                self._pending_inventory = None
+                self._reason = '等待首次电机反馈以确认现有会话'
+                return
+            if matching or motor_ids is None:
+                self._pending_inventory = None
+            else:
+                if self._pending_inventory != key:
+                    self._pending_inventory = key
+                    self._inventory_since = now
+                if now - self._inventory_since < INVENTORY_SETTLE_S:
+                    if status['state'] != 'running':
+                        self._source = 'simulation' if hil else 'waiting'
+                    self._reason = '等待电机在线列表稳定'
+                    return
+            if not selected:
+                if status['state'] != 'stopped':
+                    self.stop(reset_retry=False)
+                elif self._attempt is not None:
+                    self._stop_control()
+                self._attempt = None
+                self._attempt_count = 0
+                self._source = 'simulation' if hil else 'waiting'
+                self._reason = ('等待新鲜电机反馈' if not motor_ids
+                                else '等待完整传动组的电机反馈')
+                return
             if self._attempt != key:
                 self._attempt_count = 0
-            if (status['state'] == 'running' and status['model'] == model
-                    and status['execution'] == 'ros2_control'
-                    and status['motor_ids'] == ids and status['session_id'] == session
-                    and status['publishes_joint_states'] == publish_states
-                    and status['dds_profile'] == dds_profile):
+            if matching:
                 if self._attempt != key:
                     self._attempt, self._attempt_at = key, now
                     return

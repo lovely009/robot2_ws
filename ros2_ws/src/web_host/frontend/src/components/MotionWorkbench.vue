@@ -23,9 +23,13 @@ const props = defineProps<{ currentModel: string }>();
 const bvh = ref<File>();
 const urdf = ref<File>();
 const sources = ref<string[]>([]);
+const savedSources = ref<Record<string, boolean>>({});
+const checkingSaved = ref(false);
+const savedStatusError = ref('');
 const models = ref<string[]>([]);
 const bvhSource = ref('');
-const robotModel = ref(props.currentModel);
+const robotModel = ref(props.currentModel || new URLSearchParams(location.search).get('model')
+  || localStorage.getItem('web_host.model') || 'half_body_robot');
 const catalogLoading = ref(true);
 const modelChosen = ref(false);
 const upAxis = ref('auto');
@@ -49,6 +53,7 @@ const busy = computed(() => uploading.value || restoring.value || job.value?.sta
 const canSubmit = computed(() => !busy.value && !catalogLoading.value
   && !!(bvhSource.value || bvh.value) && !!(robotModel.value || urdf.value));
 const ready = computed(() => job.value?.state === 'done' && !!preview.value);
+const selectedSaved = computed(() => !!bvhSource.value && savedSources.value[bvhSource.value] === true);
 const seconds = (value: number) => `${value.toFixed(2)} s`;
 let display: { show(index: number): void; dispose(): void } | undefined;
 let poll: ReturnType<typeof setTimeout>;
@@ -57,6 +62,7 @@ let disposed = false;
 let lastTick = 0;
 const abort = new AbortController();
 const base = (id: string) => `/api/motion/jobs/${id}`;
+let statusRequest = 0;
 
 watch(bvhSource, name => {
   bvh.value = undefined;
@@ -67,6 +73,45 @@ watch(robotModel, () => { urdf.value = undefined; });
 watch(() => props.currentModel, name => {
   if (!modelChosen.value && models.value.includes(name)) robotModel.value = name;
 });
+watch([robotModel, urdf, upAxis, scale, catalogLoading], () => {
+  void refreshSavedSources();
+});
+
+async function modelText(modelName: string, file?: File) {
+  if (!modelName) return file?.text();
+  const name = encodeURIComponent(modelName);
+  const response = await fetch(`/robot_sim/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
+  if (!response.ok) throw Error(`模型 ${modelName} 的 URDF 加载失败`);
+  return response.text();
+}
+
+async function refreshSavedSources() {
+  const version = ++statusRequest;
+  savedSources.value = {};
+  savedStatusError.value = '';
+  checkingSaved.value = false;
+  if (catalogLoading.value || !sources.value.length || !(robotModel.value || urdf.value)) return;
+  const modelName = robotModel.value;
+  const file = urdf.value;
+  const options = { up_axis: upAxis.value, scale: scale.value };
+  checkingSaved.value = true;
+  try {
+    const text = await modelText(modelName, file);
+    if (disposed || version !== statusRequest) return;
+    const result = await request('/api/motion/sources/status', {
+      retargeting: 'generic', ...(modelName ? { model: modelName } : {}),
+      urdf_text: text, ...options,
+    });
+    if (disposed || version !== statusRequest) return;
+    savedSources.value = Object.fromEntries((result.sources || [])
+      .filter((entry: { name?: unknown; saved?: unknown }) => typeof entry.name === 'string')
+      .map((entry: { name: string; saved?: boolean }) => [entry.name, entry.saved === true]));
+  } catch {
+    if (!disposed && version === statusRequest) savedStatusError.value = '保存状态核对失败，可继续导入';
+  } finally {
+    if (version === statusRequest) checkingSaved.value = false;
+  }
+}
 
 async function loadCatalogs() {
   const results = await Promise.allSettled([request('/api/motion/sources'), request('/api/models')]);
@@ -79,7 +124,8 @@ async function loadCatalogs() {
   }
   if (robots.status === 'fulfilled' && Array.isArray(robots.value.models)) {
     models.value = robots.value.models.filter((name: unknown): name is string => typeof name === 'string');
-    robotModel.value = models.value.includes(props.currentModel) ? props.currentModel : models.value[0] || '';
+    const preferred = modelChosen.value ? robotModel.value : props.currentModel || robotModel.value;
+    robotModel.value = models.value.includes(preferred) ? preferred : models.value[0] || '';
   } else robotModel.value = '';
   if (results.some(result => result.status === 'rejected')) error.value = '库列表加载失败，可重试刷新或导入本地文件';
   catalogLoading.value = false;
@@ -156,6 +202,7 @@ async function accept(current: Job) {
     time.value = 0;
     playing.value = true;
     lastTick = performance.now();
+    void refreshSavedSources();
   } else error.value = current.error || '转换失败，请检查文件与映射';
 }
 
@@ -193,15 +240,12 @@ async function submit() {
   sessionStorage.removeItem('robot2.motionJob');
   uploading.value = true;
   try {
-    let urdfText: string;
-    if (modelName) {
-      const name = encodeURIComponent(modelName);
-      const response = await fetch(`/robot_sim/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
-      if (!response.ok) throw Error(`模型 ${modelName} 的 URDF 加载失败`);
-      urdfText = await response.text();
-    } else urdfText = await urdfFile!.text();
+    const urdfText = (await modelText(modelName, urdfFile))!;
     if ((new TextEncoder().encode(urdfText).length + (bvhFile?.size || 0)) > 20 * 1024 * 1024)
       throw Error('两份文件合计请控制在 20 MB 内');
+    sessionStorage.setItem('robot2.motionSelection', JSON.stringify({
+      model: modelName, up_axis: upAxis.value, scale: scale.value,
+    }));
     await accept(await request('/api/motion/jobs', {
       retargeting: 'generic', review_mapping: reviewMapping.value,
       ...(modelName ? {model: modelName} : {}),
@@ -238,12 +282,50 @@ function reset() { playing.value = false; time.value = 0; showFrame(); }
 
 onMounted(async () => {
   animation = requestAnimationFrame(tick);
+  const playSource = sessionStorage.getItem('robot2.motionPlaySource');
+  sessionStorage.removeItem('robot2.motionPlaySource');
   const id = sessionStorage.getItem('robot2.motionJob');
-  restoring.value = !!id;
+  restoring.value = !playSource && !!id;
+  if (restoring.value) {
+    try {
+      const selection = JSON.parse(sessionStorage.getItem('robot2.motionSelection') || 'null');
+      if (selection && typeof selection.model === 'string'
+          && ['auto', 'y_up', 'z_up'].includes(selection.up_axis)
+          && [.001, .01, 1].includes(selection.scale)) {
+        robotModel.value = selection.model;
+        modelChosen.value = true;
+        upAxis.value = selection.up_axis;
+        scale.value = selection.scale;
+      }
+    } catch { /* Invalid session preferences fall back to the current model. */ }
+  }
   await loadCatalogs();
+  if (disposed) return;
+  if (playSource) {
+    if (!sources.value.includes(playSource)) {
+      error.value = '所选 BVH 已不在动作库，请重新选择';
+      return;
+    }
+    bvhSource.value = playSource;
+    await nextTick();
+    await submit();
+    return;
+  }
   if (!id) return;
   try { await accept(await request(base(id))); }
-  catch { if (!disposed) { sessionStorage.removeItem('robot2.motionJob'); error.value = '上次临时任务已过期，请重新导入'; } }
+  catch (e) {
+    if (disposed) return;
+    sessionStorage.removeItem('robot2.motionJob');
+    if ((e as { status?: number }).status === 404) {
+      await refreshSavedSources();
+      if (!disposed && selectedSaved.value) {
+        restoring.value = false;
+        await submit();
+        return;
+      }
+    }
+    if (!disposed) error.value = '上次临时任务已过期，请重新导入';
+  }
   finally { restoring.value = false; }
 });
 onBeforeUnmount(() => {
@@ -258,10 +340,11 @@ onBeforeUnmount(() => {
       <div class="motion-import-body">
         <div class="motion-file"><span class="eyebrow">01 / 人体动作</span><strong>动作库 BVH</strong>
           <select v-model="bvhSource" aria-label="动作库 BVH" :disabled="busy || catalogLoading">
-            <option v-for="name in sources" :key="name" :value="name">{{ name }}</option>
+            <option v-for="name in sources" :key="name" :value="name">{{ name }}{{ savedSources[name] ? ' · 已保存' : '' }}</option>
             <option value="">导入本地 BVH…</option>
           </select>
           <input v-if="!bvhSource" type="file" accept=".bvh,.BHV,.bhv" aria-label="导入 BVH 文件" :disabled="busy || catalogLoading" @change="choose($event, 'bvh')" />
+          <span v-if="bvhSource" class="motion-saved-status" role="status">{{ checkingSaved ? '正在核对保存状态…' : savedStatusError || (selectedSaved ? '已保存 · 当前模型与转换选项可复用' : '当前模型与转换选项尚无保存结果') }}</span>
         </div>
         <div class="motion-file"><span class="eyebrow">02 / 目标机器人</span><strong>模型库</strong>
           <select v-model="robotModel" aria-label="目标机器人模型" :disabled="busy || catalogLoading" @change="modelChosen = true">
@@ -276,7 +359,7 @@ onBeforeUnmount(() => {
         </div>
         <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '自动识别人体与机器人对应关系；疑点首次确认，已记住的相同组合自动转换。输出仅用于预览。' }}</p>
         <label class="motion-hint"><input v-model="reviewMapping" type="checkbox" :disabled="busy" />重新确认已记住的映射</label>
-        <button class="motion-primary" :disabled="!canSubmit" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : '导入并转换' }}</button>
+        <button class="motion-primary" :disabled="!canSubmit" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : selectedSaved && !reviewMapping ? '加载并播放' : '导入并转换' }}</button>
         <div v-if="job" class="motion-metadata">
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>

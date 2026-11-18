@@ -540,7 +540,7 @@ def save_result(workspace, report, group_names=None):
         "coupled_limits": {name: group["coupled_workspace"] for name, group in report["differential_groups"].items()
                            if "coupled_workspace" in group},
     }
-    destination=MODEL/"config/simulation_limits.yaml"
+    destination=MODEL/"config/simulation_limits.pending.yaml"
     temporary=destination.with_suffix(".yaml.tmp")
     temporary.write_text(yaml.safe_dump(config, sort_keys=False))
     temporary.replace(destination)

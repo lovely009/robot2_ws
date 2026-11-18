@@ -31,7 +31,7 @@ TEST_F(BenchControl, ExplicitEnableWaitsForMcuAckAndPreservesSourceTimestamp) {
 }
 TEST_F(BenchControl, UnconfirmedEnableExpiresWithoutReplay) {
   enable(); ASSERT_TRUE(spin([&]{return !wire_grants.empty();}));
-  const auto grant=wire_grants.back(); run(140ms);
+  const auto grant=wire_grants.back(); run(240ms);
   EXPECT_FALSE(wire_grants.back().lease_active);
   status.lease_id=grant.lease_id; status.lease_sequence=grant.lease_sequence;
   status.lease_active=true; status.lease_valid_until_tick_ms=status.snapshot_tick_ms+200;
@@ -62,6 +62,101 @@ TEST_F(BenchControl, LostStatusRevokesAndDoesNotRecoverFromStatusAlone) {
   status_timer.reset(); run(320ms);
   EXPECT_FALSE(wire_grants.back().lease_active);
   publish_status(); command_pub->publish(command());run();EXPECT_TRUE(commands.empty());
+}
+
+TEST_F(BenchControl, DelayedRenewalAckWaitsOnlyWithinSentLeaseDeadline) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  status_timer.reset();
+  // A renewal is in flight while the reliable upstream status catches up.
+  run(210ms);
+  ASSERT_FALSE(wire_grants.empty());
+  EXPECT_TRUE(wire_grants.back().lease_active);
+  // The original MCU observation cannot authorize an indefinite extension.
+  run(110ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
+}
+
+TEST_F(BenchControl, ExplicitMcuRevocationStopsBeforeSentLeaseDeadline) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  status.lease_active = false;
+  publish_status();
+  run(30ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
+}
+
+TEST_F(BenchControl, FreshMotionAdvancesRenewalWhileReliableStatusIsDelayed) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  status_timer.reset();
+  const auto base_tick = status.snapshot_tick_ms;
+  const auto started = std::chrono::steady_clock::now();
+  auto motion_timer = peer->create_wall_timer(20ms, [&] {
+    AgentMotion motion;
+    motion.session_id = status.session_id;
+    motion.snapshot_stamp = stamp();
+    motion.snapshot_tick_ms = base_tick + static_cast<uint32_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count());
+    motion.sequence = static_cast<uint32_t>(motions.size() + 1);
+    motion.group_count = 1;
+    motion.count = 1;
+    motion.motor_ids = {64};
+    motion.position_q = {0};
+    motion.velocity_q = {0};
+    motion.effort_q = {0};
+    motion.state_age_ms = {5};
+    motion.target_source = {0};
+    motion_pub->publish(motion);
+  });
+  run(235ms);
+  ASSERT_FALSE(motions.empty());
+  ASSERT_FALSE(wire_grants.empty());
+  EXPECT_TRUE(wire_grants.back().lease_active);
+  EXPECT_GT(wire_grants.back().lease_valid_until_tick_ms, base_tick + 350u);
+  // Motion cannot conceal a missing control-state stream indefinitely.
+  run(110ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
+}
+
+TEST_F(BenchControl, McuLeaseChangeStopsBeforeSentLeaseDeadline) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  ++status.lease_id;
+  publish_status();
+  run(30ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
+}
+
+TEST_F(BenchControl, ImpossibleRenewalAckStopsBeforeSentLeaseDeadline) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  status.lease_sequence = UINT32_MAX;
+  publish_status();
+  run(30ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
+}
+
+TEST_F(BenchControl, ZeroRenewalAckStopsBeforeSentLeaseDeadline) {
+  enable();
+  ASSERT_TRUE(spin([&] {return !wire_grants.empty();}));
+  ack();
+  run(25ms);
+  status.lease_sequence = 0;
+  publish_status();
+  run(30ms);
+  EXPECT_FALSE(wire_grants.back().lease_active);
 }
 
 TEST_F(BenchControl, QueuedEnableFromBeforeStopCannotRestart) {

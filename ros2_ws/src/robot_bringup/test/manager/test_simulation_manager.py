@@ -73,6 +73,17 @@ def test_options_report_both_model_lists() -> None:
     assert options['mujoco_models'] == ['half_body_robot', 'standalone']
 
 
+def test_viewer_keeps_external_preview_when_hil_topology_exists():
+    manager = SimulationProcessManager(
+        model_provider=lambda: ['full_body_robot'],
+        mujoco_model_provider=lambda: ['full_body_robot'],
+        viewer_model_provider=lambda: ['full_body_robot'])
+    config, arguments, launch = manager._validate_and_build(_request(
+        backend='mujoco', model='full_body_robot', controller_mode='external'))
+    assert launch == 'mujoco.launch.py'
+    assert arguments == ['model:=full_body_robot']
+
+
 @pytest.mark.parametrize('transport', ['vcan', 'socketcan', 'slcan'])
 def test_retired_host_mode_is_rejected_before_unit_or_device_preparation(transport: str) -> None:
     systemd = _systemd()
@@ -397,3 +408,19 @@ def test_service_message_without_confirmation_is_rejected() -> None:
             model='half_body_robot', sim_interface='can0')))
 
     assert not _creations(systemd), '被拒了却起了 unit'
+
+
+def test_firmware_multichannel_configuration_survives_manager_restart():
+    import json
+    systemd = _systemd()
+    manager = SimulationProcessManager(can_provider=lambda: [], serial_provider=lambda: [],
+        model_provider=lambda: ['half_body_robot'], mujoco_model_provider=lambda: ['half_body_robot'],
+        usbcanfd_provider=lambda: [{'index': 0, 'accessible': True}],
+        systemd=SystemdUnits(runner=systemd))
+    rows = [{'bus': 0, 'transport': 'usbcanfd', 'device': 0, 'channel': 0, 'ids': '*'}]
+    request = _request(controller_mode='firmware', transport='multi',
+        physical_bus_isolated=True, sim_channels_json=json.dumps(rows))
+    status = manager.start(request)
+    assert json.loads(status['config']['sim_channels_json']) == rows
+    assert any(x.startswith('sim_channels_json:=') for x in _exec_start(systemd))
+    assert manager.start(request) == status

@@ -1,11 +1,11 @@
-// 参数查询、失能态设零与故障清除：设备屏和连接后自动读取共用。
+// 参数查询、失能态方向设置/驱动板保存、设零与故障清除。
 // 这些函数既被设备屏的按钮调用，也被连接建立后的自动读取调用（由 Vue 工作台调度）——
 // 自动读取不能住在面板里：store.paramCache 是使能面板列电机列表的依据，
 // 切到「运行」屏时设备屏并未挂载。
 import { store, markDirty, DIRTY, paramReadState } from './store.js';
 import { SYS_CMD, MOTOR_ID_NONE } from './format.js';
 import { pub, isConnected, waitDevParamSeq, waitConfigResult, getConnectionGeneration } from './ros.js';
-import { describeMotorState } from './motor_state.js';
+import { describeMotorState, policyControlError } from './motor_state.js';
 
 // 查询/维护事务的关联 id。两个高位都不能碰：bit31 是内核身份读取的命名空间，bit30 是
 // 固件自发脉冲的命名空间（置位会被本地拒）。0 表示「固件代分配」，所以绕开它。
@@ -47,10 +47,10 @@ export function setParamResult(ok, text) { writeResult('paramResult', ok, text);
 
 // 下发一条稀疏写（整条受理或整条拒绝）。返回 request_id，失败返回 0。
 export function sendSystemCommand(command, motorId) {
-  if (![SYS_CMD.REFRESH, SYS_CMD.SET_ZERO, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT].includes(command)) return 0;
+  if (![SYS_CMD.REFRESH, SYS_CMD.SET_ZERO, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT, SYS_CMD.SAVE_DEVICE].includes(command)) return 0;
   if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return 0; }
-  if (command === SYS_CMD.SET_ZERO) {
-    const error = motorZeroError(motorId);
+  if (command === SYS_CMD.SET_ZERO || command === SYS_CMD.SAVE_DEVICE) {
+    const error = command === SYS_CMD.SET_ZERO ? motorZeroError(motorId) : motorDeviceParameterError(motorId);
     if (error) {setParamResult(false, error);return 0;}
   }
   const syncTime=store.controlStates.sourceTimeNs || 0;
@@ -64,10 +64,12 @@ export function sendSystemCommand(command, motorId) {
 }
 
 const zeroRequests = new Set();
+const deviceRequests = new Set();
 export function motorZeroError(id) {
   if (!isConnected()) return '未连接 rosbridge';
   if (store.runtimeMode === 'readonly') return '当前工作台为只读模式';
   if (!Number.isInteger(id) || id < 1 || id > 64) return '请选择有效电机';
+  if (deviceRequests.has(id)) return `电机 ${id} 参数事务处理中，请等待设备回执`;
   if (zeroRequests.has(id)) return `电机 ${id} 设零处理中，请等待设备回执`;
   const actual = describeMotorState(store,id);
   const control = store.controlStates.byId.get(id);
@@ -78,6 +80,55 @@ export function motorZeroError(id) {
   if (host && (['switching','stopping','manual','trajectory','error'].includes(host.mode)
       || host.active_controllers?.length || host.pending_goal_ids?.length)) return '请先停止主机关节控制，再设零';
   return '';
+}
+
+// 方向与驱动板保存复用失能态门禁；设备内核会在实际执行前再次检查。
+export function motorDeviceParameterError(id) {
+  const error = motorZeroError(id);
+  if (error) return error.replaceAll('设零', '设置参数');
+  if (store.motors.get(id)?.topo?.protocol !== 1) return '仅 CERB 驱动板支持方向设置与参数保存';
+  const pending = policyControlError(store,[id]);
+  if (pending) return pending;
+  const cache = store.controlStates;
+  const state = cache.byId.get(id);
+  if (!cache.valid || !state || state.state_age_ms + Date.now() - cache.at > 1500)
+    return '请等待新的 MCU 电机反馈';
+  if (!cache.sourceTimeNs || !store.configSessionId || String(cache.session) !== String(store.configSessionId)) return '请等待 MCU 同步时间与会话';
+  if (!store.commandStatus.data || Date.now() - store.commandStatus.last > 2500) return '请等待新的主机控制状态';
+  return '';
+}
+
+export async function setMotorDirection(id, value) {
+  const error = motorDeviceParameterError(id);
+  if (error || ![0,1].includes(value)) {setParamResult(false,error || '方向值无效');return;}
+  if (!window.confirm(`将电机 ${id} 驱动力矩方向设置为 ${value ? 'CCW' : 'CW'}？\n不改变位置坐标、零点或限位。方向为易失参数，驱动板保存不能固化方向。`)) return;
+  // 确认期间状态可能变化，发送前重新检查。
+  const changed = motorDeviceParameterError(id);
+  if (changed) {setParamResult(false,changed);return;}
+  const requestId = nextParamReq();
+  if (!pub('deviceConfig',{sync_time_ns:store.controlStates.sourceTimeNs,
+    session_id:store.configSessionId,request_id:requestId,kind:0,count:1,
+    targets:[{motor_id:id,field:5,value}],command:0,motor_id:MOTOR_ID_NONE})) return;
+  deviceRequests.add(id);
+  setParamResult(true,`电机 ${id} 方向已请求，等待设备回读核验…`);
+  try {
+    const result = await waitRequest(requestId,10000,`电机 ${id} 方向设置`);
+    setParamResult(result.ok,result.ok ? `电机 ${id} 方向已回读核验；方向易失，断电后需重新设置` : result.text);
+  } finally {deviceRequests.delete(id);markDirty(DIRTY.PARAMS);}
+}
+
+export async function saveMotorDeviceParameters(id) {
+  const error = motorDeviceParameterError(id);
+  if (error) {setParamResult(false,error);return;}
+  if (!window.confirm(`保存电机 ${id} 的驱动板参数？\n仅保存位置上下限、速度与电流上限；不保存方向，不写控制板存储。`)) return;
+  const requestId = sendSystemCommand(SYS_CMD.SAVE_DEVICE,id);
+  if (!requestId) return;
+  deviceRequests.add(id);
+  setParamResult(true,`电机 ${id} 驱动板保存已请求，等待设备事务终态…`);
+  try {
+    const result = await waitRequest(requestId,10000,`电机 ${id} 驱动板保存`);
+    setParamResult(result.ok,result.ok ? `电机 ${id} 已完成发送驱动板保存指令；厂家协议无保存应答，未验证掉电保持` : result.text);
+  } finally {deviceRequests.delete(id);markDirty(DIRTY.PARAMS);}
 }
 
 export async function setMotorZero(id) {

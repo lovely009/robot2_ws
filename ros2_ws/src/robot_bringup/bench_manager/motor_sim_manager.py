@@ -15,6 +15,8 @@ import socket
 
 from .agent_manager import enumerate_serial_ports
 from .model_catalog import enumerate_simulation_models
+from .motor_sim_routes import (enumerate_usbcanfd_devices, validate_endpoints,
+                               encode_route_config, decode_route_config)
 from .simulation_manager import enumerate_can_interfaces
 from .systemd_units import (
     AUTO_STARTED_ENV, STATE_NAMES, UNIT_MOTOR_BACKEND, SystemdUnits, UnitState,
@@ -24,7 +26,7 @@ from .systemd_units import (
 _CONTROL_MAX_RESPONSE_BYTES = 65536
 # 电机后端只接物理/虚拟 CAN 端点；纯 vcan 软件闭环的总线电机是 motor_sim
 # 节点（随仿真自带），不需要本后端。
-_BACKEND_TRANSPORTS = ("socketcan", "slcan")
+_BACKEND_TRANSPORTS = ("socketcan", "slcan", "multi")
 # 控制通道的固定路径（见模块 docstring）。终端路径与 unit 路径共用它，靠
 # fdcan_motor_sim.py 的 flock 互斥，不靠路径区分。
 _CONTROL_SOCKET = "/tmp/robot_sim_motor_backend.sock"
@@ -84,7 +86,9 @@ def hil_motor_backend_request(request) -> dict | None:
         # 透传物理总线隔离确认，未确认时必须在启动后端前拒绝。
         "physical_bus_isolated": request.get("physical_bus_isolated") is True,
     }
-    if transport == "socketcan":
+    if transport == "multi":
+        backend_request["sim_channels_json"] = request.get("sim_channels_json")
+    elif transport == "socketcan":
         backend_request["sim_interface"] = request.get("sim_interface")
     else:
         backend_request["sim_tty"] = request.get("sim_tty")
@@ -95,11 +99,12 @@ class MotorSimProcessManager:
     """管理电机后端 unit 并转发控制命令。"""
 
     def __init__(self, can_provider=None, serial_provider=None,
-                 model_provider=None, systemd=None):
+                 model_provider=None, systemd=None, usbcanfd_provider=None):
         self._can_provider = can_provider or enumerate_can_interfaces
         self._serial_provider = serial_provider or enumerate_serial_ports
         self._model_provider = model_provider or enumerate_simulation_models
         self._systemd = systemd or SystemdUnits()
+        self._usbcanfd_provider = usbcanfd_provider or enumerate_usbcanfd_devices
 
     def _validate(self, request):
         if not isinstance(request, dict):
@@ -107,7 +112,7 @@ class MotorSimProcessManager:
         transport = request.get("transport")
         if transport not in _BACKEND_TRANSPORTS:
             raise ValueError(
-                "电机后端需要物理总线（socketcan 或 slcan）；vcan 纯软件"
+                "电机后端需要物理总线（socketcan、slcan 或 multi）；vcan 纯软件"
                 "闭环的电机由 motor_sim 节点扮演")
         model = request.get("model")
         if not isinstance(model, str) or model not in self._model_provider():
@@ -121,7 +126,14 @@ class MotorSimProcessManager:
             # 控制通道路径是常量；放进 config 让页面与幂等比较都从同一处取
             "motor_sim_control_socket": _CONTROL_SOCKET,
         }
-        if transport == "socketcan":
+        if transport == "multi":
+            try:
+                rows = json.loads(request.get("sim_channels_json", ""))
+            except (TypeError, ValueError) as exc:
+                raise ValueError('sim_channels_json must be a JSON channel list') from exc
+            config['channels'] = validate_endpoints(rows, self._can_provider(),
+                self._serial_provider(), self._usbcanfd_provider())
+        elif transport == "socketcan":
             available = {
                 item["name"]: item for item in self._can_provider()
                 if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -152,7 +164,7 @@ class MotorSimProcessManager:
                else self._systemd.environment(UNIT_MOTOR_BACKEND))
         return {
             "state": STATE_NAMES[unit.state],
-            "config": config_from_env(_CONFIG_ENV_PREFIX, env),
+            "config": decode_route_config(config_from_env(_CONFIG_ENV_PREFIX, env)),
             "returncode": unit.returncode,
             "auto_started": env.get(AUTO_STARTED_ENV) == "1",
         }
@@ -182,6 +194,7 @@ class MotorSimProcessManager:
         command = [
             "ros2", "launch", "robot_sim", "simulation.launch.py",
             "simulator_only:=true",
+            "bridge_plant:=true",
             "controller_mode:=firmware",
             f"transport:={config['transport']}",
             f"model:={config['model']}",
@@ -189,13 +202,15 @@ class MotorSimProcessManager:
             "start_micro_ros_agent:=false",
             f"sim_control_socket:={config['motor_sim_control_socket']}",
         ]
-        if config["transport"] == "socketcan":
+        if config["transport"] == "multi":
+            command.append('sim_channels_json:=' + json.dumps(config['channels'], separators=(',', ':')))
+        elif config["transport"] == "socketcan":
             command.append(f"sim_interface:={config['sim_interface']}")
         else:
             command.append(f"sim_tty:={config['sim_tty']}")
 
         self._systemd.start(UNIT_MOTOR_BACKEND, command, auto=auto,
-                            session_env=config_env(_CONFIG_ENV_PREFIX, config))
+                            session_env=config_env(_CONFIG_ENV_PREFIX, encode_route_config(config)))
         return self._status()
 
     def stop(self):

@@ -1,0 +1,307 @@
+# 仅供隔离总线 HIL；型号取自 CAD，输入轴取自 MJCF，不用于真机。
+motor_hardware:
+  motor_specs_file: ../../../config/motor.yaml
+  buses:
+    arm:
+      transport: socketcan
+      interface: can0
+  motors:
+    motor_01:
+      id: 1
+      joint: waist_yaw
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_02:
+      id: 2
+      joint: waist_flange_plus_x
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_03:
+      id: 3
+      joint: waist_flange_minus_x
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_04:
+      id: 4
+      joint: hips_flange_plus_x
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_05:
+      id: 5
+      joint: hips_flange_minus_x
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_06:
+      id: 6
+      joint: left_scapula_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_07:
+      id: 7
+      joint: left_shoulder_flange_linkage
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_08:
+      id: 8
+      joint: left_shoulder_pitch
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_09:
+      id: 9
+      joint: left_shoulder_roll
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_10:
+      id: 10
+      joint: left_shoulder_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_11:
+      id: 11
+      joint: left_elbow_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_12:
+      id: 12
+      joint: left_forearm_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_13:
+      id: 13
+      joint: left_wrist_flange_proximal
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+    motor_14:
+      id: 14
+      joint: left_wrist_flange_distal
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+    motor_15:
+      id: 15
+      joint: right_scapula_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_16:
+      id: 16
+      joint: right_shoulder_flange_linkage
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_17:
+      id: 17
+      joint: right_shoulder_pitch
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_18:
+      id: 18
+      joint: right_shoulder_roll
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_19:
+      id: 19
+      joint: right_shoulder_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_20:
+      id: 20
+      joint: right_elbow_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_21:
+      id: 21
+      joint: right_forearm_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_22:
+      id: 22
+      joint: right_wrist_flange_proximal
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+    motor_23:
+      id: 23
+      joint: right_wrist_flange_distal
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+    motor_24:
+      id: 24
+      joint: left_hip_pitch
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_25:
+      id: 25
+      joint: left_hip_roll
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_26:
+      id: 26
+      joint: left_hip_yaw
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_27:
+      id: 27
+      joint: left_knee_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_28:
+      id: 28
+      joint: left_shank_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_29:
+      id: 29
+      joint: left_ankle_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_30:
+      id: 30
+      joint: left_ankle_roll
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+    motor_31:
+      id: 31
+      joint: right_hip_pitch
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_32:
+      id: 32
+      joint: right_hip_roll
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_33:
+      id: 33
+      joint: right_hip_yaw
+      type: cerb_r58_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_34:
+      id: 34
+      joint: right_knee_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_35:
+      id: 35
+      joint: right_shank_yaw
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_36:
+      id: 36
+      joint: right_ankle_pitch
+      type: cerb_r48_101
+      bus: arm
+      command:
+        kp: 30.0
+        kd: 1.0
+    motor_37:
+      id: 37
+      joint: right_ankle_roll
+      type: vaxor_2550
+      bus: arm
+      command:
+        kp: 0.008
+        kd: 1.0
+  transmissions_file: transmissions.hil.yaml
+  coupled_limits_file: coupled_limits.hil.yaml
+  hil_input_fallback: true

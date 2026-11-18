@@ -204,6 +204,14 @@ static void test_policy_results_share_operation_id_without_cross_matching() {
 }
 
 int main() {
+  {
+    Coordinator c;
+    auto r = request(); r.command = 1; r.motor_id = 7; r.policy_count = 0;
+    r.direction_raw = 0;
+    assert(c.begin(r, 9, 0) >= 0);
+    r.direction_raw = 1;
+    assert(c.begin(r, 9, 0) < 0 && rejection(c).status == kConflict);
+  }
   test_policy_results_share_operation_id_without_cross_matching();
   test_exact_content_and_sessions();
   test_acknowledged_request_cannot_replay();

@@ -423,11 +423,8 @@ void motor_control_finish_tx(motor_control_context_t *ctx,
       dev_init_settled = true;
     }
   }
-  // 保存事务成功：脏位清除（设备侧落盘已发出；W25 由上层在同一动作里落）。
-  if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH &&
-      result == MOTOR_PROTOCOL_CONFIG_OK) {
-    entry->record_dirty_slots = 0U;
-  }
+  // 驱动板保存只覆盖厂家四槽，不代表 MCU 参数记录已写入 W25；脏位由
+  // 真正完成记录落盘的上层流程清除，不能在这里一并清空。
   if (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_T_MAX && result != MOTOR_PROTOCOL_CONFIG_OK) {
     entry->dev_raw_present &= (uint8_t)~(1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX);
     entry->profile = NULL;
@@ -894,6 +891,38 @@ static bool device_refresh_allowed(const motor_control_entry_t *entry) {
          entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE;
 }
 
+static bool trajectory_owns_entry(const motor_control_context_t *ctx,
+    const motor_control_entry_t *entry) {
+  if (!ctx->trajectory_active) {
+    return false;
+  }
+  for (uint16_t i = 0U; i < ctx->trajectory.target_count; ++i) {
+    if (ctx->trajectory.target_ids[i] == entry->motor_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 设备页单电机方向/保存只对已绑定 CERB 开放，且必须先完全失能并退出一切
+// 运动意图。RT 层再次检查，不能只依赖桥接层看到的快照。
+static bool driver_device_config_allowed(const motor_control_context_t *ctx,
+    const motor_control_entry_t *entry) {
+  return entry->online && entry->profile != NULL &&
+      motor_protocol_adapter_allows_driver_config(entry->adapter) &&
+      entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
+      !entry->policy_enable && !entry->motion_enabled &&
+      !entry->enable_pending && !entry->motion_authorized &&
+      !entry->has_target && !entry->fresh_target_pending &&
+      !entry->p0_pending && !trajectory_owns_entry(ctx, entry);
+}
+
+static bool driver_device_config_tx(const motor_control_entry_t *entry) {
+  return entry->tx_active &&
+      (entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_DIRECTION ||
+      entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH);
+}
+
 static bool reject_invalid(motor_control_context_t *ctx,
     motor_control_entry_t *entry,
     const motor_protocol_config_request_t *request,
@@ -953,6 +982,9 @@ bool motor_control_apply_policy_entry(motor_control_context_t *ctx,
     uint32_t now_ms) {
   if (entry->profile == NULL) {
     return reject_invalid(ctx, entry, request, now_ms);
+  }
+  if (request->enable && driver_device_config_tx(entry)) {
+    return reject_busy(ctx, entry, request, now_ms);
   }
   if (request->enable && entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
     return reject_busy(ctx, entry, request, now_ms);
@@ -1025,6 +1057,23 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
   }
 
   switch (request->kind) {
+  case MOTOR_PROTOCOL_CONFIG_SET_DIRECTION:
+  case MOTOR_PROTOCOL_CONFIG_SAVE_DEVICE_FLASH: {
+    const bool value_ok =
+        request->kind == MOTOR_PROTOCOL_CONFIG_SET_DIRECTION
+            ? request->direction_raw <= 1U
+            : request->save_slots == MOTOR_PROTOCOL_PARAM_SAVE_SLOTS_MASK;
+    if (!value_ok) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    if (entry->tx_active || bus_stage_in_flight(ctx, entry)) {
+      return reject_busy(ctx, entry, request, now_ms);
+    }
+    if (!driver_device_config_allowed(ctx, entry)) {
+      return reject_invalid(ctx, entry, request, now_ms);
+    }
+    return start_tx(ctx, entry, request, now_ms);
+  }
   case MOTOR_PROTOCOL_CONFIG_SET_ZERO: {
     if (!entry->online || entry->profile == NULL ||
         entry->lifecycle != MOTOR_CONTROL_LIFECYCLE_READY_DISABLED ||
@@ -1094,6 +1143,9 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     // true = 重立运动授权（仍需新快照才能运动）；false = 立即退出运动：
     // 软停 + 失能帧 + 清授权位（ARD §36 冻结语义）。
     if (request->enable) {
+      if (driver_device_config_tx(entry)) {
+        return reject_busy(ctx, entry, request, now_ms);
+      }
       if (entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_ZERO) {
         return reject_busy(ctx, entry, request, now_ms);
       }

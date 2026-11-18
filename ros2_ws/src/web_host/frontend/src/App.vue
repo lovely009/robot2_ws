@@ -300,7 +300,7 @@ onBeforeUnmount(() => {
       </div>
 
       <nav v-show="screen !== 'motion'" class="mobile-pane-tabs" aria-label="工作区面板">
-        <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : p.id !== 'parameters' && (screen !== 'sim' || p.id !== 'objects'))" :key="item.id"
+        <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : screen === 'sim' ? p.id === 'stage' : p.id !== 'parameters')" :key="item.id"
           :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true">
           {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
         </button>
@@ -308,7 +308,7 @@ onBeforeUnmount(() => {
       <MotionWorkbench v-if="screen === 'motion'" :current-model="snapshot.model" />
       <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach', 'sim-workspace': screen === 'sim' }">
         <ResizeHandle v-show="screen === 'run'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
-        <ResizeHandle v-show="screen !== 'teach' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="resizablePanelMinHeight" reverse />
+        <ResizeHandle v-show="screen === 'run' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="resizablePanelMinHeight" reverse />
         <section v-show="screen !== 'sim'" class="objects-area surface">
           <div class="panel-title">
             <span>{{ screen === 'teach' ? '设备查询' : '电机与关节' }}</span>
@@ -377,7 +377,7 @@ onBeforeUnmount(() => {
             <PanelHost id="deviceParams" :active="screen === 'teach' && deviceParameters === 'motor'" />
           </div>
         </aside>
-        <section v-show="screen !== 'teach'" class="observer-area observer surface">
+        <section v-show="screen === 'run'" class="observer-area observer surface">
           <div class="observer-head">
             <button
               class="observer-fold"
@@ -407,10 +407,10 @@ onBeforeUnmount(() => {
           <div id="observation-content" v-show="observe" class="observation-body">
             <PanelHost
               id="curve"
-              :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'curve'"
+              :active="screen === 'run' && observe && observation === 'curve'"
             />
-            <EventLog v-show="screen !== 'teach' && screen !== 'motion' && observe && observation === 'events'" />
-            <PanelHost id="imu" :active="screen !== 'teach' && screen !== 'motion' && observe && observation === 'imu'" />
+            <EventLog v-show="screen === 'run' && observe && observation === 'events'" />
+            <PanelHost id="imu" :active="screen === 'run' && observe && observation === 'imu'" />
           </div>
         </section>
       </div>

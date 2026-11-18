@@ -437,6 +437,19 @@ def write_standalone_urdf(mjcf, controlled_joints, limits):
             ET.SubElement(joint, "axis", xyz=source.get("axis"))
             parent = child
         link = ET.SubElement(robot, "link", name=name)
+        source_inertia = body.find("inertial")
+        if source_inertia is not None:
+            inertial = ET.SubElement(link, "inertial")
+            add_origin(inertial, source_inertia)
+            ET.SubElement(inertial, "mass", value=source_inertia.get("mass"))
+            if source_inertia.get("fullinertia") is not None:
+                values = np.fromstring(source_inertia.get("fullinertia"), sep=" ")
+            else:
+                values = [*np.fromstring(source_inertia.get("diaginertia"), sep=" "), 0., 0., 0.]
+            ET.SubElement(inertial, "inertia", **{
+                key: str(value) for key, value in
+                zip(("ixx", "iyy", "izz", "ixy", "ixz", "iyz"), values)
+            })
         for geom in body.findall("geom[@type='mesh']"):
             if float(geom.get("rgba", "1 1 1 1").split()[-1]) == 0:
                 continue

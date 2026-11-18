@@ -103,8 +103,10 @@ def test_scanned_limits_are_bound_to_current_exact_cad(completed_scan):
 
 
 def test_new_scanned_asymmetric_bounds_are_used_without_legacy_symmetrizing(completed_scan):
+    from joint_convention import native_limits
+
     report = json.loads((MODEL / 'mujoco/geometry_limits.json').read_text())
-    config = yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text())
+    config = native_limits(MODEL, yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text()))
     assert len(report['joint_limits']) == len(config['joint_limits']) == 37
     assert len(report['actuator_limits']) == len(config['actuator_limits']) == 37
     for name, bounds in report['joint_limits'].items():
@@ -117,7 +119,7 @@ def test_new_scanned_asymmetric_bounds_are_used_without_legacy_symmetrizing(comp
 def test_native_coupled_domains_match_the_display_model(completed_scan):
     from robot_transmission.coupled_limits import CoupledLimits
     config = yaml.safe_load((MODEL / 'config/simulation_limits.yaml').read_text())
-    topology = yaml.safe_load((MODEL / 'config/motor_topology.yaml').read_text())
+    topology = yaml.safe_load((MODEL / 'config/model_motor_topology.yaml').read_text())
     root = ET.parse(MODEL / 'mujoco/full_body_robot.xml').getroot()
     embedded = json.loads(root.find("custom/text[@name='robot_sim_joint_position']").get('data'))
     assert embedded['coupled_limits'] == config['coupled_limits']
@@ -311,7 +313,8 @@ def test_axial_interface_fit_accepts_only_the_documented_tolerance():
 def test_save_rechecks_snapshot_after_computation_before_publishing(tmp_path,monkeypatch):
     from types import SimpleNamespace
     topology=yaml.safe_load((MODEL/'config/motor_topology.yaml').read_text())
-    names=[j.get('name') for j in ET.parse(MODEL/'urdf/full_body_robot.urdf').findall('joint')]
+    root=ET.parse(MODEL/'mujoco/full_body_robot.physics.xml')
+    names=json.loads(root.find("custom/text[@name='robot_sim_joint_position']").get('data'))['joints']
     groups={name:{'joints':group['joints'],'coupled_workspace':{'joints':group['joints'],'lower':[0.,0.],
              'step':float(np.deg2rad(1.)),'valid_rows':['1']}} for name,group in topology['differential_groups'].items()}
     (tmp_path/'config').mkdir();(tmp_path/'config/motor_topology.yaml').write_text(yaml.safe_dump(topology))

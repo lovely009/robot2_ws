@@ -16,7 +16,6 @@
 #include "motor_config_contract.hpp"
 #include "motor_protocol_adapter.h"
 #include "motor_tx_router.h"
-#include "session_sync.h"
 #include "firmware_config.h"
 #include "storage_boot.h"
 
@@ -514,7 +513,8 @@ static void convert_config(const control_mailbox_config_request_t *in,
   // kind 数值契约一致（1..6、8..14；7 是内核专用 READ_IDENTITY 不经
   // mailbox，上方 static_assert 编译期锁），两侧枚举类型独立故显式转换。
   out->kind = (motor_protocol_config_kind_t)in->kind;
-
+  if (in->kind == CONTROL_MAILBOX_CONFIG_SET_DIRECTION) out->direction_raw = in->value.direction_raw;
+  if (in->kind == CONTROL_MAILBOX_CONFIG_SAVE_DEVICE_FLASH) out->save_slots = in->value.save_slots;
 }
 
 static void control_boundary(uint32_t now_ms) {

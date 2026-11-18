@@ -39,7 +39,7 @@ extern "C" {
 #define MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT 1U
 #define MOTOR_CONTROL_TARGET_SOURCE_TRAJECTORY 2U
 
-// 命令快照安全阈值（ARD-0007 §13.2）。
+// 命令快照安全阈值。
 #define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
 #define MOTOR_CONTROL_SNAPSHOT_DISABLE_MS 100U
 
@@ -47,7 +47,7 @@ extern "C" {
 #define MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 3U
 #define MOTOR_CONTROL_DEV_READ_RETRY_MS 500U
 
-// 生命周期（ARD-0007 §9.1：九态，只有 ACTIVE 允许运动帧）。
+// 生命周期，只有 ACTIVE 允许运动帧。
 typedef enum {
   MOTOR_CONTROL_LIFECYCLE_ABSENT = 0U,
   MOTOR_CONTROL_LIFECYCLE_DISCOVERED = 1U,
@@ -123,7 +123,7 @@ typedef enum {
   MOTOR_CONTROL_LIMITS_SOURCE_DEVICE = 3U   // 设备回读（权威）
 } motor_control_limits_source_t;
 
-// 事件（ARD-0007 §10.4/§18.2：拓扑变化必须可见；固定容量环形缓冲，挤掉即计数）。
+// 事件使用固定容量环形缓冲，覆盖旧事件时计数。
 typedef enum {
   MOTOR_CONTROL_EVENT_DISCOVERED = 0U,
   MOTOR_CONTROL_EVENT_PROFILE_BOUND = 1U,
@@ -165,7 +165,7 @@ typedef struct {
 // ---------------------------------------------------------------------------
 // 输入：完整命令快照（mailbox control_command_snapshot_t 的同形镜像；
 // 内核不 include mailbox 头，任务层负责拷贝转换）。
-// 语义：完整快照（ARD §13.1），受控集合中缺席的电机必须软停，
+// 语义：完整快照，受控集合中缺席的电机必须软停，
 // 禁止沿用上一周期目标（禁止项 8/13.1）。
 // ---------------------------------------------------------------------------
 typedef struct {
@@ -186,7 +186,7 @@ typedef struct {
 // 输入：mailbox 已完成拼接的多点轨迹（control_trajectory_t 的同形镜像）。
 // 语义：轨迹声明集合内的电机由轨迹独占（快照对其既不下发也不软停）；
 // 集合外的电机仍由完整快照负责。起点 = 内核受理时刻的本地单调时基，
-// 消息里的 sync_time_ns 不参与任何裁决（ARD §12）。
+// 消息里的 sync_time_ns 不参与任何裁决。
 // ---------------------------------------------------------------------------
 typedef struct {
   uint32_t time_from_start_ms; // 相对轨迹起点；同一电机内严格递增
@@ -298,7 +298,7 @@ void motor_control_init(motor_control_context_t *ctx,
 // 型号由设备身份串绑定；无身份读对象时仅允许协议内唯一型号。
 
 // 会话边沿。断链（曾连接后断开）立即对全部可控电机发协议级停机/失能（P0）、
-// 清运动授权与目标，不等待 100ms（ARD §13.2/§33）。
+// 清运动授权与目标，不等待 100ms。
 void motor_control_set_agent_connected(motor_control_context_t *ctx, bool connected,
     uint32_t now_ms);
 
@@ -454,7 +454,7 @@ bool motor_control_apply_policy(
 
 // 发现/热插拔探测与 SYNC 心跳（P2）：对 SYNC 能力协议（CERB）的总线发
 // 0x080——维持设备 20ms 周期状态上报（总线检测心跳，任务层周期调用；
-// 发现窗口复用同一路径）。禁止作为运动控制边界触发（ARD §23.4）。
+// 发现窗口复用同一路径）。禁止作为运动控制边界触发。
 bool motor_control_probe_discovery(motor_control_context_t *ctx, uint8_t bus_index);
 
 // ---------------------------------------------------------------------------

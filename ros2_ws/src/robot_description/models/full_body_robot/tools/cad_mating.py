@@ -2,7 +2,6 @@
 import hashlib
 import json
 import gzip
-from pathlib import Path
 
 import numpy as np
 

@@ -124,11 +124,11 @@ typedef struct {
   // 单位才可比。来源两处：W25 套用（blob 已存 SI）与写事务收尾（事务请求本身
   // 就是 SI）。**不按 raw 重算**，否则显示值会比比对值乐观。
   float record_si[MOTOR_PROTOCOL_PARAM_SLOT_COUNT];
-  // 已写进设备并核验、但**尚未保存**的槽位位图（1u << MOTOR_PROTOCOL_PARAM_SLOT_*）。
-  // "保存"= 写设备 0x2539（驱动器落 flash）+ W25 落盘；两者都由 SAVE 命令触发。
+  // 已写进设备并核验、但 MCU 记录尚未持久化的槽位位图。
+  // 驱动板 0x2539 保存只覆盖厂家限位对象，不等同于 MCU W25 落盘。
   // 含易失槽（保护开关 / 方向）：它们没有保存码，但**记录**要落 W25 才能生效
   //（方向尤其——上电归一的方向值就是从记录读的），所以照样置脏。
-  // 写事务成功时置位，保存事务成功时清零。
+  // 写事务成功时置位；驱动板保存不清此位，只有 MCU 记录真正持久化后才清。
   uint8_t record_dirty_slots;
   bool boot_record_offered; // 本会话已把 Flash 记录（或"无记录"）告知本表项
   // 上电参数核对结论，仅报告，不限制运动。
@@ -235,14 +235,13 @@ static inline size_t motor_control_entry_index(
   return (size_t)(entry - ctx->entries);
 }
 
-// 参数核对仅报告；除 NULL 外不拦截运动。
+// 参数核对仍报告；厂家运动准入由适配层判断，NULL 表项始终拒绝。
 // 警告：限位、速度和力矩可能未经核对，须依靠硬件急停与机械限位兜底。
 // dev_init 状态机、上电回读与 device_param_report 仍生效。
 static inline bool motor_control_dev_params_allow_motion(
     const motor_control_entry_t *entry) {
-  return entry != NULL && (entry->adapter != &motor_protocol_cerb_adapter ||
-      ((entry->dev_raw_present & (1U << MOTOR_PROTOCOL_PARAM_SLOT_T_MAX)) &&
-       entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX] > 0U));
+  return entry != NULL && motor_protocol_adapter_allows_motion(entry->adapter,
+      entry->dev_raw_present, entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX]);
 }
 
 // 顺序确定化选择器：取下一个「未输出且 motor_id 最小」表项并在 taken

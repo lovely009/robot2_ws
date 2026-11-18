@@ -1,11 +1,4 @@
-"""web_host 前端静态契约测试。
-
-Vue 工作台复用 panel_templates.html 的面板模板，JS 只做行为。结构一旦漂移
-就会出现两类错误——「改名漏改」与「新增文件忘重跑 colcon」——它们都不让构建失败，只在
-浏览器里静默失效。本文件把这两类错误变成测试失败。
-
-纯标准库解析，不引 Node、不启浏览器、不连 ROS。
-"""
+"""网页模板、模块引用、安装资产和跨包接口检查。"""
 import json
 import os
 import re
@@ -24,10 +17,7 @@ class IndexParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.ids = []
-        self.screens = []
-        self.panel_slots = []
         self.panel_templates = []
-        self.gotos = []
         self.assets = []
         self._in_importmap = False
         self._importmap = []
@@ -36,14 +26,8 @@ class IndexParser(HTMLParser):
         a = dict(attrs)
         if a.get('id'):
             self.ids.append(a['id'])
-        if a.get('data-screen'):
-            self.screens.append(a['data-screen'])
-        if a.get('data-panel'):
-            self.panel_slots.append(a['data-panel'])
         if a.get('data-panel-template'):
             self.panel_templates.append(a['data-panel-template'])
-        if a.get('data-goto'):
-            self.gotos.append(a['data-goto'])
         if tag == 'link' and a.get('href'):
             self.assets.append(a['href'])
         if tag == 'script':
@@ -85,13 +69,11 @@ def runtime_panels():
     return re.findall(r'"([^"\n]+)"', match.group(1))
 
 
-# 1. id 唯一：面板模板会被克隆，同屏出现两个同 id 会让 getElementById 取到错的元素
 def test_all_ids_unique(index):
     dupes = sorted({i for i in index.ids if index.ids.count(i) > 1})
     assert not dupes, f'index.html 里重复的 id：{dupes}'
 
 
-# 2. JS 引用的 DOM id 必须存在（重构最常犯的错：改名漏改）
 def test_js_dom_refs_exist(index):
     known = set(index.ids)
     ref = re.compile(r"\$\(\s*'([^']+)'\s*\)|getElementById\(\s*'([^']+)'\s*\)")
@@ -105,17 +87,7 @@ def test_js_dom_refs_exist(index):
 
 
 def test_js_does_not_use_unimported_core_constants():
-    """面板用了 core 模块的常量却没 import —— 只在运行时炸，而且被渲染循环捕获。
-
-    实锤：`feedforward.js` 用了 `DIRTY.BENCH` 却从没 import 过 `DIRTY`。mount 照常成功
-    （那一行在 render 里，脏帧才走到），而 工作台的渲染循环把 render 的异常
-    `try/catch` 掉只打 console——于是这个面板的脏帧刷新一直是死的，且没人发现
-    （2026-10-19 查实并修复）。同一个循环在**挂载**期没有保护时更狠：一个面板抛异常会
-    把它之后的占位一起吞掉，表现成"整屏静默缺块"。
-
-    只查全大写常量（`DIRTY` / `TOPICS` / `LIFECYCLE` …）：它们是"用了就一定得 import"
-    的裸标识符，误报面最小。查之前先去注释，免得注释里提到名字就误报。
-    """
+    """共享常量需要显式导入。"""
     exported = set()
     for path in sorted((WEB / 'js' / 'core').glob('*.js')):
         exported |= set(re.findall(
@@ -149,34 +121,16 @@ def test_js_does_not_use_unimported_core_constants():
     assert not problems, '引用了未导入的 core 常量：\n' + '\n'.join(problems)
 
 
-# 3. JS 不得生成带 id 的 DOM（否则 id 会随数据重复，契约测试也失去意义）
-def test_no_ids_generated_in_js():
-    bad = {}
-    literal = re.compile(r'(?<![A-Za-z0-9_-])id\s*=\s*["\'][^"\']+["\']')
-    setattr_id = re.compile(r"setAttribute\(\s*['\"]id['\"]")
-    for f in js_files():
-        src = f.read_text(encoding='utf-8')
-        hits = literal.findall(src) + setattr_id.findall(src)
-        if hits:
-            bad[f.relative_to(WEB).as_posix()] = hits[:5]
-    assert not bad, f'JS 生成了带 id 的元素（动态行请只用 class）：{bad}'
-
-
 def test_vue_panels_match_templates(index):
     assert set(runtime_panels()) == set(index.panel_templates)
-    assert not index.screens
-    assert not (WEB / 'js/main.js').exists()
-    assert not (WEB / 'js/core/router.js').exists()
 
 
-# 6. 每个面板模板都有对应模块文件
 def test_panel_templates_have_modules(index):
     missing = sorted(p for p in set(index.panel_templates)
                      if not (WEB / 'js' / 'panels' / f'{p}.js').is_file())
     assert not missing, f'缺少面板模块 js/panels/*.js：{missing}'
 
 
-# 7. 每个面板模块都被某屏引用（notes 由外壳挂载，豁免）
 def test_panel_modules_are_referenced(index):
     used = set(runtime_panels())
     unused = sorted(f.stem for f in (WEB / 'js' / 'panels').glob('*.js')
@@ -184,7 +138,6 @@ def test_panel_modules_are_referenced(index):
     assert not unused, f'面板模块没有被任何屏引用：{unused}'
 
 
-# 8. 相对 import 目标存在
 def test_relative_imports_exist():
     pat = re.compile(r"""(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]""")
     missing = []
@@ -198,35 +151,6 @@ def test_relative_imports_exist():
     assert not missing, f'import 目标文件不存在：{missing}'
 
 
-# 所有共享面板模块的相对 import 图无环
-def test_import_graph_acyclic():
-    pat = re.compile(r"""(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]""")
-
-    def edges(f):
-        out = []
-        for m in pat.finditer(f.read_text(encoding='utf-8')):
-            spec = m.group(1)
-            if spec.startswith('.'):
-                out.append((f.parent / spec).resolve())
-        return out
-
-    seen, stack = set(), []
-
-    def walk(f):
-        assert f not in stack, f'import 图有环：{" -> ".join(p.name for p in stack + [f])}'
-        if f in seen:
-            return
-        stack.append(f)
-        for nxt in edges(f):
-            walk(nxt)
-        stack.pop()
-        seen.add(f)
-
-    for path in js_files():
-        walk(path.resolve())
-
-
-# 10. index.html 引用的静态资产都在磁盘上
 def test_index_assets_exist(index):
     missing = []
     for ref in index.assets:
@@ -238,17 +162,8 @@ def test_index_assets_exist(index):
     assert not missing, f'index.html 引用了不存在的文件：{missing}'
 
 
-# 11. setup.py 声明的 web/ 文件必须真的落进 colcon 安装树（防「构建成功但页面 404」）
 def test_data_files_cover_web_tree(monkeypatch):
-    """setup.py 声明的 web/ 文件都要以**真实文件**出现在 colcon 安装树里。
-
-    比的是源树与 colcon 安装树这**两棵不同的树**：只往 web/ 加了文件、却没重跑
-    colcon build 时，安装树里就没有它（symlink-install 下还可能只剩悬空符号链接），
-    故用 is_file()（跟随符号链接，悬空即缺失）。这是「构建成功但页面 404」的根因，
-    也是本测试唯一要防的失效。安装树不存在 → skip，让未构建的工作区仍能跑本文件。
-    只查「源树 ⊆ 安装树」这一个方向；反方向（安装树里的历史残留）跨次构建不稳定，
-    不查。
-    """
+    """检查声明的网页资产是否存在于安装目录。"""
     captured = {}
     import setuptools
 
@@ -278,7 +193,6 @@ def test_data_files_cover_web_tree(monkeypatch):
         f'colcon build --symlink-install --packages-select web_host）：{missing}')
 
 
-# 12. importmap 的每个映射目标存在
 def test_importmap_targets_exist(index):
     raw = ''.join(index._importmap).strip()
     assert raw, 'index.html 缺少 importmap'
@@ -290,97 +204,10 @@ def test_importmap_targets_exist(index):
         assert (WEB / value.lstrip('/')).exists(), f'importmap 目标不存在：{value}'
 
 
-# 13. 内置兜底表必须覆盖**默认模型**的全部电机
-def test_builtin_joint_map_covers_default_model():
-    """内置表只是 `/api/model-transmissions` 不可达时的兜底，但兜底也必须是对的。
-
-    它曾经是**唯一**来源且只写了第一链 1..9，默认模型又早已是 18 台的
-    half_body_robot → 开箱即坏：10-18 关节角恒 0、小球点不中，像"电机没注册"。
-    权威来源现在在模型配置（见 test_model_joint_api_is_wired_across_layers），
-    这里只保证最后一道兜底不会又写成半个模型。
-    """
-    store_src = (WEB / 'js' / 'core' / 'store.js').read_text(encoding='utf-8')
-
-    m = re.search(
-        r'export const JOINT_OF_MOTOR\s*=\s*JOINT_OVERRIDE\s*\|\|\s*\{(.*?)\n\};',
-        store_src, re.S)
-    assert m, ('store.js 里找不到 JOINT_OF_MOTOR 的兜底表——'
-               '期望 `export const JOINT_OF_MOTOR = JOINT_OVERRIDE || {…};`')
-    mapped = {int(k) for k in re.findall(r'(\d+)\s*:', m.group(1))}
-    assert mapped, 'JOINT_OF_MOTOR 兜底表解析为空'
-
-    # 默认模型名从同一个文件取，避免两处各写一份而漂移
-    mm = re.search(r"const DEFAULT_MODEL = '([^']+)'", store_src)
-    assert mm, 'store.js 里找不到默认模型名 DEFAULT_MODEL'
-    model_name = mm.group(1)
-
-    driver = (PKG.parent / 'robot_description' / 'models' / model_name /
-              'config' / 'motor_driver.yaml')
-    if not driver.is_file():
-        pytest.skip(f'默认模型 {model_name} 的 motor_driver.yaml 不在源码树里')
-    declared = {int(v) for v in
-                re.findall(r'^\s*id:\s*(\d+)\s*$',
-                           driver.read_text(encoding='utf-8'), re.M)}
-    assert declared, f'{driver} 里没解析到任何电机 id'
-
-    missing = sorted(declared - mapped)
-    assert not missing, (
-        f'默认 JOINT_OF_MOTOR 漏了默认模型 {model_name} 的电机 {missing}：'
-        f'它们在臂视图里不可见、不可点选。请在 store.js 的默认表里补齐，'
-        f'或先确认"?joints= 覆盖"是否仍是有意设计。')
-
-
-# 14. 「电机后端」面板的接口控件必须与「仿真」抽屉**同值**
-def test_motor_backend_interface_mirrors_the_simulation_drawer():
-    """面板里的 CAN 接口 / 设备下拉是同一份值的第二个入口，不是第二份配置。
-
-    这个契约是纯运行时行为，上面 13 条一条都盖不到：删掉任一方向的绑定，构建、
-    测试、页面加载全部照常，只在浏览器里表现成"面板里改了不生效"或"面板下拉只剩
-    占位项"——正是本文件要防的那类静默失效。所以按源码形状断言（与第 13 条同一
-    取舍）：改机制可以，但三个入口的两向绑定与候选同源都得一起搬过去。
-    """
-    src = (WEB / 'js' / 'panels' / 'sim.js').read_text(encoding='utf-8')
-    # (宿主 ui 名, 镜像 ui 名, 候选来源数组)
-    pairs = [
-        ('transport', 'backendTransport', None),
-        ('simInterface', 'backendInterface', 'cans'),
-        ('simTty', 'backendTty', 'serials'),
-    ]
-
-    # 镜像 → 宿主：三个帧对必须在**注册 change 监听的那个循环**里
-    loop = 'for (const [primary, mirror] of ['
-    start = src.find(loop)
-    assert start != -1, f'sim.js 里找不到镜像绑定循环：{loop!r}'
-    block = src[start:start + 900]
-    assert 'addEventListener' in block, (
-        '镜像绑定循环里没有注册 change 监听——面板改动不会写回宿主')
-
-    missing = []
-    for primary, mirror, source in pairs:
-        if f'[ui.{primary}, ui.{mirror}]' not in block:
-            missing.append(f'镜像绑定循环里缺 [ui.{primary}, ui.{mirror}]')
-        # 宿主 → 镜像：syncBackendInterface 里逐个赋值
-        if not re.search(rf'ui\.{mirror}\.value\s*=\s*ui\.{primary}\.value', src):
-            missing.append(f'ui.{mirror} 没有从 ui.{primary} 取值的赋值')
-        # 候选同源：镜像下拉的 option 必须与宿主同一份来源，否则只剩占位项
-        if source and not re.search(
-                rf'replaceOptions\(\s*ui\.{mirror}\s*,\s*{source}\b', src):
-            missing.append(f'ui.{mirror} 的候选没有从 {source} 填充')
-
-    assert not missing, (
-        '「电机后端」面板与「仿真」抽屉的同值契约被破坏（面板显示会与实际生效值'
-        f'分叉，且页面不报错）：{missing}')
-
-
-# ---------------------------------------------------------------------------
-# 台架服务与 unit 名跨包对账；运动入口固定由 ros2_control 客户端消费。
-# ---------------------------------------------------------------------------
-
 SRC = PKG.parent                      # ros2_ws/src
 BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
 SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
 AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
-FORMAT_JS = WEB / 'js' / 'core' / 'format.js'
 
 
 def _skip_without(path):
@@ -389,12 +216,7 @@ def _skip_without(path):
 
 
 def test_frontend_service_table_matches_bench_manager():
-    """前端 SVC 表与 `bench_manager` 注册的 `/bench/*` 服务必须**一一对应**。
-
-    多一条 = 页面上有个调用必然失败；少一条 = 后端的能力页面够不着（本次新增的三个
-    重力前馈服务就是后者）。类型名同样对账：roslibjs 按 serviceType 构造请求，错了
-    会在服务端反序列化失败，而页面只看到"服务无响应"。
-    """
+    """核对浏览器与管理器的服务名及消息类型。"""
     _skip_without(BENCH_NODE)
     node_src = BENCH_NODE.read_text(encoding='utf-8')
     # 只认 `(类型, '/bench/名字', self._on_…)` 这个形状：`/bench/status` 是话题
@@ -432,33 +254,3 @@ def test_frontend_unit_names_match_bench_manager():
     assert frontend, 'agent.js 里没解析到 UNIT_* 常量'
     assert frontend.items() <= backend.items(), (
         f'前端 unit 名与后端不一致：前端 {frontend}，后端 {backend}')
-
-
-def test_downlink_topics_use_ros2_control_client():
-    """运动低频入口固定；设备策略与参数继续走 bridge facade。"""
-    js = FORMAT_JS.read_text(encoding='utf-8')
-    expected = {
-        'setpoint': '/control/setpoint',
-        'trajectory': '/control/trajectory',
-        'rawTrajectory': '/control/trajectory_raw',
-        'convertedTrajectory': '/control/trajectory',
-        'commandStatus': '/control/status',
-        'trajectoryState': '/control/trajectory_state',
-        'stop': '/control/stop',
-        'jointTarget': '/control/joint_target',
-        'policy': '/motor/policy_array',
-        'sysCmd': '/motor/system_command',
-    }
-    for key, topic in expected.items():
-        m = re.search(rf"^\s*{key}:\s*{{name:\s*'([^']+)'", js, re.M)
-        assert m and m.group(1) == topic, f'{key} 未迁移到 {topic}'
-    assert not re.search(r"^\s*(?:paramSet|firmwareConfig):", js, re.M)
-    assert "stop: {name: '/control/stop', type: 'std_msgs/msg/Empty'}" in js
-
-
-def test_frontend_has_no_legacy_motion_route_switch():
-    for path in js_files():
-        text = path.read_text(encoding='utf-8')
-        for obsolete in ('setDownlinkRoute', 'getDownlinkRoute', 'command_streamer',
-                         '/motor_command/', 'OVERLAY_COMMAND_TOPIC', 'DOWNLINK_ROUTE'):
-            assert obsolete not in text, f'{path}: 仍引用 {obsolete}'

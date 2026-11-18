@@ -76,11 +76,38 @@ TEST_F(PolicyServiceTest, IndependentClientsWithSameSourceGetUniqueHostIdentitie
   EXPECT_GT(std::min(one->policy_generation, two->policy_generation), 9u);
   EXPECT_EQ(std::max(one->policy_generation, two->policy_generation),
     std::min(one->policy_generation, two->policy_generation) + 1u);
-  EXPECT_EQ(std::count_if(configs.begin(), configs.end(), [](const auto & c) {
-    return c.operation == AgentConfigRequest::SET_POLICY;}), 2);
+  ASSERT_TRUE(spin([&] {
+    const auto received = [&](uint32_t request_id) {
+      return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+        return c.operation == AgentConfigRequest::SET_POLICY &&
+          c.request_id == request_id;
+      });
+    };
+    return received(one->request_id) && received(two->request_id);
+  }));
   const auto wire = *std::find_if(configs.begin(), configs.end(), [](const auto & c) {
     return c.operation == AgentConfigRequest::SET_POLICY;});
-  EXPECT_EQ(wire.issued_stamp, req->source_time_ns); EXPECT_EQ(wire.ttl_ms, 100);
+  EXPECT_GE(wire.issued_stamp, req->source_time_ns); EXPECT_EQ(wire.ttl_ms, 100);
+}
+
+TEST_F(PolicyServiceTest, AcceptedIntentBudgetDoesNotIncludeFeedbackCacheAge)
+{
+  start(); ASSERT_TRUE(service_ready());
+  const auto blocker = block_config();
+  auto req = request();
+  req->source_time_ns = stamp() - 80000000ULL;
+  const auto token = submit(req);
+  ASSERT_TRUE(token); ASSERT_TRUE(token->accepted) << token->reason;
+  run(40ms);
+  acknowledge(blocker.request_id, AgentConfigRequest::REFRESH_PARAMETERS);
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_POLICY && c.request_id == token->request_id;
+  });}));
+  const auto wire = std::find_if(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_POLICY && c.request_id == token->request_id;
+  });
+  EXPECT_GT(wire->issued_stamp, req->source_time_ns + 70000000ULL);
+  EXPECT_EQ(wire->ttl_ms, 100);
 }
 
 TEST_F(PolicyServiceTest, AdvancesPastMotorAndStopBarrierAndMapsNativeAckToIntent)
@@ -113,10 +140,40 @@ TEST_F(PolicyServiceTest, RejectsOldFutureSessionAndExpiredSourceWithoutPublishi
     auto req = request(); req->session_id = session;
     const auto response = submit(req); ASSERT_TRUE(response); EXPECT_FALSE(response->accepted);
   }
-  auto req = request(); req->source_time_ns = stamp() - 101000000ULL;
+  auto req = request(); req->source_time_ns = stamp() - 301000000ULL;
   const auto response = submit(req); ASSERT_TRUE(response); EXPECT_FALSE(response->accepted);
   EXPECT_TRUE(std::none_of(configs.begin(), configs.end(), [](const auto & c) {
     return c.operation == AgentConfigRequest::SET_POLICY;}));
+}
+
+TEST_F(PolicyServiceTest, BrowserObservationAllowsOneStatusPeriodAndTransportDelay)
+{
+  start(); ASSERT_TRUE(service_ready()); run(180ms);
+  auto req = request(); req->source_time_ns = stamp() - 150000000ULL;
+  const auto token = submit(req);
+  ASSERT_TRUE(token); ASSERT_TRUE(token->accepted) << token->reason;
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_POLICY && c.request_id == token->request_id;
+  });}));
+}
+
+TEST_F(PolicyServiceTest, LeaseHandshakeDoesNotConsumePolicyExecutionTtl)
+{
+  start(); ASSERT_TRUE(service_ready()); stop(); run(60ms); auto_authority = false;
+  const auto accepted_at = stamp();
+  const auto token = submit(request());
+  ASSERT_TRUE(token); ASSERT_TRUE(token->accepted) << token->reason;
+  run(130ms);
+  ASSERT_FALSE(terminal(*token, ConfigResult::STATUS_FAILED));
+  auto_authority = true;
+  ASSERT_TRUE(spin([&] {return std::any_of(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_POLICY && c.request_id == token->request_id;
+  });}, 150ms));
+  const auto wire = *std::find_if(configs.begin(), configs.end(), [&](const auto & c) {
+    return c.operation == AgentConfigRequest::SET_POLICY && c.request_id == token->request_id;
+  });
+  EXPECT_GT(wire.issued_stamp, accepted_at + 100000000ULL);
+  EXPECT_EQ(wire.ttl_ms, 100);
 }
 
 TEST_F(PolicyServiceTest, StopRejectsAQueuedOldSourceAndDoesNotAutomaticallyReenable)

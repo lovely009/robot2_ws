@@ -2,13 +2,13 @@
 import { store, MODEL, DIRTY, markDirty } from '../core/store.js';
 import { $ } from '../core/format.js';
 import { createJointRow, STALE_MS } from '../components/jointRow.js';
-import { buildJointTarget, jointControlError, controlSessionError } from '../core/joint_control.js';
+import { buildJointTarget, jointControlError } from '../core/joint_control.js';
 import { jointLimitsParameter } from '../core/joint_limits.js';
 import { pub, ensurePublisher, isConnected, getConnectionGeneration, callService, submitPolicy } from '../core/ros.js';
 
 import { jointPolicyTargets, isUnprotected } from '../core/control_policy.js';
-import { describeMotorState, policyRequestState, policyControlError } from '../core/motor_state.js';
-import { stopAll } from './actionLibrary.js';
+import { describeMotorState, policyRequestState, policyControlError, applyPolicySubmission } from '../core/motor_state.js';
+import { stopAll } from '../core/playback.js';
 
 export { STALE_MS };
 
@@ -16,6 +16,7 @@ export function mount(root, ctx) {
   const list = $('jointRows'), summary = $('sumJoints');
   let entries = [], key = '', generation = -1, advertised = 0, pending = false, disposed = false;
   const toggle = root.querySelector('#jointControlEnabled');
+  const disableButton = root.querySelector('#jointControlDisable');
   const toggleLabel = toggle.closest('label');
   const result = root.querySelector('#jointControlResult');
   let pendingPolicy = null, policyResult = '', submittingPolicy = false;
@@ -45,11 +46,11 @@ export function mount(root, ctx) {
     && Date.now()-store.transmissionStatus.last >= 0
     && Date.now()-store.transmissionStatus.last < 2500;
   toggle.disabled = true;
-  toggle.closest('label').title = '仅对当前主机控制会话中的完整传动组下发使能；使用模型默认增益，勾选状态以 MCU 确认为准';
+  toggle.closest('label').title = '使能当前模型的在线电机，允许部分传动组；使用模型默认增益，状态以 MCU 确认为准';
   toggle.closest('label').addEventListener('click', event => event.stopPropagation());
-  toggle.onchange = async () => {
+  const requestPolicy = async enabled => {
     if (simulationSelected() || submittingPolicy || pendingPolicy || disposed) return;
-    const enabled = toggle.checked, model=MODEL, connection=getConnectionGeneration();
+    const model=MODEL, connection=getConnectionGeneration();
     try {
       const targets = jointPolicyTargets(store, MODEL, enabled);
       if (!enabled) {
@@ -65,11 +66,7 @@ export function mount(root, ctx) {
       render(new Set([DIRTY.STATUS]));
       const ticket=await submitPolicy(targets);
       if (disposed || model!==MODEL || connection!==getConnectionGeneration()) throw new Error('连接或模型已变化，使能请求失效');
-      for (const target of targets) {
-        const previous = store.policy.get(target.motor_id) || {};
-        store.policy.set(target.motor_id, {...previous,...(enabled ? target : {}),enabled,
-          requestId:ticket.request_id,generation:ticket.policy_generation,receipt:null});
-      }
+      applyPolicySubmission(store,targets,ticket);
       pendingPolicy = {enabled,ticket,ids:targets.map(target=>target.motor_id),deadline:Date.now()+3000,model,connection};
       policyResult = '请求已发送，等待 MCU 确认';
       markDirty(DIRTY.POLICY,DIRTY.STATUS);
@@ -78,6 +75,8 @@ export function mount(root, ctx) {
     if (disposed) return;
     render(new Set([DIRTY.STATUS]));
   };
+  toggle.onchange = () => requestPolicy(toggle.checked);
+  disableButton.onclick = event => {event.stopPropagation();requestPolicy(false);};
   const applyParameters = async (parameters, expected) => {
     if (!bridgeReady() || pending) throw new Error('主机未就绪或正在更新关节控制设置');
     const model = MODEL, connection = getConnectionGeneration(), started = Date.now();
@@ -156,6 +155,7 @@ export function mount(root, ctx) {
     try { controlled = jointPolicyTargets(store, MODEL, false).map(target=>target.motor_id); }
     catch (error) {controlError=String(error.message || error);}
     const allEnabled = controlled.length > 0 && controlled.every(id => describeMotorState(store,id).policyEnabled === true);
+    const anyEnabled = controlled.some(id => describeMotorState(store,id).policyEnabled === true);
     if (pendingPolicy) {
       const request = pendingPolicy;
       const outcome=policyRequestState(store,request.ticket,request.ids,request.enabled);
@@ -165,17 +165,30 @@ export function mount(root, ctx) {
       else if (outcome.confirmed) {policyControlError(store,request.ids);policyResult=`MCU 已确认${request.enabled ? '使能' : '失能'}`;pendingPolicy=null;}
       else if (Date.now()>request.deadline) {policyResult='MCU 尚未确认请求，请检查设备状态';pendingPolicy=null;}
     }
-    const sessionError = controlSessionError(store, MODEL);
+    if (!pendingPolicy && !submittingPolicy &&
+        (policyResult === 'MCU 已确认使能' || policyResult === 'MCU 已确认失能' ||
+         policyResult === 'MCU 已确认部分使能')) {
+      policyResult = !controlled.length ? '' : !anyEnabled ? 'MCU 已确认失能'
+        : allEnabled ? 'MCU 已确认使能' : 'MCU 已确认部分使能';
+    }
+    let enableError = '';
+    try {jointPolicyTargets(store, MODEL, true);}
+    catch (error) {enableError=String(error.message || error);}
     const simSelected = simulationSelected(), sim = simulationSession();
     toggleLabel.hidden = simSelected;
-    toggle.checked = allEnabled;
-    toggle.indeterminate = submittingPolicy || Boolean(pendingPolicy);
-    toggle.disabled = simSelected || !store.conn.connected || !controlled.length || submittingPolicy || Boolean(pendingPolicy) || (Boolean(sessionError) && !allEnabled);
-    const reason = simSelected ? sim?.reject || (sim ? '' : '等待 MuJoCo 位置控制') : controlError || sessionError;
+    toggle.checked = anyEnabled;
+    toggle.indeterminate = submittingPolicy || Boolean(pendingPolicy) || (anyEnabled && !allEnabled);
+    toggle.disabled = simSelected || !store.conn.connected || !controlled.length || submittingPolicy || Boolean(pendingPolicy) || (Boolean(enableError) && !anyEnabled);
+    disableButton.hidden = simSelected || !controlled.length || !enableError || anyEnabled;
+    disableButton.disabled = !store.conn.connected || submittingPolicy || Boolean(pendingPolicy);
+    const hostReject = !simSelected && store.commandStatus.data?.model === MODEL
+      ? String(store.commandStatus.data.reject || '') : '';
+    const reason = simSelected ? sim?.reject || (sim ? '' : '等待 MuJoCo 位置控制')
+      : hostReject ? `主机拒绝：${hostReject}` : controlError || enableError;
     result.textContent = simSelected ? reason || 'MuJoCo 位置控制'
       : submittingPolicy ? '正在提交使能请求…' : pendingPolicy ? policyResult : reason || policyResult;
     result.classList.toggle('warn',Boolean(reason));
-    toggle.closest('label').title = reason || '使能当前控制会话中的完整传动组，状态以 MCU 确认为准';
+    toggle.closest('label').title = reason || '使能当前模型的在线电机，允许部分传动组；失能覆盖已发现的模型电机，状态以 MCU 确认为准';
     const source = $('jointFeedbackSource'), feedback = store.bench.feedback;
     if (source) {
       source.textContent = feedback ? (feedback.error ||

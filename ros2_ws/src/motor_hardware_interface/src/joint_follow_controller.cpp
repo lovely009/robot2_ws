@@ -48,6 +48,24 @@ Callback JointFollowController::on_configure(const rclcpp_lifecycle::State &) {
         for (const auto value : message->position) if (!std::isfinite(value)) return;
         target_.writeFromNonRT(message);
       });
+    diagnostics_pub_ = rclcpp::create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      get_node(), "~/diagnostics", 1);
+    // Publish outside the update loop. Keep the original fault stamp so an old
+    // diagnostic cannot stop a later control session after a stop barrier.
+    diagnostics_timer_ = get_node()->create_wall_timer(std::chrono::milliseconds(100), [this]() {
+      const auto stamp = fault_stamp_.load();
+      if (!stamp) return;
+      const auto joint = fault_joint_.load();
+      diagnostic_msgs::msg::DiagnosticArray message;
+      message.header.stamp = rclcpp::Time(stamp);
+      diagnostic_msgs::msg::DiagnosticStatus status;
+      status.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+      status.name = get_node()->get_node_base_interface()->get_fully_qualified_name();
+      status.message = joint < 0 ? "连续跟随控制周期无效" :
+        "连续跟随关节反馈无效：" + joints_[static_cast<std::size_t>(joint)];
+      message.status.push_back(std::move(status));
+      diagnostics_pub_->publish(message);
+    });
   } catch (const std::exception &error) {
     RCLCPP_ERROR(get_node()->get_logger(), "%s", error.what());
     return Callback::ERROR;
@@ -85,26 +103,28 @@ Callback JointFollowController::on_activate(const rclcpp_lifecycle::State &) {
   // DDS may still deliver an inactive-period sample after activation.
   activation_stamp_ = get_node()->now().nanoseconds();
   target_stamp_ = 0;
-  active_ = true; faulted_ = false;
+  fault_stamp_ = 0;
+  active_ = true;
   return Callback::SUCCESS;
 }
 
 Callback JointFollowController::on_deactivate(const rclcpp_lifecycle::State &) {
   active_ = false;
+  fault_stamp_ = 0;
   for (auto &command : velocities_) command.get().set_value(0);
   return Callback::SUCCESS;
 }
 
 Return JointFollowController::update(const rclcpp::Time &time, const rclcpp::Duration &period) {
-  if (faulted_) return Return::ERROR;
+  if (fault_stamp_.load()) return Return::ERROR;
   if (!active_) return Return::OK;
   const double dt = period.seconds();
   for (std::size_t i = 0; i < joints_.size(); ++i) {
     const double measured = measured_[i].get().get_value();
-    if (!std::isfinite(measured) || std::abs(measured - profiles_[i].position()) > .1 ||
-        !std::isfinite(dt) || dt <= 0 || dt > .1) {
-      faulted_ = true;
-      RCLCPP_ERROR(get_node()->get_logger(), "follow feedback/path tolerance or update period invalid: %s", joints_[i].c_str());
+    if (!std::isfinite(measured) || !std::isfinite(dt) || dt <= 0 || dt > .1) {
+      fault_joint_ = std::isfinite(measured) ? -1 : static_cast<int>(i);
+      fault_stamp_ = std::max<int64_t>(1, get_node()->now().nanoseconds());
+      RCLCPP_ERROR(get_node()->get_logger(), "follow feedback or update period invalid: %s", joints_[i].c_str());
       for (auto &command : velocities_) command.get().set_value(0);
       return Return::ERROR;
     }

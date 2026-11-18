@@ -33,11 +33,13 @@ def expected_names():
 
 
 def test_canonical_names_cover_urdf_simulation_and_motor_groups():
-    expected = expected_names()
+    native = expected_names()
+    coordinates = yaml.safe_load((MODEL / 'config/joint_convention.yaml').read_text())['joint_coordinates']
+    expected = [coordinates[name][0] for name in native]
     root = ET.parse(MODEL / 'urdf/full_body_robot.urdf').getroot()
     assert [j.get('name') for j in root.findall('joint')] == expected
-    assert {l.get('name') for l in root.findall('link')} == {'Base_link', *(n + '_link' for n in expected)}
-    topology = yaml.safe_load((MODEL / 'config/motor_topology.yaml').read_text())
+    assert {l.get('name') for l in root.findall('link')} == {'Base_link', *(n + '_link' for n in native)}
+    topology = yaml.safe_load((MODEL / 'config/model_motor_topology.yaml').read_text())
     names = [m['joint'] for m in topology['motors'].values() if 'joint' in m]
     names += [j for g in topology['differential_groups'].values() for j in g['joints']]
     assert len(names) == len(set(names)) == 37
@@ -46,8 +48,9 @@ def test_canonical_names_cover_urdf_simulation_and_motor_groups():
     simulation = ET.parse(MODEL / 'mujoco/full_body_robot.xml').getroot()
     config = json.loads(simulation.find("custom/text[@name='robot_sim_joint_position']").get('data'))
     assert config['joints'] == expected
-    assert config['joint_aliases']['BN_Hips_axis_1'] == 'BN_hips_roll'
-    assert config['joint_aliases']['BN_LeftHand_axis_1'] == 'BN_LeftHand_roll'
+    assert config['joint_aliases']['BN_Hips_axis_1'] == 'pelvis_roll'
+    assert config['joint_aliases']['BN_LeftHand_axis_1'] == 'left_wrist_pitch'
+    assert config['joint_alias_signs']['BN_Spine_yaw'] == -1
 
 
 def raw_mesh_pose(model, data, geom_name):
@@ -66,7 +69,7 @@ def raw_mesh_pose(model, data, geom_name):
 @pytest.fixture(scope='module')
 def simulation():
     mujoco = pytest.importorskip('mujoco')
-    model = mujoco.MjModel.from_xml_path(str(MODEL / 'mujoco/full_body_robot.xml'))
+    model = mujoco.MjModel.from_xml_path(str(MODEL / 'mujoco/full_body_robot.physics.xml'))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     return mujoco, model, data
@@ -139,7 +142,7 @@ def test_remounted_wrist_crank_meshes_keep_fixed_motor_axis_lines(simulation):
 def test_native_rods_stay_closed_under_small_output_motion(simulation):
     mujoco, model, _ = simulation
     from robot_transmission.mujoco_positions import JointPositionTargets
-    root = ET.parse(MODEL / 'mujoco/full_body_robot.xml').getroot()
+    root = ET.parse(MODEL / 'mujoco/full_body_robot.physics.xml').getroot()
     config = json.loads(root.find("custom/text[@name='robot_sim_joint_position']").get('data'))
     controller = JointPositionTargets(model, config)
     topology = yaml.safe_load((MODEL / 'config/motor_topology.yaml').read_text())
@@ -159,7 +162,7 @@ def test_moving_rod_mesh_ends_follow_both_bearing_centers(simulation):
     from robot_transmission.mujoco_positions import JointPositionTargets
     alignment = json.loads((MODEL / 'config/step_alignment.json').read_text())
     report = json.loads((MODEL / 'cad/assembly_audit/2026-11-13-step-linkages.json').read_text())
-    root = ET.parse(MODEL / 'mujoco/full_body_robot.xml').getroot()
+    root = ET.parse(MODEL / 'mujoco/full_body_robot.physics.xml').getroot()
     config = json.loads(root.find("custom/text[@name='robot_sim_joint_position']").get('data'))
     controller = JointPositionTargets(model, config)
     data = mujoco.MjData(model)

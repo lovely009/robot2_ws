@@ -4,8 +4,9 @@
     <details class="card" data-fold="joints" open>
       <summary title="关节表来自模型 URDF；数值与年龄来自 /joint_states，TF 由 robot_state_publisher 发布">
         关节 <span class="spacer"></span>
-        <label class="joint-control-toggle" title="使能当前控制会话中的完整传动组；状态以 MCU 回执为准">
+        <label class="joint-control-toggle" title="使能当前模型的在线电机，允许部分传动组；状态以 MCU 回执为准">
           <input type="checkbox" id="jointControlEnabled">使能控制</label>
+        <button type="button" id="jointControlDisable" hidden>失能电机</button>
         <span class="sum" id="sumJoints">--</span></summary>
       <div class="tiny muted" id="jointControlResult" role="status"></div>
       <div class="tiny muted" id="jointFeedbackSource"></div>
@@ -142,9 +143,10 @@
 
   <template data-panel-template="deviceParams">
     <section class="motor-parameters">
-      <p class="firmware-config-notice">只读查询设备参数与初始化核验状态。</p>
+      <p class="firmware-config-notice">查询设备参数与初始化核验状态；方向设置和驱动板保存须先失能。</p>
       <div class="firmware-parameter-actions">
         <button id="btnParamLoad" class="secondary compact">读取电机参数</button>
+        <button id="btnParamSaveDevice" class="secondary compact" disabled>保存电机参数</button>
         <span class="micro" id="sumDev">未读取</span>
       </div>
       <div id="paramResult" class="result tiny" role="status"></div>
@@ -175,6 +177,7 @@
               <option value="vcan">vcan（纯软件）</option>
               <option value="socketcan">SocketCAN</option>
               <option value="slcan">SLCAN / CANable</option>
+              <option value="multi">多路 CAN（含创芯 USB-CAN FD）</option>
             </select>
           </label>
           <div class="sim-field" id="simVcanFields">
@@ -259,6 +262,7 @@
               <option value="vcan">vcan（纯软件）</option>
               <option value="socketcan">SocketCAN</option>
               <option value="slcan">SLCAN / CANable</option>
+              <option value="multi">多路 CAN（含创芯 USB-CAN FD）</option>
             </select>
           </label>
           <label class="sim-field" id="motorBackendCanField" hidden>模拟器 CAN
@@ -271,6 +275,39 @@
               <option value="">扫描串口…</option>
             </select>
           </label>
+        </div>
+        <div id="simMultiFields" class="sim-panel" hidden>
+          <p class="sim-hint tiny muted">每路独立收发。节点 ID 可写 1-9,12，只加载填写的电机；* 加载其余模型电机，留空只开启通道。不同通道不能重复分配节点。</p>
+          <div class="sim-grid sim-channel-route" data-sim-route="0" role="group" aria-label="MCU CAN1">
+            <label class="check"><input type="checkbox" data-route-enabled>MCU CAN1</label>
+            <label class="sim-field">接口类型<select data-route-transport>
+              <option value="usbcanfd">创芯 USB-CAN FD</option><option value="socketcan">SocketCAN</option><option value="slcan">SLCAN / CANable</option>
+            </select></label>
+            <label class="sim-field" data-route-device-field>分析仪<select data-route-device><option value="">扫描分析仪…</option></select></label>
+            <label class="sim-field" data-route-channel-field>分析仪通道<select data-route-channel><option value="0">CAN1</option><option value="1">CAN2</option></select></label>
+            <label class="sim-field" data-route-endpoint-field hidden>CAN / 串口端点<select data-route-endpoint></select></label>
+            <label class="sim-field">模拟节点 ID<input data-route-ids type="text" placeholder="例如 1-9、12 或 *" spellcheck="false"></label>
+          </div>
+          <div class="sim-grid sim-channel-route" data-sim-route="1" role="group" aria-label="MCU CAN2">
+            <label class="check"><input type="checkbox" data-route-enabled>MCU CAN2</label>
+            <label class="sim-field">接口类型<select data-route-transport>
+              <option value="usbcanfd">创芯 USB-CAN FD</option><option value="socketcan">SocketCAN</option><option value="slcan">SLCAN / CANable</option>
+            </select></label>
+            <label class="sim-field" data-route-device-field>分析仪<select data-route-device><option value="">扫描分析仪…</option></select></label>
+            <label class="sim-field" data-route-channel-field>分析仪通道<select data-route-channel><option value="0">CAN1</option><option value="1">CAN2</option></select></label>
+            <label class="sim-field" data-route-endpoint-field hidden>CAN / 串口端点<select data-route-endpoint></select></label>
+            <label class="sim-field">模拟节点 ID<input data-route-ids type="text" placeholder="例如 1-9、12 或 *" spellcheck="false"></label>
+          </div>
+          <div class="sim-grid sim-channel-route" data-sim-route="2" role="group" aria-label="MCU CAN3">
+            <label class="check"><input type="checkbox" data-route-enabled>MCU CAN3</label>
+            <label class="sim-field">接口类型<select data-route-transport>
+              <option value="usbcanfd">创芯 USB-CAN FD</option><option value="socketcan">SocketCAN</option><option value="slcan">SLCAN / CANable</option>
+            </select></label>
+            <label class="sim-field" data-route-device-field>分析仪<select data-route-device><option value="">扫描分析仪…</option></select></label>
+            <label class="sim-field" data-route-channel-field>分析仪通道<select data-route-channel><option value="0">CAN1</option><option value="1">CAN2</option></select></label>
+            <label class="sim-field" data-route-endpoint-field hidden>CAN / 串口端点<select data-route-endpoint></select></label>
+            <label class="sim-field">模拟节点 ID<input data-route-ids type="text" placeholder="例如 1-9、12 或 *" spellcheck="false"></label>
+          </div>
         </div>
         <div class="ctrl-row wrap">
           <button id="btnMotorBackendStart" class="primary">启动电机后端</button>
@@ -288,6 +325,7 @@
             <span class="tiny muted" id="simMotorHint" aria-live="polite"></span>
           </div>
           <div class="sim-motor-add">
+            <label id="simMotorAddBusField" hidden>通道<select id="simMotorAddBus"></select></label>
             <label>ID<input id="simMotorAddId" type="number" min="1" max="127" step="1" inputmode="numeric"></label>
             <label>协议
               <select id="simMotorAddKind">

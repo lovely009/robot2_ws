@@ -6,6 +6,29 @@ const motor = (changes = {}) => ({motor_id:1,online:true,control_lifecycle:3,exe
 const message = (changes = {}) => ({schema_version:2,session_id:100,sequence:1,states:[motor()],...changes});
 function state() {return {conn:{connected:true},motors:new Map([[1,{status:{online:true,lifecycle:3},statusAt:1000}]]),
   policy:new Map([[1,{enabled:true}]]),controlStates:api.createControlStateCache()};}
+it('多电机共享人工意图，停止后迟到票据不能恢复意图', () => {
+  const s=state();
+  const targets=[1,2].map(motor_id=>({motor_id,enabled:true}));
+  const intent=api.beginPolicyIntent(s,targets);
+  expect(s.policy.get(1).intent).toBe(s.policy.get(2).intent);
+  api.stopPolicyIntents(s);
+  expect(()=>api.acceptPolicyTicket(s,intent,{request_id:1})).toThrow(/已停止/);
+  expect(()=>api.applyPolicySubmission(s,targets,{request_id:1})).toThrow(/已停止/);
+  expect(intent.ticket).toBeNull();
+  const next=api.beginPolicyIntent(s,targets);
+  api.acceptPolicyTicket(s,next,{request_id:2});
+  expect(next.ticket.request_id).toBe(2);
+});
+it('一组策略先整体校验，不部分覆盖草稿或接受旧票据', () => {
+  const s=state(), targets=[1,2].map(motor_id=>({motor_id,enabled:true}));
+  const first=api.beginPolicyIntent(s,targets), ticket={request_id:1};
+  api.acceptPolicyTicket(s,first,ticket);
+  const second=api.beginPolicyIntent(s,[targets[1]]);
+  api.failPolicyIntent(s,second,'已停止');
+  expect(()=>api.applyPolicySubmission(s,targets,ticket)).toThrow(/已停止/);
+  expect(s.policy.get(1).requestId).toBeUndefined();
+  expect(()=>api.applyPolicySubmission(s,[targets[0]],{request_id:2})).toThrow(/替换/);
+});
 it('MCU activation without a target is active and idle, not moving', () => {
   const s=state();api.applyControlState(s.controlStates,message(),1000);
   const view=api.describeMotorState(s,1,1100);

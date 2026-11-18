@@ -1,0 +1,4 @@
+# Keep C++ editor diagnostics aligned with each package's actual build flags.
+build:
+  cmake-args:
+    - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON

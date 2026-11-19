@@ -1,0 +1,8 @@
+Functional reference: mingfeisun/bvh_broadcaster
+https://github.com/mingfeisun/bvh_broadcaster
+Reference revision: c582c8e1a2089d85b6ac19de86395945c991d52e
+Original author listed by upstream: Mingfei Sun; upstream package declares BSD.
+
+The ROS 2 implementation, parser, coordinate conversion, tests and launch files
+in this directory are rewritten for this workspace. No upstream Python 2 source
+or vendor VDMocap binary is included as a runtime dependency.

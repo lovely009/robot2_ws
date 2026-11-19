@@ -1,0 +1,239 @@
+{
+  "method": "VTK triangle surface first contact, zero tolerance; not solid containment or penetration-depth test",
+  "pairs": [
+    {
+      "first": "base_link",
+      "second": "Joint_Link1",
+      "aabb_separated": false,
+      "surface_intersection": false
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link2",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        0.028641968965530396,
+        0.07032229006290436,
+        0.4941042363643646
+      ],
+      "first_contact_to_each_surface_mm": [
+        3.460243078614021e-06,
+        8.505173521963802e-07
+      ]
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link3",
+      "aabb_separated": false,
+      "surface_intersection": false
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link4",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link5",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link6",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "base_link",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link2",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        0.007495409809052944,
+        0.03998172655701637,
+        0.5026277303695679
+      ]
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link3",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        0.0019282809225842357,
+        0.039525676518678665,
+        0.5166757106781006
+      ],
+      "first_contact_to_each_surface_mm": [
+        2.005920917975974e-05,
+        1.4836604724629145e-05
+      ]
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link4",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        0.006600058637559414,
+        0.038750000298023224,
+        0.5168975591659546
+      ],
+      "first_contact_to_each_surface_mm": [
+        1.4474371736295274e-05,
+        1.4167556508338473e-05
+      ]
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link5",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link6",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link1",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link2",
+      "second": "Joint_Link3",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        -0.014194159768521786,
+        0.07174018025398254,
+        0.5354965329170227
+      ]
+    },
+    {
+      "first": "Joint_Link2",
+      "second": "Joint_Link4",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        -0.018373722210526466,
+        0.03614791855216026,
+        0.5305646061897278
+      ],
+      "first_contact_to_each_surface_mm": [
+        3.81094457830192e-07,
+        4.188812859341558e-06
+      ]
+    },
+    {
+      "first": "Joint_Link2",
+      "second": "Joint_Link5",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link2",
+      "second": "Joint_Link6",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link2",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link3",
+      "second": "Joint_Link4",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        -0.018556775525212288,
+        0.03925012797117233,
+        0.5170210003852844
+      ]
+    },
+    {
+      "first": "Joint_Link3",
+      "second": "Joint_Link5",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link3",
+      "second": "Joint_Link6",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link3",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link4",
+      "second": "Joint_Link5",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        -0.025352712720632553,
+        0.08054260164499283,
+        0.6375476717948914
+      ]
+    },
+    {
+      "first": "Joint_Link4",
+      "second": "Joint_Link6",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link4",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link5",
+      "second": "Joint_Link6",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        -0.031409360468387604,
+        0.08902554959058762,
+        0.843793511390686
+      ]
+    },
+    {
+      "first": "Joint_Link5",
+      "second": "Joint_Link7",
+      "aabb_separated": true,
+      "surface_intersection": false
+    },
+    {
+      "first": "Joint_Link6",
+      "second": "Joint_Link7",
+      "aabb_separated": false,
+      "surface_intersection": true,
+      "first_contact_base_m": [
+        0.00598710123449564,
+        0.08281639963388443,
+        0.9184173941612244
+      ]
+    }
+  ]
+}

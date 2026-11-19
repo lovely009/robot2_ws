@@ -1,0 +1,516 @@
+// URDF 三维视图，从 store 读取关节反馈，并提供轴标、拾取和状态着色。
+// package://robot_description/ 资源由 loader 映射到 /robot_sim/。
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import URDFLoader from '../../vendor/URDFLoader.js';
+import { store, DIRTY, markDirty, MODEL, targetOf, availableModels, selectGroups } from '../core/store.js';
+import { collectModelJoints } from '../core/tf.js';
+import { $ } from '../core/format.js';
+
+// URDF 是 **Z-up**（ROS 约定），three.js 默认 Y-up——不设这一行整条臂会"躺着"。
+// urdf-loader 自己不管这件事：它只把 box/cylinder 这类**图元**转 90° 适配 Y-up，
+// 网格（我们的 STL）原样保留，所以 Z-up 的网格在 Y-up 场景里就是横的。
+// 必须在创建任何 Object3D（相机、控制器）之前设：PerspectiveCamera 的 up 与
+// OrbitControls 的旋转轴都是在构造时从 Object3D.DEFAULT_UP 取的。
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+const MARKER_R = 0.022;
+const AXIS_LENGTH = MARKER_R * 3;
+const AXIS_RING_R = MARKER_R * 0.65;
+
+let renderer = null;
+let scene = null;
+let camera = null;
+let controls = null;
+let robot = null;
+let ghost = null;
+let root = null;
+const markers = new Map();   // 关节名 -> marker Mesh
+const picked = [];           // 供射线拾取的 marker 列表
+let selected = null;
+let onSelect = null;
+let ghostMat = null;         // 幽灵共用一份半透明材质（几何与实体共享）
+let loadGen = 0;             // URDF 加载代次：切换模型/卸载时作废在途回调
+
+let renderRequested = true;
+let lastRenderAt = -Infinity;
+function tick(now) {
+  if (!renderer || !renderer.domElement.clientWidth || !renderer.domElement.clientHeight || now - lastRenderAt < 33) return;
+  const moved = controls.update();
+  if (!renderRequested && !moved) return;
+  renderer.render(scene, camera);
+  if (renderer.domElement.dataset.modelReady === 'true') renderer.domElement.dataset.modelRendered = 'true';
+  renderRequested = false;
+  lastRenderAt = now;
+}
+
+export function init(canvas, opts) {
+  const { urdfUrl, initialPositionsUrl, packages = {}, onProgress, onReady, onError } = opts;
+  onSelect = opts.onSelect || null;
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  canvas.dataset.modelReady = 'false';
+  canvas.dataset.modelRendered = 'false';
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderRequested = true;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b1120);
+
+  camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
+  camera.position.set(1.1, -1.1, 0.8);   // 载入完成前先给个 Z-up 的合理视角
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 0, 0.25);
+
+  const hemi = new THREE.HemisphereLight(0xdfe9ff, 0x1b2438, 2.0);
+  hemi.position.set(0, 0, 1);          // Z-up：天光从 +Z 来
+  scene.add(hemi);
+  const key = new THREE.DirectionalLight(0xffffff, 2.4);
+  key.position.set(2, -2, 3);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x88aaff, 0.9);
+  fill.position.set(-2, 2, -1.5);
+  scene.add(fill);
+
+  // GridHelper 默认铺在 XZ 平面（Y-up），Z-up 场景里要转 90° 才躺在地上。
+  const grid = new THREE.GridHelper(2, 20, 0x2a3550, 0x1b2438);
+  grid.rotation.x = Math.PI / 2;
+  scene.add(grid);
+
+  root = new THREE.Group();
+  scene.add(root);
+
+  ghostMat = new THREE.MeshBasicMaterial({
+    color: 0x4da3ff, transparent: true, opacity: 0.18, depthWrite: false,
+  });
+
+  canvas.addEventListener('pointerdown', onPointerDown);
+
+  const manager = new THREE.LoadingManager();
+  const loader = new URDFLoader(manager);
+  loader.packages = packages;      // { 包名: 路径前缀 } —— package:// 的解析表
+  // 代次守卫：切换模型/卸载会作废在途加载，过期回调不得再碰新的场景对象。
+  const gen = ++loadGen;
+  manager.onProgress = () => { if (gen === loadGen) renderRequested = true; };
+  manager.onLoad = () => {
+    if (gen !== loadGen || !robot) return;
+    // URDF parsing finishes before asynchronous STL loads. Reframe and rebuild
+    // the target ghost once geometry is complete, then request a fresh render.
+    if (ghost) root.remove(ghost);
+    ghost = robot.clone();
+    ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) o.material = ghostMat; });
+    ghost.visible = false;
+    root.add(ghost);
+    if (!initialPositionsUrl) placeGround(robot, grid);
+    frameCamera(robot);
+    renderRequested = true;
+    canvas.dataset.modelReady = 'true';
+  };
+  const load = (initialPositions) => loader.load(urdfUrl, (r) => {
+    if (gen !== loadGen) { return; }
+    robot = r;
+    // CAD 根坐标带有整体倾角，按零位脊柱坐标摆正整机，反馈仍使用原关节角。
+    if (!initialPositions && robot.robotName === 'full_body_robot' && robot.joints.BN_Spine_yaw) {
+      robot.quaternion.copy(robot.joints.BN_Spine_yaw.quaternion).invert();
+    }
+    applyValues(robot, initialPositions);
+    // 这臂没有关节限位动画，包围盒按几何算；关掉剔除免得绕到背后就整段消失。
+    robot.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; } });
+    root.add(robot);
+
+    const modelJoints = collectModelJoints(robot);
+    addMarkers(robot, modelJoints.map(joint => joint.name));
+
+    ghost = robot.clone();
+    ghost.traverse((o) => { if (o.isMesh && !o.userData.hitOnly) { o.material = ghostMat; } });
+    ghost.visible = false;
+    root.add(ghost);
+
+    frameCamera(robot);
+    resize();
+    // 「关节」列表（TF 侧）的元数据（父子 link / 轴 / 原点）取自这次解析结果。
+    if (onReady) { onReady(modelJoints); }
+  }, (url, loaded, total) => {
+    if (gen === loadGen && onProgress) { onProgress(url, loaded, total); }
+  }, (err) => {
+    if (gen !== loadGen) { return; }
+    if (onError) { onError(err); }
+  });
+  if (initialPositionsUrl) {
+    fetch(initialPositionsUrl).then(response => {
+      if (!response.ok) throw new Error(`站姿配置读取失败（HTTP ${response.status}）`);
+      return response.json();
+    }).then(positions => {
+      if (gen === loadGen) load(positions);
+    }).catch(error => {
+      if (gen === loadGen && onError) onError(error);
+    });
+  } else {
+    load(null);
+  }
+
+  renderer.setAnimationLoop(tick);
+}
+
+function placeGround(model, grid) {
+  const bounds = new THREE.Box3();
+  const part = new THREE.Box3();
+  model.updateMatrixWorld(true);
+  for (const visual of Object.values(model.visual)) {
+    visual.traverse(object => {
+      if (!object.isMesh) return;
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+      part.copy(object.geometry.boundingBox).applyMatrix4(object.matrixWorld);
+      bounds.union(part);
+    });
+  }
+  if (!bounds.isEmpty()) {
+    const centre = bounds.getCenter(new THREE.Vector3());
+    grid.position.set(centre.x, centre.y, bounds.min.z);
+  }
+}
+
+// 透明球只负责拾取；细轴箭头与圆环沿真实关节轴显示方向和健康状态。
+function addMarkers(r, names) {
+  for (const name of names) {
+    const joint = r.joints[name];
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(MARKER_R, 16, 12),
+      new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0, depthWrite: false, colorWrite: false,
+      }));
+    m.userData.jointName = name;
+    m.userData.hitOnly = true;
+    const axis = joint.axis && joint.axis.lengthSq() > 0
+      ? joint.axis.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    const color = 0x7e8bab;
+    const arrow = new THREE.ArrowHelper(
+      axis, axis.clone().multiplyScalar(-AXIS_LENGTH / 2), AXIS_LENGTH,
+      color, MARKER_R * 0.55, MARKER_R * 0.3);
+    const points = Array.from({ length: 32 }, (_, i) => {
+      const angle = i / 32 * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(angle) * AXIS_RING_R, Math.sin(angle) * AXIS_RING_R, 0);
+    });
+    const ring = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color }));
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
+    // 轴线叠加显示，避免细线被电机外壳完全遮住。
+    for (const part of [arrow.line, arrow.cone, ring]) {
+      part.material.depthTest = false; part.material.depthWrite = false;
+      part.renderOrder = 20;
+    }
+    m.add(arrow, ring);
+    joint.add(m);
+    markers.set(name, m);
+    picked.push(m);
+  }
+}
+
+function frameCamera(r) {
+  const box = new THREE.Box3().setFromObject(r);
+  if (box.isEmpty()) { return; }
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3()).length() || 1;
+  const d = size * 1.15;
+  controls.target.copy(c);
+  // Z-up：从右前上方看（+X 侧、−Y 前方、抬高 +Z）。
+  camera.position.set(c.x + d * 0.75, c.y - d * 0.75, c.z + d * 0.5);
+  camera.near = d / 100;
+  camera.far = d * 20;
+  camera.updateProjectionMatrix();
+  renderRequested = true;
+  controls.update();
+}
+
+function onPointerDown(ev) {
+  if (!onSelect || !robot) { return; }
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+    -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(picked, false);
+  if (hits.length) { onSelect(hits[0].object.userData.jointName); }
+}
+
+function applyValues(target, angles) {
+  if (!target || !angles) return;
+  for (const [name, v] of Object.entries(angles)) {
+    const joint = target.joints[name];
+    if (joint && Number.isFinite(v) && joint.angle !== v) {
+      joint.ignoreLimits = true; // 显示实测/预览值，控制限位由主机执行。
+      target.setJointValue(name, v);
+      renderRequested = true;
+    }
+  }
+}
+
+export function setJoints(angles) { applyValues(robot, angles); }
+
+// 目标幽灵：angles 为 null 时隐藏（没有在发的目标就不该凭空画一个出来）。
+export function setTargets(angles) {
+  if (!ghost) { return; }
+  if (!angles) { if (ghost.visible) renderRequested = true; ghost.visible = false; return; }
+  applyValues(ghost, angles);
+  ghost.visible = true;
+}
+
+// colors: { 关节名: '#rrggbb' }；缺省回落灰色。
+export function setJointColors(colors) {
+  for (const [name, m] of markers) {
+    const next = (colors && colors[name]) || '#7e8bab';
+    const [arrow, ring] = m.children;
+    if (`#${ring.material.color.getHexString()}` !== next) {
+      arrow.setColor(next); ring.material.color.set(next); renderRequested = true;
+    }
+  }
+}
+
+export function setSelected(name) {
+  if (selected !== name) renderRequested = true;
+  if (selected && markers.has(selected)) {
+    markers.get(selected).scale.setScalar(1);
+  }
+  selected = name;
+  if (selected && markers.has(selected)) {
+    markers.get(selected).scale.setScalar(1.35);
+  }
+}
+
+export function resize() {
+  if (!renderer) { return; }
+  const c = renderer.domElement;
+  const w = c.clientWidth || 1;
+  const h = c.clientHeight || 1;
+  const size = renderer.getSize(new THREE.Vector2());
+  if (size.x === w && size.y === h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderRequested = true;
+}
+
+// 页面隐藏时停掉渲染循环（WebGL 在后台标签页仍会跑满帧）。
+export function setRunning(on) {
+  if (!renderer) { return; }
+  renderer.setAnimationLoop(on ? tick : null);
+}
+
+// 监听器具名化：旧实现是内联箭头函数，摘不掉；面板化后每次 mount 都注册一遍，
+// 旧监听器仍引用已释放的 renderer —— 必须在 unmount 里成对摘掉。
+const onWindowResize = () => resize();
+const onVisibilityChange = () => setRunning(!document.hidden);
+
+// 释放 three.js 资源。切屏会反复 mount/unmount，不释放会一路涨显存。
+// 几何与材质在幽灵与实体之间共享（ghostMat 是共用材质），故先收集再释放，避免重复。
+function disposeScene() {
+  loadGen += 1;               // 作废在途的 URDF 加载（见 init 的代次守卫）
+  if (!scene) return;
+  const geoms = new Set();
+  const mats = new Set();
+  scene.traverse((o) => {
+    if (o.geometry) geoms.add(o.geometry);
+    if (o.material) {
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) mats.add(m);
+    }
+  });
+  for (const g of geoms) g.dispose();
+  for (const m of mats) {
+    for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'alphaMap']) {
+      if (m[k]) m[k].dispose();     // STL 没有贴图，但 ColladaLoader 拉进的 TGA 会有
+    }
+    m.dispose();
+  }
+  markers.clear();
+  picked.length = 0;
+  if (controls) { controls.dispose(); controls = null; }
+  if (renderer) { renderer.dispose(); renderer = null; }
+  scene = null; camera = null; robot = null; ghost = null; root = null;
+  selected = null;
+}
+
+// ---------- 同步：store → three.js ----------
+// 只显示 /joint_states 的实际值。传动组允许一个或多个电机共同驱动同一组关节；
+// 这里不按 motor 数量猜关节，也不使用兼容接口的单电机图表。
+const JOINT_STALE_MS = 1500;
+function groupJointNames() {
+  return [...new Set(store.modelTransmissions.groups.flatMap((g) => g.joints))];
+}
+
+export function armJointAngles(jointStates=store.jointStates, now=Date.now()) {
+  const angles = {};
+  const names = jointStates.jointNames
+    || store.modelTransmissions.groups.flatMap((g) => g.joints);
+  for (const name of new Set(names)) {
+    const reading = jointStates.byName && jointStates.byName[name];
+    if (reading && Number.isFinite(reading.position) && now - reading.at < JOINT_STALE_MS) {
+      angles[name] = reading.position;
+    }
+  }
+  return angles;
+}
+
+function armSyncJoints() {
+  setJoints(armJointAngles());
+}
+
+function armSyncGhost() {
+  // 传动比例/偏移不在浏览器重算；没有显式关节位姿 metadata 时隐藏目标幽灵。
+  setTargets(null);
+}
+
+function armSyncColors() {
+  const colors = {};
+  const now = Date.now();
+  for (const name of groupJointNames()) {
+    const reading = store.jointStates.byName[name];
+    colors[name] = !reading ? '#7e8bab'
+      : (now - reading.at >= JOINT_STALE_MS ? '#f5b94a' : '#37d67a');
+  }
+  setJointColors(colors);
+}
+
+export function mount(rootEl, ctx) {
+  const stage = rootEl.querySelector('.stage') || rootEl;
+  let canvas = document.createElement('canvas');
+  canvas.className = 'arm3d';
+  const hud = document.createElement('div');
+  hud.className = 'hud';
+  hud.tabIndex = 0;
+  hud.setAttribute('aria-label', '模型加载与映射诊断');
+  hud.textContent = '臂视图加载中…';
+  // canvas 与 hud 由 JS 建（canvas 必须真元素、hud 要随加载状态改），
+  // 图例在面板模板里（DOM 单一来源），插到 canvas/hud 之后保持旧层级。
+  stage.prepend(hud);
+  stage.prepend(canvas);
+
+  let ready = false;
+  let loadedModel = null;
+  let hudFadeTimer = 0;
+  let modelSelect = null;
+  const pickJoint = (jointName) => {
+    const groups = store.modelTransmissions.groups
+      .filter((g) => g.joints.includes(jointName)).map((g) => g.name);
+    store.selectedJoint = jointName;
+    selectGroups(groups);
+  };
+
+  // 模型选择器（图例栏）：候选来自 static_server 的 /api/models（有 urdf 的模型）；
+  // 接口不可用时只留当前项。切换 → ctx.ui.setModel → DIRTY.MODEL → startLoad() 重载。
+  modelSelect = $('armModel');
+  if (modelSelect) {
+    modelSelect.disabled = false;
+    if (modelSelect.disabled) modelSelect.title = '托管机器的模型由启动配置确定';
+    const fillOptions = (names) => {
+      const list = names.includes(MODEL) ? names : [MODEL, ...names];
+      modelSelect.replaceChildren(...list.map((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        return option;
+      }));
+      modelSelect.value = MODEL;
+    };
+    fillOptions([]);
+    availableModels().then(fillOptions).catch(() => { /* 列表取不到：保留当前项 */ });
+    modelSelect.addEventListener('change', () => {
+      if (modelSelect.value) { ctx.ui.setModel(modelSelect.value); }
+    });
+  }
+
+  // 加载/按当前 MODEL 重载：整场景重建，canvas 也换一块新的——同一 canvas 上重建
+  // WebGLRenderer 会复用旧 context，新元素最省心（与切屏同一套释放路径）。
+  // window/visibility 监听只随面板开关、不随模型切换（disposeScene 不摘它们）。
+  function startLoad() {
+    loadedModel = MODEL;
+    ready = false;
+    window.clearTimeout(hudFadeTimer);
+    hud.className = 'hud';
+    hud.style.opacity = '';
+    hud.textContent = '臂视图加载中…';
+    if (renderer) {
+      disposeScene();
+      canvas.remove();
+      canvas = document.createElement('canvas');
+      canvas.className = 'arm3d';
+      stage.prepend(canvas);
+    }
+    const fullBodyVisual = MODEL === 'full_body_robot';
+    const modelUrl = `/robot_sim/models/${MODEL}`;
+    const urdfName = fullBodyVisual ? `${MODEL}.standing.urdf` : `${MODEL}.urdf`;
+    init(canvas, {
+      urdfUrl: `${modelUrl}/urdf/${urdfName}`,
+      initialPositionsUrl: fullBodyVisual ? `${modelUrl}/config/standing.json` : undefined,
+      // package://robot_description/... → static_server 挂在根部的模型包根
+      packages: {'robot_description': '/robot_sim'},
+      onSelect: pickJoint,
+      // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
+      onProgress: (url, loaded, total) => {
+        if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
+          hud.textContent = `臂视图加载中 ${Math.round(loaded / total * 100)}%`;
+        }
+      },
+      onReady: (joints) => {
+        // 没进映射表的 URDF 关节要点名——否则「这根不动」会被当成故障去排查。
+        const names = joints.map((j) => j.name);
+        const mapped = new Set(groupJointNames());
+        const extra = fullBodyVisual ? [] : names.filter((j) => !mapped.has(j));
+        hud.textContent = `${fullBodyVisual ? '整机模型' : '臂视图'}就绪 · ${names.length} 个关节`
+          + (extra.length ? ` · 未映射：${extra.join(' ')}` : '')
+          + ' · 几何已加载';
+        ready = true;
+        // 首帧渲染早于 URDF 加载完成（markers 还不存在），选中态在这里补一次；
+        // 否则切屏返回后轴标高亮要等到下一次用户点击才会恢复。
+        setSelected(null);
+        markDirty(DIRTY.MOTION);
+        hudFadeTimer = setTimeout(() => { hud.style.opacity = '0.3'; }, 5000);
+      },
+      onError: (err) => {
+        hud.className = 'hud err';
+        hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
+          + '（查 static_server 是否挂载 /robot_sim、static server 日志）';
+      },
+    });
+    setRunning(!document.hidden);     // 后台标签页不空转渲染
+  }
+
+  startLoad();
+  window.addEventListener('resize', onWindowResize);
+  const sizeObserver = new ResizeObserver(() => resize());
+  sizeObserver.observe(stage);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  const render = (dirty) => {
+    if (dirty.has(DIRTY.MODEL) && loadedModel !== MODEL) { startLoad(); }
+    if (modelSelect && modelSelect.value !== MODEL) { modelSelect.value = MODEL; }
+    if (!ready) { return; }
+    if (dirty.has(DIRTY.MOTION)) { armSyncJoints(); armSyncGhost(); }
+    if (dirty.has(DIRTY.MOTION) || dirty.has(DIRTY.STATUS) || dirty.has(DIRTY.TOPOLOGY)) {
+      armSyncColors();
+    }
+    if (dirty.has(DIRTY.SELECTED)) {
+      const joint = store.modelTransmissions.groups
+        .find((g) => g.name === store.selectedGroup)?.joints[0] || null;
+      setSelected(joint);
+    }
+  };
+  render(new Set([DIRTY.MOTION, DIRTY.STATUS]));
+  return {
+    render,
+    unmount() {
+      // three.js 资源必须显式释放：切屏会反复 mount/unmount，不释放会一路涨显存
+      setRunning(false);
+      disposeScene();
+      window.removeEventListener('resize', onWindowResize);
+      sizeObserver.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      ready = false;
+    },
+  };
+}

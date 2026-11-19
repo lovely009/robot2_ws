@@ -1,0 +1,4 @@
+# 读取 Agent 进程当前状态（refreshAgentControls 用；状态话题之外的即时快照）。
+---
+bool ok
+string status_json    # {"state": ..., "device": ..., "returncode": ...}

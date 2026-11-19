@@ -1,0 +1,2193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="Robot_body2">
+  <link
+    name="Base_link">
+    <inertial>
+      <origin
+        xyz="0.00016167 -0.004873 -0.015394"
+        rpy="0 0 0" />
+      <mass
+        value="0.80026" />
+      <inertia
+        ixx="0.00022685"
+        ixy="-9.0308E-07"
+        ixz="2.1919E-08"
+        iyy="0.00078074"
+        iyz="1.9401E-06"
+        izz="0.00080861" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/Base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/Base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="BN_Spine_yaw_link ">
+    <inertial>
+      <origin
+        xyz="1.3362E-06 0.0017169 0.042669"
+        rpy="0 0 0" />
+      <mass
+        value="0.7048" />
+      <inertia
+        ixx="0.00035146"
+        ixy="2.5203E-08"
+        ixz="-5.8911E-10"
+        iyy="0.00035767"
+        iyz="-5.9029E-06"
+        izz="0.00045766" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_yaw_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.89804 0.91765 0.92941 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_yaw_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_Spine_yaw_link "
+    type="revolute">
+    <origin
+      xyz="0 0 0.0109999999999915"
+      rpy="0 0 0" />
+    <parent
+      link="Base_link" />
+    <child
+      link="BN_Spine_yaw_link " />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_Spine_pitch_link ">
+    <inertial>
+      <origin
+        xyz="-2.74567951707994E-10 8.40260098826373E-09 -2.6888243348185E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0934780291598877" />
+      <inertia
+        ixx="1.48119609909161E-05"
+        ixy="-5.58088833122177E-19"
+        ixz="-1.61290689120049E-12"
+        iyy="1.00263355264675E-05"
+        iyz="6.10622373349756E-13"
+        izz="8.55560733118957E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_pitch_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_pitch_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_Spine_pitch_link "
+    type="revolute">
+    <origin
+      xyz="0 0 0.099"
+      rpy="-1.5708 1.2348 1.5708" />
+    <parent
+      link="BN_Spine_yaw_link " />
+    <child
+      link="BN_Spine_pitch_link " />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_Spine_roll_link ">
+    <inertial>
+      <origin
+        xyz="-3.23796320549781E-06 0.0881024037482517 -0.00640662934858707"
+        rpy="0 0 0" />
+      <mass
+        value="1.87023989534733" />
+      <inertia
+        ixx="0.00207823778975313"
+        ixy="2.76429052276805E-08"
+        ixz="-6.00661424527212E-08"
+        iyy="0.00201290294591782"
+        iyz="-6.61701116910229E-06"
+        izz="0.00255482435746527" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_roll_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.529411764705882 0.549019607843137 0.549019607843137 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_Spine_roll_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_Spine_roll_link "
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5708 0" />
+    <parent
+      link="BN_Spine_pitch_link " />
+    <child
+      link="BN_Spine_roll_link " />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftShoulder_1_link">
+    <inertial>
+      <origin
+        xyz="-0.00723372965354638 0.00522641948546614 0.0117694066098856"
+        rpy="0 0 0" />
+      <mass
+        value="0.0499208383439976" />
+      <inertia
+        ixx="1.01239144801611E-05"
+        ixy="-3.217138183798E-09"
+        ixz="6.52723112582393E-09"
+        iyy="8.06239973476916E-06"
+        iyz="-3.69919975890025E-10"
+        izz="1.39339639476986E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftShoulder_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftShoulder_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftShoulder_1_link"
+    type="revolute">
+    <origin
+      xyz="0.069679 0.20886 -0.05474"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="BN_Spine_roll_link " />
+    <child
+      link="BN_LeftShoulder_1_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftShoulder_2_link">
+    <inertial>
+      <origin
+        xyz="-0.00183421218524839 0.0104234490201937 -0.0290000449562277"
+        rpy="0 0 0" />
+      <mass
+        value="0.241731808970012" />
+      <inertia
+        ixx="9.63298439303756E-05"
+        ixy="-4.29622115767267E-07"
+        ixz="1.30827434571788E-10"
+        iyy="0.000126503981245262"
+        iyz="-4.77563806943158E-11"
+        izz="5.57579213170966E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftShoulder_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.650980392156863 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftShoulder_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftShoulder_2_link"
+    type="revolute">
+    <origin
+      xyz="-0.0056793 -0.02324 0.022137"
+      rpy="1.5708 0 0" />
+    <parent
+      link="BN_LeftShoulder_1_link" />
+    <child
+      link="BN_LeftShoulder_2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperArm_1_link">
+    <inertial>
+      <origin
+        xyz="-0.00463399923972341 0.000442026832045639 -0.0266461938644686"
+        rpy="0 0 0" />
+      <mass
+        value="0.21956044694958" />
+      <inertia
+        ixx="0.000199495885667392"
+        ixy="-1.57020829685458E-06"
+        ixz="-2.57832671175914E-05"
+        iyy="0.000173204764625777"
+        iyz="1.50566975250818E-06"
+        izz="0.000117853917081691" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.698039215686274 0.698039215686274 0.698039215686274 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperArm_1_link"
+    type="revolute">
+    <origin
+      xyz="0.0345 0.0335 -0.029"
+      rpy="-1.5708 -1.5023 1.5708" />
+    <parent
+      link="BN_LeftShoulder_2_link" />
+    <child
+      link="BN_LeftUpperArm_1_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperArm_2_link">
+    <inertial>
+      <origin
+        xyz="0.00673636871805017 -0.0382416288519231 -0.00857719554569849"
+        rpy="0 0 0" />
+      <mass
+        value="0.125542415060852" />
+      <inertia
+        ixx="0.000105915139200296"
+        ixy="1.09185035999066E-05"
+        ixz="2.93331435125026E-06"
+        iyy="4.85362185548033E-05"
+        iyz="-1.66631007476231E-05"
+        izz="0.000133475142839932" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperArm_2_link"
+    type="revolute">
+    <origin
+      xyz="0.022447 -0.0015403 -0.0535"
+      rpy="0.068512 1.5708 0" />
+    <parent
+      link="BN_LeftUpperArm_1_link" />
+    <child
+      link="BN_LeftUpperArm_2_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperArm_3_link">
+    <inertial>
+      <origin
+        xyz="8.3623747625855E-05 -0.00113448152309936 0.0953087269108522"
+        rpy="0 0 0" />
+      <mass
+        value="0.348281404386607" />
+      <inertia
+        ixx="0.000355350207774246"
+        ixy="3.9379791780727E-07"
+        ixz="5.9237609001912E-07"
+        iyy="0.000314455104932341"
+        iyz="1.47449358596598E-06"
+        izz="7.72260511301797E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_3_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperArm_3_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperArm_3_link"
+    type="revolute">
+    <origin
+      xyz="0.016514 -0.093655 -0.0235"
+      rpy="1.5708 0 0.17453" />
+    <parent
+      link="BN_LeftUpperArm_2_link" />
+    <child
+      link="BN_LeftUpperArm_3_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftLowerArm_1_link">
+    <inertial>
+      <origin
+        xyz="8.94582971229518E-06 -0.0279282510162175 -0.00584213962487634"
+        rpy="0 0 0" />
+      <mass
+        value="0.0705274100887171" />
+      <inertia
+        ixx="5.38147624265383E-05"
+        ixy="-8.25457722091539E-07"
+        ixz="-7.96008084416521E-07"
+        iyy="3.31458302835383E-05"
+        iyz="-1.50732377327969E-05"
+        izz="4.85346748844011E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerArm_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.749019607843137 0.749019607843137 0.749019607843137 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerArm_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftLowerArm_1_link"
+    type="revolute">
+    <origin
+      xyz="0.0231 -0.006 0.1765"
+      rpy="-1.5708 -0.069565 -1.5708" />
+    <parent
+      link="BN_LeftUpperArm_3_link" />
+    <child
+      link="BN_LeftLowerArm_1_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftLowerArm_2_link">
+    <inertial>
+      <origin
+        xyz="0.00150011175870168 -0.00440851740355017 0.0534569827422946"
+        rpy="0 0 0" />
+      <mass
+        value="0.158524191944944" />
+      <inertia
+        ixx="0.000125548591183196"
+        ixy="-6.99537635561526E-07"
+        ixz="-6.77414466616247E-07"
+        iyy="0.000127151834901545"
+        iyz="1.4867765367645E-06"
+        izz="1.63998725142362E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerArm_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerArm_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftLowerArm_2_link"
+    type="revolute">
+    <origin
+      xyz="0.0013027 -0.090629 -0.023"
+      rpy="1.5708 0.37633 0.069565" />
+    <parent
+      link="BN_LeftLowerArm_1_link" />
+    <child
+      link="BN_LeftLowerArm_2_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftHand_roll_link">
+    <inertial>
+      <origin
+        xyz="-1.36390822247368E-09 -0.00046142102277927 -0.00261682226993676"
+        rpy="0 0 0" />
+      <mass
+        value="0.00331041140862858" />
+      <inertia
+        ixx="6.52839310999971E-08"
+        ixy="2.03349304904717E-14"
+        ixz="-1.66442270322573E-14"
+        iyy="1.81758200347581E-07"
+        iyz="-7.34614191643813E-09"
+        izz="1.41391177256895E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftHand_roll_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftHand_roll_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftHand_roll_link"
+    type="revolute">
+    <origin
+      xyz="-0.00054068 0.0013682 0.1385"
+      rpy="-1.3963 0 0.37633" />
+    <parent
+      link="BN_LeftLowerArm_2_link" />
+    <child
+      link="BN_LeftHand_roll_link" />
+    <axis
+      xyz="0 -0.17365 -0.98481" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftHand_pitch_link">
+    <inertial>
+      <origin
+        xyz="0.0018096823814725 -0.026978861019502 6.10153412371195E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.0264042403632555" />
+      <inertia
+        ixx="5.66372444610469E-06"
+        ixy="4.52255562147004E-07"
+        ixz="-9.49820862114671E-11"
+        iyy="2.67438689521845E-06"
+        iyz="-1.53166887939584E-09"
+        izz="3.73152567776777E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftHand_pitch_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftHand_pitch_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftHand_pitch_link"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="3.1416 -1.5708 0" />
+    <parent
+      link="BN_LeftHand_roll_link" />
+    <child
+      link="BN_LeftHand_pitch_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightShoulder_1_link">
+    <inertial>
+      <origin
+        xyz="-0.00162751947603545 -0.0440125289698752 0.160901231158325"
+        rpy="0 0 0" />
+      <mass
+        value="0.0485377391940265" />
+      <inertia
+        ixx="7.98607811885495E-06"
+        ixy="4.03916641313797E-07"
+        ixz="2.76323215129391E-09"
+        iyy="1.38501190550796E-05"
+        iyz="-6.73221712947163E-09"
+        izz="1.00677606477306E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightShoulder_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightShoulder_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightShoulder_1_link"
+    type="revolute">
+    <origin
+      xyz="0.0985 0.2645 -0.0605"
+      rpy="-1.5708 -1.5023 1.5708" />
+    <parent
+      link="BN_Spine_roll_link " />
+    <child
+      link="BN_RightShoulder_1_link" />
+    <axis
+      xyz="-0.068458 -0.99765 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightShoulder_2_link">
+    <inertial>
+      <origin
+        xyz="0.00183421159151926 0.0104234505804749 -0.0332999576849444"
+        rpy="0 0 0" />
+      <mass
+        value="0.241731806748015" />
+      <inertia
+        ixx="9.63298522093594E-05"
+        ixy="4.29624622867475E-07"
+        ixz="1.25845265736764E-10"
+        iyy="0.000126503986334048"
+        iyz="5.14244577577618E-11"
+        izz="5.57579231652956E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightShoulder_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.650980392156863 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightShoulder_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightShoulder_2_link"
+    type="revolute">
+    <origin
+      xyz="0.030929 -0.035701 0.1625"
+      rpy="0.068512 1.5708 0" />
+    <parent
+      link="BN_RightShoulder_1_link" />
+    <child
+      link="BN_RightShoulder_2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name=" BN_RightUpperArm_1_link ">
+    <inertial>
+      <origin
+        xyz="-0.00465094644536969 0.000195086508324338 0.0266461870398753"
+        rpy="0 0 0" />
+      <mass
+        value="0.21956040397248" />
+      <inertia
+        ixx="0.000199430204448374"
+        ixy="-2.04603920558903E-06"
+        ixz="2.57472544273159E-05"
+        iyy="0.000173270387422417"
+        iyz="-2.03034422388811E-06"
+        izz="0.000117853887657389" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_1_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.698039215686274 0.698039215686274 0.698039215686274 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_1_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name=" BN_RightUpperArm_1_link "
+    type="revolute">
+    <origin
+      xyz="-0.0345 0.0335 -0.0333"
+      rpy="-1.5708 -1.5023 1.5708" />
+    <parent
+      link="BN_RightShoulder_2_link" />
+    <child
+      link=" BN_RightUpperArm_1_link " />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name=" BN_RightUpperArm_2_link ">
+    <inertial>
+      <origin
+        xyz="-0.00674928902778699 -0.0382393540800606 -0.00857720128566095"
+        rpy="0 0 0" />
+      <mass
+        value="0.125542433610334" />
+      <inertia
+        ixx="0.000106221358516322"
+        ixy="-1.00771718266551E-05"
+        ixz="-2.94270275991902E-06"
+        iyy="4.82300001507563E-05"
+        iyz="-1.6661443883284E-05"
+        izz="0.000133475149232507" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_2_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_2_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name=" BN_RightUpperArm_2_link "
+    type="revolute">
+    <origin
+      xyz="0.022447 -0.0015403 0.0535"
+      rpy="0.068512 1.5708 0" />
+    <parent
+      link=" BN_RightUpperArm_1_link " />
+    <child
+      link=" BN_RightUpperArm_2_link " />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name=" BN_RightUpperArm_3_link ">
+    <inertial>
+      <origin
+        xyz="-0.00108580934608348 0.000339157583578109 0.0953087166679888"
+        rpy="0 0 0" />
+      <mass
+        value="0.348281379337571" />
+      <inertia
+        ixx="0.000319709425382385"
+        ixy="1.36901184098336E-05"
+        ixz="1.15361801011416E-06"
+        iyy="0.000350095882344709"
+        iyz="-1.09283341357072E-06"
+        izz="7.7226058437065E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_3_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightUpperArm_3_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name=" BN_RightUpperArm_3_link "
+    type="revolute">
+    <origin
+      xyz="-0.016514 -0.093655 -0.0235"
+      rpy="-1.5708 -1.1945 2.9671" />
+    <parent
+      link=" BN_RightUpperArm_2_link " />
+    <child
+      link=" BN_RightUpperArm_3_link " />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightLowerArm_1_link">
+    <inertial>
+      <origin
+        xyz="0.0020877092073719 -0.0301013939658251 0.00667941174386097"
+        rpy="0 0 0" />
+      <mass
+        value="0.0652791953989844" />
+      <inertia
+        ixx="5.35212234127579E-05"
+        ixy="2.25069072237656E-06"
+        ixz="-1.84181506993246E-06"
+        iyy="3.32809734558217E-05"
+        iyz="1.49814503924718E-05"
+        izz="4.85262535168914E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerArm_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerArm_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightLowerArm_1_link"
+    type="revolute">
+    <origin
+      xyz="-0.01407 -0.019278 0.1765"
+      rpy="-1.5708 0 -0.37633" />
+    <parent
+      link=" BN_RightUpperArm_3_link " />
+    <child
+      link="BN_RightLowerArm_1_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightLowerArm_2_link">
+    <inertial>
+      <origin
+        xyz="0.00196548256676769 0.00465932800732011 0.0538697964059797"
+        rpy="0 0 0" />
+      <mass
+        value="0.154519816493855" />
+      <inertia
+        ixx="0.00012545911884023"
+        ixy="7.94713045250614E-07"
+        ixz="-5.04255373163186E-07"
+        iyy="0.000127056887768287"
+        iyz="-1.53880641240993E-06"
+        izz="1.61396588516248E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerArm_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerArm_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightLowerArm_2_link"
+    type="revolute">
+    <origin
+      xyz="0.005 -0.0905 0.023"
+      rpy="1.5708 -0.37633 0" />
+    <parent
+      link="BN_RightLowerArm_1_link" />
+    <child
+      link="BN_RightLowerArm_2_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name=" BN_RightHand_roll_link">
+    <inertial>
+      <origin
+        xyz="-9.43754435711597E-10 0.000846046301266162 -0.00479817865565435"
+        rpy="0 0 0" />
+      <mass
+        value="0.00405446609750203" />
+      <inertia
+        ixx="7.07740789048964E-08"
+        ixy="2.55364748585989E-14"
+        ixz="-5.11264174693264E-15"
+        iyy="1.87279541795313E-07"
+        iyz="7.16914434017192E-09"
+        izz="1.47885515369079E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightHand_roll_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightHand_roll_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name=" BN_RightHand_roll_link"
+    type="revolute">
+    <origin
+      xyz="-0.00054068 -0.0013682 0.1385"
+      rpy="-1.7453 0 2.7653" />
+    <parent
+      link="BN_RightLowerArm_2_link" />
+    <child
+      link=" BN_RightHand_roll_link" />
+    <axis
+      xyz="0 0.17365 -0.98481" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name=" BN_RightHand_pitch_link">
+    <inertial>
+      <origin
+        xyz="0.00753360912539439 -0.0261117936471784 8.16061154223363E-05"
+        rpy="0 0 0" />
+      <mass
+        value="0.0262391119671493" />
+      <inertia
+        ixx="5.60429918550279E-06"
+        ixy="6.14306510274445E-07"
+        ixz="-6.13368289105029E-10"
+        iyy="2.73292519022412E-06"
+        iyz="1.40690467738817E-09"
+        izz="3.7313362522708E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightHand_pitch_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/ BN_RightHand_pitch_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name=" BN_RightHand_pitch_link"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 1.5708 0" />
+    <parent
+      link=" BN_RightHand_roll_link" />
+    <child
+      link=" BN_RightHand_pitch_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_hips_roll_link ">
+    <inertial>
+      <origin
+        xyz="-8.40260684749001E-09 -2.74558285828785E-10 -2.68882434914519E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0934780291598876" />
+      <inertia
+        ixx="1.00263355264677E-05"
+        ixy="5.84802606769472E-19"
+        ixz="-6.1062315948775E-13"
+        iyy="1.4811960990916E-05"
+        iyz="-1.61290742864402E-12"
+        izz="8.55560733118959E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_hips_roll_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_hips_roll_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_hips_roll_link "
+    type="revolute">
+    <origin
+      xyz="0 0 -0.0735"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Base_link" />
+    <child
+      link="BN_hips_roll_link " />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_hips_pitch_link ">
+    <inertial>
+      <origin
+        xyz="-0.0352416139694486 -0.00758768401301602 -3.50994503657667E-06"
+        rpy="0 0 0" />
+      <mass
+        value="1.10918804844225" />
+      <inertia
+        ixx="0.00356998225984358"
+        ixy="0.000591565583569619"
+        ixz="2.39345686268679E-09"
+        iyy="0.00336375863098191"
+        iyz="-8.16870490114024E-09"
+        izz="0.00180464247063674" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_hips_pitch_link .STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_hips_pitch_link .STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_hips_pitch_link "
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.1663 -1.5708" />
+    <parent
+      link="BN_hips_roll_link " />
+    <child
+      link="BN_hips_pitch_link " />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperLeg_1_link">
+    <inertial>
+      <origin
+        xyz="0.000537309039665253 2.15895903660918E-06 0.0285511051493416"
+        rpy="0 0 0" />
+      <mass
+        value="0.293425994953086" />
+      <inertia
+        ixx="0.000138681268844946"
+        ixy="-2.70734023697297E-06"
+        ixz="6.57540902660023E-06"
+        iyy="0.000174998726767964"
+        iyz="4.91388679642907E-07"
+        izz="0.00021317243017034" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperLeg_1_link"
+    type="revolute">
+    <origin
+      xyz="-0.035991 -0.024514 0.09202"
+      rpy="0 0 0" />
+    <parent
+      link="BN_hips_pitch_link " />
+    <child
+      link="BN_LeftUpperLeg_1_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperLeg_2_link">
+    <inertial>
+      <origin
+        xyz="-0.0125753889174027 -0.105190730320016 -0.0446817861565058"
+        rpy="0 0 0" />
+      <mass
+        value="0.825082274309062" />
+      <inertia
+        ixx="0.0011636094015676"
+        ixy="-4.99420027965906E-05"
+        ixz="-3.08064241970866E-06"
+        iyy="0.000301179337679485"
+        iyz="-5.793199633557E-05"
+        izz="0.00124301542938281" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperLeg_2_link"
+    type="revolute">
+    <origin
+      xyz="0.044877 0.0033297 0.0117"
+      rpy="0.074062 1.5708 0" />
+    <parent
+      link="BN_LeftUpperLeg_1_link" />
+    <child
+      link="BN_LeftUpperLeg_2_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftUpperLeg_3_link">
+    <inertial>
+      <origin
+        xyz="0.000286036742429746 0.00026976012262224 0.0856538626268472"
+        rpy="0 0 0" />
+      <mass
+        value="0.663542442925152" />
+      <inertia
+        ixx="0.00211508346849747"
+        ixy="-7.82589811371484E-06"
+        ixz="-1.6770568344652E-06"
+        iyy="0.00211132792849622"
+        iyz="-6.77356040971569E-07"
+        izz="0.00038247776049927" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_3_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftUpperLeg_3_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftUpperLeg_3_link"
+    type="revolute">
+    <origin
+      xyz="-0.012465 -0.20091 -0.046"
+      rpy="1.5708 -0.69546 -0.061961" />
+    <parent
+      link="BN_LeftUpperLeg_2_link" />
+    <child
+      link="BN_LeftUpperLeg_3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftLowerLeg_1_link">
+    <inertial>
+      <origin
+        xyz="0.00544281929835423 -0.0382217738539853 0.0038032028618606"
+        rpy="0 0 0" />
+      <mass
+        value="0.101794297625754" />
+      <inertia
+        ixx="8.83664149557212E-05"
+        ixy="8.58974915136681E-06"
+        ixz="-1.63239361913565E-06"
+        iyy="4.27268749750949E-05"
+        iyz="1.85827890771029E-05"
+        izz="8.65180257404632E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerLeg_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerLeg_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftLowerLeg_1_link"
+    type="revolute">
+    <origin
+      xyz="-0.014679 0.018612 0.2467"
+      rpy="-1.5708 0.0771 -2.2179" />
+    <parent
+      link="BN_LeftUpperLeg_3_link" />
+    <child
+      link="BN_LeftLowerLeg_1_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftLowerLeg_2_link">
+    <inertial>
+      <origin
+        xyz="-2.66480116727641E-05 -6.29840835668916E-05 0.141951673214785"
+        rpy="0 0 0" />
+      <mass
+        value="0.337893238616535" />
+      <inertia
+        ixx="0.00201578698907585"
+        ixy="-4.32395788977106E-06"
+        ixz="-4.01305339896631E-07"
+        iyy="0.00201352905751985"
+        iyz="3.24295365037875E-07"
+        izz="8.18054921761558E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerLeg_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftLowerLeg_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftLowerLeg_2_link"
+    type="revolute">
+    <origin
+      xyz="0.0049812 -0.096122 0.027"
+      rpy="-1.5708 -0.89879 3.0684" />
+    <parent
+      link="BN_LeftLowerLeg_1_link" />
+    <child
+      link="BN_LeftLowerLeg_2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftFoot_pitch_link">
+    <inertial>
+      <origin
+        xyz="0.00212317914072742 -0.0171343486794199 -0.000325758218775216"
+        rpy="0 0 0" />
+      <mass
+        value="0.0697698796573367" />
+      <inertia
+        ixx="2.88106935728285E-05"
+        ixy="1.34819962878566E-06"
+        ixz="6.09310974792944E-07"
+        iyy="1.70183141172811E-05"
+        iyz="-5.38227209432328E-06"
+        izz="3.58081489150173E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftFoot_pitch_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftFoot_pitch_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftFoot_pitch_link"
+    type="revolute">
+    <origin
+      xyz="-0.015065 0.011984 0.285"
+      rpy="-1.5708 -0.073224 0.89879" />
+    <parent
+      link="BN_LeftLowerLeg_2_link" />
+    <child
+      link="BN_LeftFoot_pitch_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_LeftFoot_roll_link">
+    <inertial>
+      <origin
+        xyz="0.00163583512837009 -0.0171710531526799 0.0270403385811326"
+        rpy="0 0 0" />
+      <mass
+        value="0.0310065054848685" />
+      <inertia
+        ixx="5.48689512265959E-05"
+        ixy="-1.98612053524422E-07"
+        ixz="-4.61963832271184E-07"
+        iyy="5.82501001448053E-05"
+        iyz="-1.99665648591216E-08"
+        izz="4.15539998241262E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftFoot_roll_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0.811764705882353 0.56078431372549 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_LeftFoot_roll_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_LeftFoot_roll_link"
+    type="revolute">
+    <origin
+      xyz="-0.011061 -0.056231 -0.02"
+      rpy="1.5708 -1.5123 -1.4584" />
+    <parent
+      link="BN_LeftFoot_pitch_link" />
+    <child
+      link="BN_LeftFoot_roll_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightUpperLeg_1_link">
+    <inertial>
+      <origin
+        xyz="0.000531743151050611 -7.71616602926913E-05 0.0285511050019423"
+        rpy="0 0 0" />
+      <mass
+        value="0.293426005391581" />
+      <inertia
+        ixx="0.000138681918429788"
+        ixy="2.71170533607899E-06"
+        ixz="6.57593419496134E-06"
+        iyy="0.000174998083928173"
+        iyz="-4.84408605359229E-07"
+        izz="0.000213172437746489" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightUpperLeg_1_link"
+    type="revolute">
+    <origin
+      xyz="-0.035991 -0.024514 -0.09202"
+      rpy="3.1416 0 3.1416" />
+    <parent
+      link="BN_hips_pitch_link " />
+    <child
+      link="BN_RightUpperLeg_1_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightUpperLeg_2_link">
+    <inertial>
+      <origin
+        xyz="-0.0125025317157449 -0.104581298468189 -0.0434518873037702"
+        rpy="0 0 0" />
+      <mass
+        value="0.829890295603427" />
+      <inertia
+        ixx="0.00116415316514483"
+        ixy="-4.99419570232046E-05"
+        ixz="-3.08062620792964E-06"
+        iyy="0.000301723131755073"
+        iyz="-5.79319721482007E-05"
+        izz="0.00124405116737463" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightUpperLeg_2_link"
+    type="revolute">
+    <origin
+      xyz="0.043879 -0.0032557 0.0117"
+      rpy="-3.0675 1.5708 3.1416" />
+    <parent
+      link="BN_RightUpperLeg_1_link" />
+    <child
+      link="BN_RightUpperLeg_2_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightUpperLeg_3_link">
+    <inertial>
+      <origin
+        xyz="0.000214239497500816 -0.000329709600767572 0.0856538228481924"
+        rpy="0 0 0" />
+      <mass
+        value="0.663542736340918" />
+      <inertia
+        ixx="0.00211420344110283"
+        ixy="7.98587346408888E-06"
+        ixz="-3.66744492246272E-07"
+        iyy="0.00211220818815152"
+        iyz="1.77157014007342E-06"
+        izz="0.000382477895166645" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_3_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightUpperLeg_3_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightUpperLeg_3_link"
+    type="revolute">
+    <origin
+      xyz="-0.012465 -0.20091 -0.045"
+      rpy="-1.5708 -0.69546 3.0796" />
+    <parent
+      link="BN_RightUpperLeg_2_link" />
+    <child
+      link="BN_RightUpperLeg_3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightLowerLeg_1_link">
+    <inertial>
+      <origin
+        xyz="0.011028120914074 -0.0369986978583814 0.00380316818101514"
+        rpy="0 0 0" />
+      <mass
+        value="0.101794133085919" />
+      <inertia
+        ixx="8.48614454482897E-05"
+        ixy="1.48816393714445E-05"
+        ixz="-4.35899548743826E-06"
+        iyy="4.62317814516901E-05"
+        iyz="1.81379131056921E-05"
+        izz="8.65180040882876E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerLeg_1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerLeg_1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightLowerLeg_1_link"
+    type="revolute">
+    <origin
+      xyz="0.020938 0.011112 0.2467"
+      rpy="-1.5708 -0.071133 2.3146" />
+    <parent
+      link="BN_RightUpperLeg_3_link" />
+    <child
+      link="BN_RightLowerLeg_1_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightLowerLeg_2_link">
+    <inertial>
+      <origin
+        xyz="-5.74310684344007E-05 3.74168105637535E-05 0.141951647604949"
+        rpy="0 0 0" />
+      <mass
+        value="0.337892561929772" />
+      <inertia
+        ixx="0.00201513399529325"
+        ixy="4.44319689124747E-06"
+        ixz="3.95662307446495E-07"
+        iyy="0.00201417782553848"
+        iyz="3.38014408915848E-07"
+        izz="8.18057937188927E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerLeg_2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightLowerLeg_2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightLowerLeg_2_link"
+    type="revolute">
+    <origin
+      xyz="0.019123 -0.094332 0.027"
+      rpy="-1.5708 0.85328 -3.0666" />
+    <parent
+      link="BN_RightLowerLeg_1_link" />
+    <child
+      link="BN_RightLowerLeg_2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightFoot_pitch_link">
+    <inertial>
+      <origin
+        xyz="0.000430685921172583 -0.01726002044333 0.000325758197263257"
+        rpy="0 0 0" />
+      <mass
+        value="0.0697698804048239" />
+      <inertia
+        ixx="2.89473380243844E-05"
+        ixy="4.33138809665561E-07"
+        ixz="-1.92281991800739E-07"
+        iyy="1.68816694698969E-05"
+        iyz="5.41323755156275E-06"
+        izz="3.58081486918638E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightFoot_pitch_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightFoot_pitch_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightFoot_pitch_link"
+    type="revolute">
+    <origin
+      xyz="0.014504 0.012657 0.285"
+      rpy="-1.5708 -0.075009 2.2883" />
+    <parent
+      link="BN_RightLowerLeg_2_link" />
+    <child
+      link="BN_RightFoot_pitch_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="BN_RightFoot_roll_link">
+    <inertial>
+      <origin
+        xyz="-0.000497871772754316 -0.0172416109951398 0.0268403393083805"
+        rpy="0 0 0" />
+      <mass
+        value="0.0310065061583881" />
+      <inertia
+        ixx="5.48718545268932E-05"
+        ixy="2.21931066079375E-07"
+        ixz="-4.6089172779943E-07"
+        iyy="5.82471979209086E-05"
+        iyz="3.72537312007261E-08"
+        izz="4.15540020702249E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightFoot_roll_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0.811764705882353 0.56078431372549 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Robot_body2/meshes/BN_RightFoot_roll_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="BN_RightFoot_roll_link"
+    type="revolute">
+    <origin
+      xyz="-0.015533 -0.055227 0.02"
+      rpy="-1.5708 -1.5055 1.6066" />
+    <parent
+      link="BN_RightFoot_pitch_link" />
+    <child
+      link="BN_RightFoot_roll_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

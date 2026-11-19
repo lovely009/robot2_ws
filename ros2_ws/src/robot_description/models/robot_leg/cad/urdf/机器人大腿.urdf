@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="机器人大腿">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.0231989919018366 0.00168870773175969 0.662883110894709"
+        rpy="0 0 0" />
+      <mass
+        value="12.9256611396317" />
+      <inertia
+        ixx="1.49688674723977"
+        ixy="-0.000127762753774442"
+        ixz="0.0174523590157851"
+        iyy="1.49466065169435"
+        iyz="-0.000530499654258828"
+        izz="0.0265896954260708" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Joint_Link1">
+    <inertial>
+      <origin
+        xyz="0.000535991195915214 -0.00329857979001147 0.0283599660859938"
+        rpy="0 0 0" />
+      <mass
+        value="0.293426001249772" />
+      <inertia
+        ixx="0.000138480412478057"
+        ixy="-7.51138329092823E-07"
+        ixz="6.55097956545663E-06"
+        iyy="0.000175693777827172"
+        iyz="-4.30565705449234E-06"
+        izz="0.000212677794074377" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link1"
+    type="revolute">
+    <origin
+      xyz="-0.338486303395034 0.0193686347986979 1.16567161941651"
+      rpy="1.45632223199996 0.0155655011162589 -1.62795532139186" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link1" />
+    <axis
+      xyz="0 -0.114224241061885 0.993454992817408" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link2">
+    <inertial>
+      <origin
+        xyz="0.00871656035206073 -0.105006942175412 -0.0447385537211802"
+        rpy="0 0 0" />
+      <mass
+        value="0.826130029097376" />
+      <inertia
+        ixx="0.0011483373227025"
+        ixy="0.000124808856530856"
+        ixz="8.55718265390899E-06"
+        iyy="0.000316500287528625"
+        iyz="-5.7322857476165E-05"
+        izz="0.00124302540168947" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link2"
+    type="revolute">
+    <origin
+      xyz="0.0449999999999977 -0.00133642362042297 0.0116234234159455"
+      rpy="-1.82480408992149 1.57079630572147 -1.82029473315625" />
+    <parent
+      link="Joint_Link1" />
+    <child
+      link="Joint_Link2" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link3">
+    <inertial>
+      <origin
+        xyz="-3.26257091089466E-05 0.000590738246761174 -0.0916537156511891"
+        rpy="0 0 0" />
+      <mass
+        value="0.663542263724488" />
+      <inertia
+        ixx="0.00212116113106719"
+        ixy="-1.21841838889174E-06"
+        ixz="-7.74754563972282E-07"
+        iyy="0.00210525226289924"
+        iyz="1.64194169691471E-06"
+        izz="0.000382477788587636" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link3"
+    type="revolute">
+    <origin
+      xyz="0.027184 -0.1934 -0.046"
+      rpy="-1.5708 -0.036172 0.13964" />
+    <parent
+      link="Joint_Link2" />
+    <child
+      link="Joint_Link3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link4">
+    <inertial>
+      <origin
+        xyz="0.00822451211866215 0.0377213504330636 -0.0038033117373184"
+        rpy="0 0 0" />
+      <mass
+        value="0.101794730723294" />
+      <inertia
+        ixx="8.68687458814216E-05"
+        ixy="-1.18278005904687E-05"
+        ixz="2.98751954878836E-06"
+        iyy="4.42247437235831E-05"
+        iyz="1.84135730119134E-05"
+        izz="8.65180925064855E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link4"
+    type="revolute">
+    <origin
+      xyz="0.0233965896843625 0.00380405418403534 -0.252699999999752"
+      rpy="-1.57079632678426 -0.203107854124476 -1.66552440100993" />
+    <parent
+      link="Joint_Link3" />
+    <child
+      link="Joint_Link4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link5">
+    <inertial>
+      <origin
+        xyz="8.89642431146087E-05 -2.15826974059863E-05 0.141951973655806"
+        rpy="0 0 0" />
+      <mass
+        value="0.337893561540619" />
+      <inertia
+        ixx="0.00201080973491793"
+        ixy="2.31913132925853E-06"
+        ixz="1.48781671074045E-07"
+        iyy="0.00201850565997273"
+        iyz="4.95173166429493E-07"
+        izz="8.18056217814494E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link5"
+    type="revolute">
+    <origin
+      xyz="0.011999999999995 0.0954999999523001 -0.0270000000000051"
+      rpy="-1.57079632679491 1.46869256340763 0" />
+    <parent
+      link="Joint_Link4" />
+    <child
+      link="Joint_Link5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link6">
+    <inertial>
+      <origin
+        xyz="0.00489956830816829 -0.0165556021794668 -0.000325758744178339"
+        rpy="0 0 0" />
+      <mass
+        value="0.0697698670952736" />
+      <inertia
+        ixx="2.8059182926759E-05"
+        ixy="3.1803957363388E-06"
+        ixz="1.48221324922355E-06"
+        iyy="1.77698266599093E-05"
+        iyz="-5.20990893825197E-06"
+        izz="3.58081509724585E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://机器人大腿/meshes/Joint_Link6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link6"
+    type="revolute">
+    <origin
+      xyz="0.00523581061457801 0.0185242755694198 0.285000000000005"
+      rpy="-1.5707963267949 0.508519151069837 -0.275460559771595" />
+    <parent
+      link="Joint_Link5" />
+    <child
+      link="Joint_Link6" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

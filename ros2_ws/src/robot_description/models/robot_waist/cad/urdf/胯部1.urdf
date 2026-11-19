@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="胯部1">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.000167102013340403 -0.00481402449937449 -0.0150204840600125"
+        rpy="0 0 0" />
+      <mass
+        value="0.774244081400223" />
+      <inertia
+        ixx="0.000225776214018342"
+        ixy="-9.03088739354619E-07"
+        ixz="2.19247744689489E-08"
+        iyy="0.000780562098132499"
+        iyz="1.94009944036985E-06"
+        izz="0.000807520127914742" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Joint_Link1">
+    <inertial>
+      <origin
+        xyz="3.2857930800604E-07 0.00142403709531781 0.0421354061428834"
+        rpy="0 0 0" />
+      <mass
+        value="0.677881388339559" />
+      <inertia
+        ixx="0.000351114917105197"
+        ixy="3.62594619398493E-08"
+        ixz="-1.01893542524017E-07"
+        iyy="0.000355268113867673"
+        iyz="-3.92180066646326E-06"
+        izz="0.000458906373751833" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link1"
+    type="revolute">
+    <origin
+      xyz="0 0 0.0109999999999901"
+      rpy="0 0 0.0720506505510077" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link3">
+    <inertial>
+      <origin
+        xyz="-8.46920378272387E-09 -7.55803336582872E-10 -2.71930536506829E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0728567496906133" />
+      <inertia
+        ixx="9.2063010336489E-06"
+        ixy="-2.68909971607963E-07"
+        ixz="-5.18879526851334E-13"
+        iyy="1.39616097296913E-05"
+        iyz="-1.64471635357315E-12"
+        izz="6.99800548732132E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link3"
+    type="revolute">
+    <origin
+      xyz="0 0 0.099"
+      rpy="1.5708 0.18504 -1.5708" />
+    <parent
+      link="Joint_Link1" />
+    <child
+      link="Joint_link3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_link2">
+    <inertial>
+      <origin
+        xyz="-0.00167735635633133 0.0205840419233462 0.0173988854893263"
+        rpy="0 0 0" />
+      <mass
+        value="0.654150792003461" />
+      <inertia
+        ixx="0.000196573851984939"
+        ixy="-5.04056667420967E-05"
+        ixz="-3.09653888083838E-07"
+        iyy="0.000807917874000135"
+        iyz="2.09871184868469E-06"
+        izz="0.00068824665261386" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.529411764705882 0.549019607843137 0.549019607843137 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_link2"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 -1.5169 -1.5145" />
+    <parent
+      link="Joint_link3" />
+    <child
+      link="Joint_link2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link4">
+    <inertial>
+      <origin
+        xyz="-8.40260645181624E-09 -2.74558036028605E-10 -2.68882434928397E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0934780291598876" />
+      <inertia
+        ixx="1.00263355264677E-05"
+        ixy="5.67642917215305E-19"
+        ixz="-6.1062318787559E-13"
+        iyy="1.48119609909159E-05"
+        iyz="-1.61290739762144E-12"
+        izz="8.55560733118958E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.647058823529412 0.619607843137255 0.588235294117647 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link4"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.0734999994059041"
+      rpy="1.5707963267949 -0.0411451194191726 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Joint_Link4" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Joint_Link5">
+    <inertial>
+      <origin
+        xyz="-0.0352416289318867 -0.00758763397813532 -3.50994503636611E-06"
+        rpy="0 0 0" />
+      <mass
+        value="1.10918804844225" />
+      <inertia
+        ixx="0.00356998225984358"
+        ixy="0.000591565583569619"
+        ixz="2.39345686206662E-09"
+        iyy="0.00336375863098191"
+        iyz="-8.16870490264575E-09"
+        izz="0.00180464247063674" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://胯部1/meshes/Joint_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint_Link5"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.57079632679495 -1.38257629924271 -1.57079632679495" />
+    <parent
+      link="Joint_Link4" />
+    <child
+      link="Joint_Link5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

@@ -1,0 +1,16 @@
+# 模组输出轴 → 腕部关节；内部减速比已经由协议层换算。
+transmissions:
+  wrist_a:
+    plugin: transmission_interface/DifferentialTransmission
+    actuators: [arm_joint8, arm_joint9]
+    joints: [joint_link8, joint_link9]
+    actuator_reduction: [1.0, 1.0]
+    joint_reduction: [1.0, 1.0]
+    joint_offset: [0.0, 0.0]
+  wrist_b:
+    plugin: transmission_interface/DifferentialTransmission
+    actuators: [arm_joint8.8, arm_joint9.9]
+    joints: [joint_link8.8, joint_link9.9]
+    actuator_reduction: [1.0, 1.0]
+    joint_reduction: [1.0, 1.0]
+    joint_offset: [0.0, 0.0]

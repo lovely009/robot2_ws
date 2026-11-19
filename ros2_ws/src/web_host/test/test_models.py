@@ -1,0 +1,272 @@
+"""模型枚举、映射优先级、传动元数据与非法配置的只读回归测试。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from web_host.models import (
+    enumerate_arm_models,
+    has_joint_mapping_source,
+    motor_library,
+    model_transmissions,
+)
+
+PKG = Path(__file__).resolve().parent.parent
+
+
+def test_full_body_topology_covers_all_confirmed_ids_without_enabling_hardware():
+    import xml.etree.ElementTree as ET
+    root = PKG.parent / 'robot_description/models'
+    metadata = model_transmissions('full_body_robot', root)
+    groups = metadata['groups']
+    assert metadata['mapping_kind'] == 'topology'
+    assert metadata['hardware_ready'] is False
+    assert metadata['driver_file'] == '' and metadata['policy_defaults'] == {}
+    assert metadata['direct_joints'] == {}
+    ids = [m['id'] for g in groups for m in g['motors']]
+    assert len(ids) == 37 and set(ids) == set(range(1, 38))
+    joints = [j for g in groups for j in g['joints']]
+    urdf = ET.parse(root / 'full_body_robot/urdf/full_body_robot.urdf').getroot()
+    assert len(joints) == len(set(joints)) == 37
+    assert set(joints) == {j.get('name') for j in urdf.findall('joint') if j.get('type') != 'fixed'}
+    coupled = [g for g in groups if len(g['motors']) == 2]
+    assert len(coupled) == 6 and len(groups) == 31
+    waist = next(g for g in coupled if g['name'] == 'waist')
+    assert [m['id'] for m in waist['motors']] == [2, 3]
+    assert waist['joints'] == ['waist_pitch', 'waist_roll']
+    assert all(not g['direct_mapping'] for g in groups)
+
+
+@pytest.mark.parametrize('fault', ['unconfirmed_id', 'duplicate_id', 'boolean_id',
+                                  'missing_motor', 'duplicate_joint', 'unknown_joint',
+                                  'overlapping_group', 'missing_group'])
+def test_topology_rejects_invalid_ids_and_incomplete_or_ambiguous_groups(tmp_path, fault):
+    import shutil
+    import yaml
+    source = PKG.parent / 'robot_description/models/full_body_robot'
+    directory = tmp_path / 'full_body_robot'
+    (directory / 'config').mkdir(parents=True)
+    (directory / 'urdf').mkdir()
+    shutil.copy(source / 'urdf/full_body_robot.urdf', directory / 'urdf')
+    document = yaml.safe_load((source / 'config/motor_topology.yaml').read_text())
+    motors, groups = document['motors'], document['differential_groups']
+    if fault == 'unconfirmed_id': motors[1]['can_node_id'] = None
+    elif fault == 'duplicate_id': motors[2]['can_node_id'] = 1
+    elif fault == 'boolean_id': motors[1]['can_node_id'] = True
+    elif fault == 'missing_motor': del motors[37]
+    elif fault == 'duplicate_joint': motors[8]['joint'] = motors[1]['joint']
+    elif fault == 'unknown_joint': motors[8]['joint'] = 'missing_joint'
+    elif fault == 'overlapping_group': groups['waist']['motor_numbers'] = [1, 3]
+    elif fault == 'missing_group': del groups['waist']
+    (directory / 'config/motor_topology.yaml').write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError):
+        model_transmissions('full_body_robot', tmp_path)
+
+
+def test_invalid_driver_does_not_fall_back_to_topology(tmp_path, monkeypatch):
+    import robot_transmission
+    config = tmp_path / 'robot/config'
+    config.mkdir(parents=True)
+    (config / 'motor_driver.yaml').write_text('invalid driver')
+    (config / 'motor_topology.yaml').write_text('motors: {}')
+    class BadModel:
+        @staticmethod
+        def load(path):
+            raise ValueError('bad driver')
+    monkeypatch.setattr(robot_transmission, 'Model', BadModel)
+    with pytest.raises(ValueError, match='bad driver'):
+        model_transmissions('robot', tmp_path)
+
+
+def test_trial_arm_spatial_metadata_keeps_coupled_ids():
+    root = PKG.parent / 'robot_description/models'
+    metadata = model_transmissions('trial_arm_7dof', root)
+    assert metadata['policy_defaults'] == {}
+    assert metadata['direct_joints'] == {i: f'Joint_Link{i}' for i in range(3, 8)}
+    groups = metadata['groups']
+    assert len(groups) == 6
+    shoulder = next(g for g in groups if g['name'] == 'shoulder_linkage')
+    assert shoulder['motors'] == [
+        {'name': 'arm_joint1', 'id': 1}, {'name': 'arm_joint2', 'id': 2}]
+    assert shoulder['joints'] == ['Joint_Link1', 'Joint_Link2']
+    assert not shoulder['direct_mapping']
+    assert shoulder['legacy_mapping_reason'] == 'coupled_group_not_flattened'
+
+
+def test_trial_arm_uncalibrated_limits_block_workbench():
+    import xml.etree.ElementTree as ET
+    from motor_hardware_interface.workbench_control import WorkbenchModel
+    model = PKG.parent / 'robot_description/models/trial_arm_7dof'
+    urdf = model / 'urdf/trial_arm_7dof.urdf'
+    joints = [j for j in ET.parse(urdf).getroot().findall('joint') if j.get('type') == 'revolute']
+    assert len(joints) == 7
+    for joint in joints:
+        assert all(float(joint.find('limit').get(key)) == 0 for key in ('lower', 'upper', 'effort', 'velocity'))
+    with pytest.raises(ValueError, match='P/V/E 限位'):
+        WorkbenchModel(str(model / 'config/motor_driver.yaml'), str(urdf))
+
+
+# --- 枚举：臂视图候选 --------------------------------------------------------
+
+def test_enumerate_arm_models_uses_root(tmp_path: Path) -> None:
+    renderable = tmp_path / 'demo'
+    (renderable / 'urdf').mkdir(parents=True)
+    (renderable / 'urdf' / 'demo.urdf').write_text('<robot/>', encoding='utf-8')
+    (tmp_path / 'no_urdf').mkdir()
+    assert enumerate_arm_models(tmp_path) == ['demo']
+
+
+# --- 映射：解析顺序 ① 模型自带驱动配置 ---------------------------------------
+
+
+# --- 映射：解析顺序 ② 拓扑 × 权威驱动配置 ------------------------------------
+
+
+# --- 映射来源判据：区分「没配」与「配错了」----------------------------------
+
+def test_has_joint_mapping_source_needs_config_not_just_urdf(tmp_path: Path) -> None:
+    """只有主 URDF 的模型（预览件）算「没配」，不算契约缺项。
+
+    臂视图候选的判据只有主 URDF，映射另要 config 里的文件——两者本就不一致，
+    页面选到这类模型时退回内置兜底表。集成测试靠本判据跳过它们。
+    """
+    models_root = tmp_path / 'models'
+    (models_root / 'preview' / 'urdf').mkdir(parents=True)
+    (models_root / 'preview' / 'urdf' / 'preview.urdf').write_text(
+        '<robot/>', encoding='utf-8')
+    assert enumerate_arm_models(models_root) == ['preview'], '前提：它确实可枚举'
+    assert not has_joint_mapping_source('preview', root=models_root)
+
+    (models_root / 'preview' / 'config').mkdir()
+    (models_root / 'preview' / 'config' / 'model_motor_topology.yaml').write_text(
+        'simulation:\n  motors: []\n', encoding='utf-8')
+    assert has_joint_mapping_source('preview', root=models_root), '有拓扑就算配了'
+
+
+@pytest.mark.parametrize('bad', ['', '..', '../etc', 'a/b', 'nope_does_not_exist'])
+def test_has_joint_mapping_source_rejects_bad_names(bad: str) -> None:
+    """非法/不存在的模型名一律 False——不能借它读到目录外。"""
+    assert not has_joint_mapping_source(bad)
+
+
+# --- 与真实源码树的集成（臂视图 model_dir 可指源码目录）----------------------
+
+
+# --- 型号库：设备页折算设备端原值 ---------------------------------------------
+
+def test_motor_library_exposes_gear_ratio_keyed_by_topology_model() -> None:
+    """设备页用减速比把关节侧 rad/s 折成**电机端 RPM**（设备对象 0x6080 存电机端量）。
+
+    键必须与固件 Profile 的 .model_name / 拓扑的 model_name 同源——对不上就静默
+    不显示设备端值，看起来像"页面没做"。
+    """
+    lib = motor_library()
+    for name in ('cerb_r48_101', 'cerb_r58_101', 'vaxor_2550'):
+        assert name in lib, f'型号库缺 {name}：设备页的设备端 RPM 折算会静默失效'
+    assert lib['cerb_r48_101']['gear_ratio'] == 101
+    assert lib['cerb_r58_101']['gear_ratio'] == 101
+    assert lib['vaxor_2550']['gear_ratio'] == 50
+    assert lib['cerb_r58_101']['protocol'] == 'cerb'
+
+
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['without-hardware', 'stale-hardware-copy'])
+def test_motor_library_reads_robot_description(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    # 隔离 ament 索引，避免已有安装树或硬件包的旧副本掩盖型号库归属错误。
+    prefix = tmp_path / 'install'
+    index = prefix / 'share/ament_index/resource_index/packages'
+    index.mkdir(parents=True)
+    (index / 'robot_description').touch()
+    config = prefix / 'share/robot_description/config'
+    config.mkdir(parents=True)
+    (config / 'motor.yaml').write_text(
+        'motor_types:\n  demo:\n    protocol: cerb\n'
+        '    parameters: {gear_ratio: 101, rated_torque_nm: 20.0}\n', encoding='utf-8')
+    if hardware_installed:
+        (index / 'motor_hardware_interface').touch()
+        old_config = prefix / 'share/motor_hardware_interface/config'
+        old_config.mkdir(parents=True)
+        (old_config / 'motor.yaml').write_text(
+            'motor_types:\n  demo:\n    protocol: legacy\n'
+            '    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(prefix))
+
+    assert motor_library() == {
+        'demo': {'protocol': 'cerb', 'gear_ratio': 101, 'rated_torque_nm': 20.0}}
+
+
+@pytest.mark.parametrize('default_installed', [False, True],
+                         ids=['without-default', 'with-default'])
+def test_motor_library_explicit_root_wins(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_installed: bool) -> None:
+    if default_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'robot_description').touch()
+        config = tmp_path / 'share/robot_description/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  default:\n    parameters: {gear_ratio: 101}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    (tmp_path / 'motor.yaml').write_text(
+        'motor_types:\n  custom:\n    parameters: {gear_ratio: 30}\n', encoding='utf-8')
+
+    assert motor_library(tmp_path) == {'custom': {'protocol': 'custom', 'gear_ratio': 30}}
+
+
+@pytest.mark.parametrize('hardware_installed', [False, True],
+                         ids=['no-packages', 'hardware-only'])
+def test_motor_library_missing_package_is_empty(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardware_installed: bool) -> None:
+    if hardware_installed:
+        index = tmp_path / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True)
+        (index / 'motor_hardware_interface').touch()
+        config = tmp_path / 'share/motor_hardware_interface/config'
+        config.mkdir(parents=True)
+        (config / 'motor.yaml').write_text(
+            'motor_types:\n  legacy:\n    parameters: {gear_ratio: 1}\n', encoding='utf-8')
+    monkeypatch.setenv('AMENT_PREFIX_PATH', str(tmp_path))
+    assert motor_library() == {}
+
+
+def test_motor_library_missing_root_is_empty(tmp_path: Path) -> None:
+    """取不到型号库要退化成空表（页面不显示该列），不能抛。"""
+    assert motor_library(tmp_path) == {}
+
+
+def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
+    root = PKG.parent / "robot_description" / "models"
+    metadata = model_transmissions("half_body_robot", root)
+    groups = {g["name"]: g for g in metadata["groups"]}
+    assert groups["wrist_a"]["motors"] == [
+        {"name": "arm_joint8", "id": 8}, {"name": "arm_joint9", "id": 9}]
+    assert groups["wrist_a"]["joints"] == ["joint_link8", "joint_link9"]
+    assert groups["wrist_b"]["joints"] == ["joint_link8.8", "joint_link9.9"]
+    direct = model_transmissions("half_body_robot", root)["direct_joints"]
+    assert set(direct) == set(range(1, 19)) - {8, 9, 17, 18}
+    assert direct[1] == "joint_link1"
+    assert not groups["wrist_a"]["direct_mapping"]
+    assert groups["wrist_a"]["legacy_mapping_reason"] == "coupled_group_not_flattened"
+    assert all(g["legacy_mapping_reason"] is None
+               for g in groups.values() if g["direct_mapping"])
+
+
+def test_declared_invalid_transmission_metadata_cannot_use_legacy_alias(tmp_path: Path) -> None:
+    config = tmp_path / "demo" / "config"
+    config.mkdir(parents=True)
+    (config / "motor_driver.yaml").write_text(
+        "motor_hardware:\n  transmissions_file: missing.yaml\n  motors:\n    a: {id: 1, joint: yaw}\n")
+    with pytest.raises(ValueError, match="传动组"):
+        model_transmissions("demo", tmp_path)
+
+
+def test_transmission_policy_defaults_come_from_model_yaml() -> None:
+    root = PKG.parent / "robot_description" / "models"
+    defaults = model_transmissions("half_body_robot", root)["policy_defaults"]
+    assert defaults[8] == {"kp": 0.008, "kd": 1.0}
+    assert defaults[9] == {"kp": 0.008, "kd": 1.0}
+    assert defaults[1] == {"kp": 30.0, "kd": 1.0}

@@ -1,0 +1,129 @@
+# 电机拓扑与动态参数（唯一入口，经 motor_specs_file 引用 motor.yaml 型号库）。
+#
+# 分工：
+#   - motor.yaml          —— 型号库：静态参数（扭矩常数/减速比/效率等）
+#   - 本文件（拓扑+动态） —— 时序 timing、逻辑总线 buses、电机装配 motors，
+#                           以及每台电机的动态控制增益 command（kp/kd）
+#
+# 结构说明：
+#   motor_specs_file —— 型号参数库文件（相对本文件目录），见 config/motor.yaml。
+#   timing           —— 反馈超时与激活窗口时序。
+#   buses            —— 逻辑总线定义（传输类型由 transport 字段决定）：
+#                        socketcan    -> interface（Linux SocketCAN 接口，位率由 ip link 配置）
+#                        serial_slcan -> tty（CANable2 串口设备；驱动内固定
+#                                        C->S8(仲裁 1M)->Y5(数据 5M)->M0->A1->O 配置总线）
+#                        transport 缺省为 socketcan；bus_override 只覆盖设备路径。
+#   motors           —— 电机实例：type 引用 motor.yaml 型号；command.kp/kd 为
+#                        动态调参增益；单电机可覆盖 parameters。
+
+motor_hardware:
+  motor_specs_file: motor.yaml
+
+  timing:
+    feedback_timeout_s: 0.10
+    # 激活窗口：每次尝试在窗口内轮询全部关节反馈，最多重试 3 次。
+    initial_feedback_wait_s: 1.0
+
+  buses:
+    left_arm:
+      transport: serial_slcan
+      tty: /dev/ttyACM0
+    right_arm:
+      transport: serial_slcan
+      tty: /dev/ttyACM1
+
+  # 电机映射由本文件定义，支持任意数量及已注册的协议与总线。
+  #
+  # 同总线 id 必须跨协议唯一：固件以厂家 node 号为 motor_id，重号拒绝使能；
+  # HIL 模拟器 --joint-map 也以裸 ID 为键，重号会覆盖关节。
+  # 主机按 (bus, type) 分组不能替代此约束。
+  #   当前取值对齐 docs/guides/fdcan1-bench-guide.md 的九节点台架方案：
+  #   CERB 1–6 + vaxor 7–9（本机每侧 4 台 CERB，故用 1–4 + 7–9）。
+  # CERB 五项 MIT 量化范围继承型号库；自定义档位在单电机 parameters 覆盖。
+  # 量化满量程不替代型号库的物理峰值保护。
+  motors:
+    left_shoulder_yaw:
+      joint: left_shoulder_yaw_joint
+      bus: left_arm
+      type: cerb_r58_101
+      id: 1
+      command: {kp: 30.0, kd: 1.0}
+    left_shoulder_roll:
+      joint: left_shoulder_roll_joint
+      bus: left_arm
+      type: cerb_r58_101
+      id: 2
+      command: {kp: 30.0, kd: 1.0}
+    left_shoulder_pitch:
+      joint: left_shoulder_pitch_joint
+      bus: left_arm
+      type: cerb_r58_101
+      id: 3
+      command: {kp: 30.0, kd: 1.0}
+    left_elbow_pitch:
+      joint: left_elbow_pitch_joint
+      bus: left_arm
+      type: cerb_r58_101
+      id: 4
+      command: {kp: 30.0, kd: 1.0}
+    left_wrist_yaw:
+      joint: left_wrist_yaw_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 7
+      command: {kp: 0.008, kd: 1.0}
+    left_wrist_pitch:
+      joint: left_wrist_pitch_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 8
+      command: {kp: 0.008, kd: 1.0}
+    left_wrist_roll:
+      joint: left_wrist_roll_joint
+      bus: left_arm
+      type: vaxor_2550
+      id: 9
+      command: {kp: 0.008, kd: 1.0}
+
+    right_shoulder_yaw:
+      joint: right_shoulder_yaw_joint
+      bus: right_arm
+      type: cerb_r58_101
+      id: 1
+      command: {kp: 30.0, kd: 1.0}
+    right_shoulder_roll:
+      joint: right_shoulder_roll_joint
+      bus: right_arm
+      type: cerb_r58_101
+      id: 2
+      command: {kp: 30.0, kd: 1.0}
+    right_shoulder_pitch:
+      joint: right_shoulder_pitch_joint
+      bus: right_arm
+      type: cerb_r58_101
+      id: 3
+      command: {kp: 30.0, kd: 1.0}
+    right_elbow_pitch:
+      joint: right_elbow_pitch_joint
+      bus: right_arm
+      type: cerb_r58_101
+      id: 4
+      command: {kp: 30.0, kd: 1.0}
+    right_wrist_yaw:
+      joint: right_wrist_yaw_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 7
+      command: {kp: 0.008, kd: 1.0}
+    right_wrist_pitch:
+      joint: right_wrist_pitch_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 8
+      command: {kp: 0.008, kd: 1.0}
+    right_wrist_roll:
+      joint: right_wrist_roll_joint
+      bus: right_arm
+      type: vaxor_2550
+      id: 9
+      command: {kp: 0.008, kd: 1.0}

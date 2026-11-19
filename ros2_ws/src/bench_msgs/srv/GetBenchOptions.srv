@@ -1,0 +1,8 @@
+# 台架环境枚举：串口供 Agent 使用，其余字段保留兼容并返回空列表。
+---
+# *_json 字段为 JSON 数组，由 rosbridge 透传。
+string can_interfaces_json
+string serial_ports_json
+string[] simulation_models    # 兼容字段，返回空列表
+string[] mujoco_models        # 兼容字段，返回空列表
+string usbcanfd_devices_json  # 兼容字段，JSON 空数组

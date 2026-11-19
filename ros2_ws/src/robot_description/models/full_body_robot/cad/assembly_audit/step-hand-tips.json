@@ -1,0 +1,30 @@
+{
+  "step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4",
+  "source": "Actual STEP nodes at hand plate free ends; excludes dense wrist bearing rings that can hide a reversed plate.",
+  "landmarks": {
+    "BN_LeftHand_pitch_link": [
+      [
+        -0.243325354,
+        0.025202873,
+        -0.197238793
+      ],
+      [
+        -0.243325354,
+        0.053525544,
+        -0.187348074
+      ]
+    ],
+    "BN_RightHand_pitch_link": [
+      [
+        0.249947958,
+        0.05333047,
+        -0.186789468
+      ],
+      [
+        0.249947958,
+        0.025007799,
+        -0.196680187
+      ]
+    ]
+  }
+}

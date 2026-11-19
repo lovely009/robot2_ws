@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>工作台面板模板</title></head><body>
+  <template data-panel-template="jointList">
+    <details class="card" data-fold="joints" open>
+      <summary title="关节表来自模型 URDF；数值与年龄来自 /joint_states，TF 由 robot_state_publisher 发布">
+        关节 <span class="spacer"></span>
+        <label class="joint-control-toggle" title="使能当前模型的在线电机，允许部分传动组；状态以 MCU 回执为准">
+          <input type="checkbox" id="jointControlEnabled">使能控制</label>
+        <button type="button" id="jointControlDisable" hidden>失能电机</button>
+        <span class="sum" id="sumJoints">--</span></summary>
+      <div class="tiny muted" id="jointControlResult" role="status"></div>
+      <div class="tiny muted" id="jointFeedbackSource"></div>
+      <ul class="joints" id="jointRows">
+        <li class="empty">等待模型 URDF…</li>
+      </ul>
+    </details>
+  </template>
+
+  <template data-panel-template="readout">
+    <details class="card" data-fold="sel" open>
+      <summary><span id="selTitle">电机状态</span><span class="spacer"></span><span class="sum" id="selSum">--</span></summary>
+      <div id="motorCards" class="motor-cards" hidden></div>
+      <div class="table-wrap">
+        <table class="jstates">
+          <thead><tr><th>ID</th><th class="num">位置</th><th class="num">力矩</th><th class="num">温度</th><th>状态</th></tr></thead>
+          <tbody id="selRows"><tr class="empty"><td colspan="5">等待 motor_topology…</td></tr></tbody>
+        </table>
+      </div>
+    </details>
+  </template>
+
+
+  <template data-panel-template="arm">
+    <div class="stage" id="armStage">
+      <div class="legend">
+        <span><i class="sw" style="background:#3d9bff"></i>实际</span>
+        <span><i class="sw ghost"></i>目标</span>
+        <span><i class="dt" style="background:#2fd07a"></i>就绪</span>
+        <span><i class="dt" style="background:#e0a93a"></i>过渡</span>
+        <span><i class="dt" style="background:#ff5f5f"></i>故障</span>
+        <span class="spacer"></span>
+        <div id="armGravityControl"></div>
+        <select id="armModel" class="arm-model"
+                title="臂视图与关节映射使用的模型；选择会记住（刷新后保持），用于真实设备映射与几何预览"></select>
+        <span>拖拽旋转 · 点击关节</span>
+      </div>
+    </div>
+  </template>
+
+
+
+  <template data-panel-template="actionLibrary">
+    <details class="card" data-fold="actionLibrary" open>
+      <summary>动作库<span class="spacer"></span><span class="sum" id="actionSummary">--</span></summary>
+      <div class="action-controls">
+        <div class="ctrl-row wrap">
+          <label class="check" title="播放前自动武装（发 policy：enable=true + kp/kd）；取消勾选则不动策略，需自行保证电机已使能"><input id="actEnable" type="checkbox" checked> 使能</label>
+          <label class="check" title="播完自动从头再播，直到点停止"><input id="actLoop" type="checkbox"> 循环</label>
+          <label class="action-field act-gain">kp<input id="actKp" type="number" value="30" min="0" step="1"></label>
+          <label class="action-field act-gain">kd<input id="actKd" type="number" value="1" min="0" step="0.1"></label>
+          <span class="spacer"></span>
+          <input id="actFile" type="file" accept=".json,application/json">
+          <button id="btnActImport" class="secondary">导入到动作库</button>
+          <button id="btnActStop" class="danger" disabled>停止</button>
+        </div>
+        <div class="result tiny" id="actResult" role="status" aria-live="polite"></div>
+        <div class="act-list" id="actList"></div>
+        <div class="action-hint tiny muted" id="actHint"></div>
+      </div>
+    </details>
+  </template>
+
+  <template data-panel-template="curve">
+    <div class="ctrl-row curve-controls">
+      <div class="curve-field">
+        <span class="curve-field-label" id="chartMotorLabel">电机</span>
+        <details id="chartMotor" class="curve-multiselect">
+          <summary aria-labelledby="chartMotorLabel" aria-haspopup="true">
+            <span data-chart-motor-summary>电机 1</span>
+          </summary>
+          <div class="curve-multiselect-menu" data-chart-motor-options role="group"
+            aria-labelledby="chartMotorLabel">
+            <label class="curve-option">
+              <input type="checkbox" name="chart-motor" value="1" data-motor-id="1" checked>
+              <span>电机 1</span>
+            </label>
+          </div>
+        </details>
+      </div>
+      <div class="curve-field">
+        <span class="curve-field-label" id="chartChannelLabel">通道</span>
+        <details id="chartCh" class="curve-multiselect">
+          <summary aria-labelledby="chartChannelLabel" aria-haspopup="true">
+            <span data-chart-channel-summary>位置 rad</span>
+          </summary>
+          <div class="curve-multiselect-menu" role="group" aria-labelledby="chartChannelLabel">
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="position" checked>
+              <span>位置</span><span class="curve-unit">rad</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="velocity">
+              <span>速度</span><span class="curve-unit">rad/s</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="effort">
+              <span>力矩</span><span class="curve-unit">N·m</span>
+            </label>
+            <label class="curve-option">
+              <input type="checkbox" name="chart-channel" value="current">
+              <span>电流</span><span class="curve-unit">A</span>
+            </label>
+          </div>
+        </details>
+      </div>
+      <span class="muted tiny" id="chartHint">10 s · 滚轮调整 1–60 s</span>
+      <span class="spacer"></span>
+      <button id="btnChartPause" class="tiny-btn">暂停</button>
+      <button id="btnChartClear" class="tiny-btn secondary">清空</button>
+    </div>
+    <canvas id="chart" width="980" height="380" class="chart" tabindex="0"
+      aria-label="电机通道曲线，滚轮调整 1 到 60 秒时间范围"></canvas>
+    <div id="chartLegend" class="chart-legend" aria-label="曲线图例"></div>
+  </template>
+
+  <template data-panel-template="imu">
+    <details class="card" data-fold="imu" open>
+      <summary>IMU<span class="spacer"></span><span class="sum" id="imuHz">-- Hz</span></summary>
+      <div class="imu-wrap">
+        <div class="kv">
+          <div><span>Roll</span><b id="imuRoll">--</b></div>
+          <div><span>Pitch</span><b id="imuPitch">--</b></div>
+          <div><span>Yaw</span><b id="imuYaw">--</b></div>
+          <div><span>温度</span><b id="imuTemp">--</b></div>
+          <div><span>更新</span><b id="imuAge">--</b></div>
+          <div><span>四元数</span><b id="imuQuat" class="muted">--</b></div>
+        </div>
+        <canvas id="imu3d" width="200" height="200" class="imu3d" title="3D 姿态"></canvas>
+        <canvas id="attitudeHorizon" width="260" height="150" class="horizon" title="人工地平仪"></canvas>
+      </div>
+    </details>
+  </template>
+
+  <template data-panel-template="deviceParams">
+    <section class="motor-parameters">
+      <p class="firmware-config-notice">查询设备参数与初始化核验状态；方向设置和驱动板保存须先失能。</p>
+      <div class="firmware-parameter-actions">
+        <button id="btnParamLoad" class="secondary compact">读取电机参数</button>
+        <button id="btnParamSaveDevice" class="secondary compact" disabled>保存电机参数</button>
+        <span class="micro" id="sumDev">未读取</span>
+      </div>
+      <div id="paramResult" class="result tiny" role="status"></div>
+      <p id="paramSelectionHint" class="micro" hidden></p>
+      <div id="paramRows" class="motor-parameter-list"></div>
+    </section>
+  </template>
+
+</body></html>

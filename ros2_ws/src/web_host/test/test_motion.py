@@ -1,0 +1,317 @@
+"""Conversion jobs exercise real IK on a short clip, with no ROS graph or subprocess."""
+from email.message import Message
+from io import BytesIO
+import json
+from pathlib import Path
+import threading
+
+import pytest
+
+pytest.importorskip('pinocchio')
+pytest.importorskip('bvh_broadcaster')
+from web_host.motion import MotionJobs, handle_motion
+
+
+@pytest.fixture
+def payload():
+    hierarchy = 'HIERARCHY\nROOT Spine3 { OFFSET 0 0 0 CHANNELS 6 Xposition Yposition Zposition Yrotation Xrotation Zrotation\n'
+    for side, sign in [('Right', -1), ('Left', 1)]:
+        for part, offset in [('UpperArm', 10), ('LowerArm', 30), ('Hand', 30)]:
+            hierarchy += f'JOINT {side}{part} {{ OFFSET {sign * offset} 0 0 CHANNELS 3 Yrotation Xrotation Zrotation\n'
+        hierarchy += '} } }\n'
+    hierarchy += '}\nMOTION\nFrames: 3\nFrame Time: 0.02\n'
+    rows = (' '.join(['0', '100'] + ['0'] * 22) + '\n') * 3
+    urdf = Path(__file__).resolve().parents[2] / 'robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
+    return {'bvh_text': hierarchy + rows, 'urdf_text': urdf.read_text(),
+            'bvh_name': '测试.bvh', 'urdf_name': 'half_body_robot.urdf'}
+
+
+@pytest.fixture
+def jobs():
+    manager = MotionJobs()
+    yield manager
+    manager.close()
+
+
+def finish(jobs, job):
+    jobs.thread.join(timeout=10)
+    return jobs.status(job['id'])
+
+
+def test_import_convert_preview_and_download(jobs, payload):
+    job = jobs.create(payload)
+    done = finish(jobs, job)
+    assert done['state'] == 'done', done
+    assert done['progress'] == 100 and done['joint_count'] == 18
+    preview = json.loads(jobs.result(job['id'], 'preview.json'))
+    assert len(preview['source']['frames']) == 3
+    assert len(preview['robot']['frames'][0]) == 19
+    assert '<robot' in preview['robot']['urdf']
+    assert len(preview['robot']['joint_names']) == 18
+    assert len(preview['robot']['joint_positions']) == len(preview['times'])
+    assert all(len(q) == 18 for q in preview['robot']['joint_positions'])
+    assert preview['duration'] == pytest.approx(.04)
+    report = json.loads(jobs.result(job['id'], 'report.json'))
+    assert report['preview_only'] and len(report['joint_names']) == 18
+    assert jobs.result(job['id'], 'motion.npz').startswith(b'PK')
+    with pytest.raises(FileNotFoundError):
+        jobs.result(job['id'], '../robot.urdf')
+    snapshot = jobs.status(job['id'])
+    snapshot['mapping']['torso'] = 'changed'
+    assert jobs.status(job['id'])['mapping']['torso'] == 'Spine3'
+
+
+def test_unknown_model_requests_mapping_then_converts(jobs, payload):
+    payload['urdf_text'] = payload['urdf_text'].replace('Joint_link4"', 'renamed_shoulder"')
+    job = jobs.create(payload)
+    assert job['state'] == 'mapping' and job['mapping'] is None
+    import yaml
+    template = Path(__file__).resolve().parents[2] / 'bvh_broadcaster/config/half_body_robot.yaml'
+    mapping = yaml.safe_load(template.read_text())
+    mapping['arms']['right']['robot'][0] = 'renamed_shoulder'
+    jobs.start(job['id'], mapping)
+    assert finish(jobs, job)['state'] == 'done'
+
+
+def test_generic_entry_keeps_known_dual_arm_conversion(jobs, payload):
+    original = jobs.create(payload)
+    assert finish(jobs, original)['state'] == 'done'
+    expected = json.loads(jobs.result(original['id'], 'preview.json'))['robot']['joint_positions']
+    generic = jobs.create({**payload, 'retargeting': 'generic'})
+    assert generic['mapping_origin'] == 'builtin'
+    assert finish(jobs, generic)['state'] == 'done'
+    assert json.loads(jobs.result(generic['id'], 'preview.json'))['robot']['joint_positions'] == expected
+
+
+def test_generic_known_model_obeys_mimic(jobs, payload):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(payload['urdf_text'])
+    ET.SubElement(root.find("joint[@name='joint_link2']"), 'mimic',
+                  joint='joint_link1', multiplier='0', offset='0.05')
+    job = jobs.create({**payload, 'retargeting': 'generic', 'urdf_text': ET.tostring(root, encoding='unicode')})
+    assert job['state'] == 'mapping' and job['mapping']['mode'] == 'generic'
+    jobs.start(job['id'], job['mapping'])
+    assert finish(jobs, job)['state'] == 'done'
+    preview = json.loads(jobs.result(job['id'], 'preview.json'))['robot']
+    index = preview['joint_names'].index('joint_link2')
+    assert all(q[index] == pytest.approx(.05) for q in preview['joint_positions'])
+
+
+def test_saved_mapping_precedes_builtin_and_corrupt_mapping_needs_confirmation(tmp_path, payload):
+    manager = MotionJobs(profiles_dir=tmp_path)
+    try:
+        first = manager.create({**payload, 'retargeting': 'generic', 'review_mapping': True})
+        first['mapping']['source_to_robot'] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        manager.start(first['id'], first['mapping'], remember=True)
+        assert finish(manager, first)['state'] == 'done'
+        second = manager.create({**payload, 'retargeting': 'generic'})
+        assert second['mapping_origin'] == 'saved'
+        assert second['mapping']['source_to_robot'] == first['mapping']['source_to_robot']
+        assert finish(manager, second)['state'] == 'done'
+        next(tmp_path.glob('*.json')).write_text('{broken')
+        assert manager.create({**payload, 'retargeting': 'generic'})['state'] == 'mapping'
+    finally:
+        manager.close()
+
+
+def test_conversion_failure_is_terminal(jobs, payload, monkeypatch):
+    def fail(*args):
+        raise ValueError('fixture IK failure')
+    monkeypatch.setattr('bvh_broadcaster.retarget.ArmRetargeter.convert', fail)
+    done = finish(jobs, jobs.create(payload))
+    assert done['state'] == 'failed' and done['error'] == 'fixture IK failure'
+    with pytest.raises(ValueError, match='尚未完成'):
+        jobs.result(done['id'], 'preview.json')
+
+
+def test_only_one_conversion_can_run(jobs, payload, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+    def blocked(*args):
+        started.set()
+        release.wait(timeout=5)
+        raise ValueError('released')
+    monkeypatch.setattr('bvh_broadcaster.retarget.ArmRetargeter.convert', blocked)
+    try:
+        job = jobs.create(payload)
+        assert started.wait(timeout=2)
+        with pytest.raises(ValueError, match='已有转换'):
+            jobs.create(payload)
+        with pytest.raises(ValueError, match='已开始'):
+            jobs.start(job['id'], job['mapping'])
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize('field,value,match', [
+    ('bvh_text', '', '不能为空'), ('urdf_text', '<robot/>', '完整关节树'),
+    ('urdf_text', '<!DOCTYPE robot><robot/>', 'DTD'), ('up_axis', 'bad', '坐标或单位')])
+def test_invalid_import_rejected(jobs, payload, field, value, match):
+    payload[field] = value
+    with pytest.raises(ValueError, match=match):
+        jobs.create(payload)
+
+
+class Handler:
+    command = 'POST'
+    path = '/api/motion/jobs'
+    def __init__(self, body=b'{}', origin='http://localhost', content_type='application/json'):
+        self.headers = Message()
+        for k, v in {'Host': 'localhost', 'Origin': origin, 'Content-Type': content_type,
+                     'Content-Length': str(len(body))}.items():
+            self.headers[k] = v
+        self.rfile, self.wfile = BytesIO(body), BytesIO()
+        self.code = None
+    def send_response(self, code): self.code = code
+    def send_header(self, *args): pass
+    def end_headers(self): pass
+
+
+@pytest.mark.parametrize('origin,content_type,code', [
+    ('http://other.invalid', 'application/json', 403), ('http://localhost', 'text/plain', 415)])
+def test_http_upload_boundary(jobs, origin, content_type, code):
+    handler = Handler(origin=origin, content_type=content_type)
+    assert handle_motion(handler, jobs) and handler.code == code
+
+
+def test_http_missing_task_and_other_routes(jobs):
+    handler = Handler()
+    handler.command = 'GET'
+    handler.path = '/api/motion/jobs/missing'
+    assert handle_motion(handler, jobs) and handler.code == 404
+    handler.path = '/api/actions'
+    assert not handle_motion(handler, jobs)
+
+
+def test_http_lists_library_bvh_sources(tmp_path):
+    for name in ('first.bvh', 'second.BHV', 'third.BvH', 'motion.json', 'notes.txt'):
+        (tmp_path / name).write_text('fixture')
+    (tmp_path / 'directory.bvh').mkdir()
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        handler = Handler()
+        handler.command, handler.path = 'GET', '/api/motion/sources'
+        assert handle_motion(handler, manager) and handler.code == 200
+        assert json.loads(handler.wfile.getvalue()) == {
+            'sources': ['first.bvh', 'second.BHV', 'third.BvH']}
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('origin,content_type,body,code', [
+    ('http://localhost', 'application/json', b'{}', 200),
+    ('http://elsewhere', 'application/json', b'{}', 403),
+    ('http://localhost', 'text/plain', b'{}', 415),
+    ('http://localhost', 'application/json', b'[]', 400),
+])
+def test_http_saved_source_status(jobs, origin, content_type, body, code):
+    from web_host.motion_catalog import handle_motion_catalog
+    handler = Handler(body, origin=origin, content_type=content_type)
+    handler.path = '/api/motion/sources/status'
+    assert handle_motion_catalog(handler, jobs) and handler.code == code
+    if code == 200:
+        assert json.loads(handler.wfile.getvalue()) == {'sources': []}
+
+
+@pytest.mark.parametrize('failure', ['syntax', 'runtime', 'index'])
+def test_http_saved_status_reports_model_errors(tmp_path, payload, monkeypatch, failure):
+    from web_host.motion_catalog import _CatalogJobs, handle_motion_catalog
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / 'clip.bvh').write_text(payload['bvh_text'])
+    manager = MotionJobs(actions_dir=library, cache_dir=tmp_path / 'results')
+    try:
+        if failure == 'syntax':
+            payload['urdf_text'] = '<robot'
+        else:
+            def invalid_model(*args, **kwargs):
+                exception = RuntimeError if failure == 'runtime' else IndexError
+                raise exception('invalid model')
+            monkeypatch.setattr(_CatalogJobs, 'create', invalid_model)
+        handler = Handler(json.dumps(payload).encode())
+        handler.path = '/api/motion/sources/status'
+        assert handle_motion_catalog(handler, manager) and handler.code == 200
+        entries = json.loads(handler.wfile.getvalue())['sources']
+        assert len(entries) == 1
+        assert entries[0]['name'] == 'clip.bvh' and entries[0]['saved'] is False
+        assert entries[0]['error']
+        assert manager.jobs == {} and manager.thread is None
+    finally:
+        manager.close()
+
+
+def test_http_imports_library_source_symlink(tmp_path, payload):
+    original = tmp_path / 'original.txt'
+    original.write_text(payload.pop('bvh_text'))
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / 'stored.BVH').symlink_to(original)
+    manager = MotionJobs(actions_dir=library)
+    try:
+        handler = Handler(json.dumps({**payload, 'bvh_source': 'stored.BVH'}).encode())
+        assert handle_motion(handler, manager) and handler.code == 202
+        job = json.loads(handler.wfile.getvalue())
+        assert job['bvh_name'] == 'stored.BVH'
+        assert job['automatic_mapping']
+        assert finish(manager, job)['state'] == 'done'
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('name,code', [
+    ('', 400), ('../outside.bvh', 400), ('/tmp/outside.bvh', 400),
+    ('..\\outside.bvh', 400), ('motion.json', 400), ('absent.bvh', 404)])
+def test_http_rejects_invalid_library_source(tmp_path, payload, name, code):
+    payload.pop('bvh_text')
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        handler = Handler(json.dumps({**payload, 'bvh_source': name}).encode())
+        assert handle_motion(handler, manager) and handler.code == code
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+def test_rejects_library_bvh_over_20mb(tmp_path, payload):
+    payload.pop('bvh_text')
+    with (tmp_path / 'large.bvh').open('wb') as handle:
+        handle.truncate(20 * 1024 * 1024 + 1)
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        with pytest.raises(ValueError, match='20 MB'):
+            manager.create({**payload, 'bvh_source': 'large.bvh'})
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('library_source', [False, True])
+def test_combined_import_size_is_bounded(tmp_path, payload, library_source):
+    payload['urdf_text'] += ' ' * (20 * 1024 * 1024 - len(payload['urdf_text'].encode('utf-8')))
+    if library_source:
+        (tmp_path / 'stored.bvh').write_text(payload.pop('bvh_text'))
+        payload['bvh_source'] = 'stored.bvh'
+    manager = MotionJobs(actions_dir=tmp_path)
+    try:
+        with pytest.raises(ValueError, match='合计不能超过 20 MB'):
+            manager.create(payload)
+        assert not manager.jobs
+    finally:
+        manager.close()
+
+
+def test_shoulders_clip_automatically_maps_existing_joints(jobs, payload):
+    path = Path(__file__).resolve().parent / 'fixtures/1-4.bvh'
+    hierarchy, motion = path.read_text().split('MOTION\n', 1)
+    rows = motion.splitlines()
+    payload['bvh_text'] = hierarchy + 'MOTION\nFrames: 3\n' + '\n'.join(rows[1:5]) + '\n'
+    job = jobs.create(payload)
+    assert job['automatic_mapping']
+    assert job['mapping'] == {
+        'mode': 'shoulders12', 'source_to_robot': [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+        'source': 'shoulder_r', 'joints': ['joint_link1', 'joint_link2']}
+    done = finish(jobs, job)
+    assert done['state'] == 'done', done
+    preview = json.loads(jobs.result(job['id'], 'preview.json'))
+    assert len(preview['times']) == 3
+    assert preview['duration'] == pytest.approx(2 * .041667)
+    assert len(preview['robot']['joint_positions'][0]) == 18

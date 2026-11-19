@@ -25,7 +25,7 @@ const preview = { times: [0, 1, 2], duration: 2,
 
 test('动作库标识已保存结果，改变单位后重新核对', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
-  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
     sources: [{name: '1-4.bvh', saved: route.request().postDataJSON().scale === .01}],
@@ -50,7 +50,7 @@ test('动作库标识已保存结果，改变单位后重新核对', async ({ pa
 
 test('保存状态的旧响应不会覆盖新转换选项', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
-  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   let release!: () => void;
   let started!: () => void;
@@ -87,7 +87,7 @@ test('调试页BVH播放在控制未就绪时显示原因并保留页面', async
   await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
     sources: [{name: 'walk.bvh', saved: true}],
   }}));
-  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   let submitted: Record<string, unknown> | undefined;
   await page.route('**/api/motion/jobs', route => {
@@ -113,7 +113,7 @@ test('服务重启使临时任务过期时自动恢复已保存的动作', async
   });
   await page.route('**/api/motion/jobs/expired', route =>
     route.fulfill({status: 404, json: {error: '动作任务已过期'}}));
-  await page.route('**/robot_sim/models/robot_leg/urdf/robot_leg.urdf', route =>
+  await page.route('**/robot_description/models/robot_leg/urdf/robot_leg.urdf', route =>
     route.fulfill({body: '<robot name="robot_leg"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/sources/status', route => {
     const request = route.request().postDataJSON();
@@ -141,7 +141,7 @@ async function localSources(page: import('@playwright/test').Page) {
 test('默认选动作库和当前模型，不上传文件也能转换独立肩关节动作', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
   let submitted: Record<string, unknown> | undefined;
-  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/jobs', route => {
     submitted = route.request().postDataJSON();
@@ -173,7 +173,7 @@ test('动作库记住选择，换目标模型时读取所选模型URDF', async (
     localStorage.setItem('web_host.model', 'robot_leg');
   });
   let submitted: Record<string, unknown> | undefined;
-  await page.route('**/robot_sim/models/robot_leg/urdf/robot_leg.urdf', route =>
+  await page.route('**/robot_description/models/robot_leg/urdf/robot_leg.urdf', route =>
     route.fulfill({body: '<robot name="robot_leg"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/jobs', route => {
     submitted = route.request().postDataJSON();
@@ -213,7 +213,7 @@ test('恢复旧任务期间禁止新提交，恢复完成后可以导入', async
   });
   await page.route('**/api/motion/jobs', route => route.fulfill({json: {...job, state: 'done'}}));
   await page.route('**/api/motion/jobs/fixture/preview.json', route => route.fulfill({json: preview}));
-  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   try {
     await page.goto('/workbench/#/motion');
@@ -361,8 +361,8 @@ test('URDF实体模型由关节角驱动，拖动进度改变实体姿态', asyn
 });
 
 test('URDF网格缺失时显示提示并保留骨架播放', async ({ page }) => {
-  await page.route('**/robot_sim/missing.stl', route => route.fulfill({ status: 404, body: 'not found' }));
-  await modelPreview(page, visualUrdf.replace('<box size=".7 .08 .08"/>', '<mesh filename="package://robot_sim/missing.stl"/>'));
+  await page.route('**/robot_description/missing.stl', route => route.fulfill({ status: 404, body: 'not found' }));
+  await modelPreview(page, visualUrdf.replace('<box size=".7 .08 .08"/>', '<mesh filename="package://robot_description/missing.stl"/>'));
   await expect(page.getByLabel('机器人模型状态', { exact: true })).toHaveText('部分网格缺失，保留骨架');
   await expect(page.getByLabel('人体与机器人动作三维预览')).toBeVisible();
   await page.getByLabel('动作播放进度', { exact: true }).fill('1.2');

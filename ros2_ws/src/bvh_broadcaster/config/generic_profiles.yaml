@@ -620,7 +620,8 @@ profiles:
     BN_LeftFoot_roll_link: LeftFoot
     BN_LeftHand_pitch_link: LeftHand
   assembly: Robot_body2 native STEP with outward left hand
-- urdf_sha256: 694c067c7183ca8203f30ca46505569ad94e3716427b88dbedf4cfe391a7a4a8
+- &full_body_mapping
+  urdf_sha256: f7df2c8330bc03f42bab25348cc5a867182bfd1a37f2f5b85b15a2ab11b9da0a
   source_root: Spine
   source_to_robot:
   - - 1
@@ -650,7 +651,10 @@ profiles:
     BN_LeftFoot_roll_link: LeftFoot
     BN_LeftHand_pitch_link: LeftHand
   assembly: Robot_body2 native STEP with outward left hand
-- urdf_sha256: 0f76d4bb432b98a04e4c5f67e9702701a9f4d73ab590ed3670e222c9bd1ee0dd
+- <<: *full_body_mapping
+  urdf_sha256: 694c067c7183ca8203f30ca46505569ad94e3716427b88dbedf4cfe391a7a4a8
+- &full_body_standalone
+  urdf_sha256: fd48c91b4c88a72b6d255744e052df6168b961308b130468c81c3202484e8a21
   source_root: Spine
   source_to_robot:
   - - 1
@@ -680,3 +684,5 @@ profiles:
     BN_LeftFoot_roll_link: LeftFoot
     BN_LeftHand_pitch_link: LeftHand
   assembly: Robot_body2 native STEP with outward left hand
+- <<: *full_body_standalone
+  urdf_sha256: 0f76d4bb432b98a04e4c5f67e9702701a9f4d73ab590ed3670e222c9bd1ee0dd

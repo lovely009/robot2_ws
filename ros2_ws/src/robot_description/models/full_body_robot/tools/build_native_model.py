@@ -15,7 +15,7 @@ import arm_mounting
 import joint_convention
 
 MODEL = Path(__file__).resolve().parents[1]
-DIRECTORY = MODEL / 'mujoco/visual/native'
+DIRECTORY = MODEL / 'meshes/visual/native'
 ARM_INERTIA_SOURCE = MODEL / 'cad/arm_inertia/urdf/全身实验版_仅双臂质量.urdf'
 ARM_LINK_NAMES = {
     f'BN_{side}{part}_link'
@@ -243,10 +243,6 @@ def split_geometry(alignment, metadata, rods, mounting):
                 continue
             output=DIRECTORY/(part+'.STL')
             piece=append([extract(regions,indices),*extras[part]])
-            collision=MODEL/'mujoco/collision/native'/output.name
-            collision.parent.mkdir(parents=True,exist_ok=True)
-            writer=vtk.vtkSTLWriter();writer.SetInputData(piece);writer.SetFileTypeToBinary();writer.SetFileName(str(collision))
-            if not writer.Write():raise OSError(collision)
             write_display_mesh(piece,output)
             files[part]=output.relative_to(MODEL).as_posix()
         ownership[name]={'source':entry['source'],'source_sha256':entry['source_sha256'],'parts':parts,'rotor_regions':rotors,'fixed_regions':fixed}

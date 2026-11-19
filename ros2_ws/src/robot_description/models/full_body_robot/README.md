@@ -10,7 +10,7 @@
 python3 tools/build_native_model.py
 ```
 
-`urdf/full_body_robot.standalone.urdf` 保留完整 CAD 活动件骨架；`full_body_robot.standing.urdf` 须配合 `config/standing.json` 的初始角度显示。`mujoco/visual/` 与 `mujoco/collision/` 仅沿用历史网格路径，主 URDF 仍引用它们；仿真 XML、仿真扫描和 HIL 专用入口已移除。
+`urdf/full_body_robot.standalone.urdf` 保留完整 CAD 活动件骨架；`full_body_robot.standing.urdf` 须配合 `config/standing.json` 的初始角度显示。四份 URDF 共用 `meshes/visual/native/`，主 URDF 的碰撞几何继续引用相同网格。
 
 历史扫描范围及辅助件数值惯量不代表实机验收。机械限位、方向／编码器零位、电缆约束、质量属性和跨组姿态仍须独立核验。
 

@@ -1,5 +1,5 @@
 // URDF 三维视图，从 store 读取关节反馈，并提供轴标、拾取和状态着色。
-// package://robot_description/ 资源由 loader 映射到 /robot_sim/。
+// package://robot_description/ 资源由 loader 映射到 /robot_description/。
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -442,13 +442,13 @@ export function mount(rootEl, ctx) {
       stage.prepend(canvas);
     }
     const fullBodyVisual = MODEL === 'full_body_robot';
-    const modelUrl = `/robot_sim/models/${MODEL}`;
+    const modelUrl = `/robot_description/models/${MODEL}`;
     const urdfName = fullBodyVisual ? `${MODEL}.standing.urdf` : `${MODEL}.urdf`;
     init(canvas, {
       urdfUrl: `${modelUrl}/urdf/${urdfName}`,
       initialPositionsUrl: fullBodyVisual ? `${modelUrl}/config/standing.json` : undefined,
       // package://robot_description/... → static_server 挂在根部的模型包根
-      packages: {'robot_description': '/robot_sim'},
+      packages: {'robot_description': '/robot_description'},
       onSelect: pickJoint,
       // LoadingManager 的回调签名是 (url, loaded, total)；不保证一定拿到 total。
       onProgress: (url, loaded, total) => {
@@ -474,7 +474,7 @@ export function mount(rootEl, ctx) {
       onError: (err) => {
         hud.className = 'hud err';
         hud.textContent = '臂视图加载失败：' + (err && err.message ? err.message : err)
-          + '（查 static_server 是否挂载 /robot_sim、static server 日志）';
+          + '（查 static_server 是否挂载 /robot_description、static server 日志）';
       },
     });
     setRunning(!document.hidden);     // 后台标签页不空转渲染

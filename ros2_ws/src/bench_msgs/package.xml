@@ -3,7 +3,7 @@
 <package format="3">
   <name>bench_msgs</name>
   <version>0.1.0</version>
-  <description>台架主机侧控制服务定义：仿真 / micro-ROS Agent / 电机后端的起停、枚举与状态查询</description>
+  <description>板端工作台服务定义：micro-ROS Agent、设备枚举、状态查询与重力前馈</description>
   <maintainer email="dev@robot.local">robot dev</maintainer>
   <license>Apache License 2.0</license>
 

@@ -144,7 +144,7 @@ def test_native_rods_retain_exact_source_component_geometry():
         ids=vtk_to_numpy(regions.GetOutput().GetPointData().GetScalars()).astype(int)
         for name,indices in source['parts'].items():
             if not name.endswith('_rod'):continue
-            reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL/'mujoco/visual/native'/f'{name}.STL'));reader.Update()
+            reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL/'meshes/visual/native'/f'{name}.STL'));reader.Update()
             actual=vtk_to_numpy(reader.GetOutput().GetPoints().GetData()).astype(float)
             expected=points[np.isin(ids,indices)]
             assert max(cKDTree(expected).query(actual)[0].max(),cKDTree(actual).query(expected)[0].max())<1e-7,name

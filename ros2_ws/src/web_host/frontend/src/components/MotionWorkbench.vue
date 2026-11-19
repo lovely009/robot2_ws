@@ -79,7 +79,7 @@ watch([robotModel, urdf, upAxis, scale, catalogLoading], () => {
 async function modelText(modelName: string, file?: File) {
   if (!modelName) return file?.text();
   const name = encodeURIComponent(modelName);
-  const response = await fetch(`/robot_sim/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
+  const response = await fetch(`/robot_description/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
   if (!response.ok) throw Error(`模型 ${modelName} 的 URDF 加载失败`);
   return response.text();
 }
@@ -439,7 +439,7 @@ onBeforeUnmount(() => {
       <span v-if="job.summary?.direction_max_deg !== undefined">最大骨段方向误差 {{ job.summary.direction_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
       <span v-else-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>
-    <p class="motion-footnote">机器人按 URDF 显示实体模型，缺失网格时保留骨架。双足预览按足底估计支撑高度，并保留源动作的腾空；这不是接触或平衡仿真。转换结果保存在本机；动作、映射、模型、约束和算法未变化时直接复用。页面临时保留最近 3 次导入，服务重启后再次导入也可复用已保存结果。</p>
+    <p class="motion-footnote">机器人按 URDF 显示实体模型，缺失网格时保留骨架。双足预览按足底估计支撑高度，并保留源动作中的腾空阶段。转换结果保存在本机；动作、映射、模型、约束和算法未变化时直接复用。页面临时保留最近 3 次导入，服务重启后再次导入也可复用已保存结果。</p>
   </div>
 </template>
 

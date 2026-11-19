@@ -37,7 +37,7 @@ def test_installed_mechanical_model_and_meshes(relative):
 def test_installed_models_have_no_simulation_entrypoints():
     assert not list((SHARE / 'models').glob('*/config/*hil*.yaml'))
     assert not list((SHARE / 'models').glob('*/config/*simulation*.yaml'))
-    assert not list((SHARE / 'models').glob('*/mujoco/*.xml'))
+    assert not list((SHARE / 'models').glob('*/mujoco'))
     assert not list((SHARE / 'models').rglob('gazebo.launch'))
     assert not list((SHARE / 'models').rglob('*.urdf.xacro'))
 

@@ -26,8 +26,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         requested = unquote(urlsplit(path).path)
-        if requested.startswith('/robot_sim/'):
-            relative = requested[len('/robot_sim/'):]
+        if requested.startswith('/robot_description/'):
+            relative = requested[len('/robot_description/'):]
             for root in (model_root, package / 'test/fixtures/robot_description'):
                 target = (root / relative).resolve()
                 if root.resolve() in target.parents and target.is_file():

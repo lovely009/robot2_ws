@@ -20,7 +20,7 @@ export default defineConfig({
     proxy: Object.fromEntries(
       [
         "/api",
-        "/robot_sim",
+        "/robot_description",
         "/js",
         "/css",
         "/vendor",

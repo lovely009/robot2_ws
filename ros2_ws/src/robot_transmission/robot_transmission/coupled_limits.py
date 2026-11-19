@@ -1,4 +1,4 @@
-"""Sampled two-joint workspaces shared by simulation and offline motion preview."""
+"""Sampled two-joint workspaces used to validate joint pairs for control and offline motion preview."""
 
 import math
 

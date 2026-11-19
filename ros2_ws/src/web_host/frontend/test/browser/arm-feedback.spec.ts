@@ -10,9 +10,9 @@ test('整机预览默认使用 Standing，双脚贴地且反馈保留世界基�
   await page.evaluate(async()=>{
     const {init}=await import('/js/panels/arm.js');
     init(document.querySelector('canvas'),{
-      urdfUrl:'/robot_sim/models/full_body_robot/urdf/full_body_robot.standing.urdf',
-      initialPositionsUrl:'/robot_sim/models/full_body_robot/config/standing.json',
-      packages:{robot_description:'/robot_sim'},
+      urdfUrl:'/robot_description/models/full_body_robot/urdf/full_body_robot.standing.urdf',
+      initialPositionsUrl:'/robot_description/models/full_body_robot/config/standing.json',
+      packages:{robot_description:'/robot_description'},
     });
   });
   await expect(page.locator('canvas')).toHaveAttribute('data-model-rendered','true');

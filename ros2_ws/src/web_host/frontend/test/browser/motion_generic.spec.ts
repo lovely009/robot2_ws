@@ -16,7 +16,7 @@ test.beforeEach(async ({page}) => {
   await page.route('**/api/runtime', route => route.fulfill({json:{control_mode:'readonly',robot_model:'unseen'}}));
   await page.route('**/api/models', route => route.fulfill({json:{models:['unseen']}}));
   await page.route('**/api/motion/sources', route => route.fulfill({json:{sources:['sample.bvh']}}));
-  await page.route('**/robot_sim/models/unseen/urdf/unseen.urdf', route => route.fulfill({body:'<robot name="unseen"/>'}));
+  await page.route('**/robot_description/models/unseen/urdf/unseen.urdf', route => route.fulfill({body:'<robot name="unseen"/>'}));
 });
 
 test('通用候选需要确认，明确选择几何预览并记住映射', async ({page}) => {

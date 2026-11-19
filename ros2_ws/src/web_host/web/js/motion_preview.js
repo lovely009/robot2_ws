@@ -144,12 +144,12 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
     // Uploaded URDF assets are resolved only within the project's mounted model directory.
     manager.setURLModifier(raw => {
       const url = new URL(raw, location.origin);
-      if (url.origin !== location.origin || !url.pathname.startsWith('/robot_sim/'))
+      if (url.origin !== location.origin || !url.pathname.startsWith('/robot_description/'))
         throw Error('缺少工程内模型网格');
       return url.href;
     });
     const loader = new URDFLoader(manager);
-    loader.packages = { robot_sim: '/robot_sim', robot_description: '/robot_sim' };
+    loader.packages = { robot_description: '/robot_description' };
     loader.parseCollision = false;
     let pending = 0, loaded = 0;
     function finish() {
@@ -192,7 +192,7 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
     };
     try {
       const name = document.documentElement.getAttribute('name') || '';
-      model = loader.parse(document, `/robot_sim/models/${encodeURIComponent(name)}/urdf/`);
+      model = loader.parse(document, `/robot_description/models/${encodeURIComponent(name)}/urdf/`);
       if (data.robot.ignore_limits === true) {
         Object.values(model.joints).forEach(joint => { joint.ignoreLimits = true; });
       }

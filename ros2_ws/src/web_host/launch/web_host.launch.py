@@ -51,7 +51,7 @@ def web_nodes(context):
             parameters=[{
                 'host': '127.0.0.1', 'port': LaunchConfiguration('web_port'),
                 'web_root': os.path.join(pkg_share, 'web'),
-                'model_url_prefix': '/robot_sim', 'model_dir': LaunchConfiguration('model_dir'),
+                'model_url_prefix': '/robot_description', 'model_dir': LaunchConfiguration('model_dir'),
                 'control_mode': mode, 'robot_model': LaunchConfiguration('robot_model'),
                 'rosbridge_port': LaunchConfiguration('rosbridge_port'),
             }]),
@@ -59,7 +59,7 @@ def web_nodes(context):
 
 
 def generate_launch_description():
-    # 模型包几何由 static_server 挂载到 /robot_sim；缺包时仅降级臂视图与模型列表。
+    # 模型包几何由 static_server 挂载到 /robot_description；缺包时仅降级臂视图与模型列表。
     # 本 launch 提供 L1 页面服务；台架编排由 robot_bringup/robot.launch.py 负责，
     # 避免仅浏览页面时引入进程管理权限。
     try:

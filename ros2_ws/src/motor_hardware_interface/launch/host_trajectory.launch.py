@@ -105,15 +105,9 @@ def controller_parameters(joints, urdf_file):
 
 
 def control_urdf_file(config_file, urdf_file):
-    """兼容仍传入可视化 URDF 的 HIL 会话编排器。"""
-    source = Path(urdf_file)
-    if (Path(config_file).name in ('motor_driver.simulation.yaml', 'motor_driver.hil.yaml')
-            and source.name.endswith('.standalone.urdf')):
-        dedicated = source.with_name(source.name.replace('.standalone.urdf', '.hil.urdf'))
-        if dedicated.is_file():
-            return str(dedicated)
-        if source.name == 'full_body_robot.standalone.urdf':
-            raise ValueError('full_body_robot 缺少 HIL 控制 URDF，请运行 build_hil_config.py')
+    """板端不接受旧仿真/HIL 配置，也不自动切换到其他 URDF。"""
+    if Path(config_file).name in ('motor_driver.simulation.yaml', 'motor_driver.hil.yaml'):
+        raise ValueError('板端不支持仿真或 HIL 电机配置')
     return urdf_file
 
 

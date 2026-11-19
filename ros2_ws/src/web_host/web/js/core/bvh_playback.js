@@ -13,7 +13,7 @@ export function bvhSelection(model) {
 
 export async function bvhModelText(model, signal) {
   const encoded = encodeURIComponent(model);
-  const response = await fetch(`/robot_sim/models/${encoded}/urdf/${encoded}.urdf`,
+  const response = await fetch(`/robot_description/models/${encoded}/urdf/${encoded}.urdf`,
     { cache: 'no-store', signal });
   if (!response.ok) throw new Error(`模型 ${model} 的 URDF 加载失败`);
   return response.text();

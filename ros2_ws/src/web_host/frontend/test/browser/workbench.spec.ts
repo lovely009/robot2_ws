@@ -728,12 +728,15 @@ test('旧本地选型和运行配置回退到仅保留的整机', async ({page})
   await page.addInitScript(() => localStorage.setItem('web_host.model', 'half_body_robot'));
   const requests: string[] = [];
   page.on('request', request => {
-    if (request.url().includes('/robot_sim/models/')) requests.push(request.url());
+    requests.push(new URL(request.url()).pathname);
   });
   await page.goto('/workbench/#/run');
   await expect.poll(() => fixture.feedbackModels).toEqual(['full_body_robot']);
   await expect(page.locator('.arm-model')).toHaveValue('full_body_robot');
-  await expect.poll(() => requests.some(url => url.includes('/full_body_robot/'))).toBe(true);
+  await expect.poll(() => requests.some(url =>
+    url.startsWith('/robot_description/models/full_body_robot/meshes/visual/native/')
+    && url.endsWith('.STL'))).toBe(true);
+  expect(requests.some(url => url.startsWith('/robot_sim/'))).toBe(false);
   expect(requests.some(url => url.includes('/half_body_robot/'))).toBe(false);
   expect(await page.evaluate(() => localStorage.getItem('web_host.model'))).toBe('full_body_robot');
   expect(fixture.errors).toEqual([]);

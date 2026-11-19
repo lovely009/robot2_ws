@@ -1,0 +1,161 @@
+import {test,expect} from '@playwright/test';
+import {readFileSync} from 'node:fs';
+
+test('整机预览默认使用 Standing，双脚贴地且反馈保留世界基座位姿',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<canvas style="width:800px;height:600px"></canvas><script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {robot,ghost,scene};'}));
+  await page.goto('/arm-fixture');
+  await page.evaluate(async()=>{
+    const {init}=await import('/js/panels/arm.js');
+    init(document.querySelector('canvas'),{
+      urdfUrl:'/robot_sim/models/full_body_robot/urdf/full_body_robot.standing.urdf',
+      initialPositionsUrl:'/robot_sim/models/full_body_robot/config/standing.json',
+      packages:{robot_description:'/robot_sim'},
+    });
+  });
+  await expect(page.locator('canvas')).toHaveAttribute('data-model-rendered','true');
+  const result=await page.evaluate(async()=>{
+    const {Vector3,Quaternion}=await import('/vendor/three.module.min.js');
+    const {robot,ghost,scene,setJoints,setTargets}=await import('/js/panels/arm.js');
+    robot.updateMatrixWorld(true);
+    const position=name=>robot.links[name].getWorldPosition(new Vector3());
+    const shoulders=position('BN_LeftShoulder_1_link').add(position('BN_RightShoulder_1_link')).multiplyScalar(.5);
+    const torso=shoulders.sub(position('BN_hips_pitch_link')).normalize();
+    const floorHeights=['Left','Right'].map(side=>{
+      let minZ=Infinity;
+      robot.links[`BN_${side}Foot_roll_link`].traverse(object=>{
+        if (!object.isMesh || object.userData.hitOnly) return;
+        const vertices=object.geometry.getAttribute('position');
+        const vertex=new Vector3();
+        for(let i=0;i<vertices.count;i++){
+          vertex.fromBufferAttribute(vertices,i).applyMatrix4(object.matrixWorld);
+          minZ=Math.min(minZ,vertex.z);
+        }
+      });
+      return minZ;
+    });
+    const grid=scene.children.find(object=>object.type==='GridHelper');
+    const basePose=target=>target.links.Base_link.getWorldQuaternion(new Quaternion()).toArray();
+    const base=basePose(robot);
+    const initial=robot.joints.left_ankle_pitch.angle;
+    setJoints({left_ankle_pitch:.1});
+    setTargets({left_ankle_pitch:-.1});
+    return {torso:torso.toArray(),floorHeights,floor:grid.position.z,base,
+      afterFeedback:basePose(robot),ghostBase:basePose(ghost),initial,
+      actual:robot.joints.left_ankle_pitch.angle,
+      target:ghost.joints.left_ankle_pitch.angle,ghostVisible:ghost.visible};
+  });
+  expect(result.torso[0]).toBeCloseTo(0,7);
+  expect(result.torso[1]).toBeCloseTo(0,7);
+  expect(result.torso[2]).toBeCloseTo(1,7);
+  expect(result.floor).toBe(0);
+  for(const height of result.floorHeights) expect(height).toBeCloseTo(0,6);
+  expect(result.initial).toBeLessThan(-.1);
+  expect(result.afterFeedback).toEqual(result.base);
+  expect(result.ghostBase).toEqual(result.base);
+  expect(result.actual).toBeCloseTo(.1,8);
+  expect(result.target).toBeCloseTo(-.1,8);
+  expect(result.ghostVisible).toBe(true);
+});
+
+test('地面落在模型最低外观表面，忽略关节拾取球',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {placeGround};'}));
+  await page.goto('/arm-fixture');
+  const result=await page.evaluate(async()=>{
+    const {Mesh,BoxGeometry,GridHelper}=await import('/vendor/three.module.min.js');
+    const {URDFRobot}=await import('/vendor/URDFClasses.js');
+    const {placeGround}=await import('/js/panels/arm.js');
+    const model=new URDFRobot();
+    model.position.set(1,2,.5);
+    const foot=new Mesh(new BoxGeometry(.2,.1,.04));
+    foot.position.z=-1.2;
+    const marker=new Mesh(new BoxGeometry(.1,.1,1));
+    marker.userData.hitOnly=true;
+    marker.position.z=-1.5;
+    model.add(foot,marker);
+    model.visual={sole:foot};
+    const grid=new GridHelper();
+    placeGround(model,grid);
+    return grid.position.toArray();
+  });
+  expect(result[0]).toBeCloseTo(1,9);
+  expect(result[1]).toBeCloseTo(2,9);
+  expect(result[2]).toBeCloseTo(-.72,7);
+});
+
+test('3D 显示真实关节角，不按 URDF 默认范围截断或改写模型限位',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {applyValues};'}));
+  await page.goto('/arm-fixture');
+  const result=await page.evaluate(async()=>{
+    const {URDFJoint,URDFRobot}=await import('/vendor/URDFClasses.js');
+    const {applyValues}=await import('/js/panels/arm.js');
+    const joint=new URDFJoint(),robot=new URDFRobot();
+    joint.jointType='revolute';joint.name='joint_link2';
+    Object.assign(joint.limit,{lower:-.12,upper:.14,effort:10,velocity:2});
+    joint.urdfNode=new DOMParser().parseFromString('<joint name="joint_link2"><limit lower="-.12" upper=".14"/></joint>','text/xml').documentElement;
+    const node=joint.urdfNode,xml=node.outerHTML,limits={...joint.limit};
+    robot.joints={joint_link2:joint};robot.add(joint);
+    applyValues(robot,{joint_link2:1.952,unknown:2});
+    const angle=joint.angle;
+    applyValues(robot,{joint_link2:NaN});
+    return {angle,afterInvalid:joint.angle,limits:joint.limit,originalLimits:limits,
+      sameNode:joint.urdfNode===node,sameXml:joint.urdfNode.outerHTML===xml};
+  });
+  expect(result.angle).toBeCloseTo(1.952,9);
+  expect(result.afterInvalid).toBeCloseTo(1.952,9);
+  expect(result.limits).toEqual(result.originalLimits);
+  expect(result.sameNode && result.sameXml).toBe(true);
+});
+
+test('关节轴标不遮挡电机，保留真实轴向、状态色和透明点击球',async({page})=>{
+  await page.route('**/arm-fixture',route=>route.fulfill({contentType:'text/html',body:
+    '<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","three/examples/jsm/":"/vendor/jsm/"}}</script>'}));
+  await page.route('**/js/panels/arm.js',route=>route.fulfill({contentType:'text/javascript',
+    body:readFileSync('../web/js/panels/arm.js','utf8')+'\nexport {addMarkers,markers};'}));
+  await page.goto('/arm-fixture');
+  const result=await page.evaluate(async()=>{
+    const {URDFJoint,URDFRobot}=await import('/vendor/URDFClasses.js');
+    const {BoxGeometry,Mesh,MeshStandardMaterial,Raycaster,Vector3}=await import('/vendor/three.module.min.js');
+    const {addMarkers,markers,setJointColors,setSelected}=await import('/js/panels/arm.js');
+    const joint=new URDFJoint(),robot=new URDFRobot();
+    joint.name='joint_link3';joint.axis.set(1,2,3).normalize();
+    const motor=new Mesh(new BoxGeometry(.1,.1,.1),new MeshStandardMaterial({color:0x123456}));
+    joint.add(motor);robot.joints={joint_link3:joint};robot.add(joint);
+    addMarkers(robot,['joint_link3']);
+    const marker=markers.get('joint_link3'),[arrow,ring]=marker.children;
+    marker.updateMatrixWorld(true);
+    const arrowDirection=new Vector3(0,1,0).applyQuaternion(arrow.quaternion);
+    const ringNormal=new Vector3(0,0,1).applyQuaternion(ring.quaternion);
+    const originalMotorMaterial=motor.material;
+    setJointColors({joint_link3:'#37d67a'});
+    setSelected('joint_link3');
+    const selectedScale=marker.scale.x;
+    setSelected(null);
+    return {
+      invisible:marker.material.transparent && marker.material.opacity===0
+        && !marker.material.depthWrite && !marker.material.colorWrite,
+      pickable:new Raycaster(joint.axis.clone().multiplyScalar(-1),joint.axis).intersectObject(marker,false).length>0,
+      onlyHitSphere:marker.geometry.type==='SphereGeometry'
+        && marker.children.every(part=>part.geometry?.type!=='SphereGeometry'),
+      axis:arrow.type==='ArrowHelper' && ring.isLineLoop
+        && arrowDirection.distanceTo(joint.axis)<1e-9 && ringNormal.distanceTo(joint.axis)<1e-9,
+      colored:arrow.line.material.color.getHexString()==='37d67a'
+        && arrow.cone.material.color.getHexString()==='37d67a'
+        && ring.material.color.getHexString()==='37d67a',
+      axisVisible:[arrow.line,arrow.cone,ring].every(part=>!part.material.depthTest && !part.material.depthWrite && part.renderOrder===20),
+      motorUntouched:motor.material===originalMotorMaterial && motor.material.color.getHexString()==='123456',
+      selectedScale,resetScale:marker.scale.x,
+    };
+  });
+  expect(result.invisible && result.pickable && result.onlyHitSphere && result.axis && result.colored && result.axisVisible && result.motorUntouched).toBe(true);
+  expect(result.selectedScale).toBe(1.35);
+  expect(result.resetScale).toBe(1);
+});

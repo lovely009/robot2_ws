@@ -1,0 +1,18 @@
+# STEP/base 坐标（m），角度 rad。数学装配分支不是机械安全限位。
+transmissions:
+  shoulder_linkage:
+    plugin: robot_transmission/SpatialLinkageTransmission
+    actuators: [arm_joint1, arm_joint2]
+    joints: [Joint_Link1, Joint_Link2]
+    # 方向初值仅为几何约定；实机使用前须人工核验。
+    actuator_reduction: [1, 1]
+    parameters:
+      motor_axis_origin: '0.033699999952 0.04475 0.400'
+      motor_axis_direction: '1 0 0'
+      motor_ball_zero: '0.033699999952 0.061556509578 0.389158356406'
+      joint1_axis_origin: '-0.0025 0.06725 0.4825'
+      joint1_axis_direction: '0 0 1'
+      joint2_axis_origin: '0.0025 0.06775 0.5025'
+      joint2_axis_direction: '0 -1 0'
+      joint_ball_zero: '0.035840440737 0.06775 0.494319840327'
+      rod_length: '0.10536545216923923'

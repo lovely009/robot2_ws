@@ -1,0 +1,10 @@
+# 首帧必须是录制者的参考 T-pose；映射输出为 URDF 关节角，不是电机角。
+torso: Spine3
+source_to_robot: [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+arms:
+  right:
+    source: [RightUpperArm, RightLowerArm, RightHand]
+    robot: [Joint_link4, Joint_link6, Joint_link9]
+  left:
+    source: [LeftUpperArm, LeftLowerArm, LeftHand]
+    robot: [Joint_link4.4, Joint_link6.6, Joint_link9.9]

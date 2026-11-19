@@ -1,0 +1,620 @@
+{
+  "source_sha256": "fce40e4ee8c530a7c3506c3e433d6a623ee5704eead06a8daa6717863f65f534",
+  "reference_sha256": "a60250a2d6bb339de1e71a58c8a9f77c434a8e5c1418c02bc7eb4f1ec3d324a9",
+  "source_region_count": 68,
+  "algorithm": "exact-triangle-surface-majority, reviewed component ownership v1",
+  "regions": [
+    {
+      "region": 0,
+      "reference_region": 6,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.6321535508576134e-05,
+      "p95_distance_m": 0.0001056085829002547,
+      "max_distance_m": 0.00010560954576876014,
+      "owner": "fixed"
+    },
+    {
+      "region": 1,
+      "reference_region": 4,
+      "vote_fraction": 0.9760087241003271,
+      "median_distance_m": 1.860777403226402e-10,
+      "p95_distance_m": 8.720759488841033e-10,
+      "max_distance_m": 1.8771014597252366e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 2,
+      "reference_region": 6,
+      "vote_fraction": 0.9843809523809524,
+      "median_distance_m": 1.8812794712647854e-10,
+      "p95_distance_m": 9.040664753107707e-10,
+      "max_distance_m": 1.8879869039053083e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 3,
+      "reference_region": 7,
+      "vote_fraction": 0.7261904761904762,
+      "median_distance_m": 1.9089220966167196e-10,
+      "p95_distance_m": 6.077450871899516e-10,
+      "max_distance_m": 1.3403967684345188e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 4,
+      "reference_region": 8,
+      "vote_fraction": 0.6309523809523809,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 5.421784229274121e-10,
+      "max_distance_m": 6.72481457372756e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 5,
+      "reference_region": 6,
+      "vote_fraction": 0.5119047619047619,
+      "median_distance_m": 1.239074355766652e-10,
+      "p95_distance_m": 5.944136023520794e-10,
+      "max_distance_m": 7.152923642180317e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 6,
+      "reference_region": 10,
+      "vote_fraction": 0.5357142857142857,
+      "median_distance_m": 2.615707379015848e-10,
+      "p95_distance_m": 8.138113084251781e-10,
+      "max_distance_m": 1.0956972087462194e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 7,
+      "reference_region": 5,
+      "vote_fraction": 0.9655172413793104,
+      "median_distance_m": 1.9426047984667598e-10,
+      "p95_distance_m": 9.933348958818888e-10,
+      "max_distance_m": 1.9006887429095716e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 8,
+      "reference_region": 11,
+      "vote_fraction": 0.9716666666666667,
+      "median_distance_m": 2.13122211863779e-10,
+      "p95_distance_m": 8.080401974402602e-10,
+      "max_distance_m": 1.9199706733309015e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 9,
+      "reference_region": 4,
+      "vote_fraction": 0.6437086092715232,
+      "median_distance_m": 0.001867707546416977,
+      "p95_distance_m": 0.013561037261058256,
+      "max_distance_m": 0.013770205342152002,
+      "owner": "fixed"
+    },
+    {
+      "region": 10,
+      "reference_region": 12,
+      "vote_fraction": 0.9911875786823332,
+      "median_distance_m": 2.06380724965323e-10,
+      "p95_distance_m": 8.874359669430791e-10,
+      "max_distance_m": 1.870740097069623e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 11,
+      "reference_region": 13,
+      "vote_fraction": 0.5,
+      "median_distance_m": 1.931788359515907e-10,
+      "p95_distance_m": 6.887313263620537e-10,
+      "max_distance_m": 7.666952224608085e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 12,
+      "reference_region": 14,
+      "vote_fraction": 0.7619047619047619,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 6.770491972376573e-10,
+      "max_distance_m": 1.1200295542591077e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 13,
+      "reference_region": 15,
+      "vote_fraction": 0.7857142857142857,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 7.138137073726369e-10,
+      "max_distance_m": 8.775783942428369e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 14,
+      "reference_region": 16,
+      "vote_fraction": 0.7023809523809523,
+      "median_distance_m": 8.678167765614845e-11,
+      "p95_distance_m": 8.277990930802875e-10,
+      "max_distance_m": 8.775783971073001e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 15,
+      "reference_region": 3,
+      "vote_fraction": 0.9868421052631579,
+      "median_distance_m": 1.944233739673374e-10,
+      "p95_distance_m": 5.898694190457718e-10,
+      "max_distance_m": 9.23633386013793e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 16,
+      "reference_region": 6,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.591531386044342e-05,
+      "p95_distance_m": 0.00010095480770553768,
+      "max_distance_m": 0.00010471080289206152,
+      "owner": "fixed"
+    },
+    {
+      "region": 17,
+      "reference_region": 1,
+      "vote_fraction": 0.942936673625609,
+      "median_distance_m": 8.009005426989691e-10,
+      "p95_distance_m": 0.004458871153404866,
+      "max_distance_m": 0.009513150380627453,
+      "owner": "fixed"
+    },
+    {
+      "region": 18,
+      "reference_region": 2,
+      "vote_fraction": 0.7639751552795031,
+      "median_distance_m": 0.00013416958072583088,
+      "p95_distance_m": 0.00039577296713363416,
+      "max_distance_m": 0.00045372307722908305,
+      "owner": "left_wrist_flange_proximal_flange"
+    },
+    {
+      "region": 19,
+      "reference_region": 20,
+      "vote_fraction": 0.7779503105590062,
+      "median_distance_m": 0.0005558718096525855,
+      "p95_distance_m": 0.0009411985079481175,
+      "max_distance_m": 0.0010182595495604135,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 20,
+      "reference_region": 19,
+      "vote_fraction": 0.9006211180124224,
+      "median_distance_m": 0.00017873469977190557,
+      "p95_distance_m": 0.0004196307093959075,
+      "max_distance_m": 0.0004987654136599925,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 21,
+      "reference_region": 0,
+      "vote_fraction": 0.7701863354037267,
+      "median_distance_m": 0.00014421077575765015,
+      "p95_distance_m": 0.0003942647188692731,
+      "max_distance_m": 0.0004515034002405653,
+      "owner": "left_wrist_flange_distal_flange"
+    },
+    {
+      "region": 22,
+      "reference_region": 21,
+      "vote_fraction": 0.9317789291882557,
+      "median_distance_m": 1.6794961153703037e-05,
+      "p95_distance_m": 0.0020277816858779774,
+      "max_distance_m": 0.0030016415566324326,
+      "owner": "fixed"
+    },
+    {
+      "region": 23,
+      "reference_region": 17,
+      "vote_fraction": 0.78125,
+      "median_distance_m": 1.1710870317851953e-09,
+      "p95_distance_m": 0.00090634003225075,
+      "max_distance_m": 0.0024785805223513893,
+      "owner": "left_wrist_flange_proximal_rod"
+    },
+    {
+      "region": 24,
+      "reference_region": 38,
+      "vote_fraction": 0.9012658227848102,
+      "median_distance_m": 0.0001380340023738272,
+      "p95_distance_m": 0.000421494854176436,
+      "max_distance_m": 0.000499631382545246,
+      "owner": "left_wrist_flange_proximal_flange"
+    },
+    {
+      "region": 25,
+      "reference_region": 1,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015999995550520618,
+      "p95_distance_m": 0.0016000008704491464,
+      "max_distance_m": 0.008000001095336386,
+      "owner": "fixed"
+    },
+    {
+      "region": 26,
+      "reference_region": 23,
+      "vote_fraction": 0.9904661016949152,
+      "median_distance_m": 1.6815780104768439e-10,
+      "p95_distance_m": 9.83956603098853e-10,
+      "max_distance_m": 1.9199330956977664e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 27,
+      "reference_region": 25,
+      "vote_fraction": 0.9881814715974075,
+      "median_distance_m": 1.0689843194930979e-10,
+      "p95_distance_m": 8.161218109295416e-10,
+      "max_distance_m": 1.91707716396209e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 28,
+      "reference_region": 26,
+      "vote_fraction": 0.5833333333333334,
+      "median_distance_m": 1.6804162172336106e-10,
+      "p95_distance_m": 7.604953092167685e-10,
+      "max_distance_m": 8.591428811670276e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 29,
+      "reference_region": 27,
+      "vote_fraction": 0.6904761904761905,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 5.173468510941417e-10,
+      "max_distance_m": 1.0751372363166766e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 30,
+      "reference_region": 28,
+      "vote_fraction": 0.75,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 5.041799262949046e-10,
+      "max_distance_m": 1.0251031998204235e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 31,
+      "reference_region": 29,
+      "vote_fraction": 0.7738095238095238,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 7.686518660892286e-10,
+      "max_distance_m": 8.763882161049571e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 32,
+      "reference_region": 24,
+      "vote_fraction": 0.96875,
+      "median_distance_m": 1.306735746449266e-10,
+      "p95_distance_m": 9.90253305560627e-10,
+      "max_distance_m": 1.877140660839749e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 33,
+      "reference_region": 30,
+      "vote_fraction": 0.9783333333333334,
+      "median_distance_m": 2.5620019274197363e-10,
+      "p95_distance_m": 1.4076503823448455e-09,
+      "max_distance_m": 1.9199706733309015e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 34,
+      "reference_region": 23,
+      "vote_fraction": 0.5695364238410596,
+      "median_distance_m": 0.001867706433324879,
+      "p95_distance_m": 0.00914244552287592,
+      "max_distance_m": 0.009327513565527072,
+      "owner": "fixed"
+    },
+    {
+      "region": 35,
+      "reference_region": 31,
+      "vote_fraction": 0.9953800923981521,
+      "median_distance_m": 1.0335164975943928e-10,
+      "p95_distance_m": 9.927668400099126e-10,
+      "max_distance_m": 1.906225959599372e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 36,
+      "reference_region": 32,
+      "vote_fraction": 0.8214285714285714,
+      "median_distance_m": 8.409171916689282e-11,
+      "p95_distance_m": 3.900533181608057e-10,
+      "max_distance_m": 1.0553201844719584e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 37,
+      "reference_region": 33,
+      "vote_fraction": 0.7142857142857143,
+      "median_distance_m": 9.560693255505301e-11,
+      "p95_distance_m": 7.632119538481097e-10,
+      "max_distance_m": 8.642892534734034e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 38,
+      "reference_region": 34,
+      "vote_fraction": 0.6547619047619048,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 6.102895790467449e-10,
+      "max_distance_m": 7.339084927394578e-10,
+      "owner": "fixed"
+    },
+    {
+      "region": 39,
+      "reference_region": 35,
+      "vote_fraction": 0.7976190476190477,
+      "median_distance_m": 0.0,
+      "p95_distance_m": 6.543902023745224e-10,
+      "max_distance_m": 1.0402574226557392e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 40,
+      "reference_region": 22,
+      "vote_fraction": 0.9868421052631579,
+      "median_distance_m": 1.6012534623724365e-10,
+      "p95_distance_m": 1.2870278662436859e-09,
+      "max_distance_m": 1.9141335641718114e-09,
+      "owner": "fixed"
+    },
+    {
+      "region": 41,
+      "reference_region": 25,
+      "vote_fraction": 1.0,
+      "median_distance_m": 5.5916074078929526e-05,
+      "p95_distance_m": 0.00010095568889819866,
+      "max_distance_m": 0.00010471022220204063,
+      "owner": "fixed"
+    },
+    {
+      "region": 42,
+      "reference_region": 39,
+      "vote_fraction": 0.9025316455696203,
+      "median_distance_m": 0.0001402811632690759,
+      "p95_distance_m": 0.00042271817240571724,
+      "max_distance_m": 0.000499261538175326,
+      "owner": "left_wrist_flange_distal_flange"
+    },
+    {
+      "region": 43,
+      "reference_region": 18,
+      "vote_fraction": 0.8958333333333334,
+      "median_distance_m": 1.4008346209513005e-05,
+      "p95_distance_m": 0.000799951890862564,
+      "max_distance_m": 0.0013451154811347853,
+      "owner": "left_wrist_flange_distal_rod"
+    },
+    {
+      "region": 44,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0013761475842142086,
+      "p95_distance_m": 0.0050444753220060725,
+      "max_distance_m": 0.00510598281519534,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 45,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015072776099408433,
+      "p95_distance_m": 0.0015138633941550268,
+      "max_distance_m": 0.0015148784817563623,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 46,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015384234679166517,
+      "p95_distance_m": 0.0015447965201608063,
+      "max_distance_m": 0.001545766267816623,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 47,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015442533767310357,
+      "p95_distance_m": 0.0015510635040866124,
+      "max_distance_m": 0.0015521423370833624,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 48,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014721808233586022,
+      "p95_distance_m": 0.001479881990630392,
+      "max_distance_m": 0.0014811014925708355,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 49,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014908222464490215,
+      "p95_distance_m": 0.0014951466611645087,
+      "max_distance_m": 0.0014958131984450142,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 50,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014534891507245744,
+      "p95_distance_m": 0.0014604658249372856,
+      "max_distance_m": 0.0014615902511847035,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 51,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014587287039947861,
+      "p95_distance_m": 0.0014648134930401455,
+      "max_distance_m": 0.0014657526816363067,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 52,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015022286624541046,
+      "p95_distance_m": 0.0015074182145602408,
+      "max_distance_m": 0.0015082062699504327,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 53,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014802101405931407,
+      "p95_distance_m": 0.001486203788041823,
+      "max_distance_m": 0.0014871278888819218,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 54,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.00150961382932486,
+      "p95_distance_m": 0.0015169304200775093,
+      "max_distance_m": 0.0015180908953819595,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 55,
+      "reference_region": 20,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014615757688395104,
+      "p95_distance_m": 0.0014670213606900132,
+      "max_distance_m": 0.0014678560825623268,
+      "owner": "left_wrist_flange_distal_platform"
+    },
+    {
+      "region": 56,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0018341114001427985,
+      "p95_distance_m": 0.004201733868401771,
+      "max_distance_m": 0.004270127218303963,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 57,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015385561617929063,
+      "p95_distance_m": 0.0015451476215393718,
+      "max_distance_m": 0.001546166816844651,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 58,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015286705310282099,
+      "p95_distance_m": 0.0015349353110757807,
+      "max_distance_m": 0.0015359116169077658,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 59,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.00149024013997492,
+      "p95_distance_m": 0.0014969497932138646,
+      "max_distance_m": 0.001498017445779017,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 60,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0015157560283369296,
+      "p95_distance_m": 0.001523454742764869,
+      "max_distance_m": 0.0015246876504301553,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 61,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014911659591281073,
+      "p95_distance_m": 0.0014954900414895882,
+      "max_distance_m": 0.0014961645383038422,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 62,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.001483568726151987,
+      "p95_distance_m": 0.0014905648859534963,
+      "max_distance_m": 0.0014916746552163392,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 63,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014617794896374966,
+      "p95_distance_m": 0.0014678752317073536,
+      "max_distance_m": 0.0014688047095114697,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 64,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014738905120109565,
+      "p95_distance_m": 0.001479002948606488,
+      "max_distance_m": 0.0014797908996166502,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 65,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014605894198228056,
+      "p95_distance_m": 0.0014665802425099593,
+      "max_distance_m": 0.001467509574149928,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 66,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014480704632164852,
+      "p95_distance_m": 0.0014553468150956684,
+      "max_distance_m": 0.0014565100184415242,
+      "owner": "left_wrist_flange_proximal_platform"
+    },
+    {
+      "region": 67,
+      "reference_region": 19,
+      "vote_fraction": 1.0,
+      "median_distance_m": 0.0014269919441998367,
+      "p95_distance_m": 0.0014325021425476445,
+      "max_distance_m": 0.0014333564084471723,
+      "owner": "left_wrist_flange_proximal_platform"
+    }
+  ]
+}

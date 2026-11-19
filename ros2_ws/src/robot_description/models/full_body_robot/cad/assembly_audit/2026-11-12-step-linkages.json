@@ -1,0 +1,823 @@
+{
+  "scope": "Static STEP attachment geometry only; no motion, encoder sign, clearance or interference acceptance",
+  "method": "STEP analytic ball center supported by mate mesh; rod-end cylinder shares its axis and axial center, with circumferential vertex support. Native STEP-aligned assembly frames; old ICP matrices are not used.",
+  "source_step_sha256": "3cceefaccdbb681998beed7c7761a3dff4183e69a172936c8743e5bed1136a68",
+  "surface_tolerance_m": 2.5e-05,
+  "center_tolerance_m": 2.5e-05,
+  "bilateral_ball_spans": {
+    "waist": {
+      "comparison_note": "Legacy waist uses a nominal 100 mm span, with each CAD side shifted inward by 1 mm.",
+      "flange": {
+        "step_distance_m": 0.10199999999997464,
+        "legacy_distance_m": 0.1
+      },
+      "platform": {
+        "step_distance_m": 0.10199999999999365,
+        "legacy_distance_m": 0.1
+      }
+    },
+    "hips": {
+      "comparison_note": "Legacy hips uses different constructed anchors and assembly branch; these are definition differences, not a same-anchor dimensional error.",
+      "flange": {
+        "step_distance_m": 0.13942032607649116,
+        "legacy_distance_m": 0.20312079672699015
+      },
+      "platform": {
+        "step_distance_m": 0.17876704286719053,
+        "legacy_distance_m": 0.1430400014000937
+      }
+    }
+  },
+  "rods": {
+    "hips_plus_rod": {
+      "source_body": "Base_link",
+      "source_file": "Base_link.STL",
+      "rod_regions": [
+        17
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            0.07592294400854133,
+            0.02365398560095649,
+            0.027999999999989995
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1448,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.31002992455577105,
+              0.1464186513955013,
+              -0.9393843858631383
+            ],
+            "radius_m": 0.008,
+            "rod_support": 80,
+            "max_angular_gap_deg": 18.000016632693253,
+            "line_error_m": 4.972651038783647e-18,
+            "axial_center_error_m": 2.6322173390588843e-11,
+            "axial_span_m": 0.004600003298060677
+          }
+        },
+        "platform": {
+          "center_m": [
+            0.10532156045798795,
+            0.08162187355312506,
+            0.0273326790703494
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1432,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.31002992455577133,
+              0.1464186513955014,
+              -0.9393843858631382
+            ],
+            "radius_m": 0.008,
+            "rod_support": 80,
+            "max_angular_gap_deg": 18.00002803902964,
+            "line_error_m": 1.0332146638230379e-17,
+            "axial_center_error_m": 4.3506105922713756e-10,
+            "axial_span_m": 0.004600004904950877
+          }
+        }
+      },
+      "center_distance_m": 0.06499999999999985,
+      "legacy_center_distance_m": 0.06499999984004451,
+      "legacy_length_difference_m": -1.59955340639506e-10,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.6653345369377346e-16,
+            -1.7000290064572705e-16,
+            1.0
+          ],
+          "point_on_axis_m": [
+            0.07200000000003441,
+            -0.01011894009854518,
+            0.027474008448655315
+          ],
+          "radius_m": 0.028999999999999998,
+          "support": 106,
+          "max_angular_gap_deg": 28.40019527153382
+        }
+      ]
+    },
+    "hips_minus_rod": {
+      "source_body": "Base_link",
+      "source_file": "Base_link.STL",
+      "rod_regions": [
+        12
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            -0.0634947670107857,
+            0.0228000667485244,
+            0.027999999999990338
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1448,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.19780422547325593,
+              -0.14675445585418861,
+              -0.969193797994945
+            ],
+            "radius_m": 0.008,
+            "rod_support": 80,
+            "max_angular_gap_deg": 17.999999981358947,
+            "line_error_m": 5.733023350114704e-18,
+            "axial_center_error_m": 2.551182962801102e-10,
+            "axial_span_m": 0.0046000031211425665
+          }
+        },
+        "platform": {
+          "center_m": [
+            -0.07323862115265933,
+            0.08660591025772167,
+            0.02032721429063423
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1432,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.19780422547325555,
+              -0.146754455854188,
+              -0.9691937979949452
+            ],
+            "radius_m": 0.008,
+            "rod_support": 80,
+            "max_angular_gap_deg": 18.000012254049423,
+            "line_error_m": 1.0918493223545617e-17,
+            "axial_center_error_m": 9.997822339978535e-11,
+            "axial_span_m": 0.004600002263639548
+          }
+        }
+      },
+      "center_distance_m": 0.06499999999999984,
+      "legacy_center_distance_m": 0.06499999951318523,
+      "legacy_length_difference_m": -4.868146025183151e-10,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.6653345369377346e-16,
+            -1.7000290064572705e-16,
+            1.0
+          ],
+          "point_on_axis_m": [
+            -0.07199999999996559,
+            -0.010118940098546945,
+            0.027513953766766894
+          ],
+          "radius_m": 0.028999999999999998,
+          "support": 103,
+          "max_angular_gap_deg": 22.578810380639926
+        }
+      ]
+    },
+    "waist_plus_rod": {
+      "source_body": "BN_Spine_yaw_link",
+      "source_file": "BN_Spine_yaw_link .STL",
+      "rod_regions": [
+        1
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            0.05099999999985855,
+            0.04801396726233037,
+            0.07395202306933431
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1455,
+          "rod_end_cylinder": {
+            "axis": [
+              0.9463937143199868,
+              0.3170193943121647,
+              0.06194869752922667
+            ],
+            "radius_m": 0.008,
+            "rod_support": 96,
+            "max_angular_gap_deg": 15.652182909058373,
+            "line_error_m": 8.300079264553965e-18,
+            "axial_center_error_m": 3.174130446328971e-12,
+            "axial_span_m": 0.004600004962502248
+          }
+        },
+        "platform": {
+          "center_m": [
+            0.05099999999986784,
+            0.039959102277096634,
+            0.11517239606703208
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1432,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.9463937143199866,
+              -0.31701939431216497,
+              -0.061948697529226396
+            ],
+            "radius_m": 0.008,
+            "rod_support": 96,
+            "max_angular_gap_deg": 15.652179560433769,
+            "line_error_m": 7.547188094716633e-18,
+            "axial_center_error_m": 1.1385703491129107e-10,
+            "axial_span_m": 0.004600003877355892
+          }
+        }
+      },
+      "center_distance_m": 0.041999999999996145,
+      "legacy_center_distance_m": 0.04200003321629638,
+      "legacy_length_difference_m": 3.3216300238114727e-08,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.0,
+            -1.4710455076283326e-15,
+            -5.551115123125784e-17
+          ],
+          "point_on_axis_m": [
+            0.05594636619802541,
+            -3.407056144409665e-14,
+            0.059999999999988174
+          ],
+          "radius_m": 0.029,
+          "support": 101,
+          "max_angular_gap_deg": 5.454552747497016
+        }
+      ]
+    },
+    "waist_minus_rod": {
+      "source_body": "BN_Spine_yaw_link",
+      "source_file": "BN_Spine_yaw_link .STL",
+      "rod_regions": [
+        163
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            -0.05100000000011609,
+            0.04801396726233365,
+            0.07395202306933123
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1455,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.9914279272321284,
+              -0.1282294702574067,
+              -0.025057295578547384
+            ],
+            "radius_m": 0.008,
+            "rod_support": 96,
+            "max_angular_gap_deg": 15.652206032990838,
+            "line_error_m": 4.913258400372401e-18,
+            "axial_center_error_m": 1.2615630003327827e-10,
+            "axial_span_m": 0.0046000041039074
+          }
+        },
+        "platform": {
+          "center_m": [
+            -0.051000000000125806,
+            0.039959102277098424,
+            0.11517239606702907
+          ],
+          "ball_radius_m": 0.006403124237432847,
+          "mate_sphere_support": 1432,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.9914279272321284,
+              -0.12822947025740672,
+              -0.02505729557854751
+            ],
+            "radius_m": 0.008,
+            "rod_support": 96,
+            "max_angular_gap_deg": 15.652189240718497,
+            "line_error_m": 1.0229575067757163e-17,
+            "axial_center_error_m": 1.9088206362760651e-10,
+            "axial_span_m": 0.00460000413110673
+          }
+        }
+      },
+      "center_distance_m": 0.041999999999996505,
+      "legacy_center_distance_m": 0.04200003321629638,
+      "legacy_length_difference_m": 3.3216299877292244e-08,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.0,
+            -1.4710455076283326e-15,
+            -5.551115123125784e-17
+          ],
+          "point_on_axis_m": [
+            -0.05594636619741303,
+            -3.423516074542322e-14,
+            0.05999999999998817
+          ],
+          "radius_m": 0.029,
+          "support": 101,
+          "max_angular_gap_deg": 5.454552747496965
+        }
+      ]
+    },
+    "left_shoulder_flange_linkage_rod": {
+      "source_body": "BN_Spine_roll_link",
+      "source_file": "BN_Spine_roll_link .STL",
+      "rod_regions": [
+        13,
+        24,
+        25
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            -0.09519999995241457,
+            -0.06896113965159413,
+            0.21971347698729773
+          ],
+          "ball_radius_m": 0.00635,
+          "mate_sphere_support": 1124,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.8888836291753025,
+              0.45332048499912814,
+              0.066230141659962
+            ],
+            "radius_m": 0.009999999999999998,
+            "rod_support": 78,
+            "max_angular_gap_deg": 41.8409533655317,
+            "line_error_m": 2.792038018218993e-17,
+            "axial_center_error_m": 2.201177611632285e-07,
+            "axial_span_m": 0.0070002750554494534
+          }
+        },
+        "platform": {
+          "center_m": [
+            -0.09750000000011838,
+            -0.08869041216358192,
+            0.3238843397000795
+          ],
+          "ball_radius_m": 0.00635,
+          "mate_sphere_support": 1124,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.9771300275568311,
+              0.21183241912118017,
+              0.018545496921230968
+            ],
+            "radius_m": 0.009999999999999998,
+            "rod_support": 78,
+            "max_angular_gap_deg": 41.8402213376097,
+            "line_error_m": 4.3724191888609165e-18,
+            "axial_center_error_m": 2.6386766426088164e-07,
+            "axial_span_m": 0.007000169489471349
+          }
+        }
+      },
+      "center_distance_m": 0.10604764416240911,
+      "legacy_center_distance_m": 0.10690587304602915,
+      "legacy_length_difference_m": 0.0008582288836200408,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.0,
+            1.6491555837835824e-15,
+            -6.9089018900342e-16
+          ],
+          "point_on_axis_m": [
+            -0.0903016968591152,
+            -0.05368543962225418,
+            0.23262289171506995
+          ],
+          "radius_m": 0.0241,
+          "support": 88,
+          "max_angular_gap_deg": 9.730998289311112
+        }
+      ]
+    },
+    "right_shoulder_flange_linkage_rod": {
+      "source_body": "BN_Spine_roll_link",
+      "source_file": "BN_Spine_roll_link .STL",
+      "rod_regions": [
+        41,
+        43,
+        44
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            0.09519999995218528,
+            -0.06896113965159446,
+            0.2197134769872978
+          ],
+          "ball_radius_m": 0.00635,
+          "mate_sphere_support": 1124,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.888883629175304,
+              -0.45332048499912514,
+              -0.0662301416599632
+            ],
+            "radius_m": 0.009999999999999998,
+            "rod_support": 78,
+            "max_angular_gap_deg": 41.84432628612583,
+            "line_error_m": 1.6521948054508892e-17,
+            "axial_center_error_m": 2.8796345963705804e-06,
+            "axial_span_m": 0.007000410443484364
+          }
+        },
+        "platform": {
+          "center_m": [
+            0.09749999999988888,
+            -0.08869041216358224,
+            0.3238843397000796
+          ],
+          "ball_radius_m": 0.00635,
+          "mate_sphere_support": 1124,
+          "rod_end_cylinder": {
+            "axis": [
+              -0.9771300275568318,
+              -0.21183241912117695,
+              -0.01854549692123231
+            ],
+            "radius_m": 0.009999999999999998,
+            "rod_support": 78,
+            "max_angular_gap_deg": 41.836931207236695,
+            "line_error_m": 5.103277162450635e-17,
+            "axial_center_error_m": 3.2243048342281942e-06,
+            "axial_span_m": 0.0070002649764876945
+          }
+        }
+      },
+      "center_distance_m": 0.10604764416240917,
+      "legacy_center_distance_m": 0.10690587304649428,
+      "legacy_length_difference_m": 0.0008582288840851132,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -1.0,
+            1.6491555837835824e-15,
+            -6.9089018900342e-16
+          ],
+          "point_on_axis_m": [
+            0.09029825043323504,
+            -0.05368543962225448,
+            0.23262289171507006
+          ],
+          "radius_m": 0.0241,
+          "support": 90,
+          "max_angular_gap_deg": 9.731530172777589
+        }
+      ]
+    },
+    "left_wrist_flange_proximal_rod": {
+      "source_body": "BN_LeftLowerArm_2_link",
+      "source_file": "BN_LeftLowerArm_2_link.STL",
+      "rod_regions": [
+        23
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            -0.14421937747244507,
+            -0.02494906628430681,
+            -0.028328133389177536
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 336,
+          "rod_end_cylinder": {
+            "axis": [
+              -4.254833795516059e-15,
+              -0.9917261808313501,
+              -0.12837126724335277
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 32,
+            "max_angular_gap_deg": 24.002653961761585,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 9.232540411190592e-06,
+            "axial_span_m": 0.003000497091442472
+          }
+        },
+        "platform": {
+          "center_m": [
+            -0.14321968718548192,
+            -0.011920014653781891,
+            -0.1289834583001807
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 336,
+          "rod_end_cylinder": {
+            "axis": [
+              -3.659074990082427e-15,
+              -0.9917261808313501,
+              -0.1283712672433527
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 32,
+            "max_angular_gap_deg": 24.00454535664055,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 1.302070616841604e-05,
+            "axial_span_m": 0.0030004970916435543
+          }
+        }
+      },
+      "center_distance_m": 0.10150000000000173,
+      "legacy_center_distance_m": 0.10149999975418315,
+      "legacy_length_difference_m": -2.458185738296592e-10,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -8.313283879796446e-15,
+            -0.99172618083135,
+            -0.1283712672433536
+          ],
+          "point_on_axis_m": [
+            -0.1540999999524039,
+            -0.02784963855998409,
+            -0.029327866922733363
+          ],
+          "radius_m": 0.008,
+          "support": 196,
+          "max_angular_gap_deg": 5.6254038244812685
+        }
+      ]
+    },
+    "left_wrist_flange_distal_rod": {
+      "source_body": "BN_LeftLowerArm_2_link",
+      "source_file": "BN_LeftLowerArm_2_link.STL",
+      "rod_regions": [
+        43
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            -0.14420068831753738,
+            -0.06006062956570781,
+            -0.06867161176351237
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 378,
+          "rod_end_cylinder": {
+            "axis": [
+              3.950848354654398e-15,
+              0.9917261808313501,
+              0.12837126724335285
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 36,
+            "max_angular_gap_deg": 20.002977113560732,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 1.0566191813904976e-05,
+            "axial_span_m": 0.0030004973084891843
+          }
+        },
+        "platform": {
+          "center_m": [
+            -0.1432196871854829,
+            -0.05158906188682363,
+            -0.13411830898988705
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 336,
+          "rod_end_cylinder": {
+            "axis": [
+              -3.6745551739315924e-15,
+              -0.9917261808313501,
+              -0.12837126724335254
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 36,
+            "max_angular_gap_deg": 20.002924297351164,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 1.3023252410902537e-05,
+            "axial_span_m": 0.0030004973084891778
+          }
+        }
+      },
+      "center_distance_m": 0.06599999999999823,
+      "legacy_center_distance_m": 0.06600595350028055,
+      "legacy_length_difference_m": 5.953500282318558e-06,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            8.313283879796447e-15,
+            0.9917261808313502,
+            0.1283712672433521
+          ],
+          "point_on_axis_m": [
+            -0.15409999995240448,
+            -0.05713864368320527,
+            -0.06841110123996506
+          ],
+          "radius_m": 0.008,
+          "support": 194,
+          "max_angular_gap_deg": 5.625706056150402
+        }
+      ]
+    },
+    "right_wrist_flange_proximal_rod": {
+      "source_body": "BN_RightLowerArm_2_link",
+      "source_file": "BN_RightLowerArm_2_link.STL",
+      "rod_regions": [
+        19
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            0.1597806225275435,
+            -0.02494906628430681,
+            -0.028328133389177196
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 354,
+          "rod_end_cylinder": {
+            "axis": [
+              -4.254833795516059e-15,
+              -0.9917261808313501,
+              -0.12837126724335277
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 32,
+            "max_angular_gap_deg": 24.01264203374285,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 7.710506093229247e-06,
+            "axial_span_m": 0.003000516493382452
+          }
+        },
+        "platform": {
+          "center_m": [
+            0.16078031281450667,
+            -0.011920014653781891,
+            -0.12898345830018035
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 336,
+          "rod_end_cylinder": {
+            "axis": [
+              -3.659074990082427e-15,
+              -0.9917261808313501,
+              -0.1283712672433527
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 32,
+            "max_angular_gap_deg": 24.01540005404338,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 1.187647977948336e-05,
+            "axial_span_m": 0.0030005164934529985
+          }
+        }
+      },
+      "center_distance_m": 0.1015000000000017,
+      "legacy_center_distance_m": 0.10149999986778928,
+      "legacy_length_difference_m": -1.3221242156635782e-10,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            -8.313283879796446e-15,
+            -0.99172618083135,
+            -0.1283712672433536
+          ],
+          "point_on_axis_m": [
+            0.1499000000475847,
+            -0.027808484048937925,
+            -0.029322539790266527
+          ],
+          "radius_m": 0.008,
+          "support": 196,
+          "max_angular_gap_deg": 5.627400911780442
+        }
+      ]
+    },
+    "right_wrist_flange_distal_rod": {
+      "source_body": "BN_RightLowerArm_2_link",
+      "source_file": "BN_RightLowerArm_2_link.STL",
+      "rod_regions": [
+        37
+      ],
+      "endpoints": {
+        "flange": {
+          "center_m": [
+            0.15979931168245118,
+            -0.06006062956570781,
+            -0.06867161176351204
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 378,
+          "rod_end_cylinder": {
+            "axis": [
+              3.950848354654398e-15,
+              0.9917261808313501,
+              0.12837126724335285
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 36,
+            "max_angular_gap_deg": 20.01146429119337,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 9.173192908929406e-06,
+            "axial_span_m": 0.0030005191933519973
+          }
+        },
+        "platform": {
+          "center_m": [
+            0.1607803128145057,
+            -0.05158906188682363,
+            -0.13411830898988672
+          ],
+          "ball_radius_m": 0.004,
+          "mate_sphere_support": 336,
+          "rod_end_cylinder": {
+            "axis": [
+              -3.6745551739315924e-15,
+              -0.9917261808313501,
+              -0.12837126724335254
+            ],
+            "radius_m": 0.005999999999999998,
+            "rod_support": 36,
+            "max_angular_gap_deg": 20.013309002009773,
+            "line_error_m": 0.0,
+            "axial_center_error_m": 1.1877567546157838e-05,
+            "axial_span_m": 0.003000519193352003
+          }
+        }
+      },
+      "center_distance_m": 0.06599999999999824,
+      "legacy_center_distance_m": 0.0660059530565545,
+      "legacy_length_difference_m": 5.953056556262659e-06,
+      "motor_axis_candidates": [
+        {
+          "axis": [
+            8.313283879796447e-15,
+            0.9917261808313502,
+            0.1283712672433521
+          ],
+          "point_on_axis_m": [
+            0.14990000004758408,
+            -0.057124477114631124,
+            -0.06840926748746781
+          ],
+          "radius_m": 0.008,
+          "support": 194,
+          "max_angular_gap_deg": 5.627618381447042
+        }
+      ]
+    }
+  },
+  "motor_axis_note": "Geometric cylinder lines only; axis sign is arbitrary and is not an encoder direction.",
+  "fixture_mounting": {
+    "after": {
+      "model": "/home/ly/robot2_ws/ros2_ws/src/robot_description/models/full_body_robot/mujoco/full_body_robot.hips-mounted.xml",
+      "all_passed": true,
+      "sides": {
+        "plus": {
+          "mount_axis_error_m": 3.74881609128301e-16,
+          "seat_gap_m": 1.1579176587096286e-15,
+          "mount_axis_angle_deg": 2.561320938754782e-06,
+          "flange_mount_axis_error_m": 1.6082700053670816e-15,
+          "flange_seat_gap_m": 1.8783586648953516e-31,
+          "flange_mount_axis_angle_deg": 0.0,
+          "independent_receiver_seat_source_m": [
+            0.07151999999999982,
+            0.0641292726904105,
+            0.02174459831554613
+          ],
+          "receiver_rim_depth_m": 0.0020003229234077436,
+          "rod_roll_error_deg": 0.0,
+          "motor_axis_error_m": 4.493737463788242e-16,
+          "motor_axis_angle_deg": 0.0,
+          "rod_endpoint_errors_m": [
+            1.251124134274005e-15,
+            2.148753170850224e-15
+          ],
+          "rod_length_m": 0.06499999999999989,
+          "passed": true
+        },
+        "minus": {
+          "mount_axis_error_m": 9.521485543988142e-16,
+          "seat_gap_m": 8.125806661369496e-16,
+          "mount_axis_angle_deg": 1.9090959104164224e-06,
+          "flange_mount_axis_error_m": 2.3852202899091946e-16,
+          "flange_seat_gap_m": 3.4694469519531824e-18,
+          "flange_mount_axis_angle_deg": 0.0,
+          "independent_receiver_seat_source_m": [
+            -0.07152000000000014,
+            0.06412927382187245,
+            0.021744629629468062
+          ],
+          "receiver_rim_depth_m": 0.0020003229234077436,
+          "rod_roll_error_deg": 0.0,
+          "motor_axis_error_m": 9.162559139348289e-16,
+          "motor_axis_angle_deg": 0.0,
+          "rod_endpoint_errors_m": [
+            1.287590247080624e-15,
+            5.657752149213599e-16
+          ],
+          "rod_length_m": 0.06499999999999986,
+          "passed": true
+        }
+      }
+    },
+    "scope": "Hips receiver holes and seat faces checked; other groups still have rod-end checks only."
+  }
+}

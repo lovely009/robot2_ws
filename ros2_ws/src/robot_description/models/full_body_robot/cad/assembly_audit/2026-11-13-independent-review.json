@@ -1,0 +1,95 @@
+{
+  "review": "full_body_robot Robot_body2 final independent review",
+  "verdict": "pass_for_declared_kinematic_display_control_scope",
+  "true_blockers": [],
+  "scope_dependent_blocker": "Contact, interference and clearance validation is pending; physics.xml has no active contact geoms.",
+  "current_files": {
+    "mujoco_and_physics_sha256": "6e8381baedcc3c6981a6f3060aa4eb57391c66db890b653b56505d3d2a49998f",
+    "urdf_and_mapping_sha256": "03eb0a91c18bd6924d76d08e57d08f00116673bf88dbaba05772f7f21b399c37",
+    "standalone_urdf_sha256": "06cf65b7ac32c35ee00f725243aa8fad98680cf4dd49f9133a63969b19b55810",
+    "simulation_limits_sha256": "f7155a715c86a3203ce767592440df95360957c360fab2e4a7739936de4bf811",
+    "full_body_xml_equals_physics_xml": true
+  },
+  "source_provenance": {
+    "step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4",
+    "robot_body2_urdf_sha256": "32bad08d54ca5c4f885e0054045dffd6e6567d43c2fdbd26534a98b03c305b4e",
+    "configs_match_current_source": true
+  },
+  "structure": {
+    "main_links": 38,
+    "main_joints": 37,
+    "main_root": "Base_link",
+    "standalone_links": 68,
+    "standalone_joints": 67,
+    "mjcf_bodies": 59,
+    "mjcf_joints": 67,
+    "actuators": 37,
+    "equalities": 10,
+    "logical_names_have_whitespace": false,
+    "joint_names_with_link_suffix": 0,
+    "main_links_missing_link_suffix": 0,
+    "dangling_references": 0,
+    "missing_meshes": 0
+  },
+  "axis_check": {
+    "joints_checked": 37,
+    "max_line_error_mm": 0.017418,
+    "max_line_error_joint": "BN_RightFoot_roll",
+    "max_angle_deg": 0.004407,
+    "max_angle_joint": "BN_LeftFoot_roll",
+    "threshold_mm": 0.025,
+    "threshold_deg": 0.02,
+    "above_threshold": 0,
+    "urdf_standalone_consistent": true
+  },
+  "rod_check": {
+    "rods": 10,
+    "max_site_length_vs_audit_error_mm": 1.8e-12,
+    "max_mesh_principal_axis_angle_deg": 0.0053,
+    "shoulder_length_mm": 100.684850337,
+    "neutral_closure_error_mm": 3.66e-12,
+    "same_pose_closure_error_mm": 1.73e-12,
+    "opposite_pose_closure_error_mm": 1.77e-12,
+    "mesh_body_binding_errors": 0
+  },
+  "hips_fixture": {
+    "plus_compensation_deg": -67.5751126756,
+    "minus_compensation_deg": 88.6873167143,
+    "plus_passed": true,
+    "minus_passed": true,
+    "installation_axis_seat_rod_error_mm": 1e-12
+  },
+  "native_assembly": {
+    "ownership_entries": 38,
+    "coupled_visual_entries": 30,
+    "source_hashes_match": true,
+    "region_overlaps": 0,
+    "collision_validation": "pending"
+  },
+  "unresolved": [
+    {
+      "severity": "scope_limit",
+      "item": "collision_contact_interference_clearance",
+      "detail": "68 geoms all have contype=0 and conaffinity=0; physics.xml equals the display MJCF. This blocks contact-based validation but not the declared kinematic/display/control generation audit."
+    },
+    {
+      "severity": "support_evidence",
+      "item": "bilateral_foot_roll_axis_support",
+      "detail": "BN_LeftFoot_roll and BN_RightFoot_roll remain listed as unverified_bilateral_axes, although both match available STEP candidates within 0.017418 mm and 0.004407 degrees."
+    },
+    {
+      "severity": "naming_scope",
+      "item": "vendor_stl_paths_with_spaces",
+      "detail": "Logical model names and active native resource paths are whitespace-free. Some audit/secondary file metadata preserve vendor STL basenames containing spaces and compile successfully."
+    }
+  ],
+  "excluded": [
+    "hardware direction and ratio remain null by authorization",
+    "left hand 1.2225 mm p95 is discrete STEP-node distance and is not treated as a solid-surface mismatch or wrist-pose blocker"
+  ],
+  "mainline_acceptance": {
+    "targeted_tests_passed": 71,
+    "tests_rerun_by_reviewer": false,
+    "resource_sync_accepted": true
+  }
+}

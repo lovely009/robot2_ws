@@ -1,0 +1,31 @@
+# MCU 权威控制状态；控制授权与驱动使能/目标执行正交，旧 lifecycle 不承载本契约。
+uint8 LIFECYCLE_UNKNOWN=0
+uint8 LIFECYCLE_UNCONFIGURED=1
+uint8 LIFECYCLE_INACTIVE=2
+uint8 LIFECYCLE_ACTIVE=3
+uint8 LIFECYCLE_FINALIZED=4
+uint8 LIFECYCLE_CONFIGURING=10
+uint8 LIFECYCLE_ACTIVATING=13
+uint8 LIFECYCLE_DEACTIVATING=14
+uint8 LIFECYCLE_ERROR_PROCESSING=15
+uint8 EXECUTION_UNKNOWN=0
+uint8 EXECUTION_IDLE=1
+uint8 EXECUTION_HOLDING=2
+uint8 EXECUTION_COMMAND=3
+uint8 EXECUTION_TRAJECTORY=4
+uint8 EXECUTION_SOFT_STOP=5
+uint8 EXECUTION_ENABLING=6
+uint8 EXECUTION_DISABLING=7
+uint16 motor_id
+bool online
+uint8 control_lifecycle
+uint8 execution_state
+# policy_enabled 是 MCU 接受的策略位；ACTIVE 还要求逐电机授权有效、在线且健康。
+bool policy_enabled
+# 驱动使能序列的内核电平，不宣称是厂商驱动使能位的回读。
+bool motion_enabled
+uint32 state_age_ms
+uint16 unified_fault_code
+uint32 vendor_fault_code
+uint16 last_failure_reason
+uint32 policy_generation

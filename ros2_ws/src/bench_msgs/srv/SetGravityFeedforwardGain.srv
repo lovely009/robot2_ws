@@ -1,0 +1,9 @@
+# 运行期改 effort_gain，**不重起** unit。
+#
+# 不重起是安全要求：重起期间没人转发 /robot_dynamics/*，命令断流会撞固件的命令超时
+# 软停，而被控对象没有抱闸（见 robot_dynamics/README.md 的安全不变式）。
+float64 effort_gain
+---
+bool ok
+string error
+string status_json

@@ -1,0 +1,15 @@
+uint8 IDLE=0
+uint8 LOADING=1
+uint8 READY=2
+uint8 RUNNING=3
+uint8 SUCCEEDED=4
+uint8 CANCELED=5
+uint8 ABORTED=6
+uint32 trajectory_id
+uint8 state
+uint16 reason
+uint16 received_segments
+uint16 total_segments
+uint32 elapsed_ms
+uint32 total_ms
+uint16[<=48] target_ids

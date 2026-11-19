@@ -1,0 +1,55 @@
+/* 设计 token：色板沿用重构前的值，度量按 V2（放松密度，靠间距做分层）。
+   改颜色只改这里，改密度也只改这里。 */
+:root {
+  /* 深色配色方案：让系统原生控件（滚动条、select 弹层等）也按深色渲染，
+     否则 Linux/Chromium 下会混进浅色滚动条与白底下拉菜单。 */
+  color-scheme: dark;
+
+  /* ---- 色板（与重构前完全一致，不自造） ---- */
+  --bg: #0a0e16;
+  --panel: #121824;
+  --panel-2: #18202f;
+  --line: #212b3d;
+  --line-2: #2c3852;
+  --text: #d7e0ef;
+  --dim: #7f8ca6;
+  --dim-2: #55617a;
+  --accent: #3d9bff;
+  --ok: #2fd07a;
+  --warn: #e0a93a;
+  --err: #ff5f5f;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --sans: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* ---- 度量（V2：行内边距 3/6 → 7/11，圆角 5 → 9，栅格间距 → 8） ---- */
+  --fs-base: 12.5px;
+  --fs-sm: 11px;
+  --fs-xs: 10px;
+  --pad-row: 7px 11px;
+  --pad-panel: 12px;
+  --gap: 8px;
+  --gap-sm: 5px;
+  --radius: 9px;
+  --radius-sm: 5px;
+
+  /* ---- 骨架尺寸 ---- */
+  --nav-w: 132px;        /* 左导航展开宽 */
+  --nav-w-icon: 56px;    /* <1080 图标导轨宽 */
+  --topbar-h: 46px;
+  /* 运行/动作屏中栏（臂视图）高度：也是左右两栏的高度上限（超出各自内部滚动），
+     三栏底部由此齐平。臂视图 canvas 与两栏封顶都用它，别再各写一遍 clamp。 */
+  --stage-h: clamp(300px, 48vh, 640px);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-base)/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 数字一律等宽：位置/速度/力矩/时间列对齐才读得出来 */
+.num, .kv b, table td, table th { font-variant-numeric: tabular-nums; }

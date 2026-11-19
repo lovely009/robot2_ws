@@ -28,7 +28,7 @@ const savedStatusError = ref('');
 const models = ref<string[]>([]);
 const bvhSource = ref('');
 const robotModel = ref(props.currentModel || new URLSearchParams(location.search).get('model')
-  || localStorage.getItem('web_host.model') || 'half_body_robot');
+  || localStorage.getItem('web_host.model') || 'full_body_robot');
 const catalogLoading = ref(true);
 const modelChosen = ref(false);
 const upAxis = ref('auto');

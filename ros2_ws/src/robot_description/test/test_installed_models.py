@@ -11,10 +11,11 @@ import yaml
 SHARE = Path(get_package_share_directory('robot_description'))
 SOURCE = Path(__file__).resolve().parents[1]
 PREFIX = 'package://robot_description/'
-# 原始 CAD 导出保留自身包名；公共运行件统一使用本包 URI。
-URDFS = sorted(path.relative_to(SOURCE) for path in (SOURCE / 'models').glob('*/urdf/*.urdf')
-               if path.parts[-3] not in {'Robot_body2', '全身实验版_仅双臂质量', 'robot_body'})
-MODELS = sorted({path.parts[1] for path in URDFS})
+URDFS = sorted(path.relative_to(SOURCE) for path in (SOURCE / 'models').glob('*/urdf/*.urdf'))
+
+
+def test_only_full_body_model_is_installed():
+    assert {path.name for path in (SHARE / 'models').iterdir()} == {'full_body_robot'}
 
 
 @pytest.mark.parametrize('relative', URDFS, ids=str)
@@ -53,7 +54,6 @@ def test_installed_driver_references_are_self_contained():
     assert ((SHARE / 'config/motor.yaml').read_bytes()
             == (SOURCE / 'config/motor.yaml').read_bytes())
     drivers = list((SHARE / 'models').glob('*/config/motor_driver.yaml'))
-    assert drivers
     for driver in drivers:
         section = yaml.safe_load(driver.read_text())['motor_hardware']
         for field in ('motor_specs_file', 'transmissions_file'):

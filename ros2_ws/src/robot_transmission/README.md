@@ -6,7 +6,7 @@
 
 `Model.load(driver_file)` 从 `motor_hardware.transmissions_file` 加载传动；未在传动文件中使用的执行器可由 driver 的 `joint` 字段生成直连组。几何、方向和轴序保存在 YAML，不按电机名字字典序重新排序。
 
-- `robot_transmission/SpatialLinkageTransmission` 是两输入／两输出球头空间定长连杆插件；当前配置见 `robot_description/models/trial_arm_7dof/config/transmissions.yaml`。
+- `robot_transmission/SpatialLinkageTransmission` 是两输入／两输出球头空间定长连杆插件；独立测试配置见 [`motor_hardware_interface/test/fixtures/spatial_transmissions.yaml`](../motor_hardware_interface/test/fixtures/spatial_transmissions.yaml)。
 - `robot_transmission/ParallelLinkageTransmission` 用于完整模型的双杆机构，也支持第一轴直连加一根杆。`direct_first` 选择结构；两组 `jointN_origin/axis`、`motorN_bounds` 及每根杆的 `motorN_origin/axis/ball/platform/length` 保存零位几何。正解使用从零位出发的确定性连续求解，逆解使用圆球相交及零位导数同号分支，反馈与命令共用解析雅可比。
 - 空间插件要求9个几何参数：电机轴原点／单位方向／零位球心、关节1轴原点／单位方向、关节2轴原点／单位方向／零位球心、杆长，单位 m；向量为三个空格分隔数，角度 rad。
 - 两个 `actuator_reduction` 只允许 ±1；`joint_reduction` 必须为1，`joint_offset` 为0。安装相位由球心坐标表达，不加到命令上。

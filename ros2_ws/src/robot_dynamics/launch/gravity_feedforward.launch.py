@@ -7,7 +7,7 @@
   ros2 launch robot_dynamics gravity_feedforward.launch.py \
     urdf_path:=/path/to/model.urdf joint_map:=1:joint_link1,2:joint_link2
 
-joint_map 留空 = 节点内置的 half_body_robot 兜底表，只对默认模型正确；换模型必须传参。
+joint_map 留空会使用历史半身兜底表；full_body_robot 必须显式传入经核对的整机电机→关节映射。
 """
 
 from launch import LaunchDescription
@@ -26,7 +26,7 @@ def generate_launch_description():
             "joint_map",
             default_value="",
             description="motor_id:关节名 逗号分隔；留空用节点内置的 "
-            "half_body_robot 兜底表（换模型必须传参）",
+            "历史半身兜底表（full_body_robot 必须显式传入整机映射）",
         ),
     ]
     node = Node(

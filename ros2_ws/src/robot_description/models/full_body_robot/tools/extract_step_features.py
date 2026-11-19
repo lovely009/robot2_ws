@@ -7,8 +7,8 @@ from OCP.TopAbs import TopAbs_FACE
 from OCP.TopoDS import TopoDS
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Sphere,GeomAbs_Cylinder,GeomAbs_Plane
-p=Path(__file__).resolve().parents[2]
-src=p/'全身不带头.STEP'
+p=Path(__file__).resolve().parents[1]
+src=p/'cad/全身不带头.STEP'
 r=STEPControl_Reader();r.ReadFile(str(src));r.TransferRoots();shape=r.OneShape();ex=TopExp_Explorer(shape,TopAbs_FACE);spheres={};cylinders={};planes={};n=0
 while ex.More():
  face=TopoDS.Face_s(ex.Current());a=BRepAdaptor_Surface(face,True);kind=a.GetType();n+=1
@@ -23,7 +23,7 @@ while ex.More():
   if normal[np.flatnonzero(abs(normal)>1e-8)[0]]<0:normal=-normal
   offset=float(normal@origin);key=tuple(np.round(np.r_[normal,offset],8));planes[key]={'normal':normal.tolist(),'offset_m':offset}
  ex.Next()
-out={'source':'Exact analytic BRep surfaces from STEP, transformed into assembly world frame','step_sha256':hashlib.sha256(src.read_bytes()).hexdigest(),'face_count':n,'spheres':list(spheres.values()),'cylinders':list(cylinders.values())};dst=p/'full_body_robot/cad/assembly_audit/step-analytic-features.json';dst.write_text(json.dumps(out,indent=2)+'\n');print(n,'faces',len(spheres),'spheres',len(cylinders),'cylinders',flush=True)
+out={'source':'Exact analytic BRep surfaces from STEP, transformed into assembly world frame','step_sha256':hashlib.sha256(src.read_bytes()).hexdigest(),'face_count':n,'spheres':list(spheres.values()),'cylinders':list(cylinders.values())};dst=p/'cad/assembly_audit/step-analytic-features.json';dst.write_text(json.dumps(out,indent=2)+'\n');print(n,'faces',len(spheres),'spheres',len(cylinders),'cylinders',flush=True)
 plane_output={'step_sha256':out['step_sha256'],'planes':list(planes.values())}
 (dst.parent/'step-planes.json.gz').write_bytes(gzip.compress((json.dumps(plane_output,indent=2)+'\n').encode(),mtime=0))
 print(len(planes),'planes',flush=True)

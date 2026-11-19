@@ -14,6 +14,7 @@ from web_host.models import (
 )
 
 PKG = Path(__file__).resolve().parent.parent
+LEGACY_MODELS = PKG / 'test/fixtures/robot_description/models'
 
 
 def test_full_body_topology_covers_all_confirmed_ids_without_enabling_hardware():
@@ -81,7 +82,7 @@ def test_invalid_driver_does_not_fall_back_to_topology(tmp_path, monkeypatch):
 
 
 def test_trial_arm_spatial_metadata_keeps_coupled_ids():
-    root = PKG.parent / 'robot_description/models'
+    root = LEGACY_MODELS
     metadata = model_transmissions('trial_arm_7dof', root)
     assert metadata['policy_defaults'] == {}
     assert metadata['direct_joints'] == {i: f'Joint_Link{i}' for i in range(3, 8)}
@@ -98,7 +99,7 @@ def test_trial_arm_spatial_metadata_keeps_coupled_ids():
 def test_trial_arm_uncalibrated_limits_block_workbench():
     import xml.etree.ElementTree as ET
     from motor_hardware_interface.workbench_control import WorkbenchModel
-    model = PKG.parent / 'robot_description/models/trial_arm_7dof'
+    model = LEGACY_MODELS / 'trial_arm_7dof'
     urdf = model / 'urdf/trial_arm_7dof.urdf'
     joints = [j for j in ET.parse(urdf).getroot().findall('joint') if j.get('type') == 'revolute']
     assert len(joints) == 7
@@ -239,7 +240,7 @@ def test_motor_library_missing_root_is_empty(tmp_path: Path) -> None:
 
 
 def test_coupled_metadata_does_not_flatten_current_wrists() -> None:
-    root = PKG.parent / "robot_description" / "models"
+    root = LEGACY_MODELS
     metadata = model_transmissions("half_body_robot", root)
     groups = {g["name"]: g for g in metadata["groups"]}
     assert groups["wrist_a"]["motors"] == [
@@ -265,7 +266,7 @@ def test_declared_invalid_transmission_metadata_cannot_use_legacy_alias(tmp_path
 
 
 def test_transmission_policy_defaults_come_from_model_yaml() -> None:
-    root = PKG.parent / "robot_description" / "models"
+    root = LEGACY_MODELS
     defaults = model_transmissions("half_body_robot", root)["policy_defaults"]
     assert defaults[8] == {"kp": 0.008, "kd": 1.0}
     assert defaults[9] == {"kp": 0.008, "kd": 1.0}

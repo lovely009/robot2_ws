@@ -13,7 +13,7 @@ from web_host.motion import MotionJobs, handle_motion
 
 
 @pytest.fixture
-def payload():
+def payload(legacy_model_reference):
     hierarchy = 'HIERARCHY\nROOT Spine3 { OFFSET 0 0 0 CHANNELS 6 Xposition Yposition Zposition Yrotation Xrotation Zrotation\n'
     for side, sign in [('Right', -1), ('Left', 1)]:
         for part, offset in [('UpperArm', 10), ('LowerArm', 30), ('Hand', 30)]:
@@ -21,7 +21,7 @@ def payload():
         hierarchy += '} } }\n'
     hierarchy += '}\nMOTION\nFrames: 3\nFrame Time: 0.02\n'
     rows = (' '.join(['0', '100'] + ['0'] * 22) + '\n') * 3
-    urdf = Path(__file__).resolve().parents[2] / 'robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
+    urdf = legacy_model_reference / 'models/half_body_robot/urdf/half_body_robot.urdf'
     return {'bvh_text': hierarchy + rows, 'urdf_text': urdf.read_text(),
             'bvh_name': '测试.bvh', 'urdf_name': 'half_body_robot.urdf'}
 

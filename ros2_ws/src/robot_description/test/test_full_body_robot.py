@@ -70,10 +70,10 @@ def test_runtime_inertias_preserve_native_export_world_com_and_tensor(runtime_na
     import json
     import numpy as np
     from scipy.spatial.transform import Rotation
-    source = ET.parse(MODEL.parent / 'robot_body/urdf/cnm.urdf').getroot()
+    source = ET.parse(MODEL / 'cad/robot_body/urdf/cnm.urdf').getroot()
     original = {link.get('name').strip(): link for link in source.findall('link')}
     arm_source = ET.parse(
-        MODEL.parent / '全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf'
+        MODEL / 'cad/arm_inertia/urdf/全身实验版_仅双臂质量.urdf'
     ).getroot()
     arm_links = {
         link.get('name').strip(): link for link in arm_source.findall('link')
@@ -137,7 +137,7 @@ def test_native_rods_retain_exact_source_component_geometry():
     count=0
     for source in metadata['ownership'].values():
         if not source['parts']:continue
-        reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL.parent/'robot_body/meshes'/source['source']));reader.Update()
+        reader=vtk.vtkSTLReader();reader.SetFileName(str(MODEL/'cad/robot_body/meshes'/source['source']));reader.Update()
         regions=vtk.vtkPolyDataConnectivityFilter();regions.SetInputConnection(reader.GetOutputPort())
         regions.SetExtractionModeToAllRegions();regions.ColorRegionsOn();regions.Update()
         points=vtk_to_numpy(regions.GetOutput().GetPoints().GetData()).astype(float)
@@ -210,7 +210,7 @@ def test_complete_display_skeleton_and_component_ownership():
         assigned = entry['fixed_regions'] + [i for part in entry['parts'].values() for i in part]
         assigned += [i for rotor in entry['rotor_regions'].values() for i in rotor]
         assert sorted(assigned) == list(range(len(assigned)))
-        source = MODEL.parent / 'robot_body/meshes' / entry['source']
+        source = MODEL / 'cad/robot_body/meshes' / entry['source']
         assert hashlib.sha256(source.read_bytes()).hexdigest() == entry['source_sha256']
     display = ET.parse(MODEL / 'urdf/full_body_robot.standalone.urdf').getroot()
     assert len(display.findall('joint')) == 67

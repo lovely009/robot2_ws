@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 beforeEach(() => {
   vi.resetModules();
-  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("location", { search: "?model=half_body_robot" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem() {} });
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });

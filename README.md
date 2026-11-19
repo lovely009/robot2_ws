@@ -39,7 +39,9 @@ source install/setup.bash
 ros2 launch robot_bringup robot.launch.py
 ```
 
-打开 `http://localhost:8080/workbench/`。默认模型为 `half_body_robot`，模型、Agent 和控制会话在页面中选择。启动时电机保持失能。HTTP 和 rosbridge 监听本机，WebSocket 校验工作台来源。启动参数见 [robot_bringup](ros2_ws/src/robot_bringup/README.md)。
+打开 `http://localhost:8080/workbench/`。仅保留并默认使用 `full_body_robot` 整机模型，旧的本地模型选型自动回退到整机。整机尚无已标定的 `motor_driver.yaml`，当前提供模型和动作预览，硬件控制保持不可用。
+
+Agent 和控制会话在页面中选择，启动时电机保持失能。HTTP 和 rosbridge 监听本机，WebSocket 校验工作台来源。启动参数见 [robot_bringup](ros2_ws/src/robot_bringup/README.md)。
 
 ## 控制与设备维护
 

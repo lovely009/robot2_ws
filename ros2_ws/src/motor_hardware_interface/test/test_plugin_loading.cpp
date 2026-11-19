@@ -12,16 +12,15 @@
 
 namespace {
 
-hardware_interface::HardwareInfo trial_info() {
-  const auto source_root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
-  const auto model = source_root / "robot_description/models/trial_arm_7dof";
+hardware_interface::HardwareInfo spatial_info() {
+  const auto fixtures = std::filesystem::path(__FILE__).parent_path() / "fixtures";
   hardware_interface::HardwareInfo info;
   info.name = "nested_plugin_loading_test";
   info.type = "system";
-  info.hardware_parameters["config_file"] = (model / "config/motor_driver.yaml").string();
-  for (int index = 1; index <= 7; ++index) {
+  info.hardware_parameters["config_file"] = (fixtures / "spatial_motor_driver.yaml").string();
+  for (const auto &name : {"yaw", "pitch"}) {
     hardware_interface::ComponentInfo joint;
-    joint.name = "Joint_Link" + std::to_string(index);
+    joint.name = name;
     for (const auto &name : {hardware_interface::HW_IF_POSITION,
                              hardware_interface::HW_IF_VELOCITY,
                              hardware_interface::HW_IF_EFFORT}) {
@@ -45,7 +44,7 @@ TEST(PluginLoading, MicroRosSystemInitializesNestedSpatialTransmission) {
   std::shared_ptr<hardware_interface::SystemInterface> system;
   ASSERT_NO_THROW(system = loader.createSharedInstance("motor_hardware_interface/MicroRosSystem"));
   ASSERT_TRUE(system);
-  EXPECT_EQ(system->on_init(trial_info()), hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system->on_init(spatial_info()), hardware_interface::CallbackReturn::SUCCESS);
 }
 
 }  // namespace

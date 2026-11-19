@@ -204,7 +204,9 @@ async function start() {
       const runtimeConfig = await configuration.json();
       if (runtimeConfig.rosbridge_port) configuredRosUrl.value = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${runtimeConfig.rosbridge_port}`;
       ros.configureControl(runtimeConfig);
-      if (runtimeConfig.robot_model) data.setModel(runtimeConfig.robot_model);
+      const models = await data.availableModels().catch(() => []);
+      const preferred = runtimeConfig.robot_model || data.MODEL;
+      data.setModel(models.includes(preferred) ? preferred : models[0] || 'full_body_robot');
       const documentSource = new DOMParser().parseFromString(html, "text/html");
       const templates = document.createElement("div");
       templates.hidden = true;

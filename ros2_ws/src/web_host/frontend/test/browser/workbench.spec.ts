@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-async function connectFixture(page: Page, coupled = false, withControlStates = false, topologyOnly = false, onlineMotorIds = [8,9]) {
+async function connectFixture(page: Page, coupled = false, withControlStates = false, topologyOnly = false, onlineMotorIds = [8,9], fullOnly = false) {
   const publishes: { topic: string; msg: Record<string, unknown> }[] = [];
   const errors: string[] = [];
   const connections = { count: 0 };
@@ -29,7 +29,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       return route.fulfill({json: {control_mode: 'bench', robot_model: 'half_body_robot'}});
     if (url.pathname === "/api/models")
       return route.fulfill({
-        json: { models: ["half_body_robot", "robot_leg"] },
+        json: { models: fullOnly ? ['full_body_robot'] : ["half_body_robot", "robot_leg"] },
       });
     if (url.pathname === "/api/model-transmissions")
       return route.fulfill(
@@ -720,6 +720,22 @@ test("窄栏电机卡片清楚显示单位、状态并保持选择联动", async
   await expect(card).toHaveAttribute('aria-pressed', 'true');
   expect(await order()).toEqual(['1', '2']);
   expect(fixture.publishes.filter(p => !['/motor/system_command','/motor/config_request'].includes(p.topic))).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test('旧本地选型和运行配置回退到仅保留的整机', async ({page}) => {
+  const fixture = await connectFixture(page, false, false, true, [8,9], true);
+  await page.addInitScript(() => localStorage.setItem('web_host.model', 'half_body_robot'));
+  const requests: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/robot_sim/models/')) requests.push(request.url());
+  });
+  await page.goto('/workbench/#/run');
+  await expect.poll(() => fixture.feedbackModels).toEqual(['full_body_robot']);
+  await expect(page.locator('.arm-model')).toHaveValue('full_body_robot');
+  await expect.poll(() => requests.some(url => url.includes('/full_body_robot/'))).toBe(true);
+  expect(requests.some(url => url.includes('/half_body_robot/'))).toBe(false);
+  expect(await page.evaluate(() => localStorage.getItem('web_host.model'))).toBe('full_body_robot');
   expect(fixture.errors).toEqual([]);
 });
 

@@ -1,0 +1,64 @@
+<robot name="robot_leg">
+  <link name="base_link">
+    </link>
+  <link name="Joint_link1">
+    </link>
+  <joint name="joint_link1" type="revolute">
+    <origin xyz="-0.33849 0.019369 1.1657" rpy="1.4563 0.015566 -1.628" />
+    <parent link="base_link" />
+    <child link="Joint_link1" />
+    <axis xyz="0 -0.11422 0.99345" />
+    <limit lower="-1.5708" upper="1.5708" effort="20" velocity="3.1416" />
+    <dynamics damping="0.29845" friction="0" />
+  </joint>
+  <link name="Joint_link2">
+    </link>
+  <joint name="joint_link2" type="revolute">
+    <origin xyz="0.045 -0.0013364 0.011623" rpy="-1.8248 1.5708 -1.8203" />
+    <parent link="Joint_link1" />
+    <child link="Joint_link2" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-1.5708" upper="1.5708" effort="20" velocity="3.1416" />
+    <dynamics damping="0.2969" friction="0" />
+  </joint>
+  <link name="Joint_link3">
+    </link>
+  <joint name="joint_link3" type="revolute">
+    <origin xyz="0.027184 -0.1934 -0.046" rpy="-1.5708 -0.036172 0.13964" />
+    <parent link="Joint_link2" />
+    <child link="Joint_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416" />
+    <dynamics damping="0.0020447" friction="0" />
+  </joint>
+  <link name="Joint_link4">
+    </link>
+  <joint name="joint_link4" type="revolute">
+    <origin xyz="0.023397 0.0038041 -0.2527" rpy="-1.5708 -0.20311 -1.6655" />
+    <parent link="Joint_link3" />
+    <child link="Joint_link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416" />
+    <dynamics damping="0.03213" friction="0" />
+  </joint>
+  <link name="Joint_link5">
+    </link>
+  <joint name="joint_link5" type="revolute">
+    <origin xyz="0.012 0.0955 -0.027" rpy="-1.5708 1.4687 0" />
+    <parent link="Joint_link4" />
+    <child link="Joint_link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5708" upper="1.5708" effort="5" velocity="3.1416" />
+    <dynamics damping="0.00014033" friction="0" />
+  </joint>
+  <link name="Joint_link6">
+    </link>
+  <joint name="joint_link6" type="revolute">
+    <origin xyz="0.0052358 0.018524 0.285" rpy="-1.5708 0.50852 -0.27546" />
+    <parent link="Joint_link5" />
+    <child link="Joint_link6" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-1.5708" upper="1.5708" effort="1.15" velocity="4.189" />
+    <dynamics damping="5.6606E-05" friction="0" />
+  </joint>
+</robot>

@@ -6,14 +6,13 @@ from motor_hardware_interface.control_subset import materialize_control_subset
 
 
 def test_spatial_subset_preserves_parameters_and_rejects_split_group(tmp_path):
-    from ament_index_python.packages import get_package_share_directory
-    driver = Path(get_package_share_directory('robot_description')) / 'models/trial_arm_7dof/config/motor_driver.yaml'
+    driver = Path(__file__).parent / 'fixtures/spatial_motor_driver.yaml'
     original = Model.load(str(driver)).groups[0]
     for ids in ('1', '2'):
         with pytest.raises(ValueError):
             materialize_control_subset(str(driver), ids, tmp_path)
     subset = Model.load(materialize_control_subset(str(driver), '1,2', tmp_path))
-    assert subset.actuator_ids == {'arm_joint1': 1, 'arm_joint2': 2}
+    assert subset.actuator_ids == {'a': 1, 'b': 2}
     group = subset.groups[0]
     assert group.position_dependent
     assert group.parameters == original.parameters
@@ -84,16 +83,21 @@ def test_hil_partial_group_requires_explicit_input_mapping(tmp_path):
         materialize_control_subset(str(driver), '8', tmp_path)
 
 
-def test_half_body_motor_2_requires_only_its_own_joint_feedback(tmp_path):
-    from ament_index_python.packages import get_package_share_directory
+def test_motor_2_requires_only_its_own_joint_feedback(tmp_path):
     from motor_hardware_interface.workbench_control import WorkbenchModel
     from sensor_msgs.msg import JointState
-    model=Path(get_package_share_directory('robot_description'))/'models/half_body_robot'
-    config=materialize_control_subset(str(model/'config/motor_driver.yaml'),'2',tmp_path)
-    mapping=WorkbenchModel(config,str(model/'urdf/half_body_robot.urdf'))
-    assert list(mapping.ids.values())==[2]
-    assert mapping.joint_names==['joint_link2']
-    frame=JointState(name=['joint_link2'],position=[0.],velocity=[0.],effort=[0.])
-    frame.header.stamp.sec=10
-    assert list(mapping.feedback(frame,10_000_000_000))==['joint_link2']
+    driver = source(tmp_path)
+    urdf = tmp_path / 'test.urdf'
+    urdf.write_text('<robot name="test"><link name="base"/>' + ''.join(
+        f'<link name="{name}_link"/><joint name="{name}" type="revolute">'
+        f'<parent link="base"/><child link="{name}_link"/>'
+        '<limit lower="-1" upper="1" velocity="2" effort="10"/></joint>'
+        for name in ('elbow', 'yaw', 'pitch')) + '</robot>')
+    config = materialize_control_subset(str(driver), '2', tmp_path)
+    mapping = WorkbenchModel(config, str(urdf))
+    assert list(mapping.ids.values()) == [2]
+    assert mapping.joint_names == ['elbow']
+    frame = JointState(name=['elbow'], position=[0.], velocity=[0.], effort=[0.])
+    frame.header.stamp.sec = 10
+    assert list(mapping.feedback(frame, 10_000_000_000)) == ['elbow']
 

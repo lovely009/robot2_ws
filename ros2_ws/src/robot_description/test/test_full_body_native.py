@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 MODEL = Path(__file__).parents[1] / 'models/full_body_robot'
-SOURCE = MODEL.parent / 'robot_body/urdf/cnm.urdf'
+SOURCE = MODEL / 'cad/robot_body/urdf/cnm.urdf'
 
 
 
@@ -17,11 +17,13 @@ def test_calibration_uses_current_source_files():
     import hashlib
     alignment = json.loads((MODEL / 'config/step_alignment.json').read_text())
     assert alignment['urdf_sha256'] == hashlib.sha256(SOURCE.read_bytes()).hexdigest()
-    assert alignment['step_sha256'] == hashlib.sha256((MODEL.parent / '全身不带头.STEP').read_bytes()).hexdigest()
-    assert json.loads((MODEL / 'config/display_meshes.json').read_text())['source'] == 'robot_body'
+    assert alignment['step_sha256'] == hashlib.sha256((MODEL / 'cad/全身不带头.STEP').read_bytes()).hexdigest()
+    assert json.loads((MODEL / 'config/display_meshes.json').read_text())['source'] == 'cad/robot_body'
     for entry in alignment['links'].values():
         path = SOURCE.parents[1] / 'meshes' / entry['source']
         assert entry['source_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+    arm = json.loads((MODEL / 'config/native_assembly.json').read_text())['arm_inertia']
+    assert arm['sha256'] == hashlib.sha256((MODEL / arm['source_urdf']).read_bytes()).hexdigest()
 
 
 def test_mechanical_generator_preserves_calibrated_skeleton(monkeypatch):

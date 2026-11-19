@@ -1,5 +1,5 @@
 {
-  "source": "robot_body",
+  "source": "cad/robot_body",
   "registration": "Native robot_body export verified against the unchanged STEP. Changed mesh component IDs were independently matched in world coordinates. Historical ICP fields are unused.",
   "links": {
     "base_link": {

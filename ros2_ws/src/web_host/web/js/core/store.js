@@ -380,8 +380,8 @@ export async function loadModelJoints() {
   return jointMapSource;
 }
 
-// 默认模型与 robot_sim 的 launch 默认值保持一致（half_body_robot，四个 launch 都是它）。
-const DEFAULT_MODEL = 'half_body_robot';
+// 默认展示当前发布保留的整机模型。
+const DEFAULT_MODEL = 'full_body_robot';
 const MODEL_STORAGE_KEY = 'web_host.model';
 function readSavedModel() {
   try { return localStorage.getItem(MODEL_STORAGE_KEY) || ''; } catch (_e) { return ''; }

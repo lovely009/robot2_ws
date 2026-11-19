@@ -13,8 +13,8 @@
 ## 测量与模型
 
 - [2026-11-02 同步测量报告](outputs/2026-11-02-clock-sync/report.md)，原始记录位于同目录。
-- [半身电机坐标系](../ros2_ws/src/robot_description/models/half_body_robot/cad/frames/README.md)，包含几何基准和待标定项。
-- [公共模型目录](../ros2_ws/src/robot_description/README.md)，工程使用的模型和传动配置位于该包。
+- [整机模型](../ros2_ws/src/robot_description/models/full_body_robot/README.md)，包含机械几何、关节命名和重建资料。
+- [公共模型目录](../ros2_ws/src/robot_description/README.md)，说明模型资产和配置的安装方式。
 
 ## 硬件资料
 

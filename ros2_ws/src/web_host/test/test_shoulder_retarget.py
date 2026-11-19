@@ -14,9 +14,9 @@ from bvh_broadcaster.retarget import digest, load_motion
 from web_host.shoulder_retarget import ShoulderRetargeter
 
 
-ROOT = Path(__file__).resolve().parents[2]
-URDF = ROOT / 'robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures'
+URDF = FIXTURES / 'robot_description/models/half_body_robot/urdf/half_body_robot.urdf'
+pytestmark = pytest.mark.usefixtures('legacy_model_reference')
 MAPPING = {'mode': 'shoulders12', 'source': 'shoulder_r',
            'joints': ['joint_link1', 'joint_link2'],
            'source_to_robot': [[0, -1, 0], [1, 0, 0], [0, 0, 1]]}

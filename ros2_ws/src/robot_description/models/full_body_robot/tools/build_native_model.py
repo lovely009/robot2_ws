@@ -16,7 +16,7 @@ import joint_convention
 
 MODEL = Path(__file__).resolve().parents[1]
 DIRECTORY = MODEL / 'mujoco/visual/native'
-ARM_INERTIA_SOURCE = MODEL.parent / '全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf'
+ARM_INERTIA_SOURCE = MODEL / 'cad/arm_inertia/urdf/全身实验版_仅双臂质量.urdf'
 ARM_LINK_NAMES = {
     f'BN_{side}{part}_link'
     for side in ('Left', 'Right')
@@ -119,7 +119,7 @@ def append(pieces):
 
 
 def source_tree(alignment, hand_mounting=None):
-    source=MODEL.parent/alignment['source_urdf']
+    source=MODEL/alignment['source_urdf']
     if hashlib.sha256(source.read_bytes()).hexdigest()!=alignment['urdf_sha256']:
         raise ValueError('Repeat STEP calibration after changing the source URDF')
     root=ET.parse(source).getroot()
@@ -177,14 +177,14 @@ def source_tree(alignment, hand_mounting=None):
         for mesh in link.findall('.//mesh'):
             filename=Path(mesh.get('filename')).name.lstrip()
             if not (source.parents[1]/'meshes'/filename).is_file():raise ValueError(filename)
-            mesh.set('filename','package://robot_description/models/'+alignment['source']+'/meshes/'+filename)
+            mesh.set('filename','package://robot_description/models/full_body_robot/'+alignment['source']+'/meshes/'+filename)
     return root,frames,physical,arm_mount
 
 
 def split_geometry(alignment, metadata, rods, mounting):
     files={};ownership={}
     for old_name,entry in metadata['links'].items():
-        name=Path(entry['source']).stem.strip();source=MODEL.parent/metadata['source']/'meshes'/entry['source']
+        name=Path(entry['source']).stem.strip();source=MODEL/metadata['source']/'meshes'/entry['source']
         if hashlib.sha256(source.read_bytes()).hexdigest()!=entry['source_sha256']:raise ValueError('Source mesh changed')
         if alignment['links'][name]['source_sha256']!=entry['source_sha256']:
             raise ValueError(f'{name}: mesh ownership and STEP calibration use different sources')
@@ -259,7 +259,7 @@ def build():
     report = json.loads((MODEL / 'cad/assembly_audit/2026-11-13-step-linkages.json').read_text())
     mounting = json.loads((MODEL / 'config/hips_mount_alignment.json').read_text())
     hand = json.loads((MODEL / 'config/left_hand_mount_alignment.json').read_text())
-    step = hashlib.sha256((MODEL.parent / '全身不带头.STEP').read_bytes()).hexdigest()
+    step = hashlib.sha256((MODEL / 'cad/全身不带头.STEP').read_bytes()).hexdigest()
     if not step == alignment['step_sha256'] == report['source_step_sha256'] == mounting['step_sha256'] == hand['source_step_sha256']:
         raise ValueError('装配记录与当前 STEP 不一致，须重新核验机械装配')
     source, _, _, _ = source_tree(alignment, hand)

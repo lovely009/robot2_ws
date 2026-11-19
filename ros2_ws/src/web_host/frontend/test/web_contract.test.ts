@@ -11,9 +11,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("默认半身模型的初始映射包含两侧全部电机", async () => {
+it("默认整机模型仍保留旧设备映射的独立兜底", async () => {
   const { MODEL, JOINT_OF_MOTOR } = await import("../../web/js/core/store.js");
-  expect(MODEL).toBe("half_body_robot");
+  expect(MODEL).toBe("full_body_robot");
   expect(Object.keys(JOINT_OF_MOTOR).map(Number)).toEqual(
     Array.from({ length: 18 }, (_, index) => index + 1),
   );

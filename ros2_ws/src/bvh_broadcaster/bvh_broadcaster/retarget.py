@@ -199,14 +199,11 @@ def main():
     from ament_index_python.packages import get_package_share_directory
     parser = argparse.ArgumentParser(description='BVH arms → fixed-base robot IK (preview only)')
     parser.add_argument('bvh_file')
-    parser.add_argument('--urdf', help='Target URDF; defaults to the project half_body_robot model')
+    parser.add_argument('--urdf', required=True, help='External fixed-base dual-arm URDF; full_body_robot requires generic mapping')
     parser.add_argument('--mapping', default=str(Path(get_package_share_directory('bvh_broadcaster')) /
                                                'config/half_body_robot.yaml'))
     parser.add_argument('--output', required=True, help='New .npz output path; existing files are refused')
     args = parser.parse_args()
-    if args.urdf is None:
-        args.urdf = str(Path(get_package_share_directory('robot_description')) /
-                        'models/half_body_robot/urdf/half_body_robot.urdf')
     output = Path(args.output)
     report_path = output.with_suffix('.json')
     if output.suffix != '.npz' or output.exists() or report_path.exists():

@@ -2,7 +2,7 @@
   "mode": "robot_body native STEP zero-pose reference; left thigh export sign corrected",
   "step_sha256": "4741b25580a08be2abb7a49a30b21d0f63f4a6926189587785f13a80ef4c86a4",
   "urdf_sha256": "d127a6994613c80193d93ac194c4fa8d5590139c9972b2ac668b002045651be7",
-  "source": "robot_body",
+  "source": "cad/robot_body",
   "source_joint_origin_corrections": {
     "BN_LeftUpperLeg_2": {
       "rpy": "-0.0740617322384423 1.5707963267949 0",
@@ -1152,5 +1152,5 @@
       ]
     }
   },
-  "source_urdf": "robot_body/urdf/cnm.urdf"
+  "source_urdf": "cad/robot_body/urdf/cnm.urdf"
 }

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,3 +24,12 @@ def forbid_real_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(subprocess, 'Popen', guarded)
+
+
+@pytest.fixture
+def legacy_model_reference(monkeypatch):
+    # 旧半身映射仅在隔离夹具中验证，不作为发布模型或整机映射。
+    reference = Path(__file__).parent / 'fixtures/robot_description'
+    monkeypatch.setattr('web_host.shoulder_retarget.get_package_share_directory',
+                        lambda _: str(reference))
+    return reference

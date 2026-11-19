@@ -1,0 +1,121 @@
+<robot name="trial_arm_7dof">
+  <link name="base_link">
+    </link>
+  <link name="Joint_Link1.1">
+    </link>
+  <joint name="Joint_Link1.1" type="fixed">
+    <origin xyz="-0.0025 0.06725 0.4825" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="Joint_Link1.1" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link1">
+    </link>
+  <joint name="Joint_Link1" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link1.1" />
+    <child link="Joint_Link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="Joint_Link2">
+    </link>
+  <link name="Joint_Link2_axis" />
+  <joint name="Joint_Link2" type="revolute">
+    <origin xyz="0.005 0.0005 0.020" rpy="1.5707963267948966 0 0" />
+    <parent link="Joint_Link1" />
+    <child link="Joint_Link2_axis" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <joint name="Joint_Link2_body_fixed" type="fixed">
+    <origin xyz="0.00011319999999999993 -0.004999 -3.0610046744688095e-19" rpy="3.673205103416066e-06 0 0" />
+    <parent link="Joint_Link2_axis" />
+    <child link="Joint_Link2" />
+  </joint>
+  <link name="Joint_Link3.3">
+    </link>
+  <joint name="Joint_Link3.3" type="fixed">
+    <origin xyz="0.03312 0.03926 0" rpy="0.022638 1.5708 0" />
+    <parent link="Joint_Link2" />
+    <child link="Joint_Link3.3" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link3">
+    </link>
+  <joint name="Joint_Link3" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link3.3" />
+    <child link="Joint_Link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="Joint_Link4.4">
+    </link>
+  <joint name="Joint_Link4.4" type="fixed">
+    <origin xyz="-0.0225 0 0.054" rpy="1.5708 -1.5482 -1.5708" />
+    <parent link="Joint_Link3" />
+    <child link="Joint_Link4.4" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link4">
+    </link>
+  <joint name="Joint_Link4" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link4.4" />
+    <child link="Joint_Link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="Joint_Link5.5">
+    </link>
+  <joint name="Joint_Link5.5" type="fixed">
+    <origin xyz="0 -0.0991 -0.0235" rpy="-1.5708 0 -3.1416" />
+    <parent link="Joint_Link4" />
+    <child link="Joint_Link5.5" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link5">
+    </link>
+  <joint name="Joint_Link5" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link5.5" />
+    <child link="Joint_Link5" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="Joint_Link6.6">
+    </link>
+  <joint name="Joint_Link6.6" type="fixed">
+    <origin xyz="-0.02755 0 0.193" rpy="-1.5708 0 1.5708" />
+    <parent link="Joint_Link5" />
+    <child link="Joint_Link6.6" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link6">
+    </link>
+  <joint name="Joint_Link6" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link6.6" />
+    <child link="Joint_Link6" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="Joint_Link7.7">
+    </link>
+  <joint name="Joint_Link7.7" type="fixed">
+    <origin xyz="-0.009 -0.089 -0.027" rpy="1.5708 1.5708 0" />
+    <parent link="Joint_Link6" />
+    <child link="Joint_Link7.7" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="Joint_Link7">
+    </link>
+  <joint name="Joint_Link7" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Joint_Link7.7" />
+    <child link="Joint_Link7" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+</robot>

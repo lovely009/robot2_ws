@@ -19,6 +19,8 @@ class ShoulderRetargeter:
         try:
             urdf = (Path(get_package_share_directory('robot_description')) /
                     'models/half_body_robot/urdf/half_body_robot.urdf')
+            if not urdf.is_file():
+                return False
             reference = pin.buildModelFromUrdf(str(urdf))
         except (OSError, RuntimeError, LookupError):
             return False

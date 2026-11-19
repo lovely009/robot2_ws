@@ -5,9 +5,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 
 
 def preview_nodes(context):
@@ -40,13 +39,9 @@ def preview_nodes(context):
 
 def generate_launch_description():
     package = Path(get_package_share_directory('bvh_broadcaster'))
-    urdf = PathJoinSubstitution([
-        FindPackageShare('robot_description'),
-        'models', 'half_body_robot', 'urdf', 'half_body_robot.urdf',
-    ])
     return LaunchDescription([
         DeclareLaunchArgument('motion_file', description='Validated retarget .npz file'),
-        DeclareLaunchArgument('urdf', default_value=urdf),
+        DeclareLaunchArgument('urdf', description='URDF used to create the motion file'),
         DeclareLaunchArgument('rviz', default_value='false'),
         OpaqueFunction(function=preview_nodes),
         Node(package='rviz2', executable='rviz2', condition=IfCondition(LaunchConfiguration('rviz')),

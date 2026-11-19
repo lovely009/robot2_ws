@@ -2,7 +2,7 @@
 
 将 `bvh_broadcaster` 的文件回放功能迁入 ROS 2 Humble。解析与广播层为 Python 3
 重写，运行时不依赖 ROS 1 或厂商二进制 SDK。人体回放输出 `/tf`，保留原始人体骨架
-及 End Site。另提供 `half_body_robot` 双臂 IK 离线转换与独立机器人预览，
+及 End Site。另保留供外部固定底座双臂模型使用的 IK 离线转换与独立机器人预览，
 不连接电机控制链路。
 
 工作台的“动作工作台”另提供通用 BVH + URDF 转换：名称/人体语义生成候选，
@@ -52,7 +52,11 @@ ros2 launch bvh_broadcaster play.launch.py \
 有位置通道的节点要求位置通道排在旋转之前；不支持的布局会报错。
 提供 TF 时，位置和旋转一起做坐标基变换，单位统一为米，四元数为 ROS `xyzw`。
 
-## half_body_robot 双臂映射
+## 外部双臂模型映射
+
+当前发布仅包含 `full_body_robot`，请在动作工作台使用通用映射。下面的旧半身专用
+映射不适用于整机；离线双臂工具要求显式提供外部 URDF，预览也必须传入同一 URDF。
+`config/half_body_robot.yaml` 保留为旧半身映射模板，其他双臂模型还需传入适配的 `--mapping`。
 
 映射采用 Pinocchio + SciPy IK。`config/half_body_robot.yaml` 指定人体躯干、
 左右肩/肘/手与机器人连杆的语义对应及坐标基变换。**首帧必须是参考 T-pose**；
@@ -65,10 +69,11 @@ source /opt/ros/humble/setup.bash
 source /home/ly/robot2_ws/ros2_ws/install/setup.bash
 ros2 run bvh_broadcaster retarget_bvh \
   /absolute/path/to/full-body.bvh \
-  --urdf /home/ly/robot2_ws/ros2_ws/src/robot_description/models/half_body_robot/urdf/half_body_robot.urdf \
-  --output /tmp/half_body_robot-preview.npz
+  --urdf /absolute/path/to/dual-arm.urdf \
+  --mapping /absolute/path/to/dual-arm-mapping.yaml \
+  --output /tmp/dual-arm-preview.npz
 ros2 launch bvh_broadcaster retarget.launch.py \
-  motion_file:=/tmp/half_body_robot-preview.npz rviz:=true
+  motion_file:=/tmp/dual-arm-preview.npz urdf:=/absolute/path/to/dual-arm.urdf rviz:=true
 ```
 
 输出 `.npz` 保存关节角、帧时间、逐帧误差与模型/配置摘要，旁边 `.json` 为误差报告；

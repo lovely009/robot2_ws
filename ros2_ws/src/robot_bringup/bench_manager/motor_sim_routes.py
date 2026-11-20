@@ -25,15 +25,15 @@ def parse_ids(value):
 
 
 def validate_routes(rows):
-    if not isinstance(rows, list) or not 1 <= len(rows) <= 3:
-        raise ValueError('channels must contain 1..3 routes')
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 4:
+        raise ValueError('channels must contain 1..4 routes')
     routes = []; buses = set(); endpoints = set(); assigned = set(); remainder = False
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError('each channel must be an object')
         bus = row.get('bus')
-        if type(bus) is not int or not 0 <= bus <= 2 or bus in buses:
-            raise ValueError('duplicate or invalid MCU bus (expected 0..2)')
+        if type(bus) is not int or not 0 <= bus <= 3 or bus in buses:
+            raise ValueError('duplicate or invalid MCU bus (expected 0..3)')
         buses.add(bus)
         kind = row.get('transport')
         route = {'bus': bus, 'transport': kind, 'ids': row.get('ids', '')}

@@ -36,7 +36,8 @@ test('多路电机后端提交双通道配置并按通道添加节点', async ({
   await page.locator('#motorBackendTransport').selectOption('multi');
   await expect(page.locator('#simTransport')).toHaveValue('multi');
   const rows = page.locator('[data-sim-route]');
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(3)).toHaveAccessibleName('MCU CAN4');
   await rows.nth(1).locator('[data-route-enabled]').check();
   await rows.nth(1).locator('[data-route-ids]').fill('10-18');
   await page.locator('#simMultiFields').screenshot({path:test.info().outputPath('motor-routes.png')});

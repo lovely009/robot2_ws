@@ -308,6 +308,16 @@
             <label class="sim-field" data-route-endpoint-field hidden>CAN / 串口端点<select data-route-endpoint></select></label>
             <label class="sim-field">模拟节点 ID<input data-route-ids type="text" placeholder="例如 1-9、12 或 *" spellcheck="false"></label>
           </div>
+          <div class="sim-grid sim-channel-route" data-sim-route="3" role="group" aria-label="MCU CAN4">
+            <label class="check"><input type="checkbox" data-route-enabled>MCU CAN4 (SPI)</label>
+            <label class="sim-field">接口类型<select data-route-transport>
+              <option value="usbcanfd">创芯 USB-CAN FD</option><option value="socketcan">SocketCAN</option><option value="slcan">SLCAN / CANable</option>
+            </select></label>
+            <label class="sim-field" data-route-device-field>分析仪<select data-route-device><option value="">扫描分析仪…</option></select></label>
+            <label class="sim-field" data-route-channel-field>分析仪通道<select data-route-channel><option value="0">CAN1</option><option value="1">CAN2</option></select></label>
+            <label class="sim-field" data-route-endpoint-field hidden>CAN / 串口端点<select data-route-endpoint></select></label>
+            <label class="sim-field">模拟节点 ID<input data-route-ids type="text" placeholder="例如 1-9、12 或 *" spellcheck="false"></label>
+          </div>
         </div>
         <div class="ctrl-row wrap">
           <button id="btnMotorBackendStart" class="primary">启动电机后端</button>

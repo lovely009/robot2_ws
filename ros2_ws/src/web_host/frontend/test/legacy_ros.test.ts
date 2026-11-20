@@ -538,8 +538,11 @@ it('浏览器观测限流并保留事件队列，避免反馈堵塞控制连接'
   const ros = await import('../../web/js/core/ros.js');
   ros.connect(); Socket.instances[0].emit('connection');
   expect(Topic.instances.find(t => t.name === '/motor/motion_states')?.options)
-    .toMatchObject({throttle_rate:50, queue_length:1});
+    .toMatchObject({throttle_rate:50, queue_length:1, compression:'cbor'});
+  for (const name of ['/motor/control_states', '/micro_ros_up/status']) {
+    expect(Topic.instances.find(t => t.name === name)?.options.compression).toBe('cbor');
+  }
   expect(Topic.instances.find(t => t.name === '/motor/events')?.options)
-    .toMatchObject({throttle_rate:0, queue_length:64});
+    .toMatchObject({throttle_rate:0, queue_length:64, compression:'none'});
   ros.disconnect();
 });

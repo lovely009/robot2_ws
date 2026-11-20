@@ -261,6 +261,24 @@ def test_invalid_new_model_stops_old_feedback_and_reports_error(setup_feedback: 
     assert not [c for c in fake.commands()[before:] if c[0] == 'systemd-run']
 
 
+@pytest.mark.parametrize('topology', ['model_motor_topology.yaml', 'motor_topology.yaml'])
+def test_topology_only_model_releases_joint_session_and_keeps_motor_monitoring(
+        setup_feedback, topology):
+    manager, fake = setup_feedback
+    manager.reconcile('arm_a', agent_running=True)
+    config = manager.models_root / 'arm_b/config'
+    (config / 'motor_driver.yaml').unlink()
+    (config / topology).write_text('motors: {1: {can_node_id: 1}}\n')
+    manager.reconcile('arm_b', agent_running=True, motor_ids=[1], session_id=100)
+    status = manager.status()
+    assert status['state'] == 'stopped' and status['error'] == ''
+    assert 'MCU 电机反馈' in status['reason']
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+    before = len(fake.commands())
+    manager.reconcile('arm_b', agent_running=True, motor_ids=[1], session_id=100)
+    assert not [c for c in fake.commands()[before:] if 'stop' in c]
+
+
 def test_manager_restart_adopts_matching_unit(setup_feedback: FeedbackSetup) -> None:
     manager, fake = setup_feedback
     manager.reconcile('arm_a', agent_running=True)
@@ -268,6 +286,19 @@ def test_manager_restart_adopts_matching_unit(setup_feedback: FeedbackSetup) -> 
     adopted.reconcile('arm_a', agent_running=True)
     assert adopted.status()['model'] == 'arm_a'
     assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_topology_only_model_cancels_inherited_starting_unit(setup_feedback):
+    manager, fake = setup_feedback
+    config = manager.models_root / 'arm_b/config'
+    (config / 'motor_driver.yaml').unlink()
+    (config / 'model_motor_topology.yaml').write_text('motors: {}\n')
+    fake.properties[UNIT_FEEDBACK] = {'LoadState': 'loaded', 'ActiveState': 'activating'}
+    for _ in range(2):
+        manager.reconcile('arm_b', agent_running=True, motor_ids=[1], session_id=100)
+    assert len([c for c in fake.commands() if 'stop' in c and UNIT_FEEDBACK in c]) == 1
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert manager.status()['error'] == ''
 
 
 def test_old_feedback_unit_is_replaced_instead_of_adopted_as_control(setup_feedback: FeedbackSetup):

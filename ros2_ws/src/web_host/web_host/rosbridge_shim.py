@@ -19,9 +19,37 @@ import os
 import runpy
 
 from ament_index_python.packages import get_package_prefix
+from rclpy import executors
+from rclpy.exceptions import InvalidHandle
 
 import rosbridge_library.internal.message_conversion as message_conversion
 from rosbridge_library.internal import ros_loader
+
+
+class _RosbridgeExecutor(executors.SingleThreadedExecutor):
+    def _make_handler(self, entity, node, take_from_wait_list, call_coroutine):
+        destroyed = object()
+
+        def take_if_alive(ready):
+            try:
+                return take_from_wait_list(ready)
+            except InvalidHandle:
+                # 等待集就绪后客户端仍可能退订，让执行器正常释放回调组。
+                return destroyed
+
+        async def execute_if_alive(ready, data):
+            if data is not destroyed:
+                await call_coroutine(ready, data)
+
+        return super()._make_handler(entity, node, take_if_alive, execute_if_alive)
+
+    def wait_for_ready_callbacks(self, *args, **kwargs):
+        try:
+            return super().wait_for_ready_callbacks(*args, **kwargs)
+        except InvalidHandle as exc:
+            # 客户端断开可能在 Humble 构造等待集时销毁 QoS 事件。
+            # 下一轮 spin 重建等待集，已取得的回调仍按原方式执行并报告异常。
+            raise executors.TimeoutException() from exc
 
 
 def _patch_bounded_strings() -> None:
@@ -84,6 +112,7 @@ def _patch_workbench_origin(port: int) -> None:
 
 
 def main(args=None) -> None:
+    executors.SingleThreadedExecutor = _RosbridgeExecutor
     _patch_workbench_origin(int(os.environ.get('WORKBENCH_WEB_PORT', '8080')))
     _patch_bounded_strings()
     _patch_standard_trajectory_action()

@@ -171,9 +171,19 @@ class FirmwareFeedbackManager:
             self._attempt_count = 0
             self._pending_inventory = None
             return
-        status = self.status()
         try:
             driver, urdf = self._model_files(model)
+            if urdf.is_file() and not driver.exists() and any(
+                    (driver.parent / name).is_file()
+                    for name in ('model_motor_topology.yaml', 'motor_topology.yaml')):
+                unit = self._systemd.probe(UNIT_FEEDBACK)
+                if unit.state not in (UnitState.ABSENT, UnitState.STOPPED) or self._attempt is not None:
+                    self.stop()
+                self._pending_inventory = None
+                self._source = 'waiting'
+                self._reason = '仅显示 MCU 电机反馈，关节反馈需要电机驱动配置'
+                return
+            status = self.status()
             transmission = self._validate(model)
             available = set(transmission.actuator_ids.values() if motor_ids is None else motor_ids)
             selected = sorted({transmission.actuator_ids[name]

@@ -11,6 +11,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it("电机卡片按板端总线索引显示三个 FDCAN 和外置 CAN4", async () => {
+  const { busLabel } = await import("../../web/js/core/format.js");
+  expect([0, 1, 2, 3, 4, -1].map(busLabel)).toEqual([
+    "FDCAN1", "FDCAN2", "FDCAN3", "CAN4 (MCP2518FD)", "CAN --", "CAN --",
+  ]);
+});
+
 it("默认整机模型仍保留旧设备映射的独立兜底", async () => {
   const { MODEL, JOINT_OF_MOTOR } = await import("../../web/js/core/store.js");
   expect(MODEL).toBe("full_body_robot");

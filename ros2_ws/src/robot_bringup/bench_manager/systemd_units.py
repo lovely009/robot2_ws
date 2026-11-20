@@ -46,6 +46,7 @@ _ENV_EXACT = ("PATH", "LD_LIBRARY_PATH", "PYTHONPATH", "ROBOT2_CONTROLCANFD_LIB"
 class UnitState(Enum):
     ABSENT = "absent"    # 从未创建（LoadState=not-found）
     STOPPED = "stopped"  # 创建过、停着
+    ACTIVATING = "activating"
     RUNNING = "running"
     FAILED = "failed"    # 上次非零退出；returncode 带退出码
 
@@ -60,6 +61,7 @@ class UnitStatus(NamedTuple):
 STATE_NAMES = {
     UnitState.ABSENT: "stopped",
     UnitState.STOPPED: "stopped",
+    UnitState.ACTIVATING: "stopped",  # 进程就绪后才向页面报告 running
     UnitState.RUNNING: "running",
     UnitState.FAILED: "failed",
 }
@@ -186,6 +188,8 @@ class SystemdUnits:
         active = props.get("ActiveState")
         if active == "active":
             return UnitStatus(UnitState.RUNNING)
+        if active == "activating":
+            return UnitStatus(UnitState.ACTIVATING)
         if active == "failed":
             return UnitStatus(UnitState.FAILED,
                               _exit_code(props.get("ExecMainStatus")))

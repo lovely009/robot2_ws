@@ -1,6 +1,6 @@
 # 单台设备的拓扑身份与状态。
 uint16 motor_id
-uint8 bus_index           # 0..2（FDCAN1/2/3）
+uint8 bus_index           # 0..2 为片内 FDCAN1..3，3 为 SPI3 扩展 CAN4
 # 协议族（与 firmware adapter 注册顺序对齐）
 uint8 PROTOCOL_VAXOR=0
 uint8 PROTOCOL_CERB=1

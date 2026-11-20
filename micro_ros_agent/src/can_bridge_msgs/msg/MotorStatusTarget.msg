@@ -40,6 +40,6 @@ uint8 LIFECYCLE_FAULT=6
 uint8 LIFECYCLE_CONFIG_CONFLICT=7
 uint8 LIFECYCLE_OFFLINE=8
 uint8 lifecycle
-# 物理 FDCAN 总线索引（0..2 = FDCAN1..3）；来自固件发现帧所在总线。
+# 物理总线索引，0..2 为片内 FDCAN1..3，3 为 SPI3 扩展 CAN4。
 # 附加在末尾以保留现有字段顺序。
 uint8 bus_index

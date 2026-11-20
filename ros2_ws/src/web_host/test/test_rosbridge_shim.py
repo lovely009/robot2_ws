@@ -2,6 +2,68 @@
 import pytest
 
 
+def test_disconnect_during_wait_keeps_ros_callbacks_running(monkeypatch):
+    from rclpy.context import Context
+    from rclpy.exceptions import InvalidHandle
+    from web_host.rosbridge_shim import _RosbridgeExecutor
+
+    context = Context()
+    context.init()
+    executor = _RosbridgeExecutor(context=context)
+    try:
+        wait = executor._wait_for_ready_callbacks
+        disconnected = False
+
+        def disconnect(*args, **kwargs):
+            nonlocal disconnected
+            if not disconnected:
+                disconnected = True
+                raise InvalidHandle('subscription destroyed during wait set construction')
+            yield from wait(*args, **kwargs)
+
+        monkeypatch.setattr(executor, '_wait_for_ready_callbacks', disconnect)
+        future = executor.create_task(lambda: 'next callback')
+        executor.spin_once(timeout_sec=0)
+        executor.spin_once(timeout_sec=0)
+        assert future.result() == 'next callback'
+    finally:
+        executor.shutdown()
+        context.shutdown()
+
+
+def test_disconnect_after_wait_releases_event_and_callback_group():
+    from rclpy.context import Context
+    from rclpy.exceptions import InvalidHandle
+    from rclpy.node import Node
+    from web_host.rosbridge_shim import _RosbridgeExecutor
+
+    context = Context()
+    context.init()
+    executor = _RosbridgeExecutor(context=context)
+    node = Node('test_rosbridge_disconnect', context=context)
+    guard = node.create_guard_condition(lambda: None)
+    executed = []
+
+    def take_destroyed(_):
+        raise InvalidHandle('event destroyed before take_data')
+
+    async def execute(_, value):
+        executed.append(value)
+
+    try:
+        for take in (take_destroyed, lambda _: 'next callback'):
+            task = executor._make_handler(guard, node, take, execute)
+            task()
+            task.result()
+            assert not guard._executor_event
+            assert guard.callback_group.can_execute(guard)
+        assert executed == ['next callback']
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        context.shutdown()
+
+
 def test_standard_trajectory_action_services_and_nested_payload_resolve():
     pytest.importorskip('rosbridge_library')
     from control_msgs.action import FollowJointTrajectory

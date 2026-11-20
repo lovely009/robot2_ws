@@ -265,6 +265,8 @@ function sub(key, cb) {
   const topic = new ROSLIB.Topic({
     // 浏览器只保留最新观测；事件逐条传递，控制授权独立订阅。
     ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : key === 'controlStates' ? 20 : 50, queue_length: key === 'events' ? 64 : 1,
+    // 整机周期快照使用 rosbridge 原生 CBOR，缩短板端序列化时间。
+    compression: ['agentWireStatus', 'controlStates', 'motion'].includes(key) ? 'cbor' : 'none',
   });
   topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);

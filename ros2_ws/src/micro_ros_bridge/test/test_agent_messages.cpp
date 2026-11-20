@@ -488,6 +488,40 @@ TEST(AgentStatus, RejectsDuplicateTargetsAndLeavesOutputsUntouched)
   EXPECT_EQ(system.last_error, 9u);
 }
 
+TEST(AgentMessages, RoutesCan4AlongsideNativeCanAndRejectsFifthBus)
+{
+  AgentStatus in = valid_status();
+  in.motors = {motor_status(1), motor_status(2)};
+  AgentInfo info;
+  info.schema_version = in.schema_version;
+  info.session_id = in.session_id;
+  info.kind = AgentInfo::DEVICE_PAGE;
+  info.result = AgentInfo::OK;
+  info.motor_capacity = 48;
+  info.next_cursor = 2;
+  info.complete = true;
+  info.devices = {device_info(1), device_info(2)};
+  for (uint8_t bus : {3, 4}) {
+    in.motors.back().bus_index = info.devices.back().bus_index = bus;
+    MotorStatusArray statuses;
+    MotorControlStateArray controls;
+    MotorTrajectoryState trajectory;
+    SystemStatus system;
+    MotorDiagnostics diagnostics;
+    MotorTopology topology;
+    DeviceParamReport report;
+    EXPECT_EQ(micro_ros_bridge::decode_agent_status(
+      in, statuses, controls, trajectory, system, diagnostics).ok, bus == 3);
+    EXPECT_EQ(micro_ros_bridge::append_agent_info(info, topology, report).ok, bus == 3);
+    if (bus == 3) {
+      ASSERT_EQ(statuses.statuses.size(), 2U);
+      ASSERT_EQ(topology.entries.size(), 2U);
+      EXPECT_EQ(statuses.statuses.back().bus_index, 3);
+      EXPECT_EQ(topology.entries.back().bus_index, 3);
+    }
+  }
+}
+
 TEST(AgentInfo, AppendsId64DeviceWithMatchingParameterId)
 {
   AgentInfo info;

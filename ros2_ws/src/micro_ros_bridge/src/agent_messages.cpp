@@ -32,6 +32,7 @@ constexpr uint16_t kAgentSchema = can_bridge_msgs::msg::AgentWireContract::SCHEM
 constexpr uint16_t kLegacySchema = can_bridge_msgs::msg::WireContract::SCHEMA_VERSION;
 constexpr size_t kMotorIdMax = can_bridge_msgs::msg::AgentWireContract::MOTOR_ID_MAX;
 constexpr size_t kAgentMotorMax = can_bridge_msgs::msg::AgentWireContract::MOTOR_COUNT_MAX;
+constexpr size_t kCanBusCount = can_bridge_msgs::msg::AgentWireContract::CAN_BUS_COUNT_MAX;
 constexpr size_t kMotionChunkMax = can_bridge_msgs::msg::AgentWireContract::MOTION_CHUNK_MAX;
 constexpr size_t kInfoPageMax = can_bridge_msgs::msg::AgentWireContract::INFO_PAGE_MAX;
 constexpr size_t kConfigResultMax = can_bridge_msgs::msg::AgentWireContract::CONFIG_RESULTS_MAX;
@@ -334,7 +335,7 @@ Result decode_agent_status(
   for (const auto & motor : in.motors) {
     if (!valid_motor_id(motor.motor_id) || seen_ids[motor.motor_id] ||
       !valid_agent_lifecycle(motor.lifecycle) ||
-      motor.execution_state > Control::EXECUTION_DISABLING || motor.bus_index > 2 ||
+      motor.execution_state > Control::EXECUTION_DISABLING || motor.bus_index >= kCanBusCount ||
       (motor.status_flags & ~0x1fu) != 0 ||
       static_cast<bool>(motor.status_flags & 0x01u) != motor.online ||
       ((motor.status_flags & 0x04u) && !(motor.status_flags & 0x02u)) ||
@@ -510,7 +511,7 @@ Result append_agent_info(
   for (const auto & device : in.devices) {
     if (!valid_motor_id(device.motor_id) || page_seen[device.motor_id] ||
       existing[device.motor_id] || device.parameters.motor_id != device.motor_id ||
-      device.bus_index > 2 || device.protocol > TopologyEntry::PROTOCOL_CERB ||
+      device.bus_index >= kCanBusCount || device.protocol > TopologyEntry::PROTOCOL_CERB ||
       device.model_name.size() > 31) {
       return reject(result, "info 页内/跨页 motor_id 重复或字段非法");
     }

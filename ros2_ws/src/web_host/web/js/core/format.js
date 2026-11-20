@@ -93,6 +93,7 @@ export function lifecyclePill(lc, view = null) {
 }
 
 export function busLabel(index) {
+  if (index === 3) return 'CAN4 (MCP2518FD)';
   return Number.isInteger(index) && index >= 0 && index < 3
     ? `FDCAN${index + 1}` : 'CAN --';
 }

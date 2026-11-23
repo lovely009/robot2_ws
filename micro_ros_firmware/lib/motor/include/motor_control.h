@@ -24,7 +24,7 @@ extern "C" {
 // 静态容量由固件配置统一约束；满表拒绝并计数/出事件，不静默截断。
 // ---------------------------------------------------------------------------
 #define MOTOR_CONTROL_MAX_MOTORS FIRMWARE_MAX_MOTORS
-#define MOTOR_CONTROL_MAX_BUSES 3U
+#define MOTOR_CONTROL_MAX_BUSES FIRMWARE_CAN_BUS_COUNT
 #define MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS FIRMWARE_MAX_MOTORS
 #define MOTOR_CONTROL_MAX_TX_PENDING 160U
 // 事件环为并发发现预留余量；身份绑定由 config_step 限速为每毫秒一台。

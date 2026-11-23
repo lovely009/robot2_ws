@@ -11,6 +11,7 @@
 #include "agent_control_gate.h"
 #include "trajectory_transaction.hpp"
 #include "time_utils.h"
+#include "can4_spi.h"
 #include "can_bsp.h"
 #include "fdcan.h"
 #include "motor_config_contract.hpp"
@@ -68,6 +69,17 @@ static bool g_clock_requested = false;
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
 static TaskHandle_t g_task_handle = nullptr;
 static bool g_task_started = false;
+
+// motor_rt 的任务通知槽由 CAN4 RX 独占。EOT 或硬件超时在 IRQ 中给一次通知。
+void can4_spi_wait_dma(void) {
+  (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+}
+
+void can4_spi_wake_from_isr(void) {
+  BaseType_t woken = pdFALSE;
+  vTaskNotifyGiveFromISR(g_task_handle, &woken);
+  portYIELD_FROM_ISR(woken);
+}
 
 static motor_tx_router_t g_tx_router;
 
@@ -373,7 +385,7 @@ size_t motor_rt_copy_topology(motor_rt_topology_entry_t *out, size_t capacity) {
 // 任务主体
 // ---------------------------------------------------------------------------
 
-// 1ms 服务之一：三路 RX ring 有界弹出 → 内核原始帧输入。
+// 1ms 服务之一：每路 RX ring 有界弹出 → 内核原始帧输入。
 // can_rx_frame_t 与 motor_protocol_raw_frame_t 字段一一对应（fdcan 层与
 // 协议层各自独立定义，任务层显式拷贝，不假设布局一致）。
 static void drain_rx_rings(void) {
@@ -416,7 +428,7 @@ static void sustain_discovery_sync(uint32_t now_ms) {
   }
   last_sync_ms = now_ms;
   for (uint8_t bus = 0U; bus < CAN_TX_BUS_COUNT; ++bus) {
-    (void)motor_control_probe_discovery(g_motor_control, bus);
+    if (can_bsp_bus_ready(bus)) (void)motor_control_probe_discovery(g_motor_control, bus);
   }
 }
 
@@ -607,10 +619,10 @@ static void motor_rt_task_fn(void *pv_parameters) {
   for (;;) {
     watchdog_feed(); // 活性监督：本循环停摆 ≥ 超时即复位
     vTaskDelayUntil(&last_wake, kServicePeriodTicks);
-    const uint32_t now_ms = millis();
-
     // 1ms 服务：有界 RX → 内核运行时服务 → SYNC → 待发帧路由。
+    can_bsp_poll_can4(millis());
     drain_rx_rings();
+    const uint32_t now_ms = millis(); // 以完成 RX 后的实际时间判断授权到期
     const bool clock_valid = time_clock_valid();
     taskENTER_CRITICAL();
     const uint8_t safety_action = agent_gate_service(&g_agent_gate,

@@ -24,6 +24,18 @@ def test_explicit_nodes_and_remainder_are_partitioned():
     assert [r['node_ids'] for r in routes] == [[1, 2], [3, 4]]
 
 
+def test_can4_can_be_used_with_all_native_routes():
+    rows = [
+        {'bus': i, 'transport': 'socketcan', 'endpoint': f'can{i}', 'ids': str(i + 1)}
+        for i in range(4)
+    ]
+    assign = load_routes().assign_nodes
+    assert [r['node_ids'] for r in assign(rows, [1, 2, 3, 4])] == [[1], [2], [3], [4]]
+    rows[-1]['bus'] = 4
+    with pytest.raises(ValueError, match='MCU bus'):
+        assign(rows, [1, 2, 3, 4])
+
+
 @pytest.mark.parametrize('ids,expected', [('1-3', [1, 2, 3]), ('', [])])
 def test_explicit_subset_leaves_other_model_nodes_unloaded(ids, expected):
     routes = load_routes().assign_nodes([

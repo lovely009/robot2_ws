@@ -137,6 +137,9 @@ function(fw_host_test name)
 endfunction()
 
 add_library(fw_info_page OBJECT ../../src/micro_ros/info_page.cpp)
+fw_host_test(test_mcp2518fd
+  SOURCES test_mcp2518fd.c ../../lib/board/src/mcp2518fd.c
+  OBLIBS fw_can_rx_ring)
 target_include_directories(fw_info_page PUBLIC ../../include/micro_ros)
 target_link_libraries(fw_info_page PUBLIC fw_motor_control fw_config_transaction)
 fw_host_test(test_info_page SOURCES test_info_page.cpp OBLIBS fw_info_page)

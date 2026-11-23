@@ -21,9 +21,10 @@ struct Bench {
   motor_tx_router_t router{};
   std::array<can_tx_scheduler_t, CAN_TX_BUS_COUNT> schedulers{};
   std::array<Axis, axes> devices;
+  const unsigned bus_count;
   unsigned tick = 100;
   const motor_protocol_adapter_t *adapters[1] = {&motor_protocol_cerb_adapter};
-  Bench() {
+  explicit Bench(unsigned buses = 3) : bus_count(buses) {
     motor_control_init(&kernel, adapters, 1);
     motor_tx_router_init(&router);
     for (auto &scheduler : schedulers) can_tx_scheduler_init(&scheduler);
@@ -34,7 +35,7 @@ struct Bench {
       auto &entry = kernel.entries[i];
       entry.used = entry.online = entry.has_measured = true;
       entry.motor_id = entry.node = i + 1;
-      entry.bus_index = i % CAN_TX_BUS_COUNT;
+      entry.bus_index = i % bus_count;
       entry.adapter = &motor_protocol_cerb_adapter;
       for (size_t p = 0; p < motor_control_profile_count(); ++p) {
         auto profile = motor_control_profile_at(p);
@@ -56,7 +57,7 @@ struct Bench {
       device.position += std::fmax(-.02, std::fmin(.02, device.target - device.position));
       const auto code = static_cast<int16_t>(std::lround(device.position * 180. / MOTOR_PROTOCOL_PI * 182.));
       motor_protocol_raw_frame_t frame{};
-      frame.bus_index = i % CAN_TX_BUS_COUNT;
+      frame.bus_index = i % bus_count;
       frame.can_id = MOTOR_PROTOCOL_CERB_FEEDBACK_ID_BASE + i + 1;
       frame.is_fd = true;
       frame.dlc = 12;
@@ -80,7 +81,7 @@ struct Bench {
   }
   void receive(uint8_t bus, unsigned node, const uint8_t *data) {
     assert(node >= 1 && node <= axes);
-    assert((node - 1) % CAN_TX_BUS_COUNT == bus);
+    assert((node - 1) % bus_count == bus);
     assert(data[0] == 0xCC);  // An enabled MIT output, not an inferred send count.
     auto &device = devices[node - 1];
     device.commands.push_back(tick);
@@ -123,8 +124,8 @@ struct Bench {
   }
 };
 
-void test_fair_50_50_200() {
-  Bench bench;
+void test_fair_50_50_200(unsigned buses) {
+  Bench bench(buses);
   for (bench.tick = 100; bench.tick < 1100; ++bench.tick) {
     if (bench.tick % 20 == 0) bench.feedback(); // 50 Hz feedback, real decoder.
     motor_control_service(&bench.kernel, bench.tick);
@@ -142,7 +143,7 @@ void test_fair_50_50_200() {
     assert(std::fabs(device.position - (.1 + i * .001)) < .002);
     assert(bench.kernel.entries[i].has_measured);
   }
-  std::puts("37 fictional axes / 3 buses: every axis 200 outputs, every interval 5 ms; feedback decoded");
+  std::printf("37 fictional axes / %u buses: 200 outputs per axis at 5 ms, feedback decoded\n", buses);
 }
 
 void test_deadline_is_not_renewed_by_hold() {
@@ -206,7 +207,8 @@ void test_receive_and_control_phase_margin() {
 } // namespace
 
 int main() {
-  test_fair_50_50_200();
+  test_fair_50_50_200(3);
+  test_fair_50_50_200(4);
   test_deadline_is_not_renewed_by_hold();
   test_receive_and_control_phase_margin();
 }

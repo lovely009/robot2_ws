@@ -35,4 +35,22 @@ ctest --test-dir .host-build -R '^test_reliable_publish$' --output-on-failure
 
 宿主测试覆盖独立逻辑模块。HAL、FreeRTOS、rclc 和实际总线时序在目标板上验证。
 
+### SPI 扩展 CAN4
+
+DM-MC-Board02 扩展板 H1 接 SPI-CANFD V1.01（MCP2518FD，40 MHz 晶振）。H1 的 1、3、5、7、9 脚分别接 PB9/nCS、PC11/MISO、PC12/MOSI、PC10/SCK、PE14/INT，8 脚接地，10 脚供 5 V。
+
+模块的 CAN 信号从绿色端子 G/H/L 引出。对端可直接接这三个端子。走扩展板 P2 时，先确认模块 G/H/L 分别与扩展板 U1 的 1/2/3 脚相通，U1 再通往 P2 的同号脚。点对点台架两端各接 120 Ω，模块端短接 P3 即接入板载终端；两端均断电、线束保持连接时，跨 H/L 应量得约 60 Ω。
+
+H1-10 由主板对外电源 `VCC_5V` 供电。主板电源输入规格为 12–24 V，固件启动时拉高 PC15 使能对外 5 V。仅接 USB 时主控仍可枚举；验收前需在模块已插入时量 H1-10 对 H1-8，确认约 5 V。若在主控启动后才补上主电源，复位主控可重新探测 CAN4。
+
+CAN4 使用 SPI3 模式 0、15 MHz，CAN FD 仲裁 1 Mbps、数据 5 Mbps。启动时先确认内部回环收发和 INT，再切换正常模式。探测失败时仍启动三路片内 FDCAN。固件通过 USB 的 Status 和 Info 上报 CAN4 设备时使用 `bus_index=3`，工作台显示 `CAN4 (MCP2518FD)`。schema 4 的原有三组逐路诊断保留 CAN1..3。
+
+SWD 可在主控运行时读取 ELF 中的 `g_can4_diag`。阶段 `ONLINE` 表示回环通过并已进入正常模式。`tx_submitted` 统计进入硬件 FIFO 的帧，`rx_frames` 和 `last_rx_id` 记录正常模式收到的标准数据帧。
+
+SPI 事务达到 32 字节时使用 DMA1 Stream0（RX）和 Stream1（TX），缓冲位于 D2 非缓存 SRAM。短寄存器事务使用轮询。长读期间电机任务可让出 CPU，长写期间保留调度优先级直至提交。TIM23 为 SPI 传输结束（EOT）和两路 DMA 完成设置同一个 100 µs 截止时间。若完成和到期同时挂起，按超时处理。启动的 64 字节 FD+BRS 内部回环覆盖长写、长读和有效载荷。SWD 符号 `g_can4_dma_diag` 记录成功长读、长写、超时次数和期限内进入 EOT 处理时的最大微秒数。
+
+2026-11-20 台架对照中，电机失能，`can0` 每 1 ms 发送一帧 64 字节 FD+BRS。轮询版和 DMA 版各跑两轮，每轮通过 SWD 采样 10,000 次程序计数器和当前任务。程序计数器落在 CAN4 SPI 传输、完成中断及任务通知封装内的占比从 2.05% 降到 0.82%，电机任务占比从 7.53% 降到 5.33%，空闲任务占比从 91.29% 升到 93.45%。最终 DMA 固件两轮共发 18,607 帧，板端收到 18,607 帧，SPI、CRC、RX 溢出及 DMA 超时计数均为零。
+
+点对点验收时只连接 CAN4 和 SocketCAN 适配器。用 `can0` 接收主控每 20 ms 发出的标准 ID `0x080`（FD+BRS，0 字节）。反向可从 `can0` 分别发送 8 帧经典 CAN（ID `0x455`，8 字节）和 8 帧 FD+BRS（ID `0x456`，64 字节）。每批应使 CAN4 的 `rx_frames` 增加 8，`last_rx_id` 对应本批 ID，SPI、CRC 错误与 RX 溢出计数均不增加。USB Status 的原始接收总数也应增加 16。
+
 台架项目包括 RX burst 下的执行时间与抖动、命令断流、Agent 重连、授权恢复、VAXOR/CERB 混挂、CERB SYNC、CAN 无 ACK 和 BMI088 异常。烧录、驱动电机及持久化写入按现场授权执行。

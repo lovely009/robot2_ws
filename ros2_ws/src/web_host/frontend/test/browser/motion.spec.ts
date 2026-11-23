@@ -376,3 +376,58 @@ test('明确选择几何预览后，零限位 CAD 实体也能播放', async ({p
   await page.getByLabel('动作播放进度', {exact:true}).fill('1.2');
   expect(before.equals(await canvas.screenshot())).toBe(false);
 });
+
+test('实时跟随在流结束前更新姿态，停止和离开页面都会取消接收', async ({page}) => {
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    const probe = { stops: 0, send: (_value: object) => {} };
+    Object.assign(window, { liveProbe: probe });
+    window.fetch = async (input, init) => {
+      if (!String(input).endsWith('/api/motion/live/vdmocap')) return originalFetch(input, init);
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          probe.send = value => {
+            const bytes = encoder.encode(JSON.stringify(value) + '\n');
+            stream.enqueue(bytes.slice(0, 9)); stream.enqueue(bytes.slice(9));
+          };
+          probe.send({type:'state', state:'waiting'});
+          probe.send({type:'scene', source_to_robot:[[1,0,0],[0,1,0],[0,0,1]],
+            source:{names:['Hips','Head'],parents:[-1,0]},
+            robot:{names:['base','wrist'],parents:[-1,0],joint_names:[],urdf:''}});
+          init?.signal?.addEventListener('abort', () => { probe.stops++; stream.close(); }, {once:true});
+        },
+      });
+      return new Response(body, {headers:{'Content-Type':'application/x-ndjson'}});
+    };
+  });
+  await page.goto('/workbench/#/motion');
+  await page.getByRole('button',{name:'实时跟随',exact:true}).click();
+  await expect(page.getByText('等待 DreamsCapStudio 播放')).toBeVisible();
+  const send = (message: object) => page.evaluate(m => {
+    (window as unknown as {liveProbe:{send(m:object):void}}).liveProbe.send(m);
+  }, message);
+  const frame = {type:'frame', index:9, frequency:60, source:[[0,0,1],[0,0,1.8]],
+    robot:[[0,0,0],[0,.4,.5]], joint_positions:[],root_quaternion:[0,0,0,1]};
+  await send(frame);
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 9');
+  await expect(page.getByLabel('实时人体与机器人三维预览')).toBeVisible();
+  await send({type:'state',state:'disconnected'});
+  await expect(page.getByText('广播中断，等待恢复')).toBeVisible();
+  await send({...frame,index:10,robot:[[0,0,0],[0,.7,.6]]});
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 10');
+  await page.evaluate(frame => {
+    const probe = (window as unknown as {liveProbe:{send(m:object):void}}).liveProbe;
+    probe.send({...frame, index:11});
+    probe.send({type:'error', message:'测试流已关闭'});
+  }, frame);
+  await expect(page.getByText('测试流已关闭')).toBeVisible();
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 11');
+  await page.getByRole('button',{name:'停止实时跟随'}).click();
+  await expect(page.getByLabel('目标机器人模型')).toBeEnabled();
+  await page.getByRole('button',{name:'实时跟随',exact:true}).click();
+  await expect(page.getByText('等待 DreamsCapStudio 播放')).toBeVisible();
+  await page.getByRole('button',{name:'调试工作台',exact:true}).click();
+  expect(await page.evaluate(() => (window as unknown as {liveProbe:{stops:number}}).liveProbe.stops)).toBe(2);
+});

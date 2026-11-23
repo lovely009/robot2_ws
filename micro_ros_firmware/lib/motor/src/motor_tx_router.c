@@ -70,11 +70,11 @@ static size_t load_scheduler_p1_lookahead(
 static uint32_t select_p1_logical_limit(
     motor_tx_router_t *router, const can_tx_scheduler_t *scheduler,
     uint8_t bus_index, uint32_t logical_capacity,
-    uint32_t p0_logical_count) {
+    uint32_t p0_logical_count, uint32_t physical_budget) {
   const uint32_t p2_reserve =
       min_u32(scheduler->p2.count, CAN_TX_P2_PUMP_QUOTA);
   const uint32_t physical_p1_limit = subtract_floor_u32(
-      subtract_floor_u32(MOTOR_TX_ROUTER_PHYSICAL_BUDGET, p0_logical_count),
+      subtract_floor_u32(physical_budget, p0_logical_count),
       p2_reserve);
   const uint32_t logical_p1_limit = subtract_floor_u32(
       subtract_floor_u32(logical_capacity, p0_logical_count), p2_reserve);
@@ -139,13 +139,16 @@ motor_tx_router_stats_t motor_tx_router_pump(
   }
 
   const bool p0_pending = scheduler->p0.count != 0U;
+  // SPI 外设每帧需要同步读写消息 RAM；未出队的帧留给后续服务周期。
+  const uint32_t physical_budget =
+      bus_index == FIRMWARE_CAN4_INDEX ? 4U : MOTOR_TX_ROUTER_PHYSICAL_BUDGET;
   const uint32_t p0_logical_count =
-      min_u32(scheduler->p0.count, MOTOR_TX_ROUTER_PHYSICAL_BUDGET);
+      min_u32(scheduler->p0.count, physical_budget);
   const uint32_t logical_capacity =
       p0_pending ? p0_logical_count
                  : MOTOR_TX_ROUTER_LOGICAL_CAPACITY;
   const uint32_t p1_limit = select_p1_logical_limit(
-      router, scheduler, bus_index, logical_capacity, p0_logical_count);
+      router, scheduler, bus_index, logical_capacity, p0_logical_count, physical_budget);
 
   uint32_t p0_count = 0U;
   uint32_t p1_count = 0U;

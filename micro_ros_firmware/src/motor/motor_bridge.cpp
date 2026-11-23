@@ -35,7 +35,14 @@ static constexpr uint32_t kMotionIntervalMs = FIRMWARE_MOTOR_REPORT_PERIOD_MS;
 static_assert(kMotorCapacity == MOTOR_CONTROL_MAX_MOTORS, "V3 电机容量不一致");
 static_assert(kChunkCapacity == 32U && kMotorCapacity <= 2U * kChunkCapacity, "motion 每代最多两组");
 static_assert(kTrajectoryPointCapacity == AGENT_TRAJECTORY_SEGMENT_POINTS, "轨迹接收容量不一致");
-static_assert(MOTOR_CONTROL_MAX_BUSES <= 3U, "诊断总线数组容量不足");
+static_assert(MOTOR_CONTROL_MAX_BUSES == can_bridge_msgs__msg__AgentWireContract__CAN_BUS_COUNT_MAX,
+    "重新生成含 CAN4 总线常量的 micro-ROS 头文件");
+// schema 4 的逐路统计最多三项。CAN4 仍通过 Status/Info 的 bus_index 发布。
+static constexpr size_t kDiagnosticBusCount = can_bridge_msgs__msg__MotorDiagnostics__ring_drop__MAX_SIZE;
+static_assert(kDiagnosticBusCount <= MOTOR_CONTROL_MAX_BUSES &&
+    kDiagnosticBusCount == can_bridge_msgs__msg__MotorDiagnostics__rx_hw_lost__MAX_SIZE &&
+    kDiagnosticBusCount == can_bridge_msgs__msg__MotorDiagnostics__tx_frame_count__MAX_SIZE,
+    "逐路诊断序列长度不一致");
 
 static uint64_t g_session_id = 0U, g_last_session_id = 0U;
 static uint32_t g_publish_fail = 0U;
@@ -70,7 +77,7 @@ static can_bridge_msgs__msg__AgentStatus g_status_msg;
 static can_bridge_msgs__msg__AgentMotorStatus g_status_motors[kMotorCapacity];
 static can_bridge_msgs__msg__AgentConfigResult g_status_results[kResultCapacity];
 static uint16_t g_status_trajectory_ids[kMotorCapacity];
-static uint32_t g_ring_drop[MOTOR_CONTROL_MAX_BUSES], g_rx_lost[MOTOR_CONTROL_MAX_BUSES], g_tx_count[MOTOR_CONTROL_MAX_BUSES];
+static uint32_t g_ring_drop[kDiagnosticBusCount], g_rx_lost[kDiagnosticBusCount], g_tx_count[kDiagnosticBusCount];
 static motor_control_status_t g_status_snapshot[kMotorCapacity];
 
 // 验证实际静态接收区，而不只检查声明 count；空载荷也检查形状。
@@ -398,8 +405,8 @@ static void fill_status(void) {
   d.mailbox_rejected_policy = diagnostics.mailbox_rejected_policy;
   d.heap_free = diagnostics.heap_free;
   d.publish_fail = g_publish_fail + imu_bridge_publish_fail_count();
-  d.ring_drop.size = d.rx_hw_lost.size = d.tx_frame_count.size = MOTOR_CONTROL_MAX_BUSES;
-  for (size_t i = 0U; i < MOTOR_CONTROL_MAX_BUSES; ++i) {
+  d.ring_drop.size = d.rx_hw_lost.size = d.tx_frame_count.size = kDiagnosticBusCount;
+  for (size_t i = 0U; i < kDiagnosticBusCount; ++i) {
     g_ring_drop[i] = diagnostics.ring_drop[i];
     g_rx_lost[i] = diagnostics.rx_hw_lost[i];
     g_tx_count[i] = diagnostics.tx_frame_count[i];

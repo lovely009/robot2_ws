@@ -19,6 +19,9 @@ from .models import (enumerate_arm_models, model_transmissions,
 from .motion import MotionJobs, handle_motion
 from .motion_catalog import handle_motion_catalog
 from .motion_playback import handle_motion_playback
+from .vdmocap_import import IMPORT_PATH, ImportConflict, import_capture
+from .vdmocap_live import LIVE_PATH, LiveStream, serve_live
+from .vdmocap_record import DEFAULT_SDK_DIR
 
 
 # 动作库导入：单个 JSON 载荷可达数百 KB（motion.json 2868 点）
@@ -112,6 +115,11 @@ def main(args=None):
     motion_jobs = MotionJobs(actions_dir=bvh_directory(web_root),
                             profiles_dir=motion_data / 'motion_mappings', models_root=models_dir,
                             cache_dir=motion_data / 'motion_results')
+    node.declare_parameter('vdmocap_sdk_dir', str(DEFAULT_SDK_DIR))
+    node.declare_parameter('vdmocap_ip', '192.168.1.9')
+    node.declare_parameter('vdmocap_port', 7000)
+    live = LiveStream(Path(node.get_parameter('vdmocap_sdk_dir').value),
+                      node.get_parameter('vdmocap_ip').value, node.get_parameter('vdmocap_port').value)
 
     class Handler(SimpleHTTPRequestHandler):
 
@@ -237,11 +245,10 @@ def main(args=None):
             super().do_GET()
 
         def do_POST(self):
-            if handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs):
-                return
             path = urlsplit(self.path).path
-            if path != '/api/actions':
-                self._send_json(404, {'error': 'unknown API endpoint'})
+            if path not in ('/api/actions', IMPORT_PATH, LIVE_PATH):
+                if not (handle_motion_catalog(self, motion_jobs) or handle_motion(self, motion_jobs)):
+                    self._send_json(404, {'error': 'unknown API endpoint'})
                 return
             # 所有写接口共用门禁：跨源网页不能通过 text/plain 简单 POST 绕过
             # 浏览器预检，悄悄覆盖动作库。无 Origin 的 JSON 命令行客户端仍可使用。
@@ -259,13 +266,35 @@ def main(args=None):
             except ValueError:
                 self._send_json(400, {'error': 'invalid Content-Length'})
                 return
-            if content_length < 0 or content_length > _MAX_UPLOAD_BYTES:
+            max_bytes = 24 * 1024 * 1024 if path == IMPORT_PATH else _MAX_UPLOAD_BYTES
+            if path == LIVE_PATH:
+                max_bytes = 4096
+            if content_length < 0 or content_length > max_bytes:
                 self._send_json(413, {'error': 'request body too large'})
                 return
             try:
                 request = json.loads(self.rfile.read(content_length))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self._send_json(400, {'error': 'invalid JSON request'})
+                return
+
+            if path == LIVE_PATH:
+                serve_live(self, live, motion_jobs, request)
+                return
+
+            if path == IMPORT_PATH:
+                try:
+                    entry = import_capture(motion_jobs, request)
+                except (FileExistsError, ImportConflict) as exc:
+                    self._send_json(409, {'error': str(exc)})
+                except (ValueError, TypeError) as exc:
+                    self._send_json(400, {'error': str(exc)})
+                except ImportError:
+                    self._send_json(503, {'error': '动捕解算组件未就绪，请加载 ROS 工作区环境'})
+                except OSError as exc:
+                    self._send_json(500, {'error': str(exc)})
+                else:
+                    self._send_json(200, entry)
                 return
 
             if path == '/api/actions':
@@ -304,6 +333,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        live.close()
         motion_jobs.close()
         server.server_close()
         node.destroy_node()

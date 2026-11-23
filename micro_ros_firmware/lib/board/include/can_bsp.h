@@ -18,11 +18,13 @@
 extern "C" {
 #endif
 
-// 初始化 RX ring/TX 调度器、过滤器、启动三路硬件并激活中断
+// 初始化 RX ring/TX 调度器、探测 SPI 扩展，启动三路 FDCAN 并激活中断
 // （RXFIFO0 新帧/满/丢失 + 错误状态）。single-init 约定：仅在上电初始化路径
 // 调用一次，无重入保护，不在重连时重建。
 void bsp_can_init(void);
 void can_filter_init(void);
+bool can_bsp_bus_ready(uint8_t bus_index);
+void can_bsp_poll_can4(uint32_t now_ms);
 
 // 总线 RX ring 访问（任务侧批量弹出；ISR 在内部写入）。
 can_rx_ring_t *can_bsp_rx_ring(uint8_t bus_index);
@@ -35,7 +37,7 @@ can_tx_scheduler_t *can_bsp_tx_scheduler(uint8_t bus_index);
 bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame);
 
 
-// 每总线硬件 RX FIFO0 丢帧计数；FIFO 深度为 8，丢失不可恢复。
+// 每总线硬件 RX FIFO 溢出事件计数。
 uint32_t can_bsp_rx_hw_lost(uint8_t bus_index);
 
 // 每总线成功提交到硬件 TX FIFO 的帧数。

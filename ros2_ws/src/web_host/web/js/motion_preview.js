@@ -30,7 +30,7 @@ function footBranches({ names, parents }) {
   };
 }
 
-export function createMotionPreview(canvas, data, { onModelStatus = () => {} } = {}) {
+export function createMotionPreview(canvas, data, { onModelStatus = () => {}, live = false } = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const scene = new THREE.Scene();
@@ -91,7 +91,7 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
   const airborneHeight = index => Math.max(0, sourceFootHeights[index] - sourceFloor) * heightScale;
   const supportHeights = [];
   let footLinks = [];
-  const soleHeight = () => Math.min(...footLinks.map(link => new THREE.Box3().setFromObject(link, true).min.z));
+  const soleHeight = () => Math.min(...footLinks.map(link => new THREE.Box3().setFromObject(link, !live).min.z));
   let frame = 0;
   let model = null, placement = null, disposed = false, grounded = false;
   function show(index) {
@@ -214,10 +214,25 @@ export function createMotionPreview(canvas, data, { onModelStatus = () => {} } =
     camera.updateProjectionMatrix();
   });
   resize.observe(canvas);
-  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+  const render = () => { controls.update(); renderer.render(scene, camera); };
+  renderer.setAnimationLoop(render);
   show(0);
   return {
     show,
+    setActive(active) { renderer.setAnimationLoop(active ? render : null); },
+    updateLiveFrame(pose) {
+      // Slot zero remains the floor/mesh reference. Slot one always holds the newest pose.
+      data.times[1] = 1;
+      data.source.frames[1] = pose.source;
+      data.robot.frames[1] = pose.robot;
+      data.robot.joint_positions[1] = pose.joint_positions;
+      data.robot.root_quaternions[1] = pose.root_quaternion;
+      if (supportHeight) {
+        sourceFootHeights[1] = Math.min(...sourceFeet.indices.map(id => pose.source[id][2]));
+        supportHeights[1] = undefined;
+      }
+      show(1);
+    },
     dispose() {
       disposed = true;
       renderer.setAnimationLoop(null);

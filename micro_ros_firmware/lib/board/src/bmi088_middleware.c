@@ -1,5 +1,5 @@
 // BMI088 通信层：SPI2 阻塞收发，板级资源由 imu_spi2_transport.c 初始化。
-// GPIO 上电/片选由本层管理，EXTI 由 sensor_task.cpp 管理；毫秒延时使用
+// GPIO 片选由本层管理，EXTI 由 sensor_task.cpp 管理；毫秒延时使用
 // FreeRTOS，微秒延时使用 delayMicroseconds。
 
 #include "bmi088_middleware.h"
@@ -8,8 +8,6 @@
 #include "stm32h7xx_hal.h"
 #include "imu_spi2_transport.h"
 
-#define POWER_5V_PORT GPIOC
-#define POWER_5V_PIN GPIO_PIN_15
 #define ACC_CS_PORT GPIOC
 #define ACC_CS_PIN GPIO_PIN_0
 #define GYRO_CS_PORT GPIOC
@@ -19,21 +17,16 @@ static SPI_HandleTypeDef hspi_bmi088;
 static const uint32_t kBmi088SpiTransferTimeoutMs = 2U;
 
 void BMI088_GPIO_init(void) {
-  // PC15=POWER_5V：传感器供电使能（官方默认置高）
   __HAL_RCC_GPIOC_CLK_ENABLE();
   GPIO_InitTypeDef gpio = {0};
-  gpio.Pin = POWER_5V_PIN;
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
   gpio.Pull = GPIO_NOPULL;
-  gpio.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(POWER_5V_PORT, &gpio);
 
   // PC0=ACC_CS, PC3=GYRO_CS：硬件片选，默认拉到高电平（未选通）
   gpio.Pin = ACC_CS_PIN | GYRO_CS_PIN;
   gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(ACC_CS_PORT, &gpio);
-  HAL_GPIO_WritePin(GPIOC, POWER_5V_PIN | ACC_CS_PIN | GYRO_CS_PIN,
-      GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, ACC_CS_PIN | GYRO_CS_PIN, GPIO_PIN_SET);
 
   // PA0：官方例程固定输出的保留引脚，置低
   __HAL_RCC_GPIOA_CLK_ENABLE();

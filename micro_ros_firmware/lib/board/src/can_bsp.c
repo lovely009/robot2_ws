@@ -2,13 +2,16 @@
 // motor_rt_task 是 RX ring 唯一消费者；ISR 不解码、不建立运行时状态。
 
 #include "can_bsp.h"
+#include "mcp2518fd.h"
 #include "stm32_def.h" // Error_Handler 宏（_Error_Handler(file, line)）+ HAL_GetTick
 
 #include <string.h>
 
-static FDCAN_HandleTypeDef *const kCanHandles[CAN_RX_BUS_COUNT] = {
+static FDCAN_HandleTypeDef *const kCanHandles[] = {
   &hfdcan1, &hfdcan2, &hfdcan3
 };
+enum { NATIVE_BUS_COUNT = sizeof(kCanHandles) / sizeof(kCanHandles[0]) };
+_Static_assert(NATIVE_BUS_COUNT == FIRMWARE_CAN4_INDEX, "CAN4 紧随三路片内控制器");
 
 static can_rx_ring_t g_rx_rings[CAN_RX_BUS_COUNT];
 static can_tx_scheduler_t g_tx_schedulers[CAN_TX_BUS_COUNT];
@@ -84,7 +87,7 @@ void can_filter_init(void) {
 
   // Mask=0：不过滤任何标准 ID（发现/热插拔依赖全收，TBD-CAN-02 再收敛）；
   // 非匹配/远程帧仍按例程拒绝。
-  for (uint32_t i = 0; i < 3; i++) {
+  for (uint32_t i = 0; i < NATIVE_BUS_COUNT; i++) {
     if (HAL_FDCAN_ConfigFilter(kCanHandles[i], &filter) != HAL_OK) {
       Error_Handler();
     }
@@ -116,6 +119,15 @@ void bsp_can_init(void) {
   HAL_FDCAN_ActivateNotification(&hfdcan1, error_notifications, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan2, error_notifications, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan3, error_notifications, 0);
+  (void)mcp2518fd_init();
+}
+
+bool can_bsp_bus_ready(uint8_t bus_index) {
+  return bus_index < NATIVE_BUS_COUNT || (bus_index == FIRMWARE_CAN4_INDEX && mcp2518fd_ready());
+}
+
+void can_bsp_poll_can4(uint32_t now_ms) {
+  mcp2518fd_drain(&g_rx_rings[FIRMWARE_CAN4_INDEX], now_ms);
 }
 
 // 每总线成功提交到硬件 FIFO 的帧数，包含 20ms/50Hz SYNC，不仅是运动命令。
@@ -134,6 +146,15 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
   if (dlc == 0xFFFFFFFFU) {
     can_tx_scheduler_note_hw_reject(&g_tx_schedulers[bus_index]);
     return false;
+  }
+  if (bus_index == FIRMWARE_CAN4_INDEX) {
+    _Static_assert(FDCAN_DLC_BYTES_64 == 15U, "HAL DLC 必须为四位编码");
+    if (!mcp2518fd_transmit(frame, (uint8_t)dlc)) {
+      can_tx_scheduler_note_hw_reject(&g_tx_schedulers[bus_index]);
+      return false;
+    }
+    ++g_tx_frame_count[bus_index];
+    return true;
   }
   FDCAN_TxHeaderTypeDef tx = {0};
   tx.Identifier = frame->can_id;
@@ -156,7 +177,7 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
 }
 
 static int8_t can_bus_index(FDCAN_HandleTypeDef *hfdcan) {
-  for (uint8_t bus_index = 0U; bus_index < CAN_RX_BUS_COUNT; ++bus_index) {
+  for (uint8_t bus_index = 0U; bus_index < NATIVE_BUS_COUNT; ++bus_index) {
     if (hfdcan == kCanHandles[bus_index]) {
       return (int8_t)bus_index;
     }
@@ -194,6 +215,7 @@ static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,
 static uint32_t g_rx_hw_lost[CAN_TX_BUS_COUNT] = {0U};
 
 uint32_t can_bsp_rx_hw_lost(uint8_t bus_index) {
+  if (bus_index == FIRMWARE_CAN4_INDEX) return mcp2518fd_rx_overflows();
   return bus_index < CAN_TX_BUS_COUNT ? g_rx_hw_lost[bus_index] : 0U;
 }
 

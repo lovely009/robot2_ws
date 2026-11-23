@@ -1,5 +1,6 @@
-// 每总线静态 RX 环：FDCAN ISR 是唯一生产者、motor_rt_task 是唯一消费者（SPSC 无锁）。
-// push 只在 ISR 上下文（只推进 head），pop/pending 只在任务上下文（只推进 tail）；head/tail 均为
+// 每总线静态 RX 环：前三路由各自 FDCAN ISR 生产，CAN4 由 motor_rt 轮询生产。
+// 每个环只有一个生产者，均由 motor_rt 消费（SPSC）。
+// push 只推进 head，pop 只推进 tail；head/tail 均为
 // 32 位自然对齐，Cortex-M7 上单加载/存储原子。**环满丢弃新帧并计数、不移动 tail**——ISR 侧不能
 // 回收仍可能被消费者读取的槽位。
 // 帧元素含 ISR 盖章的 MCU 单调接收时戳（rx_tick_ms，与内核 millis() 同一 HAL 计数器）与 is_brs，
@@ -16,7 +17,8 @@
 extern "C" {
 #endif
 
-#define CAN_RX_BUS_COUNT 3U
+#include "firmware_config.h"
+#define CAN_RX_BUS_COUNT FIRMWARE_CAN_BUS_COUNT
 #define CAN_RX_RING_CAPACITY 64U // ARD §21.1：初始深度 64，仅台架数据可调
 #define CAN_RX_FRAME_BYTES 64U
 
@@ -44,7 +46,7 @@ typedef struct {
 // 静态初始化（零态即可用，此函数用于显式复位与可读性）。
 void can_rx_ring_init(can_rx_ring_t *ring);
 
-// ISR 侧入环。返回 false = 环满（新帧被丢弃，overflow_count 已自增）。
+// 单生产者入环，可在 ISR 或任务中使用。环满时丢弃新帧并计数。
 bool can_rx_ring_push_from_isr(can_rx_ring_t *ring, const can_rx_frame_t *frame);
 
 // 任务侧批量弹出（最多 max_count 帧），返回实际弹出数。

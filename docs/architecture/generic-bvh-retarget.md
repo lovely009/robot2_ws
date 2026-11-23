@@ -31,6 +31,38 @@
 
 网页复用当前导入、进度与结果视图，增加通用对应表、疑点与限位策略；可选择不对某个连杆设置目标。映射可重新编辑，导出报告说明覆盖与误差。几何预览允许显示超出原 CAD 零限位的姿态，但不改变原 URDF，也不影响控制页的限位。
 
+## DreamsCapStudio 身体广播导入
+
+启动工作台并加载同一个 ROS 工作区后，运行下面的命令，再在 DreamsCapStudio 播放动作。接收端使用厂商 Linux Python Demo 的 T 姿和节点表，默认从 `192.168.1.9:7000/UDP` 采集，提交到 `http://127.0.0.1:8080`，目标模型为 `full_body_robot`。SDK 在其他目录时，用 `--sdk-dir` 指向含 `main.py` 和动态库的 Demo 目录。
+
+```bash
+ros2 run web_host record_vdmocap 挥手.bvh --seconds 5
+```
+
+成功后在「动作工作台」的「动作库 BVH」选择该文件和对应模型，坐标选自动，单位选厘米，点击「加载并播放」即可预览已保存的解算结果。SDK 录制使用米，导入器生成的 BVH 使用厘米。播放暂停、回到开头或发生长时间丢帧时，录制器提交已经收到的连续片段。提交失败会打印录制 JSON 的临时文件路径，可用 `--input 路径` 重试。
+
+第三方采集程序可直接调用 `POST /api/motion/imports/vdmocap`，请求类型为 `application/json`。请求字段如下。
+
+| 字段 | 格式 |
+| --- | --- |
+| `name`、`model` | 单层 `.bvh` 文件名和可选的工作台模型名 |
+| `capture.world_space` | `WS_Geo`，Z 轴向上 |
+| `capture.joints` | SDK 的 23 个身体关节名，与同一请求中所有数组顺序一致 |
+| `capture.rest` | 该次 SDK 连接所设的 T 姿世界坐标，23 × 3，单位米 |
+| `capture.frames[]` | 每帧含 `index`（uint32）、`frequency`（固定 Hz）、`positions`（23 × 3 世界位置，米）、`quaternions`（23 × 4 世界姿态，wxyz） |
+
+接口按名称恢复骨架，用父关节世界旋转检查每段骨骼的位置，再转换为局部旋转。帧号允许 uint32 回绕，最多补 0.25 秒缺失帧，根位移用线性插值，关节旋转用球面线性插值。每段至少两个原始帧，补齐后最多 7200 帧，请求上限 24 MiB。
+
+目标模型须有适用的部位预设、内置模板或已确认映射。服务完成离线解算并保存结果后才把 BVH 发布到动作库。成功返回 HTTP 200，含 `name`、`model`、`job_id`、`received_frames`、`frames`、`interpolated_frames`、`frequency`、`matched_targets`、`joint_count` 和 `preview_only`。可用 `GET /api/motion/jobs/<job_id>/trajectory` 读取完整关节序列。同名同内容可重试。格式、骨架或模型无法匹配返回 400。同名不同录制、已有转换运行、已有映射需要重新确认或解算期间其内容发生变化时，返回 409 并说明原因。
+
+## DreamsCapStudio 实时跟随
+
+在「动作工作台」选择目标模型，点击「实时跟随」，然后在 DreamsCapStudio 播放。三维视图同时显示源人体骨架和在线解算的机器人。帧号来自广播，Hz 表示源采样率。暂停时保留最后姿态，广播恢复后自动继续。点击「停止实时跟随」或离开动作页会释放接收端。
+
+工作台服务使用 ROS 参数 `vdmocap_sdk_dir`、`vdmocap_ip` 和 `vdmocap_port` 指定 SDK Demo 目录及广播地址，默认值与录制命令相同。服务按 SDK 的身体 T 姿校准，校验每帧的 23 个关节。解算使用最近一次有效姿态作为初值，处理最新广播帧。注册的仿真模型沿用其位置、速度与耦合约束。实时跟随用于三维预览。使用上面的录制命令可将片段保存到动作库。
+
+第三方客户端可向 `POST /api/motion/live/vdmocap` 发送 JSON，例如 `{"model":"full_body_robot"}`，按行读取 `application/x-ndjson` 响应。每行的 `type` 为 `state`、`scene`、`frame` 或 `error`。场景给出骨架和关节顺序，姿态帧包含源帧号、采样率、人体和机器人连杆位置、显示关节位置以及机器人根朝向（xyzw）。服务一次供一个客户端接收，其他客户端连接时返回 HTTP 409。浏览器通过可选的 `viewer` 字段标识同一页面的重连，取值为 32 个小写十六进制字符。
+
 ## 验收
 
 1. 新的不同名称/数量/结构的 URDF 可分析、人工确认并转换，不依赖项目模型名。

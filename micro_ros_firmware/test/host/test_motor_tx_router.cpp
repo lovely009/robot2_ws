@@ -8,6 +8,7 @@
 #include "motor_tx_router.h"
 
 struct submit_capture_t {
+  uint8_t expected_bus;
   can_tx_frame_t frames[64];
   size_t count;
   uint32_t reject_p0_ids[4];
@@ -46,7 +47,7 @@ static can_tx_frame_t make_cerb_mit_frame(uint8_t node) {
 static bool capture_submit(void *context, uint8_t bus_index,
     const can_tx_frame_t *frame) {
   auto *capture = static_cast<submit_capture_t *>(context);
-  assert(bus_index == 0U);
+  assert(bus_index == capture->expected_bus);
   assert(frame != nullptr);
   assert(capture->count < sizeof(capture->frames) / sizeof(capture->frames[0]));
   capture->frames[capture->count++] = *frame;
@@ -286,12 +287,13 @@ static void test_p1_batch_does_not_cross_an_unbatchable_frame() {
   assert(capture.frames[2].can_id == last.can_id);
 }
 
-static void test_unbatchable_p1_never_exceeds_hardware_fifo_budget() {
+static void test_unbatchable_p1_never_exceeds_hardware_fifo_budget(uint8_t bus, uint32_t budget) {
   can_tx_scheduler_t scheduler = {};
   can_tx_scheduler_init(&scheduler);
   motor_tx_router_t router = {};
   motor_tx_router_init(&router);
   submit_capture_t capture = {};
+  capture.expected_bus = bus;
 
   for (uint16_t slot = 0U; slot < CAN_TX_P1_SLOTS; ++slot) {
     const can_tx_frame_t frame = make_frame(0x500U + slot, (uint8_t)slot);
@@ -303,11 +305,10 @@ static void test_unbatchable_p1_never_exceeds_hardware_fifo_budget() {
   }
 
   const motor_tx_router_stats_t stats =
-      motor_tx_router_pump(&router, &scheduler, 0U, capture_submit, &capture);
-  assert(stats.p1_logical_frames ==
-      MOTOR_TX_ROUTER_PHYSICAL_BUDGET - CAN_TX_P2_PUMP_QUOTA);
+      motor_tx_router_pump(&router, &scheduler, bus, capture_submit, &capture);
+  assert(stats.p1_logical_frames == budget - CAN_TX_P2_PUMP_QUOTA);
   assert(stats.p2_logical_frames == CAN_TX_P2_PUMP_QUOTA);
-  assert(stats.physical_attempts == MOTOR_TX_ROUTER_PHYSICAL_BUDGET);
+  assert(stats.physical_attempts == budget);
 }
 
 int main() {
@@ -319,7 +320,8 @@ int main() {
   test_p0_rejection_stops_this_pump_and_preserves_lower_classes();
   test_multiple_rejected_p0_frames_keep_fifo_order();
   test_p1_batch_does_not_cross_an_unbatchable_frame();
-  test_unbatchable_p1_never_exceeds_hardware_fifo_budget();
+  test_unbatchable_p1_never_exceeds_hardware_fifo_budget(0U, MOTOR_TX_ROUTER_PHYSICAL_BUDGET);
+  test_unbatchable_p1_never_exceeds_hardware_fifo_budget(FIRMWARE_CAN4_INDEX, 4U);
   std::printf("test_motor_tx_router: all passed\n");
   return 0;
 }

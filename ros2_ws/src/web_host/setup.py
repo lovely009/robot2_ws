@@ -61,6 +61,7 @@ setup(
     entry_points={
         'console_scripts': [
             'static_server = web_host.static_server:main',
+            'record_vdmocap = web_host.vdmocap_record:main',
             'rosbridge_shim = web_host.rosbridge_shim:main',
         ],
     },

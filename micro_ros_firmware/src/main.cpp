@@ -70,6 +70,15 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t pxTask,
   }
 }
 void initialize_system(void) {
+  // PC15 控制扩展口的 VCC_5V。利用已有的 USB 枚举等待，让模块先上电再探测。
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_SET);
+  GPIO_InitTypeDef power = {};
+  power.Pin = GPIO_PIN_15;
+  power.Mode = GPIO_MODE_OUTPUT_PP;
+  power.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &power);
+
   // 板级 DMA/BDMA 控制器资源（时钟+NVIC，src/board/dma.c）先于一切设备传输初始化；
   // 设备配置归各设备库自持（lib/board（WS2812 驱动） SPI6+BDMA、lib/board（IMU 驱动）SPI2），
   // 「DMA 先于设备初始化」的官方时序由本函数保证。

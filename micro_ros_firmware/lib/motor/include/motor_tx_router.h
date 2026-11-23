@@ -20,7 +20,7 @@ typedef bool (*motor_tx_router_submit_fn)(void *context, uint8_t bus_index,
     const can_tx_frame_t *frame);
 
 typedef struct {
-  // One shared scratch area is reused serially for the three bus schedulers.
+  // One shared scratch area is reused serially by all bus schedulers.
   can_tx_frame_t logical_frames[MOTOR_TX_ROUTER_LOGICAL_CAPACITY];
   motor_protocol_tx_frame_t p1_lookahead[MOTOR_PROTOCOL_P1_BATCH_MAX];
 } motor_tx_router_t;

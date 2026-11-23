@@ -47,6 +47,7 @@ def handler(monkeypatch, tmp_path):
     def post(path, payload, *, origin='http://localhost:8080',
              host='localhost:8080', content_type='application/json'):
         request = object.__new__(captured[0])
+        request.command = 'POST'
         request.path = path
         request.headers = Message()
         request.headers['Host'] = host
@@ -62,7 +63,8 @@ def handler(monkeypatch, tmp_path):
         assert len(replies) == 1
         return replies[0]
 
-    return SimpleNamespace(post=post, web_root=web_root, handler_class=captured[0])
+    return SimpleNamespace(post=post, web_root=web_root, handler_class=captured[0],
+                           module=module)
 
 
 def _action(position):
@@ -113,6 +115,16 @@ def test_json_required_for_all_write_endpoints(handler, content_type):
     assert status == 415
 
 
+def test_motion_import_uses_write_guards_and_reports_conflicts(handler, monkeypatch):
+    importer = Mock(side_effect=FileExistsError('同名录制'))
+    monkeypatch.setattr(handler.module, 'import_capture', importer)
+    path = '/api/motion/imports/vdmocap'
+    assert handler.post(path, {}, origin='http://foreign.example')[0] == 403
+    assert handler.post(path, {}, content_type='text/plain')[0] == 415
+    importer.assert_not_called()
+    assert handler.post(path, {}, origin=None) == (409, {'error': '同名录制'})
+
+
 @pytest.mark.parametrize('origin,host', [
     ('http://localhost:8080', 'localhost:8080'),
     ('http://LOCALHOST', 'localhost:80'),
@@ -144,6 +156,7 @@ def test_old_page_urls_redirect_to_workbench(handler, path):
     destination.parent.mkdir()
     destination.write_text('<html></html>')
     request = object.__new__(handler.handler_class)
+    request.command = 'GET'
     request.path = path
     request.send_response = Mock()
     request.send_header = Mock()
@@ -152,3 +165,15 @@ def test_old_page_urls_redirect_to_workbench(handler, path):
     request.send_response.assert_called_once_with(302)
     request.send_header.assert_called_once_with(
         'Location', '/workbench/' + ('?model=arm' if '?' in path else ''))
+
+
+def test_live_preview_stream_shares_json_and_origin_guards(handler, monkeypatch):
+    path = '/api/motion/live/vdmocap'
+    serve = Mock(side_effect=lambda h, *_: h._send_json(200, {}))
+    monkeypatch.setattr(handler.module, 'serve_live', serve)
+    assert handler.post(path, {}, origin='http://foreign.example')[0] == 403
+    assert handler.post(path, {}, content_type='text/plain')[0] == 415
+    assert handler.post(path, {'model': 'x' * 4100})[0] == 413
+    serve.assert_not_called()
+    assert handler.post(path, {'model': 'full_body_robot'})[0] == 200
+    serve.assert_called_once()

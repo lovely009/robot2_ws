@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-#define CAN_TX_BUS_COUNT 3U
 #include "firmware_config.h"
+#define CAN_TX_BUS_COUNT FIRMWARE_CAN_BUS_COUNT
 #define CAN_TX_P1_SLOTS FIRMWARE_MAX_MOTORS // 每电机一个 latest-wins 槽
 #define CAN_TX_P0_CAPACITY 32U     // P0 FIFO，预留每总线 16 台同时撤权的余量。
 #define CAN_TX_P2_CAPACITY 16U     // P2 FIFO（ARD §22.3 有界）

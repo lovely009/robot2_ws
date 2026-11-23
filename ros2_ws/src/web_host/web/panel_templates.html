@@ -4,8 +4,8 @@
     <details class="card" data-fold="joints" open>
       <summary title="关节表来自模型 URDF；数值与年龄来自 /joint_states，TF 由 robot_state_publisher 发布">
         关节 <span class="spacer"></span>
-        <label class="joint-control-toggle" title="使能当前模型的在线电机，允许部分传动组；状态以 MCU 回执为准">
-          <input type="checkbox" id="jointControlEnabled">使能控制</label>
+        <label class="joint-control-toggle" title="使能当前模型的在线电机，失能覆盖已发现的模型电机。状态以 MCU 回执为准">
+          <input type="checkbox" id="jointControlEnabled" aria-describedby="jointControlResult">使能控制</label>
         <button type="button" id="jointControlDisable" hidden>失能电机</button>
         <span class="sum" id="sumJoints">--</span></summary>
       <div class="tiny muted" id="jointControlResult" role="status"></div>

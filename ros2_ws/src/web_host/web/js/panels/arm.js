@@ -427,6 +427,7 @@ export function mount(rootEl, ctx) {
   // 加载/按当前 MODEL 重载：整场景重建，canvas 也换一块新的——同一 canvas 上重建
   // WebGLRenderer 会复用旧 context，新元素最省心（与切屏同一套释放路径）。
   // window/visibility 监听只随面板开关、不随模型切换（disposeScene 不摘它们）。
+  const sizeObserver = new ResizeObserver(resize);
   function startLoad() {
     loadedModel = MODEL;
     ready = false;
@@ -436,11 +437,13 @@ export function mount(rootEl, ctx) {
     hud.textContent = '臂视图加载中…';
     if (renderer) {
       disposeScene();
+      sizeObserver.unobserve(canvas);
       canvas.remove();
       canvas = document.createElement('canvas');
       canvas.className = 'arm3d';
       stage.prepend(canvas);
     }
+    sizeObserver.observe(canvas);
     const fullBodyVisual = MODEL === 'full_body_robot';
     const modelUrl = `/robot_description/models/${MODEL}`;
     const urdfName = fullBodyVisual ? `${MODEL}.standing.urdf` : `${MODEL}.urdf`;
@@ -482,8 +485,6 @@ export function mount(rootEl, ctx) {
 
   startLoad();
   window.addEventListener('resize', onWindowResize);
-  const sizeObserver = new ResizeObserver(() => resize());
-  sizeObserver.observe(stage);
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   const render = (dirty) => {

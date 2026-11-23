@@ -16,6 +16,8 @@ export function mount(root, ctx) {
   const list = $('jointRows'), summary = $('sumJoints');
   let entries = [], key = '', generation = -1, advertised = 0, pending = false, disposed = false;
   const toggle = root.querySelector('#jointControlEnabled');
+  const toggleLabel = toggle.closest('label');
+  const enableHint = toggleLabel.title;
   const disableButton = root.querySelector('#jointControlDisable');
   const result = root.querySelector('#jointControlResult');
   let pendingPolicy = null, policyResult = '', submittingPolicy = false;
@@ -25,8 +27,7 @@ export function mount(root, ctx) {
     && Date.now()-store.transmissionStatus.last >= 0
     && Date.now()-store.transmissionStatus.last < 2500;
   toggle.disabled = true;
-  toggle.closest('label').title = '使能当前模型的在线电机，允许部分传动组；使用模型默认增益，状态以 MCU 确认为准';
-  toggle.closest('label').addEventListener('click', event => event.stopPropagation());
+  toggleLabel.addEventListener('click', event => event.stopPropagation());
   const requestPolicy = async enabled => {
     if (submittingPolicy || pendingPolicy || disposed) return;
     const model=MODEL, connection=getConnectionGeneration();
@@ -146,7 +147,7 @@ export function mount(root, ctx) {
     const reason = hostReject ? `主机拒绝：${hostReject}` : controlError || enableError;
     result.textContent = submittingPolicy ? '正在提交使能请求…' : pendingPolicy ? policyResult : reason || policyResult;
     result.classList.toggle('warn',Boolean(reason));
-    toggle.closest('label').title = reason || '使能当前模型的在线电机，允许部分传动组；失能覆盖已发现的模型电机，状态以 MCU 确认为准';
+    toggleLabel.title = reason ? '' : enableHint;
     const source = $('jointFeedbackSource'), feedback = store.bench.feedback;
     if (source) {
       source.textContent = feedback ? (feedback.error ||

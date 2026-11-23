@@ -430,8 +430,8 @@ def test_actual_full_body_cad_uses_candidates_and_converts_without_modifying_urd
         jobs.close()
 
 
-def test_registered_model_uses_urdf_without_simulation_runtime():
-    jobs = MotionJobs()
+def test_model_without_preview_limits_uses_its_urdf(tmp_path):
+    jobs = MotionJobs(models_root=tmp_path)
     try:
         request = payload()
         first = jobs.create({**request, 'model': 'full_body_robot'})
@@ -444,5 +444,55 @@ def test_registered_model_uses_urdf_without_simulation_runtime():
         done = finish(jobs, first)
         assert done['state'] == 'done', done
         assert 'simulation_limits_enforced' not in done['summary']
+    finally:
+        jobs.close()
+
+
+def test_registered_motion_clamps_scalar_velocity_and_coupled_limits(tmp_path):
+    from web_host.motion_playback import _load_trajectory
+    from web_host.motion_cache import result_key
+    model = tmp_path / 'test_arm'
+    (model / 'config').mkdir(parents=True)
+    (model / 'urdf').mkdir()
+    data = payload()
+    source = data['urdf_text'].replace('lower="-2" upper="2" velocity="100"',
+                                       'lower="-.5" upper=".5" velocity="0"').replace(
+        '</robot>', '''<link name="tip"/><joint name="other" type="revolute">
+        <parent link="LeftArm"/><child link="tip"/><axis xyz="0 1 0"/>
+        <limit lower="-.5" upper=".5" velocity=".5" effort="1"/></joint></robot>''')
+    (model / 'urdf/test_arm.urdf').write_text(source)
+    config = {'velocity_limit_rad_s': 5., 'coupled_limits': {'pair': {
+        'joints': ['axis', 'other'], 'lower': [-.5, -.5], 'step': .25,
+        'valid_rows': ['11111', '11111', '11111', '11111', '00000']}}}
+    path = model / 'config/motion_preview_limits.yaml'
+    path.write_text(yaml.safe_dump(config))
+    request = {**data, 'model': model.name, 'urdf_text': source,
+               'bvh_text': data['bvh_text'].replace('Frames: 3', 'Frames: 7')
+                           + '0 0 0 0 0 0 60 0 0\n' * 4}
+    jobs = MotionJobs(models_root=tmp_path, cache_dir=tmp_path / 'results',
+                      profiles_dir=tmp_path / 'profiles')
+    try:
+        first = jobs.create(request)
+        jobs.start(first['id'], first['mapping'], remember=True)
+        done = finish(jobs, first)
+        assert done['state'] == 'done', done
+        summary = done['summary']
+        assert summary['cad_limits_enforced'] and not summary['mechanical_limits_enforced']
+        assert summary['coupled_clamped_frames'] > 0
+        trajectory = _load_trajectory(jobs.result(first['id'], 'motion.npz'))
+        angles = np.asarray(trajectory['positions'])[:, trajectory['joint_names'].index('axis')]
+        np.testing.assert_allclose(angles, [0, .1, .2, .25, .25, .25, .25], atol=1e-6)
+        assert jobs.result(first['id'], 'robot.urdf').decode() == source
+        assert jobs.create(request)['result_cached']
+        old_key = result_key(jobs.jobs[first['id']], first['mapping'])
+        config['coupled_limits']['pair']['valid_rows'][-1] = '11111'
+        path.write_text(yaml.safe_dump(config))
+        changed = jobs.create(request)
+        assert result_key(jobs.jobs[changed['id']], first['mapping']) != old_key
+        if changed['state'] == 'mapping':
+            jobs.start(changed['id'], changed['mapping'])
+        assert finish(jobs, changed)['state'] == 'done'
+        new = _load_trajectory(jobs.result(changed['id'], 'motion.npz'))
+        assert np.max(new['positions']) == pytest.approx(.5, abs=1e-5)
     finally:
         jobs.close()

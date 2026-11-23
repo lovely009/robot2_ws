@@ -17,16 +17,8 @@ const key = () => `robot2.layout.${props.variable}`;
 function apply(size: number) {
   const root = scope();
   if (!root) return;
-  const container = props.axis === 'height' && props.target !== '.observer-area'
-    ? root.querySelector('.stage-body') : root;
-  const available = container?.getBoundingClientRect()[props.axis] || 600;
-  let maximum = available * 0.6;
-  if (props.axis === 'width') {
-    maximum = available - 280 - 12;
-  } else if (props.target !== '.observer-area') {
-    const other = root.querySelector(props.target === '#run-joints' ? '.action-panel-host' : '#run-joints');
-    maximum = available - (other?.getBoundingClientRect().height || 0) - 200 - 24;
-  }
+  const available = root.getBoundingClientRect()[props.axis];
+  const maximum = props.axis === 'width' ? available - 280 - 12 : available * 0.6;
   const value = Math.round(Math.max(props.min, Math.min(maximum, size)));
   root.style.setProperty(props.variable, `${value}px`);
   localStorage.setItem(key(), String(value));

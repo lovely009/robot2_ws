@@ -67,6 +67,14 @@ it('uses runtime driver gains when the offline model has none',()=>{
   Object.assign(s.transmissionStatus.data,{policy_defaults:{2:{kp:12,kd:.5}}});
   expect(api.jointPolicyTargets(s,'arm',true,1100)[0]).toMatchObject({kp:12,kd:.5});
 });
+
+it('distinguishes an empty gain table from a missing motor in a populated table',()=>{
+  const s=state();
+  s.modelTransmissions.policy_defaults={};
+  expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow('当前配置未提供电机使能增益（Kp、Kd）');
+  s.modelTransmissions.policy_defaults[8]={kp:12,kd:.5};
+  expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow('m2 的有效增益');
+});
 it('rejects missing or invalid runtime gains rather than falling back',()=>{
   const s=state();
   for (const policy_defaults of [{},{2:{kp:NaN,kd:1}},{2:{kp:30,kd:-1}}]) {

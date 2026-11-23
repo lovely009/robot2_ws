@@ -1588,12 +1588,54 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
 .robot-panel .stage .hud:focus { outline: 1px solid var(--accent); opacity: 1 !important; }
 
 @media (min-width: 951px) {
-  .stage-run .stage-body { overflow: hidden; }
-  .stage-run .robot-panel { flex: 1 1 180px; min-height: 180px; }
-  .stage-run .joint-list-panel { flex-shrink: 1; min-height: 35px; }
-  .stage-run .action-panel-host { flex-shrink: 1; }
+  /* 右侧空间不足时按面板顺序滚动，左侧电机列表保持在视口内。 */
+  .workspace-grid:has(> .stage-run) {
+    container-type: size;
+    overflow-y: auto;
+    grid-template-rows: minmax(min-content, 1fr) var(--observer-height, var(--observer-default));
+  }
+  .observer-hidden .workspace-grid:has(> .stage-run) {
+    grid-template-rows: minmax(min-content, 1fr) 40px;
+  }
+  .workspace-grid:has(> .stage-run) > .objects-area,
+  .workspace-grid:has(> .stage-run) > .resize-objects {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100cqh;
+  }
+  .workspace-grid:has(> .stage-run) > .resize-objects {
+    grid-area: 1 / 1 / -1 / 2;
+    left: auto;
+    justify-self: end;
+    transform: translateX(100%);
+  }
+  .workspace-grid:has(> .stage-run) > .resize-observer {
+    grid-area: 2 / 2 / 3 / 3;
+    inset: -9px 0 auto;
+  }
+  .stage-run { min-height: min-content; }
+  .stage-run .stage-body {
+    display: grid;
+    grid-template-rows: minmax(180px, 1fr);
+    grid-auto-rows: max-content;
+    min-height: min-content;
+    overflow: hidden;
+  }
+  .stage-run .robot-panel { contain: size; }
+  .stage-run .joint-list-panel:has(details[open]) { height: var(--joints-height, 216px); }
+  .stage-run .action-panel-host:has(.panel-content > details[open]) { height: var(--actions-height, 212px); }
   .workspace-grid:not(.device-workspace) .stage-area,
   .workspace-grid:not(.device-workspace) .observer-area { grid-column: 2; }
+}
+.stage-run .robot-panel .stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.stage-run .robot-panel .stage .legend {
+  position: static;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 @media (max-width: 950px) {
   .workspace-grid:not(.device-workspace) .stage-area,

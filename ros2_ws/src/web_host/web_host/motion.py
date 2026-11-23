@@ -65,6 +65,8 @@ class MotionJobs:
         from bvh_broadcaster.generic_retarget import GenericRetargeter, analyze
         clip, directory = job['clip'], job['directory']
         analysis = analyze(directory / 'robot.urdf', clip, up_axis=job['up_axis'], scale=job['scale'])
+        if job.get('preview_limits'):
+            analysis['mapping']['limit_policy'] = 'preview'
         matched_preset = None
         if known and 'arms' in known:
             pairs = {r: s for arm in known['arms'].values() for r, s in zip(arm['robot'], arm['source'])}
@@ -212,9 +214,12 @@ class MotionJobs:
                 clip = BvhClip.load(directory / 'source.bvh', preserve_names=generic)
                 from .motion_source import prepare_source
                 up_axis, position_mode, source_basis = prepare_source(clip, up_axis)
+                preview_limits = None
                 if generic:
                     from bvh_broadcaster.generic_retarget import _Robot
+                    from .motion_limits import MotionPreviewLimits
                     parsed_robot = _Robot(directory / 'robot.urdf')
+                    preview_limits = MotionPreviewLimits.for_model(request, self.models_root, parsed_robot)
                     model = parsed_robot.model
                 else:
                     model = pin.buildModelFromUrdf(str(directory / 'robot.urdf'))
@@ -244,11 +249,13 @@ class MotionJobs:
                           'joint_count': model.nq, 'source_joints': sources, 'robot_links': links,
                           'automatic_mapping': automatic, 'mapping': template if automatic else None}
                 status.update(up_axis=up_axis, position_mode=position_mode)
+                if preview_limits:
+                    status.update(constraint_source='cad', velocity_limit_rad_s=preview_limits.velocity)
                 self.jobs[key] = {'directory': directory, 'clip': clip, 'scale': scale,
                                   'up_axis': up_axis, 'source_basis': source_basis,
-                                  'status': status}
+                                  'status': status, 'preview_limits': preview_limits}
                 if generic:
-                    builtin = (automatic and not any(parsed_robot.missing)
+                    builtin = (automatic and not preview_limits and not any(parsed_robot.missing)
                                and all(j.get('type') == 'revolute' and j.find('mimic') is None
                                        for j in parsed_robot.spec.values()))
                     automatic = self._generic_mapping(self.jobs[key], request, template if automatic else None)
@@ -284,6 +291,8 @@ class MotionJobs:
                 from bvh_broadcaster.generic_retarget import GenericRetargeter
                 solver = GenericRetargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
                                           up_axis=job['up_axis'], scale=job['scale'])
+                if job['preview_limits']:
+                    job['preview_limits'].apply_to(solver)
                 job['status']['confirmation_required'] = False
                 job['status']['mapping_saved'] = self._remember_mapping(job, mapping) if remember else False
             else:
@@ -301,6 +310,8 @@ class MotionJobs:
                         with np.load(job['directory'] / 'motion.npz', allow_pickle=False) as motion:
                             if job.get('generic'):
                                 solver.validate_result(motion['positions'])
+                                if job['preview_limits']:
+                                    job['preview_limits'].validate(solver.names, motion['positions'])
                             else:
                                 load_motion(job['directory'] / 'motion.npz', job['directory'] / 'robot.urdf')
                         summary = json.loads((job['directory'] / 'report.json').read_text())
@@ -329,9 +340,12 @@ class MotionJobs:
                 job['status']['progress'] = round(frame / total * 90)
         try:
             positions, directions, orientations = solver.convert(progress)
+            if job['preview_limits']:
+                job['preview_limits'].validate(solver.names, positions)
             np.savez_compressed(directory / 'motion.npz', positions=positions,
                                 joint_names=solver.names, frame_time=clip.frame_time,
                                 preview_only=True,
+                                cad_limits_enforced=bool(job['preview_limits']),
                                 mechanical_limits_enforced=getattr(solver, 'mechanical_limits_enforced', True),
                                 urdf_sha256=digest(directory / 'robot.urdf'),
                                 direction_error_deg=directions, orientation_error_deg=orientations)
@@ -381,6 +395,9 @@ class MotionJobs:
                 preview['robot'].update(root_quaternions=root_quaternions,
                     root_rotation_source=clip.joints[solver.source_root].name,
                     root_rotation_frame='robot')
+            if job['preview_limits']:
+                # Preserve boundary angles exactly in both the preview and the trajectory.
+                preview['robot'].update(ignore_limits=False, joint_positions=positions[indices].tolist())
             (directory / 'preview.json').write_text(json.dumps(preview, allow_nan=False))
             summary = {'preview_only': True, 'frames': len(positions), 'joint_names': solver.names,
                        'frame_time': clip.frame_time, 'mapping': job['status']['mapping'],

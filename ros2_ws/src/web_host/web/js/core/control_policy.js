@@ -39,6 +39,9 @@ export function jointPolicyTargets(state, model, enabled, now = Date.now()) {
     if (!actual.online || actual.fault) throw new Error(`m${id} 离线或存在故障`);
     const gains = defaults?.[id];
     if (![gains?.kp,gains?.kd].every(value => Number.isFinite(value) && value >= 0)) {
+      if (!defaults || Object.keys(defaults).length === 0) {
+        throw new Error('当前配置未提供电机使能增益（Kp、Kd）');
+      }
       throw new Error(`模型缺少 m${id} 的有效增益`);
     }
     return {motor_id:id,enabled:true,kp:gains.kp,kd:gains.kd,confirm_unprotected:false};

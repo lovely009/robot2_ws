@@ -14,7 +14,8 @@ type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progr
   up_axis?: 'y_up' | 'z_up'; position_mode?: string;
   warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
   result_cached?: boolean; result_saved?: boolean; cache_warning?: string;
-  summary?: { mechanical_limits_enforced?: boolean;
+  constraint_source?: 'cad';
+  summary?: { mechanical_limits_enforced?: boolean; cad_limits_enforced?: boolean; coupled_clamped_frames?: number;
     covered_joints?: string[]; unmapped_joints?: string[];
     orientation_max_deg?: number; direction_max_deg?: number }; error?: string };
 type Preview = { times: number[]; duration: number };
@@ -397,7 +398,7 @@ onBeforeUnmount(() => {
         <label>人体根参考<select v-model="genericMapping.source_root" aria-label="人体根参考"><option v-for="name in job.source_joints" :key="name">{{ name }}</option></select></label>
         <label>参考帧<input v-model.number="genericMapping.reference_frame" type="number" min="0" :max="job.frames - 1" step="1" aria-label="参考帧" /></label>
         <div class="motion-alignment"><label v-for="(axis, i) in ['X', 'Y', 'Z']" :key="axis">对齐 {{ axis }}（°）<input v-model.number="alignment[i]" type="number" step="1" :aria-label="`对齐 ${axis} 角度`" /></label></div>
-        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">按 URDF 位置和速度限位</option><option value="preview">仅几何预览：忽略缺失限位</option></select></label>
+        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">按 URDF 位置和速度限位</option><option value="preview">{{ job.constraint_source === 'cad' ? '按模型位置、预览速度和双轴可动范围钳制' : '仅几何预览：忽略缺失限位' }}</option></select></label>
         <details v-if="job.warnings?.length" class="motion-mapping-notes"><summary>模型有 {{ job.warnings.length }} 项需核对</summary><ul><li v-for="warning in job.warnings" :key="warning">{{ warning }}</li></ul></details>
         <div class="motion-targets"><div v-for="target in genericMapping.targets" :key="target.target" class="motion-target-row">
           <label :for="`mapping-${target.target}`">{{ target.target }}<small>{{ target.reason || '已确认的对应关系' }}</small></label>
@@ -435,7 +436,7 @@ onBeforeUnmount(() => {
       <span v-if="job.result_cached">已加载保存结果，无需重新转换</span>
       <span v-else-if="job.result_saved">结果已保存，相同输入下次直接复用</span>
       <span v-if="job.cache_warning">{{ job.cache_warning }}</span>
-      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
+      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · <template v-if="job.summary.cad_limits_enforced">已按模型位置与预览速度限位，{{ job.summary.coupled_clamped_frames }} 帧触及双轴可动边界</template><template v-else>{{ job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</template></span>
       <span v-if="job.summary?.direction_max_deg !== undefined">最大骨段方向误差 {{ job.summary.direction_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
       <span v-else-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>

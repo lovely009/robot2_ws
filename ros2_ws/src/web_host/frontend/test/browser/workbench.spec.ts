@@ -447,6 +447,26 @@ test(`全部电机${condition}后仍可通过关节面板提交失能`, async ({
 });
 }
 
+test('缺少使能增益时在关节面板说明一次，悬停不会遮住反馈', async ({page}) => {
+  const fixture = await connectFixture(page, true, true, true);
+  await page.goto('/workbench/#/run');
+  const toggle = page.getByRole('checkbox', {name:'使能控制', exact:true});
+  await expect(toggle).toBeEnabled();
+  fixture.sendFeedback('/robot_transmission/status', {data:JSON.stringify({
+    model:'half_body_robot', joint_names:['joint_link8','joint_link9'],
+    trajectory_enabled:false, policy_defaults:{},
+  })});
+  const message = '当前配置未提供电机使能增益（Kp、Kd）';
+  await expect(toggle).toBeDisabled();
+  await expect(page.locator('#jointControlResult')).toHaveText(message);
+  await expect(toggle).toHaveAccessibleDescription(message);
+  const label = page.locator('.joint-control-toggle');
+  await label.hover();
+  await expect(label).toHaveAttribute('title', '');
+  await expect(page.getByRole('button', {name:'失能电机', exact:true})).toBeEnabled();
+  expect(fixture.policyRequests).toHaveLength(0);
+});
+
 test('主机仍报告旧模型时拒绝使能当前模型电机', async ({page}) => {
   const fixture=await connectFixture(page,true,true);
   await page.goto('/workbench/#/run');
@@ -1473,6 +1493,36 @@ test('拖动分隔线调整窗口尺寸并在刷新后保留', async ({page}) =>
   await expect.poll(async () => (await action.boundingBox())!.height).toBeLessThan(actionBefore);
 });
 
+test('矮窗口展开关节时首行完整可见，末行、动作库和曲线均可滚动到', async ({page}) => {
+  await page.setViewportSize({width:1049, height:734});
+  await connectFixture(page, false, false, true, [8,9], true);
+  await page.goto('/workbench/#/run');
+  const rows = page.locator('#jointRows [data-joint]');
+  await expect(rows).toHaveCount(37);
+  const unobstructed = (el: Element) => {
+    const box = el.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    return box.height > 0 && [box.top + 1, box.bottom - 1].every(y =>
+      el.contains(document.elementFromPoint(x, y)));
+  };
+  await expect.poll(() => rows.first().evaluate(unobstructed)).toBe(true);
+  expect(await page.locator('.workspace-grid').evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+  const canvas = (await page.locator('.robot-panel canvas').boundingBox())!;
+  const legend = (await page.locator('.robot-panel .legend').boundingBox())!;
+  expect(canvas.y + canvas.height).toBeLessThanOrEqual(legend.y + 1);
+  const sidebar = page.locator('.objects-area');
+  const sidebarY = (await sidebar.boundingBox())!.y;
+  await page.locator('#run-joints').evaluate(el => {el.scrollTop = el.scrollHeight;});
+  await expect.poll(() => rows.last().evaluate(unobstructed)).toBe(true);
+  for (const selector of ['.action-panel-host summary', '.observer-tabs']) {
+    const target = page.locator(selector);
+    await target.scrollIntoViewIfNeeded();
+    await expect.poll(() => target.evaluate(unobstructed)).toBe(true);
+  }
+  expect((await sidebar.boundingBox())!.y).toBeCloseTo(sidebarY, 0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
 for (const viewport of [{width:1063, height:752}, {width:1600, height:650}, {width:900, height:752}, {width:640, height:752}]) {
   test(`外层不滚动，工作区适应窗口 ${viewport.width}×${viewport.height}`, async ({page}) => {
     await page.setViewportSize(viewport);
@@ -1493,6 +1543,8 @@ for (const viewport of [{width:1063, height:752}, {width:1600, height:650}, {wid
       await page.locator('.workspace-grid').evaluate(el => {el.scrollTop = el.scrollHeight;});
     if (viewport.width <= 950)
       await page.getByRole('button', {name: '观察', exact: true}).click();
+    else
+      await page.locator('.observer-head').scrollIntoViewIfNeeded();
     await expect(page.locator('.observer-head')).toBeInViewport({ratio: 1});
     await expect(page.locator('.app-footer')).toHaveCount(0);
     await page.locator('.workspace-heading').hover();

@@ -19,6 +19,9 @@ def digest(path):
 def result_key(job, mapping):
     directory = job['directory']
     inputs = {name: digest(directory / name) for name in ('source.bvh', 'robot.urdf')}
+    if job.get('preview_limits'):
+        inputs['motion_preview_limits'] = job['preview_limits'].digest
+        inputs['web_host.motion_limits'] = digest(Path(importlib.util.find_spec('web_host.motion_limits').origin))
     for name in ('web_host.motion', 'web_host.motion_cache', 'web_host.motion_source',
                  'web_host.shoulder_retarget', 'bvh_broadcaster.bvh',
                  'bvh_broadcaster.generic_retarget', 'bvh_broadcaster.retarget',

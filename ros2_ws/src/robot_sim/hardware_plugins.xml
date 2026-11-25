@@ -1,0 +1,5 @@
+<library path="motor_sim_hardware">
+  <class name="robot_sim/MotorSimSystem" type="motor_sim::ros::MotorSimSystem" base_class_type="hardware_interface::SystemInterface">
+    <description>In-process protocol/plant motor simulation plugin for ros2_control.</description>
+  </class>
+</library>

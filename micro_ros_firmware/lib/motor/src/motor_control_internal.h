@@ -40,6 +40,13 @@ typedef struct {
   float target_position_rad;
   float target_velocity_rad_s;
   float target_effort_nm;
+  bool has_prev_target;
+  float prev_target_position_rad;
+  float prev_target_velocity_rad_s;
+  float interp_position_rad;
+  float interp_velocity_rad_s;
+  uint32_t target_start_tick_ms;
+  uint32_t target_span_ms;
 
   // Policy（低频，不进入命令快照——ARD §19.4）。
   bool policy_enable;   // 逐电机 Enable（MotorPolicy；OFFLINE/厂家故障/冲突
@@ -188,17 +195,6 @@ struct motor_control_context {
   bool snapshot_soft_stop_active; // 30ms 级联已触发（去重）
   bool snapshot_disable_done;     // 100ms 级联已触发（去重）
 
-  // 轨迹归属由 active、目标 ID 与可动状态派生，不另存归属标志。
-  motor_control_trajectory_t trajectory;
-  // 受理时预计算切矢（rad/s）；端点为 0，内部采用 Fritsch–Carlson
-  // 加权调和平均并限幅，避免分段超调。2ms 边界仅求值。
-  // 静态放入 RAM_D1 .bss；该表还传递跨消息分段的边界速度，不可逐段重算。
-  float trajectory_tangent_rad_s[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
-  bool trajectory_active;
-  bool trajectory_agent_mode; // 新协议要求任一目标失去授权/100ms反馈即整条中止
-  uint32_t trajectory_start_tick_ms; // 起点 = 受理时刻的本地单调时基
-  uint32_t trajectory_accepted_count;
-  uint32_t trajectory_rejected_count;
   uint32_t policy_accepted_count;
   uint32_t policy_rejected_count;
 

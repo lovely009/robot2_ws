@@ -156,8 +156,10 @@ static void test_p2_reservation_and_physical_budget() {
 
   const motor_tx_router_stats_t stats =
       motor_tx_router_pump(&router, &scheduler, 0U, capture_submit, &capture);
-  assert(stats.p1_logical_frames ==
-      MOTOR_TX_ROUTER_LOGICAL_CAPACITY - CAN_TX_P2_PUMP_QUOTA);
+  const uint8_t expected_p1 = CAN_TX_P1_SLOTS < (MOTOR_TX_ROUTER_LOGICAL_CAPACITY - CAN_TX_P2_PUMP_QUOTA)
+      ? CAN_TX_P1_SLOTS
+      : (MOTOR_TX_ROUTER_LOGICAL_CAPACITY - CAN_TX_P2_PUMP_QUOTA);
+  assert(stats.p1_logical_frames == expected_p1);
   assert(stats.p2_logical_frames == CAN_TX_P2_PUMP_QUOTA);
   assert(stats.physical_attempts <= MOTOR_TX_ROUTER_PHYSICAL_BUDGET);
   assert(capture.count == stats.physical_attempts);

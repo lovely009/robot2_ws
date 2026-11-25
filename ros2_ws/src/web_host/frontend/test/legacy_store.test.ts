@@ -39,11 +39,11 @@ it("电机出现后汇总持续使用 MCU 状态更新，不停留在空列表",
   store.conn.connected = true;
   for (const { motor_id } of states) store.motors.set(motor_id, {});
   expect(applyControlState(store.controlStates,
-    { schema_version: 2, session_id: 100, sequence: 1, states })).toBe(true);
+    { schema_version: 6, session_id: 100, sequence: 1, control_states: states })).toBe(true);
   expect(countMotors()).toEqual({ total: 2, online: 2, active: 0, fault: 0, conflict: 0 });
   states[1]!.online = false;
   expect(applyControlState(store.controlStates,
-    { schema_version: 2, session_id: 100, sequence: 2, states })).toBe(true);
+    { schema_version: 6, session_id: 100, sequence: 2, control_states: states })).toBe(true);
   expect(countMotors()).toMatchObject({ total: 2, online: 1, active: 0 });
 });
 
@@ -146,7 +146,7 @@ it("传动组 metadata 保留耦合关系，选择不被压平成 motor 对 join
 });
 
 const commandFrame = () => ({model:'half_body_robot',joint_names:['elbow'],mode:'stopped',
-  output_topic:'/motor/host_command_array',
+  output_topic:'/motor/command',
   trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
   gravity_enabled:null,effort_gain:null,feedback_fresh:false,controllers_ready:false,active_controllers:[]});
 

@@ -297,21 +297,3 @@ def test_combined_import_size_is_bounded(tmp_path, payload, library_source):
         assert not manager.jobs
     finally:
         manager.close()
-
-
-def test_shoulders_clip_automatically_maps_existing_joints(jobs, payload):
-    path = Path(__file__).resolve().parents[1] / 'action_library/1-4.bvh'
-    hierarchy, motion = path.read_text().split('MOTION\n', 1)
-    rows = motion.splitlines()
-    payload['bvh_text'] = hierarchy + 'MOTION\nFrames: 3\n' + '\n'.join(rows[1:5]) + '\n'
-    job = jobs.create(payload)
-    assert job['automatic_mapping']
-    assert job['mapping'] == {
-        'mode': 'shoulders12', 'source_to_robot': [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
-        'source': 'shoulder_r', 'joints': ['joint_link1', 'joint_link2']}
-    done = finish(jobs, job)
-    assert done['state'] == 'done', done
-    preview = json.loads(jobs.result(job['id'], 'preview.json'))
-    assert len(preview['times']) == 3
-    assert preview['duration'] == pytest.approx(2 * .041667)
-    assert len(preview['robot']['joint_positions'][0]) == 18

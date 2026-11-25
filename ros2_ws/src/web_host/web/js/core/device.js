@@ -3,8 +3,8 @@
 // 自动读取不能住在面板里：store.paramCache 是使能面板列电机列表的依据，
 // 切到「运行」屏时设备屏并未挂载。
 import { store, markDirty, DIRTY, paramReadState } from './store.js';
-import { SYS_CMD, MOTOR_ID_NONE } from './format.js';
-import { pub, isConnected, waitDevParamSeq, waitConfigResult, getConnectionGeneration } from './ros.js';
+import { SYS_CMD, MOTOR_ID_NONE, nsToHeader } from './format.js';
+import { executeConfig, fetchDeviceInfo, isConnected, getConnectionGeneration } from './ros.js';
 import { describeMotorState, policyControlError } from './motor_state.js';
 
 // 查询/维护事务的关联 id。两个高位都不能碰：bit31 是内核身份读取的命名空间，bit30 是
@@ -17,22 +17,15 @@ function nextParamReq() {
 
 const CONFIG_STATUS = {PENDING: 0, SUCCEEDED: 1, FAILED: 2, BUSY: 3, CONFLICT: 4};
 
-async function waitRequest(requestId, timeoutMs, label) {
-  const outcome = await waitConfigResult(requestId, timeoutMs);
-  if (outcome.outcome !== 'terminal') {
-    return {ok: false, outcome: outcome.outcome, text: `${label}：${{
-      timeout: '等待设备终态超时（设备可能仍在处理，不能据此判断已回滚）',
-      disconnected: '连接中断，未收到本次请求终态',
-      session_changed: '设备会话已更换，旧请求等待失效',
-      invalid_request: 'request_id 无效',
-    }[outcome.outcome] || '请求未完成'}`};
-  }
-  const result = outcome.result;
+function formatConfigResult(result, label) {
+  if (!result) return {ok: false, outcome: 'timeout', text: `${label}：服务未返回结果`};
   if (Number(result.status) === CONFIG_STATUS.SUCCEEDED) {
     return {ok: true, result, text: `${label}成功（完成 ${result.completed_targets} 项）`};
   }
-  const statusText = Number(result.status) === CONFIG_STATUS.BUSY ? '设备忙' :
-    Number(result.status) === CONFIG_STATUS.CONFLICT ? 'request_id 冲突' : '设备拒绝';
+  const statusText = Number(result.status) === CONFIG_STATUS.PENDING
+    ? '等待设备终态超时（设备可能仍在处理，不能据此判断已回滚）'
+    : Number(result.status) === CONFIG_STATUS.BUSY ? '设备忙'
+    : Number(result.status) === CONFIG_STATUS.CONFLICT ? 'request_id 冲突' : '设备拒绝';
   return {ok: false, outcome: 'failed', result,
     text: `${label}${statusText}：error_code=${result.error_code}，` +
       `失败 ${result.failed_targets} 项 / 完成 ${result.completed_targets} 项`};
@@ -45,22 +38,35 @@ export function writeResult(key, ok, text) {
 }
 export function setParamResult(ok, text) { writeResult('paramResult', ok, text); }
 
-// 下发一条稀疏写（整条受理或整条拒绝）。返回 request_id，失败返回 0。
-export function sendSystemCommand(command, motorId) {
-  if (![SYS_CMD.REFRESH, SYS_CMD.SET_ZERO, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT, SYS_CMD.SAVE_DEVICE].includes(command)) return 0;
-  if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return 0; }
-  if (command === SYS_CMD.SET_ZERO || command === SYS_CMD.SAVE_DEVICE) {
-    const error = command === SYS_CMD.SET_ZERO ? motorZeroError(motorId) : motorDeviceParameterError(motorId);
-    if (error) {setParamResult(false, error);return 0;}
+async function runConfigService(request, timeoutMs, label) {
+  try {
+    const result = await executeConfig(request, timeoutMs);
+    return formatConfigResult(result, label);
+  } catch (error) {
+    return {ok: false, outcome: 'error', text: `${label}：${error?.message || '服务调用失败'}`};
   }
-  const syncTime=store.controlStates.sourceTimeNs || 0;
-  if (command!==SYS_CMD.REPORT && !syncTime) {setParamResult(false,'尚未收到 MCU 同步源时间，未发送维护请求');return 0;}
-  const request_id = nextParamReq();
-  const sent = pub('sysCmd', {
-    sync_time_ns: syncTime, request_id, command,
+}
+
+async function runSystemCommand(command, motorId, timeoutMs, label) {
+  if (![SYS_CMD.REFRESH, SYS_CMD.SET_ZERO, SYS_CMD.CLEAR_FAULT, SYS_CMD.REPORT, SYS_CMD.SAVE_DEVICE, SYS_CMD.SYNC_W25].includes(command)) {
+    return {ok: false, text: `${label}：未知系统命令`};
+  }
+  if (!isConnected()) { setParamResult(false, '未连接 rosbridge'); return null; }
+  const syncTime = store.controlStates.sourceTimeNs || 0;
+  if (command !== SYS_CMD.REPORT && !syncTime) {
+    setParamResult(false, '尚未收到 MCU 同步源时间，未发送维护请求');
+    return null;
+  }
+  return runConfigService({
+    header: nsToHeader(syncTime),
+    session_id: Number(store.configSessionId) || 0,
+    request_id: nextParamReq(),
+    kind: 1,
+    count: 0,
+    targets: [],
+    command,
     motor_id: motorId === undefined ? MOTOR_ID_NONE : motorId,
-  });
-  return sent ? request_id : 0;
+  }, timeoutMs, label);
 }
 
 const zeroRequests = new Set();
@@ -105,14 +111,19 @@ export async function setMotorDirection(id, value) {
   // 确认期间状态可能变化，发送前重新检查。
   const changed = motorDeviceParameterError(id);
   if (changed) {setParamResult(false,changed);return;}
-  const requestId = nextParamReq();
-  if (!pub('deviceConfig',{sync_time_ns:store.controlStates.sourceTimeNs,
-    session_id:store.configSessionId,request_id:requestId,kind:0,count:1,
-    targets:[{motor_id:id,field:5,value}],command:0,motor_id:MOTOR_ID_NONE})) return;
   deviceRequests.add(id);
   setParamResult(true,`电机 ${id} 方向已请求，等待设备回读核验…`);
   try {
-    const result = await waitRequest(requestId,10000,`电机 ${id} 方向设置`);
+    const result = await runConfigService({
+      header: nsToHeader(store.controlStates.sourceTimeNs),
+      session_id: Number(store.configSessionId) || 0,
+      request_id: nextParamReq(),
+      kind: 0,
+      count: 1,
+      targets: [{motor_id: id, field: 5, value}],
+      command: 0,
+      motor_id: MOTOR_ID_NONE,
+    }, 10000, `电机 ${id} 方向设置`);
     setParamResult(result.ok,result.ok ? `电机 ${id} 方向已回读核验；方向易失，断电后需重新设置` : result.text);
   } finally {deviceRequests.delete(id);markDirty(DIRTY.PARAMS);}
 }
@@ -121,12 +132,11 @@ export async function saveMotorDeviceParameters(id) {
   const error = motorDeviceParameterError(id);
   if (error) {setParamResult(false,error);return;}
   if (!window.confirm(`保存电机 ${id} 的驱动板参数？\n仅保存位置上下限、速度与电流上限；不保存方向，不写控制板存储。`)) return;
-  const requestId = sendSystemCommand(SYS_CMD.SAVE_DEVICE,id);
-  if (!requestId) return;
   deviceRequests.add(id);
   setParamResult(true,`电机 ${id} 驱动板保存已请求，等待设备事务终态…`);
   try {
-    const result = await waitRequest(requestId,10000,`电机 ${id} 驱动板保存`);
+    const result = await runSystemCommand(SYS_CMD.SAVE_DEVICE, id, 10000, `电机 ${id} 驱动板保存`);
+    if (!result) return;
     setParamResult(result.ok,result.ok ? `电机 ${id} 已完成发送驱动板保存指令；厂家协议无保存应答，未验证掉电保持` : result.text);
   } finally {deviceRequests.delete(id);markDirty(DIRTY.PARAMS);}
 }
@@ -135,12 +145,11 @@ export async function setMotorZero(id) {
   const error = motorZeroError(id);
   if (error) {setParamResult(false,error);return;}
   if (!window.confirm(`将电机 ${id} 的当前位置设为设备零点？\n设备位置限位对应的机械位置会随零点改变，请确认当前姿态与机械行程。`)) return;
-  const requestId = sendSystemCommand(SYS_CMD.SET_ZERO,id);
-  if (!requestId) return;
   zeroRequests.add(id);
   setParamResult(true,`电机 ${id} 设零已请求，等待设备确认…`);
   try {
-    const result = await waitRequest(requestId,10000,`电机 ${id} 设零`);
+    const result = await runSystemCommand(SYS_CMD.SET_ZERO, id, 10000, `电机 ${id} 设零`);
+    if (!result) return;
     setParamResult(result.ok,result.ok
       ? `电机 ${id} 设零成功（设备已确认），请核对实际位置与机械行程`
       : result.text + (Number(result.result?.error_code) === 5
@@ -148,26 +157,17 @@ export async function setMotorZero(id) {
   } finally {zeroRequests.delete(id);markDirty(DIRTY.PARAMS);}
 }
 
-// 读取 = 发 SystemCommand(REPORT)，固件把**当前手里的参数视图**立刻发一帧
-// device_param_report（不触发 SDO、不访问设备）。电机在线且此前核对过，
+// 读取 = 调 ExecuteConfig(REPORT)，固件把**当前手里的参数视图**立刻发一帧
+// device_info（不触发 SDO、不访问设备）。电机在线且此前核对过，
 // dev_* 就是驱动板真值；电机不在线/没核对，dev_* 为 NaN，页面呈现 rec_*
 // 即上电初始化基准。帧到达后订阅回调自行渲染，这里只等帧、给结论。
 export async function loadParams() {
   if (!isConnected()) return;
-  const before = store.devParamSeq;
-  const requestId = sendSystemCommand(SYS_CMD.REPORT, MOTOR_ID_NONE);
-  if (!requestId) return;
   setParamResult(true, '读取中…');
-  const request = await waitRequest(requestId, 6000, '参数读取请求');
-  if (!request.ok) { setParamResult(false, request.text); return; }
-  // REPORT 的 SUCCEEDED 只表示桥已 take 报告请求，必须再等实际数据帧。
-  const rc = await waitDevParamSeq(before, 2000);
-  if (rc === -2) {
-    setParamResult(false, '读取失败：未连接 rosbridge');
-    return;
-  }
-  if (rc === -3) {
-    setParamResult(false, '读取超时：未收到 device_param_report——固件/agent 未就绪？');
+  try {
+    await fetchDeviceInfo(0);
+  } catch (error) {
+    setParamResult(false, `读取失败：${error?.message || '未收到 device_info——固件/agent 未就绪？'}`);
     return;
   }
   const states = [...store.paramCache.keys()].map(id => ({id, ...paramReadState(id)}));
@@ -182,15 +182,21 @@ export async function loadParams() {
     `${states.length - withDev} 台含固件记录回落值。`);
 }
 
+export async function syncW25() {
+  if (!isConnected()) return;
+  setParamResult(true, '正在同步参数到 W25 缓存…');
+  const result = await runSystemCommand(SYS_CMD.SYNC_W25, MOTOR_ID_NONE, 10000, '同步到 W25 缓存');
+  if (result) setParamResult(result.ok, result.text);
+}
+
 export async function refreshMotorParams() {
   if (!isConnected()) return;
   const ids = [...new Set([...store.motors.keys(), ...store.paramCache.keys()])].sort((a, b) => a - b);
   const id = ids.includes(store.selectedId) ? store.selectedId : ids[0];
   if (id === undefined) { setParamResult(false, '尚未发现电机，无法回读参数'); return; }
-  const requestId = sendSystemCommand(SYS_CMD.REFRESH, id);
-  if (!requestId) return;
   setParamResult(true, `正在回读电机 ${id} 的驱动板参数…`);
-  const request = await waitRequest(requestId, 6000, '电机参数回读');
+  const request = await runSystemCommand(SYS_CMD.REFRESH, id, 6000, '电机参数回读');
+  if (!request) return;
   if (!request.ok) {
     setParamResult(false, request.result?.error_code === 12
       ? `电机 ${id} 尚未识别型号或未绑定，固件拒绝回读（error_code=12）。请先检查设备身份读取与型号绑定。`
@@ -210,10 +216,9 @@ export async function clearMotorFault(id) {
     '· 清完仍须显式使能 + 新的完整快照/轨迹才可能回运动');
   if (!ok) return;
 
-  const requestId = sendSystemCommand(SYS_CMD.CLEAR_FAULT, id);
-  if (!requestId) return;
   setParamResult(true, `电机 ${id} 故障清除已请求…`);
-  const result = await waitRequest(requestId, 10000, `电机 ${id} 故障清除`);
+  const result = await runSystemCommand(SYS_CMD.CLEAR_FAULT, id, 10000, `电机 ${id} 故障清除`);
+  if (!result) return;
   if (!result.ok) { setParamResult(false, result.text); return; }
   setParamResult(true, `电机 ${id} 故障清除已受理：厂家故障需设备状态帧回报 ` +
     'fault_active=false 才收敛到 READY_DISABLED，届时再显式使能');

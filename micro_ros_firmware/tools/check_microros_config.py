@@ -65,7 +65,7 @@ def _meta_macro_values():
         )
     return {
         match.group(1): int(match.group(2))
-        for match in re.finditer(r"-D(RMW_UXRCE_[A-Z_]+)=(\d+)", text)
+        for match in re.finditer(r"-D((?:RMW_UXRCE|UCLIENT)_[A-Z_]+)=(\d+)", text)
     }
 
 
@@ -109,6 +109,20 @@ def _check():
             "这是库用旧配置构建过的证据——meta 改了但库没重建。\n\n%s"
             % (config_path, SLOT_CONSEQUENCE[macro], REPAIR_GUIDANCE),
         )
+
+    # --- MTU 校验 ---
+    required_mtu = expected.get("UCLIENT_CUSTOM_TRANSPORT_MTU")
+    uxr_config_path = os.path.join(libmicroros, "include", "uxr", "client", "config.h")
+    if required_mtu is not None and os.path.exists(uxr_config_path):
+        with open(uxr_config_path, "r", encoding="utf-8", errors="replace") as handle:
+            uxr_text = handle.read()
+        mtu_match = re.search(r"^#define\s+UXR_CONFIG_CUSTOM_TRANSPORT_MTU\s+(\d+)", uxr_text, re.M)
+        if mtu_match is not None and int(mtu_match.group(1)) < required_mtu:
+            _fail(
+                "micro-ROS 库配置不符：UXR_CONFIG_CUSTOM_TRANSPORT_MTU = %d（meta 要求 %d）"
+                % (int(mtu_match.group(1)), required_mtu),
+                "  %s\n\n%s" % (uxr_config_path, REPAIR_GUIDANCE),
+            )
 
     # --- STREAM_HISTORY：结构校验（input/output 必须成对） ---
     required_stream = expected.get(STREAM_HISTORY_MACRO)

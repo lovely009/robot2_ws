@@ -6,7 +6,7 @@ function state() {
     modelJoints: [{name:'yaw',type:'revolute',lower:-1,upper:1},{name:'pitch',type:'revolute',lower:-1,upper:1}],
     transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['yaw','pitch'],joint_limits:{yaw:{lower:-1,upper:1},pitch:{lower:-1,upper:1}}}},
     commandStatus:{last:1000,data:{model:'arm',joint_names:['yaw','pitch'],mode:'trajectory',
-      output_topic:'/motor/host_command_array',
+      output_topic:'/motor/command',
       feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',gravity_enabled:true}},
     jointStates:{byName:{yaw:{position:.2,at:1000},pitch:{position:.1,at:1000}}},
     motors:new Map([[8,{status:{online:true,lifecycle:4,unified_fault_code:0}}],[9,{status:{online:true,lifecycle:4,unified_fault_code:0}}]])};
@@ -144,9 +144,40 @@ it('opens topology joints using explicit host groups for a partial motor session
   expect(api.controlSessionError(s,'arm',1100)).toBe('');
   expect(api.buildJointTarget(s,'arm',{name:'yaw'},.3,1100).position).toEqual([.3]);
   expect(api.jointControlError(s,'arm','pitch',1100)).toContain('未接入');
-  expect(api.rawCouplingError(s,'arm',[8])).toContain('待标定');
+  expect(api.rawCouplingError(s,'arm',[8])).toContain('wrist');
   s.transmissionStatus.last=1;
   expect(api.jointControlError(s,'arm','yaw',3000)).toContain('过期');
+});
+
+it('allows direct-mapped JSON motor commands in HIL and blocks coupled or unready ones', () => {
+  const s = state();
+  Object.assign(s.modelTransmissions, {hardware_ready:false, hardware_block_reason:'传动参数待标定'});
+  s.modelTransmissions.groups.push({name:'direct_1',motors:[{id:1}],joints:['waist_yaw']});
+  expect(api.rawCouplingError(s,'arm',[1])).toBe('传动参数待标定');
+  Object.assign(s.transmissionStatus.data,{control_groups:[
+    {name:'direct_1',motors:[{id:1}],joints:['waist_yaw']},
+    {name:'wrist',motors:[{id:8},{id:9}],joints:['yaw','pitch']},
+  ]});
+  expect(api.rawCouplingError(s,'arm',[1])).toBe('');
+  expect(api.rawCouplingError(s,'arm',[8])).toContain('wrist');
+  expect(api.rawCouplingError(s,'arm',[99])).toContain('m99');
+  delete (s.transmissionStatus.data as any).control_groups;
+  expect(api.rawCouplingError(s,'arm',[1])).toBe('传动参数待标定');
+});
+
+it('surfaces HIL feedback error/reason when HIL simulation is running without control_groups', () => {
+  const s: any = state();
+  Object.assign(s.modelTransmissions, {hardware_ready:false, hardware_block_reason:'传动参数待标定'});
+  delete s.transmissionStatus.data.control_groups;
+  s.bench = {
+    simulation: {state:'running', config:{controller_mode:'firmware', model:'arm'}},
+    feedback: {error:'关节反馈连续启动失败', reason:'等待电机故障清除'},
+  };
+  expect(api.controlSessionError(s,'arm',1100)).toBe('HIL 控制会话未就绪：关节反馈连续启动失败');
+  s.bench.feedback.error = '';
+  expect(api.controlSessionError(s,'arm',1100)).toBe('HIL 控制会话未就绪：等待电机故障清除');
+  s.bench.simulation.state = 'stopped';
+  expect(api.controlSessionError(s,'arm',1100)).toBe('传动参数待标定');
 });
 
 it.each([

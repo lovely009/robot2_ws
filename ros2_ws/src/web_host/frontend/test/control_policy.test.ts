@@ -5,7 +5,7 @@ const api=await import('../../web/js/core/control_policy.js');
 const motor=await import('../../web/js/core/motor_state.js');
 function state(){
   const cache=motor.createControlStateCache();
-  motor.applyControlState(cache,{schema_version:2,session_id:100,sequence:1,states:[{
+  motor.applyControlState(cache,{schema_version:6,session_id:100,sequence:1,control_states:[{
     motor_id:2,online:true,control_lifecycle:2,execution_state:1,policy_enabled:false,
     motion_enabled:false,state_age_ms:5,unified_fault_code:0,vendor_fault_code:0,last_failure_reason:0,policy_generation:1}]},1000);
   return {conn:{connected:true},policy:new Map(),motors:new Map([[2,{}]]),controlStates:cache,
@@ -13,7 +13,7 @@ function state(){
       {name:'direct',joints:['elbow'],motors:[{id:2}]},
       {name:'wrist',joints:['yaw','pitch'],motors:[{id:8},{id:9}]}]},
     transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['elbow']}},
-    commandStatus:{last:1000,data:{model:'arm',joint_names:['elbow'],output_topic:'/motor/host_command_array',
+    commandStatus:{last:1000,data:{model:'arm',joint_names:['elbow'],output_topic:'/motor/command',
       feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}}};
 }
 it('enables the online model motors using model gains',()=>{

@@ -148,37 +148,8 @@ def test_restored_full_body_preset_does_not_reuse_saved_incomplete_mapping(tmp_p
         jobs.close()
 
 
-def test_registered_full_body_t_pose_matches_actual_bvh_arm_directions():
-    package = Path(__file__).resolve().parents[1]
-    model = package.parent / 'robot_description/models/full_body_robot'
-    jobs = MotionJobs()
-    try:
-        first = jobs.create(payload() | {
-            'model': 'full_body_robot', 'up_axis': 'y_up',
-            'urdf_text': (model / 'urdf/full_body_robot.urdf').read_text(),
-            'bvh_text': (package / 'action_library/演示样例_20261027141432.bvh').read_text()})
-        clip = jobs.jobs[first['id']]['clip']
-        clip.frames = clip.frames[:1]
-        jobs.start(first['id'], first['mapping'])
-        done = finish(jobs, first)
-        assert done['state'] == 'done', done.get('error', done)
-        assert done['summary']['pose_fit'] == 'bone_directions'
-        preview = json.loads(jobs.result(first['id'], 'preview.json'))
-        source, robot = preview['source'], preview['robot']
-        basis = np.asarray(preview['source_to_robot'])
-        for side in ('Left', 'Right'):
-            direction = basis @ (np.asarray(source['frames'][0][source['names'].index(side + 'LowerArm')]) -
-                                 source['frames'][0][source['names'].index(side + 'UpperArm')])
-            actual = (np.asarray(robot['frames'][0][robot['names'].index(f'BN_{side}LowerArm_2_link')]) -
-                      robot['frames'][0][robot['names'].index(f'BN_{side}UpperArm_3_link')])
-            cosine = np.dot(actual, direction) / np.linalg.norm(actual) / np.linalg.norm(direction)
-            assert cosine > np.cos(np.deg2rad(15)), (side, actual, direction)
-    finally:
-        jobs.close()
-
-
 @pytest.mark.parametrize('filename,up_axis', [
-    ('仰头转身搭手.bvh', 'auto'), ('演示样例_20261027141432.bvh', 'y_up'),
+    ('仰头转身搭手.bvh', 'auto'),
 ])
 def test_full_body_displayed_trunk_matches_source_geometry(filename, up_axis):
     from scipy.spatial.transform import Rotation

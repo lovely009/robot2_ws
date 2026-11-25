@@ -9,7 +9,6 @@
 #include <cstring>
 
 #include "agent_control_gate.h"
-#include "trajectory_transaction.hpp"
 #include "time_utils.h"
 #include "can4_spi.h"
 #include "can_bsp.h"
@@ -27,12 +26,6 @@ static_assert(MOTOR_CONTROL_MAX_MOTORS == CAN_TX_P1_SLOTS,
     "P1 调度槽数必须与注册表容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS,
     "内核快照目标容量必须与注册表容量一致");
-static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_POINTS ==
-    CONTROL_TRAJECTORY_MAILBOX_MAX_POINTS,
-    "轨迹点数容量必须与 mailbox 容量一致");
-static_assert(MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS ==
-    CONTROL_TRAJECTORY_MAILBOX_MAX_MOTORS,
-    "轨迹电机容量必须与 mailbox 容量一致");
 static_assert(MOTOR_CONTROL_MAX_MOTORS == CONTROL_POLICY_MAILBOX_MAX_TARGETS,
     "策略容量必须与注册表容量一致");
 
@@ -63,7 +56,6 @@ static motor_control_context_t *const g_motor_control =
     motor_control_instance();
 static control_mailbox_t g_control_mailbox;
 static agent_control_gate_t g_agent_gate;
-static trajectory_transaction::Coordinator g_trajectory;
 static bool g_clock_requested = false;
 
 // boot 存储参数（start 时从 storage 任务快照；控制边界套用到内核）。
@@ -111,75 +103,6 @@ bool motor_rt_submit_command(const control_command_snapshot_t *snapshot) {
   return ok;
 }
 
-// 调用方已持短临界区；租约不能只看上一服务拍缓存的 bool。
-static bool trajectory_gate_allowed(uint32_t now_ms) {
-  const agent_link_t &link = g_agent_gate.link;
-  return control_lease_allows(&g_agent_gate.authority, g_agent_gate.authority.lease_id, now_ms) &&
-      link.connected && link.clock_valid && g_clock_requested &&
-      !link.stop_pending && link.lease_valid && link.authorized &&
-      g_agent_gate.kernel_authorized && link.have_command &&
-      now_ms - link.command_tick_ms <= 30U;
-}
-
-bool motor_rt_submit_agent_trajectory(const agent_trajectory_request_t *request) {
-  if (request == nullptr) return false;
-  const uint32_t now_ms = millis();
-  taskENTER_CRITICAL();
-  bool ok = false;
-  if (request->operation == AGENT_TRAJECTORY_ACK) {
-    // ACK 不占请求号，也不刷新授权；互斥载荷仍须为空。
-    if (request->request_id == 0U && request->trajectory_id == 0U &&
-        request->segment_index == 0U && request->segment_count == 0U &&
-        request->target_count == 0U && request->point_count == 0U) {
-      ok = g_trajectory.ack(request->session_id, request->ack_request_id,
-          request->ack_terminal_trajectory_id);
-    }
-  } else {
-    using namespace trajectory_transaction;
-    Receipt receipt{};
-    const bool motion = request->operation == AGENT_TRAJECTORY_LOAD ||
-        request->operation == AGENT_TRAJECTORY_COMMIT;
-    // 已受理请求必须先走幂等路径：过期重发只读旧收据，不重新执行。
-    const bool fresh = request->request_id > g_trajectory.status().request_high_water;
-    if (motion && fresh && (!trajectory_gate_allowed(now_ms) ||
-        !control_lease_allows(&g_agent_gate.authority, request->lease_id, now_ms))) {
-      receipt = g_trajectory.reject(*request, REASON_GATE);
-    } else if (motion && fresh && request->operation == AGENT_TRAJECTORY_LOAD &&
-        request->target_count <= 48U &&
-        !motor_control_trajectory_targets_healthy(g_motor_control,
-            request->target_ids, request->target_count, now_ms)) {
-      receipt = g_trajectory.reject(*request, REASON_MEASUREMENT);
-    } else if (request->operation == AGENT_TRAJECTORY_LOAD) {
-      receipt = g_trajectory.load(*request, now_ms);
-    } else if (request->operation == AGENT_TRAJECTORY_COMMIT) {
-      receipt = g_trajectory.commit(*request, now_ms);
-    } else if (request->operation == AGENT_TRAJECTORY_CANCEL) {
-      receipt = g_trajectory.cancel(*request);
-    } else {
-      receipt = g_trajectory.reject(*request, REASON_INVALID);
-    }
-    ok = receipt.state == AGENT_TRAJECTORY_PENDING ||
-        receipt.state == AGENT_TRAJECTORY_ACCEPTED;
-  }
-  if (!ok) ++g_control_mailbox.trajectory_rejected_count;
-  taskEXIT_CRITICAL();
-  return ok;
-}
-
-void motor_rt_copy_agent_trajectory(agent_trajectory_status_t *out) {
-  if (out == nullptr) return;
-  taskENTER_CRITICAL();
-  *out = g_trajectory.status();
-  taskEXIT_CRITICAL();
-}
-
-bool motor_rt_agent_trajectory_owns(uint16_t motor_id) {
-  taskENTER_CRITICAL();
-  const bool owned = g_trajectory.owns(motor_id);
-  taskEXIT_CRITICAL();
-  return owned;
-}
-
 bool motor_rt_submit_policy(const control_policy_snapshot_t *snapshot) {
   taskENTER_CRITICAL();
   const bool ok = agent_gate_submit_policy(&g_agent_gate, &g_control_mailbox,
@@ -209,7 +132,6 @@ void motor_rt_set_agent_connected(bool connected) {
 void motor_rt_begin_agent_session(uint64_t session_id) {
   taskENTER_CRITICAL();
   agent_gate_begin_session(&g_agent_gate, &g_control_mailbox, session_id);
-  g_trajectory.begin_session(session_id);
   taskEXIT_CRITICAL();
 }
 
@@ -303,16 +225,6 @@ size_t motor_rt_drain_events(motor_control_event_t *out, size_t capacity) {
   return count;
 }
 
-void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out) {
-  if (out == nullptr) {
-    return;
-  }
-  const uint32_t now_ms = millis();
-  taskENTER_CRITICAL();
-  motor_control_copy_trajectory_state(g_motor_control, out, now_ms);
-  taskEXIT_CRITICAL();
-}
-
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   if (out == nullptr) {
     return;
@@ -330,9 +242,6 @@ void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out) {
   // 拒绝计数包含外层授权/会话拒绝与内层非法载荷，两者均未进入内核。
   out->mailbox_rejected_command = g_control_mailbox.command_rejected_count +
       g_control_mailbox.command.invalid_snapshot_count;
-  out->mailbox_rejected_trajectory =
-      g_control_mailbox.trajectory_rejected_count +
-      g_control_mailbox.trajectory.invalid_trajectory_count;
   out->mailbox_rejected_policy = g_control_mailbox.policy_rejected_count +
       g_control_mailbox.policy.invalid_policy_count;
   for (uint8_t bus = 0U; bus < MOTOR_CONTROL_MAX_BUSES; ++bus) {
@@ -534,12 +443,8 @@ static void control_boundary(uint32_t now_ms) {
   taskENTER_CRITICAL();
   agent_gate_step(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms,
       clock_valid && g_clock_requested);
-  // 只在控制边界消费 COMMIT/CANCEL；组装区直接借给内核，无全量转换副本。
-  g_trajectory.boundary(g_motor_control, now_ms,
-      clock_valid && trajectory_gate_allowed(now_ms));
   taskEXIT_CRITICAL();
-  // 快照通道的边界保持重发：与 trajectory_step 同拍、覆盖互斥的电机集合，
-  // 两者合计使每个边界每台恰好产生一帧 P1（见 motor_control.h 的说明）。
+  // 快照通道的边界保持重发与线性插帧，每边界每台恰好产生一帧 P1。
   motor_control_hold_step(g_motor_control, now_ms);
 
   // 配置 FIFO 有界转发（每边界至多 kConfigDrainPerBoundary 条，不阻塞节拍）。
@@ -625,12 +530,9 @@ static void motor_rt_task_fn(void *pv_parameters) {
     const uint32_t now_ms = millis(); // 以完成 RX 后的实际时间判断授权到期
     const bool clock_valid = time_clock_valid();
     taskENTER_CRITICAL();
-    const uint8_t safety_action = agent_gate_service(&g_agent_gate,
+    (void)agent_gate_service(&g_agent_gate,
         &g_control_mailbox, g_motor_control, now_ms,
         clock_valid && g_clock_requested);
-    if (safety_action != 0U)
-      g_trajectory.abort(trajectory_transaction::REASON_STOPPED);
-    g_trajectory.poll(now_ms);
     agent_gate_admit_command(&g_agent_gate, &g_control_mailbox, g_motor_control, now_ms);
     taskEXIT_CRITICAL();
     // 配置周期的控制边界：按 millis 差触发，不补发过期边界。

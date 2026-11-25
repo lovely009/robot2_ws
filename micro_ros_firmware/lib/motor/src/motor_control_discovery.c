@@ -24,6 +24,7 @@ static void latch_config_conflict(motor_control_context_t *ctx,
   entry->motion_enabled = false;
   entry->enable_pending = false;
   entry->has_target = false;
+  entry->has_prev_target = false;
   entry->motion_authorized = false;
   // policy_enable 一并冻结：即使全局授权与新快照随后到达，也必须等待
   // motion_authorized，若 policy_enable 残留 true，锁存清除后仅重发全局授权
@@ -140,6 +141,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
     entry->motion_enabled = false;
     entry->enable_pending = false;
     entry->has_target = false;
+    entry->has_prev_target = false;
     entry->motion_authorized = false;
     entry->unified_fault_code = MOTOR_CONTROL_FAULT_NONE;
     entry->last_failure_reason = MOTOR_CONTROL_FAULT_NONE;
@@ -226,6 +228,7 @@ void motor_control_on_raw_frame(motor_control_context_t *ctx,
       entry->motion_enabled = false;
       entry->enable_pending = false;
       entry->has_target = false;
+      entry->has_prev_target = false;
       entry->motion_authorized = false;
       // policy_enable 一并冻结（ARD §36）：故障清除后不得仅凭全局
       // 再授权 + 新快照自动复运动，必须显式 SET_ENABLE(true)。

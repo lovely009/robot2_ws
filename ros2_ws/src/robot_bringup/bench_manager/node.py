@@ -35,7 +35,7 @@ from rcl_interfaces.msg import SetParametersResult
 from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.parameter import Parameter
 from std_msgs.msg import String, Empty
-from can_bridge_msgs.msg import MotorControlStateArray
+from can_bridge_msgs.msg import MotorSystemState
 
 from bench_msgs.srv import (
     GetAgentStatus,
@@ -177,7 +177,7 @@ class BenchManager(LifecycleNode):
         self._status_pub = self.create_publisher(String, '/bench/status', 10)
         self._feedback_stop_pub = self.create_publisher(Empty, '/control/stop', 10)
         self._feedback_inventory_sub = self.create_subscription(
-            MotorControlStateArray, '/motor/control_states', self._feedback_inventory.observe, 10)
+            MotorSystemState, '/motor/state', self._feedback_inventory.observe, 10)
         self._control_status_sub = self.create_subscription(
             String, '/control/status', self._on_control_status, 10)
         for srv_type, name, callback in (
@@ -317,7 +317,8 @@ class BenchManager(LifecycleNode):
                 config.get('model', '') if hil else self.get_parameter('feedback_model').value,
                 agent_running=self.agent.status()['state'] == 'running',
                 simulation_running=simulation_running, firmware_simulation=hil,
-                external_publishers=external, motor_ids=motor_ids, session_id=session_id)
+                external_publishers=external, motor_ids=motor_ids, session_id=session_id,
+                faulted_motor_ids=self._feedback_inventory.faulted())
             self._feedback_error = ''
         except _EXPECTED_ERRORS as exc:
             self._feedback_error = str(exc)
@@ -500,6 +501,7 @@ class BenchManager(LifecycleNode):
     # ---------- ros2_control 重力前馈 ----------
 
     def _on_control_status(self, message):
+        before = self.feedforward.status()
         try:
             status = json.loads(message.data)
             self.feedforward.observe(status)
@@ -507,7 +509,8 @@ class BenchManager(LifecycleNode):
         except (ValueError, TypeError) as exc:
             self.feedforward.invalidate_status(str(exc))
             self.feedback.observe_control_status(None)
-        self._publish_status()
+        if self.feedforward.status() != before:
+            self._publish_status()
 
     def _finish_gravity(self, response, action, callback):
         try:

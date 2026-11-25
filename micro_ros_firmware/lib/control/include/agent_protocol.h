@@ -10,6 +10,8 @@ extern "C" {
 
 #define AGENT_LINK_SOFT_STOP 1U
 #define AGENT_LINK_REVOKE 2U
+#define AGENT_COMMAND_SOFT_STOP_MS 100U
+#define AGENT_COMMAND_REVOKE_MS 200U
 
 // Stable wire opcode numbers; runtime parameter writes remain allow-listed in
 // param_bridge (currently direction only) and SAVE targets one driver board.

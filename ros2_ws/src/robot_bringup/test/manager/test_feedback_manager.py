@@ -501,22 +501,28 @@ def test_hil_simulation_mapping_requires_standalone_urdf(setup_feedback):
     assert not [c for c in fake.commands() if c[0] == 'systemd-run']
 
 
+def _hdr(ns):
+    from builtin_interfaces.msg import Time
+    from std_msgs.msg import Header
+    return Header(stamp=Time(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000))
+
+
 def test_feedback_inventory_uses_source_and_reception_age_and_rejects_replay():
     from bench_manager.feedback_manager import FeedbackInventory
-    from can_bridge_msgs.msg import MotorControlStateArray,MotorControlState
+    from can_bridge_msgs.msg import MotorSystemState,MotorControlState
     inventory=FeedbackInventory();now=1_000_000_000
-    frame=MotorControlStateArray(schema_version=2,session_id=100,sequence=1,sync_time_ns=now,
-        states=[MotorControlState(motor_id=2,online=True,state_age_ms=10)])
+    frame=MotorSystemState(header=_hdr(now),schema_version=6,session_id=100,sequence=1,
+        control_states=[MotorControlState(motor_id=2,online=True,state_age_ms=10)])
     assert inventory.observe(frame,now,1.)
     assert inventory.current(now,1.)==([2],100)
     import copy
-    frame=copy.deepcopy(frame);frame.sequence=2;frame.states[0].policy_enabled=True
+    frame=copy.deepcopy(frame);frame.sequence=2;frame.control_states[0].policy_enabled=True
     assert inventory.observe(frame,now,1.1)
     assert inventory.current(now,1.1)==([2],100)
     assert not inventory.observe(frame,now,1.1)
     assert inventory.current(now+301_000_000,1.2)==([],100)
     assert inventory.current(now,1.5)==([],100)
-    frame=copy.deepcopy(frame);frame.sequence=3;frame.states[0].state_age_ms=290
+    frame=copy.deepcopy(frame);frame.sequence=3;frame.control_states[0].state_age_ms=290
     assert inventory.observe(frame,now,1.6)
     assert inventory.current(now+20_000_000,1.6)==([],100)
 
@@ -524,18 +530,18 @@ def test_feedback_inventory_uses_source_and_reception_age_and_rejects_replay():
 def test_inventory_rejects_old_session_duplicate_ids_and_future_source():
     import copy
     from bench_manager.feedback_manager import FeedbackInventory
-    from can_bridge_msgs.msg import MotorControlStateArray,MotorControlState
+    from can_bridge_msgs.msg import MotorSystemState,MotorControlState
     inventory=FeedbackInventory();now=1_000_000_000
-    frame=MotorControlStateArray(schema_version=2,session_id=100,sequence=1,sync_time_ns=now,
-        states=[MotorControlState(motor_id=2,online=True,state_age_ms=10)])
+    frame=MotorSystemState(header=_hdr(now),schema_version=6,session_id=100,sequence=1,
+        control_states=[MotorControlState(motor_id=2,online=True,state_age_ms=10)])
     assert inventory.observe(frame,now,1.)
     bad=copy.deepcopy(frame);bad.sequence=2;bad.session_id=99
     assert not inventory.observe(bad,now,1.)
-    bad=copy.deepcopy(frame);bad.sequence=2;bad.states.append(copy.deepcopy(bad.states[0]))
+    bad=copy.deepcopy(frame);bad.sequence=2;bad.control_states.append(copy.deepcopy(bad.control_states[0]))
     assert not inventory.observe(bad,now,1.)
-    bad=copy.deepcopy(frame);bad.sequence=2;bad.sync_time_ns=now+20_000_001
+    bad=copy.deepcopy(frame);bad.sequence=2;bad.header=_hdr(now+20_000_001)
     assert not inventory.observe(bad,now,1.)
-    empty=MotorControlStateArray(schema_version=2,session_id=100,sequence=2,sync_time_ns=now)
+    empty=MotorSystemState(header=_hdr(now),schema_version=6,session_id=100,sequence=2)
     assert inventory.observe(empty,now,1.)
     assert inventory.current(now,1.)==([],100)
 
@@ -584,3 +590,63 @@ def test_full_body_simulation_requires_dedicated_hil_control_file(setup_feedback
     _add_simulation_files(full)
     with pytest.raises(ValueError, match='HIL 控制 URDF'):
         manager._model_files('full_body_robot', simulation=True)
+
+
+def test_backoff_recovery_after_three_failures_and_health_reset(setup_feedback, monkeypatch):
+    clock = [100.]
+    monkeypatch.setattr('bench_manager.feedback_manager.time.monotonic', lambda: clock[0])
+    manager, fake = setup_feedback
+    manager.reconcile('arm_a', agent_running=True)
+    fake.properties[UNIT_FEEDBACK].update(ActiveState='failed', ExecMainStatus='1')
+    for now in (103., 106.):
+        clock[0] = now
+        manager.reconcile('arm_a', agent_running=True)
+        fake.properties[UNIT_FEEDBACK].update(ActiveState='failed', ExecMainStatus='1')
+    clock[0] = 120.
+    manager.reconcile('arm_a', agent_running=True)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 3
+    assert manager.status()['state'] == 'failed'
+    assert '30' in manager.status()['error']
+    clock[0] = 136.
+    manager.reconcile('arm_a', agent_running=True)
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 4
+    assert manager.status()['state'] == 'running'
+    for now in (137., 139., 141., 143.):
+        clock[0] = now
+        manager.observe_control_status({'model': 'arm_a', 'feedback_fresh': True, 'controllers_ready': True})
+    manager.reconcile('arm_a', agent_running=True)
+    assert manager._attempt_count == 0
+
+
+def test_faulted_motor_waits_without_launching_or_burning_retries(setup_feedback, clock):
+    manager, fake = setup_feedback
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100,
+                      faulted_motor_ids=[1])
+    clock[0] += 2.
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100,
+                      faulted_motor_ids=[1])
+    assert not [c for c in fake.commands() if c[0] == 'systemd-run']
+    assert manager._attempt_count == 0
+    assert '故障' in manager.status()['reason']
+    manager.reconcile('arm_a', agent_running=True, motor_ids=[1], session_id=100,
+                      faulted_motor_ids=[])
+    assert len([c for c in fake.commands() if c[0] == 'systemd-run']) == 1
+
+
+def test_feedback_inventory_faulted_reports_online_faults():
+    from bench_manager.feedback_manager import FeedbackInventory
+    from can_bridge_msgs.msg import MotorSystemState, MotorControlState
+    inventory = FeedbackInventory()
+    now = 1_000_000_000
+    frame = MotorSystemState(
+        header=_hdr(now), schema_version=6, session_id=100, sequence=1,
+        control_states=[
+            MotorControlState(motor_id=1, online=True, state_age_ms=5),
+            MotorControlState(motor_id=2, online=True, unified_fault_code=1, state_age_ms=5),
+            MotorControlState(motor_id=3, online=True, control_lifecycle=15, state_age_ms=5),
+            MotorControlState(motor_id=4, online=False, vendor_fault_code=2, state_age_ms=5),
+        ],
+    )
+    assert inventory.observe(frame, now, 1.0)
+    assert inventory.faulted(now, 1.0) == [2, 3]
+    assert inventory.faulted(now, 1.5) == []

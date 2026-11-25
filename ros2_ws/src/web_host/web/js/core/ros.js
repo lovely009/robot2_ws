@@ -4,7 +4,7 @@ import {
   store, markDirty, DIRTY, chartPush, applyBenchStatus, applyCommandStatus, applyTransmissionStatus, observeTrajectory, resetTrajectory,
   jointFeedbackMatchesModel, applyAgentWireStatus } from './store.js';
 import {
-  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler,
+  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler, nsToHeader,
 } from './format.js';
 
 import { applyControlState, createControlStateCache, beginPolicyIntent, acceptPolicyTicket, failPolicyIntent, applyPolicyReceipt } from './motor_state.js';
@@ -110,7 +110,7 @@ export function isConnected() { return store.conn.connected; }
 // 浏览器仅转交人工意图；会话时钟、请求号与策略代数由主机分配。
 export async function submitPolicy(targets) {
   if (!store.conn.connected || controlMode !== 'bench') throw new Error('未连接或当前页面只读，未提交使能');
-  if (!Array.isArray(targets) || !targets.length || targets.length > 48
+  if (!Array.isArray(targets) || !targets.length || targets.length > 37
       || targets.some(target => !target || typeof target.enabled !== 'boolean')) throw new Error('使能目标无效');
   const enabled = targets.some(target => target.enabled), cache = store.controlStates;
   const age = Date.now() - cache.at;
@@ -121,7 +121,8 @@ export async function submitPolicy(targets) {
   markDirty(DIRTY.POLICY,DIRTY.STATUS);
   try {
     const ticket = await callService('/motor/submit_policy', 'can_bridge_msgs/srv/SubmitPolicy', {
-      session_id: session, source_time_ns: cache.sourceTimeNs || 0,
+      header: nsToHeader(cache.sourceTimeNs || 0),
+      session_id: session,
       targets: targets.map(target => ({...target})),
     });
     if (!store.conn.connected || connection !== connectionGeneration
@@ -143,19 +144,21 @@ export async function submitPolicy(targets) {
 }
 
 export function pub(key, message) {
-  if (['policy', 'paramSet', 'firmwareConfig'].includes(key) ||
-      (key === 'sysCmd' && ![1, 2, 3, 4, 5].includes(message.command))) return false;
-  if (key === 'deviceConfig' && !(message.kind === 0 && message.command === 0 &&
-      message.motor_id === 65535 && message.count === 1 && message.targets?.length === 1 &&
-      Number.isInteger(message.targets[0].motor_id) && message.targets[0].motor_id >= 1 &&
-      message.targets[0].motor_id <= 64 && message.targets[0].field === 5 &&
-      [0,1].includes(message.targets[0].value))) return false;
-  if (key === 'sysCmd' && message.command === 5 &&
-      (!Number.isInteger(message.motor_id) || message.motor_id < 1 || message.motor_id > 64)) return false;
+  if (!TOPICS[key]) return false;
   if (!store.conn.connected) return false;
   if (controlMode === 'readonly') return false;
   ensurePublisher(key).publish(new ROSLIB.Message(message));
   return true;
+}
+
+export async function executeConfig(request, timeoutMs = 10000) {
+  const response = await callService(
+    '/motor/execute_config',
+    'can_bridge_msgs/srv/ExecuteConfig',
+    {request, timeout_ms: timeoutMs},
+    timeoutMs + 2000,
+  );
+  return response?.result || response;
 }
 
 // rosbridge 的 advertise 是异步 WebSocket 操作。若在第一次 advertise 后
@@ -177,10 +180,12 @@ export function ensurePublisher(key) {
 let reconnectTimer = null;
 
 function resetSessionState() {
+  lastInfoRevision = null;
   clearConfigResults();
   store.motors.clear();
   store.controlStates = createControlStateCache();
   store.agentWireStatus = null;
+  store.mcuLifecycle = null;
   store.paramCache.clear();
   store.tf.clear();
   store.sysStatus.seen = false;
@@ -225,8 +230,8 @@ export function connect() {
     if (ros !== connection) return;
     setConn(true);
     subscribeAll();
-    ['setpoint', 'trajectory', 'rawTrajectory', 'jointTrajectory', 'stop', 'sysCmd', 'deviceConfig'].forEach(ensurePublisher);
-    // 连接后自动读取参数表（REPORT → device_param_report）随设备屏接入——
+    ['trajectory', 'jointTarget', 'stop'].forEach(ensurePublisher);
+    // 连接后自动读取参数表（REPORT → device_info）随设备屏接入——
     // loadParams 归 core/device.js，这里只负责建立连接与订阅。
   });
   ros.on('error', () => {
@@ -264,11 +269,73 @@ function sub(key, cb) {
   const connection = ros;
   const t = TOPICS[key];
   const topic = new ROSLIB.Topic({
-    // 浏览器只保留最新观测；事件逐条传递，控制授权独立订阅。
-    ros, name: t.name, messageType: t.type, throttle_rate: key === 'events' ? 0 : key === 'controlStates' ? 20 : 50, queue_length: key === 'events' ? 64 : 1,
+    // 浏览器只保留最新观测；事件逐条传递，系统状态高优先级。
+    ros, name: t.name, messageType: t.type,
+    throttle_rate: key === 'events' ? 0 : key === 'state' ? 20 : key === 'imu' ? 100 : 50,
+    queue_length: key === 'events' ? 64 : 1,
   });
   topic.subscribe((message) => { if (ros === connection && store.conn.connected) cb(message); });
   subs.push(topic);
+}
+
+let lastInfoRevision = null;
+
+export function applyDeviceInfo(m) {
+  if (!m) return;
+  const seen = new Set();
+  for (const e of (m.topology || [])) {
+    seen.add(e.motor_id);
+    const row = store.motors.get(e.motor_id) || {};
+    row.topo = e;
+    store.motors.set(e.motor_id, row);
+  }
+  for (const id of [...store.motors.keys()]) {
+    if (!seen.has(id)) store.motors.delete(id);
+  }
+  markDirty(DIRTY.TOPOLOGY);
+
+  store.devParamSeq++;
+  const safety = (v) => (Number.isFinite(v) ? (v === 0 ? 1 : 0) : NaN);
+  for (const e of (m.params || [])) {
+    const rec = {pos_min: e.rec_pos_min, pos_max: e.rec_pos_max,
+      vel_limit: e.rec_vel_limit, torque_limit: e.rec_torque_limit,
+      limit_protect: safety(e.rec_safety), direction: e.rec_direction, t_max: e.rec_t_max, node_id: e.rec_node_id};
+    const dev = {pos_min: e.dev_pos_min, pos_max: e.dev_pos_max,
+      vel_limit: e.dev_vel_limit, torque_limit: e.dev_torque_limit,
+      limit_protect: safety(e.dev_safety), direction: e.dev_direction, t_max: e.dev_t_max, node_id: e.dev_node_id};
+    const pick = {};
+    for (const f of Object.keys(rec)) {
+      pick[f] = Number.isFinite(dev[f]) ? dev[f] : rec[f];
+    }
+    store.paramCache.set(e.motor_id, {rec, dev, pick,
+      state: e.dev_init_state, dirty: e.record_dirty, mask: e.mismatch_mask});
+  }
+  markDirty(DIRTY.PARAMS);
+}
+
+export async function fetchDeviceInfo(motorId = 0) {
+  const response = await callService(
+    '/motor/get_device_info',
+    'can_bridge_msgs/srv/GetDeviceInfo',
+    {motor_id: motorId},
+    6000,
+  );
+  const info = response?.info || response;
+  applyDeviceInfo(info);
+  return info;
+}
+
+export async function getLifecycleState() {
+  const response = await callService(
+    '/micro_ros_node/get_state',
+    'lifecycle_msgs/srv/GetState',
+    {},
+    3000,
+  );
+  const state = response?.current_state || null;
+  store.mcuLifecycle = state ? {id: Number(state.id), label: String(state.label || '')} : null;
+  markDirty(DIRTY.CONN);
+  return store.mcuLifecycle;
 }
 
 function subscribeAll() {
@@ -280,6 +347,8 @@ function subscribeAll() {
     ros,
     name: TOPICS.robotTransmissionStatus.name,
     messageType: TOPICS.robotTransmissionStatus.type,
+    throttle_rate: 100,
+    queue_length: 1,
     qos: {reliability: 'reliable', durability: 'transient_local', history: 'keep_last', depth: 1},
   });
   statusTopic.subscribe((message) => {
@@ -292,21 +361,6 @@ function subscribeAll() {
     markDirty(DIRTY.STATUS);
   });
   subs.push(statusTopic);
-
-  sub('topology', (m) => {
-    const seen = new Set();
-    for (const e of (m.entries || [])) {
-      seen.add(e.motor_id);
-      const row = store.motors.get(e.motor_id) || {};
-      row.topo = e;
-      store.motors.set(e.motor_id, row);
-    }
-    // 拓扑消失的电机移出表（复位/换拓扑）。
-    for (const id of [...store.motors.keys()]) {
-      if (!seen.has(id)) store.motors.delete(id);
-    }
-    markDirty(DIRTY.TOPOLOGY);
-  });
 
   sub('motion', (m) => {
     store.motionCount++;
@@ -323,9 +377,9 @@ function subscribeAll() {
     markDirty(DIRTY.MOTION);
   });
 
-  sub('controlStates', (m) => {
+  sub('state', (m) => {
     const previousSession = store.controlStates.session;
-    const accepted = applyControlState(store.controlStates,m);
+    const accepted = applyControlState(store.controlStates, m);
     if (accepted) {
       const currentSession = String(store.controlStates.session);
       if (previousSession !== 0 && store.controlStates.session !== previousSession) {
@@ -336,11 +390,12 @@ function subscribeAll() {
         configSessionId = currentSession;
         store.configSessionId = currentSession;
       }
+      if (m.info_revision !== undefined && m.info_revision !== lastInfoRevision) {
+        lastInfoRevision = m.info_revision;
+        fetchDeviceInfo(0).catch(() => {});
+      }
     }
-    markDirty(DIRTY.STATUS);
-  });
-
-  sub('status', (m) => {
+    if (applyAgentWireStatus(store, m)) markDirty(DIRTY.CONN);
     const t = Date.now();
     for (const s of (m.statuses || [])) {
       const row = store.motors.get(s.motor_id) || {};
@@ -349,11 +404,23 @@ function subscribeAll() {
       store.motors.set(s.motor_id, row);
       chartPush(s.motor_id, 'current', s.current, t);
     }
+    const sys = m.system_status;
+    if (sys) {
+      if (sys.firmware_values_valid && Array.isArray(sys.firmware_values) && sys.firmware_values.length === 6 &&
+          sys.firmware_values.every(v => Number.isInteger(v) && v > 0 && v <= 1000)) {
+        store.firmwareReport = {seq: store.firmwareReport.seq + 1, at: t,
+          values: [...sys.firmware_values], unsaved: !!sys.firmware_unsaved};
+      }
+      store.lastError = sys.last_error;
+      store.lastErrorMotor = sys.last_error_motor === MOTOR_ID_NONE ? -1 : sys.last_error_motor;
+      store.sysStatus = {
+        refresh_seq: sys.refresh_seq, set_zero_seq: sys.set_zero_seq,
+        clear_fault_seq: sys.clear_fault_seq, save_seq: sys.save_seq,
+        save_in_progress: !!sys.save_in_progress, seen: true,
+      };
+    }
     markDirty(DIRTY.STATUS);
   });
-
-  // 客户端将 JTC 结果映射成轨迹状态；completed 只在 action 成功终态为真。
-  sub('trajectoryState', observeTrajectory);
 
   sub('events', (m) => {
     if (m.event_type === 13) {
@@ -378,26 +445,6 @@ function subscribeAll() {
     markDirty(DIRTY.EVENTS, DIRTY.PARAMS);
   });
 
-  // TF（关节侧）：child frame → 帧对与变换；关节列表据此配对模型 URDF 的关节。
-  // /tf_static 只在启动时发一次，收到即留在表里，不按新鲜度判它陈旧。
-  const ingestTf = (m, dynamic) => {
-    for (const tr of (m.transforms || [])) {
-      if (!tr.child_frame_id || !tr.transform) continue;
-      const prev = store.tf.get(tr.child_frame_id);
-      store.tf.set(tr.child_frame_id, {
-        parent: tr.header ? tr.header.frame_id : '',
-        xyz: tr.transform.translation,
-        quat: tr.transform.rotation,
-        dynamic,
-        at: Date.now(),
-        count: (prev ? prev.count : 0) + 1,
-      });
-    }
-    markDirty(DIRTY.TF);
-  };
-  sub('tf', (m) => ingestTf(m, true));
-  sub('tfStatic', (m) => ingestTf(m, false));
-
   sub('imu', (m) => {
     const q = m.orientation;
     const e = quatToEuler(q.x, q.y, q.z, q.w);
@@ -411,7 +458,7 @@ function subscribeAll() {
   });
 
   sub('temp', (m) => {
-    store.temp = m.data;
+    store.temp = Number.isFinite(m?.temperature) ? m.temperature : m?.data;
     store.tempLast = Date.now();
     markDirty(DIRTY.IMU);
   });
@@ -440,66 +487,6 @@ function subscribeAll() {
     markDirty(DIRTY.MOTION);
   });
 
-  // 设备参数报告（reliable，按需：REPORT 命令 / 写事务收尾 / 设备初始化结论）：
-  // 一帧带全部台的**双行**——rec_* 固件记录（权威）+ dev_* 驱动板回读。
-  // 表里显示 dev_*（"优先显示驱动板"），该台没回读到（NaN，含电机不在线）时
-  // 才退回 rec_*（即板内参数表）。写事务收尾后固件即时发一帧，所以
-  // 「写 → 等报告变」就是这一侧的完成判据。
-  sub('devParams', (m) => {
-    store.devParamSeq++;
-    // count 是 entries.size 的冗余声明（同 MotorPolicyArray.count）；不认它
-    // 会在固件侧 count 与数组长度不一致时读到 0 条。
-    const n = Math.min(m.count === undefined ? 0 : m.count, (m.entries || []).length);
-    for (let i = 0; i < n; ++i) {
-      const e = m.entries[i];
-      // 保护开关要**反转**：报文字段 rec_safety/dev_safety 是设备原值
-      // （0x2650:00 读回字节，**0 = 保护开**），而参数面 m<id>.limit_protect 与
-      // 本页这一格 checkbox 用的都是正向语义（1 = 保护生效）——两者相反。
-      // 契约见 DeviceParamEntry.msg；固件侧是原值透传（cerb_adapter.c 的
-      // CERB_VALUE_SAFETY_RAW），不改。两行一起转，rec/dev 仍彼此可比
-      // （rowsHint 拿它们对账），也仍与写回去的 field 同口径。
-      // 未回读到该对象时保持 NaN——不能落 0，那会被读成"保护关"（危险方向）。
-      const safety = (v) => (Number.isFinite(v) ? (v === 0 ? 1 : 0) : NaN);
-      const rec = {pos_min: e.rec_pos_min, pos_max: e.rec_pos_max,
-        vel_limit: e.rec_vel_limit, torque_limit: e.rec_torque_limit,
-        limit_protect: safety(e.rec_safety), direction: e.rec_direction, t_max: e.rec_t_max, node_id: e.rec_node_id};
-      const dev = {pos_min: e.dev_pos_min, pos_max: e.dev_pos_max,
-        vel_limit: e.dev_vel_limit, torque_limit: e.dev_torque_limit,
-        limit_protect: safety(e.dev_safety), direction: e.dev_direction, t_max: e.dev_t_max, node_id: e.dev_node_id};
-      const pick = {};
-      for (const f of Object.keys(rec)) {
-        pick[f] = Number.isFinite(dev[f]) ? dev[f] : rec[f];
-      }
-      store.paramCache.set(e.motor_id, {rec, dev, pick,
-        state: e.dev_init_state, dirty: e.record_dirty, mask: e.mismatch_mask});
-    }
-    // 重绘与否是面板的事：有未下发的手改时跳过重绘（否则会把操作员正在敲的
-    // 值抹掉）——设备屏面板在收到 DIRTY.PARAMS 时自行判断。
-    markDirty(DIRTY.PARAMS);
-  });
-
-  // 系统状态（best-effort，5 Hz + 变化即发）。这是**电平**不是事件：last_error
-  // 保持到下次错误，*_seq 仅供兼容观察，不关联具体配置请求。
-  sub('sysStatus', (m) => {
-    if (m.firmware_values_valid && Array.isArray(m.firmware_values) && m.firmware_values.length === 6 &&
-        m.firmware_values.every(v => Number.isInteger(v) && v > 0 && v <= 1000)) {
-      store.firmwareReport = {seq: store.firmwareReport.seq + 1, at: Date.now(),
-        values: [...m.firmware_values], unsaved: !!m.firmware_unsaved};
-    }
-    store.lastError = m.last_error;
-    store.lastErrorMotor = m.last_error_motor === MOTOR_ID_NONE ? -1 : m.last_error_motor;
-    store.sysStatus = {
-      refresh_seq: m.refresh_seq, set_zero_seq: m.set_zero_seq,
-      clear_fault_seq: m.clear_fault_seq, save_seq: m.save_seq,
-      save_in_progress: !!m.save_in_progress, seen: true,
-    };
-  });
-
-  sub('agentWireStatus', (m) => {
-    if (applyAgentWireStatus(store, m)) markDirty(DIRTY.CONN);
-  });
-  sub('configResult', (m) => ingestConfigResult(m));
-
   // 台架状态（bench_manager，JSON 字符串）：仿真 / Agent / 电机后端三段的唯一
   // 数据入口（命令的服务响应也经 applyBenchStatus 写同一份）。
   sub('bench', (m) => {
@@ -507,10 +494,15 @@ function subscribeAll() {
     catch (_e) { /* 非法帧不入 store；下一帧会重来 */ }
   });
 
-  // ros2_control 模型、模式、路由与错误。
+  // ros2_control 模型、模式、路由与错误（含 trajectory_state）。
   sub('commandStatus', (m) => {
-    try { applyCommandStatus(JSON.parse(m.data)); }
-    catch (_e) { applyCommandStatus(null); }
+    try {
+      const data = JSON.parse(m.data);
+      applyCommandStatus(data);
+      if (data && data.trajectory_state) observeTrajectory(data.trajectory_state);
+    } catch (_e) {
+      applyCommandStatus(null);
+    }
   });
   sub('simPositionStatus', (m) => {
     let data;

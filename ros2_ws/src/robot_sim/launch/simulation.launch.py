@@ -1204,22 +1204,13 @@ def launch_simulation(context):
                     "joint_names": joint_order,
                     "joint_states_topic": "/joint_states",
                     "effort_topic": "/arm_effort_controller/commands",
-                    "drive_state_topic": "/motor_sim/drive_state",
-                    "control_gate_topic": "/motor_sim/control_gate",
                     "fault_latching_enabled": True,
                 }
             ],
         )
-        gate = Node(
-            package="robot_sim",
-            executable="simulation_gate.py",
-            name="motor_sim_gate",
-            output="screen",
-        )
         actions.extend(
             [
                 motor_sim,
-                gate,
                 RegisterEventHandler(
                     OnProcessExit(
                         target_action=motor_sim,

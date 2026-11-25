@@ -21,7 +21,7 @@ async function fixture() {
   s.transmissionStatus = {last:10000,data:{model,joint_names:['joint'],trajectory_enabled:true}};
   s.commandStatus = {last:10000,data:{model,joint_names:['joint'],mode:'stopped',
     gravity_enabled:false,effort_gain:1,active_controllers:[],feedback_fresh:true,controllers_ready:true,
-    output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
+    output_topic:'/motor/command',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   s.bench.gravity_feedforward = {fresh:true,pending:null,error:'',config:{model,effort_gain:1}};
   s.bench.gravity_feedforward_last=10000;
   mocks.start.mockImplementation(async () => {s.bench.gravity_feedforward.pending='start';});

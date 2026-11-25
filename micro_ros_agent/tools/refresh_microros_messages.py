@@ -157,14 +157,12 @@ def main() -> None:
 
     # 有意不调用 download_dev_environment()/download_mcu_environment()：这两个步骤
     # 可能访问网络。这里只覆盖本仓库维护的 extra package 并增量重建现有工作区。
+    import shutil
+    for pkg in ("microxrcedds_client", "rmw_microxrcedds", "can_bridge_msgs"):
+        pkg_build = Path(builder.build_folder) / "mcu" / "build" / pkg
+        if pkg_build.exists():
+            shutil.rmtree(pkg_build)
     builder.download_extra_packages()
-    # 第三个参数是 board_microros_user_meta：官方流程（extra_script.py）用
-    # builder.run(meta, toolchain, microros_user_meta) 把它附加到 colcon 的
-    # --metas 列表后面，覆盖包内 metas/colcon.meta 的默认值。漏掉它的后果是
-    # 库被按**默认**配置重建——本固件要 RMW_UXRCE_MAX_PUBLISHERS=12 /
-    # MAX_SUBSCRIPTIONS=6 / MAX_SERVICES=5，默认分别是 4 / 4 / 1：重建后
-    # tools/check_microros_config.py 会在下一次 pio run 拦下（且只有到运行期
-    # 才会以 WAIT_AGENT 无限重连的形式暴露）。
     user_meta = firmware_root / "microros_user.meta"
     require(user_meta, "microros_user.meta 库级配置覆盖")
     builder.build_mcu_environment(
@@ -177,54 +175,45 @@ def main() -> None:
     detail_dir = (
         platformio_root / "libmicroros" / "include" / "can_bridge_msgs" / "msg" / "detail"
     )
+    srv_detail_dir = (
+        platformio_root / "libmicroros" / "include" / "can_bridge_msgs" / "srv" / "detail"
+    )
     generated_header = detail_dir / "motor_topology_entry__struct.h"
     require(generated_header, "重新生成的 can_bridge_msgs 头文件")
     header_text = generated_header.read_text(encoding="utf-8")
     if "PROTOCOL_CERB" not in header_text or "PROTOCOL_CREB" in header_text:
         raise SystemExit("生成结果仍包含旧协议常量，拒绝报告成功")
 
-    # 新增消息同样要落到库里——只刷新了协议常量而新类型缺失，说明 colcon 用了
-    # 旧的 install 目录（增量构建没看到新 .msg），此时 pio run 会在编译期报
-    # "no member named 'param_set_array'" 之类的错，指向性远不如这里直接点名。
-    for struct_name in ("control_lease", "param_set_array", "system_command", "system_status",
-                        "motor_control_state", "motor_control_state_array"):
-        require(detail_dir / f"{struct_name}__struct.h", f"新消息 {struct_name} 的生成头")
+    for struct_name in (
+        "motor_command_array",
+        "motor_motion_state_array",
+        "motor_system_state",
+        "motor_device_info",
+        "motor_event",
+        "config_request",
+        "config_result",
+        "system_command",
+        "system_status",
+    ):
+        require(detail_dir / f"{struct_name}__struct.h", f"原生消息 {struct_name} 的生成头")
 
-    # V3 的 13 个 Agent* 类型必须全部生成；任何缺失都说明本次 colcon 复用了
-    # 旧 install/build 缓存，而不是复制进来的权威 .msg。
-    agent_structs = (
-        "agent_wire_contract",
-        "agent_command",
-        "agent_motion",
-        "agent_trajectory_request",
-        "agent_config_request",
-        "agent_config_result",
-        "agent_trajectory_receipt",
-        "agent_trajectory_state",
-        "agent_motor_status",
-        "agent_status",
-        "agent_device_info",
-        "agent_operation_detail",
-        "agent_info",
-    )
-    for struct_name in agent_structs:
-        require(detail_dir / f"{struct_name}__struct.h",
-                f"V3 消息 {struct_name} 的生成头")
+    for srv_name in ("submit_policy", "execute_config", "get_device_info"):
+        require(srv_detail_dir / f"{srv_name}__struct.h", f"原生服务 {srv_name} 的生成头")
 
-    contract_text = (detail_dir / "agent_wire_contract__struct.h").read_text(encoding="utf-8")
-    if "SCHEMA_VERSION" not in contract_text:
-        raise SystemExit("AgentWireContract 生成头缺少 SCHEMA_VERSION，拒绝报告成功")
+    uxr_config = (
+        platformio_root / "libmicroros" / "include" / "uxr" / "client" / "config.h"
+    ).read_text(encoding="utf-8")
+    if "UXR_CONFIG_CUSTOM_TRANSPORT_MTU               1024" not in uxr_config and "UXR_CONFIG_CUSTOM_TRANSPORT_MTU 1024" not in " ".join(uxr_config.split()):
+        raise SystemExit("libmicroros 未按 MTU=1024 编译，拒绝报告成功")
 
-    # 标准 sensor_msgs/Temperature 走同一条 MCU 类型生成链；V3 的
-    # /micro_ros_up/imu/temperature 依赖它，不能只在主机的 Humble 里存在。
-    # rosidl_generator_c 把结构体放在 msg/detail/ 下，公开入口是 msg/temperature.h。
+    # 标准 sensor_msgs/Temperature 走同一条 MCU 类型生成链。
     require(
         platformio_root / "libmicroros" / "include" / "sensor_msgs" / "msg"
         / "detail" / "temperature__struct.h",
         "sensor_msgs/Temperature 的生成头",
     )
 
-    print("micro-ROS 自定义消息已从权威包增量刷新；未下载依赖。")
+    print("micro-ROS 原生消息/服务与 MTU=1024 已从权威包增量刷新；未下载依赖。")
 
 
 if __name__ == "__main__":

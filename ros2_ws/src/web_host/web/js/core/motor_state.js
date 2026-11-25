@@ -1,4 +1,4 @@
-import { FAULT_NAMES } from './format.js';
+import { FAULT_NAMES, headerStampNs } from './format.js';
 // MCU 控制快照是授权事实；页面草稿与旧运行态保持独立。
 export const CONTROL_LIFECYCLE = {
   0:'未知', 1:'未配置', 2:'就绪 · 未使能', 3:'活动 · 已使能', 4:'已终止',
@@ -12,16 +12,16 @@ export function createControlStateCache() {
 export function applyControlState(cache, message, now=Date.now()) {
   cache.seen=true;
   const invalid=()=>{cache.valid=false;return false;};
-  if (!message || message.schema_version!==2 || !uint(message.session_id,Number.MAX_SAFE_INTEGER)
-      || !message.session_id || !uint(message.sequence) || !Array.isArray(message.states)
-      || message.states.length>64 || !Number.isFinite(now)) return invalid();
+  if (!message || message.schema_version!==6 || !uint(message.session_id,Number.MAX_SAFE_INTEGER)
+      || !message.session_id || !uint(message.sequence) || !Array.isArray(message.control_states)
+      || message.control_states.length>37 || !Number.isFinite(now)) return invalid();
   if (cache.session && message.session_id<cache.session) return false;
   if (cache.session===message.session_id) {
     const advance=(message.sequence-cache.sequence)>>>0;
     if (!advance || advance>=0x80000000) return false;
   }
   const byId=new Map();
-  for (const s of message.states) {
+  for (const s of message.control_states) {
     if (!s || !uint(s.motor_id,65535) || byId.has(s.motor_id)
         || !Number.isInteger(s.control_lifecycle) || !(s.control_lifecycle in CONTROL_LIFECYCLE)
         || !uint(s.execution_state,7) || typeof s.online!=='boolean'
@@ -31,8 +31,9 @@ export function applyControlState(cache, message, now=Date.now()) {
         || !uint(s.policy_generation)) return invalid();
     byId.set(s.motor_id,{...s});
   }
+  const sourceTimeNs = headerStampNs(message);
   Object.assign(cache,{valid:true,at:now,session:message.session_id,
-    sourceTimeNs:Number.isInteger(message.sync_time_ns) && message.sync_time_ns>0 ? message.sync_time_ns : 0,
+    sourceTimeNs:sourceTimeNs>0 ? sourceTimeNs : 0,
     sequence:message.sequence,byId});
   return true;
 }
@@ -89,8 +90,7 @@ export function policyRequestState(state, ticket, ids, enabled, now=Date.now()) 
     return {confirmed:false,error:`使能${{2:'设备拒绝',3:'设备忙',4:'请求冲突'}[receipt.status]}：error_code=${receipt.error_code}，`
       +`失败 ${receipt.failed_targets} 项 / 完成 ${receipt.completed_targets} 项`};
   }
-  return {confirmed:Boolean(matching && Number(receipt.status)===1
-    && views.every(view=>view.canCommand && view.generation===ticket.policy_generation)),error:''};
+  return {confirmed: views.every(view=>view.canCommand && view.generation===ticket.policy_generation),error:''};
 }
 
 

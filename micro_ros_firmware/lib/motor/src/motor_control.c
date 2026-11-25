@@ -227,6 +227,7 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
     entry->motion_enabled = false;
     entry->enable_pending = false;
     entry->has_target = false;
+    entry->has_prev_target = false;
     entry->motion_authorized = false;
     // Revoking a host lease/session also disarms policy. The stored generation
     // remains the high-water mark, so a replay cannot arm the next lease.
@@ -243,11 +244,6 @@ void motor_control_revoke_motion(motor_control_context_t *ctx, uint32_t now_ms) 
   }
   ctx->authorized = false;
   ctx->require_new_snapshot = true; // 恢复必须等新的完整快照（禁止复用旧目标）
-  // 整机撤权同时作废轨迹：断链后不得留一条「未来还要动」的时间线
-  // （任务层 mailbox 已在同一时刻清掉未取走的轨迹输入）。
-  ctx->trajectory_active = false;
-  ctx->trajectory.point_count = 0U;
-  ctx->trajectory.target_count = 0U;
   if (was_authorized) {
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST,
         0U, 0U, MOTOR_CONTROL_FAULT_NONE, 0U);
@@ -433,6 +429,26 @@ static bool entry_may_move(const motor_control_context_t *ctx,
 //  - false = 边界保持重发（motor_control_hold_step）。同一目标的重复投递**不是
 //    新证据**，不得把挂起的软停/失能重试取消掉——那会让一条迟到的 P0 永远发不
 //    出去。重发路径在调用前已挡掉 p0_pending，这里的 false 是第二道锁。
+static void entry_interpolated_state(const motor_control_entry_t *entry,
+    uint32_t now_ms, float *pos_out, float *vel_out) {
+  if (!entry->has_prev_target || entry->target_span_ms == 0U) {
+    *pos_out = entry->target_position_rad;
+    *vel_out = entry->target_velocity_rad_s;
+    return;
+  }
+  const uint32_t elapsed = now_ms - entry->target_start_tick_ms;
+  if (elapsed >= entry->target_span_ms) {
+    *pos_out = entry->target_position_rad;
+    *vel_out = entry->target_velocity_rad_s;
+    return;
+  }
+  const float alpha = (float)elapsed / (float)entry->target_span_ms;
+  *pos_out = entry->prev_target_position_rad +
+      alpha * (entry->target_position_rad - entry->prev_target_position_rad);
+  *vel_out = entry->prev_target_velocity_rad_s +
+      alpha * (entry->target_velocity_rad_s - entry->prev_target_velocity_rad_s);
+}
+
 static bool entry_push_mit(motor_control_context_t *ctx,
     motor_control_entry_t *entry, size_t index,
     uint32_t now_ms, bool supersede_p0) {
@@ -443,8 +459,8 @@ static bool entry_push_mit(motor_control_context_t *ctx,
     effective.mit_torque_limit_nm = (float)entry->dev_raw[MOTOR_PROTOCOL_PARAM_SLOT_T_MAX];
   profile = &effective;
   motor_protocol_control_intent_t intent = {0};
-  intent.position_rad = entry->target_position_rad;
-  intent.velocity_rad_s = entry->target_velocity_rad_s;
+  intent.position_rad = entry->interp_position_rad;
+  intent.velocity_rad_s = entry->interp_velocity_rad_s;
   intent.effort_nm = entry->target_effort_nm;
   intent.kp = entry->has_kp_kd ? entry->kp : profile->default_kp;
   intent.kd = entry->has_kp_kd ? entry->kd : profile->default_kd;
@@ -535,10 +551,26 @@ static void entry_apply_target(motor_control_context_t *ctx,
     }
   }
 
+  if (entry->has_target && entry->motion_enabled && !entry->enable_pending) {
+    float cur_pos = target_pos;
+    float cur_vel = target_vel;
+    entry_interpolated_state(entry, now_ms, &cur_pos, &cur_vel);
+    entry->prev_target_position_rad = cur_pos;
+    entry->prev_target_velocity_rad_s = cur_vel;
+    const uint32_t dt = now_ms - entry->target_start_tick_ms;
+    entry->target_span_ms = (entry->has_prev_target && dt >= 5U && dt <= 25U) ? dt : 20U;
+    entry->has_prev_target = true;
+  } else {
+    entry->has_prev_target = false;
+    entry->target_span_ms = 20U;
+  }
+  entry->target_start_tick_ms = now_ms;
   entry->has_target = true;
   entry->target_position_rad = target_pos;
   entry->target_velocity_rad_s = target_vel;
   entry->target_effort_nm = target_effort;
+  entry_interpolated_state(entry, now_ms, &entry->interp_position_rad,
+      &entry->interp_velocity_rad_s);
   // motion_authorized 不因目标出现而自动复立：撤销后只能由
   // set_authorization(true) 或 SET_ENABLE(true) 显式重立（ARD §36）。
 
@@ -594,20 +626,6 @@ static void entry_apply_target(motor_control_context_t *ctx,
   }
 
   (void)entry_push_mit(ctx, entry, index, now_ms, true);
-}
-
-// 轨迹激活时，目标 ID 集合内的电机由轨迹独占；不在此判断生命周期或参数核对结果。
-static bool trajectory_owns(const motor_control_context_t *ctx,
-    uint16_t motor_id) {
-  if (!ctx->trajectory_active) {
-    return false;
-  }
-  for (uint16_t i = 0; i < ctx->trajectory.target_count; ++i) {
-    if (ctx->trajectory.target_ids[i] == motor_id) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static bool snapshot_contains(const motor_control_command_snapshot_t *snapshot,
@@ -698,14 +716,10 @@ static bool apply_command_snapshot(
   ctx->snapshot_disable_done = false;
   ctx->snapshot_accepted_count++;
 
-  // 受控集合逐台处理（ARD §11.3 步骤 10-12 / §51.3）。轨迹所属电机跳过
-  // 整段：它是轨迹通道的，快照对它既不下发也不软停。
+  // 受控集合逐台处理（ARD §11.3 步骤 10-12 / §51.3）。
   for (size_t i = 0; i < ctx->entry_count; ++i) {
     motor_control_entry_t *entry = &ctx->entries[i];
     if (!entry->used || !entry_target_eligible(entry)) {
-      continue;
-    }
-    if (trajectory_owns(ctx, entry->motor_id)) {
       continue;
     }
 
@@ -734,403 +748,8 @@ bool motor_control_admit_command_snapshot(motor_control_context_t *ctx,
 }
 
 // ---------------------------------------------------------------------------
-// 多点轨迹（MotorTrajectory）：在 2ms/500Hz 控制边界上按时间线确定性插值
-// ---------------------------------------------------------------------------
-
-// 轨迹结构校验（与 mailbox 同规则，另加注册表存在性——内核不信任调用方：
-// 白盒测试与未来入口都会直接喂这里）。整条拒绝，绝不部分采纳。
-// 校验并把「首个非法路点下标」带出去——拒绝事件据此告诉发送方改哪一行。
-// *bad_index = MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE 表示与路点无关
-// （计数越界 / 归属重复 / 未注册 / 有归属无路点）。
-static bool trajectory_validate(const motor_control_context_t *ctx,
-    const motor_control_trajectory_t *trajectory,
-    uint16_t *bad_index) {
-  *bad_index = MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE;
-  if (trajectory->point_count > MOTOR_CONTROL_MAX_TRAJECTORY_POINTS ||
-      trajectory->target_count > MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS) {
-    return false;
-  }
-  // 空轨迹 = 取消，合法载荷。
-  if (trajectory->point_count == 0U && trajectory->target_count == 0U) {
-    return true;
-  }
-  // 半条轨迹（有路点无归属 / 有归属无路点）没有可执行语义。
-  if (trajectory->point_count == 0U || trajectory->target_count == 0U) {
-    return false;
-  }
-
-  for (uint16_t i = 0; i < trajectory->target_count; ++i) {
-    motor_control_entry_t *owner =
-        motor_control_find_entry((motor_control_context_t *)ctx,
-        trajectory->target_ids[i]);
-    if (owner == NULL || !owner->used) {
-      return false; // 不存在/未注册设备（与快照的未知 motor_id 同口径）
-    }
-    for (uint16_t j = (uint16_t)(i + 1U); j < trajectory->target_count; ++j) {
-      if (trajectory->target_ids[i] == trajectory->target_ids[j]) {
-        return false; // 声明集合重复
-      }
-    }
-  }
-
-  uint32_t seen_mask = 0U; // 每台「已有路点」位图
-  // target_count == 32 时 1U<<32 是未定义行为，故位图只覆盖 ≤31 台。
-  const bool need_mask = trajectory->target_count < 32U;
-  uint32_t previous_time = 0U;
-  for (uint16_t i = 0; i < trajectory->point_count; ++i) {
-    const motor_control_trajectory_point_t *point = &trajectory->points[i];
-    if (!isfinite(point->position_rad) || !isfinite(point->velocity_rad_s) ||
-        !isfinite(point->effort_nm)) {
-      *bad_index = i;
-      return false;
-    }
-    int slot = -1;
-    for (uint16_t j = 0; j < trajectory->target_count && slot < 0; ++j) {
-      if (trajectory->target_ids[j] == point->motor_id) {
-        slot = (int)j;
-      }
-    }
-    if (slot < 0) {
-      *bad_index = i;
-      return false; // motor_id 不在声明集合内
-    }
-    if (i > 0U) {
-      if (point->time_from_start_ms < previous_time) {
-        *bad_index = i;
-        return false; // 时间轴必须非递减
-      }
-      // 同时间戳可交错不同电机，检查全部前点以防 1/2/1 形式漏检。
-      for (uint16_t j = 0U; j < i; ++j) {
-        const motor_control_trajectory_point_t *previous = &trajectory->points[j];
-        if (previous->motor_id == point->motor_id &&
-            previous->time_from_start_ms >= point->time_from_start_ms) {
-          *bad_index = i;
-          return false; // 同一电机时间必须严格递增
-        }
-      }
-    }
-    previous_time = point->time_from_start_ms;
-    if (need_mask) {
-      seen_mask |= (uint32_t)1U << (uint32_t)slot;
-    }
-  }
-  if (need_mask) {
-    return seen_mask == ((1U << trajectory->target_count) - 1U);
-  }
-  // 归属电机数 > 31：位图不够用，退回逐台复查（只在超大轨迹时走这条路径）。
-  for (uint16_t i = 0; i < trajectory->target_count; ++i) {
-    bool found = false;
-    for (uint16_t j = 0; j < trajectory->point_count && !found; ++j) {
-      found = trajectory->points[j].motor_id == trajectory->target_ids[i];
-    }
-    if (!found) {
-      return false; // 声明了归属却没有任何路点
-    }
-  }
-  return true;
-}
-
-// 段定位：取该电机「不晚于 elapsed 的最后一个路点」与其后的第一个路点。
-// 返回 false = 该电机在轨迹里没有任何路点（合法载荷不会出现，防御用）。
-static bool trajectory_segment(const motor_control_trajectory_t *trajectory,
-    uint16_t motor_id, uint32_t elapsed,
-    const motor_control_trajectory_point_t **left,
-    const motor_control_trajectory_point_t **right) {
-  const motor_control_trajectory_point_t *lower = NULL;
-  const motor_control_trajectory_point_t *upper = NULL;
-  for (uint16_t i = 0; i < trajectory->point_count; ++i) {
-    const motor_control_trajectory_point_t *point = &trajectory->points[i];
-    if (point->motor_id != motor_id) {
-      continue;
-    }
-    if (point->time_from_start_ms <= elapsed) {
-      lower = point; // 时间有序：最后命中的即左端点
-    } else if (upper == NULL) {
-      upper = point; // 首个晚于 elapsed 的即右端点
-    }
-  }
-  if (lower == NULL) {
-    // elapsed 早于该电机首点（首点通常为 0）：钳首点保持，绝不外推。
-    lower = upper;
-    upper = NULL;
-  }
-  *left = lower;
-  *right = upper;
-  return lower != NULL;
-}
-
-// 释放归属：软停被移出集合的电机。轨迹结束/取消/被替换都是显式交接，
-// 不靠快照隐式夺权（周期发布者会误杀轨迹）。
-static void release_trajectory_motor(motor_control_context_t *ctx,
-    uint16_t motor_id, uint32_t now_ms) {
-  motor_control_entry_t *entry = motor_control_find_entry(ctx, motor_id);
-  if (entry != NULL) {
-    motor_control_soft_stop_entry(ctx, entry, now_ms);
-  }
-}
-
-// 非均匀单调三次 Hermite：受理时预计算切矢，控制边界只求值。
-// 内部点取相邻三点的 Fritsch–Carlson 切矢（rad/s）：局部极值取 0，
-// 否则按相邻段时长加权调和平均，并限幅到 3×min(|割线斜率|)，避免超调。
-static float trajectory_monotone_tangent(
-    const motor_control_trajectory_point_t *p0,
-    const motor_control_trajectory_point_t *p1,
-    const motor_control_trajectory_point_t *p2) {
-  const float dt0 =
-      (float)(p1->time_from_start_ms - p0->time_from_start_ms) / 1000.0f;
-  const float dt1 =
-      (float)(p2->time_from_start_ms - p1->time_from_start_ms) / 1000.0f;
-  if (!(dt0 > 0.0f) || !(dt1 > 0.0f)) {
-    return 0.0f; // 校验已保证同电机时间严格递增，这里只做防御
-  }
-  const float d0 = (p1->position_rad - p0->position_rad) / dt0;
-  const float d1 = (p2->position_rad - p1->position_rad) / dt1;
-  if (d0 * d1 <= 0.0f) {
-    return 0.0f; // 局部极值（含任一割线为 0）：切矢 0，曲线在极值处停住
-  }
-  const float a0 = fabsf(d0);
-  const float a1 = fabsf(d1);
-  const float limit = 3.0f * (a0 < a1 ? a0 : a1);
-  // 对不等时间间隔不能使用简单中心差分。权重来自相邻两段时长，
-  // 加权调和平均在单调数据上保持正性并抑制短段造成的速度过冲。
-  const float w1 = 2.0f * dt1 + dt0;
-  const float w2 = dt1 + 2.0f * dt0;
-  float m = (w1 + w2) / (w1 / d0 + w2 / d1);
-  if (m > limit) {
-    m = limit;
-  } else if (m < -limit) {
-    m = -limit;
-  }
-  return m;
-}
-
-// 为轨迹里每台电机的路点序列一次性算出全部切矢。按台分段流式推进：维护
-// 「前一点 p0 / 当前点 p1」，见到下一点 p2 时就能定下 p1 的切矢；每台的首点
-// 与末点恒为 0（端点零速）。复杂度与既有校验同量级，且只在受理时跑一次。
-static void trajectory_compute_tangents(motor_control_context_t *ctx) {
-  const motor_control_trajectory_t *trajectory = &ctx->trajectory;
-  for (uint16_t i = 0; i < trajectory->point_count; ++i) {
-    ctx->trajectory_tangent_rad_s[i] = 0.0f;
-  }
-  for (uint16_t m = 0; m < trajectory->target_count; ++m) {
-    const uint16_t id = trajectory->target_ids[m];
-    const motor_control_trajectory_point_t *p0 = NULL;
-    const motor_control_trajectory_point_t *p1 = NULL;
-    uint16_t i1 = 0U;
-    for (uint16_t i = 0; i < trajectory->point_count; ++i) {
-      const motor_control_trajectory_point_t *p2 = &trajectory->points[i];
-      if (p2->motor_id != id) {
-        continue;
-      }
-      if (p1 != NULL) {
-        // p1 是首点（p0 == NULL，端点零速）或内部点（不等时间加权 + 限幅）。
-        ctx->trajectory_tangent_rad_s[i1] =
-            (p0 == NULL) ? 0.0f : trajectory_monotone_tangent(p0, p1, p2);
-      }
-      p0 = p1;
-      p1 = p2;
-      i1 = i;
-    }
-    if (p1 != NULL) {
-      ctx->trajectory_tangent_rad_s[i1] = 0.0f; // 末点：端点零速
-    }
-  }
-}
-
-bool motor_control_apply_trajectory(motor_control_context_t *ctx,
-    const motor_control_trajectory_t *trajectory,
-    uint32_t now_ms) {
-  if (ctx == NULL || trajectory == NULL) {
-    return false;
-  }
-  uint16_t bad_index = MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE;
-  if (!trajectory_validate(ctx, trajectory, &bad_index)) {
-    ctx->trajectory_rejected_count++;
-    // 字段重载（本事件只由结构非法触发，reason 放故障码没有第二重信息）：
-    //   request_id = 被拒的 trajectory_id，reason = 首个非法路点下标。
-    motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED,
-        0U, 0U, bad_index, trajectory->trajectory_id);
-    return false;
-  }
-
-  // 取消（空轨迹）：释放全部所属电机并软停，不留归属残留。
-  if (trajectory->point_count == 0U) {
-    if (ctx->trajectory_active) {
-      for (uint16_t i = 0; i < ctx->trajectory.target_count; ++i) {
-        release_trajectory_motor(ctx, ctx->trajectory.target_ids[i], now_ms);
-      }
-    }
-    ctx->trajectory_active = false;
-    ctx->trajectory.point_count = 0U;
-    ctx->trajectory.target_count = 0U;
-    return true;
-  }
-
-  // 被替换：旧集合里不在新集合的电机立即释放（软停），其余由新轨迹接手。
-  if (ctx->trajectory_active) {
-    for (uint16_t i = 0; i < ctx->trajectory.target_count; ++i) {
-      const uint16_t old_id = ctx->trajectory.target_ids[i];
-      bool still_owned = false;
-      for (uint16_t j = 0; j < trajectory->target_count && !still_owned; ++j) {
-        still_owned = trajectory->target_ids[j] == old_id;
-      }
-      if (!still_owned) {
-        release_trajectory_motor(ctx, old_id, now_ms);
-      }
-    }
-  }
-
-  ctx->trajectory = *trajectory; // 整条锁存：时间线要跨控制边界使用
-  ctx->trajectory_agent_mode = false;
-  ctx->trajectory_active = true;
-  trajectory_compute_tangents(ctx); // 切矢只在此算一次，热路径只做求值
-  ctx->trajectory_start_tick_ms = now_ms; // 起点 = 本地受理 tick（ARD §12.2）
-  // 新轨迹是新证据：与快照受理同语义（清「待新证据」门）。
-  ctx->require_new_snapshot = false;
-  ctx->trajectory_accepted_count++;
-  return true;
-}
-
-bool motor_control_trajectory_targets_healthy(const motor_control_context_t *ctx,
-    const uint16_t *target_ids, uint16_t target_count, uint32_t now_ms) {
-  if (ctx == NULL || target_ids == NULL || !ctx->authorized ||
-      target_count == 0U || target_count > MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS)
-    return false;
-  for (uint16_t i = 0U; i < target_count; ++i) {
-    const motor_control_entry_t *entry = motor_control_find_entry(
-        (motor_control_context_t *)ctx, target_ids[i]);
-    if (entry == NULL || !entry->used || !entry->online || entry->profile == NULL ||
-        !entry_target_eligible(entry) || !entry->policy_enable ||
-        !entry->motion_authorized || !entry->has_measured ||
-        now_ms - entry->last_motion_rx_tick_ms > 100U ||
-        (entry->tx_active && entry->tx_kind == MOTOR_PROTOCOL_CONFIG_SET_MODE))
-      return false;
-  }
-  return true;
-}
-
-bool motor_control_apply_agent_trajectory(motor_control_context_t *ctx,
-    const motor_control_trajectory_t *trajectory, uint32_t now_ms) {
-  if (ctx == NULL || trajectory == NULL || ctx->trajectory_active ||
-      !ctx->have_snapshot || now_ms - ctx->last_snapshot_tick_ms > 30U ||
-      !motor_control_trajectory_targets_healthy(ctx, trajectory->target_ids,
-          trajectory->target_count, now_ms)) return false;
-  if (!motor_control_apply_trajectory(ctx, trajectory, now_ms)) return false;
-  ctx->trajectory_agent_mode = true;
-  return true;
-}
-
-bool motor_control_cancel_trajectory_id(motor_control_context_t *ctx,
-    uint32_t trajectory_id, uint32_t now_ms) {
-  if (ctx == NULL || !ctx->trajectory_active ||
-      ctx->trajectory.trajectory_id != trajectory_id) return false;
-  for (uint16_t i = 0U; i < ctx->trajectory.target_count; ++i) {
-    release_trajectory_motor(ctx, ctx->trajectory.target_ids[i], now_ms);
-  }
-  ctx->trajectory_active = false;
-  return true;
-}
-
-bool motor_control_trajectory_safety_pending(const motor_control_context_t *ctx,
-    const uint16_t *target_ids, uint16_t target_count) {
-  if (ctx == NULL || target_ids == NULL ||
-      target_count > MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS) return true;
-  for (uint16_t i = 0U; i < target_count; ++i) {
-    const motor_control_entry_t *entry = motor_control_find_entry(
-        (motor_control_context_t *)ctx, target_ids[i]);
-    if (entry != NULL && entry->p0_pending) return true;
-  }
-  return false;
-}
-
-void motor_control_copy_trajectory_state(
-    const motor_control_context_t *ctx,
-    motor_control_trajectory_state_t *out, uint32_t now_ms) {
-  if (ctx == NULL || out == NULL) {
-    return;
-  }
-  const motor_control_trajectory_t *trajectory = &ctx->trajectory;
-  out->trajectory_id = trajectory->trajectory_id;
-  out->active = ctx->trajectory_active;
-  out->target_count = ctx->trajectory_active ? trajectory->target_count : 0U;
-  for (uint16_t i = 0U; i < out->target_count; ++i) {
-    out->target_ids[i] = trajectory->target_ids[i];
-  }
-  // 路点时间非递减（mailbox 与内核各校验一次），故末点即总时长。
-  const bool live = ctx->trajectory_active && trajectory->point_count > 0U;
-  out->total_ms =
-      live ? trajectory->points[trajectory->point_count - 1U].time_from_start_ms
-           : 0U;
-  out->elapsed_ms =
-      ctx->trajectory_active ? now_ms - ctx->trajectory_start_tick_ms : 0U;
-  out->completed = ctx->trajectory_active && out->elapsed_ms >= out->total_ms;
-}
-
-void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms) {
-  if (ctx == NULL || !ctx->trajectory_active) {
-    return; // 无活动轨迹：O(1) 返回（未用轨迹 = 对既有行为零影响）
-  }
-  const motor_control_trajectory_t *trajectory = &ctx->trajectory;
-  if (ctx->trajectory_agent_mode &&
-      (!ctx->have_snapshot || now_ms - ctx->last_snapshot_tick_ms > 30U ||
-       !motor_control_trajectory_targets_healthy(ctx, trajectory->target_ids,
-           trajectory->target_count, now_ms))) {
-    (void)motor_control_cancel_trajectory_id(ctx, trajectory->trajectory_id, now_ms);
-    return; // 一台反馈/策略失效中止整条，不允许剩余电机继续运行
-  }
-  const uint32_t elapsed = now_ms - ctx->trajectory_start_tick_ms;
-  for (uint16_t t = 0; t < trajectory->target_count; ++t) {
-    motor_control_entry_t *entry =
-        motor_control_find_entry(ctx, trajectory->target_ids[t]);
-    if (entry == NULL || !entry->used || !entry_target_eligible(entry)) {
-      continue; // 故障/离线/冲突/未绑定自动脱离轨迹（归属是派生的）
-    }
-    if (!entry_may_move(ctx, entry, now_ms)) {
-      continue; // 与快照路径同一套门禁
-    }
-    const motor_control_trajectory_point_t *left = NULL;
-    const motor_control_trajectory_point_t *right = NULL;
-    if (!trajectory_segment(trajectory, entry->motor_id, elapsed, &left, &right)) {
-      continue; // 该电机在轨迹里没有路点（防御）
-    }
-    float position = left->position_rad;
-    float velocity = 0.0f;
-    const float effort = left->effort_nm; // 前馈段内保持左端点值
-    if (right != NULL) {
-      const uint32_t span_ms =
-          right->time_from_start_ms - left->time_from_start_ms;
-      if (span_ms > 0U) {
-        // Hermite 插值保持段间位置与速度连续。
-        const uint16_t li = (uint16_t)(left - trajectory->points);
-        const uint16_t ri = (uint16_t)(right - trajectory->points);
-        const float h = (float)span_ms / 1000.0f;
-        const float tau =
-            (float)(elapsed - left->time_from_start_ms) / (float)span_ms;
-        const float t2 = tau * tau;
-        const float t3 = t2 * tau;
-        const float m0 = ctx->trajectory_tangent_rad_s[li];
-        const float m1 = ctx->trajectory_tangent_rad_s[ri];
-        position = (2.0f * t3 - 3.0f * t2 + 1.0f) * left->position_rad +
-            (t3 - 2.0f * t2 + tau) * h * m0 +
-            (-2.0f * t3 + 3.0f * t2) * right->position_rad +
-            (t3 - t2) * h * m1;
-        // 解析导数 v = (dx/dτ)/h —— 不直通 point.velocity（上层常填 0，
-        // 直通会让 Kd 朝 0 速刹车）。
-        const float dh00 = 6.0f * t2 - 6.0f * tau;
-        const float dh10 = 3.0f * t2 - 4.0f * tau + 1.0f;
-        const float dh01 = -6.0f * t2 + 6.0f * tau;
-        const float dh11 = 3.0f * t2 - 2.0f * tau;
-        velocity = (dh00 * left->position_rad + dh10 * h * m0 +
-            dh01 * right->position_rad + dh11 * h * m1) / h;
-      }
-    }
-    entry_apply_target(ctx, entry, motor_control_entry_index(ctx, entry), position,
-        velocity, effort, now_ms, true);
-  }
-}
-
-// 每控制边界零阶保持已受理的快照目标，命令率不依赖上行到达率。
-// 仅保持 ≤30ms 的新鲜快照；撤权、故障等门禁不变，轨迹所属电机由同拍轨迹步进处理。
+// 每控制边界对快照目标进行 50Hz→200Hz 线性插帧并重发，命令率不依赖上行到达率。
+// 仅保持 ≤30ms 的新鲜快照；超时不外推，保持在目标值并由 freshness 门软停。
 void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
   if (ctx == NULL || !ctx->have_snapshot) {
     return;
@@ -1146,10 +765,6 @@ void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
   for (size_t i = 0; i < ctx->entry_count; ++i) {
     motor_control_entry_t *entry = &ctx->entries[i];
     if (!entry->used || !entry_target_eligible(entry)) {
-      continue;
-    }
-    // 轨迹机组由 trajectory_step 在同一拍发过（它是边界驱动的），跳过。
-    if (trajectory_owns(ctx, entry->motor_id)) {
       continue;
     }
     // 只在"有已受理目标"时保持；缺席快照已在受理时软停并清 has_target。
@@ -1169,6 +784,8 @@ void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms) {
     if (!entry_may_move(ctx, entry, now_ms)) {
       continue;
     }
+    entry_interpolated_state(entry, now_ms, &entry->interp_position_rad,
+        &entry->interp_velocity_rad_s);
     (void)entry_push_mit(ctx, entry, i, now_ms, false);
   }
 }
@@ -1242,6 +859,7 @@ void motor_control_soft_stop_entry(motor_control_context_t *ctx,
     (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_SOFT_STOP);
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_SAFE_STOP;
     entry->has_target = false;
+    entry->has_prev_target = false;
     motor_control_push_event(ctx, now_ms, MOTOR_CONTROL_EVENT_SOFT_STOP,
         entry->motor_id, entry->bus_index,
         MOTOR_CONTROL_FAULT_NONE, 0U);
@@ -1350,6 +968,7 @@ static void service_offline_checks(motor_control_context_t *ctx, uint32_t now_ms
     entry->online = false;
     entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_OFFLINE;
     entry->has_target = false;
+    entry->has_prev_target = false;
     entry->motion_enabled = false;
     entry->enable_pending = false;
     entry->motion_authorized = false; // 逐电机授权冻结（§36）
@@ -1374,7 +993,6 @@ bool motor_control_target_valid(const motor_control_context_t *ctx,
   const motor_control_entry_t *entry = &ctx->entries[slot];
   if (!entry->used || !entry->has_target || !entry_target_eligible(entry) ||
       !entry_may_move(ctx, entry, now_ms) || entry->p0_pending) return false;
-  if (trajectory_owns(ctx, entry->motor_id)) return true;
   const uint32_t remaining = ctx->snapshot_deadline_tick_ms - now_ms;
   return remaining > 0U && remaining <= MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS;
 }
@@ -1392,7 +1010,6 @@ void motor_control_soft_stop_all(motor_control_context_t *ctx, uint32_t now_ms) 
   for (size_t i = 0; i < ctx->entry_count; ++i) {
     motor_control_soft_stop_entry(ctx, &ctx->entries[i], now_ms);
   }
-  ctx->trajectory_active = false;
 }
 
 // 运动反馈过期与链路离线分开处置：保留在线链路，但该电机立即安全停机并使
@@ -1409,6 +1026,7 @@ static void service_motion_feedback_checks(motor_control_context_t *ctx,
     }
     motor_control_soft_stop_entry(ctx, entry, now_ms);
     entry->has_target = false;
+    entry->has_prev_target = false;
     entry->motion_authorized = false;
     entry->policy_enable = false;
   }
@@ -1433,11 +1051,8 @@ static void service_snapshot_freshness(motor_control_context_t *ctx, uint32_t no
   }
   const uint32_t remaining = ctx->snapshot_deadline_tick_ms - now_ms;
   if (remaining == 0U || remaining > MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS) {
-    // 执行截止仅停止快照来源；轨迹仍由独立的 30ms 通信租约约束。
     for (size_t i = 0; i < ctx->entry_count; ++i) {
-      if (!trajectory_owns(ctx, ctx->entries[i].motor_id)) {
-        motor_control_soft_stop_entry(ctx, &ctx->entries[i], now_ms);
-      }
+      motor_control_soft_stop_entry(ctx, &ctx->entries[i], now_ms);
     }
   }
 }
@@ -1449,11 +1064,6 @@ void motor_control_service(motor_control_context_t *ctx, uint32_t now_ms) {
   service_offline_checks(ctx, now_ms);
   service_motion_feedback_checks(ctx, now_ms);
   service_snapshot_freshness(ctx, now_ms);
-  if (ctx->trajectory_active && ctx->trajectory_agent_mode &&
-      !motor_control_trajectory_targets_healthy(ctx, ctx->trajectory.target_ids,
-          ctx->trajectory.target_count, now_ms)) {
-    (void)motor_control_cancel_trajectory_id(ctx, ctx->trajectory.trajectory_id, now_ms);
-  }
   service_lifecycle_advance(ctx, now_ms);
   service_p0_retries(ctx);
 
@@ -1577,13 +1187,9 @@ size_t motor_control_copy_motion_states(motor_control_context_t *ctx,
     state->state_age_ms = entry->last_motion_rx_tick_ms != 0U
                               ? now_ms - entry->last_motion_rx_tick_ms
                               : 0xFFFFFFFFU;
-    // 命令源按归属派生（与仲裁同一判据）：轨迹所属即轨迹，否则看是否有
-    // 在效目标。不发散出一份独立状态，免得与仲裁漂移。
     state->target_source =
-        trajectory_owns(ctx, entry->motor_id)
-            ? MOTOR_CONTROL_TARGET_SOURCE_TRAJECTORY
-            : (entry->has_target ? MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT
-                                 : MOTOR_CONTROL_TARGET_SOURCE_NONE);
+        entry->has_target ? MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT
+                          : MOTOR_CONTROL_TARGET_SOURCE_NONE;
   }
   return count;
 }
@@ -1621,11 +1227,6 @@ static uint8_t execution_state_of(const motor_control_context_t *ctx,
   }
   if (!entry->has_target || !entry->motion_enabled) {
     return MOTOR_CONTROL_EXECUTION_IDLE;
-  }
-  if (trajectory_owns(ctx, entry->motor_id) && ctx->trajectory.point_count > 0U) {
-    return now_ms - ctx->trajectory_start_tick_ms <
-        ctx->trajectory.points[ctx->trajectory.point_count - 1U].time_from_start_ms
-        ? MOTOR_CONTROL_EXECUTION_TRAJECTORY : MOTOR_CONTROL_EXECUTION_HOLDING;
   }
   if (entry->target_velocity_rad_s != 0.0f ||
       (entry->has_measured && (fabsf(entry->measured.velocity_rad_s) > 0.001f ||
@@ -1706,8 +1307,6 @@ void motor_control_copy_diagnostics(const motor_control_context_t *ctx,
   out->event_dropped = ctx->event_dropped_count;
   out->tx_dropped = ctx->tx_dropped_count;
   out->p0_retry = ctx->p0_retry_count;
-  out->trajectory_accepted = ctx->trajectory_accepted_count;
-  out->trajectory_rejected = ctx->trajectory_rejected_count;
   out->policy_accepted = ctx->policy_accepted_count;
   out->policy_rejected = ctx->policy_rejected_count;
 }

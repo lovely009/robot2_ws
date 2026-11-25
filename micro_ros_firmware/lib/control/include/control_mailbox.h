@@ -16,7 +16,6 @@
 
 #include "control_command_mailbox.h"
 #include "control_policy_mailbox.h"
-#include "control_trajectory_mailbox.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -125,7 +124,6 @@ typedef struct {
 
 typedef struct {
   control_command_mailbox_t command;
-  control_trajectory_mailbox_t trajectory;
   control_policy_mailbox_t policy;
   control_mailbox_config_request_t
       config_queue[CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY];
@@ -138,8 +136,6 @@ typedef struct {
   uint32_t config_session_count;   // Agent 未连接期的配置提交
   uint32_t command_rejected_count; // 被授权/会话门拒绝的命令提交
                                    //（快照本身非法走同一计数，已导出）
-  uint32_t trajectory_rejected_count; // 被授权/会话门拒绝的轨迹提交
-                                      //（轨迹本身非法走 trajectory.invalid_trajectory_count）
   uint32_t policy_rejected_count; // 被授权/会话门拒绝的策略提交
                                   //（策略本身非法走 policy.invalid_policy_count）
 
@@ -164,14 +160,6 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox,
     control_command_snapshot_t *snapshot);
 // 只撤销"未取走"的输入；诊断计数保留为生命周期统计。
 void control_mailbox_clear_command(control_mailbox_t *mailbox);
-
-// 轨迹输入：多点时间线 latest-wins。与 submit_command 同门同序（授权 +
-// 会话门先于数据校验）；空轨迹 = 取消，是合法载荷。
-bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
-    const control_trajectory_t *trajectory);
-bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
-    control_trajectory_t *trajectory);
-void control_mailbox_clear_trajectory(control_mailbox_t *mailbox);
 
 // 策略输入：批量、latest-wins。与 submit_command 同门同序（授权 + 会话门
 // 先于数据校验）。**不走 config FIFO**——那条队列深 16，装不下一条最多 64

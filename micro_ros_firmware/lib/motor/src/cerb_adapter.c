@@ -56,9 +56,9 @@
 #define CERB_POS_CNT_MAX (32768)
 #define CERB_SUB_DEFAULT 0x00U
 
-// SDO 阶段超时 30ms，至多重试 2 次；不是运动周期。
+// SDO 阶段超时 100ms，至多重试 2 次；不是运动周期。
 // 同总线必须一问一答串行，过短超时会造成重复请求拥塞。
-#define CERB_SDO_TIMEOUT_MS 30U
+#define CERB_SDO_TIMEOUT_MS 100U
 
 static uint32_t cerb_read_le32(const uint8_t *data) {
   return (uint32_t)data[0] | ((uint32_t)data[1] << 8U) |

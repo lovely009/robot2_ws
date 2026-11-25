@@ -9,7 +9,7 @@ bool agent_config_operation_supported(uint8_t operation) {
 
 bool agent_deadline_valid(uint32_t now_ms, uint32_t deadline_ms) {
   const uint32_t remaining = deadline_ms - now_ms;
-  return remaining > 0U && remaining <= 30U;
+  return remaining > 0U && remaining <= AGENT_COMMAND_SOFT_STOP_MS;
 }
 
 bool agent_request_deadline(uint64_t issued_ns, uint16_t ttl_ms,
@@ -49,7 +49,7 @@ void agent_link_accept_command(agent_link_t *link, uint32_t sequence, uint32_t n
 bool agent_link_accept_policy(agent_link_t *link, uint32_t generation, uint32_t now_ms) {
   if (link == NULL || generation == 0U || link->stop_pending ||
       !link->connected || !link->clock_valid || !link->have_command ||
-      (uint32_t)(now_ms - link->command_tick_ms) > 30U ||
+      (uint32_t)(now_ms - link->command_tick_ms) > AGENT_COMMAND_SOFT_STOP_MS ||
       generation < link->highest_policy_generation ||
       (!link->authorized && generation <= link->barrier_generation)) return false;
   link->highest_policy_generation = generation;
@@ -71,9 +71,9 @@ uint8_t agent_link_poll(agent_link_t *link, uint32_t now_ms,
   link->connected = connected;
   link->clock_valid = clock_valid;
   const uint32_t age = now_ms - link->command_tick_ms;
-  link->lease_valid = link->have_command && age <= 30U && connected && clock_valid;
+  link->lease_valid = link->have_command && age <= AGENT_COMMAND_SOFT_STOP_MS && connected && clock_valid;
   if (link->stop_pending || ((!connected || !clock_valid ||
-      (link->have_command && age > 100U)) && !link->revoked)) {
+      (link->have_command && age > AGENT_COMMAND_REVOKE_MS)) && !link->revoked)) {
     link->barrier_generation = link->highest_policy_generation;
     link->authorized = false;
     link->stop_pending = false;
@@ -82,7 +82,7 @@ uint8_t agent_link_poll(agent_link_t *link, uint32_t now_ms,
     ++link->stop_generation;
     return AGENT_LINK_REVOKE;
   }
-  if (link->have_command && age > 30U && !link->soft_stopped) {
+  if (link->have_command && age > AGENT_COMMAND_SOFT_STOP_MS && !link->soft_stopped) {
     link->soft_stopped = true;
     return AGENT_LINK_SOFT_STOP;
   }

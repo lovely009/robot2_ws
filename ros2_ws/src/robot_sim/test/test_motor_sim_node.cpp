@@ -208,39 +208,18 @@ TEST(MotorSimNodeInterfaces, PublishesBrakeStateAndRejectsResetWithoutFault) {
   ros::TransportMap transports;
   transports.emplace("arm", std::make_unique<IdleTransport>());
   ros::NodeDefaults defaults;
-  defaults.drive_state_topic = "test_drive_state";
-  defaults.control_gate_topic = "test_control_gate";
   defaults.reset_fault_service = "test_reset_fault";
   defaults.effort_topic = "test_efforts";
 
   auto motor_node = std::make_shared<ros::MotorSimNode>(
       rclcpp::NodeOptions{}, one_axis_config(), std::move(transports), defaults);
   auto observer = std::make_shared<rclcpp::Node>("motor_sim_interface_test");
-  std::vector<std::string> states;
-  auto state_subscription = observer->create_subscription<std_msgs::msg::String>(
-      "test_drive_state", 10,
-      [&states](const std_msgs::msg::String &message) {
-        states.push_back(message.data);
-      });
-  auto gate_publisher = observer->create_publisher<std_msgs::msg::Bool>(
-      "test_control_gate", 10);
   auto reset_client =
       observer->create_client<std_srvs::srv::Trigger>("test_reset_fault");
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(motor_node);
   executor.add_node(observer);
-  const auto deadline = std::chrono::steady_clock::now() + 1s;
-  while (states.empty() && std::chrono::steady_clock::now() < deadline) {
-    executor.spin_some();
-  }
-  ASSERT_FALSE(states.empty());
-  EXPECT_EQ(states.back(), "brake_engaged");
-  EXPECT_EQ(motor_node->last_efforts(), std::vector<double>(1U, 0.0));
-
-  std_msgs::msg::Bool gate;
-  gate.data = true;
-  gate_publisher->publish(gate);
   executor.spin_some();
   EXPECT_EQ(motor_node->last_efforts(), std::vector<double>(1U, 0.0));
 
@@ -392,18 +371,10 @@ TEST(MotorSimNodeTransmission, MapsFeedbackAndEffortByNameAndBlocksIncompleteGro
   defaults.joint_names = {"pitch", "yaw"};
   defaults.joint_states_topic = "transmission_test/states";
   defaults.effort_topic = "transmission_test/efforts";
-  defaults.control_gate_topic = "transmission_test/gate";
-  defaults.drive_state_topic = "transmission_test/drive";
   auto node = std::make_shared<ros::MotorSimNode>(
       rclcpp::NodeOptions{}, config, std::move(transports), defaults);
   auto peer = std::make_shared<rclcpp::Node>("motor_sim_transmission_test");
   auto states = peer->create_publisher<sensor_msgs::msg::JointState>(defaults.joint_states_topic, 10);
-  auto gate = peer->create_publisher<std_msgs::msg::Bool>(defaults.control_gate_topic, 10);
-  std::string drive_state;
-  auto drive = peer->create_subscription<std_msgs::msg::String>(
-      defaults.drive_state_topic, 10, [&drive_state](const std_msgs::msg::String &msg) {
-        drive_state = msg.data;
-      });
   std::vector<double> output;
   auto sub = peer->create_subscription<std_msgs::msg::Float64MultiArray>(
       defaults.effort_topic, 10, [&output](const std_msgs::msg::Float64MultiArray &msg) { output = msg.data; });
@@ -415,12 +386,9 @@ TEST(MotorSimNodeTransmission, MapsFeedbackAndEffortByNameAndBlocksIncompleteGro
     while (std::chrono::steady_clock::now() < end) executor.spin_some();
   };
   const auto discovery_end = std::chrono::steady_clock::now() + 2s;
-  while ((!states->get_subscription_count() || !gate->get_subscription_count()) &&
+  while (!states->get_subscription_count() &&
          std::chrono::steady_clock::now() < discovery_end) spin_for(10ms);
   ASSERT_GT(states->get_subscription_count(), 0U);
-  ASSERT_GT(gate->get_subscription_count(), 0U);
-  std_msgs::msg::Bool open;
-  open.data = true;
   for (unsigned id : {1U, 2U}) {
     motor_sim::protocol::CanFrame control;
     control.id = motor_sim::protocol::vaxor_control_id(id);
@@ -448,11 +416,6 @@ TEST(MotorSimNodeTransmission, MapsFeedbackAndEffortByNameAndBlocksIncompleteGro
   states->publish(feedback);
   spin_for(50ms);
   EXPECT_EQ(node->last_efforts(), (std::vector<double>{0.0, 0.0}));
-  const auto ready_end = std::chrono::steady_clock::now() + 2s;
-  while (drive_state != "ready_for_control" &&
-         std::chrono::steady_clock::now() < ready_end) spin_for(10ms);
-  ASSERT_EQ(drive_state, "ready_for_control");
-  gate->publish(open);
   feedback.name = {"pitch", "yaw"};
   feedback.position = {0.1, 0.2};
   feedback.velocity = {0.0, 0.0};
@@ -528,28 +491,22 @@ protected:
     ros::NodeDefaults defaults;
     defaults.driver_file=(root/"driver.yaml").string(); defaults.joint_names={"pitch","elbow","yaw"};
     defaults.joint_states_topic="spatial/states"; defaults.effort_topic="spatial/efforts";
-    defaults.control_gate_topic="spatial/gate"; defaults.drive_state_topic="spatial/drive";
     node=std::make_shared<ros::MotorSimNode>(rclcpp::NodeOptions{},config,std::move(transports),defaults);
     peer=std::make_shared<rclcpp::Node>("spatial_motor_sim_peer");
     states=peer->create_publisher<sensor_msgs::msg::JointState>(defaults.joint_states_topic,10);
-    gate=peer->create_publisher<std_msgs::msg::Bool>(defaults.control_gate_topic,10);
     sub=peer->create_subscription<std_msgs::msg::Float64MultiArray>(defaults.effort_topic,10,
       [this](const std_msgs::msg::Float64MultiArray &msg){output=msg.data;});
-    drive=peer->create_subscription<std_msgs::msg::String>(defaults.drive_state_topic,10,
-      [this](const std_msgs::msg::String &msg){drive_state=msg.data;});
     executor->add_node(node); executor->add_node(peer);
     const auto end=std::chrono::steady_clock::now()+2s;
-    while((!states->get_subscription_count() || !gate->get_subscription_count()) && std::chrono::steady_clock::now()<end) spin_for(10ms);
+    while(!states->get_subscription_count() && std::chrono::steady_clock::now()<end) spin_for(10ms);
     ASSERT_GT(states->get_subscription_count(),0U);
     command();
-    while(drive_state!="ready_for_control" && std::chrono::steady_clock::now()<end) spin_for(10ms);
-    ASSERT_EQ(drive_state,"ready_for_control");
-    std_msgs::msg::Bool open; open.data=true; gate->publish(open); spin_for(20ms);
+    spin_for(30ms);
   }
   void TearDown() override {
     if(peer) executor->remove_node(peer);
     if(node) executor->remove_node(node);
-    sub.reset(); drive.reset(); states.reset(); gate.reset(); peer.reset(); node.reset();
+    sub.reset(); states.reset(); peer.reset(); node.reset();
     executor.reset();
     std::filesystem::remove_all(root);
     rclcpp::shutdown();

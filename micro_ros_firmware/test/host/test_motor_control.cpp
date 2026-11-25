@@ -892,25 +892,25 @@ static void test_frame_creates_discovered_then_bind_readies() {
   assert(have_bound);
 }
 
-// 容量 48：第 49 台拒绝并出 REGISTRY_FULL 事件（禁止静默截断）。
+// 容量 MOTOR_CONTROL_MAX_MOTORS (37)：第 38 台拒绝并出 REGISTRY_FULL 事件（禁止静默截断）。
 static void test_registry_capacity_48_rejects_overflow() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
-  // vaxor 节点 1..32 + CERB 节点 33..48，恰好注册 48 台。
-  for (uint16_t node = 1; node <= 32; ++node) {
+  // vaxor 节点 1..20 + CERB 节点 21..37，恰好注册 MOTOR_CONTROL_MAX_MOTORS 台。
+  for (uint16_t node = 1; node <= 20; ++node) {
     motor_protocol_raw_frame_t f = vaxor_reply(node, 0.0, 0.0, 0.0, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
-  for (uint16_t node = 33; node <= 48; ++node) {
+  for (uint16_t node = 21; node <= MOTOR_CONTROL_MAX_MOTORS; ++node) {
     motor_protocol_raw_frame_t f = cerb_feedback(node, node * 10);
     motor_control_on_raw_frame(&ctx, &f);
   }
-  assert(ctx.entry_count == 48U);
+  assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
 
-  // 第 49 台：合法且未占用的 CERB 节点 → 满表拒绝。
-  motor_protocol_raw_frame_t extra = cerb_feedback(49, 1000);
+  // 第 38 台：合法且未占用的 CERB 节点 → 满表拒绝。
+  motor_protocol_raw_frame_t extra = cerb_feedback(MOTOR_CONTROL_MAX_MOTORS + 1U, 1000);
   motor_control_on_raw_frame(&ctx, &extra);
-  assert(ctx.entry_count == 48U);
+  assert(ctx.entry_count == MOTOR_CONTROL_MAX_MOTORS);
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_REGISTRY_FULL, 0));
 }
 
@@ -1123,7 +1123,7 @@ static void test_identity_read_failure_retries_then_unbinds() {
 
   // 设备从容不应答；喂心跳隔离"事务超时"与"心跳丢失判离线"两条路径。
   uint32_t t = 110U;
-  for (; t <= 400U; t += 10U) {
+  for (; t <= 500U; t += 10U) {
     if (t % 20U == 0U) {
       motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
       motor_control_on_raw_frame(&ctx, &hb);
@@ -1136,7 +1136,7 @@ static void test_identity_read_failure_retries_then_unbinds() {
   assert(e->identity_read_attempts >= 1U); // 失败已计入
   assert(!events_contain(&ctx, MOTOR_CONTROL_EVENT_PROFILE_REJECTED, 9));
 
-  // 跑过全部重试窗口（每次事务 ~100ms + 500ms 退避）→ 用尽后才定论。
+  // 跑过全部重试窗口（每次事务 ~300ms + 500ms 退避）→ 用尽后才定论。
   for (; t <= 3000U; t += 10U) {
     if (t % 20U == 0U) {
       motor_protocol_raw_frame_t hb = cerb_feedback(9, t);
@@ -1397,34 +1397,34 @@ static void test_100ms_stale_disables_and_clears_authorization() {
   motor_control_service(&ctx, 130);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 
-  // 持续自主上报（设备仍在发反馈），仅快照停更：age=100 仍只是软停态，
-  // age=101（>100）协议级停机/失能 + 清授权——精确踩规范边沿。
-  motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, 219);
+  // 持续自主上报（设备仍在发反馈），仅快照停更：age=200 仍只是软停态，
+  // age=201（>200）协议级停机/失能 + 清授权——精确踩规范边沿。
+  motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, 319);
   motor_control_on_raw_frame(&ctx, &keepalive);
-  motor_control_service(&ctx, 220); // age=100：30ms 级联已发软停，尚未升级
+  motor_control_service(&ctx, 320); // age=200：100ms 级联已发软停，尚未升级
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
   assert(ctx.authorized);
-  motor_control_service(&ctx, 221); // age=101：升级为协议级停机/失能
+  motor_control_service(&ctx, 321); // age=201：升级为协议级停机/失能
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(!ctx.authorized);
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P0) >= 1); // 失能帧
   assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_DISABLE, 5));
 
   // 恢复：重新授权，但旧快照不作数 —— 必须等新快照。
-  assert(motor_control_set_authorization(&ctx, true, 240));
-  motor_control_service(&ctx, 250);
+  assert(motor_control_set_authorization(&ctx, true, 340));
+  motor_control_service(&ctx, 350);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  motor_control_command_snapshot_t s2 = make_snapshot(2, 260);
+  motor_control_command_snapshot_t s2 = make_snapshot(2, 360);
   snapshot_add(&s2, 5, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &s2, 265));
-  motor_control_service(&ctx, 270);
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 365));
+  motor_control_service(&ctx, 370);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
   assert(!entry_of(&ctx, 5)->policy_enable);
-  enable_test_motor(&ctx, 5, 271U);
+  enable_test_motor(&ctx, 5, 371U);
   s2.sequence = 3U;
-  s2.received_tick_ms = 272U;
-  s2.valid_until_tick_ms = 302U;
-  assert(motor_control_apply_command_snapshot(&ctx, &s2, 272U));
+  s2.received_tick_ms = 372U;
+  s2.valid_until_tick_ms = 402U;
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 372U));
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
@@ -2199,36 +2199,36 @@ static void test_stale_snapshot_gates() {
   motor_control_service(&ctx, 140);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 
-  // 30<age≤100：软停级联，快照不被记录（序号 2 尚未被消费）。
+  // 100<age≤200：软停级联，快照不被记录（序号 2 尚未被消费）。
   // 本用例只验证命令时效；局部刷新真实测量，避免新的运动反馈门成为
   // 提前触发条件。
-  motor_protocol_raw_frame_t feedback = vaxor_reply(5, 0.0, 0.0, 0.0, 230);
+  motor_protocol_raw_frame_t feedback = vaxor_reply(5, 0.0, 0.0, 0.0, 305);
   motor_control_on_raw_frame(&ctx, &feedback);
   motor_control_command_snapshot_t stale30 = make_snapshot(2, 205);
   snapshot_add(&stale30, 5, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &stale30, 240)); // age=35
+  assert(motor_control_apply_command_snapshot(&ctx, &stale30, 315)); // age=110
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
   assert(ctx.last_snapshot_sequence == 1U); // 未记录
 
-  // age>100：撤权 + 协议级失能。
-  feedback = vaxor_reply(5, 0.0, 0.0, 0.0, 250);
+  // age>200：撤权 + 协议级失能。
+  feedback = vaxor_reply(5, 0.0, 0.0, 0.0, 325);
   motor_control_on_raw_frame(&ctx, &feedback);
   motor_control_command_snapshot_t stale100 = make_snapshot(3, 105);
   snapshot_add(&stale100, 5, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &stale100, 260)); // age=155
+  assert(motor_control_apply_command_snapshot(&ctx, &stale100, 330)); // age=225
   assert(!ctx.authorized);
   assert(ctx.require_new_snapshot);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
 
   // 恢复链：新授权 + 序号 2 的新鲜快照（过期快照未消费序号）→ ACTIVE。
-  assert(motor_control_set_authorization(&ctx, true, 270));
-  enable_test_motor(&ctx, 5, 271U);
-  motor_control_command_snapshot_t fresh = make_snapshot(2, 275);
+  assert(motor_control_set_authorization(&ctx, true, 340));
+  enable_test_motor(&ctx, 5, 341U);
+  motor_control_command_snapshot_t fresh = make_snapshot(2, 345);
   snapshot_add(&fresh, 5, 0.1f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &fresh, 280));
-  motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, 285);
+  assert(motor_control_apply_command_snapshot(&ctx, &fresh, 350));
+  motor_protocol_raw_frame_t keepalive = vaxor_reply(5, 0.0, 0.0, 0.0, 355);
   motor_control_on_raw_frame(&ctx, &keepalive); // 自主上报保活，防误判离线
-  motor_control_service(&ctx, 290);
+  motor_control_service(&ctx, 360);
   assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
 }
 
@@ -4215,31 +4215,6 @@ static void test_copy_topology() {
 // 多点轨迹（MotorTrajectory）：归属仲裁、段内插值、通道级 freshness
 // ---------------------------------------------------------------------------
 
-static motor_control_trajectory_t make_trajectory(uint32_t sequence,
-    uint32_t tick) {
-  motor_control_trajectory_t t = {};
-  t.sequence = sequence;
-  t.received_tick_ms = tick;
-  return t;
-}
-
-static void traj_add_motor(motor_control_trajectory_t *t, uint16_t motor_id) {
-  t->target_ids[t->target_count] = motor_id;
-  t->target_count++;
-}
-
-static void traj_add_point(motor_control_trajectory_t *t, uint32_t time_ms,
-    uint16_t motor_id, float pos, float effort) {
-  t->points[t->point_count].time_from_start_ms = time_ms;
-  t->points[t->point_count].motor_id = motor_id;
-  t->points[t->point_count].position_rad = pos;
-  t->points[t->point_count].velocity_rad_s = 0.0f;
-  t->points[t->point_count].effort_nm = effort;
-  t->point_count++;
-}
-
-// 两台 vaxor 经完整快照进 ACTIVE（轨迹用例的公共起点）。最后一份快照的
-// received_tick_ms = tick + 20，是后续 freshness 级联的计时基准。
 static void bring_two_active(motor_control_context_t *ctx, uint16_t first,
     uint16_t second, uint32_t tick) {
   bring_vaxor_to_ready(ctx, first, "vaxor_2550", tick);
@@ -4263,332 +4238,6 @@ static void feed_vaxor_heartbeat(motor_control_context_t *ctx, uint16_t first,
 }
 
 // 轨迹在播期间是所属电机的唯一命令权威：快照对它既不下发也不软停。
-static void test_trajectory_owns_its_motors_against_snapshot() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 0.5f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-  motor_control_trajectory_step(&ctx, 200U);
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-  assert(entry_of(&ctx, 5)->target_position_rad == 0.1f);
-
-  // 快照只含 7：5 缺席也不得按 §13.1 软停（它归轨迹管）。
-  motor_control_command_snapshot_t s = make_snapshot(2U, 205U);
-  snapshot_add(&s, 7, 0.3f, 0.0f, 0.0f);
-  assert(motor_control_apply_command_snapshot(&ctx, &s, 210U));
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-  assert(entry_of(&ctx, 5)->has_target);
-  assert(entry_of(&ctx, 5)->target_position_rad == 0.1f); // 目标仍来自轨迹
-  assert(entry_of(&ctx, 7)->target_position_rad == 0.3f); // 7 照常跟快照
-}
-
-// 反向：轨迹集合外的电机仍受 §13.1「缺席即软停」约束。
-static void test_snapshot_absence_soft_stops_only_unowned_motors() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-
-  motor_control_command_snapshot_t empty = make_snapshot(2U, 205U);
-  assert(motor_control_apply_command_snapshot(&ctx, &empty, 210U));
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-}
-
-// Hermite 求值 / 解析速度 / 末点钳制不外推 / 前馈段内保持。
-static void test_trajectory_interpolates_and_clamps_at_end() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 300U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 1.0f, 0.25f);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
-
-  motor_control_trajectory_step(&ctx, 300U); // elapsed 0 → 首点
-  assert(entry_of(&ctx, 5)->target_position_rad == 0.0f);
-
-  feed_vaxor_heartbeat(&ctx, 5, 7, 800U);
-  motor_control_trajectory_step(&ctx, 800U); // elapsed 500 → 中点
-  assert(std::fabs(entry_of(&ctx, 5)->target_position_rad - 0.5f) < 1e-6f);
-  // 速度是 Hermite 的解析导数：两端切矢为 0 的对称段在中点取峰值
-  // = 1.5 × 平均斜率 = 1.5 rad/s。（线性插值会给常数 1.0——那正是被消除的台阶；
-  // 1.5 倍峰值意味着同样的行程/时长下瞬时速度更高，故限速钳制仍必须生效。）
-  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s - 1.5f) < 1e-6f);
-  assert(entry_of(&ctx, 5)->target_effort_nm == 0.0f); // 段内保持左端点
-
-  feed_vaxor_heartbeat(&ctx, 5, 7, 9000U);
-  motor_control_trajectory_step(&ctx, 9000U); // 越过末点 → 钳末点
-  assert(entry_of(&ctx, 5)->target_position_rad == 1.0f);
-  assert(entry_of(&ctx, 5)->target_velocity_rad_s == 0.0f);
-  assert(entry_of(&ctx, 5)->target_effort_nm == 0.25f);
-}
-
-// 单调三次 Hermite：段间速度连续（C¹）。等间隔路点（0 → 1 → 3）的
-// Fritsch–Carlson 加权调和切矢 = 3 / (3/1 + 3/2) = 4/3 rad/s。
-// 线性插值在这里是一次速度台阶（左 1.0 / 右 2.0），本用例正是钉住"台阶消失"。
-static void test_trajectory_hermite_c1_continuity() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 300U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);
-  traj_add_point(&t, 2000U, 5, 3.0f, 0.0f);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
-
-  // 路点前后各 1ms 采样（时间轴是整数 ms，这是最细的采样）。
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U + 999U);
-  motor_control_trajectory_step(&ctx, 300U + 999U);
-  const float v_before = entry_of(&ctx, 5)->target_velocity_rad_s;
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U + 1001U);
-  motor_control_trajectory_step(&ctx, 300U + 1001U);
-  const float v_after = entry_of(&ctx, 5)->target_velocity_rad_s;
-
-  // 线性插值下这三个断言全不成立（1.0 / 2.0 / 差 1.0）。
-  assert(std::fabs(v_before - v_after) < 1e-2f);  // 台阶消失
-  assert(std::fabs(v_before - (4.0f / 3.0f)) < 1e-2f);
-  assert(std::fabs(v_after - (4.0f / 3.0f)) < 1e-2f);
-}
-
-// 非均匀时间轴：0→1 用 1s，1→5 用 2s，割线为 1 和 2 rad/s。
-// 真正的非均匀 Fritsch–Carlson 切矢为
-// (5+4)/(5/1+4/2) = 9/7；简单算术平均会错误得到 1.5。
-static void test_trajectory_hermite_uses_nonuniform_time_weights() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 300U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);
-  traj_add_point(&t, 3000U, 5, 5.0f, 0.0f);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
-
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U + 1000U);
-  motor_control_trajectory_step(&ctx, 300U + 1000U);
-  assert(std::fabs(entry_of(&ctx, 5)->target_position_rad - 1.0f) < 1e-6f);
-  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s - (9.0f / 7.0f)) <
-      1e-3f);
-}
-
-// 单调三次 Hermite：端点强制零速、局部极值处切矢限为 0（因而段内不超调）。
-static void test_trajectory_hermite_no_overshoot_and_zero_endpoints() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  // 0 → 1 → 0.5：中间点两侧割线异号（+1.0 / −0.5），是局部极大。
-  // 不做单调限幅时中心差分 = (1.0 − 0.5)/2 = 0.25 ≠ 0，曲线会冲过 1.0。
-  motor_control_trajectory_t t = make_trajectory(1U, 300U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);
-  traj_add_point(&t, 2000U, 5, 0.5f, 0.0f);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
-
-  // 起点强制零速（线性插值在此给 Δ_0 = +1.0）。
-  motor_control_trajectory_step(&ctx, 300U);
-  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s) < 1e-6f);
-
-  // 局部极大处切矢为 0（线性插值在此给 Δ_1 = −0.5）。
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U + 1000U);
-  motor_control_trajectory_step(&ctx, 300U + 1000U);
-  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s) < 1e-3f);
-
-  // 第二段（1.0 → 0.5）密集采样：不得超调。
-  for (uint32_t e = 1000U; e <= 2000U; e += 25U) {
-    feed_vaxor_heartbeat(&ctx, 5, 7, 300U + e);
-    motor_control_trajectory_step(&ctx, 300U + e);
-    const float x = entry_of(&ctx, 5)->target_position_rad;
-    assert(x >= 0.5f - 1e-5f && x <= 1.0f + 1e-5f);
-  }
-
-  // 末点保持 + 端速 0（越界后保持末点，行为不变）。
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U + 9000U);
-  motor_control_trajectory_step(&ctx, 300U + 9000U);
-  assert(std::fabs(entry_of(&ctx, 5)->target_position_rad - 0.5f) < 1e-6f);
-  assert(std::fabs(entry_of(&ctx, 5)->target_velocity_rad_s) < 1e-6f);
-}
-
-// 轨迹执行时 **位置与速度必须同向**：执行侧速度是位置时间线的解析导数（路点里的
-// velocity 字段被忽略，见 motor_control.c 的求值注释）。符号写反的后果不是"看着不对"
-// 而是 MIT 律里的 kd·(v_des − v) 变成**负阻尼**。这条同时钉死两件事：
-//   ① 上升段速度为正、下降段速度为负（同向）；
-//   ② 路点里塞一个假的 velocity 不影响执行速度（证明它是解析求导，不是直通）。
-static void test_trajectory_position_velocity_same_sign() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 300U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.0f, 0.0f);      // 起 0
-  traj_add_point(&t, 1000U, 5, 1.0f, 0.0f);   // 1s 升到 +1.0
-  traj_add_point(&t, 2000U, 5, -0.5f, 0.0f);  // 2s 降到 −0.5
-  // 路点里塞满**负**的假速度：若固件直通它，上升段的 v ≥ 0 断言必然失败。
-  for (uint16_t i = 0U; i < t.point_count; ++i) {
-    t.points[i].velocity_rad_s = -9.0f;
-  }
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t, 300U));
-
-  int up = 0, down = 0;
-  float prev = 0.0f;
-  for (uint32_t e = 0U; e <= 2000U; e += 20U) {
-    feed_vaxor_heartbeat(&ctx, 5, 7, 300U + e);
-    motor_control_trajectory_step(&ctx, 300U + e);
-    const float x = entry_of(&ctx, 5)->target_position_rad;
-    const float v = entry_of(&ctx, 5)->target_velocity_rad_s;
-    if (e == 0U) { prev = x; continue; }
-    const float dx = x - prev;
-    prev = x;
-    // 单调段上解析导数是**弱**同号的：局部极值处切矢恰为 0（F–C 限幅），
-    // 而那一拍的位置差分仍可能非零——所以断言取 ≥/≤ 而不是 >/<。
-    if (dx > 1e-4f) { assert(v >= 0.0f); if (v > 1e-4f) up++; }
-    else if (dx < -1e-4f) { assert(v <= 0.0f); if (v < -1e-4f) down++; }
-  }
-  assert(up >= 10 && down >= 10); // 两个方向都真的采到了样本
-}
-
-// 取消（空轨迹）与被替换：移出集合的电机立即软停释放。
-static void test_trajectory_cancel_and_replacement_release_motors() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_motor(&t, 7);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&t, 0U, 7, 0.2f, 0.0f);
-  traj_add_point(&t, 500U, 5, 0.3f, 0.0f);
-  traj_add_point(&t, 500U, 7, 0.4f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-  motor_control_trajectory_step(&ctx, 200U);
-  assert(entry_of(&ctx, 5)->target_position_rad == 0.1f);
-  assert(entry_of(&ctx, 7)->target_position_rad == 0.2f);
-
-  // 替换成只声明 7 的轨迹 → 5 被移出集合，立即软停释放。
-  motor_control_trajectory_t t2 = make_trajectory(2U, 300U);
-  traj_add_motor(&t2, 7);
-  traj_add_point(&t2, 0U, 7, 0.9f, 0.0f);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &t2, 300U));
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  assert(!entry_of(&ctx, 5)->has_target);
-  motor_control_trajectory_step(&ctx, 300U);
-  assert(entry_of(&ctx, 7)->target_position_rad == 0.9f);
-
-  // 取消（空轨迹）→ 7 也软停释放。
-  motor_control_trajectory_t cancel = make_trajectory(3U, 400U);
-  feed_vaxor_heartbeat(&ctx, 5, 7, 400U);
-  assert(motor_control_apply_trajectory(&ctx, &cancel, 400U));
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_SAFE_STOP);
-  assert(!entry_of(&ctx, 7)->has_target);
-}
-
-// 命令租约约束全部运动源：轨迹也必须在断流后终止。
-static void test_trajectory_aborts_on_command_lease_timeout() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&t, 2000U, 5, 0.2f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-  motor_control_trajectory_step(&ctx, 200U);
-
-  const uint32_t last_snapshot = 120U; // bring_two_active 那份快照的接收 tick
-  for (uint32_t dt = 10U; dt <= 150U; dt += 10U) {
-    feed_vaxor_heartbeat(&ctx, 5, 7, last_snapshot + dt);
-    motor_control_service(&ctx, last_snapshot + dt);
-  }
-
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(!ctx.trajectory_active);
-  assert(!ctx.authorized);
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST, 0));
-}
-
-// 回归：没有活动轨迹时，100ms 级联保持原有全局撤权语义。
-static void test_snapshot_timeout_without_trajectory_revokes_globally() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  const uint32_t last_snapshot = 120U;
-  for (uint32_t dt = 10U; dt <= 150U; dt += 10U) {
-    feed_vaxor_heartbeat(&ctx, 5, 7, last_snapshot + dt);
-    motor_control_service(&ctx, last_snapshot + dt);
-  }
-
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(entry_of(&ctx, 7)->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED);
-  assert(!ctx.authorized);
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_AUTHORIZATION_LOST, 0));
-}
-
-// 整条拒绝：结构非法与未注册电机都不得部分采纳。
-static void test_trajectory_rejects_malformed_and_unknown_motor() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  // 路点 motor_id 不在声明集合内
-  motor_control_trajectory_t bad = make_trajectory(1U, 200U);
-  traj_add_motor(&bad, 5);
-  traj_add_point(&bad, 0U, 7, 0.1f, 0.0f);
-  assert(!motor_control_apply_trajectory(&ctx, &bad, 200U));
-
-  // 未注册电机
-  motor_control_trajectory_t unknown = make_trajectory(2U, 210U);
-  traj_add_motor(&unknown, 99);
-  traj_add_point(&unknown, 0U, 99, 0.1f, 0.0f);
-  assert(!motor_control_apply_trajectory(&ctx, &unknown, 210U));
-
-  // 时间轴回退
-  motor_control_trajectory_t back = make_trajectory(3U, 220U);
-  traj_add_motor(&back, 5);
-  traj_add_point(&back, 100U, 5, 0.1f, 0.0f);
-  traj_add_point(&back, 50U, 5, 0.2f, 0.0f);
-  assert(!motor_control_apply_trajectory(&ctx, &back, 220U));
-
-  // 声明了归属却没有任何路点
-  motor_control_trajectory_t empty_motor = make_trajectory(4U, 230U);
-  traj_add_motor(&empty_motor, 5);
-  traj_add_motor(&empty_motor, 7);
-  traj_add_point(&empty_motor, 0U, 5, 0.1f, 0.0f);
-  assert(!motor_control_apply_trajectory(&ctx, &empty_motor, 230U));
-
-  assert(events_contain(&ctx, MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED, 0));
-  // 被拒的轨迹没有接管任何电机：两台仍在快照通道上。
-  assert(entry_of(&ctx, 5)->lifecycle == MOTOR_CONTROL_LIFECYCLE_ACTIVE);
-  assert(ctx.trajectory_active == false);
-}
-
-// 故障清除的设备侧动作：CERB 发 MIT 控制字 bit5（清错），Vaxor 无手段。
 static void test_clear_fault_protocol_capability() {
   size_t idx = 0;
   assert(find_profile("cerb_r58_101", &idx));
@@ -4772,20 +4421,6 @@ static void test_motion_state_reports_target_source() {
   // 两台都在快照通道上。
   assert(source_of(5U) == MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT);
   assert(source_of(7U) == MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT);
-
-  // 轨迹只声明 5：5 变成轨迹源，7 不受影响。
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-  motor_control_trajectory_step(&ctx, 200U);
-  assert(source_of(5U) == MOTOR_CONTROL_TARGET_SOURCE_TRAJECTORY);
-  assert(source_of(7U) == MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT);
-
-  // 取消 → 5 被软停释放，回到「无命令源」。
-  motor_control_trajectory_t cancel = make_trajectory(2U, 300U);
-  assert(motor_control_apply_trajectory(&ctx, &cancel, 300U));
-  assert(source_of(5U) == MOTOR_CONTROL_TARGET_SOURCE_NONE);
 }
 
 // 事件序号单调递增：消费者据此判丢帧（累计丢弃数另见诊断话题）。
@@ -4832,98 +4467,13 @@ static void test_diagnostics_counters_are_exposed() {
   motor_control_copy_diagnostics(&ctx, &d);
   assert(d.snapshot_rejected == 1U);  // 拒绝可见
   assert(d.event_dropped == 0U);      // 环未满
-  assert(d.policy_accepted == 0U && d.trajectory_accepted == 0U);
+  assert(d.policy_accepted == 0U);
 
   // NULL 防护：不得解引用空指针。
   motor_control_copy_diagnostics(&ctx, nullptr);
   motor_control_copy_diagnostics(nullptr, &d);
 }
 
-// 轨迹状态：id 回带、进度、播完标志（播完 ≠ 释放归属）。
-static void test_trajectory_state_reports_progress() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_state_t st = {};
-  motor_control_copy_trajectory_state(&ctx, &st, 200U);
-  assert(!st.active && st.target_count == 0U);
-
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  t.trajectory_id = 0xABCDU;
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 0.2f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-
-  motor_control_copy_trajectory_state(&ctx, &st, 200U);
-  assert(st.active && !st.completed);
-  assert(st.trajectory_id == 0xABCDU); // 原样回带
-  assert(st.target_count == 1U && st.target_ids[0] == 5U);
-  assert(st.total_ms == 1000U && st.elapsed_ms == 0U);
-
-  motor_control_copy_trajectory_state(&ctx, &st, 600U);
-  assert(st.elapsed_ms == 400U && !st.completed);
-
-  motor_control_copy_trajectory_state(&ctx, &st, 1500U);
-  assert(st.completed && st.active); // 播完但归属仍在：电机在末点保持
-
-  motor_control_trajectory_t cancel = make_trajectory(2U, 1600U);
-  assert(motor_control_apply_trajectory(&ctx, &cancel, 1600U));
-  motor_control_copy_trajectory_state(&ctx, &st, 1600U);
-  assert(!st.active && !st.completed);
-}
-
-// 拒绝事件带 trajectory_id 与首个非法路点下标：并发多条轨迹时才分得清是谁、改哪行。
-static void test_trajectory_reject_event_carries_id_and_index() {
-  motor_control_context_t ctx;
-  motor_control_init(&ctx, g_adapters, 2);
-  bring_two_active(&ctx, 5, 7, 100);
-
-  motor_control_trajectory_t bad = make_trajectory(1U, 200U);
-  bad.trajectory_id = 0x1234U;
-  traj_add_motor(&bad, 5);
-  traj_add_point(&bad, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&bad, 0U, 5, 0.2f, 0.0f); // 同一电机同一时刻 → 下标 1 非法
-  assert(!motor_control_apply_trajectory(&ctx, &bad, 200U));
-
-  motor_control_event_t events[MOTOR_CONTROL_MAX_EVENTS];
-  bool found = false;
-  size_t n;
-  while ((n = motor_control_drain_events(&ctx, events,
-      MOTOR_CONTROL_MAX_EVENTS)) > 0) {
-    for (size_t i = 0; i < n; ++i) {
-      if (events[i].type == MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED) {
-        assert(events[i].request_id == 0x1234U);
-        assert(events[i].reason == 1U);
-        found = true;
-      }
-    }
-  }
-  assert(found);
-
-  // 与路点无关的拒绝（声明集合重复）→ 下标占位 0xFFFF。
-  motor_control_trajectory_t dup = make_trajectory(2U, 300U);
-  dup.trajectory_id = 0x5678U;
-  traj_add_motor(&dup, 5);
-  traj_add_motor(&dup, 5);
-  traj_add_point(&dup, 0U, 5, 0.1f, 0.0f);
-  assert(!motor_control_apply_trajectory(&ctx, &dup, 300U));
-  bool found2 = false;
-  while ((n = motor_control_drain_events(&ctx, events,
-      MOTOR_CONTROL_MAX_EVENTS)) > 0) {
-    for (size_t i = 0; i < n; ++i) {
-      if (events[i].type == MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED &&
-          events[i].request_id == 0x5678U) {
-        assert(events[i].reason == MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE);
-        found2 = true;
-      }
-    }
-  }
-  assert(found2);
-}
-
-// 状态视图暴露设备侧安全事实（正向语义！）：出厂的 kR58Raw[4]=0（保护开）→
 // enabled=true；未回读时两个 known 都是 false，值不得被当成真值。
 static void test_status_exposes_device_safety_facts() {
   motor_control_context_t ctx;
@@ -5045,48 +4595,18 @@ static void test_hold_step_emits_held_target_every_boundary() {
   assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0); // 已无目标
 }
 
-// 保持重发的两个让路条件：轨迹所属电机由 trajectory_step 驱动（同一拍不得
-// 重复发帧）；有挂起的 P0 时安全帧必须赢，重发不得把它取消掉。
-static void test_hold_step_yields_to_trajectory_and_pending_p0() {
+// 有挂起的 P0 时安全帧必须赢，重发不得把它取消掉。
+static void test_hold_step_yields_to_pending_p0() {
   motor_control_context_t ctx;
   motor_control_init(&ctx, g_adapters, 2);
   bring_two_active(&ctx, 5, 7, 100); // 最后一份快照 received_tick = 120
 
-  motor_control_trajectory_t t = make_trajectory(1U, 200U);
-  traj_add_motor(&t, 5);
-  traj_add_point(&t, 0U, 5, 0.1f, 0.0f);
-  traj_add_point(&t, 1000U, 5, 0.5f, 0.0f);
-  assert(motor_control_apply_trajectory(&ctx, &t, 200U));
-
-  // 快照保持新鲜：7 的目标来自快照通道，5 的目标来自轨迹（忽略快照里的 5）。
   motor_control_command_snapshot_t s = make_snapshot(2U, 296U);
   snapshot_add(&s, 5, 0.0f, 0.0f, 0.0f);
   snapshot_add(&s, 7, 0.3f, 0.0f, 0.0f);
   feed_vaxor_heartbeat(&ctx, 5, 7, 298U);
   assert(motor_control_apply_command_snapshot(&ctx, &s, 298U));
   (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1); // 排空
-
-  // 一个控制边界：5 由 trajectory_step 发，7 由 hold_step 发——合计恰好 2 帧，
-  // hold_step 不得为轨迹所属的 5 重复发帧。
-  feed_vaxor_heartbeat(&ctx, 5, 7, 300U);
-  motor_control_trajectory_step(&ctx, 300U);
-  motor_control_hold_step(&ctx, 300U);
-  {
-    motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
-    const size_t n =
-        motor_control_collect_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
-    assert(n == 2U);
-    const uint16_t slot5 = (uint16_t)(entry_of(&ctx, 5) - &ctx.entries[0]);
-    const uint16_t slot7 = (uint16_t)(entry_of(&ctx, 7) - &ctx.entries[0]);
-    size_t seen5 = 0U, seen7 = 0U;
-    for (size_t i = 0U; i < n; ++i) {
-      if (frames[i].tx_slot == slot5) { seen5++; }
-      if (frames[i].tx_slot == slot7) { seen7++; }
-    }
-    assert(seen5 == 1U && seen7 == 1U);
-  }
-  assert(entry_of(&ctx, 5)->target_position_rad < 0.2f); // 轨迹在播（首点附近）
-  assert(entry_of(&ctx, 7)->target_position_rad == 0.3f); // 快照目标
 
   // 挂起的 P0：队列塞满 P0 → 新的安全帧推不进去 → p0_pending。排空队列后
   // （等于下游把 P0 发了出去）重试意图仍在，hold_step 必须照样让路——否则它
@@ -5109,7 +4629,52 @@ static void test_hold_step_yields_to_trajectory_and_pending_p0() {
   assert(seven->p0_pending);
   motor_control_hold_step(&ctx, 305U);
   assert(seven->p0_pending); // 重发没有取消这条安全帧的重试
-  assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 0U);
+  {
+    motor_protocol_tx_frame_t frames[MOTOR_CONTROL_MAX_TX_PENDING];
+    const size_t n = motor_control_collect_tx(&ctx, frames, MOTOR_CONTROL_MAX_TX_PENDING);
+    const uint16_t slot7 = (uint16_t)(seven - &ctx.entries[0]);
+    for (size_t i = 0U; i < n; ++i) {
+      assert(frames[i].tx_slot != slot7);
+    }
+  }
+}
+
+// 50Hz → 200Hz 线性插帧：4 拍 5ms 步进平滑过渡，超时保持不外推。
+static void test_hold_step_linear_interpolation() {
+  motor_control_context_t ctx;
+  motor_control_init(&ctx, g_adapters, 2);
+  bring_vaxor_to_ready(&ctx, 5, "vaxor_2550", 100);
+
+  // 第 1 帧直接到位（无历史起点，避免启动滞后）
+  motor_control_command_snapshot_t s1 = make_snapshot(1U, 100U);
+  snapshot_add(&s1, 5, 0.0f, 0.0f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s1, 100U));
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1);
+
+  // 20ms 后收到第 2 帧目标 0.4 rad, 0.8 rad/s
+  feed_vaxor_heartbeat(&ctx, 5, 5, 120U);
+  motor_control_command_snapshot_t s2 = make_snapshot(2U, 120U);
+  snapshot_add(&s2, 5, 0.4f, 0.8f, 0.0f);
+  assert(motor_control_apply_command_snapshot(&ctx, &s2, 120U));
+  assert(fabsf(entry_of(&ctx, 5)->interp_position_rad - 0.0f) < 1e-5f);
+  (void)count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1);
+
+  // 5ms / 10ms / 15ms / 20ms 处分别插值到 0.1 / 0.2 / 0.3 / 0.4
+  const float expected_pos[4] = {0.1f, 0.2f, 0.3f, 0.4f};
+  const float expected_vel[4] = {0.2f, 0.4f, 0.6f, 0.8f};
+  for (int step = 0; step < 4; ++step) {
+    const uint32_t t = 125U + (uint32_t)(step * 5);
+    feed_vaxor_heartbeat(&ctx, 5, 5, t);
+    motor_control_hold_step(&ctx, t);
+    assert(count_tx_class(&ctx, MOTOR_PROTOCOL_TX_CLASS_P1) == 1U);
+    assert(fabsf(entry_of(&ctx, 5)->interp_position_rad - expected_pos[step]) < 1e-5f);
+    assert(fabsf(entry_of(&ctx, 5)->interp_velocity_rad_s - expected_vel[step]) < 1e-5f);
+  }
+
+  // 超过 span (25ms) 钳位在终点，绝不外推
+  motor_control_hold_step(&ctx, 145U);
+  assert(fabsf(entry_of(&ctx, 5)->interp_position_rad - 0.4f) < 1e-5f);
+  assert(fabsf(entry_of(&ctx, 5)->interp_velocity_rad_s - 0.8f) < 1e-5f);
 }
 
 static void test_control_state_projection_is_authoritative_without_motion() {
@@ -5455,7 +5020,7 @@ static void test_driver_direction_and_save_require_idle_and_block_enable() {
         case 7: e.tx_active = true; break;
         case 8: e.p0_pending = true; break;
         case 9: e.profile = nullptr; break;
-        case 10: ctx.trajectory_active = true; ctx.trajectory.target_count = 1; ctx.trajectory.target_ids[0] = 7; break;
+        case 10: e.lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE; break;
         case 11: e.lifecycle = MOTOR_CONTROL_LIFECYCLE_ACTIVE; break;
         case 12: e.fresh_target_pending = true; break;
       }
@@ -5677,19 +5242,9 @@ int main() {
   test_vaxor_refresh_params_unsupported();
   test_refresh_rejected_before_bind();
   test_copy_topology();
-  test_trajectory_owns_its_motors_against_snapshot();
-  test_snapshot_absence_soft_stops_only_unowned_motors();
-  test_trajectory_interpolates_and_clamps_at_end();
-  test_trajectory_hermite_c1_continuity();
-  test_trajectory_hermite_uses_nonuniform_time_weights();
-  test_trajectory_hermite_no_overshoot_and_zero_endpoints();
-  test_trajectory_position_velocity_same_sign();
-  test_trajectory_cancel_and_replacement_release_motors();
-  test_trajectory_aborts_on_command_lease_timeout();
   test_hold_step_emits_held_target_every_boundary();
-  test_hold_step_yields_to_trajectory_and_pending_p0();
-  test_snapshot_timeout_without_trajectory_revokes_globally();
-  test_trajectory_rejects_malformed_and_unknown_motor();
+  test_hold_step_yields_to_pending_p0();
+  test_hold_step_linear_interpolation();
   test_clear_fault_protocol_capability();
   test_clear_fault_kernel_unsupported_without_protocol_support();
   test_policy_arms_atomically_with_clamped_gains();
@@ -5698,8 +5253,6 @@ int main() {
   test_motion_state_reports_target_source();
   test_event_seq_is_monotonic();
   test_diagnostics_counters_are_exposed();
-  test_trajectory_state_reports_progress();
-  test_trajectory_reject_event_carries_id_and_index();
   test_status_exposes_device_safety_facts();
   run_all_tests();
   printf("test_motor_control: all passed\n");

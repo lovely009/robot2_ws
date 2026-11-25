@@ -46,7 +46,7 @@ async function fixture(page: Page) {
       s.transmissionStatus.last=Date.now();
     },100);
     w.controlStatus={model:data.MODEL,joint_names:['elbow'],mode:'trajectory',reason:'ok',reject:'',
-      output_topic:'/motor/host_command_array',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
+      output_topic:'/motor/command',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
       feedback_fresh:true,controllers_ready:true,active_controllers:[],gravity_enabled:true,effort_gain:.8};
     data.applyCommandStatus(w.controlStatus);
     w.panels=[];

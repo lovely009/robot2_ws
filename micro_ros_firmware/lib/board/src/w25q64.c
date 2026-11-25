@@ -13,8 +13,12 @@ _Static_assert((int)W25Q64_ERROR_STATE == (int)OCTOSPI_ERROR_STATE,
 #define W25Q64_CMD_ENABLE_RESET 0x66U
 #define W25Q64_CMD_RESET_DEVICE 0x99U
 #define W25Q64_CMD_READ_JEDEC_ID 0x9FU
+#define W25Q64_CMD_WRITE_ENABLE 0x06U
+#define W25Q64_CMD_PAGE_PROGRAM 0x02U
+#define W25Q64_CMD_SECTOR_ERASE 0x20U
 #define W25Q64_CMD_FAST_READ_QUAD_IO 0xEBU
 #define W25Q64_CMD_READ_STATUS_REG1 0x05U
+#define W25Q64_PAGE_SIZE 256U
 
 #define W25Q64_STATUS_BUSY 0x01U
 #define W25Q64_HAL_TIMEOUT_MS 1000U
@@ -171,4 +175,89 @@ w25q64_status_t w25q64_read(uint32_t address, uint8_t *data, uint32_t size) {
   }
   return w25q64_map_status(
       handle, HAL_OSPI_Receive(handle, data, W25Q64_HAL_TIMEOUT_MS));
+}
+
+static w25q64_status_t w25q64_write_enable(OSPI_HandleTypeDef *handle) {
+  OSPI_RegularCmdTypeDef command;
+  w25q64_command_init(&command, W25Q64_CMD_WRITE_ENABLE);
+  return w25q64_send_command(handle, &command);
+}
+
+w25q64_status_t w25q64_erase_sector(uint32_t address) {
+  if ((address % W25Q64_SECTOR_SIZE) != 0U ||
+      !w25q64_range_valid(address, W25Q64_SECTOR_SIZE)) {
+    return W25Q64_ERROR_ARGUMENT;
+  }
+  OSPI_HandleTypeDef *handle = w25q64_handle();
+  if (handle == NULL) {
+    return W25Q64_ERROR_STATE;
+  }
+  w25q64_status_t status = w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
+  if (status != W25Q64_OK) {
+    return status;
+  }
+  status = w25q64_write_enable(handle);
+  if (status != W25Q64_OK) {
+    return status;
+  }
+  OSPI_RegularCmdTypeDef command;
+  w25q64_command_init(&command, W25Q64_CMD_SECTOR_ERASE);
+  command.Address = address;
+  command.AddressMode = HAL_OSPI_ADDRESS_1_LINE;
+  status = w25q64_send_command(handle, &command);
+  if (status != W25Q64_OK) {
+    return status;
+  }
+  return w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
+}
+
+w25q64_status_t w25q64_write(uint32_t address, const uint8_t *data, uint32_t size) {
+  if (data == NULL && size != 0U) {
+    return W25Q64_ERROR_ARGUMENT;
+  }
+  if (!w25q64_range_valid(address, size)) {
+    return W25Q64_ERROR_ARGUMENT;
+  }
+  if (size == 0U) {
+    return W25Q64_OK;
+  }
+  OSPI_HandleTypeDef *handle = w25q64_handle();
+  if (handle == NULL) {
+    return W25Q64_ERROR_STATE;
+  }
+  uint32_t offset = 0U;
+  while (offset < size) {
+    const uint32_t addr = address + offset;
+    const uint32_t page_rem = W25Q64_PAGE_SIZE - (addr % W25Q64_PAGE_SIZE);
+    const uint32_t chunk = (size - offset) < page_rem ? (size - offset) : page_rem;
+    w25q64_status_t status = w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
+    if (status != W25Q64_OK) {
+      return status;
+    }
+    status = w25q64_write_enable(handle);
+    if (status != W25Q64_OK) {
+      return status;
+    }
+    OSPI_RegularCmdTypeDef command;
+    w25q64_command_init(&command, W25Q64_CMD_PAGE_PROGRAM);
+    command.Address = addr;
+    command.AddressMode = HAL_OSPI_ADDRESS_1_LINE;
+    command.DataMode = HAL_OSPI_DATA_1_LINE;
+    command.NbData = chunk;
+    status = w25q64_send_command(handle, &command);
+    if (status != W25Q64_OK) {
+      return status;
+    }
+    status = w25q64_map_status(
+        handle, HAL_OSPI_Transmit(handle, (uint8_t *)(data + offset), W25Q64_HAL_TIMEOUT_MS));
+    if (status != W25Q64_OK) {
+      return status;
+    }
+    status = w25q64_wait_ready(W25Q64_HAL_TIMEOUT_MS);
+    if (status != W25Q64_OK) {
+      return status;
+    }
+    offset += chunk;
+  }
+  return W25Q64_OK;
 }

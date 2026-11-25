@@ -8,7 +8,7 @@
 #   REPORT      → 收到下一帧 /motor/device_param_report（无序号推进）
 #
 # 非法 command / 越界 motor_id → 本地拒绝（system_status.last_error = 10）。
-uint64 sync_time_ns
+std_msgs/Header header
 uint32 request_id
 # 命令码
 uint8 COMMAND_SAVE=0
@@ -20,6 +20,8 @@ uint8 COMMAND_CLEAR_FAULT=3
 uint8 COMMAND_REPORT=4
 # 仅保存所选电机驱动板支持的对象；不写 MCU W25，不固化易失的方向/保护开关。
 uint8 COMMAND_SAVE_DEVICE=5
+# 将固件当前参数视图写入 MCU W25Q64 缓存槽。
+uint8 COMMAND_SYNC_W25=6
 uint8 command
 # 目标电机（1..64）；MOTOR_ID_NONE = 不适用。
 # 旧 SAVE 已禁用；SAVE_DEVICE/REFRESH/SET_ZERO/CLEAR_FAULT 必须给有效 id。

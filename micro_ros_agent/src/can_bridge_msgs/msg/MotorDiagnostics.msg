@@ -13,7 +13,6 @@
 #   p0_retry              P0 安全帧因缓冲满而挂起重试的次数
 #   trajectory_accepted / trajectory_rejected  轨迹的受理/整条拒绝
 #   ring_drop             每总线 RX ring 溢出丢弃数（索引 = bus_index）
-uint64 sync_time_ns
 uint32 rx_frame_count
 uint32 unknown_frame_count
 uint32 decode_error_count

@@ -5,17 +5,22 @@
 #include "control_lease.h"
 #include "control_mailbox.h"
 #include "motor_control.h"
-#include "wire_codec.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef struct {
+  uint64_t session_id;
+  uint32_t last_sequence;
+  bool has_command;
+} control_command_guard_t;
+
 // 与 mailbox 共用调用方临界区；step/service 只由内核唯一写任务调用。
 typedef struct {
   agent_link_t link;
   control_lease_state_t authority;
-  wire_command_guard_t command_guard;
+  control_command_guard_t command_guard;
   bool kernel_authorized;
   bool session_pending;
   uint64_t disable_pending_mask;

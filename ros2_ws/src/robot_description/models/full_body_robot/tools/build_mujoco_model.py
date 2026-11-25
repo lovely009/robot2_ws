@@ -614,7 +614,7 @@ def build_legacy():
     ET.SubElement(defaults, "geom", contype="0", conaffinity="0", density="850")
     ET.SubElement(defaults, "site", size="0.003", group="2")
     ET.SubElement(defaults, "equality", solref="0.01 1", solimp="0.99 0.999 0.001")
-    ET.SubElement(defaults, "position", kp="12", kv="1.2", ctrlrange=numbers((-np.pi, np.pi)))
+    ET.SubElement(defaults, "position", kp="350", kv="4.0", ctrlrange=numbers((-np.pi, np.pi)))
 
     assets = ET.SubElement(root, "asset")
     world = ET.SubElement(root, "worldbody")

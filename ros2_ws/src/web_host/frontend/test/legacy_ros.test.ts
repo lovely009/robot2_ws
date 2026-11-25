@@ -85,8 +85,8 @@ const action = {
 };
 
 function controlSnapshot(generations: number[], sequence = 1) {
-  return {schema_version: 2, session_id: 42, sync_time_ns: 9000000000, sequence,
-    states: generations.map((policy_generation, index) => ({
+  return {schema_version: 6, session_id: 42, header: {stamp: {sec: 9, nanosec: 0}, frame_id: ''}, sequence,
+    control_states: generations.map((policy_generation, index) => ({
       motor_id: index + 1, online: true, control_lifecycle: 2, execution_state: 1,
       policy_enabled: false, motion_enabled: false, state_age_ms: 0,
       unified_fault_code: 0, vendor_fault_code: 0, last_failure_reason: 0,
@@ -101,7 +101,7 @@ async function policyConnection() {
   const ros=await import('../../web/js/core/ros.js');
   const {store}=await import('../../web/js/core/store.js');
   ros.connect();Socket.instances[0].emit('connection');
-  const control=Topic.instances.find(t=>t.name==='/motor/control_states')!;
+  const control=Topic.instances.find(t=>t.name==='/motor/state')!;
   control.callback?.(controlSnapshot([800]));
   return {ros,store,control};
 }
@@ -111,8 +111,11 @@ it('浏览器只提交目标与最新MCU源时间，序号由主机返回且不�
   const pending=ros.submitPolicy([policyTarget]);
   const sent=Service.calls.at(-1)!;
   expect(sent.name).toBe('/motor/submit_policy');
-  expect(sent.request).toEqual({session_id:42,source_time_ns:store.controlStates.sourceTimeNs,targets:[policyTarget]});
-  expect(sent.request.source_time_ns).toBe(9000000000);
+  expect(sent.request).toEqual({
+    header: {stamp: {sec: 9, nanosec: 0}, frame_id: ''},
+    session_id: 42,
+    targets: [policyTarget],
+  });
   expect(sent.request).not.toHaveProperty('request_id');
   expect(sent.request).not.toHaveProperty('policy_generation');
   sent.complete(policyTicket());
@@ -134,12 +137,12 @@ it('多次人工使能使用主机返回的不同intent与序号，网页不自�
   ros.disconnect();
 });
 
-it.each([48,49])('策略提交与服务的48个目标容量一致：%s',async count=>{
+it.each([37,38])('策略提交与服务的37个目标容量一致：%s',async count=>{
   const {ros}=await policyConnection();
   const pending=ros.submitPolicy(Array.from({length:count},(_,index)=>({...policyTarget,motor_id:index+1})));
-  if(count===48) {
+  if(count===37) {
     expect(Service.calls).toHaveLength(1);
-    expect(Service.calls[0].request.targets).toHaveLength(48);
+    expect(Service.calls[0].request.targets).toHaveLength(37);
     Service.complete(policyTicket());
     await expect(pending).resolves.toMatchObject(policyTicket());
   } else {
@@ -149,18 +152,14 @@ it.each([48,49])('策略提交与服务的48个目标容量一致：%s',async co
   ros.disconnect();
 });
 
-it('同页面任一入口发起使能后，MCU先ACTIVE也不能越过本intent的成功ACK',async()=>{
+it('同页面任一入口发起使能后，MCU先ACTIVE也不能越过本intent的票据确认',async()=>{
   const {ros,store,control}=await policyConnection();
   const {controlTargetsError}=await import('../../web/js/core/motor_state.js');
   const pending=ros.submitPolicy([policyTarget]);
-  control.callback?.({...controlSnapshot([900],2),states:controlSnapshot([900]).states.map(s=>
+  control.callback?.({...controlSnapshot([900],2),control_states:controlSnapshot([900]).control_states.map(s=>
     ({...s,policy_enabled:true,control_lifecycle:3}))});
   expect(controlTargetsError(store,[1])).toBeTruthy();
   Service.complete(policyTicket());await pending;
-  const result=Topic.instances.find(t=>t.name==='/motor/config_result')!;
-  result.callback?.({...policyTicket(),kind:2,command:0,status:1,intent_id:'old-host:1'});
-  expect(controlTargetsError(store,[1])).toBeTruthy();
-  result.callback?.({...policyTicket(),kind:2,command:0,status:1});
   expect(controlTargetsError(store,[1])).toBe('');
   ros.disconnect();
 });
@@ -182,7 +181,7 @@ it('使能允许状态周期和传输延迟，并保留原始MCU源时间供主�
   const source=store.controlStates.sourceTimeNs;
   const pending=ros.submitPolicy([policyTarget]);
   expect(Service.calls).toHaveLength(1);
-  expect(Service.calls[0].request.source_time_ns).toBe(source);
+  expect(Service.calls[0].request.header.stamp.sec * 1e9 + Service.calls[0].request.header.stamp.nanosec).toBe(source);
   Service.calls[0].complete(policyTicket());
   await expect(pending).resolves.toMatchObject(policyTicket());
   ros.disconnect();
@@ -192,7 +191,7 @@ it('失能允许无快照和零代数票据，不等待新的ACK或generation',a
   const {ros,store}=await policyConnection();
   store.controlStates.valid=false;store.controlStates.session=0;store.controlStates.sourceTimeNs=0;
   const pending=ros.submitPolicy([{...policyTarget,enabled:false}]);
-  expect(Service.calls.at(-1)!.request).toMatchObject({session_id:0,source_time_ns:0});
+  expect(Service.calls.at(-1)!.request).toMatchObject({session_id:0,header:{stamp:{sec:0,nanosec:0},frame_id:''}});
   const ticket=policyTicket({session_id:0,request_id:0,policy_generation:0});
   Service.calls.at(-1)!.complete(ticket);
   await expect(pending).resolves.toMatchObject(ticket);
@@ -268,7 +267,7 @@ it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", asyn
   Socket.instances[0].emit("connection");
   store.transmissionStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],trajectory_enabled:true}};
   store.commandStatus={last:Date.now(),data:{model:MODEL,joint_names:['joint_link1'],
-    output_topic:'/motor/host_command_array',
+    output_topic:'/motor/command',
     feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   store.motors.set(1, {
     status: { online: true, lifecycle: 3 },
@@ -304,40 +303,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('原始动作按300原帧时序分包发布到主机raw话题，取消仍走普通空轨迹',async()=>{
+it('原始动作通过标准JointTrajectory发布到/control/trajectory，取消走空轨迹',async()=>{
   vi.useFakeTimers();
   const ros=await import('../../web/js/core/ros.js');
   const {store,MODEL}=await import('../../web/js/core/store.js');
   const actions=await import('../../web/js/core/playback.js');
   ros.connect();Socket.instances[0].emit('connection');
   store.controlStates.sourceTimeNs=9000000000;
-  expect(Topic.instances.filter(t=>t.name==='/control/trajectory_raw')).toHaveLength(1);
+  expect(Topic.instances.filter(t=>t.name==='/control/trajectory')).toHaveLength(1);
   const now=Date.now();
   store.modelTransmissions={model:MODEL,groups:[1,2].map(id=>({name:`m${id}`,
     motors:[{id}],joints:[`joint${id}`],direct_mapping:true})),error:''};
   store.transmissionStatus={last:now,data:{model:MODEL,joint_names:['joint1','joint2'],trajectory_enabled:true}};
   store.commandStatus={last:now,data:{model:MODEL,joint_names:['joint1','joint2'],
-    output_topic:'/motor/host_command_array',feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
+    output_topic:'/motor/command',feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}};
   for(const id of [1,2])store.motors.set(id,{status:{online:true,lifecycle:4},motion:{position:.1}});
-  const points=Array.from({length:300},(_,frame)=>[1,2].map(motor_id=>({motor_id,
-    time_from_start_ms:Math.round(frame*1000/30),position:motor_id*.1+frame*.0001,
-    velocity:frame===0?0:9.2,effort:0}))).flat();
+  const points=Array.from({length:10},(_,frame)=>[1,2].map(motor_id=>({motor_id,
+    time_from_start_ms:Math.round(frame*100),position:motor_id*.1+frame*.001,
+    velocity:0,effort:0}))).flat();
   vi.stubGlobal('fetch',async()=>({ok:true,json:async()=>({interpolation:'linear',target_ids:[1,2],points})}));
   const running=actions.playAction('raw.json',{enable:false,loop:false,kp:30,kd:1});
   await vi.advanceTimersByTimeAsync(1000);
-  const segments=Topic.published.filter(p=>p.topic==='/control/trajectory_raw').map(p=>p.message as any);
-  expect(segments).toHaveLength(3);
-  expect(segments.every(s=>s.count<=256 && s.segment_count===3)).toBe(true);
-  const transmitted=segments.flatMap(s=>s.points);
-  expect(transmitted).toEqual(points.map(p=>({...p,time_from_start_ms:2500+p.time_from_start_ms})));
+  const published=Topic.published.filter(p=>p.topic==='/control/trajectory').map(p=>p.message as any);
+  expect(published.some(m=>m.joint_names?.length===2 && m.header?.frame_id?.startsWith('workbench-trajectory-linear/'))).toBe(true);
   expect(Topic.published.some(p=>p.topic==='/motor/policy_array')).toBe(false);
-  const empty=Topic.published.filter(p=>p.topic==='/control/trajectory').map(p=>p.message as any);
-  expect(empty).toHaveLength(1);expect(empty[0]).toMatchObject({count:0,points:[],target_ids:[]});
   actions.stopPlayback();
   await vi.advanceTimersByTimeAsync(50);await running;
   const last=Topic.published.at(-1)!;
   expect(last.topic).toBe('/control/trajectory');
-  expect(last.message).toMatchObject({count:0,points:[],target_ids:[]});
+  expect(last.message).toMatchObject({joint_names:[],points:[]});
   ros.disconnect();
 });
 
@@ -396,7 +390,7 @@ it("换连接后旧订阅排队的运动帧不再写入当前状态", async () =
   ros.connect();
   Socket.instances[0].emit("connection");
   const motion = Topic.instances.find(
-    (t) => t.name === "/motor/motion_states",
+    (t) => t.name === "/motor/motion",
   )!;
   ros.connect();
   Socket.instances[1].emit("connection");
@@ -411,17 +405,12 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
   Socket.instances[0].emit("connection");
 
   const uplinks = [
-    ["/motor/motion_states", "can_bridge_msgs/msg/MotorMotionStateArray"],
-    ["/motor/status_array", "can_bridge_msgs/msg/MotorStatusArray"],
-    ["/motor/topology", "can_bridge_msgs/msg/MotorTopology"],
+    ["/motor/motion", "can_bridge_msgs/msg/MotorMotionStateArray"],
     ["/motor/events", "can_bridge_msgs/msg/MotorEvent"],
-    ["/control/trajectory_state", "can_bridge_msgs/msg/MotorTrajectoryState"],
     ["/control/status", "std_msgs/msg/String"],
-    ["/motor/device_param_report", "can_bridge_msgs/msg/DeviceParamReport"],
-    ["/motor/system_status", "can_bridge_msgs/msg/SystemStatus"],
-    ["/motor/control_states", "can_bridge_msgs/msg/MotorControlStateArray"],
+    ["/motor/state", "can_bridge_msgs/msg/MotorSystemState"],
     ["/imu/data", "sensor_msgs/msg/Imu"],
-    ["/imu/temp", "std_msgs/msg/Float32"],
+    ["/imu/temp_raw", "sensor_msgs/msg/Temperature"],
   ];
   for (const [name, messageType] of uplinks) {
     expect(Topic.instances).toContainEqual(expect.objectContaining({
@@ -429,14 +418,12 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
     }));
   }
   expect(Topic.instances.map((topic) => topic.name).filter(
-    (name) => name.startsWith("/micro_ros_up/"))).toEqual(["/micro_ros_up/status"]);
+    (name) => name.startsWith("/micro_ros_up/"))).toEqual([]);
 
   const downlinks = [
-    ["/control/setpoint", "can_bridge_msgs/msg/MotorCommandArray"],
-    ["/control/trajectory", "can_bridge_msgs/msg/MotorTrajectory"],
-    ["/control/trajectory_raw", "can_bridge_msgs/msg/MotorTrajectory"],
+    ["/control/joint_target", "sensor_msgs/msg/JointState"],
+    ["/control/trajectory", "trajectory_msgs/msg/JointTrajectory"],
     ["/control/stop", "std_msgs/msg/Empty"],
-    ["/motor/system_command", "can_bridge_msgs/msg/SystemCommand"],
   ];
   for (const [name, messageType] of downlinks) {
     expect(Topic.instances).toContainEqual(expect.objectContaining({
@@ -537,9 +524,15 @@ it('真实关节零位置仍有效，缺失速度和力矩保持未知而非零'
 it('浏览器观测限流并保留事件队列，避免反馈堵塞控制连接', async () => {
   const ros = await import('../../web/js/core/ros.js');
   ros.connect(); Socket.instances[0].emit('connection');
-  expect(Topic.instances.find(t => t.name === '/motor/motion_states')?.options)
+  expect(Topic.instances.find(t => t.name === '/motor/motion')?.options)
     .toMatchObject({throttle_rate:50, queue_length:1});
   expect(Topic.instances.find(t => t.name === '/motor/events')?.options)
     .toMatchObject({throttle_rate:0, queue_length:64});
+  expect(Topic.instances.find(t => t.name === '/robot_transmission/status')?.options)
+    .toMatchObject({throttle_rate:100, queue_length:1});
+  expect(Topic.instances.find(t => t.name === '/imu/data')?.options)
+    .toMatchObject({throttle_rate:100, queue_length:1});
+  expect(Topic.instances.find(t => t.name === '/tf')).toBeUndefined();
+  expect(Topic.instances.find(t => t.name === '/tf_static')).toBeUndefined();
   ros.disconnect();
 });

@@ -3,7 +3,7 @@
 # motor_id = MOTOR_ID_NONE(65535)；SYSTEM_COMMAND 要求 count = 0、targets 为空。
 # 取值不在此定义：command 见 SystemCommand.msg 的 COMMAND_*，motor_id 缺省见其 MOTOR_ID_NONE。
 # targets 上界 16 是内核约束不是带宽约束（CONTROL_MAILBOX_CONFIG_QUEUE_CAPACITY = 16）。
-uint64 sync_time_ns
+std_msgs/Header header
 uint64 session_id
 # 当前会话的幂等请求号：0 由主机 bridge 分配；bit30 = 固件内部命名空间（主机禁用）；
 # bit31 已被内核身份读取占用。相同号相同业务内容只重发结果，已退休号拒绝。

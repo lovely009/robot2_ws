@@ -206,7 +206,8 @@ def test_feedback_tick_runs_even_without_status_subscribers() -> None:
     node._tick()
     assert reconciled == [(('',), {'agent_running': False, 'simulation_running': False,
                                    'firmware_simulation': False,
-                                   'external_publishers': [], 'motor_ids': [], 'session_id': 0})]
+                                   'external_publishers': [], 'motor_ids': [], 'session_id': 0,
+                                   'faulted_motor_ids': []})]
 
 
 def test_feedback_model_parameter_rejects_paths_without_changing_units() -> None:
@@ -470,8 +471,8 @@ def test_configure_subscribes_to_real_control_status_without_creating_a_ros_grap
     node.create_service = lambda kind, name, callback: services.append(name)
     node.create_timer = lambda *args: object()
     assert node.on_configure(None) is TransitionCallbackReturn.SUCCESS
-    from can_bridge_msgs.msg import MotorControlStateArray
-    assert subscriptions == [(MotorControlStateArray, '/motor/control_states', node._feedback_inventory.observe, 10),
+    from can_bridge_msgs.msg import MotorSystemState
+    assert subscriptions == [(MotorSystemState, '/motor/state', node._feedback_inventory.observe, 10),
                              (String, '/control/status', node._on_control_status, 10)]
     assert '/bench/start_gravity_feedforward' in services
     assert '/bench/stop_gravity_feedforward' in services
@@ -600,6 +601,21 @@ def test_invalid_control_status_invalidates_previously_running_state(payload):
     assert node.feedforward.status()['state'] == 'stopped'
     assert not node.feedforward.status()['fresh']
     assert node.feedforward.status()['error']
+
+
+def test_identical_control_status_does_not_republish_bench_status(models):
+    node = _shell(_all_absent(), models)
+    published = []
+    node._publish_status = lambda: published.append(True)
+    _observe(node)
+    assert len(published) == 1
+    _observe(node)
+    assert len(published) == 1
+    _observe(node, gravity_enabled=True)
+    assert len(published) == 2
+    from std_msgs.msg import String
+    node._on_control_status(String(data='{'))
+    assert len(published) == 3
 
 
 def test_cleanup_releases_controller_handles_and_cancels_pending_without_stopping_units(models):

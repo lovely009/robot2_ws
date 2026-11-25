@@ -1,9 +1,14 @@
 cmake_minimum_required(VERSION 3.8)
 project(robot_sim)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(robot_description REQUIRED)
 find_package(robot_transmission REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -61,6 +66,18 @@ target_link_libraries(motor_sim_ros motor_sim_core motor_transport)
 ament_target_dependencies(motor_sim_ros
   diagnostic_msgs rclcpp robot_transmission sensor_msgs std_msgs std_srvs)
 
+add_library(motor_sim_hardware SHARED
+  src/ros/motor_sim_system.cpp)
+target_compile_features(motor_sim_hardware PUBLIC cxx_std_17)
+target_compile_options(motor_sim_hardware PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(motor_sim_hardware PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(motor_sim_hardware motor_sim_core)
+ament_target_dependencies(motor_sim_hardware
+  hardware_interface pluginlib rclcpp rclcpp_lifecycle robot_transmission)
+pluginlib_export_plugin_description_file(hardware_interface hardware_plugins.xml)
+
 # 通用独立可执行入口：不依赖机器人拓扑契约，buses/motors 完全由 YAML 决定。
 add_executable(motor_sim_node
   src/ros/motor_sim_node_main.cpp)
@@ -69,18 +86,18 @@ target_compile_options(motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(motor_sim_node motor_sim_ros)
 
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_ros
+install(TARGETS motor_protocol motor_transport motor_sim_core motor_sim_ros motor_sim_hardware
   EXPORT export_robot_sim
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
+install(FILES hardware_plugins.xml DESTINATION share/${PROJECT_NAME})
 install(TARGETS motor_sim_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 # 统一仿真入口与辅助节点；机械模型由 robot_description 提供。
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
-  scripts/simulation_gate.py
   scripts/agent_after_sim_ready.py
   scripts/mujoco_effort_bridge.py
   scripts/mujoco_command_mapping.py
@@ -162,6 +179,14 @@ if(BUILD_TESTING)
   target_compile_options(test_motor_sim_node PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(test_motor_sim_node motor_sim_ros util)
   ament_target_dependencies(test_motor_sim_node rclcpp std_msgs std_srvs)
+
+  ament_add_gtest(test_motor_sim_system test/test_motor_sim_system.cpp)
+  target_compile_features(test_motor_sim_system PUBLIC cxx_std_17)
+  target_compile_options(test_motor_sim_system PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_definitions(test_motor_sim_system PRIVATE
+    ROBOT_DESCRIPTION_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../robot_description/models")
+  ament_target_dependencies(test_motor_sim_system
+    hardware_interface pluginlib rclcpp rclcpp_lifecycle robot_transmission)
 endif()
 
 ament_package()

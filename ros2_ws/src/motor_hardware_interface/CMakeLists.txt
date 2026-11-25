@@ -44,7 +44,7 @@ install(FILES hardware_plugins.xml controller_plugins.xml DESTINATION share/${PR
 
 # 固件 ↔ ROS 标准话题适配桥（节点入口；转换/校验在
 # motor_hardware_interface/topic_bridge.py，由单测共用）。
-install(PROGRAMS scripts/firmware_topic_bridge.py scripts/workbench_control.py
+install(PROGRAMS scripts/firmware_topic_bridge.py scripts/workbench_control.py scripts/motor_param_sync.py
         DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
@@ -69,6 +69,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_workbench_control test/test_workbench_control.py)
   ament_add_pytest_test(test_transmission_bridge test/test_transmission_bridge.py)
   ament_add_pytest_test(test_joint_limits_parameters test/test_joint_limits_parameters.py)
+  ament_add_pytest_test(test_motor_param_sync test/test_motor_param_sync.py)
 endif()
 
 ament_python_install_package(motor_hardware_interface)

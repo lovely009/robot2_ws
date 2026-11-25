@@ -167,6 +167,38 @@ class CxChannel:
         self.pending = deque()
         self.label = f'USB-CAN FD channel {index + 1}'
 
+    def send_batch(self, packets):
+        with self.device.lock:
+            if not self.handle:
+                raise OSError('USB-CAN FD channel is closed')
+            if not packets:
+                return 0
+            first_len = len(packets[0])
+            fd = first_len == 72
+            batch = []
+            for data in packets:
+                if len(data) != first_len or len(batch) >= 64:
+                    break
+                batch.append(data)
+            count = len(batch)
+            packet_type = TxFD if fd else TxCAN
+            array = (packet_type * count)()
+            for index, data in enumerate(batch):
+                can_id, size, flags = struct.unpack_from('=IBB', data)
+                frame = array[index].frame
+                frame.can_id = can_id
+                frame.length = size
+                if fd:
+                    frame.flags = flags & 1
+                frame.data[:size] = data[8:8 + size]
+            func = self.device.api.ZCAN_TransmitFD if fd else self.device.api.ZCAN_Transmit
+            sent = func(self.handle, array, count)
+            if sent == 0:
+                raise BlockingIOError('USB-CAN FD transmit queue is full')
+            if not 0 <= sent <= count:
+                raise OSError(f'USB-CAN FD transmit failed ({sent})')
+            return sent
+
     def send(self, data):
         with self.device.lock:
             if not self.handle:

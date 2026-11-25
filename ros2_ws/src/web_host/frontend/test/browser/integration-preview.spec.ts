@@ -20,9 +20,9 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   });
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => {
     const fixtures: Record<string, unknown> = {
-      '/motor/topology': {entries: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, model_name:'模拟 CERB · 非实测', bus_index:i%3, lifecycle:3}))},
-      '/motor/status_array': {statuses: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, lifecycle:3, temperature:25, unified_fault_code:0}))},
-      '/motor/motion_states': {states: Array.from({length:37}, (_, i) => ({motor_id:i+1, position:i*.01, velocity:0, effort:0, state_age_ms:5}))},
+      '/motor/device_info': {topology: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, model_name:'模拟 CERB · 非实测', bus_index:i%3, lifecycle:3})), params: []},
+      '/motor/state': {schema_version: 5, session_id: 1, sequence: 1, control_states: [], statuses: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, lifecycle:3, temperature:25, unified_fault_code:0}))},
+      '/motor/motion': {states: Array.from({length:37}, (_, i) => ({motor_id:i+1, position:i*.01, velocity:0, effort:0, state_age_ms:5}))},
     };
     const subscribed = new Set<string>();
     const send = () => { for (const topic of subscribed) if (fixtures[topic]) socket.send(JSON.stringify({op:'publish', topic, msg:fixtures[topic]})); };

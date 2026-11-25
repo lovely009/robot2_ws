@@ -56,7 +56,6 @@ target_link_libraries(fw_session_sync PUBLIC fw_mailbox fw_motor_control)
 
 add_library(fw_mailbox OBJECT
   ../../lib/control/src/control_command_mailbox.c
-  ../../lib/control/src/control_trajectory_mailbox.c
   ../../lib/control/src/control_policy_mailbox.c
   ../../lib/control/src/control_mailbox.c)
 target_include_directories(fw_mailbox PUBLIC
@@ -107,12 +106,6 @@ target_include_directories(fw_storage_projection PUBLIC
   ../../lib/motor/include ../../lib/motor/include)
 target_link_libraries(fw_storage_projection PUBLIC fw_param_store)
 
-# 定点编解码纯逻辑（lib/control；无 ROS 依赖，host 可直编）
-add_library(fw_wire_codec OBJECT
-  ../../lib/control/src/wire_codec.c)
-target_include_directories(fw_wire_codec PUBLIC
-  ../../lib/control/include)
-
 add_library(fw_control_lease OBJECT ../../lib/control/src/control_lease.c)
 target_include_directories(fw_control_lease PUBLIC ../../lib/control/include)
 
@@ -136,21 +129,17 @@ function(fw_host_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
-add_library(fw_info_page OBJECT ../../src/micro_ros/info_page.cpp)
 fw_host_test(test_mcp2518fd
   SOURCES test_mcp2518fd.c ../../lib/board/src/mcp2518fd.c
   OBLIBS fw_can_rx_ring)
-target_include_directories(fw_info_page PUBLIC ../../include/micro_ros)
-target_link_libraries(fw_info_page PUBLIC fw_motor_control fw_config_transaction)
-fw_host_test(test_info_page SOURCES test_info_page.cpp OBLIBS fw_info_page)
 
 add_library(fw_agent_protocol OBJECT
   ../../lib/control/src/agent_protocol.c
   ../../lib/control/src/agent_control_gate.c)
 target_include_directories(fw_agent_protocol PUBLIC ../../lib/control/include)
-target_link_libraries(fw_agent_protocol PUBLIC fw_control_lease fw_mailbox fw_motor_control fw_session_sync fw_wire_codec)
+target_link_libraries(fw_agent_protocol PUBLIC fw_control_lease fw_mailbox fw_motor_control fw_session_sync)
 fw_host_test(test_agent_protocol SOURCES test_agent_protocol.cpp
-  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_wire_codec fw_control_lease
+  OBLIBS fw_agent_protocol fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol fw_control_lease
   INCLUDES ../../lib/motor/src)
 fw_host_test(test_agent_liveness SOURCES test_agent_liveness.cpp
   INCLUDES ../../lib/control/include)
@@ -191,10 +180,6 @@ fw_host_test(test_config_kind_contract
   SOURCES test_config_kind_contract.cpp
   OBLIBS fw_mailbox fw_motor_protocol
   INCLUDES ../../include ../../lib/motor/include)
-
-fw_host_test(test_trajectory_mailbox
-  SOURCES test_trajectory_mailbox.cpp
-  OBLIBS fw_mailbox)
 
 fw_host_test(test_policy_mailbox
   SOURCES test_policy_mailbox.cpp
@@ -267,10 +252,6 @@ fw_host_test(test_session_sync
   OBLIBS fw_session_sync fw_mailbox fw_motor_control fw_adapters fw_motor_protocol
   INCLUDES ../../lib/motor/src)
 
-fw_host_test(test_wire_codec
-  SOURCES test_wire_codec.cpp
-  OBLIBS fw_wire_codec)
-
 fw_host_test(test_reliable_schedule SOURCES test_reliable_schedule.cpp)
 
 # 直接编译线上 poll，ROS 端口由测试替身提供；源码改动时自动重新提取。
@@ -301,14 +282,6 @@ add_test(
   NAME verify_microros_repo_lock
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_verify_microros_repo_lock.py)
 
-add_library(fw_trajectory_transaction OBJECT
-  ../../lib/control/src/trajectory_transaction.cpp)
-target_include_directories(fw_trajectory_transaction PUBLIC ../../lib/control/include)
-target_link_libraries(fw_trajectory_transaction PUBLIC fw_motor_control fw_mailbox)
-fw_host_test(test_trajectory_transaction SOURCES test_trajectory_transaction.cpp
-  OBLIBS fw_trajectory_transaction fw_motor_control fw_adapters fw_motor_protocol
-  INCLUDES ../../lib/motor/src)
-
 add_library(fw_config_transaction OBJECT
   ../../lib/control/src/config_transaction.cpp)
 target_include_directories(fw_config_transaction PUBLIC ../../lib/control/include)
@@ -318,27 +291,6 @@ fw_host_test(test_config_transaction
 
 add_library(fw_serial_write_budget OBJECT ../../src/micro_ros/serial_write_budget.c)
 fw_host_test(test_serial_write_budget SOURCES test_serial_write_budget.cpp OBLIBS fw_serial_write_budget)
-
-# 按固件锁定源码构建的宿主 XRCE 库通过 CMAKE_PREFIX_PATH 指定。
-find_package(microxrcedds_client QUIET CONFIG)
-if(microxrcedds_client_FOUND)
-  fw_host_test(test_reliable_publish SOURCES test_reliable_publish.c ../../src/micro_ros/reliable_publish.cpp)
-  target_link_libraries(test_reliable_publish PRIVATE microxrcedds_client)
-  target_link_options(test_reliable_publish PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery)
-  target_compile_options(test_reliable_publish PRIVATE -UNDEBUG)
-  fw_host_test(test_reliable_heartbeat SOURCES test_reliable_heartbeat.c ../../src/micro_ros/reliable_publish.cpp)
-  target_link_libraries(test_reliable_heartbeat PRIVATE microxrcedds_client)
-  target_link_options(test_reliable_heartbeat PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery -Wl,--wrap=uxr_millis)
-  target_compile_options(test_reliable_heartbeat PRIVATE -UNDEBUG)
-  fw_host_test(test_reliable_ack SOURCES test_reliable_ack.c ../../src/micro_ros/reliable_publish.cpp)
-  target_link_libraries(test_reliable_ack PRIVATE microxrcedds_client)
-  target_link_options(test_reliable_ack PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery)
-  target_compile_options(test_reliable_ack PRIVATE -UNDEBUG)
-  fw_host_test(test_reliable_telemetry_queue SOURCES test_reliable_telemetry_queue.cpp ../../src/micro_ros/reliable_publish.cpp)
-  target_link_libraries(test_reliable_telemetry_queue PRIVATE microxrcedds_client)
-  target_link_options(test_reliable_telemetry_queue PRIVATE -Wl,--wrap=uxr_prepare_output_stream_fragmented -Wl,--wrap=uxr_update_output_stream_heartbeat_timestamp -Wl,--wrap=uxr_process_acknack -Wl,--wrap=uxr_run_session_until_confirm_delivery -Wl,--wrap=uxr_millis)
-  target_compile_options(test_reliable_telemetry_queue PRIVATE -UNDEBUG)
-endif()
 
 fw_host_test(test_param_store SOURCES test_param_store.cpp OBLIBS fw_param_store
   INCLUDES ../../lib/motor/include)

@@ -15,12 +15,12 @@ from robot_transmission import Model
 from motor_hardware_interface.control_subset import materialize_control_subset
 
 
-def hardware_description(config_file, urdf_file):
+def hardware_description(config_file, urdf_file, hardware_plugin='motor_hardware_interface/MicroRosSystem'):
     config_file = str(Path(config_file).resolve(strict=True))
     model = Model.load(config_file)
     ids = list(model.actuator_ids.values())
-    if not 0 < len(ids) <= 48 or len(set(ids)) != len(ids) or any(not 1 <= i <= 64 for i in ids):
-        raise ValueError('MCU motor_id 必须全局唯一、在 1..64 内，且总数不超过 48')
+    if not 0 < len(ids) <= 37 or len(set(ids)) != len(ids) or any(not 1 <= i <= 64 for i in ids):
+        raise ValueError('MCU motor_id 必须全局唯一、在 1..64 内，且总数不超过 37')
     root = ET.parse(Path(urdf_file).resolve(strict=True)).getroot()
     if root.tag != 'robot' or any('xacro' in element.tag for element in root.iter()):
         raise ValueError('urdf_file 必须是展开后的 robot URDF')
@@ -32,7 +32,7 @@ def hardware_description(config_file, urdf_file):
         root.remove(existing)
     control = ET.SubElement(root, 'ros2_control', {'name': 'micro_ros_system', 'type': 'system'})
     hardware = ET.SubElement(control, 'hardware')
-    ET.SubElement(hardware, 'plugin').text = 'motor_hardware_interface/MicroRosSystem'
+    ET.SubElement(hardware, 'plugin').text = hardware_plugin
     ET.SubElement(hardware, 'param', {'name': 'config_file'}).text = config_file
     joints = list(model.joint_names)
     for name in joints:
@@ -95,12 +95,6 @@ def controller_parameters(joints, urdf_file):
             'enabled': False, 'effort_gain': 1.0,
         }},
     }
-    for index, joint in enumerate(joints):
-        name = f'manual_controller_{index}'
-        parameters['/host_control/controller_manager']['ros__parameters'][name] = {
-            'type': 'forward_command_controller/MultiInterfaceForwardCommandController'}
-        parameters[f'/host_control/{name}'] = {'ros__parameters': {
-            'joint': joint, 'interface_names': ['position', 'velocity', 'effort']}}
     return parameters
 
 
@@ -124,7 +118,8 @@ def launch_control_stack(context):
     motor_ids = LaunchConfiguration('motor_ids').perform(context)
     if motor_ids:
         config_file = materialize_control_subset(config_file, motor_ids, temporary.name)
-    description, joints = hardware_description(config_file, urdf_file)
+    hardware_plugin = LaunchConfiguration('hardware_plugin').perform(context)
+    description, joints = hardware_description(config_file, urdf_file, hardware_plugin=hardware_plugin)
     started = LaunchConfiguration('start_controllers').perform(context).lower() == 'true'
     parameters_file = str(Path(temporary.name) / 'controllers.yaml')
     with open(parameters_file, 'w', encoding='utf-8') as handle:
@@ -144,7 +139,7 @@ def launch_control_stack(context):
                              '--controller-manager', '/host_control/controller_manager',
                              *(['--activate-as-group'] if started else ['--inactive'])])
     manual = Node(package='controller_manager', executable='spawner', output='screen',
-                  arguments=['follow_controller', *[f'manual_controller_{i}' for i in range(len(joints))],
+                  arguments=['follow_controller',
                              '--controller-manager', '/host_control/controller_manager', '--inactive'])
     client = Node(package='motor_hardware_interface', executable='workbench_control.py',
                   name='workbench_control', output='screen', parameters=[{
@@ -177,5 +172,7 @@ def generate_launch_description():
                               description='显式激活 JTC；默认等待新的工作台目标'),
         DeclareLaunchArgument('publish_joint_states', default_value='true'),
         DeclareLaunchArgument('publish_robot_state', default_value='true'),
+        DeclareLaunchArgument('hardware_plugin', default_value='motor_hardware_interface/MicroRosSystem',
+                              description='ros2_control 硬件插件（实机 MicroRosSystem / 仿真 MotorSimSystem）'),
         OpaqueFunction(function=launch_control_stack),
     ])

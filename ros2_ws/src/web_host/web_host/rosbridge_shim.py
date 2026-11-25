@@ -27,7 +27,8 @@ from rosbridge_library.internal import ros_loader
 def _patch_bounded_strings() -> None:
     # 出站：ros_primitive_types；入站：type_map['str']（原为单个字符串
     # "string"，成员判断靠子串；换成元组并补上有界记法）。
-    extra = ('string<31>', 'string<=31>')
+    extra = ('string<31>', 'string<=31>', 'string<63>', 'string<=63>',
+             'string<127>', 'string<=127>', 'string<255>', 'string<=255>')
     existing = tuple(message_conversion.ros_primitive_types)
     message_conversion.ros_primitive_types = tuple(
         dict.fromkeys((*existing, *extra)))

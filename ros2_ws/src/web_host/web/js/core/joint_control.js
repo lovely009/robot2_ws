@@ -35,7 +35,7 @@ export function createLatestTargetSender({send, isCurrent, onError=()=>{}, inter
   };
 }
 
-function controlGroups(state) {
+export function controlGroups(state) {
   return state.modelTransmissions?.hardware_ready === false
     ? state.transmissionStatus?.data?.control_groups
     : state.modelTransmissions?.groups;
@@ -45,8 +45,16 @@ export function controlSessionError(state, model, now = Date.now()) {
   if (!state.conn?.connected) return '未连接 rosbridge';
   const meta = state.modelTransmissions;
   if (meta?.model === model && meta.hardware_ready === false
-      && !Array.isArray(controlGroups(state)))
+      && !Array.isArray(controlGroups(state))) {
+    const sim = state.bench?.simulation;
+    const hilActive = sim?.state === 'running'
+      && sim?.config?.controller_mode === 'firmware'
+      && sim?.config?.model === model;
+    if (hilActive) {
+      return `HIL 控制会话未就绪：${state.bench?.feedback?.error || state.bench?.feedback?.reason || '正在等待主机控制会话启动'}`;
+    }
     return meta.hardware_block_reason || '传动参数待标定';
+  }
   if (meta?.model !== model || meta.error || !Array.isArray(meta.groups) || !meta.groups.length
       || meta.groups.some(g => !Array.isArray(g?.joints) || !g.joints.length
         || !Array.isArray(g?.motors) || !g.motors.length)) return '模型传动配置未就绪';
@@ -56,7 +64,7 @@ export function controlSessionError(state, model, now = Date.now()) {
   if (runtime.data.trajectory_enabled !== true) return '主机传动桥为只读模式';
   const command = state.commandStatus;
   if (!command?.last || now-command.last < 0 || now-command.last > 2500
-      || command.data?.output_topic !== '/motor/host_command_array'
+      || command.data?.output_topic !== '/motor/command'
       || command.data?.trajectory_output_topic !== '/host_control/trajectory_controller/follow_joint_trajectory') {
     return '主机轨迹路由未就绪';
   }
@@ -138,8 +146,18 @@ export function buildJointTarget(state, model, joint, target, now=Date.now()) {
 export function rawCouplingError(state, model, ids) {
   if (!ids.length) return '';
   const meta = state.modelTransmissions;
-  if (meta?.model === model && meta.hardware_ready === false)
-    return meta.hardware_block_reason || '传动参数待标定';
+  if (meta?.model === model && meta.hardware_ready === false) {
+    const hilGroups = state.transmissionStatus?.data?.control_groups;
+    if (!Array.isArray(hilGroups) || !hilGroups.length) {
+      return meta.hardware_block_reason || '传动参数待标定';
+    }
+    const unknown = ids.find(id => !hilGroups.some(g => g.motors.some(m => Number(m.id) === Number(id))));
+    if (unknown !== undefined) return `m${unknown} 不属于当前 HIL 控制传动组`;
+    const touched = [...(meta.groups || []), ...hilGroups].find(g =>
+      (g.motors.length > 1 || g.joints.length > 1)
+      && g.motors.some(m => ids.includes(Number(m.id))));
+    return touched ? `传动组 ${touched.name} 必须使用关节目标；原始电机命令不执行混控` : '';
+  }
   if (meta?.model !== model || !Array.isArray(meta.groups)) return '当前模型传动配置未就绪，拒绝原始运动下发';
   const unknown = ids.find(id => !meta.groups.some(g => g.motors.some(m => Number(m.id) === Number(id))));
   if (unknown !== undefined) return `m${unknown} 不属于当前模型传动组`;

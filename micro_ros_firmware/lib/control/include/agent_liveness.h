@@ -8,7 +8,7 @@
 #define AGENT_PING_TIMEOUT_MS 5U
 #define AGENT_PING_FAILURE_LIMIT 3U
 #define AGENT_SYNC_PERIOD_MS 10000U
-#define AGENT_SYNC_TIMEOUT_MS 2U
+#define AGENT_SYNC_TIMEOUT_MS 20U
 
 // 只由 micro-ROS 任务及其回调访问，运动新鲜度另由实时任务判定。
 typedef struct {

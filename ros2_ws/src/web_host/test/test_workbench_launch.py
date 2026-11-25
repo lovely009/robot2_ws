@@ -28,20 +28,24 @@ def test_workbench_exposes_controls_but_no_wire_writes():
     assert params['call_services_in_new_thread'] is True
     assert not any('/managed/' in topic or '/micro_ros_' in topic
                    for topic in literal_eval(params['topics_pub_glob']))
-    assert {'/bench/status', '/motor/control_states', '/joint_states'} <= set(literal_eval(params['topics_sub_glob']))
-    assert {'/control/status', '/control/trajectory_state'} <= set(literal_eval(params['topics_sub_glob']))
-    assert '/micro_ros_up/status' in literal_eval(params['topics_sub_glob'])
+    assert {'/bench/status', '/motor/state', '/motor/motion', '/joint_states', '/imu/temp_raw'} <= set(literal_eval(params['topics_sub_glob']))
+    assert '/motor/device_info' not in literal_eval(params['topics_sub_glob'])
+    assert '/control/status' in literal_eval(params['topics_sub_glob'])
+    assert '/micro_ros_up/status' not in literal_eval(params['topics_sub_glob'])
+    assert '/control/trajectory_state' not in literal_eval(params['topics_sub_glob'])
     assert '/bench/*' in literal_eval(params['services_glob'])
-    assert '/motor/submit_policy' in literal_eval(params['services_glob'])
+    assert {'/motor/submit_policy', '/motor/execute_config', '/motor/get_device_info', '/micro_ros_node/*'} <= set(literal_eval(params['services_glob']))
     assert '/motor/policy_array' not in literal_eval(params['topics_pub_glob'])
-    assert '/control/setpoint' in literal_eval(params['topics_pub_glob'])
+    assert '/control/setpoint' not in literal_eval(params['topics_pub_glob'])
+    assert '/control/trajectory_raw' not in literal_eval(params['topics_pub_glob'])
     assert '/control/joint_target' in literal_eval(params['topics_pub_glob'])
+    assert '/control/trajectory' in literal_eval(params['topics_pub_glob'])
+    assert '/control/stop' in literal_eval(params['topics_pub_glob'])
     assert '/robot_sim/joint_position_target' in literal_eval(params['topics_pub_glob'])
     assert '/robot_sim/position_status' in literal_eval(params['topics_sub_glob'])
     assert not any('/host_control/' in topic for topic in literal_eval(params['topics_pub_glob']))
-    assert '/control/trajectory_raw' in literal_eval(params['topics_pub_glob'])
     context.launch_configurations['control_mode'] = 'readonly'
     params = evaluate_parameters(context, getattr(module.web_nodes(context)[0], '_Node__parameters'))[0]
     assert literal_eval(params['topics_pub_glob']) == []
     assert literal_eval(params['services_glob']) == ['/rosapi/*']
-    assert '/micro_ros_up/status' in literal_eval(params['topics_sub_glob'])
+    assert '/motor/state' in literal_eval(params['topics_sub_glob'])

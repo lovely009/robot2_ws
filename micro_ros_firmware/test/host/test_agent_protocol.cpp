@@ -121,8 +121,8 @@ static void test_sparse_enable_does_not_authorize_unselected_discovery() {
 static void test_deadline_window_and_request_ttl() {
   assert(!agent_deadline_valid(100, 100));
   assert(agent_deadline_valid(100, 101));
-  assert(agent_deadline_valid(100, 130));
-  assert(!agent_deadline_valid(100, 131));
+  assert(agent_deadline_valid(100, 200));
+  assert(!agent_deadline_valid(100, 201));
   assert(agent_deadline_valid(UINT32_MAX - 4, 5));
   uint32_t deadline = 0;
   assert(agent_request_deadline(1000000000, 100, 100, 1030000000, 500, &deadline));
@@ -154,14 +154,14 @@ static void test_lease_soft_stop_then_revoke_and_clock_loss() {
   agent_link_poll(&link, 0, true, true);
   agent_link_accept_command(&link, 1, 0);
   assert(agent_link_accept_policy(&link, 1, 0));
-  assert(agent_link_poll(&link, 30, true, true) == 0);
-  assert(agent_link_poll(&link, 31, true, true) & AGENT_LINK_SOFT_STOP);
+  assert(agent_link_poll(&link, 100, true, true) == 0);
+  assert(agent_link_poll(&link, 101, true, true) & AGENT_LINK_SOFT_STOP);
   assert(link.authorized);
-  assert(agent_link_poll(&link, 101, true, true) & AGENT_LINK_REVOKE);
-  agent_link_accept_command(&link, 2, 102);
+  assert(agent_link_poll(&link, 201, true, true) & AGENT_LINK_REVOKE);
+  agent_link_accept_command(&link, 2, 202);
   assert(!link.authorized);
-  assert(agent_link_accept_policy(&link, 2, 102));
-  assert(agent_link_poll(&link, 103, true, false) & AGENT_LINK_REVOKE);
+  assert(agent_link_accept_policy(&link, 2, 202));
+  assert(agent_link_poll(&link, 203, true, false) & AGENT_LINK_REVOKE);
   assert(!link.authorized);
 }
 static void test_real_gate_stop_bypasses_full_fifo_and_retired_policy() {
@@ -423,31 +423,31 @@ static void test_sparse_disable_full_fifo_discards_pending_enable() {
   assert(!mailbox.policy.pending);
   assert(gate.link.stop_generation == 1 && gate.link.barrier_generation == 500);
 
-  // 租约过 30 ms 后，严格更高代的新策略在提交阶段即被拒（不得靠复活绕租约）。
+  // 租约过 100 ms 后，严格更高代的新策略在提交阶段即被拒（不得靠复活绕租约）。
   control_policy_snapshot_t fresh_enable = pending_enable;
   fresh_enable.request_id = 602;
-  fresh_enable.received_tick_ms = 134;
-  fresh_enable.valid_until_tick_ms = 234;
+  fresh_enable.received_tick_ms = 204;
+  fresh_enable.valid_until_tick_ms = 304;
   fresh_enable.policy_generation = 501;
   fresh_enable.lease_id = gate.authority.lease_id;
-  assert(!agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 134));
+  assert(!agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 204));
   assert(!mailbox.policy.pending);
-  agent_gate_step(&gate, &mailbox, &ctx, 134, true);
+  agent_gate_step(&gate, &mailbox, &ctx, 204, true);
   assert(!gate.link.lease_valid);
   assert(!ctx.entries[0].policy_enable);
 
   // 新心跳重建租约后，同一代 501 策略才被受理并在执行拍重新武装 motor1。
   command.sequence = 3;
-  command.received_tick_ms = 135;
-  command.valid_until_tick_ms = 165;
+  command.received_tick_ms = 205;
+  command.valid_until_tick_ms = 235;
   command.lease_id = gate.authority.lease_id;
-  assert(agent_gate_submit_command(&gate, &mailbox, &command, 135));
-  fresh_enable.received_tick_ms = 136;
-  fresh_enable.valid_until_tick_ms = 236;
+  assert(agent_gate_submit_command(&gate, &mailbox, &command, 205));
+  fresh_enable.received_tick_ms = 206;
+  fresh_enable.valid_until_tick_ms = 306;
   fresh_enable.lease_id = gate.authority.lease_id;
-  assert(agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 136));
+  assert(agent_gate_submit_policy(&gate, &mailbox, &fresh_enable, 206));
   assert(mailbox.policy.pending);
-  agent_gate_step(&gate, &mailbox, &ctx, 137, true);
+  agent_gate_step(&gate, &mailbox, &ctx, 207, true);
   assert(gate.link.lease_valid);
   assert(ctx.entries[0].policy_enable);
   assert(ctx.entries[0].policy_generation == 501);
@@ -509,20 +509,20 @@ static void test_authority_heartbeat_does_not_refresh_motion_deadline() {
   fixture_lease(gate);
   control_command_snapshot_t command{};
   command.session_id = 123; command.sequence = 1;
-  command.valid_until_tick_ms = 130;
+  command.valid_until_tick_ms = 200;
   assert(agent_gate_submit_command(&gate, &mailbox, &command, 100));
   agent_gate_admit_command(&gate, &mailbox, &ctx, 100);
   const auto deadline = ctx.snapshot_deadline_tick_ms;
   assert(control_lease_submit(&gate.authority, 123, gate.authority.lease_id,
-      2, 350, true, 120));
-  assert(agent_gate_service(&gate, &mailbox, &ctx, 131, true) & AGENT_LINK_SOFT_STOP);
+      2, 400, true, 120));
+  assert(agent_gate_service(&gate, &mailbox, &ctx, 201, true) & AGENT_LINK_SOFT_STOP);
   assert(ctx.snapshot_deadline_tick_ms == deadline);
   assert(gate.link.command_tick_ms == 100);
   // Losing the link revokes authority; incoming old snapshots cannot restore it.
   control_mailbox_request_agent_connected(&mailbox, false);
-  agent_gate_service(&gate, &mailbox, &ctx, 132, true);
+  agent_gate_service(&gate, &mailbox, &ctx, 202, true);
   assert(!gate.authority.active);
-  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 133));
+  assert(!agent_gate_submit_command(&gate, &mailbox, &command, 203));
 }
 
 int main() {

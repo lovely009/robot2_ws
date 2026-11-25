@@ -2,10 +2,10 @@
 // 文件速度仅作诊断；主机默认单调插值，显式 linear 保留原始位置/时间线性播放。
 // 数据按 ≤256 点分包；主机收齐后将引导段与完整动作提交为同一个 JTC goal。
 // 播放调度在模块级，切屏不打断动作。
-import { store, MODEL, markDirty, DIRTY, beginTrajectory } from './store.js';
+import { store, MODEL, JOINT_OF_MOTOR, markDirty, DIRTY, beginTrajectory } from './store.js';
 import { LIFECYCLE, TRAJ_MAX_POINTS, TRAJ_MAX_MOTORS, TRAJ_MAX_PLAN_POINTS, TRAJ_STATE_TIMEOUT_PAD_MS } from './format.js';
 import { pub, isConnected, submitPolicy, getConnectionGeneration } from './ros.js';
-import { controlSessionError, rawCouplingError } from './joint_control.js';
+import { controlGroups, controlSessionError, rawCouplingError } from './joint_control.js';
 import { controlTargetsError, describeMotorState, policyRequestState, applyPolicySubmission, confirmPolicyIntent, stopPolicyIntents } from './motor_state.js';
 import { isUnprotected } from './control_policy.js';
 import { buildBvhPlan, loadBvhMotion } from './bvh_playback.js';
@@ -79,8 +79,8 @@ function assertPlaybackSession() {
   if (MODEL !== player.model || store.modelTransmissions !== player.modelMetadata) {
     throw new Error('播放期间模型或传动配置已更换，请重新确认');
   }
-  if (player.jointPlan && (store.commandStatus.data?.joint_trajectory_ids !== true
-      || store.transmissionStatus.data?.joint_names?.length !== player.jointPlan.names.length
+  if (player.jointPlan && (store.commandStatus.data?.joint_trajectory_ids === false
+      || !store.transmissionStatus.data?.joint_names?.length
       || player.jointPlan.names.some(name => !store.transmissionStatus.data.joint_names.includes(name)))) {
     throw new Error('播放期间主机控制关节已更换，请重新确认');
   }
@@ -96,14 +96,8 @@ function announce() { markDirty(DIRTY.TRAJ); }
 // 空轨迹只取消 JTC 并保持位置；全部软停另走 /control/stop。
 function cancelTrajectory() {
   return pub('trajectory', {
-    sync_time_ns: store.controlStates.sourceTimeNs || 0,
-    sequence: 0,
-    trajectory_id: 0,
-    segment_index: 0,
-    segment_count: 1,
-    count: 0,
-    target_count: 0,
-    target_ids: [],
+    header: {},
+    joint_names: [],
     points: [],
   });
 }
@@ -161,6 +155,49 @@ function makePlan(steps, ids) {
   return points;
 }
 
+function motorJointMap(state) {
+  const map = new Map();
+  for (const group of controlGroups(state) || []) {
+    if (group?.motors?.length === 1 && group?.joints?.length === 1) {
+      map.set(Number(group.motors[0].id), group.joints[0]);
+    }
+  }
+  const direct = state.modelTransmissions?.direct_mapping;
+  if (direct && typeof direct === 'object') {
+    for (const [id, name] of Object.entries(direct)) {
+      if (!map.has(Number(id))) map.set(Number(id), name);
+    }
+  }
+  for (const [id, name] of Object.entries(JOINT_OF_MOTOR)) {
+    if (!map.has(Number(id))) map.set(Number(id), name);
+  }
+  return map;
+}
+
+function buildJsonJointPlan(series, state) {
+  const planPoints = makePlan(series.steps, series.ids);
+  const jointMap = motorJointMap(state);
+  const names = series.ids.map(id => jointMap.get(id));
+  if (names.some(name => !name)) throw new Error('缺少电机到关节的映射');
+  const t0 = series.steps[0].t;
+  const points = series.steps.map((step, index) => {
+    const ms = ALIGN_MS + step.t - t0;
+    return {
+      positions: series.ids.map(id => step.vals[id][0]),
+      velocities: series.interpolation === 'linear'
+        ? []
+        : series.ids.map(id => (index === 0 ? 0 : step.vals[id][1])),
+      time_from_start: { sec: Math.floor(ms / 1000), nanosec: (ms % 1000) * 1e6 },
+    };
+  });
+  return {
+    ids: series.ids,
+    names,
+    points,
+    durationMs: planPoints[planPoints.length - 1].time_from_start_ms,
+  };
+}
+
 function sendPlan() {
   assertPlaybackSession();
   const authority=controlTargetsError(store,player.ids);
@@ -172,29 +209,17 @@ function sendPlan() {
   if (player.jointPlan) {
     player.planStarted = true;
     beginTrajectory(store.traj.activeTrajectoryId, true);
-    if (!pub('jointTrajectory', {
+    if (!pub('trajectory', {
       header: {
         stamp: {sec: Math.floor(syncTime / 1e9), nanosec: Math.round(syncTime % 1e9)},
-        frame_id: `workbench-trajectory/${tid}`,
+        frame_id: `${player.raw ? 'workbench-trajectory-linear' : 'workbench-trajectory'}/${tid}`,
       },
       joint_names: player.jointPlan.names, points: player.jointPlan.points,
     })) throw new Error('关节轨迹发送失败，请检查连接与控制模式');
     beginTrajectory(tid);
     return tid;
   }
-  const segmentCount = Math.ceil(player.points.length / TRAJ_MAX_POINTS);
-  for (let index=0; index<segmentCount; index++) {
-    assertPlaybackSession();
-    const points=player.points.slice(index*TRAJ_MAX_POINTS,(index+1)*TRAJ_MAX_POINTS);
-    player.planStarted = true; // 发布也可能抛错，异常收尾须覆盖部分上传。
-    if (!pub(player.raw ? 'rawTrajectory' : 'trajectory', {
-      sync_time_ns:syncTime, sequence:tid, session_id:player.sessionId, trajectory_id:tid,
-      segment_index:index, segment_count:segmentCount, count:points.length,
-      target_count:player.ids.length, target_ids:player.ids, points,
-    })) throw new Error('轨迹发送失败，请检查连接与控制模式');
-  }
-  beginTrajectory(tid);
-  return tid;
+  throw new Error('缺少关节轨迹数据，请通过关节规划路径发送');
 }
 
 // completed 由客户端根据 JTC 成功结果映射，发布成功和时间到达都不算完成。
@@ -292,8 +317,8 @@ export async function playAction(name, options) {
       player.raw = series.interpolation === 'linear';
       const coupled = rawCouplingError(store, player.model, ids);
       if (coupled) throw new Error(coupled);
-      player.points = makePlan(series.steps, ids);
-      player.durationMs = player.points[player.points.length - 1].time_from_start_ms;
+      player.jointPlan = buildJsonJointPlan(series, store);
+      player.durationMs = player.jointPlan.durationMs;
     }
     const blocked = playbackReadinessError(ids);
     if (blocked) throw new Error(blocked);

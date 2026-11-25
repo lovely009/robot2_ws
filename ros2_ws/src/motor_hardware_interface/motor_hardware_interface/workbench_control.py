@@ -8,12 +8,11 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
+import numpy as np
 import yaml
 
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
-from can_bridge_msgs.msg import (AgentWireContract, MotorCommandArray, MotorCommandTarget,
-                                 MotorTrajectory, MotorTrajectoryState)
 from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from controller_manager_msgs.srv import ListControllers, SwitchController
@@ -22,21 +21,25 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType, SetParameters
 from rcl_interfaces.srv import GetParameters, SetParametersAtomically
 import rclpy
 from rclpy.action import ActionClient
-from rclpy.executors import SingleThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from robot_transmission import Axis, Model
 from robot_transmission.coupled_limits import CoupledLimits
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Empty, Float64MultiArray, Int32, String
+from std_msgs.msg import Empty, Int32, String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
+from .feedback_publisher import build_transmission_status
 from .transmission_bridge import parse_joint_limits
 
 FRESH_NS = 500_000_000
 RPC_TIMEOUT = 2.
 ASSEMBLY_TIMEOUT = 2.
+DYNAMIC_STATUS_PERIOD = 0.2
+DYNAMIC_LIMIT_EPS = 1e-4
 TRAJECTORY_MAX_POINTS = 8192  # 与网页一致，按展开后的电机路点计数。
 ACTION = '/host_control/trajectory_controller/follow_joint_trajectory'
 CHANNELS = ('position', 'velocity', 'effort')
@@ -124,7 +127,7 @@ class WorkbenchModel:
         self.position_tolerance = dict.fromkeys(self.joint_names, 1e-7)
         for actuator in self.ids:
             delta = self.model.actuator_to_joint({a: Axis(
-                AgentWireContract.SCALE_POSITION / 32767 if a == actuator else 0.) for a in self.ids})
+                12.5 / 32767 if a == actuator else 0.) for a in self.ids})
             for name in self.joint_names:
                 # 两次量化测量的差最多一格，再由同一传动 Model 换算到关节。
                 self.position_tolerance[name] += abs(delta[name].position - zero[name].position)
@@ -175,12 +178,16 @@ class WorkbenchModel:
             for value, low, high in ((axis.position, lower, upper),
                                     (axis.velocity, -velocity, velocity),
                                     (axis.effort, -effort, effort)):
-                bounded = min(max(value, low), high)
-                # 只消除 float32 传输的舍入误差，下游仍使用原限位严格校验。
-                if not math.isfinite(value) or not math.isclose(
-                        value, bounded, rel_tol=2**-24, abs_tol=2**-150):
+                if not math.isfinite(value):
                     raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
-                values.append(bounded)
+                if low <= value <= high:
+                    values.append(value)
+                else:
+                    bounded = low if value < low else high
+                    # 只消除 float32 传输的舍入误差，下游仍使用原限位严格校验。
+                    if not math.isclose(value, bounded, rel_tol=2**-24, abs_tol=2**-150):
+                        raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
+                    values.append(bounded)
             result[name] = Axis(*values)
         # 其他组可原位保持；只校验本次会运动或施力的耦合组。
         moving_groups = [name for name, (joints, _, _, _) in self.workspace.groups.items()
@@ -212,8 +219,8 @@ class WorkbenchModel:
             raise ValueError(str(error)) from error
 
     def manual(self, message, measured, now_ns):
-        fresh(message.sync_time_ns, now_ns)
-        if not 0 < message.count == len(message.targets) <= 64:
+        fresh(stamp_ns(message.header.stamp), now_ns)
+        if not 0 < message.count == len(message.targets) <= 37:
             raise ValueError('手动快照数量无效')
         values = self._complete(self._motors(message.targets, measured), measured)
         return [getattr(values[name], channel) for name in self.joint_names for channel in CHANNELS]
@@ -238,38 +245,228 @@ class WorkbenchModel:
         if (not names or not message.points or len(names) != len(set(names))
                 or not set(names).issubset(self.joint_names)):
             raise ValueError('轨迹为空、关节名重复或不属于模型')
+        if set(measured) != set(self.joint_names):
+            raise ValueError('缺少全模型新鲜反馈')
         # Input stamp checks freshness; admission/switch latency must not shorten validated segments.
-        output = JointTrajectory(joint_names=self.joint_names)
-        output.header.frame_id = message.header.frame_id
-        previous, previous_values = 0, measured
+        J = len(self.joint_names)
+        N = len(message.points)
+        joint_index = {n: j for j, n in enumerate(self.joint_names)}
+        col_idx = [joint_index[n] for n in names]
+        m_pos = np.array([measured[n].position for n in self.joint_names], dtype=np.float64)
+        m_vel = np.array([measured[n].velocity for n in self.joint_names], dtype=np.float64)
+        P = np.broadcast_to(m_pos, (N, J)).copy()
+        V = np.zeros((N, J), dtype=np.float64)
+        times_ns = np.empty(N, dtype=np.int64)
+        expected_len = len(names)
+        previous = 0
         for index, point in enumerate(message.points):
             t = stamp_ns(point.time_from_start)
             if (not 0 <= point.time_from_start.nanosec < 10**9 or t < 0
                     or t > 0xFFFFFFFF * 10**6 or (index and t <= previous)):
                 raise ValueError('轨迹时间必须非负、严格递增且可由状态毫秒表示')
-            if (len(point.positions) != len(names)
-                    or any(values and len(values) != len(names)
+            if (len(point.positions) != expected_len
+                    or any(values and len(values) != expected_len
                            for values in (point.velocities, point.effort, point.accelerations))):
                 raise ValueError('轨迹通道长度不匹配')
             if point.accelerations:
                 raise ValueError('当前 P/V 轨迹入口不支持 acceleration')
             if any(not math.isfinite(e) or e != 0 for e in point.effort):
                 raise ValueError('JTC 仅占 P/V；轨迹非零 effort 无执行接口，请使用手动 P/V/E')
-            values = self._complete({name: Axis(point.positions[i],
-                point.velocities[i] if point.velocities else 0.) for i, name in enumerate(names)}, measured)
-            if t == 0:
-                if any(abs(values[n].position - measured[n].position) >
-                       (1e-7 if linear else self.position_tolerance[n])
-                       for n in self.joint_names):
-                    raise ValueError('零时刻目标未对齐实测位置，请改用未来路点')
-                values = self._complete({n: Axis(measured[n].position, measured[n].velocity)
-                                         for n in self.joint_names}, measured)
-            self._interval(previous_values, values, (t - previous) / 10**9, linear=linear)
-            output.points.append(JointTrajectoryPoint(
-                positions=[values[n].position for n in self.joint_names],
-                velocities=[] if linear else [values[n].velocity for n in self.joint_names],
-                time_from_start=Duration(sec=t // 10**9, nanosec=t % 10**9)))
-            previous, previous_values = t, values
+            times_ns[index] = t
+            previous = t
+            P[index, col_idx] = point.positions
+            if point.velocities:
+                V[index, col_idx] = point.velocities
+
+        lo = np.array([self.limits[n][0] for n in self.joint_names], dtype=np.float64)
+        hi = np.array([self.limits[n][1] for n in self.joint_names], dtype=np.float64)
+        vl = np.array([self.limits[n][2] for n in self.joint_names], dtype=np.float64)
+
+        if not np.isfinite(P).all():
+            i, j = np.argwhere(~np.isfinite(P))[0]
+            raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
+        if not np.isfinite(V).all():
+            i, j = np.argwhere(~np.isfinite(V))[0]
+            raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
+
+        bad_p = (P < lo) | (P > hi)
+        if bad_p.any():
+            for i, j in np.argwhere(bad_p):
+                bounded = float(lo[j] if P[i, j] < lo[j] else hi[j])
+                if not math.isclose(float(P[i, j]), bounded, rel_tol=2**-24, abs_tol=2**-150):
+                    raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
+                P[i, j] = bounded
+        bad_v = (V < -vl) | (V > vl)
+        if bad_v.any():
+            for i, j in np.argwhere(bad_v):
+                bounded = float(-vl[j] if V[i, j] < -vl[j] else vl[j])
+                if not math.isclose(float(V[i, j]), bounded, rel_tol=2**-24, abs_tol=2**-150):
+                    raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
+                V[i, j] = bounded
+
+        if times_ns[0] == 0:
+            pos_tol = (np.full(J, 1e-7, dtype=np.float64) if linear
+                       else np.array([self.position_tolerance[n] for n in self.joint_names], dtype=np.float64))
+            if np.any(np.abs(P[0] - m_pos) > pos_tol):
+                raise ValueError('零时刻目标未对齐实测位置，请改用未来路点')
+            P[0] = m_pos
+            V[0] = m_vel
+            for j, name in enumerate(self.joint_names):
+                for arr, low, high in ((P, lo[j], hi[j]), (V, -vl[j], vl[j])):
+                    val = float(arr[0, j])
+                    if not math.isfinite(val):
+                        raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
+                    if not low <= val <= high:
+                        bounded = low if val < low else high
+                        if not math.isclose(val, bounded, rel_tol=2**-24, abs_tol=2**-150):
+                            raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
+                        arr[0, j] = bounded
+
+        for group_name, (joints, lower, step, mask) in self.workspace.groups.items():
+            j0, j1 = joint_index[joints[0]], joint_index[joints[1]]
+            moving = (P[:, j0] != m_pos[j0]) | (P[:, j1] != m_pos[j1]) | (V[:, j0] != 0.0) | (V[:, j1] != 0.0)
+            if moving.any():
+                c0 = (P[moving, j0] - float(lower[0])) / step
+                c1 = (P[moving, j1] - float(lower[1])) / step
+                if not (np.isfinite(c0).all() and np.isfinite(c1).all()):
+                    raise ValueError(f'{group_name} 两轴组合超出 CAD 可动区域，请先将另一轴移回零位附近')
+                lo0 = np.floor(c0 + 1e-8).astype(int)
+                hi0 = np.ceil(c0 - 1e-8).astype(int)
+                lo1 = np.floor(c1 + 1e-8).astype(int)
+                hi1 = np.ceil(c1 - 1e-8).astype(int)
+                h0, h1 = mask.shape
+                if ((lo0 < 0).any() or (lo1 < 0).any() or (hi0 >= h0).any() or (hi1 >= h1).any()
+                        or not (mask[lo0, lo1] & mask[lo0, hi1] & mask[hi0, lo1] & mask[hi0, hi1]).all()):
+                    raise ValueError(f'{group_name} 两轴组合超出 CAD 可动区域，请先将另一轴移回零位附近')
+
+        for i in range(N):
+            self.model.joint_to_actuator(
+                {name: Axis(float(P[i, j]), float(V[i, j])) for j, name in enumerate(self.joint_names)})
+
+        P_prev = np.vstack([m_pos[None, :], P[:-1]])
+        V_prev = np.vstack([m_vel[None, :], V[:-1]])
+        dt_arr = np.diff(np.concatenate(([0], times_ns))) / 1e9
+        nz = dt_arr > 0
+        if nz.any():
+            p0, p1 = P_prev[nz], P[nz]
+            v0, v1 = V_prev[nz], V[nz]
+            dt = dt_arr[nz, None]
+            if linear:
+                bad_pos = (p0 < lo) | (p0 > hi) | (p1 < lo) | (p1 > hi)
+                if bad_pos.any():
+                    _, j = np.argwhere(bad_pos)[0]
+                    raise ValueError(f'{self.joint_names[j]} 线性插值越过位置限位')
+                speed = (p1 - p0) / dt
+                bad_vel = ~np.isfinite(speed) | (np.abs(speed) > vl + 1e-7)
+                if bad_vel.any():
+                    _, j = np.argwhere(bad_vel)[0]
+                    raise ValueError(f'{self.joint_names[j]} 线性插值越过速度限位')
+            else:
+                a = 2.0 * p0 - 2.0 * p1 + dt * (v0 + v1)
+                b = -3.0 * p0 + 3.0 * p1 - dt * (2.0 * v0 + v1)
+                c = dt * v0
+                lo_tol, hi_tol = lo - 1e-7, hi + 1e-7
+                bad_pos = (p0 < lo_tol) | (p0 > hi_tol) | (p1 < lo_tol) | (p1 > hi_tol)
+                has_a = np.abs(a) > 1e-14
+                disc = 4.0 * b * b - 12.0 * a * c
+                has_roots = has_a & (disc >= 0.0)
+                sqrt_disc = np.sqrt(np.where(has_roots, disc, 0.0))
+                denom_a = np.where(has_a, 6.0 * a, 1.0)
+                for s in ((-2.0 * b + sqrt_disc) / denom_a, (-2.0 * b - sqrt_disc) / denom_a):
+                    in_seg = has_roots & (s >= 0.0) & (s <= 1.0)
+                    if in_seg.any():
+                        pos_s = ((a * s + b) * s + c) * s + p0
+                        bad_pos |= in_seg & ((pos_s < lo_tol) | (pos_s > hi_tol))
+                has_b = (~has_a) & (np.abs(b) > 1e-14)
+                sb = -c / np.where(has_b, 2.0 * b, 1.0)
+                in_seg_b = has_b & (sb >= 0.0) & (sb <= 1.0)
+                if in_seg_b.any():
+                    pos_sb = ((a * sb + b) * sb + c) * sb + p0
+                    bad_pos |= in_seg_b & ((pos_sb < lo_tol) | (pos_sb > hi_tol))
+                if bad_pos.any():
+                    _, j = np.argwhere(bad_pos)[0]
+                    raise ValueError(f'{self.joint_names[j]} JTC 插值越过位置限位')
+
+                v_tol = vl + 1e-7
+                bad_vel = (np.abs(v0) > v_tol) | (np.abs(v1) > v_tol)
+                sv = -b / np.where(has_a, 3.0 * a, 1.0)
+                in_seg_v = has_a & (sv >= 0.0) & (sv <= 1.0)
+                if in_seg_v.any():
+                    vel_sv = np.abs((3.0 * a * sv * sv + 2.0 * b * sv + c) / dt)
+                    bad_vel |= in_seg_v & (vel_sv > v_tol)
+                if bad_vel.any():
+                    _, j = np.argwhere(bad_vel)[0]
+                    raise ValueError(f'{self.joint_names[j]} JTC 插值越过速度限位')
+
+            dt1 = dt_arr[nz]
+            for group, (joints, lower, step, mask) in self.workspace.groups.items():
+                j0, j1 = joint_index[joints[0]], joint_index[joints[1]]
+                o0, o1 = float(lower[0]), float(lower[1])
+                h0, h1 = mask.shape
+                x0, y0 = P_prev[nz, j0], P_prev[nz, j1]
+                x3, y3 = P[nz, j0], P[nz, j1]
+                if linear:
+                    x1, y1, x2, y2 = x0, y0, x3, y3
+                else:
+                    x1 = x0 + dt1 * V_prev[nz, j0] / 3.0
+                    y1 = y0 + dt1 * V_prev[nz, j1] / 3.0
+                    x2 = x3 - dt1 * V[nz, j0] / 3.0
+                    y2 = y3 - dt1 * V[nz, j1] / 3.0
+                x_min = np.minimum(np.minimum(x0, x1), np.minimum(x2, x3))
+                x_max = np.maximum(np.maximum(x0, x1), np.maximum(x2, x3))
+                y_min = np.minimum(np.minimum(y0, y1), np.minimum(y2, y3))
+                y_max = np.maximum(np.maximum(y0, y1), np.maximum(y2, y3))
+                lo0 = np.floor((x_min - o0) / step + 1e-8).astype(int)
+                hi0 = np.ceil((x_max - o0) / step - 1e-8).astype(int)
+                lo1 = np.floor((y_min - o1) / step + 1e-8).astype(int)
+                hi1 = np.ceil((y_max - o1) / step - 1e-8).astype(int)
+                for k in range(len(dt1)):
+                    if (x0[k] == x3[k] == x1[k] == x2[k]
+                            and y0[k] == y3[k] == y1[k] == y2[k]):
+                        continue
+                    if (0 <= lo0[k] <= hi0[k] < h0 and 0 <= lo1[k] <= hi1[k] < h1
+                            and mask[lo0[k]:hi0[k] + 1, lo1[k]:hi1[k] + 1].all()):
+                        continue
+                    pending = [(((float(x0[k]), float(y0[k])), (float(x1[k]), float(y1[k])),
+                                 (float(x2[k]), float(y2[k])), (float(x3[k]), float(y3[k]))), 0)]
+                    while pending:
+                        controls, depth = pending.pop()
+                        c0, c1, c2, c3 = controls
+                        bx_min = min(c0[0], c1[0], c2[0], c3[0])
+                        bx_max = max(c0[0], c1[0], c2[0], c3[0])
+                        by_min = min(c0[1], c1[1], c2[1], c3[1])
+                        by_max = max(c0[1], c1[1], c2[1], c3[1])
+                        blo0 = math.floor((bx_min - o0) / step + 1e-8)
+                        bhi0 = math.ceil((bx_max - o0) / step - 1e-8)
+                        blo1 = math.floor((by_min - o1) / step + 1e-8)
+                        bhi1 = math.ceil((by_max - o1) / step - 1e-8)
+                        if (0 <= blo0 <= bhi0 < h0 and 0 <= blo1 <= bhi1 < h1
+                                and mask[blo0:bhi0 + 1, blo1:bhi1 + 1].all()):
+                            continue
+                        if depth == 12:
+                            raise ValueError(f'{group} JTC 插值两轴组合超出 CAD 可动区域')
+                        m01x, m01y = (c0[0] + c1[0]) * 0.5, (c0[1] + c1[1]) * 0.5
+                        m12x, m12y = (c1[0] + c2[0]) * 0.5, (c1[1] + c2[1]) * 0.5
+                        m23x, m23y = (c2[0] + c3[0]) * 0.5, (c2[1] + c3[1]) * 0.5
+                        q01x, q01y = (m01x + m12x) * 0.5, (m01y + m12y) * 0.5
+                        q12x, q12y = (m12x + m23x) * 0.5, (m12y + m23y) * 0.5
+                        mid = ((q01x + q12x) * 0.5, (q01y + q12y) * 0.5)
+                        pending.append(((mid, (q12x, q12y), (m23x, m23y), c3), depth + 1))
+                        pending.append(((c0, (m01x, m01y), (q01x, q01y), mid), depth + 1))
+
+        output = JointTrajectory(joint_names=self.joint_names)
+        output.header.frame_id = message.header.frame_id
+        P_list = P.tolist()
+        V_list = [] if linear else V.tolist()
+        times_list = times_ns.tolist()
+        output.points = [
+            JointTrajectoryPoint(
+                positions=P_list[i],
+                velocities=[] if linear else V_list[i],
+                time_from_start=Duration(sec=t // 10**9, nanosec=t % 10**9),
+            )
+            for i, t in enumerate(times_list)
+        ]
         return output
 
     def _interval(self, before, after, dt, *, linear=False):
@@ -300,24 +497,35 @@ class WorkbenchModel:
             elif abs(b) > 1e-14:
                 position_times.append(-c/(2*b))
             lower, upper, velocity, _ = self.limits[name]
-            if any(not lower-1e-7 <= ((a*s+b)*s+c)*s+p.position <= upper+1e-7
-                   for s in position_times if 0 <= s <= 1):
-                raise ValueError(f'{name} JTC 插值越过位置限位')
+            lo_tol, hi_tol = lower - 1e-7, upper + 1e-7
+            p0 = p.position
+            for s in position_times:
+                if 0 <= s <= 1:
+                    pos = ((a*s + b)*s + c)*s + p0
+                    if not lo_tol <= pos <= hi_tol:
+                        raise ValueError(f'{name} JTC 插值越过位置限位')
             velocity_times = [0., 1.] + ([-b/(3*a)] if abs(a) > 1e-14 else [])
-            if any(abs((3*a*s*s + 2*b*s + c)/dt) > velocity+1e-7
-                   for s in velocity_times if 0 <= s <= 1):
-                raise ValueError(f'{name} JTC 插值越过速度限位')
+            v_tol = velocity + 1e-7
+            for s in velocity_times:
+                if 0 <= s <= 1:
+                    if abs((3*a*s*s + 2*b*s + c)/dt) > v_tol:
+                        raise ValueError(f'{name} JTC 插值越过速度限位')
         if dt > 0:
             self._workspace_interval(before, after, dt, linear=linear)
 
     def _workspace_interval(self, before, after, dt, *, linear):
         for group, (joints, lower, step, mask) in self.workspace.groups.items():
-            start = tuple(before[name].position for name in joints)
-            end = tuple(after[name].position for name in joints)
-            control_start = start if linear else tuple(
-                before[name].position + dt * before[name].velocity / 3 for name in joints)
-            control_end = end if linear else tuple(
-                after[name].position - dt * after[name].velocity / 3 for name in joints)
+            j0, j1 = joints
+            o0, o1 = float(lower[0]), float(lower[1])
+            h0, h1 = mask.shape
+            start = (before[j0].position, before[j1].position)
+            end = (after[j0].position, after[j1].position)
+            control_start = start if linear else (
+                before[j0].position + dt * before[j0].velocity / 3,
+                before[j1].position + dt * before[j1].velocity / 3)
+            control_end = end if linear else (
+                after[j0].position - dt * after[j0].velocity / 3,
+                after[j1].position - dt * after[j1].velocity / 3)
             if start == end == control_start == control_end:
                 continue
             # Hermite 转 Bezier 后，控制点的包围框包含整段曲线。
@@ -325,24 +533,29 @@ class WorkbenchModel:
             pending = [((start, control_start, control_end, end), 0)]
             while pending:
                 controls, depth = pending.pop()
-                indices = [
-                    (math.floor((min(point[axis] for point in controls) - origin) / step + 1e-8),
-                     math.ceil((max(point[axis] for point in controls) - origin) / step - 1e-8))
-                    for axis, origin in enumerate(lower)]
-                if (all(0 <= low <= high < mask.shape[axis]
-                        for axis, (low, high) in enumerate(indices))
-                        and mask[indices[0][0]:indices[0][1] + 1,
-                                 indices[1][0]:indices[1][1] + 1].all()):
+                c0, c1, c2, c3 = controls
+                x_min = min(c0[0], c1[0], c2[0], c3[0])
+                x_max = max(c0[0], c1[0], c2[0], c3[0])
+                y_min = min(c0[1], c1[1], c2[1], c3[1])
+                y_max = max(c0[1], c1[1], c2[1], c3[1])
+                lo0 = math.floor((x_min - o0) / step + 1e-8)
+                hi0 = math.ceil((x_max - o0) / step - 1e-8)
+                lo1 = math.floor((y_min - o1) / step + 1e-8)
+                hi1 = math.ceil((y_max - o1) / step - 1e-8)
+                if (0 <= lo0 <= hi0 < h0 and 0 <= lo1 <= hi1 < h1
+                        and mask[lo0:hi0 + 1, lo1:hi1 + 1].all()):
                     continue
                 if depth == 12:
                     raise ValueError(f'{group} JTC 插值两轴组合超出 CAD 可动区域')
-                levels = [controls]
-                for _ in range(3):
-                    levels.append(tuple(
-                        tuple((a + b) / 2 for a, b in zip(left, right))
-                        for left, right in zip(levels[-1], levels[-1][1:])))
-                pending.append((tuple(level[-1] for level in reversed(levels)), depth + 1))
-                pending.append((tuple(level[0] for level in levels), depth + 1))
+                m01x, m01y = (c0[0] + c1[0]) * 0.5, (c0[1] + c1[1]) * 0.5
+                m12x, m12y = (c1[0] + c2[0]) * 0.5, (c1[1] + c2[1]) * 0.5
+                m23x, m23y = (c2[0] + c3[0]) * 0.5, (c2[1] + c3[1]) * 0.5
+                q01x, q01y = (m01x + m12x) * 0.5, (m01y + m12y) * 0.5
+                q12x, q12y = (m12x + m23x) * 0.5, (m12y + m23y) * 0.5
+                rx, ry = (q01x + q12x) * 0.5, (q01y + q12y) * 0.5
+                mid = (rx, ry)
+                pending.append(((mid, (q12x, q12y), (m23x, m23y), c3), depth + 1))
+                pending.append(((c0, (m01x, m01y), (q01x, q01y), mid), depth + 1))
 
     def motor_trajectory(self, plan, measured, now_ns, *, linear=False):
         fresh(plan.sync_time_ns, now_ns)
@@ -458,8 +671,17 @@ class TrajectoryAssembly:
 
 
 @dataclass
+class TrajectoryStateSnapshot:
+    trajectory_id: int = 0
+    active: bool = False
+    completed: bool = False
+    elapsed_ms: int = 0
+    total_ms: int = 0
+
+
+@dataclass
 class Run:
-    state: MotorTrajectoryState
+    state: TrajectoryStateSnapshot
     epoch: int
     handle: object = None
     submitted: bool = False
@@ -482,8 +704,7 @@ class WorkbenchControl(Node):
         self._limits_confirmed = not bool(self.get_parameter('joint_limits_json').value)
         self._apply_joint_limits()
         self.add_on_set_parameters_callback(self._validate_joint_limits)
-        self.manual_names = [f'manual_controller_{i}' for i in range(len(self.mapping.joint_names))]
-        self.motion_names = self.manual_names + ['trajectory_controller', 'gravity_controller', 'follow_controller']
+        self.motion_names = ['trajectory_controller', 'gravity_controller', 'follow_controller']
         self._epoch, self._id = 0, 0
         self._busy, self._stopping = False, False
         self._stop_confirmed, self._stop_deadline = False, 0.
@@ -495,36 +716,39 @@ class WorkbenchControl(Node):
         self._pending_follow = None
         self._follow_targets = {}
         self._follow_stamp = 0
-        self._assembly = TrajectoryAssembly()
+        self._last_trajectory_state = TrajectoryStateSnapshot()
         self._waits, self._runs, self._switching = [], [], set()
         self._stop_future = self._poll_future = self._params_future = None
         self._mode, self._reason, self._reject = 'stopped', '等待新目标', ''
         self._gravity_enabled = self._effort_gain = None
         self._active = []
         self._controllers_ready = False
+        self._last_dynamic_check = 0.0
+        self._last_status_json = None
+        self._last_limit_errors = None
+        self._last_dynamic_limits = None
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._status_pub = self.create_publisher(String, '/control/status', latched)
         self._transmission_pub = self.create_publisher(String, '/robot_transmission/status', latched)
-        self._trajectory_pub = self.create_publisher(MotorTrajectoryState, '/control/trajectory_state', 10)
-        self._hardware_stop_pub = self.create_publisher(Empty, '/host_control/stop', 10)
+        self._stop_pub = self.create_publisher(Empty, '/control/stop', 10)
+        self._internal_stop_emitted = False
 
         self._joint_pub = self.create_publisher(JointState, '/joint_states', 10) if publish_states else None
-        self._manual_pubs = [self.create_publisher(Float64MultiArray,
-            f'/host_control/{name}/commands', 10) for name in self.manual_names]
         self._follow_pub = self.create_publisher(JointState, '/host_control/follow_controller/target', 1)
         self._list = self.create_client(ListControllers, '/host_control/controller_manager/list_controllers')
         self._switch = self.create_client(SwitchController, '/host_control/controller_manager/switch_controller')
         self._params = self.create_client(GetParameters, '/host_control/gravity_controller/get_parameters')
         self._action = ActionClient(self, FollowJointTrajectory, ACTION)
+        self._feedback_lock = threading.Lock()
+        self._feedback_group = MutuallyExclusiveCallbackGroup()
+        self.create_subscription(
+            JointState, '/host_control/joint_states', self._on_feedback,
+            qos_profile_sensor_data, callback_group=self._feedback_group)
         for kind, topic, callback, qos in (
-            (MotorCommandArray, '/control/setpoint', self._on_setpoint, 10),
             (JointState, '/control/joint_target', self._on_joint_target, 1),
-            (MotorTrajectory, '/control/trajectory', self._on_motor_trajectory, 64),
-            (MotorTrajectory, '/control/trajectory_raw', lambda msg: self._on_motor_trajectory(msg, linear=True), 64),
-            (JointTrajectory, '/arm_controller/joint_trajectory', self._on_joint_trajectory, 10),
-            (Empty, '/control/stop', lambda _: self._stop('显式停止'), 10),
+            (JointTrajectory, '/control/trajectory', self._on_joint_trajectory, 10),
+            (Empty, '/control/stop', self._on_stop_topic, 10),
             (Int32, '/client_count', self._on_client_count, latched),
-            (JointState, '/host_control/joint_states', self._on_feedback, qos_profile_sensor_data),
             (DiagnosticArray, '/host_control/follow_controller/diagnostics',
              self._on_follow_diagnostics, 10),
         ):
@@ -581,7 +805,7 @@ class WorkbenchControl(Node):
                     if parameter.name == 'joint_limits_json':
                         if len(parameters) != 1:
                             raise ValueError('关节限位需单独原子提交')
-                        if self._busy or self._runs or self._assembly.pending or self._active:
+                        if self._busy or self._runs or self._active:
                             raise ValueError('请先停止控制器，再修改关节限位')
                         self._sync_hardware_limits(self._joint_limits(parameter.value))
             except ValueError as error:
@@ -603,12 +827,25 @@ class WorkbenchControl(Node):
         if not self._limits_confirmed:
             raise ValueError('主机硬件限位更新未确认，请重新提交限位')
         self._apply_joint_limits()
-        if self._feedback is None or time.monotonic() - self._feedback_received > FRESH_NS / 10**9:
+        with self._feedback_lock:
+            feedback, received = self._feedback, self._feedback_received
+        if feedback is None or time.monotonic() - received > FRESH_NS / 10**9:
             raise ValueError('缺少新鲜关节反馈')
-        return self.mapping.feedback(self._feedback, self.get_clock().now().nanoseconds)
+        now_ns = self.get_clock().now().nanoseconds
+        try:
+            return self.mapping.feedback(feedback, now_ns)
+        except ValueError as error:
+            if str(error) == '输入或反馈时间戳无效、过期或来自未来':
+                fb_stamp = stamp_ns(feedback.header.stamp)
+                self.get_logger().warning(
+                    f'feedback 时间戳拒绝: stamp={fb_stamp} now={now_ns} '
+                    f'diff_ms={(now_ns - fb_stamp) / 1e6:+.1f}')
+            raise
 
     def _on_feedback(self, message):
-        self._feedback, self._feedback_received = message, time.monotonic()
+        now = time.monotonic()
+        with self._feedback_lock:
+            self._feedback, self._feedback_received = message, now
         if self._joint_pub:
             self._joint_pub.publish(message)
 
@@ -625,18 +862,8 @@ class WorkbenchControl(Node):
             self._receipt(state)
         self._publish_status()
 
-    def _on_setpoint(self, message):
-        if message.count == 0 and not message.targets:
-            self._stop('空手动快照停止')
-            return
-        if message.sync_time_ns < self._input_floor_ns:
-            self._reject_input('目标早于最近一次停止')
-            return
-        self._submit('manual', lambda measured, now: self.mapping.manual(message, measured, now))
-
-    def _state(self, trajectory_id, ids, total_ms=0):
-        return MotorTrajectoryState(trajectory_id=trajectory_id, target_ids=list(ids),
-                                     target_count=len(ids), total_ms=total_ms)
+    def _state(self, trajectory_id, total_ms=0):
+        return TrajectoryStateSnapshot(trajectory_id=trajectory_id, total_ms=total_ms)
 
     def _clear_follow(self):
         self._pending_follow = None
@@ -658,8 +885,8 @@ class WorkbenchControl(Node):
     def _on_joint_target(self, message):
         try:
             if self._connected_clients == 0 or self._stopping or (
-                    self._busy and self._pending_follow is None) or self._assembly.pending:
-                raise ValueError('客户端归零、其他控制切换或轨迹收集尚未完成')
+                    self._busy and self._pending_follow is None):
+                raise ValueError('客户端归零或其他控制切换尚未完成')
             stamp = stamp_ns(message.header.stamp)
             if stamp < self._input_floor_ns or stamp <= self._follow_stamp:
                 raise ValueError('连续目标早于停止或已接收目标')
@@ -682,64 +909,67 @@ class WorkbenchControl(Node):
         elif not self._submit('follow', self._build_follow):
             self._clear_follow()
 
-    def _on_motor_trajectory(self, message, *, linear=False):
-        if message.count == 0 and message.target_count == 0 and not message.points and not message.target_ids:
-            self._cancel()
-            return
-        state = self._state(message.trajectory_id, message.target_ids)
-        try:
-            if self._connected_clients == 0 or self._stopping or self._busy:
-                raise ValueError('客户端归零或控制切换尚未完成')
-            if message.sync_time_ns < self._input_floor_ns:
-                raise ValueError('轨迹早于最近一次停止')
-            self._measured()
-            plan = self._assembly.add(message, self.get_clock().now().nanoseconds,
-                                      time.monotonic(), linear=linear)
-            if plan is None:
-                self._reason = '轨迹分段收集中'
-                self._publish_status()
-                return
-        except ValueError as error:
-            self._assembly.abort()
-            self._reject_input(error, state)
-            return
-        self._id = max(self._id, plan.trajectory_id)
-        self._submit('trajectory', lambda measured, now: self.mapping.motor_trajectory(
-            plan, measured, now, linear=linear), state, raw_linear=linear)
-
     def _on_joint_trajectory(self, message):
         if not message.joint_names and not message.points:
             self._cancel()
             return
         identity = message.header.frame_id
+        raw_linear = False
         trajectory_id = self._id % 0xFFFFFFFF + 1
-        # 调试页保留自己的播放编号，以现有 trajectory_state 跟踪 JTC 终态。
-        if identity.startswith('workbench-trajectory/'):
-            value = identity.removeprefix('workbench-trajectory/')
-            if (not 1 <= len(value) <= 10 or not value.isascii() or not value.isdigit()
-                    or not 0 < int(value) <= 0xFFFFFFFF):
-                self._reject_input('关节轨迹播放编号必须为非零 uint32')
-                return
-            trajectory_id = int(value)
-            if any(run.state.trajectory_id == trajectory_id for run in self._runs):
-                self._reject_input('关节轨迹播放编号正在使用')
-                return
+        for prefix, is_linear in (('workbench-trajectory-linear/', True), ('workbench-trajectory/', False)):
+            if identity.startswith(prefix):
+                value = identity.removeprefix(prefix)
+                if (not 1 <= len(value) <= 10 or not value.isascii() or not value.isdigit()
+                        or not 0 < int(value) <= 0xFFFFFFFF):
+                    self._reject_input('关节轨迹播放编号必须为非零 uint32')
+                    return
+                trajectory_id = int(value)
+                raw_linear = is_linear
+                if any(run.state.trajectory_id == trajectory_id for run in self._runs):
+                    self._reject_input('关节轨迹播放编号正在使用')
+                    return
+                break
         self._id = trajectory_id
-        state = self._state(trajectory_id, sorted(self.mapping.ids.values()))
+        state = self._state(trajectory_id)
         if not stamp_ns(message.header.stamp) or stamp_ns(message.header.stamp) < self._input_floor_ns:
             self._reject_input('轨迹早于最近一次停止', state)
             return
         received_at_ns = self.get_clock().now().nanoseconds
-        # 输入新鲜度以接收时刻验收；控制器切换后仍由 _measured 校验最新反馈。
-        self._submit('trajectory', lambda measured, now: self.mapping.joint_trajectory(
-            message, measured, received_at_ns), state)
+        in_stamp = stamp_ns(message.header.stamp)
+        cached = None
+
+        def build(measured, _now):
+            nonlocal cached
+            if cached is not None:
+                output, first_point_values, first_dt_s = cached
+                self.mapping._interval(measured, first_point_values, first_dt_s, linear=False)
+                return output
+            try:
+                output = self.mapping.joint_trajectory(message, measured, received_at_ns)
+            except ValueError as error:
+                if str(error) == '输入或反馈时间戳无效、过期或来自未来':
+                    self.get_logger().warning(
+                        f'trajectory input 时间戳拒绝: stamp={in_stamp} now={received_at_ns} '
+                        f'diff_ms={(received_at_ns - in_stamp) / 1e6:+.1f}')
+                raise
+            if (set(message.joint_names) == set(self.mapping.joint_names)
+                    and output.points
+                    and stamp_ns(output.points[0].time_from_start) > 0):
+                pt0 = output.points[0]
+                first_point_values = {
+                    name: Axis(pt0.positions[i], pt0.velocities[i] if pt0.velocities else 0.)
+                    for i, name in enumerate(output.joint_names)
+                }
+                first_dt_s = stamp_ns(pt0.time_from_start) / 10**9
+                cached = (output, first_point_values, first_dt_s)
+            return output
+
+        self._submit('trajectory', build, state, raw_linear=raw_linear)
 
     def _submit(self, mode, build, state=None, *, raw_linear=False):
         try:
             if self._connected_clients == 0 or self._stopping or self._busy:
                 raise ValueError('客户端归零或控制切换尚未完成')
-            if self._assembly.pending:
-                raise ValueError('尚有未收齐轨迹分段')
             result = build(self._measured(), self.get_clock().now().nanoseconds)
             if state:
                 state.total_ms = stamp_ns(result.points[-1].time_from_start) // 10**6
@@ -773,22 +1003,16 @@ class WorkbenchControl(Node):
         controllers = {c.name: c for c in response.controller}
         if not set(self.motion_names).issubset(controllers):
             raise ValueError('controller manager 缺少配置的运动控制器')
-        desired = (self.manual_names if mode == 'manual' else ['follow_controller', 'gravity_controller'] if mode == 'follow'
+        desired = (['follow_controller', 'gravity_controller'] if mode == 'follow'
                    else ['trajectory_controller', 'gravity_controller'])
         for name in desired:
             c = controllers[name]
             if c.state not in ('active', 'inactive'):
                 raise ValueError(f'{name} 未配置或不可切换')
-            if name in self.manual_names:
-                joint = self.mapping.joint_names[self.manual_names.index(name)]
-                expected = [joint + '/' + channel for channel in CHANNELS]
-                if list(c.required_command_interfaces) != expected:
-                    raise ValueError(f'{name} P/V/E 接口顺序与模型不一致')
-            else:
-                expected = [j + '/' + channel for j in self.mapping.joint_names for channel in
-                            (('effort',) if name == 'gravity_controller' else ('position', 'velocity'))]
-                if set(c.required_command_interfaces) != set(expected):
-                    raise ValueError(f'{name} 接口集合与模型不一致')
+            expected = [j + '/' + channel for j in self.mapping.joint_names for channel in
+                        (('effort',) if name == 'gravity_controller' else ('position', 'velocity'))]
+            if set(c.required_command_interfaces) != set(expected):
+                raise ValueError(f'{name} 接口集合与模型不一致')
             if c.state == 'active' and set(c.claimed_interfaces) != set(expected):
                 raise ValueError(f'{name} 实际占用接口与配置不一致')
         return controllers, desired
@@ -831,12 +1055,6 @@ class WorkbenchControl(Node):
         if mode == 'follow':
             self._publish_follow(output)
             self._busy, self._mode, self._reason = False, mode, '连续目标跟随中'
-        elif mode == 'manual':
-            if not all(p.get_subscription_count() for p in self._manual_pubs):
-                raise ValueError('手动控制器 commands 订阅不可达')
-            for i, publisher in enumerate(self._manual_pubs):
-                publisher.publish(Float64MultiArray(data=output[3*i:3*i+3]))
-            self._busy, self._mode, self._reason = False, mode, '手动控制器已激活，已发送单次目标'
         else:
             if not self._action.server_is_ready():
                 raise ValueError('JTC action 服务不可达')
@@ -952,7 +1170,6 @@ class WorkbenchControl(Node):
             self._cancel_one(run, epoch, canceled)
 
     def _cancel(self):
-        self._abort_assembly()
         if self._mode == 'follow':
             self._stop('取消连续目标')
             return
@@ -966,14 +1183,22 @@ class WorkbenchControl(Node):
             self._publish_status()
         self._cancel_handles(self._epoch, done)
 
-    def _stop(self, reason, reject=''):
+    def _on_stop_topic(self, _message):
+        if self._internal_stop_emitted:
+            self._internal_stop_emitted = False
+            return
+        self._stop('显式停止', broadcast=False)
+
+    def _stop(self, reason, reject='', *, broadcast=True):
         self._clear_follow()
         self._input_floor_ns = self.get_clock().now().nanoseconds + 50_000_000
         if not self._stopping:
             self._stop_deadline = time.monotonic() + RPC_TIMEOUT
         self._stop_confirmed = False
         self._epoch += 1
-        self._hardware_stop_pub.publish(Empty())
+        if broadcast:
+            self._internal_stop_emitted = True
+            self._stop_pub.publish(Empty())
         self._stop_policy_id = self._epoch % 0xFFFFFFFF or 1
         self._busy = self._stopping = True
         self._mode, self._reason, self._reject = 'stopping', reason, reject
@@ -984,12 +1209,6 @@ class WorkbenchControl(Node):
                 self._finish(run, False, reason)
         self._request_stop()
         self._publish_status()
-
-    def _abort_assembly(self):
-        if self._assembly.pending:
-            plan = self._assembly.pending
-            self._receipt(self._state(plan.trajectory_id, plan.target_ids))
-        self._assembly.abort()
 
     def _request_stop(self):
         if not self._stopping:
@@ -1098,12 +1317,9 @@ class WorkbenchControl(Node):
                         record[5](reason)
                     else:
                         self._stop(reason, reason)
-        if self._assembly.pending and now - self._assembly.started > ASSEMBLY_TIMEOUT:
-            pending = self._assembly.pending
-            self._assembly.abort()
-            self._reject_input('轨迹分段收集超时', self._state(pending.trajectory_id, pending.target_ids))
-        if self.mapping.dynamic_joint_names:
-            self._publish_status()
+        if self.mapping.dynamic_joint_names and now - self._last_dynamic_check >= DYNAMIC_STATUS_PERIOD:
+            self._last_dynamic_check = now
+            self._publish_status(only_if_changed=True)
 
     def _poll(self):
         epoch = self._epoch
@@ -1123,15 +1339,13 @@ class WorkbenchControl(Node):
                 if not self._active:
                     self._mode = 'stopped'
                     self._clear_follow()
-                elif set(self._active) == set(self.manual_names):
-                    self._mode = 'manual'
                 elif set(self._active) == {'follow_controller', 'gravity_controller'}:
                     self._mode = 'follow'
                 elif set(self._active) == {'trajectory_controller', 'gravity_controller'}:
                     self._mode = 'trajectory'
                 else:
                     raise ValueError('检测到非互斥的 active 控制器集合')
-                self._publish_status()
+                self._publish_status(only_if_changed=True)
             self._watch(self._poll_future, epoch, '读取控制器状态', observed)
         if self._params.service_is_ready() and (self._params_future is None or self._params_future.done()):
             self._params_future = self._params.call_async(GetParameters.Request(names=['enabled', 'effort_gain']))
@@ -1143,7 +1357,7 @@ class WorkbenchControl(Node):
                         self._gravity_enabled = enabled.bool_value
                     if gain.type == ParameterType.PARAMETER_DOUBLE and math.isfinite(gain.double_value):
                         self._effort_gain = gain.double_value
-                self._publish_status()
+                self._publish_status(only_if_changed=True)
             self._watch(self._params_future, None, '读取重力配置', parameters,
                         on_error=lambda _: self._unknown_parameters())
         elif not self._params.service_is_ready():
@@ -1154,10 +1368,31 @@ class WorkbenchControl(Node):
         self._gravity_enabled = self._effort_gain = None
 
     def _receipt(self, state):
-        state.sync_time_ns = self.get_clock().now().nanoseconds
-        self._trajectory_pub.publish(state)
+        self._last_trajectory_state = TrajectoryStateSnapshot(
+            trajectory_id=state.trajectory_id,
+            active=state.active,
+            completed=state.completed,
+            elapsed_ms=state.elapsed_ms,
+            total_ms=state.total_ms,
+        )
 
-    def _publish_status(self):
+    def _dynamic_limits_changed(self, limits):
+        """Return True if any coupled dynamic joint bound shifted beyond deadband."""
+        if self._last_dynamic_limits is None:
+            return True
+        for name in self.mapping.dynamic_joint_names:
+            prev = self._last_dynamic_limits.get(name)
+            curr = limits.get(name)
+            if prev is None or curr is None:
+                return True
+            for p_val, c_val in zip(prev, curr):
+                if math.isnan(p_val) != math.isnan(c_val):
+                    return True
+                if not math.isnan(c_val) and abs(c_val - p_val) > DYNAMIC_LIMIT_EPS:
+                    return True
+        return False
+
+    def _publish_status(self, *, only_if_changed=False):
         feedback_error = ''
         try:
             measured = self._measured()
@@ -1178,48 +1413,74 @@ class WorkbenchControl(Node):
             except ValueError as error:
                 limits.update(dict.fromkeys(joints, (math.nan, math.nan)))
                 limit_errors.update(dict.fromkeys(joints, str(error)))
+        traj = self._last_trajectory_state
         status = dict(model=self.model_name, joint_names=self.mapping.joint_names,
             mode=self._mode, reason=self._reason, reject=self._reject,
-            output_topic='/motor/host_command_array', trajectory_output_topic=ACTION,
+            output_topic='/motor/command', trajectory_output_topic=ACTION,
             gravity_enabled=self._gravity_enabled, effort_gain=self._effort_gain,
             active_controllers=self._active, feedback_fresh=feedback_fresh,
             controllers_ready=self._controllers_ready,
             joint_trajectory_ids=True,
             pending_goal_ids=[run.state.trajectory_id for run in self._runs if run.submitted],
+            trajectory_state=dict(
+                trajectory_id=traj.trajectory_id,
+                active=traj.active,
+                completed=traj.completed,
+                elapsed_ms=traj.elapsed_ms,
+                total_ms=traj.total_ms,
+            ),
             stop_policy_request_id=self._stop_policy_id,
             safety_note=('已请求主机停止；MCU 撤权由桥接层确认，恢复运动前需显式重新使能'
                          if self._stop_policy_id else ''))
-        self._status_pub.publish(String(data=json.dumps(status, ensure_ascii=False)))
-        self._transmission_pub.publish(String(data=json.dumps(dict(status,
-            driver_file=self.config_file, trajectory_enabled=True,
-            control_groups=[{
-                'name': group.name,
-                'joints': list(group.joints),
-                'motors': [{'id': self.mapping.model.actuator_ids[name]}
-                           for name in group.actuators],
-            } for group in self.mapping.model.groups],
-            policy_defaults=self.mapping.policy_defaults,
+        status_json = json.dumps(status, ensure_ascii=False)
+        dynamic_limits = {name: limits[name] for name in self.mapping.dynamic_joint_names}
+        if (only_if_changed and status_json == self._last_status_json
+                and limit_errors == self._last_limit_errors
+                and not self._dynamic_limits_changed(dynamic_limits)):
+            return
+        self._last_status_json = status_json
+        self._last_limit_errors = dict(limit_errors)
+        self._last_dynamic_limits = dynamic_limits
+        self._status_pub.publish(String(data=status_json))
+        self._transmission_pub.publish(String(data=build_transmission_status(
+            model=self.model_name,
+            driver_file=self.config_file,
+            trajectory_enabled=True,
+            control_state_source='ros2_control',
             control_service=self.get_fully_qualified_name() + '/set_parameters_atomically',
-            dynamic_joint_names=self.mapping.dynamic_joint_names,
-            joint_limit_error='；'.join(dict.fromkeys(limit_errors.values())),
-            joint_limit_errors=limit_errors,
-            joint_velocity_limits={name: bounds[2] for name, bounds in self.mapping.limits.items()},
-            joint_limits={name: {'lower': lower if math.isfinite(lower) else None,
-                                 'upper': upper if math.isfinite(upper) else None}
-                          for name, (lower, upper) in limits.items()},
-            trajectory_topic='/control/trajectory', control_state_source='ros2_control',
-            last_error=self._reject), ensure_ascii=False)))
+            joint_names=self.mapping.joint_names,
+            joint_limits=limits,
+            last_error=self._reject,
+            extra={**status,
+                   'control_groups': [{
+                       'name': group.name,
+                       'joints': list(group.joints),
+                       'motors': [{'id': self.mapping.model.actuator_ids[name]}
+                                  for name in group.actuators],
+                   } for group in self.mapping.model.groups],
+                   'policy_defaults': self.mapping.policy_defaults,
+                   'dynamic_joint_names': self.mapping.dynamic_joint_names,
+                   'joint_limit_error': '；'.join(dict.fromkeys(limit_errors.values())),
+                   'joint_limit_errors': limit_errors,
+                   'joint_velocity_limits': {name: bounds[2] for name, bounds in self.mapping.limits.items()},
+                   'trajectory_topic': '/control/trajectory'},
+        )))
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = None
+    executor = None
     try:
         node = WorkbenchControl()
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        if executor:
+            executor.shutdown()
         if node:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             node._action.destroy()

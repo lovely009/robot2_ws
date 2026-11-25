@@ -139,10 +139,6 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   defaults.fault_latching_enabled =
       declare_parameter<bool>("fault_latching_enabled",
                               defaults.fault_latching_enabled);
-  defaults.drive_state_topic = declare_parameter<std::string>(
-      "drive_state_topic", defaults.drive_state_topic);
-  defaults.control_gate_topic = declare_parameter<std::string>(
-      "control_gate_topic", defaults.control_gate_topic);
   defaults.reset_fault_service = declare_parameter<std::string>(
       "reset_fault_service", defaults.reset_fault_service);
   defaults.joint_states_topic = declare_parameter<std::string>(
@@ -191,10 +187,6 @@ MotorSimNode::MotorSimNode(const rclcpp::NodeOptions &options,
   defaults.fault_latching_enabled =
       declare_parameter<bool>("fault_latching_enabled",
                               defaults.fault_latching_enabled);
-  defaults.drive_state_topic = declare_parameter<std::string>(
-      "drive_state_topic", defaults.drive_state_topic);
-  defaults.control_gate_topic = declare_parameter<std::string>(
-      "control_gate_topic", defaults.control_gate_topic);
   defaults.reset_fault_service = declare_parameter<std::string>(
       "reset_fault_service", defaults.reset_fault_service);
   defaults.joint_states_topic = declare_parameter<std::string>(
@@ -298,8 +290,6 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
 
   effort_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
       defaults.effort_topic, 10);
-  drive_state_publisher_ = create_publisher<std_msgs::msg::String>(
-      defaults.drive_state_topic, 10);
   diagnostic_publisher_ =
       create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
           defaults.diagnostics_topic, 10);
@@ -307,11 +297,6 @@ void MotorSimNode::initialize(SystemConfig config, TransportMap transports,
       defaults.joint_states_topic, 10,
       [this](const sensor_msgs::msg::JointState &message) {
         joint_state_callback(message);
-      });
-  control_gate_subscription_ = create_subscription<std_msgs::msg::Bool>(
-      defaults.control_gate_topic, 10,
-      [this](const std_msgs::msg::Bool &message) {
-        control_gate_callback(message);
       });
   reset_fault_service_ = create_service<std_srvs::srv::Trigger>(
       defaults.reset_fault_service,
@@ -479,6 +464,7 @@ bool MotorSimNode::handle_sdo_request(const std::string &bus,
 void MotorSimNode::control_tick() {
   const auto now = FrameRouter::Clock::now();
   update_actuator_states();
+  sync_control_gate();
   last_efforts_ = router_->compute_efforts(
       joint_states_,
       1.0 / static_cast<double>(router_->config().timing.control_hz), now);
@@ -488,7 +474,6 @@ void MotorSimNode::control_tick() {
     }
   }
   publish_efforts(last_efforts_);
-  publish_drive_state();
   const auto safety = router_->safety_state();
   if (safety.latched) {
     publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::ERROR,
@@ -561,17 +546,18 @@ void MotorSimNode::publish_efforts(const std::vector<double> &efforts) {
   effort_publisher_->publish(message);
 }
 
-void MotorSimNode::publish_drive_state() {
-  std_msgs::msg::String message;
-  message.data = std::string(core::drive_state_name(router_->drive_state()));
-  drive_state_publisher_->publish(message);
-}
-
-void MotorSimNode::control_gate_callback(const std_msgs::msg::Bool &message) {
-  control_gate_open_ = message.data;
-  router_->set_control_gate(message.data);
-  last_transition_reason_ = message.data ? "controller gate opened"
-                                         : "controller gate closed";
+void MotorSimNode::sync_control_gate() {
+  const auto state = router_->drive_state();
+  const bool should_open =
+      state == core::DriveState::ReadyForControl ||
+      state == core::DriveState::MotorControlActive;
+  if (should_open == control_gate_open_) {
+    return;
+  }
+  control_gate_open_ = should_open;
+  router_->set_control_gate(should_open);
+  last_transition_reason_ =
+      should_open ? "controller gate opened" : "controller gate closed";
 }
 
 void MotorSimNode::reset_fault_callback(
@@ -601,7 +587,7 @@ void MotorSimNode::reset_fault_callback(
   if (!response->success) {
     reset_rejection_reason_ = response->message;
   }
-  publish_drive_state();
+  sync_control_gate();
 }
 
 void MotorSimNode::publish_diagnostic(const int level,
@@ -642,7 +628,7 @@ void MotorSimNode::handle_disconnect(const std::string &bus) {
   router_->observe_disconnect(bus);
   last_efforts_.assign(router_->config().motors.size(), 0.0);
   publish_efforts(last_efforts_);
-  publish_drive_state();
+  sync_control_gate();
   publish_diagnostic(diagnostic_msgs::msg::DiagnosticStatus::ERROR,
                      "serial bus '" + bus + "' disconnected; shutting down");
   if (control_timer_) {

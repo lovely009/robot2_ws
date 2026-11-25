@@ -55,8 +55,8 @@ def wire_budget():
 
 
 def measurements():
-    types = ('AgentCommand', 'AgentMotion', 'AgentTrajectoryRequest',
-             'AgentConfigRequest', 'AgentStatus', 'AgentInfo')
+    types = ('MotorCommandArray', 'MotorMotionStateArray', 'MotorSystemState',
+             'MotorDeviceInfo', 'MotorEvent', 'ConfigRequest')
     values = {name: len(serialize_message(maximum_message(
         get_message('can_bridge_msgs/msg/' + name)))) for name in types}
     for name in ('Imu', 'Temperature'):

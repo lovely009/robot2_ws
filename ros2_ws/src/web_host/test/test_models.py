@@ -9,6 +9,7 @@ import pytest
 from web_host.models import (
     enumerate_arm_models,
     has_joint_mapping_source,
+    model_motor_params,
     motor_library,
     model_transmissions,
     simulation_model_joints,
@@ -36,8 +37,24 @@ def test_full_body_topology_covers_all_confirmed_ids_without_enabling_hardware()
     assert len(coupled) == 6 and len(groups) == 31
     waist = next(g for g in coupled if g['name'] == 'waist')
     assert [m['id'] for m in waist['motors']] == [2, 3]
-    assert waist['joints'] == ['BN_Spine_pitch', 'BN_Spine_roll']
+    assert waist['joints'] == ['waist_pitch', 'waist_roll']
     assert all(not g['direct_mapping'] for g in groups)
+
+
+def test_model_motor_params_returns_37_excel_motors():
+    from collections import Counter
+    root = PKG.parent / 'robot_description/models'
+    payload = model_motor_params('full_body_robot', root)
+    assert payload['model'] == 'full_body_robot'
+    assert len(payload['motors']) == 37
+    assert Counter(m['template'] for m in payload['motors']) == {
+        'vaxor_2550': 6, 'cerb_r58_101': 15, 'cerb_r48_101': 16,
+    }
+    by_id = {m['id']: m['joint'] for m in payload['motors']}
+    assert by_id[1] == 'waist_yaw'
+    assert by_id[2] == 'waist_pitch'
+    assert by_id[3] == 'waist_roll'
+    assert by_id[37] == 'right_ankle_roll'
 
 
 @pytest.mark.parametrize('fault', ['unconfirmed_id', 'duplicate_id', 'boolean_id',

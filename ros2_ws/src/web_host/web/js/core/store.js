@@ -26,6 +26,7 @@ export const store = {
   motors: new Map(),
   controlStates: createControlStateCache(),
   agentWireStatus: null,
+  mcuLifecycle: null,
   lastError: 0,
   lastErrorMotor: -1,
   sysStatus: {refresh_seq: 0, set_zero_seq: 0, clear_fault_seq: 0,
@@ -147,7 +148,7 @@ const optional = (snapshot, key, valid) => snapshot[key] === undefined || valid(
 export function applyCommandStatus(snapshot) {
   const valid = object(snapshot) && typeof snapshot.model === 'string' && snapshot.model.trim()
     && joints(snapshot.joint_names) && typeof snapshot.mode === 'string'
-    && snapshot.output_topic === '/motor/host_command_array'
+    && snapshot.output_topic === '/motor/command'
     && snapshot.trajectory_output_topic === '/host_control/trajectory_controller/follow_joint_trajectory'
     && typeof snapshot.feedback_fresh === 'boolean' && typeof snapshot.controllers_ready === 'boolean'
     && Array.isArray(snapshot.active_controllers) && snapshot.active_controllers.every(name => typeof name === 'string')

@@ -9,7 +9,6 @@
 
 #include "control_mailbox.h"
 #include "motor_control.h"
-#include "agent_trajectory.h"
 #include "control_lease.h"
 
 #ifdef __cplusplus
@@ -88,7 +87,6 @@ typedef struct {
   motor_control_diagnostics_t kernel;
   // mailbox 拒绝计数：授权/会话不满足或载荷非法，未进入内核。
   uint32_t mailbox_rejected_command;
-  uint32_t mailbox_rejected_trajectory;
   uint32_t mailbox_rejected_policy;
   uint32_t ring_drop[MOTOR_CONTROL_MAX_BUSES];
   uint32_t rx_hw_lost[MOTOR_CONTROL_MAX_BUSES]; // 硬件 FIFO0 MESSAGE_LOST
@@ -96,9 +94,6 @@ typedef struct {
   uint32_t heap_free;
 } motor_rt_diagnostics_t;
 void motor_rt_copy_diagnostics(motor_rt_diagnostics_t *out);
-
-// 轨迹执行状态副本（内核类型直接暴露：无协议指针，无需镜像）。
-void motor_rt_copy_trajectory_state(motor_control_trajectory_state_t *out);
 
 #ifdef __cplusplus
 }

@@ -28,16 +28,14 @@ it("默认半身模型的初始映射包含两侧全部电机", async () => {
 it("控制话题使用主机控制器入口和对应消息类型", async () => {
   const { TOPICS } = await import("../../web/js/core/format.js");
   expect(TOPICS).toMatchObject({
-    setpoint: { name: "/control/setpoint", type: "can_bridge_msgs/msg/MotorCommandArray" },
-    trajectory: { name: "/control/trajectory", type: "can_bridge_msgs/msg/MotorTrajectory" },
-    rawTrajectory: { name: "/control/trajectory_raw", type: "can_bridge_msgs/msg/MotorTrajectory" },
-    convertedTrajectory: { name: "/control/trajectory", type: "can_bridge_msgs/msg/MotorTrajectory" },
+    state: { name: "/motor/state", type: "can_bridge_msgs/msg/MotorSystemState" },
+    motion: { name: "/motor/motion", type: "can_bridge_msgs/msg/MotorMotionStateArray" },
+    events: { name: "/motor/events", type: "can_bridge_msgs/msg/MotorEvent" },
+    temp: { name: "/imu/temp_raw", type: "sensor_msgs/msg/Temperature" },
+    trajectory: { name: "/control/trajectory", type: "trajectory_msgs/msg/JointTrajectory" },
     jointTarget: { name: "/control/joint_target", type: "sensor_msgs/msg/JointState" },
     commandStatus: { name: "/control/status", type: "std_msgs/msg/String" },
-    trajectoryState: { name: "/control/trajectory_state", type: "can_bridge_msgs/msg/MotorTrajectoryState" },
     stop: { name: "/control/stop", type: "std_msgs/msg/Empty" },
-    policy: { name: "/motor/policy_array", type: "can_bridge_msgs/msg/MotorPolicyArray" },
-    sysCmd: { name: "/motor/system_command", type: "can_bridge_msgs/msg/SystemCommand" },
   });
 });
 

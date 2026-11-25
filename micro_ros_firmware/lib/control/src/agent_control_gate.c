@@ -2,14 +2,32 @@
 #include "session_sync.h"
 #include <string.h>
 
+static void command_guard_reset(control_command_guard_t *g, uint64_t session_id) {
+  g->session_id = session_id;
+  g->last_sequence = 0U;
+  g->has_command = false;
+}
+
+static bool command_guard_allows(const control_command_guard_t *g,
+    uint64_t session_id, uint32_t sequence) {
+  if (session_id == 0U || session_id != g->session_id || sequence == 0U) {
+    return false;
+  }
+  return !g->has_command || sequence > g->last_sequence;
+}
+
+static void command_guard_commit(control_command_guard_t *g, uint32_t sequence) {
+  g->last_sequence = sequence;
+  g->has_command = true;
+}
+
 void agent_gate_begin_session(agent_control_gate_t *gate,
     control_mailbox_t *mailbox, uint64_t session_id) {
   memset(gate, 0, sizeof(*gate));
-  wire_command_guard_reset(&gate->command_guard, session_id);
+  command_guard_reset(&gate->command_guard, session_id);
   control_lease_set_session(&gate->authority, session_id);
   control_mailbox_clear_command(mailbox);
   control_mailbox_clear_policy(mailbox);
-  control_mailbox_clear_trajectory(mailbox);
   control_mailbox_clear_config(mailbox);
   gate->session_pending = true;
 }
@@ -43,7 +61,7 @@ bool agent_gate_submit_command(agent_control_gate_t *gate,
   if (snapshot == NULL || (snapshot->target_count &&
       !control_lease_allows(&gate->authority, snapshot->lease_id, now_ms)) || !gate->link.connected || !gate->link.clock_valid ||
       gate->link.stop_pending || !agent_deadline_valid(now_ms, snapshot->valid_until_tick_ms) ||
-      !wire_command_guard_allows(&gate->command_guard, snapshot->session_id, snapshot->sequence)) {
+      !command_guard_allows(&gate->command_guard, snapshot->session_id, snapshot->sequence)) {
     ++mailbox->command_rejected_count;
     return false;
   }
@@ -60,7 +78,7 @@ bool agent_gate_submit_command(agent_control_gate_t *gate,
   // 心跳必须在撤权状态仍可受理，但它不改变运动授权。
   if (!control_command_mailbox_publish(&mailbox->command, snapshot)) return false;
   gate->authority = authority;
-  wire_command_guard_commit(&gate->command_guard, snapshot->sequence);
+  command_guard_commit(&gate->command_guard, snapshot->sequence);
   agent_link_accept_command(&gate->link, snapshot->sequence, now_ms);
   return true;
 }
@@ -106,7 +124,7 @@ uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbo
   const uint8_t action = agent_link_poll(&gate->link, now_ms, connected, clock_valid);
   if (action & AGENT_LINK_REVOKE) {
     if (gate->authority.active && (!connected || !clock_valid ||
-        (gate->link.have_command && now_ms - gate->link.command_tick_ms > 100U))) {
+        (gate->link.have_command && now_ms - gate->link.command_tick_ms > AGENT_COMMAND_REVOKE_MS))) {
       control_lease_revoke(&gate->authority);
       (void)control_lease_take_revocation(&gate->authority); // this barrier already services it
     }
@@ -114,7 +132,6 @@ uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbo
     gate->kernel_authorized = false;
     control_mailbox_clear_command(mailbox);
     discard_policy(mailbox, ctx, now_ms);
-    control_mailbox_clear_trajectory(mailbox);
   }
   if (gate->disable_pending_mask != 0U) {
     motor_control_disable_mask(ctx, gate->disable_pending_mask, now_ms);
@@ -129,7 +146,6 @@ uint8_t agent_gate_service(agent_control_gate_t *gate, control_mailbox_t *mailbo
       gate->kernel_authorized && gate->link.authorized, now_ms);
   if (action & AGENT_LINK_SOFT_STOP) {
     motor_control_soft_stop_all(ctx, now_ms);
-    control_mailbox_clear_trajectory(mailbox);
   }
   return action;
 }

@@ -14,8 +14,8 @@ import rclpy
 from rclpy.node import Node
 
 from .actions import bvh_directory, list_actions, read_action, save_action
-from .models import (enumerate_arm_models, model_transmissions,
-                     motor_library)
+from .models import (enumerate_arm_models, model_motor_params,
+                     model_transmissions, motor_library)
 from .motion import MotionJobs, handle_motion
 from .motion_catalog import handle_motion_catalog
 from .motion_playback import handle_motion_playback
@@ -206,6 +206,16 @@ def main(args=None):
                 # 型号库（减速比等）：设备页据此把关节侧量折算成设备端原值
                 # （cnt / mA / 电机端 RPM）。取不到返回空表，页面不显示该列。
                 self._send_json(200, {'motor_types': motor_library()})
+                return
+            if path == '/api/motor-params':
+                requested = (parse_qs(
+                    urlsplit(self.path).query).get('model') or [''])[0]
+                try:
+                    payload = model_motor_params(requested, models_dir)
+                except ValueError as exc:
+                    self._send_json(404, {'error': str(exc)})
+                    return
+                self._send_json(200, payload)
                 return
             if path == '/api/model-transmissions':
                 # 传动组是关节与电机的权威关联。

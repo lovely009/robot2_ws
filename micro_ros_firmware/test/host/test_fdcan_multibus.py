@@ -676,3 +676,157 @@ def test_group_loop_timing_includes_control_service_delay():
     assert timing['control_service_ms']['last'] >= 20
     assert timing['loop_work_ms']['count'] == 1
     assert timing['loop_work_ms']['last'] >= timing['control_service_ms']['last']
+
+
+def test_vaxor_reply_coalesces_duplicate_pending_replies_per_motor():
+    import fdcan_motor_sim as module
+    source = SimTime()
+    clock = module.HostEpochClock(source.monotonic_ns, source.time_ns)
+    transport = FakeFrameTransport()
+    sim = module.CanMotorSim(None, [], [13, 14], 20, None,
+                             bus_transport=transport, clock=clock)
+    try:
+        sim.handle_sdo(1, bytes.fromhex('4008100000000000'))
+        for step in range(4):
+            source.advance_ms(2)
+            sim._enqueue_rx((0x501 + 4 * 13, bytes(12), True))
+            sim._enqueue_rx((0x501 + 4 * 14, bytes(12), True))
+            sim._drain_rx()
+        assert len(sim._tx_control) == 2
+        assert [item['model'].id for item in sim._tx_control] == [13, 14]
+        assert sim._tx_control[0]['timing']['trigger']['monotonic_ns'] == source.now_ns
+        sim._pump_tx()
+        assert len(transport.sent) == 2
+    finally:
+        sim.close()
+
+
+def test_usbcanfd_send_batch_batches_fd_frames_and_handles_partial_send():
+    import ctypes
+    import canfd_transports as transport
+    from fdcan_motor_sim import CanMotorSim, HostEpochClock, pack_socketcan_frame
+
+    api = FakeSDK()
+    batch_calls = []
+
+    def transmit(handle, packets, count):
+        arr = ctypes.cast(packets, ctypes.POINTER(transport.TxFD * count)).contents
+        batch_calls.append([arr[i].frame.can_id for i in range(count)])
+        if len(batch_calls) == 1:
+            return 2  # partial send of first 2 of 4 frames
+        if len(batch_calls) == 2:
+            return 0  # temporary backpressure -> BlockingIOError
+        return count
+
+    api.ZCAN_TransmitFD = transmit
+    device = transport.CxDevice(api, 1, 17)
+    channel = device.open_channel(0)
+    source = SimTime()
+    clock = HostEpochClock(source.monotonic_ns, source.time_ns)
+    sim = CanMotorSim(None, [1, 2], [13, 14], 20, None, bus_transport=channel, clock=clock)
+    sim.start_loop()
+    sim._last_step = source.now_ns / 1e9
+    try:
+        sim._enqueue_rx((0x80, b'', True))
+        sim.tick(source.now_ns / 1e9)
+        assert len(batch_calls[0]) == 4
+        assert batch_calls[1] == batch_calls[0][2:]
+        assert sim._tx_active is not None
+        sim._pump_tx()
+        assert batch_calls[2] == batch_calls[0][2:]
+        assert not sim._tx_control and not sim._tx_feedback and sim._tx_active is None
+        assert sim.tx_dropped == 0
+    finally:
+        sim.close()
+
+
+def test_gazebo_bridge_joint_states_uses_best_effort_depth_1_and_drains_executor(monkeypatch):
+    import sys
+    import types
+    import fdcan_motor_sim as module
+
+    subscriptions = []
+    spin_calls = []
+    added_nodes = []
+
+    class FakeQoSProfile:
+        def __init__(self, *, reliability, history, depth):
+            self.reliability = reliability
+            self.history = history
+            self.depth = depth
+
+    class FakeReliabilityPolicy:
+        BEST_EFFORT = 'BEST_EFFORT'
+        RELIABLE = 'RELIABLE'
+
+    class FakeHistoryPolicy:
+        KEEP_LAST = 'KEEP_LAST'
+
+    class FakeNode:
+        def __init__(self, name):
+            self.name = name
+
+        def create_subscription(self, msg_type, topic, callback, qos):
+            subscriptions.append((topic, callback, qos))
+
+        def create_publisher(self, msg_type, topic, qos):
+            return types.SimpleNamespace(publish=lambda _msg: None)
+
+    class FakeExecutor:
+        def add_node(self, node):
+            added_nodes.append(node)
+
+        def spin_once(self, timeout_sec=0.0):
+            spin_calls.append(timeout_sec)
+            # Deliver 2 queued /joint_states messages before going idle on the 3rd call.
+            if len(spin_calls) <= 2:
+                cb = next(c for t, c, _ in subscriptions if t == '/joint_states')
+                cb(types.SimpleNamespace(name=['waist_yaw'], position=[0.123], velocity=[0.0]))
+
+    fake_rclpy = types.ModuleType('rclpy')
+    fake_rclpy.init = lambda: None
+    fake_rclpy.spin_once = lambda *_a, **_kw: None
+    fake_executors = types.ModuleType('rclpy.executors')
+    fake_executors.SingleThreadedExecutor = FakeExecutor
+    fake_node_mod = types.ModuleType('rclpy.node')
+    fake_node_mod.Node = FakeNode
+    fake_qos = types.ModuleType('rclpy.qos')
+    fake_qos.QoSProfile = FakeQoSProfile
+    fake_qos.ReliabilityPolicy = FakeReliabilityPolicy
+    fake_qos.HistoryPolicy = FakeHistoryPolicy
+    fake_sensor = types.ModuleType('sensor_msgs.msg')
+    fake_sensor.JointState = object
+    fake_std = types.ModuleType('std_msgs.msg')
+    fake_std.Float64MultiArray = object
+    fake_can = types.ModuleType('can_bridge_msgs.msg')
+    fake_can.MotorStatusArray = object
+
+    for name, mod in (
+        ('rclpy', fake_rclpy),
+        ('rclpy.executors', fake_executors),
+        ('rclpy.node', fake_node_mod),
+        ('rclpy.qos', fake_qos),
+        ('sensor_msgs', types.ModuleType('sensor_msgs')),
+        ('sensor_msgs.msg', fake_sensor),
+        ('std_msgs', types.ModuleType('std_msgs')),
+        ('std_msgs.msg', fake_std),
+        ('can_bridge_msgs', types.ModuleType('can_bridge_msgs')),
+        ('can_bridge_msgs.msg', fake_can),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    bridge = module.GazeboBridge({1: 'waist_yaw'}, 'position',
+                                 '/arm_position_controller/commands',
+                                 '/arm_effort_controller/commands', 45.0)
+    assert added_nodes == [bridge.node]
+    js_sub = [qos for topic, _cb, qos in subscriptions if topic == '/joint_states']
+    assert len(js_sub) == 1
+    assert isinstance(js_sub[0], FakeQoSProfile)
+    assert js_sub[0].reliability == 'BEST_EFFORT'
+    assert js_sub[0].history == 'KEEP_LAST'
+    assert js_sub[0].depth == 1
+
+    bridge.spin()
+    # 2 calls delivered messages, 3rd call saw no _rx_seq increment and stopped draining.
+    assert len(spin_calls) == 3
+    assert bridge.pos['waist_yaw'] == 0.123

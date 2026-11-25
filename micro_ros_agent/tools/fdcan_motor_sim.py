@@ -526,7 +526,7 @@ def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLB
 
 class MotorModel:
     def __init__(self, motor_id: int, kind: str, gear_ratio: float | None = None,
-                 joint_nm_per_amp: float | None = None):
+                 joint_nm_per_amp: float | None = None, zero_init: bool = False):
         self.id = motor_id
         self.kind = kind  # "cerb" | "vaxor"
         self.tx_count = 0
@@ -548,8 +548,8 @@ class MotorModel:
         # 忽略下行帧），对固件等价于设备掉电；恢复时按"重新上电"清命令状态。
         self.linked = True
         if kind == "cerb":
-            # 位置按 id 区分上电初值；转速与电流由状态导出，温度取名义值。
-            self.pos_deg = float(10 * motor_id)
+            # 位置按 id 区分上电初值（zero_init=True 时归零，避免并联连杆装配合界外溢）。
+            self.pos_deg = 0.0 if zero_init else float(10 * motor_id)
             self.tgt_deg = self.pos_deg
             # 线圈温度：名义值，与 C++ motor_sim 的 kCerbNominalTemperatureDeciDegC
             # 同值。模拟器不建模热学，报一个常量比报一条按 id 递增的假升温曲线诚实。
@@ -579,7 +579,7 @@ class MotorModel:
         else:
             # VAXOR 反馈为电机轴量；关节初值 0.1*(id-6) rad。速度与电流同 CERB：
             # 状态导出，不设写死初值。
-            self.pos_motor_rad = 0.1 * (motor_id - 6) * self.gear_ratio
+            self.pos_motor_rad = 0.0 if zero_init else 0.1 * (motor_id - 6) * self.gear_ratio
             self.tgt_motor_rad = self.pos_motor_rad
 
     def approach(self, dt_s: float):
@@ -811,7 +811,9 @@ class GazeboBridge:
                  tau_limit, tau_limits=None, publish_interval_s=0.015,
                  driver_file=None, joint_names=None):
         import rclpy
+        from rclpy.executors import SingleThreadedExecutor
         from rclpy.node import Node
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
         from sensor_msgs.msg import JointState
         from std_msgs.msg import Float64MultiArray
         try:
@@ -827,6 +829,9 @@ class GazeboBridge:
         self._msg_type = Float64MultiArray
         rclpy.init()
         self.node = Node("fdcan_sim_gazebo_bridge")
+        self._rx_seq = 0
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self.node)
         self.transmission_lock = threading.RLock()
         self.joint_map = dict(joint_map)          # {motor_id: joint_name}
         # 按拓扑声明顺序去重，须与 Gazebo/MuJoCo 的命令数组一致；字典序会错配力矩。
@@ -846,10 +851,15 @@ class GazeboBridge:
         # 不宜随 50 Hz CAN 主循环发布，否则约 30 ms 死区可能使 PD 振荡。
         self.publish_interval = publish_interval_s
         self.last_pub = 0.0
-        # JointState is a complete snapshot. The CAN loop may service ROS more
-        # slowly than the simulator publishes, so retain only the newest sample.
+        # JointState is a complete snapshot. Use BEST_EFFORT depth=1 so a busy
+        # CAN loop never locks into FastDDS RELIABLE retransmit lag.
+        joint_state_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         self.node.create_subscription(JointState, "/joint_states",
-                                      self._on_state, 1)
+                                      self._on_state, joint_state_qos)
         # HIL 授权以固件为准：OFFLINE/FAULT/冻结时主机不得继续出力（ARD §36）。
         # 收到固件状态话题后才启用镜像；纯台架无此话题。
         self.fw_lifecycle = {}
@@ -876,6 +886,7 @@ class GazeboBridge:
 
     def _on_fw_status(self, msg):
         with self.transmission_lock:
+            self._rx_seq = getattr(self, "_rx_seq", 0) + 1
             self.fw_lifecycle = {s.motor_id: s.lifecycle for s in msg.statuses}
             self.fw_status_at = time.monotonic()
 
@@ -908,6 +919,7 @@ class GazeboBridge:
 
     def _on_state(self, msg):
         with self.transmission_lock:
+            self._rx_seq = getattr(self, "_rx_seq", 0) + 1
             self._feedback_snapshot = None
             for i, name in enumerate(msg.name):
                 if name not in self.pos:
@@ -946,23 +958,34 @@ class GazeboBridge:
             return True
         return self._feedback_axis(motor_id) is not None
 
+    def _feedback_snapshot_at(self, now):
+        if self._feedback_snapshot is None or now > self._feedback_snapshot_until:
+            # The CAN loop reads position, velocity and availability for
+            # every axis. Convert each ROS snapshot once, with the same
+            # 500 ms freshness cutoff as the uncached transform.
+            self._feedback_snapshot = self._actuator_feedback(now)
+            self._feedback_snapshot_until = min(
+                (stamp + 0.5 for stamp in self.state_at.values()
+                 if 0 <= now - stamp <= 0.5),
+                default=math.inf,
+            )
+        return self._feedback_snapshot
+
     def _feedback_axis(self, motor_id):
         with self.transmission_lock:
-            now = time.monotonic()
-            if self._feedback_snapshot is None or now > self._feedback_snapshot_until:
-                # The CAN loop reads position, velocity and availability for
-                # every axis. Convert each ROS snapshot once, with the same
-                # 500 ms freshness cutoff as the uncached transform.
-                self._feedback_snapshot = self._actuator_feedback(now)
-                self._feedback_snapshot_until = min(
-                    (stamp + 0.5 for stamp in self.state_at.values()
-                     if 0 <= now - stamp <= 0.5),
-                    default=math.inf,
-                )
-            return self._feedback_snapshot.get(self.motor_actuators[motor_id])
+            return self._feedback_snapshot_at(time.monotonic()).get(
+                self.motor_actuators[motor_id])
 
     def spin(self):
-        self._rclpy.spin_once(self.node, timeout_sec=0.0)
+        executor = getattr(self, "_executor", None)
+        if executor is None:
+            self._rclpy.spin_once(self.node, timeout_sec=0.0)
+            return
+        for _ in range(4):
+            before = getattr(self, "_rx_seq", 0)
+            executor.spin_once(timeout_sec=0.0)
+            if getattr(self, "_rx_seq", 0) == before:
+                break
 
     def enable_transmission(self, driver_file, model_type=None, joint_names=None):
         from robot_transmission import Axis, Model
@@ -990,6 +1013,7 @@ class GazeboBridge:
         self.position_holding_groups = set()
         self.state_at = {}
         self._feedback_snapshot = None
+        self._feedback_snapshot_until = -math.inf
 
     def _actuator_feedback(self, now):
         complete = {}
@@ -1012,9 +1036,10 @@ class GazeboBridge:
         with self.transmission_lock:
             for motor in models.values():
                 motor.applied_joint_nm = 0.0
-            axes = self._actuator_feedback(now)
+            axes = self._feedback_snapshot_at(now)
             efforts = {}
             positions = {}
+            position_targets = {}
             for group in self.transmission_groups:
                 members = [(a, models.get(self.actuator_motor_ids[a])) for a in group.actuators]
                 healthy = all(
@@ -1037,10 +1062,8 @@ class GazeboBridge:
                     continue
                 if self.control_mode == "position":
                     self.position_holding_groups.discard(tuple(group.joints))
-                    targets = {a: self.axis_type(motor.last_cmd["pos_rad"])
-                               for a, motor in members}
-                    positions.update({j: axis.position for j, axis in
-                                      self.transmission.actuator_to_joint(targets).items()})
+                    for a, motor in members:
+                        position_targets[a] = self.axis_type(motor.last_cmd["pos_rad"])
                 else:
                     torques = {}
                     for a, motor in members:
@@ -1059,6 +1082,9 @@ class GazeboBridge:
                     efforts.update(converted)
                     for a, motor in members:
                         motor.applied_joint_nm = torques[a]
+            if self.control_mode == "position" and position_targets:
+                positions.update({j: axis.position for j, axis in
+                                  self.transmission.actuator_to_joint(position_targets).items()})
             out = self._msg_type()
             if self.control_mode == "position":
                 out.data = [positions.get(j, self.hold_pos[j]) for j in self.joints]
@@ -1140,7 +1166,7 @@ class CanMotorSim:
                  joint_nm_per_amp=None, gear_ratios=None,
                  mit_position_limits=None, mit_velocity_limits=None,
                  mit_kp_limits=None, mit_kd_limits=None, bus_transport=None,
-                 clock=None):
+                 clock=None, zero_init: bool = False):
         self.clock = clock or HostEpochClock()
         self.sync_period_ns = round(period_ms * 1_000_000)
         self.timing_metrics = {name: TimingMetric() for name in (
@@ -1202,11 +1228,13 @@ class CanMotorSim:
         self._tx_active = None
         self.models = {i: MotorModel(i, "cerb",
                                      gear_ratio=self.gear_ratios.get(i),
-                                     joint_nm_per_amp=self.joint_nm_per_amp.get(i))
+                                     joint_nm_per_amp=self.joint_nm_per_amp.get(i),
+                                     zero_init=zero_init)
                        for i in cerb_ids}
         self.models.update({i: MotorModel(i, "vaxor",
                                           gear_ratio=self.gear_ratios.get(i),
-                                          joint_nm_per_amp=self.joint_nm_per_amp.get(i))
+                                          joint_nm_per_amp=self.joint_nm_per_amp.get(i),
+                                          zero_init=zero_init)
                             for i in vaxor_ids})
         for mid in r58_ids:
             if mid in self.models and self.models[mid].kind == "cerb":
@@ -1435,6 +1463,76 @@ class CanMotorSim:
         """非阻塞发送 CAN 帧；控制响应优先于可丢弃的周期反馈。"""
         if self.bus_socket is not None:
             budget = TX_PUMP_BUDGET
+            if hasattr(self.bus_socket, 'send_batch'):
+                while budget > 0:
+                    batch = []
+                    batch_bytes = 0
+                    expected_len = None
+                    while len(batch) < 64:
+                        if not batch and self._tx_active is not None:
+                            origin, item = 'active', self._tx_active
+                        elif self._tx_control:
+                            origin, item = 'control', self._tx_control[0]
+                        elif self._tx_feedback:
+                            origin, item = 'feedback', self._tx_feedback[0]
+                        else:
+                            break
+                        line_len = len(item["line"])
+                        if expected_len is None:
+                            expected_len = line_len
+                        elif line_len != expected_len:
+                            break
+                        if batch and batch_bytes + line_len > budget:
+                            break
+                        if origin == 'active':
+                            self._tx_active = None
+                        elif origin == 'control':
+                            self._tx_control.popleft()
+                        else:
+                            self._tx_feedback.popleft()
+                        batch.append((origin, item))
+                        batch_bytes += line_len
+                    if not batch:
+                        return
+                    try:
+                        sent = self.timing_metrics['transport_send_ms'].measure(
+                            self.bus_socket.send_batch, [it["line"] for _, it in batch],
+                            monotonic_ns=self.clock.monotonic_ns)
+                    except BlockingIOError:
+                        self._tx_active = batch[0][1]
+                        for origin, item in reversed(batch[1:]):
+                            if origin == 'control':
+                                self._tx_control.appendleft(item)
+                            else:
+                                self._tx_feedback.appendleft(item)
+                        return
+                    except OSError:
+                        self.tx_dropped += 1
+                        if not self._tx_error_reported:
+                            print(
+                                f"[sim] SocketCAN send on {self.can_interface} failed; "
+                                "check interface state and CAN-FD configuration",
+                                file=sys.stderr,
+                            )
+                            self._tx_error_reported = True
+                        self._tx_active = None
+                        for origin, item in reversed(batch[1:]):
+                            if origin == 'control':
+                                self._tx_control.appendleft(item)
+                            else:
+                                self._tx_feedback.appendleft(item)
+                        return
+                    for _, item in batch[:sent]:
+                        self._record_tx(item)
+                        budget -= len(item["line"])
+                    for origin, item in reversed(batch[sent:]):
+                        if origin == 'active':
+                            self._tx_active = item
+                        elif origin == 'control':
+                            self._tx_control.appendleft(item)
+                        else:
+                            self._tx_feedback.appendleft(item)
+                return
             while budget > 0:
                 if self._tx_active is None:
                     if self._tx_control:
@@ -1544,18 +1642,25 @@ class CanMotorSim:
         # 周期反馈可丢；SDO/控制回显不能被反馈队列长期挤压。
         queue = (self._tx_feedback if tag in ("cerb_fb", "vaxor_status")
                  else self._tx_control)
-        if len(queue) >= TX_QUEUE_MAX:
-            self.tx_dropped += 1
-            return
         timing = None
         if tag in ("cerb_fb", "vaxor_status", "vaxor_reply"):
             timing = {'encoded': encoded, 'trigger': trigger, 'tag': tag}
             if deadline is not None:
                 self.timing_metrics['feedback_lateness_ms'].add(max(
                     0, encoded['monotonic_ns'] - round(deadline * 1e9)))
-        queue.append({"line": frame, "offset": 0, "model": model,
-                      "tag": tag, "can_id": can_id, "payload": payload,
-                      "timing": timing})
+        new_item = {"line": frame, "offset": 0, "model": model,
+                    "tag": tag, "can_id": can_id, "payload": payload,
+                    "timing": timing}
+        if tag == "vaxor_reply" and model is not None:
+            for idx in range(len(self._tx_control) - 1, -1, -1):
+                existing = self._tx_control[idx]
+                if existing["tag"] == "vaxor_reply" and existing["model"] is model:
+                    self._tx_control[idx] = new_item
+                    return
+        if len(queue) >= TX_QUEUE_MAX:
+            self.tx_dropped += 1
+            return
+        queue.append(new_item)
 
     def log_rx(self, can_id: int, data: bytes, tag: str, received=None):
         m = self._model_for_downlink(can_id)
@@ -2313,9 +2418,10 @@ class CanMotorSim:
         try:
             self.start_loop()
             while not self.stop:
+                started = time.monotonic()
                 self.timing_metrics['loop_work_ms'].measure(
-                    self.tick, time.monotonic(), monotonic_ns=self.clock.monotonic_ns)
-                time.sleep(0.002)
+                    self.tick, started, monotonic_ns=self.clock.monotonic_ns)
+                time.sleep(max(0.0005, 0.002 - (time.monotonic() - started)))
         finally:
             self.close()
 
@@ -2450,8 +2556,9 @@ class CanMotorSimGroup:
             for sim in self.buses.values():
                 sim.start_loop()
             while not self.stop:
-                self.timing_metrics['loop_work_ms'].measure(self.tick, time.monotonic())
-                time.sleep(0.002)
+                started = time.monotonic()
+                self.timing_metrics['loop_work_ms'].measure(self.tick, started)
+                time.sleep(max(0.0005, 0.002 - (time.monotonic() - started)))
         finally:
             self.close()
 
@@ -2608,6 +2715,8 @@ def main():
     ap.add_argument("--gear", default="",
                     help="逐电机速比，形如 1:101,7:50；反馈转速按它换算到电机侧。"
                          "未列出的 vaxor 退回内置 50，cerb 上报 0 转速")
+    ap.add_argument("--zero-init", action="store_true",
+                    help="将所有模拟电机上电初始位置设为 0 deg（用于 37 轴全身并联连杆 HIL）")
     args = ap.parse_args()
     if args.channels is None and args.interface is None and args.tty is None:
         args.tty = default_canable_tty()
@@ -2638,6 +2747,7 @@ def main():
                    mit_kp_limits=parse_id_floats(args.mit_kp_limits),
                    mit_kd_limits=parse_id_floats(args.mit_kd_limits),
                    joint_nm_per_amp=joint_nm_per_amp,
+                   zero_init=args.zero_init,
                    gear_ratios=gear_ratios)
 
     if args.channels is not None:
@@ -2651,12 +2761,15 @@ def main():
     try:
         if args.gazebo:
             jm = parse_joint_map(args.joint_map)
-            effort_rate = args.effort_rate_hz if args.effort_rate_hz > 0 else 0.0
+            effort_rate = (args.effort_rate_hz
+                           if args.gazebo_control_mode == "effort" and args.effort_rate_hz > 0
+                           else 0.0)
+            publish_interval_s = (1.0 / effort_rate if effort_rate
+                                  else (0.01 if args.gazebo_control_mode == "position" else 0.015))
             sim.bridge = GazeboBridge(jm, args.gazebo_control_mode,
                                       args.position_topic, args.effort_topic,
                                       args.tau_limit, tau_limits,
-                                      publish_interval_s=(1.0 / effort_rate
-                                                          if effort_rate else 0.015),
+                                      publish_interval_s=publish_interval_s,
                                       driver_file=(args.driver_file or None),
                                       joint_names=([j for j in args.joint_names.split(",") if j]
                                                    or None))
@@ -2667,7 +2780,9 @@ def main():
                   (jm, topic, args.gazebo_control_mode,
                    ", ".join(f"{k}:{v:g}" for k, v in sorted(tau_limits.items())) or "无",
                    args.tau_limit,
-                   f"{effort_rate:g} Hz（独立线程）" if effort_rate else "随 CAN 主循环"))
+                   f"{effort_rate:g} Hz（独立线程）" if effort_rate
+                   else ("100 Hz（随 CAN 主循环）" if args.gazebo_control_mode == "position"
+                         else "随 CAN 主循环")))
             print("[sim] 反馈换算：Kt×速比×效率 %s；速比 %s" %
                   (", ".join(f"{k}:{v:g}" for k, v in sorted(joint_nm_per_amp.items()))
                    or "无（反馈电流恒 0）",

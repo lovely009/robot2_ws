@@ -44,6 +44,7 @@ static void invalidate_zero_feedback(motor_control_context_t *ctx, motor_control
   entry->measured.has_motion_state = false;
   entry->last_motion_rx_tick_ms = 0U;
   entry->has_target = false;
+  entry->has_prev_target = false;
   entry->fresh_target_pending = false;
   entry->target_position_rad = entry->target_velocity_rad_s = entry->target_effort_nm = 0.0f;
 }
@@ -56,6 +57,7 @@ static void apply_entry_disable(motor_control_context_t *ctx,
   entry->policy_enable = false;
   entry->motion_authorized = false;
   entry->has_target = false;
+  entry->has_prev_target = false;
   if (entry->motion_enabled) {
     (void)motor_control_send_p0(ctx, entry, MOTOR_CONTROL_P0_DISABLE);
     entry->motion_enabled = false;
@@ -178,6 +180,7 @@ static void freeze_entry_as_conflict(motor_control_context_t *ctx,
   entry->motion_enabled = false;
   entry->enable_pending = false;
   entry->has_target = false;
+  entry->has_prev_target = false;
   entry->motion_authorized = false;
   entry->policy_enable = false;
   entry->lifecycle = MOTOR_CONTROL_LIFECYCLE_CONFIG_CONFLICT;
@@ -891,30 +894,18 @@ static bool device_refresh_allowed(const motor_control_entry_t *entry) {
          entry->boot_norm_stage == MOTOR_CONTROL_BOOT_NORM_DONE;
 }
 
-static bool trajectory_owns_entry(const motor_control_context_t *ctx,
-    const motor_control_entry_t *entry) {
-  if (!ctx->trajectory_active) {
-    return false;
-  }
-  for (uint16_t i = 0U; i < ctx->trajectory.target_count; ++i) {
-    if (ctx->trajectory.target_ids[i] == entry->motor_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // 设备页单电机方向/保存只对已绑定 CERB 开放，且必须先完全失能并退出一切
 // 运动意图。RT 层再次检查，不能只依赖桥接层看到的快照。
 static bool driver_device_config_allowed(const motor_control_context_t *ctx,
     const motor_control_entry_t *entry) {
+  (void)ctx;
   return entry->online && entry->profile != NULL &&
       motor_protocol_adapter_allows_driver_config(entry->adapter) &&
       entry->lifecycle == MOTOR_CONTROL_LIFECYCLE_READY_DISABLED &&
       !entry->policy_enable && !entry->motion_enabled &&
       !entry->enable_pending && !entry->motion_authorized &&
       !entry->has_target && !entry->fresh_target_pending &&
-      !entry->p0_pending && !trajectory_owns_entry(ctx, entry);
+      !entry->p0_pending;
 }
 
 static bool driver_device_config_tx(const motor_control_entry_t *entry) {
@@ -1083,11 +1074,6 @@ bool motor_control_submit_config(motor_control_context_t *ctx,
     }
     if (entry->tx_active || entry->p0_pending) {
       return reject_busy(ctx, entry, request, now_ms);
-    }
-    for (uint16_t i = 0; ctx->trajectory_active && i < ctx->trajectory.target_count; ++i) {
-      if (ctx->trajectory.target_ids[i] == entry->motor_id) {
-        return reject_busy(ctx, entry, request, now_ms);
-      }
     }
     const bool accepted = start_tx(ctx, entry, request, now_ms);
     if (entry->tx_active) invalidate_zero_feedback(ctx, entry);

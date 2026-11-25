@@ -1,71 +1,71 @@
-"""V3 线上契约：真实类型生成、满容量序列化和有界接收约束。"""
+"""Schema 6 原生线契约：真实类型生成、37 轴边界和单帧/可靠 CDR 预算。"""
 import unittest
 
 import can_bridge_msgs.msg as messages
+import can_bridge_msgs.srv as services
 from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import Imu, Temperature
 
 
 class AgentWireContractTest(unittest.TestCase):
-    def require_type(self, name):
-        self.assertTrue(hasattr(messages, name), f"缺少 V3 生成类型 {name}")
+    def require_msg(self, name):
+        self.assertTrue(hasattr(messages, name), f"缺少 Schema 6 消息类型 {name}")
         return getattr(messages, name)
 
-    def test_topic_set_exact(self):
-        contract = self.require_type('AgentWireContract')
-        topics = {getattr(contract, name) for name in dir(contract)
-                  if name.startswith('TOPIC_')}
-        self.assertEqual(topics, {
-            '/micro_ros_do/command', '/micro_ros_do/trajectory',
-            '/micro_ros_do/config', '/micro_ros_up/motion',
-            '/micro_ros_up/status', '/micro_ros_up/info',
-            '/micro_ros_up/imu/data', '/micro_ros_up/imu/temperature'})
+    def require_srv(self, name):
+        self.assertTrue(hasattr(services, name), f"缺少 Schema 6 服务类型 {name}")
+        return getattr(services, name)
+
+    def test_schema_and_native_services_exist(self):
+        self.assertEqual(self.require_msg('MotorSystemState').SCHEMA_VERSION, 6)
+        self.assertEqual(self.require_msg('MotorDeviceInfo').SCHEMA_VERSION, 6)
+        self.assertEqual(self.require_msg('SystemCommand').COMMAND_SYNC_W25, 6)
+        for srv_name in ('SubmitPolicy', 'ExecuteConfig', 'GetDeviceInfo'):
+            self.require_srv(srv_name)
 
     def test_bounds(self):
-        command = self.require_type('AgentCommand')()
-        command.motor_ids = list(range(48))
-        command.position_q = [32767] * 48
-        command.velocity_q = [-32767] * 48
-        command.effort_q = [0] * 48
-        recovered = deserialize_message(serialize_message(command), type(command))
-        self.assertEqual(list(recovered.motor_ids), list(range(48)))
+        cmd_cls = self.require_msg('MotorCommandArray')
+        cmd_target = self.require_msg('MotorCommandTarget')
+        cmd = cmd_cls()
+        cmd.targets = [cmd_target() for _ in range(37)]
+        recovered = deserialize_message(serialize_message(cmd), cmd_cls)
+        self.assertEqual(len(recovered.targets), 37)
         with self.assertRaises(AssertionError):
-            command.motor_ids = list(range(49))
-        motion = self.require_type('AgentMotion')()
-        motion.motor_ids = list(range(32))
+            cmd.targets = [cmd_target() for _ in range(38)]
+
+        motion_cls = self.require_msg('MotorMotionStateArray')
+        motion_target = self.require_msg('MotorMotionStateTarget')
+        motion = motion_cls()
+        motion.states = [motion_target() for _ in range(37)]
         with self.assertRaises(AssertionError):
-            motion.motor_ids = list(range(33))
-        info = self.require_type('AgentInfo')()
-        entry = self.require_type('AgentDeviceInfo')
-        info.devices = [entry() for _ in range(16)]
+            motion.states = [motion_target() for _ in range(38)]
+
+        state_cls = self.require_msg('MotorSystemState')
+        ctrl_state = self.require_msg('MotorControlState')
+        state = state_cls()
+        state.control_states = [ctrl_state() for _ in range(37)]
         with self.assertRaises(AssertionError):
-            info.devices = [entry() for _ in range(17)]
-        status = self.require_type('AgentStatus')()
-        result = self.require_type('AgentConfigResult')
-        status.results = [result() for _ in range(8)]
+            state.control_states = [ctrl_state() for _ in range(38)]
+
+        cfg_cls = self.require_msg('ConfigRequest')
+        param_target = self.require_msg('ParamSetTarget')
+        cfg = cfg_cls()
+        cfg.targets = [param_target() for _ in range(16)]
         with self.assertRaises(AssertionError):
-            status.results = [result() for _ in range(9)]
-        trajectory = self.require_type('AgentTrajectoryRequest')()
-        point = messages.MotorTrajectoryPoint
-        trajectory.points = [point() for _ in range(32)]
-        with self.assertRaises(AssertionError):
-            trajectory.points = [point() for _ in range(33)]
-        self.assertEqual(self.require_type('AgentWireContract').TRAJECTORY_POINTS_MAX, 256)
+            cfg.targets = [param_target() for _ in range(17)]
 
     def test_max_cdr(self):
-        self.require_type('AgentCommand')
         from measure_agent_wire import maximum_message, wire_budget
         best_effort, reliable = wire_budget()
-        for name in ('AgentCommand', 'AgentMotion', 'AgentTrajectoryRequest',
-                     'AgentConfigRequest', 'AgentStatus', 'AgentInfo'):
-            cls = self.require_type(name)
+        for name in ('MotorCommandArray', 'MotorMotionStateArray',
+                     'MotorSystemState', 'MotorDeviceInfo', 'MotorEvent', 'ConfigRequest'):
+            cls = self.require_msg(name)
             value = maximum_message(cls)
             data = serialize_message(value)
-            limit = best_effort if name in ('AgentCommand', 'AgentMotion') else reliable
+            limit = best_effort if name in ('MotorCommandArray', 'MotorMotionStateArray') else reliable
             with self.subTest(message=name, size=len(data), limit=limit):
                 self.assertLessEqual(len(data), limit)
                 recovered = deserialize_message(data, cls)
-                # CDR 对齐填充字节不保证初始化；校验字段与长度，不比较填充内容。
                 self.assertEqual(recovered, value)
                 self.assertEqual(len(serialize_message(recovered)), len(data))
         for cls in (Imu, Temperature):

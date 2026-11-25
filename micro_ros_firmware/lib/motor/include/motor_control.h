@@ -29,19 +29,14 @@ extern "C" {
 #define MOTOR_CONTROL_MAX_TX_PENDING 160U
 // 事件环为并发发现预留余量；身份绑定由 config_step 限速为每毫秒一台。
 #define MOTOR_CONTROL_MAX_EVENTS 128U
-// 轨迹点数与电机数决定静态 RAM 上界；拼接、mailbox、任务转换、
-// 内核锁存与切矢表均占内存，评估时须以链接结果为准。
-#define MOTOR_CONTROL_MAX_TRAJECTORY_POINTS 256U
-#define MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS FIRMWARE_MAX_MOTORS
 
 // 命令源标识（target_source）：最近一次实际生效的命令来自哪条通道。
 #define MOTOR_CONTROL_TARGET_SOURCE_NONE 0U
 #define MOTOR_CONTROL_TARGET_SOURCE_SNAPSHOT 1U
-#define MOTOR_CONTROL_TARGET_SOURCE_TRAJECTORY 2U
 
 // 命令快照安全阈值。
-#define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 30U
-#define MOTOR_CONTROL_SNAPSHOT_DISABLE_MS 100U
+#define MOTOR_CONTROL_SNAPSHOT_SOFT_STOP_MS 100U
+#define MOTOR_CONTROL_SNAPSHOT_DISABLE_MS 200U
 
 // 设备参数上电回读的尝试上限与退避（读是只读事务，重试无副作用）。
 #define MOTOR_CONTROL_DEV_READ_MAX_ATTEMPTS 3U
@@ -78,7 +73,6 @@ typedef enum {
   MOTOR_CONTROL_EXECUTION_IDLE = 1U,
   MOTOR_CONTROL_EXECUTION_HOLDING = 2U,
   MOTOR_CONTROL_EXECUTION_COMMAND = 3U,
-  MOTOR_CONTROL_EXECUTION_TRAJECTORY = 4U,
   MOTOR_CONTROL_EXECUTION_SOFT_STOP = 5U,
   MOTOR_CONTROL_EXECUTION_ENABLING = 6U,
   MOTOR_CONTROL_EXECUTION_DISABLING = 7U
@@ -142,11 +136,7 @@ typedef enum {
   MOTOR_CONTROL_EVENT_REGISTRY_FULL = 14U,
   // 设备参数初始化定论（reason = motor_control_dev_init_t）。不一致/未核对
   // 是运维可见事实：出事件以便上层定位是哪一台、什么结论。
-  MOTOR_CONTROL_EVENT_DEV_INIT = 15U,
-// 轨迹被整条拒绝（结构与 mailbox 同规则，另加注册表存在性）：reason =
-// motor_control_fault_code_t。轨迹合法但被拒属于异常路径（mailbox 已先
-// 校验过一遍），出事件便于定位是哪一侧放行的非法载荷。
-  MOTOR_CONTROL_EVENT_TRAJECTORY_REJECTED = 16U
+  MOTOR_CONTROL_EVENT_DEV_INIT = 15U
 } motor_control_event_type_t;
 
 typedef struct {
@@ -182,29 +172,6 @@ typedef struct {
   uint8_t target_count;
   motor_control_snapshot_target_t targets[MOTOR_CONTROL_MAX_SNAPSHOT_TARGETS];
 } motor_control_command_snapshot_t;
-
-// 输入：mailbox 已完成拼接的多点轨迹（control_trajectory_t 的同形镜像）。
-// 语义：轨迹声明集合内的电机由轨迹独占（快照对其既不下发也不软停）；
-// 集合外的电机仍由完整快照负责。起点 = 内核受理时刻的本地单调时基，
-// 消息里的 sync_time_ns 不参与任何裁决。
-// ---------------------------------------------------------------------------
-typedef struct {
-  uint32_t time_from_start_ms; // 相对轨迹起点；同一电机内严格递增
-  uint16_t motor_id;
-  float position_rad;
-  float velocity_rad_s; // 诊断用；执行速度由非均匀 Hermite 解析求导
-  float effort_nm;
-} motor_control_trajectory_point_t;
-
-typedef struct {
-  uint32_t sequence;
-  uint32_t received_tick_ms;
-  uint32_t trajectory_id;
-  uint16_t point_count;
-  uint16_t target_count;
-  uint16_t target_ids[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
-  motor_control_trajectory_point_t points[MOTOR_CONTROL_MAX_TRAJECTORY_POINTS];
-} motor_control_trajectory_t;
 
 // ---------------------------------------------------------------------------
 // 输入：逐电机策略快照（mailbox control_policy_snapshot_t 的同形镜像）。
@@ -372,54 +339,10 @@ bool motor_control_apply_command_snapshot(motor_control_context_t *ctx,
 bool motor_control_admit_command_snapshot(motor_control_context_t *ctx,
     const motor_control_command_snapshot_t *snapshot, uint32_t now_ms);
 
-// 受理一条多点轨迹（整条校验，非法即整条拒绝；空轨迹 = 取消：释放全部
-// 所属电机并软停）。被新轨迹替换时，移出集合的电机立即释放。
-// 受理只落锁存与归属，实际下发由 motor_control_trajectory_step 在每个
-// 5ms/200Hz 控制边界完成。
-bool motor_control_apply_trajectory(motor_control_context_t *ctx,
-    const motor_control_trajectory_t *trajectory,
-    uint32_t now_ms);
-
-// Agent 事务入口：不抢占旧执行；逐目标授权/反馈健康均满足才原子接手。
-bool motor_control_trajectory_targets_healthy(const motor_control_context_t *ctx,
-    const uint16_t *target_ids, uint16_t target_count, uint32_t now_ms);
-bool motor_control_apply_agent_trajectory(motor_control_context_t *ctx,
-    const motor_control_trajectory_t *trajectory, uint32_t now_ms);
-// 按 ID 取消，绝不影响另一条轨迹；安全帧提交后才能对外结算取消。
-bool motor_control_cancel_trajectory_id(motor_control_context_t *ctx,
-    uint32_t trajectory_id, uint32_t now_ms);
-bool motor_control_trajectory_safety_pending(const motor_control_context_t *ctx,
-    const uint16_t *target_ids, uint16_t target_count);
-
-// 轨迹步进：按 elapsed = now_ms - 受理时刻，在完整非均匀时间线上进行单调三次
-// Hermite 插值并下发。内部路点切矢由相邻不等时间间隔共同计算，保证段边界
-// 速度传递；首尾端点不外推。无活动轨迹时 O(1) 返回。
-// 时间超出末点 → 钳末点保持，绝不外推。
-void motor_control_trajectory_step(motor_control_context_t *ctx, uint32_t now_ms);
-
-// 每控制边界重发快照目标，维持配置的 CAN 命令率，不依赖上行快照到达率。
-// 只在快照新鲜（age ≤ 30ms）时重发；挂起的 P0（软停/失能/使能重试）、整定窗、
-// 轨迹所属电机一律跳过。无新证据时它是幂等的重复投递，不改变任何生命周期状态。
-// 必须与 motor_control_trajectory_step 在同一拍调用（两者覆盖互斥的电机集合）。
+// 每控制边界对快照目标进行 50Hz→200Hz 线性插帧并重发，维持配置的 CAN 命令率，
+// 不依赖上行快照到达率。只在快照新鲜（age ≤ 30ms）时发射；挂起的 P0
+// （软停/失能/使能重试）、整定窗一律跳过。
 void motor_control_hold_step(motor_control_context_t *ctx, uint32_t now_ms);
-
-// 「与路点无关的拒绝」占位（计数越界 / 归属重复 / 未注册 / 有归属无路点）。
-#define MOTOR_CONTROL_TRAJECTORY_BAD_INDEX_NONE 0xFFFFU
-
-// 轨迹执行状态（低频发布用）。时间基准与轨迹路点同源（MCU 本地单调时基）。
-typedef struct {
-  uint32_t trajectory_id;
-  bool active;
-  bool completed;   // 时间线走完（归属仍保留：电机在末点保持）
-  uint32_t elapsed_ms;
-  uint32_t total_ms;
-  uint16_t target_count;
-  uint16_t target_ids[MOTOR_CONTROL_MAX_TRAJECTORY_MOTORS];
-} motor_control_trajectory_state_t;
-
-void motor_control_copy_trajectory_state(
-  const motor_control_context_t *ctx,
-  motor_control_trajectory_state_t *out, uint32_t now_ms);
 
 // ---------------------------------------------------------------------------
 // 内核诊断计数副本；每总线 RX 溢出与堆余量由任务层补齐。
@@ -434,8 +357,6 @@ typedef struct {
   uint32_t event_dropped;
   uint32_t tx_dropped;
   uint32_t p0_retry;
-  uint32_t trajectory_accepted;
-  uint32_t trajectory_rejected;
   uint32_t policy_accepted;
   uint32_t policy_rejected;
 } motor_control_diagnostics_t;

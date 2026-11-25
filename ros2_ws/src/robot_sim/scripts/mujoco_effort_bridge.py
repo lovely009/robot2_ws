@@ -20,6 +20,7 @@ PYGLFW_LIBRARY_VARIANT 必须由 launch 在导入 mujoco/glfw 前注入，
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections import Counter
 from uuid import uuid4
@@ -82,6 +83,9 @@ class MujocoEffortBridge(Node):
             self.declare_parameter("joint_states_topic", "/joint_states").value
         )
         control_hz = float(self.declare_parameter("control_hz", 100.0).value)
+        viewer_hz = float(self.declare_parameter("viewer_hz", 20.0).value)
+        self._viewer_sync_interval = (1.0 / viewer_hz) if viewer_hz > 0.0 else 0.0
+        self._last_viewer_sync = 0.0
         command_timeout_s = float(self.declare_parameter("command_timeout_s", 0.5).value)
         headless = bool(self.declare_parameter("headless", False).value)
         self.position_input = bool(self.declare_parameter('position_input', False).value)
@@ -143,12 +147,30 @@ class MujocoEffortBridge(Node):
         self.publisher = self.create_publisher(JointState, joint_states_topic, 50)
         self.clock_publisher = self.create_publisher(Clock, "/clock", 10)
         self.viewer = None
+        self._viewer_decoupled = bool(self.position_input or not self.viewer_position)
+        self._viewer_lock = threading.Lock()
+        self._viewer_event = threading.Event()
+        self._viewer_snapshot = None
+        self._viewer_stop = False
+        self._viewer_data = None
+        self._viewer_thread = None
         if not headless:
             try:
                 # mujoco 3.6 的 __init__ 不自动导入 viewer 子模块，必须显式导入
                 # （用别名以免把 `mujoco` 变成局部名，影响本函数其它引用）
                 from mujoco import viewer as mujoco_viewer
-                self.viewer = mujoco_viewer.launch_passive(self.model, self.data)
+                if self._viewer_decoupled:
+                    self._viewer_data = mujoco.MjData(self.model)
+                    self._viewer_data.qpos[:] = self.data.qpos
+                    self._viewer_data.qvel[:] = self.data.qvel
+                    self._viewer_data.ctrl[:] = self.data.ctrl
+                    self._viewer_data.time = self.data.time
+                    mujoco.mj_kinematics(self.model, self._viewer_data)
+                    mujoco.mj_comPos(self.model, self._viewer_data)
+                    mujoco.mj_tendon(self.model, self._viewer_data)
+                    self.viewer = mujoco_viewer.launch_passive(self.model, self._viewer_data)
+                else:
+                    self.viewer = mujoco_viewer.launch_passive(self.model, self.data)
                 # 打印实际选中的 pyGLFW 平台：Wayland 后端会自旋（窗口黑、sync() 不返回、
                 # /joint_states 一帧不发），只打窗口是否成功是不够的失败信号。
                 try:
@@ -165,6 +187,13 @@ class MujocoEffortBridge(Node):
                 self.viewer.cam.distance = self.model.stat.extent * 1.8
                 self.viewer.cam.elevation = -20.0
                 self.viewer.cam.azimuth = 135.0
+                if self._viewer_decoupled:
+                    self._viewer_thread = threading.Thread(
+                        target=self._viewer_sync_loop,
+                        name="mujoco-viewer-sync",
+                        daemon=True,
+                    )
+                    self._viewer_thread.start()
             except Exception as error:      # 无显示环境时降级为无头
                 self.get_logger().warning(f"打不开 MuJoCo viewer（{error}），改为无头运行")
         self.create_timer(1.0 / control_hz, self._tick)
@@ -450,6 +479,42 @@ class MujocoEffortBridge(Node):
         self._position_remainder_s = max(0., simulated - steps * timestep)
         return steps
 
+    def _viewer_sync_loop(self) -> None:
+        """Dedicated thread for passive MuJoCo viewer sync so X11/GLX never stalls _tick()."""
+        while not self._viewer_stop:
+            if not self._viewer_event.wait(timeout=0.1):
+                continue
+            self._viewer_event.clear()
+            if self._viewer_stop or self.viewer is None:
+                break
+            if not self.viewer.is_running():
+                self.get_logger().info("MuJoCo viewer 已关闭，改为无头继续仿真")
+                self.viewer = None
+                break
+            with self._viewer_lock:
+                snapshot = self._viewer_snapshot
+                self._viewer_snapshot = None
+            if snapshot is None:
+                continue
+            qpos, qvel, ctrl, sim_time = snapshot
+            self._viewer_data.qpos[:] = qpos
+            self._viewer_data.qvel[:] = qvel
+            self._viewer_data.ctrl[:] = ctrl
+            self._viewer_data.time = sim_time
+            mujoco.mj_kinematics(self.model, self._viewer_data)
+            mujoco.mj_comPos(self.model, self._viewer_data)
+            mujoco.mj_tendon(self.model, self._viewer_data)
+            self.viewer.sync()
+            interval = getattr(self, "_viewer_sync_interval", 0.0)
+            if interval > 0.0:
+                time.sleep(interval)
+
+    def destroy_node(self) -> bool:
+        self._viewer_stop = True
+        if hasattr(self, "_viewer_event"):
+            self._viewer_event.set()
+        return super().destroy_node()
+
     def _tick(self) -> None:
         if self.viewer_position:
             if self.position_input:
@@ -505,8 +570,20 @@ class MujocoEffortBridge(Node):
         self.clock_publisher.publish(clock)
 
         if self.viewer is not None:
-            if self.viewer.is_running():
-                self.viewer.sync()
+            if getattr(self, "_viewer_decoupled", False) and getattr(self, "_viewer_thread", None) is not None:
+                with self._viewer_lock:
+                    self._viewer_snapshot = (
+                        self.data.qpos.copy(),
+                        self.data.qvel.copy(),
+                        self.data.ctrl.copy(),
+                        float(self.data.time),
+                    )
+                self._viewer_event.set()
+            elif self.viewer.is_running():
+                now_mono = time.monotonic()
+                if now_mono - getattr(self, "_last_viewer_sync", 0.0) >= getattr(self, "_viewer_sync_interval", 0.0):
+                    self.viewer.sync()
+                    self._last_viewer_sync = time.monotonic()
             else:                           # 用户关掉窗口后继续无头仿真，别卡在 sync 上
                 self.get_logger().info("MuJoCo viewer 已关闭，改为无头继续仿真")
                 self.viewer = None

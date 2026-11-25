@@ -1,8 +1,10 @@
 // 设备屏：参数查询、CERB 方向设置与驱动板保存、失能态设零与故障清除。
 // 事务函数在 core/device.js（连接后自动读取也走它）；本面板只做渲染与按钮接线。
 import { describeMotorState } from '../core/motor_state.js';
-import { store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
-  syncWriteButtons } from '../core/store.js';
+import {
+  store, DIRTY, markDirty, paramRowIds, paramReadState, writesAllowed,
+  syncWriteButtons
+} from '../core/store.js';
 import { $, fmt, fmtParam, lifecyclePill } from '../core/format.js';
 import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError, setMotorDirection, saveMotorDeviceParameters, motorDeviceParameterError } from '../core/device.js';
 
@@ -11,7 +13,7 @@ import { refreshMotorParams, clearMotorFault, setMotorZero, motorZeroError, setM
 let motorSpecs = null;
 const directionDrafts = new Map();
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g,
-  (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+  (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 fetch('/api/motor-specs')
   .then((r) => r.json())
   .then((d) => { motorSpecs = d.motor_types || {}; markDirty(DIRTY.PARAMS); })
@@ -35,9 +37,8 @@ function renderDevRows() {
     const lc = row.status?.lifecycle ?? row.topo?.lifecycle;
     // 在线不代表参数已核对，必须同时有完整回读和设备核对终态。
     const availability = paramReadState(id);
-    const src = `<span class="pill ${availability.verified ? 'mid' : 'off'}">${
-      availability.verified ? '驱动板 · 已核对' : availability.device === 8 ? '驱动板 · 完整回读'
-        : availability.device ? '部分设备回读 · 未核对'
+    const src = `<span class="pill ${availability.verified ? 'mid' : 'off'}">${availability.verified ? '驱动板 · 已核对' : availability.device === 8 ? '驱动板 · 完整回读'
+      : availability.device ? '部分设备回读 · 未核对'
         : availability.record ? '固件记录 · 未核对' : '无有效参数'}</span>`;
     // 设备端原值：页面已知"参数单位 → 设备原值"的换算（设备对象就是 cnt / mA /
     // 电机端 RPM），显示在输入框下，省去对着 CAN 日志换算。位置参数本身就是 rad
@@ -71,7 +72,7 @@ function renderDevRows() {
       ? (pick.limit_protect === 1 ? '开启' : '关闭') : '未读取';
     const direction = directionDrafts.get(id) ?? pick.direction;
     const dirCell = `<select aria-label="电机 ${id} 方向" data-direction="${id}">
-      <option value="" ${![0,1].includes(direction) ? 'selected' : ''}>未读取</option>
+      <option value="" ${![0, 1].includes(direction) ? 'selected' : ''}>未读取</option>
       <option value="0" ${direction === 0 ? 'selected' : ''}>CW</option>
       <option value="1" ${direction === 1 ? 'selected' : ''}>CCW</option></select>
       <button class="tiny-btn" data-setdirection="${id}">设置方向</button>
@@ -87,7 +88,7 @@ function renderDevRows() {
     return `<details class="motor-parameter-item${unprotected ? ' unprotected' : ''}" data-motor="${id}"` +
       `${(existing.get(id) ?? index === 0) ? ' open' : ''}>
       <summary><strong>电机 ${id}</strong><span class="motor-parameter-model">${escapeHtml(model || '型号待识别')}</span>
-        ${lifecyclePill(lc, describeMotorState(store,id))}${src}</summary>
+        ${lifecyclePill(lc, describeMotorState(store, id))}${src}</summary>
       <div class="motor-parameter-body">
         ${!availability.usable ? `<p class="panel-error">电机 ${id} ${!model ? '型号尚未识别，固件尚未绑定型号；' : ''}未返回有效参数，不能视为读取成功。</p>` : ''}
         ${unprotected ? '<p class="panel-error">保护已关：该关节无任何限位。</p>' : ''}
@@ -114,14 +115,14 @@ function renderDevRows() {
   }).join('');
   tbody.querySelectorAll('[data-direction]').forEach(select => {
     select.onchange = () => {
-      if (select.value !== '') directionDrafts.set(Number(select.dataset.direction),Number(select.value));
+      if (select.value !== '') directionDrafts.set(Number(select.dataset.direction), Number(select.value));
     };
   });
   tbody.querySelectorAll('[data-setdirection]').forEach(button => {
     button.onclick = () => {
       const id = Number(button.dataset.setdirection);
       const select = tbody.querySelector(`[data-direction="${id}"]`);
-      if (select.value !== '') setMotorDirection(id,Number(select.value));
+      if (select.value !== '') setMotorDirection(id, Number(select.value));
     };
   });
   tbody.querySelectorAll('[data-zero]').forEach(btn => {
@@ -176,7 +177,7 @@ export function mount(root, ctx) {
     const structural = dirty.has(DIRTY.PARAMS) || dirty.has(DIRTY.SELECTED)
       || dirty.has(DIRTY.TOPOLOGY) || dirty.has(DIRTY.CONN);
     if (!structural && !dirty.has(DIRTY.MOTION) && !dirty.has(DIRTY.STATUS)
-        && !dirty.has(DIRTY.COMMAND) && !dirty.has(DIRTY.POLICY)) return;
+      && !dirty.has(DIRTY.COMMAND) && !dirty.has(DIRTY.POLICY)) return;
     if (structural) {
       renderDevRows();
       updateDevCurPos();
@@ -198,7 +199,7 @@ export function mount(root, ctx) {
       syncWriteButtons(['btnParamLoad'], allow);
       if (!allow) {
         for (const el of $('paramRows').querySelectorAll(
-            '[data-clearfault], [data-zero]')) {
+          '[data-clearfault], [data-zero]')) {
           el.disabled = true;
         }
       }
@@ -227,5 +228,5 @@ export function mount(root, ctx) {
     }
   };
   render(new Set([DIRTY.PARAMS, DIRTY.CONN]));
-  return {render, intervalMs: 200, unmount() {}};
+  return { render, intervalMs: 200, unmount() { } };
 }

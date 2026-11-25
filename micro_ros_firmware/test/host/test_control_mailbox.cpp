@@ -540,14 +540,6 @@ static void test_clear_discards_pending_but_keeps_diagnostics() {
   control_mailbox_clear_policy(&mailbox);
   assert(!control_mailbox_take_policy(&mailbox, &policy));
   assert(mailbox.policy.invalid_policy_count == 1U);
-
-  control_trajectory_t cancel{};
-  cancel.segment_count = 1U;
-  assert(control_mailbox_submit_trajectory(&mailbox, &cancel));
-  assert(!control_mailbox_submit_trajectory(&mailbox, nullptr));
-  control_mailbox_clear_trajectory(&mailbox);
-  assert(!control_mailbox_take_trajectory(&mailbox, &cancel));
-  assert(mailbox.trajectory.invalid_trajectory_count == 1U);
 }
 
 // 库本身不加锁；双任务共用同一互斥域时，消费结果必须始终是一份完整快照。

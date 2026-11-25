@@ -29,7 +29,7 @@ def handler(monkeypatch, tmp_path):
     node_module = ModuleType('rclpy.node')
     node_module.Node = lambda _name: node
     models = ModuleType('web_host.models')
-    for name in ('enumerate_arm_models', 'model_transmissions', 'motor_library'):
+    for name in ('enumerate_arm_models', 'model_motor_params', 'model_transmissions', 'motor_library'):
         setattr(models, name, Mock())
     for name, module in [('rclpy', rclpy), ('rclpy.node', node_module),
                          ('web_host.models', models)]:

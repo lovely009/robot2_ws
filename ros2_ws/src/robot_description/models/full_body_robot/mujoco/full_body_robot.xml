@@ -9,7 +9,7 @@
     <joint type="hinge" damping=".1" armature=".01" />
     <geom contype="0" conaffinity="0" />
     <site size=".003" group="2" rgba="0 0 0 0" />
-    <position kp="12" kv="1.2" />
+    <position kp="350" kv="4.0" />
   </default>
   <asset>
     <mesh name="Base_link_robot_body" file="mujoco/visual/native/Base_link.STL" />

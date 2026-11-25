@@ -3,7 +3,7 @@
 // 进程管理归 bench_manager，页面经 rosbridge 调用。话题与响应状态统一写入
 // store.bench；Vue 工作台渲染顶栏，本模块维护串口选择控件。
 import { store, markDirty, DIRTY, applyBenchStatus } from './store.js';
-import { $, CONTROLLER_PORT_STORAGE_KEY } from './format.js';
+import { $, CONTROLLER_PORT_STORAGE_KEY, headerStampNs } from './format.js';
 import { callService } from './ros.js';
 
 export function describeAgentStatus(state, now = Date.now()) {
@@ -14,9 +14,10 @@ export function describeAgentStatus(state, now = Date.now()) {
   let age = now - report.at;
   if (!Number.isFinite(age) || age < 0 || age > 300) return {...unknown, link: '状态陈旧'};
   const m = report.data;
-  if (m.schema_version !== 4) return {...unknown, link: '版本不匹配'};
+  if (m.schema_version !== 6) return {...unknown, link: '版本不匹配'};
   if (m.clock_valid === true) {
-    const sourceMs = Number(m.snapshot_stamp) / 1e6;
+    const stampNs = headerStampNs(m);
+    const sourceMs = (stampNs > 0 ? stampNs : Number(m.snapshot_stamp)) / 1e6;
     if (!Number.isFinite(sourceMs) || sourceMs <= 0 || sourceMs - now > 20)
       return {...unknown, link: '在线', clock: '时间基准异常'};
     // 接收时间不能让排队的旧状态重新变新；时钟不一致时保守显示未知。

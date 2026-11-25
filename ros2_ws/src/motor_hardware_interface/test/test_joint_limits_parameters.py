@@ -9,7 +9,7 @@ import time
 
 import rclpy
 import pytest
-from can_bridge_msgs.msg import MotorControlStateArray, MotorMotionStateTarget, MotorMotionStateArray
+from can_bridge_msgs.msg import MotorSystemState, MotorMotionStateTarget, MotorMotionStateArray
 from rcl_interfaces.srv import SetParametersAtomically
 from rclpy.context import Context
 from rclpy.executors import SingleThreadedExecutor
@@ -79,8 +79,8 @@ def test_committed_joint_limits_status_and_atomic_rejection(tmp_path, monkeypatc
             assert statuses[-1]['joint_limits']['spin'] == {'lower': None, 'upper': None}
             joints = []
             node.create_subscription(JointState, '/joint_states', joints.append, 10)
-            motion = node.create_publisher(MotorMotionStateArray, '/motor/motion_states', 10)
-            control = node.create_publisher(MotorControlStateArray, '/motor/control_states', 10)
+            motion = node.create_publisher(MotorMotionStateArray, '/motor/motion', 10)
+            control = node.create_publisher(MotorSystemState, '/motor/state', 10)
             _wait(node, lambda: motion.get_subscription_count() == 1
                   and control.get_subscription_count() == 1
                   and node.count_publishers('/joint_states') == 1)
@@ -93,7 +93,7 @@ def test_committed_joint_limits_status_and_atomic_rejection(tmp_path, monkeypatc
             assert list(joints[-1].position) == pytest.approx([.1, .4])
             assert list(joints[-1].velocity) == pytest.approx([.2, .5])
             assert list(joints[-1].effort) == pytest.approx([.3, .6])
-            control.publish(MotorControlStateArray(schema_version=2, session_id=1, sequence=1))
+            control.publish(MotorSystemState(schema_version=MotorSystemState.SCHEMA_VERSION, session_id=1, sequence=1))
             _wait(node, lambda: statuses[-1]['control_state_source'] == 'mcu')
             published = node.get_publisher_names_and_types_by_node('firmware_topic_bridge', '/')
             assert {topic for topic, _ in published} <= {

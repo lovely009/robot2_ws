@@ -163,3 +163,77 @@ def test_position_servo_parameters_require_an_unambiguous_position_actuator(monk
         if bridge is not None:
             bridge.destroy_node()
         module.rclpy.shutdown()
+
+
+def test_viewer_sync_is_rate_limited_to_viewer_hz(monkeypatch, tmp_path):
+    module = bridge_module(monkeypatch)
+    path = tmp_path / 'viewer_sync.xml'
+    path.write_text("""
+      <mujoco><custom><text name="robot_sim_control_mode" data="viewer_position"/></custom>
+        <worldbody><body><joint name="j"/><geom size=".1" mass="1"/></body></worldbody>
+        <actuator><position joint="j" kp="12" kv="1.2"/></actuator>
+      </mujoco>""")
+    module.rclpy.init(args=['--ros-args', '-p', f'mujoco_model:={path}',
+                            '-p', 'headless:=true', '-p', 'viewer_hz:=20.0'])
+    bridge = None
+    try:
+        bridge = module.MujocoEffortBridge()
+        sync_calls = []
+        bridge.viewer = SimpleNamespace(
+            is_running=lambda: True,
+            sync=lambda: sync_calls.append(True),
+        )
+        clock = [100.00]
+        monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+        for t in (100.00, 100.01, 100.02, 100.04, 100.052, 100.06, 100.105):
+            clock[0] = t
+            bridge._tick()
+        assert len(sync_calls) == 3
+    finally:
+        if bridge is not None:
+            bridge.destroy_node()
+        module.rclpy.shutdown()
+
+
+def test_decoupled_viewer_sync_never_blocks_tick(monkeypatch, tmp_path):
+    import threading
+    import time
+    module = bridge_module(monkeypatch)
+    path = tmp_path / 'decoupled_viewer.xml'
+    path.write_text("""
+      <mujoco><custom><text name="robot_sim_control_mode" data="viewer_position"/></custom>
+        <worldbody><body><joint name="j"/><geom size=".1" mass="1"/></body></worldbody>
+        <actuator><position joint="j" kp="12" kv="1.2"/></actuator>
+      </mujoco>""")
+    module.rclpy.init(args=['--ros-args', '-p', f'mujoco_model:={path}',
+                            '-p', 'headless:=true', '-p', 'position_input:=true',
+                            '-p', 'viewer_hz:=0.0'])
+    bridge = None
+    try:
+        bridge = module.MujocoEffortBridge()
+        bridge._viewer_data = module.mujoco.MjData(bridge.model)
+        synced = threading.Event()
+        positions = []
+
+        def slow_sync():
+            positions.append(float(bridge._viewer_data.qpos[0]))
+            synced.set()
+            time.sleep(0.08)
+
+        bridge.viewer = SimpleNamespace(is_running=lambda: True, sync=slow_sync)
+        bridge._viewer_thread = threading.Thread(
+            target=bridge._viewer_sync_loop, daemon=True)
+        bridge._viewer_thread.start()
+
+        started = time.monotonic()
+        for step in range(5):
+            bridge.data.qpos[0] = 0.1 * (step + 1)
+            bridge._tick()
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.05
+        assert synced.wait(timeout=1.0)
+        assert positions
+    finally:
+        if bridge is not None:
+            bridge.destroy_node()
+        module.rclpy.shutdown()

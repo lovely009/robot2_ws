@@ -13,10 +13,10 @@ def load(name):
     return module.generate_launch_description().entities
 
 
-def test_default_robot_starts_bridge_and_workbench_without_required_model():
+def test_default_robot_starts_workbench_without_required_model():
     actions=load('robot.launch.py')
     nodes=[a for a in actions if isinstance(a,Node)]
-    assert [n.node_executable for n in nodes]==['micro_ros_bridge_node']
+    assert nodes == []
     includes=[a for a in actions if isinstance(a,IncludeLaunchDescription)]
     assert len(includes)==1
     includes[0].launch_description_source.get_launch_description(LaunchContext())

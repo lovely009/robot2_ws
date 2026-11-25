@@ -1,10 +1,7 @@
 # MCU 运动反馈，频率由 FIRMWARE_MOTOR_REPORT_HZ 配置。
-# 只含运动量；诊断/故障走 MotorStatusArray（高频与低频分离，ARD §14.2）。
-uint64 sync_time_ns
-MotorMotionStateTarget[<=64] states
+# 只含运动量；诊断/故障走 MotorSystemState。
+std_msgs/Header header
+MotorMotionStateTarget[<=37] states
 uint64 session_id
-# Host assembler advances LowState.tick_ms by source/assembly delay and adds
-# the same delay to every state_age_ms, preserving each measurement's MCU tick.
 uint32 tick_ms
-# 与线上 low_state.seq 同源：best-effort 无重传，上层据此判丢帧；追加于末尾以保留现有字段顺序。
 uint32 seq

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""V3 在线桥接静态契约；无需 ROS 环境，不替代 MCU 编译或台架验证。"""
+"""Schema 6 原生桥接静态契约；无需 ROS 环境，不替代 MCU 编译或台架验证。"""
 import re
 import unittest
 from pathlib import Path
@@ -7,20 +7,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FW = ROOT / "micro_ros_firmware"
-MSG = ROOT / "micro_ros_agent/src/can_bridge_msgs/msg"
-EXPECTED = {
-    "/micro_ros_do/command": ("subscription", "can_bridge_msgs", "AgentCommand"),
-    "/micro_ros_do/trajectory": ("subscription", "can_bridge_msgs", "AgentTrajectoryRequest"),
-    "/micro_ros_do/config": ("subscription", "can_bridge_msgs", "AgentConfigRequest"),
-    "/micro_ros_up/motion": ("publisher", "can_bridge_msgs", "AgentMotion"),
-    "/micro_ros_up/status": ("publisher", "can_bridge_msgs", "AgentStatus"),
-    "/micro_ros_up/info": ("publisher", "can_bridge_msgs", "AgentInfo"),
-    "/micro_ros_up/imu/data": ("publisher", "sensor_msgs", "Imu"),
-    "/micro_ros_up/imu/temperature": ("publisher", "sensor_msgs", "Temperature"),
+EXPECTED_TOPICS = {
+    "/motor/command": ("subscription", "can_bridge_msgs", "MotorCommandArray"),
+    "/control/stop": ("subscription", "std_msgs", "Empty"),
+    "/client_count": ("subscription", "std_msgs", "Int32"),
+    "/motor/motion": ("publisher", "can_bridge_msgs", "MotorMotionStateArray"),
+    "/motor/state": ("publisher", "can_bridge_msgs", "MotorSystemState"),
+    "/motor/events": ("publisher", "can_bridge_msgs", "MotorEvent"),
+    "/imu/data": ("publisher", "sensor_msgs", "Imu"),
+    "/imu/temp_raw": ("publisher", "sensor_msgs", "Temperature"),
+}
+EXPECTED_SERVICES = {
+    "/motor/submit_policy": ("can_bridge_msgs", "SubmitPolicy"),
+    "/motor/execute_config": ("can_bridge_msgs", "ExecuteConfig"),
+    "/motor/get_device_info": ("can_bridge_msgs", "GetDeviceInfo"),
 }
 
-
-# 桥接源文件按域归组后的相对路径（仓库根 = ROOT）。
 FW_SOURCES = {
     "motor_bridge.cpp": "src/motor/motor_bridge.cpp",
     "param_bridge.cpp": "src/motor/param_bridge.cpp",
@@ -34,57 +36,35 @@ def source(name):
 
 
 class AgentOnlineContract(unittest.TestCase):
-    def test_exact_eight_paths_types_and_entity_counts(self):
-        contract = (MSG / "AgentWireContract.msg").read_text(encoding="utf-8")
-        constants = dict(re.findall(r"string (TOPIC_\w+)=(/\S+)", contract))
-        actual = {}
-        count = 0
-        for name in ("motor_bridge.cpp", "param_bridge.cpp", "imu_bridge.cpp"):
+    def test_exact_native_topics_and_services(self):
+        actual_topics = {}
+        for name in ("motor_bridge.cpp", "imu_bridge.cpp"):
             text = source(name)
-            literals = dict(re.findall(r'(?:char\s*\*|char\s+)\s*(\w+)(?:\[\])?\s*=\s*"([^"]+)"', text))
-            pattern = r"rcl_(publisher|subscription)_init\(\s*&\w+,\s*\w+,\s*ROSIDL_GET_MSG_TYPE_SUPPORT\(\s*(\w+),\s*msg,\s*(\w+)\s*\),\s*([\w:]+|\"[^\"]+\")"
+            pattern = r'rcl_(publisher|subscription)_init\(\s*&\w+,\s*\w+,\s*ROSIDL_GET_MSG_TYPE_SUPPORT\(\s*(\w+),\s*msg,\s*(\w+)\s*\),\s*"([^"]+)"'
             for kind, package, message, topic in re.findall(pattern, text):
-                count += 1
-                if "__TOPIC_" in topic:
-                    path = constants.get(topic.split("__")[-1])
-                else:
-                    path = literals.get(topic, topic.strip('"'))
-                self.assertNotIn(path, actual, f"重复实体 {path}")
-                actual[path] = (kind, package, message)
-        self.assertEqual(actual, EXPECTED)
-        self.assertEqual(count, 8)
-        self.assertEqual(sum(value[0] == "subscription" for value in actual.values()), 3)
-        self.assertEqual(sum(value[0] == "publisher" for value in actual.values()), 5)
+                self.assertNotIn(topic, actual_topics, f"重复话题 {topic}")
+                actual_topics[topic] = (kind, package, message)
+        self.assertEqual(actual_topics, EXPECTED_TOPICS)
 
-    def test_no_service_client_action_or_legacy_entities(self):
-        text = "\n".join(source(name) for name in (
-            "motor_bridge.cpp", "param_bridge.cpp", "imu_bridge.cpp", "ros_bridge.cpp"))
-        self.assertNotRegex(text, r"\b(?:rcl|rclc)_(?:service|client|action)\w*\s*\(")
-        self.assertNotRegex(text, r"ROSIDL_GET_(?:SRV|ACTION)_TYPE_SUPPORT")
-        self.assertNotRegex(text, r"ROSIDL_GET_MSG_TYPE_SUPPORT\([^)]*\b(?:LowCommand|LowState|MotorStatus|MotorPolicyArray|MotorTrajectory|MotorEvent|DeviceParamReport|ConfigResult|Float32)\b")
+        param_text = source("param_bridge.cpp")
+        srv_pattern = r'rcl_service_init\(\s*&\w+,\s*\w+,\s*ROSIDL_GET_SRV_TYPE_SUPPORT\(\s*(\w+),\s*srv,\s*(\w+)\s*\),\s*"([^"]+)"'
+        actual_services = {
+            srv: (pkg, name)
+            for pkg, name, srv in re.findall(srv_pattern, param_text)
+        }
+        self.assertEqual(actual_services, EXPECTED_SERVICES)
 
-    def test_four_executor_handles(self):
-        motor = source("motor_bridge.cpp")
-        self.assertRegex(motor, r"motor_bridge_executor_handle_count\(void\)\s*\{\s*return 2U;")
-        self.assertEqual(motor.count("rclc_executor_add_subscription("), 2)
-        self.assertIn("#define PARAM_BRIDGE_EXECUTOR_HANDLES 1U", (FW / "include/motor/param_bridge.h").read_text())
-        self.assertIn("1U + motor_bridge_executor_handle_count()", source("ros_bridge.cpp"))
+    def test_rclc_lifecycle_enabled(self):
+        ros_text = source("ros_bridge.cpp")
+        self.assertIn("rclc_make_node_a_lifecycle_node(", ros_text)
+        self.assertIn("rclc_lifecycle_init_get_state_server(", ros_text)
+        self.assertIn("rclc_lifecycle_change_state(", ros_text)
 
     def test_stop_and_deadlines_are_explicit(self):
         text = source("motor_bridge.cpp")
         self.assertIn("motor_rt_request_stop_all()", text)
-        self.assertIn("valid_until_tick_ms", text)
-        self.assertIn("agent_deadline_valid(", text)
-        self.assertIn("agent_request_deadline(", text)
-        self.assertIn("motor_rt_submit_agent_trajectory(", text)
+        self.assertIn("kCommandTimeoutMs", text)
         self.assertNotIn("wire_command_guard", text)
-
-    def test_reliable_budget_and_info_retry_contract(self):
-        text = source("motor_bridge.cpp")
-        self.assertIn("serial_transport_send_begin()", text)
-        self.assertIn("serial_transport_send_end()", text)
-        self.assertIn("param_bridge_fill_status(", text)
-        self.assertIn("param_bridge_info_sent(", text)
 
     def test_temperature_uses_actual_sample_stamp(self):
         text = source("imu_bridge.cpp")

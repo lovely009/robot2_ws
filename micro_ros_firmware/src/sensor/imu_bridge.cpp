@@ -14,7 +14,6 @@
 #include <rclc/rclc.h>
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/temperature.h>
-#include <can_bridge_msgs/msg/agent_wire_contract.h>
 
 #include "sensor_task.h"
 #include "time_utils.h"
@@ -69,10 +68,10 @@ bool imu_bridge_create(rcl_node_t *node) {
   opts.qos = qos_stream();
   if (rcl_publisher_init(&g_imu_pub, node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-      can_bridge_msgs__msg__AgentWireContract__TOPIC_IMU, &opts) != RCL_RET_OK) return false;
+      "/imu/data", &opts) != RCL_RET_OK) return false;
   if (rcl_publisher_init(&g_temp_pub, node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Temperature),
-      can_bridge_msgs__msg__AgentWireContract__TOPIC_TEMPERATURE, &opts) != RCL_RET_OK) {
+      "/imu/temp_raw", &opts) != RCL_RET_OK) {
     const rcl_ret_t rc = rcl_publisher_fini(&g_imu_pub, node); (void)rc;
     return false;
   }

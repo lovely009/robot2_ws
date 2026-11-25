@@ -9,17 +9,16 @@ from launch_ros.actions import Node
 
 READ_TOPICS = [
     '/diagnostics', '/joint_states',
-    '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp',
-    '/motor/control_states', '/motor/motion_states', '/motor/topology',
-    '/motor/trajectory_state', '/motor/status_array', '/motor/events',
-    '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
-    '/control/status', '/control/trajectory_state', '/bench/status', '/micro_ros_up/status',
+    '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp_raw',
+    '/motor/motion', '/motor/state', '/motor/events',
+    '/control/status', '/bench/status',
     '/robot_sim/position_status',
 ]
-CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
-                  '/arm_controller/joint_trajectory', '/motor/system_command', '/motor/config_request',
+CONTROL_TOPICS = ['/control/joint_target', '/control/trajectory', '/control/stop',
                   '/robot_sim/joint_position_target']
-CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
+CONTROL_SERVICES = ['/motor/submit_policy', '/motor/execute_config',
+                    '/motor/get_device_info', '/micro_ros_node/*', '/bench/*',
+                    '/bench_manager/set_parameters_atomically',
                     '/workbench_control/set_parameters_atomically',
                     '/firmware_topic_bridge/set_parameters_atomically']
 

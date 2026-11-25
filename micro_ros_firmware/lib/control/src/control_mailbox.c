@@ -70,8 +70,6 @@ static uint8_t config_queue_index(uint8_t head, uint8_t offset) {
 
 static void clear_live_inputs(control_mailbox_t *mailbox) {
   control_mailbox_clear_command(mailbox);
-  // 轨迹与会话同寿命：断链后不得留一条「未来还要动」的时间线。
-  control_mailbox_clear_trajectory(mailbox);
   control_mailbox_clear_policy(mailbox);
   control_mailbox_clear_config(mailbox);
 }
@@ -106,7 +104,6 @@ static void revoke_authorization(control_mailbox_t *mailbox) {
     mailbox->authorization_disable_edge = true;
   }
   control_mailbox_clear_command(mailbox);
-  control_mailbox_clear_trajectory(mailbox);
   control_mailbox_clear_policy(mailbox);
 }
 
@@ -116,7 +113,6 @@ void control_mailbox_init(control_mailbox_t *mailbox) {
   }
   memset(mailbox, 0, sizeof(*mailbox));
   control_command_mailbox_init(&mailbox->command);
-  control_trajectory_mailbox_init(&mailbox->trajectory);
   control_policy_mailbox_init(&mailbox->policy);
   // 在首次收到 Agent 状态前允许启动阶段写入；真正的安全裁决仍在 runtime。
   mailbox->authorization_requested = true;
@@ -147,32 +143,6 @@ bool control_mailbox_take_command(control_mailbox_t *mailbox,
 void control_mailbox_clear_command(control_mailbox_t *mailbox) {
   if (mailbox != NULL) {
     control_command_mailbox_clear(&mailbox->command);
-  }
-}
-
-bool control_mailbox_submit_trajectory(control_mailbox_t *mailbox,
-    const control_trajectory_t *trajectory) {
-  if (mailbox == NULL) {
-    return false;
-  }
-  // 与 submit_command 逐条同门同序（门拒绝与载荷非法不重复计数）。
-  if (!live_input_allowed(mailbox, &mailbox->trajectory_rejected_count)) {
-    return false;
-  }
-  return control_trajectory_mailbox_publish(&mailbox->trajectory, trajectory);
-}
-
-bool control_mailbox_take_trajectory(control_mailbox_t *mailbox,
-    control_trajectory_t *trajectory) {
-  if (mailbox == NULL) {
-    return false;
-  }
-  return control_trajectory_mailbox_take(&mailbox->trajectory, trajectory);
-}
-
-void control_mailbox_clear_trajectory(control_mailbox_t *mailbox) {
-  if (mailbox != NULL) {
-    control_trajectory_mailbox_clear(&mailbox->trajectory);
   }
 }
 
@@ -280,7 +250,6 @@ void control_mailbox_request_authorization(control_mailbox_t *mailbox,
   if (!authorized) {
     mailbox->authorization_disable_edge = true;
     control_mailbox_clear_command(mailbox);
-    control_mailbox_clear_trajectory(mailbox);
   }
 }
 

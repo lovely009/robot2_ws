@@ -83,3 +83,23 @@ class TestOriginHandshake(AsyncHTTPTestCase):
                 connection = await websocket_connect(HTTPRequest(url, headers=headers))
                 connection.close()
             assert caught.exception.code == 403
+
+
+def test_bounded_strings_cover_submit_policy_response():
+    pytest.importorskip('rosbridge_library')
+    from can_bridge_msgs.srv import SubmitPolicy
+    from rosbridge_library.internal import message_conversion
+    from web_host.rosbridge_shim import _patch_bounded_strings
+
+    _patch_bounded_strings()
+    response = SubmitPolicy.Response(
+        accepted=True, session_id=1, intent_id='i1',
+        policy_generation=2, request_id=3, reason='ok',
+    )
+    extracted = message_conversion.extract_values(response)
+    assert extracted['intent_id'] == 'i1'
+    assert extracted['reason'] == 'ok'
+    roundtrip = SubmitPolicy.Response()
+    message_conversion.populate_instance(extracted, roundtrip)
+    assert roundtrip.intent_id == 'i1'
+    assert roundtrip.reason == 'ok'

@@ -283,3 +283,36 @@ def motor_library(root=None):
         params = spec.get("parameters") or {}
         out[str(name)] = {"protocol": str(spec.get("protocol") or name), **params}
     return out
+
+
+def model_motor_params(model, root=None):
+    """读取模型的 3 模板 + 37 电机差异参数表（motor_params.yaml）。"""
+    models_root = Path(root) if root is not None else _models_root()
+    if models_root is None or not models_root.is_dir():
+        raise ValueError("找不到模型根目录")
+    if not model or model != Path(model).name or model in (".", ".."):
+        raise ValueError(f"非法模型名：{model!r}")
+    path = models_root / model / "config" / "motor_params.yaml"
+    if not path.is_file():
+        raise ValueError(f"模型 {model!r} 缺少 config/motor_params.yaml")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    templates = data.get("templates") or {}
+    motors = []
+    for entry in data.get("motors") or []:
+        tpl_name = entry.get("template")
+        if tpl_name not in templates:
+            raise ValueError(f"未知电机模板：{tpl_name!r}")
+        merged = dict(templates[tpl_name])
+        merged.update(entry.get("overrides") or {})
+        merged["id"] = int(entry["id"])
+        merged["joint"] = str(entry["joint"])
+        merged["template"] = str(tpl_name)
+        if "group" in entry:
+            merged["group"] = str(entry["group"])
+        motors.append(merged)
+    return {
+        "model": model,
+        "schema_version": int(data.get("schema_version", 1)),
+        "templates": templates,
+        "motors": motors,
+    }

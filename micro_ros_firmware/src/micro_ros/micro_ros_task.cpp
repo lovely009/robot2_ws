@@ -92,13 +92,23 @@ static void micro_ros_task_fn(void *parameters) {
       if (!connected) {
         link_state_set(MICRO_ROS_LINK_LOST);
       } else {
-        if ((TickType_t)(xTaskGetTickCount() - last_sync) >= pdMS_TO_TICKS(AGENT_SYNC_PERIOD_MS)) {
+        const uint32_t sync_period = time_clock_valid() ? AGENT_SYNC_PERIOD_MS : 100U;
+        if ((TickType_t)(xTaskGetTickCount() - last_sync) >= pdMS_TO_TICKS(sync_period)) {
           // 校时结果显式进入健康门禁；旧非零 epoch 不代表同步仍健康。
-          serial_transport_send_begin();
-          const rmw_ret_t rc = rmw_uros_sync_session(AGENT_SYNC_TIMEOUT_MS);
-          serial_transport_send_end();
-          time_sync_record(rc == RMW_RET_OK,
-              rc == RMW_RET_OK ? rmw_uros_epoch_nanos() : 0);
+          // 单次 USB 调度抖动超过 20ms 时立即复核两次，避免误判导致 10s 时钟失锁。
+          for (int attempt = 0; attempt < 3; ++attempt) {
+            serial_transport_send_begin();
+            const rmw_ret_t rc = rmw_uros_sync_session(AGENT_SYNC_TIMEOUT_MS);
+            serial_transport_send_end();
+            time_sync_record(rc == RMW_RET_OK,
+                rc == RMW_RET_OK ? rmw_uros_epoch_nanos() : 0);
+            if (time_clock_valid()) {
+              break;
+            }
+            if (attempt < 2) {
+              vTaskDelay(pdMS_TO_TICKS(10));
+            }
+          }
           motor_rt_set_clock_valid(time_clock_valid());
           last_sync = xTaskGetTickCount();
         }

@@ -1,7 +1,4 @@
-// micro-ROS 桥接层（agent 通信生命周期）：node + executor + 周期定时器，断连后整体
-// 重建。业务域实体由 imu_bridge / motor_bridge / param_bridge 各自维护，本模块只管
-// 创建/销毁顺序与定时轮询分发。
-
+// micro-ROS 桥接层（agent 通信生命周期 + rclc_lifecycle + 原生话题/服务分发）。
 #include "ros_bridge.h"
 
 #include <Arduino.h>
@@ -11,6 +8,9 @@
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rclc_lifecycle/rclc_lifecycle.h>
+#include <lifecycle_msgs/msg/state.h>
+#include <lifecycle_msgs/msg/transition.h>
 #include <rmw_microros/time_sync.h>
 #include <rmw_microros/timing.h>
 
@@ -27,40 +27,62 @@ static rcl_node_t g_node;
 static rclc_executor_t g_executor;
 static rcl_timer_t g_timer;
 static rcl_allocator_t g_allocator;
+static rcl_lifecycle_state_machine_t g_state_machine;
+static rclc_lifecycle_node_t g_lifecycle_node;
+static rclc_lifecycle_service_context_t g_lifecycle_ctx;
 
-// executor 最大句柄数：定时器 + 各业务桥订阅数（桥自报，避免魔法数截断）。
-// 只有订阅/定时器/服务占 handle，发布不占。少算一个就在 add_subscription 上
-// 失败，且只在运行期以 WAIT_AGENT 无限重连的形式暴露。
-static size_t executor_handle_count() {
-  return 1U + motor_bridge_executor_handle_count() +
-         PARAM_BRIDGE_EXECUTOR_HANDLES;
-}
-
-// 按初始化阶段跟踪，保证失败/断连时只清理已成功创建的实体
 static bool g_support_up = false;
 static bool g_node_up = false;
+static bool g_lifecycle_up = false;
 static bool g_executor_up = false;
 static bool g_timer_up = false;
 
-// 周期定时器：驱动各业务域轮询（IMU、电机反馈与状态发布）
+static size_t executor_handle_count() {
+  // 1 timer + motor_bridge subs + param_bridge services + 3 lifecycle services
+  return 1U + motor_bridge_executor_handle_count() +
+         PARAM_BRIDGE_EXECUTOR_HANDLES + 3U;
+}
+
+static int on_lifecycle_configure(void) {
+  return RCL_RET_OK;
+}
+
+static int on_lifecycle_activate(void) {
+  motor_rt_set_agent_connected(true);
+  return RCL_RET_OK;
+}
+
+static int on_lifecycle_deactivate(void) {
+  motor_rt_request_stop_all();
+  return RCL_RET_OK;
+}
+
+static int on_lifecycle_cleanup(void) {
+  motor_rt_request_stop_all();
+  motor_rt_set_agent_connected(false);
+  return RCL_RET_OK;
+}
+
+bool ros_bridge_is_active(void) {
+  if (!g_lifecycle_up || g_state_machine.current_state == nullptr) {
+    return false;
+  }
+  return g_state_machine.current_state->id ==
+         lifecycle_msgs__msg__State__PRIMARY_STATE_ACTIVE;
+}
+
 static void bridge_timer_cb(rcl_timer_t *timer, int64_t last_call_time) {
   (void)timer;
   (void)last_call_time;
   imu_bridge_poll();
   motor_bridge_poll();
-  // motor_bridge_poll 内先转发事件、更新参数快照，再统一发送。
 }
 
-// ---------------------------------------------------------------------------
-// 对外接口（micro_ros_task 调用；可重入：断连后整体重建）
-// ---------------------------------------------------------------------------
 void ros_bridge_destroy() {
-  // 先通知实时任务失联，使旧命令在 ROS 实体清理期间即失效。
   motor_rt_set_agent_connected(false);
   motor_rt_set_clock_valid(false);
   time_sync_reset();
   if (g_support_up) {
-    // Agent 已失联，逐实体等待远端删除确认只会延迟下一次建链。
     const rmw_ret_t rc = rmw_uros_set_context_entity_destroy_session_timeout(
         rcl_context_get_rmw_context(&g_support.context), 0);
     (void)rc;
@@ -70,33 +92,31 @@ void ros_bridge_destroy() {
   param_bridge_destroy(&g_node, &g_executor);
 
   if (g_timer_up) {
-    rcl_ret_t rc = rclc_executor_remove_timer(&g_executor, &g_timer);
-    rc = rcl_timer_fini(&g_timer);
-    (void)rc;
+    (void)rclc_executor_remove_timer(&g_executor, &g_timer);
+    (void)rcl_timer_fini(&g_timer);
     g_timer_up = false;
   }
   if (g_executor_up) {
-    rcl_ret_t rc = rclc_executor_fini(&g_executor);
-    (void)rc;
+    (void)rclc_executor_fini(&g_executor);
     g_executor_up = false;
   }
+  if (g_lifecycle_up) {
+    (void)rclc_lifecycle_node_fini(&g_lifecycle_node, &g_allocator);
+    g_lifecycle_up = false;
+  }
   if (g_node_up) {
-    rcl_ret_t rc = rcl_node_fini(&g_node);
-    (void)rc;
+    (void)rcl_node_fini(&g_node);
     g_node_up = false;
   }
   if (g_support_up) {
-    rcl_ret_t rc = rclc_support_fini(&g_support);
-    (void)rc;
+    (void)rclc_support_fini(&g_support);
     g_support_up = false;
   }
 }
 
 bool ros_bridge_create() {
-  // 先清残留，保证可重入（agent 断连后整体重建）
   ros_bridge_destroy();
 
-  // rclc_support/executor 保存 allocator 指针而非拷贝，必须使用静态存储
   g_allocator = rcl_get_default_allocator();
   if (rclc_support_init(&g_support, 0, nullptr, &g_allocator) != RCL_RET_OK) {
     return false;
@@ -109,6 +129,19 @@ bool ros_bridge_create() {
   }
   g_node_up = true;
 
+  g_state_machine = rcl_lifecycle_get_zero_initialized_state_machine();
+  if (rclc_make_node_a_lifecycle_node(&g_lifecycle_node, &g_node,
+      &g_state_machine, &g_allocator, true) != RCL_RET_OK) {
+    ros_bridge_destroy();
+    return false;
+  }
+  g_lifecycle_up = true;
+  g_lifecycle_ctx.lifecycle_node = &g_lifecycle_node;
+  (void)rclc_lifecycle_register_on_configure(&g_lifecycle_node, on_lifecycle_configure);
+  (void)rclc_lifecycle_register_on_activate(&g_lifecycle_node, on_lifecycle_activate);
+  (void)rclc_lifecycle_register_on_deactivate(&g_lifecycle_node, on_lifecycle_deactivate);
+  (void)rclc_lifecycle_register_on_cleanup(&g_lifecycle_node, on_lifecycle_cleanup);
+
   if (rclc_executor_init(&g_executor, &g_support.context, executor_handle_count(),
       &g_allocator) != RCL_RET_OK) {
     ros_bridge_destroy();
@@ -116,23 +149,20 @@ bool ros_bridge_create() {
   }
   g_executor_up = true;
 
-  if (!imu_bridge_create(&g_node)) {
-    ros_bridge_destroy();
-    return false;
-  }
-  if (!motor_bridge_create(&g_node, &g_executor)) {
-    ros_bridge_destroy();
-    return false;
-  }
-  if (!param_bridge_create(&g_node, &g_executor)) {
+  if (rclc_lifecycle_init_get_state_server(&g_lifecycle_ctx, &g_executor) != RCL_RET_OK ||
+      rclc_lifecycle_init_get_available_states_server(&g_lifecycle_ctx, &g_executor) != RCL_RET_OK ||
+      rclc_lifecycle_init_change_state_server(&g_lifecycle_ctx, &g_executor) != RCL_RET_OK) {
     ros_bridge_destroy();
     return false;
   }
 
+  if (!imu_bridge_create(&g_node) ||
+      !motor_bridge_create(&g_node, &g_executor) ||
+      !param_bridge_create(&g_node, &g_executor)) {
+    ros_bridge_destroy();
+    return false;
+  }
 
-  // 10ms 周期：IMU 最多100Hz，motion 每20ms一代，可靠流每轮最多一条；
-  // status 按编译期频率发送、重要变化最小20ms，温度仅新样本2Hz。
-  // USB CDC 最大负载与可靠分片阻塞仍需台架验证。
   if (rclc_timer_init_default(&g_timer, &g_support, RCL_MS_TO_NS(10),
       bridge_timer_cb) != RCL_RET_OK) {
     ros_bridge_destroy();
@@ -144,8 +174,7 @@ bool ros_bridge_create() {
     ros_bridge_destroy();
     return false;
   }
-  // 会话已建立：发起一次 NTP 时间同步，使 rmw_uros_epoch_nanos() 与主机对齐。
-  // 同步成功后分配会话标识；未建立会话时禁止接收运动授权。
+
   const bool sync_ok = rmw_uros_sync_session(1000) == RMW_RET_OK;
   const uint64_t epoch_ns = sync_ok ? rmw_uros_epoch_nanos() : 0;
   time_sync_record(sync_ok, epoch_ns);
@@ -153,9 +182,15 @@ bool ros_bridge_create() {
     ros_bridge_destroy();
     return false;
   }
-  // 仅在所有实体和 executor handle 均就绪后允许接收新电机命令。
+
   motor_rt_set_clock_valid(true);
-  motor_rt_set_agent_connected(true);
+  if (rclc_lifecycle_change_state(&g_lifecycle_node,
+      lifecycle_msgs__msg__Transition__TRANSITION_CONFIGURE, true) != RCL_RET_OK ||
+      rclc_lifecycle_change_state(&g_lifecycle_node,
+      lifecycle_msgs__msg__Transition__TRANSITION_ACTIVATE, true) != RCL_RET_OK) {
+    ros_bridge_destroy();
+    return false;
+  }
   return true;
 }
 
@@ -163,6 +198,5 @@ void ros_bridge_spin() {
   if (!g_executor_up) {
     return;
   }
-  // 处理 executor 回调（运行定时器发布，并服务微-ROS 会话）
   rclc_executor_spin_some(&g_executor, 0U);
 }

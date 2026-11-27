@@ -1066,7 +1066,14 @@ TEST_F(MicroRosSystemTest, SoftStopComplianceAllowsRecoveryButRejectsOutwardOrLa
     interfaces = system->export_command_interfaces();
   };
 
+  // Case 0: tiny Hermite deceleration bulge (measured = upper + 0.0001, command upper + 0.0005 -> OK, then upper -> OK)
+  publish_pitch(upper + 0.0001);
+  EXPECT_EQ(write_pitch(upper + 0.0005), hardware_interface::return_type::OK);
+  publish_pitch(upper);
+  EXPECT_EQ(write_pitch(upper), hardware_interface::return_type::OK);
+
   // Case 1: measured = upper + 0.005, command intermediate recovery upper + 0.003 (above_max == true) -> OK
+  reactivate();
   publish_pitch(upper + 0.005);
   ASSERT_GT(system->export_state_interfaces()[0].get_value(), upper);
   EXPECT_EQ(write_pitch(upper + 0.003), hardware_interface::return_type::OK);
@@ -1076,30 +1083,38 @@ TEST_F(MicroRosSystemTest, SoftStopComplianceAllowsRecoveryButRejectsOutwardOrLa
   ASSERT_LT(system->export_state_interfaces()[0].get_value(), upper);
   EXPECT_EQ(write_pitch(upper + 0.002), hardware_interface::return_type::OK);
 
-  // Case 3: command outward upper + 0.0025 (> previous watermark upper + 0.002) -> ERROR
-  EXPECT_EQ(write_pitch(upper + 0.0025), hardware_interface::return_type::ERROR);
+  // Case 3: outward command exceeding ceil (measured = upper + 0.005 -> ceil = upper + 0.007, command upper + 0.008) -> ERROR
+  EXPECT_EQ(write_pitch(upper + 0.008), hardware_interface::return_type::ERROR);
 
-  // Case 4: after recovering inside limits (upper) with measured <= upper, commanding upper + 0.001 -> ERROR
+  // Case 4: post-recovery re-exit when measured = upper - 0.005, command upper + 0.001 -> ERROR
   reactivate();
   publish_pitch(upper + 0.005);
   EXPECT_EQ(write_pitch(upper + 0.003), hardware_interface::return_type::OK);
-  publish_pitch(upper);
+  publish_pitch(upper - 0.005);
   EXPECT_EQ(write_pitch(upper), hardware_interface::return_type::OK);
   EXPECT_EQ(write_pitch(upper + 0.001), hardware_interface::return_type::ERROR);
 
-  // Case 5a: symmetric lower-limit (lower - 0.005) inward recovery -> OK, outward -> ERROR
+  // Case 5a: symmetric lower-limit (lower - 0.005) inward recovery -> OK, outward > ceil/floor -> ERROR
   reactivate();
   publish_pitch(lower - 0.005);
   ASSERT_LT(system->export_state_interfaces()[0].get_value(), lower);
   EXPECT_EQ(write_pitch(lower - 0.003), hardware_interface::return_type::OK);
   publish_pitch(lower + 0.001);
   EXPECT_EQ(write_pitch(lower - 0.002), hardware_interface::return_type::OK);
-  EXPECT_EQ(write_pitch(lower - 0.0025), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(write_pitch(lower - 0.008), hardware_interface::return_type::ERROR);
 
   // Case 5b: overshoot > 0.02 (upper + 0.03) -> ERROR
   reactivate();
   publish_pitch(upper + 0.03);
   EXPECT_EQ(write_pitch(upper + 0.03), hardware_interface::return_type::ERROR);
+
+  // Case 6: after partial recovery (upper + 0.002), JTC abort holds at measured (upper + 0.005) -> OK, outward > ceil -> ERROR
+  reactivate();
+  publish_pitch(upper + 0.005);
+  EXPECT_EQ(write_pitch(upper + 0.002), hardware_interface::return_type::OK);
+  EXPECT_EQ(write_pitch(system->export_state_interfaces()[0].get_value()),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(write_pitch(upper + 0.008), hardware_interface::return_type::ERROR);
 }
 
 TEST_F(MicroRosSystemTest, ArmRevocationLatchesUntilExplicitReactivation) {

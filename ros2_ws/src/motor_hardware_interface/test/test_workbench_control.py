@@ -1479,3 +1479,26 @@ def test_soft_stop_compliance_uncommanded_coupled_group_succeeds(coupled_files, 
     with pytest.raises(ValueError, match='限位'):
         model.joint_trajectory(bad_coupled_msg, rec_measured, NOW, linear=linear)
 
+
+def test_cubic_hermite_compliance_bulge_on_uncommanded_joint(files):
+    model = wc.WorkbenchModel(*files)
+    # 复现 left_wrist_roll 场景：未指令关节在 hi + 0.00002 且带有微弱向外实测速度 +0.005 rad/s
+    state = feedback()
+    state.position = [1.00002, 0.0, 0.0]
+    state.velocity = [0.005, 0.0, 0.0]
+    measured = model.feedback(state, NOW)
+    msg = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[0.5], velocities=[0.0],
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    result = model.joint_trajectory(msg, measured, NOW, linear=False)
+    assert list(result.points[-1].positions) == [1.0, 0.0, 0.5]
+
+    # 若实测初速度过大，导致三次 Hermite 减速凸起超过 COMPLIANCE_BULGE_RAD (0.002)，仍应拒绝
+    large_vel_state = feedback()
+    large_vel_state.position = [1.00002, 0.0, 0.0]
+    large_vel_state.velocity = [0.1, 0.0, 0.0]
+    with pytest.raises(ValueError, match='插值越过位置限位'):
+        model.joint_trajectory(msg, model.feedback(large_vel_state, NOW), NOW, linear=False)
+
+

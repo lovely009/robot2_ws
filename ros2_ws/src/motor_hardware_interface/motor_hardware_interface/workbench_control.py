@@ -42,6 +42,7 @@ DYNAMIC_STATUS_PERIOD = 0.2
 DYNAMIC_LIMIT_EPS = 1e-4
 TRAJECTORY_MAX_POINTS = 8192  # 与网页一致，按展开后的电机路点计数。
 HOLD_COMPLIANCE_RAD = 0.02  # 软停/重力顺从导致未指令关节或起点轻微越过耦合箱式限位的容差。
+COMPLIANCE_BULGE_RAD = 0.002  # 三次 Hermite 首段因实测初速度产生的轻微减速凸起容差。
 ACTION = '/host_control/trajectory_controller/follow_joint_trajectory'
 CHANNELS = ('position', 'velocity', 'effort')
 
@@ -381,10 +382,22 @@ class WorkbenchModel:
             seg_hi = np.broadcast_to(hi, p0.shape).copy()
             if len(p0):
                 for j in range(J):
-                    if m_pos[j] < lo[j] and lo[j] - m_pos[j] <= HOLD_COMPLIANCE_RAD:
-                        seg_lo[0, j] = float(m_pos[j])
-                    elif m_pos[j] > hi[j] and m_pos[j] - hi[j] <= HOLD_COMPLIANCE_RAD:
-                        seg_hi[0, j] = float(m_pos[j])
+                    if linear:
+                        if 0 < lo[j] - m_pos[j] <= HOLD_COMPLIANCE_RAD:
+                            seg_lo[0, j] = float(m_pos[j])
+                        elif 0 < m_pos[j] - hi[j] <= HOLD_COMPLIANCE_RAD:
+                            seg_hi[0, j] = float(m_pos[j])
+                    else:
+                        if lo[j] - HOLD_COMPLIANCE_RAD <= m_pos[j] <= lo[j] + COMPLIANCE_BULGE_RAD:
+                            seg_lo[0, j] = max(
+                                float(lo[j] - HOLD_COMPLIANCE_RAD),
+                                min(float(m_pos[j]), float(lo[j])) - COMPLIANCE_BULGE_RAD,
+                            )
+                        if hi[j] - COMPLIANCE_BULGE_RAD <= m_pos[j] <= hi[j] + HOLD_COMPLIANCE_RAD:
+                            seg_hi[0, j] = min(
+                                float(hi[j] + HOLD_COMPLIANCE_RAD),
+                                max(float(m_pos[j]), float(hi[j])) + COMPLIANCE_BULGE_RAD,
+                            )
             if linear:
                 bad_pos = (p0 < seg_lo) | (p0 > seg_hi) | (p1 < lo) | (p1 > hi)
                 if bad_pos.any():
@@ -400,7 +413,7 @@ class WorkbenchModel:
                 b = -3.0 * p0 + 3.0 * p1 - dt * (2.0 * v0 + v1)
                 c = dt * v0
                 lo_tol, hi_tol = seg_lo - 1e-7, seg_hi + 1e-7
-                bad_pos = (p0 < lo_tol) | (p0 > hi_tol) | (p1 < lo_tol) | (p1 > hi_tol)
+                bad_pos = (p0 < lo_tol) | (p0 > hi_tol) | (p1 < lo - 1e-7) | (p1 > hi + 1e-7)
                 has_a = np.abs(a) > 1e-14
                 disc = 4.0 * b * b - 12.0 * a * c
                 has_roots = has_a & (disc >= 0.0)
@@ -523,17 +536,27 @@ class WorkbenchModel:
                     raise ValueError('零时刻目标必须与实测 P/V 连续')
                 continue
             lower, upper, velocity, _ = self.limits[name]
-            eff_lo = p.position if (math.isfinite(p.position) and p.position < lower
-                                    and lower - p.position <= HOLD_COMPLIANCE_RAD) else lower
-            eff_hi = p.position if (math.isfinite(p.position) and p.position > upper
-                                    and p.position - upper <= HOLD_COMPLIANCE_RAD) else upper
             if linear:
+                eff_lo = p.position if (math.isfinite(p.position) and p.position < lower
+                                        and lower - p.position <= HOLD_COMPLIANCE_RAD) else lower
+                eff_hi = p.position if (math.isfinite(p.position) and p.position > upper
+                                        and p.position - upper <= HOLD_COMPLIANCE_RAD) else upper
                 if not eff_lo <= p.position <= eff_hi or not lower <= q.position <= upper:
                     raise ValueError(f'{name} 线性插值越过位置限位')
                 speed = (q.position - p.position)/dt
                 if not math.isfinite(speed) or abs(speed) > velocity+1e-7:
                     raise ValueError(f'{name} 线性插值越过速度限位')
                 continue
+            eff_lo = (max(lower - HOLD_COMPLIANCE_RAD, min(p.position, lower) - COMPLIANCE_BULGE_RAD)
+                      if (math.isfinite(p.position)
+                          and lower - HOLD_COMPLIANCE_RAD <= p.position <= lower + COMPLIANCE_BULGE_RAD)
+                      else lower)
+            eff_hi = (min(upper + HOLD_COMPLIANCE_RAD, max(p.position, upper) + COMPLIANCE_BULGE_RAD)
+                      if (math.isfinite(p.position)
+                          and upper - COMPLIANCE_BULGE_RAD <= p.position <= upper + HOLD_COMPLIANCE_RAD)
+                      else upper)
+            if not lower - 1e-7 <= q.position <= upper + 1e-7:
+                raise ValueError(f'{name} JTC 插值越过位置限位')
             a = 2*p.position - 2*q.position + dt*(p.velocity + q.velocity)
             b = -3*p.position + 3*q.position - dt*(2*p.velocity + q.velocity)
             c = dt*p.velocity

@@ -9,7 +9,7 @@
     <visual name="Base_link_vis_0">
       <origin xyz="0 0 0" rpy="0 -0 0" />
       <geometry>
-        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/Base_link.STL" />
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/Base_link_housing.STL" />
       </geometry>
       <material name="Base_link_vis_0_color">
         <color rgba="0.82 0.85 0.88 1" />
@@ -32,7 +32,7 @@
     <visual name="waist_yaw_vis_0">
       <origin xyz="0 0 0" rpy="0 -0 0" />
       <geometry>
-        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual/native/waist_yaw.STL" />
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_yaw_housing.STL" />
       </geometry>
       <material name="waist_yaw_vis_0_color">
         <color rgba="0.82 0.85 0.88 1" />
@@ -63,7 +63,7 @@
     </visual>
   </link>
   <joint name="waist_roll" type="revolute">
-    <limit lower="-0.244346" upper="0.226893" effort="0" velocity="0" />
+    <limit lower="-0.226893" upper="0.226893" effort="0" velocity="0" />
     <parent link="waist_pitch" />
     <child link="waist_roll" />
     <origin xyz="0 0 0" rpy="1.4288992766316 -1.5707963126528 -2.9996956034265" />
@@ -295,7 +295,7 @@
   <joint name="left_wrist_flange_proximal" type="continuous" simulation_auxiliary="true">
     <parent link="left_forearm_yaw" />
     <child link="left_wrist_flange_proximal_body" />
-    <origin xyz="0.010409813 0.0170832654 0.0370007754" rpy="2.4963777289714e-05 -3.1302481276175e-05 0.50677683178104" />
+    <origin xyz="-0.0130177505 -0.0157208059 0.037000776" rpy="2.498017407878e-05 -3.1327367364038e-05 -2.6348158218093" />
     <axis xyz="0.8373832287 0.5466162533 0" />
   </joint>
   <link name="left_wrist_flange_proximal_body">
@@ -328,7 +328,7 @@
   <joint name="left_wrist_flange_distal" type="continuous" simulation_auxiliary="true">
     <parent link="left_forearm_yaw" />
     <child link="left_wrist_flange_distal_body" />
-    <origin xyz="-0.00813965714 -0.0183570648 0.0719991806" rpy="2.4963777289714e-05 -3.1302481276175e-05 0.50677683178104" />
+    <origin xyz="0.00553172019 0.0197195251 0.07199918" rpy="2.498017407878e-05 -3.1327367364038e-05 -2.6348158218093" />
     <axis xyz="0.8373832312 0.5466162494 0" />
   </joint>
   <link name="left_wrist_flange_distal_body">
@@ -543,7 +543,7 @@
     </visual>
   </link>
   <joint name="right_wrist_roll" type="revolute">
-    <limit lower="-0.506145" upper="0.471239" effort="0" velocity="0" />
+    <limit lower="-0.488692" upper="0.471239" effort="0" velocity="0" />
     <parent link="right_wrist_pitch" />
     <child link="right_wrist_roll" />
     <origin xyz="0 0 0" rpy="1.5707963272451 -0.063075651642703 -1.2452882691803" />
@@ -568,7 +568,7 @@
   <joint name="right_wrist_flange_proximal" type="continuous" simulation_auxiliary="true">
     <parent link="right_forearm_yaw" />
     <child link="right_wrist_flange_proximal_body" />
-    <origin xyz="-0.0177275629 -0.00614839898 0.0364991803" rpy="-2.615075550431e-05 -3.0359538092727e-05 1.1019224403377" />
+    <origin xyz="-0.00552566203 0.019712762 0.0364991803" rpy="-2.615075563195e-05 -3.0359538125427e-05 -0.46887388635181" />
     <axis xyz="0.8156389792 -0.5785611943 0" />
   </joint>
   <link name="right_wrist_flange_proximal_body">
@@ -601,7 +601,7 @@
   <joint name="right_wrist_flange_distal" type="continuous" simulation_auxiliary="true">
     <parent link="right_forearm_yaw" />
     <child link="right_wrist_flange_distal_body" />
-    <origin xyz="0.0177123944 0.0123959573 0.0715007763" rpy="-2.615075550431e-05 -3.0359538092727e-05 1.1019224403377" />
+    <origin xyz="0.0130186943 -0.0157271954 0.0715007763" rpy="-2.615075563195e-05 -3.0359538125427e-05 -0.46887388635181" />
     <axis xyz="0.8156390105 -0.5785611502 0" />
   </joint>
   <link name="right_wrist_flange_distal_body">
@@ -634,7 +634,7 @@
   <joint name="left_shoulder_flange_linkage" type="continuous" simulation_auxiliary="true">
     <parent link="waist_roll" />
     <child link="left_shoulder_flange_linkage_body" />
-    <origin xyz="0.0286535037 0.128499935 -0.0553184313" rpy="-3.1415908181916 0.036848974765054 3.1415925858838" />
+    <origin xyz="0.09434598 0.128499935 -0.0361815526" rpy="1.8353982235021e-06 -0.036848974765054 6.7705974440363e-08" />
     <axis xyz="1 0 0" />
   </joint>
   <link name="left_shoulder_flange_linkage_body">
@@ -667,7 +667,7 @@
   <joint name="right_shoulder_flange_linkage" type="continuous" simulation_auxiliary="true">
     <parent link="waist_roll" />
     <child link="right_shoulder_flange_linkage_body" />
-    <origin xyz="-0.0286534796 0.128499931 -0.0510179914" rpy="-3.1415908181916 -0.036848974765054 -3.1415925858838" />
+    <origin xyz="-0.0943470367 0.128499931 -0.0361819925" rpy="1.8353982234984e-06 0.036848974765054 -6.7705974640465e-08" />
     <axis xyz="1 0 0" />
   </joint>
   <link name="right_shoulder_flange_linkage_body">
@@ -709,6 +709,15 @@
       <mass value="0.01" />
       <inertia ixx="1e-06" iyy="1e-06" izz="1e-06" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="waist_plus_flange_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_plus_flange_vis.STL" />
+      </geometry>
+      <material name="waist_plus_flange_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <link name="waist_plus_rod_axis_frame_1" />
   <joint name="waist_plus_rod_x" type="continuous" simulation_auxiliary="true">
@@ -729,6 +738,15 @@
       <mass value="0.01" />
       <inertia ixx="1.47000233e-06" iyy="1.47000233e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="waist_plus_rod_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_plus_rod_vis.STL" />
+      </geometry>
+      <material name="waist_plus_rod_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <joint name="waist_flange_minus_x" type="continuous" simulation_auxiliary="true">
     <parent link="waist_yaw" />
@@ -742,6 +760,15 @@
       <mass value="0.01" />
       <inertia ixx="1e-06" iyy="1e-06" izz="1e-06" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="waist_minus_flange_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_minus_flange_vis.STL" />
+      </geometry>
+      <material name="waist_minus_flange_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <link name="waist_minus_rod_axis_frame_1" />
   <joint name="waist_minus_rod_x" type="continuous" simulation_auxiliary="true">
@@ -762,6 +789,15 @@
       <mass value="0.01" />
       <inertia ixx="1.47000233e-06" iyy="1.47000233e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="waist_minus_rod_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_minus_rod_vis.STL" />
+      </geometry>
+      <material name="waist_minus_rod_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <joint name="pelvis_roll" type="revolute">
     <limit lower="-0.034907" upper="0.10472" effort="0" velocity="0" />
@@ -1134,7 +1170,7 @@
   <joint name="hips_flange_plus_x" type="continuous" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_plus_flange" />
-    <origin xyz="0.0187838629 0.0719999877 0.0230986548" rpy="0.33597220808003 -3.5335143114269e-07 1.5707968033395" />
+    <origin xyz="-0.000321641033 -0.0719999877 0.0297705954" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
     <axis xyz="0 0 1" />
   </joint>
   <link name="hips_plus_flange">
@@ -1143,6 +1179,15 @@
       <mass value="0.01" />
       <inertia ixx="1e-06" iyy="1e-06" izz="1e-06" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="hips_plus_flange_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/hips_plus_flange_vis.STL" />
+      </geometry>
+      <material name="hips_plus_flange_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <link name="hips_plus_rod_axis_frame_1" />
   <joint name="hips_plus_rod_x" type="continuous" simulation_auxiliary="true">
@@ -1163,11 +1208,20 @@
       <mass value="0.01" />
       <inertia ixx="3.52083332e-06" iyy="3.52083332e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="hips_plus_rod_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/hips_plus_rod_vis.STL" />
+      </geometry>
+      <material name="hips_plus_rod_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <joint name="hips_flange_minus_x" type="continuous" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_minus_flange" />
-    <origin xyz="0.0187839314 -0.0720000123 0.0230986037" rpy="0.33597220808003 -3.5335143114269e-07 1.5707968033395" />
+    <origin xyz="-0.000321726363 0.0720000123 0.0297705981" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
     <axis xyz="0 0 1" />
   </joint>
   <link name="hips_minus_flange">
@@ -1176,6 +1230,15 @@
       <mass value="0.01" />
       <inertia ixx="1e-06" iyy="1e-06" izz="1e-06" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="hips_minus_flange_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/hips_minus_flange_vis.STL" />
+      </geometry>
+      <material name="hips_minus_flange_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <link name="hips_minus_rod_axis_frame_1" />
   <joint name="hips_minus_rod_x" type="continuous" simulation_auxiliary="true">
@@ -1196,5 +1259,14 @@
       <mass value="0.01" />
       <inertia ixx="3.52083328e-06" iyy="3.52083328e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
+    <visual name="hips_minus_rod_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/hips_minus_rod_vis.STL" />
+      </geometry>
+      <material name="hips_minus_rod_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
 </robot>

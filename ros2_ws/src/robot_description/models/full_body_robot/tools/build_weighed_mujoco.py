@@ -45,7 +45,7 @@ DIFF_TO_URDF_JOINTS = {
     'left_shoulder': {'BN_LeftShoulder_1': 'left_scapula_yaw', 'BN_LeftShoulder_2': 'left_scapula_roll'},
     'right_shoulder': {'BN_RightShoulder_1': 'right_scapula_yaw', 'BN_RightShoulder_2': 'right_scapula_roll'},
     'left_wrist': {'BN_LeftHand_roll': 'left_wrist_roll', 'BN_LeftHand_pitch': 'left_wrist_pitch'},
-    'right_wrist': {'BN_RightHand_roll': 'right_wrist_roll', 'BN_RightHand_pitch': 'right_wrist_pitch'},
+    'right_wrist': {'BN_RightHand_roll': 'right_wrist_pitch', 'BN_RightHand_pitch': 'right_wrist_roll'},
 }
 
 CAD_MESH_FILES = {
@@ -224,36 +224,198 @@ def align_module_to_urdf(name: str, group: dict, urdf_joints: dict, frames: dict
     old_anchor /= len(jmap)
     new_anchor /= len(jmap)
 
-    # Break 180-deg flip ambiguity using motor-to-gimbal direction in ref_link frame
-    flange_positions = [
+    # Score all 4 (s1, s2) sign combinations against actual weighed ref_link & out_link STLs
+    from scipy.spatial import cKDTree
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    def _stl_tree(stl_path: Path) -> cKDTree:
+        r = vtk.vtkSTLReader()
+        r.SetFileName(str(stl_path))
+        r.Update()
+        pts = vtk_to_numpy(r.GetOutput().GetPoints().GetData()).astype(float)
+        return cKDTree(pts)
+
+    ref_tree = _stl_tree(MODEL / f'meshes/visual/native/{ref_link}.STL')
+    out_tree = _stl_tree(MODEL / f'meshes/visual/native/{out_link}.STL')
+    R_out_ref = out_rot.inv() * ref_rot
+    t_out_ref = out_rot.inv().apply(ref_pos - out_pos)
+
+    lowers, uppers = [], []
+    for sp in module_xml.findall('tendon/spatial'):
+        lo_s, hi_s = [s.get('site') for s in sp.findall('site')]
+        lowers.append(mod_data.site(lo_s).xpos.copy())
+        uppers.append(mod_data.site(hi_s).xpos.copy())
+    flanges = [
         np.fromstring(b.get('pos', '0 0 0'), sep=' ')
         for b in module_xml.findall('worldbody/body')
         if b.find('joint').get('name') not in jmap
     ]
-    v_old = old_anchor - np.mean(flange_positions, axis=0)
-    v_old_n = v_old / (np.linalg.norm(v_old) + 1e-12)
-    v_new_n = new_anchor / (np.linalg.norm(new_anchor) + 1e-12)
+    lowers, uppers, flanges = np.array(lowers), np.array(uppers), np.array(flanges)
 
     best_rot = Rotation.identity()
-    best_score = -1e9
+    best_score = float('inf')
     best_err = float('inf')
-    best_dot = 0.0
+    best_lo = best_hi = best_fl = 0.0
     for s1 in (1.0, -1.0):
         for s2 in (1.0, -1.0):
             rot, rssd = Rotation.align_vectors(
                 [new_axes[0], new_axes[1]],
                 [s1 * old_axes[0], s2 * old_axes[1]],
             )
-            dot = float(np.dot(rot.apply(v_old_n), v_new_n))
-            score = -100.0 * rssd + dot
-            if score > best_score:
+            t_cand = new_anchor - rot.apply(old_anchor)
+            lo_ref = rot.apply(lowers) + t_cand
+            hi_out = R_out_ref.apply(rot.apply(uppers) + t_cand) + t_out_ref
+            fl_ref = rot.apply(flanges) + t_cand
+            d_lo = float(ref_tree.query(lo_ref)[0].mean()) * 1000.0
+            d_hi = float(out_tree.query(hi_out)[0].mean()) * 1000.0
+            d_fl = float(ref_tree.query(fl_ref)[0].mean()) * 1000.0
+            score = 100000.0 * rssd + d_lo + d_hi + d_fl
+            if score < best_score:
                 best_score = score
                 best_err = rssd
                 best_rot = rot
-                best_dot = dot
+                best_lo, best_hi, best_fl = d_lo, d_hi, d_fl
     t_align = new_anchor - best_rot.apply(old_anchor)
-    print(f'  [{name:14s}] axis_align_rms={best_err:.4f}, motor_side_dot={best_dot:+.3f}, t_align={np.round(t_align, 4).tolist()}')
+    print(f'  [{name:14s}] axis_align_rms={best_err:.4f}, lo={best_lo:.1f}mm hi={best_hi:.1f}mm fl={best_fl:.1f}mm, t_align={np.round(t_align, 4).tolist()}')
     return path, module_xml, mod_model, mod_data, ref_link, out_link, ref_pos, ref_rot, out_pos, out_rot, best_rot, t_align
+
+
+def _write_binary_stl(path: Path, pts: np.ndarray, tris: np.ndarray) -> None:
+    import struct
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tri_pts = pts[tris].astype(np.float32)
+    v1 = tri_pts[:, 1] - tri_pts[:, 0]
+    v2 = tri_pts[:, 2] - tri_pts[:, 0]
+    norms = np.cross(v1, v2)
+    nlen = np.linalg.norm(norms, axis=1, keepdims=True)
+    norms = np.divide(norms, nlen, out=np.zeros_like(norms), where=nlen > 1e-12)
+    with path.open('wb') as f:
+        f.write(b'split weighed linkage'.ljust(80, b'\0'))
+        f.write(struct.pack('<I', len(tris)))
+        rec = np.zeros(len(tris), dtype=[('n', '<f4', 3), ('v', '<f4', (3, 3)), ('attr', '<u2')])
+        rec['n'] = norms
+        rec['v'] = tri_pts
+        f.write(rec.tobytes())
+
+
+def _split_weighed_visual_linkages(root: ET.Element, mj_model) -> None:
+    """Split real SolidWorks cranks & pushrods from weighed STLs into moving MuJoCo bodies."""
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    zero_data = mujoco.MjData(mj_model)
+    mujoco.mj_forward(mj_model, zero_data)
+
+    assets = root.find('asset')
+    mesh_els = {el.get('name'): el for el in assets.findall('mesh')}
+    body_els = {el.get('name'): el for el in root.iter('body') if el.get('name')}
+    parent_map = {child: parent for parent in root.iter('body') for child in parent.findall('body')}
+
+    split_dir = MODEL / 'mujoco/visual_split'
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = [
+        {
+            'link': 'waist_yaw',
+            'src_stl': MODEL / 'meshes/visual/native/waist_yaw.STL',
+            'mesh_name': 'waist_yaw_vis_0',
+            'decimate_faces': 0,
+            'group': 'waist',
+            'rod_sets': [{58}, {68}],
+            'flange_sets': [{57, 2, 63, 69}, {64, 65, 66, 71}],
+        },
+        {
+            'link': 'Base_link',
+            'src_stl': MODEL / 'meshes/collision/native/Base_link.STL',
+            'mesh_name': 'Base_link_vis_0',
+            'decimate_faces': 30000,
+            'group': 'hips',
+            'rod_sets': [{153}, {163}],
+            'flange_sets': [{155, 152, 158, 171}, {159, 162, 157, 166}],
+        },
+    ]
+
+    for spec in specs:
+        link_name = spec['link']
+        gname = spec['group']
+        r = vtk.vtkSTLReader()
+        r.SetFileName(str(spec['src_stl']))
+        r.Update()
+        conn = vtk.vtkPolyDataConnectivityFilter()
+        conn.SetInputConnection(r.GetOutputPort())
+        conn.SetExtractionModeToAllRegions()
+        conn.ColorRegionsOn()
+        conn.Update()
+        poly = conn.GetOutput()
+        pts = vtk_to_numpy(poly.GetPoints().GetData()).astype(float)
+        tris = vtk_to_numpy(poly.GetPolys().GetData()).reshape(-1, 4)[:, 1:]
+        rids = vtk_to_numpy(poly.GetPointData().GetArray('RegionId'))
+        tri_rids = rids[tris[:, 0]]
+
+        link_bid = mj_model.body(link_name).id
+        link_pos = zero_data.xpos[link_bid]
+        link_rot = zero_data.xmat[link_bid].reshape(3, 3)
+
+        # Candidate MuJoCo rod bodies & their parent flange bodies, keyed by motor_ball site world pos
+        cand_rods = {}
+        for side in ('plus', 'minus'):
+            rod_name = f'{gname}_{side}_rod'
+            site_pos = zero_data.site(f'{gname}_{side}_motor_ball').xpos.copy()
+            flange_el = parent_map[body_els[rod_name]]
+            cand_rods[rod_name] = (site_pos, flange_el.get('name'))
+
+        assigned_rids: set[int] = set()
+        for kind, region_sets in (('rod', spec['rod_sets']), ('flange', spec['flange_sets'])):
+            remaining_cands = dict(cand_rods)
+            for rset in region_sets:
+                mask = np.isin(tri_rids, list(rset))
+                sub_tris = tris[mask]
+                assert len(sub_tris) > 0, f'No triangles for {link_name} regions {rset}'
+                used_idx, inv_tris = np.unique(sub_tris, return_inverse=True)
+                sub_pts_w = pts[used_idx] @ link_rot.T + link_pos
+
+                # Match to closest motor_ball site among remaining candidates
+                best_rod = min(
+                    remaining_cands,
+                    key=lambda rn: float(np.linalg.norm(sub_pts_w - remaining_cands[rn][0], axis=1).min()),
+                )
+                site_pos, flange_body_name = remaining_cands.pop(best_rod)
+                target_body_name = best_rod if kind == 'rod' else flange_body_name
+
+                t_bid = mj_model.body(target_body_name).id
+                t_pos = zero_data.xpos[t_bid]
+                t_rot = zero_data.xmat[t_bid].reshape(3, 3)
+                local_pts = (sub_pts_w - t_pos) @ t_rot
+
+                vis_name = f'{target_body_name}_vis'
+                out_stl = split_dir / f'{vis_name}.STL'
+                _write_binary_stl(out_stl, local_pts, inv_tris.reshape(-1, 3))
+                ET.SubElement(assets, 'mesh', name=vis_name, file=f'mujoco/visual_split/{vis_name}.STL')
+                ET.SubElement(
+                    body_els[target_body_name],
+                    'geom',
+                    name=vis_name,
+                    type='mesh',
+                    mesh=vis_name,
+                    group='0',
+                    rgba='0.72 0.76 0.80 1',
+                )
+                assigned_rids.update(rset)
+
+        # Write remaining housing triangles
+        keep_mask = ~np.isin(tri_rids, list(assigned_rids))
+        keep_tris = tris[keep_mask]
+        assert len(keep_tris) > 100, f'Too few housing triangles left for {link_name}'
+        housing_stl = split_dir / f'{link_name}_housing.STL'
+        used_idx, inv_tris = np.unique(keep_tris, return_inverse=True)
+        _write_binary_stl(housing_stl, pts[used_idx], inv_tris.reshape(-1, 3))
+        if spec['decimate_faces'] and len(keep_tris) > spec['decimate_faces']:
+            decimate_for_mujoco(housing_stl, housing_stl, target_faces=spec['decimate_faces'])
+        mesh_els[spec['mesh_name']].set('file', f'mujoco/visual_split/{link_name}_housing.STL')
+        print(f'Split {link_name}: extracted {len(assigned_rids)} linkage regions -> {housing_stl.name}')
+
+    recompiled = deepcopy(root)
+    recompiled.find('compiler').set('meshdir', str(MODEL))
+    mujoco.MjModel.from_xml_string(ET.tostring(recompiled, encoding='unicode'))
 
 
 def build():
@@ -522,6 +684,9 @@ def build():
         for i in range(mj_model.neq)
     )
     print(f'JointPositionTargets test OK: max_closure_err={max_err_cfg:.2e} m')
+
+    # Split real SolidWorks cranks & pushrods from weighed STLs into MuJoCo moving bodies
+    _split_weighed_visual_linkages(root, mj_model)
 
     xml_text = ET.tostring(root, encoding='unicode') + '\n'
     OUT_MJCF.write_text(xml_text, encoding='utf-8')

@@ -40,7 +40,7 @@
     </visual>
   </link>
   <joint name="waist_pitch" type="revolute">
-    <limit lower="-1.904966" upper="2.428973" effort="0" velocity="0" />
+    <limit lower="-1.570796" upper="1.570796" effort="0" velocity="0" />
     <parent link="waist_yaw" />
     <child link="waist_pitch" />
     <origin xyz="0 -0.00827522117 -0.0994061774" rpy="-1.5707963267949 1.2348204466701 1.5707963267949" />
@@ -63,7 +63,7 @@
     </visual>
   </link>
   <joint name="waist_roll" type="revolute">
-    <limit lower="-0.294149" upper="0.247721" effort="0" velocity="0" />
+    <limit lower="-0.279253" upper="0.244346" effort="0" velocity="0" />
     <parent link="waist_pitch" />
     <child link="waist_roll" />
     <origin xyz="0 0 0" rpy="1.4288992766316 -1.5707963126528 -2.9996956034265" />
@@ -86,7 +86,7 @@
     </visual>
   </link>
   <joint name="left_scapula_yaw" type="revolute">
-    <limit lower="-1.005166" upper="2.504991" effort="0" velocity="0" />
+    <limit lower="-0.977384" upper="1.570796" effort="0" velocity="0" />
     <parent link="waist_roll" />
     <child link="left_scapula_yaw" />
     <origin xyz="0.0589997419 0.2107 -0.0599999919" rpy="-1.5707963267949 0 0" />
@@ -109,7 +109,7 @@
     </visual>
   </link>
   <joint name="left_scapula_roll" type="revolute">
-    <limit lower="-0.069813" upper="0.51944" effort="0" velocity="0" />
+    <limit lower="-0.034907" upper="0.488692" effort="0" velocity="0" />
     <parent link="left_scapula_yaw" />
     <child link="left_scapula_roll" />
     <origin xyz="0.005 -0.0285 0.0203" rpy="1.5707963267949 -0 0" />
@@ -247,7 +247,7 @@
     </visual>
   </link>
   <joint name="left_wrist_pitch" type="revolute">
-    <limit lower="-3.106686" upper="3.106686" effort="0" velocity="0" />
+    <limit lower="-0.488692" upper="0.453786" effort="0" velocity="0" />
     <parent link="left_forearm_yaw" />
     <child link="left_wrist_pitch" />
     <origin xyz="-0.00130396801 0.000681231061 0.138499998" rpy="-1.6141155976876 -1.5707963123727 1.1326859512312" />
@@ -270,7 +270,7 @@
     </visual>
   </link>
   <joint name="left_wrist_roll" type="revolute">
-    <limit lower="-3.106686" upper="3.106686" effort="0" velocity="0" />
+    <limit lower="-1.570796" upper="1.570796" effort="0" velocity="0" />
     <parent link="left_wrist_pitch" />
     <child link="left_wrist_roll" />
     <origin xyz="0 0 0" rpy="1.5707963267949 -1.3962634030691 0" />
@@ -359,7 +359,7 @@
     </inertial>
   </link>
   <joint name="right_scapula_yaw" type="revolute">
-    <limit lower="-2.504957" upper="1.005166" effort="0" velocity="0" />
+    <limit lower="-1.570796" upper="0.977384" effort="0" velocity="0" />
     <parent link="waist_roll" />
     <child link="right_scapula_yaw" />
     <origin xyz="-0.0590002581 0.2107 -0.0599999919" rpy="-1.5707963267949 0 0" />
@@ -382,7 +382,7 @@
     </visual>
   </link>
   <joint name="right_scapula_roll" type="revolute">
-    <limit lower="-0.51944" upper="0.069813" effort="0" velocity="0" />
+    <limit lower="-0.488692" upper="0.034907" effort="0" velocity="0" />
     <parent link="right_scapula_yaw" />
     <child link="right_scapula_roll" />
     <origin xyz="-0.005 -0.0328 0.0203" rpy="1.5707963267949 -0 0" />
@@ -520,7 +520,7 @@
     </visual>
   </link>
   <joint name="right_wrist_pitch" type="revolute">
-    <limit lower="-3.106686" upper="3.106686" effort="0" velocity="0" />
+    <limit lower="-1.570796" upper="1.570796" effort="0" velocity="0" />
     <parent link="right_forearm_yaw" />
     <child link="right_wrist_pitch" />
     <origin xyz="0.00130396801 0.000681231061 0.137999998" rpy="-1.5707963275329 -0.32550805826868 2.052225928906" />
@@ -543,7 +543,7 @@
     </visual>
   </link>
   <joint name="right_wrist_roll" type="revolute">
-    <limit lower="-3.106686" upper="3.106686" effort="0" velocity="0" />
+    <limit lower="-1.570796" upper="1.570796" effort="0" velocity="0" />
     <parent link="right_wrist_pitch" />
     <child link="right_wrist_roll" />
     <origin xyz="0 0 0" rpy="1.5707963272451 -0.063075651642703 -1.2452882691803" />
@@ -764,7 +764,7 @@
     </inertial>
   </link>
   <joint name="pelvis_roll" type="revolute">
-    <limit lower="-0.05236" upper="0.10472" effort="0" velocity="0" />
+    <limit lower="-0.034907" upper="0.10472" effort="0" velocity="0" />
     <parent link="Base_link" />
     <child link="pelvis_roll" />
     <origin xyz="-0.024232506 0 -0.0693904577" rpy="1.2348204454373 -0 -1.5707963267949" />
@@ -787,7 +787,7 @@
     </visual>
   </link>
   <joint name="pelvis_pitch" type="revolute">
-    <limit lower="-0.139626" upper="2.354354" effort="0" velocity="0" />
+    <limit lower="-0.10472" upper="0.383972" effort="0" velocity="0" />
     <parent link="pelvis_roll" />
     <child link="pelvis_pitch" />
     <origin xyz="0 0 0" rpy="1.5707963267949 -1.1662973414206 -1.5707963267949" />

@@ -1,8 +1,8 @@
-# 仅供隔离总线 HIL；型号取自 CAD，输入轴取自 MJCF，不用于真机。
+# 整机力矩仿真拓扑（含实测 R58/R48 阻尼与库仑摩擦）；不用于真机。
 simulation:
   model: full_body_robot
-  mujoco_model: full_body_robot.xml
-  control_mode: position
+  mujoco_model: full_body_robot.torque.xml
+  control_mode: effort
   cad_motor_evidence:
     file: cad/urdf/全身装配（不含头部）.csv
     sha256: e0563d843971d6d5a34d848dec9d42ed793d98b2a73f42de0027f2bda504f739

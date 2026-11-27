@@ -113,6 +113,8 @@ def main() -> None:
         mtype = m_entry['type']
         params = specs[mtype]['parameters']
         lower, upper = map(float, a.get('ctrlrange').split())
+        # Pad assembly bounds so soft-stop/encoder compliance at mechanical limits never aborts feedback mapping
+        lower, upper = max(-1.5708, lower - 0.10), min(1.5708, upper + 0.10)
         torque = float(params.get('peak_torque_nm', params['rated_torque_nm']))
         motor_limits[joint] = (lower, upper, float(params['rated_speed_rad_s']), torque)
 
@@ -171,6 +173,11 @@ def main() -> None:
 
     for gname, gdata in transmissions.items():
         s1, s2 = diff_signs[gname]
+        params = dict(gdata['parameters'])
+        for bk in ('motor1_bounds', 'motor2_bounds'):
+            if bk in params:
+                lo, hi = map(float, str(params[bk]).split())
+                params[bk] = f'{max(-1.5708, lo - 0.10):.6g} {min(1.5708, hi + 0.10):.6g}'
         trans_out[gname] = {
             'plugin': gdata['plugin'],
             'actuators': list(gdata['actuators']),
@@ -178,7 +185,7 @@ def main() -> None:
             'actuator_reduction': [s1, s2],
             'joint_reduction': [1, 1],
             'joint_offset': [0, 0],
-            'parameters': dict(gdata['parameters']),
+            'parameters': params,
         }
 
     pos_cfg = json.loads(mjcf_root.find('custom/text[@name="robot_sim_joint_position"]').get('data'))

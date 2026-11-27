@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 from urllib.parse import urlsplit
@@ -24,6 +26,7 @@ class MotionJobs:
         self.lock = threading.RLock()
         self.stopping = threading.Event()
         self.thread = None
+        self._proc = None
 
     @staticmethod
     def _source_name(name):
@@ -335,90 +338,56 @@ class MotionJobs:
             return copy.deepcopy(job['status'])
 
     def _convert(self, key, solver):
-        import numpy as np
-        import pinocchio as pin
-        from scipy.spatial.transform import Rotation
-        from bvh_broadcaster.retarget import digest, load_motion
         job = self.jobs[key]
-        directory, clip = job['directory'], job['clip']
-
-        def progress(frame, total):
-            if self.stopping.is_set():
-                raise RuntimeError('服务已停止，请重新导入')
-            with self.lock:
-                job['status']['progress'] = round(frame / total * 90)
+        directory = job['directory']
         try:
-            positions, directions, orientations = solver.convert(progress)
-            if job.get('simulation'):
-                from .motion_simulation import validate_positions
-                validate_positions(job['simulation'], solver.names, positions)
-            np.savez_compressed(directory / 'motion.npz', positions=positions,
-                                joint_names=solver.names, frame_time=clip.frame_time,
-                                preview_only=True,
-                                simulation_limits_enforced=bool(job.get('simulation')),
-                                mechanical_limits_enforced=getattr(solver, 'mechanical_limits_enforced', True),
-                                urdf_sha256=digest(directory / 'robot.urdf'),
-                                direction_error_deg=directions, orientation_error_deg=orientations)
-            if job.get('generic'):
-                solver.validate_result(positions)
-            else:
-                load_motion(directory / 'motion.npz', directory / 'robot.urdf')
-            links = job['status']['robot_links']
-            link_ids = [solver.model.getFrameId(n, pin.FrameType.BODY) for n in links]
-            children = {j.find('child').attrib['link']: j.find('parent').attrib['link']
-                        for j in ET.parse(directory / 'robot.urdf').getroot().findall('joint')}
-            robot_parents = [links.index(children[n]) if n in children else -1 for n in links]
-            # Downsample display geometry only; the downloaded joint motion keeps every source frame.
-            indices = sorted(set(range(0, len(positions), max(1, (len(positions) + 899) // 900)))
-                             | {len(positions) - 1})
-            source_frames, robot_frames, root_quaternions = [], [], []
-            for index in indices:
-                if self.stopping.is_set():
-                    raise RuntimeError('服务已停止')
-                ps, rs = [], []
-                for joint, (p, quat) in zip(clip.joints, clip.local_transforms(
-                        index, scale=job['scale'], up_axis=job['up_axis'], apply_root_offset=False)):
-                    r = Rotation.from_quat(quat).as_matrix()
-                    if joint.parent >= 0:
-                        p, r = ps[joint.parent] + rs[joint.parent] @ p, rs[joint.parent] @ r
-                    ps.append(p)
-                    rs.append(r)
-                source_frames.append(np.round(ps, 5).tolist())
-                if job.get('generic'):
-                    # Conjugate the source world rotation into the robot coordinate basis.
-                    root_rotation = solver.basis @ rs[solver.source_root] @ solver.basis.T
-                    root_quaternions.append(Rotation.from_matrix(root_rotation).as_quat().tolist())
-                q = solver.configuration(positions[index]) if job.get('generic') else positions[index]
-                pin.framesForwardKinematics(solver.model, solver.data, q)
-                robot_frames.append(np.round([solver.data.oMf[f].translation for f in link_ids], 5).tolist())
-            preview = {'times': (np.array(indices) * clip.frame_time).tolist(),
-                       'duration': (len(positions) - 1) * clip.frame_time,
-                       'source': {'names': [j.name for j in clip.joints],
-                                  'parents': [j.parent for j in clip.joints], 'frames': source_frames},
-                       'robot': {'names': links, 'parents': robot_parents, 'frames': robot_frames,
-                                 'urdf': (directory / 'robot.urdf').read_bytes().decode('utf-8'),
-                                 'ignore_limits': job.get('generic', False) and not solver.mechanical_limits_enforced,
-                                 'joint_names': solver.names,
-                                 'joint_positions': np.round(positions[indices], 8).tolist()},
-                       'source_to_robot': job['status']['mapping']['source_to_robot']}
-            if job.get('generic'):
-                preview['robot'].update(root_quaternions=root_quaternions,
-                    root_rotation_source=clip.joints[solver.source_root].name,
-                    root_rotation_frame='robot')
-            if job.get('simulation'):
-                from .motion_simulation import cad_preview
-                cad = cad_preview(job['simulation'], solver.names, positions[indices])
-                if cad:
-                    preview['robot'].update(cad)
-            (directory / 'preview.json').write_text(json.dumps(preview, allow_nan=False))
-            summary = {'preview_only': True, 'frames': len(positions), 'joint_names': solver.names,
-                       'frame_time': clip.frame_time, 'mapping': job['status']['mapping'],
-                       'direction_mean_deg': np.mean(directions, axis=0).tolist(),
-                       'hand_orientation_mean_deg': np.mean(orientations, axis=0).tolist(),
-                       'nonconverged_solves': solver.nonconverged}
-            if job.get('generic'):
-                summary.update(solver.report)
-            (directory / 'report.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+            simulation = job.get('simulation')
+            worker_simulation = (
+                {**simulation, 'directory': str(simulation['directory'])}
+                if simulation else None
+            )
+            worker_input = {
+                'generic': bool(job.get('generic')),
+                'mapping': job['status']['mapping'],
+                'up_axis': job['up_axis'],
+                'scale': job['scale'],
+                'robot_links': job['status']['robot_links'],
+                'simulation': worker_simulation,
+            }
+            (directory / 'worker_input.json').write_text(
+                json.dumps(worker_input), encoding='utf-8'
+            )
+            proc = subprocess.Popen(
+                [sys.executable, '-u', '-m', 'web_host.motion_worker', str(directory)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self._proc = proc
+            try:
+                assert proc.stdout is not None
+                for raw_line in proc.stdout:
+                    if self.stopping.is_set():
+                        proc.terminate()
+                        raise RuntimeError('服务已停止，请重新导入')
+                    line = raw_line.strip()
+                    if line.startswith('PROGRESS '):
+                        try:
+                            pct = int(line.split(' ', 1)[1])
+                        except ValueError:
+                            continue
+                        with self.lock:
+                            job['status']['progress'] = pct
+                rc = proc.wait()
+            finally:
+                self._proc = None
+            if rc != 0:
+                err_file = directory / 'worker_error.txt'
+                err = err_file.read_text(encoding='utf-8').strip() if err_file.is_file() else ''
+                if not err and proc.stderr is not None:
+                    err = proc.stderr.read().strip()
+                raise RuntimeError(err or '动作转换子进程失败')
+            summary = json.loads((directory / 'report.json').read_text(encoding='utf-8'))
             if self.cache is not None:
                 try:
                     self.cache.save(job['cache_key'], directory)
@@ -442,6 +411,8 @@ class MotionJobs:
 
     def close(self):
         self.stopping.set()
+        if self._proc is not None and self._proc.poll() is None:
+            self._proc.terminate()
         if self.thread:
             self.thread.join(timeout=10)
         if not self.thread or not self.thread.is_alive():

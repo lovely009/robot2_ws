@@ -36,7 +36,135 @@ class TopicSnapshot:
     seq: int
     received_mono: float
     ros_stamp_ns: int
-    payload: dict[str, Any]
+    payload: dict[str, Any] | None = None
+    _raw_msg: Any = None
+    _converter: Callable[[Any], dict[str, Any]] | None = None
+
+
+def _header_to_dict(header: Any) -> dict[str, Any]:
+    stamp = header.stamp
+    return {
+        'stamp': {'sec': int(stamp.sec), 'nanosec': int(stamp.nanosec)},
+        'frame_id': str(header.frame_id),
+    }
+
+
+def _motor_motion_to_dict(msg: Any) -> dict[str, Any]:
+    return {
+        'header': _header_to_dict(msg.header),
+        'states': [
+            {
+                'motor_id': int(s.motor_id),
+                'position': float(s.position),
+                'velocity': float(s.velocity),
+                'effort': float(s.effort),
+                'state_age_ms': int(s.state_age_ms),
+                'target_source': int(s.target_source),
+            }
+            for s in msg.states
+        ],
+        'session_id': int(msg.session_id),
+        'tick_ms': int(msg.tick_ms),
+        'seq': int(msg.seq),
+    }
+
+
+def _motor_state_to_dict(msg: Any) -> dict[str, Any]:
+    diag = msg.diagnostics
+    sys_st = msg.system_status
+    return {
+        'header': _header_to_dict(msg.header),
+        'schema_version': int(msg.schema_version),
+        'session_id': int(msg.session_id),
+        'snapshot_tick_ms': int(msg.snapshot_tick_ms),
+        'sequence': int(msg.sequence),
+        'info_revision': int(msg.info_revision),
+        'command_sequence': int(msg.command_sequence),
+        'stop_generation': int(msg.stop_generation),
+        'required_policy_generation': int(msg.required_policy_generation),
+        'lease_valid': bool(msg.lease_valid),
+        'lease_id': int(msg.lease_id),
+        'lease_sequence': int(msg.lease_sequence),
+        'lease_valid_until_tick_ms': int(msg.lease_valid_until_tick_ms),
+        'lease_active': bool(msg.lease_active),
+        'clock_valid': bool(msg.clock_valid),
+        'clock_sync_age_ms': int(msg.clock_sync_age_ms),
+        'clock_sync_failures': int(msg.clock_sync_failures),
+        'clock_offset_ns': int(msg.clock_offset_ns),
+        'control_states': [
+            {
+                'motor_id': int(c.motor_id),
+                'online': bool(c.online),
+                'control_lifecycle': int(c.control_lifecycle),
+                'execution_state': int(c.execution_state),
+                'policy_enabled': bool(c.policy_enabled),
+                'motion_enabled': bool(c.motion_enabled),
+                'state_age_ms': int(c.state_age_ms),
+                'unified_fault_code': int(c.unified_fault_code),
+                'vendor_fault_code': int(c.vendor_fault_code),
+                'last_failure_reason': int(c.last_failure_reason),
+                'policy_generation': int(c.policy_generation),
+            }
+            for c in msg.control_states
+        ],
+        'statuses': [
+            {
+                'motor_id': int(s.motor_id),
+                'temperature': float(s.temperature),
+                'current': float(s.current),
+                'voltage': float(s.voltage),
+                'drive_mode': int(s.drive_mode),
+                'unified_fault_code': int(s.unified_fault_code),
+                'vendor_fault_code': int(s.vendor_fault_code),
+                'protection_flags': int(s.protection_flags),
+                'limit_flags': int(s.limit_flags),
+                'device_protect_known': bool(s.device_protect_known),
+                'device_protect_enabled': bool(s.device_protect_enabled),
+                'device_direction_known': bool(s.device_direction_known),
+                'device_direction': int(s.device_direction),
+                'online': bool(s.online),
+                'lifecycle': int(s.lifecycle),
+                'bus_index': int(s.bus_index),
+            }
+            for s in msg.statuses
+        ],
+        'diagnostics': {
+            'rx_frame_count': int(diag.rx_frame_count),
+            'unknown_frame_count': int(diag.unknown_frame_count),
+            'decode_error_count': int(diag.decode_error_count),
+            'snapshot_accepted': int(diag.snapshot_accepted),
+            'snapshot_rejected': int(diag.snapshot_rejected),
+            'config_rejected': int(diag.config_rejected),
+            'event_dropped': int(diag.event_dropped),
+            'tx_dropped': int(diag.tx_dropped),
+            'p0_retry': int(diag.p0_retry),
+            'trajectory_accepted': int(diag.trajectory_accepted),
+            'trajectory_rejected': int(diag.trajectory_rejected),
+            'policy_accepted': int(diag.policy_accepted),
+            'policy_rejected': int(diag.policy_rejected),
+            'ring_drop': [int(v) for v in diag.ring_drop],
+            'heap_free': int(diag.heap_free),
+            'mailbox_rejected_command': int(diag.mailbox_rejected_command),
+            'mailbox_rejected_trajectory': int(diag.mailbox_rejected_trajectory),
+            'mailbox_rejected_policy': int(diag.mailbox_rejected_policy),
+            'publish_fail': int(diag.publish_fail),
+            'rx_hw_lost': [int(v) for v in diag.rx_hw_lost],
+            'tx_frame_count': [int(v) for v in diag.tx_frame_count],
+        },
+        'system_status': {
+            'sync_time_ns': int(sys_st.sync_time_ns),
+            'last_error': int(sys_st.last_error),
+            'last_error_motor': int(sys_st.last_error_motor),
+            'refresh_seq': int(sys_st.refresh_seq),
+            'set_zero_seq': int(sys_st.set_zero_seq),
+            'clear_fault_seq': int(sys_st.clear_fault_seq),
+            'save_seq': int(sys_st.save_seq),
+            'save_in_progress': bool(sys_st.save_in_progress),
+            'firmware_values_valid': bool(sys_st.firmware_values_valid),
+            'firmware_values': [int(v) for v in sys_st.firmware_values],
+            'firmware_unsaved': bool(sys_st.firmware_unsaved),
+        },
+    }
 
 
 @dataclass(slots=True)
@@ -137,6 +265,35 @@ class _ChannelStore:
             self._snapshots[channel] = snap
             return snap
 
+    def record_lazy_snapshot(
+        self,
+        channel: str,
+        raw_msg: Any,
+        converter: Callable[[Any], dict[str, Any]],
+        *,
+        ros_stamp_ns: int | None = None,
+    ) -> TopicSnapshot:
+        now = time.monotonic()
+        stamp_ns = ros_stamp_ns if ros_stamp_ns is not None else time.time_ns()
+        with self._lock:
+            count = self._rx_counts.get(channel, 0) + 1
+            self._rx_counts[channel] = count
+            dq = self._rx_times.setdefault(channel, collections.deque())
+            dq.append(now)
+            cutoff = now - 1.0
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+            snap = TopicSnapshot(
+                seq=count,
+                received_mono=now,
+                ros_stamp_ns=stamp_ns,
+                payload=None,
+                _raw_msg=raw_msg,
+                _converter=converter,
+            )
+            self._snapshots[channel] = snap
+            return snap
+
     def record_event(self, payload: dict[str, Any]) -> EventItem:
         now = time.monotonic()
         with self._lock:
@@ -162,7 +319,12 @@ class _ChannelStore:
                 hz = float(len(dq))
             else:
                 hz = 0.0
-            return self._snapshots.get(channel), self._rx_counts.get(channel, 0), hz
+            snap = self._snapshots.get(channel)
+            if snap is not None and snap.payload is None and snap._raw_msg is not None and snap._converter is not None:
+                snap.payload = snap._converter(snap._raw_msg)
+                snap._raw_msg = None
+                snap._converter = None
+            return snap, self._rx_counts.get(channel, 0), hz
 
     def events_since(self, last_seq: int) -> list[EventItem]:
         with self._lock:
@@ -594,6 +756,18 @@ class RosGatewayThread:
         self._store.record_snapshot('telemetry:imu_temp', payload)
         self._emit_raw('/imu/temp_raw', 'sensor_msgs/msg/Temperature', msg)
 
+    def _make_lazy_cb(
+        self,
+        channel: str,
+        topic: str,
+        msg_type: str,
+        converter: Callable[[Any], dict[str, Any]],
+    ):
+        def _cb(msg: Any) -> None:
+            self._store.record_lazy_snapshot(channel, msg, converter)
+            self._emit_raw(topic, msg_type, msg)
+        return _cb
+
     def _make_rosidl_cb(self, channel: str, topic: str, msg_type: str, *, is_event: bool = False):
         from rosidl_runtime_py.convert import message_to_ordereddict
 
@@ -690,19 +864,21 @@ class RosGatewayThread:
                 from can_bridge_msgs.msg import MotorEvent, MotorMotionStateArray, MotorSystemState
                 node.create_subscription(
                     MotorMotionStateArray, '/motor/motion',
-                    self._make_rosidl_cb(
+                    self._make_lazy_cb(
                         'telemetry:motor_motion',
                         '/motor/motion',
                         'can_bridge_msgs/msg/MotorMotionStateArray',
+                        _motor_motion_to_dict,
                     ),
                     sensor_qos, callback_group=cb_group,
                 )
                 node.create_subscription(
                     MotorSystemState, '/motor/state',
-                    self._make_rosidl_cb(
+                    self._make_lazy_cb(
                         'telemetry:motor_state',
                         '/motor/state',
                         'can_bridge_msgs/msg/MotorSystemState',
+                        _motor_state_to_dict,
                     ),
                     10, callback_group=cb_group,
                 )

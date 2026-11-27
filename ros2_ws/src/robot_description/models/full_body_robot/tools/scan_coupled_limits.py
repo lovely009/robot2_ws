@@ -28,6 +28,21 @@ GROUPS = {
     'right_wrist': ['right_wrist_pitch', 'right_wrist_roll'],
 }
 
+CAD_DIFF_LIMITS = {
+    'waist_pitch': (-0.279253, 0.523599),
+    'waist_roll': (-0.261799, 0.226893),
+    'pelvis_roll': (-0.052360, 0.104720),
+    'pelvis_pitch': (-0.139626, 0.069813),
+    'left_scapula_yaw': (-0.837758, 0.331613),
+    'left_scapula_roll': (-0.069813, 0.226893),
+    'right_scapula_yaw': (-0.331613, 0.837758),
+    'right_scapula_roll': (-0.226893, 0.069813),
+    'left_wrist_pitch': (-0.628319, 0.628319),
+    'left_wrist_roll': (-0.226893, 0.226893),
+    'right_wrist_pitch': (-0.226893, 0.226893),
+    'right_wrist_roll': (-0.628319, 0.558505),
+}
+
 
 def _bound_pair(entry):
     if isinstance(entry, dict):
@@ -70,22 +85,28 @@ def main() -> int:
         for name, bound in raw_limits.items()
     }
 
-    step = math.radians(2.0)
+    step = math.radians(1.0)
     base_q = np.zeros(len(joint_list), dtype=float)
     coupled_limits = {}
+    flange_limits = {}
+    flange_qadr = {
+        mj_model.joint(mj_model.actuator_trnid[act, 0]).name: mj_model.jnt_qposadr[mj_model.actuator_trnid[act, 0]]
+        for act in jpt.rods
+    }
 
     for gname, (j0, j1) in GROUPS.items():
         idx0, idx1 = joint_list.index(j0), joint_list.index(j1)
-        lo0, hi0 = _bound_pair(joint_limits[j0])
-        lo1, hi1 = _bound_pair(joint_limits[j1])
-        lo0, hi0 = max(-math.pi / 2.0, lo0), min(math.pi / 2.0, hi0)
-        lo1, hi1 = max(-math.pi / 2.0, lo1), min(math.pi / 2.0, hi1)
+        lo0, hi0 = CAD_DIFF_LIMITS[j0]
+        lo1, hi1 = CAD_DIFF_LIMITS[j1]
 
         k0_min, k0_max = math.ceil(lo0 / step), math.floor(hi0 / step)
         k1_min, k1_max = math.ceil(lo1 / step), math.floor(hi1 / step)
         v0 = np.array([k * step for k in range(k0_min, k0_max + 1)], dtype=float)
         v1 = np.array([k * step for k in range(k1_min, k1_max + 1)], dtype=float)
         r_zero, c_zero = -k0_min, -k1_min
+
+        group_flanges = {fn: adr for fn, adr in flange_qadr.items() if fn.startswith(f'{gname}_')}
+        flange_vals = {fn: [] for fn in group_flanges}
 
         valid = np.zeros((len(v0), len(v1)), dtype=bool)
         for r, a in enumerate(v0):
@@ -95,6 +116,8 @@ def main() -> int:
                 try:
                     jpt.set_configuration(data, q)
                     valid[r, c] = True
+                    for fn, adr in group_flanges.items():
+                        flange_vals[fn].append(float(data.qpos[adr]))
                 except ValueError:
                     pass
 
@@ -118,6 +141,10 @@ def main() -> int:
             'lower': round(float(v1[c0]), 6),
             'upper': round(float(v1[c1]), 6),
         }
+        for fn, vals in flange_vals.items():
+            f_lo = min(0.0, min(vals) - 0.02)
+            f_hi = max(0.0, max(vals) + 0.02)
+            flange_limits[fn] = {'lower': round(f_lo, 6), 'upper': round(f_hi, 6)}
         print(
             f'{gname:15s} {j0}=[{math.degrees(v0[r0]):+.1f}°, {math.degrees(v0[r1]):+.1f}°] '
             f'{j1}=[{math.degrees(v1[c0]):+.1f}°, {math.degrees(v1[c1]):+.1f}°] '
@@ -126,7 +153,11 @@ def main() -> int:
 
     CoupledLimits(coupled_limits, list(joint_limits)).validate(dict.fromkeys(joint_limits, 0.0))
 
-    payload = {'joint_limits': joint_limits, 'coupled_limits': coupled_limits}
+    payload = {
+        'joint_limits': joint_limits,
+        'coupled_limits': coupled_limits,
+        'flange_limits': flange_limits,
+    }
     dumped = yaml.safe_dump(payload, sort_keys=False)
     SIM_LIMITS_PATH.write_text(dumped, encoding='utf-8')
     PREVIEW_LIMITS_PATH.write_text(dumped, encoding='utf-8')

@@ -265,7 +265,9 @@ def build():
         children[j.find('parent').get('link')].append(j)
 
     topology = yaml.safe_load(TOPOLOGY_YAML.read_text(encoding='utf-8'))
-    limits_raw = yaml.safe_load(LIMITS_YAML.read_text(encoding='utf-8'))['joint_limits']
+    limits_doc = yaml.safe_load(LIMITS_YAML.read_text(encoding='utf-8'))
+    limits_raw = limits_doc['joint_limits']
+    flange_limits = limits_doc.get('flange_limits', {})
     motors, groups = topology['motors'], topology['differential_groups']
 
     root = ET.Element('mujoco', model='Full body weighed differential')
@@ -352,8 +354,13 @@ def build():
                 **pose_attributes(new_fpos, R_align),
             )
             ET.SubElement(flange, 'inertial', pos='0 0 0', mass='0.01', diaginertia='1e-6 1e-6 1e-6')
-            ET.SubElement(flange, 'joint', name=f'{name}_{j_el.get("name")}',
-                          axis=j_el.get('axis'), limited='true', range='-1.5708 1.5708')
+            flange_jn = f'{name}_{j_el.get("name")}'
+            flange_range = (
+                numbers(_joint_bounds(flange_limits[flange_jn]))
+                if flange_jn in flange_limits else '-1.5708 1.5708'
+            )
+            ET.SubElement(flange, 'joint', name=flange_jn,
+                          axis=j_el.get('axis'), limited='true', range=flange_range)
             for site in src_body.findall('site'):
                 orig = site.get('name')
                 sname = f'{name}_{orig}'

@@ -760,6 +760,7 @@ bool MicroRosSystem::command_valid(std::string &error) {
     velocity = normalize_boundary_roundoff(velocity, velocity_limits_[index].min,
                                           velocity_limits_[index].max);
     constexpr double kHoldComplianceRad = 0.02;
+    constexpr double kComplianceBulgeRad = 0.002;
     const double measured = index < position_.size()
       ? position_[index] : std::numeric_limits<double>::quiet_NaN();
     const bool below_min = !within(position_limits_[index].min, position, false);
@@ -771,35 +772,39 @@ bool MicroRosSystem::command_valid(std::string &error) {
     } else {
       bool compliance_ok = false;
       if (above_max && !below_min && position_limits_[index].max) {
+        const double max_limit = *position_limits_[index].max;
         double ceil = invalid;
         if (std::isfinite(recovery_max_[index])) {
           ceil = recovery_max_[index];
         } else if (std::isfinite(measured) &&
-                   measured > *position_limits_[index].max &&
-                   (measured - *position_limits_[index].max) <= kHoldComplianceRad) {
-          ceil = measured;
+                   measured >= max_limit - kComplianceBulgeRad &&
+                   (measured - max_limit) <= kHoldComplianceRad) {
+          ceil = std::min(max_limit + kHoldComplianceRad,
+                          std::max(measured, max_limit) + kComplianceBulgeRad);
         }
         if (std::isfinite(ceil) &&
-            (position - *position_limits_[index].max) <= kHoldComplianceRad &&
+            (position - max_limit) <= kHoldComplianceRad &&
             position <= ceil + 1e-6) {
           compliance_ok = true;
-          recovery_max_[index] = std::min(ceil, position);
+          recovery_max_[index] = ceil;
           recovery_min_[index] = invalid;
         }
       } else if (below_min && !above_max && position_limits_[index].min) {
+        const double min_limit = *position_limits_[index].min;
         double floor = invalid;
         if (std::isfinite(recovery_min_[index])) {
           floor = recovery_min_[index];
         } else if (std::isfinite(measured) &&
-                   measured < *position_limits_[index].min &&
-                   (*position_limits_[index].min - measured) <= kHoldComplianceRad) {
-          floor = measured;
+                   measured <= min_limit + kComplianceBulgeRad &&
+                   (min_limit - measured) <= kHoldComplianceRad) {
+          floor = std::max(min_limit - kHoldComplianceRad,
+                           std::min(measured, min_limit) - kComplianceBulgeRad);
         }
         if (std::isfinite(floor) &&
-            (*position_limits_[index].min - position) <= kHoldComplianceRad &&
+            (min_limit - position) <= kHoldComplianceRad &&
             position >= floor - 1e-6) {
           compliance_ok = true;
-          recovery_min_[index] = std::max(floor, position);
+          recovery_min_[index] = floor;
           recovery_max_[index] = invalid;
         }
       }

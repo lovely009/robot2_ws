@@ -258,7 +258,12 @@ function restoreRoutes(list: any[]) {
   }
 }
 
+let lastOptionsFingerprint = '';
+
 function loadDeviceOptions(options: DeviceOptions) {
+  const fingerprint = JSON.stringify(options);
+  if (optionsLoaded.value && fingerprint === lastOptionsFingerprint) return false;
+  lastOptionsFingerprint = fingerprint;
   deviceOptions.value = options;
   optionsLoaded.value = true;
   model.value = pickValue(model.value, modelEntries.value, saved.model || MODEL);
@@ -404,18 +409,22 @@ async function refreshMotorSim() {
   }
 }
 
-async function refreshOptions() {
-  if (optionsLoading.value) return;
-  optionsLoading.value = true;
+async function refreshOptions(background = false) {
+  if (!background && optionsLoading.value) return;
+  if (!background) optionsLoading.value = true;
   try {
-    loadDeviceOptions(await bench.getBenchOptions());
+    const changed = loadDeviceOptions(await bench.getBenchOptions());
     optionsReady.value = true;
-    simResult.value = { text: '设备与模型列表已刷新', kind: 'ok' };
+    if (!background || changed) {
+      simResult.value = { text: '设备与模型列表已刷新', kind: 'ok' };
+    }
   } catch (error: any) {
-    optionsReady.value = false;
-    simResult.value = { text: `读取设备失败：${error.message}`, kind: 'err' };
+    if (!background || !optionsReady.value) {
+      optionsReady.value = false;
+      simResult.value = { text: `读取设备失败：${error.message}`, kind: 'err' };
+    }
   } finally {
-    optionsLoading.value = false;
+    if (!background) optionsLoading.value = false;
   }
 }
 
@@ -599,9 +608,12 @@ async function poll() {
   try {
     const nowMs = Date.now();
     const editingSelect = document.activeElement?.tagName === 'SELECT';
-    if (!optionsReady.value || (!simActive.value && !backendActive.value && !document.hidden && !editingSelect && nowMs - lastOptionsPollAt >= 3000)) {
+    if (!optionsReady.value) {
       lastOptionsPollAt = nowMs;
-      await refreshOptions();
+      await refreshOptions(false);
+    } else if (!simActive.value && !backendActive.value && !document.hidden && !editingSelect && nowMs - lastOptionsPollAt >= 3000) {
+      lastOptionsPollAt = nowMs;
+      await refreshOptions(true);
     }
     await refreshMotorSim();
     if (simActive.value || backendActive.value) {
@@ -707,7 +719,7 @@ onBeforeUnmount(() => {
         <div class="ctrl-row wrap">
           <button id="btnSimStart" class="primary" :disabled="simActive || startingSim" @click="startSimulation">启动仿真</button>
           <button id="btnSimStop" class="danger" :disabled="!simActive || stoppingSim" @click="stopSimulation">停止仿真</button>
-          <button id="btnSimRefresh" class="secondary" :disabled="optionsLoading" @click="refreshOptions">刷新设备</button>
+          <button id="btnSimRefresh" class="secondary" :disabled="optionsLoading" @click="() => refreshOptions(false)">刷新设备</button>
           <span class="spacer" />
           <span id="simState" class="tiny muted" aria-live="polite">{{ simStateText }}</span>
         </div>

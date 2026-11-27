@@ -373,8 +373,8 @@ export const runtime = {
   async stopAgent() {
     if (initialized.value) await agent.stopAgent();
   },
-  async refreshAgentControls() {
-    if (initialized.value) await agent.refreshAgentControls();
+  async refreshAgentControls(background = false) {
+    if (initialized.value) await agent.refreshAgentControls(background);
   },
   setActiveChannels(channels: string[]) {
     ros.setActiveChannels(channels);

@@ -151,16 +151,24 @@ function setAgentStatus(status: Record<string, any> | null) {
   applyBenchStatus({ agent: status || { state: 'stopped' } });
 }
 
-export async function refreshAgentControls() {
+export async function refreshAgentControls(background = false) {
   const select = $('serialPort') as HTMLSelectElement;
   const savedPort = localStorage.getItem(CONTROLLER_PORT_STORAGE_KEY) || '';
-  select.disabled = true;
+  if (!background) select.disabled = true;
   try {
     const [options, status] = await Promise.all([
       getBenchOptions(), getAgentStatus(),
     ]);
     const ports = Array.isArray(options.serial_ports) ? options.serial_ports : [];
     const activeDevice = status.state === 'running' ? status.device : '';
+    const sig = JSON.stringify({
+      activeDevice,
+      ports: ports.map((port) => [port.path, port.label, port.accessible !== false]),
+    });
+    if (background && select.dataset?.portsSig === sig && select.options.length > 0) {
+      return;
+    }
+    const currentSelection = select.value;
     const known = new Set(ports.map((port) => port.path));
     if (activeDevice && !known.has(activeDevice)) {
       ports.push({
@@ -182,7 +190,7 @@ export async function refreshAgentControls() {
       select.append(option);
     }
 
-    const selected = activeDevice || savedPort;
+    const selected = activeDevice || (currentSelection && known.has(currentSelection) ? currentSelection : savedPort);
     if (selected && known.has(selected)) select.value = selected;
     else if (activeDevice) select.value = activeDevice;
     else {
@@ -191,15 +199,19 @@ export async function refreshAgentControls() {
       if (stm32Ports.length === 1) select.value = stm32Ports[0].path;
     }
     if (select.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, select.value);
+    if (select.dataset) select.dataset.portsSig = sig;
     select.title = select.selectedOptions?.[0]?.textContent || '';
   } catch (error: any) {
-    select.replaceChildren();
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = '无法读取主机串口列表';
-    select.append(option);
-    select.title = '';
-    setAgentStatus({ state: 'error', error: error.message, returncode: null });
+    if (!background) {
+      select.replaceChildren();
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '无法读取主机串口列表';
+      select.append(option);
+      if (select.dataset) delete select.dataset.portsSig;
+      select.title = '';
+      setAgentStatus({ state: 'error', error: error.message, returncode: null });
+    }
   } finally {
     select.disabled = ['running', 'starting', 'stopping'].includes(store.conn.agent);
   }

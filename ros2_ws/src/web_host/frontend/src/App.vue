@@ -202,7 +202,7 @@ function onHardwarePopoverToggle(event: Event) {
   portPollTimer = setInterval(() => {
     if (!snapshot.value.connected || document.hidden || document.activeElement?.id === "serialPort") return;
     if (["running", "starting", "stopping"].includes(snapshot.value.agent)) return;
-    void runtime.refreshAgentControls();
+    void runtime.refreshAgentControls(true);
   }, 3000);
 }
 onMounted(() => {

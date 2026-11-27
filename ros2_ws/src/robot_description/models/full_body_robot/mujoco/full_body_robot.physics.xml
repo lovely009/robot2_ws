@@ -4,7 +4,7 @@
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" />
   <custom>
     <text name="robot_sim_control_mode" data="viewer_position" />
-    <text name="robot_sim_joint_position" data="{&quot;model&quot;:&quot;full_body_robot&quot;,&quot;joints&quot;:[&quot;waist_yaw&quot;,&quot;waist_pitch&quot;,&quot;waist_roll&quot;,&quot;left_scapula_yaw&quot;,&quot;left_scapula_roll&quot;,&quot;left_shoulder_pitch&quot;,&quot;left_shoulder_roll&quot;,&quot;left_shoulder_yaw&quot;,&quot;left_elbow_pitch&quot;,&quot;left_forearm_yaw&quot;,&quot;left_wrist_pitch&quot;,&quot;left_wrist_roll&quot;,&quot;right_scapula_yaw&quot;,&quot;right_scapula_roll&quot;,&quot;right_shoulder_pitch&quot;,&quot;right_shoulder_roll&quot;,&quot;right_shoulder_yaw&quot;,&quot;right_elbow_pitch&quot;,&quot;right_forearm_yaw&quot;,&quot;right_wrist_pitch&quot;,&quot;right_wrist_roll&quot;,&quot;pelvis_roll&quot;,&quot;pelvis_pitch&quot;,&quot;left_hip_pitch&quot;,&quot;left_hip_roll&quot;,&quot;left_hip_yaw&quot;,&quot;left_knee_pitch&quot;,&quot;left_shank_yaw&quot;,&quot;left_ankle_pitch&quot;,&quot;left_ankle_roll&quot;,&quot;right_hip_pitch&quot;,&quot;right_hip_roll&quot;,&quot;right_hip_yaw&quot;,&quot;right_knee_pitch&quot;,&quot;right_shank_yaw&quot;,&quot;right_ankle_pitch&quot;,&quot;right_ankle_roll&quot;],&quot;flanges&quot;:{&quot;waist_flange_plus_x&quot;:&quot;waist_plus_rod&quot;,&quot;waist_flange_minus_x&quot;:&quot;waist_minus_rod&quot;,&quot;hips_flange_plus_x&quot;:&quot;hips_plus_rod&quot;,&quot;hips_flange_minus_x&quot;:&quot;hips_minus_rod&quot;,&quot;left_shoulder_flange_linkage&quot;:&quot;left_shoulder_flange_linkage_rod&quot;,&quot;left_wrist_flange_proximal&quot;:&quot;left_wrist_flange_proximal_rod&quot;,&quot;left_wrist_flange_distal&quot;:&quot;left_wrist_flange_distal_rod&quot;,&quot;right_shoulder_flange_linkage&quot;:&quot;right_shoulder_flange_linkage_rod&quot;,&quot;right_wrist_flange_proximal&quot;:&quot;right_wrist_flange_proximal_rod&quot;,&quot;right_wrist_flange_distal&quot;:&quot;right_wrist_flange_distal_rod&quot;},&quot;joint_limits&quot;:{&quot;waist_yaw&quot;:[-0.15708,0.15708],&quot;waist_pitch&quot;:[-1.904966,2.428973],&quot;waist_roll&quot;:[-0.294149,0.247721],&quot;left_scapula_yaw&quot;:[-1.005166,2.504991],&quot;left_scapula_roll&quot;:[-0.069813,0.51944],&quot;left_shoulder_pitch&quot;:[-3.106686,3.106686],&quot;left_shoulder_roll&quot;:[-3.106686,3.106686],&quot;left_shoulder_yaw&quot;:[-3.106686,3.106686],&quot;left_elbow_pitch&quot;:[-2.551521,2.779266],&quot;left_forearm_yaw&quot;:[-3.106686,3.106686],&quot;left_wrist_pitch&quot;:[-3.106686,3.106686],&quot;left_wrist_roll&quot;:[-3.106686,3.106686],&quot;right_scapula_yaw&quot;:[-2.504957,1.005166],&quot;right_scapula_roll&quot;:[-0.51944,0.069813],&quot;right_shoulder_pitch&quot;:[-3.106686,3.106686],&quot;right_shoulder_roll&quot;:[-3.106686,3.106686],&quot;right_shoulder_yaw&quot;:[-3.106686,3.106686],&quot;right_elbow_pitch&quot;:[-2.785641,2.544806],&quot;right_forearm_yaw&quot;:[-3.106686,3.106686],&quot;right_wrist_pitch&quot;:[-3.106686,3.106686],&quot;right_wrist_roll&quot;:[-3.106686,3.106686],&quot;pelvis_roll&quot;:[-0.05236,0.10472],&quot;pelvis_pitch&quot;:[-0.139626,2.354354],&quot;left_hip_pitch&quot;:[-1.745329,1.745329],&quot;left_hip_roll&quot;:[-1.117011,1.117011],&quot;left_hip_yaw&quot;:[-3.106686,3.106686],&quot;left_knee_pitch&quot;:[-2.583087,2.722339],&quot;left_shank_yaw&quot;:[-3.106686,3.106686],&quot;left_ankle_pitch&quot;:[-1.97379,2.222363],&quot;left_ankle_roll&quot;:[-1.88291,1.880251],&quot;right_hip_pitch&quot;:[-1.53589,1.53589],&quot;right_hip_roll&quot;:[-1.117011,1.117011],&quot;right_hip_yaw&quot;:[-3.106686,3.106686],&quot;right_knee_pitch&quot;:[-2.722339,2.583087],&quot;right_shank_yaw&quot;:[-3.106686,3.106686],&quot;right_ankle_pitch&quot;:[-1.895387,2.29838],&quot;right_ankle_roll&quot;:[-1.880251,1.88291]}}" />
+    <text name="robot_sim_joint_position" data="{&quot;model&quot;:&quot;full_body_robot&quot;,&quot;joints&quot;:[&quot;waist_yaw&quot;,&quot;waist_pitch&quot;,&quot;waist_roll&quot;,&quot;left_scapula_yaw&quot;,&quot;left_scapula_roll&quot;,&quot;left_shoulder_pitch&quot;,&quot;left_shoulder_roll&quot;,&quot;left_shoulder_yaw&quot;,&quot;left_elbow_pitch&quot;,&quot;left_forearm_yaw&quot;,&quot;left_wrist_pitch&quot;,&quot;left_wrist_roll&quot;,&quot;right_scapula_yaw&quot;,&quot;right_scapula_roll&quot;,&quot;right_shoulder_pitch&quot;,&quot;right_shoulder_roll&quot;,&quot;right_shoulder_yaw&quot;,&quot;right_elbow_pitch&quot;,&quot;right_forearm_yaw&quot;,&quot;right_wrist_pitch&quot;,&quot;right_wrist_roll&quot;,&quot;pelvis_roll&quot;,&quot;pelvis_pitch&quot;,&quot;left_hip_pitch&quot;,&quot;left_hip_roll&quot;,&quot;left_hip_yaw&quot;,&quot;left_knee_pitch&quot;,&quot;left_shank_yaw&quot;,&quot;left_ankle_pitch&quot;,&quot;left_ankle_roll&quot;,&quot;right_hip_pitch&quot;,&quot;right_hip_roll&quot;,&quot;right_hip_yaw&quot;,&quot;right_knee_pitch&quot;,&quot;right_shank_yaw&quot;,&quot;right_ankle_pitch&quot;,&quot;right_ankle_roll&quot;],&quot;flanges&quot;:{&quot;waist_flange_plus_x&quot;:&quot;waist_plus_rod&quot;,&quot;waist_flange_minus_x&quot;:&quot;waist_minus_rod&quot;,&quot;hips_flange_plus_x&quot;:&quot;hips_plus_rod&quot;,&quot;hips_flange_minus_x&quot;:&quot;hips_minus_rod&quot;,&quot;left_shoulder_flange_linkage&quot;:&quot;left_shoulder_flange_linkage_rod&quot;,&quot;left_wrist_flange_proximal&quot;:&quot;left_wrist_flange_proximal_rod&quot;,&quot;left_wrist_flange_distal&quot;:&quot;left_wrist_flange_distal_rod&quot;,&quot;right_shoulder_flange_linkage&quot;:&quot;right_shoulder_flange_linkage_rod&quot;,&quot;right_wrist_flange_proximal&quot;:&quot;right_wrist_flange_proximal_rod&quot;,&quot;right_wrist_flange_distal&quot;:&quot;right_wrist_flange_distal_rod&quot;},&quot;joint_limits&quot;:{&quot;waist_yaw&quot;:[-0.15708,0.15708],&quot;waist_pitch&quot;:[-1.570796,1.570796],&quot;waist_roll&quot;:[-0.279253,0.244346],&quot;left_scapula_yaw&quot;:[-0.977384,1.570796],&quot;left_scapula_roll&quot;:[-0.034907,0.488692],&quot;left_shoulder_pitch&quot;:[-3.106686,3.106686],&quot;left_shoulder_roll&quot;:[-3.106686,3.106686],&quot;left_shoulder_yaw&quot;:[-3.106686,3.106686],&quot;left_elbow_pitch&quot;:[-2.551521,2.779266],&quot;left_forearm_yaw&quot;:[-3.106686,3.106686],&quot;left_wrist_pitch&quot;:[-0.488692,0.453786],&quot;left_wrist_roll&quot;:[-1.570796,1.570796],&quot;right_scapula_yaw&quot;:[-1.570796,0.977384],&quot;right_scapula_roll&quot;:[-0.488692,0.034907],&quot;right_shoulder_pitch&quot;:[-3.106686,3.106686],&quot;right_shoulder_roll&quot;:[-3.106686,3.106686],&quot;right_shoulder_yaw&quot;:[-3.106686,3.106686],&quot;right_elbow_pitch&quot;:[-2.785641,2.544806],&quot;right_forearm_yaw&quot;:[-3.106686,3.106686],&quot;right_wrist_pitch&quot;:[-1.570796,1.570796],&quot;right_wrist_roll&quot;:[-1.570796,1.570796],&quot;pelvis_roll&quot;:[-0.034907,0.10472],&quot;pelvis_pitch&quot;:[-0.10472,0.383972],&quot;left_hip_pitch&quot;:[-1.745329,1.745329],&quot;left_hip_roll&quot;:[-1.117011,1.117011],&quot;left_hip_yaw&quot;:[-3.106686,3.106686],&quot;left_knee_pitch&quot;:[-2.583087,2.722339],&quot;left_shank_yaw&quot;:[-3.106686,3.106686],&quot;left_ankle_pitch&quot;:[-1.97379,2.222363],&quot;left_ankle_roll&quot;:[-1.88291,1.880251],&quot;right_hip_pitch&quot;:[-1.53589,1.53589],&quot;right_hip_roll&quot;:[-1.117011,1.117011],&quot;right_hip_yaw&quot;:[-3.106686,3.106686],&quot;right_knee_pitch&quot;:[-2.722339,2.583087],&quot;right_shank_yaw&quot;:[-3.106686,3.106686],&quot;right_ankle_pitch&quot;:[-1.895387,2.29838],&quot;right_ankle_roll&quot;:[-1.880251,1.88291]}}" />
   </custom>
   <statistic center="0 0 -0.25" extent="1.42" />
   <visual>
@@ -98,19 +98,19 @@
         <inertial pos="-0.000185599457 -0.0104295919 -0.0490354269" mass="2.077390139995405" fullinertia="0.00192596389 0.00555737526 0.00518192243 4.74364042e-07 -1.25896399e-06 -0.000139617069" />
         <geom name="waist_yaw_vis_0" type="mesh" mesh="waist_yaw_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
         <body name="waist_pitch" pos="0 -0.00827522117 -0.0994061774" quat="0.118227513 -0.697152964 -0.118227513 0.697152964">
-          <joint name="waist_pitch" axis="0 0 1" limited="true" range="-1.904966 2.428973" />
+          <joint name="waist_pitch" axis="0 0 1" limited="true" range="-1.570796 1.570796" />
           <inertial pos="1.0766037e-07 5.22313486e-08 -2.61050849e-07" mass="0.09660210509859406" fullinertia="2.5792709e-05 2.09141904e-05 8.79032131e-06 -6.78429726e-12 1.53950043e-09 7.3536453e-10" />
           <geom name="waist_pitch_vis_0" type="mesh" mesh="waist_pitch_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
           <body name="waist_roll" pos="0 0 0" quat="0.499999997 -0.499999996 -0.500000003 -0.500000004">
-            <joint name="waist_roll" axis="0 0 1" limited="true" range="-0.294149 0.247721" />
+            <joint name="waist_roll" axis="0 0 1" limited="true" range="-0.279253 0.244346" />
             <inertial pos="-4.62340953e-06 0.117047954 -0.0197340411" mass="4.886247139995405" fullinertia="0.0245242762 0.0233079474 0.0359013196 2.39436954e-06 -7.25166562e-07 0.00613933464" />
             <geom name="waist_roll_vis_0" type="mesh" mesh="waist_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
             <body name="left_scapula_yaw" pos="0.0589997419 0.2107 -0.0599999919" quat="0.707106781 -0.707106781 0 0">
-              <joint name="left_scapula_yaw" axis="0 0 1" limited="true" range="-1.005166 2.504991" />
+              <joint name="left_scapula_yaw" axis="0 0 1" limited="true" range="-0.977384 1.570796" />
               <inertial pos="0.00358424002 -2.91801788e-05 0.0108079812" mass="0.1355066457974504" fullinertia="0.000100014416 2.9143883e-05 0.000101706971 -1.41306683e-08 -1.54628826e-06 -3.30775103e-08" />
               <geom name="left_scapula_yaw_vis_0" type="mesh" mesh="left_scapula_yaw_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
               <body name="left_scapula_roll" pos="0.005 -0.0285 0.0203" quat="0.707106781 0.707106781 0 0">
-                <joint name="left_scapula_roll" axis="0 0 1" limited="true" range="-0.069813 0.51944" />
+                <joint name="left_scapula_roll" axis="0 0 1" limited="true" range="-0.034907 0.488692" />
                 <inertial pos="0.00337981465 0.0281582667 -0.0289997444" mass="0.7062217750512635" fullinertia="0.000453726002 0.000377134348 0.000453512345 -1.5838865e-05 -6.31176491e-09 -2.7657934e-09" />
                 <geom name="left_scapula_roll_vis_0" type="mesh" mesh="left_scapula_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                 <body name="left_shoulder_pitch" pos="0.0345 0.0335 -0.029" quat="0.69802447 -0.112968309 -0.69802447 0.112968309">
@@ -134,17 +134,17 @@
                           <inertial pos="0.00546216623 -0.00304279482 0.0524996064" mass="0.3468182660940566" fullinertia="0.000394085248 0.000386365592 5.64591804e-05 -5.58757086e-06 -1.54606229e-05 5.96216158e-06" />
                           <geom name="left_forearm_yaw_vis_0" type="mesh" mesh="left_forearm_yaw_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                           <body name="left_wrist_pitch" pos="-0.00130396801 0.000681231061 0.138499998" quat="0.686719346 -0.16857207 -0.686719344 -0.16857206">
-                            <joint name="left_wrist_pitch" axis="0 0 1" limited="true" range="-3.106686 3.106686" />
+                            <joint name="left_wrist_pitch" axis="0 0 1" limited="true" range="-0.488692 0.453786" />
                             <inertial pos="3.6496285e-08 2.26369825e-07 -0.00533314734" mass="0.01284829398733332" fullinertia="8.18577141e-07 4.97851099e-07 4.46040403e-07 -4.27247387e-11 3.02824882e-13 -2.00969112e-11" />
                             <geom name="left_wrist_pitch_vis_0" type="mesh" mesh="left_wrist_pitch_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                             <body name="left_wrist_roll" pos="0 0 0" quat="0.54167522 0.54167522 -0.454519478 0.454519478">
-                              <joint name="left_wrist_roll" axis="0 0 1" limited="true" range="-3.106686 3.106686" />
+                              <joint name="left_wrist_roll" axis="0 0 1" limited="true" range="-1.570796 1.570796" />
                               <inertial pos="-0.000995668936 -0.00820576263 1.26734342e-05" mass="0.02169805795582698" fullinertia="3.99320279e-06 3.1914378e-06 1.67064059e-06 2.44773087e-07 -1.23967629e-10 -2.19123018e-09" />
                               <geom name="left_wrist_roll_vis_0" type="mesh" mesh="left_wrist_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                               <site name="left_wrist_flange_proximal_platform_ball" pos="0.00798178841 0.00153188025 -0.0200000195" rgba="0 0 0 0" />
-                              <geom name="left_wrist_flange_proximal_platform" type="mesh" mesh="left_wrist_flange_proximal_platform" group="2" rgba="0 0 0 0" pos="-0.0218562668 0.136782736 -5.52556082e-06" quat="-0.388327888 -0.279802191 -0.649377232 0.590949571" />
+                              <geom name="left_wrist_flange_proximal_platform" type="mesh" mesh="left_wrist_flange_proximal_platform" group="2" rgba="0 0 0 0" pos="-0.0218562668 0.136782736 -5.52556082e-06" quat="0.388327888 0.279802191 0.649377232 -0.590949571" />
                               <site name="left_wrist_flange_distal_platform_ball" pos="0.00798159786 0.0015335024 0.0208864683" rgba="0 0 0 0" />
-                              <geom name="left_wrist_flange_distal_platform" type="mesh" mesh="left_wrist_flange_distal_platform" group="2" rgba="0 0 0 0" pos="-0.0218562668 0.136782736 -5.52556082e-06" quat="-0.388327888 -0.279802191 -0.649377232 0.590949571" />
+                              <geom name="left_wrist_flange_distal_platform" type="mesh" mesh="left_wrist_flange_distal_platform" group="2" rgba="0 0 0 0" pos="-0.0218562668 0.136782736 -5.52556082e-06" quat="0.388327888 0.279802191 0.649377232 -0.590949571" />
                             </body>
                           </body>
                           <body name="left_wrist_flange_proximal_body" pos="0.010409813 0.0170832654 0.0370007754" quat="0.968068553 1.60068647e-05 -1.2022444e-05 0.250685611">
@@ -156,7 +156,7 @@
                               <joint name="left_wrist_flange_proximal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="left_wrist_flange_proximal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0507499999" mass="0.01" diaginertia="8.58520829e-06 8.58520829e-06 1e-07" />
-                              <geom name="left_wrist_flange_proximal_rod" type="mesh" mesh="left_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="-0.0142056794 -0.0147909209 -0.0369279983" quat="-0.999987868 -0.0041133387 -0.00271010196 1.11477025e-05" />
+                              <geom name="left_wrist_flange_proximal_rod" type="mesh" mesh="left_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="-0.0142056794 -0.0147909209 -0.0369279983" quat="0.999987868 0.0041133387 0.00271010196 -1.11477025e-05" />
                               <site name="left_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -169,7 +169,7 @@
                               <joint name="left_wrist_flange_distal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="left_wrist_flange_distal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0330029768" mass="0.01" diaginertia="3.63065491e-06 3.63065491e-06 1e-07" />
-                              <geom name="left_wrist_flange_distal_rod" type="mesh" mesh="left_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="0.0179704866 0.00730522748 -0.072712553" quat="-0.99994837 -0.00267360801 -0.00980350937 2.62120945e-05" />
+                              <geom name="left_wrist_flange_distal_rod" type="mesh" mesh="left_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="0.0179704866 0.00730522748 -0.072712553" quat="0.99994837 0.00267360801 0.00980350937 -2.62120945e-05" />
                               <site name="left_wrist_flange_distal_rod_tip" pos="0 0 0.0660059535" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -179,15 +179,15 @@
                   </body>
                 </body>
                 <site name="left_shoulder_flange_linkage_platform_ball" pos="-0.0386618729 -0.0067349313 0.000499722919" rgba="0 0 0 0" />
-                <geom name="left_shoulder_flange_linkage_platform" type="mesh" mesh="left_shoulder_flange_linkage_platform" group="2" rgba="0 0 0 0" pos="0.061170384 -0.23100014 -0.0577855279" quat="-0.018423445 -5.07544207e-08 -0.999830274 9.18167045e-07" />
+                <geom name="left_shoulder_flange_linkage_platform" type="mesh" mesh="left_shoulder_flange_linkage_platform" group="2" rgba="0 0 0 0" pos="0.061170384 -0.23100014 -0.0577855279" quat="0.018423445 5.07544207e-08 0.999830274 -9.18167045e-07" />
               </body>
             </body>
             <body name="right_scapula_yaw" pos="-0.0590002581 0.2107 -0.0599999919" quat="0.707106781 -0.707106781 0 0">
-              <joint name="right_scapula_yaw" axis="0 0 1" limited="true" range="-2.504957 1.005166" />
+              <joint name="right_scapula_yaw" axis="0 0 1" limited="true" range="-1.570796 0.977384" />
               <inertial pos="-0.00348091784 -0.00222094227 0.0102492075" mass="0.1341235469560834" fullinertia="9.51379265e-05 2.89832198e-05 9.81262643e-05 -4.31424345e-07 1.50787133e-06 2.92197431e-06" />
               <geom name="right_scapula_yaw_vis_0" type="mesh" mesh="right_scapula_yaw_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
               <body name="right_scapula_roll" pos="-0.005 -0.0328 0.0203" quat="0.707106781 0.707106781 0 0">
-                <joint name="right_scapula_roll" axis="0 0 1" limited="true" range="-0.51944 0.069813" />
+                <joint name="right_scapula_roll" axis="0 0 1" limited="true" range="-0.488692 0.034907" />
                 <inertial pos="-0.00337981467 0.0281584595 -0.0332989813" mass="0.7062217787263254" fullinertia="0.000453727461 0.000377134351 0.000453513802 1.58393712e-05 -2.97126116e-09 -2.04110257e-09" />
                 <geom name="right_scapula_roll_vis_0" type="mesh" mesh="right_scapula_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                 <body name="right_shoulder_pitch" pos="-0.0345 0.0335 -0.0333" quat="0.69802447 -0.112968309 -0.69802447 0.112968309">
@@ -211,17 +211,17 @@
                           <inertial pos="-0.00561746637 -0.00274552964 0.0519996075" mass="0.3468182660940566" fullinertia="0.000394123406 0.000386327484 5.64591799e-05 5.56103545e-06 1.37246329e-05 9.28507053e-06" />
                           <geom name="right_forearm_yaw_vis_0" type="mesh" mesh="right_forearm_yaw_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                           <body name="right_wrist_pitch" pos="0.00130396801 0.000681231061 0.137999998" quat="0.459540387 -0.263546816 -0.656157813 0.53742221">
-                            <joint name="right_wrist_pitch" axis="0 0 1" limited="true" range="-3.106686 3.106686" />
+                            <joint name="right_wrist_pitch" axis="0 0 1" limited="true" range="-1.570796 1.570796" />
                             <inertial pos="-2.02832452e-07 -1.06914647e-07 0.00533314734" mass="0.01284829398733332" fullinertia="5.30676289e-07 7.85751953e-07 4.46040402e-07 -9.72131764e-08 -1.91391055e-11 -6.13973934e-12" />
                             <geom name="right_wrist_pitch_vis_0" type="mesh" mesh="right_wrist_pitch_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                             <body name="right_wrist_roll" pos="0 0 0" quat="0.5871282 0.561121743 -0.430281756 -0.394056438">
-                              <joint name="right_wrist_roll" axis="0 0 1" limited="true" range="-3.106686 3.106686" />
+                              <joint name="right_wrist_roll" axis="0 0 1" limited="true" range="-1.570796 1.570796" />
                               <inertial pos="0.0080441016 0.00190219017 -1.26734251e-05" mass="0.02169805795582698" fullinertia="3.14724401e-06 4.03739662e-06 1.67064065e-06 1.50092465e-07 -2.16385217e-09 -3.66919089e-10" />
                               <geom name="right_wrist_roll_vis_0" type="mesh" mesh="right_wrist_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
                               <site name="right_wrist_flange_proximal_platform_ball" pos="0.00113673423 0.0199679129 0.00812705192" rgba="0 0 0 0" />
-                              <geom name="right_wrist_flange_proximal_platform" type="mesh" mesh="right_wrist_flange_proximal_platform" group="2" rgba="0 0 0 0" pos="-0.13852433 0.00874356924 0.002227853" quat="-0.618268641 0.303508031 -0.638658506 0.343135651" />
+                              <geom name="right_wrist_flange_proximal_platform" type="mesh" mesh="right_wrist_flange_proximal_platform" group="2" rgba="0 0 0 0" pos="-0.13852433 0.00874356924 0.002227853" quat="0.618268641 -0.303508031 0.638658506 -0.343135651" />
                               <site name="right_wrist_flange_distal_platform_ball" pos="-0.00143886932 -0.0208373705 0.00812609024" rgba="0 0 0 0" />
-                              <geom name="right_wrist_flange_distal_platform" type="mesh" mesh="right_wrist_flange_distal_platform" group="2" rgba="0 0 0 0" pos="-0.13852433 0.00874356924 0.002227853" quat="-0.618268641 0.303508031 -0.638658506 0.343135651" />
+                              <geom name="right_wrist_flange_distal_platform" type="mesh" mesh="right_wrist_flange_distal_platform" group="2" rgba="0 0 0 0" pos="-0.13852433 0.00874356924 0.002227853" quat="0.618268641 -0.303508031 0.638658506 -0.343135651" />
                             </body>
                           </body>
                           <body name="right_wrist_flange_proximal_body" pos="-0.0177275629 -0.00614839898 0.0364991803" quat="0.852021711 -3.1937987e-06 -1.97785374e-05 0.523506451">
@@ -233,7 +233,7 @@
                               <joint name="right_wrist_flange_proximal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="right_wrist_flange_proximal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0507499999" mass="0.01" diaginertia="8.58520831e-06 8.58520831e-06 1e-07" />
-                              <geom name="right_wrist_flange_proximal_rod" type="mesh" mesh="right_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="0.0189077168 -0.00794003232 -0.0372279837" quat="-0.999987868 0.00400775126 -0.00286394054 -1.14781006e-05" />
+                              <geom name="right_wrist_flange_proximal_rod" type="mesh" mesh="right_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="0.0189077168 -0.00794003232 -0.0372279837" quat="0.999987868 -0.00400775126 0.00286394054 1.14781006e-05" />
                               <site name="right_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -246,7 +246,7 @@
                               <joint name="right_wrist_flange_distal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="right_wrist_flange_distal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0330029765" mass="0.01" diaginertia="3.63065487e-06 3.63065487e-06 1e-07" />
-                              <geom name="right_wrist_flange_distal_rod" type="mesh" mesh="right_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="-0.0132771618 0.0141362578 -0.0730124914" quat="-0.99994837 0.0101092372 0.00102973153 1.04103378e-05" />
+                              <geom name="right_wrist_flange_distal_rod" type="mesh" mesh="right_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="-0.0132771618 0.0141362578 -0.0730124914" quat="0.99994837 -0.0101092372 -0.00102973153 -1.04103378e-05" />
                               <site name="right_wrist_flange_distal_rod_tip" pos="0 0 0.0660059531" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -256,13 +256,13 @@
                   </body>
                 </body>
                 <site name="right_shoulder_flange_linkage_platform_ball" pos="0.038662413 -0.00673493526 0.000500162896" rgba="0 0 0 0" />
-                <geom name="right_shoulder_flange_linkage_platform" type="mesh" mesh="right_shoulder_flange_linkage_platform" group="2" rgba="0 0 0 0" pos="-0.0611703597 -0.231000144 -0.0577850689" quat="0.018423445 5.07544206e-08 -0.999830274 9.18167045e-07" />
+                <geom name="right_shoulder_flange_linkage_platform" type="mesh" mesh="right_shoulder_flange_linkage_platform" group="2" rgba="0 0 0 0" pos="-0.0611703597 -0.231000144 -0.0577850689" quat="-0.018423445 -5.07544206e-08 0.999830274 -9.18167045e-07" />
               </body>
             </body>
             <site name="waist_plus_platform_ball" pos="-0.0499997663 1.01441294e-06 0.0402927631" rgba="0 0 0 0" />
-            <geom name="waist_plus_platform" type="mesh" mesh="waist_plus_platform" group="2" rgba="0 0 0 0" pos="0.0010003286 -0.098181271 -0.0127058004" quat="-3.45327147e-06 8.25674301e-07 0.660173704 0.751112961" />
+            <geom name="waist_plus_platform" type="mesh" mesh="waist_plus_platform" group="2" rgba="0 0 0 0" pos="0.0010003286 -0.098181271 -0.0127058004" quat="3.45327147e-06 -8.25674302e-07 -0.660173704 -0.751112961" />
             <site name="waist_minus_platform_ball" pos="0.0500002337 1.42415464e-06 0.0402921832" rgba="0 0 0 0" />
-            <geom name="waist_minus_platform" type="mesh" mesh="waist_minus_platform" group="2" rgba="0 0 0 0" pos="-0.000999671402 -0.0981812792 -0.0127057888" quat="-3.45327147e-06 8.25674301e-07 0.660173704 0.751112961" />
+            <geom name="waist_minus_platform" type="mesh" mesh="waist_minus_platform" group="2" rgba="0 0 0 0" pos="-0.000999671402 -0.0981812792 -0.0127057888" quat="3.45327147e-06 -8.25674302e-07 -0.660173704 -0.751112961" />
             <body name="left_shoulder_flange_linkage_body" pos="0.0286535037 0.128499935 -0.0553184313" quat="0.018423445 5.07544207e-08 0.999830274 -9.18167045e-07">
               <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
               <joint name="left_shoulder_flange_linkage" axis="1 0 0" limited="true" range="-1.5708 1.5708" />
@@ -272,7 +272,7 @@
                 <joint name="left_shoulder_flange_linkage_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                 <joint name="left_shoulder_flange_linkage_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                 <inertial pos="0 0 0.0534529365" mass="0.01" diaginertia="9.52405474e-06 9.52405474e-06 1e-07" />
-                <geom name="left_shoulder_flange_linkage_rod" type="mesh" mesh="left_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="-0.0924339955 -0.0457826133 -0.123351467" quat="0.681398914 0.731824886 -0.00770532176 0.00827554329" />
+                <geom name="left_shoulder_flange_linkage_rod" type="mesh" mesh="left_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="-0.0924339955 -0.0457826133 -0.123351467" quat="-0.681398914 -0.731824886 0.00770532176 -0.00827554329" />
                 <site name="left_shoulder_flange_linkage_rod_tip" pos="0 0 0.106905873" rgba="0 0 0 0" />
               </body>
             </body>
@@ -285,7 +285,7 @@
                 <joint name="right_shoulder_flange_linkage_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                 <joint name="right_shoulder_flange_linkage_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                 <inertial pos="0 0 0.0534529365" mass="0.01" diaginertia="9.52405474e-06 9.52405474e-06 1e-07" />
-                <geom name="right_shoulder_flange_linkage_rod" type="mesh" mesh="right_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="0.092434512 -0.0457826132 -0.123351479" quat="0.681398914 0.731824886 0.00770532112 -0.00827554261" />
+                <geom name="right_shoulder_flange_linkage_rod" type="mesh" mesh="right_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="0.092434512 -0.0457826132 -0.123351479" quat="-0.681398914 -0.731824886 -0.00770532112 0.00827554261" />
                 <site name="right_shoulder_flange_linkage_rod_tip" pos="0 0 0.106905873" rgba="0 0 0 0" />
               </body>
             </body>
@@ -300,7 +300,7 @@
             <joint name="waist_plus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
             <joint name="waist_plus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
             <inertial pos="0 0 0.0210000166" mass="0.01" diaginertia="1.47000233e-06 1.47000233e-06 1e-07" />
-            <geom name="waist_plus_rod" type="mesh" mesh="waist_plus_rod" group="2" rgba="0 0 0 0" pos="-0.051 -0.0591958663 -0.0525751644" quat="-0.995348512 0.0963397139 0 0" />
+            <geom name="waist_plus_rod" type="mesh" mesh="waist_plus_rod" group="2" rgba="0 0 0 0" pos="-0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
             <site name="waist_plus_rod_tip" pos="0 0 0.0420000332" rgba="0 0 0 0" />
           </body>
         </body>
@@ -313,17 +313,17 @@
             <joint name="waist_minus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
             <joint name="waist_minus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
             <inertial pos="0 0 0.0210000166" mass="0.01" diaginertia="1.47000233e-06 1.47000233e-06 1e-07" />
-            <geom name="waist_minus_rod" type="mesh" mesh="waist_minus_rod" group="2" rgba="0 0 0 0" pos="0.051 -0.0591958663 -0.0525751644" quat="-0.995348512 0.0963397139 0 0" />
+            <geom name="waist_minus_rod" type="mesh" mesh="waist_minus_rod" group="2" rgba="0 0 0 0" pos="0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
             <site name="waist_minus_rod_tip" pos="0 0 0.0420000332" rgba="0 0 0 0" />
           </body>
         </body>
       </body>
       <body name="pelvis_roll" pos="-0.024232506 0 -0.0693904577" quat="0.576561065 0.409362112 -0.409362112 -0.576561065">
-        <joint name="pelvis_roll" axis="0 0 -1" limited="true" range="-0.05236 0.10472" />
+        <joint name="pelvis_roll" axis="0 0 -1" limited="true" range="-0.034907 0.10472" />
         <inertial pos="0.000152713022 0.00012814318 0.00144177348" mass="0.1025502767836914" fullinertia="2.43750295e-05 2.92866158e-05 9.09292632e-06 -1.33867302e-07 -3.21083856e-07 -2.66990452e-07" />
         <geom name="pelvis_roll_vis_0" type="mesh" mesh="pelvis_roll_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
         <body name="pelvis_pitch" pos="0 0 0" quat="0.69269396 0.142038999 -0.69269396 -0.142038999">
-          <joint name="pelvis_pitch" axis="0 0 1" limited="true" range="-0.139626 2.354354" />
+          <joint name="pelvis_pitch" axis="0 0 1" limited="true" range="-0.10472 0.383972" />
           <inertial pos="-0.033946287 -0.0147784672 -9.13618604e-07" mass="2.424750299144856" fullinertia="0.0187814095 0.0185924982 0.00293846751 0.000608832665 -5.99489899e-06 -1.80534768e-06" />
           <geom name="pelvis_pitch_vis_0" type="mesh" mesh="pelvis_pitch_vis_0" rgba="0.82 0.85 0.88 1" pos="0 0 0" quat="1 0 0 0" />
           <body name="left_hip_pitch" pos="-0.0359905486 -0.0245141353 0.0938200081" quat="0.999583371 0 0 0.0288631986">
@@ -397,9 +397,9 @@
             </body>
           </body>
           <site name="hips_plus_platform_ball" pos="0.0200325352 0.116529845 0.0715200296" rgba="0 0 0 0" />
-          <geom name="hips_plus_platform" type="mesh" mesh="hips_plus_platform" group="2" rgba="0 0 0 0" pos="0.11255351 0.119197813 -0.0281523727" quat="0.201776092 0.0676639902 -0.722942766 -0.657314043" />
+          <geom name="hips_plus_platform" type="mesh" mesh="hips_plus_platform" group="2" rgba="0 0 0 0" pos="-0.043421748 0.058996734 -0.0341461039" quat="-0.597696594 0.380588222 0.591200644 0.385218359" />
           <site name="hips_minus_platform_ball" pos="0.0200326095 0.116529877 -0.0715199718" rgba="0 0 0 0" />
-          <geom name="hips_minus_platform" type="mesh" mesh="hips_minus_platform" group="2" rgba="0 0 0 0" pos="0.0921568876 0.123145062 -0.161141413" quat="0.42098014 -0.469872236 0.45924314 0.625373122" />
+          <geom name="hips_minus_platform" type="mesh" mesh="hips_minus_platform" group="2" rgba="0 0 0 0" pos="-0.0508437226 0.0679517466 0.00525493117" quat="-0.560381417 0.391089083 0.654119678 0.32426755" />
         </body>
       </body>
       <body name="hips_plus_flange" pos="0.0187838629 0.0719999877 0.0230986548" quat="0.697152994 0.118226328 0.118226138 0.697153368">
@@ -490,7 +490,7 @@
     <position name="waist_flange_minus_x" joint="waist_flange_minus_x" ctrlrange="-1.5708 1.5708" />
     <position name="hips_flange_plus_x" joint="hips_flange_plus_x" ctrlrange="-1.5708 1.5708" />
     <position name="hips_flange_minus_x" joint="hips_flange_minus_x" ctrlrange="-1.5708 1.5708" />
-    <position name="left_shoulder_axis_1_direct" joint="left_scapula_yaw" ctrlrange="-1.005166 2.504991" />
+    <position name="left_shoulder_axis_1_direct" joint="left_scapula_yaw" ctrlrange="-0.977384 1.570796" />
     <position name="left_shoulder_flange_linkage" joint="left_shoulder_flange_linkage" ctrlrange="-1.5708 1.5708" />
     <position name="motor_08" joint="left_shoulder_pitch" ctrlrange="-3.106686 3.106686" />
     <position name="motor_09" joint="left_shoulder_roll" ctrlrange="-3.106686 3.106686" />
@@ -499,7 +499,7 @@
     <position name="motor_12" joint="left_forearm_yaw" ctrlrange="-3.106686 3.106686" />
     <position name="left_wrist_flange_proximal" joint="left_wrist_flange_proximal" ctrlrange="-1.5708 1.5708" />
     <position name="left_wrist_flange_distal" joint="left_wrist_flange_distal" ctrlrange="-1.5708 1.5708" />
-    <position name="right_shoulder_axis_1_direct" joint="right_scapula_yaw" ctrlrange="-2.504957 1.005166" />
+    <position name="right_shoulder_axis_1_direct" joint="right_scapula_yaw" ctrlrange="-1.570796 0.977384" />
     <position name="right_shoulder_flange_linkage" joint="right_shoulder_flange_linkage" ctrlrange="-1.5708 1.5708" />
     <position name="motor_17" joint="right_shoulder_pitch" ctrlrange="-3.106686 3.106686" />
     <position name="motor_18" joint="right_shoulder_roll" ctrlrange="-3.106686 3.106686" />

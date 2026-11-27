@@ -22,8 +22,10 @@ SOURCE_URDF = MODEL / 'urdf/full_body_robot.urdf'
 TOPOLOGY_YAML = MODEL / 'config/motor_topology.yaml'
 PARAMS_YAML = MODEL / 'config/motor_params.yaml'
 LIMITS_YAML = MODEL / 'config/simulation_limits.yaml'
+MOTOR_SPECS_YAML = MODEL.parents[1] / 'config/motor.yaml'
 OUT_MJCF = MODEL / 'mujoco/full_body_robot.xml'
 OUT_PHYSICS = MODEL / 'mujoco/full_body_robot.physics.xml'
+OUT_TORQUE = MODEL / 'mujoco/full_body_robot.torque.xml'
 OUT_STANDALONE = MODEL / 'urdf/full_body_robot.standalone.urdf'
 OUT_STANDING = MODEL / 'urdf/full_body_robot.standing.urdf'
 
@@ -518,6 +520,88 @@ def build():
     OUT_MJCF.write_text(xml_text, encoding='utf-8')
     OUT_PHYSICS.write_text(xml_text, encoding='utf-8')
 
+    # Build effort/torque MJCF variant with measured R58/R48 viscous damping and Coulomb friction
+    motor_specs = yaml.safe_load(MOTOR_SPECS_YAML.read_text(encoding='utf-8'))['motor_types']
+    motor_params = yaml.safe_load(PARAMS_YAML.read_text(encoding='utf-8'))['motors']
+    template_by_id = {int(entry['id']): entry['template'] for entry in motor_params}
+    group_motor_ids = {g['motor_numbers'][0]: list(g['motor_numbers']) for g in groups.values()}
+
+    torque_root = deepcopy(root)
+    torque_custom = torque_root.find('custom')
+    if torque_custom is not None:
+        cm = torque_custom.find("text[@name='robot_sim_control_mode']")
+        if cm is not None:
+            torque_custom.remove(cm)
+    torque_defaults = torque_root.find('default')
+    if torque_defaults is not None:
+        pos_def = torque_defaults.find('position')
+        if pos_def is not None:
+            torque_defaults.remove(pos_def)
+
+    passive_diff_joints = {
+        jn for mapping in DIFF_TO_URDF_JOINTS.values() for jn in mapping.values()
+    }
+    joint_elements = {j.get('name'): j for j in torque_root.iter('joint') if j.get('name')}
+    for jn in passive_diff_joints:
+        je = joint_elements.get(jn)
+        if je is not None:
+            je.set('damping', '0.02')
+            je.set('frictionloss', '0')
+
+    torque_actuators = torque_root.find('actuator')
+    torque_actuators.clear()
+    motor_driven_specs = {}
+    for num in sorted(controls):
+        mids = group_motor_ids.get(num, [num])
+        for mid, ctrl in zip(mids, controls[num]):
+            tmpl_name = template_by_id[mid]
+            spec = motor_specs[tmpl_name]['parameters']
+            damping = float(spec.get('viscous_damping_nm_s_per_rad', 0.1))
+            frictionloss = float(spec.get('coulomb_friction_nm', 0.0))
+            peak_torque = float(spec.get('peak_torque_nm', spec.get('rated_torque_nm', 1.15)))
+            jn = ctrl['joint']
+            je = joint_elements[jn]
+            je.set('damping', f'{damping:g}')
+            je.set('frictionloss', f'{frictionloss:g}')
+            je.set('actuatorfrcrange', f'{-peak_torque:g} {peak_torque:g}')
+            ET.SubElement(
+                torque_actuators,
+                'motor',
+                name=ctrl['name'],
+                joint=jn,
+                ctrllimited='true',
+                ctrlrange=f'{-peak_torque:g} {peak_torque:g}',
+            )
+            motor_driven_specs[jn] = (tmpl_name, damping, frictionloss, peak_torque)
+
+    ET.indent(torque_root, space='  ')
+    compiled_torque = deepcopy(torque_root)
+    compiled_torque.find('compiler').set('meshdir', str(MODEL))
+    t_model = mujoco.MjModel.from_xml_string(ET.tostring(compiled_torque, encoding='unicode'))
+    assert t_model.nu == 37, f'Expected 37 torque actuators, got {t_model.nu}'
+    assert t_model.neq == 10, f'Expected 10 connect constraints, got {t_model.neq}'
+    for jn, (tmpl_name, damping, frictionloss, peak_torque) in motor_driven_specs.items():
+        dof = int(t_model.jnt_dofadr[t_model.joint(jn).id])
+        assert np.isclose(t_model.dof_damping[dof], damping), f'{jn} damping mismatch'
+        assert np.isclose(t_model.dof_frictionloss[dof], frictionloss), f'{jn} frictionloss mismatch'
+
+    t_data = mujoco.MjData(t_model)
+    act_dofs = t_model.jnt_dofadr[t_model.actuator_trnid[:, 0]]
+    act_qpos = t_model.jnt_qposadr[t_model.actuator_trnid[:, 0]]
+    act_ranges = t_model.actuator_ctrlrange
+    for _ in range(200):
+        tau = 30.0 * (0.0 - t_data.qpos[act_qpos]) - 1.0 * t_data.qvel[act_dofs]
+        t_data.ctrl[:] = np.clip(tau, act_ranges[:, 0], act_ranges[:, 1])
+        mujoco.mj_step(t_model, t_data)
+    assert np.all(np.isfinite(t_data.qpos)) and np.all(np.isfinite(t_data.qvel)), 'Torque sim produced NaN/Inf'
+    t_err = max(
+        float(np.linalg.norm(t_data.site_xpos[t_model.eq_obj1id[i]] - t_data.site_xpos[t_model.eq_obj2id[i]]))
+        for i in range(t_model.neq)
+    )
+    assert t_err < 1e-3, f'Torque sim closure error too large: {t_err}'
+    print(f'Torque MJCF compiled & 200-step PD hold OK: nu={t_model.nu}, neq={t_model.neq}, max_closure_err={t_err:.2e} m')
+    OUT_TORQUE.write_text(ET.tostring(torque_root, encoding='unicode') + '\n', encoding='utf-8')
+
     # Write standalone URDF; keep full_body_robot.standing.urdf clean (38 weighed links, no duplicated CAD linkages)
     import build_mujoco_model as shared
     limits_dict = {
@@ -526,7 +610,7 @@ def build():
     shared.STANDALONE = OUT_STANDALONE
     shared.write_standalone_urdf(root, joints, limits_dict)
     shutil.copy2(SOURCE_URDF, OUT_STANDING)
-    print(f'Wrote {OUT_MJCF}, {OUT_STANDALONE}, {OUT_STANDING}')
+    print(f'Wrote {OUT_MJCF}, {OUT_TORQUE}, {OUT_STANDALONE}, {OUT_STANDING}')
     return 0
 
 

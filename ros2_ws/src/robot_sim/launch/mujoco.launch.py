@@ -84,7 +84,7 @@ def _launch_setup(context):
     variant = "standalone"
     if model == "full_body_robot" and model_path.resolve() in {
         (model_dir / "mujoco" / filename).resolve()
-        for filename in ("full_body_robot.xml", "full_body_robot.180deg.xml")
+        for filename in ("full_body_robot.xml", "full_body_robot.torque.xml", "full_body_robot.180deg.xml")
     }:
         variant = "standing"
     urdf = (model_dir / "urdf" / f"{model}.{variant}.urdf").read_text()

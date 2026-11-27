@@ -495,8 +495,8 @@ def test_full_body_hil_launch_uses_position_inputs_and_cad_types(tmp_path, monke
     actions = module.launch_simulation(context)
     plant = next(a for a in actions if isinstance(a, IncludeLaunchDescription))
     arguments = dict(plant.launch_arguments)
-    assert arguments['mujoco_model'] == str(description / 'models/full_body_robot/mujoco/full_body_robot.xml')
-    assert arguments['position_input'] == 'true'
+    assert arguments['mujoco_model'] == str(description / 'models/full_body_robot/mujoco/full_body_robot.torque.xml')
+    assert arguments['position_input'] == 'false'
     assert len(arguments['joint_names'].split(',')) == 37
     commands = [[perform_substitutions(context, part) for part in a.cmd]
                 for a in actions if isinstance(a, ExecuteProcess)]
@@ -506,9 +506,8 @@ def test_full_body_hil_launch_uses_position_inputs_and_cad_types(tmp_path, monke
     joint_map = command[command.index('--joint-map') + 1]
     assert '2:waist_flange_plus_x' in joint_map and '13:left_wrist_flange_proximal' in joint_map
     assert '--gazebo' in command
-    assert command[command.index('--gazebo-control-mode') + 1] == 'position'
-    assert command[command.index('--fb-period-ms') + 1] == '25'
-    assert command[command.index('--stagger-ms') + 1] == '0.4'
+    assert command[command.index('--gazebo-control-mode') + 1] == 'effort'
+    assert command[command.index('--fb-period-ms') + 1] == '40'
     driver = yaml.safe_load(Path(command[command.index('--driver-file') + 1]).read_text())['motor_hardware']
     assert len(driver['motors']) == 37
     assert driver['motors']['motor_13']['type'] == 'vaxor_2550'

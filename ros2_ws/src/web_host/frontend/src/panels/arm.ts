@@ -98,7 +98,7 @@ export function init(canvas: HTMLCanvasElement, opts: {
   canvas.addEventListener('pointerdown', onPointerDown);
 
   const manager = new THREE.LoadingManager();
-  manager.setURLModifier((url) => (/\.(?:stl|dae)$/i.test(url) ? `${url}?v=2` : url));
+  manager.setURLModifier((url) => (/\.(?:stl|dae)$/i.test(url) ? `${url}?v=3` : url));
   const loader = new URDFLoader(manager);
   loader.packages = packages;
   const gen = ++loadGen;

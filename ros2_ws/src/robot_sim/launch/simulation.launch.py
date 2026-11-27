@@ -750,10 +750,9 @@ def launch_simulation(context):
     model_joint_order = list(transmission_model.joint_names)
     topology_joint_order = [motor["joint"] for motor in simulation["motors"]]
     joint_order = (
-        topology_joint_order
-        if set(topology_joint_order) == set(model_joint_order)
-        and len(topology_joint_order) == len(model_joint_order)
-        else model_joint_order
+        model_joint_order
+        if set(topology_joint_order) < set(model_joint_order)
+        else topology_joint_order
     )
     # 关节集合的权威来源随后端切换：Gazebo 看控制器配置，MuJoCo 看 MJCF。
     # 两者都只做「拓扑关节 ⊆ 模型关节」的子集校验；顺序由 launch 显式交给下游

@@ -41,6 +41,33 @@ function playbackReadinessError(ids: number[]): string {
 
 const ALIGN_MS = 2500;
 const CANCEL_SETTLE_MS = 800;
+const RETURN_ZERO_SPEED_RAD_S = 0.4;
+const RETURN_ZERO_MIN_MS = 2000;
+const RETURN_ZERO_MAX_MS = 10000;
+const ZERO_EPS_RAD = 0.005;
+
+export function computeReturnZeroDurationMs(positions: number[]): number {
+  let maxAbs = 0;
+  for (const v of positions) {
+    if (Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+  }
+  if (maxAbs < ZERO_EPS_RAD) return 1000;
+  return Math.min(RETURN_ZERO_MAX_MS, Math.max(RETURN_ZERO_MIN_MS, Math.ceil((maxAbs / RETURN_ZERO_SPEED_RAD_S) * 1000)));
+}
+
+function buildReturnZeroPlan(names: string[], ids: number[], fromPositions: number[]) {
+  const durationMs = computeReturnZeroDurationMs(fromPositions);
+  return {
+    ids,
+    names,
+    points: [{
+      positions: names.map(() => 0),
+      velocities: names.map(() => 0),
+      time_from_start: { sec: Math.floor(durationMs / 1000), nanosec: (durationMs % 1000) * 1e6 },
+    }],
+    durationMs,
+  };
+}
 
 const player = {
   phase: 'idle',
@@ -263,7 +290,7 @@ async function armMotors() {
 
 export async function playAction(
   name: string,
-  options: { kp: number; kd: number; loop: boolean; enable: boolean },
+  options: { kp: number; kd: number; loop: boolean; enable: boolean; returnToZero?: boolean },
 ): Promise<void> {
   if (player.phase === 'running') return;
   if (!isConnected()) {
@@ -356,8 +383,124 @@ export async function playAction(
       if (verdict !== 'done') throw new Error(`无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
       if (!player.loop) break;
     }
+    if (options.returnToZero && player.jointPlan && !player.cancelRequested) {
+      const lastPos: number[] = player.jointPlan.points.at(-1)?.positions || [];
+      if (lastPos.some((v) => Number.isFinite(v) && Math.abs(v) > 1e-4)) {
+        const zeroPlan = buildReturnZeroPlan(player.jointPlan.names, player.jointPlan.ids, lastPos);
+        player.raw = false;
+        player.jointPlan = zeroPlan;
+        player.durationMs = zeroPlan.durationMs;
+        const ztid = await sendPlan();
+        player.detail = `平滑回初始位并保持 · ${zeroPlan.durationMs}ms`;
+        announce();
+        const zverdict = await waitPlan(ztid);
+        if (zverdict === 'stopped') throw new Error('已停止');
+        if (zverdict === 'canceled') throw new Error(`回初始位未成功（取消/拒绝/执行失败）：${store.commandStatus.data?.reject || store.commandStatus.data?.reason || '请核对控制状态'}`);
+        if (zverdict !== 'done') throw new Error(`回初始位无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
+      }
+      player.phase = 'done';
+      player.detail = '播放完成（已回初始位并保持）';
+    } else {
+      player.phase = 'done';
+      player.detail = '播放完成（JTC 成功）';
+    }
+    announce();
+  } catch (error: any) {
+    player.phase = 'error';
+    player.error = player.cancelRequested ? '已停止' : error.message;
+    if (player.planStarted && !player.cancelRequested && isConnected()
+        && player.connectionGeneration === getConnectionGeneration()) {
+      let sent = false;
+      try { sent = await publishTrajectory({ header: {}, joint_names: [], points: [] }); } catch { /* ignore */ }
+      if (!sent) player.error += '；取消未发送，运动停止未确认，请使用全部软停';
+    }
+    announce();
+  } finally {
+    player.loading = null;
+  }
+}
+
+export async function returnToZero(
+  options: { kp: number; kd: number; enable: boolean },
+): Promise<void> {
+  if (player.phase === 'running') return;
+  if (!isConnected()) {
+    player.phase = 'error';
+    player.error = '未连接 rosbridge';
+    announce();
+    return;
+  }
+  player.phase = 'running';
+  player.error = '';
+  player.cancelRequested = false;
+  player.connectionGeneration = getConnectionGeneration();
+  player.model = MODEL;
+  player.modelMetadata = store.modelTransmissions;
+  player.ids = [];
+  player.name = '回初始位';
+  player.kp = options.kp;
+  player.kd = options.kd;
+  player.loop = false;
+  player.raw = false;
+  player.enable = options.enable;
+  player.planStarted = false;
+  player.jointPlan = null;
+  player.loading = new AbortController();
+  try {
+    const sessionErr = controlSessionError(store, player.model);
+    if (sessionErr) throw new Error(sessionErr);
+    const controlledNames: string[] = Array.isArray(store.transmissionStatus.data?.joint_names)
+      ? [...store.transmissionStatus.data.joint_names]
+      : [];
+    if (!controlledNames.length) throw new Error('尚未收到主机控制关节列表，无法回初始位');
+    const nameSet = new Set(controlledNames);
+    const ids = [...new Set<number>(
+      (controlGroups(store) || [])
+        .filter((group: any) => (group?.joints || []).some((n: string) => nameSet.has(n)))
+        .flatMap((group: any) => (group?.motors || []).map((m: any) => Number(m.id)))
+        .filter((id: number) => Number.isInteger(id) && id > 0),
+    )];
+    if (!ids.length) throw new Error('缺少可控关节到电机的映射');
+    const blocked = playbackReadinessError(ids);
+    if (blocked) throw new Error(blocked);
+    const unprotected = ids.filter(isUnprotected);
+    if (unprotected.length && !window.confirm(
+        `m${unprotected.join('、m')} 的设备侧限位保护当前是关闭的：\n\n` +
+        '这些关节没有任何限位在执行（含看门狗自锁）。确认继续回初始位吗？')) {
+      throw new Error('已取消（限位保护未确认）');
+    }
+    const currentPositions = controlledNames.map((n) => Number(store.jointStates?.byName?.[n]?.position ?? 0));
+    const zeroPlan = buildReturnZeroPlan(controlledNames, ids, currentPositions);
+    player.ids = ids;
+    player.jointPlan = zeroPlan;
+    player.durationMs = zeroPlan.durationMs;
+
+    player.detail = '取消旧轨迹…';
+    announce();
+    await publishTrajectory({ header: {}, joint_names: [], points: [] });
+    await sleep(CANCEL_SETTLE_MS);
+    assertPlaybackSession();
+    if (player.cancelRequested) throw new Error('已停止');
+
+    if (player.enable) {
+      player.detail = `武装 kp=${player.kp} kd=${player.kd}…`;
+      announce();
+      await armMotors();
+      if (player.cancelRequested) throw new Error('已停止');
+    } else {
+      player.detail = '跳过武装（未勾选「使能」）';
+      announce();
+    }
+
+    const tid = await sendPlan();
+    player.detail = `平滑回初始位并保持 · ${zeroPlan.durationMs}ms`;
+    announce();
+    const verdict = await waitPlan(tid);
+    if (verdict === 'stopped') throw new Error('已停止');
+    if (verdict === 'canceled') throw new Error(`回初始位未成功（取消/拒绝/执行失败）：${store.commandStatus.data?.reject || store.commandStatus.data?.reason || '请核对控制状态'}`);
+    if (verdict !== 'done') throw new Error(`回初始位无 JTC 结果回执：${store.commandStatus.data?.reject || '请核对控制客户端状态'}`);
     player.phase = 'done';
-    player.detail = '播放完成（JTC 成功）';
+    player.detail = '已回初始位并保持';
     announce();
   } catch (error: any) {
     player.phase = 'error';

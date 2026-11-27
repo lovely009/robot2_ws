@@ -1,11 +1,9 @@
-export type Screen = "run" | "teach" | "motion";
+export type Screen = "run" | "teach" | "sim" | "motion";
 export type PanelId =
   | "jointList"
   | "arm"
   | "readout"
-  | "deviceParams"
   | "actionLibrary"
-
   | "curve"
   | "imu";
 export interface EventLogEntry {
@@ -38,6 +36,7 @@ export interface WorkbenchSnapshot {
 }
 export interface MountedPanel {
   render(dirty: Set<string>): void;
+  setActive?(active: boolean): void;
   unmount?(): void;
   intervalMs?: number;
 }

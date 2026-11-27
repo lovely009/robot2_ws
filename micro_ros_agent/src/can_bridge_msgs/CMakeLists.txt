@@ -24,62 +24,29 @@ endif()
 
 rosidl_generate_interfaces(
   ${PROJECT_NAME}
-  # V3 固件与 Agent 纯 Topic 契约；旧类型仅供既有主机接口继续生成。
-  "msg/AgentWireContract.msg"
-  "msg/AgentCommand.msg"
-  "msg/AgentMotion.msg"
-  "msg/AgentTrajectoryRequest.msg"
-  "msg/AgentConfigRequest.msg"
-  "msg/AgentConfigResult.msg"
-  "msg/AgentTrajectoryReceipt.msg"
-  "msg/AgentTrajectoryState.msg"
-  "msg/AgentMotorStatus.msg"
-  "msg/AgentStatus.msg"
-  "msg/AgentDeviceInfo.msg"
-  "msg/AgentOperationDetail.msg"
-  "msg/AgentInfo.msg"
-  # 按电机 ID 编码的有界消息
+  # 原生领域消息与聚合状态（Schema 6，37 台固定上限 + std_msgs/Header）
   "msg/MotorCommandTarget.msg"
   "msg/MotorCommandArray.msg"
-  "msg/ControlLease.msg"
   "msg/MotorMotionStateTarget.msg"
   "msg/MotorMotionStateArray.msg"
-  "msg/MotorStatusTarget.msg"
-  "msg/MotorStatusArray.msg"
   "msg/MotorControlState.msg"
-  "msg/MotorControlStateArray.msg"
+  "msg/MotorStatusTarget.msg"
   "msg/MotorTopologyEntry.msg"
-  "msg/MotorTopology.msg"
-  "msg/MotorEvent.msg"
-  # 下行多点轨迹（MotorCommandArray 的时序补充通道，非替代）
-  "msg/MotorTrajectoryPoint.msg"
-  "msg/MotorTrajectory.msg"
-  # 下行逐电机策略（动态量 enable/kp/kd；稀疏语义，非完整快照）
-  "msg/MotorPolicyTarget.msg"
-  "msg/MotorPolicyArray.msg"
-  # 上行：轨迹执行状态与固件级诊断
-  "msg/MotorTrajectoryState.msg"
-  "msg/MotorDiagnostics.msg"
-  # 上行：参数核对双行快照（固件记录 vs 驱动板回读，低频 reliable）
   "msg/DeviceParamEntry.msg"
-  "msg/DeviceParamReport.msg"
-  # 下行：稀疏参数写与系统命令
+  "msg/MotorPolicyTarget.msg"
   "msg/ParamSetTarget.msg"
-  "msg/ParamSetArray.msg"
+  "msg/MotorDiagnostics.msg"
+  "msg/MotorEvent.msg"
   "msg/SystemCommand.msg"
-  # 上行：系统状态（错误电平 + 四个完成序号，5 Hz best-effort）
   "msg/SystemStatus.msg"
-  "msg/WireContract.msg"
-  # 循环面：SoA + int16 定点，count=64 时 480 B，落在 best-effort MTU 内（永不分片）
-  "msg/LowCommand.msg"
-  "msg/LowState.msg"
-  # 低频状态面：10 Hz 合并状态（reliable，允许分片）
-  "msg/MotorStatus.msg"
-  # 配置面：参数写与系统命令合一，kind 区分互斥两组（reliable）
   "msg/ConfigRequest.msg"
   "msg/ConfigResult.msg"
+  "msg/MotorSystemState.msg"
+  "msg/MotorDeviceInfo.msg"
+  # 原生服务接口
   "srv/ExecuteConfig.srv"
   "srv/SubmitPolicy.srv"
+  "srv/GetDeviceInfo.srv"
   DEPENDENCIES std_msgs
 )
 

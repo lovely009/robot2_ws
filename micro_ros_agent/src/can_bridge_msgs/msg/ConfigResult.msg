@@ -13,4 +13,4 @@ uint16 error_code
 uint16 completed_targets
 uint16 failed_targets
 # Host-issued policy identity; empty for legacy configuration callers. Not sent to MCU.
-string intent_id
+string<=31 intent_id

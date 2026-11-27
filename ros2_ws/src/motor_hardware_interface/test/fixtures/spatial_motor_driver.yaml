@@ -1,6 +1,0 @@
-motor_hardware:
-  transmissions_file: spatial_transmissions.yaml
-  motor_specs_file: motor_specs.yaml
-  motors:
-    a: {id: 1, type: vaxor_2530}
-    b: {id: 2, type: vaxor_2530}

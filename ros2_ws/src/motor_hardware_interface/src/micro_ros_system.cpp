@@ -40,6 +40,18 @@ uint64_t elapsed_ms(Clock::time_point from, Clock::time_point to) {
     std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count()));
 }
 
+uint64_t stamp_to_ns(const builtin_interfaces::msg::Time &t) {
+  if (t.sec < 0) return 0U;
+  return static_cast<uint64_t>(t.sec) * 1000000000ULL + static_cast<uint64_t>(t.nanosec);
+}
+
+builtin_interfaces::msg::Time ns_to_stamp(uint64_t ns) {
+  builtin_interfaces::msg::Time t;
+  t.sec = static_cast<int32_t>(ns / 1000000000ULL);
+  t.nanosec = static_cast<uint32_t>(ns % 1000000000ULL);
+  return t;
+}
+
 bool source_stamp_ok(uint64_t sync_time_ns, Clock::time_point received,
                      std::chrono::milliseconds limit, Clock::time_point now) {
   if (sync_time_ns == 0U) {
@@ -77,6 +89,7 @@ bool healthy_execution(uint8_t state) {
   return state == can_bridge_msgs::msg::MotorControlState::EXECUTION_IDLE ||
          state == can_bridge_msgs::msg::MotorControlState::EXECUTION_HOLDING ||
          state == can_bridge_msgs::msg::MotorControlState::EXECUTION_COMMAND ||
+         state == can_bridge_msgs::msg::MotorControlState::EXECUTION_SOFT_STOP ||
          state == can_bridge_msgs::msg::MotorControlState::EXECUTION_ENABLING;
 }
 
@@ -317,13 +330,13 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
         position_limits_ = std::move(next);
         return result;
       });
-    command_pub_ = node_->create_publisher<Command>("/motor/host_command_array",
+    command_pub_ = node_->create_publisher<Command>("/motor/command",
       rclcpp::QoS(1).reliable());
-    motion_sub_ = node_->create_subscription<Motion>("/motor/motion_states",
+    motion_sub_ = node_->create_subscription<Motion>("/motor/motion",
       rclcpp::QoS(1).best_effort(), [this](Motion::SharedPtr message) { on_motion(message); });
-    control_sub_ = node_->create_subscription<Control>("/motor/control_states",
+    control_sub_ = node_->create_subscription<Control>("/motor/state",
       rclcpp::QoS(1).reliable(), [this](Control::SharedPtr message) { on_control(message); });
-    stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>("/host_control/stop",
+    stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>("/control/stop",
       rclcpp::QoS(1).reliable(), [this](std_msgs::msg::Empty::SharedPtr) { close_writer(); });
   } catch (const std::exception &exception) {
     RCLCPP_ERROR(rclcpp::get_logger("micro_ros_system"), "ROS node setup failed: %s", exception.what());
@@ -435,7 +448,8 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
     return;
   }
   // DDS 初次发现可带来旧帧；激活前等待新测量，运行后仍锁存故障。
-  if (message->sync_time_ns < session_time_floor_ns_) {
+  const uint64_t motion_stamp_ns = stamp_to_ns(message->header.stamp);
+  if (motion_stamp_ns < session_time_floor_ns_) {
     if (active_) fail("invalid motion snapshot");
     return;
   }
@@ -449,9 +463,15 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
     if (!expected_ids_.count(state.motor_id)) {
       continue;
     }
-    if (!healthy_motion_source(state.target_source) ||
-        !std::isfinite(state.position) || !std::isfinite(state.velocity) ||
+    if (!healthy_motion_source(state.target_source)) {
+      fail("invalid motion snapshot id/source/value/age");
+      return;
+    }
+    if (!std::isfinite(state.position) || !std::isfinite(state.velocity) ||
         !std::isfinite(state.effort) || state.state_age_ms == std::numeric_limits<uint32_t>::max()) {
+      if (!active_) {
+        return;
+      }
       fail("invalid motion snapshot id/source/value/age");
       return;
     }
@@ -461,19 +481,26 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
     return;
   }
   const auto now = Clock::now();
-  if (!source_stamp_ok(message->sync_time_ns, now, kMotionFresh, now)) {
-    if (active_ && writer_enabled_) fail("motion snapshot is stale");
+  if (!source_stamp_ok(motion_stamp_ns, now, kMotionFresh, now)) {
+    if (active_ && writer_enabled_) {
+      const auto delta_ms = (static_cast<int64_t>(now_ns()) - static_cast<int64_t>(motion_stamp_ns)) / 1000000LL;
+      fail("motion snapshot is stale (source_delta_ms=" + std::to_string(delta_ms) + ")");
+    }
     return;
   }
   const auto received_ns = now_ns();
-  const auto delay_ns = received_ns > message->sync_time_ns ?
-    received_ns - message->sync_time_ns : 0U;
+  const auto delay_ns = received_ns > motion_stamp_ns ?
+    received_ns - motion_stamp_ns : 0U;
   // 桥已累计部分源延迟；保守再次计入以覆盖桥到本回调的排队时间。
   const uint64_t source_delay_ms = (delay_ns + 999999U) / 1000000U;
   for (const auto &state : message->states) {
     if (expected_ids_.count(state.motor_id) &&
         static_cast<uint64_t>(state.state_age_ms) + source_delay_ms > kMotionFresh.count()) {
-      if (active_ && writer_enabled_) fail("motion snapshot is stale");
+      if (active_ && writer_enabled_) {
+        fail("motion snapshot is stale (motor_id=" + std::to_string(state.motor_id) +
+             ", state_age_ms=" + std::to_string(state.state_age_ms) +
+             ", source_delay_ms=" + std::to_string(source_delay_ms) + ")");
+      }
       return;
     }
   }
@@ -495,14 +522,15 @@ void MicroRosSystem::on_motion(const Motion::SharedPtr message) {
 void MicroRosSystem::on_control(const Control::SharedPtr message) {
   control_valid_ = false;
   latest_control_.reset();
+  const uint64_t control_stamp_ns = message ? stamp_to_ns(message->header.stamp) : 0U;
   if (!message || message->schema_version != Control::SCHEMA_VERSION ||
-      message->session_id == 0U || message->sequence == 0U || message->sync_time_ns == 0U ||
-      message->states.size() > kIdMax) {
+      message->session_id == 0U || message->sequence == 0U || control_stamp_ns == 0U ||
+      message->control_states.size() > kIdMax) {
     fail("invalid control snapshot header/coverage");
     return;
   }
   std::set<uint16_t> seen;
-  for (const auto &state : message->states) {
+  for (const auto &state : message->control_states) {
     if (state.motor_id == 0U || state.motor_id > kIdMax ||
         !seen.insert(state.motor_id).second) {
       fail("invalid or duplicate control motor id");
@@ -521,7 +549,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
     return;
   }
   const auto now = Clock::now();
-  if (!source_stamp_ok(message->sync_time_ns, now, kControlFresh, now)) {
+  if (!source_stamp_ok(control_stamp_ns, now, kControlFresh, now)) {
     if (active_ && writer_enabled_) fail("control stream snapshot is stale");
     return;
   }
@@ -531,7 +559,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
       return;
     }
     control_session_ = message->session_id;
-    session_time_floor_ns_ = message->sync_time_ns;
+    session_time_floor_ns_ = control_stamp_ns;
     control_seq_ = 0U;
     motion_seq_ = 0U;
     latest_motion_.reset();
@@ -542,7 +570,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
   }
   control_seq_ = message->sequence;
   latest_control_ = *message;
-  auto &states = latest_control_->states;
+  auto &states = latest_control_->control_states;
   states.erase(std::remove_if(states.begin(), states.end(), [this](const auto &state) {
     return !expected_ids_.count(state.motor_id);
   }), states.end());
@@ -555,16 +583,22 @@ bool MicroRosSystem::motion_current(const TimePoint &now, bool latch, std::strin
     error = "fresh complete motion feedback is unavailable";
     return latch ? fail(error) : false;
   }
-  if (latest_motion_->sync_time_ns < session_time_floor_ns_ ||
-      !source_stamp_ok(latest_motion_->sync_time_ns, motion_received_, kMotionFresh, now)) {
+  const uint64_t motion_stamp_ns = stamp_to_ns(latest_motion_->header.stamp);
+  if (motion_stamp_ns < session_time_floor_ns_ ||
+      !source_stamp_ok(motion_stamp_ns, motion_received_, kMotionFresh, now)) {
     error = "motion feedback is stale or predates control session";
     return latch ? fail(error) : false;
   }
   for (const auto &state : latest_motion_->states) {
+    const uint64_t read_elapsed_ms = elapsed_ms(motion_received_, now);
     if (static_cast<uint64_t>(state.state_age_ms) + motion_source_delay_ms_ +
-        elapsed_ms(motion_received_, now) >
+        read_elapsed_ms >
         static_cast<uint64_t>(kMotionFresh.count())) {
-      error = "measured motion feedback exceeds 100 ms";
+      error = "measured motion feedback exceeds 100 ms (motor_id=" +
+              std::to_string(state.motor_id) +
+              ", state_age_ms=" + std::to_string(state.state_age_ms) +
+              ", source_delay_ms=" + std::to_string(motion_source_delay_ms_) +
+              ", elapsed_ms=" + std::to_string(read_elapsed_ms) + ")";
       return latch ? fail(error) : false;
     }
   }
@@ -576,9 +610,10 @@ bool MicroRosSystem::control_current(const TimePoint &now, bool latch, std::stri
     error = "control stream snapshot is unavailable";
     return latch ? fail(error) : false;
   }
-  if (!source_stamp_ok(latest_control_->sync_time_ns, control_received_, kControlFresh, now)) {
+  const uint64_t control_stamp_ns = stamp_to_ns(latest_control_->header.stamp);
+  if (!source_stamp_ok(control_stamp_ns, control_received_, kControlFresh, now)) {
     error = "control stream freshness rejected: source_age_ms=" + std::to_string(
-      (static_cast<int64_t>(now_ns()) - static_cast<int64_t>(latest_control_->sync_time_ns)) / 1000000.0) +
+      (static_cast<int64_t>(now_ns()) - static_cast<int64_t>(control_stamp_ns)) / 1000000.0) +
       ", receive_age_ms=" + std::to_string(elapsed_ms(control_received_, now)) +
       ", sequence=" + std::to_string(latest_control_->sequence);
     return latch ? fail(error) : false;
@@ -592,7 +627,7 @@ bool MicroRosSystem::controls_armed(const TimePoint &now, std::string &error) co
     return false;
   }
   bool enabled = false;
-  for (const auto &state : latest_control_->states) {
+  for (const auto &state : latest_control_->control_states) {
     if (!state.policy_enabled) {
       continue;
     }
@@ -601,7 +636,13 @@ bool MicroRosSystem::controls_armed(const TimePoint &now, std::string &error) co
         state.control_lifecycle != can_bridge_msgs::msg::MotorControlState::LIFECYCLE_ACTIVE ||
         !healthy_execution(state.execution_state) ||
         state.unified_fault_code != 0U || state.vendor_fault_code != 0U) {
-      error = "enabled motor lacks ACTIVE, healthy policy";
+      error = "enabled motor lacks ACTIVE, healthy policy (motor_id=" +
+              std::to_string(state.motor_id) +
+              ", online=" + std::to_string(state.online ? 1 : 0) +
+              ", lifecycle=" + std::to_string(state.control_lifecycle) +
+              ", exec=" + std::to_string(state.execution_state) +
+              ", ufault=" + std::to_string(state.unified_fault_code) +
+              ", vfault=" + std::to_string(state.vendor_fault_code) + ")";
       return false;
     }
   }
@@ -733,7 +774,11 @@ bool MicroRosSystem::command_valid(std::string &error) {
 
 bool MicroRosSystem::publish(bool commanded, std::string &error) {
   Command message;
-  message.sync_time_ns = now_ns();
+  message.header.stamp = ns_to_stamp(now_ns());
+  message.session_id = control_session_;
+  if (latest_control_ && latest_control_->lease_id != 0U) {
+    message.lease_id = latest_control_->lease_id;
+  }
   if (++command_seq_ == 0U) {
     ++command_seq_;
   }
@@ -761,9 +806,9 @@ bool MicroRosSystem::publish(bool commanded, std::string &error) {
     for (const auto &name : model_->actuator_names()) {
       const auto motor_id = static_cast<uint16_t>(model_->actuator_ids().at(name));
       const auto control = std::find_if(
-        latest_control_->states.begin(), latest_control_->states.end(),
+        latest_control_->control_states.begin(), latest_control_->control_states.end(),
         [motor_id](const auto &state) { return state.motor_id == motor_id; });
-      if (control == latest_control_->states.end() || !control->policy_enabled) {
+      if (control == latest_control_->control_states.end() || !control->policy_enabled) {
         continue;
       }
       const auto axis = actuators.find(name);
@@ -814,6 +859,7 @@ MicroRosSystem::on_activate(const rclcpp_lifecycle::State &previous_state) {
   motion_seq_ = 0U;
   control_seq_ = 0U;
   // 首次 DDS 发现可能超过 1 秒，运行期各反馈流的保护窗口保持独立。
+  std::string last_error;
   const auto deadline = Clock::now() + std::chrono::seconds(5);
   while (Clock::now() < deadline) {
     rclcpp::spin_some(node_);
@@ -830,14 +876,18 @@ MicroRosSystem::on_activate(const rclcpp_lifecycle::State &previous_state) {
       }
       active_ = true;
       armed_ = controls_armed(now, error);
+      if (latest_control_ && latest_control_->command_sequence > command_seq_) {
+        command_seq_ = latest_control_->command_sequence;
+      }
       if (!publish(false, error)) {
         active_ = false;
         return hardware_interface::CallbackReturn::ERROR;
       }
       return hardware_interface::CallbackReturn::SUCCESS;
     }
+    last_error = error;
   }
-  RCLCPP_ERROR(node_->get_logger(), "activation timed out waiting for fresh complete feedback");
+  RCLCPP_ERROR(node_->get_logger(), "activation timed out waiting for fresh complete feedback: %s", last_error.c_str());
   return hardware_interface::CallbackReturn::ERROR;
 }
 

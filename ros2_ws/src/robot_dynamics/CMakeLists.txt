@@ -34,11 +34,9 @@ ament_target_dependencies(${PROJECT_NAME}_controller
   controller_interface hardware_interface pluginlib rclcpp rclcpp_lifecycle rcl_interfaces realtime_tools)
 pluginlib_export_plugin_description_file(controller_interface controller_plugins.xml)
 
-# ROS 层节点库：GravityTorqueNode 与 GravityFeedforwardOverlayNode 供独立可执行与
-# 测试链接；可执行目标名与本库刻意区分，避免 CMake 目标重名。
+# ROS 层节点库：GravityTorqueNode。
 add_library(${PROJECT_NAME}_ros
-  src/ros/gravity_torque_node.cpp
-  src/ros/gravity_feedforward_overlay_node.cpp)
+  src/ros/gravity_torque_node.cpp)
 target_compile_features(${PROJECT_NAME}_ros PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME}_ros PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(${PROJECT_NAME}_ros PUBLIC
@@ -46,19 +44,13 @@ target_include_directories(${PROJECT_NAME}_ros PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(${PROJECT_NAME}_ros ${PROJECT_NAME})
 ament_target_dependencies(${PROJECT_NAME}_ros
-  can_bridge_msgs rclcpp sensor_msgs)
+  rclcpp sensor_msgs)
 
 add_executable(gravity_torque_node
   src/ros/gravity_torque_node_main.cpp)
 target_compile_features(gravity_torque_node PRIVATE cxx_std_17)
 target_compile_options(gravity_torque_node PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(gravity_torque_node ${PROJECT_NAME}_ros)
-
-add_executable(gravity_feedforward_overlay
-  src/ros/gravity_feedforward_overlay_main.cpp)
-target_compile_features(gravity_feedforward_overlay PRIVATE cxx_std_17)
-target_compile_options(gravity_feedforward_overlay PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(gravity_feedforward_overlay ${PROJECT_NAME}_ros)
 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
@@ -67,7 +59,7 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_ros ${PROJECT_NAME}_controller
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS gravity_torque_node gravity_feedforward_overlay
+install(TARGETS gravity_torque_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
@@ -111,16 +103,6 @@ if(BUILD_TESTING)
   target_compile_definitions(test_trajectory_feedforward PRIVATE
     TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(test_trajectory_feedforward ${PROJECT_NAME})
-
-  ament_add_gtest(test_gravity_feedforward_overlay
-    test/test_gravity_feedforward_overlay.cpp)
-  target_compile_features(test_gravity_feedforward_overlay PRIVATE cxx_std_17)
-  target_compile_options(test_gravity_feedforward_overlay PRIVATE -Wall -Wextra -Wpedantic)
-  target_compile_definitions(test_gravity_feedforward_overlay PRIVATE
-    TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-  target_link_libraries(test_gravity_feedforward_overlay ${PROJECT_NAME}_ros)
-  ament_target_dependencies(test_gravity_feedforward_overlay
-    can_bridge_msgs rclcpp sensor_msgs)
 endif()
 
 ament_package()

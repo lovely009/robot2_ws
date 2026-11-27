@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { callService } = vi.hoisted(() => ({ callService: vi.fn() }));
-vi.mock("../../web/js/core/ros.js", () => ({ callService }));
+vi.mock("../src/core/ros.ts", () => ({ callService }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -11,16 +11,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("电机卡片按板端总线索引显示三个 FDCAN 和外置 CAN4", async () => {
-  const { busLabel } = await import("../../web/js/core/format.js");
-  expect([0, 1, 2, 3, 4, -1].map(busLabel)).toEqual([
-    "FDCAN1", "FDCAN2", "FDCAN3", "CAN4 (MCP2518FD)", "CAN --", "CAN --",
-  ]);
-});
-
-it("默认整机模型仍保留旧设备映射的独立兜底", async () => {
-  const { MODEL, JOINT_OF_MOTOR } = await import("../../web/js/core/store.js");
-  expect(MODEL).toBe("full_body_robot");
+it("默认半身模型的初始映射包含两侧全部电机", async () => {
+  const { MODEL, JOINT_OF_MOTOR } = await import("../src/core/store.ts");
+  expect(MODEL).toBe("half_body_robot");
   expect(Object.keys(JOINT_OF_MOTOR).map(Number)).toEqual(
     Array.from({ length: 18 }, (_, index) => index + 1),
   );
@@ -33,48 +26,55 @@ it("默认整机模型仍保留旧设备映射的独立兜底", async () => {
 });
 
 it("控制话题使用主机控制器入口和对应消息类型", async () => {
-  const { TOPICS } = await import("../../web/js/core/format.js");
+  const { TOPICS } = await import("../src/core/format.ts");
   expect(TOPICS).toMatchObject({
-    setpoint: { name: "/control/setpoint", type: "can_bridge_msgs/msg/MotorCommandArray" },
-    trajectory: { name: "/control/trajectory", type: "can_bridge_msgs/msg/MotorTrajectory" },
-    rawTrajectory: { name: "/control/trajectory_raw", type: "can_bridge_msgs/msg/MotorTrajectory" },
-    convertedTrajectory: { name: "/control/trajectory", type: "can_bridge_msgs/msg/MotorTrajectory" },
+    state: { name: "/motor/state", type: "can_bridge_msgs/msg/MotorSystemState" },
+    motion: { name: "/motor/motion", type: "can_bridge_msgs/msg/MotorMotionStateArray" },
+    events: { name: "/motor/events", type: "can_bridge_msgs/msg/MotorEvent" },
+    temp: { name: "/imu/temp_raw", type: "sensor_msgs/msg/Temperature" },
+    trajectory: { name: "/control/trajectory", type: "trajectory_msgs/msg/JointTrajectory" },
     jointTarget: { name: "/control/joint_target", type: "sensor_msgs/msg/JointState" },
     commandStatus: { name: "/control/status", type: "std_msgs/msg/String" },
-    trajectoryState: { name: "/control/trajectory_state", type: "can_bridge_msgs/msg/MotorTrajectoryState" },
     stop: { name: "/control/stop", type: "std_msgs/msg/Empty" },
-    policy: { name: "/motor/policy_array", type: "can_bridge_msgs/msg/MotorPolicyArray" },
-    sysCmd: { name: "/motor/system_command", type: "can_bridge_msgs/msg/SystemCommand" },
   });
 });
 
 it.each([
   ["getBenchOptions", [], "options", "GetBenchOptions", {}],
   ["getAgentStatus", [], "agent_status", "GetAgentStatus", {}],
+  ["startSimulation", [{ model: "arm" }], "start_simulation", "StartSimulation", { model: "arm" }],
+  ["stopSimulation", [], "stop_simulation", "StopSimulation", {}],
   ["startAgentService", ["/dev/example"], "start_agent", "StartAgent", { device: "/dev/example" }],
   ["stopAgentService", [], "stop_agent", "StopAgent", {}],
+  ["stopMotorBackend", [], "stop_motor_backend", "StopMotorBackend", {}],
   ["stopGravityFeedforward", [], "stop_gravity_feedforward", "StopGravityFeedforward", {}],
   ["setGravityFeedforwardGain", [.5], "set_gravity_feedforward_gain", "SetGravityFeedforwardGain", { effort_gain: .5 }],
-  ["getUnitLog", ["micro-ros-agent.service", 20], "get_unit_log", "GetUnitLog", { unit_name: "micro-ros-agent.service", lines: 20 }],
+  ["getUnitLog", ["bench-simulation.service", 20], "get_unit_log", "GetUnitLog", { unit_name: "bench-simulation.service", lines: 20 }],
+  ["motorBackendCommand", [{ cmd: "status" }], "motor_backend_command", "MotorBackendCommand", { request_json: '{"cmd":"status"}' }],
 ] as const)("%s 提交对应服务类型和请求", async (method, args, name, type, request) => {
-  const api = await import("../../web/js/core/agent.js");
+  const api = await import("../src/core/agent.ts");
   await api[method](...args);
   expect(callService).toHaveBeenCalledExactlyOnceWith(
     `/bench/${name}`, `bench_msgs/srv/${type}`, request,
   );
 });
 
+it("启动模拟电机时序列化通道配置", async () => {
+  const { startMotorBackend } = await import("../src/core/agent.ts");
+  await startMotorBackend({ model: "arm", transport: "socketcan", sim_interface: "can1" });
+  expect(callService).toHaveBeenCalledExactlyOnceWith(
+    "/bench/start_motor_backend", "bench_msgs/srv/StartMotorBackend", {
+      model: "arm", transport: "socketcan", sim_interface: "can1", sim_tty: "",
+      sim_channels_json: "", physical_bus_isolated: false,
+    },
+  );
+});
+
 it("重力补偿请求包含模型、关节映射和数值增益", async () => {
-  const { startGravityFeedforward } = await import("../../web/js/core/agent.js");
+  const { startGravityFeedforward } = await import("../src/core/agent.ts");
   await startGravityFeedforward({ model: "arm", joint_map: "{}", effort_gain: "0.5" });
   expect(callService).toHaveBeenCalledExactlyOnceWith(
     "/bench/start_gravity_feedforward", "bench_msgs/srv/StartGravityFeedforward",
     { model: "arm", joint_map: "{}", effort_gain: .5 },
   );
-});
-
-it("不导出已移除的仿真服务", async () => {
-  const api = await import("../../web/js/core/agent.js");
-  for (const name of ["startSimulation", "stopSimulation", "startMotorBackend", "stopMotorBackend", "motorBackendCommand"])
-    expect(api).not.toHaveProperty(name);
 });

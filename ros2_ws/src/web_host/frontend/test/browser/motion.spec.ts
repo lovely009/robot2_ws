@@ -25,7 +25,7 @@ const preview = { times: [0, 1, 2], duration: 2,
 
 test('动作库标识已保存结果，改变单位后重新核对', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
-  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
     sources: [{name: '1-4.bvh', saved: route.request().postDataJSON().scale === .01}],
@@ -50,7 +50,7 @@ test('动作库标识已保存结果，改变单位后重新核对', async ({ pa
 
 test('保存状态的旧响应不会覆盖新转换选项', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
-  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   let release!: () => void;
   let started!: () => void;
@@ -84,10 +84,7 @@ test('调试页BVH播放在控制未就绪时显示原因并保留页面', async
     socket.onMessage(message => messages.push(message));
   });
   await page.route('**/api/actions', route => route.fulfill({json: {actions: []}}));
-  await page.route('**/api/motion/sources/status', route => route.fulfill({json: {
-    sources: [{name: 'walk.bvh', saved: true}],
-  }}));
-  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   let submitted: Record<string, unknown> | undefined;
   await page.route('**/api/motion/jobs', route => {
@@ -113,11 +110,11 @@ test('服务重启使临时任务过期时自动恢复已保存的动作', async
   });
   await page.route('**/api/motion/jobs/expired', route =>
     route.fulfill({status: 404, json: {error: '动作任务已过期'}}));
-  await page.route('**/robot_description/models/robot_leg/urdf/robot_leg.urdf', route =>
+  await page.route('**/robot_sim/models/robot_leg/urdf/robot_leg.urdf', route =>
     route.fulfill({body: '<robot name="robot_leg"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/sources/status', route => {
     const request = route.request().postDataJSON();
-    if (request.model !== 'robot_leg') return route.fulfill({json: {sources: []}});
+    expect(request.model).toBe('robot_leg');
     expect(request.scale).toBe(1);
     expect(request.up_axis).toBe('z_up');
     return route.fulfill({json: {sources: [{name: '1-4.bvh', saved: true}]}});
@@ -141,7 +138,7 @@ async function localSources(page: import('@playwright/test').Page) {
 test('默认选动作库和当前模型，不上传文件也能转换独立肩关节动作', async ({ page }) => {
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
   let submitted: Record<string, unknown> | undefined;
-  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/jobs', route => {
     submitted = route.request().postDataJSON();
@@ -173,7 +170,7 @@ test('动作库记住选择，换目标模型时读取所选模型URDF', async (
     localStorage.setItem('web_host.model', 'robot_leg');
   });
   let submitted: Record<string, unknown> | undefined;
-  await page.route('**/robot_description/models/robot_leg/urdf/robot_leg.urdf', route =>
+  await page.route('**/robot_sim/models/robot_leg/urdf/robot_leg.urdf', route =>
     route.fulfill({body: '<robot name="robot_leg"/>', contentType: 'text/xml'}));
   await page.route('**/api/motion/jobs', route => {
     submitted = route.request().postDataJSON();
@@ -213,7 +210,7 @@ test('恢复旧任务期间禁止新提交，恢复完成后可以导入', async
   });
   await page.route('**/api/motion/jobs', route => route.fulfill({json: {...job, state: 'done'}}));
   await page.route('**/api/motion/jobs/fixture/preview.json', route => route.fulfill({json: preview}));
-  await page.route('**/robot_description/models/half_body_robot/urdf/half_body_robot.urdf', route =>
+  await page.route('**/robot_sim/models/half_body_robot/urdf/half_body_robot.urdf', route =>
     route.fulfill({body: '<robot name="half_body_robot"/>', contentType: 'text/xml'}));
   try {
     await page.goto('/workbench/#/motion');
@@ -361,8 +358,8 @@ test('URDF实体模型由关节角驱动，拖动进度改变实体姿态', asyn
 });
 
 test('URDF网格缺失时显示提示并保留骨架播放', async ({ page }) => {
-  await page.route('**/robot_description/missing.stl', route => route.fulfill({ status: 404, body: 'not found' }));
-  await modelPreview(page, visualUrdf.replace('<box size=".7 .08 .08"/>', '<mesh filename="package://robot_description/missing.stl"/>'));
+  await page.route('**/robot_sim/missing.stl', route => route.fulfill({ status: 404, body: 'not found' }));
+  await modelPreview(page, visualUrdf.replace('<box size=".7 .08 .08"/>', '<mesh filename="package://robot_sim/missing.stl"/>'));
   await expect(page.getByLabel('机器人模型状态', { exact: true })).toHaveText('部分网格缺失，保留骨架');
   await expect(page.getByLabel('人体与机器人动作三维预览')).toBeVisible();
   await page.getByLabel('动作播放进度', { exact: true }).fill('1.2');
@@ -378,4 +375,59 @@ test('明确选择几何预览后，零限位 CAD 实体也能播放', async ({p
   const before=await canvas.screenshot();
   await page.getByLabel('动作播放进度', {exact:true}).fill('1.2');
   expect(before.equals(await canvas.screenshot())).toBe(false);
+});
+
+test('实时跟随在流结束前更新姿态，停止和离开页面都会取消接收', async ({page}) => {
+  await page.routeWebSocket('ws://127.0.0.1:9090', socket => socket.close());
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    const probe = { stops: 0, send: (_value: object) => {} };
+    Object.assign(window, { liveProbe: probe });
+    window.fetch = async (input, init) => {
+      if (!String(input).endsWith('/api/motion/live/vdmocap')) return originalFetch(input, init);
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          probe.send = value => {
+            const bytes = encoder.encode(JSON.stringify(value) + '\n');
+            stream.enqueue(bytes.slice(0, 9)); stream.enqueue(bytes.slice(9));
+          };
+          probe.send({type:'state', state:'waiting'});
+          probe.send({type:'scene', source_to_robot:[[1,0,0],[0,1,0],[0,0,1]],
+            source:{names:['Hips','Head'],parents:[-1,0]},
+            robot:{names:['base','wrist'],parents:[-1,0],joint_names:[],urdf:''}});
+          init?.signal?.addEventListener('abort', () => { probe.stops++; stream.close(); }, {once:true});
+        },
+      });
+      return new Response(body, {headers:{'Content-Type':'application/x-ndjson'}});
+    };
+  });
+  await page.goto('/workbench/#/motion');
+  await page.getByRole('button',{name:'实时跟随',exact:true}).click();
+  await expect(page.getByText('等待 DreamsCapStudio 播放')).toBeVisible();
+  const send = (message: object) => page.evaluate(m => {
+    (window as unknown as {liveProbe:{send(m:object):void}}).liveProbe.send(m);
+  }, message);
+  const frame = {type:'frame', index:9, frequency:60, source:[[0,0,1],[0,0,1.8]],
+    robot:[[0,0,0],[0,.4,.5]], joint_positions:[],root_quaternion:[0,0,0,1]};
+  await send(frame);
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 9');
+  await expect(page.getByLabel('实时人体与机器人三维预览')).toBeVisible();
+  await send({type:'state',state:'disconnected'});
+  await expect(page.getByText('广播中断，等待恢复')).toBeVisible();
+  await send({...frame,index:10,robot:[[0,0,0],[0,.7,.6]]});
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 10');
+  await page.evaluate(frame => {
+    const probe = (window as unknown as {liveProbe:{send(m:object):void}}).liveProbe;
+    probe.send({...frame, index:11});
+    probe.send({type:'error', message:'测试流已关闭'});
+  }, frame);
+  await expect(page.getByText('测试流已关闭')).toBeVisible();
+  await expect(page.getByLabel('实时源帧')).toContainText('帧 11');
+  await page.getByRole('button',{name:'停止实时跟随'}).click();
+  await expect(page.getByLabel('目标机器人模型')).toBeEnabled();
+  await page.getByRole('button',{name:'实时跟随',exact:true}).click();
+  await expect(page.getByText('等待 DreamsCapStudio 播放')).toBeVisible();
+  await page.getByRole('button',{name:'调试工作台',exact:true}).click();
+  expect(await page.evaluate(() => (window as unknown as {liveProbe:{stops:number}}).liveProbe.stops)).toBe(2);
 });

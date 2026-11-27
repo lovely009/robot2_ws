@@ -2825,7 +2825,7 @@
   },
   "collision_validation": "pending: legacy collision results do not certify this assembly",
   "arm_inertia": {
-    "source_urdf": "cad/arm_inertia/urdf/\u5168\u8eab\u5b9e\u9a8c\u7248_\u4ec5\u53cc\u81c2\u8d28\u91cf.urdf",
+    "source_urdf": "\u5168\u8eab\u5b9e\u9a8c\u7248_\u4ec5\u53cc\u81c2\u8d28\u91cf/urdf/\u5168\u8eab\u5b9e\u9a8c\u7248_\u4ec5\u53cc\u81c2\u8d28\u91cf.urdf",
     "sha256": "112045851a76a8ef6520842d00664d7c285fe3f0dd6daa7df9cbc448dae68f0c",
     "links": [
       "BN_LeftHand_pitch_link",

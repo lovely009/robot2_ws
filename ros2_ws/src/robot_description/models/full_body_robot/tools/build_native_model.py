@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从已核验的 CAD 装配记录生成机械骨架和显示／碰撞网格，不运行仿真。"""
+"""Build the articulated full model in the verified STEP assembly frames."""
 from collections import defaultdict
 from copy import deepcopy
 import hashlib
@@ -7,80 +7,33 @@ import json
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+import mujoco
 import numpy as np
+from scipy.ndimage import binary_erosion, label
 from scipy.spatial.transform import Rotation
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
-import arm_mounting
+import yaml
+
+import audit_step_linkages as audit
+import hips_mounting as hips
+import native_names
 import joint_convention
+import left_hand_mounting
+import arm_mounting
+import scan_artifacts
+import build_mujoco_model as shared
+from assembly_fingerprint import geometry_fingerprint
 
 MODEL = Path(__file__).resolve().parents[1]
-DIRECTORY = MODEL / 'meshes/visual/native'
-ARM_INERTIA_SOURCE = MODEL / 'cad/arm_inertia/urdf/全身实验版_仅双臂质量.urdf'
+DIRECTORY = MODEL / 'mujoco/visual/native'
+ARM_INERTIA_SOURCE = MODEL.parent / '全身实验版_仅双臂质量/urdf/全身实验版_仅双臂质量.urdf'
 ARM_LINK_NAMES = {
     f'BN_{side}{part}_link'
     for side in ('Left', 'Right')
     for part in ('Shoulder_1', 'Shoulder_2', 'UpperArm_1', 'UpperArm_2',
                  'UpperArm_3', 'LowerArm_1', 'LowerArm_2', 'Hand_roll', 'Hand_pitch')
 }
-STL_FACE_LIMIT = 200_000
-DISPLAY_FACE_TARGET = 120_000
-WRIST_ROTOR_RADIUS = 0.00855
-
-def numbers(values):
-    return " ".join(format(float(value), ".14g") for value in values)
-
-
-def pose(origin):
-    return (np.fromstring(origin.get("xyz"), sep=" "),
-            Rotation.from_euler("xyz", np.fromstring(origin.get("rpy"), sep=" ")))
-
-
-def urdf_rpy(rotation):
-    """Keep near-gimbal rotations exact when expressing MJCF frames in URDF."""
-    matrix = rotation.as_matrix()
-    cosine = np.hypot(matrix[0, 0], matrix[1, 0])
-    pitch = np.arctan2(-matrix[2, 0], cosine)
-    yaw = np.arctan2(matrix[1, 0], matrix[0, 0]) if cosine > 1e-12 else 0.
-    sine_yaw, cosine_yaw = np.sin(yaw), np.cos(yaw)
-    roll = np.arctan2(sine_yaw * matrix[0, 2] - cosine_yaw * matrix[1, 2],
-                      -sine_yaw * matrix[0, 1] + cosine_yaw * matrix[1, 1])
-    return np.array([roll, pitch, yaw])
-
-
-def write_display_mesh(polydata, output):
-    output.parent.mkdir(parents=True, exist_ok=True)
-    faces = polydata.GetNumberOfPolys()
-    if faces >= STL_FACE_LIMIT:
-        decimator = vtk.vtkQuadricDecimation()
-        decimator.SetInputData(polydata)
-        decimator.SetTargetReduction(1 - DISPLAY_FACE_TARGET / faces)
-        decimator.Update()
-        polydata = decimator.GetOutput()
-        faces = polydata.GetNumberOfPolys()
-    if not 0 < faces < STL_FACE_LIMIT:
-        raise ValueError(f"{output.name}: invalid display mesh ({faces} faces)")
-    writer = vtk.vtkSTLWriter()
-    writer.SetInputData(polydata)
-    writer.SetFileTypeToBinary()
-    writer.SetFileName(str(output))
-    if not writer.Write():
-        raise OSError(f"Could not write {output}")
-
-def circle_support(points, origin, axis, radius):
-    relative = points - origin
-    radial = relative - np.outer(relative @ axis, axis)
-    selected = np.abs(np.linalg.norm(radial, axis=1) - radius) < 0.000025
-    if selected.sum() < 8:
-        return None
-    u = np.cross(axis, [1., 0., 0.] if abs(axis[0]) < .8 else [0., 1., 0.])
-    u /= np.linalg.norm(u)
-    v = np.cross(axis, u)
-    angles = np.sort(np.mod(np.arctan2(radial[selected] @ v, radial[selected] @ u), 2 * np.pi))
-    gap = float(np.max(np.diff(np.r_[angles, angles[0] + 2 * np.pi])))
-    if gap > np.deg2rad(45):
-        return None
-    return selected, float(np.rad2deg(gap))
 
 
 def transform(position=(0.,0.,0.), rotation=None):
@@ -91,9 +44,13 @@ def transform(position=(0.,0.,0.), rotation=None):
     return result
 
 
+def attrs(matrix):
+    return shared.pose_attributes(matrix[:3,3], Rotation.from_matrix(matrix[:3,:3]))
+
+
 def urdf_origin(element, matrix):
-    element.set('xyz', numbers(matrix[:3,3]))
-    element.set('rpy', numbers(urdf_rpy(Rotation.from_matrix(matrix[:3,:3]))))
+    element.set('xyz', shared.numbers(matrix[:3,3]))
+    element.set('rpy', shared.numbers(shared.urdf_rpy(Rotation.from_matrix(matrix[:3,:3]))))
 
 
 def read_regions(source):
@@ -119,7 +76,7 @@ def append(pieces):
 
 
 def source_tree(alignment, hand_mounting=None):
-    source=MODEL/alignment['source_urdf']
+    source=MODEL.parent/alignment['source_urdf']
     if hashlib.sha256(source.read_bytes()).hexdigest()!=alignment['urdf_sha256']:
         raise ValueError('Repeat STEP calibration after changing the source URDF')
     root=ET.parse(source).getroot()
@@ -157,7 +114,7 @@ def source_tree(alignment, hand_mounting=None):
             source_axis=frames[child][:3,:3]@np.fromstring(joint.find('axis').get('xyz'),sep=' ')
             if np.dot(axis,source_axis) < 0:axis=-axis
             physical[child][:3,3]=point+axis*np.dot(frames[child][:3,3]-point,axis)
-            joint.find('axis').set('xyz',numbers(physical[child][:3,:3].T@axis))
+            joint.find('axis').set('xyz',shared.numbers(physical[child][:3,:3].T@axis))
     arm_mount=arm_mounting.solve(root,physical)
     arm_delta=np.asarray(arm_mount['world_transform'])
     for name in arm_mount['affected_links']:
@@ -172,19 +129,19 @@ def source_tree(alignment, hand_mounting=None):
             if item.tag not in ('visual','collision','inertial'):continue
             origin=item.find('origin')
             if origin is None:origin=ET.SubElement(item,'origin',xyz='0 0 0',rpy='0 0 0')
-            position,rotation=pose(origin)
+            position,rotation=shared.pose(origin)
             urdf_origin(origin,offset@transform(position,rotation.as_matrix()))
         for mesh in link.findall('.//mesh'):
             filename=Path(mesh.get('filename')).name.lstrip()
             if not (source.parents[1]/'meshes'/filename).is_file():raise ValueError(filename)
-            mesh.set('filename','package://robot_description/models/full_body_robot/'+alignment['source']+'/meshes/'+filename)
+            mesh.set('filename','package://robot_description/models/'+alignment['source']+'/meshes/'+filename)
     return root,frames,physical,arm_mount
 
 
 def split_geometry(alignment, metadata, rods, mounting):
     files={};ownership={}
     for old_name,entry in metadata['links'].items():
-        name=Path(entry['source']).stem.strip();source=MODEL/metadata['source']/'meshes'/entry['source']
+        name=Path(entry['source']).stem.strip();source=MODEL.parent/metadata['source']/'meshes'/entry['source']
         if hashlib.sha256(source.read_bytes()).hexdigest()!=entry['source_sha256']:raise ValueError('Source mesh changed')
         if alignment['links'][name]['source_sha256']!=entry['source_sha256']:
             raise ValueError(f'{name}: mesh ownership and STEP calibration use different sources')
@@ -204,17 +161,17 @@ def split_geometry(alignment, metadata, rods, mounting):
                 for region in parts[mate][:]:
                     points=world[ids==region]
                     if np.max(np.linalg.norm(points-center,axis=1))>max(.015,2*radius):continue
-                    circle=circle_support(points,center,axis,radius)
-                    sphere=np.count_nonzero(abs(np.linalg.norm(points-center,axis=1)-end['ball_radius_m'])<0.000025)
+                    circle=audit.circle_support(points,center,axis,radius)
+                    sphere=np.count_nonzero(abs(np.linalg.norm(points-center,axis=1)-end['ball_radius_m'])<audit.SURFACE_TOL)
                     stations=(points-center)@axis
-                    if circle is not None and sphere>=30 and abs((stations.min()+stations.max())/2)<0.000025:
+                    if circle is not None and sphere>=30 and abs((stations.min()+stations.max())/2)<audit.CENTER_TOL:
                         # A convex ball stud can also have this outer cylinder.
                         # Only a concave bearing seat is an outer race.
                         piece=extract(regions,[region])
                         xyz=vtk_to_numpy(piece.GetPoints().GetData()).astype(float)
                         xyz=xyz@native[:3,:3].T+native[:3,3]
                         triangles=xyz[vtk_to_numpy(piece.GetPolys().GetData()).reshape(-1,4)[:,1:]]
-                        surface=np.all(abs(np.linalg.norm(triangles-center,axis=2)-end['ball_radius_m'])<0.000025,axis=1)
+                        surface=np.all(abs(np.linalg.norm(triangles-center,axis=2)-end['ball_radius_m'])<audit.SURFACE_TOL,axis=1)
                         normals=np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0])
                         signed=np.sum(normals*(triangles.mean(1)-center),axis=1)[surface]
                         if np.count_nonzero(signed < -1e-14)<8 or np.any(signed>1e-14):
@@ -231,7 +188,7 @@ def split_geometry(alignment, metadata, rods, mounting):
             if len(candidate)!=1:raise ValueError('Ambiguous rotor axis')
             axis=np.asarray(candidate[0]['axis']);origin=np.asarray(candidate[0]['point_on_axis_m'])
             cylinder=vtk.vtkCylinder();cylinder.SetCenter(*(native[:3,:3].T@(origin-native[:3,3])))
-            cylinder.SetAxis(*(native[:3,:3].T@axis));cylinder.SetRadius(WRIST_ROTOR_RADIUS)
+            cylinder.SetAxis(*(native[:3,:3].T@axis));cylinder.SetRadius(shared.WRIST_ROTOR_RADIUS)
             clip=vtk.vtkClipPolyData();clip.SetInputData(extract(regions,indices));clip.SetClipFunction(cylinder)
             clip.InsideOutOn();clip.GenerateClippedOutputOn();clip.Update()
             if not clip.GetOutput().GetNumberOfCells() or not clip.GetClippedOutput().GetNumberOfCells():raise ValueError('Rotor split failed')
@@ -243,41 +200,253 @@ def split_geometry(alignment, metadata, rods, mounting):
                 continue
             output=DIRECTORY/(part+'.STL')
             piece=append([extract(regions,indices),*extras[part]])
-            write_display_mesh(piece,output)
+            collision=MODEL/'mujoco/collision/native'/output.name
+            collision.parent.mkdir(parents=True,exist_ok=True)
+            writer=vtk.vtkSTLWriter();writer.SetInputData(piece);writer.SetFileTypeToBinary();writer.SetFileName(str(collision))
+            if not writer.Write():raise OSError(collision)
+            shared.write_display_mesh(piece,output)
             files[part]=output.relative_to(MODEL).as_posix()
         ownership[name]={'source':entry['source'],'source_sha256':entry['source_sha256'],'parts':parts,'rotor_regions':rotors,'fixed_regions':fixed}
     return files,ownership
 
 
-
 def build():
-    alignment = json.loads((MODEL / 'config/step_alignment.json').read_text())
-    report = json.loads((MODEL / 'cad/assembly_audit/2026-11-13-step-linkages.json').read_text())
-    mounting = json.loads((MODEL / 'config/hips_mount_alignment.json').read_text())
-    hand = json.loads((MODEL / 'config/left_hand_mount_alignment.json').read_text())
-    step = hashlib.sha256((MODEL / 'cad/全身不带头.STEP').read_bytes()).hexdigest()
-    if not step == alignment['step_sha256'] == report['source_step_sha256'] == mounting['step_sha256'] == hand['source_step_sha256']:
-        raise ValueError('装配记录与当前 STEP 不一致，须重新核验机械装配')
-    source, _, _, _ = source_tree(alignment, hand)
-    metadata = json.loads((MODEL / 'config/display_meshes.json').read_text())
-    files, _ = split_geometry(alignment, metadata, report['rods'], mounting)
-    rotation, coordinates = joint_convention.load(MODEL)
-    current = ET.parse(MODEL / 'urdf/full_body_robot.urdf').getroot()
+    mounting=hips.solve()
+    if not hips.validate(MODEL/'mujoco/full_body_robot.hips-mounted.xml')['all_passed']:raise ValueError('Fixture baseline is invalid')
+    alignment=json.loads((MODEL/'config/step_alignment.json').read_text())
+    metadata=json.loads((MODEL/'config/display_meshes.json').read_text())
+    report=audit.audit();rods=report['rods']
+    hand_mounting=left_hand_mounting.solve(report,alignment,json.loads((MODEL/'config/kinematic_axes.json').read_text()))
+    source,native,frames,arm_mount=source_tree(alignment,hand_mounting)
+    aliases,link_aliases=native_names.names()
+    topology=native_names.rename_tree(yaml.safe_load((MODEL/'config/motor_topology.yaml').read_text()),aliases)
+    pending_limits=MODEL/'config/simulation_limits.pending.yaml'
+    limits_path=pending_limits if pending_limits.is_file() else MODEL/'config/simulation_limits.yaml'
+    limits=joint_convention.native_limits(MODEL,yaml.safe_load(limits_path.read_text()))
+    limits=native_names.rename_tree(limits,aliases)
+    scanned_limits=limits.get('source')=='mujoco/geometry_limits.json'
+    if scanned_limits:scan_artifacts.validate(MODEL,limits)
+    if not scanned_limits:
+        limits.setdefault('legacy_scalar_caps',deepcopy(limits['joint_limits']))
+        # Old asymmetric intervals use different joint frames and zero poses.
+        # Their magnitude remains a provisional search cap, not collision evidence.
+        for number,motor in topology['motors'].items():
+            if 'joint' not in motor:continue
+            bound=limits['legacy_scalar_caps'][motor['joint']]
+            magnitude=max(abs(bound['lower']),abs(bound['upper']))
+            limits['joint_limits'][motor['joint']].update(lower=-magnitude,upper=magnitude)
+            limits['actuator_limits'][f'motor_{number:02d}'].update(lower=-magnitude,upper=magnitude)
+        limits['preview_limit_policy']='Series-joint search caps use the legacy maximum magnitude symmetrically in native coordinates; coupled output and auxiliary actuator caps retained. Collision/hardware travel remains uncalibrated.'
+    joints={j.get('name'):j for j in source.findall('joint')}
+    for name,joint in joints.items():
+        bound=limits['joint_limits'][name]
+        joint.find('limit').set('lower',str(bound['lower']))
+        joint.find('limit').set('upper',str(bound['upper']))
+    files,ownership=split_geometry(alignment,metadata,rods,mounting)
+    root=ET.Element('mujoco',model='Full body STEP-calibrated articulated preview')
+    root.append(ET.Comment(' Native CAD assembly; simulation geometry preview. Collision travel and hardware calibration are not implied. '))
+    ET.SubElement(root,'compiler',angle='radian',meshdir='..',fusestatic='false')
+    ET.SubElement(root,'option',timestep='.002',gravity='0 0 0',integrator='implicitfast')
+    ET.SubElement(root,'statistic',center='0 .08 -.28',extent='1.6')
+    ET.SubElement(ET.SubElement(root,'visual'),'global',azimuth='90',elevation='-8',offwidth='1280',offheight='960')
+    default=ET.SubElement(root,'default')
+    ET.SubElement(default,'joint',type='hinge',damping='.1',armature='.01')
+    ET.SubElement(default,'geom',contype='0',conaffinity='0')
+    ET.SubElement(default,'site',size='.003',group='2',rgba='0 0 0 0')
+    ET.SubElement(default,'position',kp='12',kv='1.2')
+    assets=ET.SubElement(root,'asset');world=ET.SubElement(root,'worldbody')
+    ET.SubElement(world,'light',pos='0 1 1.8',dir='0 -.45 -1');ET.SubElement(world,'light',pos='0 -1 .8',dir='0 .55 -1')
+    bodies={'Base_link':ET.SubElement(world,'body',name='Base_link')}
     for joint in source.findall('joint'):
-        name, sign = coordinates[joint.get('name')]
-        limit = current.find(f"joint[@name='{name}']/limit")
-        lower, upper = joint_convention.signed_interval(float(limit.get('lower')), float(limit.get('upper')), sign)
-        joint.find('limit').attrib.update(limit.attrib, lower=str(lower), upper=str(upper))
+        parent,child=(joint.find(t).get('link') for t in ('parent','child'))
+        body=ET.SubElement(bodies[parent],'body',name=child,**attrs(np.linalg.inv(frames[parent])@frames[child]))
+        lower,upper=(limits['joint_limits'][joint.get('name')][k] for k in ('lower','upper'))
+        if lower==upper:lower,upper=-shared.LOCKED_SOLVER_RANGE,shared.LOCKED_SOLVER_RANGE
+        ET.SubElement(body,'joint',name=joint.get('name'),axis=joint.find('axis').get('xyz'),limited='true',range=shared.numbers((lower,upper)))
+        bodies[child]=body
+    def visual(body,name,file,pose):
+        ET.SubElement(assets,'mesh',name=name,file=file)
+        ET.SubElement(body,'geom',name=name,type='mesh',mesh=name,mass='0',contype='0',conaffinity='0',rgba='.84 .85 .86 1',**attrs(pose))
     for link in source.findall('link'):
-        for mesh in link.findall('.//mesh'):
-            mesh.set('filename', 'package://robot_description/models/full_body_robot/' + files[link.get('name')])
-    joint_convention.convert_urdf(source, rotation, coordinates)
-    ET.indent(source, space='  ')
-    content = ET.tostring(source, encoding='unicode') + '\n'
-    for suffix in ('', '.mapping'):
-        (MODEL / f'urdf/full_body_robot{suffix}.urdf').write_text(content)
-    print('已生成 37 轴机械骨架与 CAD 显示／碰撞网格；保留当前限位，未进行实机标定')
+        name=link.get('name');inertial=link.find('inertial');position,rotation=shared.pose(inertial.find('origin'))
+        inertia=inertial.find('inertia');components=[float(inertia.get(k)) for k in ('ixx','iyy','izz','ixy','ixz','iyz')]
+        xx,yy,zz,xy,xz,yz=components
+        tensor=rotation.as_matrix()@np.array([[xx,xy,xz],[xy,yy,yz],[xz,yz,zz]])@rotation.as_matrix().T
+        values=tensor[0,0],tensor[1,1],tensor[2,2],tensor[0,1],tensor[0,2],tensor[1,2]
+        ET.SubElement(bodies[name],'inertial',mass=inertial.find('mass').get('value'),fullinertia=shared.numbers(values),pos=shared.numbers(position))
+        visual(bodies[name],name+'_robot_body',files[name],np.linalg.inv(frames[name])@native[name])
+    tendons=ET.SubElement(root,'tendon');equalities=ET.SubElement(root,'equality')
+    flanges={};actuator_by_motor={};geometry_poses={}
+    for number,motor in topology['motors'].items():
+        if 'joint' in motor:actuator_by_motor[number]=[{'name':f'motor_{number:02d}','joint':motor['joint']}]
+    for group_name,group in topology['differential_groups'].items():
+        reference=joints[group['joints'][0]].find('parent').get('link')
+        output=joints[group['joints'][-1]].find('child').get('link')
+        local=ET.parse(MODEL/'mujoco'/f'{group_name}_differential.xml').getroot()
+        auxiliary={}
+        for rod_name,record in rods.items():
+            if not rod_name.startswith(group_name+'_'):continue
+            prefix=rod_name.removesuffix('_rod')
+            if len(record['motor_axis_candidates'])!=1:raise ValueError('Ambiguous motor hinge')
+            candidate=record['motor_axis_candidates'][0];axis=np.asarray(candidate['axis']);origin=np.asarray(candidate['point_on_axis_m'])
+            delta={part:np.eye(4) for part in ('flange','platform','rod')}
+            if group_name=='hips':
+                side=prefix.removeprefix('hips_');delta={part:np.asarray(mounting['sides'][side][part+'_transform']) for part in delta}
+            elif group_name=='left_wrist':
+                delta={part:np.asarray(hand_mounting['rods'][rod_name][part+'_transform']) for part in delta}
+            if record['source_body'] in arm_mount['affected_links']:
+                arm_delta=np.asarray(arm_mount['world_transform'])
+                delta={part:arm_delta@value for part,value in delta.items()}
+                origin=hips.point(arm_delta,origin)
+                axis=arm_delta[:3,:3]@axis
+            centers={part:hips.point(delta[part],record['endpoints'][tag]['center_m']) for part,tag in (('flange','flange'),('platform','platform'))}
+            start,end=centers['flange'],centers['platform'];origin=origin+axis*np.dot(start-origin,axis)
+            flange_world=transform(origin,frames[reference][:3,:3]);flange_body=ET.SubElement(bodies[reference],'body',name=prefix+'_flange',**attrs(np.linalg.inv(frames[reference])@flange_world))
+            matching=[]
+            suffix=prefix.removeprefix(group_name+'_')
+            for actuator in local.findall('actuator/position'):
+                native_joint=aliases.get(actuator.get('joint'),actuator.get('joint'))
+                if native_joint in joints:continue
+                token=actuator.get('joint').removesuffix('_x')
+                if token==suffix or token.removeprefix('flange_')==suffix:matching.append(actuator)
+            if len(matching)!=1:raise ValueError(f'{prefix}: ambiguous actuator binding')
+            joint_name=group_name+'_'+matching[0].get('joint')
+            ET.SubElement(flange_body,'joint',name=joint_name,axis=shared.numbers(flange_world[:3,:3].T@axis))
+            ET.SubElement(flange_body,'inertial',pos='0 0 0',mass='.03',diaginertia='.00001 .00001 .00001')
+            source_frame=np.asarray(alignment['links'][record['source_body']]['world_transform'])
+            for part,body,body_frame in (('flange',flange_body,flange_world),('platform',bodies[output],frames[output])):
+                target=delta[part]@source_frame
+                if prefix+'_'+part not in files:
+                    if part!='platform':raise ValueError('Missing crank geometry')
+                    # Some export groups contain only the outer race: the stud
+                    # is already part of the physical output mesh.
+                    output_entry=alignment['links'][output]
+                    _,output_points,_=read_regions(MODEL.parent/metadata['source']/'meshes'/output_entry['source'])
+                    output_points=output_points@native[output][:3,:3].T+native[output][:3,3]
+                    sphere=record['endpoints']['platform']
+                    if np.count_nonzero(abs(np.linalg.norm(output_points-end,axis=1)-sphere['ball_radius_m'])<audit.SURFACE_TOL)<30:
+                        raise ValueError(f'{prefix}: no platform bearing stud in output mesh')
+                    continue
+                visual(body,prefix+'_'+part+'_visual',files[prefix+'_'+part],np.linalg.inv(body_frame)@target)
+                geometry_poses[prefix+'_'+part+'_visual']=target.tolist()
+            ET.SubElement(flange_body,'site',name=prefix+'_motor_ball',pos=shared.numbers(flange_world[:3,:3].T@(start-origin)))
+            ET.SubElement(bodies[output],'site',name=prefix+'_platform_ball',pos=shared.numbers(hips.point(np.linalg.inv(frames[output]),end)))
+            normal=delta['rod'][:3,:3]@record['endpoints']['flange']['rod_end_cylinder']['axis']
+            rod_rotation=hips.direction_frame(end-start,normal)
+            rod_world=transform(start,rod_rotation);rod_body=ET.SubElement(flange_body,'body',name=rod_name,**attrs(np.linalg.inv(flange_world)@rod_world))
+            for tag,vector in (('x','1 0 0'),('y','0 1 0')):ET.SubElement(rod_body,'joint',name=rod_name+'_'+tag,axis=vector,damping='.001',armature='.00005')
+            length=np.linalg.norm(end-start)
+            ET.SubElement(rod_body,'inertial',pos=shared.numbers((0,0,length/2)),mass='.01',diaginertia=shared.numbers((.01*length**2/12,.01*length**2/12,1e-7)))
+            target=delta['rod']@source_frame
+            visual(rod_body,rod_name+'_visual',files[rod_name],np.linalg.inv(rod_world)@target)
+            geometry_poses[rod_name+'_visual']=target.tolist()
+            tip=rod_name+'_tip';ET.SubElement(rod_body,'site',name=tip,pos=shared.numbers((0,0,length)))
+            ET.SubElement(equalities,'connect',name=rod_name+'_end',site1=tip,site2=prefix+'_platform_ball',solref='.006 1',solimp='.999 .9999 .001')
+            tendon=ET.SubElement(tendons,'spatial',name=rod_name,rgba='0 0 0 0')
+            ET.SubElement(tendon,'site',site=prefix+'_motor_ball');ET.SubElement(tendon,'site',site=prefix+'_platform_ball')
+            auxiliary[matching[0].get('name')]=(joint_name,rod_name)
+        controls=[]
+        for item in local.findall('actuator/position'):
+            name=group_name+'_'+item.get('name');canonical=aliases.get(item.get('joint'),item.get('joint'))
+            if canonical in joints:joint_name=canonical
+            else:
+                joint_name,rod_name=auxiliary[item.get('name')];flanges[name]=rod_name
+            controls.append({'name':name,'joint':joint_name})
+        if len(controls)!=len(group['motor_numbers']):raise ValueError('Invalid motor group')
+        actuator_by_motor[group['motor_numbers'][0]]=controls
+    actuators=ET.SubElement(root,'actuator')
+    for number in sorted(actuator_by_motor):
+        for control in actuator_by_motor[number]:
+            bound=limits['actuator_limits'][control['name']];lower,upper=bound['lower'],bound['upper']
+            if lower==upper:lower,upper=-shared.LOCKED_SOLVER_RANGE,shared.LOCKED_SOLVER_RANGE
+            ET.SubElement(actuators,'position',**control,ctrlrange=shared.numbers((lower,upper)))
+    config={'model':MODEL.name,'joints':list(joints),'joint_aliases':aliases,'flanges':flanges,
+            'joint_limits':{j:[limits['joint_limits'][j][k] for k in ('lower','upper')] for j in joints},'coupled_limits':{}}
+    custom=ET.SubElement(root,'custom');ET.SubElement(custom,'text',name='robot_sim_control_mode',data='viewer_position')
+    control_text=ET.SubElement(custom,'text',name='robot_sim_joint_position',data=json.dumps(config,separators=(',',':')))
+    compiled=deepcopy(root);compiled.find('compiler').set('meshdir',str(MODEL))
+    model=mujoco.MjModel.from_xml_string(ET.tostring(compiled,encoding='unicode'))
+    data=mujoco.MjData(model);mujoco.mj_forward(model,data)
+    if (model.nv,model.nu,model.neq)!=(67,37,10) or np.max(abs(data.efc_pos))>.000025:raise ValueError('Invalid native linkage closure')
+    # Scalar caps remain a provisional search domain; old collision grids are discarded.
+    from robot_transmission.mujoco_positions import JointPositionTargets
+    controller=JointPositionTargets(model,config)
+    if scanned_limits:
+        scan=scan_artifacts.validate(MODEL,limits)
+        if not (scan['geometry_fingerprint']==limits['geometry_sha256']==geometry_fingerprint(MODEL,root)
+                and scan['source_urdf_sha256']==alignment['urdf_sha256']
+                and scan['source_step_sha256']==alignment['step_sha256']):
+            raise ValueError('Assembly changed since the CAD limit scan; regenerate the scan before using its limits')
+        for filename,expected in scan['collision_mesh_sha256'].items():
+            if hashlib.sha256((MODEL/'mujoco/collision/native'/filename).read_bytes()).hexdigest()!=expected:
+                raise ValueError('Exact collision mesh changed since the CAD limit scan: '+filename)
+        workspaces=deepcopy(limits['coupled_limits'])
+    else:
+        workspaces={};step=np.deg2rad(1.)
+        for name,group in topology['differential_groups'].items():
+            pair=group['joints'];bounds=np.asarray([config['joint_limits'][j] for j in pair])
+            first=np.ceil(bounds[:,0]/step).astype(int);last=np.floor(bounds[:,1]/step).astype(int)
+            mask=np.zeros(tuple(last-first+1),dtype=bool)
+            for index in np.ndindex(mask.shape):
+                targets=dict.fromkeys(joints,0.);targets.update({j:float((first[k]+index[k])*step) for k,j in enumerate(pair)})
+                try:controller.apply(data,list(targets),list(targets.values()))
+                except ValueError:continue
+                mask[index]=True
+            mask=binary_erosion(mask,structure=np.ones((3,3)),border_value=1)
+            labels,_=label(mask);zero=tuple(-first)
+            component=labels[zero]
+            if not component:raise ValueError(f'{name}: neutral is outside the interior of the reachable preview domain')
+            mask=labels==component
+            workspaces[name]={'joints':pair,'lower':(first*step).tolist(),'step':float(step),'valid_rows':[''.join('1' if v else '0' for v in row) for row in mask]}
+        limits['coupled_limits']=workspaces
+        limits['source']='Native STEP assembly: recomputed kinematic reachability; provisional serial search magnitudes from legacy scan, symmetric in native coordinates'
+        limits['collision_validation']='pending: legacy collision results do not certify this assembly'
+    config['coupled_limits']=workspaces;control_text.set('data',json.dumps(config,separators=(',',':')))
+    compiled=deepcopy(root);compiled.find('compiler').set('meshdir',str(MODEL))
+    model=mujoco.MjModel.from_xml_string(ET.tostring(compiled,encoding='unicode'))
+    data=mujoco.MjData(model)
+    controller=JointPositionTargets(model,config)
+    keys=ET.SubElement(root,'keyframe');ET.SubElement(keys,'key',name='Neutral')
+    for name,signs in (('Six groups same direction',(1,1)),('Six groups opposite direction',(1,-1))):
+        targets=dict.fromkeys(joints,0.)
+        for group in topology['differential_groups'].values():
+            trial=targets|{j:float(np.deg2rad(.5)*sign) for j,sign in zip(group['joints'],signs)}
+            try:controller.workspace.validate(trial)
+            except ValueError:continue
+            targets=trial
+        controller.set_configuration(data,list(targets.values()))
+        ET.SubElement(keys,'key',name=name,qpos=shared.numbers(data.qpos),ctrl=shared.numbers(data.ctrl))
+    # Main/mapping URDF is the 37-output skeleton; standalone additionally exposes auxiliary bodies.
+    for link in source.findall('link'):
+        name=link.get('name')
+        for mesh in link.findall('visual/geometry/mesh')+link.findall('collision/geometry/mesh'):
+            mesh.set('filename','package://robot_description/models/full_body_robot/'+files[name])
+    ET.indent(root,space='  ')
+    limits['geometry_sha256']=geometry_fingerprint(MODEL,root)
+    (MODEL/'config/left_hand_mount_alignment.json').write_text(json.dumps(hand_mounting,indent=2)+'\n')
+    (MODEL/'config/arm_mount_alignment.json').write_text(json.dumps(arm_mount,indent=2)+'\n')
+    remounted={hand_mounting['hand_link']:hand_mounting['hand_world_transform']} if hand_mounting['rotation_rad'] else {}
+    remounted.update({name:native[name].tolist() for name in arm_mount['affected_links']})
+    assembly = {
+        'source_step_sha256': alignment['step_sha256'],
+        'source_urdf_sha256': alignment['urdf_sha256'],
+        'basis': 'native '+alignment['source']+' frames with hips installation, outward arm roll zero, and conditional hand mounting; no ICP matrices',
+        'remounted_source_link_world_transforms': remounted,
+        'ownership': ownership,
+        'coupled_visual_world_transforms': geometry_poses,
+        'collision_validation': limits['collision_validation'],
+        'arm_inertia': {
+            'source_urdf': str(ARM_INERTIA_SOURCE.relative_to(MODEL.parent)),
+            'sha256': hashlib.sha256(ARM_INERTIA_SOURCE.read_bytes()).hexdigest(),
+            'links': sorted(ARM_LINK_NAMES),
+        },
+        'auxiliary_inertia': 'numerical preview surrogates; physical-link inertias from '+alignment['source']+' with arm overrides recorded in arm_inertia, rigidly re-expressed with mounted assemblies',
+    }
+    (MODEL/'config/native_assembly.json').write_text(json.dumps(assembly, indent=2)+'\n')
+    (MODEL/'mujoco/full_body_robot.physics.xml').write_text(ET.tostring(root,encoding='unicode')+'\n')
+    joint_convention.publish(MODEL,source,root,limits,aliases,link_aliases)
+    if limits_path==pending_limits:pending_limits.unlink()
+    print('Native full model: 37 outputs, 30 auxiliary hinges, 10 closed rods; kinematic workspaces regenerated')
 
 
-if __name__ == '__main__':
-    build()
+if __name__=='__main__':build()

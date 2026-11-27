@@ -62,6 +62,7 @@ setup(
         'console_scripts': [
             'static_server = web_host.static_server:main',
             'rosbridge_shim = web_host.rosbridge_shim:main',
+            'bff_server = web_host.bff.main:main',
         ],
     },
 )

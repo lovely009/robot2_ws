@@ -16,7 +16,7 @@ test.beforeEach(async ({page}) => {
   await page.route('**/api/runtime', route => route.fulfill({json:{control_mode:'readonly',robot_model:'unseen'}}));
   await page.route('**/api/models', route => route.fulfill({json:{models:['unseen']}}));
   await page.route('**/api/motion/sources', route => route.fulfill({json:{sources:['sample.bvh']}}));
-  await page.route('**/robot_description/models/unseen/urdf/unseen.urdf', route => route.fulfill({body:'<robot name="unseen"/>'}));
+  await page.route('**/robot_sim/models/unseen/urdf/unseen.urdf', route => route.fulfill({body:'<robot name="unseen"/>'}));
 });
 
 test('通用候选需要确认，明确选择几何预览并记住映射', async ({page}) => {
@@ -74,14 +74,44 @@ test('已保存映射自动转换，仍可请求重新确认', async ({page}) =>
   await expect(page.getByLabel('unknown_link 人体对应')).toHaveValue('LeftArm');
 });
 
+test('整机模型提交注册名称并显示仿真范围，不再提示37项缺失限位', async ({page}) => {
+  await page.route('**/api/runtime', route => route.fulfill({json:{control_mode:'readonly',robot_model:'full_body_robot'}}));
+  await page.route('**/api/models', route => route.fulfill({json:{models:['full_body_robot']}}));
+  await page.route('**/robot_sim/models/full_body_robot/urdf/full_body_robot.urdf', route => route.fulfill({body:'<robot name="full_body_robot"/>'}));
+  const configured = {...job, robot_name:'full_body_robot', joint_count:37, warnings:[],
+    constraint_source:'simulation',velocity_limit_rad_s:Math.PI,
+    mapping:{...mapping,targets:[{target:'unknown_link',source:'LeftArm'}]}};
+  await page.route('**/api/motion/jobs', route => {
+    expect(route.request().postDataJSON().model).toBe('full_body_robot');
+    return route.fulfill({json:configured});
+  });
+  await page.route('**/api/motion/jobs/generic-fixture/convert', route => {
+    expect(route.request().postDataJSON().mapping.limit_policy).toBe('urdf');
+    return route.fulfill({json:{...configured,state:'done',summary:{simulation_limits_enforced:true,
+      mechanical_limits_enforced:false,direction_max_deg:12.3,orientation_max_deg:90,
+      covered_joints:Array.from({length:37},(_,i)=>`axis_${i}`)}}});
+  });
+  await page.route('**/api/motion/jobs/generic-fixture/preview.json', route => route.fulfill({json:preview}));
+  await page.goto('/workbench/#/motion');
+  await page.getByRole('button',{name:'导入并转换',exact:true}).click();
+  await expect(page.locator('details.motion-mapping-notes')).toHaveCount(0);
+  await expect(page.getByText('仿真几何与耦合限位 · 3.14 rad/s')).toBeVisible();
+  await expect(page.getByLabel('限位策略')).toHaveValue('urdf');
+  await expect(page.getByLabel('限位策略').locator('option')).toHaveCount(1);
+  await expect(page.getByText(/按人体骨段方向拟合姿态/)).toBeVisible();
+  await page.getByRole('button',{name:'确认映射并转换'}).click();
+  await expect(page.getByText('覆盖 37/37 个关节 · 已检查仿真位置、速度和耦合范围')).toBeVisible();
+  await expect(page.getByText('最大骨段方向误差 12.3°；详细目标误差见报告')).toBeVisible();
+  await expect(page.getByText(/最大朝向误差/)).toHaveCount(0);
+  await expect(page.getByRole('link',{name:'导出预览 URDF'})).toHaveAttribute('href','/api/motion/jobs/generic-fixture/robot.urdf');
+});
 
 test('非双足预览按参考实体最低点放到地面并保持根高度', async ({page}) => {
   await page.goto('/workbench/#/motion');
   const result = await page.evaluate(async () => {
     // @ts-expect-error The preview and loader are served as browser modules.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error The preview module is shared with the legacy renderer.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {
@@ -119,8 +149,7 @@ test('双足预览随下蹲降低基座，保留腾空和单足抬起，不以�
   const result = await page.evaluate(async () => {
     // @ts-expect-error Browser-served module.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error Browser-served module.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {
@@ -177,8 +206,7 @@ test('机器人实体将机器人坐标中的根旋转恢复到人体世界坐�
   const result = await page.evaluate(async () => {
     // @ts-expect-error Browser-served module.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error Browser-served module.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {

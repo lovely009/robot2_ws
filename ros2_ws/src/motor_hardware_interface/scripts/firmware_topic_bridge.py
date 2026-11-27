@@ -4,13 +4,12 @@
 运动请求由 workbench_control 提交给 ros2_control；本节点没有下行发布者。
 """
 
+from motor_hardware_interface.feedback_publisher import build_transmission_status
 from motor_hardware_interface.topic_bridge import (motion_states_to_joint_state,
                                                   parse_joint_map)
 from motor_hardware_interface.transmission_bridge import TransmissionBridge
 from motor_hardware_interface.topic_bridge import BridgeError
 from motor_hardware_interface.control_state import ControlStateTracker
-import json
-import math
 import signal
 import time
 
@@ -25,7 +24,7 @@ def main():  # pragma: no cover - 需要 ROS 环境
                            QoSDurabilityPolicy)
     from sensor_msgs.msg import JointState
     from std_msgs.msg import String
-    from can_bridge_msgs.msg import MotorMotionStateArray, MotorControlStateArray
+    from can_bridge_msgs.msg import MotorMotionStateArray, MotorSystemState
 
     def stream_qos():
         """best-effort depth 1：与固件运动状态流 QoS 对齐。"""
@@ -75,14 +74,14 @@ def main():  # pragma: no cover - 需要 ROS 环境
                                     reliability=QoSReliabilityPolicy.RELIABLE)
             self.status_pub = self.create_publisher(String, '/robot_transmission/status', status_qos)
             self.create_timer(1., self.publish_status)
-            self.create_subscription(MotorControlStateArray, '/motor/control_states',
-                                     self.on_control_states, 10)
+            self.create_subscription(MotorSystemState, '/motor/state',
+                                     self.on_system_state, 10)
 
             self.js_pub = self.create_publisher(
                 JointState, self.get_parameter('joint_state_topic').value, 10)
             self.create_subscription(
                 MotorMotionStateArray,
-                '/motor/motion_states',
+                '/motor/motion',
                 self.on_motion_states, stream_qos())
             self.get_logger().info('只读关节反馈桥已就绪')
 
@@ -108,24 +107,21 @@ def main():  # pragma: no cover - 需要 ROS 环境
         def publish_status(self):
             limits = self.joint_limits_from_parameter(self.get_parameter('joint_limits_json').value)
             msg = String()
-            msg.data = json.dumps({
-                'model': self.get_parameter('model_name').value,
-                'driver_file': self.get_parameter('driver_file').value,
-                'trajectory_enabled': False,
-                'control_state_source': 'mcu' if self.control_states.seen else 'legacy',
-                'control_service': self.get_fully_qualified_name() + '/set_parameters_atomically',
-                'last_error': '',
-                'joint_names': (list(self.transmission.model.joint_names) if self.transmission
-                                else list(self.motor_of_joint)),
-                'joint_limits': {name: {'lower': lower if math.isfinite(lower) else None,
-                                        'upper': upper if math.isfinite(upper) else None}
-                                 for name, (lower, upper) in limits.items()},
-            })
+            msg.data = build_transmission_status(
+                model=self.get_parameter('model_name').value,
+                driver_file=self.get_parameter('driver_file').value,
+                trajectory_enabled=False,
+                control_state_source='mcu' if self.control_states.seen else 'legacy',
+                control_service=self.get_fully_qualified_name() + '/set_parameters_atomically',
+                joint_names=(list(self.transmission.model.joint_names) if self.transmission
+                             else list(self.motor_of_joint)),
+                joint_limits=limits,
+            )
             self.status_pub.publish(msg)
 
-        def on_control_states(self, msg):
+        def on_system_state(self, msg):
             self.control_states.update(msg.schema_version, msg.session_id,
-                                       msg.sequence, msg.states, time.monotonic())
+                                       msg.sequence, msg.control_states, time.monotonic())
         def on_motion_states(self, msg):
             monotonic_now = time.monotonic()
             states = [{'motor_id': s.motor_id, 'position': s.position,

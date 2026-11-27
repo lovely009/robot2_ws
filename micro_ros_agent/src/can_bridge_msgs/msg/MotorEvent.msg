@@ -40,6 +40,7 @@ uint8 EVENT_DEV_INIT=15
 #                声明集合重复/未注册电机/声明了归属却无路点）
 #   motor_id   = 0（一条轨迹可含多台，逐台归属无意义）
 uint8 EVENT_TRAJECTORY_REJECTED=16
+std_msgs/Header header
 uint32 tick_ms
 uint64 session_id
 uint8 event_type

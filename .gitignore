@@ -80,8 +80,11 @@ desktop.ini
 # ROS 2 运行时日志目录（在包源码目录内就地运行 launch 会生成）
 /ros2_ws/src/**/log/
 
-# Web 工作台前端开发产物
+# Web 工作台前端开发产物（main 分支跟踪 web/workbench 供板端直接部署，免装 Node.js）
 node_modules/
-/ros2_ws/src/web_host/web/workbench/
 /ros2_ws/src/web_host/frontend/test-results/
 /ros2_ws/src/web_host/frontend/playwright-report/
+
+# 大体积原始 CAD 工程文件
+*.STEP
+*.step

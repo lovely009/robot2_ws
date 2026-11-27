@@ -1,4 +1,4 @@
-"""Sampled two-joint workspaces used to validate joint pairs for control and offline motion preview."""
+"""Sampled two-joint workspaces shared by simulation and offline motion preview."""
 
 import math
 
@@ -27,9 +27,15 @@ class CoupledLimits:
     def validate(self, targets, *, groups=None):
         for name in self.groups if groups is None else groups:
             joints, lower, step, mask = self.groups[name]
-            indices = self.grid_indices(joints, lower, step, targets)
-            if (np.any(indices < 0) or np.any(indices >= np.array(mask.shape)[:, None])
-                    or not mask[np.ix_(indices[0], indices[1])].all()):
+            c0 = (targets[joints[0]] - float(lower[0])) / step
+            c1 = (targets[joints[1]] - float(lower[1])) / step
+            if not (math.isfinite(c0) and math.isfinite(c1)):
+                raise ValueError(f"{name} 两轴组合超出 CAD 可动区域，请先将另一轴移回零位附近")
+            lo0, hi0 = math.floor(c0 + 1e-8), math.ceil(c0 - 1e-8)
+            lo1, hi1 = math.floor(c1 + 1e-8), math.ceil(c1 - 1e-8)
+            h0, h1 = mask.shape
+            if (lo0 < 0 or lo1 < 0 or hi0 >= h0 or hi1 >= h1
+                    or not mask[lo0:hi0 + 1, lo1:hi1 + 1].all()):
                 raise ValueError(f"{name} 两轴组合超出 CAD 可动区域，请先将另一轴移回零位附近")
 
     @classmethod

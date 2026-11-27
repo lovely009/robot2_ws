@@ -9,15 +9,14 @@ from launch_ros.actions import Node
 
 READ_TOPICS = [
     '/diagnostics', '/joint_states',
-    '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp',
-    '/motor/control_states', '/motor/motion_states', '/motor/topology',
-    '/motor/trajectory_state', '/motor/status_array', '/motor/events',
-    '/motor/device_param_report', '/motor/system_status', '/motor/config_result',
-    '/control/status', '/control/trajectory_state', '/bench/status', '/micro_ros_up/status',
+    '/tf', '/tf_static', '/robot_transmission/status', '/imu/data', '/imu/temp_raw',
+    '/motor/motion', '/motor/state', '/motor/events',
+    '/control/status', '/bench/status',
 ]
-CONTROL_TOPICS = ['/control/setpoint', '/control/joint_target', '/control/trajectory', '/control/trajectory_raw', '/control/stop',
-                  '/arm_controller/joint_trajectory', '/motor/system_command', '/motor/config_request']
-CONTROL_SERVICES = ['/motor/submit_policy', '/bench/*', '/bench_manager/set_parameters_atomically',
+CONTROL_TOPICS = ['/control/joint_target', '/control/trajectory', '/control/stop']
+CONTROL_SERVICES = ['/motor/submit_policy', '/motor/execute_config',
+                    '/motor/get_device_info', '/micro_ros_node/*', '/bench/*',
+                    '/bench_manager/set_parameters_atomically',
                     '/workbench_control/set_parameters_atomically',
                     '/firmware_topic_bridge/set_parameters_atomically']
 
@@ -26,8 +25,31 @@ def web_nodes(context):
     mode = LaunchConfiguration('control_mode').perform(context)
     if mode not in ('bench', 'readonly'):
         raise ValueError('control_mode must be bench or readonly')
+    backend = LaunchConfiguration('backend').perform(context)
+    if backend not in ('bff', 'legacy'):
+        raise ValueError('backend must be bff or legacy')
     control = mode == 'bench'
     pkg_share = get_package_share_directory('web_host')
+    if backend == 'bff':
+        args = [
+            '--host', LaunchConfiguration('host'),
+            '--port', LaunchConfiguration('web_port'),
+            '--web-root', os.path.join(pkg_share, 'web'),
+            '--model-dir', LaunchConfiguration('model_dir'),
+            '--model-url-prefix', '/robot_description',
+            '--control-mode', mode,
+            '--robot-model', LaunchConfiguration('robot_model'),
+        ]
+        pin = LaunchConfiguration('pin').perform(context)
+        if pin:
+            args.extend(['--pin', pin])
+        return [
+            Node(
+                package='web_host', executable='bff_server',
+                name='web_bff_server', output='screen',
+                arguments=args,
+            ),
+        ]
     return [
         Node(
             package='web_host', executable='rosbridge_shim',
@@ -35,14 +57,10 @@ def web_nodes(context):
             additional_env={'WORKBENCH_WEB_PORT': LaunchConfiguration('web_port')},
             parameters=[{
                 'port': LaunchConfiguration('rosbridge_port'), 'address': '127.0.0.1',
-                # Expose public intents and observations. Internal authorized
-                # outputs and wire topics must never be writable through the UI.
                 'topics_glob': '[]',
                 'topics_pub_glob': repr(CONTROL_TOPICS if control else []),
                 'topics_sub_glob': repr(READ_TOPICS),
                 'services_glob': repr(['/rosapi/*'] + (CONTROL_SERVICES if control else [])),
-                # GetResult may wait for an executing goal; it must not block
-                # lease renewal or stop requests on the same WebSocket.
                 'call_services_in_new_thread': True,
             }]),
         Node(
@@ -59,22 +77,25 @@ def web_nodes(context):
 
 
 def generate_launch_description():
-    # 模型包几何由 static_server 挂载到 /robot_description；缺包时仅降级臂视图与模型列表。
-    # 本 launch 提供 L1 页面服务；台架编排由 robot_bringup/robot.launch.py 负责，
-    # 避免仅浏览页面时引入进程管理权限。
     try:
         model_dir = get_package_share_directory('robot_description')
     except Exception:
         model_dir = ''
 
     return LaunchDescription([
+        DeclareLaunchArgument('backend', default_value='bff',
+                              description='Web backend: bff (single-port FastAPI+rclpy) or legacy (rosbridge+static_server).'),
+        DeclareLaunchArgument('host', default_value='0.0.0.0',
+                              description='HTTP/WS listen host for bff_server.'),
+        DeclareLaunchArgument('pin', default_value='',
+                              description='Optional control lease PIN for bff_server.'),
         DeclareLaunchArgument('control_mode', default_value='bench',
                               description='bench or readonly.'),
-        DeclareLaunchArgument('robot_model', default_value='', description='Initial model selection.'),
+        DeclareLaunchArgument('robot_model', default_value='full_body_robot', description='Initial model selection.'),
         DeclareLaunchArgument('rosbridge_port', default_value='9090',
-                              description='WebSocket port of rosbridge.'),
+                              description='WebSocket port of legacy rosbridge.'),
         DeclareLaunchArgument('web_port', default_value='8080',
-                              description='HTTP port of the static web UI.'),
+                              description='HTTP/WS port of the web UI.'),
         DeclareLaunchArgument('model_dir', default_value=model_dir,
                               description='模型包根目录（含 models/）：臂视图几何'
                                           '（URDF/STL）的挂载源与 /api/models 的枚举根；'

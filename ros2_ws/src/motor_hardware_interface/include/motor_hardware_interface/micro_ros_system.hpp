@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "can_bridge_msgs/msg/motor_command_array.hpp"
-#include "can_bridge_msgs/msg/motor_control_state_array.hpp"
 #include "can_bridge_msgs/msg/motor_motion_state_array.hpp"
+#include "can_bridge_msgs/msg/motor_system_state.hpp"
 #include "hardware_interface/system_interface.hpp"
 #include "rclcpp/duration.hpp"
 #include "rclcpp/macros.hpp"
@@ -54,7 +54,7 @@ public:
 private:
   using TimePoint = std::chrono::steady_clock::time_point;
   using Motion = can_bridge_msgs::msg::MotorMotionStateArray;
-  using Control = can_bridge_msgs::msg::MotorControlStateArray;
+  using Control = can_bridge_msgs::msg::MotorSystemState;
   using Command = can_bridge_msgs::msg::MotorCommandArray;
 
   struct Limit {

@@ -1,11 +1,12 @@
 import {expect, it, vi} from 'vitest';
 vi.stubGlobal('location', {search: ''});
 vi.stubGlobal('localStorage', {getItem: () => null});
-const {describeAgentStatus} = await import('../../web/js/core/agent.js');
-const {applyAgentWireStatus} = await import('../../web/js/core/store.js');
+const {describeAgentStatus} = await import('../src/core/agent.ts');
+const {applyAgentWireStatus} = await import('../src/core/store.ts');
 function state() {
   return {conn: {connected: true}, agentWireStatus: {at: 1000, data: {
-    schema_version: 4, session_id: 100, sequence: 1, snapshot_stamp: 1000000000,
+    schema_version: 6, session_id: 100, sequence: 1,
+    header: {stamp: {sec: 1, nanosec: 0}, frame_id: ''},
     clock_valid: true, clock_sync_age_ms: 100,
     clock_sync_failures: 0, snapshot_tick_ms: 100,
     lease_active: true, lease_valid_until_tick_ms: 300,
@@ -50,6 +51,6 @@ it('does not revive an expired lease when a new sequence was delayed in transit'
   const s = state();
   expect(applyAgentWireStatus(s, {...s.agentWireStatus.data, sequence: 2}, 2000)).toBe(true);
   expect(describeAgentStatus(s, 2000)).toMatchObject({link: '状态陈旧', clock: '未知', authority: '未知'});
-  s.agentWireStatus.data.snapshot_stamp = 2200000000;
+  s.agentWireStatus.data.header = {stamp: {sec: 2, nanosec: 200000000}, frame_id: ''};
   expect(describeAgentStatus(s, 2000)).toMatchObject({clock: '时间基准异常', authority: '未知'});
 });

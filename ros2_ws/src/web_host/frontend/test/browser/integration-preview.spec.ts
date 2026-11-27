@@ -20,9 +20,9 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
   });
   await page.routeWebSocket('ws://127.0.0.1:9090', socket => {
     const fixtures: Record<string, unknown> = {
-      '/motor/topology': {entries: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, model_name:'模拟 CERB · 非实测', bus_index:i%3, lifecycle:3}))},
-      '/motor/status_array': {statuses: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, lifecycle:3, temperature:25, unified_fault_code:0}))},
-      '/motor/motion_states': {states: Array.from({length:37}, (_, i) => ({motor_id:i+1, position:i*.01, velocity:0, effort:0, state_age_ms:5}))},
+      '/motor/device_info': {topology: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, model_name:'模拟 CERB · 非实测', bus_index:i%3, lifecycle:3})), params: []},
+      '/motor/state': {schema_version: 5, session_id: 1, sequence: 1, control_states: [], statuses: Array.from({length:37}, (_, i) => ({motor_id:i+1, online:true, lifecycle:3, temperature:25, unified_fault_code:0}))},
+      '/motor/motion': {states: Array.from({length:37}, (_, i) => ({motor_id:i+1, position:i*.01, velocity:0, effort:0, state_age_ms:5}))},
     };
     const subscribed = new Set<string>();
     const send = () => { for (const topic of subscribed) if (fixtures[topic]) socket.send(JSON.stringify({op:'publish', topic, msg:fixtures[topic]})); };
@@ -46,13 +46,17 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     const badge = document.createElement('div');
     badge.textContent = '模拟数据 · 37轴/总线分配为虚构 · 非实测 · 整合未验收';
     badge.dataset.evidenceBanner = 'true';
-    badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
+    badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;pointer-events:none;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
     document.body.append(badge);
   });
   await page.screenshot({path:join(captureDirectory, `${capturePrefix}-desktop.png`)});
-  for (const scene of ['设备工作台','动作工作台','调试工作台']) {
+  for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台']) {
     await page.getByRole('button', {name:scene, exact:true}).click();
-    await expect(page.getByRole('heading', {name:scene, exact:true})).toBeVisible();
+    if (scene === '调试工作台') {
+      await expect(page.locator('.inspector-dock')).toBeVisible();
+    } else {
+      await expect(page.getByRole('heading', {name:scene, exact:true})).toBeVisible();
+    }
     if (scene === '设备工作台') {
       await expect(page.getByRole('navigation', {name:'设备参数查询'})).toBeVisible();
       await expect(page.locator('.device-connection')).toHaveCount(0);

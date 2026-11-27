@@ -1,13 +1,13 @@
-# Source time is the latest MCU-synchronized control snapshot, never browser wall time.
+# Source time is the latest MCU-synchronized control snapshot header stamp.
+std_msgs/Header header
 uint64 session_id
-uint64 source_time_ns
-MotorPolicyTarget[<=48] targets
+MotorPolicyTarget[<=37] targets
 ---
-# accepted means queued by the host; enabling still requires matching ConfigResult and MCU state.
+# accepted means applied/queued; enabling still requires MCU state confirmation.
 # An all-disabled request bypasses the generation/transaction queue and returns generation/request 0.
 bool accepted
 uint64 session_id
-string intent_id
+string<=31 intent_id
 uint32 policy_generation
 uint32 request_id
-string reason
+string<=63 reason

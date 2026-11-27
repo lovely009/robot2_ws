@@ -33,7 +33,7 @@ from rcl_interfaces.msg import SetParametersResult
 from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.parameter import Parameter
 from std_msgs.msg import String, Empty
-from can_bridge_msgs.msg import MotorControlStateArray
+from can_bridge_msgs.msg import MotorSystemState
 
 from bench_msgs.srv import (
     GetAgentStatus,
@@ -126,7 +126,7 @@ class BenchManager(LifecycleNode):
         self._status_pub = self.create_publisher(String, '/bench/status', 10)
         self._feedback_stop_pub = self.create_publisher(Empty, '/control/stop', 10)
         self._feedback_inventory_sub = self.create_subscription(
-            MotorControlStateArray, '/motor/control_states', self._feedback_inventory.observe, 10)
+            MotorSystemState, '/motor/state', self._feedback_inventory.observe, 10)
         self._control_status_sub = self.create_subscription(
             String, '/control/status', self._on_control_status, 10)
         for srv_type, name, callback in (
@@ -170,11 +170,22 @@ class BenchManager(LifecycleNode):
             device = self.get_parameter('agent_device').value.strip()
             if not device:
                 ports = enumerate_serial_ports()
-                if len(ports) != 1:
+                stm32_ports = [
+                    p for p in ports
+                    if 'stm32' in (p['path'] + ' ' + p.get('label', '')).lower()
+                    and os.access(p['path'], os.R_OK | os.W_OK)
+                ]
+                if len(stm32_ports) == 1:
+                    device = stm32_ports[0]['path']
+                elif len(ports) == 1:
+                    device = ports[0]['path']
+                elif not ports:
+                    self.get_logger().info('未检测到控制板串口，跳过自动启动 Agent')
+                    return
+                else:
                     raise ValueError(
                         '检测到 %d 个串口，请在页面选择串口启动，或指定 agent_tty'
                         % len(ports))
-                device = ports[0]['path']
             self.agent.start(device, auto=True)
             self.get_logger().info('自动启动 Agent：%s' % device)
         except _EXPECTED_ERRORS as exc:

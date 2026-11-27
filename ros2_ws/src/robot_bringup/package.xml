@@ -17,7 +17,6 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>web_host</exec_depend>
-  <exec_depend>micro_ros_bridge</exec_depend>
   <exec_depend>motor_hardware_interface</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_transmission</exec_depend>

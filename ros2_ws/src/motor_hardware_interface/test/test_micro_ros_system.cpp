@@ -16,8 +16,8 @@
 #include <unistd.h>
 
 #include "can_bridge_msgs/msg/motor_command_array.hpp"
-#include "can_bridge_msgs/msg/motor_control_state_array.hpp"
 #include "can_bridge_msgs/msg/motor_motion_state_array.hpp"
+#include "can_bridge_msgs/msg/motor_system_state.hpp"
 #include "motor_hardware_interface/micro_ros_system.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/parameter_client.hpp"
@@ -26,7 +26,7 @@
 
 namespace {
 using M = can_bridge_msgs::msg::MotorMotionStateArray;
-using C = can_bridge_msgs::msg::MotorControlStateArray;
+using C = can_bridge_msgs::msg::MotorSystemState;
 using Q = can_bridge_msgs::msg::MotorCommandArray;
 using CallbackReturn = hardware_interface::CallbackReturn;
 using namespace std::chrono_literals;
@@ -66,13 +66,13 @@ protected:
       "    actuators: [a,b]\n"
       "    joints: [yaw,pitch]\n";
     peer_ = std::make_shared<rclcpp::Node>("micro_ros_system_test_peer_" + std::to_string(serial));
-    motion_pub_ = peer_->create_publisher<M>("/motor/motion_states",
+    motion_pub_ = peer_->create_publisher<M>("/motor/motion",
       rclcpp::QoS(1).best_effort());
-    control_pub_ = peer_->create_publisher<C>("/motor/control_states",
+    control_pub_ = peer_->create_publisher<C>("/motor/state",
       rclcpp::QoS(1).reliable());
-    stop_pub_ = peer_->create_publisher<std_msgs::msg::Empty>("/host_control/stop",
+    stop_pub_ = peer_->create_publisher<std_msgs::msg::Empty>("/control/stop",
       rclcpp::QoS(1).reliable());
-    command_sub_ = peer_->create_subscription<Q>("/motor/host_command_array",
+    command_sub_ = peer_->create_subscription<Q>("/motor/command",
       rclcpp::QoS(1).reliable(), [this](Q::SharedPtr message) {
         commands_.push_back(*message);
       });
@@ -152,9 +152,20 @@ protected:
     return system;
   }
 
+  static builtin_interfaces::msg::Time ns_to_stamp(uint64_t ns) {
+    builtin_interfaces::msg::Time t;
+    t.sec = static_cast<int32_t>(ns / 1000000000ULL);
+    t.nanosec = static_cast<uint32_t>(ns % 1000000000ULL);
+    return t;
+  }
+
+  static uint64_t stamp_to_ns(const builtin_interfaces::msg::Time &t) {
+    return static_cast<uint64_t>(t.sec) * 1000000000ULL + static_cast<uint64_t>(t.nanosec);
+  }
+
   M motion_message(uint32_t age = 0) {
     M message;
-    message.sync_time_ns = stamp();
+    message.header.stamp = ns_to_stamp(stamp());
     message.seq = ++motion_seq_;
     for (const auto &[id, position, velocity, effort] :
          std::vector<std::tuple<uint16_t, float, float, float>>{
@@ -182,10 +193,10 @@ protected:
     uint16_t last_failure_reason = 0) {
     C message;
     message.schema_version = C::SCHEMA_VERSION;
-    message.sync_time_ns = stamp();
+    message.header.stamp = ns_to_stamp(stamp());
     message.session_id = session;
     message.sequence = ++control_seq_;
-    message.tick_ms = 1;
+    message.snapshot_tick_ms = 1;
     for (uint16_t id : {uint16_t{8}, uint16_t{9}}) {
       if (!complete && id == 9) {
         continue;
@@ -202,7 +213,7 @@ protected:
       state.vendor_fault_code = 0;
       state.last_failure_reason = last_failure_reason;
       state.policy_generation = 1;
-      message.states.push_back(state);
+      message.control_states.push_back(state);
     }
     return message;
   }
@@ -318,8 +329,8 @@ TEST_F(MicroRosSystemTest, PartialPolicyCommandsOnlyEnabledMotorInCoupledGroup) 
   activate(*system, false);
   start_writer(*system);
   auto control = control_message();
-  control.states[1].policy_enabled = false;
-  control.states[1].control_lifecycle =
+  control.control_states[1].policy_enabled = false;
+  control.control_states[1].control_lifecycle =
     can_bridge_msgs::msg::MotorControlState::LIFECYCLE_INACTIVE;
   control_pub_->publish(control);
   publish_motion();
@@ -387,7 +398,7 @@ TEST_F(MicroRosSystemTest, ActivationUsesMeasuredJointPositionsAndLeaseStaysEmpt
   ASSERT_EQ(commands_.size(), 1U);
   EXPECT_EQ(commands_[0].targets.size(), 0U);
   EXPECT_NE(commands_[0].sequence, 0U);
-  EXPECT_NE(commands_[0].sync_time_ns, 0U);
+  EXPECT_NE(stamp_to_ns(commands_[0].header.stamp), 0U);
 }
 
 TEST_F(MicroRosSystemTest, IdleFeedbackTimeoutRecoversWithoutHardwareReactivation) {
@@ -434,7 +445,7 @@ TEST_F(MicroRosSystemTest, UnarmedCurrentFaultCannotResumePendingCommand) {
   interfaces[0].set_value(0.8);
   publish_motion();
   auto fault = control_message(1, false);
-  fault.states[0].unified_fault_code = 1;
+  fault.control_states[0].unified_fault_code = 1;
   control_pub_->publish(fault);
   std::this_thread::sleep_for(10ms);
   EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
@@ -462,8 +473,8 @@ TEST_F(MicroRosSystemTest, ActivationDiscardsExpiredDiscoverySamplesAndWaitsForF
   auto system = initialized(info());
   std::atomic<bool> stop{false};
   std::thread feedback([&] {
-    auto old_motion = motion_message(); old_motion.sync_time_ns -= 1000000000ULL;
-    auto old_control = control_message(1, false); old_control.sync_time_ns -= 1000000000ULL;
+    auto old_motion = motion_message(); old_motion.header.stamp = ns_to_stamp(stamp() - 1000000000ULL);
+    auto old_control = control_message(1, false); old_control.header.stamp = ns_to_stamp(stamp() - 1000000000ULL);
     motion_pub_->publish(old_motion); control_pub_->publish(old_control);
     std::this_thread::sleep_for(40ms);
     while (!stop.load()) {
@@ -504,7 +515,7 @@ TEST_F(MicroRosSystemTest, ActivationRejectsPresentDeviceFault) {
   std::thread feedback([&] {
     while (!stop.load()) {
       auto control = control_message(1, false);
-      control.states[0].vendor_fault_code = 2;
+      control.control_states[0].vendor_fault_code = 2;
       control_pub_->publish(control);
       publish_motion();
       std::this_thread::sleep_for(2ms);
@@ -527,7 +538,7 @@ TEST_F(MicroRosSystemTest, AggregatedFeedbackControlsOnlyConfiguredDevices) {
       can_bridge_msgs::msg::MotorControlState unrelated_control;
       unrelated_control.motor_id = 10;
       unrelated_control.vendor_fault_code = 1;
-      control.states.push_back(unrelated_control);
+      control.control_states.push_back(unrelated_control);
       control_pub_->publish(control);
       auto motion = motion_message();
       can_bridge_msgs::msg::MotorMotionStateTarget unrelated_motion;
@@ -594,13 +605,66 @@ TEST_F(MicroRosSystemTest, ActivationCannotSucceedAfterRejectedStartupFrame) {
             hardware_interface::return_type::ERROR);
 }
 
+TEST_F(MicroRosSystemTest, ActivationWaitsForInitialUnmeasuredMotionFrames) {
+  auto system = initialized(info());
+  std::atomic<bool> stop{false};
+  std::thread feedback([&] {
+    const auto healthy_at = std::chrono::steady_clock::now() + 40ms;
+    while (!stop.load()) {
+      publish_control(1, false);
+      auto motion = motion_message();
+      if (std::chrono::steady_clock::now() < healthy_at) {
+        motion.states[0].position = std::numeric_limits<float>::quiet_NaN();
+        motion.states[0].velocity = std::numeric_limits<float>::quiet_NaN();
+        motion.states[0].effort = std::numeric_limits<float>::quiet_NaN();
+        motion.states[0].state_age_ms = std::numeric_limits<uint32_t>::max();
+        motion.states[0].target_source = motion.states[0].TARGET_SOURCE_NONE;
+      }
+      motion_pub_->publish(motion);
+      std::this_thread::sleep_for(2ms);
+    }
+  });
+  const auto result = system->on_activate(rclcpp_lifecycle::State());
+  stop.store(true);
+  feedback.join();
+  EXPECT_EQ(result, CallbackReturn::SUCCESS);
+  EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+}
+
+TEST_F(MicroRosSystemTest, ActivationWaitsForPreProfileNanVelocityEffort) {
+  auto system = initialized(info());
+  std::atomic<bool> stop{false};
+  std::thread feedback([&] {
+    const auto healthy_at = std::chrono::steady_clock::now() + 40ms;
+    while (!stop.load()) {
+      publish_control(1, false);
+      auto motion = motion_message();
+      if (std::chrono::steady_clock::now() < healthy_at) {
+        motion.states[0].velocity = std::numeric_limits<float>::quiet_NaN();
+        motion.states[0].effort = std::numeric_limits<float>::quiet_NaN();
+        motion.states[0].state_age_ms = 5U;
+        motion.states[0].target_source = motion.states[0].TARGET_SOURCE_NONE;
+      }
+      motion_pub_->publish(motion);
+      std::this_thread::sleep_for(2ms);
+    }
+  });
+  const auto result = system->on_activate(rclcpp_lifecycle::State());
+  stop.store(true);
+  feedback.join();
+  EXPECT_EQ(result, CallbackReturn::SUCCESS);
+  EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+}
+
 TEST_F(MicroRosSystemTest, MeasuredAgeIncludesQueuedSourceDelay) {
   auto system = initialized(info());
   activate(*system, false);
   start_writer(*system);
   std::this_thread::sleep_for(60ms);
   auto motion = motion_message(70);
-  motion.sync_time_ns -= 50000000U;
+  motion.header.stamp = ns_to_stamp(stamp() - 50000000ULL);
   motion_pub_->publish(motion);
   publish_control(1, false);
   std::this_thread::sleep_for(5ms);
@@ -614,7 +678,7 @@ TEST_F(MicroRosSystemTest, QueuedMeasuredAgeContinuesAgingAfterReception) {
   start_writer(*system);
   std::this_thread::sleep_for(60ms);
   auto motion = motion_message(40);
-  motion.sync_time_ns -= 40000000U;
+  motion.header.stamp = ns_to_stamp(stamp() - 40000000ULL);
   motion_pub_->publish(motion);
   publish_control(1, false);
   std::this_thread::sleep_for(5ms);
@@ -781,7 +845,7 @@ TEST_F(MicroRosSystemTest, WritesMappedJointPositionAndVelocityOncePerControlCyc
   spin_until_command(2);
   ASSERT_EQ(commands_.size(), 2U);
   EXPECT_NE(commands_[1].sequence, commands_[0].sequence);
-  EXPECT_NE(commands_[1].sync_time_ns, commands_[0].sync_time_ns);
+  EXPECT_NE(stamp_to_ns(commands_[1].header.stamp), stamp_to_ns(commands_[0].header.stamp));
 }
 
 TEST_F(MicroRosSystemTest, AtomicPositionLimitsAllowOverrideAndKeepCommandValidation) {
@@ -1354,6 +1418,24 @@ TEST_F(MicroRosSystemTest, StopTopicAllowsIdleFeedbackRecoveryAndPreservesSessio
                 hardware_interface::return_type::OK);
     system->on_deactivate(rclcpp_lifecycle::State());
   }
+}
+
+TEST_F(MicroRosSystemTest, TransientSoftStopWhileActiveDoesNotLatchError) {
+  auto system = initialized(effort_info());
+  activate(*system);
+  arm(*system);
+  ASSERT_EQ(system->perform_command_mode_switch(effort_interfaces(), {}),
+            hardware_interface::return_type::OK);
+  publish_motion();
+  publish_control(1, true, 1,
+                  can_bridge_msgs::msg::MotorControlState::LIFECYCLE_ACTIVE,
+                  can_bridge_msgs::msg::MotorControlState::EXECUTION_SOFT_STOP);
+  std::this_thread::sleep_for(10ms);
+  EXPECT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(system->write(rclcpp::Time(0), rclcpp::Duration(10ms)),
+            hardware_interface::return_type::OK);
+  system->on_deactivate(rclcpp_lifecycle::State());
 }
 
 } // namespace

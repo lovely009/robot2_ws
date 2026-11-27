@@ -1,0 +1,4 @@
+# motor_id == 0 returns all motors (<=37); > 0 filters to that motor.
+uint16 motor_id
+---
+MotorDeviceInfo info

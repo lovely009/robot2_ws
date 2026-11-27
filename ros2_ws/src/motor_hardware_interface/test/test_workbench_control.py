@@ -13,8 +13,6 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from can_bridge_msgs.msg import (MotorCommandArray, MotorCommandTarget, MotorTrajectory,
-                                 MotorPolicyArray, MotorTrajectoryPoint, MotorTrajectoryState)
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from control_msgs.action import FollowJointTrajectory
@@ -227,6 +225,7 @@ def test_invalid_coupled_group_does_not_clear_other_dynamic_ranges(coupled_files
         mapping=model, _measured=lambda: measured, _follow_targets={},
         model_name='test', _mode='stopped', _reason='', _reject='', _gravity_enabled=False,
         _effort_gain=0., _active=[], _controllers_ready=True, _runs=[], _stop_policy_id=0,
+        _last_trajectory_state=wc.TrajectoryStateSnapshot(),
         config_file=coupled_files[0], get_fully_qualified_name=lambda: '/workbench_control',
         _status_pub=SimpleNamespace(publish=lambda _: None),
         _transmission_pub=SimpleNamespace(publish=lambda message: messages.append(json.loads(message.data))),
@@ -254,6 +253,7 @@ def test_published_status_json_contract_including_unknown_gravity_and_null_limit
         mapping=model, _measured=measured, _follow_targets={}, model_name='test',
         _mode='stopped', _reason='', _reject='', _gravity_enabled=None, _effort_gain=None,
         _active=[], _controllers_ready=False, _runs=[], _stop_policy_id=0,
+        _last_trajectory_state=wc.TrajectoryStateSnapshot(),
         config_file=coupled_files[0], get_fully_qualified_name=lambda: '/workbench_control',
         _status_pub=SimpleNamespace(publish=lambda message: messages[0].append(message.data)),
         _transmission_pub=SimpleNamespace(publish=lambda message: messages[1].append(message.data)),
@@ -269,7 +269,7 @@ def test_published_status_json_contract_including_unknown_gravity_and_null_limit
         assert snapshot['controllers_ready'] is False
         assert snapshot['active_controllers'] == []
         assert snapshot['gravity_enabled'] is None and snapshot['effort_gain'] is None
-        assert snapshot['output_topic'] == '/motor/host_command_array'
+        assert snapshot['output_topic'] == '/motor/command'
         assert snapshot['trajectory_output_topic'] == wc.ACTION
     assert transmission['trajectory_enabled'] is True
     assert transmission['joint_velocity_limits'] == {'yaw': 2., 'pitch': 2., 'elbow': 2.}
@@ -292,231 +292,9 @@ def feedback(stamp=NOW):
     return msg
 
 
-def setpoint(stamp=NOW):
-    return MotorCommandArray(sync_time_ns=stamp, count=2, targets=[
-        MotorCommandTarget(motor_id=8, position=.4, velocity=.2, effort=1.),
-        MotorCommandTarget(motor_id=9, position=.2, velocity=.0, effort=1.)])
-
-
 def trajectory(position=.4):
     return JointTrajectory(joint_names=['yaw'], points=[JointTrajectoryPoint(
         positions=[position], time_from_start=wc.Duration(sec=1))])
-
-
-def segment(index=0, count=1, trajectory_id=41, times=(1000,)):
-    points = [MotorTrajectoryPoint(time_from_start_ms=t, motor_id=i,
-                                  position=.2, velocity=0., effort=0.)
-              for t in times for i in (8, 9)]
-    return MotorTrajectory(sync_time_ns=NOW, session_id=3, sequence=7,
-                           trajectory_id=trajectory_id, segment_index=index,
-                           segment_count=count, count=len(points), target_count=2,
-                           target_ids=[8, 9], points=points)
-
-
-def motor_plan(times, positions, velocities=None):
-    velocities = [0.] * len(times) if velocities is None else velocities
-    message = MotorTrajectory(sync_time_ns=NOW, session_id=3, trajectory_id=41,
-        segment_count=1, count=len(times), target_count=1, target_ids=[10],
-        points=[MotorTrajectoryPoint(motor_id=10, time_from_start_ms=t, position=p, velocity=v)
-                for t, p, v in zip(times, positions, velocities)])
-    wire = deserialize_message(serialize_message(message), MotorTrajectory)
-    return wc.MotorPlan(41, [10], NOW, list(wire.points))
-
-
-def test_manual_uses_model_and_fresh_measured_holds(files):
-    model = wc.WorkbenchModel(*files)
-    measured = model.feedback(feedback(), NOW)
-    values = model.manual(setpoint(), measured, NOW)
-    assert values == pytest.approx([.3, .1, 2., .1, .1, 0., .3, 0., 0.])
-    assert model.joint_names == ['yaw', 'pitch', 'elbow']
-
-
-def test_manual_partial_motor_holds_other_actuator_at_measured_position(files):
-    model = wc.WorkbenchModel(*files)
-    msg = setpoint()
-    msg.targets.pop()
-    msg.count = 1
-    values = model.manual(msg, model.feedback(feedback(), NOW), NOW)
-    assert values == pytest.approx([.25, .1, 1., .15, .1, 1., .3, 0., 0.])
-
-
-@pytest.mark.parametrize('change', ['duplicate', 'unknown', 'count',
-                                  'nan', 'position', 'velocity', 'effort', 'stale', 'future'])
-def test_manual_rejects_whole_invalid_input(files, change):
-    model = wc.WorkbenchModel(*files)
-    msg = setpoint()
-    if change == 'duplicate':
-        msg.targets[1].motor_id = 8
-    elif change == 'unknown':
-        msg.targets[1].motor_id = 42
-    elif change == 'count':
-        msg.count = 1
-    elif change in ('nan', 'position'):
-        msg.targets[0].position = math.nan if change == 'nan' else 3.
-    elif change == 'velocity':
-        msg.targets[0].velocity = 8.
-    elif change == 'effort':
-        msg.targets[0].effort = 30.
-    else:
-        msg.sync_time_ns += -1_000_000_000 if change == 'stale' else 1_000_000_000
-    with pytest.raises(ValueError):
-        model.manual(msg, model.feedback(feedback(), NOW), NOW)
-
-
-@pytest.mark.parametrize('channel', wc.CHANNELS)
-@pytest.mark.parametrize('sign', [-1., 1.])
-def test_manual_normalizes_only_float32_boundary_rounding(files, channel, sign):
-    model = wc.WorkbenchModel(*files)
-    model.limits['elbow'] = (-.14, .14, .14, .14)
-    target = MotorCommandTarget(motor_id=10)
-    setattr(target, channel, sign * .14)
-    message = MotorCommandArray(sync_time_ns=NOW, count=1, targets=[target])
-    wire = deserialize_message(serialize_message(message), MotorCommandArray)
-    assert abs(getattr(wire.targets[0], channel)) > .14
-    values = model.manual(wire, model.feedback(feedback(), NOW), NOW)
-    assert values[6 + wc.CHANNELS.index(channel)] == sign * .14
-    setattr(target, channel, sign * (.14 + .0001))
-    wire = deserialize_message(serialize_message(message), MotorCommandArray)
-    with pytest.raises(ValueError):
-        model.manual(wire, model.feedback(feedback(), NOW), NOW)
-
-
-@pytest.mark.parametrize('bound', [.14, 2.7])
-@pytest.mark.parametrize('sign', [-1., 1.])
-def test_motor_trajectory_normalizes_wire_endpoints_to_current_host_limits(files, bound, sign):
-    model = wc.WorkbenchModel(*files)
-    model.limits['elbow'] = (-bound, bound, 2., 10.)
-    state = feedback()
-    state.position[2] = 0.
-    measured = model.feedback(state, NOW)
-    for times in [(2500,), (2500, 5000)]:
-        message = MotorTrajectory(sync_time_ns=NOW, session_id=3, trajectory_id=41,
-            segment_count=1, count=len(times), target_count=1, target_ids=[10],
-            points=[MotorTrajectoryPoint(motor_id=10, time_from_start_ms=t,
-                                        position=sign * bound) for t in times])
-        wire = deserialize_message(serialize_message(message), MotorTrajectory)
-        assert abs(wire.points[0].position) > bound
-        plan = wc.TrajectoryAssembly().add(wire, NOW, 1.)
-        result = model.motor_trajectory(plan, measured, NOW)
-        assert all(point.positions[2] == sign * bound for point in result.points)
-        message.points[0].position = sign * (bound + .0001)
-        wire = deserialize_message(serialize_message(message), MotorTrajectory)
-        plan = wc.TrajectoryAssembly().add(wire, NOW, 1.)
-        with pytest.raises(ValueError):
-            model.motor_trajectory(plan, measured, NOW)
-
-
-def test_motor_trajectory_uses_position_time_instead_of_overshooting_diagnostic_velocity(files):
-    model = wc.WorkbenchModel(*files)
-    model.limits['elbow'] = (-.12, .14, 2., 10.)
-    state = feedback()
-    state.position[2] = .14
-    measured = model.feedback(state, NOW)
-    plan = motor_plan([2500, 2542, 2584, 2625],
-        [.14, .14, .13959224309518609, .1339594744709353],
-        [0., 0., -.060231347449353254, -.285235839990286])
-    original = [(p.position, p.velocity) for p in plan.points]
-    explicit = JointTrajectory(joint_names=['elbow'], points=[JointTrajectoryPoint(
-        positions=[p.position], velocities=[p.velocity],
-        time_from_start=wc.Duration(sec=p.time_from_start_ms // 1000,
-                                   nanosec=p.time_from_start_ms % 1000 * 10**6)) for p in plan.points])
-    with pytest.raises(ValueError, match='插值越过位置限位'):
-        model.joint_trajectory(explicit, measured, NOW)
-    result = model.motor_trajectory(plan, measured, NOW)
-    assert [p.positions[2] for p in result.points] == pytest.approx([p for p, _ in original])
-    assert result.points[2].velocities[2] < 0.
-    assert result.points[-1].velocities[2] == 0.
-    assert [(p.position, p.velocity) for p in plan.points] == original
-
-
-@pytest.mark.parametrize('diagnostic_velocity', [0., 1e30])
-def test_motor_trajectory_derives_continuous_velocity_with_unequal_intervals(files, diagnostic_velocity):
-    model = wc.WorkbenchModel(*files)
-    state = feedback()
-    state.position[2] = 0.
-    plan = motor_plan([1000, 2000, 4000], [0., .1, .5], [diagnostic_velocity] * 3)
-    result = model.motor_trajectory(plan, model.feedback(state, NOW), NOW)
-    assert [p.velocities[2] for p in result.points] == pytest.approx([0., 9./70., 0.])
-    assert [wc.stamp_ns(p.time_from_start) // 10**6 for p in result.points] == [1000, 2000, 4000]
-
-
-def test_motor_trajectory_stops_tangent_at_extrema_and_plateaus(files):
-    model = wc.WorkbenchModel(*files)
-    state = feedback()
-    state.position[2] = 0.
-    plan = motor_plan([1000, 2000, 4000, 5000, 6000, 7000], [0., .1, .3, .2, .2, 0.])
-    result = model.motor_trajectory(plan, model.feedback(state, NOW), NOW)
-    assert [p.velocities[2] for p in result.points] == pytest.approx([0., .1, 0., 0., 0., 0.])
-
-
-def test_motor_trajectory_maps_complete_coupled_groups_before_deriving_velocity(files):
-    model = wc.WorkbenchModel(*files)
-    message = segment(times=(1000, 2000, 4000))
-    for index, point in enumerate(message.points):
-        point.position = .2 + .2 * (index // 2) if point.motor_id == 8 else .2
-        point.velocity = 1e30
-    wire = deserialize_message(serialize_message(message), MotorTrajectory)
-    plan = wc.TrajectoryAssembly().add(wire, NOW, 1.)
-    measured = model.feedback(feedback(), NOW)
-    result = model.motor_trajectory(plan, measured, NOW)
-    for point, expected in zip(result.points, [[.2, 0., .3], [.3, .1, .3], [.4, .2, .3]]):
-        assert list(point.positions) == pytest.approx(expected)
-    assert list(result.points[1].velocities) == pytest.approx([9./130., 9./130., 0.])
-    plan.points.pop(3)
-    with pytest.raises(ValueError, match='完整传动组'):
-        model.motor_trajectory(plan, measured, NOW)
-
-
-def test_raw_motor_trajectory_preserves_linear_time_without_cubic_speed_peak(files):
-    model = wc.WorkbenchModel(*files)
-    model.limits['elbow'] = (-1., 1., 3.1416, 10.)
-    state = feedback()
-    state.position[2] = 0.
-    measured = model.feedback(state, NOW)
-    plan = motor_plan([1000, 1042], [0., .12])
-    with pytest.raises(ValueError, match='插值越过速度限位'):
-        model.motor_trajectory(plan, measured, NOW)
-    result = model.motor_trajectory(plan, measured, NOW, linear=True)
-    assert [p.positions[2] for p in result.points] == pytest.approx([0., .12])
-    assert [wc.stamp_ns(p.time_from_start) // 10**6 for p in result.points] == [1000, 1042]
-    assert all(not p.velocities for p in result.points)
-
-
-@pytest.mark.parametrize('invalid', ['zero_mismatch', 'initial_outside'])
-def test_raw_motor_trajectory_requires_continuous_in_bounds_start(files, invalid):
-    model = wc.WorkbenchModel(*files)
-    state = feedback()
-    measured = model.feedback(state, NOW)
-    if invalid == 'zero_mismatch':
-        plan = motor_plan([0, 1000], [.3002, .4])
-    else:
-        model.limits['elbow'] = (-.2, .2, 2., 10.)
-        plan = motor_plan([1000, 2000], [.1, .1])
-    with pytest.raises(ValueError):
-        model.motor_trajectory(plan, measured, NOW, linear=True)
-
-
-@pytest.mark.parametrize('linear', [False, True])
-@pytest.mark.parametrize('invalid', ['position', 'speed', 'nan_velocity', 'nan_position',
-                                    'effort', 'time'])
-def test_motor_trajectory_position_time_conversion_keeps_validation(files, invalid, linear):
-    model = wc.WorkbenchModel(*files)
-    plan = motor_plan([1000, 2000, 3000], [0., .1, .2])
-    if invalid == 'position':
-        plan.points[-1].position = 1.0001
-    elif invalid == 'speed':
-        plan.points[1].time_from_start_ms = 1001
-        plan.points[2].time_from_start_ms = 1002
-    elif invalid == 'nan_velocity':
-        plan.points[1].velocity = math.nan
-    elif invalid == 'nan_position':
-        plan.points[1].position = math.nan
-    elif invalid == 'effort':
-        plan.points[1].effort = .1
-    else:
-        plan.points[1].time_from_start_ms = 500
-    with pytest.raises(ValueError):
-        model.motor_trajectory(plan, model.feedback(feedback(), NOW), NOW, linear=linear)
 
 
 @pytest.mark.parametrize('change', ['stale', 'future', 'nan', 'partial', 'duplicate', 'zero'])
@@ -558,7 +336,7 @@ def test_joint_trajectory_preserves_client_playback_identity(frame_id, expected)
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=NOW)),
         mapping=SimpleNamespace(ids={'a': 8, 'b': 9}),
         _state=wc.WorkbenchControl._state,
-        _submit=lambda *args: submitted.append(args),
+        _submit=lambda *args, **kwargs: submitted.append(args),
         _reject_input=lambda *args: rejected.append(args))
     node._state = MethodType(wc.WorkbenchControl._state, node)
     message = JointTrajectory(joint_names=['yaw'], points=[JointTrajectoryPoint(positions=[.1])])
@@ -628,81 +406,6 @@ def test_joint_trajectory_rejects_invalid_or_unsupported_data(files, change):
         model.joint_trajectory(msg, model.feedback(feedback(), NOW), NOW)
 
 
-def test_segment_assembly_is_atomic_and_exceeds_single_message_capacity(files):
-    model = wc.WorkbenchModel(*files)
-    assembly = wc.TrajectoryAssembly()
-    result = None
-    for index in range(3):
-        msg = segment(index, 3, times=range(1000 + index * 1280, 1000 + (index + 1) * 1280, 10))
-        result = assembly.add(msg, NOW, 1. + index * .01)
-        if index < 2:
-            assert result is None
-    converted = model.motor_trajectory(result, model.feedback(feedback(), NOW), NOW)
-    assert len(converted.points) == 384
-    assert converted.points[-1].time_from_start.sec == 4
-    with pytest.raises(ValueError):
-        assembly.add(msg, NOW, 1.1)
-
-
-@pytest.mark.parametrize('overflow', ['points', 'segments'])
-def test_segment_assembly_rejects_total_capacity_overflow(overflow):
-    assembly = wc.TrajectoryAssembly()
-    if overflow == 'points':
-        for index in range(32):
-            msg = segment(index, 33, times=range(1000 + index * 1280,
-                                                1000 + (index + 1) * 1280, 10))
-            assert assembly.add(msg, NOW, 1.) is None
-        assert len(assembly.pending.points) == 8192
-        msg = segment(32, 33, times=(50000,))
-    else:
-        msg = segment(0, 8193)
-    with pytest.raises(ValueError, match='8192'):
-        assembly.add(msg, NOW, 1.)
-    assert assembly.pending is None
-    assert (msg.session_id, msg.trajectory_id) in assembly.closed
-
-
-@pytest.mark.parametrize('linear', [False, True])
-def test_segment_assembly_rejects_mixed_linear_modes(linear):
-    assembly = wc.TrajectoryAssembly()
-    assert assembly.add(segment(0, 2), NOW, 1., linear=linear) is None
-    last = segment(1, 2, times=(2000,))
-    with pytest.raises(ValueError, match='不一致'):
-        assembly.add(last, NOW, 1.1, linear=not linear)
-    assert assembly.pending is None
-    with pytest.raises(ValueError):
-        assembly.add(last, NOW, 1.1, linear=linear)
-
-
-@pytest.mark.parametrize('change', ['order', 'duplicate', 'metadata', 'target_ids', 'stale',
-                                  'expired', 'missing_motor', 'time', 'nonfinite'])
-def test_segment_assembly_discards_invalid_group(files, change):
-    assembly = wc.TrajectoryAssembly()
-    first = segment(0, 2)
-    assert assembly.add(first, NOW, 1.) is None
-    second = segment(1, 2, times=(2000,))
-    if change == 'order':
-        second.segment_index = 0; second.trajectory_id = 42
-    elif change == 'duplicate':
-        second = first
-    elif change == 'metadata':
-        second.segment_count = 3
-    elif change == 'target_ids':
-        second.target_ids = [9, 8]
-    elif change == 'stale':
-        second.sync_time_ns -= 1_000_000_000
-    elif change == 'missing_motor':
-        second.points.pop(); second.count = 1
-    elif change == 'time':
-        second.points[1].time_from_start_ms -= 1
-    elif change == 'nonfinite':
-        second.points[0].effort = math.inf
-    with pytest.raises(ValueError):
-        assembly.add(second, NOW, 4. if change == 'expired' else 1.1)
-    with pytest.raises(ValueError):
-        assembly.add(segment(1, 2, times=(2000,)), NOW, 4.1)
-
-
 def test_invalid_urdf_or_mapping_fails_closed(files):
     driver, urdf = files
     text = Path(urdf).read_text()
@@ -728,7 +431,7 @@ def wait_for(predicate, seconds=4.):
 
 def cancel_race():
     cancel, result = Future(), Future()
-    run = wc.Run(MotorTrajectoryState(active=True), 1,
+    run = wc.Run(wc.TrajectoryStateSnapshot(active=True), 1,
                  handle=SimpleNamespace(status=GoalStatus.STATUS_EXECUTING,
                                         cancel_goal_async=lambda: cancel))
     run.result_future = result
@@ -797,7 +500,7 @@ def test_cancel_timeout_after_old_result_still_fails_current_transition(monkeypa
     if phase == 'terminal':
         cancel.set_result(CancelGoal.Response(return_code=CancelGoal.Response.ERROR_GOAL_TERMINATED))
     # 原结果回调先清理旧 run，取消等待回调尚未得到执行机会。
-    gateway._runs[:] = [wc.Run(MotorTrajectoryState(), gateway._epoch)]
+    gateway._runs[:] = [wc.Run(wc.TrajectoryStateSnapshot(), gateway._epoch)]
     monkeypatch.setattr(wc.time, 'monotonic', lambda: 1.2)
     gateway._tick()
     assert len(errors) == 1 and errors[0].startswith('stop:' if stopping else 'fail:')
@@ -807,10 +510,10 @@ def test_cancel_timeout_after_old_result_still_fails_current_transition(monkeypa
 class FakeControl(Node):
     def __init__(self, context):
         super().__init__('test_workbench_peer', context=context)
-        self.names = [f'manual_controller_{i}' for i in range(3)]
-        self.states = {name: 'inactive' for name in self.names +
+        self.names = []
+        self.states = {name: 'inactive' for name in
                        ['trajectory_controller', 'gravity_controller', 'follow_controller']}
-        self.switches, self.commands, self.goals = [], [[], [], []], []
+        self.switches, self.commands, self.goals = [], [], []
         self.follow_targets = []
         self.target_pub = self.create_publisher(JointState, '/control/joint_target', 1)
         self.create_subscription(JointState, '/host_control/follow_controller/target', self.follow_targets.append, 1)
@@ -843,26 +546,20 @@ class FakeControl(Node):
             goal_callback=self.goal, cancel_callback=lambda _: CancelResponse.ACCEPT,
             callback_group=group)
         self.state_pub = self.create_publisher(JointState, '/host_control/joint_states', 10)
-        self.setpoint_pub = self.create_publisher(MotorCommandArray, '/control/setpoint', 10)
-        self.trajectory_pub = self.create_publisher(MotorTrajectory, '/control/trajectory', 10)
-        self.joint_pub = self.create_publisher(JointTrajectory, '/arm_controller/joint_trajectory', 10)
+        self.trajectory_pub = self.create_publisher(JointTrajectory, '/control/trajectory', 10)
         self.stop_pub = self.create_publisher(Empty, '/control/stop', 10)
         self.count_pub = self.create_publisher(Int32, '/client_count',
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        for i, name in enumerate(self.names):
-            self.create_subscription(Float64MultiArray, f'/host_control/{name}/commands',
-                                     lambda msg, i=i: self.commands[i].append(msg), 10)
-        self.create_subscription(String, '/control/status',
-                                 lambda msg: self.status.append(json.loads(msg.data)), 10)
+        def on_status(msg):
+            data = json.loads(msg.data)
+            self.status.append(data)
+            if 'trajectory_state' in data:
+                self.receipts.append(SimpleNamespace(**data['trajectory_state']))
+        self.create_subscription(String, '/control/status', on_status, 10)
         self.create_subscription(String, '/robot_transmission/status',
                                  lambda msg: self.transmissions.append(json.loads(msg.data)), 10)
-        self.create_subscription(MotorTrajectoryState, '/control/trajectory_state',
-                                 self.receipts.append, 10)
         self.create_subscription(JointState, '/joint_states', self.joints.append, 10)
-        def policy(message):
-            self.policies.append(message)
-        self.create_subscription(MotorPolicyArray, '/motor/policy_array', policy, 10)
-        self.create_subscription(Empty, '/host_control/stop', self.hardware_stops.append, 10)
+        self.create_subscription(Empty, '/control/stop', self.hardware_stops.append, 10)
         self.publish_feedback = True
         self.limit_requests = []
         self.limits_ok = True
@@ -893,7 +590,7 @@ class FakeControl(Node):
                 required = [j + '/' + x for j in joints for x in
                             (('effort',) if name == 'gravity_controller' else ('position', 'velocity'))]
             if self.bad_interfaces:
-                required.reverse()
+                required.pop()
             response.controller.append(ControllerState(name=name, state=state,
                 required_command_interfaces=required,
                 claimed_interfaces=required if state == 'active' else []))
@@ -966,7 +663,7 @@ def graph(files, monkeypatch, request):
     executor.add_node(peer); executor.add_node(gateway)
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
-    assert wait_for(lambda: peer.setpoint_pub.get_subscription_count() == 1
+    assert wait_for(lambda: peer.target_pub.get_subscription_count() == 1
                     and peer.state_pub.get_subscription_count() == 1)
     if settings.get('publish_joint_states', True):
         assert wait_for(lambda: peer.joints)
@@ -985,34 +682,21 @@ def graph(files, monkeypatch, request):
         gateway.destroy_node(); peer.destroy_node(); context.shutdown()
 
 
-def send_manual(peer):
-    peer.setpoint_pub.publish(setpoint(peer.get_clock().now().nanoseconds))
+def send_follow(peer):
+    msg = JointState(name=['yaw', 'pitch'], position=[.21, .11])
+    msg.header.stamp = peer.get_clock().now().to_msg()
+    peer.target_pub.publish(msg)
 
 
 def send_trajectory(peer, trajectory_id=41):
-    msg = segment(trajectory_id=trajectory_id)
-    msg.sync_time_ns = peer.get_clock().now().nanoseconds
+    msg = trajectory()
+    msg.header.stamp = peer.get_clock().now().to_msg()
+    msg.header.frame_id = f'workbench-trajectory/{trajectory_id}'
     peer.trajectory_pub.publish(msg)
 
 
 def stopped(peer):
     return all(state == 'inactive' for state in peer.states.values())
-
-
-def test_ros_manual_switch_is_atomic_and_commands_are_one_shot(graph):
-    peer, gateway = graph
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
-    switch = next(r for r in peer.switches if r.activate_controllers)
-    assert switch.strictness == SwitchController.Request.STRICT
-    assert switch.activate_controllers == peer.names
-    assert not set(peer.names).intersection(switch.deactivate_controllers)
-    assert [list(messages[-1].data) for messages in peer.commands] == [
-        pytest.approx([.3, .1, 2.]), pytest.approx([.1, .1, 0.]), pytest.approx([.3, 0., 0.])]
-    time.sleep(.15)
-    assert [len(messages) for messages in peer.commands] == [1, 1, 1]
-    assert wait_for(lambda: peer.status and peer.status[-1]['mode'] == 'manual')
-    assert all(p.topic_name != '/motor/host_command_array' for p in gateway.publishers)
 
 
 @pytest.mark.parametrize('graph', [{'coupled_limits': True}], indirect=True)
@@ -1038,6 +722,28 @@ def test_ros_dynamic_limits_update_from_follow_target_and_expire_with_feedback(g
 
 
 @pytest.mark.parametrize('graph', [{'coupled_limits': True}], indirect=True)
+def test_ros_dynamic_limits_deduplicates_steady_ticks_and_publishes_on_change(graph):
+    peer, gateway = graph
+    assert wait_for(lambda: peer.transmissions and peer.transmissions[-1].get(
+        'dynamic_joint_names') == ['yaw', 'pitch'] and peer.transmissions[-1]['feedback_fresh'])
+    baseline_status = len(peer.status)
+    baseline_trans = len(peer.transmissions)
+    # 稳态下多次 _tick() 不应重复发布相同状态；1 秒周期心跳仍会由 _poll() 发布。
+    for _ in range(5):
+        gateway._last_dynamic_check = 0.0
+        gateway._tick()
+    assert len(peer.status) == baseline_status
+    assert len(peer.transmissions) == baseline_trans
+    # 目标变化导致动态限位改变超过死区后，下一轮 _tick() 立即发布更新。
+    message = JointState(name=['yaw', 'pitch'], position=[0., 0.])
+    message.header.stamp = peer.get_clock().now().to_msg()
+    peer.target_pub.publish(message)
+    assert wait_for(lambda: peer.follow_targets)
+    assert wait_for(lambda: peer.transmissions[-1]['joint_limits']['pitch']
+                    == {'lower': -1., 'upper': 1.}, seconds=.7)
+
+
+@pytest.mark.parametrize('graph', [{'coupled_limits': True}], indirect=True)
 def test_ros_dynamic_limits_cannot_be_overwritten_with_static_parameters(graph):
     peer, gateway = graph
     reply = gateway.set_parameters_atomically([Parameter('joint_limits_json', value=json.dumps({
@@ -1046,16 +752,6 @@ def test_ros_dynamic_limits_cannot_be_overwritten_with_static_parameters(graph):
     assert not reply.successful
     assert '动态' in reply.reason
     assert not peer.limit_requests
-
-
-def test_ros_manual_updates_same_active_mode_without_switching(graph):
-    peer, _ = graph
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
-    switches = len(peer.switches)
-    send_manual(peer)
-    assert wait_for(lambda: all(len(messages) == 2 for messages in peer.commands))
-    assert len(peer.switches) == switches
 
 
 @pytest.mark.parametrize('outcome', ['succeeded', 'aborted', 'rejected', 'canceled'])
@@ -1074,13 +770,12 @@ def test_ros_action_receipts_come_from_jtc(graph, outcome):
         assert wait_for(lambda: any(s.active for s in peer.receipts))
         assert not any(s.completed for s in peer.receipts)
         if outcome == 'canceled':
-            peer.joint_pub.publish(JointTrajectory())
+            peer.trajectory_pub.publish(JointTrajectory())
         else:
             peer.outcome = outcome
     assert wait_for(lambda: any(s.trajectory_id == 41 and not s.active for s in peer.receipts))
     receipt = [s for s in peer.receipts if s.trajectory_id == 41][-1]
     assert receipt.completed == (outcome == 'succeeded')
-    assert list(receipt.target_ids) == [8, 9]
     if outcome in ('aborted', 'rejected'):
         assert wait_for(lambda: stopped(peer))
         assert peer.status[-1]['reject']
@@ -1089,13 +784,13 @@ def test_ros_action_receipts_come_from_jtc(graph, outcome):
 @pytest.mark.parametrize('outcome', ['succeeded', 'aborted'])
 def test_ros_bvh_joint_trajectory_receipts_keep_playback_id(graph, outcome):
     peer, _ = graph
-    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    assert wait_for(lambda: peer.trajectory_pub.get_subscription_count() == 1)
     message = JointTrajectory(joint_names=['yaw', 'pitch'], points=[
         JointTrajectoryPoint(positions=[.21, .11], velocities=[0., 0.],
                              time_from_start=wc.Duration(sec=2))])
     message.header.stamp = peer.get_clock().now().to_msg()
     message.header.frame_id = 'workbench-trajectory/90123'
-    peer.joint_pub.publish(message)
+    peer.trajectory_pub.publish(message)
     assert wait_for(lambda: peer.goals and any(
         state.trajectory_id == 90123 and state.active for state in peer.receipts))
     assert list(peer.goals[0].trajectory.joint_names) == ['yaw', 'pitch', 'elbow']
@@ -1113,12 +808,12 @@ def test_ros_joint_trajectory_survives_switch_delay_with_fresh_feedback(graph, m
     peer, _ = graph
     monkeypatch.setattr(wc, 'RPC_TIMEOUT', 1.)
     peer.switch_delay = .65
-    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    assert wait_for(lambda: peer.trajectory_pub.get_subscription_count() == 1)
     message = JointTrajectory(joint_names=['yaw'], points=[
         JointTrajectoryPoint(positions=[.21], velocities=[0.],
                              time_from_start=wc.Duration(sec=2))])
     message.header.stamp = peer.get_clock().now().to_msg()
-    peer.joint_pub.publish(message)
+    peer.trajectory_pub.publish(message)
     assert wait_for(lambda: peer.goals)
     assert wc.stamp_ns(peer.goals[0].trajectory.header.stamp) == 0
     assert wc.stamp_ns(peer.goals[0].trajectory.points[-1].time_from_start) == 2_000_000_000
@@ -1127,13 +822,13 @@ def test_ros_joint_trajectory_survives_switch_delay_with_fresh_feedback(graph, m
 @pytest.mark.parametrize('offset_ns', [-1_000_000_000, 1_000_000_000])
 def test_ros_joint_trajectory_rejects_stale_or_future_input_at_receipt(graph, offset_ns):
     peer, _ = graph
-    assert wait_for(lambda: peer.joint_pub.get_subscription_count() == 1)
+    assert wait_for(lambda: peer.trajectory_pub.get_subscription_count() == 1)
     message = JointTrajectory(joint_names=['yaw'], points=[
         JointTrajectoryPoint(positions=[.21], velocities=[0.],
                              time_from_start=wc.Duration(sec=2))])
     stamp = peer.get_clock().now().nanoseconds + offset_ns
     message.header.stamp.sec, message.header.stamp.nanosec = divmod(stamp, 10**9)
-    peer.joint_pub.publish(message)
+    peer.trajectory_pub.publish(message)
     assert wait_for(lambda: peer.status[-1]['reject'])
     assert not peer.goals
     assert not any(request.activate_controllers for request in peer.switches)
@@ -1142,13 +837,13 @@ def test_ros_joint_trajectory_rejects_stale_or_future_input_at_receipt(graph, of
 def test_ros_stop_during_switch_cannot_publish_or_restore_target(graph):
     peer, _ = graph
     peer.switch_delay = .2
-    send_manual(peer)
+    send_follow(peer)
     assert wait_for(lambda: any(r.activate_controllers for r in peer.switches))
     peer.stop_pub.publish(Empty())
     assert wait_for(lambda: any(not r.activate_controllers for r in peer.switches))
     time.sleep(.4)
     assert wait_for(lambda: stopped(peer))
-    assert not any(peer.commands)
+    assert not peer.follow_targets
 
 
 def test_ros_stop_during_goal_acceptance_cancels_late_goal(graph):
@@ -1201,28 +896,28 @@ def test_ros_stop_barrier_waits_for_pending_goal_and_cancel_terminal(graph):
     assert wait_for(lambda: peer.status[-1]['active_controllers'] == [])
     assert peer.status[-1]['mode'] in ('stopping', 'error')
     peer.count_pub.publish(Int32(data=1))
-    send_manual(peer)
+    send_follow(peer)
     assert wait_for(lambda: peer.status[-1]['reject'])
-    assert not any(peer.commands) and stopped(peer)
+    assert not peer.follow_targets and stopped(peer)
     assert wait_for(lambda: peer.status[-1]['mode'] == 'error')
     assert '超时' in peer.status[-1]['reason']
     assert not any(s.trajectory_id == 41 and not s.active for s in peer.receipts)
 
     peer.goal_gate.set()
     assert wait_for(lambda: peer.canceling_goals)
-    send_manual(peer)
+    send_follow(peer)
     time.sleep(.1)
     assert peer.status[-1]['mode'] in ('stopping', 'error')
-    assert not peer.canceled_goals and not any(peer.commands) and stopped(peer)
+    assert not peer.canceled_goals and not peer.follow_targets and stopped(peer)
     assert not any(s.trajectory_id == 41 and not s.active for s in peer.receipts)
 
     peer.cancel_terminal_gate.set()
     assert wait_for(lambda: peer.canceled_goals)
     assert wait_for(lambda: peer.status[-1]['mode'] == 'stopped')
     assert wait_for(lambda: any(s.trajectory_id == 41 and not s.active for s in peer.receipts))
-    assert not any(peer.commands) and len(peer.goals) == 1
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
+    assert not peer.follow_targets and len(peer.goals) == 1
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets)
 
 
 @pytest.mark.parametrize('failure', ['switch', 'timeout', 'mapping', 'feedback'])
@@ -1237,11 +932,11 @@ def test_ros_failed_transition_stops_all_motion_controllers(graph, failure):
     else:
         peer.publish_feedback = False
         time.sleep(.6)
-    send_manual(peer)
+    send_follow(peer)
     assert wait_for(lambda: peer.status and peer.status[-1]['reject'])
     time.sleep(.7 if failure == 'timeout' else .1)
     assert wait_for(lambda: stopped(peer))
-    assert not any(peer.commands)
+    assert not peer.follow_targets
     if failure != 'feedback':
         assert peer.hardware_stops
         assert not peer.policies
@@ -1254,13 +949,22 @@ def test_ros_client_zero_is_latched_and_reconnect_does_not_replay(graph):
     peer.count_pub.publish(Int32(data=0))
     assert wait_for(lambda: stopped(peer))
     count = len(peer.switches)
-    send_manual(peer)
+    send_follow(peer)
     assert wait_for(lambda: peer.status[-1]['reject'])
     peer.count_pub.publish(Int32(data=1))
     time.sleep(.15)
-    assert len(peer.switches) == count and not any(peer.commands)
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
+    assert len(peer.switches) == count and not peer.follow_targets
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets)
+
+
+def test_ros_feedback_stays_fresh_while_control_lock_is_held(graph):
+    peer, gateway = graph
+    before_joints = len(peer.joints)
+    with gateway._lock:
+        time.sleep(.65)
+    assert len(peer.joints) > before_joints
+    assert gateway._measured()
 
 
 def test_ros_feedback_forwarding_qos_and_truthful_gravity_status(graph):
@@ -1283,109 +987,17 @@ def test_ros_feedback_forwarding_can_be_disabled(graph):
     peer, gateway = graph
     assert not any(pub.topic_name == '/joint_states' for pub in gateway.publishers)
     assert not peer.joints
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets)
 
 
 @pytest.mark.parametrize('graph', [{'client_count': 0}], indirect=True)
 def test_ros_latched_client_zero_blocks_first_target(graph):
     peer, _ = graph
     assert wait_for(lambda: peer.switches)
-    send_manual(peer)
+    send_follow(peer)
     assert wait_for(lambda: peer.status and peer.status[-1]['reject'])
     assert not any(request.activate_controllers for request in peer.switches)
-
-
-def test_ros_segments_commit_only_once_and_stop_discards_partial_group(graph):
-    peer, _ = graph
-    start = peer.get_clock().now().nanoseconds
-    first, last = segment(0, 2), segment(1, 2, times=(2000,))
-    first.sync_time_ns = last.sync_time_ns = start
-    peer.trajectory_pub.publish(first)
-    assert wait_for(lambda: peer.status[-1]['reason'] == '轨迹分段收集中')
-    assert not peer.goals and not peer.switches
-    peer.trajectory_pub.publish(last)
-    assert wait_for(lambda: len(peer.goals) == 1)
-    assert len(peer.goals[0].trajectory.points) == 2
-    assert not peer.goals[0].trajectory.points[0].effort
-    assert wait_for(lambda: any(state.active for state in peer.receipts))
-    second = segment(0, 2, trajectory_id=42)
-    second.sync_time_ns = peer.get_clock().now().nanoseconds
-    peer.trajectory_pub.publish(second)
-    assert wait_for(lambda: peer.status[-1]['reason'] == '轨迹分段收集中')
-    peer.stop_pub.publish(Empty())
-    assert wait_for(lambda: stopped(peer))
-    assert wait_for(lambda: any(s.trajectory_id == 42 and not s.active for s in peer.receipts))
-    second.segment_index = 1
-    peer.trajectory_pub.publish(second)
-    assert wait_for(lambda: peer.status[-1]['reject'])
-    assert len(peer.goals) == 1
-
-
-def test_ros_segment_burst_preserves_every_point_in_one_goal(graph):
-    peer, gateway = graph
-    publisher = peer.create_publisher(MotorTrajectory, '/control/trajectory', 64)
-    assert wait_for(lambda: publisher.get_subscription_count() == 1)
-    messages = [segment(index, 12, times=range(1000 + index * 1280,
-                                              1000 + (index + 1) * 1280, 10))
-                for index in range(12)]
-    start = peer.get_clock().now().nanoseconds
-    for message in messages:
-        message.sync_time_ns = start
-    with gateway._lock:
-        for message in messages:
-            publisher.publish(message)
-        time.sleep(.05)
-    assert wait_for(lambda: len(peer.goals) == 1)
-    goal = peer.goals[0].trajectory
-    assert len(goal.points) == 1536
-    assert [wc.stamp_ns(point.time_from_start) // 10**6 for point in goal.points] == [
-        t for message in messages for t in sorted({point.time_from_start_ms for point in message.points})]
-    assert all(list(point.positions) == pytest.approx([.2, 0., .3]) for point in goal.points)
-    assert wait_for(lambda: any(receipt.active for receipt in peer.receipts))
-    assert len(peer.goals) == 1
-
-
-def test_ros_raw_segments_make_one_linear_goal_and_normal_cancel_stops_it(graph):
-    peer, gateway = graph
-    publisher = peer.create_publisher(MotorTrajectory, '/control/trajectory_raw', 64)
-    assert wait_for(lambda: publisher.get_subscription_count() == 1)
-    points = [MotorTrajectoryPoint(motor_id=motor, time_from_start_ms=2500 + index * 42,
-                                   position=.2, velocity=0.)
-              for index in range(300) for motor in (8, 9)]
-    start = peer.get_clock().now().nanoseconds
-    with gateway._lock:
-        for index in range(3):
-            chunk = points[index*256:(index+1)*256]
-            publisher.publish(MotorTrajectory(sync_time_ns=start, session_id=3, trajectory_id=41,
-                segment_index=index, segment_count=3, count=len(chunk), target_count=2,
-                target_ids=[8, 9], points=chunk))
-    assert wait_for(lambda: len(peer.goals) == 1)
-    goal = peer.goals[0].trajectory
-    assert [(t.name, t.position, t.velocity, t.acceleration)
-            for t in peer.goals[0].path_tolerance] == [
-        (name, .2, 0., 0.) for name in goal.joint_names]
-    assert not peer.goals[0].goal_tolerance
-    assert wc.stamp_ns(peer.goals[0].goal_time_tolerance) == 0
-    assert len(goal.points) == 300
-    assert [wc.stamp_ns(p.time_from_start) // 10**6 for p in goal.points] == [
-        2500 + index * 42 for index in range(300)]
-    assert all(not p.velocities for p in goal.points)
-    assert wait_for(lambda: any(s.active and s.trajectory_id == 41 for s in peer.receipts))
-    peer.trajectory_pub.publish(MotorTrajectory())
-    assert wait_for(lambda: peer.canceled_goals)
-    assert wait_for(lambda: any(not s.active and s.trajectory_id == 41 for s in peer.receipts))
-    assert len(peer.goals) == 1
-    partial = segment(0, 2, trajectory_id=42)
-    partial.sync_time_ns = peer.get_clock().now().nanoseconds
-    publisher.publish(partial)
-    assert wait_for(lambda: gateway._assembly.pending is not None)
-    peer.stop_pub.publish(Empty())
-    assert wait_for(lambda: gateway._assembly.pending is None and stopped(peer))
-    partial.segment_index = 1
-    publisher.publish(partial)
-    assert wait_for(lambda: peer.status[-1]['reject'])
-    assert len(peer.goals) == 1
 
 
 def test_ros_native_joint_trajectory_keeps_controller_default_tolerances(graph):
@@ -1393,25 +1005,11 @@ def test_ros_native_joint_trajectory_keeps_controller_default_tolerances(graph):
     message = trajectory()
     message.header.stamp.sec, message.header.stamp.nanosec = divmod(
         peer.get_clock().now().nanoseconds, 10**9)
-    peer.joint_pub.publish(message)
+    peer.trajectory_pub.publish(message)
     assert wait_for(lambda: len(peer.goals) == 1)
     assert not peer.goals[0].path_tolerance
     assert not peer.goals[0].goal_tolerance
     assert wc.stamp_ns(peer.goals[0].goal_time_tolerance) == 0
-
-
-def test_ros_normal_and_raw_segments_cannot_commit_a_mixed_goal(graph):
-    peer, gateway = graph
-    publisher = peer.create_publisher(MotorTrajectory, '/control/trajectory_raw', 64)
-    assert wait_for(lambda: publisher.get_subscription_count() == 1)
-    first, last = segment(0, 2), segment(1, 2, times=(2000,))
-    first.sync_time_ns = last.sync_time_ns = peer.get_clock().now().nanoseconds
-    peer.trajectory_pub.publish(first)
-    assert wait_for(lambda: gateway._assembly.pending is not None)
-    publisher.publish(last)
-    assert wait_for(lambda: peer.status[-1]['reject'])
-    assert gateway._assembly.pending is None
-    assert not peer.goals and not any(r.activate_controllers for r in peer.switches)
 
 
 def test_ros_unreachable_switch_service_rejects_without_any_command(graph):
@@ -1424,13 +1022,13 @@ def test_ros_unreachable_switch_service_rejects_without_any_command(graph):
     send_trajectory(peer)
     assert wait_for(lambda: peer.status[-1]['reject'])
     assert wait_for(lambda: any(s.trajectory_id == 41 and not s.active for s in peer.receipts))
-    assert not peer.goals and not any(peer.commands)
+    assert not peer.goals and not peer.follow_targets
 
 
 def test_ros_stop_closes_hardware_gate_when_switch_service_is_unavailable(graph):
     peer, _ = graph
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets)
     service = next(service for service in peer.services
                    if service.srv_name == '/host_control/controller_manager/switch_controller')
     peer.destroy_service(service)
@@ -1440,16 +1038,16 @@ def test_ros_stop_closes_hardware_gate_when_switch_service_is_unavailable(graph)
     assert wait_for(lambda: peer.hardware_stops)
     assert wait_for(lambda: peer.status[-1]['mode'] == 'error')
     assert '显式重新使能' in peer.status[-1]['safety_note']
-    send_manual(peer)
+    send_follow(peer)
     time.sleep(.1)
-    assert [len(commands) for commands in peer.commands] == [1, 1, 1]
+    assert len(peer.follow_targets) == 1
     assert not peer.policies
 
 
 def test_ros_normal_stop_closes_hardware_gate_and_deactivates(graph):
     peer, gateway = graph
-    send_manual(peer)
-    assert wait_for(lambda: all(peer.commands))
+    send_follow(peer)
+    assert wait_for(lambda: peer.follow_targets)
     peer.stop_pub.publish(Empty())
     assert wait_for(lambda: peer.hardware_stops)
     assert wait_for(lambda: peer.status[-1]['mode'] == 'stopped')
@@ -1457,6 +1055,7 @@ def test_ros_normal_stop_closes_hardware_gate_and_deactivates(graph):
     assert not peer.policies
     assert all(pub.topic_name != '/motor/policy_array' for pub in gateway.publishers)
     assert all(sub.topic_name != '/host_control/stop' for sub in gateway.subscriptions)
+    assert all(pub.topic_name != '/motor/host_command_array' for pub in gateway.publishers)
 
 
 def test_ros_joint_limit_parameters_apply_runtime_overrides_and_block_active_updates(graph):
@@ -1553,19 +1152,18 @@ def test_startup_limit_override_requires_explicit_hardware_confirmation(graph):
 
 def test_stop_rejects_pre_stop_inputs_after_stop_completes(graph):
     peer, gateway = graph
-    old=setpoint(peer.get_clock().now().nanoseconds)
-    plan=segment();plan.sync_time_ns=old.sync_time_ns
-    joint=trajectory();joint.header.stamp=peer.get_clock().now().to_msg()
+    old_target = joint_target(peer.get_clock().now().nanoseconds)
+    joint = trajectory(); joint.header.stamp = peer.get_clock().now().to_msg()
     peer.stop_pub.publish(Empty())
-    assert wait_for(lambda:peer.hardware_stops and peer.status[-1]['mode']=='stopped')
-    switches=len(peer.switches)
-    peer.setpoint_pub.publish(old);peer.trajectory_pub.publish(plan);peer.joint_pub.publish(joint)
-    peer.joint_pub.publish(trajectory())
+    assert wait_for(lambda: peer.hardware_stops and peer.status[-1]['mode'] == 'stopped')
+    switches = len(peer.switches)
+    peer.target_pub.publish(old_target); peer.trajectory_pub.publish(joint)
+    peer.trajectory_pub.publish(trajectory())
     time.sleep(.1)
-    assert len(peer.switches)==switches
+    assert len(peer.switches) == switches
     assert stopped(peer)
-    send_manual(peer)
-    assert wait_for(lambda:peer.status[-1]['mode']=='manual')
+    send_follow(peer)
+    assert wait_for(lambda: peer.status[-1]['mode'] == 'follow')
 
 
 def joint_target(stamp=NOW, name='yaw', position=.4):

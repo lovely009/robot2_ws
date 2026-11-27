@@ -1,7 +1,7 @@
-# CAN 节点 ID 1～37 由用户于 2026-11-13 确认；方向、零位及差动参数仍待标定。
+# CAN 节点 ID 1～37 由用户确认；关节命名对齐 docs/机器人37自由度_关节命名与正方向.xlsx。
 motors:
   1:
-    joint: BN_Spine_yaw
+    joint: waist_yaw
     can_node_id: 1
   2:
     can_node_id: 2
@@ -16,19 +16,19 @@ motors:
   7:
     can_node_id: 7
   8:
-    joint: BN_LeftUpperArm_1
+    joint: left_shoulder_pitch
     can_node_id: 8
   9:
-    joint: BN_LeftUpperArm_2
+    joint: left_shoulder_roll
     can_node_id: 9
   10:
-    joint: BN_LeftUpperArm_3
+    joint: left_shoulder_yaw
     can_node_id: 10
   11:
-    joint: BN_LeftLowerArm_1
+    joint: left_elbow_pitch
     can_node_id: 11
   12:
-    joint: BN_LeftLowerArm_2
+    joint: left_forearm_yaw
     can_node_id: 12
   13:
     can_node_id: 13
@@ -39,65 +39,65 @@ motors:
   16:
     can_node_id: 16
   17:
-    joint: BN_RightUpperArm_1
+    joint: right_shoulder_pitch
     can_node_id: 17
   18:
-    joint: BN_RightUpperArm_2
+    joint: right_shoulder_roll
     can_node_id: 18
   19:
-    joint: BN_RightUpperArm_3
+    joint: right_shoulder_yaw
     can_node_id: 19
   20:
-    joint: BN_RightLowerArm_1
+    joint: right_elbow_pitch
     can_node_id: 20
   21:
-    joint: BN_RightLowerArm_2
+    joint: right_forearm_yaw
     can_node_id: 21
   22:
     can_node_id: 22
   23:
     can_node_id: 23
   24:
-    joint: BN_LeftUpperLeg_1
+    joint: left_hip_pitch
     can_node_id: 24
   25:
-    joint: BN_LeftUpperLeg_2
+    joint: left_hip_roll
     can_node_id: 25
   26:
-    joint: BN_LeftUpperLeg_3
+    joint: left_hip_yaw
     can_node_id: 26
   27:
-    joint: BN_LeftLowerLeg_1
+    joint: left_knee_pitch
     can_node_id: 27
   28:
-    joint: BN_LeftLowerLeg_2
+    joint: left_shank_yaw
     can_node_id: 28
   29:
-    joint: BN_LeftFoot_pitch
+    joint: left_ankle_pitch
     can_node_id: 29
   30:
-    joint: BN_LeftFoot_roll
+    joint: left_ankle_roll
     can_node_id: 30
   31:
-    joint: BN_RightUpperLeg_1
+    joint: right_hip_pitch
     can_node_id: 31
   32:
-    joint: BN_RightUpperLeg_2
+    joint: right_hip_roll
     can_node_id: 32
   33:
-    joint: BN_RightUpperLeg_3
+    joint: right_hip_yaw
     can_node_id: 33
   34:
-    joint: BN_RightLowerLeg_1
+    joint: right_knee_pitch
     can_node_id: 34
   35:
-    joint: BN_RightLowerLeg_2
+    joint: right_shank_yaw
     can_node_id: 35
   36:
-    joint: BN_RightFoot_pitch
+    joint: right_ankle_pitch
     can_node_id: 36
   37:
-    joint: BN_RightFoot_roll
+    joint: right_ankle_roll
     can_node_id: 37
 differential_groups:
   waist:
@@ -105,8 +105,8 @@ differential_groups:
     - 2
     - 3
     joints:
-    - BN_Spine_pitch
-    - BN_Spine_roll
+    - waist_pitch
+    - waist_roll
     ratio: null
     direction: null
   hips:
@@ -114,8 +114,8 @@ differential_groups:
     - 4
     - 5
     joints:
-    - BN_hips_roll
-    - BN_hips_pitch
+    - pelvis_roll
+    - pelvis_pitch
     ratio: null
     direction: null
   left_shoulder:
@@ -123,8 +123,8 @@ differential_groups:
     - 6
     - 7
     joints:
-    - BN_LeftShoulder_1
-    - BN_LeftShoulder_2
+    - left_scapula_yaw
+    - left_scapula_roll
     ratio: null
     direction: null
   left_wrist:
@@ -132,8 +132,8 @@ differential_groups:
     - 13
     - 14
     joints:
-    - BN_LeftHand_roll
-    - BN_LeftHand_pitch
+    - left_wrist_pitch
+    - left_wrist_roll
     ratio: null
     direction: null
   right_shoulder:
@@ -141,8 +141,8 @@ differential_groups:
     - 15
     - 16
     joints:
-    - BN_RightShoulder_1
-    - BN_RightShoulder_2
+    - right_scapula_yaw
+    - right_scapula_roll
     ratio: null
     direction: null
   right_wrist:
@@ -150,7 +150,7 @@ differential_groups:
     - 22
     - 23
     joints:
-    - BN_RightHand_roll
-    - BN_RightHand_pitch
+    - right_wrist_pitch
+    - right_wrist_roll
     ratio: null
     direction: null

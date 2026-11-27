@@ -133,4 +133,27 @@ describe("面板刷新生命周期", () => {
     expect(rendered).toBe(0);
     expect(disposed).toBe(1);
   });
+  it("可见性变化时触发 setActive 生命周期钩子", () => {
+    let visible = false;
+    const transitions: boolean[] = [];
+    const scheduler = new PanelScheduler(() => {});
+    scheduler.add(
+      "arm",
+      {
+        render() {},
+        setActive(active) {
+          transitions.push(active);
+        },
+      },
+      () => visible,
+    );
+    expect(transitions).toEqual([false]);
+    visible = true;
+    scheduler.syncVisibility();
+    scheduler.syncVisibility();
+    expect(transitions).toEqual([false, true]);
+    visible = false;
+    scheduler.flush(100);
+    expect(transitions).toEqual([false, true, false]);
+  });
 });

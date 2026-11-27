@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 beforeEach(() => {
   vi.resetModules();
-  vi.stubGlobal("location", { search: "?model=half_body_robot" });
+  vi.stubGlobal("location", { search: "" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem() {} });
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -17,7 +17,7 @@ it("保留拓扑只读状态及差动组，不生成旧版一对一映射", asyn
     hardware_block_reason:'传动参数待标定', driver_file:'', direct_joints:{},
     groups:[{name:'waist',motors:[{id:2},{id:3}],joints:['pitch','roll'],direct_mapping:false}],
   })}));
-  const {store, loadModelJoints, jointMapSource, JOINT_OF_MOTOR} = await import('../../web/js/core/store.js');
+  const {store, loadModelJoints, jointMapSource, JOINT_OF_MOTOR} = await import('../src/core/store.ts');
   await loadModelJoints();
   expect(jointMapSource.kind).toBe('topology');
   expect(store.modelTransmissions.hardware_ready).toBe(false);
@@ -27,8 +27,8 @@ it("保留拓扑只读状态及差动组，不生成旧版一对一映射", asyn
 
 it("电机出现后汇总持续使用 MCU 状态更新，不停留在空列表", async () => {
   vi.spyOn(Date, "now").mockReturnValue(1000);
-  const { countMotors, store } = await import("../../web/js/core/store.js");
-  const { applyControlState } = await import("../../web/js/core/motor_state.js");
+  const { countMotors, store } = await import("../src/core/store.ts");
+  const { applyControlState } = await import("../src/core/motor_state.ts");
   expect(countMotors()).toMatchObject({ total: 0, online: 0 });
   const states = [1, 2].map(motor_id => ({
     motor_id, online: true, control_lifecycle: 2, execution_state: 1,
@@ -39,16 +39,16 @@ it("电机出现后汇总持续使用 MCU 状态更新，不停留在空列表",
   store.conn.connected = true;
   for (const { motor_id } of states) store.motors.set(motor_id, {});
   expect(applyControlState(store.controlStates,
-    { schema_version: 2, session_id: 100, sequence: 1, states })).toBe(true);
+    { schema_version: 6, session_id: 100, sequence: 1, control_states: states })).toBe(true);
   expect(countMotors()).toEqual({ total: 2, online: 2, active: 0, fault: 0, conflict: 0 });
   states[1]!.online = false;
   expect(applyControlState(store.controlStates,
-    { schema_version: 2, session_id: 100, sequence: 2, states })).toBe(true);
+    { schema_version: 6, session_id: 100, sequence: 2, control_states: states })).toBe(true);
   expect(countMotors()).toMatchObject({ total: 2, online: 1, active: 0 });
 });
 
 it("曲线持续接收不同频率的通道时保留各自最新的有界样本", async () => {
-  const { chartPush, store } = await import("../../web/js/core/store.js");
+  const { chartPush, store } = await import("../src/core/store.ts");
   for (let i = 0; i < 2000; i++) {
     chartPush(1, 'position', i, i * 20);
     chartPush(1, 'velocity', i + 0.1, i * 20);
@@ -74,7 +74,7 @@ it("模型无映射时清除上一模型映射，不将上一模型设备配给�
     })
     .mockResolvedValueOnce({ ok: false, status: 404 });
   vi.stubGlobal("fetch", fetcher);
-  const store = await import("../../web/js/core/store.js");
+  const store = await import("../src/core/store.ts");
   await store.loadModelJoints();
   expect(store.JOINT_OF_MOTOR).toEqual({ 1: "joint_a" });
   store.setModel("preview_only");
@@ -92,7 +92,7 @@ it("晚到的旧模型响应不覆盖当前模型映射", async () => {
       json: async () => ({ model: store.MODEL, direct_joints: { 9: "new_joint" }, groups: [] }),
     });
   vi.stubGlobal("fetch", fetcher);
-  const store = await import("../../web/js/core/store.js");
+  const store = await import("../src/core/store.ts");
   const pending = store.loadModelJoints();
   store.setModel("new_model");
   await vi.waitFor(() =>
@@ -127,7 +127,7 @@ it("传动组 metadata 保留耦合关系，选择不被压平成 motor 对 join
       direct_joints: { 2: "elbow_joint" },
     }),
   }));
-  const store = await import("../../web/js/core/store.js");
+  const store = await import("../src/core/store.ts");
   await store.loadModelJoints();
   expect(store.JOINT_OF_MOTOR).toEqual({ 2: "elbow_joint" });
   expect(store.store.modelTransmissions).toMatchObject({
@@ -146,7 +146,7 @@ it("传动组 metadata 保留耦合关系，选择不被压平成 motor 对 join
 });
 
 const commandFrame = () => ({model:'half_body_robot',joint_names:['elbow'],mode:'stopped',
-  output_topic:'/motor/host_command_array',
+  output_topic:'/motor/command',
   trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
   gravity_enabled:null,effort_gain:null,feedback_fresh:false,controllers_ready:false,active_controllers:[]});
 
@@ -154,7 +154,7 @@ it.each([
   {feedback_fresh:1}, {controllers_ready:'true'}, {active_controllers:[1]},
   {joint_names:['elbow','elbow']}, {joint_names:['']}, {gravity_enabled:0}, {effort_gain:NaN},
 ])('坏控制帧撤销身份且不刷新时间 %j', async patch => {
-  const {store,applyCommandStatus} = await import('../../web/js/core/store.js');
+  const {store,applyCommandStatus} = await import('../src/core/store.ts');
   applyCommandStatus(commandFrame());
   expect(store.commandStatus.last).toBeGreaterThan(0);
   applyCommandStatus({...commandFrame(),...patch});
@@ -162,7 +162,7 @@ it.each([
 });
 
 it('传动状态接受未知扩展、null限位和未知重力，拒绝坏业务字段', async () => {
-  const data = await import('../../web/js/core/store.js');
+  const data = await import('../src/core/store.ts');
   const frame = {...commandFrame(),trajectory_enabled:true,
     control_groups:[{name:'direct',joints:['elbow'],motors:[{id:1}]}],
     dynamic_joint_names:['elbow'],joint_limits:{elbow:{lower:null,upper:null}},
@@ -184,7 +184,7 @@ it('传动状态接受未知扩展、null限位和未知重力，拒绝坏业务
 
 it.each([null,'start','stop','gain'])('台架重力合法 pending=%j 保留状态和接收时间', async pending => {
   vi.spyOn(Date, 'now').mockReturnValue(1000);
-  const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+  const {store,applyBenchStatus} = await import('../src/core/store.ts');
   const gravity = {pending,fresh:true,error:'',config:{model:'arm'},extra:42};
   applyBenchStatus({gravity_feedforward:gravity});
   expect(store.bench.gravity_feedforward).toEqual(gravity);
@@ -194,7 +194,7 @@ it.each([null,'start','stop','gain'])('台架重力合法 pending=%j 保留状�
 it.each([{pending:false},{pending:true},{pending:'false'},{pending:'unknown'},{fresh:1},{fresh:'true'}])(
   '坏台架重力帧 %j 撤销确认资格且清空时间', async patch => {
     vi.spyOn(Date, 'now').mockReturnValue(1000);
-    const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+    const {store,applyBenchStatus} = await import('../src/core/store.ts');
     const gravity = {pending:null,fresh:true,error:'',config:{model:'arm'}};
     applyBenchStatus({gravity_feedforward:gravity});
     expect(store.bench.gravity_feedforward_last).toBe(1000);
@@ -206,7 +206,7 @@ it.each([{pending:false},{pending:true},{pending:'false'},{pending:'unknown'},{f
 
 it.each([{}, {fresh:false}, {pending:null}, {config:null}])('台架重力可选字段兼容 %j', async gravity => {
   vi.spyOn(Date, 'now').mockReturnValue(1000);
-  const {store,applyBenchStatus} = await import('../../web/js/core/store.js');
+  const {store,applyBenchStatus} = await import('../src/core/store.ts');
   applyBenchStatus({gravity_feedforward:gravity});
   expect(store.bench.gravity_feedforward).toEqual(gravity);
   expect(store.bench.gravity_feedforward_last).toBe(1000);
@@ -220,10 +220,31 @@ it("停止渲染循环会取消待执行帧，卸载后不再重新排队", asyn
     return next;
   });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-  const store = await import("../../web/js/core/store.js");
+  const store = await import("../src/core/store.ts");
   const stop = store.runRenderLoop();
   expect(frames.size).toBe(1);
   expect(typeof stop).toBe("function");
   stop();
   expect(frames.size).toBe(0);
+});
+
+it("ChartChannelBuffer 环形覆盖保留最新样本且 consumeDirty 按 500ms 补发状态脏标记", async () => {
+  const { ChartChannelBuffer, consumeDirty, markDirty, DIRTY } = await import("../src/core/store.ts");
+  const ring = new ChartChannelBuffer(4);
+  for (let i = 1; i <= 6; i++) ring.push(i * 10, i * 0.5);
+  expect(ring.length).toBe(4);
+  expect(ring.t).toEqual([30, 40, 50, 60]);
+  expect(ring.values).toEqual([1.5, 2.0, 2.5, 3.0]);
+  expect(ring.tAt(0)).toBe(30);
+  expect(ring.valueAt(3)).toBe(3.0);
+
+  consumeDirty(1000);
+  markDirty(DIRTY.MOTION);
+  const first = consumeDirty(1100);
+  expect(first?.has(DIRTY.MOTION)).toBe(true);
+  expect(first?.has(DIRTY.STATUS)).toBe(false);
+  const idle = consumeDirty(1200);
+  expect(idle).toBeNull();
+  const heartbeat = consumeDirty(1600);
+  expect(heartbeat?.has(DIRTY.STATUS)).toBe(true);
 });

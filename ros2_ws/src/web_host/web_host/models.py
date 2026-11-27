@@ -7,9 +7,9 @@ import xml.etree.ElementTree as ET
 from ament_index_python.packages import get_package_share_directory
 import yaml
 
-# 真实驱动与已确认电机拓扑是映射来源。
+# motor_id → 关节映射的来源文件，按 simulation_model_joints 的解析优先级排列。
 _DRIVER_CONFIG = "config/motor_driver.yaml"
-_TOPOLOGY_CONFIG = "config/model_motor_topology.yaml"
+_TOPOLOGY_CONFIG = "config/simulation_topology.yaml"
 
 
 def _models_root():
@@ -162,7 +162,98 @@ def has_joint_mapping_source(model, root=None):
             or model in (".", "..")):
         return False
     return any((models_root / model / rel).is_file()
-               for rel in (_DRIVER_CONFIG, _TOPOLOGY_CONFIG, "config/motor_topology.yaml"))
+               for rel in (_DRIVER_CONFIG, _TOPOLOGY_CONFIG))
+
+
+def simulation_model_joints(model, root=None):
+    """读取电机 id → 关节名：优先模型驱动配置，否则用拓扑关联权威驱动配置。
+
+    非法模型名、配置缺失、条目不完整或 id 重复时抛出 ValueError。"""
+    models_root = Path(root) if root is not None else _models_root()
+    if models_root is None or not models_root.is_dir():
+        raise ValueError("找不到模型根目录（models/ 不存在或安装树不完整？）")
+    # 防目录穿越：模型名只允许是单层目录名
+    if not model or model != Path(model).name or model in (".", ".."):
+        raise ValueError(f"非法模型名：{model!r}")
+
+    driver_config = models_root / model / _DRIVER_CONFIG
+    simulation_driver = driver_config.with_name('motor_driver.simulation.yaml')
+    if simulation_driver.is_file():
+        return _joints_from_driver_config(simulation_driver)
+    if driver_config.is_file():
+        return _joints_from_driver_config(driver_config)
+    return _joints_from_topology(model, models_root / model)
+
+
+def _joints_from_driver_config(config):
+    """一路：驱动配置里每个电机同时带 `id:` 与 `joint:`。"""
+    with config.open("r", encoding="utf-8") as handle:
+        doc = yaml.safe_load(handle) or {}
+    motors = (doc.get("motor_hardware") or {}).get("motors")
+    if not isinstance(motors, dict) or not motors:
+        raise ValueError(f"{config} 里没有 motor_hardware.motors")
+
+    joints = {}
+    for name, spec in motors.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"电机 {name!r} 的条目不是映射")
+        motor_id, joint = spec.get("id"), spec.get("joint")
+        if motor_id is None or joint is None:
+            raise ValueError(f"电机 {name!r} 缺 id 或 joint")
+        _register_joint(joints, motor_id, joint)
+    return dict(sorted(joints.items()))
+
+
+def _joints_from_topology(model, model_dir):
+    """二路：拓扑给 (电机名 → 关节)，id 由电机名回查权威驱动配置。"""
+    topology_file = model_dir / _TOPOLOGY_CONFIG
+    if not topology_file.is_file():
+        raise ValueError(
+            f"模型 {model!r} 既没有 config/motor_driver.yaml，"
+            f"也没有 config/simulation_topology.yaml")
+    try:
+        driver_config = (
+            Path(get_package_share_directory("motor_hardware_interface"))
+            / "config" / "motor_driver.yaml")
+    except Exception as exc:
+        raise ValueError(
+            f"找不到 motor_hardware_interface 的权威驱动配置：{exc}") from exc
+    if not driver_config.is_file():
+        raise ValueError(f"权威驱动配置不存在：{driver_config}")
+
+    with topology_file.open("r", encoding="utf-8") as handle:
+        topology = yaml.safe_load(handle) or {}
+    entries = (topology.get("simulation") or {}).get("motors")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{topology_file} 里没有 simulation.motors")
+
+    with driver_config.open("r", encoding="utf-8") as handle:
+        driver = yaml.safe_load(handle) or {}
+    motors = (driver.get("motor_hardware") or {}).get("motors")
+    if not isinstance(motors, dict):
+        raise ValueError(f"{driver_config} 里没有 motor_hardware.motors")
+
+    joints = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"{topology_file} 的 motors 条目不是映射：{entry!r}")
+        name, joint = entry.get("motor"), entry.get("joint")
+        if name is None or joint is None:
+            raise ValueError(f"拓扑条目缺 motor 或 joint：{entry!r}")
+        spec = motors.get(name)
+        if not isinstance(spec, dict) or spec.get("id") is None:
+            raise ValueError(f"拓扑电机 {name!r} 在 {driver_config} 里没有 id")
+        _register_joint(joints, spec["id"], joint)
+    return dict(sorted(joints.items()))
+
+
+def _register_joint(joints, motor_id, joint):
+    motor_id = int(motor_id)
+    if motor_id in joints:
+        raise ValueError(
+            f"电机 id {motor_id} 重复（{joints[motor_id]!r} 与 {joint!r}）："
+            f"固件注册表以裸 motor_id 为键，重号会锁存 CONFIG_CONFLICT")
+    joints[motor_id] = str(joint)
 
 
 def _motor_config_dir():
@@ -192,3 +283,36 @@ def motor_library(root=None):
         params = spec.get("parameters") or {}
         out[str(name)] = {"protocol": str(spec.get("protocol") or name), **params}
     return out
+
+
+def model_motor_params(model, root=None):
+    """读取模型的 3 模板 + 37 电机差异参数表（motor_params.yaml）。"""
+    models_root = Path(root) if root is not None else _models_root()
+    if models_root is None or not models_root.is_dir():
+        raise ValueError("找不到模型根目录")
+    if not model or model != Path(model).name or model in (".", ".."):
+        raise ValueError(f"非法模型名：{model!r}")
+    path = models_root / model / "config" / "motor_params.yaml"
+    if not path.is_file():
+        raise ValueError(f"模型 {model!r} 缺少 config/motor_params.yaml")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    templates = data.get("templates") or {}
+    motors = []
+    for entry in data.get("motors") or []:
+        tpl_name = entry.get("template")
+        if tpl_name not in templates:
+            raise ValueError(f"未知电机模板：{tpl_name!r}")
+        merged = dict(templates[tpl_name])
+        merged.update(entry.get("overrides") or {})
+        merged["id"] = int(entry["id"])
+        merged["joint"] = str(entry["joint"])
+        merged["template"] = str(tpl_name)
+        if "group" in entry:
+            merged["group"] = str(entry["group"])
+        motors.append(merged)
+    return {
+        "model": model,
+        "schema_version": int(data.get("schema_version", 1)),
+        "templates": templates,
+        "motors": motors,
+    }

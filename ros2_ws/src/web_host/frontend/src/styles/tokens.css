@@ -1,0 +1,57 @@
+/* 统一工作台设计令牌：色彩沿用当前深色青绿主题，度量和布局尺寸统一收口在此。 */
+:root {
+  color-scheme: dark;
+
+  --bg: #101518;
+  --panel: #182024;
+  --panel-2: #202d30;
+  --surface: #182024;
+  --line: #2a3438;
+  --line-2: #3a4b50;
+  --border: #2a3438;
+  --text: #d1dadb;
+  --dim: #82979e;
+  --dim-2: #617b84;
+  --muted: #78888d;
+  --accent: #85dfb8;
+  --accent-dark: #1c3f35;
+  --ok: #85dfb8;
+  --warn: #d6b16d;
+  --err: #e69a91;
+
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --sans: Inter, "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  --fs-base: 12.5px;
+  --fs-sm: 11px;
+  --fs-xs: 10px;
+  --pad-row: 7px 11px;
+  --pad-panel: 12px;
+  --gap: 8px;
+  --gap-sm: 5px;
+  --radius: 9px;
+  --radius-sm: 5px;
+
+  --nav-w: 132px;
+  --nav-w-icon: 56px;
+  --topbar-h: 46px;
+  --stage-h: clamp(300px, 48vh, 640px);
+
+  font-family: var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  font-size: 12px;
+  line-height: 1.5;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.num, .kv b, table td, table th { font-variant-numeric: tabular-nums; }

@@ -11,6 +11,7 @@ import {
   Box,
   SlidersHorizontal,
   Cpu,
+  Workflow,
   Cable,
   RefreshCw,
   CircleStop,
@@ -18,12 +19,21 @@ import {
   PanelLeftOpen,
   Film,
 } from "@lucide/vue";
-import PanelHost from "./components/PanelHost.vue";
+import ReadoutPanel from "./components/ReadoutPanel.vue";
+import JointListPanel from "./components/JointListPanel.vue";
+import ArmStagePanel from "./components/ArmStagePanel.vue";
+import ActionLibraryPanel from "./components/ActionLibraryPanel.vue";
+import CurvePanel from "./components/CurvePanel.vue";
+import ImuPanel from "./components/ImuPanel.vue";
+import ControlLeaseBar from "./components/ControlLeaseBar.vue";
+import DiagnosticsRecorderPanel from "./components/DiagnosticsRecorderPanel.vue";
 import EventLog from "./components/EventLog.vue";
 import FirmwareParameters from "./components/FirmwareParameters.vue";
+import DeviceParameters from "./components/DeviceParameters.vue";
 import ResizeHandle from "./components/ResizeHandle.vue";
 import MotionWorkbench from "./components/MotionWorkbench.vue";
 import GravityControl from "./components/GravityControl.vue";
+import { useLeaseStore } from "./stores/lease";
 import {
   runtime,
   snapshot,
@@ -33,6 +43,8 @@ import {
   configuredRosUrl,
 } from "./runtime";
 import type { Screen } from "./contracts";
+
+const leaseStore = useLeaseStore();
 
 const resizablePanelMinHeight = 64;
 const normalize = (hash: string): Screen => {
@@ -44,6 +56,7 @@ watch(screen, (value) => {
   mobilePane.value = value === "teach" ? "objects" : "stage";
 });
 const observation = ref("curve");
+const runInspectorTab = ref<'joints' | 'actions' | 'motors'>('joints');
 const mobilePane = ref('stage');
 const connectionSettings = ref(false);
 const mobilePanes = [
@@ -135,13 +148,40 @@ function keys(event: KeyboardEvent) {
     )
   )
     return;
-  const index = "123".indexOf(event.key);
+  if ((event.key === " " || event.key === "Escape") && snapshot.value.connected) {
+    event.preventDefault();
+    runtime.stopMotion();
+    return;
+  }
+  const index = "1234".indexOf(event.key);
   if (index >= 0) go(scenes[index]!.id);
 }
-watch([screen, observation, observe], async () => {
-  await nextTick();
-  runtime.wake();
-});
+function activeChannels(): string[] {
+  const ch = [
+    "telemetry:control",
+    "telemetry:transmission",
+    "telemetry:bench",
+    "telemetry:motor_state",
+  ];
+  if (screen.value === "run") {
+    ch.push("telemetry:joints", "telemetry:motor_motion", "telemetry:events");
+    if (observe.value && observation.value === "imu") ch.push("telemetry:imu", "telemetry:imu_temp");
+  } else if (screen.value === "sim") {
+    ch.push("telemetry:joints", "telemetry:sim_position");
+  } else if (screen.value === "teach") {
+    ch.push("telemetry:motor_motion", "telemetry:events");
+  }
+  return ch;
+}
+watch(
+  [screen, observation, observe],
+  async () => {
+    runtime.setActiveChannels(activeChannels());
+    await nextTick();
+    runtime.wake();
+  },
+  { immediate: true },
+);
 onMounted(() => {
   runtime.setNavigation(go);
   clock = setInterval(() => {
@@ -160,87 +200,125 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workbench" :data-mobile-pane="mobilePane" :class="{ 'observer-hidden': !observe, 'nav-collapsed': navCollapsed }">
-    <header class="app-header">
+  <div class="workbench" :data-mobile-pane="mobilePane" :class="{ 'observer-hidden': !observe, 'nav-collapsed': navCollapsed, 'viewer-readonly': leaseStore.isBff && !leaseStore.isOwner }">
+    <header class="app-header studio-topbar" :class="{'settings-open': connectionSettings}">
       <a class="brand" href="#/run" @click="go('run')"
-        ><span class="brand-mark"><Box :size="22" /></span
-        ><span>ROBOT2<span class="brand-light"> 工程控制台</span></span></a
+        ><span class="brand-mark"><Box :size="18" /></span
+        ><span>元与定序具身智能<span class="brand-light"> 控制台</span></span></a
       >
-      <span class="header-spacer" /><span class="micro">{{
-        snapshot.session
-      }}</span>
-    </header>
-
-    <div class="session-bar" :class="{'settings-open': connectionSettings}">
-      <button class="connection-settings secondary compact" :aria-expanded="connectionSettings" aria-controls="rosUrl" @click="connectionSettings = !connectionSettings">连接设置</button>
-      <label class="session-item connection-address"
-        ><Cable :size="14" /><span class="session-label">ROS</span
-        ><input
-          id="rosUrl"
-          v-model="rosUrl"
-          aria-label="rosbridge WebSocket 地址"
-          spellcheck="false"
-      /></label>
-      <button
-        class="secondary compact reconnect-button"
-        :disabled="!initialized"
-        @click="runtime.connect(rosUrl)"
-      >
-        重新连接
-      </button>
+      <template v-if="!leaseStore.isBff">
+        <button class="connection-settings secondary compact" :aria-expanded="connectionSettings" aria-controls="rosUrl" @click="connectionSettings = !connectionSettings">连接设置</button>
+        <label class="session-item connection-address"
+          ><Cable :size="14" /><span class="session-label">ROS</span
+          ><input
+            id="rosUrl"
+            v-model="rosUrl"
+            aria-label="rosbridge WebSocket 地址"
+            spellcheck="false"
+        /></label>
+        <button
+          class="secondary compact reconnect-button"
+          :disabled="!initialized"
+          @click="runtime.connect(rosUrl)"
+        >
+          重新连接
+        </button>
+      </template>
+      <ControlLeaseBar v-else />
       <span class="session-item connection"
         ><i class="dot" :class="snapshot.connected ? 'green' : 'amber'" />{{
           snapshot.connectionText
         }}</span
       >
       <span class="session-separator" />
-      <label class="session-item"
-        ><span class="session-label">控制板</span
-        ><select id="serialPort" aria-label="控制板串口">
-          <option value="">等待串口枚举</option>
-        </select></label
-      >
+      <details class="hardware-popover">
+        <summary :title="snapshot.agentError || snapshot.agentDevice">
+          <i class="dot" :class="snapshot.agent === 'running' ? 'green' : 'amber'" />
+          硬件 · Agent：{{ agentLabel }}
+        </summary>
+        <div class="hardware-popover-body">
+          <div class="hardware-popover-row">
+            <label class="session-item"
+              ><span class="session-label">控制板</span
+              ><select
+                id="serialPort"
+                aria-label="控制板串口"
+                :disabled="
+                  !snapshot.connected ||
+                  snapshot.agent === 'running' ||
+                  snapshot.agent === 'starting' ||
+                  snapshot.agent === 'stopping'
+                "
+              >
+                <option value="">等待串口枚举</option>
+              </select></label
+            >
+            <button
+              id="btnPortRefresh"
+              class="icon-button"
+              aria-label="刷新控制板串口"
+              :disabled="!snapshot.connected"
+              @click="runtime.refreshAgentControls()"
+            >
+              <RefreshCw :size="13" />
+            </button>
+          </div>
+          <div class="hardware-popover-actions">
+            <button
+              id="btnConnect"
+              class="secondary compact"
+              :disabled="
+                !snapshot.connected ||
+                snapshot.agent === 'running' ||
+                snapshot.agent === 'starting' ||
+                snapshot.agent === 'stopping'
+              "
+              @click="runtime.startAgent()"
+            >
+              启动 Agent
+            </button>
+            <button
+              id="btnDisconnect"
+              class="secondary compact"
+              :disabled="!snapshot.connected || !snapshot.canStopAgent"
+              @click="runtime.stopAgent()"
+            >
+              停止 Agent
+            </button>
+          </div>
+        </div>
+      </details>
+      <span class="header-spacer" />
+      <div v-show="screen === 'run'" class="topbar-status">
+        <span class="micro" :title="snapshot.communication.detail">
+          <i class="dot" :class="fresh ? 'green' : 'amber'" />{{ snapshot.online }}/{{ snapshot.total }} · MCU:{{ snapshot.communication.link }}
+        </span>
+        <span
+          v-if="leaseStore.isBff && !leaseStore.isOwner"
+          class="info-badge warn"
+          tabindex="0"
+          role="status"
+          title="当前为只读围观模式；如需拖动关节、使能电机或启停仿真，请先点击顶部「申请控制权」。"
+          aria-label="只读围观模式提示"
+        >!</span>
+        <span
+          v-if="snapshot.mappingError"
+          class="info-badge warn"
+          tabindex="0"
+          role="status"
+          :title="`${snapshot.mappingError}；几何预览仍可使用。`"
+          :aria-label="snapshot.mappingError"
+        >!</span>
+      </div>
       <button
-        id="btnPortRefresh"
-        class="icon-button"
-        aria-label="刷新控制板串口"
-        :disabled="!snapshot.connected"
-        @click="runtime.refreshAgentControls()"
-      >
-        <RefreshCw :size="13" />
-      </button>
-      <button
-        id="btnConnect"
-        class="secondary compact"
-        :disabled="
-          !snapshot.connected ||
-          snapshot.agent === 'starting' ||
-          snapshot.agent === 'stopping'
-        "
-        @click="runtime.startAgent()"
-      >
-        启动 Agent
-      </button>
-      <button
-        id="btnDisconnect"
-        class="secondary compact"
-        :disabled="!snapshot.connected || !snapshot.canStopAgent"
-        @click="runtime.stopAgent()"
-      >
-        停止 Agent
-      </button>
-      <span
-        class="session-item agent-status"
-        :title="snapshot.agentError || snapshot.agentDevice"
-        >Agent：{{ agentLabel }}</span>
-      <span class="header-spacer" /><button
         class="stop-button"
+        title="全部软停（快捷键：空格 / Esc）"
         :disabled="!snapshot.connected"
         @click="runtime.stopMotion()"
       >
         <CircleStop :size="14" />全部软停
       </button>
-    </div>
+    </header>
 
     <nav class="main-nav" aria-label="工作场景">
       <button
@@ -268,7 +346,7 @@ onBeforeUnmount(() => {
     </nav>
 
     <main class="main-workspace">
-      <div class="workspace-heading">
+      <div v-show="screen !== 'run'" class="workspace-heading">
         <h1>{{ title.title }}</h1>
         <div v-show="screen !== 'teach' && screen !== 'motion'" class="workspace-summary">
           <span
@@ -289,23 +367,23 @@ onBeforeUnmount(() => {
       <div v-else-if="!initialized" class="startup-status" role="status" aria-busy="true">
         正在加载工作区与控制模块…
       </div>
-      <div v-if="snapshot.mappingError && screen !== 'teach' && screen !== 'motion'" class="mapping-warning" role="status">
-        {{ snapshot.mappingError }}；几何预览仍可使用。
+      <div v-if="snapshot.fault > 0 && screen !== 'motion'" class="fault-banner" role="alert">
+        <span>检测到 {{ snapshot.fault }} 台电机存在故障</span>
+        <button type="button" class="tiny-btn secondary" @click="go('diag')">查看事件日志</button>
       </div>
-
       <nav v-show="screen !== 'motion'" class="mobile-pane-tabs" aria-label="工作区面板">
         <button v-for="item in mobilePanes.filter(p => screen === 'teach' ? ['objects','parameters'].includes(p.id) : p.id !== 'parameters')" :key="item.id"
-          :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true">
+          :aria-pressed="mobilePane === item.id" @click="mobilePane = item.id; if (item.id === 'observer') observe = true; if (item.id === 'objects' && screen === 'run') runInspectorTab = 'motors'">
           {{ item.title }}<small v-if="item.id === 'objects'">{{ snapshot.total }}</small>
         </button>
       </nav>
       <MotionWorkbench v-if="screen === 'motion'" :current-model="snapshot.model" />
-      <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'device-workspace': screen === 'teach' }">
-        <ResizeHandle v-show="screen === 'run'" class="resize-objects" label="调整对象浏览器宽度" target=".objects-area" variable="--objects-width" axis="width" :min="140" />
+      <div v-show="screen !== 'motion'" class="workspace-grid" :class="{ 'run-workspace': screen === 'run', 'device-workspace': screen === 'teach' }">
+        <ResizeHandle v-show="screen === 'run'" class="resize-control" label="调整右侧检查器宽度" target=".inspector-dock" variable="--control-width" axis="width" :min="320" reverse />
         <ResizeHandle v-show="screen === 'run' && observe" class="resize-observer" label="调整观察区高度" target=".observer-area" variable="--observer-height" axis="height" :min="resizablePanelMinHeight" reverse />
-        <section class="objects-area surface">
+        <section v-show="screen === 'teach'" class="objects-area surface">
           <div class="panel-title">
-            <span>{{ screen === 'teach' ? '设备查询' : '电机与关节' }}</span>
+            <span>设备查询</span>
             <small class="micro">电机反馈</small>
           </div>
           <nav v-if="screen === 'teach'" class="device-parameter-nav" aria-label="设备参数查询">
@@ -322,14 +400,10 @@ onBeforeUnmount(() => {
               <p v-if="!snapshot.motors.length" class="micro">等待电机反馈</p>
             </div>
           </nav>
-          <PanelHost id="readout" :active="screen === 'run'" />
-          <Teleport to="#run-joints" :disabled="screen !== 'run'" defer>
-            <PanelHost id="jointList" :active="screen === 'run'" />
-          </Teleport>
-          <div class="tree-footer">{{ screen === 'teach' ? '选择电机，查看设备反馈与参数' : '关节数据与设备测量分别显示' }}</div>
+          <div class="tree-footer">选择电机，查看设备反馈与参数</div>
         </section>
         <div v-show="screen !== 'teach'" class="stage-area" :class="`stage-${screen}`">
-          <div class="stage-toolbar">
+          <div v-show="screen !== 'run'" class="stage-toolbar">
             <div class="breadcrumb">
               <Box :size="14" /><span>{{
                 snapshot.model || "正在读取模型"
@@ -340,29 +414,42 @@ onBeforeUnmount(() => {
             >
           </div>
           <div class="stage-body">
-            <PanelHost id="arm" :active="screen !== 'teach' && screen !== 'motion'" class="robot-panel" />
-            <Teleport v-if="initialized" to="#armGravityControl">
+            <ArmStagePanel :active="screen !== 'teach' && screen !== 'motion'" class="robot-panel">
               <GravityControl v-show="screen === 'run'" />
-            </Teleport>
-            <ResizeHandle v-show="screen === 'run'" class="resize-joints" label="调整关节面板高度" target="#run-joints" variable="--joints-height" axis="height" :min="resizablePanelMinHeight" reverse />
-            <div
-              id="run-joints"
-              v-show="screen === 'run'"
-              class="joint-list-panel"
-            />
-            <ResizeHandle v-show="screen === 'run'" class="resize-actions" label="调整动作库高度" target=".action-panel-host" variable="--actions-height" axis="height" :min="resizablePanelMinHeight" reverse />
-            <PanelHost
-              id="actionLibrary"
+            </ArmStagePanel>
+          </div>
+        </div>
+        <aside v-show="screen === 'run'" class="inspector-dock surface" aria-label="右侧检查器">
+          <div class="inspector-tabs" role="tablist" aria-label="检查器切换">
+            <button type="button" role="tab" :aria-selected="runInspectorTab === 'actions'" :class="{ active: runInspectorTab === 'actions' }" @click="runInspectorTab = 'actions'">
+              动作库
+            </button>
+            <button type="button" role="tab" :aria-selected="runInspectorTab === 'joints'" :class="{ active: runInspectorTab === 'joints' }" @click="runInspectorTab = 'joints'">
+              关节 <small class="tab-count">{{ snapshot.active }}/{{ snapshot.total }}</small>
+            </button>
+            <button type="button" role="tab" :aria-selected="runInspectorTab === 'motors'" :class="{ active: runInspectorTab === 'motors' }" @click="runInspectorTab = 'motors'">
+              电机 <small class="tab-count">{{ snapshot.online }}</small>
+            </button>
+          </div>
+          <div class="inspector-body">
+            <div v-show="runInspectorTab === 'joints'" id="run-joints" class="joint-list-panel">
+              <JointListPanel :active="screen === 'run' && runInspectorTab === 'joints'" />
+            </div>
+            <ActionLibraryPanel
+              v-show="runInspectorTab === 'actions'"
               :active="screen === 'run'"
               class="action-panel-host"
             />
+            <div v-show="runInspectorTab === 'motors'" class="motor-inspector-panel">
+              <ReadoutPanel :active="screen === 'run'" />
+            </div>
           </div>
-        </div>
+        </aside>
         <aside v-show="screen === 'teach'" class="device-details-area inspector surface">
           <div class="panel-title"><span>{{ deviceParameters === 'firmware' ? '固件固定配置' : selectedParameterMotor ? `电机 ${selectedParameterMotor} 详细参数` : '电机详细参数' }}</span></div>
           <div class="inspector-scroll">
             <FirmwareParameters :active="screen === 'teach' && deviceParameters === 'firmware'" />
-            <PanelHost id="deviceParams" :active="screen === 'teach' && deviceParameters === 'motor'" />
+            <DeviceParameters :active="screen === 'teach' && deviceParameters === 'motor'" />
           </div>
         </aside>
         <section v-show="screen === 'run'" class="observer-area observer surface">
@@ -380,6 +467,7 @@ onBeforeUnmount(() => {
                   { id: 'curve', title: '曲线' },
                   { id: 'events', title: '事件日志' },
                   { id: 'imu', title: 'IMU' },
+                  { id: 'diag', title: '诊断与录播' },
                 ]"
                 :key="item.id"
                 :class="{ active: observation === item.id }"
@@ -393,12 +481,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div id="observation-content" v-show="observe" class="observation-body">
-            <PanelHost
-              id="curve"
+            <CurvePanel
               :active="screen === 'run' && observe && observation === 'curve'"
             />
             <EventLog v-show="screen === 'run' && observe && observation === 'events'" />
-            <PanelHost id="imu" :active="screen === 'run' && observe && observation === 'imu'" />
+            <ImuPanel :active="screen === 'run' && observe && observation === 'imu'" />
+            <DiagnosticsRecorderPanel
+              :active="screen === 'run' && observe && observation === 'diag'"
+            />
           </div>
         </section>
       </div>

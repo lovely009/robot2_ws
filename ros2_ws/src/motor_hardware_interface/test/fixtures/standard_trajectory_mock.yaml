@@ -1,0 +1,18 @@
+# This mapping is used only by the no-hardware JTC integration test. The xacro
+# fixture fixes the plugin to mock_components/GenericSystem; no bus is opened.
+motor_hardware:
+  buses:
+    left_arm:
+      transport: socketcan
+      interface: unused_mock_bus
+  motors:
+    mock_axis1:
+      id: 1
+      joint: ecosystem_joint1
+      bus: left_arm
+      type: test_only_mock
+    mock_axis2:
+      id: 2
+      joint: ecosystem_joint2
+      bus: left_arm
+      type: test_only_mock

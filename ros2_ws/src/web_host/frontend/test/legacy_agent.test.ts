@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { callService } = vi.hoisted(() => ({ callService: vi.fn() }));
-vi.mock("../../web/js/core/ros.js", () => ({ callService }));
+vi.mock("../src/core/ros.ts", () => ({ callService }));
 
 const stm32 = {
   path: "/dev/serial/by-id/usb-STMicroelectronics_STM32H723-if00",
@@ -42,7 +42,7 @@ async function refresh(ports: object[], status = { state: "stopped", device: "" 
   callService.mockImplementation(async (name: string) => name === "/bench/options"
     ? { serial_ports_json: JSON.stringify(ports) }
     : { status_json: JSON.stringify(status) });
-  const { refreshAgentControls } = await import("../../web/js/core/agent.js");
+  const { refreshAgentControls } = await import("../src/core/agent.ts");
   await refreshAgentControls();
 }
 

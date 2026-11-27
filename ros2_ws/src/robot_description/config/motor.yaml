@@ -45,7 +45,7 @@ motor_types:
       # 「装减速器后 · 减速比 50」= 1150 mNm。软件侧无消费者，供被控对象取额定值。
       rated_torque_nm: 1.15
       # 额定转速，**关节侧**。参数页给的是电机端「额定 ≤2000 rpm」，除速比 50
-      # ⇒ 40 rpm；主机约束读取此额定输出速度。
+      # ⇒ 40 rpm。被控对象的速度上限用它（见模型 tools/build_mujoco_model.py）。
       rated_speed_rad_s: 4.189             # = 2000/50 rpm
 
   vaxor_2530:

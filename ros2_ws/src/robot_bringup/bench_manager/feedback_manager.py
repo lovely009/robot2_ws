@@ -14,7 +14,13 @@ MOTORS_ENV = 'BENCH_CONTROL_MOTORS'
 SESSION_ENV = 'BENCH_MCU_SESSION'
 PUBLISH_ENV = 'BENCH_FEEDBACK_PUBLISH'
 INVENTORY_SETTLE_S = 1.5
+BACKOFF_RETRY_S = 30.0
 _MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*\Z')
+
+
+def _header_stamp_ns(message):
+    stamp = message.header.stamp
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
 class FeedbackInventory:
@@ -27,15 +33,16 @@ class FeedbackInventory:
         now_ns = time.time_ns() if now_ns is None else now_ns
         now = time.monotonic() if now is None else now
         previous = self.message
-        if (message.schema_version != 2 or not message.session_id or not message.sequence
-                or not -20_000_000 <= now_ns - message.sync_time_ns <= 300_000_000
-                or len(message.states) > 48):
+        stamp_ns = _header_stamp_ns(message)
+        if (message.schema_version != 6 or not message.session_id or not message.sequence
+                or not -20_000_000 <= now_ns - stamp_ns <= 300_000_000
+                or len(message.control_states) > 37):
             return False
         if previous and (message.session_id < previous.session_id or
                 (message.session_id == previous.session_id and
                  not 0 < (message.sequence - previous.sequence) % 2**32 < 2**31)):
             return False
-        ids = [state.motor_id for state in message.states]
+        ids = [state.motor_id for state in message.control_states]
         if len(set(ids)) != len(ids) or any(not 1 <= mid <= 64 for mid in ids):
             return False
         self.message, self.received = message, now
@@ -47,11 +54,25 @@ class FeedbackInventory:
         message = self.message
         if not message:
             return [], 0
-        age = now_ns - message.sync_time_ns
+        age = now_ns - _header_stamp_ns(message)
         if not 0 <= now-self.received <= .3 or not -20_000_000 <= age <= 300_000_000:
             return [], message.session_id
-        return sorted(state.motor_id for state in message.states
+        return sorted(state.motor_id for state in message.control_states
                       if state.online and state.state_age_ms + max(0, age)/1_000_000 < 300), message.session_id
+
+    def faulted(self, now_ns=None, now=None):
+        now_ns = time.time_ns() if now_ns is None else now_ns
+        now = time.monotonic() if now is None else now
+        message = self.message
+        if not message:
+            return []
+        age = now_ns - _header_stamp_ns(message)
+        if not 0 <= now-self.received <= .3 or not -20_000_000 <= age <= 300_000_000:
+            return []
+        return sorted(state.motor_id for state in message.control_states
+                      if state.online and (state.unified_fault_code != 0
+                                           or state.vendor_fault_code != 0
+                                           or state.control_lifecycle == 15))
 
 
 class FirmwareFeedbackManager:
@@ -81,13 +102,25 @@ class FirmwareFeedbackManager:
         if not isinstance(model, str) or (model and not _MODEL.fullmatch(model)):
             raise ValueError('模型必须是单层目录名')
 
-    def _model_files(self, model: str):
+    def _model_files(self, model: str, simulation: bool = False):
         self.validate_name(model)
         if not self.models_root:
             raise ValueError('找不到模型根目录')
         base = self.models_root / model
         driver = base / 'config' / 'motor_driver.yaml'
         urdf = base / 'urdf' / f'{model}.urdf'
+        simulation_driver = base / 'config' / 'motor_driver.simulation.yaml'
+        host_hil_driver = base / 'config' / 'motor_driver.hil.yaml'
+        if host_hil_driver.is_file():
+            simulation_driver = host_hil_driver
+        if simulation and simulation_driver.is_file():
+            driver = simulation_driver
+            control_urdf = base / 'urdf' / f'{model}.hil.urdf'
+            if model == 'full_body_robot' and not control_urdf.is_file():
+                raise ValueError(f'模型 {model} 缺少 HIL 控制 URDF，请运行 build_hil_config.py')
+            urdf = control_urdf if control_urdf.is_file() else base / 'urdf' / f'{model}.standalone.urdf'
+            if not urdf.is_file():
+                raise ValueError(f'模型 {model} 的仿真 mapping 缺少 standalone URDF：{urdf}')
         return driver, urdf
 
     def _validate(self, model: str) -> None:
@@ -99,9 +132,9 @@ class FirmwareFeedbackManager:
             raise ValueError(f'模型 {model} 缺少电机配置或 URDF')
         transmission = Model.load(str(driver))
         ids = list(transmission.actuator_ids.values())
-        if (not 0 < len(ids) <= 48 or len(set(ids)) != len(ids)
+        if (not 0 < len(ids) <= 37 or len(set(ids)) != len(ids)
                 or any(not 1 <= mid <= 64 for mid in ids)):
-            raise ValueError('固件映射 motor_id 必须唯一、在 1..64 内且最多 48 台')
+            raise ValueError('固件映射 motor_id 必须唯一、在 1..64 内且最多 37 台')
         joints = {j.get('name'): j for j in ET.parse(urdf).getroot().findall('joint')}
         for name in transmission.joint_names:
             joint = joints.get(name)
@@ -152,18 +185,26 @@ class FirmwareFeedbackManager:
             self._unhealthy_since = None
 
     def reconcile(self, model: str, agent_running: bool = False,
+                  simulation_running: bool = False,
+                  firmware_simulation: bool = False,
                   external_publishers: list[str] | None = None,
-                  motor_ids: list[int] | None = None, session_id: int = 0) -> None:
+                  motor_ids: list[int] | None = None, session_id: int = 0,
+                  faulted_motor_ids: list[int] | None = None) -> None:
         self._desired = model
         self._error = ''
+        hil = simulation_running and firmware_simulation
+        publish_states = not hil
         source, reason = 'firmware', 'MCU 反馈与 ros2_control 控制会话'
-        if external_publishers:
+        if simulation_running and not hil:
+            source, reason = 'simulation', '由仿真会话提供关节反馈'
+        elif external_publishers:
             source, reason = 'external', '由外部关节源提供反馈'
         elif not model:
             source, reason = 'waiting', '等待选择模型'
         elif not agent_running:
             source, reason = 'waiting', '等待 Agent'
-        self._source, self._reason = source, reason
+        self._source = 'simulation' if hil else source
+        self._reason = f'仿真关节反馈；{reason}' if hil else reason
         if source != 'firmware':
             if self.status()['state'] != 'stopped':
                 self.stop()
@@ -171,35 +212,30 @@ class FirmwareFeedbackManager:
             self._attempt_count = 0
             self._pending_inventory = None
             return
+        status = self.status()
         try:
-            driver, urdf = self._model_files(model)
-            if urdf.is_file() and not driver.exists() and any(
-                    (driver.parent / name).is_file()
-                    for name in ('model_motor_topology.yaml', 'motor_topology.yaml')):
-                unit = self._systemd.probe(UNIT_FEEDBACK)
-                if unit.state not in (UnitState.ABSENT, UnitState.STOPPED) or self._attempt is not None:
-                    self.stop()
-                self._pending_inventory = None
-                self._source = 'waiting'
-                self._reason = '仅显示 MCU 电机反馈，关节反馈需要电机驱动配置'
-                return
-            status = self.status()
-            transmission = self._validate(model)
+            driver, urdf = self._model_files(model, simulation=hil)
+            # 保留既有 _validate(model) 扩展点；仅实际仿真 mapping 需要新路径。
+            transmission = (self._validate_files(model, driver, urdf)
+                            if driver.name in ('motor_driver.simulation.yaml', 'motor_driver.hil.yaml')
+                            else self._validate(model))
             available = set(transmission.actuator_ids.values() if motor_ids is None else motor_ids)
             selected = sorted({transmission.actuator_ids[name]
                 for group in transmission.groups
-                if all(
+                if driver.name == 'motor_driver.hil.yaml' or all(
                     transmission.actuator_ids[name] in available for name in group.actuators)
                 for name in group.actuators if transmission.actuator_ids[name] in available})
             ids = ','.join(map(str, selected)) if motor_ids is not None else ''
             session = str(session_id)
-            key = (model, ids, session)
+            profile = self.models_root / model / 'config' / 'fastdds_udp.xml'
+            dds_profile = str(profile) if hil and profile.is_file() else ''
+            key = (model, ids, session, publish_states, dds_profile)
             now = time.monotonic()
             same_context = (
                 status['model'] == model and status['execution'] == 'ros2_control'
                 and (status['session_id'] == session or (session_id == 0 and motor_ids == []))
-                and status['publishes_joint_states']
-                and not status['dds_profile'])
+                and status['publishes_joint_states'] == publish_states
+                and status['dds_profile'] == dds_profile)
             matching = (status['state'] == 'running' and same_context
                         and status['motor_ids'] == ids and bool(selected))
             # MCU 重启或控制来源切换立即释放旧控制权；在线集合抖动只延迟重建。
@@ -219,7 +255,7 @@ class FirmwareFeedbackManager:
                     self._inventory_since = now
                 if now - self._inventory_since < INVENTORY_SETTLE_S:
                     if status['state'] != 'running':
-                        self._source = 'waiting'
+                        self._source = 'simulation' if hil else 'waiting'
                     self._reason = '等待电机在线列表稳定'
                     return
             if not selected:
@@ -229,7 +265,7 @@ class FirmwareFeedbackManager:
                     self._stop_control()
                 self._attempt = None
                 self._attempt_count = 0
-                self._source = 'waiting'
+                self._source = 'simulation' if hil else 'waiting'
                 self._reason = ('等待新鲜电机反馈' if not motor_ids
                                 else '等待完整传动组的电机反馈')
                 return
@@ -248,11 +284,20 @@ class FirmwareFeedbackManager:
                 if now-self._attempt_at < 8. or (health_fresh and
                         (self._unhealthy_since is None or now-self._unhealthy_since < 3.)):
                     return
+            if status['state'] != 'running' and faulted_motor_ids and any(
+                    mid in faulted_motor_ids for mid in selected):
+                self._source = 'simulation' if hil else 'waiting'
+                self._reason = '等待电机故障清除'
+                return
             if self._attempt == key:
                 if self._attempt_count >= 3:
-                    self._error = f'模型 {model} 的关节反馈连续启动失败，已停止自动重试；请检查反馈日志'
-                    return
-                if now-self._attempt_at < 3.:
+                    if now - self._attempt_at < BACKOFF_RETRY_S:
+                        self._error = (
+                            f'模型 {model} 的关节反馈连续启动失败，将在 '
+                            f'{int(BACKOFF_RETRY_S)} 秒后自动重试；请检查反馈日志'
+                        )
+                        return
+                elif now - self._attempt_at < 3.:
                     self._error = f'模型 {model} 的关节反馈中断，正在等待重试'
                     return
             if status['state'] != 'stopped':
@@ -269,11 +314,13 @@ class FirmwareFeedbackManager:
                 f'model:={model}', f'motor_ids:={ids}',
                 f'motor_config_file:={driver}', f'urdf_file:={urdf}',
                 'start_controllers:=false',
-                'publish_joint_states:=true',
-                'publish_robot_state:=true',
+                f'publish_joint_states:={str(publish_states).lower()}',
+                f'publish_robot_state:={str(publish_states).lower()}',
             ], auto=True, session_env={MODEL_ENV: model, CONTROL_ENV: 'ros2_control',
                                       MOTORS_ENV: ids, SESSION_ENV: session,
-                                      PUBLISH_ENV: 'true'})
+                                      PUBLISH_ENV: str(publish_states).lower(),
+                                      **({'FASTRTPS_DEFAULT_PROFILES_FILE': dds_profile}
+                                         if dds_profile else {})})
         except (ValueError, OSError, RuntimeError, ET.ParseError) as exc:
             self.stop(reset_retry=False)
             self._error = str(exc)

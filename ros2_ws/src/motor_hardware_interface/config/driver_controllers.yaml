@@ -1,0 +1,48 @@
+# 仅供 GenericSystem 离线控制器测试；实机统一由 micro-ROS MCU 控制。
+# 支持根命名空间和 /driver，任意 namespace 的键由 mock launch 生成。
+# joints 不在这里维护，由共享传动模型读取实际配置后注入。
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    position_controller:
+      type: forward_command_controller/ForwardCommandController
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+/driver/controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    position_controller:
+      type: forward_command_controller/ForwardCommandController
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+position_controller:
+  ros__parameters:
+    interface_name: position
+
+/driver/position_controller:
+  ros__parameters:
+    interface_name: position
+
+# mock_control.launch.py 只启动 control_mode 选中的一个控制器，避免争用 position
+# 接口。joints 和每关节容差由实际 motor_config_file 生成，不能在此手抄。
+joint_trajectory_controller:
+  ros__parameters:
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+
+/driver/joint_trajectory_controller:
+  ros__parameters:
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0

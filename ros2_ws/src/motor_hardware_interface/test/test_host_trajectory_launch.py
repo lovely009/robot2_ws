@@ -89,14 +89,10 @@ def test_jtc_uses_measured_feedback_and_both_target_channels(model):
         assert jtc['constraints'][name] == {'trajectory': 0.1, 'goal': 0.05}
 
 
-def test_manual_and_gravity_controllers_claim_distinct_interfaces(model):
+def test_gravity_controller_claims_effort_interfaces(model):
     params = module().controller_parameters(['shoulder', 'elbow'], str(model[1]))
     manager = params['/host_control/controller_manager']['ros__parameters']
-    assert manager['manual_controller_0']['type'] == (
-        'forward_command_controller/MultiInterfaceForwardCommandController')
-    assert params['/host_control/manual_controller_0']['ros__parameters'] == {
-        'joint': 'shoulder', 'interface_names': ['position', 'velocity', 'effort']}
-    assert params['/host_control/manual_controller_1']['ros__parameters']['joint'] == 'elbow'
+    assert 'manual_controller_0' not in manager
     gravity = params['/host_control/gravity_controller']['ros__parameters']
     assert gravity == {'joints': ['shoulder', 'elbow'], 'urdf_file': str(model[1]),
                        'enabled': False, 'effort_gain': 1.0}
@@ -111,12 +107,21 @@ def test_follow_uses_urdf_velocity_and_preserves_50hz(model):
         'joints': ['shoulder', 'elbow'], 'max_velocity': [2.5, 3.0]}
 
 
-@pytest.mark.parametrize('driver', ['motor_driver.simulation.yaml', 'motor_driver.hil.yaml'])
-def test_legacy_simulation_configs_are_rejected(driver):
-    with pytest.raises(ValueError, match='板端不支持'):
-        module().control_urdf_file(driver, 'full_body_robot.standalone.urdf')
+
+def test_existing_hil_sessions_resolve_dedicated_urdf_without_changing_physical_models(tmp_path):
+    standalone = tmp_path / 'arm.standalone.urdf'
+    dedicated = tmp_path / 'arm.hil.urdf'
+    standalone.write_text('<robot name="visual"/>')
+    resolver = module().control_urdf_file
+    assert resolver('motor_driver.simulation.yaml', str(standalone)) == str(standalone)
+    dedicated.write_text('<robot name="control"/>')
+    assert resolver('motor_driver.simulation.yaml', str(standalone)) == str(dedicated)
+    assert resolver('motor_driver.yaml', str(standalone)) == str(standalone)
+    assert resolver('motor_driver.simulation.yaml', str(tmp_path / 'custom.urdf')) == str(tmp_path / 'custom.urdf')
 
 
-def test_physical_control_uses_the_requested_urdf():
-    urdf_file = 'full_body_robot.standalone.urdf'
-    assert module().control_urdf_file('motor_driver.yaml', urdf_file) == urdf_file
+
+def test_full_body_hil_missing_control_urdf_is_explicit_error(tmp_path):
+    with pytest.raises(ValueError, match='HIL 控制 URDF'):
+        module().control_urdf_file('motor_driver.simulation.yaml',
+                                   str(tmp_path / 'full_body_robot.standalone.urdf'))

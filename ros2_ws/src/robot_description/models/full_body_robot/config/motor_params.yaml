@@ -1,0 +1,75 @@
+# 37 轴全身机器人电机参数配置表：3 份型号模板 + 37 台差异配置。
+# 关节命名严格对齐 docs/机器人37自由度_关节命名与正方向.xlsx，电机 ID 1..37。
+# 通过 `ros2 run motor_hardware_interface motor_param_sync.py --check/--sync` 与驱动板/W25 缓存对账同步。
+schema_version: 1
+
+templates:
+  vaxor_2550:
+    pos_min: -3.14159
+    pos_max: 3.14159
+    vel_limit: 6.28
+    torque_limit: 12.0
+    limit_protect: true
+    direction: 0
+    t_max: 80.0
+    kp: 0.008
+    kd: 1.0
+  cerb_r48_101:
+    pos_min: -3.14
+    pos_max: 3.14
+    vel_limit: 3.14
+    torque_limit: 12.0
+    limit_protect: true
+    direction: 0
+    t_max: 80.0
+    kp: 30.0
+    kd: 1.0
+  cerb_r58_101:
+    pos_min: -3.14
+    pos_max: 3.14
+    vel_limit: 3.14
+    torque_limit: 36.0
+    limit_protect: true
+    direction: 0
+    t_max: 80.0
+    kp: 30.0
+    kd: 1.0
+
+motors:
+  - {id: 1, joint: waist_yaw, template: cerb_r58_101, overrides: {}}
+  - {id: 2, joint: waist_pitch, group: waist, template: cerb_r58_101, overrides: {}}
+  - {id: 3, joint: waist_roll, group: waist, template: cerb_r58_101, overrides: {}}
+  - {id: 4, joint: pelvis_roll, group: hips, template: cerb_r58_101, overrides: {}}
+  - {id: 5, joint: pelvis_pitch, group: hips, template: cerb_r58_101, overrides: {}}
+  - {id: 6, joint: left_scapula_yaw, group: left_shoulder, template: cerb_r48_101, overrides: {}}
+  - {id: 7, joint: left_scapula_roll, group: left_shoulder, template: cerb_r48_101, overrides: {}}
+  - {id: 8, joint: left_shoulder_pitch, template: cerb_r58_101, overrides: {}}
+  - {id: 9, joint: left_shoulder_roll, template: cerb_r58_101, overrides: {}}
+  - {id: 10, joint: left_shoulder_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 11, joint: left_elbow_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 12, joint: left_forearm_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 13, joint: left_wrist_pitch, group: left_wrist, template: vaxor_2550, overrides: {}}
+  - {id: 14, joint: left_wrist_roll, group: left_wrist, template: vaxor_2550, overrides: {}}
+  - {id: 15, joint: right_scapula_yaw, group: right_shoulder, template: cerb_r48_101, overrides: {}}
+  - {id: 16, joint: right_scapula_roll, group: right_shoulder, template: cerb_r48_101, overrides: {}}
+  - {id: 17, joint: right_shoulder_pitch, template: cerb_r58_101, overrides: {}}
+  - {id: 18, joint: right_shoulder_roll, template: cerb_r58_101, overrides: {}}
+  - {id: 19, joint: right_shoulder_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 20, joint: right_elbow_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 21, joint: right_forearm_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 22, joint: right_wrist_pitch, group: right_wrist, template: vaxor_2550, overrides: {}}
+  - {id: 23, joint: right_wrist_roll, group: right_wrist, template: vaxor_2550, overrides: {}}
+  - {id: 24, joint: left_hip_pitch, template: cerb_r58_101, overrides: {}}
+  - {id: 25, joint: left_hip_roll, template: cerb_r58_101, overrides: {}}
+  - {id: 26, joint: left_hip_yaw, template: cerb_r58_101, overrides: {}}
+  - {id: 27, joint: left_knee_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 28, joint: left_shank_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 29, joint: left_ankle_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 30, joint: left_ankle_roll, template: vaxor_2550, overrides: {}}
+  - {id: 31, joint: right_hip_pitch, template: cerb_r58_101, overrides: {}}
+  - {id: 32, joint: right_hip_roll, template: cerb_r58_101, overrides: {}}
+  - {id: 33, joint: right_hip_yaw, template: cerb_r58_101, overrides: {}}
+  - {id: 34, joint: right_knee_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 35, joint: right_shank_yaw, template: cerb_r48_101, overrides: {}}
+  - {id: 36, joint: right_ankle_pitch, template: cerb_r48_101, overrides: {}}
+  - {id: 37, joint: right_ankle_roll, template: vaxor_2550, overrides: {}}

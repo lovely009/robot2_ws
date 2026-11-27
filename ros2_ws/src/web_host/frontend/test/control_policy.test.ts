@@ -1,11 +1,11 @@
 import {expect,it,vi} from 'vitest';
 vi.stubGlobal('location',{search:''});
 vi.stubGlobal('localStorage',{getItem:()=>null});
-const api=await import('../../web/js/core/control_policy.js');
-const motor=await import('../../web/js/core/motor_state.js');
+const api=await import('../src/core/control_policy.ts');
+const motor=await import('../src/core/motor_state.ts');
 function state(){
   const cache=motor.createControlStateCache();
-  motor.applyControlState(cache,{schema_version:2,session_id:100,sequence:1,states:[{
+  motor.applyControlState(cache,{schema_version:6,session_id:100,sequence:1,control_states:[{
     motor_id:2,online:true,control_lifecycle:2,execution_state:1,policy_enabled:false,
     motion_enabled:false,state_age_ms:5,unified_fault_code:0,vendor_fault_code:0,last_failure_reason:0,policy_generation:1}]},1000);
   return {conn:{connected:true},policy:new Map(),motors:new Map([[2,{}]]),controlStates:cache,
@@ -13,7 +13,7 @@ function state(){
       {name:'direct',joints:['elbow'],motors:[{id:2}]},
       {name:'wrist',joints:['yaw','pitch'],motors:[{id:8},{id:9}]}]},
     transmissionStatus:{last:1000,data:{model:'arm',trajectory_enabled:true,joint_names:['elbow']}},
-    commandStatus:{last:1000,data:{model:'arm',joint_names:['elbow'],output_topic:'/motor/host_command_array',
+    commandStatus:{last:1000,data:{model:'arm',joint_names:['elbow'],output_topic:'/motor/command',
       feedback_fresh:true,controllers_ready:true,active_controllers:[],trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory'}}};
 }
 it('enables the online model motors using model gains',()=>{
@@ -66,14 +66,6 @@ it('uses runtime driver gains when the offline model has none',()=>{
   const s=state();s.modelTransmissions.policy_defaults={};
   Object.assign(s.transmissionStatus.data,{policy_defaults:{2:{kp:12,kd:.5}}});
   expect(api.jointPolicyTargets(s,'arm',true,1100)[0]).toMatchObject({kp:12,kd:.5});
-});
-
-it('distinguishes an empty gain table from a missing motor in a populated table',()=>{
-  const s=state();
-  s.modelTransmissions.policy_defaults={};
-  expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow('当前配置未提供电机使能增益（Kp、Kd）');
-  s.modelTransmissions.policy_defaults[8]={kp:12,kd:.5};
-  expect(()=>api.jointPolicyTargets(s,'arm',true,1100)).toThrow('m2 的有效增益');
 });
 it('rejects missing or invalid runtime gains rather than falling back',()=>{
   const s=state();

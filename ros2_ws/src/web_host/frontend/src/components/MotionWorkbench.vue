@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Upload, Play, Pause, RotateCcw, Download, Check, ArrowRight } from '@lucide/vue';
+import { Upload, Play, Pause, RotateCcw, Download, Check, ArrowRight, Radio } from '@lucide/vue';
+import LiveMotionPreview from './LiveMotionPreview.vue';
+import { createMotionPreview } from '../panels/motion_preview';
 
 type Mapping = { mode?: undefined; torso: string; source_to_robot: number[][];
   arms: Record<string, { source: string[]; robot: string[] }> };
@@ -11,11 +13,11 @@ type GenericMapping = { mode: 'generic'; source_root: string; reference_frame: n
 type Job = { id: string; state: 'mapping' | 'running' | 'done' | 'failed'; progress: number;
   bvh_name: string; urdf_name: string; robot_name: string; frames: number; frame_time: number;
   joint_count: number; source_joints: string[]; robot_links: string[]; mapping: Mapping | ShoulderMapping | GenericMapping | null;
+  constraint_source?: string; velocity_limit_rad_s?: number;
   up_axis?: 'y_up' | 'z_up'; position_mode?: string;
   warnings?: string[]; mapping_origin?: string; mapping_saved?: boolean;
   result_cached?: boolean; result_saved?: boolean; cache_warning?: string;
-  constraint_source?: 'cad';
-  summary?: { mechanical_limits_enforced?: boolean; cad_limits_enforced?: boolean; coupled_clamped_frames?: number;
+  summary?: { mechanical_limits_enforced?: boolean; simulation_limits_enforced?: boolean;
     covered_joints?: string[]; unmapped_joints?: string[];
     orientation_max_deg?: number; direction_max_deg?: number }; error?: string };
 type Preview = { times: number[]; duration: number };
@@ -49,13 +51,14 @@ const preview = ref<Preview>();
 const playing = ref(false);
 const modelStatus = ref('机器人骨架');
 const time = ref(0);
+const live = ref(false);
 const busy = computed(() => uploading.value || restoring.value || job.value?.state === 'running');
-const canSubmit = computed(() => !busy.value && !catalogLoading.value
+const canSubmit = computed(() => !live.value && !busy.value && !catalogLoading.value
   && !!(bvhSource.value || bvh.value) && !!(robotModel.value || urdf.value));
 const ready = computed(() => job.value?.state === 'done' && !!preview.value);
 const selectedSaved = computed(() => !!bvhSource.value && savedSources.value[bvhSource.value] === true);
 const seconds = (value: number) => `${value.toFixed(2)} s`;
-let display: { show(index: number): void; dispose(): void } | undefined;
+let display: { show(index: number): void; dispose(): void; setActive?(enabled: boolean): void } | undefined;
 let poll: ReturnType<typeof setTimeout>;
 let animation = 0;
 let disposed = false;
@@ -63,6 +66,12 @@ let lastTick = 0;
 const abort = new AbortController();
 const base = (id: string) => `/api/motion/jobs/${id}`;
 let statusRequest = 0;
+
+function toggleLive() {
+  live.value = !live.value;
+  if (live.value) { playing.value = false; modelChosen.value = true; }
+  display?.setActive?.(!live.value);
+}
 
 watch(bvhSource, name => {
   bvh.value = undefined;
@@ -151,15 +160,34 @@ function showFrame() {
   display?.show(index < 0 ? times.length - 1 : Math.max(0, index - 1));
 }
 
+function stopTick() {
+  if (animation) {
+    cancelAnimationFrame(animation);
+    animation = 0;
+  }
+}
+
 function tick(now: number) {
-  if (playing.value && preview.value) {
-    time.value = Math.min(preview.value.duration, time.value + (now - lastTick) / 1000);
-    showFrame();
-    if (time.value >= preview.value.duration) playing.value = false;
+  animation = 0;
+  if (!playing.value || !preview.value || disposed) return;
+  time.value = Math.min(preview.value.duration, time.value + (now - lastTick) / 1000);
+  showFrame();
+  if (time.value >= preview.value.duration) {
+    playing.value = false;
+    return;
   }
   lastTick = now;
   animation = requestAnimationFrame(tick);
 }
+
+watch(playing, (isPlaying) => {
+  if (isPlaying && preview.value && !disposed) {
+    lastTick = performance.now();
+    if (!animation) animation = requestAnimationFrame(tick);
+  } else {
+    stopTick();
+  }
+});
 
 async function accept(current: Job) {
   if (disposed) return;
@@ -192,16 +220,13 @@ async function accept(current: Job) {
     if (disposed) return;
     preview.value = data;
     await nextTick();
-    const path = '/js/motion_preview.js';
-    const module = await import(/* @vite-ignore */ path);
     if (disposed) return;
     display?.dispose();
-    display = module.createMotionPreview(canvas.value!, data, {
+    display = createMotionPreview(canvas.value!, data, {
       onModelStatus: (status: string) => { modelStatus.value = status; },
     });
     time.value = 0;
     playing.value = true;
-    lastTick = performance.now();
     void refreshSavedSources();
   } else error.value = current.error || '转换失败，请检查文件与映射';
 }
@@ -281,7 +306,6 @@ function togglePlayback() {
 function reset() { playing.value = false; time.value = 0; showFrame(); }
 
 onMounted(async () => {
-  animation = requestAnimationFrame(tick);
   const playSource = sessionStorage.getItem('robot2.motionPlaySource');
   sessionStorage.removeItem('robot2.motionPlaySource');
   const id = sessionStorage.getItem('robot2.motionJob');
@@ -339,32 +363,33 @@ onBeforeUnmount(() => {
       <div class="panel-title"><span>动作来源</span><Upload :size="14" /></div>
       <div class="motion-import-body">
         <div class="motion-file"><span class="eyebrow">01 / 人体动作</span><strong>动作库 BVH</strong>
-          <select v-model="bvhSource" aria-label="动作库 BVH" :disabled="busy || catalogLoading">
+          <select v-model="bvhSource" aria-label="动作库 BVH" :disabled="live || busy || catalogLoading">
             <option v-for="name in sources" :key="name" :value="name">{{ name }}{{ savedSources[name] ? ' · 已保存' : '' }}</option>
             <option value="">导入本地 BVH…</option>
           </select>
-          <input v-if="!bvhSource" type="file" accept=".bvh,.BHV,.bhv" aria-label="导入 BVH 文件" :disabled="busy || catalogLoading" @change="choose($event, 'bvh')" />
+          <input v-if="!bvhSource" type="file" accept=".bvh,.BHV,.bhv" aria-label="导入 BVH 文件" :disabled="live || busy || catalogLoading" @change="choose($event, 'bvh')" />
           <span v-if="bvhSource" class="motion-saved-status" role="status">{{ checkingSaved ? '正在核对保存状态…' : savedStatusError || (selectedSaved ? '已保存 · 当前模型与转换选项可复用' : '当前模型与转换选项尚无保存结果') }}</span>
         </div>
         <div class="motion-file"><span class="eyebrow">02 / 目标机器人</span><strong>模型库</strong>
-          <select v-model="robotModel" aria-label="目标机器人模型" :disabled="busy || catalogLoading" @change="modelChosen = true">
+          <select v-model="robotModel" aria-label="目标机器人模型" :disabled="live || busy || catalogLoading" @change="modelChosen = true">
             <option v-for="name in models" :key="name" :value="name">{{ name }}</option>
             <option value="">导入本地 URDF…</option>
           </select>
-          <input v-if="!robotModel" type="file" accept=".urdf,.xml" aria-label="导入 URDF 文件" :disabled="busy || catalogLoading" @change="choose($event, 'urdf')" />
+          <input v-if="!robotModel" type="file" accept=".urdf,.xml" aria-label="导入 URDF 文件" :disabled="live || busy || catalogLoading" @change="choose($event, 'urdf')" />
         </div>
         <div class="motion-source-options">
-          <label>BVH 坐标<select v-model="upAxis" :disabled="busy" aria-label="BVH 坐标"><option value="auto">自动识别</option><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
-          <label>长度单位<select v-model.number="scale" :disabled="busy" aria-label="BVH 长度单位"><option :value=".01">厘米 cm</option><option :value="1">米 m</option><option :value=".001">毫米 mm</option></select></label>
+          <label>BVH 坐标<select v-model="upAxis" :disabled="live || busy" aria-label="BVH 坐标"><option value="auto">自动识别</option><option value="y_up">Y 向上</option><option value="z_up">Z 向上（ROS）</option></select></label>
+          <label>长度单位<select v-model.number="scale" :disabled="live || busy" aria-label="BVH 长度单位"><option :value=".01">厘米 cm</option><option :value="1">米 m</option><option :value=".001">毫米 mm</option></select></label>
         </div>
         <p class="motion-hint">{{ catalogLoading ? '正在读取动作库与模型库…' : '自动识别人体与机器人对应关系；疑点首次确认，已记住的相同组合自动转换。输出仅用于预览。' }}</p>
-        <label class="motion-hint"><input v-model="reviewMapping" type="checkbox" :disabled="busy" />重新确认已记住的映射</label>
+        <label class="motion-hint"><input v-model="reviewMapping" type="checkbox" :disabled="live || busy" />重新确认已记住的映射</label>
         <button class="motion-primary" :disabled="!canSubmit" @click="submit"><ArrowRight :size="15" />{{ busy ? '处理中…' : selectedSaved && !reviewMapping ? '加载并播放' : '导入并转换' }}</button>
         <div v-if="job" class="motion-metadata">
           <span>目标模型 <strong>{{ job.robot_name }}</strong></span>
           <span>原始动作 <strong>{{ job.frames.toLocaleString() }} 帧 · {{ (1 / job.frame_time).toFixed(1) }} Hz</strong></span>
           <span v-if="job.up_axis">BVH 格式 <strong>{{ job.up_axis === 'z_up' ? 'Z 向上' : 'Y 向上' }}{{ job.position_mode === 'local_translation' ? ' · 已识别骨段位置通道' : '' }}</strong></span>
           <span>机器人 <strong>{{ job.joint_count }} 个关节</strong></span>
+          <span v-if="job.constraint_source === 'simulation'">预览范围 <strong>仿真几何与耦合限位 · {{ job.velocity_limit_rad_s?.toFixed(2) }} rad/s</strong></span>
           <span v-if="job.mapping_origin">映射来源 <strong>{{ job.mapping_origin === 'saved' ? '复用已确认映射' : job.mapping_origin === 'builtin' ? '已支持的双臂或肩关节映射' : job.mapping_saved ? '已确认并记住' : job.state === 'mapping' ? '候选待确认' : '本次已确认' }}</strong></span>
           <span v-if="job.mapping?.mode === 'shoulders12'">转换范围 <strong>右肩 → joint_link1、joint_link2；其余关节保持中立位，保留原帧与时间</strong></span>
         </div>
@@ -372,11 +397,14 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="motion-preview surface">
-      <div class="panel-title"><span>动作预览</span><span class="micro">人体骨架 <i class="motion-key human" /> / 机器人 <i class="motion-key robot" /></span></div>
+      <div class="panel-title"><span>动作预览</span>
+        <button class="motion-live-toggle" type="button" :aria-pressed="live" :disabled="!live && (busy || catalogLoading || !robotModel)"
+                @click="toggleLive"><Radio :size="14" />{{ live ? '停止实时跟随' : '实时跟随' }}</button><span class="micro">人体骨架 <i class="motion-key human" /> / 机器人 <i class="motion-key robot" /></span></div>
       <div class="motion-stage">
-        <canvas v-show="ready" ref="canvas" aria-label="人体与机器人动作三维预览" />
-        <span v-if="ready" class="motion-model-status" role="status" aria-label="机器人模型状态">{{ modelStatus }}</span>
-        <div v-if="!ready" class="motion-placeholder">
+        <LiveMotionPreview v-if="live" :model="robotModel" />
+        <canvas v-show="ready && !live" ref="canvas" aria-label="人体与机器人动作三维预览" />
+        <span v-if="ready && !live" class="motion-model-status" role="status" aria-label="机器人模型状态">{{ modelStatus }}</span>
+        <div v-if="!live && !ready" class="motion-placeholder">
           <div class="motion-stage-icon"><Upload v-if="!job" :size="30" /><Check v-else-if="job.state === 'done'" :size="30" /><ArrowRight v-else :size="30" /></div>
           <strong>{{ job?.state === 'running' ? '正在转换动作' : job?.state === 'mapping' ? '确认骨架对应关系' : job?.state === 'failed' ? '转换未完成' : '从一份动作开始' }}</strong>
           <span>{{ job?.state === 'running' ? '解析人体动作 → IK 求解 → 生成机器人预览' : '选择动作与目标模型，在这里查看转换结果' }}</span>
@@ -384,7 +412,7 @@ onBeforeUnmount(() => {
           <span v-if="job?.state === 'running'">{{ job.progress }}%</span>
         </div>
       </div>
-      <div class="motion-transport">
+      <div v-show="!live" class="motion-transport">
         <button :disabled="!ready" :aria-label="playing ? '暂停预览' : '播放预览'" @click="togglePlayback"><Pause v-if="playing" :size="17" /><Play v-else :size="17" /></button>
         <button :disabled="!ready" aria-label="回到动作起点" @click="reset"><RotateCcw :size="15" /></button>
         <input v-model.number="time" type="range" min="0" :max="preview?.duration || 0" step=".001" :disabled="!ready" aria-label="动作播放进度" @input="playing = false; showFrame()" />
@@ -398,7 +426,7 @@ onBeforeUnmount(() => {
         <label>人体根参考<select v-model="genericMapping.source_root" aria-label="人体根参考"><option v-for="name in job.source_joints" :key="name">{{ name }}</option></select></label>
         <label>参考帧<input v-model.number="genericMapping.reference_frame" type="number" min="0" :max="job.frames - 1" step="1" aria-label="参考帧" /></label>
         <div class="motion-alignment"><label v-for="(axis, i) in ['X', 'Y', 'Z']" :key="axis">对齐 {{ axis }}（°）<input v-model.number="alignment[i]" type="number" step="1" :aria-label="`对齐 ${axis} 角度`" /></label></div>
-        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">按 URDF 位置和速度限位</option><option value="preview">{{ job.constraint_source === 'cad' ? '按模型位置、预览速度和双轴可动范围钳制' : '仅几何预览：忽略缺失限位' }}</option></select></label>
+        <label>限位策略<select v-model="genericMapping.limit_policy" aria-label="限位策略"><option value="urdf">{{ job.constraint_source === 'simulation' ? '按仿真位置、速度和耦合范围' : '按 URDF 位置和速度限位' }}</option><option v-if="job.constraint_source !== 'simulation'" value="preview">仅几何预览：忽略缺失限位</option></select></label>
         <details v-if="job.warnings?.length" class="motion-mapping-notes"><summary>模型有 {{ job.warnings.length }} 项需核对</summary><ul><li v-for="warning in job.warnings" :key="warning">{{ warning }}</li></ul></details>
         <div class="motion-targets"><div v-for="target in genericMapping.targets" :key="target.target" class="motion-target-row">
           <label :for="`mapping-${target.target}`">{{ target.target }}<small>{{ target.reason || '已确认的对应关系' }}</small></label>
@@ -406,7 +434,7 @@ onBeforeUnmount(() => {
         </div></div>
         <label class="motion-remember"><input v-model="rememberMapping" type="checkbox" aria-label="记住映射" />记住本次映射；模型、骨架或参考姿势改变后重新确认</label>
         <button class="motion-primary" :disabled="busy || !genericMapping.targets.some(t => t.source) || !genericMapping.source_root || !alignment.every(Number.isFinite)" @click="convert">确认映射并转换</button>
-        <p class="motion-hint motion-mapping-notes">同一部位只映射到该组最后一个连杆，中间轴留空仍参与求解。参考帧对应机器人的中立姿势。预览恢复人体根朝向；导出仍为固定基座关节动作，不包含平衡、碰撞或实机验收。</p>
+        <p class="motion-hint motion-mapping-notes">同一部位只映射到该组最后一个连杆，中间轴留空仍参与求解。{{ job.constraint_source === 'simulation' ? '按人体骨段方向拟合姿态，第一帧作为初始姿态，不要求从机器人零位起步。' : '参考帧对应机器人的中立姿势。' }}预览恢复人体根朝向；导出仍为固定基座关节动作，不包含平衡、碰撞或实机验收。</p>
       </div>
     </section>
 
@@ -436,15 +464,17 @@ onBeforeUnmount(() => {
       <span v-if="job.result_cached">已加载保存结果，无需重新转换</span>
       <span v-else-if="job.result_saved">结果已保存，相同输入下次直接复用</span>
       <span v-if="job.cache_warning">{{ job.cache_warning }}</span>
-      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · <template v-if="job.summary.cad_limits_enforced">已按模型位置与预览速度限位，{{ job.summary.coupled_clamped_frames }} 帧触及双轴可动边界</template><template v-else>{{ job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</template></span>
+      <span v-if="job.summary?.covered_joints">覆盖 {{ job.summary.covered_joints.length }}/{{ job.joint_count }} 个关节 · {{ job.summary.simulation_limits_enforced ? '已检查仿真位置、速度和耦合范围' : job.summary.mechanical_limits_enforced ? '已检查位置与速度限位，仍仅供预览' : '几何预览，部分机械限位缺失' }}</span>
       <span v-if="job.summary?.direction_max_deg !== undefined">最大骨段方向误差 {{ job.summary.direction_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
       <span v-else-if="job.summary?.orientation_max_deg !== undefined">最大朝向误差 {{ job.summary.orientation_max_deg.toFixed(1) }}°；详细目标误差见报告</span>
     </section>
-    <p class="motion-footnote">机器人按 URDF 显示实体模型，缺失网格时保留骨架。双足预览按足底估计支撑高度，并保留源动作中的腾空阶段。转换结果保存在本机；动作、映射、模型、约束和算法未变化时直接复用。页面临时保留最近 3 次导入，服务重启后再次导入也可复用已保存结果。</p>
+    <p class="motion-footnote">机器人按 URDF 显示实体模型，缺失网格时保留骨架。双足预览按足底估计支撑高度，并保留源动作的腾空；这不是接触或平衡仿真。转换结果保存在本机；动作、映射、模型、约束和算法未变化时直接复用。页面临时保留最近 3 次导入，服务重启后再次导入也可复用已保存结果。</p>
   </div>
 </template>
 
 <style scoped>
+.motion-live-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; margin-right: auto; margin-left: 10px; white-space: nowrap; }
+.motion-live-toggle[aria-pressed="true"] { color: var(--accent); border-color: currentColor; }
 .motion-workbench { display: grid; grid-template-columns: 290px minmax(0, 1fr); grid-auto-rows: max-content; gap: 14px; min-height: 0; flex: 1; overflow: auto; align-content: start; padding-right: 3px; }
 .motion-import-body { display: grid; gap: 18px; padding: 18px; }
 .motion-file { display: flex; flex-direction: column; gap: 9px; padding: 17px 14px; border: 1px dashed var(--line-2); border-radius: 6px; background: #141c20; min-width: 0; }

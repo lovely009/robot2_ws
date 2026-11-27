@@ -106,9 +106,14 @@ def save_action(web_root: str, name, text, overwrite: bool = False) -> dict:
     if len(text.encode("utf-8")) > _MAX_TEXT_BYTES:
         raise ValueError("动作文件超过 8 MB 上限")
     summary = action_summary(json.loads(text))
-    directory = actions_directory(web_root)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = _checked_path(directory, name)
+    path = _checked_path(actions_directory(web_root), name)
+    write_action_text(path, text, overwrite=overwrite)
+    return {"name": name, **summary}
+
+
+def write_action_text(path: Path, text: str, *, overwrite=False):
+    """在已校验的目标路径原子发布完整动作文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
     # 覆盖仍写回 symlink-install 的源文件；暂存完成前不改动旧内容。
     destination = path.resolve() if overwrite else path
     try:
@@ -133,4 +138,3 @@ def save_action(web_root: str, name, text, overwrite: bool = False) -> dict:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    return {"name": name, **summary}

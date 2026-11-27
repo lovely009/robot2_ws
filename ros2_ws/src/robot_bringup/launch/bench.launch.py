@@ -16,6 +16,7 @@ from launch.conditions import LaunchConfigurationNotEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import LifecycleNode
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.events.matchers import matches_node_name
@@ -41,7 +42,11 @@ def generate_launch_description():
         name='bench_manager',
         namespace='',
         output='screen',
-        parameters=[{'model_dir': LaunchConfiguration('model_dir')}],
+        parameters=[{
+            'model_dir': LaunchConfiguration('model_dir'),
+            'auto_start_agent': ParameterValue(
+                LaunchConfiguration('auto_start_agent'), value_type=bool),
+        }],
     )
     bench_matcher = matches_node_name('bench_manager')
 
@@ -49,12 +54,20 @@ def generate_launch_description():
         DeclareLaunchArgument('model_dir', default_value=model_dir,
                               description='模型包根目录（含 models/）：臂视图几何与'
                                           '模型枚举的共同来源；可指向源码目录。'),
+        DeclareLaunchArgument('auto_start_agent', default_value='true',
+                              description='检测到唯一 STM32/串口控制板时默认自动启动 micro-ROS Agent。'),
         DeclareLaunchArgument('rosbridge_port', default_value='9090',
                               description='rosbridge WebSocket 端口。'),
         DeclareLaunchArgument('web_port', default_value='8080',
                               description='静态页面 HTTP 端口。'),
         DeclareLaunchArgument('firmware_model', default_value='',
                               description='固件实测 TF 的模型；空值不启动。'),
+        DeclareLaunchArgument('backend', default_value='bff',
+                              description='Web backend: bff or legacy.'),
+        DeclareLaunchArgument('host', default_value='0.0.0.0',
+                              description='HTTP/WS listen host for bff_server.'),
+        DeclareLaunchArgument('pin', default_value='',
+                              description='Optional control lease PIN for bff_server.'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(web_launch),
@@ -62,6 +75,9 @@ def generate_launch_description():
                 'model_dir': LaunchConfiguration('model_dir'),
                 'rosbridge_port': LaunchConfiguration('rosbridge_port'),
                 'web_port': LaunchConfiguration('web_port'),
+                'backend': LaunchConfiguration('backend'),
+                'host': LaunchConfiguration('host'),
+                'pin': LaunchConfiguration('pin'),
                 'control_mode': 'bench',
             }.items(),
         ),

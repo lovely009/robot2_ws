@@ -9,10 +9,11 @@ export default defineConfig({
     outDir: "../web/workbench",
     emptyOutDir: true,
     rolldownOptions: {
+      external: [/^three(?:\/|$)/, /^\/vendor\//],
       output: {
-        entryFileNames: "assets/workbench.js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]",
+        entryFileNames: "assets/workbench-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
   },
@@ -20,9 +21,7 @@ export default defineConfig({
     proxy: Object.fromEntries(
       [
         "/api",
-        "/robot_description",
-        "/js",
-        "/css",
+        "/robot_sim",
         "/vendor",
         "/roslib.min.js",
         "/panel_templates.html",

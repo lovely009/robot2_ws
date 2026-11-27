@@ -573,6 +573,24 @@ _b.publish_commands(_ms)
 assert _ms[1].applied_joint_nm == 45.0, _ms[1].applied_joint_nm
 assert _b.pub.msg.data == [45.0, 0.0]
 
+# VAXOR 协议刻度 (kp=0.008, kd=1.0) 应换算为关节侧物理 PD 增益后再计算力矩并按 tau_limits 钳位
+_vaxor_m = MODULE.MotorModel(7, "vaxor", gear_ratio=50.0, joint_nm_per_amp=1.365)
+_vaxor_m.enabled = True
+_vaxor_m.last_cmd = {"kp": 0.008, "kd": 1.0, "pos_rad": 0.001, "vel_rad_s": -0.1, "tau_nm": 0.0}
+_kp_v, _kd_v = MODULE.motor_joint_pd_gains(_vaxor_m, _vaxor_m.last_cmd)
+assert abs(_kp_v - (0.008 / 0.001115) * 50.0 * 1.365) < 1e-6
+assert abs(_kd_v - (1.0 / 85.636) * 50.0 * 1.365) < 1e-6
+_vb = _bridge()
+_vb.joint_map = {7: "joint_link1"}
+_vb.joints = ["joint_link1"]
+_vb.tau_limits = {7: 1.15}
+_vb.publish_commands({7: _vaxor_m})
+_expected_v_torque = _kp_v * 0.001 + _kd_v * (-0.1)
+assert abs(_vaxor_m.applied_joint_nm - _expected_v_torque) < 1e-9
+_vaxor_m.last_cmd["pos_rad"] = 0.1
+_vb.publish_commands({7: _vaxor_m})
+assert _vaxor_m.applied_joint_nm == 1.15
+
 
 # 用真实子进程验证 main 能走到设备打开阶段，而非提前因变量名错误失败。
 _startup = subprocess.run(

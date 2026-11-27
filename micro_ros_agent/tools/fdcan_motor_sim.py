@@ -397,6 +397,8 @@ VAXOR_VEL_LIMIT = 30_000
 VAXOR_CUR_SCALE = 11.0 / 4096.0
 VAXOR_KP_SCALE = 0.00001
 VAXOR_KD_SCALE = 0.01
+VAXOR_KP_FROM_CURRENT_GAIN_SCALE = 0.001115
+VAXOR_KD_FROM_CURRENT_GAIN_SCALE = 85.636
 VAXOR_GEAR_RATIO = 50.0
 VAXOR_TORQUE_PER_AMP = 0.042 * VAXOR_GEAR_RATIO * 0.65
 
@@ -520,6 +522,25 @@ def cerb_decode_command(data: bytes, torque_limit: float = CERB_MIT_TORQUE_FALLB
     return {"enabled": bool(data[0] & 0x80), "pos_rad": pos, "vel_rad_s": vel,
             "kp": kp_raw * kp_limit / 4095.0, "kd": kd_raw * kd_limit / 4095.0,
             "tau_nm": tau}
+
+
+def motor_joint_pd_gains(motor, cmd: dict) -> tuple[float, float]:
+    """Convert wire MIT gains to joint-side (Nm/rad, Nm*s/rad) PD gains.
+
+    CERB wire kp/kd are already joint-side physical gains.
+    VAXOR wire kp/kd are motor-side current-loop protocol scales:
+      k_act_kp (A/rad) = kp_wire / 0.001115
+      k_act_kd (A*s/rad) = kd_wire / 85.636
+      kp_joint = k_act_kp * gear_ratio * joint_nm_per_amp
+      kd_joint = k_act_kd * gear_ratio * joint_nm_per_amp
+    """
+    if getattr(motor, "kind", None) == "vaxor":
+        gear = motor.gear_ratio or VAXOR_GEAR_RATIO
+        nm_per_amp = motor.joint_nm_per_amp or VAXOR_TORQUE_PER_AMP
+        kp_joint = (cmd["kp"] / VAXOR_KP_FROM_CURRENT_GAIN_SCALE) * gear * nm_per_amp
+        kd_joint = (cmd["kd"] / VAXOR_KD_FROM_CURRENT_GAIN_SCALE) * gear * nm_per_amp
+        return kp_joint, kd_joint
+    return cmd["kp"], cmd["kd"]
 
 
 # ---- 节点模型 -----------------------------------------------------------
@@ -1068,8 +1089,9 @@ class GazeboBridge:
                     torques = {}
                     for a, motor in members:
                         cmd = motor.last_cmd
-                        torque = (cmd["kp"]*(cmd["pos_rad"]-axes[a].position)
-                                  + cmd["kd"]*(cmd["vel_rad_s"]-axes[a].velocity)
+                        kp_joint, kd_joint = motor_joint_pd_gains(motor, cmd)
+                        torque = (kp_joint*(cmd["pos_rad"]-axes[a].position)
+                                  + kd_joint*(cmd["vel_rad_s"]-axes[a].velocity)
                                   + cmd["tau_nm"])
                         limit = self.tau_limits.get(motor.id, self.tau_limit)
                         torques[a] = max(-limit, min(limit, torque))
@@ -1138,8 +1160,9 @@ class GazeboBridge:
             index = self.joints.index(joint)
             if "kp" not in cmd:
                 continue
-            driver = cmd["kp"] * (cmd["pos_rad"] - self.pos[joint])
-            damp = cmd["kd"] * (cmd["vel_rad_s"] - self.vel[joint])
+            kp_joint, kd_joint = motor_joint_pd_gains(m, cmd)
+            driver = kp_joint * (cmd["pos_rad"] - self.pos[joint])
+            damp = kd_joint * (cmd["vel_rad_s"] - self.vel[joint])
             torque = driver + damp + cmd["tau_nm"]
             limit = self.tau_limits.get(mid, self.tau_limit)
             out.data[index] = max(-limit, min(limit, torque))

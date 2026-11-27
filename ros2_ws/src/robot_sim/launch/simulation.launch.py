@@ -174,6 +174,8 @@ def _bind_motor_topology(
         # 所以这里是唯一的执行器权限来源。取型号库的 peak_torque_nm（真机峰值，
         # r58=45 / r48=11）；没写该字段的型号（vaxor）留 None，模拟器退回全局值。
         peak_torque = type_parameters.get("peak_torque_nm")
+        if peak_torque is None:
+            peak_torque = type_parameters.get("rated_torque_nm")
         try:
             peak_torque = float(peak_torque)
         except (TypeError, ValueError):

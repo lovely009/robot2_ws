@@ -680,3 +680,77 @@ it('playAction with returnToZero appends zero hold only on normal non-zero finis
   const sentAfterStop = pub.mock.calls.filter(([k, m]) => k === 'trajectory' && m.points?.length > 0);
   expect(sentAfterStop).toHaveLength(1);
 });
+
+it('armMotors keeps VAXOR protocol-scale policy_defaults instead of applying CERB kp/kd', async () => {
+  const { store, actions, data } = await fixture();
+  store.modelTransmissions = {
+    model: data.MODEL,
+    groups: [
+      { name: 'arm', motors: [{ id: 1 }], joints: ['elbow'], direct_mapping: true },
+      { name: 'wrist', motors: [{ id: 2 }], joints: ['wrist_pitch'], direct_mapping: true },
+    ],
+    policy_defaults: { 1: { kp: 30, kd: 1 }, 2: { kp: 0.008, kd: 1.0 } },
+    error: '',
+  };
+  store.transmissionStatus = {
+    last: Date.now(),
+    data: {
+      model: data.MODEL,
+      joint_names: ['elbow', 'wrist_pitch'],
+      trajectory_enabled: true,
+      policy_defaults: { 1: { kp: 30, kd: 1 }, 2: { kp: 0.008, kd: 1.0 } },
+    },
+  };
+  data.applyCommandStatus({
+    model: data.MODEL,
+    joint_names: ['elbow', 'wrist_pitch'],
+    mode: 'trajectory',
+    output_topic: '/motor/command',
+    feedback_fresh: true,
+    controllers_ready: true,
+    active_controllers: [],
+    trajectory_output_topic: '/host_control/trajectory_controller/follow_joint_trajectory',
+    gravity_enabled: false,
+    effort_gain: 1,
+  });
+  store.motors.set(2, { status: { online: true, lifecycle: 4 }, motion: { position: 0 } });
+  const action = {
+    target_ids: [1, 2],
+    points: [
+      { motor_id: 1, time_from_start_ms: 0, position: 0 },
+      { motor_id: 2, time_from_start_ms: 0, position: 0 },
+      { motor_id: 1, time_from_start_ms: 1000, position: 0.1 },
+      { motor_id: 2, time_from_start_ms: 1000, position: 0.1 },
+    ],
+  };
+  vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => action }));
+
+  const running = actions.playAction('mixed.json', { enable: true, loop: false, kp: 80, kd: 2 });
+  await vi.advanceTimersByTimeAsync(900);
+  expect(submitPolicy).toHaveBeenCalledTimes(1);
+  expect(submitPolicy.mock.calls[0][0]).toEqual([
+    { motor_id: 1, enabled: true, kp: 80, kd: 2, confirm_unprotected: false },
+    { motor_id: 2, enabled: true, kp: 0.008, kd: 1.0, confirm_unprotected: false },
+  ]);
+  expect(actions.playbackSnapshot().detail).toContain('VAXOR 沿用型号默认增益');
+  actions.stopPlayback();
+  await vi.advanceTimersByTimeAsync(50);
+  await running;
+
+  // returnToZero also preserves VAXOR defaults, and zero gains remain zero
+  submitPolicy.mockClear();
+  const rtz = actions.returnToZero({ enable: true, kp: 80, kd: 2 });
+  await vi.advanceTimersByTimeAsync(900);
+  expect(submitPolicy).toHaveBeenCalledTimes(1);
+  expect(submitPolicy.mock.calls[0][0]).toEqual([
+    { motor_id: 1, enabled: true, kp: 80, kd: 2, confirm_unprotected: false },
+    { motor_id: 2, enabled: true, kp: 0.008, kd: 1.0, confirm_unprotected: false },
+  ]);
+  actions.stopPlayback();
+  await vi.advanceTimersByTimeAsync(50);
+  await rtz;
+
+  expect(actions.resolvePlaybackMotorGains(store, data.MODEL, 2, 0, 0)).toEqual({
+    kp: 0, kd: 0, usedDefault: true,
+  });
+});

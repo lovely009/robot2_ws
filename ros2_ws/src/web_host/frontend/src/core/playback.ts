@@ -263,15 +263,61 @@ async function waitPlan(tid: number) {
   return 'timeout';
 }
 
-async function armMotors() {
+export function playbackPolicyDefaults(state: any, model: string): Record<number, { kp: number; kd: number }> {
+  const runtime = state.transmissionStatus;
+  if (runtime?.data?.model === model && Object.hasOwn(runtime.data, 'policy_defaults')) {
+    return runtime.data.policy_defaults || {};
+  }
+  if (state.modelTransmissions?.model === model) {
+    return state.modelTransmissions.policy_defaults || {};
+  }
+  return {};
+}
+
+export function resolvePlaybackMotorGains(
+  state: any,
+  model: string,
+  motorId: number,
+  requestedKp: number,
+  requestedKd: number,
+): { kp: number; kd: number; usedDefault: boolean } {
+  const entry = playbackPolicyDefaults(state, model)?.[motorId];
+  if (
+    entry
+    && Number.isFinite(entry.kp) && entry.kp > 0 && entry.kp < 1
+    && Number.isFinite(entry.kd) && entry.kd >= 0
+  ) {
+    return {
+      kp: requestedKp === 0 ? 0 : entry.kp,
+      kd: requestedKd === 0 ? 0 : entry.kd,
+      usedDefault: true,
+    };
+  }
+  return { kp: requestedKp, kd: requestedKd, usedDefault: false };
+}
+
+async function armMotors(): Promise<boolean> {
   assertPlaybackSession();
-  const ticket = await submitPolicy(player.ids.map(motor_id => ({
-    motor_id, enabled: true, kp: player.kp, kd: player.kd,
-    confirm_unprotected: isUnprotected(motor_id),
-  })));
+  let usedDefault = false;
+  const targets = player.ids.map((motor_id) => {
+    const gains = resolvePlaybackMotorGains(store, player.model, motor_id, player.kp, player.kd);
+    if (gains.usedDefault) usedDefault = true;
+    return {
+      motor_id,
+      enabled: true,
+      kp: gains.kp,
+      kd: gains.kd,
+      confirm_unprotected: isUnprotected(motor_id),
+    };
+  });
+  const ticket = await submitPolicy(targets);
   assertPlaybackSession();
   if (player.cancelRequested) throw new Error('已停止');
-  applyPolicySubmission(store, player.ids.map(motor_id => ({ motor_id, enabled: true, kp: player.kp, kd: player.kd })), ticket);
+  applyPolicySubmission(
+    store,
+    targets.map(({ motor_id, enabled, kp, kd }) => ({ motor_id, enabled, kp, kd })),
+    ticket,
+  );
   markDirty(DIRTY.POLICY);
   const deadline = Date.now() + 3000;
   while (true) {
@@ -281,7 +327,7 @@ async function armMotors() {
     if (outcome.error) throw new Error(outcome.error);
     if (outcome.confirmed) {
       confirmPolicyIntent(store, player.ids, ticket);
-      return;
+      return usedDefault;
     }
     if (Date.now() >= deadline) throw new Error('MCU 未确认本次使能策略，拒绝播放');
     await sleep(50);
@@ -361,7 +407,10 @@ export async function playAction(
     if (player.cancelRequested) throw new Error('已停止');
 
     if (player.enable) {
-      player.detail = `武装 kp=${player.kp} kd=${player.kd}…`;
+      const hasDefaultScaled = player.ids.some(
+        (id) => resolvePlaybackMotorGains(store, player.model, id, player.kp, player.kd).usedDefault,
+      );
+      player.detail = `武装 kp=${player.kp} kd=${player.kd}${hasDefaultScaled ? '（VAXOR 沿用型号默认增益）' : ''}…`;
       announce();
       await armMotors();
       if (player.cancelRequested) throw new Error('已停止');
@@ -483,7 +532,10 @@ export async function returnToZero(
     if (player.cancelRequested) throw new Error('已停止');
 
     if (player.enable) {
-      player.detail = `武装 kp=${player.kp} kd=${player.kd}…`;
+      const hasDefaultScaled = player.ids.some(
+        (id) => resolvePlaybackMotorGains(store, player.model, id, player.kp, player.kd).usedDefault,
+      );
+      player.detail = `武装 kp=${player.kp} kd=${player.kd}${hasDefaultScaled ? '（VAXOR 沿用型号默认增益）' : ''}…`;
       announce();
       await armMotors();
       if (player.cancelRequested) throw new Error('已停止');

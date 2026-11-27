@@ -307,7 +307,6 @@ class MotionJobs:
                 retargeter = ShoulderRetargeter if mapping.get('mode') == 'shoulders12' else ArmRetargeter
                 solver = retargeter(job['directory'] / 'robot.urdf', mapping, job['clip'],
                                     up_axis=job['up_axis'])
-            job['status'].update(state='running', progress=0, error='', mapping=copy.deepcopy(mapping))
             if self.cache is not None:
                 from .motion_cache import result_key
                 job['cache_key'] = result_key(job, mapping)
@@ -325,11 +324,12 @@ class MotionJobs:
                                 validate_positions(job['simulation'], solver.names, motion['positions'])
                         summary = json.loads((job['directory'] / 'report.json').read_text())
                         json.loads((job['directory'] / 'preview.json').read_text())
-                        job['status'].update(state='done', progress=100, summary=summary,
-                                             result_cached=True, result_saved=True)
+                        job['status'].update(state='done', progress=100, error='', mapping=copy.deepcopy(mapping),
+                                             summary=summary, result_cached=True, result_saved=True)
                         return copy.deepcopy(job['status'])
                     except (OSError, ValueError, KeyError, TypeError):
                         pass
+            job['status'].update(state='running', progress=0, error='', mapping=copy.deepcopy(mapping))
             self.thread = threading.Thread(target=self._convert, args=(key, solver), daemon=True)
             self.thread.start()
             return copy.deepcopy(job['status'])

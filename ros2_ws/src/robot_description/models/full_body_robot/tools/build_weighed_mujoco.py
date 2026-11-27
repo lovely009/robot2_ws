@@ -403,7 +403,7 @@ def build():
 
             ET.SubElement(
                 flange, 'geom', name=f'{prefix}_flange', type='mesh', mesh=f'{prefix}_flange',
-                group='2', rgba='0 0 0 0',
+                group='0', rgba='0.68 0.72 0.76 1',
                 **pose_attributes(start_old - fpos_old - flange_turn.apply(old_start), flange_turn),
             )
             ET.SubElement(
@@ -431,7 +431,7 @@ def build():
             mesh_rot = rod_orient.inv() * rod_turn
             ET.SubElement(
                 rod, 'geom', name=rod_name, type='mesh', mesh=rod_name,
-                group='2', rgba='0 0 0 0',
+                group='0', rgba='0.68 0.72 0.76 1',
                 **pose_attributes(-mesh_rot.apply(old_start), mesh_rot),
             )
             tip_name = f'{rod_name}_tip'
@@ -522,6 +522,69 @@ def build():
         for i in range(mj_model.neq)
     )
     print(f'JointPositionTargets test OK: max_closure_err={max_err_cfg:.2e} m')
+
+    # Strip static baked linkage triangles from MuJoCo copies of Base_link & waist_yaw
+    from scipy.spatial import cKDTree
+    from vtk.util.numpy_support import vtk_to_numpy
+    import struct
+
+    zero_data = mujoco.MjData(mj_model)
+    mujoco.mj_forward(mj_model, zero_data)
+    mesh_elements = {el.get('name'): el for el in root.findall('asset/mesh')}
+    dyn_pts = []
+    for g in root.iter('geom'):
+        gn = g.get('name', '')
+        if gn.endswith('_flange') or gn.endswith('_rod'):
+            gid = mj_model.geom(gn).id
+            pos = zero_data.geom_xpos[gid]
+            rot = zero_data.geom_xmat[gid].reshape(3, 3)
+            r = vtk.vtkSTLReader()
+            r.SetFileName(str(MODEL / mesh_elements[g.get('mesh')].get('file')))
+            r.Update()
+            pts = vtk_to_numpy(r.GetOutput().GetPoints().GetData()).astype(float)
+            dyn_pts.append(pts @ rot.T + pos)
+    dyn_tree = cKDTree(np.vstack(dyn_pts))
+
+    stripped_dir = MODEL / 'mujoco/visual_stripped'
+    stripped_dir.mkdir(parents=True, exist_ok=True)
+    for body_name in ('Base_link', 'waist_yaw'):
+        mname = f'{body_name}_vis_0'
+        mel = mesh_elements[mname]
+        r = vtk.vtkSTLReader()
+        r.SetFileName(str(MODEL / mel.get('file')))
+        r.Update()
+        poly = r.GetOutput()
+        pts = vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float32)
+        tris = vtk_to_numpy(poly.GetPolys().GetData()).reshape(-1, 4)[:, 1:]
+        bid = mj_model.body(body_name).id
+        wpts = pts.astype(float) @ zero_data.xmat[bid].reshape(3, 3).T + zero_data.xpos[bid]
+        tri_w = wpts[tris]
+        v_dists, _ = dyn_tree.query(tri_w.reshape(-1, 3), distance_upper_bound=0.0065)
+        v_near = np.isfinite(v_dists).reshape(-1, 3).all(axis=1)
+        c_dists, _ = dyn_tree.query(tri_w.mean(axis=1), distance_upper_bound=0.0045)
+        remove_mask = v_near & np.isfinite(c_dists)
+        kept = tris[~remove_mask]
+        assert len(kept) > 100, f'Too few triangles left for {body_name}: {len(kept)}'
+        out_stl = stripped_dir / f'{body_name}.STL'
+        tri_pts = pts[kept]
+        v1 = tri_pts[:, 1] - tri_pts[:, 0]
+        v2 = tri_pts[:, 2] - tri_pts[:, 0]
+        norms = np.cross(v1, v2)
+        nlen = np.linalg.norm(norms, axis=1, keepdims=True)
+        norms = np.divide(norms, nlen, out=np.zeros_like(norms), where=nlen > 1e-12)
+        with out_stl.open('wb') as f:
+            f.write(b'stripped for mujoco'.ljust(80, b'\0'))
+            f.write(struct.pack('<I', len(kept)))
+            rec = np.zeros(len(kept), dtype=[('n', '<f4', 3), ('v', '<f4', (3, 3)), ('attr', '<u2')])
+            rec['n'] = norms
+            rec['v'] = tri_pts
+            f.write(rec.tobytes())
+        mel.set('file', f'mujoco/visual_stripped/{body_name}.STL')
+        print(f'Stripped {int(remove_mask.sum())} static linkage tris from {body_name} -> {len(kept)} tris')
+
+    recompiled = deepcopy(root)
+    recompiled.find('compiler').set('meshdir', str(MODEL))
+    mujoco.MjModel.from_xml_string(ET.tostring(recompiled, encoding='unicode'))
 
     xml_text = ET.tostring(root, encoding='unicode') + '\n'
     OUT_MJCF.write_text(xml_text, encoding='utf-8')

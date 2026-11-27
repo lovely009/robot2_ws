@@ -18,8 +18,8 @@
     <position kp="350" kv="4.0" ctrlrange="-3.14159265 3.14159265" />
   </default>
   <asset>
-    <mesh name="Base_link_vis_0" file="mujoco/visual/native/Base_link.STL" />
-    <mesh name="waist_yaw_vis_0" file="mujoco/visual/native/waist_yaw.STL" />
+    <mesh name="Base_link_vis_0" file="mujoco/visual_stripped/Base_link.STL" />
+    <mesh name="waist_yaw_vis_0" file="mujoco/visual_stripped/waist_yaw.STL" />
     <mesh name="waist_pitch_vis_0" file="mujoco/visual/native/waist_pitch.STL" />
     <mesh name="waist_roll_vis_0" file="mujoco/visual/native/waist_roll.STL" />
     <mesh name="left_scapula_yaw_vis_0" file="mujoco/visual/native/left_scapula_yaw.STL" />
@@ -151,12 +151,12 @@
                             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
                             <joint name="left_wrist_flange_proximal" axis="0.8373832287 0.5466162533 0" limited="true" range="-1.579086 1.474259" />
                             <site name="left_wrist_flange_proximal_motor_ball" pos="-0.00541940742 0.008302206275 -0.00011847782" rgba="0 0 0 0" />
-                            <geom name="left_wrist_flange_proximal_flange" type="mesh" mesh="left_wrist_flange_proximal_flange" group="2" rgba="0 0 0 0" pos="-0.0194247199 -0.00679263641 -0.037" quat="1 0 0 0" />
+                            <geom name="left_wrist_flange_proximal_flange" type="mesh" mesh="left_wrist_flange_proximal_flange" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0194247199 -0.00679263641 -0.037" quat="1 0 0 0" />
                             <body name="left_wrist_flange_proximal_rod" pos="-0.00541940742 0.00830220627 -0.00011847782" quat="0.999987868 -0.0041133387 -0.00271010196 1.11477025e-05">
                               <joint name="left_wrist_flange_proximal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="left_wrist_flange_proximal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0507499999" mass="0.01" diaginertia="8.58520829e-06 8.58520829e-06 1e-07" />
-                              <geom name="left_wrist_flange_proximal_rod" type="mesh" mesh="left_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="-0.0142056794 -0.0147909209 -0.0369279983" quat="0.999987868 0.0041133387 0.00271010196 -1.11477025e-05" />
+                              <geom name="left_wrist_flange_proximal_rod" type="mesh" mesh="left_wrist_flange_proximal_rod" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0142056794 -0.0147909209 -0.0369279983" quat="0.999987868 0.0041133387 0.00271010196 -1.11477025e-05" />
                               <site name="left_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -164,12 +164,12 @@
                             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
                             <joint name="left_wrist_flange_distal" axis="0.8373832312 0.5466162494 0" limited="true" range="-1.534426 1.38631" />
                             <site name="left_wrist_flange_distal_motor_ball" pos="-0.0053990302 0.00827098967 0.00038427425" rgba="0 0 0 0" />
-                            <geom name="left_wrist_flange_distal_flange" type="mesh" mesh="left_wrist_flange_distal_flange" group="2" rgba="0 0 0 0" pos="0.0139936151 0.0151892445 -0.072" quat="1 0 0 0" />
+                            <geom name="left_wrist_flange_distal_flange" type="mesh" mesh="left_wrist_flange_distal_flange" group="0" rgba="0.68 0.72 0.76 1" pos="0.0139936151 0.0151892445 -0.072" quat="1 0 0 0" />
                             <body name="left_wrist_flange_distal_rod" pos="-0.0053990302 0.00827098967 0.00038427425" quat="0.99994837 -0.00267360801 -0.00980350937 2.62120945e-05">
                               <joint name="left_wrist_flange_distal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="left_wrist_flange_distal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0330029768" mass="0.01" diaginertia="3.63065491e-06 3.63065491e-06 1e-07" />
-                              <geom name="left_wrist_flange_distal_rod" type="mesh" mesh="left_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="0.0179704866 0.00730522748 -0.072712553" quat="0.99994837 0.00267360801 0.00980350937 -2.62120945e-05" />
+                              <geom name="left_wrist_flange_distal_rod" type="mesh" mesh="left_wrist_flange_distal_rod" group="0" rgba="0.68 0.72 0.76 1" pos="0.0179704866 0.00730522748 -0.072712553" quat="0.99994837 0.00267360801 0.00980350937 -2.62120945e-05" />
                               <site name="left_wrist_flange_distal_rod_tip" pos="0 0 0.0660059535" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -228,12 +228,12 @@
                             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
                             <joint name="right_wrist_flange_proximal" axis="0.8156389792 -0.5785611943 0" limited="true" range="-1.411665 1.582736" />
                             <site name="right_wrist_flange_proximal_motor_ball" pos="-0.00572005923 -0.00806397546 -0.00011847793" rgba="0 0 0 0" />
-                            <geom name="right_wrist_flange_proximal_flange" type="mesh" mesh="right_wrist_flange_proximal_flange" group="2" rgba="0 0 0 0" pos="0.0134005857 -0.0157062259 -0.0373" quat="1 0 0 0" />
+                            <geom name="right_wrist_flange_proximal_flange" type="mesh" mesh="right_wrist_flange_proximal_flange" group="0" rgba="0.68 0.72 0.76 1" pos="0.0134005857 -0.0157062259 -0.0373" quat="1 0 0 0" />
                             <body name="right_wrist_flange_proximal_rod" pos="-0.00572005923 -0.00806397546 -0.00011847793" quat="0.999987868 0.00400775126 -0.00286394054 -1.14781006e-05">
                               <joint name="right_wrist_flange_proximal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="right_wrist_flange_proximal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0507499999" mass="0.01" diaginertia="8.58520831e-06 8.58520831e-06 1e-07" />
-                              <geom name="right_wrist_flange_proximal_rod" type="mesh" mesh="right_wrist_flange_proximal_rod" group="2" rgba="0 0 0 0" pos="0.0189077168 -0.00794003232 -0.0372279837" quat="0.999987868 -0.00400775126 0.00286394054 1.14781006e-05" />
+                              <geom name="right_wrist_flange_proximal_rod" type="mesh" mesh="right_wrist_flange_proximal_rod" group="0" rgba="0.68 0.72 0.76 1" pos="0.0189077168 -0.00794003232 -0.0372279837" quat="0.999987868 -0.00400775126 0.00286394054 1.14781006e-05" />
                               <site name="right_wrist_flange_proximal_rod_tip" pos="0 0 0.1015" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -241,12 +241,12 @@
                             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
                             <joint name="right_wrist_flange_distal" axis="0.8156390105 -0.5785611502 0" limited="true" range="-1.390777 1.5887" />
                             <site name="right_wrist_flange_distal_motor_ball" pos="-0.00573065479 -0.008078913701 0.0003842746" rgba="0 0 0 0" />
-                            <geom name="right_wrist_flange_distal_flange" type="mesh" mesh="right_wrist_flange_distal_flange" group="2" rgba="0 0 0 0" pos="-0.0191581625 0.00753002525 -0.0723" quat="1 0 0 0" />
+                            <geom name="right_wrist_flange_distal_flange" type="mesh" mesh="right_wrist_flange_distal_flange" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0191581625 0.00753002525 -0.0723" quat="1 0 0 0" />
                             <body name="right_wrist_flange_distal_rod" pos="-0.00573065479 -0.0080789137 0.0003842746" quat="0.99994837 0.0101092372 0.00102973153 1.04103378e-05">
                               <joint name="right_wrist_flange_distal_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                               <joint name="right_wrist_flange_distal_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                               <inertial pos="0 0 0.0330029765" mass="0.01" diaginertia="3.63065487e-06 3.63065487e-06 1e-07" />
-                              <geom name="right_wrist_flange_distal_rod" type="mesh" mesh="right_wrist_flange_distal_rod" group="2" rgba="0 0 0 0" pos="-0.0132771618 0.0141362578 -0.0730124914" quat="0.99994837 -0.0101092372 -0.00102973153 -1.04103378e-05" />
+                              <geom name="right_wrist_flange_distal_rod" type="mesh" mesh="right_wrist_flange_distal_rod" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0132771618 0.0141362578 -0.0730124914" quat="0.99994837 -0.0101092372 -0.00102973153 -1.04103378e-05" />
                               <site name="right_wrist_flange_distal_rod_tip" pos="0 0 0.0660059531" rgba="0 0 0 0" />
                             </body>
                           </body>
@@ -267,12 +267,12 @@
               <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
               <joint name="left_shoulder_flange_linkage" axis="1 0 0" limited="true" range="-0.72854 0.345022" />
               <site name="left_shoulder_flange_linkage_motor_ball" pos="0 -0.0108416439 -0.01680650151" rgba="0 0 0 0" />
-              <geom name="left_shoulder_flange_linkage_flange" type="mesh" mesh="left_shoulder_flange_linkage_flange" group="2" rgba="0 0 0 0" pos="-0.0951997417 -0.1285 0.0375" quat="1 0 0 0" />
+              <geom name="left_shoulder_flange_linkage_flange" type="mesh" mesh="left_shoulder_flange_linkage_flange" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0951997417 -0.1285 0.0375" quat="1 0 0 0" />
               <body name="left_shoulder_flange_linkage_rod" pos="0 -0.0108416439 -0.0168065015" quat="-0.681398914 0.731824886 -0.00770532176 0.00827554329">
                 <joint name="left_shoulder_flange_linkage_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                 <joint name="left_shoulder_flange_linkage_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                 <inertial pos="0 0 0.0534529365" mass="0.01" diaginertia="9.52405474e-06 9.52405474e-06 1e-07" />
-                <geom name="left_shoulder_flange_linkage_rod" type="mesh" mesh="left_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="-0.0924339955 -0.0457826133 -0.123351467" quat="-0.681398914 -0.731824886 0.00770532176 -0.00827554329" />
+                <geom name="left_shoulder_flange_linkage_rod" type="mesh" mesh="left_shoulder_flange_linkage_rod" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0924339955 -0.0457826133 -0.123351467" quat="-0.681398914 -0.731824886 0.00770532176 -0.00827554329" />
                 <site name="left_shoulder_flange_linkage_rod_tip" pos="0 0 0.106905873" rgba="0 0 0 0" />
               </body>
             </body>
@@ -280,12 +280,12 @@
               <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
               <joint name="right_shoulder_flange_linkage" axis="1 0 0" limited="true" range="-0.707373 0.392279" />
               <site name="right_shoulder_flange_linkage_motor_ball" pos="0 -0.0108416439 -0.0168065015" rgba="0 0 0 0" />
-              <geom name="right_shoulder_flange_linkage_flange" type="mesh" mesh="right_shoulder_flange_linkage_flange" group="2" rgba="0 0 0 0" pos="0.0952002582 -0.1285 0.0375" quat="1 0 0 0" />
+              <geom name="right_shoulder_flange_linkage_flange" type="mesh" mesh="right_shoulder_flange_linkage_flange" group="0" rgba="0.68 0.72 0.76 1" pos="0.0952002582 -0.1285 0.0375" quat="1 0 0 0" />
               <body name="right_shoulder_flange_linkage_rod" pos="0 -0.0108416439 -0.0168065015" quat="-0.681398914 0.731824886 0.00770532112 -0.00827554261">
                 <joint name="right_shoulder_flange_linkage_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
                 <joint name="right_shoulder_flange_linkage_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
                 <inertial pos="0 0 0.0534529365" mass="0.01" diaginertia="9.52405474e-06 9.52405474e-06 1e-07" />
-                <geom name="right_shoulder_flange_linkage_rod" type="mesh" mesh="right_shoulder_flange_linkage_rod" group="2" rgba="0 0 0 0" pos="0.092434512 -0.0457826132 -0.123351479" quat="-0.681398914 -0.731824886 -0.00770532112 0.00827554261" />
+                <geom name="right_shoulder_flange_linkage_rod" type="mesh" mesh="right_shoulder_flange_linkage_rod" group="0" rgba="0.68 0.72 0.76 1" pos="0.092434512 -0.0457826132 -0.123351479" quat="-0.681398914 -0.731824886 -0.00770532112 0.00827554261" />
                 <site name="right_shoulder_flange_linkage_rod_tip" pos="0 0 0.106905873" rgba="0 0 0 0" />
               </body>
             </body>
@@ -295,12 +295,12 @@
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
           <joint name="waist_flange_plus_x" axis="1 0 0" limited="true" range="-0.611179 0.519467" />
           <site name="waist_plus_motor_ball" pos="0 0.048014 0.013952" rgba="0 0 0 0" />
-          <geom name="waist_plus_flange" type="mesh" mesh="waist_plus_flange" group="2" rgba="0 0 0 0" pos="-0.051 0 -0.049" quat="1 0 0 0" />
+          <geom name="waist_plus_flange" type="mesh" mesh="waist_plus_flange" group="0" rgba="0.68 0.72 0.76 1" pos="-0.051 0 -0.049" quat="1 0 0 0" />
           <body name="waist_plus_rod" pos="0 0.048014 0.013952" quat="0.995348512 0.0963397139 0 0">
             <joint name="waist_plus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
             <joint name="waist_plus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
             <inertial pos="0 0 0.0210000166" mass="0.01" diaginertia="1.47000233e-06 1.47000233e-06 1e-07" />
-            <geom name="waist_plus_rod" type="mesh" mesh="waist_plus_rod" group="2" rgba="0 0 0 0" pos="-0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
+            <geom name="waist_plus_rod" type="mesh" mesh="waist_plus_rod" group="0" rgba="0.68 0.72 0.76 1" pos="-0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
             <site name="waist_plus_rod_tip" pos="0 0 0.0420000332" rgba="0 0 0 0" />
           </body>
         </body>
@@ -308,12 +308,12 @@
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
           <joint name="waist_flange_minus_x" axis="1 0 0" limited="true" range="-0.626851 0.498458" />
           <site name="waist_minus_motor_ball" pos="0 0.048014 0.013952" rgba="0 0 0 0" />
-          <geom name="waist_minus_flange" type="mesh" mesh="waist_minus_flange" group="2" rgba="0 0 0 0" pos="0.051 0 -0.049" quat="1 0 0 0" />
+          <geom name="waist_minus_flange" type="mesh" mesh="waist_minus_flange" group="0" rgba="0.68 0.72 0.76 1" pos="0.051 0 -0.049" quat="1 0 0 0" />
           <body name="waist_minus_rod" pos="0 0.048014 0.013952" quat="0.995348512 0.0963397139 0 0">
             <joint name="waist_minus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
             <joint name="waist_minus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
             <inertial pos="0 0 0.0210000166" mass="0.01" diaginertia="1.47000233e-06 1.47000233e-06 1e-07" />
-            <geom name="waist_minus_rod" type="mesh" mesh="waist_minus_rod" group="2" rgba="0 0 0 0" pos="0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
+            <geom name="waist_minus_rod" type="mesh" mesh="waist_minus_rod" group="0" rgba="0.68 0.72 0.76 1" pos="0.051 -0.0591958663 -0.0525751644" quat="0.995348512 -0.0963397139 0 0" />
             <site name="waist_minus_rod_tip" pos="0 0 0.0420000332" rgba="0 0 0 0" />
           </body>
         </body>
@@ -406,12 +406,12 @@
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
         <joint name="hips_flange_plus_x" axis="0 0 1" limited="true" range="-0.206701 0.432847" />
         <site name="hips_plus_motor_ball" pos="0.0295604522505 0.016798124334 0" rgba="0 0 0 0" />
-        <geom name="hips_plus_flange" type="mesh" mesh="hips_plus_flange" group="2" rgba="0 0 0 0" pos="-0.0343956036 0.0640572759 -0.028" quat="0.891930064 0 0 -0.452173374" />
+        <geom name="hips_plus_flange" type="mesh" mesh="hips_plus_flange" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0343956036 0.0640572759 -0.028" quat="0.891930064 0 0 -0.452173374" />
         <body name="hips_plus_rod" pos="0.0295604523 0.0167981243 0" quat="-0.673217796 0.700125849 0.164900646 -0.171491611">
           <joint name="hips_plus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
           <joint name="hips_plus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
           <inertial pos="0 0 0.0324999999" mass="0.01" diaginertia="3.52083332e-06 3.52083332e-06 1e-07" />
-          <geom name="hips_plus_rod" type="mesh" mesh="hips_plus_rod" group="2" rgba="0 0 0 0" pos="-0.0564869108 0.029595739 -0.0551464017" quat="-0.685638797 -0.689720631 0.171518773 -0.157372812" />
+          <geom name="hips_plus_rod" type="mesh" mesh="hips_plus_rod" group="0" rgba="0.68 0.72 0.76 1" pos="-0.0564869108 0.029595739 -0.0551464017" quat="-0.685638797 -0.689720631 0.171518773 -0.157372812" />
           <site name="hips_plus_rod_tip" pos="0 0 0.0649999998" rgba="0 0 0 0" />
         </body>
       </body>
@@ -419,12 +419,12 @@
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6" />
         <joint name="hips_flange_minus_x" axis="0 0 1" limited="true" range="-0.347297 0.276834" />
         <site name="hips_minus_motor_ball" pos="-0.0295603444764 0.0167983157242 0" rgba="0 0 0 0" />
-        <geom name="hips_minus_flange" type="mesh" mesh="hips_minus_flange" group="2" rgba="0 0 0 0" pos="0.00901415307 0.0721466367 -0.028" quat="0.79399952 0 0 0.607918385" />
+        <geom name="hips_minus_flange" type="mesh" mesh="hips_minus_flange" group="0" rgba="0.68 0.72 0.76 1" pos="0.00901415307 0.0721466367 -0.028" quat="0.79399952 0 0 0.607918385" />
         <body name="hips_minus_rod" pos="-0.0295603445 0.0167983157 0" quat="-0.67321786 0.70012562 -0.164901022 0.17149193">
           <joint name="hips_minus_rod_x" axis="1 0 0" damping="0.001" armature="0.00005" />
           <joint name="hips_minus_rod_y" axis="0 1 0" damping="0.001" armature="0.00005" />
           <inertial pos="0 0 0.0324999998" mass="0.01" diaginertia="3.52083328e-06 3.52083328e-06 1e-07" />
-          <geom name="hips_minus_rod" type="mesh" mesh="hips_minus_rod" group="2" rgba="0 0 0 0" pos="0.0587431107 0.0326656846 -0.0285942037" quat="-0.662584994 -0.744988928 -0.0633476828 0.0442684427" />
+          <geom name="hips_minus_rod" type="mesh" mesh="hips_minus_rod" group="0" rgba="0.68 0.72 0.76 1" pos="0.0587431107 0.0326656846 -0.0285942037" quat="-0.662584994 -0.744988928 -0.0633476828 0.0442684427" />
           <site name="hips_minus_rod_tip" pos="0 0 0.0649999995" rgba="0 0 0 0" />
         </body>
       </body>

@@ -1,6 +1,7 @@
 """主机 JTC → MicroRosSystem；由 robot.launch.py 组合唯一的主机桥。"""
 import math
 from pathlib import Path
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 
@@ -111,6 +112,29 @@ def control_urdf_file(config_file, urdf_file):
     return urdf_file
 
 
+def _big_core_prefix():
+    """Return a taskset prefix pinning ros2_control_node to big cores on big.LITTLE hosts."""
+    if shutil.which('taskset') is None:
+        return ''
+    freqs = {}
+    for freq_file in Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/cpuinfo_max_freq'):
+        cpu_name = freq_file.parent.parent.name
+        if not cpu_name.startswith('cpu') or not cpu_name[3:].isdigit():
+            continue
+        try:
+            freqs[int(cpu_name[3:])] = int(freq_file.read_text(encoding='utf-8').strip())
+        except (OSError, ValueError):
+            continue
+    if not freqs:
+        return ''
+    min_freq = min(freqs.values())
+    max_freq = max(freqs.values())
+    if max_freq <= min_freq:
+        return ''
+    big_cpus = sorted(cpu for cpu, freq in freqs.items() if freq > min_freq)
+    return f"taskset -c {','.join(str(c) for c in big_cpus)}"
+
+
 def launch_control_stack(context):
     config_file = LaunchConfiguration('motor_config_file').perform(context)
     urdf_file = control_urdf_file(config_file, LaunchConfiguration('urdf_file').perform(context))
@@ -130,6 +154,7 @@ def launch_control_stack(context):
         return []
     manager = Node(package='controller_manager', executable='ros2_control_node',
                    namespace='host_control', output='screen',
+                   prefix=_big_core_prefix(),
                    parameters=[{'robot_description': description}, parameters_file])
     broadcaster = Node(package='controller_manager', executable='spawner', output='screen',
                        arguments=['joint_state_broadcaster', '--controller-manager',

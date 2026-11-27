@@ -14,6 +14,7 @@
 #include "can_bridge_msgs/msg/motor_system_state.hpp"
 #include "hardware_interface/system_interface.hpp"
 #include "rclcpp/duration.hpp"
+#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp/node.hpp"
 #include "rclcpp/node_options.hpp"
@@ -100,6 +101,7 @@ private:
   std::vector<double> recovery_max_;
 
   std::shared_ptr<rclcpp::Node> node_;
+  std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr position_limits_callback_;
   rclcpp::Publisher<Command>::SharedPtr command_pub_;
   rclcpp::Subscription<Motion>::SharedPtr motion_sub_;
@@ -115,6 +117,7 @@ private:
   uint64_t control_session_{0};
   uint64_t session_time_floor_ns_{0};
   uint32_t motion_seq_{0};
+  uint32_t last_mapped_motion_seq_{0U};
   uint32_t control_seq_{0};
   uint32_t command_seq_{0};
   bool active_{false};

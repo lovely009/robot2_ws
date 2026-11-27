@@ -1,4 +1,10 @@
 <robot name="full_body_robot">
+  <link name="world" />
+  <joint name="world_to_base" type="fixed">
+    <parent link="world" />
+    <child link="Base_link" />
+    <origin xyz="0 0 0.999840" rpy="0 0 0" />
+  </joint>
   <link name="Base_link">
     <inertial>
       <origin xyz="-0.009750540908150267 -1.465018477335878e-05 -0.01227180263887618" rpy="0 0 0" />

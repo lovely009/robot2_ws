@@ -867,16 +867,53 @@ def build():
     print(f'Torque MJCF compiled & 200-step PD hold OK: nu={t_model.nu}, neq={t_model.neq}, max_closure_err={t_err:.2e} m')
     OUT_TORQUE.write_text(ET.tostring(torque_root, encoding='unicode') + '\n', encoding='utf-8')
 
-    # Write standalone URDF; keep full_body_robot.standing.urdf clean (38 weighed links, no duplicated CAD linkages)
+    # Write standalone URDF and standing URDF (lifted so lowest foot vertex sits on Z=0)
     import build_mujoco_model as shared
     limits_dict = {
         'joint_limits': {jn: dict(zip(('lower', 'upper'), _joint_bounds(limits_raw[jn]))) for jn in joints}
     }
     shared.STANDALONE = OUT_STANDALONE
     shared.write_standalone_urdf(root, joints, limits_dict)
-    shutil.copy2(SOURCE_URDF, OUT_STANDING)
+    _write_standing_urdf(SOURCE_URDF, frames, OUT_STANDING)
     print(f'Wrote {OUT_MJCF}, {OUT_TORQUE}, {OUT_STANDALONE}, {OUT_STANDING}')
     return 0
+
+
+def _write_standing_urdf(source_urdf: Path, frames: dict, out_path: Path) -> None:
+    """Write standing URDF with world_to_base lifting the lowest visual vertex to Z=0."""
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    urdf_root = deepcopy(ET.parse(source_urdf).getroot())
+    min_z = float('inf')
+    for link_el in urdf_root.findall('link'):
+        lname = link_el.get('name')
+        if lname not in frames:
+            continue
+        lp, lr = frames[lname]
+        lr_mat = lr.as_matrix()
+        for vis_el in link_el.findall('visual'):
+            mesh_el = vis_el.find('geometry/mesh')
+            if mesh_el is None:
+                continue
+            rel = mesh_el.get('filename').split('models/full_body_robot/')[-1]
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(str(MODEL / rel))
+            reader.Update()
+            pts = vtk_to_numpy(reader.GetOutput().GetPoints().GetData()).astype(float)
+            vp, vr = parse_origin(vis_el.find('origin'))
+            pts_w = (pts @ vr.as_matrix().T + vp) @ lr_mat.T + lp
+            min_z = min(min_z, float(pts_w[:, 2].min()))
+    lift_z = -min_z if math.isfinite(min_z) else 0.0
+
+    world_link = ET.Element('link', name='world')
+    world_joint = ET.Element('joint', name='world_to_base', type='fixed')
+    ET.SubElement(world_joint, 'parent', link='world')
+    ET.SubElement(world_joint, 'child', link='Base_link')
+    ET.SubElement(world_joint, 'origin', xyz=f'0 0 {lift_z:.6f}', rpy='0 0 0')
+    urdf_root.insert(0, world_joint)
+    urdf_root.insert(0, world_link)
+    ET.indent(urdf_root, space='  ')
+    out_path.write_text(ET.tostring(urdf_root, encoding='unicode') + '\n', encoding='utf-8')
 
 
 if __name__ == '__main__':

@@ -294,7 +294,7 @@ def create_app(
                         'source_hz': round(rx_hz, 2),
                         'age_ms': round(max(0.0, (now_mono - snap.received_mono) * 1000.0), 3),
                         'data': snap.payload,
-                    }, ensure_ascii=False, separators=(',', ':'))
+                    }, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
                     if await hub.broadcast_text(ch, frame) > 0:
                         sent_any = True
                     last_seq[ch] = snap.seq
@@ -307,7 +307,7 @@ def create_app(
                             'seq': item.seq,
                             'server_ts_ms': int(time.time() * 1000),
                             'data': item.payload,
-                        }, ensure_ascii=False, separators=(',', ':'))
+                        }, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
                         if await hub.broadcast_text('telemetry:events', pkt) > 0:
                             sent_any = True
                         last_event_seq = item.seq
@@ -1071,7 +1071,7 @@ def create_app(
                                         max(0.0, (now_mono - snap.received_mono) * 1000.0), 3,
                                     ),
                                     'data': snap.payload,
-                                }, ensure_ascii=False, separators=(',', ':')))
+                                }, ensure_ascii=False, allow_nan=False, separators=(',', ':')))
                 elif op == 'unsubscribe':
                     active = hub.unsubscribe(cid, list(msg.get('channels') or []))
                     await ws.send_text(json.dumps({'op': 'subscribed', 'channels': active}))

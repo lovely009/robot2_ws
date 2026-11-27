@@ -1140,7 +1140,6 @@ def create_app(
     # --- Static Files & Model Assets (keep last) ---
 
     if prefix and resolved_model_dir is not None:
-        @app.get(prefix + '/{file_path:path}', include_in_schema=False)
         async def serve_model_asset(file_path: str):
             target = _resolve_under(resolved_model_dir, file_path)
             if target is None or not target.is_file():
@@ -1154,6 +1153,14 @@ def create_app(
                     },
                 )
             return FileResponse(target)
+
+        for mount_prefix in dict.fromkeys(p for p in (prefix, '/robot_sim', '/robot_description') if p):
+            app.add_api_route(
+                mount_prefix + '/{file_path:path}',
+                serve_model_asset,
+                methods=['GET'],
+                include_in_schema=False,
+            )
 
     @app.get('/', include_in_schema=False)
     @app.get('/index.html', include_in_schema=False)

@@ -5,7 +5,6 @@
 #include <micro_ros_platformio.h>
 
 #include "dma.h"
-#include "firmware_config.h"
 #include "led_task.h"
 #include "micro_ros_task.h"
 #include "serial_transport.h"
@@ -73,11 +72,7 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t pxTask,
 void initialize_system(void) {
   // PC15 控制扩展口的 VCC_5V。利用已有的 USB 枚举等待，让模块先上电再探测。
   __HAL_RCC_GPIOC_CLK_ENABLE();
-#if FIRMWARE_ENABLE_CAN4
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_SET);
-#else
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_RESET);
-#endif
   GPIO_InitTypeDef power = {};
   power.Pin = GPIO_PIN_15;
   power.Mode = GPIO_MODE_OUTPUT_PP;

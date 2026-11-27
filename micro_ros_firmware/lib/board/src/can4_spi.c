@@ -56,8 +56,17 @@ bool can4_spi_init(void) {
   spi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   spi3.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
   spi3.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
+  CLEAR_BIT(SPI3->CR1, SPI_CR1_SPE);
+  CLEAR_BIT(SPI3->CFG1, SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
+  DMA1_Stream0->CR &= ~DMA_SxCR_EN;
+  DMA1_Stream1->CR &= ~DMA_SxCR_EN;
+  dma_state = IDLE;
   if (HAL_SPI_Init(&spi3) != HAL_OK) return false;
-  g_can4_dma_diag = (struct can4_dma_diagnostics){0};
+  static bool g_dma_diag_initialized = false;
+  if (!g_dma_diag_initialized) {
+    g_can4_dma_diag = (struct can4_dma_diagnostics){0};
+    g_dma_diag_initialized = true;
+  }
 
   // Stream0/1 对应 DMAMUX1 通道 0/1，字节宽、地址自增、普通模式。
   DMAMUX1_Channel0->CCR = DMA_REQUEST_SPI3_RX;
@@ -229,6 +238,58 @@ bool can4_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, bool may
 
 bool can4_irq_asserted(void) {
   return HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_14) == GPIO_PIN_RESET;
+}
+
+void can4_spi_power_set(bool on) {
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  GPIO_InitTypeDef pin = {0};
+  if (!on) {
+    TIM23->CR1 = TIM_CR1_OPM;
+    TIM23->DIER = 0U;
+    TIM23->SR = 0U;
+    SPI3->IER = 0U;
+    CLEAR_BIT(SPI3->CR1, SPI_CR1_SPE);
+    CLEAR_BIT(SPI3->CFG1, SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
+    (void)stop_streams();
+    SPI3->IFCR = SPI_CLEAR;
+    dma_state = IDLE;
+
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_RESET);
+    // 断电期间拉低输出并断开上拉，防止经 H1 引脚 ESD 二极管反向寄生供电导致芯片无法彻底复位。
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10 | GPIO_PIN_12, GPIO_PIN_RESET);
+    pin.Pin = GPIO_PIN_9;
+    pin.Mode = GPIO_MODE_OUTPUT_PP;
+    pin.Pull = GPIO_NOPULL;
+    pin.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &pin);
+
+    pin.Pin = GPIO_PIN_10 | GPIO_PIN_12;
+    HAL_GPIO_Init(GPIOC, &pin);
+
+    pin.Pin = GPIO_PIN_11;
+    pin.Mode = GPIO_MODE_INPUT;
+    pin.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOC, &pin);
+
+    pin.Pin = GPIO_PIN_14;
+    pin.Mode = GPIO_MODE_INPUT;
+    pin.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOE, &pin);
+  } else {
+    pin.Mode = GPIO_MODE_INPUT;
+    pin.Pull = GPIO_NOPULL;
+    pin.Pin = GPIO_PIN_9;
+    HAL_GPIO_Init(GPIOB, &pin);
+    pin.Pin = GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12;
+    HAL_GPIO_Init(GPIOC, &pin);
+    pin.Pin = GPIO_PIN_14;
+    HAL_GPIO_Init(GPIOE, &pin);
+
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_SET);
+  }
 }
 
 void can4_init_delay_ms(uint32_t ms) {

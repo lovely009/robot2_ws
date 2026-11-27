@@ -6,8 +6,9 @@
 
 static uint8_t chip[4096];
 static bool connected, corrupt_once, int_connected = true, int_stuck_low;
-static bool unplug_on_ram_write;
-static unsigned resets, normal_tx, rx_pending;
+static bool unplug_on_ram_write, brownout_latched;
+static bool power_on = true;
+static unsigned resets, normal_tx, rx_pending, power_off_count, power_on_count;
 
 static void put32(unsigned reg, uint32_t value) {
   for (unsigned i = 0; i < 4; ++i) chip[reg + i] = value >> (8 * i);
@@ -48,6 +49,18 @@ static void reset_registers(void) {
 }
 
 bool can4_spi_init(void) { return true; }
+void can4_spi_power_set(bool on) {
+  if (!on) {
+    if (power_on) ++power_off_count;
+    power_on = false;
+  } else {
+    if (!power_on) {
+      ++power_on_count;
+      brownout_latched = false;
+    }
+    power_on = true;
+  }
+}
 void can4_init_delay_ms(uint32_t ms) { (void)ms; }
 bool can4_irq_asserted(void) {
   return int_stuck_low || (int_connected && (chip[0x6c] & 9U) &&
@@ -59,7 +72,7 @@ bool can4_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, bool may
   assert(length <= CAN4_SPI_MAX_BYTES);
   assert(may_block == (tx[0] >> 4 == 11 && addr >= 0x400 && addr < 0xc00));
   memset(rx, 0xff, length);
-  if (!connected) return true; // 拔掉模块时 H7 传输本身仍可成功
+  if (!connected || !power_on || brownout_latched) return true; // 拔掉/欠压锁死时 H7 传输仍返回 true但读回 0xFF
   switch (tx[0] >> 4) {
   case 0:
     assert(length == 2 && addr == 0 && (chip[2] >> 5) == 4);
@@ -168,4 +181,57 @@ int main(void) {
   assert(!mcp2518fd_init() && !mcp2518fd_ready() && normal_tx == 8);
   int_stuck_low = true;
   assert(!mcp2518fd_init() && !mcp2518fd_ready());
+
+  // 1) 开机未上电失败后，后续上电通过非阻塞 drain() 自动重初始化恢复上线。
+  int_stuck_low = false;
+  int_connected = true;
+  connected = false;
+  assert(!mcp2518fd_init() && !mcp2518fd_ready());
+  connected = true;
+  chip[2] = 4U << 5;
+  uint32_t t = 100U;
+  mcp2518fd_drain(&ring, t); // arm backoff
+  for (int i = 0; i < 60 && !mcp2518fd_ready(); ++i) {
+    t += 50U;
+    mcp2518fd_drain(&ring, t);
+  }
+  assert(mcp2518fd_ready() && mcp2518fd_transmit(&frame, 15));
+
+  // 2) 模拟欠压锁死（SPI 读全 0xFF 直到 PC15 硬断电再上电）：连续软件重试失败后触发 power cycle 并恢复。
+  brownout_latched = true;
+  unsigned prev_off = power_off_count, prev_on = power_on_count;
+  t += 600U;
+  mcp2518fd_drain(&ring, t); // 触发 HEALTH_CHECK 发现 CRC/SPI 错误
+  assert(!mcp2518fd_ready());
+  for (int i = 0; i < 120 && !mcp2518fd_ready(); ++i) {
+    t += 100U;
+    mcp2518fd_drain(&ring, t);
+  }
+  assert(mcp2518fd_ready() && power_off_count > prev_off && power_on_count > prev_on && power_on);
+
+  // 3) 静默掉电（模块被意外复位回 CONFIG 模式）：周期巡检发现后自动恢复 NORMAL。
+  chip[2] = 4U << 5;
+  t += 600U;
+  mcp2518fd_drain(&ring, t);
+  assert(!mcp2518fd_ready());
+  for (int i = 0; i < 60 && !mcp2518fd_ready(); ++i) {
+    t += 100U;
+    mcp2518fd_drain(&ring, t);
+  }
+  assert(mcp2518fd_ready() && (chip[2] >> 5) == 0);
+
+  // 4) 运行期 TX FIFO1 卡死（连续 8 次满且持续 >=500ms）：自动触发软件重初始化恢复。
+  chip[0x60] = 0;
+  for (int i = 0; i < 8; ++i) assert(!mcp2518fd_transmit(&frame, 15));
+  t += 10U;
+  mcp2518fd_drain(&ring, t); // 记录卡死起点
+  assert(mcp2518fd_ready());
+  t += 600U;
+  mcp2518fd_drain(&ring, t); // 超过 500ms 触发重初始化
+  assert(!mcp2518fd_ready());
+  for (int i = 0; i < 60 && !mcp2518fd_ready(); ++i) {
+    t += 100U;
+    mcp2518fd_drain(&ring, t);
+  }
+  assert(mcp2518fd_ready() && (chip[0x60] & 1U) == 1U && mcp2518fd_transmit(&frame, 15));
 }

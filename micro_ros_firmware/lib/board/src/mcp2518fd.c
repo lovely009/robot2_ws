@@ -22,7 +22,44 @@ static volatile struct can4_diagnostics {
   uint32_t stage, device_id, crc_errors, spi_errors, last_error_address;
   uint32_t rx_overflows, rx_frames, tx_submitted, last_rx_id;
   uint32_t crc_expected, crc_received;
+  uint32_t reinit_attempts, reinit_successes, power_cycles, tx_stalls, mode_faults;
 } g_can4_diag __attribute__((section(".dtcm_noinit")));
+
+enum {
+  REINIT_BACKOFF_MS = 1000U,
+  POWER_CYCLE_FAIL_THRESHOLD = 2U,
+  POWER_OFF_MS = 60U,
+  POWER_ON_MS = 30U,
+  HEALTH_CHECK_MS = 500U,
+  TX_STALL_MS = 500U,
+  TX_STALL_MIN_REJECTS = 8U,
+  RESET_SETTLE_MS = 4U
+};
+
+enum reinit_state {
+  R_IDLE = 0,
+  R_POWER_OFF,
+  R_POWER_ON,
+  R_REQ_CONFIG,
+  R_WAIT_CONFIG,
+  R_WAIT_RESET,
+  R_WAIT_LOOPBACK_MODE,
+  R_WAIT_LOOPBACK_RX,
+  R_WAIT_LOOPBACK_CLR,
+  R_WAIT_NORMAL_CFG,
+  R_WAIT_NORMAL
+};
+
+static enum reinit_state g_reinit_state;
+static bool g_backoff_armed;
+static bool g_tx_stall_active;
+static uint32_t g_fail_streak;
+static uint32_t g_tx_full_streak;
+static uint32_t g_tx_stall_since_ms;
+static uint32_t g_last_health_ms;
+static uint32_t g_last_attempt_ms;
+static uint32_t g_step_start_ms;
+static unsigned g_poll_count;
 
 static const uint8_t dlc_bytes[16] = {0,1,2,3,4,5,6,7,8,12,16,20,24,32,48,64};
 static uint32_t get_le32(const uint8_t *b) {
@@ -209,8 +246,264 @@ static bool loopback(void) {
   return false;
 }
 
+static void reset_runtime_recovery(void) {
+  g_reinit_state = R_IDLE;
+  g_backoff_armed = false;
+  g_tx_stall_active = false;
+  g_fail_streak = 0U;
+  g_tx_full_streak = 0U;
+  g_tx_stall_since_ms = 0U;
+  g_last_health_ms = 0U;
+  g_last_attempt_ms = 0U;
+  g_step_start_ms = 0U;
+  g_poll_count = 0U;
+}
+
+static bool probe_reset_and_configure(void) {
+  uint8_t osc[4], device[4];
+  if (!read_bytes(OSC, osc, 4) || !read_bytes(DEVID, device, 4)) return false;
+  g_can4_diag.device_id = get_le32(device);
+  if ((get_le32(osc) & 0x411U) != 0x400U || (get_le32(device) & ~0xffU) != 0) return false;
+  g_can4_diag.stage = INIT_TIMING;
+  return configure();
+}
+
+static bool send_loopback_probe(void) {
+  can_tx_frame_t probe = {
+    .can_id = 0x5a5, .is_fd = true, .is_brs = true, .size = 64
+  };
+  for (unsigned i = 0; i < probe.size; ++i) probe.data[i] = (uint8_t)(0xa5U ^ (29U * i));
+  return !can4_irq_asserted() && send_object(&probe, 15);
+}
+
+static bool verify_loopback_probe(void) {
+  can_rx_frame_t f = {0};
+  if (receive_object(&f) != RX_DATA || !f.is_fd || !f.is_brs ||
+      f.can_id != 0x5a5U || f.dlc != 64U) {
+    return false;
+  }
+  for (unsigned i = 0; i < 64U; ++i) {
+    if (f.data[i] != (uint8_t)(0xa5U ^ (29U * i))) return false;
+  }
+  return true;
+}
+
+static void fail_reinit_attempt(uint32_t now_ms) {
+  ++g_fail_streak;
+  g_last_attempt_ms = now_ms;
+  g_backoff_armed = true;
+  g_reinit_state = R_IDLE;
+}
+
+static void step_reinit(uint32_t now_ms) {
+  switch (g_reinit_state) {
+  case R_IDLE:
+    if (!g_backoff_armed) {
+      g_last_attempt_ms = now_ms;
+      g_backoff_armed = true;
+      return;
+    }
+    if ((uint32_t)(now_ms - g_last_attempt_ms) < REINIT_BACKOFF_MS) return;
+    g_last_attempt_ms = now_ms;
+    ++g_can4_diag.reinit_attempts;
+    if (g_fail_streak >= POWER_CYCLE_FAIL_THRESHOLD) {
+      can4_spi_power_set(false);
+      ++g_can4_diag.power_cycles;
+      g_step_start_ms = now_ms;
+      g_reinit_state = R_POWER_OFF;
+      return;
+    }
+    g_can4_diag.stage = INIT_RESET;
+    if (!write_byte(CON + 3, CONFIG | 8U)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    g_poll_count = 0U;
+    g_reinit_state = R_WAIT_CONFIG;
+    return;
+
+  case R_POWER_OFF:
+    if ((uint32_t)(now_ms - g_step_start_ms) < POWER_OFF_MS) return;
+    can4_spi_power_set(true);
+    g_step_start_ms = now_ms;
+    g_reinit_state = R_POWER_ON;
+    return;
+
+  case R_POWER_ON:
+    if ((uint32_t)(now_ms - g_step_start_ms) < POWER_ON_MS) return;
+    if (!can4_spi_init()) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    g_fail_streak = 0U;
+    g_can4_diag.stage = INIT_RESET;
+    if (!write_byte(CON + 3, CONFIG | 8U)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    g_poll_count = 0U;
+    g_reinit_state = R_WAIT_CONFIG;
+    return;
+
+  case R_WAIT_CONFIG: {
+    uint8_t status;
+    if (!read_bytes(CON + 2, &status, 1)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    if ((status >> 5) == CONFIG) {
+      uint8_t reset[2] = {0}, reply[2];
+      if (!can4_spi_transfer(reset, reply, 2, false)) {
+        ++g_can4_diag.spi_errors;
+        fail_reinit_attempt(now_ms);
+        return;
+      }
+      g_step_start_ms = now_ms;
+      g_reinit_state = R_WAIT_RESET;
+      return;
+    }
+    if (++g_poll_count >= 12U) fail_reinit_attempt(now_ms);
+    return;
+  }
+
+  case R_WAIT_RESET:
+    if ((uint32_t)(now_ms - g_step_start_ms) < RESET_SETTLE_MS) return;
+    if (!probe_reset_and_configure()) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    g_can4_diag.stage = INIT_LOOPBACK;
+    if (!write_byte(CON + 3, INTERNAL_LOOPBACK)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    g_poll_count = 0U;
+    g_reinit_state = R_WAIT_LOOPBACK_MODE;
+    return;
+
+  case R_WAIT_LOOPBACK_MODE: {
+    uint8_t status;
+    if (!read_bytes(CON + 2, &status, 1)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    if ((status >> 5) == INTERNAL_LOOPBACK) {
+      if (!send_loopback_probe()) {
+        fail_reinit_attempt(now_ms);
+        return;
+      }
+      g_poll_count = 0U;
+      g_reinit_state = R_WAIT_LOOPBACK_RX;
+      return;
+    }
+    if (++g_poll_count >= 12U) fail_reinit_attempt(now_ms);
+    return;
+  }
+
+  case R_WAIT_LOOPBACK_RX:
+    if (can4_irq_asserted()) {
+      if (!verify_loopback_probe()) {
+        fail_reinit_attempt(now_ms);
+        return;
+      }
+      g_poll_count = 0U;
+      g_reinit_state = R_WAIT_LOOPBACK_CLR;
+      return;
+    }
+    if (++g_poll_count >= 8U) fail_reinit_attempt(now_ms);
+    return;
+
+  case R_WAIT_LOOPBACK_CLR:
+    if (!can4_irq_asserted()) {
+      g_can4_diag.stage = INIT_NORMAL;
+      if (!write_byte(CON + 3, CONFIG | 8U)) {
+        fail_reinit_attempt(now_ms);
+        return;
+      }
+      g_poll_count = 0U;
+      g_reinit_state = R_WAIT_NORMAL_CFG;
+      return;
+    }
+    if (++g_poll_count >= 3U) fail_reinit_attempt(now_ms);
+    return;
+
+  case R_WAIT_NORMAL_CFG: {
+    uint8_t status;
+    if (!read_bytes(CON + 2, &status, 1)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    if ((status >> 5) == CONFIG) {
+      if (!write_byte(CON + 3, NORMAL)) {
+        fail_reinit_attempt(now_ms);
+        return;
+      }
+      g_poll_count = 0U;
+      g_reinit_state = R_WAIT_NORMAL;
+      return;
+    }
+    if (++g_poll_count >= 12U) fail_reinit_attempt(now_ms);
+    return;
+  }
+
+  case R_WAIT_NORMAL: {
+    uint8_t status;
+    if (!read_bytes(CON + 2, &status, 1)) {
+      fail_reinit_attempt(now_ms);
+      return;
+    }
+    if ((status >> 5) == NORMAL) {
+      g_can4_diag.stage = ONLINE;
+      ++g_can4_diag.reinit_successes;
+      g_fail_streak = 0U;
+      g_tx_full_streak = 0U;
+      g_tx_stall_active = false;
+      g_last_health_ms = now_ms;
+      g_reinit_state = R_IDLE;
+      return;
+    }
+    if (++g_poll_count >= 12U) fail_reinit_attempt(now_ms);
+    return;
+  }
+
+  case R_REQ_CONFIG:
+  default:
+    fail_reinit_attempt(now_ms);
+    return;
+  }
+}
+
+static void check_online_health(uint32_t now_ms) {
+  if (g_tx_full_streak >= TX_STALL_MIN_REJECTS) {
+    if (!g_tx_stall_active) {
+      g_tx_stall_active = true;
+      g_tx_stall_since_ms = now_ms;
+    } else if ((uint32_t)(now_ms - g_tx_stall_since_ms) >= TX_STALL_MS) {
+      ++g_can4_diag.tx_stalls;
+      g_tx_full_streak = 0U;
+      g_tx_stall_active = false;
+      g_fail_streak = 0U;
+      g_backoff_armed = false;
+      (void)io_fault(TX_STA);
+      return;
+    }
+  }
+  if ((uint32_t)(now_ms - g_last_health_ms) >= HEALTH_CHECK_MS) {
+    g_last_health_ms = now_ms;
+    uint8_t status;
+    if (!read_bytes(CON + 2, &status, 1)) return;
+    if ((status >> 5) != NORMAL) {
+      ++g_can4_diag.mode_faults;
+      g_fail_streak = 0U;
+      g_backoff_armed = false;
+      (void)io_fault(CON + 2);
+    }
+  }
+}
+
 bool mcp2518fd_init(void) {
   g_can4_diag = (struct can4_diagnostics){.stage = INIT_SPI};
+  reset_runtime_recovery();
   if (!can4_spi_init()) return false;
   g_can4_diag.stage = INIT_RESET;
   if (!reset_controller()) return false;
@@ -231,12 +524,22 @@ bool mcp2518fd_transmit(const can_tx_frame_t *frame, uint8_t dlc) {
   if (!mcp2518fd_ready() || !frame || dlc > 15U || dlc_bytes[dlc] != frame->size ||
       (!frame->is_fd && (frame->size > 8U || frame->is_brs)) ||
       frame->can_id > (frame->is_extended ? 0x1fffffffU : 0x7ffU)) return false;
-  if (!send_object(frame, dlc)) return false;
+  if (!send_object(frame, dlc)) {
+    if (g_can4_diag.stage == ONLINE && g_tx_full_streak < UINT32_MAX) ++g_tx_full_streak;
+    return false;
+  }
+  g_tx_full_streak = 0U;
+  g_tx_stall_active = false;
   ++g_can4_diag.tx_submitted;
   return true;
 }
 
 void mcp2518fd_drain(can_rx_ring_t *ring, uint32_t now_ms) {
+  if (!mcp2518fd_ready()) {
+    step_reinit(now_ms);
+    return;
+  }
+  check_online_health(now_ms);
   if (!mcp2518fd_ready()) return;
   for (unsigned i = 0; i < RX_BUDGET && can4_irq_asserted(); ++i) {
     can_rx_frame_t f = {.bus_index = FIRMWARE_CAN4_INDEX, .rx_tick_ms = now_ms};

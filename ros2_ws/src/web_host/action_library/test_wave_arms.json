@@ -1,0 +1,50 @@
+{
+  "interpolation": "monotone",
+  "target_ids": [8, 9, 10, 11, 17, 18, 19, 20],
+  "points": [
+    {"time_from_start_ms": 0, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 9, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 10, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 18, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 19, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 1500, "motor_id": 8, "position": -0.45, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 9, "position": 0.30, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 10, "position": 0.20, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 11, "position": -0.60, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 17, "position": -0.45, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 18, "position": -0.30, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 19, "position": -0.20, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 20, "position": 0.60, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 3000, "motor_id": 8, "position": -0.35, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 9, "position": 0.15, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 10, "position": -0.25, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 11, "position": -0.30, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 17, "position": -0.35, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 18, "position": -0.15, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 19, "position": 0.25, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 20, "position": 0.30, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 4500, "motor_id": 8, "position": -0.45, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 9, "position": 0.30, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 10, "position": 0.20, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 11, "position": -0.60, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 17, "position": -0.45, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 18, "position": -0.30, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 19, "position": -0.20, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 20, "position": 0.60, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 6000, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 9, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 10, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 18, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 19, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0}
+  ]
+}

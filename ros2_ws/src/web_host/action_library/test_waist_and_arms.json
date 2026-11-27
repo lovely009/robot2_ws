@@ -1,0 +1,35 @@
+{
+  "interpolation": "monotone",
+  "target_ids": [1, 8, 11, 17, 20],
+  "points": [
+    {"time_from_start_ms": 0, "motor_id": 1, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 0, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 1500, "motor_id": 1, "position": 0.12, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 8, "position": -0.40, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 11, "position": -0.50, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 1500, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 3000, "motor_id": 1, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 3000, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 4500, "motor_id": 1, "position": -0.12, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 17, "position": -0.40, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 4500, "motor_id": 20, "position": 0.50, "velocity": 0.0, "effort": 0.0},
+
+    {"time_from_start_ms": 6000, "motor_id": 1, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 8, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 11, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 17, "position": 0.0, "velocity": 0.0, "effort": 0.0},
+    {"time_from_start_ms": 6000, "motor_id": 20, "position": 0.0, "velocity": 0.0, "effort": 0.0}
+  ]
+}

@@ -5,6 +5,7 @@ import asyncio
 import collections
 from contextlib import asynccontextmanager
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -28,6 +29,25 @@ from ..vdmocap_record import DEFAULT_SDK_DIR
 from .lease import ControlLeaseManager, LeaseAuthError, LeaseConflictError
 from .recorder import RosbagRecorder
 from .ros_gateway import CHANNEL_TOPICS, MockRosGateway, RosGatewayProtocol, RosGatewayThread
+
+
+def _sanitize_json(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _sanitize_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json(v) for v in value]
+    return value
+
+
+def _dumps_strict(payload: Any) -> str:
+    return json.dumps(
+        _sanitize_json(payload),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(',', ':'),
+    )
 from .schemas import (
     ActionSaveRequest,
     ActionSaveResponse,
@@ -286,7 +306,7 @@ def create_app(
                     snap, _rx_count, rx_hz = gateway.latest_channel(ch)
                     if snap is None or snap.seq == last_seq.get(ch):
                         continue
-                    frame = json.dumps({
+                    frame = _dumps_strict({
                         'channel': ch,
                         'seq': snap.seq,
                         'server_ts_ms': int(time.time() * 1000),
@@ -294,7 +314,7 @@ def create_app(
                         'source_hz': round(rx_hz, 2),
                         'age_ms': round(max(0.0, (now_mono - snap.received_mono) * 1000.0), 3),
                         'data': snap.payload,
-                    }, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+                    })
                     if await hub.broadcast_text(ch, frame) > 0:
                         sent_any = True
                     last_seq[ch] = snap.seq
@@ -302,12 +322,12 @@ def create_app(
                 if hub.has_subscribers('telemetry:events'):
                     events = gateway.events_since(last_event_seq)
                     for item in events:
-                        pkt = json.dumps({
+                        pkt = _dumps_strict({
                             'channel': 'telemetry:events',
                             'seq': item.seq,
                             'server_ts_ms': int(time.time() * 1000),
                             'data': item.payload,
-                        }, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+                        })
                         if await hub.broadcast_text('telemetry:events', pkt) > 0:
                             sent_any = True
                         last_event_seq = item.seq
@@ -1061,7 +1081,7 @@ def create_app(
                         if ch in CHANNEL_TOPICS and ch != 'telemetry:events':
                             snap, _cnt, rx_hz = gateway.latest_channel(ch)
                             if snap is not None:
-                                await ws.send_text(json.dumps({
+                                await ws.send_text(_dumps_strict({
                                     'channel': ch,
                                     'seq': snap.seq,
                                     'server_ts_ms': int(time.time() * 1000),
@@ -1071,7 +1091,7 @@ def create_app(
                                         max(0.0, (now_mono - snap.received_mono) * 1000.0), 3,
                                     ),
                                     'data': snap.payload,
-                                }, ensure_ascii=False, allow_nan=False, separators=(',', ':')))
+                                }))
                 elif op == 'unsubscribe':
                     active = hub.unsubscribe(cid, list(msg.get('channels') or []))
                     await ws.send_text(json.dumps({'op': 'subscribed', 'channels': active}))

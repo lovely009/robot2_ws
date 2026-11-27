@@ -622,3 +622,61 @@ it('没有MCU同步源时间时拒发非空动作，取消与STOP仍可发送',a
   expect(pub.mock.calls.some(([key])=>key==='stop')).toBe(true);
   expect(pub.mock.calls.filter(([key])=>key==='trajectory').every(([,message])=>message.points.length===0)).toBe(true);
 });
+
+it('computeReturnZeroDurationMs scales safely with max joint angle', async () => {
+  const { computeReturnZeroDurationMs } = await import('../src/core/playback.ts');
+  expect(computeReturnZeroDurationMs([0.001, -0.002])).toBe(1000);
+  expect(computeReturnZeroDurationMs([0.2])).toBe(2000);
+  expect(computeReturnZeroDurationMs([-1.2, 0.4])).toBe(3000);
+  expect(computeReturnZeroDurationMs([10])).toBe(10000);
+});
+
+it('returnToZero sends smooth zero trajectory from current joint states and holds', async () => {
+  const { store, actions } = await fixture();
+  store.jointStates.byName = { elbow: { position: -1.2, velocity: 0, effort: 0 } };
+  const running = actions.returnToZero({ enable: false, kp: 30, kd: 1 });
+  await vi.advanceTimersByTimeAsync(900);
+  const sent = pub.mock.calls
+    .filter(([key, message]) => key === 'trajectory' && message.points?.length > 0)
+    .map(([, message]) => message);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].joint_names).toEqual(['elbow']);
+  expect(sent[0].points).toHaveLength(1);
+  expect(sent[0].points[0].positions).toEqual([0]);
+  expect(sent[0].points[0].velocities).toEqual([0]);
+  expect(sent[0].points[0].time_from_start).toEqual({ sec: 3, nanosec: 0 });
+  const tid = Number(sent[0].header.frame_id.split('/')[1]);
+  store.traj.state = { trajectory_id: tid, active: false, completed: true, elapsed_ms: 3000 };
+  await vi.advanceTimersByTimeAsync(50);
+  await running;
+  expect(actions.playbackSnapshot().detail).toBe('已回初始位并保持');
+});
+
+it('playAction with returnToZero appends zero hold only on normal non-zero finish, never on stop', async () => {
+  const { store, actions } = await fixture();
+  const running = actions.playAction('long.json', { enable: false, loop: false, kp: 30, kd: 1, returnToZero: true });
+  await vi.advanceTimersByTimeAsync(900);
+  const sent1 = pub.mock.calls.filter(([k, m]) => k === 'trajectory' && m.points?.length > 0).map(([, m]) => m);
+  expect(sent1).toHaveLength(1);
+  const tid1 = Number(sent1[0].header.frame_id.split('/')[1]);
+  store.traj.state = { trajectory_id: tid1, active: false, completed: true, elapsed_ms: 9490 };
+  await vi.advanceTimersByTimeAsync(100);
+  const sent2 = pub.mock.calls.filter(([k, m]) => k === 'trajectory' && m.points?.length > 0).map(([, m]) => m);
+  expect(sent2).toHaveLength(2);
+  expect(sent2[1].points[0].positions).toEqual([0]);
+  const tid2 = Number(sent2[1].header.frame_id.split('/')[1]);
+  store.traj.state = { trajectory_id: tid2, active: false, completed: true, elapsed_ms: 2000 };
+  await vi.advanceTimersByTimeAsync(100);
+  await running;
+  expect(actions.playbackSnapshot().detail).toBe('播放完成（已回初始位并保持）');
+
+  // Stop mid-action must never trigger return-to-zero
+  pub.mockClear();
+  const stopped = actions.playAction('long.json', { enable: false, loop: false, kp: 30, kd: 1, returnToZero: true });
+  await vi.advanceTimersByTimeAsync(900);
+  actions.stopPlayback();
+  await vi.advanceTimersByTimeAsync(50);
+  await stopped;
+  const sentAfterStop = pub.mock.calls.filter(([k, m]) => k === 'trajectory' && m.points?.length > 0);
+  expect(sentAfterStop).toHaveLength(1);
+});

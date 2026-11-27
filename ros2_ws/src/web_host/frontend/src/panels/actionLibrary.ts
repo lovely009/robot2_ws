@@ -1,5 +1,5 @@
 import { $ } from '../core/format';
-import { playAction, stopPlayback, loadSeries, playbackSnapshot } from '../core/playback';
+import { playAction, returnToZero, stopPlayback, loadSeries, playbackSnapshot } from '../core/playback';
 import { bvhModelText, bvhSelection } from '../core/bvh_playback';
 import { MODEL } from '../core/store';
 import type { MountedPanel } from '../contracts';
@@ -97,8 +97,10 @@ export function mount(_root: HTMLElement | null, _ctx: any): MountedPanel {
     kp: $('actKp') as HTMLInputElement,
     kd: $('actKd') as HTMLInputElement,
     loop: $('actLoop') as HTMLInputElement,
+    returnZero: document.getElementById('actReturnZero') as HTMLInputElement | null,
     file: $('actFile') as HTMLInputElement,
     importButton: $('btnActImport') as HTMLButtonElement,
+    zeroBtn: document.getElementById('btnActZero') as HTMLButtonElement | null,
   };
   let actions: any[] = [];
   let bvhSources: string[] = [];
@@ -287,6 +289,7 @@ export function mount(_root: HTMLElement | null, _ctx: any): MountedPanel {
         kd: readNumber(local.kd, 1),
         loop: local.loop.checked,
         enable: local.enable.checked,
+        returnToZero: Boolean(local.returnZero?.checked),
       });
       return;
     }
@@ -294,6 +297,13 @@ export function mount(_root: HTMLElement | null, _ctx: any): MountedPanel {
     if (preview) void togglePreview(preview.dataset.name!);
   });
   local.stop.addEventListener('click', stopPlayback);
+  local.zeroBtn?.addEventListener('click', () => {
+    void returnToZero({
+      kp: readNumber(local.kp, 30),
+      kd: readNumber(local.kd, 1),
+      enable: local.enable.checked,
+    });
+  });
   local.importButton.addEventListener('click', () => { void onImport(); });
   local.enable.addEventListener('change', () => render());
 
@@ -308,6 +318,7 @@ export function mount(_root: HTMLElement | null, _ctx: any): MountedPanel {
     const player = playbackSnapshot();
     const running = player.phase === 'running';
     local.stop.disabled = !(running || player.phase === 'done');
+    if (local.zeroBtn) local.zeroBtn.disabled = running;
     local.summary.textContent = running || player.phase === 'done'
       ? `${player.name}${player.loop ? ' · 循环' : ''}`
       : player.phase === 'error' ? '错误' : `${bvhSources.length} BVH · ${actions.length} JSON`;

@@ -328,6 +328,9 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
           next[joint->second] = Limit{values[2*i], values[2*i+1]};
         }
         position_limits_ = std::move(next);
+        const auto invalid = std::numeric_limits<double>::quiet_NaN();
+        recovery_min_.assign(info_.joints.size(), invalid);
+        recovery_max_.assign(info_.joints.size(), invalid);
         return result;
       });
     command_pub_ = node_->create_publisher<Command>("/motor/command",
@@ -349,6 +352,8 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
   command_position_.assign(info_.joints.size(), unlimited);
   command_velocity_.assign(info_.joints.size(), 0.0);
   command_effort_.assign(info_.joints.size(), 0.0);
+  recovery_min_.assign(info_.joints.size(), unlimited);
+  recovery_max_.assign(info_.joints.size(), unlimited);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -419,10 +424,12 @@ bool MicroRosSystem::transitioned_claims(
 void MicroRosSystem::close_writer() {
   writer_enabled_ = false;
   armed_ = false;
-  command_position_.assign(info_.joints.size(),
-                          std::numeric_limits<double>::quiet_NaN());
+  const auto invalid = std::numeric_limits<double>::quiet_NaN();
+  command_position_.assign(info_.joints.size(), invalid);
   command_velocity_.assign(info_.joints.size(), 0.0);
   std::fill(command_effort_.begin(), command_effort_.end(), 0.0);
+  recovery_min_.assign(info_.joints.size(), invalid);
+  recovery_max_.assign(info_.joints.size(), invalid);
 }
 
 bool MicroRosSystem::fail(std::string error) {
@@ -735,7 +742,9 @@ hardware_interface::return_type MicroRosSystem::perform_command_mode_switch(
 bool MicroRosSystem::command_valid(std::string &error) {
   if (command_position_.size() != info_.joints.size() ||
       command_velocity_.size() != info_.joints.size() ||
-      command_effort_.size() != info_.joints.size()) {
+      command_effort_.size() != info_.joints.size() ||
+      recovery_min_.size() != info_.joints.size() ||
+      recovery_max_.size() != info_.joints.size()) {
     error = "command interface storage is invalid";
     return false;
   }
@@ -750,10 +759,54 @@ bool MicroRosSystem::command_valid(std::string &error) {
                                           position_limits_[index].max);
     velocity = normalize_boundary_roundoff(velocity, velocity_limits_[index].min,
                                           velocity_limits_[index].max);
-    if (!within(position_limits_[index].min, position, false) ||
-        !within(position_limits_[index].max, position, true)) {
-      error = "joint position command exceeds host position limit: " + info_.joints[index].name;
-      return false;
+    constexpr double kHoldComplianceRad = 0.02;
+    const double measured = index < position_.size()
+      ? position_[index] : std::numeric_limits<double>::quiet_NaN();
+    const bool below_min = !within(position_limits_[index].min, position, false);
+    const bool above_max = !within(position_limits_[index].max, position, true);
+    const auto invalid = std::numeric_limits<double>::quiet_NaN();
+    if (!below_min && !above_max) {
+      recovery_min_[index] = invalid;
+      recovery_max_[index] = invalid;
+    } else {
+      bool compliance_ok = false;
+      if (above_max && !below_min && position_limits_[index].max) {
+        double ceil = invalid;
+        if (std::isfinite(recovery_max_[index])) {
+          ceil = recovery_max_[index];
+        } else if (std::isfinite(measured) &&
+                   measured > *position_limits_[index].max &&
+                   (measured - *position_limits_[index].max) <= kHoldComplianceRad) {
+          ceil = measured;
+        }
+        if (std::isfinite(ceil) &&
+            (position - *position_limits_[index].max) <= kHoldComplianceRad &&
+            position <= ceil + 1e-6) {
+          compliance_ok = true;
+          recovery_max_[index] = std::min(ceil, position);
+          recovery_min_[index] = invalid;
+        }
+      } else if (below_min && !above_max && position_limits_[index].min) {
+        double floor = invalid;
+        if (std::isfinite(recovery_min_[index])) {
+          floor = recovery_min_[index];
+        } else if (std::isfinite(measured) &&
+                   measured < *position_limits_[index].min &&
+                   (*position_limits_[index].min - measured) <= kHoldComplianceRad) {
+          floor = measured;
+        }
+        if (std::isfinite(floor) &&
+            (*position_limits_[index].min - position) <= kHoldComplianceRad &&
+            position >= floor - 1e-6) {
+          compliance_ok = true;
+          recovery_min_[index] = std::max(floor, position);
+          recovery_max_[index] = invalid;
+        }
+      }
+      if (!compliance_ok) {
+        error = "joint position command exceeds host position limit: " + info_.joints[index].name;
+        return false;
+      }
     }
     if (!within(velocity_limits_[index].min, velocity, false) ||
         !within(velocity_limits_[index].max, velocity, true)) {

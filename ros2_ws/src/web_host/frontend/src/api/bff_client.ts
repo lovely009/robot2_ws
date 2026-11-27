@@ -44,6 +44,26 @@ function extractErrorMessage(payload: any, status: number): string {
   return `HTTP ${status}`;
 }
 
+function resolveStampNs(payload: {
+  stamp_ns?: number | null;
+  header?: { stamp?: { sec?: number; nanosec?: number } };
+}): number | null {
+  if (typeof payload.stamp_ns === "number" && Number.isFinite(payload.stamp_ns) && payload.stamp_ns > 0) {
+    return Math.round(payload.stamp_ns);
+  }
+  const stamp = payload.header?.stamp;
+  if (!stamp) return null;
+  const ns = Math.round(Number(stamp.sec || 0) * 1_000_000_000 + Number(stamp.nanosec || 0));
+  return Number.isFinite(ns) && ns > 0 ? ns : null;
+}
+
+function resolveFrameId(payload: {
+  frame_id?: string;
+  header?: { frame_id?: string };
+}): string {
+  return String(payload.frame_id ?? payload.header?.frame_id ?? "");
+}
+
 export class BffClient {
   readonly clientId: string;
   private token: string | null = null;
@@ -161,7 +181,8 @@ export class BffClient {
       positions: number[];
       velocities?: number[];
       efforts?: number[];
-      stamp_ns?: number;
+      stamp_ns?: number | null;
+      frame_id?: string;
     },
   ): Promise<PublishAck> {
     const path = topic === "/robot_sim/joint_position_target"
@@ -169,7 +190,10 @@ export class BffClient {
       : "/api/control/joint-target";
     return this.requestJson<PublishAck>(path, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        frame_id: payload.frame_id || "",
+      }),
     });
   }
 
@@ -183,7 +207,12 @@ export class BffClient {
       time_from_start?: { sec?: number; nanosec?: number };
       time_from_start_ms?: number;
     }[];
-    stamp_ns?: number;
+    stamp_ns?: number | null;
+    frame_id?: string;
+    header?: {
+      stamp?: { sec?: number; nanosec?: number };
+      frame_id?: string;
+    };
   }): Promise<PublishAck> {
     const points = (payload.points || []).map((pt) => {
       const ms = typeof pt.time_from_start_ms === "number"
@@ -205,7 +234,8 @@ export class BffClient {
       body: JSON.stringify({
         joint_names: payload.joint_names || [],
         points,
-        stamp_ns: payload.stamp_ns ?? null,
+        stamp_ns: resolveStampNs(payload),
+        frame_id: resolveFrameId(payload),
       }),
     });
   }
@@ -367,7 +397,8 @@ export class BffClient {
       positions: number[];
       velocities?: number[];
       efforts?: number[];
-      stamp_ns?: number;
+      stamp_ns?: number | null;
+      frame_id?: string;
     },
   ): boolean {
     if (this.isConnected()) {
@@ -379,6 +410,7 @@ export class BffClient {
         velocities: payload.velocities || [],
         efforts: payload.efforts || [],
         stamp_ns: payload.stamp_ns ?? null,
+        frame_id: payload.frame_id || "",
       });
       return true;
     }

@@ -84,6 +84,15 @@
         <color rgba="0.82 0.85 0.88 1" />
       </material>
     </visual>
+    <visual name="waist_roll_platform_pins_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/waist_roll_platform_pins_vis.STL" />
+      </geometry>
+      <material name="waist_roll_platform_pins_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
+      </material>
+    </visual>
   </link>
   <joint name="left_scapula_yaw" type="revolute">
     <limit lower="-0.820305" upper="0.331613" effort="0" velocity="0" />
@@ -543,7 +552,7 @@
     </visual>
   </link>
   <joint name="right_wrist_roll" type="revolute">
-    <limit lower="-0.488692" upper="0.471239" effort="0" velocity="0" />
+    <limit lower="-0.471239" upper="0.471239" effort="0" velocity="0" />
     <parent link="right_wrist_pitch" />
     <child link="right_wrist_roll" />
     <origin xyz="0 0 0" rpy="1.5707963272451 -0.063075651642703 -1.2452882691803" />
@@ -700,7 +709,7 @@
   <joint name="waist_flange_plus_x" type="continuous" simulation_auxiliary="true">
     <parent link="waist_yaw" />
     <child link="waist_plus_flange" />
-    <origin xyz="0.0499998348 -0.0185654849 -0.0504763604" rpy="-2.9343130988876 -1.9415676305955e-06 -6.8234745722787e-06" />
+    <origin xyz="0.051 -0.008308 -0.049369" rpy="-2.9343130988876 -1.9415676305955e-06 -6.8234745722787e-06" />
     <axis xyz="1 0 0" />
   </joint>
   <link name="waist_plus_flange">
@@ -723,7 +732,7 @@
   <joint name="waist_plus_rod_x" type="continuous" simulation_auxiliary="true">
     <parent link="waist_plus_flange" />
     <child link="waist_plus_rod_axis_frame_1" />
-    <origin xyz="0 0.048014 0.013952" rpy="0.19297873339034 -0 0" />
+    <origin xyz="2.63973895e-07 0.0484824858 0.0122240425" rpy="-0.039561082211359 -3.0509997852786e-06 1.20763861678e-07" />
     <axis xyz="1 0 0" />
   </joint>
   <joint name="waist_plus_rod_y" type="continuous" simulation_auxiliary="true">
@@ -734,9 +743,9 @@
   </joint>
   <link name="waist_plus_rod">
     <inertial>
-      <origin xyz="0 0 0.0210000166" rpy="0 -0 0" />
+      <origin xyz="0 0 0.021047332" rpy="0 -0 0" />
       <mass value="0.01" />
-      <inertia ixx="1.47000233e-06" iyy="1.47000233e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+      <inertia ixx="1.47663395e-06" iyy="1.47663395e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
     <visual name="waist_plus_rod_vis">
       <origin xyz="0 0 0" rpy="0 -0 0" />
@@ -751,7 +760,7 @@
   <joint name="waist_flange_minus_x" type="continuous" simulation_auxiliary="true">
     <parent link="waist_yaw" />
     <child link="waist_minus_flange" />
-    <origin xyz="-0.0500001652 -0.0185648026 -0.0504765546" rpy="-2.9343130988876 -1.9415676305955e-06 -6.8234745722787e-06" />
+    <origin xyz="-0.051 -0.008308 -0.049369" rpy="-2.9343130988876 -1.9415676305955e-06 -6.8234745722787e-06" />
     <axis xyz="1 0 0" />
   </joint>
   <link name="waist_minus_flange">
@@ -774,7 +783,7 @@
   <joint name="waist_minus_rod_x" type="continuous" simulation_auxiliary="true">
     <parent link="waist_minus_flange" />
     <child link="waist_minus_rod_axis_frame_1" />
-    <origin xyz="0 0.048014 0.013952" rpy="0.19297873339034 -0 0" />
+    <origin xyz="2.63973895e-07 0.0484824858 0.0122240425" rpy="-0.039561082211359 -3.0509997852786e-06 1.20763861678e-07" />
     <axis xyz="1 0 0" />
   </joint>
   <joint name="waist_minus_rod_y" type="continuous" simulation_auxiliary="true">
@@ -785,9 +794,9 @@
   </joint>
   <link name="waist_minus_rod">
     <inertial>
-      <origin xyz="0 0 0.0210000166" rpy="0 -0 0" />
+      <origin xyz="0 0 0.021047332" rpy="0 -0 0" />
       <mass value="0.01" />
-      <inertia ixx="1.47000233e-06" iyy="1.47000233e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+      <inertia ixx="1.47663395e-06" iyy="1.47663395e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
     <visual name="waist_minus_rod_vis">
       <origin xyz="0 0 0" rpy="0 -0 0" />
@@ -842,6 +851,15 @@
       </geometry>
       <material name="pelvis_pitch_vis_0_color">
         <color rgba="0.82 0.85 0.88 1" />
+      </material>
+    </visual>
+    <visual name="pelvis_pitch_platform_pins_vis">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://robot_description/models/full_body_robot/mujoco/visual_split/pelvis_pitch_platform_pins_vis.STL" />
+      </geometry>
+      <material name="pelvis_pitch_platform_pins_vis_color">
+        <color rgba="0.72 0.76 0.80 1" />
       </material>
     </visual>
   </link>
@@ -1170,7 +1188,7 @@
   <joint name="hips_flange_plus_x" type="continuous" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_plus_flange" />
-    <origin xyz="-0.000321641033 -0.0719999877 0.0297705954" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
+    <origin xyz="0.000117 -0.07205 0.029625" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
     <axis xyz="0 0 1" />
   </joint>
   <link name="hips_plus_flange">
@@ -1193,7 +1211,7 @@
   <joint name="hips_plus_rod_x" type="continuous" simulation_auxiliary="true">
     <parent link="hips_plus_flange" />
     <child link="hips_plus_rod_axis_frame_1" />
-    <origin xyz="0.0295604523 0.0167981243 0" rpy="-1.6055458674131 0.018104309539557 0.48011424830054" />
+    <origin xyz="0.0327000049 0.00872052702 1.13358837e-07" rpy="-1.5215486918572 -0.029323845969279 0.53663883328809" />
     <axis xyz="1 0 0" />
   </joint>
   <joint name="hips_plus_rod_y" type="continuous" simulation_auxiliary="true">
@@ -1204,9 +1222,9 @@
   </joint>
   <link name="hips_plus_rod">
     <inertial>
-      <origin xyz="0 0 0.0324999999" rpy="0 -0 0" />
+      <origin xyz="0 0 0.0324788681" rpy="0 -0 0" />
       <mass value="0.01" />
-      <inertia ixx="3.52083332e-06" iyy="3.52083332e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+      <inertia ixx="3.51625625e-06" iyy="3.51625625e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
     <visual name="hips_plus_rod_vis">
       <origin xyz="0 0 0" rpy="0 -0 0" />
@@ -1221,7 +1239,7 @@
   <joint name="hips_flange_minus_x" type="continuous" simulation_auxiliary="true">
     <parent link="Base_link" />
     <child link="hips_minus_flange" />
-    <origin xyz="-0.000321726363 0.0720000123 0.0297705981" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
+    <origin xyz="0.000117 0.07205 0.029625" rpy="-0.33597955380018 1.8654485539615e-08 -1.57079573468" />
     <axis xyz="0 0 1" />
   </joint>
   <link name="hips_minus_flange">
@@ -1244,7 +1262,7 @@
   <joint name="hips_minus_rod_x" type="continuous" simulation_auxiliary="true">
     <parent link="hips_minus_flange" />
     <child link="hips_minus_rod_axis_frame_1" />
-    <origin xyz="-0.0295603445 0.0167983157 0" rpy="-1.605545474813 -0.018104150302679 -0.48011526498903" />
+    <origin xyz="-0.0326999951 0.008720564 1.24999927e-07" rpy="-1.5215488741816 0.029323814131586 -0.53663998577137" />
     <axis xyz="1 0 0" />
   </joint>
   <joint name="hips_minus_rod_y" type="continuous" simulation_auxiliary="true">
@@ -1255,9 +1273,9 @@
   </joint>
   <link name="hips_minus_rod">
     <inertial>
-      <origin xyz="0 0 0.0324999998" rpy="0 -0 0" />
+      <origin xyz="0 0 0.0324788681" rpy="0 -0 0" />
       <mass value="0.01" />
-      <inertia ixx="3.52083328e-06" iyy="3.52083328e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
+      <inertia ixx="3.51625625e-06" iyy="3.51625625e-06" izz="1e-07" ixy="0.0" ixz="0.0" iyz="0.0" />
     </inertial>
     <visual name="hips_minus_rod_vis">
       <origin xyz="0 0 0" rpy="0 -0 0" />

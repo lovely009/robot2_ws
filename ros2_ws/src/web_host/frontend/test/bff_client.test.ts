@@ -100,4 +100,26 @@ describe("BffClient and Pinia stores", () => {
     expect(diag.recordings).toHaveLength(1);
     expect(diag.recordings[0]!.name).toBe("rec_1");
   });
+
+  it("forwards header.frame_id and header.stamp on publishTrajectory", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ accepted: true, published: true, topic: "/control/trajectory", timestamp_ms: 1 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new BffClient("client-traj");
+    await client.publishTrajectory({
+      header: { stamp: { sec: 12, nanosec: 345 }, frame_id: "workbench-trajectory/99" },
+      joint_names: ["j1"],
+      points: [{ positions: [0.1], time_from_start: { sec: 2, nanosec: 500_000_000 } }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
+    expect(body).toEqual({
+      joint_names: ["j1"],
+      points: [{ positions: [0.1], velocities: [], accelerations: [], effort: [], time_from_start_ms: 2500 }],
+      stamp_ns: 12_000_000_345,
+      frame_id: "workbench-trajectory/99",
+    });
+  });
 });

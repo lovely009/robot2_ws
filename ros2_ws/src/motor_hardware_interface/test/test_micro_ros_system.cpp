@@ -1022,6 +1022,86 @@ TEST_F(MicroRosSystemTest, PositionAndVelocityOvershootBeyondRoundoffStillLatche
   }
 }
 
+TEST_F(MicroRosSystemTest, SoftStopComplianceAllowsRecoveryButRejectsOutwardOrLargeOvershoot) {
+  constexpr double lower = -0.12, upper = 0.14;
+  auto hardware_info = info();
+  for (auto &joint : hardware_info.joints) {
+    for (auto &interface : joint.command_interfaces) {
+      interface.min = "-0.12";
+      interface.max = "0.14";
+    }
+  }
+  auto system = initialized(hardware_info);
+  activate(*system, false);
+  arm(*system);
+  auto interfaces = system->export_command_interfaces();
+  ASSERT_EQ(interfaces.size(), 4U);
+
+  const auto model = robot_transmission::Model::load((root_ / "driver.yaml").string());
+  const auto publish_pitch = [&](double pitch_pos) {
+    const auto act = model.joint_to_actuator({
+      {"pitch", robot_transmission::Axis(pitch_pos, 0.0, 0.0)},
+      {"yaw", robot_transmission::Axis(0.0, 0.0, 0.0)}});
+    auto mmsg = motion_message();
+    for (auto &st : mmsg.states) {
+      const auto &a = act.at(st.motor_id == 8 ? "a" : "b");
+      st.position = static_cast<float>(a.position);
+    }
+    motion_pub_->publish(mmsg);
+    publish_control(1, true);
+    ASSERT_EQ(system->read(rclcpp::Time(0), rclcpp::Duration(10ms)),
+              hardware_interface::return_type::OK);
+  };
+  const auto write_pitch = [&](double pitch_cmd) {
+    interfaces[0].set_value(pitch_cmd);
+    interfaces[1].set_value(0.0);
+    interfaces[2].set_value(0.0);
+    interfaces[3].set_value(0.0);
+    return system->write(rclcpp::Time(0), rclcpp::Duration(10ms));
+  };
+  const auto reactivate = [&]() {
+    ASSERT_EQ(system->on_deactivate(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
+    activate(*system, true);
+    arm(*system);
+    interfaces = system->export_command_interfaces();
+  };
+
+  // Case 1: measured = upper + 0.005, command intermediate recovery upper + 0.003 (above_max == true) -> OK
+  publish_pitch(upper + 0.005);
+  ASSERT_GT(system->export_state_interfaces()[0].get_value(), upper);
+  EXPECT_EQ(write_pitch(upper + 0.003), hardware_interface::return_type::OK);
+
+  // Case 2: next tick measured moves inward ahead of setpoint (upper - 0.001), command upper + 0.002 -> OK
+  publish_pitch(upper - 0.001);
+  ASSERT_LT(system->export_state_interfaces()[0].get_value(), upper);
+  EXPECT_EQ(write_pitch(upper + 0.002), hardware_interface::return_type::OK);
+
+  // Case 3: command outward upper + 0.0025 (> previous watermark upper + 0.002) -> ERROR
+  EXPECT_EQ(write_pitch(upper + 0.0025), hardware_interface::return_type::ERROR);
+
+  // Case 4: after recovering inside limits (upper) with measured <= upper, commanding upper + 0.001 -> ERROR
+  reactivate();
+  publish_pitch(upper + 0.005);
+  EXPECT_EQ(write_pitch(upper + 0.003), hardware_interface::return_type::OK);
+  publish_pitch(upper);
+  EXPECT_EQ(write_pitch(upper), hardware_interface::return_type::OK);
+  EXPECT_EQ(write_pitch(upper + 0.001), hardware_interface::return_type::ERROR);
+
+  // Case 5a: symmetric lower-limit (lower - 0.005) inward recovery -> OK, outward -> ERROR
+  reactivate();
+  publish_pitch(lower - 0.005);
+  ASSERT_LT(system->export_state_interfaces()[0].get_value(), lower);
+  EXPECT_EQ(write_pitch(lower - 0.003), hardware_interface::return_type::OK);
+  publish_pitch(lower + 0.001);
+  EXPECT_EQ(write_pitch(lower - 0.002), hardware_interface::return_type::OK);
+  EXPECT_EQ(write_pitch(lower - 0.0025), hardware_interface::return_type::ERROR);
+
+  // Case 5b: overshoot > 0.02 (upper + 0.03) -> ERROR
+  reactivate();
+  publish_pitch(upper + 0.03);
+  EXPECT_EQ(write_pitch(upper + 0.03), hardware_interface::return_type::ERROR);
+}
+
 TEST_F(MicroRosSystemTest, ArmRevocationLatchesUntilExplicitReactivation) {
   auto system = initialized(info());
   activate(*system, false);

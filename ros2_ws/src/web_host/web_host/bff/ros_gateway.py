@@ -199,6 +199,15 @@ CHANNEL_TOPICS: dict[str, tuple[str, str]] = {
 }
 
 
+def _has_robot_sim() -> bool:
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        get_package_share_directory('robot_sim')
+        return True
+    except Exception:
+        return False
+
+
 class RosGatewayProtocol(Protocol):
     """Protocol implemented by both RosGatewayThread and MockRosGateway."""
 
@@ -215,12 +224,14 @@ class RosGatewayProtocol(Protocol):
         velocities: list[float],
         efforts: list[float],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool: ...
     def publish_trajectory(
         self,
         joint_names: list[str],
         points: list[dict[str, Any]],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool: ...
     def call_service(
         self,
@@ -238,12 +249,17 @@ class RosGatewayProtocol(Protocol):
 class _ChannelStore:
     """Thread-safe snapshot + rolling Hz store shared by RosGatewayThread and MockRosGateway."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, enable_sim: bool = True) -> None:
         self._lock = threading.Lock()
+        self._channels: dict[str, tuple[str, str]] = {
+            ch: spec
+            for ch, spec in CHANNEL_TOPICS.items()
+            if enable_sim or ch != 'telemetry:sim_position'
+        }
         self._snapshots: dict[str, TopicSnapshot] = {}
-        self._rx_counts: dict[str, int] = {ch: 0 for ch in CHANNEL_TOPICS}
+        self._rx_counts: dict[str, int] = {ch: 0 for ch in self._channels}
         self._rx_times: dict[str, collections.deque[float]] = {
-            ch: collections.deque() for ch in CHANNEL_TOPICS
+            ch: collections.deque() for ch in self._channels
         }
         self._events: collections.deque[EventItem] = collections.deque(maxlen=512)
         self._event_seq = 0
@@ -343,7 +359,7 @@ class _ChannelStore:
         now = time.monotonic()
         out: dict[str, TopicHealth] = {}
         with self._lock:
-            for ch, (topic, _msg_type) in CHANNEL_TOPICS.items():
+            for ch, (topic, _msg_type) in self._channels.items():
                 dq = self._rx_times[ch]
                 cutoff = now - 1.0
                 while dq and dq[0] < cutoff:
@@ -380,7 +396,7 @@ class RecordedServiceCall:
 class MockRosGateway:
     """In-memory RosGatewayProtocol double for deterministic unit and API tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, enable_sim: bool = True) -> None:
         self.started = False
         self.stopped = False
         self.client_counts: list[int] = []
@@ -388,7 +404,7 @@ class MockRosGateway:
         self.publishes: list[RecordedPublish] = []
         self.service_calls: list[RecordedServiceCall] = []
         self.events_log: list[str] = []
-        self._store = _ChannelStore()
+        self._store = _ChannelStore(enable_sim=enable_sim)
         self._service_handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
         self._sink_lock = threading.Lock()
         self._raw_sink: Callable[[str, str, bytes, int], None] | None = None
@@ -423,6 +439,7 @@ class MockRosGateway:
         velocities: list[float],
         efforts: list[float],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool:
         self.publishes.append(RecordedPublish(
             topic=topic,
@@ -432,6 +449,7 @@ class MockRosGateway:
                 'velocities': list(velocities),
                 'efforts': list(efforts),
                 'stamp_ns': stamp_ns,
+                'frame_id': str(frame_id or ''),
             },
         ))
         return True
@@ -441,6 +459,7 @@ class MockRosGateway:
         joint_names: list[str],
         points: list[dict[str, Any]],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool:
         self.publishes.append(RecordedPublish(
             topic='/control/trajectory',
@@ -448,6 +467,7 @@ class MockRosGateway:
                 'joint_names': list(joint_names),
                 'points': list(points),
                 'stamp_ns': stamp_ns,
+                'frame_id': str(frame_id or ''),
             },
         ))
         return True
@@ -513,8 +533,9 @@ class MockRosGateway:
 class RosGatewayThread:
     """Runs an isolated rclpy Context + MultiThreadedExecutor on a daemon thread."""
 
-    def __init__(self, node_name: str = 'web_host_bff') -> None:
+    def __init__(self, node_name: str = 'web_host_bff', *, enable_sim: bool | None = None) -> None:
         self._node_name = node_name
+        self._enable_sim = _has_robot_sim() if enable_sim is None else bool(enable_sim)
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -544,7 +565,7 @@ class RosGatewayThread:
         self._JointTrajectoryPoint = None
         self._serialize_message = None
 
-        self._store = _ChannelStore()
+        self._store = _ChannelStore(enable_sim=self._enable_sim)
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -625,6 +646,7 @@ class RosGatewayThread:
         velocities: list[float],
         efforts: list[float],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool:
         with self._pub_lock:
             pub = self._joint_target_pubs.get(topic)
@@ -632,6 +654,7 @@ class RosGatewayThread:
                 return False
             msg = self._JointState()
             self._fill_stamp(msg, stamp_ns)
+            msg.header.frame_id = str(frame_id or '')
             msg.name = list(names)
             msg.position = [float(v) for v in positions]
             msg.velocity = [float(v) for v in velocities]
@@ -644,6 +667,7 @@ class RosGatewayThread:
         joint_names: list[str],
         points: list[dict[str, Any]],
         stamp_ns: int | None = None,
+        frame_id: str = '',
     ) -> bool:
         with self._pub_lock:
             if (
@@ -655,6 +679,7 @@ class RosGatewayThread:
                 return False
             msg = self._JointTrajectory()
             self._fill_stamp(msg, stamp_ns)
+            msg.header.frame_id = str(frame_id or '')
             msg.joint_names = list(joint_names)
             built = []
             for pt in points:
@@ -829,10 +854,11 @@ class RosGatewayThread:
                 self._stop_pub = node.create_publisher(Empty, '/control/stop', 10)
                 self._joint_target_pubs = {
                     '/control/joint_target': node.create_publisher(JointState, '/control/joint_target', 1),
-                    '/robot_sim/joint_position_target': node.create_publisher(
-                        JointState, '/robot_sim/joint_position_target', 1,
-                    ),
                 }
+                if self._enable_sim:
+                    self._joint_target_pubs['/robot_sim/joint_position_target'] = node.create_publisher(
+                        JointState, '/robot_sim/joint_position_target', 1,
+                    )
                 self._trajectory_pub = node.create_publisher(JointTrajectory, '/control/trajectory', 10)
 
             node.create_subscription(
@@ -852,13 +878,14 @@ class RosGatewayThread:
                 self._make_json_cb('telemetry:bench', '/bench/status', 'std_msgs/msg/String'),
                 10, callback_group=cb_group,
             )
-            node.create_subscription(
-                String, '/robot_sim/position_status',
-                self._make_json_cb(
-                    'telemetry:sim_position', '/robot_sim/position_status', 'std_msgs/msg/String',
-                ),
-                10, callback_group=cb_group,
-            )
+            if self._enable_sim:
+                node.create_subscription(
+                    String, '/robot_sim/position_status',
+                    self._make_json_cb(
+                        'telemetry:sim_position', '/robot_sim/position_status', 'std_msgs/msg/String',
+                    ),
+                    10, callback_group=cb_group,
+                )
             node.create_subscription(
                 JointState, '/joint_states', self._on_joint_states, sensor_qos, callback_group=cb_group,
             )

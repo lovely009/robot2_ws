@@ -4,7 +4,10 @@ const { pub, submitPolicy, connection } = vi.hoisted(() => ({pub: vi.fn((..._arg
   submitPolicy:vi.fn(),
   connection:{generation:1,connected:true}}));
 vi.mock('../src/core/ros.ts', () => ({
-  pub, isConnected: () => connection.connected, getConnectionGeneration: () => connection.generation,
+  pub,
+  publishTrajectory: async (message: any) => pub('trajectory', message),
+  isConnected: () => connection.connected,
+  getConnectionGeneration: () => connection.generation,
   submitPolicy,
 }));
 beforeEach(() => {
@@ -439,6 +442,33 @@ it.each(['rejected','throws'])('异常撤销发送失败（%s）仍结束播放�
   expect(pub.mock.calls.at(-1)).toEqual(['trajectory',expect.objectContaining({joint_names:[],points:[]})]);
   expect(text()).toContain('轨迹传输异常');
   expect(text()).toContain('取消未发送');
+});
+
+it('异常路径取消会等待异步 publishTrajectory 完成后再结束并报告失败',async()=>{
+  const {actions,text,confirm}=await policyFixture();
+  confirm();
+  let resolveCancel!: (ok: boolean) => void;
+  const ros=await import('../src/core/ros.ts');
+  const spy=vi.spyOn(ros,'publishTrajectory').mockImplementation(async (message:any)=>{
+    pub('trajectory',message);
+    if(message.points?.length>0) throw new Error('轨迹传输异常');
+    if(pub.mock.calls.some(([,m])=>m.points?.length>0)) {
+      return await new Promise<boolean>(resolve=>{resolveCancel=resolve;});
+    }
+    return true;
+  });
+  let settled=false;
+  const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1}).then(()=>{settled=true;});
+  await vi.advanceTimersByTimeAsync(700);confirm();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(settled).toBe(false);
+  expect(resolveCancel).toBeTypeOf('function');
+  resolveCancel(false);
+  await running;
+  expect(settled).toBe(true);
+  expect(text()).toContain('轨迹传输异常');
+  expect(text()).toContain('取消未发送');
+  spy.mockRestore();
 });
 
 it('JTC cancel holds through the adapter without a manual target or global stop', async () => {

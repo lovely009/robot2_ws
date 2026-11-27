@@ -146,17 +146,30 @@ def test_write_gating_bench_and_readonly_modes(tmp_path):
             # Acquire lease -> REST + WS writes succeed
             acq = client.post('/api/control/lease/acquire', json={'client_id': 'ctrl-1'}).json()
             headers = {'X-Client-Id': 'ctrl-1', 'X-Lease-Token': acq['token']}
-            assert client.post('/api/control/joint-target', json={'names': ['j1'], 'positions': [0.1]}, headers=headers).status_code == 200
-            assert client.post('/api/control/trajectory', json={'joint_names': ['j1'], 'points': [{'positions': [0.2], 'time_from_start_ms': 50}]}, headers=headers).status_code == 200
+            assert client.post('/api/control/joint-target', json={'names': ['j1'], 'positions': [0.1], 'stamp_ns': 123456, 'frame_id': 'manual-1'}, headers=headers).status_code == 200
+            assert client.post('/api/sim/joint-target', json={'names': ['j1'], 'positions': [0.2], 'frame_id': 'sim-session-9'}, headers=headers).status_code == 200
+            assert client.post('/api/control/trajectory', json={'joint_names': ['j1'], 'points': [{'positions': [0.2], 'time_from_start_ms': 50}], 'stamp_ns': 987654321, 'frame_id': 'workbench-trajectory/42'}, headers=headers).status_code == 200
             assert client.post('/api/motor/policy', json={'session_id': 1, 'targets': [{'motor_id': 1, 'enabled': True}]}, headers=headers).status_code == 200
             assert client.post('/api/bench/simulation/start', json={'payload': {'model': 'half_body_robot'}}, headers=headers).status_code == 200
             assert client.post('/api/control/parameters', json={'node': '/bench_manager', 'parameters': []}, headers=headers).status_code == 200
+
+            assert any(p.topic == '/control/joint_target' and p.payload['frame_id'] == 'manual-1' and p.payload['stamp_ns'] == 123456 for p in gw.publishes)
+            assert any(p.topic == '/robot_sim/joint_position_target' and p.payload['frame_id'] == 'sim-session-9' for p in gw.publishes)
+            assert any(p.topic == '/control/trajectory' and p.payload['frame_id'] == 'workbench-trajectory/42' and p.payload['stamp_ns'] == 987654321 for p in gw.publishes)
 
             ws.send_json({
                 'op': 'control:joint_target',
                 'token': acq['token'],
                 'names': ['j1'],
                 'positions': [0.3],
+                'frame_id': 'ws-frame-1',
+            })
+            ws.send_json({
+                'op': 'sim:joint_target',
+                'token': acq['token'],
+                'names': ['j1'],
+                'positions': [0.4],
+                'frame_id': 'sim-session-9',
             })
             # Drain lease:state broadcast if any, then ping to ensure server processed uplink
             ws.send_json({'op': 'ping', 'client_ts_ms': 1})
@@ -164,7 +177,8 @@ def test_write_gating_bench_and_readonly_modes(tmp_path):
                 pkt = ws.receive_json()
                 if pkt.get('op') == 'pong':
                     break
-            assert any(p.topic == '/control/joint_target' and p.payload['positions'] == [0.3] for p in gw.publishes)
+            assert any(p.topic == '/control/joint_target' and p.payload['positions'] == [0.3] and p.payload['frame_id'] == 'ws-frame-1' for p in gw.publishes)
+            assert any(p.topic == '/robot_sim/joint_position_target' and p.payload['positions'] == [0.4] and p.payload['frame_id'] == 'sim-session-9' for p in gw.publishes)
 
     # Readonly mode blocks writes even with valid lease token
     ro_app = create_app(
@@ -183,6 +197,61 @@ def test_write_gating_bench_and_readonly_modes(tmp_path):
         )
         assert r.status_code == 403
         assert r.json()['detail']['code'] == 'readonly_mode'
+
+
+def test_diagnostics_omits_sim_position_when_sim_disabled(tmp_path):
+    app = create_app(
+        ros_gateway=MockRosGateway(enable_sim=False),
+        web_root=tmp_path / 'web',
+        motion_data_dir=tmp_path / 'data',
+        recordings_dir=tmp_path / 'rec',
+        control_mode='bench',
+    )
+    with TestClient(app) as client:
+        diag = client.get('/api/diagnostics').json()
+        assert 'telemetry:sim_position' not in diag['topics']
+        assert 'telemetry:motor_state' in diag['topics']
+
+
+def test_sim_joint_target_returns_published_false_when_sim_disabled(tmp_path):
+    pytest.importorskip('rclpy')
+    app = create_app(
+        ros_gateway=RosGatewayThread(node_name='web_host_bff_no_sim', enable_sim=False),
+        web_root=tmp_path / 'web',
+        motion_data_dir=tmp_path / 'data',
+        recordings_dir=tmp_path / 'rec',
+        control_mode='bench',
+    )
+    with TestClient(app) as client:
+        acq = client.post('/api/control/lease/acquire', json={'client_id': 'ctrl-nosim'}).json()
+        headers = {'X-Client-Id': 'ctrl-nosim', 'X-Lease-Token': acq['token']}
+        resp = client.post(
+            '/api/sim/joint-target',
+            json={'names': ['j1'], 'positions': [0.2], 'frame_id': 'sim-disabled'},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body['accepted'] is True
+        assert body['published'] is False
+
+        with client.websocket_connect('/ws?client_id=ctrl-nosim') as ws:
+            _ = ws.receive_json()
+            ws.send_json({
+                'op': 'sim:joint_target',
+                'token': acq['token'],
+                'names': ['j1'],
+                'positions': [0.4],
+                'frame_id': 'sim-disabled',
+            })
+            ws.send_json({'op': 'ping', 'client_ts_ms': 1})
+            pong = None
+            for _ in range(5):
+                pkt = ws.receive_json()
+                if pkt.get('op') == 'pong':
+                    pong = pkt
+                    break
+            assert pong is not None
 
 
 def test_unified_same_origin_and_static_cache_headers(tmp_path):

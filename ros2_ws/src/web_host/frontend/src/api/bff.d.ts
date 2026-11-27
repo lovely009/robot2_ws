@@ -51,6 +51,7 @@ export interface JointTargetRequest {
   velocities?: number[];
   efforts?: number[];
   stamp_ns?: number | null;
+  frame_id?: string;
 }
 
 export interface LeaseAcquireRequest {
@@ -175,6 +176,7 @@ export interface TrajectoryRequest {
   joint_names: string[];
   points: TrajectoryPoint[];
   stamp_ns?: number | null;
+  frame_id?: string;
 }
 
 export interface ValidationError {

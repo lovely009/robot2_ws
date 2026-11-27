@@ -1,7 +1,7 @@
 // MotorTrajectory 动作文件经低频客户端转换成 JTC action，不再上传 MCU。
 import { store, MODEL, JOINT_OF_MOTOR, markDirty, DIRTY, beginTrajectory } from './store';
 import { LIFECYCLE, TRAJ_MAX_PLAN_POINTS, TRAJ_MAX_MOTORS, TRAJ_STATE_TIMEOUT_PAD_MS } from './format';
-import { pub, isConnected, submitPolicy, getConnectionGeneration } from './ros';
+import { pub, publishTrajectory, isConnected, submitPolicy, getConnectionGeneration } from './ros';
 import { controlGroups, controlSessionError, rawCouplingError } from './joint_control';
 import { controlTargetsError, describeMotorState, policyRequestState, applyPolicySubmission, confirmPolicyIntent, stopPolicyIntents } from './motor_state';
 import { isUnprotected } from './control_policy';
@@ -193,7 +193,7 @@ function buildJsonJointPlan(series: ReturnType<typeof loadSeries>, state: any) {
   };
 }
 
-function sendPlan(): number {
+async function sendPlan(): Promise<number> {
   assertPlaybackSession();
   const authority = controlTargetsError(store, player.ids);
   if (authority) throw new Error(authority);
@@ -204,7 +204,7 @@ function sendPlan(): number {
   if (player.jointPlan) {
     player.planStarted = true;
     beginTrajectory(store.traj.activeTrajectoryId, true);
-    if (!pub('trajectory', {
+    if (!await publishTrajectory({
       header: {
         stamp: { sec: Math.floor(syncTime / 1e9), nanosec: Math.round(syncTime % 1e9) },
         frame_id: `${player.raw ? 'workbench-trajectory-linear' : 'workbench-trajectory'}/${tid}`,
@@ -328,7 +328,7 @@ export async function playAction(
 
     player.detail = '取消旧轨迹…';
     announce();
-    cancelTrajectory();
+    await publishTrajectory({ header: {}, joint_names: [], points: [] });
     await sleep(CANCEL_SETTLE_MS);
     assertPlaybackSession();
     if (player.cancelRequested) throw new Error('已停止');
@@ -344,7 +344,7 @@ export async function playAction(
     }
 
     for (player.round = 0; ; player.round++) {
-      const tid = sendPlan();
+      const tid = await sendPlan();
       player.detail = `${player.loop ? `第${player.round + 1}轮 · ` : ''}`
         + `JTC ${player.raw ? '原始线性' : '单调插值'}播放（含起点引导）· ${player.durationMs}ms`
         + (player.jointPlan?.timeScale > 1
@@ -365,7 +365,7 @@ export async function playAction(
     if (player.planStarted && !player.cancelRequested && isConnected()
         && player.connectionGeneration === getConnectionGeneration()) {
       let sent = false;
-      try { sent = cancelTrajectory(); } catch { /* ignore */ }
+      try { sent = await publishTrajectory({ header: {}, joint_names: [], points: [] }); } catch { /* ignore */ }
       if (!sent) player.error += '；取消未发送，运动停止未确认，请使用全部软停';
     }
     announce();

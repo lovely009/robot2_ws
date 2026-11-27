@@ -5,7 +5,7 @@ import {
   jointFeedbackMatchesModel, applyAgentWireStatus,
 } from './store';
 import {
-  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler, nsToHeader,
+  $, TOPICS, EVENT_NAMES, MOTOR_ID_NONE, quatToEuler, nsToHeader, headerStampNs,
 } from './format';
 
 import {
@@ -136,6 +136,7 @@ export function pub(key: string, message: Record<string, any>): boolean {
     }
     if (controlMode === 'readonly') return false;
     if (key === 'jointTarget' || key === 'simJointTarget') {
+      const stampNs = headerStampNs(message);
       return bffClient.sendJointTarget(
         key === 'simJointTarget' ? 'sim:joint_target' : 'control:joint_target',
         {
@@ -143,6 +144,8 @@ export function pub(key: string, message: Record<string, any>): boolean {
           positions: message.position || message.positions || [],
           velocities: message.velocity || message.velocities || [],
           efforts: message.effort || message.efforts || [],
+          stamp_ns: stampNs > 0 ? stampNs : null,
+          frame_id: String(message.header?.frame_id || ''),
         },
       );
     }
@@ -155,6 +158,15 @@ export function pub(key: string, message: Record<string, any>): boolean {
   if (controlMode === 'readonly') return false;
   ensurePublisher(key)?.publish(new ROSLIB.Message(message));
   return true;
+}
+
+export async function publishTrajectory(message: Record<string, any>): Promise<boolean> {
+  if (!TOPICS.trajectory || !store.conn.connected || controlMode === 'readonly') return false;
+  if (transportMode === 'bff') {
+    await bffClient.publishTrajectory(message as any);
+    return true;
+  }
+  return pub('trajectory', message);
 }
 
 export async function executeConfig(request: Record<string, any>, timeoutMs = 10000) {

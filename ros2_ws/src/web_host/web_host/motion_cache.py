@@ -10,6 +10,7 @@ import tempfile
 
 
 FILES = ('motion.npz', 'preview.json', 'report.json', 'robot.urdf')
+CACHE_SCHEMA_VERSION = 2
 
 
 def digest(path):
@@ -17,42 +18,12 @@ def digest(path):
 
 
 def result_key(job, mapping, digest_cache=None):
-    def cached_digest(path):
-        if digest_cache is None:
-            return digest(path)
-        resolved = Path(path)
-        value = digest_cache.get(resolved)
-        if value is None:
-            value = digest(resolved)
-            digest_cache[resolved] = value
-        return value
-
+    del digest_cache  # kept for call-site compatibility
     directory = job['directory']
     inputs = {name: digest(directory / name) for name in ('source.bvh', 'robot.urdf')}
-    for name in ('web_host.motion', 'web_host.motion_cache', 'web_host.motion_simulation', 'web_host.motion_source',
-                 'web_host.shoulder_retarget', 'bvh_broadcaster.bvh',
-                 'bvh_broadcaster.generic_retarget', 'bvh_broadcaster.retarget',
-                 'robot_transmission.coupled_limits', 'robot_transmission.mujoco_positions'):
-        inputs[name] = cached_digest(Path(importlib.util.find_spec(name).origin))
-    import numpy
-    import scipy
-    import pinocchio
-    inputs['runtime'] = [numpy.__version__, scipy.__version__, pinocchio.__version__]
+    inputs['cache_schema'] = CACHE_SCHEMA_VERSION
     simulation = job.get('simulation')
     if simulation:
-        from .motion_simulation import load_mujoco
-        try:
-            inputs['mujoco_version'] = load_mujoco().__version__
-        except ModuleNotFoundError:
-            inputs['mujoco_version'] = None
-        model = simulation['directory']
-        mujoco_dir = model / 'mujoco'
-        if mujoco_dir.is_dir():
-            for path in sorted(mujoco_dir.glob('*.xml')):
-                inputs[str(path.relative_to(model))] = cached_digest(path)
-        standalone = model / 'urdf' / f'{model.name}.standalone.urdf'
-        if standalone.is_file():
-            inputs['standalone'] = cached_digest(standalone)
         inputs['constraints'] = simulation['config_sha256']
     selected = {key: value for key, value in mapping.items() if key != 'targets'}
     if 'targets' in mapping:

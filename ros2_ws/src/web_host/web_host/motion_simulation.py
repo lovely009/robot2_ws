@@ -21,6 +21,21 @@ def _bound_pair(bound):
     return float(bound[0]), float(bound[1])
 
 
+def _constraints_sha256(limits: dict, velocity_limit: float) -> str:
+    """Hash only semantic retargeting constraints (ignore flange_limits & YAML formatting)."""
+    canonical = {
+        'joint_limits': {
+            name: list(_bound_pair(bound))
+            for name, bound in sorted(limits['joint_limits'].items())
+        },
+        'coupled_limits': limits.get('coupled_limits', {}),
+        'velocity_limit_rad_s': float(velocity_limit),
+    }
+    return hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+
+
 def registered_simulation(request, models_root):
     name = request.get('model')
     if name is None:
@@ -56,7 +71,7 @@ def registered_simulation(request, models_root):
         # This rate is an offline preview cap, not a calibrated motor specification.
         element.attrib.update(lower=str(lower), upper=str(upper), velocity=str(math.pi), effort='0')
     return {'directory': directory, 'limits': limits,
-            'config_sha256': hashlib.sha256(config_bytes).hexdigest(),
+            'config_sha256': _constraints_sha256(limits, math.pi),
             'urdf_text': ET.tostring(robot, encoding='unicode'), 'velocity_limit_rad_s': math.pi}
 
 
@@ -93,8 +108,8 @@ def load_mujoco():
 
 def cad_preview(simulation, names, positions):
     directory = simulation['directory']
-    current = (directory / 'config/simulation_limits.yaml').read_bytes()
-    if hashlib.sha256(current).hexdigest() != simulation['config_sha256']:
+    current = yaml.safe_load((directory / 'config/simulation_limits.yaml').read_bytes())
+    if _constraints_sha256(current, simulation['velocity_limit_rad_s']) != simulation['config_sha256']:
         raise ValueError('仿真限位已更新，请重新导入动作')
     model_path = directory / 'mujoco' / f'{directory.name}.xml'
     if not model_path.is_file():

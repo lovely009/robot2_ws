@@ -407,7 +407,9 @@ class MotionJobs:
                     root_rotation_frame='robot')
             if job.get('simulation'):
                 from .motion_simulation import cad_preview
-                preview['robot'].update(cad_preview(job['simulation'], solver.names, positions[indices]))
+                cad = cad_preview(job['simulation'], solver.names, positions[indices])
+                if cad:
+                    preview['robot'].update(cad)
             (directory / 'preview.json').write_text(json.dumps(preview, allow_nan=False))
             summary = {'preview_only': True, 'frames': len(positions), 'joint_names': solver.names,
                        'frame_time': clip.frame_time, 'mapping': job['status']['mapping'],

@@ -96,9 +96,14 @@ def cad_preview(simulation, names, positions):
     current = (directory / 'config/simulation_limits.yaml').read_bytes()
     if hashlib.sha256(current).hexdigest() != simulation['config_sha256']:
         raise ValueError('仿真限位已更新，请重新导入动作')
-    mujoco = load_mujoco()
-    from robot_transmission.mujoco_positions import JointPositionTargets
     model_path = directory / 'mujoco' / f'{directory.name}.xml'
+    if not model_path.is_file():
+        return None
+    try:
+        mujoco = load_mujoco()
+    except ModuleNotFoundError:
+        return None
+    from robot_transmission.mujoco_positions import JointPositionTargets
     root = ET.parse(model_path).getroot()
     config = json.loads(root.find("custom/text[@name='robot_sim_joint_position']").get('data'))
     model = mujoco.MjModel.from_xml_path(str(model_path))

@@ -25,6 +25,8 @@ def run_job(directory: Path) -> None:
         simulation = {**simulation, 'directory': Path(simulation['directory'])}
 
     clip = BvhClip.load(directory / 'source.bvh', preserve_names=generic)
+    from .motion_source import prepare_source
+    prepare_source(clip, up_axis)
     if generic:
         from bvh_broadcaster.generic_retarget import GenericRetargeter
         solver = GenericRetargeter(

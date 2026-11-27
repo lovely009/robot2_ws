@@ -1,112 +1,112 @@
 joint_limits:
   waist_yaw:
-  - -0.15708
-  - 0.15708
+    lower: -0.15708
+    upper: 0.15708
   waist_pitch:
-  - -1.904966
-  - 2.428973
+    lower: -1.904966
+    upper: 2.428973
   waist_roll:
-  - -0.294149
-  - 0.247721
+    lower: -0.294149
+    upper: 0.247721
   left_scapula_yaw:
-  - -1.005166
-  - 2.504991
+    lower: -1.005166
+    upper: 2.504991
   left_scapula_roll:
-  - -0.069813
-  - 0.51944
+    lower: -0.069813
+    upper: 0.51944
   left_shoulder_pitch:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_shoulder_roll:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_shoulder_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_elbow_pitch:
-  - -2.551521
-  - 2.779266
+    lower: -2.551521
+    upper: 2.779266
   left_forearm_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_wrist_pitch:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_wrist_roll:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_scapula_yaw:
-  - -2.504957
-  - 1.005166
+    lower: -2.504957
+    upper: 1.005166
   right_scapula_roll:
-  - -0.51944
-  - 0.069813
+    lower: -0.51944
+    upper: 0.069813
   right_shoulder_pitch:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_shoulder_roll:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_shoulder_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_elbow_pitch:
-  - -2.785641
-  - 2.544806
+    lower: -2.785641
+    upper: 2.544806
   right_forearm_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_wrist_pitch:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_wrist_roll:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   pelvis_roll:
-  - -0.05236
-  - 0.10472
+    lower: -0.05236
+    upper: 0.10472
   pelvis_pitch:
-  - -0.139626
-  - 2.354354
+    lower: -0.139626
+    upper: 2.354354
   left_hip_pitch:
-  - -1.745329
-  - 1.745329
+    lower: -1.745329
+    upper: 1.745329
   left_hip_roll:
-  - -1.117011
-  - 1.117011
+    lower: -1.117011
+    upper: 1.117011
   left_hip_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_knee_pitch:
-  - -2.583087
-  - 2.722339
+    lower: -2.583087
+    upper: 2.722339
   left_shank_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   left_ankle_pitch:
-  - -1.97379
-  - 2.222363
+    lower: -1.97379
+    upper: 2.222363
   left_ankle_roll:
-  - -1.88291
-  - 1.880251
+    lower: -1.88291
+    upper: 1.880251
   right_hip_pitch:
-  - -1.53589
-  - 1.53589
+    lower: -1.53589
+    upper: 1.53589
   right_hip_roll:
-  - -1.117011
-  - 1.117011
+    lower: -1.117011
+    upper: 1.117011
   right_hip_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_knee_pitch:
-  - -2.722339
-  - 2.583087
+    lower: -2.722339
+    upper: 2.583087
   right_shank_yaw:
-  - -3.106686
-  - 3.106686
+    lower: -3.106686
+    upper: 3.106686
   right_ankle_pitch:
-  - -1.895387
-  - 2.29838
+    lower: -1.895387
+    upper: 2.29838
   right_ankle_roll:
-  - -1.880251
-  - 1.88291
+    lower: -1.880251
+    upper: 1.88291

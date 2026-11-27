@@ -99,6 +99,34 @@ HIPS_CAD_BALLS = {
 }
 HIPS_CROSSBEAM_NORMAL = np.array([2.19096428e-7, 0.0361379527, 0.999346811])
 
+# Exact weighed-CAD (flange_ref, lower_ball_ref, upper_ball_ref) in ref_link frame
+WEIGHED_CAD_OVERRIDES = {
+    'waist': {
+        'plus': (
+            np.array([0.051, -0.008308, -0.049369]),
+            np.array([0.051, -0.053237, -0.071309]),
+            np.array([0.051, -0.046210, -0.112813]),
+        ),
+        'minus': (
+            np.array([-0.051, -0.008308, -0.049369]),
+            np.array([-0.051, -0.053237, -0.071309]),
+            np.array([-0.051, -0.046210, -0.112813]),
+        ),
+    },
+    'hips': {
+        'plus': (
+            np.array([0.000117, -0.07205, 0.029625]),
+            np.array([0.00835, -0.10475, 0.02675]),
+            np.array([0.062, -0.0715, 0.0114]),
+        ),
+        'minus': (
+            np.array([0.000117, 0.07205, 0.029625]),
+            np.array([0.00835, 0.10475, 0.02675]),
+            np.array([0.062, 0.0715, 0.0114]),
+        ),
+    },
+}
+
 
 def numbers(values) -> str:
     return ' '.join(f'{float(v):.9g}' for v in values)
@@ -139,7 +167,8 @@ def decimate_for_mujoco(src_stl: Path, dst_stl: Path, target_faces: int = 120_00
     poly = reader.GetOutput()
     n_cells = poly.GetNumberOfCells()
     if n_cells <= 180_000:
-        shutil.copy2(src_stl, dst_stl)
+        if src_stl.resolve() != dst_stl.resolve():
+            shutil.copy2(src_stl, dst_stl)
         return
     reduction = max(0.0, min(0.95, 1.0 - (target_faces / float(n_cells))))
     dec = vtk.vtkQuadricDecimation()
@@ -316,21 +345,31 @@ def _split_weighed_visual_linkages(root: ET.Element, mj_model) -> None:
     specs = [
         {
             'link': 'waist_yaw',
+            'out_link': 'waist_roll',
             'src_stl': MODEL / 'meshes/visual/native/waist_yaw.STL',
             'mesh_name': 'waist_yaw_vis_0',
             'decimate_faces': 0,
             'group': 'waist',
             'rod_sets': [{58}, {68}],
-            'flange_sets': [{57, 2, 63, 69}, {64, 65, 66, 71}],
+            'flange_sets': [
+                {57, 2, 63, 69, 77, 78, 79, 82, 83, 84, 87, 91},
+                {64, 65, 66, 71, 93, 94, 99, 104, 105, 106, 107, 108},
+            ],
+            'platform_rids': {1, 62, 74, 60, 61, 67},
         },
         {
             'link': 'Base_link',
+            'out_link': 'pelvis_pitch',
             'src_stl': MODEL / 'meshes/collision/native/Base_link.STL',
             'mesh_name': 'Base_link_vis_0',
             'decimate_faces': 30000,
             'group': 'hips',
             'rod_sets': [{153}, {163}],
-            'flange_sets': [{155, 152, 158, 171}, {159, 162, 157, 166}],
+            'flange_sets': [
+                {155, 152, 158, 171, 181, 182, 185, 186, 187, 192, 193, 204},
+                {159, 162, 157, 166, 0, 180, 183, 184, 188, 189, 190, 191},
+            ],
+            'platform_rids': {154, 156, 165, 160, 161, 167},
         },
     ]
 
@@ -400,6 +439,33 @@ def _split_weighed_visual_linkages(root: ET.Element, mj_model) -> None:
                     rgba='0.72 0.76 0.80 1',
                 )
                 assigned_rids.update(rset)
+
+        platform_rids = spec.get('platform_rids', set())
+        if platform_rids:
+            out_link = spec['out_link']
+            mask = np.isin(tri_rids, list(platform_rids))
+            sub_tris = tris[mask]
+            assert len(sub_tris) > 0, f'No platform triangles for {link_name} regions {platform_rids}'
+            used_idx, inv_tris = np.unique(sub_tris, return_inverse=True)
+            sub_pts_w = pts[used_idx] @ link_rot.T + link_pos
+            o_bid = mj_model.body(out_link).id
+            o_pos = zero_data.xpos[o_bid]
+            o_rot = zero_data.xmat[o_bid].reshape(3, 3)
+            local_pts = (sub_pts_w - o_pos) @ o_rot
+            vis_name = f'{out_link}_platform_pins_vis'
+            out_stl = split_dir / f'{vis_name}.STL'
+            _write_binary_stl(out_stl, local_pts, inv_tris.reshape(-1, 3))
+            ET.SubElement(assets, 'mesh', name=vis_name, file=f'mujoco/visual_split/{vis_name}.STL')
+            ET.SubElement(
+                body_els[out_link],
+                'geom',
+                name=vis_name,
+                type='mesh',
+                mesh=vis_name,
+                group='0',
+                rgba='0.72 0.76 0.80 1',
+            )
+            assigned_rids.update(platform_rids)
 
         # Write remaining housing triangles
         keep_mask = ~np.isin(tri_rids, list(assigned_rids))
@@ -504,12 +570,23 @@ def build():
         flange_bodies: dict[str, ET.Element] = {}
         flange_old_pos: dict[str, np.ndarray] = {}
 
+        overrides = WEIGHED_CAD_OVERRIDES.get(name, {})
+        flange_new_pos: dict[str, np.ndarray] = {}
+
         for src_body in module_xml.findall('worldbody/body'):
             j_el = src_body.find('joint')
             if j_el.get('name') in DIFF_TO_URDF_JOINTS[name]:
                 continue
             old_fpos = np.fromstring(src_body.get('pos', '0 0 0'), sep=' ')
-            new_fpos = t_align + R_align.apply(old_fpos)
+            sites = src_body.findall('site')
+            side = sites[0].get('name').removesuffix('_motor_ball') if sites else (
+                'plus' if 'plus' in src_body.get('name', '') else 'minus'
+            )
+            if side in overrides:
+                flange_ref, lower_ref, _upper_ref = overrides[side]
+                new_fpos = flange_ref
+            else:
+                new_fpos = t_align + R_align.apply(old_fpos)
             flange = ET.SubElement(
                 bodies[ref_link], 'body',
                 name=f'{name}_{src_body.get("name")}',
@@ -523,13 +600,18 @@ def build():
             )
             ET.SubElement(flange, 'joint', name=flange_jn,
                           axis=j_el.get('axis'), limited='true', range=flange_range)
-            for site in src_body.findall('site'):
+            for site in sites:
                 orig = site.get('name')
                 sname = f'{name}_{orig}'
                 site_names[orig] = sname
                 flange_bodies[orig] = flange
                 flange_old_pos[orig] = old_fpos
-                ET.SubElement(flange, 'site', name=sname, pos=site.get('pos'), rgba='0 0 0 0')
+                flange_new_pos[orig] = new_fpos
+                site_pos_str = (
+                    numbers(R_align.inv().apply(overrides[side][1] - new_fpos))
+                    if side in overrides else site.get('pos')
+                )
+                ET.SubElement(flange, 'site', name=sname, pos=site_pos_str, rgba='0 0 0 0')
 
         for spatial in module_xml.findall('tendon/spatial'):
             lower, upper = (s.get('site') for s in spatial.findall('site'))
@@ -537,18 +619,30 @@ def build():
             prefix = f'{name}_{side}'
             start_old = mod_data.site(lower).xpos.copy()
             end_old = mod_data.site(upper).xpos.copy()
-            length = float(np.linalg.norm(end_old - start_old))
+            flange = flange_bodies[lower]
+            fpos_old = flange_old_pos[lower]
+
+            if side in overrides:
+                flange_ref, lower_ref, upper_ref = overrides[side]
+                end_ref = upper_ref
+                rod_start_local = R_align.inv().apply(lower_ref - flange_ref)
+                rod_end_local = R_align.inv().apply(upper_ref - flange_ref)
+                rod_vec_local = rod_end_local - rod_start_local
+                length = float(np.linalg.norm(rod_vec_local))
+                rod_orient = rod_frame(rod_vec_local, np.array([1.0, 0.0, 0.0]))
+            else:
+                end_ref = t_align + R_align.apply(end_old)
+                rod_start_local = start_old - fpos_old
+                length = float(np.linalg.norm(end_old - start_old))
+                rod_orient = rod_frame(end_old - start_old, np.array([1.0, 0.0, 0.0]))
 
             # Add platform ball site in out_link frame
-            end_ref = t_align + R_align.apply(end_old)
             end_out = t_out_ref + R_out_ref.apply(end_ref)
             upper_name = f'{name}_{upper}'
             site_names[upper] = upper_name
             ET.SubElement(bodies[out_link], 'site', name=upper_name, pos=numbers(end_out), rgba='0 0 0 0')
 
             # Attach visual CAD meshes for flange & platform
-            flange = flange_bodies[lower]
-            fpos_old = flange_old_pos[lower]
             if name == 'hips':
                 old_start, old_end, old_normal = HIPS_CAD_BALLS[side]
                 flange_turn, _ = Rotation.align_vectors([start_old - fpos_old], [old_start - fpos_old])
@@ -579,10 +673,9 @@ def build():
 
             # Add rod body with universal joint at motor ball + tip site + equality connect
             rod_name = f'{prefix}_rod'
-            rod_orient = rod_frame(end_old - start_old, np.array([1.0, 0.0, 0.0]))
             rod = ET.SubElement(
                 flange, 'body', name=rod_name,
-                **pose_attributes(start_old - fpos_old, rod_orient),
+                **pose_attributes(rod_start_local, rod_orient),
             )
             for ax_suffix, ax_vec in (('x', '1 0 0'), ('y', '0 1 0')):
                 ET.SubElement(rod, 'joint', name=f'{rod_name}_{ax_suffix}', axis=ax_vec,

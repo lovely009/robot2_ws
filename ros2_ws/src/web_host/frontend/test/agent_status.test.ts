@@ -21,7 +21,7 @@ it('separates link, clock and authority including lease expiry', () => {
 });
 it('never shows stale, disconnected or incompatible data as ready', () => {
   const s = state();
-  expect(describeAgentStatus(s, 1301)).toMatchObject({link: '状态陈旧', clock: '未知', authority: '未知'});
+  expect(describeAgentStatus(s, 2001)).toMatchObject({link: '状态陈旧', clock: '未知', authority: '未知'});
   s.conn.connected = false;
   expect(describeAgentStatus(s, 1100).link).toBe('未连接');
   s.conn.connected = true; s.agentWireStatus.data.schema_version = 3;
@@ -49,8 +49,8 @@ it('rejects malformed, replayed and old-session status without refreshing receip
 
 it('does not revive an expired lease when a new sequence was delayed in transit', () => {
   const s = state();
-  expect(applyAgentWireStatus(s, {...s.agentWireStatus.data, sequence: 2}, 2000)).toBe(true);
-  expect(describeAgentStatus(s, 2000)).toMatchObject({link: '状态陈旧', clock: '未知', authority: '未知'});
-  s.agentWireStatus.data.header = {stamp: {sec: 2, nanosec: 200000000}, frame_id: ''};
-  expect(describeAgentStatus(s, 2000)).toMatchObject({clock: '时间基准异常', authority: '未知'});
+  expect(applyAgentWireStatus(s, {...s.agentWireStatus.data, sequence: 2}, 2500)).toBe(true);
+  expect(describeAgentStatus(s, 2500)).toMatchObject({link: '状态陈旧', clock: '未知', authority: '未知'});
+  s.agentWireStatus.data.header = {stamp: {sec: 2, nanosec: 700000000}, frame_id: ''};
+  expect(describeAgentStatus(s, 2500)).toMatchObject({clock: '时间基准异常', authority: '未知'});
 });

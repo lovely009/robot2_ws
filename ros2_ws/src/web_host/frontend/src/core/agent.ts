@@ -3,22 +3,25 @@ import { store, markDirty, DIRTY, applyBenchStatus } from './store';
 import { $, CONTROLLER_PORT_STORAGE_KEY, headerStampNs } from './format';
 import { callService } from './ros';
 
+const WIRE_STALE_MS = 1000;
+
 export function describeAgentStatus(state: any, now = Date.now()) {
   const unknown = { link: '未连接', clock: '未知', authority: '未知', detail: '' };
   if (!state.conn.connected) return unknown;
   const report = state.agentWireStatus;
   if (!report?.data) return { ...unknown, link: '等待状态' };
   let age = now - report.at;
-  if (!Number.isFinite(age) || age < 0 || age > 300) return { ...unknown, link: '状态陈旧' };
+  if (!Number.isFinite(age) || age < 0 || age > WIRE_STALE_MS) return { ...unknown, link: '状态陈旧' };
   const m = report.data;
   if (m.schema_version !== 6) return { ...unknown, link: '版本不匹配' };
   if (m.clock_valid === true) {
     const stampNs = headerStampNs(m);
     const sourceMs = (stampNs > 0 ? stampNs : Number(m.snapshot_stamp)) / 1e6;
-    if (!Number.isFinite(sourceMs) || sourceMs <= 0 || sourceMs - now > 20)
+    const serverNow = now + (Number(report.serverOffsetMs) || 0);
+    if (!Number.isFinite(sourceMs) || sourceMs <= 0 || sourceMs - serverNow > 20)
       return { ...unknown, link: '在线', clock: '时间基准异常' };
-    age = Math.max(age, now - sourceMs);
-    if (age > 300) return { ...unknown, link: '状态陈旧' };
+    age = Math.max(age, serverNow - sourceMs);
+    if (age > WIRE_STALE_MS) return { ...unknown, link: '状态陈旧' };
   }
   const syncAge = Number(m.clock_sync_age_ms) + age;
   const clockOk = m.clock_valid === true && Number.isFinite(syncAge) && syncAge >= 0 && syncAge <= 30000;
@@ -188,7 +191,7 @@ export async function refreshAgentControls() {
       if (stm32Ports.length === 1) select.value = stm32Ports[0].path;
     }
     if (select.value) localStorage.setItem(CONTROLLER_PORT_STORAGE_KEY, select.value);
-    select.title = select.selectedOptions[0]?.textContent || '';
+    select.title = select.selectedOptions?.[0]?.textContent || '';
   } catch (error: any) {
     select.replaceChildren();
     const option = document.createElement('option');

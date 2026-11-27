@@ -2,7 +2,12 @@
 // 订阅由 Vue 工作台全局建立并写这里，与屏是否可见无关——所以切屏不丢曲线缓冲与事件列表。
 import { createControlStateCache, describeMotorState, type ControlStateCache } from './motor_state';
 
-export function applyAgentWireStatus(state: any, message: any, now = Date.now()): boolean {
+export function applyAgentWireStatus(
+  state: any,
+  message: any,
+  now = Date.now(),
+  serverTsMs?: number,
+): boolean {
   const uint32 = (value: any) => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
   if (!Number.isSafeInteger(message.session_id) || message.session_id <= 0 ||
       !Number.isInteger(message.schema_version) ||
@@ -12,7 +17,8 @@ export function applyAgentWireStatus(state: any, message: any, now = Date.now())
   const previous = state.agentWireStatus?.data;
   if (previous && (message.session_id < previous.session_id ||
       (message.session_id === previous.session_id && ((message.sequence - previous.sequence) | 0) <= 0))) return false;
-  state.agentWireStatus = { at: now, data: message };
+  const serverOffsetMs = typeof serverTsMs === 'number' && Number.isFinite(serverTsMs) ? serverTsMs - now : 0;
+  state.agentWireStatus = { at: now, serverOffsetMs, data: message };
   return true;
 }
 

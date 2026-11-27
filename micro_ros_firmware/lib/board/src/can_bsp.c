@@ -119,15 +119,25 @@ void bsp_can_init(void) {
   HAL_FDCAN_ActivateNotification(&hfdcan1, error_notifications, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan2, error_notifications, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan3, error_notifications, 0);
+#if FIRMWARE_ENABLE_CAN4
   (void)mcp2518fd_init();
+#endif
 }
 
 bool can_bsp_bus_ready(uint8_t bus_index) {
+#if FIRMWARE_ENABLE_CAN4
   return bus_index < NATIVE_BUS_COUNT || (bus_index == FIRMWARE_CAN4_INDEX && mcp2518fd_ready());
+#else
+  return bus_index < NATIVE_BUS_COUNT;
+#endif
 }
 
 void can_bsp_poll_can4(uint32_t now_ms) {
+#if FIRMWARE_ENABLE_CAN4
   mcp2518fd_drain(&g_rx_rings[FIRMWARE_CAN4_INDEX], now_ms);
+#else
+  (void)now_ms;
+#endif
 }
 
 // 每总线成功提交到硬件 FIFO 的帧数，包含 20ms/50Hz SYNC，不仅是运动命令。
@@ -148,6 +158,7 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
     return false;
   }
   if (bus_index == FIRMWARE_CAN4_INDEX) {
+#if FIRMWARE_ENABLE_CAN4
     _Static_assert(FDCAN_DLC_BYTES_64 == 15U, "HAL DLC 必须为四位编码");
     if (!mcp2518fd_transmit(frame, (uint8_t)dlc)) {
       can_tx_scheduler_note_hw_reject(&g_tx_schedulers[bus_index]);
@@ -155,6 +166,9 @@ bool can_bsp_submit_tx(uint8_t bus_index, const can_tx_frame_t *frame) {
     }
     ++g_tx_frame_count[bus_index];
     return true;
+#else
+    return false;
+#endif
   }
   FDCAN_TxHeaderTypeDef tx = {0};
   tx.Identifier = frame->can_id;
@@ -215,7 +229,13 @@ static bool fdcan_receive_into_frame(FDCAN_HandleTypeDef *hfdcan,
 static uint32_t g_rx_hw_lost[CAN_TX_BUS_COUNT] = {0U};
 
 uint32_t can_bsp_rx_hw_lost(uint8_t bus_index) {
-  if (bus_index == FIRMWARE_CAN4_INDEX) return mcp2518fd_rx_overflows();
+  if (bus_index == FIRMWARE_CAN4_INDEX) {
+#if FIRMWARE_ENABLE_CAN4
+    return mcp2518fd_rx_overflows();
+#else
+    return 0U;
+#endif
+  }
   return bus_index < CAN_TX_BUS_COUNT ? g_rx_hw_lost[bus_index] : 0U;
 }
 

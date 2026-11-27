@@ -14,6 +14,13 @@ import yaml
 from robot_transmission.coupled_limits import CoupledLimits
 
 
+def _bound_pair(bound):
+    """Return (lower, upper) floats from either {lower, upper} dict or [lo, hi] list."""
+    if isinstance(bound, dict):
+        return float(bound['lower']), float(bound['upper'])
+    return float(bound[0]), float(bound[1])
+
+
 def registered_simulation(request, models_root):
     name = request.get('model')
     if name is None:
@@ -39,8 +46,7 @@ def registered_simulation(request, models_root):
     if set(limits['joint_limits']) != {joint.get('name') for joint in joints}:
         raise ValueError('仿真位置限位须覆盖模型的全部关节')
     for joint in joints:
-        bound = limits['joint_limits'][joint.get('name')]
-        lower, upper = float(bound['lower']), float(bound['upper'])
+        lower, upper = _bound_pair(limits['joint_limits'][joint.get('name')])
         if (joint.get('type') != 'revolute' or joint.find('mimic') is not None
                 or not np.isfinite([lower, upper]).all() or not lower <= 0 <= upper or lower >= upper):
             raise ValueError(f"{joint.get('name')} 的仿真范围无效")
@@ -55,7 +61,7 @@ def registered_simulation(request, models_root):
 
 
 def position_filter(simulation, names):
-    limits = {name: (bound['lower'], bound['upper'])
+    limits = {name: _bound_pair(bound)
               for name, bound in simulation['limits']['joint_limits'].items()}
     workspace = CoupledLimits(simulation['limits'].get('coupled_limits', {}), names)
     workspace.validate(dict.fromkeys(names, 0.))

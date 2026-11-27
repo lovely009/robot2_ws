@@ -29,6 +29,13 @@ OUT_STANDING = MODEL / 'urdf/full_body_robot.standing.urdf'
 
 LOCKED_SOLVER_RANGE = 1e-9
 
+
+def _joint_bounds(entry):
+    """Return (lower, upper) floats from either {lower, upper} dict or [lo, hi] list."""
+    if isinstance(entry, dict):
+        return float(entry['lower']), float(entry['upper'])
+    return float(entry[0]), float(entry[1])
+
 # Map differential XML joint names -> new URDF joint names
 DIFF_TO_URDF_JOINTS = {
     'waist': {'BN_Spine_pitch': 'waist_pitch', 'BN_Spine_roll': 'waist_roll'},
@@ -292,7 +299,7 @@ def build():
             pos, rot = parse_origin(j.find('origin'))
             frames[child] = (p_pos + p_rot.apply(pos), p_rot * rot)
             body = ET.SubElement(bodies[parent], 'body', name=child, **pose_attributes(pos, rot))
-            lo, hi = float(limits_raw[jn][0]), float(limits_raw[jn][1])
+            lo, hi = _joint_bounds(limits_raw[jn])
             if lo == hi:
                 lo, hi = -LOCKED_SOLVER_RANGE, LOCKED_SOLVER_RANGE
             ET.SubElement(body, 'joint', name=jn, axis=j.find('axis').get('xyz'),
@@ -445,7 +452,7 @@ def build():
         'model': MODEL.name,
         'joints': list(joints),
         'flanges': flanges,
-        'joint_limits': {name: [float(limits_raw[name][0]), float(limits_raw[name][1])] for name in joints},
+        'joint_limits': {name: list(_joint_bounds(limits_raw[name])) for name in joints},
     }, separators=(',', ':')))
 
     actuators = ET.SubElement(root, 'actuator')
@@ -453,7 +460,7 @@ def build():
         for ctrl in controls[num]:
             jn = ctrl['joint']
             if jn in limits_raw:
-                lo, hi = float(limits_raw[jn][0]), float(limits_raw[jn][1])
+                lo, hi = _joint_bounds(limits_raw[jn])
                 if lo == hi:
                     lo, hi = -LOCKED_SOLVER_RANGE, LOCKED_SOLVER_RANGE
             else:
@@ -514,7 +521,7 @@ def build():
     # Write standalone URDF; keep full_body_robot.standing.urdf clean (38 weighed links, no duplicated CAD linkages)
     import build_mujoco_model as shared
     limits_dict = {
-        'joint_limits': {jn: {'lower': float(limits_raw[jn][0]), 'upper': float(limits_raw[jn][1])} for jn in joints}
+        'joint_limits': {jn: dict(zip(('lower', 'upper'), _joint_bounds(limits_raw[jn]))) for jn in joints}
     }
     shared.STANDALONE = OUT_STANDALONE
     shared.write_standalone_urdf(root, joints, limits_dict)

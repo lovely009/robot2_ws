@@ -197,7 +197,7 @@ def main() -> int:
         json.dumps({name: 0.0 for name in joint_names}, indent=2) + '\n', encoding='utf-8')
 
     sim_limits = {
-        'joint_limits': {name: [limits[name][0], limits[name][1]] for name in joint_names},
+        'joint_limits': {name: {'lower': limits[name][0], 'upper': limits[name][1]} for name in joint_names},
     }
     (DST_MODEL / 'config/simulation_limits.yaml').write_text(
         yaml.safe_dump(sim_limits, sort_keys=False), encoding='utf-8')

@@ -143,8 +143,14 @@ async function loadCatalogs() {
 async function request(url: string, body?: unknown) {
   const response = await fetch(url, { signal: abort.signal,
     ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
-  const result = await response.json();
-  if (!response.ok) throw Object.assign(Error(result.error || '动作请求失败'), { status: response.status });
+  let result: any = {};
+  try { result = await response.json(); } catch {}
+  if (!response.ok) {
+    const message = result?.error
+      || (typeof result?.detail === 'string' ? result.detail : result?.detail?.error)
+      || '动作请求失败';
+    throw Object.assign(Error(message), { status: response.status });
+  }
   return result;
 }
 

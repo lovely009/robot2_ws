@@ -58,6 +58,33 @@ def _header_to_dict(header: Any) -> dict[str, Any]:
     }
 
 
+def _stamp_ns(msg: Any) -> int:
+    stamp = msg.header.stamp
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def _joint_states_to_dict(msg: Any) -> dict[str, Any]:
+    return {
+        'names': list(msg.name),
+        'positions': [float(v) for v in msg.position],
+        'velocities': [float(v) for v in msg.velocity],
+        'efforts': [float(v) for v in msg.effort],
+        'ros_stamp_ns': _stamp_ns(msg),
+    }
+
+
+def _imu_to_dict(msg: Any) -> dict[str, Any]:
+    q = msg.orientation
+    av = msg.angular_velocity
+    la = msg.linear_acceleration
+    return {
+        'orientation': {'x': float(q.x), 'y': float(q.y), 'z': float(q.z), 'w': float(q.w)},
+        'angular_velocity': {'x': float(av.x), 'y': float(av.y), 'z': float(av.z)},
+        'linear_acceleration': {'x': float(la.x), 'y': float(la.y), 'z': float(la.z)},
+        'ros_stamp_ns': _stamp_ns(msg),
+    }
+
+
 def _motor_motion_to_dict(msg: Any) -> dict[str, Any]:
     return {
         'header': _header_to_dict(msg.header),
@@ -591,6 +618,19 @@ class RosGatewayThread:
             return
         self.publish_client_count(0)
         self._stop_event.set()
+        with self._pub_lock:
+            executor = self._executor
+            ctx = self._ctx
+        if executor is not None:
+            try:
+                executor.wake()
+            except Exception:
+                pass
+        if ctx is not None:
+            try:
+                ctx.try_shutdown()
+            except Exception:
+                pass
         self._thread.join(timeout=2.5)
         self._thread = None
 
@@ -758,31 +798,15 @@ class RosGatewayThread:
         return _cb
 
     def _on_joint_states(self, msg: Any) -> None:
-        stamp = msg.header.stamp
-        stamp_ns = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-        payload = {
-            'names': list(msg.name),
-            'positions': [float(v) for v in msg.position],
-            'velocities': [float(v) for v in msg.velocity],
-            'efforts': [float(v) for v in msg.effort],
-            'ros_stamp_ns': stamp_ns,
-        }
-        self._store.record_snapshot('telemetry:joints', payload, ros_stamp_ns=stamp_ns)
+        self._store.record_lazy_snapshot(
+            'telemetry:joints', msg, _joint_states_to_dict, ros_stamp_ns=_stamp_ns(msg),
+        )
         self._emit_raw('/joint_states', 'sensor_msgs/msg/JointState', msg)
 
     def _on_imu(self, msg: Any) -> None:
-        stamp = msg.header.stamp
-        stamp_ns = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-        q = msg.orientation
-        av = msg.angular_velocity
-        la = msg.linear_acceleration
-        payload = {
-            'orientation': {'x': float(q.x), 'y': float(q.y), 'z': float(q.z), 'w': float(q.w)},
-            'angular_velocity': {'x': float(av.x), 'y': float(av.y), 'z': float(av.z)},
-            'linear_acceleration': {'x': float(la.x), 'y': float(la.y), 'z': float(la.z)},
-            'ros_stamp_ns': stamp_ns,
-        }
-        self._store.record_snapshot('telemetry:imu', payload, ros_stamp_ns=stamp_ns)
+        self._store.record_lazy_snapshot(
+            'telemetry:imu', msg, _imu_to_dict, ros_stamp_ns=_stamp_ns(msg),
+        )
         self._emit_raw('/imu/data', 'sensor_msgs/msg/Imu', msg)
 
     def _on_imu_temp(self, msg: Any) -> None:
@@ -818,7 +842,7 @@ class RosGatewayThread:
         try:
             import rclpy
             from rclpy.callback_groups import ReentrantCallbackGroup
-            from rclpy.executors import MultiThreadedExecutor
+            from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
             from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
             from rclpy.serialization import serialize_message
             from sensor_msgs.msg import Imu, JointState, Temperature
@@ -828,7 +852,7 @@ class RosGatewayThread:
             ctx = rclpy.Context()
             rclpy.init(context=ctx)
             node = rclpy.create_node(self._node_name, context=ctx)
-            executor = MultiThreadedExecutor(num_threads=4, context=ctx)
+            executor = SingleThreadedExecutor(context=ctx)
             executor.add_node(node)
             cb_group = ReentrantCallbackGroup()
 
@@ -932,8 +956,11 @@ class RosGatewayThread:
                 pass
 
             self._ready_event.set()
-            while not self._stop_event.is_set() and ctx.ok():
-                executor.spin_once(timeout_sec=0.05)
+            try:
+                if not self._stop_event.is_set() and ctx.ok():
+                    executor.spin()
+            except ExternalShutdownException:
+                pass
         except BaseException as exc:
             self._start_error = exc
             self._ready_event.set()

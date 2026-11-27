@@ -286,6 +286,8 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
     rclcpp::NodeOptions options;
     options.use_global_arguments(false);
     node_ = std::make_shared<rclcpp::Node>("micro_ros_system_" + info_.name, options);
+    executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    executor_->add_node(node_);
     node_->declare_parameter("position_limit_names", std::vector<std::string>{});
     node_->declare_parameter("position_limit_bounds", std::vector<double>{});
     position_limits_callback_ = node_->add_on_set_parameters_callback(
@@ -354,6 +356,7 @@ MicroRosSystem::on_init(const hardware_interface::HardwareInfo &info) {
   command_effort_.assign(info_.joints.size(), 0.0);
   recovery_min_.assign(info_.joints.size(), unlimited);
   recovery_max_.assign(info_.joints.size(), unlimited);
+  last_mapped_motion_seq_ = 0U;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -435,6 +438,7 @@ void MicroRosSystem::close_writer() {
 bool MicroRosSystem::fail(std::string error) {
   faulted_ = true;
   armed_ = false;
+  last_mapped_motion_seq_ = 0U;
   // 广播器可能继续发布，不能把故障前的测量重新标成新反馈。
   const auto invalid = std::numeric_limits<double>::quiet_NaN();
   std::fill(position_.begin(), position_.end(), invalid);
@@ -569,6 +573,7 @@ void MicroRosSystem::on_control(const Control::SharedPtr message) {
     session_time_floor_ns_ = control_stamp_ns;
     control_seq_ = 0U;
     motion_seq_ = 0U;
+    last_mapped_motion_seq_ = 0U;
     latest_motion_.reset();
     motion_valid_ = false;
   } else if (control_seq_ != 0U && !newer(message->sequence, control_seq_)) {
@@ -663,6 +668,9 @@ bool MicroRosSystem::update_states(const TimePoint &now, bool latch, std::string
   if (!motion_current(now, latch, error)) {
     return false;
   }
+  if (last_mapped_motion_seq_ != 0U && latest_motion_->seq == last_mapped_motion_seq_) {
+    return true;
+  }
   robot_transmission::AxisMap actuators;
   for (const auto &[id, name] : id_to_actuator_) {
     const auto found = std::find_if(latest_motion_->states.begin(), latest_motion_->states.end(),
@@ -695,6 +703,7 @@ bool MicroRosSystem::update_states(const TimePoint &now, bool latch, std::string
     velocity_[index] = axis.velocity;
     effort_[index] = axis.effort;
   }
+  last_mapped_motion_seq_ = latest_motion_->seq;
   return true;
 }
 
@@ -900,7 +909,7 @@ bool MicroRosSystem::publish(bool commanded, std::string &error) {
 hardware_interface::CallbackReturn
 MicroRosSystem::on_activate(const rclcpp_lifecycle::State &previous_state) {
   static_cast<void>(previous_state);
-  if (!node_) {
+  if (!node_ || !executor_) {
     return hardware_interface::CallbackReturn::ERROR;
   }
   active_ = false;
@@ -915,12 +924,13 @@ MicroRosSystem::on_activate(const rclcpp_lifecycle::State &previous_state) {
   control_session_ = 0U;
   session_time_floor_ns_ = 0U;
   motion_seq_ = 0U;
+  last_mapped_motion_seq_ = 0U;
   control_seq_ = 0U;
   // 首次 DDS 发现可能超过 1 秒，运行期各反馈流的保护窗口保持独立。
   std::string last_error;
   const auto deadline = Clock::now() + std::chrono::seconds(5);
   while (Clock::now() < deadline) {
-    rclcpp::spin_some(node_);
+    executor_->spin_some();
     if (faulted_) {
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -963,6 +973,7 @@ MicroRosSystem::on_deactivate(const rclcpp_lifecycle::State &previous_state) {
   faulted_ = false;
   motion_valid_ = false;
   control_valid_ = false;
+  last_mapped_motion_seq_ = 0U;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -974,7 +985,7 @@ MicroRosSystem::read(const rclcpp::Time &time, const rclcpp::Duration &period) {
     return hardware_interface::return_type::ERROR;
   }
   try {
-    rclcpp::spin_some(node_);
+    executor_->spin_some();
   } catch (const std::exception &exception) {
     fail("ROS callback failed: " + std::string(exception.what()));
     return hardware_interface::return_type::ERROR;
@@ -993,6 +1004,7 @@ MicroRosSystem::read(const rclcpp::Time &time, const rclcpp::Duration &period) {
     std::fill(position_.begin(), position_.end(), invalid);
     std::fill(velocity_.begin(), velocity_.end(), invalid);
     std::fill(effort_.begin(), effort_.end(), invalid);
+    last_mapped_motion_seq_ = 0U;
     armed_ = false;
     return hardware_interface::return_type::OK;
   }

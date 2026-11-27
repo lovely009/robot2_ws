@@ -1,8 +1,8 @@
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 
 const mocks = vi.hoisted(() => ({start:vi.fn(), stop:vi.fn(), generation:vi.fn()}));
-vi.mock('../../web/js/core/agent.js', () => ({startGravityFeedforward:mocks.start, stopGravityFeedforward:mocks.stop}));
-vi.mock('../../web/js/core/ros.js', () => ({getConnectionGeneration:mocks.generation}));
+vi.mock('../src/core/agent.ts', () => ({startGravityFeedforward:mocks.start, stopGravityFeedforward:mocks.stop}));
+vi.mock('../src/core/ros.ts', () => ({getConnectionGeneration:mocks.generation}));
 
 beforeEach(() => {
   vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(10000); vi.clearAllMocks();
@@ -13,8 +13,8 @@ beforeEach(() => {
 afterEach(() => {vi.useRealTimers(); vi.unstubAllGlobals();});
 
 async function fixture() {
-  const data = await import('../../web/js/core/store.js');
-  const api = await import('../../web/js/core/gravity_control.js');
+  const data = await import('../src/core/store.ts');
+  const api = await import('../src/core/gravity_control.ts');
   const s = data.store, model = data.MODEL;
   s.conn.connected = true; s.runtimeMode = 'bench';
   s.modelTransmissions = {model,groups:[{name:'arm',joints:['joint'],motors:[{id:1}]}]};

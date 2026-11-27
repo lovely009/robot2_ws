@@ -3,9 +3,7 @@ export type PanelId =
   | "jointList"
   | "arm"
   | "readout"
-  | "deviceParams"
   | "actionLibrary"
-  | "sim"
   | "curve"
   | "imu";
 export interface EventLogEntry {
@@ -38,6 +36,7 @@ export interface WorkbenchSnapshot {
 }
 export interface MountedPanel {
   render(dirty: Set<string>): void;
+  setActive?(active: boolean): void;
   unmount?(): void;
   intervalMs?: number;
 }

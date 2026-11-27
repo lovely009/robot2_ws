@@ -1,0 +1,502 @@
+# 真机传动配置：25 组直驱 + 6 组空间平行连杆（由称重版模型生成，CW 转向）。
+transmissions:
+  direct_motor_01:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_01
+    joints:
+    - waist_yaw
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_08:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_08
+    joints:
+    - left_shoulder_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_09:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_09
+    joints:
+    - left_shoulder_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_10:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_10
+    joints:
+    - left_shoulder_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_11:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_11
+    joints:
+    - left_elbow_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_12:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_12
+    joints:
+    - left_forearm_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_17:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_17
+    joints:
+    - right_shoulder_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_18:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_18
+    joints:
+    - right_shoulder_roll
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_19:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_19
+    joints:
+    - right_shoulder_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_20:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_20
+    joints:
+    - right_elbow_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_21:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_21
+    joints:
+    - right_forearm_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_24:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_24
+    joints:
+    - left_hip_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_25:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_25
+    joints:
+    - left_hip_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_26:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_26
+    joints:
+    - left_hip_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_27:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_27
+    joints:
+    - left_knee_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_28:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_28
+    joints:
+    - left_shank_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_29:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_29
+    joints:
+    - left_ankle_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_30:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_30
+    joints:
+    - left_ankle_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_31:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_31
+    joints:
+    - right_hip_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_32:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_32
+    joints:
+    - right_hip_roll
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_33:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_33
+    joints:
+    - right_hip_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_34:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_34
+    joints:
+    - right_knee_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_35:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_35
+    joints:
+    - right_shank_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_36:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_36
+    joints:
+    - right_ankle_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  direct_motor_37:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_37
+    joints:
+    - right_ankle_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  waist:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_02
+    - motor_03
+    joints:
+    - waist_pitch
+    - waist_roll
+    actuator_reduction:
+    - 1
+    - 1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '0'
+      joint1_origin: 0.036265962817469355 1.8374682153599052e-18 0.10384979247121127
+      joint1_axis: 2.9525063381454371e-16 1 2.0962987361189983e-16
+      joint2_origin: 0.036265962817469355 1.8374682153599052e-18 0.10384979247121127
+      joint2_axis: 1 2.0000001530660109e-09 -5.5511150811998095e-17
+      motor1_bounds: -1.5708 1.5708
+      motor1_origin: 0.02984918492642984 -0.049999834800000004 0.054263085776941777
+      motor1_axis: 5.801850742991146e-06 -0.99999999997483524 -4.0826484119115134e-06
+      motor1_ball: 0.079256730270252596 -0.049999579476818962 0.061937521458665393
+      motor1_platform: 0.076558726017468881 -0.049999766219400284 0.103850807584148
+      motor1_length: '0.042000033104980815'
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: 0.029848604800414198 0.050000165200000023 0.054263494066956283
+      motor2_axis: 5.801850742991146e-06 -0.99999999997483524 -4.0826484119115134e-06
+      motor2_ball: 0.079256150144236953 0.050000420523181065 0.061937929748679899
+      motor2_platform: 0.076558145917468928 0.050000233780604329 0.10385121592584801
+      motor2_length: '0.042000033154888365'
+  hips:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_04
+    - motor_05
+    joints:
+    - pelvis_roll
+    - pelvis_pitch
+    actuator_reduction:
+    - -1
+    - -1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '0'
+      joint1_origin: -0.024232506000000001 0 -0.069390457700000005
+      joint1_axis: 0.9440890202778176 0 -0.32969064559200106
+      joint2_origin: -0.024232506000000001 0 -0.069390457700000005
+      joint2_axis: 1.2414731403383328e-17 1 7.3206029147954403e-17
+      motor1_bounds: -1.5708 1.5708
+      motor1_origin: 0.0187838629 0.071999987700000004 0.0230986548
+      motor1_axis: 0.32968717768885736 -1.7648498651379185e-07 0.94409023131664949
+      motor1_ball: 0.0029249037249556298 0.10156043043609517 0.028636791447368696
+      motor1_platform: -0.052196768409889363 0.071520029599999979 0.045494298774190756
+      motor1_length: '0.064999999804680575'
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: 0.018783931399999999 -0.072000012299999999 0.023098603700000001
+      motor2_axis: 0.32968717768885736 -1.7648498651379185e-07 0.94409023131664949
+      motor2_ball: 0.0029248197090345103 -0.10156036629090284 0.028636782555845439
+      motor2_platform: -0.052196844726546662 -0.071519971800000026 0.045494325611810202
+      motor2_length: '0.064999999609242964'
+  left_shoulder:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_06
+    - motor_07
+    joints:
+    - left_scapula_yaw
+    - left_scapula_roll
+    actuator_reduction:
+    - -1
+    - -1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '1'
+      joint1_origin: -0.023734029200530138 0.058999744729800074 0.31454979164521496
+      joint1_axis: -2.2204460079152236e-16 1.4000000196980746e-08 1
+      joint2_origin: 0.0047659707894698797 0.063999745071000091 0.33484979157521499
+      joint2_axis: 1 2.0000001530660109e-09 -5.5511150811998076e-17
+      motor1_bounds: -1.005166 2.504991
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: -0.019052468539837671 0.028653505388362262 0.2323497270700623
+      motor2_axis: -0.036840634121283515 -0.99932115342242966 8.1650508580166201e-08
+      motor2_ball: -0.0022573561806710843 0.028034341596468063 0.22150811406729298
+      motor2_platform: 0.0052656937857936126 0.025337872077710481 0.32811486081648122
+      motor2_length: '0.10690587299633764'
+  left_wrist:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_13
+    - motor_14
+    joints:
+    - left_wrist_pitch
+    - left_wrist_roll
+    actuator_reduction:
+    - 1
+    - 1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '0'
+      joint1_origin: -0.026234029829209273 0.2404753389617765 -0.12437213519027468
+      joint1_axis: -4.6550936604381345e-08 0.98480775520409214 0.17364816523613122
+      joint2_origin: -0.026234029829209273 0.2404753389617765 -0.12437213519027468
+      joint2_axis: 0.99999999999999889 4.8639642845714318e-08 -7.7729623003875365e-09
+      motor1_bounds: -1.5708 1.5708
+      motor1_origin: -0.046195736257637135 0.22010512029359075 -0.024898942558853041
+      motor1_axis: -0.99999087478528792 -0.0042000364387617829 -0.00078105061789896315
+      motor1_ball: -0.046238094154424772 0.22984830620670746 -0.023060688800130812
+      motor1_platform: -0.046234049705533381 0.24845712641606152 -0.12284025487380368
+      motor1_length: '0.10150000005808905'
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: -0.0061944998697721666 0.22621255952638736 -0.059360348321866027
+      motor2_axis: -0.9999908747654993 -0.0042000410006828599 -0.00078105142227082535
+      motor2_ball: -0.0062366785098772887 0.23600633349709402 -0.058023682210228793
+      motor2_platform: -0.005347561905511472 0.24845693785478379 -0.12283863304161069
+      motor2_length: '0.06600595373511646'
+  right_shoulder:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_15
+    - motor_16
+    joints:
+    - right_scapula_yaw
+    - right_scapula_roll
+    actuator_reduction:
+    - -1
+    - 1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '1'
+      joint1_origin: -0.023734028964530175 -0.059000255270199982 0.31454979329721494
+      joint1_axis: -2.2204460079152236e-16 1.4000000196980746e-08 1
+      joint2_origin: 0.0090659710454698422 -0.064000254920399971 0.33484979336721499
+      joint2_axis: 1 2.0000001530660109e-09 -5.5511150811998076e-17
+      motor1_bounds: -2.504957 1.005166
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: -0.014752028525223712 -0.02865347790303694 0.23234972387236003
+      motor2_axis: 0.036840638118567422 -0.9993211532750691 -5.3669516409191288e-08
+      motor2_ball: 0.0020430838214730122 -0.028034314347895866 0.22150811085225411
+      motor2_platform: 0.0095661338641450308 -0.02533784201368873 0.32811485756594122
+      motor2_length: '0.10690587303731226'
+  right_wrist:
+    plugin: robot_transmission/ParallelLinkageTransmission
+    actuators:
+    - motor_22
+    - motor_23
+    joints:
+    - right_wrist_pitch
+    - right_wrist_roll
+    actuator_reduction:
+    - -1
+    - -1
+    joint_reduction:
+    - 1
+    - 1
+    joint_offset:
+    - 0
+    - 0
+    parameters:
+      direct_first: '0'
+      joint1_origin: -0.023632101972251331 -0.24037027423307872 -0.12428920380528181
+      joint1_axis: 0.019062364665842456 0.98462880840071598 -0.17361663491938953
+      joint2_origin: -0.023632101972251331 -0.24037027423307872 -0.12428920380528181
+      joint2_axis: 0.99981829661004873 -0.018772761249893997 0.00331016598304718
+      motor1_bounds: -1.5708 1.5708
+      motor1_origin: -0.026008925919304118 -0.20297021210040725 -0.027817212691586532
+      motor1_axis: -0.022590873447159737 -0.98456334843240445 0.17356458555957227
+      motor1_ball: -0.0161247517181266 -0.20316960565978584 -0.027661786170867297
+      motor1_platform: -0.015125282186854119 -0.22080884213382229 -0.12761231598620076
+      motor1_length: '0.10150000006451618'
+      motor2_bounds: -1.5708 1.5708
+      motor2_origin: -0.026797520834430336 -0.24843139801904329 -0.055342730647542679
+      motor2_axis: -0.02259092751200294 -0.98456334722924421 0.17356458534762828
+      motor2_ball: -0.016895038356643563 -0.2487184818470814 -0.055682350333906484
+      motor2_platform: -0.015905636850730147 -0.26106712120266096 -0.12051535178028895
+      motor2_length: '0.066005953411951424'

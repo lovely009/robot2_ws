@@ -9,10 +9,11 @@ export default defineConfig({
     outDir: "../web/workbench",
     emptyOutDir: true,
     rolldownOptions: {
+      external: [/^three(?:\/|$)/, /^\/vendor\//],
       output: {
-        entryFileNames: "assets/workbench.js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]",
+        entryFileNames: "assets/workbench-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
   },
@@ -21,8 +22,6 @@ export default defineConfig({
       [
         "/api",
         "/robot_sim",
-        "/js",
-        "/css",
         "/vendor",
         "/roslib.min.js",
         "/panel_templates.html",

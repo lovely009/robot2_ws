@@ -680,3 +680,24 @@ profiles:
     BN_LeftFoot_roll_link: LeftFoot
     BN_LeftHand_pitch_link: LeftHand
   assembly: Robot_body2 native STEP with outward left hand
+- urdf_sha256: 8718c1257b56019a462dfd86e56e69aff2113670138f3f21c472477efea5a95a
+  source_root: Spine
+  source_to_robot: *id001
+  targets:
+    waist_roll: Spine3
+    pelvis_pitch: Hips
+    right_scapula_roll: RightShoulder
+    right_shoulder_yaw: RightUpperArm
+    right_forearm_yaw: RightLowerArm
+    right_wrist_roll: RightHand
+    left_scapula_roll: LeftShoulder
+    left_shoulder_yaw: LeftUpperArm
+    left_forearm_yaw: LeftLowerArm
+    left_wrist_roll: LeftHand
+    right_hip_yaw: RightUpperLeg
+    right_shank_yaw: RightLowerLeg
+    right_ankle_roll: RightFoot
+    left_hip_yaw: LeftUpperLeg
+    left_shank_yaw: LeftLowerLeg
+    left_ankle_roll: LeftFoot
+  assembly: complete_robot_combine weighed 27.2kg model

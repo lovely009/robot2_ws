@@ -300,6 +300,66 @@ def test_library_saved_status_survives_restart_and_preserves_live_jobs(tmp_path,
         jobs.close()
 
 
+def test_result_cache_has_validates_without_copying_and_catalog_caches_unchanged(tmp_path, monkeypatch):
+    import shutil
+    from bvh_broadcaster import generic_retarget
+    from web_host.motion_cache import ResultCache
+    from web_host.motion_catalog import source_statuses
+
+    library = tmp_path / 'library'
+    library.mkdir()
+    data = payload()
+    (library / 'saved.bvh').write_text(data['bvh_text'])
+    options = dict(actions_dir=library, profiles_dir=tmp_path / 'profiles',
+                   cache_dir=tmp_path / 'results')
+    jobs = MotionJobs(**options)
+    try:
+        first = jobs.create({**data, 'bvh_source': 'saved.bvh'})
+        jobs.start(first['id'], first['mapping'], remember=True)
+        done = finish(jobs, first)
+        assert done['result_saved']
+        cache_key = jobs.jobs[first['id']]['cache_key']
+
+        # ResultCache.has() must not call shutil.copyfile
+        copy_calls = []
+        orig_copy = shutil.copyfile
+        monkeypatch.setattr(shutil, 'copyfile', lambda *a, **kw: (copy_calls.append(a), orig_copy(*a, **kw))[1])
+        cache = ResultCache(tmp_path / 'results')
+        assert cache.has(cache_key) is True
+        assert copy_calls == []
+
+        request = {key: value for key, value in data.items() if key != 'bvh_text'}
+        analyze_calls = 0
+        orig_analyze = generic_retarget.analyze
+
+        def counting_analyze(*args, **kwargs):
+            nonlocal analyze_calls
+            analyze_calls += 1
+            return orig_analyze(*args, **kwargs)
+
+        monkeypatch.setattr(generic_retarget, 'analyze', counting_analyze)
+        first_res = source_statuses(jobs, request)
+        assert first_res == [{'name': 'saved.bvh', 'saved': True}]
+        assert analyze_calls == 1
+        # Second call with identical inputs must hit the in-memory catalog cache
+        second_res = source_statuses(jobs, request)
+        assert second_res == [{'name': 'saved.bvh', 'saved': True}]
+        assert analyze_calls == 1
+
+        # Changing the BVH invalidates the catalog cache
+        (library / 'saved.bvh').write_text(data['bvh_text'].replace('30 0 0', '20 0 0'))
+        third_res = source_statuses(jobs, request)
+        assert third_res == [{'name': 'saved.bvh', 'saved': False}]
+        assert analyze_calls == 2
+        assert copy_calls == []
+
+        # Corrupting manifest makes ResultCache.has() return False
+        (tmp_path / 'results' / cache_key / 'manifest.json').write_text('null')
+        assert cache.has(cache_key) is False
+    finally:
+        jobs.close()
+
+
 @pytest.mark.parametrize('change', ['motion', 'model', 'units', 'axes', 'mapping'])
 def test_result_cache_invalidates_changed_inputs(tmp_path, change):
     jobs = MotionJobs(cache_dir=tmp_path)

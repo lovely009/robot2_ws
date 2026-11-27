@@ -1,8 +1,8 @@
 import {expect, it, vi} from 'vitest';
 vi.stubGlobal('location', {search: ''});
 vi.stubGlobal('localStorage', {getItem: () => null});
-const {describeAgentStatus} = await import('../../web/js/core/agent.js');
-const {applyAgentWireStatus} = await import('../../web/js/core/store.js');
+const {describeAgentStatus} = await import('../src/core/agent.ts');
+const {applyAgentWireStatus} = await import('../src/core/store.ts');
 function state() {
   return {conn: {connected: true}, agentWireStatus: {at: 1000, data: {
     schema_version: 6, session_id: 100, sequence: 1,

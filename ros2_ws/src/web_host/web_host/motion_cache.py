@@ -16,14 +16,24 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def result_key(job, mapping):
+def result_key(job, mapping, digest_cache=None):
+    def cached_digest(path):
+        if digest_cache is None:
+            return digest(path)
+        resolved = Path(path)
+        value = digest_cache.get(resolved)
+        if value is None:
+            value = digest(resolved)
+            digest_cache[resolved] = value
+        return value
+
     directory = job['directory']
     inputs = {name: digest(directory / name) for name in ('source.bvh', 'robot.urdf')}
     for name in ('web_host.motion', 'web_host.motion_cache', 'web_host.motion_simulation', 'web_host.motion_source',
                  'web_host.shoulder_retarget', 'bvh_broadcaster.bvh',
                  'bvh_broadcaster.generic_retarget', 'bvh_broadcaster.retarget',
                  'robot_transmission.coupled_limits', 'robot_transmission.mujoco_positions'):
-        inputs[name] = digest(Path(importlib.util.find_spec(name).origin))
+        inputs[name] = cached_digest(Path(importlib.util.find_spec(name).origin))
     import numpy
     import scipy
     import pinocchio
@@ -34,8 +44,8 @@ def result_key(job, mapping):
         inputs['mujoco_version'] = load_mujoco().__version__
         model = simulation['directory']
         for path in sorted((model / 'mujoco').glob('*.xml')):
-            inputs[str(path.relative_to(model))] = digest(path)
-        inputs['standalone'] = digest(model / 'urdf' / f'{model.name}.standalone.urdf')
+            inputs[str(path.relative_to(model))] = cached_digest(path)
+        inputs['standalone'] = cached_digest(model / 'urdf' / f'{model.name}.standalone.urdf')
         inputs['constraints'] = simulation['config_sha256']
     selected = {key: value for key, value in mapping.items() if key != 'targets'}
     if 'targets' in mapping:
@@ -51,23 +61,35 @@ class ResultCache:
     def __init__(self, directory):
         self.directory = Path(directory)
 
-    def load(self, key, destination):
+    def _validate_entry(self, key):
         path = self.directory / key
         try:
             manifest_path = path / 'manifest.json'
             if manifest_path.stat().st_size > 16384:
-                return False
+                return None
             manifest = json.loads(manifest_path.read_text())
             if manifest['key'] != key or set(manifest['files']) != set(FILES):
-                return False
+                return None
             for name in FILES:
                 file = path / name
                 if file.stat().st_size > 128 * 1024 * 1024 or digest(file) != manifest['files'][name]:
-                    return False
+                    return None
+            return path
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def has(self, key):
+        return self._validate_entry(key) is not None
+
+    def load(self, key, destination):
+        path = self._validate_entry(key)
+        if path is None:
+            return False
+        try:
             for name in FILES:
                 shutil.copyfile(path / name, destination / name)
             return True
-        except (OSError, ValueError, KeyError, TypeError):
+        except OSError:
             return False
 
     def save(self, key, source):

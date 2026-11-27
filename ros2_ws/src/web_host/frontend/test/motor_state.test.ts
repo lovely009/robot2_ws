@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-const api = await import(/* @vite-ignore */ new URL('../../web/js/core/motor_state.js', import.meta.url).href);
+const api = await import(/* @vite-ignore */ new URL('../src/core/motor_state.ts', import.meta.url).href);
 const motor = (changes = {}) => ({motor_id:1,online:true,control_lifecycle:3,execution_state:1,
   policy_enabled:true,motion_enabled:false,state_age_ms:10,unified_fault_code:0,
   vendor_fault_code:0,last_failure_reason:0,policy_generation:1,...changes});

@@ -72,7 +72,7 @@ beforeEach(async () => {
     },
   });
   // This file exercises the workbench facade.
-  const ros = await import("../../web/js/core/ros.js");
+  const ros = await import("../src/core/ros.ts");
   ros.configureControl({control_mode: 'bench'});
 });
 
@@ -98,8 +98,8 @@ const policyTarget = {motor_id:1, enabled:true, kp:30, kd:1, confirm_unprotected
 const policyTicket = (changes = {}) => ({accepted:true,session_id:42,intent_id:'host:1',
   policy_generation:900,request_id:7,reason:'',...changes});
 async function policyConnection() {
-  const ros=await import('../../web/js/core/ros.js');
-  const {store}=await import('../../web/js/core/store.js');
+  const ros=await import('../src/core/ros.ts');
+  const {store}=await import('../src/core/store.ts');
   ros.connect();Socket.instances[0].emit('connection');
   const control=Topic.instances.find(t=>t.name==='/motor/state')!;
   control.callback?.(controlSnapshot([800]));
@@ -154,7 +154,7 @@ it.each([37,38])('策略提交与服务的37个目标容量一致：%s',async co
 
 it('同页面任一入口发起使能后，MCU先ACTIVE也不能越过本intent的票据确认',async()=>{
   const {ros,store,control}=await policyConnection();
-  const {controlTargetsError}=await import('../../web/js/core/motor_state.js');
+  const {controlTargetsError}=await import('../src/core/motor_state.ts');
   const pending=ros.submitPolicy([policyTarget]);
   control.callback?.({...controlSnapshot([900],2),control_states:controlSnapshot([900]).control_states.map(s=>
     ({...s,policy_enabled:true,control_lifecycle:3}))});
@@ -221,9 +221,9 @@ it("读取动作期间换连接，旧播放不得在新会话下发控制", asyn
   vi.useFakeTimers();
   let respond!: (value: unknown) => void;
   vi.stubGlobal("fetch", () => new Promise((resolve) => (respond = resolve)));
-  const ros = await import("../../web/js/core/ros.js");
-  const { store } = await import("../../web/js/core/store.js");
-  const { playAction } = await import("../../web/js/core/playback.js");
+  const ros = await import("../src/core/ros.ts");
+  const { store } = await import("../src/core/store.ts");
+  const { playAction } = await import("../src/core/playback.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
   const pending = playAction("old.json", {
@@ -248,9 +248,9 @@ it("读取动作期间换连接，旧播放不得在新会话下发控制", asyn
 it("武装等待期间换连接，旧播放不得继续对齐或发轨迹", async () => {
   vi.useFakeTimers();
   vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => action }));
-  const ros = await import("../../web/js/core/ros.js");
-  const { store, MODEL } = await import("../../web/js/core/store.js");
-  const { playAction } = await import("../../web/js/core/playback.js");
+  const ros = await import("../src/core/ros.ts");
+  const { store, MODEL } = await import("../src/core/store.ts");
+  const { playAction } = await import("../src/core/playback.ts");
   store.modelTransmissions = {
     model: MODEL,
     driver_file: '',
@@ -305,9 +305,9 @@ afterEach(() => {
 
 it('原始动作通过标准JointTrajectory发布到/control/trajectory，取消走空轨迹',async()=>{
   vi.useFakeTimers();
-  const ros=await import('../../web/js/core/ros.js');
-  const {store,MODEL}=await import('../../web/js/core/store.js');
-  const actions=await import('../../web/js/core/playback.js');
+  const ros=await import('../src/core/ros.ts');
+  const {store,MODEL}=await import('../src/core/store.ts');
+  const actions=await import('../src/core/playback.ts');
   ros.connect();Socket.instances[0].emit('connection');
   store.controlStates.sourceTimeNs=9000000000;
   expect(Topic.instances.filter(t=>t.name==='/control/trajectory')).toHaveLength(1);
@@ -336,8 +336,8 @@ it('原始动作通过标准JointTrajectory发布到/control/trajectory，取消
 });
 
 it("手动重连后晚到的旧 socket 关闭与错误事件不关闭新连接", async () => {
-  const ros = await import("../../web/js/core/ros.js");
-  const data = await import("../../web/js/core/store.js");
+  const ros = await import("../src/core/ros.ts");
+  const data = await import("../src/core/store.ts");
   ros.connect();
   const old = Socket.instances[0];
   old.emit("connection");
@@ -353,7 +353,7 @@ it("手动重连后晚到的旧 socket 关闭与错误事件不关闭新连接",
 
 it("显式销毁连接取消已经排队的自动重连", async () => {
   vi.useFakeTimers();
-  const ros = await import("../../web/js/core/ros.js");
+  const ros = await import("../src/core/ros.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
   Socket.instances[0].emit("close");
@@ -363,8 +363,8 @@ it("显式销毁连接取消已经排队的自动重连", async () => {
 });
 
 it("手动切换连接复位参数基线、台架和命令去向", async () => {
-  const ros = await import("../../web/js/core/ros.js");
-  const { store } = await import("../../web/js/core/store.js");
+  const ros = await import("../src/core/ros.ts");
+  const { store } = await import("../src/core/store.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
   store.sysStatus.seen = true;
@@ -385,8 +385,8 @@ it("手动切换连接复位参数基线、台架和命令去向", async () => {
 });
 
 it("换连接后旧订阅排队的运动帧不再写入当前状态", async () => {
-  const ros = await import("../../web/js/core/ros.js");
-  const { store } = await import("../../web/js/core/store.js");
+  const ros = await import("../src/core/ros.ts");
+  const { store } = await import("../src/core/store.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
   const motion = Topic.instances.find(
@@ -400,7 +400,7 @@ it("换连接后旧订阅排队的运动帧不再写入当前状态", async () =
 });
 
 it("连接只消费主机 facade 的固件上行并保持消息契约", async () => {
-  const ros = await import("../../web/js/core/ros.js");
+  const ros = await import("../src/core/ros.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
 
@@ -434,7 +434,7 @@ it("连接只消费主机 facade 的固件上行并保持消息契约", async ()
 });
 
 it("旧连接的服务响应不能被当作当前会话成功回执", async () => {
-  const ros = await import("../../web/js/core/ros.js");
+  const ros = await import("../src/core/ros.ts");
   ros.connect();
   Socket.instances[0].emit("connection");
   const pending = ros.callService(
@@ -452,8 +452,8 @@ it("旧连接的服务响应不能被当作当前会话成功回执", async () =
 it("切换模型清空旧关节值，主机模型同步完成前拒收旧反馈", async () => {
   vi.stubGlobal('fetch', async () => ({ok: false, status: 404}));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const ros = await import('../../web/js/core/ros.js');
-  const data = await import('../../web/js/core/store.js');
+  const ros = await import('../src/core/ros.ts');
+  const data = await import('../src/core/store.ts');
   ros.connect(); Socket.instances[0].emit('connection');
   const joints = Topic.instances.find(t => t.name === '/joint_states')!;
   data.store.bench.feedback = {source: 'firmware', state: 'running',
@@ -474,8 +474,8 @@ it("切换模型清空旧关节值，主机模型同步完成前拒收旧反馈"
 });
 
 it('external 关节反馈必须等当前模型的新鲜主机状态，缺失或过期时拒收', async () => {
-  const ros = await import('../../web/js/core/ros.js');
-  const data = await import('../../web/js/core/store.js');
+  const ros = await import('../src/core/ros.ts');
+  const data = await import('../src/core/store.ts');
   ros.connect();Socket.instances[0].emit('connection');
   data.store.bench.feedback={source:'external'};
   const joints=Topic.instances.find(t=>t.name==='/joint_states')!;
@@ -491,8 +491,8 @@ it('external 关节反馈必须等当前模型的新鲜主机状态，缺失或�
 });
 
 it.each([null, NaN, '0.2', undefined])('无效关节位置 %s 清除旧读数，不伪造零或保留假新鲜反馈', async position => {
-  const ros = await import('../../web/js/core/ros.js');
-  const data = await import('../../web/js/core/store.js');
+  const ros = await import('../src/core/ros.ts');
+  const data = await import('../src/core/store.ts');
   ros.connect(); Socket.instances[0].emit('connection');
   data.store.bench.feedback = {source:'firmware',state:'running',
     model:data.MODEL,desired_model:data.MODEL};
@@ -506,8 +506,8 @@ it.each([null, NaN, '0.2', undefined])('无效关节位置 %s 清除旧读数，
 });
 
 it('真实关节零位置仍有效，缺失速度和力矩保持未知而非零', async () => {
-  const ros = await import('../../web/js/core/ros.js');
-  const data = await import('../../web/js/core/store.js');
+  const ros = await import('../src/core/ros.ts');
+  const data = await import('../src/core/store.ts');
   ros.connect(); Socket.instances[0].emit('connection');
   data.store.bench.feedback = {source:'firmware',state:'running',
     model:data.MODEL,desired_model:data.MODEL};
@@ -522,7 +522,7 @@ it('真实关节零位置仍有效，缺失速度和力矩保持未知而非零'
 });
 
 it('浏览器观测限流并保留事件队列，避免反馈堵塞控制连接', async () => {
-  const ros = await import('../../web/js/core/ros.js');
+  const ros = await import('../src/core/ros.ts');
   ros.connect(); Socket.instances[0].emit('connection');
   expect(Topic.instances.find(t => t.name === '/motor/motion')?.options)
     .toMatchObject({throttle_rate:50, queue_length:1});

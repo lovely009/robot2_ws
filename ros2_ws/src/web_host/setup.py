@@ -30,7 +30,7 @@ def _web_data_files():
 
 
 def _action_library_files():
-    """内置动作库 JSON（动作屏经 /api/actions 读写；导入的新文件落在安装树）。"""
+    """内置动作库文件（BVH / JSON；动作屏经 /api/actions 读写，导入的新文件落在安装树）。"""
     if not os.path.isdir('action_library'):
         return []
     return [(os.path.join('share', package_name, 'action_library'),
@@ -63,6 +63,7 @@ setup(
             'static_server = web_host.static_server:main',
             'record_vdmocap = web_host.vdmocap_record:main',
             'rosbridge_shim = web_host.rosbridge_shim:main',
+            'bff_server = web_host.bff.main:main',
         ],
     },
 )

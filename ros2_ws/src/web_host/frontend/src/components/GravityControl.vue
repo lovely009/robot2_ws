@@ -32,6 +32,6 @@ async function change(event: Event) {
         :disabled="busy || state.pending || state.enabled === null || (state.enabled === false && !!state.blocked)"
         aria-describedby="gravityStatus" @change="change">重力补偿
     </label>
-    <span id="gravityStatus" class="gravity-status" role="status" :title="message">{{ message }}</span>
+    <span id="gravityStatus" class="gravity-status info-badge" :class="{ warn: Boolean(error || state.blocked), active: state.enabled === true }" role="status" tabindex="0" :title="message" :aria-label="message">!</span>
   </div>
 </template>

@@ -14,8 +14,18 @@ def test_workbench_exposes_controls_but_no_wire_writes():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     context = LaunchContext()
-    context.launch_configurations.update(control_mode='bench', robot_model='fixture',
-        model_dir='', rosbridge_port='9090', web_port='8080')
+    context.launch_configurations.update(
+        backend='bff', host='0.0.0.0', pin='',
+        control_mode='bench', robot_model='fixture',
+        model_dir='', rosbridge_port='9090', web_port='8080',
+    )
+    bff_nodes = module.web_nodes(context)
+    assert [n.node_executable for n in bff_nodes] == ['bff_server']
+
+    context.launch_configurations.update(
+        backend='legacy', control_mode='bench', robot_model='fixture',
+        model_dir='', rosbridge_port='9090', web_port='8080',
+    )
     nodes = module.web_nodes(context)
     assert {node.node_executable for node in nodes} == {'rosbridge_shim', 'static_server'}
     bridge = nodes[0]

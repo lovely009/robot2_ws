@@ -464,8 +464,9 @@ def handle_motion(handler, jobs):
     try:
         parts = path.strip('/').split('/')
         if handler.command == 'POST':
+            from .bff.security import same_origin
             origin = handler.headers.get('Origin')
-            if origin and urlsplit(origin).netloc != handler.headers.get('Host'):
+            if origin is not None and not same_origin(origin, handler.headers.get('Host', '')):
                 send(403, {'error': '只接受同源动作请求'})
                 return True
             if handler.headers.get_content_type() != 'application/json':

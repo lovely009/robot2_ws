@@ -8,13 +8,13 @@ async function openWorkbenchCurve(page: Page) {
   });
   await page.goto("/workbench/#/run");
   await expect(page.locator("#chart")).toBeVisible();
-  await expect.poll(() => page.evaluate(async () =>
-    (await import('/js/core/store.js')).store.conn.connected)).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    (window as any).__workbench.store.conn.connected)).toBe(true);
 }
 
 async function injectCurveData(page: Page, motorIds = [1, 2]) {
-  await page.evaluate(async (ids) => {
-    const { store, markDirty, DIRTY } = await import("/js/core/store.js");
+  await page.evaluate((ids) => {
+    const { store, markDirty, DIRTY } = (window as any).__workbench;
     const now = Date.now();
     for (const id of ids) store.motors.set(id, {});
     for (const id of ids) {
@@ -34,10 +34,7 @@ async function injectCurveData(page: Page, motorIds = [1, 2]) {
 }
 
 async function chartWindowMs(page: Page) {
-  return page.evaluate(async () => {
-    const { store } = await import("/js/core/store.js");
-    return store.chart.windowMs;
-  });
+  return page.evaluate(() => (window as any).__workbench.store.chart.windowMs);
 }
 
 test("工作台曲线默认值、多选组合和图例单位", async ({ page }) => {
@@ -54,8 +51,8 @@ test("工作台曲线默认值、多选组合和图例单位", async ({ page }) 
   const motorMenu = page.locator("#chartMotor");
   await motorMenu.locator("summary").click();
   await expect(motorMenu).toHaveJSProperty("open", true);
-  await page.evaluate(async () => {
-    const { store, markDirty, DIRTY } = await import("/js/core/store.js");
+  await page.evaluate(() => {
+    const { store, markDirty, DIRTY } = (window as any).__workbench;
     store.motors.set(3, {});
     markDirty(DIRTY.TOPOLOGY, DIRTY.MOTION);
   });
@@ -67,8 +64,8 @@ test("工作台曲线默认值、多选组合和图例单位", async ({ page }) 
   await channelMenu.locator("summary").click();
   await expect(channelMenu).toHaveJSProperty("open", true);
   await page.locator('input[name="chart-channel"][value="velocity"]').check();
-  await page.evaluate(async () => {
-    const { markDirty, DIRTY } = await import("/js/core/store.js");
+  await page.evaluate(() => {
+    const { markDirty, DIRTY } = (window as any).__workbench;
     markDirty(DIRTY.TOPOLOGY, DIRTY.MOTION, DIRTY.STATUS);
   });
   await expect(channelMenu).toHaveJSProperty("open", true);

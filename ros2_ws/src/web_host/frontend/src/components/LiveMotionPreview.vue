@@ -5,6 +5,7 @@ const viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toS
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { createMotionPreview } from '../panels/motion_preview';
 
 const props = defineProps<{ model: string }>();
 const canvas = ref<HTMLCanvasElement>();
@@ -57,8 +58,6 @@ async function connect() {
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: props.model, viewer }) });
     if (!response.ok) throw Error((await response.json()).error || `HTTP ${response.status}`);
     if (!response.body) throw Error('浏览器未提供动捕数据流');
-    const path = '/js/motion_preview.js';
-    const { createMotionPreview } = await import(/* @vite-ignore */ path);
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let pending = '';
     const paint = () => {

@@ -5,15 +5,30 @@ import { resolve } from 'node:path';
 async function fixture(page: Page) {
   const errors:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
-  const html=readFileSync(resolve('../web/panel_templates.html'),'utf8');
-  const templates=html.match(/<template data-panel-template="(?:jointList)"[\s\S]*?<\/template>/g)!.join('');
+  const templates = `<template data-panel-template="jointList">
+    <details class="card" data-fold="joints" open>
+      <summary>关节 <span class="spacer"></span>
+        <label class="joint-control-toggle"><input type="checkbox" id="jointControlEnabled">使能控制</label>
+        <button type="button" id="jointControlDisable" hidden>失能电机</button>
+        <span class="sum" id="sumJoints">--</span></summary>
+      <div class="tiny muted" id="jointControlResult" role="status"></div>
+      <div class="tiny muted" id="jointFeedbackSource"></div>
+      <ul class="joints" id="jointRows"></ul>
+    </details>
+  </template>`;
+  const workbenchHtml=readFileSync(resolve('../web/workbench/index.html'),'utf8');
   await page.route('http://control.test/**',route=>{
     const path=new URL(route.request().url()).pathname;
-    if(path==='/') return route.fulfill({contentType:'text/html',body:`<meta charset="UTF-8"><input id="rosUrl" value="ws://127.0.0.1:9090">${templates}<main></main>`});
+    if(path==='/workbench/') return route.fulfill({contentType:'text/html',body:workbenchHtml.replace('<body>', `<body><input id="rosUrl" value="ws://127.0.0.1:9090">${templates}<main></main>`)});
+    if(path.startsWith('/workbench/assets/')) {
+      const file=path.slice('/workbench/'.length);
+      return route.fulfill({contentType:file.endsWith('.css')?'text/css':'text/javascript',body:readFileSync(resolve('../web/workbench',file),'utf8')});
+    }
+    if(path.startsWith('/vendor/')) return route.fulfill({contentType:'text/javascript',body:readFileSync(resolve('../web'+path),'utf8')});
+    if(path==='/roslib.min.js') return route.fulfill({contentType:'text/javascript',body:''});
     if(path==='/api/models') return route.fulfill({json:{models:['half_body_robot']}});
     if(path==='/api/model-transmissions') return route.fulfill({json:{model:'half_body_robot',direct_joints:{1:'elbow'}}});
     if(path==='/api/actions') return route.fulfill({json:{actions:[]}});
-    if(path.startsWith('/js/')) return route.fulfill({contentType:'text/javascript',body:readFileSync(resolve('../web'+path),'utf8')});
     return route.abort();
   });
   await page.addInitScript(()=>{
@@ -26,36 +41,35 @@ async function fixture(page: Page) {
       Service:class {name:string;constructor(o:any){this.name=o.name;}callService(args:any,done:any){w.services.push({name:this.name,args});done({ok:true});}},
     };
   });
-  await page.goto('http://control.test/');
+  await page.goto('http://control.test/workbench/?test_modules=1');
   await page.evaluate(async()=>{
     const w=window as any;
-    const data=await import('/js/core/store.js');
-    w.data=data;w.store=data.store;w.ros=await import('/js/core/ros.js');
+    const wb=w.__workbench;
+    w.data=wb.data;w.store=wb.store;w.ros=wb.ros;
     w.ros.configureControl({control_mode:'bench'});
     w.ros.connect();
     await new Promise(resolve=>setTimeout(resolve,0));
     const now=Date.now(),s=w.store;
-    s.modelTransmissions={model:data.MODEL,policy_defaults:{1:{kp:30,kd:1}},
+    s.modelTransmissions={model:wb.data.MODEL,policy_defaults:{1:{kp:30,kd:1}},
       groups:[{name:'elbow',motors:[{id:1}],joints:['elbow']}]};
     s.modelJoints=[{name:'elbow',type:'revolute',lower:-1,upper:1,velocity:1}];
     s.motors.set(1,{status:{online:true,lifecycle:4},motion:{position:.1}});
     s.jointStates={last:now,byName:{elbow:{position:.1,at:now}}};
-    s.transmissionStatus={last:now,data:{model:data.MODEL,joint_names:['elbow'],joint_limits:{elbow:{lower:-1,upper:1}},trajectory_enabled:true,last_error:''}};
+    s.transmissionStatus={last:now,data:{model:wb.data.MODEL,joint_names:['elbow'],joint_limits:{elbow:{lower:-1,upper:1}},trajectory_enabled:true,last_error:''}};
     setInterval(()=>{
       s.jointStates.last=Date.now();s.jointStates.byName.elbow.at=Date.now();
       s.transmissionStatus.last=Date.now();
     },100);
-    w.controlStatus={model:data.MODEL,joint_names:['elbow'],mode:'trajectory',reason:'ok',reject:'',
+    w.controlStatus={model:wb.data.MODEL,joint_names:['elbow'],mode:'trajectory',reason:'ok',reject:'',
       output_topic:'/motor/command',trajectory_output_topic:'/host_control/trajectory_controller/follow_joint_trajectory',
       feedback_fresh:true,controllers_ready:true,active_controllers:[],gravity_enabled:true,effort_gain:.8};
-    data.applyCommandStatus(w.controlStatus);
+    wb.data.applyCommandStatus(w.controlStatus);
     w.panels=[];
     for(const id of ['jointList']){
       const root=document.createElement('section');root.dataset.panel=id;
       root.append((document.querySelector(`template[data-panel-template="${id}"]`) as HTMLTemplateElement).content.cloneNode(true));
       document.querySelector('main')!.append(root);
-      const panel=await import(`/js/panels/${id}.js`);
-      w.panels.push(panel.mount(root,{}));
+      w.panels.push(wb[id].mount(root,{}));
     }
   });
   return errors;

@@ -65,11 +65,11 @@ afterEach(() => {
 });
 
 async function connected() {
-  const ros = await import("../../web/js/core/ros.js");
+  const ros = await import("../src/core/ros.ts");
   ros.configureControl({ control_mode: "bench" });
   ros.connect();
   Socket.instances[0].emit("connection");
-  const { store } = await import("../../web/js/core/store.js");
+  const { store } = await import("../src/core/store.ts");
   store.controlStates.sourceTimeNs = 9000000000;
   const stateTopic = Topic.instances.find((topic) => topic.name === "/motor/state")!;
   expect(stateTopic).toBeDefined();
@@ -115,8 +115,8 @@ function zeroReady(store: any, id = 2) {
 
 it("设零只发所选电机一次，并等待对应服务终态，不恢复使能或目标", async () => {
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   zeroReady(store, 64);
   const pending = device.setMotorZero(64);
@@ -136,8 +136,8 @@ it("设零只发所选电机一次，并等待对应服务终态，不恢复使�
 
 it.each(["enabled", "motion", "offline", "stale", "fault", "vendor_fault", "transition", "host_active", "host_pending", "readonly", "invalid", "canceled"])("设零拒绝 %s，不下发请求", async (change) => {
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   vi.stubGlobal("window", { confirm: vi.fn(() => change !== "canceled") });
   zeroReady(store);
   const state = store.controlStates.byId.get(2)!;
@@ -158,8 +158,8 @@ it.each(["enabled", "motion", "offline", "stale", "fault", "vendor_fault", "tran
 
 it.each([10, 5])("设零失败显示设备错误 %s，不误报成功", async (error_code) => {
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   vi.stubGlobal("window", { confirm: () => true });
   zeroReady(store);
   const pending = device.setMotorZero(2);
@@ -174,8 +174,8 @@ it.each([10, 5])("设零失败显示设备错误 %s，不误报成功", async (e
 
 it("收到全 NaN 参数报告不能判为读取成功或已核对", async () => {
   const { ros } = await connected();
-  const { store, paramReadState } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store, paramReadState } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   const pending = device.loadParams();
   const call = Service.calls[0]!;
   expect(call.name).toBe("/motor/get_device_info");
@@ -198,8 +198,8 @@ it("收到全 NaN 参数报告不能判为读取成功或已核对", async () =>
 
 it("手动读取发只读 REFRESH，未绑定时显示拒绝原因且不伪装成功", async () => {
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   store.motors.set(1, { topo: { model_name: "" } });
   const pending = device.refreshMotorParams();
   const call = Service.calls[0]!;
@@ -214,8 +214,8 @@ it("手动读取发只读 REFRESH，未绑定时显示拒绝原因且不伪装�
 
 it("REFRESH 成功后请求参数快照，完整有效回读才显示成功", async () => {
   const { ros } = await connected();
-  const { store, paramReadState } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store, paramReadState } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   store.motors.set(1, { topo: { model_name: "cerb_r48_101" } });
   const pending = device.refreshMotorParams();
   expect(Service.calls[0]!.name).toBe("/motor/execute_config");
@@ -242,8 +242,8 @@ it("浏览器时钟偏移时，系统维护写只携带缓存MCU同步源时间"
   vi.useFakeTimers();
   vi.setSystemTime(777000);
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   zeroReady(store);
   vi.stubGlobal("window", { confirm: () => true });
   const p1 = device.setMotorZero(2);
@@ -259,8 +259,8 @@ it("浏览器时钟偏移时，系统维护写只携带缓存MCU同步源时间"
 
 it("没有MCU同步源时间不发维护写，但get_device_info只读请求仍可发送", async () => {
   const { ros } = await connected();
-  const { store } = await import("../../web/js/core/store.js");
-  const device = await import("../../web/js/core/device.js");
+  const { store } = await import("../src/core/store.ts");
+  const device = await import("../src/core/device.ts");
   zeroReady(store);
   store.controlStates.sourceTimeNs = 0;
   vi.stubGlobal("window", { confirm: () => true });

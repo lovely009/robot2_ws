@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 afterEach(() => {vi.useRealTimers();vi.unstubAllGlobals();});
-const api = await import(/* @vite-ignore */ new URL('../../web/js/core/joint_control.js', import.meta.url).href);
+const api = await import(/* @vite-ignore */ new URL('../src/core/joint_control.ts', import.meta.url).href);
 function state() {
   return {conn:{connected:true},modelTransmissions:{model:'arm',groups:[{name:'wrist',motors:[{id:8},{id:9}],joints:['yaw','pitch']}]},
     modelJoints: [{name:'yaw',type:'revolute',lower:-1,upper:1},{name:'pitch',type:'revolute',lower:-1,upper:1}],

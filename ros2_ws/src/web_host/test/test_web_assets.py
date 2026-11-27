@@ -10,6 +10,7 @@ import pytest
 
 PKG = Path(__file__).resolve().parent.parent
 WEB = PKG / 'web'
+FRONTEND_SRC = PKG / 'frontend' / 'src'
 INDEX = WEB / 'panel_templates.html'
 
 
@@ -47,9 +48,8 @@ class IndexParser(HTMLParser):
 
 @pytest.fixture(scope='module')
 def index():
-    assert INDEX.is_file(), f'缺少 {INDEX}'
+    assert not INDEX.exists(), f'{INDEX} 应当已退休移除'
     parser = IndexParser()
-    parser.feed(INDEX.read_text(encoding='utf-8'))
     parser.feed((PKG / 'frontend/index.html').read_text(encoding='utf-8'))
     for component in (PKG / 'frontend/src').rglob('*.vue'):
         parser.feed(component.read_text(encoding='utf-8'))
@@ -57,8 +57,8 @@ def index():
 
 
 def js_files():
-    files = sorted((WEB / 'js').rglob('*.js'))
-    assert files, f'{WEB / "js"} 下没有任何 .js'
+    files = sorted(FRONTEND_SRC.rglob('*.ts'))
+    assert files, f'{FRONTEND_SRC} 下没有任何 .ts'
     return files
 
 
@@ -82,14 +82,14 @@ def test_js_dom_refs_exist(index):
         for m in ref.finditer(f.read_text(encoding='utf-8')):
             name = m.group(1) or m.group(2)
             if name not in known:
-                missing.setdefault(f.relative_to(WEB).as_posix(), set()).add(name)
-    assert not missing, f'JS 引用了 index.html 里不存在的 id：{missing}'
+                missing.setdefault(f.relative_to(FRONTEND_SRC).as_posix(), set()).add(name)
+    assert not missing, f'TS 引用了模板/组件里不存在的 id：{missing}'
 
 
 def test_js_does_not_use_unimported_core_constants():
     """共享常量需要显式导入。"""
     exported = set()
-    for path in sorted((WEB / 'js' / 'core').glob('*.js')):
+    for path in sorted((FRONTEND_SRC / 'core').glob('*.ts')):
         exported |= set(re.findall(
             r'export\s+(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)',
             path.read_text(encoding='utf-8')))
@@ -97,8 +97,8 @@ def test_js_does_not_use_unimported_core_constants():
     assert constants, 'core 模块里没解析到全大写导出——本测试的前提没了'
 
     problems = []
-    for path in sorted((WEB / 'js').rglob('*.js')):
-        if 'vendor' in path.parts:
+    for path in sorted(FRONTEND_SRC.rglob('*.ts')):
+        if path.name.endswith('.d.ts'):
             continue
         src = path.read_text(encoding='utf-8')
         code = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
@@ -110,30 +110,35 @@ def test_js_does_not_use_unimported_core_constants():
                 if part:
                     imported.add(part.split(' as ')[-1].strip())
         for name in sorted(constants):
-            # 前面不是 `.` 也不是标识符字符 = 当裸标识符在用（排除 obj.NAME）
-            if not re.search(rf'(?<![\w.]){name}\b', code):
+            # 前面不是 `.` 也不是标识符字符、后面不是 `:`（对象字面量键）= 当裸标识符在用
+            if not re.search(rf'(?<![\w.]){name}\b(?!\s*:)', code):
                 continue
             if name in imported:
                 continue
             if re.search(rf'\b(?:const|let|var|function|class)\s+{name}\b', code):
                 continue
-            problems.append(f'{path.relative_to(WEB).as_posix()} 用了 {name} 却没 import')
+            problems.append(f'{path.relative_to(FRONTEND_SRC).as_posix()} 用了 {name} 却没 import')
     assert not problems, '引用了未导入的 core 常量：\n' + '\n'.join(problems)
 
 
-def test_vue_panels_match_templates(index):
-    assert set(runtime_panels()) == set(index.panel_templates)
+def test_vue_panels_match_components(index):
+    vue_panels = set()
+    for component in (PKG / 'frontend/src/components').glob('*Panel.vue'):
+        m = re.search(r'data-workbench-panel="([^"]+)"', component.read_text(encoding='utf-8'))
+        if m:
+            vue_panels.add(m.group(1))
+    assert set(runtime_panels()) == vue_panels
 
 
-def test_panel_templates_have_modules(index):
-    missing = sorted(p for p in set(index.panel_templates)
-                     if not (WEB / 'js' / 'panels' / f'{p}.js').is_file())
-    assert not missing, f'缺少面板模块 js/panels/*.js：{missing}'
+def test_panel_modules_exist():
+    missing = sorted(p for p in set(runtime_panels())
+                     if not (FRONTEND_SRC / 'panels' / f'{p}.ts').is_file())
+    assert not missing, f'缺少面板模块 frontend/src/panels/*.ts：{missing}'
 
 
 def test_panel_modules_are_referenced(index):
-    used = set(runtime_panels())
-    unused = sorted(f.stem for f in (WEB / 'js' / 'panels').glob('*.js')
+    used = set(runtime_panels()) | {'jointRow', 'motion_preview'}
+    unused = sorted(f.stem for f in (FRONTEND_SRC / 'panels').glob('*.ts')
                     if f.stem not in used)
     assert not unused, f'面板模块没有被任何屏引用：{unused}'
 
@@ -145,9 +150,12 @@ def test_relative_imports_exist():
         for m in pat.finditer(f.read_text(encoding='utf-8')):
             spec = m.group(1)
             if spec.startswith('.'):
-                target = (f.parent / spec).resolve()
-                if not target.is_file():
-                    missing.append(f'{f.relative_to(WEB)} -> {spec}')
+                base = (f.parent / spec).resolve()
+                if not (base.is_file() or base.with_suffix('.ts').is_file()
+                        or base.with_suffix('.d.ts').is_file()
+                        or base.with_suffix('.js').is_file()
+                        or (base / 'index.ts').is_file()):
+                    missing.append(f'{f.relative_to(FRONTEND_SRC)} -> {spec}')
     assert not missing, f'import 目标文件不存在：{missing}'
 
 
@@ -207,7 +215,7 @@ def test_importmap_targets_exist(index):
 SRC = PKG.parent                      # ros2_ws/src
 BENCH_NODE = SRC / 'robot_bringup' / 'bench_manager' / 'node.py'
 SYSTEMD_UNITS = SRC / 'robot_bringup' / 'bench_manager' / 'systemd_units.py'
-AGENT_JS = WEB / 'js' / 'core' / 'agent.js'
+AGENT_JS = FRONTEND_SRC / 'core' / 'agent.ts'
 
 
 def _skip_without(path):

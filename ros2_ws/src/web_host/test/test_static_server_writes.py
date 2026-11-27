@@ -177,3 +177,28 @@ def test_live_preview_stream_shares_json_and_origin_guards(handler, monkeypatch)
     serve.assert_not_called()
     assert handler.post(path, {'model': 'full_body_robot'})[0] == 200
     serve.assert_called_once()
+
+
+@pytest.mark.parametrize('path,expected', [
+    ('/workbench/assets/workbench-Cxt2OT2c.js', 'public, max-age=31536000, immutable'),
+    ('/workbench/assets/index-wQB1ytaU.css', 'public, max-age=31536000, immutable'),
+    ('/workbench/', 'no-store'),
+    ('/workbench/index.html', 'no-store'),
+    ('/robot_sim/models/arm/meshes/link1.stl', 'no-cache'),
+])
+def test_cache_control_headers_by_asset_type(handler, path, expected):
+    request = object.__new__(handler.handler_class)
+    request.path = path
+    request._headers_buffer = []
+    sent = {}
+    request.send_header = lambda k, v: sent.__setitem__(k, v)
+    import http.server
+    original_end = http.server.SimpleHTTPRequestHandler.end_headers
+    http.server.SimpleHTTPRequestHandler.end_headers = lambda self: None
+    try:
+        request.end_headers()
+    finally:
+        http.server.SimpleHTTPRequestHandler.end_headers = original_end
+    assert sent.get('Cache-Control') == expected
+    assert 'Clear-Site-Data' not in sent
+    assert 'Set-Cookie' not in sent

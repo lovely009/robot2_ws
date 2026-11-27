@@ -230,11 +230,22 @@ class BenchManager(LifecycleNode):
             device = self.get_parameter('agent_device').value.strip()
             if not device:
                 ports = enumerate_serial_ports()
-                if len(ports) != 1:
+                stm32_ports = [
+                    p for p in ports
+                    if 'stm32' in (p['path'] + ' ' + p.get('label', '')).lower()
+                    and os.access(p['path'], os.R_OK | os.W_OK)
+                ]
+                if len(stm32_ports) == 1:
+                    device = stm32_ports[0]['path']
+                elif len(ports) == 1:
+                    device = ports[0]['path']
+                elif not ports:
+                    self.get_logger().info('未检测到控制板串口，跳过自动启动 Agent')
+                    return
+                else:
                     raise ValueError(
                         '检测到 %d 个串口，请在页面选择串口启动，或指定 agent_tty'
                         % len(ports))
-                device = ports[0]['path']
             self.agent.start(device, auto=True)
             self.get_logger().info('自动启动 Agent：%s' % device)
         except _EXPECTED_ERRORS as exc:

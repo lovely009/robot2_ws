@@ -41,21 +41,24 @@ def test_install_includes_workbench_assets(tmp_path: Path, monkeypatch: pytest.M
 def test_installed_web_contains_all_runtime_modules() -> None:
     from ament_index_python.packages import get_package_share_directory
 
-    source = SETUP.parent / 'web/js'
-    installed = Path(get_package_share_directory('web_host')) / 'web/js'
-    missing = sorted(str(path.relative_to(source)) for path in source.rglob('*.js')
+    source = SETUP.parent / 'web/workbench'
+    installed = Path(get_package_share_directory('web_host')) / 'web/workbench'
+    assert (installed / 'index.html').is_file()
+    assets = sorted((source / 'assets').glob('*'))
+    assert assets, 'web/workbench/assets 下没有任何构建产物'
+    missing = sorted(str(path.relative_to(source)) for path in assets
                      if not (installed / path.relative_to(source)).is_file())
     assert not missing, (
-        f'运行时模块未安装：{missing}；新增静态文件后必须重新构建 web_host，'
-        '源码浏览器测试通过不能替代安装目录验证')
+        f'构建产物未安装：{missing}；前端重新构建后必须同步重跑 web_host 构建')
 
 
 def test_retired_shell_assets_are_absent_from_install() -> None:
     from ament_index_python.packages import get_package_share_directory
 
     installed = Path(get_package_share_directory('web_host')) / 'web'
-    assert (installed / 'panel_templates.html').is_file()
-    for relative in ('index.html', 'js/main.js', 'js/core/router.js', 'css/shell.css',
+    for relative in ('panel_templates.html', 'index.html', 'js/main.js', 'js/core/router.js',
+                     'css/shell.css', 'css/tokens.css', 'css/panels.css',
                      'js/panels/policy.js', 'js/panels/command.js', 'js/panels/feedforward.js',
+                     'js/panels/sim.js', 'js/panels/deviceParams.js',
                      'js/components/jointControl.js', 'js/core/host_limits.js'):
-        assert not (installed / relative).exists(), f'旧外壳残留在安装目录：{relative}'
+        assert not (installed / relative).exists(), f'旧外壳或已迁移资产残留在安装目录：{relative}'

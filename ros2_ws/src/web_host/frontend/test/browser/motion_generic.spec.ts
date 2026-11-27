@@ -111,8 +111,7 @@ test('非双足预览按参考实体最低点放到地面并保持根高度', as
   const result = await page.evaluate(async () => {
     // @ts-expect-error The preview and loader are served as browser modules.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error The preview module is shared with the legacy renderer.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {
@@ -150,8 +149,7 @@ test('双足预览随下蹲降低基座，保留腾空和单足抬起，不以�
   const result = await page.evaluate(async () => {
     // @ts-expect-error Browser-served module.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error Browser-served module.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {
@@ -208,8 +206,7 @@ test('机器人实体将机器人坐标中的根旋转恢复到人体世界坐�
   const result = await page.evaluate(async () => {
     // @ts-expect-error Browser-served module.
     const {default: Loader} = await import('/vendor/URDFLoader.js');
-    // @ts-expect-error Browser-served module.
-    const {createMotionPreview} = await import('/js/motion_preview.js');
+    const {createMotionPreview} = (window as any).__workbench;
     let model: any;
     const parse = Loader.prototype.parse;
     Loader.prototype.parse = function (...args: any[]) {

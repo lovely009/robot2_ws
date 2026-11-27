@@ -8,7 +8,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.unstubAllGlobals());
-const api = await import(/* @vite-ignore */ new URL('../../web/js/core/joint_limits.js', import.meta.url).href);
+const api = await import(/* @vite-ignore */ new URL('../src/core/joint_limits.ts', import.meta.url).href);
 const joint = {name: 'elbow', type: 'revolute', lower: -0.17, upper: 0.52};
 
 function state() {

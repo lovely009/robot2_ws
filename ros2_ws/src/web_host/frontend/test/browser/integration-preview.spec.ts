@@ -46,13 +46,17 @@ test('整合预览仅消费模拟状态，导航与重连不产生运动授权',
     const badge = document.createElement('div');
     badge.textContent = '模拟数据 · 37轴/总线分配为虚构 · 非实测 · 整合未验收';
     badge.dataset.evidenceBanner = 'true';
-    badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
+    badge.style.cssText = 'position:fixed;top:10px;right:12px;z-index:999;pointer-events:none;background:#443417;color:#ffe1a2;border:1px solid #b8954d;padding:6px 12px;font:12px sans-serif;max-width:75vw;border-radius:5px';
     document.body.append(badge);
   });
   await page.screenshot({path:join(captureDirectory, `${capturePrefix}-desktop.png`)});
   for (const scene of ['设备工作台','仿真工作台','动作工作台','调试工作台']) {
     await page.getByRole('button', {name:scene, exact:true}).click();
-    await expect(page.getByRole('heading', {name:scene, exact:true})).toBeVisible();
+    if (scene === '调试工作台') {
+      await expect(page.locator('.inspector-dock')).toBeVisible();
+    } else {
+      await expect(page.getByRole('heading', {name:scene, exact:true})).toBeVisible();
+    }
     if (scene === '设备工作台') {
       await expect(page.getByRole('navigation', {name:'设备参数查询'})).toBeVisible();
       await expect(page.locator('.device-connection')).toHaveCount(0);

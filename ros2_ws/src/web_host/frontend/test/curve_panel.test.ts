@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 async function loadCurve() {
-  return import("../../web/js/panels/curve.js");
+  return import("../src/panels/curve.ts");
 }
 
 describe("曲线面板纯逻辑", () => {

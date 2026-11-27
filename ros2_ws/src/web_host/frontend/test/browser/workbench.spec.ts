@@ -177,9 +177,7 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
       if (message.op === 'subscribe' && message.topic === '/motor/control_states' && !fixtures[message.topic]) {
         // Legacy fixtures supply only a fake MCU synchronized stamp; health remains unchanged.
         void page.evaluate(async stamp => {
-          const path='/js/core/store.js';
-          const {store}=await import(/* @vite-ignore */ path);
-          store.controlStates.sourceTimeNs=stamp;
+          (window as any).__workbench.store.controlStates.sourceTimeNs=stamp;
         },9000000000).catch(error=>errors.push(String(error)));
       }
 
@@ -310,8 +308,9 @@ async function connectFixture(page: Page, coupled = false, withControlStates = f
 test('只读电机拓扑显示已映射与待标定，不能开放关节控制', async ({page}) => {
   const fixture = await connectFixture(page, true, true, true);
   await page.goto('/workbench/#/run');
-  await expect(page.locator('.mapping-warning')).toContainText('2 台电机映射已加载');
-  await expect(page.locator('.mapping-warning')).toContainText('传动参数待标定');
+  const mappingBadge = page.locator('.topbar-status .info-badge[title*="电机映射"]');
+  await expect(mappingBadge).toHaveAttribute('title', /2 台电机映射已加载/);
+  await expect(mappingBadge).toHaveAttribute('title', /传动参数待标定/);
   await expect(page.locator('[data-joint="joint_link8"] input[type="range"]')).toBeDisabled();
   expect(fixture.publishes.filter(p => p.topic === '/control/joint_target')).toHaveLength(0);
   expect(fixture.policyRequests).toHaveLength(0);
@@ -473,7 +472,7 @@ test('事件日志脱离旧面板后保留切换记录并导出全部数据', as
     return route.fulfill({status: 404, body: '已退役'});
   });
   await page.goto('/workbench/#/run');
-  await expect(page.locator('#selRows')).toContainText('0.150');
+  await expect(page.locator('#motorCards')).toContainText('0.150');
   await page.getByRole('button', {name: '事件日志', exact: true}).click();
   const panel = page.locator('[data-workbench-panel="events"]');
   await expect(panel).toContainText('暂无事件');
@@ -515,7 +514,7 @@ test('事件日志脱离旧面板后保留切换记录并导出全部数据', as
 test('事件日志按文本呈现并仅清空本地记录', async ({page}) => {
   const fixture = await connectFixture(page);
   await page.goto('/workbench/#/run');
-  await expect(page.locator('#selRows')).toContainText('0.150');
+  await expect(page.locator('#motorCards')).toContainText('0.150');
   await page.getByRole('button', {name: '事件日志', exact: true}).click();
   const panel = page.locator('[data-workbench-panel="events"]');
   fixture.sendFeedback('/motor/events', {event_type: '<em>未知</em>', motor_id: 1, reason: 0, request_id: 0});
@@ -525,9 +524,8 @@ test('事件日志按文本呈现并仅清空本地记录', async ({page}) => {
   await panel.getByRole('button', {name: '清空', exact: true}).click();
   await expect(panel.locator('.sum')).toHaveText('空');
   await expect(panel.locator('li')).toHaveText('暂无事件');
-  expect(await page.evaluate(async () => {
-    const path = '/js/core/store.js';
-    return (await import(/* @vite-ignore */ path)).store.events.length;
+  expect(await page.evaluate(() => {
+    return (window as any).__workbench.store.events.length;
   })).toBe(0);
   expect(fixture.publishes.slice(before)).toEqual([]);
   fixture.sendFeedback('/motor/events', {event_type: 3, motor_id: 2, reason: 0, request_id: 0});
@@ -621,8 +619,8 @@ test('布局和观察页切换保留3D场景，只有模型变化才重建', asy
   await expect(page.locator('.workbench')).not.toHaveClass(/nav-collapsed/);
   await page.getByRole('button', {name: '事件日志', exact: true}).click();
   await page.getByRole('button', {name: '曲线', exact: true}).click();
-  await page.locator('[data-workbench-panel="actionLibrary"] summary').click();
-  await page.getByRole('separator', {name: '调整关节面板高度'}).press('ArrowDown');
+  await page.getByRole('tab', { name: '动作库' }).click();
+  await page.getByRole('separator', {name: '调整右侧检查器宽度'}).press('ArrowLeft');
   await expect(canvas).toHaveAttribute('data-model-rendered', 'true');
   expect(await original!.evaluate(element => element.isConnected)).toBe(true);
   expect(modelRequests).toEqual([]);
@@ -643,16 +641,10 @@ test("关节收起后向下让出空间，观察区使用箭头折叠", async ({
   const summary = joints.locator('summary');
   await expect(summary).toBeVisible();
   await expect(page.locator('.startup-status')).toHaveCount(0);
-  // 小视口先收起动作库，给关节与臂视图的高度变化留出空间。
-  await page.locator('[data-workbench-panel="actionLibrary"] summary').click();
-  const robot = page.locator('[data-workbench-panel="arm"]');
-  const before = (await robot.boundingBox())!.height;
-  const expandedHeight = (await joints.boundingBox())!.height;
-  await summary.click();
-  await expect.poll(async () => (await joints.boundingBox())!.height).toBeLessThan(45);
-  await expect.poll(async () => (await robot.boundingBox())!.height).toBeGreaterThan(before);
-  await summary.click();
-  await expect.poll(async () => Math.abs((await joints.boundingBox())!.height-expandedHeight)).toBeLessThan(2);
+  await page.getByRole('tab', { name: '动作库' }).click();
+  await expect(page.locator('.action-panel-host')).toBeVisible();
+  await page.getByRole('tab', { name: /关节/ }).click();
+  await expect(joints).toBeVisible();
   const toggle = page.locator('.observer-head').getByRole('button', {name: '收起观察区', exact: true});
   await expect(toggle).toHaveText('▾');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -674,7 +666,7 @@ test("曲线在持续运动反馈超过缓冲上限后仍自动绘制新数据",
       target_source: 1, state_age_ms: 5,
     }]});
   }
-  await expect(page.locator('#selRows')).toContainText('90.000');
+  await expect(page.locator('#motorCards')).toContainText('90.000');
   await expect(page.locator('#chartHint')).toContainText('1 个组合');
   fixture.sendFeedback('/motor/motion_states', {states: [{
     motor_id: 1, position: 180, velocity: 0.2, effort: 0.1,
@@ -1022,8 +1014,8 @@ test("关键参数面板缺失时不建立 ROS 连接", async ({ page }) => {
     route.fulfill({
       contentType: "text/html",
       body: html.replace(
-        'data-panel-template="deviceParams"',
-        'data-panel-template="missingParams"',
+        'data-panel-template="jointList"',
+        'data-panel-template="missingJoints"',
       ),
     }),
   );
@@ -1051,7 +1043,7 @@ test("非关键观察面板失败时仍能读取设备状态", async ({ page }) 
   await expect(
     page.locator('[data-workbench-panel="curve"] .panel-error'),
   ).toContainText("缺少面板模板");
-  await expect(page.locator("#selRows")).toContainText("0.150");
+  await expect(page.locator("#motorCards")).toContainText("0.150");
   expect(fixture.connections.count).toBe(1);
   expect(fixture.errors).toEqual([]);
 });
@@ -1061,7 +1053,7 @@ test("A 工作台接入真实模块，切屏保留草稿且导航不产生控制
 }) => {
   const fixture = await connectFixture(page);
   await page.goto("/workbench/#/run");
-  await expect(page.locator("#selRows")).toContainText("0.150");
+  await expect(page.locator("#motorCards")).toContainText("0.150");
   await expect(page.locator("[data-workbench-panel]")).toHaveCount(9);
   await page.locator(".main-nav button").filter({ hasText: "设备工作台" }).click();
   await expect(
@@ -1088,7 +1080,7 @@ test("A 工作台接入真实模块，切屏保留草稿且导航不产生控制
 test("全局软停显式停用运动控制器，不重新发布手动目标", async ({ page }) => {
   const fixture = await connectFixture(page);
   await page.goto("/workbench/#/run");
-  await expect(page.locator("#selRows")).toContainText("0.150");
+  await expect(page.locator("#motorCards")).toContainText("0.150");
   await page
     .getByRole("button", { name: /软停|停止运动|停止动作/ })
     .first()
@@ -1120,8 +1112,8 @@ test("静态工作台在没有 ROS 连接时显示离线，不生成模拟设备
   );
   await page.routeWebSocket("ws://127.0.0.1:9090", (socket) => socket.close());
   await page.goto("/workbench/#/run");
-  await expect(page.locator("#selRows")).toContainText("等待");
-  await expect(page.locator("#selRows tr[data-id]")).toHaveCount(0);
+  await expect(page.locator("#motorCards")).toContainText("等待");
+  await expect(page.locator("#motorCards .motor-card[data-id]")).toHaveCount(0);
   await expect(page.locator("#btnSendOnce")).toHaveCount(0);
   for (const width of [1280, 800, 390]) {
     await page.setViewportSize({ width, height: 900 });

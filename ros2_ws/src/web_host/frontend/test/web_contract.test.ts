@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { callService } = vi.hoisted(() => ({ callService: vi.fn() }));
-vi.mock("../../web/js/core/ros.js", () => ({ callService }));
+vi.mock("../src/core/ros.ts", () => ({ callService }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -12,7 +12,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 it("默认半身模型的初始映射包含两侧全部电机", async () => {
-  const { MODEL, JOINT_OF_MOTOR } = await import("../../web/js/core/store.js");
+  const { MODEL, JOINT_OF_MOTOR } = await import("../src/core/store.ts");
   expect(MODEL).toBe("half_body_robot");
   expect(Object.keys(JOINT_OF_MOTOR).map(Number)).toEqual(
     Array.from({ length: 18 }, (_, index) => index + 1),
@@ -26,7 +26,7 @@ it("默认半身模型的初始映射包含两侧全部电机", async () => {
 });
 
 it("控制话题使用主机控制器入口和对应消息类型", async () => {
-  const { TOPICS } = await import("../../web/js/core/format.js");
+  const { TOPICS } = await import("../src/core/format.ts");
   expect(TOPICS).toMatchObject({
     state: { name: "/motor/state", type: "can_bridge_msgs/msg/MotorSystemState" },
     motion: { name: "/motor/motion", type: "can_bridge_msgs/msg/MotorMotionStateArray" },
@@ -52,7 +52,7 @@ it.each([
   ["getUnitLog", ["bench-simulation.service", 20], "get_unit_log", "GetUnitLog", { unit_name: "bench-simulation.service", lines: 20 }],
   ["motorBackendCommand", [{ cmd: "status" }], "motor_backend_command", "MotorBackendCommand", { request_json: '{"cmd":"status"}' }],
 ] as const)("%s 提交对应服务类型和请求", async (method, args, name, type, request) => {
-  const api = await import("../../web/js/core/agent.js");
+  const api = await import("../src/core/agent.ts");
   await api[method](...args);
   expect(callService).toHaveBeenCalledExactlyOnceWith(
     `/bench/${name}`, `bench_msgs/srv/${type}`, request,
@@ -60,7 +60,7 @@ it.each([
 });
 
 it("启动模拟电机时序列化通道配置", async () => {
-  const { startMotorBackend } = await import("../../web/js/core/agent.js");
+  const { startMotorBackend } = await import("../src/core/agent.ts");
   await startMotorBackend({ model: "arm", transport: "socketcan", sim_interface: "can1" });
   expect(callService).toHaveBeenCalledExactlyOnceWith(
     "/bench/start_motor_backend", "bench_msgs/srv/StartMotorBackend", {
@@ -71,7 +71,7 @@ it("启动模拟电机时序列化通道配置", async () => {
 });
 
 it("重力补偿请求包含模型、关节映射和数值增益", async () => {
-  const { startGravityFeedforward } = await import("../../web/js/core/agent.js");
+  const { startGravityFeedforward } = await import("../src/core/agent.ts");
   await startGravityFeedforward({ model: "arm", joint_map: "{}", effort_gain: "0.5" });
   expect(callService).toHaveBeenCalledExactlyOnceWith(
     "/bench/start_gravity_feedforward", "bench_msgs/srv/StartGravityFeedforward",

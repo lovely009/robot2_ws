@@ -6,6 +6,7 @@ export class PanelScheduler {
     {
       panel: MountedPanel;
       visible: () => boolean;
+      wasVisible: boolean;
       pending: Set<string>;
       last: number | null;
       failures: number;
@@ -15,15 +16,22 @@ export class PanelScheduler {
   constructor(private onError: (id: string, error: unknown) => void) {}
   add(id: string, panel: MountedPanel, visible: () => boolean) {
     if (this.entries.has(id)) throw new Error(`面板重复挂载：${id}`);
+    const nowVisible = visible();
     const entry = {
       panel,
       visible,
+      wasVisible: nowVisible,
       pending: new Set<string>(),
       last: null as number | null,
       failures: 0,
       retryAt: 0,
     };
     this.entries.set(id, entry);
+    try {
+      panel.setActive?.(nowVisible);
+    } catch (error) {
+      this.onError(id, error);
+    }
     return () => {
       if (this.entries.get(id) !== entry) return;
       this.entries.delete(id);
@@ -33,6 +41,19 @@ export class PanelScheduler {
         this.onError(id, error);
       }
     };
+  }
+  syncVisibility() {
+    for (const [id, entry] of this.entries) {
+      const nowVisible = entry.visible();
+      if (nowVisible !== entry.wasVisible) {
+        entry.wasVisible = nowVisible;
+        try {
+          entry.panel.setActive?.(nowVisible);
+        } catch (error) {
+          this.onError(id, error);
+        }
+      }
+    }
   }
   invalidate(dirty: Set<string>) {
     for (const entry of this.entries.values()) {
@@ -45,6 +66,7 @@ export class PanelScheduler {
     }
   }
   flush(now: number) {
+    this.syncVisibility();
     for (const [id, entry] of this.entries) {
       if (!entry.pending.size || !entry.visible()) continue;
       if (entry.failures >= 3 || now < entry.retryAt) continue;

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const { pub, submitPolicy, connection } = vi.hoisted(() => ({pub: vi.fn((..._args:any[]) => true),
   submitPolicy:vi.fn(),
   connection:{generation:1,connected:true}}));
-vi.mock('../../web/js/core/ros.js', () => ({
+vi.mock('../src/core/ros.ts', () => ({
   pub, isConnected: () => connection.connected, getConnectionGeneration: () => connection.generation,
   submitPolicy,
 }));
@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => {vi.useRealTimers();vi.unstubAllGlobals();});
 
 async function fixture() {
-  const data = await import('../../web/js/core/store.js');
+  const data = await import('../src/core/store.ts');
   const {store, MODEL} = data;
   store.conn.connected = true;
   store.controlStates.sourceTimeNs=9000000000;
@@ -34,8 +34,8 @@ async function fixture() {
   const action = {target_ids:[1],points:Array.from({length:700},(_,i) =>
     ({motor_id:1,time_from_start_ms:i*10,position:.1+i*.0001}))};
   vi.stubGlobal('fetch', async () => ({ok:true,json:async () => action}));
-  return {data, store, actions:await import('../../web/js/core/playback.js'),
-    command:await import('../../web/js/core/playback.js')};
+  return {data, store, actions:await import('../src/core/playback.ts'),
+    command:await import('../src/core/playback.ts')};
 }
 
 async function bvhFixture() {
@@ -67,7 +67,7 @@ async function bvhFixture() {
 
 it('BVH 按三次曲线段内峰值延长时间，保留全部位置帧和连续切矢', async () => {
   const {store, model} = await bvhFixture();
-  const {buildBvhPlan} = await import('../../web/js/core/bvh_playback.js');
+  const {buildBvhPlan} = await import('../src/core/bvh_playback.ts');
   store.transmissionStatus.data.joint_velocity_limits = {yaw: 3.14, pitch: 2};
   const motion = {joint_names: ['yaw', 'pitch'], positions: [
     [0, 0], [.12, .01], [.24, .02], [.12, .02],
@@ -218,7 +218,7 @@ async function policyFixture() {
   vi.stubGlobal('document',{getElementById(id:string) {
     if(!elements.has(id))elements.set(id,element());return elements.get(id);
   },createElement:element});
-  const panel=(await import('../../web/js/panels/actionLibrary.js')).mount(null,{});
+  const panel=(await import('../src/panels/actionLibrary.ts')).mount(null,{});
   store.controlStates={seen:true,valid:true,at:Date.now(),sourceTimeNs:9000000000,session:12,sequence:1,
     byId:new Map([[1,{motor_id:1,online:true,control_lifecycle:2,execution_state:1,
       policy_enabled:false,motion_enabled:false,state_age_ms:0,unified_fault_code:0,
@@ -301,7 +301,7 @@ it.each(['stop','connection','session'])('迟到的使能RPC响应不能越过%s
 it.each(['pending','failed'])('取消使能的动作播放也不能绕过本页%s策略意图',async phase=>{
   const {store,actions,sent,text,confirm}=await policyFixture();
   confirm(phase==='pending'?{policy_generation:0}:{});
-  const {describeMotorState}=await import('../../web/js/core/motor_state.js');
+  const {describeMotorState}=await import('../src/core/motor_state.ts');
   store.policy.set(1,{enabled:true,intent:{ids:[1],enabled:true,confirmed:false,
     error:phase==='failed'?'之前策略已失败':'',ticket:{session_id:12,intent_id:'host:1',request_id:7,policy_generation:1}}});
   const feedback=setInterval(()=>{store.controlStates.at=Date.now()},20);
@@ -484,7 +484,7 @@ it.each(['reject','reason'])('shows the host %s when the complete trajectory fai
     },
     createElement:element,
   });
-  const panel=(await import('../../web/js/panels/actionLibrary.js')).mount(null,{});
+  const panel=(await import('../src/panels/actionLibrary.ts')).mount(null,{});
   const running=actions.playAction('long.json',{enable:false,loop:false,kp:30,kd:1});
   await vi.advanceTimersByTimeAsync(1000);
   const alignment=pub.mock.calls.find(([key,msg])=>key==='trajectory' && msg.points?.length>0)![1];

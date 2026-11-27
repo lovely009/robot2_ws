@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Upload, Play, Pause, RotateCcw, Download, Check, ArrowRight, Radio } from '@lucide/vue';
 import LiveMotionPreview from './LiveMotionPreview.vue';
+import { createMotionPreview } from '../panels/motion_preview';
 
 type Mapping = { mode?: undefined; torso: string; source_to_robot: number[][];
   arms: Record<string, { source: string[]; robot: string[] }> };
@@ -30,7 +31,7 @@ const savedStatusError = ref('');
 const models = ref<string[]>([]);
 const bvhSource = ref('');
 const robotModel = ref(props.currentModel || new URLSearchParams(location.search).get('model')
-  || localStorage.getItem('web_host.model') || 'half_body_robot');
+  || localStorage.getItem('web_host.model') || 'full_body_robot');
 const catalogLoading = ref(true);
 const modelChosen = ref(false);
 const upAxis = ref('auto');
@@ -159,15 +160,34 @@ function showFrame() {
   display?.show(index < 0 ? times.length - 1 : Math.max(0, index - 1));
 }
 
+function stopTick() {
+  if (animation) {
+    cancelAnimationFrame(animation);
+    animation = 0;
+  }
+}
+
 function tick(now: number) {
-  if (playing.value && preview.value) {
-    time.value = Math.min(preview.value.duration, time.value + (now - lastTick) / 1000);
-    showFrame();
-    if (time.value >= preview.value.duration) playing.value = false;
+  animation = 0;
+  if (!playing.value || !preview.value || disposed) return;
+  time.value = Math.min(preview.value.duration, time.value + (now - lastTick) / 1000);
+  showFrame();
+  if (time.value >= preview.value.duration) {
+    playing.value = false;
+    return;
   }
   lastTick = now;
   animation = requestAnimationFrame(tick);
 }
+
+watch(playing, (isPlaying) => {
+  if (isPlaying && preview.value && !disposed) {
+    lastTick = performance.now();
+    if (!animation) animation = requestAnimationFrame(tick);
+  } else {
+    stopTick();
+  }
+});
 
 async function accept(current: Job) {
   if (disposed) return;
@@ -200,16 +220,13 @@ async function accept(current: Job) {
     if (disposed) return;
     preview.value = data;
     await nextTick();
-    const path = '/js/motion_preview.js';
-    const module = await import(/* @vite-ignore */ path);
     if (disposed) return;
     display?.dispose();
-    display = module.createMotionPreview(canvas.value!, data, {
+    display = createMotionPreview(canvas.value!, data, {
       onModelStatus: (status: string) => { modelStatus.value = status; },
     });
     time.value = 0;
     playing.value = true;
-    lastTick = performance.now();
     void refreshSavedSources();
   } else error.value = current.error || '转换失败，请检查文件与映射';
 }
@@ -289,7 +306,6 @@ function togglePlayback() {
 function reset() { playing.value = false; time.value = 0; showFrame(); }
 
 onMounted(async () => {
-  animation = requestAnimationFrame(tick);
   const playSource = sessionStorage.getItem('robot2.motionPlaySource');
   sessionStorage.removeItem('robot2.motionPlaySource');
   const id = sessionStorage.getItem('robot2.motionJob');

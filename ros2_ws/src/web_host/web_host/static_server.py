@@ -5,8 +5,8 @@ HTTP 服务不打开 CAN 或串口。运动意图通过受限 rosbridge 入口�
 
 import json
 import os
+import re
 import signal
-import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -107,9 +107,6 @@ def main(args=None):
         '模型挂载：%s -> %s；模型枚举根：%s'
         % (prefix or '(无)', model_dir or '(无)', models_dir or '(robot_description 安装树)'))
 
-    # 本次服务启动的标识：写进 cookie，用来判断"这个浏览器还欠不欠一次缓存清理"
-    # （见 Handler.end_headers 的长注释）。用启动时刻，每次重启都不同。
-    build_token = str(int(time.time()))
     from pathlib import Path
     motion_data = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'robot2'
     motion_jobs = MotionJobs(actions_dir=bvh_directory(web_root),
@@ -123,40 +120,22 @@ def main(args=None):
 
     class Handler(SimpleHTTPRequestHandler):
 
-        # 这些后缀是"页面本身"，一个旧的就是一次链接期失败；其余（模型几何）允许
-        # 走重验证，别为了省事让 70 MB 的 STL 每次重下。
+        # 页面文档与非哈希资产使用 no-store 防止跨版本混用；
+        # Vite 构建的带内容哈希的 JS/CSS 可长期 immutable 缓存；
+        # 其余大型模型几何（STL/URDF）走 no-cache 重验证（命中 Last-Modified 返回 304）。
         _NO_STORE_SUFFIXES = ('.html', '.js', '.mjs', '.css', '.json')
+        _HASHED_ASSET_RE = re.compile(r'^/workbench/assets/.+-[0-9a-zA-Z_-]{8,}\.(?:js|mjs|css)$')
 
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=web_root, **kw)
 
-        def _cookie(self, name):
-            """取请求里某个 cookie 的值（没有则 None）。只服务于 web_ver 这一个自设标记。"""
-            for part in self.headers.get('Cookie', '').split(';'):
-                key, sep, value = part.strip().partition('=')
-                if sep and key == name:
-                    return value
-            return None
-
         def end_headers(self):
-            # 页面资产用 no-store，避免跨版本模块混用；该头无法清除浏览器已有缓存。
-            # 文档响应以 cookie 记录每个浏览器的服务版本，重启后各清一次 HTTP 缓存，
-            # 避免被探活请求消耗清理机会，或反复清掉大型 STL 缓存。
-            # Clear-Site-Data 要求安全上下文（localhost 可用，局域网 IP 不可用）。
-            # 模型几何用 no-cache 重验证，Last-Modified 命中时返回 304，无需重传。
             buffer = getattr(self, '_headers_buffer', None) or []
             path = urlsplit(self.path).path.lower()
-            if b' 200 ' in b''.join(buffer[:1]) and (
-                    path == '/' or path.endswith('.html')):
-                if self._cookie('web_ver') != build_token:
-                    self.send_header('Clear-Site-Data', '"cache"')
-                    self.send_header(
-                        'Set-Cookie',
-                        f'web_ver={build_token}; Path=/; SameSite=Lax')
             if b'Cache-Control' not in b''.join(buffer):
-                # `/` 也是文档（映射到 index.html）：契约测试按 id 比对的就是它，
-                # 它必须与那批 JS 同代，所以一并按"不复用"处理。
-                if path == '/' or path.endswith(self._NO_STORE_SUFFIXES):
+                if self._HASHED_ASSET_RE.match(path):
+                    self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+                elif path == '/' or path.endswith('/') or path.endswith(self._NO_STORE_SUFFIXES):
                     self.send_header('Cache-Control', 'no-store')
                 else:
                     self.send_header('Cache-Control', 'no-cache')

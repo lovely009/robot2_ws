@@ -20,8 +20,10 @@ async function read() {
   const current = generation;
   busy.value = true;
   try {
-    const next: Record<string, number | boolean> = {};
-    for (const [name] of fields) next[name] = await runtime.readFirmwareParameter(name);
+    const entries = await Promise.all(
+      fields.map(async ([name]) => [name, await runtime.readFirmwareParameter(name)] as const),
+    );
+    const next: Record<string, number | boolean> = Object.fromEntries(entries);
     if (current !== generation) return;
     values.value = next;
     message.value = '已读取控制板固定频率';

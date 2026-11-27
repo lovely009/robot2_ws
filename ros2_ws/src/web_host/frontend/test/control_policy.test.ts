@@ -1,8 +1,8 @@
 import {expect,it,vi} from 'vitest';
 vi.stubGlobal('location',{search:''});
 vi.stubGlobal('localStorage',{getItem:()=>null});
-const api=await import('../../web/js/core/control_policy.js');
-const motor=await import('../../web/js/core/motor_state.js');
+const api=await import('../src/core/control_policy.ts');
+const motor=await import('../src/core/motor_state.ts');
 function state(){
   const cache=motor.createControlStateCache();
   motor.applyControlState(cache,{schema_version:6,session_id:100,sequence:1,control_states:[{

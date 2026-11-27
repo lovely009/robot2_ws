@@ -41,11 +41,18 @@ def result_key(job, mapping, digest_cache=None):
     simulation = job.get('simulation')
     if simulation:
         from .motion_simulation import load_mujoco
-        inputs['mujoco_version'] = load_mujoco().__version__
+        try:
+            inputs['mujoco_version'] = load_mujoco().__version__
+        except ModuleNotFoundError:
+            inputs['mujoco_version'] = None
         model = simulation['directory']
-        for path in sorted((model / 'mujoco').glob('*.xml')):
-            inputs[str(path.relative_to(model))] = cached_digest(path)
-        inputs['standalone'] = cached_digest(model / 'urdf' / f'{model.name}.standalone.urdf')
+        mujoco_dir = model / 'mujoco'
+        if mujoco_dir.is_dir():
+            for path in sorted(mujoco_dir.glob('*.xml')):
+                inputs[str(path.relative_to(model))] = cached_digest(path)
+        standalone = model / 'urdf' / f'{model.name}.standalone.urdf'
+        if standalone.is_file():
+            inputs['standalone'] = cached_digest(standalone)
         inputs['constraints'] = simulation['config_sha256']
     selected = {key: value for key, value in mapping.items() if key != 'targets'}
     if 'targets' in mapping:

@@ -188,6 +188,23 @@ watch(
   },
   { immediate: true },
 );
+let portPollTimer: ReturnType<typeof setInterval> | null = null;
+function stopPortPoll() {
+  if (portPollTimer !== null) {
+    clearInterval(portPollTimer);
+    portPollTimer = null;
+  }
+}
+function onHardwarePopoverToggle(event: Event) {
+  stopPortPoll();
+  if (!(event.target as HTMLDetailsElement | null)?.open) return;
+  if (snapshot.value.connected) void runtime.refreshAgentControls();
+  portPollTimer = setInterval(() => {
+    if (!snapshot.value.connected || document.hidden || document.activeElement?.id === "serialPort") return;
+    if (["running", "starting", "stopping"].includes(snapshot.value.agent)) return;
+    void runtime.refreshAgentControls();
+  }, 3000);
+}
 onMounted(() => {
   runtime.setNavigation(go);
   clock = setInterval(() => {
@@ -198,6 +215,7 @@ onMounted(() => {
   void runtime.start();
 });
 onBeforeUnmount(() => {
+  stopPortPoll();
   clearInterval(clock);
   window.removeEventListener("hashchange", hashchange);
   window.removeEventListener("keydown", keys);
@@ -237,7 +255,7 @@ onBeforeUnmount(() => {
         }}</span
       >
       <span class="session-separator" />
-      <details class="hardware-popover">
+      <details class="hardware-popover" @toggle="onHardwarePopoverToggle">
         <summary :title="snapshot.agentError || snapshot.agentDevice">
           <i class="dot" :class="snapshot.agent === 'running' ? 'green' : 'amber'" />
           硬件 · Agent：{{ agentLabel }}

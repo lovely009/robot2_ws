@@ -591,12 +591,18 @@ function removeMotor(motor: any) {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let pollInFlight = false;
+let lastOptionsPollAt = 0;
 
 async function poll() {
   if (pollInFlight || !props.active || !snapshot.value.connected) return;
   pollInFlight = true;
   try {
-    if (!optionsReady.value) await refreshOptions();
+    const nowMs = Date.now();
+    const editingSelect = document.activeElement?.tagName === 'SELECT';
+    if (!optionsReady.value || (!simActive.value && !backendActive.value && !document.hidden && !editingSelect && nowMs - lastOptionsPollAt >= 3000)) {
+      lastOptionsPollAt = nowMs;
+      await refreshOptions();
+    }
     await refreshMotorSim();
     if (simActive.value || backendActive.value) {
       await refreshLogs();
@@ -665,25 +671,25 @@ onBeforeUnmount(() => {
           </div>
           <label id="simSocketFields" class="sim-field" :hidden="transport !== 'socketcan'">模拟器 CAN
             <select id="simInterface" v-model="simInterface" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : '扫描 SocketCAN…' }}</option>
+              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : (optionsReady ? '未检测到 SocketCAN 接口' : '扫描 SocketCAN…') }}</option>
               <option v-for="entry in canEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
           <label id="simDriverCanField" class="sim-field" :hidden="transport !== 'socketcan' || !isHost">驱动端 CAN
             <select id="simDriverInterface" v-model="driverInterface" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : '扫描 SocketCAN…' }}</option>
+              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : (optionsReady ? '未检测到 SocketCAN 接口' : '扫描 SocketCAN…') }}</option>
               <option v-for="entry in canEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
           <label id="simSlcanFields" class="sim-field" :hidden="transport !== 'slcan'">模拟器串口
             <select id="simTty" v-model="simTty" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ serialEntries.length ? '选择模拟器串口' : '扫描串口…' }}</option>
+              <option value="">{{ serialEntries.length ? '选择模拟器串口' : (optionsReady ? '未检测到串口' : '扫描串口…') }}</option>
               <option v-for="entry in serialEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
           <label id="simDriverTtyField" class="sim-field" :hidden="transport !== 'slcan' || !isHost">驱动端串口
             <select id="simDriverTty" v-model="driverTty" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ serialEntries.length ? '选择驱动端串口' : '扫描串口…' }}</option>
+              <option value="">{{ serialEntries.length ? '选择驱动端串口' : (optionsReady ? '未检测到串口' : '扫描串口…') }}</option>
               <option v-for="entry in serialEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
@@ -757,13 +763,13 @@ onBeforeUnmount(() => {
           </label>
           <label id="motorBackendCanField" class="sim-field" :hidden="transport !== 'socketcan'">模拟器 CAN
             <select id="motorBackendInterface" v-model="simInterface" aria-label="电机后端模拟器 CAN" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : '扫描 SocketCAN…' }}</option>
+              <option value="">{{ canEntries.length ? '选择 SocketCAN 接口' : (optionsReady ? '未检测到 SocketCAN 接口' : '扫描 SocketCAN…') }}</option>
               <option v-for="entry in canEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
           <label id="motorBackendTtyField" class="sim-field" :hidden="transport !== 'slcan'">模拟器串口
             <select id="motorBackendTty" v-model="simTty" aria-label="电机后端模拟器串口" :disabled="simActive" @change="syncFields(true)">
-              <option value="">{{ serialEntries.length ? '选择模拟器串口' : '扫描串口…' }}</option>
+              <option value="">{{ serialEntries.length ? '选择模拟器串口' : (optionsReady ? '未检测到串口' : '扫描串口…') }}</option>
               <option v-for="entry in serialEntries" :key="entry.value" :value="entry.value" :disabled="entry.disabled" :title="entry.title">{{ entry.label }}</option>
             </select>
           </label>
